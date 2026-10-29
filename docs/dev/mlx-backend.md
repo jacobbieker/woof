@@ -87,6 +87,20 @@ nondeterministic, three diagnostic variables help:
   Fully inlined, its radiation kernel crashes Metal's compiler service
   (`XPC_ERROR_CONNECTION_INTERRUPTED`). Its device oracle holds the result to
   WRF's words in both builds, on repeated runs.
+* **TEMPO compiles with out-of-line calls** too (`INLINE_POLICY_BY_KERNEL`,
+  keyed on its `tempo_columns` kernel because a `RawModule`'s unit name is
+  a hash). Fully inlined, the column kernel had not finished compiling after
+  35 minutes; out of line it takes a few. Given CUDA's init blob, three
+  steps of eight columns are CUDA's words in every field and diagnostic.
+  The blob itself is built by `rw-tempo` with the platform C library's
+  `tgamma`, so on macOS it differs from Linux's in 2772 of 122 million words,
+  and TEMPO on a Mac is not CUDA's words with its own blob.
+* **Preprocessing is NVRTC's.** The translator defines `__CUDA_ARCH__`
+  (860, the comparison machine's) because NVRTC compiles device code only:
+  TEMPO's `__CUDA_ARCH__` branch uses woof's glibc ports where its host
+  branch calls the C library. The unit's `-I` options are include
+  directories, and the binary64 libm is prepended when a header the unit
+  includes calls it, not only the unit's own text.
 * **A `float` literal argument in an `--ftz=false` unit** becomes `f32s(...)`
   when clang resolved its parameter as `float`. Otherwise `g(f64, float)`
   beside `g(f64, f64)` is ambiguous in Metal, because both need a

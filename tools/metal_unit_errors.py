@@ -27,7 +27,11 @@ def main(argv=None):
     from woof.core import kernels
     src = kernels.module_source(args.unit)
     opts = kernels.module_options(args.unit)
-    unit = _translated(src, args.unit, contracts(opts), retains_subnormals(args.unit, src, opts))
+    from woof import numerics
+    from woof.backend.translate import option_defines, option_include_dirs
+    effective = numerics.effective_options(tuple(opts or ()))
+    unit = _translated(src, args.unit, contracts(opts), retains_subnormals(args.unit, src, opts),
+                       option_defines(effective), option_include_dirs(effective))
     lines = unit.msl.splitlines()
     try:
         ext.load().compile("errors:" + unit.key, unit.msl, sorted(unit.kernels), 0)

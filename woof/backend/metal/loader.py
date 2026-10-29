@@ -345,14 +345,16 @@ def retains_subnormals(name: str, source: str, options) -> bool:
 
 
 @lru_cache(maxsize=None)
-def _translated(source: str, unit: str, contract: bool, retain: bool, defines=()) -> TranslatedUnit:
-    return translate(source, unit=unit, contract=contract, retain_subnormals=retain, defines=defines)
+def _translated(source: str, unit: str, contract: bool, retain: bool, defines=(),
+                include_dirs=()) -> TranslatedUnit:
+    return translate(source, unit=unit, contract=contract, retain_subnormals=retain, defines=defines,
+                     include_dirs=include_dirs)
 
 
 def load_unit(name: str, source: str, *, options=()) -> MetalModule:
     from woof import numerics
-    from woof.backend.translate import option_defines
-    defines = option_defines(numerics.effective_options(tuple(options or ())))
+    from woof.backend.translate import option_defines, option_include_dirs
+    effective = numerics.effective_options(tuple(options or ()))
     unit = _translated(source, name, contracts(options), retains_subnormals(name, source, options),
-                       defines)
+                       option_defines(effective), option_include_dirs(effective))
     return MetalModule(unit, name)

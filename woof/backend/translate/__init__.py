@@ -66,6 +66,11 @@ PARSE_DEFINES = (
     "-D__device__=", "-D__host__=", "-D__forceinline__=inline",
     "-D__noinline__=__attribute__((noinline))", "-D__restrict__=", "-D__launch_bounds__(...)=",
     "-D__CUDACC__=1", "-D__CUDACC_RTC__=1", "-D__WOOF_METAL__=1", "-D__align__(n)=alignas(n)",
+    # NVRTC compiles device code only, so CUDA runs a unit's __CUDA_ARCH__
+    # branches (TEMPO's glibc libm, MPAS WSM6's global workspace); the
+    # value is the CUDA comparison machine's (sm_86).  A by-value kernel
+    # parameter is constant data in Metal already: __grid_constant__ is moot.
+    "-D__CUDA_ARCH__=860", "-D__grid_constant__=",
     # NVRTC's own spelling of the keywords (a unit that #undefs __global__
     # restores it as `__location__(global)`)
     "-D__location__(x)=__woof_location_##x",
@@ -178,11 +183,12 @@ def _index():
     return ci.Index.create()
 
 
-def preprocess(source: str, defines=()) -> str:
-    """``defines``: the -D macros the unit's NVRTC options carry."""
+def preprocess(source: str, defines=(), include_dirs=()) -> str:
+    """``defines``: the -D macros the unit's NVRTC options carry;
+    ``include_dirs``: its -I directories, searched before woof's kernels."""
     result = subprocess.run(
         [_clang(), "-E", "-P", "-x", "c++", "-std=c++17", "-nostdinc", "-nostdinc++",
-         "-isystem", str(INCLUDE), *[f"-I{d}" for d in KERNEL_INCLUDE_DIRS],
+         "-isystem", str(INCLUDE), *[f"-I{d}" for d in (*include_dirs, *KERNEL_INCLUDE_DIRS)],
          "-Wno-pragma-once-outside-header", *PARSE_DEFINES, *[f"-D{d}" for d in defines], "-"],
         input=source, capture_output=True, text=True)
     if result.returncode != 0:
@@ -1680,6 +1686,10 @@ class _Rewriter:
                 seen.add(key)
                 target = parm.type.get_canonical().get_pointee().get_pointee()
                 tspace = "const device" if target.is_const_qualified() else "device"
+                if "type-parameter-" in target.spelling:
+                    # a template's `const T* const*`: the canonical type has
+                    # lost the parameter's name, which the written type keeps
+                    target = parm.type.get_pointee().get_pointee()
                 elem = self._spell_type(target, drop_const=True)
                 toks = list(parm.get_tokens())
                 name = next((t for t in toks if t.spelling == parm.spelling), None)
@@ -1696,6 +1706,22 @@ class _Rewriter:
     #: radiation column, which compiles in a second with the large
     #: functions out of line.  Its device oracle holds it to WRF's words.
     INLINE_POLICY_BY_UNIT = {"goddard": "size"}
+
+    #: The same, for units known by a kernel they define (a RawModule's unit
+    #: name is a hash of its text).  TEMPO's column kernel did not finish
+    #: compiling fully inlined in 35 minutes; its column oracle holds the
+    #: out-of-line build to CUDA's words.
+    INLINE_POLICY_BY_KERNEL = {"tempo_columns": "size"}
+
+    def _unit_inline_policy(self) -> str:
+        policy = self.INLINE_POLICY_BY_UNIT.get(self.unit.split("[", 1)[0], "")
+        if policy:
+            return policy
+        for node in self.tu.cursor.walk_preorder():
+            if node.spelling in self.INLINE_POLICY_BY_KERNEL and self.main_file(node) \
+                    and node.kind == self.ci.CursorKind.FUNCTION_DECL and self.is_kernel(node):
+                return self.INLINE_POLICY_BY_KERNEL[node.spelling]
+        return ""
 
     def inline_pointer_functions(self):
         """Every device function of the unit is ``always_inline`` (a source
@@ -1715,8 +1741,7 @@ class _Rewriter:
         alternatives, for diagnosis only."""
         K = self.ci.CursorKind
         kinds = (K.FUNCTION_DECL, K.FUNCTION_TEMPLATE, K.CXX_METHOD, K.CONSTRUCTOR, K.DESTRUCTOR)
-        policy = os.environ.get("WOOF_INLINE_POLICY", "") or self.INLINE_POLICY_BY_UNIT.get(
-            self.unit.split("[", 1)[0], "")
+        policy = os.environ.get("WOOF_INLINE_POLICY", "") or self._unit_inline_policy()
         keep_call = set(os.environ.get("WOOF_KEEP_CALL", "").split(","))
         done = set()
         for node in self.tu.cursor.walk_preorder():
@@ -2641,10 +2666,11 @@ _VENDOR_CALL = re.compile(r"\b(exp|log|log10|sin|cos|atan|pow|atan2|hypot|log2|e
 CR_CBRT = HERE.parents[1] / "core" / "kernels" / "cr_cbrt_flt64.cuh"
 
 
-def compose(source: str) -> str:
+def compose(source: str, expanded: str | None = None) -> str:
     """Prepend the binary64 libm (vendor_libm64.cuh, with f64cr.cuh) to a
-    unit that calls one of CUDA's binary64 libm names."""
-    if not _VENDOR_CALL.search(source):
+    unit that calls one of CUDA's binary64 libm names, in its own text or
+    (``expanded``, the preprocessed unit) in a header it includes."""
+    if not _VENDOR_CALL.search(source) and not (expanded and _VENDOR_CALL.search(expanded)):
         return source
     f64cr = F64CR.read_text(encoding="utf-8")
     hook = "#define WCR_PLATFORM_SIN(x) sin(x)"
@@ -2669,6 +2695,19 @@ def option_defines(options) -> tuple[str, ...]:
         elif o.startswith("--define-macro="):
             out.append(o.split("=", 1)[1])
         elif o.startswith("-D") and len(o) > 2:
+            out.append(o[2:])
+    return tuple(d for d in out if d)
+
+
+def option_include_dirs(options) -> tuple[str, ...]:
+    """The ``-I DIR`` include directories among NVRTC options."""
+    out, it = [], iter(options or ())
+    for o in it:
+        if o in ("-I", "--include-path"):
+            out.append(next(it, ""))
+        elif o.startswith("--include-path="):
+            out.append(o.split("=", 1)[1])
+        elif o.startswith("-I") and len(o) > 2:
             out.append(o[2:])
     return tuple(d for d in out if d)
 
@@ -2873,14 +2912,17 @@ def flatten_inheritance(text: str, unit: str) -> str:
 
 
 def translate(source: str, *, unit: str = "<unit>", contract: bool = False,
-              retain_subnormals: bool = False, defines=()) -> TranslatedUnit:
+              retain_subnormals: bool = False, defines=(), include_dirs=()) -> TranslatedUnit:
     """CUDA unit text -> :class:`TranslatedUnit` (MSL plus kernel signatures).
 
     ``retain_subnormals``: the unit's ``float`` is ``f32s`` (gradual
     underflow in software where the GPU would flush; woof/backend/metal/
     f32s.h) -- CUDA's --ftz=false.
     """
-    text = rewrite_ptx_asm(preprocess(compose(source), defines), unit)
+    text = preprocess(source, defines, include_dirs)
+    if compose(source, text) is not source:
+        text = preprocess(compose(source, text), defines, include_dirs)
+    text = rewrite_ptx_asm(text, unit)
     text = flatten_inheritance(text, unit)
     tu = parse(text)
     result = _Rewriter(text, tu, unit=unit, retain_subnormals=retain_subnormals).run()
