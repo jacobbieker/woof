@@ -1012,7 +1012,24 @@ def resolve_physics_slot(selector: str, value) -> str | None:
 
 # WRF G3 restart carriers and convtrans_prep accumulators. Shape tokens
 # resolve through cfg; the same rows drive allocation and memory review.
-CUMULUS_STATE_LAYOUTS = {5: {
+#: convtrans_prep's accumulators and averages (dyn_em/module_convtrans_prep.F),
+#: the same rows for Grell-Freitas and Grell 3D under cu_diag = 1.
+_CONVTRANS_PREP_LAYOUT = {
+    **{name: (("nz", "ny", "nx"), "f4", "cu_diag") for name in
+       ("gd_cloud_a", "qc_cu", "gd_cloud2_a", "qi_cu", "gd_cldfr")},
+    "raincv_a": (("ny", "nx"), "f4", "cu_diag"),
+    "raincv_b": (("ny", "nx"), "f4", "cu_diag"),
+    "g3_diag_clock": ((4,), "i4", "cu_diag"),
+}
+CUMULUS_STATE_LAYOUTS = {
+# Kain-Fritsch's cloud for radiation under cu_rad_feedback (ICLOUD_CU = 2):
+# KF_eta_CPS's CLDFRA_DP_KF/CLDFRA_SH_KF/QC_KF/QI_KF, which the cumulus
+# driver binds to grid%cldfra_dp/cldfra_sh/QC_CU/QI_CU
+# (module_cumulus_driver.F:1044-1046), held between due calls.
+1: {name: (("nz", "ny", "nx"), "f4", "cu_rad_feedback") for name in
+    ("cldfra_dp", "cldfra_sh", "qc_cu", "qi_cu")},
+3: dict(_CONVTRANS_PREP_LAYOUT),
+5: {
     "g3_apr": ((8, "ny", "nx"), "f4", None),
     "g3_xf_ens": (("ensdim", "ny", "nx"), "f4", None),
     "g3_pr_ens": (("ensdim", "ny", "nx"), "f4", None),

@@ -135,7 +135,9 @@ def test_the_checkpoint_echo_drops_both_at_their_default():
              # the output-only woof.radtran diagnostic
              "radtran_wavelengths", "radtran_interval_s", "radtran_umu", "radtran_phi",
              "radtran_mol_abs_param", "radtran_solver", "radtran_streams",
-             "radtran_pseudospherical"]
+             "radtran_pseudospherical",
+             # WRF's shcu_physics (Deng) and cu_rad_feedback.
+             "shcu_physics", "cu_rad_feedback"]
     assert names[-len(later):] == later
     names = names[:-len(later)]
     # The 2.9.4 capabilities campaign's keyword-only keys follow the fire

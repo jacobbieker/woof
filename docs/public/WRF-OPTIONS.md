@@ -22,7 +22,7 @@ WRF source: https://github.com/wrf-model/WRF at v4.7.1 (f52c197ed39d).
 |---|---|---|
 | `mp_physics` | 0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 30, 50, 106 | 7, 11, 13, 14, 15, 26, 27, 29, 32, 38, 40, 51, 52, 53, 55, 56, 95, 96, 97, 98, 99 |
 | `cu_physics` | 0, 1, 3, 5, 6, 16, 96 | 2, 4, 7, 10, 11, 14, 93, 94, 95, 98, 99 |
-| `shcu_physics` | 0 | 1, 2, 3, 4, 5 |
+| `shcu_physics` | 0, 5 | 1, 2, 3, 4 |
 | `bl_pbl_physics` | 0, 1, 2, 5, 9, 11 | 3, 4, 7, 8, 10, 12, 16, 17, 98, 99 |
 | `sf_sfclay_physics` | 0, 1, 2, 5, 91 | 3, 4, 7, 10, 89 |
 | `sf_surface_physics` | 0, 2, 3, 4 | 1, 5, 6, 7, 8 |
@@ -109,11 +109,11 @@ WRF source: https://github.com/wrf-model/WRF at v4.7.1 (f52c197ed39d).
 | value | WRF option | woof |
 |---|---|---|
 | `0` | no independent shallow cumulus | imports |
-| `1` | Grell 3D ensemble scheme (use with cu_physics=93 or 5) (PLACEHOLDER: SWITCH NOT YET IMPLEMENTED--use ishallow) | refused: &physics shcu_physics = [1]: woof implements shcu_physics = 0 only (no separate shallow-cumulus scheme (1 Grell 3D shallow, 2 UW, 3 GRIMS, 4 NSCV, 5 Deng) is ported in this release; the shallow convection inside Grell-Freitas and Grell 3D (ishallow = 1) and New SAS's built-in NSCV do run). |
-| `2` | Park and Bretherton shallow cumulus from CAM5 (CESM 1_0_1) | refused: &physics shcu_physics = [2]: woof implements shcu_physics = 0 only (no separate shallow-cumulus scheme (1 Grell 3D shallow, 2 UW, 3 GRIMS, 4 NSCV, 5 Deng) is ported in this release; the shallow convection inside Grell-Freitas and Grell 3D (ishallow = 1) and New SAS's built-in NSCV do run). |
-| `3` | GRIMS shallow cumulus from YSU group | refused: &physics shcu_physics = [3]: woof implements shcu_physics = 0 only (no separate shallow-cumulus scheme (1 Grell 3D shallow, 2 UW, 3 GRIMS, 4 NSCV, 5 Deng) is ported in this release; the shallow convection inside Grell-Freitas and Grell 3D (ishallow = 1) and New SAS's built-in NSCV do run). |
-| `4` | NSAS shallow cululus scheme. Must be used with KIAPS SAS cumulus scheme (cu_physics = 14) | refused: &physics shcu_physics = [4]: woof implements shcu_physics = 0 only (no separate shallow-cumulus scheme (1 Grell 3D shallow, 2 UW, 3 GRIMS, 4 NSCV, 5 Deng) is ported in this release; the shallow convection inside Grell-Freitas and Grell 3D (ishallow = 1) and New SAS's built-in NSCV do run). |
-| `5` | Deng cumulus scheme (including both shallow and deep convections) from PSU and WRF-Solar. | refused: &physics shcu_physics = [5]: woof implements shcu_physics = 0 only (no separate shallow-cumulus scheme (1 Grell 3D shallow, 2 UW, 3 GRIMS, 4 NSCV, 5 Deng) is ported in this release; the shallow convection inside Grell-Freitas and Grell 3D (ishallow = 1) and New SAS's built-in NSCV do run). |
+| `1` | Grell 3D ensemble scheme (use with cu_physics=93 or 5) (PLACEHOLDER: SWITCH NOT YET IMPLEMENTED--use ishallow) | refused: &physics shcu_physics = [1]: woof implements shcu_physics = 0 and 5 (Deng, WRF-Solar) only: 1 (Grell 3D shallow), 2 (UW), 3 (GRIMS) and 4 (NSCV) have no separate port (the shallow convection inside Grell-Freitas and Grell 3D (ishallow = 1) and New SAS's built-in NSCV do run). |
+| `2` | Park and Bretherton shallow cumulus from CAM5 (CESM 1_0_1) | refused: &physics shcu_physics = [2]: woof implements shcu_physics = 0 and 5 (Deng, WRF-Solar) only: 1 (Grell 3D shallow), 2 (UW), 3 (GRIMS) and 4 (NSCV) have no separate port (the shallow convection inside Grell-Freitas and Grell 3D (ishallow = 1) and New SAS's built-in NSCV do run). |
+| `3` | GRIMS shallow cumulus from YSU group | refused: &physics shcu_physics = [3]: woof implements shcu_physics = 0 and 5 (Deng, WRF-Solar) only: 1 (Grell 3D shallow), 2 (UW), 3 (GRIMS) and 4 (NSCV) have no separate port (the shallow convection inside Grell-Freitas and Grell 3D (ishallow = 1) and New SAS's built-in NSCV do run). |
+| `4` | NSAS shallow cululus scheme. Must be used with KIAPS SAS cumulus scheme (cu_physics = 14) | refused: &physics shcu_physics = [4]: woof implements shcu_physics = 0 and 5 (Deng, WRF-Solar) only: 1 (Grell 3D shallow), 2 (UW), 3 (GRIMS) and 4 (NSCV) have no separate port (the shallow convection inside Grell-Freitas and Grell 3D (ishallow = 1) and New SAS's built-in NSCV do run). |
+| `5` | Deng cumulus scheme (including both shallow and deep convections) from PSU and WRF-Solar. | imports |
 
 ## `bl_pbl_physics`
 

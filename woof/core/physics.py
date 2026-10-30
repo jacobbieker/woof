@@ -626,6 +626,9 @@ def _composed_optional_tendency_components(
     """Union of optional moisture categories entering the RK target."""
     members = (set(_pbl_optional_tendency_components(cfg))
                | set(_cumulus_optional_tendency_components(cfg)))
+    if int(getattr(cfg, "shcu_physics", 0)):
+        # Deng's RQRSHTEN (phy_shcu_ten, module_physics_addtendc.F:1894).
+        members.add("rqr")
     return tuple(name for name in ("rqr", "rqi", "rqs") if name in members)
 
 
@@ -1274,6 +1277,11 @@ class CumulusResult:
     # Actual producer records that remain unused by the prognostic species.
     # Output-only: a diagnostic ice rate cannot create an ice state slot.
     history_rates: Mapping[str, cp.ndarray] | None = None
+    # The scheme's cloud for radiation under cu_rad_feedback, by driver
+    # field name (Kain-Fritsch: cldfra_dp, cldfra_sh, qc_cu, qi_cu, the
+    # grid arrays module_cumulus_driver.F:1044-1046 binds).  Written with
+    # the same per-column NCA eligibility as the rates.
+    cloud_feedback: Mapping[str, cp.ndarray] | None = None
 
     def __post_init__(self) -> None:
         if (self.rucuten is None) != (self.rvcuten is None):
@@ -2338,6 +2346,15 @@ class PhysicsDriver:
         from woof.eclipse_windows import EclipseRadiation
         self.eclipse = EclipseRadiation.for_run(cfg, radiation)
         self.cumulus_callable = cumulus
+        # WRF's separate shallow-cumulus slot (shcu_physics), run every model
+        # step after the cumulus call (module_first_rk_step_part1.F:1570).
+        # Its state is in ``fields``; its coupled tendencies are rebuilt by
+        # every compute() before the composer reads them.
+        self.shallow_cumulus = None
+        self.shallow_tendencies = None
+        if int(getattr(cfg, "shcu_physics", 0)):
+            from woof.core.shcu_deng import DengShallowCumulus
+            self.shallow_cumulus = DengShallowCumulus(cfg)
         self.ra_physics = cfg.ra_physics
         self.ra_lw_physics, self.ra_sw_physics = radiation_scheme_ids(cfg)
         self.radiation_active = bool(
@@ -2534,6 +2551,8 @@ class PhysicsDriver:
         self.call_counts = {"radiation": 0, "sfclay": 0,
                             "noah": 0, "ysu": 0, "cumulus": 0,
                             "cumulus_history": 0}
+        if self.shallow_cumulus is not None:
+            self.call_counts["shallow_cumulus"] = 0
         self.ysu_nan_guard_fires = 0
         #: Opt-in :class:`~woof.core.surface_moisture_ledger.
         #: SurfaceMoistureLedger`, or ``None`` on every ordinary run.  The
@@ -3446,6 +3465,11 @@ class PhysicsDriver:
         for name, new in news.items():
             cp.copyto(self.cu_rates[name], new, where=eligible[None])
         self.retain_cumulus_history(result, state, eligible=eligible, validated=native_kf)
+        # KF_eta_CPS zeroes and rewrites CLDFRA_DP_KF/CLDFRA_SH_KF/QC_KF/
+        # QI_KF only for the columns it recomputes (module_cu_kfeta.F:
+        # 410-426); a held column keeps its cloud for radiation.
+        for name, new in (result.cloud_feedback or {}).items():
+            cp.copyto(self.fields[name], new, where=eligible[None])
         cp.copyto(self.cu_pratec, pratec_new, where=eligible)
         # RAINCV = DT*PRATEC (module_cu_kfeta.F:2504-2505, 2642-2643).
         cp.copyto(self.cu_raincv, DTYPE(clock_dt) * pratec_new,
@@ -3819,15 +3843,21 @@ class PhysicsDriver:
             contribution = getattr(self.cumulus_tendencies, name, None)
             if contribution is not None:
                 getattr(target, name).__iadd__(contribution)
+        shallow = getattr(self, "shallow_tendencies", None)
         for name in ("rtheta", "rqv", "rqc"):
             value = getattr(target, name)
             _compose_three(value, getattr(pbl, name),
                            getattr(self.radiation_tendencies, name),
                            getattr(self.cumulus_tendencies, name))
+            if shallow is not None:
+                # phy_shcu_ten's add_a2a, after phy_cu_ten's.
+                value += getattr(shallow, name)
         for name in ("rqr", "rqi", "rqs"):
-            sources = [getattr(component, name) for component in (
-                pbl, self.radiation_tendencies, self.cumulus_tendencies)
-                if getattr(component, name) is not None]
+            components = (pbl, self.radiation_tendencies,
+                          self.cumulus_tendencies) + (
+                (shallow,) if shallow is not None else ())
+            sources = [getattr(component, name) for component in components
+                       if getattr(component, name) is not None]
             if sources:
                 value = getattr(target, name)
                 if value is None:
@@ -6482,6 +6512,21 @@ class PhysicsDriver:
             self._run_cumulus(atmosphere, state, cfg)
             self.call_counts["cumulus"] += 1
 
+        # WRF's shallowcu_driver follows the cumulus driver on every model
+        # step (module_first_rk_step_part1.F:1567-1663); calculate_phy_tend
+        # couples its rates with the column mass (module_em.F:2309-2340)
+        # and phy_shcu_ten adds them after the cumulus ones
+        # (module_physics_addtendc.F:161-165, :1864-1899).
+        if self.shallow_cumulus is not None:
+            if atmosphere is None:
+                atmosphere = _prepare_atmosphere(state)
+            rates = self.shallow_cumulus(driver=self, atmosphere=atmosphere,
+                                         state=state, cfg=cfg)
+            self.shallow_tendencies = couple_column_tendencies(
+                state, cfg, rtheta=rates["rthshten"], rqv=rates["rqvshten"],
+                rqc=rates["rqcshten"], rqr=rates["rqrshten"])
+            self.call_counts["shallow_cumulus"] += 1
+
         self.couple_cumulus_history(state, cfg)
         if getattr(self, "_wrf_rthraten", None) is not None:
             self.radiation_tendencies = couple_column_tendencies(
@@ -6630,9 +6675,14 @@ class PhysicsDriver:
         ``cu_physics=0`` therefore failed every downstream QPF product,
         which is exactly how this was found.
 
-        ``RAINSH`` is always zero here, and that is a true statement rather
-        than a placeholder: woof implements no shallow-cumulus scheme, and
-        zero is what WRF writes for ``shcu_physics=0``.
+        ``RAINSH`` is zero unless ``shcu_physics = 5`` (Deng) runs, and zero
+        is what WRF writes for ``shcu_physics=0``.  Under Deng it is WRF's
+        RAINSH word for word, which is the LAST step's shallow rain in mm, not
+        an accumulation: deng_shcu_driver zeroes RAINSH for every column before
+        adding that step's RAINSHV (module_shcu_deng.F:276, :2834), and the
+        accumulation in advance_ppt adds PRATESH*DT, which Deng never writes
+        (module_physics_addtendc.F:2292); shallowcu_driver then sets RAINSHV to
+        PRATESH*DT = 0 (module_shallowcu_driver.F:686-691).
         """
         from woof.io.history_layout import physics_history_fields
 
@@ -7746,6 +7796,12 @@ def initialize_physics(
                     else CARRIER_SOURCE_UNWRITTEN),
             model_time=(0.0 if not radiation_active else None))
 
+    if int(getattr(cfg, "shcu_physics", 0)):
+        # WRF's dengshcuscheme package state (Registry.EM_COMMON:3232) at
+        # deng_shcu_init's cold start, under the Registry names, so the
+        # checkpoint carries it with the physics inventory.
+        from woof.core.shcu_deng import allocate_deng_fields
+        allocate_deng_fields(f, cfg, *state.p.shape)
     driver = PhysicsDriver(state, cfg, f, result, noah_params,
                            radiation=radiation, cumulus=cumulus,
                            noahmp_params=noahmp_params,

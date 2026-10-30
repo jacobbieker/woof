@@ -5375,6 +5375,15 @@ def physics_array_shapes(cfg: RunConfig, *, cam_ozone: bool = False,
     from woof.core.physics_inventory import radtran_fields
     for name, full in radtran_fields(cfg, ny, nx).items():
         shapes[f"fields/{name}"] = full
+    if int(getattr(cfg, "shcu_physics", 0)):
+        # Deng's carried package state (woof.core.shcu_deng
+        # allocate_deng_fields reads the same roster): 10 level fields, 10
+        # surface fields, 3 integer surface fields and the 100-deep
+        # AINCKFSA history -- 110*ny*nx + 10*nz*ny*nx words per domain.
+        from woof.core.shcu_deng import deng_field_shapes
+        for name, (shape, _dtype) in deng_field_shapes(cfg, nz, ny,
+                                                        nx).items():
+            shapes[f"fields/{name}"] = shape
     if int(getattr(cfg, "sf_ocean_physics", 0)) == 2:
         from woof.ocean.mixed_layer import PROFILE_FIELDS
         for name in (*PROFILE_FIELDS, "_pwp_w", "_pwp_p"):

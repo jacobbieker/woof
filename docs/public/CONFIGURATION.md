@@ -454,7 +454,7 @@ consumed `RunConfig` field -- the knob-parity battery
 consuming kernel/module rather than being decorative -- and every one
 is importable from a WRF namelist.
 
-**Which keys a `[[domain]]` table may override.** Exactly these 272,
+**Which keys a `[[domain]]` table may override.** Exactly these 274,
 and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
 
     lightning_option  lightning_dt  lightning_start_seconds  flashrate_factor
@@ -473,7 +473,8 @@ and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
     v_mom_adv_order  h_mom_adv_order  tke_budget  sase_flux_diag  hmix_k_diag
     surface_energy_diag  rrtmg_spectral_output  radtran_wavelengths  radtran_interval_s
     radtran_umu  radtran_phi  radtran_mol_abs_param  radtran_solver  radtran_streams
-    radtran_pseudospherical  inflow_perturbation  inflow_perturbation_seed
+    radtran_pseudospherical  shcu_physics  cu_rad_feedback  inflow_perturbation
+    inflow_perturbation_seed
     inflow_perturbation_amplitude_scale  inflow_perturbation_faces  target_cfl
     target_hcfl  max_step_increase_pct  starting_time_step  starting_time_step_den
     max_time_step  max_time_step_den  min_time_step  min_time_step_den
@@ -681,6 +682,7 @@ wrong answer reported as a success. Put them in `[shared]`.
 | `radtran_solver` | (none) | `"disort"` | `"disort"`, `"twostr"`; per domain | Discrete ordinates (delta-M) or two-stream (delta-Eddington), irradiances only for the latter |
 | `radtran_streams` | (none) | `0` | 0 or even 2-32; per domain | Number of streams; 0 means 6 for irradiances, 16 with radiances |
 | `radtran_pseudospherical` | (none) | `false` | bool; per domain | Pseudo-spherical direct beam (Dahlback & Stamnes 1991) for low sun |
+| `shcu_physics` | `shcu_physics` | 0 | 0, 5; per domain | the separate shallow-cumulus slot. 5 is WRF-Solar's PSU Deng scheme (`phys/module_shcu_deng.F`), run every model step after the cumulus call as `shallowcu_driver` is, with its non-buoyant cloud (CLDAREAA/B, CLDLIQA/B, the updraft history and the 100-deep AINCKFSA) carried in the checkpoint and its shallow cloud handed to the next radiation call (`CLDFRA = MAX(CLDFRA_SH, CLDFRA)`, `QC = CW_RAD + QC`, `module_radiation_driver.F:1566-1575`). Needs MYJ or MYNN (`bl_pbl_physics` 2 or 5, WRF's own rule), a microphysics scheme (QC, QR) and RRTMG (`ra_*_physics = 4`); shares W0AVG with Kain-Fritsch as WRF does. Every output word is held to WRF v4.7.1 (`tests/test_shcu_deng_wrf471_oracle.py`). `RAINSH` in history is WRF's word: the last step's shallow rain in mm, which WRF does not accumulate. WRF's 1-4 are refused |
 | `alb_sol` | `alb_sol` | 0 | 0, 1 | `[shared]` only. 1 updates sun-angle-dependent land albedo `ALBSOL` and background albedo `ALBBCKSOL` on radiation steps. Shortwave uses `ALBSOL`; RUC uses both fields and retains the fractional sea-ice blend. Needs active shortwave and the MODIS21 land-use categories. HRRR namelist imports honor the supplied value; shipped HRRR demos and the new solar-albedo monthly RUC legacy-RRTMG template explicitly select 1. Other configurations remain at 0. Checkpoints bind it when enabled; prepared bundles do not. Stock WRF 4.6.1 export omits this fork-only key, and its comparison receipt records that the stock arm does not apply the correction |
 | `num_soil_layers` | `num_soil_layers` | 4 | scheme-defined | WOOF *refuses* a count the scheme does not define where WRF silently overwrites it |
 | `nest_microphysics_transition` | -- | `same-scheme-only` | + `mp8-to-mp18-mass-diagnosed-v1`, `mp-edge-mass-diagnosed-v1` | WOOF-only, one-way nest MP edges. Left at the default, a mixed edge between two ported schemes resolves to the closure that pair takes (`mp8-to-mp18-mass-diagnosed-v1` for Thompson over NSSL-2, the matrix id for every other pair) and the coupler receipt records the requested and the effective policy; naming the pair's own id pins it, and naming the other mixed id is refused. An `mp_physics = 28` child entering from another scheme is seeded with WRF's own non-aerosol-aware droplet number and aerosol floors, named in the receipt |
@@ -1134,7 +1136,7 @@ namelist assumes for an omitted key (`mix_full_fields` is an ordinary knob).
 | `ghg_input` | 0 | analytic year-formula trace gases (no CAMtr reader) |
 | `cldovrlp` / `idcor` | 2 / 0 | McICA maximum-random overlap, constant decorrelation |
 | `gwd_opt` | 0 | no gravity-wave drag |
-| `shcu_physics` | 0 | no shallow cumulus |
+| `shcu_physics` | 0 | no shallow cumulus (5, Deng, is a configuration key above) |
 | `cu_rad_feedback` | .false. | KF cloud fraction does not feed radiation |
 | `kf_edrates` | 0 | no KF rate diagnostics |
 | `sst_update`, `sst_skin`, `tmn_update` | 0 | single-analysis case runs |

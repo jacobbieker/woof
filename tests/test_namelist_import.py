@@ -1765,7 +1765,8 @@ def test_tke_adv_opt_drops_as_inert(tmp_path):
     # gwd_opt left this list with lane/282-terrain-drag: 1 and 3 are ported
     # (tests/test_terrain_drag_config.py).
     # CLM lake 0/1 and its WRF defaults are held by test_lake_options.py.
-    "shcu_physics",
+    # shcu_physics left this list with the Deng port: 0 and 5 import
+    # (tests/test_shcu_deng_integration.py), 1-4 refuse.
     "kf_edrates", "flag_sm_adj",
     "sst_update", "sst_skin", "tmn_update",
 ])

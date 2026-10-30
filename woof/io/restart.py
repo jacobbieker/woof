@@ -1319,6 +1319,12 @@ DRIVER_REBUILT_ATTRS = frozenset({
     # rather than carried; see _restore_carriers.
     "carriers_need_producer_refresh",
     "tendencies", "last_ysu", "refl_10cm", "microphysics",
+    # The shallow-cumulus slot (shcu_physics = 5, Deng): the adapter is
+    # rebuilt from the RunConfig, and its coupled tendencies are recomputed
+    # by every compute() before the composer reads them (Deng runs every
+    # model step).  Every array Deng carries lives in ``fields`` under its
+    # WRF Registry name and rides the serialized physics inventory.
+    "shallow_cumulus", "shallow_tendencies",
     "nssl2_binding",
     # Dynamics forcing is integrator-owned: the restart-carried state pair
     # on ARW, or buffers refilled before phase 1 on MPAS. Column spacing is
@@ -2808,6 +2814,11 @@ from woof.checkpoint_identity import (  # noqa: E402
     seaice_read as _seaice_read)
 
 
+#: shcu_physics / cu_rad_feedback at the value every checkpoint written
+#: before them ran: dropped from the echo when off, read back as off.
+SHALLOW_CUMULUS_RUN_DEFAULTS = {"shcu_physics": 0, "cu_rad_feedback": False}
+
+
 def _drop_default_off_run_keys(values: dict) -> None:
     """Drop every default-off RunConfig key that older headers omit.
 
@@ -2874,6 +2885,13 @@ def _drop_default_off_run_keys(values: dict) -> None:
             value = tuple(value)
         if value == default:
             values.pop(key, None)
+    # shcu_physics / cu_rad_feedback (Deng shallow cumulus, cumulus cloud to
+    # radiation): off is every earlier header.  On, they are physics and
+    # stay in the digest.
+    if not values.get("shcu_physics", 0):
+        values.pop("shcu_physics", None)
+    if not values.get("cu_rad_feedback", False):
+        values.pop("cu_rad_feedback", None)
     if not values.get("scalar_pblmix", 0):
         values.pop("scalar_pblmix", None)
     # MYNN-EDMF's split mixing keys (lane rrfs288-gap1): off mixes nothing
@@ -5019,6 +5037,13 @@ def _require_config_match(stored_config: dict, cfg, path) -> None:
             # Absent is the default (_drop_inert_terrain_drag); a moved
             # topo_wind/gwd_opt still refuses below.
             default = TERRAIN_DRAG_RUN_DEFAULTS[key]
+            stored = default if stored is absent else stored
+            live = default if live is absent else live
+        if key in SHALLOW_CUMULUS_RUN_DEFAULTS:
+            # Absent is off (_drop_default_off_run_keys): every checkpoint
+            # written before the Deng port ran without it.  A moved
+            # selector still refuses below.
+            default = SHALLOW_CUMULUS_RUN_DEFAULTS[key]
             stored = default if stored is absent else stored
             live = default if live is absent else live
         if key in TOPO_RADIATION_RUN_DEFAULTS:

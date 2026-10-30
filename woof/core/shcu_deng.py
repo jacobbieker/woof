@@ -265,7 +265,142 @@ def launch_deng(*, u, v, t, qv, qc, qr, p, pii, rho, dz8w, tke, exch_h,
     return out
 
 
-__all__ = ["DENGWS_SLOTS", "DengState", "NSH", "OUTPUT_3D", "STATE_2D",
+#: The Deng fields the physics driver holds in ``driver.fields`` under their
+#: WRF Registry names (lower case), so the checkpoint carries them with the
+#: rest of the physics inventory.  W0AVG is absent from this roster when
+#: Kain-Fritsch holds it (woof.config.DENG_SHARED_W0AVG_CU).
+DENG_FIELDS_3D = STATE_3D
+DENG_FIELDS_2D = STATE_2D
+DENG_FIELDS_INT = STATE_INT
+DENG_FIELD_AINCKFSA = "ainckfsa"
+
+
+def deng_field_shapes(cfg, nz: int, ny: int, nx: int) -> dict:
+    """Name -> (shape, dtype) of every Deng field the driver allocates."""
+    from woof.config import DENG_SHARED_W0AVG_CU
+    shapes = {}
+    for name in DENG_FIELDS_3D:
+        if name == "w0avg" and int(cfg.cu_physics) in DENG_SHARED_W0AVG_CU:
+            continue
+        shapes[name] = ((nz, ny, nx), np.float32)
+    for name in DENG_FIELDS_2D:
+        shapes[name] = ((ny, nx), np.float32)
+    for name in DENG_FIELDS_INT:
+        shapes[name] = ((ny, nx), np.int32)
+    shapes[DENG_FIELD_AINCKFSA] = ((NSH, ny, nx), np.float32)
+    return shapes
+
+
+def allocate_deng_fields(fields: dict, cfg, nz: int, ny: int, nx: int) -> None:
+    """``deng_shcu_init``'s cold start (module_shcu_deng.F:3629-3674) into
+    ``fields``: every real field 0, LTOPB/KDCLDTOP/KDCLDBAS 1."""
+    import cupy as cp
+
+    for name, (shape, dtype) in deng_field_shapes(cfg, nz, ny, nx).items():
+        if name in fields:
+            # CLDFRA_SH is one grid array in WRF: Kain-Fritsch's
+            # CLDFRA_SH_KF (cu_rad_feedback) and Deng's write the same
+            # field (module_first_rk_step_part1.F:1390, :1638).
+            continue
+        if dtype is np.int32:
+            fields[name] = cp.ones(shape, dtype=cp.int32)
+        else:
+            fields[name] = cp.zeros(shape, dtype=cp.float32)
+
+
+class DengShallowCumulus:
+    """``shcu_physics = 5`` for :class:`woof.core.physics.PhysicsDriver`.
+
+    Called on every model step after the cumulus call, as
+    ``module_first_rk_step_part1.F:1570`` calls ``shallowcu_driver``.  It
+    reads the driver's PBL fields (MYJ: TKE_MYJ/EL_MYJ, MYNN: QKE/EL_PBL,
+    both EXCH_H), the held radiative heating (RTHRATENLW/SW), PBLH, MAVAIL
+    (updated in place) and the radiation calendar (start time, longitude),
+    and returns the coupled tendencies WRF's calculate_phy_tend and
+    phy_shcu_ten add (module_em.F:2309-2340, module_physics_addtendc.F:
+    1864-1899).  Everything it carries lives in ``driver.fields``.
+    """
+
+    def __init__(self, cfg):
+        from woof.config import shcu_refusal
+        why = shcu_refusal(cfg)
+        if why is not None:
+            raise ValueError(why)
+        self.bl_pbl_physics = int(cfg.bl_pbl_physics)
+
+    def state_view(self, driver, state) -> DengState:
+        from woof.config import DENG_SHARED_W0AVG_CU
+        f = driver.fields
+        if int(driver.cu_physics) in DENG_SHARED_W0AVG_CU:
+            # WRF's one W0AVG: KF advances it on its due steps, Deng every
+            # step (module_cu_kfeta.F:218-251, module_shcu_deng.F:133-153).
+            w0avg = driver.cumulus_callable.ensure_trigger_history(state)
+        else:
+            w0avg = f["w0avg"]
+        values = {name: f[name] for name in DENG_FIELDS_3D if name != "w0avg"}
+        values.update({name: f[name] for name in DENG_FIELDS_2D})
+        values.update({name: f[name] for name in DENG_FIELDS_INT})
+        return DengState(w0avg=w0avg, ainckfsa=f[DENG_FIELD_AINCKFSA],
+                         **values)
+
+    def __call__(self, *, driver, atmosphere, state, cfg) -> dict:
+        import cupy as cp
+        from woof.core.physics import _model_clock_dt
+        from woof.core.swint import calendar_scalars
+
+        clock_dt = _model_clock_dt(cfg)
+        if float(clock_dt) != float(cfg.dt):
+            raise ValueError(
+                "shcu_physics=5 (Deng) runs on WRF's model step; the "
+                "compatibility substep integration (clock_dt != dt) is not "
+                "wired for it")
+        radiation = driver.radiation_callable
+        start = getattr(radiation, "start_time", None)
+        longitude = getattr(radiation, "longitude_deg", None)
+        if start is None or longitude is None:
+            raise ValueError(
+                "shcu_physics=5 (Deng) needs the radiation calendar's UTC "
+                "start time and longitude (XLONG, GMT: the local-time PBLMAX "
+                "reset, module_shcu_deng.F:871-880)")
+        _julian, xtime, gmt = calendar_scalars(start, state.elapsed_seconds)
+        f = driver.fields
+        shape = state.p.shape
+        if self.bl_pbl_physics == 2:
+            tke, el = f["tke_myj"], f["el_myj"]
+        else:
+            tke, el = f["qke"], f["el_pbl"]
+        surface = shape[1:]
+        xlong = cp.ascontiguousarray(
+            cp.asarray(longitude, dtype=cp.float32).reshape(surface))
+        ht = cp.ascontiguousarray(
+            cp.asarray(state.ht, dtype=cp.float32).reshape(surface))
+        dnw = cp.ascontiguousarray(cp.asarray(state.dnw, dtype=cp.float32))
+        deng = self.state_view(driver, state)
+
+        def c(a):
+            return cp.ascontiguousarray(a)
+
+        out = launch_deng(
+            u=c(atmosphere["u"]), v=c(atmosphere["v"]),
+            t=c(atmosphere["temperature"]), qv=c(atmosphere["qv"]),
+            qc=c(atmosphere["qc"]), qr=c(state.qr), p=c(atmosphere["pressure"]),
+            pii=c(atmosphere["exner"]), rho=c(atmosphere["rho"]),
+            dz8w=c(atmosphere["dz"]), tke=c(tke), exch_h=c(f["exch_h"]),
+            el_pbl=c(el), rthratenlw=c(driver.rthratenlw),
+            rthratensw=c(driver.rthratensw),
+            z_at_w=c(atmosphere["z_interface"]), w=c(state.w),
+            pblh=f["pblh"], ht=ht, xlong=xlong, dnw=dnw, mavail=f["mavail"],
+            state=deng, dt=float(cfg.dt), dx=float(cfg.dx), xtime=float(xtime),
+            gmt=float(gmt), adaptive=False,
+            bl_pbl_physics=self.bl_pbl_physics)
+        # A nonzero status already raised inside launch_deng.
+        out.pop("status")
+        return out
+
+
+__all__ = ["DENG_FIELDS_2D", "DENG_FIELDS_3D", "DENG_FIELDS_INT",
+           "DENG_FIELD_AINCKFSA", "DengShallowCumulus",
+           "allocate_deng_fields", "deng_field_shapes", "DENGWS_SLOTS", "DengState", "NSH", "OUTPUT_3D", "STATE_2D",
            "STATE_3D", "STATE_INT", "STATUS_BITS", "SUPPORTED_PBL",
            "deng_tile_columns", "deng_workspace_floats", "kernel_capacity",
            "launch_deng"]

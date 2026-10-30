@@ -624,6 +624,36 @@ class GrellFreitas:
         rainc = cp.ascontiguousarray(
             sca[:, _OUT_SCA.index("raincv")].reshape(ny, nx))
         _mask_output_support(rainc, cfg)
+        if int(getattr(cfg, "cu_diag", 0)):
+            # convtrans_prep after GFDRV (module_first_rk_step_part1.F:
+            # 1547-1563; module_convtrans_prep.F reads GD_CLOUD/GD_CLOUD2 for
+            # cu_phys 3 as for 5): the time-averaged QC_CU/QI_CU that
+            # cu_rad_feedback hands radiation.  G3's transcription, graded
+            # against WRF by tests/test_g3_diag.py, on the same driver
+            # fields G3 uses.
+            from woof.core.g3 import run_g3_diag
+            from woof.core.physics_inventory import cumulus_state_layout
+            for key, (field_shape, dtype) in cumulus_state_layout(cfg).items():
+                if key not in fields:
+                    fields[key] = cp.zeros(field_shape, dtype=dtype)
+            averages = {key: fields[key] for key in
+                        ("gd_cloud_a", "qc_cu", "gd_cloud2_a", "qi_cu",
+                         "gd_cldfr", "raincv_a", "raincv_b")}
+            averages["clock"] = fields["g3_diag_clock"]
+            shape3 = (nz, ny, nx)
+            fqi = int(getattr(state, "qi", None) is not None)
+            run_g3_diag(
+                averages, cloud=grid(_OUT_LEV.index("gdc")),
+                ice=grid(_OUT_LEV.index("gdc2")), rain=rainc,
+                temperature=atmosphere["temperature"],
+                pressure=atmosphere["pressure"], qv=atmosphere["qv"],
+                qc=atmosphere["qc"],
+                qi=(atmosphere["qi"] if "qi" in atmosphere
+                    else cp.zeros(shape3, dtype=DTYPE)),
+                fqi=fqi, dt=float(clock_dt),
+                curr_secs=float(state.elapsed_seconds),
+                avg_minutes=float(cfg.convtrans_avglen_m),
+                adaptive=bool(getattr(cfg, "use_adaptive_time_step", False)))
 
         return _native_result_type()(
             owner=self,
