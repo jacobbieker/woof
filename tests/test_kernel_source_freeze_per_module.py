@@ -1135,9 +1135,12 @@ BASELINE_PINNED: dict[str, str] = {
         "dfe3b824da5e8af04366dc873654368fb687a26075ddad898f48e3a6a2a367e6",
     # The clean-room spectral solver (woof/radtran, docs/dev/radtran.md);
     # its words are tests/data/radtran/kernel_words.npz on host, CUDA and
-    # Metal, and its fluxes are held to uvspec 2.0.6.
+    # Metal, and its fluxes are held to uvspec 2.0.6.  Moved once on
+    # radtran-opac: the body became rt_problem, and radtran_disort_modes +
+    # _finish spread radiance Fourier modes over threads (same words, held
+    # by tests/test_radtran_kernel_words_gpu.py on both device paths).
     "radtran_disort":
-        "fff8cb315d9f4f2d301b8a9eb524c3d0f2261318def4ee163a217aeba2b46432",
+        "9b4efb5acb2c165a38fd0c4f92870418eb34c58f7faba7ffaa6ec51f3fe23a06",
     # lane/281-zadvect-implicit (A158): WRF 4.7.1's implicit-explicit
     # vertical advection, graded word for word against WRF's compiled
     # routines by tests/test_zadvect_implicit.py.  Moved once on the lane:
