@@ -643,14 +643,19 @@ def solve_device(ncol, nlay, icld, play, plev, tlay, tlev,
                                 ciwpmcl, clwpmcl, cswpmcl, reicmcl,
                                 relqmcl, resnmcl, tauaer, K,
                                 column_chunk=None, _stage_probe=None, *,
-                                mcica_layout="gpoint"):
+                                mcica_layout="gpoint", spectral_output="none"):
     """MPAS: module_ra_rrtmg_lw.F:10705-11533,2775-10623.
 
     Audited solver launch chain. K holds device coefficient tables, scalar
     constants and owning references supplied by the radiation table backend.
+    ``spectral_output`` "bands" (or "gpoints": longwave is per band either way)
+    adds ``lw_band`` (4, ncol, nlay+1, 16), quantities u d uc dc, from a separate
+    launch over the accumulation's inputs (rlw_rtrn_band_rows, as the WRF engine).
     """
     if mcica_layout not in ("gpoint", "column"):
         raise ValueError("mcica_layout must be gpoint or column")
+    if spectral_output not in ("none", "bands", "gpoints"):
+        raise ValueError(f"rrtmg_spectral_output must be none, bands or gpoints, not {spectral_output!r}")
     import cupy as cp
     cp.cuda.get_current_stream().wait_event(K['ready'])
     nl = int(nlay)
@@ -669,6 +674,8 @@ def solve_device(ncol, nlay, icld, play, plev, tlay, tlev,
     dflxc = cp.zeros((ncol, nl + 1), dtype=cp.float32)
     hr = cp.zeros((ncol, nl), dtype=cp.float32)
     hrc = cp.zeros((ncol, nl), dtype=cp.float32)
+    lw_band = (cp.empty((len(_legacy.LW_SPECTRAL_QUANTITIES), ncol, nl + 1, NBNDLW), dtype=cp.float32)
+               if spectral_output != "none" else None)
 
     fslot = {name: i for i, name in enumerate(GPU_FSLOTS)}
     islot = {name: i for i, name in enumerate(GPU_ISLOTS)}
@@ -861,6 +868,17 @@ def solve_device(ncol, nlay, icld, play, plev, tlay, tlev,
              iclddn_p, radlu_sfc, radclru_sfc,
              K["ngs"], K["delwave"], WTDIFF,
              totuflux, totdflux, totuclfl, totdclfl))
+        if lw_band is not None:
+            # a separate launch over the same inputs (broadband unchanged)
+            part = cp.empty((len(_legacy.LW_SPECTRAL_QUANTITIES), nc, nl + 1, NBNDLW), dtype=cp.float32)
+            total = nc * (nl + 1) * NBNDLW
+            _gpu_kernel("rlw_rtrn_band_rows")(
+                ((total + 127) // 128,), (128,),
+                (i32(nc), i32(nl), radld_p, radclrd_p, radlu_p, radclru_p,
+                 iclddn_p, radlu_sfc, radclru_sfc,
+                 K["ngs"], K["delwave"], WTDIFF, K["fluxfac"], part))
+            lw_band[:, rows] = part
+            del part
         del (radld_p, radclrd_p, radlu_p, radclru_p, iclddn_p,
              radlu_sfc, radclru_sfc)
 
@@ -893,12 +911,15 @@ def solve_device(ncol, nlay, icld, play, plev, tlay, tlev,
     from .deferred_checks_v842 import defer
     defer(err_flags, "rlw_cldprmc device abort, code {value} "
           "(bounds violation, mirrors the Fortran stop)", reduce="first", error=ValueError)
-    return {
+    out = {
         "uflx": uflx, "dflx": dflx, "hr": hr,
         "uflxc": uflxc, "dflxc": dflxc, "hrc": hrc,
         "uflxcln": cp.zeros((ncol, nl + 1), dtype=cp.float32),
         "dflxcln": cp.zeros((ncol, nl + 1), dtype=cp.float32),
     }
+    if lw_band is not None:
+        out["lw_band"] = lw_band
+    return out
 
 
 def mcica_subcol_device(a,surface,tauc,tables,*,icld,irng,permuteseed,idcor,julday):
@@ -1137,7 +1158,8 @@ def rrtmg_lwrad_device(model, interfaces, surface, tables, *, icloud,
                        cldovrlp, idcor, julday, has_reqc=0, has_reqi=0,
                        has_reqs=0, o3input=0, pin=None, ozone=None,
                        has_qc3d=True, has_qi3d=True, has_qs3d=True,
-                       has_cldfra3d=True, column_chunk=None, retain_profiles=True):
+                       has_cldfra3d=True, column_chunk=None, retain_profiles=True,
+                       spectral_output="none"):
     """MPAS: module_ra_rrtmg_lw.F:11574-12305.
 
     Device-only MPAS wrapper, retaining variable layer counts per column.
@@ -1152,8 +1174,13 @@ def rrtmg_lwrad_device(model, interfaces, surface, tables, *, icloud,
     Optional argument presence is retained separately from packed values:
     native ignores cldfra3d unless at least one condensate is present
     (MPAS: module_ra_rrtmg_lw.F:11801-11806).
+    spectral_output "bands"/"gpoints" adds the boundary fluxes' per-band split
+    (radiation_spectral_v842.slot_fields) as (column, band) arrays, the
+    surface interface and the top of each column's extended solver profile.
     """
     import cupy as cp
+    from .radiation_spectral_v842 import boundary_slabs, slot_fields
+    spectral_fields = slot_fields('lw', spectral_output)
     # MPAS: module_ra_rrtmg_lw.F:11810-12185. Each wrapper column has
     # independent KISS state (IRNG=0, seed=150). Bound the complete wrapper,
     # including its four 140-g-point McICA buffers, before solver chunking.
@@ -1191,6 +1218,7 @@ def rrtmg_lwrad_device(model, interfaces, surface, tables, *, icloud,
     tendency=cp.empty((nc,nm),dtype=cp.float32)
     radii=cp.empty((nc,3,nm),dtype=cp.float32)
     flux=cp.empty((nc,len(FLUX_FIELDS)),dtype=cp.float32)
+    spectral={name:cp.zeros((nc,NBNDLW),dtype=cp.float32) for name in spectral_fields}
     profiles=[None]*nc if retain_profiles else None
     i32=np.int32
     presence = (int(bool(has_qc3d)) | (int(bool(has_qi3d)) << 1) |
@@ -1232,7 +1260,8 @@ def rrtmg_lwrad_device(model, interfaces, surface, tables, *, icloud,
             const(.169e-9),const(.093e-9),cp.broadcast_to(s[:,1:2],(ng,16)).copy(),
             inflag,iceflag,1,cloud,cp.zeros_like(cloud),ice,liquid,snow,
             a[:,10,:],a[:,9,:],a[:,11,:],cp.zeros((ng,nl,16),dtype=cp.float32),
-            tables,column_chunk=ng,mcica_layout='column')
+            tables,column_chunk=ng,mcica_layout='column',
+            spectral_output=spectral_output if spectral_fields else 'none')
         tendency_group=cp.empty((ng,nm),dtype=cp.float32)
         radii_group=cp.empty((ng,3,nm),dtype=cp.float32)
         flux_group=cp.empty((ng,len(FLUX_FIELDS)),dtype=cp.float32)
@@ -1240,6 +1269,9 @@ def rrtmg_lwrad_device(model, interfaces, surface, tables, *, icloud,
             (i32(ng),i32(nm),i32(nl),i32(icloud),m,a,out['uflx'],out['dflx'],
              out['uflxc'],out['dflxc'],out['hr'],tendency_group,radii_group,flux_group))
         tendency[indices]=tendency_group;radii[indices]=radii_group;flux[indices]=flux_group
+        if spectral:
+            for name,value in boundary_slabs(out.pop('lw_band'),spectral_fields).items():
+                spectral[name][indices]=value
         if profiles is not None:
             for row,c in enumerate(members):
                 profiles[c]={name:array[row:row+1] for name,array in out.items()}
@@ -1251,6 +1283,7 @@ def rrtmg_lwrad_device(model, interfaces, surface, tables, *, icloud,
     result={name:flux[:,j] for j,name in enumerate(FLUX_FIELDS)}
     result.update(rthratenlw=tendency,rre_cloud=radii[:,0],rre_ice=radii[:,1],
                   rre_snow=radii[:,2],mpas_nlay=counts-nm,profiles=profiles)
+    result.update(spectral)
     return result
 
 
@@ -1265,6 +1298,11 @@ def radiation_lw_to_mpas(result):
     out={name:result[name] for name in FLUX_FIELDS}
     for name in ('rthratenlw','rre_cloud','rre_ice','rre_snow'):
         out[name]=cp.ascontiguousarray(result[name].T)
+    # rrtmg_spectral_output: (column, band) -> MPAS's [band, cell]
+    from .radiation_spectral_v842 import FIELDS
+    for name in FIELDS:
+        if name.startswith('lw') and name in result:
+            out[name]=cp.ascontiguousarray(result[name].T)
     return out
 
 
@@ -1409,14 +1447,20 @@ def radiation_lw_slot(call):
             (np.int32(pressure.size),pressure,pressure_mb))
         diag['o3vmr'][:,:nc]=vinterp_ozn_device(pressure_mb,pin,ozone).T
     packed=radiation_lw_from_mpas(state)
+    # WOOF's &radiation config_rrtmg_spectral_output (radiation_spectral_v842): [band, cell] fields.
+    from .radiation_spectral_v842 import OPTION, slot_fields
+    spectral=call.options.get(OPTION,'none')
     result=rrtmg_lwrad_device(*packed,pools['rrtmg_lw_tables'],
         icloud=int(pools['icloud']),julday=int(pools['julday']),
         cldovrlp=opts.cldovrlp,idcor=opts.idcor,has_reqc=opts.has_reqc,
         has_reqi=opts.has_reqi,has_reqs=opts.has_reqs,o3input=opts.o3input,
-        pin=pin,ozone=ozone,retain_profiles=pools.get('retain_lw_profiles', True))
+        pin=pin,ozone=ozone,retain_profiles=pools.get('retain_lw_profiles', True),
+        spectral_output=spectral)
     out=radiation_lw_to_mpas(result)
     for name in FLUX_FIELDS:
         diag['olrtoa' if name=='olr' else name][:nc]=out[name]
+    for name in slot_fields('lw',spectral):
+        diag[name][:,:nc]=out[name]
     pools['tend_physics']['rthratenlw'][:,:nc]=out['rthratenlw']
     if str(call.options['config_microp_scheme']).strip() in RADIUS_SCHEMES:
         for name in ('rre_cloud','rre_ice','rre_snow'):
