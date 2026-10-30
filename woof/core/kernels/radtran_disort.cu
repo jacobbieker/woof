@@ -309,7 +309,14 @@ extern "C" __global__ void radtran_disort(
         double w0 = ssa[n];
         if (w0 > 1.0 - RT_DITHER) w0 = 1.0 - RT_DITHER;
         double f = 0.0;
-        if (deltam && nmom >= nstr) f = pmom[(long)n * (nmom + 1) + nstr];
+        if (deltam && twostream) {
+            // two-stream: delta-Eddington truncation f = g^2 (Joseph, Wiscombe &
+            // Weinman 1976), g the first moment
+            double g1 = nmom >= 1 ? pmom[(long)n * (nmom + 1) + 1] : 0.0;
+            f = g1 * g1;
+        } else if (deltam && nmom >= nstr) {
+            f = pmom[(long)n * (nmom + 1) + nstr];
+        }
         dtu[n] = dtau[n];
         double sc = 1.0 - w0 * f;
         dtaus[n] = sc * dtau[n];
@@ -604,8 +611,10 @@ extern "C" __global__ void radtran_disort(
                 fo[0] = edir_u;
                 fo[1] = 2.0 * RT_PI * fdn + edir_s - edir_u;
                 fo[2] = 2.0 * RT_PI * fup;
-                fo[3] = fbeam * rt_exp(-chu[k]) / (4.0 * RT_PI);
-                fo[4] = 0.5 * udn + (fbeam * rt_exp(-ch[k]) - fbeam * rt_exp(-chu[k])) / (4.0 * RT_PI);
+                // mean intensities keep the delta-M split (scaled direct beam),
+                // irradiances report the unscaled direct beam (uvspec's conventions)
+                fo[3] = fbeam * rt_exp(-ch[k]) / (4.0 * RT_PI);
+                fo[4] = 0.5 * udn;
                 fo[5] = 0.5 * uup;
             }
         }

@@ -1,0 +1,128 @@
+{
+ "case": "model_h2o",
+ "options": {
+  "wavelength": [
+   935.0,
+   938.0
+  ],
+  "mol_abs_param": "reptran coarse",
+  "rte_solver": "disort",
+  "number_of_streams": 8,
+  "sza": 35.0,
+  "phi0": 0.0,
+  "umu": [],
+  "phi": [],
+  "albedo": 0.2,
+  "pseudospherical": false,
+  "earth_radius": 6370.0,
+  "deltam": null,
+  "disort_intcor": "moments",
+  "zout": [
+   "sur",
+   "toa"
+  ],
+  "output_quantity": "irradiance",
+  "day_of_year": null,
+  "atmosphere_file": "us",
+  "wc_file": null,
+  "wc_properties": "hu",
+  "ic_file": null,
+  "ic_properties": "fu",
+  "ic_fu_reff_def": false,
+  "no_absorption": false,
+  "no_scattering": false
+ },
+ "inputs_sha256": "3eb12564bdc37c32a359e7cad6a52eba4924e613d6f060620926bfefa138e359",
+ "uvspec_input": "data_files_path <libRadtran data>\natmosphere_file <run dir>/atm.dat\nsource solar\nmol_abs_param reptran coarse\nwavelength 935.0 938.0\nrte_solver disort\nnumber_of_streams 8\nsza 35.0\nphi0 0.0\nalbedo 0.2\ndisort_intcor moments\nzout sur toa\nmol_file CH4 <run dir>/CH4.vmr vmr\nmol_file N2O <run dir>/N2O.vmr vmr\nmol_file CO <run dir>/CO.vmr vmr\nmol_file N2 <run dir>/N2.vmr vmr\nquiet\n",
+ "uvspec": {
+  "lambda": [
+   934.798,
+   936.111,
+   937.427
+  ],
+  "edir": [
+   [
+    141.5342,
+    676.46
+   ],
+   [
+    118.9865,
+    675.4683
+   ],
+   [
+    92.60554,
+    678.0947
+   ]
+  ],
+  "edn": [
+   [
+    0.6607059,
+    -1.291843e-08
+   ],
+   [
+    0.5224758,
+    -6.337519e-12
+   ],
+   [
+    0.3880639,
+    2.12598e-11
+   ]
+  ],
+  "eup": [
+   [
+    28.43898,
+    12.82751
+   ],
+   [
+    23.90179,
+    9.55529
+   ],
+   [
+    18.59872,
+    7.13416
+   ]
+  ],
+  "uavgdir": [
+   [
+    13.7495,
+    65.71548
+   ],
+   [
+    11.55908,
+    65.61915
+   ],
+   [
+    8.996271,
+    65.87429
+   ]
+  ],
+  "uavgdn": [
+   [
+    0.09104642,
+    1.459288e-09
+   ],
+   [
+    0.06935522,
+    -1.470256e-12
+   ],
+   [
+    0.04998131,
+    2.305231e-12
+   ]
+  ],
+  "uavgup": [
+   [
+    4.526204,
+    1.908937
+   ],
+   [
+    3.804088,
+    1.488037
+   ],
+   [
+    2.960078,
+    1.193256
+   ]
+  ]
+ }
+}

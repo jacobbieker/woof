@@ -1,0 +1,151 @@
+{
+ "case": "twostr_wc",
+ "options": {
+  "wavelength": [
+   500.0,
+   502.0
+  ],
+  "mol_abs_param": "reptran coarse",
+  "rte_solver": "twostr",
+  "number_of_streams": 8,
+  "sza": 30.0,
+  "phi0": 0.0,
+  "umu": [],
+  "phi": [],
+  "albedo": 0.2,
+  "pseudospherical": false,
+  "earth_radius": 6370.0,
+  "deltam": null,
+  "disort_intcor": "moments",
+  "zout": [
+   "sur",
+   "toa"
+  ],
+  "output_quantity": "irradiance",
+  "day_of_year": null,
+  "atmosphere_file": "us",
+  "wc_file": null,
+  "wc_properties": "hu",
+  "ic_file": null,
+  "ic_properties": "fu",
+  "ic_fu_reff_def": false,
+  "no_absorption": false,
+  "no_scattering": false
+ },
+ "inputs_sha256": "a418f01db4d98071e24c678b232848e871f0794e673aafedd8338e657db955b7",
+ "uvspec_input": "data_files_path <libRadtran data>\natmosphere_file <run dir>/atm.dat\nsource solar\nmol_abs_param reptran coarse\nwavelength 500.0 502.0\nrte_solver twostr\nsza 30.0\nphi0 0.0\nalbedo 0.2\nzout sur toa\nwc_file 1D <run dir>/wc.dat\nwc_properties hu\nmol_file CH4 <run dir>/CH4.vmr vmr\nmol_file N2O <run dir>/N2O.vmr vmr\nmol_file CO <run dir>/CO.vmr vmr\nmol_file N2 <run dir>/N2.vmr vmr\nquiet\n",
+ "uvspec": {
+  "lambda": [
+   500.063,
+   500.438,
+   500.814,
+   501.19,
+   501.567,
+   501.945
+  ],
+  "edir": [
+   [
+    7.542775e-29,
+    1601.927
+   ],
+   [
+    7.69446e-29,
+    1627.648
+   ],
+   [
+    7.231505e-29,
+    1525.428
+   ],
+   [
+    8.054566e-29,
+    1693.469
+   ],
+   [
+    7.597132e-29,
+    1592.802
+   ],
+   [
+    7.770723e-29,
+    1622.839
+   ]
+  ],
+  "edn": [
+   [
+    294.4935,
+    0.0
+   ],
+   [
+    299.0604,
+    0.0
+   ],
+   [
+    280.0509,
+    0.0
+   ],
+   [
+    310.9986,
+    0.0
+   ],
+   [
+    292.0877,
+    0.0
+   ],
+   [
+    296.0747,
+    0.0
+   ]
+  ],
+  "eup": [
+   [
+    68.01037,
+    1327.371
+   ],
+   [
+    69.06503,
+    1347.214
+   ],
+   [
+    64.675,
+    1261.391
+   ],
+   [
+    71.82205,
+    1399.359
+   ],
+   [
+    67.45478,
+    1315.03
+   ],
+   [
+    68.37553,
+    1336.313
+   ]
+  ],
+  "uavg": [
+   [
+    49.96472,
+    330.1526
+   ],
+   [
+    50.73954,
+    335.2511
+   ],
+   [
+    47.51434,
+    314.0291
+   ],
+   [
+    52.76502,
+    348.4866
+   ],
+   [
+    49.55655,
+    327.6131
+   ],
+   [
+    50.23299,
+    333.3066
+   ]
+  ]
+ }
+}
