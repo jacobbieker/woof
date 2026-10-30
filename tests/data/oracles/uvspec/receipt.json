@@ -34,7 +34,11 @@
   "wc/wc.asy": "428f43e383324bc287230e8dc895860c0c4bb6f01ce68108c27236482e42691f",
   "ic/fu96/fu96.ext": "50cc39fca3e62332dae0d2aeb99b3787fc295934823cae639ae12a652f345bcc",
   "ic/fu96/fu96.ssa": "14e8fc4b6ee5ff3935339b647e0251c795923f052b1ffc0800a37c07327f0c7b",
-  "ic/fu96/fu96.asy": "8a0761eff213be30da3221ee0aa5092fb2a8dd3c1e637b57e717e59ec486ac3f"
+  "ic/fu96/fu96.asy": "8a0761eff213be30da3221ee0aa5092fb2a8dd3c1e637b57e717e59ec486ac3f",
+  "aerosol/OPAC/size_distr.cfg": "bc7d01041afc8398a60037ffeb95a4f57d281ff6ad4d64fb37d5e5c4aa738307",
+  "aerosol/OPAC/standard_aerosol_files/continental_average.dat": "fc39fda0f8ada2d0a0a872b8b62d684cfccd74f7b0655b5af2dcdec51115e469",
+  "aerosol/OPAC/standard_aerosol_files/maritime_clean.dat": "290de45fb72d31cbb23ff67376325aa69a2b846a5485f8370daf0b5e076b7a1c",
+  "aerosol/OPAC/standard_aerosol_files/urban.dat": "4ebe91d7de2cdaba170eecc50156491e0e4d6d122eaa50bdd314b5027985ab6d"
  },
  "cases": [
   "co2_ch4_1600",
@@ -48,7 +52,22 @@
   "o2_aband",
   "o3_chappuis",
   "o3_huggins",
+  "opac_continental_afglus",
+  "opac_continental_mie_rh50",
+  "opac_continental_rh90",
+  "opac_maritime_1600_rh90",
+  "opac_maritime_mie_rad16_rh95",
+  "opac_maritime_mie_rh90",
+  "opac_maritime_rad16_rh95",
+  "opac_maritime_rh70",
+  "opac_maritime_rh97",
+  "opac_urban_mie_rh80",
+  "opac_urban_rad16_rh80",
+  "opac_urban_rh10",
+  "opac_urban_rh80",
   "pp_sza85",
+  "rad16_ims_wc_ic_levels",
+  "rad16_ims_window_sza60",
   "rad16_rayleigh",
   "rad16_sph85",
   "rad16_wc_intcor_off",
@@ -68,5 +87,214 @@
   "twostr_wc_thin",
   "wc_hu_1600",
   "wc_hu_500"
- ]
+ ],
+ "opac_libraries": {
+  "mie": {
+   "species": {
+    "inso": {
+     "input": "data_files_path D\naerosol_type inso\nmie_program MIEV0\nwavelength wvl.dat\noutput_user netcdf\nbasename inso.\n",
+     "wavelength_file": "1 450.0\n2 500.0\n3 550.0\n4 600.0\n",
+     "span_um": [
+      0.45,
+      0.6
+     ],
+     "seconds": 2.8,
+     "sha256": "5bac8019f79380819c00edadbbf4814ae6427cf5d0714fcae74445e1f84a5231"
+    },
+    "waso": {
+     "input": "data_files_path D\naerosol_type waso\nmie_program MIEV0\nwavelength wvl.dat\noutput_user netcdf\nbasename waso.\n",
+     "wavelength_file": "1 450.0\n2 500.0\n3 550.0\n4 600.0\n",
+     "span_um": [
+      0.45,
+      0.6
+     ],
+     "seconds": 5.6,
+     "sha256": "5653d49b26b812fe1beede07e6085808fa06d1c8ff0e5b9ba1dc6692dcf3ee57"
+    },
+    "soot": {
+     "input": "data_files_path D\naerosol_type soot\nmie_program MIEV0\nwavelength wvl.dat\noutput_user netcdf\nbasename soot.\n",
+     "wavelength_file": "1 450.0\n2 500.0\n3 550.0\n4 600.0\n",
+     "span_um": [
+      0.45,
+      0.6
+     ],
+     "seconds": 0.1,
+     "sha256": "26165e28d95f3e72d56b5334b359ec4e29b47e82967d15659188ff1730ad5cc5"
+    },
+    "ssam": {
+     "input": "data_files_path D\naerosol_type ssam\nmie_program MIEV0\nwavelength wvl.dat\noutput_user netcdf\nbasename ssam.\n",
+     "wavelength_file": "1 450.0\n2 500.0\n3 550.0\n4 600.0\n",
+     "span_um": [
+      0.45,
+      0.6
+     ],
+     "seconds": 621.7,
+     "sha256": "fea18325ba66f6228329341686aa0836e94f99d98f7dd0cb304115c55cc18f4b"
+    },
+    "sscm": {
+     "input": "data_files_path D\naerosol_type sscm\nmie_program MIEV0\nwavelength wvl.dat\noutput_user netcdf\nbasename sscm.\n",
+     "wavelength_file": "1 450.0\n2 500.0\n3 550.0\n4 600.0\n",
+     "span_um": [
+      0.45,
+      0.6
+     ],
+     "seconds": 2059.3,
+     "sha256": "48f0c95094200085eaf1924c634b0fa2720bd7feca1f32b89ff12e0122ced21b"
+    },
+    "suso": {
+     "input": "data_files_path D\naerosol_type suso\nmie_program MIEV0\nwavelength wvl.dat\noutput_user netcdf\nbasename suso.\n",
+     "wavelength_file": "1 450.0\n2 500.0\n3 550.0\n4 600.0\n",
+     "span_um": [
+      0.45,
+      0.6
+     ],
+     "seconds": 20.0,
+     "sha256": "6dad5080af5f42959181ed513f9673ba4e27f3b2f8cccf5a81a721de966ad5ee"
+    }
+   },
+   "tool": "libRadtran mie (black box)",
+   "command": "<woof>/.pixi/envs/libradtran/bin/mie",
+   "package": {
+    "name": "rubin-libradtran",
+    "version": "2.0.6",
+    "build": "py311pl5321h6e06971_1",
+    "channel": "https://conda.anaconda.org/conda-forge/",
+    "url": "https://conda.anaconda.org/conda-forge/osx-arm64/rubin-libradtran-2.0.6-py311pl5321h6e06971_1.conda",
+    "sha256": "a056a687da52ee0e2c67a48b49da5252c1ca25b9eb411bfbc890472c672b9b3d"
+   },
+   "mie_sha256": "24646cd0bf82910ac948fd29050a1f91ea482a7a25b068f996a855509cc33bb9",
+   "platform": "Darwin arm64",
+   "data_sha256": {
+    "aerosol/OPAC/refractive_indices/inso00_refr.dat": "52305cfba5fa0371db32fdec683283c8ff83378a11ef80613172a3b7e1615c1a",
+    "aerosol/OPAC/refractive_indices/soot00_refr.dat": "c183adc7e236b5f01f2fe3394279e4722b539aa60b1615e3a03940e71b0ec34f",
+    "aerosol/OPAC/refractive_indices/ssam00_refr.dat": "e25d71965e6db61971898cabe16515fd3c79c615bb3756312286e871c3066ff1",
+    "aerosol/OPAC/refractive_indices/ssam50_refr.dat": "263af3f659a2b5d235a3cc009c4020f978672246e5dddf97002b072210d59682",
+    "aerosol/OPAC/refractive_indices/ssam70_refr.dat": "297bf7c69516c9cb47a4b5f47eb5e21fd64e8b70fb0d1adb15bd10ae59337212",
+    "aerosol/OPAC/refractive_indices/ssam80_refr.dat": "b20e1421122695617e0c04c5a4010e093d0aa11e80099ce8085db86193494765",
+    "aerosol/OPAC/refractive_indices/ssam90_refr.dat": "cf6ca3f7b4f44c1ca8229d29d2c330ff3ed7be3a42b05f886b336fda3628f21a",
+    "aerosol/OPAC/refractive_indices/ssam95_refr.dat": "1c44a84c9508edf5f41d9701107566617ae8f96d3a4232edf0c857375cf70129",
+    "aerosol/OPAC/refractive_indices/ssam98_refr.dat": "86e8f379c6462b5ed6c4b57009fe17624b0b8161ead6dd7f35d37a0553d15c31",
+    "aerosol/OPAC/refractive_indices/ssam99_refr.dat": "44d7c56a463ea6fce6b1816ec94f323c4d8bb0417d21b3e5e68cabefe852d2d3",
+    "aerosol/OPAC/refractive_indices/sscm00_refr.dat": "e25d71965e6db61971898cabe16515fd3c79c615bb3756312286e871c3066ff1",
+    "aerosol/OPAC/refractive_indices/sscm50_refr.dat": "b2ee4b005b5b3e2e5c00d64fe3e61f2eac7144ecda68bad5475ce01ce478bdc3",
+    "aerosol/OPAC/refractive_indices/sscm70_refr.dat": "f00722f67709b2bf865f420e751e1b2e73ae52fb03edffff5246efc496cb8342",
+    "aerosol/OPAC/refractive_indices/sscm80_refr.dat": "452b4acecf497b6fd577e81ed785b57b4416ac40a0d4b5973c5afb5149bc5879",
+    "aerosol/OPAC/refractive_indices/sscm90_refr.dat": "626289f8e95ca5616cb0228e414fe7e6dbc012513131f5915705c748d6836341",
+    "aerosol/OPAC/refractive_indices/sscm95_refr.dat": "dde1cdedd40e99dc352343a9e1af0c10247f9c5865ac970e5ce84c63d1f0055a",
+    "aerosol/OPAC/refractive_indices/sscm98_refr.dat": "1f4ba27920ee1fcc5b65e1f048174257cfc3bc1f1375f28bbed450da90d39f28",
+    "aerosol/OPAC/refractive_indices/sscm99_refr.dat": "34182a322f3d5bde752af5d6eb32f3ddee85cd23e5e382a76cd0791688a56d36",
+    "aerosol/OPAC/refractive_indices/suso00_refr.dat": "b9c38eabae45f5c23a9eb1a10a0f14bf9851aa818344a428b96c42c5e9796df8",
+    "aerosol/OPAC/refractive_indices/suso50_refr.dat": "58d554d3119a49ff9bb1e3da62105982d6b314e06fd53c6e8f6833c40060258e",
+    "aerosol/OPAC/refractive_indices/suso70_refr.dat": "33e791553cd2cbe7bbcd8a33234f22622d8344040734429ccb3ae3de06c88224",
+    "aerosol/OPAC/refractive_indices/suso80_refr.dat": "95311aa1327c9af9d0ecfe0b1c95e50f6ce7d203aa0a6e322feda0f096f6db1f",
+    "aerosol/OPAC/refractive_indices/suso90_refr.dat": "ea4af362bdf1eee0778299e21b79e415075d1e63d5c7f993eec868ff611bed2f",
+    "aerosol/OPAC/refractive_indices/suso95_refr.dat": "098e9756ea932d311ad027ef06c9c70c3cabb529b0f9ddfceea9b1db346fe1d0",
+    "aerosol/OPAC/refractive_indices/suso98_refr.dat": "c9d8e33b4d62a5b77ecbd9ef49d8d02327b6843885cd34704ac5f273870c298c",
+    "aerosol/OPAC/refractive_indices/suso99_refr.dat": "17dce2a12d03d43e1e9a076a1dd233ae3d11efca6bc94473cd9e143c1886a473",
+    "aerosol/OPAC/refractive_indices/waso00_refr.dat": "72868d23f7a63fa8dd717cce291a3b3ade601584f680ee5aa12e562675370ee9",
+    "aerosol/OPAC/refractive_indices/waso50_refr.dat": "3e1b050618e58d43296a104c82ebac1bc8e9f326d50ba759eef2a2bf629bcbe3",
+    "aerosol/OPAC/refractive_indices/waso70_refr.dat": "0ca1ba6dd6f4b806a60f9f0e034fbf1e3faf0a88a999ba91b9a5b37aadfdbcf3",
+    "aerosol/OPAC/refractive_indices/waso80_refr.dat": "07cfac17b6fe20159938c65648ea4e83077353a87538db8fc3a4faae4cf46f1c",
+    "aerosol/OPAC/refractive_indices/waso90_refr.dat": "e35dc47948f71d715a6f77920d1cff09a7e1d7f28460a30a9e26294af0a0ce9b",
+    "aerosol/OPAC/refractive_indices/waso95_refr.dat": "e3c8ba03880a6df745a325994e64f1aea5e6b79b00061d913a88b7b4b6cbabf8",
+    "aerosol/OPAC/refractive_indices/waso98_refr.dat": "7dff1e4a64247b9f4e2becd22c71a73d4e5046828371eb4ca5fcae366a2035d7",
+    "aerosol/OPAC/refractive_indices/waso99_refr.dat": "1c9c0f6a7ea5d00dc2b87cd8967b50f489e70bb81e9ca9230d774c8e791d7585",
+    "aerosol/OPAC/size_distr.cfg": "bc7d01041afc8398a60037ffeb95a4f57d281ff6ad4d64fb37d5e5c4aa738307"
+   }
+  },
+  "woof": {
+   "species": {
+    "inso": {
+     "seconds": 0.0,
+     "span_um": [
+      0.4,
+      2.0
+     ],
+     "sha256": "5af60bd24fd2a87dae9dec7bfc2cbe99a6ddda1e6aabd2fbdae79599571da0bf"
+    },
+    "waso": {
+     "seconds": 0.0,
+     "span_um": [
+      0.4,
+      2.0
+     ],
+     "sha256": "e4ab0d5e654b4497b839f36ef6f0e42ce79642c455532c4820a62cc132a122ae"
+    },
+    "soot": {
+     "seconds": 0.0,
+     "span_um": [
+      0.4,
+      2.0
+     ],
+     "sha256": "72db1a9feccb0a3137214484d1c5c6ff45c4d2cf91b812ec8b161244f8eee009"
+    },
+    "ssam": {
+     "seconds": 126.5,
+     "span_um": [
+      0.4,
+      2.0
+     ],
+     "sha256": "f03cd2553df06cd860af6063bfc47bc2fb53bba840afc80a46576e16f9f44121"
+    },
+    "sscm": {
+     "seconds": 431.4,
+     "span_um": [
+      0.4,
+      2.0
+     ],
+     "sha256": "95a6801a9986b80f690ea6facc980fc6e345c3deb461735edf6304d9e4520974"
+    },
+    "suso": {
+     "seconds": 144.2,
+     "span_um": [
+      0.4,
+      2.0
+     ],
+     "sha256": "4f396d43f57b81e69d45188d57d599d156c1fbf92a3f3b78e07143b644e00dcd"
+    }
+   },
+   "tool": "woof.radtran.aerosol",
+   "table_version": 1,
+   "dlnr": 0.005,
+   "dx": 0.05,
+   "lmax": 32,
+   "data_sha256": {
+    "aerosol/OPAC/refractive_indices/inso00_refr.dat": "52305cfba5fa0371db32fdec683283c8ff83378a11ef80613172a3b7e1615c1a",
+    "aerosol/OPAC/refractive_indices/soot00_refr.dat": "c183adc7e236b5f01f2fe3394279e4722b539aa60b1615e3a03940e71b0ec34f",
+    "aerosol/OPAC/refractive_indices/ssam00_refr.dat": "e25d71965e6db61971898cabe16515fd3c79c615bb3756312286e871c3066ff1",
+    "aerosol/OPAC/refractive_indices/ssam50_refr.dat": "263af3f659a2b5d235a3cc009c4020f978672246e5dddf97002b072210d59682",
+    "aerosol/OPAC/refractive_indices/ssam70_refr.dat": "297bf7c69516c9cb47a4b5f47eb5e21fd64e8b70fb0d1adb15bd10ae59337212",
+    "aerosol/OPAC/refractive_indices/ssam80_refr.dat": "b20e1421122695617e0c04c5a4010e093d0aa11e80099ce8085db86193494765",
+    "aerosol/OPAC/refractive_indices/ssam90_refr.dat": "cf6ca3f7b4f44c1ca8229d29d2c330ff3ed7be3a42b05f886b336fda3628f21a",
+    "aerosol/OPAC/refractive_indices/ssam95_refr.dat": "1c44a84c9508edf5f41d9701107566617ae8f96d3a4232edf0c857375cf70129",
+    "aerosol/OPAC/refractive_indices/ssam98_refr.dat": "86e8f379c6462b5ed6c4b57009fe17624b0b8161ead6dd7f35d37a0553d15c31",
+    "aerosol/OPAC/refractive_indices/ssam99_refr.dat": "44d7c56a463ea6fce6b1816ec94f323c4d8bb0417d21b3e5e68cabefe852d2d3",
+    "aerosol/OPAC/refractive_indices/sscm00_refr.dat": "e25d71965e6db61971898cabe16515fd3c79c615bb3756312286e871c3066ff1",
+    "aerosol/OPAC/refractive_indices/sscm50_refr.dat": "b2ee4b005b5b3e2e5c00d64fe3e61f2eac7144ecda68bad5475ce01ce478bdc3",
+    "aerosol/OPAC/refractive_indices/sscm70_refr.dat": "f00722f67709b2bf865f420e751e1b2e73ae52fb03edffff5246efc496cb8342",
+    "aerosol/OPAC/refractive_indices/sscm80_refr.dat": "452b4acecf497b6fd577e81ed785b57b4416ac40a0d4b5973c5afb5149bc5879",
+    "aerosol/OPAC/refractive_indices/sscm90_refr.dat": "626289f8e95ca5616cb0228e414fe7e6dbc012513131f5915705c748d6836341",
+    "aerosol/OPAC/refractive_indices/sscm95_refr.dat": "dde1cdedd40e99dc352343a9e1af0c10247f9c5865ac970e5ce84c63d1f0055a",
+    "aerosol/OPAC/refractive_indices/sscm98_refr.dat": "1f4ba27920ee1fcc5b65e1f048174257cfc3bc1f1375f28bbed450da90d39f28",
+    "aerosol/OPAC/refractive_indices/sscm99_refr.dat": "34182a322f3d5bde752af5d6eb32f3ddee85cd23e5e382a76cd0791688a56d36",
+    "aerosol/OPAC/refractive_indices/suso00_refr.dat": "b9c38eabae45f5c23a9eb1a10a0f14bf9851aa818344a428b96c42c5e9796df8",
+    "aerosol/OPAC/refractive_indices/suso50_refr.dat": "58d554d3119a49ff9bb1e3da62105982d6b314e06fd53c6e8f6833c40060258e",
+    "aerosol/OPAC/refractive_indices/suso70_refr.dat": "33e791553cd2cbe7bbcd8a33234f22622d8344040734429ccb3ae3de06c88224",
+    "aerosol/OPAC/refractive_indices/suso80_refr.dat": "95311aa1327c9af9d0ecfe0b1c95e50f6ce7d203aa0a6e322feda0f096f6db1f",
+    "aerosol/OPAC/refractive_indices/suso90_refr.dat": "ea4af362bdf1eee0778299e21b79e415075d1e63d5c7f993eec868ff611bed2f",
+    "aerosol/OPAC/refractive_indices/suso95_refr.dat": "098e9756ea932d311ad027ef06c9c70c3cabb529b0f9ddfceea9b1db346fe1d0",
+    "aerosol/OPAC/refractive_indices/suso98_refr.dat": "c9d8e33b4d62a5b77ecbd9ef49d8d02327b6843885cd34704ac5f273870c298c",
+    "aerosol/OPAC/refractive_indices/suso99_refr.dat": "17dce2a12d03d43e1e9a076a1dd233ae3d11efca6bc94473cd9e143c1886a473",
+    "aerosol/OPAC/refractive_indices/waso00_refr.dat": "72868d23f7a63fa8dd717cce291a3b3ade601584f680ee5aa12e562675370ee9",
+    "aerosol/OPAC/refractive_indices/waso50_refr.dat": "3e1b050618e58d43296a104c82ebac1bc8e9f326d50ba759eef2a2bf629bcbe3",
+    "aerosol/OPAC/refractive_indices/waso70_refr.dat": "0ca1ba6dd6f4b806a60f9f0e034fbf1e3faf0a88a999ba91b9a5b37aadfdbcf3",
+    "aerosol/OPAC/refractive_indices/waso80_refr.dat": "07cfac17b6fe20159938c65648ea4e83077353a87538db8fc3a4faae4cf46f1c",
+    "aerosol/OPAC/refractive_indices/waso90_refr.dat": "e35dc47948f71d715a6f77920d1cff09a7e1d7f28460a30a9e26294af0a0ce9b",
+    "aerosol/OPAC/refractive_indices/waso95_refr.dat": "e3c8ba03880a6df745a325994e64f1aea5e6b79b00061d913a88b7b4b6cbabf8",
+    "aerosol/OPAC/refractive_indices/waso98_refr.dat": "7dff1e4a64247b9f4e2becd22c71a73d4e5046828371eb4ca5fcae366a2035d7",
+    "aerosol/OPAC/refractive_indices/waso99_refr.dat": "1c9c0f6a7ea5d00dc2b87cd8967b50f489e70bb81e9ca9230d774c8e791d7585",
+    "aerosol/OPAC/size_distr.cfg": "bc7d01041afc8398a60037ffeb95a4f57d281ff6ad4d64fb37d5e5c4aa738307"
+   }
+  }
+ }
 }

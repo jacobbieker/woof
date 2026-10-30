@@ -8,6 +8,9 @@ levels (woof.radtran.model), evaluates the sun at the step's own time
 (woof.core.swint.calendar_scalars + woof.core.solar.solar_geometry_device,
 the per-step zenith cosine WRF's swint uses), solves on the device and
 writes the physics fields RT_EDIR, RT_EDN, RT_EUP, RT_EUP_TOA (and RT_RAD).
+With ``radtran_aerosol`` set it adds OPAC aerosol: the Thompson
+aerosol-aware microphysics' nwfa/nifa (mp_physics = 28) or an OPAC mixture
+(woof.radtran.model).
 No prognostic or other diagnostic word changes.
 
 Restart: rebuilt by initialize_physics from the resumed RunConfig and the
@@ -72,11 +75,15 @@ class RadtranRun:
         qv = cols(atmosphere["qv"], nz)
         rho_dry = cols(atmosphere["rho"], nz) / (1.0 + qv)
         eff = lambda name: (None if getattr(state, name, None) is None else cols(getattr(state, name), nz))
+        aer = {}
+        if self.diag.aerosol == model.AEROSOL_THOMPSON:
+            # Thompson aerosol-aware (mp_physics = 28) number concentrations [kg-1]
+            aer = dict(nwfa=cols(state.nwfa, nz), nifa=cols(state.nifa, nz))
         out = model.compute(
             self.diag, z_w_m=cols(atmosphere["z_interface"], nz + 1), p_w_pa=cols(atmosphere["p_interface"], nz + 1),
             t_mass=cols(atmosphere["temperature"], nz), qv_mass=qv, umu0=mu0, albedo=albedo,
             qc_mass=cols(atmosphere["qc"], nz), qi_mass=cols(atmosphere["qi"], nz), rho_dry=rho_dry,
-            re_cloud_um=eff("effc"), re_ice_um=eff("effi"), day_of_year=day)
+            re_cloud_um=eff("effc"), re_ice_um=eff("effi"), day_of_year=day, **aer)
         ny, nx = self.shape
         for name, key in (("rt_edir", "edir"), ("rt_edn", "edn"), ("rt_eup", "eup"), ("rt_eup_toa", "eup_toa")):
             f[name][...] = cp.asarray(out[key].reshape(-1, ny, nx))

@@ -60,9 +60,15 @@ def test_config_is_off_by_default_and_refuses_what_cannot_run():
                 dict(radtran_wavelengths=(500.0,), radtran_solver="twostr", radtran_umu=(0.5,)),
                 dict(radtran_wavelengths=(500.0,), radtran_umu=(0.0,)),
                 dict(radtran_wavelengths=(500.0,), radtran_mol_abs_param="kato2"),
-                dict(radtran_wavelengths=(500.0,), radtran_streams=7)):
+                dict(radtran_wavelengths=(500.0,), radtran_streams=7),
+                dict(radtran_wavelengths=(500.0,), radtran_aerosol="volcanic"),
+                dict(radtran_wavelengths=(240.0,), radtran_aerosol="urban"),
+                # Thompson aerosol numbers exist only with mp_physics = 28
+                dict(radtran_wavelengths=(500.0,), radtran_aerosol="thompson")):
         with pytest.raises(ConfigurationRefused):
             validate_run_config(dataclasses.replace(cfg, **bad))
+    assert cfg.radtran_aerosol == "none"
+    validate_run_config(dataclasses.replace(cfg, radtran_wavelengths=(500.0,), radtran_aerosol="maritime_clean"))
 
 
 def test_frame_sink_routes_radtran_fields_by_name():
@@ -145,6 +151,36 @@ def test_carrier_words_equal_the_library_on_the_same_columns():
     # the cloudy columns see less direct and more diffuse light at 500 nm
     clear, cloudy = (0, 1), (1, 1)
     assert rt["rt_edir"][0][cloudy] < 0.5 * rt["rt_edir"][0][clear]
+
+
+@requires_gpu
+def test_opac_aerosol_carrier_equals_the_library_and_dims_the_beam():
+    _need_data()
+    from woof.core.physics import _prepare_atmosphere
+    from woof.radtran import model
+    cfg = _cfg(**ON, radtran_aerosol="continental_average")
+    state, driver = _driver(cfg)
+    atmos = _prepare_atmosphere(state)
+    driver.radtran.run(driver, state, cfg, atmos)
+    rt = {k: cp.asnumpy(driver.fields[k]) for k in ("rt_edir", "rt_edn", "rt_rad")}
+    nz = cfg.nz
+    cols = lambda a, n: np.asarray(cp.asnumpy(a), dtype=np.float64).reshape(n, -1).T
+    qv = cols(atmos["qv"], nz)
+    mu0 = driver.radtran.coszen(float(state.elapsed_seconds), "wrf_480").reshape(-1)
+    kw = dict(z_w_m=cols(atmos["z_interface"], nz + 1), p_w_pa=cols(atmos["p_interface"], nz + 1),
+              t_mass=cols(atmos["temperature"], nz), qv_mass=qv, umu0=mu0,
+              albedo=np.clip(cp.asnumpy(driver.fields["albedo"]).reshape(-1), 0, 1),
+              qc_mass=cols(atmos["qc"], nz), qi_mass=cols(atmos["qi"], nz),
+              rho_dry=cols(atmos["rho"], nz) / (1 + qv), day_of_year=START.timetuple().tm_yday, backend="host")
+    ref = model.compute(driver.radtran.diag, **kw)
+    clean = model.compute(dataclasses.replace(driver.radtran.diag, aerosol="none"), **kw)
+    ny, nx = cfg.ny, cfg.nx
+    assert np.array_equal(rt["rt_edir"], np.float32(ref["edir"].reshape(-1, ny, nx)))
+    assert np.array_equal(rt["rt_edn"], np.float32(ref["edn"].reshape(-1, ny, nx)))
+    assert np.array_equal(rt["rt_rad"], np.float32(ref["rad"].reshape(2, 4, ny, nx)))
+    # continental aerosol (tau ~ 0.2 at 500 nm) dims the beam everywhere and adds
+    # diffuse light under clear sky (column 0)
+    assert np.all(ref["edir"] < clean["edir"]) and np.all(ref["edn"][:, 0] > clean["edn"][:, 0])
 
 
 @requires_gpu

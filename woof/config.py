@@ -1917,6 +1917,11 @@ class RunConfig:
     # cadence (WRF's driver republishes them every step under this switch).
     # Appended last, keyword-only.
     solar_diagnostics: int = 0
+    #: OPAC aerosol in the radtran diagnostic: "none" (off), "thompson" (the
+    #: aerosol-aware Thompson microphysics' nwfa/nifa as OPAC water-soluble and
+    #: mineral aerosol; mp_physics = 28) or an OPAC mixture ("continental_average",
+    #: "maritime_clean", "urban", ...; woof.radtran.model.AEROSOL_CHOICES)
+    radtran_aerosol: str = "none"
 
 #: The ways a domain's clock meets the measured terrain rules
 #: (:attr:`RunConfig.terrain_clock`).
@@ -6862,6 +6867,10 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
             _radtran_validate(diagnostic_from_config(cfg))
         except (TypeError, ValueError) as exc:
             raise ConfigurationRefused(f"radtran: {exc}") from None
+        if cfg.radtran_aerosol == "thompson" and cfg.mp_physics != 28:
+            raise ConfigurationRefused(
+                "radtran_aerosol = \"thompson\" reads the aerosol-aware Thompson microphysics' "
+                f"nwfa/nifa (mp_physics = 28); this run has mp_physics = {cfg.mp_physics}")
     why = terrain_drag_refusal(
         topo_wind=cfg.topo_wind, gwd_opt=cfg.gwd_opt,
         bl_pbl_physics=cfg.bl_pbl_physics,

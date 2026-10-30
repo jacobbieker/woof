@@ -413,6 +413,8 @@ class DriverConfig:
             result["radtran"] = dict(wavelengths=list(d.wavelengths), umu=list(d.umu), phi=list(d.phi),
                                      mol_abs_param=d.mol_abs_param, solver=d.solver, streams=d.streams,
                                      pseudospherical=d.pseudospherical)
+            if d.aerosol != "none":
+                result["radtran"]["aerosol"] = d.aerosol
         if self.solar_diagnostics:
             result["solar_diagnostics"] = True
         return result

@@ -1,0 +1,99 @@
+{
+ "case": "opac_maritime_1600_rh90",
+ "options": {
+  "wavelength": [
+   1600.0,
+   1603.0
+  ],
+  "mol_abs_param": "reptran coarse",
+  "rte_solver": "disort",
+  "number_of_streams": 8,
+  "sza": 30.0,
+  "phi0": 0.0,
+  "umu": [],
+  "phi": [],
+  "albedo": 0.2,
+  "pseudospherical": false,
+  "earth_radius": 6370.0,
+  "deltam": null,
+  "disort_intcor": "off",
+  "zout": [
+   "sur",
+   "toa"
+  ],
+  "output_quantity": "irradiance",
+  "day_of_year": null,
+  "atmosphere_file": "us",
+  "wc_file": null,
+  "wc_properties": "hu",
+  "ic_file": null,
+  "ic_properties": "fu",
+  "ic_fu_reff_def": false,
+  "no_absorption": false,
+  "no_scattering": false
+ },
+ "inputs_sha256": "c8d0c3a27db7714b102ffedd860dcef2ce95c58c736f3b4d66b91d06accc7004",
+ "aerosol": {
+  "species": [
+   "inso",
+   "waso",
+   "soot",
+   "ssam",
+   "sscm",
+   "suso"
+  ],
+  "library": "woof",
+  "library_sha256": {
+   "inso": "5af60bd24fd2a87dae9dec7bfc2cbe99a6ddda1e6aabd2fbdae79599571da0bf",
+   "waso": "e4ab0d5e654b4497b839f36ef6f0e42ce79642c455532c4820a62cc132a122ae",
+   "soot": "72db1a9feccb0a3137214484d1c5c6ff45c4d2cf91b812ec8b161244f8eee009",
+   "ssam": "f03cd2553df06cd860af6063bfc47bc2fb53bba840afc80a46576e16f9f44121",
+   "sscm": "95a6801a9986b80f690ea6facc980fc6e345c3deb461735edf6304d9e4520974",
+   "suso": "4f396d43f57b81e69d45188d57d599d156c1fbf92a3f3b78e07143b644e00dcd"
+  },
+  "library_tool": "woof.radtran.aerosol",
+  "library_package": null
+ },
+ "uvspec_input": "data_files_path <libRadtran data>\natmosphere_file <run dir>/atm.dat\nsource solar\nmol_abs_param reptran coarse\nwavelength 1600.0 1603.0\nrte_solver disort\nnumber_of_streams 8\nsza 30.0\nphi0 0.0\nalbedo 0.2\ndisort_intcor off\nzout sur toa\nmol_file CH4 <run dir>/CH4.vmr vmr\nmol_file N2O <run dir>/N2O.vmr vmr\nmol_file CO <run dir>/CO.vmr vmr\nmol_file N2 <run dir>/N2.vmr vmr\naerosol_default\naerosol_species_file <run dir>/aer.dat inso waso soot ssam sscm suso\naerosol_species_library <OPAC library>/\nquiet\n",
+ "uvspec": {
+  "lambda": [
+   1601.925
+  ],
+  "edir": [
+   [
+    175.9612,
+    205.8216
+   ]
+  ],
+  "edn": [
+   [
+    17.68765,
+    3.362999e-11
+   ]
+  ],
+  "eup": [
+   [
+    38.72977,
+    36.07324
+   ]
+  ],
+  "uavgdir": [
+   [
+    16.40864,
+    18.91256
+   ]
+  ],
+  "uavgdn": [
+   [
+    2.308247,
+    5.810493e-12
+   ]
+  ],
+  "uavgup": [
+   [
+    6.164033,
+    5.412807
+   ]
+  ]
+ }
+}

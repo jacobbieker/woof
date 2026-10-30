@@ -10,6 +10,8 @@ never a native config) carries
     config_radtran_solver           = 'disort' | 'twostr'
     config_radtran_streams          = 0            (6, or 16 with radiances)
     config_radtran_pseudospherical  = .false.
+    config_radtran_aerosol          = 'none' | 'thompson' | an OPAC mixture
+                                      (woof.radtran.model.AEROSOL_CHOICES)
 
 (:func:`resolve`).  With wavelengths set, the Registry gains (only in this run's
 parsed tree, :func:`extend_registry`) the dimensions nRadtranWavelengths and
@@ -40,7 +42,7 @@ GROUP = "radtran"
 PREFIX = "config_radtran_"
 OPTIONS = ("config_radtran_wavelengths", "config_radtran_umu", "config_radtran_phi",
            "config_radtran_mol_abs_param", "config_radtran_solver", "config_radtran_streams",
-           "config_radtran_pseudospherical")
+           "config_radtran_pseudospherical", "config_radtran_aerosol")
 PACKAGE = "radtran_diag"
 FLUX_FIELDS = ("rt_edir", "rt_edn", "rt_eup", "rt_eup_toa")
 WAVELENGTH_FIELDS = ("rt_wavelength", "rt_band_min", "rt_band_max")
@@ -120,7 +122,8 @@ def resolve(groups: Mapping[str, Mapping[str, Any]]):
         phi=_floats("config_radtran_phi", supplied.get("config_radtran_phi", "")),
         mol_abs_param=str(supplied.get("config_radtran_mol_abs_param", "reptran coarse")).strip(),
         solver=str(supplied.get("config_radtran_solver", "disort")).strip(),
-        streams=int(streams), pseudospherical=pseudo)
+        streams=int(streams), pseudospherical=pseudo,
+        aerosol=str(supplied.get("config_radtran_aerosol", "none")).strip())
     model.validate(diag)
     return diag
 
@@ -198,6 +201,12 @@ class RadtranOutput:
         self.diag = session.config.radtran
         self.calls = 0
         self.last_time = None
+        if self.diag.aerosol == "thompson":
+            idx = session.layout.indices
+            if any(idx.get(("state", k), -1) <= 0 for k in ("index_nwfa", "index_nifa")):
+                raise ValueError("config_radtran_aerosol = 'thompson' needs the aerosol-aware Thompson "
+                                 "microphysics (config_microp_scheme = 'mp_thompson_aerosols'): "
+                                 "this run carries no nwfa/nifa")
 
     def wanted(self, streams, packages) -> bool:
         names = set(field_names(self.diag))
@@ -224,6 +233,9 @@ class RadtranOutput:
         q = lambda key: (scal[layout.indices["state", key] - 1]
                          if ("state", key) in layout.indices and layout.indices["state", key] > 0 else None)
         qv, qc, qi = q("index_qv"), q("index_qc"), q("index_qi")
+        aer = {}
+        if self.diag.aerosol == "thompson":
+            aer = dict(nwfa=q("index_nwfa").T, nifa=q("index_nifa").T)
         n = p.shape[-1]
         zgrid = zgrid[:, :n]
         t = theta * exner
@@ -245,7 +257,7 @@ class RadtranOutput:
                             umu0=mu0, albedo=albedo,
                             qc_mass=None if qc is None else qc.T, qi_mass=None if qi is None else qi.T,
                             rho_dry=rho.T, re_cloud_um=eff("re_cloud"), re_ice_um=eff("re_ice"),
-                            day_of_year=int(when.timetuple().tm_yday))
+                            day_of_year=int(when.timetuple().tm_yday), **aer)
         for name in FLUX_FIELDS:
             self._put(name, out[name[3:]])
         self._put("rt_wavelength", out["wavelength"])

@@ -2688,8 +2688,11 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # WRF-Solar FARMS and the clean-room spectral solver, RTX A6000 sm_86,
     # NVRTC 12.9.86, 2026-10-30, default and strict loaders: farms_columns
     # and farms_mpas_coszen read 0 B; radtran_disort carries its binary64
-    # stream/layer work arrays (30,432 B), radtran_work_size 0 B.
-    "farms": 0, "radtran_disort": 30432,
+    # stream/layer work arrays (30,432 B), radtran_work_size 0 B.  Re-read
+    # on radtran-opac (same box, NVRTC, both loaders) after the body became
+    # rt_problem: radtran_disort and radtran_disort_modes 30,448 B,
+    # radtran_disort_finish 30,432 B, radtran_work_size 0 B.
+    "farms": 0, "radtran_disort": 30448,
     # Deng shallow cumulus (shcu_physics = 5), same card and day, both
     # loaders: deng_shcu_column 504 B, deng_shcu_mpas_column 496 B, the
     # three MPAS glue kernels 0 B.

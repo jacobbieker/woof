@@ -3968,7 +3968,7 @@ _DIAGNOSTIC_ON = {"rrtmg_spectral_output": "bands",
                   "radtran_wavelengths": (550.0,), "radtran_interval_s": 1800.0,
                   "radtran_umu": (0.5,), "radtran_phi": (90.0,),
                   "radtran_mol_abs_param": "reptran medium", "radtran_solver": "twostr",
-                  "radtran_streams": 8}
+                  "radtran_streams": 8, "radtran_aerosol": "continental_average"}
 
 
 def _diagnostic_on(name):

@@ -19,6 +19,11 @@ TMS = 8
 MAX_STREAMS = 32
 MAX_UMU = 32
 _TPB = 64
+#: Mode-parallel radiances up to this many threads.  Measured on Apple M-series
+#: Metal (soft-float binary64), 16 streams, 30 layers, TMS: one thread per
+#: problem takes ~7 s for 64-1024 problems (latency bound); modes over
+#: threads take 1.4 s (64), 2.4 s (128), 3.7 s (256), 5.5 s (512), 11.6 s (1024).
+MODE_THREADS = 8192
 
 
 def work_size(nlyr: int, nstr: int) -> int:
@@ -77,18 +82,35 @@ def solve(*, nstr, flags, dtau, ssa, pmom, umu0, fbeam, albedo, zlev=None, radiu
     d_umu = cp.asarray(np.asarray(umu if numu else [1.0], dtype=np.float64))
     d_phi = cp.asarray(np.asarray(phi if nphi else [0.0], dtype=np.float64))
     d_pt = cp.asarray(np.zeros(1) if ptrue is None else np.ascontiguousarray(ptrue, dtype=np.float64))
-    work = cp.zeros(wstride * chunk, dtype=cp.float64)
     flux = cp.zeros((nprob, nout, 6), dtype=cp.float64)
     rad = cp.zeros((nprob, nout, max(numu, 1), max(nphi, 1)), dtype=cp.float64)
-    kern = get_kernel("radtran_disort", "radtran_disort")
-    for p0 in range(0, nprob, chunk):
-        n = min(chunk, nprob - p0)
-        blocks = (n + _TPB - 1) // _TPB
-        kern((blocks,), (_TPB,), (
-            np.int32(p0), np.int32(p0 + n), np.int32(nlyr), np.int32(nmom), np.int32(nstr),
-            np.int32(flags), d["dtau"], d["ssa"], d["pmom"], d["umu0"], d["fbeam"], d["albedo"],
-            d["zlev"], np.float64(radius), np.int32(nout), d_out, np.int32(numu), d_umu,
-            np.int32(nphi), d_phi, d_pt, work, np.int64(wstride), flux, rad))
+    common = lambda p0, n: (np.int32(p0), np.int32(p0 + n), np.int32(nlyr), np.int32(nmom), np.int32(nstr),
+                            np.int32(flags), d["dtau"], d["ssa"], d["pmom"], d["umu0"], d["fbeam"],
+                            d["albedo"], d["zlev"], np.float64(radius), np.int32(nout), d_out, np.int32(numu),
+                            d_umu, np.int32(nphi), d_phi, d_pt)
+    if numu > 0 and not (flags & TWOSTREAM) and nprob * n_str <= MODE_THREADS:
+        # radiances on few problems: the Fourier modes on separate threads
+        # (radtran_disort_modes), then the partials summed in mode order and TMS
+        # (radtran_disort_finish); the same words as one thread per problem,
+        # with nstr times the parallelism
+        nmodes = n_str
+        chunk = max(1, min(nprob, budget_bytes // (8 * wstride * nmodes)))
+        work = cp.zeros(wstride * chunk * nmodes, dtype=cp.float64)
+        radm = cp.zeros(chunk * nmodes * nout * numu * nphi, dtype=cp.float64)
+        kmodes = get_kernel("radtran_disort", "radtran_disort_modes")
+        kfin = get_kernel("radtran_disort", "radtran_disort_finish")
+        for p0 in range(0, nprob, chunk):
+            n = min(chunk, nprob - p0)
+            kmodes(((n * nmodes + _TPB - 1) // _TPB,), (_TPB,),
+                   common(p0, n) + (work, np.int64(wstride), flux, np.int32(nmodes), radm))
+            kfin(((n + _TPB - 1) // _TPB,), (_TPB,),
+                 common(p0, n) + (work, np.int64(wstride), rad, np.int32(nmodes), radm))
+    else:
+        work = cp.zeros(wstride * chunk, dtype=cp.float64)
+        kern = get_kernel("radtran_disort", "radtran_disort")
+        for p0 in range(0, nprob, chunk):
+            n = min(chunk, nprob - p0)
+            kern(((n + _TPB - 1) // _TPB,), (_TPB,), common(p0, n) + (work, np.int64(wstride), flux, rad))
     flux_h = cp.asnumpy(flux)
     rad_h = cp.asnumpy(rad)[:, :, :numu, :nphi]
     return flux_h, rad_h

@@ -2706,7 +2706,9 @@ _DIGEST_DROPPED_DIAGNOSTIC_FIELDS = frozenset(
      "radtran_streams",
      "radtran_pseudospherical",
      # WRF-Solar diagnostics: output-only; no earlier digest carried it.
-     "solar_diagnostics"})
+     "solar_diagnostics",
+     # woof.radtran OPAC aerosol: output-only; no earlier digest carried it.
+     "radtran_aerosol"})
 
 
 #: WRF's slope_rad / topo_shading / shadlen (woof.core.topo_radiation),
@@ -2890,7 +2892,7 @@ def _drop_default_off_run_keys(values: dict) -> None:
                          ("radtran_umu", ()), ("radtran_phi", ()),
                          ("radtran_mol_abs_param", "reptran coarse"),
                          ("radtran_solver", "disort"), ("radtran_streams", 0),
-                         ("radtran_pseudospherical", False)):
+                         ("radtran_pseudospherical", False), ("radtran_aerosol", "none")):
         value = values.get(key, default)
         if isinstance(value, list):
             value = tuple(value)

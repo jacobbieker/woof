@@ -38,6 +38,12 @@
 #define RT_TWOSTREAM 4
 #define RT_TMS 8
 
+// parts of a problem a call computes (rt_problem)
+#define RT_PART_FLUX 1      // zero and write the fluxes (they come from Fourier mode 0)
+#define RT_PART_RADZERO 2   // zero the radiance destination first
+#define RT_PART_TMS 4       // add the TMS single-scattering correction after the modes
+#define RT_PART_ALL 7
+
 #define RT_DITHER 1e-9
 
 __device__ __forceinline__ double rt_exp(double x) { return glibc_exp(x); }
@@ -258,20 +264,24 @@ extern "C" __global__ void radtran_work_size(int nlyr, int N, int nstr, long lon
     if (threadIdx.x == 0 && blockIdx.x == 0) out[0] = (long long)rt_work_size(nlyr, N, nstr);
 }
 
-extern "C" __global__ void radtran_disort(
-    int prob0, int nprob, int nlyr, int nmom, int nstr, int flags,
+// One problem (a column at one wavelength): Fourier modes m_first..m_last
+// (clipped to the problem's own highest mode) and the parts in ``part``.
+// ``flux`` and ``rad`` are this problem's output rows; ``wk`` its workspace.
+// The whole problem in one call (radtran_disort) and the modes split over
+// threads then summed in mode order (radtran_disort_modes + _finish) give
+// the same words: every radiance slot receives exactly one addition per
+// mode, so the per-mode partials summed from 0.0 in mode order repeat the
+// single thread's additions.
+__device__ void rt_problem(
+    int prob, double *wk, int m_first, int m_last, int part,
+    int nlyr, int nmom, int nstr, int flags,
     const double *dtau_in, const double *ssa_in, const double *pmom_in,
     const double *umu0_in, const double *fbeam_in, const double *albedo_in,
     const double *zlev_in, double radius,
     int nout, const int *outlev,
     int numu, const double *umu_in, int nphi, const double *phi_in,
-    const double *ptrue_in,
-    double *work, long long wstride,
-    double *flux_out, double *rad_out)
+    const double *ptrue_in, double *flux, double *rad)
 {
-    const int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    const int prob = prob0 + tid;
-    if (prob >= nprob) return;
     const int twostream = (flags & RT_TWOSTREAM) != 0;
     if (twostream) nstr = 2;
     const int N = nstr / 2;
@@ -283,7 +293,6 @@ extern "C" __global__ void radtran_disort(
     const double *ssa = ssa_in + (long)prob * L;
     const double *pmom = pmom_in + (long)prob * L * (nmom + 1);
 
-    double *wk = work + (long)tid * wstride;
     double *dtaus = wk;              // L   scaled optical depth
     double *ssas = dtaus + L;        // L   scaled single-scattering albedo
     double *fz = ssas + L;           // L   delta-M truncation fraction
@@ -372,10 +381,10 @@ extern "C" __global__ void radtran_disort(
     }
 
     // outputs
-    double *flux = flux_out + (long)prob * nout * 6;
-    double *rad = rad_out + (long)prob * nout * numu * nphi;
-    for (int o = 0; o < nout * 6; ++o) flux[o] = 0.0;
-    for (int o = 0; o < nout * numu * nphi; ++o) rad[o] = 0.0;
+    if (part & RT_PART_FLUX)
+        for (int o = 0; o < nout * 6; ++o) flux[o] = 0.0;
+    if (part & RT_PART_RADZERO)
+        for (int o = 0; o < nout * numu * nphi; ++o) rad[o] = 0.0;
 
     const int mmax = (numu > 0 && !twostream) ? nstr - 1 : 0;
     double lq[RT_MAXSTR * RT_MAXN];      // Lambda_l^m(mu_i): [l][i]
@@ -383,7 +392,7 @@ extern "C" __global__ void radtran_disort(
     double tmp[RT_MAXSTR];
     double sg[RT_MAXSTR];
 
-    for (int m = 0; m <= mmax; ++m) {
+    for (int m = m_first; m <= mmax && m <= m_last; ++m) {
         for (int i = 0; i < N; ++i) {
             rt_lambda(m, nstr - 1, mu[i], tmp);
             for (int l = 0; l < nstr; ++l) lq[l * N + i] = tmp[l];
@@ -580,7 +589,7 @@ extern "C" __global__ void radtran_disort(
         rt_band_solve(nun, ml, mub, ab, piv, rhs);
 
         // ---- fluxes at the output levels (m = 0) ----
-        if (m == 0) {
+        if (m == 0 && (part & RT_PART_FLUX)) {
             for (int o = 0; o < nout; ++o) {
                 int k = outlev[o];
                 int n = k < L ? k : L - 1;
@@ -738,7 +747,7 @@ extern "C" __global__ void radtran_disort(
     }
 
     // ---- TMS (Nakajima & Tanaka 1988): exact single scattering after delta-M ----
-    if ((flags & RT_TMS) && deltam && numu > 0 && !twostream) {
+    if ((part & RT_PART_TMS) && (flags & RT_TMS) && deltam && numu > 0 && !twostream) {
         const double *ptrue = ptrue_in + (long)prob * L * numu * nphi;
         for (int iu = 0; iu < numu; ++iu) {
             const double u = umu_in[iu];
@@ -781,4 +790,77 @@ extern "C" __global__ void radtran_disort(
             }
         }
     }
+}
+
+#define RT_ARGS nlyr, nmom, nstr, flags, dtau_in, ssa_in, pmom_in, umu0_in, fbeam_in, albedo_in, \
+    zlev_in, radius, nout, outlev, numu, umu_in, nphi, phi_in, ptrue_in
+
+// One thread per problem: every mode, the fluxes and TMS.
+extern "C" __global__ void radtran_disort(
+    int prob0, int nprob, int nlyr, int nmom, int nstr, int flags,
+    const double *dtau_in, const double *ssa_in, const double *pmom_in,
+    const double *umu0_in, const double *fbeam_in, const double *albedo_in,
+    const double *zlev_in, double radius,
+    int nout, const int *outlev,
+    int numu, const double *umu_in, int nphi, const double *phi_in,
+    const double *ptrue_in,
+    double *work, long long wstride,
+    double *flux_out, double *rad_out)
+{
+    const int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    const int prob = prob0 + tid;
+    if (prob >= nprob) return;
+    rt_problem(prob, work + (long)tid * wstride, 0, RT_MAXSTR, RT_PART_ALL, RT_ARGS,
+               flux_out + (long)prob * nout * 6, rad_out + (long)prob * nout * numu * nphi);
+}
+
+// Radiances with the Fourier modes spread over threads: thread
+// (problem p, mode m), p counted from prob0, writes mode m's radiance
+// partials to radm[(p * nmodes + m) * nout * numu * nphi ...] and, for m = 0,
+// the fluxes.  radtran_disort_finish then sums the partials in mode order
+// and adds TMS.  Same words as radtran_disort.
+extern "C" __global__ void radtran_disort_modes(
+    int prob0, int nprob, int nlyr, int nmom, int nstr, int flags,
+    const double *dtau_in, const double *ssa_in, const double *pmom_in,
+    const double *umu0_in, const double *fbeam_in, const double *albedo_in,
+    const double *zlev_in, double radius,
+    int nout, const int *outlev,
+    int numu, const double *umu_in, int nphi, const double *phi_in,
+    const double *ptrue_in,
+    double *work, long long wstride,
+    double *flux_out, int nmodes, double *radm)
+{
+    const int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    const int p = tid / nmodes;
+    const int m = tid - p * nmodes;
+    const int prob = prob0 + p;
+    if (prob >= nprob) return;
+    const long sz = (long)nout * numu * nphi;
+    rt_problem(prob, work + (long)tid * wstride, m, m,
+               (m == 0 ? RT_PART_FLUX : 0) | RT_PART_RADZERO, RT_ARGS,
+               flux_out + (long)prob * nout * 6, radm + (long)tid * sz);
+}
+
+extern "C" __global__ void radtran_disort_finish(
+    int prob0, int nprob, int nlyr, int nmom, int nstr, int flags,
+    const double *dtau_in, const double *ssa_in, const double *pmom_in,
+    const double *umu0_in, const double *fbeam_in, const double *albedo_in,
+    const double *zlev_in, double radius,
+    int nout, const int *outlev,
+    int numu, const double *umu_in, int nphi, const double *phi_in,
+    const double *ptrue_in,
+    double *work, long long wstride,
+    double *rad_out, int nmodes, const double *radm)
+{
+    const int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    const int prob = prob0 + tid;
+    if (prob >= nprob) return;
+    const long sz = (long)nout * numu * nphi;
+    double *rad = rad_out + (long)prob * sz;
+    for (long o = 0; o < sz; ++o) rad[o] = 0.0;
+    for (int m = 0; m < nmodes; ++m) {
+        const double *part = radm + ((long)tid * nmodes + m) * sz;
+        for (long o = 0; o < sz; ++o) rad[o] += part[o];
+    }
+    rt_problem(prob, work + (long)tid * wstride, 1, 0, RT_PART_TMS, RT_ARGS, rad, rad);
 }
