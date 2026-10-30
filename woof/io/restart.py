@@ -977,6 +977,9 @@ REBUILT_SCRATCH_PREFIXES = (
     "rk_", "adv_", "smag_", "diff_", "diff6_", "acoustic_", "openbc_",
     "moist_", "pd_", "morr_", "wsm3_", "wsm6_", "wsm6r_", "wdm6_", "mpcol_", "refl_", "physics_", "lbc_",
     "integration_health_", "nest_",
+    # The partial-depth nest's mass-budget residual (partial_nest_run.py),
+    # rewritten by every forcing call before it is read.
+    "partial_nest_",
     # The monotonic chem stage's workspace (woof/core/chem_context.py
     # MONO_SCRATCH_SLOTS, rewritten by every launch before it is read) and
     # its zero implicit vertical flux (MONO_IMPLICIT_SLOT, allocated zero
