@@ -5962,8 +5962,8 @@ def test_the_recorded_local_frames_match_the_driver():
     from woof.certify import compile_platform
 
     cp = pytest.importorskip("cupy")
-    from woof import backend
-    if backend.active() != "cuda":
+    from conftest import _nvrtc_frames_measurable
+    if not _nvrtc_frames_measurable():
         # NVRTC local frames and cudaLimitStackSize are CUDA quantities: on
         # Metal the frame is the MSL compiler's and there is no stack limit,
         # so the recorded table has nothing to be compared against there.

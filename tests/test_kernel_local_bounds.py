@@ -40,7 +40,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from conftest import requires_gpu
+from conftest import requires_gpu, requires_nvrtc_frames
 
 from woof.core import preflight as pf
 
@@ -78,6 +78,7 @@ def test_thompson_selected_shallow_frames_bound_the_production_exports():
         assert max(measured.values()) <= bound, measured
 
 
+@requires_nvrtc_frames
 def test_the_specialized_frames_are_what_preflight_prices():
     """Every row of the pricing model, read back off the driver."""
     from woof.core.kernels import get_kernel, get_kernel_int_defines
@@ -125,6 +126,7 @@ def test_the_microphysics_workspace_kernels_hold_no_column_on_the_stack(module):
     assert not hasattr(pf, f"{module.upper()}_TIER_FRAME")
 
 
+@requires_nvrtc_frames
 def test_the_sase_tier_frame_is_what_the_driver_reports_at_every_rung():
     """SASE compiles ``SASE_KMAX`` per run at 32 / 64 / 128 / 256.
 
@@ -165,6 +167,7 @@ def test_the_sase_tier_frame_is_what_the_driver_reports_at_every_rung():
         assert widest(module) == spec.frame_bytes(tier) == 49 * tier, tier
 
 
+@requires_nvrtc_frames
 def test_the_unspecialized_source_still_compiles_to_the_recorded_ceiling():
     """The ``#ifndef`` guard must not move the default.  If it did, every
     historical measurement priced against ``KERNEL_MAX_LOCAL_SIZE_BYTES``
@@ -375,6 +378,7 @@ def test_the_ceiling_is_still_refused_above_the_compiled_bound():
 _WPHI_SYMBOLS = ("advance_w_phi", "advance_w_phi_msf")
 
 
+@requires_nvrtc_frames
 def test_the_acoustic_tier_frames_are_what_preflight_prices():
     """De-provisionalizes ``preflight.ACOUSTIC_TIER_FRAME``.
 
@@ -398,6 +402,7 @@ def test_the_acoustic_tier_frames_are_what_preflight_prices():
         assert max(frames.values()) == spec.frame_bytes(tier), (tier, frames)
 
 
+@requires_nvrtc_frames
 def test_the_unspecialized_acoustic_source_still_compiles_to_its_row():
     """The ``#ifndef`` guard must not move the shipped tier's frame."""
     from woof.core.kernels import get_kernel
@@ -428,6 +433,7 @@ def _w_phi_bytes(kernel, seed, nz):
                  for name in ("w_pp", "ph_pp", "p_pp", "al_pp"))
 
 
+@requires_nvrtc_frames
 def test_a_deeper_acoustic_tier_moves_no_bits_below_the_ceiling():
     """AC-P2.2's tier-equivalence half, measured rather than asserted.
 
@@ -459,6 +465,7 @@ def test_the_acoustic_ceiling_is_still_refused_above_the_top_tier():
 # RTE+RRTMGP: compiled to each call's radiation layer count
 # ---------------------------------------------------------------------------
 
+@requires_nvrtc_frames
 def test_the_rrtmgp_rte_layer_frames_are_what_preflight_prices():
     """``preflight.rrtmgp_rte_frame_bytes`` against the driver, past 128.
 

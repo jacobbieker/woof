@@ -94,6 +94,22 @@ HAS_GPU = has_gpu()
 requires_gpu = pytest.mark.skipif(not HAS_GPU, reason="no CUDA GPU / cupy")
 
 
+def _nvrtc_frames_measurable() -> bool:
+    try:
+        from woof import backend
+        return HAS_GPU and backend.active() == "cuda"
+    except Exception:
+        return False
+
+
+#: NVRTC local frames (``local_size_bytes``) and the CUDA stack limit exist
+#: only on CUDA; the Metal facade reports 0, so a frame assertion has
+#: nothing to compare there.
+requires_nvrtc_frames = pytest.mark.skipif(
+    not _nvrtc_frames_measurable(),
+    reason="NVRTC local frames are measured on CUDA only")
+
+
 def _is_cupy_import(node: ast.AST) -> bool:
     """Whether this single node imports cupy, however it is spelled."""
     if isinstance(node, ast.Import):

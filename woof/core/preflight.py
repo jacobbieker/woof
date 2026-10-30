@@ -2229,7 +2229,9 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # 40,800-column step fell from 3,288 MiB to 58 MiB.  The same source
     # reads 4,496 B on an RTX 4090 (sm_89, NVRTC 13.4.92, 2026-10-22), the
     # ceiling: priced at 1,240 B a 4090 lake run was under-charged 0.6 GiB.
-    "lake": 4496,
+    # The RTX A6000 (sm_86, NVRTC 12.9.86) reads 4,528 B (2026-10-30), now
+    # the ceiling.
+    "lake": 4528,
     # Test-only math grading unit, read on sm_89 and sm_120, NVRTC 13.4.59.
     "portable_libm64_grade": 48,
     # Added with this box's recording at 0 B. 'ntiedtke' is what

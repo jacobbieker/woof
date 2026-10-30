@@ -713,6 +713,11 @@ SM86_NVRTC_12_9_86 = KernelFrameRecording(
         # frames): 0 B -- WOOF 1.1.x moved KF's column arrays into the
         # global KFWS workspace, so no array is stack-resident any more.
         'kf': 0,
+        # Read 2026-10-30 on the RTX A6000 (tools/vram_reserve_probe.py
+        # frames): the arena-backed lake step compiles 32 B wider on sm_86
+        # at NVRTC 12.9.86 than the RTX 4090's 4,496 B, so this is the
+        # ceiling.
+        'lake': 4528,
         'milbrandt2': 2048,
         # Read 2026-10-12 at the column-workspace source (kernels/myjpbl.cu
         # / myjurb.cu headers) on an RTX A6000 -- the same platform key,
