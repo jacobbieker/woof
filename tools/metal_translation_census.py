@@ -15,6 +15,17 @@ Failures are grouped by a normalised message so the most common construct
 is fixed first.  ``--retain`` translates with subnormal retention (``f32s``)
 as GPUWM_WRF_EXACT=1 would.  Writes JSON (``--out``) and prints a summary.
 
+Results are cached in ``--out`` (JSON lines) under a *toolchain
+fingerprint*: the bytes of the translator, the Metal loader and headers,
+and every kernel source.  A cached result whose fingerprint differs is
+stale and the unit runs again, so the census reports the tree it runs in.
+(It once kept results from before goto and writable globals were
+translated, and listed goddard and lin as refused after both compiled.)
+``source_error`` units are composed with companion headers by their own
+loaders (``woof.core.p3_device`` ...); they are counted apart from the
+standalone units.  ``timeout`` is no result in ``--timeout`` seconds, not a
+failure: rerun those units alone with ``--only``.
+
 Usage::
 
     pixi run -e mlx python tools/metal_translation_census.py --jobs 8 \
@@ -54,6 +65,27 @@ def composed_units() -> list[str]:
         if re.search(r"^def module_source\(", text, re.M) and re.search(r"^MODULE_OPTIONS\b", text, re.M):
             out.append(f"composed:{path.stem}")
     return out
+
+
+def fingerprint() -> str:
+    """sha256 over what decides a unit's class: the translator, the Metal
+    loader/launcher and headers, and every kernel source."""
+    import hashlib
+    h = hashlib.sha256()
+    roots = [ROOT / "woof" / "backend" / "translate", ROOT / "woof" / "backend" / "metal",
+             ROOT / "woof" / "core" / "kernels", ROOT / "woof" / "numerics.py",
+             ROOT / "woof" / "wrf_exact.py", Path(__file__).resolve()]
+    files = []
+    for root in roots:
+        if root.is_file():
+            files.append(root)
+        elif root.is_dir():
+            files += [p for p in root.rglob("*") if p.is_file() and "__pycache__" not in p.parts
+                      and p.suffix in (".py", ".h", ".cuh", ".cu", ".cpp", ".mm", ".m", ".json", ".txt")]
+    for path in sorted(files):
+        h.update(str(path.relative_to(ROOT)).encode())
+        h.update(path.read_bytes())
+    return h.hexdigest()[:16]
 
 
 def _normalise(message: str) -> str:
@@ -123,7 +155,7 @@ def main(argv=None) -> int:
     parser.add_argument("--retain", action="store_true", help="translate as GPUWM_WRF_EXACT=1")
     parser.add_argument("--only", nargs="*", help="unit names to check")
     parser.add_argument("--one", help=argparse.SUPPRESS)
-    parser.add_argument("--timeout", type=float, default=600.0, help="seconds per unit")
+    parser.add_argument("--timeout", type=float, default=1800.0, help="seconds per unit")
     parser.add_argument("--out", type=Path, default=Path("/tmp/metal-census.jsonl"),
                         help="JSON lines, appended as units finish; finished units are skipped on rerun")
     parser.add_argument("--fresh", action="store_true", help="ignore results already in --out")
@@ -132,19 +164,30 @@ def main(argv=None) -> int:
         print(json.dumps(census_one(args.one, args.retain)))
         return 0
     done = {}
+    stamp = fingerprint()
+    current = set(units())
+    stale = set()
     if args.out.exists() and not args.fresh:
         for line in args.out.read_text().splitlines():
             if line.strip():
                 r = json.loads(line)
-                if r.get("retain", False) == args.retain:
-                    done[r["unit"]] = r
+                if r.get("retain", False) != args.retain or r["unit"] not in current:
+                    continue
+                if r.get("fingerprint") != stamp:
+                    stale.add(r["unit"])
+                    done.pop(r["unit"], None)
+                    continue
+                done[r["unit"]] = r
     names = [n for n in (args.only or units()) if args.only or n not in done]
+    print(f"toolchain {stamp}: {len(done)} cached, {len(names)} to run"
+          + (f" ({len(stale - set(done))} stale results ignored)" if stale else ""), flush=True)
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=args.jobs) as pool, args.out.open("a") as sink:
         futures = {pool.submit(_run_isolated, n, args.retain, args.timeout): n for n in names}
         for f in as_completed(futures):
             r = f.result()
             r["retain"] = args.retain
+            r["fingerprint"] = stamp
             done[r["unit"]] = r
             sink.write(json.dumps(r) + "\n")
             sink.flush()
@@ -153,6 +196,10 @@ def main(argv=None) -> int:
                      key=lambda r: r["unit"])
     counts = collections.Counter(r["class"] for r in results)
     print(f"\n{len(results)} units: " + ", ".join(f"{k} {v}" for k, v in counts.most_common()))
+    standalone = [r for r in results if r["class"] != "source_error"]
+    print(f"standalone units: {counts['compiled']} of {len(standalone)} compile"
+          + (f" ({counts['timeout']} timed out: rerun with --only)" if counts["timeout"] else "")
+          + f"; {counts['source_error']} are composed by their own loaders")
     groups = collections.defaultdict(list)
     for r in results:
         if r["class"] != "compiled":

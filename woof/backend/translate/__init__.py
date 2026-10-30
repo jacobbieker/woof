@@ -2193,7 +2193,8 @@ class _Rewriter:
                 s, e = self.span(node)
                 self.edits.replace(s, e, "((void)0)")
                 continue
-            if kind == K.DECL_REF_EXPR and node.spelling in ("threadIdx", "blockIdx", "blockDim", "gridDim"):
+            if kind == K.DECL_REF_EXPR and node.spelling in ("threadIdx", "blockIdx", "blockDim", "gridDim") \
+                    and not self._shadows_builtin(node):
                 # Kernels have these as parameters; device functions that
                 # read them receive them (thread_builtins below).
                 s, e = self.span(node)
@@ -2249,7 +2250,9 @@ class _Rewriter:
                         if s < e:
                             spelled = self._spell_type(node.type, drop_const=True)
                             self.edits.wrap(s, e, f"(({spelled})(", "))", d)
-            if kind == K.COMPOUND_ASSIGNMENT_OPERATOR:
+            if self.retain and self.f32s_vector_component(node, d):
+                pass
+            elif kind == K.COMPOUND_ASSIGNMENT_OPERATOR:
                 self.compound_assign(node, d)
             if kind == K.LAMBDA_EXPR:
                 self.lambda_pointer_params(node)
@@ -2427,9 +2430,25 @@ class _Rewriter:
             if inner.kind.name == "UNARY_OPERATOR" and len(list(inner.get_children())) == 1:
                 literal = next(inner.get_children())
             if literal.kind.name != "FLOATING_LITERAL" or literal.type.get_canonical().kind.name != "FLOAT":
-                continue
+                # a constant expression of float literals (`1.f/3000.f`) is
+                # a Metal float too (chem_drydep_wesely's WFloat operators)
+                if not self._float_literal_arithmetic(inner):
+                    continue
             s, e = self.span(inner)
             self.edits.wrap(s, e, "f32s(", ")", 900)
+
+    @staticmethod
+    def _float_literal_arithmetic(node) -> bool:
+        if node.kind.name not in ("BINARY_OPERATOR", "UNARY_OPERATOR"):
+            return False
+        for n in node.walk_preorder():
+            k = n.kind.name
+            if k in ("BINARY_OPERATOR", "UNARY_OPERATOR", "PAREN_EXPR", "UNEXPOSED_EXPR"):
+                if n.type.get_canonical().kind.name != "FLOAT":
+                    return False
+            elif k != "FLOATING_LITERAL" or n.type.get_canonical().kind.name != "FLOAT":
+                return False
+        return True
 
     def const_eval(self, node):
         """Evaluate a constant expression of literals: ("double", float) or
@@ -2584,6 +2603,90 @@ class _Rewriter:
             s, e = self.span(child)
             self.edits.replace(s, e, f"__woof_f64_lit(0x{word:016X}UL)")
 
+    @staticmethod
+    def _shadows_builtin(node) -> bool:
+        """``const dim3 blockIdx(...)`` in a kernel (the ensemble batch
+        adapter's virtual block coordinates) is a local that hides CUDA's
+        builtin: a reference to it stays a reference to the local."""
+        ref = node.referenced
+        if ref is None or ref.kind.name not in ("VAR_DECL", "PARM_DECL"):
+            return False
+        sp = ref.semantic_parent
+        return sp is not None and sp.kind.name in _Rewriter._FUNCTION_KINDS
+
+    @staticmethod
+    def _float_vector_component(node) -> bool:
+        """``v.x`` / ``p->y`` of a CUDA float vector (float1..float4).  Its
+        Metal namesake keeps ``float`` components in a unit whose scalar
+        ``float`` is ``f32s``."""
+        if node.kind.name != "MEMBER_REF_EXPR" or not _is_float(node.type) \
+                or node.spelling not in ("x", "y", "z", "w"):
+            return False
+        kids = list(node.get_children())
+        if len(kids) != 1:
+            return False
+        t = kids[0].type.get_canonical()
+        if t.kind.name == "POINTER":
+            t = t.get_pointee().get_canonical()
+        name = t.spelling.replace("const ", "").replace("volatile ", "").replace("struct ", "").strip()
+        return re.fullmatch(r"float[1-4]", name) is not None
+
+    def f32s_vector_component(self, node, depth) -> bool:
+        """``retain_subnormals``: float vector components stay ``float`` (a
+        Metal vector of f32s does not exist), while the unit's scalar float
+        is ``f32s``, which converts to ``float`` only explicitly.  So
+
+        * a component read as a value is ``f32s(v.x)`` -- arithmetic on it
+          keeps subnormals, as CUDA's --ftz=false does;
+        * ``v.x = e`` stores ``float(e)`` (the same bits);
+        * ``v.x op= e`` is ``v.x = float(f32s(f32s(v.x) op (e)))``;
+        * a vector built by ``make_floatN(...)`` or ``{...}`` takes
+          ``float(e)`` elements.
+
+        Returns True when the node was rewritten as a compound assignment
+        (so the binary64 compound rewrite does not also apply)."""
+        K = self.ci.CursorKind
+        kind = node.kind
+        kids = list(node.get_children())
+        if kind == K.UNEXPOSED_EXPR and len(kids) == 1 and _is_float(node.type) \
+                and self._float_vector_component(kids[0]):
+            s, e = self.span(kids[0])
+            if s < e:
+                self.edits.wrap(s, e, "f32s(", ")", depth + 1)
+            return False
+        if kind in (K.BINARY_OPERATOR, K.COMPOUND_ASSIGNMENT_OPERATOR) and len(kids) == 2 \
+                and self._float_vector_component(kids[0]):
+            lhs, rhs = kids
+            op = next((t.spelling for t in node.get_tokens()
+                       if lhs.extent.end.offset <= t.extent.start.offset < rhs.extent.start.offset), None)
+            rs, re_ = self.span(rhs)
+            if op == "=":
+                self.edits.wrap(rs, re_, "float(", ")", depth + 1)
+                return False
+            if op in ("+=", "-=", "*=", "/="):
+                lhs_text = self.src(lhs)
+                if not re.fullmatch(r"[\w\s\.\[\]\(\)\->+*]*", lhs_text) or "++" in lhs_text or "--" in lhs_text:
+                    self.refuse(node, f"compound assignment to vector component {lhs_text!r} "
+                                      "would evaluate the target twice")
+                self.edits.replace(lhs.extent.end.offset, rs,
+                                   f" = float(f32s(f32s({lhs_text}) {op[0]} (")
+                self.edits.insert(re_, ")))", rank=-depth)
+                return True
+            return False
+        building = False
+        if kind == K.CALL_EXPR and re.fullmatch(r"make_float[1-4]", node.spelling or ""):
+            building, args = True, kids[1:]
+        elif kind == K.INIT_LIST_EXPR:
+            name = node.type.get_canonical().spelling.replace("const ", "").replace("struct ", "").strip()
+            building, args = re.fullmatch(r"float[1-4]", name) is not None, kids
+        if building:
+            for a in args:
+                if _is_float(a.type):
+                    s, e = self.span(a)
+                    if s < e:
+                        self.edits.wrap(s, e, "float(", ")", depth + 1)
+        return False
+
     def compound_assign(self, node, depth):
         children = list(node.get_children())
         if len(children) != 2:
@@ -2606,6 +2709,25 @@ class _Rewriter:
         self.edits.replace(lhs.extent.end.offset, rs, f" = (({spelled})(f64({lhs_text}) {op[0]} (")
         self.edits.insert(re_, ")))", rank=-depth)
 
+    @staticmethod
+    def _volatile_float_value(tokens, i) -> bool:
+        """tokens[i] is `volatile` qualifying a float *value* (not the
+        pointee of a pointer or reference): `volatile [const] float x`."""
+        quals = ("const", "volatile")
+        j = i
+        while j > 0 and tokens[j - 1].spelling in quals:
+            j -= 1
+        k = i + 1
+        while k < len(tokens) and tokens[k].spelling in quals:
+            k += 1
+        if k < len(tokens) and tokens[k].spelling == "float":
+            k += 1
+        elif not (j > 0 and tokens[j - 1].spelling == "float"):
+            return False
+        while k < len(tokens) and tokens[k].spelling in quals:
+            k += 1
+        return k < len(tokens) and tokens[k].kind.name == "IDENTIFIER"
+
     # -- tokens
     def rewrite_tokens(self):
         import clang.cindex as ci
@@ -2619,6 +2741,15 @@ class _Rewriter:
                 continue
             sp = t.spelling
             if t.kind == ci.TokenKind.KEYWORD:
+                if sp == "volatile" and self.retain and self._volatile_float_value(tokens, i):
+                    # `volatile float x` pins a rounding in CUDA (no
+                    # contraction across it).  f32s arithmetic is calls,
+                    # never contracted, and a volatile f32s has no copy
+                    # constructor: the qualifier goes.
+                    if not self._inside_replacement(t.extent.start.offset):
+                        self.edits.replace(t.extent.start.offset, t.extent.end.offset, "")
+                    i += 1
+                    continue
                 if sp == "float" and self.retain:
                     at = t.extent.start.offset
                     if any(a <= at < b for a, b in self._keep_float_ranges):
@@ -2724,6 +2855,35 @@ def option_include_dirs(options) -> tuple[str, ...]:
         elif o.startswith("-I") and len(o) > 2:
             out.append(o[2:])
     return tuple(d for d in out if d)
+
+
+def explicit_float_to_integral(text: str) -> str:
+    """``retain_subnormals`` with inheritance: ``f32s`` converts to the
+    integer types only explicitly, and the translator spells C++'s implicit
+    float -> integer conversions as casts where it sees them.  But
+    :func:`flatten_inheritance` makes every function taking a base class a
+    template, and in that dependent code no conversion is visible (CLM
+    lake's ``snl(c) = snl2d(i,j)``).  So the casts are spelled first, on
+    the unit as written."""
+    import clang.cindex as ci
+    if not re.search(r"\b(struct|class)\s+\w+\s*:\s*(public\s+)?\w", text):
+        return text
+    tu = parse(text)
+    edits = Edits(text.encode())
+    for n in tu.cursor.walk_preorder():
+        if n.kind != ci.CursorKind.UNEXPOSED_EXPR or n.location.file is None \
+                or n.location.file.name != "unit.cpp":
+            continue
+        if n.type.get_canonical().kind.name not in _INTEGRAL_KINDS:
+            continue
+        kids = list(n.get_children())
+        if len(kids) != 1 or not _is_float(kids[0].type):
+            continue
+        s, e = kids[0].extent.start.offset, kids[0].extent.end.offset
+        if s < e:
+            spelled = n.type.get_canonical().spelling.replace("const ", "").strip()
+            edits.wrap(s, e, f"(({spelled})(", "))", 0)
+    return edits.apply()
 
 
 def flatten_inheritance(text: str, unit: str) -> str:
@@ -2937,6 +3097,8 @@ def translate(source: str, *, unit: str = "<unit>", contract: bool = False,
     if compose(source, text) is not source:
         text = preprocess(compose(source, text), defines, include_dirs)
     text = rewrite_ptx_asm(text, unit)
+    if retain_subnormals:
+        text = explicit_float_to_integral(text)
     text = flatten_inheritance(text, unit)
     tu = parse(text)
     result = _Rewriter(text, tu, unit=unit, retain_subnormals=retain_subnormals).run()

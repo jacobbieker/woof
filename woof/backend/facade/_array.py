@@ -74,7 +74,7 @@ class Storage:
     filled array can be one scalar with stride 0), and a kernel bound to
     such a buffer would read and write past the one element it holds."""
 
-    __slots__ = ("arr", "dtype", "_aliases", "__weakref__")
+    __slots__ = ("arr", "dtype", "_aliases", "_memory", "__weakref__")
 
     def __init__(self, arr, dtype: np.dtype, *, fresh: bool = False):
         """``fresh``: ``arr`` is a newly computed value no other array holds
@@ -87,6 +87,7 @@ class Storage:
         self.arr = flat if fresh else mx.array(flat)
         self.dtype = np.dtype(dtype)
         self._aliases = None
+        self._memory = None
         # A new value is usually still lazy -- a copy or an expression of other
         # buffers.  It must be computed before any in-place launch overwrites
         # what it reads (flush_pending), as CUDA's stream order would have it.
@@ -466,6 +467,13 @@ class ndarray:
             return self.transpose().reshape(tuple(reversed(shape))).transpose()
         if self.is_c_contiguous():
             return ndarray(shape, self.dtype, _storage=self._st, _offset=self._offset)
+        strides = _nocopy_strides(self.shape, self.strides, shape, self.dtype.itemsize) \
+            if self.size else None
+        if strides is not None:
+            # NumPy/CuPy's view reshape: strided rows split or merged where
+            # the layout allows it (a padded member slab stays its backing).
+            return ndarray(shape, self.dtype, _storage=self._st, _offset=self._offset,
+                           _strides=tuple(strides))
         return self.copy().reshape(shape)
 
     def _memory_order(self, order) -> str:
@@ -645,6 +653,51 @@ def _address(mem) -> int:
     return ctypes.cast(mem, ctypes.c_void_p).value
 
 
+def _nocopy_strides(oldshape, oldstrides, newshape, itemsize):
+    """NumPy's ``_attempt_nocopy_reshape`` (C order): the strides that give
+    ``newshape`` as a view of the same elements, or None."""
+    old = [(n, st) for n, st in zip(oldshape, oldstrides) if n != 1]
+    newshape = list(newshape)
+    oldnd, newnd = len(old), len(newshape)
+    out = [0] * newnd
+    oi, oj, ni, nj = 0, 1, 0, 1
+    while ni < newnd and oi < oldnd:
+        np_, op = newshape[ni], old[oi][0]
+        while np_ != op:
+            if np_ < op:
+                np_ *= newshape[nj]
+                nj += 1
+            else:
+                op *= old[oj][0]
+                oj += 1
+        for ok in range(oi, oj - 1):
+            if old[ok + 1][1] * old[ok + 1][0] != old[ok][1]:
+                return None
+        out[nj - 1] = old[oj - 1][1]
+        for nk in range(nj - 1, ni, -1):
+            out[nk - 1] = out[nk] * newshape[nk]
+        ni, nj, oi, oj = nj, nj + 1, oj, oj + 1
+    last = out[ni - 1] if ni >= 1 else itemsize
+    for nk in range(ni, newnd):
+        out[nk] = last
+    return out
+
+
+class _Memory:
+    """``ndarray.data.mem``: the storage (CuPy's allocation) behind a view."""
+
+    def __init__(self, st):
+        self._st = st
+
+    @property
+    def ptr(self):
+        return self._st.address()
+
+    @property
+    def size(self):
+        return self._st.nbytes
+
+
 class _Pointer:
     """``ndarray.data``: the view's device address."""
 
@@ -659,7 +712,17 @@ class _Pointer:
 
     @property
     def mem(self):
-        return self
+        """CuPy's ``MemoryPointer.mem``: the whole allocation, whose
+        ``ptr`` is its first byte (not the view's) and ``size`` its bytes."""
+        # One object per storage while anyone holds it (CuPy compares
+        # owners with `is`); a weak link, so storage is freed promptly.
+        st = self._a._st
+        memory = st._memory() if st._memory is not None else None
+        if memory is None:
+            import weakref
+            memory = _Memory(st)
+            st._memory = weakref.ref(memory)
+        return memory
 
     @property
     def size(self):

@@ -105,6 +105,15 @@ nondeterministic, three diagnostic variables help:
   when clang resolved its parameter as `float`. Otherwise `g(f64, float)`
   beside `g(f64, f64)` is ambiguous in Metal, because both need a
   user-defined conversion.
+* **Float vectors in an `--ftz=false` unit** keep `float` components (Metal
+  has no vector of `f32s`). A component read as a value is `f32s(v.x)`, an
+  assignment stores `float(e)`, `v.x op= e` goes through `f32s`, and
+  `make_floatN`/`{...}` take `float(e)` elements. A `volatile float` value
+  loses its qualifier there (f32s arithmetic is calls, never contracted),
+  and in a unit with base classes C++'s implicit float→integer conversions
+  are spelled as casts before the bases are flattened into templates.
+* **A kernel-local `blockIdx`/`gridDim`** (the ensemble batch adapter's
+  virtual block coordinates) hides the builtin, as in CUDA.
 * **Static constexpr members.** MSL is C++14, so an out-of-line call that
   binds a `static constexpr` data member to a `const&` parameter odr-uses
   it. The translator therefore emits the member's out-of-class definition.
@@ -153,7 +162,9 @@ and `astype`, `copy(order="K")`, `array(order=...)` and the `*_like`
 constructors keep a column-major prototype's layout. Kernels index these
 buffers directly, so a dropped layout scrambles fields rather than failing
 (SATMEDMF's column packing did). `tests/test_metal_memory_order.py` guards
-this. Elementwise results are row-major whatever their operands' layout;
+this. `reshape` of a strided view is a view wherever NumPy's would be
+(a padded member slab keeps its backing), and `x.data.mem` is the whole
+allocation, one object per buffer, as CuPy's is. Elementwise results are row-major whatever their operands' layout;
 make a column-major kernel argument explicit with `asfortranarray`.
 
 ## Threads
@@ -241,5 +252,7 @@ The envelope receipts per backend are in the same directory.
    gives a 3-D launch.
 3. `tools/metal_unit_errors.py UNIT`: show each Metal compile error beside its
    MSL line.
-4. `tools/metal_translation_census.py`: which units translate and compile.
+4. `tools/metal_translation_census.py`: which units translate and compile. Cached
+   results are keyed on a fingerprint of the translator, the Metal headers
+   and the kernel sources, so a stale result is never reported.
 5. `tools/cupy_surface_census.py --gate`: which CuPy paths the facade lacks.
