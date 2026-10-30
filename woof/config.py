@@ -3848,7 +3848,8 @@ def _validate_farms(cfg: RunConfig) -> None:
     microphysics scheme that hands FARMS neither its radii nor all of cloud,
     ice and snow -- then the parts of the radiation driver's Solar_step
     (the per-step CLDFRA and its temporary hydrometeor additions) that are
-    ported: icloud 0, 1 (with MYNN's icloud_bl merge) and 2, and aer_opt
+    ported: icloud 0, 1 (with MYNN's icloud_bl merge), 2 and 3 (WRF-Solar
+    cal_cldfra3, whose made-up qc/qi FARMS reads as WRF's does), and aer_opt
     0, 1 and 2.  Everything else is refused by name rather than run with a
     cloud fraction or aerosol WRF would not have used.
     """
@@ -3866,11 +3867,11 @@ def _validate_farms(cfg: RunConfig) -> None:
             "(module_physics_init.F:1039-1057): FARMS needs the scheme's "
             "effective radii (Thompson, Thompson aerosol-aware, WSM3/5/6/7, "
             "WDM5/6/7) or none of them with cloud, ice and snow all present")
-    if int(getattr(cfg, "icloud", 1)) not in (0, 1, 2):
+    if int(getattr(cfg, "icloud", 1)) not in (0, 1, 2, 3):
         raise ConfigurationRefused(
             f"swint_opt=2 with icloud={int(cfg.icloud)}: FARMS reads the "
-            "radiation driver's per-step CLDFRA, ported for icloud 0, 1 and 2 "
-            "(icloud = 3's cal_cldfra3 condensate adjustment is not)")
+            "radiation driver's per-step CLDFRA, ported for icloud 0, 1, 2 "
+            "and 3")
     if int(cfg.aer_opt) not in (0, 1, 2):
         raise ConfigurationRefused(
             f"swint_opt=2 with aer_opt={int(cfg.aer_opt)}: FARMS's 2-D "
