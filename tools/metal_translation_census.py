@@ -9,7 +9,15 @@ kernel's pipeline).  Each unit lands in one class:
 ``refused``         the translator refused a construct, by name;
 ``metal_error``     Metal rejected the translation (first error kept);
 ``source_error``    the unit does not preprocess/parse on its own (it needs
-                    integer defines or companion headers its loader adds).
+                    integer defines or companion headers its loader adds);
+``translated``      (``--translate-only``) the MSL was produced; nothing was
+                    compiled, so no Metal device is needed.
+
+``--translate-only`` stops after translation: it is the half of the census a
+machine without a Metal device (a GitHub macOS VM) can run.  ``--gate`` exits
+non-zero when any unit is ``refused``, ``metal_error``, ``crash`` or
+``timeout``; ``source_error`` is the documented class of units that are only
+ever compiled with their loader's defines, and does not fail the gate.
 
 Failures are grouped by a normalised message so the most common construct
 is fixed first.  ``--retain`` translates with subnormal retention (``f32s``)
@@ -38,6 +46,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
+#: The classes ``--gate`` fails on.  ``source_error`` is not one: those units
+#: are only ever compiled with the defines their loaders add.
+GATE_FAILURES = frozenset({"refused", "metal_error", "crash", "timeout"})
+
+
 def units() -> list[str]:
     kernels = ROOT / "woof" / "core" / "kernels"
     return sorted(p.stem for p in kernels.glob("*.cu")) + composed_units()
@@ -64,12 +77,12 @@ def _normalise(message: str) -> str:
     return m.strip()[:160]
 
 
-def census_one(name: str, retain: bool) -> dict:
+def census_one(name: str, retain: bool, translate_only: bool = False) -> dict:
     os.environ.setdefault("WOOF_BACKEND", "mlx")
     if retain:
         os.environ["GPUWM_WRF_EXACT"] = "1"
     import woof  # noqa: F401  -- installs the facade
-    from woof.backend.metal.loader import CompileError, load_unit
+    from woof.backend.metal.loader import CompileError, load_unit, translate_unit
     from woof.backend.translate import TranslationError
     from woof.core import kernels
     t0 = time.perf_counter()
@@ -83,6 +96,10 @@ def census_one(name: str, retain: bool) -> dict:
     except Exception as exc:  # noqa: BLE001
         return {"unit": name, "class": "source_error", "message": f"{type(exc).__name__}: {exc}"[:400]}
     try:
+        if translate_only:
+            unit = translate_unit(name.replace(":", "_"), source, options=options)
+            return {"unit": name, "class": "translated", "kernels": sorted(unit.kernels),
+                    "seconds": round(time.perf_counter() - t0, 2)}
         module = load_unit(name.replace(":", "_"), source, options=options)
         module.build_all()
     except TranslationError as exc:
@@ -101,11 +118,12 @@ def census_one(name: str, retain: bool) -> dict:
             "seconds": round(time.perf_counter() - t0, 2)}
 
 
-def _run_isolated(name: str, retain: bool, timeout: float) -> dict:
+def _run_isolated(name: str, retain: bool, timeout: float, translate_only: bool = False) -> dict:
     """One unit in its own interpreter: a unit that hangs the translator or
     the Metal compiler is recorded as ``timeout`` instead of stalling."""
     import subprocess
-    cmd = [sys.executable, str(Path(__file__).resolve()), "--one", name] + (["--retain"] if retain else [])
+    cmd = ([sys.executable, str(Path(__file__).resolve()), "--one", name] + (["--retain"] if retain else [])
+           + (["--translate-only"] if translate_only else []))
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, cwd=str(ROOT))
     except subprocess.TimeoutExpired:
@@ -127,24 +145,31 @@ def main(argv=None) -> int:
     parser.add_argument("--out", type=Path, default=Path("/tmp/metal-census.jsonl"),
                         help="JSON lines, appended as units finish; finished units are skipped on rerun")
     parser.add_argument("--fresh", action="store_true", help="ignore results already in --out")
+    parser.add_argument("--translate-only", action="store_true",
+                        help="translate to MSL and stop: no Metal device is touched")
+    parser.add_argument("--gate", action="store_true",
+                        help="exit 1 if any unit is refused, metal_error, crash or timeout")
     args = parser.parse_args(argv)
     if args.one:
-        print(json.dumps(census_one(args.one, args.retain)))
+        print(json.dumps(census_one(args.one, args.retain, args.translate_only)))
         return 0
     done = {}
     if args.out.exists() and not args.fresh:
         for line in args.out.read_text().splitlines():
             if line.strip():
                 r = json.loads(line)
-                if r.get("retain", False) == args.retain:
+                if (r.get("retain", False) == args.retain
+                        and r.get("translate_only", False) == args.translate_only):
                     done[r["unit"]] = r
     names = [n for n in (args.only or units()) if args.only or n not in done]
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=args.jobs) as pool, args.out.open("a") as sink:
-        futures = {pool.submit(_run_isolated, n, args.retain, args.timeout): n for n in names}
+        futures = {pool.submit(_run_isolated, n, args.retain, args.timeout, args.translate_only): n
+                   for n in names}
         for f in as_completed(futures):
             r = f.result()
             r["retain"] = args.retain
+            r["translate_only"] = args.translate_only
             done[r["unit"]] = r
             sink.write(json.dumps(r) + "\n")
             sink.flush()
@@ -155,10 +180,14 @@ def main(argv=None) -> int:
     print(f"\n{len(results)} units: " + ", ".join(f"{k} {v}" for k, v in counts.most_common()))
     groups = collections.defaultdict(list)
     for r in results:
-        if r["class"] != "compiled":
+        if r["class"] not in ("compiled", "translated"):
             groups[(r["class"], r.get("key", r.get("message", "")[:120]))].append(r["unit"])
     for (cls, key), members in sorted(groups.items(), key=lambda kv: -len(kv[1])):
         print(f"{len(members):4d}  {cls:12s} {key}\n        {', '.join(members[:8])}{' ...' if len(members) > 8 else ''}")
+    failing = [r["unit"] for r in results if r["class"] in GATE_FAILURES]
+    if args.gate and failing:
+        print(f"\ngate: {len(failing)} unit(s) in {', '.join(sorted(GATE_FAILURES))}: {', '.join(failing)}")
+        return 1
     return 0
 
 
