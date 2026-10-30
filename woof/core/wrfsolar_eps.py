@@ -606,6 +606,7 @@ class MultiPerturb:
     def __init__(self, cfg, fields: dict, *, nz: int, ny: int, nx: int):
         self.cfg = cfg
         self.fields = fields
+        self.switches = active_switches(cfg)
         self.names = consumed_fields(cfg)
         table = load_stochpert_table(getattr(cfg, "stochpert_tbl", ""),
                                      num_pert_3d=int(cfg.num_pert_3d))
@@ -642,3 +643,19 @@ class MultiPerturb:
         """{field name: Pattern} over the consumed fields."""
         return {name: Pattern(self.fields[pattern_field_name(name)])
                 for name in self.names}
+
+
+    def factors(self, switch: str):
+        """The switch's factors when it is on here, else None."""
+        return factors(self.cfg, switch) if switch in self.switches else None
+
+    def cld3_columns(self, transform):
+        """pert_cld3's (pert_th, pert_qv) in a cal_cldfra3 caller's column
+        layout: ``transform`` maps a (nz, ny, nx) field to the layout its
+        t and qv take.  None when pert_cld3 is off."""
+        if "pert_cld3" not in self.switches:
+            return None
+        pats = self.patterns()
+        return dict(pert_th=transform(pats["TH"].grid(self.nz)),
+                    pert_qv=transform(pats["QVAPOR"].grid(self.nz)),
+                    factors=factors(self.cfg, "pert_cld3"))

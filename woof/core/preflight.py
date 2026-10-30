@@ -3608,7 +3608,7 @@ _MICROPHYSICS_KERNEL_MODULES.update({
 #: 28 to the shared operator -- so an NSSL domain reserved refl.cu's
 #: per-thread frame for a translation unit the run cannot launch, and a
 #: reservation that is too large refuses a run that would have fit.
-_REFLECTIVITY_MICROPHYSICS = frozenset({1, 2, 3, 6, 8, 10, 16, 28, 106})
+_REFLECTIVITY_MICROPHYSICS = frozenset({1, 2, 3, 6, 8, 10, 16, 28, 96, 106})
 
 #: The DELIBERATE absences from :data:`_REFLECTIVITY_MICROPHYSICS`, each
 #: with the reason it is a decision and not an omission.  The pattern is
@@ -3985,6 +3985,8 @@ def domain_kernel_modules(dc: DomainConfig, *,
         modules.add("oml")
     if int(getattr(dc.run, "icloud", 1)) == 3:          # woof/core/cldfra3.py
         modules.add("cldfra3")
+    if int(getattr(dc.run, "multi_perturb", 0)) == 1:   # woof/core/wrfsolar_eps.py
+        modules.add("wrfsolar_eps")
     if int(getattr(dc.run, "solar_diagnostics", 0) or 0) == 1:
         modules.add("solar_diag")                # woof/core/solar_diagnostics.py
     from woof.core.theta_m import run_theta_m
@@ -5422,6 +5424,14 @@ def physics_array_shapes(cfg: RunConfig, *, cam_ozone: bool = False,
         from woof.core.shcu_deng import deng_field_shapes
         for name, (shape, _dtype) in deng_field_shapes(cfg, nz, ny,
                                                         nx).items():
+            shapes[f"fields/{name}"] = shape
+    if int(getattr(cfg, "multi_perturb", 0)) == 1:
+        # WRF-Solar EPS (woof.core.wrfsolar_eps
+        # allocate_multi_perturb_fields reads the same roster): each consumed
+        # pert3d field, (nz or 1, ny, nx), and its two (ny+1, nx+1) spectra.
+        from woof.core.wrfsolar_eps import multi_perturb_field_shapes
+        for name, (shape, _dtype) in multi_perturb_field_shapes(
+                cfg, nz, ny, nx).items():
             shapes[f"fields/{name}"] = shape
     if int(getattr(cfg, "sf_ocean_physics", 0)) == 2:
         from woof.ocean.mixed_layer import PROFILE_FIELDS

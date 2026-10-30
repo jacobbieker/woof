@@ -1,0 +1,88 @@
+{
+  "schema": "gpuwm.chem.species.v1",
+  "owner": "wrf-solar",
+  "description": "MAD-WRF's hydrometeor tracers (madwrf_opt = 2): advected and diffused copies of the initial qc, qi and qs that the step nudges the active hydrometeors toward.",
+  "rows": [
+    {
+      "name": "tr_qc",
+      "wrf_array": "tracer",
+      "output_name": "TR_QC",
+      "long_name": "MAD-WRF cloud water tracer",
+      "units": "kg kg-1",
+      "phase": "aerosol",
+      "family": "tracer",
+      "sets": [
+        "madwrf"
+      ],
+      "transported": true,
+      "floor": 0.0,
+      "default_inflow": 0.0,
+      "molar_mass_g_mol": null,
+      "processes": [],
+      "emissions": [],
+      "boundary": [],
+      "drydep": null,
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "provenance": "WRF v4.7.1 Registry.EM_COMMON:3072, package madwrf (madwrf_opt==2) tracer:tr_qc,tr_qi,tr_qs: set equal to qc by real.exe's Init_madwrf_tracers (module_initialize_real.F:4868-4874; woof seeds it at the cold start) and advected and diffused as a WRF tracer; zero inflow (flow_dep_bdy). Read by Cloud_tracer_nudge (woof/core/madwrf.py)."
+    },
+    {
+      "name": "tr_qi",
+      "wrf_array": "tracer",
+      "output_name": "TR_QI",
+      "long_name": "MAD-WRF cloud ice tracer",
+      "units": "kg kg-1",
+      "phase": "aerosol",
+      "family": "tracer",
+      "sets": [
+        "madwrf"
+      ],
+      "transported": true,
+      "floor": 0.0,
+      "default_inflow": 0.0,
+      "molar_mass_g_mol": null,
+      "processes": [],
+      "emissions": [],
+      "boundary": [],
+      "drydep": null,
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "provenance": "WRF v4.7.1 Registry.EM_COMMON:3072, package madwrf (madwrf_opt==2) tracer:tr_qc,tr_qi,tr_qs: set equal to qi by real.exe's Init_madwrf_tracers (module_initialize_real.F:4868-4874; woof seeds it at the cold start) and advected and diffused as a WRF tracer; zero inflow (flow_dep_bdy). Read by Cloud_tracer_nudge (woof/core/madwrf.py)."
+    },
+    {
+      "name": "tr_qs",
+      "wrf_array": "tracer",
+      "output_name": "TR_QS",
+      "long_name": "MAD-WRF snow tracer",
+      "units": "kg kg-1",
+      "phase": "aerosol",
+      "family": "tracer",
+      "sets": [
+        "madwrf"
+      ],
+      "transported": true,
+      "floor": 0.0,
+      "default_inflow": 0.0,
+      "molar_mass_g_mol": null,
+      "processes": [],
+      "emissions": [],
+      "boundary": [],
+      "drydep": null,
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "provenance": "WRF v4.7.1 Registry.EM_COMMON:3072, package madwrf (madwrf_opt==2) tracer:tr_qc,tr_qi,tr_qs: set equal to qs by real.exe's Init_madwrf_tracers (module_initialize_real.F:4868-4874; woof seeds it at the cold start) and advected and diffused as a WRF tracer; zero inflow (flow_dep_bdy). Read by Cloud_tracer_nudge (woof/core/madwrf.py)."
+    }
+  ]
+}

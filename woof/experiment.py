@@ -391,6 +391,14 @@ _DOMAIN_RUN_OVERRIDES = (
     # output-only.  use_theta_m is one value for the run in WRF
     # (Registry.EM_COMMON:2864) and stays [shared].
     "do_avgflx_em",
+    # WRF-Solar EPS: multi_perturb, the pert_<scheme> switches, their
+    # factors and spdt are max_domains in registry.stoch:98-130, :188.
+    "multi_perturb", "pert_farms", "pert_farms_albedo", "pert_farms_aod",
+    "pert_farms_angexp", "pert_farms_aerasy", "pert_farms_qv",
+    "pert_farms_qc", "pert_farms_qs", "pert_deng", "pert_deng_qv",
+    "pert_deng_qc", "pert_deng_t", "pert_deng_w", "pert_thom",
+    "pert_thom_qv", "pert_thom_qc", "pert_thom_qi", "pert_thom_qs",
+    "pert_thom_ni", "pert_cld3", "pert_cld3_qv", "pert_cld3_t", "spdt",
     # LES-nest inflow seeding (P3): per-domain because the mechanism IS
     # per-edge -- it perturbs one child's rolling nest-boundary tables,
     # validate_run_config refuses it on a non-nested domain, and like

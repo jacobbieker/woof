@@ -10,6 +10,9 @@ import dataclasses
 
 import pytest
 
+from woof.config import MADWRF_RUN_DEFAULTS, MULTI_PERTURB_RUN_DEFAULTS
+NEW_TAIL = [*MULTI_PERTURB_RUN_DEFAULTS, *MADWRF_RUN_DEFAULTS]
+
 from woof.config import (RunConfig, load_config, validate_chem_config,
                           validate_run_config)
 
@@ -173,7 +176,8 @@ def test_the_chem_block_is_appended_after_every_older_field():
     tail = ["rrtmg_spectral_output", "couple_farms", "radtran_wavelengths",
             "radtran_interval_s", "radtran_umu", "radtran_phi",
             "radtran_mol_abs_param", "radtran_solver", "radtran_streams",
-            "radtran_pseudospherical", "shcu_physics", "cu_rad_feedback"]
+            "radtran_pseudospherical", "shcu_physics", "cu_rad_feedback",
+            "solar_diagnostics", *NEW_TAIL]
     assert names[-len(tail):] == tail
     names = names[:-len(tail)]
     assert names[-len(WINDFARM_RUN_DEFAULTS):] == list(WINDFARM_RUN_DEFAULTS)

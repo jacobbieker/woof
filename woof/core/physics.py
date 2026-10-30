@@ -2360,6 +2360,14 @@ class PhysicsDriver:
         if int(getattr(cfg, "shcu_physics", 0)):
             from woof.core.shcu_deng import DengShallowCumulus
             self.shallow_cumulus = DengShallowCumulus(cfg)
+        # WRF-Solar EPS (multi_perturb = 1): the pattern provider over the
+        # pert3d fields held in ``fields``; rebuilt, never serialized.
+        self.multi_perturb = None
+        from woof.core.wrfsolar_eps import active_switches
+        if active_switches(cfg):
+            from woof.core.wrfsolar_eps import MultiPerturb
+            nz_, ny_, nx_ = state.p.shape
+            self.multi_perturb = MultiPerturb(cfg, self.fields, nz=nz_, ny=ny_, nx=nx_)
         self.ra_physics = cfg.ra_physics
         self.ra_lw_physics, self.ra_sw_physics = radiation_scheme_ids(cfg)
         self.radiation_active = bool(
@@ -3004,7 +3012,8 @@ class PhysicsDriver:
             aodtot = None
         cldfra = farms.step(self.fields, atmosphere, state,
                             elapsed_seconds=float(state.elapsed_seconds),
-                            itimestep=itimestep, aodtot=aodtot)
+                            itimestep=itimestep, aodtot=aodtot,
+                            eps=self.multi_perturb)
         if radiation_due:
             return
         if self.cldfra is not None:
@@ -6534,8 +6543,23 @@ class PhysicsDriver:
         if self.shallow_cumulus is not None:
             if atmosphere is None:
                 atmosphere = _prepare_atmosphere(state)
+            deng_eps = (self.multi_perturb is not None
+                        and "pert_deng" in self.multi_perturb.switches)
+            if deng_eps:
+                # WRF-Solar EPS (module_shallowcu_driver.F:632-672): Add_ on
+                # th_phy, QV, QC and W before deng_shcu_driver, Remove_
+                # after.  Deng reads T, not TH, so its theta change is the
+                # round trip th_phy keeps; QV, QC and W are the state.
+                from woof.core import wrfsolar_eps as _eps
+                _deng_args = dict(th=atmosphere["theta"], qv=state.qv,
+                                  qc=state.qc, w=state.w)
+                _eps.deng_add(self.multi_perturb.patterns(),
+                              _eps.factors(cfg, "pert_deng"), **_deng_args)
             rates = self.shallow_cumulus(driver=self, atmosphere=atmosphere,
                                          state=state, cfg=cfg)
+            if deng_eps:
+                _eps.deng_remove(self.multi_perturb.patterns(),
+                                 _eps.factors(cfg, "pert_deng"), **_deng_args)
             self.shallow_tendencies = couple_column_tendencies(
                 state, cfg, rtheta=rates["rthshten"], rqv=rates["rqvshten"],
                 rqc=rates["rqcshten"], rqr=rates["rqrshten"])
@@ -6558,6 +6582,11 @@ class PhysicsDriver:
         # Morrison can consume them.
         if cfg.cu_physics:
             self._advance_cumulus_clock(state, cfg)
+        if self.multi_perturb is not None:
+            # first_rk_step_part2.F:262-317: the multi_perturb fields move
+            # after the first-RK physics, on domain 1, on the first step and
+            # every stepsp steps -- the microphysics of this step reads them.
+            self.multi_perturb.update(itimestep)
         return self.tendencies
 
     def set_forcing(self, **fields) -> None:
@@ -7816,6 +7845,12 @@ def initialize_physics(
         # checkpoint carries it with the physics inventory.
         from woof.core.shcu_deng import allocate_deng_fields
         allocate_deng_fields(f, cfg, *state.p.shape)
+    if int(getattr(cfg, "multi_perturb", 0)) == 1:
+        # WRF-Solar EPS: the consumed pert3d fields and their spectra under
+        # WRF's Registry names, zero as INITIALIZE_STOCH leaves them, so the
+        # checkpoint carries them with the physics inventory.
+        from woof.core.wrfsolar_eps import allocate_multi_perturb_fields
+        allocate_multi_perturb_fields(f, cfg, *state.p.shape)
     driver = PhysicsDriver(state, cfg, f, result, noah_params,
                            radiation=radiation, cumulus=cumulus,
                            noahmp_params=noahmp_params,
@@ -8110,6 +8145,12 @@ def initialize_physics(
     #
     # An empty receipt is simply not recorded; the property's default is {}.
     receipt = microphysics_cold_start(state, cfg)
+    if int(getattr(cfg, "madwrf_opt", 0)) == 2:
+        # real.exe's Init_madwrf_tracers (module_initialize_real.F:4868-
+        # 4874): TR_QC/TR_QI/TR_QS start equal to qc/qi/qs.  A restart
+        # overwrites them with the carried tracers.
+        from woof.core.madwrf import seed_tracers
+        seed_tracers(state)
     if receipt:
         _MICROPHYSICS_INIT_RECEIPTS[driver] = receipt
     # Carriers must exist before anyone takes an inventory: see

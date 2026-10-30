@@ -365,13 +365,11 @@ def test_digital_filter_request_is_refused_by_name(tmp_path):
     ("rand_perturb = 1, 1,", "RAND_PERT random-pattern array"),
     ("perturb_bdy = 1,", "lateral boundary tendencies of U, V and T"),
     ("perturb_chem_bdy = 1,", "lateral boundaries of chemical tracers"),
-    ("multi_perturb = 1, 1,", "multi-perturbation option"),
-    ("pert_thom = .true., .true.,", "Thompson microphysics"),
-    ("pert_mynn = .true., .true.,", "MYNN boundary-layer scheme"),
-    ("pert_noah = .true., .true.,", "Noah land-surface scheme"),
-    ("pert_farms = .true., .true.,", "FARMS shortwave scheme"),
-    ("pert_deng = .true., .true.,", "Deng shallow-cumulus scheme"),
-    ("pert_cld3 = .true., .true.,", "CLD3 cloud-fraction scheme"),
+    # WRF-Solar EPS's MYNN and Noah hooks; multi_perturb and the FARMS,
+    # Deng, Thompson and icloud = 3 hooks are ported
+    # (tests/test_wrfsolar_eps_import.py).
+    ("pert_mynn = .true., .true.,", "MYNN's qv, qc, theta and qke"),
+    ("pert_noah = .true., .true.,", "Noah's qv, theta, soil moisture"),
 ])
 def test_unconsumed_stochastic_selector_names_the_lost_operation(
         tmp_path, line, operation):

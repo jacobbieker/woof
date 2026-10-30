@@ -57,6 +57,9 @@ def _kg_per_unit(row) -> float:
         return 1e-9
     if row.units == "ppmv":
         return 1e-6 * float(row.molar_mass_g_mol) / M_AIR_G_MOL
+    if row.units == "kg kg-1":
+        # mixing ratios carried as WRF tracers (MAD-WRF's TR_Q*)
+        return 1.0
     raise ValueError(f"chem row {row.name!r}: no ledger conversion for "
                      f"units {row.units!r}")
 

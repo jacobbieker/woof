@@ -849,6 +849,11 @@ REFL_10CM_INPUT_SPECIES: dict[int, tuple[str, ...]] = {
     # Aerosol-aware Thompson: mp=8's list exactly -- see the docstring of
     # compute_refl_10cm for why nc/nwfa/nifa contribute nothing to Z.
     28: ("qv", "qr", "nr", "qs", "qg"),
+    # MAD-WRF's passive hydrometeors (mp_physics = 96): WRF's empty
+    # CASE (MADWRF_MP) computes none; woof's diagnostic is Kessler's
+    # rain-only form on the (never-written, zero) qr, i.e. the clear-air
+    # floor.
+    96: ("qv", "qr"),
 }
 
 from woof.core.column_schemes import COLUMN_SCHEMES

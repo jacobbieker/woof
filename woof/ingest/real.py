@@ -4156,7 +4156,8 @@ def initialize_real(snapshot: HorizontalSnapshot, cfg: RunConfig,
                     landmask=None,
                     boundary_species=(),
                     column_block_rows=None,
-                    receipt_joins=None) -> RealInitResult:
+                    receipt_joins=None,
+                    madwrf_observations=None) -> RealInitResult:
     """Construct a moist, discretely hydrostatic :class:`DomainState`.
 
     ``receipt_joins``, a list, defers the hydrometeor disposition receipt's
@@ -6350,6 +6351,14 @@ def initialize_real(snapshot: HorizontalSnapshot, cfg: RunConfig,
         convert_initial_state(state)
     if timing_report is not None:
         timing_report["total_seconds"] = perf_counter() - timing_start
+    if int(getattr(cfg, "madwrf_cldinit", 0)) == 1:
+        # MAD-WRF's cloud initialization (module_initialize_real.F:4861-
+        # 4866): every real time, after the state is final and with no
+        # rebalance after it; metgrid's CLDMASK/BRTEMP/CLDTOPZ/CLDBASEZ when
+        # the door carries them, the analysis RH alone otherwise.
+        from woof.core.madwrf import cloud_init_state
+        cloud_init_state(state, cfg, p_hyd=total_pressure_h, terrain=terrain,
+                         landmask=landmask, observations=madwrf_observations)
     result = RealInitResult(
         state=state, coord=coord, base=host_base,
         surface_pressure=surface_pressure, surface_qv=published_surface_qv,

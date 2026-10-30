@@ -1,0 +1,8 @@
+{
+  "schema": "gpuwm.chem.set.v1",
+  "name": "madwrf",
+  "description": "MAD-WRF's TR_QC, TR_QI, TR_QS tracers (madwrf_opt = 2), selected by madwrf_opt, never by name.",
+  "wrf_chem_opt": null,
+  "wrf_tracer_opt": null,
+  "provenance": "WRF v4.7.1 Registry.EM_COMMON:3072 package madwrf (tracer:tr_qc,tr_qi,tr_qs)."
+}

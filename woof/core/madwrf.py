@@ -177,3 +177,146 @@ def scalar_tile(cfg, ny: int, nx: int):
 def finite_positive(value) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool) \
         and math.isfinite(value) and value > 0
+
+
+def apply(state, cfg, dt, *, refl_10cm_due=False):
+    """mp_physics = 96 (CASE (MADWRF_MP), module_microphysics_driver.F:2895):
+    no microphysical process.  The driver's prep and finish run around it as
+    around every scheme (the theta it hands back is the theta it took, so
+    h_diabatic is zero); RAINNC/RAINNCV and SR stay zero."""
+    import cupy as cp
+    from woof.core.microphysics import (MicrophysicsDiagnostics,
+                                        moist_physics_finish, save_pre_mp_theta)
+    nz, ny, nx = state.p.shape
+    thb = state.thb if state.thb.ndim == 3 else state.thb[:, None, None]
+    th = state.scratch((nz, ny, nx), "mp_th")
+    th[...] = thb + state.thp
+    save_pre_mp_theta(state)
+    if refl_10cm_due:
+        # WRF computes none for MADWRF_MP; woof's history diagnostic is the
+        # Kessler operator on the zero rain (woof.core.refl).
+        from woof.core.microphysics import prepare_microphysics_exner
+        from woof.core.refl import compute_and_stash_refl_10cm
+        pii = state.scratch((nz, ny, nx), "mp_pii")
+        prepare_microphysics_exner(state.p, pii)
+        refl_t = state.scratch((nz, ny, nx), "refl_t")
+        refl_t[...] = th * pii
+        compute_and_stash_refl_10cm(state, cfg, refl_t, state.p)
+    moist_physics_finish(state, cfg, th, dt)
+    rainnc = state.scratch((ny, nx), "mp_rainnc")
+    rainncv = state.scratch((ny, nx), "mp_rainncv")
+    rainncv[...] = 0.0
+    sr = state.scratch((ny, nx), "mp_sr")
+    sr[...] = 0.0
+    return MicrophysicsDiagnostics(rainnc=rainnc, rainncv=rainncv, sr=sr)
+
+
+def tracer_fields(state):
+    """(tr_qc, tr_qi, tr_qs) arrays of the domain's chem arena."""
+    from woof.core.chem_state import chem_state_of
+    chem = chem_state_of(state)
+    if chem is None:
+        raise ValueError("madwrf_opt = 2 carries TR_QC/TR_QI/TR_QS in the chem "
+                         "arena, and this state has none")
+    rows = {row.name: row for row in chem.transported}
+    missing = [name for name in TRACERS if name not in rows]
+    if missing:
+        raise ValueError(f"madwrf_opt = 2: the chem arena lacks {missing}")
+    return tuple(getattr(state, rows[name].state_attr) for name in TRACERS)
+
+
+def seed_tracers(state) -> None:
+    """Init_madwrf_tracers (module_madwrf.F:206-237): tr = q on every mass
+    point and level, as real.exe leaves them in wrfinput."""
+    for tr, q in zip(tracer_fields(state), (state.qc, state.qi, state.qs)):
+        tr[...] = q
+
+
+def step_nudge(state, cfg) -> bool:
+    """solve_em.F:3646-3662 for this step: Cloud_tracer_nudge over the
+    scalar tile while xtime (minutes since the domain started, at the
+    step's start) is below madwrf_dt_nudge.  Returns whether it nudged."""
+    if int(getattr(cfg, "madwrf_opt", 0)) != 2:
+        return False
+    epoch = float(getattr(state, "domain_start_offset", 0.0) or 0.0)
+    xtime = F(F(float(state.elapsed_seconds) - epoch) / F(60.0))
+    nz, ny, nx = state.qc.shape
+    trqc, trqi, trqs = tracer_fields(state)
+    return nudge(state.qc, state.qi, state.qs, trqc, trqi, trqs,
+                 dt=float(cfg.dt), dt_relax=float(cfg.madwrf_dt_relax),
+                 xtime_minutes=xtime, dt_nudge=float(cfg.madwrf_dt_nudge),
+                 tile=scalar_tile(cfg, ny, nx))
+
+
+#: The metgrid fields Init_madwrf_clouds reads (Registry.EM_COMMON:3071,
+#: package cldinit, state:brtemp,cldmask,cldtopz,cldbasez), with the
+#: FLAG_* attributes module_initialize_real.F passes beside them.
+OBSERVATION_FIELDS = ("CLDMASK", "CLDTOPZ", "CLDBASEZ", "BRTEMP")
+
+
+def observations_from_metem(case):
+    """``{name: (ny, nx) array, "flags": (cldmask, cldtopz, cldbasez,
+    brtemp)}`` from one met_em case; absent fields are WRF's missing
+    value with a zero flag."""
+    out = {}
+    flags = []
+    for name in OBSERVATION_FIELDS:
+        field = case.statics.get(name)
+        raw = case.attributes.get(f"FLAG_{name}")
+        flag = int(float(raw)) if raw is not None and field is not None else 0
+        out[name] = None if field is None else np.asarray(field, dtype=np.float32)
+        flags.append(flag)
+    cm, ct, cb, br = flags
+    out["flags"] = (cm, ct, cb, br)
+    return out
+
+
+def cloud_init_state(state, cfg, *, p_hyd, terrain, landmask=None,
+                     observations=None, p00=1.0e5) -> dict:
+    """real.exe's Init_madwrf_clouds on a freshly initialized state, after
+    its geopotential and hydrostatic pressure are final and with no
+    rebalance after it (module_initialize_real.F:4861-4866): qv, qc, qi and
+    qs are rewritten in place.  ``p_hyd`` is the (nz, ny, nx) hydrostatic
+    pressure, ``terrain`` HGT, ``landmask`` 1 over land (XLAND = 2 -
+    LANDMASK).  Returns a small receipt."""
+    import cupy as cp
+    nz, ny, nx = state.qv.shape
+    ncol = ny * nx
+
+    def cols(a, width):
+        a = cp.asarray(np.asarray(cp.asnumpy(a), dtype=np.float32)
+                       if not isinstance(a, cp.ndarray) else a, dtype=cp.float32)
+        if a.ndim == 1:
+            a = cp.broadcast_to(a[:, None, None], (a.shape[0], ny, nx))
+        return cp.ascontiguousarray(a.reshape(width, ncol).T)
+
+    theta = state.total_theta()
+    t2 = cols(cp.asarray(theta, dtype=cp.float32) - cp.float32(300.0), nz)
+    p = cols(p_hyd, nz)
+    ph = cols(state.php, nz + 1)
+    phb = cols(state.phb, nz + 1)
+    species = [cols(getattr(state, n), nz) for n in ("qv", "qc", "qi", "qs")]
+    surf = lambda a, fill: (cp.full(ncol, fill, dtype=cp.float32) if a is None else
+                            cp.asarray(np.asarray(cp.asnumpy(a) if isinstance(a, cp.ndarray) else a,
+                                                  dtype=np.float32).reshape(-1)))
+    xland = (cp.ones(ncol, dtype=cp.float32) if landmask is None else
+             cp.float32(2.0) - surf(landmask, 1.0))
+    obs = observations or {"flags": (0, 0, 0, 0)}
+    cf, _, _ = cloud_init(
+        t2=t2, p=p, ph=ph, phb=phb, qv=species[0], qc=species[1], qi=species[2],
+        qs=species[3], xland=xland, ht=surf(terrain, 0.0), dx=cfg.dx, dy=cfg.dy,
+        cldmask=None if obs.get("CLDMASK") is None else surf(obs["CLDMASK"], MISSING),
+        cldtopz=None if obs.get("CLDTOPZ") is None else surf(obs["CLDTOPZ"], MISSING),
+        cldbasez=None if obs.get("CLDBASEZ") is None else surf(obs["CLDBASEZ"], MISSING),
+        brtemp=None if obs.get("BRTEMP") is None else surf(obs["BRTEMP"], MISSING),
+        flags=obs["flags"], p00=p00)
+    for name, column in zip(("qv", "qc", "qi", "qs"), species):
+        target = getattr(state, name)
+        grid = cp.ascontiguousarray(column.T).reshape(nz, ny, nx)
+        if isinstance(target, cp.ndarray):
+            target[...] = grid
+        else:
+            target[...] = cp.asnumpy(grid)
+    return {"madwrf_cldinit": {"insert_clouds": insert_clouds(*obs["flags"]),
+                               "flags": dict(zip(OBSERVATION_FIELDS, obs["flags"])),
+                               "cloudy_columns": int(cp.count_nonzero(cf.max(axis=1) > 0))}}

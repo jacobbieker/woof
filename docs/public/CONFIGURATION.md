@@ -500,7 +500,7 @@ consumed `RunConfig` field -- the knob-parity battery
 consuming kernel/module rather than being decorative -- and every one
 is importable from a WRF namelist.
 
-**Which keys a `[[domain]]` table may override.** Exactly these 275,
+**Which keys a `[[domain]]` table may override.** Exactly these 300,
 and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
 
     hailcast_opt  haildt  lightning_option  lightning_dt  lightning_start_seconds
@@ -520,8 +520,12 @@ and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
     surface_energy_diag  rrtmg_spectral_output  radtran_wavelengths
     radtran_interval_s  radtran_umu  radtran_phi  radtran_mol_abs_param
     radtran_solver  radtran_streams  radtran_pseudospherical  shcu_physics
-    cu_rad_feedback  radtran_aerosol  do_avgflx_em
-    inflow_perturbation  inflow_perturbation_seed
+    cu_rad_feedback  radtran_aerosol  do_avgflx_em  multi_perturb  pert_farms
+    pert_farms_albedo  pert_farms_aod  pert_farms_angexp  pert_farms_aerasy
+    pert_farms_qv  pert_farms_qc  pert_farms_qs  pert_deng  pert_deng_qv
+    pert_deng_qc  pert_deng_t  pert_deng_w  pert_thom  pert_thom_qv  pert_thom_qc
+    pert_thom_qi  pert_thom_qs  pert_thom_ni  pert_cld3  pert_cld3_qv  pert_cld3_t
+    spdt  inflow_perturbation  inflow_perturbation_seed
     inflow_perturbation_amplitude_scale  inflow_perturbation_faces  target_cfl
     target_hcfl  max_step_increase_pct  starting_time_step  starting_time_step_den
     max_time_step  max_time_step_den  min_time_step  min_time_step_den

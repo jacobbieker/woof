@@ -463,7 +463,7 @@ _MP_DECLARES_RADII = {
 
 from woof.microphysics_schemes import NAMED_SCHEMES as _NAMED_MP_SCHEMES
 # Named schemes declare radii (their adapters write effc/effi/effs).
-_MP_DECLARES_RADII.update({_s.mp_id: True for _s in _NAMED_MP_SCHEMES.values()})
+_MP_DECLARES_RADII.update({_s.mp_id: _s.declares_radii for _s in _NAMED_MP_SCHEMES.values()})
 
 def _require_agreement_with_the_registry() -> None:
     """``_MP_DECLARES_RADII`` is the registry's ``cloud_optics.legacy_declares_radii``.
@@ -2266,6 +2266,18 @@ class RRTMGLegacyRadiation:
             from woof.core.rrtm_lw import _stream_is_capturing
             cldfra3_args = (cldfra3_gridkm(cfg.dx, cfg.dy),
                             not _stream_is_capturing(cp))
+            from woof.core.wrfsolar_eps import (Pattern, active_switches,
+                                                factors as _eps_factors,
+                                                pattern_field_name)
+            cld3_eps = None
+            if "pert_cld3" in active_switches(cfg):
+                # WRF-Solar EPS: t_1d/qv_1d perturbed by the pert3d TH and
+                # QVAPOR fields (:1472-1474), gathered as t3d and qv are.
+                for name in ("TH", "QVAPOR"):
+                    gather_grids["eps_" + name] = _device_grid(
+                        Pattern(fields[pattern_field_name(name)]).grid(nz), nz)
+                cld3_eps = _eps_factors(cfg, "pert_cld3")
+            cldfra3_args = (*cldfra3_args, cld3_eps)
         if icloud == 2:
             # One driver CLDFRA field is shared by LW and SW. Gather only
             # repacks it into each prep's column window; it never recomputes
@@ -2316,10 +2328,13 @@ class RRTMGLegacyRadiation:
                 cldfra = blocks["binary_cldfra"]
             elif icloud == 3:
                 from woof.core.cldfra3 import cal_cldfra3
-                gridkm, check = cldfra3_args
+                gridkm, check, cld3_eps = cldfra3_args
                 cldfra, moist["qc"], moist["qi"] = cal_cldfra3(
                     moist["qv"], moist["qc"], moist["qi"], moist["qs"],
                     blocks["dz8w"], p3d, t3d, surf["xland"][sel], gridkm,
+                    perturbation=(None if cld3_eps is None else dict(
+                        pert_th=blocks["eps_TH"], pert_qv=blocks["eps_QVAPOR"],
+                        factors=cld3_eps)),
                     check=check)
             else:
                 cldfra = _rrtmgp.cal_cldfra1(

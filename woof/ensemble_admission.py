@@ -31,7 +31,12 @@ UNCALIBRATED_SPREAD_WARNING = "uncalibrated spread, WRF default amplitudes"
 # an admission reason: calibration does not identify an implementation defect.
 UNCALIBRATED_SPREAD_REASON = UNCALIBRATED_SPREAD_WARNING
 IMPLEMENTED_RANDOM_SELECTORS = frozenset({
-    "sppt", "skebs", "stoch_force_opt", "spp", "spp_conv", "spp_pbl", "spp_lsm"})
+    "sppt", "skebs", "stoch_force_opt", "spp", "spp_conv", "spp_pbl", "spp_lsm",
+    # WRF-Solar EPS (woof/core/wrfsolar_eps.py): a RunConfig field each,
+    # validated by woof.config.multi_perturb_refusal.
+    "multi_perturb", "pert_farms", "pert_deng", "pert_thom", "pert_cld3"})
+#: The factors of the implemented pert_* switches, RunConfig fields too.
+IMPLEMENTED_PERT_PREFIXES = ("pert_farms_", "pert_deng_", "pert_thom_", "pert_cld3_")
 RANDOM_SELECTORS = frozenset({
     "sppt", "skebs", "stoch_force_opt", "spp", "spp_conv", "spp_pbl", "spp_lsm",
     "rand_perturb", "multi_perturb", "perturb_bdy", "perturb_chem_bdy",
@@ -91,7 +96,8 @@ def refuse_configured_random(raw):
                 continue
             if name in RANDOM_SELECTORS or name.startswith("pert_"):
                 enabled = any(bool(item) for item in value) if isinstance(value, list) else bool(value)
-                if enabled and name not in IMPLEMENTED_RANDOM_SELECTORS:
+                if (enabled and name not in IMPLEMENTED_RANDOM_SELECTORS
+                        and not name.startswith(IMPLEMENTED_PERT_PREFIXES)):
                     raise ValueError(missing_random_consumer(name))
             elif isinstance(value, (dict, list)):
                 refuse_configured_random(value)

@@ -103,6 +103,11 @@ def test_the_fields_are_appended_last_at_wrfs_defaults():
     # appended after them: the output-only rrtmg_spectral_output, WRF's
     # couple_farms, the output-only woof.radtran diagnostic's eight keys,
     # then the shallow-cumulus selector and cumulus-radiation feedback,
+    # and after them WRF-Solar EPS's and MAD-WRF's keys
+    from woof.config import MADWRF_RUN_DEFAULTS, MULTI_PERTURB_RUN_DEFAULTS
+    later = [*MULTI_PERTURB_RUN_DEFAULTS, *MADWRF_RUN_DEFAULTS]
+    assert names[-len(later):] == later
+    names = names[:-len(later)]
     # the output-only solar_diagnostics and radtran_aerosol, WRF's
     # use_theta_m and the output-only do_avgflx_em
     assert names[-20:] == ["windfarm_opt", "windfarm_ij",

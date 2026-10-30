@@ -89,6 +89,14 @@ class RunConfig:
         if not isinstance(self.chem_sets, str) or not isinstance(self.fire_smoke, bool):
             return
         selected = tuple(name.strip() for name in self.chem_sets.split(","))
+        if getattr(self, "madwrf_opt", 0) == 2 and "madwrf" not in selected:
+            # MAD-WRF's tracer package (Registry.EM_COMMON:3072, tracer:
+            # tr_qc,tr_qi,tr_qs): the advected TR_QC/TR_QI/TR_QS rows of
+            # woof/data/chem/species/madwrf.json (woof/core/madwrf.py).
+            from woof.chem_table import chem_names
+            object.__setattr__(self, "chem_sets", ",".join(
+                (*chem_names(self.chem_sets), "madwrf")))
+            selected = (*selected, "madwrf")
         profiles = ("sfire_smoke", "sfire_smoke_mixed")
         if self.fire_smoke or any(name in selected for name in profiles):
             from woof.chem_table import chem_names
@@ -1937,6 +1945,64 @@ class RunConfig:
     #: the mass-coupled wind fluxes (woof.core.avgflx).  Output-only.
     #: Appended last, keyword-only.
     do_avgflx_em: int = 0
+    # WRF-Solar EPS (WRF &stoch, Registry/registry.stoch:98-130, :174-188;
+    # woof/core/wrfsolar_eps.py).  ``multi_perturb = 1`` builds the
+    # STOCHPERT.TBL perturbation fields on domain 1 (updated on the first
+    # step and every max(nint(spdt*60/dt), 1) steps; a nest keeps WRF's zero
+    # fields) and each ``pert_<scheme>`` switch applies the drivers' own
+    # Add_/Remove_ multipliers around its scheme: FARMS (albedo, AOD,
+    # Angstrom exponent, asymmetry, qv, qc, qs), Deng (qv, qc, theta, w),
+    # Thompson mp 8/28 (qv, qc, qi, qs, ni) and icloud = 3's t and qv.
+    # ``pert_<scheme>_<var>`` scales the field; 0 leaves that input (up to
+    # the clamps).  ``nens`` is WRF's ensemble-member seed label;
+    # ``stochpert_tbl`` names the STOCHPERT.TBL ("" is WRF v4.7.1's
+    # run/STOCHPERT.TBL) and ``num_pert_3d`` how many of its rows WRF reads
+    # (plus one).  MYNN's and Noah's (pert_mynn, pert_noah) are not ported.
+    # Max_domains in WRF except num_pert_3d, nens and the table.  All off
+    # by default.  Appended last, keyword-only.
+    multi_perturb: int = 0
+    pert_farms: bool = False
+    pert_farms_albedo: float = 0.0
+    pert_farms_aod: float = 0.0
+    pert_farms_angexp: float = 0.0
+    pert_farms_aerasy: float = 0.0
+    pert_farms_qv: float = 0.0
+    pert_farms_qc: float = 0.0
+    pert_farms_qs: float = 0.0
+    pert_deng: bool = False
+    pert_deng_qv: float = 0.0
+    pert_deng_qc: float = 0.0
+    pert_deng_t: float = 0.0
+    pert_deng_w: float = 0.0
+    pert_thom: bool = False
+    pert_thom_qv: float = 0.0
+    pert_thom_qc: float = 0.0
+    pert_thom_qi: float = 0.0
+    pert_thom_qs: float = 0.0
+    pert_thom_ni: float = 0.0
+    pert_cld3: bool = False
+    pert_cld3_qv: float = 0.0
+    pert_cld3_t: float = 0.0
+    spdt: float = -1.0
+    num_pert_3d: int = 15
+    nens: int = 1
+    stochpert_tbl: str = ""
+    # MAD-WRF (WRF &physics, Registry.EM_COMMON:2677-2680, one value for the
+    # run; woof/core/madwrf.py).  ``madwrf_opt`` 1 advects and diffuses the
+    # initial hydrometeors with no microphysics (it needs mp_physics = 96,
+    # MAD-WRF's passive qv/qc/qi/qs, and use_mp_re = 0); 2 carries the
+    # tracers TR_QC/TR_QI/TR_QS, equal to qc/qi/qs at the start, and nudges
+    # qc/qi/qs toward them, q += (tr - q)*dt/madwrf_dt_relax [s], while the
+    # forecast time is below madwrf_dt_nudge [min] (solve_em.F:3646-3662).
+    # ``madwrf_cldinit = 1`` is real.exe's cloud initialization
+    # (Init_madwrf_clouds) from the analysis RH and, when metgrid supplies
+    # them, CLDMASK, BRTEMP, CLDTOPZ and CLDBASEZ: woof's met_em door runs
+    # it; a wrfinput from WRF's real.exe already carries it.  Off by
+    # default.  Appended last, keyword-only.
+    madwrf_opt: int = 0
+    madwrf_dt_relax: float = 60.0
+    madwrf_dt_nudge: float = 60.0
+    madwrf_cldinit: int = 0
 
 #: The ways a domain's clock meets the measured terrain rules
 #: (:attr:`RunConfig.terrain_clock`).
@@ -3480,8 +3546,9 @@ _MP_PHYSICS_SCHEMA_MENU = (
     "(Milbrandt-Yau two-moment), 10 (Morrison two-moment), 16 (WDM6 "
     "double-moment warm rain), 18 (NSSL two-moment), 24 (WSM7 "
     "single-moment with hail), 28 (Thompson aerosol-aware), 30 "
-    "(FAST_SBM spectral bin), 50 (P3 one-category), 106 (WSM6R, the "
-    "revised WSM6), or \"tempo\" (TEMPO, WOOF id 900)"
+    "(FAST_SBM spectral bin), 50 (P3 one-category), 96 (MAD-WRF passive "
+    "hydrometeors), 106 (WSM6R, the revised WSM6), or \"tempo\" (TEMPO, "
+    "WOOF id 900)"
 )
 
 #: Every ``mp_physics`` value the config loader admits, as the importable
@@ -3491,7 +3558,7 @@ _MP_PHYSICS_SCHEMA_MENU = (
 #: membership against this tuple and recites the menu when it refuses, so
 #: a new scheme is added in both places in the same edit or the loader
 #: and its refusal text disagree in front of a user.
-MP_PHYSICS_ACCEPTED = (0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 30, 50, 106, 900)
+MP_PHYSICS_ACCEPTED = (0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 30, 50, 96, 106, 900)
 
 
 #: WDM6's two unported siblings, held as a table for the reason
@@ -3594,12 +3661,6 @@ _MP_UNPORTED_SCHEMES = {
         "ported. It advects total condensate with ice and rain fractions; "
         "Ferrier-Aligo (mp_physics=5) is its successor and is not run in its "
         "place."
-    ),
-    96: (
-        "mp_physics=96 (MADWRF, package madwrf_mp) is not ported. It is the "
-        "cloud scheme of WRF's MAD-WRF solar-irradiance configuration, "
-        "which works with MAD-WRF's satellite cloud initialization; woof "
-        "carries neither."
     ),
     97: (
         "mp_physics=97 (Goddard GCE three-ice, package gsfcgcescheme) is not "
@@ -4567,6 +4628,7 @@ CONFIG_RELATIVE_FILE_KEYS: tuple[str, ...] = (
     "fire_static", "fire_fuel_namelist",
     "ocean_config",
     "windfarm_turbine_file",
+    "stochpert_tbl",
 )
 
 
@@ -6826,6 +6888,146 @@ def cu_rad_feedback_refusal(cfg) -> str | None:
     return None
 
 
+#: The WRF-Solar EPS keys (RunConfig names = WRF &stoch names).
+MULTI_PERTURB_SWITCHES = ("pert_farms", "pert_deng", "pert_thom", "pert_cld3")
+MULTI_PERTURB_FACTORS = (
+    "pert_farms_albedo", "pert_farms_aod", "pert_farms_angexp",
+    "pert_farms_aerasy", "pert_farms_qv", "pert_farms_qc", "pert_farms_qs",
+    "pert_deng_qv", "pert_deng_qc", "pert_deng_t", "pert_deng_w",
+    "pert_thom_qv", "pert_thom_qc", "pert_thom_qi", "pert_thom_qs",
+    "pert_thom_ni", "pert_cld3_qv", "pert_cld3_t")
+#: Absent = WRF's Registry default; the checkpoint echo drops them there.
+#: In RunConfig's field order (each switch before its factors).
+MULTI_PERTURB_RUN_DEFAULTS = {
+    "multi_perturb": 0,
+    "pert_farms": False, **{k: 0.0 for k in MULTI_PERTURB_FACTORS if k.startswith("pert_farms_")},
+    "pert_deng": False, **{k: 0.0 for k in MULTI_PERTURB_FACTORS if k.startswith("pert_deng_")},
+    "pert_thom": False, **{k: 0.0 for k in MULTI_PERTURB_FACTORS if k.startswith("pert_thom_")},
+    "pert_cld3": False, **{k: 0.0 for k in MULTI_PERTURB_FACTORS if k.startswith("pert_cld3_")},
+    "spdt": -1.0, "num_pert_3d": 15, "nens": 1, "stochpert_tbl": ""}
+
+
+#: MAD-WRF's keys at their Registry defaults (the checkpoint echo drops them
+#: there).
+MADWRF_RUN_DEFAULTS = {"madwrf_opt": 0, "madwrf_dt_relax": 60.0,
+                       "madwrf_dt_nudge": 60.0, "madwrf_cldinit": 0}
+
+
+def madwrf_refusal(cfg) -> str | None:
+    """Why this configuration cannot run its MAD-WRF keys, or None."""
+    opt = getattr(cfg, "madwrf_opt", 0)
+    if isinstance(opt, bool) or opt not in (0, 1, 2):
+        return "madwrf_opt must be 0 (off), 1 or 2"
+    init = getattr(cfg, "madwrf_cldinit", 0)
+    if isinstance(init, bool) or init not in (0, 1):
+        return "madwrf_cldinit must be 0 or 1"
+    for key in ("madwrf_dt_relax", "madwrf_dt_nudge"):
+        value = getattr(cfg, key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) \
+                or not math.isfinite(value):
+            return f"{key} must be a finite real"
+    if opt == 1 and (int(cfg.mp_physics) != 96 or int(getattr(cfg, "use_mp_re", 1)) != 0):
+        return ("madwrf_opt = 1 requires mp_physics = 96 and use_mp_re = 0 "
+                "(WRF's '--- ERROR: madwrf_opt = 1 requires mp_physics=96 and "
+                "use_mp_re=0', module_check_a_mundo.F:375-381); got "
+                f"mp_physics = {cfg.mp_physics}, use_mp_re = "
+                f"{getattr(cfg, 'use_mp_re', 1)}")
+    if opt == 2:
+        from woof.core.rrtmg_legacy import legacy_cloud_fraction_flags
+        try:
+            f_qi, f_qs = legacy_cloud_fraction_flags(int(cfg.mp_physics))
+        except (NotImplementedError, ValueError, KeyError):
+            f_qi = f_qs = False
+        if not cfg.moist or int(cfg.mp_physics) == 0 or not (f_qi and f_qs):
+            return ("madwrf_opt = 2 nudges qc, qi and qs toward their tracers "
+                    "and needs a microphysics scheme carrying all three "
+                    "(WRF stops: 'madwrf_opt = 2 requires a mp_physics option "
+                    f"with qc, qi, and qs', module_physics_init.F:4693); got "
+                    f"mp_physics = {cfg.mp_physics}")
+        if not float(cfg.madwrf_dt_relax) > 0.0:
+            return "madwrf_dt_relax must be positive (the nudge divides by it)"
+    if init == 1:
+        from woof.core.rrtmg_legacy import legacy_cloud_fraction_flags
+        try:
+            f_qi, f_qs = legacy_cloud_fraction_flags(int(cfg.mp_physics))
+        except (NotImplementedError, ValueError, KeyError):
+            f_qi = f_qs = False
+        if not cfg.moist or int(cfg.mp_physics) == 0 or not (f_qi and f_qs):
+            return ("madwrf_cldinit = 1 rewrites moist(P_QV, P_QC, P_QI, "
+                    "P_QS) at the start (module_initialize_real.F:4861); woof "
+                    "runs it for schemes carrying qc, qi and qs; got "
+                    f"mp_physics = {cfg.mp_physics}")
+    return None
+
+
+def multi_perturb_refusal(cfg) -> str | None:
+    """Why this configuration cannot run its WRF-Solar EPS keys, or None."""
+    mp = getattr(cfg, "multi_perturb", 0)
+    if isinstance(mp, bool) or mp not in (0, 1):
+        return "multi_perturb must be 0 or 1"
+    for key in MULTI_PERTURB_SWITCHES:
+        if type(getattr(cfg, key)) is not bool:
+            return f"{key} must be boolean"
+    for key in (*MULTI_PERTURB_FACTORS, "spdt"):
+        value = getattr(cfg, key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) \
+                or not math.isfinite(value):
+            return f"{key} must be a finite real"
+    for key in ("num_pert_3d", "nens"):
+        value = getattr(cfg, key)
+        if isinstance(value, bool) or not isinstance(value, int):
+            return f"{key} must be an integer"
+    if not isinstance(cfg.stochpert_tbl, str):
+        return "stochpert_tbl must name a STOCHPERT.TBL (\"\" for WRF's)"
+    if mp == 0:
+        on = [k for k in MULTI_PERTURB_SWITCHES if getattr(cfg, k)]
+        if on:
+            return (f"{', '.join(on)} without multi_perturb = 1 does nothing "
+                    "in WRF (each driver tests 'pert_<scheme> .and. "
+                    "multi_perturb == 1'); set multi_perturb = 1 or remove it")
+        return None
+    if getattr(cfg, "use_adaptive_time_step", False):
+        return ("multi_perturb = 1 with use_adaptive_time_step: WRF stops "
+                "('multi_perturb and adpative time step are not compatible', "
+                "module_check_a_mundo.F:328-337)")
+    if not any(getattr(cfg, k) for k in MULTI_PERTURB_SWITCHES):
+        return ("multi_perturb = 1 with every pert_<scheme> switch off: WRF "
+                "only writes the perturbation fields to history, which woof "
+                "does not; switch on pert_farms, pert_deng, pert_thom or "
+                "pert_cld3")
+    if cfg.pert_farms and int(cfg.swint_opt) != 2:
+        return ("pert_farms perturbs FARMS's inputs (module_radiation_driver.F"
+                f":3052-3082); it needs swint_opt = 2, got {cfg.swint_opt}")
+    if cfg.pert_deng and int(getattr(cfg, "shcu_physics", 0)) != 5:
+        return ("pert_deng perturbs Deng's inputs (module_shallowcu_driver.F"
+                ":632-672); it needs shcu_physics = 5")
+    if cfg.pert_thom and int(cfg.mp_physics) not in (8, 28):
+        return ("pert_thom perturbs Thompson's inputs (module_microphysics_"
+                "driver.F:1120-1213, :1314-1381, mp_physics 28 and 8); got "
+                f"mp_physics = {cfg.mp_physics}")
+    if cfg.pert_cld3 and int(cfg.icloud) != 3:
+        return ("pert_cld3 perturbs cal_cldfra3's t and qv "
+                "(module_radiation_driver.F:1472-1474); it needs icloud = 3, "
+                f"got {cfg.icloud}")
+    from woof.core.wrfsolar_eps import (StochpertTableError,
+                                        load_stochpert_table)
+    try:
+        load_stochpert_table(cfg.stochpert_tbl, num_pert_3d=int(cfg.num_pert_3d))
+    except (StochpertTableError, OSError) as problem:
+        return f"stochpert_tbl {cfg.stochpert_tbl!r}: {problem}"
+    if min(int(cfg.nx) + 1, int(cfg.ny) + 1) // 2 - 5 < 1:
+        return ("multi_perturb = 1 needs at least 12 staggered points each "
+                "way: SETUP_RAND_PERTURB forces wavenumbers up to "
+                "min(LMAX, KMAX)/2 - 5 (module_stoch.F:607), and with none "
+                "its normalization divides by zero; got "
+                f"{int(cfg.nx) + 1} x {int(cfg.ny) + 1}")
+    if float(cfg.dt) < 1.0:
+        return ("multi_perturb = 1 needs a time step of at least 1 s: "
+                "SETUP_RAND_PERTURB's AR(1) step is stepsp*time_step, the "
+                "integer namelist seconds")
+    return None
+
+
 def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> RunConfig:
     """The RunConfig invariant battery, shared by BOTH loaders.
 
@@ -6866,6 +7068,12 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
         raise ConfigurationRefused(feedback_why)
     if type(cfg.solar_diagnostics) is not int or cfg.solar_diagnostics not in (0, 1):
         raise ConfigurationRefused("solar_diagnostics must be 0 or 1")
+    eps_why = multi_perturb_refusal(cfg)
+    if eps_why is not None:
+        raise ConfigurationRefused(eps_why)
+    madwrf_why = madwrf_refusal(cfg)
+    if madwrf_why is not None:
+        raise ConfigurationRefused(madwrf_why)
     if cfg.solar_diagnostics:
         _lw_scheme, _sw_scheme = radiation_scheme_ids(cfg)
         if int(_sw_scheme) != 4:

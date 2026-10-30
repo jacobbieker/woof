@@ -7,9 +7,21 @@ from woof.wrf_namelist_registry import wrf_namelist_keys
 
 SUPPORTED_SELECTORS = frozenset({"sppt", "skebs", "stoch_force_opt", "spp",
                                "spp_conv", "spp_pbl", "spp_lsm"})
-UNSUPPORTED_SELECTORS = frozenset({"rand_perturb", "multi_perturb", "perturb_bdy",
-    "perturb_chem_bdy", "pert_cld3", "pert_deng", "pert_farms", "pert_mynn",
-    "pert_noah", "pert_thom"})
+#: WRF-Solar EPS (woof/core/wrfsolar_eps.py): RunConfig keys of their own,
+#: imported by :func:`_import_multi_perturb`, not ensemble-door processes.
+EPS_SELECTORS = ("multi_perturb", "pert_farms", "pert_deng", "pert_thom", "pert_cld3")
+EPS_FACTORS = ("pert_farms_albedo", "pert_farms_aod", "pert_farms_angexp",
+               "pert_farms_aerasy", "pert_farms_qv", "pert_farms_qc",
+               "pert_farms_qs", "pert_deng_qv", "pert_deng_qc", "pert_deng_t",
+               "pert_deng_w", "pert_thom_qv", "pert_thom_qc", "pert_thom_qi",
+               "pert_thom_qs", "pert_thom_ni", "pert_cld3_qv", "pert_cld3_t")
+#: Emitted only where they leave WRF's Registry default.
+EPS_DEFAULTS = {"multi_perturb": 0, "pert_farms": False, "pert_deng": False,
+                "pert_thom": False, "pert_cld3": False,
+                **{key: 0.0 for key in EPS_FACTORS}, "spdt": -1.0,
+                "num_pert_3d": 15, "nens": 1}
+UNSUPPORTED_SELECTORS = frozenset({"rand_perturb", "perturb_bdy",
+    "perturb_chem_bdy", "pert_mynn", "pert_noah"})
 #: What WRF v4.7.1 does under each selector the engine has no consumer for
 #: (Registry/registry.stoch, registry.bdy_perturb), so the refusal says which
 #: operation would be lost rather than one sentence for all ten.  A row
@@ -17,26 +29,21 @@ UNSUPPORTED_SELECTORS = frozenset({"rand_perturb", "multi_perturb", "perturb_bdy
 UNSUPPORTED_SELECTOR_OPERATION = {
     "rand_perturb": "WRF fills the RAND_PERT random-pattern array and "
                     "writes it to history (registry.stoch:15, :205)",
-    "multi_perturb": "WRF's multi-perturbation option drives the pert_* "
-                     "scheme perturbations (registry.stoch:98)",
     "perturb_bdy": "WRF perturbs the lateral boundary tendencies of U, V "
                    "and T (registry.bdy_perturb:9: 1 with the SKEBS "
                    "pattern, 2 with a supplied one)",
     "perturb_chem_bdy": "WRF perturbs the lateral boundaries of chemical "
                         "tracers with the RAND_PERT pattern "
                         "(registry.bdy_perturb:10)",
-    "pert_farms": "WRF perturbs the FARMS shortwave scheme "
-                  "(registry.stoch:99)",
-    "pert_deng": "WRF perturbs the Deng shallow-cumulus scheme "
-                 "(registry.stoch:107)",
-    "pert_mynn": "WRF perturbs the MYNN boundary-layer scheme "
-                 "(registry.stoch:112)",
-    "pert_noah": "WRF perturbs the Noah land-surface scheme "
-                 "(registry.stoch:117)",
-    "pert_thom": "WRF perturbs the Thompson microphysics "
-                 "(registry.stoch:122)",
-    "pert_cld3": "WRF perturbs the CLD3 cloud-fraction scheme "
-                 "(registry.stoch:128)",
+    "pert_mynn": "WRF-Solar EPS perturbs MYNN's qv, qc, theta and qke "
+                 "around the PBL scheme (registry.stoch:112, "
+                 "module_pbl_driver.F:1647-1725); woof ports the FARMS, "
+                 "Deng, Thompson and icloud = 3 hooks only",
+    "pert_noah": "WRF-Solar EPS perturbs Noah's qv, theta, soil moisture "
+                 "and soil temperature around the land surface "
+                 "(registry.stoch:117, module_surface_driver.F:2810-2915); "
+                 "woof ports the FARMS, Deng, Thompson and icloud = 3 hooks "
+                 "only",
 }
 assert set(UNSUPPORTED_SELECTOR_OPERATION) == UNSUPPORTED_SELECTORS
 SEED_NOTICE = ("Stochastic physics uses engine keyed Philox and cuFFT, not WRF's "
@@ -46,10 +53,79 @@ SEED_NOTICE = ("Stochastic physics uses engine keyed Philox and cuFFT, not WRF's
     "member count. nens is a seed label and never a member count.")
 
 
+def _import_multi_perturb(section, *, max_dom, registry, fix, drop, error):
+    """WRF-Solar EPS: ``multi_perturb`` and its keys as RunConfig columns.
+
+    Returns {key: per-domain column} when multi_perturb = 1 on some domain,
+    else None (the keys are then left for the inert drop below)."""
+    raw = section.entries.get("multi_perturb")
+    column = ([] if raw is None else list(raw[:max_dom]))
+    if any(type(v) is not int or v not in (0, 1) for v in column):
+        raise error("stoch", "multi_perturb", raw, "must be integer 0 or 1")
+    if not any(column):
+        if raw is not None:
+            fix("stoch", "multi_perturb", section.take("multi_perturb"), 0,
+                "multi_perturb is off: WRF runs no pert_* hook")
+        return None
+    section.take("multi_perturb")
+    out = {"multi_perturb": column + [0] * (max_dom - len(column))}
+
+    def default(key):
+        row = registry[key]
+        text = row["default"].lower()
+        return (text == ".true." if row["type"] == "logical" else
+                int(text) if row["type"] == "integer" else
+                float(text.replace("d", "e")))
+
+    for key in (*EPS_SELECTORS[1:], *EPS_FACTORS, "spdt"):
+        values = section.take(key)
+        base = default(key)
+        col = [] if values is None else list(values[:max_dom])
+        logical = registry[key]["type"] == "logical"
+        for v in col:
+            if logical and type(v) is not bool:
+                raise error("stoch", key, values, "must be a WRF logical")
+            if not logical and (isinstance(v, bool) or not isinstance(v, (int, float))):
+                raise error("stoch", key, values, "must be a WRF real")
+        col = [v if logical else float(v) for v in col]
+        out[key] = col + [base] * (max_dom - len(col))
+    for key in ("num_pert_3d", "nens"):
+        values = section.take(key)
+        value = default(key) if values is None else values[0]
+        if values is not None and len(values) != 1:
+            raise error("stoch", key, values, "WRF declares one scalar value")
+        if type(value) is not int:
+            raise error("stoch", key, values, "must be a WRF integer")
+        out[key] = [value] * max_dom
+    # INITIALIZE_STOCH hands SETUP_RAND_PERTURB the namelist forcing band
+    # (module_stoch.F:390-404); woof's generator takes WRF's defaults.
+    for key in ("kminforct", "lminforct", "kmaxforct", "lmaxforct"):
+        values = section.take(key)
+        if values is not None and any(v != default(key) for v in values):
+            raise error("stoch", key, values,
+                        "multi_perturb's patterns take the forcing band's "
+                        "Registry default; a moved band is not ported")
+        if values is not None:
+            fix("stoch", key, values, default(key), "the multi_perturb forcing band")
+    for key in ("pert_mynn", "pert_noah"):
+        values = section.entries.get(key)
+        if values is not None and any(bool(v) for v in values):
+            raise error("stoch", key, values,
+                        UNSUPPORTED_SELECTOR_OPERATION[key])
+    return out
+
+
 def import_stochastic_section(section, *, max_dom, fix, drop, error):
-    """Consume only supported controls, retaining disabled import bytes."""
+    """Consume only supported controls, retaining disabled import bytes.
+
+    Returns (ensemble-door controls or None, per-domain RunConfig columns):
+    the SPP consumer flags and, with multi_perturb = 1, WRF-Solar EPS's keys
+    (woof/core/wrfsolar_eps.py), which run on the ordinary forecast."""
     registry = {key: row for (group, key), row in wrf_namelist_keys().items()
                 if group == "stoch"}
+    eps_columns = _import_multi_perturb(section, max_dom=max_dom,
+                                        registry=registry, fix=fix,
+                                        drop=drop, error=error)
 
     def default(key):
         row = registry[key]
@@ -82,12 +158,21 @@ def import_stochastic_section(section, *, max_dom, fix, drop, error):
         for name in ("spp_conv", "spp_pbl", "spp_lsm"):
             selectors[name] = [1] * max_dom
     active = any(any(column) for column in selectors.values())
+    if active and eps_columns is not None:
+        raise error("stoch", "multi_perturb", eps_columns["multi_perturb"],
+                    "WRF-Solar EPS runs on the ordinary forecast and SPPT/"
+                    "SKEBS/SPP on the ensemble door; one import cannot carry "
+                    "both (run the EPS members as separate forecasts with "
+                    "their own nens, as WRF-Solar EPS does)")
     if not active:
         for key in sorted(registry.keys() & section.entries.keys()):
             drop("stoch", key, section.take(key),
-                "stochastic parameters and bookkeeping are inert with every &stoch selector off")
+                "stochastic parameters and bookkeeping are inert with every &stoch selector off"
+                if eps_columns is None else
+                "inert beside multi_perturb (WRF-Solar EPS reads its table, "
+                "the pert_* keys, spdt, num_pert_3d and nens)")
         section.finish()
-        return None, {}
+        return None, ({} if eps_columns is None else eps_columns)
 
     def uniform(key, column):
         if len(set(column)) != 1:
