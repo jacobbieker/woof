@@ -633,6 +633,18 @@ class MemoryPointer:
         view.fill(0)
 
 
+def _address(mem) -> int:
+    """A raw address from an int, a pointer object, or a ctypes pointer."""
+    import ctypes
+    if isinstance(mem, tuple):
+        mem = mem[0]
+    if isinstance(mem, (int, np.integer)):
+        return int(mem)
+    if hasattr(mem, "ptr"):
+        return int(mem.ptr)
+    return ctypes.cast(mem, ctypes.c_void_p).value
+
+
 class _Pointer:
     """``ndarray.data``: the view's device address."""
 
@@ -652,6 +664,23 @@ class _Pointer:
     @property
     def size(self):
         return self._a._st.nbytes
+
+    # CuPy's MemoryPointer copies, by raw address (cupy.cuda.runtime.memcpy)
+    def copy_from_device(self, src, size, stream=None):
+        from woof.backend.facade.cuda import _memcpy
+        _memcpy(self.ptr, _address(src), size)
+
+    def copy_from_host(self, mem, size, stream=None):
+        from woof.backend.facade.cuda import _memcpy
+        _memcpy(self.ptr, _address(mem), size)
+
+    def copy_to_host(self, mem, size, stream=None):
+        from woof.backend.facade.cuda import _memcpy
+        _memcpy(_address(mem), self.ptr, size)
+
+    copy_from_device_async = copy_from_device
+    copy_from_host_async = copy_from_host
+    copy_to_host_async = copy_to_host
 
     def memset_async(self, value, size, stream=None):
         """cudaMemsetAsync from this view's first byte: ``size`` bytes of

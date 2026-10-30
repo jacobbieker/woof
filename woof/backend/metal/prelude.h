@@ -232,6 +232,25 @@ static inline f64 ldexp(f64 a, int n) {
   return a * f64::bits((ulong)(n + 0x3FF) << 52);
 }
 
+static inline float nextafterf(float x, float y) {
+  // the neighbouring binary32 word toward y, on the bits ordered as
+  // sign-magnitude integers (subnormal operands are not flushed)
+  uint ux = as_type<uint>(x), uy = as_type<uint>(y);
+  if ((ux & 0x7FFFFFFFu) > 0x7F800000u || (uy & 0x7FFFFFFFu) > 0x7F800000u)
+    return as_type<float>(0x7FC00000u);
+  int ix = (ux >> 31) ? -int(ux & 0x7FFFFFFFu) : int(ux);
+  int iy = (uy >> 31) ? -int(uy & 0x7FFFFFFFu) : int(uy);
+  if (ix == iy) return y;
+  ix += (ix < iy) ? 1 : -1;
+  return as_type<float>(ix < 0 ? (uint(-ix) | 0x80000000u) : uint(ix));
+}
+static inline f64 nextafter(f64 x, f64 y) {
+  if (x != x || y != y) return x + y;
+  if (x == y) return y;
+  if (x == f64(0.0f)) return f64::bits((y.b & 0x8000000000000000UL) | 1UL);
+  return f64::bits(((x < y) == (x > f64(0.0f))) ? x.b + 1UL : x.b - 1UL);
+}
+
 static inline f64 frexp(f64 a, thread int* e) {
   // a = m * 2^e with |m| in [0.5, 1): exact, by moving the exponent field
   ulong u = a.b, mag = u & 0x7FFFFFFFFFFFFFFFUL;
@@ -591,6 +610,8 @@ static inline int3 make_int3(int x, int y, int z) { return int3(x, y, z); }
 static inline int4 make_int4(int x, int y, int z, int w) { return int4(x, y, z, w); }
 static inline uint2 make_uint2(uint x, uint y) { return uint2(x, y); }
 static inline uint3 make_uint3(uint x, uint y, uint z) { return uint3(x, y, z); }
+// CUDA's dim3 is the launch builtins' uint3 here (blockDim, gridDim)
+typedef uint3 dim3;
 static inline uint4 make_uint4(uint x, uint y, uint z, uint w) { return uint4(x, y, z, w); }
 struct __woof_double2 { f64 x, y; };
 struct __woof_double3 { f64 x, y, z; };

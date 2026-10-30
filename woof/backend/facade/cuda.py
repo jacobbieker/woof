@@ -317,6 +317,62 @@ def _memcpy_async(dst, src, size, kind=4, stream=0):
     _memcpy(dst, src, size, kind)
 
 
+def _read_bytes(ptr, nbytes):
+    import ctypes
+    view = _bytes_view(ptr, nbytes)
+    if view is not None:
+        return view.get()
+    return np.frombuffer((ctypes.c_char * nbytes).from_address(int(ptr)), np.uint8).copy()
+
+
+def _write_bytes(ptr, data):
+    import ctypes
+    view = _bytes_view(ptr, data.size)
+    if view is not None:
+        view.set(data)
+    else:
+        ctypes.memmove(int(ptr), data.ctypes.data, data.size)
+
+
+def _copy_boxes(dst, dst_pitch, dst_plane, src, src_pitch, src_plane, width, height, depth):
+    """``depth`` planes of ``height`` rows of ``width`` bytes, each side with
+    its own row and plane pitch: one read of the source span and one
+    read-modify-write of the destination span."""
+    if not (width and height and depth):
+        return
+    span = lambda pitch, plane: plane * (depth - 1) + pitch * (height - 1) + width
+    rows = np.lib.stride_tricks.as_strided(
+        _read_bytes(src, span(src_pitch, src_plane)), (depth, height, width), (src_plane, src_pitch, 1))
+    dspan = span(dst_pitch, dst_plane)
+    if dst_pitch == width and dst_plane == width * height:
+        target = np.ascontiguousarray(rows).reshape(-1)
+    else:
+        target = _read_bytes(dst, dspan)
+        np.lib.stride_tricks.as_strided(target, (depth, height, width),
+                                        (dst_plane, dst_pitch, 1))[...] = rows
+    _write_bytes(dst, target)
+
+
+def _memcpy2d(dst, dpitch, src, spitch, width, height, kind=4, stream=0):
+    """cudaMemcpy2D(Async): ``height`` rows of ``width`` bytes."""
+    _copy_boxes(dst, int(dpitch), 0, src, int(spitch), 0, int(width), int(height), 1)
+
+
+def _memcpy3d(params, stream=0):
+    """cudaMemcpy3D(Async) from a pointer to cudaMemcpy3DParms (x86-64 layout,
+    pitched pointers only): the box ``extent`` at srcPos to dstPos."""
+    import ctypes
+    words = (ctypes.c_size_t * 20).from_address(int(params))
+    if words[0] or words[8]:
+        raise AttributeError("cudaMemcpy3D with CUDA arrays is not supported by woof's mlx backend")
+    (sx, sy, sz), (sptr, spitch, _sxs, sysize) = words[1:4], words[4:8]
+    (dx, dy, dz), (dptr, dpitch, _dxs, dysize) = words[9:12], words[12:16]
+    width, height, depth = words[16:19]
+    _copy_boxes(dptr + dz * dpitch * dysize + dy * dpitch + dx, dpitch, dpitch * dysize,
+                sptr + sz * spitch * sysize + sy * spitch + sx, spitch, spitch * sysize,
+                width, height, depth)
+
+
 def _memset(ptr, value, size):
     view = _bytes_view(ptr, int(size))
     if view is None:
@@ -328,6 +384,7 @@ def _memset(ptr, value, size):
 
 runtime = types.SimpleNamespace(
     memcpy=_memcpy, memcpyAsync=_memcpy_async, memset=_memset,
+    memcpy2D=_memcpy2d, memcpy2DAsync=_memcpy2d, memcpy3D=_memcpy3d, memcpy3DAsync=_memcpy3d,
     memsetAsync=lambda ptr, value, size, stream=0: _memset(ptr, value, size),
     **_MEMCPY_KINDS,
     getDevice=lambda: 0,

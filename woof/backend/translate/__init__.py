@@ -563,7 +563,14 @@ class _Rewriter:
         if cursor.kind in (K.STRUCT_DECL, K.CLASS_DECL, K.CLASS_TEMPLATE,
                            K.CLASS_TEMPLATE_PARTIAL_SPECIALIZATION):
             self.struct_fields(cursor)
-        self.visit_expr_tree(cursor, depth=0, in_kernel=False)
+        # A file-scope static_assert names the launch builtins only in
+        # unevaluated operands (decltype(blockIdx.x)): their types, not a
+        # thread's parameters, which exist only inside functions.
+        self._file_scope_builtins = cursor.kind == K.STATIC_ASSERT
+        try:
+            self.visit_expr_tree(cursor, depth=0, in_kernel=False)
+        finally:
+            self._file_scope_builtins = False
 
     def program_scope_var(self, cursor):
         """MSL program-scope variables live in ``constant`` (or are
@@ -2190,6 +2197,9 @@ class _Rewriter:
                 # Kernels have these as parameters; device functions that
                 # read them receive them (thread_builtins below).
                 s, e = self.span(node)
+                if getattr(self, "_file_scope_builtins", False):
+                    self.edits.replace(s, e, "uint3()")
+                    continue
                 self.edits.replace(s, e, {"threadIdx": "__woof_tid", "blockIdx": "__woof_bid",
                                           "blockDim": "__woof_bdim", "gridDim": "__woof_gdim"}[node.spelling])
                 continue

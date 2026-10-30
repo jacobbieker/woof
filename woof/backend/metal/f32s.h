@@ -214,6 +214,17 @@ static inline f32s fmaf(f32s a, f32s b, f32s c) {
   return f32s(__woof_n(s));
 }
 static inline f32s fma(f32s a, f32s b, f32s c) { return fmaf(a, b, c); }
+static inline f32s nextafterf(f32s x, f32s y) {
+  // on the bits, ordered as sign-magnitude integers: exact for subnormals
+  uint ux = as_type<uint>(x.v), uy = as_type<uint>(y.v);
+  if ((ux & 0x7FFFFFFFu) > 0x7F800000u || (uy & 0x7FFFFFFFu) > 0x7F800000u)
+    return f32s(as_type<float>(0x7FC00000u));
+  int ix = (ux >> 31) ? -int(ux & 0x7FFFFFFFu) : int(ux);
+  int iy = (uy >> 31) ? -int(uy & 0x7FFFFFFFu) : int(uy);
+  if (ix == iy) return y;
+  ix += (ix < iy) ? 1 : -1;
+  return f32s(as_type<float>(ix < 0 ? (uint(-ix) | 0x80000000u) : uint(ix)));
+}
 static inline f32s fminf(f32s a, f32s b) {
   if (isnan(a)) return b;
   if (isnan(b)) return a;

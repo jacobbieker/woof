@@ -181,7 +181,8 @@ def dot(a, b):
 
 
 def array_equal(a, b, equal_nan=False):
-    return bool(np.array_equal(asnumpy(a), asnumpy(b), equal_nan=equal_nan))
+    # CuPy's answer is a 0-d device array (``.item()``, ``bool()``)
+    return asarray(np.array(np.array_equal(asnumpy(a), asnumpy(b), equal_nan=equal_nan)))
 
 
 def isclose(a, b, rtol=1e-05, atol=1e-08, equal_nan=False):
