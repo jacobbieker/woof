@@ -1890,6 +1890,15 @@
     "registry_groups": {
       "radiation": [
         "config_rrtmg_spectral_output"
+      ],
+      "radtran": [
+        "config_radtran_wavelengths",
+        "config_radtran_umu",
+        "config_radtran_phi",
+        "config_radtran_mol_abs_param",
+        "config_radtran_solver",
+        "config_radtran_streams",
+        "config_radtran_pseudospherical"
       ]
     },
     "services": {

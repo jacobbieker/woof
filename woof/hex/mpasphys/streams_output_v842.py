@@ -166,6 +166,11 @@ class PhysicsStreams(NativePoolStreams):
                                     staged_frames=0, in_stream_frames=0, staging_bytes_max=0)
         if diagnostics is not None:
             diagnostics.bind(self)
+        # WOOF's &radtran spectral diagnostic: computed at the write of a stream carrying it.
+        self.radtran = None
+        if getattr(getattr(session, 'config', None), 'radtran', None) is not None:
+            from .radtran_v842 import RadtranOutput
+            self.radtran = RadtranOutput(session)
 
     def current_time(self, *, step, dt):
         """Use the ported clock's committed time at the stream boundary."""
@@ -465,6 +470,9 @@ class PhysicsStreams(NativePoolStreams):
                     self.alarms.due(name, when)]
         if not selected:
             return False
+        if self.radtran is not None and self.radtran.wanted(selected, self.layout.packages):
+            self.radtran.compute(when)
+            receipt['radtran'] = self.radtran.receipt()
         waiting = perf_counter()
         slot = self._free_slot()
         self._host_storage = self._host_sets[slot]
