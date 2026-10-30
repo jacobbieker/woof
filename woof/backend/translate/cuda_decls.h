@@ -84,13 +84,15 @@ unsigned long long atomicCAS(unsigned long long*, unsigned long long, unsigned l
 int atomicOr(int*, int); unsigned int atomicOr(unsigned int*, unsigned int);
 int atomicAnd(int*, int); unsigned int atomicAnd(unsigned int*, unsigned int);
 
-// warp shuffles
-float __shfl_down_sync(unsigned int, float, unsigned int, int = 32);
-double __shfl_down_sync(unsigned int, double, unsigned int, int = 32);
-int __shfl_down_sync(unsigned int, int, unsigned int, int = 32);
-float __shfl_xor_sync(unsigned int, float, int, int = 32);
-double __shfl_xor_sync(unsigned int, double, int, int = 32);
-float __shfl_sync(unsigned int, float, int, int = 32);
+// warp shuffles: CUDA's overload set
+#define WOOF_SHFL(T) \
+  T __shfl_sync(unsigned int, T, int, int = 32); \
+  T __shfl_up_sync(unsigned int, T, unsigned int, int = 32); \
+  T __shfl_down_sync(unsigned int, T, unsigned int, int = 32); \
+  T __shfl_xor_sync(unsigned int, T, int, int = 32);
+WOOF_SHFL(int) WOOF_SHFL(unsigned int) WOOF_SHFL(long) WOOF_SHFL(unsigned long)
+WOOF_SHFL(long long) WOOF_SHFL(unsigned long long) WOOF_SHFL(float) WOOF_SHFL(double)
+#undef WOOF_SHFL
 
 // libm: the C names CUDA provides, binary32 and binary64
 #define WOOF_F1(n) float n##f(float); double n(double); float n(float);
@@ -135,12 +137,6 @@ void __trap();
 void __syncwarp(unsigned int = 0xffffffffu);
 unsigned int __ballot_sync(unsigned int, int);
 int __any_sync(unsigned int, int); int __all_sync(unsigned int, int);
-float __shfl_up_sync(unsigned int, float, unsigned int, int = 32);
-int __shfl_up_sync(unsigned int, int, unsigned int, int = 32);
-unsigned int __shfl_down_sync(unsigned int, unsigned int, unsigned int, int = 32);
-unsigned int __shfl_sync(unsigned int, unsigned int, int, int = 32);
-int __shfl_sync(unsigned int, int, int, int = 32);
-double __shfl_sync(unsigned int, double, int, int = 32);
 int atomicXor(int*, int); unsigned int atomicXor(unsigned int*, unsigned int);
 float __double2float_ru(double); float __double2float_rd(double);
 long long __float2ll_rz(float); long long __float2ll_rn(float);

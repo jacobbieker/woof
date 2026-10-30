@@ -112,6 +112,13 @@ class _FacadeFinder:
         self.backend = backend
 
     def find_spec(self, fullname, path=None, target=None):
+        if fullname in ("cupy_backends", "cupy_backends.cuda", "cupy_backends.cuda.api",
+                        "cupy_backends.cuda.libs"):
+            # packages only; their modules are the facade's cupy.cuda
+            # namespaces, registered when it loads (facade/cuda.py)
+            import importlib.machinery
+            import cupy.cuda  # noqa: F401
+            return importlib.machinery.ModuleSpec(fullname, None, is_package=True)
         if fullname not in ("cupy", "cupyx", "cupyx.scipy", "cupyx.scipy.special", "cupyx.scipy.ndimage"):
             return None
         import importlib.machinery

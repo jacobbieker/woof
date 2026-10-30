@@ -119,6 +119,8 @@ class Stream:
     def __init__(self, null=False, non_blocking=False, ptr=0, priority=0):
         self._null = null
         self.ptr = 0 if null else id(self)
+        # one Metal queue serves every stream: the priority is recorded only
+        self.priority = int(priority)
 
     def __enter__(self):
         self._prev = Stream._current
@@ -274,7 +276,60 @@ def _pointer_attributes(ptr):
     return types.SimpleNamespace(type=_MEMORY_UNREGISTERED, device=-2, hostPointer=0, devicePointer=0)
 
 
+#: cudaMemcpyKind
+_MEMCPY_KINDS = dict(memcpyHostToHost=0, memcpyHostToDevice=1, memcpyDeviceToHost=2,
+                     memcpyDeviceToDevice=3, memcpyDefault=4)
+
+
+def _bytes_view(ptr, nbytes):
+    """``nbytes`` at address ``ptr``: a uint8 facade view of the storage that
+    handed the address out, or None for host memory."""
+    from woof.backend.facade._array import ndarray, storage_at
+    found = storage_at(int(ptr))
+    if found is None:
+        return None
+    st, offset = found
+    if offset + nbytes > st.nbytes:
+        raise ValueError("cudaMemcpy range runs past the end of its device allocation")
+    return ndarray((int(nbytes),), np.uint8, _storage=st, _offset=offset)
+
+
+def _memcpy(dst, src, size, kind=4):
+    """cudaMemcpy over raw addresses: a device side is a facade storage's GPU
+    address (``a.data.ptr``), a host side any process address.  Memory is
+    unified and the facade orders work itself, so the copy is complete when
+    this returns; the kind is implied by the addresses (cudaMemcpyDefault)."""
+    import ctypes
+    size = int(size)
+    if size <= 0:
+        return
+    source = _bytes_view(src, size)
+    data = source.get() if source is not None else \
+        np.frombuffer((ctypes.c_char * size).from_address(int(src)), np.uint8).copy()
+    target = _bytes_view(dst, size)
+    if target is not None:
+        target.set(data)
+    else:
+        ctypes.memmove(int(dst), data.ctypes.data, size)
+
+
+def _memcpy_async(dst, src, size, kind=4, stream=0):
+    _memcpy(dst, src, size, kind)
+
+
+def _memset(ptr, value, size):
+    view = _bytes_view(ptr, int(size))
+    if view is None:
+        import ctypes
+        ctypes.memset(int(ptr), int(value), int(size))
+    else:
+        view.fill(np.uint8(int(value) & 0xFF))
+
+
 runtime = types.SimpleNamespace(
+    memcpy=_memcpy, memcpyAsync=_memcpy_async, memset=_memset,
+    memsetAsync=lambda ptr, value, size, stream=0: _memset(ptr, value, size),
+    **_MEMCPY_KINDS,
     getDevice=lambda: 0,
     setDevice=lambda d: Device(d) and None,
     getDeviceCount=lambda: 1,
@@ -296,6 +351,10 @@ runtime = types.SimpleNamespace(
 
 
 class _MemoryPool:
+    def __init__(self, allocator=None):
+        # CuPy's pool draws on ``allocator``; MLX's allocator is the facade's only one
+        self.allocator = allocator
+
     def used_bytes(self):
         mx = _mx()
         return int(mx.get_active_memory()) if hasattr(mx, "get_active_memory") else 0
@@ -344,9 +403,30 @@ def get_default_pinned_memory_pool():
     return _PINNED
 
 
+class PinnedMemoryPointer:
+    """``cupy.cuda.alloc_pinned_memory``'s result: a hostAlloc block (so
+    ``pointerGetAttributes`` reports page-locked host memory, as CuPy's
+    pinned pool's blocks are), exported through the buffer protocol."""
+
+    def __init__(self, nbytes):
+        import weakref
+        self.ptr = _host_alloc(max(int(nbytes), 1))
+        self.size = int(nbytes)
+        self._host = _HOST_BLOCKS[self.ptr][0][:self.size]
+        weakref.finalize(self, _free_host, self.ptr)
+
+    def __buffer__(self, flags):
+        return memoryview(self._host)
+
+    def __len__(self):
+        return self.size
+
+    def __int__(self):
+        return self.ptr
+
+
 def alloc_pinned_memory(nbytes):
-    # Unified memory: host memory is device-visible already.
-    return memoryview(bytearray(int(nbytes)))
+    return PinnedMemoryPointer(nbytes)
 
 
 def set_allocator(allocator=None):
@@ -399,11 +479,15 @@ class using_allocator:
         return False
 def _compile_using_nvrtc(source, options=(), arch=None, filename="kern.cu", name_expressions=None,
                          log_stream=None, cache_in_memory=False, jitify=False, method=None):
-    """CuPy's direct NVRTC call: a translated image (``function.Module().load``
-    translates it) and no name mapping."""
+    """CuPy's direct NVRTC call: a translated image and no name mapping.
+    The unit is translated and its Metal library built here, so a unit that
+    does not compile fails at this call, as it does under NVRTC; loading the
+    image (``function.Module().load``) then finds the library built."""
     if name_expressions:
         raise AttributeError("NVRTC name expressions are not supported by woof's mlx backend")
-    return translated_image(source, tuple(options or ()), filename), None
+    image = translated_image(source, tuple(options or ()), filename)
+    _FunctionModule().load(image)
+    return image, None
 
 
 def _compile_with_cache_cuda(source, options, arch=None, cache_dir=None, extra_source=None,
@@ -428,8 +512,17 @@ class _NVRTCProgram:
 
 compiler = types.SimpleNamespace(
     CompileException=RuntimeError, compile_using_nvrtc=_compile_using_nvrtc,
+    # CuPy's raw route under compile_using_nvrtc (woof.kernel_aot wraps it)
+    _compile_using_nvrtc_no_warning=_compile_using_nvrtc,
     _compile_with_cache_cuda=_compile_with_cache_cuda, _NVRTCProgram=_NVRTCProgram,
-    _get_arch=lambda: "metal")
+    _get_arch=lambda: "metal",
+    # the architecture translated units are preprocessed for (__CUDA_ARCH__)
+    _get_arch_for_options_for_nvrtc=lambda arch=None: _nvrtc_arch())
+
+
+def _nvrtc_arch():
+    from woof.backend.translate import CUDA_ARCH
+    return f"-arch=compute_{CUDA_ARCH // 10}", "ptx"
 
 
 def _func_get_attribute(attribute, function_ptr):
@@ -446,9 +539,45 @@ driver = types.SimpleNamespace(
     CU_FUNC_ATTRIBUTE_NUM_REGS=4, CU_FUNC_ATTRIBUTE_PTX_VERSION=5,
     CU_FUNC_ATTRIBUTE_BINARY_VERSION=6)
 
-#: No NVRTC: (0, 0) so a receipt header cannot be mistaken for a CUDA build
-#: (the facade's cupy.__version__ names the backend).
-nvrtc = types.SimpleNamespace(getVersion=lambda: (0, 0), NVRTCError=RuntimeError)
+class _NvrtcProgram:
+    def __init__(self, source, name, headers=(), include_names=()):
+        self.source, self.name = source, name or "kern.cu"
+        self.headers = dict(zip(include_names or (), headers or ()))
+        self.image, self.log = None, ""
+
+
+def _compile_program(program, options=()):
+    """nvrtcCompileProgram: translate and build the unit (the image is what
+    getPTX/getCUBIN hand back; ``function.Module().load`` takes it).  The
+    in-memory headers of nvrtcCreateProgram are written to a directory the
+    preprocessor searches."""
+    options = tuple(str(o) for o in options or ())
+    if program.headers:
+        import hashlib
+        import tempfile
+        from pathlib import Path
+        digest = hashlib.sha256(repr(sorted(program.headers.items())).encode()).hexdigest()[:16]
+        root = Path(tempfile.gettempdir()) / f"woof-nvrtc-headers-{digest}"
+        for name, text in program.headers.items():
+            path = root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text if isinstance(text, str) else text.decode())
+        options += (f"-I{root}",)
+    try:
+        program.image = _compile_using_nvrtc(program.source, options, filename=program.name)[0]
+    except Exception as exc:
+        program.log = str(exc)
+        raise RuntimeError(f"NVRTC_ERROR_COMPILATION (woof mlx backend): {exc}") from exc
+
+
+#: No NVRTC: version (0, 0) so a receipt header cannot be mistaken for a
+#: CUDA build (the facade's cupy.__version__ names the backend).  The
+#: program API compiles through the translator.
+nvrtc = types.SimpleNamespace(
+    getVersion=lambda: (0, 0), NVRTCError=RuntimeError,
+    createProgram=_NvrtcProgram, compileProgram=_compile_program,
+    getPTX=lambda program: program.image, getCUBIN=lambda program: program.image,
+    getProgramLog=lambda program: program.log, destroyProgram=lambda program: None)
 
 
 # ---------------------------------------------------------------- direct NVRTC route
@@ -540,3 +669,16 @@ def __getattr__(name):
     if name == "MemoryPointer":
         return _memory_pointer
     raise AttributeError(f"cupy.cuda.{name} is not implemented by woof's mlx backend")
+
+
+# `import cupy.cuda.compiler` / `from cupy.cuda.runtime import ...`: Python
+# finds a submodule already in sys.modules without asking the parent for a
+# package path.
+import sys as _sys  # noqa: E402
+
+for _name in ("compiler", "runtime", "driver", "nvrtc"):
+    _sys.modules.setdefault(f"cupy.cuda.{_name}", globals()[_name])
+# CuPy's low-level bindings package, by the names woof imports them
+for _name, _value in (("cupy_backends.cuda.api.runtime", runtime), ("cupy_backends.cuda.api.driver", driver),
+                      ("cupy_backends.cuda.libs.nvrtc", nvrtc)):
+    _sys.modules.setdefault(_name, _value)

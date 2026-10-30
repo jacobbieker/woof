@@ -156,6 +156,34 @@ buffers directly, so a dropped layout scrambles fields rather than failing
 this. Elementwise results are row-major whatever their operands' layout;
 make a column-major kernel argument explicit with `asfortranarray`.
 
+## Threads
+
+CuPy arrays and CUDA's null stream are shared by every host thread. MLX's
+streams belong to the thread that made them, so an array computed lazily in
+one thread could not be evaluated in another ("There is no Stream(gpu, N) in
+current thread"). The facade therefore puts all work on one
+`new_thread_unsafe_stream`, made the default in every thread as it starts
+(`loader.share_one_stream`). That stream is not thread-safe, and two threads
+evaluating at once abort the process, so `mx.eval`, `mx.async_eval` and
+`mx.synchronize` take one lock. Threads still build graphs concurrently, but
+their GPU work is serialised.
+
+## NumPy protocols and the CUDA runtime surface
+
+* `np.maximum(0, x)`, `np.where(m, x, y)` and other NumPy calls on facade
+  arrays dispatch to the facade (`__array_ufunc__`, `__array_function__`),
+  as they do to CuPy. Binary ufuncs have `reduce`, `reduceat`, `accumulate`
+  and `outer`, which NumPy computes on the host words.
+* A same-width view of another kind (`a.view(cupy.uint32)` of float32) reads
+  the bits. A boolean mask over several axes indexes as NumPy's `nonzero`.
+* `cupy.cuda.runtime.memcpy`/`memcpyAsync`/`memset` work on raw addresses: a
+  facade storage's GPU address on the device side, any process address on
+  the host side. `alloc_pinned_memory` returns a `hostAlloc` block.
+* `cupy.cuda.nvrtc`'s program API and `compile_using_nvrtc` translate and
+  build the unit when they are called, so a unit that does not compile fails
+  there, as it does under NVRTC. `cupy.cuda.compiler`/`runtime`/`driver`/
+  `nvrtc` and `cupy_backends.cuda.{api,libs}` import as modules.
+
 ## Mapped host memory
 
 `cudaHostAlloc` returns an evaluated MLX buffer's host address. Apple

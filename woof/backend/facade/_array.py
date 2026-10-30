@@ -303,6 +303,11 @@ class ndarray:
         if not self._same_item():
             return self._reinterpreted_values()
         arr = self._st.arr
+        want = storage_mx_dtype(self.dtype)
+        if arr.dtype != want:
+            # a same-width view of another kind (float32 storage read as
+            # uint32): the bits, as CuPy's view gives them
+            arr = arr.view(want)
         start = self._element_offset()
         if self.is_c_contiguous():
             flat = arr[start:start + self.size] if (start or self.size != arr.size) else arr
@@ -342,6 +347,36 @@ class ndarray:
         # through the explicit get()/asnumpy() paths.
         raise TypeError("Implicit conversion to a NumPy array is not allowed. "
                         "Please use `.get()` to construct a NumPy array explicitly.")
+
+    def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
+        """NumPy's ufuncs on a facade array run on the device, as CuPy's do
+        (``np.maximum(0, x)``): the facade function of the same name."""
+        from woof.backend import facade
+        fn = getattr(facade, ufunc.__name__, None)
+        if method != "__call__":
+            fn = getattr(fn, method, None)      # np.add.reduceat(x, ...)
+        if fn is None:
+            return NotImplemented
+        out = kwargs.get("out")
+        if isinstance(out, tuple):
+            if len(out) != 1:
+                return NotImplemented
+            kwargs["out"] = out[0]
+        return fn(*inputs, **kwargs)
+
+    def __array_function__(self, func, types, args, kwargs):
+        """NumPy's array functions (``np.where``, ``np.linalg.norm``) on facade
+        arrays: the facade's namesake in the matching submodule, as CuPy."""
+        from woof.backend import facade
+        target = facade
+        for part in func.__module__.split(".")[1:]:
+            if part.startswith("_"):
+                continue
+            target = getattr(target, part, None)
+        fn = getattr(target, func.__name__, None)
+        if fn is None or fn is func:
+            return NotImplemented
+        return fn(*args, **kwargs)
 
     def item(self):
         return self.get().item()

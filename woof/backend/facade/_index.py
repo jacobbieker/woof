@@ -59,26 +59,22 @@ def _advanced_key(key):
     items = key if isinstance(key, tuple) else (key,)
     out = []
     for k in items:
+        if isinstance(k, ndarray) and k.dtype == np.bool_:
+            k = k.get()
         if isinstance(k, ndarray):
-            v = k._values()
-            if k.dtype == np.bool_:
-                # mx has no boolean-mask indexing; use the flat positions.
-                host = k.get()
-                v = mx.array(np.flatnonzero(host).astype(np.int64)) if host.ndim == 1 else None
-                if v is None:
-                    raise NotImplementedError("multi-dimensional boolean mask indexing")
-            out.append(v)
+            out.append(k._values())
         elif isinstance(k, np.ndarray):
             if k.dtype == np.bool_:
-                if k.ndim != 1:
-                    raise NotImplementedError("multi-dimensional boolean mask indexing")
-                k = np.flatnonzero(k)
+                # mx has no boolean-mask indexing; a mask over m axes is
+                # NumPy's nonzero(mask): one position array per axis.
+                out.extend(mx.array(i.astype(np.int64)) for i in np.nonzero(k))
+                continue
             out.append(mx.array(k.astype(np.int64)))
         elif isinstance(k, list):
             out.append(mx.array(np.asarray(k, dtype=np.int64)))
         else:
             out.append(k)
-    return tuple(out) if isinstance(key, tuple) else out[0]
+    return tuple(out) if isinstance(key, tuple) or len(out) != 1 else out[0]
 
 
 def getitem(a: ndarray, key):

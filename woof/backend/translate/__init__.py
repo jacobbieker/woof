@@ -58,6 +58,12 @@ _SHARED = "woof_shared"
 _CONSTANT = "woof_constant"
 _SPACE_HINT = "woof_space:"
 
+#: The __CUDA_ARCH__ a translated unit is preprocessed for: the CUDA
+#: comparison machine's (sm_86).  NVRTC compiles device code only, so CUDA
+#: runs a unit's __CUDA_ARCH__ branches (TEMPO's glibc libm, MPAS WSM6's
+#: global workspace); the facade's NVRTC architecture says the same.
+CUDA_ARCH = 860
+
 #: The CUDA keywords, as the preprocessor sees them.
 PARSE_DEFINES = (
     f'-D__global__=__attribute__((annotate("{_GLOBAL}")))',
@@ -66,11 +72,9 @@ PARSE_DEFINES = (
     "-D__device__=", "-D__host__=", "-D__forceinline__=inline",
     "-D__noinline__=__attribute__((noinline))", "-D__restrict__=", "-D__launch_bounds__(...)=",
     "-D__CUDACC__=1", "-D__CUDACC_RTC__=1", "-D__WOOF_METAL__=1", "-D__align__(n)=alignas(n)",
-    # NVRTC compiles device code only, so CUDA runs a unit's __CUDA_ARCH__
-    # branches (TEMPO's glibc libm, MPAS WSM6's global workspace); the
-    # value is the CUDA comparison machine's (sm_86).  A by-value kernel
-    # parameter is constant data in Metal already: __grid_constant__ is moot.
-    "-D__CUDA_ARCH__=860", "-D__grid_constant__=",
+    # A by-value kernel parameter is constant data in Metal already:
+    # __grid_constant__ is moot.
+    f"-D__CUDA_ARCH__={CUDA_ARCH}", "-D__grid_constant__=",
     # NVRTC's own spelling of the keywords (a unit that #undefs __global__
     # restores it as `__location__(global)`)
     "-D__location__(x)=__woof_location_##x",

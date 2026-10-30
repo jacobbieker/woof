@@ -97,7 +97,7 @@ def zeros(shape, dtype=np.float32, order="C"):
 
 
 def ones(shape, dtype=np.float32, order="C"):
-    return full(shape, 1, dtype)
+    return full(shape, 1, dtype, order)
 
 
 def full(shape, fill_value, dtype=None, order="C"):
@@ -105,6 +105,8 @@ def full(shape, fill_value, dtype=None, order="C"):
     if dtype is None:
         dtype = fill_value.dtype if isinstance(fill_value, ndarray) else np.asarray(fill_value).dtype
     shape = (int(shape),) if isinstance(shape, (int, np.integer)) else tuple(int(n) for n in shape)
+    if order == "F" and len(shape) > 1:
+        return full(tuple(reversed(shape)), fill_value, dtype).transpose()
     return _wrap(mx.broadcast_to(scalar_values(fill_value, dtype), shape), np.dtype(dtype), fresh=True)
 
 
@@ -119,10 +121,6 @@ def _like(a, dtype, shape, order="K"):
     return (a.dtype if dtype is None else dtype), (a.shape if shape is None else shape), order
 
 
-def _in_order(r, order):
-    return r.copy(order="F") if order == "F" and r.ndim > 1 else r
-
-
 def empty_like(a, dtype=None, order="K", subok=None, shape=None):
     dtype, shape, order = _like(a, dtype, shape, order)
     return empty(shape, dtype, order)
@@ -135,12 +133,12 @@ def zeros_like(a, dtype=None, order="K", subok=None, shape=None):
 
 def ones_like(a, dtype=None, order="K", subok=None, shape=None):
     dtype, shape, order = _like(a, dtype, shape, order)
-    return _in_order(ones(shape, dtype), order)
+    return ones(shape, dtype, order)
 
 
 def full_like(a, fill_value, dtype=None, order="K", subok=None, shape=None):
     dtype, shape, order = _like(a, dtype, shape, order)
-    return _in_order(full(shape, fill_value, dtype), order)
+    return full(shape, fill_value, dtype, order)
 
 
 def arange(*args, dtype=None):
@@ -334,8 +332,42 @@ def _predicate(np_name):
     return fn
 
 
+class _BinaryUfunc:
+    """A binary ufunc with NumPy's methods.  The call runs on the device;
+    ``reduce``, ``reduceat``, ``accumulate`` and ``outer`` run NumPy's on the
+    host words, so they are exact and slow."""
+
+    def __init__(self, fn):
+        self._fn = fn
+        self.__name__ = fn.__name__
+        self.nin, self.nout = 2, 1
+
+    def __call__(self, *args, **kwargs):
+        return self._fn(*args, **kwargs)
+
+    def _host_method(self, method, *args, out=None, **kwargs):
+        r = from_host(np.asarray(getattr(getattr(np, self.__name__), method)(
+            *[_host(x) for x in args], **kwargs)))
+        if out is not None:
+            copyto(out, r)
+            return out
+        return r
+
+    def reduce(self, a, axis=0, dtype=None, out=None, keepdims=False):
+        return self._host_method("reduce", a, axis=axis, dtype=dtype, out=out, keepdims=keepdims)
+
+    def reduceat(self, a, indices, axis=0, dtype=None, out=None):
+        return self._host_method("reduceat", a, indices, axis=axis, dtype=dtype, out=out)
+
+    def accumulate(self, a, axis=0, dtype=None, out=None):
+        return self._host_method("accumulate", a, axis=axis, dtype=dtype, out=out)
+
+    def outer(self, a, b, **kwargs):
+        return self._host_method("outer", a, b, **kwargs)
+
+
 UFUNCS = {}
-UFUNCS.update({n: _binary(n) for n in _BINARY})
+UFUNCS.update({n: _BinaryUfunc(_binary(n)) for n in _BINARY})
 UFUNCS.update({n: _compare(n) for n in _COMPARE})
 UFUNCS.update({n: _unary(n) for n in _UNARY})
 UFUNCS.update({n: _predicate(n) for n in _PREDICATE})
@@ -517,6 +549,23 @@ ndarray.__pos__ = lambda self: self.copy()
 ndarray.__abs__ = lambda self: UFUNCS["abs"](self)
 ndarray.__invert__ = lambda self: _apply("invert", "bitwise_invert", self)
 ndarray.__hash__ = None
+# a @ b: NumPy's matmul on the host words (cupy.matmul in the facade)
+ndarray.__matmul__ = lambda self, other: from_host(np.matmul(self.get(), _host(other)))
+ndarray.__rmatmul__ = lambda self, other: from_host(np.matmul(_host(other), self.get()))
+
+def _scan_out(r, out):
+    if out is None:
+        return r
+    copyto(out, r)
+    return out
+
+
+# .real / .imag: the array itself and zeros for a real dtype; the parts,
+# computed on the host words, for a complex one
+ndarray.real = property(lambda self: from_host(np.ascontiguousarray(self.get().real))
+                        if self.dtype.kind == "c" else self)
+ndarray.imag = property(lambda self: from_host(np.ascontiguousarray(self.get().imag))
+                        if self.dtype.kind == "c" else zeros(self.shape, self.dtype))
 
 METHODS = {name: fn for name, fn in REDUCTIONS.items()}
 METHODS.update({
@@ -525,6 +574,9 @@ METHODS.update({
     "nonzero": lambda a: where_(a),
     "round": lambda a, decimals=0: UFUNCS["round"](a) if decimals == 0 else
     from_host(np.round(a.get(), decimals)),
-    "cumsum": lambda a, axis=None, dtype=None: from_host(np.cumsum(a.get(), axis=axis, dtype=dtype)),
+    "cumsum": lambda a, axis=None, dtype=None, out=None: _scan_out(
+        from_host(np.cumsum(a.get(), axis=axis, dtype=dtype)), out),
     "dot": lambda a, b: from_host(np.dot(a.get(), _host(b))),
+    "take": lambda a, indices, axis=None, out=None, mode="raise": _scan_out(
+        from_host(np.take(a.get(), _host(indices), axis=axis, mode=mode)), out),
 })
