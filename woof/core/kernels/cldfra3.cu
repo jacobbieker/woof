@@ -14,9 +14,11 @@
 //
 // Every float32 operation rounds once, in Fortran's left-to-right order
 // (FADD/FMUL/... from glibc_flt32.cuh; the unit also compiles with
-// --fmad=false --ftz=false).  LOG10 and ** are glibc 2.39's log10f and powf
-// (gfk_log10, gfk_pow), the libm the WRF column oracles link: CUDA's own
-// log10f/powf round differently.  The reference is gfortran -O0
+// --fmad=false --ftz=false).  LOG10 and ** are glibc 2.43's log10f (CORE-MATH,
+// correctly rounded: cm_log10f, corem_log10f.cuh) and powf (Arm, unchanged
+// since glibc 2.28: gfk_pow), the libm of the repository's WRF v4.7.1 column
+// oracles; CUDA's own log10f/powf round differently, and so does glibc
+// 2.39's FDLIBM log10f (gfk_log10).  The reference is gfortran -O0
 // -ffp-contract=off (tools/cldfra3_wrf471_oracle).
 //
 // Layout: every profile is (ncol, nz), level k = 1 (surface) .. nz
@@ -283,7 +285,7 @@ extern "C" __global__ void cldfra3_columns(
                 || (C3(qs, k) > 1.E-6f && C3(t, k) < 273.f)) {
             c = 1.0f;
         } else if (FADD(qck, qik) > 1.E-10f && FADD(qck, qik) < 1.E-6f) {
-            c = c3_min(0.99f, FMUL(0.1f, FADD(11.0f, gfk_log10(FADD(qck, qik)))));
+            c = c3_min(0.99f, FMUL(0.1f, FADD(11.0f, cm_log10f(FADD(qck, qik)))));
         } else {
             float rh_00 = FSUB(land, 1.5f) > 0.f ? rh_00o : rh_00l;
             const float tc = c3_max(-80.0f, FSUB(C3(t, k), 273.15f));
@@ -314,4 +316,14 @@ extern "C" __global__ void cldfra3_columns(
     }
     c3_adjust_final(cf, qc, qi, rhoa, dz, kts, kte);
     status[col] = 0;
+}
+
+// cm_log10f under this unit's own compile route, for the Metal/CUDA sweep in
+// tests/test_cldfra3_wrf471_oracle.py (tools/corem_log10f_proof holds the
+// exhaustive proofs).
+extern "C" __global__ void cldfra3_log10_probe(int n, const float* __restrict__ x,
+                                               float* __restrict__ y)
+{
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) y[i] = cm_log10f(x[i]);
 }

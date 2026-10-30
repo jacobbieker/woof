@@ -125,3 +125,48 @@ def test_perturbation_hook_refused():
     with pytest.raises(NotImplementedError, match="pert_cld3"):
         cal_cldfra3(z, z, z, z, z, z, z, cp.ones(1, cp.float32), 3.0,
                     perturbation={"pert_cld3_t": 0.1})
+
+
+def _cr_log10(x):
+    """Correctly rounded float32 log10 of float32 ``x`` (positive, finite):
+    the binary64 log10 rounded once, with arguments whose binary64 value
+    lies near a float32 rounding boundary settled in 50-digit decimal."""
+    from decimal import Decimal, getcontext
+    getcontext().prec = 50
+    t = np.log10(x.astype(np.float64))
+    r = t.astype(np.float32)
+    up = np.nextafter(r, np.float32(np.inf)).astype(np.float64)
+    dn = np.nextafter(r, np.float32(-np.inf)).astype(np.float64)
+    r64 = r.astype(np.float64)
+    mid = np.where(t >= r64, 0.5 * (r64 + up), 0.5 * (r64 + dn))
+    close = np.abs(t - mid) <= 1e-15 * np.abs(t)
+    for i in np.flatnonzero(close):
+        exact = Decimal(float(x[i])).log10()
+        m = Decimal(float(mid[i]))
+        if exact != m:
+            pick = up[i] if (exact > m) == (mid[i] > r64[i]) else r64[i]
+            if mid[i] < r64[i]:
+                pick = dn[i] if exact < m else r64[i]
+            r[i] = np.float32(pick)
+    return r
+
+
+def test_log10_is_glibc_243_on_the_device():
+    """cm_log10f (glibc 2.43's correctly rounded log10f) through the cldfra3
+    unit on this backend, over the arguments cal_cldfra3 passes it
+    (1e-10 < qc+qi < 1e-6): every 64th float32 there, plus the edges."""
+    from woof.core.kernels import get_kernel
+    lo = np.float32(1e-10).view(np.uint32)
+    hi = np.float32(1e-6).view(np.uint32)
+    words = np.arange(lo, hi + 1, 64, dtype=np.uint32)
+    words = np.unique(np.concatenate([words, np.arange(lo, lo + 4096, dtype=np.uint32),
+                                      np.arange(hi - 4096, hi + 1, dtype=np.uint32)]))
+    x = words.view(np.float32)
+    want = _cr_log10(x)
+    dx = cp.asarray(x)
+    dy = cp.empty_like(dx)
+    get_kernel("cldfra3", "cldfra3_log10_probe")(
+        ((x.size + 255) // 256,), (256,), (np.int32(x.size), dx, dy))
+    got = cp.asnumpy(dy)
+    bad = np.flatnonzero(got.view(np.uint32) != want.view(np.uint32))
+    assert bad.size == 0, (bad.size, x[bad[:5]], got[bad[:5]], want[bad[:5]])

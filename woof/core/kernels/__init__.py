@@ -321,8 +321,8 @@ _EXTRA_HEADERS: dict[str, tuple[str, ...]] = {
     "nssl2_driver_support": ("glibc_flt32.cuh", "nssl2_wrf_math.cuh"),
     "nssl2_diagnostics": ("glibc_flt32.cuh", "nssl2_wrf_math.cuh"),
     "rrtmgp_gas": ("rrtmgp_libm.cuh", "rrtmgp_planck_common.cuh"),
-    # WRF-Solar icloud = 3 (cal_cldfra3): glibc's log10f and powf.
-    "cldfra3": ("glibc_flt32.cuh", "glibc_flt32_extra.cuh"),
+    # WRF-Solar icloud = 3 (cal_cldfra3): glibc 2.43's log10f and powf.
+    "cldfra3": ("glibc_flt32.cuh", "corem_log10f.cuh"),
 }
 
 #: Read-only view for tests and freeze receipts.

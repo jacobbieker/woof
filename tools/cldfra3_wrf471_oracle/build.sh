@@ -4,17 +4,19 @@
 #
 #   build.sh WRF_SOURCE_ROOT OUT_DIR
 #
-# Reference of record: gfortran -O0 -ffp-contract=off against glibc 2.39's
-# libm (log10f, powf) -- the C library the repository's WRF column oracles
-# link (Ubuntu 24.04).  A host with a newer glibc has CORE-MATH's correctly
-# rounded log10f, a different function (29.8 million float32 arguments
-# differ on glibc 2.44), so the script refuses any other libm.  On pb the
-# record was made as
+# Reference of record: gfortran -O0 -ffp-contract=off against glibc 2.43's
+# libm (Ubuntu 26.04, 2.43-2ubuntu2.4) -- the C library of the repository's
+# WRF v4.7.1 column oracles (tools/glibc_trig_flt32_proof,
+# tools/noah_mosaic_wrf471_oracle).  cal_cldfra3 calls log10f and powf:
+# glibc 2.42+ log10f is CORE-MATH's correctly rounded one, glibc 2.39's is
+# FDLIBM's (29,787,060 float32 arguments differ), and macOS libm moves the
+# record too, so the script refuses any other libm.  On pb the record was
+# made as
 #
 #   E=$(pixi exec -s gfortran sh -c 'echo $CONDA_PREFIX')
 #   docker run --rm -u $(id -u):$(id -g) -v $E:$E:ro -v $WRF:/wrf:ro \
 #       -v $PWD:$PWD -w $PWD -e PATH=$E/bin:/usr/bin:/bin \
-#       -e PYTHON=$PWD/.pixi/envs/default/bin/python ubuntu:24.04 \
+#       -e PYTHON=$PWD/.pixi/envs/default/bin/python ubuntu:26.04 \
 #       bash tools/cldfra3_wrf471_oracle/build.sh /wrf OUT_DIR
 # (the woof checkout mounted at its own path, so its pixi python runs).
 #
@@ -38,8 +40,8 @@ for f in phys/module_radiation_driver.F phys/module_mp_thompson.F; do
 done
 glibc=$(ldd --version | sed -n 1p)
 case "$glibc" in
-    *" 2.39"*) ;;
-    *) echo "libm is not glibc 2.39 ($glibc); see the header" >&2; exit 4 ;;
+    *" 2.43"*) ;;
+    *) echo "libm is not glibc 2.43 ($glibc); see the header" >&2; exit 4 ;;
 esac
 
 cd "$out"

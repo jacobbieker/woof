@@ -55,9 +55,9 @@ _ALLOWED_AEROSOL_MODULES = frozenset({
 #: reason the trade was takeable.
 _EXPECTED_HEADERS = {
     # WRF-Solar icloud = 3 (cal_cldfra3), a new unit graded word for word
-    # against WRF v4.7.1 (tests/test_cldfra3_wrf471_oracle.py): glibc's
+    # against WRF v4.7.1 (tests/test_cldfra3_wrf471_oracle.py): glibc 2.43's
     # log10f and powf.
-    "cldfra3": ("glibc_flt32.cuh", "glibc_flt32_extra.cuh"),
+    "cldfra3": ("glibc_flt32.cuh", "corem_log10f.cuh"),
     "gsd_initial_reflectivity": ("glibc_flt32.cuh", "glibc_flt64.cuh",
                                  "thompson_fork_constants.cuh", "thompson_fork.cu"),
     # A new full-column generation unit; existing classic and aerosol units

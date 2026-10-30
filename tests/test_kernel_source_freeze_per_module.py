@@ -232,7 +232,7 @@ BASELINE_PINNED: dict[str, str] = {
     # WRF-Solar cloud fraction (icloud = 3): WRF v4.7.1 cal_cldfra3 and its
     # helpers, 500 columns equal word for word to the gfortran -O0 / glibc
     # 2.39 record (tests/test_cldfra3_wrf471_oracle.py) on Metal and CUDA.
-    "cldfra3": "c4cd578fbfb71343a4e3712eb4b1c51f154bc1845372a157aaf8f93a3b78e498",
+    "cldfra3": "8ed60f16c949aaa68cf08f4b8735d1002493808466963f05c0b55479bef021d0",
     # e677dccb6: active table edits multiply binary64 values on the GPU,
     # round once to REAL, and reject non-positive crop roughness.
     "physics_params":
@@ -1397,6 +1397,10 @@ _merge_extension_pins(PINNED, _EXTENSION_PINS["modules"])
 # docs/gf_gamma_known_delta.md and tests/test_gf_gamma_correctly_rounded.py;
 # header assembly is independently checked by test_kernel_loader_inert.py.
 PINNED_HEADERS = {
+    # glibc 2.43's correctly rounded log10f (CORE-MATH bc385c2), prepended to
+    # the WRF-Solar cldfra3 unit only; proven against glibc 2.43 over all
+    # 2^32 inputs on the host and on the RTX A6000 (tools/corem_log10f_proof).
+    "corem_log10f.cuh": "bcede6f5758979b534bb73754310ad0e631db50b99a8fdcb7fd76f766241cdd5",
     # Existing fork radar transcription, reused unchanged by the initial helper.
     "thompson_fork.cu": "c7313ce62d863bdeb9478b7a503c8faffae6d17c8a20cbb1b6d458c216e4c947",
 
