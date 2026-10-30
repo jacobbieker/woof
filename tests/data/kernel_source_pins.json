@@ -36,7 +36,8 @@
     "acoustic.cu": "92d0a3e4bf0312e16ebcc4714a40729e0f9c67cceb794b2ccf07bbd85c51f745"
   },
   "composed_headers": {
-    "nextgen_reservoirs.cuh": "add8702c3e80c0514326e0cc2efbd0d149d2e1ca1228ce81d88a204c865a7526"
+    "nextgen_reservoirs.cuh": "add8702c3e80c0514326e0cc2efbd0d149d2e1ca1228ce81d88a204c865a7526",
+    "rrtmg_sw_spectral.cuh": "5ea756c7d433fa382657f484179adfcb6dfd4b83a4d774061a11d3e968d72340"
   },
   "loader_headers": {
     "gsd_diagnostics": [
@@ -86,6 +87,9 @@
     "nest_top": [
       "glibc_trig_flt32.cuh",
       "acoustic.cu"
+    ],
+    "radtran_disort": [
+      "glibc_flt64.cuh"
     ]
   }
 }

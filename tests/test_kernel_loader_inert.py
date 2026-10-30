@@ -267,6 +267,9 @@ def test_lake_compile_options_do_not_change_existing_modules(monkeypatch, strict
     # WRF's HAILCAST diagnostics (lane/cap-hail 97e9a3ca061) compile without
     # FMA, like the other column-exact WRF ports.
     expected["hail"] = ("-std=c++17", "--fmad=false")
+    # The clean-room spectral solver (woof/radtran): no FMA, so CUDA's words
+    # are Metal's and the host build's (tests/test_radtran_kernel_words*.py).
+    expected["radtran_disort"] = ("-std=c++17", "--fmad=false")
     names = _module_names()
     assert set(expected) <= set(names), sorted(set(expected) - set(names))
     for name in names:

@@ -278,7 +278,10 @@ BASELINE_PINNED: dict[str, str] = {
     # (it took the top layer as T_GRND whenever another lake in the same call
     # was observed); a streamed 5 km CONUS hour then equals the resident hour
     # bit for bit (241/241 variables).  Previously b36729b9.
-    "lake": "b57ad46930d5db97b68b37c7e9db81bab469da481f7342ec0141994f693241a8",
+    # RE-PINNED on mlx-backend: the device arena is spelled behind
+    # LAKE_ARENA, which lake_support.cuh defines for CUDA (not for the Metal
+    # translation), so CUDA compiles the same text as before.
+    "lake": "a9fbc1a8de9129d2ca51fe5cfbbadbfc974e36909b00e31d3240bce2fea7f69c",
     # Native bulk source/units bridge, both GPU receipts; FTZ disabled.
     "chem_sfire": "01a0c2dd43046d33254e4365d4cd87ee472b468d65077dfc06716b9bfe6e6596",
     # lane/283-sfire: compiled WRF v4.7.1 routine controls at 0 ULP
@@ -1115,8 +1118,17 @@ BASELINE_PINNED: dict[str, str] = {
     # Previously 8998771f.
     "rrtmg_lw_chain_coalesced":
         "4fe1e55bdb36cf806830a1f3e01538530033838940c6e65d044c1eec0f02a510",
+    # RE-PINNED on mlx-backend: rlw_rtrn_band_rows APPENDED (RRTMG per-band
+    # longwave fluxes, rrtmg_spectral_output); every existing entry point is
+    # unchanged text.  Its words equal compiled WRF v4.6.1 rtrnmc's per-band
+    # terms (tests/test_rrtmg_spectral_output.py), CUDA and Metal.
     "rrtmg_lw_zbatched":
-        "5611794c5c9e44815ad00e28af7367428beda949afe205654ecb959665de7a8e",
+        "dfe3b824da5e8af04366dc873654368fb687a26075ddad898f48e3a6a2a367e6",
+    # The clean-room spectral solver (woof/radtran, docs/dev/radtran.md);
+    # its words are tests/data/radtran/kernel_words.npz on host, CUDA and
+    # Metal, and its fluxes are held to uvspec 2.0.6.
+    "radtran_disort":
+        "fff8cb315d9f4f2d301b8a9eb524c3d0f2261318def4ee163a217aeba2b46432",
     # lane/281-zadvect-implicit (A158): WRF 4.7.1's implicit-explicit
     # vertical advection, graded word for word against WRF's compiled
     # routines by tests/test_zadvect_implicit.py.  Moved once on the lane:
@@ -1431,7 +1443,10 @@ PINNED_HEADERS = {
     # correctly rounded functions in every state and output word of the
     # 112-column regime campaign (tools/lake_wrf461_oracle/regimes.py), where
     # CUDA's own library left hfx and grdflx in 1,223 words.
-    "lake_support.cuh": "c21f1cf9deb1930e9ad5e24b48247cedf8de8832fdb92e97dfbf938122ccb106",
+    # RE-PINNED on mlx-backend: LAKE_ARENA (defined for CUDA only) and the
+    # LAKE_LOCAL_PTR thread-space annotation (empty on CUDA) for the Metal
+    # translation; CUDA's preprocessed arithmetic and addressing unchanged.
+    "lake_support.cuh": "7604abfb5a7bfde79f59c018b350b7d62db87b2b9704a6738240143c272c9cba",
     "lake_wrf.cuh": "91ccdd68fc9b87564a28f1554faa2a913171e02d963d86b46be292c65e47fffd",
     # WOOF's correctly rounded binary64 exp, log, log10, sin, atan, pow for
     # the lake; tests/test_lake_f64cr.py grades it on the device against

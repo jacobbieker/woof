@@ -2685,6 +2685,11 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # The partial-depth nest's top (Phase D2), RTX A6000 sm_86, NVRTC
     # 12.9.86, 2026-10-30: advance_w_phi_top's WPHI_MAX_LEV column.
     "nest_top": 520,
+    # WRF-Solar FARMS and the clean-room spectral solver, RTX A6000 sm_86,
+    # NVRTC 12.9.86, 2026-10-30, default and strict loaders: farms_columns
+    # and farms_mpas_coszen read 0 B; radtran_disort carries its binary64
+    # stream/layer work arrays (30,432 B), radtran_work_size 0 B.
+    "farms": 0, "radtran_disort": 30432,
 }
 
 #: The readings the ceiling above is made of, each naming its box, its
