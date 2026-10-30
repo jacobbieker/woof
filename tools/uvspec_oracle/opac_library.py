@@ -2,6 +2,7 @@
 
     pixi run -e mlx python -m tools.uvspec_oracle.opac_library mie  [species ...]
     pixi run -e mlx python -m tools.uvspec_oracle.opac_library woof [species ...]
+    pixi run -e mlx python -m tools.uvspec_oracle.opac_library fixture [species ...]
 
 Both write uvspec ``aerosol_species_library`` directories
 (``<species>..mie.cdf``, the netCDF layout of libRadtran's ``mie`` tool) under
@@ -9,8 +10,8 @@ Both write uvspec ``aerosol_species_library`` directories
 
 * ``mie/``: libRadtran's ``mie`` tool run as a black box (separate process,
   pixi ``libradtran`` environment) with ``aerosol_type <species>``,
-  ``mie_program MIEV0``, ``output_user netcdf`` on OPAC's wavelength grid
-  0.25-6 um.  ``receipt.json`` records every input text, the conda build,
+  ``mie_program MIEV0``, ``output_user netcdf`` on OPAC's wavelengths
+  0.45-0.6 um (the end-to-end cases' bands).  ``receipt.json`` records every input text, the conda build,
   the mie binary's sha256, the sha256 of the OPAC data files it read and of
   every library file written.
 * ``woof/``: woof's own tables (:mod:`woof.radtran.aerosol`) written in the
@@ -46,6 +47,9 @@ ORACLE_SPECIES = ("inso", "waso", "soot", "ssam", "sscm", "suso")
 #: Wavelength span of the oracle libraries [um] (the oracle cases' bands
 #: and their bracketing OPAC nodes; the full 0.25-6 um grid works too).
 ORACLE_SPAN_UM = (0.4, 2.0)
+#: the mie tool is slow for coarse sea salt (~20 min for ssam over 0.4-2 um):
+#: its library covers the end-to-end cases' 500 nm bands only
+MIE_SPAN_UM = (0.45, 0.6)
 #: moment dimension of the netCDF layout (the mie tool's default nmom)
 NMOMMAX = 1000
 
@@ -100,7 +104,7 @@ def _span(name, span):
     return np.nonzero(sel)[0], lam[sel]
 
 
-def build_mie(species=ORACLE_SPECIES, dest: Path | None = None, span=ORACLE_SPAN_UM) -> Path:
+def build_mie(species=ORACLE_SPECIES, dest: Path | None = None, span=MIE_SPAN_UM) -> Path:
     """Run libRadtran's mie tool per species; returns the library directory."""
     from woof.radtran import aerosol, data
     dest = Path(dest or library_root() / "mie")
@@ -203,10 +207,54 @@ def build_woof(species=ORACLE_SPECIES, dest: Path | None = None, span=ORACLE_SPA
     return dest
 
 
+FIXTURE = ROOT / "tests" / "data" / "radtran" / "opac_mie_tool.json"
+FIXTURE_LAMBDA_UM = (0.5, 0.55)
+FIXTURE_MOMENTS = 16
+
+
+def write_fixture(species=ORACLE_SPECIES, src: Path | None = None) -> Path:
+    """The mie tool's optics at selected nodes (tests/data/radtran/opac_mie_tool.json).
+
+    Stores only the mie tool's outputs (extinction per mass, single-scattering
+    albedo, moments chi_0..16) with each species' tolerance: twice the
+    difference measured against woof's tables now (floor 1e-6)."""
+    import netCDF4
+    from woof.radtran import aerosol
+    src = Path(src or library_root() / "mie")
+    rec = json.loads((src / "receipt.json").read_text())
+    out = {"tool": "libRadtran mie (black box), tools/uvspec_oracle/opac_library.py",
+           "package": rec.get("package"), "species": {}}
+    for s in species:
+        rows, worst = [], {"ext": 0.0, "ssa": 0.0, "chi": 0.0}
+        with netCDF4.Dataset(src / f"{s}..mie.cdf") as ds:
+            lam = np.array(ds["wavelen"][:])
+            hum = np.array(ds["hum"][:])
+            for target in FIXTURE_LAMBDA_UM:
+                il = int(np.argmin(np.abs(lam - target)))
+                for ih, rh in enumerate(hum):
+                    nm = int(ds["nmom"][il, ih, 0])
+                    k = min(FIXTURE_MOMENTS + 1, nm)
+                    chi = np.array(ds["pmom"][il, ih, 0, :k], dtype=np.float64) / (2 * np.arange(k) + 1)
+                    r = {"lambda_um": float(lam[il]), "rh": float(rh), "ext": float(ds["ext"][il, ih]),
+                         "ssa": float(ds["ssa"][il, ih]), "chi": chi.tolist()}
+                    rows.append(r)
+                    jl = int(np.argmin(np.abs(aerosol.wavelengths_um(s) - lam[il])))
+                    jh = [n.rh for n in aerosol.species_nodes(s)].index(float(rh))
+                    e, w, c = aerosol.node_optics(s, jl, jh)
+                    worst["ext"] = max(worst["ext"], abs(e / r["ext"] - 1))
+                    worst["ssa"] = max(worst["ssa"], abs(w / r["ssa"] - 1))
+                    worst["chi"] = max(worst["chi"], float(np.abs(c[:k] - chi).max()))
+        out["species"][s] = {"rows": rows, "measured": worst,
+                             "tolerance": {q: max(2.0 * v, 1e-6) for q, v in worst.items()}}
+        print(s, {q: f"{v:.1e}" for q, v in worst.items()}, flush=True)
+    FIXTURE.write_text(json.dumps(out, indent=1))
+    return FIXTURE
+
+
 def main(argv):
     kind = argv[0] if argv else "mie"
     species = tuple(argv[1:]) or ORACLE_SPECIES
-    {"mie": build_mie, "woof": build_woof}[kind](species)
+    {"mie": build_mie, "woof": build_woof, "fixture": write_fixture}[kind](species)
 
 
 if __name__ == "__main__":
