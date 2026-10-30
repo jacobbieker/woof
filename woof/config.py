@@ -3864,9 +3864,11 @@ def _validate_farms(cfg: RunConfig) -> None:
             f"swint_opt=2 with aer_opt={int(cfg.aer_opt)}: FARMS's 2-D "
             "aerosol is wired for aer_opt 0, 1 and 2; under aer_opt = 3 WRF "
             "hands it the radiation call's TAOD5502D and the taer_* optics")
-    # The Solar_step's convective cloud additions (icloud_cu, KF's cldfra_dp,
-    # shcu_physics = 5, BMJ feedback, KF-CuP) have no woof counterpart: the
-    # legacy RRTMG adapter takes no convective condensate either.
+    # The Solar_step's convective cloud additions -- cu_rad_feedback's
+    # ICLOUD_CU (KF's CLDFRA_DP/SH, QC_CU/QI_CU) and shcu_physics = 5 --
+    # feed FARMS as they feed RRTMG (woof.core.cumulus_radiation, held to
+    # WRF's lines by tests/test_cu_rad_feedback_oracle.py); BMJ feedback and
+    # KF-CuP have no woof scheme to come from.
 
 
 def validate_radiation_driver_options(cfg: RunConfig) -> None:

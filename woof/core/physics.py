@@ -632,6 +632,11 @@ def _composed_optional_tendency_components(
     return tuple(name for name in ("rqr", "rqi", "rqs") if name in members)
 
 
+def _cumulus_radiation_icloud_cu(cfg) -> int:
+    from woof.core.cumulus_radiation import icloud_cu
+    return icloud_cu(cfg)
+
+
 def _as_2d(value, shape, name: str, *, dtype=DTYPE) -> cp.ndarray:
     array = cp.asarray(value, dtype=dtype)
     try:
@@ -8018,7 +8023,9 @@ def initialize_physics(
             aer_ssa_val=float(getattr(cfg, "aer_ssa_val", 0.85)),
             aer_asy_val=float(getattr(cfg, "aer_asy_val", 0.9)),
             couple_farms=bool(getattr(cfg, "couple_farms", False)),
-            bl_merge=bl_merge)
+            bl_merge=bl_merge,
+            icloud_cu=_cumulus_radiation_icloud_cu(cfg),
+            deng_cloud=int(getattr(cfg, "shcu_physics", 0)) == 5)
     if tuple(getattr(cfg, "radtran_wavelengths", ()) or ()):
         # woof.radtran spectral diagnostic: the step's own solar geometry
         # needs this domain's latitude, longitude and start time.

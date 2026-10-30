@@ -35,7 +35,7 @@ WRF source: https://github.com/wrf-model/WRF at v4.7.1 (f52c197ed39d).
 | `tmn_update` | - | 1 |
 | `sf_lake_physics` | 1 | - |
 | `windfarm_opt` | - | 1, 2 |
-| `cu_rad_feedback` | - | .true. |
+| `cu_rad_feedback` | .true. | - |
 | `icloud` | - | 3 |
 
 ## `mp_physics`
@@ -243,7 +243,7 @@ WRF source: https://github.com/wrf-model/WRF at v4.7.1 (f52c197ed39d).
 
 | value | WRF option | woof |
 |---|---|---|
-| `.true.` | cumulus sub-grid cloud fed to radiation | refused: &physics cu_rad_feedback = [True]: cumulus cloud fraction does not feed radiation in woof (WRF Registry default .false.); only the disabled branch is implemented. |
+| `.true.` | cumulus sub-grid cloud fed to radiation | imports |
 
 ## `icloud`
 

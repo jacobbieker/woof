@@ -117,3 +117,39 @@ def test_kf_and_gf_fill_the_fields_the_radiation_reads():
     assert int(clock[0]) == 2       # convtrans_prep ran on both steps
     for name in ("qc_cu", "qi_cu", "gd_cloud_a"):
         assert np.isfinite(cp.asnumpy(driver.fields[name])).all()
+
+
+def test_farms_reads_the_same_merged_cloud():
+    """swint_opt = 2: WRF's Solar_step forms the convective cloud before
+    farms_driver reads QC/QI/CLDFRA (module_radiation_driver.F:3064), so
+    FARMS's per-step cloud is the same merges of its zero-field cloud."""
+    from test_shcu_deng_driver_gpu import _build
+    from woof.core import cumulus_radiation as curad
+    from woof.core import physics as physics_module
+
+    cfg = _cfg(swint_opt=2)
+    state, driver = _build(cfg)
+    assert driver.farms is not None
+    assert driver.farms.icloud_cu == 2 and driver.farms.deng_cloud
+    f = driver.fields
+    atmosphere = physics_module._prepare_atmosphere(state)
+    names = ("cldfra_dp", "cldfra_sh", "qc_cu", "qi_cu", "cw_rad")
+    for name in names:
+        f[name][...] = 0.0
+    base = [cp.asnumpy(a) for a in
+            driver.farms.cloud_fraction(atmosphere, f, itimestep=2)]
+    rng = np.random.default_rng(11)
+    for name in names:
+        f[name][...] = cp.asarray(rng.uniform(0.0, 0.5 if "cldfra" in name
+                                               else 5e-4, f[name].shape)
+                                  .astype(np.float32))
+    got = [cp.asnumpy(a) for a in
+           driver.farms.cloud_fraction(atmosphere, f, itimestep=2)]
+    cldfra, qc, qi = curad.merge_kf_cloud(
+        cp.asarray(base[0]), cp.asarray(base[1]), cp.asarray(base[2]),
+        cldfra_dp=f["cldfra_dp"], cldfra_sh=f["cldfra_sh"],
+        qc_cu=f["qc_cu"], qi_cu=f["qi_cu"])
+    cldfra, qc = curad.merge_deng_cloud(cldfra, qc, cldfra_sh=f["cldfra_sh"],
+                                        cw_rad=f["cw_rad"])
+    for g, want in zip(got, (cldfra, qc, qi)):
+        assert np.array_equal(g.view(np.uint32), cp.asnumpy(want).view(np.uint32))
