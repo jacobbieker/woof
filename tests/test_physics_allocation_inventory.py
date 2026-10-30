@@ -1579,6 +1579,27 @@ _PHYSICS_ALLOCATION_INVENTORY['woof/core/cldfra3.py'] = {'cal_cldfra3': 3}
 # radius_metres allocates one (nz, ny, nx) float32 only for a caller that
 # passes no output (the tests' replay), never on the step.
 _PHYSICS_ALLOCATION_INVENTORY['woof/core/solar_diagnostics.py'] = {'radius_metres': 1}
+# mlx-backend merges, entered together (each module's bound beside it):
+# WRF-Solar FARMS (swint_opt = 2): per step one (ncol,) output block, the
+# per-step CLDFRA, the metre radii, and four 2-D aerosol planes (zeros for
+# aer_opt = 0, AODTOT plus namelist values for 1, the radiation call's for 2).
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/farms.py'] = {
+    'farms_columns': 1, 'cloud_fraction': 1, '_radii': 1, '_aerosol': 4}
+# The partial-depth nest's top (Phase D2): one (ny, nx) column-sum plane and
+# one output per entry point, released with the call; no integration runs it
+# yet (tests/test_partial_nest_dyn.py drives it).
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/partial_nest_dyn.py'] = {
+    'zeros': 1, 'column_sums': 1, 'calc_ww_top': 1, 'add_top_face_flux': 1,
+    'time_interpolate': 1}
+# In-model gusts and extremes (c80237153): all planes are state fields.
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/wind_gust_diag.py'] = {}
+# cu_rad_feedback (ICLOUD_CU = 1): GF's convtrans_prep qc_cu/qi_cu planes.
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/gf.py']['__call__'] = 14
+# Driver construction: the FARMS SW*2 fields, the radtran diagnostic
+# planes and Deng's carried state (__init__ 22 -> 25, initialize_physics
+# 37 -> 40), and the wind farm's one attach-time plane.
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/physics.py'].update(
+    {'__init__': 25, '_attach_windfarm': 1, 'initialize_physics': 40})
 
 
 def _live_inventory() -> dict[str, dict[str, int]]:
