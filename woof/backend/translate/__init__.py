@@ -1724,6 +1724,18 @@ class _Rewriter:
     #: out-of-line build to CUDA's words.
     INLINE_POLICY_BY_KERNEL = {"tempo_columns": "size"}
 
+    #: Units (known by a kernel they define) whose source ``__noinline__``
+    #: functions are inlined too.  FAST_SBM's tile kernel, with its 23
+    #: ``__noinline__`` helpers out of line, gave wrong words in 3 of 49
+    #: columns of its kc2 replay (th off by 4e-3 K, number concentrations
+    #: by orders of magnitude); fully inlined it is CUDA's --fmad=false
+    #: words but for 1-ulp deltas in 8 liquid-bin words.  Not the default:
+    #: the other units with ``__noinline__`` (noah, sfclay, mynn_surface,
+    #: kf, urban_ucm480, the MPAS ports) give the same results either way,
+    #: and fully inlined sfclay took 46 minutes to compile cold.
+    #: WOOF_INLINE_NOINLINE=1|0 forces either way, for diagnosis.
+    INLINE_NOINLINE_BY_KERNEL = frozenset({"fsbm_tile_f64", "fsbm_tile_f32"})
+
     def _unit_inline_policy(self) -> str:
         policy = self.INLINE_POLICY_BY_UNIT.get(self.unit.split("[", 1)[0], "")
         if policy:
@@ -1754,6 +1766,14 @@ class _Rewriter:
         kinds = (K.FUNCTION_DECL, K.FUNCTION_TEMPLATE, K.CXX_METHOD, K.CONSTRUCTOR, K.DESTRUCTOR)
         policy = os.environ.get("WOOF_INLINE_POLICY", "") or self._unit_inline_policy()
         keep_call = set(os.environ.get("WOOF_KEEP_CALL", "").split(","))
+        forced = os.environ.get("WOOF_INLINE_NOINLINE", "")
+        if forced in ("0", "1"):
+            honour_noinline = forced == "0"
+        else:
+            honour_noinline = not any(
+                n.kind == K.FUNCTION_DECL and n.spelling in self.INLINE_NOINLINE_BY_KERNEL
+                and self.main_file(n) and self.is_kernel(n)
+                for n in self.tu.cursor.walk_preorder())
         done = set()
         for node in self.tu.cursor.walk_preorder():
             if node.kind not in kinds or not node.is_definition() or not self.main_file(node):
@@ -1765,7 +1785,12 @@ class _Rewriter:
                 continue
             done.add(key)
             tokens = list(node.get_tokens())
-            if "noinline" in [t.spelling for t in tokens[:40]]:
+            noinline = next((t for t in tokens[:40] if t.spelling == "noinline"), None)
+            if noinline is not None:
+                if not honour_noinline and policy not in ("size", "none") \
+                        and not self._inside_replacement(noinline.extent.start.offset):
+                    self.edits.replace(noinline.extent.start.offset, noinline.extent.end.offset,
+                                       "always_inline")
                 continue
             at = self._attribute_site(node, tokens)
             if at is None:

@@ -83,6 +83,13 @@ nondeterministic, three diagnostic variables help:
   `WOOF_KEEP_CALL=f,g` select the alternatives, for diagnosis.
   `tools/kernel_probe.py --repeat N` shows whether a kernel's words vary
   across replays.
+* **FAST_SBM inlines its `__noinline__` helpers too**
+  (`INLINE_NOINLINE_BY_KERNEL`, keyed on `fsbm_tile_*`). Out of line, its
+  tile kernel gave wrong words in 3 of 49 columns of the kc2 replay; fully
+  inlined it is CUDA's `--fmad=false` words but for 1-ulp deltas in a few
+  liquid-bin words. The other units with `__noinline__` give the same
+  results either way and keep it (fully inlined, sfclay compiled for 46
+  minutes cold). `WOOF_INLINE_NOINLINE=1|0` forces either, for diagnosis.
 * **goddard compiles with out-of-line calls** (`INLINE_POLICY_BY_UNIT`).
   Fully inlined, its radiation kernel crashes Metal's compiler service
   (`XPC_ERROR_CONNECTION_INTERRUPTED`). Its device oracle holds the result to

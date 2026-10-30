@@ -6,6 +6,12 @@ from tools.fast_sbm_host import host as H, replay as RP
 from tools.fast_sbm_host.device import Device
 from tools.fast_sbm_wrf480_oracle import fixtures as fx
 
+#: The host authority calls the platform libm where the device calls woof's
+#: glibc ports (fast_sbm_common.cuh "libm"), so device and host words agree
+#: only where that libm is glibc.  On macOS (the MLX backend) they cannot:
+#: there the device's words are compared with CUDA's by launch trace
+#: (docs/dev/mlx-backend.md, "Finding a difference").
+@pytest.mark.skipif(not H.GLIBC_LIBM, reason=H.NOT_GLIBC_REASON)
 @pytest.mark.parametrize("build", ("o32", "o64"))
 @pytest.mark.parametrize("family", ("kc1", "kc2", "kc2g", "kc2edge"))
 @pytest.mark.parametrize("parallel", (False, True))
