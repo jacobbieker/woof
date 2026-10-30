@@ -3093,6 +3093,15 @@ UNMEASURED_KERNEL_MODULES = frozenset({
     # that launches it, p3_reflectivity_module, read p3k_reflectivity at
     # 0 B local frame (40 registers) on the same card the same day.
     "p3_zdiag",
+    # The partial-depth nest's top entry points (Phase D2) are appended to
+    # acoustic.cu's own text by the loader (EXTRA_HEADERS["nest_top"]), so
+    # nest_top.cu alone does not compile (pdmp, dpn_face and
+    # diagnose_p_column are acoustic.cu's).  No integration launches them
+    # yet -- tests/test_partial_nest_dyn.py drives them -- so no
+    # configuration prices them; D3, which runs the nest, records the
+    # composed unit's frame (its advance_w_phi_top carries the same
+    # WPHI_MAX_LEV column as advance_w_phi).
+    "nest_top",
     "rrtmg_sw", "rrtmg_lw_chain", "rrtmg_lw_chain_coalesced", "rrtmg_lw_zbatched",
     "rrtmg_lw_taugb02_10_11_12", "rrtmg_lw_taugb03_05",
     "rrtmg_lw_taugb06_09", "rrtmg_lw_taugb13_16",

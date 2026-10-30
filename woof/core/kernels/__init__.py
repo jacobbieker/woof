@@ -45,6 +45,10 @@ _EXTRA_HEADERS: dict[str, tuple[str, ...]] = {
                         "thompson_aerosol_libm.cuh", "thompson_column_support.cuh", "thompson_column_radar.cuh",
                         "thompson_column_generated.cuh"),
     "acoustic": ("glibc_trig_flt32.cuh",),
+    # The partial-depth nest's top (Phase D2) composes acoustic.cu's own
+    # device helpers ahead of its entry points; a new module, so the
+    # acoustic unit and its launches keep their bytes.
+    "nest_top": ("glibc_trig_flt32.cuh", "acoustic.cu"),
     "lin_refl": ("refl.cu",),
     "lin": ("glibc_flt32.cuh", "lin_support.cuh", "lin_wrf.cuh"),
     "goddard": ("glibc_flt32.cuh", "portable_libm64.cuh", "goddard_bands.cuh", "goddard_sounding.cuh"),
