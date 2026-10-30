@@ -64,9 +64,23 @@ TOL["sph_sza89"].update({q: (1.4e-5, "SZA 89: diffuse field measured 6.4e-6 (lay
 TOL["twostr_sph85"].update({q: (3e-6, "two-stream pseudo-spherical diffuse field; measured 1.3e-6")
                             for q in ("edn", "eup")})
 
+#: OPAC cases on the mie tool's tables (end to end): woof's tables are its
+#: own Mie integrals; the mie tool's coarser size integration differs by up
+#: to 2.9e-4 in soot extinction, 5.5e-4 in soot ssa and 4.6e-4 in sea-salt
+#: extinction (tests/data/radtran/opac_mie_tool.json).  On woof's tables the
+#: same cases agree to print precision (the opac_* cases without "mie").
+_MIE = "mie-tool tables vs woof's own (size integration), see opac_mie_tool.json; measured {}"
+_Q = ("edir", "edn", "eup", "uavgdir", "uavgdn", "uavgup")
+TOL.update({
+    "opac_continental_mie_rh50": {q: (8e-6, _MIE.format("3.8e-6")) for q in _Q},
+    "opac_maritime_mie_rh90": {q: (1.1e-5, _MIE.format("5.4e-6")) for q in _Q},
+    "opac_urban_mie_rh80": {q: (1.1e-4, _MIE.format("5.1e-5 (soot)")) for q in _Q},
+    "opac_maritime_mie_rad16_rh95": {q: (1.1e-4, _MIE.format("5.2e-5 (sea salt)")) for q in _Q},
+})
+
 RAD_TOL = (1e-6, "uvspec prints radiances with 10 digits; measured <= 6.7e-7")
 #: case -> (radiance tolerance, reason) where RAD_TOL does not hold
-RAD_TOLS = {}
+RAD_TOLS = {"opac_maritime_mie_rad16_rh95": (3e-4, _MIE.format("1.5e-4 (sea salt, near-solar)"))}
 #: disort_intcor moments: uvspec applies Nakajima & Tanaka's TMS and IMS
 #: corrections; woof's IMS (woof/radtran/ims.py) reproduces its near-solar
 #: downward radiances to the print floor (measured <= 5.3e-7; TMS alone
