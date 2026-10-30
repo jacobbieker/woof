@@ -20,6 +20,7 @@ from typing import Any, Callable, Iterable, Mapping, Protocol
 from ..config import parse_fortran_namelist
 from ..physics_suites import load_table
 from . import radiation_spectral_v842 as _spectral
+from . import radtran_v842 as _radtran
 
 SCHEMA = "mpas-port.physics-driver-v842/v1"
 
@@ -301,6 +302,9 @@ class DriverConfig:
     #: WOOF's &radiation config_rrtmg_spectral_output (radiation_spectral_v842): "none", "bands" or
     #: "gpoints".  Not a Registry option, so it never reaches the native config pool.
     spectral_output: str = "none"
+    #: WOOF's &radtran group (radtran_v842): the woof.radtran spectral diagnostic's settings
+    #: (woof.radtran.model.Diagnostic), or None.  Not a Registry option either.
+    radtran: Any = None
 
     def cpu_warning(self) -> str | None:
         """The loud start-up lines naming each active slot that runs on the CPU, or None when none does."""
@@ -400,6 +404,11 @@ class DriverConfig:
                           correct_skip=sorted(self.correct_skip), correct_mode=self.correct_mode_record())
         if self.spectral_output != "none":
             result["rrtmg_spectral_output"] = self.spectral_output
+        if self.radtran is not None:
+            d = self.radtran
+            result["radtran"] = dict(wavelengths=list(d.wavelengths), umu=list(d.umu), phi=list(d.phi),
+                                     mol_abs_param=d.mol_abs_param, solver=d.solver, streams=d.streams,
+                                     pseudospherical=d.pseudospherical)
         return result
 
 
@@ -657,8 +666,11 @@ def resolve_namelist(text: str, *, backends: Mapping[str, str] | None = None,
         explicit.add(slot)
 
     spectral = _spectral.resolve(groups)
+    radtran = _radtran.resolve(groups)
 
     def record(config: DriverConfig) -> DriverConfig:
+        if radtran is not None:
+            config = _replace(config, radtran=radtran)
         if spectral != "none":
             config = _replace(config, spectral_output=spectral)
             _check_spectral_output(config)

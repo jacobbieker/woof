@@ -454,7 +454,7 @@ consumed `RunConfig` field -- the knob-parity battery
 consuming kernel/module rather than being decorative -- and every one
 is importable from a WRF namelist.
 
-**Which keys a `[[domain]]` table may override.** Exactly these 264,
+**Which keys a `[[domain]]` table may override.** Exactly these 272,
 and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
 
     lightning_option  lightning_dt  lightning_start_seconds  flashrate_factor
@@ -471,7 +471,9 @@ and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
     diff_6th_thresh  dampcoef  zdamp  emdiv  smdiv  khdif  kvdif  diff_opt
     mix_full_fields  h_sca_adv_order  moist_adv_opt  v_sca_adv_order
     v_mom_adv_order  h_mom_adv_order  tke_budget  sase_flux_diag  hmix_k_diag
-    surface_energy_diag  rrtmg_spectral_output  inflow_perturbation  inflow_perturbation_seed
+    surface_energy_diag  rrtmg_spectral_output  radtran_wavelengths  radtran_interval_s
+    radtran_umu  radtran_phi  radtran_mol_abs_param  radtran_solver  radtran_streams
+    radtran_pseudospherical  inflow_perturbation  inflow_perturbation_seed
     inflow_perturbation_amplitude_scale  inflow_perturbation_faces  target_cfl
     target_hcfl  max_step_increase_pct  starting_time_step  starting_time_step_den
     max_time_step  max_time_step_den  min_time_step  min_time_step_den
@@ -671,6 +673,14 @@ wrong answer reported as a success. Put them in `[shared]`.
 | `couple_farms` | `couple_farms` | false | true, false | `[shared]` only. WRF's FARMS coupling: with `swint_opt = 2`, the radiation driver copies FARMS's `SWDOWN2` into `SWDOWN` on every step, which the land surface reads (Noah's net shortwave is `SWDOWN * (1 - ALBEDO)`); `GSW` keeps the radiation call's value. Refused without `swint_opt = 2`, as WRF's `module_check_a_mundo` refuses it. Checkpoints bind it when on |
 | `aer_opt` | `aer_opt` | 0 | 0, 3 | `[shared]` only. 3 is the aerosol-aware radiation operational HRRR runs: on each radiation call the legacy RRTMG shortwave gets per-band aerosol optical depth, single-scattering albedo and asymmetry built from the Thompson water- and ice-friendly aerosol numbers; needs `mp_physics = 28` and the legacy RRTMG shortwave (`ra_sw_physics = 4`, `ra_rrtmg_variant = "rrtmg_legacy"`). The longwave takes no aerosol, as in that WRF. 1 and 2 (WRF's ECMWF climatology and its aod550 namelist path) are refused by name. Checkpoints bind it; prepared bundles do not |
 | `rrtmg_spectral_output` | (none) | `"none"` | `"none"`, `"bands"`, `"gpoints"`; per domain | WRF's top and bottom radiative fluxes resolved by RRTMG band: `SWUPT_BAND` ... `SWDDIRC_BAND` on the 14 shortwave bands (axis `rrtmg_sw_band`) and `LWUPT_BAND` ... `LWDNBC_BAND` on the 16 longwave bands (`rrtmg_lw_band`), each variable carrying its band edges (`wavenumber_low`/`wavenumber_high`, cm-1). `"gpoints"` resolves the shortwave by its 112 g-points instead (`SW*_GPT`, axis `rrtmg_sw_gpt`, with `band_of_gpoint`); the longwave stays per band. Legacy RRTMG only (`ra_rrtmg_variant = "rrtmg_legacy"`, an RRTMG `ra_*_physics = 4`). Output-only: separate kernels over the spectral buffers the broadband sums read, so no prognostic or broadband word changes; every band and g-point word is held to compiled WRF v4.6.1 (`tests/test_rrtmg_spectral_output.py`). Night shortwave columns are zero, as WRF's fluxes are |
+| `radtran_wavelengths` | (none) | `[]` (off) | list of wavelengths [nm], 120-5000; per domain | woof's spectral radiative-transfer diagnostic (`woof.radtran`, a clean-room discrete-ordinate solver checked against libRadtran's uvspec; `docs/dev/radtran.md`). Each wavelength selects the REPTRAN band containing it; history gains `RT_EDIR`, `RT_EDN`, `RT_EUP` (surface) and `RT_EUP_TOA` on axis `rt_wavelength` [W m-2 nm-1, band mean], with `RT_WAVELENGTH`, `RT_BAND_MIN`, `RT_BAND_MAX` naming each entry. Model columns on their interface levels with the U.S. Standard atmosphere above the model top, REPTRAN gas absorption, Bodhaine Rayleigh, Hu & Stamnes water and Fu (1996) ice clouds from the microphysics. Needs libRadtran's data files at run time (`$WOOF_LIBRADTRAN_DATA` or `pixi install -e libradtran`). Output-only |
+| `radtran_interval_s` | (none) | `3600.0` | seconds > 0; per domain | Cadence of the radtran diagnostic: the first step, then every step that crosses a multiple |
+| `radtran_umu` | (none) | `[]` | cosines in [-1, 0) or (0, 1]; per domain | Radiance directions for `RT_RAD` [W m-2 nm-1 sr-1] on (`rt_wavelength`, `rt_direction`): umu > 0 upwelling at the top of the atmosphere, umu < 0 downwelling at the surface; `RT_UMU`/`RT_PHI` name each direction. DISORT only |
+| `radtran_phi` | (none) | `[]` | degrees; per domain | Relative azimuths (phi - phi0) for every `radtran_umu` (default 0) |
+| `radtran_mol_abs_param` | (none) | `"reptran coarse"` | `"reptran coarse"`, `"reptran medium"`, `"reptran fine"`; per domain | REPTRAN band resolution (15, 5, 1 cm-1); medium and fine need libRadtran's separately distributed lookup tables |
+| `radtran_solver` | (none) | `"disort"` | `"disort"`, `"twostr"`; per domain | Discrete ordinates (delta-M) or two-stream (delta-Eddington), irradiances only for the latter |
+| `radtran_streams` | (none) | `0` | 0 or even 2-32; per domain | Number of streams; 0 means 6 for irradiances, 16 with radiances |
+| `radtran_pseudospherical` | (none) | `false` | bool; per domain | Pseudo-spherical direct beam (Dahlback & Stamnes 1991) for low sun |
 | `alb_sol` | `alb_sol` | 0 | 0, 1 | `[shared]` only. 1 updates sun-angle-dependent land albedo `ALBSOL` and background albedo `ALBBCKSOL` on radiation steps. Shortwave uses `ALBSOL`; RUC uses both fields and retains the fractional sea-ice blend. Needs active shortwave and the MODIS21 land-use categories. HRRR namelist imports honor the supplied value; shipped HRRR demos and the new solar-albedo monthly RUC legacy-RRTMG template explicitly select 1. Other configurations remain at 0. Checkpoints bind it when enabled; prepared bundles do not. Stock WRF 4.6.1 export omits this fork-only key, and its comparison receipt records that the stock arm does not apply the correction |
 | `num_soil_layers` | `num_soil_layers` | 4 | scheme-defined | WOOF *refuses* a count the scheme does not define where WRF silently overwrites it |
 | `nest_microphysics_transition` | -- | `same-scheme-only` | + `mp8-to-mp18-mass-diagnosed-v1`, `mp-edge-mass-diagnosed-v1` | WOOF-only, one-way nest MP edges. Left at the default, a mixed edge between two ported schemes resolves to the closure that pair takes (`mp8-to-mp18-mass-diagnosed-v1` for Thompson over NSSL-2, the matrix id for every other pair) and the coupler receipt records the requested and the effective policy; naming the pair's own id pins it, and naming the other mixed id is refused. An `mp_physics = 28` child entering from another scheme is seeded with WRF's own non-aerosol-aware droplet number and aerosol floors, named in the receipt |

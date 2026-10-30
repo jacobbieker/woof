@@ -1,0 +1,153 @@
+{
+ "case": "day_of_year_180",
+ "options": {
+  "wavelength": [
+   450.0,
+   451.0
+  ],
+  "mol_abs_param": "reptran coarse",
+  "rte_solver": "disort",
+  "number_of_streams": 8,
+  "sza": 30.0,
+  "phi0": 0.0,
+  "umu": [],
+  "phi": [],
+  "albedo": 0.2,
+  "pseudospherical": false,
+  "earth_radius": 6370.0,
+  "deltam": null,
+  "disort_intcor": "moments",
+  "zout": [
+   "sur",
+   "toa"
+  ],
+  "output_quantity": "irradiance",
+  "day_of_year": 180,
+  "atmosphere_file": "us",
+  "wc_file": null,
+  "wc_properties": "hu",
+  "ic_file": null,
+  "ic_properties": "fu",
+  "ic_fu_reff_def": false,
+  "no_absorption": false,
+  "no_scattering": false
+ },
+ "inputs_sha256": "d21a6eeb4395ca446f7533a4e69a4be28072dbc9d9fd4f61602ab96ac4a40980",
+ "uvspec_input": "data_files_path <libRadtran data>\natmosphere_file <run dir>/atm.dat\nsource solar\nmol_abs_param reptran coarse\nwavelength 450.0 451.0\nrte_solver disort\nnumber_of_streams 8\nsza 30.0\nphi0 0.0\nalbedo 0.2\ndisort_intcor moments\nzout sur toa\nday_of_year 180\nmol_file CH4 <run dir>/CH4.vmr vmr\nmol_file N2O <run dir>/N2O.vmr vmr\nmol_file CO <run dir>/CO.vmr vmr\nmol_file N2 <run dir>/N2.vmr vmr\nquiet\n",
+ "uvspec": {
+  "lambda": [
+   450.096,
+   450.4,
+   450.704,
+   451.009
+  ],
+  "edir": [
+   [
+    1380.602,
+    1790.312
+   ],
+   [
+    1397.305,
+    1811.357
+   ],
+   [
+    1449.665,
+    1877.475
+   ],
+   [
+    1447.724,
+    1873.42
+   ]
+  ],
+  "edn": [
+   [
+    251.7397,
+    6.885406e-13
+   ],
+   [
+    254.2812,
+    0.0
+   ],
+   [
+    262.7786,
+    0.0
+   ],
+   [
+    261.6565,
+    -2.401678e-13
+   ]
+  ],
+  "eup": [
+   [
+    326.4684,
+    471.6629
+   ],
+   [
+    330.3171,
+    476.8051
+   ],
+   [
+    342.4887,
+    493.7428
+   ],
+   [
+    341.8761,
+    492.4927
+   ]
+  ],
+  "uavgdir": [
+   [
+    126.861,
+    164.5084
+   ],
+   [
+    128.3957,
+    166.4423
+   ],
+   [
+    133.207,
+    172.5177
+   ],
+   [
+    133.0287,
+    172.1451
+   ]
+  ],
+  "uavgdn": [
+   [
+    54.25625,
+    9.853743e-14
+   ],
+   [
+    54.82692,
+    -3.913302e-14
+   ],
+   [
+    56.70734,
+    -4.838573e-14
+   ],
+   [
+    56.50155,
+    -1.148624e-13
+   ]
+  ],
+  "uavgup": [
+   [
+    51.95907,
+    81.80976
+   ],
+   [
+    52.57161,
+    82.67419
+   ],
+   [
+    54.50877,
+    85.60007
+   ],
+   [
+    54.41127,
+    85.39634
+   ]
+  ]
+ }
+}

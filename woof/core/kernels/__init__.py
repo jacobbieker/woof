@@ -188,6 +188,10 @@ _EXTRA_HEADERS: dict[str, tuple[str, ...]] = {
     # (saturation lookups, the implicit diffusion solver, exacol/zisocl/
     # compute_cubic, caleddy, compute_eddy_diff with trbintd/sfdiag and the
     # camuwpbl column driver).  A new module, so no existing unit moves.
+    # woof's clean-room spectral discrete-ordinate solver (woof/radtran):
+    # binary64 exp/cos through the word-exact ports, so CUDA, Metal and the
+    # host build agree word for word.  A new module, so no existing unit moves.
+    "radtran_disort": ("glibc_flt64.cuh",),
     "uwpbl": ("glibc_flt64.cuh", "uwpbl_common.cuh", "uwpbl_wvsat.cuh",
               "uwpbl_vdiff.cuh", "uwpbl_zisocl.cuh", "uwpbl_caleddy.cuh",
               "uwpbl_eddy.cuh", "uwpbl_driver.cuh"),
@@ -462,6 +466,7 @@ def module_source(name: str, *, kernel_dir: Path = _KDIR) -> str:
 #: climate_diagnostics: all 48 climate fields match the pinned gfortran
 #: oracle only with separate rounding in strict mode; fast strips this option.
 _NO_FMAD_MODULES = frozenset({"climate_diagnostics", "hail", "lake", "g3", "ysu", "shinhong", "mynn_pbl",
+                              "radtran_disort",
                               "mynn_dmp_sibling", "wsm6", "kessler", "myjpbl",
                               "milbrandt2", "milbrandt2_zet", "wdm6",
                               "wdm6_refl", "wsm3", "wsm6r", "noah"})

@@ -131,7 +131,11 @@ def test_the_checkpoint_echo_drops_both_at_their_default():
              # WRF's wind farm (the fork's Fitch coupling), appended after.
              *WINDFARM_RUN_DEFAULTS,
              # RRTMG band output, then WRF-Solar's couple_farms.
-             "rrtmg_spectral_output", "couple_farms"]
+             "rrtmg_spectral_output", "couple_farms",
+             # the output-only woof.radtran diagnostic
+             "radtran_wavelengths", "radtran_interval_s", "radtran_umu", "radtran_phi",
+             "radtran_mol_abs_param", "radtran_solver", "radtran_streams",
+             "radtran_pseudospherical"]
     assert names[-len(later):] == later
     names = names[:-len(later)]
     # The 2.9.4 capabilities campaign's keyword-only keys follow the fire

@@ -349,6 +349,10 @@ def resolve_namelist(text: str, *, backends: Mapping[str, str] | None = None,
         groups.get("nhyd_model", {}).pop(key, None)
     # WOOF's &radiation config_rrtmg_spectral_output is produced by the v8.4.2 RRTMG slots only.
     from .. import radiation_spectral_v842 as spectral
+    from .. import radtran_v842 as radtran
+    if groups.get(radtran.GROUP):
+        raise ValueError(f"&{radtran.GROUP} (the woof.radtran diagnostic) is not available on the RRFS "
+                         "fork route; it is an MPAS-A v8.4.2 suite-route option")
     if spectral.resolve(groups) != "none":
         raise ValueError(f"&{spectral.GROUP} {spectral.OPTION} is not available on the RRFS fork route; "
                          "it is an MPAS-A v8.4.2 suite-route option")

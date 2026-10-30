@@ -20,6 +20,7 @@ from ..config import parse_fortran_namelist
 from ..host_parallel import threads as host_copy_threads
 from .driver_v842 import DriverConfig
 from . import radiation_spectral_v842 as _spectral
+from . import radtran_v842 as _radtran
 
 _ENTITY = {"nCells", "nEdges", "nVertices"}
 
@@ -98,6 +99,8 @@ def active_packages(config: DriverConfig, configs: Mapping[str, Any]) -> set[str
         packages.add("ugwp_ngw_stream")
     # WOOF's &radiation config_rrtmg_spectral_output (radiation_spectral_v842).
     packages.update(_spectral.packages(config))
+    # WOOF's &radtran spectral diagnostic (radtran_v842).
+    packages.update(_radtran.packages(config))
     return packages
 
 
@@ -116,6 +119,8 @@ class RegistryLayout:
             getattr(import_module(module), operation)(self.root)
         # rrtmg_spectral_output's package-gated fields join the parsed tree only when the option is on.
         _spectral.extend_registry(self.root, _spectral.packages(config))
+        # &radtran's package-gated fields likewise, only when the group is set.
+        _radtran.extend_registry(self.root, config)
         self.configs = {}
         self.config_kinds = {}
         for option in self.root.findall(".//nml_option"):
@@ -132,7 +137,7 @@ class RegistryLayout:
         canonical = {key.casefold(): key for key in self.config_kinds}
         for group, options in parse_fortran_namelist(namelist).items():
             # WOOF's own groups (slot backends, &radiation's spectral output) are not native configs.
-            if group not in ("hex_mpasphys", _spectral.GROUP):
+            if group not in ("hex_mpasphys", _spectral.GROUP, _radtran.GROUP):
                 self.configs.update({canonical.get(key.casefold(), key): value
                                      for key, value in options.items()})
         self.configs.update({canonical.get(key.casefold(), key): value

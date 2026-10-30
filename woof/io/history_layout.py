@@ -502,6 +502,12 @@ def physics_history_fields(physics) -> dict[str, object]:
         for suffix in ("_band", "_gpt"):
             if base + suffix in physics.fields:
                 output[(base + suffix).upper()] = physics.fields[base + suffix]
+    # woof.radtran spectral diagnostic (RT_* planes, radiances, axes)
+    from woof.core.physics_inventory import (RADTRAN_DIRECTION_FIELDS, RADTRAN_FLUX_FIELDS,
+                                             RADTRAN_WAVELENGTH_FIELDS)
+    for name in (*RADTRAN_FLUX_FIELDS, "rt_rad", *RADTRAN_WAVELENGTH_FIELDS, *RADTRAN_DIRECTION_FIELDS):
+        if name in physics.fields:
+            output[name.upper()] = physics.fields[name]
     # WRF's live surface masks (core history rows in stock wrf.exe; the
     # seaice and lake branches can move them during a run).  2.9.0 wrote
     # neither, so a wrfout reader found no land/water mask beside LANDMASK.

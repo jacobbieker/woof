@@ -1,0 +1,78 @@
+{
+ "case": "ic_fu_1600",
+ "options": {
+  "wavelength": [
+   1600.0,
+   1603.0
+  ],
+  "mol_abs_param": "reptran coarse",
+  "rte_solver": "disort",
+  "number_of_streams": 8,
+  "sza": 30.0,
+  "phi0": 0.0,
+  "umu": [],
+  "phi": [],
+  "albedo": 0.2,
+  "pseudospherical": false,
+  "earth_radius": 6370.0,
+  "deltam": null,
+  "disort_intcor": "moments",
+  "zout": [
+   "sur",
+   "toa"
+  ],
+  "output_quantity": "irradiance",
+  "day_of_year": null,
+  "atmosphere_file": "us",
+  "wc_file": null,
+  "wc_properties": "hu",
+  "ic_file": null,
+  "ic_properties": "fu",
+  "ic_fu_reff_def": false,
+  "no_absorption": false,
+  "no_scattering": false
+ },
+ "inputs_sha256": "db3877adecb9eba228fbef3c004f36248641d4b693480955b83d3164064a63b2",
+ "uvspec_input": "data_files_path <libRadtran data>\natmosphere_file <run dir>/atm.dat\nsource solar\nmol_abs_param reptran coarse\nwavelength 1600.0 1603.0\nrte_solver disort\nnumber_of_streams 8\nsza 30.0\nphi0 0.0\nalbedo 0.2\ndisort_intcor moments\nzout sur toa\nic_file 1D <run dir>/ic.dat\nic_properties fu\nic_fu reff_def off\nmol_file CH4 <run dir>/CH4.vmr vmr\nmol_file N2O <run dir>/N2O.vmr vmr\nmol_file CO <run dir>/CO.vmr vmr\nmol_file N2 <run dir>/N2.vmr vmr\nquiet\n",
+ "uvspec": {
+  "lambda": [
+   1601.925
+  ],
+  "edir": [
+   [
+    29.60374,
+    205.8216
+   ]
+  ],
+  "edn": [
+   [
+    116.095,
+    1.083982e-11
+   ]
+  ],
+  "eup": [
+   [
+    29.13975,
+    30.40179
+   ]
+  ],
+  "uavgdir": [
+   [
+    4.19181,
+    18.91256
+   ]
+  ],
+  "uavgdn": [
+   [
+    12.40147,
+    1.27502e-12
+   ]
+  ],
+  "uavgup": [
+   [
+    4.637735,
+    4.961182
+   ]
+  ]
+ }
+}

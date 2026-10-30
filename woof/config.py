@@ -75,7 +75,7 @@ class RunConfig:
         # The PWP reference profiles (lane/cap-slab-ocean) arrive as lists
         # from TOML, the namelist importer and callers; store tuples so the
         # frozen configuration stays hashable.
-        for name in ("ocean_z", "ocean_t", "ocean_s"):
+        for name in ("ocean_z", "ocean_t", "ocean_s", "radtran_wavelengths", "radtran_umu", "radtran_phi"):
             value = getattr(self, name)
             if isinstance(value, list):
                 object.__setattr__(self, name, tuple(value))
@@ -1858,6 +1858,31 @@ class RunConfig:
     # swint_opt = 2.  Off, FARMS's six fields are diagnostics.  Appended
     # last, keyword-only.
     couple_farms: bool = False
+    # woof.radtran spectral diagnostic (output-only, per domain, off by
+    # default): woof's clean-room discrete-ordinate solver run on this
+    # domain's columns with REPTRAN gas absorption, Rayleigh scattering and
+    # the model's own water/ice clouds.  Each listed wavelength [nm] selects
+    # the REPTRAN band containing it; history gains RT_EDIR, RT_EDN, RT_EUP
+    # (surface) and RT_EUP_TOA on axis rt_wavelength, [W m-2 nm-1], and with
+    # radtran_umu RT_RAD [W m-2 nm-1 sr-1] on (rt_wavelength, rt_direction).
+    # Needs libRadtran's data files at run time (woof.radtran.data).  No
+    # prognostic word changes.  Appended last, keyword-only.
+    radtran_wavelengths: tuple[float, ...] = ()
+    #: seconds between radtran calls (the first step always computes)
+    radtran_interval_s: float = 3600.0
+    #: radiance directions: cosines of the polar angle (> 0 upwelling at the
+    #: top of the atmosphere, < 0 downwelling at the surface) ...
+    radtran_umu: tuple[float, ...] = ()
+    #: ... and relative azimuths phi - phi0 [deg] (default 0 with umu)
+    radtran_phi: tuple[float, ...] = ()
+    #: REPTRAN band resolution ("reptran coarse" | "reptran medium" | "reptran fine")
+    radtran_mol_abs_param: str = "reptran coarse"
+    #: "disort" (discrete ordinates) or "twostr" (two-stream, irradiance only)
+    radtran_solver: str = "disort"
+    #: number of streams (0: 6 for irradiance, 16 with radiances)
+    radtran_streams: int = 0
+    #: pseudo-spherical direct beam (Dahlback & Stamnes 1991)
+    radtran_pseudospherical: bool = False
 
 #: The ways a domain's clock meets the measured terrain rules
 #: (:attr:`RunConfig.terrain_clock`).
@@ -6694,6 +6719,12 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
                 "rrtmg_spectral_output needs legacy RRTMG radiation (ra_lw_physics or "
                 "ra_sw_physics = 4 with ra_rrtmg_variant = \"rrtmg_legacy\"); RTE+RRTMGP's "
                 "band output is not wired yet")
+    if cfg.radtran_wavelengths:
+        from woof.radtran.model import diagnostic_from_config, validate as _radtran_validate
+        try:
+            _radtran_validate(diagnostic_from_config(cfg))
+        except (TypeError, ValueError) as exc:
+            raise ConfigurationRefused(f"radtran: {exc}") from None
     why = terrain_drag_refusal(
         topo_wind=cfg.topo_wind, gwd_opt=cfg.gwd_opt,
         bl_pbl_physics=cfg.bl_pbl_physics,

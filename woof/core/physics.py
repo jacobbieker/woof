@@ -2224,6 +2224,10 @@ class PhysicsDriver:
         # initialize_physics attaches it where the config asks for it
         # (restart: rebuilt; its six outputs ride ``fields``).
         self.farms = None
+        # woof.radtran spectral diagnostic (RunConfig radtran_*, output-only);
+        # initialize_physics attaches it where radtran_wavelengths is set
+        # (restart: rebuilt; its outputs ride ``fields``).
+        self.radtran = None
         self.lake = None
         self.o3rad = None
         self.fields = fields
@@ -6190,6 +6194,14 @@ class PhysicsDriver:
         # every model step, even when the wrapper did not run this step.
         self.accumulate_radiation_boundary_fluxes(cfg)
 
+        # woof.radtran spectral diagnostic (output-only) on the time-t
+        # atmosphere, at its own cadence; writes only its RT_* fields.
+        radtran = getattr(self, "radtran", None)
+        if radtran is not None and radtran.due(state, cfg):
+            if atmosphere is None:
+                atmosphere = _prepare_atmosphere(state)
+            radtran.run(self, state, cfg, atmosphere)
+
         # WRF fixed-dt surface/PBL cadence: the mandatory ITIMESTEP=1 call
         # is followed by calls where MOD(ITIMESTEP, STEPBL) == 0.
         if (self.surface_enabled
@@ -7269,6 +7281,9 @@ def initialize_physics(
         f["ac"+name] = cp.zeros(shape,dtype=DTYPE)
     for name, count in radiation_spectral_fields(cfg).items():
         f[name] = cp.zeros((count,) + tuple(shape), dtype=DTYPE)
+    from woof.core.physics_inventory import radtran_fields
+    for name, full in radtran_fields(cfg, *shape).items():
+        f[name] = cp.zeros(full, dtype=DTYPE)
     if "swupt" in radiation_boundary_flux_names(cfg) and "coszen" not in f:
         f["coszen"] = cp.zeros(shape,dtype=DTYPE)
     n_soil = soil_layer_count(cfg)
@@ -7948,6 +7963,21 @@ def initialize_physics(
             aer_asy_val=float(getattr(cfg, "aer_asy_val", 0.9)),
             couple_farms=bool(getattr(cfg, "couple_farms", False)),
             bl_merge=bl_merge)
+    if tuple(getattr(cfg, "radtran_wavelengths", ()) or ()):
+        # woof.radtran spectral diagnostic: the step's own solar geometry
+        # needs this domain's latitude, longitude and start time.
+        from woof.core.radtran_diag import RadtranRun
+        if (radiation_latitude is None or radiation_longitude is None
+                or radiation_start_time is None):
+            raise ValueError(
+                "radtran_wavelengths needs the domain's latitude, longitude and "
+                "UTC start time (radiation_latitude/radiation_longitude/"
+                "radiation_start_time): the spectral diagnostic evaluates the "
+                "solar zenith angle at each call")
+        driver.radtran = RadtranRun(cfg, start_time=radiation_start_time,
+                                    latitude_deg=radiation_latitude,
+                                    longitude_deg=radiation_longitude,
+                                    shape=shape, fields=f)
     # WRF's topo_wind / gwd_opt (woof.core.terrain_drag): the topo_wind
     # coefficients from this domain's terrain (start_em.F:1539-1626) and the
     # gwd_opt statistics, on the device once.  Only where either is on, so

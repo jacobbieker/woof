@@ -93,6 +93,32 @@ def test_new_fields_are_reviewed_defaults_appended_last():
     """
     from woof.config import CHEM_RUN_FIELDS, FIRE_RUN_FIELDS
     names = [f.name for f in dataclasses.fields(RunConfig)]
+    # Output-only woof.radtran spectral diagnostic, appended off (no
+    # wavelength: nothing computes, no field is allocated).
+    assert names.pop() == "radtran_pseudospherical"
+    assert RunConfig.__dataclass_fields__["radtran_pseudospherical"].default == False
+    assert RunConfig.__dataclass_fields__["radtran_pseudospherical"].kw_only
+    assert names.pop() == "radtran_streams"
+    assert RunConfig.__dataclass_fields__["radtran_streams"].default == 0
+    assert RunConfig.__dataclass_fields__["radtran_streams"].kw_only
+    assert names.pop() == "radtran_solver"
+    assert RunConfig.__dataclass_fields__["radtran_solver"].default == "disort"
+    assert RunConfig.__dataclass_fields__["radtran_solver"].kw_only
+    assert names.pop() == "radtran_mol_abs_param"
+    assert RunConfig.__dataclass_fields__["radtran_mol_abs_param"].default == "reptran coarse"
+    assert RunConfig.__dataclass_fields__["radtran_mol_abs_param"].kw_only
+    assert names.pop() == "radtran_phi"
+    assert RunConfig.__dataclass_fields__["radtran_phi"].default == ()
+    assert RunConfig.__dataclass_fields__["radtran_phi"].kw_only
+    assert names.pop() == "radtran_umu"
+    assert RunConfig.__dataclass_fields__["radtran_umu"].default == ()
+    assert RunConfig.__dataclass_fields__["radtran_umu"].kw_only
+    assert names.pop() == "radtran_interval_s"
+    assert RunConfig.__dataclass_fields__["radtran_interval_s"].default == 3600.0
+    assert RunConfig.__dataclass_fields__["radtran_interval_s"].kw_only
+    assert names.pop() == "radtran_wavelengths"
+    assert RunConfig.__dataclass_fields__["radtran_wavelengths"].default == ()
+    assert RunConfig.__dataclass_fields__["radtran_wavelengths"].kw_only
     # WRF's couple_farms (swint_opt = 2's SWDOWN2 -> SWDOWN), appended off.
     assert names.pop() == "couple_farms"
     assert RunConfig.__dataclass_fields__["couple_farms"].default is False
@@ -549,7 +575,13 @@ def _check_frozen_defaults(actual):
                          # output-only band-resolved RRTMG fluxes, off
                          ("rrtmg_spectral_output", "none"),
                          # WRF couple_farms, off
-                         ("couple_farms", False)):
+                         ("couple_farms", False),
+                         # output-only woof.radtran diagnostic, off
+                         ("radtran_wavelengths", ()), ("radtran_interval_s", 3600.0),
+                         ("radtran_umu", ()), ("radtran_phi", ()),
+                         ("radtran_mol_abs_param", "reptran coarse"),
+                         ("radtran_solver", "disort"), ("radtran_streams", 0),
+                         ("radtran_pseudospherical", False)):
         assert actual.pop(field) == value, field
     # WRF's windfarm_opt and its three companions (the fork's Fitch
     # coupling), appended after upstream 1.1.0's fields, off.

@@ -1,0 +1,228 @@
+{
+ "case": "sph_sza60",
+ "options": {
+  "wavelength": [
+   450.0,
+   452.0
+  ],
+  "mol_abs_param": "reptran coarse",
+  "rte_solver": "disort",
+  "number_of_streams": 8,
+  "sza": 60.0,
+  "phi0": 0.0,
+  "umu": [],
+  "phi": [],
+  "albedo": 0.2,
+  "pseudospherical": true,
+  "earth_radius": 6370.0,
+  "deltam": null,
+  "disort_intcor": "moments",
+  "zout": [
+   "sur",
+   "toa"
+  ],
+  "output_quantity": "irradiance",
+  "day_of_year": null,
+  "atmosphere_file": "us",
+  "wc_file": null,
+  "wc_properties": "hu",
+  "ic_file": null,
+  "ic_properties": "fu",
+  "ic_fu_reff_def": false,
+  "no_absorption": false,
+  "no_scattering": false
+ },
+ "inputs_sha256": "d21a6eeb4395ca446f7533a4e69a4be28072dbc9d9fd4f61602ab96ac4a40980",
+ "uvspec_input": "data_files_path <libRadtran data>\natmosphere_file <run dir>/atm.dat\nsource solar\nmol_abs_param reptran coarse\nwavelength 450.0 452.0\nrte_solver disort\nnumber_of_streams 8\nsza 60.0\nphi0 0.0\nalbedo 0.2\npseudospherical\nearth_radius 6370.0\ndisort_intcor moments\nzout sur toa\nmol_file CH4 <run dir>/CH4.vmr vmr\nmol_file N2O <run dir>/N2O.vmr vmr\nmol_file CO <run dir>/CO.vmr vmr\nmol_file N2 <run dir>/N2.vmr vmr\nquiet\n",
+ "uvspec": {
+  "lambda": [
+   450.096,
+   450.4,
+   450.704,
+   451.009,
+   451.315,
+   451.62,
+   451.926
+  ],
+  "edir": [
+   [
+    682.7638,
+    1069.207
+   ],
+   [
+    691.1953,
+    1081.775
+   ],
+   [
+    717.5844,
+    1121.262
+   ],
+   [
+    717.0508,
+    1118.84
+   ],
+   [
+    683.0934,
+    1064.529
+   ],
+   [
+    682.1221,
+    1061.517
+   ],
+   [
+    648.0581,
+    1008.207
+   ]
+  ],
+  "edn": [
+   [
+    215.3591,
+    0.0
+   ],
+   [
+    217.5418,
+    2.402024e-13
+   ],
+   [
+    224.8699,
+    0.0
+   ],
+   [
+    223.9722,
+    2.484325e-13
+   ],
+   [
+    212.737,
+    2.36373e-13
+   ],
+   [
+    211.5818,
+    -2.357041e-13
+   ],
+   [
+    200.7483,
+    2.238669e-13
+   ]
+  ],
+  "eup": [
+   [
+    179.6265,
+    340.0625
+   ],
+   [
+    181.7493,
+    343.6688
+   ],
+   [
+    188.4928,
+    355.7489
+   ],
+   [
+    188.2066,
+    354.7891
+   ],
+   [
+    179.1679,
+    337.3802
+   ],
+   [
+    178.7426,
+    335.9851
+   ],
+   [
+    169.763,
+    318.8649
+   ]
+  ],
+  "uavgdir": [
+   [
+    108.6652,
+    170.1695
+   ],
+   [
+    110.0071,
+    172.1699
+   ],
+   [
+    114.2071,
+    178.4544
+   ],
+   [
+    114.1222,
+    178.069
+   ],
+   [
+    108.7177,
+    169.4251
+   ],
+   [
+    108.5631,
+    168.9456
+   ],
+   [
+    103.1416,
+    160.4611
+   ]
+  ],
+  "uavgdn": [
+   [
+    48.85555,
+    1.548464e-14
+   ],
+   [
+    49.37453,
+    -3.919149e-15
+   ],
+   [
+    51.08781,
+    -2.706421e-15
+   ],
+   [
+    50.92159,
+    2.835348e-14
+   ],
+   [
+    48.39914,
+    5.524147e-14
+   ],
+   [
+    48.17812,
+    -6.403095e-15
+   ],
+   [
+    45.72368,
+    6.081528e-15
+   ]
+  ],
+  "uavgup": [
+   [
+    28.58844,
+    65.93309
+   ],
+   [
+    28.9263,
+    66.60766
+   ],
+   [
+    29.99956,
+    68.94147
+   ],
+   [
+    29.954,
+    68.7701
+   ],
+   [
+    28.51546,
+    65.40598
+   ],
+   [
+    28.44777,
+    65.12646
+   ],
+   [
+    27.01862,
+    61.7915
+   ]
+  ]
+ }
+}
