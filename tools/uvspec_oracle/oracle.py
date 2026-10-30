@@ -76,6 +76,16 @@ def write_cloud(z, content, reff, path: Path):
     path.write_text("# z(km) content(g/m3) reff(um)\n" + "\n".join(rows) + "\n")
 
 
+def write_aerosol(z, species, mass, path: Path):
+    """uvspec ``aerosol_species_file`` on the column's levels: the row at a
+    level holds the mass [g m-3] of the layer above it (probed convention)."""
+    m = np.asarray(mass, dtype=np.float64)
+    rows = [" ".join([_fmt(z[0])] + ["0"] * len(species))]
+    for k in range(m.shape[0]):
+        rows.append(" ".join([_fmt(z[k + 1])] + [_fmt(v) for v in m[k]]))
+    path.write_text("# z(km) " + " ".join(species) + " (g/m3)\n" + "\n".join(rows) + "\n")
+
+
 def parse(stdout: str, *, nout: int, numu: int, nphi: int, twostr: bool):
     """uvspec's default output: per wavelength, per zout a flux line, then
     (with umu) a header of phi and numu rows 'umu u0u uu(phi...)'."""
@@ -108,8 +118,12 @@ def parse(stdout: str, *, nout: int, numu: int, nphi: int, twostr: bool):
     return out
 
 
-def run(opts, col, clouds=None, *, keep: Path | None = None):
-    """Run uvspec on (Options, Column[, CloudLayers]); returns parsed arrays."""
+def run(opts, col, clouds=None, *, aerosol=None, aerosol_library: Path | None = None,
+        keep: Path | None = None):
+    """Run uvspec on (Options, Column[, CloudLayers][, AerosolLayers]); returns parsed arrays.
+
+    ``aerosol_library``: directory of ``<species>.*.cdf`` Mie tables (libRadtran's
+    mie-tool netCDF format; tools/uvspec_oracle/opac_library.py)."""
     from woof.radtran import data as rtdata
     if col.z.ndim == 1:
         from woof.radtran.atmosphere import Column
@@ -131,6 +145,12 @@ def run(opts, col, clouds=None, *, keep: Path | None = None):
             write_cloud(col.z[0], clouds.iwc[0] if clouds.iwc.ndim > 1 else clouds.iwc,
                         clouds.reff_ic[0] if clouds.reff_ic.ndim > 1 else clouds.reff_ic, d / "ic.dat")
             o = o.with_(ic_file=str(d / "ic.dat"))
+        if aerosol is not None:
+            mass = aerosol.mass[0] if aerosol.mass.ndim > 2 else aerosol.mass
+            write_aerosol(col.z[0], aerosol.species, mass, d / "aer.dat")
+            (d / "L").symlink_to(Path(aerosol_library).resolve())
+            extra += ["aerosol_default", f"aerosol_species_file {d / 'aer.dat'} " + " ".join(aerosol.species),
+                      f"aerosol_species_library {d / 'L'}/"]
         text = o.to_uvspec(data_path=str(d / "D"), atmosphere_path=str(atm), extra=tuple(extra) + ("quiet",))
         p = subprocess.run(_uvspec_cmd(), input=text, capture_output=True, text=True, cwd=td)
         if keep is not None:
@@ -145,7 +165,8 @@ def run(opts, col, clouds=None, *, keep: Path | None = None):
             raise RuntimeError(f"uvspec failed ({p.returncode}): {p.stdout[:400]} {p.stderr[-800:]}")
         out = parse(p.stdout, nout=len(o.zout), numu=len(o.umu), nphi=len(o.phi),
                     twostr=o.rte_solver == "twostr")
-        out["input"] = text.replace(str(d / "D"), "<libRadtran data>").replace(str(d), "<run dir>")
+        out["input"] = (text.replace(str(d / "D"), "<libRadtran data>").replace(str(d / "L"), "<OPAC library>")
+                        .replace(str(d), "<run dir>"))
         return out
 
 

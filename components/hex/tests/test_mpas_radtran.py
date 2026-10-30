@@ -44,6 +44,10 @@ def test_group_is_off_by_default_and_resolves():
     assert "radtran" not in resolve_namelist(_namelist(None), default_backend="hex-cuda").receipt()
     assert radtran.packages(config) == {radtran.PACKAGE}
     assert not any(k.startswith("config_radtran") for k in config.options)
+    # aerosol: off by default (and absent from the receipt), an OPAC mixture or 'thompson'
+    assert d.aerosol == "none" and "aerosol" not in config.receipt()["radtran"]
+    on = resolve_namelist(_namelist(config_radtran_aerosol="maritime_clean"), default_backend="hex-cuda")
+    assert on.radtran.aerosol == "maritime_clean" and on.receipt()["radtran"]["aerosol"] == "maritime_clean"
 
 
 @pytest.mark.parametrize("text,match", [
@@ -53,6 +57,7 @@ def test_group_is_off_by_default_and_resolves():
     (_namelist("500", config_radtran_solver="twostr", config_radtran_umu="0.5"), "radtran_umu needs"),
     (_namelist("500 abc"), "quoted list of numbers"),
     (_namelist("500", config_radtran_streams=7), "radtran_streams"),
+    (_namelist("500", config_radtran_aerosol="smoke"), "radtran_aerosol"),
 ])
 def test_group_is_refused_where_it_cannot_run(text, match):
     with pytest.raises(ValueError, match=match):
@@ -209,3 +214,51 @@ def test_output_fills_the_fields_with_the_librarys_words(layouts):
     assert np.array_equal(w["rt_rad"], ref["rad"])
     assert np.all(np.delete(w["rt_edir"][0], 2) > 0.1)       # clear columns, all in daylight
     assert w["rt_edir"][0, 2] < 0.5 * w["rt_edir"][0, 1]      # the cloudy column
+
+
+def test_thompson_aerosol_reads_nwfa_nifa(layouts):
+    pytest.importorskip("cupy")
+    import dataclasses
+    from woof.radtran import data, model
+    try:
+        data.data_dir()
+    except data.LibradtranDataMissing as exc:
+        pytest.skip(str(exc))
+    base = layouts["rad"]
+    config = resolve_namelist(_namelist("500", config_radtran_aerosol="thompson"), default_backend="hex-cuda")
+    c = _columns()
+    n = c["pressure"].shape[1]
+    nscal = max(base.indices["state", k] for k in ("index_qv", "index_qc", "index_qi"))
+    # the aerosol-aware scheme's two number tracers after the moisture scalars
+    layout = SimpleNamespace(indices={**base.indices, ("state", "index_nwfa"): nscal + 1,
+                                      ("state", "index_nifa"): nscal + 2})
+    scalars = np.zeros((nscal + 2, NZ, n))
+    for key, name in (("index_qv", "qv"), ("index_qc", "qc"), ("index_qi", "qi")):
+        scalars[layout.indices["state", key] - 1] = c[name]
+    zm = 0.5 * (c["zgrid"][:-1] + c["zgrid"][1:])
+    nwfa = 2e9 * np.exp(-zm / 1500.0)
+    nifa = 1e6 * np.exp(-zm / 3000.0)
+    scalars[nscal], scalars[nscal + 1] = nwfa, nifa
+    lat = np.radians(np.linspace(20.0, 50.0, n))
+    lon = np.radians(np.linspace(-120.0, -70.0, n))
+    arrays = {("mesh", "zgrid"): c["zgrid"], ("diag", "pressure"): c["pressure"],
+              ("diag", "theta"): c["theta"], ("diag", "exner"): c["exner"], ("diag", "rho"): c["rho"],
+              ("state", "scalars"): scalars, ("mesh", "latCell"): lat, ("mesh", "lonCell"): lon,
+              ("diag_physics", "sfc_albedo"): np.full(n, 0.15)}
+    session = _Session(layout, config, arrays, {k: np.float64 for k in radtran.FIELDS})
+    out = radtran.RadtranOutput(session)
+    when = datetime(2025, 6, 21, 18, 0, 0)
+    out.compute(when)
+    t = c["theta"] * c["exner"]
+    kw = dict(z_w_m=c["zgrid"].T, p_w_pa=radtran.interface_pressure(c["zgrid"], c["pressure"], t, c["qv"]).T,
+              t_mass=t.T, qv_mass=c["qv"].T, umu0=radtran.solar_cosine(when, np.degrees(lat), np.degrees(lon)),
+              albedo=np.full(n, 0.15), qc_mass=c["qc"].T, qi_mass=c["qi"].T, rho_dry=c["rho"].T,
+              day_of_year=172, backend="host")
+    ref = model.compute(config.radtran, nwfa=nwfa.T, nifa=nifa.T, **kw)
+    for name in radtran.FLUX_FIELDS:
+        assert np.array_equal(session.written[name], ref[name[3:]]), name
+    clean = model.compute(dataclasses.replace(config.radtran, aerosol="none"), **kw)
+    assert np.all(ref["edir"] < clean["edir"])
+    # a run without the aerosol-aware scheme is refused
+    with pytest.raises(ValueError, match="mp_thompson_aerosols"):
+        radtran.RadtranOutput(_Session(base, config, arrays, {k: np.float64 for k in radtran.FIELDS}))

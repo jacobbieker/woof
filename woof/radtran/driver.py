@@ -22,7 +22,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from woof.radtran import atmosphere, clouds, data, optics, solver
+from woof.radtran import aerosol as opac
+from woof.radtran import atmosphere, clouds, data, ims, optics, solver
 from woof.radtran.options import Options
 from woof.radtran.reptran import open_reptran
 
@@ -94,7 +95,7 @@ def _hg_phase(g, mu):
     return (1.0 - g * g) / (1.0 + g * g - 2.0 * g * mu) ** 1.5
 
 
-def _layer_optics(opts, col, rep, iw, cl, nstr, numu_angles):
+def _layer_optics(opts, col, rep, iw, cl, nstr, numu_angles, aer=None, aer_nodes=None):
     """(dtau, ssa, pmom, ptrue) for every column at representative wavelength iw."""
     mo = optics.molecular(col, rep, iw)
     lam = float(rep.wvl[iw])
@@ -130,10 +131,28 @@ def _layer_optics(opts, col, rep, iw, cl, nstr, numu_angles):
         hg.append(_add_cloud(opts, tau, w, g, coef, nmom))
         tsca = tsca + hg[-1][0]
         text = text + (hg[-1][0] if opts.no_absorption else tau)
+    la = None
+    if aer is not None:
+        la = opac.layer_optics(aer, aer_nodes, lam, dz_km)
+        ts = la.tau_ext if opts.no_absorption else la.tau_sca
+        if opts.no_scattering:
+            ts = np.zeros_like(ts)
+        la_scale = np.divide(ts, la.tau_sca, out=np.zeros_like(ts), where=la.tau_sca > 0)
+        coef += (la.sca_chi[..., :nmom + 1] * la_scale[..., None])
+        tsca = tsca + ts
+        text = text + (ts if opts.no_absorption else la.tau_ext)
     with np.errstate(invalid="ignore", divide="ignore"):
         ssa = np.where(text > 0, tsca / text, 0.0)
         pmom = np.where(tsca[..., None] > 0, coef / tsca[..., None], 0.0)
     pmom[..., 0] = 1.0
+    # forward-peaked components for the IMS correction (scattering optical depth, g or moments)
+    peaks = [("hg", ts, g) for ts, g in hg]
+    if la is not None:
+        for s_, ts_, ih_ in la.by_species:
+            sa = opac.species_at(s_, lam)
+            chi = np.divide(sa.sca_chi[ih_], sa.sca[ih_][..., None], out=np.zeros(ih_.shape + (opac.LMAX + 1,)),
+                            where=sa.sca[ih_][..., None] > 0)
+            peaks.append(("mom", ts_ * la_scale, chi))
     ptrue = None
     if numu_angles is not None:
         cosang = numu_angles[:, None, :, :]                   # (ncol, 1, numu, nphi)
@@ -143,9 +162,11 @@ def _layer_optics(opts, col, rep, iw, cl, nstr, numu_angles):
         num = tr[..., None, None] * pr
         for ts, g in hg:
             num = num + ts[..., None, None] * _hg_phase(g[..., None, None], cosang)
+        if la is not None:
+            num = num + opac.layer_phase_sum(la, lam, cosang, la_scale)
         with np.errstate(invalid="ignore", divide="ignore"):
             ptrue = np.where(tsca[..., None, None] > 0, num / tsca[..., None, None], 1.0)
-    return text, ssa, pmom, ptrue
+    return text, ssa, pmom, ptrue, peaks
 
 
 def _add_cloud(opts, tau, w, g, coef, nmom):
@@ -172,8 +193,8 @@ def select_bands(rep, opts: Options, wavelengths=None) -> list[int]:
 
 
 def compute(opts: Options, col: atmosphere.Column, clouds_in: CloudLayers | None = None,
-            *, backend: str = "gpu", umu0=None, albedo=None, wavelengths=None,
-            budget_bytes: int = 1 << 29) -> Result:
+            *, aerosol: "opac.AerosolLayers | None" = None, backend: str = "gpu", umu0=None, albedo=None,
+            wavelengths=None, budget_bytes: int = 1 << 29) -> Result:
     """Band-averaged spectral irradiances/radiances for every column.
 
     ``umu0`` and ``albedo`` (per column) override ``opts.sza`` and
@@ -229,6 +250,9 @@ def compute(opts: Options, col: atmosphere.Column, clouds_in: CloudLayers | None
         if clouds_in is not None:
             clouds_in = CloudLayers(**{k: (None if v is None else np.broadcast_to(v, (ncol, L))[day])
                                        for k, v in clouds_in.__dict__.items()})
+        if aerosol is not None:
+            aerosol = opac.AerosolLayers(aerosol.species, np.broadcast_to(
+                aerosol.mass, (ncol, L, len(aerosol.species)))[day])
     nd = day.size
     mu0 = mu0_all[day]
     # user angles: cosine of the scattering angle per (column, umu, phi)
@@ -245,10 +269,12 @@ def compute(opts: Options, col: atmosphere.Column, clouds_in: CloudLayers | None
         flags |= solver.SPHERICAL
     if opts.umu and opts.disort_intcor == "moments":
         flags |= solver.TMS
-    D, S, P, PT = [], [], [], []
+    aer_nodes = None if aerosol is None else opac.humidity_nodes(aerosol, col)
+    D, S, P, PT, PK = [], [], [], [], []
     for iw in iws:
-        d, s, p, pt = _layer_optics(opts, col, rep, iw, clouds_in, nstr, ang if flags & solver.TMS else None)
-        D.append(d); S.append(s); P.append(p)
+        d, s, p, pt, pk = _layer_optics(opts, col, rep, iw, clouds_in, nstr, ang if flags & solver.TMS else None,
+                                    aerosol, aer_nodes)
+        D.append(d); S.append(s); P.append(p); PK.append(pk)
         if pt is not None:
             PT.append(pt)
     nw = len(iws)
@@ -263,6 +289,12 @@ def compute(opts: Options, col: atmosphere.Column, clouds_in: CloudLayers | None
                              backend=backend, budget_bytes=budget_bytes)
     flux = flux.reshape(nw, nd, nout, 6)
     rad = rad.reshape(nw, nd, nout, numu, nphi)
+    if flags & solver.TMS and flags & solver.DELTAM:
+        # Nakajima & Tanaka (1988) IMS: secondary scattering through the forward peak
+        for k in range(nw):
+            f = P[k][..., nstr]
+            rad[k] += ims.correction(dtau=D[k], ssa=S[k], f=f, components=PK[k], nstr=nstr, umu0=mu0,
+                                     umu=opts.umu, cosang=ang, outlev=outlev, fbeam=1.0)
     dist = sun_distance_factor(opts.day_of_year)
     pos = {iw: k for k, iw in enumerate(iws)}
     for j, b in enumerate(bands):

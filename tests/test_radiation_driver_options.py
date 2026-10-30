@@ -142,7 +142,9 @@ def test_the_checkpoint_echo_drops_both_at_their_default():
              "shcu_physics", "cu_rad_feedback",
 
              # the output-only WRF-Solar diagnostics
-             "solar_diagnostics"]
+             "solar_diagnostics",
+             # the radtran diagnostic's OPAC aerosol, appended after
+             "radtran_aerosol"]
     assert names[-len(later):] == later
     names = names[:-len(later)]
     # The 2.9.4 capabilities campaign's keyword-only keys follow the fire

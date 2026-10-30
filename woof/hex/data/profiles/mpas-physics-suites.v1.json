@@ -1898,7 +1898,8 @@
         "config_radtran_mol_abs_param",
         "config_radtran_solver",
         "config_radtran_streams",
-        "config_radtran_pseudospherical"
+        "config_radtran_pseudospherical",
+        "config_radtran_aerosol"
       ],
       "diagnostics": [
         "config_solar_diagnostics"

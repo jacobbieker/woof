@@ -23,6 +23,24 @@ N2 come from the AFGL profile's mixing ratios, CO2 from the run's value.
 Cloud water and ice per mass layer become Hu & Stamnes and Fu (1996) cloud
 layers, with the microphysics' effective radii where the scheme provides
 them (clipped to the parameterisations' ranges) and 10 um / 30 um otherwise.
+
+Aerosol (``aerosol``, off by default) becomes OPAC species layers
+(:mod:`woof.radtran.aerosol`; documented mapping, docs/dev/radtran.md):
+
+* ``"thompson"``: the Thompson & Eidhammer (2014) aerosol-aware
+  microphysics' number concentrations [kg-1] times the dry-air density give
+  numbers per m3; water-friendly aerosol (nwfa: sulfates and organics)
+  becomes OPAC water-soluble (waso) and ice-friendly aerosol (nifa: mineral
+  dust) OPAC mineral, accumulation mode (miam), each at OPAC's mean particle
+  mass (waso at its 50 % humidity node, the mass basis of uvspec's species
+  profiles; miam dry).  Model layers only; none above the model top.
+* an OPAC mixture name (``continental_average``, ``maritime_clean``,
+  ``urban``, ...): libRadtran's OPAC mixture profile (Hess et al. 1998,
+  masses at 50 % RH) by height above the model surface, on every layer
+  including the spliced standard atmosphere.
+
+The humidity node of each layer follows from the column's own temperature
+and water vapour (uvspec's rule, :func:`woof.radtran.aerosol.select_nodes`).
 """
 
 from __future__ import annotations
@@ -32,6 +50,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from woof.radtran import aerosol as opac
 from woof.radtran import atmosphere, driver
 from woof.radtran.options import Options
 
@@ -44,6 +63,11 @@ DEFAULT_REFF_ICE = 30.0
 #: Yang definition maps r -> D = 2 r 4/(3 sqrt 3), valid for D 9.3-65 um.
 REFF_WATER_RANGE = (2.5, 60.0)
 REFF_ICE_RANGE = (6.06, 42.3)
+#: radtran aerosol settings: off, Thompson aerosol-aware numbers, or an OPAC mixture
+AEROSOL_THOMPSON = "thompson"
+AEROSOL_CHOICES = ("none", AEROSOL_THOMPSON) + opac.MIXTURES
+#: Thompson aerosol -> OPAC species (number -> mass at this humidity node)
+THOMPSON_SPECIES = (("waso", 50.0), ("miam", 0.0))
 
 
 @dataclass(frozen=True)
@@ -58,6 +82,7 @@ class Diagnostic:
     streams: int = 0
     pseudospherical: bool = False
     co2_vmr: float = 4.0e-4
+    aerosol: str = "none"
 
     @property
     def enabled(self) -> bool:
@@ -86,7 +111,8 @@ def diagnostic_from_config(cfg) -> Diagnostic:
         mol_abs_param=str(getattr(cfg, "radtran_mol_abs_param", "reptran coarse")),
         solver=str(getattr(cfg, "radtran_solver", "disort")),
         streams=int(getattr(cfg, "radtran_streams", 0) or 0),
-        pseudospherical=bool(getattr(cfg, "radtran_pseudospherical", False)))
+        pseudospherical=bool(getattr(cfg, "radtran_pseudospherical", False)),
+        aerosol=str(getattr(cfg, "radtran_aerosol", "none")))
 
 
 def validate(diag: Diagnostic) -> None:
@@ -110,6 +136,13 @@ def validate(diag: Diagnostic) -> None:
         raise ValueError("radtran_mol_abs_param must be \"reptran coarse|medium|fine\"")
     if diag.streams not in (0, None) and (int(diag.streams) % 2 or not 2 <= int(diag.streams) <= 32):
         raise ValueError("radtran_streams must be 0 (default) or even, 2..32")
+    if diag.aerosol not in AEROSOL_CHOICES:
+        raise ValueError("radtran_aerosol must be \"none\", \"thompson\" or an OPAC mixture ("
+                         + ", ".join(opac.MIXTURES) + ")")
+    if diag.aerosol != "none":
+        lo = opac.LAM_MIN_UM * 1e3
+        if any(w < lo for w in diag.wavelengths):
+            raise ValueError(f"radtran_aerosol: the OPAC tables start at {lo:.0f} nm")
     diag.options()
 
 
@@ -141,14 +174,35 @@ def _interfaces(mass):
     return out
 
 
+def aerosol_layers(diag: Diagnostic, col, nz: int, *, rho_dry=None, nwfa=None, nifa=None):
+    """OPAC species layers (top first, every RT layer) for the run's setting."""
+    if diag.aerosol == "none":
+        return None
+    ncol, nlev = col.z.shape
+    L = nlev - 1
+    if diag.aerosol == AEROSOL_THOMPSON:
+        if nwfa is None or nifa is None or rho_dry is None:
+            raise ValueError("radtran_aerosol = \"thompson\" needs the aerosol-aware Thompson "
+                             "microphysics' nwfa and nifa")
+        mass = np.zeros((ncol, L, len(THOMPSON_SPECIES)))
+        rho = np.asarray(rho_dry, dtype=np.float64)
+        for k, (num, (sp, rh)) in enumerate(zip((nwfa, nifa), THOMPSON_SPECIES)):
+            n = np.maximum(np.asarray(num, dtype=np.float64), 0.0) * rho        # m-3
+            mass[:, L - nz:, k] = (n * opac.particle_mass(sp, rh))[:, ::-1]       # g m-3
+        return opac.AerosolLayers(tuple(s for s, _ in THOMPSON_SPECIES), mass)
+    zb = col.z[:, 1:] - col.z[:, -1:]
+    return opac.mixture_layers(diag.aerosol, zb)
+
+
 def compute(diag: Diagnostic, *, z_w_m, p_w_pa, t_mass, qv_mass, umu0, albedo,
             qc_mass=None, qi_mass=None, rho_dry=None, re_cloud_um=None, re_ice_um=None,
-            day_of_year: int | None = None, backend: str = "gpu") -> dict:
+            nwfa=None, nifa=None, day_of_year: int | None = None, backend: str = "gpu") -> dict:
     """Spectral diagnostic on (ncol, ...) host arrays, surface first.
 
     z_w_m, p_w_pa: (ncol, nz+1) interface altitude above sea level [m] and
     pressure [Pa]; t_mass [K], qv_mass [kg/kg]: (ncol, nz); qc/qi [kg/kg]
-    and rho_dry [kg m-3] per mass layer for clouds; umu0, albedo: (ncol,).
+    and rho_dry [kg m-3] per mass layer for clouds; nwfa/nifa [kg-1] per
+    mass layer for ``aerosol = "thompson"``; umu0, albedo: (ncol,).
     Returns arrays shaped (nband, ncol) and (nband, ndir, ncol).
     """
     opts = diag.options(day_of_year)
@@ -176,7 +230,8 @@ def compute(diag: Diagnostic, *, z_w_m, p_w_pa, t_mass, qv_mass, umu0, albedo,
                   else np.where(np.asarray(re_ice_um) > 0, re_ice_um, DEFAULT_REFF_ICE))
             kw.update(iwc=pad(np.where(iwc > 1e-8, iwc, 0.0)), reff_ic=pad(np.clip(re, *REFF_ICE_RANGE)))
         clouds = driver.CloudLayers(**kw)
-    res = driver.compute(opts, col, clouds, backend=backend, umu0=umu0, albedo=albedo,
+    aer = aerosol_layers(diag, col, nz, rho_dry=rho_dry, nwfa=nwfa, nifa=nifa)
+    res = driver.compute(opts, col, clouds, aerosol=aer, backend=backend, umu0=umu0, albedo=albedo,
                          wavelengths=diag.wavelengths)
     mw = 1e-3                                                            # mW -> W
     # one row per requested wavelength: the band containing it
