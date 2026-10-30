@@ -211,11 +211,12 @@ class FarmsShortwave(ShortwaveInterpolation):
                 f"swint_opt = 2 with icloud={self.icloud}: FARMS reads the "
                 "per-step CLDFRA, and only icloud 0, 1 and 2 are ported")
         self.aer_opt = int(aer_opt)
-        if self.aer_opt not in (0, 1):
+        if self.aer_opt not in (0, 1, 2):
             raise NotImplementedError(
                 f"swint_opt = 2 with aer_opt={self.aer_opt}: FARMS's 2-D "
                 "aerosol (AOD5502D/ANGEXP2D/AERSSA2D/AERASY2D) is wired for "
-                "aer_opt 0 and 1")
+                "aer_opt 0, 1 and 2; under aer_opt = 3 WRF reads the "
+                "radiation call's TAOD5502D and the taer_* 2-D optics")
         self.aer_values = (F(aer_angexp_val), F(aer_ssa_val), F(aer_asy_val))
         self.couple_farms = bool(couple_farms)
         self.bl_merge = bool(bl_merge)
@@ -273,11 +274,17 @@ class FarmsShortwave(ShortwaveInterpolation):
                 radii.append(radius_metres(value).reshape(nz, *self.shape))
         return radii
 
-    def _aerosol(self, aodtot):
+    def _aerosol(self, aodtot, fields):
         import cupy as cp
         zeros = cp.zeros(self.shape, dtype=cp.float32)
         if self.aer_opt == 0:
+            # :2996-3011, zeroed every step
             return zeros, zeros, zeros, zeros
+        if self.aer_opt == 2:
+            # case (2): the 2-D fields calc_aerosol_rrtmg_sw left at the
+            # last radiation call (:2293-2297), read as they stand
+            return tuple(fields[name] for name in (
+                "AOD5502D", "ANGEXP2D", "AERSSA2D", "AERASY2D"))
         if aodtot is None:
             raise ValueError("swint_opt = 2 with aer_opt = 1 reads the last "
                              "radiation call's AODTOT, and none is carried")
@@ -292,14 +299,14 @@ class FarmsShortwave(ShortwaveInterpolation):
     def step(self, fields, atmosphere, state, *, elapsed_seconds, itimestep,
              aodtot=None):
         """FARMS for this step: the six outputs into ``fields``, then the
-        ``couple_farms`` copy into SWDOWN."""
+        ``couple_farms`` copy into SWDOWN.  Returns the step's CLDFRA."""
         julian, xtime, gmt = calendar_scalars(self.start_time, elapsed_seconds)
         coszen_loc = self.coszen_loc_at(julian, xtime, gmt)
         cldfra, qc, qi = self.cloud_fraction(atmosphere, fields,
                                              itimestep=itimestep)
         nz = atmosphere["qv"].shape[0]
         re_cloud, re_ice, re_snow = self._radii(state, nz)
-        aod, angexp, ssa, asy = self._aerosol(aodtot)
+        aod, angexp, ssa, asy = self._aerosol(aodtot, fields)
         if "albsol" in fields:
             albedo = fields["albsol"]
         else:
@@ -314,3 +321,12 @@ class FarmsShortwave(ShortwaveInterpolation):
             out={name: fields[name] for name in STATE_FIELDS})
         if self.couple_farms:
             fields["swdown"][...] = fields["swdown2"]
+        return cldfra
+
+    def radiation_coszen_at(self, elapsed_seconds, radt_minutes):
+        """The Solar_step's COSZEN on this step: ``calc_coszen`` at the
+        CURRENT julian and the hour angle at ``xtime + radt*0.5``
+        (module_radiation_driver.F:1206-1208), (ny, nx)."""
+        julian, xtime, gmt = calendar_scalars(self.start_time, elapsed_seconds)
+        xt_mid = F(xtime) + F(radt_minutes) * F(0.5)
+        return self.coszen_loc_at(julian, xt_mid, gmt).reshape(self.shape)

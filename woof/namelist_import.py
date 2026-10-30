@@ -1519,10 +1519,11 @@ PHYSICS_CHOICES: dict[str, tuple[tuple[int, ...], str]] = {
      'module_big_step_utilities_em.F:5770-5782).'),
     "ysu_topdown_pblmix": ((0, 1),
      'must be 0 or 1 (top-down radiation-driven PBL mixing).'),
-    "swint_opt": ((0, 1),
+    "swint_opt": ((0, 1, 2),
      "must be 0 (hold the radiation call's surface shortwave for the "
-     "interval) or 1 (fit it to the zenith cosine at every radiation call "
-     "and evaluate the fit on every step, woof.core.swint)."),
+     "interval), 1 (fit it to the zenith cosine at every radiation call "
+     "and evaluate the fit on every step, woof.core.swint) or 2 (WRF-Solar "
+     "FARMS on every step, woof.core.farms)."),
     "alb_sol": ((0, 1),
      "must be 0 (unchanged land albedo) or 1 (sun-angle-dependent "
      "ALBSOL/ALBBCKSOL updated on radiation steps)."),
@@ -4594,6 +4595,12 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
         # The default: receipted, no TOML line (byte-identical to the
         # import of a namelist that omits it, as while it was pinned).
         swint_opt = None
+    # couple_farms (Registry.EM_COMMON:2602): FARMS's SWDOWN2 into SWDOWN;
+    # validate_run_config refuses it without swint_opt = 2, as
+    # module_check_a_mundo does.  .false. is the default and emits nothing.
+    couple_farms = _optional_scalar_bool("couple_farms")
+    if couple_farms is False:
+        couple_farms = None
     alb_sol_values = ph.take("alb_sol")
     alb_sol = None
     if alb_sol_values is not None:
@@ -7242,6 +7249,7 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
                        ("ysu_version", carried_selectors.get("ysu_version")),
                        ("ra_sw_eclipse", eclipse_sw[0]),
                        ("swint_opt", swint_opt),
+                       ("couple_farms", couple_farms),
                        ("aer_opt", aer_opt),
                        ("alb_sol", alb_sol),
                        ("bl_mynn_mixlength", bl_mynn_mixlength),

@@ -100,10 +100,11 @@ def _assert_same_layout(a, b):
 
 def test_the_fields_are_appended_last_at_wrfs_defaults():
     names = [f.name for f in dataclasses.fields(RunConfig)]
-    # appended after them: the output-only rrtmg_spectral_output
-    assert names[-5:] == ["windfarm_opt", "windfarm_ij",
+    # appended after them: the output-only rrtmg_spectral_output and
+    # WRF's couple_farms
+    assert names[-6:] == ["windfarm_opt", "windfarm_ij",
                           "windfarm_tke_factor", "windfarm_turbine_file",
-                          "rrtmg_spectral_output"]
+                          "rrtmg_spectral_output", "couple_farms"]
     for name, default in WINDFARM_RUN_DEFAULTS.items():
         assert RunConfig.__dataclass_fields__[name].default == default
     # Registry.EM_COMMON:3003-3005.
