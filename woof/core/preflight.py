@@ -2699,6 +2699,9 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # cldfra3_columns, cldfra3_log10_probe, solar_diag_columns and
     # solar_radius_metres read 0 B (their scratch profiles are global).
     "cldfra3": 0, "solar_diag": 0,
+    # The partial-depth nest's coupling (Phase D3, kernels/partial_nest.cu),
+    # RTX A6000 sm_86, NVRTC 12.9, 2026-10-30: all eight entry points 0 B.
+    "partial_nest": 0,
 }
 
 #: The readings the ceiling above is made of, each naming its box, its

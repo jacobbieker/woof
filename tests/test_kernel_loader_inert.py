@@ -281,6 +281,10 @@ def test_lake_compile_options_do_not_change_existing_modules(monkeypatch, strict
     # The clean-room spectral solver (woof/radtran): no FMA, so CUDA's words
     # are Metal's and the host build's (tests/test_radtran_kernel_words*.py).
     expected["radtran_disort"] = ("-std=c++17", "--fmad=false")
+    # The partial-depth nest's coupling (Phase D3): default options, every
+    # cross-backend operation an explicit round-to-nearest intrinsic
+    # (tests/test_partial_nest_kernel_words.py).
+    expected["partial_nest"] = ("-std=c++17",)
     names = _module_names()
     assert set(expected) <= set(names), sorted(set(expected) - set(names))
     for name in names:
