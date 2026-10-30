@@ -243,9 +243,28 @@ def driver_clouds(state, cfg, atmosphere, fields, *, cldfra_out, qc_out, qi_out)
     icloud = int(getattr(cfg, "icloud", 1))
     f_qi, f_qs = legacy_cloud_fraction_flags(mp_physics)
     cf = cldfra_out.reshape(nz, ncol)
+    # The cumulus cloud handed to radiation (woof.core.cumulus_radiation):
+    # ICLOUD_CU = 1's condensate before every ICLOUD arm (:1264-1281), KF's
+    # merge right after cal_cldfra1 (:1337-1348), Deng's shallow cloud after
+    # the MYNN merge (:1566-1575) -- the engines' order.
+    from woof.core import cumulus_radiation as _curad
+    level_cu = _curad.icloud_cu(cfg)
+    cu = {name: grid(fields[name]) for name in _curad.radiation_cloud_fields(cfg)}
+    if level_cu == 1:
+        a, b = _curad.add_convective_condensate(
+            qc, qi, cu["qc_cu"], cu["qi_cu"], f_qc=True, f_qi=f_qi)
+        qc[...] = a
+        qi[...] = b
     if icloud == 1:
         cf[...] = _rrtmgp.cal_cldfra1(qv, qc, qi, qs, t, p, f_qc=True, f_qi=f_qi,
                                       f_qs=f_qs, mp_physics=mp_physics)
+        if level_cu == 2:
+            c2, a, b = _curad.merge_kf_cloud(
+                cf, qc, qi, cldfra_dp=cu["cldfra_dp"], cldfra_sh=cu["cldfra_sh"],
+                qc_cu=cu["qc_cu"], qi_cu=cu["qi_cu"])
+            cf[...] = c2
+            qc[...] = a
+            qi[...] = b
     elif icloud == 2:
         cf[...] = _rrtmgp.cal_cldfra2(cp.ascontiguousarray(qc), cp.ascontiguousarray(qi),
                                       f_qc=mp_physics != 0, f_qi=f_qi)
@@ -273,6 +292,11 @@ def driver_clouds(state, cfg, atmosphere, fields, *, cldfra_out, qc_out, qi_out)
             itimestep=wrf_itimestep(state.elapsed_seconds, cfg.dt),
             bl_mynn_version=getattr(cfg, "bl_mynn_version", "wrf_461"),
             temperature=t)
+    if int(getattr(cfg, "shcu_physics", 0)) == 5:
+        c2, a = _curad.merge_deng_cloud(cf, qc, cldfra_sh=cu["cldfra_sh"],
+                                        cw_rad=cu["cw_rad"])
+        cf[...] = c2
+        qc[...] = a
 
 
 def capture_solar_step(physics, state, cfg, atmosphere):

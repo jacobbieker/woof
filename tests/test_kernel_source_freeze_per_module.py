@@ -231,7 +231,7 @@ BASELINE_PINNED: dict[str, str] = {
     "oml": "ce97181b17e72439ceb7cab26a9e088013669bb94e42b786b1b14293e4241728",
     # WRF-Solar cloud fraction (icloud = 3): WRF v4.7.1 cal_cldfra3 and its
     # helpers, 500 columns equal word for word to the gfortran -O0 / glibc
-    # 2.39 record (tests/test_cldfra3_wrf471_oracle.py) on Metal and CUDA.
+    # 2.43 record (tests/test_cldfra3_wrf471_oracle.py) on Metal and CUDA.
     "cldfra3": "8ed60f16c949aaa68cf08f4b8735d1002493808466963f05c0b55479bef021d0",
     # WRF-Solar diagnostics (solar_diagnostics = 1): WRF v4.7.1 solar_diag,
     # 432 WRF- and MPAS-shaped columns x 26 outputs equal word for word to the

@@ -457,11 +457,11 @@ is importable from a WRF namelist.
 **Which keys a `[[domain]]` table may override.** Exactly these 274,
 and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
 
-    lightning_option  lightning_dt  lightning_start_seconds  flashrate_factor
-    iccg_method  iccg_prescribed_num  iccg_prescribed_den  cellcount_method
-    cldtop_adjustment  do_radar_ref  cu_physics  cudt_minutes  clos_choice  ishallow
-    cugd_avedx  maxiens  maxens  maxens2  maxens3  ensdim  cu_diag
-    convtrans_avglen_m  sas_pgcon  nsas_dx_factor  radt  radt_minutes  bldt
+    hailcast_opt  haildt  lightning_option  lightning_dt  lightning_start_seconds
+    flashrate_factor  iccg_method  iccg_prescribed_num  iccg_prescribed_den
+    cellcount_method  cldtop_adjustment  do_radar_ref  cu_physics  cudt_minutes
+    clos_choice  ishallow  cugd_avedx  maxiens  maxens  maxens2  maxens3  ensdim
+    cu_diag  convtrans_avglen_m  sas_pgcon  nsas_dx_factor  radt  radt_minutes  bldt
     ra_physics  ra_lw_physics  ra_sw_physics  ra_rrtmg_variant
     wrf_rrtmg_compatibility  o3input  use_mp_re  swrad_scat  diff_6th_factor  epssm
     spec_exp  mp_physics  moist  moist_cq  nest_microphysics_transition  spp_conv
@@ -471,19 +471,20 @@ and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
     diff_6th_thresh  dampcoef  zdamp  emdiv  smdiv  khdif  kvdif  diff_opt
     mix_full_fields  h_sca_adv_order  moist_adv_opt  v_sca_adv_order
     v_mom_adv_order  h_mom_adv_order  tke_budget  sase_flux_diag  hmix_k_diag
-    surface_energy_diag  rrtmg_spectral_output  radtran_wavelengths  radtran_interval_s
-    radtran_umu  radtran_phi  radtran_mol_abs_param  radtran_solver  radtran_streams
-    radtran_pseudospherical  shcu_physics  cu_rad_feedback  inflow_perturbation
-    inflow_perturbation_seed
+    surface_energy_diag  rrtmg_spectral_output  radtran_wavelengths
+    radtran_interval_s  radtran_umu  radtran_phi  radtran_mol_abs_param
+    radtran_solver  radtran_streams  radtran_pseudospherical  shcu_physics
+    cu_rad_feedback  inflow_perturbation  inflow_perturbation_seed
     inflow_perturbation_amplitude_scale  inflow_perturbation_faces  target_cfl
     target_hcfl  max_step_increase_pct  starting_time_step  starting_time_step_den
     max_time_step  max_time_step_den  min_time_step  min_time_step_den
     min_time_step_sound  slope_rad  topo_shading  mosaic_urban_canopy
-    sf_lake_physics  use_lakedepth  lakedepth_default  lake_min_elev  topo_wind
-    history_interval2_s  history_interval_change_s  prec_acc_dt  prec_acc_dt1
-    gsd_diagnostics  reset_interval1
-    gwd_opt  fmoist_run  fmoist_interp  fmoist_only  fmoist_freq  fmoist_dt  ifire
-    fire_boundary_guard  fire_num_ignitions  fire_ignition_ros1
+    sf_lake_physics  use_lakedepth  lakedepth_default  lake_min_elev
+    lake_state_source  lake_state_path  lake_state_accept_licence  topo_wind
+    gwd_opt  history_interval2_s  history_interval_change_s  prec_acc_dt
+    prec_acc_dt1  gsd_diagnostics  reset_interval1  windfarm_opt
+    windfarm_turbine_file  fmoist_run  fmoist_interp  fmoist_only  fmoist_freq
+    fmoist_dt  ifire  fire_boundary_guard  fire_num_ignitions  fire_ignition_ros1
     fire_ignition_start_lon1  fire_ignition_start_lat1  fire_ignition_end_lon1
     fire_ignition_end_lat1  fire_ignition_radius1  fire_ignition_start_time1
     fire_ignition_end_time1  fire_ignition_ros2  fire_ignition_start_lon2
@@ -522,8 +523,6 @@ and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
     fire_lsm_band_ngp  fire_lsm_zcoupling  fire_lsm_zcoupling_ref  fire_tracer_smoke
     fire_viscosity_bg  fire_viscosity_band  fire_viscosity_ngp  fire_slope_factor
     fuel_crosswalk  sr_x  sr_y  fire_static  fire_fuel_namelist  fire_smoke
-    hailcast_opt  haildt  lake_state_source  lake_state_path
-    lake_state_accept_licence  windfarm_opt  windfarm_turbine_file
 
 `hailcast_opt` and `haildt` select the GPU WRF HAILCAST hail diameter per
 domain (see the physics table below). `lake_state_source` picks the lake

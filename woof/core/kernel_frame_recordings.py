@@ -3271,3 +3271,18 @@ KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
     measured="2026-10-30", complete=False,
     frames=MappingProxyType({"shcu_deng": 504}),
 ),)
+
+# WRF-Solar cal_cldfra3 (kernels/cldfra3.cu, icloud = 3) and module_diag_solar
+# (kernels/solar_diag.cu, solar_diagnostics = 1), production loader
+# (woof.core.kernels.load_module), default and strict numerics, read
+# 2026-10-30 on the RTX A6000 CUDA host: every entry point reads 0 B.
+KERNEL_LOCAL_FRAME_RECORDINGS = tuple(
+    replace(row, complete=False)
+    if not {"cldfra3", "solar_diag"} <= set(row.frames) else row
+    for row in KERNEL_LOCAL_FRAME_RECORDINGS)
+KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
+    box="pb", device="NVIDIA RTX A6000",
+    compute_capability="86", nvrtc_build="12.9.86", platform_family="linux",
+    measured="2026-10-30", complete=False,
+    frames=MappingProxyType({"cldfra3": 0, "solar_diag": 0}),
+),)

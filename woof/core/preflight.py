@@ -2163,11 +2163,6 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # WRF's ocean mixed layer, read at 0 B through the production loader
     # by the OML port lane (port289-1-ocean1-oml, tools/vram_reserve_probe.py).
     "oml": 0,
-    # WRF-Solar cal_cldfra3 (icloud = 3): scratch profiles are global, read
-    # at 0 B through the production loader (RTX A6000 sm_86, CUDA 12.9).
-    "cldfra3": 0,
-    # WRF-Solar module_diag_solar (solar_diagnostics = 1), same reading.
-    "solar_diag": 0,
     # Production loader, V58 sm_120 / NVRTC 12.8.93, 2026-10-20.
     "hail": 7392,
     # 27,408 B on test host B (RTX 5090, sm_120, NVRTC 13.4.92, 2026-10-17);
@@ -2699,6 +2694,11 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # loaders: deng_shcu_column 504 B, deng_shcu_mpas_column 496 B, the
     # three MPAS glue kernels 0 B.
     "shcu_deng": 504,
+    # WRF-Solar cal_cldfra3 (icloud = 3) and module_diag_solar
+    # (solar_diagnostics = 1), same card, both loaders (load_module):
+    # cldfra3_columns, cldfra3_log10_probe, solar_diag_columns and
+    # solar_radius_metres read 0 B (their scratch profiles are global).
+    "cldfra3": 0, "solar_diag": 0,
 }
 
 #: The readings the ceiling above is made of, each naming its box, its

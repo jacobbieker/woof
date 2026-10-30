@@ -4005,9 +4005,16 @@ class RRTMGPRadiation:
             from woof.core.rrtm_lw import _stream_is_capturing
             if fields.get("xland") is None:
                 raise ValueError("icloud=3 reads XLAND (fields['xland'])")
+            qc_in, qi_in = self._columns(qc3), self._columns(qi3)
+            if level_cu == 1:
+                # ICLOUD_CU = 1's condensate joins QC/QI before every
+                # ICLOUD arm (:1264-1281), cal_cldfra3's included.
+                qc_in, qi_in = _curad.add_convective_condensate(
+                    qc_in, qi_in, cu_cols["qc_cu"], cu_cols["qi_cu"],
+                    f_qc=True, f_qi=ice_active)
             cldfra, qc_raw, qi_raw = cal_cldfra3(
-                self._columns(atmosphere["qv"]), self._columns(qc3),
-                self._columns(qi3), self._columns(qs3),
+                self._columns(atmosphere["qv"]), cp.ascontiguousarray(qc_in),
+                cp.ascontiguousarray(qi_in), self._columns(qs3),
                 self._columns(atmosphere["dz"]), play, tlay,
                 fields["xland"].reshape(-1),
                 cldfra3_gridkm(cfg.dx, cfg.dy),
