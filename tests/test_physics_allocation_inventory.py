@@ -1591,6 +1591,9 @@ _PHYSICS_ALLOCATION_INVENTORY['woof/core/farms.py'] = {
 _PHYSICS_ALLOCATION_INVENTORY['woof/core/partial_nest_dyn.py'] = {
     'zeros': 1, 'column_sums': 1, 'calc_ww_top': 1, 'add_top_face_flux': 1,
     'time_interpolate': 1}
+# The running partial-depth nest (Phase D3): its forcing, strip and budget
+# planes come from one allocation site at construction, reused every step.
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/partial_nest_run.py'] = {'__init__': 1}
 # In-model gusts and extremes (c80237153): all planes are state fields.
 _PHYSICS_ALLOCATION_INVENTORY['woof/core/wind_gust_diag.py'] = {}
 # cu_rad_feedback (ICLOUD_CU = 1): GF's convtrans_prep qc_cu/qi_cu planes.
