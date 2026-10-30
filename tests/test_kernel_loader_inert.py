@@ -381,7 +381,8 @@ def test_allow_listed_headers_exist_and_translation_units_are_explicit():
                 ("urban_ucm480", "urban_ucm.cu"),
                 ("lin_refl", "refl.cu"),
                 ("gsd_helicity", "uh_diag.cu"),
-                ("gsd_initial_reflectivity", "thompson_fork.cu")), (
+                ("gsd_initial_reflectivity", "thompson_fork.cu"),
+                ("nest_top", "acoustic.cu")), (
                 "only the explicitly reused initialization and scalar units may supply a .cu header")
 
 

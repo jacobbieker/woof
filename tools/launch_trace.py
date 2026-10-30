@@ -143,7 +143,15 @@ def install(path: str | None = None) -> None:
 
     class RawModule(cupy.RawModule):
         def get_function(self, name):
-            return _Traced(super().get_function(name), name)
+            # CuPy's RawModule fetches the kernel through the Module class
+            # wrapped below and its Cython RawKernel takes only a real
+            # Function: that inner fetch must not be wrapped a second time.
+            _STATE["raw_depth"] = _STATE.get("raw_depth", 0) + 1
+            try:
+                fn = super().get_function(name)
+            finally:
+                _STATE["raw_depth"] -= 1
+            return _Traced(fn, name)
 
     class RawKernel:
         def __init__(self, code, name, *a, **k):
@@ -171,7 +179,18 @@ def install(path: str | None = None) -> None:
             fn = super().get_function(name)
             # CuPy's own kernels (cupy_*) load through this class too, and
             # its Cython launchers take only a real Function: wrap woof's
-            return fn if name.startswith("cupy_") else _Traced(fn, name)
+            if name.startswith("cupy_") or _STATE.get("raw_depth", 0):
+                return fn
+            # CuPy's ElementwiseKernel fetches its compiled function here
+            # from Cython, which takes only a real Function; a Python
+            # caller (woof's direct-NVRTC modules) names get_function on
+            # the line that called it.
+            import linecache
+            caller = sys._getframe(1)
+            if "get_function" not in linecache.getline(caller.f_code.co_filename,
+                                                       caller.f_lineno):
+                return fn
+            return _Traced(fn, name)
     cuda_function.Module = Module
     # woof's direct-NVRTC loads (cupy.cuda.function.Module, whose type CuPy
     # checks) reach kernels through woof's own wrapper

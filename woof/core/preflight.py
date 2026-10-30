@@ -2682,6 +2682,9 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # RTX 5070 Ti production loaders, 2026-10-18, both numerics modes.
     "nextgen_cfe": 0, "nextgen_reservoirs": 0,
     "nextgen_inundation": 0, "nextgen_terrain": 56,
+    # The partial-depth nest's top (Phase D2), RTX A6000 sm_86, NVRTC
+    # 12.9.86, 2026-10-30: advance_w_phi_top's WPHI_MAX_LEV column.
+    "nest_top": 520,
 }
 
 #: The readings the ceiling above is made of, each naming its box, its
