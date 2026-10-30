@@ -129,7 +129,9 @@ def test_the_checkpoint_echo_drops_both_at_their_default():
              "output_diagnostics", "diag_int", "wind_int",
              "nest_accumulation_archive",
              # WRF's wind farm (the fork's Fitch coupling), appended after.
-             *WINDFARM_RUN_DEFAULTS]
+             *WINDFARM_RUN_DEFAULTS,
+             # RRTMG band output, then WRF-Solar's couple_farms.
+             "rrtmg_spectral_output", "couple_farms"]
     assert names[-len(later):] == later
     names = names[:-len(later)]
     # The 2.9.4 capabilities campaign's keyword-only keys follow the fire
