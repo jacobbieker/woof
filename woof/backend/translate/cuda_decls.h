@@ -18,12 +18,12 @@ extern const float FLT_MAX; extern const float FLT_MIN; extern const float FLT_E
 extern const double DBL_MAX; extern const double DBL_MIN; extern const double DBL_EPSILON;
 extern const int INT_MAX; extern const int INT_MIN; extern const unsigned int UINT_MAX;
 
-struct __woof_uint3 { unsigned int x, y, z; };
-struct __woof_dim3 { unsigned int x, y, z; };
-extern const __woof_uint3 threadIdx;
-extern const __woof_uint3 blockIdx;
-extern const __woof_dim3 blockDim;
-extern const __woof_dim3 gridDim;
+// CUDA's types for the launch builtins (uint3 and dim3 are defined below)
+struct uint3; struct dim3;
+extern const uint3 threadIdx;
+extern const uint3 blockIdx;
+extern const dim3 blockDim;
+extern const dim3 gridDim;
 extern const int warpSize;
 
 void __syncthreads();
@@ -84,13 +84,15 @@ unsigned long long atomicCAS(unsigned long long*, unsigned long long, unsigned l
 int atomicOr(int*, int); unsigned int atomicOr(unsigned int*, unsigned int);
 int atomicAnd(int*, int); unsigned int atomicAnd(unsigned int*, unsigned int);
 
-// warp shuffles
-float __shfl_down_sync(unsigned int, float, unsigned int, int = 32);
-double __shfl_down_sync(unsigned int, double, unsigned int, int = 32);
-int __shfl_down_sync(unsigned int, int, unsigned int, int = 32);
-float __shfl_xor_sync(unsigned int, float, int, int = 32);
-double __shfl_xor_sync(unsigned int, double, int, int = 32);
-float __shfl_sync(unsigned int, float, int, int = 32);
+// warp shuffles: CUDA's overload set
+#define WOOF_SHFL(T) \
+  T __shfl_sync(unsigned int, T, int, int = 32); \
+  T __shfl_up_sync(unsigned int, T, unsigned int, int = 32); \
+  T __shfl_down_sync(unsigned int, T, unsigned int, int = 32); \
+  T __shfl_xor_sync(unsigned int, T, int, int = 32);
+WOOF_SHFL(int) WOOF_SHFL(unsigned int) WOOF_SHFL(long) WOOF_SHFL(unsigned long)
+WOOF_SHFL(long long) WOOF_SHFL(unsigned long long) WOOF_SHFL(float) WOOF_SHFL(double)
+#undef WOOF_SHFL
 
 // libm: the C names CUDA provides, binary32 and binary64
 #define WOOF_F1(n) float n##f(float); double n(double); float n(float);
@@ -105,6 +107,7 @@ WOOF_F2(pow) WOOF_F2(atan2) WOOF_F2(fmin) WOOF_F2(fmax) WOOF_F2(fmod) WOOF_F2(co
 WOOF_F2(hypot) WOOF_F2(fdim) WOOF_F2(remainder)
 #undef WOOF_F1
 #undef WOOF_F2
+float nextafterf(float, float); double nextafter(double, double);
 float fmaf(float, float, float); double fma(double, double, double); float fma(float, float, float);
 float ldexpf(float, int); double ldexp(double, int); float ldexp(float, int);
 float frexpf(float, int*); double frexp(double, int*);
@@ -126,6 +129,12 @@ void* memset(void*, int, size_t);
 WOOF_VEC2(float, float) WOOF_VEC3(float, float) WOOF_VEC4(float, float)
 WOOF_VEC2(int, int) WOOF_VEC3(int, int) WOOF_VEC4(int, int)
 WOOF_VEC2(unsigned int, uint) WOOF_VEC3(unsigned int, uint) WOOF_VEC4(unsigned int, uint)
+struct dim3 {
+  unsigned int x, y, z;
+  dim3(unsigned int vx = 1, unsigned int vy = 1, unsigned int vz = 1) : x(vx), y(vy), z(vz) {}
+  dim3(uint3 v) : x(v.x), y(v.y), z(v.z) {}
+  operator uint3() const { return uint3{x, y, z}; }
+};
 WOOF_VEC2(double, double) WOOF_VEC3(double, double) WOOF_VEC4(double, double)
 #undef WOOF_VEC2
 #undef WOOF_VEC3
@@ -135,12 +144,6 @@ void __trap();
 void __syncwarp(unsigned int = 0xffffffffu);
 unsigned int __ballot_sync(unsigned int, int);
 int __any_sync(unsigned int, int); int __all_sync(unsigned int, int);
-float __shfl_up_sync(unsigned int, float, unsigned int, int = 32);
-int __shfl_up_sync(unsigned int, int, unsigned int, int = 32);
-unsigned int __shfl_down_sync(unsigned int, unsigned int, unsigned int, int = 32);
-unsigned int __shfl_sync(unsigned int, unsigned int, int, int = 32);
-int __shfl_sync(unsigned int, int, int, int = 32);
-double __shfl_sync(unsigned int, double, int, int = 32);
 int atomicXor(int*, int); unsigned int atomicXor(unsigned int*, unsigned int);
 float __double2float_ru(double); float __double2float_rd(double);
 long long __float2ll_rz(float); long long __float2ll_rn(float);

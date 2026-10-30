@@ -217,6 +217,45 @@ def set_wired_limit():
     return _WIRED
 
 
+_SHARED_STREAM = None
+
+
+def share_one_stream():
+    """Every thread works on one MLX stream, as CUDA's arrays and its null
+    stream are shared by every host thread.  MLX's own streams belong to
+    the thread that made them: an array computed lazily in one thread could
+    not be evaluated in another ("There is no Stream(gpu, N) in current
+    thread"), which the ensemble's member threads do.  The stream is made
+    the default here and in each thread as it starts."""
+    global _SHARED_STREAM
+    import threading
+    import mlx.core as mx
+    if _SHARED_STREAM is not None:
+        return _SHARED_STREAM
+    _SHARED_STREAM = mx.new_thread_unsafe_stream(mx.gpu)
+    mx.set_default_stream(_SHARED_STREAM)
+    # The stream is not thread-safe: two threads evaluating on it at once
+    # abort the process (LETKF's per-card threads did).  Evaluation is
+    # serialised; building lazy graphs stays concurrent.
+    lock = threading.RLock()
+
+    def serialised(fn):
+        def call(*args, **kwargs):
+            with lock:
+                return fn(*args, **kwargs)
+        call.__name__, call.__doc__ = fn.__name__, fn.__doc__
+        return call
+    for name in ("eval", "async_eval", "synchronize"):
+        setattr(mx, name, serialised(getattr(mx, name)))
+    bootstrap = threading.Thread._bootstrap_inner
+
+    def _bootstrap_inner(self):
+        mx.set_default_stream(_SHARED_STREAM)
+        bootstrap(self)
+    threading.Thread._bootstrap_inner = _bootstrap_inner
+    return _SHARED_STREAM
+
+
 #: C type of a module global's element -> the storage dtype it is held in
 #: WOOF_METAL_SERIAL=1: every launch waits for all earlier GPU work and
 #: finishes before returning -- a diagnostic for ordering hazards.
@@ -345,14 +384,16 @@ def retains_subnormals(name: str, source: str, options) -> bool:
 
 
 @lru_cache(maxsize=None)
-def _translated(source: str, unit: str, contract: bool, retain: bool, defines=()) -> TranslatedUnit:
-    return translate(source, unit=unit, contract=contract, retain_subnormals=retain, defines=defines)
+def _translated(source: str, unit: str, contract: bool, retain: bool, defines=(),
+                include_dirs=()) -> TranslatedUnit:
+    return translate(source, unit=unit, contract=contract, retain_subnormals=retain, defines=defines,
+                     include_dirs=include_dirs)
 
 
 def load_unit(name: str, source: str, *, options=()) -> MetalModule:
     from woof import numerics
-    from woof.backend.translate import option_defines
-    defines = option_defines(numerics.effective_options(tuple(options or ())))
+    from woof.backend.translate import option_defines, option_include_dirs
+    effective = numerics.effective_options(tuple(options or ()))
     unit = _translated(source, name, contracts(options), retains_subnormals(name, source, options),
-                       defines)
+                       option_defines(effective), option_include_dirs(effective))
     return MetalModule(unit, name)

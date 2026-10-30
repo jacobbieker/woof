@@ -87,6 +87,20 @@ nondeterministic, three diagnostic variables help:
   Fully inlined, its radiation kernel crashes Metal's compiler service
   (`XPC_ERROR_CONNECTION_INTERRUPTED`). Its device oracle holds the result to
   WRF's words in both builds, on repeated runs.
+* **TEMPO compiles with out-of-line calls** too (`INLINE_POLICY_BY_KERNEL`,
+  keyed on its `tempo_columns` kernel because a `RawModule`'s unit name is
+  a hash). Fully inlined, the column kernel had not finished compiling after
+  35 minutes; out of line it takes a few. Given CUDA's init blob, three
+  steps of eight columns are CUDA's words in every field and diagnostic.
+  The blob itself is built by `rw-tempo` with the platform C library's
+  `tgamma`, so on macOS it differs from Linux's in 2772 of 122 million words,
+  and TEMPO on a Mac is not CUDA's words with its own blob.
+* **Preprocessing is NVRTC's.** The translator defines `__CUDA_ARCH__`
+  (860, the comparison machine's) because NVRTC compiles device code only:
+  TEMPO's `__CUDA_ARCH__` branch uses woof's glibc ports where its host
+  branch calls the C library. The unit's `-I` options are include
+  directories, and the binary64 libm is prepended when a header the unit
+  includes calls it, not only the unit's own text.
 * **A `float` literal argument in an `--ftz=false` unit** becomes `f32s(...)`
   when clang resolved its parameter as `float`. Otherwise `g(f64, float)`
   beside `g(f64, f64)` is ambiguous in Metal, because both need a
@@ -131,6 +145,45 @@ function per combination of spaces. Two cases need runtime help:
   buffer in `device` memory, and the analysis says so. Only `const` and
   `__constant__` data is `constant`.
 
+## Memory order
+
+Facade arrays carry NumPy strides, and CuPy's memory-order rules hold:
+`reshape`/`ravel`/`flatten` with `order="F"` read indices column-major,
+and `astype`, `copy(order="K")`, `array(order=...)` and the `*_like`
+constructors keep a column-major prototype's layout. Kernels index these
+buffers directly, so a dropped layout scrambles fields rather than failing
+(SATMEDMF's column packing did). `tests/test_metal_memory_order.py` guards
+this. Elementwise results are row-major whatever their operands' layout;
+make a column-major kernel argument explicit with `asfortranarray`.
+
+## Threads
+
+CuPy arrays and CUDA's null stream are shared by every host thread. MLX's
+streams belong to the thread that made them, so an array computed lazily in
+one thread could not be evaluated in another ("There is no Stream(gpu, N) in
+current thread"). The facade therefore puts all work on one
+`new_thread_unsafe_stream`, made the default in every thread as it starts
+(`loader.share_one_stream`). That stream is not thread-safe, and two threads
+evaluating at once abort the process, so `mx.eval`, `mx.async_eval` and
+`mx.synchronize` take one lock. Threads still build graphs concurrently, but
+their GPU work is serialised.
+
+## NumPy protocols and the CUDA runtime surface
+
+* `np.maximum(0, x)`, `np.where(m, x, y)` and other NumPy calls on facade
+  arrays dispatch to the facade (`__array_ufunc__`, `__array_function__`),
+  as they do to CuPy. Binary ufuncs have `reduce`, `reduceat`, `accumulate`
+  and `outer`, which NumPy computes on the host words.
+* A same-width view of another kind (`a.view(cupy.uint32)` of float32) reads
+  the bits. A boolean mask over several axes indexes as NumPy's `nonzero`.
+* `cupy.cuda.runtime.memcpy`/`memcpyAsync`/`memset` work on raw addresses: a
+  facade storage's GPU address on the device side, any process address on
+  the host side. `alloc_pinned_memory` returns a `hostAlloc` block.
+* `cupy.cuda.nvrtc`'s program API and `compile_using_nvrtc` translate and
+  build the unit when they are called, so a unit that does not compile fails
+  there, as it does under NVRTC. `cupy.cuda.compiler`/`runtime`/`driver`/
+  `nvrtc` and `cupy_backends.cuda.{api,libs}` import as modules.
+
 ## Mapped host memory
 
 `cudaHostAlloc` returns an evaluated MLX buffer's host address. Apple
@@ -162,7 +215,8 @@ The MLX backend's pins are recorded beside CUDA's:
 
 Record a family only after showing that its Metal words are CUDA's words
 with contraction off. Run `tools/launch_trace.py` on both machines, with
-CUDA's compiles forced to `--fmad=false`, and compare the traces with
+CUDA's compiles forced to `--fmad=false` (`WOOF_FMAD_OFF=1`, applied at
+`woof.numerics.effective_options`), and compare the traces with
 `tools/backend_receipts.py`. A remaining difference is then a vendor-libm
 or NaN-payload delta, and the pin file says so (for example the `known_deltas`
 in `vertical-native-metal.json`).

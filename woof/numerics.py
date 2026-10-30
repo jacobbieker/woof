@@ -78,6 +78,11 @@ def effective_options(options) -> tuple[str, ...]:
         # caches and warm-plan/pack identities must see the same controls.
         from woof.wrf_exact import effective_options as wrf_options
         options = wrf_options(options)
+    if os.environ.get("WOOF_FMAD_OFF", "0") == "1":
+        # Diagnostic: CUDA compiles without contraction everywhere, so its
+        # launch traces compare word for word with the Metal translation's
+        # (docs/dev/mlx-backend.md, "Measured-word pins per backend").
+        options = tuple(o for o in options if not o.lstrip("-").startswith("fmad")) + ("--fmad=false",)
     return options
 
 

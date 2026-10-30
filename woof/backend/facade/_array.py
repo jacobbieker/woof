@@ -303,6 +303,11 @@ class ndarray:
         if not self._same_item():
             return self._reinterpreted_values()
         arr = self._st.arr
+        want = storage_mx_dtype(self.dtype)
+        if arr.dtype != want:
+            # a same-width view of another kind (float32 storage read as
+            # uint32): the bits, as CuPy's view gives them
+            arr = arr.view(want)
         start = self._element_offset()
         if self.is_c_contiguous():
             flat = arr[start:start + self.size] if (start or self.size != arr.size) else arr
@@ -342,6 +347,36 @@ class ndarray:
         # through the explicit get()/asnumpy() paths.
         raise TypeError("Implicit conversion to a NumPy array is not allowed. "
                         "Please use `.get()` to construct a NumPy array explicitly.")
+
+    def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
+        """NumPy's ufuncs on a facade array run on the device, as CuPy's do
+        (``np.maximum(0, x)``): the facade function of the same name."""
+        from woof.backend import facade
+        fn = getattr(facade, ufunc.__name__, None)
+        if method != "__call__":
+            fn = getattr(fn, method, None)      # np.add.reduceat(x, ...)
+        if fn is None:
+            return NotImplemented
+        out = kwargs.get("out")
+        if isinstance(out, tuple):
+            if len(out) != 1:
+                return NotImplemented
+            kwargs["out"] = out[0]
+        return fn(*inputs, **kwargs)
+
+    def __array_function__(self, func, types, args, kwargs):
+        """NumPy's array functions (``np.where``, ``np.linalg.norm``) on facade
+        arrays: the facade's namesake in the matching submodule, as CuPy."""
+        from woof.backend import facade
+        target = facade
+        for part in func.__module__.split(".")[1:]:
+            if part.startswith("_"):
+                continue
+            target = getattr(target, part, None)
+        fn = getattr(target, func.__name__, None)
+        if fn is None or fn is func:
+            return NotImplemented
+        return fn(*args, **kwargs)
 
     def item(self):
         return self.get().item()
@@ -425,15 +460,27 @@ class ndarray:
         shape = tuple(shape)
         if reduce(operator.mul, shape, 1) != self.size:
             raise ValueError(f"cannot reshape array of size {self.size} into shape {shape}")
+        if self._memory_order(order) == "F":
+            # column-major index order: NumPy's a.reshape(s, "F") is
+            # a.T.reshape(reversed s).T, a view when a is F-contiguous
+            return self.transpose().reshape(tuple(reversed(shape))).transpose()
         if self.is_c_contiguous():
             return ndarray(shape, self.dtype, _storage=self._st, _offset=self._offset)
         return self.copy().reshape(shape)
 
+    def _memory_order(self, order) -> str:
+        """"C" or "F": NumPy's "A" and "K" read F only for an array laid out
+        column-major (and not also row-major)."""
+        order = (order or "C").upper()
+        if order in ("A", "K"):
+            return "F" if self.is_f_contiguous() and not self.is_c_contiguous() else "C"
+        return order
+
     def ravel(self, order="C"):
-        return self.reshape(-1)
+        return self.reshape(-1, order=order)
 
     def flatten(self, order="C"):
-        return self.copy().reshape(-1)
+        return self.copy().reshape(-1, order=self._memory_order(order))
 
     def squeeze(self, axis=None):
         keep = [i for i, n in enumerate(self.shape)
@@ -455,6 +502,8 @@ class ndarray:
         return self.transpose(axes)
 
     def copy(self, order="C"):
+        if self.ndim > 1 and self._memory_order(order) == "F":
+            return self.transpose().copy().transpose()
         mx = _mx()
         return ndarray(self.shape, self.dtype,
                        _storage=Storage(mx.contiguous(self._values()), self._st.dtype)) \
@@ -584,6 +633,18 @@ class MemoryPointer:
         view.fill(0)
 
 
+def _address(mem) -> int:
+    """A raw address from an int, a pointer object, or a ctypes pointer."""
+    import ctypes
+    if isinstance(mem, tuple):
+        mem = mem[0]
+    if isinstance(mem, (int, np.integer)):
+        return int(mem)
+    if hasattr(mem, "ptr"):
+        return int(mem.ptr)
+    return ctypes.cast(mem, ctypes.c_void_p).value
+
+
 class _Pointer:
     """``ndarray.data``: the view's device address."""
 
@@ -603,6 +664,23 @@ class _Pointer:
     @property
     def size(self):
         return self._a._st.nbytes
+
+    # CuPy's MemoryPointer copies, by raw address (cupy.cuda.runtime.memcpy)
+    def copy_from_device(self, src, size, stream=None):
+        from woof.backend.facade.cuda import _memcpy
+        _memcpy(self.ptr, _address(src), size)
+
+    def copy_from_host(self, mem, size, stream=None):
+        from woof.backend.facade.cuda import _memcpy
+        _memcpy(self.ptr, _address(mem), size)
+
+    def copy_to_host(self, mem, size, stream=None):
+        from woof.backend.facade.cuda import _memcpy
+        _memcpy(_address(mem), self.ptr, size)
+
+    copy_from_device_async = copy_from_device
+    copy_from_host_async = copy_from_host
+    copy_to_host_async = copy_to_host
 
     def memset_async(self, value, size, stream=None):
         """cudaMemsetAsync from this view's first byte: ``size`` bytes of

@@ -42,8 +42,9 @@ def configure(kind: str):
     global _kind
     if kind != "mlx":
         raise BackendUnsupported(f"the facade backend {kind!r} is not implemented yet")
-    from woof.backend.metal.loader import set_wired_limit
+    from woof.backend.metal.loader import set_wired_limit, share_one_stream
     set_wired_limit()
+    share_one_stream()
     _kind = kind
 
 
@@ -163,8 +164,12 @@ def searchsorted(a, v, side="left"):
     return asarray(np.searchsorted(asnumpy(a), asnumpy(v), side=side))
 
 
-def cumsum(a, axis=None, dtype=None):
-    return asarray(np.cumsum(asnumpy(a), axis=axis, dtype=dtype))
+def cumsum(a, axis=None, dtype=None, out=None):
+    r = asarray(np.cumsum(asnumpy(a), axis=axis, dtype=dtype))
+    if out is not None:
+        out[...] = r
+        return out
+    return r
 
 
 def diff(a, n=1, axis=-1):
@@ -176,7 +181,8 @@ def dot(a, b):
 
 
 def array_equal(a, b, equal_nan=False):
-    return bool(np.array_equal(asnumpy(a), asnumpy(b), equal_nan=equal_nan))
+    # CuPy's answer is a 0-d device array (``.item()``, ``bool()``)
+    return asarray(np.array(np.array_equal(asnumpy(a), asnumpy(b), equal_nan=equal_nan)))
 
 
 def isclose(a, b, rtol=1e-05, atol=1e-08, equal_nan=False):
@@ -221,7 +227,7 @@ def _on_host(np_fn):
 for _name in ("eye", "identity", "moveaxis", "broadcast_arrays", "bincount", "interp", "gradient", "cross",
               "diagonal", "isin", "lexsort", "unravel_index", "ravel_multi_index", "take_along_axis",
               "outer", "matmul", "nan_to_num", "packbits", "unpackbits", "fromfile", "load", "tril",
-              "triu", "histogram", "digitize", "trapz" if hasattr(np, "trapz") else "trapezoid"):
+              "triu", "histogram", "digitize", "einsum", "trapz" if hasattr(np, "trapz") else "trapezoid"):
     globals()[_name] = _on_host(getattr(np, _name))
 broadcast_shapes = np.broadcast_shapes
 

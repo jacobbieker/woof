@@ -232,6 +232,39 @@ static inline f64 ldexp(f64 a, int n) {
   return a * f64::bits((ulong)(n + 0x3FF) << 52);
 }
 
+static inline float nextafterf(float x, float y) {
+  // the neighbouring binary32 word toward y, on the bits ordered as
+  // sign-magnitude integers (subnormal operands are not flushed)
+  uint ux = as_type<uint>(x), uy = as_type<uint>(y);
+  if ((ux & 0x7FFFFFFFu) > 0x7F800000u || (uy & 0x7FFFFFFFu) > 0x7F800000u)
+    return as_type<float>(0x7FC00000u);
+  int ix = (ux >> 31) ? -int(ux & 0x7FFFFFFFu) : int(ux);
+  int iy = (uy >> 31) ? -int(uy & 0x7FFFFFFFu) : int(uy);
+  if (ix == iy) return y;
+  ix += (ix < iy) ? 1 : -1;
+  return as_type<float>(ix < 0 ? (uint(-ix) | 0x80000000u) : uint(ix));
+}
+static inline f64 nextafter(f64 x, f64 y) {
+  if (x != x || y != y) return x + y;
+  if (x == y) return y;
+  if (x == f64(0.0f)) return f64::bits((y.b & 0x8000000000000000UL) | 1UL);
+  return f64::bits(((x < y) == (x > f64(0.0f))) ? x.b + 1UL : x.b - 1UL);
+}
+
+static inline f64 frexp(f64 a, thread int* e) {
+  // a = m * 2^e with |m| in [0.5, 1): exact, by moving the exponent field
+  ulong u = a.b, mag = u & 0x7FFFFFFFFFFFFFFFUL;
+  *e = 0;
+  if (mag == 0 || mag >= 0x7FF0000000000000UL) return a;   // zero, inf, NaN
+  int bias = 0;
+  if (mag < 0x0010000000000000UL) {                      // subnormal: normalise
+    u = (a * f64::bits(0x4350000000000000UL)).b;         // * 2^54, exact
+    bias = -54;
+  }
+  *e = (int)((u >> 52) & 0x7FF) - 1022 + bias;
+  return f64::bits((u & 0x800FFFFFFFFFFFFFUL) | 0x3FE0000000000000UL);
+}
+
 // CUDA's binary64 intrinsics.
 static inline f64 __dadd_rn(f64 a, f64 b) { return a + b; }
 static inline f64 __dsub_rn(f64 a, f64 b) { return a - b; }
@@ -454,11 +487,13 @@ static inline uint __ballot_sync(uint mask, int pred) {
 static inline int __any_sync(uint mask, int pred) { return metal::simd_any(pred != 0) ? 1 : 0; }
 static inline int __all_sync(uint mask, int pred) { return metal::simd_all(pred != 0) ? 1 : 0; }
 template <typename T> static inline T __woof_shfl(T v, uint src) { return metal::simd_shuffle(v, ushort(src)); }
-static inline f64 __woof_shfl(f64 v, uint src) {
-  uint lo = metal::simd_shuffle((uint)v.b, ushort(src));
-  uint hi = metal::simd_shuffle((uint)(v.b >> 32), ushort(src));
-  return f64::bits(((ulong)hi << 32) | lo);
+static inline ulong __woof_shfl(ulong v, uint src) {
+  uint lo = metal::simd_shuffle((uint)v, ushort(src));
+  uint hi = metal::simd_shuffle((uint)(v >> 32), ushort(src));
+  return ((ulong)hi << 32) | lo;
 }
+static inline long __woof_shfl(long v, uint src) { return (long)__woof_shfl((ulong)v, src); }
+static inline f64 __woof_shfl(f64 v, uint src) { return f64::bits(__woof_shfl(v.b, src)); }
 template <typename T> static inline T __shfl_sync(uint mask, T v, int src, int width = 32) {
   uint lane = __woof_lane();
   uint base = lane & ~uint(width - 1);
@@ -575,6 +610,8 @@ static inline int3 make_int3(int x, int y, int z) { return int3(x, y, z); }
 static inline int4 make_int4(int x, int y, int z, int w) { return int4(x, y, z, w); }
 static inline uint2 make_uint2(uint x, uint y) { return uint2(x, y); }
 static inline uint3 make_uint3(uint x, uint y, uint z) { return uint3(x, y, z); }
+// CUDA's dim3 is the launch builtins' uint3 here (blockDim, gridDim)
+typedef uint3 dim3;
 static inline uint4 make_uint4(uint x, uint y, uint z, uint w) { return uint4(x, y, z, w); }
 struct __woof_double2 { f64 x, y; };
 struct __woof_double3 { f64 x, y, z; };
