@@ -1887,6 +1887,11 @@
       }
     },
     "backend_namelist_group": "hex_mpasphys",
+    "registry_groups": {
+      "radiation": [
+        "config_rrtmg_spectral_output"
+      ]
+    },
     "services": {
       "surface_update": {
         "backend_selector": "config_surface_update_backend",

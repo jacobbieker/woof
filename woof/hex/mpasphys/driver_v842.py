@@ -19,6 +19,7 @@ from typing import Any, Callable, Iterable, Mapping, Protocol
 
 from ..config import parse_fortran_namelist
 from ..physics_suites import load_table
+from . import radiation_spectral_v842 as _spectral
 
 SCHEMA = "mpas-port.physics-driver-v842/v1"
 
@@ -297,6 +298,9 @@ class DriverConfig:
     #: The active slots that run on the CPU in this run (a route resolution records them; a library
     #: resolution for module replays records none).
     cpu_slots: tuple[CpuSlot, ...] = ()
+    #: WOOF's &radiation config_rrtmg_spectral_output (radiation_spectral_v842): "none", "bands" or
+    #: "gpoints".  Not a Registry option, so it never reaches the native config pool.
+    spectral_output: str = "none"
 
     def cpu_warning(self) -> str | None:
         """The loud start-up lines naming each active slot that runs on the CPU, or None when none does."""
@@ -390,6 +394,8 @@ class DriverConfig:
         if self.mode != "exact":
             result.update(physics_mode=self.mode, corrections=sorted(self.corrections),
                           correct_skip=sorted(self.correct_skip), correct_mode=self.correct_mode_record())
+        if self.spectral_output != "none":
+            result["rrtmg_spectral_output"] = self.spectral_output
         return result
 
 
@@ -515,6 +521,26 @@ def settle_corrections(config: DriverConfig, requested: Iterable[str],
     return frozenset(applied), tuple(gaps)
 
 
+def _check_spectral_output(config: DriverConfig) -> None:
+    """Refuse config_rrtmg_spectral_output where nothing would produce it.
+
+    The per-band fluxes come from the GPU RRTMG slots (radiation_spectral_v842); a run with no RRTMG side, or
+    whose RRTMG side runs MPAS's own Fortran (which has no such output), would carry fields no slot writes.
+    """
+    name = f"&{_spectral.GROUP} {_spectral.OPTION}={config.spectral_output!r}"
+    sides = _spectral.sides(config)
+    if not sides:
+        raise ValueError(f"{name} needs RRTMG radiation (config_radt_sw_scheme='rrtmg_sw' or "
+                         f"config_radt_lw_scheme='rrtmg_lw'); this run has "
+                         f"radiation_sw={config.selectors.get('radiation_sw')!r}, "
+                         f"radiation_lw={config.selectors.get('radiation_lw')!r}")
+    for side in sides:
+        slot = "radiation_sw" if side == "sw" else "radiation_lw"
+        if config.backends[slot] != Backend.HEX_CUDA:
+            raise ValueError(f"{name} needs {slot} on hex-cuda: MPAS's own Fortran RRTMG "
+                             f"({config.backends[slot]}) has no per-band output")
+
+
 def resolve_namelist(text: str, *, backends: Mapping[str, str] | None = None,
                      default_backend: str | None = None, physics_mode: str | None = None,
                      correct_skip: Iterable[str] | None = None,
@@ -619,7 +645,12 @@ def resolve_namelist(text: str, *, backends: Mapping[str, str] | None = None,
         chosen[slot] = Backend(backend)
         explicit.add(slot)
 
+    spectral = _spectral.resolve(groups)
+
     def record(config: DriverConfig) -> DriverConfig:
+        if spectral != "none":
+            config = _replace(config, spectral_output=spectral)
+            _check_spectral_output(config)
         if library:
             return config
         return _replace(config, cpu_slots=cpu_slot_record(config, "mpasphys_v842", cpu_reasons, explicit))
@@ -1191,6 +1222,9 @@ class PhysicsDriver:
         options = dict(c.execution_options)
         if slot == "gwdo" and c.active("ngw") and not c.native_embedded("ngw"):
             options["config_ngw_scheme"] = False
+        if slot in ("radiation_sw", "radiation_lw") and c.spectral_output != "none":
+            # The slot's own copy only: the WOOF option is not a Registry config (configure()).
+            options[_spectral.OPTION] = c.spectral_output
         service = next((name for name, row in load_table()["mpasphys_v842"].get("services", {}).items()
                         if slot is None and operation in row["operations"]), None)
         glue_backend = c.service_backends.get(service, Backend.NATIVE_CPU)

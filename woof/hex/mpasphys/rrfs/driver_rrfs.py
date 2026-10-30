@@ -347,6 +347,11 @@ def resolve_namelist(text: str, *, backends: Mapping[str, str] | None = None,
     # Hex mode controls are orchestration, absent from the pristine fork Registry.
     for key in ("config_physics_mode", "config_physics_correct_skip"):
         groups.get("nhyd_model", {}).pop(key, None)
+    # WOOF's &radiation config_rrtmg_spectral_output is produced by the v8.4.2 RRTMG slots only.
+    from .. import radiation_spectral_v842 as spectral
+    if spectral.resolve(groups) != "none":
+        raise ValueError(f"&{spectral.GROUP} {spectral.OPTION} is not available on the RRFS fork route; "
+                         "it is an MPAS-A v8.4.2 suite-route option")
     for group, keys in spec["registry_groups"].items():
         for key, value in groups.get(group, {}).items():
             if key not in keys:
