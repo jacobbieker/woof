@@ -372,6 +372,16 @@ _DOMAIN_RUN_OVERRIDES = (
     # Output-only: band-resolved RRTMG fluxes, (14|16|112, ny, nx) planes
     # per flux name and frame.
     "rrtmg_spectral_output",
+    # Output-only: woof.radtran spectral irradiance/radiance planes per
+    # requested wavelength.
+    "radtran_wavelengths",
+    "radtran_interval_s",
+    "radtran_umu",
+    "radtran_phi",
+    "radtran_mol_abs_param",
+    "radtran_solver",
+    "radtran_streams",
+    "radtran_pseudospherical",
     # LES-nest inflow seeding (P3): per-domain because the mechanism IS
     # per-edge -- it perturbs one child's rolling nest-boundary tables,
     # validate_run_config refuses it on a non-nested domain, and like

@@ -3963,7 +3963,12 @@ def _diagnostic_default(name):
 
 
 #: The "on" value of a switch that is neither a boolean nor an integer.
-_DIAGNOSTIC_ON = {"rrtmg_spectral_output": "bands"}
+_DIAGNOSTIC_ON = {"rrtmg_spectral_output": "bands",
+                  # woof.radtran spectral diagnostic (output-only keys)
+                  "radtran_wavelengths": (550.0,), "radtran_interval_s": 1800.0,
+                  "radtran_umu": (0.5,), "radtran_phi": (90.0,),
+                  "radtran_mol_abs_param": "reptran medium", "radtran_solver": "twostr",
+                  "radtran_streams": 8}
 
 
 def _diagnostic_on(name):

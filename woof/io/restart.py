@@ -1199,6 +1199,11 @@ DRIVER_REBUILT_ATTRS = frozenset({
     # handles, and FARMS's six outputs live in ``fields`` (restart-carried,
     # as WRF's SWDOWN2 ... SWDDNIC2 are).
     "farms",
+    # woof.radtran spectral diagnostic (woof.core.radtran_diag.RadtranRun):
+    # initialize_physics rebuilds it from the resumed RunConfig, latitude,
+    # longitude and start time; its outputs (RT_* and their axis
+    # variables) live in ``fields``, serialized and restored in place.
+    "radtran",
     # SASE: the active flag and the kernel-module tuple are re-derived
     # from the resumed RunConfig at driver init; the ledger is a
     # per-step diagnostic replaced before any consumer reads it; the
@@ -2674,7 +2679,17 @@ _DIGEST_DROPPED_DIAGNOSTIC_FIELDS = frozenset(
      # dropped rather than held at a default no earlier digest carried.
      "thompson_cloud_surface_booking",
      # Band-resolved RRTMG fluxes: output-only; no earlier digest carried it.
-     "rrtmg_spectral_output"})
+     "rrtmg_spectral_output",
+     # woof.radtran spectral diagnostic: output-only; no earlier digest
+     # carried these keys.
+     "radtran_wavelengths",
+     "radtran_interval_s",
+     "radtran_umu",
+     "radtran_phi",
+     "radtran_mol_abs_param",
+     "radtran_solver",
+     "radtran_streams",
+     "radtran_pseudospherical"})
 
 
 #: WRF's slope_rad / topo_shading / shadlen (woof.core.topo_radiation),
@@ -2847,6 +2862,18 @@ def _drop_default_off_run_keys(values: dict) -> None:
     # every earlier header.
     if values.get("rrtmg_spectral_output", "none") == "none":
         values.pop("rrtmg_spectral_output", None)
+    # woof.radtran spectral diagnostic (output-only): every key at its
+    # default is every earlier header.
+    for key, default in (("radtran_wavelengths", ()), ("radtran_interval_s", 3600.0),
+                         ("radtran_umu", ()), ("radtran_phi", ()),
+                         ("radtran_mol_abs_param", "reptran coarse"),
+                         ("radtran_solver", "disort"), ("radtran_streams", 0),
+                         ("radtran_pseudospherical", False)):
+        value = values.get(key, default)
+        if isinstance(value, list):
+            value = tuple(value)
+        if value == default:
+            values.pop(key, None)
     if not values.get("scalar_pblmix", 0):
         values.pop("scalar_pblmix", None)
     # MYNN-EDMF's split mixing keys (lane rrfs288-gap1): off mixes nothing

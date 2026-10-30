@@ -183,6 +183,16 @@ CONFIG_DIAGNOSTIC_FIELDS = frozenset(
      # buffers, broadband and prognostic words unchanged
      # (tests/test_rrtmg_spectral_output.py).
      "rrtmg_spectral_output",
+     # woof.radtran spectral diagnostic: RT_* fields only, no prognostic
+     # word moves (tests/test_radtran_wrf_diagnostic.py).
+     "radtran_wavelengths",
+     "radtran_interval_s",
+     "radtran_umu",
+     "radtran_phi",
+     "radtran_mol_abs_param",
+     "radtran_solver",
+     "radtran_streams",
+     "radtran_pseudospherical",
      # Correct mode WB1 (woof/correct_mode.py OUTPUT_ONLY_KEYS): books the
      # settled-cloud total CLOUDNC and changes no prognostic word.
      "thompson_cloud_surface_booking"})

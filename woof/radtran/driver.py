@@ -136,10 +136,10 @@ def _layer_optics(opts, col, rep, iw, cl, nstr, numu_angles):
     pmom[..., 0] = 1.0
     ptrue = None
     if numu_angles is not None:
-        cosang = numu_angles                                  # (numu, nphi)
+        cosang = numu_angles[:, None, :, :]                   # (ncol, 1, numu, nphi)
         p2 = 0.5 * (3.0 * cosang * cosang - 1.0)
-        chi2 = np.asarray(mo.chi2)
-        pr = 1.0 + 5.0 * (chi2[..., None, None, None] if chi2.ndim else chi2) * p2
+        chi2 = np.broadcast_to(np.asarray(mo.chi2, dtype=np.float64), (cosang.shape[0],))
+        pr = 1.0 + 5.0 * chi2[:, None, None, None] * p2
         num = tr[..., None, None] * pr
         for ts, g in hg:
             num = num + ts[..., None, None] * _hg_phase(g[..., None, None], cosang)
@@ -159,8 +159,28 @@ def _add_cloud(opts, tau, w, g, coef, nmom):
     return ts, g
 
 
+def select_bands(rep, opts: Options, wavelengths=None) -> list[int]:
+    """REPTRAN bands: every band overlapping ``opts.wavelength`` (uvspec's
+    rule), or, given ``wavelengths``, the band containing each one."""
+    if wavelengths is not None:
+        return sorted({rep.band_containing(float(w)) for w in wavelengths})
+    lo, hi = opts.wavelength
+    bands = rep.bands_overlapping(lo, hi)
+    if not bands:
+        raise ValueError(f"no REPTRAN band overlaps {lo}-{hi} nm")
+    return bands
+
+
 def compute(opts: Options, col: atmosphere.Column, clouds_in: CloudLayers | None = None,
-            *, backend: str = "gpu") -> Result:
+            *, backend: str = "gpu", umu0=None, albedo=None, wavelengths=None,
+            budget_bytes: int = 1 << 29) -> Result:
+    """Band-averaged spectral irradiances/radiances for every column.
+
+    ``umu0`` and ``albedo`` (per column) override ``opts.sza`` and
+    ``opts.albedo``; columns with the sun at or below the horizon (umu0 <= 0)
+    get zeros.  ``wavelengths`` selects the bands containing those
+    wavelengths instead of ``opts.wavelength``'s range.
+    """
     opts.validate()
     if col.z.ndim == 1:
         col = atmosphere.Column(z=col.z[None], p=col.p[None], t=col.t[None],
@@ -168,13 +188,13 @@ def compute(opts: Options, col: atmosphere.Column, clouds_in: CloudLayers | None
     ncol, nlev = col.z.shape
     L = nlev - 1
     rep = open_reptran(str(data.reptran_file(opts.reptran_resolution)))
-    lo, hi = opts.wavelength
-    bands = rep.bands_overlapping(lo, hi)
-    if not bands:
-        raise ValueError(f"no REPTRAN band overlaps {lo}-{hi} nm")
+    bands = select_bands(rep, opts, wavelengths)
     iws = sorted({int(i) for b in bands for i in rep.band(b).iwvl})
     nstr = opts.streams
-    umu0 = math.cos(math.radians(opts.sza))
+    mu0_all = (np.full(ncol, math.cos(math.radians(opts.sza))) if umu0 is None
+               else np.broadcast_to(np.asarray(umu0, dtype=np.float64), (ncol,)).copy())
+    alb_all = np.broadcast_to(np.asarray(opts.albedo if albedo is None else albedo, dtype=np.float64),
+                              (ncol,)).copy()
     # output levels
     zsur = col.z[:, -1]
     outlev = []
@@ -188,12 +208,36 @@ def compute(opts: Options, col: atmosphere.Column, clouds_in: CloudLayers | None
             if k.size == 0:
                 raise ValueError(f"zout {zo} km is not a level of the column")
             outlev.append(int(k[0]))
-    # user angles
+    nout = len(outlev)
+    phis = [p - opts.phi0 for p in (opts.phi if opts.phi else ((0.0,) if opts.umu else ()))]
+    numu, nphi = len(opts.umu), len(phis)
+    nb = len(bands)
+    fo = np.zeros((6, ncol, nout, nb))
+    uu = np.zeros((ncol, nout, numu, nphi, nb))
+    centers = [0.5 * (rep.wvlmin[b] + rep.wvlmax[b]) for b in bands]
+    zout = np.array([[col.z[c, k] - zsur[c] for k in outlev] for c in range(ncol)])
+    result = Result(wavelength=np.array(centers), wvlmin=rep.wvlmin[bands].copy(),
+                    wvlmax=rep.wvlmax[bands].copy(), zout=zout,
+                    **{n: fo[i] for i, n in enumerate(FLUX_NAMES)}, uu=uu,
+                    umu=np.asarray(opts.umu, dtype=np.float64), phi=np.asarray(opts.phi, dtype=np.float64))
+    day = np.nonzero(mu0_all > 0.0)[0]
+    if day.size == 0:
+        return result
+    if day.size < ncol:
+        col = atmosphere.Column(z=col.z[day], p=col.p[day], t=col.t[day], n_air=col.n_air[day],
+                                dens={k: v[day] for k, v in col.dens.items()})
+        if clouds_in is not None:
+            clouds_in = CloudLayers(**{k: (None if v is None else np.broadcast_to(v, (ncol, L))[day])
+                                       for k, v in clouds_in.__dict__.items()})
+    nd = day.size
+    mu0 = mu0_all[day]
+    # user angles: cosine of the scattering angle per (column, umu, phi)
     ang = None
     if opts.umu:
-        u = np.asarray(opts.umu, dtype=np.float64)[:, None]
-        ph = np.radians(np.asarray(opts.phi if opts.phi else (0.0,), dtype=np.float64) - opts.phi0)[None, :]
-        ang = -umu0 * u + np.sqrt(np.maximum(0.0, 1 - u * u)) * math.sqrt(max(0.0, 1 - umu0 * umu0)) * np.cos(ph)
+        u = np.asarray(opts.umu, dtype=np.float64)[None, :, None]
+        ph = np.radians(np.asarray(phis, dtype=np.float64))[None, None, :]
+        m = mu0[:, None, None]
+        ang = -m * u + np.sqrt(np.maximum(0.0, 1 - u * u)) * np.sqrt(np.maximum(0.0, 1 - m * m)) * np.cos(ph)
     flags = (solver.DELTAM if opts.use_deltam else 0)
     if opts.rte_solver == "twostr":
         flags |= solver.TWOSTREAM
@@ -208,37 +252,33 @@ def compute(opts: Options, col: atmosphere.Column, clouds_in: CloudLayers | None
         if pt is not None:
             PT.append(pt)
     nw = len(iws)
-    dtau = np.concatenate(D).reshape(nw * ncol, L)
-    ssa = np.concatenate(S).reshape(nw * ncol, L)
-    pmom = np.concatenate(P).reshape(nw * ncol, L, nstr + 1)
-    ptrue = np.concatenate(PT).reshape(nw * ncol, L, *ang.shape) if PT else None
+    dtau = np.concatenate(D).reshape(nw * nd, L)
+    ssa = np.concatenate(S).reshape(nw * nd, L)
+    pmom = np.concatenate(P).reshape(nw * nd, L, nstr + 1)
+    ptrue = np.concatenate(PT).reshape(nw * nd, L, numu, nphi) if PT else None
     zlev = np.tile(col.z, (nw, 1))
-    phis = [p - opts.phi0 for p in (opts.phi if opts.phi else ((0.0,) if opts.umu else ()))]
-    flux, rad = solver.solve(nstr=nstr, flags=flags, dtau=dtau, ssa=ssa, pmom=pmom, umu0=umu0,
-                             fbeam=1.0, albedo=opts.albedo, zlev=zlev, radius=opts.earth_radius,
-                             outlev=outlev, umu=opts.umu, phi=phis, ptrue=ptrue, backend=backend)
-    flux = flux.reshape(nw, ncol, len(outlev), 6)
-    rad = rad.reshape(nw, ncol, len(outlev), len(opts.umu), len(phis))
+    flux, rad = solver.solve(nstr=nstr, flags=flags, dtau=dtau, ssa=ssa, pmom=pmom, umu0=np.tile(mu0, nw),
+                             fbeam=1.0, albedo=np.tile(alb_all[day], nw), zlev=zlev,
+                             radius=opts.earth_radius, outlev=outlev, umu=opts.umu, phi=phis, ptrue=ptrue,
+                             backend=backend, budget_bytes=budget_bytes)
+    flux = flux.reshape(nw, nd, nout, 6)
+    rad = rad.reshape(nw, nd, nout, numu, nphi)
     dist = sun_distance_factor(opts.day_of_year)
     pos = {iw: k for k, iw in enumerate(iws)}
-    nb = len(bands)
-    fo = np.zeros((6, ncol, len(outlev), nb))
-    uu = np.zeros((ncol, len(outlev), len(opts.umu), len(phis), nb))
-    centers, wmin, wmax = [], [], []
     for j, b in enumerate(bands):
         B = rep.band(b)
         e0 = 0.0
+        accf = np.zeros((6, nd, nout))
+        accr = np.zeros((nd, nout, numu, nphi))
         for iw, w in zip(B.iwvl, B.weight):
             k = pos[int(iw)]
             f = w * rep.extra[iw] * dist
             e0 += f
-            fo[:, :, :, j] += f * np.moveaxis(flux[k], -1, 0)
-            uu[..., j] += f * rad[k]
+            accf += f * np.moveaxis(flux[k], -1, 0)
+            accr += f * rad[k]
         if opts.output_quantity == "transmittance":
-            fo[:, :, :, j] /= e0
-            uu[..., j] /= e0
-        centers.append(0.5 * (B.wvlmin + B.wvlmax)); wmin.append(B.wvlmin); wmax.append(B.wvlmax)
-    zout = np.array([[col.z[c, k] - zsur[c] for k in outlev] for c in range(ncol)])
-    return Result(wavelength=np.array(centers), wvlmin=np.array(wmin), wvlmax=np.array(wmax),
-                  zout=zout, **{n: fo[i] for i, n in enumerate(FLUX_NAMES)}, uu=uu,
-                  umu=np.asarray(opts.umu, dtype=np.float64), phi=np.asarray(opts.phi, dtype=np.float64))
+            accf /= e0
+            accr /= e0
+        fo[..., j][:, day, :] = accf
+        uu[..., j][day] = accr
+    return result

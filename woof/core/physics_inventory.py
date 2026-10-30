@@ -73,6 +73,30 @@ SPECTRAL_WIDTHS = {("sw", "bands"): 14, ("sw", "gpoints"): 112,
                    ("lw", "bands"): 16, ("lw", "gpoints"): 16}
 
 
+#: woof.radtran spectral diagnostic (RunConfig radtran_*): the irradiance
+#: planes (rt_wavelength, ny, nx), the radiance stack (rt_wavelength,
+#: rt_direction, ny, nx) and the axis variables naming each entry.
+RADTRAN_FLUX_FIELDS = ("rt_edir", "rt_edn", "rt_eup", "rt_eup_toa")
+RADTRAN_WAVELENGTH_FIELDS = ("rt_wavelength", "rt_band_min", "rt_band_max")
+RADTRAN_DIRECTION_FIELDS = ("rt_umu", "rt_phi")
+
+
+def radtran_fields(cfg, ny: int, nx: int) -> dict[str, tuple[int, ...]]:
+    """The radtran diagnostic's physics fields, name -> full shape (empty when off)."""
+    waves = tuple(getattr(cfg, "radtran_wavelengths", ()) or ())
+    if not waves:
+        return {}
+    nw = len(waves)
+    out = {name: (nw, ny, nx) for name in RADTRAN_FLUX_FIELDS}
+    out.update({name: (nw,) for name in RADTRAN_WAVELENGTH_FIELDS})
+    umu = tuple(getattr(cfg, "radtran_umu", ()) or ())
+    if umu:
+        ndir = len(umu) * max(1, len(tuple(getattr(cfg, "radtran_phi", ()) or ())))
+        out["rt_rad"] = (nw, ndir, ny, nx)
+        out.update({name: (ndir,) for name in RADTRAN_DIRECTION_FIELDS})
+    return out
+
+
 def radiation_spectral_fields(cfg) -> dict[str, int]:
     """rrtmg_spectral_output's physics fields, field name -> band (or
     g-point) count; each is (count, ny, nx).  Legacy RRTMG only, on the

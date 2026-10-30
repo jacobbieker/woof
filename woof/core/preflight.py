@@ -5364,6 +5364,9 @@ def physics_array_shapes(cfg: RunConfig, *, cam_ozone: bool = False,
     from woof.core.physics_inventory import radiation_spectral_fields
     for name, count in radiation_spectral_fields(cfg).items():
         shapes[f"fields/{name}"] = (count, ny, nx)
+    from woof.core.physics_inventory import radtran_fields
+    for name, full in radtran_fields(cfg, ny, nx).items():
+        shapes[f"fields/{name}"] = full
     if int(getattr(cfg, "sf_ocean_physics", 0)) == 2:
         from woof.ocean.mixed_layer import PROFILE_FIELDS
         for name in (*PROFILE_FIELDS, "_pwp_w", "_pwp_p"):

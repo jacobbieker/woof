@@ -43,7 +43,7 @@ from woof.io.wrf_output_schema import (
     HISTORY_FIELDS_BY_NETCDF_NAME, HUB_HEIGHT_DIMENSION,
     HUB_HEIGHT_DIMENSIONED_FIELDS, PHYSICS_SELECTOR_GLOBALS,
     RRTMG_LW_BAND_DIMENSION, RRTMG_LW_WAVENUMBERS, RRTMG_SW_GPT_DIMENSION,
-    rrtmg_spectral_dimension,
+    rrtmg_spectral_dimension, radtran_dimensions,
     RADIATION_CLDFRA_ATTRIBUTES,
     REGISTRY_VAR_META, SCHEME_OUTPUT_FIELDS, WINDFARM_TURBINE_DIMENSION,
     WINDFARM_TURBINE_DIMENSIONED_FIELDS, WRF_FIELD_TYPE_INTEGER,
@@ -1240,6 +1240,16 @@ class WrfoutWriter:
             if name == "HUB_HEIGHT":
                 return ("Time", HUB_HEIGHT_DIMENSION)
             return ("Time", HUB_HEIGHT_DIMENSION, "south_north", "west_east")
+        rt_axes = radtran_dimensions(name)
+        if rt_axes is not None:
+            # woof.radtran spectral diagnostic, routed by NAME (an entry count
+            # equal to nz must not land on bottom_top)
+            spatial = len(shape) == len(rt_axes) + 2 and tuple(shape[-2:]) == (ny, nx)
+            if not spatial and len(shape) != len(rt_axes):
+                raise ValueError(f"radtran history field {name} has shape {tuple(shape)}")
+            for axis_name, size in zip(rt_axes, shape):
+                self._ensure_dimension(axis_name, int(size))
+            return ("Time", *rt_axes, "south_north", "west_east") if spatial else ("Time", *rt_axes)
         axis = rrtmg_spectral_dimension(name)
         if axis is not None:
             # rrtmg_spectral_output, routed by NAME (a band count equal to

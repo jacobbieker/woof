@@ -1513,6 +1513,27 @@ def rrtmg_spectral_dimension(name: str):
     return None
 
 
+#: woof.radtran spectral diagnostic (RunConfig radtran_*): one entry per
+#: requested wavelength on ``rt_wavelength`` and, for radiances, one per
+#: (umu, phi) direction on ``rt_direction``; routed BY NAME.
+RADTRAN_WAVELENGTH_DIMENSION = "rt_wavelength"
+RADTRAN_DIRECTION_DIMENSION = "rt_direction"
+RADTRAN_PLANES = frozenset({"RT_EDIR", "RT_EDN", "RT_EUP", "RT_EUP_TOA"})
+RADTRAN_WAVELENGTH_AXES = frozenset({"RT_WAVELENGTH", "RT_BAND_MIN", "RT_BAND_MAX"})
+RADTRAN_DIRECTION_AXES = frozenset({"RT_UMU", "RT_PHI"})
+
+
+def radtran_dimensions(name: str):
+    """The non-spatial axes of a radtran history name, or None."""
+    if name in RADTRAN_PLANES or name in RADTRAN_WAVELENGTH_AXES:
+        return (RADTRAN_WAVELENGTH_DIMENSION,)
+    if name == "RT_RAD":
+        return (RADTRAN_WAVELENGTH_DIMENSION, RADTRAN_DIRECTION_DIMENSION)
+    if name in RADTRAN_DIRECTION_AXES:
+        return (RADTRAN_DIRECTION_DIMENSION,)
+    return None
+
+
 from woof.core.output_diagnostics import HISTORY as _OUTPUT_HISTORY
 # setdefault, not update: WSPD10MAX and W_UP_MAX/W_DN_MAX are also the
 # nwp_diagnostics wind maxima (woof/core/wind_gust_diag.py), whose rows
@@ -1531,6 +1552,19 @@ for _base in (*_SW_SPEC, *_LW_SPEC):
     if _base.startswith("sw"):
         REGISTRY_VAR_META[_base.upper() + "_GPT"] = (f"{_desc}, PER RRTMG G-POINT", _units or "W m-2")
 del _base, _desc, _units, _LW_SPEC, _SW_SPEC
+REGISTRY_VAR_META.update({
+    "RT_EDIR": ("DIRECT HORIZONTAL SPECTRAL IRRADIANCE AT THE SURFACE, BAND MEAN (WOOF.RADTRAN)", "W m-2 nm-1"),
+    "RT_EDN": ("DIFFUSE DOWNWARD SPECTRAL IRRADIANCE AT THE SURFACE, BAND MEAN (WOOF.RADTRAN)", "W m-2 nm-1"),
+    "RT_EUP": ("UPWARD SPECTRAL IRRADIANCE AT THE SURFACE, BAND MEAN (WOOF.RADTRAN)", "W m-2 nm-1"),
+    "RT_EUP_TOA": ("UPWARD SPECTRAL IRRADIANCE AT THE TOP OF THE ATMOSPHERE, BAND MEAN (WOOF.RADTRAN)", "W m-2 nm-1"),
+    "RT_RAD": ("SPECTRAL RADIANCE: UPWELLING AT THE TOP OF THE ATMOSPHERE (UMU > 0), DOWNWELLING AT THE "
+               "SURFACE (UMU < 0), BAND MEAN (WOOF.RADTRAN)", "W m-2 nm-1 sr-1"),
+    "RT_WAVELENGTH": ("REQUESTED WAVELENGTH OF EACH RADTRAN ENTRY", "nm"),
+    "RT_BAND_MIN": ("LOWER EDGE OF THE REPTRAN BAND CONTAINING THE WAVELENGTH", "nm"),
+    "RT_BAND_MAX": ("UPPER EDGE OF THE REPTRAN BAND CONTAINING THE WAVELENGTH", "nm"),
+    "RT_UMU": ("COSINE OF THE POLAR ANGLE OF EACH RADIANCE DIRECTION (> 0 UPWELLING)", "1"),
+    "RT_PHI": ("AZIMUTH OF EACH RADIANCE DIRECTION RELATIVE TO THE SUN", "degree"),
+})
 
 __all__ = [
     "HISTORY_FIELDS_BY_NETCDF_NAME",
@@ -1539,6 +1573,9 @@ __all__ = [
     "RRTMG_SW_BAND_DIMENSION",
     "RRTMG_SW_GPT_DIMENSION",
     "rrtmg_spectral_dimension",
+    "RADTRAN_DIRECTION_DIMENSION",
+    "RADTRAN_WAVELENGTH_DIMENSION",
+    "radtran_dimensions",
     "HUB_HEIGHT_DIMENSION",
     "HUB_HEIGHT_DIMENSIONED_FIELDS",
     "HUB_SCALAR_OUTPUT_FIELDS",

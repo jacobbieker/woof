@@ -118,6 +118,40 @@ def model_column(z_km, p_hpa, t_k, *, h2o_vmr=None, o3_vmr=None, co2_vmr=None,
     return Column(z=zz, p=pp, t=tt, n_air=nn, dens=dens)
 
 
+def model_columns(z_km, p_hpa, t_k, *, h2o_vmr=None, o3_vmr=None, co2_vmr=None,
+                  above: str = "us", gap_km: float = 1.0) -> Column:
+    """Many model columns (ncol, nlev), top first, spliced onto one AFGL profile.
+
+    Every column receives the same AFGL levels: those more than ``gap_km``
+    above the highest model top, so each column has the same number of
+    levels (the gap layer between a column's top and the first AFGL level
+    differs in thickness).  Gases the model does not supply take the AFGL
+    mixing ratio at the model levels.
+    """
+    z = np.asarray(z_km, dtype=np.float64)
+    p = np.asarray(p_hpa, dtype=np.float64)
+    t = np.asarray(t_k, dtype=np.float64)
+    if z.ndim != 2 or not np.all(np.diff(z, axis=1) < 0):
+        raise ValueError("model columns must be (ncol, nlev) with altitudes strictly decreasing")
+    ncol = z.shape[0]
+    na = p * 100.0 / (KB * t) * 1e-6
+    ref = afgl(above)
+    top = ref.z > z[:, 0].max() + gap_km
+    nt = int(top.sum())
+    rep = lambda a: np.broadcast_to(a[top], (ncol, nt))
+    dens = {}
+    given = {"H2O": h2o_vmr, "O3": o3_vmr, "CO2": co2_vmr}
+    for gas in GASES:
+        if given.get(gas) is not None:
+            v = np.broadcast_to(np.asarray(given[gas], dtype=np.float64), z.shape)
+        else:
+            v = np.interp(-z, -ref.z, ref.vmr(gas))
+        dens[gas] = np.concatenate((rep(ref.dens[gas]), v * na), axis=1)
+    return Column(z=np.concatenate((rep(ref.z), z), axis=1), p=np.concatenate((rep(ref.p), p), axis=1),
+                  t=np.concatenate((rep(ref.t), t), axis=1), n_air=np.concatenate((rep(ref.n_air), na), axis=1),
+                  dens=dens)
+
+
 def layer_column(z_km, n_air, n_gas=None):
     """Per-layer column [cm-2] (top first), exponential air x linear vmr.
 
