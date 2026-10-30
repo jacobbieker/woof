@@ -653,7 +653,7 @@ wrong answer reported as a success. Put them in `[shared]`.
 | `radt` / `radt_minutes` | `radt` | 0.0 / 12.0 | minutes; 0 = every step | per-domain; WRF `radt = 0` imports as `radt_minutes = 0.0` |
 | `bldt` | `bldt` | 0.0 | minutes; 0 = every step | surface layer + LSM + PBL interval |
 | `cudt_minutes` | `cudt` | 5.0 | minutes | consumed where `cu_physics = 1` |
-| `icloud` | `icloud` | 1 | 0, 1 (Dudhia); fixed 1 with any RRTMG spectrum | |
+| `icloud` | `icloud` | 1 | 0, 1, 2 (Dudhia/RRTM); 1, 2 or 3 (WRF-Solar cal_cldfra3) with RRTMG (ra_lw/sw_physics = 4) | |
 | `swrad_scat` | `swrad_scat` | 1.0 | >= 0 | Dudhia scattering |
 | `no_mp_heating` | `no_mp_heating` | 0 | 0, 1 | disables microphysics latent heating |
 | `mp_tend_lim` | `mp_tend_lim` | 10.0 | > 0, K/s | microphysics theta-tendency clamp |

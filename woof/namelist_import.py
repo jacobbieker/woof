@@ -5275,7 +5275,7 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
         icloud = int(ph.scalar("icloud", 1))
         swrad_scat = float(ph.scalar("swrad_scat", 1.0))
         if icloud not in (0, 1, 2):
-            raise _err("physics", "icloud", icloud, "choose 0, 1 or 2; icloud=3 needs unported cal_cldfra3 condensate adjustment.")
+            raise _err("physics", "icloud", icloud, "choose 0, 1 or 2; icloud=3 (WRF-Solar cal_cldfra3) is ported for ra_lw_physics/ra_sw_physics = 4 (RRTMG) only, not the Dudhia shortwave.")
         if not math.isfinite(swrad_scat) or swrad_scat < 0.0:
             raise _err("physics", "swrad_scat", swrad_scat,
                        "must be finite and non-negative.")
@@ -5294,8 +5294,12 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
                 "pair for clear sky or icloud=1/2.")
         if raw_icloud is not None:
             icloud = int(_uniform("physics", "icloud", raw_icloud))
-            if icloud not in (0, 1, 2):
-                raise _err("physics", "icloud", raw_icloud, "choose 0, 1 or 2; icloud=3 needs unported cal_cldfra3 condensate adjustment.")
+            if icloud not in (0, 1, 2, 3):
+                raise _err("physics", "icloud", raw_icloud, "choose 0, 1, 2 or 3.")
+            if icloud == 3 and any(set(pair) - {0, 4} for pair in radiation_pairs):
+                raise _err("physics", "icloud", raw_icloud,
+                    "icloud=3 (WRF-Solar cal_cldfra3) is ported for "
+                    "ra_lw_physics/ra_sw_physics = 4 (RRTMG) only.")
         if icloud == 1:
             fix("physics", "icloud", raw_icloud, 1,
                 f"cloud-radiation coupling is fixed on in the {adapter_label} "

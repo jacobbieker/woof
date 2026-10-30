@@ -40,7 +40,7 @@ call must run the device McICA twin and the batched CUDA engines, never
 the NumPy compute chain.
 
 The implemented option envelope (dossier section 1) is pinned here and
-fails closed on anything else: ``icloud=1 or 2``, ``cldovrlp=2`` (McICA
+fails closed on anything else: ``icloud=1, 2 or 3``, ``cldovrlp=2`` (McICA
 maximum-random), ``idcor=0``, ``o3input in {0, 2}``, ``ghg_input=0``,
 ``aer_opt=0``, ``swint_opt=0``.  ``o3input=0`` selects the wrapper's
 O3DATA branch; ``o3input=2`` selects CAM climatology.
@@ -1732,10 +1732,9 @@ class RRTMGLegacyRadiation:
     # ------------------------------------------------------------------
     def _check_pins(self, cfg):
         """Fail closed on any option outside the ported combination."""
-        if int(getattr(cfg, "icloud", 1)) not in (1, 2):
+        if int(getattr(cfg, "icloud", 1)) not in (1, 2, 3):
             raise NotImplementedError(
-                "icloud=0 lacks a recorded legacy clear-sky solve; "
-                "icloud=3 requires unported cal_cldfra3 condensate adjustment")
+                "icloud=0 lacks a recorded legacy clear-sky solve")
         for name, pinned in _PINNED_OPTIONS.items():
             value = getattr(cfg, name, pinned)
             if int(value) != pinned:
@@ -2223,6 +2222,21 @@ class RRTMGLegacyRadiation:
                     f"/ shcu_physics) reads fields[{name!r}], which this "
                     "driver did not allocate")
             gather_grids["cu_" + name] = _device_grid(fields[name], nz)
+        cldfra3_args = None
+        if icloud == 3:
+            # WRF-Solar cal_cldfra3 (module_radiation_driver.F:1462-1510):
+            # it needs both QC and QI (the driver stops otherwise) and runs
+            # per column on the gathered copies, so the prognostic qc/qi
+            # never see its made-up condensate (WRF restores them after
+            # the schemes, :3137-3155).
+            if g_moist["qc"] is None or g_moist["qi"] is None:
+                raise ValueError(
+                    "Can not use icloud = 3 option, missing QC or QI field "
+                    f"(mp_physics={mp_physics}; WRF's wrf_error_fatal)")
+            from woof.core.cldfra3 import cldfra3_gridkm
+            from woof.core.rrtm_lw import _stream_is_capturing
+            cldfra3_args = (cldfra3_gridkm(cfg.dx, cfg.dy),
+                            not _stream_is_capturing(cp))
         if icloud == 2:
             # One driver CLDFRA field is shared by LW and SW. Gather only
             # repacks it into each prep's column window; it never recomputes
@@ -2271,6 +2285,13 @@ class RRTMGLegacyRadiation:
             # moisture before the MYNN merge writes qc/qi.
             if icloud == 2:
                 cldfra = blocks["binary_cldfra"]
+            elif icloud == 3:
+                from woof.core.cldfra3 import cal_cldfra3
+                gridkm, check = cldfra3_args
+                cldfra, moist["qc"], moist["qi"] = cal_cldfra3(
+                    moist["qv"], moist["qc"], moist["qi"], moist["qs"],
+                    blocks["dz8w"], p3d, t3d, surf["xland"][sel], gridkm,
+                    check=check)
             else:
                 cldfra = _rrtmgp.cal_cldfra1(
                     moist["qv"], moist["qc"], moist["qi"], moist["qs"], t3d,

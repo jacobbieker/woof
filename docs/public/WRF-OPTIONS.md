@@ -36,7 +36,7 @@ WRF source: https://github.com/wrf-model/WRF at v4.7.1 (f52c197ed39d).
 | `sf_lake_physics` | 1 | - |
 | `windfarm_opt` | - | 1, 2 |
 | `cu_rad_feedback` | .true. | - |
-| `icloud` | - | 3 |
+| `icloud` | 3 | - |
 
 ## `mp_physics`
 
@@ -249,4 +249,4 @@ WRF source: https://github.com/wrf-model/WRF at v4.7.1 (f52c197ed39d).
 
 | value | WRF option | woof |
 |---|---|---|
-| `3` | Thompson-Eidhammer cloud fraction (cal_cldfra3) | refused: &physics icloud = [3]: choose 0, 1 or 2; icloud=3 needs unported cal_cldfra3 condensate adjustment. |
+| `3` | Thompson-Eidhammer cloud fraction (cal_cldfra3) | imports |

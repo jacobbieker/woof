@@ -3970,6 +3970,29 @@ class RRTMGPRadiation:
         if icloud == 2:
             cldfra = cal_cldfra2(qc_cols, qi_cols,
                 f_qc=int(getattr(cfg, "mp_physics", 0)) != 0, f_qi=ice_active)
+        elif icloud == 3:
+            # WRF-Solar cal_cldfra3 (module_radiation_driver.F:1462-1510)
+            # reads the driver's unclamped moisture; the radiation then
+            # reads max(0, q) of the copies it returns, as above.  The
+            # prognostic qc/qi are untouched (WRF restores them, :3137-3155).
+            if not ice_active or mp_physics == 0:
+                raise ValueError(
+                    "Can not use icloud = 3 option, missing QC or QI field "
+                    f"(mp_physics={mp_physics}; WRF's wrf_error_fatal)")
+            from woof.core.cldfra3 import cal_cldfra3, cldfra3_gridkm
+            from woof.core.rrtm_lw import _stream_is_capturing
+            if fields.get("xland") is None:
+                raise ValueError("icloud=3 reads XLAND (fields['xland'])")
+            cldfra, qc_raw, qi_raw = cal_cldfra3(
+                self._columns(atmosphere["qv"]), self._columns(qc3),
+                self._columns(qi3), self._columns(qs3),
+                self._columns(atmosphere["dz"]), play, tlay,
+                fields["xland"].reshape(-1),
+                cldfra3_gridkm(cfg.dx, cfg.dy),
+                check=not _stream_is_capturing(cp))
+            qc_cols = _radiation_reads_nonnegative(qc_raw)
+            qi_cols = _radiation_reads_nonnegative(qi_raw)
+            del qc_raw, qi_raw
         else:
             cldfra = cal_cldfra1(qv, qc_cols, qi_cols, qs_cols, tlay, play,
                                  f_qc=True, f_qi=ice_active, f_qs=snow_species,
