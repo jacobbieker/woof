@@ -328,6 +328,8 @@ _EXTRA_HEADERS: dict[str, tuple[str, ...]] = {
     # WRF-Solar EPS (multi_perturb): the scheme hooks (FADD/FMUL/FDIV/FSUB)
     # and module_stoch's pattern arithmetic (expf, logf, cosf, sinf).
     "wrfsolar_eps": ("glibc_flt32.cuh", "glibc_trig_flt32.cuh"),
+    # MAD-WRF (module_madwrf.F, Cloud_tracer_nudge): glibc's powf.
+    "madwrf": ("glibc_flt32.cuh",),
 }
 
 #: Read-only view for tests and freeze receipts.
@@ -519,7 +521,9 @@ _NO_FTZ_MODULES = frozenset({"g3", "nsas", "sfclay", "myjsfc", "mynn_surface", "
                              # WRF 4.7.1 multi_perturb hooks
                              # (tools/wrfsolar_eps_wrf471_oracle): subnormal
                              # mixing ratios pass the multipliers unflushed.
-                             "wrfsolar_eps"}) | _SOLAR_NO_FTZ_MODULES
+                             "wrfsolar_eps",
+                             # WRF 4.7.1 MAD-WRF (tools/madwrf_wrf471_oracle)
+                             "madwrf"}) | _SOLAR_NO_FTZ_MODULES
 
 # The exact chain's strict intake contracts (GPUWM_WRF_EXACT=1): these units
 # also compile without contraction in a strict process.  A default process
