@@ -191,7 +191,7 @@ class FarmsShortwave(ShortwaveInterpolation):
                  generation="wrf_480", mp_physics, use_mp_re=1, icloud=1,
                  aer_opt=0, aer_angexp_val=1.3, aer_ssa_val=0.85,
                  aer_asy_val=0.9, couple_farms=False, bl_merge=False,
-                 icloud_cu=0, deng_cloud=False):
+                 icloud_cu=0, deng_cloud=False, gridkm=None):
         super().__init__(start_time=start_time, latitude_deg=latitude_deg,
                          longitude_deg=longitude_deg, shape=shape,
                          generation=generation)
@@ -207,10 +207,18 @@ class FarmsShortwave(ShortwaveInterpolation):
                              legacy_scheme_has_req(self.mp_physics, use_mp_re))
         self.f_qi, self.f_qs = legacy_cloud_fraction_flags(self.mp_physics)
         self.icloud = int(icloud)
-        if self.icloud not in (0, 1, 2):
+        if self.icloud not in (0, 1, 2, 3):
             raise NotImplementedError(
                 f"swint_opt = 2 with icloud={self.icloud}: FARMS reads the "
-                "per-step CLDFRA, and only icloud 0, 1 and 2 are ported")
+                "per-step CLDFRA, and only icloud 0, 1, 2 and 3 are ported")
+        if self.icloud == 3 and gridkm is None:
+            raise ValueError("swint_opt = 2 with icloud = 3 needs the "
+                             "driver's gridkm (woof.core.cldfra3.cldfra3_gridkm)")
+        # icloud = 3 (WRF-Solar cal_cldfra3, woof.core.cldfra3): the
+        # Solar_step runs it on every step and Farms_driver
+        # (module_radiation_driver.F:3064-3068) reads its CLDFRA and the qc/qi
+        # it rewrote -- the restore of qc/qi comes after (:3137-3155).
+        self.gridkm = None if gridkm is None else F(gridkm)
         self.aer_opt = int(aer_opt)
         if self.aer_opt not in (0, 1, 2):
             raise NotImplementedError(
@@ -275,6 +283,19 @@ class FarmsShortwave(ShortwaveInterpolation):
             cldfra = cal_cldfra2(cp.ascontiguousarray(qc, dtype=cp.float32),
                                  cp.ascontiguousarray(qi, dtype=cp.float32),
                                  f_qc=True, f_qi=self.f_qi)
+        elif self.icloud == 3:
+            from woof.core.cldfra3 import cal_cldfra3
+            from woof.core.rrtm_lw import _stream_is_capturing
+            ncol = cols
+            tr = lambda a: cp.ascontiguousarray(
+                cp.ascontiguousarray(a, dtype=cp.float32).reshape(nz, ncol).T)
+            c3, q3c, q3i = cal_cldfra3(
+                tr(qv), tr(qc), tr(qi), tr(qs), tr(atmosphere["dz"]),
+                tr(atmosphere["pressure"]), tr(atmosphere["temperature"]),
+                fields["xland"].reshape(-1), self.gridkm,
+                check=not _stream_is_capturing(cp))
+            back = lambda a: cp.ascontiguousarray(a.T).reshape(qv.shape)
+            cldfra, qc, qi = back(c3), back(q3c), back(q3i)
         if self.deng_cloud:
             # :1566-1575, after every icloud branch.
             cldfra, qc = curad.merge_deng_cloud(

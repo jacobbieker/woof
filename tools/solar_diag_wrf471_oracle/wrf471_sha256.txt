@@ -1,0 +1,2 @@
+95fca753e8874b8b74da533317771a840f0d9694290a2dab1879c9756128adf6  phys/module_diag_solar.F
+5b80377fecdc18a5f0ad38d3b6c15cfc86ad5d76701adbbbb08a08698d0f7062  share/module_model_constants.F

@@ -457,11 +457,11 @@ is importable from a WRF namelist.
 **Which keys a `[[domain]]` table may override.** Exactly these 274,
 and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
 
-    lightning_option  lightning_dt  lightning_start_seconds  flashrate_factor
-    iccg_method  iccg_prescribed_num  iccg_prescribed_den  cellcount_method
-    cldtop_adjustment  do_radar_ref  cu_physics  cudt_minutes  clos_choice  ishallow
-    cugd_avedx  maxiens  maxens  maxens2  maxens3  ensdim  cu_diag
-    convtrans_avglen_m  sas_pgcon  nsas_dx_factor  radt  radt_minutes  bldt
+    hailcast_opt  haildt  lightning_option  lightning_dt  lightning_start_seconds
+    flashrate_factor  iccg_method  iccg_prescribed_num  iccg_prescribed_den
+    cellcount_method  cldtop_adjustment  do_radar_ref  cu_physics  cudt_minutes
+    clos_choice  ishallow  cugd_avedx  maxiens  maxens  maxens2  maxens3  ensdim
+    cu_diag  convtrans_avglen_m  sas_pgcon  nsas_dx_factor  radt  radt_minutes  bldt
     ra_physics  ra_lw_physics  ra_sw_physics  ra_rrtmg_variant
     wrf_rrtmg_compatibility  o3input  use_mp_re  swrad_scat  diff_6th_factor  epssm
     spec_exp  mp_physics  moist  moist_cq  nest_microphysics_transition  spp_conv
@@ -471,19 +471,20 @@ and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
     diff_6th_thresh  dampcoef  zdamp  emdiv  smdiv  khdif  kvdif  diff_opt
     mix_full_fields  h_sca_adv_order  moist_adv_opt  v_sca_adv_order
     v_mom_adv_order  h_mom_adv_order  tke_budget  sase_flux_diag  hmix_k_diag
-    surface_energy_diag  rrtmg_spectral_output  radtran_wavelengths  radtran_interval_s
-    radtran_umu  radtran_phi  radtran_mol_abs_param  radtran_solver  radtran_streams
-    radtran_pseudospherical  shcu_physics  cu_rad_feedback  inflow_perturbation
-    inflow_perturbation_seed
+    surface_energy_diag  rrtmg_spectral_output  radtran_wavelengths
+    radtran_interval_s  radtran_umu  radtran_phi  radtran_mol_abs_param
+    radtran_solver  radtran_streams  radtran_pseudospherical  shcu_physics
+    cu_rad_feedback  inflow_perturbation  inflow_perturbation_seed
     inflow_perturbation_amplitude_scale  inflow_perturbation_faces  target_cfl
     target_hcfl  max_step_increase_pct  starting_time_step  starting_time_step_den
     max_time_step  max_time_step_den  min_time_step  min_time_step_den
     min_time_step_sound  slope_rad  topo_shading  mosaic_urban_canopy
-    sf_lake_physics  use_lakedepth  lakedepth_default  lake_min_elev  topo_wind
-    history_interval2_s  history_interval_change_s  prec_acc_dt  prec_acc_dt1
-    gsd_diagnostics  reset_interval1
-    gwd_opt  fmoist_run  fmoist_interp  fmoist_only  fmoist_freq  fmoist_dt  ifire
-    fire_boundary_guard  fire_num_ignitions  fire_ignition_ros1
+    sf_lake_physics  use_lakedepth  lakedepth_default  lake_min_elev
+    lake_state_source  lake_state_path  lake_state_accept_licence  topo_wind
+    gwd_opt  history_interval2_s  history_interval_change_s  prec_acc_dt
+    prec_acc_dt1  gsd_diagnostics  reset_interval1  windfarm_opt
+    windfarm_turbine_file  fmoist_run  fmoist_interp  fmoist_only  fmoist_freq
+    fmoist_dt  ifire  fire_boundary_guard  fire_num_ignitions  fire_ignition_ros1
     fire_ignition_start_lon1  fire_ignition_start_lat1  fire_ignition_end_lon1
     fire_ignition_end_lat1  fire_ignition_radius1  fire_ignition_start_time1
     fire_ignition_end_time1  fire_ignition_ros2  fire_ignition_start_lon2
@@ -522,8 +523,6 @@ and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
     fire_lsm_band_ngp  fire_lsm_zcoupling  fire_lsm_zcoupling_ref  fire_tracer_smoke
     fire_viscosity_bg  fire_viscosity_band  fire_viscosity_ngp  fire_slope_factor
     fuel_crosswalk  sr_x  sr_y  fire_static  fire_fuel_namelist  fire_smoke
-    hailcast_opt  haildt  lake_state_source  lake_state_path
-    lake_state_accept_licence  windfarm_opt  windfarm_turbine_file
 
 `hailcast_opt` and `haildt` select the GPU WRF HAILCAST hail diameter per
 domain (see the physics table below). `lake_state_source` picks the lake
@@ -653,7 +652,7 @@ wrong answer reported as a success. Put them in `[shared]`.
 | `radt` / `radt_minutes` | `radt` | 0.0 / 12.0 | minutes; 0 = every step | per-domain; WRF `radt = 0` imports as `radt_minutes = 0.0` |
 | `bldt` | `bldt` | 0.0 | minutes; 0 = every step | surface layer + LSM + PBL interval |
 | `cudt_minutes` | `cudt` | 5.0 | minutes | consumed where `cu_physics = 1` |
-| `icloud` | `icloud` | 1 | 0, 1 (Dudhia); fixed 1 with any RRTMG spectrum | |
+| `icloud` | `icloud` | 1 | 0, 1, 2 (Dudhia/RRTM); 1, 2 or 3 (WRF-Solar cal_cldfra3) with RRTMG (ra_lw/sw_physics = 4) | |
 | `swrad_scat` | `swrad_scat` | 1.0 | >= 0 | Dudhia scattering |
 | `no_mp_heating` | `no_mp_heating` | 0 | 0, 1 | disables microphysics latent heating |
 | `mp_tend_lim` | `mp_tend_lim` | 10.0 | > 0, K/s | microphysics theta-tendency clamp |
@@ -684,6 +683,7 @@ wrong answer reported as a success. Put them in `[shared]`.
 | `radtran_pseudospherical` | (none) | `false` | bool; per domain | Pseudo-spherical direct beam (Dahlback & Stamnes 1991) for low sun |
 | `shcu_physics` | `shcu_physics` | 0 | 0, 5; per domain | the separate shallow-cumulus slot. 5 is WRF-Solar's PSU Deng scheme (`phys/module_shcu_deng.F`), run every model step after the cumulus call as `shallowcu_driver` is, with its non-buoyant cloud (CLDAREAA/B, CLDLIQA/B, the updraft history and the 100-deep AINCKFSA) carried in the checkpoint and its shallow cloud handed to the next radiation call (`CLDFRA = MAX(CLDFRA_SH, CLDFRA)`, `QC = CW_RAD + QC`, `module_radiation_driver.F:1566-1575`). Needs MYJ or MYNN (`bl_pbl_physics` 2 or 5, WRF's own rule), a microphysics scheme (QC, QR) and RRTMG (`ra_*_physics = 4`); shares W0AVG with Kain-Fritsch as WRF does. Every output word is held to WRF v4.7.1 (`tests/test_shcu_deng_wrf471_oracle.py`). `RAINSH` in history is WRF's word: the last step's shallow rain in mm, which WRF does not accumulate. WRF's 1-4 are refused |
 | `cu_rad_feedback` | `cu_rad_feedback` | false | bool; per domain | the cumulus cloud handed to radiation, WRF's ICLOUD_CU (`module_physics_init.F:1103-1118`): Kain-Fritsch (2) hands its CLDFRA_DP/CLDFRA_SH and QC_KF/QI_KF, merged right after the icloud = 1 cloud fraction; Grell-Freitas and Grell 3D (1) hand convtrans_prep's time-averaged QC_CU/QI_CU, added before it, and need `cu_diag = 1` (WRF sets it; the namelist importer does too). RRTMG only, and FARMS (`swint_opt = 2`) reads the same merged cloud, as in WRF. Every merged word is held to WRF v4.7.1's radiation-driver lines (`tests/test_cu_rad_feedback_oracle.py`) |
+| `solar_diagnostics` | `solar_diagnostics` (`&diags`) | 0 | 0, 1 | `[shared]` only (one value for the run, as in WRF). 1 writes WRF-Solar's 26 diagnostics (Registry `registry.solar_fields`, names, units and descriptions as WRF's): `CLRNIDX`, `SZA`, `GHI_ACCUM`, `CLDFRAC2D`, `WVP`, `LWP`, `IWP`, `SWP`, `WP_SUM`, `LWP_TOT`, `IWP_TOT`, `WP_TOT_SUM`, `RE_QC`, `RE_QI`, `RE_QS`, `RE_QC_TOT`, `RE_QI_TOT`, `TAU_QC`, `TAU_QI`, `TAU_QS`, `TAU_QC_TOT`, `TAU_QI_TOT`, `CBASEHT`, `CTOPHT`, `CBASEHT_TOT`, `CTOPHT_TOT`, computed every step by WRF v4.7.1 `module_diag_solar.F` (every word held to compiled WRF, `tests/test_solar_diag_wrf471_oracle.py`). The `_TOT` fields read the radiation driver's cloud (e.g. `icloud = 3`'s made-up condensate), and the cloud fraction, `QC_TOT`/`QI_TOT` and `COSZEN` they read are evaluated every step, as WRF's driver does under this switch. `GHI_ACCUM` sums `SWDNB*dt` from the start of the run segment: like WRF (no restart I/O), a resumed run starts it at zero. Needs the RRTMG shortwave (`ra_sw_physics = 4`). Output-only: woof's forecast `CLDFRA`/`COSZEN` stay on the radiation cadence, where WRF's driver republishes them every step |
 | `alb_sol` | `alb_sol` | 0 | 0, 1 | `[shared]` only. 1 updates sun-angle-dependent land albedo `ALBSOL` and background albedo `ALBBCKSOL` on radiation steps. Shortwave uses `ALBSOL`; RUC uses both fields and retains the fractional sea-ice blend. Needs active shortwave and the MODIS21 land-use categories. HRRR namelist imports honor the supplied value; shipped HRRR demos and the new solar-albedo monthly RUC legacy-RRTMG template explicitly select 1. Other configurations remain at 0. Checkpoints bind it when enabled; prepared bundles do not. Stock WRF 4.6.1 export omits this fork-only key, and its comparison receipt records that the stock arm does not apply the correction |
 | `num_soil_layers` | `num_soil_layers` | 4 | scheme-defined | WOOF *refuses* a count the scheme does not define where WRF silently overwrites it |
 | `nest_microphysics_transition` | -- | `same-scheme-only` | + `mp8-to-mp18-mass-diagnosed-v1`, `mp-edge-mass-diagnosed-v1` | WOOF-only, one-way nest MP edges. Left at the default, a mixed edge between two ported schemes resolves to the closure that pair takes (`mp8-to-mp18-mass-diagnosed-v1` for Thompson over NSSL-2, the matrix id for every other pair) and the coupler receipt records the requested and the effective policy; naming the pair's own id pins it, and naming the other mixed id is refused. An `mp_physics = 28` child entering from another scheme is seeded with WRF's own non-aerosol-aware droplet number and aerosol floors, named in the receipt |

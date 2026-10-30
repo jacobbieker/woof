@@ -4922,6 +4922,8 @@ def _step_epilogue(state: DomainState, cfg: RunConfig,
     update_precipitation(state, cfg)
     from woof.core.climate_diagnostics import update as update_climate
     update_climate(state, cfg)
+    from woof.core.solar_diagnostics import update as update_solar
+    update_solar(state, cfg)
 
 
 def _wrf_step_epilogue(state: DomainState, cfg: RunConfig,
@@ -4980,6 +4982,8 @@ def _wrf_step_epilogue(state: DomainState, cfg: RunConfig,
     update_precipitation(state, cfg)
     from woof.core.climate_diagnostics import update as update_climate
     update_climate(state, cfg)
+    from woof.core.solar_diagnostics import update as update_solar
+    update_solar(state, cfg)
 
 
 def _wrf_reuse_diagnostics(state: DomainState) -> bool:

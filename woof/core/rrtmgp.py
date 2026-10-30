@@ -3724,6 +3724,28 @@ class RRTMGPRadiation:
                   + 0.000077 * np.sin(2.0 * da))
         return 1370.0 * eccfac
 
+    def coszen_now(self, state, cfg):
+        """The radiation call's COSZEN at this model time (what __call__
+        radiates with, and what WRF's Solar_step recomputes every step under
+        solar_diagnostics = 1, woof.core.solar_diagnostics).
+
+        WRF evaluates the HOUR ANGLE at the CENTER of the radiation
+        interval: calc_coszen receives xtime + radt*0.5 inside the
+        Solar_step block (module_radiation_driver.F:1206-1208, 'jararias
+        2013/08/10') while declination/EOT stay at the call-time julian
+        (:3514-3541); that coszen is what RRTMG SW consumes (driver:2636).
+        """
+        valid_time = (self.start_time
+                      + timedelta(seconds=float(state.elapsed_seconds)))
+        from woof.core.physics import _physics_period_seconds
+        radt_minutes = cfg.radt if cfg.radt > 0.0 else cfg.radt_minutes
+        radt_seconds = _physics_period_seconds(radt_minutes, cfg)
+        from woof.core.solar import solar_period_seconds
+        radt_seconds = solar_period_seconds(cfg, radt_seconds)
+        return self._cosine_zenith(
+            valid_time, hour_offset_seconds=0.5 * radt_seconds,
+            generation=getattr(cfg, "solar_generation", "wrf_480"))
+
     def _cosine_zenith(self, valid_time, *, hour_offset_seconds=0.0, generation="wrf_480"):
         """Selected WRF ``radconst``/``calc_coszen`` solar generation.
 
@@ -3970,6 +3992,36 @@ class RRTMGPRadiation:
         if icloud == 2:
             cldfra = cal_cldfra2(qc_cols, qi_cols,
                 f_qc=int(getattr(cfg, "mp_physics", 0)) != 0, f_qi=ice_active)
+        elif icloud == 3:
+            # WRF-Solar cal_cldfra3 (module_radiation_driver.F:1462-1510)
+            # reads the driver's unclamped moisture; the radiation then
+            # reads max(0, q) of the copies it returns, as above.  The
+            # prognostic qc/qi are untouched (WRF restores them, :3137-3155).
+            if not ice_active or mp_physics == 0:
+                raise ValueError(
+                    "Can not use icloud = 3 option, missing QC or QI field "
+                    f"(mp_physics={mp_physics}; WRF's wrf_error_fatal)")
+            from woof.core.cldfra3 import cal_cldfra3, cldfra3_gridkm
+            from woof.core.rrtm_lw import _stream_is_capturing
+            if fields.get("xland") is None:
+                raise ValueError("icloud=3 reads XLAND (fields['xland'])")
+            qc_in, qi_in = self._columns(qc3), self._columns(qi3)
+            if level_cu == 1:
+                # ICLOUD_CU = 1's condensate joins QC/QI before every
+                # ICLOUD arm (:1264-1281), cal_cldfra3's included.
+                qc_in, qi_in = _curad.add_convective_condensate(
+                    qc_in, qi_in, cu_cols["qc_cu"], cu_cols["qi_cu"],
+                    f_qc=True, f_qi=ice_active)
+            cldfra, qc_raw, qi_raw = cal_cldfra3(
+                self._columns(atmosphere["qv"]), cp.ascontiguousarray(qc_in),
+                cp.ascontiguousarray(qi_in), self._columns(qs3),
+                self._columns(atmosphere["dz"]), play, tlay,
+                fields["xland"].reshape(-1),
+                cldfra3_gridkm(cfg.dx, cfg.dy),
+                check=not _stream_is_capturing(cp))
+            qc_cols = _radiation_reads_nonnegative(qc_raw)
+            qi_cols = _radiation_reads_nonnegative(qi_raw)
+            del qc_raw, qi_raw
         else:
             cldfra = cal_cldfra1(qv, qc_cols, qi_cols, qs_cols, tlay, play,
                                  f_qc=True, f_qi=ice_active, f_qs=snow_species,
@@ -4311,19 +4363,7 @@ class RRTMGPRadiation:
 
         valid_time = (self.start_time
                       + timedelta(seconds=float(state.elapsed_seconds)))
-        # WRF evaluates the HOUR ANGLE at the CENTER of the radiation
-        # interval: calc_coszen receives xtime + radt*0.5 inside the
-        # Solar_step block (module_radiation_driver.F:1206-1208, 'jararias
-        # 2013/08/10') while declination/EOT stay at the call-time julian
-        # (:3514-3541); that coszen is what RRTMG SW consumes (driver:2636).
-        from woof.core.physics import _physics_period_seconds
-        radt_minutes = cfg.radt if cfg.radt > 0.0 else cfg.radt_minutes
-        radt_seconds = _physics_period_seconds(radt_minutes, cfg)
-        from woof.core.solar import solar_period_seconds
-        radt_seconds = solar_period_seconds(cfg, radt_seconds)
-        mu_raw = self._cosine_zenith(
-            valid_time, hour_offset_seconds=0.5 * radt_seconds,
-            generation=getattr(cfg, "solar_generation", "wrf_480"))
+        mu_raw = self.coszen_now(state, cfg)
         daylight = mu_raw > DTYPE(0.0)
         mu = cp.where(daylight, mu_raw, DTYPE(1.0)).reshape(-1)
         albedo_surface = cp.asarray(

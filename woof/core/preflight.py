@@ -2694,6 +2694,11 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # loaders: deng_shcu_column 504 B, deng_shcu_mpas_column 496 B, the
     # three MPAS glue kernels 0 B.
     "shcu_deng": 504,
+    # WRF-Solar cal_cldfra3 (icloud = 3) and module_diag_solar
+    # (solar_diagnostics = 1), same card, both loaders (load_module):
+    # cldfra3_columns, cldfra3_log10_probe, solar_diag_columns and
+    # solar_radius_metres read 0 B (their scratch profiles are global).
+    "cldfra3": 0, "solar_diag": 0,
 }
 
 #: The readings the ceiling above is made of, each naming its box, its
@@ -3957,6 +3962,10 @@ def domain_kernel_modules(dc: DomainConfig, *,
         modules.add("lake")
     if int(getattr(dc.run, "sf_ocean_physics", 0)) == 1:
         modules.add("oml")
+    if int(getattr(dc.run, "icloud", 1)) == 3:          # woof/core/cldfra3.py
+        modules.add("cldfra3")
+    if int(getattr(dc.run, "solar_diagnostics", 0) or 0) == 1:
+        modules.add("solar_diag")                # woof/core/solar_diagnostics.py
     mp_physics = int(dc.run.mp_physics)
     from woof.thompson_generations import CLASSIC_GENERATIONS
     classic_generation = (CLASSIC_GENERATIONS.get(getattr(dc.run,"thompson_version","wrf_461"))
@@ -5884,6 +5893,8 @@ def scratch_slot_registry(cfg: RunConfig, *,
     slots.update(hail_scratch_shapes(cfg))
     from woof.core.output_diagnostics import scratch_shapes as output_shapes
     slots.update(output_shapes(cfg))
+    from woof.core.solar_diagnostics import scratch_shapes as solar_shapes
+    slots.update(solar_shapes(cfg))
     if cfg.lightning_option:
         from woof.lightning_contract import LIGHTNING_OPTIONS
         slots.update({"ltng_" + k: s2 for k in LIGHTNING_OPTIONS[cfg.lightning_option]["fields"]})
@@ -6893,6 +6904,15 @@ SCRATCH_SLOT_LIFETIME_AUDIT = (
         ("hail_temperature", "hail_height", "hail_density", "hail_new_mask",
          "hail_new_duration"), "write_before_read", "woof/core/hail.py:update",
         "Preparation and duration kernels overwrite every entry before use"),
+    ScratchSlotLifetime(
+        ("solar_out",), "carrying", "woof/core/solar_diagnostics.py:update",
+        "GHI_ACCUM sums across steps and an output WRF leaves unassigned "
+        "keeps its word"),
+    ScratchSlotLifetime(
+        ("solar_step_*",), "carrying",
+        "woof/core/solar_diagnostics.py:capture_solar_step,update",
+        "written at the physics step's start and read by the end-of-step "
+        "call; the absent-species plane must remain zero"),
     ScratchSlotLifetime(("ieva_*",), "excluded_unproven", "woof/core/ieva.py (zadvect_implicit = 1)", "the explicit/implicit eta mass-flux split and column masses are produced by the dynamics and reused by the scalar split later in the step; no audit has proven a sibling domain cannot interleave, so each domain keeps its own (found by the first HRRR-recipe tree, 2026-10-21)"),
     ScratchSlotLifetime(("fsbm_*",), "excluded_unproven", "woof/core/fast_sbm_runtime.py:apply", "mixed uint64 pointers, int32 status and float64 tallies are not compatible with the float32 arena; all are rewritten inside each call"),
     # Strict WRF mode (woof.wrf_exact.ENABLED).  acoustic_wrf_muts entered

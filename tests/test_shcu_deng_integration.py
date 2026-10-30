@@ -64,7 +64,8 @@ def test_the_selector_is_appended_off_and_keyword_only():
     fields = RunConfig.__dataclass_fields__
     assert fields["shcu_physics"].default == 0 and fields["shcu_physics"].kw_only
     names = [f.name for f in dataclasses.fields(RunConfig)]
-    assert names[-2:] == ["shcu_physics", "cu_rad_feedback"]
+    # appended after them: the output-only WRF-Solar solar_diagnostics
+    assert names[-3:] == ["shcu_physics", "cu_rad_feedback", "solar_diagnostics"]
 
 
 def _myj(text):

@@ -1905,6 +1905,18 @@ class RunConfig:
     #: QI_CU, cu_diag = 1) for Grell-Freitas and Grell 3D.  Appended last,
     #: keyword-only.
     cu_rad_feedback: bool = False
+    # WRF-Solar diagnostics (WRF &diags solar_diagnostics, one value for the
+    # run): 1 writes Registry/registry.solar_fields' 26 2-D history fields --
+    # clearness index, solar zenith angle, accumulated GHI, 2-D max cloud
+    # fraction, water vapour / liquid / ice / snow paths (resolved, and with
+    # the radiation driver's cloud for liquid and ice), mass-weighted radii
+    # and optical depths, cloud base/top heights -- computed every step by
+    # WRF v4.7.1 module_diag_solar.F (woof/core/solar_diagnostics.py, held to
+    # compiled WRF).  Needs the RRTMG shortwave (ra_sw_physics = 4).
+    # Output-only in woof: the forecast's CLDFRA/COSZEN stay on the radiation
+    # cadence (WRF's driver republishes them every step under this switch).
+    # Appended last, keyword-only.
+    solar_diagnostics: int = 0
 
 #: The ways a domain's clock meets the measured terrain rules
 #: (:attr:`RunConfig.terrain_clock`).
@@ -3836,7 +3848,8 @@ def _validate_farms(cfg: RunConfig) -> None:
     microphysics scheme that hands FARMS neither its radii nor all of cloud,
     ice and snow -- then the parts of the radiation driver's Solar_step
     (the per-step CLDFRA and its temporary hydrometeor additions) that are
-    ported: icloud 0, 1 (with MYNN's icloud_bl merge) and 2, and aer_opt
+    ported: icloud 0, 1 (with MYNN's icloud_bl merge), 2 and 3 (WRF-Solar
+    cal_cldfra3, whose made-up qc/qi FARMS reads as WRF's does), and aer_opt
     0, 1 and 2.  Everything else is refused by name rather than run with a
     cloud fraction or aerosol WRF would not have used.
     """
@@ -3854,11 +3867,11 @@ def _validate_farms(cfg: RunConfig) -> None:
             "(module_physics_init.F:1039-1057): FARMS needs the scheme's "
             "effective radii (Thompson, Thompson aerosol-aware, WSM3/5/6/7, "
             "WDM5/6/7) or none of them with cloud, ice and snow all present")
-    if int(getattr(cfg, "icloud", 1)) not in (0, 1, 2):
+    if int(getattr(cfg, "icloud", 1)) not in (0, 1, 2, 3):
         raise ConfigurationRefused(
             f"swint_opt=2 with icloud={int(cfg.icloud)}: FARMS reads the "
-            "radiation driver's per-step CLDFRA, ported for icloud 0, 1 and 2 "
-            "(icloud = 3's cal_cldfra3 condensate adjustment is not)")
+            "radiation driver's per-step CLDFRA, ported for icloud 0, 1, 2 "
+            "and 3")
     if int(cfg.aer_opt) not in (0, 1, 2):
         raise ConfigurationRefused(
             f"swint_opt=2 with aer_opt={int(cfg.aer_opt)}: FARMS's 2-D "
@@ -6823,6 +6836,17 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
     feedback_why = cu_rad_feedback_refusal(cfg)
     if feedback_why is not None:
         raise ConfigurationRefused(feedback_why)
+    if type(cfg.solar_diagnostics) is not int or cfg.solar_diagnostics not in (0, 1):
+        raise ConfigurationRefused("solar_diagnostics must be 0 or 1")
+    if cfg.solar_diagnostics:
+        _lw_scheme, _sw_scheme = radiation_scheme_ids(cfg)
+        if int(_sw_scheme) != 4:
+            raise ConfigurationRefused(
+                "solar_diagnostics = 1 needs the RRTMG shortwave "
+                "(ra_sw_physics = 4): WRF-Solar's clearness index and GHI "
+                "read RRTMG's SWDNB/SWDNT, and its per-step cloud "
+                "evaluation is the RRTMG drivers' (legacy RRTMG or "
+                f"RTE+RRTMGP); got ra_sw_physics = {_sw_scheme}")
     if cfg.rrtmg_spectral_output not in ("none", "bands", "gpoints"):
         raise ConfigurationRefused("rrtmg_spectral_output must be \"none\", \"bands\" or \"gpoints\"")
     if cfg.rrtmg_spectral_output != "none":
@@ -7743,8 +7767,23 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
             "ra_sw_physics must be 0 (off), 1 (WRF Dudhia), 4 "
             "(RTE+RRTMGP), 5 (WRF New Goddard) or 90 (analytic proxy), "
             f"got {ra_sw_physics}." + (f" {why}." if why else ""))
-    if cfg.icloud not in (0, 1, 2):
-        raise ConfigurationRefused(f"icloud={cfg.icloud} needs unported cal_cldfra3 condensate adjustment; choose 0, 1 or 2.")
+    if cfg.icloud not in (0, 1, 2, 3):
+        raise ConfigurationRefused(f"icloud must be 0, 1, 2 or 3, got {cfg.icloud}.")
+    if cfg.icloud == 3:
+        # WRF-Solar cal_cldfra3 (woof/core/cldfra3.py), wired into the
+        # RRTMG drivers (legacy RRTMG and RTE+RRTMGP).  WRF stops without
+        # both QC and QI (module_radiation_driver.F:1507): mp 0, 1 and 3
+        # carry no qi (Registry.EM_COMMON passiveqv/kessler/wsm3 packages).
+        if {ra_lw_physics, ra_sw_physics} - {0, 4}:
+            raise ConfigurationRefused(
+                "icloud=3 (WRF-Solar cal_cldfra3) is ported for "
+                "ra_lw_physics/ra_sw_physics = 4 (RRTMG) only, got "
+                f"{ra_lw_physics}/{ra_sw_physics}.")
+        if cfg.mp_physics in (0, 1, 3):
+            raise ConfigurationRefused(
+                "icloud=3 needs a microphysics scheme with both qc and qi "
+                f"(WRF: 'Can not use icloud = 3 option, missing QC or QI "
+                f"field'); mp_physics={cfg.mp_physics} has no qi.")
     if not math.isfinite(cfg.swrad_scat) or cfg.swrad_scat < 0.0:
         raise ConfigurationRefused(
             "swrad_scat must be finite and non-negative, got "
@@ -7879,7 +7918,7 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
             f"ra_rrtmg_variant='{RRTMG_VARIANT_LEGACY}' to run the legacy "
             "port, or wrf_rrtmg_compatibility='none' to run RTE+RRTMGP "
             "without a WRF mapping receipt.")
-    if 4 in (ra_lw_physics, ra_sw_physics) and cfg.icloud not in (1, 2):
+    if 4 in (ra_lw_physics, ra_sw_physics) and cfg.icloud not in (1, 2, 3):
         # NOT A PHYSICAL INCOMPATIBILITY: icloud is WRF's clear-sky coupling
         # switch, woof honours it on the 1/1 pair, and the legacy 4/4
         # preparation carries its arms.  What is missing on the 4/4 pair is
@@ -7900,7 +7939,7 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
             "both arms AND recording one longwave and one shortwave oracle "
             "case at icloud=0. Run clear-sky coupling on the 1/1 pair "
             "(ra_lw_physics=1 WRF RRTM with ra_sw_physics=1 Dudhia), which "
-            "honours icloud=0 end to end, or use icloud=1 or 2 on the 4/4 "
+            "honours icloud=0 end to end, or use icloud=1, 2 or 3 on the 4/4 "
             "pair.")
     if cfg.cu_physics not in CU_SCHEMES:
         raise ConfigurationRefused(

@@ -760,6 +760,11 @@ _THOMPSON_CLOUD_BOOKING_SLOTS = frozenset({"mp_cloudnc", "mp_cloudncv"})
 #: shorter window.
 CARRIED_SCRATCH_SLOTS = frozenset({
     "uh_follow_window", "uh_spawn_window",
+    # WRF-Solar diagnostics' output stack (woof/core/solar_diagnostics.py):
+    # GHI_ACCUM sums across steps, so a sweep carries it; WRF gives these
+    # fields no restart I/O, so a checkpoint does not, and a resumed run
+    # starts GHI_ACCUM at zero as a WRF restart does.
+    "solar_out",
     # Strict mode only: WRF's grid%muts from the last acoustic loop, which
     # the next step's first pressure diagnosis reads (woof/core/dycore.py
     # WRF_MUTS_SLOT). Checkpoints retain it for exact continuation too.
@@ -963,6 +968,10 @@ REBUILT_SCRATCH_SLOTS = frozenset({
 })
 
 REBUILT_SCRATCH_PREFIXES = (
+    # WRF-Solar diagnostics: the step-start snapshots (phy_prep density and
+    # dz8w, the Solar_step cloud and COSZEN) rewritten at every physics step
+    # before the end-of-step call reads them, and that call's work planes.
+    "solar_step_",
     # Every FAST_SBM workspace is rewritten inside a call. Its spectral state is explicit.
     "fsbm_",
     "rk_", "adv_", "smag_", "diff_", "diff6_", "acoustic_", "openbc_",
@@ -2695,7 +2704,9 @@ _DIGEST_DROPPED_DIAGNOSTIC_FIELDS = frozenset(
      "radtran_mol_abs_param",
      "radtran_solver",
      "radtran_streams",
-     "radtran_pseudospherical"})
+     "radtran_pseudospherical",
+     # WRF-Solar diagnostics: output-only; no earlier digest carried it.
+     "solar_diagnostics"})
 
 
 #: WRF's slope_rad / topo_shading / shadlen (woof.core.topo_radiation),
@@ -2892,6 +2903,10 @@ def _drop_default_off_run_keys(values: dict) -> None:
         values.pop("shcu_physics", None)
     if not values.get("cu_rad_feedback", False):
         values.pop("cu_rad_feedback", None)
+    # solar_diagnostics (output-only WRF-Solar diagnostics): off is every
+    # earlier header.
+    if not values.get("solar_diagnostics", 0):
+        values.pop("solar_diagnostics", None)
     if not values.get("scalar_pblmix", 0):
         values.pop("scalar_pblmix", None)
     # MYNN-EDMF's split mixing keys (lane rrfs288-gap1): off mixes nothing

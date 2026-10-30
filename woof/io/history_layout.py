@@ -215,6 +215,10 @@ def live_state_history_fields(state) -> dict[str, object]:
         value = getattr(state, "_scratch", {}).get(slot)
         if value is not None:
             fields[output_name] = value
+    # WRF-Solar diagnostics (solar_diagnostics = 1): views of the output
+    # stack, present exactly when the run carries it.
+    from woof.core.solar_diagnostics import history_fields as solar_history
+    fields.update(solar_history(state))
     # Correct mode, finding WB1 (woof/core/thompson_cloud_booking.py): the
     # settled-cloud total and its last-call amount, present exactly when the
     # run carries them (a correct-mode Thompson run, after its first call).
@@ -833,9 +837,12 @@ def produced_history_shapes(cfg, *, include_reflectivity: bool = True
         state._scratch = {"ltng_" + name: carrier(surface) for name in LIGHTNING_OPTIONS[cfg.lightning_option]["fields"]}
     from woof.core.output_diagnostics import scratch_shapes as output_shapes
     from woof.core.hail import scratch_shapes as hail_shapes
+    from woof.core.solar_diagnostics import OUT_SLOT as _SOLAR_OUT, scratch_shapes as solar_shapes
     state._scratch = dict(getattr(state, "_scratch", {}))
     state._scratch.update({slot: carrier(shape) for slot, shape in
                           (output_shapes(cfg) | hail_shapes(cfg)).items()})
+    if _SOLAR_OUT in solar_shapes(cfg):
+        state._scratch[_SOLAR_OUT] = carrier(solar_shapes(cfg)[_SOLAR_OUT])
     state.p_top = 0.0
     state.physics = None
     uh = (carrier(surface)

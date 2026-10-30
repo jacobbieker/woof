@@ -28,7 +28,11 @@ KERNELS = Path(rrtmg_legacy.__file__).resolve().parent / "kernels"
 
 
 def test_adapter_takes_its_sun_from_the_device_solar_unit():
-    source = inspect.getsource(rrtmg_legacy.RRTMGLegacyRadiation.__call__)
+    # The radiation call's sun lives in _call_coszen since the WRF-Solar
+    # diagnostics evaluate the same statements every step (coszen_now).
+    assert "self._call_coszen(" in inspect.getsource(
+        rrtmg_legacy.RRTMGLegacyRadiation.__call__)
+    source = inspect.getsource(rrtmg_legacy.RRTMGLegacyRadiation._call_coszen)
     assert "solar_geometry_device(" in source
     import ast, textwrap
     # The strict wrf_461 arm (`if ENABLED and generation == "wrf_461"`)

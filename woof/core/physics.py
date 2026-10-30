@@ -6225,6 +6225,15 @@ class PhysicsDriver:
             self._run_farms(atmosphere, state, cfg, itimestep=itimestep,
                             radiation_due=radiation_due)
 
+        # WRF-Solar diagnostics (solar_diagnostics = 1): WRF's radiation
+        # driver runs its Solar_step cloud block and COSZEN on EVERY step
+        # under this switch, and phy_prep's density/dz8w are the step's
+        # start; the end-of-step call reads them
+        # (woof.core.solar_diagnostics).  Off, nothing runs.
+        if int(getattr(cfg, "solar_diagnostics", 0) or 0):
+            from woof.core.solar_diagnostics import capture_solar_step
+            capture_solar_step(self, state, cfg, atmosphere)
+
         # radiation_driver.F:3195-3243 integrates the held boundary fluxes
         # every model step, even when the wrapper did not run this step.
         self.accumulate_radiation_boundary_fluxes(cfg)
@@ -8010,6 +8019,7 @@ def initialize_physics(
             raise ValueError(
                 "swint_opt = 2 under MYNN's icloud_bl reads QC_BL, QI_BL "
                 "and CLDFRA_BL every step, and this driver carries none")
+        from woof.core.cldfra3 import cldfra3_gridkm as _cldfra3_gridkm
         driver.farms = FarmsShortwave(
             start_time=radiation_start_time,
             latitude_deg=radiation_latitude,
@@ -8025,7 +8035,9 @@ def initialize_physics(
             couple_farms=bool(getattr(cfg, "couple_farms", False)),
             bl_merge=bl_merge,
             icloud_cu=_cumulus_radiation_icloud_cu(cfg),
-            deng_cloud=int(getattr(cfg, "shcu_physics", 0)) == 5)
+            deng_cloud=int(getattr(cfg, "shcu_physics", 0)) == 5,
+            gridkm=(_cldfra3_gridkm(cfg.dx, cfg.dy)
+                    if int(getattr(cfg, "icloud", 1)) == 3 else None))
     if tuple(getattr(cfg, "radtran_wavelengths", ()) or ()):
         # woof.radtran spectral diagnostic: the step's own solar geometry
         # needs this domain's latitude, longitude and start time.

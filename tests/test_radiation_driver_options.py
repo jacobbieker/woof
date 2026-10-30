@@ -41,6 +41,8 @@ def test_the_operational_hrrr_values_pass_on_legacy_rrtmg_with_mp28():
     # Morrison: no radii, but cloud, ice and snow (WRF's second arm)
     dict(swint_opt=2, mp_physics=10, ra_physics=4,
          ra_rrtmg_variant="rrtmg_legacy", icloud=2),
+    # icloud = 3: the Solar_step's cal_cldfra3 feeds FARMS, as in WRF
+    dict(swint_opt=2, icloud=3, **_HRRR),
 ])
 def test_farms_configurations_wrf_admits_pass(overrides):
     validate_radiation_driver_options(_cfg(**overrides))
@@ -72,7 +74,7 @@ def test_farms_configurations_wrf_admits_pass(overrides):
     (dict(swint_opt=2, mp_physics=50, **{k: v for k, v in _HRRR.items()
                                           if k != "mp_physics"}),
      "requires a different MP scheme"),
-    (dict(swint_opt=2, icloud=3, **_HRRR), "icloud=3"),
+    (dict(swint_opt=2, icloud=4, **_HRRR), "icloud=4"),
     (dict(swint_opt=2, aer_opt=3, **_HRRR), "aer_opt=3"),
 ])
 def test_refusals_name_the_breakage(overrides, match):
@@ -137,7 +139,10 @@ def test_the_checkpoint_echo_drops_both_at_their_default():
              "radtran_mol_abs_param", "radtran_solver", "radtran_streams",
              "radtran_pseudospherical",
              # WRF's shcu_physics (Deng) and cu_rad_feedback.
-             "shcu_physics", "cu_rad_feedback"]
+             "shcu_physics", "cu_rad_feedback",
+
+             # the output-only WRF-Solar diagnostics
+             "solar_diagnostics"]
     assert names[-len(later):] == later
     names = names[:-len(later)]
     # The 2.9.4 capabilities campaign's keyword-only keys follow the fire

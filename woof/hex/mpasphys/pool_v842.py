@@ -21,6 +21,7 @@ from ..host_parallel import threads as host_copy_threads
 from .driver_v842 import DriverConfig
 from . import radiation_spectral_v842 as _spectral
 from . import radtran_v842 as _radtran
+from . import solar_diagnostics_v842 as _solar
 
 _ENTITY = {"nCells", "nEdges", "nVertices"}
 
@@ -101,6 +102,8 @@ def active_packages(config: DriverConfig, configs: Mapping[str, Any]) -> set[str
     packages.update(_spectral.packages(config))
     # WOOF's &radtran spectral diagnostic (radtran_v842).
     packages.update(_radtran.packages(config))
+    # WOOF's &diagnostics config_solar_diagnostics (solar_diagnostics_v842).
+    packages.update(_solar.packages(config))
     return packages
 
 
@@ -121,6 +124,7 @@ class RegistryLayout:
         _spectral.extend_registry(self.root, _spectral.packages(config))
         # &radtran's package-gated fields likewise, only when the group is set.
         _radtran.extend_registry(self.root, config)
+        _solar.extend_registry(self.root, _solar.packages(config))
         self.configs = {}
         self.config_kinds = {}
         for option in self.root.findall(".//nml_option"):
@@ -137,7 +141,7 @@ class RegistryLayout:
         canonical = {key.casefold(): key for key in self.config_kinds}
         for group, options in parse_fortran_namelist(namelist).items():
             # WOOF's own groups (slot backends, &radiation's spectral output) are not native configs.
-            if group not in ("hex_mpasphys", _spectral.GROUP, _radtran.GROUP):
+            if group not in ("hex_mpasphys", _spectral.GROUP, _radtran.GROUP, _solar.GROUP):
                 self.configs.update({canonical.get(key.casefold(), key): value
                                      for key, value in options.items()})
         self.configs.update({canonical.get(key.casefold(), key): value

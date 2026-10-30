@@ -40,7 +40,7 @@ call must run the device McICA twin and the batched CUDA engines, never
 the NumPy compute chain.
 
 The implemented option envelope (dossier section 1) is pinned here and
-fails closed on anything else: ``icloud=1 or 2``, ``cldovrlp=2`` (McICA
+fails closed on anything else: ``icloud=1, 2 or 3``, ``cldovrlp=2`` (McICA
 maximum-random), ``idcor=0``, ``o3input in {0, 2}``, ``ghg_input=0``,
 ``aer_opt=0``, ``swint_opt=0``.  ``o3input=0`` selects the wrapper's
 O3DATA branch; ``o3input=2`` selects CAM climatology.
@@ -1729,13 +1729,65 @@ class RRTMGLegacyRadiation:
             identity["trace_gas_overrides"] = dict(self.trace_gas_overrides)
         return identity
 
+    def _call_coszen(self, state, cfg, julian, lat_flat, lon_flat, lat_d):
+        """The radiation call's COSZEN (device and host, ``(ncol,)``),
+        DECLIN and SOLCON at this model time (``julian`` from the call's
+        calendar).  Also what WRF's Solar_step recomputes on every step
+        under solar_diagnostics = 1 (woof.core.solar_diagnostics)."""
+        import cupy as cp
+        gmt = F(self.start_time.hour + self.start_time.minute / 60.0
+                + self.start_time.second / 3600.0
+                + self.start_time.microsecond / 3.6e9)
+        xtime = F(float(state.elapsed_seconds) / 60.0)
+        radt_minutes = F(cfg.radt if cfg.radt > 0.0 else cfg.radt_minutes)
+        # WRF: hour angle at the interval midpoint, declination/solcon at
+        # call time (module_radiation_driver.F:1206-1208).  Evaluated on the
+        # device with WOOF's own float32 sinf/cosf/asinf: the NumPy twins
+        # (radconst, calc_coszen) differ from WRF's Fortran by up to 64 ULP
+        # in COSZEN (tools/rrtmg_legacy_column_oracle).
+        xt_mid = xtime + radt_minutes * F(0.5)
+        generation = getattr(cfg, "solar_generation", "wrf_480")
+        from woof.wrf_exact import ENABLED
+        if ENABLED and generation == "wrf_461":
+            coszen_d, _hrang_d, declin, solcon = solar_geometry_device(
+                julian, xt_mid, gmt, lat_d, cp.asarray(lon_flat))
+            coszen = cp.asnumpy(coszen_d)
+        elif generation == "wrf_480":
+            from woof.core.solar import solar_geometry_device as _solar_device
+            ds, coszen_d, _hrang = _solar_device(julian, xt_mid, gmt, lat_flat, lon_flat)
+            declin, solcon = map(F, cp.asnumpy(ds))
+            coszen = cp.asnumpy(coszen_d)
+        else:
+            declin, solcon = radconst(julian)
+            coszen = calc_coszen(julian, xt_mid, gmt, lat_flat, lon_flat,
+                                 declin, generation='wrf_461')
+            coszen_d = cp.asarray(coszen)
+        return coszen_d, coszen, declin, solcon
+
+    def coszen_now(self, state, cfg):
+        """``(ny, nx)`` device COSZEN of a radiation call made now, for the
+        WRF-Solar diagnostics' per-step Solar_step (no radiation runs)."""
+        import cupy as cp
+        valid_time = (self.start_time
+                      + timedelta(seconds=float(state.elapsed_seconds)))
+        julday = int(valid_time.timetuple().tm_yday)
+        hour = (valid_time.hour + valid_time.minute / 60.0
+                + valid_time.second / 3600.0
+                + valid_time.microsecond / 3.6e9)
+        julian = F((julday - 1) + hour / 24.0)
+        lat_flat = self.latitude_deg.reshape(-1)
+        lon_flat = self.longitude_deg.reshape(-1)
+        coszen_d, _c, _d, _s = self._call_coszen(
+            state, cfg, julian, lat_flat, lon_flat, cp.asarray(lat_flat))
+        return cp.asarray(coszen_d, dtype=cp.float32).reshape(
+            self.latitude_deg.shape)
+
     # ------------------------------------------------------------------
     def _check_pins(self, cfg):
         """Fail closed on any option outside the ported combination."""
-        if int(getattr(cfg, "icloud", 1)) not in (1, 2):
+        if int(getattr(cfg, "icloud", 1)) not in (1, 2, 3):
             raise NotImplementedError(
-                "icloud=0 lacks a recorded legacy clear-sky solve; "
-                "icloud=3 requires unported cal_cldfra3 condensate adjustment")
+                "icloud=0 lacks a recorded legacy clear-sky solve")
         for name, pinned in _PINNED_OPTIONS.items():
             value = getattr(cfg, name, pinned)
             if int(value) != pinned:
@@ -2083,33 +2135,9 @@ class RRTMGLegacyRadiation:
             aer1_grid, aodtot, _ = _aer3.aer1_time_pressure_device(
                 monthly, julian, cp.ascontiguousarray(g_p3d.T), cp.ascontiguousarray(g_p8w.T),
                 self._sw_tables.aer1_climatology)
-        gmt = F(self.start_time.hour + self.start_time.minute / 60.0
-                + self.start_time.second / 3600.0
-                + self.start_time.microsecond / 3.6e9)
-        xtime = F(float(state.elapsed_seconds) / 60.0)
-        radt_minutes = F(cfg.radt if cfg.radt > 0.0 else cfg.radt_minutes)
-        # WRF: hour angle at the interval midpoint, declination/solcon at
-        # call time (module_radiation_driver.F:1206-1208).  Evaluated on the
-        # device with WOOF's own float32 sinf/cosf/asinf: the NumPy twins
-        # (radconst, calc_coszen) differ from WRF's Fortran by up to 64 ULP
-        # in COSZEN (tools/rrtmg_legacy_column_oracle).
-        xt_mid = xtime + radt_minutes * F(0.5)
-        generation = getattr(cfg, "solar_generation", "wrf_480")
+        coszen_d, coszen, declin, solcon = self._call_coszen(
+            state, cfg, julian, lat_flat, lon_flat, lat_d)
         from woof.wrf_exact import ENABLED
-        if ENABLED and generation == "wrf_461":
-            coszen_d, _hrang_d, declin, solcon = solar_geometry_device(
-                julian, xt_mid, gmt, lat_d, cp.asarray(lon_flat))
-            coszen = cp.asnumpy(coszen_d)
-        elif generation == "wrf_480":
-            from woof.core.solar import solar_geometry_device as _solar_device
-            ds, coszen_d, _hrang = _solar_device(julian, xt_mid, gmt, lat_flat, lon_flat)
-            declin, solcon = map(F, cp.asnumpy(ds))
-            coszen = cp.asnumpy(coszen_d)
-        else:
-            declin, solcon = radconst(julian)
-            coszen = calc_coszen(julian, xt_mid, gmt, lat_flat, lon_flat,
-                                 declin, generation='wrf_461')
-            coszen_d = cp.asarray(coszen)
 
         # ---- o33d: WRF's root-compute + parent->child routing ----------
         # Keep the interpolated grid for all chunk gathers. The retained
@@ -2223,6 +2251,21 @@ class RRTMGLegacyRadiation:
                     f"/ shcu_physics) reads fields[{name!r}], which this "
                     "driver did not allocate")
             gather_grids["cu_" + name] = _device_grid(fields[name], nz)
+        cldfra3_args = None
+        if icloud == 3:
+            # WRF-Solar cal_cldfra3 (module_radiation_driver.F:1462-1510):
+            # it needs both QC and QI (the driver stops otherwise) and runs
+            # per column on the gathered copies, so the prognostic qc/qi
+            # never see its made-up condensate (WRF restores them after
+            # the schemes, :3137-3155).
+            if g_moist["qc"] is None or g_moist["qi"] is None:
+                raise ValueError(
+                    "Can not use icloud = 3 option, missing QC or QI field "
+                    f"(mp_physics={mp_physics}; WRF's wrf_error_fatal)")
+            from woof.core.cldfra3 import cldfra3_gridkm
+            from woof.core.rrtm_lw import _stream_is_capturing
+            cldfra3_args = (cldfra3_gridkm(cfg.dx, cfg.dy),
+                            not _stream_is_capturing(cp))
         if icloud == 2:
             # One driver CLDFRA field is shared by LW and SW. Gather only
             # repacks it into each prep's column window; it never recomputes
@@ -2271,6 +2314,13 @@ class RRTMGLegacyRadiation:
             # moisture before the MYNN merge writes qc/qi.
             if icloud == 2:
                 cldfra = blocks["binary_cldfra"]
+            elif icloud == 3:
+                from woof.core.cldfra3 import cal_cldfra3
+                gridkm, check = cldfra3_args
+                cldfra, moist["qc"], moist["qi"] = cal_cldfra3(
+                    moist["qv"], moist["qc"], moist["qi"], moist["qs"],
+                    blocks["dz8w"], p3d, t3d, surf["xland"][sel], gridkm,
+                    check=check)
             else:
                 cldfra = _rrtmgp.cal_cldfra1(
                     moist["qv"], moist["qc"], moist["qi"], moist["qs"], t3d,
