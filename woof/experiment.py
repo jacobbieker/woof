@@ -382,6 +382,10 @@ _DOMAIN_RUN_OVERRIDES = (
     "radtran_solver",
     "radtran_streams",
     "radtran_pseudospherical",
+    # WRF's shallow-cumulus selector and cumulus-radiation feedback are
+    # max_domains columns (Registry.EM_COMMON:2492, :2594): a tree may run
+    # Deng on its convection-permitting nest and not on the parent.
+    "shcu_physics", "cu_rad_feedback",
     # LES-nest inflow seeding (P3): per-domain because the mechanism IS
     # per-edge -- it perturbs one child's rolling nest-boundary tables,
     # validate_run_config refuses it on a non-nested domain, and like

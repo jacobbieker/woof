@@ -190,7 +190,8 @@ class FarmsShortwave(ShortwaveInterpolation):
     def __init__(self, *, start_time, latitude_deg, longitude_deg, shape,
                  generation="wrf_480", mp_physics, use_mp_re=1, icloud=1,
                  aer_opt=0, aer_angexp_val=1.3, aer_ssa_val=0.85,
-                 aer_asy_val=0.9, couple_farms=False, bl_merge=False):
+                 aer_asy_val=0.9, couple_farms=False, bl_merge=False,
+                 icloud_cu=0, deng_cloud=False):
         super().__init__(start_time=start_time, latitude_deg=latitude_deg,
                          longitude_deg=longitude_deg, shape=shape,
                          generation=generation)
@@ -220,6 +221,13 @@ class FarmsShortwave(ShortwaveInterpolation):
         self.aer_values = (F(aer_angexp_val), F(aer_ssa_val), F(aer_asy_val))
         self.couple_farms = bool(couple_farms)
         self.bl_merge = bool(bl_merge)
+        # The Solar_step's convective cloud (woof.core.cumulus_radiation):
+        # cu_rad_feedback's ICLOUD_CU and Deng's shallow cloud, which WRF
+        # forms before farms_driver reads QC/QI/CLDFRA
+        # (module_radiation_driver.F:1264-1281, :1337-1348, :1566-1575,
+        # then :3064), on every step under swint_opt = 2 (:1176).
+        self.icloud_cu = int(icloud_cu)
+        self.deng_cloud = bool(deng_cloud)
 
     # -- inputs ------------------------------------------------------------
 
@@ -233,6 +241,12 @@ class FarmsShortwave(ShortwaveInterpolation):
         qs = atmosphere["qs"]
         nz = qv.shape[0]
         cols = qv.size // nz
+        from woof.core import cumulus_radiation as curad
+        if self.icloud_cu == 1:
+            # :1264-1281, before the cloud fraction (F_QC is true here).
+            qc, qi = curad.add_convective_condensate(
+                qc, qi, fields["qc_cu"], fields["qi_cu"], f_qc=True,
+                f_qi=self.f_qi)
         cldfra = cp.zeros(qv.shape, dtype=cp.float32)
         if self.icloud == 1:
             from woof.core.rrtmgp import cal_cldfra1
@@ -242,6 +256,12 @@ class FarmsShortwave(ShortwaveInterpolation):
                 flat(atmosphere["temperature"]), flat(atmosphere["pressure"]),
                 f_qc=True, f_qi=self.f_qi, f_qs=self.f_qs,
                 mp_physics=self.mp_physics).reshape(qv.shape)
+            if self.icloud_cu == 2:
+                # :1337-1348, right after cal_cldfra1, before the MYNN merge.
+                cldfra, qc, qi = curad.merge_kf_cloud(
+                    cldfra, qc, qi, cldfra_dp=fields["cldfra_dp"],
+                    cldfra_sh=fields["cldfra_sh"], qc_cu=fields["qc_cu"],
+                    qi_cu=fields["qi_cu"])
             if self.bl_merge:
                 # module_radiation_driver.F:1406-1428 (icloud_bl > 0)
                 cf_bl = fields["cldfra_bl"]
@@ -255,6 +275,11 @@ class FarmsShortwave(ShortwaveInterpolation):
             cldfra = cal_cldfra2(cp.ascontiguousarray(qc, dtype=cp.float32),
                                  cp.ascontiguousarray(qi, dtype=cp.float32),
                                  f_qc=True, f_qi=self.f_qi)
+        if self.deng_cloud:
+            # :1566-1575, after every icloud branch.
+            cldfra, qc = curad.merge_deng_cloud(
+                cldfra, qc, cldfra_sh=fields["cldfra_sh"],
+                cw_rad=fields["cw_rad"])
         return cldfra, qc, qi
 
     def _radii(self, state, nz):

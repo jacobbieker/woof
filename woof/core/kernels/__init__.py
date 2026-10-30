@@ -248,6 +248,10 @@ _EXTRA_HEADERS: dict[str, tuple[str, ...]] = {
     # oracle (tools/kf_wrf461_oracle), graded at 0 ULP by
     # tests/test_kf_wrf461_oracle.py.
     "kf": ("glibc_flt32.cuh",),
+    # Deng shallow cumulus (shcu_physics=5): EXP, ALOG and REAL**REAL of
+    # module_shcu_deng.F are the float32 libm words its WRF v4.7.1 oracle
+    # links (tools/shcu_deng_wrf471_oracle/libm_shim.cpp).  A new module.
+    "shcu_deng": ("glibc_flt32.cuh",),
     "chem_fire": ("glibc_flt32.cuh",),
     "chem_plumerise": ("glibc_flt32.cuh",),
     "wsm3": ("glibc_flt32.cuh",),

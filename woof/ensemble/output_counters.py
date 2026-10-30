@@ -182,7 +182,11 @@ def _surface_fields(values, cfg):
 
 def _resident_counters(state, cfg):
     physics = getattr(state, "physics", None)
-    zero = {"RAINSH"}  # Original physics_history_fields declares no shallow producer.
+    zero = {"RAINSH"}  # Zero unless a shallow-cumulus scheme runs (below).
+    if getattr(cfg, "shcu_physics", 0):
+        return None, zero, ("RAINSH has a producer under shcu_physics (Deng's "
+                            "per-step shallow rain), which the counter capture "
+                            "does not borrow")
     fields = {}
     if not cfg.mp_physics:
         zero.add("RAINNC")
@@ -204,6 +208,9 @@ def _resident_counters(state, cfg):
 def _streamed_counters(streamed, cfg):
     run = getattr(streamed, "_run", None)
     zero = {"RAINSH"}
+    if getattr(cfg, "shcu_physics", 0):
+        return None, zero, ("RAINSH has a producer under shcu_physics, which the "
+                            "streamed counter capture does not carry")
     selected = {}
     for name, key in _STORE_KEYS.items():
         active = cfg.mp_physics if name == "RAINNC" else cfg.cu_physics
@@ -271,6 +278,8 @@ def capture_due_counter(node, collector, member_id, *, calendar, start_time, met
             zeros.add("RAINC")
         reason = (None if set(_COUNTERS) <= fields.keys() | zeros
                   else "the explicit counter view lacks an active precipitation accumulator")
+        if getattr(cfg, "shcu_physics", 0) and "RAINSH" not in fields:
+            reason = "the explicit counter view lacks RAINSH, which shcu_physics produces"
     elif streamed is not None:
         fields, zeros, reason = _streamed_counters(streamed, cfg)
     else:

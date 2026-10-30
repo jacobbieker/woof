@@ -62,6 +62,32 @@ diagnostic. The FARMS column words are WRF's own
 (`components/hex/tests/test_mpas_farms_v842.py`). Without the key nothing runs and the
 receipt is unchanged.
 
+WOOF-only Deng shallow cumulus and cumulus-radiation feedback
+(`woof.hex.mpasphys.shcu_deng_v842`; MPAS v8.4.2 has no shallow-convection scheme and
+its radiation reads no convective cloud). `config_shcu_deng_backend='hex-cuda'`
+(service `shcu_deng`, default `off`) runs WRF-Solar's Deng scheme (WRF
+`shcu_physics = 5`, `phys/module_shcu_deng.F` v4.7.1) on every step right after the
+convection block, as WRF's shallowcu_driver follows cumulus_driver. It needs
+`bl_mynn` (Deng reads MYNN's `qke`, `kzh`, `el_pbl`; WRF stops on other PBLs and MPAS
+has no MYJ), a microphysics scheme, `rrtmg_lw`/`rrtmg_sw` and the cloudiness slot on
+`hex-cuda`. The columns are MPAS's own prepared words (`u/v/t/qv/qc/qr/pres/pi/rho/dz_p`,
+`z_p`/`w_p` at the w levels), `hpbl`, `zgrid(1)`, `lonCell/degrad`, `rthratenlw/sw`,
+`mavail` (updated on owned cells, as WRF does), with two defined quantities: the grid
+length `config_len_disp/meshDensity**0.25` (MPAS's convection `dx_p`) and WRF's eta
+increment DNW from the column's dry hydrostatic w-level pressure `pres2_hydd_p`. The
+tendencies (RTHSHTEN, RQVSHTEN, RQCSHTEN, RQRSHTEN) join physics_get_tend's sources as
+one more term in `mpas_atmphys_todynamics.F`'s coupling (`shcu_deng_tend`), and on
+radiation steps the cloudiness slot merges Deng's cloud as WRF's radiation driver does
+(`cldfrac = MAX(CLDFRA_SH, cldfrac)`, `qcrad = CW_RAD + qcrad`). The scheme's state
+travels in the physics restart state; its W0AVG is its own (MPAS's Kain-Fritsch keeps a
+separate one). `config_cu_rad_feedback_backend='hex-cuda'` (service `cu_rad_feedback`)
+is WRF's ICLOUD_CU = 1 for `cu_grell_freitas`: the cloudiness slot's copies of qc/qi gain
+GF's `qc_cu`/`qi_cu` before the cloud fraction. FARMS reads the step's condensate with
+the same additions. The column body is the WRF-graded one: its MPAS entry point returns
+compiled WRF v4.7.1's words on all 1,737,808 graded words, and the glue, coupling and
+merges are held word for word (`components/hex/tests/test_mpas_shcu_deng_v842.py`).
+Without the keys nothing runs and the receipt is unchanged.
+
 A selection of Noah-MP v5.0 runs only with `--licence-opt-in ucar-noahmp`
 (`woof.hex.licence_gate`); UGWP and the fork's NOAA GSL physics are not gated
 (owner ruling 2026-10-14: US Government code). The library resolvers are not

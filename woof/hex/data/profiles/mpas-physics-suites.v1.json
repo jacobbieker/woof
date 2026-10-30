@@ -1931,6 +1931,31 @@
           "farms_sw"
         ],
         "woof_only": "WRF-Solar FARMS (WRF swint_opt = 2, phys/module_ra_farms.F v4.7.1): every step after the radiation slots, overwrites diag_physics swdnb/swddir/swddni/swddif; MPAS v8.4.2 has no FARMS"
+      },
+      "shcu_deng": {
+        "backend_selector": "config_shcu_deng_backend",
+        "default_backend": "off",
+        "backends": [
+          "off",
+          "hex-cuda"
+        ],
+        "module": "woof.hex.mpasphys.shcu_deng_v842",
+        "operations": [
+          "shcu_deng",
+          "shcu_deng_tend"
+        ],
+        "woof_only": "WRF-Solar Deng shallow cumulus (WRF shcu_physics = 5, phys/module_shcu_deng.F v4.7.1): every step after the convection block; its tendencies join physics_get_tend's sources; its cloud (CLDFRA_SH, CW_RAD) joins the radiation's in the hex-cuda cloudiness slot; MPAS v8.4.2 has no shallow-convection scheme"
+      },
+      "cu_rad_feedback": {
+        "backend_selector": "config_cu_rad_feedback_backend",
+        "default_backend": "off",
+        "backends": [
+          "off",
+          "hex-cuda"
+        ],
+        "module": "woof.hex.mpasphys.shcu_deng_v842",
+        "operations": [],
+        "woof_only": "WRF cu_rad_feedback, ICLOUD_CU = 1 (module_radiation_driver.F:1264-1281) for cu_grell_freitas: qc_cu/qi_cu added to the cloudiness slot's condensate before the cloud fraction; MPAS v8.4.2 radiation reads no convective cloud"
       }
     }
   },

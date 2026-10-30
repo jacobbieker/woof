@@ -466,9 +466,14 @@ def physics_history_fields(physics) -> dict[str, object]:
     ``cu_physics=0`` therefore failed every downstream QPF product,
     which is exactly how this was found.
 
-    ``RAINSH`` is always zero here, and that is a true statement rather
-    than a placeholder: woof implements no shallow-cumulus scheme, and
-    zero is what WRF writes for ``shcu_physics=0``.
+    ``RAINSH`` is zero unless ``shcu_physics = 5`` (Deng) runs, and zero
+    is what WRF writes for ``shcu_physics=0``.  Under Deng it is WRF's
+    RAINSH word for word, which is the LAST step's shallow rain in mm, not
+    an accumulation: deng_shcu_driver zeroes RAINSH for every column before
+    adding that step's RAINSHV (module_shcu_deng.F:276, :2834), and the
+    accumulation in advance_ppt adds PRATESH*DT, which Deng never writes
+    (module_physics_addtendc.F:2292); shallowcu_driver then sets RAINSHV to
+    PRATESH*DT = 0 (module_shallowcu_driver.F:686-691).
     """
     output = {name: physics.fields[field]
               for name, field in _OUTPUT_FIELDS.items()}
@@ -627,7 +632,10 @@ def physics_history_fields(physics) -> dict[str, object]:
         output["POWER"] = physics.fields["power"]
     output["RAINC"] = (physics._zero_accumulator() if physics.rainc is None
                        else physics.rainc)
-    output["RAINSH"] = physics._zero_accumulator()
+    rainsh = physics.fields.get("rainsh") if getattr(
+        physics, "shallow_cumulus", None) is not None else None
+    output["RAINSH"] = (physics._zero_accumulator() if rainsh is None
+                        else rainsh)
     microphysics = physics.microphysics if physics.mp_physics else None
     output["SR"] = (physics._zero_accumulator() if microphysics is None
                     else microphysics.sr)

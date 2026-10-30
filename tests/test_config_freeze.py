@@ -93,6 +93,15 @@ def test_new_fields_are_reviewed_defaults_appended_last():
     """
     from woof.config import CHEM_RUN_FIELDS, FIRE_RUN_FIELDS
     names = [f.name for f in dataclasses.fields(RunConfig)]
+    # WRF's shallow-cumulus selector (5 = Deng) and cumulus-radiation
+    # feedback, appended off: nothing is built and nothing launches
+    # (tests/test_shcu_deng_integration.py).
+    assert names.pop() == "cu_rad_feedback"
+    assert RunConfig.__dataclass_fields__["cu_rad_feedback"].default is False
+    assert RunConfig.__dataclass_fields__["cu_rad_feedback"].kw_only
+    assert names.pop() == "shcu_physics"
+    assert RunConfig.__dataclass_fields__["shcu_physics"].default == 0
+    assert RunConfig.__dataclass_fields__["shcu_physics"].kw_only
     # Output-only woof.radtran spectral diagnostic, appended off (no
     # wavelength: nothing computes, no field is allocated).
     assert names.pop() == "radtran_pseudospherical"
@@ -581,7 +590,9 @@ def _check_frozen_defaults(actual):
                          ("radtran_umu", ()), ("radtran_phi", ()),
                          ("radtran_mol_abs_param", "reptran coarse"),
                          ("radtran_solver", "disort"), ("radtran_streams", 0),
-                         ("radtran_pseudospherical", False)):
+                         ("radtran_pseudospherical", False),
+                         # shallow cumulus and cumulus-radiation feedback, off
+                         ("shcu_physics", 0), ("cu_rad_feedback", False)):
         assert actual.pop(field) == value, field
     # WRF's windfarm_opt and its three companions (the fork's Fitch
     # coupling), appended after upstream 1.1.0's fields, off.

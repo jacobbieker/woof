@@ -1883,6 +1883,28 @@ class RunConfig:
     radtran_streams: int = 0
     #: pseudo-spherical direct beam (Dahlback & Stamnes 1991)
     radtran_pseudospherical: bool = False
+    #: WRF ``&physics shcu_physics`` (Registry.EM_COMMON:2492, max_domains,
+    #: default 0), the separate shallow-cumulus slot.  5 runs WRF-Solar's
+    #: PSU Deng scheme (phys/module_shcu_deng.F; woof/core/shcu_deng.py,
+    #: kernel shcu_deng.cu, graded word for word against WRF v4.7.1 by
+    #: tests/test_shcu_deng_wrf471_oracle.py) every model step after the
+    #: cumulus call, as module_first_rk_step_part1.F:1570 does, with its
+    #: shallow cloud handed to the next radiation call
+    #: (module_radiation_driver.F:1566-1575).  Deng reads MYJ's or MYNN's
+    #: TKE (bl_pbl_physics 2 or 5, module_shallowcu_driver.F:605-630), QC
+    #: and QR (a microphysics scheme) and the radiation's LW/SW heating.
+    #: 0 (the default) builds nothing and launches nothing; WRF's 1-4 (G3
+    #: shallow, UW, GRIMS, NSCV) are not ported as separate schemes.
+    #: Appended last, keyword-only.
+    shcu_physics: int = 0
+    #: WRF ``&physics cu_rad_feedback`` (Registry.EM_COMMON:2594,
+    #: max_domains, default .false.): hand the cumulus scheme's cloud water,
+    #: ice and cloud fraction to radiation.  module_physics_init.F:1103-1118
+    #: derives ICLOUD_CU from it: 2 (KF's CLDFRA_DP/SH, QC_KF/QI_KF) for
+    #: cu_physics = 1, 1 (the time-averaged GD_CLOUD/GD_CLOUD2 as QC_CU/
+    #: QI_CU, cu_diag = 1) for Grell-Freitas and Grell 3D.  Appended last,
+    #: keyword-only.
+    cu_rad_feedback: bool = False
 
 #: The ways a domain's clock meets the measured terrain rules
 #: (:attr:`RunConfig.terrain_clock`).
@@ -3842,9 +3864,11 @@ def _validate_farms(cfg: RunConfig) -> None:
             f"swint_opt=2 with aer_opt={int(cfg.aer_opt)}: FARMS's 2-D "
             "aerosol is wired for aer_opt 0, 1 and 2; under aer_opt = 3 WRF "
             "hands it the radiation call's TAOD5502D and the taer_* optics")
-    # The Solar_step's convective cloud additions (icloud_cu, KF's cldfra_dp,
-    # shcu_physics = 5, BMJ feedback, KF-CuP) have no woof counterpart: the
-    # legacy RRTMG adapter takes no convective condensate either.
+    # The Solar_step's convective cloud additions -- cu_rad_feedback's
+    # ICLOUD_CU (KF's CLDFRA_DP/SH, QC_CU/QI_CU) and shcu_physics = 5 --
+    # feed FARMS as they feed RRTMG (woof.core.cumulus_radiation, held to
+    # WRF's lines by tests/test_cu_rad_feedback_oracle.py); BMJ feedback and
+    # KF-CuP have no woof scheme to come from.
 
 
 def validate_radiation_driver_options(cfg: RunConfig) -> None:
@@ -6686,6 +6710,89 @@ def validate_seaice_parameters(cfg):
         raise ValueError("seaice_ocean_heat_flux must be finite, positive into ice")
 
 
+#: WRF's shallow-cumulus selector values (Registry.EM_COMMON:3227-3232) and
+#: the one woof runs.
+SHCU_SCHEMES = (0, 5)
+DENG_SHCU_PHYSICS = 5
+#: The PBL schemes whose TKE/EXCH_H/EL_PBL Deng reads
+#: (module_shallowcu_driver.F:605-630); anything else is wrf_error_fatal.
+DENG_PBL_SCHEMES = (2, 5)
+#: Cumulus schemes sharing WRF's one W0AVG array with Deng: Kain-Fritsch
+#: advances it on its own due steps (module_cu_kfeta.F:218-251) and Deng
+#: every step (module_shcu_deng.F:133-153).  woof hands Deng KF's array.
+DENG_SHARED_W0AVG_CU = frozenset({1})
+
+
+def shcu_refusal(cfg) -> str | None:
+    """Why this configuration cannot run its ``shcu_physics``, or None."""
+    shcu = getattr(cfg, "shcu_physics", 0)
+    if isinstance(shcu, bool) or not isinstance(shcu, int):
+        return "shcu_physics must be an integer"
+    if shcu == 0:
+        return None
+    if shcu not in SHCU_SCHEMES:
+        return (f"shcu_physics={shcu} is not ported: woof runs 0 (off) and 5 "
+                "(Deng, WRF-Solar); WRF's 1 (G3 shallow), 2 (UW), 3 (GRIMS) "
+                "and 4 (NSCV) have no separate port (the shallow arms inside "
+                "Grell-Freitas, Grell 3D and New SAS do run)")
+    if int(cfg.bl_pbl_physics) not in DENG_PBL_SCHEMES:
+        return ("shcu_physics=5 (Deng) reads the PBL scheme's TKE, EXCH_H and "
+                "EL_PBL, which WRF takes from MYJ (bl_pbl_physics=2) or MYNN "
+                "(5) only and stops on any other PBL "
+                f"(module_shallowcu_driver.F:605-630); got bl_pbl_physics="
+                f"{cfg.bl_pbl_physics}")
+    if not cfg.moist or int(cfg.mp_physics) == 0:
+        return ("shcu_physics=5 (Deng) reads QC and QR and writes their "
+                "tendencies (module_first_rk_step_part1.F:1596-1598); it needs "
+                "a microphysics scheme with cloud water and rain")
+    lw, sw = radiation_scheme_ids(cfg)
+    if (int(lw), int(sw)) != (4, 4):
+        return ("shcu_physics=5 (Deng) reads RRTMG's longwave and shortwave "
+                "heating (RTHRATENLW/SW) and the radiation calendar (XLONG, "
+                "GMT), and hands its shallow cloud back to the radiation "
+                "(module_radiation_driver.F:1566-1575), which woof wires for "
+                "RRTMG (ra_lw_physics = ra_sw_physics = 4, either "
+                f"ra_rrtmg_variant) only; got {lw}/{sw}")
+    if getattr(cfg, "use_adaptive_time_step", False):
+        return ("shcu_physics=5 (Deng) with an adaptive time step is not "
+                "graded: the time averages take ADAPT_STEP_FLAG's DT-weighted "
+                "form, held to WRF by the column oracle, but the driver's "
+                "step clock for it is not wired")
+    return None
+
+
+#: The cumulus schemes whose cloud woof hands radiation under
+#: ``cu_rad_feedback`` (ICLOUD_CU, module_physics_init.F:1103-1118).
+CU_RAD_FEEDBACK_SCHEMES = frozenset({1, 3, 5})
+
+
+def cu_rad_feedback_refusal(cfg) -> str | None:
+    """Why this configuration cannot run its ``cu_rad_feedback``, or None."""
+    value = getattr(cfg, "cu_rad_feedback", False)
+    if type(value) is not bool:
+        return "cu_rad_feedback must be boolean"
+    if not value:
+        return None
+    if int(cfg.cu_physics) not in CU_RAD_FEEDBACK_SCHEMES:
+        return (f"cu_rad_feedback with cu_physics={cfg.cu_physics}: WRF "
+                "derives ICLOUD_CU for Kain-Fritsch (1), Grell-Freitas (3) "
+                "and Grell 3D (5) among woof's schemes "
+                "(module_physics_init.F:1103-1118); woof hands radiation the "
+                f"cloud of cu_physics in {sorted(CU_RAD_FEEDBACK_SCHEMES)}")
+    lw, sw = radiation_scheme_ids(cfg)
+    if (int(lw), int(sw)) != (4, 4):
+        return ("cu_rad_feedback hands the cumulus cloud to radiation, which "
+                "woof wires for RRTMG (ra_lw_physics = ra_sw_physics = 4) "
+                f"only; got {lw}/{sw}")
+    if int(cfg.cu_physics) in (3, 5) and int(cfg.cu_diag) != 1:
+        return ("cu_rad_feedback beside Grell-Freitas or Grell 3D reads "
+                "convtrans_prep's time-averaged QC_CU/QI_CU, so it needs "
+                "cu_diag = 1, which WRF sets itself (module_check_a_mundo: "
+                "'Turning on cu_rad_feedback also requires setting "
+                "cu_diag== 1')")
+    return None
+
+
 def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> RunConfig:
     """The RunConfig invariant battery, shared by BOTH loaders.
 
@@ -6710,6 +6817,12 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
         raise ValueError("ocean_config requires an active surface layer to supply 10m winds and friction velocity")
     if type(cfg.surface_energy_diag) is not bool:
         raise ConfigurationRefused("surface_energy_diag must be boolean")
+    deng_why = shcu_refusal(cfg)
+    if deng_why is not None:
+        raise ConfigurationRefused(deng_why)
+    feedback_why = cu_rad_feedback_refusal(cfg)
+    if feedback_why is not None:
+        raise ConfigurationRefused(feedback_why)
     if cfg.rrtmg_spectral_output not in ("none", "bands", "gpoints"):
         raise ConfigurationRefused("rrtmg_spectral_output must be \"none\", \"bands\" or \"gpoints\"")
     if cfg.rrtmg_spectral_output != "none":
@@ -7078,9 +7191,26 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
                 or cfg.convtrans_avglen_m * 60. < cfg.dt):
             raise ConfigurationRefused("convtrans_avglen_m must span at least one model step: "
                              "convtrans_prep would evaluate MOD(ktau,0)")
+    elif cfg.cu_physics == GRELL_FREITAS_CU_PHYSICS and any(
+            getattr(cfg, name) != default for name, default in
+            G3_RUN_DEFAULTS.items()
+            if name not in ("cugd_avedx", "cu_diag", "convtrans_avglen_m")):
+        raise ConfigurationRefused("G3 ensemble dimensions are read only by cu_physics=5; "
+                         "Grell-Freitas would discard the requested ensemble")
+    elif cfg.cu_physics == GRELL_FREITAS_CU_PHYSICS:
+        # convtrans_prep runs after GFDRV as after G3DRV (module_check_a_mundo
+        # admits cu_diag = 1 for both; module_convtrans_prep.F reads GD_CLOUD
+        # for cu_phys 3 and 5 alike), so cu_diag is GF's too.
+        if type(cfg.cu_diag) is not int or cfg.cu_diag not in (0, 1):
+            raise ConfigurationRefused("cu_diag must be 0 or 1")
+        if (not math.isfinite(cfg.convtrans_avglen_m)
+                or cfg.convtrans_avglen_m * 60. < cfg.dt):
+            raise ConfigurationRefused("convtrans_avglen_m must span at least one model step: "
+                             "convtrans_prep would evaluate MOD(ktau,0)")
     elif any(getattr(cfg, name) != default for name, default in
              G3_RUN_DEFAULTS.items() if name != "cugd_avedx"):
-        raise ConfigurationRefused("G3 ensemble dimensions and cu_diag are read only by cu_physics=5; "
+        raise ConfigurationRefused("G3 ensemble dimensions and cu_diag are read only by cu_physics=5 "
+                         "(and cu_diag by cu_physics=3); "
                          "other schemes would discard the requested ensemble or diagnostic window")
     if cfg.cu_physics in GRELL_FAMILY_CU_PHYSICS:
         if cfg.cu_physics == GRELL_FREITAS_CU_PHYSICS and not cfg.bl_pbl_physics:

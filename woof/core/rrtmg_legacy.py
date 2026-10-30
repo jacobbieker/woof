@@ -2209,6 +2209,20 @@ class RRTMGLegacyRadiation:
                             if g is not None)
         if active_bl:
             gather_grids.update(g_bl)
+        # The cumulus cloud handed to radiation (woof.core.cumulus_radiation):
+        # cu_rad_feedback's ICLOUD_CU and Deng's shallow cloud, read from the
+        # driver fields the schemes left (module_radiation_driver.F:1264-1281,
+        # :1337-1348, :1566-1575).
+        from woof.core import cumulus_radiation as _curad
+        level_cu = _curad.icloud_cu(cfg)
+        deng_cloud = int(getattr(cfg, "shcu_physics", 0)) == 5
+        for name in _curad.radiation_cloud_fields(cfg):
+            if fields.get(name) is None:
+                raise ValueError(
+                    "the cumulus cloud handed to radiation (cu_rad_feedback "
+                    f"/ shcu_physics) reads fields[{name!r}], which this "
+                    "driver did not allocate")
+            gather_grids["cu_" + name] = _device_grid(fields[name], nz)
         if icloud == 2:
             # One driver CLDFRA field is shared by LW and SW. Gather only
             # repacks it into each prep's column window; it never recomputes
@@ -2245,6 +2259,13 @@ class RRTMGLegacyRadiation:
                 g = g_moist[name]
                 moist[name] = (cp.zeros((nc, nz), dtype=cp.float32)
                                if g is None else blocks[name])
+            if level_cu == 1:
+                # ICLOUD_CU = 1 (GF/G3 cu_rad_feedback): the averaged
+                # convective condensate joins QC/QI before the cloud
+                # fraction sees them (module_radiation_driver.F:1264-1281).
+                moist["qc"], moist["qi"] = _curad.add_convective_condensate(
+                    moist["qc"], moist["qi"], blocks["cu_qc_cu"],
+                    blocks["cu_qi_cu"], f_qc=f_flags["qc"], f_qi=f_flags["qi"])
             # cal_cldfra1 (icloud=1), the WRF transcription already gated
             # on the RTE+RRTMGP path -- imported, not copied; fed the raw
             # moisture before the MYNN merge writes qc/qi.
@@ -2254,6 +2275,14 @@ class RRTMGLegacyRadiation:
                 cldfra = _rrtmgp.cal_cldfra1(
                     moist["qv"], moist["qc"], moist["qi"], moist["qs"], t3d,
                     p3d, f_qc=True, f_qi=f_qi, f_qs=f_qs, mp_physics=mp_physics)
+                if level_cu == 2:
+                    # ICLOUD_CU = 2 (KF cu_rad_feedback), inside ICLOUD = 1
+                    # right after cal_cldfra1 (:1337-1348).
+                    cldfra, moist["qc"], moist["qi"] = _curad.merge_kf_cloud(
+                        cldfra, moist["qc"], moist["qi"],
+                        cldfra_dp=blocks["cu_cldfra_dp"],
+                        cldfra_sh=blocks["cu_cldfra_sh"],
+                        qc_cu=blocks["cu_qc_cu"], qi_cu=blocks["cu_qi_cu"])
             # Microphysics already applied the stock wrapper's metre to
             # micron multiply. Undoing and redoing it loses one ULP in
             # some radii on the next radiation call, so a strict run's prep
@@ -2308,6 +2337,13 @@ class RRTMGLegacyRadiation:
                          F(MERGE_QC_BELOW), F(MERGE_QI_BELOW),
                          F(MERGE_CLDFRA_BL_ABOVE)))
                 del bl
+            if deng_cloud:
+                # Deng's shallow cloud after every icloud branch and the MYNN
+                # merge (:1566-1575); a radiation-only copy, as WRF restores
+                # QC from qc_save after the call.
+                cldfra, moist["qc"] = _curad.merge_deng_cloud(
+                    cldfra, moist["qc"], cldfra_sh=blocks["cu_cldfra_sh"],
+                    cw_rad=blocks["cu_cw_rad"])
             o33d = (blocks["o33d"] if grid_o3 is not None else
                     cp.zeros((nc, nz), dtype=cp.float32))
             sel_kw = dict(

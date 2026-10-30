@@ -3957,6 +3957,16 @@ class RRTMGPRadiation:
         ice_active = scheme_is_ice_active(scheme)
         snow_species = scheme_has_snow_species(scheme)
         icloud = int(getattr(cfg, "icloud", 1))
+        # The cumulus cloud handed to radiation (woof.core.cumulus_radiation,
+        # module_radiation_driver.F:1264-1281, :1337-1348, :1566-1575).
+        from woof.core import cumulus_radiation as _curad
+        level_cu = _curad.icloud_cu(cfg)
+        cu_cols = {name: self._columns(fields[name])
+                   for name in _curad.radiation_cloud_fields(cfg)}
+        if level_cu == 1:
+            qc_cols, qi_cols = _curad.add_convective_condensate(
+                qc_cols, qi_cols, cu_cols["qc_cu"], cu_cols["qi_cu"],
+                f_qc=True, f_qi=ice_active)
         if icloud == 2:
             cldfra = cal_cldfra2(qc_cols, qi_cols,
                 f_qc=int(getattr(cfg, "mp_physics", 0)) != 0, f_qi=ice_active)
@@ -3964,6 +3974,12 @@ class RRTMGPRadiation:
             cldfra = cal_cldfra1(qv, qc_cols, qi_cols, qs_cols, tlay, play,
                                  f_qc=True, f_qi=ice_active, f_qs=snow_species,
                                  mp_physics=int(getattr(cfg, "mp_physics", 0)))
+            if level_cu == 2:
+                cldfra, qc_cols, qi_cols = _curad.merge_kf_cloud(
+                    cldfra, qc_cols, qi_cols,
+                    cldfra_dp=cu_cols["cldfra_dp"],
+                    cldfra_sh=cu_cols["cldfra_sh"],
+                    qc_cu=cu_cols["qc_cu"], qi_cu=cu_cols["qi_cu"])
         if scheme == "wsm3":
             # WSM3 stores cloud ice in qc and snow in qr. WRF splits
             # these carriers below freezing in module_ra_sw.F:193-203
@@ -3997,6 +4013,12 @@ class RRTMGPRadiation:
             bl_mynn_version=getattr(cfg, "bl_mynn_version", "wrf_461"),
             temperature=tlay if active_bl else None,
         )
+        if int(getattr(cfg, "shcu_physics", 0)) == 5:
+            # Deng's shallow cloud after the icloud cloud fraction and the
+            # MYNN merge (module_radiation_driver.F:1566-1575).
+            cldfra, qc_cols = _curad.merge_deng_cloud(
+                cldfra, qc_cols, cldfra_sh=cu_cols["cldfra_sh"],
+                cw_rad=cu_cols["cw_rad"])
         if scheme in SCHEME_RADII_COUPLINGS:
             # After the MYNN merge, so its subgrid cloud and fraction are
             # the cloud being sized: see cloudy_background_radii.

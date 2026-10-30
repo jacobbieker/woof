@@ -1,0 +1,257 @@
+executed lines 1868, never-executed (lines < 4430) 256
+  155: DO J = jts,jte
+  156: DO I = its,ite
+  157: DO k = kts,kte
+  158: w_at_half(i,k,j) = 0.5* ( w(i,k,j) + w(i,k+1,j) )
+  159: w0avg(i,k,j) = w_at_half(i,k,j)
+  168: time_period_avg_min = 120.0
+  169: DO J = jts,jte
+  170: DO I = its,ite
+  171: pblh_tile(i,j) = pblh(i,j)
+  172: pblhavg_tile(i,j) = pblhavg(i,j)
+  178: )
+  179: DO J = jts,jte
+  180: DO I = its,ite
+  181: pblhavg(i,j) = pblhavg_tile(i,j)
+  199: time_period_avg_min = 30.0
+  200: DO J = jts,jte
+  201: DO I = its,ite
+  202: DO k = kts,kte
+  203: tke_tile(i,k,j)    = tke(i,k,j)
+  204: tkeavg_tile(i,k,j) = tkeavg(i,k,j)
+  211: )
+  212: DO J = jts,jte
+  213: DO I = its,ite
+  214: DO k = kts,kte
+  215: tkeavg(i,k,j) = tkeavg_tile(i,k,j)
+  800: GOTO 425
+  823: PPBL=P0(1)
+ 1152: EFFQ= 1.0
+ 1275: EQFRC(NK1)= 1.0
+ 1376: CTP2=Z0(KL)
+ 1377: LTOP2=KL
+ 1572: UMF(NK)=VMFPBLCL
+ 1573: UER(NK)=0.
+ 1781: EQFRC(LFS) = 1.0
+ 1843: TDER=0.
+ 1844: GOTO 141
+ 1958: DPPTDF=0.
+ 1967: TDER=0.
+ 1968: GOTO 141
+ 1979: UPDINC=1.
+ 2258: ELSE IF(TMA .EQ. 0.0 .AND. TMB .EQ. 0.0) THEN
+ 2259: BCOEFF = 0.0
+ 2260: ACOEFF = 0.0
+ 2261: ELSE IF(TMA .EQ. 0.0) THEN
+ 2262: BCOEFF = -TMM/TMB
+ 2263: ACOEFF = 0.0
+ 2264: ELSE IF(TMB .EQ. 0.0) THEN
+ 2265: BCOEFF = 0.0
+ 2266: ACOEFF = -TMM/TMA
+ 2277: IF ( wrf_dm_on_monitor()) THEN
+ 2278: CALL get_wrf_debug_level( dbg_level )
+ 2279: IF( dbg_level >= 10 .AND. i == i0 .AND. j == j0 ) THEN
+ 2280: WRITE(message,*)'ERROR:  MASS DOES NOT BALANCE IN KF SCHEME;', &
+ 2281: ' TOPOMG, OMG =',TOPOMG,OMG(LTOP)
+ 2282: CALL wrf_message( message )
+ 2285: ISTOP=1
+ 2286: GOTO 265
+ 2343: RL=XLV0-XLV1*TMIX2
+ 2344: CPM=CP*(1.+0.887*QMIX2)
+ 2345: DQSSDT=QS*SVP2*(SVPT0-SVP3)/((TMIX2-SVP3)*(TMIX2-SVP3))
+ 2346: DQ=(QMIX2-QS)/(1.+RL*DQSSDT/CPM)
+ 2347: TMIX2=TMIX2+RL/CP*DQ
+ 2348: QMIX2=QMIX2-DQ
+ 2349: ROCPQ=0.2854*(1.-0.28*QMIX2)
+ 2350: THMIX2=TMIX2*(P00/PMIX2)**ROCPQ
+ 2351: TTLCL=TMIX2
+ 2352: PPLCL=PMIX2
+ 2427: KFLAG=4
+ 2428: GOTO 265
+ 2477: KFLAG=4
+ 2478: GOTO 265
+ 2528: WRITE(message,1080) LFS,LDB,LDT,TIMEC,NSTEP,NCOUNT,FABE,AINC
+ 2531: CALL wrf_message(message)
+ 2565: RF=DMFMIN/DER(LFS)
+ 2566: DO NK=LDB,LFS
+ 2567: DER2(NK)=DER2(NK)*RF
+ 2568: DDR2(NK)=DDR2(NK)*RF
+ 2569: DMF2(NK)=DMF2(NK)*RF
+ 2570: DER(NK)=DER2(NK)*AINC
+ 2571: DDR(NK)=DDR2(NK)*AINC
+ 2572: DMF(NK)=DMF2(NK)*AINC
+ 2574: TDER2=TDER2*RF
+ 2575: TDER=TDER2*AINC
+ 2576: IF(LFS.GE.KLCL)THEN
+ 2577: UPDIN2=1.-(1.-EQFRC(LFS))*DMF(LFS)*UPDINC/UMF(LFS)
+ 2579: UPDIN2=1.
+ 2581: CPR=TRPPT+PPR*(UPDIN2-1.)
+ 2583: (CPR*AINC)
+ 2584: PPTFL2=PEFF*CPR
+ 2585: PPTFLX=PPTFL2*AINC
+ 2586: F1=UPDIN2/(AINC*UPDINC)
+ 2587: DO NK=LC,LFS
+ 2588: UMF2(NK)=UMF(NK)*F1
+ 2589: UMF(NK)=UMF2(NK)*AINC
+ 2590: UDR2(NK)=UDR(NK)*F1
+ 2591: UDR(NK)=UDR2(NK)*AINC
+ 2592: UER2(NK)=UER(NK)*F1
+ 2593: UER(NK)=UER2(NK)*AINC
+ 2594: DETLQ2(NK)=DETLQ(NK)*F1
+ 2595: DETLQ(NK)=DETLQ2(NK)*AINC
+ 2596: DETIC2(NK)=DETIC(NK)*F1
+ 2597: DETIC(NK)=DETIC2(NK)*AINC
+ 2598: PPTML2=PPTML2-PPTICE(NK)*(1.-UPDIN2/UPDINC)
+ 2599: PPTLIQ(NK)=PPTLIQ(NK)*F1*AINC
+ 2600: PPTICE(NK)=PPTICE(NK)*F1*AINC
+ 2602: PPTMLT=PPTML2*AINC
+ 2603: UPDINC=UPDIN2
+ 2712: IF ( wrf_dm_on_monitor()) THEN
+ 2713: CALL get_wrf_debug_level( dbg_level )
+ 2714: IF( dbg_level >= 10 .AND. i == i0 .AND. j == j0 ) THEN
+ 2715: DO K = 1,KX
+ 2717: Z0(K),P0(K)/100.,T0(K)-273.16,Q0(K)*1000.,                       &
+ 2718: U0(K),V0(K),DP(K)/100.,W0AVG0(K)
+ 2719: CALL wrf_message(message)
+ 2753: WRITE(message,*)'QFNL-QINIT, QCFINL =',QFNL-QINIT,QCFINL
+ 2754: CALL wrf_message(message)
+ 2755: WRITE(message,1110)QINIT,QFNL,ERR2
+ 2756: CALL wrf_message(message)
+ 2757: WRITE(message,1200)RELERR
+ 2758: CALL wrf_message(message)
+ 2806: WRITE(message,909) RAINSHV(I,J)*NIC
+ 2808: CALL wrf_message(message)
+ 3261: K100=L
+ 3294: -VAL1*DP(L)/DP(KDCT+1)
+ 3295: TTEN(L)=TTEN(L)+VAL1*AREA*RLOVCP
+ 3415: 'IN SUB. SHALLOW (ICE SETTLING), NSTEP TOO LARGE, PROBABLY NAN'
+ 3574: SUBROUTINE  deng_shcu_init(RTHSHTEN,RQVSHTEN,RQCSHTEN,RQRSHTEN,  &
+ 3575: RUSHTEN,RVSHTEN,RDCASHTEN,RQCDCSHTEN,W0AVG,    &
+ 3576: PBLHAVG, TKEAVG, cldareaa, cldareab,           &
+ 3577: cldliqa, cldliqb, ca_rad, cw_rad,        &
+ 3578: wub, pblmax, ltopb, clddpthb, cldtopb,         &
+ 3579: capesave, ainckfsa, radsave,                   &
+ 3580: rainsh, rainshvb, kdcldtop, kdcldbas,                  &
+ 3581: xtime1,                                        &
+ 3625: jtf=min0(jte,jde-1)
+ 3626: ktf=min0(kte,kde-1)
+ 3627: itf=min0(ite,ide-1)
+ 3629: IF(.NOT.RESTART)THEN
+ 3630: DO j=jts,jtf
+ 3631: DO i=its,itf
+ 3632: DO k=kts,ktf
+ 3633: RUSHTEN(i,k,j)    = 0.
+ 3634: RVSHTEN(i,k,j)    = 0.
+ 3635: RTHSHTEN(i,k,j)   = 0.
+ 3636: RQVSHTEN(i,k,j)   = 0.
+ 3637: RQCSHTEN(i,k,j)   = 0.
+ 3638: RQRSHTEN(i,k,j)   = 0.
+ 3639: RDCASHTEN(i,k,j)  = 0.
+ 3640: RQCDCSHTEN(i,k,j) = 0.
+ 3641: W0AVG(i,k,j)      = 0.
+ 3642: TKEAVG(i,k,j)      = 0.
+ 3643: wub(i,k,j)        = 0.
+ 3644: cldareaa(i,k,j)   = 0.0
+ 3645: cldareab(i,k,j)   = 0.0
+ 3646: cldliqa(i,k,j)    = 0.0
+ 3647: cldliqb(i,k,j)    = 0.0
+ 3648: ca_rad(i,k,j)  = 0.0
+ 3649: cw_rad(i,k,j)  = 0.0
+ 3651: PBLHAVG(i,j)   = 0.0
+ 3652: pblmax(i,j)   = 0.0
+ 3653: clddpthb(I,J) = 0.0
+ 3654: cldtopb(I,J)  = 0.0
+ 3655: rainsh(i,j)  = 0.0
+ 3656: rainshvb(i,j)  = 0.0
+ 3657: capesave(i,j)  = 0.0
+ 3658: radsave(i,j)  = 0.0
+ 3659: xtime1(i,j)  = 0.0
+ 3660: ltopb(i,j)       = 1
+ 3661: kdcldtop(i,j)    = 1
+ 3662: kdcldbas(i,j)    = 1
+ 3666: DO j=jts,jtf
+ 3667: DO i=its,itf
+ 3668: DO k=1,100
+ 3669: ainckfsa(i,k,j) = 0.0
+ 3676: CALL KF_LUTAB(SVP1,SVP2,SVP3,SVPT0)
+ 3679: END SUBROUTINE deng_shcu_init
+ 3682: SUBROUTINE time_avg_2d( dt, ADAPT_STEP_FLAG, time_period_avg_min &
+ 3683: ,array2d, array2d_avg                           &
+ 3698: NTST = NINT( time_period_avg_min * 60.0 / dt ) ! number of time steps in time_period_avg_min
+ 3699: TST = FLOAT(NTST)
+ 3700: IF( TST <= 0 ) STOP 'Denominator has to be greater than zero - deng_shcu_driver'
+ 3702: if (ADAPT_STEP_FLAG) then
+ 3703: AVGfctr = MAX( time_period_avg_min*60,dt ) - dt
+ 3704: fctr = dt
+ 3705: den = MAX( time_period_avg_min*60,dt )
+ 3707: AVGfctr = (TST-1.)
+ 3708: fctr = 1.
+ 3709: den = TST
+ 3712: DO J = jts,jte
+ 3713: DO I = its,ite
+ 3714: array2d_avg(i,j) = ( array2d_avg(i,j) * AVGfctr + array2d(i,j) * fctr ) / den
+ 3720: END SUBROUTINE time_avg_2d
+ 4009: SUBROUTINE ENVIRTHT2(P1,T1,Q1,THT1,ALIQ,BLIQ,CLIQ,DLIQ)
+ 4028: EE=Q1*P1/(0.622+Q1)
+ 4032: astrt=1.e-3
+ 4033: ainc=0.075
+ 4034: a1=ee/aliq
+ 4035: tp=(a1-astrt)/ainc
+ 4036: indlu=int(tp)+1
+ 4037: value=(indlu-1)*ainc+astrt
+ 4038: aintrp=(a1-value)/ainc
+ 4039: tlog=aintrp*alu(indlu+1)+(1-aintrp)*alu(indlu)
+ 4041: TDPT=(CLIQ-DLIQ*TLOG)/(BLIQ-TLOG)
+ 4042: TSAT=TDPT-(.212+1.571E-3*(TDPT-T00)-4.36E-4*(T1-T00))*(T1-TDPT)
+ 4043: THT=T1*(P00/P1)**(0.2854*(1.-0.28*Q1))
+ 4044: THT1=THT*EXP((C1/TSAT-C2)*Q1*(1.+0.81*Q1))
+ 4046: END SUBROUTINE ENVIRTHT2
+ 4091: FUNCTION TPDD(P,THTED,TGS,RS,RD,RH,XLV0,XLV1,   &
+ 4111: ES=1.E3*SVP1*EXP(SVP2*(TGS-SVPT0)/(TGS-SVP3))
+ 4112: RS=0.622*ES/(P-ES)
+ 4113: PI=(1.E5/P)**(0.2854*(1.-0.28*RS))
+ 4114: THTGS=TGS*PI*EXP((3374.6525/TGS-2.5403)*RS*(1.+0.81*RS))
+ 4115: F0=THTGS-THTED
+ 4116: T1=TGS-0.5*F0
+ 4117: T0=TGS
+ 4118: CP=1005.7
+ 4122: ITCNT=0
+ 4124: 90 ES=1.E3*SVP1*EXP(SVP2*(T1-SVPT0)/(T1-SVP3))
+ 4125: RS=0.622*ES/(P-ES)
+ 4126: PI=(1.E5/P)**(0.2854*(1.-0.28*RS))
+ 4127: THTGS=T1*PI*EXP((3374.6525/T1-2.5403)*RS*(1.+0.81*RS))
+ 4128: F1=THTGS-THTED
+ 4129: IF(ABS(F1).LT.0.05)GOTO 50
+ 4130: ITCNT=ITCNT+1
+ 4131: IF(ITCNT.GT.10)GOTO 50
+ 4132: DT=F1*(T1-T0)/(F1-F0)
+ 4133: T0=T1
+ 4134: F0=F1
+ 4135: T1=T1-DT
+ 4136: GOTO 90
+ 4137: 50 RL=XLV0-XLV1*T1
+ 4142: IF(RH.EQ.1.)GOTO 110
+ 4143: DSSDT=SVP2*(SVPT0-SVP3)/((T1-SVP3)*(T1-SVP3))
+ 4144: DT=RL*RS*(1.-RH)/(CP+RL*RH*RS*DSSDT)
+ 4145: T1RH=T1+DT
+ 4147: ES=RH*1.E3*SVP1*EXP(SVP2*(T1RH-SVPT0)/(T1RH-SVP3))
+ 4148: RSRH=0.622*ES/(P-ES)
+ 4153: IF(RSRH.LT.RD)THEN
+ 4154: RSRH=RD
+ 4155: T1RH=T1+(RS-RSRH)*RL/CP
+ 4157: T1=T1RH
+ 4158: RS=RSRH
+ 4159: 110 TPDD=T1
+ 4162: RETURN
+ 4243: DSSDT=SVP2*(SVPT0-SVP3)/((T1-SVP3)*(T1-SVP3))
+ 4244: DT=RL*RS*(1.-RH)/(CP+RL*RH*RS*DSSDT)
+ 4245: T1RH=T1+DT
+ 4247: ES=RH*1.E3*SVP1*EXP(SVP2*(T1RH-SVPT0)/(T1RH-SVP3))
+ 4248: RSRH=0.622*ES/(P-ES)
+ 4253: IF(RSRH.LT.RD)THEN
+ 4254: RSRH=RD
+ 4255: T1RH=T1+(RS-RSRH)*RL/CP
+ 4257: T1=T1RH
+ 4258: RS=RSRH
+ 4390: DQLIQ=0.0-QICE
+ 4391: QICE=0.0

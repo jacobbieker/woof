@@ -131,6 +131,17 @@ class NativePhysicsSession:
             from .farms_v842 import FarmsService
             self.farms_service = FarmsService(self)
             self.hooks.external.update(self.farms_service.callbacks())
+        # WOOF-only Deng shallow cumulus and cumulus-radiation feedback services (shcu_deng_v842).
+        self.shcu_deng_service = None
+        backends = getattr(config, 'service_backends', {})
+        for service in ('shcu_deng', 'cu_rad_feedback'):
+            if str(backends.get(service, 'off')) == 'hex-cuda' and cuda_device is None:
+                raise RuntimeError(f"the {service} service (config_{service}_backend = 'hex-cuda') runs on "
+                                   "the CUDA device pool views; this session has none")
+        if str(backends.get('shcu_deng', 'off')) == 'hex-cuda':
+            from .shcu_deng_v842 import DengService
+            self.shcu_deng_service = DengService(self)
+            self.hooks.external.update(self.shcu_deng_service.callbacks())
         self.driver = PhysicsDriver(config, PhysicsManager(config, dt,
                                      streams=stream_intervals), slots, self.hooks)
         if getattr(native, 'framework_only', False):
@@ -235,11 +246,16 @@ class NativePhysicsSession:
             result.update(self.precipitation_window.snapshot())
         if self.surface_service is not None:
             result["surface_service"] = self.surface_service.restart_state()
+        if getattr(self, 'shcu_deng_service', None) is not None:
+            result["shcu_deng_service"] = self.shcu_deng_service.restart_state()
         return result
 
     def restore(self, fields: Mapping[str, Any]) -> None:
         """Restore explicit native time levels; mpas_atmphys_init.F:174-396."""
         fields = dict(fields)
+        deng = fields.pop('shcu_deng_service', None)
+        if (deng is None) != (getattr(self, 'shcu_deng_service', None) is None):
+            raise ValueError('Deng shallow cumulus service restart state/backend differs')
         state = fields.pop('surface_service', None)
         if (state is None) != (self.surface_service is None):
             raise ValueError('surface service restart state/backend differs')
@@ -266,3 +282,5 @@ class NativePhysicsSession:
             self.put(pool,name,value,level=int(level))
         if state is not None:
             self.surface_service.restore_restart_state(state)
+        if deng is not None:
+            self.shcu_deng_service.restore_restart_state(deng)

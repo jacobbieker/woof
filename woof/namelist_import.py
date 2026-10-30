@@ -1365,11 +1365,6 @@ def ignored_time_control_reason(key: str) -> str | None:
 #: &physics keys pinned to the one value woof implements, as
 #: (key, pin, why).  Exported by woof.namelist_contract.
 PHYSICS_PINS: tuple[tuple[str, int, str], ...] = (
-    ("shcu_physics", 0,
-     "no separate shallow-cumulus scheme (1 Grell 3D shallow, 2 UW, 3 "
-     "GRIMS, 4 NSCV, 5 Deng) is ported in this release; the shallow "
-     "convection inside Grell-Freitas and Grell 3D (ishallow = 1) and New "
-     "SAS's built-in NSCV do run"),
     ("kf_edrates", 0,
      "KF entrainment/detrainment rate diagnostics are not "
      "implemented"),
@@ -4805,6 +4800,28 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
     # byte-identical.
     topo_columns = {}
     terrain_drag_columns: dict[str, list[int]] = {}
+    # ---- shallow cumulus (shcu_physics, Registry.EM_COMMON:2492) ---------
+    # A max_domains column, default 0.  woof ports 5 (Deng, WRF-Solar;
+    # woof/core/shcu_deng.py) and emits the column only when a domain runs
+    # it, through the same per-domain integer emission as slope_rad below,
+    # so an omitted or all-zero key keeps every import byte-identical.
+    shcu_raw = ph.take("shcu_physics")
+    if shcu_raw is not None:
+        if any(isinstance(value, bool) or not isinstance(value, int)
+               or value not in (0, 5) for value in shcu_raw):
+            raise _err("physics", "shcu_physics", shcu_raw,
+                       "woof implements shcu_physics = 0 and 5 (Deng, "
+                       "WRF-Solar) only: 1 (Grell 3D shallow), 2 (UW), 3 "
+                       "(GRIMS) and 4 (NSCV) have no separate port (the "
+                       "shallow convection inside Grell-Freitas and Grell 3D "
+                       "(ishallow = 1) and New SAS's built-in NSCV do run).")
+        column = list(shcu_raw[:max_dom])
+        column += [0] * (max_dom - len(column))
+        fix("physics", "shcu_physics", shcu_raw, column,
+            "WRF per-domain selector; 5 runs the Deng shallow cumulus "
+            "(woof/core/shcu_deng.py), an omitted domain keeps 0")
+        if any(column):
+            topo_columns["shcu_physics"] = column
     for key in ("slope_rad", "topo_shading"):
         raw = ph.take(key)
         if raw is None:
@@ -4824,17 +4841,10 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
             raise _err("physics", "shadlen", shadlen_values,
                        "must be a finite positive length in metres (WRF "
                        "default 25000.).")
+    # cu_rad_feedback (Registry.EM_COMMON:2594, max_domains, default
+    # .false.) is read below, beside cu_diag, which WRF sets from it
+    # (module_check_a_mundo).
     cu_rad_feedback = ph.take("cu_rad_feedback")
-    if cu_rad_feedback is not None:
-        if any(_require_bools("physics", "cu_rad_feedback",
-                              cu_rad_feedback)):
-            raise _err("physics", "cu_rad_feedback", cu_rad_feedback,
-                       "cumulus cloud fraction does not feed radiation in "
-                       "woof (WRF Registry default .false.); only the "
-                       "disabled branch is implemented.")
-        fix("physics", "cu_rad_feedback", cu_rad_feedback, False,
-            "cumulus-radiation feedback is not implemented (the WRF "
-            "Registry default .false. branch is the implemented one)")
 
     # ---- MYNN option identity ------------------------------------------
     # woof's MYNN port is validated at exactly one value of each option
@@ -6139,6 +6149,32 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
                        f"(module_check_a_mundo: 'Using cu_diag=1 requires use "
                        f"of one of the following CU schemes'), and domain "
                        f"{n + 1} runs cu_physics = {cu[n]}.")
+    # ---- cumulus cloud to radiation (cu_rad_feedback) ----------------------
+    # A max_domains logical, default .false.; module_physics_init.F:1103-1118
+    # turns it into ICLOUD_CU (2 for Kain-Fritsch, 1 for Grell-Freitas and
+    # Grell 3D), and module_check_a_mundo sets cu_diag = 1 beside it for the
+    # two Grell schemes, whose radiation reads convtrans_prep's averaged
+    # QC_CU/QI_CU (woof.core.cumulus_radiation).
+    feedback_column = [False] * max_dom
+    if cu_rad_feedback is not None:
+        _require_bools("physics", "cu_rad_feedback", cu_rad_feedback)
+        given = [bool(value) for value in cu_rad_feedback[:max_dom]]
+        feedback_column[:len(given)] = given
+        for n, on in enumerate(feedback_column):
+            if on and cu[n] not in (1, 3, 5):
+                raise _err("physics", "cu_rad_feedback", cu_rad_feedback,
+                           f"domain {n + 1} runs cu_physics = {cu[n]}; woof "
+                           "hands radiation the cumulus cloud of Kain-Fritsch "
+                           "(1), Grell-Freitas (3) and Grell 3D (5) only, the "
+                           "schemes WRF's ICLOUD_CU names "
+                           "(module_physics_init.F:1103-1118).")
+            if on and cu[n] in (3, 5):
+                g3_controls["cu_diag"][n] = 1
+        fix("physics", "cu_rad_feedback", cu_rad_feedback, feedback_column,
+            "WRF per-domain logical; on, the cumulus cloud reaches the "
+            "RRTMG radiation (woof/core/cumulus_radiation.py), with cu_diag "
+            "= 1 beside Grell-Freitas and Grell 3D as module_check_a_mundo "
+            "sets it")
     if any(value == 5 for value in cu):
         validate_g3_dimensions(*(g3_controls[key] for key in
             ("maxiens", "maxens", "maxens2", "maxens3", "ensdim")), cugd_avedx)
@@ -6155,12 +6191,20 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
         # write those, and for the schemes left here WRF overwrites cu_diag
         # itself.  2.9.0 refused all of this as "cu_physics=5 is required"
         # and so refused NCAR's benchmark as shipped.
+        gf_feedback = any(feedback_column[n] and cu[n] == 3
+                          for n in range(max_dom))
         for key, default in G3_RUN_DEFAULTS.items():
             if key == "cugd_avedx":
                 continue
             if key not in g3_named:
                 continue
             value = g3_controls[key]
+            if gf_feedback and key in ("cu_diag", "convtrans_avglen_m"):
+                fix("physics", key, value if isinstance(value, list) else [value],
+                    value, "convtrans_prep's averaged QC_CU/QI_CU feed the "
+                    "radiation under cu_rad_feedback on a Grell-Freitas "
+                    "domain (module_radiation_driver.F:1264-1281)")
+                continue
             if key == "cu_diag":
                 reason = ("WRF sets cu_diag from cu_physics itself "
                           "(module_check_a_mundo); it only switches on "
@@ -7492,6 +7536,8 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
             # F3).
             lines.append("radt_minutes = 0.0")
         lines.append(f"cu_physics = {cu[n]}")
+        if feedback_column[n]:
+            lines.append("cu_rad_feedback = true")
         if cu[n] == 1:
             lines.append(f"cudt_minutes = {_fmt(cudt[n])}")
         elif cu[n] == 3:
@@ -7500,6 +7546,10 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
             lines.append("cudt_minutes = 0.0")
             lines.append(f"clos_choice = {clos_choice}")
             lines.append(f"ishallow = {ishallow}")
+            if feedback_column[n]:
+                lines.append("cu_diag = 1")
+                lines.append("convtrans_avglen_m = "
+                             f"{_fmt(g3_controls['convtrans_avglen_m'])}")
             if cudt[n]:
                 drop("physics", f"cudt[{n + 1}]", [cudt[n]],
                      "GF carries no cudt cadence: WRF's GF runs every "
