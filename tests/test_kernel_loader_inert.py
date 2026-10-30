@@ -58,6 +58,10 @@ _EXPECTED_HEADERS = {
     # against WRF v4.7.1 (tests/test_cldfra3_wrf471_oracle.py): glibc 2.43's
     # log10f and powf.
     "cldfra3": ("glibc_flt32.cuh", "corem_log10f.cuh"),
+    # WRF-Solar module_diag_solar (solar_diagnostics = 1), a new unit graded
+    # word for word against WRF v4.7.1 (tests/test_solar_diag_wrf471_oracle.py):
+    # glibc 2.43's acosf.
+    "solar_diag": ("glibc_flt32.cuh", "glibc_trig_flt32.cuh"),
     "gsd_initial_reflectivity": ("glibc_flt32.cuh", "glibc_flt64.cuh",
                                  "thompson_fork_constants.cuh", "thompson_fork.cu"),
     # A new full-column generation unit; existing classic and aerosol units
@@ -270,6 +274,7 @@ def test_lake_compile_options_do_not_change_existing_modules(monkeypatch, strict
     expected["farms"] = ("-std=c++17", "--fmad=false", "--ftz=false")
     # WRF-Solar cal_cldfra3 (icloud = 3): column-exact, subnormals kept.
     expected["cldfra3"] = ("-std=c++17", "--fmad=false", "--ftz=false")
+    expected["solar_diag"] = ("-std=c++17", "--fmad=false", "--ftz=false")
     # WRF's HAILCAST diagnostics (lane/cap-hail 97e9a3ca061) compile without
     # FMA, like the other column-exact WRF ports.
     expected["hail"] = ("-std=c++17", "--fmad=false")

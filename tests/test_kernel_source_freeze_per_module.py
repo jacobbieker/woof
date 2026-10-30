@@ -233,6 +233,11 @@ BASELINE_PINNED: dict[str, str] = {
     # helpers, 500 columns equal word for word to the gfortran -O0 / glibc
     # 2.39 record (tests/test_cldfra3_wrf471_oracle.py) on Metal and CUDA.
     "cldfra3": "8ed60f16c949aaa68cf08f4b8735d1002493808466963f05c0b55479bef021d0",
+    # WRF-Solar diagnostics (solar_diagnostics = 1): WRF v4.7.1 solar_diag,
+    # 432 WRF- and MPAS-shaped columns x 26 outputs equal word for word to the
+    # gfortran -O0 / glibc 2.43 record (tests/test_solar_diag_wrf471_oracle.py)
+    # on Metal and CUDA.
+    "solar_diag": "aa5f5faf1e6487948d2e7dfdae51bcd1a174638186ff72efd1aad5760219c069",
     # e677dccb6: active table edits multiply binary64 values on the GPU,
     # round once to REAL, and reject non-positive crop roughness.
     "physics_params":

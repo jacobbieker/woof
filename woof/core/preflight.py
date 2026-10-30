@@ -2166,6 +2166,8 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # WRF-Solar cal_cldfra3 (icloud = 3): scratch profiles are global, read
     # at 0 B through the production loader (RTX A6000 sm_86, CUDA 12.9).
     "cldfra3": 0,
+    # WRF-Solar module_diag_solar (solar_diagnostics = 1), same reading.
+    "solar_diag": 0,
     # Production loader, V58 sm_120 / NVRTC 12.8.93, 2026-10-20.
     "hail": 7392,
     # 27,408 B on test host B (RTX 5090, sm_120, NVRTC 13.4.92, 2026-10-17);
@@ -3962,6 +3964,8 @@ def domain_kernel_modules(dc: DomainConfig, *,
         modules.add("oml")
     if int(getattr(dc.run, "icloud", 1)) == 3:          # woof/core/cldfra3.py
         modules.add("cldfra3")
+    if int(getattr(dc.run, "solar_diagnostics", 0) or 0) == 1:
+        modules.add("solar_diag")                # woof/core/solar_diagnostics.py
     mp_physics = int(dc.run.mp_physics)
     from woof.thompson_generations import CLASSIC_GENERATIONS
     classic_generation = (CLASSIC_GENERATIONS.get(getattr(dc.run,"thompson_version","wrf_461"))
