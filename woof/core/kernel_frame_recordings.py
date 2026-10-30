@@ -709,7 +709,10 @@ SM86_NVRTC_12_9_86 = KernelFrameRecording(
         # at 2 x 4 B x KF_KMAX, so 512 -> 1,024 B -- AT the 1,024 B default
         # stack, so still zero reservation.  KF_KMAX = 49 / 128 / 256 read
         # 200 / 512 / 1,024 B on both the pre- and post-cut source.
-        'kf': 1024,
+        # RE-READ 2026-10-30 on the RTX A6000 (tools/vram_reserve_probe.py
+        # frames): 0 B -- WOOF 1.1.x moved KF's column arrays into the
+        # global KFWS workspace, so no array is stack-resident any more.
+        'kf': 0,
         'milbrandt2': 2048,
         # Read 2026-10-12 at the column-workspace source (kernels/myjpbl.cu
         # / myjurb.cu headers) on an RTX A6000 -- the same platform key,
@@ -720,7 +723,10 @@ SM86_NVRTC_12_9_86 = KernelFrameRecording(
         'myjpbl': 0,
         'myjurb': 0,
         'nest_microphysics': 0,
-        'noah': 224,
+        # RE-READ 2026-10-30 on the RTX A6000 (tools/vram_reserve_probe.py
+        # frames, same platform key): 464 B at the WOOF 1.1.x Noah source,
+        # where the 2026-09 desktop reading of the older source was 224 B.
+        'noah': 464,
         'nssl2_fused_gs': 112,
         # WRF aer_opt = 3 (rrtmg_aer3.cu), read 2026-10-12 on an RTX A6000
         # (same sm_86 / NVRTC 12.9.86 platform key, Linux, fresh process)

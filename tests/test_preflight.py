@@ -4190,7 +4190,7 @@ def test_check_cli_estimator_json(capsys):
     assert frames_4dom["rrtmgp_rte"] == 3600
     assert frames_4dom["morrison"] == max(frames_4dom.values()) == 5120
     assert "kf" in payload["kernel_modules"]
-    assert frames_4dom["kf"] == 1024  # 512 until KF_KMAX 128 -> 256
+    assert frames_4dom["kf"] == 512  # the ceiling: the A6000 re-reads 0 B (KFWS workspace)
     from woof.core.kf import KFWS_SLOTS
     assert KFWS_SLOTS == 66
     assert pf.kf_column_workspace_bytes(
@@ -5101,14 +5101,15 @@ def test_the_local_memory_law_reproduces_every_measurement():
                 f"vs measured {measured_mib} MiB")
     # MEASURED_KF_RESERVATION_MIB was read off `kf_column`'s first launch
     # at KF_KMAX = 128, so the law is checked against THAT frame and not
-    # against today's row -- today's row is 1,024 B (512 B until KF_KMAX
-    # went 128 -> 256) and reserves nothing, which is the point of the
-    # workspace, not a counter-example to the law.
+    # against today's row -- today's row is 512 B (the older platforms'
+    # readings; the A6000 re-reads 0 B at the KFWS workspace source) and
+    # reserves nothing, which is the point of the workspace, not a
+    # counter-example to the law.
     kf_predicted = profile.reservation_bytes(
         KF_AS_BUILT_FRAME.frame_bytes(128)) / 1024 ** 2
     assert abs(kf_predicted - MEASURED_KF_RESERVATION_MIB) <= 1.0
-    assert pf.KERNEL_MAX_LOCAL_SIZE_BYTES["kf"] == 1024
-    assert profile.reservation_bytes(1024) == 0
+    assert pf.KERNEL_MAX_LOCAL_SIZE_BYTES["kf"] == 512
+    assert profile.reservation_bytes(512) == 0
 
 
 def test_a_frame_inside_the_default_stack_reserves_nothing():
@@ -5625,8 +5626,8 @@ def test_the_widest_frame_is_no_longer_the_cumulus_kernel():
     widest = max(frames, key=lambda m: frames[m])
     assert widest == "morrison"
     assert frames["morrison"] == 5120
-    assert frames["kf"] == 1024
-    assert pf.KERNEL_MAX_LOCAL_SIZE_BYTES["kf"] == 1024
+    assert frames["kf"] == 512
+    assert pf.KERNEL_MAX_LOCAL_SIZE_BYTES["kf"] == 512
     assert pf.MEASURED_LOCAL_MEMORY_PROFILE.reservation_bytes(
         frames["kf"]) == 0
     assert max(f for m, f in frames.items() if m.startswith("mynn")) == 0

@@ -2357,7 +2357,10 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # PRO 6000 Blackwell, sm_120, NVRTC 12.9); the row is the element-wise
     # ceiling over the recorded platforms (kernel_frame_recordings).
     # The workspace itself is priced by :func:`kf_column_workspace_bytes`.
-    "kf": 1024,
+    # 2026-10-30: the A6000's 1,024 B reading is retired (it re-reads 0 B at
+    # the KFWS workspace source), so the ceiling is the older platforms'
+    # 512 B readings, still the element-wise maximum.
+    "kf": 512,
     "kf_validation": 0,
     "lbc_flow": 0,
     "lbc_state": 0,
@@ -2447,8 +2450,11 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # sm_86 compiles Noah 48 B wider than sm_120 (224 against 176); sm_89
     # compiles the 2026-10-12 source to 320 B (re-read 2026-10-22), so the
     # ceiling is the sm_89 reading.  Well under the default stack either
-    # way, so it reserves nothing on any card.
-    "noah": 320,
+    # way, so it reserves nothing on any card.  RAISED 2026-10-30: sm_86 at
+    # NVRTC 12.9.86 (RTX A6000) compiles the WOOF 1.1.x source to 464 B,
+    # wider than the sm_89 reading, so the ceiling is that reading; still
+    # under the 1,024 B default stack.
+    "noah": 464,
     "noahmp_bareflux": 0,
     "noahmp_fluxprep": 0,
     "noahmp_leaves": 272,
