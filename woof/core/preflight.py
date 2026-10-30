@@ -2690,6 +2690,10 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # and farms_mpas_coszen read 0 B; radtran_disort carries its binary64
     # stream/layer work arrays (30,432 B), radtran_work_size 0 B.
     "farms": 0, "radtran_disort": 30432,
+    # Deng shallow cumulus (shcu_physics = 5), same card and day, both
+    # loaders: deng_shcu_column 504 B, deng_shcu_mpas_column 496 B, the
+    # three MPAS glue kernels 0 B.
+    "shcu_deng": 504,
 }
 
 #: The readings the ceiling above is made of, each naming its box, its

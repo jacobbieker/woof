@@ -3259,3 +3259,15 @@ KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
     measured="2026-10-30", complete=False,
     frames=MappingProxyType({"farms": 0, "radtran_disort": 30432}),
 ),)
+
+# Deng shallow cumulus (kernels/shcu_deng.cu), production loader, default
+# and strict numerics, read 2026-10-30 on the RTX A6000 CUDA host.
+KERNEL_LOCAL_FRAME_RECORDINGS = tuple(
+    replace(row, complete=False) if "shcu_deng" not in row.frames else row
+    for row in KERNEL_LOCAL_FRAME_RECORDINGS)
+KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
+    box="pb", device="NVIDIA RTX A6000",
+    compute_capability="86", nvrtc_build="12.9.86", platform_family="linux",
+    measured="2026-10-30", complete=False,
+    frames=MappingProxyType({"shcu_deng": 504}),
+),)
