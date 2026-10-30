@@ -386,7 +386,11 @@ class DriverConfig:
                   "backends": {s: str(b) for s, b in self.backends.items()}}
         # Service backends (the surface-update glue, i5) appear only when one is moved off its native-cpu
         # default, so default and exact receipts stay word for word what they were (integrator, 2026-10-14).
-        if any(b != Backend.NATIVE_CPU for b in self.service_backends.values()):
+        # A service whose table default is not native-cpu (farms_sw, default off) counts as moved only
+        # off that default.
+        defaults = {name: Backend(row["default_backend"])
+                    for name, row in load_table()["mpasphys_v842"].get("services", {}).items()}
+        if any(b != defaults.get(s, Backend.NATIVE_CPU) for s, b in self.service_backends.items()):
             result["service_backends"] = {s: str(b) for s, b in self.service_backends.items()}
         if self.cpu_slots:
             result["cpu_slots"] = [item.as_dict() for item in self.cpu_slots]
@@ -539,6 +543,13 @@ def _check_spectral_output(config: DriverConfig) -> None:
         if config.backends[slot] != Backend.HEX_CUDA:
             raise ValueError(f"{name} needs {slot} on hex-cuda: MPAS's own Fortran RRTMG "
                              f"({config.backends[slot]}) has no per-band output")
+
+
+def farms_enabled(config) -> bool:
+    """WOOF-only FARMS service selected (config_farms_sw_backend = 'hex-cuda') with a shortwave to sit
+    beside: WRF evaluates FARMS inside its radiation driver."""
+    backend = getattr(config, "service_backends", {}).get("farms_sw", Backend.OFF)
+    return backend != Backend.OFF and config.active("radiation_sw")
 
 
 def resolve_namelist(text: str, *, backends: Mapping[str, str] | None = None,
@@ -1124,6 +1135,8 @@ class NativeDriverHooks:
                     operations.update(("allocate_lsm", "deallocate_lsm"))
             if config.active("convection"):
                 operations.add("update_convection_step2")
+            if farms_enabled(config):
+                operations.add("farms_sw")
         if config.active("ngw") and not config.native_embedded("ngw"):
             operations.add("snapshot_gwdo_tendencies")
         return tuple(sorted(op for op in operations if op not in self.external
@@ -1309,6 +1322,11 @@ class PhysicsDriver:
         for slot in ("radiation_sw", "radiation_lw"):
             if c.active(slot):
                 glue("deallocate_" + slot)
+        # WOOF-only: WRF-Solar FARMS (services.farms_sw, woof.hex.mpasphys.farms_v842) on EVERY step,
+        # radiation steps included, after the radiation slots, as WRF's radiation driver runs it after
+        # ENDIF Radiation_step under swint_opt = 2.  Off (the default) calls nothing.
+        if farms_enabled(c):
+            glue("farms_sw")
         # RP6: pbl_due is False only in correct mode, between the calls config_pbl_interval sets.
         due = self.manager.pbl_due
         # RP6 (correct mode with config_pbl_interval): every step's precipitation is added to the window the

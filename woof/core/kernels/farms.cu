@@ -334,3 +334,32 @@ extern "C" __global__ void farms_columns(
     swdownc2[i] = ghi_clear;
     swddnic2[i] = dni_clear;
 }
+
+// The MPAS-A v8.4.2 path (woof/hex/mpasphys/farms_v842.py): the solar
+// zenith cosine FARMS reads on every step, by MPAS's own radiation
+// geometry -- radconst's declination (mpas_atmphys_driver_radiation_sw.F
+// :1009-1050, as mpas_sw_radconst) and the hour angle of the shortwave
+// wrapper's coszen (module_ra_rrtmg_sw.F, as mpas_sw_prep), with no
+// equation of time -- at the step's own xtime (minutes) instead of the
+// radiation interval's midpoint.  Latitude and longitude in radians, as
+// the mesh carries them, turned to degrees as radiation_sw_from_MPAS does.
+extern "C" __global__ void farms_mpas_coszen(
+    int nc, const float* __restrict__ lat_rad, const float* __restrict__ lon_rad,
+    float julian, float xtime, float gmt, float degrad, float dpd,
+    float* __restrict__ coszen)
+{
+    const int c = blockIdx.x * blockDim.x + threadIdx.x;
+    if (c >= nc) return;
+    const float sinob = glibc_sinf(FMUL(23.5f, degrad));
+    float sx = FMUL(dpd, julian >= 80.f ? FSUB(julian, 80.f) : FADD(julian, 285.f));
+    sx = FMUL(sx, degrad);
+    const float declin = glibc_asinf(FMUL(sinob, glibc_sinf(sx)));
+    const float xt24 = fmodf(xtime, 1440.f);
+    const float local = FADD(FADD(gmt, FDIV(xt24, 60.f)),
+                             FDIV(FDIV(lon_rad[c], degrad), 15.f));
+    const float angle = FMUL(FMUL(15.f, FSUB(local, 12.f)), degrad);
+    const float lat = FMUL(FDIV(lat_rad[c], degrad), degrad);
+    coszen[c] = FADD(FMUL(glibc_sinf(lat), glibc_sinf(declin)),
+                     FMUL(FMUL(glibc_cosf(lat), glibc_cosf(declin)),
+                          glibc_cosf(angle)));
+}

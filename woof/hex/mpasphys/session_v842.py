@@ -122,6 +122,15 @@ class NativePhysicsSession:
             self.surface_service = NativeSurfaceService(self, cuda_device,
                 read_surface_record=surface_record_reader)
             self.hooks.external.update(self.surface_service.callbacks())
+        # WOOF-only WRF-Solar FARMS service (farms_v842): a CUDA glue operation on the device pool views.
+        self.farms_service = None
+        if str(getattr(config, 'service_backends', {}).get('farms_sw', 'off')) == 'hex-cuda':
+            if cuda_device is None:
+                raise RuntimeError("the FARMS service (config_farms_sw_backend = 'hex-cuda') runs on the CUDA "
+                                   "device pool views; this session has none")
+            from .farms_v842 import FarmsService
+            self.farms_service = FarmsService(self)
+            self.hooks.external.update(self.farms_service.callbacks())
         self.driver = PhysicsDriver(config, PhysicsManager(config, dt,
                                      streams=stream_intervals), slots, self.hooks)
         if getattr(native, 'framework_only', False):
