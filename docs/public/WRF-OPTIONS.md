@@ -20,7 +20,7 @@ WRF source: https://github.com/wrf-model/WRF at v4.7.1 (f52c197ed39d).
 
 | selector | imports | refused |
 |---|---|---|
-| `mp_physics` | 0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 30, 50, 106 | 7, 11, 13, 14, 15, 26, 27, 29, 32, 38, 40, 51, 52, 53, 55, 56, 95, 96, 97, 98, 99 |
+| `mp_physics` | 0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 30, 50, 96, 106 | 7, 11, 13, 14, 15, 26, 27, 29, 32, 38, 40, 51, 52, 53, 55, 56, 95, 97, 98, 99 |
 | `cu_physics` | 0, 1, 3, 5, 6, 16, 96 | 2, 4, 7, 10, 11, 14, 93, 94, 95, 98, 99 |
 | `shcu_physics` | 0, 5 | 1, 2, 3, 4 |
 | `bl_pbl_physics` | 0, 1, 2, 5, 9, 11 | 3, 4, 7, 8, 10, 12, 16, 17, 98, 99 |
@@ -75,7 +75,7 @@ WRF source: https://github.com/wrf-model/WRF at v4.7.1 (f52c197ed39d).
 | `55` | jensen_ishmael | refused: namelist.input &physics: mp_physics=55 (Jensen-ISHMAEL, Registry.EM_COMMON:3043 package jensen_ishmael) is not ported. ISHMAEL carries three ice species (qi, qi2, qi3) that each predict number, volume and aspect ratio (qni/qvoli/qaoli and the _2/_3 sets), so ice habit and density evolve with growth and riming; no woof scheme carries those moments. Morrison (mp_physics=10) has fixed spherical cloud ice, snow and graupel/hail, and running it under an ISHMAEL request would deposit, rime and sediment ice by a different model. Ask for mp_physics=10 to run Morrison under its own name. |
 | `56` | ntu | refused: namelist.input &physics: mp_physics=56 (NTU multi-moment, package ntu) is not ported. It predicts two moments for liquid and three for ice, with ice shape and density, which no woof scheme carries. |
 | `95` | etampnew | refused: namelist.input &physics: mp_physics=95 (the old Eta Ferrier scheme, package etampnew) is not ported. It advects total condensate with ice and rain fractions; Ferrier-Aligo (mp_physics=5) is its successor and is not run in its place. |
-| `96` | madwrf_mp | refused: namelist.input &physics: mp_physics=96 (MADWRF, package madwrf_mp) is not ported. It is the cloud scheme of WRF's MAD-WRF solar-irradiance configuration, which works with MAD-WRF's satellite cloud initialization; woof carries neither. |
+| `96` | madwrf_mp | imports |
 | `97` | gsfcgcescheme | refused: namelist.input &physics: mp_physics=97 (Goddard GCE three-ice, package gsfcgcescheme) is not ported; no woof scheme runs the Goddard ice processes, and none is run in its place. |
 | `98` | lscondscheme | refused: namelist.input &physics: mp_physics=98 (large-scale condensation, package lscondscheme) is not ported. It removes supersaturation as instantaneous rain with no cloud or ice species; no woof scheme runs it, and none is run in its place. |
 | `99` | mkesslerscheme | refused: namelist.input &physics: mp_physics=99 (modified Kessler, package mkesslerscheme) is not ported. Its warm-rain rates differ from Kessler (mp_physics=1), which is not run in its place. |

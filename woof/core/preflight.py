@@ -2720,6 +2720,11 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # Its D4 coupling (kernels/partial_nest_d4.cu), RTX A6000 sm_86, NVRTC
     # 12.9, 2026-10-30: all six entry points 0 B.
     "partial_nest_d4": 0,
+    # WRF-Solar EPS (multi_perturb) and MAD-WRF, same card, both loaders
+    # (load_module, GPUWM_WRF_EXACT 0 and 1): eps_apply, mp_setup_amplitude,
+    # mp_noise, mp_ar1, mp_fill_levels, mp_clip, madwrf_cloud_init_columns
+    # and madwrf_nudge read 0 B (their profiles are global scratch).
+    "wrfsolar_eps": 0, "madwrf": 0,
 }
 
 #: The readings the ceiling above is made of, each naming its box, its
@@ -3987,6 +3992,9 @@ def domain_kernel_modules(dc: DomainConfig, *,
         modules.add("cldfra3")
     if int(getattr(dc.run, "multi_perturb", 0)) == 1:   # woof/core/wrfsolar_eps.py
         modules.add("wrfsolar_eps")
+    if (int(getattr(dc.run, "madwrf_opt", 0)) == 2
+            or int(getattr(dc.run, "madwrf_cldinit", 0)) == 1):   # woof/core/madwrf.py
+        modules.add("madwrf")
     if int(getattr(dc.run, "solar_diagnostics", 0) or 0) == 1:
         modules.add("solar_diag")                # woof/core/solar_diagnostics.py
     from woof.core.theta_m import run_theta_m

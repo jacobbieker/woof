@@ -3353,3 +3353,18 @@ KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
     measured="2026-10-30", complete=False,
     frames=MappingProxyType({"partial_nest_d4": 0}),
 ),)
+
+# WRF-Solar EPS (kernels/wrfsolar_eps.cu, multi_perturb) and MAD-WRF
+# (kernels/madwrf.cu), production loader (woof.core.kernels.load_module),
+# default and strict numerics, read 2026-10-30 on the RTX A6000 CUDA host
+# (NVRTC 12.9): every entry point reads 0 B.
+KERNEL_LOCAL_FRAME_RECORDINGS = tuple(
+    replace(row, complete=False)
+    if not {"wrfsolar_eps", "madwrf"} <= set(row.frames) else row
+    for row in KERNEL_LOCAL_FRAME_RECORDINGS)
+KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
+    box="pb", device="NVIDIA RTX A6000",
+    compute_capability="86", nvrtc_build="12.9.86", platform_family="linux",
+    measured="2026-10-30", complete=False,
+    frames=MappingProxyType({"wrfsolar_eps": 0, "madwrf": 0}),
+),)

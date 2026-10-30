@@ -74,11 +74,18 @@ def mpas_coszen(cp, *, lat_cell, lon_cell, julian, xtime_min, gmt, degrad, dpd):
     return out
 
 
+def _eps_farms(session, **copies):
+    from .wrfsolar_eps_v842 import farms_inputs
+    farms_inputs(session, **copies)
+
+
 def farms_mpas(cp, *, nc, nl, p8w, rho, dz, qv, qc, qi, qs, cldfrac,
-               re_cloud, re_ice, re_snow, albedo, coszen, has_req, juday):
+               re_cloud, re_ice, re_snow, albedo, coszen, has_req, juday,
+               perturb=None):
     """FARMS on MPAS [level, cell] arrays: the first ``nc`` cells of every
     array, levels 1..nl (nl = nVertLevels, the WRF kte).  ``p8w`` is the
-    surface interface pressure per cell.  Returns the six outputs, (nc,)."""
+    surface interface pressure per cell.  Returns the six outputs, (nc,).
+    ``perturb`` (WOOF-only WRF-Solar EPS) rewrites the copies FARMS reads."""
     def prof(a):
         return cp.ascontiguousarray(cp.asarray(a, dtype=cp.float32)[:nl, :nc])
 
@@ -86,11 +93,18 @@ def farms_mpas(cp, *, nc, nl, p8w, rho, dz, qv, qc, qi, qs, cldfrac,
         return cp.ascontiguousarray(cp.asarray(a, dtype=cp.float32)[:nc])
 
     zeros = cp.zeros(nc, dtype=cp.float32)
+    inputs = dict(albedo=surf(albedo), aod=zeros, angexp=zeros, aerasy=zeros,
+                  qv=prof(qv), qc=prof(qc), qs=prof(qs))
+    if perturb:
+        # four distinct aerosol planes, as WRF's 2-D fields are
+        inputs.update(aod=cp.zeros(nc, dtype=cp.float32), angexp=cp.zeros(nc, dtype=cp.float32),
+                      aerasy=cp.zeros(nc, dtype=cp.float32))
+        perturb(**inputs)
     return farms_columns(
-        p8w_sfc=surf(p8w), albedo=surf(albedo), coszen=surf(coszen),
-        aerssa=zeros, aerasy=zeros, aod550=zeros, angexp=zeros,
-        rho=prof(rho), dz8w=prof(dz), qv=prof(qv), qc=prof(qc), qi=prof(qi),
-        qs=prof(qs), re_cloud=prof(re_cloud), re_ice=prof(re_ice),
+        p8w_sfc=surf(p8w), albedo=inputs["albedo"], coszen=surf(coszen),
+        aerssa=zeros, aerasy=inputs["aerasy"], aod550=inputs["aod"], angexp=inputs["angexp"],
+        rho=prof(rho), dz8w=prof(dz), qv=inputs["qv"], qc=inputs["qc"], qi=prof(qi),
+        qs=inputs["qs"], re_cloud=prof(re_cloud), re_ice=prof(re_ice),
         re_snow=prof(re_snow), cldfra=prof(cldfrac), has_req=has_req,
         juday=juday)
 
@@ -140,7 +154,9 @@ def farms_sw_step(provider, call):
         dz=prepared["dz_p"], qv=prepared["qv_p"], qc=qc,
         qi=qi, qs=prepared["qs_p"], cldfrac=diag["cldfrac"],
         albedo=diag["sfc_albedo"], coszen=coszen, has_req=has_req,
-        juday=int(np.trunc(F(julian))), **radii)
+        juday=int(np.trunc(F(julian))),
+        perturb=getattr(provider.session, "wrfsolar_eps", None) and (
+            lambda **copies: _eps_farms(provider.session, **copies)), **radii)
     for source, target in OVERWRITES:
         diag[target][:nc] = out[source]
     return out

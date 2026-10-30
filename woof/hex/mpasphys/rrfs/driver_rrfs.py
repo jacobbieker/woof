@@ -356,6 +356,11 @@ def resolve_namelist(text: str, *, backends: Mapping[str, str] | None = None,
     if spectral.resolve(groups) != "none":
         raise ValueError(f"&{spectral.GROUP} {spectral.OPTION} is not available on the RRFS fork route; "
                          "it is an MPAS-A v8.4.2 suite-route option")
+    from .. import wrfsolar_eps_v842 as wrfsolar_eps
+    wrfsolar_eps.refuse_madwrf(groups)
+    if groups.get(wrfsolar_eps.GROUP):
+        raise ValueError(f"&{wrfsolar_eps.GROUP} (WRF-Solar EPS) is not available on the RRFS fork "
+                         "route; it is an MPAS-A v8.4.2 suite-route option")
     from .. import solar_diagnostics_v842 as solar
     if solar.resolve(groups):
         raise ValueError(f"&{solar.GROUP} {solar.OPTION} is not available on the RRFS fork route; "

@@ -1434,6 +1434,14 @@ def _run_native_dynamics(arguments, config, layout, payload, streams, library,
                 cuda_resources=cuda_resources,
                 surface_record_reader=surface_record_reader)
         session.output_config_snapshot=output_config_snapshot
+        if getattr(config,'wrfsolar_eps',None) is not None:
+            # WOOF's &wrfsolar_eps (wrfsolar_eps_v842): the STOCHPERT.TBL fields on the mesh's harmonics.
+            if limited_area:
+                raise ValueError('&wrfsolar_eps config_multi_perturb runs on global meshes: its harmonic '
+                                 'patterns need every neighbour, and a regional mesh has none at its edge')
+            from .wrfsolar_eps_v842 import MpasMultiPerturb
+            session.wrfsolar_eps=MpasMultiPerturb(config.wrfsolar_eps,mesh,dt=dt,
+                                                  n_solve=int(layout.dimensions['nCellsSolve']))
         receipt['lake_cells_folded_to_water']=fold_lake_class(native,layout)
         if limited_area:
             receipt['limited_area_sentinels']=remap_limited_area_sentinels(native,layout)

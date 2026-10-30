@@ -28,7 +28,9 @@
     "theta_m": "f4ba37fc9e5b12fe0f71dd856210d105bf59d8ea8c68954cb573901e94a455f2",
     "avgflx": "311619e4c2249be2fccf86771c68441d56fd8cb3f7986c2992ce5f2483871ea5",
     "partial_nest": "0d1d0892139d67623e8cb055de55f83855fa7f02739c81a26d6577eb5f2bd33a",
-    "partial_nest_d4": "6afe495a2f6399cbf4c8f34955de495274a2285b3bfdf5ead828a9de1595c6e2"
+    "partial_nest_d4": "6afe495a2f6399cbf4c8f34955de495274a2285b3bfdf5ead828a9de1595c6e2",
+    "wrfsolar_eps": "c312b1fba916461bac63332e911d1e2d9968924adf5466c562649a790dfda58d",
+    "madwrf": "cefa3f49219aae1d562848db1e1cbad6362fb3478666e3e6c3b00c5f4cb99650"
   },
   "headers": {
     "gsd_hail_bins.cuh": "55646c988bc37b59911385010843d1f48b1644e659390876f3f0581c923c9bed",
@@ -109,6 +111,13 @@
     "solar_diag": [
       "glibc_flt32.cuh",
       "glibc_trig_flt32.cuh"
+    ],
+    "wrfsolar_eps": [
+      "glibc_flt32.cuh",
+      "glibc_trig_flt32.cuh"
+    ],
+    "madwrf": [
+      "glibc_flt32.cuh"
     ]
   }
 }

@@ -248,11 +248,16 @@ class NativePhysicsSession:
             result["surface_service"] = self.surface_service.restart_state()
         if getattr(self, 'shcu_deng_service', None) is not None:
             result["shcu_deng_service"] = self.shcu_deng_service.restart_state()
+        if getattr(self, 'wrfsolar_eps', None) is not None:
+            result["wrfsolar_eps"] = self.wrfsolar_eps.restart_state()
         return result
 
     def restore(self, fields: Mapping[str, Any]) -> None:
         """Restore explicit native time levels; mpas_atmphys_init.F:174-396."""
         fields = dict(fields)
+        multi = fields.pop('wrfsolar_eps', None)
+        if (multi is None) != (getattr(self, 'wrfsolar_eps', None) is None):
+            raise ValueError('WRF-Solar EPS restart state/configuration differs')
         deng = fields.pop('shcu_deng_service', None)
         if (deng is None) != (getattr(self, 'shcu_deng_service', None) is None):
             raise ValueError('Deng shallow cumulus service restart state/backend differs')
@@ -284,3 +289,5 @@ class NativePhysicsSession:
             self.surface_service.restore_restart_state(state)
         if deng is not None:
             self.shcu_deng_service.restore_restart_state(deng)
+        if multi is not None:
+            self.wrfsolar_eps.restore_restart_state(multi)

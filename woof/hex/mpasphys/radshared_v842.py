@@ -668,6 +668,11 @@ def cloudiness_slot(call):
     nc=int(pools["nCellsSolve"])
     profiles={name:_from_public(pools["prepared"][name],nc) for name in
               ("qv","qc","qi","qs","t","pres","pres_hyd","rho")}
+    if call.scheme=="cld_fraction_thompson" and pools.get("wrfsolar_eps_session") is not None:
+        # WOOF-only WRF-Solar EPS (wrfsolar_eps_v842, config_pert_cld3): the t and qv cal_cldfra3
+        # reads (module_radiation_driver.F:1472-1474), on the cloudiness copies.
+        from .wrfsolar_eps_v842 import cld3_perturb
+        profiles=cld3_perturb(pools["wrfsolar_eps_session"],profiles)
     # WOOF-only services (woof.hex.mpasphys.shcu_deng_v842): WRF's convective
     # cloud for radiation. Absent (the default) nothing below changes a word.
     convective=pools.get("convective_cloud") or {}
@@ -739,6 +744,8 @@ def bind_native_pools(provider, call):
            'f_qc':provider['scalar_state']['f_qc'],
            'f_qi':provider['scalar_state']['f_qi'],'radshared':shared}
     session=getattr(provider,'session',None)
+    if getattr(session,'wrfsolar_eps',None) is not None:
+        pools['wrfsolar_eps_session']=session
     services=getattr(getattr(session,'config',None),'service_backends',{})
     if any(str(services.get(name,'off'))!='off' for name in ('shcu_deng','cu_rad_feedback')):
         from .shcu_deng_v842 import convective_cloud
