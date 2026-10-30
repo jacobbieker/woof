@@ -113,6 +113,11 @@ def shortwave_slot(call):
     aerosols = {n: sounding[n][:, :nc] for n in ("nwfa", "nifa", "aerosol_qv") if n in sounding}
     if "ht" in sounding:
         aerosols["ht"] = sounding["ht"][:nc]
+    # WOOF's &radiation config_rrtmg_spectral_output (radiation_spectral_v842): [band, cell] fields.
+    from .radiation_spectral_v842 import OPTION, slot_fields
+    spectral = call.options.get(OPTION, "none")
+    if spectral != "none":
+        options["spectral_output"] = spectral
     out = engine.radiation_sw_from_MPAS(fields, surface,
         sounding["p8w"][:, :nc], sounding["t8w"][:, :nc],
         lat_cell=mesh["latCell"][:nc], lon_cell=mesh["lonCell"][:nc],
@@ -120,6 +125,8 @@ def shortwave_slot(call):
         config_microp_re=call.options["config_microp_re"], **aerosols, **options)
     for name in SCALAR_OUTPUTS:
         diag[name][:nc] = out[name]
+    for name in slot_fields("sw", spectral):
+        diag[name][:, :nc] = out[name]
     pools["tend_physics"]["rthratensw"][:, :nc] = out["rthratensw"]
     for name in ("taod5502d", "taod5503d"):
         if name in out:
@@ -180,6 +187,9 @@ class MPASShortwave(CudaSW):
         from woof import nvrtc_ptx_cache
         import woof.core.rrtmg_sw as legacy
         self.cp = cp
+        # CudaSW's rrtmg_spectral_output switch (this constructor does not run CudaSW's); the MPAS slot sets
+        # it per call (rrtmg_swrad spectral_output).
+        self.spectral_output = "none"
         if (tables is None) == (raw_coefficients is None):
             raise ValueError("provide either initialized oracle tables or raw device coefficients")
         if raw_coefficients is None:
@@ -501,7 +511,11 @@ class MPASShortwave(CudaSW):
     def rrtmg_swrad(self, fields, surface, p8w, t8w, *, xtime, gmt, julday, radt,
                     degrad, declin, solcon, icloud, cldovrlp, idcor, o3input,
                     pin, o3clim, has_reqc=0, has_reqi=0, has_reqs=0,
-                    aer_opt=0, aerosol=None, column_chunk=None):
+                    aer_opt=0, aerosol=None, column_chunk=None, spectral_output="none"):
+        """``spectral_output`` "bands"/"gpoints" adds the boundary fluxes' spectral split
+        (radiation_spectral_v842.slot_fields) as (count, column) slabs, zero in night columns
+        as the broadband outputs are; the broadband words do not depend on it."""
+        from .radiation_spectral_v842 import slot_fields
         cp = self.cp
         nc, nz = fields["p3d"].shape
         nl = nz + 1
@@ -536,6 +550,9 @@ class MPASShortwave(CudaSW):
         profiles = [cp.zeros((nc, nl + 1), dtype=cp.float32) for _ in range(4)]
         direct = cp.zeros((nc, nl + 1), dtype=cp.float32)
         heat = cp.zeros((nc, nl), dtype=cp.float32)
+        from woof.core.physics_inventory import SPECTRAL_WIDTHS
+        spectral = {name: cp.zeros((nc, SPECTRAL_WIDTHS["sw", spectral_output]), dtype=cp.float32)
+                    for name in slot_fields("sw", spectral_output)}
         day = cp.flatnonzero(cosine > 0)
         nd = int(day.size)
         if nd:
@@ -568,7 +585,8 @@ class MPASShortwave(CudaSW):
             with _deferred_guards():
                 self._sunlit_batches(day, nd, width, layers, interfaces, height, s, sources, nz, nl,
                                      cldovrlp, idcor, julday, cloudflag, iceflag, solcon,
-                                     cosine, column_chunk, profiles, direct, heat)
+                                     cosine, column_chunk, profiles, direct, heat,
+                                     spectral_output, spectral)
             del sources
             # The batched chain's workspace is used on radiation calls only;
             # hand it back so it is not held through the steps in between
@@ -581,13 +599,20 @@ class MPASShortwave(CudaSW):
         result = {n: scalars[i] for i, n in enumerate(SCALAR_OUTPUTS)}
         result.update(zip(PROFILE_OUTPUTS, (profiles[0], profiles[1], profiles[2], profiles[3])))
         result["rthratensw"] = tendency
+        # (count, column), MPAS's [band, cell]
+        result.update({name: cp.ascontiguousarray(value.T) for name, value in spectral.items()})
         return result
 
     def _sunlit_batches(self, day, nd, width, layers, interfaces, height, s, sources, nz, nl,
                         cldovrlp, idcor, julday, cloudflag, iceflag, solcon, cosine, column_chunk,
-                        profiles, direct, heat):
-        """MPAS module_ra_rrtmg_sw.F:10026-10664: the sunlit wrapper batches of rrtmg_swrad."""
+                        profiles, direct, heat, spectral_output="none", spectral=None):
+        """MPAS module_ra_rrtmg_sw.F:10026-10664: the sunlit wrapper batches of rrtmg_swrad.
+
+        ``spectral`` (field -> (count, column)) takes each batch's surface and top slabs of the
+        solver's spectral output (CudaSW.spectral_output, on for these calls only)."""
+        from .radiation_spectral_v842 import boundary_slabs, slot_fields
         cp = self.cp
+        fields = slot_fields("sw", spectral_output) if spectral else {}
         for first in range(0, nd, width):
             cols = day[first:first + width]
             n = int(cols.size)
@@ -614,17 +639,26 @@ class MPASShortwave(CudaSW):
             # shape only; per-column words are the same at any width.
             # icld=0 inatm clears the same optical slabs supplied here; bypass
             # the legacy launcher's campaign-only refusal without changing it.
-            out = self.rrtmg_sw_batched_device(
-                n, nl, max(1, cldovrlp), l[0], it[0], l[1], it[1], cp.ascontiguousarray(s[3, cols]),
-                l[2], l[3], l[4], l[5], l[6], l[7], albedo, albedo, albedo, albedo,
-                cp.ascontiguousarray(cosine[cols]), cp.ones(n, dtype=cp.float32), 0,
-                cp.full(n, solcon, dtype=cp.float32), cloudflag, iceflag, 1,
-                m[0], m[4], m[5], m[6], m[7], m[1], m[2], m[3], l[12], l[13], l[14],
-                aer_opt=3 if optics is not None else 0, column_chunk=column_chunk or n, mcica_layout="column", aerosol=optics)
+            self.spectral_output = spectral_output if fields else "none"
+            try:
+                out = self.rrtmg_sw_batched_device(
+                    n, nl, max(1, cldovrlp), l[0], it[0], l[1], it[1], cp.ascontiguousarray(s[3, cols]),
+                    l[2], l[3], l[4], l[5], l[6], l[7], albedo, albedo, albedo, albedo,
+                    cp.ascontiguousarray(cosine[cols]), cp.ones(n, dtype=cp.float32), 0,
+                    cp.full(n, solcon, dtype=cp.float32), cloudflag, iceflag, 1,
+                    m[0], m[4], m[5], m[6], m[7], m[1], m[2], m[3], l[12], l[13], l[14],
+                    aer_opt=3 if optics is not None else 0, column_chunk=column_chunk or n, mcica_layout="column", aerosol=optics)
+            finally:
+                self.spectral_output = "none"
             for target, name in zip(profiles, ("swuflx", "swuflxc", "swdflx", "swdflxc")):
                 target[cols] = out[name]
             direct[cols] = out["swdkdir"]
             heat[cols] = out["swhr"]
+            if fields:
+                slab = out["sw_band" if spectral_output == "bands" else "sw_gpt"]
+                for name, value in boundary_slabs(slab, fields).items():
+                    spectral[name][cols] = value
+                del slab
             # Retire this batch's inputs, slab and solver outputs before
             # the next batch allocates its own.
             del cols, l, it, m, optics, albedo, out

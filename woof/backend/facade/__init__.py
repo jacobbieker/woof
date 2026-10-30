@@ -154,8 +154,9 @@ def sort(a, axis=-1):
     return asarray(np.sort(asnumpy(a), axis=axis))
 
 
-def argsort(a, axis=-1):
-    return asarray(np.argsort(asnumpy(a), axis=axis))
+def argsort(a, axis=-1, kind=None):
+    # CuPy's signature: the MPAS longwave groups columns with kind='stable'.
+    return asarray(np.argsort(asnumpy(a), axis=axis, kind=kind))
 
 
 def searchsorted(a, v, side="left"):
