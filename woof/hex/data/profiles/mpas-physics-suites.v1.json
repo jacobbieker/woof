@@ -1899,6 +1899,9 @@
         "config_radtran_solver",
         "config_radtran_streams",
         "config_radtran_pseudospherical"
+      ],
+      "diagnostics": [
+        "config_solar_diagnostics"
       ]
     },
     "services": {

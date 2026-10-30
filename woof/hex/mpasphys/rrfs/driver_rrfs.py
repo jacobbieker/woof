@@ -356,6 +356,10 @@ def resolve_namelist(text: str, *, backends: Mapping[str, str] | None = None,
     if spectral.resolve(groups) != "none":
         raise ValueError(f"&{spectral.GROUP} {spectral.OPTION} is not available on the RRFS fork route; "
                          "it is an MPAS-A v8.4.2 suite-route option")
+    from .. import solar_diagnostics_v842 as solar
+    if solar.resolve(groups):
+        raise ValueError(f"&{solar.GROUP} {solar.OPTION} is not available on the RRFS fork route; "
+                         "it is an MPAS-A v8.4.2 suite-route option")
     for group, keys in spec["registry_groups"].items():
         for key, value in groups.get(group, {}).items():
             if key not in keys:

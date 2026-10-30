@@ -21,6 +21,7 @@ from ..config import parse_fortran_namelist
 from ..physics_suites import load_table
 from . import radiation_spectral_v842 as _spectral
 from . import radtran_v842 as _radtran
+from . import solar_diagnostics_v842 as _solar
 
 SCHEMA = "mpas-port.physics-driver-v842/v1"
 
@@ -305,6 +306,9 @@ class DriverConfig:
     #: WOOF's &radtran group (radtran_v842): the woof.radtran spectral diagnostic's settings
     #: (woof.radtran.model.Diagnostic), or None.  Not a Registry option either.
     radtran: Any = None
+    #: WOOF's &diagnostics config_solar_diagnostics (solar_diagnostics_v842): WRF-Solar's 26
+    #: diagnostics after every step.  Not a Registry option.
+    solar_diagnostics: bool = False
 
     def cpu_warning(self) -> str | None:
         """The loud start-up lines naming each active slot that runs on the CPU, or None when none does."""
@@ -409,6 +413,8 @@ class DriverConfig:
             result["radtran"] = dict(wavelengths=list(d.wavelengths), umu=list(d.umu), phi=list(d.phi),
                                      mol_abs_param=d.mol_abs_param, solver=d.solver, streams=d.streams,
                                      pseudospherical=d.pseudospherical)
+        if self.solar_diagnostics:
+            result["solar_diagnostics"] = True
         return result
 
 
@@ -705,6 +711,7 @@ def resolve_namelist(text: str, *, backends: Mapping[str, str] | None = None,
 
     spectral = _spectral.resolve(groups)
     radtran = _radtran.resolve(groups)
+    solar = _solar.resolve(groups)
 
     def record(config: DriverConfig) -> DriverConfig:
         _check_convective_cloud(config)
@@ -713,6 +720,9 @@ def resolve_namelist(text: str, *, backends: Mapping[str, str] | None = None,
         if spectral != "none":
             config = _replace(config, spectral_output=spectral)
             _check_spectral_output(config)
+        if solar:
+            config = _replace(config, solar_diagnostics=True)
+            _solar.check(config)
         if library:
             return config
         return _replace(config, cpu_slots=cpu_slot_record(config, "mpasphys_v842", cpu_reasons, explicit))

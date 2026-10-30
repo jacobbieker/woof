@@ -17,7 +17,7 @@
 #       -e PYTHON=$PWD/.pixi/envs/default/bin/python ubuntu:26.04 \
 #       bash tools/solar_diag_wrf471_oracle/build.sh /wrf OUT_DIR
 #
-# Writes OUT_DIR/{columns.bin, columns_meta.json, solar_diag.out.bin,
+# Writes OUT_DIR/{columns.bin, columns_meta.json, mpas_zgrid.bin, solar_diag.out.bin,
 # receipt.txt}.  tests/test_solar_diag_wrf471_oracle.py grades the port.
 set -euo pipefail
 [[ $# -eq 2 ]] || { echo "usage: build.sh WRF_SOURCE_ROOT OUT_DIR" >&2; exit 2; }
@@ -59,7 +59,7 @@ if grep -q _ZGV undefined.txt; then echo "libmvec symbol at -O0" >&2; exit 5; fi
     echo "libm symbols (module_diag_solar.o): $(grep -E 'acosf|atanf|powf|expf|logf' undefined.txt | tr -s ' ' | tr '\n' ' ')"
     sha256sum "$root/phys/module_diag_solar.F" "$root/share/module_model_constants.F" \
         "$here/run_solar_diag.F90" "$here/make_columns.py" "$here/build.sh" \
-        columns.bin columns_meta.json solar_diag.out.bin \
+        columns.bin columns_meta.json mpas_zgrid.bin solar_diag.out.bin \
         | sed "s#$root/##; s#$here/#tools/solar_diag_wrf471_oracle/#"
 } > receipt.txt
 cat receipt.txt

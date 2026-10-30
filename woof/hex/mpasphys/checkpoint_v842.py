@@ -64,6 +64,11 @@ class CheckpointRoute(MovingRoute):
         selected = super().carried_rows(layout)
         if getattr(self, '_restoring_moving', False):
             return selected
+        # WRF-Solar diagnostics (solar_diagnostics_v842) have no restart I/O in
+        # WRF, so a checkpoint leaves them out and GHI_ACCUM restarts at zero.
+        from .solar_diagnostics_v842 import FIELDS as _SOLAR
+        selected = [row for row in selected
+                    if not (row['pool'] == 'diag_physics' and row['name'] in _SOLAR)]
         seen = {(row['pool'], row['name']) for row in selected}
         # A same-mesh restart must keep evolving SST/ice and surface roles.
         # Moving remaps deliberately take those fields from the new member.

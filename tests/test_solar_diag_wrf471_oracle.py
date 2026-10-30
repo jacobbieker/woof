@@ -24,7 +24,7 @@ DATA = Path(__file__).parent / "data" / "oracles" / "solar_diag"
 
 def _read():
     receipt = (DATA / "receipt.txt").read_text()
-    for name in ("columns.bin", "columns_meta.json", "solar_diag.out.bin"):
+    for name in ("columns.bin", "columns_meta.json", "mpas_zgrid.bin", "solar_diag.out.bin"):
         digest = hashlib.sha256((DATA / name).read_bytes()).hexdigest()
         assert f"{digest}  {name}" in receipt, name
     raw = np.fromfile(DATA / "columns.bin", dtype=np.uint8)
@@ -48,6 +48,13 @@ def _read():
                          swdnt=swdnt, prior=prior, arrays=arrays, ph=ph, phb=phb,
                          want=out[c], meta=meta[c]))
     assert pos == raw.size and len(cols) == out.shape[0] == len(meta)
+    zg = np.fromfile(DATA / "mpas_zgrid.bin", dtype="<f4")
+    zpos = 0
+    for c in cols:
+        if c["meta"]["mpas"]:
+            c["zgrid"] = zg[zpos:zpos + c["nz"] + 1]
+            zpos += c["nz"] + 1
+    assert zpos == zg.size
     return cols
 
 
@@ -71,6 +78,14 @@ def _run(sub):
         stack(j) for j in range(12))
     ph = cp.asarray(np.ascontiguousarray(np.stack([c["ph"] for c in sub], axis=1)))
     phb = cp.asarray(np.ascontiguousarray(np.stack([c["phb"] for c in sub], axis=1)))
+    if sub[0]["meta"]["mpas"]:
+        # the MPAS adapter's own inputs: zgrid, MPAS's moist rho_p and dz_p
+        from woof.hex.mpasphys.solar_diagnostics_v842 import mpas_solar_inputs
+        zgrid = cp.asarray(np.ascontiguousarray(np.stack([c["zgrid"] for c in sub], axis=1)))
+        ph2, phb2, rho, dz = mpas_solar_inputs(cp, zgrid=zgrid, rho_p=rho, dz_p=dz)
+        for a, b in ((ph2, ph), (phb2, phb)):
+            assert np.array_equal(cp.asnumpy(a).view(np.uint32), cp.asnumpy(b).view(np.uint32))
+        ph, phb = ph2, phb2
     surf = lambda k: cp.asarray(np.array([c[k] for c in sub], np.float32))
     out = cp.asarray(np.ascontiguousarray(np.broadcast_to(
         np.array([c["prior"] for c in sub], np.float32), (NOUT, ncol))))

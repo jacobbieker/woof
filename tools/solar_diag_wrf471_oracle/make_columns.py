@@ -4,7 +4,7 @@
 
 Writes OUT_DIR/columns.bin in run_solar_diag.F90's layout and
 OUT_DIR/columns_meta.json (which columns are WRF-shaped and which are
-MPAS-shaped).  Deterministic; every value is a float32 word.
+MPAS-shaped) and OUT_DIR/mpas_zgrid.bin (the MPAS columns' zgrid).  Deterministic; every value is a float32 word.
 
 WRF-shaped columns: a hydrostatic sounding on a stretched height ladder;
 geopotential split as WRF splits it (PHB the base state, PH a small
@@ -131,7 +131,7 @@ def column(rng, mpas, kind, flags, coszen_override=None):
     arrays = [rho, dz, qv, qc, qi, qs, qc_tot, qi_tot, f32(re_c), f32(re_i),
               f32(re_s), f32(cldfra)]
     return dict(nz=nz, flags=flags, scalars=[dt, coszen, swdnb, swdnt, prior],
-                arrays=arrays, ph=ph, phb=phb)
+                arrays=arrays, ph=ph, phb=phb, zgrid=zwf if mpas else None)
 
 
 def main():
@@ -165,6 +165,12 @@ def main():
             f.write(c["ph"].tobytes())
             f.write(c["phb"].tobytes())
     (out / "columns_meta.json").write_text(json.dumps(meta))
+    # The MPAS columns' zgrid (w-level heights, float32), in column order:
+    # the adapter's own input, from which it forms PHB = 9.81*zgrid.
+    with open(out / "mpas_zgrid.bin", "wb") as f:
+        for c in cols:
+            if c["zgrid"] is not None:
+                f.write(np.ascontiguousarray(c["zgrid"], F).tobytes())
     print(len(cols), "columns")
 
 
