@@ -1123,10 +1123,13 @@ BASELINE_PINNED: dict[str, str] = {
     # levels256/rrtmg-lw: regenerated from rrtmg_lw_chain.cu after its
     # RLW_MAXLAY became an #ifndef default (the per-run layer tier); the
     # shipped-tier unit's PTX is byte-identical to the base's.
-    # RE-PINNED at the 1.1.0 upstream merge: regenerated from rrtmg_lw_chain.cu, which now carries the fork's per-run RLW_MAXLAY tier.
-    # Previously 8998771f.
+    # The 1.1.0 upstream merge dropped the on-disk twin for generation at
+    # composition and recorded 4fe1e55b here, a digest no generated twin
+    # has had: the generator's text is byte-identical to the twin file
+    # 59ef52e8d measured and pinned (8998771f, the RLW_MAXLAY tier), at every
+    # commit since.  Restored to that measured digest.
     "rrtmg_lw_chain_coalesced":
-        "4fe1e55bdb36cf806830a1f3e01538530033838940c6e65d044c1eec0f02a510",
+        "8998771ff5f3e7fe81da8e16ec9cf58dba99d983ac3f689edfbb1625deeb3250",
     # RE-PINNED on mlx-backend: rlw_rtrn_band_rows APPENDED (RRTMG per-band
     # longwave fluxes, rrtmg_spectral_output); every existing entry point is
     # unchanged text.  Its words equal compiled WRF v4.6.1 rtrnmc's per-band
