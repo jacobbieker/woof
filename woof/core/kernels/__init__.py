@@ -325,6 +325,9 @@ _EXTRA_HEADERS: dict[str, tuple[str, ...]] = {
     "cldfra3": ("glibc_flt32.cuh", "corem_log10f.cuh"),
     # WRF-Solar diagnostics (module_diag_solar.F): glibc 2.43's acosf.
     "solar_diag": ("glibc_flt32.cuh", "glibc_trig_flt32.cuh"),
+    # WRF-Solar EPS (multi_perturb): the scheme hooks (FADD/FMUL/FDIV/FSUB)
+    # and module_stoch's pattern arithmetic (expf, logf, cosf, sinf).
+    "wrfsolar_eps": ("glibc_flt32.cuh", "glibc_trig_flt32.cuh"),
 }
 
 #: Read-only view for tests and freeze receipts.
@@ -512,7 +515,11 @@ _URBAN_NO_FTZ_MODULES = frozenset({"urban_ucm", "urban_ucm480", "urban_bep",
 _NO_FTZ_MODULES = frozenset({"g3", "nsas", "sfclay", "myjsfc", "mynn_surface", "mynn_pbl",
                              "thompson_column", "ysu_480", "wsm6r",
                              "aer_opt2", "oml", "farms", "cldfra3", "solar_diag",
-                             "theta_m", "avgflx"}) | _SOLAR_NO_FTZ_MODULES
+                             "theta_m", "avgflx",
+                             # WRF 4.7.1 multi_perturb hooks
+                             # (tools/wrfsolar_eps_wrf471_oracle): subnormal
+                             # mixing ratios pass the multipliers unflushed.
+                             "wrfsolar_eps"}) | _SOLAR_NO_FTZ_MODULES
 
 # The exact chain's strict intake contracts (GPUWM_WRF_EXACT=1): these units
 # also compile without contraction in a strict process.  A default process
