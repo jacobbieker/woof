@@ -1195,6 +1195,11 @@ class RunConfig:
     #   (woof.core.swint; module_radiation_driver.F
     #   update_swinterp_parameters / interp_sw_radiation).  0 holds the
     #   last radiation call's fluxes for the whole interval.
+    #   swint_opt = 2: WRF-Solar's FARMS (woof.core.farms;
+    #   phys/module_ra_farms.F) evaluates the surface irradiance on every
+    #   step into SWDOWN2, SWDDIR2, SWDDNI2, SWDDIF2, SWDOWNC2 and SWDDNIC2;
+    #   the radiation call's SWDOWN stands unless couple_farms copies
+    #   SWDOWN2 into it.
     #   aer_opt = 3: the legacy RRTMG shortwave sees per-band aerosol
     #   optics built from the Thompson water- and ice-friendly aerosol
     #   numbers (woof.core.rrtmg_aerosol_optics; the driver's gt_aod plus
@@ -1846,6 +1851,13 @@ class RunConfig:
     # broadband word changes (tests/test_rrtmg_spectral_output.py, which
     # also holds every band word to compiled WRF).  Appended last, keyword-only.
     rrtmg_spectral_output: str = "none"
+    # WRF's couple_farms (Registry.EM_COMMON:2602, default .false.): under
+    # swint_opt = 2 the radiation driver copies FARMS's SWDOWN2 into SWDOWN
+    # on every step (module_radiation_driver.F:3084-3099), which the land
+    # surface reads; module_check_a_mundo.F:654-660 admits it only with
+    # swint_opt = 2.  Off, FARMS's six fields are diagnostics.  Appended
+    # last, keyword-only.
+    couple_farms: bool = False
 
 #: The ways a domain's clock meets the measured terrain rules
 #: (:attr:`RunConfig.terrain_clock`).
@@ -3770,6 +3782,46 @@ MP28_AEROSOL_SOURCE_OPTIONS: dict[str, tuple[int, str, str]] = {
 }
 
 
+def _validate_farms(cfg: RunConfig) -> None:
+    """``swint_opt = 2`` (FARMS, woof.core.farms): the ported envelope.
+
+    WRF's own checks first -- module_physics_init.F:1039-1057 stops a
+    microphysics scheme that hands FARMS neither its radii nor all of cloud,
+    ice and snow -- then the parts of the radiation driver's Solar_step
+    (the per-step CLDFRA and its temporary hydrometeor additions) that are
+    ported: icloud 0, 1 (with MYNN's icloud_bl merge) and 2, and aer_opt
+    0, 1 and 2.  Everything else is refused by name rather than run with a
+    cloud fraction or aerosol WRF would not have used.
+    """
+    from woof.core.farms import farms_mp_admitted
+    lw, sw = radiation_scheme_ids(cfg)
+    if int(sw) == 0:
+        raise ConfigurationRefused(
+            "swint_opt=2 (FARMS) needs a shortwave scheme (ra_sw_physics != "
+            "0): WRF evaluates FARMS inside the radiation driver, beside the "
+            "shortwave call whose SWDOWN couple_farms replaces")
+    if not farms_mp_admitted(int(cfg.mp_physics), int(getattr(cfg, "use_mp_re", 1))):
+        raise ConfigurationRefused(
+            f"swint_opt=2 with mp_physics={int(cfg.mp_physics)}: WRF stops "
+            "with 'FARMS (swint_opt==2) requires a different MP scheme' "
+            "(module_physics_init.F:1039-1057): FARMS needs the scheme's "
+            "effective radii (Thompson, Thompson aerosol-aware, WSM3/5/6/7, "
+            "WDM5/6/7) or none of them with cloud, ice and snow all present")
+    if int(getattr(cfg, "icloud", 1)) not in (0, 1, 2):
+        raise ConfigurationRefused(
+            f"swint_opt=2 with icloud={int(cfg.icloud)}: FARMS reads the "
+            "radiation driver's per-step CLDFRA, ported for icloud 0, 1 and 2 "
+            "(icloud = 3's cal_cldfra3 condensate adjustment is not)")
+    if int(cfg.aer_opt) not in (0, 1, 2):
+        raise ConfigurationRefused(
+            f"swint_opt=2 with aer_opt={int(cfg.aer_opt)}: FARMS's 2-D "
+            "aerosol is wired for aer_opt 0, 1 and 2; under aer_opt = 3 WRF "
+            "hands it the radiation call's TAOD5502D and the taer_* optics")
+    # The Solar_step's convective cloud additions (icloud_cu, KF's cldfra_dp,
+    # shcu_physics = 5, BMJ feedback, KF-CuP) have no woof counterpart: the
+    # legacy RRTMG adapter takes no convective condensate either.
+
+
 def validate_radiation_driver_options(cfg: RunConfig) -> None:
     """Radiation-driver options: the implemented values, by name.
 
@@ -3798,11 +3850,22 @@ def validate_radiation_driver_options(cfg: RunConfig) -> None:
             "radius defaults and snow ice fractions, so an unknown name "
             "cannot select either")
     swint = cfg.swint_opt
-    if isinstance(swint, bool) or swint not in (0, 1):
+    if isinstance(swint, bool) or swint not in (0, 1, 2):
         raise ConfigurationRefused(
             f"swint_opt={swint!r}: WRF defines 0 (hold the radiation call's "
-            "surface shortwave for the interval) and 1 (fit and interpolate "
-            "it on every step); nothing else is a WRF value")
+            "surface shortwave for the interval), 1 (fit and interpolate "
+            "it on every step) and 2 (FARMS on every step); nothing else is "
+            "a WRF value")
+    couple = getattr(cfg, "couple_farms", False)
+    if type(couple) is not bool:
+        raise ConfigurationRefused("couple_farms must be a boolean")
+    if couple and swint != 2:
+        raise ConfigurationRefused(
+            "couple_farms = true requires swint_opt = 2 (WRF "
+            "module_check_a_mundo.F:654-660): it copies FARMS's SWDOWN2 into "
+            "SWDOWN, and without FARMS there is no SWDOWN2")
+    if swint == 2:
+        _validate_farms(cfg)
     aer = cfg.aer_opt
     if isinstance(aer, bool) or aer not in (0, 1, 2, 3):
         raise ConfigurationRefused(

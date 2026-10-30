@@ -48,6 +48,20 @@ route's default above. An explicit adapter override must agree with the namelist
 both name the same slot. The real forecast door passes the native namelist and backend group to this
 resolver before the existing WOOF path.
 
+WOOF-only FARMS. `config_farms_sw_backend='hex-cuda'` in `&hex_mpasphys` (service
+`farms_sw`, default `off`) runs WRF-Solar's FARMS (WRF `swint_opt = 2`,
+`phys/module_ra_farms.F` v4.7.1; `woof.hex.mpasphys.farms_v842`) on every step,
+radiation steps included, right after the radiation slots and before the surface
+layer. It overwrites `swdnb`, `swddir`, `swddni` and `swddif` on owned cells with
+FARMS's GHI, direct, DNI and diffuse irradiance at the step's own sun (MPAS's radiation
+geometry), from the step's prepared `qv/qc/qi/qs_p`, `rho_p`, `dz_p`, `pres2_hyd_p`,
+the last radiation call's `cldfrac`, the microphysics' metre radii exactly when the
+MPAS shortwave reads them, `sfc_albedo`, and no aerosol. In v8.4.2 nothing reads those
+four between radiation calls (Noah takes `gsw`, untouched), so the service is
+diagnostic. The FARMS column words are WRF's own
+(`components/hex/tests/test_mpas_farms_v842.py`). Without the key nothing runs and the
+receipt is unchanged.
+
 A selection of Noah-MP v5.0 runs only with `--licence-opt-in ucar-noahmp`
 (`woof.hex.licence_gate`); UGWP and the fork's NOAA GSL physics are not gated
 (owner ruling 2026-10-14: US Government code). The library resolvers are not

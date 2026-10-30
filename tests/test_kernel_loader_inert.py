@@ -261,6 +261,9 @@ def test_lake_compile_options_do_not_change_existing_modules(monkeypatch, strict
     expected["lightning"] = ("-std=c++17", "--ftz=false", "--fmad=false")
     # WRF's ocean mixed layer (2.9.1) compiles as the column-exact ports do.
     expected["oml"] = ("-std=c++17", "--fmad=false", "--ftz=false")
+    # WRF-Solar FARMS (swint_opt = 2), graded bitwise against WRF v4.7.1's
+    # module_ra_farms.F (tests/test_farms_wrf471_parity.py).
+    expected["farms"] = ("-std=c++17", "--fmad=false", "--ftz=false")
     # WRF's HAILCAST diagnostics (lane/cap-hail 97e9a3ca061) compile without
     # FMA, like the other column-exact WRF ports.
     expected["hail"] = ("-std=c++17", "--fmad=false")

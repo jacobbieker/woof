@@ -199,6 +199,13 @@ _EXTRA_HEADERS: dict[str, tuple[str, ...]] = {
     # existing unit moves.
     "rrtmg_legacy_solar": ("glibc_flt32.cuh", "glibc_trig_flt32.cuh"),
     "swint": ("glibc_flt32.cuh", "glibc_trig_flt32.cuh"),
+    # WRF-Solar FARMS (swint_opt = 2, phys/module_ra_farms.F): EXP, **,
+    # ALOG10, COS, SIN, ACOS and SINH on REAL(4) are glibc's expf/powf/
+    # log10f/cosf/sinf/acosf and the correctly rounded sinhf, graded bitwise
+    # against WRF v4.7.1's gfortran Fortran by
+    # tests/test_farms_wrf471_parity.py.  A new module.
+    "farms": ("glibc_flt32.cuh", "glibc_trig_flt32.cuh", "log10_flt32.cuh",
+              "sinhf_flt32.cuh"),
     # WRF aer_opt = 3 shortwave optics (gt_aod, calc_aerosol_rrtmg_sw of
     # the operational HRRR fork): EXP is glibc's expf, graded bitwise
     # against the fork's gfortran/glibc Fortran by
@@ -481,7 +488,7 @@ _URBAN_NO_FTZ_MODULES = frozenset({"urban_ucm", "urban_ucm480", "urban_bep",
 # oml: graded word for word against WRF 4.6.1 OML1D (tools/oml_wrf461_oracle).
 _NO_FTZ_MODULES = frozenset({"g3", "nsas", "sfclay", "myjsfc", "mynn_surface", "mynn_pbl",
                              "thompson_column", "ysu_480", "wsm6r",
-                             "aer_opt2", "oml"}) | _SOLAR_NO_FTZ_MODULES
+                             "aer_opt2", "oml", "farms"}) | _SOLAR_NO_FTZ_MODULES
 
 # The exact chain's strict intake contracts (GPUWM_WRF_EXACT=1): these units
 # also compile without contraction in a strict process.  A default process

@@ -941,7 +941,33 @@ SOLAR_ALBEDO_OUTPUT_FIELDS = {
                      'ALBBCKSOL', 'BACKGROUND ALBEDO corrected for solar angle',
                      '', 'Registry.EM_COMMON:1587 (HRRR v4.1.21)'),
 }
+#: WRF swint_opt = 2 (FARMS, woof.core.farms): the six irradiances
+#: Farms_driver writes every step.  WRF's Registry puts SWDOWN2, SWDOWNC2
+#: and SWDDNIC2 in history ("rhd") and the direct/normal/diffuse three in
+#: restart only ("rd"); woof writes all six, the latter three flagged
+#: ``wrf_history=False``.
+FARMS_OUTPUT_FIELDS = {
+    "swdown2": _output_field(
+        'SWDOWN2', 'DOWNWARD SHORT WAVE FLUX AT GROUND SURFACE FROM FARMS',
+        'W m-2', 'Registry.EM_COMMON:1710'),
+    "swdownc2": _output_field(
+        'SWDOWNC2', 'CLEAR-SKY DOWNWARD SHORT WAVE FLUX AT GROUND SURFACE FROM FARMS',
+        'W m-2', 'Registry.EM_COMMON:1712'),
+    "swddnic2": _output_field(
+        'SWDDNIC2', 'Clear-sky Shortwave surface downward direct normal irradiance from FARMS',
+        'W m-2', 'Registry.EM_COMMON:1724'),
+    "swddir2": WrfOutputField(
+        'SWDDIR2', "f4", "", 'Shortwave surface downward direct irradiance from FARMS',
+        'W m-2', 'Registry.EM_COMMON:1719', False),
+    "swddni2": WrfOutputField(
+        'SWDDNI2', "f4", "", 'Shortwave surface downward direct normal irradiance from FARMS',
+        'W m-2', 'Registry.EM_COMMON:1722', False),
+    "swddif2": WrfOutputField(
+        'SWDDIF2', "f4", "", 'Shortwave surface downward diffuse irradiance from FARMS',
+        'W m-2', 'Registry.EM_COMMON:1726', False),
+}
 for _group in (CARRIED_SURFACE_OUTPUT_FIELDS, NOAH_OUTPUT_FIELDS, RADIATION_BOUNDARY_OUTPUT_FIELDS,
+               FARMS_OUTPUT_FIELDS,
                CUMULUS_RATE_OUTPUT_FIELDS,
                PHYSICS_PRESSURE_OUTPUT_FIELDS,
                SURFACE_ENERGY_OUTPUT_FIELDS,

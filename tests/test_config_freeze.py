@@ -93,6 +93,10 @@ def test_new_fields_are_reviewed_defaults_appended_last():
     """
     from woof.config import CHEM_RUN_FIELDS, FIRE_RUN_FIELDS
     names = [f.name for f in dataclasses.fields(RunConfig)]
+    # WRF's couple_farms (swint_opt = 2's SWDOWN2 -> SWDOWN), appended off.
+    assert names.pop() == "couple_farms"
+    assert RunConfig.__dataclass_fields__["couple_farms"].default is False
+    assert RunConfig.__dataclass_fields__["couple_farms"].kw_only
     # Output-only band-resolved RRTMG fluxes, appended off.
     assert names.pop() == "rrtmg_spectral_output"
     assert RunConfig.__dataclass_fields__["rrtmg_spectral_output"].default == "none"
@@ -543,7 +547,9 @@ def _check_frozen_defaults(actual):
                          ("output_diagnostics", 0), ("diag_int", 15),
                          ("wind_int", 5), ("nest_accumulation_archive", True),
                          # output-only band-resolved RRTMG fluxes, off
-                         ("rrtmg_spectral_output", "none")):
+                         ("rrtmg_spectral_output", "none"),
+                         # WRF couple_farms, off
+                         ("couple_farms", False)):
         assert actual.pop(field) == value, field
     # WRF's windfarm_opt and its three companions (the fork's Fitch
     # coupling), appended after upstream 1.1.0's fields, off.

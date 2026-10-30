@@ -3913,6 +3913,9 @@ def domain_kernel_modules(dc: DomainConfig, *,
     # legacy RRTMG shortwave (woof/core/rrtmg_aerosol_optics.py).
     if int(getattr(dc.run, "swint_opt", 0) or 0) == 1:
         modules.add("swint")
+    # WRF swint_opt = 2 (woof/core/farms.py): FARMS, on swint's zenith cosine.
+    if int(getattr(dc.run, "swint_opt", 0) or 0) == 2:
+        modules.update(("swint", "farms"))
     if int(getattr(dc.run, "alb_sol", 0) or 0) == 1:
         modules.add("solar_albedo")
     # Dudhia shortwave (ra_sw_physics = 1) launches its own column kernel

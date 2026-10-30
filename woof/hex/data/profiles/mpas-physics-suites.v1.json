@@ -1909,6 +1909,19 @@
           "update_radiation_diagnostics",
           "update_convection_step2"
         ]
+      },
+      "farms_sw": {
+        "backend_selector": "config_farms_sw_backend",
+        "default_backend": "off",
+        "backends": [
+          "off",
+          "hex-cuda"
+        ],
+        "module": "woof.hex.mpasphys.farms_v842",
+        "operations": [
+          "farms_sw"
+        ],
+        "woof_only": "WRF-Solar FARMS (WRF swint_opt = 2, phys/module_ra_farms.F v4.7.1): every step after the radiation slots, overwrites diag_physics swdnb/swddir/swddni/swddif; MPAS v8.4.2 has no FARMS"
       }
     }
   },

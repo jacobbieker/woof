@@ -1193,6 +1193,12 @@ DRIVER_REBUILT_ATTRS = frozenset({
     # restored in place, so the rebuilt carrier evaluates the checkpoint's
     # own fit on the first resumed step.
     "swint",
+    # WRF's swint_opt = 2 carrier, FARMS (woof.core.farms): rebuilt by
+    # initialize_physics from the resumed RunConfig, latitude, longitude and
+    # start time; it holds the per-step zenith-cosine scratch and the kernel
+    # handles, and FARMS's six outputs live in ``fields`` (restart-carried,
+    # as WRF's SWDOWN2 ... SWDDNIC2 are).
+    "farms",
     # SASE: the active flag and the kernel-module tuple are re-derived
     # from the resumed RunConfig at driver init; the ledger is a
     # per-step diagnostic replaced before any consumer reads it; the
@@ -2994,6 +3000,10 @@ def _drop_default_off_run_keys(values: dict) -> None:
     for key in ("swint_opt", "aer_opt", "alb_sol"):
         if not values.get(key, 0):
             values.pop(key, None)
+    # couple_farms (swint_opt = 2's SWDOWN2 -> SWDOWN copy): off is every
+    # earlier header.
+    if not values.get("couple_farms", False):
+        values.pop("couple_farms", None)
 
 
 def _drop_inert_nest_archive(values):
@@ -4797,6 +4807,7 @@ _RESTART_ABSENT_RUN_DEFAULTS = {
     'aer_opt': 0,
     'alb_sol': 0,
     'w_crit_cfl': 1.0,
+    'couple_farms': False,
 }
 
 

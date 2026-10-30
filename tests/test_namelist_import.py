@@ -3288,8 +3288,29 @@ def test_swint_opt_and_aer_opt_reach_the_run_config(tmp_path):
     assert "swint_opt" not in plain and "aer_opt" not in plain
 
 
+def test_swint_opt_2_and_couple_farms_reach_the_run_config(tmp_path):
+    """WRF-Solar's FARMS (swint_opt = 2) and couple_farms are honoured:
+    Thompson (mp_physics = 8) hands FARMS its radii, Morrison (10) hands
+    it cloud, ice and snow with none, both of which WRF admits
+    (module_physics_init.F:1039-1057).  couple_farms = .false. emits
+    nothing."""
+    for mp in (8, 10):
+        toml_text, report = _import_radiation_options(
+            tmp_path, ["swint_opt = 2", "couple_farms = .true."],
+            mp_physics=mp)
+        for dc in _load(tmp_path, toml_text).domains:
+            assert dc.run.swint_opt == 2 and dc.run.couple_farms is True
+        translated = {(t.section, t.key) for t in report.translated}
+        assert ("physics", "couple_farms") in translated
+    toml_text, _ = _import_radiation_options(
+        tmp_path, ["swint_opt = 2", "couple_farms = .false."], mp_physics=8)
+    assert "couple_farms" not in toml_text
+
+
 @pytest.mark.parametrize(("line", "mp", "match"), [
-    ("swint_opt = 2", 10, "swint_opt"),
+    ("swint_opt = 3", 10, "swint_opt"),
+    # module_check_a_mundo.F:654-660
+    ("couple_farms = .true.", 10, "couple_farms = true requires swint_opt = 2"),
     ("aer_opt = 1", 28, "domain-1 aerod parent forcing"),
     ("aer_opt = 4", 28, "must be 0, 1, 2 or 3"),
     # mp_physics = 10 (Morrison): WRF gates aer_opt = 3 on the Thompson aerosol

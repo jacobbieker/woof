@@ -2220,6 +2220,10 @@ class PhysicsDriver:
         # attaches it where the config asks for it (restart: rebuilt; its
         # eleven state fields ride ``fields``).
         self.swint = None
+        # WRF's swint_opt = 2 carrier, FARMS (woof.core.farms);
+        # initialize_physics attaches it where the config asks for it
+        # (restart: rebuilt; its six outputs ride ``fields``).
+        self.farms = None
         self.lake = None
         self.o3rad = None
         self.fields = fields
@@ -2951,6 +2955,42 @@ class PhysicsDriver:
             ledger.note_carrier(
                 name, source=source, model_time=now,
                 value=float(array.reshape(-1)[0]))
+
+    def _run_farms(self, atmosphere, state: DomainState, cfg: RunConfig, *,
+                   itimestep: int, radiation_due: bool) -> None:
+        """WRF ``swint_opt = 2``: FARMS's six irradiances on this step and,
+        between radiation calls, the Solar_step's own rewrites of COSZEN
+        and CLDFRA (woof.core.farms module docstring).
+
+        FARMS writes SWDOWN2 ... SWDDNIC2 into ``fields``; only
+        ``couple_farms`` copies SWDOWN2 into SWDOWN, which the land surface
+        reads.  The per-step CLDFRA lands in the history CLDFRA and in the
+        UW PBL's ``uw_cldfra`` where those exist, and COSZEN -- at this
+        step's ``xtime + radt/2``, as the Solar_step computes it -- in the
+        carried COSZEN and the history COSZEN; on a radiation step the
+        radiation call already wrote both from the same statements.
+        """
+        farms = self.farms
+        aodtot = self.aodtot
+        if int(cfg.aer_opt) == 2:
+            aodtot = None
+        cldfra = farms.step(self.fields, atmosphere, state,
+                            elapsed_seconds=float(state.elapsed_seconds),
+                            itimestep=itimestep, aodtot=aodtot)
+        if radiation_due:
+            return
+        if self.cldfra is not None:
+            self.cldfra[...] = cldfra
+        if "uw_cldfra" in self.fields:
+            self.fields["uw_cldfra"][...] = cldfra
+        need = [target for target in (self.fields.get("coszen"),
+                                      getattr(self, "radiation_coszen", None))
+                if target is not None]
+        if need:
+            cosine = farms.radiation_coszen_at(
+                float(state.elapsed_seconds), np.float32(self.radt_minutes))
+            for target in need:
+                target[...] = cosine
 
     def _run_radiation(self, atmosphere: Mapping[str, cp.ndarray],
                        state: DomainState, cfg: RunConfig) -> None:
@@ -6137,6 +6177,15 @@ class PhysicsDriver:
         if eclipse is not None and not radiation_due:
             eclipse.apply(self, state, cfg)
 
+        if getattr(self, "farms", None) is not None and radiation_enabled(cfg):
+            # WRF swint_opt = 2: FARMS on EVERY step, radiation steps
+            # included, after ENDIF Radiation_step
+            # (module_radiation_driver.F:2983-3101; woof.core.farms).
+            if atmosphere is None:
+                atmosphere = _prepare_atmosphere(state)
+            self._run_farms(atmosphere, state, cfg, itimestep=itimestep,
+                            radiation_due=radiation_due)
+
         # radiation_driver.F:3195-3243 integrates the held boundary fluxes
         # every model step, even when the wrapper did not run this step.
         self.accumulate_radiation_boundary_fluxes(cfg)
@@ -7657,6 +7706,15 @@ def initialize_physics(
         for name in (*_swint_fields, "gsw"):
             if name not in f:
                 f[name] = cp.zeros(shape, dtype=DTYPE)
+    if int(getattr(cfg, "swint_opt", 0)) == 2:
+        # WRF swint_opt = 2 (woof.core.farms): SWDOWN2, SWDDIR2, SWDDNI2,
+        # SWDDIF2, SWDOWNC2 and SWDDNIC2, zero at the start as WRF's misc
+        # state is (Registry.EM_COMMON:1710-1726, restart-carried),
+        # serialized with the surface inventory.
+        from woof.core.farms import STATE_FIELDS as _farms_fields
+        for name in _farms_fields:
+            if name not in f:
+                f[name] = cp.zeros(shape, dtype=DTYPE)
     if int(getattr(cfg, "alb_sol", 0)) == 1:
         if landuse_dataset not in ("MODIFIED_IGBP_MODIS_NOAH", "MODI-RUC"):
             raise ValueError(
@@ -7853,6 +7911,43 @@ def initialize_physics(
             start_time=radiation_start_time,
             latitude_deg=radiation_latitude,
             longitude_deg=radiation_longitude, shape=shape, generation=getattr(cfg, "solar_generation", "wrf_480"))
+    if int(getattr(cfg, "swint_opt", 0)) == 2:
+        # WRF's swint_opt = 2 carrier, FARMS (woof.core.farms): the
+        # per-step zenith cosine, the Solar_step's cloud fraction and the
+        # FARMS kernel, on this domain's own latitude, longitude and start
+        # time.  Only where the config asks for it.
+        from woof.core.farms import FarmsShortwave
+        from woof.core.mynn_radiation import mynn_bl_cloud_active
+        if (radiation_latitude is None or radiation_longitude is None
+                or radiation_start_time is None):
+            raise ValueError(
+                "swint_opt = 2 needs the domain's latitude, longitude and "
+                "UTC start time (radiation_latitude/radiation_longitude/"
+                "radiation_start_time): FARMS is evaluated at the local "
+                "solar zenith angle every step")
+        bl_merge = (int(getattr(cfg, "icloud", 1)) == 1
+                    and mynn_bl_cloud_active(
+                        getattr(cfg, "bl_pbl_physics", 0),
+                        getattr(cfg, "icloud_bl", 0)))
+        if bl_merge and any(f.get(name) is None
+                            for name in ("qc_bl", "qi_bl", "cldfra_bl")):
+            raise ValueError(
+                "swint_opt = 2 under MYNN's icloud_bl reads QC_BL, QI_BL "
+                "and CLDFRA_BL every step, and this driver carries none")
+        driver.farms = FarmsShortwave(
+            start_time=radiation_start_time,
+            latitude_deg=radiation_latitude,
+            longitude_deg=radiation_longitude, shape=shape,
+            generation=getattr(cfg, "solar_generation", "wrf_480"),
+            mp_physics=int(cfg.mp_physics),
+            use_mp_re=int(getattr(cfg, "use_mp_re", 1)),
+            icloud=int(getattr(cfg, "icloud", 1)),
+            aer_opt=int(getattr(cfg, "aer_opt", 0)),
+            aer_angexp_val=float(getattr(cfg, "aer_angexp_val", 1.3)),
+            aer_ssa_val=float(getattr(cfg, "aer_ssa_val", 0.85)),
+            aer_asy_val=float(getattr(cfg, "aer_asy_val", 0.9)),
+            couple_farms=bool(getattr(cfg, "couple_farms", False)),
+            bl_merge=bl_merge)
     # WRF's topo_wind / gwd_opt (woof.core.terrain_drag): the topo_wind
     # coefficients from this domain's terrain (start_em.F:1539-1626) and the
     # gwd_opt statistics, on the device once.  Only where either is on, so

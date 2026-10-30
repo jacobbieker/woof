@@ -5981,6 +5981,7 @@ def _public_config_value(value):
                                   ("ruc_2m_diagnostic", "flux"),
                                   ("ruc_snow", "wrf_461"),
                                   ("swint_opt", 0), ("aer_opt", 0),
+                                  ("couple_farms", False),
                                   ("alb_sol", 0),
                                   ("thompson_version", "wrf_461"),
                                   ("thompson_table_dir", None),

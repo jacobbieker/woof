@@ -1,0 +1,148 @@
+{
+ "oracle": "WRF v4.7.1 (f52c197ed) phys/module_ra_farms.F Farms_driver, compiled unmodified, driven one call per scenario by tools/farms_wrf471_oracle/run_farms.F90 on make_columns.py's columns",
+ "reference_libm": "binary32 expf/powf/log10f (glibc 2.39 algorithms), cosf/sinf/acosf (glibc 2.43) and correctly rounded sinhf (glibc >= 2.41), bound in place of the host C library (libm_ports.cpp, libm_shim.c); the reference is byte-identical on every build below",
+ "host_libm_evidence_cause": "the same Fortran objects linked against the host's own libm: macOS libSystem's binary32 functions are not glibc's, and glibc 2.44's powf and log10f differ from 2.39's (tools/host_libm32_check.cpp on the 2.44 host: log10f 29,787,060 of 2^32 arguments, powf 129,511 of 2^28 sampled pairs); evidence only",
+ "npz_sha256": "e632ed30345132714e2e407f930c4b8bc69fb6e671ded8f08a8e414d43fa1431",
+ "scenarios": [
+  "req1_summer",
+  "req0_jan",
+  "req1_dec",
+  "req0_feb"
+ ],
+ "builds": [
+  {
+   "receipt": [
+    "wrf: WRF v4.7.1 commit f52c197ed39d12e087d02c50f412d90d418f6186",
+    "host: Linux 6.12.104-1-MANJARO x86_64",
+    "GNU Fortran (conda-forge gcc 16.2.0-7) 16.2.0",
+    "g++ (GCC) 16.2.1 20260810",
+    "fortran flags: -O0 -ffp-contract=off -cpp -ffree-form -ffree-line-length-none (module_model_constants.F with -DEM_CORE=1)",
+    "libm port flags: -std=c++17 -O2 -ffp-contract=off -fno-fast-math -fno-builtin",
+    "libm calls in module_ra_farms.o (bound to woof ports): acosf cosf expf log10f powf sinf sinhf ",
+    "req1_summer: 2088 columns, nz=30",
+    "req0_jan: 2088 columns, nz=30",
+    "req1_dec: 2088 columns, nz=30",
+    "req0_feb: 2088 columns, nz=30",
+    "1b9e060d71dd7218c39e5a5724a7886307507a7cb85d7db33cd3ed52c0034a60  /home/jacob/Development/wrf-src/WRF-4.7.1/phys/module_ra_farms.F",
+    "5b80377fecdc18a5f0ad38d3b6c15cfc86ad5d76701adbbbb08a08698d0f7062  /home/jacob/Development/wrf-src/WRF-4.7.1/share/module_model_constants.F",
+    "46053c660c07f9ebb3cc832aea8be01ac3eda0f1cc90c6692c9cafacbea594bf  /home/jacob/Development/woof-farms/tools/farms_wrf471_oracle/run_farms.F90",
+    "212eb4d322880e56cb9bec1f973cccd375e7718e3d90f3af4cdbcf0cf29396e2  /home/jacob/Development/woof-farms/tools/farms_wrf471_oracle/make_columns.py",
+    "ca43613a0a613dbdc38398b3ed97843f785a83c33dedf9baba8b6631e3d45b2c  /home/jacob/Development/woof-farms/tools/farms_wrf471_oracle/libm_ports.cpp",
+    "f7af0b59ec588306792d85677fa6e1f2b1765f7de4e98abeedfc8b0adad0175d  /home/jacob/Development/woof-farms/tools/farms_wrf471_oracle/libm_shim.c",
+    "3af8b4d9583b007b7f06d14af24080c5a82521579356da362637371f2eefb0b0  /home/jacob/Development/woof-farms/woof/backend/host/cuda_host_shim.h",
+    "6a0facc2047f04b071a0f77847f8d9c9079c0af5350e32a972406a81661ddc46  /home/jacob/Development/woof-farms/woof/core/kernels/glibc_flt32.cuh",
+    "bbdb54c85d361d208ea9b1a7cb49a33132026d17694ad0f42c8b0bf5460baaf0  /home/jacob/Development/woof-farms/woof/core/kernels/glibc_trig_flt32.cuh",
+    "f0635036ea7a0514279c82a8c34e2998d2b65a4e2d4f4933765ea00b259966a4  /home/jacob/Development/woof-farms/woof/core/kernels/log10_flt32.cuh",
+    "cff7b61810ad14c46916c9dbd864f26565ccab1c932c1780c856e307aa831827  /home/jacob/Development/woof-farms/woof/core/kernels/sinhf_flt32.cuh",
+    "eda2ce48735fc897e90178bdeb422fed65efc4853dccbf5922f52a559e8cd8c8  ./req0_feb.out.bin",
+    "938b45d1a9873e2b77fb5a24e00dd9458187fe6118407bb68c12c12ee307b26d  ./req0_feb.syslibm.out.bin",
+    "ca0b8d2fcb71c7473b9b4a1d3b9957eb8fc70e80049f92ebfb3b8c2efd5e4266  ./req0_jan.out.bin",
+    "154332483eb068c4a55837900747d9a81bd24212c9e39dc0901f67bcaf6e9aeb  ./req0_jan.syslibm.out.bin",
+    "bc7fa4d33fada59e46c950f55a68fdd3efe62f3c8f95be0c3531721e4ef03bb2  ./req1_dec.out.bin",
+    "a07256b9705dadc6d1c70b3ba4477f565e64cfc0fa5e74c47644bff482cc69e8  ./req1_dec.syslibm.out.bin",
+    "ee58e48367f76420121895a98fb78c6348c4352df0e8bb21f8a42ef606f491e8  ./req1_summer.out.bin",
+    "573977335bad12aaeb7d4db7fccf7423c55c0c7cef978933640933e65f5e84a9  ./req1_summer.syslibm.out.bin",
+    "ca0894acc3b6700b4cf1fa708c6aaad4466e705b249df4e60a8662ec35f7315c  columns.npz"
+   ],
+   "host_libm_evidence": {
+    "swdown2": {
+     "words": 8352,
+     "differ": 230,
+     "max_ulp": 17
+    },
+    "swddir2": {
+     "words": 8352,
+     "differ": 0,
+     "max_ulp": 0
+    },
+    "swddni2": {
+     "words": 8352,
+     "differ": 0,
+     "max_ulp": 0
+    },
+    "swddif2": {
+     "words": 8352,
+     "differ": 230,
+     "max_ulp": 17
+    },
+    "swdownc2": {
+     "words": 8352,
+     "differ": 0,
+     "max_ulp": 0
+    },
+    "swddnic2": {
+     "words": 8352,
+     "differ": 0,
+     "max_ulp": 0
+    }
+   }
+  },
+  {
+   "receipt": [
+    "wrf: WRF v4.7.1 commit f52c197ed39d12e087d02c50f412d90d418f6186",
+    "host: Darwin 25.5.0 arm64",
+    "GNU Fortran (conda-forge gcc 16.2.0-7) 16.2.0",
+    "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+    "fortran flags: -O0 -ffp-contract=off -cpp -ffree-form -ffree-line-length-none (module_model_constants.F with -DEM_CORE=1)",
+    "libm port flags: -std=c++17 -O2 -ffp-contract=off -fno-fast-math -fno-builtin",
+    "libm calls in module_ra_farms.o (bound to woof ports): acosf cosf expf log10f powf sinf sinhf ",
+    "req1_summer: 2088 columns, nz=30",
+    "req0_jan: 2088 columns, nz=30",
+    "req1_dec: 2088 columns, nz=30",
+    "req0_feb: 2088 columns, nz=30",
+    "1b9e060d71dd7218c39e5a5724a7886307507a7cb85d7db33cd3ed52c0034a60  /Users/jacob/Development/wrf-src/WRF-4.7.1/phys/module_ra_farms.F",
+    "5b80377fecdc18a5f0ad38d3b6c15cfc86ad5d76701adbbbb08a08698d0f7062  /Users/jacob/Development/wrf-src/WRF-4.7.1/share/module_model_constants.F",
+    "46053c660c07f9ebb3cc832aea8be01ac3eda0f1cc90c6692c9cafacbea594bf  /Users/jacob/Development/woof/.claude/worktrees/agent-aeee1dc76a569e2c8/tools/farms_wrf471_oracle/run_farms.F90",
+    "212eb4d322880e56cb9bec1f973cccd375e7718e3d90f3af4cdbcf0cf29396e2  /Users/jacob/Development/woof/.claude/worktrees/agent-aeee1dc76a569e2c8/tools/farms_wrf471_oracle/make_columns.py",
+    "ca43613a0a613dbdc38398b3ed97843f785a83c33dedf9baba8b6631e3d45b2c  /Users/jacob/Development/woof/.claude/worktrees/agent-aeee1dc76a569e2c8/tools/farms_wrf471_oracle/libm_ports.cpp",
+    "f7af0b59ec588306792d85677fa6e1f2b1765f7de4e98abeedfc8b0adad0175d  /Users/jacob/Development/woof/.claude/worktrees/agent-aeee1dc76a569e2c8/tools/farms_wrf471_oracle/libm_shim.c",
+    "3af8b4d9583b007b7f06d14af24080c5a82521579356da362637371f2eefb0b0  /Users/jacob/Development/woof/.claude/worktrees/agent-aeee1dc76a569e2c8/woof/backend/host/cuda_host_shim.h",
+    "6a0facc2047f04b071a0f77847f8d9c9079c0af5350e32a972406a81661ddc46  /Users/jacob/Development/woof/.claude/worktrees/agent-aeee1dc76a569e2c8/woof/core/kernels/glibc_flt32.cuh",
+    "bbdb54c85d361d208ea9b1a7cb49a33132026d17694ad0f42c8b0bf5460baaf0  /Users/jacob/Development/woof/.claude/worktrees/agent-aeee1dc76a569e2c8/woof/core/kernels/glibc_trig_flt32.cuh",
+    "f0635036ea7a0514279c82a8c34e2998d2b65a4e2d4f4933765ea00b259966a4  /Users/jacob/Development/woof/.claude/worktrees/agent-aeee1dc76a569e2c8/woof/core/kernels/log10_flt32.cuh",
+    "cff7b61810ad14c46916c9dbd864f26565ccab1c932c1780c856e307aa831827  /Users/jacob/Development/woof/.claude/worktrees/agent-aeee1dc76a569e2c8/woof/core/kernels/sinhf_flt32.cuh",
+    "eda2ce48735fc897e90178bdeb422fed65efc4853dccbf5922f52a559e8cd8c8  ./req0_feb.out.bin",
+    "e7355e3c371b41242024ff041115246e7fcb144ac39267ef1c0834313b252039  ./req0_feb.syslibm.out.bin",
+    "ca0b8d2fcb71c7473b9b4a1d3b9957eb8fc70e80049f92ebfb3b8c2efd5e4266  ./req0_jan.out.bin",
+    "4543bf4d56bb4f1f5c4d66ddfeddfec72f84dc5127234d23d027df19d59c880f  ./req0_jan.syslibm.out.bin",
+    "bc7fa4d33fada59e46c950f55a68fdd3efe62f3c8f95be0c3531721e4ef03bb2  ./req1_dec.out.bin",
+    "39e5279802ecd3575e240dc6eced5a229719730d4590e7986c0314551dc7a8ea  ./req1_dec.syslibm.out.bin",
+    "ee58e48367f76420121895a98fb78c6348c4352df0e8bb21f8a42ef606f491e8  ./req1_summer.out.bin",
+    "28593986c2980e85a2aecdbf62bc7f0c202b7dce5fee92d90cd6434ee66f90d4  ./req1_summer.syslibm.out.bin",
+    "ca0894acc3b6700b4cf1fa708c6aaad4466e705b249df4e60a8662ec35f7315c  columns.npz"
+   ],
+   "host_libm_evidence": {
+    "swdown2": {
+     "words": 8352,
+     "differ": 421,
+     "max_ulp": 34
+    },
+    "swddir2": {
+     "words": 8352,
+     "differ": 88,
+     "max_ulp": 121
+    },
+    "swddni2": {
+     "words": 8352,
+     "differ": 150,
+     "max_ulp": 66
+    },
+    "swddif2": {
+     "words": 8352,
+     "differ": 423,
+     "max_ulp": 48
+    },
+    "swdownc2": {
+     "words": 8352,
+     "differ": 159,
+     "max_ulp": 241
+    },
+    "swddnic2": {
+     "words": 8352,
+     "differ": 181,
+     "max_ulp": 123
+    }
+   }
+  }
+ ]
+}
