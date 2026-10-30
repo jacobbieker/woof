@@ -3259,3 +3259,16 @@ KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
     measured="2026-10-30", complete=False,
     frames=MappingProxyType({"farms": 0, "radtran_disort": 30432}),
 ),)
+
+# The partial-depth nest's coupling (Phase D3, kernels/partial_nest.cu),
+# default loader options, read 2026-10-30 on the RTX A6000 CUDA host: all
+# eight entry points read 0 B (13-40 registers).
+KERNEL_LOCAL_FRAME_RECORDINGS = tuple(
+    replace(row, complete=False) if "partial_nest" not in row.frames else row
+    for row in KERNEL_LOCAL_FRAME_RECORDINGS)
+KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
+    box="pb", device="NVIDIA RTX A6000",
+    compute_capability="86", nvrtc_build="12.9.86", platform_family="linux",
+    measured="2026-10-30", complete=False,
+    frames=MappingProxyType({"partial_nest": 0}),
+),)

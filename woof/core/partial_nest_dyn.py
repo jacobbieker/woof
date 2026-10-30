@@ -63,15 +63,23 @@ def _blocks(n: int) -> tuple[int]:
     return ((n + _THREADS - 1) // _THREADS,)
 
 
-def refuse_unsupported(cfg: RunConfig, state: DomainState | None = None) -> None:
-    """Name every configuration the D2 entry points do not carry."""
+def refuse_unsupported(cfg: RunConfig, state: DomainState | None = None, *,
+                       nested_frame: bool = False) -> None:
+    """Name every configuration the D2 entry points do not carry.
+
+    ``nested_frame`` is D3's (:mod:`woof.core.partial_nest_run`): the child
+    runs inside its parent's lateral frame (``cfg.nested``), which the entry
+    points carry through the same ``spec_zone`` arguments as the existing
+    acoustic kernels.  Every other lateral treatment stays refused."""
     from woof import wrf_exact
     if wrf_exact.ENABLED:
         raise PartialNestRefused(
             "the partial-depth nest's top entry points carry the default "
             "arithmetic build only; this process is strict (GPUWM_WRF_EXACT=1)")
-    if cfg.open_x or cfg.open_y or getattr(cfg, "specified", False) \
-            or getattr(cfg, "nested", False):
+    framed = (nested_frame and getattr(cfg, "nested", False)
+              and not (cfg.open_x or cfg.open_y or getattr(cfg, "specified", False)))
+    if not framed and (cfg.open_x or cfg.open_y or getattr(cfg, "specified", False)
+                       or getattr(cfg, "nested", False)):
         raise PartialNestRefused(
             "the D2 top entry points are driven on periodic lateral boundaries; "
             "the child's lateral frame joins them in D3")
@@ -206,7 +214,8 @@ def column_sums(state: DomainState, cfg: RunConfig, klev: int, ru=None, rv=None)
 def prepare_top_substep(state: DomainState, cfg: RunConfig, dtau: float,
                         coefficients: tuple, iface: Interface, top: TopForcing,
                         *, mudf=None, theta_upwind: bool = False,
-                        rigid_predictor: bool = False):
+                        rigid_predictor: bool = False, nested_frame: bool = False,
+                        predictor=None):
     """One child acoustic substep, bound once per RK stage (the counterpart
     of :func:`woof.core.acoustic.prepare_acoustic_substep_launch`).
 
@@ -214,10 +223,14 @@ def prepare_top_substep(state: DomainState, cfg: RunConfig, dtau: float,
     on the child.  ``top`` is read by reference at every launch.
     ``rigid_predictor`` takes the interface phi'' predictor as zero (a rigid
     lid's), instead of :func:`nest_top_ph_predictor`'s continuation.
+    ``nested_frame``: see :func:`refuse_unsupported`.  ``predictor``, a
+    callable ``predictor(rhs_top)`` launched after ``advance_mu_th_top``,
+    replaces :func:`nest_top_ph_predictor` (D3's specified-interface
+    predictor, :mod:`woof.core.partial_nest_run`).
     """
     from woof.core.acoustic import (_base3d, _boundary_x, _boundary_y,
                                     _mass_w_boundary_zone, _spec_zone)
-    refuse_unsupported(cfg, state)
+    refuse_unsupported(cfg, state, nested_frame=nested_frame)
     cp = _xp()
     nz, ny, nx = cfg.nz, cfg.ny, cfg.nx
     mu_old = state.scratch((ny, nx), "acoustic_mu_pp_old")
@@ -288,6 +301,8 @@ def prepare_top_substep(state: DomainState, cfg: RunConfig, dtau: float,
         mu(col_grid, block, mu_args)
         if rigid_predictor:
             rhs_top[...] = 0.0
+        elif predictor is not None:
+            predictor(rhs_top)
         else:
             pred(col_grid, block, pred_args)
         w(col_grid, block, w_args)
@@ -296,11 +311,12 @@ def prepare_top_substep(state: DomainState, cfg: RunConfig, dtau: float,
     return launch
 
 
-def calc_ww_top(state: DomainState, cfg: RunConfig, ru, rv, ww_top, adj=None):
+def calc_ww_top(state: DomainState, cfg: RunConfig, ru, rv, ww_top, adj=None, *,
+                nested_frame: bool = False):
     """WRF ``calc_ww_cp`` on the child with the interface flux ``ww_top``
     (``dycore._omega_ref``'s arithmetic, ``dmdt`` gaining ``ww_top`` and
     ``adj``).  Returns the ``(nz+1, ny, nx)`` Omega in the ``rk_ww`` slot."""
-    refuse_unsupported(cfg, state)
+    refuse_unsupported(cfg, state, nested_frame=nested_frame)
     cp = _xp()
     nz, ny, nx = cfg.nz, cfg.ny, cfg.nx
     ww = state.scratch((nz + 1, ny, nx), "rk_ww")
@@ -320,23 +336,28 @@ _STAGGER = {"": 0, "x": 1, "y": 2}
 
 def add_top_face_flux(tend, q, q_above, ww_top, state: DomainState,
                       cfg: RunConfig, iface: Interface, stagger: str = "",
-                      *, centered: bool = False):
+                      *, centered: bool = False, nested_frame: bool = False,
+                      flux=None):
     """Add the flux of ``q`` through the child's top face to ``tend``'s top
     half level, upwinded on the face's Omega (``nest_top_face_flux``);
     returns the per-point face flux.  ``stagger`` "" (mass/theta/scalars),
     "x" (u) or "y" (v); ``q_above`` is the parent's value at half level
-    ``k_top`` on the same staggering."""
-    refuse_unsupported(cfg, state)
+    ``k_top`` on the same staggering.  ``flux`` may pass the output plane
+    (every point is written)."""
+    refuse_unsupported(cfg, state, nested_frame=nested_frame)
     cp = _xp()
     ny, nx = cfg.ny, cfg.nx
     s = _STAGGER[stagger]
     shape = (ny + (s == 2), nx + (s == 1))
-    flux = cp.zeros(shape, dtype=DTYPE)
+    if flux is None:
+        flux = cp.zeros(shape, dtype=DTYPE)
     get_kernel(_MODULE, "nest_top_face_flux")(
         _blocks(shape[0] * shape[1]), (_THREADS,),
         (tend, q, q_above, ww_top, state.rdnw, flux, iface.fnm, iface.fnp,
-         np.int32(bool(centered)), np.int32(s), np.int32(cfg.open_x),
-         np.int32(cfg.open_y), np.int32(cfg.nz), np.int32(ny), np.int32(nx)))
+         np.int32(bool(centered)), np.int32(s),
+         np.int32(cfg.open_x or (nested_frame and cfg.nested)),
+         np.int32(cfg.open_y or (nested_frame and cfg.nested)),
+         np.int32(cfg.nz), np.int32(ny), np.int32(nx)))
     return flux
 
 
