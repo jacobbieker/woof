@@ -647,8 +647,13 @@ def test_strict_and_unsupported_configurations_are_refused_by_name():
     from woof.config import RunConfig
     from woof.core.partial_nest import PartialNestRefused
     from woof.core.partial_nest_dyn import refuse_unsupported
+    from woof import wrf_exact
     cfg = RunConfig(nx=8, ny=4, nz=10, dx=500.0, dy=500.0, ztop=8000.0, dt=3.0,
                     run_seconds=0.0, hybrid_opt=2)
+    if wrf_exact.ENABLED:
+        with pytest.raises(PartialNestRefused, match="GPUWM_WRF_EXACT=1"):
+            refuse_unsupported(cfg)
+        return
     with pytest.raises(PartialNestRefused, match="damp_opt=3"):
         refuse_unsupported(dataclasses.replace(cfg, damp_opt=3))
     with pytest.raises(PartialNestRefused, match="lateral"):
