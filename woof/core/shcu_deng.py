@@ -182,7 +182,7 @@ def kernel_capacity(nz: int) -> int:
 
 def launch_deng(*, u, v, t, qv, qc, qr, p, pii, rho, dz8w, tke, exch_h,
                 el_pbl, rthratenlw, rthratensw, z_at_w, w, pblh, ht, xlong,
-                dnw, mavail, state: DengState, dt: float, dx: float,
+                dnw, mavail, state: DengState, dt: float, dx,
                 xtime: float, gmt: float, adaptive: bool, bl_pbl_physics: int,
                 pratesh=None, raise_on_status: bool = True) -> dict:
     """One ``shallowcu_driver`` call of the Deng scheme over every column.
@@ -194,6 +194,11 @@ def launch_deng(*, u, v, t, qv, qc, qr, p, pii, rho, dz8w, tke, exch_h,
     ``exch_h`` and ``el_pbl``, the RRTMG ``rthratenlw``/``rthratensw``,
     ``pblh``, ``ht``, ``xlong`` (degrees east), ``dnw`` (nz,) and the
     surface ``mavail`` (updated in place, module_shcu_deng.F:365-370).
+
+    A per-column ``dx`` (device array (ny, nx)) with a per-column ``dnw``
+    ((ny, nx, nz)) runs the MPAS entry point ``deng_shcu_mpas_column``: the
+    same column body, each column its own DX and DSIGMA
+    (woof.hex.mpasphys.shcu_deng_v842).
     ``state`` is advanced in place.  ``xtime`` is WRF's minutes since start
     at this step, ``gmt`` the start hour.
 
@@ -210,6 +215,11 @@ def launch_deng(*, u, v, t, qv, qc, qr, p, pii, rho, dz8w, tke, exch_h,
     shape = tuple(int(n) for n in t.shape)
     nz, ny, nx = shape
     kernel_capacity(nz)
+    per_column = isinstance(dx, cp.ndarray)
+    if per_column and (tuple(dx.shape) != (ny, nx) or dx.dtype != DTYPE
+                       or not dx.flags.c_contiguous):
+        raise ValueError("Deng per-column dx must be a C-contiguous float32 "
+                         f"device array of shape {(ny, nx)}")
     for name, arr, want in (
             ("u", u, shape), ("v", v, shape), ("t", t, shape),
             ("qv", qv, shape), ("qc", qc, shape), ("qr", qr, shape),
@@ -221,7 +231,7 @@ def launch_deng(*, u, v, t, qv, qc, qr, p, pii, rho, dz8w, tke, exch_h,
             ("z_at_w", z_at_w, (nz + 1, ny, nx)), ("w", w, (nz + 1, ny, nx)),
             ("pblh", pblh, (ny, nx)), ("ht", ht, (ny, nx)),
             ("xlong", xlong, (ny, nx)), ("mavail", mavail, (ny, nx)),
-            ("dnw", dnw, (nz,))):
+            ("dnw", dnw, (ny, nx, nz) if per_column else (nz,))):
         if (not isinstance(arr, cp.ndarray) or tuple(arr.shape) != want
                 or arr.dtype != DTYPE or not arr.flags.c_contiguous):
             raise ValueError(f"Deng {name} must be a C-contiguous float32 "
@@ -231,7 +241,9 @@ def launch_deng(*, u, v, t, qv, qc, qr, p, pii, rho, dz8w, tke, exch_h,
     out = {k: cp.empty(shape, dtype=DTYPE) for k in OUTPUT_3D}
     status = cp.zeros((ny, nx), dtype=cp.int32)
     s = state
-    kernel = _deng_function("deng_shcu_column")
+    kernel = _deng_function("deng_shcu_mpas_column" if per_column
+                            else "deng_shcu_column")
+    dx_arg = dx if per_column else DTYPE(dx)
     ncol = ny * nx
     tile = deng_tile_columns(kernel, ncol)
     ws = cp.empty(deng_workspace_floats(nz, tile), dtype=DTYPE)
@@ -248,7 +260,7 @@ def launch_deng(*, u, v, t, qv, qc, qr, p, pii, rho, dz8w, tke, exch_h,
             out["rthshten"], out["rqvshten"], out["rqcshten"],
             out["rqrshten"], out["rushten"], out["rvshten"],
             out["rdcashten"], out["rqcdcshten"], s.cldfra_sh, s.ca_rad,
-            s.cw_rad, status, ws, DTYPE(dt), DTYPE(dx), DTYPE(xtime),
+            s.cw_rad, status, ws, DTYPE(dt), dx_arg, DTYPE(xtime),
             DTYPE(gmt), np.int32(1 if adaptive else 0),
             np.int32(1 if int(bl_pbl_physics) == 5 else 0),
             np.int32(nz), np.int32(ny), np.int32(nx), np.int32(col0)))

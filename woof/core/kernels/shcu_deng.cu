@@ -2256,11 +2256,12 @@ __device__ void deng_shcu(
 }
 
 /* ==================================================== deng_shcu_driver
- * One thread per column: module_shcu_deng.F:107-424 at this column, then
- * module_shallowcu_driver.F:686-691.  Inputs (nz, ny, nx), x fastest;
- * Z_AT_W and W (nz+1, ny, nx); AINCKFSA (100, ny, nx). */
-extern "C" __global__ __launch_bounds__(256)
-void deng_shcu_column(
+ * One column: module_shcu_deng.F:107-424 at this column, then
+ * module_shallowcu_driver.F:686-691.  Inputs (nz, ncol), column fastest;
+ * Z_AT_W and W (nz+1, ncol); AINCKFSA (100, ncol).  DX is this column's
+ * grid length and DNW its DSIGMA(1:nz).  Both entry points below call this
+ * body; deng_shcu_column (WRF) hands it the domain's DX and DNW. */
+__device__ __forceinline__ void deng_column_body(
         const float* __restrict__ u, const float* __restrict__ v,
         const float* __restrict__ t, const float* __restrict__ qv,
         const float* __restrict__ qc, const float* __restrict__ qr,
@@ -2282,10 +2283,8 @@ void deng_shcu_column(
         float* rushten, float* rvshten, float* rdcashten, float* rqcdcshten,
         float* cldfra_sh, float* ca_rad, float* cw_rad, int* status_out,
         float* ws, float dt, float dx, float xtime, float gmt, int adapt,
-        int tke_from_qke, int nz, int ny, int nx, int col0) {
-    const int ncol = ny * nx;
-    const int column = col0 + (int)(blockIdx.x * blockDim.x + threadIdx.x);
-    if (column >= ncol || nz < 3 || nz > DENG_KMAX) return;
+        int tke_from_qke, int nz, int ncol, int column) {
+    if (nz < 3 || nz > DENG_KMAX) return;
     const int kp = nz + 1;
     float* wsb = DENGWS_LANE_BASE(ws, kp);
     for (int s = 0; s < DENGWS_SLOTS; ++s) {
@@ -2483,4 +2482,142 @@ void deng_shcu_column(
      * and Deng never writes PRATESH (module_shallowcu_driver.F:686-691). */
     rainsh[column] = rsh;
     rainshv[column] = pratesh[column] * dt;
+}
+
+/* WRF: every column of a (nz, ny, nx) tile, the domain's DX and DNW. */
+extern "C" __global__ __launch_bounds__(256)
+void deng_shcu_column(
+        const float* __restrict__ u, const float* __restrict__ v,
+        const float* __restrict__ t, const float* __restrict__ qv,
+        const float* __restrict__ qc, const float* __restrict__ qr,
+        const float* __restrict__ p, const float* __restrict__ pii,
+        const float* __restrict__ rho, const float* __restrict__ dz8w,
+        const float* __restrict__ tke_in, const float* __restrict__ exch_h,
+        const float* __restrict__ el_pbl, const float* __restrict__ radl,
+        const float* __restrict__ rads, const float* __restrict__ z_at_w,
+        const float* __restrict__ w, const float* __restrict__ pblh,
+        const float* __restrict__ htopo, const float* __restrict__ xlong,
+        const float* __restrict__ dnw, const float* __restrict__ pratesh,
+        float* w0avg, float* tkeavg, float* cldareaa, float* cldareab,
+        float* cldliqa, float* cldliqb, float* wub,
+        float* rainsh, float* rainshv, float* rainshvb, float* pblmax,
+        float* capesave, float* xtime1, float* radsave, float* clddpthb,
+        float* cldtopb, float* mavail, float* pblhavg,
+        int* ltopb, int* kdcldtop, int* kdcldbas, float* ainckfsa,
+        float* rthshten, float* rqvshten, float* rqcshten, float* rqrshten,
+        float* rushten, float* rvshten, float* rdcashten, float* rqcdcshten,
+        float* cldfra_sh, float* ca_rad, float* cw_rad, int* status_out,
+        float* ws, float dt, float dx, float xtime, float gmt, int adapt,
+        int tke_from_qke, int nz, int ny, int nx, int col0) {
+    const int ncol = ny * nx;
+    const int column = col0 + (int)(blockIdx.x * blockDim.x + threadIdx.x);
+    if (column >= ncol) return;
+    deng_column_body(u, v, t, qv, qc, qr, p, pii, rho, dz8w, tke_in, exch_h,
+        el_pbl, radl, rads, z_at_w, w, pblh, htopo, xlong, dnw, pratesh,
+        w0avg, tkeavg, cldareaa, cldareab, cldliqa, cldliqb, wub,
+        rainsh, rainshv, rainshvb, pblmax, capesave, xtime1, radsave, clddpthb,
+        cldtopb, mavail, pblhavg, ltopb, kdcldtop, kdcldbas, ainckfsa,
+        rthshten, rqvshten, rqcshten, rqrshten, rushten, rvshten, rdcashten,
+        rqcdcshten, cldfra_sh, ca_rad, cw_rad, status_out,
+        ws, dt, dx, xtime, gmt, adapt, tke_from_qke, nz, ncol, column);
+}
+
+/* MPAS (woof.hex.mpasphys.shcu_deng_v842, WOOF-only): the same body with a
+ * grid length per cell, dxcol (ncol,), and a DSIGMA per cell, dnwcol
+ * (ncol, nz) -- the variable-resolution mesh has no single DX and the
+ * height coordinate no shared eta.  ny = 1, nx = the owned cells. */
+extern "C" __global__ __launch_bounds__(256)
+void deng_shcu_mpas_column(
+        const float* __restrict__ u, const float* __restrict__ v,
+        const float* __restrict__ t, const float* __restrict__ qv,
+        const float* __restrict__ qc, const float* __restrict__ qr,
+        const float* __restrict__ p, const float* __restrict__ pii,
+        const float* __restrict__ rho, const float* __restrict__ dz8w,
+        const float* __restrict__ tke_in, const float* __restrict__ exch_h,
+        const float* __restrict__ el_pbl, const float* __restrict__ radl,
+        const float* __restrict__ rads, const float* __restrict__ z_at_w,
+        const float* __restrict__ w, const float* __restrict__ pblh,
+        const float* __restrict__ htopo, const float* __restrict__ xlong,
+        const float* __restrict__ dnwcol, const float* __restrict__ pratesh,
+        float* w0avg, float* tkeavg, float* cldareaa, float* cldareab,
+        float* cldliqa, float* cldliqb, float* wub,
+        float* rainsh, float* rainshv, float* rainshvb, float* pblmax,
+        float* capesave, float* xtime1, float* radsave, float* clddpthb,
+        float* cldtopb, float* mavail, float* pblhavg,
+        int* ltopb, int* kdcldtop, int* kdcldbas, float* ainckfsa,
+        float* rthshten, float* rqvshten, float* rqcshten, float* rqrshten,
+        float* rushten, float* rvshten, float* rdcashten, float* rqcdcshten,
+        float* cldfra_sh, float* ca_rad, float* cw_rad, int* status_out,
+        float* ws, float dt, const float* __restrict__ dxcol, float xtime, float gmt, int adapt,
+        int tke_from_qke, int nz, int ny, int nx, int col0) {
+    const int ncol = ny * nx;
+    const int column = col0 + (int)(blockIdx.x * blockDim.x + threadIdx.x);
+    if (column >= ncol) return;
+    deng_column_body(u, v, t, qv, qc, qr, p, pii, rho, dz8w, tke_in, exch_h,
+        el_pbl, radl, rads, z_at_w, w, pblh, htopo, xlong, dnwcol + (size_t)column * (size_t)nz, pratesh,
+        w0avg, tkeavg, cldareaa, cldareab, cldliqa, cldliqb, wub,
+        rainsh, rainshv, rainshvb, pblmax, capesave, xtime1, radsave, clddpthb,
+        cldtopb, mavail, pblhavg, ltopb, kdcldtop, kdcldbas, ainckfsa,
+        rthshten, rqvshten, rqcshten, rqrshten, rushten, rvshten, rdcashten,
+        rqcdcshten, cldfra_sh, ca_rad, cw_rad, status_out,
+        ws, dt, dxcol[column], xtime, gmt, adapt, tke_from_qke, nz, ncol, column);
+}
+
+/* ============================================ MPAS column words (WOOF-only)
+ * woof.hex.mpasphys.shcu_deng_v842: the per-cell quantities the MPAS path
+ * hands deng_shcu_mpas_column and the coupling of its tendencies.  Each
+ * statement is one binary32 operation in the order written. */
+
+/* DX = len_disp / meshDensity**0.25 (mpas_atmphys_driver_convection.F:718,
+ * glibc powf) and XLONG = lonCell / degrad (the MPAS radiation's xlon_p,
+ * mpas_atmphys_driver_radiation_sw.F:422), (nc,). */
+extern "C" __global__ void deng_mpas_surface(int nc, float len_disp,
+        float degrad, const float* __restrict__ density,
+        const float* __restrict__ lon, float* __restrict__ dx,
+        float* __restrict__ xlong) {
+    const int i = (int)(blockIdx.x * blockDim.x + threadIdx.x);
+    if (i >= nc) return;
+    dx[i] = len_disp / gfk_pow(density[i], 0.25f);
+    xlong[i] = lon[i] / degrad;
+}
+
+/* DNW per cell, (nc, nl): WRF's eta increment of the column's dry
+ * hydrostatic w-level pressure pd (nl+1 rows of ``stride`` cells),
+ * (pd(k+1) - pd(k)) / (pd(1) - pd(nl+1)). */
+extern "C" __global__ void deng_mpas_dnw(int nl, int nc, int stride,
+        const float* __restrict__ pd, float* __restrict__ dnw) {
+    const int c = (int)(blockIdx.x * blockDim.x + threadIdx.x);
+    if (c >= nc) return;
+    const float depth = pd[c] - pd[(size_t)nl * stride + c];
+    for (int k = 0; k < nl; ++k)
+        dnw[(size_t)c * nl + k] =
+            (pd[(size_t)(k + 1) * stride + c] - pd[(size_t)k * stride + c]) / depth;
+}
+
+/* The Deng tendencies (nl, nc) added to physics_get_tend's sources on the
+ * owned cells as one more coupled term in mpas_atmphys_todynamics.F's
+ * arithmetic (physics_get_tend_work): th = RTHSHTEN*m, qv = RQVSHTEN*m,
+ * coeff = 1 + rvord*qv_state, rtheta += coeff*th + rvord*theta_m*qv/coeff,
+ * q(v,c,r) += RQ*SHTEN*m.  State arrays have ``sstride`` cells per level,
+ * the sources ``dstride``; ``plane`` is one scalar's source plane. */
+extern "C" __global__ void deng_mpas_couple(int nl, int nc, int sstride,
+        int dstride, int plane, int iqv, int iqc, int iqr, float rvord,
+        const float* __restrict__ mass, const float* __restrict__ theta_m,
+        const float* __restrict__ qv, const float* __restrict__ rth,
+        const float* __restrict__ rqv, const float* __restrict__ rqc,
+        const float* __restrict__ rqr, float* rho_theta, float* scalars) {
+    const int i = (int)(blockIdx.x * blockDim.x + threadIdx.x);
+    if (i >= nl * nc) return;
+    const int k = i / nc, c = i % nc;
+    const size_t s = (size_t)k * sstride + c;
+    const size_t d = (size_t)k * dstride + c;
+    const float m = mass[s];
+    const float th = rth[i] * m;
+    const float vq = rqv[i] * m;
+    const float coeff = 1.0f + rvord * qv[s];
+    const float coupled = coeff * th + ((rvord * theta_m[s]) * vq) / coeff;
+    rho_theta[d] = rho_theta[d] + coupled;
+    scalars[(size_t)iqv * plane + d] = scalars[(size_t)iqv * plane + d] + vq;
+    scalars[(size_t)iqc * plane + d] = scalars[(size_t)iqc * plane + d] + rqc[i] * m;
+    scalars[(size_t)iqr * plane + d] = scalars[(size_t)iqr * plane + d] + rqr[i] * m;
 }

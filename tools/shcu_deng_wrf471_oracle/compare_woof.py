@@ -35,8 +35,11 @@ def ulp_distance(a, b):
     return np.abs(monotone_fp32_key(a) - monotone_fp32_key(b))
 
 
-def run(input_path, oracle_path):
-    """Per (case, step, field): max ULP, words off, bitwise-unequal words."""
+def run(input_path, oracle_path, mpas_entry=False):
+    """Per (case, step, field): max ULP, words off, bitwise-unequal words.
+
+    ``mpas_entry`` runs the MPAS entry point (``deng_shcu_mpas_column``):
+    the case's DX and DNW handed per column, as woof.hex.mpasphys does."""
     import cupy as cp
     from woof.core.shcu_deng import DengState, launch_deng
 
@@ -70,6 +73,11 @@ def run(input_path, oracle_path):
         ht = dev(c["ht"], (1, ncol))
         xlong = dev(c["xlong"], (1, ncol))
         dnw = dev(c["dnw"], (nz,))
+        dx = float(c["dx"])
+        if mpas_entry:
+            dnw = dev(np.tile(np.asarray(c["dnw"], np.float32), ncol),
+                      (1, ncol, nz))
+            dx = cp.full((1, ncol), np.float32(c["dx"]), dtype=cp.float32)
         for si, (s, ref) in enumerate(zip(c["steps"], o["steps"])):
             tke = s["qke"] if c["bl_pbl"] == 5 else s["tke_pbl"]
             out = launch_deng(
@@ -86,7 +94,7 @@ def run(input_path, oracle_path):
                 w=dev(s["w"], (nz + 1, 1, ncol)),
                 pblh=dev(s["pblh"], (1, ncol)), ht=ht, xlong=xlong, dnw=dnw,
                 mavail=mavail, state=state, dt=float(c["dt"]),
-                dx=float(c["dx"]), xtime=float(s["xtime"]),
+                dx=dx, xtime=float(s["xtime"]),
                 gmt=float(c["gmt"]), adaptive=c["adapt"],
                 bl_pbl_physics=c["bl_pbl"], pratesh=pratesh,
                 raise_on_status=False)

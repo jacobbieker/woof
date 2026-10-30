@@ -120,10 +120,25 @@ def farms_sw_step(provider, call):
                     for n in ("has_reqc", "has_reqi", "has_reqs"))
     zeros = cp.zeros((nl, nc), dtype=cp.float32)
     radii = {n: (diag[n] if declared else zeros) for n in ("re_cloud", "re_ice", "re_snow")}
+    qc, qi = prepared["qc_p"], prepared["qi_p"]
+    services = getattr(getattr(provider.session, "config", None), "service_backends", {})
+    if any(str(services.get(n, "off")) != "off" for n in ("shcu_deng", "cu_rad_feedback")):
+        # WRF's Solar_step convective cloud before FARMS (module_radiation_driver.F:1264-1281,
+        # :1566-1575, then :3064): the step's condensate gains cu_rad_feedback's qc_cu/qi_cu and
+        # Deng's CW_RAD; the cloud fraction is the last radiation call's, which carries both merges.
+        from .shcu_deng_v842 import convective_cloud, merged_condensate
+        cloud = convective_cloud(provider.session)
+        own = lambda a: cp.asarray(a, dtype=cp.float32)[:nl, :nc]
+        qc, qi = merged_condensate(
+            cp, qc=own(qc), qi=own(qi),
+            qc_cu=own(diag["qc_cu"]) if cloud["feedback"] else None,
+            qi_cu=own(diag["qi_cu"]) if cloud["feedback"] else None,
+            cw_rad=None if cloud["deng"] is None else cloud["deng"][1],
+            f_qc=True, f_qi=bool(provider["scalar_state"]["f_qi"]))
     out = farms_mpas(
         cp, nc=nc, nl=nl, p8w=prepared["pres2_hyd_p"][0], rho=prepared["rho_p"],
-        dz=prepared["dz_p"], qv=prepared["qv_p"], qc=prepared["qc_p"],
-        qi=prepared["qi_p"], qs=prepared["qs_p"], cldfrac=diag["cldfrac"],
+        dz=prepared["dz_p"], qv=prepared["qv_p"], qc=qc,
+        qi=qi, qs=prepared["qs_p"], cldfrac=diag["cldfrac"],
         albedo=diag["sfc_albedo"], coszen=coszen, has_req=has_req,
         juday=int(np.trunc(F(julian))), **radii)
     for source, target in OVERWRITES:

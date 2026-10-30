@@ -561,6 +561,44 @@ def farms_enabled(config) -> bool:
     return backend != Backend.OFF and config.active("radiation_sw")
 
 
+def shcu_deng_enabled(config) -> bool:
+    """WOOF-only Deng shallow cumulus service selected (config_shcu_deng_backend = 'hex-cuda')."""
+    backend = getattr(config, "service_backends", {}).get("shcu_deng", Backend.OFF)
+    return backend != Backend.OFF
+
+
+def _check_convective_cloud(config) -> None:
+    """The Deng and cu_rad_feedback services' preconditions (woof.hex.mpasphys.shcu_deng_v842)."""
+    services = getattr(config, "service_backends", {})
+    deng = services.get("shcu_deng", Backend.OFF) != Backend.OFF
+    feedback = services.get("cu_rad_feedback", Backend.OFF) != Backend.OFF
+    if not (deng or feedback):
+        return
+    for on, name in ((deng, "config_shcu_deng_backend"), (feedback, "config_cu_rad_feedback_backend")):
+        if not on:
+            continue
+        # The convective cloud reaches radiation inside the hex-cuda cloudiness slot, which both MPAS
+        # RRTMG schemes read (WRF's merges sit in the RRTMG path of its radiation driver).
+        if (config.selectors["radiation_lw"], config.selectors["radiation_sw"]) != ("rrtmg_lw", "rrtmg_sw"):
+            raise ValueError(f"{name} hands its cloud to RRTMG: needs config_radt_lw_scheme = 'rrtmg_lw' "
+                             f"and config_radt_sw_scheme = 'rrtmg_sw'")
+        if config.backends["cloudiness"] != Backend.HEX_CUDA:
+            raise ValueError(f"{name} merges its cloud in the hex-cuda cloudiness slot: needs "
+                             f"config_radt_cld_backend = 'hex-cuda', not {config.backends['cloudiness']}")
+    if deng:
+        if config.selectors["pbl"] != "bl_mynn":
+            raise ValueError("config_shcu_deng_backend: Deng reads the PBL's TKE, EXCH_H and EL_PBL; WRF "
+                             "stops unless MYJ or MYNN supplies them, and MPAS v8.4.2 has MYNN "
+                             f"(bl_mynn) only, not {config.selectors['pbl']!r}")
+        if not config.active("microphysics"):
+            raise ValueError("config_shcu_deng_backend: Deng needs a microphysics scheme (WRF refuses "
+                             "shcu_physics = 5 with mp_physics = 0)")
+    if feedback and config.selectors["convection"] not in ("cu_grell_freitas",):
+        raise ValueError("config_cu_rad_feedback_backend: MPAS v8.4.2's cu_grell_freitas is the cumulus "
+                         "scheme that writes a convective cloud (qc_cu/qi_cu) for radiation, not "
+                         f"{config.selectors['convection']!r}")
+
+
 def resolve_namelist(text: str, *, backends: Mapping[str, str] | None = None,
                      default_backend: str | None = None, physics_mode: str | None = None,
                      correct_skip: Iterable[str] | None = None,
@@ -669,6 +707,7 @@ def resolve_namelist(text: str, *, backends: Mapping[str, str] | None = None,
     radtran = _radtran.resolve(groups)
 
     def record(config: DriverConfig) -> DriverConfig:
+        _check_convective_cloud(config)
         if radtran is not None:
             config = _replace(config, radtran=radtran)
         if spectral != "none":
@@ -1149,6 +1188,8 @@ class NativeDriverHooks:
                 operations.add("update_convection_step2")
             if farms_enabled(config):
                 operations.add("farms_sw")
+            if shcu_deng_enabled(config):
+                operations.update(("shcu_deng", "shcu_deng_tend"))
         if config.active("ngw") and not config.native_embedded("ngw"):
             operations.add("snapshot_gwdo_tendencies")
         return tuple(sorted(op for op in operations if op not in self.external
@@ -1388,6 +1429,10 @@ class PhysicsDriver:
             glue("deallocate_convection")
         if c.active("convection"):
             glue("update_convection_step2")
+        # WOOF-only: WRF's Deng shallow cumulus (services.shcu_deng, woof.hex.mpasphys.shcu_deng_v842)
+        # on every step after the convection block, as WRF's shallowcu_driver follows cumulus_driver.
+        if shcu_deng_enabled(c):
+            glue("shcu_deng")
         glue("deallocate_forall_physics")
         return flags
 
@@ -1406,6 +1451,10 @@ class PhysicsDriver:
         self._tendencies = self._call("physics_get_tend", step, time, flags,
                                      {"pools": pools, "rk_step": rk_step,
                                       "dynamics_substep": dynamics_substep})
+        if shcu_deng_enabled(self.config) and self.config.moist_physics:
+            # WOOF-only: the step's Deng tendencies join the held sources (shcu_deng_v842.couple_deng).
+            self._tendencies = self._call("shcu_deng_tend", step, time, flags,
+                                         {"sources": self._tendencies, "pools": pools})
         self._tendencies_ready = True
         return self._tendencies
 
