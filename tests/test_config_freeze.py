@@ -93,6 +93,10 @@ def test_new_fields_are_reviewed_defaults_appended_last():
     """
     from woof.config import CHEM_RUN_FIELDS, FIRE_RUN_FIELDS
     names = [f.name for f in dataclasses.fields(RunConfig)]
+    # Output-only WRF-Solar diagnostics, appended off.
+    assert names.pop() == "solar_diagnostics"
+    assert RunConfig.__dataclass_fields__["solar_diagnostics"].default == 0
+    assert RunConfig.__dataclass_fields__["solar_diagnostics"].kw_only
     # WRF's shallow-cumulus selector (5 = Deng) and cumulus-radiation
     # feedback, appended off: nothing is built and nothing launches
     # (tests/test_shcu_deng_integration.py).
@@ -592,7 +596,9 @@ def _check_frozen_defaults(actual):
                          ("radtran_solver", "disort"), ("radtran_streams", 0),
                          ("radtran_pseudospherical", False),
                          # shallow cumulus and cumulus-radiation feedback, off
-                         ("shcu_physics", 0), ("cu_rad_feedback", False)):
+                         ("shcu_physics", 0), ("cu_rad_feedback", False),
+                         # output-only WRF-Solar diagnostics, off
+                         ("solar_diagnostics", 0)):
         assert actual.pop(field) == value, field
     # WRF's windfarm_opt and its three companions (the fork's Fitch
     # coupling), appended after upstream 1.1.0's fields, off.

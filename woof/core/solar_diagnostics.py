@@ -80,17 +80,27 @@ def species_flags(*, qv, qc, qi, qs, has_reqc, has_reqi, has_reqs):
             | FLAG_REQI * bool(has_reqi) | FLAG_REQS * bool(has_reqs))
 
 
-def radius_metres(microns):
-    """WRF's RE_* (metres) from woof's micron radii: ``microns * 1e-6``.
+def radius_metres(microns, out=None):
+    """WRF's RE_* (metres) from woof's micron radii: ``microns / 1e6``.
 
     woof's microphysics publishes ``fl(re_m * 1e6)``, the RRTMG wrapper's
-    micron word; WRF's grid holds ``re_m``.  The round trip is not always
-    the identity (a float32 can sit between two images of the multiply), so
-    a radius-weighted output can differ from WRF's by the ULP this conversion
-    moves; the routine's arithmetic itself is graded word for word.
+    micron word; WRF's grid holds ``re_m`` itself.  The round trip is not
+    the identity everywhere: over every float32 radius from 2.49e-6 to
+    2e-3 m, dividing by 1e6 returns 3,597,476 of 81,524,879 words one ULP
+    off (multiplying by 1e-6: 4,212,052), never more.  So RE_*/TAU_* can sit
+    one ULP (and what that ULP moves) from WRF's; the routine's arithmetic
+    itself is graded word for word (tests/test_solar_diag_wrf471_oracle.py).
     """
     import cupy as cp
-    return cp.multiply(microns, np.float32(1.0e-6), dtype=cp.float32)
+    from woof.core.kernels import get_kernel
+    microns = cp.ascontiguousarray(microns, dtype=cp.float32)
+    if out is None:
+        out = cp.empty_like(microns)
+    n = microns.size
+    if n:
+        get_kernel("solar_diag", "solar_radius_metres")(
+            ((n + 255) // 256,), (256,), (np.int64(n), microns, out))
+    return out
 
 
 def run_solar_diag(*, nz, ncol, dt, flags, rho, dz8w, ph, phb, cldfra, coszen,
@@ -135,3 +145,199 @@ def run_solar_diag(*, nz, ncol, dt, flags, rho, dz8w, ph, phb, cldfra, coszen,
         (np.int32(ncol), np.int32(nz), np.float32(dt), np.int32(flags),
          *args, work, out))
     return out
+
+
+# ---------------------------------------------------------------------------
+# The WRF driver around the routine: state slots, the per-step Solar_step
+# evaluation and the end-of-step call.
+# ---------------------------------------------------------------------------
+
+#: (NOUT, ny, nx): the 26 output planes, the history fields' storage.  Cross-
+#: step (GHI_ACCUM sums, unassigned outputs keep their word) and NOT
+#: checkpointed -- WRF's Registry gives them no restart I/O, so a resumed run
+#: starts GHI_ACCUM at zero as a WRF restart does.
+OUT_SLOT = "solar_out"
+#: Written at the physics step's start (WRF's phy_prep and radiation-driver
+#: Solar_step), read by the end-of-step call of the same step.
+STEP_MASS_SLOTS = ("solar_step_rho", "solar_step_dz", "solar_step_cldfra",
+                   "solar_step_qc_tot", "solar_step_qi_tot")
+STEP_PLANE_SLOTS = ("solar_step_coszen",)
+#: End-of-step work: the radii in metres, the rhodz column, an absent
+#: species' zeros, PHB broadcast when the base state is a 1-D profile.
+WORK_MASS_SLOTS = ("solar_step_re_cloud", "solar_step_re_ice",
+                   "solar_step_re_snow", "solar_step_work", "solar_step_zero")
+WORK_FULL_SLOTS = ("solar_step_phb",)
+
+
+def enabled(cfg) -> bool:
+    return int(getattr(cfg, "solar_diagnostics", 0) or 0) == 1
+
+
+def scratch_shapes(cfg):
+    """Every scratch slot the diagnostics allocate, for memory planning."""
+    if not enabled(cfg):
+        return {}
+    nz, ny, nx = int(cfg.nz), int(cfg.ny), int(cfg.nx)
+    shapes = {OUT_SLOT: (NOUT, ny, nx)}
+    shapes.update({slot: (nz, ny, nx) for slot in STEP_MASS_SLOTS + WORK_MASS_SLOTS})
+    shapes.update({slot: (ny, nx) for slot in STEP_PLANE_SLOTS})
+    shapes.update({slot: (nz + 1, ny, nx) for slot in WORK_FULL_SLOTS})
+    return shapes
+
+
+def initialize(state, cfg):
+    """Allocate the slots, zero (WRF's grid arrays start at zero)."""
+    if not enabled(cfg):
+        return
+    for slot, shape in scratch_shapes(cfg).items():
+        state.scratch(shape, slot)[...] = 0.0
+
+
+def history_fields(state) -> dict:
+    """WRF name -> (ny, nx) plane, views of the output stack; empty when the
+    run does not carry the diagnostics."""
+    existing = getattr(state, "existing_scratch", None)
+    stack = (existing(OUT_SLOT) if existing is not None
+             else getattr(state, "_scratch", {}).get(OUT_SLOT))
+    if stack is None:
+        return {}
+    return {name: stack[i] for i, (_slot, name, _u, _d) in enumerate(SOLAR_OUTPUTS)}
+
+
+def _shortwave_adapter(radiation):
+    sw = getattr(radiation, "shortwave_adapter", None)
+    return radiation if sw is None else sw
+
+
+def driver_clouds(state, cfg, atmosphere, fields, *, cldfra_out, qc_out, qi_out):
+    """WRF's radiation-driver cloud block, evaluated now.
+
+    module_radiation_driver.F's ICLOUD arms (:1300-1510) as its Solar_step
+    runs them on every step under solar_diagnostics = 1: CLDFRA from
+    cal_cldfra1 (icloud = 1, then MYNN's subgrid cloud, :1403-1429),
+    cal_cldfra2 (icloud = 2) or cal_cldfra3 (icloud = 3, with its made-up
+    condensate), on the driver's own unclamped moisture; the qc/qi it
+    leaves are QC_TOT/QI_TOT (:3114-3134).  The same routines the RRTMG
+    adapters radiate with (tests/test_solar_diagnostics_wiring.py holds the
+    radiation-step values to theirs).  Writes ``(nz, ny, nx)`` outputs.
+    """
+    import cupy as cp
+    from woof.core.rrtmg_legacy import legacy_cloud_fraction_flags
+    from woof.core import rrtmgp as _rrtmgp
+    from woof.core.mynn_radiation import (merge_mynn_bl_clouds,
+                                          mynn_bl_cloud_active, wrf_itimestep)
+    nz, ny, nx = atmosphere["pressure"].shape
+    ncol = ny * nx
+    zero = state.scratch((nz, ny, nx), "solar_step_zero")
+    species = {name: (getattr(state, name, None)
+                      if getattr(state, name, None) is not None else zero)
+               for name in ("qc", "qi", "qs")}
+    qc_out[...] = species["qc"]
+    qi_out[...] = species["qi"]
+    grid = lambda a: cp.ascontiguousarray(a).reshape(nz, ncol)
+    qv = grid(atmosphere["qv"])
+    t = grid(atmosphere["temperature"])
+    p = grid(atmosphere["pressure"])
+    qc, qi, qs = qc_out.reshape(nz, ncol), qi_out.reshape(nz, ncol), grid(species["qs"])
+    mp_physics = int(getattr(cfg, "mp_physics", 0))
+    icloud = int(getattr(cfg, "icloud", 1))
+    f_qi, f_qs = legacy_cloud_fraction_flags(mp_physics)
+    cf = cldfra_out.reshape(nz, ncol)
+    if icloud == 1:
+        cf[...] = _rrtmgp.cal_cldfra1(qv, qc, qi, qs, t, p, f_qc=True, f_qi=f_qi,
+                                      f_qs=f_qs, mp_physics=mp_physics)
+    elif icloud == 2:
+        cf[...] = _rrtmgp.cal_cldfra2(cp.ascontiguousarray(qc), cp.ascontiguousarray(qi),
+                                      f_qc=mp_physics != 0, f_qi=f_qi)
+    elif icloud == 3:
+        from woof.core.cldfra3 import cal_cldfra3, cldfra3_gridkm
+        from woof.core.rrtm_lw import _stream_is_capturing
+        cols = lambda a: cp.ascontiguousarray(a.T)
+        c3, q3c, q3i = cal_cldfra3(
+            cols(qv), cols(qc), cols(qi), cols(qs),
+            cols(grid(atmosphere["dz"])), cols(p), cols(t),
+            fields["xland"].reshape(-1), cldfra3_gridkm(cfg.dx, cfg.dy),
+            check=not _stream_is_capturing(cp))
+        cf[...] = c3.T
+        qc[...] = q3c.T
+        qi[...] = q3i.T
+    else:
+        cf[...] = 0.0
+    if icloud == 1 and mynn_bl_cloud_active(getattr(cfg, "bl_pbl_physics", 0),
+                                            getattr(cfg, "icloud_bl", 0)):
+        merge_mynn_bl_clouds(
+            qc, qi, cf, qc_bl=grid(fields["qc_bl"]), qi_bl=grid(fields["qi_bl"]),
+            cldfra_bl=grid(fields["cldfra_bl"]),
+            bl_pbl_physics=getattr(cfg, "bl_pbl_physics", 0),
+            icloud_bl=getattr(cfg, "icloud_bl", 0),
+            itimestep=wrf_itimestep(state.elapsed_seconds, cfg.dt),
+            bl_mynn_version=getattr(cfg, "bl_mynn_version", "wrf_461"),
+            temperature=t)
+
+
+def capture_solar_step(physics, state, cfg, atmosphere):
+    """The step's start: WRF's phy_prep density and dz8w, and the radiation
+    driver's Solar_step cloud and COSZEN (every step, radiation or not)."""
+    if not enabled(cfg):
+        return
+    import cupy as cp
+    nz, ny, nx = atmosphere["pressure"].shape
+    m = (nz, ny, nx)
+    state.scratch(m, "solar_step_rho")[...] = atmosphere["rho"]
+    state.scratch(m, "solar_step_dz")[...] = atmosphere["dz"]
+    driver_clouds(state, cfg, atmosphere, physics.fields,
+                  cldfra_out=state.scratch(m, "solar_step_cldfra"),
+                  qc_out=state.scratch(m, "solar_step_qc_tot"),
+                  qi_out=state.scratch(m, "solar_step_qi_tot"))
+    adapter = _shortwave_adapter(physics.radiation_callable)
+    state.scratch((ny, nx), "solar_step_coszen")[...] = cp.asarray(
+        adapter.coszen_now(state, cfg), dtype=cp.float32).reshape(ny, nx)
+
+
+def update(state, cfg):
+    """The end of the step (module_diagnostics_driver.F:1181-1213)."""
+    if not enabled(cfg) or getattr(state, "physics", None) is None:
+        return
+    import cupy as cp
+    from woof.core.rrtmg_legacy import legacy_scheme_has_req
+    physics = state.physics
+    nz1, ny, nx = state.php.shape
+    nz = nz1 - 1
+    m = (nz, ny, nx)
+    zero = state.scratch(m, "solar_step_zero")
+    present = {name: getattr(state, name, None) is not None
+               for name in ("qv", "qc", "qi", "qs")}
+    has_req = legacy_scheme_has_req(int(cfg.mp_physics), getattr(cfg, "use_mp_re", 1))
+    radii, have = {}, []
+    for flag, src, slot in zip(has_req, ("effc", "effi", "effs"),
+                               ("solar_step_re_cloud", "solar_step_re_ice",
+                                "solar_step_re_snow")):
+        value = getattr(state, src, None)
+        if flag and value is not None:
+            radii[src] = radius_metres(value, out=state.scratch(m, slot))
+            have.append(True)
+        else:
+            radii[src] = zero
+            have.append(False)
+    phb = state.phb
+    if phb.ndim == 1:
+        full = state.scratch((nz + 1, ny, nx), "solar_step_phb")
+        full[...] = phb[:, None, None]
+        phb = full
+    flags = species_flags(qv=present["qv"], qc=present["qc"], qi=present["qi"],
+                          qs=present["qs"], has_reqc=have[0], has_reqi=have[1],
+                          has_reqs=have[2])
+    sp = lambda name: getattr(state, name) if present[name] else zero
+    run_solar_diag(
+        nz=nz, ncol=ny * nx, dt=cfg.dt, flags=flags,
+        rho=state.scratch(m, "solar_step_rho"),
+        dz8w=state.scratch(m, "solar_step_dz"), ph=state.php, phb=phb,
+        cldfra=state.scratch(m, "solar_step_cldfra"),
+        coszen=state.scratch((ny, nx), "solar_step_coszen"),
+        swdnb=physics.fields["swdnb"], swdnt=physics.fields["swdnt"],
+        qv=sp("qv"), qc=sp("qc"), qi=sp("qi"), qs=sp("qs"),
+        qc_tot=state.scratch(m, "solar_step_qc_tot"),
+        qi_tot=state.scratch(m, "solar_step_qi_tot"),
+        re_cloud=radii["effc"], re_ice=radii["effi"], re_snow=radii["effs"],
+        out=state.scratch((NOUT, ny, nx), OUT_SLOT),
+        work=state.scratch(m, "solar_step_work"))

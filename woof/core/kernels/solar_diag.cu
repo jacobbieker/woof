@@ -229,3 +229,14 @@ extern "C" __global__ void solar_diag_columns(
     }
 }
 #undef O
+
+// WRF's RE_* (metres) from woof's micron radii, a correctly rounded float32
+// division by 1e6 on every backend (woof/core/solar_diagnostics.py
+// radius_metres).
+extern "C" __global__ void solar_radius_metres(long long n,
+                                               const float* __restrict__ um,
+                                               float* __restrict__ m)
+{
+    const long long i = (long long)blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) m[i] = FDIV(um[i], 1.0e6f);
+}

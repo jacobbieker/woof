@@ -1544,6 +1544,12 @@ del _symbol, _units, _description
 from woof.core.hail import HISTORY as _HAIL_HISTORY
 REGISTRY_VAR_META.update({symbol: (description, units)
     for symbol, units, description in _HAIL_HISTORY.values()})
+# WRF-Solar diagnostics: Registry/registry.solar_fields' descriptions and
+# units, verbatim (woof/core/solar_diagnostics.py SOLAR_OUTPUTS).
+from woof.core.solar_diagnostics import SOLAR_OUTPUTS as _SOLAR_OUTPUTS
+REGISTRY_VAR_META.update({symbol: (description, units)
+    for _slot, symbol, units, description in _SOLAR_OUTPUTS})
+del _SOLAR_OUTPUTS
 
 from woof.core.physics_inventory import LW_SPECTRAL_FLUXES as _LW_SPEC, SW_SPECTRAL_FLUXES as _SW_SPEC
 for _base in (*_SW_SPEC, *_LW_SPEC):

@@ -1905,6 +1905,18 @@ class RunConfig:
     #: QI_CU, cu_diag = 1) for Grell-Freitas and Grell 3D.  Appended last,
     #: keyword-only.
     cu_rad_feedback: bool = False
+    # WRF-Solar diagnostics (WRF &diags solar_diagnostics, one value for the
+    # run): 1 writes Registry/registry.solar_fields' 26 2-D history fields --
+    # clearness index, solar zenith angle, accumulated GHI, 2-D max cloud
+    # fraction, water vapour / liquid / ice / snow paths (resolved, and with
+    # the radiation driver's cloud for liquid and ice), mass-weighted radii
+    # and optical depths, cloud base/top heights -- computed every step by
+    # WRF v4.7.1 module_diag_solar.F (woof/core/solar_diagnostics.py, held to
+    # compiled WRF).  Needs the RRTMG shortwave (ra_sw_physics = 4).
+    # Output-only in woof: the forecast's CLDFRA/COSZEN stay on the radiation
+    # cadence (WRF's driver republishes them every step under this switch).
+    # Appended last, keyword-only.
+    solar_diagnostics: int = 0
 
 #: The ways a domain's clock meets the measured terrain rules
 #: (:attr:`RunConfig.terrain_clock`).
@@ -6823,6 +6835,17 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
     feedback_why = cu_rad_feedback_refusal(cfg)
     if feedback_why is not None:
         raise ConfigurationRefused(feedback_why)
+    if type(cfg.solar_diagnostics) is not int or cfg.solar_diagnostics not in (0, 1):
+        raise ConfigurationRefused("solar_diagnostics must be 0 or 1")
+    if cfg.solar_diagnostics:
+        _lw_scheme, _sw_scheme = radiation_scheme_ids(cfg)
+        if int(_sw_scheme) != 4:
+            raise ConfigurationRefused(
+                "solar_diagnostics = 1 needs the RRTMG shortwave "
+                "(ra_sw_physics = 4): WRF-Solar's clearness index and GHI "
+                "read RRTMG's SWDNB/SWDNT, and its per-step cloud "
+                "evaluation is the RRTMG drivers' (legacy RRTMG or "
+                f"RTE+RRTMGP); got ra_sw_physics = {_sw_scheme}")
     if cfg.rrtmg_spectral_output not in ("none", "bands", "gpoints"):
         raise ConfigurationRefused("rrtmg_spectral_output must be \"none\", \"bands\" or \"gpoints\"")
     if cfg.rrtmg_spectral_output != "none":

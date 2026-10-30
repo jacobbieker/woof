@@ -6225,6 +6225,15 @@ class PhysicsDriver:
             self._run_farms(atmosphere, state, cfg, itimestep=itimestep,
                             radiation_due=radiation_due)
 
+        # WRF-Solar diagnostics (solar_diagnostics = 1): WRF's radiation
+        # driver runs its Solar_step cloud block and COSZEN on EVERY step
+        # under this switch, and phy_prep's density/dz8w are the step's
+        # start; the end-of-step call reads them
+        # (woof.core.solar_diagnostics).  Off, nothing runs.
+        if int(getattr(cfg, "solar_diagnostics", 0) or 0):
+            from woof.core.solar_diagnostics import capture_solar_step
+            capture_solar_step(self, state, cfg, atmosphere)
+
         # radiation_driver.F:3195-3243 integrates the held boundary fluxes
         # every model step, even when the wrapper did not run this step.
         self.accumulate_radiation_boundary_fluxes(cfg)

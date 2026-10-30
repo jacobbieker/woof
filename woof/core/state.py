@@ -1079,6 +1079,9 @@ class DomainState:
         from woof.core.hail import initialize as initialize_hail
         initialize_hail(self, cfg)
 
+        from woof.core.solar_diagnostics import initialize as initialize_solar
+        initialize_solar(self, cfg)
+
         # Chem species (woof/core/chem_state.py): the ``chem_<row>`` /
         # ``chem0_<row>`` arena views and ``self.chem``, allocated ONLY when
         # the run names chem sets.  A chem-off state gains no attribute, so

@@ -3724,6 +3724,28 @@ class RRTMGPRadiation:
                   + 0.000077 * np.sin(2.0 * da))
         return 1370.0 * eccfac
 
+    def coszen_now(self, state, cfg):
+        """The radiation call's COSZEN at this model time (what __call__
+        radiates with, and what WRF's Solar_step recomputes every step under
+        solar_diagnostics = 1, woof.core.solar_diagnostics).
+
+        WRF evaluates the HOUR ANGLE at the CENTER of the radiation
+        interval: calc_coszen receives xtime + radt*0.5 inside the
+        Solar_step block (module_radiation_driver.F:1206-1208, 'jararias
+        2013/08/10') while declination/EOT stay at the call-time julian
+        (:3514-3541); that coszen is what RRTMG SW consumes (driver:2636).
+        """
+        valid_time = (self.start_time
+                      + timedelta(seconds=float(state.elapsed_seconds)))
+        from woof.core.physics import _physics_period_seconds
+        radt_minutes = cfg.radt if cfg.radt > 0.0 else cfg.radt_minutes
+        radt_seconds = _physics_period_seconds(radt_minutes, cfg)
+        from woof.core.solar import solar_period_seconds
+        radt_seconds = solar_period_seconds(cfg, radt_seconds)
+        return self._cosine_zenith(
+            valid_time, hour_offset_seconds=0.5 * radt_seconds,
+            generation=getattr(cfg, "solar_generation", "wrf_480"))
+
     def _cosine_zenith(self, valid_time, *, hour_offset_seconds=0.0, generation="wrf_480"):
         """Selected WRF ``radconst``/``calc_coszen`` solar generation.
 
@@ -4334,19 +4356,7 @@ class RRTMGPRadiation:
 
         valid_time = (self.start_time
                       + timedelta(seconds=float(state.elapsed_seconds)))
-        # WRF evaluates the HOUR ANGLE at the CENTER of the radiation
-        # interval: calc_coszen receives xtime + radt*0.5 inside the
-        # Solar_step block (module_radiation_driver.F:1206-1208, 'jararias
-        # 2013/08/10') while declination/EOT stay at the call-time julian
-        # (:3514-3541); that coszen is what RRTMG SW consumes (driver:2636).
-        from woof.core.physics import _physics_period_seconds
-        radt_minutes = cfg.radt if cfg.radt > 0.0 else cfg.radt_minutes
-        radt_seconds = _physics_period_seconds(radt_minutes, cfg)
-        from woof.core.solar import solar_period_seconds
-        radt_seconds = solar_period_seconds(cfg, radt_seconds)
-        mu_raw = self._cosine_zenith(
-            valid_time, hour_offset_seconds=0.5 * radt_seconds,
-            generation=getattr(cfg, "solar_generation", "wrf_480"))
+        mu_raw = self.coszen_now(state, cfg)
         daylight = mu_raw > DTYPE(0.0)
         mu = cp.where(daylight, mu_raw, DTYPE(1.0)).reshape(-1)
         albedo_surface = cp.asarray(

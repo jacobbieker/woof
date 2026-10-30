@@ -954,7 +954,7 @@ INPUT_MACHINERY_SECTIONS: dict[str, tuple[str | None, object]] = {
 }
 INPUT_SECTIONS = ("time_control", "domains", "physics", "fdda", "dynamics",
                   "bdy_control", "grib2", "namelist_quilt", "noah_mp",
-                  "stoch", "fire", *INPUT_MACHINERY_SECTIONS)
+                  "stoch", "fire", "diags", *INPUT_MACHINERY_SECTIONS)
 #: Groups whose every key is recorded and dropped: ungrib/metgrid staging
 #: is replaced by woof's own ingest; FDDA (once no nudging selector is on),
 #: GRIB2 and quilt-server keys have no woof counterpart.
@@ -3284,6 +3284,16 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
         if type(value) is not int or (value not in (0, 1) if key == "output_diagnostics" else value <= 0):
             raise _err("time_control", key, value,
                        "must be 0 or 1" if key == "output_diagnostics" else "must be positive whole minutes")
+    # &diags: WRF-Solar's solar_diagnostics (Registry/registry.solar_fields,
+    # one value for the run) is admitted; every other &diags key (pressure-
+    # and height-level output, ...) is left for diags.finish() to refuse by
+    # name.
+    diags = _Section("diags", inp.get("diags", {}), str(input_path))
+    solar_diagnostics = diags.scalar("solar_diagnostics", 0)
+    if type(solar_diagnostics) is not int or solar_diagnostics not in (0, 1):
+        raise _err("diags", "solar_diagnostics", solar_diagnostics,
+                   "must be 0 or 1")
+    diags.finish()
     gsd_diagnostics = tc.scalar("gsd_diagnostics", 0)
     if gsd_diagnostics not in (0, 1):
         raise _err("time_control", "gsd_diagnostics", gsd_diagnostics,
@@ -5200,6 +5210,11 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
     ra_lw_physics, lw_wrf_name, lw_gp_name = lw_mapped[0]
     ra_sw_physics, sw_wrf_name, sw_gp_name = sw_mapped[0]
     radiation_pairs = [(lw[0], sw[0]) for lw, sw in zip(lw_mapped, sw_mapped)]
+    if solar_diagnostics and any(pair[1] != 4 for pair in radiation_pairs):
+        raise _err("diags", "solar_diagnostics", solar_diagnostics,
+                   "WRF-Solar diagnostics need the RRTMG shortwave "
+                   "(ra_sw_physics = 4): the clearness index and GHI read "
+                   "its SWDNB/SWDNT.")
     # An unspecified mapping follows the named source generation. An
     # ordinary namelist retains the existing modern RRTMG default; an
     # explicit mapping still wins over a named source's selection.
@@ -7321,6 +7336,7 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
                        ("rdmaxalb", rdmaxalb),
                        ("nwp_diagnostics", nwp_diagnostics),
                        ("gsd_diagnostics", gsd_diagnostics if gsd_diagnostics else None),
+                       ("solar_diagnostics", solar_diagnostics if solar_diagnostics else None),
                        ("cycling", cycling)):
         if value is not None:
             lines.append(f"{key} = {_fmt(value)}")

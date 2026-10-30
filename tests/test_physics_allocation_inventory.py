@@ -1574,9 +1574,11 @@ _PHYSICS_ALLOCATION_INVENTORY['woof/core/hail.py'] = {}
 # fatal flag; the radiation copies of qc/qi are .copy() of the gathered
 # inputs, released with the call.
 _PHYSICS_ALLOCATION_INVENTORY['woof/core/cldfra3.py'] = {'cal_cldfra3': 3}
-# WRF-Solar diagnostics (solar_diagnostics = 1): the kernel wrapper draws its
-# output stack and scratch from the caller (the state scratch arena).
-_PHYSICS_ALLOCATION_INVENTORY['woof/core/solar_diagnostics.py'] = {}
+# WRF-Solar diagnostics (solar_diagnostics = 1): every plane the step uses is
+# a state scratch slot (woof/core/solar_diagnostics.py scratch_shapes);
+# radius_metres allocates one (nz, ny, nx) float32 only for a caller that
+# passes no output (the tests' replay), never on the step.
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/solar_diagnostics.py'] = {'radius_metres': 1}
 
 
 def _live_inventory() -> dict[str, dict[str, int]]:

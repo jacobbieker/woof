@@ -193,6 +193,9 @@ CONFIG_DIAGNOSTIC_FIELDS = frozenset(
      "radtran_solver",
      "radtran_streams",
      "radtran_pseudospherical",
+     # WRF-Solar diagnostics: 26 history planes from their own kernel; no
+     # forecast word moves (woof/core/solar_diagnostics.py).
+     "solar_diagnostics",
      # Correct mode WB1 (woof/correct_mode.py OUTPUT_ONLY_KEYS): books the
      # settled-cloud total CLOUDNC and changes no prognostic word.
      "thompson_cloud_surface_booking"})
