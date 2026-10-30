@@ -3231,3 +3231,17 @@ KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
     measured="2026-10-21", complete=False,
     frames=MappingProxyType({"gsd_initial_reflectivity": 0}),
 ),)
+
+# The partial-depth nest's top entry points (Phase D2, kernels/nest_top.cu,
+# composed after acoustic.cu by the loader), default loader options, read
+# 2026-10-30 on the RTX A6000 CUDA host: advance_w_phi_top carries the same
+# WPHI_MAX_LEV column as advance_w_phi (520 B); the other seven read 0 B.
+KERNEL_LOCAL_FRAME_RECORDINGS = tuple(
+    replace(row, complete=False) if "nest_top" not in row.frames else row
+    for row in KERNEL_LOCAL_FRAME_RECORDINGS)
+KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
+    box="pb", device="NVIDIA RTX A6000",
+    compute_capability="86", nvrtc_build="12.9.86", platform_family="linux",
+    measured="2026-10-30", complete=False,
+    frames=MappingProxyType({"nest_top": 520}),
+),)
