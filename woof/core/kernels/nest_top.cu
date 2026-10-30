@@ -361,7 +361,11 @@ void nest_top_ph_predictor(real* __restrict__ rhs_top,
     size_t boff = base3d ? (size_t)c : 0;
     real mut = mub2d[c] + mup[c];
     size_t f = (size_t)nz * st + c;
-    real rhs = dtau * (rph_t[f] + 0.5f * G * (1.0f - epssm) * w_pp[f]);
+    // advance_w_phi keeps rhs[] in its per-thread column, so this product
+    // is rounded before the wd term is subtracted from it there; in
+    // registers a contracting compiler could fuse it into that subtraction
+    // instead (measured on sm_86: 4 of 144 columns of a warm-bubble stage).
+    real rhs = arn_mul(dtau, rph_t[f] + 0.5f * G * (1.0f - epssm) * w_pp[f]);
     real ph_lo = phb[(size_t)(nz - 1) * bstr + boff]
                + php[(size_t)(nz - 1) * st + c];
     real ph_hi = phb[(size_t)nz * bstr + boff] + php[f];

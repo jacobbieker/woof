@@ -35,6 +35,42 @@ def _skip_strict():
         pytest.skip("D2 top entry points are default-build only (refused by name)")
 
 
+def _host_eos(s):
+    """p, alpha and alpha' from the state's own words in float64 on the host
+    (the hypsometric_opt=1 relation and the dry EOS), replacing the device
+    calc_p_alpha's: its powf is a vendor libm word, so CUDA and Metal would
+    otherwise hand the acoustic kernels different p.  The oracle needs no
+    particular EOS; a backend receipt needs identical inputs."""
+    import cupy as cp
+    from woof.core import constants as c
+    h = lambda a: cp.asnumpy(a).astype(np.float64)
+    nz = s.p.shape[0]
+    base3d = s.thb.ndim == 3
+    prof = (lambda a: a) if base3d else (lambda a: a[:, None, None])
+    ph = prof(h(s.phb)) + h(s.php)
+    mu = h(s.mub2d) + h(s.mup)
+    rdnw, c1h, c2h = h(s.rdnw), h(s.c1h), h(s.c2h)
+    alt = (-rdnw[:, None, None] * (ph[1:] - ph[:-1])
+           / (c1h[:, None, None] * mu[None] + c2h[:, None, None]))
+    theta = prof(h(s.thb)) + h(s.thp)
+    p = c.P0 * (c.RD * theta / (c.P0 * alt)) ** c.GAMMA
+    s.alt[...] = cp.asarray(alt, dtype=cp.float32)
+    s.al[...] = cp.asarray(alt - prof(h(s.alb)), dtype=cp.float32)
+    s.p[...] = cp.asarray(p, dtype=cp.float32)
+    assert nz == alt.shape[0] and np.all(alt > 0.0)
+
+
+def _restart_launch_trace():
+    """Under WOOF_LAUNCH_TRACE_DIR, drop the setup launches from this test's
+    trace: what remains starts from host-identical words on both backends."""
+    import os
+    import sys
+    if os.environ.get("WOOF_LAUNCH_TRACE_DIR"):
+        trace = sys.modules.get("launch_trace")
+        if trace is not None and trace._STATE.get("path"):
+            trace.set_output(trace._STATE["path"])
+
+
 def _parent(seed, **kw):
     import cupy as cp
     from woof.verify.npref import random_acoustic_state
@@ -42,6 +78,8 @@ def _parent(seed, **kw):
     # The interior of a nest: no large-step mass forcing (WRF's mu_tend is a
     # lateral-boundary term).
     s.rmu_t[...] = cp.float32(0.0)
+    _host_eos(s)
+    _restart_launch_trace()
     return s, cfg
 
 
@@ -219,10 +257,11 @@ def _warm_bubble():
 
 
 @requires_gpu
-def test_child_reproduces_a_dycore_warm_bubble_stage(monkeypatch):
+@pytest.mark.parametrize("stage", [1, 2, 3])
+def test_child_reproduces_a_dycore_warm_bubble_stage(monkeypatch, stage):
     """The full column is the existing dycore (woof.core.dycore.step, its
-    own acoustic launches, fused or separate) on a rising warm bubble; the
-    third RK stage of the fourth step is recorded at the interface, and the
+    own acoustic launches, fused or separate) on a rising warm bubble; one
+    RK stage of the fourth step is recorded at the interface, and the
     child, cut there and built from the stage's opening state, reproduces
     every substep below the interface word for word."""
     _skip_strict()
@@ -236,7 +275,7 @@ def test_child_reproduces_a_dycore_warm_bubble_stage(monkeypatch):
     k = int(np.flatnonzero(coord.c3f == 0.0)[0]) + 1
     assert k <= cfg.nz - 2
     original = dycore.prepare_acoustic_substep_launch
-    target = 3 * 3 + 3                       # step 4, stage 3
+    target = 3 * 3 + stage                   # step 4
     calls, rec = [0], {"subs": []}
 
     def hooked(st, cf, dtau, coefficients, **kw):
@@ -272,7 +311,7 @@ def test_child_reproduces_a_dycore_warm_bubble_stage(monkeypatch):
     dycore.run_steps(state, cfg, 4)
     monkeypatch.undo()
     subs = rec["subs"]
-    assert len(subs) >= 4
+    assert len(subs) >= (4 if stage == 3 else 1)
     parent = rec["snap"]
     flux = max(float(cp.max(cp.abs(s["ww_pp"]))) for s in subs)
     assert flux > 0.0, "the bubble must drive a flux through the interface"
@@ -362,6 +401,9 @@ def test_zero_flux_and_a_lid_reduce_to_the_existing_kernels_word_for_word():
 
     a, cfg = random_acoustic_state(seed=41, nz=NZ, ny=NY, nx=NX, hybrid_opt=2)
     b, _ = random_acoustic_state(seed=41, nz=NZ, ny=NY, nx=NX, hybrid_opt=2)
+    _host_eos(a)
+    _host_eos(b)
+    _restart_launch_trace()
     open_cfg = dataclasses.replace(cfg, top_lid=0)
     lid_cfg = dataclasses.replace(cfg, top_lid=1)
     # a: existing kernels.  The explicit part on the open top (uv + mu),
