@@ -264,7 +264,8 @@ class VerticalNestPlan:
             child=ladder(child_state, with_cf=False),
             p_top=child_state.p_top,
             hypsometric_opt=int(getattr(child_cfg, "hypsometric_opt", 2)),
-            base_temp=float(getattr(child_cfg, "base_temp", 290.0)))
+            base_temp=float(getattr(child_cfg, "base_temp", 290.0)),
+            use_theta_m=int(getattr(child_cfg, "use_theta_m", 0) or 0))
 
     # -- shapes ---------------------------------------------------------------
 

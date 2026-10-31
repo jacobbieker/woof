@@ -443,7 +443,14 @@ def moist_physics_finish(state: DomainState, cfg: RunConfig, th_phy,
     to the theta tendency.  With ``no_mp_heating = 1`` theta is left
     untouched (:5775) and ``h_diabatic = 0`` (:5776) -- the scheme's
     moisture updates stand either way.
+
+    Under ``use_theta_m = 1`` the dycore runs the scheme inside
+    :func:`woof.core.theta_m.microphysics_window`, and this call is the
+    theta_m branch (:5735-5741, :func:`woof.core.theta_m.finish_microphysics`).
     """
+    from woof.core.theta_m import finish_microphysics
+    if finish_microphysics(state, cfg, th_phy, dt):
+        return
     if cfg.no_mp_heating == 0:
         # WRF multiplies the REAL mp_tend_lim by the REAL dt (:5706-5707),
         # one float32 rounding of two float32 operands, as classic

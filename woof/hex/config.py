@@ -428,6 +428,18 @@ _KNOWN_UNSUPPORTED: Mapping[str, tuple[str, str]] = MappingProxyType(
             "config_deepsoiltemp_update": "surface alarms are configured by the physics suite, outside DryDycoreConfig",
             "config_bucket_update": "the production physics update is not linked",
             "config_sounding_interval": "sounding output is outside DryDycoreConfig",
+            # WRF ARW options a mixed WRF/MPAS namelist may carry.  MPAS-A
+            # has no averaged-flux diagnostic (Registry/registry.avgflx is
+            # ARW's), and it integrates theta_m natively: its prognostic is
+            # rho_zz*theta_m with theta_m = theta(1 + Rv/Rd qv) on every
+            # configuration (MPAS core_atmosphere Registry.xml theta_m), so
+            # there is no switch to set.
+            "do_avgflx_em": "WRF ARW's averaged mass-coupled wind fluxes "
+                            "(Registry/registry.avgflx) have no MPAS-A counterpart",
+            "config_do_avgflx_em": "WRF ARW's averaged mass-coupled wind fluxes "
+                                   "(Registry/registry.avgflx) have no MPAS-A counterpart",
+            "use_theta_m": "MPAS-A always integrates theta_m; WRF ARW's "
+                           "use_theta_m switch has no MPAS-A counterpart",
         }.items()
     }
 )

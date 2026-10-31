@@ -275,6 +275,11 @@ def test_lake_compile_options_do_not_change_existing_modules(monkeypatch, strict
     # WRF-Solar cal_cldfra3 (icloud = 3): column-exact, subnormals kept.
     expected["cldfra3"] = ("-std=c++17", "--fmad=false", "--ftz=false")
     expected["solar_diag"] = ("-std=c++17", "--fmad=false", "--ftz=false")
+    # WRF v4.7.1's use_theta_m conversions and upd_avgflx: column-exact,
+    # every operation an explicit round-to-nearest intrinsic, subnormals kept
+    # (tests/test_bigstep_thetam_wrf471_parity.py).
+    expected["theta_m"] = ("-std=c++17", "--fmad=false", "--ftz=false")
+    expected["avgflx"] = ("-std=c++17", "--fmad=false", "--ftz=false")
     # WRF's HAILCAST diagnostics (lane/cap-hail 97e9a3ca061) compile without
     # FMA, like the other column-exact WRF ports.
     expected["hail"] = ("-std=c++17", "--fmad=false")

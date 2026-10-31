@@ -3324,3 +3324,19 @@ KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
     measured="2026-10-30", complete=False,
     frames=MappingProxyType({"radtran_disort": 30448}),
 ),)
+
+# use_theta_m = 1 (kernels/theta_m.cu: theta_m_from_dry, theta_dry_from_moist,
+# conv_t_tendf_to_moist, moist_physics_finish_theta_m) and do_avgflx_em = 1
+# (kernels/avgflx.cu: upd_avgflx), production loader, default and strict
+# numerics, read 2026-10-31 on the RTX A6000 CUDA host: every entry point
+# reads 0 B.
+KERNEL_LOCAL_FRAME_RECORDINGS = tuple(
+    replace(row, complete=False)
+    if not {"theta_m", "avgflx"} <= set(row.frames) else row
+    for row in KERNEL_LOCAL_FRAME_RECORDINGS)
+KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
+    box="pb", device="NVIDIA RTX A6000",
+    compute_capability="86", nvrtc_build="12.9.86", platform_family="linux",
+    measured="2026-10-31", complete=False,
+    frames=MappingProxyType({"theta_m": 0, "avgflx": 0}),
+),)

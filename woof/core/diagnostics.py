@@ -61,7 +61,10 @@ def update_diagnostics(state: DomainState, hypsometric_opt: int = 1,
         return
     nz, ny, nx = state.p.shape
     j0, i0, nyw, nxw = _validated_window(window, ny, nx)
-    moist = state.qv is not None
+    # use_theta_m = 1 (state.theta_m: thp holds theta_m') is calc_p_rho_phi's
+    # moist branch with qvf = 1 (module_big_step_utilities_em.F:1061-1062),
+    # which is the kernel's existing moist = 0 arithmetic word for word.
+    moist = state.qv is not None and not getattr(state, "theta_m", False)
     blocks = (nxw * nyw + _THREADS - 1) // _THREADS
     if DIAGNOSTICS_ENABLED and muts is not None:
         if getattr(state, "p_perturbation", None) is None:
@@ -149,7 +152,10 @@ def _update_diagnostics_numpy(state: DomainState,
     mu = col(np.asarray(state.mub2d + state.mup, dtype=np.float32))
     theta = np.asarray(
         prof(state.thb) + col(state.thp), dtype=np.float32)
-    if state.qv is not None:
+    if state.qv is not None and not getattr(state, "theta_m", False):
+        # use_theta_m = 1 (state.theta_m) takes calc_p_rho_phi's other
+        # branch, temp = r_d*(t0+t)/(p0*(al+alb)) (F:1061-1062): thp
+        # already carries the vapour.
         # WRF's qvf = 1.+rvovrd*moist(i,k,j,P_QV) (calc_p_rho_phi,
         # module_big_step_utilities_em.F:1064).  ``c.RVOVRD`` is the float32
         # quotient gfortran folds; ``f32(c.RV / c.RD)`` is a *double* divide

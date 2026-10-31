@@ -219,6 +219,10 @@ def live_state_history_fields(state) -> dict[str, object]:
     # stack, present exactly when the run carries it.
     from woof.core.solar_diagnostics import history_fields as solar_history
     fields.update(solar_history(state))
+    # do_avgflx_em = 1: AVGFLX_RUM/RVM/WWM (Registry/registry.avgflx), present
+    # exactly when the run carries them (woof/core/avgflx.py).
+    from woof.core.avgflx import history_fields as avgflx_history
+    fields.update(avgflx_history(state))
     # Correct mode, finding WB1 (woof/core/thompson_cloud_booking.py): the
     # settled-cloud total and its last-call amount, present exactly when the
     # run carries them (a correct-mode Thompson run, after its first call).
@@ -843,6 +847,9 @@ def produced_history_shapes(cfg, *, include_reflectivity: bool = True
                           (output_shapes(cfg) | hail_shapes(cfg)).items()})
     if _SOLAR_OUT in solar_shapes(cfg):
         state._scratch[_SOLAR_OUT] = carrier(solar_shapes(cfg)[_SOLAR_OUT])
+    from woof.core.avgflx import scratch_shapes as avgflx_shapes
+    state._scratch.update({slot: carrier(shape)
+                           for slot, shape in avgflx_shapes(cfg).items()})
     state.p_top = 0.0
     state.physics = None
     uh = (carrier(surface)

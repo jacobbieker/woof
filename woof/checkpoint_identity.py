@@ -198,6 +198,10 @@ CONFIG_DIAGNOSTIC_FIELDS = frozenset(
      "solar_diagnostics",
      # woof.radtran OPAC aerosol: RT_* fields only.
      "radtran_aerosol",
+     # do_avgflx_em: three history means of the sumflux fluxes; no forecast
+     # word moves (woof/core/avgflx.py).  use_theta_m is NOT here: it is
+     # the prognostic itself.
+     "do_avgflx_em",
      # Correct mode WB1 (woof/correct_mode.py OUTPUT_ONLY_KEYS): books the
      # settled-cloud total CLOUDNC and changes no prognostic word.
      "thompson_cloud_surface_booking"})

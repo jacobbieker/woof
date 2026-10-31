@@ -144,7 +144,9 @@ def test_the_checkpoint_echo_drops_both_at_their_default():
              # the output-only WRF-Solar diagnostics
              "solar_diagnostics",
              # the radtran diagnostic's OPAC aerosol, appended after
-             "radtran_aerosol"]
+             "radtran_aerosol",
+             # WRF's use_theta_m and do_avgflx_em, appended after
+             "use_theta_m", "do_avgflx_em"]
     assert names[-len(later):] == later
     names = names[:-len(later)]
     # The 2.9.4 capabilities campaign's keyword-only keys follow the fire

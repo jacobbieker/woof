@@ -84,6 +84,7 @@ from woof.microphysics_schemes import scheme_for_state as _named_scheme_for_stat
 from woof.core.state import DTYPE, DomainState, init_at_rest
 from woof.core.wdm6_constants import WDM6_NUMBER_SPECIES
 from woof.core import tke_budget
+from woof.core.theta_m import convert_initial_state, run_theta_m
 
 _TPB = 128  # threads per block along i (i fastest)
 
@@ -1294,6 +1295,11 @@ def init_moist_balanced(cfg: RunConfig, coord: VerticalCoord,
     # Idealized cases always use hypsometric_opt=1, regardless of namelist
     # setting (WRF share/input_wrf.F:1038); the php recurrence above is the
     # opt-1 discrete hydrostatic inversion, so the default key matches.
+    if run_theta_m(cfg):
+        # use_theta_m = 1: ideal.exe's last statement turns the dry theta
+        # into theta_m (module_initialize_ideal.F:1726-1734); the pressure
+        # diagnosed below then takes calc_p_rho_phi's theta_m branch.
+        convert_initial_state(s)
     update_diagnostics(s)
     return s
 

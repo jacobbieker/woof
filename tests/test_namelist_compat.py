@@ -469,9 +469,13 @@ def test_the_compat_door_gives_the_same_theta_m_answer_as_the_importer(
     assert issue["severity"] == SEVERITY_ADVISORY
     assert "WRF Registry default 1" in issue["message"]
     # The importer's own sentence, from the function both doors call.
-    from woof.namelist_import import theta_m_decision
+    from woof.namelist_import import (read_namelist_role, theta_m_decision,
+                                      theta_m_unwired)
 
-    assert theta_m_decision(1).reason in issue["message"]
+    parsed = read_namelist_role(inp, "namelist.input")
+    unwired = theta_m_unwired(parsed, 1)
+    assert unwired is not None and "mp_physics = 6" in unwired
+    assert theta_m_decision(1, unwired=unwired).reason in issue["message"]
 
 
 @pytest.mark.parametrize("declaration", [None, ".false.", ".true."])

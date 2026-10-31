@@ -70,6 +70,8 @@ from woof.core.moist import (SPECIES, WRF_MOIST_ARRAY_SPECIES,
 from woof.core.moist_n2_mutation import calc_n2_kernel
 from woof.core.physics import physics_enabled
 from woof.core import tke_budget
+from woof.core import theta_m as theta_m_branch
+from woof.core import avgflx
 from woof.core.state import (DTYPE, DomainState, mu_at_u_faces,
                               mu_at_v_faces)
 from woof.core.uh_diag import update_up_heli_max
@@ -4394,7 +4396,8 @@ def close_periodic_alias(state: DomainState, cfg: RunConfig) -> None:
 
 def step(state: DomainState, cfg: RunConfig, *, acoustic: bool = True,
          mass_flux_observer=None, mass_flux_accumulator=None,
-         refl_10cm_due: bool = False, fire_history_due: bool = False) -> None:
+         refl_10cm_due: bool = False, fire_history_due: bool = False,
+         avgflx_history_due: bool = False) -> None:
     """Advance ``state`` one full RK3 step of length ``cfg.dt``.
 
     The schemes' error-only health reads are deferred to the END of the
@@ -4423,6 +4426,9 @@ def step(state: DomainState, cfg: RunConfig, *, acoustic: bool = True,
     finish-stage theta writeback and the post-microphysics EOS refresh.
     ``fire_history_due`` is the independent history alarm for firebrand
     landing likelihood and counters, including vapor-only fire cases.
+    ``avgflx_history_due`` (``do_avgflx_em = 1`` only) says a history frame
+    is written at this step's end, so the AVGFLX means restart on the next
+    step (woof.core.avgflx).
 
     Config-gated physics (no-ops with the defaults): ``km_opt=1`` with
     ``cfg.khdif/kvdif > 0`` runs WRF's diff_opt=2 mixing package with the
@@ -4483,12 +4489,14 @@ def step(state: DomainState, cfg: RunConfig, *, acoustic: bool = True,
                    mass_flux_observer=mass_flux_observer,
                    mass_flux_accumulator=mass_flux_accumulator,
                    refl_10cm_due=refl_10cm_due,
-                   fire_history_due=fire_history_due)
+                   fire_history_due=fire_history_due,
+                   avgflx_history_due=avgflx_history_due)
 
 
 def _step_body(state: DomainState, cfg: RunConfig, *, acoustic: bool,
                mass_flux_observer, mass_flux_accumulator,
-               refl_10cm_due: bool, fire_history_due: bool) -> None:
+               refl_10cm_due: bool, fire_history_due: bool,
+               avgflx_history_due: bool = False) -> None:
     """The step itself; :func:`step` is this under the resident ledger."""
     if mass_flux_observer is not None and mass_flux_accumulator is not None:
         raise ValueError(
@@ -4525,6 +4533,9 @@ def _step_body(state: DomainState, cfg: RunConfig, *, acoustic: bool,
         raise NotImplementedError(
             "non-timesplit physics requires the acoustic RK3 path "
             "(step(acoustic=False) is the Phase-1 dry advection test path)")
+    # use_theta_m: the state's theta and the run's must agree (a door that
+    # built dry theta for a theta_m run is refused here, by name).
+    theta_m_branch.check_step(state, cfg)
     _save_time_t(state)
     zero_tendencies = _prepare_tendency_zero(state)
 
@@ -4544,7 +4555,10 @@ def _step_body(state: DomainState, cfg: RunConfig, *, acoustic: bool,
         if not _wrf_reuse_diagnostics(state):
             update_diagnostics(state, cfg.hypsometric_opt,
                                muts=_wrf_muts(state))
-        physics_tendencies = state.physics.compute(state, cfg)
+        # use_theta_m = 1: the physics reads phy_prep's dry theta; off, the
+        # window is a no-op and the call is the call it always was.
+        with theta_m_branch.physics_window(state, cfg):
+            physics_tendencies = state.physics.compute(state, cfg)
         # WRF rk_update_scalar saves scalar_old from the post-physics
         # carrier on stage 1 (module_em.F:1679,1722). Preserve the MYNN solve.
         if getattr(state, "qke_adv", None) is not None:
@@ -4554,11 +4568,16 @@ def _step_body(state: DomainState, cfg: RunConfig, *, acoustic: bool,
         # schemes disabled. Run its common cadence, adding no tendencies.
         update_diagnostics(state, cfg.hypsometric_opt,
                            muts=_wrf_muts(state))
-        state.physics.compute(state, cfg)
+        with theta_m_branch.physics_window(state, cfg):
+            state.physics.compute(state, cfg)
 
     if stochastic_binding is not None:
         physics_tendencies = stochastic_binding.after_nonmicrophysics(
             state, cfg, physics_tendencies)
+    # use_theta_m = 1: conv_t_tendf_to_moist (module_first_rk_step_part2.F:
+    # 1005), the held dry-theta physics tendency as a theta_m tendency.
+    physics_tendencies = theta_m_branch.convert_physics_tendencies(
+        state, cfg, physics_tendencies)
     if getattr(state, "chem", None) is not None:
         # Native SFIRE emits into tracers before RK transport. The common
         # chem driver owns its source ledger and refreshes affected time-t
@@ -4731,8 +4750,12 @@ def _step_body(state: DomainState, cfg: RunConfig, *, acoustic: bool,
         # Chem species advect with the same acoustic time-averaged fluxes
         # (WRF rk_scalar_tend for chem, solve_em.F:2476-2500), so a chem run
         # accumulates sumflux even on a dry state.
+        # do_avgflx_em = 1 averages WRF's sumflux fluxes, which WRF forms
+        # on every stage of every run (woof.core.avgflx), so a run without
+        # transported scalars accumulates them too; nothing else reads them.
         scalars = (moist or getattr(state, "tke", None) is not None
-                   or chem is not None or getattr(state, "qke_adv", None) is not None)
+                   or chem is not None or getattr(state, "qke_adv", None) is not None
+                   or avgflx.active(cfg))
         if scalars:
             ru_m = state.scratch((nzs, nys, nxs + 1), "rk_ru_m")
             rv_m = state.scratch((nzs, nys + 1, nxs), "rk_rv_m")
@@ -4835,6 +4858,11 @@ def _step_body(state: DomainState, cfg: RunConfig, *, acoustic: bool,
     # divided by.  Report-only (woof/core/tke_budget.py); a no-op unless
     # cfg.tke_budget is on.
     tke_budget.accumulate(state, cfg)
+    # do_avgflx_em = 1: solve_em's avgflx block, after the RK loop and before
+    # the microphysics, on the last stage's sumflux fluxes.
+    if avgflx.active(cfg):
+        avgflx.update(state, cfg, ru_m, rv_m, ww_m,
+                      history_due=avgflx_history_due)
     # Whether this step ends on a history time: the streamed/ranked post-step
     # hook builds the chem history fields (the GOCART 550 nm optics among
     # them) only then (woof/core/streaming.py refl_handoff_hook).
@@ -4891,7 +4919,8 @@ def _step_epilogue(state: DomainState, cfg: RunConfig,
     # wind).  Same instant and same inertness contract as UP_HELI_MAX:
     # reads the completed step's u/v/ph, writes only its own buffers.
     # One getattr when nothing is attached.
-    interval_diagnostics.step(state, cfg)
+    with theta_m_branch.dry_view(state):
+        interval_diagnostics.step(state, cfg)
     # WRF lightning diagnostics (lightning_option): off touches nothing here.
     lightning_refl_due = False
     if cfg.lightning_option:
@@ -4905,13 +4934,28 @@ def _step_epilogue(state: DomainState, cfg: RunConfig,
         # and documented in PROVENANCE.md entry D1 (self-consistent: the
         # capture dt and apply window are the same internal step; the
         # native dt=60 path restores WRF cadence with no code change).
-        microphysics_result = apply_microphysics(     # (WRF microphysics
-            state, cfg, cfg.dt, refl_10cm_due=(refl_10cm_due or lightning_refl_due))
+        # use_theta_m = 1: moist_physics_prep_em/finish_em's theta_m branch
+        # around the scheme; off, the window is a no-op.
+        with theta_m_branch.microphysics_window(state, cfg):
+            microphysics_result = apply_microphysics(     # (WRF microphysics
+                state, cfg, cfg.dt,
+                refl_10cm_due=(refl_10cm_due or lightning_refl_due))
         if state.physics is not None:
             state.physics.accept_microphysics(
                 microphysics_result, dt=cfg.dt)
         update_diagnostics(state, cfg.hypsometric_opt)  # after the RK loop)
+    # use_theta_m = 1: WRF's diagnostics driver reads th_phy_m_t0, the dry
+    # theta update_phys_fields forms (module_diagnostics_driver.F:1252);
+    # off, the view is a no-op.
+    with theta_m_branch.dry_view(state):
+        _post_step_diagnostics(state, cfg, refl_10cm_due)
+
+
+def _post_step_diagnostics(state: DomainState, cfg: RunConfig,
+                           refl_10cm_due: bool) -> None:
+    """The end-of-step diagnostics both epilogues run last, in order."""
     if cfg.lightning_option:
+        from woof.core.lightning import update_lightning
         update_lightning(state, cfg, history_reflectivity_due=refl_10cm_due)
     from woof.core.gsd_diagnostics import reset_interval, update as update_gsd
     reset_interval(state, cfg)
@@ -4950,8 +4994,10 @@ def _wrf_step_epilogue(state: DomainState, cfg: RunConfig,
         lightning_refl_due = (cfg.lightning_option in (1, 2)
                               and lightning_due(state, cfg))
     if cfg.mp_physics != 0:
-        microphysics_result = apply_microphysics(
-            state, cfg, cfg.dt, refl_10cm_due=(refl_10cm_due or lightning_refl_due))
+        with theta_m_branch.microphysics_window(state, cfg):
+            microphysics_result = apply_microphysics(
+                state, cfg, cfg.dt,
+                refl_10cm_due=(refl_10cm_due or lightning_refl_due))
         if state.physics is not None:
             state.physics.accept_microphysics(
                 microphysics_result, dt=cfg.dt)
@@ -4968,22 +5014,15 @@ def _wrf_step_epilogue(state: DomainState, cfg: RunConfig,
         update_wind_maxima(state, cfg)
     # Per-history-interval diagnostics (hub-height wind), as in the
     # default epilogue.
-    interval_diagnostics.step(state, cfg)
+    with theta_m_branch.dry_view(state):
+        interval_diagnostics.step(state, cfg)
     # Passive diagnostic (its inertness receipts hash every serialized
     # field): the same place in the step as the default epilogue.
-    if cfg.lightning_option:
-        update_lightning(state, cfg, history_reflectivity_due=refl_10cm_due)
-    from woof.core.gsd_diagnostics import reset_interval, update as update_gsd
-    reset_interval(state, cfg)
-    from woof.core.hail import update as update_hail
-    update_hail(state, cfg)
-    update_gsd(state, cfg, history_due=refl_10cm_due)
-    from woof.core.output_diagnostics import update_precipitation
-    update_precipitation(state, cfg)
-    from woof.core.climate_diagnostics import update as update_climate
-    update_climate(state, cfg)
-    from woof.core.solar_diagnostics import update as update_solar
-    update_solar(state, cfg)
+    # use_theta_m = 1: WRF's diagnostics driver reads th_phy_m_t0, the dry
+    # theta update_phys_fields forms (module_diagnostics_driver.F:1252);
+    # off, the view is a no-op.
+    with theta_m_branch.dry_view(state):
+        _post_step_diagnostics(state, cfg, refl_10cm_due)
 
 
 def _wrf_reuse_diagnostics(state: DomainState) -> bool:

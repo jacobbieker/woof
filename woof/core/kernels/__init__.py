@@ -506,9 +506,13 @@ _URBAN_NO_FTZ_MODULES = frozenset({"urban_ucm", "urban_ucm480", "urban_bep",
 # cldfra3: graded word for word against WRF 4.7.1 cal_cldfra3
 # (tools/cldfra3_wrf471_oracle); tiny condensate words must not flush.
 # solar_diag: WRF 4.7.1 module_diag_solar.F (tools/solar_diag_wrf471_oracle).
+# theta_m: WRF 4.7.1's use_theta_m = 1 conversions, and avgflx: its
+# do_avgflx_em = 1 accumulation (tools/bigstep_wrf471_oracle/thetam_build.py);
+# new units, so every existing unit keeps its options.
 _NO_FTZ_MODULES = frozenset({"g3", "nsas", "sfclay", "myjsfc", "mynn_surface", "mynn_pbl",
                              "thompson_column", "ysu_480", "wsm6r",
-                             "aer_opt2", "oml", "farms", "cldfra3", "solar_diag"}) | _SOLAR_NO_FTZ_MODULES
+                             "aer_opt2", "oml", "farms", "cldfra3", "solar_diag",
+                             "theta_m", "avgflx"}) | _SOLAR_NO_FTZ_MODULES
 
 # The exact chain's strict intake contracts (GPUWM_WRF_EXACT=1): these units
 # also compile without contraction in a strict process.  A default process
