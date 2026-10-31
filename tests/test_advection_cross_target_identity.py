@@ -20,6 +20,10 @@ def advection_target_artifacts(tmp_path_factory):
     supplied = os.environ.get("WOOF_ADVECTION_TARGET_REPLAY_DIR")
     if supplied:
         return Path(supplied)
+    if not str(cp.cuda.Device().compute_capability).isdigit():
+        # NVRTC images for several sm targets compared on this card: there
+        # are no sm targets on the Metal backend (compute capability "metal")
+        pytest.skip("cross-target NVRTC images exist on CUDA only")
     outdir = tmp_path_factory.mktemp("advection-cross-target")
     try:
         compile_advection(outdir, int(cp.cuda.Device().compute_capability))

@@ -245,6 +245,12 @@ def rewrite_ptx_asm(text: str, unit: str) -> str:
             return f"{out} = __double2float_rn({a});"
         raise TranslationError(f"{unit}: inline PTX with no Metal translation: {body!r}")
     out = _ASM.sub(one, text)
+    # `asm volatile("" ::: "memory")`: a compiler barrier (no instruction).
+    # Values cross it through memory: a fence on this thread's device
+    # memory, the same promise to Metal's compiler (acoustic_fusion's
+    # phase separator).
+    out = re.sub(r'\basm\s*(?:volatile\s*)?\(\s*""\s*:\s*:\s*:\s*"memory"\s*\)\s*;',
+                 "__woof_compiler_fence();", out)
     if re.search(r"\basm\s*(volatile\s*)?\(", out):
         line = out[:re.search(r"\basm\s*(volatile\s*)?\(", out).start()].count("\n") + 1
         raise TranslationError(f"{unit}: line {line}: inline asm in a form the translator does not read")
@@ -2863,7 +2869,7 @@ def prelude(*, contract: bool, retain_subnormals: bool = False, ieee_helpers: bo
 
 VENDOR_LIBM64 = HERE / "vendor_libm64.cuh"
 F64CR = HERE.parents[1] / "core" / "kernels" / "f64cr.cuh"
-_VENDOR_CALL = re.compile(r"\b(exp|log|log10|sin|cos|atan|pow|atan2|hypot|log2|expm1|tanh|tgammaf?|lgamma|log1pf?|cbrtf?|erfc?)\s*\(")
+_VENDOR_CALL = re.compile(r"\b(exp|log|log10|sin|cos|tan|atan|pow|atan2|hypot|log2|expm1|tanh|tgammaf?|lgamma|log1pf?|cbrtf?|erfc?)\s*\(")
 CR_CBRT = HERE.parents[1] / "core" / "kernels" / "cr_cbrt_flt64.cuh"
 
 

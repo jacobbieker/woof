@@ -417,6 +417,7 @@ static inline uint __brev(uint a) { return metal::reverse_bits(a); }
 
 static inline void __syncthreads() { metal::threadgroup_barrier(metal::mem_flags::mem_threadgroup | metal::mem_flags::mem_device); }
 static inline void __threadfence() { metal::atomic_thread_fence(metal::mem_flags::mem_device, metal::memory_order_seq_cst, metal::thread_scope_device); }
+static inline void __woof_compiler_fence() { metal::atomic_thread_fence(metal::mem_flags::mem_device, metal::memory_order_seq_cst, metal::thread_scope_thread); }
 static inline void __threadfence_block() { metal::threadgroup_barrier(metal::mem_flags::mem_threadgroup); }
 
 constant f64 DBL_MAX = f64::bits(0x7FEFFFFFFFFFFFFFUL);

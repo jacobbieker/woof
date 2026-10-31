@@ -105,6 +105,20 @@ class _FacadeLoader:
         return None
 
 
+class _AliasLoader:
+    """``cupy.<name>`` is the already-imported ``woof.backend.facade.<name>``."""
+
+    def __init__(self, target: str):
+        self.target = target
+
+    def create_module(self, spec):
+        import importlib
+        return importlib.import_module(self.target)
+
+    def exec_module(self, module):
+        return None
+
+
 class _FacadeFinder:
     """``import cupy`` / ``import cupyx`` -> woof's facade (install())."""
 
@@ -112,6 +126,21 @@ class _FacadeFinder:
         self.backend = backend
 
     def find_spec(self, fullname, path=None, target=None):
+        if fullname.startswith("cupy.") and fullname.count(".") == 1:
+            # `import cupy.cuda`: the facade's own module object, not a
+            # second execution of its file (which kept a second registry of
+            # hostAlloc blocks: alloc_pinned_memory registered in one copy and
+            # pointerGetAttributes looked in the other)
+            import importlib.machinery
+            import importlib.util
+            own = "woof.backend.facade." + fullname.split(".", 1)[1]
+            try:
+                found = importlib.util.find_spec(own)
+            except (ImportError, ValueError):
+                found = None
+            if found is not None:
+                return importlib.machinery.ModuleSpec(fullname, _AliasLoader(own),
+                                                      is_package=found.submodule_search_locations is not None)
         if fullname in ("cupy_backends", "cupy_backends.cuda", "cupy_backends.cuda.api",
                         "cupy_backends.cuda.libs"):
             # packages only; their modules are the facade's cupy.cuda

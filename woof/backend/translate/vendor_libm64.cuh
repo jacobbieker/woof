@@ -807,6 +807,36 @@ __device__ __forceinline__ double wlm_cos(double x) {
     if (q & 2) v = wcr_neg(v);
     return wcr_round(v, rel);
 }
+// tan x: the same reduction and the same two series (sin r, cos r) in
+// double-double, then sin/cos (even quadrant) or -cos/sin (odd), rounded
+// once.  Each series and the reduction are bounded as in wlm_cos; the
+// quotient doubles the relative bound and adds the division's.  The same
+// wlm_KNOWN wlm_GAP above 2^20.  (wlm_CUDA's libdevice tan is not correctly rounded:
+// a known vendor delta, as for sin and cos.)
+__device__ __forceinline__ double wlm_tan(double x) {
+    if (x != x) return x + x;
+    if (wcr_fabs(x) == WCR_INF) return x - x;
+    if (wcr_fabs(x) >= 0x1p+20) x = fmod(x, wlm_bits(0x401921fb54442d18));
+    double nd = WCR_RINT(x * WCR_INV_PIO2);
+    wcr_dd r = wcr_dd{x, 0.0};
+    double rel = 0x1p-90;
+    if (nd != 0.0) {
+        wcr_dd p = wcr_2prod(nd, WCR_PIO2_1);
+        r = wcr_add(wcr_2sum(x, -p.h), wcr_dd{-p.l, 0.0});
+        r = wcr_add(r, wcr_neg(wcr_2prod(nd, WCR_PIO2_2)));
+        r = wcr_add(r, wcr_dd{-(nd * WCR_PIO2_3), 0.0});
+        rel = rel + WCR_DIV(wcr_fabs(nd) * 0x1p-158, wcr_fabs(r.h));
+    }
+    wcr_dd r2 = wcr_mul(r, r);
+    wcr_dd c = wcr_sgn(wcr_inv_fact[28], 14);
+    for (int n = 13; n >= 0; --n) c = wcr_add(wcr_mul(c, r2), wcr_sgn(wcr_inv_fact[2 * n], n));
+    wcr_dd s = wcr_sgn(wcr_inv_fact[29], 14);
+    for (int n = 13; n >= 0; --n) s = wcr_add(wcr_mul(s, r2), wcr_sgn(wcr_inv_fact[2 * n + 1], n));
+    s = wcr_mul(s, r);
+    wcr_dd t = (((int)nd) & 1) ? wcr_neg(wcr_div(c, s)) : wcr_div(s, c);
+    return wcr_round(t, rel + rel + 0x1p-95);
+}
+__device__ __forceinline__ double tan(double x) { return wlm_tan(x); }
 __device__ __forceinline__ double cos(double x) { return wlm_cos(x); }
 __device__ __forceinline__ double exp(double x) { return wcr_exp(x); }
 __device__ __forceinline__ double log(double x) { return wcr_log(x); }

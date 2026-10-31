@@ -146,6 +146,11 @@ def meshgrid(*xi, **kw):
     return [asarray(m) for m in np.meshgrid(*[asnumpy(x) for x in xi], **kw)]
 
 
+def indices(dimensions, dtype=int, sparse=False):
+    r = np.indices(tuple(int(d) for d in dimensions), dtype=dtype, sparse=sparse)
+    return tuple(asarray(x) for x in r) if sparse else asarray(r)
+
+
 def unique(a, **kw):
     r = np.unique(asnumpy(a), **kw)
     return tuple(asarray(x) for x in r) if isinstance(r, tuple) else asarray(r)
@@ -224,12 +229,27 @@ def _on_host(np_fn):
     return fn
 
 
-for _name in ("eye", "identity", "moveaxis", "broadcast_arrays", "bincount", "interp", "gradient", "cross",
+for _name in ("eye", "identity", "broadcast_arrays", "bincount", "interp", "gradient", "cross",
               "diagonal", "isin", "lexsort", "unravel_index", "ravel_multi_index", "take_along_axis",
               "outer", "matmul", "nan_to_num", "packbits", "unpackbits", "fromfile", "load", "tril",
               "triu", "histogram", "digitize", "einsum", "trapz" if hasattr(np, "trapz") else "trapezoid"):
     globals()[_name] = _on_host(getattr(np, _name))
 broadcast_shapes = np.broadcast_shapes
+
+
+def moveaxis(a, source, destination):
+    """A view, as CuPy's (a transpose of the same buffer)."""
+    return _moveaxis_view(asarray(a), source, destination)
+
+
+def _moveaxis_view(a, source, destination):
+    from numpy.lib.array_utils import normalize_axis_tuple
+    src = normalize_axis_tuple(source, a.ndim, "source")
+    dst = normalize_axis_tuple(destination, a.ndim, "destination")
+    order = [n for n in range(a.ndim) if n not in src]
+    for d, s_ in sorted(zip(dst, src)):
+        order.insert(d, s_)
+    return a.transpose(order)
 
 
 class _OGrid:
