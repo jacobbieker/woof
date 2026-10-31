@@ -9,33 +9,33 @@
     "cupy.ReductionKernel",
     "cupy.cuda.compiler.compile_using_nvrtc"
   ],
-  "site_count": 447,
+  "site_count": 468,
   "site_count_by_kind": {
     "cupy.ElementwiseKernel": 32,
-    "cupy.RawKernel": 54,
-    "cupy.RawModule": 213,
+    "cupy.RawKernel": 59,
+    "cupy.RawModule": 220,
     "cupy.ReductionKernel": 11,
-    "cupy.cuda.compiler.compile_using_nvrtc": 137
+    "cupy.cuda.compiler.compile_using_nvrtc": 146
   },
   "site_count_by_surface": {
     "other": {
       "cupy.RawKernel": 6,
-      "cupy.RawModule": 14,
+      "cupy.RawModule": 15,
       "cupy.cuda.compiler.compile_using_nvrtc": 22
     },
     "package": {
       "cupy.ElementwiseKernel": 22,
-      "cupy.RawKernel": 13,
-      "cupy.RawModule": 63,
+      "cupy.RawKernel": 15,
+      "cupy.RawModule": 66,
       "cupy.ReductionKernel": 7,
-      "cupy.cuda.compiler.compile_using_nvrtc": 81
+      "cupy.cuda.compiler.compile_using_nvrtc": 87
     },
     "tests": {
       "cupy.ElementwiseKernel": 5,
-      "cupy.RawKernel": 16,
-      "cupy.RawModule": 84,
+      "cupy.RawKernel": 19,
+      "cupy.RawModule": 87,
       "cupy.ReductionKernel": 2,
-      "cupy.cuda.compiler.compile_using_nvrtc": 27
+      "cupy.cuda.compiler.compile_using_nvrtc": 30
     },
     "tools": {
       "cupy.ElementwiseKernel": 5,
@@ -301,6 +301,28 @@
       "options_element_expressions": null,
       "options_are_literal": false,
       "text": "kernel = cp.RawKernel("
+    },
+    {
+      "file": "components/hex/tests/test_deformation_geometry_precision_gpu.py",
+      "line": 58,
+      "column": 17,
+      "surface": "other",
+      "constructor": "cp.RawModule",
+      "constructor_kind": "cupy.RawModule",
+      "enclosing": "_gpu_kdiff",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "(\"--std=c++17\", \"--fmad=false\")",
+      "options": [
+        "--std=c++17",
+        "--fmad=false"
+      ],
+      "options_element_expressions": [
+        "\"--std=c++17\"",
+        "\"--fmad=false\""
+      ],
+      "options_are_literal": true,
+      "text": "kernel = cp.RawModule("
     },
     {
       "file": "components/hex/tests/test_dycore_subnormal_v842.py",
@@ -845,6 +867,22 @@
       "text": "self.modules[module_key] = cp.RawModule(code=source, options=('--std=c++17',))"
     },
     {
+      "file": "tests/_microphysics_workspace_columns.py",
+      "line": 70,
+      "column": 11,
+      "surface": "tests",
+      "constructor": "cp.RawModule",
+      "constructor_kind": "cupy.RawModule",
+      "enclosing": "pre_cut_kernel",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "module_options(module)",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "return cp.RawModule(code=src, options=module_options(module)).get_function("
+    },
+    {
       "file": "tests/data/assembled_legacy_proofs/E-kernel-loader.py",
       "line": 288,
       "column": 20,
@@ -1075,6 +1113,22 @@
       ],
       "options_are_literal": true,
       "text": "mod = cp.RawModule(code=src, options=(\"-std=c++17\", \"--fmad=false\"),"
+    },
+    {
+      "file": "tests/test_async_checkpoints_gpu.py",
+      "line": 74,
+      "column": 11,
+      "surface": "tests",
+      "constructor": "cp.RawKernel",
+      "constructor_kind": "cupy.RawKernel",
+      "enclosing": "test_gpu_snapshot_is_the_checkpoint_instant",
+      "takes_caller_options": true,
+      "options_argument_present": false,
+      "options_expression": null,
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "spin = cp.RawKernel(r\"\"\""
     },
     {
       "file": "tests/test_bandwidth_word_kernels.py",
@@ -1115,6 +1169,22 @@
       ],
       "options_are_literal": true,
       "text": "vector = cp.RawModule(code=source, options=('-std=c++17',)).get_function('saxpy')"
+    },
+    {
+      "file": "tests/test_both_streamed_nesting.py",
+      "line": 181,
+      "column": 11,
+      "surface": "tests",
+      "constructor": "cp.RawKernel",
+      "constructor_kind": "cupy.RawKernel",
+      "enclosing": "_force_tables_land_late",
+      "takes_caller_options": true,
+      "options_argument_present": false,
+      "options_expression": null,
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "spin = cp.RawKernel(r'''"
     },
     {
       "file": "tests/test_chem_advect_mono_wrf471_parity.py",
@@ -1403,6 +1473,22 @@
       "text": "ptx, _ = compile_using_nvrtc("
     },
     {
+      "file": "tests/test_history_output_path_gpu.py",
+      "line": 50,
+      "column": 11,
+      "surface": "tests",
+      "constructor": "cp.RawKernel",
+      "constructor_kind": "cupy.RawKernel",
+      "enclosing": "_spin_kernel",
+      "takes_caller_options": true,
+      "options_argument_present": false,
+      "options_expression": null,
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "spin = cp.RawKernel(r\"\"\""
+    },
+    {
       "file": "tests/test_hydro_world_door_cuda.py",
       "line": 27,
       "column": 22,
@@ -1676,7 +1762,7 @@
     },
     {
       "file": "tests/test_mp8_frozen.py",
-      "line": 3086,
+      "line": 3099,
       "column": 8,
       "surface": "tests",
       "constructor": "cp.RawModule",
@@ -1705,6 +1791,22 @@
       "options_element_expressions": null,
       "options_are_literal": false,
       "text": "read_after_delay = cp.RawKernel(r'''"
+    },
+    {
+      "file": "tests/test_myj_workspace.py",
+      "line": 328,
+      "column": 10,
+      "surface": "tests",
+      "constructor": "cp.RawModule",
+      "constructor_kind": "cupy.RawModule",
+      "enclosing": "_pre_cut_function",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "module_options(name)",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "mod = cp.RawModule(code=src, options=module_options(name))"
     },
     {
       "file": "tests/test_mynn_pbl_gpu.py",
@@ -2431,6 +2533,54 @@
       "text": "kernel=cp.RawKernel(_CUDA,'roughness')"
     },
     {
+      "file": "tests/test_physics_256_levels_gpu.py",
+      "line": 183,
+      "column": 11,
+      "surface": "tests",
+      "constructor": "cp.RawModule",
+      "constructor_kind": "cupy.RawModule",
+      "enclosing": "_raw_module",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "options",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "return cp.RawModule(code=source, options=options,"
+    },
+    {
+      "file": "tests/test_physics_256_levels_gpu.py",
+      "line": 336,
+      "column": 16,
+      "surface": "tests",
+      "constructor": "compiler.compile_using_nvrtc",
+      "constructor_kind": "cupy.cuda.compiler.compile_using_nvrtc",
+      "enclosing": "_kf_old_ceiling_function",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "KF_MODULE_OPTIONS",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "binary, _ = compiler.compile_using_nvrtc("
+    },
+    {
+      "file": "tests/test_physics_256_levels_gpu.py",
+      "line": 449,
+      "column": 13,
+      "surface": "tests",
+      "constructor": "compiler.compile_using_nvrtc",
+      "constructor_kind": "cupy.cuda.compiler.compile_using_nvrtc",
+      "enclosing": "_old_drag_module",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "td.MODULE_OPTIONS",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "ptx, _ = compiler.compile_using_nvrtc(source, td.MODULE_OPTIONS, None,"
+    },
+    {
       "file": "tests/test_physics_params.py",
       "line": 520,
       "column": 14,
@@ -3125,6 +3275,22 @@
       "text": "kernel = cp.RawKernel(source, \"rain_budget_probe\")"
     },
     {
+      "file": "tests/test_windfarm_fitch_wrf471_parity.py",
+      "line": 241,
+      "column": 13,
+      "surface": "tests",
+      "constructor": "compiler.compile_using_nvrtc",
+      "constructor_kind": "cupy.cuda.compiler.compile_using_nvrtc",
+      "enclosing": "test_a_changed_word_in_the_kernel_is_seen",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "wf.MODULE_OPTIONS",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "ptx, _ = compiler.compile_using_nvrtc(mutated, wf.MODULE_OPTIONS, None,"
+    },
+    {
       "file": "tests/test_woof_expf_argument_reduction.py",
       "line": 74,
       "column": 13,
@@ -3492,7 +3658,7 @@
     },
     {
       "file": "tools/cuda_rounding_check.py",
-      "line": 463,
+      "line": 473,
       "column": 17,
       "surface": "tools",
       "constructor": "cp.ElementwiseKernel",
@@ -4959,6 +5125,22 @@
       "text": "_SMOKE_VD = cp.ElementwiseKernel("
     },
     {
+      "file": "woof/core/cr_cbrt.py",
+      "line": 208,
+      "column": 17,
+      "surface": "package",
+      "constructor": "compiler.compile_using_nvrtc",
+      "constructor_kind": "cupy.cuda.compiler.compile_using_nvrtc",
+      "enclosing": "_batch_module",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "MODULE_OPTIONS",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "ptx, _ = compiler.compile_using_nvrtc(source, MODULE_OPTIONS, None,"
+    },
+    {
       "file": "woof/core/cumulus_clock.py",
       "line": 106,
       "column": 13,
@@ -4976,7 +5158,7 @@
     },
     {
       "file": "woof/core/dycore.py",
-      "line": 302,
+      "line": 305,
       "column": 11,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
@@ -4996,7 +5178,7 @@
     },
     {
       "file": "woof/core/dycore.py",
-      "line": 333,
+      "line": 336,
       "column": 11,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
@@ -5032,7 +5214,47 @@
     },
     {
       "file": "woof/core/health_ledger.py",
-      "line": 318,
+      "line": 343,
+      "column": 38,
+      "surface": "package",
+      "constructor": "cp.RawKernel",
+      "constructor_kind": "cupy.RawKernel",
+      "enclosing": "_ordered_record_kernel",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "(\"-std=c++17\",)",
+      "options": [
+        "-std=c++17"
+      ],
+      "options_element_expressions": [
+        "\"-std=c++17\""
+      ],
+      "options_are_literal": true,
+      "text": "_ORDERED_RECORD_KERNEL.append(cp.RawKernel("
+    },
+    {
+      "file": "woof/core/health_ledger.py",
+      "line": 570,
+      "column": 28,
+      "surface": "package",
+      "constructor": "cp.RawKernel",
+      "constructor_kind": "cupy.RawKernel",
+      "enclosing": "record_span_bits",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "(\"-std=c++17\",)",
+      "options": [
+        "-std=c++17"
+      ],
+      "options_element_expressions": [
+        "\"-std=c++17\""
+      ],
+      "options_are_literal": true,
+      "text": "_SPAN_KERNEL.append(cp.RawKernel("
+    },
+    {
+      "file": "woof/core/health_ledger.py",
+      "line": 689,
       "column": 24,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
@@ -5045,6 +5267,22 @@
       "options_element_expressions": null,
       "options_are_literal": false,
       "text": "_MASKED_CLEAR = cp.ElementwiseKernel("
+    },
+    {
+      "file": "woof/core/hub_wind_diag.py",
+      "line": 424,
+      "column": 15,
+      "surface": "package",
+      "constructor": "cp.RawModule",
+      "constructor_kind": "cupy.RawModule",
+      "enclosing": "_module",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "KERNEL_OPTIONS",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "return cp.RawModule(code=KERNEL_SOURCE, options=KERNEL_OPTIONS)"
     },
     {
       "file": "woof/core/ieee_module.py",
@@ -5400,7 +5638,7 @@
     },
     {
       "file": "woof/core/mynn_pbl_gpu.py",
-      "line": 293,
+      "line": 294,
       "column": 11,
       "surface": "package",
       "constructor": "cp.ReductionKernel",
@@ -5416,7 +5654,7 @@
     },
     {
       "file": "woof/core/mynn_pbl_gpu.py",
-      "line": 300,
+      "line": 301,
       "column": 11,
       "surface": "package",
       "constructor": "cp.ReductionKernel",
@@ -5432,7 +5670,7 @@
     },
     {
       "file": "woof/core/mynn_pbl_gpu.py",
-      "line": 307,
+      "line": 308,
       "column": 11,
       "surface": "package",
       "constructor": "cp.ReductionKernel",
@@ -5448,7 +5686,7 @@
     },
     {
       "file": "woof/core/mynn_pbl_gpu.py",
-      "line": 367,
+      "line": 368,
       "column": 11,
       "surface": "package",
       "constructor": "cp.RawKernel",
@@ -5487,6 +5725,22 @@
       ],
       "options_are_literal": true,
       "text": "mod = cp.RawModule(code=src,"
+    },
+    {
+      "file": "woof/core/nest_vertical.py",
+      "line": 676,
+      "column": 17,
+      "surface": "package",
+      "constructor": "compiler.compile_using_nvrtc",
+      "constructor_kind": "cupy.cuda.compiler.compile_using_nvrtc",
+      "enclosing": "_module",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "MODULE_OPTIONS",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "ptx, _ = compiler.compile_using_nvrtc("
     },
     {
       "file": "woof/core/noah_forcing.py",
@@ -5770,7 +6024,7 @@
     },
     {
       "file": "woof/core/rrtmg_legacy.py",
-      "line": 1079,
+      "line": 1083,
       "column": 24,
       "surface": "package",
       "constructor": "_cc.compile_using_nvrtc",
@@ -5808,7 +6062,7 @@
     },
     {
       "file": "woof/core/rrtmg_lw.py",
-      "line": 3699,
+      "line": 3739,
       "column": 24,
       "surface": "package",
       "constructor": "_cc.compile_using_nvrtc",
@@ -6174,7 +6428,7 @@
     },
     {
       "file": "woof/core/terrain_drag.py",
-      "line": 113,
+      "line": 122,
       "column": 17,
       "surface": "package",
       "constructor": "compiler.compile_using_nvrtc",
@@ -6227,6 +6481,54 @@
       "options_element_expressions": null,
       "options_are_literal": false,
       "text": "module = cp.RawModule(code=source, options=MODULE_OPTIONS,"
+    },
+    {
+      "file": "woof/core/windfarm_fitch.py",
+      "line": 293,
+      "column": 17,
+      "surface": "package",
+      "constructor": "compiler.compile_using_nvrtc",
+      "constructor_kind": "cupy.cuda.compiler.compile_using_nvrtc",
+      "enclosing": "_module",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "MODULE_OPTIONS",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "ptx, _ = compiler.compile_using_nvrtc("
+    },
+    {
+      "file": "woof/core/windfarm_fitch.py",
+      "line": 313,
+      "column": 17,
+      "surface": "package",
+      "constructor": "compiler.compile_using_nvrtc",
+      "constructor_kind": "cupy.cuda.compiler.compile_using_nvrtc",
+      "enclosing": "_cells_module",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "MODULE_OPTIONS",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "ptx, _ = compiler.compile_using_nvrtc("
+    },
+    {
+      "file": "woof/core/windfarm_power_diag.py",
+      "line": 850,
+      "column": 17,
+      "surface": "package",
+      "constructor": "compiler.compile_using_nvrtc",
+      "constructor_kind": "cupy.cuda.compiler.compile_using_nvrtc",
+      "enclosing": "_module",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "MODULE_OPTIONS",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "ptx, _ = compiler.compile_using_nvrtc("
     },
     {
       "file": "woof/core/wsm_family.py",
@@ -6456,7 +6758,7 @@
     },
     {
       "file": "woof/ensemble/batch_physics.py",
-      "line": 525,
+      "line": 528,
       "column": 17,
       "surface": "package",
       "constructor": "array_module.RawModule",
@@ -6476,7 +6778,7 @@
     },
     {
       "file": "woof/ensemble/batch_physics.py",
-      "line": 753,
+      "line": 756,
       "column": 17,
       "surface": "package",
       "constructor": "array_module.RawModule",
@@ -6492,7 +6794,7 @@
     },
     {
       "file": "woof/ensemble/batch_physics.py",
-      "line": 900,
+      "line": 903,
       "column": 21,
       "surface": "package",
       "constructor": "array_module.RawModule",
@@ -6769,6 +7071,22 @@
       "text": "module = xp.RawModule(code=SOURCE, options=options)"
     },
     {
+      "file": "woof/fire/_device.py",
+      "line": 46,
+      "column": 17,
+      "surface": "package",
+      "constructor": "compiler.compile_using_nvrtc",
+      "constructor_kind": "cupy.cuda.compiler.compile_using_nvrtc",
+      "enclosing": "_module",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "MODULE_OPTIONS",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "ptx, _ = compiler.compile_using_nvrtc("
+    },
+    {
       "file": "woof/hex/cuda_acoustic_rrfs.py",
       "line": 330,
       "column": 19,
@@ -6865,6 +7183,22 @@
       "text": "module = cp.RawModule("
     },
     {
+      "file": "woof/hex/cuda_compensated_recovery.py",
+      "line": 226,
+      "column": 35,
+      "surface": "package",
+      "constructor": "self.cp.RawModule",
+      "constructor_kind": "cupy.RawModule",
+      "enclosing": "_kernel",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "COMPILE_OPTIONS",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "self._module = self.cp.RawModule("
+    },
+    {
       "file": "woof/hex/cuda_compile_rrfs.py",
       "line": 18,
       "column": 19,
@@ -6915,6 +7249,22 @@
       ],
       "options_are_literal": true,
       "text": "self.kernel = cp.RawKernel(CUDA_COLUMN_TRANSPORT, 'fullstep_column_transport', options=('--std=c++11',))"
+    },
+    {
+      "file": "woof/hex/cuda_les_v841.py",
+      "line": 893,
+      "column": 35,
+      "surface": "package",
+      "constructor": "self.cp.RawModule",
+      "constructor_kind": "cupy.RawModule",
+      "enclosing": "_kernel",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "COMPILE_OPTIONS",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "self._module = self.cp.RawModule("
     },
     {
       "file": "woof/hex/cuda_physics_v841.py",
@@ -8062,7 +8412,7 @@
     },
     {
       "file": "woof/verify/wsm6_process_budget.py",
-      "line": 147,
+      "line": 148,
       "column": 22,
       "surface": "package",
       "constructor": "cp.RawModule",
