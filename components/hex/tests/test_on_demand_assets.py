@@ -5,6 +5,7 @@ import functools
 import hashlib
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import json
+import os
 from pathlib import Path
 import socket
 import threading
@@ -278,8 +279,12 @@ def test_select_downloads_only_matching_family(estate, server):
 
 def test_staged_resolution_memoises_hash(estate, monkeypatch):
     source, name, pins, identity = estate
-    assets.fetch_one(name, pins, from_directory=source)
+    staged = Path(assets.fetch_one(name, pins, from_directory=source)['path'])
     assets._VERIFIED.clear()
+    # A file written inside the racy window is rehashed on every verify
+    # (assets.RACY_WINDOW_NS); a settled staged pack is hashed once.
+    settled = time.time_ns() - 10 * assets.RACY_WINDOW_NS
+    os.utime(staged, ns=(settled, settled))
     original = hashlib.file_digest
     calls = []
     def hashing(*args, **kwargs):

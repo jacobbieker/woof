@@ -71,9 +71,20 @@ def asset_path(name, row, cache=None):
     return cache_root(cache) / 'assets' / row['sha256'] / name
 
 
+#: A file modified this recently is hashed on every verify, never memoised.
+#: File timestamps come from a coarse clock (one kernel tick on Linux before
+#: multigrain timestamps, 2 s on FAT), so a same-size rewrite inside that tick
+#: leaves size, mtime and ctime unchanged, and a memo keyed on them would keep
+#: the old verdict for new bytes (the "racily clean" index entry of version
+#: control).  Seen as test_on_demand_assets::test_private_checkout_only_accepts_pin
+#: returning a pack overwritten with garbage under a parallel test run.
+RACY_WINDOW_NS = 3_000_000_000
+
+
 def verify(path, row, *, memoise=False):
     path = Path(path)
     try:
+        started = time.time_ns()
         stat = path.stat()
         key = (str(path.resolve()), row['sha256'], row['bytes'], stat.st_size,
                stat.st_mtime_ns, stat.st_ctime_ns)
@@ -87,7 +98,7 @@ def verify(path, row, *, memoise=False):
             raise AssetError(f'{path}: sha256 mismatch (expected {row["sha256"]}, got {digest})')
     except OSError as error:
         raise AssetError(f'{path}: {error}') from error
-    if memoise:
+    if memoise and stat.st_mtime_ns < started - RACY_WINDOW_NS:
         _VERIFIED.add(key)
     return path
 
