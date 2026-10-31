@@ -483,6 +483,7 @@ class GrellFreitas:
         zeros_lev = cp.zeros((n, nz), dtype=DTYPE)
         forcing_mass = None
         from woof.wrf_exact import ENABLED as WRF_EXACT
+        from woof.core.theta_m import forcing_already_decoupled
 
         def held_lane(name):
             """Driver-held auxiliary forcing lane, zeros when absent."""
@@ -499,6 +500,11 @@ class GrellFreitas:
             if (WRF_EXACT and name in owned
                     and lane is getattr(state, owned[name], None)
                     and cfg.cu_physics == 3):
+                if forcing_already_decoupled(cfg):
+                    # use_theta_m = 1: phy_prep_part2 decoupled and converted
+                    # the pair at the end of the last step (woof.core.
+                    # theta_m.convert_advective_forcing).
+                    return cols(lane)
                 if forcing_mass is None:
                     from woof.state_serialization_contract import WRF_MUTS_SLOT
                     mut = state.existing_scratch(WRF_MUTS_SLOT)

@@ -807,6 +807,11 @@ def _apply_thompson_default(
     launch_adapter_finish(
         temperature, pii, th, state.thp, state.h_diabatic,
         rainncv, snowncv, graupelncv, sr, cfg, dt)
+    # use_theta_m = 1: the fused finish wrote th = T/pii, the post-call dry
+    # th_phy, and moist_physics_finish_em's theta_m branch is made from it
+    # (woof.core.theta_m.microphysics_window).  Off, a dictionary miss.
+    from woof.core.theta_m import finish_microphysics
+    finish_microphysics(state, cfg, th, dt)
     return MicrophysicsDiagnostics(
         rainnc=rainnc, rainncv=rainncv, sr=sr,
         snownc=snownc, snowncv=snowncv,

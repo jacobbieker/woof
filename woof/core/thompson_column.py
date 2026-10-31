@@ -136,6 +136,10 @@ def apply_generated(state, cfg, dt, *, refl_10cm_due=False):
         state.h_diabatic[...] = increment / np.float32(dt)
     else:
         state.h_diabatic.fill(0)
+    # use_theta_m = 1: th is the post-call dry th_phy; the theta_m finish is
+    # made from it (woof.core.theta_m.microphysics_window).  Off, a miss.
+    from woof.core.theta_m import finish_microphysics
+    finish_microphysics(state, cfg, th, dt)
     if refl_10cm_due:
         state.physics.refl_10cm = refl
     return MicrophysicsDiagnostics(**surface)

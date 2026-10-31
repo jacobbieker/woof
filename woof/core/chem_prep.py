@@ -46,7 +46,11 @@ class ChemPrep:
             shape=(nz+(name in W_LEVEL_NAMES),ny,nx)
             if name not in self._fields or self._fields[name].shape != shape:
                 self._fields[name]=cp.empty(shape,dtype=cp.float32)
-        args=(p,state.thp,state.thb,state.alt,state.php,state.phb,state.u,state.v,
+        # chem_prep reads grid%t_2 itself (module_chem_utilities.F:80): under
+        # use_theta_m = 1 that is theta_m', whichever window the caller is in
+        # (woof.core.theta_m.prognostic_theta); otherwise thp.
+        from woof.core.theta_m import prognostic_theta
+        args=(p,prognostic_theta(state),state.thb,state.alt,state.php,state.phb,state.u,state.v,
               p if qv is None else qv,state.fnm,state.fnp,
               np.int32(state.thb.ndim==3),np.int32(state.phb.ndim==3),
               np.int32(qv is not None),np.int32(nz),np.int32(ny),np.int32(nx))

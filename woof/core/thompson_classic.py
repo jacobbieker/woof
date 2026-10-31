@@ -171,6 +171,10 @@ def apply_classic(state, cfg, dt: float, table_owner, *,
         stash_refl_10cm(state, refl)
     launch_classic_effective_radius(t1d, state, size=size)
     launch_classic_finish(th, state, th_save, cfg, dt, size=size)
+    # use_theta_m = 1: th is the post-call dry th_phy; the theta_m finish is
+    # made from it (woof.core.theta_m.microphysics_window).  Off, a miss.
+    from woof.core.theta_m import finish_microphysics
+    finish_microphysics(state, cfg, th, dt)
     return rainnc, rainncv, snownc, snowncv, graupelnc, graupelncv, sr
 
 

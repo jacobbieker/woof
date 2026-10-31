@@ -175,8 +175,9 @@ def omitted_use_theta_m(wrf_version) -> int:
 
 #: How each import route recovers the dry-theta state it integrates when
 #: the moist-theta prognostic WRF would run is SUBSTITUTED (a configuration
-#: whose theta_m branch is not wired, woof.core.theta_m.refusal, or the
-#: WRF-file route).  The initial and boundary state is recovered exactly on
+#: whose theta_m branch is not wired, woof.core.theta_m.refusal).  The
+#: WRF-file route integrates the files' own THM/T_B* under use_theta_m = 1
+#: (woof.ingest.wrfinput.restore_theta_m_prognostic).  The initial and boundary state is recovered exactly on
 #: all three routes, so the answer is one announced substitution rather than
 #: a refusal on whichever door the user happened to arrive through.
 _THETA_M_ROUTES = {
@@ -212,14 +213,6 @@ def active_nudging_selectors(fdda: dict) -> list[tuple[str, list]]:
         if requested:
             active.append((key, list(values)))
     return active
-
-
-#: Why the WRF-file route keeps dry theta: the wrfinput/wrfbdy door converts
-#: the files' THM/QV/MU into the dry-theta state (woof/ingest/wrfinput.py),
-#: and handing the theta_m prognostic its own THM words is not wired.
-_THETA_M_WRF_FILE_ROUTE = (
-    "the WRF-file door (wrfinput/wrfbdy) restores dry theta and its "
-    "theta_m restoration is not wired")
 
 
 @dataclass(frozen=True)
@@ -290,6 +283,13 @@ def theta_m_unwired(inp: dict, max_dom: int = 1) -> str | None:
                 return why
     except (TypeError, ValueError) as error:
         return f"its physics selectors could not be read ({error})"
+    radar = physics.get("mp_tend_radar")
+    if radar is not None:
+        radar = list(radar) if isinstance(radar, (list, tuple)) else [radar]
+        if any(value == 1 for value in radar):
+            from woof.core.theta_m import RADAR_REFUSAL
+            return ("mp_tend_radar = 1: "
+                    + RADAR_REFUSAL.split(" is not wired: ", 1)[1])
     return None
 
 
@@ -301,10 +301,10 @@ def theta_m_decision(use_theta_m: int, *,
     """Book ``&dynamics/use_theta_m`` for whichever door is asking.
 
     ``use_theta_m = 1`` is honoured -- WOOF integrates WRF's theta_m
-    prognostic -- unless ``unwired`` names why this configuration's theta_m
-    branch is not wired (:func:`theta_m_unwired`) or the route is the
-    WRF-file door; then it is the declared dry-theta substitution it always
-    was."""
+    prognostic, on every route, the WRF-file door included -- unless
+    ``unwired`` names why this configuration's theta_m branch is not wired
+    (:func:`theta_m_unwired`); then it is the declared dry-theta
+    substitution it always was."""
 
     if metgrid_initialization:
         route = "metgrid"
@@ -320,8 +320,6 @@ def theta_m_decision(use_theta_m: int, *,
                     "and boundaries" if route == "metgrid" else
                     "woof transcribes the non-moist-theta use_theta_m=0 "
                     "branch"))
-    if route == "wrf_boundary" and unwired is None:
-        unwired = _THETA_M_WRF_FILE_ROUTE
     if unwired is not None:
         return ThetaMDecision(
             moist_theta=False, route=route, substituted=True,
@@ -335,9 +333,15 @@ def theta_m_decision(use_theta_m: int, *,
         moist_theta=True, route=route,
         reason=("woof integrates WRF's moist potential temperature "
                 "prognostic theta_m = theta*(1 + Rv/Rd*qv), the "
-                "use_theta_m = 1 branch (woof.core.theta_m); the initial "
-                "and boundary theta_m is made from the analysed dry theta "
-                "as real.exe makes it (module_initialize_real.F:4923)"))
+                "use_theta_m = 1 branch (woof.core.theta_m); "
+                + ("the initial and boundary theta_m are the files' own "
+                   "THM (THM_2 on a restart) and coupled T_B*, restored "
+                   "unconverted (woof.ingest.wrfinput."
+                   "restore_theta_m_prognostic)"
+                   if route == "wrf_boundary" else
+                   "the initial and boundary theta_m is made from the "
+                   "analysed dry theta as real.exe makes it "
+                   "(module_initialize_real.F:4923)")))
 
 
 #: ``&time_control/fine_input_stream`` selects which input stream
