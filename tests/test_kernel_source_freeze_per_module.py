@@ -238,6 +238,14 @@ BASELINE_PINNED: dict[str, str] = {
     # gfortran -O0 / glibc 2.43 record (tests/test_solar_diag_wrf471_oracle.py)
     # on Metal and CUDA.
     "solar_diag": "20ab14d004c6edb77d27426eee7a151a8634f442b1c40158f7979bda07ce6d5b",
+    # use_theta_m = 1: WRF v4.7.1's theta_m conversions (real.exe's theta ->
+    # theta_m, phy_prep/update_phys_fields' dry theta, conv_t_tendf_to_moist,
+    # moist_physics_finish_em's theta_m branch) and do_avgflx_em = 1's
+    # upd_avgflx, new units equal word for word to the gfortran -O0 /
+    # glibc 2.43 record (tests/test_bigstep_thetam_wrf471_parity.py) on
+    # Metal and CUDA.  Every existing unit keeps its bytes.
+    "theta_m": "f4ba37fc9e5b12fe0f71dd856210d105bf59d8ea8c68954cb573901e94a455f2",
+    "avgflx": "311619e4c2249be2fccf86771c68441d56fd8cb3f7986c2992ce5f2483871ea5",
     # e677dccb6: active table edits multiply binary64 values on the GPU,
     # round once to REAL, and reject non-positive crop roughness.
     "physics_params":
