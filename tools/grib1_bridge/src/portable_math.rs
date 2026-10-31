@@ -73,8 +73,9 @@ fn host_acos(x: f64) -> f64 {
     if (-1.0..=1.0).contains(&x) { unsafe { host_c_acos(x) } } else { f64::NAN }
 }
 fn host_atan2(y: f64, x: f64) -> f64 {
-    // Unlike the C call, math.atan2 returns the canonical Python NaN.
-    if y.is_nan() || x.is_nan() { f64::NAN } else { unsafe { host_c_atan2(y, x) } }
+    // CPython 3.14's math.atan2 (pixi pins 3.14) propagates a NaN operand,
+    // quieted, and x's when both are NaN -- what x + y gives.
+    if y.is_nan() || x.is_nan() { x + y } else { unsafe { host_c_atan2(y, x) } }
 }
 pub(crate) fn host_pow(x: f64, y: f64) -> f64 {
     // CPython handles NaN operands before the C call. Preserve their
