@@ -270,6 +270,20 @@ With `diff_opt=2`, two LES closures are selectable per domain
 |---|---|---|---|
 | 2 | 1.5-order prognostic TKE, `K = c_k sqrt(e) l` | prognostic, advected | yes, unless the parent is also `km_opt=2` |
 | 3 | 3-D Smagorinsky, `K = (c_s l)^2 |S|` | diagnostic | yes |
+| 5 | SMS-3DTKE scale-adaptive 3-D TKE (WRF v4.7.1) | prognostic, advected | yes; cold-starts TKE and `GAMU`/`GAMV` |
+
+`km_opt=5` is WRF v4.7.1's scale-adaptive closure (Zhang, Wang et al., 2018):
+its horizontal K blends 2-D Smagorinsky with the TKE K by `pthl(dx/zi)`, its
+vertical K blends the LES length with a Nakanishi-Niino/BouLac mesoscale length
+by `pu(dx/zi)`, a prescribed nonlocal heat flux and nonlocal momentum gammas
+carry the convective boundary layer's counter-gradient transport, and vertical
+mixing (with the TKE dissipation) is solved implicitly. The partial functions
+are zero for `dx <= 100 m`, so it is an LES closure there and approaches a
+mesoscale PBL scheme at kilometre spacing. It diagnoses `PBLH`/`KPBL` itself and
+replaces the PBL scheme: WRF requires `bl_pbl_physics=0` and `diff_opt=2` and a
+surface layer of 0, 1, 5 or 91. Every routine is held word for word to compiled
+WRF (`tests/test_sms3dtke_wrf471_parity.py`); it runs on periodic, specified
+and nested domains, not radiative open ones, and is WRF-only (refused on MPAS).
 
 `km_opt=2` additionally requires `bl_pbl_physics=0`: WRF will evolve TKE with the
 PBL on, but that combination has no vertical TKE mixing (WRF's

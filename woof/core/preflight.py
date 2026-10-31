@@ -2714,6 +2714,10 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # A6000 sm_86, NVRTC 12.9, 2026-10-31, both loaders: all five entry
     # points read 0 B.
     "theta_m": 0, "avgflx": 0,
+    # km_opt = 5 (SMS-3DTKE, kernels/sms3dtke.cu), RTX A6000 sm_86, NVRTC
+    # 12.9.86, 2026-10-31, default and strict loaders: all fourteen entry
+    # points read 0 B (the tridiagonal planes are a global workspace).
+    "sms3dtke": 0,
     # The partial-depth nest's coupling (Phase D3, kernels/partial_nest.cu),
     # RTX A6000 sm_86, NVRTC 12.9, 2026-10-30: all eight entry points 0 B.
     "partial_nest": 0,

@@ -120,6 +120,19 @@ strict native library. The shim uses native timekeeping and manager arithmetic,
 sets the eight shared logical flags, and returns timestamp/Julian/leap metadata.
 Advance the native clock exactly once at the native outer-step clock boundary.
 
+### WRF-only turbulence: km_opt = 5 (SMS-3DTKE)
+
+WRF v4.7.1's SMS-3DTKE closure (`km_opt = 5`) is not offered on MPAS. MPAS-A
+v8.4.2 has no counterpart: its `config_les_model` takes `none`,
+`3d_smagorinsky` or `prognostic_1.5_order`, and `config_horiz_mixing` the 2-D
+forms. Nor does it map onto the mesh as a WOOF-only service the way FARMS and
+Deng did: those are column schemes behind existing slots, while SMS-3DTKE is a
+dycore closure built on WRF's C grid (the `cal_deform_and_div` deformation and
+`zx`/`zy` terrain slopes, the u/v-face nonlocal momentum gammas, the eta-level
+tridiagonal solves of `vertical_diffusion_implicit`) and replaces the PBL
+scheme the seam calls. `woof hex` refuses `km_opt = 5` by name
+(`woof/hex/physics_suites.py`; `components/hex/tests/test_arbitrary_physics.py`).
+
 ## Time ownership
 
 `physics_timetracker_state` updates native calendar globals and logical flags
