@@ -100,3 +100,25 @@ def test_float_vector_components_keep_subnormals_in_an_ftz_false_unit(cp):
     want = np.full(4, tiny, dtype=np.float32) * np.float32(0.5)
     assert want[0] != 0
     assert cp.asnumpy(out).tobytes() == want.tobytes()
+
+
+_POINTER_GLOBAL = r'''
+__device__ unsigned int* bound_counts;
+extern "C" __global__ void bind_counts(unsigned int* counts) {
+    if (blockIdx.x == 0 && threadIdx.x == 0) bound_counts = counts;
+}
+extern "C" __global__ void count(int n) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) atomicAdd(&bound_counts[i % 4], 1u);
+}
+'''
+
+
+def test_mutable_pointer_global_set_by_one_kernel_and_read_by_another(cp):
+    """`__device__ T* p;` (rrtmg_lw's writer proof): Metal binds no buffer
+    of pointers, so the global is an address word behind a pointer cell."""
+    module = cp.RawModule(code=_POINTER_GLOBAL)
+    counts = cp.zeros(4, dtype=cp.uint32)
+    module.get_function("bind_counts")((1,), (1,), (counts,))
+    module.get_function("count")((1,), (64,), (np.int32(50),))
+    assert cp.asnumpy(counts).tolist() == [13, 13, 12, 12]

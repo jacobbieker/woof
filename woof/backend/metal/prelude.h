@@ -528,6 +528,17 @@ template <typename T> struct __woof_addr_table {
   T operator*() const { return reinterpret_cast<T>(w[0]); }
 };
 
+// A mutable pointer global (`__device__ T* p;`): Metal binds no buffer of
+// pointers, so its buffer is one 64-bit word holding the address, and each
+// reference to the global is this cell -- assignable from a pointer, and a
+// pointer where one is read.
+template <typename P> struct __woof_ptr_cell {
+  device ulong* w;
+  __woof_ptr_cell(device ulong* p) : w(p) {}
+  template <typename Q> __woof_ptr_cell operator=(Q q) { *w = reinterpret_cast<ulong>(q); return *this; }
+  operator P() const { return reinterpret_cast<P>(*w); }
+};
+
 // A space-generic struct's pointer and reference types (translator
 // generic_struct): its __WS template argument names the address space of
 // the data it wraps, 0 thread, 1 device, 2 constant, 3 threadgroup.

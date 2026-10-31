@@ -440,7 +440,7 @@ def _binary32_of_decimal(text: str):
 
 
 class _Rewriter:
-    def __init__(self, text: str, tu, *, unit: str, retain_subnormals: bool = False):
+    def __init__(self, text: str, tu, *, unit: str, retain_subnormals: bool = False, macros=None):
         import clang.cindex as ci
         self.ci = ci
         self.text = text
@@ -448,6 +448,8 @@ class _Rewriter:
         self.tu = tu
         self.unit = unit
         self.retain = retain_subnormals
+        #: the largest integer value each macro is #defined to in the unit as given
+        self.macros = dict(macros or {})
         self.edits = Edits(self.data)
         self._indirect_kernels: set = set()
         self.kernels: dict[str, KernelSignature] = {}
@@ -681,11 +683,19 @@ class _Rewriter:
         device functions receive it as an implicit one (thread_builtins)."""
         t = cursor.type
         elem, dims = self._array_shape(t)
+        cell = None
+        if not dims and elem.rstrip().endswith("*") and space != "constant":
+            # a pointer global (`__device__ T* p;`, set by one kernel and
+            # read by others): Metal binds no buffer of pointers, so the
+            # buffer is one address word and every reference a
+            # __woof_ptr_cell (prelude).  It points into device memory.
+            cell = f"device {elem.rstrip()}"
+            elem = "ulong"
         index = len(self.module_globals)
         self.module_globals[cursor.get_usr()] = {
             "name": cursor.spelling, "elem": elem, "dims": dims, "space": space,
             "nbytes": int(t.get_size()), "param": f"__woof_g_{index}",
-            "ctype": _canonical(self._base_type(t)).replace("const ", "").strip(), "init": init}
+            "ctype": _canonical(self._base_type(t)).replace("const ", "").strip(), "init": init, "cell": cell}
         tokens = list(cursor.get_tokens())
         start, end = tokens[0].extent.start.offset, self._statement_end(cursor)
         before = self.data[:start].rstrip()
@@ -1269,7 +1279,9 @@ class _Rewriter:
                 if node.kind == K.DECL_REF_EXPR and node.referenced is not None \
                         and node.referenced.get_usr() == usr and self.main_file(node):
                     rs, re_ = self.span(node)
-                    self.edits.replace(rs, re_, g["param"] if g["dims"] else f"(*{g['param']})")
+                    self.edits.replace(rs, re_, g["param"] if g["dims"] else
+                                       f"(__woof_ptr_cell<{g['cell']}>({g['param']}))" if g.get("cell")
+                                       else f"(*{g['param']})")
         # hoist each device function's __shared__ arrays out of its body
         for key, (node, owner) in hoisted.items():
             name = f"__woof_sh_{key[3:]}"
@@ -1736,14 +1748,29 @@ class _Rewriter:
     #: WOOF_INLINE_NOINLINE=1|0 forces either way, for diagnosis.
     INLINE_NOINLINE_BY_KERNEL = frozenset({"fsbm_tile_f64", "fsbm_tile_f32"})
 
+    #: The same, only for a tier: (kernel, macro, smallest value) -> policy.
+    #: Thompson's column kernel crashes Metal's compiler service fully
+    #: inlined (XPC_ERROR_CONNECTION_INTERRUPTED after ~3 min) at
+    #: THOMPSON_COLUMN_KMAX 128 and 256, and at the default 64 as well, so
+    #: the tier gate covers every tier.  Out of line (size or none: the same
+    #: words) the three tiers agree word for word on the same columns.
+    INLINE_POLICY_BY_KERNEL_TIER = {("thompson_column_step", "THOMPSON_COLUMN_KMAX", 64): "size"}
+
     def _unit_inline_policy(self) -> str:
         policy = self.INLINE_POLICY_BY_UNIT.get(self.unit.split("[", 1)[0], "")
         if policy:
             return policy
+        tiers = {k: (m, v, p) for (k, m, v), p in self.INLINE_POLICY_BY_KERNEL_TIER.items()}
         for node in self.tu.cursor.walk_preorder():
+            if node.kind != self.ci.CursorKind.FUNCTION_DECL:
+                continue
             if node.spelling in self.INLINE_POLICY_BY_KERNEL and self.main_file(node) \
-                    and node.kind == self.ci.CursorKind.FUNCTION_DECL and self.is_kernel(node):
+                    and self.is_kernel(node):
                 return self.INLINE_POLICY_BY_KERNEL[node.spelling]
+            if node.spelling in tiers and self.main_file(node) and self.is_kernel(node):
+                macro, least, tier_policy = tiers[node.spelling]
+                if self.macros.get(macro, 0) >= least:
+                    return tier_policy
         return ""
 
     def inline_pointer_functions(self):
@@ -2137,6 +2164,10 @@ class _Rewriter:
             else:
                 pointers.append((g["param"], f"{space} {g['elem']}*"))
                 meta.append(Param(g["param"], True, g["ctype"], const, global_name=g["name"]))
+                if g.get("cell"):
+                    # what the stored address points at is invisible to
+                    # MLX's hazard tracking, as a pointer table's targets are
+                    self._indirect_kernels.add(name)
         scalar_size = (offset + max_align - 1) // max_align * max_align if scalars else 0
         table = len(pointers) > MAX_DIRECT_POINTERS
         sig_params, prologue, structs = [], [], []
@@ -2856,6 +2887,19 @@ def compose(source: str, expanded: str | None = None) -> str:
             + VENDOR_LIBM64.read_text(encoding="utf-8") + "\n" + cbrt + source)
 
 
+def _integer_macros(source: str, defines=()) -> dict:
+    """Each macro the unit (or a -D option) defines to an integer: the
+    largest value given (a tier's ``#define KMAX 128`` ahead of a header's
+    ``#ifndef`` default of 64 reads 128)."""
+    out: dict = {}
+    pairs = re.findall(r"^[ \t]*#[ \t]*define[ \t]+(\w+)[ \t]+(\d+)[ \t]*$", source, re.M)
+    pairs += [tuple(d.split("=", 1)) for d in defines if "=" in d]
+    for name, value in pairs:
+        if str(value).isdigit():
+            out[name] = max(out.get(name, 0), int(value))
+    return out
+
+
 def option_defines(options) -> tuple[str, ...]:
     """The ``-DNAME[=VALUE]`` macros among NVRTC options."""
     out, it = [], iter(options or ())
@@ -3126,7 +3170,8 @@ def translate(source: str, *, unit: str = "<unit>", contract: bool = False,
         text = explicit_float_to_integral(text)
     text = flatten_inheritance(text, unit)
     tu = parse(text)
-    result = _Rewriter(text, tu, unit=unit, retain_subnormals=retain_subnormals).run()
+    result = _Rewriter(text, tu, unit=unit, retain_subnormals=retain_subnormals,
+                       macros=_integer_macros(source, defines)).run()
     result.msl = (prelude(contract=contract, retain_subnormals=retain_subnormals,
                           ieee_helpers="__woof_ieee_" in result.msl)
                   + "\n// ---- translated unit: " + unit + "\n" + result.msl)
