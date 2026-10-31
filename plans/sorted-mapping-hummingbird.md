@@ -143,6 +143,24 @@ The first task is to confirm each source file below in the WRF 4.7.1 tree. MAD-W
 **D4. Physics, radiation and multiple bands.**
 - Radiation uses an extended column: the parent's levels above k_i, interpolated with `sint`, refreshed each radiation call. Heating is applied below k_i only.
 - Multiple bands schedule through `clock.execute_schedule`: coarsest first, feedback last, `parent_time_step_ratio`.
+- STATUS (branch partial-nest-d4): done.
+  - The child steps through `dycore.step(partial_top=...)`. Its hooks are the
+    stage forcing, the interface Omega, the face fluxes and top zone, the
+    specified-top acoustic substep, and the scalars' interface flux. So
+    moist scalars, physics and microphysics run on the child as on any
+    domain.
+  - The interface face takes the parent's second-order value, not D3's
+    upwind value; that fixed the gravity-wave ratchet. Feedback defaults to
+    theta plus the moist scalars. mu, u, v and w are opt-in. phi is refused,
+    because its feedback is a measured instability.
+  - Chains: band n's parent is band n-1, and each band's snapshot uses its
+    partial parent's own interface-closed Omega.
+  - Radiation runs on the extended column (`partial_nest_physics.py`).
+  - The model wiring is `DomainConfig.partial_nest` (the loader's
+    `partial_nest` domain key) plus `model.realize_partial_nests` /
+    `partial_nest_steppers`, on the idealized tree. The real-data route
+    refuses partial nests by name.
+  - Receipts are in `tests/data/receipts/partial-nest-d4`.
 
 **D5. MPAS.**
 - The fine band is a regional variable-resolution mesh truncated at z_i (`density.py`, `rw_mpas_mesh`).

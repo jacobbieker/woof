@@ -221,6 +221,12 @@ CUDA's compiles forced to `--fmad=false` (`WOOF_FMAD_OFF=1`, applied at
 or NaN-payload delta, and the pin file says so (for example the `known_deltas`
 in `vertical-native-metal.json`).
 
+The partial-depth nest's D4 unit (`kernels/partial_nest_d4.cu`) writes
+every operation as an explicit round-to-nearest intrinsic, like D3's.
+Traced on both machines, its word tests, D3's and the WRF oracle tests agree
+launch for launch (`tests/data/receipts/partial-nest-d4/backend-launch-words.txt`).
+The envelope receipts per backend are in the same directory.
+
 ## Finding a difference
 
 1. `tools/launch_trace.py`: run the same scenario on CUDA (`ssh pb`) and on

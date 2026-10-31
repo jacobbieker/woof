@@ -1,6 +1,7 @@
 # wrf_sint.o -O0 libm symbols:
 # wrf_interp_fcn.o -O0 libm symbols:
 # wrf_bc.o -O0 libm symbols:
+# wrf_vflux2.o -O0 libm symbols:
 # run_partial_nest.o -O0 libm symbols:
 _cosf
 _sinf

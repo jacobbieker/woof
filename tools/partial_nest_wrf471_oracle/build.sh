@@ -8,7 +8,8 @@
 # them out); every one is checked before anything compiles.  extract.py cuts
 # WRF's own statements (share/sint.F, interp_fcn.F's interp_fcn_sint,
 # copy_fcn, copy_fcnm, copy_fcni, smoother/sm121/smdsm, and module_bc.F's
-# relax_bdytend_core and spec_bdytend) byte for byte; stubs.F90 supplies
+# relax_bdytend_core and spec_bdytend; module_advect_em.F's advect_scalar
+# second-order vertical flux, D4) byte for byte; stubs.F90 supplies
 # the namelist getters and config record they USE; run_partial_nest.F90
 # generates the inputs, calls the routines and writes the fixture with
 # ../urban_wrf471_oracle/oracle_io.F90.
@@ -48,11 +49,12 @@ flags=(-c -O0 -ffp-contract=off -ffree-form -ffree-line-length-none)
 "${fc[@]}" "${flags[@]}" wrf_sint.F90
 "${fc[@]}" "${flags[@]}" wrf_interp_fcn.F90
 "${fc[@]}" "${flags[@]}" wrf_bc.F90
+"${fc[@]}" "${flags[@]}" wrf_vflux2.F90
 "${fc[@]}" "${flags[@]}" "${script_dir}/../urban_wrf471_oracle/oracle_io.F90"
 "${fc[@]}" "${flags[@]}" "${script_dir}/run_partial_nest.F90"
 
 : > libmvec-report.txt
-for obj in wrf_sint.o wrf_interp_fcn.o wrf_bc.o run_partial_nest.o; do
+for obj in wrf_sint.o wrf_interp_fcn.o wrf_bc.o wrf_vflux2.o run_partial_nest.o; do
     if nm -u "${obj}" | grep -q '_ZGV'; then
         echo "-O0 object ${obj} pulled in a libmvec vector symbol" >&2
         exit 4
@@ -88,7 +90,7 @@ fi
 # smoothers and the relaxation are + - * / and MIN/MAX/SIGN only).
 
 "${fc[@]}" -o run_partial_nest run_partial_nest.o wrf_sint.o wrf_interp_fcn.o \
-    wrf_bc.o stubs.o oracle_io.o
+    wrf_bc.o wrf_vflux2.o stubs.o oracle_io.o
 mkdir -p fixtures
 ./run_partial_nest fixtures
 

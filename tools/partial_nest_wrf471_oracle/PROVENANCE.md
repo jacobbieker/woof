@@ -73,3 +73,19 @@ and the top strip (full and half levels).  No ulp tolerance is used
 anywhere.
 
 Publish: copy BUILD_DIR/fixtures to tests/data/oracles/partial_nest/.
+
+## D4: the interface face's vertical flux
+
+`dyn_em/module_advect_em.F:4337-4350` (advect_scalar, `vert_order == 2`,
+sha256 d7507c42...), wrapped in `wrf_vflux2` with no statement edited: the
+second-order face flux `vflux(i,k) = rom*(fzm(k)*field(k) + fzp(k)*field(k-1))`
+and `tendency(k) = tendency(k) - rdzw(k)*(vflux(k+1) - vflux(k))`.  Three
+cases (`vflux2_theta`, `vflux2_qv`, `vflux2_u`) on a two-level column per
+point -- level 1 the child's top half level, level 2 the parent's half level
+above, face 2 the interface, Omega of either sign.  woof's
+`nest_top_face_flux_all` (centered) and `nest_top_scalar_face_flux`
+(kernels/partial_nest_d4.cu) equal WRF's vflux and tendency word for word;
+the scalar entry point's outgoing-face cap (a donor never gives more than
+its own value) is woof's, compared where it binds against `rom*q_top`.
+The D3 fixtures are unchanged (the new cases are generated after them).
+Metal, 2026-10-30: 24 tests pass, no tolerance.
