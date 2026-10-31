@@ -52,6 +52,12 @@ def inventory(package_root=None, numerics=None, compiler_family=None, *, compile
         if module_name == "woof.hex.mpasphys.resident_v842":
             bindings = [dict(namespace, unit="latitude", source=namespace["_LATITUDE"]),
                         dict(namespace, unit="preparation", source=namespace["preparation_source"]())]
+        # The YSU-GWDO kernel compiles per run at the bound column
+        # (gwdo_kernel_source(nlev), 3..GWDO_MAX_LEVELS).  The pack carries the
+        # anchored column, whose source is the pinned _CUDA_SOURCE byte for
+        # byte; any other column is a level variant compiled on first use.
+        if module_name == "woof.hex.cuda_gwdo_v841":
+            bindings = [dict(namespace, nlev=namespace["GWDO_ANCHORED_LEVELS"])]
         for call in calls:
             keywords = {k.arg: k.value for k in call.keywords}
             if "module_key" not in keywords:

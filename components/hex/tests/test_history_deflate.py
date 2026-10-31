@@ -25,6 +25,14 @@ def library():
     if not sys.platform.startswith("linux"):
         pytest.skip("the HDF5 filter-table hook is built for Linux")
     if history_deflate.library_path() is None:
+        if not (CRATE / "Cargo.toml").is_file():
+            # (WOOF) gpuwm-hex's rust/history-deflate is not carried in this
+            # folded tree; a woof wheel ships the library prebuilt among the
+            # hex helpers (woof.hex.helpers).  Without it staged there is
+            # nothing to build here.
+            pytest.skip(f"{history_deflate.LIBRARY_NAME} is not on this machine and this tree "
+                        "does not carry rust/history-deflate to build it; set "
+                        f"{history_deflate.LIBRARY_ENVIRONMENT} to a built copy to run these")
         cargo = shutil.which("cargo")
         if cargo is None:
             pytest.skip("cargo is not on PATH to build rust/history-deflate")

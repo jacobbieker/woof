@@ -48,6 +48,16 @@ not a pass.
   `cuda` job runs only the pytest members.
 - **Assets (Tier 2, `asset_gates.txt`, `-m assets`).** About 6.9 GiB of
   byte-pinned files have no fetch path, so no job runs them.
+- **Hex helpers whose crates this tree does not carry.** `hex_contract_hostprep`
+  (gpuwm-hex `rust/host-prep`) and `libhex_history_deflate.so`
+  (`rust/history-deflate`) ship prebuilt among a wheel's hex helpers and are
+  not `build-native` workspaces. `components/hex/tests/test_contract_hostprep.py`
+  (14 comparisons) and `test_history_deflate.py` skip with that reason on every
+  runner. Set `WOOF_HEX_CONTRACT_HOSTPREP` / `WOOF_HEX_HISTORY_DEFLATE_LIB` to
+  a built copy to run them.
+- **The shipped kernel packs.** `test_hex_aot.py::test_shipped_pack_covers_every_declared_module_on_every_architecture`
+  needs `kernel-pack-cuda{12,13}.json` staged (`woof hex fetch-assets`); a
+  hosted runner has neither, so it skips there.
 - **The full CUDA pytest shard** (`tools/battery/gpu_shard_files.txt`, 516
   files). It is not in the `cuda` job. Run it by hand on the CUDA host.
 - **The full Metal compile census** (`tools/metal_translation_census.py`
