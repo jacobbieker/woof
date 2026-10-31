@@ -322,6 +322,10 @@ cpu  tools/rustwx  rw-wrfbatch  115
 # with the dual-pol PPI field and echo mask tests, 2026-10-03.
 cpu  tools/rustwx  rw-simradar  31
 
+# rw-sitesample: the wrfout site sampler behind woof.energy.sample
+# (ba5aa9ad3), library and C API.
+cpu  tools/rustwx  rw-sitesample  12
+
 # rw-mpas: THIS project's crate too, and the DEFAULT route from an MPAS
 # history frame to a picture -- `rw_mpas_convert` gathers an unstructured
 # mesh onto a structured render window and writes the wrfout-shaped
