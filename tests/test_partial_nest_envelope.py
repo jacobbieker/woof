@@ -37,8 +37,15 @@ def _receipt():
     return json.loads(path.read_text())
 
 
-def _bounded(got, want, what):
-    assert got <= GROWTH * abs(want) + FLOOR, f"{what}: {got} outside {GROWTH} x {want}"
+#: The rest cases measure the coupled noise floor (~1e-4 m/s, 1e-4 K), which
+#: is not bit-reproducible run to run on Metal: MEASURED, chain_rest's
+#: root-cell w RMSE 5.9e-5 in the receipt and 9.5e-5 on a rerun of the same
+#: commit.  Their accuracy rows get an absolute allowance at that floor.
+REST_FLOOR = 2e-4
+
+
+def _bounded(got, want, what, floor=FLOOR):
+    assert got <= GROWTH * abs(want) + floor, f"{what}: {got} outside {GROWTH} x {want}"
 
 
 def _theta(row, group="child_block_mean_vs_allfine_block_mean"):
@@ -65,15 +72,16 @@ def test_case_stays_inside_its_measured_envelope(case):
         pytest.skip("the partial-depth nest runs in the default build only")
     from woof.verify.partial_nest_envelope import run_case
     want = _receipt()["cases"][case]
+    floor = REST_FLOOR if case.endswith("rest") else FLOOR
     got = run_case(case, timing=False)
     assert got["finite"]
     assert (got["parent_steps"], got["child_steps"], got["forces"], got["feedbacks"]) == (
         want["parent_steps"], want["child_steps"], want["forces"], want["feedbacks"])
     for group in ("child_vs_allfine", "child_block_mean_vs_allfine_block_mean"):
         for var, row in want[group].items():
-            _bounded(got[group][var]["rmse"], row["rmse"], f"{group}.{var}.rmse")
+            _bounded(got[group][var]["rmse"], row["rmse"], f"{group}.{var}.rmse", floor)
             _bounded(abs(got[group][var]["bias"]), abs(row["bias"]) + 0.5 * row["rmse"],
-                     f"{group}.{var}.bias")
+                     f"{group}.{var}.bias", floor)
     for key in ("top_zone_w_variance_max", "interface_w_max_abs", "child_w_max_abs"):
         _bounded(got[key], want[key], key)
     for key in ("child_dry_mass_drift_rel", "parent_dry_mass_drift_rel"):
