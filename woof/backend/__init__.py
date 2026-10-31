@@ -6,7 +6,9 @@
           ``mlx.core``; kernels are the same CUDA sources translated to Metal
           (:mod:`woof.backend.translate`) and launched in place
           (:mod:`woof.backend.metal`).
-``cpu``   the same facade over NumPy, kernels compiled as host C++.
+``cpu``   planned: the same facade over NumPy, kernels compiled as host
+          C++.  Until it exists ``cpu`` installs no facade, so ``import
+          cupy`` stays an ImportError on a machine without CuPy.
 
 Selection: ``$WOOF_BACKEND`` when set, else ``cuda`` when CuPy is importable,
 else ``mlx`` on darwin-arm64 with MLX installed, else ``cpu``.  The choice is
@@ -24,6 +26,8 @@ import platform
 import sys
 
 BACKENDS = ("cuda", "mlx", "cpu")
+#: The backends :mod:`woof.backend.facade` can serve ``import cupy`` for.
+FACADE_BACKENDS = ("mlx",)
 ENV = "WOOF_BACKEND"
 
 _active: str | None = None
@@ -78,6 +82,15 @@ def install(name: str | None = None) -> str:
         if importlib.util.find_spec("mlx") is None:
             raise BackendUnavailable("backend 'mlx' needs the mlx package "
                                      "(pixi environment `mlx`, or the gpu-mlx extra)")
+    if name not in FACADE_BACKENDS:
+        # No facade serves this backend yet (cpu): leave `import cupy` as the
+        # ImportError it is on a machine without CuPy, so importorskip and
+        # `except ImportError` guards skip GPU work as they always have.  A
+        # finder here made every such import raise BackendUnsupported (an
+        # AttributeError) instead -- 487 CPU-tier failures on a CuPy-less
+        # Linux runner.
+        _active = name
+        return name
     # Lazily: `import cupy` finds the facade when something first imports it,
     # so a module that imports no cupy on CUDA imports none here either.
     if not any(isinstance(f, _FacadeFinder) for f in sys.meta_path):
