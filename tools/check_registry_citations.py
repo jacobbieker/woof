@@ -275,10 +275,13 @@ RESOLVED: dict[str, tuple[str, str]] = {
     # (lane/hrrr-v4-output-fold 514f72e8be, RK descriptors passed as by-value
     # host arrays, moved both two lines down, to :1433 and :1527.  Anchors
     # unchanged.)
-    "woof/core/dycore.py:1436": (
+    # (mlx-backend moved both two lines down, to :1438 and :1532, and
+    # km_opt=5's launcher, inserted between them, moved the km_opt=3 one
+    # to :1745.  Anchors unchanged.)
+    "woof/core/dycore.py:1438": (
         "woof/core/dycore.py",
         "WRF v4.6.1 km_opt=2:"),
-    "woof/core/dycore.py:1530": (
+    "woof/core/dycore.py:1745": (
         "woof/core/dycore.py",
         "WRF v4.6.1 km_opt=3:"),
 }

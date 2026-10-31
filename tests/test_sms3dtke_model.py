@@ -38,6 +38,7 @@ def _cfg(**kw):
     (dict(open_x=True), "radiative open"),
     (dict(mix_isotropic=1), "mix_isotropic"),
     (dict(tke_budget=1), "tke_budget"),
+    (dict(use_theta_m=1), "use_theta_m"),
     (dict(sf_sfclay_physics=0, sf_surface_physics=0, isfflx=0,
           tke_heat_flux=0.24), "0/0"),
 ])

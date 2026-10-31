@@ -5643,6 +5643,14 @@ def validate_sms3dtke(cfg: RunConfig) -> None:
             "mix_isotropic (module_diffusion_em.F:2253-2333, :6512-6520); "
             "the horizontal and vertical lengths are always separate. "
             "Set mix_isotropic=0.")
+    if int(getattr(cfg, "use_theta_m", 0)):
+        raise ConfigurationRefused(
+            "km_opt=5 (SMS-3DTKE) with use_theta_m=1 is not ported: WRF's "
+            "km_opt=5 path then forms th_phy as the dry theta of the moist "
+            "carrier and adds the moist qfac and 1.61*theta*QFX terms to "
+            "its implicit heat solve (module_diffusion_em.F:8090-8116), and "
+            "woof's km_opt=5 operands and its WRF v4.7.1 oracle cover "
+            "use_theta_m=0 only. Set use_theta_m=0.")
     if int(getattr(cfg, "tke_budget", 0)):
         raise ConfigurationRefused(
             "tke_budget is a km_opt=2 receipt: its terms are the km_opt=2 "
