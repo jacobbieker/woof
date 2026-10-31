@@ -3120,6 +3120,10 @@ def r1():
         # A later numeric GPU check must construct its real modules.
         for loader in loaders:
             loader.cache_clear()
+        # FAST_SBM caches its own module per device: the capture leaves a
+        # stub there that a later FAST_SBM step in this worker would launch.
+        from woof.core import fast_sbm_cuda
+        fast_sbm_cuda.module.cache_clear()
 
 
 def test_thompson_cu_is_byte_frozen(r1):

@@ -456,7 +456,12 @@ def prognostic_theta(state):
     window or a :func:`dry_view`, else ``thp``.  For code transcribing a WRF
     routine that reads ``t_2`` itself rather than phy_prep's th_phy
     (WRF-Chem's chem_prep, chem/module_chem_utilities.F:80)."""
-    held = _WINDOW.get(state)
+    try:
+        held = _WINDOW.get(state)
+    except TypeError:
+        # An object that cannot be weakly referenced (a bare namespace
+        # standing in for a state) is never inside a window.
+        held = None
     return state.thp if held is None else held
 
 
