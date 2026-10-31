@@ -83,7 +83,8 @@ def child_column_mass(parent_mu, parent: VerticalCoord, k_top: int):
 
 
 # ---------------------------------------------------------------------------
-# D0: one partial child band, and everything it cannot carry, refused by name
+# D0/D4: partial child bands (a chain), and everything they cannot carry,
+# refused by name
 # ---------------------------------------------------------------------------
 
 #: Deep convection is refused while the interface sits below this height
@@ -94,22 +95,37 @@ DEEP_CUMULUS_MIN_INTERFACE_M = 12000.0
 _BAND_KEYS = frozenset({
     "k_top", "parent_grid_ratio", "parent_time_step_ratio",
     "i_parent_start", "j_parent_start", "nx", "ny", "spec_levels",
-    "relax_levels", "feedback", "smooth_option", "mass_correction"})
+    "relax_levels", "feedback", "smooth_option", "mass_correction",
+    "feedback_fields"})
+
+#: What a band may restrict onto its parent below the interface.  theta (with
+#: the child's moist scalars) is the default: MEASURED on the envelope cases
+#: (tests/data/receipts/partial-nest-d4; partial_nest_run's "Feedback"
+#: docstring), restricting mu or u/v as well leaves the gravity wave worse
+#: than the parent alone, so they are opt-in.  phi is refused (below).
+FEEDBACK_FIELDS = ("t", "mu", "u", "v", "w")
+DEFAULT_FEEDBACK_FIELDS = ("t",)
 
 
 @dataclass(frozen=True)
 class PartialNestBand:
-    """One partial-depth child band (the minimal D0 config entry).
+    """One partial-depth child band.
 
     The child covers parent cells ``i_parent_start .. i_parent_start +
     nx/ratio - 1`` (1-based, WRF's namelist meaning) from the surface to the
     parent's full level ``k_top``, a pure-pressure level.  Its top zone is
     ``spec_levels`` specified levels plus ``relax_levels`` relaxation levels
     below the interface (WRF's spec_zone and relax_zone - spec_zone, turned
-    on their side); ``feedback`` 1 restricts the child onto the parent below
-    the interface each parent step with WRF's copy_fcn and, for
-    ``smooth_option`` 1/2, its sm121/smdsm smoother.  ``mass_correction``
-    hands the child the parent's interface budget through dmdt_adj.
+    on their side); ``feedback`` 1 restricts the child's ``feedback_fields``
+    (theta bringing the moist scalars with it) onto the parent below the
+    interface each parent step with WRF's copy_fcn and, for ``smooth_option``
+    1/2, its sm121/smdsm smoother.  ``mass_correction`` closes the parent's
+    interface budget over the footprint.
+
+    Several bands form a CHAIN, listed coarse to fine: band ``n``'s parent is
+    band ``n - 1`` (the root for the first); ``i/j_parent_start`` and the
+    ratios are relative to that parent, and ``k_top`` counts the root's own
+    levels (every band keeps the root's eta levels below its interface).
     """
 
     k_top: int
@@ -124,6 +140,7 @@ class PartialNestBand:
     feedback: int = 1
     smooth_option: int = 0
     mass_correction: bool = True
+    feedback_fields: tuple = DEFAULT_FEEDBACK_FIELDS
 
     @property
     def relax_zone(self) -> int:
@@ -137,48 +154,109 @@ class PartialNestBand:
         return self.relax_zone + 1
 
 
-def partial_nest_from_mapping(table) -> "PartialNestBand | None":
-    """The ``[partial_nest]`` config entry, or ``None`` when absent.
-
-    ``table`` is the parsed mapping (TOML or dict).  A list of tables is
-    more than one band and is refused by name (D4); unknown keys are
-    refused, so a misspelt key cannot silently fall back to a default.
-    """
-    if table is None:
-        return None
-    if isinstance(table, (list, tuple)):
-        if len(table) != 1:
-            raise PartialNestRefused(
-                f"{len(table)} partial-nest bands are configured; D3 carries one "
-                "band (multiple bands, coarsest first, are D4)")
-        table = table[0]
+def band_from_table(table, *, where: str = "[partial_nest]",
+                    geometry=None) -> PartialNestBand:
+    """One band from a parsed table.  ``geometry`` supplies the placement
+    keys (ratio, starts, extent) when the table sits on a domain that
+    already declares them (the experiment loader's ``partial_nest`` key);
+    the table may then not repeat them."""
+    table = dict(table)
     unknown = set(table) - _BAND_KEYS
     if unknown:
-        raise PartialNestRefused(f"unknown [partial_nest] keys {sorted(unknown)}")
+        raise PartialNestRefused(f"unknown {where} keys {sorted(unknown)}")
+    if geometry is not None:
+        clash = set(table) & set(geometry)
+        if clash:
+            raise PartialNestRefused(
+                f"{where} repeats {sorted(clash)}, which its domain already declares")
+        table.update(geometry)
     missing = {"k_top", "parent_grid_ratio", "i_parent_start", "j_parent_start",
                "nx", "ny"} - set(table)
     if missing:
-        raise PartialNestRefused(f"[partial_nest] is missing {sorted(missing)}")
-    values = dict(table)
+        raise PartialNestRefused(f"{where} is missing {sorted(missing)}")
+    values = table
     values.setdefault("parent_time_step_ratio", values["parent_grid_ratio"])
-    for key in _BAND_KEYS - {"mass_correction"}:
+    for key in _BAND_KEYS - {"mass_correction", "feedback_fields"}:
         if key in values:
             values[key] = int(values[key])
     if "mass_correction" in values:
         values["mass_correction"] = bool(values["mass_correction"])
+    if "feedback_fields" in values:
+        fields = values["feedback_fields"]
+        if isinstance(fields, str):
+            fields = [fields]
+        values["feedback_fields"] = tuple(str(f) for f in fields)
     return PartialNestBand(**values)
+
+
+def partial_nest_from_mapping(table) -> "tuple[PartialNestBand, ...] | None":
+    """The ``[partial_nest]`` / ``[[partial_nest]]`` config entry as a chain
+    of bands (coarse to fine), or ``None`` when absent.
+
+    ``table`` is the parsed mapping (TOML or dict) -- one table for one band
+    or a list of tables for a chain.  Unknown keys are refused, so a
+    misspelt key cannot silently fall back to a default.
+    """
+    if table is None:
+        return None
+    tables = list(table) if isinstance(table, (list, tuple)) else [table]
+    if not tables:
+        return None
+    return tuple(band_from_table(t, where=f"[[partial_nest]] #{i + 1}")
+                 for i, t in enumerate(tables))
+
+
+def validate_band_chain(bands, root_cfg, root_coord: VerticalCoord, *,
+                        interface_heights_m=None, has_msf: bool = False):
+    """Validate a chain coarse to fine: :func:`validate_partial_nest` for
+    each band, its footprint inside its parent's extent, and each finer
+    interface below its parent band's top zone.  Returns the bands as a
+    tuple.  ``interface_heights_m``: one per band (or ``None``), for the
+    deep-cumulus rule."""
+    bands = tuple(bands)
+    heights = (tuple(interface_heights_m) if interface_heights_m is not None
+               else (None,) * len(bands))
+    parent_nx, parent_ny = int(root_cfg.nx), int(root_cfg.ny)
+    parent = None
+    for n, band in enumerate(bands):
+        validate_partial_nest(band, root_cfg, root_coord,
+                              interface_height_m=heights[n], has_msf=has_msf)
+        r = int(band.parent_grid_ratio)
+        i0, j0 = int(band.i_parent_start), int(band.j_parent_start)
+        if i0 < 1 or j0 < 1 or i0 - 1 + band.nx // r > parent_nx \
+                or j0 - 1 + band.ny // r > parent_ny:
+            raise PartialNestRefused(
+                f"band {n + 1}'s footprint (parent cells {i0}..{i0 - 1 + band.nx // r}"
+                f" x {j0}..{j0 - 1 + band.ny // r}) is not inside its parent "
+                f"({parent_nx} x {parent_ny})")
+        if parent is not None:
+            if band.k_top >= parent.k_top:
+                raise PartialNestRefused(
+                    f"band {n + 1}'s interface (level {band.k_top}) must lie below "
+                    f"its parent band's (level {parent.k_top}): the child's interface "
+                    "planes read its parent's levels k_top and k_top + 1, which a "
+                    "partial parent has only below its own interface")
+            if band.k_top + 1 > parent.k_top - parent.relax_zone:
+                raise PartialNestRefused(
+                    f"band {n + 1}'s interface (level {band.k_top}) reaches into its "
+                    f"parent band's top zone (levels {parent.k_top - parent.relax_zone}"
+                    f"..{parent.k_top - 1}): its interface planes would be "
+                    "relaxation-zone values, not the parent's own")
+        parent_nx, parent_ny = int(band.nx), int(band.ny)
+        parent = band
+    return bands
 
 
 def validate_partial_nest(band, parent_cfg, parent_coord: VerticalCoord, *,
                           interface_height_m: float | None = None,
                           has_msf: bool = False):
-    """Refuse, by name, every configuration D3 does not carry.
+    """Refuse, by name, every configuration one band does not carry.
 
-    ``band`` may be a :class:`PartialNestBand`, a sequence of them (more
-    than one is refused) or ``None`` (no partial nest: returns ``None`` and
-    touches nothing).  ``interface_height_m`` is the interface's lowest
-    height above sea level (the deep-cumulus rule needs it whenever
-    cumulus is on).
+    ``band`` may be a :class:`PartialNestBand`, a one-band sequence or
+    ``None`` (no partial nest: returns ``None`` and touches nothing); a
+    chain goes through :func:`validate_band_chain`.  ``interface_height_m``
+    is the interface's lowest height above sea level (the deep-cumulus rule
+    needs it whenever cumulus is on).
     """
     from woof import wrf_exact
     if band is None:
@@ -186,8 +264,8 @@ def validate_partial_nest(band, parent_cfg, parent_coord: VerticalCoord, *,
     if isinstance(band, (list, tuple)):
         if len(band) != 1:
             raise PartialNestRefused(
-                f"{len(band)} partial-nest bands are configured; D3 carries one "
-                "band (multiple bands, coarsest first, are D4)")
+                f"{len(band)} partial-nest bands: a chain is validated band by "
+                "band against its own parent (validate_band_chain)")
         band = band[0]
     if wrf_exact.ENABLED:
         raise PartialNestRefused(
@@ -234,6 +312,19 @@ def validate_partial_nest(band, parent_cfg, parent_coord: VerticalCoord, *,
             f"at ratio {r} (the interface budget is kept per parent cell)")
     if band.feedback not in (0, 1) or band.smooth_option not in (0, 1, 2):
         raise PartialNestRefused("feedback must be 0/1 and smooth_option 0/1/2")
+    fields = tuple(band.feedback_fields)
+    if "ph" in fields or "phi" in fields:
+        raise PartialNestRefused(
+            "phi is not fed back below a partial interface: MEASURED, restricting "
+            "the child's geopotential onto the parent grows a coupled mode at the "
+            "interface (e-folding about 80 s at rest, with or without mu, theta "
+            "or w alongside, with the lateral exclusion widened to 3 parent "
+            "cells, the top zone excluded, or the interface mismatch spread over "
+            "the column) -- partial_nest_run's 'w and phi' docstring")
+    bad = set(fields) - set(FEEDBACK_FIELDS)
+    if bad or len(set(fields)) != len(fields):
+        raise PartialNestRefused(
+            f"feedback_fields {fields!r}: each of {FEEDBACK_FIELDS} at most once")
     if parent_cfg.open_x or parent_cfg.open_y:
         raise PartialNestRefused("radiative-open parent boundaries are not carried")
     return band

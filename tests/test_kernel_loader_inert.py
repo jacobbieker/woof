@@ -285,6 +285,8 @@ def test_lake_compile_options_do_not_change_existing_modules(monkeypatch, strict
     # cross-backend operation an explicit round-to-nearest intrinsic
     # (tests/test_partial_nest_kernel_words.py).
     expected["partial_nest"] = ("-std=c++17",)
+    # Its D4 coupling: the same (tests/test_partial_nest_d4_kernel_words.py).
+    expected["partial_nest_d4"] = ("-std=c++17",)
     names = _module_names()
     assert set(expected) <= set(names), sorted(set(expected) - set(names))
     for name in names:

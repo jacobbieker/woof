@@ -74,12 +74,13 @@ def test_config_entry_round_trip_and_unknown_keys():
     band = partial_nest_from_mapping({"k_top": 21, "parent_grid_ratio": 3,
                                       "i_parent_start": 16, "j_parent_start": 5,
                                       "nx": 90, "ny": 12})
-    assert band == _band()
+    # D4: the entry is a chain (one band here).
+    assert band == (_band(),)
+    band = band[0]
     assert band.relax_zone == 6 and band.strip_width == 7
     with pytest.raises(PartialNestRefused, match="unknown"):
         partial_nest_from_mapping({**dataclasses.asdict(band), "k_tpo": 3})
-    with pytest.raises(PartialNestRefused, match="2 partial-nest bands"):
-        partial_nest_from_mapping([dataclasses.asdict(band)] * 2)
+    assert partial_nest_from_mapping([dataclasses.asdict(band)] * 2) == (band, band)
 
 
 def test_unsupported_configurations_are_refused_by_name(monkeypatch):
@@ -108,8 +109,12 @@ def test_unsupported_configurations_are_refused_by_name(monkeypatch):
         validate_partial_nest(_band(), dataclasses.replace(cfg, damp_opt=3), coord)
     with pytest.raises(PartialNestRefused, match="map factors"):
         validate_partial_nest(_band(), cfg, coord, has_msf=True)
-    with pytest.raises(PartialNestRefused, match="2 partial-nest bands"):
+    with pytest.raises(PartialNestRefused, match="validate_band_chain"):
         validate_partial_nest([_band(), _band()], cfg, coord)
+    with pytest.raises(PartialNestRefused, match="phi is not fed back"):
+        validate_partial_nest(_band(feedback_fields=("t", "ph")), cfg, coord)
+    with pytest.raises(PartialNestRefused, match="feedback_fields"):
+        validate_partial_nest(_band(feedback_fields=("t", "qv")), cfg, coord)
     with pytest.raises(PartialNestRefused, match="whole parent cells"):
         validate_partial_nest(_band(nx=89), cfg, coord)
     with pytest.raises(PartialNestRefused, match="does not fit"):
@@ -295,7 +300,7 @@ def test_interface_budget_matches_the_parent_over_the_footprint():
     j0, i0 = band.j_parent_start - 1, band.i_parent_start - 1
     parent_sum = r * r * pw[j0:j0 + band.ny // r, i0:i0 + band.nx // r].sum()
     scale = np.abs(pw).max() * band.nx * band.ny
-    assert nest.stats["max_abs_adj"] > 0.0                   # SINT alone is not conservative
+    assert nest.max_abs_mass_residual > 0.0                   # SINT alone is not conservative
     # mass_route "face" (default): the residual folded into the flux itself.
     assert nest.mass_route == "face"
     face_sum = cp.asnumpy(nest.b.om_k).astype(np.float64).sum()
@@ -314,16 +319,17 @@ def test_interface_budget_matches_the_parent_over_the_footprint():
 @pytest.mark.gpu
 def test_feedback_is_copy_fcn_below_the_interface():
     """copy_fcn's words on the parent below the interface for mu, u, v and
-    theta (WRF's t_2 = theta - 300, re-expressed on the parent's base);
+    theta (WRF's t_2 = theta - 300, re-expressed on the parent's base) when
+    a band selects them (feedback_fields; D4's default is theta alone);
     everything above the interface, and w and phi everywhere, untouched;
     mu' restricted, which is the total mass with the constant offset
     p_i - p_top added back."""
     _skip_strict()
     import cupy as cp
     from woof.core.nest_interp import copy_fcn, feedback_parent_bounds
-    from woof.core.partial_nest_run import FEEDBACK_KINDS
-    assert FEEDBACK_KINDS == ("mu", "u", "v", "t")
-    nest, _, _ = _forced("bubble")
+    from woof.core.partial_nest import DEFAULT_FEEDBACK_FIELDS
+    assert DEFAULT_FEEDBACK_FIELDS == ("t",)
+    nest, _, _ = _forced("bubble", feedback_fields=("mu", "u", "v", "t"))
     p, c, k = nest.parent, nest.child, nest.k
     before = {n: getattr(p, n).copy() for n in ("u", "v", "w", "thp", "php", "mup")}
     want = {}

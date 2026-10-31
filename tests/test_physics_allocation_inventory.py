@@ -1594,6 +1594,11 @@ _PHYSICS_ALLOCATION_INVENTORY['woof/core/partial_nest_dyn.py'] = {
 # The running partial-depth nest (Phase D3): its forcing, strip and budget
 # planes come from one allocation site at construction, reused every step.
 _PHYSICS_ALLOCATION_INVENTORY['woof/core/partial_nest_run.py'] = {'__init__': 1}
+# The partial-depth nest's physics (Phase D4): no allocation site of its
+# own.  The extended radiation column is one DomainState built at
+# construction; its refresh writes scratch slots and nest_interp.sint's
+# outputs, and the radiation result is cut by contiguous copies.
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/partial_nest_physics.py'] = {}
 # In-model gusts and extremes (c80237153): all planes are state fields.
 _PHYSICS_ALLOCATION_INVENTORY['woof/core/wind_gust_diag.py'] = {}
 # cu_rad_feedback (ICLOUD_CU = 1): GF's convtrans_prep qc_cu/qi_cu planes.

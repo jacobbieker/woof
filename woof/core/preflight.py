@@ -2713,6 +2713,9 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # The partial-depth nest's coupling (Phase D3, kernels/partial_nest.cu),
     # RTX A6000 sm_86, NVRTC 12.9, 2026-10-30: all eight entry points 0 B.
     "partial_nest": 0,
+    # Its D4 coupling (kernels/partial_nest_d4.cu), RTX A6000 sm_86, NVRTC
+    # 12.9, 2026-10-30: all six entry points 0 B.
+    "partial_nest_d4": 0,
 }
 
 #: The readings the ceiling above is made of, each naming its box, its
