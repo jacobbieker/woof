@@ -2714,6 +2714,10 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # A6000 sm_86, NVRTC 12.9, 2026-10-31, both loaders: all five entry
     # points read 0 B.
     "theta_m": 0, "avgflx": 0,
+    # km_opt = 5 (SMS-3DTKE, kernels/sms3dtke.cu), RTX A6000 sm_86, NVRTC
+    # 12.9.86, 2026-10-31, default and strict loaders: all fourteen entry
+    # points read 0 B (the tridiagonal planes are a global workspace).
+    "sms3dtke": 0,
     # The partial-depth nest's coupling (Phase D3, kernels/partial_nest.cu),
     # RTX A6000 sm_86, NVRTC 12.9, 2026-10-30: all eight entry points 0 B.
     "partial_nest": 0,
@@ -3992,6 +3996,8 @@ def domain_kernel_modules(dc: DomainConfig, *,
         modules.add("theta_m")                   # woof/core/theta_m.py
     if int(getattr(dc.run, "do_avgflx_em", 0) or 0) == 1:
         modules.add("avgflx")                    # woof/core/avgflx.py
+    if int(getattr(dc.run, "km_opt", 0)) == 5:   # woof/core/sms3dtke.py
+        modules.add("sms3dtke")
     mp_physics = int(dc.run.mp_physics)
     from woof.thompson_generations import CLASSIC_GENERATIONS
     classic_generation = (CLASSIC_GENERATIONS.get(getattr(dc.run,"thompson_version","wrf_461"))
@@ -6005,9 +6011,9 @@ def scratch_slot_registry(cfg: RunConfig, *,
         # do_avgflx_em averages the sumflux fluxes, which dycore.step then
         # accumulates on a dry state too (woof/core/avgflx.py).
         slots.update(rk_ru_m=xs, rk_rv_m=ys, rk_ww_m=fl)
-    if cfg.moist or cfg.km_opt == 2 or chem_on or (cfg.bl_pbl_physics == 5 and cfg.bl_mynn_tkeadvect):
+    if cfg.moist or cfg.km_opt in (2, 5) or chem_on or (cfg.bl_pbl_physics == 5 and cfg.bl_mynn_tkeadvect):
         # dycore.py acoustic time-averaged mass fluxes (moist scalars,
-        # the km_opt=2 TKE carrier and the chem rows advect with them;
+        # the km_opt=2/5 TKE carrier and the chem rows advect with them;
         # dycore.step accumulates them for a chem state even when dry).
         slots.update(rk_ru_m=xs, rk_rv_m=ys, rk_ww_m=fl)
         slots["moist_rq_t"] = m                     # moist.py:247
@@ -6025,7 +6031,7 @@ def scratch_slot_registry(cfg: RunConfig, *,
             # module must stay importable without cupy;
             # tests/test_p3_port.py pins it to moist.ABSENT_MASS_SLOT.
             slots["moist_absent_mass"] = m
-        pd = ((cfg.moist and cfg.moist_adv_opt == 1) or cfg.km_opt == 2
+        pd = ((cfg.moist and cfg.moist_adv_opt == 1) or cfg.km_opt in (2, 5)
               or (cfg.bl_pbl_physics == 5 and cfg.bl_mynn_tkeadvect
                   and cfg.scalar_adv_opt == 1)) and not (cfg.open_x or cfg.open_y)
         # woof/core/chem_transport.py: the chem rows' limited final stage
@@ -6481,15 +6487,33 @@ def scratch_slot_registry(cfg: RunConfig, *,
         if cfg.diff_opt == 1:
             slots.update(diff1_theta_initial=m, diff1_theta_work=m,
                          smag_mut=s2)
-    if cfg.km_opt in (2, 3) or (mixing_package and cfg.km_opt == 1):
+    if cfg.km_opt in (2, 3, 5) or (mixing_package and cfg.km_opt == 1):
         # These closures carry the vertical exchange-coefficient pair; BN2
         # borrows the diff6_x face-workspace prefix and needs no slot.
         # km_opt=1 keeps its kvdif pair there (launch_wrf_isotropic_km).
         slots.update(smag_kmv=m, smag_khv=m)
-    if cfg.km_opt == 2:
+    if cfg.km_opt in (2, 5):
         # Prognostic-TKE forward tendency, its doubling temporary, and the
         # tke_rhs coupled-mass staging.
         slots.update(smag_rtke=m, smag_tke_tmp=m, smag_mut=s2)
+    if cfg.km_opt == 5:
+        # woof/core/dycore.py launch_wrf_sms3dtke: WRF's operands, the
+        # closure's own fields, the shear-split tke_rhs terms and the
+        # tridiagonal workspace (sms3dtke.workspace_shape); the
+        # no-surface-layer zero planes only when no surface layer runs.
+        for name in ("th", "t2", "rho", "u_phy", "v_phy", "rdzw", "rdz",
+                     "elmin", "dlk", "xkmv_meso", "l_diss", "rhs_terms"):
+            slots["sms_" + name] = m
+        slots["sms_nlflux"] = fl
+        slots["sms_zx"] = (nz + 1, ny, nx + 1)
+        slots["sms_zy"] = (nz + 1, ny + 1, nx)
+        for name in ("p8w1", "t8w1", "p8wt", "t8wt"):
+            slots["sms_" + name] = s2
+        slots["sms_tridiag"] = (5 * nz * (ny + 1) * (nx + 1),)
+        if cfg.sf_sfclay_physics == 0:
+            for name in ("ust", "ustm", "hfx", "qfx", "br", "rmol", "wspd",
+                         "pblh", "kpbl"):
+                slots["sms_" + name] = s2
         if getattr(cfg, "tke_budget", 0):
             # woof/core/tke_budget.py: the packed per-term field buffer,
             # the pre-bound_tke carrier snapshot, the two coupled-mass

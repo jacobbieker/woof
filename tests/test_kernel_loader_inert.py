@@ -62,6 +62,10 @@ _EXPECTED_HEADERS = {
     # word for word against WRF v4.7.1 (tests/test_solar_diag_wrf471_oracle.py):
     # glibc 2.43's acosf.
     "solar_diag": ("glibc_flt32.cuh", "glibc_trig_flt32.cuh"),
+    # km_opt = 5 (SMS-3DTKE), a new unit graded word for word against WRF
+    # v4.7.1 (tests/test_sms3dtke_wrf471_parity.py): glibc's powf/expf and
+    # glibc 2.43's correctly rounded tanhf.
+    "sms3dtke": ("glibc_flt32.cuh", "sfire_libm.cuh"),
     "gsd_initial_reflectivity": ("glibc_flt32.cuh", "glibc_flt64.cuh",
                                  "thompson_fork_constants.cuh", "thompson_fork.cu"),
     # A new full-column generation unit; existing classic and aerosol units
@@ -280,6 +284,8 @@ def test_lake_compile_options_do_not_change_existing_modules(monkeypatch, strict
     # (tests/test_bigstep_thetam_wrf471_parity.py).
     expected["theta_m"] = ("-std=c++17", "--fmad=false", "--ftz=false")
     expected["avgflx"] = ("-std=c++17", "--fmad=false", "--ftz=false")
+    # km_opt = 5 (SMS-3DTKE): tile-exact against WRF v4.7.1, subnormals kept.
+    expected["sms3dtke"] = ("-std=c++17", "--fmad=false", "--ftz=false")
     # WRF's HAILCAST diagnostics (lane/cap-hail 97e9a3ca061) compile without
     # FMA, like the other column-exact WRF ports.
     expected["hail"] = ("-std=c++17", "--fmad=false")

@@ -1579,6 +1579,11 @@ _PHYSICS_ALLOCATION_INVENTORY['woof/core/cldfra3.py'] = {'cal_cldfra3': 3}
 # radius_metres allocates one (nz, ny, nx) float32 only for a caller that
 # passes no output (the tests' replay), never on the step.
 _PHYSICS_ALLOCATION_INVENTORY['woof/core/solar_diagnostics.py'] = {'radius_metres': 1}
+# km_opt = 5, SMS-3DTKE (woof/core/sms3dtke.py): launchers only.  Every
+# operand, closure field and the tridiagonal workspace is a state scratch
+# slot the dycore names (woof/core/dycore.py launch_wrf_sms3dtke); the
+# module itself allocates nothing.
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/sms3dtke.py'] = {}
 # use_theta_m = 1 (woof/core/theta_m.py): every device plane is a state
 # scratch slot (theta_m_stash/dry/rtheta/qv_diabatic); no pool allocation.
 _PHYSICS_ALLOCATION_INVENTORY['woof/core/theta_m.py'] = {}

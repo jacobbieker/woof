@@ -5466,9 +5466,9 @@ def constant_k_mixing_active(cfg) -> bool:
 def wrf_mixing_package_active(cfg) -> bool:
     """Whether the dycore builds WRF's once-per-step mixing tendencies.
 
-    km_opt 2/3/4 always; km_opt 1 under :func:`constant_k_mixing_active`.
+    km_opt 2/3/4/5 always; km_opt 1 under :func:`constant_k_mixing_active`.
     """
-    return (int(getattr(cfg, "km_opt", 0)) in (2, 3, 4)
+    return (int(getattr(cfg, "km_opt", 0)) in (2, 3, 4, 5)
             or constant_k_mixing_active(cfg))
 
 
@@ -5576,6 +5576,101 @@ def km_opt_zero_producer(cfg: RunConfig) -> str | None:
     return None
 
 
+#: Surface layers WRF v4.7.1 pairs with km_opt = 5
+#: (share/module_check_a_mundo.F:384-402: nosfcscheme, sfclayrevscheme,
+#: mynnsfcscheme, sfclayscheme).
+SMS3DTKE_SFCLAY_SCHEMES = (0, 1, 5, 91)
+
+
+def validate_sms3dtke(cfg: RunConfig) -> None:
+    """Admission for ``km_opt = 5`` (SMS-3DTKE), WRF v4.7.1's rules first.
+
+    WRF's check_a_mundo refuses km_opt = 5 with diff_opt != 2
+    (module_check_a_mundo.F:341-353), with bl_pbl_physics != 0 (:356-368:
+    the closure IS the column's vertical mixing at every grid spacing, so a
+    PBL scheme would double it), with a surface layer other than 0, 1, 5
+    or 91 (:384-402), and with cu_physics = 11, multi-scale Kain-Fritsch
+    (:1366-1382).  woof refuses four more, each for a stated reason.
+    """
+    if cfg.diff_opt != 2:
+        raise ConfigurationRefused(
+            f"km_opt=5 (SMS-3DTKE) works only with diff_opt=2, got "
+            f"diff_opt={cfg.diff_opt}: WRF v4.7.1 refuses the pair "
+            "(share/module_check_a_mundo.F:341-353, 'SMS-3DTKE scheme can "
+            "only work with diff_opt=2'). Set diff_opt=2.")
+    if cfg.bl_pbl_physics != 0:
+        raise ConfigurationRefused(
+            f"km_opt=5 (SMS-3DTKE) works only with bl_pbl_physics=0, got "
+            f"bl_pbl_physics={cfg.bl_pbl_physics}: WRF v4.7.1 refuses the "
+            "pair (share/module_check_a_mundo.F:356-368). The closure is "
+            "itself the column's vertical mixing at every grid spacing -- "
+            "its nonlocal heat flux, mesoscale length scale and implicit "
+            "vertical diffusion replace the PBL scheme -- so running a PBL "
+            "scheme too would mix the column twice. Set bl_pbl_physics=0.")
+    if cfg.sf_sfclay_physics not in SMS3DTKE_SFCLAY_SCHEMES:
+        raise ConfigurationRefused(
+            f"km_opt=5 (SMS-3DTKE) works with sf_sfclay_physics = 0, 1, 5 "
+            f"or 91, got {cfg.sf_sfclay_physics}: WRF v4.7.1 refuses any "
+            "other surface layer (share/module_check_a_mundo.F:384-402); "
+            "the closure reads the bulk Richardson number, u*, 1/L and the "
+            "10 m wind speed those four write. Select sf_sfclay_physics=1 "
+            "(revised MM5), 91 (classic MM5), 5 (MYNN) or 0.")
+    if cfg.cu_physics == 11:
+        raise ConfigurationRefused(
+            "cu_physics=11 (multi-scale Kain-Fritsch) cannot run with "
+            "km_opt=5 (SMS-3DTKE): WRF v4.7.1 refuses the pair "
+            "(share/module_check_a_mundo.F:1366-1382).")
+    if cfg.open_x or cfg.open_y:
+        raise ConfigurationRefused(
+            "km_opt=5 (SMS-3DTKE) is admitted with periodic, specified or "
+            "nested lateral boundaries, not radiative open ones: WRF "
+            "v4.7.1 gives km_opt=5's TKE no physical boundary condition "
+            "(solve_em.F:3332 applies set_physical_bc3d to tke for "
+            "km_opt=2 only), so at an open boundary its TKE halo keeps "
+            "whatever the previous step left there, which woof does not "
+            "carry. Use periodic or specified boundaries, or km_opt=2.")
+    if getattr(cfg, "tke_mix2_off", False):
+        raise ConfigurationRefused(
+            "tke_mix2_off is set with km_opt=5 (SMS-3DTKE), where it takes "
+            "no effect: WRF v4.7.1 diffuses km_opt=5's TKE horizontally "
+            "whatever tke_mix2_off says (module_diffusion_em.F:3020-3021). "
+            "Remove tke_mix2_off.")
+    if cfg.mix_isotropic != 0:
+        raise ConfigurationRefused(
+            f"mix_isotropic={cfg.mix_isotropic} is set with km_opt=5 "
+            "(SMS-3DTKE), where it takes no effect: WRF v4.7.1's km_opt=5 "
+            "branch of tke_km and its dissipation length read no "
+            "mix_isotropic (module_diffusion_em.F:2253-2333, :6512-6520); "
+            "the horizontal and vertical lengths are always separate. "
+            "Set mix_isotropic=0.")
+    if int(getattr(cfg, "use_theta_m", 0)):
+        raise ConfigurationRefused(
+            "km_opt=5 (SMS-3DTKE) with use_theta_m=1 is not ported: WRF's "
+            "km_opt=5 path then forms th_phy as the dry theta of the moist "
+            "carrier and adds the moist qfac and 1.61*theta*QFX terms to "
+            "its implicit heat solve (module_diffusion_em.F:8090-8116), and "
+            "woof's km_opt=5 operands and its WRF v4.7.1 oracle cover "
+            "use_theta_m=0 only. Set use_theta_m=0.")
+    if int(getattr(cfg, "tke_budget", 0)):
+        raise ConfigurationRefused(
+            "tke_budget is a km_opt=2 receipt: its terms are the km_opt=2 "
+            "tke_rhs pieces (shear, buoyancy, dissipation, limiter), and "
+            "km_opt=5 moves the dissipation into the implicit vertical "
+            "solve, where no separate term exists to export. Set "
+            "tke_budget=0 with km_opt=5.")
+    if (cfg.sf_sfclay_physics == 0 and cfg.isfflx in (0, 2)
+            and cfg.tke_heat_flux > 0.0):
+        raise ConfigurationRefused(
+            f"km_opt=5 (SMS-3DTKE) with sf_sfclay_physics=0 and a positive "
+            f"prescribed tke_heat_flux={cfg.tke_heat_flux} (isfflx="
+            f"{cfg.isfflx}) is refused: with no surface layer u* is WRF's "
+            "never-written zero, and nonlocal_flux's convective column then "
+            "forms its momentum gamma as 0/0 (module_diffusion_em.F:5150-"
+            "5153, brint = -sm*u*^2*w*^3/(zi*wscale^4) with wscale = 0), "
+            "which turns u and v into NaN. Select a surface layer "
+            "(sf_sfclay_physics=1, 5 or 91), or a zero tke_heat_flux.")
+
+
 def validate_km_opt(cfg: RunConfig) -> None:
     """Admission for ``km_opt``, shared by the loaders and the dycore.
 
@@ -5621,15 +5716,16 @@ def validate_km_opt(cfg: RunConfig) -> None:
             f"km_opt_zero_acknowledgement = {KM_OPT_ZERO_ACK!r}. It is a "
             "literal id and not a boolean so that it cannot be reached "
             "by a stray `= true`.")
-    if cfg.km_opt not in (0, 1, 2, 3, 4):
+    if cfg.km_opt not in (0, 1, 2, 3, 4, 5):
         # Checked BEFORE the acknowledgement's placement, so an
         # unimplemented selector reports itself rather than reporting
         # that the acknowledgement is in the wrong place: the id opens
         # km_opt = 0 and nothing else, and cannot shadow this.
         raise ConfigurationRefused(
             f"km_opt must be 1 (constant K via khdif/kvdif), 2 (1.5-order "
-            f"prognostic TKE), 3 (3-D Smagorinsky), or 4 "
-            f"(2-D Smagorinsky), got {cfg.km_opt}. 0 is admitted with "
+            f"prognostic TKE), 3 (3-D Smagorinsky), 4 (2-D Smagorinsky) "
+            f"or 5 (SMS-3DTKE scale-adaptive TKE), got {cfg.km_opt}. "
+            f"0 is admitted with "
             f"bl_pbl_physics={SASE_PBL_SCHEME} (SASE), whose closure "
             "supplies the mixing the km_opt operator would otherwise "
             f"apply, or with km_opt_zero_acknowledgement = "
@@ -5748,6 +5844,9 @@ def validate_km_opt(cfg: RunConfig) -> None:
     # door stays exact if either refusal retires.  The
     # engine's own idealized cases (``woof verify``) run fixed
     # configurations with mix_full_fields = true and take no override.
+    if cfg.km_opt == 5:
+        validate_sms3dtke(cfg)
+        return
     if cfg.km_opt in (1, 2, 3, 4):
         return
     if producer is None and ack != KM_OPT_ZERO_ACK:
@@ -7063,7 +7162,7 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
     # arms as km_opt 2-4 (constant_k_mixing_active), so it consumes the
     # prescribed forcing too.
     _prescribed_flux_consumer = cfg.bl_pbl_physics == 0 and (
-        cfg.km_opt in (2, 3, 4) or constant_k_mixing_active(cfg))
+        cfg.km_opt in (2, 3, 4, 5) or constant_k_mixing_active(cfg))
     if cfg.isfflx == 0 and cfg.sf_sfclay_physics == 0 \
             and not _prescribed_flux_consumer:
         raise ConfigurationRefused(

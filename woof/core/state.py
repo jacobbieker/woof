@@ -856,11 +856,21 @@ class DomainState:
             # Registry.EM_COMMON:1118,3168: scalar qke_adv, not water mass.
             self.qke_adv = zeros(nz, ny, nx)
             self.qke_adv0 = rebuilt("qke_adv0", nz, ny, nx)
-        if cfg.km_opt == 2:
+        if cfg.km_opt in (2, 5):
             self.tke = zeros(nz, ny, nx)
             self.tke0 = rebuilt("tke0", nz, ny, nx)
         else:
             self.tke = self.tke0 = None
+        if cfg.km_opt == 5:
+            # SMS-3DTKE's nonlocal momentum gammas (Registry.EM_COMMON:317-
+            # 318, ``state real gamu/gamv ij dyn_em 1 - r``).  nonlocal_flux
+            # writes them only on convective columns and every other
+            # column keeps the previous step's word, so they are prognostic
+            # in effect and WRF carries them in the restart stream; so does
+            # woof (SERIALIZED, woof/io/restart.py).  Allocated only for
+            # km_opt = 5, absent otherwise.
+            self.gamu = zeros(ny, nx)
+            self.gamv = zeros(ny, nx)
         # Prognostic/published subgrid turbulence energy.  The attribute
         # is ``e_sgs`` because ``self.e`` is already the WRF Coriolis
         # cosine parameter 2*Omega*cos(lat); the owning scheme's symbol

@@ -244,6 +244,11 @@ def test_every_implemented_option_is_selected_by_a_registered_suite() -> None:
             "forecast or observation score qualifies a recommended suite; "
             "a config or imported WRF namelist selects cu_physics=5 directly",
         ("land_surface", "off"): "a degradation, not a suite to recommend",
+        ("turbulence", "sms-3dtke"):
+            "WRF v4.7.1's SMS-3DTKE (km_opt = 5) is held word for word to "
+            "the compiled WRF routines but has no forecast or observation "
+            "score yet, so no preset recommends it; a config or an imported "
+            "WRF namelist selects km_opt = 5 directly",
         ("surface_layer", "off"): "a degradation, not a suite to recommend",
         ("microphysics", "off"): "a degradation, not a suite to recommend",
         ("radiation", "off"): "a degradation, not a suite to recommend",

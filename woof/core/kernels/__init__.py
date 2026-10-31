@@ -325,6 +325,11 @@ _EXTRA_HEADERS: dict[str, tuple[str, ...]] = {
     "cldfra3": ("glibc_flt32.cuh", "corem_log10f.cuh"),
     # WRF-Solar diagnostics (module_diag_solar.F): glibc 2.43's acosf.
     "solar_diag": ("glibc_flt32.cuh", "glibc_trig_flt32.cuh"),
+    # km_opt = 5, SMS-3DTKE (module_diffusion_em.F): REAL**REAL and EXP are
+    # glibc's powf/expf (gfk_pow/gfk_exp), TANH glibc 2.43's correctly
+    # rounded tanhf (sfire_tanhf), graded word for word against WRF
+    # v4.7.1 by tests/test_sms3dtke_wrf471_parity.py.  A new module.
+    "sms3dtke": ("glibc_flt32.cuh", "sfire_libm.cuh"),
 }
 
 #: Read-only view for tests and freeze receipts.
@@ -509,10 +514,12 @@ _URBAN_NO_FTZ_MODULES = frozenset({"urban_ucm", "urban_ucm480", "urban_bep",
 # theta_m: WRF 4.7.1's use_theta_m = 1 conversions, and avgflx: its
 # do_avgflx_em = 1 accumulation (tools/bigstep_wrf471_oracle/thetam_build.py);
 # new units, so every existing unit keeps its options.
+# sms3dtke: WRF 4.7.1 km_opt = 5 (tools/sms3dtke_wrf471_oracle); gfortran
+# -O0 contracts nothing and keeps subnormal words.
 _NO_FTZ_MODULES = frozenset({"g3", "nsas", "sfclay", "myjsfc", "mynn_surface", "mynn_pbl",
                              "thompson_column", "ysu_480", "wsm6r",
                              "aer_opt2", "oml", "farms", "cldfra3", "solar_diag",
-                             "theta_m", "avgflx"}) | _SOLAR_NO_FTZ_MODULES
+                             "theta_m", "avgflx", "sms3dtke"}) | _SOLAR_NO_FTZ_MODULES
 
 # The exact chain's strict intake contracts (GPUWM_WRF_EXACT=1): these units
 # also compile without contraction in a strict process.  A default process

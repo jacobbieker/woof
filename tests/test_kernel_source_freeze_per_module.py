@@ -246,6 +246,12 @@ BASELINE_PINNED: dict[str, str] = {
     # Metal and CUDA.  Every existing unit keeps its bytes.
     "theta_m": "f4ba37fc9e5b12fe0f71dd856210d105bf59d8ea8c68954cb573901e94a455f2",
     "avgflx": "311619e4c2249be2fccf86771c68441d56fd8cb3f7986c2992ce5f2483871ea5",
+    # km_opt = 5 (SMS-3DTKE): WRF v4.7.1 nonlocal_flux, free_atmos_length,
+    # meso_length_scale, tke_km/tke_rhs's km_opt = 5 arms and
+    # vertical_diffusion_implicit, 1,768,262 output words over 19 3-D tiles
+    # equal word for word to the gfortran -O0 / glibc 2.43 record
+    # (tests/test_sms3dtke_wrf471_parity.py) on Metal and CUDA.
+    "sms3dtke": "7a6544f7eafd1b2f4955a5b37f684826aacafddbf4f0ff981cad68503dd94ab5",
     # e677dccb6: active table edits multiply binary64 values on the GPU,
     # round once to REAL, and reject non-positive crop roughness.
     "physics_params":

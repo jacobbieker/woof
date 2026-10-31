@@ -1527,6 +1527,219 @@ def launch_wrf_tke_km(state: DomainState, cfg: RunConfig,
     return d11, d22, d12
 
 
+#: The WRF scalar-array species ``vertical_diffusion_implicit`` leaves
+#: unmixed (module_diffusion_em.F:8304-8305: P_QNS, P_QNR, P_QNG, P_QNH,
+#: P_QT, P_QVOLG), under woof's names for them.
+SMS3DTKE_UNMIXED_SCALARS = frozenset(
+    {"nr", "ns", "ng", "nh", "qnr", "qns", "qng", "qnh", "qt", "qvolg"})
+
+
+def _sms3dtke_surface(state: DomainState, nx: int, ny: int) -> dict:
+    """The surface-layer planes km_opt = 5 reads (and HFX, PBLH and KPBL,
+    which it writes), from the physics driver's fields.
+
+    A run without a surface layer reads WRF's never-written zeros, held in
+    dedicated slots so that nothing downstream sees a borrowed buffer.
+    """
+    fields = (state.physics.fields
+              if state.physics is not None
+              and hasattr(state.physics, "fields") else {})
+    out = {}
+    for name in ("ust", "ustm", "hfx", "qfx", "br", "rmol", "wspd", "pblh"):
+        out[name] = (fields[name] if name in fields
+                     else state.scratch((ny, nx), "sms_" + name))
+    out["kpbl"] = (fields["kpbl"] if "kpbl" in fields
+                   else state.scratch((ny, nx), "sms_kpbl", np.int32))
+    return out
+
+
+def _sms3dtke_operands(state: DomainState, cfg: RunConfig, *,
+                       time_t: bool) -> dict:
+    """WRF's operands for km_opt = 5 (th_phy, t_2, rho, u_phy, v_phy,
+    rdzw, rdz, zx, zy and the p8w/t8w surface and top planes), formed by
+    ``sms3dtke.prepare`` into persistent ``sms_*`` slots."""
+    from woof.core import sms3dtke
+    nz, ny, nx = state.p.shape
+    suffix = "0" if time_t else ""
+    out = {name: state.scratch((nz, ny, nx), "sms_" + name)
+           for name in ("th", "t2", "rho", "u_phy", "v_phy", "rdzw", "rdz")}
+    out["zx"] = state.scratch((nz + 1, ny, nx + 1), "sms_zx")
+    out["zy"] = state.scratch((nz + 1, ny + 1, nx), "sms_zy")
+    for name in ("p8w1", "t8w1", "p8wt", "t8wt"):
+        out[name] = state.scratch((ny, nx), "sms_" + name)
+    qv = getattr(state, "qv" + suffix) if state.qv is not None else None
+    sms3dtke.prepare(
+        u=getattr(state, "u" + suffix), v=getattr(state, "v" + suffix),
+        php=getattr(state, "php" + suffix), phb=state.phb,
+        thp=getattr(state, "thp" + suffix), thb=state.thb, alt=state.alt,
+        qv=qv, p=state.p, rdx=DTYPE(1.0 / cfg.dx), rdy=DTYPE(1.0 / cfg.dy),
+        bx=_boundary_x(cfg), by=_boundary_y(cfg), out=out)
+    return out
+
+
+def launch_wrf_sms3dtke(state: DomainState, cfg: RunConfig,
+                        xkmh, xkhh, *, time_t: bool):
+    """WRF v4.7.1 km_opt = 5 (SMS-3DTKE) on device, in
+    module_first_rk_step_part2.F's order: ``cal_deform_and_div``,
+    ``nonlocal_flux``, ``free_atmos_length``, ``meso_length_scale``,
+    ``calculate_km_kh`` (``calculate_N2`` + ``tke_km``'s km_opt = 5 arm),
+    then ``tke_rhs`` into ``smag_rtke`` and the implicit vertical TKE solve
+    (``vertical_diffusion_implicit``'s TKE row, which carries the
+    dissipation) on top of it, before the horizontal TKE diffusion
+    :func:`_compute_wrf_smag_tendencies` adds next.
+
+    tke_rhs's shear term is the km_opt = 2 kernel's (``wrf_tke_rhs``, whose
+    budget export separates it exactly: its running sum starts from the
+    zeroed ``smag_rtke``), and ``sms_tke_rhs`` completes it with the
+    km_opt = 5 buoyancy, L_DISS and the limiter.  The deformation tensors
+    borrow the u/v/w carrying-buffer prefixes and BN2 the ``diff6_x``
+    prefix, as in :func:`launch_wrf_tke_km`.  Returns the (d11, d22, d12)
+    triple.
+    """
+    from woof.core import sms3dtke
+    nz, ny, nx = xkmh.shape
+    n_mass = nz * ny * nx
+    bx, by = _boundary_x(cfg), _boundary_y(cfg)
+    d11 = state.scratch((nz + 1, ny, nx), "smag_rw").reshape(-1)[:n_mass]
+    d22 = state.scratch((nz, ny, nx + 1), "smag_ru").reshape(-1)[:n_mass]
+    d12 = state.scratch((nz, ny + 1, nx), "smag_rv").reshape(-1)[:n_mass]
+    d11 = d11.reshape((nz, ny, nx))
+    d22 = d22.reshape((nz, ny, nx))
+    d12 = d12.reshape((nz, ny, nx))
+    xkmv = state.scratch((nz, ny, nx), "smag_kmv")
+    xkhv = state.scratch((nz, ny, nx), "smag_khv")
+    common = _wrf_smag_grid_args(state, cfg, time_t=time_t)
+    dims = [np.int32(nz), np.int32(ny), np.int32(nx),
+            np.int32(state.phb.ndim == 3), np.int32(bx), np.int32(by)]
+    grid = ((nx + _TPB - 1) // _TPB, ny, nz)
+    get_kernel("smag2d", "wrf_smag_deform")(
+        grid, (_TPB, 1, 1), tuple(common + [d11, d22, d12] + dims))
+    bn2 = state.scratch((nz, ny, nx + 1), "diff6_x").reshape(-1)[:n_mass]
+    bn2 = bn2.reshape((nz, ny, nx))
+    launch_wrf_calc_n2(state, cfg, bn2, time_t=time_t)
+
+    ops = _sms3dtke_operands(state, cfg, time_t=time_t)
+    sfc = _sms3dtke_surface(state, nx, ny)
+    suffix = "0" if time_t else ""
+    tke = getattr(state, "tke" + suffix)
+    qv = getattr(state, "qv" + suffix) if state.qv is not None else None
+    nlflux = state.scratch((nz + 1, ny, nx), "sms_nlflux")
+    elmin = state.scratch((nz, ny, nx), "sms_elmin")
+    dlk = state.scratch((nz, ny, nx), "sms_dlk")
+    meso = state.scratch((nz, ny, nx), "sms_xkmv_meso")
+    l_diss = state.scratch((nz, ny, nx), "sms_l_diss")
+    side = dict(bx=bx, by=by)
+    sms3dtke.nonlocal_flux(
+        rdzw=ops["rdzw"], th=ops["th"], qv=qv, u_phy=ops["u_phy"],
+        v_phy=ops["v_phy"], rho=ops["rho"], ust=sfc["ust"], br=sfc["br"],
+        wspd=sfc["wspd"], msft=state.msft, hfx=sfc["hfx"], dx=cfg.dx,
+        dy=cfg.dy, isfflx=cfg.isfflx, tke_heat_flux=cfg.tke_heat_flux,
+        nlflux=nlflux, gamu=state.gamu, gamv=state.gamv, hpbl=sfc["pblh"],
+        kpbl=sfc["kpbl"], **side)
+    sms3dtke.free_atmos_length(rdzw=ops["rdzw"], tke=tke, th=ops["th"],
+                               elmin=elmin, **side)
+    planes = {n: ops[n] for n in ("p8w1", "t8w1", "p8wt", "t8wt")}
+    sms3dtke.meso_length_scale(
+        rdzw=ops["rdzw"], rdz=ops["rdz"], tke=tke, th=ops["th"], **planes,
+        hpbl=sfc["pblh"], elmin=elmin, rmol=sfc["rmol"], rho=ops["rho"],
+        hfx=sfc["hfx"], qv=qv, isfflx=cfg.isfflx,
+        tke_heat_flux=cfg.tke_heat_flux, dlk=dlk, **side)
+    sms3dtke.tke_km(
+        tke=tke, th=ops["th"], rdz=ops["rdz"], rdzw=ops["rdzw"], **planes,
+        d11=d11, d22=d22, d12=d12, zx=ops["zx"], zy=ops["zy"],
+        msft=state.msft, hpbl=sfc["pblh"], dlk=dlk, dx=cfg.dx, dy=cfg.dy,
+        c_s=cfg.c_s, c_k=cfg.c_k, tke_seed=_tke_seed(cfg), xkmh=xkmh,
+        xkmv=xkmv, xkhh=xkhh, xkhv=xkhv, xkmv_meso=meso, **side)
+
+    # tke_rhs: shear from the km_opt = 2 kernel's exact budget export.
+    rtke = state.scratch((nz, ny, nx), "smag_rtke")
+    rtke[...] = 0
+    junk = state.scratch((nz, ny, nx), "sms_rhs_terms")
+    mut = state.scratch((ny, nx), "smag_mut")
+    mut[...] = state.mub2d + (state.mup0 if time_t else state.mup)
+    thp = getattr(state, "thp" + suffix)
+    get_kernel("smag2d", "wrf_tke_rhs")(
+        grid, (_TPB, 1, 1),
+        tuple(common + [
+            thp, state.thb, np.int32(state.thb.ndim == 3),
+            tke, bn2, d11, d22, d12,
+            xkmh, xkmv, xkhv,
+            mut, state.c1h, state.c2h,
+            sfc["ustm"], sfc["hfx"], np.int32(1), np.int32(1),
+            DTYPE(cfg.c_k), DTYPE(cfg.dt),
+            DTYPE(cfg.tke_drag_coefficient), DTYPE(cfg.tke_heat_flux),
+            np.int32(cfg.isfflx),
+            rtke, rtke, junk, junk, junk, np.int32(1),
+        ] + dims))
+    sms3dtke.tke_rhs(
+        tend=rtke, bn2=bn2, xkhv=xkhv, nlflux=nlflux, th=ops["th"], tke=tke,
+        mut=mut, c1h=state.c1h, c2h=state.c2h, rdzw=ops["rdzw"],
+        msft=state.msft, hpbl=sfc["pblh"], dlk=dlk, qv=qv, rho=ops["rho"],
+        hfx=sfc["hfx"], isfflx=cfg.isfflx, tke_heat_flux=cfg.tke_heat_flux,
+        c_k=cfg.c_k, dt=cfg.dt, dx=cfg.dx, dy=cfg.dy, l_diss=l_diss, **side)
+    ws = state.scratch(sms3dtke.workspace_shape(nz, ny, nx), "sms_tridiag")
+    sms3dtke.vdiff_tke(
+        rtke=rtke, tke=tke, rho=ops["rho"], xkmv=xkmv, l_diss=l_diss,
+        rdz=ops["rdz"], fnm=state.fnm, fnp=state.fnp, dnw=state.dnw,
+        c1h=state.c1h, c2h=state.c2h, mut=mut, dt=cfg.dt, ws=ws, **side)
+    return d11, d22, d12
+
+
+def add_wrf_sms3dtke_vertical(state: DomainState, cfg: RunConfig, specs,
+                              buffers: dict, *, time_t: bool) -> None:
+    """``vertical_diffusion_implicit``'s u, v, w, theta and scalar rows
+    (module_diffusion_em.F:7754-8475) into the carrying buffers, with the
+    surface stress (USTM), heat flux (HFX, and the nonlocal flux NLFLUX)
+    and moisture flux (QFX) inside the implicit solves.  km_opt = 5 runs
+    no vertical_diffusion_2 (module_first_rk_step_part2.F:1028-1052)."""
+    from woof.core import sms3dtke
+    nz, ny, nx = state.p.shape
+    bx, by = _boundary_x(cfg), _boundary_y(cfg)
+    suffix = "0" if time_t else ""
+    ops = {name: state._scratch["sms_" + name]
+           for name in ("th", "t2", "rho", "rdzw", "rdz")}
+    sfc = _sms3dtke_surface(state, nx, ny)
+    mut = state.scratch((ny, nx), "smag_mut")
+    ws = state.scratch(sms3dtke.workspace_shape(nz, ny, nx), "sms_tridiag")
+    xkmv = state.scratch((nz, ny, nx), "smag_kmv")
+    xkhv = state.scratch((nz, ny, nx), "smag_khv")
+    xkmh = state.scratch((nz, ny, nx), "smag_km")
+    meso = state.scratch((nz, ny, nx), "sms_xkmv_meso")
+    nlflux = state.scratch((nz + 1, ny, nx), "sms_nlflux")
+    qv = getattr(state, "qv" + suffix) if state.qv is not None else None
+    common = dict(fnm=state.fnm, fnp=state.fnp, dnw=state.dnw,
+                  c1h=state.c1h, c2h=state.c2h, mut=mut, dt=cfg.dt, ws=ws,
+                  bx=bx, by=by)
+    u = getattr(state, "u" + suffix)
+    v = getattr(state, "v" + suffix)
+    sms3dtke.vdiff_u(ru=buffers["smag_ru"], u=u, v=v, rho=ops["rho"],
+                     xkmv=xkmv, xkmv_meso=meso, gamu=state.gamu,
+                     rdz=ops["rdz"], ustm=sfc["ustm"], **common)
+    sms3dtke.vdiff_v(rv=buffers["smag_rv"], u=u, v=v, rho=ops["rho"],
+                     xkmv=xkmv, xkmv_meso=meso, gamv=state.gamv,
+                     rdz=ops["rdz"], ustm=sfc["ustm"], **common)
+    sms3dtke.vdiff_w(rw=buffers["smag_rw"], w=getattr(state, "w" + suffix),
+                     rho=ops["rho"], xkmh=xkmh, rdzw=ops["rdzw"], dn=state.dn,
+                     c1f=state.c1f, c2f=state.c2f, mut=mut, dt=cfg.dt, ws=ws,
+                     bx=bx, by=by)
+    sms3dtke.vdiff_th(rt=buffers["smag_rth"], var=ops["t2"], th=ops["th"],
+                      rho=ops["rho"], xkhv=xkhv, nlflux=nlflux,
+                      rdz=ops["rdz"], hfx=sfc["hfx"], qfx=sfc["qfx"], qv=qv,
+                      use_theta_m=int(getattr(cfg, "use_theta_m", 0)),
+                      isfflx=cfg.isfflx, tke_heat_flux=cfg.tke_heat_flux,
+                      **common)
+    for f, _tend, _xk, _c1, _c2, slot, stag in specs:
+        if stag != "" or slot == "smag_rth":
+            continue
+        name = slot[len("smag_r"):]
+        if name in SMS3DTKE_UNMIXED_SCALARS:
+            continue
+        sms3dtke.vdiff_scalar(
+            tend=buffers[slot], field=f, base=None, rho=ops["rho"],
+            xkhv=xkhv, rdz=ops["rdz"],
+            flux=sfc["qfx"] if name == "qv" else None, **common)
+
+
 def launch_wrf_smag3d_km(state: DomainState, cfg: RunConfig,
                          xkmh, xkhh, *, time_t: bool):
     """WRF v4.6.1 km_opt=3: ``cal_deform_and_div`` + ``calculate_N2`` +
@@ -1786,7 +1999,7 @@ def _horizontal_w_km(state: DomainState, cfg: RunConfig):
     """
     # km_opt=1's xkmv is kvdif (isotropic_km), live only while its package
     # runs; a diff6-only km_opt=1 step must not allocate the slot.
-    if cfg.km_opt not in (2, 3) and not constant_k_mixing_active(cfg):
+    if cfg.km_opt not in (2, 3, 5) and not constant_k_mixing_active(cfg):
         return None
     return state.scratch(state.p.shape, "smag_kmv")
 
@@ -2186,6 +2399,9 @@ def _compute_wrf_smag_tendencies(state: DomainState, cfg: RunConfig,
     if cfg.km_opt == 2:
         deformation = launch_wrf_tke_km(
             state, cfg, km, kh, time_t=time_t)
+    elif cfg.km_opt == 5:
+        deformation = launch_wrf_sms3dtke(
+            state, cfg, km, kh, time_t=time_t)
     elif cfg.km_opt == 3:
         deformation = launch_wrf_smag3d_km(
             state, cfg, km, kh, time_t=time_t)
@@ -2222,15 +2438,16 @@ def _compute_wrf_smag_tendencies(state: DomainState, cfg: RunConfig,
                              full_theta=(slot == "smag_rth"))
         _zero_open_strips(buf, cfg, 1)
 
-    if cfg.km_opt == 2:
+    if cfg.km_opt in (2, 5):
         # TKE self-diffusion: horizontal with 2*Km_h regardless of the PBL
         # (module_diffusion_em.F:3020-3032, doubling :3988-3996 -- WRF's
         # doing_tke tendency = tmptendf + 2*(tendency - tmptendf)).
+        # km_opt = 5 runs it whatever tke_mix2_off says (:3020-3021).
         nz_, ny_, nx_ = km.shape
         tke_t = getattr(state, "tke0" if time_t else "tke")
         rtke = state.scratch((nz_, ny_, nx_), "smag_rtke")
         tmp = state.scratch((nz_, ny_, nx_), "smag_tke_tmp")
-        if not getattr(cfg, "tke_mix2_off", False):
+        if cfg.km_opt == 5 or not getattr(cfg, "tke_mix2_off", False):
             tmp[...] = 0
             launch_wrf_smag2d_hd(state, cfg, tke_t, km, tmp, stagger="",
                                  time_t=time_t, full_theta=False)
@@ -2239,6 +2456,19 @@ def _compute_wrf_smag_tendencies(state: DomainState, cfg: RunConfig,
             budget_h = tke_budget.term(state, cfg, "diffusion_h")
             if budget_h is not None:
                 budget_h[...] = 2.0 * tmp
+
+    if cfg.km_opt == 5:
+        # vertical_diffusion_implicit replaces vertical_diffusion_2; its
+        # TKE row already ran in launch_wrf_sms3dtke, before the horizontal
+        # TKE diffusion, as WRF orders them.
+        buffers = {
+            slot: state.scratch(f.shape, slot)
+            for f, _tend, _xk, _c1, _c2, slot, _stag in specs
+        }
+        add_wrf_sms3dtke_vertical(state, cfg, specs, buffers, time_t=time_t)
+        for f, _tend, _xk, _c1, _c2, slot, _stag in specs:
+            _zero_open_strips(buffers[slot], cfg, 1)
+        return
 
     if cfg.bl_pbl_physics == 0:
         buffers = {
@@ -2464,7 +2694,7 @@ def prepare_fixed_tendencies(state: DomainState, cfg: RunConfig,
                           kmv=_horizontal_w_km(state, cfg))
     for f0, _tend, _xk, _c1, _c2, slot, _stag in specs:
         state.scratch(f0.shape, slot)[...] = 0
-    if cfg.km_opt == 2:
+    if cfg.km_opt in (2, 5):
         # The prognostic-TKE forward tendency (tke_rhs + self-diffusion),
         # consumed by advance_tke_stage on every RK pass.
         state.scratch((nz, ny, nx), "smag_rtke")[...] = 0
@@ -2486,7 +2716,7 @@ def prepare_fixed_tendencies(state: DomainState, cfg: RunConfig,
         exempt = diff6_exempt_slots(cfg)
         # row[5] is the row's carrying slot (see _smag2d_specs).
         diff6_rows = [row for row in specs if row[5] not in exempt]
-        if cfg.km_opt == 2:
+        if cfg.km_opt in (2, 5):
             # WRF applies the 6th-order filter to tke through
             # rk_scalar_tend unless tke_mix6_off (Registry default
             # .false., Registry.EM_COMMON:2893).
@@ -2647,7 +2877,7 @@ def add_scalar_diff6_wrf(state: DomainState, cfg: RunConfig) -> None:
     specs = _smag2d_specs(state, None, None, time_t=True)
     exempt = diff6_exempt_slots(cfg)
     rows = [row for row in specs if row[1] is None and row[5] not in exempt]
-    if cfg.km_opt == 2:
+    if cfg.km_opt in (2, 5):
         rows.append((state.tke0, None, None, state.c1h, state.c2h,
                      "smag_rtke", ""))
     for f0, _tend, _xk, c1, c2, slot, stag in rows:

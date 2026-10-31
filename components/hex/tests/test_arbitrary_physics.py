@@ -198,6 +198,14 @@ def test_a_setting_only_woofs_dycore_reads_is_refused(engine_tree, override):
         ps.resolve_physics("arwen_mpas_column", {"km_opt": "4"}, engine_checkout=engine_tree)
 
 
+def test_km_opt_5_is_refused_by_name_on_mpas(engine_tree):
+    # SMS-3DTKE is WRF-only: MPAS-A v8.4.2 has no counterpart and the
+    # closure is built on WRF's C grid, so it is refused, not seamed.
+    with pytest.raises(ps.PhysicsSelectionRefusal, match="SMS-3DTKE") as caught:
+        ps.resolve_physics("arwen_mpas_column", {"km_opt": "5"}, engine_checkout=engine_tree)
+    assert [item.knob for item in caught.value.refusals] == ["km_opt"]
+
+
 # ---------------------------------------------------------------------------
 # cumulus schemes register themselves
 # ---------------------------------------------------------------------------
