@@ -136,7 +136,7 @@ def cold_state(nl: int, nc: int):
 def deng_mpas(cp, *, nl, nc, state, u, v, t, qv, qc, qr, pres, pii, rho, dz,
               z_w, w_w, qke, kzh, el_pbl, rthratenlw, rthratensw, hpbl, ht,
               lon, degrad, mavail, mesh_density, len_disp, pres2_hydd, dt,
-              xtime_min, gmt):
+              xtime_min, gmt, perturb=None):
     """One Deng call on MPAS [level, cell] arrays: the first ``nc`` cells,
     levels 1..nl (w-level arrays 1..nl+1).  ``state`` (nl, 1, nc) advances
     in place and ``mavail`` (owned cells first) is updated in place.
@@ -157,17 +157,28 @@ def deng_mpas(cp, *, nl, nc, state, u, v, t, qv, qc, qr, pres, pii, rho, dz,
                              degrad=degrad)
     dx, xlong = dx.reshape(1, nc), xlong.reshape(1, nc)
     dnw = mpas_dnw(cp, pres2_hydd, nl=nl, nc=nc).reshape(1, nc, nl)
+    qv_in, qc_in, w_in = prof(qv), prof(qc), prof(w_w, nl + 1)
+    if perturb is not None:
+        # WOOF-only WRF-Solar EPS (wrfsolar_eps_v842, config_pert_deng): WRF's Add_ on the copies.
+        perturb(qv=qv_in, qc=qc_in, w=w_in)
     out = launch_deng(
-        u=prof(u), v=prof(v), t=prof(t), qv=prof(qv), qc=prof(qc), qr=prof(qr),
+        u=prof(u), v=prof(v), t=prof(t), qv=qv_in, qc=qc_in, qr=prof(qr),
         p=prof(pres), pii=prof(pii), rho=prof(rho), dz8w=prof(dz),
         tke=prof(qke), exch_h=prof(kzh), el_pbl=prof(el_pbl),
         rthratenlw=prof(rthratenlw), rthratensw=prof(rthratensw),
-        z_at_w=prof(z_w, nl + 1), w=prof(w_w, nl + 1), pblh=surf(hpbl),
+        z_at_w=prof(z_w, nl + 1), w=w_in, pblh=surf(hpbl),
         ht=surf(ht), xlong=xlong, dnw=dnw, mavail=moist, state=state,
         dt=float(dt), dx=dx, xtime=float(xtime_min), gmt=float(gmt),
         adaptive=False, bl_pbl_physics=MYNN)
     mavail[:nc] = moist.reshape(nc)
     return out
+
+
+def _eps_deng(session):
+    if getattr(session, "wrfsolar_eps", None) is None:
+        return None
+    from .wrfsolar_eps_v842 import deng_inputs
+    return lambda **copies: deng_inputs(session, **copies)
 
 
 def deng_step(provider, call, service):
@@ -190,7 +201,8 @@ def deng_step(provider, call, service):
         mavail=diag["mavail"], mesh_density=mesh["meshDensity"],
         len_disp=provider["configs"]["config_len_disp"],
         pres2_hydd=prep["pres2_hydd_p"], dt=call.dt,
-        xtime_min=F(call.time_seconds) / F(60.0), gmt=gmt)
+        xtime_min=F(call.time_seconds) / F(60.0), gmt=gmt,
+        perturb=_eps_deng(provider.session))
     service.tendencies = {n: cp.ascontiguousarray(out[n].reshape(nl, nc))
                           for n in TENDENCIES}
     service.rainsh = out.get("rainsh")

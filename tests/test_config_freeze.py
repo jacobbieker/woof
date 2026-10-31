@@ -93,6 +93,15 @@ def test_new_fields_are_reviewed_defaults_appended_last():
     """
     from woof.config import CHEM_RUN_FIELDS, FIRE_RUN_FIELDS
     names = [f.name for f in dataclasses.fields(RunConfig)]
+    # MAD-WRF's four keys and WRF-Solar EPS's (multi_perturb and its pert_*
+    # keys, the table), appended off at WRF's Registry defaults
+    # (tests/test_wrfsolar_eps_madwrf_config.py).
+    from woof.config import MADWRF_RUN_DEFAULTS, MULTI_PERTURB_RUN_DEFAULTS
+    for name in reversed([*MULTI_PERTURB_RUN_DEFAULTS, *MADWRF_RUN_DEFAULTS]):
+        assert names.pop() == name
+        field = RunConfig.__dataclass_fields__[name]
+        assert field.kw_only
+        assert field.default == {**MULTI_PERTURB_RUN_DEFAULTS, **MADWRF_RUN_DEFAULTS}[name]
     # WRF's do_avgflx_em (output-only AVGFLX means), appended off.
     assert names.pop() == "do_avgflx_em"
     assert RunConfig.__dataclass_fields__["do_avgflx_em"].default == 0
@@ -615,7 +624,10 @@ def _check_frozen_defaults(actual):
                          ("radtran_aerosol", "none"),
                          # the theta_m prognostic (dry 0) and the
                          # output-only AVGFLX means, off
-                         ("use_theta_m", 0), ("do_avgflx_em", 0)):
+                         ("use_theta_m", 0), ("do_avgflx_em", 0),
+                         # WRF-Solar EPS and MAD-WRF, off
+                         *__import__("woof.config", fromlist=["x"]).MULTI_PERTURB_RUN_DEFAULTS.items(),
+                         *__import__("woof.config", fromlist=["x"]).MADWRF_RUN_DEFAULTS.items()):
         assert actual.pop(field) == value, field
     # WRF's windfarm_opt and its three companions (the fork's Fitch
     # coupling), appended after upstream 1.1.0's fields, off.

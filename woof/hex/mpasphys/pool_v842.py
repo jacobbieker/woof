@@ -141,7 +141,7 @@ class RegistryLayout:
         canonical = {key.casefold(): key for key in self.config_kinds}
         for group, options in parse_fortran_namelist(namelist).items():
             # WOOF's own groups (slot backends, &radiation's spectral output) are not native configs.
-            if group not in ("hex_mpasphys", _spectral.GROUP, _radtran.GROUP, _solar.GROUP):
+            if group not in ("hex_mpasphys", _spectral.GROUP, _radtran.GROUP, _solar.GROUP, "wrfsolar_eps"):
                 self.configs.update({canonical.get(key.casefold(), key): value
                                      for key, value in options.items()})
         self.configs.update({canonical.get(key.casefold(), key): value

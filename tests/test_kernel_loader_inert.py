@@ -66,6 +66,14 @@ _EXPECTED_HEADERS = {
     # v4.7.1 (tests/test_sms3dtke_wrf471_parity.py): glibc's powf/expf and
     # glibc 2.43's correctly rounded tanhf.
     "sms3dtke": ("glibc_flt32.cuh", "sfire_libm.cuh"),
+    # WRF-Solar EPS (multi_perturb) hooks and module_stoch pattern
+    # arithmetic, new units graded word for word against WRF v4.7.1
+    # (tests/test_wrfsolar_eps_wrf471_oracle.py, _pattern_oracle.py):
+    # glibc's expf/logf and 2.43's cosf/sinf.
+    "wrfsolar_eps": ("glibc_flt32.cuh", "glibc_trig_flt32.cuh"),
+    # MAD-WRF (module_madwrf.F, Cloud_tracer_nudge), graded word for word
+    # (tests/test_madwrf_wrf471_oracle.py): glibc's powf.
+    "madwrf": ("glibc_flt32.cuh",),
     "gsd_initial_reflectivity": ("glibc_flt32.cuh", "glibc_flt64.cuh",
                                  "thompson_fork_constants.cuh", "thompson_fork.cu"),
     # A new full-column generation unit; existing classic and aerosol units
@@ -286,6 +294,9 @@ def test_lake_compile_options_do_not_change_existing_modules(monkeypatch, strict
     expected["avgflx"] = ("-std=c++17", "--fmad=false", "--ftz=false")
     # km_opt = 5 (SMS-3DTKE): tile-exact against WRF v4.7.1, subnormals kept.
     expected["sms3dtke"] = ("-std=c++17", "--fmad=false", "--ftz=false")
+    # WRF-Solar EPS and MAD-WRF: column-exact, subnormals kept.
+    expected["wrfsolar_eps"] = ("-std=c++17", "--fmad=false", "--ftz=false")
+    expected["madwrf"] = ("-std=c++17", "--fmad=false", "--ftz=false")
     # WRF's HAILCAST diagnostics (lane/cap-hail 97e9a3ca061) compile without
     # FMA, like the other column-exact WRF ports.
     expected["hail"] = ("-std=c++17", "--fmad=false")

@@ -73,6 +73,9 @@ _OPTIONAL_2D = (
     "F", "E", "SINALPHA", "COSALPHA",
     "XLAT_M", "XLONG_M", "XLAT_U", "XLONG_U", "XLAT_V", "XLONG_V",
     "CLAT", "CLONG",
+    # MAD-WRF's satellite cloud inputs (Registry.EM_COMMON:3071, package
+    # cldinit), read by woof.core.madwrf with their FLAG_* attributes.
+    "CLDMASK", "CLDTOPZ", "CLDBASEZ", "BRTEMP",
 )
 
 #: Category-dimensioned geogrid statics carried through as-is.

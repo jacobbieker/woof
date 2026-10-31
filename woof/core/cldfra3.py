@@ -17,8 +17,10 @@ WRF-Solar EPS (``multi_perturb = 1`` with ``pert_cld3``) perturbs the
 temperature and vapour cal_cldfra3 reads, ``t*(1 + perts_th*pert_cld3_t)``
 and ``max(0, qv*(1 + perts_qvapor*pert_cld3_qv))`` (:1472-1474).  That is
 the ``perturbation`` hook below: the inputs are perturbed before the call
-and nothing inside the routine changes.  It is not ported yet and is
-refused rather than ignored.
+and nothing inside the routine changes.  ``perturbation`` carries the two
+pert3d fields in the caller's column layout and the (pert_cld3_qv,
+pert_cld3_t) factors; woof.core.wrfsolar_eps.cld3_inputs applies the two
+statements word for word (tests/test_wrfsolar_eps_wrf471_oracle.py).
 """
 
 from __future__ import annotations
@@ -56,10 +58,13 @@ def cal_cldfra3(qv, qc, qi, qs, dz8w, p, t, xland, gridkm, *,
     import cupy as cp
     from woof.core.kernels import get_kernel
     if perturbation is not None:
-        raise NotImplementedError(
-            "icloud=3 under multi_perturb=1/pert_cld3 (WRF-Solar EPS "
-            "temperature and vapour perturbations, module_radiation_driver.F"
-            ":1472-1474) is not ported")
+        # WRF-Solar EPS (multi_perturb = 1, pert_cld3): t_1d and qv_1d are
+        # perturbed copies (module_radiation_driver.F:1472-1474).
+        from woof.core.wrfsolar_eps import cld3_inputs
+        f_qv, f_t = perturbation["factors"]
+        t, qv = cld3_inputs(cp.asarray(t), cp.asarray(qv),
+                            perturbation["pert_th"], perturbation["pert_qv"],
+                            f_qv, f_t)
 
     def col(a, name):
         a = cp.asarray(a)

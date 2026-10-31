@@ -22,6 +22,7 @@ from ..physics_suites import load_table
 from . import radiation_spectral_v842 as _spectral
 from . import radtran_v842 as _radtran
 from . import solar_diagnostics_v842 as _solar
+from . import wrfsolar_eps_v842 as _eps
 
 SCHEMA = "mpas-port.physics-driver-v842/v1"
 
@@ -309,6 +310,9 @@ class DriverConfig:
     #: WOOF's &diagnostics config_solar_diagnostics (solar_diagnostics_v842): WRF-Solar's 26
     #: diagnostics after every step.  Not a Registry option.
     solar_diagnostics: bool = False
+    #: WOOF's &wrfsolar_eps group (wrfsolar_eps_v842): WRF-Solar EPS's multi_perturb hooks at the
+    #: FARMS, Deng, Thompson and cloudiness seats, or None.  Not a Registry option.
+    wrfsolar_eps: Any = None
 
     def cpu_warning(self) -> str | None:
         """The loud start-up lines naming each active slot that runs on the CPU, or None when none does."""
@@ -417,6 +421,10 @@ class DriverConfig:
                 result["radtran"]["aerosol"] = d.aerosol
         if self.solar_diagnostics:
             result["solar_diagnostics"] = True
+        if self.wrfsolar_eps is not None:
+            o = self.wrfsolar_eps
+            result["wrfsolar_eps"] = dict(switches=list(o.switches), degree=o.degree,
+                                          **{k: v for k, v in sorted(o.values.items())})
         return result
 
 
@@ -627,6 +635,7 @@ def resolve_namelist(text: str, *, backends: Mapping[str, str] | None = None,
         if row["type"] == "real":
             options[key] = float(options[key])
     groups = parse_fortran_namelist(text)
+    _eps.refuse_madwrf(groups)          # MAD-WRF, by name, before the generic Registry refusal
     supplied = groups.get("physics", {})
     for name, value in supplied.items():
         key = name.casefold()
@@ -714,6 +723,7 @@ def resolve_namelist(text: str, *, backends: Mapping[str, str] | None = None,
     spectral = _spectral.resolve(groups)
     radtran = _radtran.resolve(groups)
     solar = _solar.resolve(groups)
+    multi_perturb = _eps.resolve(groups)
 
     def record(config: DriverConfig) -> DriverConfig:
         _check_convective_cloud(config)
@@ -725,6 +735,9 @@ def resolve_namelist(text: str, *, backends: Mapping[str, str] | None = None,
         if solar:
             config = _replace(config, solar_diagnostics=True)
             _solar.check(config)
+        if multi_perturb is not None:
+            config = _replace(config, wrfsolar_eps=multi_perturb)
+            _eps.check(config)
         if library:
             return config
         return _replace(config, cpu_slots=cpu_slot_record(config, "mpasphys_v842", cpu_reasons, explicit))
@@ -1446,6 +1459,11 @@ class PhysicsDriver:
         if shcu_deng_enabled(c):
             glue("shcu_deng")
         glue("deallocate_forall_physics")
+        # WOOF-only: WRF-Solar EPS (wrfsolar_eps_v842).  WRF moves the multi_perturb fields after the
+        # first-RK physics (first_rk_step_part2.F:262-317), so this step's microphysics reads them.
+        provider = getattr(pools, "wrfsolar_eps", None)
+        if provider is not None:
+            provider.update(itimestep, time_seconds)
         return flags
 
     def physics_get_tend(self, *, rk_step: int, dynamics_substep: int, pools: Any) -> Any:

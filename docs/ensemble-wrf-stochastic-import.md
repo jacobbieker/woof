@@ -29,8 +29,13 @@ lsm = 1
 
 SPP still requires the corresponding GF, WRF MYNN and RUC physics selectors.
 Unsupported combinations refuse with the missing consumer's name. Native
-`rand_perturb`, `multi_perturb`, boundary and `pert_*` selectors have no runtime
-consumer for their requested increments. They refuse because their fields
+`rand_perturb`, boundary, `pert_mynn` and `pert_noah` selectors have no runtime
+consumer for their requested increments.  WRF-Solar EPS (`multi_perturb` with
+`pert_farms`, `pert_deng`, `pert_thom`, `pert_cld3`) is not an ensemble-door
+process: it imports to RunConfig keys and runs on the ordinary forecast, one
+member per run with its own `nens`, as WRF-Solar EPS runs (woof/core/
+wrfsolar_eps.py); an import that carries it beside SPPT, SKEBS or SPP is
+refused. They refuse because their fields
 would stay unperturbed while the receipt claimed the selector. Turning the
 selector off is the remedy; changing an amplitude cannot supply its consumer.
 

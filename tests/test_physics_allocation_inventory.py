@@ -1619,6 +1619,20 @@ _PHYSICS_ALLOCATION_INVENTORY['woof/core/gf.py']['__call__'] = 14
 # 37 -> 40), and the wind farm's one attach-time plane.
 _PHYSICS_ALLOCATION_INVENTORY['woof/core/physics.py'].update(
     {'__init__': 25, '_attach_windfarm': 1, 'initialize_physics': 40})
+# WRF-Solar EPS (multi_perturb): each pert3d field and its two spectra at
+# driver construction (allocate_multi_perturb_fields); per generator SP_AMP,
+# its ZCHI scratch and the three scalars (__init__), per update the two
+# draw planes (draws) and the filled real/imaginary levels (fill); per hook
+# statement Add_'s saved copy and a one-word dummy (apply, _dummy).
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/wrfsolar_eps.py'] = {
+    '_dummy': 1, 'apply': 2, 'allocate_multi_perturb_fields': 1, '__init__': 3,
+    'draws': 2, 'fill': 2}
+# MAD-WRF's cloud initialization, once at the real initialization: the
+# column copies (cloud_init_state), CLDFRA, the work and status buffers
+# (cloud_init) and the default surface planes (surf).  The nudge allocates
+# nothing.
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/madwrf.py'] = {
+    'surf': 1, 'cloud_init': 3, 'cloud_init_state': 2}
 
 
 def _live_inventory() -> dict[str, dict[str, int]]:

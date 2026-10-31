@@ -709,7 +709,8 @@ def test_the_experiment_loader_refuses_random_physics_on_every_route(tmp_path):
     text = base.read_text(encoding="utf-8")
     assert "[shared]\n" in text
     config = tmp_path / "base.toml"
-    for switch in ("pert_mynn = true", "pert_thom = true", "rand_perturb = 1"):
+    # pert_thom (WRF-Solar EPS) is a RunConfig key now; pert_noah is not.
+    for switch in ("pert_mynn = true", "pert_noah = true", "rand_perturb = 1"):
         config.write_text(text.replace("[shared]\n", "[shared]\n" + switch + "\n", 1), encoding="utf-8")
         for load in (load_experiment, load_experiment_case):
             with pytest.raises(ValueError) as refused:

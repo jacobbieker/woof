@@ -1903,6 +1903,36 @@
       ],
       "diagnostics": [
         "config_solar_diagnostics"
+      ],
+      "wrfsolar_eps": [
+        "config_multi_perturb",
+        "config_pert_farms",
+        "config_pert_deng",
+        "config_pert_thom",
+        "config_pert_cld3",
+        "config_pert_farms_albedo",
+        "config_pert_farms_aod",
+        "config_pert_farms_angexp",
+        "config_pert_farms_aerasy",
+        "config_pert_farms_qv",
+        "config_pert_farms_qc",
+        "config_pert_farms_qs",
+        "config_pert_deng_qv",
+        "config_pert_deng_qc",
+        "config_pert_deng_t",
+        "config_pert_deng_w",
+        "config_pert_thom_qv",
+        "config_pert_thom_qc",
+        "config_pert_thom_qi",
+        "config_pert_thom_qs",
+        "config_pert_thom_ni",
+        "config_pert_cld3_qv",
+        "config_pert_cld3_t",
+        "config_spdt",
+        "config_num_pert_3d",
+        "config_nens",
+        "config_stochpert_tbl",
+        "config_multi_perturb_degree"
       ]
     },
     "services": {

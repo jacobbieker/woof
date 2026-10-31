@@ -118,7 +118,7 @@
         "name": {"$ref": "#/definitions/name"},
         "output_name": {"type": ["string", "null"], "pattern": "^[A-Za-z][A-Za-z0-9_]{0,31}$"},
         "long_name": {"type": "string", "minLength": 1},
-        "units": {"enum": ["ug kg-1", "ppmv", "mol mol-1"]},
+        "units": {"enum": ["ug kg-1", "ppmv", "mol mol-1", "kg kg-1"]},
         "phase": {"enum": ["aerosol", "gas"]},
         "family": {"enum": ["tracer", "smoke", "dust", "seasalt", "bc", "oc", "sulfate",
                             "sulfur_gas", "ozone", "nox", "co", "pm_other", "oxidant"]},

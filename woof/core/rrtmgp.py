@@ -563,9 +563,13 @@ _MP_CLOUD_OPTICS_SCHEME = {
 }
 
 from woof.microphysics_schemes import NAMED_SCHEMES as _NAMED_MP_SCHEMES
-# Named schemes: the capability row names the radii family.
+# Named schemes: the capability row names the radii family.  A row whose
+# family is "none" (MAD-WRF's passive 96: no size distribution, WRF's
+# use_mp_re = 0) has no cloud-optics row; its reason is recorded in
+# _NO_CLOUD_OPTICS_COUPLING below.
 _MP_CLOUD_OPTICS_SCHEME.update({
-    _s.mp_id: _s.cloud_optics_family for _s in _NAMED_MP_SCHEMES.values()})
+    _s.mp_id: _s.cloud_optics_family for _s in _NAMED_MP_SCHEMES.values()
+    if _s.cloud_optics_family != "none"})
 
 # WHY A SELECTOR THIS BUILD ACCEPTS HAS NO ROW ABOVE.  One entry per such
 # selector, stating the reason a row would be WRONG -- not a note that one
@@ -583,7 +587,7 @@ _MP_CLOUD_OPTICS_SCHEME.update({
 # the radii from a gamma distribution that is not this scheme's", which
 # was true and was the argument for a row of the scheme's own, not for
 # refusing the pairing.  P3's entry went the same way before it.
-_NO_CLOUD_OPTICS_COUPLING: dict[int, str] = {2: "Lin supplies no effective radii to this adapter; borrowing another scheme would change its cloud distribution", 30: "the spectral effective-radius integration has not been qualified; reusing bulk radii would replace the size-distribution optics"}
+_NO_CLOUD_OPTICS_COUPLING: dict[int, str] = {2: "Lin supplies no effective radii to this adapter; borrowing another scheme would change its cloud distribution", 30: "the spectral effective-radius integration has not been qualified; reusing bulk radii would replace the size-distribution optics", 96: "MAD-WRF's passive hydrometeors (mp_physics = 96) carry no size distribution and WRF pairs them with use_mp_re = 0, so radiation computes its own radii; that is the legacy RRTMG wrappers' path, and borrowing a scheme's radii here would invent one"}
 
 #: The two adapters that DO serve these selectors, named by every refusal
 #: so none of them is a dead end.  One copy: a user told different things
@@ -4018,6 +4022,8 @@ class RRTMGPRadiation:
                 self._columns(atmosphere["dz"]), play, tlay,
                 fields["xland"].reshape(-1),
                 cldfra3_gridkm(cfg.dx, cfg.dy),
+                perturbation=_cld3_perturbation(cfg, fields, self._columns,
+                                                atmosphere["qv"].shape[0]),
                 check=not _stream_is_capturing(cp))
             qc_cols = _radiation_reads_nonnegative(qc_raw)
             qi_cols = _radiation_reads_nonnegative(qi_raw)
@@ -5748,3 +5754,16 @@ __all__ = ["CloudOpticsResult", "CloudTables", "DATA_DIR", "FluxResult",
            "lw_rte", "mcica_cloud_masks", "planck_sources",
            "rfmip_clear_sky", "rrtmgp_above_model_layer_counts",
            "sw_rte", "trace_gases"]
+
+
+def _cld3_perturbation(cfg, fields, columns, nz):
+    """WRF-Solar EPS pert_cld3 for cal_cldfra3 (module_radiation_driver.F
+    :1472-1474): the pert3d TH and QVAPOR fields in the adapter's column
+    layout, or None."""
+    from woof.core.wrfsolar_eps import (Pattern, active_switches, factors,
+                                        pattern_field_name)
+    if "pert_cld3" not in active_switches(cfg):
+        return None
+    grid = lambda name: Pattern(fields[pattern_field_name(name)]).grid(nz)
+    return dict(pert_th=columns(grid("TH")), pert_qv=columns(grid("QVAPOR")),
+                factors=factors(cfg, "pert_cld3"))

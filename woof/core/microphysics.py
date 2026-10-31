@@ -1393,6 +1393,28 @@ def _ring_guard_width(cfg: RunConfig) -> int:
     return max(int(cfg.spec_zone), 0)
 
 
+def _dispatch_with_eps(state: DomainState, cfg: RunConfig, dt: float, *,
+                       refl_10cm_due: bool) -> MicrophysicsDiagnostics:
+    """:func:`_dispatch_scheme`, inside WRF-Solar EPS's Thompson pair when
+    ``multi_perturb = 1`` and ``pert_thom``: Add_multi_perturb_mp_perturbations
+    on QV, QC, QI, QS and NI before mp_gt_driver, Remove_ on its output
+    (module_microphysics_driver.F:1120-1213 for mp 28, :1314-1381 for mp 8),
+    inside the tile the ring guard bounds, as WRF's tile loop is."""
+    provider = getattr(getattr(state, "physics", None), "multi_perturb", None)
+    fac = None if provider is None else provider.factors("pert_thom")
+    if fac is None or int(cfg.mp_physics) not in (8, 28):
+        return _dispatch_scheme(state, cfg, dt, refl_10cm_due=refl_10cm_due)
+    from woof.core import wrfsolar_eps as _eps
+    pats = provider.patterns()
+    fields = dict(qv=state.qv, qc=state.qc, qi=state.qi, qs=state.qs, ni=state.ni)
+    saved = _eps.thompson_add(pats, fac, **fields)
+    result = _dispatch_scheme(state, cfg, dt, refl_10cm_due=refl_10cm_due)
+    # the scheme's output arrays (re-read: a launch path may rebind them)
+    _eps.thompson_remove(pats, fac, saved, qv=state.qv, qc=state.qc,
+                         qi=state.qi, qs=state.qs, ni=state.ni)
+    return result
+
+
 def _apply_scheme(state: DomainState, cfg: RunConfig, dt: float, *,
                   refl_10cm_due: bool = False
                   ) -> MicrophysicsDiagnostics | None:
@@ -1430,7 +1452,7 @@ def _apply_scheme(state: DomainState, cfg: RunConfig, dt: float, *,
         pin_absent_nssl2_fields(state, resolve_nssl2_mode_for_config(cfg))
     slices = _ring_guard_slices(state, cfg)
     if slices is None:
-        result = _dispatch_scheme(state, cfg, dt, refl_10cm_due=refl_10cm_due)
+        result = _dispatch_with_eps(state, cfg, dt, refl_10cm_due=refl_10cm_due)
     else:
         saved, captured_slots = _capture_spec_zone_ring(state, slices)
         try:
@@ -1439,8 +1461,8 @@ def _apply_scheme(state: DomainState, cfg: RunConfig, dt: float, *,
             # driver or an unconsumed stash, refl.py stash_refl_10cm) would
             # otherwise leave ring columns mutated that WRF never
             # dispatches at all.
-            result = _dispatch_scheme(state, cfg, dt,
-                                      refl_10cm_due=refl_10cm_due)
+            result = _dispatch_with_eps(state, cfg, dt,
+                                        refl_10cm_due=refl_10cm_due)
         finally:
             _restore_spec_zone_ring(state, slices, saved, captured_slots)
     if getattr(cfg, "mp_zero_out", 0):

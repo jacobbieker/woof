@@ -270,6 +270,11 @@ def test_every_implemented_option_is_selected_by_a_registered_suite() -> None:
             "score yet, so no preset recommends it; a config asks for it "
             "directly (bl_pbl_physics = 9, per domain too) and an imported "
             "WRF namelist carries it",
+        ("microphysics", "madwrf"):
+            "MAD-WRF's passive hydrometeors (mp_physics = 96) run no process "
+            "and belong to the MAD-WRF nowcast configuration (madwrf_opt = 1), "
+            "not to a forecast preset; a config or an imported WRF namelist "
+            "asks for it directly",
         ("microphysics", "tempo"):
             "TEMPO is asked for by name through the rrfs-v2-hex-tempo model "
             "preset (woof preset run), an RRFS configuration on the hex "

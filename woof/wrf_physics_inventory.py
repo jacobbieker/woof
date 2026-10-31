@@ -553,6 +553,7 @@ def _require_agreement_with_the_registry() -> None:
             9: "export-only scope: no evidenced Registry.EM_COMMON package contract packaged (audit R-014)",
             16: "export-only scope: no evidenced Registry.EM_COMMON package contract packaged (audit R-014)",
             900: "TEMPO is a WOOF named scheme with no WRF Registry.EM_COMMON package; stock-WRF export does not apply",
+            96: "export-only scope: MAD-WRF's madwrf_mp package (WRF v4.7.1 Registry.EM_COMMON:3052, moist:qv,qc,qi,qs) is not in the WRF v4.6.1 export contract",
         })
 
 

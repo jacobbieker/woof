@@ -252,6 +252,15 @@ BASELINE_PINNED: dict[str, str] = {
     # equal word for word to the gfortran -O0 / glibc 2.43 record
     # (tests/test_sms3dtke_wrf471_parity.py) on Metal and CUDA.
     "sms3dtke": "7a6544f7eafd1b2f4955a5b37f684826aacafddbf4f0ff981cad68503dd94ab5",
+    # WRF-Solar EPS (multi_perturb): the drivers' Add_/Remove_ hooks, 634,368
+    # words equal to the gfortran -O0 x86-64 record, and module_stoch's
+    # pattern arithmetic (tests/test_wrfsolar_eps_wrf471_oracle.py,
+    # tests/test_wrfsolar_eps_pattern_oracle.py) on Metal and CUDA.
+    "wrfsolar_eps": "c312b1fba916461bac63332e911d1e2d9968924adf5466c562649a790dfda58d",
+    # MAD-WRF: Init_madwrf_clouds and Cloud_tracer_nudge, 135,505 words
+    # equal to the gfortran -O0 / glibc 2.43 record
+    # (tests/test_madwrf_wrf471_oracle.py) on Metal and CUDA.
+    "madwrf": "cefa3f49219aae1d562848db1e1cbad6362fb3478666e3e6c3b00c5f4cb99650",
     # e677dccb6: active table edits multiply binary64 values on the GPU,
     # round once to REAL, and reject non-positive crop roughness.
     "physics_params":

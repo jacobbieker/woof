@@ -186,7 +186,7 @@ AXES = (
     # Lin), 3 (WSM3), 4 (WSM5), 5 (Ferrier-Aligo), 24 (WSM7) and 106
     # (WSM6R) with their ports.  ra_lw/ra_sw 5 (New Goddard, golden/ports-rad)
     # joined the radiation checks below the same way in 2.9.0.
-    Axis("mp_physics", (0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 30, 50, 106, 900),
+    Axis("mp_physics", (0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 30, 50, 96, 106, 900),
          "woof.config.validate_run_config, inline 'mp_physics must be' "
          "check, plus its two by-name gates -- _P3_UNPORTED_VARIANTS and "
          "the WDM5/WDM7 siblings -- each of which recites the same menu"),
@@ -597,6 +597,14 @@ REMEDIES = (
                "own radii the way WRF does)'",
      "before": _suite(mp_physics=30),
      "after": _suite(mp_physics=30) | {"ra_rrtmg_variant": "rrtmg_legacy"}},
+    # MAD-WRF (mp_physics=96): passive hydrometeors with no size
+    # distribution, WRF's use_mp_re = 0.  The same judged exclusion,
+    # followed the same first way.
+    {"id": "mad-wrf-has-no-rte-rrtmgp-cloud-optics",
+     "remedy": "'Set ra_rrtmg_variant='rrtmg_legacy' (which computes its "
+               "own radii the way WRF does)'",
+     "before": _suite(mp_physics=96),
+     "after": _suite(mp_physics=96) | {"ra_rrtmg_variant": "rrtmg_legacy"}},
 )
 
 

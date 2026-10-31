@@ -239,7 +239,7 @@ class FarmsShortwave(ShortwaveInterpolation):
 
     # -- inputs ------------------------------------------------------------
 
-    def cloud_fraction(self, atmosphere, fields, *, itimestep):
+    def cloud_fraction(self, atmosphere, fields, *, itimestep, eps=None):
         """The Solar_step's CLDFRA and hydrometeors for this step:
         ``(cldfra, qc, qi)`` on the device, (nz, ny, nx)."""
         import cupy as cp
@@ -293,6 +293,7 @@ class FarmsShortwave(ShortwaveInterpolation):
                 tr(qv), tr(qc), tr(qi), tr(qs), tr(atmosphere["dz"]),
                 tr(atmosphere["pressure"]), tr(atmosphere["temperature"]),
                 fields["xland"].reshape(-1), self.gridkm,
+                perturbation=(None if eps is None else eps.cld3_columns(tr)),
                 check=not _stream_is_capturing(cp))
             back = lambda a: cp.ascontiguousarray(a.T).reshape(qv.shape)
             cldfra, qc, qi = back(c3), back(q3c), back(q3i)
@@ -343,13 +344,27 @@ class FarmsShortwave(ShortwaveInterpolation):
     # -- the every-step call -------------------------------------------------
 
     def step(self, fields, atmosphere, state, *, elapsed_seconds, itimestep,
-             aodtot=None):
+             aodtot=None, eps=None):
         """FARMS for this step: the six outputs into ``fields``, then the
-        ``couple_farms`` copy into SWDOWN.  Returns the step's CLDFRA."""
+        ``couple_farms`` copy into SWDOWN.  Returns the step's CLDFRA.
+
+        ``eps`` is the domain's WRF-Solar EPS provider
+        (woof.core.wrfsolar_eps.MultiPerturb) or None: pert_cld3 perturbs
+        cal_cldfra3's inputs; pert_farms wraps farms_driver in WRF's Add_/
+        Remove_ pair (module_radiation_driver.F:3052-3082) on the arrays
+        WRF's own would touch -- the albedo, qv and qs in place (what the
+        round trip leaves stays, as in WRF), the 2-D aerosol in place where
+        it is carried (aer_opt = 2) and on fresh copies where WRF rebuilds
+        it each call, and a copy of the radiation's qc, whose Remove_ the
+        driver's qc restore (:3137-3145) discards."""
+        import cupy as cp
         julian, xtime, gmt = calendar_scalars(self.start_time, elapsed_seconds)
         coszen_loc = self.coszen_loc_at(julian, xtime, gmt)
+        # eps rides only when multi_perturb's cld3 pair is live, so the
+        # unperturbed call keeps the seam's original keywords.
+        extra = {} if eps is None else {"eps": eps}
         cldfra, qc, qi = self.cloud_fraction(atmosphere, fields,
-                                             itimestep=itimestep)
+                                             itimestep=itimestep, **extra)
         nz = atmosphere["qv"].shape[0]
         re_cloud, re_ice, re_snow = self._radii(state, nz)
         aod, angexp, ssa, asy = self._aerosol(aodtot, fields)
@@ -357,6 +372,20 @@ class FarmsShortwave(ShortwaveInterpolation):
             albedo = fields["albsol"]
         else:
             albedo = fields["albedo"]
+        farms_fac = None if eps is None else eps.factors("pert_farms")
+        if farms_fac is not None:
+            from woof.core import wrfsolar_eps as _eps
+            if self.aer_opt != 2:
+                # rebuilt by the radiation driver on every call: perturb
+                # private copies (four distinct arrays, never the carried
+                # AODTOT)
+                aod, angexp, asy = (cp.array(a, dtype=cp.float32, copy=True)
+                                    for a in (aod, angexp, asy))
+            qc = cp.array(qc, dtype=cp.float32, copy=True)
+            pats = eps.patterns()
+            hooked = dict(albedo=albedo, aod=aod, angexp=angexp, aerasy=asy,
+                          qv=atmosphere["qv"], qc=qc, qs=atmosphere["qs"])
+            saved = _eps.farms_add(pats, farms_fac, **hooked)
         farms_columns(
             p8w_sfc=atmosphere["p_interface"][0], albedo=albedo,
             coszen=coszen_loc, aerssa=ssa, aerasy=asy, aod550=aod,
@@ -365,6 +394,8 @@ class FarmsShortwave(ShortwaveInterpolation):
             re_cloud=re_cloud, re_ice=re_ice, re_snow=re_snow,
             cldfra=cldfra, has_req=self.has_req, juday=wrf_juday(julian),
             out={name: fields[name] for name in STATE_FIELDS})
+        if farms_fac is not None:
+            _eps.farms_remove(pats, farms_fac, saved, **hooked)
         if self.couple_farms:
             fields["swdown"][...] = fields["swdown2"]
         return cldfra

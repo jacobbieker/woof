@@ -1,0 +1,19 @@
+wrf v4.7.1 commit f52c197ed39d12e087d02c50f412d90d418f6186
+GNU Fortran (conda-forge gcc 16.2.0-7) 16.2.0
+flags: -O0 -ffp-contract=off -fno-fast-math -ffree-form -ffree-line-length-none
+machine: x86_64
+ldd (Ubuntu GLIBC 2.43-2ubuntu2.4) 2.43
+libm symbols (module_madwrf.o):  U powf 
+745e020af31af12e1cbe4b391d78f5f32c23d2fb6037d7c44e3b190a18e15948  phys/module_madwrf.F
+5b80377fecdc18a5f0ad38d3b6c15cfc86ad5d76701adbbbb08a08698d0f7062  share/module_model_constants.F
+f981a2cce2cd1a8ca5b8ced100bf2d34eb2725d1d0bc7c42daf05fd05aa2c074  share/module_soil_pre.F
+fabf19e2a9073cff886e882b187080bfdf089d3fd40c0fce1d19bc93b1e5e802  phys/module_mp_thompson.F
+bd177b6b5ba7949cf9e694d7ad654fd9ae2f07d39d85802f0716c5318889a815  dyn_em/module_big_step_utilities_em.F
+ed3c37561efdc1fd16133c79d75a15a30f97558e4f5649eec2c85a94a8d632de  tools/madwrf_wrf471_oracle/extract.py
+deebddeb66c6bb62ad329e7281c78aed190d188573d0b9580b4750db3d5acdde  tools/madwrf_wrf471_oracle/stubs.F90
+ce6b0ba27ce48a0bb2f970e4136b135d7c9bef45f2bac7fe4ff4894b63e15ae7  tools/madwrf_wrf471_oracle/run_madwrf.F90
+93c97a84141549427374df51d331ef8aa2d7259e24755bb495fa5410c7f0cab8  tools/madwrf_wrf471_oracle/make_columns.py
+dcddd0a01ffa53bc58ed32eff6d1ef9ee1bf1bccfad3a83d141be68be54b6813  tools/madwrf_wrf471_oracle/build.sh
+5fa3f216c78f722ac018738587b8901b8e461f3278829165e2caf84bcceec07e  tools/madwrf_wrf471_oracle/../cldfra3_wrf471_oracle/make_columns.py
+fac19f73945118f1faf7488f77ed1145d3d49f55cec76921fe90b39a7a81788a  madwrf_columns.bin
+23ffee2579ffd3871db58480e7a2ec3ff398dfa2c18f6c0f1fd6ce4259f710a0  madwrf.out.bin

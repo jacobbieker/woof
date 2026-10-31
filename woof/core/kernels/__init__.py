@@ -330,6 +330,11 @@ _EXTRA_HEADERS: dict[str, tuple[str, ...]] = {
     # rounded tanhf (sfire_tanhf), graded word for word against WRF
     # v4.7.1 by tests/test_sms3dtke_wrf471_parity.py.  A new module.
     "sms3dtke": ("glibc_flt32.cuh", "sfire_libm.cuh"),
+    # WRF-Solar EPS (multi_perturb): the scheme hooks (FADD/FMUL/FDIV/FSUB)
+    # and module_stoch's pattern arithmetic (expf, logf, cosf, sinf).
+    "wrfsolar_eps": ("glibc_flt32.cuh", "glibc_trig_flt32.cuh"),
+    # MAD-WRF (module_madwrf.F, Cloud_tracer_nudge): glibc's powf.
+    "madwrf": ("glibc_flt32.cuh",),
 }
 
 #: Read-only view for tests and freeze receipts.
@@ -519,7 +524,14 @@ _URBAN_NO_FTZ_MODULES = frozenset({"urban_ucm", "urban_ucm480", "urban_bep",
 _NO_FTZ_MODULES = frozenset({"g3", "nsas", "sfclay", "myjsfc", "mynn_surface", "mynn_pbl",
                              "thompson_column", "ysu_480", "wsm6r",
                              "aer_opt2", "oml", "farms", "cldfra3", "solar_diag",
-                             "theta_m", "avgflx", "sms3dtke"}) | _SOLAR_NO_FTZ_MODULES
+                             "theta_m", "avgflx",
+                             # WRF 4.7.1 multi_perturb hooks
+                             # (tools/wrfsolar_eps_wrf471_oracle): subnormal
+                             # mixing ratios pass the multipliers unflushed.
+                             "wrfsolar_eps",
+                             # WRF 4.7.1 MAD-WRF (tools/madwrf_wrf471_oracle)
+                             "madwrf",
+                             "sms3dtke"}) | _SOLAR_NO_FTZ_MODULES
 
 # The exact chain's strict intake contracts (GPUWM_WRF_EXACT=1): these units
 # also compile without contraction in a strict process.  A default process

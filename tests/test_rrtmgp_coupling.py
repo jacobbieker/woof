@@ -11,7 +11,7 @@ import pytest
 #: production validator over range(0, 107), exactly as
 #: ``test_the_accepted_selector_list_this_module_uses_is_the_real_one``
 #: does; not hand-extended.
-_ACCEPTED_MP_PHYSICS = (0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 30, 50, 106, 900)
+_ACCEPTED_MP_PHYSICS = (0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 30, 50, 96, 106, 900)
 
 #: The admitted selectors without a cloud-optics coupling: FAST_SBM (30)
 #: alone, refused against the 4/4 pair with the legacy-RRTMG remedy until
@@ -21,9 +21,11 @@ _ACCEPTED_MP_PHYSICS = (0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 30, 50, 1
 #: remap row landed; Milbrandt-Yau (9) left it when its own-radii row
 #: landed (``9: "milbrandt2"``: the block WRF ships commented out at
 #: module_mp_milbrandt2mom.F:3351-3378, evaluated over the transported
-#: number moments).  The tuple stays so the partition checks below keep
+#: number moments).  MAD-WRF (96) joins it: WRF pairs its passive
+#: hydrometeors with use_mp_re = 0, so radiation diagnoses its radii on
+#: the legacy RRTMG path.  The tuple stays so the partition checks below keep
 #: asserting that nothing is admitted and uncoupled.
-_NO_RTE_RRTMGP_CLOUD_OPTICS = (2, 30)
+_NO_RTE_RRTMGP_CLOUD_OPTICS = (2, 30, 96)
 
 #: The selectors the RTE+RRTMGP cross-checks below may actually drive.
 #: Derived, so a scheme cannot be dropped from coverage by hand.
@@ -51,8 +53,8 @@ def test_every_accepted_selector_is_judged():
     assert coupled | uncoupled == set(_ACCEPTED_MP_PHYSICS), (
         "these accepted selectors are neither coupled nor refused: "
         f"{sorted(set(_ACCEPTED_MP_PHYSICS) - coupled - uncoupled)}")
-    assert uncoupled == {2, 30}, (
-        "the accepted selectors refused against RTE+RRTMGP are FAST_SBM and Lin; "
+    assert uncoupled == {2, 30, 96}, (
+        "the accepted selectors refused against RTE+RRTMGP are FAST_SBM, Lin and MAD-WRF; "
         "50, then 9, were retired by writing their rows")
 
     # Every coupled selector validates against the 4/4 pair on the DEFAULT
@@ -87,8 +89,8 @@ def test_the_uncoupled_selectors_are_a_decision_in_the_module_that_raises():
         f"{sorted(set(_ACCEPTED_MP_PHYSICS) - coupled - recorded)}")
     assert (tuple(sorted(_NO_CLOUD_OPTICS_COUPLING))
             == tuple(sorted(_NO_RTE_RRTMGP_CLOUD_OPTICS)))
-    assert set(_NO_CLOUD_OPTICS_COUPLING) == {2, 30}, (
-        "the recorded exclusions are FAST_SBM and Lin; mp=9 was retired by "
+    assert set(_NO_CLOUD_OPTICS_COUPLING) == {2, 30, 96}, (
+        "the recorded exclusions are FAST_SBM, Lin and MAD-WRF; mp=9 was retired by "
         "writing the scheme's own row")
     assert "Lin supplies no effective radii" in _NO_CLOUD_OPTICS_COUPLING[2]
     with pytest.raises(NotImplementedError, match="Lin supplies no effective radii"):
@@ -184,7 +186,8 @@ def test_the_accepted_selector_list_this_module_uses_is_the_real_one():
         return True
 
     from woof.microphysics_schemes import NAMED_MP_IDS
-    admitted = tuple(mp for mp in (*range(0, 107), *NAMED_MP_IDS) if admits(mp))
+    # A named scheme may carry WRF's own number (MAD-WRF's 96): walk it once.
+    admitted = tuple(mp for mp in sorted({*range(0, 107), *NAMED_MP_IDS}) if admits(mp))
     assert admitted == _ACCEPTED_MP_PHYSICS
     # The named refusals are the reason the helper cannot key on one
     # sentence; pin that they exist, so a lane cannot "fix" a future

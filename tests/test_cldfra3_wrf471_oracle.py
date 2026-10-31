@@ -120,11 +120,32 @@ def test_fatal_profile_is_refused():
                     cp.ones(1, cp.float32), np.float32(3.0))
 
 
-def test_perturbation_hook_refused():
-    z = cp.zeros((1, 10), cp.float32)
-    with pytest.raises(NotImplementedError, match="pert_cld3"):
-        cal_cldfra3(z, z, z, z, z, z, z, cp.ones(1, cp.float32), 3.0,
-                    perturbation={"pert_cld3_t": 0.1})
+def test_the_perturbation_hook_feeds_perturbed_copies(columns):
+    """multi_perturb/pert_cld3 (module_radiation_driver.F:1472-1474): the
+    routine reads (1 + perts_th*f_t)*t and max(0, (1 + perts_qv*f_qv)*qv),
+    built by woof.core.wrfsolar_eps.cld3_inputs (graded word for word in
+    tests/test_wrfsolar_eps_wrf471_oracle.py); the inputs are untouched."""
+    from woof.core.wrfsolar_eps import cld3_inputs
+    (nz, dx, dy), idx = next(iter(_groups(columns).items()))
+    sub = [columns[i] for i in idx]
+    gridkm = cldfra3_gridkm(dx, dy)
+    stack = lambda j: cp.asarray(np.stack([c["arrays"][j] for c in sub]))
+    qv, qc, qi, qs, dz, p, t = (stack(j) for j in range(7))
+    xland = cp.asarray(np.array([c["xland"] for c in sub], np.float32))
+    rng = np.random.default_rng(3)
+    pth = cp.asarray(rng.normal(0, 0.003, t.shape).astype(np.float32))
+    pqv = cp.asarray(rng.normal(0, 0.15, t.shape).astype(np.float32))
+    t0, qv0 = t.copy(), qv.copy()
+    got = cal_cldfra3(qv, qc, qi, qs, dz, p, t, xland, gridkm,
+                      perturbation=dict(pert_th=pth, pert_qv=pqv,
+                                        factors=(np.float32(1.0), np.float32(1.0))))
+    assert cp.array_equal(t, t0) and cp.array_equal(qv, qv0)
+    tp, qvp = cld3_inputs(t, qv, pth, pqv, 1.0, 1.0)
+    want = cal_cldfra3(qvp, qc, qi, qs, dz, p, tp, xland, gridkm)
+    plain = cal_cldfra3(qv, qc, qi, qs, dz, p, t, xland, gridkm)
+    for a, b in zip(got, want):
+        assert cp.array_equal(a, b)
+    assert not cp.array_equal(got[0], plain[0])
 
 
 def _cr_log10(x):

@@ -736,6 +736,9 @@ _MP_MAP = {
     # original.  WRF's hail_opt does not reach wsm6r, so no hail knob is
     # written for it.
     106: (106, "WSM6R", "WSM6R"),
+    # MAD-WRF's passive hydrometeors (madwrf_mp, Registry.EM_COMMON:3052),
+    # native: CASE (MADWRF_MP) runs no process (woof/core/madwrf.py).
+    96: (96, "MADWRF", "MADWRF"),
     8: (8, "Thompson", "Thompson"),
     # A namelist that says mp_physics = 9 gets Milbrandt-Yau, natively.  The
     # mapped value equals the WRF value, so this is not a substitution and
@@ -2679,6 +2682,11 @@ def _default_rrtmg_variant_for_namelist(inp: dict, input_path=None,
     requested_aerosol = physics.get("aer_opt", ())
     # aer_opt 1, 2 and 3 exist only on the legacy RRTMG shortwave.
     if requested_aerosol and all(type(value) is int and value in (1, 2, 3) for value in requested_aerosol):
+        return RRTMG_VARIANT_LEGACY
+    # MAD-WRF (mp_physics = 96, madwrf_opt): WRF pairs it with use_mp_re = 0,
+    # whose calculated radii only the legacy RRTMG wrappers carry.
+    if 96 in physics.get("mp_physics", ()) or any(
+            type(value) is int and value for value in physics.get("madwrf_opt", ())):
         return RRTMG_VARIANT_LEGACY
     budget = physics.get("bl_mynn_tkebudget")
     pbl = physics.get("bl_pbl_physics", [])
@@ -4759,6 +4767,32 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
             "the established WRF microphysics effective-radius scheme-table "
             "value")
         use_mp_re = None
+    # MAD-WRF (Registry.EM_COMMON:2677-2680, one value for the run):
+    # madwrf_opt, the nudge's relaxation time [s] and window [min], and
+    # real.exe's cloud initialization switch (woof/core/madwrf.py).
+    madwrf_values = {}
+    for _key, _default, _kind in (("madwrf_opt", 0, int),
+                                  ("madwrf_dt_relax", 60.0, float),
+                                  ("madwrf_dt_nudge", 60.0, float),
+                                  ("madwrf_cldinit", 0, int)):
+        _raw = ph.take(_key)
+        if _raw is None:
+            continue
+        if len(_raw) != 1:
+            raise _err("physics", _key, _raw, "WRF declares one value for the run")
+        _value = _raw[0]
+        if _kind is int and (type(_value) is not int or _value not in
+                             ((0, 1, 2) if _key == "madwrf_opt" else (0, 1))):
+            raise _err("physics", _key, _raw,
+                       "must be 0, 1 or 2" if _key == "madwrf_opt" else "must be 0 or 1")
+        if _kind is float:
+            if isinstance(_value, bool) or not isinstance(_value, (int, float)):
+                raise _err("physics", _key, _raw, "must be a WRF real")
+            _value = float(_value)
+        if _value != _default:
+            madwrf_values[_key] = _value
+        else:
+            fix("physics", _key, _raw, _default, "WRF's Registry default")
     isftcflx = _optional_scalar_int(
         "isftcflx", *PHYSICS_CHOICES["isftcflx"])
     iz0tlnd = _optional_scalar_int(
@@ -7408,9 +7442,16 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
             raise ValueError(f"unknown urban controls {sorted(set(urban_controls)-admitted)}")
         for key,value in urban_controls.items():
             lines.append(f'{key} = {_toml_string(value) if isinstance(value,str) else _fmt(value)}')
+    from woof.namelist_stochastic import EPS_DEFAULTS as _EPS_DEFAULTS
     for key, column in stochastic_flags.items():
-        if column[0]:
-            lines.append(f"{key} = {column[0]}")
+        if column[0] != _EPS_DEFAULTS.get(key, 0):
+            lines.append(f"{key} = {_fmt(column[0])}")
+    if stochastic_flags.get("multi_perturb") and any(stochastic_flags["multi_perturb"]):
+        # WRF reads STOCHPERT.TBL from the run directory (module_stoch.F:282);
+        # the shipped table is woof's default.
+        _table = Path(input_path).resolve().parent / "STOCHPERT.TBL"
+        if _table.is_file():
+            lines.append(f"stochpert_tbl = {_toml_string(str(_table))}")
     if resolved_soil_layers != 4:
         lines.append(f"num_soil_layers = {resolved_soil_layers}")
     if sf_surface_mosaic == 1:
@@ -7466,7 +7507,8 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
                        ("nwp_diagnostics", nwp_diagnostics),
                        ("gsd_diagnostics", gsd_diagnostics if gsd_diagnostics else None),
                        ("solar_diagnostics", solar_diagnostics if solar_diagnostics else None),
-                       ("cycling", cycling)):
+                       ("cycling", cycling),
+                       *madwrf_values.items()):
         if value is not None:
             lines.append(f"{key} = {_fmt(value)}")
     for key, default in (("output_diagnostics", 0), ("diag_int", 15), ("wind_int", 5)):
@@ -7568,7 +7610,7 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
             lines.append(f"moist = {_fmt(moist_column[n])}")
         for key, column in stochastic_flags.items():
             if column[n] != column[0]:
-                lines.append(f"{key} = {column[n]}")
+                lines.append(f"{key} = {_fmt(column[n])}")
         for _fire_key, _fire_column in fire_columns.items():
             if _fire_column[n] != _fire_column[0]:
                 lines.append(f"{_fire_key} = {_fmt(_fire_column[n])}")

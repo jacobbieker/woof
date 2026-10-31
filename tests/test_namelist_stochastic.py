@@ -76,7 +76,7 @@ def test_an_active_supported_stochastic_namelist_reaches_the_provider(
     assert provider.enabled_for_experiment(configured)
 
 
-@pytest.mark.parametrize("selector", ["rand_perturb", "multi_perturb", "perturb_bdy", "pert_mynn", "pert_thom"])
+@pytest.mark.parametrize("selector", ["rand_perturb", "perturb_bdy", "pert_mynn", "pert_noah"])
 def test_the_unsupported_selectors_give_the_same_reason_and_name_their_key(tmp_path, selector):
     """They used to read "consumer is not implemented": no breakage, no remedy."""
     value = ".true." if selector.startswith("pert_") else "1, 1"

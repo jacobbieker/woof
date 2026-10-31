@@ -644,6 +644,10 @@ def _run_bound_slot(call: Any) -> None:
                        l_acrain=p["l_acrain"], bucket=call.options["config_bucket_rainnc"])
     core.launch_conversion("from", *conversion, device_math_source=maths)
     aerosol_from_mpas(p["model"], fields, p["tendencies"])
+    # WOOF-only WRF-Solar EPS (wrfsolar_eps_v842, config_pert_thom): WRF's pair around the THOMPSONAERO
+    # mp_gt_driver call (module_microphysics_driver.F:1120-1213) on the driver's fields.
+    eps_pair = p.get("eps_pair")
+    eps_saved = None if eps_pair is None else eps_pair[0](fields)
     for _ in range(p["n_microp"]):
         launch_driver(fields, p["surface"], p["tables"], dt=p["dt_microp"],
                       device_math_source=maths,
@@ -654,6 +658,8 @@ def _run_bound_slot(call: Any) -> None:
         # A trigger look's reflectivity (mpasphys/nest_look_v842): scratch only off a diagnostics step.
         p["nest_look"].form(fields, p["diagnostics"], diagnostics_formed=bool(call.flags.diagnostics),
                             launch_radar=core.launch_radar, device_math_source=maths)
+    if eps_pair is not None:
+        eps_pair[1](fields, eps_saved)
     if call.flags.diagnostics:
         nz, columns = fields["qv"].shape
         relhum = p["diagnostics"]["relhum"]

@@ -64,6 +64,11 @@ def test_the_selector_is_appended_off_and_keyword_only():
     fields = RunConfig.__dataclass_fields__
     assert fields["shcu_physics"].default == 0 and fields["shcu_physics"].kw_only
     names = [f.name for f in dataclasses.fields(RunConfig)]
+    # last: WRF-Solar EPS's and MAD-WRF's keys
+    from woof.config import MADWRF_RUN_DEFAULTS, MULTI_PERTURB_RUN_DEFAULTS
+    later = [*MULTI_PERTURB_RUN_DEFAULTS, *MADWRF_RUN_DEFAULTS]
+    assert names[-len(later):] == later
+    names = names[:-len(later)]
     # appended after them: the output-only WRF-Solar solar_diagnostics, the
     # radtran diagnostic's radtran_aerosol, WRF's use_theta_m and the
     # output-only do_avgflx_em

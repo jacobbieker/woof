@@ -5191,6 +5191,11 @@ def _step_epilogue(state: DomainState, cfg: RunConfig,
         # and documented in PROVENANCE.md entry D1 (self-consistent: the
         # capture dt and apply window are the same internal step; the
         # native dt=60 path restores WRF cadence with no code change).
+        if getattr(cfg, "madwrf_opt", 0) == 2:
+            # MAD-WRF's hydrometeor nudge (solve_em.F:3646-3662), in the
+            # scalar tile loop ahead of moist_physics_prep.
+            from woof.core.madwrf import step_nudge
+            step_nudge(state, cfg)
         # use_theta_m = 1: moist_physics_prep_em/finish_em's theta_m branch
         # around the scheme; off, the window is a no-op.
         with theta_m_branch.microphysics_window(state, cfg):
@@ -5251,6 +5256,9 @@ def _wrf_step_epilogue(state: DomainState, cfg: RunConfig,
         lightning_refl_due = (cfg.lightning_option in (1, 2)
                               and lightning_due(state, cfg))
     if cfg.mp_physics != 0:
+        if getattr(cfg, "madwrf_opt", 0) == 2:
+            from woof.core.madwrf import step_nudge
+            step_nudge(state, cfg)
         with theta_m_branch.microphysics_window(state, cfg):
             microphysics_result = apply_microphysics(
                 state, cfg, cfg.dt,

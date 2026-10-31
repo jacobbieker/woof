@@ -96,8 +96,10 @@ def test_offline_child_capabilities_are_warning_only_and_exact(capsys):
     # 4, 24 and 106.  Ferrier-Aligo (5), FAST_SBM (30) and TEMPO (900) are
     # refused by name in their registry rows (rime factor, bin spectra,
     # graupel volume), so none of them is a same-scheme offline parent.
+    # MAD-WRF's passive 96 is read same-scheme: its moist inventory is the
+    # parent's QVAPOR/QCLOUD/QICE/QSNOW and nothing else.
     assert capability["same_scheme_mp_physics"] == [
-        0, 1, 2, 3, 4, 6, 8, 9, 10, 16, 18, 24, 28, 50, 106]
+        0, 1, 2, 3, 4, 6, 8, 9, 10, 16, 18, 24, 28, 50, 96, 106]
     assert capability["cross_scheme_transitions"]["mp_physics"] == list(_INTAKE_EDGES)
     assert capability["cross_scheme_transitions"]["order"] == (
         "diagnose-parent-then-spatially-interpolate")

@@ -128,6 +128,8 @@ from woof.config import (CORRECT_MODE_RESTART_BREAK_NOTICE,
                           MIX_ISOTROPIC_RESTART_BREAK_NOTICE,
                           TERRAIN_CLOCK_PINNED_RESTART_NOTICE,
                           TERRAIN_CLOCK_RESTART_BREAK_NOTICE,
+                          MADWRF_RUN_DEFAULTS,
+                          MULTI_PERTURB_RUN_DEFAULTS,
                           WINDFARM_RUN_DEFAULTS,
                           radiation_scheme_ids)
 from woof.supervisor import _fsync_directory, fsync_file, unique_temp_path
@@ -1366,6 +1368,10 @@ DRIVER_REBUILT_ATTRS = frozenset({
     # model step).  Every array Deng carries lives in ``fields`` under its
     # WRF Registry name and rides the serialized physics inventory.
     "shallow_cumulus", "shallow_tendencies",
+    # WRF-Solar EPS: the pattern provider is rebuilt from the RunConfig
+    # (SP_AMP and ALPH are recomputed as INITIALIZE_STOCH recomputes them
+    # on a restart); the pert3d fields and spectra live in ``fields``.
+    "multi_perturb",
     "nssl2_binding",
     # Dynamics forcing is integrator-owned: the restart-carried state pair
     # on ARW, or buffers refilled before phase 1 on MPAS. Column spacing is
@@ -2955,6 +2961,12 @@ def _drop_default_off_run_keys(values: dict) -> None:
         values.pop("use_theta_m", None)
     if not values.get("do_avgflx_em", 0):
         values.pop("do_avgflx_em", None)
+    # WRF-Solar EPS (multi_perturb and its pert_* keys): each at its WRF
+    # Registry default is every earlier header.  Moved, they are physics
+    # and stay in the digest.
+    for key, default in {**MULTI_PERTURB_RUN_DEFAULTS, **MADWRF_RUN_DEFAULTS}.items():
+        if key in values and values[key] == default:
+            values.pop(key, None)
     if not values.get("scalar_pblmix", 0):
         values.pop("scalar_pblmix", None)
     # MYNN-EDMF's split mixing keys (lane rrfs288-gap1): off mixes nothing
@@ -5100,6 +5112,12 @@ def _require_config_match(stored_config: dict, cfg, path) -> None:
             # Absent is the default (_drop_inert_terrain_drag); a moved
             # topo_wind/gwd_opt still refuses below.
             default = TERRAIN_DRAG_RUN_DEFAULTS[key]
+            stored = default if stored is absent else stored
+            live = default if live is absent else live
+        if key in MULTI_PERTURB_RUN_DEFAULTS or key in MADWRF_RUN_DEFAULTS:
+            # Absent is the Registry default (_drop_default_off_run_keys);
+            # a moved WRF-Solar EPS or MAD-WRF key still refuses below.
+            default = {**MULTI_PERTURB_RUN_DEFAULTS, **MADWRF_RUN_DEFAULTS}[key]
             stored = default if stored is absent else stored
             live = default if live is absent else live
         if key in SHALLOW_CUMULUS_RUN_DEFAULTS:

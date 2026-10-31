@@ -88,6 +88,39 @@ compiled WRF v4.7.1's words on all 1,737,808 graded words, and the glue, couplin
 merges are held word for word (`components/hex/tests/test_mpas_shcu_deng_v842.py`).
 Without the keys nothing runs and the receipt is unchanged.
 
+WOOF-only WRF-Solar EPS (`woof.hex.mpasphys.wrfsolar_eps_v842`; MPAS v8.4.2 perturbs
+no physics input). The WOOF group `&wrfsolar_eps` carries WRF's `&stoch` multi_perturb
+keys with `config_` names (`config_multi_perturb`, `config_pert_farms`/`_deng`/`_thom`/
+`_cld3` and their factors, `config_spdt`, `config_num_pert_3d`, `config_nens`,
+`config_stochpert_tbl`) plus `config_multi_perturb_degree` (the harmonic truncation,
+default 48); `--physics` overrides land there. Each switch applies WRF's own driver
+statements (`woof.core.wrfsolar_eps`, every word held to compiled WRF v4.7.1) at its
+MPAS seat: the FARMS service's copies of `sfc_albedo`, `qv/qc/qs_p` (and its zero
+aerosol, which stays zero); the Deng service's copies of `qv/qc_p` and `w_p` (Deng reads
+T, not theta); the `mp_thompson`/`mp_thompson_aerosols` driver's `qv, qc, qi, qs, ni`
+around its substeps, so the pair's residue reaches the state as in WRF; and the
+`cld_fraction_thompson` cloudiness copies of `t` and `qv`. Each switch is refused when
+its seat does not run (service off, another scheme, a slot off the GPU). The
+perturbation fields are not WRF's: WRF's generator is a doubly periodic FFT on the
+(i, j) grid; here each STOCHPERT.TBL field is a stationary AR(1) spherical-harmonic
+process (`woof.hex.stochastic.SphericalPattern`) with the table's decorrelation time,
+scaled by its standard deviation and clipped at its cutoff, constant in height (the
+table's random-phase vertical structure belongs to WRF's FFT), and lengths below the
+truncation's resolution (about 2*pi*R/degree) are smoothed to it. They move on WRF's
+cadence -- the first step and every `max(nint(spdt*60/dt), 1)` steps -- after the
+physics that precede the dynamics, travel in the physics restart state, and need a
+global mesh (the harmonic basis refuses a regional mesh). The RRFS fork route refuses
+the group (`components/hex/tests/test_mpas_wrfsolar_eps_v842.py`). Without it nothing
+runs and the receipt is unchanged.
+
+MAD-WRF (WRF `madwrf_opt`, `mp_physics = 96`, `madwrf_cldinit`) is refused by name on
+both MPAS routes: woof's MPAS initialization (the Rust init engine) writes no qc, qi or
+qs (`woof/hex/hrrr_intermediate.py`), so MAD-WRF's passively advected hydrometeors and
+its TR_QC/TR_QI/TR_QS tracers would start from zero and the nudge would relax toward
+zero, and its cloud initialization is a real.exe step that reads metgrid's
+CLDMASK/BRTEMP/CLDTOPZ/CLDBASEZ, which no MPAS init door carries. MAD-WRF runs on WRF
+domains (`woof/core/madwrf.py`).
+
 A selection of Noah-MP v5.0 runs only with `--licence-opt-in ucar-noahmp`
 (`woof.hex.licence_gate`); UGWP and the fork's NOAA GSL physics are not gated
 (owner ruling 2026-10-14: US Government code). The library resolvers are not

@@ -276,6 +276,8 @@ def driver_clouds(state, cfg, atmosphere, fields, *, cldfra_out, qc_out, qi_out)
             cols(qv), cols(qc), cols(qi), cols(qs),
             cols(grid(atmosphere["dz"])), cols(p), cols(t),
             fields["xland"].reshape(-1), cldfra3_gridkm(cfg.dx, cfg.dy),
+            perturbation=_rrtmgp._cld3_perturbation(
+                cfg, fields, lambda a: cols(grid(a)), atmosphere["qv"].shape[0]),
             check=not _stream_is_capturing(cp))
         cf[...] = c3.T
         qc[...] = q3c.T
