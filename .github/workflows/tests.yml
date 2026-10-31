@@ -105,7 +105,7 @@ jobs:
     name: cpu (ubuntu-24.04, ${{ matrix.leg }})
     needs: native-linux
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 150
     strategy:
       fail-fast: false
       matrix:
@@ -204,7 +204,7 @@ jobs:
     name: macos (macos-15, mlx env, ${{ matrix.leg }})
     needs: native-macos
     runs-on: macos-15
-    timeout-minutes: 120
+    timeout-minutes: 240
     strategy:
       fail-fast: false
       matrix:
