@@ -424,6 +424,11 @@ def test_every_rawmodule_constructor_in_the_tree_is_named():
         # The folded hex model compiles through its own KernelCache and compile contract
         # (woof/hex/cuda_backend), held by its own tier-1 tests; this audit is the regional engine's.
             continue
+        if path.relative_to(REPO).as_posix().startswith("woof/backend/facade/"):
+            # The Metal backend's CuPy facade implements RawKernel and
+            # ElementwiseKernel over its own RawModule; the source it compiles
+            # is always a caller's, and that caller's site is counted here.
+            continue
         text = path.read_text(encoding="utf-8")
         if "RawModule" not in text and "RawKernel" not in text:
             continue

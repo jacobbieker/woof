@@ -430,6 +430,7 @@ _NOT_FDLIBM = {
     "chem_optics.cu": ("chem_log10f",),
     "glibc_trig_flt32.cuh": ("glibc_atanf",),    # CORE-MATH s_atanf.c, a8066a5, MIT
     "sfire_libm.cuh": ("sfire_tanhf",),          # CORE-MATH s_tanhf.c, b1ecd83, MIT (NOTICE)
+    "corem_log10f.cuh": ("cm_log10f", "cm_log10f_special"),  # CORE-MATH log10f.c, bc385c2, MIT
     "p3.cu": ("p3_log10",),                      # (float)log10((double)x)
     "thompson_aerosol_warm.cu": ("thompson_aa_log10f_cr",),
     "ruc.cu": ("ruc_log10f_rn", "ruc_expm1f_glibc"),

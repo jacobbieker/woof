@@ -594,7 +594,11 @@ def test_the_streaming_inventory_carries_what_restart_deliberately_does_not():
     # Strict acoustic mass carriers survive the gap between steps too.
     # Exact restart now retains these too; tracker windows remain stream-only.
     acoustic_slots = {"wrf_exact_muts", "wrf_exact_mu_halo"}
-    assert added == {f"scratch/{s}" for s in uh_diag.TRACKER_WINDOW_SLOTS}
+    # The WRF-Solar diagnostics' output stack too: GHI_ACCUM sums across
+    # steps, so a sweep carries it, and WRF gives it no restart I/O.
+    from woof.core import solar_diagnostics
+    assert added == ({f"scratch/{s}" for s in uh_diag.TRACKER_WINDOW_SLOTS}
+                     | {f"scratch/{solar_diagnostics.OUT_SLOT}"})
     for slot in acoustic_slots:
         assert restart.classify_scratch_slot(slot) == "carry"
         assert slot not in restart.SERIALIZED_SCRATCH_SLOTS

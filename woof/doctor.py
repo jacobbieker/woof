@@ -4870,7 +4870,7 @@ _PYARROW_REMEDY_NOTE = (
     "\n  #   pip install pyarrow")
 #: How many files the cache census walks before it stops and says so.
 #: The cache holds one Parquet file per year, so this is never reached by
-#: an honest cache; it bounds the walk on a mis-pointed override.
+#: a correct cache; it bounds the walk on a mis-pointed override.
 _DYNAMICAL_CACHE_WALK_LIMIT = 10_000
 
 

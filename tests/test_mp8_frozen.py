@@ -3245,6 +3245,17 @@ def test_loader_hook_is_inert_for_every_frozen_module(r1):
                             'glibc_flt64.cuh', 'gsd_hail_bins.cuh'),
         'gsd_helicity': ('gsd_helicity_helpers.cuh',),
     })
+    # Later ports, each with its composed source pinned in
+    # kernel_source_pins.json: WRF-Solar FARMS and Deng shallow cumulus, the
+    # woof.radtran DISORT solver, and the partial-depth nest's top coupling
+    # (acoustic.cu composed with its own unit).
+    _EXPECTED_HEADERS.update({
+        'farms': ('glibc_flt32.cuh', 'glibc_trig_flt32.cuh',
+                  'log10_flt32.cuh', 'sinhf_flt32.cuh'),
+        'shcu_deng': ('glibc_flt32.cuh',),
+        'radtran_disort': ('glibc_flt64.cuh',),
+        'nest_top': ('glibc_trig_flt32.cuh', 'acoustic.cu'),
+    })
 
     # The header grant stays a CLOSED literal: the loader's own allow-list
     # must equal the historical mapping plus the selected literal grant,

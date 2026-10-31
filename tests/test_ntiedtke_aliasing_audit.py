@@ -31,6 +31,7 @@ auditing some other file cannot be mistaken for agreement.
 from __future__ import annotations
 
 import hashlib
+import stat
 import os
 import subprocess
 import sys
@@ -62,7 +63,13 @@ def _source():
             continue
         p = Path(cand)
         try:
-            if not p.is_file():
+            # stat, not is_file(): Python 3.14's is_file swallows every
+            # OSError, and an unreachable share must be named, not skipped
+            # past as a missing file.
+            try:
+                if not stat.S_ISREG(p.stat().st_mode):
+                    continue
+            except (FileNotFoundError, NotADirectoryError):
                 continue
             raw = p.read_bytes()
         except OSError as error:

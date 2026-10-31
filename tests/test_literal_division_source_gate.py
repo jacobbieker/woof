@@ -51,6 +51,14 @@ def test_terrain_drag_divisions_use_the_direct_non_ftz_production_route():
     assert "terrain_drag.cu" in FTZ_FALSE_SOURCES
 
 
+def test_sms3dtke_and_deng_exceptions_compile_without_ftz():
+    """Their source exceptions hold only while their routes keep --ftz=false."""
+    from woof.core import kernels, shcu_deng
+    assert "sms3dtke" in kernels._NO_FTZ_MODULES
+    assert "--ftz=false" in shcu_deng.DENG_MODULE_OPTIONS
+    assert {"sms3dtke.cu", "shcu_deng.cu"} <= FTZ_FALSE_SOURCES
+
+
 def test_cumulus_and_lightning_exceptions_compile_without_ftz():
     """2.9.0 round 2: g3.cu, nsas.cu and lightning.cu are exempt only because
     their loaders never append -ftz=true; if a route changes, the exception

@@ -4495,6 +4495,8 @@ LW_EMPTY_SLOTS = {
     "secdiff": "secdiff writes every column and band",
     "odcld": "prol writes both cloudy and clear branches",
     "efclfrac": "prol writes both cloudy and clear branches",
+    "part": ("rlw_rtrn_band_rows writes all four quantity planes for every "
+             "column, interface and band"),
     "totuflux": "accum writes every interface",
     "totdflux": "accum writes every interface",
     "totuclfl": "accum writes every interface",

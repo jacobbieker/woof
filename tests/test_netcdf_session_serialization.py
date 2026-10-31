@@ -143,4 +143,8 @@ def test_the_writer_still_serializes_its_own_session(module):
 
     mod = importlib.import_module(module)
     text = pathlib.Path(mod.__file__).read_text(encoding="utf-8")
-    assert "with _NETCDF4_IO_LOCK:" in text
+    # Plain, or conditional on the session (2fe483a34: a netCDF4-engine
+    # tape holds it for the whole session, a Rust-engine tape only for its
+    # validating reopen).
+    assert ("with _NETCDF4_IO_LOCK:" in text
+            or "with (_NETCDF4_IO_LOCK if " in text)

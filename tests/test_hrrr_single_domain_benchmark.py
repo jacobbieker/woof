@@ -2698,7 +2698,7 @@ def test_the_aerosol_climatology_is_decoded_once_per_process(
 
     calls = []
 
-    def decode(path, *, backend="rust"):
+    def decode(path, engine):
         calls.append(str(path))
         return wif.WifClimatology(
             qnwfa=np.zeros((12, 1, 2, 2), np.float32),
@@ -2707,7 +2707,7 @@ def test_the_aerosol_climatology_is_decoded_once_per_process(
             latitude=np.array([0.0, 1.0]), longitude=np.array([0.0, 1.0]),
             source_path=str(path))
 
-    monkeypatch.setattr(wif, "_load_wif_climatology_uncached", decode)
+    monkeypatch.setattr(wif, "_decode_wif_climatology", decode)
     monkeypatch.setattr(wif, "_DECODED", {})
     dataset = tmp_path / "climatology.dat"
     dataset.write_bytes(b"one")

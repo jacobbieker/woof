@@ -544,6 +544,10 @@ binary32 log10f as glibc 2.43 carries it (sysdeps/ieee754/flt-32/
 e_log10f.c: src/binary32/log10/log10f.c, bc385c2), Copyright (c)
 2022-2023 Alexei Sibidanov, under the same MIT permission. That file
 carries the copyright line and the permission notice beside the code.
+
+woof/core/kernels/corem_log10f.cuh (cm_log10f, cm_log10f_special) is the
+same CORE-MATH log10f under its own names, with the same copyright line
+and permission notice beside the code.
 ubm_atanf there is a call to glibc_atanf above, not a transcription.
 
 The noah_log10 and noah_log10_special functions in

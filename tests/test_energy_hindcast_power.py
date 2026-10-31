@@ -323,7 +323,7 @@ def test_rews_ignores_nan_outside_the_rotor():
     rews, used = PF.rotor_equivalent_wind_speed(
         speed, heights, np.array([90.0]), np.array([120.0]))
     assert used.all() and rews[0, 0] == pytest.approx(8.0)
-    speed[0, 0, 2] = np.nan        # inside the disc: NaN is honest
+    speed[0, 0, 2] = np.nan        # inside the disc: NaN is the right answer
     rews, _ = PF.rotor_equivalent_wind_speed(
         speed, heights, np.array([90.0]), np.array([120.0]))
     assert np.isnan(rews[0, 0])

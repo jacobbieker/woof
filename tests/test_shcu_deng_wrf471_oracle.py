@@ -20,7 +20,7 @@ The breakage each gate prevents, named:
   route from WRF's arithmetic, on every output word of every step.
 * ``test_cuda_libm_is_what_the_glibc_words_prevent`` -- the libm pin: the
   same unit on the platform's own expf/logf/powf leaves the oracle, so the
-  gate above can fail and the glibc transcription is load-bearing.
+  gate above can fail and the glibc transcription is what keeps it passing.
 * the CPU gates pin the fixture's identity, its coverage, the workspace
   slot table and the oracle receipts, so the device gate cannot pass on a
   shrunken or regenerated set.

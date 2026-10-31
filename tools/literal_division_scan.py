@@ -70,6 +70,10 @@ FTZ_FALSE_SOURCES = frozenset({
     # hydro.reservoirs._module composes this header and uses ieee_module
     # exclusively; test_nextgen_reservoir_divisions_use_non_ftz pins the route.
     "nextgen_reservoirs.cuh",
+    # km_opt = 5 compiles through kernels.load_module with --ftz=false
+    # (kernels._NO_FTZ_MODULES); WRF-Solar's Deng shallow cumulus through
+    # direct NVRTC with shcu_deng.DENG_MODULE_OPTIONS (--ftz=false).
+    "sms3dtke.cu", "shcu_deng.cu",
 })
 
 _NUMBER = r"(?:\d+\.\d*|\.\d+|\d+)(?:[eE][-+]?\d+)?"

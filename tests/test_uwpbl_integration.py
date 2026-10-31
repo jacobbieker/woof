@@ -152,5 +152,7 @@ def test_default_off_allocates_nothing_and_reaches_no_seam():
                 guarded |= "UWPBL_STATE_FULL" in body and \
                     "UWPBL_HELD_3D" in body
     assert guarded
-    assert source.count('"uw_cldfra" in self.fields') == 1
+    # The radiation seam, and FARMS's between-call refresh of the same
+    # field (swint_opt = 2, db1e35abd): both behind its presence.
+    assert source.count('"uw_cldfra" in self.fields') == 2
     assert source.count("UWPBL_HELD_3D") == 2  # import + guarded allocation
