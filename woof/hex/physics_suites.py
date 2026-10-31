@@ -530,6 +530,27 @@ def resolve_physics(
             # An engine setting: typed and bounded by the registry's own
             # parameter row when it has one; otherwise handed to the engine,
             # whose plan refuses a key that is not a RunConfig field by name.
+            if key == "km_opt" and str(value).strip() == "5":
+                # SMS-3DTKE is WRF-only.  MPAS-A v8.4.2 has no counterpart
+                # (config_les_model offers 3d_smagorinsky and
+                # prognostic_1.5_order), and the closure does not map onto
+                # the MPAS mesh as a WOOF service: every one of its routines
+                # is written on WRF's C grid -- the deformation tensor and
+                # terrain slopes zx/zy of cal_deform_and_div, the
+                # eta-level tridiagonal solves of
+                # vertical_diffusion_implicit, and the u/v-face gammas --
+                # and it replaces the PBL scheme the MPAS physics seam
+                # calls, so there is no column service to hand it.
+                refusals.append(OptionRefusal(
+                    key, value,
+                    "km_opt=5 (SMS-3DTKE) is a WRF ARW closure: MPAS-A "
+                    "v8.4.2 has no SMS-3DTKE option, and the scheme is built "
+                    "on WRF's C-grid deformation, eta-level implicit "
+                    "diffusion and u/v-face momentum gammas, which the MPAS "
+                    "Voronoi mesh does not carry",
+                    "an MPAS PBL scheme (config_pbl_scheme) or a WRF domain "
+                    "for km_opt=5"))
+                continue
             try:
                 # THE BREAKAGE THIS REFUSES: an ARW dycore setting (km_opt,
                 # diff_6th_opt, epssm) resolved, moved the run onto the

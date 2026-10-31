@@ -991,6 +991,16 @@ REBUILT_SCRATCH_PREFIXES = (
     # Every FAST_SBM workspace is rewritten inside a call. Its spectral state is explicit.
     "fsbm_",
     "rk_", "adv_", "smag_", "diff_", "diff6_", "acoustic_", "openbc_",
+    # km_opt=5 (SMS-3DTKE, woof/core/dycore.py launch_wrf_sms3dtke): WRF's
+    # operands (th_phy, rho, rdzw, rdz, zx, zy, p8w/t8w planes), NLFLUX,
+    # ELMIN, DLK, XKMV_MESO, L_DISS, the tridiagonal workspace and the
+    # no-surface-layer zero planes.  Every one is rewritten at the top of
+    # every step before it is read (Registry gives NLFLUX, DLK, L_DISS,
+    # ELMIN and XKMV_MESO no restart flag); the words a step never writes
+    # (NLFLUX's top level and the columns outside WRF's bounds) are the
+    # allocation's zeros on both sides of a resume.  GAMU/GAMV, which DO
+    # carry across steps, are DomainState attributes (SERIALIZED).
+    "sms_",
     "moist_", "pd_", "morr_", "wsm3_", "wsm6_", "wsm6r_", "wdm6_", "mpcol_", "refl_", "physics_", "lbc_",
     "integration_health_", "nest_",
     # The partial-depth nest's mass-budget residual (partial_nest_run.py),

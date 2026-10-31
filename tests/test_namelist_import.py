@@ -2598,6 +2598,42 @@ def test_a_km_opt_2_nest_child_imports_and_loads(tmp_path, km_opt, pbl):
     assert exp.domains[1].run.bl_pbl_physics == 0
 
 
+@pytest.mark.parametrize(
+    "km_opt,pbl",
+    [(" km_opt = 4, 5,", " bl_pbl_physics = 11, 0,"),
+     (" km_opt = 5, 5,", " bl_pbl_physics = 0, 0,")],
+    ids=["pbl-parent", "sms-parent"])
+def test_a_km_opt_5_namelist_imports_and_loads(tmp_path, km_opt, pbl):
+    """km_opt = 5 (SMS-3DTKE) imports per domain and loads; its TKE and
+    GAMU/GAMV carry no nest flag in WRF, so a child cold-starts them."""
+    toml_text, report = _import_with(
+        tmp_path,
+        inp_filter=lambda inp: (
+            inp.replace(" km_opt = 4, 4,", km_opt)
+               .replace(" bl_pbl_physics = 11, 11,", pbl)),
+        extra_dynamics=" tke_adv_opt = 1, 1,\n")
+    exp = _load(tmp_path, toml_text)
+    expected = [int(v) for v in km_opt.split("=")[1].split(",") if v.strip()]
+    assert [dc.run.km_opt for dc in exp.domains] == expected
+    assert exp.domains[-1].run.bl_pbl_physics == 0
+    # tke_adv_opt = 1 is consumed (pinned), not dropped as inert.
+    assert ("dynamics", "tke_adv_opt") not in {
+        (d.section, d.key) for d in report.dropped}
+
+
+def test_a_km_opt_5_domain_with_a_pbl_scheme_is_refused(tmp_path):
+    """WRF v4.7.1 refuses km_opt = 5 with bl_pbl_physics != 0
+    (module_check_a_mundo.F:356-368), and so does the import."""
+    from woof.config import ConfigurationRefused
+    with pytest.raises(ConfigurationRefused,
+                       match="km_opt=5 .*bl_pbl_physics=0"):
+        toml_text, _ = _import_with(
+            tmp_path,
+            inp_filter=lambda inp: inp.replace(" km_opt = 4, 4,",
+                                               " km_opt = 5, 5,"))
+        _load(tmp_path, toml_text)
+
+
 def test_turbulence_row_reaches_every_per_domain_run_config(tmp_path):
     """Booby-trap reach test: a NON-UNIFORM turbulence row must land per
     domain, which is the whole point of `a PBL parent may carry a PBL-off

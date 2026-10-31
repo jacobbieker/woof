@@ -55,6 +55,12 @@ STATE_SERIALIZED_ATTRS = (
     # Absent (None) under every other km_opt, so non-LES inventories are
     # unchanged.
     "tke", "tke_edmf",
+    # km_opt=5 (SMS-3DTKE) nonlocal momentum gammas: Registry.EM_COMMON:
+    # 317-318 ``state real gamu/gamv ij dyn_em 1 - r``.  nonlocal_flux
+    # writes them only on convective columns, so every other column carries
+    # the previous step's word across the step boundary, and WRF restarts
+    # them.  Absent under every other km_opt.
+    "gamu", "gamv",
     "qi", "qs", "qg", "nc", "nr", "ni", "ns", "ng",
     "qh", "qndrop", "qnr", "qni", "qns", "qng", "qnh", "qnn",
     "qvolg", "qvolh",

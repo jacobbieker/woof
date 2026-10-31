@@ -5037,6 +5037,18 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
                     "km_opt=4 parent "
                     "(docs/superpowers/receipts/les/"
                     "nested-les-km2-2026-08-02.md).")
+        if dc.run.km_opt == 5:
+            warn_once(
+                f"nested-km5-{dc.run.grid_id}-{parent.grid_id}",
+                f"domain grid_id = {dc.run.grid_id} runs km_opt=5 "
+                f"(SMS-3DTKE) as a nest child of grid_id = "
+                f"{parent.grid_id}: it cold-starts its own TKE and its "
+                "nonlocal momentum gammas GAMU/GAMV, as in WRF, which "
+                "neither interpolates them to a nest nor feeds them back. "
+                "Implemented, not yet verified against a reference run.",
+                why="Registry.EM_COMMON:312 and :317-318 declare tke, gamu "
+                    "and gamv with no i and no f flag; "
+                    "woof/core/nest_fields.py carries no row for them.")
 
     # SASE on a domain tree, uniform or per domain.  Each SASE domain runs
     # its own closure on its own state: the prognostic subgrid energy

@@ -1416,13 +1416,13 @@ def _consume_unrun_dynamics_controls(dyn, inp: dict, max_dom: int,
              "exist with tracer_opt = 0")
     tke = dyn.entries.get("tke_mix6_off")
     if tke is not None:
-        if all(value != 2 for value in km_opt_col[:max_dom]):
+        if all(value not in (2, 5) for value in km_opt_col[:max_dom]):
             drop("dynamics", "tke_mix6_off", dyn.take("tke_mix6_off"),
                  "filter switch of the prognostic TKE array, which exists "
-                 "only under km_opt = 2")
+                 "only under km_opt = 2 or 5")
         elif all(value is False for value in tke[:max_dom]):
             fix("dynamics", "tke_mix6_off", dyn.take("tke_mix6_off"), False,
-                "the sixth-order filter acts on TKE under km_opt = 2 "
+                "the sixth-order filter acts on TKE under km_opt = 2 and 5 "
                 "(woof/core/dycore.py diff6 rows)")
     scalar = dyn.entries.get("scalar_mix6_off")
     if scalar is not None and all(value is False for value in scalar[:max_dom]):
@@ -6788,8 +6788,13 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
     #   so 1 is pinned and 0/2 are refused rather than dropped;
     # * with no km_opt=2 domain there is no TKE carrier to transport, so
     #   WRF would not consume the key either and it is dropped as inert.
+    #
+    # km_opt = 5's TKE takes the same positive-definite advection
+    # (advect_scalar_pd in rk_scalar_tend) without the source fold, which
+    # WRF keys on km_opt = 2 alone (solve_em.F:2104-2106); 1 is pinned for
+    # it too.
     tke_adv_opt_raw = dyn.take("tke_adv_opt")
-    if 2 in km_opt_col:
+    if 2 in km_opt_col or 5 in km_opt_col:
         if tke_adv_opt_raw is not None:
             column = list(tke_adv_opt_raw[:max_dom])
             column += [column[-1]] * (max_dom - len(column))
@@ -6799,15 +6804,16 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
                     "dynamics", "tke_adv_opt", tke_adv_opt_raw,
                     "woof implements tke_adv_opt = 1 only (the "
                     "positive-definite RK3 TKE transport of WRF "
-                    "solve_em.F:2100-2119, which km_opt = 2 makes live).")
+                    "solve_em.F:2100-2119, which km_opt = 2 and 5 make "
+                    "live).")
             fix("dynamics", "tke_adv_opt", tke_adv_opt_raw, 1,
-                "the km_opt=2 TKE carrier takes WRF's positive-definite "
+                "the km_opt=2/5 TKE carrier takes WRF's positive-definite "
                 "RK3 transport, the only one woof implements")
     else:
         drop("dynamics", "tke_adv_opt", tke_adv_opt_raw,
              "inert: no domain selects a prognostic-TKE mixing scheme "
-             "(km_opt = 2), so there is no TKE carrier to transport and "
-             "WRF would not consume it either")
+             "(km_opt = 2 or 5), so there is no TKE carrier to transport "
+             "and WRF would not consume it either")
     base_temp = float(dyn.scalar("base_temp", 290.0))
     damp_opt = int(dyn.scalar("damp_opt", 3))
     # THE DAMPING AND CONSTANT-K ROW, per domain.  Every key here is

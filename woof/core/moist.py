@@ -1352,6 +1352,12 @@ def advance_tke_stage(state: DomainState, cfg: RunConfig,
     q = state.tke
     q0 = state.tke0
     pd = final and not (cfg.open_x or cfg.open_y)
+    # WRF folds the TKE sources ahead of the PD limiter (rk_update_scalar_pd)
+    # for km_opt = 2 only (solve_em.F:2104-2106).  km_opt = 5 takes the
+    # positive-definite advection (advect_scalar_pd in rk_scalar_tend) on
+    # the unfolded tke_1, and its sources enter rk_update_scalar with the
+    # advective tendency like any non-PD pass.
+    fold_sources = cfg.km_opt != 5
     tend[...] = 0
     if pd:
         bufs = (state.scratch((nz, ny, nx + 1), "pd_fxl"),
@@ -1362,7 +1368,7 @@ def advance_tke_stage(state: DomainState, cfg: RunConfig,
                 state.scratch((nz + 1, ny, nx), "pd_fzc"))
         q0_eff = _pd_fold_sources(
             state, cfg, "tke", q0, chm0, dt_eff, None,
-            fixed_tendency=fixed_tendency)
+            fixed_tendency=fixed_tendency if fold_sources else None)
         launch_pd_fluxes(q, q0_eff, ru, rv, ww, mu, state,
                          cfg.dx, cfg.dy, dt_eff, *bufs,
                          msft=state.msft, has_msf=state.has_msf,
@@ -1380,6 +1386,8 @@ def advance_tke_stage(state: DomainState, cfg: RunConfig,
         # WRF's PD fold moved the sources into q0_eff, so ``tend`` here is
         # the pure advective flux divergence -- the budget's transport term.
         _tke_budget_transport(state, cfg, tend, final=final)
+        if not fold_sources and fixed_tendency is not None:
+            tend += fixed_tendency
         q[...] = (chm0 * q0_eff + dt_eff * tend) / chm
     else:
         launch_flux_div_scalar(q, ru, rv, ww, tend, state,
