@@ -30,7 +30,9 @@
     "partial_nest": "0d1d0892139d67623e8cb055de55f83855fa7f02739c81a26d6577eb5f2bd33a",
     "partial_nest_d4": "6afe495a2f6399cbf4c8f34955de495274a2285b3bfdf5ead828a9de1595c6e2",
     "wrfsolar_eps": "c312b1fba916461bac63332e911d1e2d9968924adf5466c562649a790dfda58d",
-    "madwrf": "cefa3f49219aae1d562848db1e1cbad6362fb3478666e3e6c3b00c5f4cb99650"
+    "madwrf": "cefa3f49219aae1d562848db1e1cbad6362fb3478666e3e6c3b00c5f4cb99650",
+    "theta_m_cumulus": "580dfc42c040cb87474f33a32a15427681e92feac2c1bf7283ed9418d923f7d3",
+    "smag2d_theta_m": "85e469baf5494063679403def8bc1256932ebe972cf4ebb53fd1b44bbe2b9f5a"
   },
   "headers": {
     "gsd_hail_bins.cuh": "55646c988bc37b59911385010843d1f48b1644e659390876f3f0581c923c9bed",
@@ -43,7 +45,8 @@
     "hailcast_wrf.cuh": "4cf483057a46b81514c2df4c0c0bc6d15a93a7a163b3a6cc308a825a226e9e73",
     "sinhf_flt32.cuh": "cff7b61810ad14c46916c9dbd864f26565ccab1c932c1780c856e307aa831827",
     "acoustic.cu": "92d0a3e4bf0312e16ebcc4714a40729e0f9c67cceb794b2ccf07bbd85c51f745",
-    "corem_log10f.cuh": "bcede6f5758979b534bb73754310ad0e631db50b99a8fdcb7fd76f766241cdd5"
+    "corem_log10f.cuh": "bcede6f5758979b534bb73754310ad0e631db50b99a8fdcb7fd76f766241cdd5",
+    "smag2d.cu": "731d7f64e86af2d17344be7328fda2a3ecfd4f2e22371f6093128ca2f3192500"
   },
   "composed_headers": {
     "nextgen_reservoirs.cuh": "add8702c3e80c0514326e0cc2efbd0d149d2e1ca1228ce81d88a204c865a7526",
@@ -118,6 +121,10 @@
     ],
     "madwrf": [
       "glibc_flt32.cuh"
+    ],
+    "smag2d_theta_m": [
+      "glibc_flt32.cuh",
+      "smag2d.cu"
     ]
   }
 }

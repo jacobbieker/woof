@@ -2322,6 +2322,9 @@ def execute_experiment(
                     raise RuntimeError(
                         "do_avgflx_em = 1 on a streamed domain is not wired: "
                         "the tile sweep carries no AVGFLX means")
+                from woof.core.theta_m import STEP_REFUSALS, run_theta_m
+                if run_theta_m(node.cfg.run):
+                    raise RuntimeError(STEP_REFUSALS["_streamed_domain"])
                 streamed_here.impose_clock(node.state.elapsed_seconds)
             # Lagged gate, resident domain: the schemes' status words are
             # ORed into the monitor's ledger on the device instead of each
