@@ -133,7 +133,52 @@ def build_blob(table_dir: str | Path, *, hailaware: bool = True,
         out.ctypes.data_as(ctypes.POINTER(ctypes.c_double)), n)
     if rc != 0:
         raise RuntimeError(f"TEMPO init failed: {_last_error(lib)}")
-    return out
+    return _glibc_libm_fields(out)
+
+
+#: tempo_init's tables computed with the C library's exp/log/pow/atan
+#: (collision efficiencies, drop evaporation, ice autoconversion), as the
+#: reference build computes them on glibc 2.44, x86-64: the same words for
+#: every init option.  Elsewhere the platform libm moves their last bits
+#: (macOS: 2772 words, in these six fields only; tgamma is answered from
+#: glibc's words inside rw-tempo), so they are overlaid from the shipped
+#: glibc words and the blob is the same on every platform.  The digests are
+#: of the glibc fields; a field that already matches is left alone.
+GLIBC_LIBM_FIELDS = Path(__file__).resolve().parents[1] / "data" / "tempo" / "glibc-libm-fields.npz"
+GLIBC_LIBM_FIELDS_SHA256 = "17460c09cf26dd48ffef096f7934e81b186443bbf410fa4bf85565cff62645fb"
+GLIBC_FIELD_SHA256 = {
+    "t_efrw": "59fab3b02e25c2dd4f127fa49ee3e71d5792530d747d72cf43f5843f734f25e7",
+    "t_efsw": "3e22181d31012b2bb111df37e4ef25ada1bf353aa04e0b98e476d0d2b8ad874e",
+    "tpc_wev": "0d706c8d3eba6e205fbd99d4d075a140b0b6237f629ed472040fd51f0bab33ca",
+    "tnc_wev": "3798cd80a2f5004c05f1281f6a1a125d8ce5fe85a33f563bb3ecdd020ccd2c12",
+    "tps_iaus": "b1ee2adf948d319a044c60b897b3e27b7f2dc050424d2e049f821893880c14b1",
+    "tni_iaus": "0f4d1b05538aff8540cb1915a7cfbc1d894ce2d8a315b9e00f684b063f628746",
+}
+
+
+def _glibc_libm_fields(blob: np.ndarray) -> np.ndarray:
+    import hashlib
+    at, spans = 0, {}
+    for name, n in layout():
+        if name in GLIBC_FIELD_SHA256:
+            spans[name] = (at, n)
+        at += n
+    stale = [k for k, (a, n) in spans.items()
+             if hashlib.sha256(blob[a:a + n].tobytes()).hexdigest() != GLIBC_FIELD_SHA256[k]]
+    if not stale:
+        return blob
+    payload = GLIBC_LIBM_FIELDS.read_bytes()
+    if hashlib.sha256(payload).hexdigest() != GLIBC_LIBM_FIELDS_SHA256:
+        raise RuntimeError(f"{GLIBC_LIBM_FIELDS} is not the recorded glibc TEMPO fields")
+    import io
+    with np.load(io.BytesIO(payload)) as words:
+        for k in stale:
+            a, n = spans[k]
+            field = words[k]
+            if field.shape != (n,):
+                raise RuntimeError(f"glibc TEMPO field {k} has {field.size} words; the blob has {n}")
+            blob[a:a + n] = field
+    return blob
 
 
 def write_records(table_dir: str | Path, out_path: str | Path, *, hailaware: bool = True,

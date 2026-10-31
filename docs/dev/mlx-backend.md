@@ -99,9 +99,14 @@ nondeterministic, three diagnostic variables help:
   a hash). Fully inlined, the column kernel had not finished compiling after
   35 minutes; out of line it takes a few. Given CUDA's init blob, three
   steps of eight columns are CUDA's words in every field and diagnostic.
-  The blob itself is built by `rw-tempo` with the platform C library's
-  `tgamma`, so on macOS it differs from Linux's in 2772 of 122 million words,
-  and TEMPO on a Mac is not CUDA's words with its own blob.
+  The blob is built by `rw-tempo`, whose reference is gfortran on glibc.
+  The platform libm moved 2772 of its 122 million words on macOS: `rw-tempo`
+  answers `tgamma` from glibc's own words for every argument it passes
+  (`glibc_tgamma.rs`), and the six tables computed with exp/log/pow/atan
+  (t_efrw, t_efsw, tpc_wev, tnc_wev, tps_iaus, tni_iaus; the same for every
+  init option) are overlaid from `woof/data/tempo/glibc-libm-fields.npz`
+  when they differ (`woof.core.tempo_rust`). The Mac's blob is now the
+  Linux blob byte for byte (sha256 08fc1095…), which itself is unchanged.
 * **Preprocessing is NVRTC's.** The translator defines `__CUDA_ARCH__`
   (860, the comparison machine's) because NVRTC compiles device code only:
   TEMPO's `__CUDA_ARCH__` branch uses woof's glibc ports where its host
