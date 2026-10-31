@@ -1082,10 +1082,16 @@ def test_hand_authored_root_enclosing_the_pole_is_refused_at_plan_review(
     with pytest.raises(ValueError) as excinfo:
         load_experiment(path)
     message = str(excinfo.value)
-    # The breakage, and the two things that move, in the door's words.
+    # The breakage, the polar projection that serves such a domain, and
+    # the two things that move, in the door's words.
     assert "contains or touches the north pole" in message
-    assert "not pole-capable" in message
+    assert "map_proj to 'polar'" in message
     assert "ref_lat" in message and "nx/ny/dx" in message
+    # Following the first remedy loads the same root.
+    polar = _pole_case(tmp_path, map_proj="polar", ref_lat=75.0,
+                       truelat1=60.0, truelat2=60.0,
+                       nx=300, ny=240, dx=30000.0)
+    assert load_experiment(polar).root.run.nx == 300
 
 
 def test_the_case_file_door_reviews_the_same_footprint(tmp_path):

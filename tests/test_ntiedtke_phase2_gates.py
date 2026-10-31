@@ -471,6 +471,20 @@ def test_the_prepared_cache_identity_needs_no_scheme_entry():
                "ocean_z": (), "ocean_t": (), "ocean_s": ()}
     for name, default in neutral.items():
         assert expected_run.pop(name) == default
+    # FARMS coupling and the keys appended after it leave the identity at
+    # their defaults, by the document's rule (woof/experiment.py).
+    from woof.config import MADWRF_RUN_DEFAULTS, MULTI_PERTURB_RUN_DEFAULTS
+    later = {"couple_farms": False, "rrtmg_spectral_output": "none",
+             "radtran_wavelengths": (), "radtran_interval_s": 3600.0,
+             "radtran_umu": (), "radtran_phi": (),
+             "radtran_mol_abs_param": "reptran coarse",
+             "radtran_solver": "disort", "radtran_streams": 0,
+             "radtran_pseudospherical": False, "radtran_aerosol": "none",
+             "shcu_physics": 0, "cu_rad_feedback": False,
+             "solar_diagnostics": 0, "use_theta_m": 0, "do_avgflx_em": 0,
+             **MULTI_PERTURB_RUN_DEFAULTS, **MADWRF_RUN_DEFAULTS}
+    for name, default in later.items():
+        assert expected_run.pop(name) == default, name
     # 2.9.7 tc/nest: the fixed-frame archive is read only on a nested domain;
     # this root leaves it out by the document's rule.
     assert expected_run.pop("nest_accumulation_archive") is True

@@ -233,6 +233,15 @@ DEFAULT_OFF = frozenset({
     # WRF-Solar EPS and MAD-WRF, each dropped at its Registry default.
     *__import__("woof.config", fromlist=["x"]).MULTI_PERTURB_RUN_DEFAULTS,
     *__import__("woof.config", fromlist=["x"]).MADWRF_RUN_DEFAULTS,
+    # The keys appended after the wind farm, each dropped while off
+    # (woof/io/restart.py): RRTMG spectral output, FARMS coupling, the
+    # woof.radtran diagnostic's keys, the shallow-cumulus pair, the solar
+    # diagnostics, and use_theta_m / do_avgflx_em.
+    "rrtmg_spectral_output", "couple_farms", "radtran_wavelengths",
+    "radtran_interval_s", "radtran_umu", "radtran_phi",
+    "radtran_mol_abs_param", "radtran_solver", "radtran_streams",
+    "radtran_pseudospherical", "radtran_aerosol", "shcu_physics",
+    "cu_rad_feedback", "solar_diagnostics", "use_theta_m", "do_avgflx_em",
 })
 
 

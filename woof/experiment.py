@@ -485,6 +485,10 @@ _DOMAIN_KEY_ROWS = key_rows(
            "k_top only (k_top, spec_levels, relax_levels, feedback, "
            "feedback_fields, smooth_option, mass_correction); absent, the "
            "child is full depth"),
+    KeyRow("quicklook", "table", None,
+           "a quick-look history stream between full frames (every_s, "
+           "which divides history_interval_s, and history_vars), written "
+           "to quicklook/wrfout_dNN_<time>; absent, none"),
     KeyRow("e_we", "integer", None,
            "WRF's staggered west-east point count, nx + 1; give e_we or nx"),
     KeyRow("e_sn", "integer", None,
@@ -6126,6 +6130,35 @@ def _public_config_value(value):
                                   ("noahmp_snow_age", "wrf_461"),
                                   ("urban_water_balance", "wrf_471")):
                 if run_document.get(name, default) == default:
+                    run_document.pop(name, None)
+            # The keys appended since, each at its default as in a document
+            # written before it, by the checkpoint echo's rule
+            # (woof/io/restart.py): RRTMG spectral output and the
+            # woof.radtran diagnostic (output-only), Deng and cumulus cloud
+            # to radiation, the solar diagnostics, use_theta_m and
+            # do_avgflx_em, and WRF-Solar EPS and MAD-WRF.  Moved, each
+            # stays and binds.
+            from woof.config import (MADWRF_RUN_DEFAULTS,
+                                     MULTI_PERTURB_RUN_DEFAULTS)
+            for name, default in (("rrtmg_spectral_output", "none"),
+                                  ("radtran_wavelengths", ()),
+                                  ("radtran_interval_s", 3600.0),
+                                  ("radtran_umu", ()), ("radtran_phi", ()),
+                                  ("radtran_mol_abs_param", "reptran coarse"),
+                                  ("radtran_solver", "disort"),
+                                  ("radtran_streams", 0),
+                                  ("radtran_pseudospherical", False),
+                                  ("radtran_aerosol", "none"),
+                                  ("shcu_physics", 0),
+                                  ("cu_rad_feedback", False),
+                                  ("solar_diagnostics", 0),
+                                  ("use_theta_m", 0), ("do_avgflx_em", 0),
+                                  *MULTI_PERTURB_RUN_DEFAULTS.items(),
+                                  *MADWRF_RUN_DEFAULTS.items()):
+                value = run_document.get(name, default)
+                if isinstance(value, list):
+                    value = tuple(value)
+                if value == default:
                     run_document.pop(name, None)
             # ... and the scheme-scoped ones reach nothing while their
             # scheme is off, so they leave such a document whatever they say.

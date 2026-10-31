@@ -172,12 +172,15 @@ def test_the_chem_block_is_appended_after_every_older_field():
     from woof.config import WINDFARM_RUN_DEFAULTS
     # After them: rrtmg_spectral_output, couple_farms, the woof.radtran
     # diagnostic's eight keys, shcu_physics and cu_rad_feedback
-    # (tests/test_radiation_driver_options.py holds the order).
+    # (tests/test_radiation_driver_options.py holds the order), then
+    # solar_diagnostics, the radtran aerosol key, use_theta_m and
+    # do_avgflx_em, and the WRF-Solar EPS and MAD-WRF keys.
     tail = ["rrtmg_spectral_output", "couple_farms", "radtran_wavelengths",
             "radtran_interval_s", "radtran_umu", "radtran_phi",
             "radtran_mol_abs_param", "radtran_solver", "radtran_streams",
             "radtran_pseudospherical", "shcu_physics", "cu_rad_feedback",
-            "solar_diagnostics", *NEW_TAIL]
+            "solar_diagnostics", "radtran_aerosol", "use_theta_m",
+            "do_avgflx_em", *NEW_TAIL]
     assert names[-len(tail):] == tail
     names = names[:-len(tail)]
     assert names[-len(WINDFARM_RUN_DEFAULTS):] == list(WINDFARM_RUN_DEFAULTS)

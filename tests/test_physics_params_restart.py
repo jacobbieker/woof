@@ -25,6 +25,10 @@ def test_absent_set_preserves_emitted_config_bytes_and_checkpoint_echo():
     # [radar_heating] (e30746bd1) is a later default-off control that
     # experiment_config_document drops when off, the same way.
     previous.pop("radar_heating")
+    # start_from and partial_nest, later default-off domain controls, leave
+    # each domain the same way.
+    for domain in previous["domains"]:
+        experiment._drop_off_domain_controls(domain)
     assert _bytes(experiment.experiment_config_document(exp)) == _bytes(previous)
     assert "physics_params" not in restart_identity_payload(exp)
     assert "physics_params" not in configuration_echo(exp.root.run)
