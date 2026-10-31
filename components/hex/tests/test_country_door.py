@@ -209,15 +209,22 @@ def test_country_default_prepares_before_forecast_and_joins_one_scorer(tmp_path,
     assert stages == ["init-source", "forecast", "products"]
 
 
-@pytest.mark.parametrize("override", [False, True])
+@pytest.mark.parametrize("override", [False, "ladder", True])
 def test_country_static_uses_helper_geography_default_or_explicit_override(tmp_path, monkeypatch, override):
+    from woof import rustwx_static
     from woof.hex import country_door, engines, mesh_rows, prep_store
     args = arguments(tmp_path)
     args.stage = "prepare"
     args.grid, args.static, args.init = [tmp_path / name for name in ("grid.nc", "static.nc", "init.nc")]
     args.grid.touch()
     args.init.touch()
-    args.geog = tmp_path / "explicit-geography" if override else None
+    args.geog = tmp_path / "explicit-geography" if override is True else None
+    # (WOOF) Without --geog the door passes the root `woof fetch-geog` stages
+    # (engines.static_geog_argv, WOOF 1.1.0 r13), so the machine's own
+    # ~/.local/share/woof/WPS_GEOG must not decide which branch this tests.
+    staged = tmp_path / "staged-geography"
+    monkeypatch.setattr(rustwx_static, "default_geog_root",
+                        lambda: staged if override == "ladder" else None)
     calls = []
     monkeypatch.setattr(engines, "resolve", lambda spec: tmp_path / spec.name)
     monkeypatch.setattr(prep_store, "run_or_fetch", lambda argv, **kw: calls.append(argv))
@@ -227,11 +234,15 @@ def test_country_static_uses_helper_geography_default_or_explicit_override(tmp_p
     assert len(calls) == 1
     static = calls[0]
     assert static[0].endswith("rw_mpas_static")
-    if override:
+    if override is True:
         assert static[static.index("--geog") + 1] == str(args.geog)
+    elif override == "ladder":
+        # The root `woof fetch-geog` staged, which the helper's own ladder
+        # (the gpuwm roots) would not find.
+        assert static[static.index("--geog") + 1] == str(staged.absolute())
     else:
-        # Omit the flag so the native helper keeps its root lookup and its
-        # fetch-geog diagnostic, instead of a second Python lookup ladder.
+        # Nothing staged: omit the flag so the native helper keeps its root
+        # lookup and its fetch-geog diagnostic.
         assert "--geog" not in static
 
 
