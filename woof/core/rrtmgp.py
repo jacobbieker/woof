@@ -563,9 +563,13 @@ _MP_CLOUD_OPTICS_SCHEME = {
 }
 
 from woof.microphysics_schemes import NAMED_SCHEMES as _NAMED_MP_SCHEMES
-# Named schemes: the capability row names the radii family.
+# Named schemes: the capability row names the radii family.  A row whose
+# family is "none" (MAD-WRF's passive 96: no size distribution, WRF's
+# use_mp_re = 0) has no cloud-optics row; its reason is recorded in
+# _NO_CLOUD_OPTICS_COUPLING below.
 _MP_CLOUD_OPTICS_SCHEME.update({
-    _s.mp_id: _s.cloud_optics_family for _s in _NAMED_MP_SCHEMES.values()})
+    _s.mp_id: _s.cloud_optics_family for _s in _NAMED_MP_SCHEMES.values()
+    if _s.cloud_optics_family != "none"})
 
 # WHY A SELECTOR THIS BUILD ACCEPTS HAS NO ROW ABOVE.  One entry per such
 # selector, stating the reason a row would be WRONG -- not a note that one

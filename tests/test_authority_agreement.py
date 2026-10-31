@@ -1587,10 +1587,10 @@ def test_the_consumer_row_gate_refuses_a_missing_row_before_step_0(monkeypatch):
 
 
 def test_every_implemented_scheme_couples_to_rte_rrtmgp_at_plan_review():
-    """No cloud_optics row publishes a null coupling except the one judged
-    exclusions (FAST_SBM and Purdue Lin, refused at the run door), and every other
-    implemented scheme passes the 4/4 RTE+RRTMGP pairing on the DEFAULT
-    variant at plan review.
+    """No cloud_optics row publishes a null coupling except the judged
+    exclusions (FAST_SBM, Purdue Lin and MAD-WRF, refused at the run door),
+    and every other implemented scheme passes the 4/4 RTE+RRTMGP pairing on
+    the DEFAULT variant at plan review.
 
     This test used to assert the opposite half -- that the one scheme
     publishing a null coupling (mp=9) was refused by validate_run_config
@@ -1612,10 +1612,13 @@ def test_every_implemented_scheme_couples_to_rte_rrtmgp_at_plan_review():
     # _NO_CLOUD_OPTICS_COUPLING and both authorities refuse the RTE+RRTMGP
     # pairing (measured below) with the legacy-RRTMG remedy.  Any other
     # null is a gap, as it was when mp=9 was retired by writing its row.
-    assert uncoupled == [2, 30], (
+    assert uncoupled == [2, 30, 96], (
         "a scheme publishes a null RTE+RRTMGP coupling other than the "
-        f"judged FAST_SBM and Lin exclusions: {uncoupled}")
+        f"judged FAST_SBM, Lin and MAD-WRF exclusions: {uncoupled}")
     assert rows[30]["rte_rrtmgp_refusal"] is not None
+    # MAD-WRF (mp=96): passive hydrometeors, no size distribution
+    # (WRF's use_mp_re = 0), so radiation computes its own radii.
+    assert "MAD-WRF's passive hydrometeors" in rows[96]["rte_rrtmgp_refusal"]
     # Lin (mp=2) has no effective-radius output at all (Registry.EM_COMMON:3016).
     assert "Lin supplies no effective radii" in rows[2]["rte_rrtmgp_refusal"]
     assert rows[9]["rte_rrtmgp_coupling"] == "milbrandt2"

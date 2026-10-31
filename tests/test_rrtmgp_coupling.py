@@ -11,7 +11,7 @@ import pytest
 #: production validator over range(0, 107), exactly as
 #: ``test_the_accepted_selector_list_this_module_uses_is_the_real_one``
 #: does; not hand-extended.
-_ACCEPTED_MP_PHYSICS = (0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 30, 50, 106, 96, 900)
+_ACCEPTED_MP_PHYSICS = (0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 30, 50, 96, 106, 900)
 
 #: The admitted selectors without a cloud-optics coupling: FAST_SBM (30)
 #: alone, refused against the 4/4 pair with the legacy-RRTMG remedy until
@@ -187,8 +187,7 @@ def test_the_accepted_selector_list_this_module_uses_is_the_real_one():
 
     from woof.microphysics_schemes import NAMED_MP_IDS
     # A named scheme may carry WRF's own number (MAD-WRF's 96): walk it once.
-    numbered = (mp for mp in range(0, 107) if mp not in NAMED_MP_IDS)
-    admitted = tuple(mp for mp in (*numbered, *NAMED_MP_IDS) if admits(mp))
+    admitted = tuple(mp for mp in sorted({*range(0, 107), *NAMED_MP_IDS}) if admits(mp))
     assert admitted == _ACCEPTED_MP_PHYSICS
     # The named refusals are the reason the helper cannot key on one
     # sentence; pin that they exist, so a lane cannot "fix" a future

@@ -404,9 +404,10 @@ def test_a_remedy_label_names_exactly_the_edit_its_remedy_settings_makes(
     # admission adds one topo_wind and one gwd_opt remedy on each of the
     # five closures; their labels name only the selector their edit sets
     # to zero.  FAST_SBM (mp30) refuses RRTMGP with the legacy-RRTMG
-    # remedy, and Purdue Lin (mp2) does the same.  1 + 3 + 5 + 5 + 1 + 1, and the wind farm adds one
-    # windfarm_opt remedy (MYNN only) on each of the five.
-    assert checked == 21
+    # remedy, and Purdue Lin (mp2) and MAD-WRF (mp96) do the same.
+    # 1 + 3 + 5 + 5 + 1 + 1 + 1, and the wind farm adds one windfarm_opt
+    # remedy (MYNN only) on each of the five.
+    assert checked == 22
 
 
 def test_the_builder_refuses_a_remedy_label_that_promises_a_second_edit(
