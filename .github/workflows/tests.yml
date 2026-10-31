@@ -51,7 +51,7 @@ jobs:
       - name: workflow files (actionlint)
         run: pixi exec --spec actionlint==1.7.12 actionlint -color
       - name: undefined names (ruff F821/F822/F823, tests/test_no_undefined_names.py)
-        run: pixi run -e cpu --locked python -m pytest -q -p no:cacheprovider tests/test_no_undefined_names.py
+        run: pixi run -e cpu --locked python -m pytest -q -p no:cacheprovider -o faulthandler_timeout=1200 tests/test_no_undefined_names.py
       - name: syntax (compileall over the trees the repository owns)
         run: pixi run -e cpu --locked python -m compileall -q -x '/vendor/' woof tools tilestream tests components/hex/tests components/hex/tools
       - name: every shipped module imports (tools/import_sweep.py)
@@ -134,13 +134,13 @@ jobs:
         run: |
           mapfile -t files < <(pixi run -e cpu --locked python .github/ci/select_tests.py shard "${{ matrix.leg }}" "$TEST_LEGS")
           mkdir -p junit
-          pixi run -e cpu --locked python -m pytest -q -rfE -p no:cacheprovider -n auto --dist loadfile \
+          pixi run -e cpu --locked python -m pytest -q -rfE -p no:cacheprovider -o faulthandler_timeout=1200 -n auto --dist loadfile \
             -m "$CPU_MARKERS" --junitxml="junit/tests-${{ matrix.leg }}.xml" "${files[@]}"
       - name: Stage 1, the maintained CPU list (tools/battery/run_stage1.py)
         if: matrix.leg == 'stage1'
         run: |
           mkdir -p junit
-          pixi run -e cpu --locked python tools/battery/run_stage1.py -- -q -rfE -p no:cacheprovider -n auto --dist loadfile \
+          pixi run -e cpu --locked python tools/battery/run_stage1.py -- -q -rfE -p no:cacheprovider -o faulthandler_timeout=1200 -n auto --dist loadfile \
             -m "$CPU_MARKERS" --junitxml=junit/stage1.xml
       - name: hex Tier 1 (components/hex/tools/battery/cpu_files.txt)
         if: matrix.leg == 'hex'
@@ -148,7 +148,7 @@ jobs:
         run: |
           mapfile -t files < <(pixi run -e cpu --locked python ../../.github/ci/select_tests.py hex)
           mkdir -p ../../junit
-          pixi run -e cpu --locked python -m pytest -q -rfE -p no:cacheprovider -n auto --dist loadfile \
+          pixi run -e cpu --locked python -m pytest -q -rfE -p no:cacheprovider -o faulthandler_timeout=1200 -n auto --dist loadfile \
             -m "$CPU_MARKERS" --junitxml=../../junit/hex.xml "${files[@]}"
       - name: counts
         if: always() && hashFiles('junit/*.xml') != ''
@@ -232,13 +232,13 @@ jobs:
           files=()
           while IFS= read -r f; do files+=("$f"); done < <(pixi run -e mlx --locked python .github/ci/select_tests.py shard "${{ matrix.leg }}" "$TEST_LEGS")
           mkdir -p junit
-          pixi run -e mlx --locked python -m pytest -q -rfE -p no:cacheprovider -n auto --dist loadfile \
+          pixi run -e mlx --locked python -m pytest -q -rfE -p no:cacheprovider -o faulthandler_timeout=1200 -n auto --dist loadfile \
             -m "$CPU_MARKERS" --junitxml="junit/tests-${{ matrix.leg }}.xml" "${files[@]}"
       - name: Stage 1, the maintained CPU list (tools/battery/run_stage1.py)
         if: matrix.leg == 'stage1'
         run: |
           mkdir -p junit
-          pixi run -e mlx --locked python tools/battery/run_stage1.py -- -q -rfE -p no:cacheprovider -n auto --dist loadfile \
+          pixi run -e mlx --locked python tools/battery/run_stage1.py -- -q -rfE -p no:cacheprovider -o faulthandler_timeout=1200 -n auto --dist loadfile \
             -m "$CPU_MARKERS" --junitxml=junit/stage1.xml
       - name: hex Tier 1 (components/hex/tools/battery/cpu_files.txt)
         if: matrix.leg == 'hex'
@@ -247,7 +247,7 @@ jobs:
           files=()
           while IFS= read -r f; do files+=("$f"); done < <(pixi run -e mlx --locked python ../../.github/ci/select_tests.py hex)
           mkdir -p ../../junit
-          pixi run -e mlx --locked python -m pytest -q -rfE -p no:cacheprovider -n auto --dist loadfile \
+          pixi run -e mlx --locked python -m pytest -q -rfE -p no:cacheprovider -o faulthandler_timeout=1200 -n auto --dist loadfile \
             -m "$CPU_MARKERS" --junitxml=../../junit/hex.xml "${files[@]}"
       - name: counts
         if: always() && hashFiles('junit/*.xml') != ''
@@ -320,7 +320,7 @@ jobs:
       - name: Metal parity and ordering gates
         run: |
           mkdir -p junit
-          pixi run -e mlx --locked python -m pytest -q -rfEs -p no:cacheprovider \
+          pixi run -e mlx --locked python -m pytest -q -rfEs -p no:cacheprovider -o faulthandler_timeout=1200 \
             --junitxml="junit/metal-exact${GPUWM_WRF_EXACT}.xml" \
             tests/test_kessler_wrf461_parity.py tests/test_wsm6_wrf461_column_exact.py \
             tests/test_ysu_wrf461_parity.py tests/test_metal_launch_ordering.py \
@@ -379,7 +379,7 @@ jobs:
       - name: WRF v4.6.1 parity gates (kessler, wsm6, ysu)
         run: |
           mkdir -p junit
-          pixi run -e default --locked python -m pytest -q -rfEs -p no:cacheprovider \
+          pixi run -e default --locked python -m pytest -q -rfEs -p no:cacheprovider -o faulthandler_timeout=1200 \
             --junitxml="junit/cuda-parity-exact${GPUWM_WRF_EXACT}.xml" \
             tests/test_kessler_wrf461_parity.py tests/test_wsm6_wrf461_column_exact.py tests/test_ysu_wrf461_parity.py
       - name: hex GPU gates (components/hex/tools/battery/gpu_gates.txt pytest members)
@@ -387,7 +387,7 @@ jobs:
         working-directory: components/hex
         run: |
           mapfile -t files < <(grep -v '^#' tools/battery/gpu_gates.txt | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | grep '^tests/.*\.py$')
-          pixi run -e default --locked python -m pytest -q -rfE -p no:cacheprovider -m "not assets" \
+          pixi run -e default --locked python -m pytest -q -rfE -p no:cacheprovider -o faulthandler_timeout=1200 -m "not assets" \
             --junitxml=../../junit/cuda-hex-gpu-gates.xml "${files[@]}"
       - name: counts
         if: always() && hashFiles('junit/*.xml') != ''
