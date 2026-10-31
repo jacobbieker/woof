@@ -204,7 +204,7 @@ AXES = (
          "check (after woof.config.radiation_scheme_ids resolution)"),
     Axis("cu_physics", tuple(CU_SCHEMES),
          "woof.config.CU_SCHEMES"),
-    Axis("km_opt", (0, 1, 2, 3, 4),
+    Axis("km_opt", (0, 1, 2, 3, 4, 5),
          "woof.config.validate_km_opt"),
 )
 
@@ -524,6 +524,13 @@ REMEDIES = (
                "PBL-off-gated for the same reason",
      "before": _suite(km_opt=2),
      "after": _suite(km_opt=4)},
+    # km_opt=5 (SMS-3DTKE) is a full 3-D closure that replaces the PBL
+    # scheme (WRF's check_a_mundo refuses the pair); its message names one
+    # way out, followed literally.
+    {"id": "sms-3dtke-is-pbl-off-only",
+     "remedy": "'Set bl_pbl_physics=0.'",
+     "before": _suite(km_opt=5),
+     "after": _suite(km_opt=5, bl_pbl_physics=0)},
     # RETIRED with the rule (audit R-036): SASE with the MYNN surface
     # layer is admitted.  The exclusion was an intersection of two tables
     # -- MYNN's row transcribes WRF's isfc matrix, which has no cell for
