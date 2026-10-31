@@ -13,6 +13,32 @@ from woof.hex.transport import (AdvectionCoefficients, _atmosphere_horizontal_ed
 from test_mesh_validation import graded_sphere_mesh
 
 
+@pytest.fixture
+def native_reference():
+    """The host-prep crate's executable, or a skip where this tree cannot have one.
+
+    (WOOF) hex_contract_hostprep is built from gpuwm-hex's rust/host-prep, a
+    crate this folded tree does not carry; a woof wheel ships it prebuilt
+    among the hex helpers (woof.hex.helpers).  A source checkout without that
+    helper staged has no way to build it, so the comparisons skip there and
+    say so.  An explicit WOOF_HEX_CONTRACT_HOSTPREP that names nothing, or
+    gpuwm-hex's own layout (which carries the crate), still fails.
+    """
+
+    import os
+    from _layout import FOLDED
+
+    rust.engine.cache_clear()
+    try:
+        return rust.engine()
+    except rust.MpasPortError:
+        if not FOLDED or os.environ.get("WOOF_HEX_CONTRACT_HOSTPREP"):
+            raise
+        pytest.skip("hex_contract_hostprep is not on this machine: its crate (gpuwm-hex "
+                    "rust/host-prep) is not carried in this tree and no woof wheel's hex "
+                    "helpers are staged; set WOOF_HEX_CONTRACT_HOSTPREP to run these")
+
+
 def bits(a, b):
     assert a.shape == b.shape
     assert a.dtype == b.dtype == np.dtype("float32")
@@ -48,7 +74,7 @@ def bundle(nl=7, nt=1, seed=214):
 
 
 @pytest.mark.parametrize("nl,nt,seed", [(2,1,12),(7,1,214),(19,3,729)])
-def test_horizontal_all_rings_and_signed_zero(nl, nt, seed):
+def test_horizontal_all_rings_and_signed_zero(nl, nt, seed, native_reference):
     b, co, _ = bundle(nl,nt,seed)
     # A specified edge is skipped before its sentinel cells can be read.
     edge = int(np.flatnonzero(b.masks.bdy_mask_edge > 5)[0])
@@ -61,7 +87,7 @@ def test_horizontal_all_rings_and_signed_zero(nl, nt, seed):
 
 
 @pytest.mark.parametrize("nl", [2,3,7,19])
-def test_vertical_endpoints_and_interior(nl):
+def test_vertical_endpoints_and_interior(nl, native_reference):
     b, _, _ = bundle(nl)
     expected = _atmosphere_vertical_flux(b.scalars_stage[0],b.saved.vertical_velocity,
         b.vertical.fzm,b.vertical.fzp,3,0.25)
@@ -69,7 +95,7 @@ def test_vertical_endpoints_and_interior(nl):
 
 
 @pytest.mark.parametrize("nt", [1,3])
-def test_finish_including_specified_cells(nt):
+def test_finish_including_specified_cells(nt, native_reference):
     b,co,_ = bundle(nt=nt)
     edges = rust.horizontal(b,co)
     flux = np.stack([_atmosphere_vertical_flux(stage,b.saved.vertical_velocity,
@@ -85,7 +111,7 @@ def test_finish_including_specified_cells(nt):
 
 
 @pytest.mark.parametrize("nl,regional,seed", [(2,False,1),(7,False,13),(7,True,14),(19,True,20)])
-def test_acoustic_all_output_fields(nl,regional,seed):
+def test_acoustic_all_output_fields(nl,regional,seed,native_reference):
     b,_,noise = bundle(nl,seed=seed)
     cells, edges, rows = (nl,b.ncells),(nl,b.nedges),(nl+1,b.ncells)
     b.masks.spec_zone_mask_cell = (b.masks.bdy_mask_cell>5).astype("f4") if regional else np.zeros(b.ncells,"f4")
@@ -109,7 +135,7 @@ def test_acoustic_all_output_fields(nl,regional,seed):
         bits(getattr(actual,name),getattr(expected,name))
 
 
-def test_vertical_subnormal_and_signed_zero_bits():
+def test_vertical_subnormal_and_signed_zero_bits(native_reference):
     b, _, _ = bundle(7)
     b.scalars_stage[:] *= np.float32(1.e-36)
     expected = _atmosphere_vertical_flux(b.scalars_stage[0],b.saved.vertical_velocity,
