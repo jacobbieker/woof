@@ -173,6 +173,9 @@ _SHARED_CODES = frozenset({
     "noah-mosaic-pairing",
     # Consumer requirements are also checked by validate_run_config.
     "parameter-consumer",
+    # A knob read but left unset (windfarm_turbine_file under
+    # windfarm_opt = 1), refused by validate_run_config the same way.
+    "parameter-required",
     "parameter-value",
     # The SPP consumer law, shared the same way: plan review calls
     # woof.config's validate_spp_config, the function validate_run_config

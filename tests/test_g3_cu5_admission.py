@@ -130,12 +130,20 @@ def test_short_ensemble_arrays_name_the_out_of_bounds_read():
 def test_g3_specific_controls_name_the_only_runtime_consumer():
     from woof.physics_registry import physics_registry, registry_knob_is_read
     registry = physics_registry()
-    for name in ("maxiens", "maxens", "maxens2", "maxens3", "ensdim",
-                 "cu_diag", "convtrans_avglen_m"):
+    for name in ("maxiens", "maxens", "maxens2", "maxens3", "ensdim"):
         row = registry["parameters"][name]
         assert row["read_when"] == {"cu_physics": 5}
         assert registry_knob_is_read(name, {"cu_physics": 5}, registry)
         for selector in (0, 1, 3, 16):
+            assert not registry_knob_is_read(name, {"cu_physics": selector}, registry)
+    # convtrans_prep's two controls are Grell-Freitas's too: WRF runs it
+    # after GFDRV as after G3DRV, and woof/core/gf.py reads cu_diag.
+    for name in ("cu_diag", "convtrans_avglen_m"):
+        row = registry["parameters"][name]
+        assert row["read_when"] == {"cu_physics": [3, 5]}
+        for selector in (3, 5):
+            assert registry_knob_is_read(name, {"cu_physics": selector}, registry)
+        for selector in (0, 1, 16):
             assert not registry_knob_is_read(name, {"cu_physics": selector}, registry)
 
 
@@ -150,15 +158,20 @@ def test_inactive_g3_controls_do_not_change_existing_cumulus_requirements():
         assert not (set(G3_RUN_DEFAULTS) - {"cugd_avedx"}) & set(required)
 
 
-@pytest.mark.parametrize("name,value", [
-    ("maxiens", 2), ("maxens", 4), ("maxens2", 4),
-    ("maxens3", 17), ("ensdim", 272), ("cu_diag", 1),
-    ("convtrans_avglen_m", 4.0),
+# The ensemble dimensions are G3's alone, so Grell-Freitas refuses them;
+# convtrans_prep's two controls are Grell-Freitas's too, so their
+# consumer-less scheme is Kain-Fritsch.
+@pytest.mark.parametrize("name,value,cu_physics", [
+    ("maxiens", 2, 3), ("maxens", 4, 3), ("maxens2", 4, 3),
+    ("maxens3", 17, 3), ("ensdim", 272, 3), ("cu_diag", 1, 1),
+    ("convtrans_avglen_m", 4.0, 1),
 ])
-def test_nondefault_g3_controls_remain_refused_without_the_consumer(name, value):
+def test_nondefault_g3_controls_remain_refused_without_the_consumer(
+        name, value, cu_physics):
     from woof.config import RunConfig, validate_run_config
     with pytest.raises(ValueError, match="cu_physics=5"):
-        validate_run_config(RunConfig(**dict(_G3_BASE, cu_physics=3), **{name: value}))
+        validate_run_config(RunConfig(**dict(_G3_BASE, cu_physics=cu_physics),
+                                      **{name: value}))
 
 
 def test_registry_declares_inactive_control_policy_without_changing_other_options():

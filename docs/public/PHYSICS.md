@@ -44,12 +44,13 @@ substitutions (see the end of this page).
 
 **A rung grades one OPTION, and most of the tree sits on the same
 rung.** `implemented-unverified` is not a mark against any particular
-scheme. It is carried by **40 of the registry's 58 component options**:
+scheme. It is carried by **42 of the registry's 60 component options**:
 YSU, MYJ, MYNN (PBL and surface layer both), Eta similarity, Shin-Hong,
-UW moist turbulence, SASE, CCPP TKE-EDMF, Purdue Lin, WSM3, WSM5, Ferrier-Aligo, WSM7, WSM6R, Milbrandt-Yau, Morrison, WDM6, P3 one-category, FAST_SBM spectral bin, Thompson
+UW moist turbulence, SASE, CCPP TKE-EDMF, Purdue Lin, WSM3, WSM5, Ferrier-Aligo, WSM7, WSM6R, Milbrandt-Yau, Morrison, WDM6, P3 one-category, FAST_SBM spectral bin, MAD-WRF, Thompson
 aerosol-aware, TEMPO, Noah, Noah-MP, RUC, Grell-Freitas, Original cu6 cumulus, New Tiedtke, Grell 3D, New SAS (YSU) with NSCV shallow convection, WRF RRTM
 longwave with Dudhia shortwave, New Goddard longwave and shortwave, the three urban canopy models
-(single-layer UCM, BEP and BEP+BEM), and all five turbulence closures. It says
+(single-layer UCM, BEP and BEP+BEM), and all six turbulence closures
+(SMS-3DTKE, `km_opt = 5`, the sixth). It says
 that the option retains the evidence limits described in its own row.
 Some rows report an oracle or an idealized trajectory, while others
 explicitly report no independent oracle. This is separate from whether
@@ -104,7 +105,7 @@ verdict. `docs/public/receipts/physics-composition-walk.json` is that
 record, and `tests/test_physics_composition_walk.py` regenerates it on
 every release cut and compares it byte for byte. As measured:
 
-- **6439 of 20682 admission attempts are accepted**, covering **6431 distinct
+- **6777 of 24717 admission attempts are accepted**, covering **6769 distinct
   accepted suites**, against 37 registered templates. The presets are a
   corner of the space, not the space.
 - **Every accepted run keeps every switch the file set**, checked
@@ -112,9 +113,9 @@ every release cut and compares it byte for byte. As measured:
   admission is never a silent substitution.
 - **Every admitted value of every axis reaches an accepted run**, with
   no exceptions left. `ra_lw_physics = 1` (WRF RRTM longwave) was the
-  last one; 1.9 ports it, and it now reaches 1165 distinct accepted suites,
+  last one; 1.9 ports it, and it now reaches 1230 distinct accepted suites,
   including 233 paired with Dudhia shortwave.
-- **14243 refusals fall into 20 distinct rules**, every one of which
+- **17940 refusals fall into 22 distinct rules**, every one of which
   names the selector to change, and each of which has a
   demonstrated remedy -- the receipt carries a before/after pair per
   rule showing that doing what the message says reaches an accepted
@@ -1402,7 +1403,7 @@ calls (`tests/test_sfclayrev_nonfinite.py`,
 All four run. In plain words: `template` means **a preset exists**, and
 `component-override` means **a preset exists** on the routes that
 declare it and you **type it in your config** anywhere else -- which is
-how the revised MM5 row's 2344 distinct accepted combinations were measured.
+how the revised MM5 row's 2444 distinct accepted combinations were measured.
 Maturity and reachability are separate registry axes, quoted verbatim
 from the registry: `maturity` is the option's evidence tier and
 `reachability.state` is how a NAMED route can offer it. Neither column
@@ -2050,8 +2051,8 @@ with Grell-Freitas, SASE on the revised MM5 surface layer, and the three
 large-eddy closures (1.5-order TKE, 3D Smagorinsky, constant K). None of
 them reads anything source-specific, so none of them is a source's
 choice to make, and every source that names any suite at all names all
-six. On the prepared single-domain route that is fifty-five of its
-fifty-six sources; the other one is the caller-supplied composition row,
+six. On the prepared single-domain route that is fifty-eight of its
+fifty-nine sources; the other one is the caller-supplied composition row,
 which names no suite because the caller states the physics. A source
 with no measured suite of its own is not emptied: it reports the suites
 that route names for every source it HAS measured, with the limitation

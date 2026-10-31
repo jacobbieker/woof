@@ -84,6 +84,40 @@ from woof.wrf461_compatibility import (  # noqa: E402
 # type / enum / minimum / default taken from woof's own accepted sets
 # (woof/config.py validate_run_config), not from WRF's wider sets.
 IMPLEMENTED: dict[str, dict] = {
+    # WRF-Solar's shallow-cumulus slot and cumulus-radiation feedback
+    # (max_domains columns, so per domain).
+    "shcu_physics": {
+        "type": "integer", "enum": [0, 5], "default": 0, "per_domain": True,
+        "component_id": "cumulus", "consuming_read": "woof/core/shcu_deng.py",
+        # woof.config.shcu_physics_refusal: MYJ or MYNN TKE, a microphysics
+        # scheme's QC/QR, RRTMG heating (4/4, either ra_rrtmg_variant).
+        "nondefault_requires_components": {
+            "pbl": ["myj", "mynn"],
+            "microphysics": [
+                "fast-sbm-mp30", "ferrier-aligo-mp5", "kessler-mp1", "lin-mp2",
+                "madwrf", "milbrandt2mom-mp9", "morrison-mp10", "nssl2-mp18",
+                "p3-mp50", "tempo", "thompson-aerosol-mp28", "thompson-mp8",
+                "wdm6-mp16", "wsm3-mp3", "wsm5-mp4", "wsm6-mp6",
+                "wsm6r-mp106", "wsm7-mp24"],
+            "radiation": ["rte-rrtmgp"]},
+        "warnings": ["5 runs the PSU Deng scheme (module_shcu_deng.F), graded "
+                     "word for word against WRF v4.7.1; it needs MYJ or MYNN "
+                     "TKE (bl_pbl_physics 2 or 5). WRF's 1-4 are not ported."]},
+    "cu_rad_feedback": {
+        "type": "boolean", "default": False, "per_domain": True,
+        "component_id": "cumulus",
+        "consuming_read": "woof/core/cumulus_radiation.py",
+        # woof.config.cu_rad_feedback_refusal: ICLOUD_CU's schemes, RRTMG.
+        "nondefault_requires_components": {
+            "cumulus": ["kain-fritsch", "grell-freitas", "grell-3d"],
+            "radiation": ["rte-rrtmgp"]},
+        # ... and beside Grell-Freitas or Grell 3D, convtrans_prep's
+        # time-averaged cloud, so cu_diag = 1 (module_check_a_mundo).
+        "nondefault_requires_settings": [
+            {"when": {"cu_physics": [3, 5]}, "settings": {"cu_diag": 1}}],
+        "warnings": ["Hands the cumulus scheme's cloud to radiation as WRF's "
+                     "ICLOUD_CU: 2 for Kain-Fritsch, 1 for Grell-Freitas and "
+                     "Grell 3D, as WRF derives it."]},
     "solar_generation": {
         "type": "string", "enum": ["wrf_480", "wrf_461"], "default": "wrf_480",
         "component_id": "radiation",
@@ -357,6 +391,8 @@ IMPLEMENTED: dict[str, dict] = {
         "type": "string", "default": "",
         "per_domain": True, "component_id": "pbl",
         "read_when": {"windfarm_opt": 1},
+        # windfarm_opt = 1 with no turbines is refused (validate_run_config).
+        "active_value_policy": "required-when-read",
         "warnings": ["A woof turbine table (.csv, .geojson, sites.v1 .json) "
                      "or a WRF windturbines.txt / windturbines-ij.txt with "
                      "its wind-turbine-N.tbl tables beside it. Checkpoints "
@@ -1084,8 +1120,11 @@ TIGHTEN: dict[str, dict] = {
     "maxens2": {"type": "integer", "default": 3, "component_id": "cumulus", "read_when": {"cu_physics": 5}, "inactive_value_policy": "require-default"},
     "maxens3": {"type": "integer", "default": 16, "component_id": "cumulus", "read_when": {"cu_physics": 5}, "inactive_value_policy": "require-default"},
     "ensdim": {"type": "integer", "default": 144, "component_id": "cumulus", "read_when": {"cu_physics": 5}, "inactive_value_policy": "require-default"},
-    "cu_diag": {"type": "integer", "default": 0, "enum": [0, 1], "component_id": "cumulus", "read_when": {"cu_physics": 5}, "inactive_value_policy": "require-default"},
-    "convtrans_avglen_m": {"type": "number", "default": 30.0, "component_id": "cumulus", "read_when": {"cu_physics": 5}, "inactive_value_policy": "require-default"},
+    # cu_diag and convtrans_avglen_m feed convtrans_prep, which WRF runs
+    # after GFDRV as after G3DRV (module_convtrans_prep.F reads GD_CLOUD for
+    # cu_physics 3 and 5 alike; woof/core/gf.py reads cu_diag too).
+    "cu_diag": {"type": "integer", "default": 0, "enum": [0, 1], "component_id": "cumulus", "read_when": {"cu_physics": [3, 5]}, "inactive_value_policy": "require-default"},
+    "convtrans_avglen_m": {"type": "number", "default": 30.0, "component_id": "cumulus", "read_when": {"cu_physics": [3, 5]}, "inactive_value_policy": "require-default"},
 }
 
 WRF_TYPE = {"integer": "integer", "real": "number",
@@ -1110,12 +1149,6 @@ UNIMPLEMENTED_LEDGER: dict[str, tuple[str, str]] = {
         "Not a WRF v4.6.1 namelist option. BRCR_UB is a YSU scheme-internal "
         "constant compiled into the existing kernel, so there is no legal "
         "WRF user setting to expose."),
-    "cu_rad_feedback": (
-        "c",
-        "KF radiation feedback needs persistent convective cloud fraction, "
-        "condensate-path profiles, cadence ownership, restart state, and a "
-        "radiation-driver merge; the ported KF contract returns none of "
-        "those profiles."),
     "cu_used": (
         "c",
         "Not a WRF v4.6.1 namelist option. CU_USED is derived by WRF from "
@@ -1290,11 +1323,6 @@ UNIMPLEMENTED_LEDGER: dict[str, tuple[str, str]] = {
         "The shallow-water roughness branch needs the missing shallow-water/"
         "bathymetry classification and surface-driver coupling; setting a "
         "scalar alone would be inert."),
-    "shcu_physics": (
-        "c",
-        "This selects independent shallow-cumulus schemes. No shallow-"
-        "cumulus component, tendencies, cadence state, restart contract, or "
-        "radiation coupling is ported."),
     "sst_update": (
         "c",
         "SST updates require a time-varying lower-boundary input stream, "

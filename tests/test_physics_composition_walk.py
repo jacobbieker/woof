@@ -618,12 +618,14 @@ def test_the_shipped_mynn_presets_are_inside_the_measured_space() -> None:
     # with prescribed monthly surface seeds (322308291, cc881f530) and its
     # solar-angle albedo sibling (67d633a15, 32f258956), and the
     # aerosol-aware Thompson mp28 with the GSD MYNN form (4193eb0da,
-    # be69b1235).  A dropped or an unannounced row still turns this red.
+    # be69b1235).  On 2026-10-18 the LES-nest tree suite's root, Thompson
+    # mp8 + MYNN over Noah-MP with RTE+RRTMGP, joined as (8, 4) (ed5bbe4ce).
+    # A dropped or an unannounced row still turns this red.
     shipped = {land_surface: len(rows[True])
                for land_surface, rows in by_land_surface.items()
                if rows[True]}
     assert shipped == {(6, 2): 1, (6, 3): 1, (6, 4): 1, (8, 3): 3,
-                       (28, 3): 1}, (
+                       (8, 4): 1, (28, 3): 1}, (
         f"radiation-bearing MYNN rows per (mp_physics, sf_surface_physics) "
         f"moved: got {shipped} from {radiating} against shortwave-only "
         f"pairs {sorted(dark)}")

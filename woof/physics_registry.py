@@ -839,7 +839,9 @@ def registry_knob_is_read(knob: str, settings: Mapping[str, object] | object,
 
     A knob's declaration may name the settings it is read under,
     ``read_when: {setting: value, ...}``, every one of which must hold (a
-    tile count read only with tiles on).  A setting the configuration
+    tile count read only with tiles on).  A list value holds when the
+    setting equals any of its entries (cu_diag, read by Grell-Freitas and
+    Grell 3D alike: ``{"cu_physics": [3, 5]}``).  A setting the configuration
     omits holds its :func:`setting_off_value`.  ``True`` when the
     declaration names no condition, when every condition holds, or when an
     omitted setting has no single off value (then it cannot be shown
@@ -864,7 +866,8 @@ def registry_knob_is_read(knob: str, settings: Mapping[str, object] | object,
             value = setting_off_value(str(name), selected)
             if value is NO_OFF_VALUE:
                 return True
-        if not same_setting_value(value, wanted):
+        choices = wanted if isinstance(wanted, list) else [wanted]
+        if not any(same_setting_value(value, choice) for choice in choices):
             return False
     return True
 
@@ -3432,6 +3435,22 @@ def validate_physics_plan(
                     "parameter-value", f"{base_path}.parameters.{name}",
                     f"{name}={value!r} needs {spec.get('read_when')}; "
                     "the inactive consumer would discard its nondefault value"))
+        # The converse: a knob whose default is no usable value must be set
+        # whenever a setting it is read under is on (windfarm_turbine_file
+        # under windfarm_opt = 1 -- with no turbines the scheme would run as
+        # windfarm_opt = 0 under another name, and the run door refuses it).
+        for name, spec in parameter_specs.items():
+            if (not isinstance(spec, dict)
+                    or spec.get("active_value_policy") != "required-when-read"):
+                continue
+            if not registry_knob_is_read(name, settings, selected_registry):
+                continue
+            value = _effective_setting(name, settings, parameter_specs)
+            if _same_value(value, spec.get("default")):
+                errors.append(_issue(
+                    "parameter-required", f"{base_path}.parameters.{name}",
+                    f"{spec.get('read_when')} reads {name}, which is unset; "
+                    f"set {name}"))
         # A new parameter can declare the consumers that read a moved value.
         # Defaults remain inert outside them, preserving existing identities.
         for name, spec in parameter_specs.items():
@@ -3450,6 +3469,41 @@ def validate_physics_plan(
                         f"{name}={value!r} would be ignored: it requires "
                         f"{component} in {allowed!r}; leave it at its default "
                         "or select a consuming option"))
+
+        # A moved value can need another setting under some selections:
+        # nondefault_requires_settings is a list of {"when": {setting:
+        # value or [values]}, "settings": {setting: value}} rows, each
+        # judged with read_when's rule (cu_rad_feedback beside Grell-Freitas
+        # or Grell 3D needs cu_diag = 1, as WRF's check_a_mundo says).
+        for name, spec in parameter_specs.items():
+            if not isinstance(spec, dict):
+                continue
+            rows = spec.get("nondefault_requires_settings")
+            if not isinstance(rows, list):
+                continue
+            value = _effective_setting(name, settings, parameter_specs)
+            if _same_value(value, spec.get("default")):
+                continue
+            for row in rows:
+                when = row.get("when", {}) if isinstance(row, dict) else {}
+                holds = all(
+                    any(same_setting_value(
+                            _effective_setting(key, settings, parameter_specs),
+                            choice)
+                        for choice in (wanted if isinstance(wanted, list)
+                                       else [wanted]))
+                    for key, wanted in when.items())
+                if not holds:
+                    continue
+                for key, needed in row.get("settings", {}).items():
+                    if not _same_value(
+                            _effective_setting(key, settings, parameter_specs),
+                            needed):
+                        errors.append(_issue(
+                            "parameter-consumer",
+                            f"{base_path}.parameters.{name}",
+                            f"{name}={value!r} under {when} needs "
+                            f"{key}={needed!r}"))
 
         # Use the run door's coupling law after parameter values resolve.
         from types import SimpleNamespace
