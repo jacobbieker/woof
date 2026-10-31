@@ -2710,6 +2710,10 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # cldfra3_columns, cldfra3_log10_probe, solar_diag_columns and
     # solar_radius_metres read 0 B (their scratch profiles are global).
     "cldfra3": 0, "solar_diag": 0,
+    # use_theta_m = 1's conversions and do_avgflx_em = 1's upd_avgflx, RTX
+    # A6000 sm_86, NVRTC 12.9, 2026-10-31, both loaders: all five entry
+    # points read 0 B.
+    "theta_m": 0, "avgflx": 0,
     # The partial-depth nest's coupling (Phase D3, kernels/partial_nest.cu),
     # RTX A6000 sm_86, NVRTC 12.9, 2026-10-30: all eight entry points 0 B.
     "partial_nest": 0,
@@ -3980,6 +3984,11 @@ def domain_kernel_modules(dc: DomainConfig, *,
         modules.add("cldfra3")
     if int(getattr(dc.run, "solar_diagnostics", 0) or 0) == 1:
         modules.add("solar_diag")                # woof/core/solar_diagnostics.py
+    from woof.core.theta_m import run_theta_m
+    if run_theta_m(dc.run):
+        modules.add("theta_m")                   # woof/core/theta_m.py
+    if int(getattr(dc.run, "do_avgflx_em", 0) or 0) == 1:
+        modules.add("avgflx")                    # woof/core/avgflx.py
     mp_physics = int(dc.run.mp_physics)
     from woof.thompson_generations import CLASSIC_GENERATIONS
     classic_generation = (CLASSIC_GENERATIONS.get(getattr(dc.run,"thompson_version","wrf_461"))
@@ -5909,6 +5918,17 @@ def scratch_slot_registry(cfg: RunConfig, *,
     slots.update(output_shapes(cfg))
     from woof.core.solar_diagnostics import scratch_shapes as solar_shapes
     slots.update(solar_shapes(cfg))
+    # use_theta_m = 1 (woof/core/theta_m.py): the windows' stash, the dry
+    # theta, the converted tendency and qv_diabatic.
+    from woof.core import theta_m as _theta_m
+    if _theta_m.run_theta_m(cfg):
+        slots.update({slot: (nz, ny, nx) for slot in _theta_m.SCRATCH_SLOTS})
+    # do_avgflx_em = 1 (woof/core/avgflx.py): the three means and the
+    # one-word counter.
+    from woof.core.avgflx import COUNT_SLOT as _AVGFLX_COUNT, scratch_shapes as _avgflx_shapes
+    if _avgflx_shapes(cfg):
+        slots.update(_avgflx_shapes(cfg))
+        slots[_AVGFLX_COUNT] = (1,)
     if cfg.lightning_option:
         from woof.lightning_contract import LIGHTNING_OPTIONS
         slots.update({"ltng_" + k: s2 for k in LIGHTNING_OPTIONS[cfg.lightning_option]["fields"]})
@@ -5978,6 +5998,10 @@ def scratch_slot_registry(cfg: RunConfig, *,
         slots.update(acoustic_mudf=s2)
 
     chem_on = bool(getattr(cfg, "chem_sets", ""))
+    if int(getattr(cfg, "do_avgflx_em", 0) or 0) == 1:
+        # do_avgflx_em averages the sumflux fluxes, which dycore.step then
+        # accumulates on a dry state too (woof/core/avgflx.py).
+        slots.update(rk_ru_m=xs, rk_rv_m=ys, rk_ww_m=fl)
     if cfg.moist or cfg.km_opt == 2 or chem_on or (cfg.bl_pbl_physics == 5 and cfg.bl_mynn_tkeadvect):
         # dycore.py acoustic time-averaged mass fluxes (moist scalars,
         # the km_opt=2 TKE carrier and the chem rows advect with them;
@@ -6927,6 +6951,18 @@ SCRATCH_SLOT_LIFETIME_AUDIT = (
         "woof/core/solar_diagnostics.py:capture_solar_step,update",
         "written at the physics step's start and read by the end-of-step "
         "call; the absent-species plane must remain zero"),
+    ScratchSlotLifetime(
+        ("theta_m_*",), "carrying",
+        "woof/core/theta_m.py:physics_window,convert_physics_tendencies,"
+        "microphysics_window",
+        "the stash holds the step-start theta_m from the physics window "
+        "to the tendency conversion and the microphysics window's theta_m "
+        "across the scheme; a sibling domain's step must not interleave"),
+    ScratchSlotLifetime(
+        ("avgflx_rum", "avgflx_rvm", "avgflx_wwm", "avgflx_count"),
+        "carrying", "woof/core/avgflx.py:update",
+        "the history-interval means and their count persist across steps "
+        "and are written at history time"),
     ScratchSlotLifetime(("ieva_*",), "excluded_unproven", "woof/core/ieva.py (zadvect_implicit = 1)", "the explicit/implicit eta mass-flux split and column masses are produced by the dynamics and reused by the scalar split later in the step; no audit has proven a sibling domain cannot interleave, so each domain keeps its own (found by the first HRRR-recipe tree, 2026-10-21)"),
     ScratchSlotLifetime(("fsbm_*",), "excluded_unproven", "woof/core/fast_sbm_runtime.py:apply", "mixed uint64 pointers, int32 status and float64 tallies are not compatible with the float32 arena; all are rewritten inside each call"),
     # Strict WRF mode (woof.wrf_exact.ENABLED).  acoustic_wrf_muts entered

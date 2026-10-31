@@ -1550,6 +1550,12 @@ from woof.core.solar_diagnostics import SOLAR_OUTPUTS as _SOLAR_OUTPUTS
 REGISTRY_VAR_META.update({symbol: (description, units)
     for _slot, symbol, units, description in _SOLAR_OUTPUTS})
 del _SOLAR_OUTPUTS
+# do_avgflx_em = 1: Registry/registry.avgflx's descriptions and units,
+# verbatim (woof/core/avgflx.py HISTORY_FIELDS).
+from woof.core.avgflx import HISTORY_FIELDS as _AVGFLX_FIELDS
+REGISTRY_VAR_META.update({symbol: (description, units)
+    for symbol, (description, units, _stag) in _AVGFLX_FIELDS.items()})
+del _AVGFLX_FIELDS
 
 from woof.core.physics_inventory import LW_SPECTRAL_FLUXES as _LW_SPEC, SW_SPECTRAL_FLUXES as _SW_SPEC
 for _base in (*_SW_SPEC, *_LW_SPEC):

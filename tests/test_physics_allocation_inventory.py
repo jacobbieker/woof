@@ -1579,6 +1579,12 @@ _PHYSICS_ALLOCATION_INVENTORY['woof/core/cldfra3.py'] = {'cal_cldfra3': 3}
 # radius_metres allocates one (nz, ny, nx) float32 only for a caller that
 # passes no output (the tests' replay), never on the step.
 _PHYSICS_ALLOCATION_INVENTORY['woof/core/solar_diagnostics.py'] = {'radius_metres': 1}
+# use_theta_m = 1 (woof/core/theta_m.py): every device plane is a state
+# scratch slot (theta_m_stash/dry/rtheta/qv_diabatic); no pool allocation.
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/theta_m.py'] = {}
+# do_avgflx_em = 1 (woof/core/avgflx.py): the means and the counter are
+# state scratch slots; the counter increment forms one one-word temporary.
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/avgflx.py'] = {}
 # mlx-backend merges, entered together (each module's bound beside it):
 # WRF-Solar FARMS (swint_opt = 2): per step one (ncol,) output block, the
 # per-step CLDFRA, the metre radii, and four 2-D aerosol planes (zeros for

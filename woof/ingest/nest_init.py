@@ -991,8 +991,10 @@ def _adjust_and_rederive(state: DomainState, cfg, coord: VerticalCoord,
     placement does not change, moved 0.5%.
     """
     # WRF's reference T is moist-theta perturbation from 300 K because
-    # use_theta_m=1.  woof stores dry theta; use_theta_m=0 is the
-    # algebraically equivalent dry-frame branch.
+    # use_theta_m=1.  A dry-theta state takes adjust_tempqv's use_theta_m=0
+    # branch, the algebraically equivalent dry frame; a theta_m state
+    # (woof.core.theta_m) takes WRF's own use_theta_m=1 branch.
+    theta_m_state = int(bool(getattr(state, "theta_m", False)))
     theta_300 = state.total_theta() - np.float32(300.0)
     if column_mass_correction:
         pb = state.pb if state.pb.ndim == 3 else state.pb[:, None, None]
@@ -1005,12 +1007,12 @@ def _adjust_and_rederive(state: DomainState, cfg, coord: VerticalCoord,
                 state.mub2d, save_mub, c3h[k0:k1], c4h[k0:k1],
                 float(state.p_top), theta_300[k0:k1],
                 pressure_perturbation[k0:k1], state.qv[k0:k1],
-                use_theta_m=0), cells=theta_300.size)
+                use_theta_m=theta_m_state), cells=theta_300.size)
         else:
             adjust_tempqv(
                 state.mub2d, save_mub, state.c3h, state.c4h,
                 float(state.p_top), theta_300, pressure_perturbation,
-                state.qv, use_theta_m=0)
+                state.qv, use_theta_m=theta_m_state)
     adjusted_theta = theta_300 + np.float32(300.0)
     base = _base_from_blended(cfg, coord, _run_p_top(coord, state), blended)
     state.load_base(coord, base)
@@ -2117,7 +2119,10 @@ def parent_only_init(child_dc: DomainConfig,
                 child=_ladder_arrays(child_coord, with_cf=False),
                 p_top=parent.p_top,
                 hypsometric_opt=int(cfg.hypsometric_opt),
-                base_temp=float(cfg.base_temp))
+                base_temp=float(cfg.base_temp),
+                # use_theta_m = 1: the rebalance reads t as theta_m (its
+                # qvf = 1 branch), as the parent integrates it.
+                use_theta_m=int(getattr(cfg, "use_theta_m", 0) or 0))
             parent = VerticallyNestedParent(parent, vertical_plan)
             coord = child_coord
         else:
@@ -2132,6 +2137,10 @@ def parent_only_init(child_dc: DomainConfig,
     if array_module is not None:
         state_kwargs["array_module"] = array_module
     child = DomainState(cfg, **state_kwargs)
+    # use_theta_m = 1: the child interpolates the parent's t_2, which is
+    # theta_m (WRF nests down t_2 itself), so it holds theta_m too.
+    from woof.core.theta_m import run_theta_m
+    child.theta_m = bool(getattr(parent, "theta_m", run_theta_m(cfg)))
     if (getattr(child, "chem", None) is not None
             and isinstance(child.thp, np.ndarray)):
         raise ValueError(

@@ -93,6 +93,14 @@ def test_new_fields_are_reviewed_defaults_appended_last():
     """
     from woof.config import CHEM_RUN_FIELDS, FIRE_RUN_FIELDS
     names = [f.name for f in dataclasses.fields(RunConfig)]
+    # WRF's do_avgflx_em (output-only AVGFLX means), appended off.
+    assert names.pop() == "do_avgflx_em"
+    assert RunConfig.__dataclass_fields__["do_avgflx_em"].default == 0
+    assert RunConfig.__dataclass_fields__["do_avgflx_em"].kw_only
+    # WRF's use_theta_m (the theta_m prognostic), appended at woof's dry 0.
+    assert names.pop() == "use_theta_m"
+    assert RunConfig.__dataclass_fields__["use_theta_m"].default == 0
+    assert RunConfig.__dataclass_fields__["use_theta_m"].kw_only
     # The radtran diagnostic's OPAC aerosol (output-only), appended off.
     assert names.pop() == "radtran_aerosol"
     assert RunConfig.__dataclass_fields__["radtran_aerosol"].default == "none"
@@ -604,7 +612,10 @@ def _check_frozen_defaults(actual):
                          # output-only WRF-Solar diagnostics, off
                          ("solar_diagnostics", 0),
                          # output-only woof.radtran aerosol, off
-                         ("radtran_aerosol", "none")):
+                         ("radtran_aerosol", "none"),
+                         # the theta_m prognostic (dry 0) and the
+                         # output-only AVGFLX means, off
+                         ("use_theta_m", 0), ("do_avgflx_em", 0)):
         assert actual.pop(field) == value, field
     # WRF's windfarm_opt and its three companions (the fork's Fitch
     # coupling), appended after upstream 1.1.0's fields, off.

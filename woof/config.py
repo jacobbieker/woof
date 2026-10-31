@@ -1922,6 +1922,21 @@ class RunConfig:
     #: mineral aerosol; mp_physics = 28) or an OPAC mixture ("continental_average",
     #: "maritime_clean", "urban", ...; woof.radtran.model.AEROSOL_CHOICES)
     radtran_aerosol: str = "none"
+    #: WRF ``&dynamics use_theta_m`` (Registry.EM_COMMON:2864; one value for
+    #: the run).  1 integrates WRF v4's moist potential temperature
+    #: theta_m = theta*(1 + Rv/Rd*qv) as the prognostic (woof.core.theta_m:
+    #: the EOS without the vapour factor, phy_prep's dry theta for the
+    #: physics, conv_t_tendf_to_moist, moist_physics_finish_em's theta_m
+    #: branch, theta_m initial and boundary state).  woof's default stays 0
+    #: (dry theta, what every earlier configuration integrated); WRF's
+    #: Registry default of 1 reaches a run through the namelist importer.
+    #: Appended last, keyword-only.
+    use_theta_m: int = 0
+    #: WRF ``&dynamics do_avgflx_em`` (Registry/registry.avgflx, max_domains,
+    #: default 0): 1 writes AVGFLX_RUM/RVM/WWM, the history-interval means of
+    #: the mass-coupled wind fluxes (woof.core.avgflx).  Output-only.
+    #: Appended last, keyword-only.
+    do_avgflx_em: int = 0
 
 #: The ways a domain's clock meets the measured terrain rules
 #: (:attr:`RunConfig.terrain_clock`).
@@ -6838,6 +6853,14 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
     deng_why = shcu_refusal(cfg)
     if deng_why is not None:
         raise ConfigurationRefused(deng_why)
+    from woof.core.theta_m import refusal as theta_m_refusal
+    theta_m_why = theta_m_refusal(cfg)
+    if theta_m_why is not None:
+        raise ConfigurationRefused(theta_m_why)
+    from woof.core.avgflx import refusal as avgflx_refusal
+    avgflx_why = avgflx_refusal(cfg)
+    if avgflx_why is not None:
+        raise ConfigurationRefused(avgflx_why)
     feedback_why = cu_rad_feedback_refusal(cfg)
     if feedback_why is not None:
         raise ConfigurationRefused(feedback_why)

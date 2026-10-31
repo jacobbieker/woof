@@ -89,6 +89,8 @@ def prepare_moist_step(state, *, physics_adapter=None, tables=None, boundary_clo
         raise BatchStateUnsupported('this graph binds metric km4/diff6; constant second-order or other closures need their scalar graph')
     if cfg.diff_6th_opt == 1:
         raise BatchStateUnsupported('original moist dynamics refuses unimplemented non-monotonic sixth-order diffusion')
+    if int(getattr(cfg, 'use_theta_m', 0) or 0) == 1:
+        raise BatchStateUnsupported('use_theta_m = 1 (the theta_m prognostic, woof.core.theta_m) has no batched member graph')
     if getattr(cfg, 'mp_zero_out', 0):
         raise BatchStateUnsupported('mp_zero_out runs after the ordinary microphysics call; the batched physics adapter has no zero-out pass')
     if getattr(state,'rthften',None) is not None or getattr(state,'rqvften',None) is not None:

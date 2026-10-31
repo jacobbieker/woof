@@ -173,11 +173,12 @@ def omitted_use_theta_m(wrf_version) -> int:
     """
     return OMITTED_USE_THETA_M_BY_WRF_VERSION[wrf_line_of(wrf_version)]
 
-#: How each import route recovers the dry-theta state it integrates.  The
-#: moist theta_m prognostic is implemented nowhere in the engine and the
-#: initial and boundary state is recovered exactly on all three routes,
-#: so the answer is one announced substitution rather than a refusal on
-#: whichever door the user happened to arrive through.
+#: How each import route recovers the dry-theta state it integrates when
+#: the moist-theta prognostic WRF would run is SUBSTITUTED (a configuration
+#: whose theta_m branch is not wired, woof.core.theta_m.refusal, or the
+#: WRF-file route).  The initial and boundary state is recovered exactly on
+#: all three routes, so the answer is one announced substitution rather than
+#: a refusal on whichever door the user happened to arrive through.
 _THETA_M_ROUTES = {
     "metgrid": ("metgrid TT is physical temperature, so the initial and "
                 "boundary state is recovered exactly"),
@@ -213,27 +214,97 @@ def active_nudging_selectors(fdda: dict) -> list[tuple[str, list]]:
     return active
 
 
+#: Why the WRF-file route keeps dry theta: the wrfinput/wrfbdy door converts
+#: the files' THM/QV/MU into the dry-theta state (woof/ingest/wrfinput.py),
+#: and handing the theta_m prognostic its own THM words is not wired.
+_THETA_M_WRF_FILE_ROUTE = (
+    "the WRF-file door (wrfinput/wrfbdy) restores dry theta and its "
+    "theta_m restoration is not wired")
+
+
 @dataclass(frozen=True)
 class ThetaMDecision:
     """The single answer every door gives about ``use_theta_m``.
 
-    ``moist_theta`` is true when WRF would integrate the moist theta_m
-    prognostic and WOOF integrates dry theta instead -- a DECLARED
-    DIVERGENCE with ``reason``, never a refusal: the divergence is the
-    same on every door, so refusing on one of them and announcing it on
-    the others gave one namelist two answers.
+    ``moist_theta`` is true when WOOF integrates WRF's moist theta_m
+    prognostic (woof.core.theta_m, RunConfig.use_theta_m = 1).
+    ``substituted`` is true when WRF would integrate theta_m and WOOF
+    integrates dry theta instead -- a DECLARED DIVERGENCE with ``reason``,
+    never a refusal: the configuration's theta_m branch is not wired
+    (woof.core.theta_m.refusal) or the route is the WRF-file door.  The
+    answer is the same on every door, so one namelist has one answer.
     """
 
     moist_theta: bool
     route: str
     reason: str
+    substituted: bool = False
+
+
+def theta_m_unwired(inp: dict, max_dom: int = 1) -> str | None:
+    """Why this namelist's physics cannot integrate theta_m, or ``None``.
+
+    Reads the raw &physics/&dynamics selectors (WRF numbering, Registry
+    defaults for an omission) of every active domain through the run's own
+    test, :func:`woof.core.theta_m.refusal`, so the doors and RunConfig
+    validation give one answer.
+    """
+    from types import SimpleNamespace
+    from woof.core.theta_m import refusal
+
+    physics = inp.get("physics", {}) or {}
+    dynamics = inp.get("dynamics", {}) or {}
+
+    def column(section, key, default):
+        values = section.get(key)
+        if values is None:
+            values = [default]
+        if not isinstance(values, (list, tuple)):
+            values = [values]
+        values = list(values)[:max(1, max_dom)]
+        return values + [values[-1]] * (max(1, max_dom) - len(values))
+
+    def scalar(section, key, default):
+        values = section.get(key)
+        if values is None:
+            return default
+        if isinstance(values, (list, tuple)):
+            return values[0] if values else default
+        return values
+
+    try:
+        mp = column(physics, "mp_physics", 0)
+        cu = column(physics, "cu_physics", 0)
+        bl = column(physics, "bl_pbl_physics", 0)
+        sfclay = column(physics, "sf_sfclay_physics", 0)
+        diff = column(dynamics, "diff_opt", 0)
+        isfflx = int(scalar(physics, "isfflx", 1))
+        heat = float(scalar(dynamics, "tke_heat_flux", 0.0))
+        for n in range(max(1, max_dom)):
+            why = refusal(SimpleNamespace(
+                use_theta_m=1, moist=True, mp_physics=int(mp[n]),
+                cu_physics=int(cu[n]), bl_pbl_physics=int(bl[n]),
+                sf_sfclay_physics=int(sfclay[n]),
+                diff_opt=int(diff[n]), isfflx=isfflx, tke_heat_flux=heat))
+            if why is not None:
+                return why
+    except (TypeError, ValueError) as error:
+        return f"its physics selectors could not be read ({error})"
+    return None
 
 
 def theta_m_decision(use_theta_m: int, *,
                      metgrid_initialization: bool = False,
-                     wrf_boundary_use_theta_m: int | None = None
+                     wrf_boundary_use_theta_m: int | None = None,
+                     unwired: str | None = None
                      ) -> ThetaMDecision:
-    """Book ``&dynamics/use_theta_m`` for whichever door is asking."""
+    """Book ``&dynamics/use_theta_m`` for whichever door is asking.
+
+    ``use_theta_m = 1`` is honoured -- WOOF integrates WRF's theta_m
+    prognostic -- unless ``unwired`` names why this configuration's theta_m
+    branch is not wired (:func:`theta_m_unwired`) or the route is the
+    WRF-file door; then it is the declared dry-theta substitution it always
+    was."""
 
     if metgrid_initialization:
         route = "metgrid"
@@ -249,14 +320,24 @@ def theta_m_decision(use_theta_m: int, *,
                     "and boundaries" if route == "metgrid" else
                     "woof transcribes the non-moist-theta use_theta_m=0 "
                     "branch"))
+    if route == "wrf_boundary" and unwired is None:
+        unwired = _THETA_M_WRF_FILE_ROUTE
+    if unwired is not None:
+        return ThetaMDecision(
+            moist_theta=False, route=route, substituted=True,
+            reason=("WRF would integrate moist theta; WOOF integrates dry "
+                    f"theta because {unwired}.  "
+                    + _THETA_M_ROUTES[route]
+                    + "; the integration itself differs from a use_theta_m "
+                    "= 1 WRF run.  Set use_theta_m = 0 in the producing "
+                    "namelist to run WRF on the same variable."))
     return ThetaMDecision(
         moist_theta=True, route=route,
-        reason=("WRF would integrate moist theta; WOOF integrates dry theta "
-                "and the moist-theta branch is not implemented.  "
-                + _THETA_M_ROUTES[route]
-                + "; the integration itself differs from a use_theta_m = 1 "
-                "WRF run.  Set use_theta_m = 0 in the producing namelist to "
-                "run WRF on the same variable."))
+        reason=("woof integrates WRF's moist potential temperature "
+                "prognostic theta_m = theta*(1 + Rv/Rd*qv), the "
+                "use_theta_m = 1 branch (woof.core.theta_m); the initial "
+                "and boundary theta_m is made from the analysed dry theta "
+                "as real.exe makes it (module_initialize_real.F:4923)"))
 
 
 #: ``&time_control/fine_input_stream`` selects which input stream
@@ -6291,9 +6372,9 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
     # An omitted scalar takes the Registry default of the WRF line the
     # namelist was written for: V4 Registry.EM_COMMON:2860 says 1, the
     # V3.9 line operational HRRR runs says 0 (OMITTED_USE_THETA_M_BY_WRF_
-    # VERSION).  woof's h_diabatic/moist-physics transcription implements
-    # only the dry-theta (use_theta_m=0) branch, so a V4 omission must not
-    # silently select 0; it is booked below as the substitution it is.
+    # VERSION).  A V4 omission therefore selects theta_m: honoured where the
+    # configuration's theta_m branch is wired (woof.core.theta_m), booked
+    # below as a substitution where it is not -- never silently 0.
     use_theta_m = (omitted_use_theta_m(wrf_version)
                    if use_theta_m_values is None
                    else int(use_theta_m_values[0]))
@@ -6305,10 +6386,12 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
             raise ValueError("namelist use_theta_m differs from the producing WRF files")
     if use_theta_m not in THETA_M_ADMITTED:
         raise _err("dynamics", "use_theta_m", use_theta_m, "requires 0 or 1")
-    # A SUBSTITUTION, NOT A FIX, AND NOT A REFUSAL.  use_theta_m = 1 (WRF's
-    # Registry default when omitted) selects the moist-theta prognostic for
-    # the whole integration; ArWen integrates dry theta and has no such
-    # branch.  The initial and boundary fields are recovered exactly on all
+    # HONOURED, OR A SUBSTITUTION; NOT A FIX, AND NOT A REFUSAL.
+    # use_theta_m = 1 (WRF's Registry default when omitted) selects the
+    # moist-theta prognostic for the whole integration.  Where its branches
+    # are wired (woof.core.theta_m.refusal answers None, and the route
+    # initializes through woof's own real/ideal door) woof integrates it.
+    # Otherwise woof integrates dry theta.  The initial and boundary fields are recovered exactly on all
     # three routes -- metgrid TT is physical temperature, a moist wrfbdy's
     # THM/QV/MU are converted at each forcing time, and native
     # initialization builds dry theta from physical temperature -- but the
@@ -6320,16 +6403,50 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
     # announced, which is one namelist with two answers.
     decision = theta_m_decision(
         use_theta_m, metgrid_initialization=metgrid_initialization,
-        wrf_boundary_use_theta_m=wrf_boundary_use_theta_m)
-    if decision.moist_theta:
+        wrf_boundary_use_theta_m=wrf_boundary_use_theta_m,
+        unwired=(theta_m_unwired(inp, max_dom) if use_theta_m == 1 else None))
+    # use_theta_m = 1 honoured: the experiment integrates theta_m
+    # (RunConfig.use_theta_m = 1, written to [shared] below).
+    theta_m_integrated = decision.moist_theta
+    if decision.substituted:
         substitutions.append(Substitution(
             key="use_theta_m", wrf_value=1,
             wrf_name="moist potential temperature (theta_m) prognostic",
             gpuwm_key="use_theta_m", gpuwm_value=0,
             gpuwm_name="dry potential temperature",
             reason=decision.reason))
-    else:
+    elif not theta_m_integrated:
         fix("dynamics", "use_theta_m", use_theta_m_values, 0, decision.reason)
+    # do_avgflx_em (Registry/registry.avgflx, max_domains, default 0): the
+    # history-interval means of the coupled wind fluxes (woof/core/avgflx.py),
+    # emitted per domain only where a domain asks, so an omitted or all-zero
+    # key keeps every import byte-identical.  do_avgflx_cugd averages the
+    # Grell-Devenyi (cu_physics = 93) mass fluxes, a scheme woof does not
+    # port, so 1 is refused by name.
+    avgflx_raw = dyn.take("do_avgflx_em")
+    if avgflx_raw is not None:
+        if any(isinstance(value, bool) or not isinstance(value, int)
+               or value not in (0, 1) for value in avgflx_raw):
+            raise _err("dynamics", "do_avgflx_em", avgflx_raw,
+                       "WRF defines 0 and 1 (Registry/registry.avgflx)")
+        avgflx_column = list(avgflx_raw[:max_dom])
+        avgflx_column += [0] * (max_dom - len(avgflx_column))
+        fix("dynamics", "do_avgflx_em", avgflx_raw, avgflx_column,
+            "WRF per-domain switch; 1 writes AVGFLX_RUM/RVM/WWM "
+            "(woof/core/avgflx.py), an omitted domain keeps 0")
+        if any(avgflx_column):
+            topo_columns["do_avgflx_em"] = avgflx_column
+    cugd_raw = dyn.take("do_avgflx_cugd")
+    if cugd_raw is not None:
+        if any(value != 0 for value in cugd_raw):
+            raise _err("dynamics", "do_avgflx_cugd", cugd_raw,
+                       "averages the Grell-Devenyi (cu_physics = 93) "
+                       "CFU1/CFD1/DFU1/EFU1/DFD1/EFD1 mass fluxes "
+                       "(Registry/registry.avgflx), and Grell-Devenyi is "
+                       "not ported, so those fluxes do not exist; set "
+                       "do_avgflx_cugd = 0")
+        fix("dynamics", "do_avgflx_cugd", cugd_raw, 0,
+            "0, WRF's default: no Grell-Devenyi flux averages")
     top_lid_values = dyn.col("top_lid", max_dom)
     if top_lid_values is None:
         # WRF's Registry default (Registry.EM_COMMON:2898, .false.): an
@@ -7110,6 +7227,12 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
         "# hypsometric_opt 2, h_sca_adv_order 5.",
         f"emdiv = {_fmt(emdiv)}",
         f"hypsometric_opt = {hypsometric_opt}",
+        # use_theta_m = 1 honoured (theta_m_decision): WRF's moist-theta
+        # prognostic.  Written only then, so every other import keeps its
+        # bytes and RunConfig's default 0.
+        *(["# &dynamics use_theta_m = 1: WRF's theta_m prognostic "
+           "(woof.core.theta_m).",
+           "use_theta_m = 1"] if theta_m_integrated else []),
         "# Adaptive time step (Registry.EM_COMMON:2269-2281).  Off unless",
         "# the namelist asked for it; with it off every value below is",
         "# WRF's Registry default and nothing reads them.",

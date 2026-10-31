@@ -2306,6 +2306,10 @@ def execute_experiment(
             # cadence -- and dtbc -- is evaluated against it.
             streamed_here = _streamed(grid_id)
             if streamed_here is not None:
+                if int(getattr(node.cfg.run, "do_avgflx_em", 0)) == 1:
+                    raise RuntimeError(
+                        "do_avgflx_em = 1 on a streamed domain is not wired: "
+                        "the tile sweep carries no AVGFLX means")
                 streamed_here.impose_clock(node.state.elapsed_seconds)
             # Lagged gate, resident domain: the schemes' status words are
             # ORed into the monitor's ledger on the device instead of each
@@ -2330,7 +2334,12 @@ def execute_experiment(
                         and node.cfg.run.mp_physics in REFL_10CM_MICROPHYSICS
                         and clock.history_rings_within_step()),
                     **({"fire_history_due": clock.history_rings_within_step()}
-                       if node.cfg.run.ifire == 2 else {}))
+                       if node.cfg.run.ifire == 2 else {}),
+                    # do_avgflx_em = 1: the means restart after each
+                    # history write (solve_em.F:3498-3534).
+                    **({"avgflx_history_due": clock.history_rings_within_step()}
+                       if int(getattr(node.cfg.run, "do_avgflx_em", 0)) == 1
+                       else {}))
             if not lagged_here and step_ledger is not None:
                 # One read for every scheme site of this step; raises the
                 # first site's own refusal.  Before anything downstream.

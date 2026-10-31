@@ -387,6 +387,10 @@ _DOMAIN_RUN_OVERRIDES = (
     # Deng on its convection-permitting nest and not on the parent.
     "shcu_physics", "cu_rad_feedback",
     "radtran_aerosol",
+    # WRF's do_avgflx_em is a max_domains column (Registry/registry.avgflx);
+    # output-only.  use_theta_m is one value for the run in WRF
+    # (Registry.EM_COMMON:2864) and stays [shared].
+    "do_avgflx_em",
     # LES-nest inflow seeding (P3): per-domain because the mechanism IS
     # per-edge -- it perturbs one child's rolling nest-boundary tables,
     # validate_run_config refuses it on a non-nested domain, and like

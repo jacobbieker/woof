@@ -67,7 +67,9 @@ def test_moist_theta_on_the_metem_door_is_a_declared_substitution_the_user_is_to
     entry=next(item for item in report.substitutions if item.key=='use_theta_m')
     assert (entry.wrf_value, entry.gpuwm_value)==(1, 0)
     assert 'WOOF integrates dry theta' in entry.reason
-    assert 'not implemented' in entry.reason
+    # The fixture's microphysics finishes theta in its own kernel, so the
+    # theta_m branch is not wired for it and the reason names it.
+    assert 'is not wired' in entry.reason or 'wired for' in entry.reason
     # The door gate admits the declared divergence (isolated from the
     # fixture's own mp_physics = 55 package substitution, which it refuses) ...
     require_preserved_wrf_selectors(SimpleNamespace(substitutions=tuple(

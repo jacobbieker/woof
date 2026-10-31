@@ -791,8 +791,17 @@ def state_frame(
             "MUB": cp.asnumpy(state.mub2d),
             "HGT": cp.asnumpy(state.ht),
         }
-        # WOOF advances dry perturbation theta, the USE_THETA_M=0 record.
+        # USE_THETA_M = 0: the prognostic IS dry theta and THM = T.  Under
+        # use_theta_m = 1 THM is the prognostic theta_m - 300 and T is the
+        # dry th_phy_m_t0 WRF's update_phys_fields forms from it
+        # (module_diagnostics_driver.F:1252; woof.core.theta_m).
         fields["THM"] = fields["T"]
+        if getattr(state, "theta_m", False):
+            from woof.core.theta_m import dry_view
+            with dry_view(state):
+                fields["T"] = (cp.asnumpy(state.thp) if _WRF_EXACT
+                               else cp.asnumpy(state.total_theta())
+                               - np.float32(300.0))
         if include_diagnostic_pressure:
             pb = state.pb
             pb3 = pb if pb.ndim == 3 else pb[:, None, None]
@@ -1707,6 +1716,13 @@ def _device_state_frame(state, *, include_diagnostic_pressure: bool = True):
             "PHB": phb, "MUB": state.mub2d, "HGT": state.ht,
         }
         fields["THM"] = fields["T"]
+        if getattr(state, "theta_m", False):
+            # use_theta_m = 1: T is the dry theta (see state_frame); a copy,
+            # since the view's scratch is rewritten by the next conversion.
+            from woof.core.theta_m import dry_view
+            with dry_view(state):
+                fields["T"] = (state.thp.copy() if _WRF_EXACT
+                               else state.total_theta() - cp.float32(300.0))
         if include_diagnostic_pressure:
             pb = state.pb
             pb3 = pb if pb.ndim == 3 else pb[:, None, None]

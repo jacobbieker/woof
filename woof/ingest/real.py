@@ -6341,6 +6341,13 @@ def initialize_real(snapshot: HorizontalSnapshot, cfg: RunConfig,
         hydrometeor_initialization["vertical_disposition"] = (
             vertical_disposition_job.result())
         mark_timing("hydrometeor_disposition_receipt_join")
+    # use_theta_m = 1: real.exe's last statement turns the dry theta into
+    # theta_m, "This field will be in the model IC and used to construct the
+    # BC file" (module_initialize_real.F:4918-4931).  The receipts above and
+    # the result's pressures stay the dry initialization's, as real.exe's do.
+    from woof.core.theta_m import convert_initial_state, run_theta_m
+    if run_theta_m(cfg) and getattr(state, "qv", None) is not None:
+        convert_initial_state(state)
     if timing_report is not None:
         timing_report["total_seconds"] = perf_counter() - timing_start
     result = RealInitResult(

@@ -438,6 +438,10 @@ class DomainState:
         if xp is not np and xp is not cp:
             raise TypeError("array_module must be numpy or cupy")
         self._host_setup_state = array_module is np
+        # Which theta ``thp`` holds: False (dry theta) on every new state;
+        # woof.core.theta_m.convert_initial_state, and the restore of a
+        # use_theta_m = 1 checkpoint, set it (WRF's t_2 is theta_m then).
+        self.theta_m = False
         # Same definition as acoustic._spec_zone/_boundary_forced. Stored
         # geometry lets all health scans keep the interior scalar floor.
         self._health_spec_zone = (max(0, int(cfg.spec_zone))
@@ -1081,6 +1085,12 @@ class DomainState:
 
         from woof.core.solar_diagnostics import initialize as initialize_solar
         initialize_solar(self, cfg)
+
+        # do_avgflx_em = 1: start_em's zeroed AVGFLX means and count.
+        if (int(getattr(cfg, "do_avgflx_em", 0) or 0) == 1
+                and not self._host_setup_state):
+            from woof.core.avgflx import initialize as initialize_avgflx
+            initialize_avgflx(self, cfg)
 
         # Chem species (woof/core/chem_state.py): the ``chem_<row>`` /
         # ``chem0_<row>`` arena views and ``self.chem``, allocated ONLY when

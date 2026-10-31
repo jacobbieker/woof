@@ -103,15 +103,17 @@ def test_the_fields_are_appended_last_at_wrfs_defaults():
     # appended after them: the output-only rrtmg_spectral_output, WRF's
     # couple_farms, the output-only woof.radtran diagnostic's eight keys,
     # then the shallow-cumulus selector and cumulus-radiation feedback,
-    # the output-only solar_diagnostics and radtran_aerosol
-    assert names[-18:] == ["windfarm_opt", "windfarm_ij",
+    # the output-only solar_diagnostics and radtran_aerosol, WRF's
+    # use_theta_m and the output-only do_avgflx_em
+    assert names[-20:] == ["windfarm_opt", "windfarm_ij",
                            "windfarm_tke_factor", "windfarm_turbine_file",
                            "rrtmg_spectral_output", "couple_farms",
                            "radtran_wavelengths", "radtran_interval_s", "radtran_umu",
                            "radtran_phi", "radtran_mol_abs_param", "radtran_solver",
                            "radtran_streams", "radtran_pseudospherical",
                            "shcu_physics", "cu_rad_feedback",
-                           "solar_diagnostics", "radtran_aerosol"]
+                           "solar_diagnostics", "radtran_aerosol",
+                           "use_theta_m", "do_avgflx_em"]
     for name, default in WINDFARM_RUN_DEFAULTS.items():
         assert RunConfig.__dataclass_fields__[name].default == default
     # Registry.EM_COMMON:3003-3005.

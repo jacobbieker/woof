@@ -517,6 +517,10 @@ STATE_INFRA_ATTRS = frozenset({
     # prognostic. Stage entry rebuilds it; a fresh standalone caller seeds
     # the buffer when the marker is absent. Checkpoints are step-boundary.
     "_wrf_acoustic_muts_initialized",
+    # use_theta_m: which theta ``thp`` holds (woof.core.theta_m).  Not a
+    # value of its own: the restore sets it from the validated config echo
+    # (_apply_validated_restart), and a door sets it when it converts.
+    "theta_m",
     # Spectral backing is serialized through its 142 named field views.
     "fast_sbm_bins", "fast_sbm_itimestep",
     # Cached launch descriptors are rebuilt from the live state buffers.
@@ -692,6 +696,11 @@ SERIALIZED_SCRATCH_SLOTS = frozenset({
     "ltng_lat", "ltng_lon", "ltng_ktop_deep", "ltng_lpi",
     # WRF diff_opt=1 keeps the original thermal reference after restart.
     "diff1_theta_initial",
+    # do_avgflx_em = 1 (woof/core/avgflx.py): AVGFLX_RUM/RVM/WWM are "rh" in
+    # Registry/registry.avgflx, so a checkpoint carries them.  The counter
+    # (avgflx_count, "r") is REBUILT at 0 below: start_em sets
+    # avgflx_count = 0 on every start, restart included (start_em.F:1304).
+    "avgflx_rum", "avgflx_rvm", "avgflx_wwm",
     "mp_rainnc", "mp_rainncv", "mp_snownc", "mp_snowncv",
     "mp_graupelnc", "mp_graupelncv", "mp_sr", "mp_kessler_sr",
     "mp_hailnc", "mp_hailncv",
@@ -839,6 +848,9 @@ RESTART_ONLY_DRIVER_SLOTS = frozenset({
 #: rebuilds are EXACT names only â€” a future accumulator slot under those
 #: prefixes must be classified explicitly instead of silently dropping.
 REBUILT_SCRATCH_SLOTS = frozenset({
+    # do_avgflx_em's counter: start_em's avgflx_count = 0 on every start
+    # (woof/core/avgflx.py creates it at 0 on the first update after a restore).
+    "avgflx_count",
     "cl_zero", "output_zero", "gsd_zero", "gsd_uh_use", "gsd_pressure_w", "gsd_temperature", "gsd_density", "gsd_wind10", "gsd_wind80",
     "hail_zero", "hail_temperature", "hail_height", "hail_density",
     "hail_new_mask", "hail_new_duration",
@@ -968,6 +980,10 @@ REBUILT_SCRATCH_SLOTS = frozenset({
 })
 
 REBUILT_SCRATCH_PREFIXES = (
+    # use_theta_m = 1 (woof/core/theta_m.py): the windows' stash, the dry
+    # theta, the converted tendency and qv_diabatic, each written before it
+    # is read inside one call of the step.
+    "theta_m_",
     # WRF-Solar diagnostics: the step-start snapshots (phy_prep density and
     # dz8w, the Solar_step cloud and COSZEN) rewritten at every physics step
     # before the end-of-step call reads them, and that call's work planes.
@@ -2711,7 +2727,9 @@ _DIGEST_DROPPED_DIAGNOSTIC_FIELDS = frozenset(
      # WRF-Solar diagnostics: output-only; no earlier digest carried it.
      "solar_diagnostics",
      # woof.radtran OPAC aerosol: output-only; no earlier digest carried it.
-     "radtran_aerosol"})
+     "radtran_aerosol",
+     # do_avgflx_em: output-only; no earlier digest carried it.
+     "do_avgflx_em"})
 
 
 #: WRF's slope_rad / topo_shading / shadlen (woof.core.topo_radiation),
@@ -2834,6 +2852,12 @@ from woof.checkpoint_identity import (  # noqa: E402
 #: before them ran: dropped from the echo when off, read back as off.
 SHALLOW_CUMULUS_RUN_DEFAULTS = {"shcu_physics": 0, "cu_rad_feedback": False}
 
+#: use_theta_m and do_avgflx_em at the value every checkpoint written before
+#: them ran (dry theta, no AVGFLX means): dropped from the echo when off, read
+#: back as off.  use_theta_m = 1 against a dry checkpoint still refuses: the
+#: serialized thp is the other theta.
+THETA_M_AVGFLX_RUN_DEFAULTS = {"use_theta_m": 0, "do_avgflx_em": 0}
+
 
 def _drop_default_off_run_keys(values: dict) -> None:
     """Drop every default-off RunConfig key that older headers omit.
@@ -2912,6 +2936,12 @@ def _drop_default_off_run_keys(values: dict) -> None:
     # earlier header.
     if not values.get("solar_diagnostics", 0):
         values.pop("solar_diagnostics", None)
+    # use_theta_m (the theta_m prognostic) and do_avgflx_em (output-only):
+    # off is every earlier header; use_theta_m = 1 is physics and binds.
+    if not values.get("use_theta_m", 0):
+        values.pop("use_theta_m", None)
+    if not values.get("do_avgflx_em", 0):
+        values.pop("do_avgflx_em", None)
     if not values.get("scalar_pblmix", 0):
         values.pop("scalar_pblmix", None)
     # MYNN-EDMF's split mixing keys (lane rrfs288-gap1): off mixes nothing
@@ -5064,6 +5094,12 @@ def _require_config_match(stored_config: dict, cfg, path) -> None:
             # written before the Deng port ran without it.  A moved
             # selector still refuses below.
             default = SHALLOW_CUMULUS_RUN_DEFAULTS[key]
+            stored = default if stored is absent else stored
+            live = default if live is absent else live
+        if key in THETA_M_AVGFLX_RUN_DEFAULTS:
+            # Absent is off (_drop_default_off_run_keys); a switched-on
+            # theta_m against a dry-theta checkpoint refuses below.
+            default = THETA_M_AVGFLX_RUN_DEFAULTS[key]
             stored = default if stored is absent else stored
             live = default if live is absent else live
         if key in TOPO_RADIATION_RUN_DEFAULTS:
@@ -8394,6 +8430,11 @@ def _apply_validated_restart(validated: _ValidatedRestart,
                     if key.startswith("state/")}
     for name, host in stored_state.items():
         getattr(state, name)[...] = asarray(host)
+    # use_theta_m = 1: the serialized thp IS theta_m' (WRF's restart THM_2);
+    # the config echo validated above binds the switch, so the flag follows
+    # the run's configuration (woof.core.theta_m).
+    from woof.core.theta_m import run_theta_m
+    state.theta_m = run_theta_m(cfg)
     # The checkpoint-only carriers.  A checkpoint written before this
     # namespace existed simply has none, and the freshly allocated zeros
     # are what that build resumed with anyway -- so absence is a note's
