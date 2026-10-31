@@ -996,6 +996,9 @@ REBUILT_SCRATCH_PREFIXES = (
     # The partial-depth nest's mass-budget residual (partial_nest_run.py),
     # rewritten by every forcing call before it is read.
     "partial_nest_",
+    # Its radiation extended column (partial_nest_physics.py): the parent's
+    # SINT-ed levels above the interface, rebuilt every radiation call.
+    "partial_ext_",
     # The monotonic chem stage's workspace (woof/core/chem_context.py
     # MONO_SCRATCH_SLOTS, rewritten by every launch before it is read) and
     # its zero implicit vertical flux (MONO_IMPLICIT_SLOT, allocated zero
