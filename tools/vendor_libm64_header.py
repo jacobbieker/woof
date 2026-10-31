@@ -8,7 +8,10 @@ This is a development tool.  The generated header is the shipped source.
 import re
 from pathlib import Path
 
-from portable_libm64_header import expand
+try:
+    from tools.portable_libm64_header import expand
+except ImportError:  # run as a path from a checkout
+    from portable_libm64_header import expand
 
 ROOT = Path(__file__).resolve().parents[1]
 

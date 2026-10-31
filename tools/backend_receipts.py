@@ -18,8 +18,11 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import launch_trace  # noqa: E402
+try:
+    from tools import launch_trace
+except ImportError:  # run as a path from a checkout
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import launch_trace  # noqa: E402
 
 
 def first_divergence(a_path: Path, b_path: Path, known=None):

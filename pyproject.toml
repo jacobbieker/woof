@@ -47,8 +47,11 @@ gpu = ["recast-woof[gpu-cu12]"]
 # Apple-silicon GPU through MLX (Metal); the forecast's cupy calls run on a
 # facade over mlx.core (woof.backend), its kernels translated to Metal.
 # libclang: the CUDA-to-Metal translator's typed front end (woof.backend.translate).
+# nanobind: the Metal extension (woof/backend/metal/ext) is built against it
+# on first use; 3.x carries the internals ABI mlx 0.32 is built with.
 gpu-mlx = ["mlx>=0.29; sys_platform == 'darwin' and platform_machine == 'arm64'",
-           "libclang>=18.1"]
+           "libclang>=18.1",
+           "nanobind>=3.0,<3.2; sys_platform == 'darwin' and platform_machine == 'arm64'"]
 # The wrf-rust Python bindings, for the renderer's Python-side helpers.
 render = ["wrf-rust>=0.2.39,<0.3"]
 # The legacy Python warp path of the high-resolution static builder; the
@@ -117,6 +120,17 @@ woof = [
 "woof.hydro" = ["kernels/*.cu", "kernels/t-route-LICENSE.txt", "kernels/t-route-TERMS.txt"]
 "woof.hydro.noahowp" = ["*.cu", "schema.json", "LICENSE", "UPSTREAM-TERMS.md", "NOTICE", "parameters/*.TBL"]
 "woof.native_step" = ["*.c", "README.md"]
+# The Apple-silicon backend's runtime sources: the translator's CUDA
+# declarations and libc/libm include shims, the Metal preludes and binary32/
+# binary64 headers, the arithmetic receipt, the host-C++ tier's shim and
+# libm, and the Metal extension the loader builds on first use.  The
+# startup hook is also copied to the site-packages root (setup.py
+# BACKEND_STARTUP_HOOK); inside the package it is inert.
+"woof.backend" = ["*.pth"]
+"woof.backend.host" = ["*.h", "*.cpp"]
+"woof.backend.metal" = ["*.h", "*.json"]
+"woof.backend.metal.ext" = ["*.cpp", "*.txt"]
+"woof.backend.translate" = ["*.h", "*.cuh", "include/*"]
 "woof.obs" = ["data/**/*"]
 "woof.verify" = ["*.json"]
 "woof.certify" = ["*.json"]

@@ -158,6 +158,19 @@ _PROVIDERS: dict[str, tuple[str, ...]] = {
     # tools/hf_inventory.py, a maintainer inventory instrument -- see
     # _OPTIONAL_BY_DESIGN.
     "requests": ("requests",),
+    # The Apple-silicon backend (woof/backend): MLX arrays, the libclang
+    # front end of the CUDA-to-Metal translator, and the nanobind the Metal
+    # extension is built against -- each in [gpu-mlx], see _EXTRA_GATED.
+    "mlx": ("mlx",),
+    "clang": ("libclang",),
+    "nanobind": ("nanobind",),
+    # NO distribution provides these: maintainer instruments that import a
+    # non-shipped directory after a sys.path insert -- see
+    # _OPTIONAL_BY_DESIGN.
+    "host_backend": (),
+    "cupti_counter": (),
+    "test_smallstep_vertical_wrf471_parity": (),
+    "test_smallstep_horizontal_wrf471_parity": (),
 }
 
 #: Modules this project deliberately never declares, because a *declared*
@@ -249,6 +262,25 @@ _EARTH2_INTERPRETER = (
 )
 
 _OPTIONAL_BY_DESIGN: dict[str, str] = {
+    "host_backend": (
+        "tools/kernel_probe.py --host puts tools/thompson_real_column_parity on "
+        "sys.path to run a kernel on its host shim; that directory does not ship "
+        "(packages.find names `tools`, not `tools*`), and the probe is a checkout "
+        "instrument no wheel-user path reaches."
+    ),
+    "cupti_counter": (
+        "tools/profile_launch_overhead.py --lane cupti loads a CUPTI counter "
+        "built from a checkout's --build-dir; a maintainer profiling "
+        "instrument, never on a forecast path."
+    ),
+    "test_smallstep_vertical_wrf471_parity": (
+        "tools/record_metal_pins.py puts tests/ on sys.path to re-measure the "
+        "small-step oracles on a Mac before recording a Metal pin; tests/ does "
+        "not ship, and the recorder runs from a checkout only."
+    ),
+    "test_smallstep_horizontal_wrf471_parity": (
+        "tools/record_metal_pins.py, as for the vertical small-step module."
+    ),
     "boto3": (
         "woof/hex/analysis_bundle.py tries boto3 inside a try/except for an s3:// analysis bundle and "
         "falls back to the HTTPS route without it; no default door needs it."
@@ -343,6 +375,9 @@ _OPTIONAL_BY_DESIGN: dict[str, str] = {
 #: capability is genuinely optional"; it is deliberately more work than
 #: promoting the dependency.
 _EXTRA_GATED: dict[str, tuple[tuple[str, ...], str]] = {
+    "mlx": (("gpu-mlx", "all-mlx"), "The Apple-silicon (MLX/Metal) backend, selected only on darwin-arm64 or by WOOF_BACKEND=mlx (woof/backend). Without [gpu-mlx] that backend is unavailable and says so (BackendUnavailable names the extra); CUDA and CPU routes never import it."),
+    "clang": (("gpu-mlx", "all-mlx"), "The Apple-silicon (MLX/Metal) backend, selected only on darwin-arm64 or by WOOF_BACKEND=mlx (woof/backend). Without [gpu-mlx] that backend is unavailable and says so (BackendUnavailable names the extra); CUDA and CPU routes never import it."),
+    "nanobind": (("gpu-mlx", "all-mlx"), "The Apple-silicon (MLX/Metal) backend, selected only on darwin-arm64 or by WOOF_BACKEND=mlx (woof/backend). Without [gpu-mlx] that backend is unavailable and says so (BackendUnavailable names the extra); CUDA and CPU routes never import it."),
     "pyarrow": (
         ("obs",),
         "Reads the Dynamical.org ASOS Parquet archive "
@@ -861,7 +896,7 @@ def test_all_covers_every_extra_a_forecast_user_needs(declaration, pyproject):
     """
 
     optional = pyproject["project"].get("optional-dependencies", {})
-    aggregates = {"all", "all-cu12", "all-cu13", "gpu"}
+    aggregates = {"all", "all-cu12", "all-cu13", "all-mlx", "gpu"}
     excused = {
         "dev": "the test suite, not a runtime capability",
         "publish": "maintainer-only mirror publishing, needs credentials "
@@ -886,6 +921,10 @@ def test_all_covers_every_extra_a_forecast_user_needs(declaration, pyproject):
                "would be dead weight in the one-liner. The agent that "
                "does need it is told the extra by name in the guarded "
                "import's remedy sentence and in docs/mcp-server.md.",
+        "gpu-mlx": "the Apple-silicon backend, which [all-cu12] and "
+                   "[all-cu13] exclude as they exclude each other's CuPy: "
+                   "a CUDA install never runs Metal, and its own aggregate "
+                   "is [all-mlx].",
     }
     for major, other in (("cu12", "cu13"), ("cu13", "cu12")):
         covered = declaration["extras"][f"all-{major}"]
