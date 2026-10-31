@@ -730,13 +730,17 @@ MAPPED_PREPARATION_TELEMETRY_KEYS = frozenset({
 #: own declared grid and pairs cell for cell (lane/286-fixed-step-grid,
 #: horiz.declared_grid_pairing); without it here the runner refused every
 #: such bundle as an unknown top-level inventory.
+#: ``upper_source`` likewise: written only when a second source carried the
+#: column above the mapped one (1ca604652, the stratospheric top-up's seam
+#: and appended levels); without it the runner refused every such bundle.
 MAPPED_OPTIONAL_PROOF_KEYS = frozenset({
     # The mapped writer records the existing preparation-time land floor.
     # Its absence remains valid; rejecting the present receipt prevents a
     # correctly prepared land column from reaching the forecast reader.
     "soil_moisture_floor",
     "statics_corridor", "source_vertical_ladder", "soil_temperature_repair",
-    "init_caps", "initial_perturbation", "posting", "initial_source", "source_pairing"})
+    "init_caps", "initial_perturbation", "posting", "initial_source", "source_pairing",
+    "upper_source"})
 _SOURCE_ADAPTER = {
     # The generic mapped adapter, truthfully: a packaged profile is
     # prepared by `woof.mapped_direct` with nothing model-specific in
