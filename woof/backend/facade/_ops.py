@@ -225,6 +225,35 @@ def copyto(dst, src, casting="same_kind", where=None):
 
 # ---------------------------------------------------------------- element-wise
 
+#: binary32 arithmetic that CuPy's ElementwiseKernels run with the process's
+#: NVRTC options: under GPUWM_WRF_EXACT=1 those carry --ftz=false, so CuPy
+#: keeps subnormal operands and results.  MLX's own arithmetic flushes them
+#: on Metal, so in that process these go through a translated kernel,
+#: whose float is then f32s (tests/test_bandwidth_glue.py compares glue
+#: kernels with eager `dst + src` on subnormal words).
+_SUBNORMAL_ARITH = {"add": "+", "subtract": "-", "multiply": "*", "divide": "/", "true_divide": "/"}
+_SUBNORMAL_KERNELS: dict = {}
+
+
+def _keeps_subnormals() -> bool:
+    import os
+    return os.environ.get("GPUWM_WRF_EXACT", "0") == "1"
+
+
+def _subnormal_arith(np_name, a, b):
+    from woof.backend.facade._elementwise import ElementwiseKernel
+    op = _SUBNORMAL_ARITH[np_name]
+    k = _SUBNORMAL_KERNELS.get(op)
+    if k is None:
+        k = _SUBNORMAL_KERNELS[op] = ElementwiseKernel(
+            "float32 x, float32 y", "float32 z", f"z = x {op} y", f"woof_f32_{np_name}")
+    if not isinstance(a, (ndarray, np.ndarray)):
+        a = np.float32(a)
+    if not isinstance(b, (ndarray, np.ndarray)):
+        b = np.float32(b)
+    return k(a, b)
+
+
 def _apply(np_name, mx_name, *args, out=None, dtype=None, result_dtype=None):
     hints = [_dtype_hint(x) for x in args]
     if result_dtype is None:
@@ -238,6 +267,13 @@ def _apply(np_name, mx_name, *args, out=None, dtype=None, result_dtype=None):
     involves_f64 = (np.dtype(result_dtype) == np.float64
                     or any(isinstance(h, np.dtype) and h == np.float64 for h in hints))
     mx = _mx()
+    if (not involves_f64 and np_name in _SUBNORMAL_ARITH and np.dtype(result_dtype) == np.float32
+            and _keeps_subnormals()):
+        result = _subnormal_arith(np_name, args[0], args[1])
+        if out is not None:
+            copyto(out, result)
+            return out
+        return result
     if involves_f64 or mx_name is None or not hasattr(mx, mx_name):
         host = getattr(np, np_name)(*[_host(x) for x in args])
         if dtype is not None:

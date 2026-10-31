@@ -83,6 +83,13 @@ nondeterministic, three diagnostic variables help:
   `WOOF_KEEP_CALL=f,g` select the alternatives, for diagnosis.
   `tools/kernel_probe.py --repeat N` shows whether a kernel's words vary
   across replays.
+* **FAST_SBM inlines its `__noinline__` helpers too**
+  (`INLINE_NOINLINE_BY_KERNEL`, keyed on `fsbm_tile_*`). Out of line, its
+  tile kernel gave wrong words in 3 of 49 columns of the kc2 replay; fully
+  inlined it is CUDA's `--fmad=false` words but for 1-ulp deltas in a few
+  liquid-bin words. The other units with `__noinline__` give the same
+  results either way and keep it (fully inlined, sfclay compiled for 46
+  minutes cold). `WOOF_INLINE_NOINLINE=1|0` forces either, for diagnosis.
 * **goddard compiles with out-of-line calls** (`INLINE_POLICY_BY_UNIT`).
   Fully inlined, its radiation kernel crashes Metal's compiler service
   (`XPC_ERROR_CONNECTION_INTERRUPTED`). Its device oracle holds the result to
@@ -92,9 +99,14 @@ nondeterministic, three diagnostic variables help:
   a hash). Fully inlined, the column kernel had not finished compiling after
   35 minutes; out of line it takes a few. Given CUDA's init blob, three
   steps of eight columns are CUDA's words in every field and diagnostic.
-  The blob itself is built by `rw-tempo` with the platform C library's
-  `tgamma`, so on macOS it differs from Linux's in 2772 of 122 million words,
-  and TEMPO on a Mac is not CUDA's words with its own blob.
+  The blob is built by `rw-tempo`, whose reference is gfortran on glibc.
+  The platform libm moved 2772 of its 122 million words on macOS: `rw-tempo`
+  answers `tgamma` from glibc's own words for every argument it passes
+  (`glibc_tgamma.rs`), and the six tables computed with exp/log/pow/atan
+  (t_efrw, t_efsw, tpc_wev, tnc_wev, tps_iaus, tni_iaus; the same for every
+  init option) are overlaid from `woof/data/tempo/glibc-libm-fields.npz`
+  when they differ (`woof.core.tempo_rust`). The Mac's blob is now the
+  Linux blob byte for byte (sha256 08fc1095…), which itself is unchanged.
 * **Preprocessing is NVRTC's.** The translator defines `__CUDA_ARCH__`
   (860, the comparison machine's) because NVRTC compiles device code only:
   TEMPO's `__CUDA_ARCH__` branch uses woof's glibc ports where its host
@@ -105,6 +117,15 @@ nondeterministic, three diagnostic variables help:
   when clang resolved its parameter as `float`. Otherwise `g(f64, float)`
   beside `g(f64, f64)` is ambiguous in Metal, because both need a
   user-defined conversion.
+* **Float vectors in an `--ftz=false` unit** keep `float` components (Metal
+  has no vector of `f32s`). A component read as a value is `f32s(v.x)`, an
+  assignment stores `float(e)`, `v.x op= e` goes through `f32s`, and
+  `make_floatN`/`{...}` take `float(e)` elements. A `volatile float` value
+  loses its qualifier there (f32s arithmetic is calls, never contracted),
+  and in a unit with base classes C++'s implicit float→integer conversions
+  are spelled as casts before the bases are flattened into templates.
+* **A kernel-local `blockIdx`/`gridDim`** (the ensemble batch adapter's
+  virtual block coordinates) hides the builtin, as in CUDA.
 * **Static constexpr members.** MSL is C++14, so an out-of-line call that
   binds a `static constexpr` data member to a `const&` parameter odr-uses
   it. The translator therefore emits the member's out-of-class definition.
@@ -153,7 +174,9 @@ and `astype`, `copy(order="K")`, `array(order=...)` and the `*_like`
 constructors keep a column-major prototype's layout. Kernels index these
 buffers directly, so a dropped layout scrambles fields rather than failing
 (SATMEDMF's column packing did). `tests/test_metal_memory_order.py` guards
-this. Elementwise results are row-major whatever their operands' layout;
+this. `reshape` of a strided view is a view wherever NumPy's would be
+(a padded member slab keeps its backing), and `x.data.mem` is the whole
+allocation, one object per buffer, as CuPy's is. Elementwise results are row-major whatever their operands' layout;
 make a column-major kernel argument explicit with `asfortranarray`.
 
 ## Threads
@@ -241,5 +264,7 @@ The envelope receipts per backend are in the same directory.
    gives a 3-D launch.
 3. `tools/metal_unit_errors.py UNIT`: show each Metal compile error beside its
    MSL line.
-4. `tools/metal_translation_census.py`: which units translate and compile.
+4. `tools/metal_translation_census.py`: which units translate and compile. Cached
+   results are keyed on a fingerprint of the translator, the Metal headers
+   and the kernel sources, so a stale result is never reported.
 5. `tools/cupy_surface_census.py --gate`: which CuPy paths the facade lacks.

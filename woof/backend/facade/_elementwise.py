@@ -33,6 +33,11 @@ class _Param:
             raise ValueError(f"cannot read ElementwiseKernel parameter {text!r}")
         self.type, self.name = words
         self.generic = self.type not in _CTYPES
+        # CuPy's ParameterInfo: the C type ("T" for a generic), the dtype
+        # (None for a generic), constness (inputs), and raw-ness
+        self.ctype = self.type if self.generic else _CTYPES[self.type]
+        self.dtype = None if self.generic else np.dtype(self.type)
+        self.is_const = False
 
 
 def _params(text: str):
@@ -45,6 +50,13 @@ class ElementwiseKernel:
                  after_loop="", options=(), **_):
         self.inputs = _params(in_params)
         self.outputs = _params(out_params)
+        for p in self.inputs:
+            p.is_const = True
+        # CuPy's names for the parameter lists
+        self.in_params = tuple(self.inputs)
+        self.out_params = tuple(self.outputs)
+        self.params = self.in_params + self.out_params
+        self.nin, self.nout = len(self.inputs), len(self.outputs)
         self.operation = operation
         self.name = re.sub(r"\W", "_", name)
         self.preamble = preamble or ""

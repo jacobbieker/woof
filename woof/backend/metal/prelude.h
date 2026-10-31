@@ -417,6 +417,7 @@ static inline uint __brev(uint a) { return metal::reverse_bits(a); }
 
 static inline void __syncthreads() { metal::threadgroup_barrier(metal::mem_flags::mem_threadgroup | metal::mem_flags::mem_device); }
 static inline void __threadfence() { metal::atomic_thread_fence(metal::mem_flags::mem_device, metal::memory_order_seq_cst, metal::thread_scope_device); }
+static inline void __woof_compiler_fence() { metal::atomic_thread_fence(metal::mem_flags::mem_device, metal::memory_order_seq_cst, metal::thread_scope_thread); }
 static inline void __threadfence_block() { metal::threadgroup_barrier(metal::mem_flags::mem_threadgroup); }
 
 constant f64 DBL_MAX = f64::bits(0x7FEFFFFFFFFFFFFFUL);
@@ -526,6 +527,17 @@ template <typename T> struct __woof_addr_table {
   template <typename P> __woof_addr_table(const device P* p) : w(reinterpret_cast<const device ulong*>(p)) {}
   T operator[](long i) const { return reinterpret_cast<T>(w[i]); }
   T operator*() const { return reinterpret_cast<T>(w[0]); }
+};
+
+// A mutable pointer global (`__device__ T* p;`): Metal binds no buffer of
+// pointers, so its buffer is one 64-bit word holding the address, and each
+// reference to the global is this cell -- assignable from a pointer, and a
+// pointer where one is read.
+template <typename P> struct __woof_ptr_cell {
+  device ulong* w;
+  __woof_ptr_cell(device ulong* p) : w(p) {}
+  template <typename Q> __woof_ptr_cell operator=(Q q) { *w = reinterpret_cast<ulong>(q); return *this; }
+  operator P() const { return reinterpret_cast<P>(*w); }
 };
 
 // A space-generic struct's pointer and reference types (translator

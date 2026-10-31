@@ -245,6 +245,12 @@ def rewrite_ptx_asm(text: str, unit: str) -> str:
             return f"{out} = __double2float_rn({a});"
         raise TranslationError(f"{unit}: inline PTX with no Metal translation: {body!r}")
     out = _ASM.sub(one, text)
+    # `asm volatile("" ::: "memory")`: a compiler barrier (no instruction).
+    # Values cross it through memory: a fence on this thread's device
+    # memory, the same promise to Metal's compiler (acoustic_fusion's
+    # phase separator).
+    out = re.sub(r'\basm\s*(?:volatile\s*)?\(\s*""\s*:\s*:\s*:\s*"memory"\s*\)\s*;',
+                 "__woof_compiler_fence();", out)
     if re.search(r"\basm\s*(volatile\s*)?\(", out):
         line = out[:re.search(r"\basm\s*(volatile\s*)?\(", out).start()].count("\n") + 1
         raise TranslationError(f"{unit}: line {line}: inline asm in a form the translator does not read")
@@ -440,7 +446,7 @@ def _binary32_of_decimal(text: str):
 
 
 class _Rewriter:
-    def __init__(self, text: str, tu, *, unit: str, retain_subnormals: bool = False):
+    def __init__(self, text: str, tu, *, unit: str, retain_subnormals: bool = False, macros=None):
         import clang.cindex as ci
         self.ci = ci
         self.text = text
@@ -448,6 +454,8 @@ class _Rewriter:
         self.tu = tu
         self.unit = unit
         self.retain = retain_subnormals
+        #: the largest integer value each macro is #defined to in the unit as given
+        self.macros = dict(macros or {})
         self.edits = Edits(self.data)
         self._indirect_kernels: set = set()
         self.kernels: dict[str, KernelSignature] = {}
@@ -681,11 +689,19 @@ class _Rewriter:
         device functions receive it as an implicit one (thread_builtins)."""
         t = cursor.type
         elem, dims = self._array_shape(t)
+        cell = None
+        if not dims and elem.rstrip().endswith("*") and space != "constant":
+            # a pointer global (`__device__ T* p;`, set by one kernel and
+            # read by others): Metal binds no buffer of pointers, so the
+            # buffer is one address word and every reference a
+            # __woof_ptr_cell (prelude).  It points into device memory.
+            cell = f"device {elem.rstrip()}"
+            elem = "ulong"
         index = len(self.module_globals)
         self.module_globals[cursor.get_usr()] = {
             "name": cursor.spelling, "elem": elem, "dims": dims, "space": space,
             "nbytes": int(t.get_size()), "param": f"__woof_g_{index}",
-            "ctype": _canonical(self._base_type(t)).replace("const ", "").strip(), "init": init}
+            "ctype": _canonical(self._base_type(t)).replace("const ", "").strip(), "init": init, "cell": cell}
         tokens = list(cursor.get_tokens())
         start, end = tokens[0].extent.start.offset, self._statement_end(cursor)
         before = self.data[:start].rstrip()
@@ -1269,7 +1285,9 @@ class _Rewriter:
                 if node.kind == K.DECL_REF_EXPR and node.referenced is not None \
                         and node.referenced.get_usr() == usr and self.main_file(node):
                     rs, re_ = self.span(node)
-                    self.edits.replace(rs, re_, g["param"] if g["dims"] else f"(*{g['param']})")
+                    self.edits.replace(rs, re_, g["param"] if g["dims"] else
+                                       f"(__woof_ptr_cell<{g['cell']}>({g['param']}))" if g.get("cell")
+                                       else f"(*{g['param']})")
         # hoist each device function's __shared__ arrays out of its body
         for key, (node, owner) in hoisted.items():
             name = f"__woof_sh_{key[3:]}"
@@ -1724,14 +1742,41 @@ class _Rewriter:
     #: out-of-line build to CUDA's words.
     INLINE_POLICY_BY_KERNEL = {"tempo_columns": "size"}
 
+    #: Units (known by a kernel they define) whose source ``__noinline__``
+    #: functions are inlined too.  FAST_SBM's tile kernel, with its 23
+    #: ``__noinline__`` helpers out of line, gave wrong words in 3 of 49
+    #: columns of its kc2 replay (th off by 4e-3 K, number concentrations
+    #: by orders of magnitude); fully inlined it is CUDA's --fmad=false
+    #: words but for 1-ulp deltas in 8 liquid-bin words.  Not the default:
+    #: the other units with ``__noinline__`` (noah, sfclay, mynn_surface,
+    #: kf, urban_ucm480, the MPAS ports) give the same results either way,
+    #: and fully inlined sfclay took 46 minutes to compile cold.
+    #: WOOF_INLINE_NOINLINE=1|0 forces either way, for diagnosis.
+    INLINE_NOINLINE_BY_KERNEL = frozenset({"fsbm_tile_f64", "fsbm_tile_f32"})
+
+    #: The same, only for a tier: (kernel, macro, smallest value) -> policy.
+    #: Thompson's column kernel crashes Metal's compiler service fully
+    #: inlined (XPC_ERROR_CONNECTION_INTERRUPTED after ~3 min) at
+    #: THOMPSON_COLUMN_KMAX 128 and 256, and at the default 64 as well, so
+    #: the tier gate covers every tier.  Out of line (size or none: the same
+    #: words) the three tiers agree word for word on the same columns.
+    INLINE_POLICY_BY_KERNEL_TIER = {("thompson_column_step", "THOMPSON_COLUMN_KMAX", 64): "size"}
+
     def _unit_inline_policy(self) -> str:
         policy = self.INLINE_POLICY_BY_UNIT.get(self.unit.split("[", 1)[0], "")
         if policy:
             return policy
+        tiers = {k: (m, v, p) for (k, m, v), p in self.INLINE_POLICY_BY_KERNEL_TIER.items()}
         for node in self.tu.cursor.walk_preorder():
+            if node.kind != self.ci.CursorKind.FUNCTION_DECL:
+                continue
             if node.spelling in self.INLINE_POLICY_BY_KERNEL and self.main_file(node) \
-                    and node.kind == self.ci.CursorKind.FUNCTION_DECL and self.is_kernel(node):
+                    and self.is_kernel(node):
                 return self.INLINE_POLICY_BY_KERNEL[node.spelling]
+            if node.spelling in tiers and self.main_file(node) and self.is_kernel(node):
+                macro, least, tier_policy = tiers[node.spelling]
+                if self.macros.get(macro, 0) >= least:
+                    return tier_policy
         return ""
 
     def inline_pointer_functions(self):
@@ -1754,6 +1799,14 @@ class _Rewriter:
         kinds = (K.FUNCTION_DECL, K.FUNCTION_TEMPLATE, K.CXX_METHOD, K.CONSTRUCTOR, K.DESTRUCTOR)
         policy = os.environ.get("WOOF_INLINE_POLICY", "") or self._unit_inline_policy()
         keep_call = set(os.environ.get("WOOF_KEEP_CALL", "").split(","))
+        forced = os.environ.get("WOOF_INLINE_NOINLINE", "")
+        if forced in ("0", "1"):
+            honour_noinline = forced == "0"
+        else:
+            honour_noinline = not any(
+                n.kind == K.FUNCTION_DECL and n.spelling in self.INLINE_NOINLINE_BY_KERNEL
+                and self.main_file(n) and self.is_kernel(n)
+                for n in self.tu.cursor.walk_preorder())
         done = set()
         for node in self.tu.cursor.walk_preorder():
             if node.kind not in kinds or not node.is_definition() or not self.main_file(node):
@@ -1765,7 +1818,12 @@ class _Rewriter:
                 continue
             done.add(key)
             tokens = list(node.get_tokens())
-            if "noinline" in [t.spelling for t in tokens[:40]]:
+            noinline = next((t for t in tokens[:40] if t.spelling == "noinline"), None)
+            if noinline is not None:
+                if not honour_noinline and policy not in ("size", "none") \
+                        and not self._inside_replacement(noinline.extent.start.offset):
+                    self.edits.replace(noinline.extent.start.offset, noinline.extent.end.offset,
+                                       "always_inline")
                 continue
             at = self._attribute_site(node, tokens)
             if at is None:
@@ -2112,9 +2170,25 @@ class _Rewriter:
             else:
                 pointers.append((g["param"], f"{space} {g['elem']}*"))
                 meta.append(Param(g["param"], True, g["ctype"], const, global_name=g["name"]))
+                if g.get("cell"):
+                    # what the stored address points at is invisible to
+                    # MLX's hazard tracking, as a pointer table's targets are
+                    self._indirect_kernels.add(name)
         scalar_size = (offset + max_align - 1) // max_align * max_align if scalars else 0
         table = len(pointers) > MAX_DIRECT_POINTERS
         sig_params, prologue, structs = [], [], []
+        repointed = []
+        # A const pointer parameter the kernel points elsewhere (a layout
+        # trial's `dnw = __shared_cache;`): a variant pointer, bound to the
+        # buffer and reassignable to another space (prelude __woof_vptr).
+        for parm in self._kernel_params_repointed(fn, params):
+            pname = parm.spelling
+            slot = next((k for k, (pn, _) in enumerate(pointers) if pn == pname), None)
+            if slot is None:
+                continue
+            pointers[slot] = (f"__woof_vp_{pname}", pointers[slot][1])
+            elem = self._spell_type(parm.type.get_pointee(), drop_const=True)
+            repointed.append(f"__woof_vptr<{elem}> {pname}(__woof_vp_{pname});")
         if table:
             fields = "\n".join(f"    {ty} {pn};" for pn, ty in pointers)
             structs.append(f"struct __woof_table_{name} {{\n{fields}\n}};")
@@ -2124,7 +2198,7 @@ class _Rewriter:
         else:
             sig_params += [f"{ty} {pn} [[buffer({i})]]" for i, (pn, ty) in enumerate(pointers)]
             table_slot, scalar_slot = -1, len(pointers)
-        prologue += addr_tables
+        prologue += addr_tables + repointed
         if scalars:
             fields = "\n".join(f"    {ty} {pn};" for pn, ty in scalars)
             structs.append(f"struct __woof_scalars_{name} {{\n{fields}\n}};")
@@ -2193,7 +2267,8 @@ class _Rewriter:
                 s, e = self.span(node)
                 self.edits.replace(s, e, "((void)0)")
                 continue
-            if kind == K.DECL_REF_EXPR and node.spelling in ("threadIdx", "blockIdx", "blockDim", "gridDim"):
+            if kind == K.DECL_REF_EXPR and node.spelling in ("threadIdx", "blockIdx", "blockDim", "gridDim") \
+                    and not self._shadows_builtin(node):
                 # Kernels have these as parameters; device functions that
                 # read them receive them (thread_builtins below).
                 s, e = self.span(node)
@@ -2249,7 +2324,9 @@ class _Rewriter:
                         if s < e:
                             spelled = self._spell_type(node.type, drop_const=True)
                             self.edits.wrap(s, e, f"(({spelled})(", "))", d)
-            if kind == K.COMPOUND_ASSIGNMENT_OPERATOR:
+            if self.retain and self.f32s_vector_component(node, d):
+                pass
+            elif kind == K.COMPOUND_ASSIGNMENT_OPERATOR:
                 self.compound_assign(node, d)
             if kind == K.LAMBDA_EXPR:
                 self.lambda_pointer_params(node)
@@ -2427,9 +2504,25 @@ class _Rewriter:
             if inner.kind.name == "UNARY_OPERATOR" and len(list(inner.get_children())) == 1:
                 literal = next(inner.get_children())
             if literal.kind.name != "FLOATING_LITERAL" or literal.type.get_canonical().kind.name != "FLOAT":
-                continue
+                # a constant expression of float literals (`1.f/3000.f`) is
+                # a Metal float too (chem_drydep_wesely's WFloat operators)
+                if not self._float_literal_arithmetic(inner):
+                    continue
             s, e = self.span(inner)
             self.edits.wrap(s, e, "f32s(", ")", 900)
+
+    @staticmethod
+    def _float_literal_arithmetic(node) -> bool:
+        if node.kind.name not in ("BINARY_OPERATOR", "UNARY_OPERATOR"):
+            return False
+        for n in node.walk_preorder():
+            k = n.kind.name
+            if k in ("BINARY_OPERATOR", "UNARY_OPERATOR", "PAREN_EXPR", "UNEXPOSED_EXPR"):
+                if n.type.get_canonical().kind.name != "FLOAT":
+                    return False
+            elif k != "FLOATING_LITERAL" or n.type.get_canonical().kind.name != "FLOAT":
+                return False
+        return True
 
     def const_eval(self, node):
         """Evaluate a constant expression of literals: ("double", float) or
@@ -2584,6 +2677,115 @@ class _Rewriter:
             s, e = self.span(child)
             self.edits.replace(s, e, f"__woof_f64_lit(0x{word:016X}UL)")
 
+    def _kernel_params_repointed(self, fn, params):
+        """Pointer-to-const kernel parameters assigned a pointer that is not
+        in device memory."""
+        K = self.ci.CursorKind
+        consts = {p.get_usr(): p for p in params
+                  if p.type.get_canonical().kind.name == "POINTER"
+                  and p.type.get_pointee().is_const_qualified()}
+        out = {}
+        if not consts:
+            return []
+        for node in fn.walk_preorder():
+            if node.kind != K.BINARY_OPERATOR:
+                continue
+            kids = list(node.get_children())
+            if len(kids) != 2 or kids[0].kind != K.DECL_REF_EXPR or kids[0].referenced is None:
+                continue
+            usr = kids[0].referenced.get_usr()
+            if usr not in consts:
+                continue
+            op = next((t.spelling for t in node.get_tokens()
+                       if t.extent.start.offset >= kids[0].extent.end.offset), None)
+            if op == "=" and self.spaces.space(kids[1], {}) not in ("device", None):
+                out[usr] = consts[usr]
+        return list(out.values())
+
+    @staticmethod
+    def _shadows_builtin(node) -> bool:
+        """``const dim3 blockIdx(...)`` in a kernel (the ensemble batch
+        adapter's virtual block coordinates) is a local that hides CUDA's
+        builtin: a reference to it stays a reference to the local."""
+        ref = node.referenced
+        if ref is None or ref.kind.name not in ("VAR_DECL", "PARM_DECL"):
+            return False
+        sp = ref.semantic_parent
+        return sp is not None and sp.kind.name in _Rewriter._FUNCTION_KINDS
+
+    @staticmethod
+    def _float_vector_component(node) -> bool:
+        """``v.x`` / ``p->y`` of a CUDA float vector (float1..float4).  Its
+        Metal namesake keeps ``float`` components in a unit whose scalar
+        ``float`` is ``f32s``."""
+        if node.kind.name != "MEMBER_REF_EXPR" or not _is_float(node.type) \
+                or node.spelling not in ("x", "y", "z", "w"):
+            return False
+        kids = list(node.get_children())
+        if len(kids) != 1:
+            return False
+        t = kids[0].type.get_canonical()
+        if t.kind.name == "POINTER":
+            t = t.get_pointee().get_canonical()
+        name = t.spelling.replace("const ", "").replace("volatile ", "").replace("struct ", "").strip()
+        return re.fullmatch(r"float[1-4]", name) is not None
+
+    def f32s_vector_component(self, node, depth) -> bool:
+        """``retain_subnormals``: float vector components stay ``float`` (a
+        Metal vector of f32s does not exist), while the unit's scalar float
+        is ``f32s``, which converts to ``float`` only explicitly.  So
+
+        * a component read as a value is ``f32s(v.x)`` -- arithmetic on it
+          keeps subnormals, as CUDA's --ftz=false does;
+        * ``v.x = e`` stores ``float(e)`` (the same bits);
+        * ``v.x op= e`` is ``v.x = float(f32s(f32s(v.x) op (e)))``;
+        * a vector built by ``make_floatN(...)`` or ``{...}`` takes
+          ``float(e)`` elements.
+
+        Returns True when the node was rewritten as a compound assignment
+        (so the binary64 compound rewrite does not also apply)."""
+        K = self.ci.CursorKind
+        kind = node.kind
+        kids = list(node.get_children())
+        if kind == K.UNEXPOSED_EXPR and len(kids) == 1 and _is_float(node.type) \
+                and self._float_vector_component(kids[0]):
+            s, e = self.span(kids[0])
+            if s < e:
+                self.edits.wrap(s, e, "f32s(", ")", depth + 1)
+            return False
+        if kind in (K.BINARY_OPERATOR, K.COMPOUND_ASSIGNMENT_OPERATOR) and len(kids) == 2 \
+                and self._float_vector_component(kids[0]):
+            lhs, rhs = kids
+            op = next((t.spelling for t in node.get_tokens()
+                       if lhs.extent.end.offset <= t.extent.start.offset < rhs.extent.start.offset), None)
+            rs, re_ = self.span(rhs)
+            if op == "=":
+                self.edits.wrap(rs, re_, "float(", ")", depth + 1)
+                return False
+            if op in ("+=", "-=", "*=", "/="):
+                lhs_text = self.src(lhs)
+                if not re.fullmatch(r"[\w\s\.\[\]\(\)\->+*]*", lhs_text) or "++" in lhs_text or "--" in lhs_text:
+                    self.refuse(node, f"compound assignment to vector component {lhs_text!r} "
+                                      "would evaluate the target twice")
+                self.edits.replace(lhs.extent.end.offset, rs,
+                                   f" = float(f32s(f32s({lhs_text}) {op[0]} (")
+                self.edits.insert(re_, ")))", rank=-depth)
+                return True
+            return False
+        building = False
+        if kind == K.CALL_EXPR and re.fullmatch(r"make_float[1-4]", node.spelling or ""):
+            building, args = True, kids[1:]
+        elif kind == K.INIT_LIST_EXPR:
+            name = node.type.get_canonical().spelling.replace("const ", "").replace("struct ", "").strip()
+            building, args = re.fullmatch(r"float[1-4]", name) is not None, kids
+        if building:
+            for a in args:
+                if _is_float(a.type):
+                    s, e = self.span(a)
+                    if s < e:
+                        self.edits.wrap(s, e, "float(", ")", depth + 1)
+        return False
+
     def compound_assign(self, node, depth):
         children = list(node.get_children())
         if len(children) != 2:
@@ -2606,6 +2808,25 @@ class _Rewriter:
         self.edits.replace(lhs.extent.end.offset, rs, f" = (({spelled})(f64({lhs_text}) {op[0]} (")
         self.edits.insert(re_, ")))", rank=-depth)
 
+    @staticmethod
+    def _volatile_float_value(tokens, i) -> bool:
+        """tokens[i] is `volatile` qualifying a float *value* (not the
+        pointee of a pointer or reference): `volatile [const] float x`."""
+        quals = ("const", "volatile")
+        j = i
+        while j > 0 and tokens[j - 1].spelling in quals:
+            j -= 1
+        k = i + 1
+        while k < len(tokens) and tokens[k].spelling in quals:
+            k += 1
+        if k < len(tokens) and tokens[k].spelling == "float":
+            k += 1
+        elif not (j > 0 and tokens[j - 1].spelling == "float"):
+            return False
+        while k < len(tokens) and tokens[k].spelling in quals:
+            k += 1
+        return k < len(tokens) and tokens[k].kind.name == "IDENTIFIER"
+
     # -- tokens
     def rewrite_tokens(self):
         import clang.cindex as ci
@@ -2619,6 +2840,15 @@ class _Rewriter:
                 continue
             sp = t.spelling
             if t.kind == ci.TokenKind.KEYWORD:
+                if sp == "volatile" and self.retain and self._volatile_float_value(tokens, i):
+                    # `volatile float x` pins a rounding in CUDA (no
+                    # contraction across it).  f32s arithmetic is calls,
+                    # never contracted, and a volatile f32s has no copy
+                    # constructor: the qualifier goes.
+                    if not self._inside_replacement(t.extent.start.offset):
+                        self.edits.replace(t.extent.start.offset, t.extent.end.offset, "")
+                    i += 1
+                    continue
                 if sp == "float" and self.retain:
                     at = t.extent.start.offset
                     if any(a <= at < b for a, b in self._keep_float_ranges):
@@ -2676,7 +2906,7 @@ def prelude(*, contract: bool, retain_subnormals: bool = False, ieee_helpers: bo
 
 VENDOR_LIBM64 = HERE / "vendor_libm64.cuh"
 F64CR = HERE.parents[1] / "core" / "kernels" / "f64cr.cuh"
-_VENDOR_CALL = re.compile(r"\b(exp|log|log10|sin|cos|atan|pow|atan2|hypot|log2|expm1|tanh|tgammaf?|lgamma|log1pf?|cbrtf?|erfc?)\s*\(")
+_VENDOR_CALL = re.compile(r"\b(exp|log|log10|sin|cos|tan|atan|pow|atan2|hypot|log2|expm1|tanh|tgammaf?|lgamma|log1pf?|cbrtf?|erfc?)\s*\(")
 CR_CBRT = HERE.parents[1] / "core" / "kernels" / "cr_cbrt_flt64.cuh"
 
 
@@ -2698,6 +2928,19 @@ def compose(source: str, expanded: str | None = None) -> str:
                 + "\n__device__ __forceinline__ double cbrt(double x) { return g64_cbrt::cr_cbrt(x); }\n")
     return ("__device__ double wlm_sin_huge(double x);\n" + f64cr + "\n"
             + VENDOR_LIBM64.read_text(encoding="utf-8") + "\n" + cbrt + source)
+
+
+def _integer_macros(source: str, defines=()) -> dict:
+    """Each macro the unit (or a -D option) defines to an integer: the
+    largest value given (a tier's ``#define KMAX 128`` ahead of a header's
+    ``#ifndef`` default of 64 reads 128)."""
+    out: dict = {}
+    pairs = re.findall(r"^[ \t]*#[ \t]*define[ \t]+(\w+)[ \t]+(\d+)[ \t]*$", source, re.M)
+    pairs += [tuple(d.split("=", 1)) for d in defines if "=" in d]
+    for name, value in pairs:
+        if str(value).isdigit():
+            out[name] = max(out.get(name, 0), int(value))
+    return out
 
 
 def option_defines(options) -> tuple[str, ...]:
@@ -2724,6 +2967,35 @@ def option_include_dirs(options) -> tuple[str, ...]:
         elif o.startswith("-I") and len(o) > 2:
             out.append(o[2:])
     return tuple(d for d in out if d)
+
+
+def explicit_float_to_integral(text: str) -> str:
+    """``retain_subnormals`` with inheritance: ``f32s`` converts to the
+    integer types only explicitly, and the translator spells C++'s implicit
+    float -> integer conversions as casts where it sees them.  But
+    :func:`flatten_inheritance` makes every function taking a base class a
+    template, and in that dependent code no conversion is visible (CLM
+    lake's ``snl(c) = snl2d(i,j)``).  So the casts are spelled first, on
+    the unit as written."""
+    import clang.cindex as ci
+    if not re.search(r"\b(struct|class)\s+\w+\s*:\s*(public\s+)?\w", text):
+        return text
+    tu = parse(text)
+    edits = Edits(text.encode())
+    for n in tu.cursor.walk_preorder():
+        if n.kind != ci.CursorKind.UNEXPOSED_EXPR or n.location.file is None \
+                or n.location.file.name != "unit.cpp":
+            continue
+        if n.type.get_canonical().kind.name not in _INTEGRAL_KINDS:
+            continue
+        kids = list(n.get_children())
+        if len(kids) != 1 or not _is_float(kids[0].type):
+            continue
+        s, e = kids[0].extent.start.offset, kids[0].extent.end.offset
+        if s < e:
+            spelled = n.type.get_canonical().spelling.replace("const ", "").strip()
+            edits.wrap(s, e, f"(({spelled})(", "))", 0)
+    return edits.apply()
 
 
 def flatten_inheritance(text: str, unit: str) -> str:
@@ -2937,9 +3209,12 @@ def translate(source: str, *, unit: str = "<unit>", contract: bool = False,
     if compose(source, text) is not source:
         text = preprocess(compose(source, text), defines, include_dirs)
     text = rewrite_ptx_asm(text, unit)
+    if retain_subnormals:
+        text = explicit_float_to_integral(text)
     text = flatten_inheritance(text, unit)
     tu = parse(text)
-    result = _Rewriter(text, tu, unit=unit, retain_subnormals=retain_subnormals).run()
+    result = _Rewriter(text, tu, unit=unit, retain_subnormals=retain_subnormals,
+                       macros=_integer_macros(source, defines)).run()
     result.msl = (prelude(contract=contract, retain_subnormals=retain_subnormals,
                           ieee_helpers="__woof_ieee_" in result.msl)
                   + "\n// ---- translated unit: " + unit + "\n" + result.msl)

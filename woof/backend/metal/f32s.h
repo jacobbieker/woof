@@ -68,6 +68,17 @@ struct f32s {
   f32s(bool x) : v(x ? 1.0f : 0.0f) {}
   explicit f32s(f64 x) : v(f64_to_f32(x.b)) {}
   static f32s bits(uint u) { f32s r; r.v = as_type<float>(u); return r; }
+  // `float_lvalue = double`: C++ converts implicitly, and in a dependent
+  // context (a template the translator made, CLM lake's generic array
+  // bases) the translator sees no conversion to spell.  Assignment only,
+  // and only from f64 (a float argument keeps the copy assignment).
+#define WOOF_F32S_ASSIGN_F64(AS)                                                        \
+  template <typename __T, typename = metal::enable_if_t<metal::is_same_v<__T, f64>>>    \
+  AS f32s& operator=(__T x) AS { v = f64_to_f32(x.b); return *this; }
+  WOOF_F32S_ASSIGN_F64(thread)
+  WOOF_F32S_ASSIGN_F64(device)
+  WOOF_F32S_ASSIGN_F64(threadgroup)
+#undef WOOF_F32S_ASSIGN_F64
 #define WOOF_F32S_CONV(AS)                                                    \
   explicit operator float() const AS { return v; }                            \
   operator f64() const AS { return f64::bits(f64_from_f32(v)); }              \
@@ -297,6 +308,17 @@ WOOF_F32S_VENDOR1(cosh) WOOF_F32S_VENDOR1(tanh)
 static inline f32s powf(f32s a, f32s b) { return f32s(powf(a.v, b.v)); }
 static inline f32s atan2f(f32s a, f32s b) { return f32s(atan2f(a.v, b.v)); }
 static inline f32s fmodf(f32s a, f32s b) { return f32s(__woof_n(fmod(f64(a), f64(b)).b)); }
+// C++'s float overloads (CUDA's <cmath>: pow(float, float) is powf, not
+// the double function), so `pow(a, b)` of two floats stays binary32.
+#define WOOF_F32S_CXX1(N) static inline f32s N(f32s a) { return N##f(a); }
+WOOF_F32S_CXX1(exp) WOOF_F32S_CXX1(exp2) WOOF_F32S_CXX1(log) WOOF_F32S_CXX1(log2)
+WOOF_F32S_CXX1(log10) WOOF_F32S_CXX1(sin) WOOF_F32S_CXX1(cos) WOOF_F32S_CXX1(tan)
+WOOF_F32S_CXX1(asin) WOOF_F32S_CXX1(acos) WOOF_F32S_CXX1(atan) WOOF_F32S_CXX1(sinh)
+WOOF_F32S_CXX1(cosh) WOOF_F32S_CXX1(tanh)
+#undef WOOF_F32S_CXX1
+static inline f32s pow(f32s a, f32s b) { return powf(a, b); }
+static inline f32s atan2(f32s a, f32s b) { return atan2f(a, b); }
+static inline f32s fmod(f32s a, f32s b) { return fmodf(a, b); }
 static inline long lroundf(f32s a) { return (long)roundf(a).v; }
 static inline long lrintf(f32s a) { return (long)rintf(a).v; }
 static inline long llroundf(f32s a) { return (long)roundf(a).v; }

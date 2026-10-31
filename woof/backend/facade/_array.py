@@ -68,13 +68,35 @@ def to_storage_values(host: np.ndarray):
     return mx.array(host)
 
 
+#: Bytes of live storages, each rounded up to CuPy's 512-byte allocation
+#: unit: the default pool's ``used_bytes`` (MLX's own active memory also
+#: holds lazy intermediates and its own rounding).
+LIVE_BYTES = [0]
+
+
+def _release(n):
+    LIVE_BYTES[0] -= n
+
+
+def _count_allocation(st):
+    import weakref
+    n = (st.nbytes + 511) // 512 * 512
+    if n:
+        LIVE_BYTES[0] += n
+        weakref.finalize(st, _release, n)
+
+
+#: Active cupy.cuda.MemoryHook objects (innermost last).
+MEMORY_HOOKS: list = []
+
+
 class Storage:
     """A buffer.  ``arr`` is always a flat, row-contiguous mx.array that owns
     its elements: MLX may otherwise keep a broadcast or strided view (a
     filled array can be one scalar with stride 0), and a kernel bound to
     such a buffer would read and write past the one element it holds."""
 
-    __slots__ = ("arr", "dtype", "_aliases", "__weakref__")
+    __slots__ = ("arr", "dtype", "_aliases", "_memory", "__weakref__")
 
     def __init__(self, arr, dtype: np.dtype, *, fresh: bool = False):
         """``fresh``: ``arr`` is a newly computed value no other array holds
@@ -87,6 +109,14 @@ class Storage:
         self.arr = flat if fresh else mx.array(flat)
         self.dtype = np.dtype(dtype)
         self._aliases = None
+        self._memory = None
+        _count_allocation(self)
+        if MEMORY_HOOKS:
+            # cupy.cuda.MemoryHook: a new storage is a device allocation
+            n = self.nbytes
+            for hook in MEMORY_HOOKS:
+                hook.malloc_preprocess(device_id=0, size=n, mem_size=n)
+                hook.malloc_postprocess(device_id=0, size=n, mem_size=n, mem_ptr=0, pmem_id=id(self))
         # A new value is usually still lazy -- a copy or an expression of other
         # buffers.  It must be computed before any in-place launch overwrites
         # what it reads (flush_pending), as CUDA's stream order would have it.
@@ -280,11 +310,18 @@ class ndarray:
 
     # ---------------------------------------------------------- layout
     def is_c_contiguous(self) -> bool:
-        return self.strides == _contiguous_strides(self.shape, self.itemsize) or self.size <= 1
+        # NumPy's flag: the stride of a length-1 axis does not matter
+        if self.size <= 1:
+            return True
+        want = _contiguous_strides(self.shape, self.itemsize)
+        return all(n == 1 or s == w for n, s, w in zip(self.shape, self.strides, want))
 
     def is_f_contiguous(self) -> bool:
+        if self.size <= 1:
+            return True
         f = tuple(reversed(_contiguous_strides(tuple(reversed(self.shape)), self.itemsize)))
-        return self.strides == f or self.size <= 1 or (self.ndim <= 1 and self.is_c_contiguous())
+        return all(n == 1 or s == w for n, s, w in zip(self.shape, self.strides, f)) \
+            or (self.ndim <= 1 and self.is_c_contiguous())
 
     def _element_offset(self) -> int:
         st_item = self._st.dtype.itemsize
@@ -320,7 +357,15 @@ class ndarray:
     def _reinterpreted_values(self):
         mx = _mx()
         if not self.is_c_contiguous():
-            raise NotImplementedError("non-contiguous view of a reinterpreted dtype")
+            # the storage's bytes read as this dtype, then strided as NumPy
+            # would (a float32 column of a uint8 record, a padded slab)
+            item = self.itemsize
+            if self._offset % item or any(s % item for s in self.strides):
+                raise NotImplementedError("view of a reinterpreted dtype at an unaligned stride")
+            raw = self._st.arr.view(mx.uint8)
+            whole = raw[:raw.size // item * item].view(storage_mx_dtype(self.dtype))
+            return mx.as_strided(whole, self.shape, tuple(s // item for s in self.strides),
+                                 self._offset // item)
         raw = self._st.arr.view(mx.uint8)
         start = self._offset
         raw = raw[start:start + self.nbytes]
@@ -442,11 +487,18 @@ class ndarray:
                            _strides=self.strides)
         dtype = np.dtype(dtype)
         if dtype.itemsize != self.itemsize:
-            if not self.is_c_contiguous():
-                raise ValueError("changing the itemsize needs a contiguous array")
+            if self.is_c_contiguous():
+                last = self.shape[-1] * self.itemsize // dtype.itemsize
+                shape = self.shape[:-1] + (last,)
+                return ndarray(shape, dtype, _storage=self._st, _offset=self._offset)
+            # NumPy: the last axis must be contiguous; it is re-cut, the
+            # other axes keep their strides
+            if not self.ndim or self.strides[-1] != self.itemsize \
+                    or (self.shape[-1] * self.itemsize) % dtype.itemsize:
+                raise ValueError("changing the itemsize needs a contiguous last axis")
             last = self.shape[-1] * self.itemsize // dtype.itemsize
-            shape = self.shape[:-1] + (last,)
-            return ndarray(shape, dtype, _storage=self._st, _offset=self._offset)
+            return ndarray(self.shape[:-1] + (last,), dtype, _storage=self._st, _offset=self._offset,
+                           _strides=self.strides[:-1] + (dtype.itemsize,))
         return ndarray(self.shape, dtype, _storage=self._st, _offset=self._offset,
                        _strides=self.strides)
 
@@ -466,6 +518,13 @@ class ndarray:
             return self.transpose().reshape(tuple(reversed(shape))).transpose()
         if self.is_c_contiguous():
             return ndarray(shape, self.dtype, _storage=self._st, _offset=self._offset)
+        strides = _nocopy_strides(self.shape, self.strides, shape, self.dtype.itemsize) \
+            if self.size else None
+        if strides is not None:
+            # NumPy/CuPy's view reshape: strided rows split or merged where
+            # the layout allows it (a padded member slab stays its backing).
+            return ndarray(shape, self.dtype, _storage=self._st, _offset=self._offset,
+                           _strides=tuple(strides))
         return self.copy().reshape(shape)
 
     def _memory_order(self, order) -> str:
@@ -645,6 +704,51 @@ def _address(mem) -> int:
     return ctypes.cast(mem, ctypes.c_void_p).value
 
 
+def _nocopy_strides(oldshape, oldstrides, newshape, itemsize):
+    """NumPy's ``_attempt_nocopy_reshape`` (C order): the strides that give
+    ``newshape`` as a view of the same elements, or None."""
+    old = [(n, st) for n, st in zip(oldshape, oldstrides) if n != 1]
+    newshape = list(newshape)
+    oldnd, newnd = len(old), len(newshape)
+    out = [0] * newnd
+    oi, oj, ni, nj = 0, 1, 0, 1
+    while ni < newnd and oi < oldnd:
+        np_, op = newshape[ni], old[oi][0]
+        while np_ != op:
+            if np_ < op:
+                np_ *= newshape[nj]
+                nj += 1
+            else:
+                op *= old[oj][0]
+                oj += 1
+        for ok in range(oi, oj - 1):
+            if old[ok + 1][1] * old[ok + 1][0] != old[ok][1]:
+                return None
+        out[nj - 1] = old[oj - 1][1]
+        for nk in range(nj - 1, ni, -1):
+            out[nk - 1] = out[nk] * newshape[nk]
+        ni, nj, oi, oj = nj, nj + 1, oj, oj + 1
+    last = out[ni - 1] if ni >= 1 else itemsize
+    for nk in range(ni, newnd):
+        out[nk] = last
+    return out
+
+
+class _Memory:
+    """``ndarray.data.mem``: the storage (CuPy's allocation) behind a view."""
+
+    def __init__(self, st):
+        self._st = st
+
+    @property
+    def ptr(self):
+        return self._st.address()
+
+    @property
+    def size(self):
+        return self._st.nbytes
+
+
 class _Pointer:
     """``ndarray.data``: the view's device address."""
 
@@ -659,7 +763,17 @@ class _Pointer:
 
     @property
     def mem(self):
-        return self
+        """CuPy's ``MemoryPointer.mem``: the whole allocation, whose
+        ``ptr`` is its first byte (not the view's) and ``size`` its bytes."""
+        # One object per storage while anyone holds it (CuPy compares
+        # owners with `is`); a weak link, so storage is freed promptly.
+        st = self._a._st
+        memory = st._memory() if st._memory is not None else None
+        if memory is None:
+            import weakref
+            memory = _Memory(st)
+            st._memory = weakref.ref(memory)
+        return memory
 
     @property
     def size(self):

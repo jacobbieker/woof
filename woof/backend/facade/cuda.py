@@ -30,6 +30,9 @@ def _drain():
     mx.synchronize()
 
 
+_PCI_BUS_ID = "0000:00:00.0"
+
+
 class Device:
     def __init__(self, device=None):
         ordinal = 0 if device is None else int(device)
@@ -52,6 +55,12 @@ class Device:
     @property
     def compute_capability(self):
         return "metal"
+
+    @property
+    def pci_bus_id(self):
+        """The one GPU of an Apple-silicon SoC has no PCI address; CuPy's
+        spelling of bus 0, so device identities stay well formed."""
+        return _PCI_BUS_ID
 
     @property
     def mem_info(self):
@@ -250,8 +259,12 @@ def _host_alloc(nbytes, flags=0):
     return ptr
 
 
-def _free_host(ptr):
-    _HOST_BLOCKS.pop(int(ptr), None)
+def _free_host(ptr, st=None):
+    """cudaFreeHost.  ``st``: free only that block -- a late finaliser of a
+    freed block must not drop a new block MLX placed at the same address."""
+    entry = _HOST_BLOCKS.get(int(ptr))
+    if entry is not None and (st is None or entry[1] is st):
+        del _HOST_BLOCKS[int(ptr)]
 
 
 def _host_block_at(ptr):
@@ -401,6 +414,10 @@ runtime = types.SimpleNamespace(
     freeHost=_free_host,
     getDeviceProperties=_properties,
     runtimeGetVersion=lambda: 0,
+    deviceGetPCIBusId=lambda device=0: _PCI_BUS_ID,
+    # one device: a peer copy is a copy
+    memcpyPeer=lambda dst, dst_dev, src, src_dev, size: _memcpy(dst, src, size, 3),
+    memcpyPeerAsync=lambda dst, dst_dev, src, src_dev, size, stream=0: _memcpy(dst, src, size, 3),
     driverGetVersion=lambda: 0,
     is_hip=False,
     CUDARuntimeError=RuntimeError,
@@ -413,8 +430,9 @@ class _MemoryPool:
         self.allocator = allocator
 
     def used_bytes(self):
-        mx = _mx()
-        return int(mx.get_active_memory()) if hasattr(mx, "get_active_memory") else 0
+        """Bytes in live facade arrays, in CuPy's 512-byte units."""
+        from woof.backend.facade._array import LIVE_BYTES
+        return LIVE_BYTES[0]
 
     def total_bytes(self):
         mx = _mx()
@@ -470,7 +488,9 @@ class PinnedMemoryPointer:
         self.ptr = _host_alloc(max(int(nbytes), 1))
         self.size = int(nbytes)
         self._host = _HOST_BLOCKS[self.ptr][0][:self.size]
-        weakref.finalize(self, _free_host, self.ptr)
+        # freed when the last holder of its bytes goes: an array made with
+        # np.frombuffer(this) holds the view, as CuPy's holds the memory
+        weakref.finalize(self._host, _free_host, self.ptr, _HOST_BLOCKS[self.ptr][1])
 
     def __buffer__(self, flags):
         return memoryview(self._host)
@@ -492,6 +512,41 @@ def set_allocator(allocator=None):
 
 def set_pinned_memory_allocator(allocator=None):
     return None
+
+
+class MemoryHook:
+    """CuPy's memory hook: entered with ``with``, told of every device
+    allocation (a new facade storage).  Frees are not reported."""
+    name = "MemoryHook"
+
+    def __enter__(self):
+        from woof.backend.facade._array import MEMORY_HOOKS
+        MEMORY_HOOKS.append(self)
+        return self
+
+    def __exit__(self, *exc):
+        from woof.backend.facade._array import MEMORY_HOOKS
+        if self in MEMORY_HOOKS:
+            MEMORY_HOOKS.remove(self)
+        return False
+
+    def malloc_preprocess(self, **kw):
+        pass
+
+    def malloc_postprocess(self, **kw):
+        pass
+
+    def alloc_preprocess(self, **kw):
+        pass
+
+    def alloc_postprocess(self, **kw):
+        pass
+
+    def free_preprocess(self, **kw):
+        pass
+
+    def free_postprocess(self, **kw):
+        pass
 
 
 class _Graph:
@@ -594,7 +649,9 @@ driver = types.SimpleNamespace(
     CU_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK=0, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES=1,
     CU_FUNC_ATTRIBUTE_CONST_SIZE_BYTES=2, CU_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES=3,
     CU_FUNC_ATTRIBUTE_NUM_REGS=4, CU_FUNC_ATTRIBUTE_PTX_VERSION=5,
-    CU_FUNC_ATTRIBUTE_BINARY_VERSION=6)
+    CU_FUNC_ATTRIBUTE_BINARY_VERSION=6,
+    # a context exists once the backend is installed (one per process)
+    ctxGetCurrent=lambda: 1)
 
 class _NvrtcProgram:
     def __init__(self, source, name, headers=(), include_names=()):

@@ -142,6 +142,17 @@ def test_composed_source_compiles_to_the_include_path_ptx():
     from woof.core.tempo_runtime import _KERNEL, KERNEL_DIR, composed_source
 
     common = ("-std=c++17", "-DTEMPO_NZ_MAX=100", "--fmad=false")
+    import cupy as cp
+    if not str(cp.cuda.Device().compute_capability).isdigit():
+        # the Metal backend's "PTX" image carries the unit's text and
+        # options, so it differs by construction; what runs is the
+        # translation, which must be the same
+        from woof.backend.translate import option_defines, translate
+        by_path = translate(_KERNEL, defines=option_defines(common), include_dirs=(str(KERNEL_DIR),)).msl
+        composed = translate(composed_source(), defines=option_defines(common)).msl
+        # (the keywords it drops leave different indentation)
+        assert composed.split() == by_path.split()
+        return
     by_path = compiler.compile_using_nvrtc(
         _KERNEL, options=common + (f"-I{KERNEL_DIR}",))
     composed = compiler.compile_using_nvrtc(composed_source(), options=common)

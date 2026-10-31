@@ -469,7 +469,11 @@ def test_terrain_drag_is_bit_identical_to_the_128_level_kernel(
             cp.cuda.driver.CU_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES, fn.ptr))
 
     # The 128 arm is a different image: its stress profiles are half size.
-    assert frame(old.get_function(name)) < frame(td._kernel(name))
+    # (NVRTC frames exist on CUDA only; the word identity below is every
+    # backend's.)
+    from conftest import _nvrtc_frames_measurable
+    if _nvrtc_frames_measurable():
+        assert frame(old.get_function(name)) < frame(td._kernel(name))
     case = _drag_case(cp, nz, 96)
     shipped = _run_drag(td, case, gwd_opt)
     served = []

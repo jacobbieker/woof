@@ -37,7 +37,7 @@ F64CR = ROOT / "woof" / "core" / "kernels" / "f64cr.cuh"
 RUST_FNS = ("atan2", "hypot", "log2", "expm1", "tanh", "tgamma", "lgamma", "log1p", "erf", "erfc")
 CR_FNS = ("exp", "log", "log10", "sin", "atan", "pow")
 BINARY = {"atan2", "hypot", "pow"}
-CR_EXTRA = ("cbrt", "cos")      # cr_cbrt and wlm_cos: graded against exact decimal values
+CR_EXTRA = ("cbrt", "cos", "tan")   # cr_cbrt, wlm_cos, wlm_tan: graded against exact decimal values
 F32_FNS = ("cbrtf", "tgammaf", "log1pf")   # binary32: Rust (cbrtf, tgammaf), glibc (log1pf)
 ALL = RUST_FNS + CR_FNS + CR_EXTRA
 
@@ -197,6 +197,32 @@ def exact_cos(a) -> np.ndarray:
     return out
 
 
+def exact_tan(a) -> np.ndarray:
+    """Correctly rounded binary64 tangents below 2^20 (80-digit reduction
+    and series, sin/cos); NaN (ungraded: the known gap) above."""
+    import decimal
+    ctx = decimal.Context(prec=80)
+    D = decimal.Decimal
+    pi = D("3.14159265358979323846264338327950288419716939937510582097494459230781640628620899862803482534211706798214808651")
+    out = np.empty(len(a))
+    for i, v in enumerate(a):
+        if not np.isfinite(v) or abs(v) >= 2.0 ** 20:
+            out[i] = np.nan
+            continue
+        x = ctx.remainder_near(D(float(v)), pi)
+        x2 = ctx.multiply(x, x)
+        s, c, ts, tc, n = x, D(1), x, D(1), 0
+        while True:
+            n += 2
+            tc = ctx.divide(ctx.multiply(-tc, x2), (n - 1) * n)
+            ts = ctx.divide(ctx.multiply(-ts, x2), n * (n + 1))
+            if abs(tc) < D(10) ** -78 and abs(ts) < D(10) ** -78:
+                break
+            c, s = ctx.add(c, tc), ctx.add(s, ts)
+        out[i] = float(ctx.divide(s, c)) if s else float(v) * 0.0 + (0.0 if v >= 0 else -0.0)
+    return out
+
+
 def log1pf_reference(af) -> np.ndarray:
     from woof.core.noahmp_libm import log1pf
     return np.array([log1pf(np.float32(v)) for v in af], dtype=np.float32)
@@ -211,7 +237,8 @@ def main(argv=None):
     got, gotf = gpu(a, b)
     rust = rust_reference(a, b)
     want = np.concatenate([rust[:, :len(RUST_FNS)], cr_reference(a, b),
-                           exact_cbrt(a)[:, None], exact_cos(a)[:, None]], axis=1)
+                           exact_cbrt(a)[:, None], exact_cos(a)[:, None],
+                           exact_tan(a)[:, None]], axis=1)
     af = a.astype(np.float32)
     wantf = np.stack([rust[:, len(RUST_FNS)].astype(np.float32), rust[:, len(RUST_FNS) + 1].astype(np.float32),
                       log1pf_reference(af)], axis=1)
@@ -227,7 +254,7 @@ def main(argv=None):
     for k, fn in enumerate(ALL):
         g, w = got[:, k], want[:, k]
         ok = (g.view(np.uint64) == w.view(np.uint64)) | (np.isnan(g) & np.isnan(w))
-        if fn == "cos":         # NaN reference: inf/nan operands and the |x| >= 2^20 known gap
+        if fn in ("cos", "tan"):    # NaN reference: inf/nan operands and the |x| >= 2^20 known gap
             ok |= np.isnan(w) & (np.isnan(g) | (np.abs(a) >= 2.0 ** 20))
         bad = np.flatnonzero(~ok)
         summary[fn] = {"samples": len(g), "mismatches": int(bad.size)}

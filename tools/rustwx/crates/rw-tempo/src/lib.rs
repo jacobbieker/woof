@@ -27,6 +27,7 @@
 
 pub mod capi;
 mod fields;
+mod glibc_tgamma;
 
 use std::collections::HashMap;
 use std::fs;
@@ -76,10 +77,25 @@ impl Libm for f64 {
     }
 }
 
-/// Fortran GAMMA: gfortran calls the C library's tgamma.
+/// Fortran GAMMA: gfortran calls the C library's tgamma -- glibc's, on the
+/// reference build.  Platform C libraries' tgamma differ in the last bits
+/// (macOS's moved 2772 of the blob's 122 million words), so every argument
+/// tempo_init passes is answered from glibc's own words, recorded once on
+/// glibc ([`glibc_tgamma::TABLE`]); the blob is then the same on every
+/// platform.  An argument outside the table (a changed parameter) falls
+/// back to the platform tgamma; `RW_TEMPO_GAMMA_LOG=1` prints those calls,
+/// to extend the table on a glibc host.
 fn gamma(x: f64) -> f64 {
+    let bits = x.to_bits();
+    if let Ok(i) = glibc_tgamma::TABLE.binary_search_by_key(&bits, |e| e.0) {
+        return f64::from_bits(glibc_tgamma::TABLE[i].1);
+    }
     // SAFETY: tgamma is a pure C library function on a plain double.
-    unsafe { tgamma(x) }
+    let r = unsafe { tgamma(x) };
+    if std::env::var_os("RW_TEMPO_GAMMA_LOG").is_some() {
+        eprintln!("rw-tempo tgamma 0x{:016x} 0x{:016x}", bits, r.to_bits());
+    }
+    r
 }
 
 /// libgcc `__powidf2`: real ** integer as gfortran evaluates it.
