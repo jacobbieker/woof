@@ -95,7 +95,7 @@ def test_optimize_ranks_meets_the_deadline_and_chooses(tmp_path):
     # The estimate step prices the leaves the plan step writes.
     assert chosen["recipe"][1].endswith("--store-preset windfarm")
     assert "--leaf-output-preset" not in chosen["recipe"][2]
-    # Honesty fields: band, utilisation and the price table's age.
+    # Disclosure fields: band, utilisation and the price table's age.
     assert doc["model"]["throughput_band"]["pessimistic"] == 0.5
     assert "ASSUMPTIONS" in doc["model"]["utilisation"]["status"]
     assert doc["prices"]["as_of"] == "2025-07-01"

@@ -660,7 +660,7 @@ def _dynamical_asos(args) -> int:
             refresh=args.refresh, station_ids=args.stations)
     except (KeyError, IndexError):
         # LookupError's other children are reader bugs, not "no data";
-        # a traceback is the honest report of those.
+        # a traceback is the faithful report of those.
         raise
     except LookupError as error:
         return _refuse(

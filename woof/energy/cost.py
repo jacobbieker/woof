@@ -50,7 +50,7 @@ Per domain and segment, on a card with bandwidth ``B`` GB/s and ``S`` SMs:
   fixed per-step cost (kernel launches and their tails) that no amount of
   bandwidth removes.
 
-Utilisation (the honesty term).  Throughput is NOT linear in cells: the
+Utilisation (the term that keeps the price real).  Throughput is NOT linear in cells: the
 knee ``h`` and the per-step cost ``L`` together make a small domain on a
 big, fast card pay for idle SMs and launch latency, which is what keeps
 the card ranking from favouring an H100 for a 0.3 M-cell tile; and a
