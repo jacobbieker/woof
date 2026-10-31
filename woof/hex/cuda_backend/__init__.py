@@ -63,8 +63,8 @@ __all__ = [
     "validate_compile_platform_fingerprint",
 ]
 
-# On the mlx backend the Metal translation answers the CUDA admission
-# questions (woof/hex/metal_lane.py); on cuda this does nothing.
+# On the mlx backend, with WOOF_HEX_METAL=1, the Metal translation answers the
+# CUDA admission questions (woof/hex/metal_lane.py); otherwise this does nothing.
 from ..metal_lane import install as _install_metal_lane
 
 _install_metal_lane()

@@ -10,9 +10,12 @@ themselves need nothing CUDA-specific: the facade translates each unit to
 Metal Shading Language exactly as it does for the WRF core
 (docs/dev/mlx-backend.md).
 
-This module answers those questions for the Metal translation, and only on
-the ``mlx`` backend (on ``cuda`` :func:`install` returns without touching
-anything).  It changes no byte of the regional kernel set
+This module answers those questions for the Metal translation, only on the
+``mlx`` backend and only when ``WOOF_HEX_METAL=1`` asks for it (otherwise
+:func:`install` returns without touching anything, and the hex lane refuses
+on a Mac exactly as before).  It is opt-in because only the partial-depth
+band (Phase D5, its oracle and envelope tests) has been measured on Metal;
+the rest of the hex lane has not.  It changes no byte of the regional kernel set
 (``cuda_backend.regional_admission.REGIONAL_KERNEL_SOURCES``): it rebinds
 three module globals of the hex runtime instead of editing them.
 
@@ -124,12 +127,13 @@ def metal_fingerprint() -> dict[str, str]:
 
 
 def install() -> bool:
-    """Admit the hex CUDA lane on the Metal translation (``mlx`` only).
-    Idempotent; returns whether the Metal answers are in place."""
+    """Admit the hex CUDA lane on the Metal translation (``mlx`` with
+    ``WOOF_HEX_METAL=1`` only).  Idempotent; returns whether the Metal
+    answers are in place."""
     global _INSTALLED
     if _INSTALLED:
         return True
-    if _backend() != "mlx":
+    if _backend() != "mlx" or os.environ.get("WOOF_HEX_METAL", "").strip() != "1":
         return False
     import cupy
     from cupy.cuda import nvrtc
