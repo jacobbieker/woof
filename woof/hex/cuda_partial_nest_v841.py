@@ -462,19 +462,6 @@ extern "C" __global__ void pn_feedback_delta_v841(
     }
 }
 
-/* Copy fed-back scalar rows (k < nlev) of the remapped field into the state. */
-extern "C" __global__ void pn_scatter_rows_v841(
-    const int nlev, const int nrows, const int ncells, const int *targets,
-    const float *src, float *dst)
-{
-    PN_LOOP(nlev * nrows) {
-        const int r = element % nrows;
-        const int k = element / nrows;
-        const size_t i = C2(k, targets[r], ncells);
-        dst[i] = src[i];
-    }
-}
-
 /* The interface mass budget over the child (D4's nest_top_budget_residual,
    on the overlap): the parent's flux through the area the child covers less
    the child's interpolated flux, per unit child area,
@@ -665,7 +652,7 @@ KERNELS = (
     "pn_u_flux_top_v841", "pn_w_flux_top_v841", "pn_scalar_flux_top_v841",
     "pn_recover_top_v841", "pn_set_top_v841", "pn_lerp_v841", "pn_bary_apply_v841",
     "pn_reconstruct_v841", "pn_edge_normal_v841", "pn_frame_cells_v841",
-    "pn_remap_rows_v841", "pn_feedback_delta_v841", "pn_scatter_rows_v841",
+    "pn_remap_rows_v841", "pn_feedback_delta_v841",
     "pn_budget_residual_v841", "pn_add_scalar_v841",
     "pn_topzone_rayleigh_cell_v841", "pn_topzone_rayleigh_edge_v841",
     "pn_topzone_filter_cell_v841", "pn_topzone_filter_edge_v841",

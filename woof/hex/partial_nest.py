@@ -52,7 +52,8 @@ _REFUSED_FEEDBACK = {
     "rho": "rho_zz is the MPAS coordinate's mass; restricting it moves the "
            "parent's EOS pressure under its own theta (D4 measured mu "
            "feedback worsening the gravity wave)",
-    "rho_zz": "see rho",
+    "rho_zz": "rho_zz is the MPAS coordinate's mass; restricting it moves the "
+              "parent's EOS pressure under its own theta",
     "zgrid": "the vertical coordinate is never fed back",
     "u": "u is not fed back: D4 measured restricted short waves hurting the "
          "parent (theta' block RMSE 0.011 against 0.0075 alone)",
@@ -137,6 +138,19 @@ def refuse_unsupported_config(config: Any, *, role: str = "child") -> None:
     from woof.hex.cuda_acoustic_fusion_v841 import fusion_enabled
     if getattr(config, "source_release", None) != "v8.4.1":
         raise PartialNestRefused("the partial band runs the v8.4.1 CUDA dycore")
+    if bool(getattr(config, "config_moist_physics", False)):
+        raise PartialNestRefused(
+            "config_moist_physics: the moist acoustic coefficients (cqw, qtot) at the "
+            "interface row would need the parent's moisture above the interface, which "
+            "the band does not carry into pn_coefficients_top_v841; the band runs the "
+            "dry dynamics (scalars are transported and fed back)")
+    if getattr(config, "config_physics_suite", "none") not in ("none", None):
+        raise PartialNestRefused(
+            "config_physics_suite / column physics: a partial band's radiation must see "
+            "the extended column (its own levels below the interface, the parent's "
+            "above), and the hex column physics (cuda_arwen_physics_v841 run_phase1) "
+            "takes the dycore column with one scalar p_top -- no seam carries a "
+            "column taller than the dycore's.  The band runs the dry dycore")
     if bool(getattr(config, "config_rayleigh_damp_u", False)):
         raise PartialNestRefused(
             "config_rayleigh_damp_u counts its levels from the model top, which "
@@ -284,8 +298,23 @@ def band_from_mapping(group: Mapping[str, Any], *, where: str = "partial nest") 
     return HexPartialNestBand(**values)
 
 
+def configs_from_namelist(text: str):
+    """``(dycore config, band or None)`` from one v8.4.1 namelist: the
+    dycore groups through :func:`woof.hex.config.dry_dycore_config_from_namelist`
+    with the band's group admitted, and the band from ``&woof_partial_nest``.
+    A namelist without the group yields exactly the config the dycore loader
+    gives (the option off)."""
+    from woof.hex.config import dry_dycore_config_from_namelist
+    band = band_from_namelist(text)
+    config = dry_dycore_config_from_namelist(text, source_release="v8.4.1",
+                                             admit_partial_nest=band is not None)
+    if band is not None:
+        refuse_unsupported_config(config, role="parent")
+    return config, band
+
+
 __all__ = [
-    "FACE_SCHEMES", "FEEDBACK_FIELDS", "HexPartialNestBand", "MAX_RELAX_LEVELS",
+    "FACE_SCHEMES", "configs_from_namelist", "FEEDBACK_FIELDS", "HexPartialNestBand", "MAX_RELAX_LEVELS",
     "NAMELIST_GROUP", "PartialNestRefused", "band_from_mapping", "band_from_namelist",
     "interface_height", "refuse_damping_below", "refuse_unsupported_config", "truncate",
     "validate_band",

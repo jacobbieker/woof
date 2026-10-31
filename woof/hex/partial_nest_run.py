@@ -911,7 +911,58 @@ class PartialNestHex:
                 c.state.rho, cp.ascontiguousarray(c.state.scalars[s]), q))
             p.state.scalars[s] = q
         self.stats["feedbacks"] += 1
+        self.refresh()
         self.stats["coupling_seconds"] += time.perf_counter() - t0
+
+    def refresh(self) -> None:
+        """After feedback: the end planes and the lateral frame at the
+        parent's time are re-read from the parent as feedback left it, and
+        the child's driving state restarts on that frame -- so the next
+        parent step's start values are the parent's own (post-feedback)
+        state, and a restart at this boundary rebuilds every band buffer
+        word for word (:data:`RESTART_SCRATCH`)."""
+        when = self.start_time + timedelta(
+            seconds=float(self.parent_driver.config.config_dt) * self.parent_steps_done)
+        self.snapshot(self.b)
+        self.pool.frames[when] = self.frame(when)
+        runtime = self.child_driver.regional_v841
+        runtime.driving.start(when)
+
+
+#: Restart classification of every attribute the band holds, at a parent
+#: step boundary (after feedback and :meth:`PartialNestHex.refresh`).
+#: Nothing is serialized: the parent's and the child's own drivers carry
+#: their states, and every band buffer is one of
+#:   "rebuilt"   -- recomputed from those states at the restart time, word
+#:                  for word what the uninterrupted run holds there;
+#:   "table"     -- built from the meshes at construction;
+#:   "transient" -- written within a step before any read;
+#:   "host"      -- configuration, handles and counters (the clock's own
+#:                  restart time gives ``parent_steps_done``);
+#:   "diagnostic" -- running statistics, restarted from zero.
+RESTART_SCRATCH = {
+    "PartialNestHex": {
+        **dict.fromkeys(("a", "b", "pool"), "rebuilt"),
+        **dict.fromkeys(("_residual", "_max_residual", "stats", "table_seconds"), "diagnostic"),
+        **dict.fromkeys((
+            "bary_cells", "bary_edges", "d_cells", "d_edges", "remap", "cover", "d_cover",
+            "d_child_area", "d_remap", "p_coeffs", "p_trig", "p_eoc", "p_noc", "p_max_edges",
+            "c_cos", "c_sin", "_c_cos_pad", "_c_sin_pad", "top_cells", "top_edges"), "table"),
+        **dict.fromkeys((
+            "band", "k", "z_i", "fzm_top", "fzp_top", "nc", "ne", "nc_solve", "ne_solve", "ns",
+            "start_time", "child_config", "parent_nest", "parent_driver", "child_driver",
+            "child_cache", "child_kernels", "parent_kernels", "top", "parent_steps_done"),
+            "host"),
+    },
+    "ChildTop": {
+        **dict.fromkeys((
+            "stage_planes", "stage_edges", "stage_q", "saved_th", "_tmp_cells", "rw_save",
+            "schedule", "stage", "coefficient_calls", "small_step", "scalar_stage", "sub_start",
+            "step_frac0", "step_span", "sub_frac0"), "transient"),
+        **dict.fromkeys(("nest", "k", "nc", "ne", "ns", "kernels", "cache", "scheme",
+                         "disabled"), "host"),
+    },
+}
 
 
 def advance(driver: Any) -> None:
@@ -953,5 +1004,5 @@ def run(nests, parent_steps: int, *, on_child_step=None, on_parent_step=None) ->
             "child_steps": [n.stats["child_steps"] for n in nests]}
 
 
-__all__ = ["ChildBuild", "OnlineDrivingState", "OnlinePool", "PartialChildRuntime",
+__all__ = ["RESTART_SCRATCH", "ChildBuild", "OnlineDrivingState", "OnlinePool", "PartialChildRuntime",
            "PartialNestHex", "PartialTopDriver", "PartialTopKernelCache", "run"]

@@ -51,6 +51,7 @@ RADIUS = 30_000.0
 
 #: The geometry: meshes, levels, steps.
 GEOMETRY = dict(parent_cells=2562, fine_cells=10242, cap_radius_km=4250.0,
+                cap_center_deg=(0.0, 0.0),
                 nz=30, ztop=10_000.0, interface_level=18, parent_dt=12.0, ratio=2,
                 relax_levels=4)
 
@@ -76,9 +77,11 @@ def _cases():
     neutral = lambda z: 300.0 + 0.0 * np.asarray(z)
 
     def arc(xyz):
-        # Great-circle distance (m) from the cap centre (lat 0, lon 0) = +x.
+        # Great-circle distance (m) from the cap centre.
+        lat, lon = np.radians(GEOMETRY["cap_center_deg"])
+        centre = np.array([np.cos(lat) * np.cos(lon), np.cos(lat) * np.sin(lon), np.sin(lat)])
         u = xyz / np.linalg.norm(xyz, axis=-1, keepdims=True)
-        return RADIUS * np.arccos(np.clip(u[..., 0], -1.0, 1.0))
+        return RADIUS * np.arccos(np.clip(u @ centre, -1.0, 1.0))
 
     def bubble(xyz, z):
         r = np.sqrt((arc(xyz) / 6000.0) ** 2 + ((z - 2000.0) / 1500.0) ** 2)
@@ -123,8 +126,9 @@ def ensure_meshes() -> dict[str, Path]:
     d = mesh_dir()
     d.mkdir(parents=True, exist_ok=True)
     g = GEOMETRY
+    lat, lon = g["cap_center_deg"]
     paths = {"parent": d / f"p{g['parent_cells']}.nc", "fine": d / f"f{g['fine_cells']}.nc",
-             "child": d / "child.nc"}
+             "child": d / f"child-{g['fine_cells']}-{lat:g}-{lon:g}-{g['cap_radius_km']:g}.nc"}
     exe = str(_rw_mpas_mesh())
     km = lambda n: str(int(round(480.0 * np.sqrt(2562.0 / n))))
     for key, n in (("parent", g["parent_cells"]), ("fine", g["fine_cells"])):
@@ -132,9 +136,9 @@ def ensure_meshes() -> dict[str, Path]:
             subprocess.run([exe, "--out", str(paths[key]), "--background-km", km(n),
                             "--cells", str(n), "--clobber"], check=True, capture_output=True)
     if not paths["child"].is_file():
-        region = d / "cap.json"
-        region.write_text('{"kind": "cap", "center_deg": [0, 0], "radius_km": %s}'
-                          % g["cap_radius_km"])
+        region = paths["child"].with_suffix(".json")
+        region.write_text('{"kind": "cap", "center_deg": [%r, %r], "radius_km": %r}'
+                          % (float(lat), float(lon), float(g["cap_radius_km"])))
         subprocess.run([exe, "--cull-parent", str(paths["fine"]), "--region", str(region),
                         "--out", str(paths["child"]), "--clobber"], check=True,
                        capture_output=True)
@@ -154,7 +158,9 @@ def load_mesh(path: Path, *, culled_from: Path | None = None):
     ``culled_from``: a regional mesh's global source.  Its ``deriv_two`` is
     the source's rows (``indexToEdgeID``), as init_atmosphere computes it on
     the global mesh before a regional cull (an outer-ring cell has no full
-    stencil of its own)."""
+    stencil of its own).  The rows are the source's edges at the same
+    positions: a culled mesh renumbers its edges, and its ``indexToEdgeID``
+    is that new numbering, not the source's."""
     from woof.hex.mesh import Mesh
     from woof.hex.transport import initialize_deriv_two
     m = Mesh.from_netcdf(path, validate=False)
@@ -172,8 +178,10 @@ def load_mesh(path: Path, *, culled_from: Path | None = None):
     if culled_from is None:
         a["deriv_two"] = np.ascontiguousarray(initialize_deriv_two(m))
     else:
-        source, _ = load_mesh(culled_from)
-        rows = np.asarray(a["indexToEdgeID"], np.int64) - 1
+        source, spos = load_mesh(culled_from)
+        edge_xyz = np.stack([np.asarray(a[n + "Edge"], np.float64) for n in "xyz"], axis=1)
+        rows = coincident(edge_xyz, np.stack([spos[n + "Edge"] for n in "xyz"], axis=1),
+                          "edges")
         a["deriv_two"] = np.ascontiguousarray(np.asarray(source.arrays["deriv_two"])[rows])
     positions64 = {k: np.array(a[k], np.float64) for k in
                    ("xCell", "yCell", "zCell", "xVertex", "yVertex", "zVertex",
@@ -264,20 +272,34 @@ def host_case(mesh, positions64, case: Case, *, regional: bool = False) -> HostC
                     terrain, wind)
 
 
-def dycore_config(dt: float, **kw):
+#: MPAS's standard horizontal dissipation (as D3/D4 ran WRF's sixth-order
+#: filter), 2-D because the band carries no 3-D mixing through its
+#: interface: Smagorinsky 0.125 and the Registry's del4 0.05, length scale
+#: the mesh's own spacing, on all three runs.
+MIXING = dict(config_horiz_mixing="2d_smagorinsky", config_mix_full=False,
+              config_visc4_2dsmag=0.05, config_smagorinsky_coef=0.125)
+
+
+def dycore_config(dt: float, *, len_disp: float, **kw):
     from woof.hex.config_v841 import V841DryDycoreConfig
     values = dict(config_dt=float(dt), config_dynamics_split_steps=3,
                   config_number_of_sub_steps=2, config_split_dynamics_transport=True,
-                  config_monotonic=False, config_positive_definite=False, config_xnutr=0.0)
+                  config_monotonic=False, config_positive_definite=False, config_xnutr=0.0,
+                  config_len_disp=float(len_disp), **MIXING)
     values.update(kw)
     return V841DryDycoreConfig(**values)
+
+
+def _spacing(mesh) -> float:
+    """The mesh's nominal spacing (mean dcEdge, m): config_len_disp."""
+    return float(np.mean(np.asarray(mesh.arrays["dcEdge"], np.float64)))
 
 
 def global_driver(h: HostCase, dt: float, *, kernel_cache=None):
     from woof.hex.cuda_backend import KernelCache
     from woof.hex.cuda_driver import CudaDryDycoreDriver
     return CudaDryDycoreDriver.from_host(
-        h.mesh, h.state, h.vertical, h.reference, dycore_config(dt),
+        h.mesh, h.state, h.vertical, h.reference, dycore_config(dt, len_disp=_spacing(h.mesh)),
         saved_diagnostics=h.saved, terrain_metrics=h.terrain,
         reference_wind_profiles=h.wind,
         kernel_cache=KernelCache() if kernel_cache is None else kernel_cache)
@@ -319,7 +341,7 @@ def build(case_name: str, *, band_overrides: dict | None = None):
         state=truncate(hc.state, nlev, k), vertical=truncate(hc.vertical, nlev, k),
         reference=truncate(hc.reference, nlev, k), saved=truncate(hc.saved, nlev, k),
         terrain=truncate(hc.terrain, nlev, k),
-        wind=truncate(hc.wind, nlev, k), config=dycore_config(child_dt, config_apply_lbcs=True),
+        wind=truncate(hc.wind, nlev, k), config=dycore_config(child_dt, len_disp=_spacing(cmesh), config_apply_lbcs=True),
         start_time=datetime(2000, 6, 21, 18, 0, 0))
     nest = PartialNestHex(parent, pmesh, _geometry(pmesh, ppos), cbuild, band)
 
