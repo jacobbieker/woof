@@ -812,6 +812,7 @@ def test_the_two_netcdf_name_maps_stand_in_the_declared_relation():
         HISTORY_FIELDS_BY_NETCDF_NAME, OUTPUT_FIELDS_BY_NETCDF_NAME,
         PRECIPITATION_OUTPUT_FIELDS, SCHEME_OUTPUT_FIELDS,
         SFIRE_OUTPUT_FIELDS, SURFACE_IDENTITY_OUTPUT_FIELDS,
+        SURFACE_SOLAR_OUTPUT_FIELDS,
         THOMPSON_AEROSOL_OUTPUT_FIELDS, WRF_INPUT_ECHO_OUTPUT_FIELDS)
 
     model_state_groups = {
@@ -820,6 +821,9 @@ def test_the_two_netcdf_name_maps_stand_in_the_declared_relation():
         # The SFIRE Registry rows (woof.io.sfire_schema), a model-state
         # group the schema module declares by name.
         "SFIRE_OUTPUT_FIELDS": SFIRE_OUTPUT_FIELDS,
+        # The surface solar fields a 4-shortwave solve publishes beside
+        # SWDOWN (9b42f298e), declared by name on the same terms.
+        "SURFACE_SOLAR_OUTPUT_FIELDS": SURFACE_SOLAR_OUTPUT_FIELDS,
         # The WRF input rows wrf.exe repeats in every history frame (static
         # words, coordinates, the SPP seed arrays), declared by name as
         # WRF_INPUT_ECHO_OUTPUT_FIELDS (the exact chain, 2.9.1).
@@ -839,10 +843,20 @@ def test_the_two_netcdf_name_maps_stand_in_the_declared_relation():
     assert set(THOMPSON_AEROSOL_OUTPUT_FIELDS) == {
         "QNWFA", "QNIFA", "QNWFA2D", "QNIFA2D"}
     for label, group in model_state_groups.items():
-        assert not (set(group) & set(OUTPUT_FIELDS_BY_NETCDF_NAME)), label
+        shared = set(group) & set(OUTPUT_FIELDS_BY_NETCDF_NAME)
+        # COSZEN is both a radiation scheme's selector row and a surface
+        # solar row, declared equal on both sides (the schema refuses two
+        # different fields under one NetCDF name).
+        allowed = {"COSZEN"} if label == "SURFACE_SOLAR_OUTPUT_FIELDS" else set()
+        assert shared <= allowed, label
+        for name in shared:
+            assert group[name] == OUTPUT_FIELDS_BY_NETCDF_NAME[name], name
         assert set(group) <= set(HISTORY_FIELDS_BY_NETCDF_NAME), label
     for name, field in OUTPUT_FIELDS_BY_NETCDF_NAME.items():
-        assert HISTORY_FIELDS_BY_NETCDF_NAME[name] is field
+        if name == "COSZEN":  # the equal surface solar row, see above
+            assert HISTORY_FIELDS_BY_NETCDF_NAME[name] == field
+        else:
+            assert HISTORY_FIELDS_BY_NETCDF_NAME[name] is field
 
 
 def test_aerosol_metadata_lives_in_exactly_one_table():

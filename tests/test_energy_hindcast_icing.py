@@ -28,6 +28,9 @@ from woof.energy.contracts import (FORECAST_VARIABLES, Plan, PlanDomain,
                                    file_ref)
 
 from test_energy_products import _parse, open_nc, write_forecast
+# The Rust site sampler's test helpers (needs_library); a module-level
+# skip takes the whole module, so it sits with the imports.
+sample_tests = pytest.importorskip("test_energy_sample")
 
 KELVIN = 273.15
 
@@ -437,8 +440,6 @@ def test_extract_then_rating_with_a_fake_sampler(tmp_path, monkeypatch,
         others = [i for i in range(len(kind)) if i not in turbines]
         assert (ds["turbine_iea_ice_class"][others] == -1).all()
 
-
-sample_tests = pytest.importorskip("test_energy_sample")
 
 
 @sample_tests.needs_library
