@@ -122,3 +122,24 @@ def test_mutable_pointer_global_set_by_one_kernel_and_read_by_another(cp):
     module.get_function("bind_counts")((1,), (1,), (counts,))
     module.get_function("count")((1,), (64,), (np.int32(50),))
     assert cp.asnumpy(counts).tolist() == [13, 13, 12, 12]
+
+
+_REPOINTED = r'''
+extern "C" __global__ void repointed(const float* dnw, float* out, int n) {
+    __shared__ float cache[4];
+    for (unsigned int at = threadIdx.x; at < 4u; at += blockDim.x) cache[at] = dnw[at] * 2.0f;
+    __syncthreads();
+    dnw = cache;
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) out[i] = dnw[i % 4] + dnw[0];
+}
+'''
+
+
+def test_kernel_pointer_parameter_repointed_at_shared_memory(cp):
+    """A layout trial stages coefficients in shared memory and points the
+    kernel's const parameter at them: a variant pointer on Metal."""
+    src = cp.asarray(np.array([1, 2, 3, 4], dtype=np.float32))
+    out = cp.zeros(8, dtype=cp.float32)
+    cp.RawKernel(_REPOINTED, "repointed")((1,), (8,), (src, out, np.int32(8)))
+    assert cp.asnumpy(out).tolist() == [4, 6, 8, 10, 4, 6, 8, 10]

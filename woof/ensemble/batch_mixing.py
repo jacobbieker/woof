@@ -179,7 +179,19 @@ def _original_smag_ptx_module(audit_options):
     return module, {**receipt, **link_receipt}
 
 
+def _ptx_route() -> bool:
+    """The PTX-level adapter needs NVRTC's PTX and nvJitLink: CUDA only.
+    On a facade backend (Metal) the same CUDA source is translated, and the
+    member addresses come from the source-level adapter instead."""
+    from woof import backend
+    return backend.active() == "cuda"
+
+
 def _original_smag_ptx_kernel(entry, audit_options):
+    if not _ptx_route():
+        from woof.core.kernels import get_kernel
+        return get_kernel("smag2d", entry), {"source_kind": "translated-source",
+                                             "source_sha256": sha256(normalized_smag_source().encode()).hexdigest()}
     module, receipt = _original_smag_ptx_module(audit_options)
     return module.get_function(entry), receipt
 
@@ -274,6 +286,12 @@ def _member_smag_kernel(spec, members, audit_options):
     from cupy.cuda import function
     from types import SimpleNamespace
     from woof.certify.kernel_manifest import record_module
+    if not _ptx_route():
+        from woof.ensemble.batch_kernel import _compiled_source
+        source = normalized_smag_source()
+        kernel, source_hash, compiled_hash = _compiled_source(source, spec, members, audit_options)
+        return kernel, {"source_kind": "source-member-addresses", "source_sha256": source_hash,
+                        "compiled_source_sha256": compiled_hash}, {}
     ptx, receipt = _scalar_smag_ptx(audit_options)
     names = _entry_parts(normalized_smag_source(), spec, audit_options)[-2]
     adapted, float_hash = _member_smag_ptx(ptx, spec, members, names)

@@ -2177,6 +2177,18 @@ class _Rewriter:
         scalar_size = (offset + max_align - 1) // max_align * max_align if scalars else 0
         table = len(pointers) > MAX_DIRECT_POINTERS
         sig_params, prologue, structs = [], [], []
+        repointed = []
+        # A const pointer parameter the kernel points elsewhere (a layout
+        # trial's `dnw = __shared_cache;`): a variant pointer, bound to the
+        # buffer and reassignable to another space (prelude __woof_vptr).
+        for parm in self._kernel_params_repointed(fn, params):
+            pname = parm.spelling
+            slot = next((k for k, (pn, _) in enumerate(pointers) if pn == pname), None)
+            if slot is None:
+                continue
+            pointers[slot] = (f"__woof_vp_{pname}", pointers[slot][1])
+            elem = self._spell_type(parm.type.get_pointee(), drop_const=True)
+            repointed.append(f"__woof_vptr<{elem}> {pname}(__woof_vp_{pname});")
         if table:
             fields = "\n".join(f"    {ty} {pn};" for pn, ty in pointers)
             structs.append(f"struct __woof_table_{name} {{\n{fields}\n}};")
@@ -2186,7 +2198,7 @@ class _Rewriter:
         else:
             sig_params += [f"{ty} {pn} [[buffer({i})]]" for i, (pn, ty) in enumerate(pointers)]
             table_slot, scalar_slot = -1, len(pointers)
-        prologue += addr_tables
+        prologue += addr_tables + repointed
         if scalars:
             fields = "\n".join(f"    {ty} {pn};" for pn, ty in scalars)
             structs.append(f"struct __woof_scalars_{name} {{\n{fields}\n}};")
@@ -2664,6 +2676,31 @@ class _Rewriter:
             word = struct.unpack("<Q", struct.pack("<d", float(value)))[0]
             s, e = self.span(child)
             self.edits.replace(s, e, f"__woof_f64_lit(0x{word:016X}UL)")
+
+    def _kernel_params_repointed(self, fn, params):
+        """Pointer-to-const kernel parameters assigned a pointer that is not
+        in device memory."""
+        K = self.ci.CursorKind
+        consts = {p.get_usr(): p for p in params
+                  if p.type.get_canonical().kind.name == "POINTER"
+                  and p.type.get_pointee().is_const_qualified()}
+        out = {}
+        if not consts:
+            return []
+        for node in fn.walk_preorder():
+            if node.kind != K.BINARY_OPERATOR:
+                continue
+            kids = list(node.get_children())
+            if len(kids) != 2 or kids[0].kind != K.DECL_REF_EXPR or kids[0].referenced is None:
+                continue
+            usr = kids[0].referenced.get_usr()
+            if usr not in consts:
+                continue
+            op = next((t.spelling for t in node.get_tokens()
+                       if t.extent.start.offset >= kids[0].extent.end.offset), None)
+            if op == "=" and self.spaces.space(kids[1], {}) not in ("device", None):
+                out[usr] = consts[usr]
+        return list(out.values())
 
     @staticmethod
     def _shadows_builtin(node) -> bool:
