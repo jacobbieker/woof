@@ -398,11 +398,16 @@ def state_array_shapes(cfg: RunConfig) -> dict[str, tuple[int, ...]]:
     for name, _ in PBL_ADVECTED_SCALARS.get(cfg.bl_pbl_physics, ()):
         shapes[name] = m
         shapes[name + "0"] = m
-    if cfg.km_opt == 2:
+    if cfg.km_opt in (2, 5):
         # WRF's two-time-level prognostic TKE (Registry.EM_COMMON:312):
         # the SERIALIZED carrier plus its REBUILT time-t copy.
         shapes["tke"] = m
         shapes["tke0"] = m
+    if cfg.km_opt == 5:
+        # SMS-3DTKE's SERIALIZED nonlocal momentum gammas
+        # (Registry.EM_COMMON:317-318).
+        shapes["gamu"] = (ny, nx)
+        shapes["gamv"] = (ny, nx)
     if cfg.bl_pbl_physics in (SASE_PBL_SCHEME, 11):
         # The published subgrid energy (state.py allocates it under the
         # same two-scheme condition): SASE's prognostic closure energy,

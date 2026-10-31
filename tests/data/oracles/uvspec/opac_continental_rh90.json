@@ -1,0 +1,220 @@
+{
+ "case": "opac_continental_rh90",
+ "options": {
+  "wavelength": [
+   500.0,
+   502.0
+  ],
+  "mol_abs_param": "reptran coarse",
+  "rte_solver": "disort",
+  "number_of_streams": 8,
+  "sza": 30.0,
+  "phi0": 0.0,
+  "umu": [],
+  "phi": [],
+  "albedo": 0.2,
+  "pseudospherical": false,
+  "earth_radius": 6370.0,
+  "deltam": null,
+  "disort_intcor": "off",
+  "zout": [
+   "sur",
+   "toa"
+  ],
+  "output_quantity": "irradiance",
+  "day_of_year": null,
+  "atmosphere_file": "us",
+  "wc_file": null,
+  "wc_properties": "hu",
+  "ic_file": null,
+  "ic_properties": "fu",
+  "ic_fu_reff_def": false,
+  "no_absorption": false,
+  "no_scattering": false
+ },
+ "inputs_sha256": "b4afb1ecd57068e8b6e7c420e936ecf18ec0299515412c36fb6d269666142a00",
+ "aerosol": {
+  "species": [
+   "inso",
+   "waso",
+   "soot",
+   "suso"
+  ],
+  "library": "woof",
+  "library_sha256": {
+   "inso": "5af60bd24fd2a87dae9dec7bfc2cbe99a6ddda1e6aabd2fbdae79599571da0bf",
+   "waso": "e4ab0d5e654b4497b839f36ef6f0e42ce79642c455532c4820a62cc132a122ae",
+   "soot": "72db1a9feccb0a3137214484d1c5c6ff45c4d2cf91b812ec8b161244f8eee009",
+   "suso": "4f396d43f57b81e69d45188d57d599d156c1fbf92a3f3b78e07143b644e00dcd"
+  },
+  "library_tool": "woof.radtran.aerosol",
+  "library_package": null
+ },
+ "uvspec_input": "data_files_path <libRadtran data>\natmosphere_file <run dir>/atm.dat\nsource solar\nmol_abs_param reptran coarse\nwavelength 500.0 502.0\nrte_solver disort\nnumber_of_streams 8\nsza 30.0\nphi0 0.0\nalbedo 0.2\ndisort_intcor off\nzout sur toa\nmol_file CH4 <run dir>/CH4.vmr vmr\nmol_file N2O <run dir>/N2O.vmr vmr\nmol_file CO <run dir>/CO.vmr vmr\nmol_file N2 <run dir>/N2.vmr vmr\naerosol_default\naerosol_species_file <run dir>/aer.dat inso waso soot suso\naerosol_species_library <OPAC library>/\nquiet\n",
+ "uvspec": {
+  "lambda": [
+   500.063,
+   500.438,
+   500.814,
+   501.19,
+   501.567,
+   501.945
+  ],
+  "edir": [
+   [
+    1129.04,
+    1601.927
+   ],
+   [
+    1147.392,
+    1627.648
+   ],
+   [
+    1075.193,
+    1525.428
+   ],
+   [
+    1194.365,
+    1693.469
+   ],
+   [
+    1122.832,
+    1592.802
+   ],
+   [
+    1140.981,
+    1622.839
+   ]
+  ],
+  "edn": [
+   [
+    323.7883,
+    1.437541e-12
+   ],
+   [
+    328.2825,
+    2.295265e-12
+   ],
+   [
+    307.015,
+    1.564449e-12
+   ],
+   [
+    340.5915,
+    -1.085493e-12
+   ],
+   [
+    319.3896,
+    1.020966e-12
+   ],
+   [
+    322.6248,
+    1.664351e-12
+   ]
+  ],
+  "eup": [
+   [
+    290.5656,
+    374.5422
+   ],
+   [
+    295.1349,
+    379.787
+   ],
+   [
+    276.4416,
+    355.1807
+   ],
+   [
+    306.9913,
+    394.0922
+   ],
+   [
+    288.4443,
+    369.5997
+   ],
+   [
+    292.7213,
+    373.1523
+   ]
+  ],
+  "uavgdir": [
+   [
+    104.8783,
+    147.1981
+   ],
+   [
+    106.5817,
+    149.5616
+   ],
+   [
+    99.87413,
+    140.1688
+   ],
+   [
+    110.9429,
+    155.6097
+   ],
+   [
+    104.2972,
+    146.3596
+   ],
+   [
+    105.9813,
+    149.1196
+   ]
+  ],
+  "uavgdn": [
+   [
+    53.17209,
+    1.685264e-13
+   ],
+   [
+    53.90808,
+    2.67626e-13
+   ],
+   [
+    50.40028,
+    2.423153e-13
+   ],
+   [
+    55.94045,
+    -1.675528e-13
+   ],
+   [
+    52.41446,
+    1.620152e-13
+   ],
+   [
+    52.77097,
+    1.990063e-13
+   ]
+  ],
+  "uavgup": [
+   [
+    46.24495,
+    63.27954
+   ],
+   [
+    46.97219,
+    64.10912
+   ],
+   [
+    43.99704,
+    59.9105
+   ],
+   [
+    48.85919,
+    66.43294
+   ],
+   [
+    45.90733,
+    62.26457
+   ],
+   [
+    46.58804,
+    62.74738
+   ]
+  ]
+ }
+}

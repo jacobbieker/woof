@@ -5552,6 +5552,10 @@ def _bind_native_views(provider, call):
     p.update({name: bool(native_scalars[name]) for name in ("has_reqc", "has_reqi", "has_reqs")})
     # A [hex_nests] trigger look armed on this run (mpasphys/nest_look_v842): None on every other run.
     p["nest_look"] = getattr(provider.session, "nest_look", None)
+    from .wrfsolar_eps_v842 import thompson_pair
+    pair=thompson_pair(getattr(provider,"session",None))
+    if pair is not None:
+        p["eps_pair"]=pair
     return {"thompson_v842": p}
 
 
@@ -5617,6 +5621,9 @@ def _run_bound_slot(call):
     launch_precip("from",fields,p["surface"],p["precip"],device_math_source=maths,
                   l_acrain=p["l_acrain"],bucket=call.options["config_bucket_rainnc"])
     launch_conversion("from",*conversion,device_math_source=maths)
+    # WOOF-only WRF-Solar EPS (wrfsolar_eps_v842, config_pert_thom): WRF's Add_/Remove_multi_perturb_mp_
+    # pair around mp_gt_driver (module_microphysics_driver.F:1314-1381) on the driver's fields.
+    eps_pair=p.get("eps_pair");eps_saved=None if eps_pair is None else eps_pair[0](fields)
     for _ in range(p["n_microp"]):
         launch_driver(fields,p["surface"],p["tables"],dt=p["dt_microp"],device_math_source=maths,
                       **{n:p[n] for n in ("has_reqc","has_reqi","has_reqs")})
@@ -5626,6 +5633,8 @@ def _run_bound_slot(call):
         # A trigger look's reflectivity: the diagnostics' own on a diagnostics step, else into scratch only.
         p["nest_look"].form(fields,p["diagnostics"],diagnostics_formed=bool(call.flags.diagnostics),
                             launch_radar=launch_radar,device_math_source=maths)
+    if eps_pair is not None:
+        eps_pair[1](fields,eps_saved)
     if call.flags.diagnostics:
         nz,columns=fields["qv"].shape;a=p["diagnostics"]["relhum"]
         if a.shape!=(nz,columns) or a.dtype!=cp.float32 or not a.flags.c_contiguous or a.device.id!=fields["qv"].device.id:

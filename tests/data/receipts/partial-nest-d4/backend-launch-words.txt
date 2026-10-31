@@ -1,0 +1,12 @@
+Partial-depth nest D4: CUDA/Metal launch-word agreement (2026-10-30)
+
+Traced tests (WOOF_LAUNCH_TRACE_DIR, tools/launch_trace.py):
+  tests/test_partial_nest_d4_kernel_words.py   (every kernels/partial_nest_d4.cu entry point)
+  tests/test_partial_nest_kernel_words.py      (D3's kernels/partial_nest.cu)
+  tests/test_partial_nest_wrf471_oracle.py     (WRF v4.7.1 sint/copy_fcn/smoother/
+                                                relaxation/advect_scalar vflux cases)
+CUDA: RTX A6000 (pb), NVRTC 12.9, WOOF_FMAD_OFF=1 (--fmad=false), pixi env default
+Metal: Apple silicon, pixi env mlx
+
+python tools/backend_receipts.py <cuda-traces> <mlx-traces>
+  40 tests traced on both: 40 agree on every launch word

@@ -44,6 +44,11 @@ class MicrophysicsScheme:
     algorithm_identity: str
     #: a state field no other scheme allocates (presence-based consumers)
     discriminator: str
+    #: the scheme's package declares radii to radiation under use_mp_re
+    #: (module_physics_init.F:988-1024 names it)
+    declares_radii: bool = True
+    #: the scheme writes surface precipitation (RAINNC, SNOWNC, GRAUPELNC)
+    precipitates: bool = True
 
 
 TEMPO = MicrophysicsScheme(
@@ -62,7 +67,32 @@ TEMPO = MicrophysicsScheme(
     discriminator="volg",
 )
 
-NAMED_SCHEMES: dict[str, MicrophysicsScheme] = {TEMPO.name: TEMPO}
+#: MAD-WRF's passive hydrometeors, WRF's own selector mp_physics = 96
+#: (Registry.EM_COMMON:3052, package madwrf_mp, moist:qv,qc,qi,qs): the
+#: microphysics driver's CASE (MADWRF_MP) does nothing
+#: (module_microphysics_driver.F:2895), so qc, qi and qs are only advected
+#: and diffused.  WRF-numbered, so a WRF namelist's 96 means the same here;
+#: no use_mp_re radii (module_check_a_mundo.F:375-381 pairs MAD-WRF with
+#: use_mp_re = 0) and no precipitation.  Adapter: woof/core/madwrf.py.
+MADWRF = MicrophysicsScheme(
+    name="madwrf",
+    mp_id=96,
+    label="MAD-WRF passive hydrometeors (WRF v4.7.1 MADWRF_MP)",
+    ice_mass_species=("qi", "qs"),
+    moment_species=(),
+    aerosol_species=(),
+    surface_fields=(),
+    native_reflectivity=False,
+    sr_available=False,
+    cloud_optics_family="none",
+    aerosol_aware=False,
+    algorithm_identity="madwrf-mp-passive-wrf-v4.7.1-v1",
+    discriminator="",
+    declares_radii=False,
+    precipitates=False,
+)
+
+NAMED_SCHEMES: dict[str, MicrophysicsScheme] = {TEMPO.name: TEMPO, MADWRF.name: MADWRF}
 SCHEMES_BY_ID: dict[int, MicrophysicsScheme] = {s.mp_id: s for s in NAMED_SCHEMES.values()}
 NAMED_MP_IDS: tuple[int, ...] = tuple(sorted(SCHEMES_BY_ID))
 
@@ -96,7 +126,7 @@ def scheme(mp) -> MicrophysicsScheme | None:
 def scheme_for_state(state) -> MicrophysicsScheme | None:
     """The named scheme whose discriminator field the state allocated."""
     for s in NAMED_SCHEMES.values():
-        if getattr(state, s.discriminator, None) is not None:
+        if s.discriminator and getattr(state, s.discriminator, None) is not None:
             return s
     return None
 

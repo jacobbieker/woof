@@ -34,8 +34,24 @@ def test_the_operational_hrrr_values_pass_on_legacy_rrtmg_with_mp28():
     validate_radiation_driver_options(_cfg(swint_opt=1, aer_opt=3, **_HRRR))
 
 
+@pytest.mark.parametrize("overrides", [
+    dict(swint_opt=2, **_HRRR),
+    dict(swint_opt=2, couple_farms=True, aer_opt=1, **_HRRR),
+    dict(swint_opt=2, couple_farms=True, mp_physics=8, ra_physics=1),
+    # Morrison: no radii, but cloud, ice and snow (WRF's second arm)
+    dict(swint_opt=2, mp_physics=10, ra_physics=4,
+         ra_rrtmg_variant="rrtmg_legacy", icloud=2),
+    # icloud = 3: the Solar_step's cal_cldfra3 feeds FARMS, as in WRF
+    dict(swint_opt=2, icloud=3, **_HRRR),
+])
+def test_farms_configurations_wrf_admits_pass(overrides):
+    validate_radiation_driver_options(_cfg(**overrides))
+
+
 @pytest.mark.parametrize(("overrides", "match"), [
-    (dict(swint_opt=2), "swint_opt=2"),
+    (dict(swint_opt=3), "swint_opt=3"),
+    (dict(couple_farms=True), "couple_farms = true requires swint_opt = 2"),
+    (dict(couple_farms=1), "couple_farms must be a boolean"),
     (dict(swint_opt=True), "swint_opt=True"),
     (dict(aer_opt=4), "aer_opt=4"),
     (dict(aer_opt=1, nested=True, **_HRRR), "domain-1 aerod parent forcing"),
@@ -51,6 +67,15 @@ def test_the_operational_hrrr_values_pass_on_legacy_rrtmg_with_mp28():
     (dict(swint_opt=1, ra_lw_physics=4, ra_sw_physics=0,
           ra_rrtmg_variant="rrtmg_legacy"), "needs a shortwave"),
     (dict(swint_opt=1, ra_physics=1), "Ruiz-Arias"),
+    # FARMS (swint_opt = 2): WRF's microphysics check, then the ported
+    # Solar_step envelope
+    (dict(swint_opt=2, ra_lw_physics=4, ra_sw_physics=0, mp_physics=8,
+          ra_rrtmg_variant="rrtmg_legacy"), "needs a shortwave"),
+    (dict(swint_opt=2, mp_physics=50, **{k: v for k, v in _HRRR.items()
+                                          if k != "mp_physics"}),
+     "requires a different MP scheme"),
+    (dict(swint_opt=2, icloud=4, **_HRRR), "icloud=4"),
+    (dict(swint_opt=2, aer_opt=3, **_HRRR), "aer_opt=3"),
 ])
 def test_refusals_name_the_breakage(overrides, match):
     with pytest.raises(ValueError, match=match):
@@ -106,7 +131,25 @@ def test_the_checkpoint_echo_drops_both_at_their_default():
              "output_diagnostics", "diag_int", "wind_int",
              "nest_accumulation_archive",
              # WRF's wind farm (the fork's Fitch coupling), appended after.
-             *WINDFARM_RUN_DEFAULTS]
+             *WINDFARM_RUN_DEFAULTS,
+             # RRTMG band output, then WRF-Solar's couple_farms.
+             "rrtmg_spectral_output", "couple_farms",
+             # the output-only woof.radtran diagnostic
+             "radtran_wavelengths", "radtran_interval_s", "radtran_umu", "radtran_phi",
+             "radtran_mol_abs_param", "radtran_solver", "radtran_streams",
+             "radtran_pseudospherical",
+             # WRF's shcu_physics (Deng) and cu_rad_feedback.
+             "shcu_physics", "cu_rad_feedback",
+
+             # the output-only WRF-Solar diagnostics
+             "solar_diagnostics",
+             # the radtran diagnostic's OPAC aerosol, appended after
+             "radtran_aerosol",
+             # WRF's use_theta_m and do_avgflx_em, appended after
+             "use_theta_m", "do_avgflx_em",
+             # WRF-Solar EPS (multi_perturb, pert_*, table) and MAD-WRF.
+             *__import__("woof.config", fromlist=["x"]).MULTI_PERTURB_RUN_DEFAULTS,
+             *__import__("woof.config", fromlist=["x"]).MADWRF_RUN_DEFAULTS]
     assert names[-len(later):] == later
     names = names[:-len(later)]
     # The 2.9.4 capabilities campaign's keyword-only keys follow the fire

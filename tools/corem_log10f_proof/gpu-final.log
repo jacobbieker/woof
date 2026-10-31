@@ -1,0 +1,4 @@
+CuPy 14.2.0 NVRTC (12, 9) GPU NVIDIA RTX A6000
+header_sha256 bcede6f5758979b534bb73754310ad0e631db50b99a8fdcb7fd76f766241cdd5
+('-std=c++17', '--fmad=false', '--ftz=false') log10f inputs 4294967296 mismatches 0 examples []
+('-std=c++17', '--fmad=true', '--ftz=false') log10f inputs 4294967296 mismatches 0 examples []

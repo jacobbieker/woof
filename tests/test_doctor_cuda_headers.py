@@ -31,6 +31,13 @@ import pytest
 from woof import doctor
 
 
+@pytest.fixture(autouse=True)
+def _cuda_backend(monkeypatch):
+    """These are the CUDA front door's tests: under WOOF_BACKEND=mlx the
+    same door asks for MLX instead (tests/test_backend_capabilities.py)."""
+    monkeypatch.setenv("WOOF_BACKEND", "cuda")
+
+
 def _check(monkeypatch, payload, *, box_major=13):
     """The check with the probe and the box's CUDA major both forced."""
     monkeypatch.delenv("GPUWM_NO_LOCAL_GPU", raising=False)

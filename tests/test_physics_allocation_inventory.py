@@ -1569,6 +1569,70 @@ _PHYSICS_ALLOCATION_INVENTORY['woof/core/surface_ocean.py']['update_ocean_diagno
 # lane/cap-hail (97e9a3ca061): hail.py draws all its working set from the
 # state scratch arena (21 hail_*/hailcast_* slots); no pool allocation.
 _PHYSICS_ALLOCATION_INVENTORY['woof/core/hail.py'] = {}
+# WRF-Solar icloud = 3 (cal_cldfra3): per radiation call (or chunk) one
+# (ncol, nz) float32 CLDFRA, a 4*ncol*nz float32 scratch and an (ncol,) int32
+# fatal flag; the radiation copies of qc/qi are .copy() of the gathered
+# inputs, released with the call.
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/cldfra3.py'] = {'cal_cldfra3': 3}
+# WRF-Solar diagnostics (solar_diagnostics = 1): every plane the step uses is
+# a state scratch slot (woof/core/solar_diagnostics.py scratch_shapes);
+# radius_metres allocates one (nz, ny, nx) float32 only for a caller that
+# passes no output (the tests' replay), never on the step.
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/solar_diagnostics.py'] = {'radius_metres': 1}
+# km_opt = 5, SMS-3DTKE (woof/core/sms3dtke.py): launchers only.  Every
+# operand, closure field and the tridiagonal workspace is a state scratch
+# slot the dycore names (woof/core/dycore.py launch_wrf_sms3dtke); the
+# module itself allocates nothing.
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/sms3dtke.py'] = {}
+# use_theta_m = 1 (woof/core/theta_m.py): every device plane is a state
+# scratch slot (theta_m_stash/dry/rtheta/qv_diabatic); no pool allocation.
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/theta_m.py'] = {}
+# do_avgflx_em = 1 (woof/core/avgflx.py): the means and the counter are
+# state scratch slots; the counter increment forms one one-word temporary.
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/avgflx.py'] = {}
+# mlx-backend merges, entered together (each module's bound beside it):
+# WRF-Solar FARMS (swint_opt = 2): per step one (ncol,) output block, the
+# per-step CLDFRA, the metre radii, and four 2-D aerosol planes (zeros for
+# aer_opt = 0, AODTOT plus namelist values for 1, the radiation call's for 2).
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/farms.py'] = {
+    'farms_columns': 1, 'cloud_fraction': 1, '_radii': 1, '_aerosol': 4}
+# The partial-depth nest's top (Phase D2): one (ny, nx) column-sum plane and
+# one output per entry point, released with the call; no integration runs it
+# yet (tests/test_partial_nest_dyn.py drives it).
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/partial_nest_dyn.py'] = {
+    'zeros': 1, 'column_sums': 1, 'calc_ww_top': 1, 'add_top_face_flux': 1,
+    'time_interpolate': 1}
+# The running partial-depth nest (Phase D3): its forcing, strip and budget
+# planes come from one allocation site at construction, reused every step.
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/partial_nest_run.py'] = {'__init__': 1}
+# The partial-depth nest's physics (Phase D4): no allocation site of its
+# own.  The extended radiation column is one DomainState built at
+# construction; its refresh writes scratch slots and nest_interp.sint's
+# outputs, and the radiation result is cut by contiguous copies.
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/partial_nest_physics.py'] = {}
+# In-model gusts and extremes (c80237153): all planes are state fields.
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/wind_gust_diag.py'] = {}
+# cu_rad_feedback (ICLOUD_CU = 1): GF's convtrans_prep qc_cu/qi_cu planes.
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/gf.py']['__call__'] = 14
+# Driver construction: the FARMS SW*2 fields, the radtran diagnostic
+# planes and Deng's carried state (__init__ 22 -> 25, initialize_physics
+# 37 -> 40), and the wind farm's one attach-time plane.
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/physics.py'].update(
+    {'__init__': 25, '_attach_windfarm': 1, 'initialize_physics': 40})
+# WRF-Solar EPS (multi_perturb): each pert3d field and its two spectra at
+# driver construction (allocate_multi_perturb_fields); per generator SP_AMP,
+# its ZCHI scratch and the three scalars (__init__), per update the two
+# draw planes (draws) and the filled real/imaginary levels (fill); per hook
+# statement Add_'s saved copy and a one-word dummy (apply, _dummy).
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/wrfsolar_eps.py'] = {
+    '_dummy': 1, 'apply': 2, 'allocate_multi_perturb_fields': 1, '__init__': 3,
+    'draws': 2, 'fill': 2}
+# MAD-WRF's cloud initialization, once at the real initialization: the
+# column copies (cloud_init_state), CLDFRA, the work and status buffers
+# (cloud_init) and the default surface planes (surf).  The nudge allocates
+# nothing.
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/madwrf.py'] = {
+    'surf': 1, 'cloud_init': 3, 'cloud_init_state': 2}
 
 
 def _live_inventory() -> dict[str, dict[str, int]]:

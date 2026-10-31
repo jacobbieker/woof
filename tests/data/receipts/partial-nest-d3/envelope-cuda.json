@@ -1,0 +1,457 @@
+{
+ "backend": "cuda",
+ "cases": {
+  "bubble": {
+   "case": "bubble",
+   "cell_steps_ratio": 4.716157205240175,
+   "child_block_mean_vs_allfine_block_mean": {
+    "theta_p": {
+     "bias": 0.0044714508863983975,
+     "ref_rms": 0.260953291098482,
+     "rmse": 0.1432786837534741
+    },
+    "u": {
+     "bias": -0.0005456589795007675,
+     "ref_rms": 1.5615785639512418,
+     "rmse": 0.5173327055999589
+    },
+    "w": {
+     "bias": 0.006728814934911992,
+     "ref_rms": 1.9420454915457837,
+     "rmse": 0.48164849359079953
+    }
+   },
+   "child_dry_mass_drift_rel": -9.882662510348768e-05,
+   "child_steps": 180,
+   "child_vs_allfine": {
+    "theta_p": {
+     "bias": 0.004839764809121891,
+     "ref_rms": 0.2809641216973844,
+     "rmse": 0.16458833185845517
+    },
+    "u": {
+     "bias": -0.0004942803421865173,
+     "ref_rms": 1.679581702104299,
+     "rmse": 0.5484398901060061
+    },
+    "w": {
+     "bias": 0.006821521055397748,
+     "ref_rms": 2.018242523976934,
+     "rmse": 0.7088862047829805
+    }
+   },
+   "child_w_max_abs": 8.325393676757812,
+   "diff_6th_opt": 2,
+   "feedback": 1,
+   "feedback_kinds": [
+    "mu",
+    "u",
+    "v",
+    "t"
+   ],
+   "feedbacks": 60,
+   "finite": true,
+   "forces": 60,
+   "interface_pressure_pa": 47638.262214271876,
+   "interface_w_max_abs": 2.606020212173462,
+   "k_top": 21,
+   "mass_correction": true,
+   "mass_route": "face",
+   "max_abs_mass_residual": 0.03863554075360298,
+   "parent_dry_mass_drift_rel": -6.520829462515935e-06,
+   "parent_only_vs_allfine_block_mean": {
+    "theta_p": {
+     "bias": 0.0034521752661401065,
+     "ref_rms": 0.260953291098482,
+     "rmse": 0.23803430340643975
+    },
+    "u": {
+     "bias": -0.001807163173413443,
+     "ref_rms": 1.5615785639512418,
+     "rmse": 0.7373166688163119
+    },
+    "w": {
+     "bias": -0.0005413289363552506,
+     "ref_rms": 1.9420454915457837,
+     "rmse": 0.9914306646784575
+    }
+   },
+   "parent_steps": 60,
+   "relax_zone": 6,
+   "seconds": 720.0,
+   "speedup": 0.5046030201379937,
+   "top_zone_w_variance_final": 2.584362745285034,
+   "top_zone_w_variance_max": 2.584362745285034,
+   "wall_allfine_s": 0.4851416312158108,
+   "wall_parent_plus_child_s": 0.9614322781562805,
+   "wall_split_s": {
+    "child_seconds": 0.7493082117289305,
+    "coupling_seconds": 0.09258747100830078,
+    "parent_seconds": 0.11625419557094574
+   }
+  },
+  "gravity_wave": {
+   "case": "gravity_wave",
+   "cell_steps_ratio": 4.716157205240175,
+   "child_block_mean_vs_allfine_block_mean": {
+    "theta_p": {
+     "bias": 0.0016779249452894475,
+     "ref_rms": 0.05486187229726851,
+     "rmse": 0.02282522941491233
+    },
+    "u": {
+     "bias": 0.000367276591889744,
+     "ref_rms": 20.045017298030142,
+     "rmse": 0.022749361258475403
+    },
+    "w": {
+     "bias": 0.0014367304795605941,
+     "ref_rms": 0.0524645586744724,
+     "rmse": 0.026445070091279395
+    }
+   },
+   "child_dry_mass_drift_rel": 6.954658790429036e-05,
+   "child_steps": 300,
+   "child_vs_allfine": {
+    "theta_p": {
+     "bias": 0.0018396585166048842,
+     "ref_rms": 0.05468396901531594,
+     "rmse": 0.02298591972405495
+    },
+    "u": {
+     "bias": 0.0001264975184486026,
+     "ref_rms": 20.04495959959704,
+     "rmse": 0.02354425981939441
+    },
+    "w": {
+     "bias": 0.0013733124367247443,
+     "ref_rms": 0.05371208888601482,
+     "rmse": 0.02779025338940672
+    }
+   },
+   "child_w_max_abs": 0.1846514493227005,
+   "diff_6th_opt": 2,
+   "feedback": 1,
+   "feedback_kinds": [
+    "mu",
+    "u",
+    "v",
+    "t"
+   ],
+   "feedbacks": 100,
+   "finite": true,
+   "forces": 100,
+   "interface_pressure_pa": 49150.79489741418,
+   "interface_w_max_abs": 0.4028991758823395,
+   "k_top": 21,
+   "mass_correction": true,
+   "mass_route": "face",
+   "max_abs_mass_residual": 0.002994638867676258,
+   "parent_dry_mass_drift_rel": 8.689440016967479e-07,
+   "parent_only_vs_allfine_block_mean": {
+    "theta_p": {
+     "bias": -0.0002967359382154304,
+     "ref_rms": 0.05486187229726851,
+     "rmse": 0.007497090048365776
+    },
+    "u": {
+     "bias": -0.0010727566822690744,
+     "ref_rms": 20.045017298030142,
+     "rmse": 0.014616007407958816
+    },
+    "w": {
+     "bias": 0.00043955953557644296,
+     "ref_rms": 0.0524645586744724,
+     "rmse": 0.01675797404635103
+    }
+   },
+   "parent_steps": 100,
+   "relax_zone": 6,
+   "seconds": 1200.0,
+   "speedup": 0.5058316783986181,
+   "top_zone_w_variance_final": 0.004337606485933065,
+   "top_zone_w_variance_max": 0.015669329091906548,
+   "wall_allfine_s": 0.8029525559395552,
+   "wall_parent_plus_child_s": 1.5873908065259457,
+   "wall_split_s": {
+    "child_seconds": 1.2370504485443234,
+    "coupling_seconds": 0.15301610436290503,
+    "parent_seconds": 0.19221621099859476
+   }
+  },
+  "rest": {
+   "case": "rest",
+   "cell_steps_ratio": 4.716157205240175,
+   "child_block_mean_vs_allfine_block_mean": {
+    "theta_p": {
+     "bias": 1.0400755792601493e-05,
+     "ref_rms": 0.0,
+     "rmse": 0.00013742220583448487
+    },
+    "u": {
+     "bias": -1.7660731543936624e-05,
+     "ref_rms": 0.0,
+     "rmse": 0.00011069108054605216
+    },
+    "w": {
+     "bias": -1.3860432950099384e-06,
+     "ref_rms": 1.6585063422863716e-05,
+     "rmse": 0.00012377540007576298
+    }
+   },
+   "child_dry_mass_drift_rel": -4.913543206263101e-09,
+   "child_steps": 450,
+   "child_vs_allfine": {
+    "theta_p": {
+     "bias": 1.2885632158136692e-05,
+     "ref_rms": 0.0,
+     "rmse": 0.00015672296775074757
+    },
+    "u": {
+     "bias": -1.714452768020609e-05,
+     "ref_rms": 0.0,
+     "rmse": 0.00014634518339424053
+    },
+    "w": {
+     "bias": -1.4927794134318575e-06,
+     "ref_rms": 1.658506342286372e-05,
+     "rmse": 0.00019600989592873612
+    }
+   },
+   "child_w_max_abs": 0.0010327605996280909,
+   "diff_6th_opt": 2,
+   "feedback": 1,
+   "feedback_kinds": [
+    "mu",
+    "u",
+    "v",
+    "t"
+   ],
+   "feedbacks": 150,
+   "finite": true,
+   "forces": 150,
+   "interface_pressure_pa": 49150.79489741418,
+   "interface_w_max_abs": 0.00026922437245957553,
+   "k_top": 21,
+   "mass_correction": true,
+   "mass_route": "face",
+   "max_abs_mass_residual": 8.67525341163855e-06,
+   "parent_dry_mass_drift_rel": 9.740496354152111e-09,
+   "parent_only_vs_allfine_block_mean": {
+    "theta_p": {
+     "bias": 0.0,
+     "ref_rms": 0.0,
+     "rmse": 0.0
+    },
+    "u": {
+     "bias": 0.0,
+     "ref_rms": 0.0,
+     "rmse": 0.0
+    },
+    "w": {
+     "bias": -8.087068682441223e-06,
+     "ref_rms": 1.6585063422863716e-05,
+     "rmse": 1.742663289167183e-05
+    }
+   },
+   "parent_steps": 150,
+   "relax_zone": 6,
+   "seconds": 1800.0,
+   "speedup": 0.5195853832869698,
+   "top_zone_w_variance_final": 1.4698898098686186e-08,
+   "top_zone_w_variance_max": 2.0149055757201495e-08,
+   "wall_allfine_s": 1.238606410101056,
+   "wall_parent_plus_child_s": 2.383836131542921,
+   "wall_split_s": {
+    "child_seconds": 1.8580910684540868,
+    "coupling_seconds": 0.22970273345708847,
+    "parent_seconds": 0.2884879885241389
+   }
+  }
+ },
+ "commit": "8caa35dce7fc924de4d94ec4591d975a349c48a7",
+ "device": "NVIDIA RTX A6000",
+ "geometry": {
+  "cx": 30,
+  "cy": 8,
+  "diff_6th_opt": 2,
+  "dt": 12.0,
+  "dx": 3000.0,
+  "etac": 0.45,
+  "ipos": 16,
+  "jpos": 5,
+  "nz": 30,
+  "px": 60,
+  "py": 16,
+  "ratio": 3,
+  "ztop": 10000.0
+ },
+ "platform": "Linux-6.12.104-1-MANJARO-x86_64-with-glibc2.44",
+ "schema": "woof-partial-nest-envelope-v1",
+ "tree_dirty": true,
+ "variants": {
+  "bubble_mass_route_adj": {
+   "case": "bubble",
+   "cell_steps_ratio": 4.716157205240175,
+   "child_block_mean_vs_allfine_block_mean": {
+    "theta_p": {
+     "bias": 0.03814030120563933,
+     "ref_rms": 0.260953291098482,
+     "rmse": 0.2009318754821038
+    },
+    "u": {
+     "bias": -3.433297629880509e-05,
+     "ref_rms": 1.5615785639512418,
+     "rmse": 0.5184330572369714
+    },
+    "w": {
+     "bias": 0.028671415468208967,
+     "ref_rms": 1.9420454915457837,
+     "rmse": 0.48632688391843387
+    }
+   },
+   "child_dry_mass_drift_rel": -0.00013823992370031105,
+   "child_steps": 180,
+   "child_vs_allfine": {
+    "theta_p": {
+     "bias": 0.03848424768772255,
+     "ref_rms": 0.2809641216973844,
+     "rmse": 0.21785534605328857
+    },
+    "u": {
+     "bias": 0.00014794989626942706,
+     "ref_rms": 1.679581702104299,
+     "rmse": 0.5492010409822489
+    },
+    "w": {
+     "bias": 0.030191710820571985,
+     "ref_rms": 2.018242523976934,
+     "rmse": 0.7131920845500332
+    }
+   },
+   "child_w_max_abs": 8.337700843811035,
+   "diff_6th_opt": 2,
+   "feedback": 1,
+   "feedback_kinds": [
+    "mu",
+    "u",
+    "v",
+    "t"
+   ],
+   "feedbacks": 60,
+   "finite": true,
+   "forces": 60,
+   "interface_pressure_pa": 47638.262214271876,
+   "interface_w_max_abs": 2.6775078773498535,
+   "k_top": 21,
+   "mass_correction": true,
+   "mass_route": "adj",
+   "max_abs_mass_residual": 0.03302356228232384,
+   "parent_dry_mass_drift_rel": 1.0257212602958984e-05,
+   "parent_only_vs_allfine_block_mean": {
+    "theta_p": {
+     "bias": 0.0034521752661401065,
+     "ref_rms": 0.260953291098482,
+     "rmse": 0.23803430340643975
+    },
+    "u": {
+     "bias": -0.001807163173413443,
+     "ref_rms": 1.5615785639512418,
+     "rmse": 0.7373166688163119
+    },
+    "w": {
+     "bias": -0.0005413289363552506,
+     "ref_rms": 1.9420454915457837,
+     "rmse": 0.9914306646784575
+    }
+   },
+   "parent_steps": 60,
+   "relax_zone": 6,
+   "seconds": 720.0,
+   "top_zone_w_variance_final": 2.5705204010009766,
+   "top_zone_w_variance_max": 2.5705204010009766
+  },
+  "bubble_one_way": {
+   "case": "bubble",
+   "cell_steps_ratio": 4.716157205240175,
+   "child_block_mean_vs_allfine_block_mean": {
+    "theta_p": {
+     "bias": -0.006187454490677145,
+     "ref_rms": 0.260953291098482,
+     "rmse": 0.17409406504835642
+    },
+    "u": {
+     "bias": -0.0007676124810491992,
+     "ref_rms": 1.5615785639512418,
+     "rmse": 0.4688531511718264
+    },
+    "w": {
+     "bias": -0.004968104726598542,
+     "ref_rms": 1.9420454915457837,
+     "rmse": 0.6093036998058339
+    }
+   },
+   "child_dry_mass_drift_rel": -6.571465735353183e-05,
+   "child_steps": 180,
+   "child_vs_allfine": {
+    "theta_p": {
+     "bias": -0.00573081451208413,
+     "ref_rms": 0.2809641216973844,
+     "rmse": 0.1921265455004041
+    },
+    "u": {
+     "bias": -0.0006932899209658381,
+     "ref_rms": 1.679581702104299,
+     "rmse": 0.5291981845434246
+    },
+    "w": {
+     "bias": -0.006025064099799006,
+     "ref_rms": 2.018242523976934,
+     "rmse": 0.7704209337634882
+    }
+   },
+   "child_w_max_abs": 7.941511154174805,
+   "diff_6th_opt": 2,
+   "feedback": 0,
+   "feedback_kinds": [
+    "mu",
+    "u",
+    "v",
+    "t"
+   ],
+   "feedbacks": 60,
+   "finite": true,
+   "forces": 60,
+   "interface_pressure_pa": 47638.262214271876,
+   "interface_w_max_abs": 2.509901523590088,
+   "k_top": 21,
+   "mass_correction": true,
+   "mass_route": "face",
+   "max_abs_mass_residual": 0.06683281809091568,
+   "parent_dry_mass_drift_rel": -2.4004415613483995e-11,
+   "parent_only_vs_allfine_block_mean": {
+    "theta_p": {
+     "bias": 0.0034521752661401065,
+     "ref_rms": 0.260953291098482,
+     "rmse": 0.23803430340643975
+    },
+    "u": {
+     "bias": -0.001807163173413443,
+     "ref_rms": 1.5615785639512418,
+     "rmse": 0.7373166688163119
+    },
+    "w": {
+     "bias": -0.0005413289363552506,
+     "ref_rms": 1.9420454915457837,
+     "rmse": 0.9914306646784575
+    }
+   },
+   "parent_steps": 60,
+   "relax_zone": 6,
+   "seconds": 720.0,
+   "top_zone_w_variance_final": 1.8404308557510376,
+   "top_zone_w_variance_max": 1.8495887517929077
+  }
+ },
+ "written": "2026-10-30T12:12:48+00:00"
+}

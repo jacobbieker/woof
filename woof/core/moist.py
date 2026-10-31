@@ -84,6 +84,7 @@ from woof.microphysics_schemes import scheme_for_state as _named_scheme_for_stat
 from woof.core.state import DTYPE, DomainState, init_at_rest
 from woof.core.wdm6_constants import WDM6_NUMBER_SPECIES
 from woof.core import tke_budget
+from woof.core.theta_m import convert_initial_state, run_theta_m
 
 _TPB = 128  # threads per block along i (i fastest)
 
@@ -1294,6 +1295,11 @@ def init_moist_balanced(cfg: RunConfig, coord: VerticalCoord,
     # Idealized cases always use hypsometric_opt=1, regardless of namelist
     # setting (WRF share/input_wrf.F:1038); the php recurrence above is the
     # opt-1 discrete hydrostatic inversion, so the default key matches.
+    if run_theta_m(cfg):
+        # use_theta_m = 1: ideal.exe's last statement turns the dry theta
+        # into theta_m (module_initialize_ideal.F:1726-1734); the pressure
+        # diagnosed below then takes calc_p_rho_phi's theta_m branch.
+        convert_initial_state(s)
     update_diagnostics(s)
     return s
 
@@ -1346,6 +1352,12 @@ def advance_tke_stage(state: DomainState, cfg: RunConfig,
     q = state.tke
     q0 = state.tke0
     pd = final and not (cfg.open_x or cfg.open_y)
+    # WRF folds the TKE sources ahead of the PD limiter (rk_update_scalar_pd)
+    # for km_opt = 2 only (solve_em.F:2104-2106).  km_opt = 5 takes the
+    # positive-definite advection (advect_scalar_pd in rk_scalar_tend) on
+    # the unfolded tke_1, and its sources enter rk_update_scalar with the
+    # advective tendency like any non-PD pass.
+    fold_sources = cfg.km_opt != 5
     tend[...] = 0
     if pd:
         bufs = (state.scratch((nz, ny, nx + 1), "pd_fxl"),
@@ -1356,7 +1368,7 @@ def advance_tke_stage(state: DomainState, cfg: RunConfig,
                 state.scratch((nz + 1, ny, nx), "pd_fzc"))
         q0_eff = _pd_fold_sources(
             state, cfg, "tke", q0, chm0, dt_eff, None,
-            fixed_tendency=fixed_tendency)
+            fixed_tendency=fixed_tendency if fold_sources else None)
         launch_pd_fluxes(q, q0_eff, ru, rv, ww, mu, state,
                          cfg.dx, cfg.dy, dt_eff, *bufs,
                          msft=state.msft, has_msf=state.has_msf,
@@ -1374,6 +1386,8 @@ def advance_tke_stage(state: DomainState, cfg: RunConfig,
         # WRF's PD fold moved the sources into q0_eff, so ``tend`` here is
         # the pure advective flux divergence -- the budget's transport term.
         _tke_budget_transport(state, cfg, tend, final=final)
+        if not fold_sources and fixed_tendency is not None:
+            tend += fixed_tendency
         q[...] = (chm0 * q0_eff + dt_eff * tend) / chm
     else:
         launch_flux_div_scalar(q, ru, rv, ww, tend, state,

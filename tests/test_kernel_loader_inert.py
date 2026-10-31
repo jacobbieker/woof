@@ -54,6 +54,26 @@ _ALLOWED_AEROSOL_MODULES = frozenset({
 #: at max_ulp 0, which is a stronger gate than source identity and the only
 #: reason the trade was takeable.
 _EXPECTED_HEADERS = {
+    # WRF-Solar icloud = 3 (cal_cldfra3), a new unit graded word for word
+    # against WRF v4.7.1 (tests/test_cldfra3_wrf471_oracle.py): glibc 2.43's
+    # log10f and powf.
+    "cldfra3": ("glibc_flt32.cuh", "corem_log10f.cuh"),
+    # WRF-Solar module_diag_solar (solar_diagnostics = 1), a new unit graded
+    # word for word against WRF v4.7.1 (tests/test_solar_diag_wrf471_oracle.py):
+    # glibc 2.43's acosf.
+    "solar_diag": ("glibc_flt32.cuh", "glibc_trig_flt32.cuh"),
+    # km_opt = 5 (SMS-3DTKE), a new unit graded word for word against WRF
+    # v4.7.1 (tests/test_sms3dtke_wrf471_parity.py): glibc's powf/expf and
+    # glibc 2.43's correctly rounded tanhf.
+    "sms3dtke": ("glibc_flt32.cuh", "sfire_libm.cuh"),
+    # WRF-Solar EPS (multi_perturb) hooks and module_stoch pattern
+    # arithmetic, new units graded word for word against WRF v4.7.1
+    # (tests/test_wrfsolar_eps_wrf471_oracle.py, _pattern_oracle.py):
+    # glibc's expf/logf and 2.43's cosf/sinf.
+    "wrfsolar_eps": ("glibc_flt32.cuh", "glibc_trig_flt32.cuh"),
+    # MAD-WRF (module_madwrf.F, Cloud_tracer_nudge), graded word for word
+    # (tests/test_madwrf_wrf471_oracle.py): glibc's powf.
+    "madwrf": ("glibc_flt32.cuh",),
     "gsd_initial_reflectivity": ("glibc_flt32.cuh", "glibc_flt64.cuh",
                                  "thompson_fork_constants.cuh", "thompson_fork.cu"),
     # A new full-column generation unit; existing classic and aerosol units
@@ -261,9 +281,34 @@ def test_lake_compile_options_do_not_change_existing_modules(monkeypatch, strict
     expected["lightning"] = ("-std=c++17", "--ftz=false", "--fmad=false")
     # WRF's ocean mixed layer (2.9.1) compiles as the column-exact ports do.
     expected["oml"] = ("-std=c++17", "--fmad=false", "--ftz=false")
+    # WRF-Solar FARMS (swint_opt = 2), graded bitwise against WRF v4.7.1's
+    # module_ra_farms.F (tests/test_farms_wrf471_parity.py).
+    expected["farms"] = ("-std=c++17", "--fmad=false", "--ftz=false")
+    # WRF-Solar cal_cldfra3 (icloud = 3): column-exact, subnormals kept.
+    expected["cldfra3"] = ("-std=c++17", "--fmad=false", "--ftz=false")
+    expected["solar_diag"] = ("-std=c++17", "--fmad=false", "--ftz=false")
+    # WRF v4.7.1's use_theta_m conversions and upd_avgflx: column-exact,
+    # every operation an explicit round-to-nearest intrinsic, subnormals kept
+    # (tests/test_bigstep_thetam_wrf471_parity.py).
+    expected["theta_m"] = ("-std=c++17", "--fmad=false", "--ftz=false")
+    expected["avgflx"] = ("-std=c++17", "--fmad=false", "--ftz=false")
+    # km_opt = 5 (SMS-3DTKE): tile-exact against WRF v4.7.1, subnormals kept.
+    expected["sms3dtke"] = ("-std=c++17", "--fmad=false", "--ftz=false")
+    # WRF-Solar EPS and MAD-WRF: column-exact, subnormals kept.
+    expected["wrfsolar_eps"] = ("-std=c++17", "--fmad=false", "--ftz=false")
+    expected["madwrf"] = ("-std=c++17", "--fmad=false", "--ftz=false")
     # WRF's HAILCAST diagnostics (lane/cap-hail 97e9a3ca061) compile without
     # FMA, like the other column-exact WRF ports.
     expected["hail"] = ("-std=c++17", "--fmad=false")
+    # The clean-room spectral solver (woof/radtran): no FMA, so CUDA's words
+    # are Metal's and the host build's (tests/test_radtran_kernel_words*.py).
+    expected["radtran_disort"] = ("-std=c++17", "--fmad=false")
+    # The partial-depth nest's coupling (Phase D3): default options, every
+    # cross-backend operation an explicit round-to-nearest intrinsic
+    # (tests/test_partial_nest_kernel_words.py).
+    expected["partial_nest"] = ("-std=c++17",)
+    # Its D4 coupling: the same (tests/test_partial_nest_d4_kernel_words.py).
+    expected["partial_nest_d4"] = ("-std=c++17",)
     names = _module_names()
     assert set(expected) <= set(names), sorted(set(expected) - set(names))
     for name in names:
@@ -378,7 +423,8 @@ def test_allow_listed_headers_exist_and_translation_units_are_explicit():
                 ("urban_ucm480", "urban_ucm.cu"),
                 ("lin_refl", "refl.cu"),
                 ("gsd_helicity", "uh_diag.cu"),
-                ("gsd_initial_reflectivity", "thompson_fork.cu")), (
+                ("gsd_initial_reflectivity", "thompson_fork.cu"),
+                ("nest_top", "acoustic.cu")), (
                 "only the explicitly reused initialization and scalar units may supply a .cu header")
 
 

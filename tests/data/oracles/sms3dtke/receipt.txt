@@ -1,0 +1,17 @@
+wrf v4.7.1 commit f52c197ed39d12e087d02c50f412d90d418f6186
+GNU Fortran (conda-forge gcc 16.2.0-7) 16.2.0
+flags: -O0 -ffp-contract=off -fno-fast-math -cpp -ffree-form -ffree-line-length-none -fcheck=bounds
+ldd (Ubuntu GLIBC 2.43-2ubuntu2.4) 2.43
+libm symbols (sms_cut.o):  U __powisf2  U expf  U logf  U powf  U tanhf 
+a7d4570c97e51c635e86a0dbd628c6846457ac5b93d5a7af798b118c7d8d2d54  dyn_em/module_diffusion_em.F
+bd177b6b5ba7949cf9e694d7ad654fd9ae2f07d39d85802f0716c5318889a815  dyn_em/module_big_step_utilities_em.F
+61b9235004b2a7799faabaa928276af8a7ef2e4672619c8ad120c857461301ad  share/module_bc.F
+5b80377fecdc18a5f0ad38d3b6c15cfc86ad5d76701adbbbb08a08698d0f7062  share/module_model_constants.F
+ad986df1b7768ac8c7be0130c234b4dfd25a01e042afaa135d4c89f9d9176ee9  sms_cut.F90
+0f51dab90f2519131d25132da217ea359ba04ab0bdf0c547c6019346068937f8  tools/sms3dtke_wrf471_oracle/extract.py
+b921150a47b9dff168ffcafad75d58c7a9882d8f0ba84bd6ea17f96ab90a96f6  tools/sms3dtke_wrf471_oracle/config.F90
+680a6b0621797d36d48327b0dc1a500033aee058047fb74b8d0876f97bf329dd  tools/sms3dtke_wrf471_oracle/run_sms3dtke.F90
+f42776c2492e25efcaa23bff9aa91f3866910f1a2aab8e5db3a1fc7ff47466a9  tools/sms3dtke_wrf471_oracle/make_cases.py
+5ac294bc435bb9b45bb87ad083bee6cd42c6ce17e7d0609471b900c8539d7988  tools/sms3dtke_wrf471_oracle/build.sh
+ab0cc3c2d4cffb05501c1aa65d2fc26adb3ce3384a9d3251e463eccdbb60d03d  cases.bin
+f97eda7559e3af984f901818bacd2dfb4beeea75700c7d9901cb7adc1e3630dc  oracle.bin

@@ -278,7 +278,12 @@ def _run_tool(tmp_path, script_name, *args):
         if shutil.which(os.environ.get("CXX", "g++")) is None:
             pytest.skip("no C++ compiler to build the host kernels")
         cmd = [sys.executable, str(script), *[str(a) for a in args]]
-        env = dict(os.environ, WOOF_HOST_KERNEL_BUILD_DIR=str(build),
+        sys.path.insert(0, str(_TOOL))
+        try:
+            from host_backend import host_environment
+        finally:
+            sys.path.remove(str(_TOOL))
+        env = dict(host_environment(), WOOF_HOST_KERNEL_BUILD_DIR=str(build),
                    GPUWM_WRF_EXACT="1")
     done = subprocess.run(cmd, capture_output=True, text=True, env=env,
                           check=False)

@@ -508,6 +508,9 @@ _SCHEME_GEOGRAPHY: tuple[tuple[str, str], ...] = (
     # WRF's swint_opt = 1 carrier (woof.core.swint): its per-step zenith
     # cosine reads its own device latitude/longitude grids.
     ("swint", "swint"),
+    # WRF's swint_opt = 2 carrier (woof.core.farms.FarmsShortwave): the
+    # same per-step zenith cosine, on its own grids.
+    ("farms", "farms"),
 )
 _SCHEME_GEOGRAPHY_ATTRS: tuple[str, ...] = ("latitude_deg", "longitude_deg")
 

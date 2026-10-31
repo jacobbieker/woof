@@ -216,6 +216,9 @@ CLEAR_AIR_FLOOR_DBZ: dict[int, float] = {
     # at -35 dBZ exactly as mp=6 does.
     3: -35.0,
     4: -35.0,  # wsm5_refl10cm_column final clamp.
+    # MAD-WRF (mp_physics = 96): woof's history diagnostic is the Kessler
+    # operator on the never-written qr, so it is the Kessler floor.
+    96: -35.0,
     6: -35.0,
     # WSM6R's H(x) is the same refl10cm_wsm6 operator (woof.core.refl).
     106: -35.0,

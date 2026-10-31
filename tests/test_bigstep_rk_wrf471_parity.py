@@ -16,6 +16,7 @@ from conftest import requires_gpu
 from woof.verify.bigstep_rk_oracle import (RK_ORACLE_DIR,load_rk_oracle,
                                            measure_rk_case,load_rk_tendency_oracle,
                                            measure_rk_tendency_case)
+from woof.verify.platform_pins import pin_path
 
 
 def test_rk_wrf471_fixture_words_and_provenance():
@@ -41,7 +42,7 @@ def test_rk_wrf471_fixture_words_and_provenance():
 def test_rk_addtend_dry_matches_compiled_wrf471(case_id):
     arrays,meta=load_rk_oracle()
     case=next(c for c in meta["cases"] if c["kind"]=="dry" and c["id"]==case_id)
-    pin=json.loads((RK_ORACLE_DIR/"rk-ulp-table.json").read_text())
+    pin=json.loads(pin_path(RK_ORACLE_DIR/"rk-ulp-table.json").read_text())
     assert measure_rk_case(arrays,case)==pin["measurements"]["dry:"+case["name"]]
 
 
@@ -51,7 +52,7 @@ def test_rk_addtend_dry_matches_compiled_wrf471(case_id):
 def test_rk_update_scalar_matches_compiled_wrf471(case_id):
     arrays,meta=load_rk_oracle()
     case=next(c for c in meta["cases"] if c["kind"]=="scalar" and c["id"]==case_id)
-    pin=json.loads((RK_ORACLE_DIR/"rk-ulp-table.json").read_text())
+    pin=json.loads(pin_path(RK_ORACLE_DIR/"rk-ulp-table.json").read_text())
     assert measure_rk_case(arrays,case)==pin["measurements"]["scalar:"+case["name"]]
 
 
@@ -70,7 +71,7 @@ def test_rk_tendency_records_every_compiled_wrf471_output(case_id,filename,key):
     """
     arrays,meta=load_rk_tendency_oracle(filename)
     case=next(c for c in meta["cases"] if c["id"]==case_id)
-    pin=json.loads((RK_ORACLE_DIR/"rk-ulp-table.json").read_text())
+    pin=json.loads(pin_path(RK_ORACLE_DIR/"rk-ulp-table.json").read_text())
     assert measure_rk_tendency_case(arrays,case)==pin[key][case["name"]]
 
 
@@ -81,7 +82,7 @@ def test_rk_oracle_detects_changed_timestep():
     arrays,meta=load_rk_oracle()
     case=next(c for c in meta["cases"] if c["kind"]=="scalar" and c["id"]==1).copy()
     case["dt"]+=0.125
-    pin=json.loads((RK_ORACLE_DIR/"rk-ulp-table.json").read_text())
+    pin=json.loads(pin_path(RK_ORACLE_DIR/"rk-ulp-table.json").read_text())
     measured=measure_rk_case(arrays,case)
     assert measured!=pin["measurements"]["scalar:"+case["name"]]
     assert measured["s2"]["different_words"]>0

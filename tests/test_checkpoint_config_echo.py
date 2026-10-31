@@ -230,6 +230,9 @@ DEFAULT_OFF = frozenset({
     # WRF's wind farm, all four dropped while windfarm_opt is 0.
     "windfarm_opt", "windfarm_ij", "windfarm_tke_factor",
     "windfarm_turbine_file",
+    # WRF-Solar EPS and MAD-WRF, each dropped at its Registry default.
+    *__import__("woof.config", fromlist=["x"]).MULTI_PERTURB_RUN_DEFAULTS,
+    *__import__("woof.config", fromlist=["x"]).MADWRF_RUN_DEFAULTS,
 })
 
 

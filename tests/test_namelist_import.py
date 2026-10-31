@@ -1765,7 +1765,8 @@ def test_tke_adv_opt_drops_as_inert(tmp_path):
     # gwd_opt left this list with lane/282-terrain-drag: 1 and 3 are ported
     # (tests/test_terrain_drag_config.py).
     # CLM lake 0/1 and its WRF defaults are held by test_lake_options.py.
-    "shcu_physics",
+    # shcu_physics left this list with the Deng port: 0 and 5 import
+    # (tests/test_shcu_deng_integration.py), 1-4 refuse.
     "kf_edrates", "flag_sm_adj",
     "sst_update", "sst_skin", "tmn_update",
 ])
@@ -2002,12 +2003,20 @@ def test_disabled_stochastic_parameters_do_not_enable_any_scheme(tmp_path):
     # with the fields it would leave unperturbed and the key that set it
     # (2.9.0 stochastic admission: the blanket uncalibrated-spread refusal
     # named no breakage); an unknown key keeps its own answer.
-    ("pert_thom = .true.", "&stoch pert_thom = .*no runtime consumer.*would remain unperturbed"),
+    ("pert_mynn = .true.", "&stoch pert_mynn = .*no runtime consumer.*would remain unperturbed"),
     ("perturb_bdy = 1", "&stoch perturb_bdy = .*no runtime consumer.*would remain unperturbed"),
     ("unknown_noise = 0", "unmapped key")])
 def test_disabled_parameter_handling_does_not_drop_active_or_unknown_settings(tmp_path, setting, reason):
     with pytest.raises(ValueError, match=reason):
         _import_with(tmp_path, extra_input="&stoch\n" + setting + ",\n/\n")
+
+
+def test_a_lone_eps_selector_is_dropped_as_wrf_never_reads_it(tmp_path):
+    # WRF v4.7.1 runs the Thompson hooks only under
+    # pert_thom .and. multi_perturb == 1 (module_microphysics_driver.F:1120,
+    # :1201, :1314, :1369); without multi_perturb pert_thom is inert.
+    _, report = _import_with(tmp_path, extra_input="&stoch\n pert_thom = .true.,\n/\n")
+    assert ("stoch", "pert_thom") in {(d.section, d.key) for d in report.dropped}
 
 
 def test_fdda_active_nudging_refuses_disabled_drops(tmp_path):
@@ -2595,6 +2604,42 @@ def test_a_km_opt_2_nest_child_imports_and_loads(tmp_path, km_opt, pbl):
     assert [dc.run.km_opt for dc in exp.domains] == expected
     assert exp.domains[1].run.nested
     assert exp.domains[1].run.bl_pbl_physics == 0
+
+
+@pytest.mark.parametrize(
+    "km_opt,pbl",
+    [(" km_opt = 4, 5,", " bl_pbl_physics = 11, 0,"),
+     (" km_opt = 5, 5,", " bl_pbl_physics = 0, 0,")],
+    ids=["pbl-parent", "sms-parent"])
+def test_a_km_opt_5_namelist_imports_and_loads(tmp_path, km_opt, pbl):
+    """km_opt = 5 (SMS-3DTKE) imports per domain and loads; its TKE and
+    GAMU/GAMV carry no nest flag in WRF, so a child cold-starts them."""
+    toml_text, report = _import_with(
+        tmp_path,
+        inp_filter=lambda inp: (
+            inp.replace(" km_opt = 4, 4,", km_opt)
+               .replace(" bl_pbl_physics = 11, 11,", pbl)),
+        extra_dynamics=" tke_adv_opt = 1, 1,\n")
+    exp = _load(tmp_path, toml_text)
+    expected = [int(v) for v in km_opt.split("=")[1].split(",") if v.strip()]
+    assert [dc.run.km_opt for dc in exp.domains] == expected
+    assert exp.domains[-1].run.bl_pbl_physics == 0
+    # tke_adv_opt = 1 is consumed (pinned), not dropped as inert.
+    assert ("dynamics", "tke_adv_opt") not in {
+        (d.section, d.key) for d in report.dropped}
+
+
+def test_a_km_opt_5_domain_with_a_pbl_scheme_is_refused(tmp_path):
+    """WRF v4.7.1 refuses km_opt = 5 with bl_pbl_physics != 0
+    (module_check_a_mundo.F:356-368), and so does the import."""
+    from woof.config import ConfigurationRefused
+    with pytest.raises(ConfigurationRefused,
+                       match="km_opt=5 .*bl_pbl_physics=0"):
+        toml_text, _ = _import_with(
+            tmp_path,
+            inp_filter=lambda inp: inp.replace(" km_opt = 4, 4,",
+                                               " km_opt = 5, 5,"))
+        _load(tmp_path, toml_text)
 
 
 def test_turbulence_row_reaches_every_per_domain_run_config(tmp_path):
@@ -3288,8 +3333,29 @@ def test_swint_opt_and_aer_opt_reach_the_run_config(tmp_path):
     assert "swint_opt" not in plain and "aer_opt" not in plain
 
 
+def test_swint_opt_2_and_couple_farms_reach_the_run_config(tmp_path):
+    """WRF-Solar's FARMS (swint_opt = 2) and couple_farms are honoured:
+    Thompson (mp_physics = 8) hands FARMS its radii, Morrison (10) hands
+    it cloud, ice and snow with none, both of which WRF admits
+    (module_physics_init.F:1039-1057).  couple_farms = .false. emits
+    nothing."""
+    for mp in (8, 10):
+        toml_text, report = _import_radiation_options(
+            tmp_path, ["swint_opt = 2", "couple_farms = .true."],
+            mp_physics=mp)
+        for dc in _load(tmp_path, toml_text).domains:
+            assert dc.run.swint_opt == 2 and dc.run.couple_farms is True
+        translated = {(t.section, t.key) for t in report.translated}
+        assert ("physics", "couple_farms") in translated
+    toml_text, _ = _import_radiation_options(
+        tmp_path, ["swint_opt = 2", "couple_farms = .false."], mp_physics=8)
+    assert "couple_farms" not in toml_text
+
+
 @pytest.mark.parametrize(("line", "mp", "match"), [
-    ("swint_opt = 2", 10, "swint_opt"),
+    ("swint_opt = 3", 10, "swint_opt"),
+    # module_check_a_mundo.F:654-660
+    ("couple_farms = .true.", 10, "couple_farms = true requires swint_opt = 2"),
     ("aer_opt = 1", 28, "domain-1 aerod parent forcing"),
     ("aer_opt = 4", 28, "must be 0, 1, 2 or 3"),
     # mp_physics = 10 (Morrison): WRF gates aer_opt = 3 on the Thompson aerosol

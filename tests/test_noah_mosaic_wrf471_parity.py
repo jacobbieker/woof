@@ -112,10 +112,47 @@ STRICT_PINNED_SHA256 = {
 }
 
 
+#: The MLX backend (woof's Metal translation), read 2026-10-29 on an M3 Max,
+#: differs from CUDA only in the subnormal-CHS column (24), whose words the
+#: note above calls unreproducible: Metal's NaNs are the canonical 0x7fc00000
+#: (CUDA's 0x7fffffff, WRF's x86 0x7fc00000/0xffc00000), and TSK, TSK_MOSAIC
+#: and GRDFLX_MOSAIC there equal WRF's words.  The same in both builds.
+_METAL_COLUMN_24_SHA256 = {
+    'hfx': 'ef1eaf26cea96eb18f8fa3137abdf23f52852a855c22ae6f169d21a379dcd739',
+    'qfx': 'df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119',
+    'lh': 'ef1eaf26cea96eb18f8fa3137abdf23f52852a855c22ae6f169d21a379dcd739',
+    'grdflx': 'ef1eaf26cea96eb18f8fa3137abdf23f52852a855c22ae6f169d21a379dcd739',
+    'qsfc': 'ef1eaf26cea96eb18f8fa3137abdf23f52852a855c22ae6f169d21a379dcd739',
+    'smstav': 'e00e5eb9444182f352323374ef4e08ebcb784725fdd4fd612d7730540b3e0c8c',
+    'smstot': '08abb60a845468a5d5c7e80336e40a33b34a46f10fed75c8f37419c81d1ce15f',
+    'potevp': 'ef1eaf26cea96eb18f8fa3137abdf23f52852a855c22ae6f169d21a379dcd739',
+    'noahres': 'ef1eaf26cea96eb18f8fa3137abdf23f52852a855c22ae6f169d21a379dcd739',
+    'smois': 'a5dfb1bab90059ea04bcaff91a0aff013946ce001e7d0b4bbc0332dc844bd7e9',
+    'tslb': 'ef99cfd192ee2fe43a68cef2af40c85c2c215759f491c1b3fa09ed0f794f9201',
+    'sh2o': 'a5dfb1bab90059ea04bcaff91a0aff013946ce001e7d0b4bbc0332dc844bd7e9',
+    'smcrel': 'f6bb1294da2f78cd935b01c7656280df5eaa0439e9d97bc03775825a41a508e4',
+    'qsfc_mosaic': '79a48569b1efb0d9bf9bacd0c802a2d672630bdb412759ea5d35e15042b7116f',
+    'hfx_mosaic': '79a48569b1efb0d9bf9bacd0c802a2d672630bdb412759ea5d35e15042b7116f',
+    'qfx_mosaic': '15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b',
+    'lh_mosaic': '79a48569b1efb0d9bf9bacd0c802a2d672630bdb412759ea5d35e15042b7116f',
+    'tslb_mosaic': '2cf196b3d5b5509c0ea746faf9344f200f231ee0a28eda6611c061be80bf4d50',
+    'smois_mosaic': '6144926af4fa5e048495ac7ae61f48853860aa28e5b4dfb1753c642161ca3873',
+    'sh2o_mosaic': '6144926af4fa5e048495ac7ae61f48853860aa28e5b4dfb1753c642161ca3873',
+}
+_METAL_COLUMN_24_BITWISE = ('tsk', 'tsk_mosaic', 'grdflx_mosaic')
+
+
+def _metal_pins(table):
+    return {key: (_METAL_COLUMN_24_SHA256[key[3]] if key[2] == 24 else digest)
+            for key, digest in table.items()
+            if not (key[2] == 24 and key[3] in _METAL_COLUMN_24_BITWISE)}
+
+
 def pinned_pairs():
     """The held-out pairs for this process's arithmetic."""
-    from woof import wrf_exact
-    return STRICT_PINNED_SHA256 if wrf_exact.ENABLED else FTZ_PINNED_SHA256
+    from woof import backend, wrf_exact
+    table = STRICT_PINNED_SHA256 if wrf_exact.ENABLED else FTZ_PINNED_SHA256
+    return _metal_pins(table) if backend.active() == "mlx" else table
 
 
 D2 = ("sfcrunoff", "udrunoff", "potevp", "acsnom", "snopcx", "acsnow")

@@ -1,0 +1,2 @@
+779875651512709c47d50ef6c1e1216ad94726f1996c5e45a0db8eb800733ffa  phys/module_radiation_driver.F
+fabf19e2a9073cff886e882b187080bfdf089d3fd40c0fce1d19bc93b1e5e802  phys/module_mp_thompson.F

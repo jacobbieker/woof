@@ -108,6 +108,11 @@ def install(compiler=None):
     if not ENABLED:
         return
     if compiler is None:
+        import cupy
+        if getattr(cupy, "__woof_facade__", False):
+            # No NVRTC to hook: on woof's facade backends the translator
+            # applies the strict arithmetic itself (woof.backend.metal.loader).
+            return
         from cupy.cuda import compiler
     if getattr(compiler, "_gpuwm_wrf_exact", False):
         return

@@ -22,6 +22,7 @@ from woof.io.wrf_output_schema import (SCHEME_OUTPUT_FIELDS,
                                         NOAH_OUTPUT_FIELDS,
                                         PHYSICS_PRESSURE_OUTPUT_FIELDS,
                                         SURFACE_ENERGY_OUTPUT_FIELDS,
+                                        FARMS_OUTPUT_FIELDS,
                                         PBL_RATE_OUTPUT_FIELDS,
                                         CUMULUS_RATE_OUTPUT_FIELDS,
                                         SCM_FORCING_OUTPUT_FIELDS,
@@ -214,6 +215,14 @@ def live_state_history_fields(state) -> dict[str, object]:
         value = getattr(state, "_scratch", {}).get(slot)
         if value is not None:
             fields[output_name] = value
+    # WRF-Solar diagnostics (solar_diagnostics = 1): views of the output
+    # stack, present exactly when the run carries it.
+    from woof.core.solar_diagnostics import history_fields as solar_history
+    fields.update(solar_history(state))
+    # do_avgflx_em = 1: AVGFLX_RUM/RVM/WWM (Registry/registry.avgflx), present
+    # exactly when the run carries them (woof/core/avgflx.py).
+    from woof.core.avgflx import history_fields as avgflx_history
+    fields.update(avgflx_history(state))
     # Correct mode, finding WB1 (woof/core/thompson_cloud_booking.py): the
     # settled-cloud total and its last-call amount, present exactly when the
     # run carries them (a correct-mode Thompson run, after its first call).
@@ -465,9 +474,14 @@ def physics_history_fields(physics) -> dict[str, object]:
     ``cu_physics=0`` therefore failed every downstream QPF product,
     which is exactly how this was found.
 
-    ``RAINSH`` is always zero here, and that is a true statement rather
-    than a placeholder: woof implements no shallow-cumulus scheme, and
-    zero is what WRF writes for ``shcu_physics=0``.
+    ``RAINSH`` is zero unless ``shcu_physics = 5`` (Deng) runs, and zero
+    is what WRF writes for ``shcu_physics=0``.  Under Deng it is WRF's
+    RAINSH word for word, which is the LAST step's shallow rain in mm, not
+    an accumulation: deng_shcu_driver zeroes RAINSH for every column before
+    adding that step's RAINSHV (module_shcu_deng.F:276, :2834), and the
+    accumulation in advance_ppt adds PRATESH*DT, which Deng never writes
+    (module_physics_addtendc.F:2292); shallowcu_driver then sets RAINSHV to
+    PRATESH*DT = 0 (module_shallowcu_driver.F:686-691).
     """
     output = {name: physics.fields[field]
               for name, field in _OUTPUT_FIELDS.items()}
@@ -486,6 +500,7 @@ def physics_history_fields(physics) -> dict[str, object]:
             RADIATION_BOUNDARY_OUTPUT_FIELDS,
             PHYSICS_PRESSURE_OUTPUT_FIELDS,
             SURFACE_ENERGY_OUTPUT_FIELDS,
+            FARMS_OUTPUT_FIELDS,
             PBL_RATE_OUTPUT_FIELDS,
             CUMULUS_RATE_OUTPUT_FIELDS,
             SCM_FORCING_OUTPUT_FIELDS,
@@ -494,6 +509,18 @@ def physics_history_fields(physics) -> dict[str, object]:
         for key, schema in table.items():
             if key in physics.fields:
                 output[schema.netcdf_name] = physics.fields[key]
+    # rrtmg_spectral_output's band (and shortwave g-point) fluxes
+    from woof.core.physics_inventory import LW_SPECTRAL_FLUXES, SW_SPECTRAL_FLUXES
+    for base in (*SW_SPECTRAL_FLUXES, *LW_SPECTRAL_FLUXES):
+        for suffix in ("_band", "_gpt"):
+            if base + suffix in physics.fields:
+                output[(base + suffix).upper()] = physics.fields[base + suffix]
+    # woof.radtran spectral diagnostic (RT_* planes, radiances, axes)
+    from woof.core.physics_inventory import (RADTRAN_DIRECTION_FIELDS, RADTRAN_FLUX_FIELDS,
+                                             RADTRAN_WAVELENGTH_FIELDS)
+    for name in (*RADTRAN_FLUX_FIELDS, "rt_rad", *RADTRAN_WAVELENGTH_FIELDS, *RADTRAN_DIRECTION_FIELDS):
+        if name in physics.fields:
+            output[name.upper()] = physics.fields[name]
     # WRF's live surface masks (core history rows in stock wrf.exe; the
     # seaice and lake branches can move them during a run).  2.9.0 wrote
     # neither, so a wrfout reader found no land/water mask beside LANDMASK.
@@ -613,7 +640,10 @@ def physics_history_fields(physics) -> dict[str, object]:
         output["POWER"] = physics.fields["power"]
     output["RAINC"] = (physics._zero_accumulator() if physics.rainc is None
                        else physics.rainc)
-    output["RAINSH"] = physics._zero_accumulator()
+    rainsh = physics.fields.get("rainsh") if getattr(
+        physics, "shallow_cumulus", None) is not None else None
+    output["RAINSH"] = (physics._zero_accumulator() if rainsh is None
+                        else rainsh)
     microphysics = physics.microphysics if physics.mp_physics else None
     output["SR"] = (physics._zero_accumulator() if microphysics is None
                     else microphysics.sr)
@@ -811,9 +841,15 @@ def produced_history_shapes(cfg, *, include_reflectivity: bool = True
         state._scratch = {"ltng_" + name: carrier(surface) for name in LIGHTNING_OPTIONS[cfg.lightning_option]["fields"]}
     from woof.core.output_diagnostics import scratch_shapes as output_shapes
     from woof.core.hail import scratch_shapes as hail_shapes
+    from woof.core.solar_diagnostics import OUT_SLOT as _SOLAR_OUT, scratch_shapes as solar_shapes
     state._scratch = dict(getattr(state, "_scratch", {}))
     state._scratch.update({slot: carrier(shape) for slot, shape in
                           (output_shapes(cfg) | hail_shapes(cfg)).items()})
+    if _SOLAR_OUT in solar_shapes(cfg):
+        state._scratch[_SOLAR_OUT] = carrier(solar_shapes(cfg)[_SOLAR_OUT])
+    from woof.core.avgflx import scratch_shapes as avgflx_shapes
+    state._scratch.update({slot: carrier(shape)
+                           for slot, shape in avgflx_shapes(cfg).items()})
     state.p_top = 0.0
     state.physics = None
     uh = (carrier(surface)

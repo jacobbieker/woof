@@ -464,8 +464,9 @@ MYNN_MICROPHYSICS_ACCEPTED = [0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 50,
 #: integrals are not qualified for RTE+RRTMGP cloud optics
 #: (woof.core.rrtmgp._NO_CLOUD_OPTICS_COUPLING), so the slice's RTE+RRTMGP
 #: anchor refuses it at the run door; its legacy-RRTMG pairing accepts
-#: (measured below).
-MYNN_MICROPHYSICS_EXCLUDED = (30,)
+#: (measured below).  MAD-WRF (96) is excluded by the same judgement: its
+#: passive hydrometeors carry no size distribution (WRF's use_mp_re = 0).
+MYNN_MICROPHYSICS_EXCLUDED = (30, 96)
 
 
 def test_mynn_composes_with_every_microphysics_and_cumulus_scheme(
@@ -514,6 +515,13 @@ def test_mynn_composes_with_every_microphysics_and_cumulus_scheme(
     assert on_rrtmgp.verdict == "REFUSED", on_rrtmgp.message
     assert "rrtmg_legacy" in on_rrtmgp.message
     on_legacy = walk.attempt(dict(anchor, mp_physics=30,
+                                  ra_rrtmg_variant="rrtmg_legacy"))
+    assert on_legacy.verdict == "ACCEPTED", on_legacy.message
+    # MAD-WRF the same way.
+    on_rrtmgp = walk.attempt(dict(anchor, mp_physics=96))
+    assert on_rrtmgp.verdict == "REFUSED", on_rrtmgp.message
+    assert "rrtmg_legacy" in on_rrtmgp.message
+    on_legacy = walk.attempt(dict(anchor, mp_physics=96,
                                   ra_rrtmg_variant="rrtmg_legacy"))
     assert on_legacy.verdict == "ACCEPTED", on_legacy.message
 

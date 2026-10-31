@@ -3904,6 +3904,57 @@ def _tempo_named(registry: dict) -> None:
     }
 
 
+MADWRF_OPTION_ID = "madwrf"
+
+
+def _madwrf_mp96(registry: dict) -> None:
+    """Register MAD-WRF's passive hydrometeors, WRF's own mp_physics = 96.
+
+    Registry.EM_COMMON:3052 binds mp_physics==96 to package madwrf_mp
+    (moist qv, qc, qi, qs) and module_microphysics_driver.F:2895's CASE
+    (MADWRF_MP) does nothing, so the port is the capability row
+    woof.microphysics_schemes.MADWRF and an adapter that runs no process
+    (woof/core/madwrf.py).  ``maturity: implemented-unverified``: there is no
+    microphysical arithmetic to grade; the MAD-WRF column routines it travels
+    with (cloud initialization, tracer nudge) are graded word for word in
+    tests/test_madwrf_wrf471_oracle.py, but no forecast trajectory
+    comparison exists.  ``reachability: component-override``.
+    """
+    from woof.microphysics_schemes import MADWRF
+
+    options = registry["components"]["microphysics"]["options"]
+    options[MADWRF_OPTION_ID] = {
+        "asset_requirements": [],
+        "constraints": {"required_settings": {"moist": True}},
+        "extensions": {
+            "woof_named_scheme": {
+                "name": MADWRF.name, "woof_id": MADWRF.mp_id,
+                "capability_row": "woof.microphysics_schemes.MADWRF"},
+            "wrf_package": (
+                "Registry/Registry.EM_COMMON:3052 binds mp_physics==96 to the "
+                "madwrf_mp package: moist qv,qc,qi,qs and no radius state"),
+            "prognostic_species": {
+                "transported": list(MADWRF.ice_mass_species),
+                "not_ported": [],
+                "note": ("qc, qi and qs are advected and diffused with no "
+                         "microphysical process; woof also carries qr, which "
+                         "stays zero (its moist base set)."),
+            },
+        },
+        "implemented": True,
+        "label": "MAD-WRF passive hydrometeors (mp_physics = 96)",
+        "maturity": "implemented-unverified",
+        "parameters": {"moist": True, "moist_cq": True},
+        "reachability": {"state": "component-override"},
+        "scientific_evidence": "none",
+        "selectors": {"mp_physics": MADWRF.mp_id},
+        "warnings": [
+            "No microphysical process runs (WRF's CASE (MADWRF_MP) is empty); "
+            "pair with madwrf_opt = 1 and use_mp_re = 0 as WRF requires.",
+        ],
+    }
+
+
 def _wdm6_mp16(registry: dict) -> None:
     """Register WDM6 (mp_physics=16) at exactly the maturity it has earned.
 
@@ -4276,6 +4327,7 @@ def _ferrier_mp5(registry: dict) -> None:
 _NO_RTE_RRTMGP_CLOUD_OPTICS_REASON: dict[int, str] = {
     2: "Lin supplies no effective radii to this adapter; borrowing another scheme would change its cloud distribution",
     30: "the bin effective-radius integrals are not qualified; a bulk radius closure would replace the spectral distribution optics",
+    96: "MAD-WRF's passive hydrometeors carry no size distribution and WRF pairs them with use_mp_re = 0, so radiation computes its own radii; that is the legacy RRTMG path, and borrowing a scheme's radii here would invent one",
     # EMPTY: every implemented scheme has a cloud-optics row.  The table
     # stays because the pass below still needs it the day a scheme is
     # implemented without one, and because tests/test_rrtmgp_coupling.py
@@ -4623,6 +4675,7 @@ _VERTICAL_BOUND_SOURCES: dict[str, dict[str, tuple[str, str]]] = {
         "wsm7-mp24": ("WSM7 microphysics", "WSM7_VERTICAL_LEVEL_BOUNDS"),
         "p3-mp50": ("P3 microphysics", "P3_VERTICAL_LEVEL_BOUNDS"),
         "tempo": ("TEMPO microphysics", "TEMPO_VERTICAL_LEVEL_BOUNDS"),
+        "madwrf": ("MAD-WRF passive hydrometeors", "MADWRF_VERTICAL_LEVEL_BOUNDS"),
     },
     "pbl": {
         "mynn": ("MYNN PBL", "MYNN_VERTICAL_LEVEL_BOUNDS"),
@@ -4681,6 +4734,10 @@ _MOMENT_ROWS: dict[int, dict | None] = {
         "unpaired": [], "repair_authority": None, "q_threshold": 1.0e-14},
     4: {"name": "WSM5", "mass_only": ["qv", "qc", "qr", "qi", "qs"],
         "pairs": [], "unpaired": [], "repair_authority": None, "q_threshold": 1.0e-14},
+    # MAD-WRF's passive hydrometeors (madwrf_mp, Registry.EM_COMMON:3052):
+    # masses only, no process to repair anything.
+    96: {"name": "MADWRF", "mass_only": ["qv", "qc", "qr", "qi", "qs"],
+         "pairs": [], "unpaired": [], "repair_authority": None, "q_threshold": 1.0e-14},
     6: {"name": "WSM6", "mass_only": ["qv", "qc", "qr", "qi", "qs", "qg"],
         "pairs": [], "unpaired": [], "repair_authority": None,
         "q_threshold": 1.0e-14},
@@ -4792,6 +4849,7 @@ _OFFLINE_CHILD_ROWS: dict[int, dict] = {
     # transported set too.
     3: {"same_scheme": True, "refusal": None},
     4: {"same_scheme": True, "refusal": None},
+    96: {"same_scheme": True, "refusal": None},
     6: {"same_scheme": True, "refusal": None},
     # WSM6R transports WSM6's six masses and nothing else, which the lane's
     # transported-field helper builds for it beside WSM6.
@@ -4838,6 +4896,9 @@ _RING_STATE_ROWS: dict[int, list[str]] = {
     # 185-189).
     3: ["thp", "qv", "qc", "qr", "effc", "effi", "effs"],
     4: ["thp", "qv", "qc", "qr", "qi", "qs", "effc", "effi", "effs"],
+    # MAD-WRF: the passive masses (and the unread radii the named-scheme
+    # allocator carries); the empty arm writes none of them.
+    96: ["thp", "qv", "qc", "qr", "qi", "qs", "effc", "effi", "effs"],
     6: ["thp", "qv", "qc", "qr", "qi", "qs", "qg", "effc", "effi", "effs"],
     # WSM6R advances the six masses and woof writes WSM6's radii on its
     # state every call (woof/core/wsm6.py), so the radii are in the set.
@@ -4882,6 +4943,9 @@ _RING_SURFACE_ROWS: dict[int, list[str]] = {
     # (module_mp_wsm3.F:597-625).
     3: ["mp_rainnc", "mp_rainncv", "mp_snownc", "mp_snowncv", "mp_sr"],
     4: ["mp_rainnc", "mp_rainncv", "mp_snownc", "mp_snowncv", "mp_sr"],
+    # CASE (MADWRF_MP) binds no precipitation argument; the surface
+    # contract's three slots stay zero.
+    96: ["mp_rainnc", "mp_rainncv", "mp_sr"],
     6: list(_RING_SURFACE_STANDARD),
     # WSM6R's driver arm binds RAINNC/RAINNCV only; SR is the contract's
     # zero (module_microphysics_driver.F:2362-2372).
@@ -5941,6 +6005,7 @@ def build(registry: dict) -> dict:
     _milbrandt2mom_mp9(registry)
     _wdm6_mp16(registry)
     _tempo_named(registry)
+    _madwrf_mp96(registry)
     _lin_mp2(registry)
     _ferrier_mp5(registry)
     _wsm3_mp3(registry)

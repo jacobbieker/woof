@@ -709,7 +709,15 @@ SM86_NVRTC_12_9_86 = KernelFrameRecording(
         # at 2 x 4 B x KF_KMAX, so 512 -> 1,024 B -- AT the 1,024 B default
         # stack, so still zero reservation.  KF_KMAX = 49 / 128 / 256 read
         # 200 / 512 / 1,024 B on both the pre- and post-cut source.
-        'kf': 1024,
+        # RE-READ 2026-10-30 on the RTX A6000 (tools/vram_reserve_probe.py
+        # frames): 0 B -- WOOF 1.1.x moved KF's column arrays into the
+        # global KFWS workspace, so no array is stack-resident any more.
+        'kf': 0,
+        # Read 2026-10-30 on the RTX A6000 (tools/vram_reserve_probe.py
+        # frames): the arena-backed lake step compiles 32 B wider on sm_86
+        # at NVRTC 12.9.86 than the RTX 4090's 4,496 B, so this is the
+        # ceiling.
+        'lake': 4528,
         'milbrandt2': 2048,
         # Read 2026-10-12 at the column-workspace source (kernels/myjpbl.cu
         # / myjurb.cu headers) on an RTX A6000 -- the same platform key,
@@ -720,7 +728,10 @@ SM86_NVRTC_12_9_86 = KernelFrameRecording(
         'myjpbl': 0,
         'myjurb': 0,
         'nest_microphysics': 0,
-        'noah': 224,
+        # RE-READ 2026-10-30 on the RTX A6000 (tools/vram_reserve_probe.py
+        # frames, same platform key): 464 B at the WOOF 1.1.x Noah source,
+        # where the 2026-09 desktop reading of the older source was 224 B.
+        'noah': 464,
         'nssl2_fused_gs': 112,
         # WRF aer_opt = 3 (rrtmg_aer3.cu), read 2026-10-12 on an RTX A6000
         # (same sm_86 / NVRTC 12.9.86 platform key, Linux, fresh process)
@@ -3230,4 +3241,144 @@ KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
     compute_capability="86", nvrtc_build="13.0.48", platform_family="windows",
     measured="2026-10-21", complete=False,
     frames=MappingProxyType({"gsd_initial_reflectivity": 0}),
+),)
+
+# The partial-depth nest's top entry points (Phase D2, kernels/nest_top.cu,
+# composed after acoustic.cu by the loader), default loader options, read
+# 2026-10-30 on the RTX A6000 CUDA host: advance_w_phi_top carries the same
+# WPHI_MAX_LEV column as advance_w_phi (520 B); the other seven read 0 B.
+KERNEL_LOCAL_FRAME_RECORDINGS = tuple(
+    replace(row, complete=False) if "nest_top" not in row.frames else row
+    for row in KERNEL_LOCAL_FRAME_RECORDINGS)
+KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
+    box="pb", device="NVIDIA RTX A6000",
+    compute_capability="86", nvrtc_build="12.9.86", platform_family="linux",
+    measured="2026-10-30", complete=False,
+    frames=MappingProxyType({"nest_top": 520}),
+),)
+
+# WRF-Solar FARMS (kernels/farms.cu) and the clean-room spectral solver
+# (kernels/radtran_disort.cu), production loader, default and strict
+# numerics, read 2026-10-30 on the RTX A6000 CUDA host.
+KERNEL_LOCAL_FRAME_RECORDINGS = tuple(
+    replace(row, complete=False)
+    if not {"farms", "radtran_disort"} <= set(row.frames) else row
+    for row in KERNEL_LOCAL_FRAME_RECORDINGS)
+KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
+    box="pb", device="NVIDIA RTX A6000",
+    compute_capability="86", nvrtc_build="12.9.86", platform_family="linux",
+    measured="2026-10-30", complete=False,
+    frames=MappingProxyType({"farms": 0, "radtran_disort": 30432}),
+),)
+
+# Deng shallow cumulus (kernels/shcu_deng.cu), production loader, default
+# and strict numerics, read 2026-10-30 on the RTX A6000 CUDA host.
+KERNEL_LOCAL_FRAME_RECORDINGS = tuple(
+    replace(row, complete=False) if "shcu_deng" not in row.frames else row
+    for row in KERNEL_LOCAL_FRAME_RECORDINGS)
+KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
+    box="pb", device="NVIDIA RTX A6000",
+    compute_capability="86", nvrtc_build="12.9.86", platform_family="linux",
+    measured="2026-10-30", complete=False,
+    frames=MappingProxyType({"shcu_deng": 504}),
+),)
+
+# WRF-Solar cal_cldfra3 (kernels/cldfra3.cu, icloud = 3) and module_diag_solar
+# (kernels/solar_diag.cu, solar_diagnostics = 1), production loader
+# (woof.core.kernels.load_module), default and strict numerics, read
+# 2026-10-30 on the RTX A6000 CUDA host: every entry point reads 0 B.
+KERNEL_LOCAL_FRAME_RECORDINGS = tuple(
+    replace(row, complete=False)
+    if not {"cldfra3", "solar_diag"} <= set(row.frames) else row
+    for row in KERNEL_LOCAL_FRAME_RECORDINGS)
+KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
+    box="pb", device="NVIDIA RTX A6000",
+    compute_capability="86", nvrtc_build="12.9.86", platform_family="linux",
+    measured="2026-10-30", complete=False,
+    frames=MappingProxyType({"cldfra3": 0, "solar_diag": 0}),
+),)
+
+# The partial-depth nest's coupling (Phase D3, kernels/partial_nest.cu),
+# default loader options, read 2026-10-30 on the RTX A6000 CUDA host: all
+# eight entry points read 0 B (13-40 registers).
+KERNEL_LOCAL_FRAME_RECORDINGS = tuple(
+    replace(row, complete=False) if "partial_nest" not in row.frames else row
+    for row in KERNEL_LOCAL_FRAME_RECORDINGS)
+KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
+    box="pb", device="NVIDIA RTX A6000",
+    compute_capability="86", nvrtc_build="12.9.86", platform_family="linux",
+    measured="2026-10-30", complete=False,
+    frames=MappingProxyType({"partial_nest": 0}),
+),)
+
+# radtran-opac: the radtran_disort body became rt_problem and the module
+# gained radtran_disort_modes / radtran_disort_finish (mode-parallel
+# radiances); re-read 2026-10-30 on the RTX A6000, default and strict
+# numerics: radtran_disort 30,448 B, _modes 30,448 B, _finish 30,432 B.
+KERNEL_LOCAL_FRAME_RECORDINGS = tuple(
+    replace(row, complete=False) if "radtran_disort" in row.frames else row
+    for row in KERNEL_LOCAL_FRAME_RECORDINGS)
+KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
+    box="pb", device="NVIDIA RTX A6000",
+    compute_capability="86", nvrtc_build="12.9.86", platform_family="linux",
+    measured="2026-10-30", complete=False,
+    frames=MappingProxyType({"radtran_disort": 30448}),
+),)
+
+# use_theta_m = 1 (kernels/theta_m.cu: theta_m_from_dry, theta_dry_from_moist,
+# conv_t_tendf_to_moist, moist_physics_finish_theta_m) and do_avgflx_em = 1
+# (kernels/avgflx.cu: upd_avgflx), production loader, default and strict
+# numerics, read 2026-10-31 on the RTX A6000 CUDA host: every entry point
+# reads 0 B.
+KERNEL_LOCAL_FRAME_RECORDINGS = tuple(
+    replace(row, complete=False)
+    if not {"theta_m", "avgflx"} <= set(row.frames) else row
+    for row in KERNEL_LOCAL_FRAME_RECORDINGS)
+KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
+    box="pb", device="NVIDIA RTX A6000",
+    compute_capability="86", nvrtc_build="12.9.86", platform_family="linux",
+    measured="2026-10-31", complete=False,
+    frames=MappingProxyType({"theta_m": 0, "avgflx": 0}),
+),)
+
+# The partial-depth nest's D4 coupling (kernels/partial_nest_d4.cu), default
+# loader options, read 2026-10-30 on the RTX A6000 CUDA host: all six entry
+# points read 0 B (10-32 registers).
+KERNEL_LOCAL_FRAME_RECORDINGS = tuple(
+    replace(row, complete=False) if "partial_nest_d4" not in row.frames else row
+    for row in KERNEL_LOCAL_FRAME_RECORDINGS)
+KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
+    box="pb", device="NVIDIA RTX A6000",
+    compute_capability="86", nvrtc_build="12.9.86", platform_family="linux",
+    measured="2026-10-30", complete=False,
+    frames=MappingProxyType({"partial_nest_d4": 0}),
+),)
+
+# km_opt = 5, SMS-3DTKE (kernels/sms3dtke.cu), production loader
+# (woof.core.kernels.load_module), default and strict numerics, read
+# 2026-10-31 on the RTX A6000 CUDA host: all fourteen entry points read 0 B
+# (30-96 registers; the tridiagonal planes live in a global workspace).
+KERNEL_LOCAL_FRAME_RECORDINGS = tuple(
+    replace(row, complete=False) if "sms3dtke" not in row.frames else row
+    for row in KERNEL_LOCAL_FRAME_RECORDINGS)
+KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
+    box="pb", device="NVIDIA RTX A6000",
+    compute_capability="86", nvrtc_build="12.9.86", platform_family="linux",
+    measured="2026-10-31", complete=False,
+    frames=MappingProxyType({"sms3dtke": 0}),
+),)
+
+# WRF-Solar EPS (kernels/wrfsolar_eps.cu, multi_perturb) and MAD-WRF
+# (kernels/madwrf.cu), production loader (woof.core.kernels.load_module),
+# default and strict numerics, read 2026-10-30 on the RTX A6000 CUDA host
+# (NVRTC 12.9): every entry point reads 0 B.
+KERNEL_LOCAL_FRAME_RECORDINGS = tuple(
+    replace(row, complete=False)
+    if not {"wrfsolar_eps", "madwrf"} <= set(row.frames) else row
+    for row in KERNEL_LOCAL_FRAME_RECORDINGS)
+KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
+    box="pb", device="NVIDIA RTX A6000",
+    compute_capability="86", nvrtc_build="12.9.86", platform_family="linux",
+    measured="2026-10-30", complete=False,
+    frames=MappingProxyType({"wrfsolar_eps": 0, "madwrf": 0}),
 ),)

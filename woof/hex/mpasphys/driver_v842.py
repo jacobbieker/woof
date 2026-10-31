@@ -19,6 +19,10 @@ from typing import Any, Callable, Iterable, Mapping, Protocol
 
 from ..config import parse_fortran_namelist
 from ..physics_suites import load_table
+from . import radiation_spectral_v842 as _spectral
+from . import radtran_v842 as _radtran
+from . import solar_diagnostics_v842 as _solar
+from . import wrfsolar_eps_v842 as _eps
 
 SCHEMA = "mpas-port.physics-driver-v842/v1"
 
@@ -297,6 +301,18 @@ class DriverConfig:
     #: The active slots that run on the CPU in this run (a route resolution records them; a library
     #: resolution for module replays records none).
     cpu_slots: tuple[CpuSlot, ...] = ()
+    #: WOOF's &radiation config_rrtmg_spectral_output (radiation_spectral_v842): "none", "bands" or
+    #: "gpoints".  Not a Registry option, so it never reaches the native config pool.
+    spectral_output: str = "none"
+    #: WOOF's &radtran group (radtran_v842): the woof.radtran spectral diagnostic's settings
+    #: (woof.radtran.model.Diagnostic), or None.  Not a Registry option either.
+    radtran: Any = None
+    #: WOOF's &diagnostics config_solar_diagnostics (solar_diagnostics_v842): WRF-Solar's 26
+    #: diagnostics after every step.  Not a Registry option.
+    solar_diagnostics: bool = False
+    #: WOOF's &wrfsolar_eps group (wrfsolar_eps_v842): WRF-Solar EPS's multi_perturb hooks at the
+    #: FARMS, Deng, Thompson and cloudiness seats, or None.  Not a Registry option.
+    wrfsolar_eps: Any = None
 
     def cpu_warning(self) -> str | None:
         """The loud start-up lines naming each active slot that runs on the CPU, or None when none does."""
@@ -382,7 +398,11 @@ class DriverConfig:
                   "backends": {s: str(b) for s, b in self.backends.items()}}
         # Service backends (the surface-update glue, i5) appear only when one is moved off its native-cpu
         # default, so default and exact receipts stay word for word what they were (integrator, 2026-10-14).
-        if any(b != Backend.NATIVE_CPU for b in self.service_backends.values()):
+        # A service whose table default is not native-cpu (farms_sw, default off) counts as moved only
+        # off that default.
+        defaults = {name: Backend(row["default_backend"])
+                    for name, row in load_table()["mpasphys_v842"].get("services", {}).items()}
+        if any(b != defaults.get(s, Backend.NATIVE_CPU) for s, b in self.service_backends.items()):
             result["service_backends"] = {s: str(b) for s, b in self.service_backends.items()}
         if self.cpu_slots:
             result["cpu_slots"] = [item.as_dict() for item in self.cpu_slots]
@@ -390,6 +410,21 @@ class DriverConfig:
         if self.mode != "exact":
             result.update(physics_mode=self.mode, corrections=sorted(self.corrections),
                           correct_skip=sorted(self.correct_skip), correct_mode=self.correct_mode_record())
+        if self.spectral_output != "none":
+            result["rrtmg_spectral_output"] = self.spectral_output
+        if self.radtran is not None:
+            d = self.radtran
+            result["radtran"] = dict(wavelengths=list(d.wavelengths), umu=list(d.umu), phi=list(d.phi),
+                                     mol_abs_param=d.mol_abs_param, solver=d.solver, streams=d.streams,
+                                     pseudospherical=d.pseudospherical)
+            if d.aerosol != "none":
+                result["radtran"]["aerosol"] = d.aerosol
+        if self.solar_diagnostics:
+            result["solar_diagnostics"] = True
+        if self.wrfsolar_eps is not None:
+            o = self.wrfsolar_eps
+            result["wrfsolar_eps"] = dict(switches=list(o.switches), degree=o.degree,
+                                          **{k: v for k, v in sorted(o.values.items())})
         return result
 
 
@@ -515,6 +550,71 @@ def settle_corrections(config: DriverConfig, requested: Iterable[str],
     return frozenset(applied), tuple(gaps)
 
 
+def _check_spectral_output(config: DriverConfig) -> None:
+    """Refuse config_rrtmg_spectral_output where nothing would produce it.
+
+    The per-band fluxes come from the GPU RRTMG slots (radiation_spectral_v842); a run with no RRTMG side, or
+    whose RRTMG side runs MPAS's own Fortran (which has no such output), would carry fields no slot writes.
+    """
+    name = f"&{_spectral.GROUP} {_spectral.OPTION}={config.spectral_output!r}"
+    sides = _spectral.sides(config)
+    if not sides:
+        raise ValueError(f"{name} needs RRTMG radiation (config_radt_sw_scheme='rrtmg_sw' or "
+                         f"config_radt_lw_scheme='rrtmg_lw'); this run has "
+                         f"radiation_sw={config.selectors.get('radiation_sw')!r}, "
+                         f"radiation_lw={config.selectors.get('radiation_lw')!r}")
+    for side in sides:
+        slot = "radiation_sw" if side == "sw" else "radiation_lw"
+        if config.backends[slot] != Backend.HEX_CUDA:
+            raise ValueError(f"{name} needs {slot} on hex-cuda: MPAS's own Fortran RRTMG "
+                             f"({config.backends[slot]}) has no per-band output")
+
+
+def farms_enabled(config) -> bool:
+    """WOOF-only FARMS service selected (config_farms_sw_backend = 'hex-cuda') with a shortwave to sit
+    beside: WRF evaluates FARMS inside its radiation driver."""
+    backend = getattr(config, "service_backends", {}).get("farms_sw", Backend.OFF)
+    return backend != Backend.OFF and config.active("radiation_sw")
+
+
+def shcu_deng_enabled(config) -> bool:
+    """WOOF-only Deng shallow cumulus service selected (config_shcu_deng_backend = 'hex-cuda')."""
+    backend = getattr(config, "service_backends", {}).get("shcu_deng", Backend.OFF)
+    return backend != Backend.OFF
+
+
+def _check_convective_cloud(config) -> None:
+    """The Deng and cu_rad_feedback services' preconditions (woof.hex.mpasphys.shcu_deng_v842)."""
+    services = getattr(config, "service_backends", {})
+    deng = services.get("shcu_deng", Backend.OFF) != Backend.OFF
+    feedback = services.get("cu_rad_feedback", Backend.OFF) != Backend.OFF
+    if not (deng or feedback):
+        return
+    for on, name in ((deng, "config_shcu_deng_backend"), (feedback, "config_cu_rad_feedback_backend")):
+        if not on:
+            continue
+        # The convective cloud reaches radiation inside the hex-cuda cloudiness slot, which both MPAS
+        # RRTMG schemes read (WRF's merges sit in the RRTMG path of its radiation driver).
+        if (config.selectors["radiation_lw"], config.selectors["radiation_sw"]) != ("rrtmg_lw", "rrtmg_sw"):
+            raise ValueError(f"{name} hands its cloud to RRTMG: needs config_radt_lw_scheme = 'rrtmg_lw' "
+                             f"and config_radt_sw_scheme = 'rrtmg_sw'")
+        if config.backends["cloudiness"] != Backend.HEX_CUDA:
+            raise ValueError(f"{name} merges its cloud in the hex-cuda cloudiness slot: needs "
+                             f"config_radt_cld_backend = 'hex-cuda', not {config.backends['cloudiness']}")
+    if deng:
+        if config.selectors["pbl"] != "bl_mynn":
+            raise ValueError("config_shcu_deng_backend: Deng reads the PBL's TKE, EXCH_H and EL_PBL; WRF "
+                             "stops unless MYJ or MYNN supplies them, and MPAS v8.4.2 has MYNN "
+                             f"(bl_mynn) only, not {config.selectors['pbl']!r}")
+        if not config.active("microphysics"):
+            raise ValueError("config_shcu_deng_backend: Deng needs a microphysics scheme (WRF refuses "
+                             "shcu_physics = 5 with mp_physics = 0)")
+    if feedback and config.selectors["convection"] not in ("cu_grell_freitas",):
+        raise ValueError("config_cu_rad_feedback_backend: MPAS v8.4.2's cu_grell_freitas is the cumulus "
+                         "scheme that writes a convective cloud (qc_cu/qi_cu) for radiation, not "
+                         f"{config.selectors['convection']!r}")
+
+
 def resolve_namelist(text: str, *, backends: Mapping[str, str] | None = None,
                      default_backend: str | None = None, physics_mode: str | None = None,
                      correct_skip: Iterable[str] | None = None,
@@ -535,6 +635,7 @@ def resolve_namelist(text: str, *, backends: Mapping[str, str] | None = None,
         if row["type"] == "real":
             options[key] = float(options[key])
     groups = parse_fortran_namelist(text)
+    _eps.refuse_madwrf(groups)          # MAD-WRF, by name, before the generic Registry refusal
     supplied = groups.get("physics", {})
     for name, value in supplied.items():
         key = name.casefold()
@@ -619,7 +720,24 @@ def resolve_namelist(text: str, *, backends: Mapping[str, str] | None = None,
         chosen[slot] = Backend(backend)
         explicit.add(slot)
 
+    spectral = _spectral.resolve(groups)
+    radtran = _radtran.resolve(groups)
+    solar = _solar.resolve(groups)
+    multi_perturb = _eps.resolve(groups)
+
     def record(config: DriverConfig) -> DriverConfig:
+        _check_convective_cloud(config)
+        if radtran is not None:
+            config = _replace(config, radtran=radtran)
+        if spectral != "none":
+            config = _replace(config, spectral_output=spectral)
+            _check_spectral_output(config)
+        if solar:
+            config = _replace(config, solar_diagnostics=True)
+            _solar.check(config)
+        if multi_perturb is not None:
+            config = _replace(config, wrfsolar_eps=multi_perturb)
+            _eps.check(config)
         if library:
             return config
         return _replace(config, cpu_slots=cpu_slot_record(config, "mpasphys_v842", cpu_reasons, explicit))
@@ -1093,6 +1211,10 @@ class NativeDriverHooks:
                     operations.update(("allocate_lsm", "deallocate_lsm"))
             if config.active("convection"):
                 operations.add("update_convection_step2")
+            if farms_enabled(config):
+                operations.add("farms_sw")
+            if shcu_deng_enabled(config):
+                operations.update(("shcu_deng", "shcu_deng_tend"))
         if config.active("ngw") and not config.native_embedded("ngw"):
             operations.add("snapshot_gwdo_tendencies")
         return tuple(sorted(op for op in operations if op not in self.external
@@ -1191,6 +1313,9 @@ class PhysicsDriver:
         options = dict(c.execution_options)
         if slot == "gwdo" and c.active("ngw") and not c.native_embedded("ngw"):
             options["config_ngw_scheme"] = False
+        if slot in ("radiation_sw", "radiation_lw") and c.spectral_output != "none":
+            # The slot's own copy only: the WOOF option is not a Registry config (configure()).
+            options[_spectral.OPTION] = c.spectral_output
         service = next((name for name, row in load_table()["mpasphys_v842"].get("services", {}).items()
                         if slot is None and operation in row["operations"]), None)
         glue_backend = c.service_backends.get(service, Backend.NATIVE_CPU)
@@ -1275,6 +1400,11 @@ class PhysicsDriver:
         for slot in ("radiation_sw", "radiation_lw"):
             if c.active(slot):
                 glue("deallocate_" + slot)
+        # WOOF-only: WRF-Solar FARMS (services.farms_sw, woof.hex.mpasphys.farms_v842) on EVERY step,
+        # radiation steps included, after the radiation slots, as WRF's radiation driver runs it after
+        # ENDIF Radiation_step under swint_opt = 2.  Off (the default) calls nothing.
+        if farms_enabled(c):
+            glue("farms_sw")
         # RP6: pbl_due is False only in correct mode, between the calls config_pbl_interval sets.
         due = self.manager.pbl_due
         # RP6 (correct mode with config_pbl_interval): every step's precipitation is added to the window the
@@ -1324,7 +1454,16 @@ class PhysicsDriver:
             glue("deallocate_convection")
         if c.active("convection"):
             glue("update_convection_step2")
+        # WOOF-only: WRF's Deng shallow cumulus (services.shcu_deng, woof.hex.mpasphys.shcu_deng_v842)
+        # on every step after the convection block, as WRF's shallowcu_driver follows cumulus_driver.
+        if shcu_deng_enabled(c):
+            glue("shcu_deng")
         glue("deallocate_forall_physics")
+        # WOOF-only: WRF-Solar EPS (wrfsolar_eps_v842).  WRF moves the multi_perturb fields after the
+        # first-RK physics (first_rk_step_part2.F:262-317), so this step's microphysics reads them.
+        provider = getattr(pools, "wrfsolar_eps", None)
+        if provider is not None:
+            provider.update(itimestep, time_seconds)
         return flags
 
     def physics_get_tend(self, *, rk_step: int, dynamics_substep: int, pools: Any) -> Any:
@@ -1342,6 +1481,10 @@ class PhysicsDriver:
         self._tendencies = self._call("physics_get_tend", step, time, flags,
                                      {"pools": pools, "rk_step": rk_step,
                                       "dynamics_substep": dynamics_substep})
+        if shcu_deng_enabled(self.config) and self.config.moist_physics:
+            # WOOF-only: the step's Deng tendencies join the held sources (shcu_deng_v842.couple_deng).
+            self._tendencies = self._call("shcu_deng_tend", step, time, flags,
+                                         {"sources": self._tendencies, "pools": pools})
         self._tendencies_ready = True
         return self._tendencies
 

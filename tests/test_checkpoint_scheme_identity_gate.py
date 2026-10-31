@@ -436,8 +436,9 @@ def test_the_accepted_registries_are_the_loader_menus():
     """The tuples this suite iterates are the ones the loader gates on."""
     from woof.microphysics_schemes import NAMED_MP_IDS
     # 5 is Ferrier-Aligo (its own identity row).  30 is FAST_SBM, which joined with its own restart identity in 2.8.9.
-    assert config_mod.MP_PHYSICS_ACCEPTED == (0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 16, 18,
-                                              24, 28, 30, 50, 106) + NAMED_MP_IDS
+    # Sorted: a named scheme may carry WRF's own number (MAD-WRF's 96).
+    assert config_mod.MP_PHYSICS_ACCEPTED == tuple(sorted(
+        (0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 30, 50, 106) + NAMED_MP_IDS))
     assert config_mod.RA_LW_PHYSICS_ACCEPTED == (0, 1, 4, 5, 90)
     assert config_mod.RA_SW_PHYSICS_ACCEPTED == (0, 1, 4, 5, 90)
     with pytest.raises(ValueError, match="mp_physics must be"):

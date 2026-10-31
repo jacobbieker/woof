@@ -13,6 +13,7 @@ from woof.verify.bigstep_prep_oracle import (
     ORACLE_DIR, PREP_CASES, PHY_MAPPING, load_prep_fixture,
     measure_prep, prep_port_outputs,
 )
+from woof.verify.platform_pins import pin_path
 
 
 def test_prep_oracle_source_fixture_and_constant_pins():
@@ -42,7 +43,7 @@ def test_prep_fixture_captures_all_native_outputs(case):
 @pytest.mark.parametrize("case", PREP_CASES)
 def test_bigstep_rhs_ph_compiled_wrf471_every_output_word(case):
     fixture = load_prep_fixture(case)
-    pins = json.loads((ORACLE_DIR / "prep-measurements.json").read_text())
+    pins = json.loads(pin_path(ORACLE_DIR / "prep-measurements.json").read_text())
     got = prep_port_outputs(fixture)
     measured = measure_prep(fixture,{"ph_tend":got["ph_tend"]})
     assert measured["ph_tend"] == pins[case]["ph_tend"]
@@ -53,7 +54,7 @@ def test_bigstep_rhs_ph_compiled_wrf471_every_output_word(case):
 @pytest.mark.parametrize("case", PREP_CASES)
 def test_bigstep_phy_prep_compiled_wrf471_exposed_outputs(case):
     fixture = load_prep_fixture(case)
-    pins = json.loads((ORACLE_DIR / "prep-measurements.json").read_text())
+    pins = json.loads(pin_path(ORACLE_DIR / "prep-measurements.json").read_text())
     got = prep_port_outputs(fixture)
     measured = measure_prep(fixture,{name:got[name] for name in PHY_MAPPING})
     assert measured == {name:pins[case][name] for name in PHY_MAPPING}

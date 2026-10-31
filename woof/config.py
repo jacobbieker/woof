@@ -75,7 +75,7 @@ class RunConfig:
         # The PWP reference profiles (lane/cap-slab-ocean) arrive as lists
         # from TOML, the namelist importer and callers; store tuples so the
         # frozen configuration stays hashable.
-        for name in ("ocean_z", "ocean_t", "ocean_s"):
+        for name in ("ocean_z", "ocean_t", "ocean_s", "radtran_wavelengths", "radtran_umu", "radtran_phi"):
             value = getattr(self, name)
             if isinstance(value, list):
                 object.__setattr__(self, name, tuple(value))
@@ -89,6 +89,14 @@ class RunConfig:
         if not isinstance(self.chem_sets, str) or not isinstance(self.fire_smoke, bool):
             return
         selected = tuple(name.strip() for name in self.chem_sets.split(","))
+        if getattr(self, "madwrf_opt", 0) == 2 and "madwrf" not in selected:
+            # MAD-WRF's tracer package (Registry.EM_COMMON:3072, tracer:
+            # tr_qc,tr_qi,tr_qs): the advected TR_QC/TR_QI/TR_QS rows of
+            # woof/data/chem/species/madwrf.json (woof/core/madwrf.py).
+            from woof.chem_table import chem_names
+            object.__setattr__(self, "chem_sets", ",".join(
+                (*chem_names(self.chem_sets), "madwrf")))
+            selected = (*selected, "madwrf")
         profiles = ("sfire_smoke", "sfire_smoke_mixed")
         if self.fire_smoke or any(name in selected for name in profiles):
             from woof.chem_table import chem_names
@@ -1195,6 +1203,11 @@ class RunConfig:
     #   (woof.core.swint; module_radiation_driver.F
     #   update_swinterp_parameters / interp_sw_radiation).  0 holds the
     #   last radiation call's fluxes for the whole interval.
+    #   swint_opt = 2: WRF-Solar's FARMS (woof.core.farms;
+    #   phys/module_ra_farms.F) evaluates the surface irradiance on every
+    #   step into SWDOWN2, SWDDIR2, SWDDNI2, SWDDIF2, SWDOWNC2 and SWDDNIC2;
+    #   the radiation call's SWDOWN stands unless couple_farms copies
+    #   SWDOWN2 into it.
     #   aer_opt = 3: the legacy RRTMG shortwave sees per-band aerosol
     #   optics built from the Thompson water- and ice-friendly aerosol
     #   numbers (woof.core.rrtmg_aerosol_optics; the driver's gt_aod plus
@@ -1836,6 +1849,160 @@ class RunConfig:
     #: relative paths resolve beside the config.  Read only with
     #: windfarm_opt = 1, and checkpoints bind its bytes.  Appended last.
     windfarm_turbine_file: str = ""
+    # RRTMG per-band (and per-g-point) flux diagnostic (output-only, per
+    # domain).  "bands" adds WRF's top and bottom radiative fluxes resolved
+    # by RRTMG band -- 14 shortwave, 16 longwave -- as <NAME>_BAND history
+    # fields (SWDNB_BAND, LWUPT_BAND, ...); "gpoints" resolves the
+    # shortwave by its 112 g-points instead (<NAME>_GPT).  Legacy RRTMG
+    # (ra_rrtmg_variant = "rrtmg_legacy") only.  Separate kernels over the
+    # spectral buffers the broadband sums read, so no prognostic or
+    # broadband word changes (tests/test_rrtmg_spectral_output.py, which
+    # also holds every band word to compiled WRF).  Appended last, keyword-only.
+    rrtmg_spectral_output: str = "none"
+    # WRF's couple_farms (Registry.EM_COMMON:2602, default .false.): under
+    # swint_opt = 2 the radiation driver copies FARMS's SWDOWN2 into SWDOWN
+    # on every step (module_radiation_driver.F:3084-3099), which the land
+    # surface reads; module_check_a_mundo.F:654-660 admits it only with
+    # swint_opt = 2.  Off, FARMS's six fields are diagnostics.  Appended
+    # last, keyword-only.
+    couple_farms: bool = False
+    # woof.radtran spectral diagnostic (output-only, per domain, off by
+    # default): woof's clean-room discrete-ordinate solver run on this
+    # domain's columns with REPTRAN gas absorption, Rayleigh scattering and
+    # the model's own water/ice clouds.  Each listed wavelength [nm] selects
+    # the REPTRAN band containing it; history gains RT_EDIR, RT_EDN, RT_EUP
+    # (surface) and RT_EUP_TOA on axis rt_wavelength, [W m-2 nm-1], and with
+    # radtran_umu RT_RAD [W m-2 nm-1 sr-1] on (rt_wavelength, rt_direction).
+    # Needs libRadtran's data files at run time (woof.radtran.data).  No
+    # prognostic word changes.  Appended last, keyword-only.
+    radtran_wavelengths: tuple[float, ...] = ()
+    #: seconds between radtran calls (the first step always computes)
+    radtran_interval_s: float = 3600.0
+    #: radiance directions: cosines of the polar angle (> 0 upwelling at the
+    #: top of the atmosphere, < 0 downwelling at the surface) ...
+    radtran_umu: tuple[float, ...] = ()
+    #: ... and relative azimuths phi - phi0 [deg] (default 0 with umu)
+    radtran_phi: tuple[float, ...] = ()
+    #: REPTRAN band resolution ("reptran coarse" | "reptran medium" | "reptran fine")
+    radtran_mol_abs_param: str = "reptran coarse"
+    #: "disort" (discrete ordinates) or "twostr" (two-stream, irradiance only)
+    radtran_solver: str = "disort"
+    #: number of streams (0: 6 for irradiance, 16 with radiances)
+    radtran_streams: int = 0
+    #: pseudo-spherical direct beam (Dahlback & Stamnes 1991)
+    radtran_pseudospherical: bool = False
+    #: WRF ``&physics shcu_physics`` (Registry.EM_COMMON:2492, max_domains,
+    #: default 0), the separate shallow-cumulus slot.  5 runs WRF-Solar's
+    #: PSU Deng scheme (phys/module_shcu_deng.F; woof/core/shcu_deng.py,
+    #: kernel shcu_deng.cu, graded word for word against WRF v4.7.1 by
+    #: tests/test_shcu_deng_wrf471_oracle.py) every model step after the
+    #: cumulus call, as module_first_rk_step_part1.F:1570 does, with its
+    #: shallow cloud handed to the next radiation call
+    #: (module_radiation_driver.F:1566-1575).  Deng reads MYJ's or MYNN's
+    #: TKE (bl_pbl_physics 2 or 5, module_shallowcu_driver.F:605-630), QC
+    #: and QR (a microphysics scheme) and the radiation's LW/SW heating.
+    #: 0 (the default) builds nothing and launches nothing; WRF's 1-4 (G3
+    #: shallow, UW, GRIMS, NSCV) are not ported as separate schemes.
+    #: Appended last, keyword-only.
+    shcu_physics: int = 0
+    #: WRF ``&physics cu_rad_feedback`` (Registry.EM_COMMON:2594,
+    #: max_domains, default .false.): hand the cumulus scheme's cloud water,
+    #: ice and cloud fraction to radiation.  module_physics_init.F:1103-1118
+    #: derives ICLOUD_CU from it: 2 (KF's CLDFRA_DP/SH, QC_KF/QI_KF) for
+    #: cu_physics = 1, 1 (the time-averaged GD_CLOUD/GD_CLOUD2 as QC_CU/
+    #: QI_CU, cu_diag = 1) for Grell-Freitas and Grell 3D.  Appended last,
+    #: keyword-only.
+    cu_rad_feedback: bool = False
+    # WRF-Solar diagnostics (WRF &diags solar_diagnostics, one value for the
+    # run): 1 writes Registry/registry.solar_fields' 26 2-D history fields --
+    # clearness index, solar zenith angle, accumulated GHI, 2-D max cloud
+    # fraction, water vapour / liquid / ice / snow paths (resolved, and with
+    # the radiation driver's cloud for liquid and ice), mass-weighted radii
+    # and optical depths, cloud base/top heights -- computed every step by
+    # WRF v4.7.1 module_diag_solar.F (woof/core/solar_diagnostics.py, held to
+    # compiled WRF).  Needs the RRTMG shortwave (ra_sw_physics = 4).
+    # Output-only in woof: the forecast's CLDFRA/COSZEN stay on the radiation
+    # cadence (WRF's driver republishes them every step under this switch).
+    # Appended last, keyword-only.
+    solar_diagnostics: int = 0
+    #: OPAC aerosol in the radtran diagnostic: "none" (off), "thompson" (the
+    #: aerosol-aware Thompson microphysics' nwfa/nifa as OPAC water-soluble and
+    #: mineral aerosol; mp_physics = 28) or an OPAC mixture ("continental_average",
+    #: "maritime_clean", "urban", ...; woof.radtran.model.AEROSOL_CHOICES)
+    radtran_aerosol: str = "none"
+    #: WRF ``&dynamics use_theta_m`` (Registry.EM_COMMON:2864; one value for
+    #: the run).  1 integrates WRF v4's moist potential temperature
+    #: theta_m = theta*(1 + Rv/Rd*qv) as the prognostic (woof.core.theta_m:
+    #: the EOS without the vapour factor, phy_prep's dry theta for the
+    #: physics, conv_t_tendf_to_moist, moist_physics_finish_em's theta_m
+    #: branch, theta_m initial and boundary state).  woof's default stays 0
+    #: (dry theta, what every earlier configuration integrated); WRF's
+    #: Registry default of 1 reaches a run through the namelist importer.
+    #: Appended last, keyword-only.
+    use_theta_m: int = 0
+    #: WRF ``&dynamics do_avgflx_em`` (Registry/registry.avgflx, max_domains,
+    #: default 0): 1 writes AVGFLX_RUM/RVM/WWM, the history-interval means of
+    #: the mass-coupled wind fluxes (woof.core.avgflx).  Output-only.
+    #: Appended last, keyword-only.
+    do_avgflx_em: int = 0
+    # WRF-Solar EPS (WRF &stoch, Registry/registry.stoch:98-130, :174-188;
+    # woof/core/wrfsolar_eps.py).  ``multi_perturb = 1`` builds the
+    # STOCHPERT.TBL perturbation fields on domain 1 (updated on the first
+    # step and every max(nint(spdt*60/dt), 1) steps; a nest keeps WRF's zero
+    # fields) and each ``pert_<scheme>`` switch applies the drivers' own
+    # Add_/Remove_ multipliers around its scheme: FARMS (albedo, AOD,
+    # Angstrom exponent, asymmetry, qv, qc, qs), Deng (qv, qc, theta, w),
+    # Thompson mp 8/28 (qv, qc, qi, qs, ni) and icloud = 3's t and qv.
+    # ``pert_<scheme>_<var>`` scales the field; 0 leaves that input (up to
+    # the clamps).  ``nens`` is WRF's ensemble-member seed label;
+    # ``stochpert_tbl`` names the STOCHPERT.TBL ("" is WRF v4.7.1's
+    # run/STOCHPERT.TBL) and ``num_pert_3d`` how many of its rows WRF reads
+    # (plus one).  MYNN's and Noah's (pert_mynn, pert_noah) are not ported.
+    # Max_domains in WRF except num_pert_3d, nens and the table.  All off
+    # by default.  Appended last, keyword-only.
+    multi_perturb: int = 0
+    pert_farms: bool = False
+    pert_farms_albedo: float = 0.0
+    pert_farms_aod: float = 0.0
+    pert_farms_angexp: float = 0.0
+    pert_farms_aerasy: float = 0.0
+    pert_farms_qv: float = 0.0
+    pert_farms_qc: float = 0.0
+    pert_farms_qs: float = 0.0
+    pert_deng: bool = False
+    pert_deng_qv: float = 0.0
+    pert_deng_qc: float = 0.0
+    pert_deng_t: float = 0.0
+    pert_deng_w: float = 0.0
+    pert_thom: bool = False
+    pert_thom_qv: float = 0.0
+    pert_thom_qc: float = 0.0
+    pert_thom_qi: float = 0.0
+    pert_thom_qs: float = 0.0
+    pert_thom_ni: float = 0.0
+    pert_cld3: bool = False
+    pert_cld3_qv: float = 0.0
+    pert_cld3_t: float = 0.0
+    spdt: float = -1.0
+    num_pert_3d: int = 15
+    nens: int = 1
+    stochpert_tbl: str = ""
+    # MAD-WRF (WRF &physics, Registry.EM_COMMON:2677-2680, one value for the
+    # run; woof/core/madwrf.py).  ``madwrf_opt`` 1 advects and diffuses the
+    # initial hydrometeors with no microphysics (it needs mp_physics = 96,
+    # MAD-WRF's passive qv/qc/qi/qs, and use_mp_re = 0); 2 carries the
+    # tracers TR_QC/TR_QI/TR_QS, equal to qc/qi/qs at the start, and nudges
+    # qc/qi/qs toward them, q += (tr - q)*dt/madwrf_dt_relax [s], while the
+    # forecast time is below madwrf_dt_nudge [min] (solve_em.F:3646-3662).
+    # ``madwrf_cldinit = 1`` is real.exe's cloud initialization
+    # (Init_madwrf_clouds) from the analysis RH and, when metgrid supplies
+    # them, CLDMASK, BRTEMP, CLDTOPZ and CLDBASEZ: woof's met_em door runs
+    # it; a wrfinput from WRF's real.exe already carries it.  Off by
+    # default.  Appended last, keyword-only.
+    madwrf_opt: int = 0
+    madwrf_dt_relax: float = 60.0
+    madwrf_dt_nudge: float = 60.0
+    madwrf_cldinit: int = 0
 
 #: The ways a domain's clock meets the measured terrain rules
 #: (:attr:`RunConfig.terrain_clock`).
@@ -3379,8 +3546,9 @@ _MP_PHYSICS_SCHEMA_MENU = (
     "(Milbrandt-Yau two-moment), 10 (Morrison two-moment), 16 (WDM6 "
     "double-moment warm rain), 18 (NSSL two-moment), 24 (WSM7 "
     "single-moment with hail), 28 (Thompson aerosol-aware), 30 "
-    "(FAST_SBM spectral bin), 50 (P3 one-category), 106 (WSM6R, the "
-    "revised WSM6), or \"tempo\" (TEMPO, WOOF id 900)"
+    "(FAST_SBM spectral bin), 50 (P3 one-category), 96 (MAD-WRF passive "
+    "hydrometeors), 106 (WSM6R, the revised WSM6), or \"tempo\" (TEMPO, "
+    "WOOF id 900)"
 )
 
 #: Every ``mp_physics`` value the config loader admits, as the importable
@@ -3390,7 +3558,9 @@ _MP_PHYSICS_SCHEMA_MENU = (
 #: membership against this tuple and recites the menu when it refuses, so
 #: a new scheme is added in both places in the same edit or the loader
 #: and its refusal text disagree in front of a user.
-MP_PHYSICS_ACCEPTED = (0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 30, 50, 106, 900)
+#: Sorted; it holds the named rows of woof.microphysics_schemes too
+#: (NAMED_MP_IDS: MAD-WRF's 96 and TEMPO's 900).
+MP_PHYSICS_ACCEPTED = (0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 30, 50, 96, 106, 900)
 
 
 #: WDM6's two unported siblings, held as a table for the reason
@@ -3493,12 +3663,6 @@ _MP_UNPORTED_SCHEMES = {
         "ported. It advects total condensate with ice and rain fractions; "
         "Ferrier-Aligo (mp_physics=5) is its successor and is not run in its "
         "place."
-    ),
-    96: (
-        "mp_physics=96 (MADWRF, package madwrf_mp) is not ported. It is the "
-        "cloud scheme of WRF's MAD-WRF solar-irradiance configuration, "
-        "which works with MAD-WRF's satellite cloud initialization; woof "
-        "carries neither."
     ),
     97: (
         "mp_physics=97 (Goddard GCE three-ice, package gsfcgcescheme) is not "
@@ -3760,6 +3924,49 @@ MP28_AEROSOL_SOURCE_OPTIONS: dict[str, tuple[int, str, str]] = {
 }
 
 
+def _validate_farms(cfg: RunConfig) -> None:
+    """``swint_opt = 2`` (FARMS, woof.core.farms): the ported envelope.
+
+    WRF's own checks first -- module_physics_init.F:1039-1057 stops a
+    microphysics scheme that hands FARMS neither its radii nor all of cloud,
+    ice and snow -- then the parts of the radiation driver's Solar_step
+    (the per-step CLDFRA and its temporary hydrometeor additions) that are
+    ported: icloud 0, 1 (with MYNN's icloud_bl merge), 2 and 3 (WRF-Solar
+    cal_cldfra3, whose made-up qc/qi FARMS reads as WRF's does), and aer_opt
+    0, 1 and 2.  Everything else is refused by name rather than run with a
+    cloud fraction or aerosol WRF would not have used.
+    """
+    from woof.core.farms import farms_mp_admitted
+    lw, sw = radiation_scheme_ids(cfg)
+    if int(sw) == 0:
+        raise ConfigurationRefused(
+            "swint_opt=2 (FARMS) needs a shortwave scheme (ra_sw_physics != "
+            "0): WRF evaluates FARMS inside the radiation driver, beside the "
+            "shortwave call whose SWDOWN couple_farms replaces")
+    if not farms_mp_admitted(int(cfg.mp_physics), int(getattr(cfg, "use_mp_re", 1))):
+        raise ConfigurationRefused(
+            f"swint_opt=2 with mp_physics={int(cfg.mp_physics)}: WRF stops "
+            "with 'FARMS (swint_opt==2) requires a different MP scheme' "
+            "(module_physics_init.F:1039-1057): FARMS needs the scheme's "
+            "effective radii (Thompson, Thompson aerosol-aware, WSM3/5/6/7, "
+            "WDM5/6/7) or none of them with cloud, ice and snow all present")
+    if int(getattr(cfg, "icloud", 1)) not in (0, 1, 2, 3):
+        raise ConfigurationRefused(
+            f"swint_opt=2 with icloud={int(cfg.icloud)}: FARMS reads the "
+            "radiation driver's per-step CLDFRA, ported for icloud 0, 1, 2 "
+            "and 3")
+    if int(cfg.aer_opt) not in (0, 1, 2):
+        raise ConfigurationRefused(
+            f"swint_opt=2 with aer_opt={int(cfg.aer_opt)}: FARMS's 2-D "
+            "aerosol is wired for aer_opt 0, 1 and 2; under aer_opt = 3 WRF "
+            "hands it the radiation call's TAOD5502D and the taer_* optics")
+    # The Solar_step's convective cloud additions -- cu_rad_feedback's
+    # ICLOUD_CU (KF's CLDFRA_DP/SH, QC_CU/QI_CU) and shcu_physics = 5 --
+    # feed FARMS as they feed RRTMG (woof.core.cumulus_radiation, held to
+    # WRF's lines by tests/test_cu_rad_feedback_oracle.py); BMJ feedback and
+    # KF-CuP have no woof scheme to come from.
+
+
 def validate_radiation_driver_options(cfg: RunConfig) -> None:
     """Radiation-driver options: the implemented values, by name.
 
@@ -3788,11 +3995,22 @@ def validate_radiation_driver_options(cfg: RunConfig) -> None:
             "radius defaults and snow ice fractions, so an unknown name "
             "cannot select either")
     swint = cfg.swint_opt
-    if isinstance(swint, bool) or swint not in (0, 1):
+    if isinstance(swint, bool) or swint not in (0, 1, 2):
         raise ConfigurationRefused(
             f"swint_opt={swint!r}: WRF defines 0 (hold the radiation call's "
-            "surface shortwave for the interval) and 1 (fit and interpolate "
-            "it on every step); nothing else is a WRF value")
+            "surface shortwave for the interval), 1 (fit and interpolate "
+            "it on every step) and 2 (FARMS on every step); nothing else is "
+            "a WRF value")
+    couple = getattr(cfg, "couple_farms", False)
+    if type(couple) is not bool:
+        raise ConfigurationRefused("couple_farms must be a boolean")
+    if couple and swint != 2:
+        raise ConfigurationRefused(
+            "couple_farms = true requires swint_opt = 2 (WRF "
+            "module_check_a_mundo.F:654-660): it copies FARMS's SWDOWN2 into "
+            "SWDOWN, and without FARMS there is no SWDOWN2")
+    if swint == 2:
+        _validate_farms(cfg)
     aer = cfg.aer_opt
     if isinstance(aer, bool) or aer not in (0, 1, 2, 3):
         raise ConfigurationRefused(
@@ -4412,6 +4630,7 @@ CONFIG_RELATIVE_FILE_KEYS: tuple[str, ...] = (
     "fire_static", "fire_fuel_namelist",
     "ocean_config",
     "windfarm_turbine_file",
+    "stochpert_tbl",
 )
 
 
@@ -5311,9 +5530,9 @@ def constant_k_mixing_active(cfg) -> bool:
 def wrf_mixing_package_active(cfg) -> bool:
     """Whether the dycore builds WRF's once-per-step mixing tendencies.
 
-    km_opt 2/3/4 always; km_opt 1 under :func:`constant_k_mixing_active`.
+    km_opt 2/3/4/5 always; km_opt 1 under :func:`constant_k_mixing_active`.
     """
-    return (int(getattr(cfg, "km_opt", 0)) in (2, 3, 4)
+    return (int(getattr(cfg, "km_opt", 0)) in (2, 3, 4, 5)
             or constant_k_mixing_active(cfg))
 
 
@@ -5421,6 +5640,101 @@ def km_opt_zero_producer(cfg: RunConfig) -> str | None:
     return None
 
 
+#: Surface layers WRF v4.7.1 pairs with km_opt = 5
+#: (share/module_check_a_mundo.F:384-402: nosfcscheme, sfclayrevscheme,
+#: mynnsfcscheme, sfclayscheme).
+SMS3DTKE_SFCLAY_SCHEMES = (0, 1, 5, 91)
+
+
+def validate_sms3dtke(cfg: RunConfig) -> None:
+    """Admission for ``km_opt = 5`` (SMS-3DTKE), WRF v4.7.1's rules first.
+
+    WRF's check_a_mundo refuses km_opt = 5 with diff_opt != 2
+    (module_check_a_mundo.F:341-353), with bl_pbl_physics != 0 (:356-368:
+    the closure IS the column's vertical mixing at every grid spacing, so a
+    PBL scheme would double it), with a surface layer other than 0, 1, 5
+    or 91 (:384-402), and with cu_physics = 11, multi-scale Kain-Fritsch
+    (:1366-1382).  woof refuses four more, each for a stated reason.
+    """
+    if cfg.diff_opt != 2:
+        raise ConfigurationRefused(
+            f"km_opt=5 (SMS-3DTKE) works only with diff_opt=2, got "
+            f"diff_opt={cfg.diff_opt}: WRF v4.7.1 refuses the pair "
+            "(share/module_check_a_mundo.F:341-353, 'SMS-3DTKE scheme can "
+            "only work with diff_opt=2'). Set diff_opt=2.")
+    if cfg.bl_pbl_physics != 0:
+        raise ConfigurationRefused(
+            f"km_opt=5 (SMS-3DTKE) works only with bl_pbl_physics=0, got "
+            f"bl_pbl_physics={cfg.bl_pbl_physics}: WRF v4.7.1 refuses the "
+            "pair (share/module_check_a_mundo.F:356-368). The closure is "
+            "itself the column's vertical mixing at every grid spacing -- "
+            "its nonlocal heat flux, mesoscale length scale and implicit "
+            "vertical diffusion replace the PBL scheme -- so running a PBL "
+            "scheme too would mix the column twice. Set bl_pbl_physics=0.")
+    if cfg.sf_sfclay_physics not in SMS3DTKE_SFCLAY_SCHEMES:
+        raise ConfigurationRefused(
+            f"km_opt=5 (SMS-3DTKE) works with sf_sfclay_physics = 0, 1, 5 "
+            f"or 91, got {cfg.sf_sfclay_physics}: WRF v4.7.1 refuses any "
+            "other surface layer (share/module_check_a_mundo.F:384-402); "
+            "the closure reads the bulk Richardson number, u*, 1/L and the "
+            "10 m wind speed those four write. Select sf_sfclay_physics=1 "
+            "(revised MM5), 91 (classic MM5), 5 (MYNN) or 0.")
+    if cfg.cu_physics == 11:
+        raise ConfigurationRefused(
+            "cu_physics=11 (multi-scale Kain-Fritsch) cannot run with "
+            "km_opt=5 (SMS-3DTKE): WRF v4.7.1 refuses the pair "
+            "(share/module_check_a_mundo.F:1366-1382).")
+    if cfg.open_x or cfg.open_y:
+        raise ConfigurationRefused(
+            "km_opt=5 (SMS-3DTKE) is admitted with periodic, specified or "
+            "nested lateral boundaries, not radiative open ones: WRF "
+            "v4.7.1 gives km_opt=5's TKE no physical boundary condition "
+            "(solve_em.F:3332 applies set_physical_bc3d to tke for "
+            "km_opt=2 only), so at an open boundary its TKE halo keeps "
+            "whatever the previous step left there, which woof does not "
+            "carry. Use periodic or specified boundaries, or km_opt=2.")
+    if getattr(cfg, "tke_mix2_off", False):
+        raise ConfigurationRefused(
+            "tke_mix2_off is set with km_opt=5 (SMS-3DTKE), where it takes "
+            "no effect: WRF v4.7.1 diffuses km_opt=5's TKE horizontally "
+            "whatever tke_mix2_off says (module_diffusion_em.F:3020-3021). "
+            "Remove tke_mix2_off.")
+    if cfg.mix_isotropic != 0:
+        raise ConfigurationRefused(
+            f"mix_isotropic={cfg.mix_isotropic} is set with km_opt=5 "
+            "(SMS-3DTKE), where it takes no effect: WRF v4.7.1's km_opt=5 "
+            "branch of tke_km and its dissipation length read no "
+            "mix_isotropic (module_diffusion_em.F:2253-2333, :6512-6520); "
+            "the horizontal and vertical lengths are always separate. "
+            "Set mix_isotropic=0.")
+    if int(getattr(cfg, "use_theta_m", 0)):
+        raise ConfigurationRefused(
+            "km_opt=5 (SMS-3DTKE) with use_theta_m=1 is not ported: WRF's "
+            "km_opt=5 path then forms th_phy as the dry theta of the moist "
+            "carrier and adds the moist qfac and 1.61*theta*QFX terms to "
+            "its implicit heat solve (module_diffusion_em.F:8090-8116), and "
+            "woof's km_opt=5 operands and its WRF v4.7.1 oracle cover "
+            "use_theta_m=0 only. Set use_theta_m=0.")
+    if int(getattr(cfg, "tke_budget", 0)):
+        raise ConfigurationRefused(
+            "tke_budget is a km_opt=2 receipt: its terms are the km_opt=2 "
+            "tke_rhs pieces (shear, buoyancy, dissipation, limiter), and "
+            "km_opt=5 moves the dissipation into the implicit vertical "
+            "solve, where no separate term exists to export. Set "
+            "tke_budget=0 with km_opt=5.")
+    if (cfg.sf_sfclay_physics == 0 and cfg.isfflx in (0, 2)
+            and cfg.tke_heat_flux > 0.0):
+        raise ConfigurationRefused(
+            f"km_opt=5 (SMS-3DTKE) with sf_sfclay_physics=0 and a positive "
+            f"prescribed tke_heat_flux={cfg.tke_heat_flux} (isfflx="
+            f"{cfg.isfflx}) is refused: with no surface layer u* is WRF's "
+            "never-written zero, and nonlocal_flux's convective column then "
+            "forms its momentum gamma as 0/0 (module_diffusion_em.F:5150-"
+            "5153, brint = -sm*u*^2*w*^3/(zi*wscale^4) with wscale = 0), "
+            "which turns u and v into NaN. Select a surface layer "
+            "(sf_sfclay_physics=1, 5 or 91), or a zero tke_heat_flux.")
+
+
 def validate_km_opt(cfg: RunConfig) -> None:
     """Admission for ``km_opt``, shared by the loaders and the dycore.
 
@@ -5466,15 +5780,16 @@ def validate_km_opt(cfg: RunConfig) -> None:
             f"km_opt_zero_acknowledgement = {KM_OPT_ZERO_ACK!r}. It is a "
             "literal id and not a boolean so that it cannot be reached "
             "by a stray `= true`.")
-    if cfg.km_opt not in (0, 1, 2, 3, 4):
+    if cfg.km_opt not in (0, 1, 2, 3, 4, 5):
         # Checked BEFORE the acknowledgement's placement, so an
         # unimplemented selector reports itself rather than reporting
         # that the acknowledgement is in the wrong place: the id opens
         # km_opt = 0 and nothing else, and cannot shadow this.
         raise ConfigurationRefused(
             f"km_opt must be 1 (constant K via khdif/kvdif), 2 (1.5-order "
-            f"prognostic TKE), 3 (3-D Smagorinsky), or 4 "
-            f"(2-D Smagorinsky), got {cfg.km_opt}. 0 is admitted with "
+            f"prognostic TKE), 3 (3-D Smagorinsky), 4 (2-D Smagorinsky) "
+            f"or 5 (SMS-3DTKE scale-adaptive TKE), got {cfg.km_opt}. "
+            f"0 is admitted with "
             f"bl_pbl_physics={SASE_PBL_SCHEME} (SASE), whose closure "
             "supplies the mixing the km_opt operator would otherwise "
             f"apply, or with km_opt_zero_acknowledgement = "
@@ -5593,6 +5908,9 @@ def validate_km_opt(cfg: RunConfig) -> None:
     # door stays exact if either refusal retires.  The
     # engine's own idealized cases (``woof verify``) run fixed
     # configurations with mix_full_fields = true and take no override.
+    if cfg.km_opt == 5:
+        validate_sms3dtke(cfg)
+        return
     if cfg.km_opt in (1, 2, 3, 4):
         return
     if producer is None and ack != KM_OPT_ZERO_ACK:
@@ -6588,6 +6906,229 @@ def validate_seaice_parameters(cfg):
         raise ValueError("seaice_ocean_heat_flux must be finite, positive into ice")
 
 
+#: WRF's shallow-cumulus selector values (Registry.EM_COMMON:3227-3232) and
+#: the one woof runs.
+SHCU_SCHEMES = (0, 5)
+DENG_SHCU_PHYSICS = 5
+#: The PBL schemes whose TKE/EXCH_H/EL_PBL Deng reads
+#: (module_shallowcu_driver.F:605-630); anything else is wrf_error_fatal.
+DENG_PBL_SCHEMES = (2, 5)
+#: Cumulus schemes sharing WRF's one W0AVG array with Deng: Kain-Fritsch
+#: advances it on its own due steps (module_cu_kfeta.F:218-251) and Deng
+#: every step (module_shcu_deng.F:133-153).  woof hands Deng KF's array.
+DENG_SHARED_W0AVG_CU = frozenset({1})
+
+
+def shcu_refusal(cfg) -> str | None:
+    """Why this configuration cannot run its ``shcu_physics``, or None."""
+    shcu = getattr(cfg, "shcu_physics", 0)
+    if isinstance(shcu, bool) or not isinstance(shcu, int):
+        return "shcu_physics must be an integer"
+    if shcu == 0:
+        return None
+    if shcu not in SHCU_SCHEMES:
+        return (f"shcu_physics={shcu} is not ported: woof runs 0 (off) and 5 "
+                "(Deng, WRF-Solar); WRF's 1 (G3 shallow), 2 (UW), 3 (GRIMS) "
+                "and 4 (NSCV) have no separate port (the shallow arms inside "
+                "Grell-Freitas, Grell 3D and New SAS do run)")
+    if int(cfg.bl_pbl_physics) not in DENG_PBL_SCHEMES:
+        return ("shcu_physics=5 (Deng) reads the PBL scheme's TKE, EXCH_H and "
+                "EL_PBL, which WRF takes from MYJ (bl_pbl_physics=2) or MYNN "
+                "(5) only and stops on any other PBL "
+                f"(module_shallowcu_driver.F:605-630); got bl_pbl_physics="
+                f"{cfg.bl_pbl_physics}")
+    if not cfg.moist or int(cfg.mp_physics) == 0:
+        return ("shcu_physics=5 (Deng) reads QC and QR and writes their "
+                "tendencies (module_first_rk_step_part1.F:1596-1598); it needs "
+                "a microphysics scheme with cloud water and rain")
+    lw, sw = radiation_scheme_ids(cfg)
+    if (int(lw), int(sw)) != (4, 4):
+        return ("shcu_physics=5 (Deng) reads RRTMG's longwave and shortwave "
+                "heating (RTHRATENLW/SW) and the radiation calendar (XLONG, "
+                "GMT), and hands its shallow cloud back to the radiation "
+                "(module_radiation_driver.F:1566-1575), which woof wires for "
+                "RRTMG (ra_lw_physics = ra_sw_physics = 4, either "
+                f"ra_rrtmg_variant) only; got {lw}/{sw}")
+    if getattr(cfg, "use_adaptive_time_step", False):
+        return ("shcu_physics=5 (Deng) with an adaptive time step is not "
+                "graded: the time averages take ADAPT_STEP_FLAG's DT-weighted "
+                "form, held to WRF by the column oracle, but the driver's "
+                "step clock for it is not wired")
+    return None
+
+
+#: The cumulus schemes whose cloud woof hands radiation under
+#: ``cu_rad_feedback`` (ICLOUD_CU, module_physics_init.F:1103-1118).
+CU_RAD_FEEDBACK_SCHEMES = frozenset({1, 3, 5})
+
+
+def cu_rad_feedback_refusal(cfg) -> str | None:
+    """Why this configuration cannot run its ``cu_rad_feedback``, or None."""
+    value = getattr(cfg, "cu_rad_feedback", False)
+    if type(value) is not bool:
+        return "cu_rad_feedback must be boolean"
+    if not value:
+        return None
+    if int(cfg.cu_physics) not in CU_RAD_FEEDBACK_SCHEMES:
+        return (f"cu_rad_feedback with cu_physics={cfg.cu_physics}: WRF "
+                "derives ICLOUD_CU for Kain-Fritsch (1), Grell-Freitas (3) "
+                "and Grell 3D (5) among woof's schemes "
+                "(module_physics_init.F:1103-1118); woof hands radiation the "
+                f"cloud of cu_physics in {sorted(CU_RAD_FEEDBACK_SCHEMES)}")
+    lw, sw = radiation_scheme_ids(cfg)
+    if (int(lw), int(sw)) != (4, 4):
+        return ("cu_rad_feedback hands the cumulus cloud to radiation, which "
+                "woof wires for RRTMG (ra_lw_physics = ra_sw_physics = 4) "
+                f"only; got {lw}/{sw}")
+    if int(cfg.cu_physics) in (3, 5) and int(cfg.cu_diag) != 1:
+        return ("cu_rad_feedback beside Grell-Freitas or Grell 3D reads "
+                "convtrans_prep's time-averaged QC_CU/QI_CU, so it needs "
+                "cu_diag = 1, which WRF sets itself (module_check_a_mundo: "
+                "'Turning on cu_rad_feedback also requires setting "
+                "cu_diag== 1')")
+    return None
+
+
+#: The WRF-Solar EPS keys (RunConfig names = WRF &stoch names).
+MULTI_PERTURB_SWITCHES = ("pert_farms", "pert_deng", "pert_thom", "pert_cld3")
+MULTI_PERTURB_FACTORS = (
+    "pert_farms_albedo", "pert_farms_aod", "pert_farms_angexp",
+    "pert_farms_aerasy", "pert_farms_qv", "pert_farms_qc", "pert_farms_qs",
+    "pert_deng_qv", "pert_deng_qc", "pert_deng_t", "pert_deng_w",
+    "pert_thom_qv", "pert_thom_qc", "pert_thom_qi", "pert_thom_qs",
+    "pert_thom_ni", "pert_cld3_qv", "pert_cld3_t")
+#: Absent = WRF's Registry default; the checkpoint echo drops them there.
+#: In RunConfig's field order (each switch before its factors).
+MULTI_PERTURB_RUN_DEFAULTS = {
+    "multi_perturb": 0,
+    "pert_farms": False, **{k: 0.0 for k in MULTI_PERTURB_FACTORS if k.startswith("pert_farms_")},
+    "pert_deng": False, **{k: 0.0 for k in MULTI_PERTURB_FACTORS if k.startswith("pert_deng_")},
+    "pert_thom": False, **{k: 0.0 for k in MULTI_PERTURB_FACTORS if k.startswith("pert_thom_")},
+    "pert_cld3": False, **{k: 0.0 for k in MULTI_PERTURB_FACTORS if k.startswith("pert_cld3_")},
+    "spdt": -1.0, "num_pert_3d": 15, "nens": 1, "stochpert_tbl": ""}
+
+
+#: MAD-WRF's keys at their Registry defaults (the checkpoint echo drops them
+#: there).
+MADWRF_RUN_DEFAULTS = {"madwrf_opt": 0, "madwrf_dt_relax": 60.0,
+                       "madwrf_dt_nudge": 60.0, "madwrf_cldinit": 0}
+
+
+def madwrf_refusal(cfg) -> str | None:
+    """Why this configuration cannot run its MAD-WRF keys, or None."""
+    opt = getattr(cfg, "madwrf_opt", 0)
+    if isinstance(opt, bool) or opt not in (0, 1, 2):
+        return "madwrf_opt must be 0 (off), 1 or 2"
+    init = getattr(cfg, "madwrf_cldinit", 0)
+    if isinstance(init, bool) or init not in (0, 1):
+        return "madwrf_cldinit must be 0 or 1"
+    for key in ("madwrf_dt_relax", "madwrf_dt_nudge"):
+        value = getattr(cfg, key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) \
+                or not math.isfinite(value):
+            return f"{key} must be a finite real"
+    if opt == 1 and (int(cfg.mp_physics) != 96 or int(getattr(cfg, "use_mp_re", 1)) != 0):
+        return ("madwrf_opt = 1 requires mp_physics = 96 and use_mp_re = 0 "
+                "(WRF's '--- ERROR: madwrf_opt = 1 requires mp_physics=96 and "
+                "use_mp_re=0', module_check_a_mundo.F:375-381); got "
+                f"mp_physics = {cfg.mp_physics}, use_mp_re = "
+                f"{getattr(cfg, 'use_mp_re', 1)}")
+    if opt == 2:
+        from woof.core.rrtmg_legacy import legacy_cloud_fraction_flags
+        try:
+            f_qi, f_qs = legacy_cloud_fraction_flags(int(cfg.mp_physics))
+        except (NotImplementedError, ValueError, KeyError):
+            f_qi = f_qs = False
+        if not cfg.moist or int(cfg.mp_physics) == 0 or not (f_qi and f_qs):
+            return ("madwrf_opt = 2 nudges qc, qi and qs toward their tracers "
+                    "and needs a microphysics scheme carrying all three "
+                    "(WRF stops: 'madwrf_opt = 2 requires a mp_physics option "
+                    f"with qc, qi, and qs', module_physics_init.F:4693); got "
+                    f"mp_physics = {cfg.mp_physics}")
+        if not float(cfg.madwrf_dt_relax) > 0.0:
+            return "madwrf_dt_relax must be positive (the nudge divides by it)"
+    if init == 1:
+        from woof.core.rrtmg_legacy import legacy_cloud_fraction_flags
+        try:
+            f_qi, f_qs = legacy_cloud_fraction_flags(int(cfg.mp_physics))
+        except (NotImplementedError, ValueError, KeyError):
+            f_qi = f_qs = False
+        if not cfg.moist or int(cfg.mp_physics) == 0 or not (f_qi and f_qs):
+            return ("madwrf_cldinit = 1 rewrites moist(P_QV, P_QC, P_QI, "
+                    "P_QS) at the start (module_initialize_real.F:4861); woof "
+                    "runs it for schemes carrying qc, qi and qs; got "
+                    f"mp_physics = {cfg.mp_physics}")
+    return None
+
+
+def multi_perturb_refusal(cfg) -> str | None:
+    """Why this configuration cannot run its WRF-Solar EPS keys, or None."""
+    mp = getattr(cfg, "multi_perturb", 0)
+    if isinstance(mp, bool) or mp not in (0, 1):
+        return "multi_perturb must be 0 or 1"
+    for key in MULTI_PERTURB_SWITCHES:
+        if type(getattr(cfg, key)) is not bool:
+            return f"{key} must be boolean"
+    for key in (*MULTI_PERTURB_FACTORS, "spdt"):
+        value = getattr(cfg, key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) \
+                or not math.isfinite(value):
+            return f"{key} must be a finite real"
+    for key in ("num_pert_3d", "nens"):
+        value = getattr(cfg, key)
+        if isinstance(value, bool) or not isinstance(value, int):
+            return f"{key} must be an integer"
+    if not isinstance(cfg.stochpert_tbl, str):
+        return "stochpert_tbl must name a STOCHPERT.TBL (\"\" for WRF's)"
+    if mp == 0:
+        on = [k for k in MULTI_PERTURB_SWITCHES if getattr(cfg, k)]
+        if on:
+            return (f"{', '.join(on)} without multi_perturb = 1 does nothing "
+                    "in WRF (each driver tests 'pert_<scheme> .and. "
+                    "multi_perturb == 1'); set multi_perturb = 1 or remove it")
+        return None
+    if getattr(cfg, "use_adaptive_time_step", False):
+        return ("multi_perturb = 1 with use_adaptive_time_step: WRF stops "
+                "('multi_perturb and adpative time step are not compatible', "
+                "module_check_a_mundo.F:328-337)")
+    if not any(getattr(cfg, k) for k in MULTI_PERTURB_SWITCHES):
+        return ("multi_perturb = 1 with every pert_<scheme> switch off: WRF "
+                "only writes the perturbation fields to history, which woof "
+                "does not; switch on pert_farms, pert_deng, pert_thom or "
+                "pert_cld3")
+    if cfg.pert_farms and int(cfg.swint_opt) != 2:
+        return ("pert_farms perturbs FARMS's inputs (module_radiation_driver.F"
+                f":3052-3082); it needs swint_opt = 2, got {cfg.swint_opt}")
+    if cfg.pert_deng and int(getattr(cfg, "shcu_physics", 0)) != 5:
+        return ("pert_deng perturbs Deng's inputs (module_shallowcu_driver.F"
+                ":632-672); it needs shcu_physics = 5")
+    if cfg.pert_thom and int(cfg.mp_physics) not in (8, 28):
+        return ("pert_thom perturbs Thompson's inputs (module_microphysics_"
+                "driver.F:1120-1213, :1314-1381, mp_physics 28 and 8); got "
+                f"mp_physics = {cfg.mp_physics}")
+    if cfg.pert_cld3 and int(cfg.icloud) != 3:
+        return ("pert_cld3 perturbs cal_cldfra3's t and qv "
+                "(module_radiation_driver.F:1472-1474); it needs icloud = 3, "
+                f"got {cfg.icloud}")
+    from woof.core.wrfsolar_eps import (StochpertTableError,
+                                        load_stochpert_table)
+    try:
+        load_stochpert_table(cfg.stochpert_tbl, num_pert_3d=int(cfg.num_pert_3d))
+    except (StochpertTableError, OSError) as problem:
+        return f"stochpert_tbl {cfg.stochpert_tbl!r}: {problem}"
+    if min(int(cfg.nx) + 1, int(cfg.ny) + 1) // 2 - 5 < 1:
+        return ("multi_perturb = 1 needs at least 12 staggered points each "
+                "way: SETUP_RAND_PERTURB forces wavenumbers up to "
+                "min(LMAX, KMAX)/2 - 5 (module_stoch.F:607), and with none "
+                "its normalization divides by zero; got "
+                f"{int(cfg.nx) + 1} x {int(cfg.ny) + 1}")
+    if float(cfg.dt) < 1.0:
+        return ("multi_perturb = 1 needs a time step of at least 1 s: "
+                "SETUP_RAND_PERTURB's AR(1) step is stepsp*time_step, the "
+                "integer namelist seconds")
+    return None
+
+
 def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> RunConfig:
     """The RunConfig invariant battery, shared by BOTH loaders.
 
@@ -6612,6 +7153,56 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
         raise ValueError("ocean_config requires an active surface layer to supply 10m winds and friction velocity")
     if type(cfg.surface_energy_diag) is not bool:
         raise ConfigurationRefused("surface_energy_diag must be boolean")
+    deng_why = shcu_refusal(cfg)
+    if deng_why is not None:
+        raise ConfigurationRefused(deng_why)
+    from woof.core.theta_m import refusal as theta_m_refusal
+    theta_m_why = theta_m_refusal(cfg)
+    if theta_m_why is not None:
+        raise ConfigurationRefused(theta_m_why)
+    from woof.core.avgflx import refusal as avgflx_refusal
+    avgflx_why = avgflx_refusal(cfg)
+    if avgflx_why is not None:
+        raise ConfigurationRefused(avgflx_why)
+    feedback_why = cu_rad_feedback_refusal(cfg)
+    if feedback_why is not None:
+        raise ConfigurationRefused(feedback_why)
+    if type(cfg.solar_diagnostics) is not int or cfg.solar_diagnostics not in (0, 1):
+        raise ConfigurationRefused("solar_diagnostics must be 0 or 1")
+    eps_why = multi_perturb_refusal(cfg)
+    if eps_why is not None:
+        raise ConfigurationRefused(eps_why)
+    madwrf_why = madwrf_refusal(cfg)
+    if madwrf_why is not None:
+        raise ConfigurationRefused(madwrf_why)
+    if cfg.solar_diagnostics:
+        _lw_scheme, _sw_scheme = radiation_scheme_ids(cfg)
+        if int(_sw_scheme) != 4:
+            raise ConfigurationRefused(
+                "solar_diagnostics = 1 needs the RRTMG shortwave "
+                "(ra_sw_physics = 4): WRF-Solar's clearness index and GHI "
+                "read RRTMG's SWDNB/SWDNT, and its per-step cloud "
+                "evaluation is the RRTMG drivers' (legacy RRTMG or "
+                f"RTE+RRTMGP); got ra_sw_physics = {_sw_scheme}")
+    if cfg.rrtmg_spectral_output not in ("none", "bands", "gpoints"):
+        raise ConfigurationRefused("rrtmg_spectral_output must be \"none\", \"bands\" or \"gpoints\"")
+    if cfg.rrtmg_spectral_output != "none":
+        lw_scheme, sw_scheme = radiation_scheme_ids(cfg)
+        if cfg.ra_rrtmg_variant != RRTMG_VARIANT_LEGACY or 4 not in (int(lw_scheme), int(sw_scheme)):
+            raise ConfigurationRefused(
+                "rrtmg_spectral_output needs legacy RRTMG radiation (ra_lw_physics or "
+                "ra_sw_physics = 4 with ra_rrtmg_variant = \"rrtmg_legacy\"); RTE+RRTMGP's "
+                "band output is not wired yet")
+    if cfg.radtran_wavelengths:
+        from woof.radtran.model import diagnostic_from_config, validate as _radtran_validate
+        try:
+            _radtran_validate(diagnostic_from_config(cfg))
+        except (TypeError, ValueError) as exc:
+            raise ConfigurationRefused(f"radtran: {exc}") from None
+        if cfg.radtran_aerosol == "thompson" and cfg.mp_physics != 28:
+            raise ConfigurationRefused(
+                "radtran_aerosol = \"thompson\" reads the aerosol-aware Thompson microphysics' "
+                f"nwfa/nifa (mp_physics = 28); this run has mp_physics = {cfg.mp_physics}")
     why = terrain_drag_refusal(
         topo_wind=cfg.topo_wind, gwd_opt=cfg.gwd_opt,
         bl_pbl_physics=cfg.bl_pbl_physics,
@@ -6781,7 +7372,7 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
     # arms as km_opt 2-4 (constant_k_mixing_active), so it consumes the
     # prescribed forcing too.
     _prescribed_flux_consumer = cfg.bl_pbl_physics == 0 and (
-        cfg.km_opt in (2, 3, 4) or constant_k_mixing_active(cfg))
+        cfg.km_opt in (2, 3, 4, 5) or constant_k_mixing_active(cfg))
     if cfg.isfflx == 0 and cfg.sf_sfclay_physics == 0 \
             and not _prescribed_flux_consumer:
         raise ConfigurationRefused(
@@ -6965,9 +7556,26 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
                 or cfg.convtrans_avglen_m * 60. < cfg.dt):
             raise ConfigurationRefused("convtrans_avglen_m must span at least one model step: "
                              "convtrans_prep would evaluate MOD(ktau,0)")
+    elif cfg.cu_physics == GRELL_FREITAS_CU_PHYSICS and any(
+            getattr(cfg, name) != default for name, default in
+            G3_RUN_DEFAULTS.items()
+            if name not in ("cugd_avedx", "cu_diag", "convtrans_avglen_m")):
+        raise ConfigurationRefused("G3 ensemble dimensions are read only by cu_physics=5; "
+                         "Grell-Freitas would discard the requested ensemble")
+    elif cfg.cu_physics == GRELL_FREITAS_CU_PHYSICS:
+        # convtrans_prep runs after GFDRV as after G3DRV (module_check_a_mundo
+        # admits cu_diag = 1 for both; module_convtrans_prep.F reads GD_CLOUD
+        # for cu_phys 3 and 5 alike), so cu_diag is GF's too.
+        if type(cfg.cu_diag) is not int or cfg.cu_diag not in (0, 1):
+            raise ConfigurationRefused("cu_diag must be 0 or 1")
+        if (not math.isfinite(cfg.convtrans_avglen_m)
+                or cfg.convtrans_avglen_m * 60. < cfg.dt):
+            raise ConfigurationRefused("convtrans_avglen_m must span at least one model step: "
+                             "convtrans_prep would evaluate MOD(ktau,0)")
     elif any(getattr(cfg, name) != default for name, default in
              G3_RUN_DEFAULTS.items() if name != "cugd_avedx"):
-        raise ConfigurationRefused("G3 ensemble dimensions and cu_diag are read only by cu_physics=5; "
+        raise ConfigurationRefused("G3 ensemble dimensions and cu_diag are read only by cu_physics=5 "
+                         "(and cu_diag by cu_physics=3); "
                          "other schemes would discard the requested ensemble or diagnostic window")
     if cfg.cu_physics in GRELL_FAMILY_CU_PHYSICS:
         if cfg.cu_physics == GRELL_FREITAS_CU_PHYSICS and not cfg.bl_pbl_physics:
@@ -7500,8 +8108,23 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
             "ra_sw_physics must be 0 (off), 1 (WRF Dudhia), 4 "
             "(RTE+RRTMGP), 5 (WRF New Goddard) or 90 (analytic proxy), "
             f"got {ra_sw_physics}." + (f" {why}." if why else ""))
-    if cfg.icloud not in (0, 1, 2):
-        raise ConfigurationRefused(f"icloud={cfg.icloud} needs unported cal_cldfra3 condensate adjustment; choose 0, 1 or 2.")
+    if cfg.icloud not in (0, 1, 2, 3):
+        raise ConfigurationRefused(f"icloud must be 0, 1, 2 or 3, got {cfg.icloud}.")
+    if cfg.icloud == 3:
+        # WRF-Solar cal_cldfra3 (woof/core/cldfra3.py), wired into the
+        # RRTMG drivers (legacy RRTMG and RTE+RRTMGP).  WRF stops without
+        # both QC and QI (module_radiation_driver.F:1507): mp 0, 1 and 3
+        # carry no qi (Registry.EM_COMMON passiveqv/kessler/wsm3 packages).
+        if {ra_lw_physics, ra_sw_physics} - {0, 4}:
+            raise ConfigurationRefused(
+                "icloud=3 (WRF-Solar cal_cldfra3) is ported for "
+                "ra_lw_physics/ra_sw_physics = 4 (RRTMG) only, got "
+                f"{ra_lw_physics}/{ra_sw_physics}.")
+        if cfg.mp_physics in (0, 1, 3):
+            raise ConfigurationRefused(
+                "icloud=3 needs a microphysics scheme with both qc and qi "
+                f"(WRF: 'Can not use icloud = 3 option, missing QC or QI "
+                f"field'); mp_physics={cfg.mp_physics} has no qi.")
     if not math.isfinite(cfg.swrad_scat) or cfg.swrad_scat < 0.0:
         raise ConfigurationRefused(
             "swrad_scat must be finite and non-negative, got "
@@ -7636,7 +8259,7 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
             f"ra_rrtmg_variant='{RRTMG_VARIANT_LEGACY}' to run the legacy "
             "port, or wrf_rrtmg_compatibility='none' to run RTE+RRTMGP "
             "without a WRF mapping receipt.")
-    if 4 in (ra_lw_physics, ra_sw_physics) and cfg.icloud not in (1, 2):
+    if 4 in (ra_lw_physics, ra_sw_physics) and cfg.icloud not in (1, 2, 3):
         # NOT A PHYSICAL INCOMPATIBILITY: icloud is WRF's clear-sky coupling
         # switch, woof honours it on the 1/1 pair, and the legacy 4/4
         # preparation carries its arms.  What is missing on the 4/4 pair is
@@ -7657,7 +8280,7 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
             "both arms AND recording one longwave and one shortwave oracle "
             "case at icloud=0. Run clear-sky coupling on the 1/1 pair "
             "(ra_lw_physics=1 WRF RRTM with ra_sw_physics=1 Dudhia), which "
-            "honours icloud=0 end to end, or use icloud=1 or 2 on the 4/4 "
+            "honours icloud=0 end to end, or use icloud=1, 2 or 3 on the 4/4 "
             "pair.")
     if cfg.cu_physics not in CU_SCHEMES:
         raise ConfigurationRefused(

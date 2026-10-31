@@ -134,6 +134,10 @@ CUMULUS_OPTIONS = (0, 1, 3, 5, 6, 16, 96)
 #: transcription's silence means, which is what stops the next reader from
 #: mistaking absence for illegality.
 AXIS_EXCLUSIONS = MappingProxyType({
+    ("mp_physics", 96): (
+        "MAD-WRF's passive hydrometeors (madwrf_mp) are a WRF v4.7.1 package "
+        "with no microphysical process; this matrix transcribes WRF v4.6.1 "
+        "and WRF has no pairing law for mp_physics=96 to transcribe."),
     ("mp_physics", 900): (
         "TEMPO is a WOOF named scheme (woof.microphysics_schemes, id 900, "
         "outside WRF's mp_physics range): WRF v4.6.1 has no TEMPO option, so "

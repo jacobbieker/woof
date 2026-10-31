@@ -31,6 +31,7 @@ from woof.namelist_import import (
     ignored_time_control_reason,
     read_namelist_role,
     theta_m_decision,
+    theta_m_unwired,
 )
 from woof.vertical_contract import validate_explicit_eta_grid
 from woof.wrf_physics_inventory import stock_wrf_physics_inventory
@@ -796,11 +797,14 @@ def analyze_namelists(
             )
         elif moist_theta:
             # The SAME answer woof.namelist_import gives for the same
-            # namelist, from the same function: a declared divergence the
-            # reader is told about, not a runtime FAIL.  This door used to
-            # FAIL the gpuwm_runtime verdict for a pair the importer
+            # namelist, from the same function: honoured where the theta_m
+            # branch is wired for this physics, else a declared divergence
+            # the reader is told about, not a runtime FAIL.  This door used
+            # to FAIL the gpuwm_runtime verdict for a pair the importer
             # accepts and announces -- one configuration, two answers.
-            decision = theta_m_decision(1)
+            decision = theta_m_decision(
+                1, unwired=theta_m_unwired(inp, max_dom))
+        if moist_theta and not undefined_theta and decision.substituted:
             issues.append(_issue(
                 "THETA_M_DRY_SUBSTITUTION", "&dynamics/use_theta_m",
                 f"&dynamics/use_theta_m {declaration}; domains "

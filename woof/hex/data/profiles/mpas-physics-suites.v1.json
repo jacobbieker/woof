@@ -1887,6 +1887,54 @@
       }
     },
     "backend_namelist_group": "hex_mpasphys",
+    "registry_groups": {
+      "radiation": [
+        "config_rrtmg_spectral_output"
+      ],
+      "radtran": [
+        "config_radtran_wavelengths",
+        "config_radtran_umu",
+        "config_radtran_phi",
+        "config_radtran_mol_abs_param",
+        "config_radtran_solver",
+        "config_radtran_streams",
+        "config_radtran_pseudospherical",
+        "config_radtran_aerosol"
+      ],
+      "diagnostics": [
+        "config_solar_diagnostics"
+      ],
+      "wrfsolar_eps": [
+        "config_multi_perturb",
+        "config_pert_farms",
+        "config_pert_deng",
+        "config_pert_thom",
+        "config_pert_cld3",
+        "config_pert_farms_albedo",
+        "config_pert_farms_aod",
+        "config_pert_farms_angexp",
+        "config_pert_farms_aerasy",
+        "config_pert_farms_qv",
+        "config_pert_farms_qc",
+        "config_pert_farms_qs",
+        "config_pert_deng_qv",
+        "config_pert_deng_qc",
+        "config_pert_deng_t",
+        "config_pert_deng_w",
+        "config_pert_thom_qv",
+        "config_pert_thom_qc",
+        "config_pert_thom_qi",
+        "config_pert_thom_qs",
+        "config_pert_thom_ni",
+        "config_pert_cld3_qv",
+        "config_pert_cld3_t",
+        "config_spdt",
+        "config_num_pert_3d",
+        "config_nens",
+        "config_stochpert_tbl",
+        "config_multi_perturb_degree"
+      ]
+    },
     "services": {
       "surface_update": {
         "backend_selector": "config_surface_update_backend",
@@ -1904,6 +1952,44 @@
           "update_radiation_diagnostics",
           "update_convection_step2"
         ]
+      },
+      "farms_sw": {
+        "backend_selector": "config_farms_sw_backend",
+        "default_backend": "off",
+        "backends": [
+          "off",
+          "hex-cuda"
+        ],
+        "module": "woof.hex.mpasphys.farms_v842",
+        "operations": [
+          "farms_sw"
+        ],
+        "woof_only": "WRF-Solar FARMS (WRF swint_opt = 2, phys/module_ra_farms.F v4.7.1): every step after the radiation slots, overwrites diag_physics swdnb/swddir/swddni/swddif; MPAS v8.4.2 has no FARMS"
+      },
+      "shcu_deng": {
+        "backend_selector": "config_shcu_deng_backend",
+        "default_backend": "off",
+        "backends": [
+          "off",
+          "hex-cuda"
+        ],
+        "module": "woof.hex.mpasphys.shcu_deng_v842",
+        "operations": [
+          "shcu_deng",
+          "shcu_deng_tend"
+        ],
+        "woof_only": "WRF-Solar Deng shallow cumulus (WRF shcu_physics = 5, phys/module_shcu_deng.F v4.7.1): every step after the convection block; its tendencies join physics_get_tend's sources; its cloud (CLDFRA_SH, CW_RAD) joins the radiation's in the hex-cuda cloudiness slot; MPAS v8.4.2 has no shallow-convection scheme"
+      },
+      "cu_rad_feedback": {
+        "backend_selector": "config_cu_rad_feedback_backend",
+        "default_backend": "off",
+        "backends": [
+          "off",
+          "hex-cuda"
+        ],
+        "module": "woof.hex.mpasphys.shcu_deng_v842",
+        "operations": [],
+        "woof_only": "WRF cu_rad_feedback, ICLOUD_CU = 1 (module_radiation_driver.F:1264-1281) for cu_grell_freitas: qc_cu/qi_cu added to the cloudiness slot's condensate before the cloud fraction; MPAS v8.4.2 radiation reads no convective cloud"
       }
     }
   },

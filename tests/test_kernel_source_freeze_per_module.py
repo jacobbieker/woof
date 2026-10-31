@@ -229,6 +229,38 @@ BASELINE_PINNED: dict[str, str] = {
     # one.  Under ice it carries the ice owner's heat and keeps entrained
     # polar water at or above freezing.  Previously 969bc568.
     "oml": "ce97181b17e72439ceb7cab26a9e088013669bb94e42b786b1b14293e4241728",
+    # WRF-Solar cloud fraction (icloud = 3): WRF v4.7.1 cal_cldfra3 and its
+    # helpers, 500 columns equal word for word to the gfortran -O0 / glibc
+    # 2.43 record (tests/test_cldfra3_wrf471_oracle.py) on Metal and CUDA.
+    "cldfra3": "8ed60f16c949aaa68cf08f4b8735d1002493808466963f05c0b55479bef021d0",
+    # WRF-Solar diagnostics (solar_diagnostics = 1): WRF v4.7.1 solar_diag,
+    # 432 WRF- and MPAS-shaped columns x 26 outputs equal word for word to the
+    # gfortran -O0 / glibc 2.43 record (tests/test_solar_diag_wrf471_oracle.py)
+    # on Metal and CUDA.
+    "solar_diag": "20ab14d004c6edb77d27426eee7a151a8634f442b1c40158f7979bda07ce6d5b",
+    # use_theta_m = 1: WRF v4.7.1's theta_m conversions (real.exe's theta ->
+    # theta_m, phy_prep/update_phys_fields' dry theta, conv_t_tendf_to_moist,
+    # moist_physics_finish_em's theta_m branch) and do_avgflx_em = 1's
+    # upd_avgflx, new units equal word for word to the gfortran -O0 /
+    # glibc 2.43 record (tests/test_bigstep_thetam_wrf471_parity.py) on
+    # Metal and CUDA.  Every existing unit keeps its bytes.
+    "theta_m": "f4ba37fc9e5b12fe0f71dd856210d105bf59d8ea8c68954cb573901e94a455f2",
+    "avgflx": "311619e4c2249be2fccf86771c68441d56fd8cb3f7986c2992ce5f2483871ea5",
+    # km_opt = 5 (SMS-3DTKE): WRF v4.7.1 nonlocal_flux, free_atmos_length,
+    # meso_length_scale, tke_km/tke_rhs's km_opt = 5 arms and
+    # vertical_diffusion_implicit, 1,768,262 output words over 19 3-D tiles
+    # equal word for word to the gfortran -O0 / glibc 2.43 record
+    # (tests/test_sms3dtke_wrf471_parity.py) on Metal and CUDA.
+    "sms3dtke": "7a6544f7eafd1b2f4955a5b37f684826aacafddbf4f0ff981cad68503dd94ab5",
+    # WRF-Solar EPS (multi_perturb): the drivers' Add_/Remove_ hooks, 634,368
+    # words equal to the gfortran -O0 x86-64 record, and module_stoch's
+    # pattern arithmetic (tests/test_wrfsolar_eps_wrf471_oracle.py,
+    # tests/test_wrfsolar_eps_pattern_oracle.py) on Metal and CUDA.
+    "wrfsolar_eps": "c312b1fba916461bac63332e911d1e2d9968924adf5466c562649a790dfda58d",
+    # MAD-WRF: Init_madwrf_clouds and Cloud_tracer_nudge, 135,505 words
+    # equal to the gfortran -O0 / glibc 2.43 record
+    # (tests/test_madwrf_wrf471_oracle.py) on Metal and CUDA.
+    "madwrf": "cefa3f49219aae1d562848db1e1cbad6362fb3478666e3e6c3b00c5f4cb99650",
     # e677dccb6: active table edits multiply binary64 values on the GPU,
     # round once to REAL, and reject non-positive crop roughness.
     "physics_params":
@@ -278,7 +310,10 @@ BASELINE_PINNED: dict[str, str] = {
     # (it took the top layer as T_GRND whenever another lake in the same call
     # was observed); a streamed 5 km CONUS hour then equals the resident hour
     # bit for bit (241/241 variables).  Previously b36729b9.
-    "lake": "b57ad46930d5db97b68b37c7e9db81bab469da481f7342ec0141994f693241a8",
+    # RE-PINNED on mlx-backend: the device arena is spelled behind
+    # LAKE_ARENA, which lake_support.cuh defines for CUDA (not for the Metal
+    # translation), so CUDA compiles the same text as before.
+    "lake": "a9fbc1a8de9129d2ca51fe5cfbbadbfc974e36909b00e31d3240bce2fea7f69c",
     # Native bulk source/units bridge, both GPU receipts; FTZ disabled.
     "chem_sfire": "01a0c2dd43046d33254e4365d4cd87ee472b468d65077dfc06716b9bfe6e6596",
     # lane/283-sfire: compiled WRF v4.7.1 routine controls at 0 ULP
@@ -1111,12 +1146,27 @@ BASELINE_PINNED: dict[str, str] = {
     # levels256/rrtmg-lw: regenerated from rrtmg_lw_chain.cu after its
     # RLW_MAXLAY became an #ifndef default (the per-run layer tier); the
     # shipped-tier unit's PTX is byte-identical to the base's.
-    # RE-PINNED at the 1.1.0 upstream merge: regenerated from rrtmg_lw_chain.cu, which now carries the fork's per-run RLW_MAXLAY tier.
-    # Previously 8998771f.
+    # The 1.1.0 upstream merge dropped the on-disk twin for generation at
+    # composition and recorded 4fe1e55b here, a digest no generated twin
+    # has had: the generator's text is byte-identical to the twin file
+    # 59ef52e8d measured and pinned (8998771f, the RLW_MAXLAY tier), at every
+    # commit since.  Restored to that measured digest.
     "rrtmg_lw_chain_coalesced":
-        "4fe1e55bdb36cf806830a1f3e01538530033838940c6e65d044c1eec0f02a510",
+        "8998771ff5f3e7fe81da8e16ec9cf58dba99d983ac3f689edfbb1625deeb3250",
+    # RE-PINNED on mlx-backend: rlw_rtrn_band_rows APPENDED (RRTMG per-band
+    # longwave fluxes, rrtmg_spectral_output); every existing entry point is
+    # unchanged text.  Its words equal compiled WRF v4.6.1 rtrnmc's per-band
+    # terms (tests/test_rrtmg_spectral_output.py), CUDA and Metal.
     "rrtmg_lw_zbatched":
-        "5611794c5c9e44815ad00e28af7367428beda949afe205654ecb959665de7a8e",
+        "dfe3b824da5e8af04366dc873654368fb687a26075ddad898f48e3a6a2a367e6",
+    # The clean-room spectral solver (woof/radtran, docs/dev/radtran.md);
+    # its words are tests/data/radtran/kernel_words.npz on host, CUDA and
+    # Metal, and its fluxes are held to uvspec 2.0.6.  Moved once on
+    # radtran-opac: the body became rt_problem, and radtran_disort_modes +
+    # _finish spread radiance Fourier modes over threads (same words, held
+    # by tests/test_radtran_kernel_words_gpu.py on both device paths).
+    "radtran_disort":
+        "9b4efb5acb2c165a38fd0c4f92870418eb34c58f7faba7ffaa6ec51f3fe23a06",
     # lane/281-zadvect-implicit (A158): WRF 4.7.1's implicit-explicit
     # vertical advection, graded word for word against WRF's compiled
     # routines by tests/test_zadvect_implicit.py.  Moved once on the lane:
@@ -1381,6 +1431,10 @@ _merge_extension_pins(PINNED, _EXTENSION_PINS["modules"])
 # docs/gf_gamma_known_delta.md and tests/test_gf_gamma_correctly_rounded.py;
 # header assembly is independently checked by test_kernel_loader_inert.py.
 PINNED_HEADERS = {
+    # glibc 2.43's correctly rounded log10f (CORE-MATH bc385c2), prepended to
+    # the WRF-Solar cldfra3 unit only; proven against glibc 2.43 over all
+    # 2^32 inputs on the host and on the RTX A6000 (tools/corem_log10f_proof).
+    "corem_log10f.cuh": "bcede6f5758979b534bb73754310ad0e631db50b99a8fdcb7fd76f766241cdd5",
     # Existing fork radar transcription, reused unchanged by the initial helper.
     "thompson_fork.cu": "c7313ce62d863bdeb9478b7a503c8faffae6d17c8a20cbb1b6d458c216e4c947",
 
@@ -1431,7 +1485,10 @@ PINNED_HEADERS = {
     # correctly rounded functions in every state and output word of the
     # 112-column regime campaign (tools/lake_wrf461_oracle/regimes.py), where
     # CUDA's own library left hfx and grdflx in 1,223 words.
-    "lake_support.cuh": "c21f1cf9deb1930e9ad5e24b48247cedf8de8832fdb92e97dfbf938122ccb106",
+    # RE-PINNED on mlx-backend: LAKE_ARENA (defined for CUDA only) and the
+    # LAKE_LOCAL_PTR thread-space annotation (empty on CUDA) for the Metal
+    # translation; CUDA's preprocessed arithmetic and addressing unchanged.
+    "lake_support.cuh": "7604abfb5a7bfde79f59c018b350b7d62db87b2b9704a6738240143c272c9cba",
     "lake_wrf.cuh": "91ccdd68fc9b87564a28f1554faa2a913171e02d963d86b46be292c65e47fffd",
     # WOOF's correctly rounded binary64 exp, log, log10, sin, atan, pow for
     # the lake; tests/test_lake_f64cr.py grades it on the device against

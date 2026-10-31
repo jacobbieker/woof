@@ -563,9 +563,13 @@ _MP_CLOUD_OPTICS_SCHEME = {
 }
 
 from woof.microphysics_schemes import NAMED_SCHEMES as _NAMED_MP_SCHEMES
-# Named schemes: the capability row names the radii family.
+# Named schemes: the capability row names the radii family.  A row whose
+# family is "none" (MAD-WRF's passive 96: no size distribution, WRF's
+# use_mp_re = 0) has no cloud-optics row; its reason is recorded in
+# _NO_CLOUD_OPTICS_COUPLING below.
 _MP_CLOUD_OPTICS_SCHEME.update({
-    _s.mp_id: _s.cloud_optics_family for _s in _NAMED_MP_SCHEMES.values()})
+    _s.mp_id: _s.cloud_optics_family for _s in _NAMED_MP_SCHEMES.values()
+    if _s.cloud_optics_family != "none"})
 
 # WHY A SELECTOR THIS BUILD ACCEPTS HAS NO ROW ABOVE.  One entry per such
 # selector, stating the reason a row would be WRONG -- not a note that one
@@ -583,7 +587,7 @@ _MP_CLOUD_OPTICS_SCHEME.update({
 # the radii from a gamma distribution that is not this scheme's", which
 # was true and was the argument for a row of the scheme's own, not for
 # refusing the pairing.  P3's entry went the same way before it.
-_NO_CLOUD_OPTICS_COUPLING: dict[int, str] = {2: "Lin supplies no effective radii to this adapter; borrowing another scheme would change its cloud distribution", 30: "the spectral effective-radius integration has not been qualified; reusing bulk radii would replace the size-distribution optics"}
+_NO_CLOUD_OPTICS_COUPLING: dict[int, str] = {2: "Lin supplies no effective radii to this adapter; borrowing another scheme would change its cloud distribution", 30: "the spectral effective-radius integration has not been qualified; reusing bulk radii would replace the size-distribution optics", 96: "MAD-WRF's passive hydrometeors (mp_physics = 96) carry no size distribution and WRF pairs them with use_mp_re = 0, so radiation computes its own radii; that is the legacy RRTMG wrappers' path, and borrowing a scheme's radii here would invent one"}
 
 #: The two adapters that DO serve these selectors, named by every refusal
 #: so none of them is a dead end.  One copy: a user told different things
@@ -3724,6 +3728,28 @@ class RRTMGPRadiation:
                   + 0.000077 * np.sin(2.0 * da))
         return 1370.0 * eccfac
 
+    def coszen_now(self, state, cfg):
+        """The radiation call's COSZEN at this model time (what __call__
+        radiates with, and what WRF's Solar_step recomputes every step under
+        solar_diagnostics = 1, woof.core.solar_diagnostics).
+
+        WRF evaluates the HOUR ANGLE at the CENTER of the radiation
+        interval: calc_coszen receives xtime + radt*0.5 inside the
+        Solar_step block (module_radiation_driver.F:1206-1208, 'jararias
+        2013/08/10') while declination/EOT stay at the call-time julian
+        (:3514-3541); that coszen is what RRTMG SW consumes (driver:2636).
+        """
+        valid_time = (self.start_time
+                      + timedelta(seconds=float(state.elapsed_seconds)))
+        from woof.core.physics import _physics_period_seconds
+        radt_minutes = cfg.radt if cfg.radt > 0.0 else cfg.radt_minutes
+        radt_seconds = _physics_period_seconds(radt_minutes, cfg)
+        from woof.core.solar import solar_period_seconds
+        radt_seconds = solar_period_seconds(cfg, radt_seconds)
+        return self._cosine_zenith(
+            valid_time, hour_offset_seconds=0.5 * radt_seconds,
+            generation=getattr(cfg, "solar_generation", "wrf_480"))
+
     def _cosine_zenith(self, valid_time, *, hour_offset_seconds=0.0, generation="wrf_480"):
         """Selected WRF ``radconst``/``calc_coszen`` solar generation.
 
@@ -3957,13 +3983,61 @@ class RRTMGPRadiation:
         ice_active = scheme_is_ice_active(scheme)
         snow_species = scheme_has_snow_species(scheme)
         icloud = int(getattr(cfg, "icloud", 1))
+        # The cumulus cloud handed to radiation (woof.core.cumulus_radiation,
+        # module_radiation_driver.F:1264-1281, :1337-1348, :1566-1575).
+        from woof.core import cumulus_radiation as _curad
+        level_cu = _curad.icloud_cu(cfg)
+        cu_cols = {name: self._columns(fields[name])
+                   for name in _curad.radiation_cloud_fields(cfg)}
+        if level_cu == 1:
+            qc_cols, qi_cols = _curad.add_convective_condensate(
+                qc_cols, qi_cols, cu_cols["qc_cu"], cu_cols["qi_cu"],
+                f_qc=True, f_qi=ice_active)
         if icloud == 2:
             cldfra = cal_cldfra2(qc_cols, qi_cols,
                 f_qc=int(getattr(cfg, "mp_physics", 0)) != 0, f_qi=ice_active)
+        elif icloud == 3:
+            # WRF-Solar cal_cldfra3 (module_radiation_driver.F:1462-1510)
+            # reads the driver's unclamped moisture; the radiation then
+            # reads max(0, q) of the copies it returns, as above.  The
+            # prognostic qc/qi are untouched (WRF restores them, :3137-3155).
+            if not ice_active or mp_physics == 0:
+                raise ValueError(
+                    "Can not use icloud = 3 option, missing QC or QI field "
+                    f"(mp_physics={mp_physics}; WRF's wrf_error_fatal)")
+            from woof.core.cldfra3 import cal_cldfra3, cldfra3_gridkm
+            from woof.core.rrtm_lw import _stream_is_capturing
+            if fields.get("xland") is None:
+                raise ValueError("icloud=3 reads XLAND (fields['xland'])")
+            qc_in, qi_in = self._columns(qc3), self._columns(qi3)
+            if level_cu == 1:
+                # ICLOUD_CU = 1's condensate joins QC/QI before every
+                # ICLOUD arm (:1264-1281), cal_cldfra3's included.
+                qc_in, qi_in = _curad.add_convective_condensate(
+                    qc_in, qi_in, cu_cols["qc_cu"], cu_cols["qi_cu"],
+                    f_qc=True, f_qi=ice_active)
+            cldfra, qc_raw, qi_raw = cal_cldfra3(
+                self._columns(atmosphere["qv"]), cp.ascontiguousarray(qc_in),
+                cp.ascontiguousarray(qi_in), self._columns(qs3),
+                self._columns(atmosphere["dz"]), play, tlay,
+                fields["xland"].reshape(-1),
+                cldfra3_gridkm(cfg.dx, cfg.dy),
+                perturbation=_cld3_perturbation(cfg, fields, self._columns,
+                                                atmosphere["qv"].shape[0]),
+                check=not _stream_is_capturing(cp))
+            qc_cols = _radiation_reads_nonnegative(qc_raw)
+            qi_cols = _radiation_reads_nonnegative(qi_raw)
+            del qc_raw, qi_raw
         else:
             cldfra = cal_cldfra1(qv, qc_cols, qi_cols, qs_cols, tlay, play,
                                  f_qc=True, f_qi=ice_active, f_qs=snow_species,
                                  mp_physics=int(getattr(cfg, "mp_physics", 0)))
+            if level_cu == 2:
+                cldfra, qc_cols, qi_cols = _curad.merge_kf_cloud(
+                    cldfra, qc_cols, qi_cols,
+                    cldfra_dp=cu_cols["cldfra_dp"],
+                    cldfra_sh=cu_cols["cldfra_sh"],
+                    qc_cu=cu_cols["qc_cu"], qi_cu=cu_cols["qi_cu"])
         if scheme == "wsm3":
             # WSM3 stores cloud ice in qc and snow in qr. WRF splits
             # these carriers below freezing in module_ra_sw.F:193-203
@@ -3997,6 +4071,12 @@ class RRTMGPRadiation:
             bl_mynn_version=getattr(cfg, "bl_mynn_version", "wrf_461"),
             temperature=tlay if active_bl else None,
         )
+        if int(getattr(cfg, "shcu_physics", 0)) == 5:
+            # Deng's shallow cloud after the icloud cloud fraction and the
+            # MYNN merge (module_radiation_driver.F:1566-1575).
+            cldfra, qc_cols = _curad.merge_deng_cloud(
+                cldfra, qc_cols, cldfra_sh=cu_cols["cldfra_sh"],
+                cw_rad=cu_cols["cw_rad"])
         if scheme in SCHEME_RADII_COUPLINGS:
             # After the MYNN merge, so its subgrid cloud and fraction are
             # the cloud being sized: see cloudy_background_radii.
@@ -4289,19 +4369,7 @@ class RRTMGPRadiation:
 
         valid_time = (self.start_time
                       + timedelta(seconds=float(state.elapsed_seconds)))
-        # WRF evaluates the HOUR ANGLE at the CENTER of the radiation
-        # interval: calc_coszen receives xtime + radt*0.5 inside the
-        # Solar_step block (module_radiation_driver.F:1206-1208, 'jararias
-        # 2013/08/10') while declination/EOT stay at the call-time julian
-        # (:3514-3541); that coszen is what RRTMG SW consumes (driver:2636).
-        from woof.core.physics import _physics_period_seconds
-        radt_minutes = cfg.radt if cfg.radt > 0.0 else cfg.radt_minutes
-        radt_seconds = _physics_period_seconds(radt_minutes, cfg)
-        from woof.core.solar import solar_period_seconds
-        radt_seconds = solar_period_seconds(cfg, radt_seconds)
-        mu_raw = self._cosine_zenith(
-            valid_time, hour_offset_seconds=0.5 * radt_seconds,
-            generation=getattr(cfg, "solar_generation", "wrf_480"))
+        mu_raw = self.coszen_now(state, cfg)
         daylight = mu_raw > DTYPE(0.0)
         mu = cp.where(daylight, mu_raw, DTYPE(1.0)).reshape(-1)
         albedo_surface = cp.asarray(
@@ -5686,3 +5754,16 @@ __all__ = ["CloudOpticsResult", "CloudTables", "DATA_DIR", "FluxResult",
            "lw_rte", "mcica_cloud_masks", "planck_sources",
            "rfmip_clear_sky", "rrtmgp_above_model_layer_counts",
            "sw_rte", "trace_gases"]
+
+
+def _cld3_perturbation(cfg, fields, columns, nz):
+    """WRF-Solar EPS pert_cld3 for cal_cldfra3 (module_radiation_driver.F
+    :1472-1474): the pert3d TH and QVAPOR fields in the adapter's column
+    layout, or None."""
+    from woof.core.wrfsolar_eps import (Pattern, active_switches, factors,
+                                        pattern_field_name)
+    if "pert_cld3" not in active_switches(cfg):
+        return None
+    grid = lambda name: Pattern(fields[pattern_field_name(name)]).grid(nz)
+    return dict(pert_th=columns(grid("TH")), pert_qv=columns(grid("QVAPOR")),
+                factors=factors(cfg, "pert_cld3"))

@@ -369,6 +369,36 @@ _DOMAIN_RUN_OVERRIDES = (
     # whose mixing is being read and leave it off the rest.
     "hmix_k_diag",
     "surface_energy_diag",
+    # Output-only: band-resolved RRTMG fluxes, (14|16|112, ny, nx) planes
+    # per flux name and frame.
+    "rrtmg_spectral_output",
+    # Output-only: woof.radtran spectral irradiance/radiance planes per
+    # requested wavelength.
+    "radtran_wavelengths",
+    "radtran_interval_s",
+    "radtran_umu",
+    "radtran_phi",
+    "radtran_mol_abs_param",
+    "radtran_solver",
+    "radtran_streams",
+    "radtran_pseudospherical",
+    # WRF's shallow-cumulus selector and cumulus-radiation feedback are
+    # max_domains columns (Registry.EM_COMMON:2492, :2594): a tree may run
+    # Deng on its convection-permitting nest and not on the parent.
+    "shcu_physics", "cu_rad_feedback",
+    "radtran_aerosol",
+    # WRF's do_avgflx_em is a max_domains column (Registry/registry.avgflx);
+    # output-only.  use_theta_m is one value for the run in WRF
+    # (Registry.EM_COMMON:2864) and stays [shared].
+    "do_avgflx_em",
+    # WRF-Solar EPS: multi_perturb, the pert_<scheme> switches, their
+    # factors and spdt are max_domains in registry.stoch:98-130, :188.
+    "multi_perturb", "pert_farms", "pert_farms_albedo", "pert_farms_aod",
+    "pert_farms_angexp", "pert_farms_aerasy", "pert_farms_qv",
+    "pert_farms_qc", "pert_farms_qs", "pert_deng", "pert_deng_qv",
+    "pert_deng_qc", "pert_deng_t", "pert_deng_w", "pert_thom",
+    "pert_thom_qv", "pert_thom_qc", "pert_thom_qi", "pert_thom_qs",
+    "pert_thom_ni", "pert_cld3", "pert_cld3_qv", "pert_cld3_t", "spdt",
     # LES-nest inflow seeding (P3): per-domain because the mechanism IS
     # per-edge -- it perturbs one child's rolling nest-boundary tables,
     # validate_run_config refuses it on a non-nested domain, and like
@@ -449,6 +479,12 @@ _DOMAIN_KEY_ROWS = key_rows(
            "what a delayed nest is born from at its start_time: "
            "\"analysis\" (the source analysis valid then) or \"parent\" "
            "(its live parent, interpolated onto its own terrain)"),
+    KeyRow("partial_nest", "table", None,
+           "a partial-depth nest (height-dependent resolution): this child "
+           "covers its footprint from the surface to the root's full level "
+           "k_top only (k_top, spec_levels, relax_levels, feedback, "
+           "feedback_fields, smooth_option, mass_correction); absent, the "
+           "child is full depth"),
     KeyRow("e_we", "integer", None,
            "WRF's staggered west-east point count, nx + 1; give e_we or nx"),
     KeyRow("e_sn", "integer", None,
@@ -469,6 +505,8 @@ _DOMAIN_KEYS = frozenset({
     "start_time", "static",
     # What a delayed nest is born from (see START_FROM_PARENT below).
     "start_from",
+    # A partial-depth band (woof/core/partial_nest.py, Phase D).
+    "partial_nest",
     "e_we", "e_sn", "nx", "ny", "dx", "dy", "dt",
     # A nest on its own eta ladder (WRF vert_refine_method = 2); nz and
     # e_vert must agree with it.  Refused on the root (_domain_ladder).
@@ -1095,6 +1133,15 @@ class DomainConfig:
     #: key existed keeps its exact fingerprint.  A declared ``"parent"``
     #: binds: the child's initial state is a different one.
     start_from: str | None = None
+    #: A partial-depth band (:class:`woof.core.partial_nest.PartialNestBand`,
+    #: Phase D of plans/sorted-mapping-hummingbird.md): this child covers
+    #: its footprint from the surface to the root's full level ``k_top``
+    #: only, and steps through :mod:`woof.core.partial_nest_run`.  ``None``
+    #: -- every domain without the key -- is a full-depth nest, and drops
+    #: out of the restart, document and prepared-cache identities, so every
+    #: experiment written before the key keeps its exact fingerprint.  A
+    #: declared band binds (it is a different model).
+    partial_nest: "object | None" = None
 
 
 #: ``[[domain]] start_from`` value that births a delayed nest from its
@@ -3554,6 +3601,55 @@ def validate_boundary_timing(
                 f"{forcing_seams}.")
 
 
+def _partial_nest_band(dom: dict, *, grid_id, source, is_root, ratio, tratio,
+                       i_start, j_start, run, parent, domain_start, start_time,
+                       spawn, follow, tiles):
+    """The ``partial_nest`` table of one ``[[domain]]`` as a
+    :class:`woof.core.partial_nest.PartialNestBand` (the domain supplies its
+    placement and extent), or ``None`` when absent.  The coordinate-level
+    rules (a pure-pressure interface strictly above etac, the top zone,
+    a chain's interfaces) are checked where the coordinate exists,
+    :func:`woof.core.model.realize_partial_nests`."""
+    where = f"[[domain]] grid_id = {grid_id} of {source}"
+    parent_band = getattr(parent, "partial_nest", None)
+    if "partial_nest" not in dom:
+        if parent_band is not None:
+            raise ValueError(
+                f"{where} is a full-depth child of the partial-depth d"
+                f"{parent.grid_id:02d}: a partial domain has no column above its "
+                "interface to nest a full-depth child in; give this domain a "
+                "partial_nest table (a chain) or nest it in a full-depth parent.")
+        return None
+    from woof.core.partial_nest import PartialNestRefused, band_from_table
+    table = dom["partial_nest"]
+    if not isinstance(table, dict):
+        raise ValueError(f"partial_nest on {where} must be a table")
+    if is_root:
+        raise ValueError(f"partial_nest on the root {where}: the root carries the "
+                         "whole column; a partial band is a child")
+    refused = [name for name, value in (("spawn", spawn), ("follow", follow),
+                                        ("tiles", tiles)) if value is not None]
+    if domain_start is not None and domain_start != start_time:
+        refused.append("a delayed start_time")
+    if refused:
+        raise ValueError(f"partial_nest on {where} with {', '.join(refused)}: a "
+                         "partial band is a resident child that starts with its "
+                         "parent and does not move")
+    if not run.nested:
+        raise ValueError(f"partial_nest on {where} needs a nested child")
+    try:
+        band = band_from_table(table, where=f"partial_nest on {where}", geometry=dict(
+            parent_grid_ratio=ratio, parent_time_step_ratio=tratio,
+            i_parent_start=i_start, j_parent_start=j_start, nx=run.nx, ny=run.ny))
+    except PartialNestRefused as exc:
+        raise ValueError(str(exc)) from None
+    if parent_band is not None and band.k_top >= parent_band.k_top:
+        raise ValueError(
+            f"partial_nest on {where}: k_top {band.k_top} must lie below its "
+            f"parent band's ({parent_band.k_top})")
+    return band
+
+
 def _parent_before_child(domain_tables: list, source: str) -> list:
     """Reorder [[domain]] tables so parents precede their children.
 
@@ -4887,6 +4983,12 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
             spawn=spawn_cfg, retire=retire_cfg, rearm=rearm_cfg,
             follow=follow_cfg, tiles=domain_tiles, output=domain_output,
             start_from=start_from,
+            partial_nest=_partial_nest_band(
+                dom, grid_id=grid_id, source=source, is_root=is_root,
+                ratio=ratio, tratio=tratio, i_start=i_start, j_start=j_start,
+                run=run, parent=None if is_root else by_id[parent_id],
+                domain_start=domain_start, start_time=start_time,
+                spawn=spawn_cfg, follow=follow_cfg, tiles=domain_tiles),
             full_history_interval_s=full_history_interval_s,
             quicklook_output=quicklook_output)
         domains.append(dc)
@@ -4943,6 +5045,18 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
                     "km_opt=4 parent "
                     "(docs/superpowers/receipts/les/"
                     "nested-les-km2-2026-08-02.md).")
+        if dc.run.km_opt == 5:
+            warn_once(
+                f"nested-km5-{dc.run.grid_id}-{parent.grid_id}",
+                f"domain grid_id = {dc.run.grid_id} runs km_opt=5 "
+                f"(SMS-3DTKE) as a nest child of grid_id = "
+                f"{parent.grid_id}: it cold-starts its own TKE and its "
+                "nonlocal momentum gammas GAMU/GAMV, as in WRF, which "
+                "neither interpolates them to a nest nor feeds them back. "
+                "Implemented, not yet verified against a reference run.",
+                why="Registry.EM_COMMON:312 and :317-318 declare tke, gamu "
+                    "and gamv with no i and no f flag; "
+                    "woof/core/nest_fields.py carries no row for them.")
 
     # SASE on a domain tree, uniform or per domain.  Each SASE domain runs
     # its own closure on its own state: the prognostic subgrid energy
@@ -5978,6 +6092,7 @@ def _public_config_value(value):
                                   ("ruc_2m_diagnostic", "flux"),
                                   ("ruc_snow", "wrf_461"),
                                   ("swint_opt", 0), ("aer_opt", 0),
+                                  ("couple_farms", False),
                                   ("alb_sol", 0),
                                   ("thompson_version", "wrf_461"),
                                   ("thompson_table_dir", None),
@@ -6100,6 +6215,8 @@ def _drop_off_domain_controls(document):
     # absent when off, so every pre-feature document keeps its bytes.
     if isinstance(document, dict) and document.get("start_from") is None:
         document.pop("start_from", None)
+    if isinstance(document, dict) and document.get("partial_nest") is None:
+        document.pop("partial_nest", None)
     return document
 
 

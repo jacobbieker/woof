@@ -1,0 +1,11 @@
+half i4 0
+nzf i4 0
+dtbc f4 0
+dt f4 0
+fcx f4 1 7
+gcx f4 1 7
+field f4 3 9 5 7
+tend_in f4 3 9 5 7
+top_val f4 3 9 5 7
+top_tend f4 3 9 5 7
+tend f4 3 9 5 7

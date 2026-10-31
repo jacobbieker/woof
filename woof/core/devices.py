@@ -439,6 +439,16 @@ def refuse_unrouted_devices(exp, route):
 
 def validate_device_count(options, visible_count):
     ids = options.device_ids()
+    if options.enabled:
+        from woof import backend
+        if backend.active() != "cuda":
+            # The split's halo exchange and peer copies are CUDA (streams,
+            # events, cudaMemcpyPeer); the facade backends have one device
+            # and no transport for them.
+            raise DevicesRefused(
+                f"[devices] count = {options.count} needs the CUDA backend; this process "
+                f"runs WOOF_BACKEND={backend.active()} (one Apple GPU, no peer transport). "
+                "Set count = 1, or run the split on a CUDA host")
     if options.enabled and any(dev >= visible_count for dev in ids):
         raise DevicesRefused(
             f"[devices] ids = {list(ids)} but visible card count = {visible_count}; "

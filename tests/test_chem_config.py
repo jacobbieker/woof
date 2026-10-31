@@ -10,6 +10,9 @@ import dataclasses
 
 import pytest
 
+from woof.config import MADWRF_RUN_DEFAULTS, MULTI_PERTURB_RUN_DEFAULTS
+NEW_TAIL = [*MULTI_PERTURB_RUN_DEFAULTS, *MADWRF_RUN_DEFAULTS]
+
 from woof.config import (RunConfig, load_config, validate_chem_config,
                           validate_run_config)
 
@@ -167,6 +170,16 @@ def test_the_chem_block_is_appended_after_every_older_field():
     # The fork's wind-farm keys (WRF windfarm_opt and its companions) are
     # appended after every upstream field.
     from woof.config import WINDFARM_RUN_DEFAULTS
+    # After them: rrtmg_spectral_output, couple_farms, the woof.radtran
+    # diagnostic's eight keys, shcu_physics and cu_rad_feedback
+    # (tests/test_radiation_driver_options.py holds the order).
+    tail = ["rrtmg_spectral_output", "couple_farms", "radtran_wavelengths",
+            "radtran_interval_s", "radtran_umu", "radtran_phi",
+            "radtran_mol_abs_param", "radtran_solver", "radtran_streams",
+            "radtran_pseudospherical", "shcu_physics", "cu_rad_feedback",
+            "solar_diagnostics", *NEW_TAIL]
+    assert names[-len(tail):] == tail
+    names = names[:-len(tail)]
     assert names[-len(WINDFARM_RUN_DEFAULTS):] == list(WINDFARM_RUN_DEFAULTS)
     names = names[:-len(WINDFARM_RUN_DEFAULTS)]
     # Appended last after the campaign, keyword-only: sea ice's real.exe

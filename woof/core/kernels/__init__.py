@@ -45,6 +45,10 @@ _EXTRA_HEADERS: dict[str, tuple[str, ...]] = {
                         "thompson_aerosol_libm.cuh", "thompson_column_support.cuh", "thompson_column_radar.cuh",
                         "thompson_column_generated.cuh"),
     "acoustic": ("glibc_trig_flt32.cuh",),
+    # The partial-depth nest's top (Phase D2) composes acoustic.cu's own
+    # device helpers ahead of its entry points; a new module, so the
+    # acoustic unit and its launches keep their bytes.
+    "nest_top": ("glibc_trig_flt32.cuh", "acoustic.cu"),
     "lin_refl": ("refl.cu",),
     "lin": ("glibc_flt32.cuh", "lin_support.cuh", "lin_wrf.cuh"),
     "goddard": ("glibc_flt32.cuh", "portable_libm64.cuh", "goddard_bands.cuh", "goddard_sounding.cuh"),
@@ -188,6 +192,10 @@ _EXTRA_HEADERS: dict[str, tuple[str, ...]] = {
     # (saturation lookups, the implicit diffusion solver, exacol/zisocl/
     # compute_cubic, caleddy, compute_eddy_diff with trbintd/sfdiag and the
     # camuwpbl column driver).  A new module, so no existing unit moves.
+    # woof's clean-room spectral discrete-ordinate solver (woof/radtran):
+    # binary64 exp/cos through the word-exact ports, so CUDA, Metal and the
+    # host build agree word for word.  A new module, so no existing unit moves.
+    "radtran_disort": ("glibc_flt64.cuh",),
     "uwpbl": ("glibc_flt64.cuh", "uwpbl_common.cuh", "uwpbl_wvsat.cuh",
               "uwpbl_vdiff.cuh", "uwpbl_zisocl.cuh", "uwpbl_caleddy.cuh",
               "uwpbl_eddy.cuh", "uwpbl_driver.cuh"),
@@ -199,6 +207,13 @@ _EXTRA_HEADERS: dict[str, tuple[str, ...]] = {
     # existing unit moves.
     "rrtmg_legacy_solar": ("glibc_flt32.cuh", "glibc_trig_flt32.cuh"),
     "swint": ("glibc_flt32.cuh", "glibc_trig_flt32.cuh"),
+    # WRF-Solar FARMS (swint_opt = 2, phys/module_ra_farms.F): EXP, **,
+    # ALOG10, COS, SIN, ACOS and SINH on REAL(4) are glibc's expf/powf/
+    # log10f/cosf/sinf/acosf and the correctly rounded sinhf, graded bitwise
+    # against WRF v4.7.1's gfortran Fortran by
+    # tests/test_farms_wrf471_parity.py.  A new module.
+    "farms": ("glibc_flt32.cuh", "glibc_trig_flt32.cuh", "log10_flt32.cuh",
+              "sinhf_flt32.cuh"),
     # WRF aer_opt = 3 shortwave optics (gt_aod, calc_aerosol_rrtmg_sw of
     # the operational HRRR fork): EXP is glibc's expf, graded bitwise
     # against the fork's gfortran/glibc Fortran by
@@ -233,6 +248,10 @@ _EXTRA_HEADERS: dict[str, tuple[str, ...]] = {
     # oracle (tools/kf_wrf461_oracle), graded at 0 ULP by
     # tests/test_kf_wrf461_oracle.py.
     "kf": ("glibc_flt32.cuh",),
+    # Deng shallow cumulus (shcu_physics=5): EXP, ALOG and REAL**REAL of
+    # module_shcu_deng.F are the float32 libm words its WRF v4.7.1 oracle
+    # links (tools/shcu_deng_wrf471_oracle/libm_shim.cpp).  A new module.
+    "shcu_deng": ("glibc_flt32.cuh",),
     "chem_fire": ("glibc_flt32.cuh",),
     "chem_plumerise": ("glibc_flt32.cuh",),
     "wsm3": ("glibc_flt32.cuh",),
@@ -302,6 +321,20 @@ _EXTRA_HEADERS: dict[str, tuple[str, ...]] = {
     "nssl2_driver_support": ("glibc_flt32.cuh", "nssl2_wrf_math.cuh"),
     "nssl2_diagnostics": ("glibc_flt32.cuh", "nssl2_wrf_math.cuh"),
     "rrtmgp_gas": ("rrtmgp_libm.cuh", "rrtmgp_planck_common.cuh"),
+    # WRF-Solar icloud = 3 (cal_cldfra3): glibc 2.43's log10f and powf.
+    "cldfra3": ("glibc_flt32.cuh", "corem_log10f.cuh"),
+    # WRF-Solar diagnostics (module_diag_solar.F): glibc 2.43's acosf.
+    "solar_diag": ("glibc_flt32.cuh", "glibc_trig_flt32.cuh"),
+    # km_opt = 5, SMS-3DTKE (module_diffusion_em.F): REAL**REAL and EXP are
+    # glibc's powf/expf (gfk_pow/gfk_exp), TANH glibc 2.43's correctly
+    # rounded tanhf (sfire_tanhf), graded word for word against WRF
+    # v4.7.1 by tests/test_sms3dtke_wrf471_parity.py.  A new module.
+    "sms3dtke": ("glibc_flt32.cuh", "sfire_libm.cuh"),
+    # WRF-Solar EPS (multi_perturb): the scheme hooks (FADD/FMUL/FDIV/FSUB)
+    # and module_stoch's pattern arithmetic (expf, logf, cosf, sinf).
+    "wrfsolar_eps": ("glibc_flt32.cuh", "glibc_trig_flt32.cuh"),
+    # MAD-WRF (module_madwrf.F, Cloud_tracer_nudge): glibc's powf.
+    "madwrf": ("glibc_flt32.cuh",),
 }
 
 #: Read-only view for tests and freeze receipts.
@@ -455,6 +488,7 @@ def module_source(name: str, *, kernel_dir: Path = _KDIR) -> str:
 #: climate_diagnostics: all 48 climate fields match the pinned gfortran
 #: oracle only with separate rounding in strict mode; fast strips this option.
 _NO_FMAD_MODULES = frozenset({"climate_diagnostics", "hail", "lake", "g3", "ysu", "shinhong", "mynn_pbl",
+                              "radtran_disort",
                               "mynn_dmp_sibling", "wsm6", "kessler", "myjpbl",
                               "milbrandt2", "milbrandt2_zet", "wdm6",
                               "wdm6_refl", "wsm3", "wsm6r", "noah"})
@@ -479,9 +513,25 @@ _URBAN_NO_FTZ_MODULES = frozenset({"urban_ucm", "urban_ucm480", "urban_bep",
                                    "urban_bep_couple"})
 # aer_opt2: WRF keeps the aerosol optics' subnormal operands (port289-final 550349628).
 # oml: graded word for word against WRF 4.6.1 OML1D (tools/oml_wrf461_oracle).
+# cldfra3: graded word for word against WRF 4.7.1 cal_cldfra3
+# (tools/cldfra3_wrf471_oracle); tiny condensate words must not flush.
+# solar_diag: WRF 4.7.1 module_diag_solar.F (tools/solar_diag_wrf471_oracle).
+# theta_m: WRF 4.7.1's use_theta_m = 1 conversions, and avgflx: its
+# do_avgflx_em = 1 accumulation (tools/bigstep_wrf471_oracle/thetam_build.py);
+# new units, so every existing unit keeps its options.
+# sms3dtke: WRF 4.7.1 km_opt = 5 (tools/sms3dtke_wrf471_oracle); gfortran
+# -O0 contracts nothing and keeps subnormal words.
 _NO_FTZ_MODULES = frozenset({"g3", "nsas", "sfclay", "myjsfc", "mynn_surface", "mynn_pbl",
                              "thompson_column", "ysu_480", "wsm6r",
-                             "aer_opt2", "oml"}) | _SOLAR_NO_FTZ_MODULES
+                             "aer_opt2", "oml", "farms", "cldfra3", "solar_diag",
+                             "theta_m", "avgflx",
+                             # WRF 4.7.1 multi_perturb hooks
+                             # (tools/wrfsolar_eps_wrf471_oracle): subnormal
+                             # mixing ratios pass the multipliers unflushed.
+                             "wrfsolar_eps",
+                             # WRF 4.7.1 MAD-WRF (tools/madwrf_wrf471_oracle)
+                             "madwrf",
+                             "sms3dtke"}) | _SOLAR_NO_FTZ_MODULES
 
 # The exact chain's strict intake contracts (GPUWM_WRF_EXACT=1): these units
 # also compile without contraction in a strict process.  A default process
@@ -590,6 +640,9 @@ def _load_diffusion_module(name: str, defines=()):
         options = effective_options(options)
     tier = ",".join(f"{key}={value}" for key, value in defines)
     key = f"{MODULE_KEY_ROOT}:{name}" + (f"[{tier}]" if tier else "")
+    from woof import backend
+    if backend.active() != "cuda":
+        return _translated_module(name, source, key=f"{name}[{tier}]" if tier else name, options=options)
     module = compile_diffusion_source(source, key, options)
     note_compiled(name)
     return module
@@ -758,8 +811,31 @@ class _DirectNvrtcModule:
         return self.module.get_function(name)
 
 
+def _translated_module(name: str, source: str, *, key: str | None = None, options=None):
+    """Non-CUDA backends: the same unit, translated (woof.backend), with
+    the options the CUDA route would hand NVRTC."""
+    from woof import backend
+    if backend.active() == "mlx":
+        from woof.backend.metal.loader import load_unit
+        from woof.certify.kernel_manifest import record_module
+        options = module_options(name) if options is None else options
+        module = load_unit(key or name, source, options=options)
+        # the manifest describes the unit by its CUDA source and options, the
+        # same entry the CUDA route records
+        record_module(f"{MODULE_KEY_ROOT}:{key or name}", source=source, options=options, module=None)
+        return module
+    raise backend.BackendUnavailable(f"backend {backend.active()!r} cannot load kernel units yet")
+
+
 @cuda_cache(maxsize=None)
 def load_module(name: str):
+    from woof import backend
+    if backend.active() != "cuda":
+        if name in _DIFFUSION_MODULES:
+            return _load_diffusion_module(name)
+        if name in _UNFLUSHED_MODULES:
+            return load_module_unflushed(name)
+        return _translated_module(name, module_source(name))
     import cupy as cp
     if name in _DIFFUSION_MODULES:
         return _load_diffusion_module(name)
@@ -852,6 +928,10 @@ def load_module_int_defines(
                 f"CUDA integer define {key} must be a positive integer")
     prefix = "\n".join(f"#define {key} {value}" for key, value in normalized)
     src = module_source_int_defines(name, normalized, prefix=prefix)
+    from woof import backend
+    if backend.active() != "cuda":
+        tier = ",".join(f"{key}={value}" for key, value in normalized)
+        return _translated_module(name, src, key=f"{name}[{tier}]")
     if name in _NO_FTZ_MODULES:
         tier = ",".join(f"{key}={value}" for key, value in normalized)
         return compile_noftz_module(name, src, f"{MODULE_KEY_ROOT}:{name}[{tier}]")
@@ -938,6 +1018,10 @@ def load_module_unflushed(name: str, defines: tuple[tuple[str, int], ...] = ()):
               else module_source(name))
     tier = ",".join(f"{key}={value}" for key, value in normalized)
     key = f"{MODULE_KEY_ROOT}:{name}" + (f"[{tier}]" if tier else "")
+    from woof import backend
+    if backend.active() != "cuda":
+        return _translated_module(name, source, key=f"{name}[{tier}]" if tier else name,
+                                  options=UNFLUSHED_OPTIONS)
     with observe_module_compile(key):
         image, _mapping = nvrtc_ptx_cache.compile_using_nvrtc(
             source, UNFLUSHED_OPTIONS, None, f"{name}.cu")

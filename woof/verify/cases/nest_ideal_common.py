@@ -962,6 +962,7 @@ def assemble_idealized_tree(exp, root_state, *, grids=None,
                             child_initializer=parent_only_init,
                             coupler_factory=ConcreteNestCoupler,
                             domain_preparer=prepare_idealized_domain,
+                            coord=None,
                             ) -> ExperimentState:
     """Hand-assemble the public Task-14 tree around real or mock states.
 
@@ -1009,6 +1010,14 @@ def assemble_idealized_tree(exp, root_state, *, grids=None,
     model._dycore_state_workspace = None
     model._io_manager = None
     model._last_checkpoint = None
+    if any(getattr(dc, "partial_nest", None) is not None for dc in exp.domains):
+        # Partial-depth bands (Phase D): truncated at their interfaces, on
+        # the root's float64 coordinate.
+        if coord is None:
+            raise ValueError("an experiment with partial_nest bands needs the "
+                             "root's vertical coordinate (coord=)")
+        from woof.core.model import realize_partial_nests
+        realize_partial_nests(model, exp, coord)
     return model
 
 

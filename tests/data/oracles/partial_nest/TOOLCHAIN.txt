@@ -1,0 +1,3 @@
+gfortran: GNU Fortran (conda-forge gcc 16.2.0-7) 16.2.0
+flags: -O0 -ffp-contract=off -ffree-form (REAL = real(4))
+host: Darwin 25.5.0 arm64

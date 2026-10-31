@@ -899,14 +899,15 @@ def install_aware_one_line_hint(one_liner: str,
             "a clone)")
 
 
-#: The two native executable formats this project runs, by magic bytes.
-#: An ELF header is four bytes; a PE is ``MZ`` plus a signature at the
-#: offset stored at 0x3c, so 0x40 bytes is always enough to classify.
+#: The native executable formats this project runs, by magic bytes.  An
+#: ELF header is four bytes; a PE is ``MZ`` plus a signature at the offset
+#: stored at 0x3c, so 0x40 bytes is always enough to classify; a Mach-O
+#: (macOS, the mlx backend's platform) is a four-byte magic, thin or fat.
 _EXECUTABLE_HEADER_BYTES = 0x40
 
 
 def native_executable_format(path: Path) -> tuple[str | None, str]:
-    """``('elf'|'pe'|None, evidence)`` from the file's own header.
+    """``('elf'|'pe'|'macho'|None, evidence)`` from the file's own header.
 
     A cheap read, and the ONLY safe way to ask "can this be executed"
     about a file of unknown provenance -- because on Windows, asking the
@@ -934,6 +935,8 @@ def native_executable_format(path: Path) -> tuple[str | None, str]:
         return None, f"cannot be read: {error}"
     if head[:4] == b"\x7fELF":
         return "elf", "ELF executable header"
+    if head[:4] in (b"\xcf\xfa\xed\xfe", b"\xce\xfa\xed\xfe", b"\xca\xfe\xba\xbe"):
+        return "macho", "Mach-O executable header"
     if head[:2] == b"MZ" and len(head) >= 0x40:
         offset = int.from_bytes(head[0x3c:0x40], "little")
         # The signature lives past this window; its OFFSET is what a
@@ -944,7 +947,7 @@ def native_executable_format(path: Path) -> tuple[str | None, str]:
         return None, ("has an MZ stub whose PE signature offset is out of "
                       "range -- truncated or not an executable")
     return None, (f"is not a native executable ({len(head)} byte(s) read, "
-                  "no ELF or PE header)")
+                  "no ELF, PE or Mach-O header)")
 
 
 def launchable(path: Path) -> tuple[bool, str]:
@@ -961,7 +964,7 @@ def launchable(path: Path) -> tuple[bool, str]:
     binary_format, evidence = native_executable_format(path)
     if binary_format is None:
         return False, f"exists but {evidence}"
-    expected = "pe" if os.name == "nt" else "elf"
+    expected = "pe" if os.name == "nt" else ("macho" if sys.platform == "darwin" else "elf")
     if binary_format != expected:
         return False, (f"exists but is a {binary_format.upper()} binary on a "
                        f"host that runs {expected.upper()} -- built for "

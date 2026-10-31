@@ -77,6 +77,7 @@ static inline float __double2float_rn(double d) { return (float)d; }
 static inline int __float2int_rn(float x) { return (int)nearbyintf(x); }
 static inline int __float2int_rz(float x) { return (int)x; }
 static inline int __double2int_rn(double x) { return (int)nearbyint(x); }
+static inline long long __double2ll_rn(double x) { return (long long)nearbyint(x); }
 
 static inline float __uint_as_float(unsigned int u)
 { float f; std::memcpy(&f, &u, 4); return f; }

@@ -667,13 +667,17 @@ class KainFritsch:
         # cumulus driver (module_big_step_utilities_em.F:4856): KF's layer
         # masses are DP = RHO*G*DZ8W (module_cu_kfeta.F:779).
         phase_mode = kf_phase_mode_for_microphysics(cfg.mp_physics)
+        # cu_rad_feedback (ICLOUD_CU = 2): KF_eta_CPS's sub-grid cloud for
+        # radiation, graded with every other output by the column oracle.
+        feedback = bool(getattr(cfg, "cu_rad_feedback", False))
         result = launch_kf(
             atmosphere["u"], atmosphere["v"], atmosphere["temperature"],
             atmosphere["qv"], atmosphere["pressure"], atmosphere["rho"],
             atmosphere["exner"], atmosphere["dz"], self.w0avg,
             dx=cfg.dx, dt=clock_dt, cudt_minutes=float(cfg.cudt_minutes),
             phase_mode=phase_mode,
-            f_qr=kf_has_rain_for_microphysics(cfg.mp_physics))
+            f_qr=kf_has_rain_for_microphysics(cfg.mp_physics),
+            cloud_diagnostics=feedback)
         from woof.core.physics import _NativeKFCumulusResult
 
         # PRATEC = PPTFLX*(1-FBFRC)/DXSQ in mm s-1 and NCA come straight
@@ -691,7 +695,11 @@ class KainFritsch:
             rqicuten=(result["rqicuten"] if separate_ice else None),
             rqrcuten=result["rqrcuten"],
             rqscuten=(result["rqscuten"] if separate_snow else None),
-            rainc=result["rainc"], nca_seconds=nca, pratec=pratec)
+            rainc=result["rainc"], nca_seconds=nca, pratec=pratec,
+            cloud_feedback=({"cldfra_dp": result["cldfra_dp"],
+                             "cldfra_sh": result["cldfra_sh"],
+                             "qc_cu": result["qc_kf"],
+                             "qi_cu": result["qi_kf"]} if feedback else None))
 
 
 __all__ = ["KFPhaseMode", "KFTable", "KainFritsch", "KFWS_SLOTS",

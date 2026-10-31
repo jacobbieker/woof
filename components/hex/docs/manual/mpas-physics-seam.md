@@ -48,6 +48,79 @@ route's default above. An explicit adapter override must agree with the namelist
 both name the same slot. The real forecast door passes the native namelist and backend group to this
 resolver before the existing WOOF path.
 
+WOOF-only FARMS. `config_farms_sw_backend='hex-cuda'` in `&hex_mpasphys` (service
+`farms_sw`, default `off`) runs WRF-Solar's FARMS (WRF `swint_opt = 2`,
+`phys/module_ra_farms.F` v4.7.1; `woof.hex.mpasphys.farms_v842`) on every step,
+radiation steps included, right after the radiation slots and before the surface
+layer. It overwrites `swdnb`, `swddir`, `swddni` and `swddif` on owned cells with
+FARMS's GHI, direct, DNI and diffuse irradiance at the step's own sun (MPAS's radiation
+geometry), from the step's prepared `qv/qc/qi/qs_p`, `rho_p`, `dz_p`, `pres2_hyd_p`,
+the last radiation call's `cldfrac`, the microphysics' metre radii exactly when the
+MPAS shortwave reads them, `sfc_albedo`, and no aerosol. In v8.4.2 nothing reads those
+four between radiation calls (Noah takes `gsw`, untouched), so the service is
+diagnostic. The FARMS column words are WRF's own
+(`components/hex/tests/test_mpas_farms_v842.py`). Without the key nothing runs and the
+receipt is unchanged.
+
+WOOF-only Deng shallow cumulus and cumulus-radiation feedback
+(`woof.hex.mpasphys.shcu_deng_v842`; MPAS v8.4.2 has no shallow-convection scheme and
+its radiation reads no convective cloud). `config_shcu_deng_backend='hex-cuda'`
+(service `shcu_deng`, default `off`) runs WRF-Solar's Deng scheme (WRF
+`shcu_physics = 5`, `phys/module_shcu_deng.F` v4.7.1) on every step right after the
+convection block, as WRF's shallowcu_driver follows cumulus_driver. It needs
+`bl_mynn` (Deng reads MYNN's `qke`, `kzh`, `el_pbl`; WRF stops on other PBLs and MPAS
+has no MYJ), a microphysics scheme, `rrtmg_lw`/`rrtmg_sw` and the cloudiness slot on
+`hex-cuda`. The columns are MPAS's own prepared words (`u/v/t/qv/qc/qr/pres/pi/rho/dz_p`,
+`z_p`/`w_p` at the w levels), `hpbl`, `zgrid(1)`, `lonCell/degrad`, `rthratenlw/sw`,
+`mavail` (updated on owned cells, as WRF does), with two defined quantities: the grid
+length `config_len_disp/meshDensity**0.25` (MPAS's convection `dx_p`) and WRF's eta
+increment DNW from the column's dry hydrostatic w-level pressure `pres2_hydd_p`. The
+tendencies (RTHSHTEN, RQVSHTEN, RQCSHTEN, RQRSHTEN) join physics_get_tend's sources as
+one more term in `mpas_atmphys_todynamics.F`'s coupling (`shcu_deng_tend`), and on
+radiation steps the cloudiness slot merges Deng's cloud as WRF's radiation driver does
+(`cldfrac = MAX(CLDFRA_SH, cldfrac)`, `qcrad = CW_RAD + qcrad`). The scheme's state
+travels in the physics restart state; its W0AVG is its own (MPAS's Kain-Fritsch keeps a
+separate one). `config_cu_rad_feedback_backend='hex-cuda'` (service `cu_rad_feedback`)
+is WRF's ICLOUD_CU = 1 for `cu_grell_freitas`: the cloudiness slot's copies of qc/qi gain
+GF's `qc_cu`/`qi_cu` before the cloud fraction. FARMS reads the step's condensate with
+the same additions. The column body is the WRF-graded one: its MPAS entry point returns
+compiled WRF v4.7.1's words on all 1,737,808 graded words, and the glue, coupling and
+merges are held word for word (`components/hex/tests/test_mpas_shcu_deng_v842.py`).
+Without the keys nothing runs and the receipt is unchanged.
+
+WOOF-only WRF-Solar EPS (`woof.hex.mpasphys.wrfsolar_eps_v842`; MPAS v8.4.2 perturbs
+no physics input). The WOOF group `&wrfsolar_eps` carries WRF's `&stoch` multi_perturb
+keys with `config_` names (`config_multi_perturb`, `config_pert_farms`/`_deng`/`_thom`/
+`_cld3` and their factors, `config_spdt`, `config_num_pert_3d`, `config_nens`,
+`config_stochpert_tbl`) plus `config_multi_perturb_degree` (the harmonic truncation,
+default 48); `--physics` overrides land there. Each switch applies WRF's own driver
+statements (`woof.core.wrfsolar_eps`, every word held to compiled WRF v4.7.1) at its
+MPAS seat: the FARMS service's copies of `sfc_albedo`, `qv/qc/qs_p` (and its zero
+aerosol, which stays zero); the Deng service's copies of `qv/qc_p` and `w_p` (Deng reads
+T, not theta); the `mp_thompson`/`mp_thompson_aerosols` driver's `qv, qc, qi, qs, ni`
+around its substeps, so the pair's residue reaches the state as in WRF; and the
+`cld_fraction_thompson` cloudiness copies of `t` and `qv`. Each switch is refused when
+its seat does not run (service off, another scheme, a slot off the GPU). The
+perturbation fields are not WRF's: WRF's generator is a doubly periodic FFT on the
+(i, j) grid; here each STOCHPERT.TBL field is a stationary AR(1) spherical-harmonic
+process (`woof.hex.stochastic.SphericalPattern`) with the table's decorrelation time,
+scaled by its standard deviation and clipped at its cutoff, constant in height (the
+table's random-phase vertical structure belongs to WRF's FFT), and lengths below the
+truncation's resolution (about 2*pi*R/degree) are smoothed to it. They move on WRF's
+cadence -- the first step and every `max(nint(spdt*60/dt), 1)` steps -- after the
+physics that precede the dynamics, travel in the physics restart state, and need a
+global mesh (the harmonic basis refuses a regional mesh). The RRFS fork route refuses
+the group (`components/hex/tests/test_mpas_wrfsolar_eps_v842.py`). Without it nothing
+runs and the receipt is unchanged.
+
+MAD-WRF (WRF `madwrf_opt`, `mp_physics = 96`, `madwrf_cldinit`) is refused by name on
+both MPAS routes: woof's MPAS initialization (the Rust init engine) writes no qc, qi or
+qs (`woof/hex/hrrr_intermediate.py`), so MAD-WRF's passively advected hydrometeors and
+its TR_QC/TR_QI/TR_QS tracers would start from zero and the nudge would relax toward
+zero, and its cloud initialization is a real.exe step that reads metgrid's
+CLDMASK/BRTEMP/CLDTOPZ/CLDBASEZ, which no MPAS init door carries. MAD-WRF runs on WRF
+domains (`woof/core/madwrf.py`).
+
 A selection of Noah-MP v5.0 runs only with `--licence-opt-in ucar-noahmp`
 (`woof.hex.licence_gate`); UGWP and the fork's NOAA GSL physics are not gated
 (owner ruling 2026-10-14: US Government code). The library resolvers are not
@@ -79,6 +152,19 @@ selects time level 1 for pre-dynamics preparation and level 2 for microphysics.
 strict native library. The shim uses native timekeeping and manager arithmetic,
 sets the eight shared logical flags, and returns timestamp/Julian/leap metadata.
 Advance the native clock exactly once at the native outer-step clock boundary.
+
+### WRF-only turbulence: km_opt = 5 (SMS-3DTKE)
+
+WRF v4.7.1's SMS-3DTKE closure (`km_opt = 5`) is not offered on MPAS. MPAS-A
+v8.4.2 has no counterpart: its `config_les_model` takes `none`,
+`3d_smagorinsky` or `prognostic_1.5_order`, and `config_horiz_mixing` the 2-D
+forms. Nor does it map onto the mesh as a WOOF-only service the way FARMS and
+Deng did: those are column schemes behind existing slots, while SMS-3DTKE is a
+dycore closure built on WRF's C grid (the `cal_deform_and_div` deformation and
+`zx`/`zy` terrain slopes, the u/v-face nonlocal momentum gammas, the eta-level
+tridiagonal solves of `vertical_diffusion_implicit`) and replaces the PBL
+scheme the seam calls. `woof hex` refuses `km_opt = 5` by name
+(`woof/hex/physics_suites.py`; `components/hex/tests/test_arbitrary_physics.py`).
 
 ## Time ownership
 

@@ -774,6 +774,9 @@ _GPU_ROW_GLIBC = {
 GPU_BASELINE_MAX_ULP_BY_NVRTC_BUILD = {
     "13.4.92": {RTX_PRO_6000: _GPU_ROW_GLIBC},
     "12.9.86": {RTX_PRO_6000: _GPU_ROW_GLIBC},
+    # The MLX backend (woof's Metal translation), 2026-10-29 on an M3 Max:
+    # the RTX PRO 6000's row in every field, the flushed lanes included.
+    "metal": {"Apple M3 Max": _GPU_ROW_GLIBC},
 }
 
 #: The certification row.
@@ -977,6 +980,9 @@ def test_the_kernel_compiler_identifies_itself_to_four_parts():
     is the resolution the row key needs, so a fingerprint that silently fell
     back to a coarser one has to fail here rather than at some ULP table.
     """
+    from woof.certify.compile_platform import METAL_BUILD
+    if nvrtc_build() == METAL_BUILD:
+        pytest.skip("the MLX backend compiles no kernel with NVRTC: its build is 'metal'")
     fingerprint = compile_platform_fingerprint()
     build = fingerprint["nvrtc_build"]
     assert build != "unavailable", (

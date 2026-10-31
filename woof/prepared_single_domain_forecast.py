@@ -279,8 +279,8 @@ HRRR_BUNDLE_PATHS = MappingProxyType({
 #: asserts they are the same set -- and which fails on ANY surviving
 #: ``mp_physics in (1, 6, 8, 10, 18)`` literal anywhere under ``gpuwm/``,
 #: so a fifth copy of this gate cannot be added silently.
-REFL_10CM_MICROPHYSICS = (1, 2, 3, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 50, 106) + tuple(
-    __import__('woof.microphysics_schemes', fromlist=['NAMED_MP_IDS']).NAMED_MP_IDS)
+REFL_10CM_MICROPHYSICS = tuple(sorted((1, 2, 3, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 50, 106) + tuple(
+    __import__('woof.microphysics_schemes', fromlist=['NAMED_MP_IDS']).NAMED_MP_IDS)))
 #: What a PACKAGED source reports when nothing has been measured on it:
 #: the suites the generic mapped route carries for every packaged profile,
 #: with the row's own limitation saying no source-specific verification is

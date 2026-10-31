@@ -277,6 +277,9 @@ DEFAULT_TOLERANT_IDENTITY_FIELDS = frozenset({
     # A delayed nest's birth source.  Not in use (None, the analysis
     # birth) is what every header before the key describes.
     "start_from",
+    # A partial-depth band: None (a full-depth nest) is what every header
+    # before the key describes.
+    "partial_nest",
     # 2.8's per-domain follower reach bound, nested in a DECLARED follow
     # document.  Its not-in-use value is None (the engine default), the
     # state every follower header written before the key describes, and
@@ -625,6 +628,7 @@ def undelayed_identity_defaults(experiment) -> dict[str, object]:
             "retire": None, "rearm": None, "follow": None,
             "follow.reach_speed_m_s": None,
             "start_from": None,
+            "partial_nest": None,
             # The history window: DomainConfig's own defaults, read from
             # the dataclass rather than restated (the reason is below).
             **_domain_config_defaults("history_begin_s", "history_end_s"),

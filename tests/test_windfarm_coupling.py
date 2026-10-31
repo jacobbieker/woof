@@ -100,8 +100,25 @@ def _assert_same_layout(a, b):
 
 def test_the_fields_are_appended_last_at_wrfs_defaults():
     names = [f.name for f in dataclasses.fields(RunConfig)]
-    assert names[-4:] == ["windfarm_opt", "windfarm_ij",
-                          "windfarm_tke_factor", "windfarm_turbine_file"]
+    # appended after them: the output-only rrtmg_spectral_output, WRF's
+    # couple_farms, the output-only woof.radtran diagnostic's eight keys,
+    # then the shallow-cumulus selector and cumulus-radiation feedback,
+    # and after them WRF-Solar EPS's and MAD-WRF's keys
+    from woof.config import MADWRF_RUN_DEFAULTS, MULTI_PERTURB_RUN_DEFAULTS
+    later = [*MULTI_PERTURB_RUN_DEFAULTS, *MADWRF_RUN_DEFAULTS]
+    assert names[-len(later):] == later
+    names = names[:-len(later)]
+    # the output-only solar_diagnostics and radtran_aerosol, WRF's
+    # use_theta_m and the output-only do_avgflx_em
+    assert names[-20:] == ["windfarm_opt", "windfarm_ij",
+                           "windfarm_tke_factor", "windfarm_turbine_file",
+                           "rrtmg_spectral_output", "couple_farms",
+                           "radtran_wavelengths", "radtran_interval_s", "radtran_umu",
+                           "radtran_phi", "radtran_mol_abs_param", "radtran_solver",
+                           "radtran_streams", "radtran_pseudospherical",
+                           "shcu_physics", "cu_rad_feedback",
+                           "solar_diagnostics", "radtran_aerosol",
+                           "use_theta_m", "do_avgflx_em"]
     for name, default in WINDFARM_RUN_DEFAULTS.items():
         assert RunConfig.__dataclass_fields__[name].default == default
     # Registry.EM_COMMON:3003-3005.

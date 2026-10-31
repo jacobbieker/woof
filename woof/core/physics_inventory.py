@@ -54,6 +54,71 @@ def radiation_boundary_flux_names(cfg):
              if int(selector)==4}
     return tuple(name for name in RADIATION_BOUNDARY_FLUXES if name[:2] in sides)
 
+#: rrtmg_spectral_output's fields: WRF's top (t) and bottom (b) flux names
+#: resolved by band (``<name>_band``) or, shortwave only, by g-point
+#: (``<name>_gpt``); value (quantity index, level) into the engines'
+#: spectral slabs (woof.core.rrtmg_sw.SPECTRAL_QUANTITIES fu fd cu cd
+#: fddir cddir; woof.core.rrtmg_lw.LW_SPECTRAL_QUANTITIES u d uc dc).
+SW_SPECTRAL_FLUXES = {
+    "swupt": (0, "t"), "swuptc": (2, "t"), "swdnt": (1, "t"), "swdntc": (3, "t"),
+    "swupb": (0, "b"), "swupbc": (2, "b"), "swdnb": (1, "b"), "swdnbc": (3, "b"),
+    "swddir": (4, "b"), "swddirc": (5, "b"),
+}
+LW_SPECTRAL_FLUXES = {
+    "lwupt": (0, "t"), "lwuptc": (2, "t"),
+    "lwupb": (0, "b"), "lwupbc": (2, "b"), "lwdnb": (1, "b"), "lwdnbc": (3, "b"),
+}
+#: band or g-point count per (side, rrtmg_spectral_output)
+SPECTRAL_WIDTHS = {("sw", "bands"): 14, ("sw", "gpoints"): 112,
+                   ("lw", "bands"): 16, ("lw", "gpoints"): 16}
+
+
+#: woof.radtran spectral diagnostic (RunConfig radtran_*): the irradiance
+#: planes (rt_wavelength, ny, nx), the radiance stack (rt_wavelength,
+#: rt_direction, ny, nx) and the axis variables naming each entry.
+RADTRAN_FLUX_FIELDS = ("rt_edir", "rt_edn", "rt_eup", "rt_eup_toa")
+RADTRAN_WAVELENGTH_FIELDS = ("rt_wavelength", "rt_band_min", "rt_band_max")
+RADTRAN_DIRECTION_FIELDS = ("rt_umu", "rt_phi")
+
+
+def radtran_fields(cfg, ny: int, nx: int) -> dict[str, tuple[int, ...]]:
+    """The radtran diagnostic's physics fields, name -> full shape (empty when off)."""
+    waves = tuple(getattr(cfg, "radtran_wavelengths", ()) or ())
+    if not waves:
+        return {}
+    nw = len(waves)
+    out = {name: (nw, ny, nx) for name in RADTRAN_FLUX_FIELDS}
+    out.update({name: (nw,) for name in RADTRAN_WAVELENGTH_FIELDS})
+    umu = tuple(getattr(cfg, "radtran_umu", ()) or ())
+    if umu:
+        ndir = len(umu) * max(1, len(tuple(getattr(cfg, "radtran_phi", ()) or ())))
+        out["rt_rad"] = (nw, ndir, ny, nx)
+        out.update({name: (ndir,) for name in RADTRAN_DIRECTION_FIELDS})
+    return out
+
+
+def radiation_spectral_fields(cfg) -> dict[str, int]:
+    """rrtmg_spectral_output's physics fields, field name -> band (or
+    g-point) count; each is (count, ny, nx).  Legacy RRTMG only, on the
+    side(s) running selector 4.  Longwave has bands under either option:
+    a g-point is a quadrature point, not a wavelength interval."""
+    mode = str(getattr(cfg, "rrtmg_spectral_output", "none") or "none")
+    if mode == "none":
+        return {}
+    from woof.config import RRTMG_VARIANT_LEGACY, radiation_scheme_ids
+    if cfg.ra_rrtmg_variant != RRTMG_VARIANT_LEGACY:
+        return {}
+    lw, sw = radiation_scheme_ids(cfg)
+    out = {}
+    for side, selector, table in (("sw", sw, SW_SPECTRAL_FLUXES), ("lw", lw, LW_SPECTRAL_FLUXES)):
+        if int(selector) != 4:
+            continue
+        suffix = "_gpt" if side == "sw" and mode == "gpoints" else "_band"
+        for name in table:
+            out[name + suffix] = SPECTRAL_WIDTHS[(side, mode)]
+    return out
+
+
 #: HORIZONTAL EDDY-VISCOSITY DIAGNOSTIC (cfg.hmix_k_diag): the (momentum,
 #: scalar) history names each horizontal mixing producer publishes under.
 #:
@@ -205,8 +270,8 @@ PBL_RQI_MICROPHYSICS = (2, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 30, 50, 106) + tup
 
 
 #: Microphysics producers with an output-due radar reflectivity carrier.
-REFL_10CM_MICROPHYSICS = (1, 2, 3, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 50, 106) + tuple(
-    _s.mp_id for _s in _NAMED_MP_SCHEMES.values())
+REFL_10CM_MICROPHYSICS = tuple(sorted((1, 2, 3, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 50, 106) + tuple(
+    _s.mp_id for _s in _NAMED_MP_SCHEMES.values())))
 # Kessler has no stock microphysics reflectivity writer. The default
 # diagnostic remains available; strict forecast history retains the
 # initialized stock slot (module_mp_kessler.F, no REFL_10CM argument).
@@ -324,6 +389,13 @@ def microphysics_scratch_slots(
                 ("sr", "mp_sr"),
                 ("snownc", "mp_snownc"),
                 ("snowncv", "mp_snowncv"))
+    if mp_physics == 96:
+        # MAD-WRF: CASE (MADWRF_MP) binds no precipitation argument
+        # (module_microphysics_driver.F:2895); the surface contract's rain
+        # and SR stay zero.
+        return (("rainnc", "mp_rainnc"),
+                ("rainncv", "mp_rainncv"),
+                ("sr", "mp_sr"))
     if mp_physics in (2, 6, 8, 10, 16, 28, 30) or mp_physics in _NAMED_MP_SCHEMES_BY_ID:
         return (("rainnc", "mp_rainnc"),
                 ("rainncv", "mp_rainncv"),
@@ -947,7 +1019,24 @@ def resolve_physics_slot(selector: str, value) -> str | None:
 
 # WRF G3 restart carriers and convtrans_prep accumulators. Shape tokens
 # resolve through cfg; the same rows drive allocation and memory review.
-CUMULUS_STATE_LAYOUTS = {5: {
+#: convtrans_prep's accumulators and averages (dyn_em/module_convtrans_prep.F),
+#: the same rows for Grell-Freitas and Grell 3D under cu_diag = 1.
+_CONVTRANS_PREP_LAYOUT = {
+    **{name: (("nz", "ny", "nx"), "f4", "cu_diag") for name in
+       ("gd_cloud_a", "qc_cu", "gd_cloud2_a", "qi_cu", "gd_cldfr")},
+    "raincv_a": (("ny", "nx"), "f4", "cu_diag"),
+    "raincv_b": (("ny", "nx"), "f4", "cu_diag"),
+    "g3_diag_clock": ((4,), "i4", "cu_diag"),
+}
+CUMULUS_STATE_LAYOUTS = {
+# Kain-Fritsch's cloud for radiation under cu_rad_feedback (ICLOUD_CU = 2):
+# KF_eta_CPS's CLDFRA_DP_KF/CLDFRA_SH_KF/QC_KF/QI_KF, which the cumulus
+# driver binds to grid%cldfra_dp/cldfra_sh/QC_CU/QI_CU
+# (module_cumulus_driver.F:1044-1046), held between due calls.
+1: {name: (("nz", "ny", "nx"), "f4", "cu_rad_feedback") for name in
+    ("cldfra_dp", "cldfra_sh", "qc_cu", "qi_cu")},
+3: dict(_CONVTRANS_PREP_LAYOUT),
+5: {
     "g3_apr": ((8, "ny", "nx"), "f4", None),
     "g3_xf_ens": (("ensdim", "ny", "nx"), "f4", None),
     "g3_pr_ens": (("ensdim", "ny", "nx"), "f4", None),

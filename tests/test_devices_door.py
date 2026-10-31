@@ -17,6 +17,21 @@ from woof.experiment import build_experiment, experiment_from_run_config
 ROOT = Path(__file__).resolve().parents[1]
 
 
+@pytest.fixture(autouse=True)
+def _cuda_backend(monkeypatch):
+    """The split is a CUDA road; its refusal off CUDA is tested on its own."""
+    from woof import backend
+    monkeypatch.setattr(backend, "active", lambda: "cuda")
+
+
+def test_a_split_off_cuda_is_refused_by_name(monkeypatch):
+    from woof import backend
+    monkeypatch.setattr(backend, "active", lambda: "mlx")
+    validate_device_count(DeviceOptions(count=1), 1)
+    with pytest.raises(DevicesRefused, match="count = 2 needs the CUDA backend.*WOOF_BACKEND=mlx"):
+        validate_device_count(DeviceOptions(count=2, ids=(0, 0)), 1)
+
+
 @pytest.fixture
 def exp():
     return experiment_from_run_config(RunConfig(nx=120, ny=90, nz=12, dx=3000, dy=3000, ztop=12000, dt=15, run_seconds=120), datetime(2026, 1, 1))

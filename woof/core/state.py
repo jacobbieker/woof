@@ -438,6 +438,10 @@ class DomainState:
         if xp is not np and xp is not cp:
             raise TypeError("array_module must be numpy or cupy")
         self._host_setup_state = array_module is np
+        # Which theta ``thp`` holds: False (dry theta) on every new state;
+        # woof.core.theta_m.convert_initial_state, and the restore of a
+        # use_theta_m = 1 checkpoint, set it (WRF's t_2 is theta_m then).
+        self.theta_m = False
         # Same definition as acoustic._spec_zone/_boundary_forced. Stored
         # geometry lets all health scans keep the interior scalar floor.
         self._health_spec_zone = (max(0, int(cfg.spec_zone))
@@ -852,11 +856,21 @@ class DomainState:
             # Registry.EM_COMMON:1118,3168: scalar qke_adv, not water mass.
             self.qke_adv = zeros(nz, ny, nx)
             self.qke_adv0 = rebuilt("qke_adv0", nz, ny, nx)
-        if cfg.km_opt == 2:
+        if cfg.km_opt in (2, 5):
             self.tke = zeros(nz, ny, nx)
             self.tke0 = rebuilt("tke0", nz, ny, nx)
         else:
             self.tke = self.tke0 = None
+        if cfg.km_opt == 5:
+            # SMS-3DTKE's nonlocal momentum gammas (Registry.EM_COMMON:317-
+            # 318, ``state real gamu/gamv ij dyn_em 1 - r``).  nonlocal_flux
+            # writes them only on convective columns and every other
+            # column keeps the previous step's word, so they are prognostic
+            # in effect and WRF carries them in the restart stream; so does
+            # woof (SERIALIZED, woof/io/restart.py).  Allocated only for
+            # km_opt = 5, absent otherwise.
+            self.gamu = zeros(ny, nx)
+            self.gamv = zeros(ny, nx)
         # Prognostic/published subgrid turbulence energy.  The attribute
         # is ``e_sgs`` because ``self.e`` is already the WRF Coriolis
         # cosine parameter 2*Omega*cos(lat); the owning scheme's symbol
@@ -1078,6 +1092,15 @@ class DomainState:
 
         from woof.core.hail import initialize as initialize_hail
         initialize_hail(self, cfg)
+
+        from woof.core.solar_diagnostics import initialize as initialize_solar
+        initialize_solar(self, cfg)
+
+        # do_avgflx_em = 1: start_em's zeroed AVGFLX means and count.
+        if (int(getattr(cfg, "do_avgflx_em", 0) or 0) == 1
+                and not self._host_setup_state):
+            from woof.core.avgflx import initialize as initialize_avgflx
+            initialize_avgflx(self, cfg)
 
         # Chem species (woof/core/chem_state.py): the ``chem_<row>`` /
         # ``chem0_<row>`` arena views and ``self.chem``, allocated ONLY when

@@ -741,6 +741,84 @@ def _host_threads_check() -> Check:
         brief="GIL on: --devices N>1 refused", blocking=False)
 
 
+def _backend_requested() -> str:
+    try:
+        from woof import backend
+        return backend.requested()
+    except Exception:  # noqa: BLE001 -- an unreadable choice is the default, cuda
+        return "cuda"
+
+
+#: Translate one CUDA kernel to Metal, launch it in place through the
+#: facade, and read the words back: import (mlx), translator (libclang),
+#: extension build (cmake + Xcode command-line tools) and Metal compile
+#: are each a stage that fails on its own.
+_METAL_PROBE = r"""
+import json, sys, os
+os.environ["WOOF_BACKEND"] = "mlx"
+stage = "import"
+try:
+    import woof, cupy, numpy as np
+    import mlx.core as mx
+    stage = "translate+compile"
+    k = cupy.RawKernel('extern "C" __global__ void probe(double* x, float* y, int n) {'
+                       ' int i = blockIdx.x * blockDim.x + threadIdx.x;'
+                       ' if (i < n) { x[i] = x[i] / 3.0 + 1e-300 * 1e-10;'
+                       ' y[i] = __fdiv_rn(1.0f, (float)(i + 3)); } }', "probe")
+    x = cupy.arange(64, dtype=cupy.float64)
+    y = cupy.zeros(64, dtype=cupy.float32)
+    stage = "launch"
+    k((1,), (64,), (x, y, np.int32(64)))
+    want_x = np.arange(64.0) / 3.0 + 1e-300 * 1e-10
+    want_y = np.float32(1.0) / np.arange(3, 67, dtype=np.float32)
+    ok = (x.get().view(np.uint64) == want_x.view(np.uint64)).all() and \
+         (y.get().view(np.uint32) == want_y.view(np.uint32)).all()
+    info = mx.metal.device_info() if hasattr(mx, "metal") else {}
+    sys.stdout.write(json.dumps({"ok": bool(ok), "mlx": mx.__version__,
+                                 "device": str(info.get("device_name", "?"))}))
+except Exception as exc:
+    sys.stdout.write(json.dumps({"stage": stage, "error": f"{type(exc).__name__}: {exc}"[:400]}))
+"""
+
+
+def _metal_runtime_check() -> Check:
+    """The MLX backend: mlx imports, a CUDA kernel translates to Metal,
+    compiles, runs in place, and its binary64/binary32 words are exact."""
+
+    name = "mlx (Apple GPU runtime)"
+    remedy = ("  remedy: pixi install -e mlx\n"
+              "  #   or: pip install 'recast-woof[all-mlx]'  (needs the Xcode\n"
+              "  #   command-line tools and cmake for the Metal launch extension)")
+    if find_spec("mlx") is None:
+        return Check(name, "missing", "WOOF_BACKEND=mlx but mlx is not installed", remedy,
+                     action="pixi install -e mlx", brief="mlx not installed")
+    try:
+        probe = subprocess.run([sys.executable, "-c", _METAL_PROBE], capture_output=True,
+                               text=True, timeout=900)
+    except subprocess.TimeoutExpired:
+        return Check(name, "untested", "not tested: the Metal probe timed out after 900 s",
+                     brief="probe timed out", blocking=False)
+    try:
+        result = json.loads(probe.stdout.strip() or "{}")
+    except ValueError:
+        result = {}
+    if not result:
+        result = {"stage": "probe", "error": _short(probe.stderr.strip() or "no output", 400)}
+    if result.get("ok"):
+        return Check(name, "verified",
+                     f"mlx {result['mlx']} on {result['device']}: a CUDA kernel translated to "
+                     "Metal, ran in place, and its fp64/fp32 words are exact",
+                     brief=f"mlx {result['mlx']}, Metal ok")
+    if "ok" in result:
+        return Check(name, "missing", "the Metal probe ran but returned wrong words", remedy,
+                     action="report the mismatch; the translated backend is wrong on this GPU",
+                     brief="Metal probe words wrong")
+    return Check(name, "missing",
+                 f"the Metal probe failed at {result.get('stage', '?')}: {result.get('error', '?')}",
+                 remedy, action="pixi install -e mlx",
+                 brief=f"Metal probe failed ({result.get('stage', '?')})")
+
+
 def _cupy_check() -> Check:
     wheels = _installed_cupy_wheels()
     if len(wheels) > 1:
@@ -1628,6 +1706,12 @@ def _canonical(name: str) -> str:
 _IMPORT_NAME = {
     "cupy-cuda12x": "cupy",
     "cupy-cuda13x": "cupy",
+    # The Apple-silicon backend ([gpu-mlx] extra): MLX, and libclang for
+    # the CUDA -> Metal translator (woof/backend).
+    "mlx": "mlx",
+    "libclang": "clang",
+    # The Dynamical.org ASOS Parquet reader ([obs] extra).
+    "pyarrow": "pyarrow",
     "wrf-rust": "wrf",
     "pyshp": "shapefile",
     "scipy": "scipy",
@@ -1900,6 +1984,12 @@ _EXTRA_FACTS: dict[str, _ExtraFacts] = {
         doors=_GPU_DOORS, still_works=_GPU_STILL_WORKS,
         blocking=True, severity=SEVERITY_UNREACHABLE,
         deferred_to="cupy (GPU runtime)", mutually_exclusive=True),
+    # Apple silicon: the CuPy facade over MLX (woof/backend).  Absent is
+    # normal off a Mac, and on a CUDA box this extra cannot even install.
+    "gpu-mlx": _ExtraFacts(
+        doors=_GPU_DOORS, still_works=_GPU_STILL_WORKS,
+        blocking=False, severity=SEVERITY_DEGRADED,
+        deferred_to="mlx (Apple GPU runtime)", expected_absent=True),
     # wrf-rust and pyshp gate DIFFERENT doors, which is why the old
     # single "render extra" line could not tell the truth about either:
     # wrf-rust is what `woof enprod` and `woof render --engine
@@ -7740,11 +7830,16 @@ def _collect_checks(sources: tuple[str, ...] | None = None,
             action="install Python 3.11 or newer",
             brief=f"{version} is below the 3.11 floor"))
     checks.append(_host_threads_check())
-    checks.append(_cupy_check())
-    # Between the wheel and the solver, because that is the order the
-    # three fail in: a wheel that will not load, then a wheel that
-    # loads but cannot compile, then a compile that cannot factor.
-    checks.append(_cuda_headers_check())
+    if _backend_requested() == "mlx":
+        # Apple silicon: no CuPy, no NVRTC.  The same CUDA sources are
+        # translated to Metal; one probe proves the whole chain.
+        checks.append(_metal_runtime_check())
+    else:
+        checks.append(_cupy_check())
+        # Between the wheel and the solver, because that is the order the
+        # three fail in: a wheel that will not load, then a wheel that
+        # loads but cannot compile, then a compile that cannot factor.
+        checks.append(_cuda_headers_check())
     checks.append(_da_eigensolver_check())
     # Beside the extras, because they are the same question asked of a
     # different feature: can this install actually run the thing its

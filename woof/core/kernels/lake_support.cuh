@@ -2,6 +2,12 @@
 // WRF public-domain notice: licenses/LICENSE-WRF-public-domain.txt.
 #ifndef GPUWM_LAKE_SUPPORT
 #define GPUWM_LAKE_SUPPORT
+#if defined(__CUDACC__) && !defined(__WOOF_METAL__)
+// CUDA backs LakeStorage with a device arena; the Metal translation keeps
+// the inline-array form, whose arena state (per-thread tops reached from a
+// destructor) has no MSL spelling.  Same arithmetic, other addresses.
+#define LAKE_ARENA 1
+#endif
 #ifdef __CUDACC__
 #define LAKE_HD __device__
 #else
@@ -28,12 +34,17 @@ using std::fabs;
 // consecutive threads in consecutive 8-byte slots, so a warp's accesses
 // stay coalesced the way the hardware interleaves local memory.  Only the
 // address of each element changes; every arithmetic operation is the same.
+#ifdef __WOOF_METAL__
+#define LAKE_LOCAL_PTR __attribute__((annotate("woof_space:thread")))
+#else
+#define LAKE_LOCAL_PTR
+#endif
 template<class T> struct LakePtr {
-    T* p;
+    LAKE_LOCAL_PTR T* p;
     int s;
     LAKE_HD T& operator[](int k) const {return p[k*s];}
 };
-#ifdef __CUDACC__
+#ifdef LAKE_ARENA
 // One launch block is LAKE_ARENA_BLOCK threads (lake.py launches 32).
 #define LAKE_ARENA_BLOCK 32
 // Upper bound on the 8-byte slots live at once in one thread: every
@@ -79,7 +90,7 @@ template<class T> struct LakeArray {
     LAKE_HD const T& operator()(int a,int b,int c) const {return data[a-lo1+n1*(b-lo2+n2*(c-lo3))];}
     LAKE_HD void fill(T value) {for(int j=0;j<n1*n2*n3;++j)data[j]=value;}
 };
-#ifdef __CUDACC__
+#ifdef LAKE_ARENA
 // Taken in declaration order and given back in reverse, which is C++'s own
 // construction and destruction order for locals and members, so the arena
 // is a stack.  Never copied: every routine takes LakeArray by reference.
@@ -94,7 +105,7 @@ template<class T,int N> struct LakeStorage: LakeArray<T> {
 template<class T,int N> struct LakeStorage: LakeArray<T> {
     T values[N];
     LAKE_HD LakeStorage(int a,int b,int c=1,int d=1,int e=1,int f=1)
-      : LakeArray<T>(values,a,b,c,d,e,f) {}
+      : LakeArray<T>(LakePtr<T>{values,1},a,b,c,d,e,f) {}
     LakeStorage(const LakeStorage&) = delete;
     LakeStorage& operator=(const LakeStorage&) = delete;
 };

@@ -604,12 +604,16 @@ def prepare_metem_run(run, directory, *, run_seconds=None, preprocess_backend=No
             # nwfa/nifa from it; without it a met_em lacking QNWFA/QNIFA
             # refused "could not derive the model mass-point
             # latitudes/longitudes" while holding them.
+            from woof.core.madwrf import observations_from_metem
             result = initialize_real(case.snapshot, cfg, coord, case.terrain,
                 grid={'XLAT_M': lat, 'XLONG_M': lon},
                 source_orography=case.source_orography, p_top=exp.vertical.p_top,
                 preprocess_backend=backend, state_backend='preprocess',
                 boundary_only=index != 0,
-                landmask=case.statics.get('LANDMASK'), **controls)
+                landmask=case.statics.get('LANDMASK'),
+                madwrf_observations=(observations_from_metem(case)
+                                     if int(getattr(cfg, 'madwrf_cldinit', 0)) == 1 else None),
+                **controls)
             result.state.set_map_coriolis(case.statics['MAPFAC_M'], case.statics['MAPFAC_U'], case.statics['MAPFAC_V'],
                 case.statics['F'], case.statics['E'], sina=case.statics['SINALPHA'], cosa=case.statics['COSALPHA'])
             if domain.parent_id == 0:

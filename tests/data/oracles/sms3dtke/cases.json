@@ -1,0 +1,268 @@
+[
+ {
+  "name": "les50-cbl-flat-per",
+  "regime": "convective",
+  "dx": 50.0,
+  "terrain": "flat",
+  "bnd": 0,
+  "isfflx": 1,
+  "hybrid": false,
+  "shape": [
+   10,
+   9,
+   40
+  ]
+ },
+ {
+  "name": "les100-cbl-hill-per",
+  "regime": "convective",
+  "dx": 100.0,
+  "terrain": "hill",
+  "bnd": 0,
+  "isfflx": 1,
+  "hybrid": false,
+  "shape": [
+   9,
+   10,
+   40
+  ]
+ },
+ {
+  "name": "les50-sbl-flat-per",
+  "regime": "stable",
+  "dx": 50.0,
+  "terrain": "flat",
+  "bnd": 0,
+  "isfflx": 1,
+  "hybrid": false,
+  "shape": [
+   8,
+   8,
+   44
+  ]
+ },
+ {
+  "name": "gz250-cbl-flat-per",
+  "regime": "convective",
+  "dx": 250.0,
+  "terrain": "flat",
+  "bnd": 0,
+  "isfflx": 1,
+  "hybrid": true,
+  "shape": [
+   10,
+   10,
+   40
+  ]
+ },
+ {
+  "name": "gz250-neu-hill-spec",
+  "regime": "neutral",
+  "dx": 250.0,
+  "terrain": "hill",
+  "bnd": 1,
+  "isfflx": 1,
+  "hybrid": false,
+  "shape": [
+   11,
+   9,
+   38
+  ]
+ },
+ {
+  "name": "gz500-cbl-hill-per",
+  "regime": "convective",
+  "dx": 500.0,
+  "terrain": "hill",
+  "bnd": 0,
+  "isfflx": 1,
+  "hybrid": false,
+  "shape": [
+   9,
+   9,
+   42
+  ]
+ },
+ {
+  "name": "gz500-sbl-hill-spec",
+  "regime": "stable",
+  "dx": 500.0,
+  "terrain": "hill",
+  "bnd": 1,
+  "isfflx": 1,
+  "hybrid": true,
+  "shape": [
+   10,
+   11,
+   40
+  ]
+ },
+ {
+  "name": "gz1k-cbl-flat-spec",
+  "regime": "convective",
+  "dx": 1000.0,
+  "terrain": "flat",
+  "bnd": 1,
+  "isfflx": 1,
+  "hybrid": false,
+  "shape": [
+   10,
+   10,
+   40
+  ]
+ },
+ {
+  "name": "gz1k-neu-flat-per",
+  "regime": "neutral",
+  "dx": 1000.0,
+  "terrain": "flat",
+  "bnd": 0,
+  "isfflx": 1,
+  "hybrid": false,
+  "shape": [
+   9,
+   9,
+   36
+  ]
+ },
+ {
+  "name": "gz1k-sbl-hill-per",
+  "regime": "stable",
+  "dx": 1000.0,
+  "terrain": "hill",
+  "bnd": 0,
+  "isfflx": 1,
+  "hybrid": false,
+  "shape": [
+   9,
+   10,
+   42
+  ]
+ },
+ {
+  "name": "meso3k-cbl-hill-per",
+  "regime": "convective",
+  "dx": 3000.0,
+  "terrain": "hill",
+  "bnd": 0,
+  "isfflx": 1,
+  "hybrid": true,
+  "shape": [
+   10,
+   9,
+   40
+  ]
+ },
+ {
+  "name": "meso3k-sbl-flat-spec",
+  "regime": "stable",
+  "dx": 3000.0,
+  "terrain": "flat",
+  "bnd": 1,
+  "isfflx": 1,
+  "hybrid": false,
+  "shape": [
+   9,
+   9,
+   40
+  ]
+ },
+ {
+  "name": "meso9k-cbl-flat-per",
+  "regime": "convective",
+  "dx": 9000.0,
+  "terrain": "flat",
+  "bnd": 0,
+  "isfflx": 1,
+  "hybrid": false,
+  "shape": [
+   9,
+   9,
+   45
+  ]
+ },
+ {
+  "name": "meso9k-neu-hill-spec",
+  "regime": "neutral",
+  "dx": 9000.0,
+  "terrain": "hill",
+  "bnd": 1,
+  "isfflx": 1,
+  "hybrid": false,
+  "shape": [
+   10,
+   10,
+   40
+  ]
+ },
+ {
+  "name": "gz500-cbl-isfflx0-per",
+  "regime": "convective",
+  "dx": 500.0,
+  "terrain": "flat",
+  "bnd": 0,
+  "isfflx": 0,
+  "hybrid": false,
+  "shape": [
+   8,
+   9,
+   40
+  ]
+ },
+ {
+  "name": "gz1k-cbl-isfflx2-hill",
+  "regime": "convective",
+  "dx": 1000.0,
+  "terrain": "hill",
+  "bnd": 0,
+  "isfflx": 2,
+  "hybrid": false,
+  "shape": [
+   9,
+   8,
+   40
+  ]
+ },
+ {
+  "name": "les50-edge-flat-per",
+  "regime": "edge",
+  "dx": 50.0,
+  "terrain": "flat",
+  "bnd": 0,
+  "isfflx": 1,
+  "hybrid": false,
+  "shape": [
+   9,
+   9,
+   36
+  ]
+ },
+ {
+  "name": "gz1k-edge-hill-spec",
+  "regime": "edge",
+  "dx": 1000.0,
+  "terrain": "hill",
+  "bnd": 1,
+  "isfflx": 1,
+  "hybrid": false,
+  "shape": [
+   10,
+   10,
+   36
+  ]
+ },
+ {
+  "name": "meso3k-edge-flat-per",
+  "regime": "edge",
+  "dx": 3000.0,
+  "terrain": "flat",
+  "bnd": 0,
+  "isfflx": 0,
+  "hybrid": false,
+  "shape": [
+   9,
+   9,
+   36
+  ]
+ }
+]

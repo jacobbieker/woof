@@ -28,6 +28,13 @@ import pytest
 from woof import capabilities
 
 
+@pytest.fixture(autouse=True)
+def _cuda_backend(monkeypatch):
+    """These are the CUDA front door's tests: under WOOF_BACKEND=mlx the
+    same door asks for MLX instead (tests/test_backend_capabilities.py)."""
+    monkeypatch.setenv("WOOF_BACKEND", "cuda")
+
+
 # ---------------------------------------------------------------------------
 # The registry itself: derived remedies, and remedies that resolve
 # ---------------------------------------------------------------------------

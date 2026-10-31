@@ -409,8 +409,12 @@ def test_reflectivity_for_a_scheme_with_no_hx_route_is_refused_at_config_time():
     # reflectivity cycle on it is refused by name below, the positive
     # control this arm lacked.  Ferrier-Aligo (5) computes its DBZ column
     # inside EGCP01COLUMN, so it is fused too.
-    from woof.microphysics_schemes import NAMED_MP_IDS
-    assert set(fused) == {5} | set(NAMED_MP_IDS), routes
+    # MAD-WRF's passive mp 96 is named but not fused: it has no Z of its
+    # own and reads the Kessler operator (woof/core/refl.py).
+    from woof.microphysics_schemes import NAMED_SCHEMES
+    assert set(fused) == {5} | {s.mp_id for s in NAMED_SCHEMES.values()
+                                if s.native_reflectivity}, routes
+    assert routes[96] == "operator", routes
     assert routes[50] == "scheme-diagnostic", routes
     for mp in fused:
         with pytest.raises(RadarAssimilationError,

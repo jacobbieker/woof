@@ -1,0 +1,227 @@
+{
+ "case": "opac_continental_mie_rh50",
+ "options": {
+  "wavelength": [
+   500.0,
+   502.0
+  ],
+  "mol_abs_param": "reptran coarse",
+  "rte_solver": "disort",
+  "number_of_streams": 8,
+  "sza": 30.0,
+  "phi0": 0.0,
+  "umu": [],
+  "phi": [],
+  "albedo": 0.2,
+  "pseudospherical": false,
+  "earth_radius": 6370.0,
+  "deltam": null,
+  "disort_intcor": "off",
+  "zout": [
+   "sur",
+   "toa"
+  ],
+  "output_quantity": "irradiance",
+  "day_of_year": null,
+  "atmosphere_file": "us",
+  "wc_file": null,
+  "wc_properties": "hu",
+  "ic_file": null,
+  "ic_properties": "fu",
+  "ic_fu_reff_def": false,
+  "no_absorption": false,
+  "no_scattering": false
+ },
+ "inputs_sha256": "2a86eda7eb3cdb50b0c7cd28418a836ecc617e3740c6c9dcdb54a9d07290f80c",
+ "aerosol": {
+  "species": [
+   "inso",
+   "waso",
+   "soot",
+   "suso"
+  ],
+  "library": "mie",
+  "library_sha256": {
+   "inso": "5bac8019f79380819c00edadbbf4814ae6427cf5d0714fcae74445e1f84a5231",
+   "waso": "5653d49b26b812fe1beede07e6085808fa06d1c8ff0e5b9ba1dc6692dcf3ee57",
+   "soot": "26165e28d95f3e72d56b5334b359ec4e29b47e82967d15659188ff1730ad5cc5",
+   "suso": "6dad5080af5f42959181ed513f9673ba4e27f3b2f8cccf5a81a721de966ad5ee"
+  },
+  "library_tool": "libRadtran mie (black box)",
+  "library_package": {
+   "name": "rubin-libradtran",
+   "version": "2.0.6",
+   "build": "py311pl5321h6e06971_1",
+   "channel": "https://conda.anaconda.org/conda-forge/",
+   "url": "https://conda.anaconda.org/conda-forge/osx-arm64/rubin-libradtran-2.0.6-py311pl5321h6e06971_1.conda",
+   "sha256": "a056a687da52ee0e2c67a48b49da5252c1ca25b9eb411bfbc890472c672b9b3d"
+  }
+ },
+ "uvspec_input": "data_files_path <libRadtran data>\natmosphere_file <run dir>/atm.dat\nsource solar\nmol_abs_param reptran coarse\nwavelength 500.0 502.0\nrte_solver disort\nnumber_of_streams 8\nsza 30.0\nphi0 0.0\nalbedo 0.2\ndisort_intcor off\nzout sur toa\nmol_file CH4 <run dir>/CH4.vmr vmr\nmol_file N2O <run dir>/N2O.vmr vmr\nmol_file CO <run dir>/CO.vmr vmr\nmol_file N2 <run dir>/N2.vmr vmr\naerosol_default\naerosol_species_file <run dir>/aer.dat inso waso soot suso\naerosol_species_library <OPAC library>/\nquiet\n",
+ "uvspec": {
+  "lambda": [
+   500.063,
+   500.438,
+   500.814,
+   501.19,
+   501.567,
+   501.945
+  ],
+  "edir": [
+   [
+    1143.105,
+    1601.927
+   ],
+   [
+    1161.738,
+    1627.648
+   ],
+   [
+    1088.791,
+    1525.428
+   ],
+   [
+    1209.258,
+    1693.469
+   ],
+   [
+    1137.229,
+    1592.802
+   ],
+   [
+    1157.135,
+    1622.839
+   ]
+  ],
+  "edn": [
+   [
+    305.9029,
+    1.437541e-12
+   ],
+   [
+    310.135,
+    6.259814e-13
+   ],
+   [
+    290.0934,
+    1.564449e-12
+   ],
+   [
+    321.6802,
+    -1.085493e-12
+   ],
+   [
+    301.8248,
+    -4.083864e-13
+   ],
+   [
+    305.5895,
+    8.321755e-13
+   ]
+  ],
+  "eup": [
+   [
+    289.8015,
+    374.9089
+   ],
+   [
+    294.3746,
+    380.1915
+   ],
+   [
+    275.7768,
+    355.6658
+   ],
+   [
+    306.1876,
+    394.4775
+   ],
+   [
+    287.8107,
+    370.2367
+   ],
+   [
+    292.5449,
+    374.8434
+   ]
+  ],
+  "uavgdir": [
+   [
+    105.831,
+    147.1981
+   ],
+   [
+    107.5553,
+    149.5616
+   ],
+   [
+    100.8011,
+    140.1688
+   ],
+   [
+    111.9533,
+    155.6097
+   ],
+   [
+    105.2842,
+    146.3596
+   ],
+   [
+    107.1259,
+    149.1196
+   ]
+  ],
+  "uavgdn": [
+   [
+    52.19911,
+    1.607152e-13
+   ],
+   [
+    52.9252,
+    3.061903e-14
+   ],
+   [
+    49.50005,
+    1.955561e-13
+   ],
+   [
+    54.90939,
+    -1.038293e-13
+   ],
+   [
+    51.49997,
+    -9.987271e-14
+   ],
+   [
+    52.05388,
+    7.124475e-14
+   ]
+  ],
+  "uavgup": [
+   [
+    46.12335,
+    63.40974
+   ],
+   [
+    46.85117,
+    64.24716
+   ],
+   [
+    43.89124,
+    60.05891
+   ],
+   [
+    48.73126,
+    66.57013
+   ],
+   [
+    45.8065,
+    62.4428
+   ],
+   [
+    46.55996,
+    63.11375
+   ]
+  ]
+ }
+}

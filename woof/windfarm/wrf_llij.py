@@ -42,6 +42,7 @@ import ctypes.util
 from dataclasses import dataclass
 from functools import lru_cache
 import math
+import sys
 
 import numpy as np
 
@@ -71,8 +72,24 @@ class WrfProjectionRefused(ValueError):
     """A projection WRF's wind-farm placement does not handle."""
 
 
+class _Ported:
+    """glibc's functions from woof's own word-exact ports, under the C
+    names (woof.backend.host.libm32): the host C library is not glibc."""
+
+    def __init__(self, lib):
+        self._lib = lib
+
+    def __getattr__(self, name):
+        return getattr(self._lib, "woof_" + name)
+
+
 @lru_cache(maxsize=1)
 def _libm():
+    from woof.backend.host import host_libc_is_glibc, libm32
+    if not host_libc_is_glibc() and not sys.platform.startswith("linux"):
+        # macOS / Windows: their libm is not the C library gfortran's WRF
+        # called; glibc's words come from woof's ports instead.
+        return _Ported(libm32())
     name = ctypes.util.find_library("m") or "libm.so.6"
     library = ctypes.CDLL(name)
     for fn in ("cosf", "sinf", "tanf", "logf", "log10f"):

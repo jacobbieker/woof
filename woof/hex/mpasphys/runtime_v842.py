@@ -1434,6 +1434,14 @@ def _run_native_dynamics(arguments, config, layout, payload, streams, library,
                 cuda_resources=cuda_resources,
                 surface_record_reader=surface_record_reader)
         session.output_config_snapshot=output_config_snapshot
+        if getattr(config,'wrfsolar_eps',None) is not None:
+            # WOOF's &wrfsolar_eps (wrfsolar_eps_v842): the STOCHPERT.TBL fields on the mesh's harmonics.
+            if limited_area:
+                raise ValueError('&wrfsolar_eps config_multi_perturb runs on global meshes: its harmonic '
+                                 'patterns need every neighbour, and a regional mesh has none at its edge')
+            from .wrfsolar_eps_v842 import MpasMultiPerturb
+            session.wrfsolar_eps=MpasMultiPerturb(config.wrfsolar_eps,mesh,dt=dt,
+                                                  n_solve=int(layout.dimensions['nCellsSolve']))
         receipt['lake_cells_folded_to_water']=fold_lake_class(native,layout)
         if limited_area:
             receipt['limited_area_sentinels']=remap_limited_area_sentinels(native,layout)
@@ -1540,6 +1548,15 @@ def _run_native_dynamics(arguments, config, layout, payload, streams, library,
                 chemistry.bind(dycore=dycore,cache=coupling.physics_cache,coupling=coupling)
                 output.extra_history=chemistry.history_fields
                 output.extra_history_attrs={'CHEMISTRY':chemistry.history_attribute()}
+            solar=None
+            if getattr(config,'solar_diagnostics',False):
+                # WOOF's &diagnostics config_solar_diagnostics: WRF-Solar's 26 fields after
+                # every step (woof.hex.mpasphys.solar_diagnostics_v842).
+                if not resident or halo is not None:
+                    raise ValueError('config_solar_diagnostics runs on the resident single-card MPAS route: '
+                                     "it reads the GPU radiation's cloud copies (qcrad_p/qirad_p)")
+                from .solar_diagnostics_v842 import MpasSolarDiagnostics
+                solar=MpasSolarDiagnostics(session,coupling,dycore)
             receipt['output_metadata']=getattr(output,'metadata_receipt',None)
             initialized_scalars = dycore.cp.asarray(native.get_field('state','scalars')[...,:-1])
             registry_scalars = coupling._registry_rows(dycore.atmosphere.state.scalars)
@@ -1644,6 +1661,10 @@ def _run_native_dynamics(arguments, config, layout, payload, streams, library,
                             with timed_stage(receipt['stage_timings'], 'chemistry', timeline='post.forecast_process.native.chemistry',
                                              parallelism={'device':'GPU','cards':1,'host_threads':1}):
                                 chemistry.step(session=session,dt=dt)
+                        if solar is not None:
+                            with timed_stage(receipt['stage_timings'], 'solar-diagnostics', timeline='post.forecast_process.native.solar_diagnostics',
+                                             parallelism={'device':'GPU','cards':1,'host_threads':1}):
+                                solar.step(dt=dt)
                         if execution is not None:
                             # Complete boundary exchange before committing the native clock.
                             execution.after_step(dycore)

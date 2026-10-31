@@ -1,0 +1,128 @@
+{
+ "case": "co2_ch4_1600",
+ "options": {
+  "wavelength": [
+   1600.0,
+   1610.0
+  ],
+  "mol_abs_param": "reptran coarse",
+  "rte_solver": "disort",
+  "number_of_streams": 8,
+  "sza": 40.0,
+  "phi0": 0.0,
+  "umu": [],
+  "phi": [],
+  "albedo": 0.2,
+  "pseudospherical": false,
+  "earth_radius": 6370.0,
+  "deltam": null,
+  "disort_intcor": "moments",
+  "zout": [
+   "sur",
+   "toa"
+  ],
+  "output_quantity": "irradiance",
+  "day_of_year": null,
+  "atmosphere_file": "us",
+  "wc_file": null,
+  "wc_properties": "hu",
+  "ic_file": null,
+  "ic_properties": "fu",
+  "ic_fu_reff_def": false,
+  "no_absorption": false,
+  "no_scattering": false
+ },
+ "inputs_sha256": "d21a6eeb4395ca446f7533a4e69a4be28072dbc9d9fd4f61602ab96ac4a40980",
+ "uvspec_input": "data_files_path <libRadtran data>\natmosphere_file <run dir>/atm.dat\nsource solar\nmol_abs_param reptran coarse\nwavelength 1600.0 1610.0\nrte_solver disort\nnumber_of_streams 8\nsza 40.0\nphi0 0.0\nalbedo 0.2\ndisort_intcor moments\nzout sur toa\nmol_file CH4 <run dir>/CH4.vmr vmr\nmol_file N2O <run dir>/N2O.vmr vmr\nmol_file CO <run dir>/CO.vmr vmr\nmol_file N2 <run dir>/N2.vmr vmr\nquiet\n",
+ "uvspec": {
+  "lambda": [
+   1601.925,
+   1605.783,
+   1609.66
+  ],
+  "edir": [
+   [
+    170.8739,
+    182.0599
+   ],
+   [
+    177.459,
+    183.1724
+   ],
+   [
+    169.7112,
+    179.4734
+   ]
+  ],
+  "edn": [
+   [
+    0.1754647,
+    8.256573e-12
+   ],
+   [
+    0.1863025,
+    -1.048446e-13
+   ],
+   [
+    0.1735174,
+    -3.007703e-12
+   ]
+  ],
+  "eup": [
+   [
+    34.20987,
+    31.74702
+   ],
+   [
+    35.52907,
+    34.20792
+   ],
+   [
+    33.97694,
+    31.94914
+   ]
+  ],
+  "uavgdir": [
+   [
+    17.75056,
+    18.91256
+   ],
+   [
+    18.43462,
+    19.02813
+   ],
+   [
+    17.62977,
+    18.64388
+   ]
+  ],
+  "uavgdn": [
+   [
+    0.04990977,
+    1.196593e-12
+   ],
+   [
+    0.05550078,
+    -1.956294e-14
+   ],
+   [
+    0.05036459,
+    -8.866899e-13
+   ]
+  ],
+  "uavgup": [
+   [
+    5.44467,
+    4.789117
+   ],
+   [
+    5.654627,
+    5.274551
+   ],
+   [
+    5.407598,
+    4.868007
+   ]
+  ]
+ }
+}

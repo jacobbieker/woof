@@ -73,6 +73,7 @@ from woof.core.physics_inventory import (
     CUMULUS_HISTORY_RATES, CUMULUS_HISTORY_SPECIES, history_tendency_rows,
     scm_forcing_fields,
     radiation_boundary_flux_names,
+    radiation_spectral_fields,
     _HMIX_K_DIAG_NAMES,
     hmix_k_diag_names,
     microphysics_scratch_slots,
@@ -625,7 +626,15 @@ def _composed_optional_tendency_components(
     """Union of optional moisture categories entering the RK target."""
     members = (set(_pbl_optional_tendency_components(cfg))
                | set(_cumulus_optional_tendency_components(cfg)))
+    if int(getattr(cfg, "shcu_physics", 0)):
+        # Deng's RQRSHTEN (phy_shcu_ten, module_physics_addtendc.F:1894).
+        members.add("rqr")
     return tuple(name for name in ("rqr", "rqi", "rqs") if name in members)
+
+
+def _cumulus_radiation_icloud_cu(cfg) -> int:
+    from woof.core.cumulus_radiation import icloud_cu
+    return icloud_cu(cfg)
 
 
 def _as_2d(value, shape, name: str, *, dtype=DTYPE) -> cp.ndarray:
@@ -1216,6 +1225,9 @@ class RadiationResult:
     aerosol2d: dict | None = None
     aodtot: cp.ndarray | None = None
     boundary_fluxes: Mapping[str, cp.ndarray] | None = None
+    # rrtmg_spectral_output: physics field name -> (count, ny, nx) band or
+    # g-point fluxes (woof.core.physics_inventory.radiation_spectral_fields)
+    spectral_fluxes: Mapping[str, cp.ndarray] | None = None
 
 
 @dataclass
@@ -1270,6 +1282,11 @@ class CumulusResult:
     # Actual producer records that remain unused by the prognostic species.
     # Output-only: a diagnostic ice rate cannot create an ice state slot.
     history_rates: Mapping[str, cp.ndarray] | None = None
+    # The scheme's cloud for radiation under cu_rad_feedback, by driver
+    # field name (Kain-Fritsch: cldfra_dp, cldfra_sh, qc_cu, qi_cu, the
+    # grid arrays module_cumulus_driver.F:1044-1046 binds).  Written with
+    # the same per-column NCA eligibility as the rates.
+    cloud_feedback: Mapping[str, cp.ndarray] | None = None
 
     def __post_init__(self) -> None:
         if (self.rucuten is None) != (self.rvcuten is None):
@@ -2216,6 +2233,14 @@ class PhysicsDriver:
         # attaches it where the config asks for it (restart: rebuilt; its
         # eleven state fields ride ``fields``).
         self.swint = None
+        # WRF's swint_opt = 2 carrier, FARMS (woof.core.farms);
+        # initialize_physics attaches it where the config asks for it
+        # (restart: rebuilt; its six outputs ride ``fields``).
+        self.farms = None
+        # woof.radtran spectral diagnostic (RunConfig radtran_*, output-only);
+        # initialize_physics attaches it where radtran_wavelengths is set
+        # (restart: rebuilt; its outputs ride ``fields``).
+        self.radtran = None
         self.lake = None
         self.o3rad = None
         self.fields = fields
@@ -2326,6 +2351,23 @@ class PhysicsDriver:
         from woof.eclipse_windows import EclipseRadiation
         self.eclipse = EclipseRadiation.for_run(cfg, radiation)
         self.cumulus_callable = cumulus
+        # WRF's separate shallow-cumulus slot (shcu_physics), run every model
+        # step after the cumulus call (module_first_rk_step_part1.F:1570).
+        # Its state is in ``fields``; its coupled tendencies are rebuilt by
+        # every compute() before the composer reads them.
+        self.shallow_cumulus = None
+        self.shallow_tendencies = None
+        if int(getattr(cfg, "shcu_physics", 0)):
+            from woof.core.shcu_deng import DengShallowCumulus
+            self.shallow_cumulus = DengShallowCumulus(cfg)
+        # WRF-Solar EPS (multi_perturb = 1): the pattern provider over the
+        # pert3d fields held in ``fields``; rebuilt, never serialized.
+        self.multi_perturb = None
+        from woof.core.wrfsolar_eps import active_switches
+        if active_switches(cfg):
+            from woof.core.wrfsolar_eps import MultiPerturb
+            nz_, ny_, nx_ = state.p.shape
+            self.multi_perturb = MultiPerturb(cfg, self.fields, nz=nz_, ny=ny_, nx=nx_)
         self.ra_physics = cfg.ra_physics
         self.ra_lw_physics, self.ra_sw_physics = radiation_scheme_ids(cfg)
         self.radiation_active = bool(
@@ -2522,6 +2564,8 @@ class PhysicsDriver:
         self.call_counts = {"radiation": 0, "sfclay": 0,
                             "noah": 0, "ysu": 0, "cumulus": 0,
                             "cumulus_history": 0}
+        if self.shallow_cumulus is not None:
+            self.call_counts["shallow_cumulus"] = 0
         self.ysu_nan_guard_fires = 0
         #: Opt-in :class:`~woof.core.surface_moisture_ledger.
         #: SurfaceMoistureLedger`, or ``None`` on every ordinary run.  The
@@ -2948,6 +2992,43 @@ class PhysicsDriver:
                 name, source=source, model_time=now,
                 value=float(array.reshape(-1)[0]))
 
+    def _run_farms(self, atmosphere, state: DomainState, cfg: RunConfig, *,
+                   itimestep: int, radiation_due: bool) -> None:
+        """WRF ``swint_opt = 2``: FARMS's six irradiances on this step and,
+        between radiation calls, the Solar_step's own rewrites of COSZEN
+        and CLDFRA (woof.core.farms module docstring).
+
+        FARMS writes SWDOWN2 ... SWDDNIC2 into ``fields``; only
+        ``couple_farms`` copies SWDOWN2 into SWDOWN, which the land surface
+        reads.  The per-step CLDFRA lands in the history CLDFRA and in the
+        UW PBL's ``uw_cldfra`` where those exist, and COSZEN -- at this
+        step's ``xtime + radt/2``, as the Solar_step computes it -- in the
+        carried COSZEN and the history COSZEN; on a radiation step the
+        radiation call already wrote both from the same statements.
+        """
+        farms = self.farms
+        aodtot = self.aodtot
+        if int(cfg.aer_opt) == 2:
+            aodtot = None
+        cldfra = farms.step(self.fields, atmosphere, state,
+                            elapsed_seconds=float(state.elapsed_seconds),
+                            itimestep=itimestep, aodtot=aodtot,
+                            eps=self.multi_perturb)
+        if radiation_due:
+            return
+        if self.cldfra is not None:
+            self.cldfra[...] = cldfra
+        if "uw_cldfra" in self.fields:
+            self.fields["uw_cldfra"][...] = cldfra
+        need = [target for target in (self.fields.get("coszen"),
+                                      getattr(self, "radiation_coszen", None))
+                if target is not None]
+        if need:
+            cosine = farms.radiation_coszen_at(
+                float(state.elapsed_seconds), np.float32(self.radt_minutes))
+            for target in need:
+                target[...] = cosine
+
     def _run_radiation(self, atmosphere: Mapping[str, cp.ndarray],
                        state: DomainState, cfg: RunConfig) -> None:
         """Invoke and capture one due radiation result."""
@@ -3020,6 +3101,13 @@ class PhysicsDriver:
             for name in expected_fluxes:
                 self.fields[name][...] = _checked_array(
                     result.boundary_fluxes[name], (ny,nx), "radiation "+name)
+        spectral = radiation_spectral_fields(cfg)
+        if spectral:
+            if result.spectral_fluxes is None or set(result.spectral_fluxes) != set(spectral):
+                raise ValueError("radiation omitted its rrtmg_spectral_output fluxes")
+            for name, count in spectral.items():
+                self.fields[name][...] = _checked_array(
+                    result.spectral_fluxes[name], (count, ny, nx), "radiation " + name)
         swdown = _checked_array(
             result.swdown, (ny, nx), "radiation SWDOWN")
         glw = _checked_array(result.glw, (ny, nx), "radiation GLW")
@@ -3391,6 +3479,11 @@ class PhysicsDriver:
         for name, new in news.items():
             cp.copyto(self.cu_rates[name], new, where=eligible[None])
         self.retain_cumulus_history(result, state, eligible=eligible, validated=native_kf)
+        # KF_eta_CPS zeroes and rewrites CLDFRA_DP_KF/CLDFRA_SH_KF/QC_KF/
+        # QI_KF only for the columns it recomputes (module_cu_kfeta.F:
+        # 410-426); a held column keeps its cloud for radiation.
+        for name, new in (result.cloud_feedback or {}).items():
+            cp.copyto(self.fields[name], new, where=eligible[None])
         cp.copyto(self.cu_pratec, pratec_new, where=eligible)
         # RAINCV = DT*PRATEC (module_cu_kfeta.F:2504-2505, 2642-2643).
         cp.copyto(self.cu_raincv, DTYPE(clock_dt) * pratec_new,
@@ -3764,15 +3857,21 @@ class PhysicsDriver:
             contribution = getattr(self.cumulus_tendencies, name, None)
             if contribution is not None:
                 getattr(target, name).__iadd__(contribution)
+        shallow = getattr(self, "shallow_tendencies", None)
         for name in ("rtheta", "rqv", "rqc"):
             value = getattr(target, name)
             _compose_three(value, getattr(pbl, name),
                            getattr(self.radiation_tendencies, name),
                            getattr(self.cumulus_tendencies, name))
+            if shallow is not None:
+                # phy_shcu_ten's add_a2a, after phy_cu_ten's.
+                value += getattr(shallow, name)
         for name in ("rqr", "rqi", "rqs"):
-            sources = [getattr(component, name) for component in (
-                pbl, self.radiation_tendencies, self.cumulus_tendencies)
-                if getattr(component, name) is not None]
+            components = (pbl, self.radiation_tendencies,
+                          self.cumulus_tendencies) + (
+                (shallow,) if shallow is not None else ())
+            sources = [getattr(component, name) for component in components
+                       if getattr(component, name) is not None]
             if sources:
                 value = getattr(target, name)
                 if value is None:
@@ -6126,9 +6225,35 @@ class PhysicsDriver:
         if eclipse is not None and not radiation_due:
             eclipse.apply(self, state, cfg)
 
+        if getattr(self, "farms", None) is not None and radiation_enabled(cfg):
+            # WRF swint_opt = 2: FARMS on EVERY step, radiation steps
+            # included, after ENDIF Radiation_step
+            # (module_radiation_driver.F:2983-3101; woof.core.farms).
+            if atmosphere is None:
+                atmosphere = _prepare_atmosphere(state)
+            self._run_farms(atmosphere, state, cfg, itimestep=itimestep,
+                            radiation_due=radiation_due)
+
+        # WRF-Solar diagnostics (solar_diagnostics = 1): WRF's radiation
+        # driver runs its Solar_step cloud block and COSZEN on EVERY step
+        # under this switch, and phy_prep's density/dz8w are the step's
+        # start; the end-of-step call reads them
+        # (woof.core.solar_diagnostics).  Off, nothing runs.
+        if int(getattr(cfg, "solar_diagnostics", 0) or 0):
+            from woof.core.solar_diagnostics import capture_solar_step
+            capture_solar_step(self, state, cfg, atmosphere)
+
         # radiation_driver.F:3195-3243 integrates the held boundary fluxes
         # every model step, even when the wrapper did not run this step.
         self.accumulate_radiation_boundary_fluxes(cfg)
+
+        # woof.radtran spectral diagnostic (output-only) on the time-t
+        # atmosphere, at its own cadence; writes only its RT_* fields.
+        radtran = getattr(self, "radtran", None)
+        if radtran is not None and radtran.due(state, cfg):
+            if atmosphere is None:
+                atmosphere = _prepare_atmosphere(state)
+            radtran.run(self, state, cfg, atmosphere)
 
         # WRF fixed-dt surface/PBL cadence: the mandatory ITIMESTEP=1 call
         # is followed by calls where MOD(ITIMESTEP, STEPBL) == 0.
@@ -6410,6 +6535,36 @@ class PhysicsDriver:
             self._run_cumulus(atmosphere, state, cfg)
             self.call_counts["cumulus"] += 1
 
+        # WRF's shallowcu_driver follows the cumulus driver on every model
+        # step (module_first_rk_step_part1.F:1567-1663); calculate_phy_tend
+        # couples its rates with the column mass (module_em.F:2309-2340)
+        # and phy_shcu_ten adds them after the cumulus ones
+        # (module_physics_addtendc.F:161-165, :1864-1899).
+        if self.shallow_cumulus is not None:
+            if atmosphere is None:
+                atmosphere = _prepare_atmosphere(state)
+            deng_eps = (self.multi_perturb is not None
+                        and "pert_deng" in self.multi_perturb.switches)
+            if deng_eps:
+                # WRF-Solar EPS (module_shallowcu_driver.F:632-672): Add_ on
+                # th_phy, QV, QC and W before deng_shcu_driver, Remove_
+                # after.  Deng reads T, not TH, so its theta change is the
+                # round trip th_phy keeps; QV, QC and W are the state.
+                from woof.core import wrfsolar_eps as _eps
+                _deng_args = dict(th=atmosphere["theta"], qv=state.qv,
+                                  qc=state.qc, w=state.w)
+                _eps.deng_add(self.multi_perturb.patterns(),
+                              _eps.factors(cfg, "pert_deng"), **_deng_args)
+            rates = self.shallow_cumulus(driver=self, atmosphere=atmosphere,
+                                         state=state, cfg=cfg)
+            if deng_eps:
+                _eps.deng_remove(self.multi_perturb.patterns(),
+                                 _eps.factors(cfg, "pert_deng"), **_deng_args)
+            self.shallow_tendencies = couple_column_tendencies(
+                state, cfg, rtheta=rates["rthshten"], rqv=rates["rqvshten"],
+                rqc=rates["rqcshten"], rqr=rates["rqrshten"])
+            self.call_counts["shallow_cumulus"] += 1
+
         self.couple_cumulus_history(state, cfg)
         if getattr(self, "_wrf_rthraten", None) is not None:
             self.radiation_tendencies = couple_column_tendencies(
@@ -6427,6 +6582,11 @@ class PhysicsDriver:
         # Morrison can consume them.
         if cfg.cu_physics:
             self._advance_cumulus_clock(state, cfg)
+        if self.multi_perturb is not None:
+            # first_rk_step_part2.F:262-317: the multi_perturb fields move
+            # after the first-RK physics, on domain 1, on the first step and
+            # every stepsp steps -- the microphysics of this step reads them.
+            self.multi_perturb.update(itimestep)
         return self.tendencies
 
     def set_forcing(self, **fields) -> None:
@@ -6558,9 +6718,14 @@ class PhysicsDriver:
         ``cu_physics=0`` therefore failed every downstream QPF product,
         which is exactly how this was found.
 
-        ``RAINSH`` is always zero here, and that is a true statement rather
-        than a placeholder: woof implements no shallow-cumulus scheme, and
-        zero is what WRF writes for ``shcu_physics=0``.
+        ``RAINSH`` is zero unless ``shcu_physics = 5`` (Deng) runs, and zero
+        is what WRF writes for ``shcu_physics=0``.  Under Deng it is WRF's
+        RAINSH word for word, which is the LAST step's shallow rain in mm, not
+        an accumulation: deng_shcu_driver zeroes RAINSH for every column before
+        adding that step's RAINSHV (module_shcu_deng.F:276, :2834), and the
+        accumulation in advance_ppt adds PRATESH*DT, which Deng never writes
+        (module_physics_addtendc.F:2292); shallowcu_driver then sets RAINSHV to
+        PRATESH*DT = 0 (module_shallowcu_driver.F:686-691).
         """
         from woof.io.history_layout import physics_history_fields
 
@@ -7207,6 +7372,11 @@ def initialize_physics(
     for name in radiation_boundary_flux_names(cfg):
         f[name] = cp.zeros(shape,dtype=DTYPE)
         f["ac"+name] = cp.zeros(shape,dtype=DTYPE)
+    for name, count in radiation_spectral_fields(cfg).items():
+        f[name] = cp.zeros((count,) + tuple(shape), dtype=DTYPE)
+    from woof.core.physics_inventory import radtran_fields
+    for name, full in radtran_fields(cfg, *shape).items():
+        f[name] = cp.zeros(full, dtype=DTYPE)
     if "swupt" in radiation_boundary_flux_names(cfg) and "coszen" not in f:
         f["coszen"] = cp.zeros(shape,dtype=DTYPE)
     n_soil = soil_layer_count(cfg)
@@ -7644,6 +7814,15 @@ def initialize_physics(
         for name in (*_swint_fields, "gsw"):
             if name not in f:
                 f[name] = cp.zeros(shape, dtype=DTYPE)
+    if int(getattr(cfg, "swint_opt", 0)) == 2:
+        # WRF swint_opt = 2 (woof.core.farms): SWDOWN2, SWDDIR2, SWDDNI2,
+        # SWDDIF2, SWDOWNC2 and SWDDNIC2, zero at the start as WRF's misc
+        # state is (Registry.EM_COMMON:1710-1726, restart-carried),
+        # serialized with the surface inventory.
+        from woof.core.farms import STATE_FIELDS as _farms_fields
+        for name in _farms_fields:
+            if name not in f:
+                f[name] = cp.zeros(shape, dtype=DTYPE)
     if int(getattr(cfg, "alb_sol", 0)) == 1:
         if landuse_dataset not in ("MODIFIED_IGBP_MODIS_NOAH", "MODI-RUC"):
             raise ValueError(
@@ -7660,6 +7839,18 @@ def initialize_physics(
                     else CARRIER_SOURCE_UNWRITTEN),
             model_time=(0.0 if not radiation_active else None))
 
+    if int(getattr(cfg, "shcu_physics", 0)):
+        # WRF's dengshcuscheme package state (Registry.EM_COMMON:3232) at
+        # deng_shcu_init's cold start, under the Registry names, so the
+        # checkpoint carries it with the physics inventory.
+        from woof.core.shcu_deng import allocate_deng_fields
+        allocate_deng_fields(f, cfg, *state.p.shape)
+    if int(getattr(cfg, "multi_perturb", 0)) == 1:
+        # WRF-Solar EPS: the consumed pert3d fields and their spectra under
+        # WRF's Registry names, zero as INITIALIZE_STOCH leaves them, so the
+        # checkpoint carries them with the physics inventory.
+        from woof.core.wrfsolar_eps import allocate_multi_perturb_fields
+        allocate_multi_perturb_fields(f, cfg, *state.p.shape)
     driver = PhysicsDriver(state, cfg, f, result, noah_params,
                            radiation=radiation, cumulus=cumulus,
                            noahmp_params=noahmp_params,
@@ -7840,6 +8031,63 @@ def initialize_physics(
             start_time=radiation_start_time,
             latitude_deg=radiation_latitude,
             longitude_deg=radiation_longitude, shape=shape, generation=getattr(cfg, "solar_generation", "wrf_480"))
+    if int(getattr(cfg, "swint_opt", 0)) == 2:
+        # WRF's swint_opt = 2 carrier, FARMS (woof.core.farms): the
+        # per-step zenith cosine, the Solar_step's cloud fraction and the
+        # FARMS kernel, on this domain's own latitude, longitude and start
+        # time.  Only where the config asks for it.
+        from woof.core.farms import FarmsShortwave
+        from woof.core.mynn_radiation import mynn_bl_cloud_active
+        if (radiation_latitude is None or radiation_longitude is None
+                or radiation_start_time is None):
+            raise ValueError(
+                "swint_opt = 2 needs the domain's latitude, longitude and "
+                "UTC start time (radiation_latitude/radiation_longitude/"
+                "radiation_start_time): FARMS is evaluated at the local "
+                "solar zenith angle every step")
+        bl_merge = (int(getattr(cfg, "icloud", 1)) == 1
+                    and mynn_bl_cloud_active(
+                        getattr(cfg, "bl_pbl_physics", 0),
+                        getattr(cfg, "icloud_bl", 0)))
+        if bl_merge and any(f.get(name) is None
+                            for name in ("qc_bl", "qi_bl", "cldfra_bl")):
+            raise ValueError(
+                "swint_opt = 2 under MYNN's icloud_bl reads QC_BL, QI_BL "
+                "and CLDFRA_BL every step, and this driver carries none")
+        from woof.core.cldfra3 import cldfra3_gridkm as _cldfra3_gridkm
+        driver.farms = FarmsShortwave(
+            start_time=radiation_start_time,
+            latitude_deg=radiation_latitude,
+            longitude_deg=radiation_longitude, shape=shape,
+            generation=getattr(cfg, "solar_generation", "wrf_480"),
+            mp_physics=int(cfg.mp_physics),
+            use_mp_re=int(getattr(cfg, "use_mp_re", 1)),
+            icloud=int(getattr(cfg, "icloud", 1)),
+            aer_opt=int(getattr(cfg, "aer_opt", 0)),
+            aer_angexp_val=float(getattr(cfg, "aer_angexp_val", 1.3)),
+            aer_ssa_val=float(getattr(cfg, "aer_ssa_val", 0.85)),
+            aer_asy_val=float(getattr(cfg, "aer_asy_val", 0.9)),
+            couple_farms=bool(getattr(cfg, "couple_farms", False)),
+            bl_merge=bl_merge,
+            icloud_cu=_cumulus_radiation_icloud_cu(cfg),
+            deng_cloud=int(getattr(cfg, "shcu_physics", 0)) == 5,
+            gridkm=(_cldfra3_gridkm(cfg.dx, cfg.dy)
+                    if int(getattr(cfg, "icloud", 1)) == 3 else None))
+    if tuple(getattr(cfg, "radtran_wavelengths", ()) or ()):
+        # woof.radtran spectral diagnostic: the step's own solar geometry
+        # needs this domain's latitude, longitude and start time.
+        from woof.core.radtran_diag import RadtranRun
+        if (radiation_latitude is None or radiation_longitude is None
+                or radiation_start_time is None):
+            raise ValueError(
+                "radtran_wavelengths needs the domain's latitude, longitude and "
+                "UTC start time (radiation_latitude/radiation_longitude/"
+                "radiation_start_time): the spectral diagnostic evaluates the "
+                "solar zenith angle at each call")
+        driver.radtran = RadtranRun(cfg, start_time=radiation_start_time,
+                                    latitude_deg=radiation_latitude,
+                                    longitude_deg=radiation_longitude,
+                                    shape=shape, fields=f)
     # WRF's topo_wind / gwd_opt (woof.core.terrain_drag): the topo_wind
     # coefficients from this domain's terrain (start_em.F:1539-1626) and the
     # gwd_opt statistics, on the device once.  Only where either is on, so
@@ -7897,6 +8145,12 @@ def initialize_physics(
     #
     # An empty receipt is simply not recorded; the property's default is {}.
     receipt = microphysics_cold_start(state, cfg)
+    if int(getattr(cfg, "madwrf_opt", 0)) == 2:
+        # real.exe's Init_madwrf_tracers (module_initialize_real.F:4868-
+        # 4874): TR_QC/TR_QI/TR_QS start equal to qc/qi/qs.  A restart
+        # overwrites them with the carried tracers.
+        from woof.core.madwrf import seed_tracers
+        seed_tracers(state)
     if receipt:
         _MICROPHYSICS_INIT_RECEIPTS[driver] = receipt
     # Carriers must exist before anyone takes an inventory: see

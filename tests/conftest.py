@@ -33,6 +33,14 @@ import re
 # tests of the fast default select it themselves (tests/test_numerics_default.py).
 os.environ["GPUWM_NUMERICS"] = "strict"
 
+# WOOF_BACKEND=mlx|cpu runs the GPU suite on woof's facade backends: the
+# facade must own `import cupy` before has_gpu() below probes it, so the
+# backend is installed here, ahead of any import of cupy (woof/backend).
+if os.environ.get("WOOF_BACKEND", "").strip().lower() in ("mlx", "cpu"):
+    from woof import backend as _woof_backend
+
+    _woof_backend.install()
+
 import pytest
 
 #: Set to 1 to guarantee no local device is opened, whatever is collected.
@@ -84,6 +92,22 @@ def has_gpu() -> bool:
 
 HAS_GPU = has_gpu()
 requires_gpu = pytest.mark.skipif(not HAS_GPU, reason="no CUDA GPU / cupy")
+
+
+def _nvrtc_frames_measurable() -> bool:
+    try:
+        from woof import backend
+        return HAS_GPU and backend.active() == "cuda"
+    except Exception:
+        return False
+
+
+#: NVRTC local frames (``local_size_bytes``) and the CUDA stack limit exist
+#: only on CUDA; the Metal facade reports 0, so a frame assertion has
+#: nothing to compare there.
+requires_nvrtc_frames = pytest.mark.skipif(
+    not _nvrtc_frames_measurable(),
+    reason="NVRTC local frames are measured on CUDA only")
 
 
 def _is_cupy_import(node: ast.AST) -> bool:
@@ -1533,3 +1557,24 @@ def _gate_on_case_inputs(items) -> None:
                     reason=f"this machine does not hold the case inputs: "
                            f"{absent}"))
                 break
+
+
+# WOOF_LAUNCH_TRACE_DIR=<dir>: every kernel launch of each test is recorded
+# to <dir>/<test id>.jsonl (tools/launch_trace.py) -- run the same tests on
+# CUDA and on MLX, then tools/backend_receipts.py compares them launch by
+# launch.  Off unless the variable is set.
+if os.environ.get("WOOF_LAUNCH_TRACE_DIR"):
+    @pytest.fixture(autouse=True)
+    def _woof_launch_trace(request):
+        import re as _re
+        import sys as _sys
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        tools = os.path.join(root, "tools")
+        if tools not in _sys.path:
+            _sys.path.insert(0, tools)
+        import launch_trace
+        directory = os.environ["WOOF_LAUNCH_TRACE_DIR"]
+        os.makedirs(directory, exist_ok=True)
+        name = _re.sub(r"[^A-Za-z0-9_.-]+", "_", request.node.nodeid)[:200] + ".jsonl"
+        launch_trace.install(os.path.join(directory, name))
+        yield

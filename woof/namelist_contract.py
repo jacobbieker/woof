@@ -611,9 +611,16 @@ def build_namelist_contract() -> dict:
     asked, records = _probe_vocabulary()
     rules = _value_rules()
     registry = wrf_namelist_keys()
-    from woof.namelist_stochastic import SUPPORTED_SELECTORS
+    from woof.namelist_stochastic import EPS_SELECTORS, SUPPORTED_SELECTORS
     for key in ni.STOCH_SELECTORS:
         row = registry[("stoch", key)]
+        if key in EPS_SELECTORS:
+            rules[("stoch", key)] = {
+                "values": [False, True] if row["type"] == "logical" else [0, 1],
+                "scalar": False,
+                "why": "WRF-Solar EPS (multi_perturb and its scheme hooks); "
+                       "scheme pairings remain RunConfig checks"}
+            continue
         rules[("stoch", key)] = {
             "values": ([0, 1] if key in SUPPORTED_SELECTORS else
                        [False] if row["type"] == "logical" else [0]),

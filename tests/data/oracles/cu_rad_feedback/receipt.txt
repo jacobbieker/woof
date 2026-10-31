@@ -1,0 +1,11 @@
+gfortran: GNU Fortran (conda-forge gcc 16.2.0-7) 16.2.0
+host:     Darwin arm64
+flags:    -O0 -ffp-contract=off -ffree-form -ffree-line-length-none
+float32 libm calls (bound to libm_shim.o): expf powf 
+779875651512709c47d50ef6c1e1216ad94726f1996c5e45a0db8eb800733ffa  wrf-4.7.1/phys/module_radiation_driver.F
+04b26f90b017d06381a401f0ad2023d64eac7f23b941595e2229d591cfc413ae  (generated) wrf_rad_cloud_slices.F90
+bb5dd1f9571f51e44fe53218d8d81dea343ce7233ebd9121750d201363680a95  tools/cu_rad_feedback_oracle/gen_slices.py
+5f54189a0aa7252768be49bf4646bf30ca1aeb6c60595a1e115ce95b9f1553ac  tools/cu_rad_feedback_oracle/run_rad_cloud.F90
+4bef8a573064e00cc1564b394f69ebdc0426a2356cff6c4c19bee8f14baa289b  tools/cu_rad_feedback_oracle/stub_state.F90
+479b1a2bf4e35118d541bbef437d9b5ae6b2ca5c024f0051ce949c36d917fbef  tools/cu_rad_feedback_oracle/rad_cloud_cases.py
+71a9cb00832f8486e99bf680bc852596ecc9ea7adbf36edec186c719a590fd8a  tools/cu_rad_feedback_oracle/build.sh

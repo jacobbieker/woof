@@ -93,6 +93,74 @@ def test_new_fields_are_reviewed_defaults_appended_last():
     """
     from woof.config import CHEM_RUN_FIELDS, FIRE_RUN_FIELDS
     names = [f.name for f in dataclasses.fields(RunConfig)]
+    # MAD-WRF's four keys and WRF-Solar EPS's (multi_perturb and its pert_*
+    # keys, the table), appended off at WRF's Registry defaults
+    # (tests/test_wrfsolar_eps_madwrf_config.py).
+    from woof.config import MADWRF_RUN_DEFAULTS, MULTI_PERTURB_RUN_DEFAULTS
+    for name in reversed([*MULTI_PERTURB_RUN_DEFAULTS, *MADWRF_RUN_DEFAULTS]):
+        assert names.pop() == name
+        field = RunConfig.__dataclass_fields__[name]
+        assert field.kw_only
+        assert field.default == {**MULTI_PERTURB_RUN_DEFAULTS, **MADWRF_RUN_DEFAULTS}[name]
+    # WRF's do_avgflx_em (output-only AVGFLX means), appended off.
+    assert names.pop() == "do_avgflx_em"
+    assert RunConfig.__dataclass_fields__["do_avgflx_em"].default == 0
+    assert RunConfig.__dataclass_fields__["do_avgflx_em"].kw_only
+    # WRF's use_theta_m (the theta_m prognostic), appended at woof's dry 0.
+    assert names.pop() == "use_theta_m"
+    assert RunConfig.__dataclass_fields__["use_theta_m"].default == 0
+    assert RunConfig.__dataclass_fields__["use_theta_m"].kw_only
+    # The radtran diagnostic's OPAC aerosol (output-only), appended off.
+    assert names.pop() == "radtran_aerosol"
+    assert RunConfig.__dataclass_fields__["radtran_aerosol"].default == "none"
+    assert RunConfig.__dataclass_fields__["radtran_aerosol"].kw_only
+    # Output-only WRF-Solar diagnostics, appended off.
+    assert names.pop() == "solar_diagnostics"
+    assert RunConfig.__dataclass_fields__["solar_diagnostics"].default == 0
+    assert RunConfig.__dataclass_fields__["solar_diagnostics"].kw_only
+    # WRF's shallow-cumulus selector (5 = Deng) and cumulus-radiation
+    # feedback, appended off: nothing is built and nothing launches
+    # (tests/test_shcu_deng_integration.py).
+    assert names.pop() == "cu_rad_feedback"
+    assert RunConfig.__dataclass_fields__["cu_rad_feedback"].default is False
+    assert RunConfig.__dataclass_fields__["cu_rad_feedback"].kw_only
+    assert names.pop() == "shcu_physics"
+    assert RunConfig.__dataclass_fields__["shcu_physics"].default == 0
+    assert RunConfig.__dataclass_fields__["shcu_physics"].kw_only
+    # Output-only woof.radtran spectral diagnostic, appended off (no
+    # wavelength: nothing computes, no field is allocated).
+    assert names.pop() == "radtran_pseudospherical"
+    assert RunConfig.__dataclass_fields__["radtran_pseudospherical"].default == False
+    assert RunConfig.__dataclass_fields__["radtran_pseudospherical"].kw_only
+    assert names.pop() == "radtran_streams"
+    assert RunConfig.__dataclass_fields__["radtran_streams"].default == 0
+    assert RunConfig.__dataclass_fields__["radtran_streams"].kw_only
+    assert names.pop() == "radtran_solver"
+    assert RunConfig.__dataclass_fields__["radtran_solver"].default == "disort"
+    assert RunConfig.__dataclass_fields__["radtran_solver"].kw_only
+    assert names.pop() == "radtran_mol_abs_param"
+    assert RunConfig.__dataclass_fields__["radtran_mol_abs_param"].default == "reptran coarse"
+    assert RunConfig.__dataclass_fields__["radtran_mol_abs_param"].kw_only
+    assert names.pop() == "radtran_phi"
+    assert RunConfig.__dataclass_fields__["radtran_phi"].default == ()
+    assert RunConfig.__dataclass_fields__["radtran_phi"].kw_only
+    assert names.pop() == "radtran_umu"
+    assert RunConfig.__dataclass_fields__["radtran_umu"].default == ()
+    assert RunConfig.__dataclass_fields__["radtran_umu"].kw_only
+    assert names.pop() == "radtran_interval_s"
+    assert RunConfig.__dataclass_fields__["radtran_interval_s"].default == 3600.0
+    assert RunConfig.__dataclass_fields__["radtran_interval_s"].kw_only
+    assert names.pop() == "radtran_wavelengths"
+    assert RunConfig.__dataclass_fields__["radtran_wavelengths"].default == ()
+    assert RunConfig.__dataclass_fields__["radtran_wavelengths"].kw_only
+    # WRF's couple_farms (swint_opt = 2's SWDOWN2 -> SWDOWN), appended off.
+    assert names.pop() == "couple_farms"
+    assert RunConfig.__dataclass_fields__["couple_farms"].default is False
+    assert RunConfig.__dataclass_fields__["couple_farms"].kw_only
+    # Output-only band-resolved RRTMG fluxes, appended off.
+    assert names.pop() == "rrtmg_spectral_output"
+    assert RunConfig.__dataclass_fields__["rrtmg_spectral_output"].default == "none"
+    assert RunConfig.__dataclass_fields__["rrtmg_spectral_output"].kw_only
     # WRF's windfarm_opt and its three companions, appended off: no turbine
     # is placed and nothing launches (tests/test_windfarm_coupling.py).
     assert names.pop() == "windfarm_turbine_file"
@@ -537,7 +605,29 @@ def _check_frozen_defaults(actual):
                          # 2.9.7: the HRRR v4 climate statistics (off) and
                          # tc/nest's archive (read only on a nested domain).
                          ("output_diagnostics", 0), ("diag_int", 15),
-                         ("wind_int", 5), ("nest_accumulation_archive", True)):
+                         ("wind_int", 5), ("nest_accumulation_archive", True),
+                         # output-only band-resolved RRTMG fluxes, off
+                         ("rrtmg_spectral_output", "none"),
+                         # WRF couple_farms, off
+                         ("couple_farms", False),
+                         # output-only woof.radtran diagnostic, off
+                         ("radtran_wavelengths", ()), ("radtran_interval_s", 3600.0),
+                         ("radtran_umu", ()), ("radtran_phi", ()),
+                         ("radtran_mol_abs_param", "reptran coarse"),
+                         ("radtran_solver", "disort"), ("radtran_streams", 0),
+                         ("radtran_pseudospherical", False),
+                         # shallow cumulus and cumulus-radiation feedback, off
+                         ("shcu_physics", 0), ("cu_rad_feedback", False),
+                         # output-only WRF-Solar diagnostics, off
+                         ("solar_diagnostics", 0),
+                         # output-only woof.radtran aerosol, off
+                         ("radtran_aerosol", "none"),
+                         # the theta_m prognostic (dry 0) and the
+                         # output-only AVGFLX means, off
+                         ("use_theta_m", 0), ("do_avgflx_em", 0),
+                         # WRF-Solar EPS and MAD-WRF, off
+                         *__import__("woof.config", fromlist=["x"]).MULTI_PERTURB_RUN_DEFAULTS.items(),
+                         *__import__("woof.config", fromlist=["x"]).MADWRF_RUN_DEFAULTS.items()):
         assert actual.pop(field) == value, field
     # WRF's windfarm_opt and its three companions (the fork's Fitch
     # coupling), appended after upstream 1.1.0's fields, off.

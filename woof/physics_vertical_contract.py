@@ -176,6 +176,10 @@ MILBRANDT2_VERTICAL_LEVEL_BOUNDS = (3, 256)
 #: reads k-2..k+1 (semi-Lagrangian wi stencil) and needs nz >= 3; the GPU
 #: runtime compiles its column arrays for the domain's nz, capped here.
 TEMPO_VERTICAL_LEVEL_BOUNDS = (3, 256)
+#: MAD-WRF's passive hydrometeors (mp_physics = 96): no column process,
+#: so no level window of its own; the cloud initialization's six-level
+#: floor (find_cloudLayers' tropopause search) is woof.core.madwrf's.
+MADWRF_VERTICAL_LEVEL_BOUNDS = (1, None)
 #: WDM6 (mp_physics=16): the 256-level refusal ceiling, imported from the
 #: CuPy-free constants module at the top of this file rather than retyped
 #: (``WDM6_VERTICAL_LEVEL_BOUNDS``).

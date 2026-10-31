@@ -512,8 +512,31 @@ def is_development_module(package: str, module: str) -> bool:
 DECLARATION_ONLY_DATA_PACKAGES: tuple[str, ...] = ("docs",)
 
 
+#: The interpreter-startup hook for woof's facade backends: with
+#: WOOF_BACKEND=mlx|cpu, ``import cupy`` must resolve to woof's facade in
+#: every process, including tools and test subprocesses that import cupy
+#: before woof.  The .pth line imports woof only when that variable asks
+#: for it (woof/__init__.py then installs the backend), so no other Python
+#: process pays for it.  It ships at the site-packages root.
+BACKEND_STARTUP_HOOK = "woof/backend/woof-backend.pth"
+
+
 class _OperationalBuildPy(_BuildPy):
     """Copies every module of a package into the wheel EXCEPT the probes."""
+
+    def run(self) -> None:  # noqa: D102
+        super().run()
+        source = _HERE / BACKEND_STARTUP_HOOK
+        if source.is_file():
+            target = Path(self.build_lib) / source.name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            self.copy_file(str(source), str(target))
+
+    def get_outputs(self, include_bytecode=1):  # noqa: D102
+        outputs = super().get_outputs(include_bytecode)
+        if (_HERE / BACKEND_STARTUP_HOOK).is_file():
+            outputs.append(str(Path(self.build_lib) / Path(BACKEND_STARTUP_HOOK).name))
+        return outputs
 
     def find_package_modules(self, package, package_dir):  # noqa: D102
         return [row for row in super().find_package_modules(package, package_dir)

@@ -179,6 +179,29 @@ def drop_default_spp_selectors(values: dict) -> None:
 CONFIG_DIAGNOSTIC_FIELDS = frozenset(
     {"hailcast_opt", "haildt", "nwp_diagnostics", "tke_budget", "sase_flux_diag", "hmix_k_diag",
      "surface_energy_diag",
+     # Band-resolved RRTMG fluxes: separate kernels over the spectral
+     # buffers, broadband and prognostic words unchanged
+     # (tests/test_rrtmg_spectral_output.py).
+     "rrtmg_spectral_output",
+     # woof.radtran spectral diagnostic: RT_* fields only, no prognostic
+     # word moves (tests/test_radtran_wrf_diagnostic.py).
+     "radtran_wavelengths",
+     "radtran_interval_s",
+     "radtran_umu",
+     "radtran_phi",
+     "radtran_mol_abs_param",
+     "radtran_solver",
+     "radtran_streams",
+     "radtran_pseudospherical",
+     # WRF-Solar diagnostics: 26 history planes from their own kernel; no
+     # forecast word moves (woof/core/solar_diagnostics.py).
+     "solar_diagnostics",
+     # woof.radtran OPAC aerosol: RT_* fields only.
+     "radtran_aerosol",
+     # do_avgflx_em: three history means of the sumflux fluxes; no forecast
+     # word moves (woof/core/avgflx.py).  use_theta_m is NOT here: it is
+     # the prognostic itself.
+     "do_avgflx_em",
      # Correct mode WB1 (woof/correct_mode.py OUTPUT_ONLY_KEYS): books the
      # settled-cloud total CLOUDNC and changes no prognostic word.
      "thompson_cloud_surface_booking"})

@@ -186,7 +186,7 @@ AXES = (
     # Lin), 3 (WSM3), 4 (WSM5), 5 (Ferrier-Aligo), 24 (WSM7) and 106
     # (WSM6R) with their ports.  ra_lw/ra_sw 5 (New Goddard, golden/ports-rad)
     # joined the radiation checks below the same way in 2.9.0.
-    Axis("mp_physics", (0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 30, 50, 106, 900),
+    Axis("mp_physics", (0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 30, 50, 96, 106, 900),
          "woof.config.validate_run_config, inline 'mp_physics must be' "
          "check, plus its two by-name gates -- _P3_UNPORTED_VARIANTS and "
          "the WDM5/WDM7 siblings -- each of which recites the same menu"),
@@ -204,7 +204,7 @@ AXES = (
          "check (after woof.config.radiation_scheme_ids resolution)"),
     Axis("cu_physics", tuple(CU_SCHEMES),
          "woof.config.CU_SCHEMES"),
-    Axis("km_opt", (0, 1, 2, 3, 4),
+    Axis("km_opt", (0, 1, 2, 3, 4, 5),
          "woof.config.validate_km_opt"),
 )
 
@@ -524,6 +524,13 @@ REMEDIES = (
                "PBL-off-gated for the same reason",
      "before": _suite(km_opt=2),
      "after": _suite(km_opt=4)},
+    # km_opt=5 (SMS-3DTKE) is a full 3-D closure that replaces the PBL
+    # scheme (WRF's check_a_mundo refuses the pair); its message names one
+    # way out, followed literally.
+    {"id": "sms-3dtke-is-pbl-off-only",
+     "remedy": "'Set bl_pbl_physics=0.'",
+     "before": _suite(km_opt=5),
+     "after": _suite(km_opt=5, bl_pbl_physics=0)},
     # RETIRED with the rule (audit R-036): SASE with the MYNN surface
     # layer is admitted.  The exclusion was an intersection of two tables
     # -- MYNN's row transcribes WRF's isfc matrix, which has no cell for
@@ -597,6 +604,14 @@ REMEDIES = (
                "own radii the way WRF does)'",
      "before": _suite(mp_physics=30),
      "after": _suite(mp_physics=30) | {"ra_rrtmg_variant": "rrtmg_legacy"}},
+    # MAD-WRF (mp_physics=96): passive hydrometeors with no size
+    # distribution, WRF's use_mp_re = 0.  The same judged exclusion,
+    # followed the same first way.
+    {"id": "mad-wrf-has-no-rte-rrtmgp-cloud-optics",
+     "remedy": "'Set ra_rrtmg_variant='rrtmg_legacy' (which computes its "
+               "own radii the way WRF does)'",
+     "before": _suite(mp_physics=96),
+     "after": _suite(mp_physics=96) | {"ra_rrtmg_variant": "rrtmg_legacy"}},
 )
 
 

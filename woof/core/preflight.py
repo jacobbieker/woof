@@ -2229,7 +2229,9 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # 40,800-column step fell from 3,288 MiB to 58 MiB.  The same source
     # reads 4,496 B on an RTX 4090 (sm_89, NVRTC 13.4.92, 2026-10-22), the
     # ceiling: priced at 1,240 B a 4090 lake run was under-charged 0.6 GiB.
-    "lake": 4496,
+    # The RTX A6000 (sm_86, NVRTC 12.9.86) reads 4,528 B (2026-10-30), now
+    # the ceiling.
+    "lake": 4528,
     # Test-only math grading unit, read on sm_89 and sm_120, NVRTC 13.4.59.
     "portable_libm64_grade": 48,
     # Added with this box's recording at 0 B. 'ntiedtke' is what
@@ -2357,7 +2359,10 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # PRO 6000 Blackwell, sm_120, NVRTC 12.9); the row is the element-wise
     # ceiling over the recorded platforms (kernel_frame_recordings).
     # The workspace itself is priced by :func:`kf_column_workspace_bytes`.
-    "kf": 1024,
+    # 2026-10-30: the A6000's 1,024 B reading is retired (it re-reads 0 B at
+    # the KFWS workspace source), so the ceiling is the older platforms'
+    # 512 B readings, still the element-wise maximum.
+    "kf": 512,
     "kf_validation": 0,
     "lbc_flow": 0,
     "lbc_state": 0,
@@ -2447,8 +2452,11 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # sm_86 compiles Noah 48 B wider than sm_120 (224 against 176); sm_89
     # compiles the 2026-10-12 source to 320 B (re-read 2026-10-22), so the
     # ceiling is the sm_89 reading.  Well under the default stack either
-    # way, so it reserves nothing on any card.
-    "noah": 320,
+    # way, so it reserves nothing on any card.  RAISED 2026-10-30: sm_86 at
+    # NVRTC 12.9.86 (RTX A6000) compiles the WOOF 1.1.x source to 464 B,
+    # wider than the sm_89 reading, so the ceiling is that reading; still
+    # under the 1,024 B default stack.
+    "noah": 464,
     "noahmp_bareflux": 0,
     "noahmp_fluxprep": 0,
     "noahmp_leaves": 272,
@@ -2682,6 +2690,45 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # RTX 5070 Ti production loaders, 2026-10-18, both numerics modes.
     "nextgen_cfe": 0, "nextgen_reservoirs": 0,
     "nextgen_inundation": 0, "nextgen_terrain": 56,
+    # The partial-depth nest's top (Phase D2), RTX A6000 sm_86, NVRTC
+    # 12.9.86, 2026-10-30: advance_w_phi_top's WPHI_MAX_LEV column.
+    "nest_top": 520,
+    # WRF-Solar FARMS and the clean-room spectral solver, RTX A6000 sm_86,
+    # NVRTC 12.9.86, 2026-10-30, default and strict loaders: farms_columns
+    # and farms_mpas_coszen read 0 B; radtran_disort carries its binary64
+    # stream/layer work arrays (30,432 B), radtran_work_size 0 B.  Re-read
+    # on radtran-opac (same box, NVRTC, both loaders) after the body became
+    # rt_problem: radtran_disort and radtran_disort_modes 30,448 B,
+    # radtran_disort_finish 30,432 B, radtran_work_size 0 B.
+    "farms": 0, "radtran_disort": 30448,
+    # Deng shallow cumulus (shcu_physics = 5), same card and day, both
+    # loaders: deng_shcu_column 504 B, deng_shcu_mpas_column 496 B, the
+    # three MPAS glue kernels 0 B.
+    "shcu_deng": 504,
+    # WRF-Solar cal_cldfra3 (icloud = 3) and module_diag_solar
+    # (solar_diagnostics = 1), same card, both loaders (load_module):
+    # cldfra3_columns, cldfra3_log10_probe, solar_diag_columns and
+    # solar_radius_metres read 0 B (their scratch profiles are global).
+    "cldfra3": 0, "solar_diag": 0,
+    # use_theta_m = 1's conversions and do_avgflx_em = 1's upd_avgflx, RTX
+    # A6000 sm_86, NVRTC 12.9, 2026-10-31, both loaders: all five entry
+    # points read 0 B.
+    "theta_m": 0, "avgflx": 0,
+    # km_opt = 5 (SMS-3DTKE, kernels/sms3dtke.cu), RTX A6000 sm_86, NVRTC
+    # 12.9.86, 2026-10-31, default and strict loaders: all fourteen entry
+    # points read 0 B (the tridiagonal planes are a global workspace).
+    "sms3dtke": 0,
+    # The partial-depth nest's coupling (Phase D3, kernels/partial_nest.cu),
+    # RTX A6000 sm_86, NVRTC 12.9, 2026-10-30: all eight entry points 0 B.
+    "partial_nest": 0,
+    # Its D4 coupling (kernels/partial_nest_d4.cu), RTX A6000 sm_86, NVRTC
+    # 12.9, 2026-10-30: all six entry points 0 B.
+    "partial_nest_d4": 0,
+    # WRF-Solar EPS (multi_perturb) and MAD-WRF, same card, both loaders
+    # (load_module, GPUWM_WRF_EXACT 0 and 1): eps_apply, mp_setup_amplitude,
+    # mp_noise, mp_ar1, mp_fill_levels, mp_clip, madwrf_cloud_init_columns
+    # and madwrf_nudge read 0 B (their profiles are global scratch).
+    "wrfsolar_eps": 0, "madwrf": 0,
 }
 
 #: The readings the ceiling above is made of, each naming its box, its
@@ -3570,7 +3617,7 @@ _MICROPHYSICS_KERNEL_MODULES.update({
 #: 28 to the shared operator -- so an NSSL domain reserved refl.cu's
 #: per-thread frame for a translation unit the run cannot launch, and a
 #: reservation that is too large refuses a run that would have fit.
-_REFLECTIVITY_MICROPHYSICS = frozenset({1, 2, 3, 6, 8, 10, 16, 28, 106})
+_REFLECTIVITY_MICROPHYSICS = frozenset({1, 2, 3, 6, 8, 10, 16, 28, 96, 106})
 
 #: The DELIBERATE absences from :data:`_REFLECTIVITY_MICROPHYSICS`, each
 #: with the reason it is a decision and not an omission.  The pattern is
@@ -3913,6 +3960,9 @@ def domain_kernel_modules(dc: DomainConfig, *,
     # legacy RRTMG shortwave (woof/core/rrtmg_aerosol_optics.py).
     if int(getattr(dc.run, "swint_opt", 0) or 0) == 1:
         modules.add("swint")
+    # WRF swint_opt = 2 (woof/core/farms.py): FARMS, on swint's zenith cosine.
+    if int(getattr(dc.run, "swint_opt", 0) or 0) == 2:
+        modules.update(("swint", "farms"))
     if int(getattr(dc.run, "alb_sol", 0) or 0) == 1:
         modules.add("solar_albedo")
     # Dudhia shortwave (ra_sw_physics = 1) launches its own column kernel
@@ -3942,6 +3992,22 @@ def domain_kernel_modules(dc: DomainConfig, *,
         modules.add("lake")
     if int(getattr(dc.run, "sf_ocean_physics", 0)) == 1:
         modules.add("oml")
+    if int(getattr(dc.run, "icloud", 1)) == 3:          # woof/core/cldfra3.py
+        modules.add("cldfra3")
+    if int(getattr(dc.run, "multi_perturb", 0)) == 1:   # woof/core/wrfsolar_eps.py
+        modules.add("wrfsolar_eps")
+    if (int(getattr(dc.run, "madwrf_opt", 0)) == 2
+            or int(getattr(dc.run, "madwrf_cldinit", 0)) == 1):   # woof/core/madwrf.py
+        modules.add("madwrf")
+    if int(getattr(dc.run, "solar_diagnostics", 0) or 0) == 1:
+        modules.add("solar_diag")                # woof/core/solar_diagnostics.py
+    from woof.core.theta_m import run_theta_m
+    if run_theta_m(dc.run):
+        modules.add("theta_m")                   # woof/core/theta_m.py
+    if int(getattr(dc.run, "do_avgflx_em", 0) or 0) == 1:
+        modules.add("avgflx")                    # woof/core/avgflx.py
+    if int(getattr(dc.run, "km_opt", 0)) == 5:   # woof/core/sms3dtke.py
+        modules.add("sms3dtke")
     mp_physics = int(dc.run.mp_physics)
     from woof.thompson_generations import CLASSIC_GENERATIONS
     classic_generation = (CLASSIC_GENERATIONS.get(getattr(dc.run,"thompson_version","wrf_461"))
@@ -5358,6 +5424,29 @@ def physics_array_shapes(cfg: RunConfig, *, cam_ozone: bool = False,
                 shapes[f"fields/{name}"] = m
     for name in physics_field_names_2d(cfg):
         shapes[f"fields/{name}"] = s2
+    from woof.core.physics_inventory import radiation_spectral_fields
+    for name, count in radiation_spectral_fields(cfg).items():
+        shapes[f"fields/{name}"] = (count, ny, nx)
+    from woof.core.physics_inventory import radtran_fields
+    for name, full in radtran_fields(cfg, ny, nx).items():
+        shapes[f"fields/{name}"] = full
+    if int(getattr(cfg, "shcu_physics", 0)):
+        # Deng's carried package state (woof.core.shcu_deng
+        # allocate_deng_fields reads the same roster): 10 level fields, 10
+        # surface fields, 3 integer surface fields and the 100-deep
+        # AINCKFSA history -- 110*ny*nx + 10*nz*ny*nx words per domain.
+        from woof.core.shcu_deng import deng_field_shapes
+        for name, (shape, _dtype) in deng_field_shapes(cfg, nz, ny,
+                                                        nx).items():
+            shapes[f"fields/{name}"] = shape
+    if int(getattr(cfg, "multi_perturb", 0)) == 1:
+        # WRF-Solar EPS (woof.core.wrfsolar_eps
+        # allocate_multi_perturb_fields reads the same roster): each consumed
+        # pert3d field, (nz or 1, ny, nx), and its two (ny+1, nx+1) spectra.
+        from woof.core.wrfsolar_eps import multi_perturb_field_shapes
+        for name, (shape, _dtype) in multi_perturb_field_shapes(
+                cfg, nz, ny, nx).items():
+            shapes[f"fields/{name}"] = shape
     if int(getattr(cfg, "sf_ocean_physics", 0)) == 2:
         from woof.ocean.mixed_layer import PROFILE_FIELDS
         for name in (*PROFILE_FIELDS, "_pwp_w", "_pwp_p"):
@@ -5854,6 +5943,19 @@ def scratch_slot_registry(cfg: RunConfig, *,
     slots.update(hail_scratch_shapes(cfg))
     from woof.core.output_diagnostics import scratch_shapes as output_shapes
     slots.update(output_shapes(cfg))
+    from woof.core.solar_diagnostics import scratch_shapes as solar_shapes
+    slots.update(solar_shapes(cfg))
+    # use_theta_m = 1 (woof/core/theta_m.py): the windows' stash, the dry
+    # theta, the converted tendency and qv_diabatic.
+    from woof.core import theta_m as _theta_m
+    if _theta_m.run_theta_m(cfg):
+        slots.update({slot: (nz, ny, nx) for slot in _theta_m.SCRATCH_SLOTS})
+    # do_avgflx_em = 1 (woof/core/avgflx.py): the three means and the
+    # one-word counter.
+    from woof.core.avgflx import COUNT_SLOT as _AVGFLX_COUNT, scratch_shapes as _avgflx_shapes
+    if _avgflx_shapes(cfg):
+        slots.update(_avgflx_shapes(cfg))
+        slots[_AVGFLX_COUNT] = (1,)
     if cfg.lightning_option:
         from woof.lightning_contract import LIGHTNING_OPTIONS
         slots.update({"ltng_" + k: s2 for k in LIGHTNING_OPTIONS[cfg.lightning_option]["fields"]})
@@ -5923,9 +6025,13 @@ def scratch_slot_registry(cfg: RunConfig, *,
         slots.update(acoustic_mudf=s2)
 
     chem_on = bool(getattr(cfg, "chem_sets", ""))
-    if cfg.moist or cfg.km_opt == 2 or chem_on or (cfg.bl_pbl_physics == 5 and cfg.bl_mynn_tkeadvect):
+    if int(getattr(cfg, "do_avgflx_em", 0) or 0) == 1:
+        # do_avgflx_em averages the sumflux fluxes, which dycore.step then
+        # accumulates on a dry state too (woof/core/avgflx.py).
+        slots.update(rk_ru_m=xs, rk_rv_m=ys, rk_ww_m=fl)
+    if cfg.moist or cfg.km_opt in (2, 5) or chem_on or (cfg.bl_pbl_physics == 5 and cfg.bl_mynn_tkeadvect):
         # dycore.py acoustic time-averaged mass fluxes (moist scalars,
-        # the km_opt=2 TKE carrier and the chem rows advect with them;
+        # the km_opt=2/5 TKE carrier and the chem rows advect with them;
         # dycore.step accumulates them for a chem state even when dry).
         slots.update(rk_ru_m=xs, rk_rv_m=ys, rk_ww_m=fl)
         slots["moist_rq_t"] = m                     # moist.py:247
@@ -5943,7 +6049,7 @@ def scratch_slot_registry(cfg: RunConfig, *,
             # module must stay importable without cupy;
             # tests/test_p3_port.py pins it to moist.ABSENT_MASS_SLOT.
             slots["moist_absent_mass"] = m
-        pd = ((cfg.moist and cfg.moist_adv_opt == 1) or cfg.km_opt == 2
+        pd = ((cfg.moist and cfg.moist_adv_opt == 1) or cfg.km_opt in (2, 5)
               or (cfg.bl_pbl_physics == 5 and cfg.bl_mynn_tkeadvect
                   and cfg.scalar_adv_opt == 1)) and not (cfg.open_x or cfg.open_y)
         # woof/core/chem_transport.py: the chem rows' limited final stage
@@ -6399,15 +6505,33 @@ def scratch_slot_registry(cfg: RunConfig, *,
         if cfg.diff_opt == 1:
             slots.update(diff1_theta_initial=m, diff1_theta_work=m,
                          smag_mut=s2)
-    if cfg.km_opt in (2, 3) or (mixing_package and cfg.km_opt == 1):
+    if cfg.km_opt in (2, 3, 5) or (mixing_package and cfg.km_opt == 1):
         # These closures carry the vertical exchange-coefficient pair; BN2
         # borrows the diff6_x face-workspace prefix and needs no slot.
         # km_opt=1 keeps its kvdif pair there (launch_wrf_isotropic_km).
         slots.update(smag_kmv=m, smag_khv=m)
-    if cfg.km_opt == 2:
+    if cfg.km_opt in (2, 5):
         # Prognostic-TKE forward tendency, its doubling temporary, and the
         # tke_rhs coupled-mass staging.
         slots.update(smag_rtke=m, smag_tke_tmp=m, smag_mut=s2)
+    if cfg.km_opt == 5:
+        # woof/core/dycore.py launch_wrf_sms3dtke: WRF's operands, the
+        # closure's own fields, the shear-split tke_rhs terms and the
+        # tridiagonal workspace (sms3dtke.workspace_shape); the
+        # no-surface-layer zero planes only when no surface layer runs.
+        for name in ("th", "t2", "rho", "u_phy", "v_phy", "rdzw", "rdz",
+                     "elmin", "dlk", "xkmv_meso", "l_diss", "rhs_terms"):
+            slots["sms_" + name] = m
+        slots["sms_nlflux"] = fl
+        slots["sms_zx"] = (nz + 1, ny, nx + 1)
+        slots["sms_zy"] = (nz + 1, ny + 1, nx)
+        for name in ("p8w1", "t8w1", "p8wt", "t8wt"):
+            slots["sms_" + name] = s2
+        slots["sms_tridiag"] = (5 * nz * (ny + 1) * (nx + 1),)
+        if cfg.sf_sfclay_physics == 0:
+            for name in ("ust", "ustm", "hfx", "qfx", "br", "rmol", "wspd",
+                         "pblh", "kpbl"):
+                slots["sms_" + name] = s2
         if getattr(cfg, "tke_budget", 0):
             # woof/core/tke_budget.py: the packed per-term field buffer,
             # the pre-bound_tke carrier snapshot, the two coupled-mass
@@ -6863,6 +6987,27 @@ SCRATCH_SLOT_LIFETIME_AUDIT = (
         ("hail_temperature", "hail_height", "hail_density", "hail_new_mask",
          "hail_new_duration"), "write_before_read", "woof/core/hail.py:update",
         "Preparation and duration kernels overwrite every entry before use"),
+    ScratchSlotLifetime(
+        ("solar_out",), "carrying", "woof/core/solar_diagnostics.py:update",
+        "GHI_ACCUM sums across steps and an output WRF leaves unassigned "
+        "keeps its word"),
+    ScratchSlotLifetime(
+        ("solar_step_*",), "carrying",
+        "woof/core/solar_diagnostics.py:capture_solar_step,update",
+        "written at the physics step's start and read by the end-of-step "
+        "call; the absent-species plane must remain zero"),
+    ScratchSlotLifetime(
+        ("theta_m_*",), "carrying",
+        "woof/core/theta_m.py:physics_window,convert_physics_tendencies,"
+        "microphysics_window",
+        "the stash holds the step-start theta_m from the physics window "
+        "to the tendency conversion and the microphysics window's theta_m "
+        "across the scheme; a sibling domain's step must not interleave"),
+    ScratchSlotLifetime(
+        ("avgflx_rum", "avgflx_rvm", "avgflx_wwm", "avgflx_count"),
+        "carrying", "woof/core/avgflx.py:update",
+        "the history-interval means and their count persist across steps "
+        "and are written at history time"),
     ScratchSlotLifetime(("ieva_*",), "excluded_unproven", "woof/core/ieva.py (zadvect_implicit = 1)", "the explicit/implicit eta mass-flux split and column masses are produced by the dynamics and reused by the scalar split later in the step; no audit has proven a sibling domain cannot interleave, so each domain keeps its own (found by the first HRRR-recipe tree, 2026-10-21)"),
     ScratchSlotLifetime(("fsbm_*",), "excluded_unproven", "woof/core/fast_sbm_runtime.py:apply", "mixed uint64 pointers, int32 status and float64 tallies are not compatible with the float32 arena; all are rewritten inside each call"),
     # Strict WRF mode (woof.wrf_exact.ENABLED).  acoustic_wrf_muts entered

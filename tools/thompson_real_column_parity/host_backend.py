@@ -41,7 +41,7 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
-SHIM = HERE / "cuda_host_shim.h"
+SHIM = ROOT / "woof" / "backend" / "host" / "cuda_host_shim.h"   # the host tier's shim
 
 CXX_FLAGS = ("-O2", "-std=c++17", "-ffp-contract=off",
              "-fno-unsafe-math-optimizations", "-fno-tree-vectorize",
@@ -178,23 +178,23 @@ def parse_kernels(source: str) -> dict[str, list[Param]]:
 def _launcher(name: str, params: list[Param]) -> str:
     decl = ", ".join(p.text for p in params)
     args = ", ".join(p.name for p in params)
-    head = ("unsigned gx, unsigned gy, unsigned gz, "
-            "unsigned bx, unsigned by, unsigned bz")
+    head = ("unsigned __woof_gx, unsigned __woof_gy, unsigned __woof_gz, "
+            "unsigned __woof_bx, unsigned __woof_by, unsigned __woof_bz")
     if decl:
         head += ", " + decl
     return (
         f'extern "C" void hostlaunch__{name}({head})\n'
         "{\n"
-        "    gridDim.x = gx; gridDim.y = gy; gridDim.z = gz;\n"
-        "    blockDim.x = bx; blockDim.y = by; blockDim.z = bz;\n"
-        "    for (unsigned kz = 0; kz < gz; ++kz)\n"
-        "    for (unsigned ky = 0; ky < gy; ++ky)\n"
-        "    for (unsigned kx = 0; kx < gx; ++kx) {\n"
-        "        blockIdx.x = kx; blockIdx.y = ky; blockIdx.z = kz;\n"
-        "        for (unsigned tz = 0; tz < bz; ++tz)\n"
-        "        for (unsigned ty = 0; ty < by; ++ty)\n"
-        "        for (unsigned tx = 0; tx < bx; ++tx) {\n"
-        "            threadIdx.x = tx; threadIdx.y = ty; threadIdx.z = tz;\n"
+        "    gridDim.x = __woof_gx; gridDim.y = __woof_gy; gridDim.z = __woof_gz;\n"
+        "    blockDim.x = __woof_bx; blockDim.y = __woof_by; blockDim.z = __woof_bz;\n"
+        "    for (unsigned __woof_kz = 0; __woof_kz < __woof_gz; ++__woof_kz)\n"
+        "    for (unsigned __woof_ky = 0; __woof_ky < __woof_gy; ++__woof_ky)\n"
+        "    for (unsigned __woof_kx = 0; __woof_kx < __woof_gx; ++__woof_kx) {\n"
+        "        blockIdx.x = __woof_kx; blockIdx.y = __woof_ky; blockIdx.z = __woof_kz;\n"
+        "        for (unsigned __woof_tz = 0; __woof_tz < __woof_bz; ++__woof_tz)\n"
+        "        for (unsigned __woof_ty = 0; __woof_ty < __woof_by; ++__woof_ty)\n"
+        "        for (unsigned __woof_tx = 0; __woof_tx < __woof_bx; ++__woof_tx) {\n"
+        "            threadIdx.x = __woof_tx; threadIdx.y = __woof_ty; threadIdx.z = __woof_tz;\n"
         f"            {name}({args});\n"
         "        }\n"
         "    }\n"
@@ -255,7 +255,7 @@ class HostModule:
             cpp.write_text(unit, encoding="utf-8", newline="\n")
             tmp = build / f"{stem}.{os.getpid()}.tmp.so"
             done = subprocess.run(
-                [cxx, *CXX_FLAGS, "-I", str(HERE), str(cpp), "-o", str(tmp),
+                [cxx, *CXX_FLAGS, "-I", str(HERE), "-I", str(SHIM.parent), str(cpp), "-o", str(tmp),
                  "-lm"], capture_output=True, text=True, check=False)
             cpp.unlink(missing_ok=True)
             if done.returncode != 0:
@@ -478,10 +478,23 @@ def set_rates(on: bool) -> None:
     _module_int_cached.cache_clear()
 
 
+def _option_defines(name: str) -> str:
+    """The ``-D`` macros of the unit's NVRTC options, as source lines (the
+    diffusion units' ``-DGPUWM_WRF_EXACT_C_DIFFUSION=1`` selects their
+    arithmetic)."""
+    from woof.backend.translate import option_defines
+    from woof.core import kernels as K
+    lines = []
+    for d in option_defines(K.module_options(name)):
+        key, _, value = d.partition("=")
+        lines.append(f"#define {key} {value or 1}\n")
+    return "".join(lines)
+
+
 @lru_cache(maxsize=None)
 def _module_cached(name: str) -> HostModule:
     from woof.core import kernels as K
-    text = K.module_source(name)
+    text = _option_defines(name) + K.module_source(name)
     transform = _TRANSFORMS.get(name)
     if transform is not None:
         text = transform(text)
@@ -492,7 +505,7 @@ def _module_cached(name: str) -> HostModule:
 @lru_cache(maxsize=None)
 def _module_int_cached(name: str, defines: tuple) -> HostModule:
     from woof.core import kernels as K
-    text = K.module_source_int_defines(name, defines)
+    text = _option_defines(name) + K.module_source_int_defines(name, defines)
     transform = _TRANSFORMS.get(name)
     if transform is not None:
         text = transform(text)
@@ -514,6 +527,21 @@ def host_get_kernel_int_defines(name: str, func: str,
                                 defines: tuple) -> HostKernel:
     """Drop-in for ``woof.core.kernels.get_kernel_int_defines``."""
     return _module_int_cached(name, tuple(defines)).get_function(func)
+
+
+def host_environment(env=None) -> dict:
+    """``env`` (default: this process's) for a process that will run the
+    host backend: WOOF_BACKEND=cuda and no facade startup hook on PYTHONPATH.
+    In the pixi ``mlx`` environment every process otherwise serves
+    ``import cupy`` from woof's MLX facade (woof/backend/startup), and
+    :func:`install` refuses an already-imported cupy."""
+    import os
+    env = dict(os.environ if env is None else env)
+    startup = str(ROOT / "woof" / "backend" / "startup")
+    paths = [p for p in env.get("PYTHONPATH", "").split(os.pathsep) if p and Path(p) != Path(startup)]
+    env["PYTHONPATH"] = os.pathsep.join(paths)
+    env["WOOF_BACKEND"] = "cuda"
+    return env
 
 
 def install() -> None:

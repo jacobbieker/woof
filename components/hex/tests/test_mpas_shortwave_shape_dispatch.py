@@ -58,7 +58,7 @@ def test_native_constructor_shape_and_stream_contract(harness, monkeypatch, mode
     assert bool(h.initialized) == (route == "raw")
     original_source, original_options, _, original_name = h.calls[0]
     assert original_source.startswith("#define NATIVE_TABLE_SENTINEL 7\n")
-    assert original_source.endswith(h.native.CUDA_SOURCE)
+    assert original_source.endswith(h.native.CUDA_SOURCE + h.native.spectral_source())
     assert original_name == "mpas_rrtmg_sw_v842.cu"
     assert "--prec-div=true" in original_options and "--prec-sqrt=true" in original_options
     assert ("--fmad=false" if mode == "strict" else "--fmad=true") in original_options

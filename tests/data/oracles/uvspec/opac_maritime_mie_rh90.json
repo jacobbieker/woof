@@ -1,0 +1,231 @@
+{
+ "case": "opac_maritime_mie_rh90",
+ "options": {
+  "wavelength": [
+   500.0,
+   502.0
+  ],
+  "mol_abs_param": "reptran coarse",
+  "rte_solver": "disort",
+  "number_of_streams": 8,
+  "sza": 45.0,
+  "phi0": 0.0,
+  "umu": [],
+  "phi": [],
+  "albedo": 0.2,
+  "pseudospherical": false,
+  "earth_radius": 6370.0,
+  "deltam": null,
+  "disort_intcor": "off",
+  "zout": [
+   "sur",
+   "toa"
+  ],
+  "output_quantity": "irradiance",
+  "day_of_year": null,
+  "atmosphere_file": "us",
+  "wc_file": null,
+  "wc_properties": "hu",
+  "ic_file": null,
+  "ic_properties": "fu",
+  "ic_fu_reff_def": false,
+  "no_absorption": false,
+  "no_scattering": false
+ },
+ "inputs_sha256": "c8d0c3a27db7714b102ffedd860dcef2ce95c58c736f3b4d66b91d06accc7004",
+ "aerosol": {
+  "species": [
+   "inso",
+   "waso",
+   "soot",
+   "ssam",
+   "sscm",
+   "suso"
+  ],
+  "library": "mie",
+  "library_sha256": {
+   "inso": "5bac8019f79380819c00edadbbf4814ae6427cf5d0714fcae74445e1f84a5231",
+   "waso": "5653d49b26b812fe1beede07e6085808fa06d1c8ff0e5b9ba1dc6692dcf3ee57",
+   "soot": "26165e28d95f3e72d56b5334b359ec4e29b47e82967d15659188ff1730ad5cc5",
+   "ssam": "fea18325ba66f6228329341686aa0836e94f99d98f7dd0cb304115c55cc18f4b",
+   "sscm": "48f0c95094200085eaf1924c634b0fa2720bd7feca1f32b89ff12e0122ced21b",
+   "suso": "6dad5080af5f42959181ed513f9673ba4e27f3b2f8cccf5a81a721de966ad5ee"
+  },
+  "library_tool": "libRadtran mie (black box)",
+  "library_package": {
+   "name": "rubin-libradtran",
+   "version": "2.0.6",
+   "build": "py311pl5321h6e06971_1",
+   "channel": "https://conda.anaconda.org/conda-forge/",
+   "url": "https://conda.anaconda.org/conda-forge/osx-arm64/rubin-libradtran-2.0.6-py311pl5321h6e06971_1.conda",
+   "sha256": "a056a687da52ee0e2c67a48b49da5252c1ca25b9eb411bfbc890472c672b9b3d"
+  }
+ },
+ "uvspec_input": "data_files_path <libRadtran data>\natmosphere_file <run dir>/atm.dat\nsource solar\nmol_abs_param reptran coarse\nwavelength 500.0 502.0\nrte_solver disort\nnumber_of_streams 8\nsza 45.0\nphi0 0.0\nalbedo 0.2\ndisort_intcor off\nzout sur toa\nmol_file CH4 <run dir>/CH4.vmr vmr\nmol_file N2O <run dir>/N2O.vmr vmr\nmol_file CO <run dir>/CO.vmr vmr\nmol_file N2 <run dir>/N2.vmr vmr\naerosol_default\naerosol_species_file <run dir>/aer.dat inso waso soot ssam sscm suso\naerosol_species_library <OPAC library>/\nquiet\n",
+ "uvspec": {
+  "lambda": [
+   500.063,
+   500.438,
+   500.814,
+   501.19,
+   501.567,
+   501.945
+  ],
+  "edir": [
+   [
+    887.5645,
+    1307.968
+   ],
+   [
+    901.8987,
+    1328.969
+   ],
+   [
+    845.0289,
+    1245.507
+   ],
+   [
+    938.7133,
+    1382.712
+   ],
+   [
+    882.295,
+    1300.517
+   ],
+   [
+    895.8392,
+    1325.042
+   ]
+  ],
+  "edn": [
+   [
+    288.5039,
+    4.107261e-13
+   ],
+   [
+    292.5511,
+    8.346419e-13
+   ],
+   [
+    273.6085,
+    -7.822243e-13
+   ],
+   [
+    303.6039,
+    0.0
+   ],
+   [
+    284.6895,
+    -2.041932e-13
+   ],
+   [
+    287.4152,
+    2.080439e-13
+   ]
+  ],
+  "eup": [
+   [
+    235.2137,
+    330.2305
+   ],
+   [
+    238.8899,
+    334.7818
+   ],
+   [
+    223.7275,
+    313.0266
+   ],
+   [
+    248.4635,
+    347.2851
+   ],
+   [
+    233.3969,
+    325.6206
+   ],
+   [
+    236.6509,
+    328.5088
+   ]
+  ],
+  "uavgdir": [
+   [
+    103.8166,
+    147.1981
+   ],
+   [
+    105.4918,
+    149.5616
+   ],
+   [
+    98.83892,
+    140.1688
+   ],
+   [
+    109.7956,
+    155.6097
+   ],
+   [
+    103.1955,
+    146.3596
+   ],
+   [
+    104.7777,
+    149.1196
+   ]
+  ],
+  "uavgdn": [
+   [
+    49.71473,
+    3.962176e-14
+   ],
+   [
+    50.40122,
+    1.400496e-13
+   ],
+   [
+    47.11308,
+    -1.567615e-13
+   ],
+   [
+    52.3056,
+    -8.846491e-15
+   ],
+   [
+    48.98745,
+    -3.911808e-14
+   ],
+   [
+    49.23471,
+    4.466636e-14
+   ]
+  ],
+  "uavgup": [
+   [
+    37.43542,
+    58.43629
+   ],
+   [
+    38.02052,
+    59.18658
+   ],
+   [
+    35.60733,
+    55.29695
+   ],
+   [
+    39.54419,
+    61.3078
+   ],
+   [
+    37.14627,
+    57.44634
+   ],
+   [
+    37.66416,
+    57.84824
+   ]
+  ]
+ }
+}

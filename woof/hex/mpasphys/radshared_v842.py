@@ -668,12 +668,37 @@ def cloudiness_slot(call):
     nc=int(pools["nCellsSolve"])
     profiles={name:_from_public(pools["prepared"][name],nc) for name in
               ("qv","qc","qi","qs","t","pres","pres_hyd","rho")}
+    if call.scheme=="cld_fraction_thompson" and pools.get("wrfsolar_eps_session") is not None:
+        # WOOF-only WRF-Solar EPS (wrfsolar_eps_v842, config_pert_cld3): the t and qv cal_cldfra3
+        # reads (module_radiation_driver.F:1472-1474), on the cloudiness copies.
+        from .wrfsolar_eps_v842 import cld3_perturb
+        profiles=cld3_perturb(pools["wrfsolar_eps_session"],profiles)
+    # WOOF-only services (woof.hex.mpasphys.shcu_deng_v842): WRF's convective
+    # cloud for radiation. Absent (the default) nothing below changes a word.
+    convective=pools.get("convective_cloud") or {}
+    if convective.get("feedback"):
+        # cu_rad_feedback, ICLOUD_CU = 1 (module_radiation_driver.F:1264-1281):
+        # the cloudiness copies of qc/qi gain MPAS GF's qc_cu/qi_cu before
+        # the cloud fraction; the prepared qc_p/qi_p are untouched.
+        from woof.core.cumulus_radiation import add_convective_condensate
+        nz=profiles["qc"].shape[1]
+        cu={name:_from_public(convective[name][:nz],nc) for name in ("qc_cu","qi_cu")}
+        profiles["qc"],profiles["qi"]=add_convective_condensate(
+            profiles["qc"],profiles["qi"],cu["qc_cu"],cu["qi_cu"],
+            f_qc=bool(pools["f_qc"]),f_qi=bool(pools["f_qi"]))
     # Column vectors already have the MPAS layout. Slicing solve extents
     # creates views, preserving halos and avoiding any host field processing.
     out=driver_cloudiness(scheme=call.scheme,**profiles,
         meshDensity=pools["mesh"]["meshDensity"][:nc],
         xland=pools["sfc_input"]["xland"][:nc],
         len_disp=pools["config_len_disp"],f_qc=pools["f_qc"],f_qi=pools["f_qi"])
+    if convective.get("deng") is not None:
+        # Deng (shcu_physics = 5, module_radiation_driver.F:1566-1575), after
+        # the cloud fraction: CLDFRA = MAX(CLDFRA_SH, CLDFRA), QC = CW_RAD + QC.
+        from woof.core.cumulus_radiation import merge_deng_cloud
+        cldfra_sh,cw_rad=(_cp().ascontiguousarray(a.T) for a in convective["deng"])
+        out["cldfrac"],out["qcrad"]=merge_deng_cloud(out["cldfrac"],out["qcrad"],
+            cldfra_sh=cldfra_sh,cw_rad=cw_rad)
     _to_public(out["cldfrac"],pools["diag_physics"]["cldfrac"])
     # MPAS cloudiness_from_MPAS:131-145 publishes these prepared globals.
     # Native radiation consumes q*rad_p (LW:868-869, SW:924-925), so the
@@ -713,11 +738,23 @@ def bind_native_pools(provider, call):
     shared=getattr(provider,'radshared_v842_state',None)
     if shared is None:
         shared={};provider.radshared_v842_state=shared
-    return {'prepared':prepared,'radiation_prepared':radiation,'mesh':provider['mesh'],
-            'sfc_input':provider['sfc_input'],'diag_physics':provider['diag_physics'],
-            'nCellsSolve':nc,'config_len_disp':provider['configs']['config_len_disp'],
-            'f_qc':provider['scalar_state']['f_qc'],
-            'f_qi':provider['scalar_state']['f_qi'],'radshared':shared}
+    pools={'prepared':prepared,'radiation_prepared':radiation,'mesh':provider['mesh'],
+           'sfc_input':provider['sfc_input'],'diag_physics':provider['diag_physics'],
+           'nCellsSolve':nc,'config_len_disp':provider['configs']['config_len_disp'],
+           'f_qc':provider['scalar_state']['f_qc'],
+           'f_qi':provider['scalar_state']['f_qi'],'radshared':shared}
+    session=getattr(provider,'session',None)
+    if getattr(session,'wrfsolar_eps',None) is not None:
+        pools['wrfsolar_eps_session']=session
+    services=getattr(getattr(session,'config',None),'service_backends',{})
+    if any(str(services.get(name,'off'))!='off' for name in ('shcu_deng','cu_rad_feedback')):
+        from .shcu_deng_v842 import convective_cloud
+        cloud=convective_cloud(session)
+        if cloud['feedback']:
+            diag=provider['diag_physics']
+            cloud.update(qc_cu=diag['qc_cu'],qi_cu=diag['qi_cu'])
+        pools['convective_cloud']=cloud
+    return pools
 
 
 def load_ozone_resources(resources, device):

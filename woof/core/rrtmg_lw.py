@@ -171,6 +171,9 @@ def trunc_int(x):
 
 NBNDLW = 16
 NGPTLW = 140
+#: rrtmg_spectral_output quantities of the LW band slab (first axis;
+#: kernels/rrtmg_lw_zbatched.cu rlw_rtrn_band_rows)
+LW_SPECTRAL_QUANTITIES = ("u", "d", "uc", "dc")
 MXMOL = 38
 MAXXSEC = 4
 MG = 16
@@ -4314,6 +4317,7 @@ LW_GPU_KERNEL_NAMES = (
     "rlw_rtrn_secdiff", "rlw_rtrn_prol", "rlw_rtrn_march",
     "rlw_rtrn_accum", "rlw_rtrn_final", "rlw_taumol_batched",
     "rlw_rtrn_accum_rows", "rlw_rtrn_prol_gpoints", "rlw_setcoef_layers",
+    "rlw_rtrn_band_rows",
     "rlw_rtrn_march_inline", "rlw_rtrn_cloudy_layers",
 ) + tuple("rlw_taugb%d" % b for b in range(1, 17))
 
@@ -4612,7 +4616,8 @@ def gpu_rrtmg_lw_batched_device(ncol, nlay, icld, play, plev, tlay, tlev,
                                 ciwpmcl, clwpmcl, cswpmcl, reicmcl,
                                 relqmcl, resnmcl, tauaer, C,
                                 column_chunk=None, _stage_probe=None, *,
-                                mcica_layout="gpoint", _march="inline"):
+                                mcica_layout="gpoint", _march="inline",
+                                spectral_output="none"):
     """Batched full LW chain, device-resident: same kernels, same compile
     path, same launch-side numerics as gpu_rrtmg_lw -- the only changes
     are grid sizes (ncol > 1) and host plumbing.  Inputs numpy or cupy
@@ -4655,6 +4660,12 @@ def gpu_rrtmg_lw_batched_device(ncol, nlay, icld, play, plev, tlay, tlev,
     K = _lw_dev_consts(cp, C)
     i32 = np.int32
 
+    if spectral_output not in ("none", "bands", "gpoints"):
+        raise ValueError(f"rrtmg_spectral_output must be none, bands or gpoints, not {spectral_output!r}")
+    # LW has band output only: a g-point is a quadrature point, not a
+    # wavelength interval, and WRF's clear-sky bookkeeping is per band
+    lw_band = (cp.empty((len(LW_SPECTRAL_QUANTITIES), ncol, nl + 1, NBNDLW), dtype=cp.float32)
+               if spectral_output != "none" else None)
     uflx = cp.zeros((ncol, nl + 1), dtype=cp.float32)
     dflx = cp.zeros((ncol, nl + 1), dtype=cp.float32)
     uflxc = cp.zeros((ncol, nl + 1), dtype=cp.float32)
@@ -4860,6 +4871,17 @@ def gpu_rrtmg_lw_batched_device(ncol, nlay, icld, play, plev, tlay, tlev,
              iclddn_p, radlu_sfc, radclru_sfc,
              K["ngs"], K["delwave"], WTDIFF,
              totuflux, totdflux, totuclfl, totdclfl))
+        if lw_band is not None:
+            # a separate launch over the same inputs (broadband unchanged)
+            part = cp.empty((len(LW_SPECTRAL_QUANTITIES), nc, nl + 1, NBNDLW), dtype=cp.float32)
+            total = nc * (nl + 1) * NBNDLW
+            _gpu_kernel("rlw_rtrn_band_rows", maxlay)(
+                ((total + 127) // 128,), (128,),
+                (i32(nc), i32(nl), radld_p, radclrd_p, radlu_p, radclru_p,
+                 iclddn_p, radlu_sfc, radclru_sfc,
+                 K["ngs"], K["delwave"], WTDIFF, K["fluxfac"], part))
+            lw_band[:, rows] = part
+            del part
         del (radld_p, radclrd_p, radlu_p, radclru_p, iclddn_p,
              radlu_sfc, radclru_sfc)
 
@@ -4895,12 +4917,15 @@ def gpu_rrtmg_lw_batched_device(ncol, nlay, icld, play, plev, tlay, tlev,
     # Read now, or once per radiation call (woof.core.deferred_device_checks).
     from woof.core.deferred_device_checks import check
     check(err_flags, _cldprmc_verdict)
-    return {
+    out = {
         "uflx": uflx, "dflx": dflx, "hr": hr,
         "uflxc": uflxc, "dflxc": dflxc, "hrc": hrc,
         "uflxcln": cp.zeros((ncol, nl + 1), dtype=cp.float32),
         "dflxcln": cp.zeros((ncol, nl + 1), dtype=cp.float32),
     }
+    if lw_band is not None:
+        out["lw_band"] = lw_band
+    return out
 
 
 def lw_batched_to_host(out):

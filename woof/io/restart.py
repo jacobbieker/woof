@@ -128,6 +128,8 @@ from woof.config import (CORRECT_MODE_RESTART_BREAK_NOTICE,
                           MIX_ISOTROPIC_RESTART_BREAK_NOTICE,
                           TERRAIN_CLOCK_PINNED_RESTART_NOTICE,
                           TERRAIN_CLOCK_RESTART_BREAK_NOTICE,
+                          MADWRF_RUN_DEFAULTS,
+                          MULTI_PERTURB_RUN_DEFAULTS,
                           WINDFARM_RUN_DEFAULTS,
                           radiation_scheme_ids)
 from woof.supervisor import _fsync_directory, fsync_file, unique_temp_path
@@ -517,6 +519,10 @@ STATE_INFRA_ATTRS = frozenset({
     # prognostic. Stage entry rebuilds it; a fresh standalone caller seeds
     # the buffer when the marker is absent. Checkpoints are step-boundary.
     "_wrf_acoustic_muts_initialized",
+    # use_theta_m: which theta ``thp`` holds (woof.core.theta_m).  Not a
+    # value of its own: the restore sets it from the validated config echo
+    # (_apply_validated_restart), and a door sets it when it converts.
+    "theta_m",
     # Spectral backing is serialized through its 142 named field views.
     "fast_sbm_bins", "fast_sbm_itimestep",
     # Cached launch descriptors are rebuilt from the live state buffers.
@@ -692,6 +698,11 @@ SERIALIZED_SCRATCH_SLOTS = frozenset({
     "ltng_lat", "ltng_lon", "ltng_ktop_deep", "ltng_lpi",
     # WRF diff_opt=1 keeps the original thermal reference after restart.
     "diff1_theta_initial",
+    # do_avgflx_em = 1 (woof/core/avgflx.py): AVGFLX_RUM/RVM/WWM are "rh" in
+    # Registry/registry.avgflx, so a checkpoint carries them.  The counter
+    # (avgflx_count, "r") is REBUILT at 0 below: start_em sets
+    # avgflx_count = 0 on every start, restart included (start_em.F:1304).
+    "avgflx_rum", "avgflx_rvm", "avgflx_wwm",
     "mp_rainnc", "mp_rainncv", "mp_snownc", "mp_snowncv",
     "mp_graupelnc", "mp_graupelncv", "mp_sr", "mp_kessler_sr",
     "mp_hailnc", "mp_hailncv",
@@ -760,6 +771,11 @@ _THOMPSON_CLOUD_BOOKING_SLOTS = frozenset({"mp_cloudnc", "mp_cloudncv"})
 #: shorter window.
 CARRIED_SCRATCH_SLOTS = frozenset({
     "uh_follow_window", "uh_spawn_window",
+    # WRF-Solar diagnostics' output stack (woof/core/solar_diagnostics.py):
+    # GHI_ACCUM sums across steps, so a sweep carries it; WRF gives these
+    # fields no restart I/O, so a checkpoint does not, and a resumed run
+    # starts GHI_ACCUM at zero as a WRF restart does.
+    "solar_out",
     # Strict mode only: WRF's grid%muts from the last acoustic loop, which
     # the next step's first pressure diagnosis reads (woof/core/dycore.py
     # WRF_MUTS_SLOT). Checkpoints retain it for exact continuation too.
@@ -834,6 +850,9 @@ RESTART_ONLY_DRIVER_SLOTS = frozenset({
 #: rebuilds are EXACT names only â€” a future accumulator slot under those
 #: prefixes must be classified explicitly instead of silently dropping.
 REBUILT_SCRATCH_SLOTS = frozenset({
+    # do_avgflx_em's counter: start_em's avgflx_count = 0 on every start
+    # (woof/core/avgflx.py creates it at 0 on the first update after a restore).
+    "avgflx_count",
     "cl_zero", "output_zero", "gsd_zero", "gsd_uh_use", "gsd_pressure_w", "gsd_temperature", "gsd_density", "gsd_wind10", "gsd_wind80",
     "hail_zero", "hail_temperature", "hail_height", "hail_density",
     "hail_new_mask", "hail_new_duration",
@@ -963,11 +982,35 @@ REBUILT_SCRATCH_SLOTS = frozenset({
 })
 
 REBUILT_SCRATCH_PREFIXES = (
+    # use_theta_m = 1 (woof/core/theta_m.py): the windows' stash, the dry
+    # theta, the converted tendency and qv_diabatic, each written before it
+    # is read inside one call of the step.
+    "theta_m_",
+    # WRF-Solar diagnostics: the step-start snapshots (phy_prep density and
+    # dz8w, the Solar_step cloud and COSZEN) rewritten at every physics step
+    # before the end-of-step call reads them, and that call's work planes.
+    "solar_step_",
     # Every FAST_SBM workspace is rewritten inside a call. Its spectral state is explicit.
     "fsbm_",
     "rk_", "adv_", "smag_", "diff_", "diff6_", "acoustic_", "openbc_",
+    # km_opt=5 (SMS-3DTKE, woof/core/dycore.py launch_wrf_sms3dtke): WRF's
+    # operands (th_phy, rho, rdzw, rdz, zx, zy, p8w/t8w planes), NLFLUX,
+    # ELMIN, DLK, XKMV_MESO, L_DISS, the tridiagonal workspace and the
+    # no-surface-layer zero planes.  Every one is rewritten at the top of
+    # every step before it is read (Registry gives NLFLUX, DLK, L_DISS,
+    # ELMIN and XKMV_MESO no restart flag); the words a step never writes
+    # (NLFLUX's top level and the columns outside WRF's bounds) are the
+    # allocation's zeros on both sides of a resume.  GAMU/GAMV, which DO
+    # carry across steps, are DomainState attributes (SERIALIZED).
+    "sms_",
     "moist_", "pd_", "morr_", "wsm3_", "wsm6_", "wsm6r_", "wdm6_", "mpcol_", "refl_", "physics_", "lbc_",
     "integration_health_", "nest_",
+    # The partial-depth nest's mass-budget residual (partial_nest_run.py),
+    # rewritten by every forcing call before it is read.
+    "partial_nest_",
+    # Its radiation extended column (partial_nest_physics.py): the parent's
+    # SINT-ed levels above the interface, rebuilt every radiation call.
+    "partial_ext_",
     # The monotonic chem stage's workspace (woof/core/chem_context.py
     # MONO_SCRATCH_SLOTS, rewritten by every launch before it is read) and
     # its zero implicit vertical flux (MONO_IMPLICIT_SLOT, allocated zero
@@ -1193,6 +1236,17 @@ DRIVER_REBUILT_ATTRS = frozenset({
     # restored in place, so the rebuilt carrier evaluates the checkpoint's
     # own fit on the first resumed step.
     "swint",
+    # WRF's swint_opt = 2 carrier, FARMS (woof.core.farms): rebuilt by
+    # initialize_physics from the resumed RunConfig, latitude, longitude and
+    # start time; it holds the per-step zenith-cosine scratch and the kernel
+    # handles, and FARMS's six outputs live in ``fields`` (restart-carried,
+    # as WRF's SWDOWN2 ... SWDDNIC2 are).
+    "farms",
+    # woof.radtran spectral diagnostic (woof.core.radtran_diag.RadtranRun):
+    # initialize_physics rebuilds it from the resumed RunConfig, latitude,
+    # longitude and start time; its outputs (RT_* and their axis
+    # variables) live in ``fields``, serialized and restored in place.
+    "radtran",
     # SASE: the active flag and the kernel-module tuple are re-derived
     # from the resumed RunConfig at driver init; the ledger is a
     # per-step diagnostic replaced before any consumer reads it; the
@@ -1308,6 +1362,16 @@ DRIVER_REBUILT_ATTRS = frozenset({
     # rather than carried; see _restore_carriers.
     "carriers_need_producer_refresh",
     "tendencies", "last_ysu", "refl_10cm", "microphysics",
+    # The shallow-cumulus slot (shcu_physics = 5, Deng): the adapter is
+    # rebuilt from the RunConfig, and its coupled tendencies are recomputed
+    # by every compute() before the composer reads them (Deng runs every
+    # model step).  Every array Deng carries lives in ``fields`` under its
+    # WRF Registry name and rides the serialized physics inventory.
+    "shallow_cumulus", "shallow_tendencies",
+    # WRF-Solar EPS: the pattern provider is rebuilt from the RunConfig
+    # (SP_AMP and ALPH are recomputed as INITIALIZE_STOCH recomputes them
+    # on a restart); the pert3d fields and spectra live in ``fields``.
+    "multi_perturb",
     "nssl2_binding",
     # Dynamics forcing is integrator-owned: the restart-carried state pair
     # on ARW, or buffers refilled before phase 1 on MPAS. Column spacing is
@@ -2666,7 +2730,25 @@ _DIGEST_DROPPED_DIAGNOSTIC_FIELDS = frozenset(
     {"hailcast_opt", "haildt", "nwp_diagnostics", "tke_budget", "sase_flux_diag", "surface_energy_diag",
      # Correct mode WB1: output-only and on by default from 2.9.0, so it is
      # dropped rather than held at a default no earlier digest carried.
-     "thompson_cloud_surface_booking"})
+     "thompson_cloud_surface_booking",
+     # Band-resolved RRTMG fluxes: output-only; no earlier digest carried it.
+     "rrtmg_spectral_output",
+     # woof.radtran spectral diagnostic: output-only; no earlier digest
+     # carried these keys.
+     "radtran_wavelengths",
+     "radtran_interval_s",
+     "radtran_umu",
+     "radtran_phi",
+     "radtran_mol_abs_param",
+     "radtran_solver",
+     "radtran_streams",
+     "radtran_pseudospherical",
+     # WRF-Solar diagnostics: output-only; no earlier digest carried it.
+     "solar_diagnostics",
+     # woof.radtran OPAC aerosol: output-only; no earlier digest carried it.
+     "radtran_aerosol",
+     # do_avgflx_em: output-only; no earlier digest carried it.
+     "do_avgflx_em"})
 
 
 #: WRF's slope_rad / topo_shading / shadlen (woof.core.topo_radiation),
@@ -2785,6 +2867,17 @@ from woof.checkpoint_identity import (  # noqa: E402
     seaice_read as _seaice_read)
 
 
+#: shcu_physics / cu_rad_feedback at the value every checkpoint written
+#: before them ran: dropped from the echo when off, read back as off.
+SHALLOW_CUMULUS_RUN_DEFAULTS = {"shcu_physics": 0, "cu_rad_feedback": False}
+
+#: use_theta_m and do_avgflx_em at the value every checkpoint written before
+#: them ran (dry theta, no AVGFLX means): dropped from the echo when off, read
+#: back as off.  use_theta_m = 1 against a dry checkpoint still refuses: the
+#: serialized thp is the other theta.
+THETA_M_AVGFLX_RUN_DEFAULTS = {"use_theta_m": 0, "do_avgflx_em": 0}
+
+
 def _drop_default_off_run_keys(values: dict) -> None:
     """Drop every default-off RunConfig key that older headers omit.
 
@@ -2835,6 +2928,45 @@ def _drop_default_off_run_keys(values: dict) -> None:
     # scalar_pblmix: off preserves checkpoints predating scalar diffusion.
     if not values.get("surface_energy_diag", False):
         values.pop("surface_energy_diag", None)
+    # rrtmg_spectral_output (output-only band-resolved RRTMG fluxes): off is
+    # every earlier header.
+    if values.get("rrtmg_spectral_output", "none") == "none":
+        values.pop("rrtmg_spectral_output", None)
+    # woof.radtran spectral diagnostic (output-only): every key at its
+    # default is every earlier header.
+    for key, default in (("radtran_wavelengths", ()), ("radtran_interval_s", 3600.0),
+                         ("radtran_umu", ()), ("radtran_phi", ()),
+                         ("radtran_mol_abs_param", "reptran coarse"),
+                         ("radtran_solver", "disort"), ("radtran_streams", 0),
+                         ("radtran_pseudospherical", False), ("radtran_aerosol", "none")):
+        value = values.get(key, default)
+        if isinstance(value, list):
+            value = tuple(value)
+        if value == default:
+            values.pop(key, None)
+    # shcu_physics / cu_rad_feedback (Deng shallow cumulus, cumulus cloud to
+    # radiation): off is every earlier header.  On, they are physics and
+    # stay in the digest.
+    if not values.get("shcu_physics", 0):
+        values.pop("shcu_physics", None)
+    if not values.get("cu_rad_feedback", False):
+        values.pop("cu_rad_feedback", None)
+    # solar_diagnostics (output-only WRF-Solar diagnostics): off is every
+    # earlier header.
+    if not values.get("solar_diagnostics", 0):
+        values.pop("solar_diagnostics", None)
+    # use_theta_m (the theta_m prognostic) and do_avgflx_em (output-only):
+    # off is every earlier header; use_theta_m = 1 is physics and binds.
+    if not values.get("use_theta_m", 0):
+        values.pop("use_theta_m", None)
+    if not values.get("do_avgflx_em", 0):
+        values.pop("do_avgflx_em", None)
+    # WRF-Solar EPS (multi_perturb and its pert_* keys): each at its WRF
+    # Registry default is every earlier header.  Moved, they are physics
+    # and stay in the digest.
+    for key, default in {**MULTI_PERTURB_RUN_DEFAULTS, **MADWRF_RUN_DEFAULTS}.items():
+        if key in values and values[key] == default:
+            values.pop(key, None)
     if not values.get("scalar_pblmix", 0):
         values.pop("scalar_pblmix", None)
     # MYNN-EDMF's split mixing keys (lane rrfs288-gap1): off mixes nothing
@@ -2988,6 +3120,10 @@ def _drop_default_off_run_keys(values: dict) -> None:
     for key in ("swint_opt", "aer_opt", "alb_sol"):
         if not values.get(key, 0):
             values.pop(key, None)
+    # couple_farms (swint_opt = 2's SWDOWN2 -> SWDOWN copy): off is every
+    # earlier header.
+    if not values.get("couple_farms", False):
+        values.pop("couple_farms", None)
 
 
 def _drop_inert_nest_archive(values):
@@ -4791,6 +4927,7 @@ _RESTART_ABSENT_RUN_DEFAULTS = {
     'aer_opt': 0,
     'alb_sol': 0,
     'w_crit_cfl': 1.0,
+    'couple_farms': False,
 }
 
 
@@ -4975,6 +5112,25 @@ def _require_config_match(stored_config: dict, cfg, path) -> None:
             # Absent is the default (_drop_inert_terrain_drag); a moved
             # topo_wind/gwd_opt still refuses below.
             default = TERRAIN_DRAG_RUN_DEFAULTS[key]
+            stored = default if stored is absent else stored
+            live = default if live is absent else live
+        if key in MULTI_PERTURB_RUN_DEFAULTS or key in MADWRF_RUN_DEFAULTS:
+            # Absent is the Registry default (_drop_default_off_run_keys);
+            # a moved WRF-Solar EPS or MAD-WRF key still refuses below.
+            default = {**MULTI_PERTURB_RUN_DEFAULTS, **MADWRF_RUN_DEFAULTS}[key]
+            stored = default if stored is absent else stored
+            live = default if live is absent else live
+        if key in SHALLOW_CUMULUS_RUN_DEFAULTS:
+            # Absent is off (_drop_default_off_run_keys): every checkpoint
+            # written before the Deng port ran without it.  A moved
+            # selector still refuses below.
+            default = SHALLOW_CUMULUS_RUN_DEFAULTS[key]
+            stored = default if stored is absent else stored
+            live = default if live is absent else live
+        if key in THETA_M_AVGFLX_RUN_DEFAULTS:
+            # Absent is off (_drop_default_off_run_keys); a switched-on
+            # theta_m against a dry-theta checkpoint refuses below.
+            default = THETA_M_AVGFLX_RUN_DEFAULTS[key]
             stored = default if stored is absent else stored
             live = default if live is absent else live
         if key in TOPO_RADIATION_RUN_DEFAULTS:
@@ -8305,6 +8461,11 @@ def _apply_validated_restart(validated: _ValidatedRestart,
                     if key.startswith("state/")}
     for name, host in stored_state.items():
         getattr(state, name)[...] = asarray(host)
+    # use_theta_m = 1: the serialized thp IS theta_m' (WRF's restart THM_2);
+    # the config echo validated above binds the switch, so the flag follows
+    # the run's configuration (woof.core.theta_m).
+    from woof.core.theta_m import run_theta_m
+    state.theta_m = run_theta_m(cfg)
     # The checkpoint-only carriers.  A checkpoint written before this
     # namespace existed simply has none, and the freshly allocated zeros
     # are what that build resumed with anyway -- so absence is a note's

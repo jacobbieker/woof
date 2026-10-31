@@ -656,6 +656,13 @@ def test_real_history_handler_30_minute_restart_split_has_exact_frames(
                 state, np.asarray([cfg.grid_id, endpoint], dtype=np.int64))
 
     monkeypatch.setattr("woof.core.dycore.step", fake_step)
+    # Each domain's own analysis frame (tick 0) writes WRF's initial REFL
+    # array through analysis_refl_10cm (runtime._submit_tree_history_frame,
+    # WOOF 1.1.1); this test is about the stash at the restart seam, so the
+    # analysis frame's contents are a stand-in.
+    monkeypatch.setattr(
+        "woof.core.refl.analysis_refl_10cm",
+        lambda state, shape=None, **_kw: np.zeros(shape, dtype=np.float32))
 
     straight = _history_model(2700.0)
     straight_writers = _RecordingWriters()

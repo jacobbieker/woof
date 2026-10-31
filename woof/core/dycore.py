@@ -70,6 +70,8 @@ from woof.core.moist import (SPECIES, WRF_MOIST_ARRAY_SPECIES,
 from woof.core.moist_n2_mutation import calc_n2_kernel
 from woof.core.physics import physics_enabled
 from woof.core import tke_budget
+from woof.core import theta_m as theta_m_branch
+from woof.core import avgflx
 from woof.core.state import (DTYPE, DomainState, mu_at_u_faces,
                               mu_at_v_faces)
 from woof.core.uh_diag import update_up_heli_max
@@ -1525,6 +1527,219 @@ def launch_wrf_tke_km(state: DomainState, cfg: RunConfig,
     return d11, d22, d12
 
 
+#: The WRF scalar-array species ``vertical_diffusion_implicit`` leaves
+#: unmixed (module_diffusion_em.F:8304-8305: P_QNS, P_QNR, P_QNG, P_QNH,
+#: P_QT, P_QVOLG), under woof's names for them.
+SMS3DTKE_UNMIXED_SCALARS = frozenset(
+    {"nr", "ns", "ng", "nh", "qnr", "qns", "qng", "qnh", "qt", "qvolg"})
+
+
+def _sms3dtke_surface(state: DomainState, nx: int, ny: int) -> dict:
+    """The surface-layer planes km_opt = 5 reads (and HFX, PBLH and KPBL,
+    which it writes), from the physics driver's fields.
+
+    A run without a surface layer reads WRF's never-written zeros, held in
+    dedicated slots so that nothing downstream sees a borrowed buffer.
+    """
+    fields = (state.physics.fields
+              if state.physics is not None
+              and hasattr(state.physics, "fields") else {})
+    out = {}
+    for name in ("ust", "ustm", "hfx", "qfx", "br", "rmol", "wspd", "pblh"):
+        out[name] = (fields[name] if name in fields
+                     else state.scratch((ny, nx), "sms_" + name))
+    out["kpbl"] = (fields["kpbl"] if "kpbl" in fields
+                   else state.scratch((ny, nx), "sms_kpbl", np.int32))
+    return out
+
+
+def _sms3dtke_operands(state: DomainState, cfg: RunConfig, *,
+                       time_t: bool) -> dict:
+    """WRF's operands for km_opt = 5 (th_phy, t_2, rho, u_phy, v_phy,
+    rdzw, rdz, zx, zy and the p8w/t8w surface and top planes), formed by
+    ``sms3dtke.prepare`` into persistent ``sms_*`` slots."""
+    from woof.core import sms3dtke
+    nz, ny, nx = state.p.shape
+    suffix = "0" if time_t else ""
+    out = {name: state.scratch((nz, ny, nx), "sms_" + name)
+           for name in ("th", "t2", "rho", "u_phy", "v_phy", "rdzw", "rdz")}
+    out["zx"] = state.scratch((nz + 1, ny, nx + 1), "sms_zx")
+    out["zy"] = state.scratch((nz + 1, ny + 1, nx), "sms_zy")
+    for name in ("p8w1", "t8w1", "p8wt", "t8wt"):
+        out[name] = state.scratch((ny, nx), "sms_" + name)
+    qv = getattr(state, "qv" + suffix) if state.qv is not None else None
+    sms3dtke.prepare(
+        u=getattr(state, "u" + suffix), v=getattr(state, "v" + suffix),
+        php=getattr(state, "php" + suffix), phb=state.phb,
+        thp=getattr(state, "thp" + suffix), thb=state.thb, alt=state.alt,
+        qv=qv, p=state.p, rdx=DTYPE(1.0 / cfg.dx), rdy=DTYPE(1.0 / cfg.dy),
+        bx=_boundary_x(cfg), by=_boundary_y(cfg), out=out)
+    return out
+
+
+def launch_wrf_sms3dtke(state: DomainState, cfg: RunConfig,
+                        xkmh, xkhh, *, time_t: bool):
+    """WRF v4.7.1 km_opt = 5 (SMS-3DTKE) on device, in
+    module_first_rk_step_part2.F's order: ``cal_deform_and_div``,
+    ``nonlocal_flux``, ``free_atmos_length``, ``meso_length_scale``,
+    ``calculate_km_kh`` (``calculate_N2`` + ``tke_km``'s km_opt = 5 arm),
+    then ``tke_rhs`` into ``smag_rtke`` and the implicit vertical TKE solve
+    (``vertical_diffusion_implicit``'s TKE row, which carries the
+    dissipation) on top of it, before the horizontal TKE diffusion
+    :func:`_compute_wrf_smag_tendencies` adds next.
+
+    tke_rhs's shear term is the km_opt = 2 kernel's (``wrf_tke_rhs``, whose
+    budget export separates it exactly: its running sum starts from the
+    zeroed ``smag_rtke``), and ``sms_tke_rhs`` completes it with the
+    km_opt = 5 buoyancy, L_DISS and the limiter.  The deformation tensors
+    borrow the u/v/w carrying-buffer prefixes and BN2 the ``diff6_x``
+    prefix, as in :func:`launch_wrf_tke_km`.  Returns the (d11, d22, d12)
+    triple.
+    """
+    from woof.core import sms3dtke
+    nz, ny, nx = xkmh.shape
+    n_mass = nz * ny * nx
+    bx, by = _boundary_x(cfg), _boundary_y(cfg)
+    d11 = state.scratch((nz + 1, ny, nx), "smag_rw").reshape(-1)[:n_mass]
+    d22 = state.scratch((nz, ny, nx + 1), "smag_ru").reshape(-1)[:n_mass]
+    d12 = state.scratch((nz, ny + 1, nx), "smag_rv").reshape(-1)[:n_mass]
+    d11 = d11.reshape((nz, ny, nx))
+    d22 = d22.reshape((nz, ny, nx))
+    d12 = d12.reshape((nz, ny, nx))
+    xkmv = state.scratch((nz, ny, nx), "smag_kmv")
+    xkhv = state.scratch((nz, ny, nx), "smag_khv")
+    common = _wrf_smag_grid_args(state, cfg, time_t=time_t)
+    dims = [np.int32(nz), np.int32(ny), np.int32(nx),
+            np.int32(state.phb.ndim == 3), np.int32(bx), np.int32(by)]
+    grid = ((nx + _TPB - 1) // _TPB, ny, nz)
+    get_kernel("smag2d", "wrf_smag_deform")(
+        grid, (_TPB, 1, 1), tuple(common + [d11, d22, d12] + dims))
+    bn2 = state.scratch((nz, ny, nx + 1), "diff6_x").reshape(-1)[:n_mass]
+    bn2 = bn2.reshape((nz, ny, nx))
+    launch_wrf_calc_n2(state, cfg, bn2, time_t=time_t)
+
+    ops = _sms3dtke_operands(state, cfg, time_t=time_t)
+    sfc = _sms3dtke_surface(state, nx, ny)
+    suffix = "0" if time_t else ""
+    tke = getattr(state, "tke" + suffix)
+    qv = getattr(state, "qv" + suffix) if state.qv is not None else None
+    nlflux = state.scratch((nz + 1, ny, nx), "sms_nlflux")
+    elmin = state.scratch((nz, ny, nx), "sms_elmin")
+    dlk = state.scratch((nz, ny, nx), "sms_dlk")
+    meso = state.scratch((nz, ny, nx), "sms_xkmv_meso")
+    l_diss = state.scratch((nz, ny, nx), "sms_l_diss")
+    side = dict(bx=bx, by=by)
+    sms3dtke.nonlocal_flux(
+        rdzw=ops["rdzw"], th=ops["th"], qv=qv, u_phy=ops["u_phy"],
+        v_phy=ops["v_phy"], rho=ops["rho"], ust=sfc["ust"], br=sfc["br"],
+        wspd=sfc["wspd"], msft=state.msft, hfx=sfc["hfx"], dx=cfg.dx,
+        dy=cfg.dy, isfflx=cfg.isfflx, tke_heat_flux=cfg.tke_heat_flux,
+        nlflux=nlflux, gamu=state.gamu, gamv=state.gamv, hpbl=sfc["pblh"],
+        kpbl=sfc["kpbl"], **side)
+    sms3dtke.free_atmos_length(rdzw=ops["rdzw"], tke=tke, th=ops["th"],
+                               elmin=elmin, **side)
+    planes = {n: ops[n] for n in ("p8w1", "t8w1", "p8wt", "t8wt")}
+    sms3dtke.meso_length_scale(
+        rdzw=ops["rdzw"], rdz=ops["rdz"], tke=tke, th=ops["th"], **planes,
+        hpbl=sfc["pblh"], elmin=elmin, rmol=sfc["rmol"], rho=ops["rho"],
+        hfx=sfc["hfx"], qv=qv, isfflx=cfg.isfflx,
+        tke_heat_flux=cfg.tke_heat_flux, dlk=dlk, **side)
+    sms3dtke.tke_km(
+        tke=tke, th=ops["th"], rdz=ops["rdz"], rdzw=ops["rdzw"], **planes,
+        d11=d11, d22=d22, d12=d12, zx=ops["zx"], zy=ops["zy"],
+        msft=state.msft, hpbl=sfc["pblh"], dlk=dlk, dx=cfg.dx, dy=cfg.dy,
+        c_s=cfg.c_s, c_k=cfg.c_k, tke_seed=_tke_seed(cfg), xkmh=xkmh,
+        xkmv=xkmv, xkhh=xkhh, xkhv=xkhv, xkmv_meso=meso, **side)
+
+    # tke_rhs: shear from the km_opt = 2 kernel's exact budget export.
+    rtke = state.scratch((nz, ny, nx), "smag_rtke")
+    rtke[...] = 0
+    junk = state.scratch((nz, ny, nx), "sms_rhs_terms")
+    mut = state.scratch((ny, nx), "smag_mut")
+    mut[...] = state.mub2d + (state.mup0 if time_t else state.mup)
+    thp = getattr(state, "thp" + suffix)
+    get_kernel("smag2d", "wrf_tke_rhs")(
+        grid, (_TPB, 1, 1),
+        tuple(common + [
+            thp, state.thb, np.int32(state.thb.ndim == 3),
+            tke, bn2, d11, d22, d12,
+            xkmh, xkmv, xkhv,
+            mut, state.c1h, state.c2h,
+            sfc["ustm"], sfc["hfx"], np.int32(1), np.int32(1),
+            DTYPE(cfg.c_k), DTYPE(cfg.dt),
+            DTYPE(cfg.tke_drag_coefficient), DTYPE(cfg.tke_heat_flux),
+            np.int32(cfg.isfflx),
+            rtke, rtke, junk, junk, junk, np.int32(1),
+        ] + dims))
+    sms3dtke.tke_rhs(
+        tend=rtke, bn2=bn2, xkhv=xkhv, nlflux=nlflux, th=ops["th"], tke=tke,
+        mut=mut, c1h=state.c1h, c2h=state.c2h, rdzw=ops["rdzw"],
+        msft=state.msft, hpbl=sfc["pblh"], dlk=dlk, qv=qv, rho=ops["rho"],
+        hfx=sfc["hfx"], isfflx=cfg.isfflx, tke_heat_flux=cfg.tke_heat_flux,
+        c_k=cfg.c_k, dt=cfg.dt, dx=cfg.dx, dy=cfg.dy, l_diss=l_diss, **side)
+    ws = state.scratch(sms3dtke.workspace_shape(nz, ny, nx), "sms_tridiag")
+    sms3dtke.vdiff_tke(
+        rtke=rtke, tke=tke, rho=ops["rho"], xkmv=xkmv, l_diss=l_diss,
+        rdz=ops["rdz"], fnm=state.fnm, fnp=state.fnp, dnw=state.dnw,
+        c1h=state.c1h, c2h=state.c2h, mut=mut, dt=cfg.dt, ws=ws, **side)
+    return d11, d22, d12
+
+
+def add_wrf_sms3dtke_vertical(state: DomainState, cfg: RunConfig, specs,
+                              buffers: dict, *, time_t: bool) -> None:
+    """``vertical_diffusion_implicit``'s u, v, w, theta and scalar rows
+    (module_diffusion_em.F:7754-8475) into the carrying buffers, with the
+    surface stress (USTM), heat flux (HFX, and the nonlocal flux NLFLUX)
+    and moisture flux (QFX) inside the implicit solves.  km_opt = 5 runs
+    no vertical_diffusion_2 (module_first_rk_step_part2.F:1028-1052)."""
+    from woof.core import sms3dtke
+    nz, ny, nx = state.p.shape
+    bx, by = _boundary_x(cfg), _boundary_y(cfg)
+    suffix = "0" if time_t else ""
+    ops = {name: state._scratch["sms_" + name]
+           for name in ("th", "t2", "rho", "rdzw", "rdz")}
+    sfc = _sms3dtke_surface(state, nx, ny)
+    mut = state.scratch((ny, nx), "smag_mut")
+    ws = state.scratch(sms3dtke.workspace_shape(nz, ny, nx), "sms_tridiag")
+    xkmv = state.scratch((nz, ny, nx), "smag_kmv")
+    xkhv = state.scratch((nz, ny, nx), "smag_khv")
+    xkmh = state.scratch((nz, ny, nx), "smag_km")
+    meso = state.scratch((nz, ny, nx), "sms_xkmv_meso")
+    nlflux = state.scratch((nz + 1, ny, nx), "sms_nlflux")
+    qv = getattr(state, "qv" + suffix) if state.qv is not None else None
+    common = dict(fnm=state.fnm, fnp=state.fnp, dnw=state.dnw,
+                  c1h=state.c1h, c2h=state.c2h, mut=mut, dt=cfg.dt, ws=ws,
+                  bx=bx, by=by)
+    u = getattr(state, "u" + suffix)
+    v = getattr(state, "v" + suffix)
+    sms3dtke.vdiff_u(ru=buffers["smag_ru"], u=u, v=v, rho=ops["rho"],
+                     xkmv=xkmv, xkmv_meso=meso, gamu=state.gamu,
+                     rdz=ops["rdz"], ustm=sfc["ustm"], **common)
+    sms3dtke.vdiff_v(rv=buffers["smag_rv"], u=u, v=v, rho=ops["rho"],
+                     xkmv=xkmv, xkmv_meso=meso, gamv=state.gamv,
+                     rdz=ops["rdz"], ustm=sfc["ustm"], **common)
+    sms3dtke.vdiff_w(rw=buffers["smag_rw"], w=getattr(state, "w" + suffix),
+                     rho=ops["rho"], xkmh=xkmh, rdzw=ops["rdzw"], dn=state.dn,
+                     c1f=state.c1f, c2f=state.c2f, mut=mut, dt=cfg.dt, ws=ws,
+                     bx=bx, by=by)
+    sms3dtke.vdiff_th(rt=buffers["smag_rth"], var=ops["t2"], th=ops["th"],
+                      rho=ops["rho"], xkhv=xkhv, nlflux=nlflux,
+                      rdz=ops["rdz"], hfx=sfc["hfx"], qfx=sfc["qfx"], qv=qv,
+                      use_theta_m=int(getattr(cfg, "use_theta_m", 0)),
+                      isfflx=cfg.isfflx, tke_heat_flux=cfg.tke_heat_flux,
+                      **common)
+    for f, _tend, _xk, _c1, _c2, slot, stag in specs:
+        if stag != "" or slot == "smag_rth":
+            continue
+        name = slot[len("smag_r"):]
+        if name in SMS3DTKE_UNMIXED_SCALARS:
+            continue
+        sms3dtke.vdiff_scalar(
+            tend=buffers[slot], field=f, base=None, rho=ops["rho"],
+            xkhv=xkhv, rdz=ops["rdz"],
+            flux=sfc["qfx"] if name == "qv" else None, **common)
+
+
 def launch_wrf_smag3d_km(state: DomainState, cfg: RunConfig,
                          xkmh, xkhh, *, time_t: bool):
     """WRF v4.6.1 km_opt=3: ``cal_deform_and_div`` + ``calculate_N2`` +
@@ -1784,7 +1999,7 @@ def _horizontal_w_km(state: DomainState, cfg: RunConfig):
     """
     # km_opt=1's xkmv is kvdif (isotropic_km), live only while its package
     # runs; a diff6-only km_opt=1 step must not allocate the slot.
-    if cfg.km_opt not in (2, 3) and not constant_k_mixing_active(cfg):
+    if cfg.km_opt not in (2, 3, 5) and not constant_k_mixing_active(cfg):
         return None
     return state.scratch(state.p.shape, "smag_kmv")
 
@@ -2184,6 +2399,9 @@ def _compute_wrf_smag_tendencies(state: DomainState, cfg: RunConfig,
     if cfg.km_opt == 2:
         deformation = launch_wrf_tke_km(
             state, cfg, km, kh, time_t=time_t)
+    elif cfg.km_opt == 5:
+        deformation = launch_wrf_sms3dtke(
+            state, cfg, km, kh, time_t=time_t)
     elif cfg.km_opt == 3:
         deformation = launch_wrf_smag3d_km(
             state, cfg, km, kh, time_t=time_t)
@@ -2220,15 +2438,16 @@ def _compute_wrf_smag_tendencies(state: DomainState, cfg: RunConfig,
                              full_theta=(slot == "smag_rth"))
         _zero_open_strips(buf, cfg, 1)
 
-    if cfg.km_opt == 2:
+    if cfg.km_opt in (2, 5):
         # TKE self-diffusion: horizontal with 2*Km_h regardless of the PBL
         # (module_diffusion_em.F:3020-3032, doubling :3988-3996 -- WRF's
         # doing_tke tendency = tmptendf + 2*(tendency - tmptendf)).
+        # km_opt = 5 runs it whatever tke_mix2_off says (:3020-3021).
         nz_, ny_, nx_ = km.shape
         tke_t = getattr(state, "tke0" if time_t else "tke")
         rtke = state.scratch((nz_, ny_, nx_), "smag_rtke")
         tmp = state.scratch((nz_, ny_, nx_), "smag_tke_tmp")
-        if not getattr(cfg, "tke_mix2_off", False):
+        if cfg.km_opt == 5 or not getattr(cfg, "tke_mix2_off", False):
             tmp[...] = 0
             launch_wrf_smag2d_hd(state, cfg, tke_t, km, tmp, stagger="",
                                  time_t=time_t, full_theta=False)
@@ -2237,6 +2456,19 @@ def _compute_wrf_smag_tendencies(state: DomainState, cfg: RunConfig,
             budget_h = tke_budget.term(state, cfg, "diffusion_h")
             if budget_h is not None:
                 budget_h[...] = 2.0 * tmp
+
+    if cfg.km_opt == 5:
+        # vertical_diffusion_implicit replaces vertical_diffusion_2; its
+        # TKE row already ran in launch_wrf_sms3dtke, before the horizontal
+        # TKE diffusion, as WRF orders them.
+        buffers = {
+            slot: state.scratch(f.shape, slot)
+            for f, _tend, _xk, _c1, _c2, slot, _stag in specs
+        }
+        add_wrf_sms3dtke_vertical(state, cfg, specs, buffers, time_t=time_t)
+        for f, _tend, _xk, _c1, _c2, slot, _stag in specs:
+            _zero_open_strips(buffers[slot], cfg, 1)
+        return
 
     if cfg.bl_pbl_physics == 0:
         buffers = {
@@ -2462,7 +2694,7 @@ def prepare_fixed_tendencies(state: DomainState, cfg: RunConfig,
                           kmv=_horizontal_w_km(state, cfg))
     for f0, _tend, _xk, _c1, _c2, slot, _stag in specs:
         state.scratch(f0.shape, slot)[...] = 0
-    if cfg.km_opt == 2:
+    if cfg.km_opt in (2, 5):
         # The prognostic-TKE forward tendency (tke_rhs + self-diffusion),
         # consumed by advance_tke_stage on every RK pass.
         state.scratch((nz, ny, nx), "smag_rtke")[...] = 0
@@ -2484,7 +2716,7 @@ def prepare_fixed_tendencies(state: DomainState, cfg: RunConfig,
         exempt = diff6_exempt_slots(cfg)
         # row[5] is the row's carrying slot (see _smag2d_specs).
         diff6_rows = [row for row in specs if row[5] not in exempt]
-        if cfg.km_opt == 2:
+        if cfg.km_opt in (2, 5):
             # WRF applies the 6th-order filter to tke through
             # rk_scalar_tend unless tke_mix6_off (Registry default
             # .false., Registry.EM_COMMON:2893).
@@ -2645,7 +2877,7 @@ def add_scalar_diff6_wrf(state: DomainState, cfg: RunConfig) -> None:
     specs = _smag2d_specs(state, None, None, time_t=True)
     exempt = diff6_exempt_slots(cfg)
     rows = [row for row in specs if row[1] is None and row[5] not in exempt]
-    if cfg.km_opt == 2:
+    if cfg.km_opt in (2, 5):
         rows.append((state.tke0, None, None, state.c1h, state.c2h,
                      "smag_rtke", ""))
     for f0, _tend, _xk, c1, c2, slot, stag in rows:
@@ -4394,8 +4626,18 @@ def close_periodic_alias(state: DomainState, cfg: RunConfig) -> None:
 
 def step(state: DomainState, cfg: RunConfig, *, acoustic: bool = True,
          mass_flux_observer=None, mass_flux_accumulator=None,
-         refl_10cm_due: bool = False, fire_history_due: bool = False) -> None:
+         refl_10cm_due: bool = False, fire_history_due: bool = False,
+         avgflx_history_due: bool = False,
+         partial_top=None) -> None:
     """Advance ``state`` one full RK3 step of length ``cfg.dt``.
+
+    ``partial_top`` (default ``None``: the step is the step it always was)
+    is a partial-depth child's interface driver
+    (:class:`woof.core.partial_nest_run.ChildTop`): the step's column ends at
+    an interface the parent's mass flux passes through, and the driver's
+    hooks -- stage forcing, the interface Omega, the top-face fluxes and
+    top zone, the acoustic substep with the specified interface, the
+    scalars' interface flux -- run at their places in the RK loop below.
 
     The schemes' error-only health reads are deferred to the END of the
     step (:class:`woof.core.health_ledger.resident_step`): one device read
@@ -4423,6 +4665,9 @@ def step(state: DomainState, cfg: RunConfig, *, acoustic: bool = True,
     finish-stage theta writeback and the post-microphysics EOS refresh.
     ``fire_history_due`` is the independent history alarm for firebrand
     landing likelihood and counters, including vapor-only fire cases.
+    ``avgflx_history_due`` (``do_avgflx_em = 1`` only) says a history frame
+    is written at this step's end, so the AVGFLX means restart on the next
+    step (woof.core.avgflx).
 
     Config-gated physics (no-ops with the defaults): ``km_opt=1`` with
     ``cfg.khdif/kvdif > 0`` runs WRF's diff_opt=2 mixing package with the
@@ -4483,13 +4728,19 @@ def step(state: DomainState, cfg: RunConfig, *, acoustic: bool = True,
                    mass_flux_observer=mass_flux_observer,
                    mass_flux_accumulator=mass_flux_accumulator,
                    refl_10cm_due=refl_10cm_due,
-                   fire_history_due=fire_history_due)
+                   fire_history_due=fire_history_due,
+                   avgflx_history_due=avgflx_history_due,
+                   partial_top=partial_top)
 
 
 def _step_body(state: DomainState, cfg: RunConfig, *, acoustic: bool,
                mass_flux_observer, mass_flux_accumulator,
-               refl_10cm_due: bool, fire_history_due: bool) -> None:
+               refl_10cm_due: bool, fire_history_due: bool,
+               avgflx_history_due: bool = False,
+               partial_top=None) -> None:
     """The step itself; :func:`step` is this under the resident ledger."""
+    if partial_top is not None:
+        partial_top.admit(state, cfg, acoustic=acoustic)
     if mass_flux_observer is not None and mass_flux_accumulator is not None:
         raise ValueError(
             "mass_flux_observer and mass_flux_accumulator are mutually "
@@ -4525,6 +4776,9 @@ def _step_body(state: DomainState, cfg: RunConfig, *, acoustic: bool,
         raise NotImplementedError(
             "non-timesplit physics requires the acoustic RK3 path "
             "(step(acoustic=False) is the Phase-1 dry advection test path)")
+    # use_theta_m: the state's theta and the run's must agree (a door that
+    # built dry theta for a theta_m run is refused here, by name).
+    theta_m_branch.check_step(state, cfg)
     _save_time_t(state)
     zero_tendencies = _prepare_tendency_zero(state)
 
@@ -4544,7 +4798,10 @@ def _step_body(state: DomainState, cfg: RunConfig, *, acoustic: bool,
         if not _wrf_reuse_diagnostics(state):
             update_diagnostics(state, cfg.hypsometric_opt,
                                muts=_wrf_muts(state))
-        physics_tendencies = state.physics.compute(state, cfg)
+        # use_theta_m = 1: the physics reads phy_prep's dry theta; off, the
+        # window is a no-op and the call is the call it always was.
+        with theta_m_branch.physics_window(state, cfg):
+            physics_tendencies = state.physics.compute(state, cfg)
         # WRF rk_update_scalar saves scalar_old from the post-physics
         # carrier on stage 1 (module_em.F:1679,1722). Preserve the MYNN solve.
         if getattr(state, "qke_adv", None) is not None:
@@ -4554,11 +4811,16 @@ def _step_body(state: DomainState, cfg: RunConfig, *, acoustic: bool,
         # schemes disabled. Run its common cadence, adding no tendencies.
         update_diagnostics(state, cfg.hypsometric_opt,
                            muts=_wrf_muts(state))
-        state.physics.compute(state, cfg)
+        with theta_m_branch.physics_window(state, cfg):
+            state.physics.compute(state, cfg)
 
     if stochastic_binding is not None:
         physics_tendencies = stochastic_binding.after_nonmicrophysics(
             state, cfg, physics_tendencies)
+    # use_theta_m = 1: conv_t_tendf_to_moist (module_first_rk_step_part2.F:
+    # 1005), the held dry-theta physics tendency as a theta_m tendency.
+    physics_tendencies = theta_m_branch.convert_physics_tendencies(
+        state, cfg, physics_tendencies)
     if getattr(state, "chem", None) is not None:
         # Native SFIRE emits into tracers before RK transport. The common
         # chem driver owns its source ledger and refreshes affected time-t
@@ -4648,7 +4910,11 @@ def _step_body(state: DomainState, cfg: RunConfig, *, acoustic: bool,
         if not (istage == 0 and _wrf_reuse_diagnostics(state)):
             update_diagnostics(state, cfg.hypsometric_opt,
                                muts=_wrf_muts(state))  # p, al, alt at t*
+        if partial_top is not None:
+            partial_top.stage_begin(istage)
         ru, rv, ww = stage_fluxes(state, cfg, first_stage=(istage == 0))
+        if partial_top is not None:
+            ww = partial_top.stage_ww(ru, rv, istage)
         # WRF calc_cq is fixed at the RK-stage reference state and shared by
         # horizontal_pressure_gradient plus every acoustic substep.
         stage_cq = prepare_moist_cq(state, cfg)
@@ -4691,6 +4957,8 @@ def _step_body(state: DomainState, cfg: RunConfig, *, acoustic: bool,
             if cfg.mp_physics != 0:                   # WRF rk_addtend_dry's
                 add_h_diabatic_tendency(state)        # h_diabatic slot, every
             add_fixed_dry_tendencies(state, cfg)       # held Smag/diff6 tendf
+            if partial_top is not None:               # interface face fluxes,
+                partial_top.slow_tendencies(istage)   # top relaxation zone
             apply_w_damping(state, cfg, ww)           # w_damping=1 only
             record_wrf_vertical_cfl(state, cfg, ww)  # probe; off by default
             apply_state_lateral_boundaries(state, cfg, rk_stage=istage)
@@ -4731,8 +4999,12 @@ def _step_body(state: DomainState, cfg: RunConfig, *, acoustic: bool,
         # Chem species advect with the same acoustic time-averaged fluxes
         # (WRF rk_scalar_tend for chem, solve_em.F:2476-2500), so a chem run
         # accumulates sumflux even on a dry state.
+        # do_avgflx_em = 1 averages WRF's sumflux fluxes, which WRF forms
+        # on every stage of every run (woof.core.avgflx), so a run without
+        # transported scalars accumulates them too; nothing else reads them.
         scalars = (moist or getattr(state, "tke", None) is not None
-                   or chem is not None or getattr(state, "qke_adv", None) is not None)
+                   or chem is not None or getattr(state, "qke_adv", None) is not None
+                   or avgflx.active(cfg))
         if scalars:
             ru_m = state.scratch((nzs, nys, nxs + 1), "rk_ru_m")
             rv_m = state.scratch((nzs, nys + 1, nxs), "rk_rv_m")
@@ -4740,10 +5012,14 @@ def _step_body(state: DomainState, cfg: RunConfig, *, acoustic: bool,
         # The joined substep launches (woof/core/acoustic_fusion.py) submit
         # the emdiv increment and the sumflux zero/accumulation themselves
         # where they cover this configuration; ``absorbs`` names which.
-        launch_acoustic_substep = prepare_acoustic_substep_launch(
-            state, cfg, dtau, acoustic_coefficients, mudf=mudf,
-            emdiv_args=launch_emdiv_filter.args if emdiv else None,
-            sumflux=(ru_m, rv_m, ww_m) if scalars else None)
+        if partial_top is not None:
+            launch_acoustic_substep = partial_top.acoustic_launch(
+                dtau, acoustic_coefficients, istage)
+        else:
+            launch_acoustic_substep = prepare_acoustic_substep_launch(
+                state, cfg, dtau, acoustic_coefficients, mudf=mudf,
+                emdiv_args=launch_emdiv_filter.args if emdiv else None,
+                sumflux=(ru_m, rv_m, ww_m) if scalars else None)
         absorbed = getattr(launch_acoustic_substep, "absorbs", frozenset())
         separate_sumflux = scalars and "sumflux" not in absorbed
         if separate_sumflux:
@@ -4799,6 +5075,8 @@ def _step_body(state: DomainState, cfg: RunConfig, *, acoustic: bool,
             if ieva.active_stage(cfg, istage, len(stages)):
                 scalar_implicit["implicit"] = ieva.split_scalar_omega(
                     state, cfg, ww_m, state.mub2d + state.mup, nsub * dtau)
+            if partial_top is not None:
+                partial_top.scalars_before(istage, ww_m)
             if moist or getattr(state, "qke_adv", None) is not None:
                 advance_scalars_stage(
                     state, cfg, ru_m, rv_m, ww_m, nsub * dtau,
@@ -4811,6 +5089,8 @@ def _step_body(state: DomainState, cfg: RunConfig, *, acoustic: bool,
                     # and the tendency is still pure advection.
                     export_advective_forcing=(istage == 0),
                     **scalar_implicit)
+            if partial_top is not None:
+                partial_top.scalars_after(istage, nsub * dtau)
             if getattr(state, "tke", None) is not None:
                 from woof.core.moist import advance_tke_stage
                 advance_tke_stage(
@@ -4835,6 +5115,11 @@ def _step_body(state: DomainState, cfg: RunConfig, *, acoustic: bool,
     # divided by.  Report-only (woof/core/tke_budget.py); a no-op unless
     # cfg.tke_budget is on.
     tke_budget.accumulate(state, cfg)
+    # do_avgflx_em = 1: solve_em's avgflx block, after the RK loop and before
+    # the microphysics, on the last stage's sumflux fluxes.
+    if avgflx.active(cfg):
+        avgflx.update(state, cfg, ru_m, rv_m, ww_m,
+                      history_due=avgflx_history_due)
     # Whether this step ends on a history time: the streamed/ranked post-step
     # hook builds the chem history fields (the GOCART 550 nm optics among
     # them) only then (woof/core/streaming.py refl_handoff_hook).
@@ -4891,7 +5176,8 @@ def _step_epilogue(state: DomainState, cfg: RunConfig,
     # wind).  Same instant and same inertness contract as UP_HELI_MAX:
     # reads the completed step's u/v/ph, writes only its own buffers.
     # One getattr when nothing is attached.
-    interval_diagnostics.step(state, cfg)
+    with theta_m_branch.dry_view(state):
+        interval_diagnostics.step(state, cfg)
     # WRF lightning diagnostics (lightning_option): off touches nothing here.
     lightning_refl_due = False
     if cfg.lightning_option:
@@ -4905,13 +5191,33 @@ def _step_epilogue(state: DomainState, cfg: RunConfig,
         # and documented in PROVENANCE.md entry D1 (self-consistent: the
         # capture dt and apply window are the same internal step; the
         # native dt=60 path restores WRF cadence with no code change).
-        microphysics_result = apply_microphysics(     # (WRF microphysics
-            state, cfg, cfg.dt, refl_10cm_due=(refl_10cm_due or lightning_refl_due))
+        if getattr(cfg, "madwrf_opt", 0) == 2:
+            # MAD-WRF's hydrometeor nudge (solve_em.F:3646-3662), in the
+            # scalar tile loop ahead of moist_physics_prep.
+            from woof.core.madwrf import step_nudge
+            step_nudge(state, cfg)
+        # use_theta_m = 1: moist_physics_prep_em/finish_em's theta_m branch
+        # around the scheme; off, the window is a no-op.
+        with theta_m_branch.microphysics_window(state, cfg):
+            microphysics_result = apply_microphysics(     # (WRF microphysics
+                state, cfg, cfg.dt,
+                refl_10cm_due=(refl_10cm_due or lightning_refl_due))
         if state.physics is not None:
             state.physics.accept_microphysics(
                 microphysics_result, dt=cfg.dt)
         update_diagnostics(state, cfg.hypsometric_opt)  # after the RK loop)
+    # use_theta_m = 1: WRF's diagnostics driver reads th_phy_m_t0, the dry
+    # theta update_phys_fields forms (module_diagnostics_driver.F:1252);
+    # off, the view is a no-op.
+    with theta_m_branch.dry_view(state):
+        _post_step_diagnostics(state, cfg, refl_10cm_due)
+
+
+def _post_step_diagnostics(state: DomainState, cfg: RunConfig,
+                           refl_10cm_due: bool) -> None:
+    """The end-of-step diagnostics both epilogues run last, in order."""
     if cfg.lightning_option:
+        from woof.core.lightning import update_lightning
         update_lightning(state, cfg, history_reflectivity_due=refl_10cm_due)
     from woof.core.gsd_diagnostics import reset_interval, update as update_gsd
     reset_interval(state, cfg)
@@ -4922,6 +5228,8 @@ def _step_epilogue(state: DomainState, cfg: RunConfig,
     update_precipitation(state, cfg)
     from woof.core.climate_diagnostics import update as update_climate
     update_climate(state, cfg)
+    from woof.core.solar_diagnostics import update as update_solar
+    update_solar(state, cfg)
 
 
 def _wrf_step_epilogue(state: DomainState, cfg: RunConfig,
@@ -4948,8 +5256,13 @@ def _wrf_step_epilogue(state: DomainState, cfg: RunConfig,
         lightning_refl_due = (cfg.lightning_option in (1, 2)
                               and lightning_due(state, cfg))
     if cfg.mp_physics != 0:
-        microphysics_result = apply_microphysics(
-            state, cfg, cfg.dt, refl_10cm_due=(refl_10cm_due or lightning_refl_due))
+        if getattr(cfg, "madwrf_opt", 0) == 2:
+            from woof.core.madwrf import step_nudge
+            step_nudge(state, cfg)
+        with theta_m_branch.microphysics_window(state, cfg):
+            microphysics_result = apply_microphysics(
+                state, cfg, cfg.dt,
+                refl_10cm_due=(refl_10cm_due or lightning_refl_due))
         if state.physics is not None:
             state.physics.accept_microphysics(
                 microphysics_result, dt=cfg.dt)
@@ -4966,20 +5279,15 @@ def _wrf_step_epilogue(state: DomainState, cfg: RunConfig,
         update_wind_maxima(state, cfg)
     # Per-history-interval diagnostics (hub-height wind), as in the
     # default epilogue.
-    interval_diagnostics.step(state, cfg)
+    with theta_m_branch.dry_view(state):
+        interval_diagnostics.step(state, cfg)
     # Passive diagnostic (its inertness receipts hash every serialized
     # field): the same place in the step as the default epilogue.
-    if cfg.lightning_option:
-        update_lightning(state, cfg, history_reflectivity_due=refl_10cm_due)
-    from woof.core.gsd_diagnostics import reset_interval, update as update_gsd
-    reset_interval(state, cfg)
-    from woof.core.hail import update as update_hail
-    update_hail(state, cfg)
-    update_gsd(state, cfg, history_due=refl_10cm_due)
-    from woof.core.output_diagnostics import update_precipitation
-    update_precipitation(state, cfg)
-    from woof.core.climate_diagnostics import update as update_climate
-    update_climate(state, cfg)
+    # use_theta_m = 1: WRF's diagnostics driver reads th_phy_m_t0, the dry
+    # theta update_phys_fields forms (module_diagnostics_driver.F:1252);
+    # off, the view is a no-op.
+    with theta_m_branch.dry_view(state):
+        _post_step_diagnostics(state, cfg, refl_10cm_due)
 
 
 def _wrf_reuse_diagnostics(state: DomainState) -> bool:

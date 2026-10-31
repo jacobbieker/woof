@@ -31,13 +31,17 @@ def load_momentum_measurement_pins():
     Its WRF-order controls still match every compiled reference output.
     Other platforms run the original exact gate and report their identity
     if their measured words drift; this never skips a device comparison.
+    Metal (the MLX backend) never contracts, so it has its own words: those
+    of CUDA built with ``--fmad=false``, rw_t equal to WRF's in every case.
     """
     import cupy as cp
     from woof.certify.compile_platform import nvrtc_build
 
     platform = (str(cp.cuda.Device().compute_capability), nvrtc_build())
     filename = ("momentum-measurements-sm89-nvrtc12.9.86.json"
-                if platform == ("89", "12.9.86") else "momentum-measurements.json")
+                if platform == ("89", "12.9.86") else
+                "momentum-measurements-metal.json" if platform[0] == "metal" else
+                "momentum-measurements.json")
     directory = require_fixture_dir(MOMENTUM_ORACLE_DIR, "big-step momentum")
     return json.loads((directory / filename).read_text()), platform
 

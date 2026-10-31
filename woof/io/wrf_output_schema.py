@@ -941,7 +941,33 @@ SOLAR_ALBEDO_OUTPUT_FIELDS = {
                      'ALBBCKSOL', 'BACKGROUND ALBEDO corrected for solar angle',
                      '', 'Registry.EM_COMMON:1587 (HRRR v4.1.21)'),
 }
+#: WRF swint_opt = 2 (FARMS, woof.core.farms): the six irradiances
+#: Farms_driver writes every step.  WRF's Registry puts SWDOWN2, SWDOWNC2
+#: and SWDDNIC2 in history ("rhd") and the direct/normal/diffuse three in
+#: restart only ("rd"); woof writes all six, the latter three flagged
+#: ``wrf_history=False``.
+FARMS_OUTPUT_FIELDS = {
+    "swdown2": _output_field(
+        'SWDOWN2', 'DOWNWARD SHORT WAVE FLUX AT GROUND SURFACE FROM FARMS',
+        'W m-2', 'Registry.EM_COMMON:1710'),
+    "swdownc2": _output_field(
+        'SWDOWNC2', 'CLEAR-SKY DOWNWARD SHORT WAVE FLUX AT GROUND SURFACE FROM FARMS',
+        'W m-2', 'Registry.EM_COMMON:1712'),
+    "swddnic2": _output_field(
+        'SWDDNIC2', 'Clear-sky Shortwave surface downward direct normal irradiance from FARMS',
+        'W m-2', 'Registry.EM_COMMON:1724'),
+    "swddir2": WrfOutputField(
+        'SWDDIR2', "f4", "", 'Shortwave surface downward direct irradiance from FARMS',
+        'W m-2', 'Registry.EM_COMMON:1719', False),
+    "swddni2": WrfOutputField(
+        'SWDDNI2', "f4", "", 'Shortwave surface downward direct normal irradiance from FARMS',
+        'W m-2', 'Registry.EM_COMMON:1722', False),
+    "swddif2": WrfOutputField(
+        'SWDDIF2', "f4", "", 'Shortwave surface downward diffuse irradiance from FARMS',
+        'W m-2', 'Registry.EM_COMMON:1726', False),
+}
 for _group in (CARRIED_SURFACE_OUTPUT_FIELDS, NOAH_OUTPUT_FIELDS, RADIATION_BOUNDARY_OUTPUT_FIELDS,
+               FARMS_OUTPUT_FIELDS,
                CUMULUS_RATE_OUTPUT_FIELDS,
                PHYSICS_PRESSURE_OUTPUT_FIELDS,
                SURFACE_ENERGY_OUTPUT_FIELDS,
@@ -1458,6 +1484,56 @@ WINDFARM_TURBINE_DIMENSIONED_FIELDS: frozenset[str] = frozenset({
 WINDFARM_TURBINE_DIMENSION = "windfarm_turbine"
 
 
+#: rrtmg_spectral_output (RunConfig): WRF's top and bottom fluxes resolved
+#: by RRTMG band (``<NAME>_BAND``) or shortwave g-point (``SW*_GPT``),
+#: written on ``(Time, <axis>, south_north, west_east)`` and routed BY NAME
+#: as the hub fields are.  The axes exist only in a file that carries them.
+RRTMG_SW_BAND_DIMENSION = "rrtmg_sw_band"
+RRTMG_SW_GPT_DIMENSION = "rrtmg_sw_gpt"
+RRTMG_LW_BAND_DIMENSION = "rrtmg_lw_band"
+
+#: Band edges, cm-1: WRF's rrlw_wvn wavenum1/wavenum2 (their differences
+#: are the port's delwave, tests/test_rrtmg_spectral_output.py).  The
+#: shortwave edges come from the port's own tables (woof.core.rrtmg_sw).
+RRTMG_LW_WAVENUMBERS = ((10.0, 350.0), (350.0, 500.0), (500.0, 630.0), (630.0, 700.0),
+                        (700.0, 820.0), (820.0, 980.0), (980.0, 1080.0), (1080.0, 1180.0),
+                        (1180.0, 1390.0), (1390.0, 1480.0), (1480.0, 1800.0), (1800.0, 2080.0),
+                        (2080.0, 2250.0), (2250.0, 2380.0), (2380.0, 2600.0), (2600.0, 3250.0))
+
+
+def rrtmg_spectral_dimension(name: str):
+    """The spectral axis of an rrtmg_spectral_output history name, or None."""
+    if name.startswith("SW") and name.endswith("_GPT"):
+        return RRTMG_SW_GPT_DIMENSION
+    if name.endswith("_BAND"):
+        if name.startswith("SW"):
+            return RRTMG_SW_BAND_DIMENSION
+        if name.startswith("LW"):
+            return RRTMG_LW_BAND_DIMENSION
+    return None
+
+
+#: woof.radtran spectral diagnostic (RunConfig radtran_*): one entry per
+#: requested wavelength on ``rt_wavelength`` and, for radiances, one per
+#: (umu, phi) direction on ``rt_direction``; routed BY NAME.
+RADTRAN_WAVELENGTH_DIMENSION = "rt_wavelength"
+RADTRAN_DIRECTION_DIMENSION = "rt_direction"
+RADTRAN_PLANES = frozenset({"RT_EDIR", "RT_EDN", "RT_EUP", "RT_EUP_TOA"})
+RADTRAN_WAVELENGTH_AXES = frozenset({"RT_WAVELENGTH", "RT_BAND_MIN", "RT_BAND_MAX"})
+RADTRAN_DIRECTION_AXES = frozenset({"RT_UMU", "RT_PHI"})
+
+
+def radtran_dimensions(name: str):
+    """The non-spatial axes of a radtran history name, or None."""
+    if name in RADTRAN_PLANES or name in RADTRAN_WAVELENGTH_AXES:
+        return (RADTRAN_WAVELENGTH_DIMENSION,)
+    if name == "RT_RAD":
+        return (RADTRAN_WAVELENGTH_DIMENSION, RADTRAN_DIRECTION_DIMENSION)
+    if name in RADTRAN_DIRECTION_AXES:
+        return (RADTRAN_DIRECTION_DIMENSION,)
+    return None
+
+
 from woof.core.output_diagnostics import HISTORY as _OUTPUT_HISTORY
 # setdefault, not update: WSPD10MAX and W_UP_MAX/W_DN_MAX are also the
 # nwp_diagnostics wind maxima (woof/core/wind_gust_diag.py), whose rows
@@ -1468,9 +1544,50 @@ del _symbol, _units, _description
 from woof.core.hail import HISTORY as _HAIL_HISTORY
 REGISTRY_VAR_META.update({symbol: (description, units)
     for symbol, units, description in _HAIL_HISTORY.values()})
+# WRF-Solar diagnostics: Registry/registry.solar_fields' descriptions and
+# units, verbatim (woof/core/solar_diagnostics.py SOLAR_OUTPUTS).
+from woof.core.solar_diagnostics import SOLAR_OUTPUTS as _SOLAR_OUTPUTS
+REGISTRY_VAR_META.update({symbol: (description, units)
+    for _slot, symbol, units, description in _SOLAR_OUTPUTS})
+del _SOLAR_OUTPUTS
+# do_avgflx_em = 1: Registry/registry.avgflx's descriptions and units,
+# verbatim (woof/core/avgflx.py HISTORY_FIELDS).
+from woof.core.avgflx import HISTORY_FIELDS as _AVGFLX_FIELDS
+REGISTRY_VAR_META.update({symbol: (description, units)
+    for symbol, (description, units, _stag) in _AVGFLX_FIELDS.items()})
+del _AVGFLX_FIELDS
+
+from woof.core.physics_inventory import LW_SPECTRAL_FLUXES as _LW_SPEC, SW_SPECTRAL_FLUXES as _SW_SPEC
+for _base in (*_SW_SPEC, *_LW_SPEC):
+    _desc, _units = REGISTRY_VAR_META.get(_base.upper(), (_base.upper(), "W m-2"))
+    REGISTRY_VAR_META[_base.upper() + "_BAND"] = (f"{_desc}, PER RRTMG BAND", _units or "W m-2")
+    if _base.startswith("sw"):
+        REGISTRY_VAR_META[_base.upper() + "_GPT"] = (f"{_desc}, PER RRTMG G-POINT", _units or "W m-2")
+del _base, _desc, _units, _LW_SPEC, _SW_SPEC
+REGISTRY_VAR_META.update({
+    "RT_EDIR": ("DIRECT HORIZONTAL SPECTRAL IRRADIANCE AT THE SURFACE, BAND MEAN (WOOF.RADTRAN)", "W m-2 nm-1"),
+    "RT_EDN": ("DIFFUSE DOWNWARD SPECTRAL IRRADIANCE AT THE SURFACE, BAND MEAN (WOOF.RADTRAN)", "W m-2 nm-1"),
+    "RT_EUP": ("UPWARD SPECTRAL IRRADIANCE AT THE SURFACE, BAND MEAN (WOOF.RADTRAN)", "W m-2 nm-1"),
+    "RT_EUP_TOA": ("UPWARD SPECTRAL IRRADIANCE AT THE TOP OF THE ATMOSPHERE, BAND MEAN (WOOF.RADTRAN)", "W m-2 nm-1"),
+    "RT_RAD": ("SPECTRAL RADIANCE: UPWELLING AT THE TOP OF THE ATMOSPHERE (UMU > 0), DOWNWELLING AT THE "
+               "SURFACE (UMU < 0), BAND MEAN (WOOF.RADTRAN)", "W m-2 nm-1 sr-1"),
+    "RT_WAVELENGTH": ("REQUESTED WAVELENGTH OF EACH RADTRAN ENTRY", "nm"),
+    "RT_BAND_MIN": ("LOWER EDGE OF THE REPTRAN BAND CONTAINING THE WAVELENGTH", "nm"),
+    "RT_BAND_MAX": ("UPPER EDGE OF THE REPTRAN BAND CONTAINING THE WAVELENGTH", "nm"),
+    "RT_UMU": ("COSINE OF THE POLAR ANGLE OF EACH RADIANCE DIRECTION (> 0 UPWELLING)", "1"),
+    "RT_PHI": ("AZIMUTH OF EACH RADIANCE DIRECTION RELATIVE TO THE SUN", "degree"),
+})
 
 __all__ = [
     "HISTORY_FIELDS_BY_NETCDF_NAME",
+    "RRTMG_LW_BAND_DIMENSION",
+    "RRTMG_LW_WAVENUMBERS",
+    "RRTMG_SW_BAND_DIMENSION",
+    "RRTMG_SW_GPT_DIMENSION",
+    "rrtmg_spectral_dimension",
+    "RADTRAN_DIRECTION_DIMENSION",
+    "RADTRAN_WAVELENGTH_DIMENSION",
+    "radtran_dimensions",
     "HUB_HEIGHT_DIMENSION",
     "HUB_HEIGHT_DIMENSIONED_FIELDS",
     "HUB_SCALAR_OUTPUT_FIELDS",

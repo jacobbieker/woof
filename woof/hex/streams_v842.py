@@ -38,7 +38,18 @@ def field_definition(name: str, *, physics: bool = True) -> dict:
     try:
         return _REGISTRY['fields'][name]
     except KeyError:
-        raise ValueError(f'{name}: unknown v8.4.2 Registry field') from None
+        pass
+    # WOOF's own package-gated fields (rrtmg_spectral_output), never in the pinned Registry.
+    from .mpasphys import radiation_spectral_v842 as spectral
+    if physics and name in spectral.FIELDS:
+        return spectral.field_definition(name)
+    from .mpasphys import radtran_v842 as radtran
+    if physics and name in radtran.FIELDS:
+        return radtran.field_definition(name)
+    from .mpasphys import solar_diagnostics_v842 as solar
+    if physics and name in solar.FIELDS:
+        return solar.field_definition(name)
+    raise ValueError(f'{name}: unknown v8.4.2 Registry field')
 
 
 @dataclass(frozen=True)
@@ -351,7 +362,10 @@ def parse_streams(path: str | Path, *, physics: bool = True,
 
 
 def _all_packages() -> frozenset[str]:
-    return frozenset(p for f in _REGISTRY['fields'].values() for gate in f['gates']
+    from .mpasphys.radiation_spectral_v842 import PACKAGES
+    from .mpasphys.radtran_v842 import PACKAGE as RADTRAN_PACKAGE
+    from .mpasphys.solar_diagnostics_v842 import PACKAGE as SOLAR_PACKAGE
+    return frozenset(PACKAGES.values()) | {RADTRAN_PACKAGE, SOLAR_PACKAGE} | frozenset(p for f in _REGISTRY['fields'].values() for gate in f['gates']
                      for p in gate.split(';')) | frozenset(
                      p for s in _REGISTRY['streams'].values()
                      for p in s['options'].get('packages','').split(';')) | {'no_invariant_stream'}

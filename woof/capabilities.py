@@ -124,6 +124,33 @@ GPU_RUNTIME = Requirement(
     unlocks="every path that integrates the model on a card",
     remedy=GPU_RUNTIME_REMEDY)
 
+#: The Apple-silicon runtime (woof/backend): MLX under a CuPy facade, the
+#: same CUDA kernels translated to Metal.  Stands in for GPU_RUNTIME when
+#: the process's backend is ``mlx``.
+MLX_RUNTIME = Requirement(
+    module="mlx",
+    distribution="mlx",
+    extras=("gpu-mlx", "all-mlx"),
+    unlocks="every path that integrates the model on an Apple GPU",
+    remedy=("  remedy: pixi install -e mlx\n"
+            "  #   or: pip install 'recast-woof[gpu-mlx]'\n"
+            "  # `woof doctor` translates, compiles and runs a probe kernel."))
+
+
+def _runtime_for(requirement: Requirement) -> Requirement:
+    """GPU_RUNTIME means MLX_RUNTIME on a process whose backend is mlx."""
+
+    if requirement is not GPU_RUNTIME:
+        return requirement
+    try:
+        from woof import backend
+        if backend.requested() == "mlx":
+            return MLX_RUNTIME
+    except Exception:  # noqa: BLE001 -- an unreadable choice keeps the CUDA answer
+        pass
+    return requirement
+
+
 #: The oldest CuPy the engine integrates on: the floor the ``gpu-cu12``
 #: and ``gpu-cu13`` extras declare.  Breakage it prevents: the dycore's
 #: bookkeeping launches pass by-value tables as ``numpy.void`` (since
@@ -369,6 +396,7 @@ def _base_dependency(module: str, distribution: str, unlocks: str
 #: ``ModuleNotFoundError.name`` carries.
 REQUIREMENTS: tuple[Requirement, ...] = (
     GPU_RUNTIME,
+    MLX_RUNTIME,
     SCIENCE_CORE,
     SHAPEFILE_READER,
     SCIPY,
@@ -443,7 +471,7 @@ def is_installed(module: str) -> bool:
 def missing(requirements) -> tuple[Requirement, ...]:
     """Which of ``requirements`` do not resolve here, in the given order."""
 
-    return tuple(item for item in requirements if not is_installed(item.module))
+    return tuple(item for item in map(_runtime_for, requirements) if not is_installed(item.module))
 
 
 def remedy_for_module(name: str | None) -> str | None:
@@ -565,7 +593,7 @@ def require(door: str, *requirements: Requirement,
         raise CapabilityMissing(
             refusal(door, requirement, before=before),
             requirement=requirement, command=door)
-    if GPU_RUNTIME in requirements:
+    if GPU_RUNTIME in requirements and _runtime_for(GPU_RUNTIME) is GPU_RUNTIME:
         found = outdated_gpu_runtime()
         if found is not None:
             raise CapabilityMissing(
@@ -661,13 +689,13 @@ def unmet_run_requirements() -> tuple[Requirement, ...]:
     """
 
     unmet = missing((GPU_RUNTIME,))
-    if not unmet and outdated_gpu_runtime() is not None:
+    if not unmet and _runtime_for(GPU_RUNTIME) is GPU_RUNTIME and outdated_gpu_runtime() is not None:
         return (GPU_RUNTIME,)
     return unmet
 
 
 __all__ = ["CapabilityMissing", "COMMAND_REQUIREMENTS", "COMPANION_DATA",
-           "GPU_RUNTIME", "GPU_RUNTIME_MINIMUM",
+           "GPU_RUNTIME", "GPU_RUNTIME_MINIMUM", "MLX_RUNTIME",
            "GPU_RUNTIME_REMEDY", "gpu_runtime_floor_refusal",
            "installed_cupy_version", "outdated_gpu_runtime", "PILLOW", "PYPROJ", "RASTERIO",
            "REQUIREMENTS", "Requirement", "SCIENCE_CORE", "SCIPY",

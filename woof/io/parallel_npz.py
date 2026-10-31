@@ -111,6 +111,41 @@ def crc32_combine(crc1: int, crc2: int, length2: int) -> int:
 
 # --- members ------------------------------------------------------------------------------------
 
+def _staged_layout(value):
+    """(shape, dtype) of a member staged through a shared host buffer, else None."""
+    staged = getattr(value, "_value", None)
+    if staged is not None and not isinstance(value, np.ndarray):
+        return tuple(int(n) for n in staged.shape), np.dtype(staged.dtype)
+    return None
+
+
+def _npy_header(value) -> bytes:
+    """The .npy header ``_npy_parts`` will write for ``value``.  A staged member's comes from
+    its C-ordered shape and dtype, so it is not materialised before its turn."""
+    layout = _staged_layout(value)
+    if layout is None:
+        return _npy_parts(value)[0]
+    shape, dtype = layout
+    info = {"descr": np.lib.format.dtype_to_descr(dtype), "fortran_order": False, "shape": shape}
+    fmt = np.lib.format
+    header = io.BytesIO()
+    write_header = getattr(fmt, "_write_array_header", None)
+    if write_header is not None:
+        write_header(header, info, None)
+    else:                                                    # pragma: no cover - older numpy
+        fmt.write_array_header_1_0(header, info)
+    return header.getvalue()
+
+
+def _member_nbytes(value) -> int:
+    layout = _staged_layout(value)
+    if layout is None:
+        array = np.asanyarray(value)
+        return 0 if array.itemsize == 0 else int(array.nbytes)
+    shape, dtype = layout
+    return int(np.prod(shape, dtype=np.int64)) * dtype.itemsize
+
+
 def _npy_parts(value):
     """(.npy header bytes, data buffer) exactly as ``np.lib.format.write_array`` writes them."""
     array = np.asanyarray(value)
@@ -189,16 +224,22 @@ def write_npz(path, arrays, *, workers: int | None = None) -> int:
 
     Returns the archive's size in bytes.  Every member carries ``zipfile``'s default timestamp,
     1980-01-01 00:00:00, as ``np.savez``'s do (``ZipFile.open(name, "w")`` stamps no clock).
+
+    Members are materialised one at a time, in archive order, each immediately before it is
+    written, as ``np.savez`` does: a checkpoint's device members are staged through ONE reused
+    host buffer (woof.io.restart._StagedMember), so materialising them all first left every
+    staged member holding the bytes of the last one staged.  The layout (headers, sizes,
+    offsets) is computed from shapes and dtypes alone (_npy_header, _member_nbytes).
     """
     stamp = _dos_stamp(_DATE_TIME)
     members = []
     offset = 0
     for key, value in arrays.items():
         name = _member_name(key)
-        header, data = _npy_parts(value)
+        header = _npy_header(value)
         local_size = _LOCAL.size + len(name) + _ZIP64_LOCAL_EXTRA.size
-        size = len(header) + data.nbytes
-        members.append({"name": name, "header": header, "data": data, "size": size,
+        size = len(header) + _member_nbytes(value)
+        members.append({"name": name, "header": header, "value": value, "size": size,
                         "offset": offset, "local_size": local_size})
         offset += local_size + size
     if len(members) > _ZIP_FILECOUNT_LIMIT:
@@ -211,31 +252,27 @@ def write_npz(path, arrays, *, workers: int | None = None) -> int:
     flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_BINARY", 0)
     fd = os.open(os.fspath(path), flags, 0o666)
     try:
-        # Every member's pieces are CRC'd on the pool while this thread writes the same bytes
-        # in file order (one sequential stream, as np.savez's; the kernel serialises writes into
-        # one file anyway).  Local headers carry the CRC, so they are written last, in place.
-        pending = []
-        for member in members:
-            data = member["data"]
-            pieces = [data[begin:begin + PIECE_BYTES] for begin in range(0, data.nbytes, PIECE_BYTES)]
-            if pool is not None:
-                pending.append([pool.submit(zlib.crc32, piece) for piece in pieces])
-            else:
-                pending.append([zlib.crc32(piece) for piece in pieces])
-        for member in members:
-            _write_all(fd, bytes(member["local_size"]) + member["header"])
-            data = member["data"]
-            for begin in range(0, data.nbytes, PIECE_BYTES):
-                _write_all(fd, data[begin:begin + PIECE_BYTES])
         member_crcs = []
-        for member, crcs in zip(members, pending):
-            crc = zlib.crc32(member["header"])
-            remaining = member["data"].nbytes
-            for piece_crc in crcs:
+        for member in members:
+            # Materialise now; CRC its pieces on every core while it is written; drop it.
+            header, data = _npy_parts(member.pop("value"))
+            if header != member["header"] or len(header) + data.nbytes != member["size"]:
+                raise ValueError(f"archive member {member['name']!r} changed between its "
+                                 "layout and its write")
+            pieces = [data[begin:begin + PIECE_BYTES] for begin in range(0, data.nbytes, PIECE_BYTES)]
+            pending = ([pool.submit(zlib.crc32, piece) for piece in pieces] if pool is not None
+                       else [zlib.crc32(piece) for piece in pieces])
+            _write_all(fd, bytes(member["local_size"]) + header)
+            for piece in pieces:
+                _write_all(fd, piece)
+            crc = zlib.crc32(header)
+            remaining = data.nbytes
+            for piece_crc in pending:
                 length = min(PIECE_BYTES, remaining)
                 crc = crc32_combine(crc, piece_crc if pool is None else piece_crc.result(), length)
                 remaining -= length
             member_crcs.append(crc)
+            del header, data, pieces, pending
         tail = _tail(members, member_crcs, start_dir, stamp)
         _write_at(fd, tail, start_dir)
         for member, crc in zip(members, member_crcs):

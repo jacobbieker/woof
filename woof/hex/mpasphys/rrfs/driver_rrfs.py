@@ -347,6 +347,24 @@ def resolve_namelist(text: str, *, backends: Mapping[str, str] | None = None,
     # Hex mode controls are orchestration, absent from the pristine fork Registry.
     for key in ("config_physics_mode", "config_physics_correct_skip"):
         groups.get("nhyd_model", {}).pop(key, None)
+    # WOOF's &radiation config_rrtmg_spectral_output is produced by the v8.4.2 RRTMG slots only.
+    from .. import radiation_spectral_v842 as spectral
+    from .. import radtran_v842 as radtran
+    if groups.get(radtran.GROUP):
+        raise ValueError(f"&{radtran.GROUP} (the woof.radtran diagnostic) is not available on the RRFS "
+                         "fork route; it is an MPAS-A v8.4.2 suite-route option")
+    if spectral.resolve(groups) != "none":
+        raise ValueError(f"&{spectral.GROUP} {spectral.OPTION} is not available on the RRFS fork route; "
+                         "it is an MPAS-A v8.4.2 suite-route option")
+    from .. import wrfsolar_eps_v842 as wrfsolar_eps
+    wrfsolar_eps.refuse_madwrf(groups)
+    if groups.get(wrfsolar_eps.GROUP):
+        raise ValueError(f"&{wrfsolar_eps.GROUP} (WRF-Solar EPS) is not available on the RRFS fork "
+                         "route; it is an MPAS-A v8.4.2 suite-route option")
+    from .. import solar_diagnostics_v842 as solar
+    if solar.resolve(groups):
+        raise ValueError(f"&{solar.GROUP} {solar.OPTION} is not available on the RRFS fork route; "
+                         "it is an MPAS-A v8.4.2 suite-route option")
     for group, keys in spec["registry_groups"].items():
         for key, value in groups.get(group, {}).items():
             if key not in keys:

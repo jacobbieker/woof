@@ -72,13 +72,28 @@ def nvrtc_banner() -> str:
         return ""
 
 
+METAL_BUILD = "metal"
+
+
+def _metal_backend() -> bool:
+    try:
+        from woof import backend
+        return backend.active() == "mlx"
+    except Exception:
+        return False
+
+
 def nvrtc_build(banner: str | None = None) -> str:
     """The four-part NVRTC build, e.g. ``"12.9.86"`` or ``"13.0.48"``.
 
     This is the discriminator ``nvrtc.getVersion()`` is too coarse to be:
     12.9.41 and 12.9.86 both report ``(12, 9)`` and do not generate the same
-    code.  ``UNRESOLVED`` when NVRTC did not answer.
+    code.  ``UNRESOLVED`` when NVRTC did not answer.  On the MLX backend no
+    kernel is compiled by NVRTC: the build is ``"metal"`` (woof's translator
+    and the Metal compiler), so per-compiler measurement rows have a key.
     """
+    if banner is None and _metal_backend():
+        return METAL_BUILD
     text = nvrtc_banner() if banner is None else banner
     match = _BUILD_RE.search(text)
     return match.group("build") if match else UNRESOLVED
@@ -182,7 +197,7 @@ def compile_platform_fingerprint() -> dict[str, str]:
     banner = nvrtc_banner()
     library = nvrtc_library()
     fingerprint = {
-        "nvrtc_build": nvrtc_build(banner),
+        "nvrtc_build": METAL_BUILD if _metal_backend() else nvrtc_build(banner),
         "nvrtc_build_id": nvrtc_build_id(banner),
         "nvrtc_library_sha256": library["sha256"],
         "cuda_driver_version": _driver_version(),
