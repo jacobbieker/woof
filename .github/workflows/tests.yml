@@ -1,0 +1,400 @@
+name: tests
+
+# Tests every push and pull request.  docs/dev/ci.md says what each job proves
+# and what none of them covers (the big-card tier, the byte-pinned assets).
+#
+# Every environment is a pixi environment from the committed pixi.lock
+# (locked: true): cpu on Linux and macOS, mlx on macOS, default (CUDA 12) on
+# the opt-in self-hosted CUDA runner.
+#
+# This file is deliberately not named ci.yml.  tools/promote_prepared_release.py,
+# tools/workflow_rehearsals.py and several tests/ contracts describe the
+# engine's own ci.yml, which this tree leaves out (tests/_woof_snapshot.py
+# skips them while it is absent); a ci.yml here would switch those contracts on
+# against a different workflow.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  PIXI_VERSION: v0.81.0
+  # The CPU selection, as the battery READMEs spell it.
+  CPU_MARKERS: not gpu and not bigcard and not assets
+  # Number of legs the tests/ tree is split into (.github/ci/select_tests.py).
+  TEST_LEGS: "8"
+  PYTHONUNBUFFERED: "1"
+  FORCE_COLOR: "0"
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: prefix-dev/setup-pixi@ad1da6449d9e506fd127fd67ab2d054a769f6a94 # v0.11.2
+        with:
+          pixi-version: ${{ env.PIXI_VERSION }}
+          environments: cpu
+          locked: true
+          cache: true
+          cache-write: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      - name: workflow files (actionlint)
+        run: pixi exec --spec actionlint==1.7.12 actionlint -color
+      - name: undefined names (ruff F821/F822/F823, tests/test_no_undefined_names.py)
+        run: pixi run -e cpu --locked python -m pytest -q -p no:cacheprovider tests/test_no_undefined_names.py
+      - name: syntax (compileall over the trees the repository owns)
+        run: pixi run -e cpu --locked python -m compileall -q -x '/vendor/' woof tools tilestream tests components/hex/tests components/hex/tools
+      - name: every shipped module imports (tools/import_sweep.py)
+        env:
+          GPUWM_NO_LOCAL_GPU: "1"
+        run: pixi run -e cpu --locked python -m tools.import_sweep
+      - name: the test legs partition tests/
+        run: pixi run -e cpu --locked python .github/ci/select_tests.py check "$TEST_LEGS"
+
+  # ---------------------------------------------------------------- Linux CPU
+  native-linux:
+    name: native (ubuntu-24.04)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: prefix-dev/setup-pixi@ad1da6449d9e506fd127fd67ab2d054a769f6a94 # v0.11.2
+        with:
+          pixi-version: ${{ env.PIXI_VERSION }}
+          environments: cpu
+          activate-environment: cpu
+          locked: true
+          cache: true
+          cache-write: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      - id: workspaces
+        name: workspaces (the build-native pixi task)
+        run: |
+          {
+            echo 'list<<EOF'
+            python .github/ci/build_native.py list | sed 's|.*|tools/& -> target|'
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: ${{ steps.workspaces.outputs.list }}
+          shared-key: native-linux
+          cache-on-failure: true
+          save-if: ${{ github.event_name == 'push' }}
+      - name: cargo build --release --locked --offline (every build-native workspace)
+        run: python .github/ci/build_native.py build
+      - name: pack the bridges
+        run: python .github/ci/build_native.py pack native-linux.tar
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-linux
+          path: native-linux.tar
+          retention-days: 3
+          if-no-files-found: error
+
+  cpu:
+    name: cpu (ubuntu-24.04, ${{ matrix.leg }})
+    needs: native-linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        leg: ["0", "1", "2", "3", "4", "5", "6", "7", hex, stage1]
+    env:
+      # No device on a hosted runner; this also makes any test that reaches
+      # CUDA without a marker fail loudly instead of skipping (tests/conftest.py).
+      GPUWM_NO_LOCAL_GPU: "1"
+      WOOF_HEX_NO_LOCAL_GPU: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: prefix-dev/setup-pixi@ad1da6449d9e506fd127fd67ab2d054a769f6a94 # v0.11.2
+        with:
+          pixi-version: ${{ env.PIXI_VERSION }}
+          environments: cpu
+          locked: true
+          cache: true
+          cache-write: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: native-linux
+      - name: unpack the bridges into tools/*/target/release
+        run: pixi run -e cpu --locked python .github/ci/build_native.py unpack native-linux.tar
+      - name: tests/ leg ${{ matrix.leg }} of ${{ env.TEST_LEGS }}
+        if: matrix.leg != 'hex' && matrix.leg != 'stage1'
+        run: |
+          mapfile -t files < <(pixi run -e cpu --locked python .github/ci/select_tests.py shard "${{ matrix.leg }}" "$TEST_LEGS")
+          mkdir -p junit
+          pixi run -e cpu --locked python -m pytest -q -rfE -p no:cacheprovider -n auto --dist loadfile \
+            -m "$CPU_MARKERS" --junitxml="junit/tests-${{ matrix.leg }}.xml" "${files[@]}"
+      - name: Stage 1, the maintained CPU list (tools/battery/run_stage1.py)
+        if: matrix.leg == 'stage1'
+        run: |
+          mkdir -p junit
+          pixi run -e cpu --locked python tools/battery/run_stage1.py -- -q -rfE -p no:cacheprovider -n auto --dist loadfile \
+            -m "$CPU_MARKERS" --junitxml=junit/stage1.xml
+      - name: hex Tier 1 (components/hex/tools/battery/cpu_files.txt)
+        if: matrix.leg == 'hex'
+        working-directory: components/hex
+        run: |
+          mapfile -t files < <(pixi run -e cpu --locked python ../../.github/ci/select_tests.py hex)
+          mkdir -p ../../junit
+          pixi run -e cpu --locked python -m pytest -q -rfE -p no:cacheprovider -n auto --dist loadfile \
+            -m "$CPU_MARKERS" --junitxml=../../junit/hex.xml "${files[@]}"
+      - name: counts
+        if: always() && hashFiles('junit/*.xml') != ''
+        run: python3 .github/ci/junit_summary.py "cpu ${{ matrix.leg }} (linux)" junit/*.xml >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: junit-cpu-linux-${{ matrix.leg }}
+          path: junit/*.xml
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------- macOS
+  native-macos:
+    name: native (macos-15)
+    runs-on: macos-15
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: prefix-dev/setup-pixi@ad1da6449d9e506fd127fd67ab2d054a769f6a94 # v0.11.2
+        with:
+          pixi-version: ${{ env.PIXI_VERSION }}
+          environments: mlx
+          activate-environment: mlx
+          locked: true
+          cache: true
+          cache-write: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      - id: workspaces
+        name: workspaces (the build-native pixi task)
+        run: |
+          {
+            echo 'list<<EOF'
+            python .github/ci/build_native.py list | sed 's|.*|tools/& -> target|'
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: ${{ steps.workspaces.outputs.list }}
+          shared-key: native-macos
+          cache-on-failure: true
+          save-if: ${{ github.event_name == 'push' }}
+      - name: cargo build --release --locked --offline (every build-native workspace)
+        run: python .github/ci/build_native.py build
+      - name: pack the bridges
+        run: python .github/ci/build_native.py pack native-macos.tar
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-macos
+          path: native-macos.tar
+          retention-days: 3
+          if-no-files-found: error
+
+  macos:
+    name: macos (macos-15, mlx env, ${{ matrix.leg }})
+    needs: native-macos
+    runs-on: macos-15
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        leg: ["0", "1", "2", "3", "4", "5", "6", "7", hex, stage1]
+    env:
+      GPUWM_NO_LOCAL_GPU: "1"
+      WOOF_HEX_NO_LOCAL_GPU: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: prefix-dev/setup-pixi@ad1da6449d9e506fd127fd67ab2d054a769f6a94 # v0.11.2
+        with:
+          pixi-version: ${{ env.PIXI_VERSION }}
+          environments: mlx
+          locked: true
+          cache: true
+          cache-write: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: native-macos
+      - name: unpack the bridges into tools/*/target/release
+        run: pixi run -e mlx --locked python .github/ci/build_native.py unpack native-macos.tar
+      - name: tests/ leg ${{ matrix.leg }} of ${{ env.TEST_LEGS }}
+        if: matrix.leg != 'hex' && matrix.leg != 'stage1'
+        run: |
+          files=()
+          while IFS= read -r f; do files+=("$f"); done < <(pixi run -e mlx --locked python .github/ci/select_tests.py shard "${{ matrix.leg }}" "$TEST_LEGS")
+          mkdir -p junit
+          pixi run -e mlx --locked python -m pytest -q -rfE -p no:cacheprovider -n auto --dist loadfile \
+            -m "$CPU_MARKERS" --junitxml="junit/tests-${{ matrix.leg }}.xml" "${files[@]}"
+      - name: Stage 1, the maintained CPU list (tools/battery/run_stage1.py)
+        if: matrix.leg == 'stage1'
+        run: |
+          mkdir -p junit
+          pixi run -e mlx --locked python tools/battery/run_stage1.py -- -q -rfE -p no:cacheprovider -n auto --dist loadfile \
+            -m "$CPU_MARKERS" --junitxml=junit/stage1.xml
+      - name: hex Tier 1 (components/hex/tools/battery/cpu_files.txt)
+        if: matrix.leg == 'hex'
+        working-directory: components/hex
+        run: |
+          files=()
+          while IFS= read -r f; do files+=("$f"); done < <(pixi run -e mlx --locked python ../../.github/ci/select_tests.py hex)
+          mkdir -p ../../junit
+          pixi run -e mlx --locked python -m pytest -q -rfE -p no:cacheprovider -n auto --dist loadfile \
+            -m "$CPU_MARKERS" --junitxml=../../junit/hex.xml "${files[@]}"
+      - name: counts
+        if: always() && hashFiles('junit/*.xml') != ''
+        run: python3 .github/ci/junit_summary.py "cpu ${{ matrix.leg }} (macos, mlx env)" junit/*.xml >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: junit-cpu-macos-${{ matrix.leg }}
+          path: junit/*.xml
+          if-no-files-found: warn
+
+  metal-probe:
+    name: metal probe + device-free translator checks (macos-15)
+    runs-on: macos-15
+    timeout-minutes: 60
+    outputs:
+      metal: ${{ steps.probe.outputs.metal }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: prefix-dev/setup-pixi@ad1da6449d9e506fd127fd67ab2d054a769f6a94 # v0.11.2
+        with:
+          pixi-version: ${{ env.PIXI_VERSION }}
+          environments: mlx
+          locked: true
+          cache: true
+          cache-write: false
+      - id: probe
+        name: is there a Metal device?
+        run: |
+          metal=$(pixi run -e mlx --locked python -c 'import mlx.core as mx; print("true" if mx.metal.is_available() else "false")')
+          echo "metal=$metal" >> "$GITHUB_OUTPUT"
+          if [ "$metal" = true ]; then
+            pixi run -e mlx --locked python -c 'import mlx.core as mx; print(mx.metal.device_info())' || true
+            echo "Metal device present: the metal-gates job runs." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning title=Metal gates NOT RUN::mx.metal.is_available() is False on this runner. The Metal parity gates (kessler, wsm6, ysu in GPUWM_WRF_EXACT=0 and 1, launch ordering, memory order, mapped host memory, f64_soft_grade gpu) did NOT run; the metal-gates job is skipped, not passed. Only the device-free translator checks below ran."
+            echo "**Metal gates NOT RUN**: this runner has no Metal device (mx.metal.is_available() is False). The metal-gates job is skipped, not passed." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: every kernel unit translates to MSL (no device; tools/metal_translation_census.py --translate-only)
+        run: |
+          pixi run -e mlx --locked python tools/metal_translation_census.py --translate-only --gate --fresh --jobs 3 --out census-translate.jsonl
+          pixi run -e mlx --locked python tools/metal_translation_census.py --translate-only --retain --gate --fresh --jobs 3 --out census-translate-retain.jsonl
+      - name: soft binary64 header, host leg (clang++, no device; tools/f64_soft_grade.py host)
+        run: pixi run -e mlx --locked python tools/f64_soft_grade.py host
+
+  metal-gates:
+    name: metal gates (macos-15, GPUWM_WRF_EXACT=${{ matrix.exact }})
+    needs: metal-probe
+    # Skipped (grey), never green, when the probe found no Metal device.
+    if: needs.metal-probe.outputs.metal == 'true'
+    runs-on: macos-15
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        exact: ["0", "1"]
+    env:
+      GPUWM_WRF_EXACT: ${{ matrix.exact }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: prefix-dev/setup-pixi@ad1da6449d9e506fd127fd67ab2d054a769f6a94 # v0.11.2
+        with:
+          pixi-version: ${{ env.PIXI_VERSION }}
+          environments: mlx
+          locked: true
+          cache: true
+          cache-write: false
+      - name: confirm the device is still there
+        run: pixi run -e mlx --locked python -c 'import mlx.core as mx, sys; sys.exit(0 if mx.metal.is_available() else "no Metal device on this runner")'
+      - name: Metal parity and ordering gates
+        run: |
+          mkdir -p junit
+          pixi run -e mlx --locked python -m pytest -q -rfEs -p no:cacheprovider \
+            --junitxml="junit/metal-exact${GPUWM_WRF_EXACT}.xml" \
+            tests/test_kessler_wrf461_parity.py tests/test_wsm6_wrf461_column_exact.py \
+            tests/test_ysu_wrf461_parity.py tests/test_metal_launch_ordering.py \
+            tests/test_metal_memory_order.py tests/test_metal_mapped_host_memory.py
+      - name: soft binary64 header on the GPU (tools/f64_soft_grade.py gpu)
+        if: matrix.exact == '0'
+        run: pixi run -e mlx --locked python tools/f64_soft_grade.py gpu
+      - name: counts
+        if: always() && hashFiles('junit/*.xml') != ''
+        run: python3 .github/ci/junit_summary.py "metal gates, GPUWM_WRF_EXACT=${GPUWM_WRF_EXACT}" junit/*.xml >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: junit-metal-exact${{ matrix.exact }}
+          path: junit/*.xml
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------- CUDA
+  # Opt-in: runs only when the repository variable WOOF_CUDA_RUNNER is 'true',
+  # so it never queues forever on a repository with no such runner.  Pull
+  # requests from forks never reach it (their code would run on our card).
+  # Registering the runner: docs/dev/ci.md.
+  cuda:
+    name: cuda (self-hosted, GPUWM_WRF_EXACT=${{ matrix.exact }})
+    if: >-
+      vars.WOOF_CUDA_RUNNER == 'true' &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    needs: native-linux
+    runs-on: [self-hosted, linux, cuda]
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        exact: ["0", "1"]
+    env:
+      GPUWM_WRF_EXACT: ${{ matrix.exact }}
+      WOOF_BACKEND: cuda
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: prefix-dev/setup-pixi@ad1da6449d9e506fd127fd67ab2d054a769f6a94 # v0.11.2
+        with:
+          pixi-version: ${{ env.PIXI_VERSION }}
+          environments: default
+          locked: true
+          cache: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: native-linux
+      - name: unpack the bridges into tools/*/target/release
+        run: pixi run -e default --locked python .github/ci/build_native.py unpack native-linux.tar
+      - name: the card
+        run: |
+          nvidia-smi --query-gpu=name,memory.used,memory.total --format=csv
+          pixi run -e default --locked python -c 'import cupy; print("cupy", cupy.__version__, "devices", cupy.cuda.runtime.getDeviceCount())'
+      - name: WRF v4.6.1 parity gates (kessler, wsm6, ysu)
+        run: |
+          mkdir -p junit
+          pixi run -e default --locked python -m pytest -q -rfEs -p no:cacheprovider \
+            --junitxml="junit/cuda-parity-exact${GPUWM_WRF_EXACT}.xml" \
+            tests/test_kessler_wrf461_parity.py tests/test_wsm6_wrf461_column_exact.py tests/test_ysu_wrf461_parity.py
+      - name: hex GPU gates (components/hex/tools/battery/gpu_gates.txt pytest members)
+        if: matrix.exact == '0'
+        working-directory: components/hex
+        run: |
+          mapfile -t files < <(grep -v '^#' tools/battery/gpu_gates.txt | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | grep '^tests/.*\.py$')
+          pixi run -e default --locked python -m pytest -q -rfE -p no:cacheprovider -m "not assets" \
+            --junitxml=../../junit/cuda-hex-gpu-gates.xml "${files[@]}"
+      - name: counts
+        if: always() && hashFiles('junit/*.xml') != ''
+        run: python3 .github/ci/junit_summary.py "cuda, GPUWM_WRF_EXACT=${GPUWM_WRF_EXACT}" junit/*.xml >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: junit-cuda-exact${{ matrix.exact }}
+          path: junit/*.xml
+          if-no-files-found: warn
