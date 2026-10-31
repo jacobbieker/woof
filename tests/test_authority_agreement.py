@@ -1372,7 +1372,11 @@ def _observed_and_absences(consumer: str):
         return "microphysics", mt.PORTED_MP_PHYSICS, absences
     if consumer == "obsop.CLEAR_AIR_FLOOR_DBZ":
         from woof.da import obsop
-        from woof.microphysics_schemes import NAMED_MP_IDS
+        from woof.microphysics_schemes import NAMED_SCHEMES
+        # Only a named scheme whose Z is its own (native_reflectivity) is
+        # refused by radar DA; MAD-WRF's passive mp 96 reads the Kessler
+        # operator and its floor like a numbered scheme.
+        fused = [s.mp_id for s in NAMED_SCHEMES.values() if s.native_reflectivity]
         return "microphysics", obsop.CLEAR_AIR_FLOOR_DBZ, {
             0: "no microphysics, no operator",
             30: ("FAST_SBM writes no REFL_10CM, so radar DA has no H(x) and "
@@ -1380,7 +1384,7 @@ def _observed_and_absences(consumer: str):
                  "absence in woof.da.obsop._require_agreement_with_the_registry)"),
             **{mp: "named scheme: its Z is fused with the step "
                "(obsop.NATIVE_Z_NOT_SEPARABLE_FROM_THE_STEP), radar DA "
-               "refuses it, no floor is read" for mp in NAMED_MP_IDS}}
+               "refuses it, no floor is read" for mp in fused}}
     if consumer == "refl.REFL_10CM_INPUT_SPECIES + SCHEME_NATIVE_REFL_10CM":
         from woof.core import refl
         return "microphysics", (set(refl.REFL_10CM_INPUT_SPECIES)

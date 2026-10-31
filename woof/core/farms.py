@@ -360,8 +360,11 @@ class FarmsShortwave(ShortwaveInterpolation):
         import cupy as cp
         julian, xtime, gmt = calendar_scalars(self.start_time, elapsed_seconds)
         coszen_loc = self.coszen_loc_at(julian, xtime, gmt)
+        # eps rides only when multi_perturb's cld3 pair is live, so the
+        # unperturbed call keeps the seam's original keywords.
+        extra = {} if eps is None else {"eps": eps}
         cldfra, qc, qi = self.cloud_fraction(atmosphere, fields,
-                                             itimestep=itimestep, eps=eps)
+                                             itimestep=itimestep, **extra)
         nz = atmosphere["qv"].shape[0]
         re_cloud, re_ice, re_snow = self._radii(state, nz)
         aod, angexp, ssa, asy = self._aerosol(aodtot, fields)

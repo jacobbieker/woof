@@ -2003,12 +2003,20 @@ def test_disabled_stochastic_parameters_do_not_enable_any_scheme(tmp_path):
     # with the fields it would leave unperturbed and the key that set it
     # (2.9.0 stochastic admission: the blanket uncalibrated-spread refusal
     # named no breakage); an unknown key keeps its own answer.
-    ("pert_thom = .true.", "&stoch pert_thom = .*no runtime consumer.*would remain unperturbed"),
+    ("pert_mynn = .true.", "&stoch pert_mynn = .*no runtime consumer.*would remain unperturbed"),
     ("perturb_bdy = 1", "&stoch perturb_bdy = .*no runtime consumer.*would remain unperturbed"),
     ("unknown_noise = 0", "unmapped key")])
 def test_disabled_parameter_handling_does_not_drop_active_or_unknown_settings(tmp_path, setting, reason):
     with pytest.raises(ValueError, match=reason):
         _import_with(tmp_path, extra_input="&stoch\n" + setting + ",\n/\n")
+
+
+def test_a_lone_eps_selector_is_dropped_as_wrf_never_reads_it(tmp_path):
+    # WRF v4.7.1 runs the Thompson hooks only under
+    # pert_thom .and. multi_perturb == 1 (module_microphysics_driver.F:1120,
+    # :1201, :1314, :1369); without multi_perturb pert_thom is inert.
+    _, report = _import_with(tmp_path, extra_input="&stoch\n pert_thom = .true.,\n/\n")
+    assert ("stoch", "pert_thom") in {(d.section, d.key) for d in report.dropped}
 
 
 def test_fdda_active_nudging_refuses_disabled_drops(tmp_path):
