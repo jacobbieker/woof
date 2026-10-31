@@ -279,3 +279,39 @@ def test_real_like_dry_run_launches_no_theta_m_kernel(monkeypatch):
     assert not state.theta_m
     for slot in ("theta_m_stash", "theta_m_h_pre", "theta_m_th_phy"):
         assert state.existing_scratch(slot) is None, slot
+
+
+def _accepted_microphysics():
+    from woof.config import MP_PHYSICS_ACCEPTED
+    return [mp for mp in MP_PHYSICS_ACCEPTED if mp != 0]
+
+
+@pytest.mark.parametrize("mp", _accepted_microphysics())
+def test_every_microphysics_scheme_finishes_theta_m(mp):
+    """Each accepted scheme hands its post-call dry theta to the window
+    (a scheme that does not is refused at its first step) and integrates the
+    dry run's weather under use_theta_m = 1, on the real-like patch with its
+    physics driver (8 x 8, three steps)."""
+    import cupy as cp
+    from woof.core.dycore import run_steps
+    from woof.core.theta_m import GENERIC_FINISH_MICROPHYSICS, dry_theta
+    from woof.verify.cases import theta_m_real_like as case
+    assert mp in GENERIC_FINISH_MICROPHYSICS
+    extra = {}
+    if mp in (2, 30, 96):
+        # No RTE+RRTMGP cloud-optics coupling: the legacy wrappers' radii.
+        extra["ra_rrtmg_variant"] = "rrtmg_legacy"
+    if mp in (96, 900):
+        # Grell-Freitas has no phase-output contract for these.
+        extra["cu_physics"] = 0
+    theta = {}
+    for flag in (0, 1):
+        cfg = case.config(use_theta_m=flag, mp_physics=mp, nx=8, ny=8, **extra)
+        state, _driver = case.build(cfg)
+        run_steps(state, cfg, n=3)
+        assert state.theta_m == bool(flag)
+        theta[flag] = cp.asnumpy(dry_theta(state))
+        assert np.isfinite(theta[flag]).all()
+    # Measured on the RTX A6000: at most 1.5e-3 K (aerosol-aware Thompson).
+    assert np.abs(theta[1] - theta[0]).max() < 0.01
+

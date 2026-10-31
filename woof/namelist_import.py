@@ -271,6 +271,7 @@ def theta_m_unwired(inp: dict, max_dom: int = 1) -> str | None:
         bl = column(physics, "bl_pbl_physics", 0)
         sfclay = column(physics, "sf_sfclay_physics", 0)
         diff = column(dynamics, "diff_opt", 0)
+        km = column(dynamics, "km_opt", 0)
         isfflx = int(scalar(physics, "isfflx", 1))
         heat = float(scalar(dynamics, "tke_heat_flux", 0.0))
         for n in range(max(1, max_dom)):
@@ -278,7 +279,8 @@ def theta_m_unwired(inp: dict, max_dom: int = 1) -> str | None:
                 use_theta_m=1, moist=True, mp_physics=int(mp[n]),
                 cu_physics=int(cu[n]), bl_pbl_physics=int(bl[n]),
                 sf_sfclay_physics=int(sfclay[n]),
-                diff_opt=int(diff[n]), isfflx=isfflx, tke_heat_flux=heat))
+                diff_opt=int(diff[n]), km_opt=int(km[n]), isfflx=isfflx,
+                tke_heat_flux=heat))
             if why is not None:
                 return why
     except (TypeError, ValueError) as error:

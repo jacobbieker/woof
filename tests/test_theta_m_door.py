@@ -99,3 +99,17 @@ def test_do_avgflx_em_imports_per_domain(tmp_path):
     toml_text, _report = import_namelists(*_pair(tmp_path, inp=text))
     assert "do_avgflx_em = 1" in toml_text
     assert "do_avgflx_em = 0" in toml_text
+
+
+def test_km_opt_5_keeps_the_declared_substitution():
+    """SMS-3DTKE's use_theta_m = 1 arm is not ported: the run refuses it by
+    name and the door books the substitution rather than writing a TOML the
+    run would refuse."""
+    from types import SimpleNamespace
+    from woof.core.theta_m import refusal
+    why = refusal(SimpleNamespace(use_theta_m=1, moist=True, mp_physics=8,
+                                  cu_physics=0, km_opt=5, diff_opt=2))
+    assert why is not None and "km_opt = 5 (SMS-3DTKE)" in why
+    door = theta_m_unwired({"physics": {"mp_physics": [8]},
+                            "dynamics": {"diff_opt": [2], "km_opt": [5]}})
+    assert door == why

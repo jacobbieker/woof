@@ -73,13 +73,14 @@ SCRATCH_SLOTS = (STASH_SLOT, DRY_SLOT, RTHETA_SLOT, QV_DIABATIC_SLOT,
 #: post-call full dry theta to :func:`finish_microphysics` -- through
 #: :func:`woof.core.microphysics.moist_physics_finish` (Kessler, Lin, WSM3,
 #: WSM5, Ferrier-Aligo, WSM6, WSM6R, Milbrandt-Yau, Morrison, WDM6, NSSL,
-#: WSM7, Thompson aerosol-aware, fast SBM, P3, TEMPO) or, for classic
+#: WSM7, Thompson aerosol-aware, fast SBM, P3, TEMPO, and MAD-WRF's
+#: process-free mp_physics = 96, whose theta out is the theta in) or, for classic
 #: Thompson's fused finishes (kernels/thompson.cu thompson_adapter_finish,
 #: kernels/thompson_classic.cu tc_finish, the generated column), directly
 #: after them -- and :func:`microphysics_window` makes WRF's theta_m finish
 #: from it.  The scheme kernels and their dry finishes keep every byte.
 GENERIC_FINISH_MICROPHYSICS = frozenset(
-    {1, 2, 3, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 30, 50, 106, 900})
+    {1, 2, 3, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 30, 50, 96, 106, 900})
 
 #: WRF phy_prep_part2's RTHFTEN branch (module_big_step_utilities_em.F:
 #: 5309-5333): the cumulus schemes that read the advective theta forcing,
@@ -126,6 +127,14 @@ def refusal(cfg) -> str | None:
         return (f"use_theta_m = 1 with mp_physics = {mp}: the theta_m finish "
                 "(module_big_step_utilities_em.F:5735) is wired for "
                 f"mp_physics in {sorted(GENERIC_FINISH_MICROPHYSICS)} only")
+    if int(getattr(cfg, "km_opt", 0) or 0) == 5:
+        return ("use_theta_m = 1 with km_opt = 5 (SMS-3DTKE) is not wired: "
+                "WRF's km_opt = 5 path then forms th_phy as the dry theta of "
+                "the moist carrier and adds the moist qfac and "
+                "1.61*theta*QFX terms to its implicit heat solve "
+                "(module_diffusion_em.F:8090-8116), and woof's km_opt = 5 "
+                "operands and its WRF v4.7.1 oracle (tools/"
+                "sms3dtke_wrf471_oracle) cover use_theta_m = 0 only")
     # Every cumulus scheme woof runs is admitted: KF, MSKF, Tiedtke and New
     # SAS read no theta forcing; GF, G3 and New Tiedtke read phy_prep_part2's
     # dry-theta RTHFTEN (convert_advective_forcing).  diff_opt = 2 without
