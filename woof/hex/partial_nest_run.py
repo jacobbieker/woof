@@ -371,6 +371,9 @@ class ChildTop:
         self.scalar_stage = 0
         self.rw_save = None
         self.cache = nest.child_cache
+        #: Hooks switched off by name (measurement and diagnosis only):
+        #: coefficients, column, flux, scalar_flux, recover, top_zone.
+        self.disabled: set[str] = set()
 
     # -- the clock -----------------------------------------------------------
     def _frac(self, seconds_into_step: float) -> float:
@@ -422,6 +425,8 @@ class ChildTop:
         """After acoustic_coefficients_v841: the interface rows with theta
         above at the time ``theta`` stands for (the subcycle start, or the
         stage-2 reference on RK3's second solve)."""
+        if "coefficients" in self.disabled:
+            return
         self.coefficient_calls += 1
         cp = _cp()
         if self.coefficient_calls == 1:
@@ -442,6 +447,8 @@ class ChildTop:
     def before(self, name: str, args: tuple) -> None:
         if name == "acoustic_prepare_v841":
             self.small_step = int(args[2])
+        elif "column" in self.disabled:
+            return
         elif name in ("acoustic_column_solve_v841", "acoustic_column_solve_regional_v841",
                       "acoustic_column_pre_v841"):
             dts = float(args[2])
@@ -458,6 +465,8 @@ class ChildTop:
     def after(self, name: str, args: tuple) -> None:
         if name == "transport_vertical_flux":
             self.scalar_stage += 1
+            if "scalar_flux" in self.disabled:
+                return
             ntracers, nlev = int(args[0]), int(args[1])
             if nlev != self.k or ntracers != self.ns:
                 return
@@ -475,6 +484,8 @@ class ChildTop:
 
     # -- the big step ---------------------------------------------------------
     def big_step_flux(self, name: str, args: tuple) -> None:
+        if "flux" in self.disabled:
+            return
         p = self.stage_planes
         th, th1 = p[CELL_PLANES.index("th")], p[CELL_PLANES.index("th1")]
         if name == "theta_vertical_flux_f32":
@@ -494,6 +505,8 @@ class ChildTop:
 
     def recover_top(self, saved_state: Any, acoustic: Any, acoustic_steps: int,
                     state: Any, diag: Any, flux_w: Any) -> None:
+        if "recover" in self.disabled:
+            return
         stage = self.schedule.stages[self.stage - 1]
         frac = self._frac(self.sub_start + float(stage.large_timestep))
         a, b = self.nest.a, self.nest.b
@@ -504,6 +517,8 @@ class ChildTop:
 
     # -- the top zone --------------------------------------------------------
     def top_zone(self, kw: dict) -> None:
+        if "top_zone" in self.disabled:
+            return
         runtime = self.nest.child_driver.regional_v841
         rk_step = int(kw["rk_step"])
         values_ru = runtime.driving_values("ru", rk_step)
@@ -625,8 +640,10 @@ class PartialNestHex:
         from .partial_nest import interface_height
         self.z_i = interface_height(zg[:, :n_parent], k, what="parent")
         cz = np.asarray(build.vertical.zgrid)
-        if interface_height(cz, k, what="child") != self.z_i:
-            raise PartialNestRefused("the child's interface height differs from the parent's")
+        if cz.shape[0] != k + 1 or np.any(cz[k] != self.z_i):
+            raise PartialNestRefused(
+                "the child's top face is not the parent's flat interface face "
+                f"({self.z_i:.0f} m)")
         refuse_damping_below(pcfg, self.z_i)
         refuse_damping_below(ccfg, self.z_i)
         ratio = int(band.parent_time_step_ratio)
@@ -835,7 +852,7 @@ class PartialNestHex:
         ratio = int(self.band.parent_time_step_ratio)
         self.top.step_frac0 = j / ratio
         self.top.step_span = 1.0 / ratio
-        self.child_driver.step_device()
+        advance(self.child_driver)
         self.stats["child_steps"] += 1
         self.stats["child_seconds"] += time.perf_counter() - t0
 
@@ -897,6 +914,12 @@ class PartialNestHex:
         self.stats["coupling_seconds"] += time.perf_counter() - t0
 
 
+def advance(driver: Any) -> None:
+    """One step of a hex CUDA driver, published: ``step_device`` returns the
+    new atmosphere rather than filling the resident one."""
+    driver.atmosphere = driver.step_device().atmosphere
+
+
 def run(nests, parent_steps: int, *, on_child_step=None, on_parent_step=None) -> dict:
     """Drive a root and its chain (coarse to fine; band n's parent is band
     n-1's child): each parent step first, FORCE, the child ``ratio`` times
@@ -906,7 +929,7 @@ def run(nests, parent_steps: int, *, on_child_step=None, on_parent_step=None) ->
         if nests[n].parent_driver is not nests[n - 1].child_driver:
             raise PartialNestRefused("a chain's band n must be band n-1's child")
 
-    def advance(level: int) -> None:
+    def cycle(level: int) -> None:
         nest = nests[level]
         nest.force()
         for j in range(int(nest.band.parent_time_step_ratio)):
@@ -914,18 +937,18 @@ def run(nests, parent_steps: int, *, on_child_step=None, on_parent_step=None) ->
             if on_child_step is not None:
                 on_child_step(nest, j)
             if level + 1 < len(nests):
-                advance(level + 1)
+                cycle(level + 1)
         nest.feedback()
         nest.roll()
 
     root = nests[0]
     for _ in range(int(parent_steps)):
         t0 = time.perf_counter()
-        root.parent_driver.step_device()
+        advance(root.parent_driver)
         root.stats["parent_seconds"] += time.perf_counter() - t0
         if on_parent_step is not None:
             on_parent_step(root)
-        advance(0)
+        cycle(0)
     return {"parent_steps": int(parent_steps),
             "child_steps": [n.stats["child_steps"] for n in nests]}
 

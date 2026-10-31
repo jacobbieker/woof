@@ -55,12 +55,35 @@ class CellGeometry:
         def xyz(suffix):
             return np.stack([np.asarray(src[n + suffix], np.float64) for n in "xyz"], axis=1)
 
-        return cls(xyz("Cell"), xyz("Vertex"),
-                   np.asarray(a["cellsOnVertex"], np.int64),
+        x_cell = xyz("Cell")
+        return cls(x_cell, xyz("Vertex"),
+                   counterclockwise_cells_on_vertex(a["cellsOnVertex"], x_cell),
                    np.asarray(a["verticesOnCell"], np.int64),
                    np.asarray(a["nEdgesOnCell"], np.int64),
                    np.asarray(src.get("areaCell", a["areaCell"]), np.float64),
                    float(mesh.attrs["sphere_radius"]))
+
+
+def counterclockwise_cells_on_vertex(cells_on_vertex, x_cell) -> np.ndarray:
+    """``cellsOnVertex`` with every complete triangle counterclockwise seen
+    from outside the sphere.
+
+    The MPAS mesh specification orders ``cellsOnVertex`` counterclockwise,
+    and ``mpas_calculate_barycentric_weights`` depends on it (a clockwise
+    triangle has a negative signed area and gets zero weights; the
+    point-in-polygon test rejects every point).  Meshes from
+    ``rw_mpas_mesh`` order half their triangles clockwise (MEASURED: 2560 of
+    5120 on its 2562-cell mesh), so the table's copy is normalized by
+    swapping the last two cells of a clockwise triangle -- the same triangle,
+    MPAS's orientation.  The mesh the dycore reads is not touched."""
+    cov = np.array(cells_on_vertex, np.int64, copy=True)
+    x = np.asarray(x_cell, np.float64)
+    ok = np.all((cov >= 0) & (cov < len(x)), axis=1)
+    rows = np.flatnonzero(ok)
+    a, b, c = x[cov[rows, 0]], x[cov[rows, 1]], x[cov[rows, 2]]
+    clockwise = rows[np.einsum("ij,ij->i", np.cross(b - a, c - a), a) < 0.0]
+    cov[clockwise, 1], cov[clockwise, 2] = cov[clockwise, 2], cov[clockwise, 1].copy()
+    return cov
 
 
 # ---------------------------------------------------------------------------
@@ -358,4 +381,5 @@ def remap_conservation(remap: FeedbackRemap, rho: np.ndarray, q: np.ndarray):
 
 __all__ = ["BarycentricTable", "BudgetCover", "CellGeometry", "FeedbackRemap",
            "bary_apply_reference", "bary_table", "barycentric_weights",
+           "counterclockwise_cells_on_vertex",
            "nearest_vertices", "overlap_matrix", "remap_conservation"]

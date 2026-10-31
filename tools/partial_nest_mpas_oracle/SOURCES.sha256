@@ -1,0 +1,4 @@
+# MPAS-Model v8.4.1 (MPAS-Dev/MPAS-Model tag v8.4.1), the files extract.py cuts.
+ea046f50c9973f041c1d80a91b775c7376a8e527423cd3d1e0e2e197575d3190  src/operators/mpas_geometry_utils.F
+5c4a0074b4f1a18dfd76322dfae416db27beb3d454b9e70d97e9a4d68b0f7a1f  src/operators/mpas_vector_operations.F
+937e3191a646b0f3f14aaf1678f57b0d6880574f06e402a5053ff6ed12ab706b  src/core_atmosphere/dynamics/mpas_atm_time_integration.F
