@@ -390,10 +390,14 @@ def _translated(source: str, unit: str, contract: bool, retain: bool, defines=()
                      include_dirs=include_dirs)
 
 
-def load_unit(name: str, source: str, *, options=()) -> MetalModule:
+def translate_unit(name: str, source: str, *, options=()) -> TranslatedUnit:
+    """The MSL ``load_unit`` would compile, without touching a Metal device."""
     from woof import numerics
     from woof.backend.translate import option_defines, option_include_dirs
     effective = numerics.effective_options(tuple(options or ()))
-    unit = _translated(source, name, contracts(options), retains_subnormals(name, source, options),
+    return _translated(source, name, contracts(options), retains_subnormals(name, source, options),
                        option_defines(effective), option_include_dirs(effective))
-    return MetalModule(unit, name)
+
+
+def load_unit(name: str, source: str, *, options=()) -> MetalModule:
+    return MetalModule(translate_unit(name, source, options=options), name)

@@ -220,10 +220,10 @@ nanobind = ">=3.0,<3.2"
 recast-woof = { path = ".", editable = true, extras = ["all-mlx", "dev"] }
 
 [tool.pixi.feature.cu12.pypi-dependencies]
-recast-woof = { path = ".", editable = true, extras = ["all-cu12"] }
+recast-woof = { path = ".", editable = true, extras = ["all-cu12", "dev"] }
 
 [tool.pixi.feature.cu13.pypi-dependencies]
-recast-woof = { path = ".", editable = true, extras = ["all-cu13"] }
+recast-woof = { path = ".", editable = true, extras = ["all-cu13", "dev"] }
 
 # libRadtran's uvspec as an ORACLE only (woof/radtran is a clean-room
 # implementation; libRadtran is GPL-2 and never linked or imported by woof).

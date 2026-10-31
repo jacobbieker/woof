@@ -1,0 +1,4 @@
+self-hosted-runner:
+  # The opt-in CUDA runner of tests.yml (docs/dev/ci.md).
+  labels:
+    - cuda
