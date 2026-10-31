@@ -63,6 +63,10 @@ PROGRAM run_partial_nest
   CALL strip_case('strip_full_phi', 0, 12, 1.0E7, 8.0, 4.0)
   CALL strip_case('strip_half_u', 1, 11, 7.0E5, 8.0, 4.0)
   CALL strip_case('strip_half_theta', 1, 11, 2.8E6, 2.6666667, 4.0)
+  ! D4: advect_scalar's second-order vertical flux at the interface face.
+  CALL vflux2_case('vflux2_theta', 320.0, 3.0, 2.0E4)
+  CALL vflux2_case('vflux2_qv', 4.0E-3, 1.5E-3, 2.0E4)
+  CALL vflux2_case('vflux2_u', 20.0, 8.0, 2.0E4)
   CALL oracle_close()
 
 CONTAINS
@@ -359,5 +363,43 @@ CONTAINS
     CALL oracle_put('top_tend', tys(:, 1:nyf, :))
     CALL oracle_put('tend', tend(:, 1:nyf, 1:width))
   END SUBROUTINE strip_case
+
+  ! The interface face as WRF's advect_scalar sees an interior face (D4): a
+  ! two-level column per point, level 1 the child's top half level and
+  ! level 2 the parent's half level above it, the face between them the
+  ! interface (face 2; faces 1 and 3 carry no flux here, vflux = 0).
+  ! rom is the coupled Omega there, of either sign.
+  SUBROUTINE vflux2_case(case, base, spread, rom_scale)
+    CHARACTER(LEN=*), INTENT(IN) :: case
+    REAL, INTENT(IN) :: base, spread, rom_scale
+    INTEGER, PARAMETER :: ni = 37, kte = 3
+    REAL :: field(ni, kte, 1), tend_in(ni, kte, 1), tend(ni, kte, 1)
+    REAL :: rom(ni, kte, 1), vflux(ni, kte)
+    REAL :: fzm(kte), fzp(kte), rdzw(kte)
+    INTEGER :: i, k
+    DO i = 1, ni
+      DO k = 1, kte
+        field(i, k, 1) = base + spread * (urand() - 0.5)
+        tend_in(i, k, 1) = 1.0E-2 * spread * (urand() - 0.5)
+        rom(i, k, 1) = rom_scale * (urand() - 0.5)
+      END DO
+    END DO
+    DO k = 1, kte
+      fzm(k) = 0.5 + 0.1 * (urand() - 0.5)
+      fzp(k) = 1.0 - fzm(k)
+      rdzw(k) = -1.0 / (0.02 + 0.03 * urand())
+    END DO
+    tend = tend_in
+    CALL wrf_vflux2(field, tend, rom, fzm, fzp, rdzw, vflux, 1, ni, 1, kte)
+    CALL oracle_open(case)
+    CALL oracle_put('field', field(:, :, 1))
+    CALL oracle_put('rom', rom(:, :, 1))
+    CALL oracle_put('fzm', fzm)
+    CALL oracle_put('fzp', fzp)
+    CALL oracle_put('rdzw', rdzw)
+    CALL oracle_put('tend_in', tend_in(:, :, 1))
+    CALL oracle_put('tend', tend(:, :, 1))
+    CALL oracle_put('vflux', vflux)
+  END SUBROUTINE vflux2_case
 
 END PROGRAM run_partial_nest

@@ -18,14 +18,21 @@ compiles WRF's own statements:
 * ``share/interp_fcn.F:1829-1906`` -- ``copy_fcni``;
 * ``share/interp_fcn.F:3794-4014`` -- ``smoother``, ``sm121``, ``smdsm``;
 * ``share/module_bc.F:1221-1427`` -- ``relax_bdytend_core``;
-* ``share/module_bc.F:1430-1549`` -- ``spec_bdytend``.
+* ``share/module_bc.F:1430-1549`` -- ``spec_bdytend``;
+* ``dyn_em/module_advect_em.F:4337-4350`` -- ``advect_scalar``'s second-order
+  vertical flux and its tendency (``vert_order == 2``), the face value D4's
+  interface fluxes take (Phase D4: theta, u, v and the moist scalars through
+  the interface).
 
 The interp_fcn.F routines are external subroutines in WRF and stay so;
 their ``USE module_configure`` / ``USE module_wrf_error`` resolve to the
 stubs in ``stubs.F90`` (the namelist getters the routines call, and
 ``grid_config_rec_type`` carrying ``periodic_x``).  The two module_bc.F
 routines live in WRF's ``MODULE module_bc``; they are wrapped here in
-``MODULE wrf_bc`` with the same stub ``USE``.  No statement is edited.
+``MODULE wrf_bc`` with the same stub ``USE``.  The advect_scalar block (the
+body of a ``j`` loop inside that routine) is wrapped in a subroutine
+``wrf_vflux2`` declaring exactly the names it reads and writes.  No
+statement is edited.
 
 WRF v4.7.1 is tag v4.7.1, commit f52c197ed39d12e087d02c50f412d90d418f6186,
 public domain.
@@ -45,6 +52,8 @@ FILES = {
         "680881db48904396f38856ca1dd2578a84e8eb0a9cdd05d49f4c63cd8ce9bdaa",
     "share/module_bc.F":
         "61b9235004b2a7799faabaa928276af8a7ef2e4672619c8ad120c857461301ad",
+    "dyn_em/module_advect_em.F":
+        "58253bdbeb188dd47ed0579fcd2891086be1889b75c0c7d3696c9ad1d213559d",
 }
 
 #: (output, file, first line, last line, sha256 of the lines, LF-joined).
@@ -65,7 +74,25 @@ BLOCKS = (
      "99d336be3a3ed9ecf2540d94cb34c6b764f9d50bf0dfb79b77b611e525cb7bc0"),
     ("spec_bdytend", "share/module_bc.F", 1430, 1549,
      "781ac59d7ddf6522eff88831ff30e0fbbfda257c8014ca611528e67586b97907"),
+    ("advect_scalar_vflux2", "dyn_em/module_advect_em.F", 4337, 4350,
+     "d7507c42c055698cfc691aeb986a57583510028faafb974cb40d231c0fb08f5d"),
 )
+
+_VFLUX2 = """SUBROUTINE wrf_vflux2(field, tendency, rom, fzm, fzp, rdzw, vflux, &
+                      i_start, i_end, kts, kte)
+  IMPLICIT NONE
+  INTEGER, INTENT(IN) :: i_start, i_end, kts, kte
+  REAL, INTENT(IN) :: field(i_start:i_end, kts:kte, 1), rom(i_start:i_end, kts:kte, 1)
+  REAL, INTENT(IN) :: fzm(kts:kte), fzp(kts:kte), rdzw(kts:kte)
+  REAL, INTENT(INOUT) :: tendency(i_start:i_end, kts:kte, 1)
+  REAL, INTENT(OUT) :: vflux(i_start:i_end, kts:kte)
+  INTEGER :: i, j, k, ktf, j_start, j_end
+  ktf = kte - 1
+  j_start = 1
+  j_end = 1
+  vflux = 0.0
+{block}END SUBROUTINE wrf_vflux2
+"""
 
 _BC_MODULE = """MODULE wrf_bc
   USE module_configure
@@ -106,6 +133,8 @@ def main(argv: list[str]) -> int:
     (out / "wrf_bc.F90").write_text(
         _BC_MODULE.format(relax=blocks["relax_bdytend_core"],
                           spec=blocks["spec_bdytend"]), encoding="ascii")
+    (out / "wrf_vflux2.F90").write_text(
+        _VFLUX2.format(block=blocks["advect_scalar_vflux2"]), encoding="ascii")
     return 0
 
 

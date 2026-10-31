@@ -4397,8 +4397,17 @@ def close_periodic_alias(state: DomainState, cfg: RunConfig) -> None:
 def step(state: DomainState, cfg: RunConfig, *, acoustic: bool = True,
          mass_flux_observer=None, mass_flux_accumulator=None,
          refl_10cm_due: bool = False, fire_history_due: bool = False,
-         avgflx_history_due: bool = False) -> None:
+         avgflx_history_due: bool = False,
+         partial_top=None) -> None:
     """Advance ``state`` one full RK3 step of length ``cfg.dt``.
+
+    ``partial_top`` (default ``None``: the step is the step it always was)
+    is a partial-depth child's interface driver
+    (:class:`woof.core.partial_nest_run.ChildTop`): the step's column ends at
+    an interface the parent's mass flux passes through, and the driver's
+    hooks -- stage forcing, the interface Omega, the top-face fluxes and
+    top zone, the acoustic substep with the specified interface, the
+    scalars' interface flux -- run at their places in the RK loop below.
 
     The schemes' error-only health reads are deferred to the END of the
     step (:class:`woof.core.health_ledger.resident_step`): one device read
@@ -4490,14 +4499,18 @@ def step(state: DomainState, cfg: RunConfig, *, acoustic: bool = True,
                    mass_flux_accumulator=mass_flux_accumulator,
                    refl_10cm_due=refl_10cm_due,
                    fire_history_due=fire_history_due,
-                   avgflx_history_due=avgflx_history_due)
+                   avgflx_history_due=avgflx_history_due,
+                   partial_top=partial_top)
 
 
 def _step_body(state: DomainState, cfg: RunConfig, *, acoustic: bool,
                mass_flux_observer, mass_flux_accumulator,
                refl_10cm_due: bool, fire_history_due: bool,
-               avgflx_history_due: bool = False) -> None:
+               avgflx_history_due: bool = False,
+               partial_top=None) -> None:
     """The step itself; :func:`step` is this under the resident ledger."""
+    if partial_top is not None:
+        partial_top.admit(state, cfg, acoustic=acoustic)
     if mass_flux_observer is not None and mass_flux_accumulator is not None:
         raise ValueError(
             "mass_flux_observer and mass_flux_accumulator are mutually "
@@ -4667,7 +4680,11 @@ def _step_body(state: DomainState, cfg: RunConfig, *, acoustic: bool,
         if not (istage == 0 and _wrf_reuse_diagnostics(state)):
             update_diagnostics(state, cfg.hypsometric_opt,
                                muts=_wrf_muts(state))  # p, al, alt at t*
+        if partial_top is not None:
+            partial_top.stage_begin(istage)
         ru, rv, ww = stage_fluxes(state, cfg, first_stage=(istage == 0))
+        if partial_top is not None:
+            ww = partial_top.stage_ww(ru, rv, istage)
         # WRF calc_cq is fixed at the RK-stage reference state and shared by
         # horizontal_pressure_gradient plus every acoustic substep.
         stage_cq = prepare_moist_cq(state, cfg)
@@ -4710,6 +4727,8 @@ def _step_body(state: DomainState, cfg: RunConfig, *, acoustic: bool,
             if cfg.mp_physics != 0:                   # WRF rk_addtend_dry's
                 add_h_diabatic_tendency(state)        # h_diabatic slot, every
             add_fixed_dry_tendencies(state, cfg)       # held Smag/diff6 tendf
+            if partial_top is not None:               # interface face fluxes,
+                partial_top.slow_tendencies(istage)   # top relaxation zone
             apply_w_damping(state, cfg, ww)           # w_damping=1 only
             record_wrf_vertical_cfl(state, cfg, ww)  # probe; off by default
             apply_state_lateral_boundaries(state, cfg, rk_stage=istage)
@@ -4763,10 +4782,14 @@ def _step_body(state: DomainState, cfg: RunConfig, *, acoustic: bool,
         # The joined substep launches (woof/core/acoustic_fusion.py) submit
         # the emdiv increment and the sumflux zero/accumulation themselves
         # where they cover this configuration; ``absorbs`` names which.
-        launch_acoustic_substep = prepare_acoustic_substep_launch(
-            state, cfg, dtau, acoustic_coefficients, mudf=mudf,
-            emdiv_args=launch_emdiv_filter.args if emdiv else None,
-            sumflux=(ru_m, rv_m, ww_m) if scalars else None)
+        if partial_top is not None:
+            launch_acoustic_substep = partial_top.acoustic_launch(
+                dtau, acoustic_coefficients, istage)
+        else:
+            launch_acoustic_substep = prepare_acoustic_substep_launch(
+                state, cfg, dtau, acoustic_coefficients, mudf=mudf,
+                emdiv_args=launch_emdiv_filter.args if emdiv else None,
+                sumflux=(ru_m, rv_m, ww_m) if scalars else None)
         absorbed = getattr(launch_acoustic_substep, "absorbs", frozenset())
         separate_sumflux = scalars and "sumflux" not in absorbed
         if separate_sumflux:
@@ -4822,6 +4845,8 @@ def _step_body(state: DomainState, cfg: RunConfig, *, acoustic: bool,
             if ieva.active_stage(cfg, istage, len(stages)):
                 scalar_implicit["implicit"] = ieva.split_scalar_omega(
                     state, cfg, ww_m, state.mub2d + state.mup, nsub * dtau)
+            if partial_top is not None:
+                partial_top.scalars_before(istage, ww_m)
             if moist or getattr(state, "qke_adv", None) is not None:
                 advance_scalars_stage(
                     state, cfg, ru_m, rv_m, ww_m, nsub * dtau,
@@ -4834,6 +4859,8 @@ def _step_body(state: DomainState, cfg: RunConfig, *, acoustic: bool,
                     # and the tendency is still pure advection.
                     export_advective_forcing=(istage == 0),
                     **scalar_implicit)
+            if partial_top is not None:
+                partial_top.scalars_after(istage, nsub * dtau)
             if getattr(state, "tke", None) is not None:
                 from woof.core.moist import advance_tke_stage
                 advance_tke_stage(

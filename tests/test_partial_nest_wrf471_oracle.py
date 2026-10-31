@@ -239,3 +239,62 @@ def test_strip_tables_equal_bdy_interp1_on_the_frame(stag):
     _same(tend[:, :, :sz], wt, "west tendency")
     _same(val[:, :sz, :], sv, "south value")
     _same(tend[:, :sz, :], st, "south tendency")
+
+
+# ---------------------------------------------------------------------------
+# D4: the interface face's second-order vertical flux (advect_scalar,
+# vert_order == 2), as theta/u/v (nest_top_face_flux_all, centered) and the
+# moist scalars (nest_top_scalar_face_flux) take it through the interface.
+# WRF's two-level column: level 1 the child's top half level, level 2 the
+# parent's half level above, face 2 the interface.
+# ---------------------------------------------------------------------------
+
+def _vflux_inputs(name):
+    case = _case(name)
+    f = np.asarray(case["field"], dtype=np.float32)        # (i, k)
+    return case, f
+
+
+@requires_gpu
+@pytest.mark.parametrize("name", ["vflux2_theta", "vflux2_qv", "vflux2_u"])
+def test_interface_face_flux_is_wrfs_second_order_vflux(name):
+    import cupy as cp
+    from woof import wrf_exact
+    from woof.core.kernels import get_kernel
+    if wrf_exact.ENABLED:
+        pytest.skip("the partial-depth nest runs in the default build only")
+    case, f = _vflux_inputs(name)
+    rom = np.asarray(case["rom"], dtype=np.float32)
+    fzm, fzp = np.float32(case["fzm"][1]), np.float32(case["fzp"][1])
+    rdzw = np.asarray(case["rdzw"], dtype=np.float32)
+    ni = f.shape[0]
+    q = cp.asarray(f[:, 0].reshape(1, 1, ni))
+    above = cp.asarray(f[:, 1].reshape(1, ni))
+    ww = cp.asarray(rom[:, 1].reshape(1, ni))
+    tend = cp.asarray(np.asarray(case["tend_in"], np.float32)[:, 0].reshape(1, 1, ni))
+    flux = cp.zeros((1, ni), cp.float32)
+    # u/v rows of the fused launch: inert stand-ins (not compared).
+    qu, au = cp.zeros((1, 1, ni + 1), cp.float32), cp.zeros((1, ni + 1), cp.float32)
+    tu, fu = cp.zeros((1, 1, ni + 1), cp.float32), cp.zeros((1, ni + 1), cp.float32)
+    qv, av = cp.zeros((1, 2, ni), cp.float32), cp.zeros((2, ni), cp.float32)
+    tv, fv = cp.zeros((1, 2, ni), cp.float32), cp.zeros((2, ni), cp.float32)
+    get_kernel("partial_nest_d4", "nest_top_face_flux_all")((1,), (64,), (
+        tend, q, above, flux, tu, qu, au, fu, tv, qv, av, fv, ww,
+        cp.asarray(rdzw[:1]), fzm, fzp, np.int32(1), np.int32(1), np.int32(1),
+        np.int32(1), np.int32(1), np.int32(ni)))
+    _same(cp.asnumpy(flux).ravel(), np.asarray(case["vflux"], np.float32)[:, 1], "vflux")
+    _same(cp.asnumpy(tend).ravel(), np.asarray(case["tend"], np.float32)[:, 0], "tendency")
+    # The scalar entry point: WRF's face flux wherever the outgoing cap is
+    # idle, the donor's own value where it binds.
+    ww_m = cp.zeros((2, 1, ni), cp.float32)
+    ww_m[1] = ww
+    sflux = cp.zeros(ni, cp.float32)
+    get_kernel("partial_nest_d4", "nest_top_scalar_face_flux")((1,), (64,), (
+        q, above.ravel(), ww_m, fzm, fzp, sflux, np.int32(1), np.int32(ni)))
+    got = cp.asnumpy(sflux)
+    face = ((fzm * f[:, 1]).astype(np.float32) + (fzp * f[:, 0]).astype(np.float32))
+    capped = (rom[:, 1] < 0) & (face.astype(np.float32) > f[:, 0])
+    want = np.where(capped, (rom[:, 1] * f[:, 0]).astype(np.float32),
+                    np.asarray(case["vflux"], np.float32)[:, 1]).astype(np.float32)
+    _same(got, want, "scalar flux")
+    assert (~capped).sum() > ni // 2
