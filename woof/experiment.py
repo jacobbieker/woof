@@ -467,6 +467,12 @@ _DOMAIN_KEY_ROWS = key_rows(
            "what a delayed nest is born from at its start_time: "
            "\"analysis\" (the source analysis valid then) or \"parent\" "
            "(its live parent, interpolated onto its own terrain)"),
+    KeyRow("partial_nest", "table", None,
+           "a partial-depth nest (height-dependent resolution): this child "
+           "covers its footprint from the surface to the root's full level "
+           "k_top only (k_top, spec_levels, relax_levels, feedback, "
+           "feedback_fields, smooth_option, mass_correction); absent, the "
+           "child is full depth"),
     KeyRow("e_we", "integer", None,
            "WRF's staggered west-east point count, nx + 1; give e_we or nx"),
     KeyRow("e_sn", "integer", None,
@@ -487,6 +493,8 @@ _DOMAIN_KEYS = frozenset({
     "start_time", "static",
     # What a delayed nest is born from (see START_FROM_PARENT below).
     "start_from",
+    # A partial-depth band (woof/core/partial_nest.py, Phase D).
+    "partial_nest",
     "e_we", "e_sn", "nx", "ny", "dx", "dy", "dt",
     # A nest on its own eta ladder (WRF vert_refine_method = 2); nz and
     # e_vert must agree with it.  Refused on the root (_domain_ladder).
@@ -1113,6 +1121,15 @@ class DomainConfig:
     #: key existed keeps its exact fingerprint.  A declared ``"parent"``
     #: binds: the child's initial state is a different one.
     start_from: str | None = None
+    #: A partial-depth band (:class:`woof.core.partial_nest.PartialNestBand`,
+    #: Phase D of plans/sorted-mapping-hummingbird.md): this child covers
+    #: its footprint from the surface to the root's full level ``k_top``
+    #: only, and steps through :mod:`woof.core.partial_nest_run`.  ``None``
+    #: -- every domain without the key -- is a full-depth nest, and drops
+    #: out of the restart, document and prepared-cache identities, so every
+    #: experiment written before the key keeps its exact fingerprint.  A
+    #: declared band binds (it is a different model).
+    partial_nest: "object | None" = None
 
 
 #: ``[[domain]] start_from`` value that births a delayed nest from its
@@ -3572,6 +3589,55 @@ def validate_boundary_timing(
                 f"{forcing_seams}.")
 
 
+def _partial_nest_band(dom: dict, *, grid_id, source, is_root, ratio, tratio,
+                       i_start, j_start, run, parent, domain_start, start_time,
+                       spawn, follow, tiles):
+    """The ``partial_nest`` table of one ``[[domain]]`` as a
+    :class:`woof.core.partial_nest.PartialNestBand` (the domain supplies its
+    placement and extent), or ``None`` when absent.  The coordinate-level
+    rules (a pure-pressure interface strictly above etac, the top zone,
+    a chain's interfaces) are checked where the coordinate exists,
+    :func:`woof.core.model.realize_partial_nests`."""
+    where = f"[[domain]] grid_id = {grid_id} of {source}"
+    parent_band = getattr(parent, "partial_nest", None)
+    if "partial_nest" not in dom:
+        if parent_band is not None:
+            raise ValueError(
+                f"{where} is a full-depth child of the partial-depth d"
+                f"{parent.grid_id:02d}: a partial domain has no column above its "
+                "interface to nest a full-depth child in; give this domain a "
+                "partial_nest table (a chain) or nest it in a full-depth parent.")
+        return None
+    from woof.core.partial_nest import PartialNestRefused, band_from_table
+    table = dom["partial_nest"]
+    if not isinstance(table, dict):
+        raise ValueError(f"partial_nest on {where} must be a table")
+    if is_root:
+        raise ValueError(f"partial_nest on the root {where}: the root carries the "
+                         "whole column; a partial band is a child")
+    refused = [name for name, value in (("spawn", spawn), ("follow", follow),
+                                        ("tiles", tiles)) if value is not None]
+    if domain_start is not None and domain_start != start_time:
+        refused.append("a delayed start_time")
+    if refused:
+        raise ValueError(f"partial_nest on {where} with {', '.join(refused)}: a "
+                         "partial band is a resident child that starts with its "
+                         "parent and does not move")
+    if not run.nested:
+        raise ValueError(f"partial_nest on {where} needs a nested child")
+    try:
+        band = band_from_table(table, where=f"partial_nest on {where}", geometry=dict(
+            parent_grid_ratio=ratio, parent_time_step_ratio=tratio,
+            i_parent_start=i_start, j_parent_start=j_start, nx=run.nx, ny=run.ny))
+    except PartialNestRefused as exc:
+        raise ValueError(str(exc)) from None
+    if parent_band is not None and band.k_top >= parent_band.k_top:
+        raise ValueError(
+            f"partial_nest on {where}: k_top {band.k_top} must lie below its "
+            f"parent band's ({parent_band.k_top})")
+    return band
+
+
 def _parent_before_child(domain_tables: list, source: str) -> list:
     """Reorder [[domain]] tables so parents precede their children.
 
@@ -4905,6 +4971,12 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
             spawn=spawn_cfg, retire=retire_cfg, rearm=rearm_cfg,
             follow=follow_cfg, tiles=domain_tiles, output=domain_output,
             start_from=start_from,
+            partial_nest=_partial_nest_band(
+                dom, grid_id=grid_id, source=source, is_root=is_root,
+                ratio=ratio, tratio=tratio, i_start=i_start, j_start=j_start,
+                run=run, parent=None if is_root else by_id[parent_id],
+                domain_start=domain_start, start_time=start_time,
+                spawn=spawn_cfg, follow=follow_cfg, tiles=domain_tiles),
             full_history_interval_s=full_history_interval_s,
             quicklook_output=quicklook_output)
         domains.append(dc)
@@ -6119,6 +6191,8 @@ def _drop_off_domain_controls(document):
     # absent when off, so every pre-feature document keeps its bytes.
     if isinstance(document, dict) and document.get("start_from") is None:
         document.pop("start_from", None)
+    if isinstance(document, dict) and document.get("partial_nest") is None:
+        document.pop("partial_nest", None)
     return document
 
 

@@ -440,6 +440,52 @@ Which doors activate delayed nests:
 Automatic health rollback is not qualified for delayed domains and refuses
 them, as before.
 
+### Partial-depth nests (height-dependent resolution)
+
+A child `[[domain]]` may carry a `partial_nest` table. The child then covers
+its footprint only from the surface to the root's full level `k_top`, and the
+parent alone carries the atmosphere above it (fine near the ground, coarser
+aloft). The child keeps the root's eta levels below its interface, so the
+interface must be a pure-pressure level strictly above `etac`. The parent's
+mass flux crosses the interface every acoustic substep, and theta, u, v and
+the moist scalars cross it with the parent's own second-order face value. A
+top relaxation zone (`spec_levels` specified plus `relax_levels` relaxation
+levels, default 1 + 5) sits under the interface. Radiation runs on an
+extended column, made of the child's levels below the interface and the
+parent's levels above it, and heats the child below its interface only.
+
+```toml
+[[domain]]
+grid_id = 2
+parent_id = 1
+# placement, ratio and extent as for any nest
+partial_nest = { k_top = 21 }
+```
+
+Keys: `k_top` (required), `spec_levels`, `relax_levels`, `feedback` (0/1,
+default 1), `feedback_fields` (default `["t"]`: theta and, with it, the moist
+scalars; `mu`, `u`, `v` and `w` may be added), `smooth_option` (0/1/2,
+default 0), and `mass_correction` (default true). The domain already gives
+the placement, ratio and extent, and the table may not repeat them. Several
+`partial_nest` domains, each the child of the one before, form a chain. Each
+interface must lie below its parent band's top zone. A full-depth child
+under a partial domain is refused.
+
+Some things are refused by name:
+
+- phi feedback;
+- the root;
+- spawn, follow, `[tiles]` and a delayed start;
+- damp_opt = 3, km_opt mixing on the child, emdiv, and map factors;
+- deep cumulus with an interface below 12 km;
+- the strict build.
+
+Partial nests run on the idealized experiment tree. The real-data
+`woof run` route refuses them by name, because it prepares its child
+land-surface physics at full depth. Hydrometeor sedimentation does not cross
+the interface. Without the key the domain is the full-depth nest it always
+was, and every fingerprint and document is unchanged.
+
 External boundary cadence has no whole-hour rule. It must be a positive,
 uniform whole-second interval and an exact integer number of d01 steps because
 the Davies boundary clock resets at a top-of-step seam. Five-minute forcing is

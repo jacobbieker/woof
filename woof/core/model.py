@@ -671,6 +671,12 @@ def restart_identity_payload(exp) -> dict:
         # initial state for that nest.
         if domain.get("start_from") is None:
             domain.pop("start_from", None)
+        # A partial-depth band, on the same convention: absent (a
+        # full-depth nest, every pre-key experiment) stays absent, and a
+        # declared band binds -- it is a different model below and above
+        # its interface.
+        if domain.get("partial_nest") is None:
+            domain.pop("partial_nest", None)
         # A follower's reach bound takes the same convention one level
         # down: its default (None) drops out so every follower fingerprint
         # written before the key existed is unchanged, and a DECLARED
@@ -1212,6 +1218,7 @@ def build_experiment(exp, case_data) -> ExperimentState:
     # This route's on_domain_start initializes a delayed child from the
     # analysis at its start; a parent-born child is the prepared tree's.
     refuse_parent_born_activation(exp, "woof run (experiment-tree)")
+    refuse_real_partial_nests(exp, "woof run (experiment-tree)")
     from woof import runtime
     from woof.core.clock import build_schedule, resolve_clock
     from woof.core.preflight import estimate_experiment
@@ -1949,6 +1956,11 @@ def execute_experiment(
     # that joins the tree later falls back to the dycore's own step rather
     # than to whatever the last domain happened to bind.
     steppers = dict(steppers or {})
+    if getattr(model, "_partial_nests", None):
+        # Partial-depth bands (realize_partial_nests): their own steps and
+        # their parents' interface snapshots.  Absent -- every experiment
+        # without a partial_nest table -- this adds nothing.
+        steppers = partial_nest_steppers(model, steppers)
     #: Grid ids the checkpoint's question has already been asked of, so a
     #: domain is asked once and no later than it can be.
     asked_the_checkpoints_question: set[int] = set()
@@ -2834,3 +2846,121 @@ __all__ = [
     "ModelRuntimeStatus", "SharedRRTMGPChunkWorkspace", "build_experiment",
     "execute_experiment", "experiment_fingerprint",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Partial-depth bands (plans/sorted-mapping-hummingbird.md, Phase D)
+# ---------------------------------------------------------------------------
+
+def refuse_real_partial_nests(exp, route: str) -> None:
+    """A route that builds real-data children refuses partial bands by name:
+    their land-surface physics is prepared at full depth
+    (``runtime.prepare_child_case``) and no truncated-depth rebuild of it is
+    wired yet.  The idealized tree (``nest_ideal_common
+    .assemble_idealized_tree``) carries them."""
+    named = [int(dc.grid_id) for dc in exp.domains
+             if getattr(dc, "partial_nest", None) is not None]
+    if named:
+        raise ValueError(
+            f"{route}: d{named[0]:02d} declares partial_nest; partial-depth bands "
+            "run on the idealized experiment tree (its neutral-surface physics); "
+            "this route's real-data child physics is prepared full depth and has "
+            "no truncated-depth rebuild")
+
+
+def realize_partial_nests(model, exp, coord, *, physics=None):
+    """Make every node whose :class:`~woof.experiment.DomainConfig` carries a
+    ``partial_nest`` band a running partial child, parent first.
+
+    The node's full-depth state (as the route initialized it) is truncated
+    at the band's ``k_top`` on ``coord`` (the root's float64
+    :class:`~woof.core.grid.VerticalCoord`), its config becomes the
+    truncated one, its coupler a
+    :class:`~woof.core.partial_nest_run.PartialNestCoupler`, and its physics
+    driver -- when its config needs one -- is rebuilt on the truncated
+    state with the radiation on the extended column
+    (:func:`woof.core.partial_nest_physics.attach_child_physics`, the
+    idealized neutral-surface defaults; ``physics(nest, node)`` replaces
+    that).  :func:`execute_experiment` then steps the bands through
+    :func:`partial_nest_steppers`.  Returns ``{grid_id: PartialNest}``."""
+    import dataclasses as _dc
+    from woof.core.partial_nest import (truncated_vertical_coord,
+                                        validate_band_chain)
+    from woof.core.partial_nest_dyn import truncate_state
+    from woof.core.partial_nest_run import PartialNest, PartialNestCoupler
+    from woof.core.physics import physics_driver_required
+    nests: dict[int, object] = {}
+    for node in model.walk_parent_first():
+        band = getattr(node.cfg, "partial_nest", None)
+        if band is None:
+            continue
+        parent = node.parent
+        chain = []
+        walk = node
+        while getattr(walk.cfg, "partial_nest", None) is not None:
+            chain.append(walk.cfg.partial_nest)
+            walk = walk.parent
+        validate_band_chain(tuple(reversed(chain)), walk.cfg.run, coord)
+        parent_nest = nests.get(int(parent.cfg.grid_id))
+        pcoord = (coord if parent_nest is None
+                  else truncated_vertical_coord(coord, parent_nest.k))
+        child, ccfg = truncate_state(node.state, node.cfg.run, int(band.k_top),
+                                     coord=coord)
+        child.elapsed_seconds = node.state.elapsed_seconds
+        nest = PartialNest(parent.state, parent.cfg.run, pcoord, child, ccfg, band,
+                           parent_nest=parent_nest)
+        if physics is not None:
+            physics(nest, node)
+        elif physics_driver_required(ccfg):
+            from woof.core.partial_nest_physics import attach_child_physics
+            lat, lon = node.grid.latlon_mass()
+            attach_child_physics(nest, start_time=exp.start_time, latitude=lat,
+                                 longitude=lon)
+        node.state = child
+        node.cfg = _dc.replace(node.cfg, run=ccfg)
+        node.coupler = PartialNestCoupler(nest)
+        nests[int(node.cfg.grid_id)] = nest
+    model._partial_nests = nests
+    return nests
+
+
+def partial_nest_steppers(model, steppers=None) -> dict:
+    """``{grid_id: stepper}`` for :func:`execute_experiment`: each band
+    steps through its :class:`~woof.core.partial_nest_run.PartialNest`, and
+    each band's parent snapshots the band's interface planes before its own
+    step.  ``steppers`` (the route's own mapping) may not claim a band or a
+    band's parent."""
+    from woof.core import dycore
+    out = dict(steppers or {})
+    nests = getattr(model, "_partial_nests", {}) or {}
+    claimed = set(out) & ({gid for gid in nests}
+                          | {int(model.node(gid).parent.cfg.grid_id) for gid in nests})
+    if claimed:
+        raise ValueError(f"steppers for {sorted(claimed)} would bypass their "
+                         "partial-depth band's interface")
+    by_parent: dict[int, list] = {}
+    for gid, nest in nests.items():
+        by_parent.setdefault(int(model.node(gid).parent.cfg.grid_id), []).append(nest)
+
+    def own_step(gid):
+        if gid in nests:
+            nest, node = nests[gid], model.node(gid)
+
+            def step_band(state, cfg, **kw):
+                nest.child_step(node.clock, **kw)
+            return step_band
+        return dycore.step
+
+    for gid in set(nests) | set(by_parent):
+        inner = own_step(gid)
+        children = tuple(by_parent.get(gid, ()))
+        if not children:
+            out[gid] = inner
+            continue
+
+        def step_with_snapshots(state, cfg, _inner=inner, _children=children, **kw):
+            for child in _children:
+                child.snapshot(child.a)
+            _inner(state, cfg, **kw)
+        out[gid] = step_with_snapshots
+    return out
