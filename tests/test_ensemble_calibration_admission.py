@@ -60,7 +60,17 @@ def test_run_plan_keeps_active_supported_controls(mode, tmp_path):
     refuse_public_arguments(SimpleNamespace(command="run-plan", plan=path))
 
 
-@pytest.mark.parametrize("selector", ["rand_perturb", "multi_perturb", "perturb_bdy", "pert_mynn", "pert_thom"])
+@pytest.mark.parametrize("entry", ["multi_perturb=1", "pert_thom=.true."])
+def test_native_wrfsolar_eps_selector_is_admitted(entry, tmp_path):
+    # WRF-Solar EPS consumes these (woof/core/wrfsolar_eps.py); the public
+    # door no longer refuses them as having no consumer.
+    native = tmp_path / "native"
+    native.mkdir()
+    native.joinpath("namelist.input").write_text(f"&stoch\n {entry},\n/\n")
+    refuse_public_arguments(SimpleNamespace(command=None, wrfinput=native))
+
+
+@pytest.mark.parametrize("selector", ["rand_perturb", "perturb_bdy", "pert_mynn", "pert_noah"])
 def test_native_absent_consumer_refuses_before_headers(selector, tmp_path):
     native = tmp_path / "native"
     native.mkdir()

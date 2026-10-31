@@ -1710,6 +1710,8 @@ _IMPORT_NAME = {
     # the CUDA -> Metal translator (woof/backend).
     "mlx": "mlx",
     "libclang": "clang",
+    # The Metal extension (woof/backend/metal/ext) is built against it.
+    "nanobind": "nanobind",
     # The Dynamical.org ASOS Parquet reader ([obs] extra).
     "pyarrow": "pyarrow",
     "wrf-rust": "wrf",

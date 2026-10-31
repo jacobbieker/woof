@@ -27,8 +27,7 @@ def test_uniform_initial_wind_request_has_an_actual_initializer(tmp_path):
 
 
 @pytest.mark.parametrize("selector", [
-    "rand_perturb", "multi_perturb", "perturb_bdy", "perturb_chem_bdy",
-    "pert_cld3", "pert_deng", "pert_farms", "pert_mynn", "pert_noah", "pert_thom",
+    "rand_perturb", "perturb_bdy", "perturb_chem_bdy", "pert_mynn", "pert_noah",
 ])
 def test_native_missing_consumers_name_the_lost_output(selector):
     from woof.ensemble_admission import refuse_configured_random
@@ -38,6 +37,22 @@ def test_native_missing_consumers_name_the_lost_output(selector):
     assert ("RAND_PERT history and restart field would be missing" if selector == "rand_perturb"
             else "unperturbed") in str(caught.value)
     assert "Next:" in str(caught.value)
+
+
+@pytest.mark.parametrize("selector", [
+    "multi_perturb", "pert_cld3", "pert_deng", "pert_farms", "pert_thom",
+    "pert_farms_albedo", "pert_thom_qv",
+])
+def test_wrfsolar_eps_selectors_have_a_runtime_consumer(selector):
+    # WRF-Solar EPS (woof/core/wrfsolar_eps.py) consumes multi_perturb and
+    # the four pert_* switches with their factors; woof.config's
+    # multi_perturb_refusal owns their pairings, not this door.
+    from woof.ensemble_admission import (
+        IMPLEMENTED_PERT_PREFIXES, IMPLEMENTED_RANDOM_SELECTORS,
+        refuse_configured_random)
+    assert (selector in IMPLEMENTED_RANDOM_SELECTORS
+            or selector.startswith(IMPLEMENTED_PERT_PREFIXES))
+    refuse_configured_random({"stoch": {selector: [1]}})
 
 
 def test_disabled_controls_have_no_warning_or_owner():

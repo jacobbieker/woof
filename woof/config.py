@@ -2264,7 +2264,7 @@ _MYNN_QN_STATE_TO_FLAG: dict[str, str] = {
 #: fast_khain_lynn_shpund (30, Registry/registry.sbm:318)
 #: qnn,qnc,qnr,qni,qns,qng, so F_QNC and F_QNI are true for it.  The
 #: schemes with no number moment (kessler 1, lin 2, fer_mp_hires 5, wsm3 3, wsm5 4,
-#: wsm6 6, wsm6r 106, and 0) carry none: there every
+#: wsm6 6, wsm6r 106, MAD-WRF 96, and 0) carry none: there every
 #: flag is false, ``mynn_bl_driver`` hands the solves zero columns and the
 #: key is WRF's no-op.  Any scheme not listed here is a new table row, not
 #: a new code path.
@@ -2272,6 +2272,9 @@ MYNN_QN_FLAG_SPECIES: dict[int, tuple[str, ...]] = {
     2: (),  # Six Lin masses, no prognostic number species.
     4: (),  # Single-moment package carries no number concentrations.
     0: (), 1: (), 3: (), 5: (), 6: (), 24: (), 106: (),
+    # MAD-WRF (96): package madwrf_mp is moist:qv,qc,qi,qs, no scalars
+    # (Registry.EM_COMMON:3052); every flag is false.
+    96: (),
     8: ("qni",), 9: ("qnc", "qni"), 10: ("qni",), 16: ("qnc",),
     18: ("qni",), 28: ("qnc", "qni", "qnwfa", "qnifa", "qnbca"),
     30: ("qnc", "qni"), 50: ("qni",),

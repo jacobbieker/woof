@@ -796,14 +796,20 @@ def test_every_option_carries_the_registrys_own_couplings():
         (component["id"], option["id"]): option["refused_when"]
         for component in editor.physics_components()
         for option in component["options"] if option["refused_when"]}
+    # SMS-3DTKE (km_opt = 5) also carries WRF's own unconditional pairings
+    # (no active PBL scheme; surface layer 0/1/5/91 only), which have no
+    # "settings" key.
     turbulence = {"closure-supplied", "constant-k", "smagorinsky-2d",
-                  "smagorinsky-3d", "tke-1.5-order"}
+                  "smagorinsky-3d", "sms-3dtke", "tke-1.5-order"}
     # FAST_SBM carries the registry's RTE+RRTMGP refusal (its remedy is the
     # legacy RRTMG pair) until its bin cloud optics are qualified; Lin
-    # (mp2) carries it because it produces no effective radii.
+    # (mp2) carries it because it produces no effective radii; MAD-WRF
+    # (mp96) carries it because its passive hydrometeors have no size
+    # distribution and WRF runs them with use_mp_re = 0.
     assert set(carriers) == {("microphysics", "off"),
                              ("microphysics", "fast-sbm-mp30"),
-                             ("microphysics", "lin-mp2")} | {
+                             ("microphysics", "lin-mp2"),
+                             ("microphysics", "madwrf")} | {
         ("turbulence", option) for option in turbulence}
     for option in turbulence:
         rules = carriers[("turbulence", option)]
@@ -813,9 +819,10 @@ def test_every_option_carries_the_registrys_own_couplings():
         assert not [rule for rule in rules
                     if rule.get("settings") == {"diff_opt": [2],
                                                 "mix_full_fields": [False]}]
-        assert any(rule["settings"] == {"diff_opt": [1]}
+        assert any(rule.get("settings") == {"diff_opt": [1]}
                    for rule in rules) is (
-            option in {"closure-supplied", "constant-k", "smagorinsky-3d"})
+            option in {"closure-supplied", "constant-k", "smagorinsky-3d",
+                       "sms-3dtke"})
         for name, values in (("topo_wind", [1, 2]), ("gwd_opt", [1, 3])):
             terrain = [rule for rule in rules
                        if rule.get("settings") == {name: values}]
