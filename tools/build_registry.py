@@ -4327,6 +4327,7 @@ def _ferrier_mp5(registry: dict) -> None:
 _NO_RTE_RRTMGP_CLOUD_OPTICS_REASON: dict[int, str] = {
     2: "Lin supplies no effective radii to this adapter; borrowing another scheme would change its cloud distribution",
     30: "the bin effective-radius integrals are not qualified; a bulk radius closure would replace the spectral distribution optics",
+    96: "MAD-WRF's passive hydrometeors carry no size distribution and WRF pairs them with use_mp_re = 0, so radiation computes its own radii; that is the legacy RRTMG path, and borrowing a scheme's radii here would invent one",
     # EMPTY: every implemented scheme has a cloud-optics row.  The table
     # stays because the pass below still needs it the day a scheme is
     # implemented without one, and because tests/test_rrtmgp_coupling.py

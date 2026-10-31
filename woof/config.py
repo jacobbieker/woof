@@ -3558,7 +3558,9 @@ _MP_PHYSICS_SCHEMA_MENU = (
 #: membership against this tuple and recites the menu when it refuses, so
 #: a new scheme is added in both places in the same edit or the loader
 #: and its refusal text disagree in front of a user.
-MP_PHYSICS_ACCEPTED = (0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 30, 50, 96, 106, 900)
+#: The numbered schemes, then the named rows of woof.microphysics_schemes
+#: (NAMED_MP_IDS: MAD-WRF's 96 and TEMPO's 900), as every consumer spells it.
+MP_PHYSICS_ACCEPTED = (0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 30, 50, 106, 96, 900)
 
 
 #: WDM6's two unported siblings, held as a table for the reason

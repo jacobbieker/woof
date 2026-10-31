@@ -1855,7 +1855,9 @@ def test_the_offline_child_lane_converts_every_ported_edge():
     from woof.core import microphysics_transition as mt
 
     assert 28 in OFFLINE_CHILD_MP_PHYSICS
-    assert _CAPABILITIES["same_scheme_mp_physics"] == [0, 1, 2, 3, 4, 6, 8, 9, 10, 16, 18, 24, 28, 50, 106]
+    # 96 is MAD-WRF's passive qv/qc/qi/qs: a same-scheme child reads the
+    # parent's four moist fields and nothing else.
+    assert _CAPABILITIES["same_scheme_mp_physics"] == [0, 1, 2, 3, 4, 6, 8, 9, 10, 16, 18, 24, 28, 50, 96, 106]
     assert _CAPABILITIES["cross_scheme_transitions"]["mp_physics"] == sorted(
         PARENT_SCHEME_CONTRACT)
     assert PARENT_SCHEME_CONTRACT == (
