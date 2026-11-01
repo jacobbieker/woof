@@ -31,12 +31,23 @@ def _fraction(events, valid, radius, boundary):
     return fraction, denominator
 
 
+def _last_extreme(values, better):
+    # The bridge's rule: of equal extremes (-0.0 and 0.0) the last in scan
+    # order wins.  NumPy's max/min leave that to its SIMD loop, which picks
+    # 0.0 on x86 and -0.0 on arm64 for [-0., 0., -0., 0.].
+    pick = values[0]
+    for value in values[1:]:
+        if better(value, pick) or value == pick:
+            pick = value
+    return pick
+
+
 def _threshold(field, valid, target):
     values = np.asarray(field, dtype=np.float64)[valid]
     if target <= 0:
-        return float(np.nextafter(values.max(), np.inf))
+        return float(np.nextafter(_last_extreme(values, np.greater), np.inf))
     if target >= 1:
-        return float(values.min())
+        return float(_last_extreme(values, np.less))
     return float(np.quantile(values, 1.0 - target, method="linear"))
 
 
