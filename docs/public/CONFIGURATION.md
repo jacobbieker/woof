@@ -55,9 +55,7 @@ statistical equivalence or forecast accuracy.
 
 WRF's `iofields_filename`, as a selection over the inventory the run
 already produces. `preset = "full"` (the default) writes everything;
-`"minimal"`, `"severe"` and `"energy"` (what a power-grid site
-forecast samples, including `SWDDNI`/`SWDDIF`/`COSZEN`) are named sets;
-`history_vars` /
+`"minimal"` and `"severe"` are named sets; `history_vars` /
 `history_drop` are explicit include and exclude lists, mutually
 exclusive. The same table sits inline on a `[[domain]]` as
 `output = { ... }` and overrides the tree-wide one for that domain, as
@@ -65,35 +63,6 @@ exclusive. The same table sits inline on a `[[domain]]` as
 enter the restart identity, so a trimmed run resumes a full run's
 checkpoints. Full page:
 [OUTPUT-VARIABLES.md](OUTPUT-VARIABLES.md).
-
-The same table configures the in-model hub-height wind diagnostic
-([docs/energy-hindcast/hub-wind.md](../energy-hindcast/hub-wind.md)):
-
-| key | type | default | meaning |
-|---|---|---|---|
-| `hub_wind` | boolean | off | `true` turns hub-height wind on at the default heights |
-| `hub_heights_m` | array of numbers | `[40, 80, 100, 120, 150, 200]` | heights in m above ground, strictly increasing, at most 32, each in (0, 2000]; setting it turns the diagnostic on |
-| `hub_sites` | string or array | unset | a sites.v1 JSON path (`woof energy sites`), or inline `{ site_id = "...", lat = ..., lon = ... }` tables, to sample per site |
-| `hub_sample_interval_s` | number | `60` | per-site sampling cadence in model seconds; needs `hub_sites` |
-| `windfarm_turbines` | string | unset | a turbine CSV (relative to the config) with the header `name, lat, lon, hub_height_m, rotor_diameter_m, turbine_type` (plus `rated_kw` for `turbine_type = generic`); turns on the wind-farm power diagnostic: per-turbine rotor-equivalent wind, power and thrust coefficient every step, and a `windfarm_d0N_<time>.nc` sidecar of interval means and maxima ([OUTPUT-VARIABLES.md](OUTPUT-VARIABLES.md#wind-farm-power-fields)) |
-
-Two keys in the table are about how files are written, not what they
-carry:
-
-| key | type | default | meaning |
-|---|---|---|---|
-| `async_checkpoints` | boolean | `true` | write checkpoints in the background from a snapshot; `false` writes them synchronously, stopping the forecast while they are written. Tree-wide only (a `[[domain]]` `output = {...}` refuses it). `WOOF_ASYNC_CHECKPOINTS` overrides it. It changes no number and no checkpoint byte. See [PREPARED-RESTART.md](PREPARED-RESTART.md#how-a-checkpoint-is-written). |
-| `history_queue_depth` | integer | `1` | history frames each domain's writer may hold queued behind the one it is writing (1 to 8). A deeper queue lets a burst of frames leave the model loop while the disk catches up, at the price of one page-locked host copy per queued frame; the depth is lowered (and the receipt says so) when those copies would not fit host RAM beside the run. Tree-wide only. `WOOF_HISTORY_QUEUE_DEPTH` overrides it. It changes no byte. See [OUTPUT-VARIABLES.md](OUTPUT-VARIABLES.md#how-a-history-frame-leaves-the-model). |
-
-The tree-wide table also asks `woof go` to export each history frame
-to an Icechunk repository while the forecast runs
-([PROGRESS.md](PROGRESS.md#exporting-frames-to-icechunk-while-the-run-goes)).
-A `[[domain]]` `output = { ... }` refuses this key: one repository holds
-every domain, one group each.
-
-| key | type | default | meaning |
-|---|---|---|---|
-| `icechunk` | string or table | unset | a store URL (`s3://bucket/prefix`, `gs://bucket/prefix`, `file:///path`) or a directory (relative to the config), or `{ url = "...", branch = "main", compress = true, zstd_clevel = 5, group_prefix = "", threads = 4, domains = [3], delete_after_commit = false }`; `{name}` in `url` is `[experiment] name`; `domains` exports only those grid ids; `delete_after_commit` unlinks each exported wrfout once the store holds it (needs `--products none`); `woof go --icechunk URL` replaces `url` ([PROGRESS.md](PROGRESS.md#exporting-frames-to-icechunk-while-the-run-goes)) |
 
 ## GRIB2 output
 
@@ -215,41 +184,6 @@ copied.
 | `hybrid_opt` | `hybrid_opt` | 0 (legacy) | 0/1 (sigma), 2 (WRF cubic-B) | importer default 2 (Registry) |
 | `etac` | `etac` | 0.2 | [0, 1] | the value asked for; preparation lowers it when this run's terrain needs it (below) |
 | `ztop` | -- | required | > 0 | WOOF-only scaffold height; real runs derive heights from p_top/eta_levels |
-| `vert_refine_method` | `vert_refine_method` | 0 | 0, 2 | 2 declares what a nest's own `eta_levels` already says and changes nothing; 1 (integer refinement) is refused |
-
-#### A nest on its own eta ladder (`[[domain]]`, WRF `vert_refine_method = 2`)
-
-| TOML key | WRF equivalent | default | allowed | note |
-|---|---|---|---|---|
-| `eta_levels` | `eta_levels` (this domain's slice) | [shared]'s | 1.0 -> 0.0 strictly decreasing, 4 <= nz <= 256 | nests only; the root's ladder is [shared]'s |
-| `nz` / `e_vert` | `e_vert` | len(eta_levels) | must agree with `eta_levels` | refused without `eta_levels` |
-
-A nest that names its own `eta_levels` runs on them under the tree's shared
-`p_top`, `hybrid_opt` and `etac`. A ladder equal to `[shared]`'s is no ladder
-of its own: that nest's `RunConfig` is the one it always was. The parent hands
-such a nest everything through WRF v4.7.1's vertical-nesting operators
-(`woof/core/nest_vertical.py`, held word for word to WRF's Fortran by
-`tests/test_nest_vertical_wrf471_parity.py`):
-
-- **Each parent step:** the parent's coupled fields, on the parent columns the
-  nest's SINT reads, are interpolated onto the nest's levels. This is a
-  monotone cubic Hermite in a reference log-pressure height, with the surface
-  and top points of half-level fields extrapolated by the parent's
-  `cf1..cfn1`. `t`, QV and `ph` are then rebalanced on the nest's coefficients
-  (`force_domain_em_part2.F:124-303`), and the boundary tables are built as
-  before.
-- **At the nest's start:** a nest prepared from the analysis is built on its own
-  ladder (the analysis is interpolated onto its levels directly). A nest born
-  from its parent (`start_from = "parent"`) takes the parent interpolated
-  vertically, then horizontally (`interp_domain_em_part2`).
-
-Refused by name, before anything is prepared:
-
-- `feedback = 1` (the restriction has no vertical operator back up);
-- a nest on its own ladder that moves, follows or spawns, or sits under one
-  that does;
-- a split (`[devices]`) or streamed (`[tiles]` on) edge;
-- a nest whose microphysics scheme differs from its parent's.
 
 #### The coordinate a run's terrain can order
 
@@ -393,58 +327,45 @@ only under it.
 
 Each `[[domain]]` may also carry an offset-free `start_time`. It defaults to
 `[experiment].start_time`; d01 must equal that root start. A delayed child is
-dormant until its timestamp and integrates nothing before it: it writes no
-history frame and costs no step. Its `start_from` key says what it is born
-from at that instant:
+dormant until its timestamp, then follows the ordinary parent-state nest
+initialization path -- it initializes from the analysis valid at its
+activation instant, so that instant must be one the declared inputs decode.
+The timestamp must be an exact boundary of its parent's step clock and an
+exact external-forcing seam. Its first history frame is the domain's own
+analysis frame and carries no `REFL_10CM`, exactly as d01's frame at t = 0
+does; every frame after it carries the field. Restart headers persist
+`STARTED`/`NOT_STARTED` lifecycle state, so resuming before the timestamp does
+not initialize the child early.
 
-- `start_from = "analysis"` (the default) initializes it from the source
-  analysis valid at its start, so that instant must be one the declared
-  inputs decode: an exact boundary of its parent's step clock and an exact
-  external-forcing seam.
-- `start_from = "parent"` interpolates it from its LIVE parent, WRF's nest
-  initialization from the parent: a full-parent SINT of the parent's state
-  onto the child grid, then the real-data terrain adoption on the child's own
-  statics (`blend_terrain` on ht/mub/phb, `adjust_tempqv`, the base/EOS
-  re-derivation and `press_adj`). Its land state is the parent's, through
-  WRF's masked surface interpolator against the child's own land-use
-  categories, and its accumulated precipitation starts from the parent's.
-  This is how a long coarse spin-up feeds a short fine one (for example d01
-  and d02 spun up for 3 h, d03 started 2 h in for its last hour): the fine
-  nest starts from the spun-up parent instead of the cold analysis. The start must still
-  be an exact boundary of its parent's step clock, but need not be a forcing
-  seam, so it can sit between two source leads. The nest is prepared with
-  the root (its cache holds only its grid, statics and base state), so no
-  extra analysis is fetched for it. Each birth appends a row to
-  `nest_birth_receipts.jsonl` in the run directory. The parent must have
-  run first: a nest starting at the same instant as its own parent is
-  refused. A parent-born nest cannot also follow or be a `[relocation]`
-  target, and the stock-WRF export (`wrfinput_dNN`) refuses it.
-
-Its first history frame is the domain's own initial frame and carries no
-`REFL_10CM`, exactly as d01's frame at t = 0 does; every frame after it
-carries the field. Restart headers persist `STARTED`/`NOT_STARTED` lifecycle
-state, so resuming before the timestamp does not initialize the child early:
-it is born at its start from the resumed parent. Resuming after a
-parent birth births the nest again from the parent before the restore (its
-setup arrays come from the birth, not from its cache) and the checkpoint then
-supplies every prognostic.
-
-Which doors activate delayed nests:
-
-| Door | `start_from = "analysis"` | `start_from = "parent"` |
-|---|---|---|
-| `woof go` (native prepared domain tree) | yes | yes, with the parent and the child resident; a parent or child that streams through `[tiles]` or `[devices]` is refused at startup |
-| `woof run` (experiment tree) | yes | refused by name |
-| `woof stream`, `run --wrfinput`, `run --met-em` | refused by name | refused by name |
-
-Automatic health rollback is not qualified for delayed domains and refuses
-them, as before.
+Delayed activation is a `woof run` capability. The prepared-tree runner
+(`woof-prepared-tree-forecast`, which `woof stream` and the wizard's nested
+route drive) restores every domain from a prepared cache and has no way to
+bring one to life mid-run, so it refuses a delayed `start_time` by name and
+tells you which door runs it.
 
 External boundary cadence has no whole-hour rule. It must be a positive,
 uniform whole-second interval and an exact integer number of d01 steps because
 the Davies boundary clock resets at a top-of-step seam. Five-minute forcing is
 therefore valid for a 60-second d01 step; 310-second forcing is not
 (`310/60 = 31/6` steps). History cadence is independent.
+
+### Constant moving frame
+
+Set `umove` and `vmove` (m/s, default `0.0`) in `[shared]`, or pass them
+to `RunConfig`, to translate a flat idealized Cartesian domain at constant
+speed. Initial and boundary winds are supplied ground-relative; the model
+subtracts the frame once for transport, and surface physics and history
+use ground-relative winds. Both zero skips the new path entirely. History
+records the speed and ground offset at each output time.
+
+Terrain, real-data land fields, nests, moving nests and Coriolis are
+refused: ground geometry would need translation each step, and Coriolis
+would need a consistently shifted geostrophic balance. Use a uniform
+prescribed surface; evolving soil, urban, lake, ocean and fire fields also
+need ground translation. The real-data WRF namelist importer accepts
+explicit zero `&dynamics umove/vmove` and refuses nonzero values for the
+same geography reason. See [moving-frame.md](../moving-frame.md) for the
+direct Python API, boundary conversion and output attributes.
 
 ### Dynamics
 
@@ -454,7 +375,7 @@ consumed `RunConfig` field -- the knob-parity battery
 consuming kernel/module rather than being decorative -- and every one
 is importable from a WRF namelist.
 
-**Which keys a `[[domain]]` table may override.** Exactly these 263,
+**Which keys a `[[domain]]` table may override.** Exactly these 267,
 and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
 
     lightning_option  lightning_dt  lightning_start_seconds  flashrate_factor
@@ -519,11 +440,14 @@ and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
     fire_lsm_band_ngp  fire_lsm_zcoupling  fire_lsm_zcoupling_ref  fire_tracer_smoke
     fire_viscosity_bg  fire_viscosity_band  fire_viscosity_ngp  fire_slope_factor
     fuel_crosswalk  sr_x  sr_y  fire_static  fire_fuel_namelist  fire_smoke
-    hailcast_opt  haildt  lake_state_source  lake_state_path
-    lake_state_accept_licence  windfarm_opt  windfarm_turbine_file
+    hailcast_opt  haildt  hailcast_version  lake_state_source  lake_state_path
+    lake_state_accept_licence
+    wind_farm_scheme  wind_farms  wind_farm_table  windfarm_tke_factor  wind_farm_max_dx_m
 
 `hailcast_opt` and `haildt` select the GPU WRF HAILCAST hail diameter per
-domain (see the physics table below). `lake_state_source` picks the lake
+domain (see the physics table below), and `hailcast_version` its stone
+model: `wrf_39_noaa` (default, the HAILCAST in NOAA's operational HRRR v4)
+or `wrf_461` (WRF v4.6.1's). `lake_state_source` picks the lake
 initial-state row from `woof/data/surface_obs/lake-state-sources.v1.toml`
 (`auto` and `forcing` are the two built-in choices); a research-only row
 also needs `lake_state_path`, its acquired CF NetCDF file, and
@@ -658,7 +582,7 @@ wrong answer reported as a success. Put them in `[shared]`.
 | `wsm6_hail_opt` | `hail_opt` | 0 (graupel) | 0, 1 | WSM6 rimed-ice identity |
 | `ysu_topdown_pblmix` | `ysu_topdown_pblmix` | 1 | 0, 1 | YSU top-down radiation-driven mixing |
 | `ysu_version` | no stock namelist spelling | `"wrf_480"` | `"wrf_480"`, `"wrf_461"` | Corrected YSU default. WRF 4.8 MMM `550b5b4` removes the old efficiency offset and caps `0.2*8*tmp1` at 0.4. `[shared]` selects the generation; namelist import uses the corrected default and preserves an explicit physics-selector comment (`! gpuwm-physics-selectors-v1: {...}`). `wrf_461` under default arithmetic reproduces 2.8.9's YSU kernel, under its restart identity. Under `GPUWM_WRF_EXACT=1` it matches WRF 4.6.1 `bl_ysu_run` word for word on the 1,188-column test set, with the same declared exceptions as `wrf_480` (YSU surface drag removed on mixed BEP urban columns; the bounded PBL-height search on four-level columns), under its own restart identity, so a strict-mode `wrf_461` checkpoint from 2.9.0 or earlier is refused rather than continued with different arithmetic. Four-level shallow columns use the declared bounded PBL-height search and zero final TKE word. A generation change is refused on restart; old headers without a selector mean `wrf_461`. The corrected path uses the shared no-FTZ loader and WOOF's own math routines |
-| `nwp_diagnostics` | `nwp_diagnostics` (&time_control) | 0 | 0, 1 | per-step running maxima, reset each history frame, restart-carried, trajectory-inert: UP_HELI_MAX (2-5 km updraft helicity, WRF cal_helicity), WSPD10MAX with U10MAX/V10MAX, W_UP_MAX/W_DN_MAX, and the UPP CALGUST surface GUST (docs/energy-hindcast/gusts.md); W_MEAN, GRPL_MAX, REFD_MAX and HAIL_MAX* are not carried; wizard configs set 1 |
+| `nwp_diagnostics` | `nwp_diagnostics` (&time_control) | 0 | 0, 1 | per-step UP_HELI_MAX running max (2-5 km updraft helicity, WRF cal_helicity), reset each history frame, restart-carried, trajectory-inert; the other WRF nwp_output maxima are not carried; wizard configs set 1 |
 | `isftcflx` | `isftcflx` | 0 | 0, 1, 2 | MM5 sfclay water-point roughness (Garratt/Donelan) |
 | `iz0tlnd` | `iz0tlnd` | 0 | 0, 1, 2 | MM5 sfclay land thermal roughness |
 | `usemonalb` | `usemonalb` | false | bool | Monthly background albedo for Noah and RUC; the HRRR configuration recipe selects true |
@@ -1106,7 +1030,7 @@ namelist assumes for an omitted key (`mix_full_fields` is an ordinary knob).
 | `bl_mynn_gsd41_unsquared_qtke` | false (default), true | woof key, `[shared]`: true takes the `gsd_41` option-2 mixing length's TKE conversion as written, 0.5*q without the square (v4.1.21 `module_bl_mynn.F:995`); false takes 0.5*q**2, as that file's option 1 and every later generation do. Read only under `bl_mynn_version = "gsd_41"`, `bl_mynn_mixlength = 2` |
 
 | `ruc_irrigation` | `"wrf_461"` (generic default), `"wrf_45"` | woof key, `[shared]`: `wrf_461` preserves WRF v4.6.1's root-layer relaxation under `mosaic_lu = 1`. `wrf_45` uses the operational WRF v4.0-4.5 crop-fraction floor, gated on leaf area, with or without mosaic land use. The operational HRRR namelist importer and the shipped HRRR configuration recipes explicitly select `wrf_45`. An HRRR data source alone does not select it. A named change is refused on restart |
-| `ruc_qvg_cold_start` | `"wrf"` (default), `"air"` | woof key, `[shared]`: how LSMRUC starts the ground vapour and condensate when the run starts without them. `wrf` (public WRF) starts QCG from the lowest-level condensate and QVG from saturation at the skin times moisture availability. `air` (the operational RAP/HRRR branch's fallback; that branch cycles QVG) starts an invalid QVG from the lowest-level vapour with no ground condensate; because SOILTEMP carries the old QVG as vapour storage it pulls the skin toward the air's dewpoint on the first steps, measured 2.7 K colder after 20 steps on a moist test column and -0.013 to +0.018 K of 2 m dewpoint on a 3 km cut of an operational-HRRR start. Read only on a cold start; a flip is refused on restart |
+| `ruc_qvg_cold_start` | `"wrf"` (default), `"air"` | woof key, `[shared]`: how LSMRUC starts the ground vapour and condensate when the run starts without them. `wrf` (public WRF) starts QCG from the lowest-level condensate and QVG from saturation at the skin times moisture availability. `air` (the operational RAP/HRRR branch's fallback; that branch cycles QVG) starts an invalid QVG from the lowest-level vapour with no ground condensate; because SOILTEMP carries the old QVG as vapour storage it pulls the skin toward the air's dewpoint on the first steps, measured 2.7 K colder after 20 steps on a moist test column and -0.013 to +0.018 K of 2 m dewpoint on a 3 km cut of an operational-HRRR start. Read only on a cold start; a flip is refused on restart. `woof domain`, `woof physics-catalog --into` and a `woof downscale` child moved onto RUC write `air` for a RUC suite whose file states no form (no source carries the ground vapour, so every RUC forecast cold-starts it, and the public-WRF form dropped the land skin 3.5-4 K on the first step over dry soil); an imported WRF namelist, or a file already on RUC that states no form, keeps `wrf` |
 | `ruc_2m_diagnostic` | `"flux"` (default), `"log_profile"` | woof key, `[shared]`: how RUC's SFCDIAGS_RUCLSM writes T2, TH2 and Q2. `flux` is public WRF's flux form. `log_profile` adds the block the operational RAP/HRRR branch carries and no public WRF has: where the air is warmer or moister than the surface, T2 and Q2 follow a logarithmic profile between the surface and half the lowest layer, with no saturation cap. Its final surface-driver bound limits Q2 to 1.05 times the lowest-level vapour mixing ratio over both land and water; `flux` applies that bound to land only. Measured at night on a 3 km cut of an operational-HRRR start: T2 0.33 to 0.36 K lower and 2 m dewpoint 0.01 K lower than the flux form, where the operational model's own files match the flux form's T2 within 0.04 K. A flip is refused on restart |
 | `ruc_snow` | `"wrf_461"` (generic default), `"wrf_45"` | woof key, `[shared]`: `wrf_461` preserves WRF v4.6.1 snow conductivity, cover, albedo and melt. `wrf_45` selects the operational WRF v4.0-4.5 set: conductivity 0.265 W/m/K, depth-based cover without the final rebuild, fresh-snow albedo from depth on the ground, a melt cap independent of the step, capped bottom melt and cover-weighted bookkeeping. SNOWFALLAC stays in millimetres. The operational HRRR namelist importer and shipped HRRR configuration recipes explicitly select `wrf_45`; a data source alone does not. The full raw HRRR namelist still refuses unported controls; the automatic selections apply to supported resolved imports. A named change is refused on restart |
 | `sf_urban_physics` | 0 (default) | 1 single-layer urban canopy, 2 BEP, 3 BEP+BEM; requires Noah or Noah-MP; mosaic admits only option 1 |
@@ -1155,62 +1079,6 @@ fail-loud unimplemented).
 to 0. They are selected in `[shared]` or on a domain and imported from
 WRF namelists. See [Terrain drag](TERRAIN-DRAG.md) for the schemes, required
 WPS geography and preparation command.
-
-## Wind farms
-
-WRF v4.7.1's Fitch et al. (2012) wind-farm scheme (`windfarm_opt = 1`).
-Each turbine is an elevated momentum sink and a source of turbulence in
-the model levels its rotor sweeps, so a farm slows the flow behind it and
-its wake reaches the cells downstream. The drag is added to the PBL
-momentum tendencies and the TKE source to MYNN's `QKE` right after the PBL
-scheme, as WRF's PBL driver does, on the device and with no host copy per
-step. The kernel matches WRF's own Fortran word for word.
-
-| TOML key | WRF equivalent | default | allowed | note |
-|---|---|---|---|---|
-| `windfarm_opt` | `windfarm_opt` | 0 | 0, 1 | `[shared]` or per domain. 1 runs the Fitch scheme on that domain. It needs MYNN (`bl_pbl_physics = 5`): the TKE source goes into MYNN's `QKE`, and every other PBL scheme is refused. WRF's 2 (the MAV wake scheme) is not ported. Off builds nothing and launches nothing, so checkpoints, fingerprints and prepared bundles match a build without it. A moving or spawned nest with it on is refused, as is a `[tiles]`-streamed, row-slab or multi-device domain: the turbines are placed once on the whole domain |
-| `windfarm_turbine_file` | `windturbines.txt` / `windturbines-ij.txt` | `""` | path | `[shared]` or per domain, relative paths resolve beside the config. Either a woof turbine table (`.csv`, `.geojson` or a sites.v1 `.json`, the format `woof windfarm layout` reads; curves from the turbine library) or WRF's own turbine list with its `wind-turbine-N.tbl` tables in the same directory. Turbines are placed with WRF's own projection code; one outside the domain or in its outermost row or column is refused by name. WRF skips a turbine outside a domain instead; woof refuses it so a mistyped coordinate cannot drop a turbine unseen, so on a tree give each farm domain its own `[[domain]] windfarm_turbine_file`. Read only where `windfarm_opt = 1`. Checkpoints and fingerprints bind the file's SHA-256 and its curves' (the WRF tables, or the turbine library) |
-| `windfarm_ij` | `windfarm_ij` | 0 | 0, 1 | `[shared]` only. How a WRF list places its turbines: 0 reads `lat lon type` rows, 1 reads `i j type` rows (1-based mass indices). A woof table is always lat/lon |
-| `windfarm_tke_factor` | `windfarm_tke_factor` | 0.25 | finite, >= 0 | `[shared]` only. The factor on the TKE source, `factor*(Ct - Cp)`; 1.0 is Fitch's original |
-
-```toml
-[shared]
-bl_pbl_physics = 5
-windfarm_opt = 1
-windfarm_turbine_file = "farm.csv"   # turbine_id,lat,lon,hub_height_m,curve
-```
-
-WRF passes the scheme the model time step `dt`, not the PBL interval, so
-with `bldt > 0` each PBL call adds one model step's TKE while its momentum
-tendencies are held for the whole interval. woof does the same. A WRF
-namelist's `windfarm_opt`, `windfarm_ij` and `windfarm_tke_factor` import;
-the turbine file becomes the namelist directory's `windturbines.txt` (or
-`windturbines-ij.txt`), where WRF opens it. The MAV keys
-(`windfarm_wake_model`, `windfarm_overlap_method`, `windfarm_deg`) are
-refused by name.
-
-The history carries WRF's `POWER`, each cell's turbine power in W, on every
-domain with the scheme on, and the `windfarm` preset keeps it (see
-[OUTPUT-VARIABLES.md](OUTPUT-VARIABLES.md#wind-farm-power-fields)).
-
-**On hex** (`woof hex forecast`) the same keys are `--physics` overrides
-on WOOF's physics, with a MYNN boundary layer:
-
-```
-woof hex forecast ... --physics-suite rrfs_v2_dev \
-    --physics windfarm_opt=1 --physics windfarm_turbine_file=/abs/farm.csv
-```
-
-A turbine goes to the cell whose centre is nearest (the rule MPAS applies
-to a point), and each column's own `areaCell` takes WRF's `dx*dx`, so the
-drag is divided by the cell volume. A turbine outside the mesh or in a
-limited-area mesh's boundary cells is refused by name, as is
-`windfarm_ij = 1` (an unstructured mesh has no i/j) and the MPAS suite route
-(`--physics-backend mpasphys`: MPAS-A has no wind-farm scheme). The history
-frames carry `power` (WRF's `POWER`, W per cell), and a woof turbine table
-also gets a `windfarm_d01_<time>.nc` sidecar per frame: per-turbine
-rotor-equivalent wind, power and thrust coefficient, with their means and
-maxima over the steps since the last frame (`woof.hex.windfarm`).
 
 ## Terrain smoothing (`[[domain]] static`)
 
@@ -1323,20 +1191,6 @@ the configured step and warns that the run may stop: under a 44 m/s crest
 wind that domain's smoothed terrain was held to 3.5 s steps, while the
 unsmoothed terrain ran 8 s steps (and finished its 3 hours). Watch for that
 warning, and set `max_time_step` yourself if the run stops.
-
-High-resolution terrain (`[static.highres]`, the default at 1 km and
-finer) then gets a steep-ground pass, after the smoother above. Ground
-steeper than 0.85 is smoothed down to it by local 1-2-1 rounds, and only
-that ground. 0.85 is the steepest slope any measured acoustic substep count
-holds (`woof.acoustic_adaptation`). Nothing else changes, so a domain with
-no ground that steep keeps its exact terrain. The pass exists because no
-clock setting rescues steeper ground. A 100 m nest whose canyon wall read
-1.56 went non-finite within two model seconds whatever its step, substep
-count or `epssm`. Smoothed this way it ran on its configured clock. The
-pass reaches at most 2.5 km from a steep face and does not run coarser
-than 500 m. The terrain source is read that much wider, so a moving nest's
-statics stay the same wherever it sits. The static receipt's
-`steep_ground` entry records what moved, and its absence means nothing did.
 
 Roots built from `WPS_GEOG` on the ERA5, GFS, native HRRR and mapped-source (ICON, ECMWF and the rest) routes carry the setting, and so does every nest.
 A root loaded from a prebuilt static cache that does not record its smoothing refuses a non-default setting before integrating default terrain.
@@ -1467,7 +1321,7 @@ keeps the count of keys consumed with no record at zero.
 | `&chem` with `chem_opt` on | mapped onto WOOF's chemistry (`chem_sets`, `chem_sources`, the carried `&chem` keys) or refused key by key; never run with no chemistry |
 | a `&stoch` selector with no consumer | refused, naming the WRF operation that would be lost |
 | `fractional_seaice = 1` under a non-RUC land surface | declared divergence: whole-cell ice at XICE >= 0.5; differs only where the sea-ice fraction is strictly between 0.02 and 1 |
-| `hailcast_opt = 1` | GPU WRF HAILCAST and PSD hail diameter; automatic at spacing up to 4 km by default. `haildt` is seconds (60 by default, 0 means every step); [hail diameter products](HAIL-DIAMETER.md) |
+| `hailcast_opt = 1` | GPU WRF HAILCAST and PSD hail diameter; automatic at spacing up to 4 km by default. `haildt` is seconds (60 by default, 0 means every step); `hailcast_version` picks operational HRRR v4's stone model (`wrf_39_noaa`, default) or WRF v4.6.1's (`wrf_461`); [hail diameter products](HAIL-DIAMETER.md) |
 | `dfi_opt` other than 0 | refused: WOOF has no digital filter, so every hour would integrate from a different initial state (a declared divergence until 2026-10-12) |
 
 The unmodified operational 3 km namelist (NOAA-EMC/HRRR v4.1.21

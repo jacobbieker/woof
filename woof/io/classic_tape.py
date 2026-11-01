@@ -42,6 +42,10 @@ from pathlib import Path
 
 import numpy as np
 
+#: The container name for a lossless, compressed NetCDF-4 frame written
+#: through the same schema (see :meth:`ClassicTape._freeze`).
+NETCDF4_DEFLATE = "netcdf4-deflate"
+
 #: ``createVariable`` keywords that describe HDF5 storage rather than
 #: data.  Named here so the refusal can say which one was passed.
 _HDF5_ONLY_KWARGS = ("zlib", "shuffle", "complevel", "fletcher32",
@@ -227,7 +231,8 @@ class ClassicTape:
     def __init__(self, path, *, container: str = "cdf2",
                  completion_attr: str | None = None,
                  frozen_remedy: str = "",
-                 expect_records: int | None = None) -> None:
+                 expect_records: int | None = None,
+                 netcdf4_options: dict | None = None) -> None:
         self._path = Path(path)
         #: ``expect_records`` asks the writer to hash the file AS IT IS
         #: WRITTEN, predicting this many records.  After :meth:`close`,
@@ -241,6 +246,10 @@ class ClassicTape:
             None if expect_records is not None
             else "no streamed digest was requested")
         self._container = container
+        # container NETCDF4_DEFLATE: the same schema and values written as a
+        # lossless shuffle+deflate NetCDF-4 frame (woof.io.wrfout's history
+        # default); options go to ClassicSchema.create_netcdf4.
+        self._netcdf4_options = dict(netcdf4_options or {})
         self._completion_attr = completion_attr
         self._frozen_remedy = frozen_remedy
         self.dimensions: dict[str, ClassicDim] = {}
@@ -319,7 +328,11 @@ class ClassicTape:
     def _freeze(self) -> None:
         from woof.io import nc_writer_bridge
 
-        schema = nc_writer_bridge.ClassicSchema(self._container)
+        netcdf4 = self._container == NETCDF4_DEFLATE
+        # The NetCDF-4 frame takes the same schema; CDF-5 is only the
+        # schema's (most permissive) classic validation, never written.
+        schema = nc_writer_bridge.ClassicSchema(
+            "cdf5" if netcdf4 else self._container)
         dimids: dict[str, int] = {}
         for name, dim in self.dimensions.items():
             dimids[name] = schema.def_dim(
@@ -340,12 +353,22 @@ class ClassicTape:
                 schema.put_var_attr(varid, attr_name,
                                     classic_attr_value(attr_value))
             object.__setattr__(variable, "_varid", varid)
-        self._writer = schema.create(self._path)
-        if self._expect_records is not None:
-            self.stream_identity_refusal = self._writer.begin_digest(
-                int(self._expect_records))
-            if self.stream_identity_refusal is not None:
+        if netcdf4:
+            self._writer = schema.create_netcdf4(self._path,
+                                                 **self._netcdf4_options)
+            if self._expect_records is not None:
+                # The streamed digest hashes the classic layout as it is
+                # written; a deflated NetCDF-4 frame is re-read instead.
+                self.stream_identity_refusal = (
+                    "the NetCDF-4 (deflate) container has no streamed digest")
                 self._expect_records = None
+        else:
+            self._writer = schema.create(self._path)
+            if self._expect_records is not None:
+                self.stream_identity_refusal = self._writer.begin_digest(
+                    int(self._expect_records))
+                if self.stream_identity_refusal is not None:
+                    self._expect_records = None
 
     def _write_record(self, recno: int, variable: ClassicVariable,
                       values) -> None:
@@ -409,4 +432,4 @@ class ClassicTape:
 
 
 __all__ = ["ClassicDim", "ClassicTape", "ClassicVariable",
-           "classic_attr_value"]
+           "NETCDF4_DEFLATE", "classic_attr_value"]

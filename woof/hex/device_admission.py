@@ -431,6 +431,7 @@ def card_profile_from_attributes(
 KNOWN_CARDS: Mapping[str, CardProfile] = MappingProxyType(
     {
         "32gib-170sm": CardProfile("RTX 5090 (32,607 MiB, sm_120)", 170, 1536),
+        "24gib-128sm": CardProfile("RTX 4090 (24,564 MiB, sm_89)", 128, 1536),
         "16gib-70sm": CardProfile("RTX 5070 Ti (16,303 MiB, sm_120)", 70, 1536),
         "10gib-68sm": CardProfile("RTX 3080 (10,240 MiB, sm_86, WDDM)", 68, 1536),
         "96gib-188sm": CardProfile(
@@ -1732,7 +1733,7 @@ class RouteRunPeak:
 
 #: Whole-run peaks of ONE member on the MPAS physics route (fixed step, fast numerics).
 #:
-#: THE BREAKAGE IT PREVENTS (U-H4, global synradar cycle, 2026-10-27 00:28Z): ``woof hex global --row
+#: THE BREAKAGE IT PREVENTS (U-H4, global ensemble cycle, 2026-10-27 00:28Z): ``woof hex global --row
 #: global-30km --source gefs --members-per-card auto`` on two RTX PRO 6000 (97,887 MiB) priced each 30 km MPAS
 #: member at the ArWen-route floor (43,080 MiB), planned 2 per card, and all four members ran out of memory about
 #: 3 min in (CuPy: "Out of memory allocating 432,537,600 bytes (allocated so far: 48,761,238,528 bytes)"); the

@@ -89,6 +89,12 @@
       "source_axes": ["y", "x"], "target_axes": ["y", "x"],
       "location": "surface", "staggering": "none", "missing": {"kind": "reject"}
     },
+    "sea_ice_fraction": {
+      "provider": "composition_bound",
+      "units": {"source": "1", "target": "1"},
+      "source_axes": ["y", "x"], "target_axes": ["y", "x"],
+      "location": "surface", "staggering": "none", "missing": {"kind": "preserve_mask"}
+    },
     "air_temperature_2m": {
       "selectors": [{"format": "grib2", "discipline": 0, "category": 0, "parameter": 0, "level_type": 103, "level_value": 2, "pdt": 0}],
       "units": {"source": "K", "target": "K"},
@@ -196,7 +202,7 @@
       "vertical_velocity": "explicit_zero_with_adapter_validation",
       "snow_water_equivalent": "bound_as_ecmwf_local_snow_depth_water_equivalent_at_water_density",
       "snow_depth": "real_derives_snowh_from_snow_water_equivalent_at_5_to_1",
-      "sea_ice_fraction": "source_publishes_sea_ice_thickness_only_no_area_fraction"
+      "sea_ice_fraction": "borrowed_from_companion_analysis"
     }
   }
 }

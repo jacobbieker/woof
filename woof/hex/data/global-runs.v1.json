@@ -1,6 +1,6 @@
 {
   "schema": "gpuwm-hex.global-runs/v1",
-  "about": "Global experiment rows for `gpuwm-hex global`: one command from a row and a cycle to a mesh, a native static, an init, a forecast on every card the mesh needs, products, a lat-lon export and an observation score. A new resolution, mesh or physics arm is a row here, not a code path. Meshes are the NCAR-published quasi-uniform x1 meshes, fetched by URL and pinned by the SHA-256 of the archive and of the grid file inside it; the static is built from that grid by rw_mpas_static with the native init_atmosphere static stream and the native gravity-wave-drag statistics; the init comes from the init-source table; the forecast door picks the card count from its own capacity rows.",
+  "about": "Global experiment rows for `woof hex global`: one command from a row and a cycle to a mesh, a native static, an init, a forecast on every card the mesh needs, products, a lat-lon export and an observation score. A new resolution, mesh or physics arm is a row here, not a code path. Meshes are the NCAR-published quasi-uniform x1 meshes, fetched by URL and pinned by the SHA-256 of the archive and of the grid file inside it; the static is built from that grid by rw_mpas_static with the native init_atmosphere static stream and the native gravity-wave-drag statistics; the init comes from the init-source table; the forecast door picks the card count from its own capacity rows.",
   "mesh_cache_env": "GPUWM_HEX_GLOBAL_CACHE",
   "static": {
     "builder": "rw_mpas_static",
@@ -109,10 +109,10 @@
      "about": "80 layers to 50 km (approximately 1 hPa), 750 m stratospheric spacing above 20 km, sponge above 40 km, RRTMG with monthly climatological ozone; one-member 30-day warming/reversal and measured card fit: docs/s2s/receipts/high-top-20180205.json; independent observed skill and multi-member fit are unqualified"}
   ],
   "measured_seconds_per_forecast_hour": [
-    {"mesh": "x1.2621442", "cards": 8, "card": "RTX PRO 6000 Blackwell 96 GB", "card_match": "rtx pro 6000", "seconds": 52.2, "basis": "all-in, 8-card same-host, 2026-10-10"},
-    {"mesh": "x1.655362", "cards": 2, "card": "RTX PRO 6000 Blackwell 96 GB", "card_match": "rtx pro 6000", "seconds": 22.8, "basis": "2026-10-10"},
-    {"mesh": "x1.655362", "cards": 1, "card": "RTX PRO 6000 Blackwell 96 GB", "card_match": "rtx pro 6000", "seconds": 63.2, "basis": "2026-10-10"},
-    {"mesh": "x1.163842", "cards": 1, "card": "RTX PRO 6000 Blackwell 96 GB", "card_match": "rtx pro 6000", "seconds": 21.5, "basis": "17.9 s measured at the 360 s step (2026-10-10), scaled by 360/300 for the YSU arms' 300 s cap"},
-    {"mesh": "x1.40962", "cards": 1, "card": "RTX 5070 Ti 16 GB", "card_match": "rtx 5070 ti", "seconds": 5.5, "basis": "forecast door 132.8 s for 24 h at the 300 s step (the YSU arms' cap), warm kernel cache, GFS 2026-10-11 12Z, measured 2026-10-14"}
+    {"mesh": "x1.2621442", "cards": 8, "card": "RTX PRO 6000 Blackwell 96 GB", "card_match": "rtx pro 6000", "route": "arwen", "suite": "arwen_mpas_column", "seconds": 52.2, "basis": "all-in, 8-card same-host, 2026-10-10"},
+    {"mesh": "x1.655362", "cards": 2, "card": "RTX PRO 6000 Blackwell 96 GB", "card_match": "rtx pro 6000", "route": "arwen", "suite": "arwen_mpas_column", "seconds": 22.8, "basis": "2026-10-10"},
+    {"mesh": "x1.655362", "cards": 1, "card": "RTX PRO 6000 Blackwell 96 GB", "card_match": "rtx pro 6000", "route": "arwen", "suite": "arwen_mpas_column", "seconds": 63.2, "basis": "2026-10-10"},
+    {"mesh": "x1.163842", "cards": 1, "card": "RTX PRO 6000 Blackwell 96 GB", "card_match": "rtx pro 6000", "route": "arwen", "suite": "arwen_mpas_column", "seconds": 21.5, "basis": "17.9 s measured at the 360 s step (2026-10-10), scaled by 360/300 for the YSU arms' 300 s cap"},
+    {"mesh": "x1.40962", "cards": 1, "card": "RTX 5070 Ti 16 GB", "card_match": "rtx 5070 ti", "route": "arwen", "suite": "arwen_mpas_column", "seconds": 5.5, "basis": "forecast door 132.8 s for 24 h at the 300 s step (the YSU arms' cap), warm kernel cache, GFS 2026-10-11 12Z, measured 2026-10-14"}
   ]
 }

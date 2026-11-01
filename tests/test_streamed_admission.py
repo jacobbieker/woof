@@ -591,11 +591,13 @@ def test_check_on_a_config_that_does_not_stream_is_byte_identical(
     # The fork's nwp_diagnostics wind running maxima (WSPD10MAX, U10MAX,
     # V10MAX, W_UP_MAX, W_DN_MAX and the UPP gust; woof/core/wind_gust_diag)
     # and its SWDDNI/SWDDIF/COSZEN surface-solar carriers add nine 550x550
-    # FP32 planes, 12,305,700 B with the 1.13 pool margin
-    # (16,286,356,887 and 12,407,408,023 at upstream 1.1.1).
-    assert payload["peak_envelope_bytes"] == 16298662587
-    assert payload["observed_peak_envelope_bytes"] == 16298662587
-    assert payload["alloc_estimate_bytes"] == 12419713723
+    # FP32 planes, 12,305,700 B with the 1.13 pool margin; paper/conus-suite-
+    # exact (2.9.11): the stored MF_VX_INV plane msfv_inv, 4 x 551 x 550 =
+    # 1,212,200 B, 1,369,786 B with the 1.13 pool margin (16,286,356,887 and
+    # 12,407,408,023 at upstream 1.1.1).
+    assert payload["peak_envelope_bytes"] == 16300032373
+    assert payload["observed_peak_envelope_bytes"] == 16300032373
+    assert payload["alloc_estimate_bytes"] == 12421083509
     # The reserve's 0.03 retention term follows the estimate: A163 moved
     # it by 0.03 x -212,355,128 = -6,370,653 B.
     # The density addition raises its retention reserve by 2,009,931 B, and
@@ -608,10 +610,11 @@ def test_check_on_a_config_that_does_not_stream_is_byte_identical(
     # The cap-solar + cap-hail allocations raise it by 0.03 x 295,336,800 =
     # 8,860,104 B and the hail frame's local memory by 593,264,640 B
     # (3,648,461,654 before).
-    # HN1's number tables raise it by 0.03 x 19,490,240 = 584,707 B, and the
-    # fork's nine diagnostic planes by 0.03 x 12,305,700 = 369,171 B
-    # (4,251,171,105 at upstream 1.1.1).
-    assert payload["reserve_bytes"] == 4251540276
+    # HN1's number tables raise it by 0.03 x 19,490,240 = 584,707 B, the
+    # fork's nine diagnostic planes by 0.03 x 12,305,700 = 369,171 B, and
+    # msfv_inv (paper/conus-suite-exact, 2.9.11) by 0.03 x 1,369,786 =
+    # 41,094 B (4,251,171,105 at upstream 1.1.1).
+    assert payload["reserve_bytes"] == 4251581370
     assert payload["budget_bytes"] == _FITS_STREAMED_GIB * GIB
     assert payload["gates"]["alloc_estimate_le_wddm_budget"] is False
     assert rc == 1
@@ -669,10 +672,10 @@ def test_check_on_a_config_that_does_not_stream_is_byte_identical(
     # change nothing this configuration is charged. The density allocation
     # and its unchanged pool and retention margins remain present in both,
     # as does the priced CLDFRA buffer, and the strict-rim health table.
-    assert old_payload["peak_envelope_bytes"] == 16298662587
-    assert old_payload["observed_peak_envelope_bytes"] == 16298662587
-    assert old_payload["alloc_estimate_bytes"] == 12419713723
-    assert old_payload["reserve_bytes"] == 4251540276
+    assert old_payload["peak_envelope_bytes"] == 16300032373
+    assert old_payload["observed_peak_envelope_bytes"] == 16300032373
+    assert old_payload["alloc_estimate_bytes"] == 12421083509
+    assert old_payload["reserve_bytes"] == 4251581370
     assert old_rc == rc == 1
     assert old_estimate == estimate
     for key in ("peak_envelope_bytes", "observed_peak_envelope_bytes",
