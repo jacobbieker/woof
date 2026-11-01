@@ -138,15 +138,19 @@ _die_with_launcher()
 from importlib import metadata as _metadata  # noqa: E402
 from pathlib import Path as _Path  # noqa: E402
 
-#: The distribution this package is published as.
+#: The distribution this package is published as.  ``metal-woof`` is the
+#: same source built for Apple silicon (.github/workflows/publish-metal.yml);
+#: :data:`DISTRIBUTION_NAME` is re-read below from the one that installed
+#: this package, so its remedies name the distribution the user has.
 DISTRIBUTION_NAME = "recast-woof"
+METAL_DISTRIBUTION_NAME = "metal-woof"
 
 #: Every distribution that ships this package directory, in the order the
 #: version is read: woof, then the standalone RW-WPS preparation package
 #: built from the same source.  Reading woof alone, a clean rw-wps
 #: install reported 0+unknown and its own runtime check refused it
 #: ("rw-wps version mismatch: metadata=2.8.1, module=0+unknown").
-DISTRIBUTION_NAMES = (DISTRIBUTION_NAME, "rw-wps")
+DISTRIBUTION_NAMES = (DISTRIBUTION_NAME, METAL_DISTRIBUTION_NAME, "rw-wps")
 
 #: The RECORD row a distribution that installed this package carries for
 #: the package's own ``__init__.py``.  Both names ship the same package
@@ -327,6 +331,19 @@ def _installed_version() -> str:
 
 __version__ = _installed_version()
 
+
+def _installed_distribution_name() -> str:
+    distribution = version_distribution()
+    try:
+        name = str(distribution.metadata["Name"]) if distribution else ""
+    except Exception:                                   # noqa: BLE001
+        name = ""
+    return name if name in (DISTRIBUTION_NAME, METAL_DISTRIBUTION_NAME) \
+        else DISTRIBUTION_NAME
+
+
+DISTRIBUTION_NAME = _installed_distribution_name()
+
 # Before any woof module imports CuPy: on Windows with the CUDA 12 toolkit
 # wheels, CuPy 14.2 warns on import that it cannot find CUDA when it can,
 # and that line headed every failed command's text in the desktop.  See
@@ -371,7 +388,7 @@ from woof import numerics as _numerics  # noqa: E402
 
 _numerics.arm()
 
-__all__ = ["DISTRIBUTION_NAME", "DISTRIBUTION_NAMES", "LAUNCH_MONOTONIC",
+__all__ = ["DISTRIBUTION_NAME", "DISTRIBUTION_NAMES", "METAL_DISTRIBUTION_NAME", "LAUNCH_MONOTONIC",
            "LAUNCH_UNIX_MS", "PACKAGE_INIT", "__version__",
            "candidate_distributions", "editable_source_root",
            "installs_package", "owning_distribution",

@@ -277,8 +277,8 @@ def main(argv: list[str] | None = None) -> int:
         description="Stage built Rust artifacts into the package for a "
                     "platform wheel.")
     parser.add_argument(
-        "--platform", choices=bridge_assets.SUPPORTED_PLATFORMS,
-        default=bridge_assets.host_platform(),
+        "--platform", choices=bridge_assets.WHEEL_PLATFORMS,
+        default=bridge_assets.wheel_host_platform(),
         help="platform key the artifacts were built for (default: this host)")
     parser.add_argument(
         "--from-bundle", type=Path, default=None, metavar="ARCHIVE",
@@ -324,10 +324,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.platform is None:
         raise SystemExit(
-            "no bundle is published for this host "
+            "this host cannot stage a platform wheel "
             f"({bridge_assets.host_platform_description()}); pass --platform "
             f"explicitly to cross-stage, or build from source.  Known: "
-            f"{', '.join(bridge_assets.SUPPORTED_PLATFORMS)}")
+            f"{', '.join(bridge_assets.WHEEL_PLATFORMS)}")
     destination = stage(args.platform, destination=args.dest)
     total = sum(path.stat().st_size for path in destination.iterdir()
                 if path.is_file())

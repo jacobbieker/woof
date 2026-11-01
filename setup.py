@@ -94,6 +94,9 @@ def _build_provenance(version: str) -> dict:
 PLATFORM_TAGS = {
     "win-x86_64": "win_amd64",
     "linux-x86_64": "manylinux_2_28_x86_64",
+    # metal-woof (.github/workflows/publish-metal.yml): the bridges are
+    # built on the macos-14 runner image's SDK floor, macOS 14.
+    "macos-arm64": "macosx_14_0_arm64",
 }
 
 #: The glibc the Linux tag promises, and the reading that checks the staged
@@ -185,6 +188,12 @@ def _refuse_off_policy_wheel(platform: str) -> None:
 #: directly rather than through :mod:`woof.bridge_assets`, because
 #: setup.py must not import the package it is packaging.
 _PINS_PATH = _HERE / "woof" / "data" / "bridges" / "bridge-pins.json"
+
+#: Platforms whose wheel is the only carrier of their bridges: no bundle is
+#: published for them, so the packaged pins have nothing to point at and
+#: the wheel's own staged bytes (checked by _staged_platform's manifest)
+#: are what `woof setup` finds.  metal-woof's Apple-silicon wheel.
+_SELF_CONTAINED_PLATFORMS = ("macos-arm64",)
 
 #: Explicit opt-in for building a wheel from an UNPINNED tree.  Dev and
 #: test fixtures set it (their wheels never leave a temp directory); a
@@ -430,7 +439,8 @@ class _PlatformWheel(_BdistWheel):
         # Metadata and PEP 660 editable installs finalize bdist_wheel to
         # obtain tags; they do not build a distributable package.  Gate
         # the actual wheel build, before it copies any package bytes.
-        _refuse_unpinned_wheel()
+        if _staged_platform() not in _SELF_CONTAINED_PLATFORMS:
+            _refuse_unpinned_wheel()
         if _staged_platform() is not None:
             _refuse_off_policy_wheel(_staged_platform())
         super().run()

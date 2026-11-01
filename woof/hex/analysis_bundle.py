@@ -1045,7 +1045,8 @@ def _versions(producer: str) -> dict[str, Any]:
         except metadata.PackageNotFoundError:
             return None
 
-    return {"woof": version("recast-woof"), "gpuwm_hex": version("recast-woof"), "producer": producer}
+    from woof import DISTRIBUTION_NAME
+    return {"woof": version(DISTRIBUTION_NAME), "gpuwm_hex": version(DISTRIBUTION_NAME), "producer": producer}
 
 
 def carried_row_document(rows_file: str | Path, name: str, *, grid_name: str) -> dict[str, Any]:

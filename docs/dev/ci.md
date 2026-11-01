@@ -118,3 +118,31 @@ GPUWM_NO_LOCAL_GPU=1 pixi run -e cpu python tools/battery/run_stage1.py -- -q -n
 pixi run -e mlx python tools/metal_translation_census.py --translate-only --gate --fresh --out /tmp/c.jsonl
 GPUWM_WRF_EXACT=1 pixi run -e mlx python -m pytest -q tests/test_kessler_wrf461_parity.py
 ```
+
+## Publishing metal-woof
+
+`.github/workflows/publish-metal.yml` builds and publishes `metal-woof`, this
+source built for Apple silicon. It never touches `publish.yml` or
+`publish-data.yml`, which publish `recast-woof`.
+
+- **When:** a `metal-vX.Y.Z[.N]` tag, or a manual run given a version (it
+  publishes only with `publish` ticked). Versions are upstream's release plus
+  a fork build number, for example `1.1.3.1`.
+- **Build (macos-15):** every `build-native` workspace for macOS 14+, then
+  `tools/metal_woof_project.py` renames the distribution (name, version, the
+  extras' self-references, and the `gpu-mlx` requirements folded into the
+  base dependencies). The sdist is built from an unstaged tree, then the
+  macOS bridges are staged (`tools/stage_wheel_bridges.py --platform
+  macos-arm64`) and the `macosx_14_0_arm64` wheel is built. No `pixi`
+  command may run after the rename: pixi refuses a manifest whose editable
+  package changed name.
+- **Smoke:** the wheel is installed into a fresh venv outside the checkout;
+  it must report `metal-woof` at the tag's version, carry its bridges and
+  import the MLX stack.
+- **Publish:** PyPI trusted publishing, environment `pypi-metal`, after the
+  digests are re-checked against the build's `SHA256SUMS`.
+
+`macos-arm64` is a wheel-only platform (`bridge_assets.WHEEL_PLATFORMS`): no
+downloadable bundle is published for it, so `setup.py` does not require the
+packaged pins to name one (`_SELF_CONTAINED_PLATFORMS`). The wheel was 96.3 MB
+at 1.1.3.1, under PyPI's 100 MB per-file limit.

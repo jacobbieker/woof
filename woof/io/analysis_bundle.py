@@ -1256,7 +1256,8 @@ def _versions(producer: str) -> dict[str, Any]:
     from importlib import metadata
 
     try:
-        gpuwm_version = metadata.version("recast-woof")
+        from woof import DISTRIBUTION_NAME
+        gpuwm_version = metadata.version(DISTRIBUTION_NAME)
     except metadata.PackageNotFoundError:
         gpuwm_version = None
     return {"woof": gpuwm_version, "producer": producer}

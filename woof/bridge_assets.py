@@ -147,6 +147,12 @@ PINS_RESOURCE = "data/bridges/bridge-pins.json"
 #: those bytes", never "who is asking".
 SUPPORTED_PLATFORMS = ("win-x86_64", "linux-x86_64")
 
+#: Platform keys a platform WHEEL can carry staged bridges for: every
+#: bundle platform, plus Apple silicon, whose bridges ship only inside the
+#: metal-woof wheel (.github/workflows/publish-metal.yml) and are not
+#: published as a downloadable bundle.
+WHEEL_PLATFORMS = SUPPORTED_PLATFORMS + ("macos-arm64",)
+
 #: Override the download base URL (private mirrors, tests).  The bundle
 #: filename is appended to it.
 ASSET_URL_BASE_ENV = "WOOF_BRIDGE_ASSET_URL_BASE"
@@ -973,12 +979,15 @@ def artifact_filename(artifact: BundledArtifact, platform: str) -> str:
     library naming); a test binds the two.
     """
 
-    if platform not in SUPPORTED_PLATFORMS:
+    if platform not in WHEEL_PLATFORMS:
         raise ValueError(f"unknown platform {platform!r}; known: "
-                         f"{SUPPORTED_PLATFORMS}")
+                         f"{WHEEL_PLATFORMS}")
     windows = platform.startswith("win-")
     if artifact.kind == "library":
-        return f"{artifact.name}.dll" if windows else f"lib{artifact.name}.so"
+        if windows:
+            return f"{artifact.name}.dll"
+        suffix = "dylib" if platform.startswith("macos-") else "so"
+        return f"lib{artifact.name}.{suffix}"
     return f"{artifact.name}.exe" if windows else artifact.name
 
 
@@ -997,6 +1006,19 @@ def host_platform() -> str | None:
     if sys.platform.startswith("linux") and machine == "x86_64":
         return "linux-x86_64"
     return None
+
+
+def wheel_host_platform() -> str | None:
+    """This box's key among :data:`WHEEL_PLATFORMS`, or None.
+
+    :func:`host_platform` answers "is a bundle published for this box";
+    this answers "can this box stage a platform wheel", which Apple
+    silicon can (metal-woof) though no bundle is published for it.
+    """
+
+    if sys.platform == "darwin" and platform_module.machine().lower() == "arm64":
+        return "macos-arm64"
+    return host_platform()
 
 
 def host_platform_description() -> str:
@@ -2781,7 +2803,7 @@ __all__ = [
     "SOURCE_REV_MARKER", "STALE_POLICIES", "STALE_POLICY_ENV",
     "StagedPinStatus", "forget_pin_memo", "refresh_staged_bundle",
     "staged_pin_status", "stale_policy",
-    "SUPPORTED_PLATFORMS", "artifact_filename", "asset_url_base",
+    "SUPPORTED_PLATFORMS", "WHEEL_PLATFORMS", "wheel_host_platform", "artifact_filename", "asset_url_base",
     "bundle_url", "classify_assets", "classify_destination",
     "download_bundle", "embedded_source_revisions", "fetch_bundle",
     "NATIVE_BUILD_INPUTS", "NATIVE_BUILD_INPUT_EXCLUSIONS",
