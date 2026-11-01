@@ -32,7 +32,9 @@ env:
   # Number of legs the tests/ tree is split into (.github/ci/select_tests.py).
   TEST_LEGS: "8"
   PYTHONUNBUFFERED: "1"
-  FORCE_COLOR: "0"
+  # No FORCE_COLOR: Python 3.14 reads any non-empty value, "0" included, as
+  # "force colour", and argparse then writes ANSI escapes into every usage
+  # and help text the CLI tests compare as plain words.
 
 jobs:
   lint:
