@@ -408,8 +408,9 @@ class HeightConservativeMap:
                 # remap onto the derecho 1 km member, box 2026-10-17 01:34Z) while the moving forecast waited; it also
                 # runs at every moving-region move. WOOF_HEX_MOVING_HEIGHT_THREADS caps the threads (default: affinity).
                 from concurrent.futures import ThreadPoolExecutor
+                from woof.hex.cpu_budget import affinity_cpus  # sched_getaffinity is Linux-only
                 levels=range(1 if self.endpoint_alignment else 0,len(self.target_dzw))
-                threads=int(os.environ.get('WOOF_HEX_MOVING_HEIGHT_THREADS','0')) or len(os.sched_getaffinity(0))
+                threads=int(os.environ.get('WOOF_HEX_MOVING_HEIGHT_THREADS','0')) or affinity_cpus()
                 with ThreadPoolExecutor(max_workers=max(1,min(threads,len(levels)))) as pool:
                     list(pool.map(interface,levels))
                 # Exact source endpoint totals own the top. No below-ground loss or
