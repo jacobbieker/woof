@@ -138,7 +138,7 @@ at dtbc=T_bdy on pre-seam steps (solve_em.F:4531-4639).  The frozen
 Phase-4/-r2 anchor bytes encode the retired elapsed-based semantics and
 can no longer serve as the byte authority; the d01/d02/d03 invariance
 ratchets regenerate against the seam-closure anchor epoch
-(reference-t7-final-r3) in the batched end-of-Wave-1 regeneration.  The
+(real74-t7-final-r3) in the batched end-of-Wave-1 regeneration.  The
 ratchet metric NAMES keep their historic d01_bitwise_vs_phase4_13z
 identity; what they protect is unchanged (gpuwm-invariance --
 non-mutating coupling -- not WRF identity).  Restart headers gained the
@@ -956,7 +956,7 @@ NEST_GATES: tuple[NestGate, ...] = (
         "boundary clock, so root Davies launches consume WRF's post-"
         "increment recurrence (solve_em.F:371-372) on root and children "
         "alike; the byte authority is the seam-closure anchor epoch "
-        "(reference-t7-final-r3) -- the metric keeps its historic Phase-4 "
+        "(real74-t7-final-r3) -- the metric keeps its historic Phase-4 "
         "name, while the original Phase-4/-r2 bytes encode the retired "
         "pre-bind elapsed-based dtbc and remain historical evidence "
         "only.",
@@ -998,7 +998,7 @@ NEST_GATES: tuple[NestGate, ...] = (
     NestGate(
         "N4", "d01_bitwise_vs_phase4_13z", "bitwise", None,
         "RATCHET: d01 bitwise vs the anchor epoch (historic Phase 4 "
-        "metric name; reference-t7-final-r3 bytes since the 2026-07-28 "
+        "metric name; real74-t7-final-r3 bytes since the 2026-07-28 "
         "Davies clock bind) protects the registered "
         "non-mutating-coupling deviation when d03 is added.",
         "section F, N4 (RATCHETS)"),
@@ -1165,7 +1165,7 @@ NEST_GATES: tuple[NestGate, ...] = (
     NestGate(
         "N6", "d01_13z_gates_unchanged", "bitwise", None,
         "d01 13:00 gates unchanged in the flagship (the frozen anchor-"
-        "epoch bytes contract of N3(i) still holds; reference-t7-final-r3 "
+        "epoch bytes contract of N3(i) still holds; real74-t7-final-r3 "
         "since the 2026-07-28 Davies clock bind -- the historic Phase-4 "
         "bytes encode the retired pre-bind semantics).",
         "section F, N6"),
