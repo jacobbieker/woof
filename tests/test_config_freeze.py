@@ -554,12 +554,6 @@ def _check_frozen_defaults(actual):
                          # gases (fix/wrf461-2dom-exact).
                          ("ghg_input", 0), ("umove", 0.0), ("vmove", 0.0)):
         assert actual.pop(field) == value, field
-    # WRF's windfarm_opt and its three companions (the fork's Fitch
-    # coupling), appended after upstream 1.1.0's fields, off.
-    for field, value in (("windfarm_opt", 0), ("windfarm_ij", 0),
-                         ("windfarm_tke_factor", 0.25),
-                         ("windfarm_turbine_file", "")):
-        assert actual.pop(field) == value, field
     for field,value in (("urban_ucm_generation","wrf_471"),("urban_treeoption",-1),
                         ("urban_ttscheme",-1),("urban_fvg",-1.),("urban_table_dir","")):
         assert actual.pop(field) == value
