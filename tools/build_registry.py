@@ -7298,7 +7298,8 @@ def build(registry: dict) -> dict:
         km_opt = option["selectors"]["km_opt"]
         rules = [rule for rule in
                  option.get("constraints", {}).get("refused_when", [])
-                 if not {"topo_wind", "gwd_opt", "wind_farm_scheme"}.intersection(
+                 if not {"topo_wind", "gwd_opt", "wind_farm_scheme",
+                      "windfarm_opt"}.intersection(
                      rule.get("settings", {}))
                  and ("diff_opt" not in rule.get("settings", {})
                       or "components" in rule)]
