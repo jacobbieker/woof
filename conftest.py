@@ -126,3 +126,24 @@ if pytest is not None:
                 report.outcome = "skipped"
                 report.longrepr = (str(item.path), (lineno or 0) + 1, f"Skipped: {reason}")
         return report
+
+    @pytest.hookimpl(wrapper=True)
+    def pytest_make_collect_report(collector):
+        # The same rule at collection: a test module whose own import reads a
+        # left-out module (``woof.gui``, ``woof.tui_worker``) never reaches
+        # pytest_runtest_makereport, so it was an ERROR rather than the named
+        # skip the rule gives a case.  The import is asked again for the
+        # exception itself (pytest keeps only its rendering); a failure the
+        # rule does not name stays an error.
+        report = yield
+        if (report.failed and isinstance(collector, pytest.Module)
+                and _snapshot_module() is not None):
+            try:
+                collector.obj
+            except Exception as failure:  # noqa: BLE001 - the rule decides
+                reason = _snapshot.skip_reason(failure)
+                if reason is not None:
+                    report.outcome = "skipped"
+                    report.longrepr = (str(collector.path), 0, f"Skipped: {reason}")
+                    report.result = []
+        return report
