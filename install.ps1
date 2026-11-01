@@ -20,11 +20,12 @@
 #      an older rustc without rustup stops with the version it needs;
 #   3. creates .venv if absent on free-threaded CPython 3.14t (see
 #      "Interpreter" below), installs the checkout's recast-woof-data
-#      companion, then installs -e ".[gpu-cuNN,render]" into it,
-#      where NN is the CUDA major this box's driver reports (CuPy
-#      ships one wheel per major and the wrong one dies at its first
-#      cuBLAS load); -Cuda overrides the detection, and an undetectable
-#      major is announced rather than defaulted quietly;
+#      companion, then installs -e ".[gpu-cu13,render]" into it:
+#      CUDA 13 is the default (CuPy ships one wheel per major and the
+#      wrong one dies at its first cuBLAS load).  The CUDA 12 build is
+#      installed only with -Cuda 12; a driver that serves only CUDA 12
+#      stops the install and says so, and an undetectable major is
+#      announced rather than defaulted quietly;
 #   4. stages the externalized Thompson tables with `woof fetch-tables`
 #      (downloads only what is absent -- ~243 MiB from a checkout --
 #      SHA-256 verified before install; a no-op when already staged;
@@ -568,21 +569,34 @@ function Get-CudaMajor {
     return $null
 }
 
+$cudaGiven = [bool]$CudaMajor
 if ($CudaMajor) {
     Say "CUDA major $CudaMajor was given on the command line"
 } else {
     $CudaMajor = Get-CudaMajor
     if ($CudaMajor) { Say "nvidia-smi reports CUDA $CudaMajor" }
 }
-if (@('12', '13') -contains "$CudaMajor") {
-    $gpuExtra = "gpu-cu$CudaMajor"
-} else {
+# CUDA 13 is the default install; CUDA 12 is installed only when asked
+# for by name (-Cuda 12 or WOOF_INSTALL_CUDA=12), never on a reading of
+# the driver.
+if ("$CudaMajor" -eq '13') {
+    $gpuExtra = 'gpu-cu13'
+} elseif ("$CudaMajor" -eq '12') {
+    if (-not $cudaGiven) {
+        Say 'this box''s driver serves CUDA 12, and the default install is'
+        Say 'CUDA 13 ([gpu-cu13]), which that driver cannot load.  Update'
+        Say 'the driver, or install the CUDA 12 build explicitly by'
+        Say 're-running with -Cuda 12.'
+        exit 1
+    }
     $gpuExtra = 'gpu-cu12'
+} else {
+    $gpuExtra = 'gpu-cu13'
     Say 'the box''s CUDA major could not be read (no nvidia-smi, or no'
-    Say 'driver answered), so this install falls back to [gpu-cu12].'
-    Say 'IF THIS BOX''S CUDA IS 13-ONLY THAT WHEEL IS WRONG: it will'
-    Say 'import fine and fail at the first cuBLAS load.  Re-run with'
-    Say '-Cuda 13 in that case; woof doctor judges the pairing at the'
+    Say 'driver answered), so this install takes the default, [gpu-cu13].'
+    Say 'IF THIS BOX''S DRIVER SERVES ONLY CUDA 12 THAT WHEEL IS WRONG: it'
+    Say 'will import fine and fail at its first CUDA call.  Re-run with'
+    Say '-Cuda 12 in that case; woof doctor judges the pairing at the'
     Say 'end of this script either way.'
 }
 # ------------------------------------------------ one CuPy build, not two

@@ -953,7 +953,7 @@ def test_all_covers_every_extra_a_forecast_user_needs(declaration, pyproject):
                 f"[all-{major}] does not cover [{name}]: missing "
                 f"{sorted(wanted - covered)}. Either add woof[{name}] to "
                 f"[all-{major}] or record why it is excused.")
-    assert declaration["extras"]["all"] == declaration["extras"]["all-cu12"]
+    assert declaration["extras"]["all"] == declaration["extras"]["all-cu13"]
 
 
 # --------------------------------------------------------------------------

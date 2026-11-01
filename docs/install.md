@@ -284,9 +284,9 @@ CuPy installed, and names the extra that matches; `install.sh` /
 `install.ps1` do the same detection and take `--cuda 12|13` /
 `-Cuda 12|13` to override it.
 
-`[gpu]` and `[all]` are kept and still mean cu12, so every install that
-already names them keeps working; they are aliases for the cu12 pair,
-not a separate pin.
+`[gpu]` and `[all]` are aliases for the cu13 pair, not a separate pin: in
+this fork CUDA 13 is the default and CUDA 12 is installed only by naming
+`[gpu-cu12]` or `[all-cu12]`.
 
 `[render]` = `wrf-rust` in its certified window (`>=0.2.39,<0.3` -- a
 window, not an equality, so installing woof never downgrades a newer core
@@ -481,14 +481,14 @@ observation battery and the demo gallery's basemaps.
 | `recast-woof[gpu-cu12]` | `cupy-cuda12x[ctk]` | running the model on a CUDA 12.x box. The `[ctk]` half is a matching CUDA toolkit as wheels, ~1.6 GiB; without it a driver-only box cannot compile a kernel or load cuBLAS |
 | `recast-woof[gpu-cu13]` | `cupy-cuda13x[ctk]` | running the model on a CUDA-13-only box |
 | `recast-woof[gpu-mlx]` | `mlx`, `libclang`, `nanobind` | running the model on an Apple-silicon GPU (Metal). The CUDA kernels are translated to Metal on first use (libclang) and launched through an extension built against nanobind; darwin-arm64 only |
-| `recast-woof[gpu]` | alias of `gpu-cu12` | kept so existing install lines keep working |
+| `recast-woof[gpu]` | alias of `gpu-cu13` | kept so existing install lines keep working |
 | `recast-woof[render]` | `wrf-rust>=0.2.39` | `woof render`'s matplotlib engine, `woof enprod`, and derived quantities. The default rust engine needs none of it. The floor is 0.2.39 because that is the oldest release with wheels for every supported interpreter (cp310-cp314); no environment marker, nothing skipped |
 | `recast-woof[dev]` | `pytest`, `pyyaml`, `setuptools` | running the test battery (setuptools because the wheel-gate tests run `setup.py` with the battery's interpreter) |
 | `recast-woof[publish]` | `huggingface_hub` | maintainers only: publishing the WPS_GEOG mirror snapshot. Needs write credentials nobody else has, so it is deliberately outside `[all]` |
 | `recast-woof[all-cu12]` | `gpu-cu12` + `render` + `obs` | one line for a CUDA 12.x forecasting box |
 | `recast-woof[all-cu13]` | `gpu-cu13` + `render` + `obs` | one line for a CUDA-13-only forecasting box |
 | `recast-woof[all-mlx]` | `gpu-mlx` + `render` + `obs` + `geog` | one line for an Apple-silicon forecasting box |
-| `recast-woof[all]` | alias of `all-cu12` | kept so existing install lines keep working |
+| `recast-woof[all]` | alias of `all-cu13` | kept so existing install lines keep working |
 | `recast-woof[geog]` | `rasterio`, `pyproj` | the pure-Python **parity fallback** for the high-resolution warp (`WOOF_STATIC_PYTHON=1`). The default engine is the Rust `static-fields` library a bare install stages, so this changes no default and unlocks no product; deliberately outside `[all]` because 118.8 MiB of GDAL stack does not belong in the recommended one-liner for a debugging aid |
 | `recast-woof[obs]` | `pyarrow` | reading station reports from the Dynamical.org ASOS Parquet archive (`woof.obs.dynamical_asos`), which scores a forecast against surface observations in the US and a dozen other countries without the IEM front door. Everything else in `woof.verify.obs` works from `pip install recast-woof` (scipy has been a base dependency since 2.4.1) |
 | `recast-woof[dealias]` | nothing | **empty as of 2.4.1.** scipy moved into the base install, so the `vad-region` dealiasing engine is selectable from `pip install recast-woof`; the name is kept so the old line does not fail |
