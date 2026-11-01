@@ -227,6 +227,31 @@ Traced on both machines, its word tests, D3's and the WRF oracle tests agree
 launch for launch (`tests/data/receipts/partial-nest-d4/backend-launch-words.txt`).
 The envelope receipts per backend are in the same directory.
 
+## hex (MPAS) on Metal: opt-in
+
+The hex lane resolves kernels through `woof.hex.cuda_backend.KernelCache`. Its
+admission asks CUDA questions: the runtime version, the compute capability,
+NVRTC's architectures and NVRTC's build identity. The facade answers these
+with zeros, so hex refuses on a Mac by default.
+
+`WOOF_HEX_METAL=1` installs `woof/hex/metal_lane.py`, which answers those
+questions for the Metal translation:
+
+- it stands in for compute 12.0;
+- its compile fingerprint names the translator, never NVRTC;
+- the regional unit's cubin load becomes a facade `RawModule`.
+
+No kernel source changes.
+
+Only the partial-depth band (Phase D5) is measured on Metal:
+
+- `components/hex/tests/test_partial_nest_oracle_v841.py`: the device
+  operators are bitwise to compiled MPAS v8.4.1 on Metal;
+- the envelope receipt `tests/data/receipts/partial-nest-d5/envelope-mlx.json`.
+
+The rest of the hex lane is not measured on Metal, which is why the lane is
+opt-in.
+
 ## Finding a difference
 
 1. `tools/launch_trace.py`: run the same scenario on CUDA (`ssh pb`) and on
