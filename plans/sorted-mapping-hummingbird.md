@@ -168,6 +168,43 @@ The first task is to confirm each source file below in the WRF 4.7.1 tree. MAD-W
 - Lateral zones are filled online through the `lbc.py` machinery.
 - Coarse to fine is barycentric, held to MPAS init_atmosphere's own interpolation where it applies.
 - Fine to coarse is a conservative overlap remap (`moving_remap.py` tables), held to an exact float64 reference that conserves to round-off.
+- STATUS (branch partial-nest-d5): built, dry dycore only.
+  - The child is a regional v8.4.1 CUDA driver cut at a flat zgrid face.
+    `woof/hex/partial_nest_run.py` hooks its acoustic interface row, the
+    face fluxes (the parent's second-order value), the scalar interface
+    flux and the recovery. The kernels are in
+    `woof/hex/cuda_partial_nest_v841.py`, a new unit; no existing kernel
+    byte changes.
+  - The top zone is MPAS's relaxation zone with a per-level ring strength.
+    The lateral zones run through the regional LBC pool, fed online.
+  - Coarse to fine is barycentric. Fine to coarse is a conservative overlap
+    remap of theta and the scalars. The interface budget is a face-flux
+    correction. After feedback the band re-reads its planes and lateral
+    frame.
+  - `&woof_partial_nest` is wired through
+    `partial_nest.configs_from_namelist`; every other route refuses it by
+    name.
+  - Oracle (b): `tools/partial_nest_mpas_oracle` holds the barycentric
+    weights and application and the relaxation zone to compiled MPAS
+    v8.4.1, word for word. Oracle (b'): the remap is held to its binary64
+    reference, which conserves to round-off.
+  - Envelope: `tests/data/receipts/partial-nest-d5`, on a 30 km planet
+    (2562-cell parent, a band culled from 10242 cells, 6 km of 10 km).
+    - The band beats the parent alone on the bubble's block theta' (0.045
+      against 0.074).
+    - It does not on the gravity wave (0.0040 against 0.0011); feedback
+      doubles that error (one-way 0.0021).
+    - The upwinded face is 0.026: D4's ratchet, reproduced.
+    - At rest the coupled noise floor is about 4e-5 m/s.
+    - Speed: 0.2x all-fine. The regional child's step is host-bound on
+      its per-launch solve-region path at this mesh size.
+  - Refused by name: column physics and radiation (no seam carries a
+    column taller than the dycore's, and hex physics is built only from
+    init_atmosphere files), so the moist bubble with radiation is not run;
+    moist dynamics; feedback of w, rho_zz, the coordinate or u.
+  - Chains run through `run()` but are not measured.
+  - Metal: the hex lane is opt-in (`WOOF_HEX_METAL=1`); the band's oracle
+    and envelope pass there.
 
 **Oracles.**
 - (a) The existing WRF and MPAS suites with a single band, plus kernel hashes.
