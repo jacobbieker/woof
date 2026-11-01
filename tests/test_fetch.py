@@ -24,6 +24,7 @@ import pytest
 
 import woof.cli as cli
 import woof.fetch as fetch
+import woof.fetch_routes as fetch_routes
 from tools import download_gfs_native_subset as gfs_transport
 from tools import download_hrrr_native_subset as hrrr_transport
 
@@ -456,10 +457,22 @@ def test_every_registered_source_resolves_latest_or_says_what_it_lacks():
     resolved, refused = [], []
     for adapter in source_adapters():
         source = adapter.source_id
+        # The window a bare [fetch] opens: the route's first published
+        # lead (the GEFSv12 reforecast publishes no f000).
+        first = fetch_routes.first_published_lead(source)
         try:
             cycle = fetch.resolve_latest_cycle(
-                source, 0, now=now, probe=lambda url: True)
+                source, first, start_hour=first, now=now, probe=lambda url: True)
         except ValueError as refusal:
+            route = fetch_routes.table_route(source)
+            if (route is not None and route.publication_eras
+                    and min(era.valid_from for era in route.publication_eras) > now):
+                # A route that began publishing after this clock (the
+                # 0.1-degree ECMWF open data, 2026-10-20) has no cycle yet;
+                # its refusal is its own publication era's.
+                assert "this cycle predates it" in str(refusal), refusal
+                refused.append(source)
+                continue
             assert cycle_grid_for(source) is None, (
                 f"{source} declares a cycle grid but latest refused it")
             assert "declares when that source initializes" in str(refusal), (
@@ -2771,10 +2784,13 @@ def test_cli_fetch_hrrr_transport_and_wait_contracts(tmp_path, capsys):
     # container sources have one -- but only their whole-object
     # transport walks it.  The grib-filter crop is a CGI service on one
     # host, so there is no rung to name.
+    # A rung with a declared archive layout (s3, ncei-1p0) now selects the
+    # whole-object transport by itself; the live host, which only crops,
+    # is still refused with the remedy.
     refused("--mode full-file",
             ["fetch", "--source", "gfs", "--cycle", "2026-07-28T06",
              "--hours", "6", "--area", "30,-100,40,-90",
-             "--out", str(tmp_path), "--transport", "s3"])
+             "--out", str(tmp_path), "--transport", "nomads"])
     # --wait-for is the as-posted spelling for every source (A136 L2),
     # and --wait-timeout-minutes the as-posted window cap, so what is
     # refused is a wait budget beside --whole-cycle, which waits for nothing.
