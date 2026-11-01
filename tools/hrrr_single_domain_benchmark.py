@@ -3095,8 +3095,12 @@ def _detach_mapped_snapshot(met):
 def _map_boundary_snapshot(
         snapshot, targets, mapping_report, *,
         surface_fallback_radius: int = 8, preprocess_backend="cuda",
-        domain_grid=None):
+        domain_grid=None, upper_source=None):
     """Map only four boundary strips, avoiding a disposable full-domain hour.
+
+    ``upper_source`` (an :class:`woof.upper_source.UpperSourceDonor`) is
+    mapped onto each strip's own exact subgrid and joined above it, so a
+    boundary time's column reaches the same top its start state does.
 
     ``domain_grid`` is the domain the strips were cut from.  Each strip is
     mapped with it as its lattice parent, so the strips of a domain that
@@ -3122,6 +3126,10 @@ def _map_boundary_snapshot(
             # domain's owner with four identical-looking suspects.
             target_name=f"the {side} boundary strip of domain 1",
             lattice_parent=domain_grid)
+        if upper_source is not None:
+            met = upper_source.splice(
+                met, subgrid, backend=preprocess_backend,
+                target_name=f"the {side} boundary strip of domain 1")
         compact[side] = _detach_mapped_snapshot(met)
         side_reports[side] = side_report
         del met
