@@ -323,6 +323,27 @@ DEFAULT_TOLERANT_IDENTITY_FIELDS = frozenset({
     # any other cumulus scheme), so a tree prepared before they existed
     # could not have selected anything but their defaults.
     "run.nsas_dx_factor", "run.sas_pgcon",
+    # The WRF-Solar fields (b14dfd8bb cu_rad_feedback; 61107f3fe the
+    # Deng shallow-cumulus slot, the EPS &stoch switches and MAD-WRF;
+    # 9d6b47c4f use_theta_m), each appended last and off by default, so
+    # their defaults describe exactly the state every older tree was
+    # prepared and run with.  use_theta_m and madwrf_cldinit are read by
+    # preparation (the theta_m initial/boundary state, real.exe's cloud
+    # initialization), so a stated non-default against an older header
+    # must re-prepare -- which default tolerance does (the safe side);
+    # the rest are read only by the forecast.
+    "run.cu_rad_feedback", "run.shcu_physics", "run.use_theta_m",
+    "run.multi_perturb", "run.pert_farms", "run.pert_farms_albedo",
+    "run.pert_farms_aod", "run.pert_farms_angexp", "run.pert_farms_aerasy",
+    "run.pert_farms_qv", "run.pert_farms_qc", "run.pert_farms_qs",
+    "run.pert_deng", "run.pert_deng_qv", "run.pert_deng_qc",
+    "run.pert_deng_t", "run.pert_deng_w",
+    "run.pert_thom", "run.pert_thom_qv", "run.pert_thom_qc",
+    "run.pert_thom_qi", "run.pert_thom_qs", "run.pert_thom_ni",
+    "run.pert_cld3", "run.pert_cld3_qv", "run.pert_cld3_t",
+    "run.spdt", "run.num_pert_3d", "run.nens", "run.stochpert_tbl",
+    "run.madwrf_opt", "run.madwrf_dt_relax", "run.madwrf_dt_nudge",
+    "run.madwrf_cldinit",
     # 2.6.1 added run.p3_backend to RunConfig without adding it here,
     # which refused EVERY tree prepared before it -- 16 of them on the
     # box that found this.  The FOURTH instance of this exact trap in
@@ -1020,6 +1041,12 @@ PREPARATION_INERT_RUN_FIELDS = SFIRE_PREPARATION_INERT_RUN_FIELDS | frozenset({
     # every value.  They stay in the experiment fingerprint and the
     # restart identity when moved.
     "run.swint_opt", "run.aer_opt",
+    # couple_farms (db1e35abd), on the same argument: it copies FARMS's
+    # per-step SWDOWN2 into SWDOWN inside the forecast's radiation driver
+    # (woof/core/farms.py) and is admitted only with swint_opt = 2.
+    # Nothing under woof/ingest names it; the prepared state and boundary
+    # tables are the same under either value.
+    "run.couple_farms",
     # The aer_opt = 2 user-aerosol controls (woof/config.py
     # AER_OPT2_RUN_KEYS), on the same argument: only the legacy RRTMG
     # shortwave's aerosol optics read them, on each radiation call, and
