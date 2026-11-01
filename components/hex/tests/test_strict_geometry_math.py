@@ -27,10 +27,13 @@ def test_reference_words_for_scalar_array_and_batch(monkeypatch, name, bits, exp
         assert np.all(function(*arrays).view(np.uint32) == expected)
     assert not geometry.unmodified_gnu_float32()
     assert rust_hostprep.deformation_engine_digest().startswith("gnu243-geometry:")
-    # The opt-in must not change the existing fast GNU host binding.
+    # The opt-in must not change the existing fast GNU host binding -- which
+    # exists only on a glibc host (native_geometry_math binds _LIBM there and
+    # nowhere else; macOS has no GNU binding to preserve).
     monkeypatch.setattr(numerics, "is_strict", lambda: False)
-    native = getattr(geometry._LIBM, {"asin": "asinf", "atan2": "atan2f"}[name])
-    assert function(*args).tobytes() == np.float32(native(*[float(a) for a in args])).tobytes()
+    if geometry._LIBM is not None:
+        native = getattr(geometry._LIBM, {"asin": "asinf", "atan2": "atan2f"}[name])
+        assert function(*args).tobytes() == np.float32(native(*[float(a) for a in args])).tobytes()
     assert geometry.strict_binding() is None
 
 

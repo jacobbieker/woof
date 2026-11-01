@@ -13,6 +13,12 @@ from woof.hex.mpasphys import thompson_v842 as thompson
 
 
 def _compile_arithmetic(support, mode):
+    from woof import backend
+    if backend.active() != "cuda":
+        # The mlx environment's cupy_backends is woof's Metal facade: its
+        # "PTX" is not NVIDIA's, so the fma/rounding words this reads do
+        # not exist there.
+        pytest.skip(f"reads NVRTC's PTX; this process runs WOOF_BACKEND={backend.active()}")
     nvrtc = pytest.importorskip("cupy_backends.cuda.libs.nvrtc")
     # Only the scalar helpers are needed to reproduce this compiler defect.
     support = support[:support.index("// MPAS physics_mmm/mp_radar.F90")]
