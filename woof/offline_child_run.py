@@ -659,6 +659,20 @@ class _ChildProgress:
         stops it itself (:func:`woof.go_cli._render_stage`).
         """
 
+        self.end_columns(halt=halt)
+        live = self._live_products
+        if live is None:
+            return None
+        return live.halt() if halt else live.stop()
+
+    def end_columns(self, *, halt: bool) -> None:
+        """End the column store and say what it wrote (once; later calls do nothing).
+
+        ``halt`` drops what is still queued, for a stop.  A stop calls
+        this before its ``failed`` event, so the store's own summary is
+        not written after the stream's last word.
+        """
+
         columns, self._columns = self._columns, None
         if columns is not None:
             try:
@@ -667,10 +681,6 @@ class _ChildProgress:
                           failed=len(s["failed"]), out=s["out"])
             except Exception as error:  # noqa: BLE001 - a store never fails the child
                 self.warn("columns_not_written", str(error))
-        live = self._live_products
-        if live is None:
-            return None
-        return live.halt() if halt else live.stop()
 
     def _column_frame(self, fields) -> None:
         """The child's any-point column store (rw-store v2), written beside its frames for every output hour."""
@@ -2640,6 +2650,10 @@ def _record_stop(progress: "_ChildProgress", error: BaseException, *,
         ended = progress.halt_renders()
     except Exception:  # noqa: BLE001 - the stop is still written down
         ended = False
+    # The column store is ended here too, not in close() after the stop
+    # event: its summary written there was the stream's last line, so a
+    # reader keyed on the last event saw ``columns_written``, not the stop.
+    progress.end_columns(halt=True)
     command = (None if progress.render_plan is None
                else _render_command_text(progress.render_plan))
     try:
