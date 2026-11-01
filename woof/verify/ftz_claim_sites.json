@@ -17707,7 +17707,7 @@
     },
     {
       "file": "tests/test_noahmp_frame_provenance.py",
-      "line": 178,
+      "line": 183,
       "kind": "prose",
       "anchor": "# --ftz=false kept past CuPy's trailing override), not through",
       "anchor_sha256": "4f7f4e8c7b62193d62422148f03a3385991cf08f4a10c423e3ac833640415df5",
@@ -17718,7 +17718,7 @@
     },
     {
       "file": "tests/test_noahmp_frame_provenance.py",
-      "line": 180,
+      "line": 185,
       "kind": "prose",
       "anchor": "# options without --ftz=false, take the strict options under",
       "anchor_sha256": "36fbb8b68fb3faef182a7bcc352a2a99b59fb1eca1b1aec20de1db1345ce38c2",
@@ -17729,7 +17729,7 @@
     },
     {
       "file": "tests/test_noahmp_frame_provenance.py",
-      "line": 188,
+      "line": 193,
       "kind": "prose",
       "anchor": "if \"--ftz=false\" not in options:",
       "anchor_sha256": "c22dbb798afb97e4600ac6971174c73a1e6ff2e34ba58ffb97b82c5d15fdc14c",
@@ -17740,7 +17740,7 @@
     },
     {
       "file": "tests/test_noahmp_frame_provenance.py",
-      "line": 189,
+      "line": 194,
       "kind": "prose",
       "anchor": "raise ValueError(\"land kernels require --ftz=false\")",
       "anchor_sha256": "ef9d4a6b0fd2239539f925bf59873887da1e389df4144f0908ff9a38f26797e5",
@@ -17751,7 +17751,7 @@
     },
     {
       "file": "tests/test_noahmp_frame_provenance.py",
-      "line": 326,
+      "line": 331,
       "kind": "prose",
       "anchor": "assert unit.options == (\"-std=c++14\", \"--ftz=false\")",
       "anchor_sha256": "e0de9c6d716d412da3880b13042f261f4c1a3c43704b41eef2ce683cdb67ca63",
@@ -18895,7 +18895,7 @@
     },
     {
       "file": "tests/test_nvrtc_ptx_cache.py",
-      "line": 44,
+      "line": 48,
       "kind": "prose",
       "anchor": "return cache.compile_using_nvrtc(\"unit\", (\"-std=c++17\", \"--ftz=false\"),",
       "anchor_sha256": "327b1c26c5d89ba6bdfac3882dd38be1a273fa4272bba85c3fd29987b9997dcc",
@@ -18906,7 +18906,7 @@
     },
     {
       "file": "tests/test_nvrtc_ptx_cache.py",
-      "line": 53,
+      "line": 57,
       "kind": "prose",
       "anchor": "assert compiler.calls == [(\"unit\", (\"-std=c++17\", \"--ftz=false\"),",
       "anchor_sha256": "b03761fa21fd61e17ca742537d81555399c84723717751c1137bc974209c00ac",
@@ -18917,7 +18917,7 @@
     },
     {
       "file": "tests/test_nvrtc_ptx_cache.py",
-      "line": 75,
+      "line": 79,
       "kind": "prose",
       "anchor": "assert compiler.calls[0][1] == (\"-std=c++17\", \"--ftz=false\")",
       "anchor_sha256": "789103dd6f521d200fd0f0f73f38bd8c3d5282dbb22a0762c99a83ebfba57b9e",
@@ -18928,7 +18928,7 @@
     },
     {
       "file": "tests/test_nvrtc_ptx_cache.py",
-      "line": 77,
+      "line": 81,
       "kind": "prose",
       "anchor": "(\"-std=c++17\", \"--ftz=false\"))",
       "anchor_sha256": "896c5fb9b0b731e36c84ebe192519082dbcfaf165504c49cfb9e265b2a4528f2",
@@ -18939,7 +18939,7 @@
     },
     {
       "file": "tests/test_nvrtc_ptx_cache.py",
-      "line": 88,
+      "line": 92,
       "kind": "prose",
       "anchor": "options = (\"-std=c++17\", \"--ftz=false\", \"--fmad=false\")",
       "anchor_sha256": "7d273a618d021a2118763fba5ac67275031418e2299cf88128b9b1702e7547fb",
@@ -18950,7 +18950,7 @@
     },
     {
       "file": "tests/test_nvrtc_ptx_cache.py",
-      "line": 165,
+      "line": 169,
       "kind": "prose",
       "anchor": "source, options, arch, filename = \"unit\", (\"-std=c++17\", \"--ftz=false\"), None, \"unit.cu\"",
       "anchor_sha256": "b8b141bd8ec914a44a8d1ff6266cf69b4d1e01ec683b5d48bc77bca49584f961",
@@ -18961,7 +18961,7 @@
     },
     {
       "file": "tests/test_nvrtc_ptx_cache.py",
-      "line": 169,
+      "line": 173,
       "kind": "prose",
       "anchor": "options = (\"-std=c++17\", \"--ftz=true\")",
       "anchor_sha256": "72b2b9619e4890a89f9022040032f06cde73eb6621a7cb97f143f5a4d2695770",
@@ -18972,7 +18972,7 @@
     },
     {
       "file": "tests/test_nvrtc_ptx_cache.py",
-      "line": 290,
+      "line": 294,
       "kind": "prose",
       "anchor": "first = cache._cache_identity(cupy, compiler, \"unit\", (\"--ftz=false\",), None, \"unit.cu\")",
       "anchor_sha256": "9efda892136a87e02fb623c2a6ee3aa93ca37d4909272e8fd4f4d4cc7a01fd32",
@@ -18983,7 +18983,7 @@
     },
     {
       "file": "tests/test_nvrtc_ptx_cache.py",
-      "line": 292,
+      "line": 296,
       "kind": "prose",
       "anchor": "second = cache._cache_identity(cupy, compiler, \"unit\", (\"--ftz=false\",), None, \"unit.cu\")",
       "anchor_sha256": "e68ea0fb7938eb7ccc0e36c11eecb3503c7ff0cf621b32f2b75d3059c1e3a456",
@@ -18994,7 +18994,7 @@
     },
     {
       "file": "tests/test_nvrtc_ptx_cache.py",
-      "line": 294,
+      "line": 298,
       "kind": "prose",
       "anchor": "assert first[\"options\"] == [\"--ftz=false\"]",
       "anchor_sha256": "a9e880b4177bf44a09e1e2a3cd69ab6210d996801e02d3f104f77146ea032959",
@@ -19005,7 +19005,7 @@
     },
     {
       "file": "tests/test_nvrtc_ptx_cache.py",
-      "line": 326,
+      "line": 330,
       "kind": "prose",
       "anchor": "def test_native_image_cache_retains_subnormal_words_and_recovers_corruption(",
       "anchor_sha256": "48351a6d504125b867dc7986fee439b6519ee18f1c28163a1ac5d9822e0b364e",
@@ -19016,7 +19016,7 @@
     },
     {
       "file": "tests/test_nvrtc_ptx_cache.py",
-      "line": 345,
+      "line": 349,
       "kind": "prose",
       "anchor": "source, (\"-std=c++17\", \"--ftz=false\"), None, \"product.cu\")",
       "anchor_sha256": "4d0d73ae50ce5c4665522cb2b7c921f7e2c2655bfd5f7dce9b5f0f06f6b5f8ed",
@@ -46923,7 +46923,7 @@
     },
     {
       "file": "woof/core/microphysics.py",
-      "line": 444,
+      "line": 414,
       "kind": "prose",
       "anchor": "// flushing compiler cannot hide a subnormal negative).",
       "anchor_sha256": "b9280ce1e9983f9bf71d80418b2d683ce9c41b21c8fa62c254a85e597dcd12cf",
@@ -46934,7 +46934,7 @@
     },
     {
       "file": "woof/core/microphysics.py",
-      "line": 477,
+      "line": 447,
       "kind": "prose",
       "anchor": "# compiler flushes subnormals cannot change a word: a subnormal mean",
       "anchor_sha256": "ad6ac7d15ea1bc25bc509eaf4e70f7e82cc70c18eb072797dbac1ff6e0081f58",
@@ -46945,7 +46945,7 @@
     },
     {
       "file": "woof/core/microphysics.py",
-      "line": 479,
+      "line": 449,
       "kind": "prose",
       "anchor": "# lift the mean above 1.E-7 a subnormal addend is far below its ULP.",
       "anchor_sha256": "428448b1c9f3bf1c99f60caf49a9c1b4813a1d8c69569a49b17ba61942d74589",
@@ -47979,7 +47979,7 @@
     },
     {
       "file": "woof/core/rrtmg_sw.py",
-      "line": 4344,
+      "line": 4355,
       "kind": "prose",
       "anchor": "F(a - b) scalar loop performs, including subnormal handling (x86",
       "anchor_sha256": "f9b5fd41ee0a723239275afc0143cbacae4b528351306b8b88cb26a7a7f20c36",
@@ -49167,7 +49167,7 @@
     },
     {
       "file": "woof/mpas_mesh.py",
-      "line": 173,
+      "line": 174,
       "kind": "prose",
       "anchor": "\"--oned-underflow preserve|reproduce-ifx-ftz \"",
       "anchor_sha256": "66ea1397c96976996b64d29b45f12bc330a78128f5248042bd0ae76d66d7d01e",

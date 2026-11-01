@@ -2551,7 +2551,7 @@
     },
     {
       "file": "tests/test_nvrtc_ptx_cache.py",
-      "line": 44,
+      "line": 48,
       "column": 11,
       "surface": "tests",
       "constructor": "cache.compile_using_nvrtc",
@@ -2573,7 +2573,7 @@
     },
     {
       "file": "tests/test_nvrtc_ptx_cache.py",
-      "line": 89,
+      "line": 93,
       "column": 4,
       "surface": "tests",
       "constructor": "cache.compile_using_nvrtc",
@@ -2589,7 +2589,7 @@
     },
     {
       "file": "tests/test_nvrtc_ptx_cache.py",
-      "line": 115,
+      "line": 119,
       "column": 8,
       "surface": "tests",
       "constructor": "cache.compile_using_nvrtc",
@@ -2605,7 +2605,7 @@
     },
     {
       "file": "tests/test_nvrtc_ptx_cache.py",
-      "line": 176,
+      "line": 180,
       "column": 4,
       "surface": "tests",
       "constructor": "cache.compile_using_nvrtc",
@@ -2621,7 +2621,7 @@
     },
     {
       "file": "tests/test_nvrtc_ptx_cache.py",
-      "line": 231,
+      "line": 235,
       "column": 4,
       "surface": "tests",
       "constructor": "cache.compile_using_nvrtc",
@@ -2637,7 +2637,7 @@
     },
     {
       "file": "tests/test_nvrtc_ptx_cache.py",
-      "line": 232,
+      "line": 236,
       "column": 4,
       "surface": "tests",
       "constructor": "cache.compile_using_nvrtc",
@@ -2653,7 +2653,7 @@
     },
     {
       "file": "tests/test_nvrtc_ptx_cache.py",
-      "line": 248,
+      "line": 252,
       "column": 4,
       "surface": "tests",
       "constructor": "cache.compile_using_nvrtc",
@@ -2669,7 +2669,7 @@
     },
     {
       "file": "tests/test_nvrtc_ptx_cache.py",
-      "line": 249,
+      "line": 253,
       "column": 4,
       "surface": "tests",
       "constructor": "cache.compile_using_nvrtc",
@@ -2685,7 +2685,7 @@
     },
     {
       "file": "tests/test_nvrtc_ptx_cache.py",
-      "line": 344,
+      "line": 348,
       "column": 25,
       "surface": "tests",
       "constructor": "cache.compile_using_nvrtc",
@@ -5863,7 +5863,7 @@
     },
     {
       "file": "woof/core/microphysics.py",
-      "line": 482,
+      "line": 452,
       "column": 17,
       "surface": "package",
       "constructor": "cp.RawModule",
@@ -5879,7 +5879,7 @@
     },
     {
       "file": "woof/core/microphysics.py",
-      "line": 1701,
+      "line": 1601,
       "column": 21,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
@@ -5895,7 +5895,7 @@
     },
     {
       "file": "woof/core/microphysics.py",
-      "line": 1705,
+      "line": 1605,
       "column": 21,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
