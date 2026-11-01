@@ -319,6 +319,13 @@ WOOF_F32S_CXX1(cosh) WOOF_F32S_CXX1(tanh)
 static inline f32s pow(f32s a, f32s b) { return powf(a, b); }
 static inline f32s atan2(f32s a, f32s b) { return atan2f(a, b); }
 static inline f32s fmod(f32s a, f32s b) { return fmodf(a, b); }
+// hypotf / remainderf (prelude.h's float versions; remainder is exact).
+static inline f32s hypotf(f32s a, f32s b) { return f32s(hypotf(a.v, b.v)); }
+static inline f32s hypotf(f32s a, float b) { return hypotf(a, f32s(b)); }
+static inline f32s hypotf(float a, f32s b) { return hypotf(f32s(a), b); }
+static inline f32s remainderf(f32s a, f32s b) { return f32s(remainderf(a.v, b.v)); }
+static inline f32s remainderf(f32s a, float b) { return remainderf(a, f32s(b)); }
+static inline f32s remainderf(float a, f32s b) { return remainderf(f32s(a), b); }
 static inline long lroundf(f32s a) { return (long)roundf(a).v; }
 static inline long lrintf(f32s a) { return (long)rintf(a).v; }
 static inline long llroundf(f32s a) { return (long)roundf(a).v; }
