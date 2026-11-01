@@ -2004,12 +2004,8 @@ def execute_experiment(
     if seam_experiment is None and context is not None:
         seam_experiment = context.get("experiment")
     spectral_seam = attach_seam(model, seam_experiment, steppers)
-    nudging = getattr(seam_experiment, "nudging", None)
-    if nudging is not None:
-        for node in model.walk_parent_first():
-            if (nudging.for_domain(node.cfg.grid_id) is not None
-                    and getattr(node.state, "_spectral_nudging_owner", None) is None):
-                raise ValueError("NUDGING_ANALYSES_UNBOUND: this domain has no prepared analysis forcing; use the prepared forecast route")
+    from woof.spectral_nudging import nudging_owner, require_bound_nudging
+    require_bound_nudging(model, seam_experiment)
     feedback_scratch = {
         node.cfg.grid_id: FeedbackScratch()
         for node in model.walk_parent_first() if node.parent is not None}
@@ -2554,9 +2550,9 @@ def execute_experiment(
                 validators[grid_id].require_healthy(
                     phase=f"pre-history.d{grid_id:02d}")
             node = model.node(grid_id)
-            nudging_owner = getattr(node.state, '_spectral_nudging_owner', None)
-            if nudging_owner is not None:
-                nudging_owner.check_at_seam()
+            nudger = nudging_owner(node.state)
+            if nudger is not None:
+                nudger.check_at_seam()
             from woof.wrf_exact import ENABLED as wrf_exact
             if wrf_exact and node.parent is not None:
                 # WRF writes a nest's frame at an instant it shares with its
