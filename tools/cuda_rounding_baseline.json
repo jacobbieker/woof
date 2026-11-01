@@ -3335,7 +3335,7 @@
    },
    {
     "file": "woof/core/microphysics.py",
-    "sha256": "5f70e5e07fde4f2bea098d859b1139032b33930dfd991581633788da8bf80eb3"
+    "sha256": "f92bca73ce7072a1ff5e6a3ffb37aa36d535c1c8ccb18743a4b29bb61d51f849"
    },
    {
     "file": "woof/core/microphysics_transition.py",
@@ -3451,7 +3451,7 @@
    },
    {
     "file": "woof/core/rrtmg_sw.py",
-    "sha256": "01b72340e2dd03fd97a4922d0563a105f898b50dfe28ef9771d7df14b3a9ef6f"
+    "sha256": "a7dcf98a0a0aab8a9c94ecfa148fc17ad67c35bcbbe86edbb2288202794ecf2b"
    },
    {
     "file": "woof/core/ruc_gpu.py",
@@ -3571,7 +3571,7 @@
    },
    {
     "file": "woof/doctor.py",
-    "sha256": "9ead2155a1c4c0ef2a508c692de74e21aadd6726af78978a26640949faf28b59"
+    "sha256": "4a3b2f3efef627852b4e1fd1d07a044210ddb86e09d995c673b7309dc17ba5c2"
    },
    {
     "file": "woof/eclipse_windows.py",
