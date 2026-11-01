@@ -12,7 +12,7 @@ from woof.hex.cli import build_parser
 
 def test_route_preserves_explicit_thread_budget(monkeypatch):
     from woof.hex import s2s_door
-    monkeypatch.setattr(s2s_door.os, "sched_getaffinity", lambda _: set(range(256)))
+    monkeypatch.setattr(s2s_door.os, "sched_getaffinity", lambda _: set(range(256)), raising=False)
     monkeypatch.setenv("RAYON_NUM_THREADS", "24")
     assert s2s_door.cores() == 24
     monkeypatch.setenv("RAYON_NUM_THREADS", "512")

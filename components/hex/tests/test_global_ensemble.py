@@ -245,7 +245,7 @@ def test_device_selection_refuses_allocation_escape_or_duplicates(mask, requeste
 def test_init_jobs_auto_is_bounded_by_cores_and_host_ram(monkeypatch):
     """--init-jobs auto (unified image, 2026-10-16: a fixed 4 left members waiting on a 24-core box)."""
     value = {"mesh": {"cells": 40_962}}
-    monkeypatch.setattr(global_ensemble.os, "sched_getaffinity", lambda pid: set(range(24)))
+    monkeypatch.setattr(global_ensemble.os, "sched_getaffinity", lambda pid: set(range(24)), raising=False)
     monkeypatch.setattr(global_ensemble, "_available_host_bytes", lambda: 100 * 1024**3)
     assert global_ensemble.init_jobs("auto", value, 6) == 6
     assert global_ensemble.init_jobs("auto", value, 30) == 6
