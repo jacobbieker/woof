@@ -17,6 +17,10 @@
   definition, so every GF unit under GPUWM_WRF_EXACT=1 failed to compile.
   ``frexpf`` works on the bits, so a subnormal operand is normalised as
   CUDA does, not flushed.
+* An ``ElementwiseKernel`` output is read-write, as in CuPy.  On a
+  non-contiguous view (a ring or interior slice of a 3-D field) the facade
+  ran the operation on an empty dense stand-in, so ``if (x < t) x = 0``
+  read zeros and wrote zeros everywhere (microphysics_zero_out).
 """
 
 import importlib.util
@@ -181,3 +185,16 @@ def test_frexpf_and_scalbnf_are_exact_on_normals_and_subnormals(cp, options):
     assert cp.asnumpy(expo)[finite].tolist() == want_e[finite].tolist()
     if options:  # ftz=false keeps the subnormal results scalbnf rebuilds
         assert cp.asnumpy(back).tobytes() == values.tobytes()
+
+
+def test_elementwise_output_on_a_strided_view_is_read_write(cp):
+    zero_below = cp.ElementwiseKernel("float32 t", "float32 x",
+                                      "if (x < t) x = 0.0f;", "zero_below_view")
+    host = np.arange(-30, 30, dtype=np.float32).reshape(3, 4, 5) / 7
+    field = cp.asarray(host)
+    zero_below(np.float32(0.5), field[:, 1:3, 1:4])   # interior: not contiguous
+    zero_below(np.float32(0.5), field[:, 0, :])        # one ring row
+    want = host.copy()
+    for view in (want[:, 1:3, 1:4], want[:, 0, :]):
+        view[view < np.float32(0.5)] = 0
+    assert cp.asnumpy(field).tobytes() == want.tobytes()
