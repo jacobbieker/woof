@@ -335,7 +335,11 @@ def test_the_manifest_records_the_engine_mode_and_bars(tmp_path,
         out=tmp_path / "hrrr", transport="s3", progress=lambda _: None)
     payload = json.loads(manifest.read_text(encoding="utf-8"))
     assert payload["engine"] == "python"
-    assert payload["mode"] == "auto"
+    # The request was auto; "mode" is the byte mode the claimed files ARE
+    # in (each file says its own), which the Python transport lands as
+    # .idx record subsets.
+    assert payload["requested_mode"] == "auto"
+    assert payload["mode"] == "idx-subset"
     assert {bar["kind"] for bar in payload["record_bars"]} == {
         "hrrr-atmosphere", "hrrr-soil"}
     assert all(bar["inventory_change_accepted"] is False
