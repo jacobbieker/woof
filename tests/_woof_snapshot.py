@@ -93,6 +93,18 @@ def left_out(rel: str) -> bool:
     return not (ROOT / rel).exists() and rule_for(rel, rules()) is not None
 
 
+def left_out_reason(rel: str, verb: str = "runs") -> str | None:
+    """The named skip for a case that hands ``rel`` to a child process, or ``None``.
+
+    A child that cannot open a left-out script fails in its own process, which
+    :func:`skip_reason` never sees, so such a case asks before it starts.
+    """
+    if not left_out(rel):
+        return None
+    return (f"{verb} {rel}, which the Recast WOOF tree leaves out "
+            f"({RULES_FILE.name}: {rule_for(rel, rules())}); this case runs in the engine's tree")
+
+
 #: Native artifacts the engine declares whose workspace a tree may leave out:
 #: artifact -> its workspace.  The engine's tests name them among the
 #: artifacts every release carries.

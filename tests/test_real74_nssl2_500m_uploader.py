@@ -30,6 +30,12 @@ def _calendar() -> dict[str, list[datetime]]:
 
 @pytest.mark.skipif(os.name == "nt", reason="production uploader requires Linux")
 def test_uploader_parallelizes_only_stable_files_and_verifies_remote_sha(tmp_path):
+    from _woof_snapshot import left_out_reason
+
+    # bash runs the uploader in its own process, where a left-out script is a
+    # "No such file" the named rule in conftest.py never sees.
+    if (reason := left_out_reason("tools/upload_real74_nssl2_wrfout_r2.sh")) is not None:
+        pytest.skip(reason)
     if shutil.which("bash") is None or shutil.which("flock") is None:
         pytest.skip("bash and flock are required")
 

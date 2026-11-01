@@ -247,7 +247,12 @@ def test_every_opted_in_config_actually_opted_in(expert_budget):
     """
     for name in OPT_IN_CONFIGS:
         path = CONFIG_DIR / name
-        assert path.exists(), f"{name} is in OPT_IN_CONFIGS but does not exist"
+        # A config the Recast WOOF tree leaves out by a named rule raises
+        # FileNotFoundError on the read below, which skips naming the rule;
+        # any other absence is a stale entry.
+        from _woof_snapshot import left_out
+        assert path.exists() or left_out(f"configs/{name}"), (
+            f"{name} is in OPT_IN_CONFIGS but does not exist")
         text = path.read_text(encoding="utf-8")
         positive = [(value, comment)
                     for value, comment in _declared_bldts(text) if value > 0.0]
