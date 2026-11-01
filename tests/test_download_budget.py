@@ -203,10 +203,15 @@ def test_the_projection_counts_what_the_ef4_run_wrote_before_its_first_step():
 
 def test_every_route_and_transport_a_fetch_defaults_to_is_priced():
     """A source whose download is left out of every projection is the defect; adding one is a table row."""
+    from route_cycle_fit import first_window
+
     for source in fetch_routes.route_ids():
         route = fetch_routes.route_for(source)
-        request = {"source": source, "cycle": None, "hours": route.default_cadence,
-                   "cadence": route.default_cadence}
+        # The route's own first window: an analysis-only donor publishes one
+        # frame, so a six-hour window of it is a request its fetch refuses.
+        start, hours = first_window(route, route.default_cadence)
+        request = {"source": source, "cycle": None, "hours": hours,
+                   "cadence": route.default_cadence, "forecast_start_hour": start}
         estimate = download_budget.download_estimate(request)
         assert estimate["bytes"] is not None, (source, estimate["basis"])
     for source, legacy in download_budget.table()["legacy_sources"].items():
