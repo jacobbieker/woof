@@ -23,8 +23,8 @@ are bound to PyPI trusted publishing.
 | `cpu (ubuntu-24.04, N)` | ubuntu-24.04 | `cpu` | Legs `0`–`7`: `tests/test_*.py` split into 8 legs by a hash of each path. `hex`: `components/hex/tools/battery/cpu_files.txt`, run from `components/hex`. `stage1`: `tools/battery/run_stage1.py`, the maintained Stage 1 list. Every leg uses `-m "not gpu and not bigcard and not assets"` and `pytest-xdist -n auto --dist loadfile` | The CPU tier passes on Linux, with the bridges present |
 | `native (macos-15)` | macos-15 (arm64) | `mlx` | The same Rust build on macOS | The bridges build on macOS |
 | `macos (macos-15, mlx env, N)` | macos-15 | `mlx` | The same legs as `cpu` | The CPU tier passes on macOS in the environment Mac users run (`WOOF_BACKEND=mlx` is set by the env) |
-| `metal probe + device-free translator checks` | macos-15 | `mlx` | Checks `mx.metal.is_available()`. Without a device it still runs `tools/metal_translation_census.py --translate-only --gate` (both rounding modes) and `tools/f64_soft_grade.py host` | Every CUDA kernel unit translates to MSL, and the soft-binary64 header is word-exact on the host. Whether Metal exists is reported |
-| `metal gates (GPUWM_WRF_EXACT=0/1)` | macos-15 | `mlx` | Runs only if the probe found a device: the Kessler, WSM6 and YSU WRF 4.6.1 parity files, `test_metal_launch_ordering`, `test_metal_memory_order`, `test_metal_mapped_host_memory`, and `tools/f64_soft_grade.py gpu` | The Metal backend reproduces the WRF oracles word for word |
+| `metal probe + device-free translator checks` | macos-15 | `mlx` | Checks for an Apple-silicon GPU (`mx.metal.device_info()` architecture `applegpu_*`). Without one it still runs `tools/metal_translation_census.py --translate-only --gate` (both rounding modes) and `tools/f64_soft_grade.py host` | Every CUDA kernel unit translates to MSL, and the soft-binary64 header is word-exact on the host. Whether Metal exists is reported |
+| `metal gates (GPUWM_WRF_EXACT=0/1)` | macos-15 | `mlx` | Runs only if the probe found an Apple-silicon GPU: the Kessler, WSM6 and YSU WRF 4.6.1 parity files, `test_metal_launch_ordering`, `test_metal_memory_order`, `test_metal_mapped_host_memory`, and `tools/f64_soft_grade.py gpu` | The Metal backend reproduces the WRF oracles word for word |
 | `cuda (self-hosted, GPUWM_WRF_EXACT=0/1)` | `[self-hosted, linux, cuda]` | `default` | Opt-in. The three WRF 4.6.1 parity files in both modes. With `EXACT=0`, also the pytest members of `components/hex/tools/battery/gpu_gates.txt` (`-m "not assets"`; their `bigcard` members fit a 48 GB card) | The CUDA backend passes the parity gates and the hex GPU gates |
 
 Each test leg uploads its junit XML (`junit-*` artifacts) and writes its
@@ -33,8 +33,12 @@ where every test skipped does not read as green.
 
 ### When Metal is missing
 
-GitHub's macOS runners are virtual machines and may have no Metal device. If
-the probe finds none, three things happen. The `metal gates` jobs are
+GitHub's macOS runners are virtual machines. Their Metal device, when there is
+one, is an `Apple Paravirtual device` (architecture `air64_*`), not an
+Apple-silicon GPU, and it does not compute the gates' words: on 2026-10-31 it
+returned NaN for every YSU tendency an M3 Max matches WRF on. So the probe
+counts only an `applegpu_*` architecture as a device. Without one, three
+things happen. The `metal gates` jobs are
 **skipped**: they show grey, never green. The probe job prints a
 `Metal gates NOT RUN` warning annotation and a summary line. Only the
 translator checks run, because they need no device. A skipped Metal gate is

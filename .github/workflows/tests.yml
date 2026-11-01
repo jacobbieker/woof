@@ -277,14 +277,24 @@ jobs:
       - id: probe
         name: is there a Metal device?
         run: |
-          metal=$(pixi run -e mlx --locked python -c 'import mlx.core as mx; print("true" if mx.metal.is_available() else "false")')
+          # The gates hold Metal to compiled WRF word for word, which is a
+          # claim about Apple-silicon GPUs.  GitHub's macOS VMs expose an
+          # "Apple Paravirtual device" (architecture air64_*) that computes
+          # NaN where an M-series GPU computes WRF's words (YSU, 2026-10-31),
+          # so only a real Apple GPU (architecture applegpu_*) runs them.
+          info=$(pixi run -e mlx --locked python -c 'import mlx.core as mx; print(mx.metal.device_info() if mx.metal.is_available() else "")')
+          echo "device: ${info:-none}"
+          case "$info" in
+            *"'architecture': 'applegpu"*) metal=true ;;
+            *) metal=false ;;
+          esac
           echo "metal=$metal" >> "$GITHUB_OUTPUT"
           if [ "$metal" = true ]; then
-            pixi run -e mlx --locked python -c 'import mlx.core as mx; print(mx.metal.device_info())' || true
-            echo "Metal device present: the metal-gates job runs." >> "$GITHUB_STEP_SUMMARY"
+            echo "Apple GPU present: the metal-gates job runs." >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "::warning title=Metal gates NOT RUN::mx.metal.is_available() is False on this runner. The Metal parity gates (kessler, wsm6, ysu in GPUWM_WRF_EXACT=0 and 1, launch ordering, memory order, mapped host memory, f64_soft_grade gpu) did NOT run; the metal-gates job is skipped, not passed. Only the device-free translator checks below ran."
-            echo "**Metal gates NOT RUN**: this runner has no Metal device (mx.metal.is_available() is False). The metal-gates job is skipped, not passed." >> "$GITHUB_STEP_SUMMARY"
+            reason="this runner has no Apple-silicon GPU (device: ${info:-none})"
+            echo "::warning title=Metal gates NOT RUN::${reason}. The Metal parity gates (kessler, wsm6, ysu in GPUWM_WRF_EXACT=0 and 1, launch ordering, memory order, mapped host memory, f64_soft_grade gpu) did NOT run; the metal-gates job is skipped, not passed. Only the device-free translator checks below ran."
+            echo "**Metal gates NOT RUN**: ${reason}. The metal-gates job is skipped, not passed." >> "$GITHUB_STEP_SUMMARY"
           fi
       - name: every kernel unit translates to MSL (no device; tools/metal_translation_census.py --translate-only)
         run: |
