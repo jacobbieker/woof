@@ -125,7 +125,11 @@ print(json.dumps({"schema": "gpuwm-rw-fetch-record-v1",
                         functools.partial(_run_through_python,
                                           rustwx_fetch._run))
     assert run(streams=3)["streams"] == "3"
-    assert run()["streams"] is None
+    # With no share named the bridge still gets a width: _run leases the
+    # default request (16) from the box-wide connection cap and hands the
+    # backbone exactly the grant, so it never opens sockets it was not given.
+    unnamed = run()["streams"]
+    assert unnamed is not None and 1 <= int(unnamed) <= 16
     for bad in (0, -2, True):
         with pytest.raises(ValueError):
             run(streams=bad)
@@ -142,9 +146,9 @@ def _run_through_python(real, command, **kwargs):
     (1, 74, None, lambda budget: budget),
     (6, 1, None, lambda budget: budget),
     (64, 74, None, lambda budget: 1),
-    (6, 74, "nomads.ncep.noaa.gov",
-     lambda budget: budget // min(
-         6, fetch_pool.host_worker_cap("nomads.ncep.noaa.gov", 6))),
+    # NOMADS is read one stream per file whatever the budget
+    # (fetch_pool.chunk_streams_per_file): it paces multi-stream clients.
+    (6, 74, "nomads.ncep.noaa.gov", lambda budget: 1),
 ])
 def test_the_stream_budget_is_split_over_the_files_in_flight(
         workers, files, host, share):
