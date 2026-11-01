@@ -178,5 +178,11 @@ def test_every_caller_in_the_engine_and_its_tools_passes_the_render_choice():
                 name = path.relative_to(ROOT).as_posix()
                 callers.add(name)
                 missing.extend(f"{name}:{line}" for line in _calls_without_render(path))
-    assert {"woof/runplan.py", "tools/wiki_seed/design_recipes.py"} <= callers
+    from _woof_snapshot import left_out
+    # The recipe designer (tools/wiki_seed) is left out of the Recast WOOF
+    # export by its named rule; where it ships, it must be a caller.
+    expected = {name for name in ("woof/runplan.py",
+                                  "tools/wiki_seed/design_recipes.py")
+                if not left_out(name)}
+    assert "woof/runplan.py" in expected and expected <= callers
     assert missing == []

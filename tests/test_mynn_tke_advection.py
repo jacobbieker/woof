@@ -56,6 +56,14 @@ def test_dry_scalar_prices_the_existing_pd_and_mass_flux_slots():
 @pytest.mark.parametrize("prefix", ("qke_adv", "QKE_ADV"))
 def test_native_lateral_tables_transport_supplied_qke(tmp_path, prefix):
     import netCDF4
+    from _woof_snapshot import RULES_FILE, left_out, rule_for, rules
+    helper = "tests/test_n5s_toolchain.py"
+    if left_out(helper):
+        # The fixture builders live in the campaign harness's test, which
+        # the Recast WOOF tree leaves out by a named rule.
+        pytest.skip(f"reads {helper}, which the Recast WOOF tree leaves out "
+                    f"({RULES_FILE.name}: {rule_for(helper, rules())}); "
+                    "this case runs in the engine's tree")
     from test_n5s_toolchain import _real_shaped_d01_wrfinput, _small_wrfbdy
     from woof.ingest.wrfinput import read_wrfinput, read_wrfbdy
     from dataclasses import replace as change

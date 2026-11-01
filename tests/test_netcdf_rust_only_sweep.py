@@ -117,6 +117,23 @@ _PLUMBING_OR_BLOCKED = {
     "woof/verify/obs/cross_reader.py": "char",
     "woof/verify/metem_differential.py": "independent-oracle",
     "woof/wrf_backend_parity.py": "bytes",
+    # Declared when the hosted CPU lanes first ran this sweep on the Recast
+    # WOOF tree, each read for what its import is used for.
+    # Earth2 member admission compares two global attributes per frame.
+    "woof/earth2_members.py": "plumbing",
+    # Typed global and per-variable attributes, the reason
+    # woof/io/wrf_boundary_extension.py gives above.
+    "woof/moving_downscale.py": "attrs",
+    # "foreign-env": launched in Earth2Studio's own environment (torch,
+    # earth2studio, xarray), not in woof's; the bridge is not on that
+    # interpreter.
+    "woof/earth2_diagnose_runner.py": "foreign-env",
+    "woof/earth2_diagnostic_runner.py": "foreign-env",
+    # "xarray-api": xarray in and out; the caller hands a Dataset/DataArray
+    # or the module opens a Zarr/Icechunk store.  No NetCDF file is decoded.
+    "woof/energy/icing_turbine.py": "xarray-api",
+    "woof/energy/ramps.py": "xarray-api",
+    "woof/ml_export.py": "xarray-api",
 }
 
 #: Modules whose netCDF4 import IS an announced workaround engine: the
@@ -140,7 +157,42 @@ _WORKAROUND_ENGINE = {
 #: classic writer and sits in :data:`_WORKAROUND_ENGINE`, and
 #: `woof/verify/spectral_io.py` (audit F2) reads its planes through
 #: :mod:`woof.netcdf_bridge` and sits in :data:`_DECODERS`.
-_OPEN_FINDINGS: dict[str, str] = {}
+#:
+#: Not empty in the Recast WOOF tree: the modules below arrived after the
+#: sweep (fork commits and the 1.0.x-1.1.x exports) with a netCDF4 field
+#: read or write that never went through rw_netcdf or the Rust writer.
+#: They are listed as found when the hosted CPU lanes first ran this file,
+#: so the open work is named rather than excused.
+_OPEN_FINDINGS: dict[str, str] = {
+    "woof/core/hub_wind_diag.py": "writes the hub-height wind NetCDF4 product with netCDF4 (e98bbafd5)",
+    "woof/core/windfarm_power_diag.py": "writes the per-turbine power NetCDF4 product with netCDF4 (eb0eb03b1)",
+    "woof/earth2_run.py": "reads Earth2 member frames with netCDF4 (9c5ebdda9)",
+    "woof/energy/contracts.py": "reads woof-energy product files with netCDF4",
+    "woof/energy/extract.py": "writes the extracted forecast with netCDF4 and xarray",
+    "woof/energy/icechunk_store.py": "reads wrfout frames with netCDF4 into the site store",
+    "woof/energy/power_farm.py": "writes and reads the farm power product with netCDF4",
+    "woof/energy/products.py": "writes and reads woof-energy products with netCDF4",
+    "woof/energy/sample.py": "reads wrfout history fields with netCDF4 (ba5aa9ad3)",
+    "woof/energy/sample_hex.py": "reads MPAS history cells with netCDF4",
+    "woof/radtran/reptran.py": "reads the REPTRAN gas-optics tables with netCDF4 (cc980b540)",
+    "woof/regional_crop.py": "reads and writes the cropped global source with netCDF4 (30a4a3f56)",
+    "woof/setup_targets.py": "reads frame fields (XLAT, the target field) with netCDF4",
+    "woof/track/splice.py": "reads and rewrites history frames with netCDF4 (d97400bcc)",
+    "woof/ukv_source.py": "reads and writes UKV fields with netCDF4 (8929f6032)",
+}
+
+#: The hex model folded into the package (woof/hex, from components/hex at
+#: b0c71f0a8) reads and writes MPAS meshes and histories with netCDF4
+#: throughout; the sweep was written for the regional engine before the
+#: fold.  One finding names the whole subtree as unconverted.
+_OPEN_FINDING_PREFIXES: dict[str, str] = {
+    "woof/hex/": "the folded-in hex model's MPAS mesh and history I/O is netCDF4 throughout",
+}
+
+
+def _declared_open(name: str) -> bool:
+    return name in _OPEN_FINDINGS or any(
+        name.startswith(prefix) for prefix in _OPEN_FINDING_PREFIXES)
 
 _BANNED = {"netCDF4", "xarray", "h5py", "h5netcdf"}
 
@@ -198,9 +250,9 @@ def test_every_python_netcdf_importer_is_declared_with_a_reason():
     """A new netCDF4 import has to be argued for, not just added."""
 
     importers = set(_python_netcdf_importers())
-    undeclared = sorted(importers - _DECODERS - set(_PLUMBING_OR_BLOCKED)
-                        - set(_WORKAROUND_ENGINE)
-                        - set(_OPEN_FINDINGS))
+    undeclared = sorted(name for name in importers - _DECODERS
+                        - set(_PLUMBING_OR_BLOCKED) - set(_WORKAROUND_ENGINE)
+                        if not _declared_open(name))
     assert not undeclared, (
         f"{len(undeclared)} module(s) import a Python NetCDF library and are "
         f"in none of the lists; classify each as a decoder (convert it), an "
@@ -211,9 +263,15 @@ def test_every_python_netcdf_importer_is_declared_with_a_reason():
 def test_the_declared_exemptions_have_not_gone_stale():
     """An exemption must not outlive the import it excuses."""
 
+    from _woof_snapshot import left_out
     importers = set(_python_netcdf_importers())
-    stale = sorted((set(_PLUMBING_OR_BLOCKED) | set(_WORKAROUND_ENGINE)
-                    | set(_OPEN_FINDINGS)) - importers)
+    # An exempted module the Recast WOOF tree leaves out by a named rule
+    # (tests/_woof_left_out.txt: the real74 verification cases) is absent,
+    # not stale; where it ships it is read as usual.
+    stale = sorted(name for name in (set(_PLUMBING_OR_BLOCKED)
+                                     | set(_WORKAROUND_ENGINE)
+                                     | set(_OPEN_FINDINGS)) - importers
+                   if not left_out(name))
     assert not stale, (
         f"{len(stale)} module(s) are exempted but no longer import a Python "
         f"NetCDF library; drop them from _PLUMBING_OR_BLOCKED: {stale}")
@@ -228,7 +286,9 @@ def test_the_sweep_actually_converted_something():
 
     importers = _python_netcdf_importers()
     declared = (len(_PLUMBING_OR_BLOCKED) + len(_WORKAROUND_ENGINE)
-                + len(_OPEN_FINDINGS))
+                + len(_OPEN_FINDINGS)
+                + sum(1 for name in importers
+                      if name not in _OPEN_FINDINGS and _declared_open(name)))
     assert len(importers) <= declared, (
         f"{len(importers)} modules import a Python NetCDF library; only "
         f"{declared} are declared exempt")
