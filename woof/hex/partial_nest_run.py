@@ -228,6 +228,12 @@ class OnlineDrivingState(PaddedRegionalDrivingState):
     device arrays already in the padded layout, so ``_derive`` skips only
     the file upload and runs the regional unit's own derivation kernels."""
 
+    def compact_to_boundary(self, bdy_mask_cell: Any, *, neighbour_rings: int = 3) -> None:
+        """Keep the full-extent pool.  Upstream's padded state compacts its
+        pool to the boundary support (1.1.4); the online child's frames
+        arrive whole from its parent every step, so it stays whole."""
+        return None
+
     def _derive(self, admitted: OnlineFrame) -> tuple[dict[str, Any], Any]:
         cp = _cp()
         f = admitted.fields
@@ -240,7 +246,9 @@ class OnlineDrivingState(PaddedRegionalDrivingState):
             "regional_lbc_derive_v841", self.nlev * self.ncells,
             (I32(self.nlev * self.ncells), F32(RVORD), self._zz, rho, theta, qv,
              rho_zz, rtheta_m))
-        rho_edge = cp.array(self._rho_edge_zero, copy=True)
+        # Upstream's padded state no longer holds a run-long zero edge array
+        # (1.1.4: _rho_edge_zero is None); the same zeros, made here.
+        rho_edge = cp.zeros(self._edge_shape, dtype=cp.float32)
         ru = cp.empty(self._edge_shape, dtype=cp.float32)
         self._kernels.launch(
             "regional_lbc_rho_edge_v841", self.nedges,
@@ -597,6 +605,11 @@ def make_partial_driver(build: ChildBuild, *, kernel_cache: PartialTopKernelCach
     pool = OnlinePool()
     online = OnlineDrivingState.__new__(OnlineDrivingState)
     online.__dict__.update(old.__dict__)
+    # The forecast compacted its own pool to the boundary support (upstream
+    # 1.1.4, compact_to_boundary); the online child's frames arrive whole
+    # from its parent each step, so its pool stays at full extent.
+    online._support = None
+    online._derive_support = None
     online._pool = pool
     runtime.driving = online
     return driver, pool
