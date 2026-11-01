@@ -2,10 +2,13 @@
 
 WRF's Registry default for an omitted &dynamics/use_theta_m is 1 on the V4
 line (Registry.EM_COMMON:2864), and the door already booked omission as 1.
-It integrates theta_m (RunConfig.use_theta_m = 1, written to [shared])
-wherever woof.core.theta_m.refusal admits the physics -- now every ported
-microphysics and cumulus scheme and the WRF-file door -- and keeps booking
-the declared dry-theta substitution where it does not (mp_tend_radar).
+An explicit use_theta_m = 1 integrates theta_m (RunConfig.use_theta_m = 1,
+written to [shared]) wherever woof.core.theta_m.refusal admits the physics --
+now every ported microphysics and cumulus scheme and the WRF-file door -- and
+keeps booking the declared dry-theta substitution where it does not
+(km_opt = 5, mp_tend_radar).  An OMITTED key integrates theta_m only within
+the scope it had before (theta_m_omitted_scope); widening that is a
+project decision, not a side effect of the wiring.
 RunConfig itself keeps woof's default 0, so no TOML configuration changes.
 """
 from __future__ import annotations
@@ -35,13 +38,33 @@ def test_wired_physics_imports_the_theta_m_prognostic(tmp_path, spelling):
     assert not any(item.key == "use_theta_m" for item in report.fixed)
 
 
-def test_every_ported_scheme_imports_the_theta_m_prognostic(tmp_path):
-    """The fixture's own physics (WRF's fused-finish Morrison, Kain-Fritsch)
-    under an omitted use_theta_m: WRF's Registry default 1 is integrated."""
-    text = INPUT_TEXT.replace(" use_theta_m = 0,", "")
+def test_an_explicit_one_imports_theta_m_for_every_ported_scheme(tmp_path):
+    """The fixture's own physics (Morrison, Kain-Fritsch) under an explicit
+    use_theta_m = 1: integrated, nothing booked."""
+    text = INPUT_TEXT.replace(" use_theta_m = 0,", " use_theta_m = 1,")
     toml_text, report = import_namelists(*_pair(tmp_path, inp=text))
     assert "use_theta_m = 1" in toml_text
     assert not any(item.key == "use_theta_m" for item in report.substitutions)
+
+
+def test_an_omission_keeps_its_scope(tmp_path):
+    """An omitted use_theta_m (WRF's Registry default 1) integrates theta_m
+    only within the scope it always has (theta_m_omitted_scope: mp_physics
+    0 or 1, no RTHFTEN cumulus, ...); outside it the import keeps booking
+    the declared substitution, byte for byte, and its reason says how to
+    integrate theta_m."""
+    text = INPUT_TEXT.replace(" use_theta_m = 0,", "")
+    toml_text, report = import_namelists(*_pair(tmp_path, inp=text))
+    assert "use_theta_m = 1" not in toml_text
+    entry = next(item for item in report.substitutions
+                 if item.key == "use_theta_m")
+    assert (entry.wrf_value, entry.gpuwm_value) == (1, 0)
+    assert "mp_physics = 10" in entry.reason
+    assert "explicit &dynamics use_theta_m = 1" in entry.reason
+    from woof.namelist_import import theta_m_omitted_scope
+    assert theta_m_omitted_scope({"physics": {"mp_physics": [1]}}) is None
+    assert theta_m_omitted_scope({"physics": {"mp_physics": [1]}},
+                                 route="wrf_boundary") is not None
 
 
 def test_radar_tten_keeps_the_declared_substitution():

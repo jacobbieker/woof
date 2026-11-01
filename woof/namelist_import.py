@@ -234,6 +234,80 @@ class ThetaMDecision:
     substituted: bool = False
 
 
+#: The configurations an OMITTED ``&dynamics/use_theta_m`` (WRF V4's
+#: Registry default 1) has integrated as theta_m since the Kessler merge:
+#: mp_physics 0 or 1, no cumulus scheme that reads the advective theta
+#: forcing, no diff_opt = 2 surface flux without a PBL, never the WRF-file
+#: door.  Wider wiring (every ported scheme, the RTHFTEN cumulus, the
+#: diff_opt = 2 flux, THM restored from WRF files) is honoured when the
+#: namelist SAYS use_theta_m = 1; whether an omission should integrate it
+#: too changes the import bytes of every V4 namelist outside this scope, so
+#: it is a decision for the project, not a side effect of the wiring.
+OMITTED_THETA_M_MICROPHYSICS = frozenset({0, 1})
+
+
+def theta_m_omitted_scope(inp: dict, max_dom: int = 1, *,
+                          route: str = "native") -> str | None:
+    """Why an omitted use_theta_m keeps the declared dry-theta substitution
+    for this namelist (outside :data:`OMITTED_THETA_M_MICROPHYSICS`'s
+    scope), or ``None`` where the omission integrates theta_m."""
+    from woof.core.theta_m import RTHFTEN_CUMULUS
+    hint = ("; an explicit &dynamics use_theta_m = 1 integrates theta_m "
+            "with this configuration")
+    if route == "wrf_boundary":
+        return ("the namelist omits use_theta_m, and an omission on the "
+                "WRF-file door keeps the dry-theta reading of the files"
+                + hint)
+    physics = inp.get("physics", {}) or {}
+    dynamics = inp.get("dynamics", {}) or {}
+
+    def column(section, key, default):
+        values = section.get(key)
+        if values is None:
+            values = [default]
+        if not isinstance(values, (list, tuple)):
+            values = [values]
+        values = list(values)[:max(1, max_dom)]
+        return values + [values[-1]] * (max(1, max_dom) - len(values))
+
+    def scalar(section, key, default):
+        values = section.get(key)
+        if values is None:
+            return default
+        if isinstance(values, (list, tuple)):
+            return values[0] if values else default
+        return values
+
+    try:
+        mp = column(physics, "mp_physics", 0)
+        cu = column(physics, "cu_physics", 0)
+        bl = column(physics, "bl_pbl_physics", 0)
+        sfclay = column(physics, "sf_sfclay_physics", 0)
+        diff = column(dynamics, "diff_opt", 0)
+        isfflx = int(scalar(physics, "isfflx", 1))
+        heat = float(scalar(dynamics, "tke_heat_flux", 0.0))
+        for n in range(max(1, max_dom)):
+            if int(mp[n]) not in OMITTED_THETA_M_MICROPHYSICS:
+                return (f"the namelist omits use_theta_m and mp_physics = "
+                        f"{int(mp[n])} is outside the scope an omission "
+                        "integrates theta_m in (mp_physics 0 or 1)" + hint)
+            if int(cu[n]) in RTHFTEN_CUMULUS:
+                return (f"the namelist omits use_theta_m and cu_physics = "
+                        f"{int(cu[n])} ({RTHFTEN_CUMULUS[int(cu[n])]}) is "
+                        "outside the scope an omission integrates theta_m "
+                        "in" + hint)
+            prescribed = isfflx in (0, 2) and heat != 0.0
+            driver = isfflx in (1, 2) and int(sfclay[n]) != 0
+            if (int(diff[n]) == 2 and int(bl[n]) == 0
+                    and (prescribed or driver)):
+                return ("the namelist omits use_theta_m and diff_opt = 2 "
+                        "without a PBL carries a surface flux, outside the "
+                        "scope an omission integrates theta_m in" + hint)
+    except (TypeError, ValueError) as error:
+        return f"its physics selectors could not be read ({error})"
+    return None
+
+
 def theta_m_unwired(inp: dict, max_dom: int = 1) -> str | None:
     """Why this namelist's physics cannot integrate theta_m, or ``None``.
 
@@ -6441,10 +6515,18 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
     # reached the user through nothing but the receipt file, ENG-016).
     # The bare door used to REFUSE the same configuration the other two
     # announced, which is one namelist with two answers.
+    unwired = theta_m_unwired(inp, max_dom) if use_theta_m == 1 else None
+    if unwired is None and use_theta_m == 1 and use_theta_m_values is None:
+        # An omission integrates theta_m only within the scope it always
+        # has (theta_m_omitted_scope); an explicit 1 wherever it is wired.
+        unwired = theta_m_omitted_scope(
+            inp, max_dom,
+            route=("wrf_boundary" if wrf_boundary_use_theta_m is not None
+                   else "native"))
     decision = theta_m_decision(
         use_theta_m, metgrid_initialization=metgrid_initialization,
         wrf_boundary_use_theta_m=wrf_boundary_use_theta_m,
-        unwired=(theta_m_unwired(inp, max_dom) if use_theta_m == 1 else None))
+        unwired=unwired)
     # use_theta_m = 1 honoured: the experiment integrates theta_m
     # (RunConfig.use_theta_m = 1, written to [shared] below).
     theta_m_integrated = decision.moist_theta

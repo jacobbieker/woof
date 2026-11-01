@@ -34,7 +34,7 @@ def test_public_metgrid_dispatch_and_existing_config(monkeypatch):
 def test_metgrid_context_does_not_spoof_wrf_boundary_representation(tmp_path):
     from test_namelist_import import INPUT_TEXT, _pair
     from woof.namelist_import import import_namelists
-    text=INPUT_TEXT.replace(' use_theta_m = 0,',' use_theta_m = 1,')
+    text=INPUT_TEXT.replace(' use_theta_m = 0,\n','')
     paths=_pair(tmp_path,inp=text)
     _, report=import_namelists(*paths,metgrid_initialization=True)
     entry=next(item for item in report.substitutions if item.key=='use_theta_m')
@@ -43,10 +43,24 @@ def test_metgrid_context_does_not_spoof_wrf_boundary_representation(tmp_path):
         import_namelists(*paths,metgrid_initialization=True,wrf_boundary_use_theta_m=1)
 
 
-@pytest.mark.parametrize('spelling', [' use_theta_m = 1,', ''])
+def test_explicit_moist_theta_on_the_metem_door_integrates_theta_m(tmp_path):
+    """An explicit use_theta_m = 1 is honoured on the met_em door for the
+    fixture's own physics (Morrison, Kain-Fritsch): theta_m is integrated
+    and nothing is booked."""
+    from test_namelist_import import INPUT_TEXT, _pair
+    from woof.namelist_import import import_namelists
+    text=INPUT_TEXT.replace(' use_theta_m = 0,', ' use_theta_m = 1,')
+    toml_text, report=import_namelists(*_pair(tmp_path,inp=text),metgrid_initialization=True)
+    assert 'use_theta_m = 1' in toml_text
+    assert not any(item.key=='use_theta_m' for item in report.substitutions)
+    assert not any(item.key=='use_theta_m' for item in report.fixed)
+
+
+@pytest.mark.parametrize('spelling', [''])
 def test_moist_theta_on_the_metem_door_is_a_declared_substitution_the_user_is_told_about(
         tmp_path, spelling, capsys):
-    """use_theta_m = 1 (explicit, or WRF's omitted default) is not "Fixed by WOOF".
+    """An omitted use_theta_m (WRF's default 1) outside the scope an
+    omission integrates theta_m in is not "Fixed by WOOF".
 
     It selects WRF's moist-theta prognostic for the whole integration and
     WOOF has no such branch: a first-order dycore difference in a moist
@@ -67,9 +81,10 @@ def test_moist_theta_on_the_metem_door_is_a_declared_substitution_the_user_is_to
     entry=next(item for item in report.substitutions if item.key=='use_theta_m')
     assert (entry.wrf_value, entry.gpuwm_value)==(1, 0)
     assert 'WOOF integrates dry theta' in entry.reason
-    # The fixture's microphysics finishes theta in its own kernel, so the
-    # theta_m branch is not wired for it and the reason names it.
-    assert 'is not wired' in entry.reason or 'wired for' in entry.reason
+    # The fixture's microphysics (Morrison) is outside the omitted key's
+    # scope, and the reason says how to integrate theta_m with it.
+    assert 'omits use_theta_m' in entry.reason
+    assert 'explicit &dynamics use_theta_m = 1' in entry.reason
     # The door gate admits the declared divergence (isolated from the
     # fixture's own mp_physics = 55 package substitution, which it refuses) ...
     require_preserved_wrf_selectors(SimpleNamespace(substitutions=tuple(
