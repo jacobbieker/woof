@@ -54,6 +54,37 @@ def _checker():
 
 CHECKER = _checker()
 
+B4_RECEIPT = (REPOSITORY_ROOT / "docs" / "public" / "receipts" / "obsbattery"
+              / "B4-ROUTE-QUALIFICATION.md")
+
+
+def _engine_revision_absent() -> str | None:
+    """Why the receipts' pinned route cannot run in this clone, or ``None``.
+
+    The observation-battery receipts pin their citations to engine
+    revisions (B4: "against `fc15d9ae`") and cite the engine's own
+    ``gpuwm/`` package paths.  The Recast WOOF export carries neither the
+    engine's commit history nor that spelling, so those citations resolve
+    only in the engine's tree.
+    """
+
+    if not B4_RECEIPT.is_file():
+        return "the observation battery's B4 receipt is not in this tree"
+    revision = CHECKER.revision_of(B4_RECEIPT.read_text(encoding="utf-8"))
+    if revision is None:
+        return None
+    import subprocess
+    try:
+        subprocess.run(["git", "cat-file", "-e", revision + "^{commit}"],
+                       cwd=REPOSITORY_ROOT, check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except (OSError, subprocess.CalledProcessError):
+        return (f"the B4 receipt pins its citations to engine revision "
+                f"{revision}, which this clone does not hold (the Recast WOOF "
+                "export carries no engine history); this case runs in the "
+                "engine's tree")
+    return None
+
 
 def test_no_documentation_anchor_has_drifted() -> None:
     """The property: every resolvable in-scope citation lands on its anchor."""
