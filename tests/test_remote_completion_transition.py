@@ -26,8 +26,8 @@ from woof import remote_preparation_v2 as preparation, remote_processed as legac
 from woof import remote_processed_v2 as viewer, remote_worker as rw
 
 pytestmark = pytest.mark.skipif(
-    sys.platform != "linux" or not hasattr(os, "pidfd_open")
-    or not hasattr(signal, "pidfd_send_signal"), reason="Linux pidfd ownership contract")
+    sys.platform != "linux" or not ra.linux_handles.has_pidfd(),
+    reason="Linux pidfd ownership contract")
 WATCHDOG = 10  # Deadlock guard only; never establishes the interleaving.
 
 #: Name of the fixture clock anchor the wrapper and runner read.
@@ -733,11 +733,11 @@ def test_missing_runner_receipt_names_the_completion_race(transition):
 def test_off_linux_the_transition_names_the_platform_breakage(transition, monkeypatch):
     c = transition.launch()
     class WithoutPidfd:
-        def __getattr__(self, name):
-            if name == "pidfd_open":
-                raise AttributeError(name)
-            return getattr(os, name)
-    monkeypatch.setattr(ra, "os", WithoutPidfd())
+        def has_pidfd(self):
+            return False
+        def pidfd_open(self, *_args):
+            raise AttributeError("pidfd_open")
+    monkeypatch.setattr(ra, "linux_handles", WithoutPidfd())
     state = rw._status(c.directory)
     with pytest.raises(ValueError) as error:
         ra.bound_manifest(c.record, state, job_directory=c.directory)
@@ -1046,7 +1046,8 @@ def test_permission_failure_is_not_missing_process_proof(transition, monkeypatch
     c = transition.launch()
     def denied(_pid, _flags):
         raise PermissionError("cannot inspect process")
-    monkeypatch.setattr(ra.os, "pidfd_open", denied)
+    monkeypatch.setattr(ra, "linux_handles", SimpleNamespace(
+        has_pidfd=ra.linux_handles.has_pidfd, pidfd_open=denied))
     with watching(c, monkeypatch) as w:
         assert "cannot inspect" in expect_done(w, 2)["error"]
 
