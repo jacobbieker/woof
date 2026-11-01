@@ -189,6 +189,12 @@ def _refuse_off_policy_wheel(platform: str) -> None:
 #: setup.py must not import the package it is packaging.
 _PINS_PATH = _HERE / "woof" / "data" / "bridges" / "bridge-pins.json"
 
+#: Platforms whose wheel is the only carrier of their bridges: no bundle is
+#: published for them, so the packaged pins have nothing to point at and
+#: the wheel's own staged bytes (checked by _staged_platform's manifest)
+#: are what `woof setup` finds.  metal-woof's Apple-silicon wheel.
+_SELF_CONTAINED_PLATFORMS = ("macos-arm64",)
+
 #: Explicit opt-in for building a wheel from an UNPINNED tree.  Dev and
 #: test fixtures set it (their wheels never leave a temp directory); a
 #: release must not, and a wheel built under it is unpublishable by
@@ -433,7 +439,8 @@ class _PlatformWheel(_BdistWheel):
         # Metadata and PEP 660 editable installs finalize bdist_wheel to
         # obtain tags; they do not build a distributable package.  Gate
         # the actual wheel build, before it copies any package bytes.
-        _refuse_unpinned_wheel()
+        if _staged_platform() not in _SELF_CONTAINED_PLATFORMS:
+            _refuse_unpinned_wheel()
         if _staged_platform() is not None:
             _refuse_off_policy_wheel(_staged_platform())
         super().run()
