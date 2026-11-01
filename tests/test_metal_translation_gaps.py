@@ -13,6 +13,10 @@
   components stay ``float``: ``out.x = f(...)`` did not compile
   (bandwidth_glue under GPUWM_WRF_EXACT=1), and arithmetic on components
   must keep subnormals as CUDA does.
+* ``scalbnf`` and ``frexpf`` (the GF gamma normalization) had no Metal
+  definition, so every GF unit under GPUWM_WRF_EXACT=1 failed to compile.
+  ``frexpf`` works on the bits, so a subnormal operand is normalised as
+  CUDA does, not flushed.
 """
 
 import importlib.util
@@ -143,3 +147,37 @@ def test_kernel_pointer_parameter_repointed_at_shared_memory(cp):
     out = cp.zeros(8, dtype=cp.float32)
     cp.RawKernel(_REPOINTED, "repointed")((1,), (8,), (src, out, np.int32(8)))
     assert cp.asnumpy(out).tolist() == [4, 6, 8, 10, 4, 6, 8, 10]
+
+
+_FREXP_SCALBN = r'''
+extern "C" __global__ void frexp_scalbn(const float* in, float* mant, int* expo, float* back, int n) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n) return;
+    int e;
+    float m = frexpf(in[i], &e);
+    mant[i] = m;
+    expo[i] = e;
+    back[i] = scalbnf(m, e);
+}
+'''
+
+
+@pytest.mark.parametrize("options", [(), ("--ftz=false",)], ids=["default", "ftz-false"])
+def test_frexpf_and_scalbnf_are_exact_on_normals_and_subnormals(cp, options):
+    info = np.finfo(np.float32)
+    values = np.array([1.0, -3.75, 0.5, 1e30, -1e-30, info.tiny, info.max,
+                       info.smallest_subnormal, -info.smallest_subnormal * 37,
+                       info.tiny * np.float32(0.75), 0.0, -0.0, np.inf, -np.inf],
+                      dtype=np.float32)
+    n = len(values)
+    module = cp.RawModule(code=_FREXP_SCALBN, options=options)
+    mant = cp.zeros(n, dtype=cp.float32)
+    expo = cp.zeros(n, dtype=cp.int32)
+    back = cp.zeros(n, dtype=cp.float32)
+    module.get_function("frexp_scalbn")((1,), (32,), (cp.asarray(values), mant, expo, back, np.int32(n)))
+    want_m, want_e = np.frexp(values)
+    assert cp.asnumpy(mant).tobytes() == want_m.astype(np.float32).tobytes()
+    finite = np.isfinite(values)
+    assert cp.asnumpy(expo)[finite].tolist() == want_e[finite].tolist()
+    if options:  # ftz=false keeps the subnormal results scalbnf rebuilds
+        assert cp.asnumpy(back).tobytes() == values.tobytes()

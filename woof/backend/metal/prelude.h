@@ -369,6 +369,20 @@ static inline float fmax(float a, float b) { return fmaxf(a, b); }
 static inline float ldexpf(float a, int n) { return metal::ldexp(a, n); }
 // FLT_RADIX is 2, so scalbnf is ldexpf.
 static inline float scalbnf(float a, int n) { return ldexpf(a, n); }
+static inline float frexpf(float a, thread int* e) {
+  // a = m * 2^e with |m| in [0.5, 1): exact, on the bits (subnormal
+  // operands are normalised, not flushed)
+  uint u = as_type<uint>(a), mag = u & 0x7FFFFFFFu;
+  *e = 0;
+  if (mag == 0 || mag >= 0x7F800000u) return a;           // zero, inf, NaN
+  if (mag < 0x00800000u) {                                // subnormal
+    int top = 31 - (int)metal::clz(mag);                        // leading 1's bit
+    *e = top - 148;
+    return as_type<float>((u & 0x80000000u) | 0x3F000000u | ((mag << (23 - top)) & 0x007FFFFFu));
+  }
+  *e = (int)(mag >> 23) - 126;
+  return as_type<float>((u & 0x807FFFFFu) | 0x3F000000u);
+}
 static inline bool isnan(float a) { return metal::isnan(a); }
 static inline bool isinf(float a) { return metal::isinf(a); }
 static inline bool isfinite(float a) { return metal::isfinite(a); }
