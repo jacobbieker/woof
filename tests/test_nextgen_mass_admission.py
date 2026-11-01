@@ -60,7 +60,7 @@ class MassDoor(unittest.TestCase):
                 checkpoint = root/f"parent-{index}.nc"
                 checkpoint.touch()  # Metadata admission must not open fields.
                 parents.append(dict(checkpoint=str(checkpoint), prepared_root=str(root),
-                    experiment_config=str(config), provenance=dict(source="test", cycle="2024-01-01T00:00:00Z")))
+                    experiment_config=str(config), provenance=dict(source="gfs", cycle="2024-01-01T00:00:00Z")))
             source = root/"parents.json"
             source.write_text(json.dumps(parents))
             args = SimpleNamespace(branch_from=source, members=2, config=policy,
