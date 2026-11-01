@@ -117,7 +117,7 @@ def wheel_venv(tmp_path_factory):
          "--no-build-isolation", "-w", str(wheelhouse)],
         check=True, capture_output=True, text=True, timeout=1800,
         env=build_env)
-    wheels = sorted(wheelhouse.glob("gpuwm-*.whl"))
+    wheels = sorted(wheelhouse.glob("recast_woof-*.whl"))
     assert wheels, "no wheel was built"
 
     venv = work / "venv"
