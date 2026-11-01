@@ -2958,7 +2958,6 @@ def realize_partial_nests(model, exp, coord, *, physics=None):
                   else truncated_vertical_coord(coord, parent_nest.k))
         child, ccfg = truncate_state(node.state, node.cfg.run, int(band.k_top),
                                      coord=coord)
-        child.elapsed_seconds = node.state.elapsed_seconds
         nest = PartialNest(parent.state, parent.cfg.run, pcoord, child, ccfg, band,
                            parent_nest=parent_nest)
         if physics is not None:
