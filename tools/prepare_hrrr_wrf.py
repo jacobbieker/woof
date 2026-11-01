@@ -1135,9 +1135,28 @@ def _validated_physics_receipt(
     # where the paired mass is zero and a finite seeded number above zero,
     # counted against the closure's seed receipt, where it is not.
     seeded_numbers = cold_start_seeded_numbers(selection)
+    # Correct-mode HN1 (woof.ingest.handover_numbers): Morrison's droplet
+    # number starts at the scheme's own NDCNST diagnostic, so the producer
+    # (tools/hrrr_single_domain_benchmark.py, the same predicate) records
+    # it as finite and positive everywhere rather than at the allocation
+    # zero.  Without this arm every default Morrison preparation was
+    # refused here for evidence the producer had written correctly.
+    from types import SimpleNamespace as _Namespace
+
+    from woof.ingest.handover_numbers import closure_active
+    _cfg = (_Namespace(**selection) if isinstance(selection, dict)
+            else selection)
+    morrison_hn1 = (int(_cfg.mp_physics) == 10 and closure_active(selection))
     for name, (expected_float32, expected_uint32_bits) \
             in expected_state_fields.items():
         observed = initialization["state_source_absent_fields"][name]
+        if morrison_hn1 and name == "nc":
+            if observed != {"ndcnst_droplet_number": True,
+                            "all_finite_above_zero": True}:
+                raise RuntimeError(
+                    "HRRR preparation omitted deterministic cold-start "
+                    "evidence")
+            continue
         if name in seeded_numbers:
             mass_name, seed_key = seeded_numbers[name]
             seeded_cells = (observed.get("seeded_cells")
