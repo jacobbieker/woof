@@ -239,13 +239,19 @@ def _hydraulics(rules, model: str, soil_class: np.ndarray):
 
 def convert_source_soil_moisture(fields, *, sf_surface_physics, soil_type,
                                  landmask=None, lake_mask=None,
-                                 soil_layer_contract=None):
+                                 soil_layer_contract=None,
+                                 no_source_land=None):
     """The soil-moisture index remap on the source moisture fields.
 
     Returns ``(fields, receipt)``.  ``fields`` is the input mapping itself
     when nothing changes (same soil model, unknown model, opt-out), else a
     shallow copy with the moisture arrays replaced.  Temperature fields are
     never touched.
+
+    ``no_source_land`` is the mask of land the source holds no land for,
+    whose column :func:`woof.ingest.soil.island_soil_columns` already built
+    at the target soil's own field capacity.  Those values are not source
+    moisture, so they are not remapped a second time.
     """
 
     rules = load_rules()
@@ -274,13 +280,19 @@ def convert_source_soil_moisture(fields, *, sf_surface_physics, soil_type,
     soil_class = np.rint(np.asarray(_host(soil_type), dtype=np.float64)).astype(np.int64)
     wp_s, fc_s, _, _ = _hydraulics(rules, source, soil_class)
     wp_t, fc_t, dry_t, sat_t = _hydraulics(rules, target, soil_class)
-    if np.isnan(dry_t).all():
+    # The bound must exist wherever the target has hydraulics.  A grid with
+    # no soil class the target maps (all water: open ocean or sea ice) has
+    # no cell to bound and nothing to convert; refusing it stopped every
+    # all-water domain at ingest.
+    if np.any(np.isfinite(wp_t) & (np.isnan(dry_t) | np.isnan(sat_t))):
         raise ValueError(f"target soil model {target!r} must carry air-dry/saturation values")
     land = np.ones(soil_class.shape, dtype=bool)
     if landmask is not None:
         land &= _host(landmask) >= 0.5
     if lake_mask is not None:
         land &= ~_host(lake_mask).astype(bool)
+    if no_source_land is not None:
+        land &= ~np.asarray(_host(no_source_land), dtype=bool)
     usable = (land & np.isfinite(wp_s) & np.isfinite(fc_s) & (fc_s > wp_s)
               & np.isfinite(wp_t) & np.isfinite(fc_t))
     out = dict(fields)
