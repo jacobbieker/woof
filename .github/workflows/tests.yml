@@ -131,6 +131,18 @@ jobs:
           name: native-linux
       - name: unpack the bridges into tools/*/target/release
         run: pixi run -e cpu --locked python .github/ci/build_native.py unpack native-linux.tar
+      # The recast-woof-data wheel leaves out the two externalized Thompson
+      # tables (qr_acr_qg_V4.dat, freezeH2O.dat: over PyPI's per-file cap),
+      # so every install stages them with `woof fetch-tables`, SHA-256
+      # verified against woof/core/thompson_contract.py, into
+      # ~/.woof/tables/thompson.  A runner is a fresh install: without this
+      # every mp=8/mp=28 test stops at "Thompson table identity is invalid".
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.woof/tables/thompson
+          key: thompson-tables-${{ hashFiles('woof/core/thompson_contract.py', 'woof/core/thompson_aerosol_contract.py') }}
+      - name: stage the externalized Thompson tables (woof fetch-tables, SHA-256 verified)
+        run: pixi run -e cpu --locked woof fetch-tables
       - name: tests/ leg ${{ matrix.leg }} of ${{ env.TEST_LEGS }}
         if: matrix.leg != 'hex' && matrix.leg != 'stage1'
         run: |
@@ -228,6 +240,13 @@ jobs:
           name: native-macos
       - name: unpack the bridges into tools/*/target/release
         run: pixi run -e mlx --locked python .github/ci/build_native.py unpack native-macos.tar
+      # The externalized Thompson tables, as in the Linux cpu job.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.woof/tables/thompson
+          key: thompson-tables-${{ hashFiles('woof/core/thompson_contract.py', 'woof/core/thompson_aerosol_contract.py') }}
+      - name: stage the externalized Thompson tables (woof fetch-tables, SHA-256 verified)
+        run: pixi run -e mlx --locked woof fetch-tables
       - name: tests/ leg ${{ matrix.leg }} of ${{ env.TEST_LEGS }}
         if: matrix.leg != 'hex' && matrix.leg != 'stage1'
         run: |
