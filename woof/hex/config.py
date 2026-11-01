@@ -481,11 +481,18 @@ def dry_dycore_config_from_namelist(
     text: str,
     *,
     source_release: str = "v8.2.3",
+    admit_partial_nest: bool = False,
 ) -> DryDycoreConfig:
     """Map a scalar atmosphere namelist to the canonical dry config.
 
     Every encountered knob must have an explicit admitted binding. Known
     framework/physics options and unknown options refuse by their MPAS names.
+
+    The WOOF-only group ``&woof_partial_nest`` (Phase D5's partial-depth
+    band, :mod:`woof.hex.partial_nest`) is not a dycore knob: it is passed
+    over only when the caller runs the coupled band
+    (``admit_partial_nest=True``, :func:`woof.hex.partial_nest.
+    configs_from_namelist`), and refused by name everywhere else.
     """
 
     if source_release == "v8.2.3":
@@ -515,6 +522,17 @@ def dry_dycore_config_from_namelist(
     values: dict[str, object] = {}
     seen_attributes: set[str] = set()
     for group, assignments in parsed.items():
+        if str(group).casefold() == "woof_partial_nest":
+            if admit_partial_nest:
+                continue
+            _refuse(
+                "&woof_partial_nest",
+                "present",
+                "a partial-depth band runs only through the coupled band runner "
+                "(woof.hex.partial_nest_run); this route steps one mesh",
+                "remove &woof_partial_nest, or run the band through "
+                "woof.hex.partial_nest.configs_from_namelist",
+            )
         if group not in admitted_groups and not assignments:
             _refuse(
                 group,
