@@ -6,6 +6,7 @@ decoded, no forecast is run and no card is touched.
 import hashlib
 import io
 import json
+import sys
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -154,7 +155,18 @@ def test_an_unregistered_route_is_refused_by_name_with_the_registered_set():
 
 @pytest.fixture
 def recorded(tmp_path, monkeypatch):
-    """A durable job record on disk, with no worker process behind it."""
+    """A durable job record on disk, with no worker process behind it.
+
+    Read by the worker's status door, which runs only on a platform with a
+    registered ownership provider (Linux: /proc and pidfd).  Elsewhere the
+    worker refuses before reading the record, which
+    tests/test_remote_ownership_and_capabilities.py asserts, so these
+    status-door tests have no worker to drive there.
+    """
+    if sys.platform not in rw.OWNERSHIP_PROVIDERS:
+        pytest.skip(f"the remote worker's status door is Linux-only (ownership through /proc "
+                    f"and pidfd); on {sys.platform} it refuses, as "
+                    "test_remote_ownership_and_capabilities asserts")
     store = tmp_path / ".arwen-jobs"
     store.mkdir(mode=0o700)
     directory = store / "20260907T180000-0123456789abcdef"
