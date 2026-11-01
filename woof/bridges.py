@@ -375,7 +375,8 @@ BRIDGE_ABI_MARKERS = {
     # matched and the woof hex product stage died on "unknown flag --remap".
     "rw_mpas_convert": (
         b"gpuwm-rw-mpas-convert-v1\tCONVERTED\tWINDOW\tWEIGHTS\tFINISHED"
-        b"\tREMAP\tBUDGET\t--remap nearest|product\t--jobs N"),
+        b"\tREMAP\tBUDGET\t--remap nearest|product\t--jobs N"
+        b"\t--terrain-authority FILE\t--window latlon:S,N,W,E,SPACING"),
     # The ML dataset exporter behind `woof ml-export`.  The marker is the
     # request schema, the modes and the progress grammar, the literal that
     # changes when the contract does: a build predating it would read a
