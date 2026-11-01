@@ -1090,7 +1090,7 @@ def _initialize_real_case_physics(
         radiation_start_time=start_time, radiation_latitude=lat,
         radiation_longitude=lon,
         terrain_drag_static=static,
-        # WRF's windfarm_opt = 1 places its turbines on this grid; a row
+        # wind_farm_scheme = "fitch_wrf" places its turbines on this grid; a row
         # window's state is refused against it by shape.
         windfarm_grid=grid,
         **lake_physics_inputs(cfg, static),
@@ -4481,12 +4481,47 @@ def _global_wrf_attrs(
     if capture is not None and capture.provenance:
         from woof.ensemble.wofs_recipe import provenance_label
         attrs["GPUWM_ENSEMBLE_PROVENANCE"] = provenance_label(capture.provenance)
+    name = grid_name_for(identity.get("grid_id", 1))
+    if name:
+        attrs[GRID_NAME_ATTR] = name
     return attrs
 
 
 def _streamed_identity_frames():
     from woof.io.history_staging import async_history_mode
     return None if async_history_mode() == "off" else 1
+#: What a run's maps call its OUTERMOST domain in place of WRF's ``d01``
+#: (``nest`` -> headline ``nest 3 km``), read from the environment by
+#: :func:`grid_name_for` and stamped as the ``GPUWM_GRID_NAME`` global
+#: attribute, which ``rw_wrfbatch`` reads for the headline only (the domain
+#: folder and the filename keep ``d01``).
+#:
+#: THE BREAKAGE THIS PREVENTS (WOOF Hex with Regional, 2026-10-28): a nest
+#: added to a hex run (``woof hex add-nest``) is its own one-domain run, so
+#: its frames say ``GRID_ID = 1`` and every nest map was headlined
+#: ``d01 3 km`` while the site files the nest as d05.  The add-nest door sets
+#: ``GPUWM_GRID_NAME=nest`` for its ``woof sim``.  Only d01 takes it: in a
+#: run with nests of its own, d02 and beyond keep their WRF names.
+GRID_NAME_ENV = "GPUWM_GRID_NAME"
+GRID_NAME_ATTR = "GPUWM_GRID_NAME"
+
+
+def grid_name_for(grid_id) -> str | None:
+    """The ``GPUWM_GRID_NAME`` a domain's frames carry, or ``None``.
+
+    Whitespace is collapsed; a name the renderer would not draw (over 32
+    characters, a control character or ``|``) is refused by name rather
+    than written and silently ignored there.
+    """
+
+    raw = os.environ.get(GRID_NAME_ENV, "")
+    name = " ".join(raw.split())
+    if not name or int(grid_id) != 1:
+        return None
+    if len(name) > 32 or "|" in name or any(not ch.isprintable() for ch in name):
+        raise ValueError(f"{GRID_NAME_ENV}={raw!r}: a grid name is at most 32 printable "
+                         "characters and no '|' (rw_wrfbatch's headline label rule)")
+    return name
 
 
 def write_case_output(prepared, output_dir: Path, valid_time: datetime, *,

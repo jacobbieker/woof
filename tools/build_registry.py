@@ -364,39 +364,41 @@ IMPLEMENTED: dict[str, dict] = {
     # every PBL scheme.
     "topo_wind": {"type": "integer", "enum": [0, 1, 2], "default": 0},
     "gwd_opt": {"type": "integer", "enum": [0, 1, 3], "default": 0},
-    # WRF v4.7.1 wind farm (woof.core.windfarm_coupling, kernel
-    # woof.core.windfarm_fitch), off by default: Fitch under MYNN.
-    "windfarm_opt": {
-        "type": "integer", "enum": [0, 1], "default": 0,
+    # Wind farms (upstream's switch, woof.core.wind_farm), off by default:
+    # "fitch" is upstream's GPU Fitch, "fitch_wrf" WRF v4.7.1's windfarm_opt
+    # = 1 word for word (woof.core.windfarm_coupling, kernel
+    # woof.core.windfarm_fitch); both under MYNN.
+    "wind_farm_scheme": {
+        "type": "string", "enum": ["off", "fitch", "fitch_wrf"],
+        "default": "off", "per_domain": True, "component_id": "pbl",
+        "warnings": ["fitch runs upstream's GPU Fitch turbine forcing and "
+                     "fitch_wrf WRF v4.7.1's Fitch scheme word for word, in "
+                     "the PBL slot right after MYNN: each turbine of "
+                     "wind_farms is an elevated momentum sink and a TKE "
+                     "source in MYNN's QKE over the levels its rotor sweeps, "
+                     "and POWER is written. Both require MYNN "
+                     "(bl_pbl_physics=5). WRF's windfarm_opt=2 (MAV) is not "
+                     "ported."]},
+    "wind_farms": {
+        "type": "string", "default": "",
         "per_domain": True, "component_id": "pbl",
-        "warnings": ["Option 1 runs WRF's Fitch wind-farm scheme in the PBL "
-                     "slot: each turbine of windfarm_turbine_file is an "
-                     "elevated momentum sink and a TKE source in MYNN's QKE "
-                     "over the levels its rotor sweeps, and POWER is "
-                     "written. It requires MYNN (bl_pbl_physics=5). WRF's "
-                     "2 (MAV) is not ported."]},
-    "windfarm_ij": {
-        "type": "integer", "enum": [0, 1], "default": 0,
-        "component_id": "pbl", "read_when": {"windfarm_opt": 1},
-        "warnings": ["0 reads a WRF windturbines.txt as lat lon type rows, "
-                     "1 a windturbines-ij.txt as i j type rows; a woof "
-                     "turbine table is always lat/lon."]},
+        "read_when": {"wind_farm_scheme": "fitch_wrf"},
+        # fitch_wrf with no turbines is refused (validate_run_config,
+        # woof.config.wrf_fitch_refusal); upstream's fitch reads it too.
+        "active_value_policy": "required-when-read",
+        "warnings": ["The turbines: uswtdb (the US Wind Turbine Database, "
+                     "fitch only), a WRF windturbines.txt (lat lon type) or "
+                     "windturbines-ij.txt (i j type, fitch_wrf) with its "
+                     "wind-turbine-N.tbl tables beside it, or, for "
+                     "fitch_wrf, a woof turbine table (.csv, .geojson, "
+                     "sites.v1 .json) with turbine-library curves. "
+                     "Checkpoints and fingerprints bind its bytes."]},
     "windfarm_tke_factor": {
         "type": "number", "default": 0.25,
-        "component_id": "pbl", "read_when": {"windfarm_opt": 1},
+        "component_id": "pbl",
         "warnings": ["The factor on the turbines' TKE source, "
                      "factor*(Ct - Cp). WRF's default 0.25; 1.0 is Fitch's "
                      "original."]},
-    "windfarm_turbine_file": {
-        "type": "string", "default": "",
-        "per_domain": True, "component_id": "pbl",
-        "read_when": {"windfarm_opt": 1},
-        # windfarm_opt = 1 with no turbines is refused (validate_run_config).
-        "active_value_policy": "required-when-read",
-        "warnings": ["A woof turbine table (.csv, .geojson, sites.v1 .json) "
-                     "or a WRF windturbines.txt / windturbines-ij.txt with "
-                     "its wind-turbine-N.tbl tables beside it. Checkpoints "
-                     "and fingerprints bind its bytes."]},
     "o3input": {
         "type": "integer", "enum": [0, 2], "default": 2,
         "warnings": [
@@ -5959,7 +5961,7 @@ def _single_moment_column_options(registry: dict) -> None:
 
     No preset is generated: the radiation-off template the WSM lane generated here
     made radiation.off reachable from a registered suite (spot-check FAIL,
-    RELEASE-2.8.9-CANDIDATE/C-ports/SPOT-RESULTS-290.md).  A row is reachable as a
+    the 2.9.0 spot results).  A row is reachable as a
     component override, exactly like WSM3, WSM6R, Lin and Ferrier-Aligo.
     """
     from woof.core.column_schemes import COLUMN_SCHEMES
@@ -7296,7 +7298,7 @@ def build(registry: dict) -> dict:
         km_opt = option["selectors"]["km_opt"]
         rules = [rule for rule in
                  option.get("constraints", {}).get("refused_when", [])
-                 if not {"topo_wind", "gwd_opt", "windfarm_opt"}.intersection(
+                 if not {"topo_wind", "gwd_opt", "wind_farm_scheme"}.intersection(
                      rule.get("settings", {}))
                  and ("diff_opt" not in rule.get("settings", {})
                       or "components" in rule)]
@@ -7344,15 +7346,15 @@ def build(registry: dict) -> dict:
             "remedy_settings": {"gwd_opt": 0},
         })
         rules.append({
-            "settings": {"windfarm_opt": [1]},
+            "settings": {"wind_farm_scheme": ["fitch", "fitch_wrf"]},
             "components": {"pbl": non_mynn_pbl},
             "reason": (
-                "windfarm_opt=1 adds the turbines' TKE source into MYNN's "
-                "QKE inside the PBL driver (bl_pbl_physics=5); another PBL "
-                "scheme carries no QKE, so the rotors would extract "
+                "the Fitch wind farm adds the turbines' TKE source into "
+                "MYNN's QKE inside the PBL driver (bl_pbl_physics=5); another "
+                "PBL scheme carries no QKE, so the rotors would extract "
                 "momentum while their turbulence went nowhere"),
-            "remedy_label": "Set windfarm_opt=0.",
-            "remedy_settings": {"windfarm_opt": 0},
+            "remedy_label": "Set wind_farm_scheme=off.",
+            "remedy_settings": {"wind_farm_scheme": "off"},
         })
         option.setdefault("constraints", {})["refused_when"] = rules
     sase_constraints = pbl_options["sase"]["constraints"]
@@ -9134,7 +9136,11 @@ def _mynn_source_version_templates(registry: dict) -> None:
         "wrf_rrtmg_compatibility": "wrf-rrtmg-4-4-legacy-v1",
         "radt": 15.0,
     })
-    template["label"] = "Aerosol Thompson + GSD v4.1 MYNN + MYNN surface + RUC + legacy RRTMG"
+    # The suite runs HRRR's NOAA WRFV3.9 fork Thompson (thompson_version =
+    # "wrf_39_noaa"), not WRF 4.6.1's; its label says so (a user who swapped
+    # in YSU, Noah and KF read it as WRF's mp28).
+    template["label"] = ("HRRR WRFV3.9 aerosol Thompson + GSD v4.1 MYNN + MYNN surface + RUC + "
+                         "legacy RRTMG")
     template["maturity"] = _composition_ceiling(registry, template["components"])
     template["warnings"] = [
         "The GSD v4.1 MYNN source version is selected explicitly. Remaining fork differences are listed in docs/dev/mynn-gsd41.md.",

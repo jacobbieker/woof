@@ -36,6 +36,8 @@ _SEAICE_BOUND = ("seaice_prognostic", "seaice_initial_thickness",
 #: Every default-off field restart._drop_default_off_run_keys drops at its
 #: default, moved, as (overrides, the keys the echo must then carry).
 MOVED = {
+    "umove": (dict(umove=12.0), {"umove"}),
+    "vmove": (dict(vmove=-8.0), {"vmove"}),
     "output_diagnostics": (dict(output_diagnostics=1), {"output_diagnostics", "diag_int", "wind_int"}),
     "diag_int": (dict(diag_int=30), {"diag_int"}),
     "wind_int": (dict(wind_int=10), {"wind_int"}),
@@ -126,6 +128,14 @@ MOVED = {
 #: The keys an echo at every default leaves out.
 DEFAULT_OFF = frozenset({
     "output_diagnostics", "diag_int", "wind_int",
+    # 2.9.10: WRF's ghg_input at the engine's fixed gases (0), absent as in
+    # a header written before the key (checkpoint_identity).
+    "ghg_input",
+    "umove", "vmove",
+    # 2.9.11: the Fitch wind-farm controls with farm physics off
+    # (labs/windfarm, woof.wind_table.drop_inert_config).
+    "wind_farm_scheme", "wind_farms", "wind_farm_table",
+    "windfarm_tke_factor", "wind_farm_max_dx_m",
     # The ocean mixed layer (2.9.1) off: dropped, as in a header written
     # before the keys existed.
     "sf_ocean_physics", "oml_hml0", "oml_gamma", "oml_relaxation_time",
@@ -224,16 +234,16 @@ DEFAULT_OFF = frozenset({
     "ocean_levels", "ocean_analysis", "ocean_analysis_source",
     "ocean_mld_climatology", "omdt", "ocean_z", "ocean_t", "ocean_s",
     "ra_sw_eclipse", "ocean_config", "hailcast_opt", "haildt",
+    # fix/hailcast: the HAILCAST generation, absent at its default like the
+    # other output-only HAILCAST selectors.
+    "hailcast_version",
     "seaice_prognostic", "seaice_initial_thickness",
     "seaice_new_ice_thickness", "seaice_ocean_heat_flux",
     "lake_state_source", "lake_state_path", "lake_state_accept_licence",
-    # WRF's wind farm, all four dropped while windfarm_opt is 0.
-    "windfarm_opt", "windfarm_ij", "windfarm_tke_factor",
-    "windfarm_turbine_file",
     # WRF-Solar EPS and MAD-WRF, each dropped at its Registry default.
     *__import__("woof.config", fromlist=["x"]).MULTI_PERTURB_RUN_DEFAULTS,
     *__import__("woof.config", fromlist=["x"]).MADWRF_RUN_DEFAULTS,
-    # The keys appended after the wind farm, each dropped while off
+    # The keys appended after upstream's, each dropped while off
     # (woof/io/restart.py): RRTMG spectral output, FARMS coupling, the
     # woof.radtran diagnostic's keys, the shallow-cumulus pair, the solar
     # diagnostics, and use_theta_m / do_avgflx_em.
@@ -280,6 +290,10 @@ def _echoes(cfg, monkeypatch, tmp_path, *, surface_receipt=None) -> dict[str, di
     from tilestream import checkpoint, physics_inventory, restart_stream
 
     state, _driver = _checkpoint_state(cfg, monkeypatch)
+    if cfg.umove or cfg.vmove:
+        # _fill_setup deliberately writes nonzero bytes into every setup
+        # array; active moving-frame fixtures must represent flat ground.
+        state.ht[...] = 0.0
     if surface_receipt is not None:
         state._ensemble_surface_state = surface_receipt
     paths = {"resident": restart.write_restart(

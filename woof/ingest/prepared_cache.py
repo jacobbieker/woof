@@ -788,6 +788,10 @@ SFIRE_PREPARATION_INERT_RUN_FIELDS = frozenset({
 RETIRED_INACTIVE_IDENTITY_FIELDS = {"run.fire_moisture_namelist": ""}
 
 PREPARATION_INERT_RUN_FIELDS = SFIRE_PREPARATION_INERT_RUN_FIELDS | frozenset({
+    # Turbine forcing attaches only in forecast initialize_physics; real
+    # initialization and boundary preparation never read these controls.
+    # Runtime overrides retain the original config bytes and record changes.
+    "run.wind_farm_scheme", "run.wind_farm_table", "run.wind_farm_max_dx_m", "run.wind_farms", "run.windfarm_tke_factor",
     # The per-run smoke-off sentence (woof/smoke_execution.py): launch
     # metadata for the receipts; chem_sets carries the physics it
     # describes, so one prepared bundle serves either value.  It rides the
@@ -1065,15 +1069,6 @@ PREPARATION_INERT_RUN_FIELDS = SFIRE_PREPARATION_INERT_RUN_FIELDS | frozenset({
     # array depends on.  It stays in the experiment fingerprint and the
     # restart identity.
     "run.moist_cq",
-    # WRF's windfarm_opt and its three companions (woof.core.
-    # windfarm_coupling): the turbines are placed and uploaded at forecast
-    # physics initialisation and act only inside the PBL slot; nothing under
-    # woof/ingest reads them, and the prepared state and boundary tables are
-    # the same under every value.  One preparation serves the farm on and
-    # off; the forecast and restart identities bind them (and the file's
-    # bytes) when on.
-    "run.windfarm_opt", "run.windfarm_ij", "run.windfarm_tke_factor",
-    "run.windfarm_turbine_file",
     # Placement rain history begins at forecast initialization. Neither
     # prepared prognostics nor parent boundary tables depend on its policy.
     # Forecast/restart identity still binds the policy and its archive.
@@ -3374,7 +3369,7 @@ def restore_prepared_cache(path, *, expected_identity, cfg, static,
     state.set_map_coriolis(
         static["MAPFAC_M"], static["MAPFAC_U"], static["MAPFAC_V"],
         static["F"], static["E"], sina=static["SINALPHA"],
-        cosa=static["COSALPHA"])
+        cosa=static["COSALPHA"], msfv_inv=static.get("MF_VX_INV"))
     expected_state_names = [
         name for name in serialized_state_attrs(state)
         if getattr(state, name, None) is not None]

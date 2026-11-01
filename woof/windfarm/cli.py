@@ -12,8 +12,8 @@ def register_cli(subparsers) -> None:
         description="Read a turbine table and place it on one domain of an "
                     "experiment: the cells it occupies, the turbines in "
                     "each and the rated capacity: the placement a forecast "
-                    "with windfarm_opt = 1 and this table as "
-                    "windfarm_turbine_file runs.")
+                    "with wind_farm_scheme = \"fitch_wrf\" and this table "
+                    "as wind_farms runs.")
     commands = parser.add_subparsers(dest="windfarm_command", required=True)
     layout = commands.add_parser(
         "layout", help="place a turbine table on a domain and print the "

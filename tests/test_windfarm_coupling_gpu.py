@@ -1,6 +1,8 @@
-"""windfarm_opt = 1 in the running model, on the device.
+"""wind_farm_scheme = "fitch_wrf" (WRF's windfarm_opt = 1) in the running
+model, on the device.
 
-The seam (woof.core.physics.PhysicsDriver._couple_pbl_slot) must hand the
+The seam (upstream's PhysicsDriver.wind_farm.apply_mynn in the MYNN slot,
+woof.core.windfarm_coupling.WrfFitchFarm) must hand the
 Fitch kernel exactly what WRF's PBL driver hands dragforce
 (module_pbl_driver.F:2053-2063) -- phy_prep's mass-point winds, z_at_w, the
 domain's dx, the MODEL dt, MYNN's QKE as MYNN left it and the scheme's own
@@ -98,8 +100,8 @@ def _state(cfg):
 
 
 def _on(tmp_path, **over):
-    return _cfg(windfarm_opt=1,
-                windfarm_turbine_file=str(_farm_csv(tmp_path / "farm.csv")),
+    return _cfg(wind_farm_scheme="fitch_wrf",
+                wind_farms=str(_farm_csv(tmp_path / "farm.csv")),
                 **over)
 
 
@@ -216,7 +218,7 @@ def test_the_farm_slows_and_stirs_its_own_columns(tmp_path):
     for _ in range(4):
         step(on, cfg)
         step(off, _cfg())
-    layout = on.physics.windfarm.layout
+    layout = on.physics.wind_farm.farm.layout
     cells = np.flatnonzero(np.diff(layout.cell_offsets) > 0)
     j, i = np.divmod(cells, N)
     qke_on = cp.asnumpy(on.physics.fields["qke"])[:8, j, i]
@@ -240,9 +242,9 @@ def test_off_is_the_run_without_the_fields(tmp_path):
 
     path = _farm_csv(tmp_path / "farm.csv")
     plain_cfg = _cfg()
-    inert_cfg = _cfg(windfarm_turbine_file=str(path), windfarm_tke_factor=1.0)
+    inert_cfg = _cfg(windfarm_tke_factor=1.0)
     plain, inert = _state(plain_cfg), _state(inert_cfg)
-    assert plain.physics.windfarm is None and inert.physics.windfarm is None
+    assert plain.physics.wind_farm is None and inert.physics.wind_farm is None
     assert "power" not in inert.physics.fields
     for _ in range(3):
         step(plain, plain_cfg)
@@ -288,7 +290,7 @@ def test_a_resume_refuses_another_turbine_file(tmp_path):
     step(state, cfg)
     path = restart.write_restart(tmp_path / "ck.npz", state, cfg)
     other = _farm_csv(tmp_path / "other.csv", size=2)
-    moved = dataclasses.replace(cfg, windfarm_turbine_file=str(other))
+    moved = dataclasses.replace(cfg, wind_farms=str(other))
     with pytest.raises(Exception, match="windfarm"):
         restart.restore_restart(path, _state(moved), moved)
 

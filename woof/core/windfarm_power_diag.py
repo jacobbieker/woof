@@ -1095,7 +1095,7 @@ class WindfarmPowerDiagnostic:
         restart it: ``{"steps", "seconds"}`` plus, after a step, the
         ``"sums"``/``"max"`` per quantity and the ``"farm"`` pair.  A caller
         that closes the window itself (hex's per-frame sidecar,
-        :mod:`woof.hex.windfarm`) reads it here rather than the internals."""
+        :mod:`woof.hex.wind_farm`) reads it here rather than the internals."""
         if not self.window_steps:
             out = {"steps": 0, "seconds": 0.0}
         else:

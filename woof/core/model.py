@@ -80,11 +80,13 @@ class NestCoupler(Protocol):
         """Read the child only and write restricted data into scratch."""
         ...
 
-    def feedback_commit(self, node: DomainNode) -> None:
-        """PARENT MUTATED: masked merge plus ``ht_coarse`` bookkeeping."""
+    def feedback_commit(self, node: DomainNode, *, start: bool = False) -> None:
+        """PARENT MUTATED: masked merge plus ``ht_coarse`` bookkeeping.
+
+        ``start`` marks the nest-start transaction (med_nest_initial)."""
         ...
 
-    def feedback_finalize(self, node: DomainNode) -> None:
+    def feedback_finalize(self, node: DomainNode, *, start: bool = False) -> None:
         """PARENT MUTATED: restore parent halo/diagnostic validity."""
         ...
 
@@ -589,6 +591,8 @@ def restart_identity_payload(exp) -> dict:
     # experiment and must refuse.
     if experiment.get("spectral_numerics") is None:
         experiment.pop("spectral_numerics", None)
+    if experiment.get("nudging") is None:
+        experiment.pop("nudging", None)
     # Same convention for [physics_params]: ABSENT stays absent, so every
     # pre-feature fingerprint and checkpoint is preserved.  A PRESENT set
     # binds value for value: resuming a checkpoint under other constants is
@@ -706,6 +710,10 @@ def restart_identity_payload(exp) -> dict:
         run = domain.get("run", {})
         drop_default_diffusion_selectors(run)
         drop_default_spp_selectors(run)
+        # ghg_input, absent-stays-absent: 0 is the fixed-gas radiation
+        # every fingerprint written before the key ran; 1 binds.
+        if not run.get("ghg_input", 0):
+            run.pop("ghg_input", None)
         # The historical scalar operator was PD. Its unchanged default
         # leaves old tree checkpoint identities intact; TKE activation binds.
         if run.get("scalar_adv_opt", 1) == 1:
@@ -907,6 +915,22 @@ def restart_identity_payload(exp) -> dict:
         # ... and the MYNN generation, omitted at wrf_461 (every earlier
         # fingerprint), bound by name off it; its gsd_41 TKE option is
         # omitted at its default for the same reason.
+        if run.get("wind_farm_scheme", "off") == "off":
+            run.pop("wind_farm_scheme", None)
+            run.pop("wind_farm_table", None)
+            run.pop("wind_farm_max_dx_m", None)
+            run.pop("wind_farms", None)
+            run.pop("windfarm_tke_factor", None)
+        elif run["wind_farm_scheme"] == "fitch_wrf":
+            # WRF's own turbine list (or a woof table with library curves):
+            # its bytes and its curves' bytes bind beside the path
+            # (woof.core.windfarm_coupling.windfarm_input_digests).
+            from woof.wind_table import bind_wrf_fitch_identity
+            bind_wrf_fitch_identity(run)
+        else:
+            from woof.wind_table import read_table
+            _, run["wind_farm_table_sha256"] = read_table(
+                run["wind_farm_table"], run["wind_farm_scheme"])
         if run.get("bl_mynn_version", "wrf_461") == "wrf_461":
             run.pop("bl_mynn_version", None)
         # Headers before this selector ran the legacy YSU kernel.
@@ -1038,12 +1062,6 @@ def restart_identity_payload(exp) -> dict:
         # land/water type binds.
         if run.get("rrtmg_aer3_type_source", "rural") == "rural":
             run.pop("rrtmg_aer3_type_source", None)
-        # WRF's windfarm_opt, absent-stays-absent: off, no turbine is placed
-        # and nothing launches, so all four keys leave and every earlier
-        # fingerprint keeps its value; on, they bind with the turbine
-        # file's and its curves' SHA-256 (woof.core.windfarm_coupling).
-        from woof.core.windfarm_coupling import bind_windfarm_identity
-        bind_windfarm_identity(run)
         # Source members, not a path alone, identify prescribed radiation.
         from woof.core.rrtmg_smoke_identity import bind_smoke_source_identity
         if run.get("rrtmg_smoke_manifest", ""):
@@ -1447,8 +1465,8 @@ def build_experiment(exp, case_data) -> ExperimentState:
         if exp.feedback == 1 and node._started:
             initial = FeedbackScratch()
             node.coupler.feedback_prepare(node, initial)
-            node.coupler.feedback_commit(node)
-            node.coupler.feedback_finalize(node)
+            node.coupler.feedback_commit(node, start=True)
+            node.coupler.feedback_finalize(node, start=True)
 
     built = ExperimentState(
         root=root, nodes_by_grid_id=MappingProxyType(nodes),
@@ -2011,6 +2029,12 @@ def execute_experiment(
     if seam_experiment is None and context is not None:
         seam_experiment = context.get("experiment")
     spectral_seam = attach_seam(model, seam_experiment, steppers)
+    nudging = getattr(seam_experiment, "nudging", None)
+    if nudging is not None:
+        for node in model.walk_parent_first():
+            if (nudging.for_domain(node.cfg.grid_id) is not None
+                    and getattr(node.state, "_spectral_nudging_owner", None) is None):
+                raise ValueError("NUDGING_ANALYSES_UNBOUND: this domain has no prepared analysis forcing; use the prepared forecast route")
     feedback_scratch = {
         node.cfg.grid_id: FeedbackScratch()
         for node in model.walk_parent_first() if node.parent is not None}
@@ -2233,8 +2257,8 @@ def execute_experiment(
         if exp.feedback == 1:
             initial = FeedbackScratch()
             node.coupler.feedback_prepare(node, initial)
-            node.coupler.feedback_commit(node)
-            node.coupler.feedback_finalize(node)
+            node.coupler.feedback_commit(node, start=True)
+            node.coupler.feedback_finalize(node, start=True)
         if rebound is not None:
             # After the feedback seed, as build_experiment's t = 0 children
             # are seeded before the route attaches their steppers.
@@ -2359,6 +2383,8 @@ def execute_experiment(
                 # One read for every scheme site of this step; raises the
                 # first site's own refusal.  Before anything downstream.
                 step_ledger.drain()
+            from woof.core.nest_round_trip import th_phy_m_t0_after_step
+            th_phy_m_t0_after_step(node)
             refresh_model_time(node.state, clock, after_step=True)
             # Scientific accumulators see every committed domain step. This
             # is not the best-effort telemetry seam below: losing a wind
@@ -2552,7 +2578,21 @@ def execute_experiment(
             if validators:
                 validators[grid_id].require_healthy(
                     phase=f"pre-history.d{grid_id:02d}")
-            history_handler(model, model.node(grid_id), ticks)
+            node = model.node(grid_id)
+            nudging_owner = getattr(node.state, '_spectral_nudging_owner', None)
+            if nudging_owner is not None:
+                nudging_owner.check_at_seam()
+            from woof.wrf_exact import ENABLED as wrf_exact
+            if wrf_exact and node.parent is not None:
+                # WRF writes a nest's frame at an instant it shares with its
+                # parent after the parent's next med_nest_force, whose
+                # couple/uncouple round trip the frame then carries
+                # (woof.core.nest_round_trip.round_tripped_frame_fields).
+                node.state._wrf_frame_round_trip_due = (
+                    int(node.clock.ticks) == int(node.parent.clock.ticks)
+                    and int(node.clock.ticks) < int(node.clock.run_ticks))
+                node.state._wrf_round_trip_run = node.cfg.run
+            history_handler(model, node, ticks)
         if io_manager is not None:
             status.pending_d2h = int(io_manager.pending)
 

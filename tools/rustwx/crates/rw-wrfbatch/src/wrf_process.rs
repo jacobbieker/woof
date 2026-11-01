@@ -116,7 +116,7 @@ pub struct WrfProcessOptions {
     /// and the catalog listing still answers), and the grid file carries the
     /// georeference the basemap is drawn on regardless.
     ///
-    /// WHAT BREAKAGE THIS PREVENTS (gate law): `gpuwm render RUN --products
+    /// WHAT BREAKAGE THIS PREVENTS (gate law): `woof render RUN --products
     /// 2m_temperature` paid the whole import for one picture -- 14 s of a 15 s
     /// invocation on a 1000x1000x50 frame (open and index, 13 parcel
     /// diagnostics, the REFL_10CM volume, the isotherm and water-path columns,
@@ -2229,7 +2229,7 @@ pub const REUSED_IMPORT_PROGRESS: &str = "Reusing the imported WRF run";
 
 /// The file a complete import keeps inside its published run directory.
 ///
-/// WHAT BREAKAGE THIS PREVENTS (gate law): `gpuwm render` asks the catalog
+/// WHAT BREAKAGE THIS PREVENTS (gate law): `woof render` asks the catalog
 /// what a set of frames can draw (`--list-products`) and then renders them,
 /// two launches into one store, and each launch imported every frame.  Nine
 /// long windows over four 750 m frames cost 219 CPU-s through the door
@@ -2568,10 +2568,33 @@ fn read_wrf_products(
             // 54 hPa low over Antarctica, Greenland and high terrain against the
             // GFS analysis on the 120 km mesh (79 hPa on 15 km), with the state's
             // own surface pressure right to 0.05 hPa.
+            // Either reduction is then smoothed over ground above 500 m the way
+            // operational graphics draw it (crate::mslp_smoothing): at 3 km the
+            // raw reduction over the Rockies was a tangle of closed isobars.
             if options.should_process("slp", Some("mslp"), WrfProductGroup::Core) {
-                if file.global_attr_str("MPAS_BRIDGE_SCHEMA").is_ok() {
-                    match mpas_bridge_mslp(file, timeidx, shape.len()) {
-                        Ok(values) => push_canonical_values(
+                let reduced = if file.global_attr_str("MPAS_BRIDGE_SCHEMA").is_ok() {
+                    mpas_bridge_mslp(file, timeidx, shape.len())
+                } else {
+                    compute_var(file, "slp", timeidx, Some("Pa"))
+                        .and_then(|output| single_plane(output, shape.len()))
+                        .map(|(values, _units)| values)
+                };
+                match reduced {
+                    Ok(mut values) => {
+                        if let Ok(terrain) = file.terrain(timeidx) {
+                            if terrain.len() == values.len() {
+                                let terrain: Vec<f32> = terrain.iter().map(|&z| z as f32).collect();
+                                crate::mslp_smoothing::display_mslp(
+                                    &mut values,
+                                    &terrain,
+                                    &grid.lat_deg,
+                                    &grid.lon_deg,
+                                    grid.shape.nx,
+                                    grid.shape.ny,
+                                );
+                            }
+                        }
+                        push_canonical_values(
                             &mut fields,
                             &grid,
                             projection.clone(),
@@ -2579,19 +2602,12 @@ fn read_wrf_products(
                             core_field_selector("mslp"),
                             "Pa",
                             values,
-                        ),
-                        Err(err) => fields.notes.push(format!("mslp unavailable: {err}")),
+                        )
                     }
-                } else {
-                    push_core!(
-                        "slp",
-                        "mslp",
-                        core_field_selector("mslp"),
-                        Some("Pa")
-                    );
+                    Err(err) => fields.notes.push(format!("mslp unavailable: {err}")),
                 }
             }
-            // Surface pressure (Pa): required by the skew-T column builder. WRF PSFC
+            // Surface pressure (Pa), required by the skew-T column builder. WRF PSFC
             // is a raw field (no `getvar` diagnostic), so push it explicitly with a
             // forced "Pa" unit rather than through `push_core!`.
             if options.should_process("PSFC", Some("surface_pressure"), WrfProductGroup::Core) {

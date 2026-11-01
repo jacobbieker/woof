@@ -167,10 +167,7 @@ def test_the_chem_block_is_appended_after_every_older_field():
     from woof.config import CHEM_RUN_FIELDS, FIRE_RUN_FIELDS
 
     names = [f.name for f in dataclasses.fields(RunConfig)]
-    # The fork's wind-farm keys (WRF windfarm_opt and its companions) are
-    # appended after every upstream field.
-    from woof.config import WINDFARM_RUN_DEFAULTS
-    # After them: rrtmg_spectral_output, couple_farms, the woof.radtran
+    # After upstream's fields: rrtmg_spectral_output, couple_farms, the woof.radtran
     # diagnostic's eight keys, shcu_physics and cu_rad_feedback
     # (tests/test_radiation_driver_options.py holds the order), then
     # solar_diagnostics, the radtran aerosol key, use_theta_m and
@@ -183,8 +180,6 @@ def test_the_chem_block_is_appended_after_every_older_field():
             "do_avgflx_em", *NEW_TAIL]
     assert names[-len(tail):] == tail
     names = names[:-len(tail)]
-    assert names[-len(WINDFARM_RUN_DEFAULTS):] == list(WINDFARM_RUN_DEFAULTS)
-    names = names[:-len(WINDFARM_RUN_DEFAULTS)]
     # Appended last after the campaign, keyword-only: sea ice's real.exe
     # threshold (4c82704f8f) and the HRRR v4 output controls
     # (lane/hrrr-v4-output: e55b68accb, bd4a1c2090, f80ac46aeb).
@@ -194,8 +189,20 @@ def test_the_chem_block_is_appended_after_every_older_field():
              # 2.9.7, keyword-only: the HRRR v4 climate statistics
              # (lane/hrrr-v4-clwrf) and tc/nest's fixed-frame archive.
              "output_diagnostics", "diag_int", "wind_int",
-             "nest_accumulation_archive"]
+             "nest_accumulation_archive",
+             # 2.9.10, keyword-only: WRF's ghg_input (fix/wrf461-2dom-exact,
+             # placed last by d1e35bf2da).
+             "ghg_input", "umove", "vmove",
+             # 2.9.11, keyword-only: the Fitch wind-farm controls
+             # (labs/windfarm 73cb37dd11), folded after ds-umove's frame.
+             "wind_farm_scheme", "wind_farms", "wind_farm_table",
+             "windfarm_tke_factor", "wind_farm_max_dx_m",
+             # fix/hailcast, keyword-only: the HAILCAST generation.
+             "hailcast_version"]
     assert names[-len(later):] == later
+    for field in dataclasses.fields(RunConfig):
+        if field.name in ("umove", "vmove"):
+            assert field.kw_only and field.default == 0.0
     names = names[:-len(later)]
     # The 2.9.4 capabilities campaign's keyword-only keys follow the fire
     # block: lane/cap-waves-couple, cap-hail, cap-seaice, cap-eclipse and

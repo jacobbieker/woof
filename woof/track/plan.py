@@ -1091,9 +1091,13 @@ def apply_track_tables(document: dict, *, times: PlanTimes,
         **({"hub_sites": [{"site_id": n, "lat": la, "lon": lo}
                           for n, la, lo in options.hub_sites]}
            if options.hub_sites else {}),
-        "icechunk": {"url": icechunk_url,
-                     "domains": sorted(int(t["grid_id"]) for t in domains),
-                     "delete_after_commit": True, "compress": True},
+        # Upstream's store export (woof.output_formats) with the fork's
+        # live-export policy: only the track domains, each frame deleted
+        # once committed.
+        "formats": ["netcdf", "icechunk"],
+        "icechunk_store": icechunk_url,
+        "icechunk_domains": sorted(int(t["grid_id"]) for t in domains),
+        "icechunk_delete_after_commit": True,
     }
     document.pop("relocation", None)
     if relocation:

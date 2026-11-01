@@ -149,10 +149,10 @@ def plan_suite(cfg, *, members=1, registry=None):
         "swint_opt": 0, "aer_opt": 0,
         # The Fitch wind farm runs in the member physics driver's PBL slot;
         # the packed batch has no wind-farm stage.
-        "windfarm_opt": 0,
+        "wind_farm_scheme": "off",
     }
     for key, required in selections.items():
-        value = _value(cfg, key, 0)
+        value = _value(cfg, key, "off" if key == "wind_farm_scheme" else 0)
         if value != required:
             if key == "sf_surface_physics" and value == 3:
                 reasons.append("sf_surface_physics=3 lacks a qualified packed RUC state and fused land driver graph")

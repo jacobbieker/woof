@@ -289,7 +289,7 @@ def initialize_prepared_physics(
         # The prepared statics carry the sub-grid orographic statistics when
         # the preparation ran with topo_wind / gwd_opt on; read only then.
         terrain_drag_static=static,
-        # WRF's windfarm_opt = 1 places its turbines on this grid; a row
+        # wind_farm_scheme = "fitch_wrf" places its turbines on this grid; a row
         # slab's state is refused against it by shape.
         windfarm_grid=grid,
         **lake_physics_inputs(cfg, static),

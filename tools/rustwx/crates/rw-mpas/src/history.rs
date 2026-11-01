@@ -373,15 +373,35 @@ pub struct InitFields {
 /// needs the ground: MSLP ("mslp unavailable: HGT"), and with it the 2 m
 /// temperature and dewpoint maps that contour it, SBCAPE/MUCAPE, the 0 C
 /// height, IVT and simulated IR (column planes "read terrain"), precipitation
-/// type (height above ground); `gpuwm prep --source hex-global` refused the
+/// type (height above ground); `woof prep --source hex-global` refused the
 /// export (`terrain_height`) and no column store was written.  The init the
 /// converter already reads for PHB holds the terrain that run integrated on.
 /// A history that carries `ter` (the ArWen-physics route's) keeps its own
-/// words, so its frames are unchanged.
+/// words, so its frames are unchanged -- unless those words were never filled
+/// ([`history_invariant_unset`]).
 pub const INIT_FALLBACK_FIELDS: &[(&str, &str)] = &[("HGT", "ter")];
 
 fn is_init_fallback(wrf_name: &str) -> bool {
     INIT_FALLBACK_FIELDS.iter().any(|(wrf, _)| *wrf == wrf_name)
+}
+
+/// True when a history's copy of an init-fallback invariant was written but
+/// never filled: every word zero while the run's init carries a nonzero one.
+/// The init's words then stand in, as for a history that omits the field.
+///
+/// THE BREAKAGE THIS PREVENTS (RRFS-MPAS hrrrv5 maps, 2026-10-28): the RRFS
+/// fork's history stream writes `ter`, and the run never fills it, so every
+/// word is 0.0 -- native MPAS-Model-rrfs 1d6e370e (pinned strict build) and
+/// hex write the same zeros (lam7k, 9,957 cells: init `ter` 134.7-344.2 m,
+/// history `ter` 0.0 everywhere, both models).  The converter kept the
+/// history's zeros as `HGT`, so the renderer's MSLP reduction ran from sea
+/// level and drew the surface pressure (the mv3km cut: 864-1013 hPa contours
+/// following the terrain, lows of 867.5 and 940.8 hPa, while the model's own
+/// diag mslp read 989-1023 hPa), and every height-above-ground product read
+/// heights off by the terrain.  A domain that is all sea level has an all-zero
+/// init `ter` too, so its frames keep the history's words.
+fn history_invariant_unset(history: &[f32], init: &[f32]) -> bool {
+    history.iter().all(|v| *v == 0.0) && init.iter().any(|v| *v != 0.0)
 }
 
 /// Hash `path` (refusing a mismatch against `init_sha256`) and read every
@@ -621,7 +641,7 @@ fn carries_mapped(file: &netcrust::File, wrf_name: &str, mpas_name: &str) -> boo
 ///   ([`diag_companion`]) when that file exists.
 ///
 /// THE BREAKAGE THIS PREVENTS (hex 0.4.0 completeness row #39, 2026-10-16):
-/// `gpuwm-hex render` on an RRFS-MPAS run's own output stopped with
+/// `woof hex render` on an RRFS-MPAS run's own output stopped with
 /// "history has no latCell" although `--mesh` was given, and the run's 2 m
 /// temperature and reflectivity, which the fork writes to `diag.*.nc`, could
 /// not be drawn at all.
@@ -843,10 +863,13 @@ fn read_history_body(
                 if !requested(name) {
                     continue;
                 }
-                // An invariant the history omitted comes from the init; one it
-                // carries keeps the history's words.
+                // An invariant the history omitted, or carried unfilled, comes
+                // from the init; one it carries filled keeps the history's words.
                 if is_init_fallback(name) {
-                    if !fields.contains_key(name) {
+                    let take = fields
+                        .get(name)
+                        .map_or(true, |(history, _)| history_invariant_unset(history, &value.0));
+                    if take {
                         fields.insert(name.clone(), value.clone());
                         absent.retain(|missing| missing != name);
                     }
@@ -864,6 +887,14 @@ fn read_history_body(
                     absent.push(mapping.wrf_name.to_string());
                 }
             }
+        }
+    }
+
+    // The parameterised convection's reflectivity joins REFC on the mesh, before any remap
+    // (fieldmap::add_convective_reflectivity says why).
+    if let Some((rate, 1)) = fields.get("CUPREC").map(|(v, l)| (v.clone(), *l)) {
+        if let Some((refc, 1)) = fields.get_mut("REFC").map(|(v, l)| (v, *l)) {
+            crate::fieldmap::add_convective_reflectivity(refc, &rate);
         }
     }
 
@@ -1205,19 +1236,36 @@ pub fn read_history_cells_on_mesh(
                 }
             }
             // The same invariants the frame path completes from the init
-            // ([`INIT_FALLBACK_FIELDS`]), for a wanted one the history omitted.
+            // ([`INIT_FALLBACK_FIELDS`]), for a wanted one the history omitted
+            // or carried unfilled ([`history_invariant_unset`]).
             for (wrf_name, mpas_name) in INIT_FALLBACK_FIELDS.iter().copied() {
-                if !wanted.contains(&wrf_name) || fields.contains_key(wrf_name) {
+                let carried_filled = fields
+                    .get(wrf_name)
+                    .is_some_and(|(history, _)| history.iter().any(|v| *v != 0.0));
+                if !wanted.contains(&wrf_name) || carried_filled {
                     continue;
                 }
                 if let Some(value) = read_cell_field_at(&init, mpas_name, mesh_cells, cells)? {
-                    fields.insert(wrf_name.to_string(), value);
-                    absent.retain(|missing| missing != wrf_name);
+                    let take = fields
+                        .get(wrf_name)
+                        .map_or(true, |(history, _)| history_invariant_unset(history, &value.0));
+                    if take {
+                        fields.insert(wrf_name.to_string(), value);
+                        absent.retain(|missing| missing != wrf_name);
+                    }
                 }
             }
             init_resolved = Some(path.to_path_buf());
         }
         None => absent.extend(wanted_from(FieldSource::Init).map(|(w, _)| w.to_string())),
+    }
+
+    // The parameterised convection's reflectivity joins REFC on the mesh, before any remap
+    // (fieldmap::add_convective_reflectivity says why).
+    if let Some((rate, 1)) = fields.get("CUPREC").map(|(v, l)| (v.clone(), *l)) {
+        if let Some((refc, 1)) = fields.get_mut("REFC").map(|(v, l)| (v, *l)) {
+            crate::fieldmap::add_convective_reflectivity(refc, &rate);
+        }
     }
 
     if let Some((_, levels)) = fields.get("PHB") {

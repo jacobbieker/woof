@@ -405,10 +405,10 @@ def test_a_remedy_label_names_exactly_the_edit_its_remedy_settings_makes(
     # five closures; their labels name only the selector their edit sets
     # to zero.  FAST_SBM (mp30) refuses RRTMGP with the legacy-RRTMG
     # remedy, and Purdue Lin (mp2) and MAD-WRF (mp96) do the same.  The
-    # wind farm adds one windfarm_opt remedy (MYNN only) on each closure.
+    # wind farm adds one wind_farm_scheme remedy (MYNN only) on each closure.
     # SMS-3DTKE (km_opt=5) is a sixth closure and also names its surface
     # layer (sf_sfclay_physics=1).  By selector: diff_opt 4, gwd_opt 6,
-    # topo_wind 6, windfarm_opt 6, bl_pbl_physics 2, sf_sfclay_physics 1,
+    # topo_wind 6, wind_farm_scheme 6, bl_pbl_physics 2, sf_sfclay_physics 1,
     # ra_rrtmg_variant 3.
     assert checked == 28
 

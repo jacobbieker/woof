@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+Merged upstream WOOF 1.1.5 (with 1.1.4). Where upstream built a feature the
+fork already had, upstream's keys and flags are now the only ones:
+
+- Wind farms: `wind_farm_scheme`, `wind_farms` (and `--wind-farms`),
+  `windfarm_tke_factor`. The fork's WRF v4.7.1 Fitch scheme is
+  `wind_farm_scheme = "fitch_wrf"`, reading `wind_farms` as a WRF
+  `windturbines.txt`, a `windturbines-ij.txt` (WRF's `windfarm_ij = 1`) or a
+  woof turbine table with turbine-library curves; it writes WRF's `POWER`,
+  runs on hex's unequal-area cells (`--physics wind_farm_scheme=fitch_wrf
+  --physics wind_farms=FILE`), and `woof import-namelist` selects it for
+  `windfarm_opt = 1`. The `windfarm_opt`, `windfarm_ij` and
+  `windfarm_turbine_file` config keys are gone.
+- Icechunk: `woof go` exports through `--output-format netcdf,icechunk` /
+  `--icechunk-store` (`[output] formats` / `icechunk_store`). `--icechunk URL`
+  and `[output] icechunk = {...}` are gone; `[output]
+  icechunk_delete_after_commit` (or `--icechunk-delete-after-commit`) and
+  `icechunk_domains` carry the fork's delete-after-commit backpressure and
+  domain subset, and `{name}` in the store is the `[experiment] name`.
+- LES nests: upstream's `--les-below-m`, `--les-closure` and
+  `--les-inflow-seeding`; a tree suite whose nests run PBL off is still
+  counted as LES in the gray-zone advisory.
+
 New:
 
 - A live nest can carry its own eta ladder (WRF `vert_refine_method = 2`): a
@@ -918,6 +940,71 @@ Fixed:
   those inputs already exist. Under `--prepare-only` the forecast memory
   gate warns instead of refusing and the forecast-device check is
   skipped, since no forecast starts.
+
+## 1.1.5 (2026-10-31)
+
+WOOF 1.1.5 stays on engine 2.9.11 and the hex model 0.4.11. Forecast answers do not change.
+
+Fixed:
+
+- A hex run missing its geography now tells you to run `woof fetch-geog`.
+  Other messages, tables and pages that named a command WOOF does not install
+  name the `woof` command.
+- The README said the hex model runs only on CUDA 13. It runs on either extra.
+- Comments, docs and test records are tidied, and stray bytecode is gone from
+  the source tree.
+
+## 1.1.4 (2026-10-31)
+
+WOOF 1.1.4 takes engine 2.9.11 and the hex model 0.4.11. Forecast answers change.
+
+New:
+
+- Hex runs NOAA's RRFS v2 `hrrrv5` suite with no native library, from
+  RRFS's own start state, on zoom globes and on any region (circle, ellipse
+  or drawn outline), on one card or several.
+- Wind farms (`--wind-farms uswtdb|PATH`, opt-in): turbine drag and
+  turbulence inside the boundary layer, with turbine and farm power in
+  history, on regional runs and hex globes.
+- Nudging toward the source analyses (`--nudging spectral|grid`, opt-in).
+- Simulated radar at C- and X-band as well as S-band.
+- Optional Icechunk output (`--output-format netcdf,icechunk`).
+
+Changed:
+
+- History frames are written lossless-compressed: the same values in about
+  a third of the disk. `--history-compression none` writes classic frames.
+- Starts from HRRR, GFS, GDAS, GEFS, RRFS, IFS, AIFS and ERA5 download only
+  the records they read (an HRRR start moves about 40 % of the bytes); the
+  prepared start is unchanged.
+- Hex multi-card runs use one process per card and scale on any Python.
+
+Fixed:
+
+- Hail: HAILCAST now uses the hail stone model NOAA's operational HRRR runs,
+  by default. WRF 4.6.1's model melted most stones before they reached the
+  ground and left thin, broken hail swaths; it is still selectable with
+  `hailcast_version = "wrf_461"`. HAILCAST is a diagnostic, so the forecast
+  itself does not change.
+- Runs with Kain-Fritsch cumulus and Thompson microphysics no longer show
+  the cumulus scheme's drizzle as 20-30 dBZ echoes or strips along a coarse
+  grid's edges.
+- A source that carries cloud and rain (HRRR and others) no longer streams
+  convective cells in through the grid's edges as straight rain bands.
+- Nest-downs at 600 m or finer take 100 m land cover and soil, and those at
+  250 m or finer run as LES.
+- A nested run on a source that posts lead by lead starts on the first
+  leads instead of waiting for the cycle's last one.
+- HRRR-recipe runs with a companion export no longer exit 1 after a
+  finished forecast.
+- A case prepares the same lake temperatures from a cold or a warm cache.
+- Starts from ECMWF open data and AIFS have sea ice.
+- Sea-level pressure maps are smoothed over high terrain.
+- Soundings show MOSHE as `--` without an inflow layer and colour the MCS
+  Index the right way round.
+- Hex starts from GFS and HRRR begin with the source's cloud, rain, ice,
+  snow and graupel, so the first radar map shows the starting storms.
+- Hex storm-following regions on MPAS physics move about four times faster.
 
 ## 1.1.3 (2026-10-28)
 

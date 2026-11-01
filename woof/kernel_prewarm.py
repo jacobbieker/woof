@@ -380,7 +380,7 @@ _COMPOSED_LOADERS = {
 _DEVICE_LOADERS = {
     "terrain_drag_composed": ("terrain_drag", "_module"),
     "thompson_fork_unit": ("thompson_fork", "_module"),
-    # WRF's windfarm_opt = 1 (the fork's Fitch coupling): its own direct
+    # wind_farm_scheme = "fitch_wrf" (WRF's windfarm_opt = 1): its own direct
     # NVRTC unit, compiled per device like the terrain drag.
     "windfarm_fitch_composed": ("windfarm_fitch", "_module"),
     # WRF vertical grid nesting (a nest on its own eta ladder): its own
@@ -875,7 +875,10 @@ def start_plan(experiment) -> dict | None:
             submitted = submit_static(experiment, hydro=hydro_wanted())
             if submitted:
                 record["static_jobs"] = submitted
-        kernel_plan.close()
+        # Keep the existing process compiler available for kernels discovered
+        # by the real first step, as warm_static does for its forecast column.
+        # Closing here diverted every dynamic request back onto one CPU.
+        # The plan's exit drop owns worker shutdown, including abnormal exit.
         return record
     except Exception:  # noqa: BLE001 - nothing here may fail a run
         return None

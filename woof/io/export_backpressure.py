@@ -1,7 +1,8 @@
 """Hold history writing while a delete-after-commit export catches up.
 
-With ``[output.icechunk] delete_after_commit`` the exporter deletes each
-wrfout once it is committed, so the output disk holds only the export's
+With ``[output] icechunk_delete_after_commit`` (or
+``--icechunk-delete-after-commit``) the store export deletes each wrfout
+once it is committed, so the output disk holds only the export's
 backlog.  The model, though, does not wait for the exporter: on a host
 whose CPUs the forecast also uses, the exporter fell 660 frames (11 h of
 model time) behind a 1 km tree, the disk filled, and the forecast died
@@ -25,6 +26,11 @@ import time
 from pathlib import Path
 from typing import Callable, Mapping
 
+#: Set while a delete-after-commit store export runs
+#: (woof.output_formats.HistoryOutputs): JSON ``{"domains": [grid ids] |
+#: null}`` (null: every grid).  The history writers and the child stages'
+#: output-disk reviews (woof.output_disk) read it.
+LIVE_EXPORT_DELETE_ENV = "WOOF_LIVE_EXPORT_DELETES"
 RESERVE_FLOOR_BYTES = 8 * 1024 ** 3
 FRAMES_HELD = 3
 POLL_SECONDS = 15.0
@@ -35,8 +41,6 @@ DEFAULT_MAX_WAIT_S = 6 * 3600.0
 
 def exported_grid(grid_id: int | None, env: Mapping[str, str]) -> bool:
     """Whether a delete-after-commit export takes this grid's frames."""
-    from woof.icechunk_export import LIVE_EXPORT_DELETE_ENV
-
     raw = env.get(LIVE_EXPORT_DELETE_ENV)
     if not raw:
         return False

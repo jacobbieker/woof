@@ -178,8 +178,10 @@ the source file each frame was written from.
 
 ## Live export from `woof go`
 
-`woof go` with `[output] icechunk = { url = "..." }` or `--icechunk URL`
-exports a forecast's frames while the forecast is running
+`woof go` with `[output] formats = ["netcdf", "icechunk"]` and
+`icechunk_store` (or `--output-format netcdf,icechunk --icechunk-store
+URL`) exports a forecast's frames while the forecast is running, through
+upstream's store writer
 ([PROGRESS.md](../public/PROGRESS.md#exporting-frames-to-icechunk-while-the-run-goes)).
 `woof icechunk-export` resumes or completes such an export, and also
 exports run folders after the fact. Both use `write_gridded_segment`, one

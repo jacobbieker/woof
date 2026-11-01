@@ -54,7 +54,7 @@ def _live_export_from_env():
     import os
     from types import SimpleNamespace
 
-    from woof.icechunk_export import LIVE_EXPORT_DELETE_ENV
+    from woof.io.export_backpressure import LIVE_EXPORT_DELETE_ENV
 
     raw = os.environ.get(LIVE_EXPORT_DELETE_ENV)
     if not raw:

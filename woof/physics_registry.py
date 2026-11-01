@@ -3436,9 +3436,9 @@ def validate_physics_plan(
                     f"{name}={value!r} needs {spec.get('read_when')}; "
                     "the inactive consumer would discard its nondefault value"))
         # The converse: a knob whose default is no usable value must be set
-        # whenever a setting it is read under is on (windfarm_turbine_file
-        # under windfarm_opt = 1 -- with no turbines the scheme would run as
-        # windfarm_opt = 0 under another name, and the run door refuses it).
+        # whenever a setting it is read under is on (wind_farms under
+        # wind_farm_scheme = "fitch_wrf" -- with no turbines the scheme would
+        # run as off under another name, and the run door refuses it).
         for name, spec in parameter_specs.items():
             if (not isinstance(spec, dict)
                     or spec.get("active_value_policy") != "required-when-read"):

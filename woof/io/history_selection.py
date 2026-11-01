@@ -347,10 +347,10 @@ WINDFARM_FIELD_REASONS: dict[str, str] = {
     "POWER_FARM": "the domain's summed turbine power at the frame",
     "POWER_FARM_MEAN": "time-mean summed power over the interval: energy "
                        "yield",
-    # WRF's own POWER (windfarm_opt = 1, woof/core/windfarm_coupling.py):
-    # the in-model turbines' power per cell, with their wakes.
-    "POWER": "per-cell power of the in-model Fitch turbines (windfarm_opt "
-             "= 1): generation with the farm's own wakes",
+    # The in-model turbines' POWER (wind_farm_scheme fitch or fitch_wrf,
+    # woof/core/wind_farm.py): power per cell, with their wakes.
+    "POWER": "per-cell power of the in-model Fitch turbines "
+             "(wind_farm_scheme): generation with the farm's own wakes",
 }
 
 #: The ``balloon`` preset: what a high-altitude balloon track and the
@@ -491,23 +491,26 @@ PRODUCT_COUNT_BASIS = (
 #: ``history_queue_depth`` is how many history frames each domain's writer
 #: may hold queued behind the one it is writing
 #: (:mod:`woof.io.history_staging`); it is tree-wide only too.
-#: ``icechunk`` asks ``woof go`` to export each history frame to an
-#: Icechunk repository as it lands (:mod:`woof.icechunk_export`); it is
-#: validated here and read by ``go``, and selects nothing on the tape.
+#: ``formats`` / ``icechunk_store`` are upstream's store export
+#: (:mod:`woof.output_formats`); ``icechunk_delete_after_commit`` and
+#: ``icechunk_domains`` its export policy (the fork's live export,
+#: :class:`woof.output_formats.ExportPolicy`).  They select nothing on the
+#: tape.
 OUTPUT_KEYS: frozenset[str] = frozenset(
-    {"preset", "history_vars", "history_drop",
+    {"formats", "icechunk_store", "preset", "history_vars", "history_drop",
      "hub_wind", "hub_heights_m", "hub_sample_interval_s", "hub_sites",
      "windfarm_turbines",
-     "async_checkpoints", "history_queue_depth", "icechunk",
+     "async_checkpoints", "history_queue_depth",
+     "icechunk_delete_after_commit", "icechunk_domains",
      "full_history_interval_s", "between_preset", "between_history_add"})
 
 #: The keys a ``[[domain]]`` ``output = {...}`` accepts: the tree-wide
-#: ones less ``icechunk``, which exports every domain of the tree into
-#: one repository (one group per domain) and so belongs to the tree.
+#: ones less the store export's policy, which belongs to the tree.
 #: ``async_checkpoints`` and ``history_queue_depth`` stay listed so the
 #: experiment loader can refuse them on a domain by name
 #: (woof/experiment.py) rather than as unknown.
-DOMAIN_OUTPUT_KEYS: frozenset[str] = OUTPUT_KEYS - {"icechunk"}
+DOMAIN_OUTPUT_KEYS: frozenset[str] = OUTPUT_KEYS - {
+    "icechunk_delete_after_commit", "icechunk_domains"}
 
 #: ``hub_heights_m`` when ``hub_wind = true`` names none: the common
 #: onshore/offshore turbine hub range, in m above ground level.
@@ -669,11 +672,14 @@ def output_key_rows(*, tree_wide: bool = True):
     from woof.config_keys import KeyRow, key_rows
 
     tree_rows = (KeyRow(
-        "icechunk", ("string", "table"), None,
-        "woof go exports each history frame to this Icechunk repository "
-        "as it lands: a URL, or { url, branch, compress, zstd_clevel, "
-        "group_prefix, threads, domains, delete_after_commit }; {name} "
-        "in url is the [experiment] name."),) if tree_wide else ()
+        "icechunk_delete_after_commit", "boolean", False,
+        "with the icechunk output format: delete each history frame once "
+        "the store has committed it, so the disk holds only the export's "
+        "backlog; the model waits for space when the disk runs low"),
+        KeyRow(
+        "icechunk_domains", "array", None,
+        "with the icechunk output format: export only these grid ids "
+        "(default every domain)")) if tree_wide else ()
     return key_rows(*tree_rows,
         KeyRow("preset", "string", "full",
                "Named history set: full (default), minimal, severe, "
@@ -994,6 +1000,8 @@ class HistorySelection:
     between_history_add: tuple[str, ...] = ()
     #: Where this block was read from, for refusal text only.
     source: str = "<config>"
+    formats: tuple[str, ...] = ("netcdf",)
+    icechunk_store: str | None = None
     #: The in-model hub-height wind diagnostic this domain asked for, or
     #: ``None`` (the default: no diagnostic, no hub fields, nothing moves).
     #: It lives here and not on RunConfig for the reason the rest of
@@ -1028,6 +1036,8 @@ class HistorySelection:
     # as a plain attribute.
 
     def __post_init__(self) -> None:
+        from woof.output_formats import selected
+        selected(self.formats)
         if self.preset not in HISTORY_PRESETS:
             raise ValueError(
                 f"[output] preset = {self.preset!r} in {self.source} is not "
@@ -1165,10 +1175,10 @@ class HistorySelection:
         ``base_dir`` is the config file's directory: a relative
         ``hub_sites`` path resolves from there first, then from the
         working directory.  ``tree_wide=False`` reads a ``[[domain]]``
-        ``output`` table, which refuses ``icechunk`` by name.  An
-        ``icechunk`` value is validated
-        (:meth:`woof.icechunk_export.ExportOptions.from_mapping`) and not
-        kept: it selects nothing on the tape, and ``woof go`` reads it.
+        ``output`` table, which refuses the store export's tree-wide
+        policy by name.  That policy is validated
+        (:func:`woof.output_formats.export_policy_from_table`) and not
+        kept: it selects nothing on the tape.
         """
         if table is None:
             return FULL
@@ -1177,23 +1187,16 @@ class HistorySelection:
                 f"[output] of {source} must be a table, e.g. "
                 '[output] preset = "minimal", got '
                 f"{table!r}.")
-        if not tree_wide and "icechunk" in table:
+        policy_keys = sorted({"icechunk_delete_after_commit",
+                              "icechunk_domains"} & set(table))
+        if not tree_wide and policy_keys:
             raise ValueError(
-                f"icechunk in output of {source} is tree-wide: one "
-                "repository holds every domain, one group each.  Move it "
-                "to the tree-wide [output] table.")
-        if "icechunk" in table:
-            try:
-                from woof.icechunk_export import ExportOptions
-            except ImportError:
-                # The standalone preparation wheel carries no exporter (it
-                # exports no forecast); woof go validates the table itself.
-                ExportOptions = None
-            if ExportOptions is not None:
-                # {name} in its url is woof go's to fill.
-                ExportOptions.from_mapping(table["icechunk"], source=source,
-                                           base_dir=base_dir,
-                                           allow_template=True)
+                f"{', '.join(policy_keys)} in output of {source} is "
+                "tree-wide: the store export runs once for the tree.  Move "
+                "it to the tree-wide [output] table.")
+        if policy_keys:
+            from woof.output_formats import export_policy_from_table
+            export_policy_from_table(table, source=source)
         unknown = sorted(set(table) - OUTPUT_KEYS)
         if unknown:
             suggestions = "".join(
@@ -1249,7 +1252,12 @@ class HistorySelection:
             raise ValueError(
                 f"[output] full_history_interval_s of {source} must be a "
                 f"number of seconds, got {interval!r}.")
+        formats = table.get("formats", ("netcdf",))
+        if not isinstance(formats, (list, tuple)):
+            raise ValueError(f"[output] formats of {source} must be a list of row names")
         selection = cls(
+            formats=tuple(formats),
+            icechunk_store=table.get("icechunk_store"),
             preset=str(table.get("preset", "full")),
             history_vars=tuple(table.get("history_vars", ()) or ()),
             history_drop=tuple(table.get("history_drop", ()) or ()),
@@ -1541,6 +1549,60 @@ FULL = HistorySelection()
 _BETWEEN_CACHE: dict = {}
 
 
+#: What a QUICK-LOOK frame need not carry although every full frame must:
+#: ``T`` (the one 3-D volume a reader needed to open a wrfout -- the vendored
+#: wrf-core now takes the grid's dimensions from ZNU and XLAT when T is
+#: absent) and ``PHB`` (the base geopotential, which never changes over a
+#: fixed domain and is in every full frame).  A quick-look frame keeps either
+#: one only when its own variable list names it.
+#:
+#: Breakage it prevents (WOOF run_0e9d51235e54e762, 2026-10-28): 22
+#: quick-look frames of 200 x 150 x 49 for eight chosen fields were 26.4 MB
+#: each, and T and PHB -- written whatever the user chose -- were about 45 %
+#: of every frame.
+QUICKLOOK_UNFORCED_FIELDS: frozenset[str] = frozenset({"T", "PHB"})
+
+#: The global attribute a quick-look frame of a FIXED domain carries: the
+#: path, relative to the frame's own folder, of the domain's first full
+#: frame, where a reader finds the static fields the quick-look frame left
+#: out (wrf-core ``WrfFile`` reads PHB, PB, MUB and HGT there).
+STATIC_FRAME_ATTR = "GPUWM_STATIC_FRAME"
+
+
+@dataclass(frozen=True)
+class QuickLookSelection(HistorySelection):
+    """A quick-look stream's selection (``quicklook = {...}`` on a domain).
+
+    The same fields and validation as :class:`HistorySelection` (so a resolved
+    document and every fingerprint read from it keep their bytes); it only
+    stops forcing :data:`QUICKLOOK_UNFORCED_FIELDS` into the frame.
+    """
+
+    def keeps(self, name: str) -> bool:
+        if (name in QUICKLOOK_UNFORCED_FIELDS and self._include is not None
+                and name not in self._include):
+            return False
+        return super().keeps(name)
+
+    def on_moving_domain(self) -> "HistorySelection":
+        """The selection for a domain that moves: PHB changes with every
+        move, so it stays in each frame (T may still be left out)."""
+        return _MovingQuickLookSelection(**{
+            name: getattr(self, name)
+            for name in self.__dataclass_fields__})
+
+
+@dataclass(frozen=True)
+class _MovingQuickLookSelection(QuickLookSelection):
+    def keeps(self, name: str) -> bool:
+        if name == "PHB":
+            return True
+        return super().keeps(name)
+
+    def on_moving_domain(self) -> "HistorySelection":
+        return self
+
+
 def _between_selection(preset, add, source) -> HistorySelection:
     """The between-hours subset as an ordinary selection (cached)."""
     key = (preset, tuple(add), source)
@@ -1591,6 +1653,9 @@ __all__ = [
     "WINDFARM_STRUCTURAL_EXEMPT",
     "WindfarmConfigError",
     "WindfarmPowerRequest",
+    "QUICKLOOK_UNFORCED_FIELDS",
+    "QuickLookSelection",
+    "STATIC_FRAME_ATTR",
     "lost_products",
     "parse_hub_wind",
     "parse_windfarm_power",

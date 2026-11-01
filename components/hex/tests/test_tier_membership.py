@@ -212,6 +212,26 @@ DUAL_TIER_ALLOWED: dict[str, str] = {
     "tests/test_mpas_wrfsolar_eps_v842.py":
         "tier 1 takes the &wrfsolar_eps group, refusals and door; tier 3 "
         "takes the pattern cadence, restore and scheme seats on the device",
+    "tests/test_aerosol_workspace.py":
+        "tier 1 takes the tiled launch's full-field, bounded-workspace plan; tier 3 takes the aerosol "
+        "workspace tiles bitwise on the device",
+    "tests/test_cloud_merge_oracle.py":
+        "tier 1 takes the CPU cloud-merge oracle; tier 3 takes the device merge against it",
+    "tests/test_transport_species_batch.py":
+        "tier 1 takes batch budgets, halo round schedules, signed-zero plans and host launches; tier 3 "
+        "takes the device kernel launches bitwise",
+    "tests/test_rrfs_convective_inplace.py":
+        "tier 1 takes the will-be-written event set; tier 3 takes the in-place rows and split launches "
+        "word for word on the device",
+    "tests/test_gfs_hydrometeors_f000.py":
+        "tier 1 takes the GFS hydrometeor vtable rows, the .idx select and the scheme pick; tier 3 takes "
+        "the start-state f000 echo and its column slabs word for word on the device",
+    "tests/test_moving_kernel_modules.py":
+        "tier 1 takes the moving kernel module inventory; tier 3 compiles and launches the modules on the device",
+    "tests/test_moving_rates_batch.py":
+        "tier 1 takes the batched rate plans on the host; tier 3 takes the batched device rates against them",
+    "tests/test_moving_upload_cache.py":
+        "tier 1 takes the upload cache's host bookkeeping; tier 3 takes the exact incremental device uploads",
 }
 
 

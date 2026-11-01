@@ -280,13 +280,12 @@ def test_surface_flux_option_lands_in_shared():
 
 
 def test_delete_after_commit_export_holds_only_its_backlog():
-    from woof.icechunk_export import ExportOptions
+    from woof.output_formats import export_policy_from_table
 
     exp = _exp(hours=24)
     whole = disk_budget.projected_run_bytes(exp, keep_checkpoints=1, fetch=None,
                                             chain=None, render=False)
-    live = ExportOptions.from_mapping({"url": "file:///tmp/x.icechunk",
-                                       "delete_after_commit": True})
+    live = export_policy_from_table({"icechunk_delete_after_commit": True})
     held = disk_budget.projected_run_bytes(exp, keep_checkpoints=1, fetch=None,
                                            chain=None, render=False,
                                            live_export=live)
@@ -296,7 +295,7 @@ def test_delete_after_commit_export_holds_only_its_backlog():
             row_whole["history_frames"], disk_budget.LIVE_EXPORT_BACKLOG_FRAMES)
     assert held["history_bytes"] < whole["history_bytes"]
     # Without delete_after_commit the export leaves every frame on disk.
-    keep = ExportOptions.from_mapping({"url": "file:///tmp/x.icechunk"})
+    keep = export_policy_from_table({})
     kept = disk_budget.projected_run_bytes(exp, keep_checkpoints=1, fetch=None,
                                            chain=None, render=False,
                                            live_export=keep)
@@ -307,7 +306,7 @@ def test_forecast_stage_prices_an_announced_delete_after_commit_export(monkeypat
     """The forecast stage runs as woof go's child and learns of the live
     export through the environment: its review prices only the backlog."""
     from woof import output_disk
-    from woof.icechunk_export import LIVE_EXPORT_DELETE_ENV
+    from woof.io.export_backpressure import LIVE_EXPORT_DELETE_ENV
 
     exp = _exp(hours=24)
     monkeypatch.delenv(LIVE_EXPORT_DELETE_ENV, raising=False)

@@ -29,6 +29,9 @@ def test_absent_set_preserves_emitted_config_bytes_and_checkpoint_echo():
     # each domain the same way.
     for domain in previous["domains"]:
         experiment._drop_off_domain_controls(domain)
+    # [nudging] (labs/nudging, 2.9.11) is another default-off control the
+    # document drops when absent.
+    previous.pop("nudging", None)
     assert _bytes(experiment.experiment_config_document(exp)) == _bytes(previous)
     assert "physics_params" not in restart_identity_payload(exp)
     assert "physics_params" not in configuration_echo(exp.root.run)

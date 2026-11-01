@@ -28,9 +28,9 @@ Each worker claims one job, runs
 queue. `woof go-job` does these things in order:
 
 1. It copies the config and its companion files onto the instance's NVMe.
-2. It runs `woof go CONFIG --icechunk URL --products none`. The Icechunk
-   export runs beside the forecast and commits one snapshot per history
-   frame.
+2. It runs `woof go CONFIG --output-format netcdf,icechunk
+   --icechunk-store URL --products none`. The Icechunk export runs beside
+   the forecast and commits each history frame as it lands.
 3. If the forecast finishes but the export does not, it resumes the export
    from the run folder on local disk. It tries up to three times, waiting
    30 s, then 2 min, then 5 min.

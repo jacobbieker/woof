@@ -10,7 +10,7 @@ import dataclasses
 
 import pytest
 
-from woof.config import (WINDFARM_RUN_DEFAULTS, RunConfig,
+from woof.config import (RunConfig,
                          validate_radiation_driver_options)
 
 
@@ -130,8 +130,15 @@ def test_the_checkpoint_echo_drops_both_at_their_default():
              # (lane/hrrr-v4-clwrf) and tc/nest's fixed-frame archive.
              "output_diagnostics", "diag_int", "wind_int",
              "nest_accumulation_archive",
-             # WRF's wind farm (the fork's Fitch coupling), appended after.
-             *WINDFARM_RUN_DEFAULTS,
+             # 2.9.10, keyword-only: WRF's ghg_input (fix/wrf461-2dom-exact,
+             # placed last by d1e35bf2da).
+             "ghg_input", "umove", "vmove",
+             # 2.9.11, keyword-only: the Fitch wind-farm controls
+             # (labs/windfarm 73cb37dd11), folded after ds-umove's frame.
+             "wind_farm_scheme", "wind_farms", "wind_farm_table",
+             "windfarm_tke_factor", "wind_farm_max_dx_m",
+             # fix/hailcast, keyword-only: the HAILCAST generation.
+             "hailcast_version",
              # RRTMG band output, then WRF-Solar's couple_farms.
              "rrtmg_spectral_output", "couple_farms",
              # the output-only woof.radtran diagnostic
@@ -151,6 +158,9 @@ def test_the_checkpoint_echo_drops_both_at_their_default():
              *__import__("woof.config", fromlist=["x"]).MULTI_PERTURB_RUN_DEFAULTS,
              *__import__("woof.config", fromlist=["x"]).MADWRF_RUN_DEFAULTS]
     assert names[-len(later):] == later
+    for field in dataclasses.fields(RunConfig):
+        if field.name in ("umove", "vmove"):
+            assert field.kw_only and field.default == 0.0
     names = names[:-len(later)]
     # The 2.9.4 capabilities campaign's keyword-only keys follow the fire
     # block: lane/cap-waves-couple, cap-hail, cap-seaice, cap-eclipse and
