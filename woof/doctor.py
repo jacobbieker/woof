@@ -786,9 +786,9 @@ def _metal_runtime_check() -> Check:
     compiles, runs in place, and its binary64/binary32 words are exact."""
 
     name = "mlx (Apple GPU runtime)"
-    remedy = ("  remedy: pixi install -e mlx\n"
-              "  #   or: pip install 'recast-woof[all-mlx]'  (needs the Xcode\n"
-              "  #   command-line tools and cmake for the Metal launch extension)")
+    remedy = ("pixi install -e mlx\n"
+              "# or: pip install 'recast-woof[all-mlx]'  (needs the Xcode\n"
+              "#   command-line tools and cmake for the Metal launch extension)")
     if find_spec("mlx") is None:
         return Check(name, "missing", "WOOF_BACKEND=mlx but mlx is not installed", remedy,
                      action="pixi install -e mlx", brief="mlx not installed")

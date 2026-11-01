@@ -1123,6 +1123,9 @@ _REMEDY_COMMANDS = frozenset({
     # ...and the PowerShell half of pointing CuPy at that toolkit.  The
     # POSIX half is `export`, which is already here.
     "$env:CUDA_PATH",
+    # The MLX backend's runtime remedy on a Mac (doctor._metal_runtime_check):
+    # the mlx pixi environment is how the repository installs MLX.
+    "pixi",
 })
 
 #: A bare ALL-CAPS word is a placeholder the reader must expand.
