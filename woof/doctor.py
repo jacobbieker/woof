@@ -1680,7 +1680,7 @@ def _da_eigensolver_check() -> Check:
 # command each extra is the difference between running and not.
 
 #: The distribution whose metadata declares the extras.  Named once.
-_DISTRIBUTION = "recast-woof"
+from woof import DISTRIBUTION_NAME as _DISTRIBUTION  # noqa: E402
 
 #: The leading name of a ``Requires-Dist`` line, and the ``extra ==``
 #: marker that assigns it to one.

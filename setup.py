@@ -94,6 +94,9 @@ def _build_provenance(version: str) -> dict:
 PLATFORM_TAGS = {
     "win-x86_64": "win_amd64",
     "linux-x86_64": "manylinux_2_28_x86_64",
+    # metal-woof (.github/workflows/publish-metal.yml): the bridges are
+    # built on the macos-14 runner image's SDK floor, macOS 14.
+    "macos-arm64": "macosx_14_0_arm64",
 }
 
 #: The glibc the Linux tag promises, and the reading that checks the staged

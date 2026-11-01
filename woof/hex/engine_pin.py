@@ -223,7 +223,7 @@ import re
 from typing import Any
 
 #: The engine distribution, spelled once.
-DISTRIBUTION = "recast-woof"
+from woof import DISTRIBUTION_NAME as DISTRIBUTION  # noqa: E402
 
 #: The public repository a checkout comes from, named in remedies.
 REPOSITORY = "https://github.com/recastsystems/woof"

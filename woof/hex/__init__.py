@@ -29,7 +29,7 @@ __all__ = [
 #: because that name may be a trademark; the import name still does, and that
 #: gap is recorded as a pre-public blocker in
 #: tests/test_packaging_declaration.py.
-DISTRIBUTION_NAME = "recast-woof"
+from woof import DISTRIBUTION_NAME  # noqa: E402  (recast-woof or metal-woof)
 
 # Read back out of installed metadata rather than restated here.  pyproject's
 # [project].version is the single place the number is written; a second

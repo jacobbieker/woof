@@ -861,7 +861,7 @@ def check_physics_seam() -> list[Finding]:
     from . import engine_pin
 
     findings: list[Finding] = []
-    installed = _distribution_version("recast-woof")
+    installed = _distribution_version(DISTRIBUTION_NAME)
     if installed is None:
         findings.append(
             Finding(
