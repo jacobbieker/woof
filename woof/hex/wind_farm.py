@@ -225,6 +225,11 @@ def attach_arwen(backend, host, driver, *, output_root=None):
     if choice in (None, '', 'off'):
         return
     seam = backend._seam
+    if getattr(seam._driver, 'wind_farm', None) is not None:
+        # One turbine set per column seam: --physics wind_farm_scheme=fitch_wrf
+        # already attached WRF's scheme, and replacing it would drop those turbines.
+        raise ValueError("--wind-farms and --physics wind_farm_scheme=fitch_wrf both place turbines on this "
+                         "run; choose one (--wind-farms is the GPU Fitch, fitch_wrf WRF v4.7.1's word for word)")
     require_mynn(seam._cfg.bl_pbl_physics, interval=seam._cfg.bldt)
     if host.get('regional') is not None:
         raise ValueError("Fitch turbine mapping requires complete Voronoi ownership; a culled boundary could assign outside-domain turbines to edge cells")
