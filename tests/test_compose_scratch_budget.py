@@ -40,7 +40,9 @@ GIB = 1024 ** 3
 #: grid, 1,905,141 x 8 bytes, until the compose is run again.
 ENGINE_BYTES_PER_VALID_TIME = {
     "gem-gdps": 4_842_432_000,
-    "ecmwf-open-data": 838_897_920,
+    # Measured 2026-09-28 at 101 layers; the mapping has since bound
+    # snow_water_equivalent, one more surface plane of 1,038,240 points.
+    "ecmwf-open-data": 838_897_920 + 1_038_240 * 8,
     "aifs": 755_838_720,
     "aigfs": 789_062_400,
     "aigefs": 789_062_400,
