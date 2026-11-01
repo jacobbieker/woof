@@ -111,7 +111,7 @@
   },
   "documents": [
     {
-      "output": "gpuwm/authorities/rw-wps-gefs-ensemble-grib2.mapping.json",
+      "output": "woof/authorities/rw-wps-gefs-ensemble-grib2.mapping.json",
       "format": {"indent": 1},
       "base": {"kind": "empty"},
       "steps": [
@@ -310,7 +310,7 @@
       ]
     },
     {
-      "output": "gpuwm/authorities/rw-wps-gefs-ensemble-grib2.composition.json",
+      "output": "woof/authorities/rw-wps-gefs-ensemble-grib2.composition.json",
       "format": {"indent": 1},
       "base": {"kind": "empty"},
       "steps": [
@@ -359,7 +359,7 @@
       ]
     },
     {
-      "output": "gpuwm/authorities/rw-wps-gefs-ensemble-grib2.provenance.json",
+      "output": "woof/authorities/rw-wps-gefs-ensemble-grib2.provenance.json",
       "format": {"indent": 1},
       "base": {"kind": "empty"},
       "steps": [
