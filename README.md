@@ -2,6 +2,16 @@
 
 **Weather Observations and Open Forecasting: a GPU-native weather model you run on your own card.**
 
+> **This is a fork.** WOOF is written and maintained by Recast Systems at
+> [github.com/recastsystems/woof](https://github.com/recastsystems/woof),
+> which is the original and main code, and the place to start. This fork,
+> [github.com/jacobbieker/woof](https://github.com/jacobbieker/woof), merges
+> each upstream release and adds the work listed under
+> [This fork](#this-fork) below, most notably a backend that runs on
+> Apple-silicon GPUs. On PyPI, Recast's release is `recast-woof`; this fork's
+> Apple-silicon build is `metal-woof`, which is unofficial and not supported
+> by Recast Systems.
+
 WOOF is a regional weather model with WRF-class physics that runs on one
 NVIDIA GPU, with its own preprocessing, data assimilation and plots. One
 install carries two models:
@@ -152,6 +162,83 @@ WOOF continues an engine released before under another name: WOOF 1.0 is
 that engine's release 2.8.0 and the fixes made since, under the WOOF name,
 with the hex model inside it. Settings spelled `GPUWM_*` keep
 working beside the new `WOOF_*` spelling.
+
+## This fork
+
+Everything above describes Recast WOOF, and is kept as upstream wrote it.
+This section is the fork's own. Its additions sit on top of the latest
+upstream release and do not change upstream's defaults: each new option is
+off until selected, and a configuration that selects none of them runs as
+upstream's does.
+
+### What it adds
+
+- **An Apple-silicon backend (MLX/Metal).** `WOOF_BACKEND=mlx` runs the GPU
+  code on a Mac. The CUDA kernels are not rewritten by hand: each `.cu` unit
+  is translated to Metal when it first loads, and `import cupy` resolves to a
+  CuPy-compatible layer over MLX. CUDA runs exactly as before. Design and
+  details: [docs/dev/mlx-backend.md](docs/dev/mlx-backend.md).
+- **Further WRF physics,** each held word for word to compiled WRF v4.7.1
+  Fortran where the port says so:
+  - SMS-3DTKE (`km_opt = 5`);
+  - `use_theta_m = 1` for every ported microphysics and cumulus scheme and
+    for WRF's own input files, plus `do_avgflx_em`;
+  - WRF-Solar: FARMS, the EPS perturbations, MAD-WRF, Deng shallow cumulus
+    and cumulus cloud fed to radiation;
+  - the Fitch wind-farm scheme with WRF's turbine files and layout;
+  - coupled fire spread and smoke.
+- **Height-dependent resolution:** a partial-depth two-way nest, fine near
+  the ground and coarser aloft, on WRF and (dry dynamics only) on MPAS; and
+  WRF's live vertical nesting (`vert_refine_method = 2`).
+- **More data sources:** the Met Office global and UKV models, DWD ICON
+  (global and the machine-learning variant) and additional mapped routes.
+- **Applied tooling:** wind-energy siting, hindcasts and power products,
+  storm-track planning with moving nests, and live Icechunk export.
+- **Continuous integration:** GitHub Actions on Linux and macOS, with a
+  self-hosted CUDA job ([docs/dev/ci.md](docs/dev/ci.md)).
+
+### Install on a Mac
+
+```bash
+pip install metal-woof        # macOS 14 or newer on Apple silicon, Python 3.11+
+```
+
+The `metal-woof` wheel carries the macOS builds of the Rust bridges and the
+MLX stack, and selects the MLX backend on its own. It installs the same
+`woof` package and commands as `recast-woof`; install one or the other, not
+both. From a checkout, `pixi run -e mlx ...` uses the same backend.
+
+### Limitations of the MLX backend
+
+The Metal backend is younger than the CUDA one and narrower. Before relying
+on it:
+
+- **Apple silicon only,** macOS 14 or newer, one GPU. Domain size is bounded
+  by the Mac's unified memory. There is no multi-GPU or peer transport.
+- **Double precision is emulated.** Apple GPUs have no fp64, so `double`
+  becomes a bit-exact software binary64. It is correct to the last bit and
+  much slower than native fp64; units that lean on it are slow on a Mac.
+- **The answers are not CUDA's bits everywhere.**
+  - Metal never contracts a multiply-add, so where a CUDA result carries
+    NVRTC's fused multiply-adds, Metal gives CUDA's `--fmad=false` words
+    instead. Those families are pinned separately for Metal, each only after
+    a launch-by-launch trace shows the difference is contraction.
+  - Single-precision libm calls that are not woof's own glibc ports use
+    Metal's `precise::` functions, a recorded vendor-libm difference.
+  - NaN payloads can differ.
+- **The first run compiles.** Every kernel unit is translated and compiled on
+  first load. Pipelines are then kept on disk (`~/.cache/woof/metal-pipelines`),
+  but a cold start can take minutes, and the largest units (CLM lake's step
+  kernel, for one) about twenty.
+- **The hex (MPAS) model on Metal is opt-in** (`WOOF_HEX_METAL=1`). Only the
+  partial-depth band is measured against MPAS on Metal. The rest of the hex
+  lane runs, but is not yet held to its CUDA words there.
+- **Virtual Macs are not supported.** GitHub's hosted macOS runners expose an
+  "Apple Paravirtual device" that computes wrong answers (NaN) where an
+  M-series GPU matches WRF, so CI runs the Metal parity gates only on real
+  Apple GPUs.
+- **Some checks do not run on Metal.** A few test helpers capture CUDA-only
+  compiler output. They are reported as failing on Metal rather than skipped.
 
 ## Licence
 

@@ -131,11 +131,12 @@ source built for Apple silicon. It never touches `publish.yml` or
 - **Build (macos-15):** every `build-native` workspace for macOS 14+, then
   `tools/metal_woof_project.py` renames the distribution (name, version, the
   extras' self-references, and the `gpu-mlx` requirements folded into the
-  base dependencies). The sdist is built from an unstaged tree, then the
-  macOS bridges are staged (`tools/stage_wheel_bridges.py --platform
-  macos-arm64`) and the `macosx_14_0_arm64` wheel is built. No `pixi`
-  command may run after the rename: pixi refuses a manifest whose editable
-  package changed name.
+  base dependencies). The rename happens only in two `git archive` exports
+  of the committed tree, never in the checkout, so the checkout keeps
+  recast-woof's manifest and pixi (which installs it as the editable
+  recast-woof) keeps working. The macOS bridges are staged in the checkout
+  (`tools/stage_wheel_bridges.py --platform macos-arm64`) and copied into
+  the wheel's export; the sdist is built from the other, unstaged export.
 - **Smoke:** the wheel is installed into a fresh venv outside the checkout;
   it must report `metal-woof` at the tag's version, carry its bridges and
   import the MLX stack.
