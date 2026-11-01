@@ -151,7 +151,8 @@ INIT_ABI_MARKER = (
 #: on ``unknown flag --remap``.
 CONVERT_ABI_MARKER = (
     "gpuwm-rw-mpas-convert-v1\tCONVERTED\tWINDOW\tWEIGHTS\tFINISHED"
-    "\tREMAP\tBUDGET\t--remap nearest|product\t--jobs N")
+    "\tREMAP\tBUDGET\t--remap nearest|product\t--jobs N"
+    "\t--terrain-authority FILE\t--window latlon:S,N,W,E,SPACING")
 
 #: ``rw_mpas_lbc``'s contract, its first usage line through the
 #: physics-mode switch.  The crate's literal is four usage lines with
