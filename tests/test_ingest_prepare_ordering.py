@@ -48,12 +48,11 @@ class _FakeState:
     """A state whose coupled snapshot is already the host arrays.
 
     ``add_state`` is the call the adapters make, and it reaches the
-    device through ``_coupled_device_fields`` (since 5c4304e02 it keeps
-    the snapshot on the device rather than going through
-    ``domain_boundary_snapshot``, which itself reads the same seam).
-    Patching that one seam (``_host_snapshot`` below) keeps these tests
-    on the CPU while still exercising the entry point the adapters
-    actually use.
+    device through ``_coupled_device_field_items`` (one coupled field at a
+    time, named by ``_coupled_device_field_names``; ``_coupled_device_fields``
+    and ``domain_boundary_snapshot`` read the same seam).  Patching that
+    seam (``_host_snapshot`` below) keeps these tests on the CPU while
+    still exercising the entry point the adapters actually use.
     """
 
     def __init__(self, snapshot):
@@ -65,8 +64,11 @@ def _host_snapshot(monkeypatch):
     import woof.ingest.lateral_bc as lateral_bc
 
     monkeypatch.setattr(
-        lateral_bc, "_coupled_device_fields",
-        lambda state: state.snapshot)
+        lateral_bc, "_coupled_device_field_items",
+        lambda state: iter(state.snapshot.items()))
+    monkeypatch.setattr(
+        lateral_bc, "_coupled_device_field_names",
+        lambda state: list(state.snapshot))
 
 
 def _snapshots(count=5, seed=20260812, ny=40, nx=50):

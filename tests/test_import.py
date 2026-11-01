@@ -15,7 +15,7 @@ def test_version_is_the_installed_distribution_version():
     """
 
     assert woof.__version__ == metadata.version(woof.DISTRIBUTION_NAME)
-    assert woof.DISTRIBUTION_NAME == "woof"
+    assert woof.DISTRIBUTION_NAME == "recast-woof"
 
 
 def test_the_version_is_not_a_literal_in_the_package():

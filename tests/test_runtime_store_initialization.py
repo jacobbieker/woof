@@ -293,6 +293,12 @@ def test_ordinary_dispatch_decides_before_preparation_and_keeps_elapsed_clock(tm
         trajectory_digest: object = None
         frame_records: tuple | None = None
         moisture_floor_receipts: object = None
+        # RealCaseRunSummary's hydro fields: the route reads the one and
+        # replaces the other after integration.
+        hydro_receipt: object = None
+        hydro_receipts: object = None
+        # report.json (runtime._write_runtime_report) states how far it got.
+        completed_seconds: float = 0.0
     def integrate(*args, **kwargs):
         assert kwargs['stepper'] is stepper
         assert state._streamed_domain is stepper

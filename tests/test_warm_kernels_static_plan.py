@@ -232,7 +232,19 @@ def test_registered_moving_tree_go_reaches_prewarm_before_fetch(monkeypatch, tmp
             order.append("join")
             return 0
 
-    monkeypatch.setattr(subprocess, "Popen", Process)
+    real_popen = subprocess.Popen
+
+    def popen(command, **kwargs):
+        # Only the pre-warm child is stood in for.  Other children the route
+        # starts run as they are: on macOS woof.proc_identity reads a
+        # process's start time with ``ps -o stat=,lstart= -p PID`` (Linux
+        # reads /proc), and standing that in failed this case on its
+        # argv[3] before the pre-warm was reached.
+        if list(command[1:3]) == ["-m", "woof.kernel_prewarm"]:
+            return Process(command, **kwargs)
+        return real_popen(command, **kwargs)
+
+    monkeypatch.setattr(subprocess, "Popen", popen)
 
     def execute(plan, *, events):
         # The real executor requires an empty launch before accepting it.
@@ -283,10 +295,20 @@ def test_static_jobs_cover_the_moving_tree_forecast_compile_events():
                     sf_sfclay_physics=91, sf_surface_physics=2, ra_physics=0,
                     ra_lw_physics=4, ra_sw_physics=4, ra_rrtmg_variant="rte-rrtmgp",
                     diff_6th_opt=2, km_opt=4, nwp_diagnostics=1, ysu_version="wrf_480")
+    # The tree's parent links and the shared ladder are what the selector
+    # pricing reads to find a vertically nested edge
+    # (woof.experiment.vertically_nested_ids).  Without them the pricing
+    # raised and static_modules fell back to the dycore's core set, so no
+    # physics module (sfclay first among them) was warmed at all.
     experiment = SimpleNamespace(
-        domains=(SimpleNamespace(run=run, grid_id=1, history_interval_s=60),
-                 SimpleNamespace(run=replace(run, cu_physics=0), grid_id=2, history_interval_s=60)),
-        vertical=SimpleNamespace(p_top=5000.0), run_seconds=120.0)
+        domains=(SimpleNamespace(run=run, grid_id=1, parent_id=0, history_interval_s=60),
+                 SimpleNamespace(run=replace(run, cu_physics=0), grid_id=2, parent_id=1,
+                                 history_interval_s=60)),
+        vertical=SimpleNamespace(p_top=5000.0, eta_levels=()), run_seconds=120.0)
+    from woof.core import preflight
+    assert set(kernel_prewarm.static_modules(experiment)) >= set(
+        preflight.physics_kernel_modules(experiment)) - set(
+        preflight.UNMEASURED_KERNEL_MODULES)
     jobs = kernel_prewarm.static_jobs(experiment)
     labels = {label for label, _, _ in jobs}
     assert jobs[0][0] == "sfclay"  # an 8 s serial tail when queued behind short units

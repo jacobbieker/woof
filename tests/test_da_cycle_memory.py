@@ -54,6 +54,11 @@ def _fake_cupy():
     module.get_default_pinned_memory_pool = lambda: pool
     module.asarray = np.asarray
     module.abs = np.abs
+    # The device array type, read at import by modules that tell device
+    # operands from host ones (woof.core.moist._DEVICE_ARRAY).  This fake
+    # device holds NumPy arrays, which no isinstance check may take for
+    # device arrays, so it is a type nothing is an instance of.
+    module.ndarray = type("ndarray", (), {})
     module.cuda = SimpleNamespace(
         Stream=SimpleNamespace(null=SimpleNamespace(synchronize=lambda: None)))
     return module

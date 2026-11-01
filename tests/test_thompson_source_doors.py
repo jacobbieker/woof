@@ -75,5 +75,11 @@ def test_explicit_mp8_hrrr_profile_does_not_receive_inert_or_invalid_fork_select
         assert domain.run.mp_physics == 8
         assert domain.run.thompson_version == "wrf_461"
         assert domain.run.thompson_fork_snow_fall == "blend"
-        assert domain.run.bl_mynn_version == "wrf_461"
+        # The profile names no MYNN generation, so the HRRR source's
+        # [request.load_generations] row (request-defaults.v1.toml, since
+        # 1.1.0, lane/mynn-exact) fills the fork's GSD MYNN v4.1 at load on
+        # every domain that admits it (gsd41_admitted): MYNN PBL, no
+        # spp_pbl, no active mixscalars.  It is neither inert nor refused
+        # under mp_physics = 8.
+        assert domain.run.bl_mynn_version == "gsd_41"
         assert domain.run.bl_mynn_cloud_tendency_form == "wrf_461"

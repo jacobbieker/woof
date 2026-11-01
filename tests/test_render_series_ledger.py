@@ -16,5 +16,8 @@ def test_a_running_ledger_is_not_identity():
 
 
 def test_run_identity_is_still_identity():
-    for name in ("START_DATE", "GRID_ID", "DX", "MP_PHYSICS", "WOOF_RUN_ID"):
+    # History global attributes keep their GPUWM_ spelling (woof/io/wrfout.py);
+    # the initial-condition source is one such identity attribute.
+    for name in ("START_DATE", "GRID_ID", "DX", "MP_PHYSICS",
+                 "GPUWM_INITIAL_CONDITION_SOURCE"):
         assert _history_identity_attribute(name), name

@@ -123,7 +123,35 @@ def test_the_subcommand_sweep_covers_the_whole_surface():
         assert anchor in names
 
 
-@pytest.mark.parametrize("name", _registered_subcommands())
+def _front_door_subcommands() -> list[str]:
+    """The subcommands whose words the front door's own parser reads.
+
+    A component door (``woof hex``) is listed in the help but dispatched
+    before this parser runs: every word after its name goes to the
+    component's own parser, and the front door records no invocation for
+    it, so no front-door pointer ever names ``woof hex ... --explain``.
+    Holding it to the sweep would hold the component to an empty
+    forwarding entry it never parses (the docs-flag test excludes it
+    for the same reason).
+    """
+
+    from woof.components import COMPONENTS
+
+    return [name for name in _registered_subcommands()
+            if name not in COMPONENTS]
+
+
+def test_a_component_door_answers_its_own_help(capsys):
+    """The forwarding door still reaches a parser: the component's own."""
+
+    from woof.components import COMPONENTS
+
+    for name in COMPONENTS:
+        assert cli_main([name, "--help"]) == 0
+        assert f"usage: woof {name}" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("name", _front_door_subcommands())
 def test_every_subcommand_accepts_explain(capsys, name):
     """The pointer names ``woof <command> --explain`` for ANY command.
 

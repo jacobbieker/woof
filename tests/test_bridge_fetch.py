@@ -784,14 +784,17 @@ def test_every_bundled_artifact_is_one_the_resolver_searches_for():
     assert envs["rw_zarr"] == zarr_bridge.BRIDGE_ENV
     assert crates["rw_zarr"] == zarr_bridge.CRATE_RELATIVE
     assert bridges.BRIDGE_ABI_MARKERS["rw_zarr"] == zarr_bridge.ABI_MARKER
-    # And the filename the bundle stages is the one the ladder opens.
-    staged = bridge_assets.artifact_filename(
-        next(a for a in bridge_assets.BUNDLED_ARTIFACTS
-             if a.name == "region_global_dealias"),
-        "win-x86_64" if os.name == "nt" else "linux-x86_64")
-    assert staged == dealias_region.library_name()
-    assert bridges.default_bridge_dir() / staged in set(
-        dealias_region.region_bridge_candidates())
+    # And the filename the bundle stages is the one the ladder opens, on
+    # every platform a bundle is published for (host_platform() is None
+    # elsewhere, e.g. macOS, which builds from source and stages nothing).
+    host = bridge_assets.host_platform()
+    if host is not None:
+        staged = bridge_assets.artifact_filename(
+            next(a for a in bridge_assets.BUNDLED_ARTIFACTS
+                 if a.name == "region_global_dealias"), host)
+        assert staged == dealias_region.library_name()
+        assert bridges.default_bridge_dir() / staged in set(
+            dealias_region.region_bridge_candidates())
     for name, env in bridges.BRIDGE_ENV.items():
         assert envs[name] == env
 
