@@ -320,4 +320,7 @@ def legacy_radiation_layer_counts(
         rounded += 1
     elif raw - rounded <= -0.5:
         rounded -= 1
-    return int(nz) + rounded, int(nz) + 1
+    # The runtime keeps one clear buffer layer above a top below 2 hPa,
+    # where the rounded 4-hPa extension is zero
+    # (woof.core.rrtmg_legacy_prep.compute_lw_nlayers).
+    return int(nz) + max(1, rounded), int(nz) + 1
