@@ -175,8 +175,9 @@ def omitted_use_theta_m(wrf_version) -> int:
 
 #: How each import route recovers the dry-theta state it integrates when
 #: the moist-theta prognostic WRF would run is SUBSTITUTED (a configuration
-#: whose theta_m branch is not wired, woof.core.theta_m.refusal, or the
-#: WRF-file route).  The initial and boundary state is recovered exactly on
+#: whose theta_m branch is not wired, woof.core.theta_m.refusal).  The
+#: WRF-file route integrates the files' own THM/T_B* under use_theta_m = 1
+#: (woof.ingest.wrfinput.restore_theta_m_prognostic).  The initial and boundary state is recovered exactly on
 #: all three routes, so the answer is one announced substitution rather than
 #: a refusal on whichever door the user happened to arrive through.
 _THETA_M_ROUTES = {
@@ -214,14 +215,6 @@ def active_nudging_selectors(fdda: dict) -> list[tuple[str, list]]:
     return active
 
 
-#: Why the WRF-file route keeps dry theta: the wrfinput/wrfbdy door converts
-#: the files' THM/QV/MU into the dry-theta state (woof/ingest/wrfinput.py),
-#: and handing the theta_m prognostic its own THM words is not wired.
-_THETA_M_WRF_FILE_ROUTE = (
-    "the WRF-file door (wrfinput/wrfbdy) restores dry theta and its "
-    "theta_m restoration is not wired")
-
-
 @dataclass(frozen=True)
 class ThetaMDecision:
     """The single answer every door gives about ``use_theta_m``.
@@ -239,6 +232,80 @@ class ThetaMDecision:
     route: str
     reason: str
     substituted: bool = False
+
+
+#: The configurations an OMITTED ``&dynamics/use_theta_m`` (WRF V4's
+#: Registry default 1) has integrated as theta_m since the Kessler merge:
+#: mp_physics 0 or 1, no cumulus scheme that reads the advective theta
+#: forcing, no diff_opt = 2 surface flux without a PBL, never the WRF-file
+#: door.  Wider wiring (every ported scheme, the RTHFTEN cumulus, the
+#: diff_opt = 2 flux, THM restored from WRF files) is honoured when the
+#: namelist SAYS use_theta_m = 1; whether an omission should integrate it
+#: too changes the import bytes of every V4 namelist outside this scope, so
+#: it is a decision for the project, not a side effect of the wiring.
+OMITTED_THETA_M_MICROPHYSICS = frozenset({0, 1})
+
+
+def theta_m_omitted_scope(inp: dict, max_dom: int = 1, *,
+                          route: str = "native") -> str | None:
+    """Why an omitted use_theta_m keeps the declared dry-theta substitution
+    for this namelist (outside :data:`OMITTED_THETA_M_MICROPHYSICS`'s
+    scope), or ``None`` where the omission integrates theta_m."""
+    from woof.core.theta_m import RTHFTEN_CUMULUS
+    hint = ("; an explicit &dynamics use_theta_m = 1 integrates theta_m "
+            "with this configuration")
+    if route == "wrf_boundary":
+        return ("the namelist omits use_theta_m, and an omission on the "
+                "WRF-file door keeps the dry-theta reading of the files"
+                + hint)
+    physics = inp.get("physics", {}) or {}
+    dynamics = inp.get("dynamics", {}) or {}
+
+    def column(section, key, default):
+        values = section.get(key)
+        if values is None:
+            values = [default]
+        if not isinstance(values, (list, tuple)):
+            values = [values]
+        values = list(values)[:max(1, max_dom)]
+        return values + [values[-1]] * (max(1, max_dom) - len(values))
+
+    def scalar(section, key, default):
+        values = section.get(key)
+        if values is None:
+            return default
+        if isinstance(values, (list, tuple)):
+            return values[0] if values else default
+        return values
+
+    try:
+        mp = column(physics, "mp_physics", 0)
+        cu = column(physics, "cu_physics", 0)
+        bl = column(physics, "bl_pbl_physics", 0)
+        sfclay = column(physics, "sf_sfclay_physics", 0)
+        diff = column(dynamics, "diff_opt", 0)
+        isfflx = int(scalar(physics, "isfflx", 1))
+        heat = float(scalar(dynamics, "tke_heat_flux", 0.0))
+        for n in range(max(1, max_dom)):
+            if int(mp[n]) not in OMITTED_THETA_M_MICROPHYSICS:
+                return (f"the namelist omits use_theta_m and mp_physics = "
+                        f"{int(mp[n])} is outside the scope an omission "
+                        "integrates theta_m in (mp_physics 0 or 1)" + hint)
+            if int(cu[n]) in RTHFTEN_CUMULUS:
+                return (f"the namelist omits use_theta_m and cu_physics = "
+                        f"{int(cu[n])} ({RTHFTEN_CUMULUS[int(cu[n])]}) is "
+                        "outside the scope an omission integrates theta_m "
+                        "in" + hint)
+            prescribed = isfflx in (0, 2) and heat != 0.0
+            driver = isfflx in (1, 2) and int(sfclay[n]) != 0
+            if (int(diff[n]) == 2 and int(bl[n]) == 0
+                    and (prescribed or driver)):
+                return ("the namelist omits use_theta_m and diff_opt = 2 "
+                        "without a PBL carries a surface flux, outside the "
+                        "scope an omission integrates theta_m in" + hint)
+    except (TypeError, ValueError) as error:
+        return f"its physics selectors could not be read ({error})"
+    return None
 
 
 def theta_m_unwired(inp: dict, max_dom: int = 1) -> str | None:
@@ -278,6 +345,7 @@ def theta_m_unwired(inp: dict, max_dom: int = 1) -> str | None:
         bl = column(physics, "bl_pbl_physics", 0)
         sfclay = column(physics, "sf_sfclay_physics", 0)
         diff = column(dynamics, "diff_opt", 0)
+        km = column(dynamics, "km_opt", 0)
         isfflx = int(scalar(physics, "isfflx", 1))
         heat = float(scalar(dynamics, "tke_heat_flux", 0.0))
         for n in range(max(1, max_dom)):
@@ -285,11 +353,19 @@ def theta_m_unwired(inp: dict, max_dom: int = 1) -> str | None:
                 use_theta_m=1, moist=True, mp_physics=int(mp[n]),
                 cu_physics=int(cu[n]), bl_pbl_physics=int(bl[n]),
                 sf_sfclay_physics=int(sfclay[n]),
-                diff_opt=int(diff[n]), isfflx=isfflx, tke_heat_flux=heat))
+                diff_opt=int(diff[n]), km_opt=int(km[n]), isfflx=isfflx,
+                tke_heat_flux=heat))
             if why is not None:
                 return why
     except (TypeError, ValueError) as error:
         return f"its physics selectors could not be read ({error})"
+    radar = physics.get("mp_tend_radar")
+    if radar is not None:
+        radar = list(radar) if isinstance(radar, (list, tuple)) else [radar]
+        if any(value == 1 for value in radar):
+            from woof.core.theta_m import RADAR_REFUSAL
+            return ("mp_tend_radar = 1: "
+                    + RADAR_REFUSAL.split(" is not wired: ", 1)[1])
     return None
 
 
@@ -301,10 +377,10 @@ def theta_m_decision(use_theta_m: int, *,
     """Book ``&dynamics/use_theta_m`` for whichever door is asking.
 
     ``use_theta_m = 1`` is honoured -- WOOF integrates WRF's theta_m
-    prognostic -- unless ``unwired`` names why this configuration's theta_m
-    branch is not wired (:func:`theta_m_unwired`) or the route is the
-    WRF-file door; then it is the declared dry-theta substitution it always
-    was."""
+    prognostic, on every route, the WRF-file door included -- unless
+    ``unwired`` names why this configuration's theta_m branch is not wired
+    (:func:`theta_m_unwired`); then it is the declared dry-theta
+    substitution it always was."""
 
     if metgrid_initialization:
         route = "metgrid"
@@ -320,8 +396,6 @@ def theta_m_decision(use_theta_m: int, *,
                     "and boundaries" if route == "metgrid" else
                     "woof transcribes the non-moist-theta use_theta_m=0 "
                     "branch"))
-    if route == "wrf_boundary" and unwired is None:
-        unwired = _THETA_M_WRF_FILE_ROUTE
     if unwired is not None:
         return ThetaMDecision(
             moist_theta=False, route=route, substituted=True,
@@ -335,9 +409,15 @@ def theta_m_decision(use_theta_m: int, *,
         moist_theta=True, route=route,
         reason=("woof integrates WRF's moist potential temperature "
                 "prognostic theta_m = theta*(1 + Rv/Rd*qv), the "
-                "use_theta_m = 1 branch (woof.core.theta_m); the initial "
-                "and boundary theta_m is made from the analysed dry theta "
-                "as real.exe makes it (module_initialize_real.F:4923)"))
+                "use_theta_m = 1 branch (woof.core.theta_m); "
+                + ("the initial and boundary theta_m are the files' own "
+                   "THM (THM_2 on a restart) and coupled T_B*, restored "
+                   "unconverted (woof.ingest.wrfinput."
+                   "restore_theta_m_prognostic)"
+                   if route == "wrf_boundary" else
+                   "the initial and boundary theta_m is made from the "
+                   "analysed dry theta as real.exe makes it "
+                   "(module_initialize_real.F:4923)")))
 
 
 #: ``&time_control/fine_input_stream`` selects which input stream
@@ -6435,10 +6515,18 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
     # reached the user through nothing but the receipt file, ENG-016).
     # The bare door used to REFUSE the same configuration the other two
     # announced, which is one namelist with two answers.
+    unwired = theta_m_unwired(inp, max_dom) if use_theta_m == 1 else None
+    if unwired is None and use_theta_m == 1 and use_theta_m_values is None:
+        # An omission integrates theta_m only within the scope it always
+        # has (theta_m_omitted_scope); an explicit 1 wherever it is wired.
+        unwired = theta_m_omitted_scope(
+            inp, max_dom,
+            route=("wrf_boundary" if wrf_boundary_use_theta_m is not None
+                   else "native"))
     decision = theta_m_decision(
         use_theta_m, metgrid_initialization=metgrid_initialization,
         wrf_boundary_use_theta_m=wrf_boundary_use_theta_m,
-        unwired=(theta_m_unwired(inp, max_dom) if use_theta_m == 1 else None))
+        unwired=unwired)
     # use_theta_m = 1 honoured: the experiment integrates theta_m
     # (RunConfig.use_theta_m = 1, written to [shared] below).
     theta_m_integrated = decision.moist_theta

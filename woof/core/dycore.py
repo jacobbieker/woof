@@ -1970,6 +1970,27 @@ def launch_wrf_smag2d_vertical(
                 grid, (_TPB, 1, 1),
                 tuple(common + [ustm, np.int32(active), tendency] + tail))
     scalar_grid = ((nx + _TPB - 1) // _TPB, ny, 1)
+    if theta_m_branch.state_theta_m(state):
+        # use_theta_m = 1: hflux's theta_m branch (module_diffusion_em.F:
+        # 4294-4318), kernels/smag2d_theta_m.cu; theta is phy_prep's dry
+        # th_phy of the grid's own theta_m and vapour.
+        thp = getattr(state, "thp0" if time_t else "thp")
+        thb, base3d = theta_m_branch._thb_args(state)
+        if isfflx in (0, 2):
+            get_kernel("smag2d_theta_m", "wrf_smag_surface_heat_const_theta_m")(
+                scalar_grid, (_TPB, 1, 1),
+                tuple(common + [DTYPE(cfg.tke_heat_flux), hfx,
+                                np.int32("hfx" in fields), qfx,
+                                np.int32("qfx" in fields), thp, thb, base3d,
+                                rth] + tail))
+        get_kernel("smag2d_theta_m", "wrf_smag_surface_scalars_theta_m")(
+            scalar_grid, (_TPB, 1, 1),
+            tuple(common + [
+                hfx, qfx, np.int32(int(isfflx == 1) and active),
+                np.int32(int(isfflx in (1, 2)) and active), thp, thb, base3d,
+                rth, rqv if rqv is not None else rth,
+            ] + tail))
+        return
     if isfflx in (0, 2):
         # hflux CASE(0,2): prescribed constant kinematic heat flux.
         get_kernel("smag2d", "wrf_smag_surface_heat_const")(
@@ -5184,6 +5205,10 @@ def _step_epilogue(state: DomainState, cfg: RunConfig,
         from woof.core.lightning import lightning_due, update_lightning
         lightning_refl_due = (cfg.lightning_option in (1, 2)
                               and lightning_due(state, cfg))
+    # use_theta_m = 1: phy_prep_part2's dry-theta RTHFTEN for GF/G3/New
+    # Tiedtke (solve_em.F:3585, before moist_physics_prep_em); otherwise a
+    # no-op that launches nothing.
+    theta_m_branch.convert_advective_forcing(state, cfg)
     if cfg.mp_physics != 0:                           # post-RK3 adjustment
         # h_diabatic capture cadence: once per INTERNAL step with cfg.dt.
         # Under the reference case compatibility integrator (dt = clock_dt/8) this
@@ -5255,6 +5280,8 @@ def _wrf_step_epilogue(state: DomainState, cfg: RunConfig,
         from woof.core.lightning import lightning_due, update_lightning
         lightning_refl_due = (cfg.lightning_option in (1, 2)
                               and lightning_due(state, cfg))
+    # use_theta_m = 1: phy_prep_part2's dry-theta RTHFTEN (solve_em.F:3585).
+    theta_m_branch.convert_advective_forcing(state, cfg)
     if cfg.mp_physics != 0:
         if getattr(cfg, "madwrf_opt", 0) == 2:
             from woof.core.madwrf import step_nudge

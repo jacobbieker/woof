@@ -1214,6 +1214,12 @@ def read_wrfinput(path: str | Path, *, require_complete: bool = True,
         # (grid constants, flags) are carried even where the model has no
         # state for them: IGNORED_WRFINPUT only says nothing is restored.
         carried |= frozenset(WRF_INPUT_HISTORY_ROWS)
+        # use_theta_m = 1: THM is the prognostic t_2 itself (real.exe's
+        # theta_m - T0, module_initialize_real.F:4923-4931), which the
+        # theta_m run restores word for word (restore_domain_state).
+        from woof.core.theta_m import run_theta_m
+        if cfg is not None and run_theta_m(cfg):
+            carried |= frozenset({"THM"})
         def unread(name):
             return (name == "Times"
                     or (name in IGNORED_WRFINPUT and name not in carried)
@@ -1620,6 +1626,52 @@ def wrf_start_base_state(raw, hypsometric_opt: int):
     return {'MUB': mub, 'PB': pb, 'T_INIT': t_init, 'ALB': alb, 'PHB': phb}
 
 
+def restore_theta_m_prognostic(state, restored: RestoredDomain, cfg, base, cp,
+                               *, wrf_exact: bool) -> None:
+    """The WRF-file door under ``use_theta_m = 1``: ``thp`` is the files'
+    own theta_m'.
+
+    WRF 4.x real.exe writes the prognostic ``t_2`` -- theta_m - T0 under
+    use_theta_m = 1 (module_initialize_real.F:4923-4931) -- as THM
+    (Registry.EM_COMMON:210, dataname "thm") and the dry th_phy_m_t0 as T
+    (:209, saved at :4913 before the conversion); a WRF restart carries
+    ``t_2`` as THM_2 (woof.ingest.wrfrst keeps it as THM for a theta_m run).
+    The theta_m run restores THM by the words the dry run restores T with
+    (strict: T itself about thb = 300; default: (THM + 300) - thb), and its
+    boundaries are wrfbdy's coupled theta_m T_B* unconverted
+    (:func:`read_wrfbdy`).  wrf.exe stops when the file and the namelist
+    disagree (share/input_wrf.F:211-216) and when use_theta_m = 1 meets
+    pre-V4 input (:1080-1086), whose files carry no THM; so does this door.
+    A run integrating dry theta is untouched.
+    """
+    from woof.core.theta_m import run_theta_m
+    if not run_theta_m(cfg):
+        return
+    raw = restored.raw
+    attrs = restored.global_attributes
+    file_flag = int(float(attrs.get("USE_THETA_M", 0)))
+    if file_flag != 1:
+        raise ConfigurationRefused(
+            f"{restored.path}: the run integrates theta_m (use_theta_m = 1) "
+            f"but the file says USE_THETA_M = {file_flag}: wrf.exe stops here "
+            "('use_theta_m values must be consistent', share/input_wrf.F:"
+            "211-216); re-run real.exe with use_theta_m = 1 or run this "
+            "file with use_theta_m = 0")
+    if "THM" not in raw:
+        raise ConfigurationRefused(
+            f"{restored.path}: USE_THETA_M = 1 but the file carries no THM "
+            "(theta_m - T0): pre-V4 input, which wrf.exe refuses under "
+            "use_theta_m = 1 ('Cannot have old input data when requesting "
+            "use_theta_m=1', share/input_wrf.F:1080-1086)")
+    thm = np.asarray(raw["THM"], dtype=np.float32)
+    if wrf_exact:
+        state.thp[...] = cp.asarray(thm, dtype=cp.float32)
+    else:
+        state.thp[...] = cp.asarray(
+            (thm + np.float32(300.0)) - base.thb, dtype=cp.float32)
+    state.theta_m = True
+
+
 def restore_domain_state(restored: RestoredDomain, cfg, *, scratch_arena=None,
                          dycore_state_workspace=None, radiation=None,
                          radiation_start_time=None, radiation_latitude=None,
@@ -1681,6 +1733,10 @@ def restore_domain_state(restored: RestoredDomain, cfg, *, scratch_arena=None,
         state.thp[...] = cp.asarray(
             (raw["T"].astype(np.float32) + np.float32(300.0))
             - base.thb, dtype=cp.float32)
+    # use_theta_m = 1: the files' own prognostic, THM (or a restart's
+    # THM_2), replaces the dry T restored above, by the same words.
+    restore_theta_m_prognostic(state, restored, cfg, base, cp,
+                               wrf_exact=wrf_exact)
     state.p[...] = cp.asarray(raw["P"] + raw["PB"], dtype=cp.float32)
     from woof.wrf_exact import DIAGNOSTICS_ENABLED
     if DIAGNOSTICS_ENABLED:
@@ -2473,8 +2529,19 @@ def read_wrfbdy(path: str | Path, *, run_seconds: float,
         for name in external_scalar_fields(cfg):
             layouts[name] = (by_state[name], "bottom_top", "south_north", "west_east")
     field_names = {name: layout[0] for name, layout in layouts.items()}
+    # use_theta_m = 1 run: wrfbdy's T_B* is the coupled theta_m it
+    # integrates (real_em.F:872 couples the converted t_2), so it is not
+    # converted to dry theta (restore_theta_m_prognostic checks the files).
+    from woof.core.theta_m import run_theta_m
+    integrates_theta_m = cfg is not None and run_theta_m(cfg)
     with netcdf_bridge.open_dataset(path) as dataset:
         _check_boundary_identity(dataset, restored)
+        if integrates_theta_m and int(dataset.getncattr("USE_THETA_M")) != 1:
+            raise ConfigurationRefused(
+                f"{path}: the run integrates theta_m (use_theta_m = 1) but "
+                "the boundary file says USE_THETA_M = "
+                f"{int(dataset.getncattr('USE_THETA_M'))}: wrf.exe stops here "
+                "(share/input_wrf.F:211-216)")
         if (cfg is not None and cfg.bl_pbl_physics == 5 and cfg.bl_mynn_tkeadvect
                 and any(name.upper().startswith("QKE_ADV_B") for name in dataset.variables)):
             prefix = ("qke_adv" if any(name.startswith("qke_adv_B")
@@ -2655,7 +2722,9 @@ def read_wrfbdy(path: str | Path, *, run_seconds: float,
             side_tables = {gpu_name: {} for gpu_name in field_names}
             for gpu_name, sides in raw_tables.items():
                 for side_name, (value, tendency) in sides.items():
-                    if (gpu_name == "theta" and
+                    # use_theta_m = 1 run: T_B* is the coupled theta_m it
+                    # integrates, taken like every other coupled field.
+                    if (gpu_name == "theta" and not integrates_theta_m and
                             int(restored.global_attributes["USE_THETA_M"]) == 1):
                         side_tables[gpu_name][side_name] = _moist_theta_time_law(
                             restored, side_name, raw_tables, width,

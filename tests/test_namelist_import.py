@@ -1095,11 +1095,14 @@ def test_implicit_switches_come_from_the_shipped_profile_not_the_importer(
 
 def test_the_bare_door_books_theta_m_as_the_same_substitution_as_the_other_two(
         tmp_path):
-    """use_theta_m = 1 is one integration divergence, and the bare
-    import-namelist door books it exactly as the met_em and wrfinput doors
-    do: an announced Substitution with a reason, never a refusal that
-    depends on which door the user arrived through."""
-    inp = INPUT_TEXT.replace(" use_theta_m = 0,", " use_theta_m = 1,")
+    """An omitted use_theta_m (WRF's Registry default 1) outside the scope
+    an omission integrates theta_m in is one integration divergence, and
+    the bare import-namelist door books it exactly as the met_em and
+    wrfinput doors do: an announced Substitution with a reason, never a
+    refusal that depends on which door the user arrived through.  (An
+    explicit use_theta_m = 1 integrates theta_m on every door,
+    tests/test_theta_m_door.py.)"""
+    inp = INPUT_TEXT.replace(" use_theta_m = 0,\n", "")
     _toml, report = import_namelists(*_pair(tmp_path, inp=inp))
     booked = [item for item in report.substitutions
               if item.key == "use_theta_m"]
@@ -1120,13 +1123,13 @@ def test_the_bare_door_books_theta_m_as_the_same_substitution_as_the_other_two(
         == [(item.key, item.wrf_value, item.gpuwm_value) for item in booked]
     assert "metgrid TT is physical temperature" in metgrid[0].reason
 
-    # Omission takes WRF's Registry default 1 and is booked the same way,
-    # rather than refused for being omitted.
-    omitted = INPUT_TEXT.replace(" use_theta_m = 0,\n", "")
-    _omitted_toml, omitted_report = import_namelists(
-        *_pair(tmp_path, inp=omitted))
-    assert [item.key for item in omitted_report.substitutions
-            if item.key == "use_theta_m"] == ["use_theta_m"]
+    # The explicit request is honoured instead: theta_m is integrated.
+    explicit = INPUT_TEXT.replace(" use_theta_m = 0,", " use_theta_m = 1,")
+    explicit_toml, explicit_report = import_namelists(
+        *_pair(tmp_path, inp=explicit))
+    assert "use_theta_m = 1" in explicit_toml
+    assert not [item for item in explicit_report.substitutions
+                if item.key == "use_theta_m"]
 
 
 def test_theta_m_outside_wrfs_two_values_is_still_refused(tmp_path):

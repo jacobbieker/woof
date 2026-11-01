@@ -31,6 +31,7 @@ from woof.namelist_import import (
     ignored_time_control_reason,
     read_namelist_role,
     theta_m_decision,
+    theta_m_omitted_scope,
     theta_m_unwired,
 )
 from woof.vertical_contract import validate_explicit_eta_grid
@@ -802,8 +803,10 @@ def analyze_namelists(
             # the reader is told about, not a runtime FAIL.  This door used
             # to FAIL the gpuwm_runtime verdict for a pair the importer
             # accepts and announces -- one configuration, two answers.
-            decision = theta_m_decision(
-                1, unwired=theta_m_unwired(inp, max_dom))
+            unwired = theta_m_unwired(inp, max_dom)
+            if unwired is None and "use_theta_m" not in dynamics:
+                unwired = theta_m_omitted_scope(inp, max_dom)
+            decision = theta_m_decision(1, unwired=unwired)
         if moist_theta and not undefined_theta and decision.substituted:
             issues.append(_issue(
                 "THETA_M_DRY_SUBSTITUTION", "&dynamics/use_theta_m",

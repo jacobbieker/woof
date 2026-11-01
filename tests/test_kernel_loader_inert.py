@@ -88,7 +88,9 @@ _EXPECTED_HEADERS = {
     "mynn_surface": ("mynn_libm.cuh", "surface_subnormal.cuh"),
     "sfclay": ("glibc_flt32.cuh", "sfclay_classic.cuh"),
     "smag2d": ("glibc_flt32.cuh",),
-    "lin": ("glibc_flt32.cuh", "lin_support.cuh", "lin_wrf.cuh"),
+    # use_theta_m = 1's diff_opt = 2 hflux composes smag2d.cu (a new unit).
+    "smag2d_theta_m": ("glibc_flt32.cuh", "smag2d.cu"),
+    "lin":("glibc_flt32.cuh", "lin_support.cuh", "lin_wrf.cuh"),
     "lin_refl": ("refl.cu",),
     # Goddard 2017 radiation (ra_lw/ra_sw_physics = 5): a new unit.
     "goddard": ("glibc_flt32.cuh", "portable_libm64.cuh", "goddard_bands.cuh", "goddard_sounding.cuh"),
@@ -260,7 +262,8 @@ def test_lake_compile_options_do_not_change_existing_modules(monkeypatch, strict
             "myjpbl", "wsm6"}
     no_ftz = {"g3", "sfclay", "myjsfc", "mynn_surface", "mynn_pbl", "thompson_column",
               "ysu_480", "wsm6r", "aer_opt2"}
-    diffusion = {"smag2d", "diffusion", "diff_opt1", "diff6", "diff6_seam"}
+    diffusion = {"smag2d", "diffusion", "diff_opt1", "diff6", "diff6_seam",
+                 "smag2d_theta_m"}
     expected = {name: ("-std=c++17", "--fmad=false") for name in no_fmad}
     expected.update({name: ("-std=c++17", "--fmad=false", "--ftz=false")
                      for name in no_ftz})
@@ -297,6 +300,8 @@ def test_lake_compile_options_do_not_change_existing_modules(monkeypatch, strict
     # WRF-Solar EPS and MAD-WRF: column-exact, subnormals kept.
     expected["wrfsolar_eps"] = ("-std=c++17", "--fmad=false", "--ftz=false")
     expected["madwrf"] = ("-std=c++17", "--fmad=false", "--ftz=false")
+    # phy_prep_part2's use_theta_m RTHFTEN block: the same column-exact options.
+    expected["theta_m_cumulus"] = ("-std=c++17", "--fmad=false", "--ftz=false")
     # WRF's HAILCAST diagnostics (lane/cap-hail 97e9a3ca061) compile without
     # FMA, like the other column-exact WRF ports.
     expected["hail"] = ("-std=c++17", "--fmad=false")
@@ -424,7 +429,8 @@ def test_allow_listed_headers_exist_and_translation_units_are_explicit():
                 ("lin_refl", "refl.cu"),
                 ("gsd_helicity", "uh_diag.cu"),
                 ("gsd_initial_reflectivity", "thompson_fork.cu"),
-                ("nest_top", "acoustic.cu")), (
+                ("nest_top", "acoustic.cu"),
+                ("smag2d_theta_m", "smag2d.cu")), (
                 "only the explicitly reused initialization and scalar units may supply a .cu header")
 
 

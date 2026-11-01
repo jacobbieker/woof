@@ -261,6 +261,11 @@ _EXTRA_HEADERS: dict[str, tuple[str, ...]] = {
     # v4.6.1 Fortran.  CUDA's powf/expf/logf flipped calculate_N2's saturated
     # predicate there and moved the TKE coefficients by up to 34,746 ULP.
     "smag2d": ("glibc_flt32.cuh",),
+    # use_theta_m = 1's diff_opt = 2 surface heat flux (vertical_diffusion_2
+    # hflux, module_diffusion_em.F:4294-4318) composes smag2d.cu's own grid
+    # helpers ahead of its two entry points; a new module, so the smag2d
+    # unit and its launches keep their bytes.
+    "smag2d_theta_m": ("glibc_flt32.cuh", "smag2d.cu"),
     "myjsfc": ("glibc_flt32.cuh", "flt32_expf_fma.cuh"),
     "mynn_surface": ("mynn_libm.cuh", "surface_subnormal.cuh"),
     "sfclay": ("glibc_flt32.cuh", "sfclay_classic.cuh"),
@@ -518,13 +523,15 @@ _URBAN_NO_FTZ_MODULES = frozenset({"urban_ucm", "urban_ucm480", "urban_bep",
 # solar_diag: WRF 4.7.1 module_diag_solar.F (tools/solar_diag_wrf471_oracle).
 # theta_m: WRF 4.7.1's use_theta_m = 1 conversions, and avgflx: its
 # do_avgflx_em = 1 accumulation (tools/bigstep_wrf471_oracle/thetam_build.py);
+# theta_m_cumulus: phy_prep_part2's use_theta_m = 1 RTHFTEN block
+# (tools/bigstep_wrf471_oracle/thetam_ext_build.py);
 # new units, so every existing unit keeps its options.
 # sms3dtke: WRF 4.7.1 km_opt = 5 (tools/sms3dtke_wrf471_oracle); gfortran
 # -O0 contracts nothing and keeps subnormal words.
 _NO_FTZ_MODULES = frozenset({"g3", "nsas", "sfclay", "myjsfc", "mynn_surface", "mynn_pbl",
                              "thompson_column", "ysu_480", "wsm6r",
                              "aer_opt2", "oml", "farms", "cldfra3", "solar_diag",
-                             "theta_m", "avgflx",
+                             "theta_m", "avgflx", "theta_m_cumulus",
                              # WRF 4.7.1 multi_perturb hooks
                              # (tools/wrfsolar_eps_wrf471_oracle): subnormal
                              # mixing ratios pass the multipliers unflushed.
@@ -567,7 +574,8 @@ def module_options(name: str) -> tuple[str, ...]:
             else ("-std=c++17",))
 
 
-_DIFFUSION_MODULES = frozenset(("smag2d", "diffusion", "diff_opt1", "diff6", "diff6_seam"))
+_DIFFUSION_MODULES = frozenset(("smag2d", "diffusion", "diff_opt1", "diff6", "diff6_seam",
+                                "smag2d_theta_m"))
 
 DIFFUSION_OPTIONS = ("-std=c++17", "--fmad=false", "--ftz=false",
                      "--prec-div=true", "--prec-sqrt=true",

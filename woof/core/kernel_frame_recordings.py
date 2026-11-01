@@ -3382,3 +3382,20 @@ KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
     measured="2026-10-30", complete=False,
     frames=MappingProxyType({"wrfsolar_eps": 0, "madwrf": 0}),
 ),)
+
+# use_theta_m = 1 beyond Kessler: phy_prep_part2's RTHFTEN block
+# (kernels/theta_m_cumulus.cu) and vertical_diffusion_2's theta_m hflux
+# (kernels/smag2d_theta_m.cu, which composes smag2d.cu), production loader,
+# default and strict (GPUWM_WRF_EXACT=1) numerics, read 2026-10-31 on the
+# RTX A6000 CUDA host with load_module + kernel_local_size_bytes: every
+# entry point reads 0 B (smag2d.cu's 31 composed entry points included).
+KERNEL_LOCAL_FRAME_RECORDINGS = tuple(
+    replace(row, complete=False)
+    if not {"theta_m_cumulus", "smag2d_theta_m"} <= set(row.frames) else row
+    for row in KERNEL_LOCAL_FRAME_RECORDINGS)
+KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
+    box="pb", device="NVIDIA RTX A6000",
+    compute_capability="86", nvrtc_build="12.9.86", platform_family="linux",
+    measured="2026-10-31", complete=False,
+    frames=MappingProxyType({"theta_m_cumulus": 0, "smag2d_theta_m": 0}),
+),)

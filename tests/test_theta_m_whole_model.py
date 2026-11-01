@@ -204,3 +204,114 @@ def test_avgflx_history_and_restart_classification():
     for slot in ("theta_m_stash", "theta_m_dry", "theta_m_rtheta",
                  "theta_m_qv_diabatic"):
         assert classify_scratch_slot(slot) == "rebuild"
+
+
+# --- The real-data-like configuration (woof/verify/cases/theta_m_real_like.py):
+# Thompson (mp 8) + RRTMG + YSU or MYNN + Grell-Freitas on a 12 km patch.
+
+REAL_LIKE_STEPS = 20
+
+
+def _dry_total(state) -> float:
+    """sum((c1h*mu + c2h)*theta*(-dnw)) of the DRY theta, whichever the
+    state integrates."""
+    import cupy as cp
+    from woof.core.theta_m import dry_theta
+    f8 = cp.float64
+    thb = state.thb if state.thb.ndim == 3 else state.thb[:, None, None]
+    theta = thb.astype(f8) + dry_theta(state).astype(f8)
+    chm = (state.c1h[:, None, None].astype(f8)
+           * (state.mub2d + state.mup)[None].astype(f8)
+           + state.c2h[:, None, None].astype(f8))
+    return float(cp.sum(theta * chm * (-state.dnw[:, None, None].astype(f8))))
+
+
+@pytest.mark.parametrize("pbl", ("ysu", "mynn"))
+def test_real_like_thompson_gf_runs_theta_m_stably_and_conservatively(pbl):
+    """Both runs are stable, and the theta_m run's dry-theta budget is the
+    dry run's: the coupled dry-theta total moves by what the physics puts in
+    (radiation, surface flux, GF, Thompson), identically in both modes to
+    the float32 envelope the dycore conserves to (2e-7; measured on the RTX
+    A6000: YSU 5.9e-8, MYNN 1.1e-8 after 30 steps)."""
+    import cupy as cp
+    from woof.core.dycore import run_steps, stability_report
+    from woof.core.theta_m import dry_theta
+    from woof.verify.cases import theta_m_real_like as case
+    drift, states = {}, {}
+    for flag in (0, 1):
+        cfg = case.config(use_theta_m=flag, pbl=pbl)
+        state, _driver = case.build(cfg)
+        assert state.theta_m == bool(flag)
+        before = _dry_total(state)
+        run_steps(state, cfg, n=REAL_LIKE_STEPS)
+        report = stability_report(state, cfg)
+        assert not report["nan"], report
+        assert report["w_max"] < 1.0 and report["u_max"] < 5.0, report
+        drift[flag] = (_dry_total(state) - before) / before
+        states[flag] = state
+    # The physics heats the patch (a nonzero budget to agree on) ...
+    assert drift[0] > 1e-5
+    # ... and the theta_m run's dry-theta budget is the dry run's.
+    assert abs(drift[1] - drift[0]) < 2e-7, drift
+    theta = cp.asnumpy(dry_theta(states[1]))
+    assert np.abs(theta - cp.asnumpy(states[0].thp)).max() < 0.05
+    assert float(cp.abs(states[1].qv - states[0].qv).max()) < 1e-4
+
+
+def test_real_like_dry_run_launches_no_theta_m_kernel(monkeypatch):
+    """use_theta_m = 0 on the real-like configuration reaches none of the
+    theta_m units (the conversions, the RTHFTEN block, the hflux variant)."""
+    import woof.core.kernels as kernels
+    from woof.core.dycore import run_steps
+    from woof.verify.cases import theta_m_real_like as case
+    real = kernels.get_kernel
+    new = ("theta_m", "theta_m_cumulus", "smag2d_theta_m")
+
+    def guarded(name, func, *args, **kwargs):
+        if name in new:
+            raise AssertionError(f"{name}.{func} launched on a dry-theta run")
+        return real(name, func, *args, **kwargs)
+
+    monkeypatch.setattr(kernels, "get_kernel", guarded)
+    cfg = case.config(use_theta_m=0)
+    state, _driver = case.build(cfg)
+    run_steps(state, cfg, n=2)
+    assert not state.theta_m
+    for slot in ("theta_m_stash", "theta_m_h_pre", "theta_m_th_phy"):
+        assert state.existing_scratch(slot) is None, slot
+
+
+def _accepted_microphysics():
+    from woof.config import MP_PHYSICS_ACCEPTED
+    return [mp for mp in MP_PHYSICS_ACCEPTED if mp != 0]
+
+
+@pytest.mark.parametrize("mp", _accepted_microphysics())
+def test_every_microphysics_scheme_finishes_theta_m(mp):
+    """Each accepted scheme hands its post-call dry theta to the window
+    (a scheme that does not is refused at its first step) and integrates the
+    dry run's weather under use_theta_m = 1, on the real-like patch with its
+    physics driver (8 x 8, three steps)."""
+    import cupy as cp
+    from woof.core.dycore import run_steps
+    from woof.core.theta_m import GENERIC_FINISH_MICROPHYSICS, dry_theta
+    from woof.verify.cases import theta_m_real_like as case
+    assert mp in GENERIC_FINISH_MICROPHYSICS
+    extra = {}
+    if mp in (2, 30, 96):
+        # No RTE+RRTMGP cloud-optics coupling: the legacy wrappers' radii.
+        extra["ra_rrtmg_variant"] = "rrtmg_legacy"
+    if mp in (96, 900):
+        # Grell-Freitas has no phase-output contract for these.
+        extra["cu_physics"] = 0
+    theta = {}
+    for flag in (0, 1):
+        cfg = case.config(use_theta_m=flag, mp_physics=mp, nx=8, ny=8, **extra)
+        state, _driver = case.build(cfg)
+        run_steps(state, cfg, n=3)
+        assert state.theta_m == bool(flag)
+        theta[flag] = cp.asnumpy(dry_theta(state))
+        assert np.isfinite(theta[flag]).all()
+    # Measured on the RTX A6000: at most 1.5e-3 K (aerosol-aware Thompson).
+    assert np.abs(theta[1] - theta[0]).max() < 0.01
+

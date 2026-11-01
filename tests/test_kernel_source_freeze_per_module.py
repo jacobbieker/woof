@@ -261,6 +261,13 @@ BASELINE_PINNED: dict[str, str] = {
     # equal to the gfortran -O0 / glibc 2.43 record
     # (tests/test_madwrf_wrf471_oracle.py) on Metal and CUDA.
     "madwrf": "cefa3f49219aae1d562848db1e1cbad6362fb3478666e3e6c3b00c5f4cb99650",
+    # use_theta_m = 1 everywhere: phy_prep_part2's RTHFTEN block and
+    # vertical_diffusion_2's theta_m hflux (which composes smag2d.cu), new
+    # units equal word for word to the gfortran -O0 / glibc 2.43 record
+    # (tests/test_thetam_ext_wrf471_parity.py) on Metal and CUDA.  Every
+    # existing unit keeps its bytes.
+    "theta_m_cumulus": "580dfc42c040cb87474f33a32a15427681e92feac2c1bf7283ed9418d923f7d3",
+    "smag2d_theta_m": "85e469baf5494063679403def8bc1256932ebe972cf4ebb53fd1b44bbe2b9f5a",
     # e677dccb6: active table edits multiply binary64 values on the GPU,
     # round once to REAL, and reject non-positive crop roughness.
     "physics_params":

@@ -2718,6 +2718,10 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # 12.9.86, 2026-10-31, default and strict loaders: all fourteen entry
     # points read 0 B (the tridiagonal planes are a global workspace).
     "sms3dtke": 0,
+    # use_theta_m = 1's phy_prep_part2 RTHFTEN block and vertical_diffusion_2
+    # hflux (smag2d_theta_m composes smag2d.cu, whose own frame is 0 B), RTX
+    # A6000 sm_86, NVRTC 12.9, 2026-10-31, both loaders: every entry point 0 B.
+    "theta_m_cumulus": 0, "smag2d_theta_m": 0,
     # The partial-depth nest's coupling (Phase D3, kernels/partial_nest.cu),
     # RTX A6000 sm_86, NVRTC 12.9, 2026-10-30: all eight entry points 0 B.
     "partial_nest": 0,
@@ -4004,6 +4008,11 @@ def domain_kernel_modules(dc: DomainConfig, *,
     from woof.core.theta_m import run_theta_m
     if run_theta_m(dc.run):
         modules.add("theta_m")                   # woof/core/theta_m.py
+        from woof.core.theta_m import RTHFTEN_CUMULUS
+        if int(dc.run.cu_physics) in RTHFTEN_CUMULUS:
+            modules.add("theta_m_cumulus")       # phy_prep_part2's RTHFTEN
+        if int(dc.run.diff_opt) == 2 and int(dc.run.bl_pbl_physics) == 0:
+            modules.add("smag2d_theta_m")        # vertical_diffusion_2 hflux
     if int(getattr(dc.run, "do_avgflx_em", 0) or 0) == 1:
         modules.add("avgflx")                    # woof/core/avgflx.py
     if int(getattr(dc.run, "km_opt", 0)) == 5:   # woof/core/sms3dtke.py

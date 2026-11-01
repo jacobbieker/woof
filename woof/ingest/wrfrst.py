@@ -739,6 +739,12 @@ def read_wrfrst(path, *, expected_dimensions: Mapping[str, int], cfg):
     else:
         raise ValueError(f"{path}: USE_THETA_M = {use_theta_m} is not 0 or 1")
     raw["T"] = dry
+    # A use_theta_m = 1 run restarts from THM_2 itself, by the wrfinput name
+    # THM (woof.ingest.wrfinput.restore_theta_m_prognostic); T stays the dry
+    # theta every other reader of the restored fields expects.
+    from woof.core.theta_m import run_theta_m
+    if use_theta_m == 1 and cfg is not None and run_theta_m(cfg):
+        raw["THM"] = theta
     from woof.ingest.wrfinput import missing_required_wrfinput
     missing = missing_required_wrfinput(raw, cfg)
     if missing:
