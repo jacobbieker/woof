@@ -217,11 +217,15 @@ def test_a_fetch_only_source_is_refused_by_the_wizard_naming_its_state(
     wizard says so by the registry row's state instead of writing a
     configuration nothing could prepare."""
 
-    assert get_source_adapter(source).status is AdapterStatus.COMPOSITION_REQUIRED
+    # rrfs-ens is a composition the wizard does not compose; the donor rows
+    # (gefs-reforecast-land, ncep-r1-seaice) need a mapping onto an
+    # atmosphere.  Either way the refusal names the row's own state.
+    status = get_source_adapter(source).status
+    assert status in (AdapterStatus.COMPOSITION_REQUIRED, AdapterStatus.MAPPING_REQUIRED)
     rc, out = _emit(tmp_path / source, source)
     err = capsys.readouterr().err
     assert rc == 2 and not out.exists(), err
-    assert "explicit_composition_required" in err, err
+    assert status.value in err, err
 
 
 @pytest.mark.parametrize("source", _planable_sources_with_public_bytes())
@@ -489,11 +493,22 @@ def test_hand_written_fetch_table_validates_for_every_routed_source(source):
     """
 
     from woof.fetch import validate_fetch_hints
+    from woof.fetch_routes import table_route
+    from route_cycle_fit import first_window, route_cycle_text
 
-    validate_fetch_hints({"source": source,
-                          "cycle": _ARCHIVE_CYCLES.get(source, "2026-08-17T00"),
-                          "hours": 6, "out": "data"},
-                         source="hand-written.toml")
+    # The table a person would type for THIS route: a cycle the route can
+    # plan (its publication era, a host that holds it) and a window its
+    # ladder publishes (an analysis-only donor is one frame; the GEFSv12
+    # reforecast opens at f003), decided from the route row, not the clock.
+    table = {"source": source, "hours": 6, "out": "data",
+             "cycle": _ARCHIVE_CYCLES.get(source)
+             or route_cycle_text(source, "2026-08-17T00")}
+    route = table_route(source)
+    if route is not None:
+        start, table["hours"] = first_window(route, 6)
+        if start:
+            table["forecast_start_hour"] = start
+    validate_fetch_hints(table, source="hand-written.toml")
 
 
 # ---------------------------------------------------------------------------
