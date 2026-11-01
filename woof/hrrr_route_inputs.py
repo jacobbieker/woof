@@ -408,6 +408,11 @@ def render_target_domain(exp) -> str:
     root = exp.domains[0]
     run = root.run
     projection = exp.projection
+    if projection is None:
+        raise HrrrRouteInputError(
+            "the nested HRRR route is Lambert-only; this experiment has no "
+            "[projection] table.  Re-run the wizard with --projection "
+            "lambert, or add a lambert [projection] table to the TOML.")
     if projection.map_proj != "lambert":
         raise HrrrRouteInputError(
             f"the nested HRRR route is Lambert-only; this domain is "
@@ -1672,6 +1677,16 @@ ROUTE_FORECAST_TOML_FIELDS: Mapping[str, str] = MappingProxyType({
     # a rented box, 2026-10-21).
     "smoke_off_reason": (
         "woof/smoke_receipts.py, the run receipt's smoke-off sentence"),
+    # The moving nest's fixed-frame precipitation archive (tc/nest, 1.1.1):
+    # a woof policy WRF has no namelist key for, so the pair cannot spell
+    # it.  Preparation-inert (prepared_cache PREPARATION_INERT_RUN_FIELDS);
+    # the forecast reads it from the bound TOML at each nest move.  Without
+    # this entry the round trip compared it against the importer's default,
+    # so a TOML choosing the legacy parent-seeded counters (false) was
+    # refused at emission for a value the forecast does read.
+    "nest_accumulation_archive": (
+        "woof/core/nest_accumulation.py relocate, the moving nest's "
+        "accumulation archive"),
 })
 
 
