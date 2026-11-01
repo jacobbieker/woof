@@ -129,6 +129,19 @@ no land state (its registry row is `explicit_composition_required`).
 The route table also carries `met-office-global` (see "Met Office global"
 below), whose fetch door is open before its preparation profile ships.
 
+It also carries rows added after the table above was written, each served
+by the same table-route engine:
+
+| source | what it is |
+|---|---|
+| `ecmwf-open-data-0p1` | ECMWF IFS HRES open data at 0.1 degree, published from the 2026-10-20 cycles under CC-BY-4.0; a cycle before that has no file to fetch |
+| `gefs-reforecast` | GEFSv12 retrospective daily member (5 members); its first instantaneous state is f003, there is no f000 |
+| `gefs-reforecast-weekly` | GEFSv12 retrospective weekly member (11 members), also opening at f003 |
+| `gefs-v11` | GEFS v11 legacy archive member (one degree, 21 members, six-hourly leads, 26 pressure levels), fetched only inside its publication era |
+| `gefs-v11-flat` | GEFS v11 flat archive layout of the same members, also era-bound |
+| `gefs-reforecast-land` | a NOAA surface donor (`adapter_mapping_required`): partial surface state used only by a declared composition, so the wizard refuses it on its own |
+| `ncep-r1-seaice` | a NOAA sea-ice surface donor (`adapter_mapping_required`), likewise only part of a declared composition |
+
 `woof domain` emits the `[fetch]` table and the runnable step 1 for every
 one of them, because the wizard asks the fetch module the question rather
 than carrying a list:
