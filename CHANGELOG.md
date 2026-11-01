@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+Merged upstream WOOF 1.1.5 (with 1.1.4). Where upstream built a feature the
+fork already had, upstream's keys and flags are now the only ones:
+
+- Wind farms: `wind_farm_scheme`, `wind_farms` (and `--wind-farms`),
+  `windfarm_tke_factor`. The fork's WRF v4.7.1 Fitch scheme is
+  `wind_farm_scheme = "fitch_wrf"`, reading `wind_farms` as a WRF
+  `windturbines.txt`, a `windturbines-ij.txt` (WRF's `windfarm_ij = 1`) or a
+  woof turbine table with turbine-library curves; it writes WRF's `POWER`,
+  runs on hex's unequal-area cells (`--physics wind_farm_scheme=fitch_wrf
+  --physics wind_farms=FILE`), and `woof import-namelist` selects it for
+  `windfarm_opt = 1`. The `windfarm_opt`, `windfarm_ij` and
+  `windfarm_turbine_file` config keys are gone.
+- Icechunk: `woof go` exports through `--output-format netcdf,icechunk` /
+  `--icechunk-store` (`[output] formats` / `icechunk_store`). `--icechunk URL`
+  and `[output] icechunk = {...}` are gone; `[output]
+  icechunk_delete_after_commit` (or `--icechunk-delete-after-commit`) and
+  `icechunk_domains` carry the fork's delete-after-commit backpressure and
+  domain subset, and `{name}` in the store is the `[experiment] name`.
+- LES nests: upstream's `--les-below-m`, `--les-closure` and
+  `--les-inflow-seeding`; a tree suite whose nests run PBL off is still
+  counted as LES in the gray-zone advisory.
+
 New:
 
 - A live nest can carry its own eta ladder (WRF `vert_refine_method = 2`): a
