@@ -128,7 +128,8 @@ include docs/adapt-validation-contract.md docs/arbitrary-verified-adapters.md
 include docs/benchmark.md docs/cells.md docs/cumulus-new-tiedtke.md
 include docs/da-nowcast-quickstart.md docs/da-vs-wofs.md
 include docs/desktop-package-launcher.md
-include docs/dev/a65-preparation-peaks.md docs/dev/mynn-gsd41.md docs/dev/verify-exact.md
+include docs/dev/a65-preparation-peaks.md docs/dev/ci.md docs/dev/mlx-backend.md
+include docs/dev/mynn-gsd41.md docs/dev/verify-exact.md
 include docs/ensemble-output-contract.md docs/ensemble-wrf-stochastic-import.md
 include docs/gf_gamma_known_delta.md docs/grib2-export.md docs/install.md
 include docs/local-da-companion-protocol.md
