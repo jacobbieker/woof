@@ -68,8 +68,7 @@ def test_printed_member_prep_then_go_keeps_both_manifests(
     monkeypatch.setattr(runplan, "_asserted_profile", lambda *a, **k: None)
     run = tmp_path / "run"
     runplan._staged_chain(plan, config_path=config,
-                         exp=SimpleNamespace(relocation=RelocationConfig(), domains=(),
-                                             tiles=SimpleNamespace(enabled=False)),
+                         exp=_stationary_experiment(),
                          observer=observer, run_dir=run)
     assert forecasts == [True]
     assert standalone.read_bytes() == original
@@ -80,3 +79,22 @@ def test_printed_member_prep_then_go_keeps_both_manifests(
     actual = [(manifests[0].parent / row["path"]).resolve()
               for row in authored["primary_files"]]
     assert actual == [Path(row["path"]) for row in verified["files"]]
+
+
+def _stationary_experiment():
+    """A real one-domain experiment for 2026-07-29 that declares no relocation.
+
+    The chain reads the root's chem selection (none here), the start the
+    upper source is fetched for and the relocation contract before it
+    prepares anything, so a stand-in with no domains or start no longer
+    reaches the preparation these cases are about.
+    """
+    import dataclasses
+    from datetime import datetime as _datetime
+
+    from woof.config import RunConfig
+    from woof.experiment import RelocationConfig, experiment_from_run_config
+    exp = experiment_from_run_config(
+        RunConfig(nx=10, ny=10, nz=10, dx=3000.0, dy=3000.0, ztop=16000.0,
+                  dt=10.0, run_seconds=600.0), _datetime(2026, 7, 29))
+    return dataclasses.replace(exp, relocation=RelocationConfig())
