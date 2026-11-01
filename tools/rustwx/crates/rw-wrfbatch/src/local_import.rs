@@ -4101,6 +4101,11 @@ fn plane_from_last_record(
 }
 
 pub(crate) fn variable_units(nc: &NcFile, name: &str) -> Option<String> {
+    // NC_CHAR text ends at its first NUL, as netCDF-C's ncdump reads it.
+    // netCDF4-python stores an empty attribute as one NUL byte (HDF5 has no
+    // zero-length string), and netcrust hands every stored byte back, so a
+    // history written by the netCDF4 engine would otherwise label a unitless
+    // field "[\0]" where the classic writer's copy of the same file says "".
     nc.variable(name)
         .and_then(|variable| {
             variable
@@ -4109,6 +4114,10 @@ pub(crate) fn variable_units(nc: &NcFile, name: &str) -> Option<String> {
                 .map(str::to_string)
         })
         .or_else(|| nc.hdf5_dataset_attribute_string(name, "units"))
+        .map(|units| match units.find('\0') {
+            Some(end) => units[..end].to_string(),
+            None => units,
+        })
 }
 
 fn combine_same_grid(
