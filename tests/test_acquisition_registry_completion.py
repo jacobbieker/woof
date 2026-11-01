@@ -234,7 +234,10 @@ def test_staged_chain_verifies_and_consumes_the_selected_member_tree(tmp_path, m
     # This member-selection fixture declares a stationary experiment; the
     # chain checks its relocation contract before invoking preparation.
     from woof.experiment import RelocationConfig
-    exp = SimpleNamespace(relocation=RelocationConfig(), domains=())
+    # A real experiment has a root domain and a start: the chain reads the
+    # root's chem selection (_staged_chem_fetch) and the start the upper
+    # source is fetched for (upper_fetch_plan); this one selects no chem.
+    exp = _stationary_experiment()
     with pytest.raises(Prepared):
         runplan._staged_chain(plan, config_path=config, exp=exp, observer=observer, run_dir=tmp_path / "run")
     assert calls == ["select", "verify"]
@@ -269,3 +272,22 @@ def test_advisory_expert_profile_is_available_to_domain_authoring(tmp_path):
     assert code == 0
     from woof.domain_wizard import experiment_from_text
     assert experiment_from_text(out.read_text(), source=str(out)).root.run.sf_surface_physics == 4
+
+
+def _stationary_experiment():
+    """A real one-domain experiment for 2026-07-29 that declares no relocation.
+
+    The chain reads the root's chem selection (none here), the start the
+    upper source is fetched for and the relocation contract before it
+    prepares anything, so a stand-in with no domains or start no longer
+    reaches the preparation these cases are about.
+    """
+    import dataclasses
+    from datetime import datetime as _datetime
+
+    from woof.config import RunConfig
+    from woof.experiment import RelocationConfig, experiment_from_run_config
+    exp = experiment_from_run_config(
+        RunConfig(nx=10, ny=10, nz=10, dx=3000.0, dy=3000.0, ztop=16000.0,
+                  dt=10.0, run_seconds=600.0), _datetime(2026, 7, 29))
+    return dataclasses.replace(exp, relocation=RelocationConfig())
