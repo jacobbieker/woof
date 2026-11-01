@@ -100,7 +100,7 @@ def test_a_resized_nest_moves_only_the_bounds_the_size_derives():
 
 def test_a_budget_chooses_the_largest_rung_that_fits_with_the_admission_margin():
     plan = tc.plan_cyclone(cycle=CYCLE, point=POINT, sizing=CARD, hours=3,
-                           tiles="off", nest_budget_gib=5.5)
+                           tiles="off", nest_budget_gib=6.2)
     nest = plan["nest"]
     chosen = nest["parent_cells"]
     assert chosen > tc.PRESET_NEST_PARENT_CELLS
@@ -112,7 +112,7 @@ def test_a_budget_chooses_the_largest_rung_that_fits_with_the_admission_margin()
 
     # Priced against the budget the plan was priced against, which is the
     # narrowed allowance and not the card's own.
-    narrowed, bound = tc._budget_sizing(CARD, 5.5)
+    narrowed, bound = tc._budget_sizing(CARD, 6.2)
     assert bound == "request"
     envelope, budget = priced(tc._nest_dimensions(chosen), narrowed)
     assert envelope <= budget - dw.fit_headroom_bytes(budget)
@@ -131,7 +131,7 @@ def test_the_budget_is_what_the_whole_tree_is_priced_against():
     """A budget narrows the allowance every later number is measured
     against, so a smaller budget can never choose a larger nest."""
     sizes = []
-    for budget_gib in (5.1, 5.5, 6.5):
+    for budget_gib in (5.6, 6.2, 7.0):
         plan = tc.plan_cyclone(cycle=CYCLE, point=POINT, sizing=CARD, hours=3,
                                tiles="off", nest_budget_gib=budget_gib)
         sizes.append(plan["nest"]["parent_cells"])
@@ -193,7 +193,7 @@ def test_the_cli_prints_the_chosen_nest_and_the_priced_memory(monkeypatch, capsy
     tc.register_cli(parser.add_subparsers(dest="command", required=True))
     args = parser.parse_args(["cyclone-setup", "--cycle", CYCLE, "--point=18,-65",
                               "--hours", "3", "--tiles", "off",
-                              "--nest-budget-gib", "5.5", "--json"])
+                              "--nest-budget-gib", "6.2", "--json"])
     monkeypatch.setattr(dw, "_domain_target_hardware",
                         lambda args: (CARD, None, False))
     assert tc.main(args) == 0
@@ -354,8 +354,19 @@ def layout(plan):
 # through 5.15 on the 2.9.2 tip 63063559075, where the floor prices
 # 5,254,488,212 B -- the RRTMGP flux rows and the WSM6 column workspace
 # moved the resident envelope 61,620,265 B -- read at 0.05 GiB steps from
-# 4.8 to 5.2).
-@pytest.mark.parametrize("budget_gib", [4.9, 5.0, 5.1])
+# 4.8 to 5.2; 5.6 through 5.85 since 1.1.0/1.1.1, where the floor prices
+# 5,978,007,220 B, read at 0.05 GiB steps from 5.2 to 5.95.  Three moves,
+# each a deliberate product change and each measured by pricing the floor
+# with it reverted: HAILCAST switching itself on for the 3 km Morrison nest
+# (`hailcast_opt = -1` at dx <= 4 km, woof/core/hail.py,
+# docs/public/HAIL-DIAMETER.md), whose 7,392 B `hail` frame becomes the
+# widest local frame the backing store is sized to, +619,143,629 B; the
+# 128 MiB Morrison WORK floor (`morrison_constants.WORK_FLOOR_BYTES`,
+# 1.1.1), which takes a small domain's WORK stack in one call, morr_work
+# 6,272,784 -> 131,712,000 B of arena, +148,833,630 B priced; and the
+# NWP-maximum and solar-irradiance planes (gust_max, u10max, w_up_max,
+# surface_dni, ...) added since, +2,460,326 B).
+@pytest.mark.parametrize("budget_gib", [5.6, 5.7, 5.8])
 def test_a_floor_inside_its_budget_is_the_preset_and_not_a_refusal(budget_gib):
     narrowed, bound = tc._budget_sizing(CARD, budget_gib)
     assert bound == "request"
@@ -382,7 +393,7 @@ def test_a_floor_inside_its_budget_is_the_preset_and_not_a_refusal(budget_gib):
     assert dropped["memory"]["budget_bytes"] == budget
 
 
-@pytest.mark.parametrize("budget_gib", [4.6, 4.7])
+@pytest.mark.parametrize("budget_gib", [5.5, 5.55])
 def test_the_floor_refusal_quotes_the_budget_it_was_compared_against(budget_gib):
     """The number printed is the number compared, so a refused floor's price
     is above it and raising the flag past that price is the way out."""
@@ -484,8 +495,9 @@ def test_the_card_sweep_reaches_both_answers_on_both_roads():
 # The same question with the budget the flag names as the bound, on the 16
 # GiB fixture: the flagless door is asked on a card whose free memory IS that
 # budget (`_budget_sizing`'s own narrowing).  Across the old band 4.75 to 4.95
-# and one step either side.
-REQUEST_SWEEP = [round(4.7 + 0.05 * k, 3) for k in range(7)]
+# and one step either side; since 1.1.0/1.1.1 (above) from two steps under
+# the band's lower edge, 5.6, into it.
+REQUEST_SWEEP = [round(5.5 + 0.05 * k, 3) for k in range(7)]
 
 
 @pytest.mark.parametrize("budget_gib", REQUEST_SWEEP)

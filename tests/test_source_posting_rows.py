@@ -154,7 +154,15 @@ def test_the_load_time_probeable_rule_is_the_fetch_s():
 
     for source in fetch_routes.posting_sources():
         row = fetch_routes.posting_for(source)
-        assert row.waited == fetch.cycle_is_probeable(source), source
+        if row.waited:
+            assert fetch.cycle_is_probeable(source), source
+        elif not fetch.cycle_is_probeable(source):
+            # Nothing to ask a server about (a keyed job API): never waited.
+            assert row.shape in {"brokered", "private"}, source
+        else:
+            # A fixed historical archive route: its objects can be asked
+            # about, but a run never waits for them to post.
+            assert row.shape == "archive", source
 
 
 # --------------------------------------------------------------------------
@@ -344,8 +352,10 @@ def test_expected_at_is_the_rule_s_arithmetic(source, cycle, rule):
         assert source_posting.expected_at(source, cycle, lead) == (
             cycle + timedelta(hours=cycle_grid_for(source, posting=True).delay(cycle, lead)))
         budget = fetch_routes.posting_for(source).late_after_minutes
+        # An archive is never waited on: it has no lateness budget, and
+        # late_at says so with None rather than a time.
         assert source_posting.late_at(source, cycle, lead) == (
-            expected + timedelta(minutes=budget))
+            None if budget is None else expected + timedelta(minutes=budget))
         assert source_posting.publication_rule(source, cycle, lead) is rule
 
 

@@ -1305,6 +1305,20 @@ def table_route(source: str) -> Route | None:
     return _ROUTES.get(_canonical(source))
 
 
+def first_published_lead(source: str) -> int:
+    """The lead a window that names no start opens at: the route's first.
+
+    f000 for every source outside the table and for every route that
+    publishes its analysis; the GEFSv12 reforecast (``first_lead = 3``)
+    publishes no f000, so a door that defaults to the analysis plans a
+    window its own fetch refuses.  One answer for the fetch's bare
+    ``[fetch]`` table and for the doors that write one.
+    """
+
+    route = table_route(source)
+    return 0 if route is None else int(route.first_lead)
+
+
 def route_for(source: str) -> Route:
     """The route for ``source``, or the refusal that names why there is none."""
 
@@ -4076,7 +4090,8 @@ __all__ = [
     "LATE_BUDGET_MARGIN_MINUTES", "late_spread_minutes",
     "PostingRow", "READY_CHECKS", "WAITED_POSTING_SHAPES", "legacy_posting",
     "legacy_publication_lag", "posting_for", "posting_sources",
-    "endpoint_ladder", "first_preparable_cycle", "handoff_lines", "ladder_for",
+    "endpoint_ladder", "first_preparable_cycle", "first_published_lead",
+    "handoff_lines", "ladder_for",
     "member_tokens", "named_flags", "packaged_route_table_sha256", "planning_cycles",
     "prep_handoff_lines", "publication_era", "refusal_ids", "render_prep_command",
     "resolve_cycle",

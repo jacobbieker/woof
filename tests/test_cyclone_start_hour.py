@@ -19,7 +19,7 @@ from woof.fetch_routes import resolve_leads, route_for
 from woof.source_adapters import get_source_adapter
 
 from cyclone_preset_fit import source_licence
-from cyclone_preset_fit import center as tc_point, holds_the_preset_root
+from cyclone_preset_fit import center as tc_point, cycle_for, holds_the_preset_root
 
 CYCLE = "2026090900"
 MOMENT = datetime(2026, 9, 9, 0)
@@ -57,6 +57,10 @@ def test_every_lead_publishing_source_begins_at_the_lead_it_is_given(source):
         lead = min(step * 2, adapter.max_forecast_hour - step)
         if lead <= 0:
             pytest.skip(f"{source} publishes no lead beyond one forcing interval")
+        # CYCLE, or the cycle at its hour inside the source's own
+        # publication era (an archive row, a product that began later).
+        cycle = cycle_for(source, CYCLE)
+        moment = datetime.strptime(cycle, "%Y%m%d%H")
         if not holds_the_preset_root(source):
             # The preset root fits nowhere in this source's window, so the door
             # refuses it by name and emits no file.  The door checks the lead
@@ -64,21 +68,21 @@ def test_every_lead_publishing_source_begins_at_the_lead_it_is_given(source):
             # fail this match with its own message; the route's ladder is then
             # asked directly that the window begins at the lead.
             with pytest.raises(ValueError, match="covering sources"):
-                tc.configuration_text(cycle=CYCLE, point=tc_point(source),
+                tc.configuration_text(cycle=cycle, point=tc_point(source),
                                       hours=step, forcing_source=source,
                                       start_hour=lead)
-            leads = resolve_leads(route_for(source), MOMENT, step,
+            leads = resolve_leads(route_for(source), moment, step,
                                   cadence=dw._fetch_cadence_h(source, lead),
                                   start_hour=lead)
             assert leads[0] == lead and leads[-1] == lead + step
             return
-        text, exp = tc.configuration_text(cycle=CYCLE, point=tc_point(source),
+        text, exp = tc.configuration_text(cycle=cycle, point=tc_point(source),
                                           hours=step, forcing_source=source,
                                           start_hour=lead)
         table = tomllib.loads(text)
-        assert exp.start_time == MOMENT + timedelta(hours=lead)
+        assert exp.start_time == moment + timedelta(hours=lead)
         assert table["fetch"]["forecast_start_hour"] == lead
-        assert table["fetch"]["cycle"] == "2026-09-09T00"
+        assert table["fetch"]["cycle"] == f"{moment:%Y-%m-%dT%H}"
         from woof.fetch import validate_fetch_hints
         validate_fetch_hints(table["fetch"], source="fixture")
 
@@ -138,13 +142,19 @@ def _analysis_moment(source):
     a reason this cell is not about.
     """
 
+    from woof import ukv_source
     from woof.fetch import native_cf_fetch_contract
 
     if native_cf_fetch_contract(source) is None:
         return MOMENT
-    from woof.cf_archive_fetch import row
-    end = datetime.fromisoformat(row(get_source_adapter(source).source_id)[
-        "coverage_end"])
+    source_id = get_source_adapter(source).source_id
+    if source_id == ukv_source.SOURCE_ID:
+        # The UKV archive is read through its own store (not an annual CF
+        # row) and declares its period on the module.
+        end = ukv_source.COVERAGE_END
+    else:
+        from woof.cf_archive_fetch import row
+        end = datetime.fromisoformat(row(source_id)["coverage_end"])
     return (end - timedelta(days=1)).replace(hour=0)
 
 
@@ -155,6 +165,15 @@ def test_an_analysis_only_source_refuses_a_lead_and_names_why(source):
                               forcing_source=source, start_hour=6)
     # And still authors its analysis configuration, unchanged.
     moment = _analysis_moment(source)
+    if not holds_the_preset_root(source):
+        # The preset root fits nowhere in this source's window (the UKV
+        # grid is about 1,700 km across): the door refuses it by name and
+        # emits no file, as it does for a lead-publishing source.
+        with pytest.raises(ValueError, match="covering sources"):
+            tc.configuration_text(cycle=f"{moment:%Y%m%d%H}",
+                                  point=tc_point(source), hours=6,
+                                  forcing_source=source)
+        return
     text, exp = tc.configuration_text(cycle=f"{moment:%Y%m%d%H}",
                                       point=tc_point(source),
                                       hours=6, forcing_source=source)
