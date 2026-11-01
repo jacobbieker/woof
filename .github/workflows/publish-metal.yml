@@ -90,11 +90,27 @@ jobs:
           save-if: false
       - name: cargo build --release --locked --offline (every build-native workspace)
         run: python .github/ci/build_native.py build
-      # After this step no `pixi` command may run: pixi installs this checkout
-      # as the editable recast-woof, and refuses a manifest whose package is
-      # now named metal-woof.  The steps below use the activated env's python.
-      - name: rename the distribution to metal-woof
-        run: python tools/metal_woof_project.py --version "${{ steps.version.outputs.version }}"
+      # The bridges are staged in the checkout, by the pixi env.  The rename
+      # happens only in exported copies of the committed tree: the checkout
+      # keeps recast-woof's manifest, so pixi (which installs it as the
+      # editable recast-woof) stays usable for the whole job.
+      - name: stage the macOS bridges into the checkout's package
+        run: python tools/stage_wheel_bridges.py --platform macos-arm64
+      - name: export the tree twice and rename each copy to metal-woof
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          for tree in sdist wheel; do
+            dir="$RUNNER_TEMP/metal-$tree"
+            rm -rf "$dir" && mkdir -p "$dir"
+            git archive HEAD | tar -x -C "$dir"
+            python tools/metal_woof_project.py --version "$VERSION" "$dir/pyproject.toml"
+          done
+          # The wheel's copy carries the staged bridges; the sdist's never
+          # does (setup.py refuses an sdist with a platform's binaries in it).
+          mkdir -p "$RUNNER_TEMP/metal-wheel/woof/libexec"
+          cp -R woof/libexec/bridges "$RUNNER_TEMP/metal-wheel/woof/libexec/"
       - id: py
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
@@ -105,16 +121,10 @@ jobs:
         run: |
           "${{ steps.py.outputs.python-path }}" -m venv "$RUNNER_TEMP/build-env"
           "$RUNNER_TEMP/build-env/bin/python" -m pip install --quiet --upgrade pip build
-      # The sdist first, from an unstaged tree: setup.py refuses an sdist
-      # while a platform's binaries are staged.
-      - name: sdist
-        run: |
-          python tools/stage_wheel_bridges.py --clean
-          "$RUNNER_TEMP/build-env/bin/python" -m build --sdist --outdir dist
-      - name: stage the macOS bridges into the package
-        run: python tools/stage_wheel_bridges.py --platform macos-arm64
-      - name: platform wheel
-        run: "\"$RUNNER_TEMP/build-env/bin/python\" -m build --wheel --outdir dist"
+      - name: sdist (from the unstaged copy)
+        run: "\"$RUNNER_TEMP/build-env/bin/python\" -m build --sdist --outdir \"$GITHUB_WORKSPACE/dist\" \"$RUNNER_TEMP/metal-sdist\""
+      - name: platform wheel (from the staged copy)
+        run: "\"$RUNNER_TEMP/build-env/bin/python\" -m build --wheel --outdir \"$GITHUB_WORKSPACE/dist\" \"$RUNNER_TEMP/metal-wheel\""
       - name: the distributions are metal-woof's, and the wheel is macOS arm64
         env:
           VERSION: ${{ steps.version.outputs.version }}
