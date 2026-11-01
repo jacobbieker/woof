@@ -126,7 +126,10 @@ def test_staging_is_released_while_identity_waits_and_callback_waits_for_hash(
         waiter.start()
         assert consumed.wait(2), "staging drain waited for payload hashing"
         assert not landed.is_set()
-        assert writer._queue.maxsize == 1
+        # The default ticket queue: unbounded by count since 1.1.1 (bytes
+        # bound admission, AsyncDomainWrfoutWriter._new_ticket_queue), so
+        # the hashing ticket holds no count slot the drain could wait on.
+        assert writer._queue.maxsize == 0
     finally:
         release.set()
         if waiter is not None:

@@ -5,7 +5,7 @@ runs `pip install -e .`) produced an install that could name no identity:
 doctor reported run provenance MISSING and recommended the very
 `pip install -e .` that had just run, stage reuse degraded to "unknown
 engine" and the HRRR hierarchy route refused.  The tree has no commit to
-name, but setuptools leaves its file list in gpuwm.egg-info/SOURCES.txt,
+name, but setuptools leaves its file list in recast_woof.egg-info/SOURCES.txt,
 and the identity is the digest of those files' current bytes.
 """
 
@@ -23,20 +23,20 @@ from woof import provenance as install_provenance
 from woof import runtime_manifest as runtime
 
 LISTED = ("pyproject.toml", "woof/__init__.py", "woof/data/authority.json",
-          "gpuwm.egg-info/PKG-INFO", "gpuwm.egg-info/SOURCES.txt")
+          "recast_woof.egg-info/PKG-INFO", "recast_woof.egg-info/SOURCES.txt")
 
 
 def _archive(tmp_path: Path, *, extra: tuple[str, ...] = ()) -> Path:
-    root = tmp_path / "gpuwm-2.8.0"
+    root = tmp_path / "recast-woof-2.8.0"
     (root / "woof" / "data").mkdir(parents=True)
     (root / "pyproject.toml").write_text(
-        '[project]\nname = "woof"\nversion = "2.8.0"\n', encoding="utf-8")
+        '[project]\nname = "recast-woof"\nversion = "2.8.0"\n', encoding="utf-8")
     (root / "woof" / "__init__.py").write_text('VERSION = "2.8.0"\n', encoding="utf-8")
     (root / "woof" / "data" / "authority.json").write_text('{"value": 1}\n', encoding="utf-8")
-    info = root / "gpuwm.egg-info"
+    info = root / "recast_woof.egg-info"
     info.mkdir()
     (info / "PKG-INFO").write_text(
-        "Metadata-Version: 2.4\nName: woof\nVersion: 2.8.0\n", encoding="utf-8")
+        "Metadata-Version: 2.4\nName: recast-woof\nVersion: 2.8.0\n", encoding="utf-8")
     (info / "SOURCES.txt").write_text("\n".join(LISTED + extra) + "\n", encoding="utf-8")
     return root
 
@@ -146,9 +146,9 @@ def test_a_listed_file_outside_the_tree_is_refused(tmp_path, source_only, entry)
 
 def test_a_tree_with_no_file_list_still_refuses_and_names_the_step(tmp_path, source_only):
     root = _archive(tmp_path)
-    for path in (root / "gpuwm.egg-info").iterdir():
+    for path in (root / "recast_woof.egg-info").iterdir():
         path.unlink()
-    (root / "gpuwm.egg-info").rmdir()
+    (root / "recast_woof.egg-info").rmdir()
     with pytest.raises(runtime.IdentityError, match="SOURCES.txt") as refusal:
         runtime.provenance(root)
     assert "pip install -e ." in str(refusal.value)
@@ -165,11 +165,11 @@ def test_a_wheel_beside_a_pyproject_keeps_its_wheel_identity(tmp_path, source_on
     (site / "woof").mkdir(parents=True)
     (site / "woof" / "__init__.py").write_text("", encoding="utf-8")
     (site / "pyproject.toml").write_text(
-        '[project]\nname = "woof"\nversion = "9.9.9"\n', encoding="utf-8")
-    info = site / "gpuwm-2.8.0.dist-info"
+        '[project]\nname = "recast-woof"\nversion = "9.9.9"\n', encoding="utf-8")
+    info = site / "recast_woof-2.8.0.dist-info"
     info.mkdir()
     (info / "METADATA").write_text(
-        "Metadata-Version: 2.4\nName: woof\nVersion: 2.8.0\n", encoding="utf-8")
+        "Metadata-Version: 2.4\nName: recast-woof\nVersion: 2.8.0\n", encoding="utf-8")
     (info / "RECORD").write_text("woof/__init__.py,sha256=AAAA,0\n", encoding="utf-8")
     record = {"record_aggregate_sha256": "a" * 64}
     monkeypatch.setattr(runtime, "wheel_record_identity", lambda: record)
