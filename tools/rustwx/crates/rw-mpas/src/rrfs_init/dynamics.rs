@@ -335,29 +335,43 @@ pub struct WindState {pub ru:Vec<Vec<f32>>,pub rw:Vec<Vec<f32>>,pub w:Vec<Vec<f3
 /// RRFSx/MPAS-Model src/core_init_atmosphere/mpas_init_atm_cases.F:7670-7721 at 1d6e370e.
 /// Preserve the pinned strict GNU scalar instruction's destination operand.
 #[inline]
+#[cfg(target_arch = "x86_64")]
 fn wind_add(mut destination:f32, source:f32)->f32 {
     unsafe { core::arch::asm!("addss {destination}, {source}",
         destination=inout(xmm_reg) destination, source=in(xmm_reg) source,
         options(pure,nomem,nostack,preserves_flags)); }
     destination
 }
+/// Apple silicon: the same IEEE binary32 operation as one scalar instruction,
+/// destination first; a NaN result is the first NaN operand, quieted (ARM
+/// ranks a signalling NaN before a quiet one, where SSE takes the destination).
+#[inline]
+#[cfg(target_arch = "aarch64")]
+fn wind_add(mut destination:f32, source:f32)->f32 {
+    unsafe { core::arch::asm!("fadd {destination:s}, {destination:s}, {source:s}",
+        destination=inout(vreg) destination, source=in(vreg) source,
+        options(pure,nomem,nostack,preserves_flags)); }
+    destination
+}
 
 /// RRFSx/MPAS-Model src/core_init_atmosphere/mpas_init_atm_cases.F:7670-7721 at 1d6e370e.
 /// Preserve the pinned strict GNU scalar instruction's destination operand.
 #[inline]
+#[cfg(target_arch = "x86_64")]
 fn wind_mul(mut destination:f32, source:f32)->f32 {
     unsafe { core::arch::asm!("mulss {destination}, {source}",
         destination=inout(xmm_reg) destination, source=in(xmm_reg) source,
         options(pure,nomem,nostack,preserves_flags)); }
     destination
 }
-
-/// RRFSx/MPAS-Model src/core_init_atmosphere/mpas_init_atm_cases.F:7670-7721 at 1d6e370e.
-/// Preserve the pinned strict GNU scalar instruction's destination operand.
+/// Apple silicon: the same IEEE binary32 operation as one scalar instruction,
+/// destination first; a NaN result is the first NaN operand, quieted (ARM
+/// ranks a signalling NaN before a quiet one, where SSE takes the destination).
 #[inline]
-fn wind_sub(mut destination:f32, source:f32)->f32 {
-    unsafe { core::arch::asm!("subss {destination}, {source}",
-        destination=inout(xmm_reg) destination, source=in(xmm_reg) source,
+#[cfg(target_arch = "aarch64")]
+fn wind_mul(mut destination:f32, source:f32)->f32 {
+    unsafe { core::arch::asm!("fmul {destination:s}, {destination:s}, {source:s}",
+        destination=inout(vreg) destination, source=in(vreg) source,
         options(pure,nomem,nostack,preserves_flags)); }
     destination
 }
@@ -365,9 +379,43 @@ fn wind_sub(mut destination:f32, source:f32)->f32 {
 /// RRFSx/MPAS-Model src/core_init_atmosphere/mpas_init_atm_cases.F:7670-7721 at 1d6e370e.
 /// Preserve the pinned strict GNU scalar instruction's destination operand.
 #[inline]
+#[cfg(target_arch = "x86_64")]
+fn wind_sub(mut destination:f32, source:f32)->f32 {
+    unsafe { core::arch::asm!("subss {destination}, {source}",
+        destination=inout(xmm_reg) destination, source=in(xmm_reg) source,
+        options(pure,nomem,nostack,preserves_flags)); }
+    destination
+}
+/// Apple silicon: the same IEEE binary32 operation as one scalar instruction,
+/// destination first; a NaN result is the first NaN operand, quieted (ARM
+/// ranks a signalling NaN before a quiet one, where SSE takes the destination).
+#[inline]
+#[cfg(target_arch = "aarch64")]
+fn wind_sub(mut destination:f32, source:f32)->f32 {
+    unsafe { core::arch::asm!("fsub {destination:s}, {destination:s}, {source:s}",
+        destination=inout(vreg) destination, source=in(vreg) source,
+        options(pure,nomem,nostack,preserves_flags)); }
+    destination
+}
+
+/// RRFSx/MPAS-Model src/core_init_atmosphere/mpas_init_atm_cases.F:7670-7721 at 1d6e370e.
+/// Preserve the pinned strict GNU scalar instruction's destination operand.
+#[inline]
+#[cfg(target_arch = "x86_64")]
 fn wind_div(mut destination:f32, source:f32)->f32 {
     unsafe { core::arch::asm!("divss {destination}, {source}",
         destination=inout(xmm_reg) destination, source=in(xmm_reg) source,
+        options(pure,nomem,nostack,preserves_flags)); }
+    destination
+}
+/// Apple silicon: the same IEEE binary32 operation as one scalar instruction,
+/// destination first; a NaN result is the first NaN operand, quieted (ARM
+/// ranks a signalling NaN before a quiet one, where SSE takes the destination).
+#[inline]
+#[cfg(target_arch = "aarch64")]
+fn wind_div(mut destination:f32, source:f32)->f32 {
+    unsafe { core::arch::asm!("fdiv {destination:s}, {destination:s}, {source:s}",
+        destination=inout(vreg) destination, source=in(vreg) source,
         options(pure,nomem,nostack,preserves_flags)); }
     destination
 }
