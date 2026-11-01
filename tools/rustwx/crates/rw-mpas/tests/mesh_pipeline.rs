@@ -465,6 +465,7 @@ fn a_graded_mesh_is_numbered_so_neighbours_share_memory_lines() {
     // warp; renumbered, 2.29.
     use rw_mpas::mesh::order::{morton_order, neighbour_lines_per_warp};
     let spec = MeshSpec {
+        rasters: Vec::new(),
         background_km: 600.0,
         regions: vec![Region {
             shape: Shape::Cap {
