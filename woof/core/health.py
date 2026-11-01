@@ -520,11 +520,14 @@ def rule_for_field(name: str, *, p_top: float | None = None) -> FieldRule:
             return FieldRule("surface", 0.0, 0.0,
                              bound_note="PWP failure bits: 1 Richardson mixing did not converge; 2 nonfinite ocean state")
         if leaf == "ebal":
-            # Noah's energy-balance case (kernels/noah.cu): 0-3 are the land
-            # SFLX branches, 4 marks an SFLX_GLACIAL (land-ice) column.
-            # With the bound at 3, the first land-ice point of a real
-            # forecast failed the post-d01-sync health gate (g16 ports-pbl).
-            return FieldRule("surface", 0.0, 4.0)
+            # Noah's energy-balance case (kernels/noah.cu): 0-3 are the SFLX
+            # branches.  The first SFLX_GLACIAL port marked a land-ice column
+            # 4 (g16 ports-pbl, when a bound of 3 failed it); the full
+            # module_sf_noahlsm_glacial_only.F port (noah_glacial_column)
+            # stores the same 1-3 branch codes as land, so no kernel writes
+            # 4 and the bound is the codes the kernels store
+            # (tests/test_health_integer_policy.py reads them).
+            return FieldRule("surface", 0.0, 3.0)
         if leaf == "kpbl":
             # collect_state_fields supplies the state-dependent nz cap.
             return FieldRule("surface", 0.0)
