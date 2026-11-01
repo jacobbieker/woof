@@ -390,6 +390,33 @@ static inline float sinhf(float a) { return metal::precise::sinh(a); }
 static inline float coshf(float a) { return metal::precise::cosh(a); }
 static inline float tanhf(float a) { return metal::precise::tanh(a); }
 static inline float fmodf(float a, float b) { return metal::precise::fmod(a, b); }
+// hypotf and remainderf have no MSL builtin; upstream's wind_farm.cu (1.1.5)
+// calls both.  hypotf scales by the larger magnitude so neither the square
+// nor the sum overflows or flushes (CUDA's is within 2 ulp, as this is).
+static inline float hypotf(float a, float b) {
+    float x = metal::fabs(a), y = metal::fabs(b);
+    float m = metal::max(x, y), n = metal::min(x, y);
+    if (m == 0.0f || metal::isinf(m)) return m + n;
+    if (metal::isnan(m) || metal::isnan(n)) return a + b;
+    float r = n / m;
+    return m * metal::precise::sqrt(metal::fma(r, r, 1.0f));
+}
+// IEEE remainder: x - n*y, n the integer nearest x/y with ties to even.
+static inline float remainderf(float x, float y) {
+    float ay = metal::fabs(y);
+    if (metal::isnan(x) || metal::isnan(y) || metal::isinf(x) || ay == 0.0f)
+        return (x * y) / (x * y);  // NaN, as C's remainder
+    float r = metal::precise::fmod(x, ay);   // sign of x, |r| < |y|
+    float ar = metal::fabs(r), mid = 0.5f * ay;
+    if (ar > mid) {
+        r -= metal::copysign(ay, r);
+    } else if (ar == mid) {
+        // Tie: n = trunc(x/|y|) is odd exactly when x - r is an odd multiple.
+        float q = metal::precise::fmod(metal::fabs(x - r) / ay, 2.0f);
+        if (q != 0.0f) r -= metal::copysign(ay, r);
+    }
+    return r;
+}
 
 // ---------------------------------------------------------------- integers
 static inline int min(int a, int b) { return metal::min(a, b); }
