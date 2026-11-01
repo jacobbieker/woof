@@ -277,11 +277,12 @@ RESOLVED: dict[str, tuple[str, str]] = {
     # unchanged.)
     # (mlx-backend moved both two lines down, to :1438 and :1532, and
     # km_opt=5's launcher, inserted between them, moved the km_opt=3 one
-    # to :1745.  Anchors unchanged.)
-    "woof/core/dycore.py:1438": (
+    # to :1745.  The 1.1.5 merge's imports moved them to :1456 and :1767.
+    # Anchors unchanged.)
+    "woof/core/dycore.py:1456": (
         "woof/core/dycore.py",
         "WRF v4.6.1 km_opt=2:"),
-    "woof/core/dycore.py:1745": (
+    "woof/core/dycore.py:1767": (
         "woof/core/dycore.py",
         "WRF v4.6.1 km_opt=3:"),
 }

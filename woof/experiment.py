@@ -467,8 +467,6 @@ VERT_REFINE_ARBITRARY = 2
 #: Rows for the [[domain]] keys no typed field declares
 #: (:mod:`woof.config_keys`).
 _DOMAIN_KEY_ROWS = key_rows(
-    KeyRow("quicklook", "table", None,
-           "optional additional history cadence and variable selection"),
     KeyRow("static", "table", None, "per-domain terrain smooth_option, smooth_passes and smooth_precision"),
     KeyRow("start_time", "datetime", None,
            "when this nest starts, an offset-free TOML date-time inside "
