@@ -681,6 +681,13 @@ def output_key_rows(*, tree_wide: bool = True):
         "with the icechunk output format: export only these grid ids "
         "(default every domain)")) if tree_wide else ()
     return key_rows(*tree_rows,
+        KeyRow("formats", "array", ["netcdf"],
+               "History output formats: netcdf (default) and/or icechunk, "
+               "which also exports each frame into icechunk_store.",
+               items="string"),
+        KeyRow("icechunk_store", "string", None,
+               "The Icechunk store URL the icechunk format writes; {name} "
+               "is the [experiment] name."),
         KeyRow("preset", "string", "full",
                "Named history set: full (default), minimal, severe, "
                "energy, windfarm or balloon."),
