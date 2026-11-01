@@ -234,3 +234,14 @@ tests/test_stochastic_verification.py
 
 # FCT fused device equality; CPU hook and admission checks stay in tier 1.
 tests/test_fct_horizontal_scale_fusion.py
+
+# MPAS v8.4.2 WOOF-only services and options (FARMS, Deng/cu_rad_feedback, radtran,
+# rrtmg_spectral_output, solar diagnostics, WRF-Solar EPS): the device members replay the
+# CUDA kernels word for word on a card; the files' namelist, pool, stream and driver members
+# are tier 1.
+tests/test_mpas_farms_v842.py
+tests/test_mpas_radtran.py
+tests/test_mpas_rrtmg_spectral_output.py
+tests/test_mpas_shcu_deng_v842.py
+tests/test_mpas_solar_diagnostics.py
+tests/test_mpas_wrfsolar_eps_v842.py

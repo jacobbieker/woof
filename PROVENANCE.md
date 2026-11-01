@@ -193,23 +193,23 @@ bytes are outside the numerical oracle.
   `cupy.cuda.compiler` line 585 (`options += ('-ftz=true',)`), after the
   caller's options, and NVRTC honours the last occurrence.
   The inventory records 14 distinct caller-supplied option tuples across the
-  186 compile sites in the shipped package, each listed here with a site
+  201 compile sites in the shipped package, each listed here with a site
   that supplies it:
-  - no caller options -- `woof/core/attribute_tracking.py:99`
-    (xp.ElementwiseKernel), and 136 other site(s)
+  - no caller options -- `woof/backend/facade/__init__.py:336` (RawModule),
+    and 149 other site(s)
   - `-std=c++17` -- `woof/core/acoustic_fusion.py:403` (cp.RawModule), and
-    13 other site(s)
+    15 other site(s)
   - `--std=c++17` -- `woof/ensemble/batch_perturbation.py:51`
     (xp.RawModule), and 10 other site(s)
   - `-std=c++17` `--ftz=false` -- `woof/core/chem_plumerise_cache.py:37`
     (compiler.compile_using_nvrtc), and 5 other site(s)
   - `--std=c++11` -- `woof/hex/cuda_courant_fullstep_lts.py:52`
     (cp.RawKernel), and 3 other site(s)
-  - `-fmad=false` -- `woof/core/dycore.py:302` (cp.ElementwiseKernel), and 2
+  - `-fmad=false` -- `woof/core/dycore.py:307` (cp.ElementwiseKernel), and 2
     other site(s)
   - `--fmad=false` -- `woof/hex/moving_vertical_cuda.py:19` (cp.RawKernel),
     and 1 other site(s)
-  - `-std=c++17` `--fmad=false` -- `woof/core/kernels/__init__.py:689`
+  - `-std=c++17` `--fmad=false` -- `woof/core/kernels/__init__.py:742`
     (cp.RawModule), and 1 other site(s)
   - `-std=c++17` `--fmad=false` `--ftz=false` --
     `woof/core/thompson_fork.py:109` (compiler.compile_using_nvrtc), and 1
@@ -219,7 +219,7 @@ bytes are outside the numerical oracle.
   - `--std=c++17` a target flag built from the device architecture at run
     time -- `woof/ocean/waves/model.py:73` (cp.RawModule)
   - `-std=c++17` `--ftz=false` `--fmad=false` --
-    `woof/core/kernels/__init__.py:805` (compiler.compile_using_nvrtc)
+    `woof/core/kernels/__init__.py:881` (compiler.compile_using_nvrtc)
   - `-std=c++17` `-fmad=false` -- `woof/core/nest_interp.py:261`
     (cp.RawModule)
   - a target flag built from the device architecture at run time a target

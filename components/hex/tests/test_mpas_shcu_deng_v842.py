@@ -52,6 +52,9 @@ def _harness():
     return deng_columns, compare_woof
 
 
+# compare_woof.run launches the CUDA kernel (it imports cupy itself), which the
+# conftest's AST scan of this function cannot see, so the marker is explicit.
+@pytest.mark.gpu
 def test_mpas_entry_point_matches_wrf471_word_for_word():
     _, compare_woof = _harness()
     rows = compare_woof.run(str(FIXTURE / "columns-structured.bin.gz"),

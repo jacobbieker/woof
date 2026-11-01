@@ -1184,3 +1184,12 @@ tests/test_samehost_ownership_duplicates.py
 tests/test_mpas_lts_frame_async.py
 # Full-step LTS: the door runs the cheapest of the fixed step and LTS at each top class, on both routes (HEX-LAM-VS-ZOOM-2026-10-27 defect 2, HEX-LTS-REGRESSION-2026-10-27), host-only.
 tests/test_lts_clock_top_and_choice.py
+# MPAS v8.4.2 WOOF-only services and options (FARMS, Deng/cu_rad_feedback, radtran,
+# rrtmg_spectral_output, solar diagnostics, WRF-Solar EPS): namelist resolution, refusals,
+# pools, streams and driver order are host-only; the CUDA members are on gpu_gates.txt.
+tests/test_mpas_farms_v842.py
+tests/test_mpas_radtran.py
+tests/test_mpas_rrtmg_spectral_output.py
+tests/test_mpas_shcu_deng_v842.py
+tests/test_mpas_solar_diagnostics.py
+tests/test_mpas_wrfsolar_eps_v842.py

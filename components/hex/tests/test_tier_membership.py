@@ -184,6 +184,24 @@ DUAL_TIER_ALLOWED: dict[str, str] = {
     "tests/test_ocean_mixed_layer.py":
         "tier 1 takes the ocean configuration, restart and budget checks; tier 3 "
         "steps the native CUDA mixed-layer ocean and sea-ice kernels",
+    "tests/test_mpas_farms_v842.py":
+        "tier 1 takes the driver order and service-absent receipt; tier 3 "
+        "takes the WRF v4.7.1 word-for-word layout and the CUDA glue",
+    "tests/test_mpas_radtran.py":
+        "tier 1 takes the &radtran group, door, pools and streams; tier 3 "
+        "fills the fields with the library's words on the device",
+    "tests/test_mpas_rrtmg_spectral_output.py":
+        "tier 1 takes the option, pools, streams and history axes; tier 3 "
+        "runs the spectral RRTMG columns on the device",
+    "tests/test_mpas_shcu_deng_v842.py":
+        "tier 1 takes the driver order and service refusals; tier 3 takes "
+        "the WRF v4.7.1 entry point, glue, coupling and restart words",
+    "tests/test_mpas_solar_diagnostics.py":
+        "tier 1 takes the option, door, pools, streams and checkpoints; "
+        "tier 3 writes WRF's words on MPAS fields on the device",
+    "tests/test_mpas_wrfsolar_eps_v842.py":
+        "tier 1 takes the &wrfsolar_eps group, refusals and door; tier 3 "
+        "takes the pattern cadence, restore and scheme seats on the device",
 }
 
 

@@ -62,6 +62,13 @@ def _import_multi_perturb(section, *, max_dom, registry, fix, drop, error):
     column = ([] if raw is None else list(raw[:max_dom]))
     if any(type(v) is not int or v not in (0, 1) for v in column):
         raise error("stoch", "multi_perturb", raw, "must be integer 0 or 1")
+    # The four switches are WRF logicals whether or not multi_perturb reads
+    # them: WRF's namelist read rejects a non-logical value before any
+    # pairing is checked, so the type is held here as multi_perturb's is.
+    for key in EPS_SELECTORS[1:]:
+        values = section.entries.get(key)
+        if values is not None and any(type(v) is not bool for v in values):
+            raise error("stoch", key, values, "must be a WRF logical")
     if not any(column):
         if raw is not None:
             fix("stoch", "multi_perturb", section.take("multi_perturb"), 0,
