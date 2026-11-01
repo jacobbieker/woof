@@ -64,7 +64,9 @@ def test_staged_prepare_only_retains_output_and_never_calls_forecast(tmp_path, m
         target.mkdir(parents=True, exist_ok=True)
         frame = target / 'preserved.nc'
         frame.write_bytes(b'committed input generation')
-        value = original(*args, **kwargs, prepare_only=True)
+        # The dispatch passes the plan's own prepare_only (False here);
+        # this double turns it on rather than passing it a second time.
+        value = original(*args, **{**kwargs, 'prepare_only': True})
         assert frame.read_bytes() == b'committed input generation'
         returned.append(value)
         return value
@@ -109,6 +111,36 @@ def _automatic_sources():
     return [row['source'] for row in catalog()['sources'] if 'automatic' in row.get('initialization_modes', [])]
 
 
+#: The epoch every source is authored at unless its route table dates it out.
+_EPOCH = datetime(2026, 9, 10, 12, tzinfo=timezone.utc)
+
+
+def _epoch_inside_an_era(source):
+    """``_EPOCH``, or a fixed epoch inside the source's own publication eras.
+
+    The route table dates each file layout (woof/fetch_routes.py
+    publication_era): GEFS v11 is a closed legacy archive and the 0.1 degree
+    ECMWF open data begins 2026-10-20, so no single calendar date selects a
+    layout for every automatic source.  Read from the table, never from the
+    clock: ten days into the newest preparable era, or ``_EPOCH`` when that
+    era already serves it.
+    """
+    from woof.fetch_routes import table_route
+
+    route = table_route(source)
+    eras = [era for era in (route.publication_eras if route else ())
+            if not era.prep_refusal]
+    naive = _EPOCH.replace(tzinfo=None)
+    if not eras or any(era.valid_from + timedelta(days=3) <= naive
+                       and (era.valid_until is None or naive < era.valid_until)
+                       for era in eras):
+        return _EPOCH.strftime('%Y-%m-%dT%H:%M:%SZ')
+    newest = max(eras, key=lambda era: era.valid_from)
+    epoch = newest.valid_from.replace(hour=12, minute=0, second=0) + timedelta(days=10)
+    assert newest.valid_until is None or epoch < newest.valid_until - timedelta(days=3), source
+    return epoch.strftime('%Y-%m-%dT%H:%M:%SZ')
+
+
 @pytest.mark.parametrize('source', _automatic_sources())
 def test_every_automatic_owner_authors_consumable_exact_fetch_arguments(source):
     from woof.background_contract import capability
@@ -117,7 +149,7 @@ def test_every_automatic_owner_authors_consumable_exact_fetch_arguments(source):
     coverage = capability(source)['coverage'] or {}
     point = ((coverage['south'] + coverage['north']) / 2,
              (coverage['west'] + coverage['east']) / 2) if 'south' in coverage else (40., -100.)
-    request = replace(_request(source=source), epoch='2026-09-10T12:00:00Z', point=point)
+    request = replace(_request(source=source), epoch=_epoch_inside_an_era(source), point=point)
     text, _, _, background = configuration(request, derive_rung(request, 1))
     hints = tomllib.loads(text)['fetch']
     args = build_parser().parse_args(['fetch', *_fetch_arguments_from_hints(hints, out=Path('unused'))])
