@@ -341,7 +341,7 @@ def _vertical_columns(source_levels=6):
 
 @pytest.mark.parametrize("requested", ("auto", "cpu"))
 def test_a_slot_receipt_is_the_controllers_but_for_its_worker_counts(
-        requested):
+        requested, eight_cpu_host):
     """Every slot of a CPU budget passes the check on its own share.
 
     The controller's backend ran f00 on the whole budget, so its route
@@ -436,7 +436,7 @@ def test_a_spawned_worker_at_another_source_depth_passes_and_is_recorded():
             expected_native_workers=2)
 
 
-def test_the_receipt_check_holds_each_worker_count_to_the_allocation():
+def test_the_receipt_check_holds_each_worker_count_to_the_allocation(eight_cpu_host):
     """The counts left out of the comparison are checked, not dropped."""
     from woof.ingest import preprocess_backend as backends
 
