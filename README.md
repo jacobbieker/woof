@@ -187,7 +187,10 @@ upstream's does.
     for WRF's own input files, plus `do_avgflx_em`;
   - WRF-Solar: FARMS, the EPS perturbations, MAD-WRF, Deng shallow cumulus
     and cumulus cloud fed to radiation;
-  - the Fitch wind-farm scheme with WRF's turbine files and layout;
+  - WRF v4.7.1's Fitch wind-farm scheme word for word as
+    `wind_farm_scheme = "fitch_wrf"` beside upstream's `fitch`, reading
+    WRF's turbine files and layout (or a turbine-library table) from
+    `wind_farms`, also on hex's unequal-area cells;
   - coupled fire spread and smoke.
 - **Height-dependent resolution:** a partial-depth two-way nest, fine near
   the ground and coarser aloft, on WRF and (dry dynamics only) on MPAS; and
@@ -195,7 +198,9 @@ upstream's does.
 - **More data sources:** the Met Office global and UKV models, DWD ICON
   (global and the machine-learning variant) and additional mapped routes.
 - **Applied tooling:** wind-energy siting, hindcasts and power products,
-  storm-track planning with moving nests, and live Icechunk export.
+  storm-track planning with moving nests, and delete-after-commit
+  backpressure and domain selection for upstream's Icechunk store export
+  (`[output] icechunk_delete_after_commit`, `icechunk_domains`).
 - **Continuous integration:** GitHub Actions on Linux and macOS, with a
   self-hosted CUDA job ([docs/dev/ci.md](docs/dev/ci.md)).
 
