@@ -81,6 +81,15 @@ def _stderr_beyond_the_banner(err: str) -> str:
         if sep and text == banner and door.startswith("woof "):
             del lines[index]
             break
+    # The second healthy notice tests/test_go_chain.py documents: the
+    # planning-time model-top verdict `woof check` (which this door runs)
+    # states on stderr so `--json` stdout stays one document.  Only its
+    # PASS form; a REFUSED top stops the door.
+    top_pass = "woof check: model-top check PASS: source "
+    for index, line in enumerate(lines):
+        if line.startswith(top_pass):
+            del lines[index]
+            break
     return "\n".join(lines)
 
 
