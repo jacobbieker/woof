@@ -330,7 +330,12 @@ def test_the_record_has_rw_asos_layout_and_provenance(archive, tmp_path):
     observed = AsosSurfaceSource(surface).observations(record["valid_times"])
     assert len(observed.reports) == 3 and len(observed.stations) == 3
     assert observed.provenance.source == dyn.SOURCE
-    assert observed.provenance.sha256 == provenance["sha256"]
+    # The reader's record is the archive object a scorer can re-hash (its
+    # upstream is a remote Parquet year), so the scored provenance names the
+    # record's own bytes, not the Parquet digest the record carries.
+    import hashlib
+    assert observed.provenance.sha256 == hashlib.sha256(surface.read_bytes()).hexdigest()
+    assert observed.provenance.uri == str(surface.resolve())
 
 
 def test_only_the_row_groups_holding_the_stations_are_read(archive, tmp_path):
