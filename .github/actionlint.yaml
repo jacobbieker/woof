@@ -2,3 +2,13 @@ self-hosted-runner:
   # The opt-in CUDA runner of tests.yml (docs/dev/ci.md).
   labels:
     - cuda
+paths:
+  # The release workflows stay byte-for-byte (their file names are bound to
+  # PyPI trusted publishing); shellcheck's SC2012 note on their `ls` is
+  # informational, and the hosted runner has shellcheck where a dev box may not.
+  .github/workflows/publish.yml:
+    ignore:
+      - 'SC2012'
+  .github/workflows/publish-data.yml:
+    ignore:
+      - 'SC2012'
