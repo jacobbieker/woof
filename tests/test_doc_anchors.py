@@ -107,7 +107,12 @@ def test_the_survey_actually_resolved_something() -> None:
     """
 
     result = CHECKER.survey()
-    assert result["checked"] >= 8, (
+    # Four of the eleven were the B4 receipt's citations, resolved at the
+    # engine revision it pins.  A clone without that revision (the Recast
+    # WOOF export carries no engine history) cannot resolve them, so the
+    # floor here is the HEAD-resolved share of the recorded count.
+    floor = 8 if _engine_revision_absent() is None else 8 - 4
+    assert result["checked"] >= floor, (
         f"the anchor survey resolved only {result['checked']} citations; it "
         "resolved 11 when this floor was recorded, so either the citation "
         "pattern or the in-scope test has stopped matching and the gate "
@@ -147,10 +152,10 @@ def test_a_document_that_names_its_revision_is_resolved_there() -> None:
     its citations are correct there and stale against HEAD.
     """
 
-    receipt = (REPOSITORY_ROOT / "docs" / "public" / "receipts" / "obsbattery"
-               / "B4-ROUTE-QUALIFICATION.md")
-    if not receipt.is_file():
-        pytest.skip("the observation battery's B4 receipt is not in this tree")
+    receipt = B4_RECEIPT
+    absent = _engine_revision_absent()
+    if absent is not None:
+        pytest.skip(absent)
     revision = CHECKER.revision_of(receipt.read_text(encoding="utf-8"))
     assert revision is not None and re.fullmatch(r"[0-9a-f]{7,40}", revision), (
         "the B4 receipt states the revision it was written against in its "

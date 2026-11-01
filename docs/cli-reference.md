@@ -265,6 +265,48 @@ test refuses any drift between the two.
 | `20crv3-cf` | `20crv3-netcdf`, `20cr-netcdf`, `20cr-cf` |
 | `hex-global` | `hex`, `woof hex`, `hex-regional` |
 | `mapped` | `generic-mapped`, `mapping-v1` |
+| `gefs-v11-flat` | -- |
+| `gefs-reforecast` | -- |
+| `gefs-reforecast-weekly` | -- |
+| `gefs-reforecast-land` | -- |
+| `ncep-r1-seaice` | -- |
+| `gefs-v11` | `gefs-legacy` |
+| `ecmwf-open-data-0p1` | `ifs-0p1`, `ifs-hres`, `ecmwf-hres`, `ecmwf-0p1` |
+| `ukv` | `ukv-2km`, `met-office-ukv`, `metoffice-ukv`, `uk-deterministic-2km`, `ukv-sc` |
+| `earth2-fcn3` | `earth2-fourcastnet3` |
+| `earth2-sfno` | `earth2-fourcastnet-sfno`, `earth2-fcn2` |
+| `earth2-pangu` | `earth2-pangu6` |
+| `earth2-aurora` | -- |
+| `earth2-fengwu` | -- |
+| `earth2-aifs` | -- |
+| `earth2-fuxi` | -- |
+| `earth2-fcn` | `earth2-fourcastnet` |
+| `earth2-stormcast` | -- |
+| `earth2-corrdiff` | -- |
+| `earth2-dlwp` | -- |
+| `earth2-atlas` | `earth2-atlascrps` |
+| `earth2-atlas-si` | `earth2-atlas-stochastic-interpolant` |
+| `earth2-aifs2` | -- |
+| `earth2-aifs-ens` | -- |
+| `earth2-aifs2-ens` | -- |
+| `earth2-aurora15` | -- |
+| `earth2-aurora15-6h` | -- |
+| `earth2-aurora15-ensemble` | -- |
+| `earth2-aurora15-ensemble-6h` | -- |
+| `earth2-gencast-mini` | -- |
+| `earth2-weathernext2` | -- |
+| `earth2-weathernext2-mini` | -- |
+| `earth2-dlesym` | -- |
+| `earth2-ace2` | -- |
+| `earth2-ucast` | -- |
+| `earth2-graphcast-operational` | `earth2-graphcast` |
+| `earth2-graphcast-small` | -- |
+| `earth2-interpmodafno` | -- |
+| `earth2-fuxi-s2s` | -- |
+| `earth2-stormcast-conus` | -- |
+| `earth2-atlas-crps` | -- |
+| `earth2-derived-ws10m` | `earth2-derived-ws` |
+| `earth2-windgust` | `earth2-windgust-afno` |
 
 Not every row is runnable on this release; the tables above name the
 routes that execute, and `--list-sources` reports each row's status.
