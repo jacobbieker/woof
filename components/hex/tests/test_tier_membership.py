@@ -193,6 +193,16 @@ DUAL_TIER_ALLOWED: dict[str, str] = {
     "tests/test_mpas_rrtmg_spectral_output.py":
         "tier 1 takes the option, pools, streams and history axes; tier 3 "
         "runs the spectral RRTMG columns on the device",
+    "tests/test_partial_nest_envelope_v841.py":
+        "tier 1 checks the D5 receipt's claims; tier 3 reruns the "
+        "envelope cases on the device",
+    "tests/test_partial_nest_kernels_v841.py":
+        "tier 1 takes the unit pin, entry points, loader options, "
+        "allocation inventory and restart classification; tier 3 the "
+        "A6000 frames and the rebuilt buffers",
+    "tests/test_partial_nest_oracle_v841.py":
+        "tier 1 holds the barycentric weights and the remap reference to "
+        "MPAS and binary64; tier 3 the device kernels to the same words",
     "tests/test_mpas_shcu_deng_v842.py":
         "tier 1 takes the driver order and service refusals; tier 3 takes "
         "the WRF v4.7.1 entry point, glue, coupling and restart words",

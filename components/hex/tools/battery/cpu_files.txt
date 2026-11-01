@@ -1193,3 +1193,7 @@ tests/test_mpas_rrtmg_spectral_output.py
 tests/test_mpas_shcu_deng_v842.py
 tests/test_mpas_solar_diagnostics.py
 tests/test_mpas_wrfsolar_eps_v842.py
+tests/test_partial_nest_config_v841.py
+tests/test_partial_nest_envelope_v841.py
+tests/test_partial_nest_kernels_v841.py
+tests/test_partial_nest_oracle_v841.py
