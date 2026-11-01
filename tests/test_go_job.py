@@ -129,7 +129,7 @@ def test_push_uploads_a_folder_and_prints_its_manifest(tmp_path, capsys):
     (_job(files=[{"url": "s3://b/n.wps", "path": "../n.wps"}]), "relative"),
     (_job(files=[{"url": "s3://b/n.wps", "path": "/etc/n.wps"}]), "relative"),
     (_job(files=["s3://b/R001.toml"]), "staged twice"),
-    (_job(go_args=["--icechunk", "s3://b/y"]), "icechunk_url"),
+    (_job(go_args=["--icechunk-store", "s3://b/y"]), "icechunk_url"),
     (_job(go_args=["--outdir=/tmp"]), "--workdir"),
     (_job(go_args=["--restart", "x"]), "not a flag a job may pass"),
     (_job(go_args=["--cycle"]), "needs a value"),
@@ -160,12 +160,15 @@ def test_go_args_are_normalised_and_passed_after_the_owned_flags(tmp_path):
     argv = gj.go_command(job, tmp_path / "R001.toml", tmp_path / "go")
     assert argv[:5] == [sys.executable, "-m", "woof", "go",
                         str(tmp_path / "R001.toml")]
-    assert argv[5:] == ["--outdir", str(tmp_path / "go"), "--icechunk",
+    # Upstream's store export (woof.output_formats) carries the store.
+    assert argv[5:] == ["--outdir", str(tmp_path / "go"), "--output-format",
+                        "netcdf,icechunk", "--icechunk-store",
                         "file:///stores/R001.icechunk", "--products", "t2m",
                         *job.go_args]
     # Every flag go-job passes is one woof go's own parser accepts.
     parsed = build_parser().parse_args(argv[3:])
-    assert parsed.command == "go" and parsed.icechunk == job.icechunk_url
+    assert parsed.command == "go" and parsed.icechunk_store == job.icechunk_url
+    assert parsed.output_format == "netcdf,icechunk"
     assert parsed.render_products == "t2m" and parsed.cycle == "2026-08-20T00"
 
 

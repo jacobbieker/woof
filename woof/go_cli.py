@@ -1627,40 +1627,61 @@ def _checkpoint_retention(keep: int | None):
 
 
 def icechunk_request(args, config):
-    """The live Icechunk export ``woof go`` was asked for, or ``None``.
+    """The store export's policy ``woof go`` was asked for
+    (:class:`woof.output_formats.ExportPolicy`; the fork's live export,
+    on upstream's ``--icechunk-store`` / ``[output] icechunk_store``), or
+    ``None`` when it deletes nothing.  A bad ``[output]`` key, or deletion
+    beside simulated radar (which reads each frame from disk after the
+    next lands), is a named refusal before anything is fetched."""
 
-    ``--icechunk URL`` over the config's ``[output] icechunk`` table
-    (:func:`woof.icechunk_export.go_export_options`); a bad table is a
-    named refusal before anything is fetched."""
-
-    from woof.icechunk_export import IcechunkExportRefused, go_export_options
+    from woof.output_formats import export_policy, export_policy_from_table
 
     try:
-        return go_export_options(args, None if config is None else Path(config))
-    except IcechunkExportRefused as error:
+        if config is not None and Path(config).is_file():
+            import tomllib
+            raw = tomllib.loads(Path(config).read_text(encoding="utf-8-sig"))
+            policy = export_policy_from_table(raw.get("output") or {},
+                                              source=str(config))
+            if getattr(args, "icechunk_delete_after_commit", None):
+                policy = type(policy)(delete_after_commit=True,
+                                      domains=policy.domains)
+        else:
+            raw = {}
+            policy = export_policy(args)
+    except ValueError as error:
         raise GoRefusal(str(error)) from None
+    if not policy.delete_after_commit:
+        return None
+    radar = raw.get("simulated_radar")
+    if isinstance(radar, dict) and radar.get("enabled", True):
+        from woof.explain import layered
+
+        raise GoRefusal(layered(
+            "[output] icechunk_delete_after_commit and [simulated_radar] "
+            "cannot run together. Next: drop one, or set [simulated_radar] "
+            "enabled = false.",
+            "Simulated radar scans each history frame after the next one "
+            "on its grid lands, from the file; the store export would "
+            "already have deleted it, and the radar's failure stops the "
+            "forecast."))
+    return policy
 
 
 def _icechunk_for_chain(args, config):
-    """:func:`icechunk_request`, less a config table on ``--prepare-only``
-    (no forecast runs, so the table waits for the run that will); the
-    flag itself is refused there, because nothing would read it."""
+    """:func:`icechunk_request`, less on ``--prepare-only`` (no forecast
+    runs, so nothing is exported or deleted)."""
 
     options = icechunk_request(args, config)
     if options is not None and getattr(args, "prepare_only", False):
-        if getattr(args, "icechunk", None) is not None:
-            raise GoRefusal(
-                "--icechunk exports a forecast's frames as they land, and "
-                "--prepare-only starts no forecast. Next: drop one of them.")
         return None
     return options
 
 
 def _refuse_render_with_deleted_frames(icechunk, products) -> None:
-    """``delete_after_commit`` unlinks each history frame of the exported
-    domains once the store holds it, while ``go``'s render stage, which
-    runs after the forecast and beside the exporter's drain, reads those
-    frames from disk: refused unless the run asks for no products."""
+    """``icechunk_delete_after_commit`` unlinks each history frame of the
+    exported domains once the store holds it, while ``go``'s render stage,
+    which runs after the forecast, reads those frames from disk: refused
+    unless the run asks for no products."""
 
     if icechunk is None or not icechunk.delete_after_commit:
         return
@@ -1669,102 +1690,13 @@ def _refuse_render_with_deleted_frames(icechunk, products) -> None:
     from woof.explain import layered
 
     raise GoRefusal(layered(
-        "[output] icechunk delete_after_commit deletes the history frames "
+        "[output] icechunk_delete_after_commit deletes the history frames "
         "the render stage draws from. Next: add --products none (render "
-        "from the Icechunk store afterwards), or drop delete_after_commit.",
-        "The exporter unlinks each frame as soon as its commit lands, and "
-        "the render stage lists and reads the frames on disk after the "
-        "forecast while the exporter is still draining: it would draw a "
-        "partial set or fail on a frame deleted under it, after a forecast "
-        "that finished."))
-
-
-def _plan_export_folders(route: str, output: Path) -> tuple[Path, Path]:
-    """Where a run plan's forecast writes its frames, and the path whose
-    appearance says the plan has claimed its folder (the exporter starts
-    only then: a launch refuses an output folder holding files it did not
-    write).
-
-    The prepared route writes under ``<output>/chain/run`` and makes
-    ``<output>/chain`` once claimed; the experiment route (``[case_data]``)
-    writes into ``<output>`` itself, whose ``run-manifest.json`` is
-    written just after the claim (:func:`woof.runplan.execute_plan`).
-    Waiting for ``<output>/chain`` on that route started no exporter."""
-
-    from woof.runplan import MANIFEST_FILENAME
-
-    output = Path(output)
-    if route == "experiment":
-        return output, output / MANIFEST_FILENAME
-    return output / "chain" / "run", output / "chain"
-
-
-def _icechunk_state_dir(root) -> Path:
-    from woof.icechunk_export import EXPORT_DIRNAME
-
-    return Path(root) / EXPORT_DIRNAME
-
-
-def _wrfout_dir_beside(plan: dict) -> list[Path]:
-    """The plan's history folder when it is not under its run folder."""
-
-    wrfout = plan.get("wrfout_dir")
-    if wrfout is None:
-        return []
-    run = Path(plan["run"]).resolve()
-    wrfout = Path(wrfout).resolve()
-    return [] if wrfout == run or run in wrfout.parents else [wrfout]
-
-
-def _start_icechunk_export(options, *, run_dir: Path, state_dir: Path,
-                           config, extra_sources=(), say=None, after=None):
-    """Start the exporter beside the forecast; a start that fails is said
-    and the forecast runs without it (:class:`woof.icechunk_export.LiveExport`)."""
-
-    from woof.icechunk_export import LiveExport, history_intervals
-
-    # PYTHONSAFEPATH for the reason _stage_env gives: `python -m` must
-    # import the install, not a checkout the caller stands in.
-    environment = {**os.environ, "PYTHONSAFEPATH": "1"}
-    live = LiveExport(options, sources=[Path(run_dir), *extra_sources],
-                      state_dir=Path(state_dir),
-                      intervals=history_intervals(config),
-                      say=say, env=environment)
-    live.start(after=after)
-    return live
-
-
-def _settle_icechunk_export(live, *, observer=None) -> bool:
-    """Wait for the exporter to finish the frames the forecast left, said
-    as stage ``icechunk-export``; returns whether the store is complete.
-
-    The stage's wall is only the wait after the forecast (and render):
-    the export itself ran beside the forecast."""
-
-    if live is None:
-        return True
-    started = time.monotonic()
-    _notify(observer, "stage_begin", label="icechunk-export",
-            command=live.command())
-    result = live.wait()
-    ok = bool(result.get("ok"))
-    if not ok:
-        from woof.icechunk_export import resume_command
-
-        _notify(observer, "stage_warning", label="icechunk-export",
-                code="icechunk_export_incomplete",
-                message=("the Icechunk export is incomplete; the forecast "
-                         "is complete"),
-                resume=resume_command(live.state_dir),
-                frames_exported=result.get("frames_exported"),
-                frames_found=result.get("frames_found"))
-    code = result.get("exit_code")
-    _notify(observer, "stage_end", label="icechunk-export",
-            exit_code=0 if ok else (code if isinstance(code, int) and code
-                                    else 1),
-            ok=ok, elapsed_seconds=time.monotonic() - started,
-            progress=None)
-    return ok
+        "from the Icechunk store afterwards), or drop the deletion.",
+        "The store export unlinks each frame as soon as its commit lands, "
+        "and the render stage lists and reads the frames on disk after the "
+        "forecast: it would draw a partial set or fail on a frame deleted "
+        "under it, after a forecast that finished."))
 
 
 def _run_forecast(plan: dict, digests: dict, *, explain: bool,
@@ -5146,8 +5078,8 @@ def _registered_launch(args, *, config: Path, payload: dict,
     keep = getattr(args, "keep_checkpoints", None)
     if keep is not None:
         options["keep_checkpoints"] = keep
-    # The live Icechunk export: refused here when its table is wrong,
-    # started beside the run plan's forecast below.
+    # The store export's delete-after-commit policy: refused here when it
+    # is wrong (the export itself runs in woof.output_formats' scope).
     icechunk = _icechunk_for_chain(args, config)
     _refuse_render_with_deleted_frames(icechunk, options["render_products"])
     if flag_transport is not None and acquires:
@@ -5276,12 +5208,7 @@ def _registered_launch(args, *, config: Path, payload: dict,
               *([] if keep is None else ["--keep-checkpoints", str(keep)]),
               *(["--run-stamp", "off"] if not stamp else []),
               *(["--no-memory-gate"] if args.no_memory_gate else []),
-              *([] if getattr(args, "icechunk", None) is None
-                else ["--icechunk", args.icechunk]),
               *(["--prepare-only"] if prepare_only else [])]))
-        if icechunk is not None:
-            print(f"Icechunk: each history frame to {icechunk.url} as it "
-                  "lands (woof icechunk-export)")
         return 0
     prepare_only = _prepare_only_needs_no_card(args)
     if not prepare_only:
@@ -5405,17 +5332,11 @@ def _registered_launch(args, *, config: Path, payload: dict,
             elif event == "completed":
                 completed.update(fields.get("summary") or {})
                 line = f"go: complete. Output: {output}"
-                if icechunk is not None:
-                    # Said once the export has finished too: the run is
-                    # done when its store is.
-                    said_after_export.append(line)
-                else:
-                    print(line, file=terminal, flush=True)
+                print(line, file=terminal, flush=True)
             return record
 
     output_lock = threading.RLock()
     completed: dict = {}
-    said_after_export: list[str] = []
 
     class LaunchOutput(io.TextIOBase):
         # Every line goes to the log and each advisory reaches the
@@ -5484,30 +5405,7 @@ def _registered_launch(args, *, config: Path, payload: dict,
                     with contextlib.redirect_stdout(LaunchOutput(terminal, log, "stdout")), \
                             contextlib.redirect_stderr(LaunchOutput(errors, log, "stderr")), \
                             source_cli.redirect_adapter_output(sys.stdout, sys.stderr):
-                        live = None
-                        if icechunk is not None:
-                            forecast_dir, claimed = _plan_export_folders(
-                                plan.route, output)
-                            live = _start_icechunk_export(
-                                icechunk, run_dir=forecast_dir,
-                                state_dir=_icechunk_state_dir(output),
-                                config=config, after=claimed,
-                                say=lambda line: print(line, file=terminal,
-                                                       flush=True))
-                        try:
-                            code = runplan.execute_plan(plan, events=events)
-                        finally:
-                            if live is not None:
-                                live.finish()
-                        if live is not None:
-                            if code == INTERRUPT_EXIT_CODE:
-                                live.abandon()
-                            elif not _settle_icechunk_export(live) and code == 0:
-                                from woof.icechunk_export import (
-                                    EXPORT_INCOMPLETE_EXIT_CODE)
-                                code = EXPORT_INCOMPLETE_EXIT_CODE
-                        for line in said_after_export:
-                            print(line, file=terminal, flush=True)
+                        code = runplan.execute_plan(plan, events=events)
                         if log.failure is not None:
                             return 74
                         if prepare_only and code == 0:
@@ -6363,15 +6261,6 @@ def go_main(args, *, observer=None) -> int:
         raise GoRefusal(str(refusal)) from None
     if getattr(args, "command", None) == "ensemble" and request is None and Path(args.config).is_file():
         raise GoRefusal("ensemble requires --members N or [ensemble].members in CONFIG")
-    if request is not None and icechunk_request(
-            args, Path(args.config) if Path(args.config).is_file() else None) is not None:
-        # Breakage it prevents: every member would export into the same
-        # dNN groups, the last member's frames winning each valid time.
-        raise GoRefusal(
-            "--icechunk / [output] icechunk exports one forecast's frames, "
-            "and this is an ensemble: every member would write the same "
-            "groups. Next: drop it and export each member's run folder "
-            "with woof icechunk-export PATH --url URL.")
     if getattr(args, "restart_roster", None) is not None:
         if getattr(args, "prepare_only", False):
             raise GoRefusal("--restart-roster resumes a forecast, and "
@@ -7123,8 +7012,8 @@ def _go_prepared_main(args, *, observer=None) -> int:
         bridge = Path("<gfs_grib2_bridge, after woof setup>")
     geog_root = (Path(args.geog_root) if getattr(args, "geog_root", None)
                  else config_geog_root(Path(plan["config"])))
-    # The live Icechunk export, refused here when its table is wrong --
-    # before anything is fetched -- and started beside the forecast.
+    # The store export's delete-after-commit policy, refused here when it
+    # is wrong -- before anything is fetched.
     icechunk = _icechunk_for_chain(args, plan["config"])
     _refuse_render_with_deleted_frames(icechunk, plan.get("render_products"))
 
@@ -7214,9 +7103,6 @@ def _go_prepared_main(args, *, observer=None) -> int:
                 "prepared_content":
                     "<proof.json prepared_cache.content_sha256>"})))
         print("6. render\n     " + printable(render_command(plan)))
-        if icechunk is not None:
-            print(f"   beside 5: each history frame to Icechunk "
-                  f"{icechunk.url} as it lands (woof icechunk-export)")
         return 0
 
     # Re-running `woof go` is the second thing anyone does, and the
@@ -7286,7 +7172,6 @@ def _go_prepared_main(args, *, observer=None) -> int:
 
     #: The Icechunk exporter started beside the forecast, when one was
     #: asked for; every way out of the chain below settles or abandons it.
-    exporting: list = []
     # The interrupt contract covers the gate too: the memory probe
     # is a real subprocess (first-run staging), and a Ctrl-C landing
     # there deserves the same one sentence and rc 130 as any stage.
@@ -7531,19 +7416,9 @@ def _go_prepared_main(args, *, observer=None) -> int:
                 # the hook (there is no such thing in tree, but `go` takes any
                 # duck) must not be a reason a chain stops.
                 _notify(observer, "arm_first_products", render_plan=plan)
-                if icechunk is not None and not exporting:
-                    exporting.append(_start_icechunk_export(
-                        icechunk, run_dir=plan["run"],
-                        extra_sources=_wrfout_dir_beside(plan),
-                        state_dir=_icechunk_state_dir(plan["root"]),
-                        config=plan["config"]))
-                try:
-                    with _checkpoint_retention(keep):
-                        _run_forecast(plan, digests, explain=explain,
-                                      observer=observer)
-                finally:
-                    for live in exporting:
-                        live.finish()
+                with _checkpoint_retention(keep):
+                    _run_forecast(plan, digests, explain=explain,
+                                  observer=observer)
             except BaseException as error:
                 _failing("forecast", error)
                 raise
@@ -7653,15 +7528,11 @@ def _go_prepared_main(args, *, observer=None) -> int:
             return 0
         rendered = _render_stage(plan, explain=explain,
                                  observer=observer)
-        export_ok = _settle_icechunk_export(
-            exporting[0] if exporting else None, observer=observer)
     except GoRefusal:
         # A refusal reached from INSIDE the chain -- a manifest stage
         # that wrote nothing, a proof with no single cache identity.
         # The stream is open by then and would otherwise end mid-run,
         # which reads exactly like a killed process.
-        if exporting:
-            _settle_icechunk_export(exporting[0], observer=observer)
         if chain is not None:
             chain.finish(status="REFUSED", exit_code=2)
         raise
@@ -7673,10 +7544,6 @@ def _go_prepared_main(args, *, observer=None) -> int:
         # Nothing is deleted here: the tree is the only evidence of what
         # went wrong, and a tool that tidies away the failure a person is
         # about to report is worse than one that leaves it.
-        # The frames the forecast did publish are still exported: the
-        # store then holds exactly what the run folder holds.
-        if exporting:
-            _settle_icechunk_export(exporting[0], observer=observer)
         if chain is not None:
             chain.finish(status="FAILED", exit_code=failure.code)
         print(_partial_tree_note(plan["root"]), file=sys.stderr)
@@ -7687,8 +7554,6 @@ def _go_prepared_main(args, *, observer=None) -> int:
         # its incompleteness visible to every receipt reader.
         print(render(_interrupt_report(stop, plan),
                      explain=explain, command="woof go"), file=sys.stderr)
-        for live in exporting:
-            live.abandon()
         if chain is not None:
             chain.finish(status="INTERRUPTED",
                          exit_code=INTERRUPT_EXIT_CODE)
@@ -7716,8 +7581,7 @@ def _go_prepared_main(args, *, observer=None) -> int:
         pictures = _rendered_root(plan)
         if pictures is not None:
             print(f"go: rendered {pictures}")
-    from woof.icechunk_export import EXPORT_INCOMPLETE_EXIT_CODE
-    code = 0 if export_ok else EXPORT_INCOMPLETE_EXIT_CODE
+    code = 0
     if chain is not None:
         summary = chain.finish(status="SUCCESS", exit_code=code)
         # THE HEADLINE NUMBER, said out loud at the end of the run that
@@ -8068,16 +7932,6 @@ def _add_go_arguments(parser) -> None:
                              "as --section=-33.9,151.2,-34.1,151.3.  An "
                              "xsec: product with no line is refused before "
                              "anything is fetched")
-    parser.add_argument("--icechunk", default=None, metavar="URL",
-                        help="export each history frame to this Icechunk "
-                             "repository as it lands (s3://, gs://, "
-                             "file:// or a directory; one group per "
-                             "domain), from a separate process the model "
-                             "never waits on; wins over the config's "
-                             "[output] icechunk url ({name} in it is the "
-                             "[experiment] name).  go waits "
-                             "for it before it is done and exits 73 if "
-                             "the export is incomplete")
     parser.add_argument("--keep-checkpoints", type=_checkpoint_sets, default=None,
                         dest="keep_checkpoints", metavar="N",
                         help="how many complete checkpoint sets the run keeps in "

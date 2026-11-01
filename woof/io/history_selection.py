@@ -491,23 +491,26 @@ PRODUCT_COUNT_BASIS = (
 #: ``history_queue_depth`` is how many history frames each domain's writer
 #: may hold queued behind the one it is writing
 #: (:mod:`woof.io.history_staging`); it is tree-wide only too.
-#: ``icechunk`` asks ``woof go`` to export each history frame to an
-#: Icechunk repository as it lands (:mod:`woof.icechunk_export`); it is
-#: validated here and read by ``go``, and selects nothing on the tape.
+#: ``formats`` / ``icechunk_store`` are upstream's store export
+#: (:mod:`woof.output_formats`); ``icechunk_delete_after_commit`` and
+#: ``icechunk_domains`` its export policy (the fork's live export,
+#: :class:`woof.output_formats.ExportPolicy`).  They select nothing on the
+#: tape.
 OUTPUT_KEYS: frozenset[str] = frozenset(
     {"formats", "icechunk_store", "preset", "history_vars", "history_drop",
      "hub_wind", "hub_heights_m", "hub_sample_interval_s", "hub_sites",
      "windfarm_turbines",
-     "async_checkpoints", "history_queue_depth", "icechunk",
+     "async_checkpoints", "history_queue_depth",
+     "icechunk_delete_after_commit", "icechunk_domains",
      "full_history_interval_s", "between_preset", "between_history_add"})
 
 #: The keys a ``[[domain]]`` ``output = {...}`` accepts: the tree-wide
-#: ones less ``icechunk``, which exports every domain of the tree into
-#: one repository (one group per domain) and so belongs to the tree.
+#: ones less the store export's policy, which belongs to the tree.
 #: ``async_checkpoints`` and ``history_queue_depth`` stay listed so the
 #: experiment loader can refuse them on a domain by name
 #: (woof/experiment.py) rather than as unknown.
-DOMAIN_OUTPUT_KEYS: frozenset[str] = OUTPUT_KEYS - {"icechunk"}
+DOMAIN_OUTPUT_KEYS: frozenset[str] = OUTPUT_KEYS - {
+    "icechunk_delete_after_commit", "icechunk_domains"}
 
 #: ``hub_heights_m`` when ``hub_wind = true`` names none: the common
 #: onshore/offshore turbine hub range, in m above ground level.
@@ -669,11 +672,14 @@ def output_key_rows(*, tree_wide: bool = True):
     from woof.config_keys import KeyRow, key_rows
 
     tree_rows = (KeyRow(
-        "icechunk", ("string", "table"), None,
-        "woof go exports each history frame to this Icechunk repository "
-        "as it lands: a URL, or { url, branch, compress, zstd_clevel, "
-        "group_prefix, threads, domains, delete_after_commit }; {name} "
-        "in url is the [experiment] name."),) if tree_wide else ()
+        "icechunk_delete_after_commit", "boolean", False,
+        "with the icechunk output format: delete each history frame once "
+        "the store has committed it, so the disk holds only the export's "
+        "backlog; the model waits for space when the disk runs low"),
+        KeyRow(
+        "icechunk_domains", "array", None,
+        "with the icechunk output format: export only these grid ids "
+        "(default every domain)")) if tree_wide else ()
     return key_rows(*tree_rows,
         KeyRow("preset", "string", "full",
                "Named history set: full (default), minimal, severe, "
@@ -1169,10 +1175,10 @@ class HistorySelection:
         ``base_dir`` is the config file's directory: a relative
         ``hub_sites`` path resolves from there first, then from the
         working directory.  ``tree_wide=False`` reads a ``[[domain]]``
-        ``output`` table, which refuses ``icechunk`` by name.  An
-        ``icechunk`` value is validated
-        (:meth:`woof.icechunk_export.ExportOptions.from_mapping`) and not
-        kept: it selects nothing on the tape, and ``woof go`` reads it.
+        ``output`` table, which refuses the store export's tree-wide
+        policy by name.  That policy is validated
+        (:func:`woof.output_formats.export_policy_from_table`) and not
+        kept: it selects nothing on the tape.
         """
         if table is None:
             return FULL
@@ -1181,23 +1187,16 @@ class HistorySelection:
                 f"[output] of {source} must be a table, e.g. "
                 '[output] preset = "minimal", got '
                 f"{table!r}.")
-        if not tree_wide and "icechunk" in table:
+        policy_keys = sorted({"icechunk_delete_after_commit",
+                              "icechunk_domains"} & set(table))
+        if not tree_wide and policy_keys:
             raise ValueError(
-                f"icechunk in output of {source} is tree-wide: one "
-                "repository holds every domain, one group each.  Move it "
-                "to the tree-wide [output] table.")
-        if "icechunk" in table:
-            try:
-                from woof.icechunk_export import ExportOptions
-            except ImportError:
-                # The standalone preparation wheel carries no exporter (it
-                # exports no forecast); woof go validates the table itself.
-                ExportOptions = None
-            if ExportOptions is not None:
-                # {name} in its url is woof go's to fill.
-                ExportOptions.from_mapping(table["icechunk"], source=source,
-                                           base_dir=base_dir,
-                                           allow_template=True)
+                f"{', '.join(policy_keys)} in output of {source} is "
+                "tree-wide: the store export runs once for the tree.  Move "
+                "it to the tree-wide [output] table.")
+        if policy_keys:
+            from woof.output_formats import export_policy_from_table
+            export_policy_from_table(table, source=source)
         unknown = sorted(set(table) - OUTPUT_KEYS)
         if unknown:
             suggestions = "".join(

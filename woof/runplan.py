@@ -4042,19 +4042,19 @@ def _present_download_bytes(request: Mapping[str, Any] | None, directory: Path |
 
 
 def _planned_live_export(raw: Mapping[str, Any] | None):
-    """The config's ``[output] icechunk`` export, or ``None``: the disk
-    projection prices a delete-after-commit export's history as its
+    """The config's delete-after-commit store export (``[output]
+    icechunk_delete_after_commit``, woof.output_formats.ExportPolicy), or
+    ``None``: the disk projection prices its history as the export's
     backlog, not the whole run."""
 
-    table = ((raw or {}).get("output") or {}).get("icechunk")
-    if table is None:
-        return None
-    from woof.icechunk_export import ExportOptions
+    table = (raw or {}).get("output") or {}
+    from woof.output_formats import export_policy_from_table
 
     try:
-        return ExportOptions.from_mapping(table, allow_template=True)
+        policy = export_policy_from_table(table)
     except (TypeError, ValueError):
         return None
+    return policy if policy.delete_after_commit else None
 
 
 def _disk_projection(plan: RunPlan, exp, *, raw: Mapping[str, Any], data,

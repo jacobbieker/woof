@@ -1,5 +1,5 @@
-"""The live Icechunk export ``woof go`` runs beside a forecast
-(``woof/icechunk_export.py``) and its resume door, ``woof icechunk-export``.
+"""The fork's Icechunk exporter (``woof/icechunk_export.py``) and its door,
+``woof icechunk-export`` (woof go's store export is upstream's, woof.output_formats).
 
 A fake forecast publishes tiny wrfout frames the way the history writer
 does -- a hidden temporary renamed onto its name, then a ``ready/`` marker
@@ -202,60 +202,6 @@ def test_options_refusals_are_named(value, match):
         ie.ExportOptions.from_mapping(value)
 
 
-def test_the_output_table_takes_icechunk_and_a_domain_table_refuses_it():
-    from woof.io.history_selection import HistorySelection
-
-    HistorySelection.from_mapping({"icechunk": "gs://b/run"})
-    with pytest.raises(ValueError, match="zstd_clevel"):
-        HistorySelection.from_mapping({"icechunk": {"url": "gs://b/run",
-                                                    "zstd_clevel": 0}})
-    with pytest.raises(ValueError, match="tree-wide"):
-        HistorySelection.from_mapping({"icechunk": "gs://b/run"},
-                                      tree_wide=False)
-
-
-def test_go_reads_the_config_table_and_the_flag_wins(tmp_path):
-    config = tmp_path / "case.toml"
-    config.write_text('[output]\nicechunk = { url = "repo", zstd_clevel = 7 }\n'
-                      "[[domain]]\ngrid_id = 1\nhistory_interval_s = 600\n"
-                      "[[domain]]\ngrid_id = 2\nhistory_interval_s = 300.0\n")
-    args = argparse.Namespace(icechunk=None)
-    options = ie.go_export_options(args, config)
-    assert options.url == str(tmp_path / "repo") and options.zstd_clevel == 7
-    args.icechunk = "s3://bucket/run"
-    options = ie.go_export_options(args, config)
-    assert options.url == "s3://bucket/run" and options.zstd_clevel == 7
-    assert ie.history_intervals(config) == {1: 600, 2: 300}
-    assert ie.go_export_options(argparse.Namespace(icechunk=None),
-                                tmp_path / "absent.toml") is None
-
-
-def test_go_refuses_the_flag_on_prepare_only(tmp_path):
-    from woof import go_cli
-
-    config = tmp_path / "case.toml"
-    config.write_text('[output]\nicechunk = "s3://b/x"\n')
-    args = argparse.Namespace(icechunk=None, prepare_only=True)
-    assert go_cli._icechunk_for_chain(args, config) is None
-    args.icechunk = "s3://b/y"
-    with pytest.raises(go_cli.GoRefusal, match="prepare-only"):
-        go_cli._icechunk_for_chain(args, config)
-    bad = tmp_path / "bad.toml"
-    bad.write_text('[output]\nicechunk = { url = "s3://b/x", level = 1 }\n')
-    with pytest.raises(go_cli.GoRefusal, match="unknown key"):
-        go_cli.icechunk_request(argparse.Namespace(icechunk=None), bad)
-
-
-def test_go_flag_is_registered():
-    from woof import cli
-
-    parser = cli.build_parser()
-    args = parser.parse_args(["go", "case.toml", "--icechunk", "s3://b/x"])
-    assert args.icechunk == "s3://b/x"
-    args = parser.parse_args(["icechunk-export", "run", "--url", "s3://b/x"])
-    assert args.func is ie.main
-
-
 # --------------------------------------------------------------------------
 # discovery
 
@@ -444,80 +390,6 @@ def test_the_resume_door_without_an_export_folder_needs_a_url(tmp_path,
     assert ie.main(_cli([tmp_path / "absent"], url="s3://b/x")) == 2
 
 
-def test_an_exporter_crash_leaves_the_forecast_running_and_resume_completes(
-        tmp_path):
-    """The exporter process is killed mid-run; the fake forecast publishes
-    every frame on schedule regardless; go's handle reports the export
-    INCOMPLETE with the resume command; that command completes the store,
-    which then equals an after-the-fact export."""
-
-    run = tmp_path / "go-run" / "run"
-    state = tmp_path / "go-run" / ie.EXPORT_DIRNAME
-    url = _file_url(tmp_path / "repo")
-    said: list[str] = []
-    live = ie.LiveExport(_options(url), sources=[run], state_dir=state,
-                         intervals={1: 900}, say=said.append,
-                         poll_seconds=0.05)
-    assert live.start()
-    published: list[float] = []
-    killed = threading.Event()
-
-    def forecast():
-        for index in range(10):
-            publish(run, 1, index)
-            published.append(time.monotonic())
-            time.sleep(0.2)
-
-    producer = threading.Thread(target=forecast)
-    producer.start()
-    deadline = time.monotonic() + 90
-    while time.monotonic() < deadline:
-        status = live.status() or {}
-        if int(status.get("frames_exported") or 0) >= 2:
-            os.kill(live.process.pid, signal.SIGKILL)
-            killed.set()
-            break
-        time.sleep(0.05)
-    assert killed.is_set(), live.status()
-    producer.join(timeout=120)
-    assert len(published) == 10                     # the forecast finished
-    assert max(np.diff(published)) < 5.0            # and never stalled
-    live.finish()
-    result = live.wait()
-    assert not result["ok"] and result["exit_code"] == -signal.SIGKILL
-    warning = [line for line in said if "INCOMPLETE" in line]
-    assert warning and "woof icechunk-export" in warning[0]
-
-    assert ie.main(_cli([state], json=True)) == 0
-    group = _open_group(url, "d01")
-    np.testing.assert_array_equal(group["frame_written"][:], np.ones(10))
-    after = _file_url(tmp_path / "after")
-    _drain([run], after, tmp_path)
-    assert_same_store(url, after, ["d01"])
-    # The run folder itself also names the export (go's layout).
-    assert ie.main(_cli([run], json=True)) == 0
-
-
-def test_live_export_through_go_handle_completes(tmp_path):
-    run = tmp_path / "go-run" / "run"
-    state = tmp_path / "go-run" / ie.EXPORT_DIRNAME
-    url = _file_url(tmp_path / "repo")
-    said: list[str] = []
-    live = ie.LiveExport(_options(url), sources=[run], state_dir=state,
-                         say=said.append, poll_seconds=0.05)
-    assert live.start()
-    for index in range(4):
-        publish(run, 1, index)
-        time.sleep(0.05)
-    live.finish()
-    result = live.wait()
-    assert result["ok"] and result["frames_exported"] == 4, (result, said)
-    assert any("icechunk export complete" in line for line in said)
-    spec = json.loads((state / ie.SPEC_NAME).read_text())
-    assert spec["schema"] == ie.SPEC_SCHEMA and spec["sources"] == [str(run)]
-    assert (state / ie.LOG_NAME).is_file()
-
-
 def test_progress_line_reports_lag():
     line = ie.progress_line({"frames_exported": 3, "frames_found": 5,
                              "frames_pending": 2, "lag_model_seconds": 1800,
@@ -525,41 +397,6 @@ def test_progress_line_reports_lag():
     assert line == ("icechunk export: 3/5 frames committed, 2 pending "
                     "(30 min 00 s of model time behind, oldest waiting "
                     "1 min 15 s)")
-
-
-def test_a_deferred_start_waits_for_the_run_to_claim_its_folder(tmp_path):
-    """``woof run-plan``'s prepared launch refuses an output folder holding
-    anything it did not write, so go starts the exporter only once the
-    plan has made ``<output>/chain``."""
-
-    output = tmp_path / "out"
-    run = output / "chain" / "run"
-    state = output / ie.EXPORT_DIRNAME
-    url = _file_url(tmp_path / "repo")
-    live = ie.LiveExport(_options(url), sources=[run], state_dir=state,
-                         say=lambda _line: None, poll_seconds=0.05)
-    assert live.start(after=output / "chain")
-    time.sleep(0.3)
-    assert not state.exists() and live.process is None
-    publish(run, 1, 0)
-    publish(run, 1, 1)
-    live.finish()
-    result = live.wait()
-    assert result["ok"] and result["frames_exported"] == 2
-
-
-def test_a_run_that_ends_before_its_folder_starts_no_exporter(tmp_path):
-    output = tmp_path / "out"
-    live = ie.LiveExport(_options(_file_url(tmp_path / "repo")),
-                         sources=[output / "chain" / "run"],
-                         state_dir=output / ie.EXPORT_DIRNAME,
-                         say=lambda _line: None, poll_seconds=0.05)
-    live.start(after=output / "chain")
-    live.finish()
-    result = live.wait()
-    assert not result["ok"] and result["state"] == "not-started"
-    assert "ended before" in result["error"]
-    assert not output.exists()
 
 
 def test_an_export_that_finds_no_frame_is_not_complete(tmp_path):
@@ -638,27 +475,6 @@ def test_concurrent_writes_never_share_a_chunk(tmp_path):
     np.testing.assert_array_equal(group["T2"][2:4, 0, 0], [30.0, 45.0])
 
 
-def test_go_stops_an_exporter_that_stalls(tmp_path):
-    class Stalled(ie.LiveExport):
-        STALL_SECONDS = 1.0
-
-        def command(self):
-            import sys
-            return [sys.executable, "-c", "import time; time.sleep(120)"]
-
-    said: list[str] = []
-    live = Stalled(_options(_file_url(tmp_path / "repo")),
-                   sources=[tmp_path / "run"], state_dir=tmp_path / "state",
-                   say=said.append)
-    assert live.start()
-    started = time.monotonic()
-    result = live.wait()
-    assert time.monotonic() - started < 60
-    assert not result["ok"]
-    assert any("no progress" in line and "INCOMPLETE" in line
-               for line in said)
-
-
 # --------------------------------------------------------------------------
 # long runs: url placeholders, domains, delete_after_commit
 
@@ -688,73 +504,6 @@ def test_url_placeholders_are_filled_with_the_experiment_name(tmp_path):
 def test_url_placeholder_refusals_are_named(url, names, match):
     with pytest.raises(ie.IcechunkExportRefused, match=match):
         ie.ExportOptions.from_mapping({"url": url}, names=names)
-
-
-def test_go_fills_name_from_the_config_and_the_flag(tmp_path):
-    from woof import go_cli
-    from woof.io.history_selection import HistorySelection
-
-    config = tmp_path / "run.toml"
-    config.write_text(
-        '[experiment]\nname = "run-007"\n'
-        '[output]\nicechunk = { url = "s3://b/runs/{name}.icechunk", '
-        "domains = [3], delete_after_commit = true }\n")
-    options = ie.go_export_options(argparse.Namespace(icechunk=None), config)
-    assert options.url == "s3://b/runs/run-007.icechunk"
-    assert options.domains == (3,) and options.delete_after_commit
-    flagged = ie.go_export_options(
-        argparse.Namespace(icechunk="file:///scratch/{name}.icechunk"),
-        config)
-    assert flagged.url == "file:///scratch/run-007.icechunk"
-    assert flagged.domains == (3,)
-    nameless = tmp_path / "nameless.toml"
-    nameless.write_text('[output]\nicechunk = "s3://b/{name}"\n')
-    with pytest.raises(go_cli.GoRefusal, match="experiment"):
-        go_cli.icechunk_request(argparse.Namespace(icechunk=None), nameless)
-    # The [output] table's own validation accepts the template.
-    HistorySelection.from_mapping({"icechunk": {
-        "url": "s3://b/{name}.icechunk", "domains": [3],
-        "delete_after_commit": True}})
-
-
-def test_go_follows_each_routes_forecast_folder(tmp_path):
-    """The experiment route ([case_data]) writes its frames into the
-    output folder itself and never makes <output>/chain: waiting for that
-    started no exporter at all."""
-
-    from woof import go_cli, runplan
-
-    assert go_cli._plan_export_folders("experiment", tmp_path) == (
-        tmp_path, tmp_path / runplan.MANIFEST_FILENAME)
-    assert go_cli._plan_export_folders("prepared", tmp_path) == (
-        tmp_path / "chain" / "run", tmp_path / "chain")
-
-
-def test_go_refuses_deleting_frames_its_own_stages_read(tmp_path):
-    """The render stage and simulated radar read history frames from disk
-    after they land; delete_after_commit is refused beside them."""
-
-    from woof import go_cli
-
-    deleting = _options("s3://b/x", delete_after_commit=True)
-    with pytest.raises(go_cli.GoRefusal, match="--products none"):
-        go_cli._refuse_render_with_deleted_frames(deleting, None)
-    with pytest.raises(go_cli.GoRefusal, match="--products none"):
-        go_cli._refuse_render_with_deleted_frames(deleting, "t2,refl")
-    go_cli._refuse_render_with_deleted_frames(deleting, "none")
-    go_cli._refuse_render_with_deleted_frames(_options("s3://b/x"), None)
-    go_cli._refuse_render_with_deleted_frames(None, None)
-    config = tmp_path / "radar.toml"
-    config.write_text('[output]\nicechunk = { url = "s3://b/x", '
-                      "delete_after_commit = true }\n[simulated_radar]\n"
-                      'sites = "auto"\n')
-    with pytest.raises(go_cli.GoRefusal, match="simulated_radar"):
-        go_cli.icechunk_request(argparse.Namespace(icechunk=None), config)
-    config.write_text('[output]\nicechunk = { url = "s3://b/x", '
-                      "delete_after_commit = true }\n[simulated_radar]\n"
-                      "enabled = false\n")
-    assert go_cli.icechunk_request(argparse.Namespace(icechunk=None),
-                                   config).delete_after_commit
 
 
 @pytest.mark.parametrize("value, match", [
@@ -1031,40 +780,6 @@ def test_an_export_stopped_after_commit_before_its_record_resumes(tmp_path):
     assert list((run / "wrfout").glob("wrfout_d01_*")) == []
     np.testing.assert_array_equal(
         _open_group(url, "d01")["frame_written"][:], [1, 1, 1])
-
-
-def test_a_killed_exporter_process_with_delete_after_commit_resumes(
-        tmp_path):
-    """The separate exporter process is SIGKILLed mid-run; the files it
-    committed are gone, the rest are on disk; the resume door finishes
-    the store and frees the rest.  Nothing is lost."""
-
-    run = tmp_path / "go-run" / "run"
-    state = tmp_path / "go-run" / ie.EXPORT_DIRNAME
-    url = _file_url(tmp_path / "repo")
-    live = ie.LiveExport(_options(url, delete_after_commit=True),
-                         sources=[run], state_dir=state, intervals={1: 900},
-                         say=lambda _line: None, poll_seconds=0.05)
-    assert live.start()
-    for index in range(8):
-        publish(run, 1, index)
-    deadline = time.monotonic() + 90
-    while time.monotonic() < deadline:
-        status = live.status() or {}
-        if int(status.get("frames_exported") or 0) >= 2:
-            os.kill(live.process.pid, signal.SIGKILL)
-            break
-        time.sleep(0.02)
-    live.finish()
-    result = live.wait()
-    assert not result["ok"]
-    assert ie.main(_cli([state], json=True)) == 0
-    group = _open_group(url, "d01")
-    np.testing.assert_array_equal(group["frame_written"][:], np.ones(8))
-    np.testing.assert_array_equal(group["U"][:, 0, 0, 0], np.arange(8))
-    assert list((run / "wrfout").glob("wrfout_d01_*")) == []
-    final = json.loads((state / ie.STATUS_NAME).read_text())
-    assert final["frames_exported"] == final["frames_found"] == 8
 
 
 def test_no_frame_before_history_begin_reaches_the_store(tmp_path):

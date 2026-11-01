@@ -44,13 +44,15 @@ What ``woof go-job`` does, in order:
    or ``$WOOF_WORKER_INDEX``, which is how one AWS Batch array job runs a
    whole list of runs);
 2. stages the config and companions into ``WORKDIR/inputs``;
-3. runs ``woof go CONFIG --outdir WORKDIR/go --icechunk URL --products P
-   [go_args]`` in this process group (so a worker's or scheduler's SIGTERM
+3. runs ``woof go CONFIG --outdir WORKDIR/go --output-format
+   netcdf,icechunk --icechunk-store URL --products P [go_args]`` (upstream's
+   store export, woof.output_formats) in this process group (so a worker's or scheduler's SIGTERM
    reaches it; a SIGTERM delivered to this process is forwarded);
-4. when ``woof go`` exits 73 -- the forecast is complete, its Icechunk
-   export is not -- resumes the export from the run folder still on local
-   disk (``woof icechunk-export``) up to :data:`EXPORT_RESUME_ATTEMPTS`
-   times, so a store hiccup at the end does not cost a whole forecast;
+4. when a run leaves the fork's exporter state behind and exits 73 --
+   the forecast is complete, its Icechunk export is not -- resumes the
+   export from the run folder still on local disk (``woof
+   icechunk-export``) up to :data:`EXPORT_RESUME_ATTEMPTS` times.  Under
+   upstream's store export a failed export fails the run instead;
 5. writes the result (:data:`RESULT_SCHEMA`: status, exit codes, timings,
    the store URL, the last committed frame and snapshot) to ``--result``
    (default ``WORKDIR/result.json``), to stdout, and to the job's
@@ -132,7 +134,9 @@ GO_ARGS: dict[str, bool] = {
 }
 
 #: Flags this wrapper sets itself, and the job key that sets them instead.
-OWNED_GO_ARGS = {"--icechunk": "icechunk_url", "--products": "products",
+OWNED_GO_ARGS = {"--icechunk-store": "icechunk_url",
+                 "--output-format": "icechunk_url",
+                 "--products": "products",
                  "--outdir": "the --workdir of woof go-job"}
 
 EXIT_OK = 0
@@ -775,7 +779,8 @@ def go_command(job: GoJob, config: Path, outdir: Path) -> list[str]:
     """The ``woof go`` argv this job runs."""
 
     return [sys.executable, "-m", "woof", "go", str(config),
-            "--outdir", str(outdir), "--icechunk", job.icechunk_url,
+            "--outdir", str(outdir), "--output-format", "netcdf,icechunk",
+            "--icechunk-store", job.icechunk_url,
             "--products", job.products, *job.go_args]
 
 

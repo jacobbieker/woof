@@ -3,11 +3,23 @@
 Only filenames, configuration and receipts cross this Python boundary.
 Rust reads, chunks, compresses and commits the native arrays. A worker
 observes publication ledgers, never file age or a partly written frame.
+
+The fork's live Icechunk export (``woof go --icechunk``) moved onto this
+design: ``--icechunk-store`` / ``[output] icechunk_store`` name the store,
+and the export policy upstream had no word for rides two ``[output]`` keys
+(:class:`ExportPolicy`): ``icechunk_delete_after_commit`` unlinks each
+history frame once every store row has committed it, so the disk holds only
+the export's backlog -- and while it is on, the history writers wait for
+free space before queuing a frame (woof.io.export_backpressure) and the
+output-disk review prices that backlog (woof.disk_budget,
+LIVE_EXPORT_BACKLOG_FRAMES); ``icechunk_domains`` limits the export to
+those grid ids.
 """
 from __future__ import annotations
 
 import argparse
 from contextlib import contextmanager
+from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
@@ -107,6 +119,61 @@ def capabilities():
     return {"schema": "gpuwm.output-formats/v1", "rows": rows}
 
 
+@dataclass(frozen=True)
+class ExportPolicy:
+    """What a store export does beyond writing: the fork's live-export
+    policy on upstream's store (``[output] icechunk_delete_after_commit``,
+    ``[output] icechunk_domains``).  The default does nothing extra."""
+
+    delete_after_commit: bool = False
+    domains: tuple[int, ...] | None = None
+
+    def exports(self, grid_id) -> bool:
+        """Whether grid ``grid_id``'s frames go to the store (``None``: a
+        mesh history with no WRF domain, always)."""
+        return grid_id is None or self.domains is None or int(grid_id) in self.domains
+
+    def env_value(self) -> str:
+        """``woof.io.export_backpressure.LIVE_EXPORT_DELETE_ENV``'s value."""
+        return json.dumps({"domains": None if self.domains is None else list(self.domains)})
+
+
+def export_policy_from_table(block, *, source="<config>") -> ExportPolicy:
+    """The :class:`ExportPolicy` an ``[output]`` table asks for, validated."""
+    block = block or {}
+    delete = block.get("icechunk_delete_after_commit", False)
+    if not isinstance(delete, bool):
+        raise ValueError(f"[output] icechunk_delete_after_commit of {source} must be true or false")
+    domains = block.get("icechunk_domains")
+    if domains is not None:
+        if (not isinstance(domains, (list, tuple)) or not domains
+                or any(isinstance(d, bool) or not isinstance(d, int) or d < 1 for d in domains)
+                or len(set(domains)) != len(domains)):
+            raise ValueError(f"[output] icechunk_domains of {source} must be a non-empty list of "
+                             f"distinct grid ids, e.g. icechunk_domains = [3], got {domains!r}")
+        domains = tuple(sorted(int(d) for d in domains))
+    return ExportPolicy(delete_after_commit=delete, domains=domains)
+
+
+def _output_block(arguments):
+    config = (getattr(arguments, "output_config", None) or getattr(arguments, "config", None)
+              or getattr(arguments, "experiment_config", None))
+    if config and Path(config).is_file() and Path(config).suffix == ".toml":
+        with Path(config).open("rb") as stream:
+            return tomllib.load(stream).get("output", {}), str(config)
+    return {}, "<config>"
+
+
+def export_policy(arguments) -> ExportPolicy:
+    """The run's :class:`ExportPolicy`: the config's ``[output]`` keys, with
+    ``--icechunk-delete-after-commit`` turning deletion on."""
+    block, source = _output_block(arguments)
+    policy = export_policy_from_table(block, source=source)
+    if getattr(arguments, "icechunk_delete_after_commit", None):
+        policy = ExportPolicy(delete_after_commit=True, domains=policy.domains)
+    return policy
+
+
 def add_arguments(parser):
     parser.add_argument("--output-config", type=Path, default=None, metavar="TOML",
                         help="Read [output] formats and icechunk_store from TOML; CLI values override it")
@@ -116,20 +183,33 @@ def add_arguments(parser):
     parser.add_argument("--icechunk-store", default=None, metavar="URL",
                         help="Output store base: local path or s3://bucket/prefix; "
                              "domain and member paths are appended (default RUN/icechunk)")
+    parser.add_argument("--icechunk-delete-after-commit", action="store_true", default=None,
+                        help="delete each history frame once the store has committed it, so the "
+                             "disk holds only the export's backlog; the model waits for space when "
+                             "the disk runs low (same as [output] icechunk_delete_after_commit)")
 
 
 def options(arguments):
     config = (getattr(arguments, "output_config", None) or getattr(arguments, "config", None) or getattr(arguments, "experiment_config", None))
     block = {}
+    name = None
     if config and Path(config).is_file() and Path(config).suffix == ".toml":
         with Path(config).open("rb") as stream:
-            block = tomllib.load(stream).get("output", {})
+            document = tomllib.load(stream)
+        block = document.get("output", {})
+        name = (document.get("experiment") or {}).get("name")
     formats = getattr(arguments, "output_format", None)
     if formats is None:
         formats = block.get("formats")
     store = getattr(arguments, "icechunk_store", None)
     if store is None:
         store = block.get("icechunk_store")
+    if store is not None and "{name}" in str(store):
+        # The fork's live-export URL template: {name} is the [experiment] name.
+        if not name:
+            raise ValueError(f"icechunk_store {store!r} names {{name}} and the config has no "
+                             "[experiment] name to fill it")
+        store = str(store).replace("{name}", str(name))
     rows = selected(formats)
     if store is not None and not any(r["writer"] for r in rows):
         raise ValueError("--icechunk-store needs an output format with a store writer")
@@ -174,11 +254,14 @@ class HistoryOutputs:
     path existing by itself is insufficient. Failed exports are surfaced at
     close and preserved in the receipt, never converted to successful runs.
     """
-    def __init__(self, root, rows, store=None, *, engine="woof"):
+    def __init__(self, root, rows, store=None, *, engine="woof", policy=None):
         self.root = Path(root).resolve()
         self.rows = [(r, require_binary(r)) for r in rows if r["writer"]]
         self.store = store
         self.engine = engine
+        self.policy = policy or ExportPolicy()
+        self.deleted = 0
+        self._previous_env = None
         self.seen = set()
         self.repositories = set()
         self.events = []
@@ -193,6 +276,13 @@ class HistoryOutputs:
 
     def __enter__(self):
         if self.rows:
+            if self.policy.delete_after_commit:
+                # The history writers hold a frame while the disk is short
+                # of the export's reserve (woof.io.export_backpressure), and
+                # child stages price the backlog (woof.output_disk).
+                from woof.io.export_backpressure import LIVE_EXPORT_DELETE_ENV
+                self._previous_env = os.environ.get(LIVE_EXPORT_DELETE_ENV)
+                os.environ[LIVE_EXPORT_DELETE_ENV] = self.policy.env_value()
             self.thread = threading.Thread(target=self._work, name="history-output-formats", daemon=True)
             self.thread.start()
         return self
@@ -223,8 +313,11 @@ class HistoryOutputs:
                 from woof.hex.forecast_door import history_files
                 if marker.with_name(name) not in history_files(marker.parent):
                     continue
-            record = json.loads(marker.read_text(encoding="utf-8"))
             path = marker.with_name(name)
+            if path in self.seen:
+                # Committed already (and, with delete_after_commit, gone).
+                continue
+            record = json.loads(marker.read_text(encoding="utf-8"))
             info = path.stat()
             if info.st_size != record["bytes"] or info.st_mtime_ns != record["mtime_ns"]:
                 raise RuntimeError(f"published history changed: {path}")
@@ -263,15 +356,30 @@ class HistoryOutputs:
             self.events.append({"event": "stage", "format": row["id"],
                                 "wall_seconds": time.monotonic()-started, "mode": mode})
 
+    @staticmethod
+    def _grid_id(path):
+        match = re.search(r"wrfout_d(\d+)_", path.name)
+        return int(match.group(1)) if match else None
+
     def _scan(self):
         for path in self._published():
             if path in self.seen:
+                continue
+            if not self.policy.exports(self._grid_id(path)):
+                self.seen.add(path)
                 continue
             for i, (row, binary) in enumerate(self.rows):
                 store = self._store_for(row, path)
                 self._invoke(row, binary, store, [path], "append")
                 self.repositories.add((i, store))
             self.seen.add(path)
+            if self.policy.delete_after_commit:
+                # Every store row holds the frame: the disk keeps only the
+                # backlog (the fork's live export, delete_after_commit).
+                path.unlink(missing_ok=True)
+                durable = path.with_name(path.name + ".durable.json")
+                durable.unlink(missing_ok=True)
+                self.deleted += 1
 
     def _work(self):
         try:
@@ -287,6 +395,12 @@ class HistoryOutputs:
             return False
         self.stop.set()
         self.thread.join()
+        if self.policy.delete_after_commit:
+            from woof.io.export_backpressure import LIVE_EXPORT_DELETE_ENV
+            if self._previous_env is None:
+                os.environ.pop(LIVE_EXPORT_DELETE_ENV, None)
+            else:
+                os.environ[LIVE_EXPORT_DELETE_ENV] = self._previous_env
         try:
             if self.error is not None:
                 raise self.error
@@ -307,7 +421,10 @@ class HistoryOutputs:
                     "schema": "gpuwm.output-formats.receipt/v1", "engine": self.engine,
                     "status": "failed" if self.error or kind or not self.success else "complete",
                     "error": str(self.error) if self.error else None,
-                    "frames": len(self.seen), "events": self.events}, indent=2), encoding="utf-8")
+                    "frames": len(self.seen), "events": self.events,
+                    "policy": {"delete_after_commit": self.policy.delete_after_commit,
+                               "domains": None if self.policy.domains is None else list(self.policy.domains),
+                               "frames_deleted": self.deleted}}, indent=2), encoding="utf-8")
         elapsed = sum(e.get("wall_seconds", 0) for e in self.events if e["event"] == "stage")
         print(f"[output-formats] {len(self.seen)} history files, {elapsed:.3f} s writer wall; "
               f"receipt {self.root / 'output-formats' / 'receipt.json'}", flush=True)
@@ -321,6 +438,8 @@ def argument_values(arguments, *, relative=None):
         value = getattr(arguments, name, None)
         if value is not None:
             result.extend(("--" + name.replace("_", "-"), str(value)))
+    if getattr(arguments, "icechunk_delete_after_commit", None):
+        result.append("--icechunk-delete-after-commit")
     if relative is not None:
         _, store = options(arguments)
         if store is not None:
@@ -374,7 +493,8 @@ def command_scope(arguments, *, engine="woof"):
     if inherited and root.is_relative_to(Path(inherited)):
         yield None
         return
-    with HistoryOutputs(root, rows, store, engine=engine) as scope:
+    with HistoryOutputs(root, rows, store, engine=engine,
+                        policy=export_policy(arguments)) as scope:
         os.environ["WOOF_OUTPUT_SCOPE_ROOT"] = str(root)
         try:
             yield scope

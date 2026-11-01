@@ -431,8 +431,8 @@ def projected_run_bytes(exp, *, keep_checkpoints: int | None,
     A part the table cannot price is named in ``unpriced`` and left out of
     ``total_bytes``.
 
-    ``live_export`` is the run's ``[output] icechunk`` export
-    (:class:`woof.icechunk_export.ExportOptions`), or ``None``.  With
+    ``live_export`` is the run's store-export policy
+    (:class:`woof.output_formats.ExportPolicy`), or ``None``.  With
     ``delete_after_commit`` its domains hold at most
     :data:`LIVE_EXPORT_BACKLOG_FRAMES` history frames on the disk, since
     each frame is unlinked once the store holds it.
