@@ -2,7 +2,7 @@ schema = "gpuwm.suite.v1"
 name = "agency-2box"
 region = "US"
 
-# Planning targets from the suite capacity plan (gpuwm/data/nwpsuite/receipts.v1.json#suite-capacity-plan-2026-10-12), not a live hardware receipt. init replaces these.
+# Planning targets from the suite capacity plan (woof/data/nwpsuite/receipts.v1.json#suite-capacity-plan-2026-10-12), not a live hardware receipt. init replaces these.
 [[box]]
 id = "r"
 host = "local"
