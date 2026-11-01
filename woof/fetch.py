@@ -1835,8 +1835,19 @@ def probe_cycle_window(source: str, cycle: datetime, leads, *,
         seen = set()
         complete = True
         for lead in (values[-1], *values[:-1]):
-            urls = cycle_probe_urls(source, cycle, lead, transport=endpoint.name,
-                                    cadence=cadence, start_hour=values[0], member=member)
+            try:
+                urls = cycle_probe_urls(source, cycle, lead, transport=endpoint.name,
+                                        cadence=cadence, start_hour=values[0], member=member)
+            except ValueError as refusal:
+                # A rung whose declared layout has no object for this lead (an
+                # archive that keeps only 3-hourly leads, asked for f001) does
+                # not hold the set: the next rung is asked.  Raising here
+                # aborted the whole probe on the first such rung, although the
+                # live host above or below it could serve every lead.
+                checks.append(dict(endpoint=endpoint.name, lead=lead, url=None,
+                                   available=False, why=str(refusal)))
+                complete = False
+                break
             for url in urls:
                 if url in seen:
                     continue
