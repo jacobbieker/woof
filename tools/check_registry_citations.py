@@ -275,10 +275,13 @@ RESOLVED: dict[str, tuple[str, str]] = {
     # (lane/hrrr-v4-output-fold 514f72e8be, RK descriptors passed as by-value
     # host arrays and forecast-entry imports moved these anchors.  Anchors
     # unchanged.)
-    "woof/core/dycore.py:1438": (
+    # (The 1.1.5 merge: the fork's health-ledger and diagnostic imports
+    # beside upstream's CPU-safe CUDA import block moved both three lines
+    # down.  Anchors unchanged.)
+    "woof/core/dycore.py:1441": (
         "woof/core/dycore.py",
         "WRF v4.6.1 km_opt=2:"),
-    "woof/core/dycore.py:1536": (
+    "woof/core/dycore.py:1539": (
         "woof/core/dycore.py",
         "WRF v4.6.1 km_opt=3:"),
 }
