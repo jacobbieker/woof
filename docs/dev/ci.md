@@ -70,6 +70,26 @@ not a pass.
 - **Rust formatting.** `cargo fmt --check` is not clean across the path
   dependencies into vendored crates, so it is not enforced.
 - **Windows.** No job runs on Windows.
+- **Inputs the Recast WOOF tree leaves out.** A case that reads or runs a
+  file `tests/_woof_left_out.txt` names (the desktop and terminal front
+  ends, the release-cut tools, campaign evidence, `tools/n5s`) skips with
+  the input and the rule in its reason, at collection or at run time
+  (`conftest.py`, `tests/_woof_snapshot.py`). It runs in the engine's tree.
+  `test_doc_anchors.py::test_a_document_that_names_its_revision_is_resolved_there`
+  skips because the B4 receipt pins engine revision `fc15d9ae`, which this
+  export's history does not hold.
+- **Linux-only machinery on the macOS legs**, each skipped on darwin by
+  name with the reason: the remote worker's node-side cases
+  (`tests/test_remote_*.py`; job ownership reads `/proc` and signals through
+  a pidfd, and every other platform is refused by name, which
+  `test_every_door_refuses_an_unsupported_platform_with_one_sentence`
+  still asserts there); the worker container's `deploy/entrypoint.sh`
+  (`util-linux flock`); the hex native oracle harnesses' GNU tar unpack
+  (`test_oracle_archive_publication.py`) and unlimited-stack replay
+  (`test_native_physics_oracle.py`).
+- **kubectl's client dry run** in `test_energy_hindcast_deploy.py` runs
+  only where a cluster context is configured: it still asks a cluster for
+  its API groups, and the hosted Ubuntu image ships kubectl with none.
 
 ## The opt-in CUDA runner
 
