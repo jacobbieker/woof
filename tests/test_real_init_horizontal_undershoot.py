@@ -43,6 +43,17 @@ from woof.ingest.real import (
 )
 
 #: The root domain the 16 GiB sizing emits at that centre, and its nest:
+#: 266x212 / 528x424 since Recast WOOF 1.1.0 (9c5ebdda9), which
+#: switches HAILCAST on by default for a microphysics domain at or under
+#: 4 km (woof.core.hail.enabled, hailcast_opt = -1): the 3 km nest now
+#: holds its scratch planes and launches the hail kernel, whose 7,392 B
+#: local frame is wider than Morrison's 5,120 B, so the device's
+#: local-memory backing store on the reference card rose from 1.70 to
+#: 2.36 GiB.  The same release added the radiation accumulators
+#: (ACSWDNB...), p_hyd and Morrison's workspace; c80237153 (in-model
+#: WSPD10MAX/U10MAX/V10MAX/W_UP_MAX/W_DN_MAX/GUST) and 9b42f298e
+#: (SWDDNI/SWDDIF/COSZEN) added resident planes after it.  1.0.0 still
+#: emits the 276x220 / 552x440 below.
 #: 276x220 / 552x440 since 3bf65e9c7 (golden/parity, whose WRF 4.6.1
 #: line-for-line Kain-Fritsch port 26779da4e keeps 66 column arrays in the
 #: KF workspace, not 52, so the 12 km root's cumulus prices more device
@@ -54,15 +65,17 @@ from woof.ingest.real import (
 #: merge alone); 278x222 / 560x448 after
 #: A163 measured the forecast margin at 1.13 of the subtotal, and
 #: 276x220 / 552x440 on the plan's 1.15 before that.
-SIZED_16GIB_LAYOUTS = [(276, 220), (552, 440)]
+SIZED_16GIB_LAYOUTS = [(266, 212), (528, 424)]
 #: The plan whose run measured MEASURED_PEAK_BYTES: the 16 GiB sizing's
 #: layouts at the plan's 1.15 margin.
 MEASURED_16GIB_LAYOUTS = [(276, 220), (552, 440)]
 #: The 8 GiB sizing of the same centre, which never met the undershoot
 #: (154x124 / 304x248 on the plan's 1.15 margin, 156x124 / 312x248 from
 #: A163's 1.13 margin, and 154x124 / 304x248 again since 3bf65e9c7's
-#: 66-array KF workspace, the same bisected move as the 16 GiB pin above).
-SIZED_8GIB_LAYOUTS = [(154, 124), (304, 248)]
+#: 66-array KF workspace, the same bisected move as the 16 GiB pin above;
+#: 138x112 / 272x224 since 1.1.0's default HAILCAST and the resident
+#: planes after it, the same moves as the 16 GiB pin above).
+SIZED_8GIB_LAYOUTS = [(138, 112), (272, 224)]
 #: The source field the mapper was handed for the root's first valid time
 #: (ERA5 SPFH, 37 levels, 117x173 source cells, 748,917 values), which is
 #: also where the whole file's two extremes fall: its other valid time

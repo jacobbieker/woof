@@ -30,9 +30,15 @@ from types import SimpleNamespace
 
 import pytest
 
+from _release_export import private_input
+
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 GATE_PATH = (REPOSITORY_ROOT / "tools" / "gf_real74_dual" / "gpu_free_gate.py")
+#: The dual-run queue's gate is a bench fixture for one machine, and
+#: RELEASE-EXCLUDE.txt drops ``tools/gf_real74_dual/**`` from the public
+#: export; its cases run in the development tree, where the gate exists.
+GATE_INPUT = private_input("tools/gf_real74_dual/gpu_free_gate.py")
 
 
 class _NullLock:
@@ -347,6 +353,7 @@ def _stub_gate_supervisor(monkeypatch, *, reservation, outcome):
     return seen
 
 
+@GATE_INPUT
 def test_gate_waits_exactly_while_the_run_door_would_refuse(
         tmp_path, monkeypatch, capsys):
     import woof.supervisor as supervisor
@@ -367,6 +374,7 @@ def test_gate_waits_exactly_while_the_run_door_would_refuse(
     assert "pid=41001" in printed
 
 
+@GATE_INPUT
 def test_gate_clears_as_soon_as_the_run_door_would_admit(
         tmp_path, monkeypatch, capsys):
     config = tmp_path / "arm.toml"
@@ -387,6 +395,7 @@ def test_gate_clears_as_soon_as_the_run_door_would_admit(
     assert "28.00 GiB" in printed
 
 
+@GATE_INPUT
 def test_gate_with_no_configuration_says_so_and_still_waits(
         monkeypatch, capsys):
     """No configuration is not a licence to print CLEAR beside a co-tenant.
@@ -412,6 +421,7 @@ def test_gate_with_no_configuration_says_so_and_still_waits(
     assert "--config" in printed
 
 
+@GATE_INPUT
 def test_gate_clears_an_exclusive_card_with_no_configuration(
         monkeypatch, capsys):
     receipt = {"verdict": "exclusive", "cotenants": "",

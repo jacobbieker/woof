@@ -748,6 +748,9 @@ def _hand_built_compute_driver(monkeypatch, *, carriers):
     # The normal constructor carries this inactive slot on radiation-off
     # runs; the synthetic compute driver must reach the carrier contract.
     driver.swint = None
+    # Likewise the constructor's inactive shallow-cumulus slot
+    # (PhysicsDriver.__init__: None unless shcu_physics selects one).
+    driver.shallow_cumulus = None
     driver.stepbl = 1
     driver.radt_minutes = 12.0
     driver.radt_seconds = 720.0
@@ -948,7 +951,7 @@ def test_the_per_domain_submit_stamps_carrier_provenance_per_frame():
 
         def submit(self, path, valid_time, state, *, extra_fields=None,
                    refl_field=None, global_attrs=None,
-                   completed_observer=None):
+                   completed_observer=None, history_selection=None):
             self.calls.append(global_attrs)
             self.completed_observers.append(completed_observer)
 

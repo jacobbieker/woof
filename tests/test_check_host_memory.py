@@ -134,11 +134,14 @@ def _gfs_sourced_case_config(tmp_path, name="gfscase"):
     body = _era5_case_config(tmp_path, name=f"{name}-src").read_text(
         encoding="utf-8")
     # BEFORE [case_data], because a TOML table swallows every key under it.
+    # GFS's fetch takes --hours in whole steps of its cadence (3 h unless
+    # stated), so the one-hour window states the hourly cadence it is on.
     fetch = textwrap.dedent("""\
         [fetch]
         source = "gfs"
         cycle = "2024-05-03T12"
         hours = 1
+        cadence = 1
 
         """)
     path.write_text(body.replace("[case_data]", fetch + "[case_data]", 1),

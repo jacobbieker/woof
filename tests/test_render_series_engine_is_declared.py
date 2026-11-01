@@ -234,6 +234,10 @@ def test_the_changelog_keeps_the_mechanism_the_pane_cannot_hold() -> None:
     requirement becomes a rule with no reason behind it.
     """
 
+    # The entry records what left the guide's help, so it binds only where
+    # the guide ships: a tree that leaves tools/arwen-tui out skips here by
+    # that rule, as every other case in this file does.
+    _history_help()
     entry = _mechanism_changelog()
     for phrase in (
         # Why one timeline has to reach one renderer.

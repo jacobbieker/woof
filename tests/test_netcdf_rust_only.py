@@ -229,9 +229,16 @@ def test_variable_length_text_is_not_truncated_to_characters(tmp_path):
     with netCDF4.Dataset(path, "w") as ds:
         ds.createDimension("record", 2)
         ds.createVariable("labels", str, ("record",))[:] = np.array(["long text", "more text"], dtype=object)
+    # Since 1.1.0 (9c5ebdda9, rw-netcdf character_bytes) an NC_STRING
+    # variable is decoded rather than refused: each text is padded to the
+    # widest one and the record gains that width as its character
+    # dimension, the same (..., width) S1 array a classic char variable
+    # gives.  Every character survives; none is cut to a one-byte slot.
     with netcdf_bridge.open_dataset(path, executable=bridge) as ds:
-        with pytest.raises(netcdf_bridge.NetcdfDecodeError, match="fixed-width ASCII"):
-            ds.variables["labels"][:]
+        got = ds.variables["labels"][:]
+    assert got.dtype == np.dtype("S1")
+    assert got.shape == (2, 9)
+    assert [row.tobytes() for row in got] == [b"long text", b"more text"]
 
 
 def test_an_undeclared_default_fill_reads_as_missing_as_the_c_library_masks_it(tmp_path):

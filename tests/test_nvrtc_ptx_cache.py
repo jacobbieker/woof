@@ -35,6 +35,10 @@ def runtime(tmp_path, monkeypatch):
     # Runtime, compiler and identity are all host-only test doubles.
     # Keep the actual process ban and CUDA visibility unchanged.
     monkeypatch.setattr("woof.local_gpu.no_local_gpu", lambda: False)
+    # This cache is the CUDA route's; a CuPy-less host (cpu backend) or an
+    # Apple host (mlx) would otherwise take the facade's translated image
+    # before the cache is consulted.
+    monkeypatch.setattr("woof.backend.active", lambda: "cuda")
     monkeypatch.delenv("CUPY_CACHE_IN_MEMORY", raising=False)
     cache.cache_events(clear=True)
     return compiler, platform
