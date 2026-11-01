@@ -10,7 +10,7 @@ import dataclasses
 
 import pytest
 
-from woof.config import (WINDFARM_RUN_DEFAULTS, RunConfig,
+from woof.config import (RunConfig,
                          validate_radiation_driver_options)
 
 
@@ -113,9 +113,7 @@ def test_the_checkpoint_echo_drops_both_at_their_default():
              "wind_farm_scheme", "wind_farms", "wind_farm_table",
              "windfarm_tke_factor", "wind_farm_max_dx_m",
              # fix/hailcast, keyword-only: the HAILCAST generation.
-             "hailcast_version",
-             # WRF's wind farm (the fork's Fitch coupling), appended after.
-             "windfarm_opt", "windfarm_ij", "windfarm_turbine_file"]
+             "hailcast_version"]
     assert names[-len(later):] == later
     for field in dataclasses.fields(RunConfig):
         if field.name in ("umove", "vmove"):

@@ -128,7 +128,6 @@ from woof.config import (CORRECT_MODE_RESTART_BREAK_NOTICE,
                           MIX_ISOTROPIC_RESTART_BREAK_NOTICE,
                           TERRAIN_CLOCK_PINNED_RESTART_NOTICE,
                           TERRAIN_CLOCK_RESTART_BREAK_NOTICE,
-                          WINDFARM_RUN_DEFAULTS,
                           radiation_scheme_ids)
 from woof.supervisor import _fsync_directory, fsync_file, unique_temp_path
 from woof.correct_mode import (CORRECTION_KEYS as _CORRECTION_KEYS,
@@ -1222,7 +1221,12 @@ DRIVER_CHECKPOINT_ONLY_ATTRS = frozenset({"olr", "cldfra", "radiation_flux_diagn
 DRIVER_HELD_FORCING_ATTRS = frozenset({"gf_rthblten", "gf_rqvblten"})
 
 DRIVER_REBUILT_ATTRS = frozenset({
-    "wind_farm",  # Device tables and diagnostics rebuilt; QKE carriers persist.
+    # Device tables and diagnostics rebuilt; QKE carriers persist.  The
+    # fitch_wrf carrier (woof.core.wind_farm.WrfFitchFarm) holds only the
+    # uploaded layout and the TKE factor -- WRF's POWER lives in ``fields``,
+    # serialized and restored in place -- and the checkpoint identity binds
+    # the turbine file's bytes, so the rebuilt carrier is the one the run had.
+    "wind_farm",
     # Startup inventory/geometry decision, rebuilt from configuration and statics.
     # This receipt owns no evolving numerical state.
     "wind_farm_detection",
@@ -1261,13 +1265,6 @@ DRIVER_REBUILT_ATTRS = frozenset({
     # holds only static coefficients and statistics, never a value a step
     # writes, so the rebuilt carrier is the one the checkpoint ran with.
     "terrain_drag",
-    # WRF's windfarm_opt = 1 carrier (woof.core.windfarm_coupling):
-    # initialize_physics rebuilds it from the resumed RunConfig, the turbine
-    # file and the domain's grid; it holds only the uploaded layout and the
-    # TKE factor, never a value a step writes -- POWER lives in ``fields``,
-    # serialized and restored in place -- and the checkpoint identity binds
-    # the file's bytes, so the rebuilt carrier is the one the run had.
-    "windfarm",
     # WRF's swint_opt = 1 carrier (woof.core.swint): initialize_physics
     # rebuilds it from the resumed RunConfig, latitude, longitude and start
     # time; it holds the per-step zenith-cosine scratch (a local in WRF's
@@ -2906,12 +2903,12 @@ def _drop_default_off_run_keys(values: dict) -> None:
             values.pop(key, None)
     from woof.checkpoint_identity import drop_default_cumulus_selectors
     drop_default_cumulus_selectors(values)
-    # windfarm_opt off is the state every earlier header ran: no turbine is
-    # placed and no kernel launched, so all four keys (and the file's
-    # digests) leave; on, they stay and bind_windfarm_identity binds the
-    # file's bytes.
-    from woof.core.windfarm_coupling import bind_windfarm_identity
-    bind_windfarm_identity(values)
+    # wind_farm_scheme off is the state every earlier header ran: no turbine
+    # is placed and no kernel launched, so every wind-farm key leaves
+    # (woof.wind_table.drop_inert_config, above); fitch_wrf binds its
+    # turbine file's and curves' bytes beside the path.
+    from woof.wind_table import bind_wrf_fitch_identity
+    bind_wrf_fitch_identity(values)
     # No prescribed smoke is the source forcing every earlier header ran.
     if not values.get("rrtmg_smoke_manifest", ""):
         values.pop("rrtmg_smoke_manifest", None)
@@ -4903,10 +4900,11 @@ def _require_config_match(stored_config: dict, cfg, path) -> None:
     _drop_default_radiation_port_keys(live_config)
     from woof.core.rrtmg_smoke_identity import bind_smoke_source_identity
     bind_smoke_source_identity(live_config)
-    # The live turbine file's bytes against the ones the checkpoint ran
-    # with (the echo binds them the same way); off drops every key.
-    from woof.core.windfarm_coupling import bind_windfarm_identity
-    bind_windfarm_identity(live_config)
+    from woof.wind_table import RUN_DEFAULTS as WIND_FARM_RUN_DEFAULTS
+    # The live fitch_wrf turbine file's bytes against the ones the
+    # checkpoint ran with (the echo binds them the same way).
+    from woof.wind_table import bind_wrf_fitch_identity
+    bind_wrf_fitch_identity(live_config)
     absent = object()
     differences = []
     policy_changes: list[str] = []
@@ -5017,12 +5015,13 @@ def _require_config_match(stored_config: dict, cfg, path) -> None:
             default = _RESTART_ABSENT_RUN_DEFAULTS[key]
             stored = default if stored is absent else stored
             live = default if live is absent else live
-        if key in WINDFARM_RUN_DEFAULTS:
+        if key in WIND_FARM_RUN_DEFAULTS:
             # Old checkpoints ran no wind farm, and an off echo drops the
-            # keys (bind_windfarm_identity); a flip, another file, factor
-            # or placement mode is refused below, as is changed file bytes
-            # (windfarm_turbine_sha256 / windfarm_curves_sha256).
-            default = WINDFARM_RUN_DEFAULTS[key]
+            # keys (woof.wind_table.drop_inert_config); a flip, another
+            # scheme, file or factor is refused below, as is a fitch_wrf
+            # file's changed bytes (windfarm_turbine_sha256 /
+            # windfarm_curves_sha256).
+            default = WIND_FARM_RUN_DEFAULTS[key]
             stored = default if stored is absent else stored
             live = default if live is absent else live
         if key == "urban_water_balance":

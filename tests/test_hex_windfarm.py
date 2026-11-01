@@ -1,9 +1,10 @@
-"""WRF's wind-farm scheme on hex's unstructured columns (woof.hex.windfarm).
+"""WRF's wind-farm scheme on hex's unstructured columns (woof.hex.wind_farm,
+``wind_farm_scheme = "fitch_wrf"``).
 
 * Placement: the nearest cell centre (MPAS's rule for a point), ties to the
   lowest column, refused outside the mesh and in boundary columns; a cell's
   turbines grouped in table order exactly as on a WRF grid.
-* The seam: ``windfarm_opt = 1`` on the engine's generic column seam adds
+* The seam: ``wind_farm_scheme = "fitch_wrf"`` on the engine's generic column seam adds
   ``fitch_column_cells`` into the PBL slot's A-grid rates and MYNN's QKE, word
   for word what the launcher adds to the same rates, and writes POWER.
 * Momentum: the cell-centre drag hex projects to edges (MPAS's
@@ -11,7 +12,8 @@
   total momentum, exactly on a regular hexagonal mesh.
 * Off: no key, no placement, no observer, no export -- the seam is built
   with exactly the keywords it was built with before.
-* Refused by name: the MPAS suite route, a non-MYNN PBL, ``windfarm_ij = 1``.
+* Refused by name: the wind-farm keys on the MPAS suite route (whose
+  switch is --wind-farms), a non-MYNN PBL, a windturbines-ij.txt list.
 """
 from __future__ import annotations
 
@@ -154,7 +156,7 @@ def test_the_coupling_places_tables_and_wrf_lists_and_refuses_ij(tmp_path):
 
 def test_interior_columns_masks_the_boundary_and_the_garbage_column():
     from types import SimpleNamespace
-    from woof.hex.windfarm import interior_columns
+    from woof.hex.wind_farm import interior_columns
 
     mesh = SimpleNamespace(latCell=np.zeros(5),
                            bdyMaskCell=np.array([0, 0, 1, 7, 0]))
@@ -172,23 +174,27 @@ def test_the_keys_reach_the_generic_seam_and_ysu_is_refused_by_name():
                                          parse_override, resolve_physics)
 
     keys = dict(parse_override(t) for t in (
-        "windfarm_opt=1", "windfarm_turbine_file=/x/farm.csv",
+        "wind_farm_scheme=fitch_wrf", "wind_farms=/x/farm.csv",
         "windfarm_tke_factor=0.25"))
     resolved = resolve_physics("rrfs_v2_dev", keys)
     assert resolved.seam == "engine"
     engine = dict(resolved.engine_physics)
-    assert engine["windfarm_opt"] == 1 and engine["bl_pbl_physics"] == 5
-    assert engine["windfarm_turbine_file"] == "/x/farm.csv"
+    assert engine["wind_farm_scheme"] == "fitch_wrf"
+    assert engine["bl_pbl_physics"] == 5
+    assert engine["wind_farms"] == "/x/farm.csv"
     with pytest.raises(PhysicsSelectionRefusal, match="needs MYNN"):
         resolve_physics(None, keys)          # the default suite runs YSU
 
 
 def test_the_mpas_route_refuses_the_keys_by_name():
-    from woof.hex.windfarm import mpas_route_refusal
+    from woof.hex.wind_farm import mpas_route_refusal
 
     assert mpas_route_refusal(["config_pbl_scheme"]) is None
     text = mpas_route_refusal(["WINDFARM_OPT", "config_dt"])
-    assert "windfarm_opt" in text and "no wind-farm scheme" in text
+    assert "windfarm_opt" in text and "no wind-farm key" in text
+    assert "--wind-farms" in text
+    text = mpas_route_refusal(["wind_farm_scheme"])
+    assert "wind_farm_scheme" in text and "fitch_wrf" in text
 
 
 def test_the_constructor_carries_the_interior_mask_only_with_the_farm_on():
@@ -206,7 +212,8 @@ def test_the_constructor_carries_the_interior_mask_only_with_the_farm_on():
             values, row_name="x", orographic_statistics=None,
             cell_area_m2=np.ones(4), interior_column=np.zeros(4, bool))
         assert "interior_column" not in off
-        suite["physics"] = {"bl_pbl_physics": 5, "windfarm_opt": 1}
+        suite["physics"] = {"bl_pbl_physics": 5,
+                            "wind_farm_scheme": "fitch_wrf"}
         with pytest.raises(ValueError, match="needs interior_column"):
             adapter.constructor_values_for(
                 values, row_name="x", orographic_statistics=None,
@@ -290,7 +297,7 @@ def _seam(tmp_path, *, farm: bool, ncol=8):
         p = _placement(3)
         rows = _farm_rows(p, [2, 4, 4], per_cell=1)
         path = _write(tmp_path / "farm.csv", rows)
-        physics.update(windfarm_opt=1, windfarm_turbine_file=str(path),
+        physics.update(wind_farm_scheme="fitch_wrf", wind_farms=str(path),
                        windfarm_tke_factor=0.25)
     plan = suite.column_physics_plan(
         physics, n_levels=cases.NZ, dt=cases.DT, radiation_seconds=120.0,
@@ -349,7 +356,7 @@ def test_the_seam_adds_exactly_the_cells_kernel_into_mynn_rates(tmp_path):
     power = launch_fitch(
         fields["u"].reshape(nz, 1, ncol), fields["v"].reshape(nz, 1, ncol),
         fields["z_interface"].reshape(nz + 1, 1, ncol),
-        on._driver.windfarm.layout, du, dv,
+        on._driver.wind_farm.farm.layout, du, dv,
         wfdensity=cp.asarray(cell_wfdensity(area)), qke=qke, dt=60.0,
         tke_factor=0.25)
     for got, want in ((r_on.du, du), (r_on.dv, dv),
@@ -369,9 +376,10 @@ def test_the_seam_refuses_a_farm_without_cell_areas(tmp_path):
     from woof.core import mpas_column_suite as suite
 
     p = _placement(3)
-    physics = dict(cases.selections()["pbl.mynn"], windfarm_opt=1,
-                   windfarm_turbine_file=str(_write(tmp_path / "f.csv",
-                                                    _farm_rows(p, [2]))))
+    physics = dict(cases.selections()["pbl.mynn"],
+                   wind_farm_scheme="fitch_wrf",
+                   wind_farms=str(_write(tmp_path / "f.csv",
+                                         _farm_rows(p, [2]))))
     plan = suite.column_physics_plan(
         physics, n_levels=cases.NZ, dt=cases.DT, radiation_seconds=120.0,
         surface_pbl_seconds=cases.DT)
@@ -423,7 +431,7 @@ def test_the_power_window_reads_each_turbine_column_word_for_word(tmp_path):
     import cupy as cp
     from woof.core.windfarm_power_diag import G, evaluate_turbines
     from woof.windfarm.layout import build_cell_layout, read_turbines
-    from woof.hex.windfarm import HexWindfarmPower
+    from woof.hex.wind_farm import HexWindfarmPower
 
     p = _placement()
     rows = _farm_rows(p, [10, 10, 40, 77], per_cell=2)

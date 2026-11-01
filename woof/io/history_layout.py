@@ -519,6 +519,9 @@ def physics_history_fields(physics) -> dict[str, object]:
     ocean = getattr(physics, "ocean", None)
     if ocean is not None:
         output.update(ocean.history_fields())
+    # The turbines' history (woof.core.wind_farm): POWER, and upstream's
+    # per-turbine and per-farm rows; fitch_wrf writes WRF's POWER
+    # (Registry.EM_COMMON:413, package fitchscheme) alone.
     wind_farm = getattr(physics, "wind_farm", None)
     if wind_farm is not None:
         output.update(wind_farm.history_fields())
@@ -623,10 +626,6 @@ def physics_history_fields(physics) -> dict[str, object]:
         # publish the name (upstream's split, when present, wins).
         for name, value in surface_solar_history_fields(physics).items():
             output.setdefault(name, value)
-    # WRF's POWER (Registry.EM_COMMON:413, package fitchscheme), written
-    # only where windfarm_opt = 1 runs: each cell's turbine power, W.
-    if getattr(physics, "windfarm", None) is not None:
-        output["POWER"] = physics.fields["power"]
     output["RAINC"] = (physics._zero_accumulator() if physics.rainc is None
                        else physics.rainc)
     output["RAINSH"] = physics._zero_accumulator()
@@ -867,8 +866,11 @@ def produced_history_shapes(cfg, *, include_reflectivity: bool = True
             sase_flux_diag=None, hmix_k_diag=None,
             radiation_active=radiation_enabled(cfg),
             topo_shortwave=object() if topography else None,
-            windfarm=(object() if int(getattr(cfg, "windfarm_opt", 0) or 0)
-                      else None),
+            # fitch_wrf writes WRF's POWER through the wind_farm seam.
+            wind_farm=(SimpleNamespace(
+                history_fields=lambda: {"POWER": carrier(surface)})
+                if getattr(cfg, "wind_farm_scheme", "off") == "fitch_wrf"
+                else None),
             olr=carrier(surface) if "olr" in allocated else None,
             surface_dni=(carrier(surface) if "surface_dni" in allocated
                          else None),

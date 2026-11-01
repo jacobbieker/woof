@@ -2,6 +2,14 @@
 
 Initialization builds spatial indices on the GPU. The sparse Fitch step launches one kernel; legacy schemes retain event timing.
 Diagnostics transfer only when the caller requests a receipt.
+
+``wind_farm_scheme = "fitch_wrf"`` is WRF v4.7.1's windfarm_opt = 1
+(module_wind_fitch.F) word for word: :class:`WrfFitchFarm` behind the same
+attach and MYNN seam, its kernels in :mod:`woof.core.windfarm_fitch` and
+its turbine reading and placement in :mod:`woof.core.windfarm_coupling`
+(WRF windturbines.txt / windturbines-ij.txt, WRF's own llij placement, or a
+woof turbine table with library curves; unequal-area columns on an
+unstructured mesh).
 """
 from __future__ import annotations
 
@@ -10,6 +18,9 @@ import numpy as np
 import cupy as cp
 from woof.wind_table import read_table
 from woof.core.kernels import get_kernel
+# fitch_wrf's carrier and attach live beside its reader and placement
+# (CPU-importable; CuPy is taken at attach time).
+from woof.core.windfarm_coupling import WrfFitchFarm, attach_wrf_fitch  # noqa: F401
 
 
 class WindCost:
@@ -162,7 +173,7 @@ class WindFarm:
             self.turbines, self.meta, self.curves, self.curve_params, atmosphere["z_interface"],
             atmosphere["u"], atmosphere["v"], atmosphere["rho"], fields.get("exch_m", self.zero), self.hub))
 
-    def apply_mynn(self, atmosphere, fields, rates, *, step_seconds=None):
+    def apply_mynn(self, atmosphere, fields, rates, *, step_seconds=None, cfg=None):
         if step_seconds is not None and step_seconds != self.dt:
             self.dt = np.float32(step_seconds)
             if self.sparse:

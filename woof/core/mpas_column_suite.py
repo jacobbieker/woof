@@ -1377,7 +1377,7 @@ class MpasColumnPhysics(MpasColumnBatchPhysics):
                  interior_column=None):
         """``interior_column`` (one bool per column, default all True) says
         which columns a limited-area caller models; it is read only by
-        ``windfarm_opt = 1``, which places each turbine in the column whose
+        ``wind_farm_scheme = "fitch_wrf"``, which places each turbine in the column whose
         cell centre is nearest (:mod:`woof.windfarm.cells`) and refuses one
         in a column that is not interior.  The wind farm divides its drag
         by each column's own ``cell_area_m2`` (WRF's ``dx*dx``), which it
@@ -1489,14 +1489,14 @@ class MpasColumnPhysics(MpasColumnBatchPhysics):
             oro[name] = value.reshape(1, ncol)
         znu = _nominal_znu(z_interface_nominal_m, p_top)
         windfarm_grid = None
-        if int(getattr(cfg, "windfarm_opt", 0) or 0):
-            # WRF's windfarm_opt = 1 on an unstructured mesh: the turbines go
+        if getattr(cfg, "wind_farm_scheme", "off") == "fitch_wrf":
+            # WRF's windfarm_opt = 1 (fitch_wrf) on an unstructured mesh: the turbines go
             # to the nearest cell centre and each column's drag is divided
             # by its own volume, so the seam needs every column's area.
             from woof.windfarm.cells import CellPlacement
             if area is None:
                 raise ValueError(
-                    "windfarm_opt = 1 on the column seam needs cell_area_m2: "
+                    'wind_farm_scheme = "fitch_wrf" on the column seam needs cell_area_m2: '
                     "the Fitch drag is divided by each column's volume "
                     "(area * dz), WRF's dx*dx on its own grid, and these "
                     "columns have no uniform dx")
@@ -1511,13 +1511,13 @@ class MpasColumnPhysics(MpasColumnBatchPhysics):
                 interior=interior, nominal_dx_m=dx)
         elif interior_column is not None:
             raise ValueError(
-                "interior_column is read only by windfarm_opt = 1; with the "
+                'interior_column is read only by wind_farm_scheme = "fitch_wrf"; with the '
                 "wind farm off it would be accepted and never read")
 
         self._cfg = cfg
         self._plan = plan
         self._cadences = cadences
-        #: The columns the wind farm was placed on (windfarm_opt = 1), else
+        #: The columns the wind farm was placed on (wind_farm_scheme = "fitch_wrf"), else
         #: None: a caller's per-turbine diagnostic places by the same rule.
         self.windfarm_placement = windfarm_grid
         self._dt = float(cadences["dt"])
@@ -1947,7 +1947,7 @@ class MpasColumnPhysics(MpasColumnBatchPhysics):
                     out=state.php)
         # The post-RK state, before microphysics adjusts it: the instant the
         # WRF-like core's dycore epilogue folds its interval diagnostics
-        # (woof.hex.windfarm.HexWindfarmPower).  Read-only; none by default.
+        # (woof.hex.wind_farm.HexWindfarmPower).  Read-only; none by default.
         for observer in self.phase2_observers:
             observer(self)
         receipt = {}

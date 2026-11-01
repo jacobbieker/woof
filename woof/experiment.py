@@ -418,11 +418,6 @@ _DOMAIN_RUN_OVERRIDES = (
     "wind_farm_scheme", "wind_farm_table", "wind_farm_max_dx_m", "wind_farms", "windfarm_tke_factor",
     "history_interval2_s", "history_interval_change_s",
     "prec_acc_dt", "prec_acc_dt1", "gsd_diagnostics", "reset_interval1",
-    # WRF declares windfarm_opt max_domains (Registry.EM_COMMON:3003), and
-    # each domain places its own turbines, so the switch and the turbine
-    # file are per domain.  windfarm_ij and windfarm_tke_factor are scope 1
-    # in WRF and stay [shared].
-    "windfarm_opt", "windfarm_turbine_file",
 ) + FIRE_DOMAIN_FIELDS
 
 #: Per-domain vertical keys are REJECTED outright (F1 amendment: the
@@ -2061,15 +2056,13 @@ def load_experiment(path: str | Path, *,
     source = str(authority.source)
     from woof.config import _anchor_config_file_paths
     _anchor_config_file_paths(raw.get("shared", {}), authority.source,
-                              keys=("rrtmg_smoke_manifest", "wind_farm_table", "wind_farms",
-                                    "windfarm_turbine_file"))
+                              keys=("rrtmg_smoke_manifest", "wind_farm_table", "wind_farms"))
     # The wind-farm files are per domain too (_DOMAIN_RUN_OVERRIDES), so a
     # [[domain]] path resolves beside the config exactly as a [shared] one.
     for table in raw.get("domain", ()) or ():
         if isinstance(table, dict):
             _anchor_config_file_paths(
-                table, authority.source,
-                keys=("wind_farm_table", "wind_farms", "windfarm_turbine_file"))
+                table, authority.source, keys=("wind_farm_table", "wind_farms"))
     base_dir = Path(authority.source).parent
     experiment = build_experiment_from_config_tables(
         raw, source=source, base_dir=base_dir)
@@ -2778,8 +2771,9 @@ def _moving_grid_ids(domains, relocation, *, include_spawn=False) -> set:
 
 
 def _refuse_streamed_windfarm(tiles, domains) -> None:
-    """windfarm_opt = 1 on a domain that streams its columns: refused here,
-    before preparation, rather than when the first tile buffer is built.
+    """A wind farm (``wind_farm_scheme`` on) on a domain that streams its
+    columns: refused here, before preparation, rather than when the first
+    tile buffer is built.
 
     The turbines are placed once on the whole domain and the Fitch kernel
     indexes whole-domain columns; a [tiles] road hands the physics a tile's
@@ -2788,22 +2782,24 @@ def _refuse_streamed_windfarm(tiles, domains) -> None:
     buffer is built.
     """
     for dc in domains:
-        if not int(getattr(dc.run, "windfarm_opt", 0) or 0):
+        scheme = getattr(dc.run, "wind_farm_scheme", "off")
+        if scheme == "off":
             continue
         road = dc.tiles if getattr(dc, "tiles", None) is not None else tiles
         if getattr(road, "enabled", False) and \
                 getattr(road, "mode", None) != "auto":
             raise ValueError(
-                f"[[domain]] grid_id = {int(dc.grid_id)} sets windfarm_opt = "
-                "1 and streams its columns through [tiles]: the turbines are "
-                "placed once on the whole domain and the wind-farm kernel "
-                "reads whole-domain columns, so it runs on a resident domain "
-                "only.  Turn [tiles] off for this domain, or set "
-                "windfarm_opt = 0.")
+                f"[[domain]] grid_id = {int(dc.grid_id)} sets wind_farm_scheme = "
+                f"{scheme!r} and streams its columns through [tiles]: the "
+                "turbines are placed once on the whole domain and the "
+                "wind-farm kernel reads whole-domain columns, so it runs on a "
+                "resident domain only.  Turn [tiles] off for this domain, or "
+                'set wind_farm_scheme = "off" (wind_farms = "off") on it.')
 
 
 def _refuse_moving_windfarm(domains, relocation, source) -> None:
-    """windfarm_opt = 1 on a nest that moves or spawns: refused.
+    """A wind farm (``wind_farm_scheme`` on) on a nest that moves or spawns:
+    refused.
 
     The turbines are placed once on the nest's grid at its declared
     placement (woof.core.windfarm_coupling); a move rebuilds the nest at a
@@ -2814,15 +2810,15 @@ def _refuse_moving_windfarm(domains, relocation, source) -> None:
     """
     moving = _moving_grid_ids(domains, relocation, include_spawn=True)
     for dc in domains:
-        if int(dc.grid_id) in moving and int(
-                getattr(dc.run, "windfarm_opt", 0) or 0):
+        if int(dc.grid_id) in moving and \
+                getattr(dc.run, "wind_farm_scheme", "off") != "off":
             raise ValueError(
                 f"[[domain]] grid_id = {int(dc.grid_id)} of {source} moves "
-                "and sets windfarm_opt = 1: the turbines are placed once on "
-                "the nest's grid at its declared placement, and after a move "
-                "the same cells are other ground, so the farm would travel "
-                "with the nest.  Set windfarm_opt = 0 on the moving nest, or "
-                "keep the nest fixed.")
+                "and runs a wind farm: the turbines are placed once on the "
+                "nest's grid at its declared placement, and after a move the "
+                "same cells are other ground, so the farm would travel with "
+                'the nest.  Set wind_farm_scheme = "off" (wind_farms = "off") '
+                "on the moving nest, or keep the nest fixed.")
 
 
 def _refuse_rebuilt_nest_shortwave_interpolation(domains, relocation,
@@ -6156,12 +6152,6 @@ def _public_config_value(value):
                 for name in ("ocean_z", "ocean_t", "ocean_s"):
                     if not run_document.get(name, ()):
                         run_document.pop(name, None)
-            # windfarm_opt off reads none of its four keys (a shared turbine
-            # file with the switch on other domains only included).
-            if not run_document.get("windfarm_opt", 0):
-                from woof.config import WINDFARM_RUN_DEFAULTS
-                for name in WINDFARM_RUN_DEFAULTS:
-                    run_document.pop(name, None)
         return document
     if isinstance(value, tuple) and hasattr(value, "_fields"):
         return type(value)(*(_public_config_value(item) for item in value))

@@ -12,7 +12,19 @@ import json
 import math
 from pathlib import Path
 
-SCHEMES = ("off", "auto", "fitch", "ewp", "jensen", "gad")
+SCHEMES = ("off", "auto", "fitch", "ewp", "jensen", "gad", "fitch_wrf")
+
+#: The RunConfig wind-farm keys at their defaults: what a header written
+#: before the keys existed ran (no turbines).
+RUN_DEFAULTS = {"wind_farm_scheme": "off", "wind_farms": "", "wind_farm_table": "",
+                "windfarm_tke_factor": 0.25, "wind_farm_max_dx_m": 3000.0}
+
+#: WRF v4.7.1's Fitch scheme (windfarm_opt = 1, module_wind_fitch.F) word for
+#: word: woof.core.windfarm_fitch's kernels behind woof.core.wind_farm's
+#: attach, reading WRF's own turbine lists (or a woof turbine table with
+#: library curves) through woof.core.windfarm_coupling rather than a
+#: gpuwm-wind-farm.v1 table.
+WRF_FITCH_SCHEME = "fitch_wrf"
 
 
 def _number(value, label, *, positive=False, nonnegative=False):
@@ -122,9 +134,18 @@ def read_table(path, scheme="fitch"):
 
 def validate_config(cfg):
     scheme = cfg.wind_farm_scheme
-    if scheme not in ("off", "fitch"):
-        raise ValueError("wind_farm_scheme supports off or fitch; other schemes lack a qualified coupled run")
+    if scheme not in ("off", "fitch", WRF_FITCH_SCHEME):
+        raise ValueError("wind_farm_scheme supports off, fitch or fitch_wrf; other schemes lack a qualified coupled run")
     if scheme == "off":
+        return
+    if scheme == WRF_FITCH_SCHEME:
+        from woof.config import wrf_fitch_refusal
+        why = wrf_fitch_refusal(
+            wind_farm_scheme=scheme, wind_farm_table=cfg.wind_farm_table,
+            windfarm_tke_factor=getattr(cfg, "windfarm_tke_factor", .25),
+            bl_pbl_physics=cfg.bl_pbl_physics)
+        if why is not None:
+            raise ValueError(why)
         return
     if scheme == "auto":
         _number(cfg.wind_farm_max_dx_m, "wind_farm_max_dx_m", positive=True)
@@ -144,8 +165,30 @@ def validate_config(cfg):
     read_table(cfg.wind_farm_table, scheme)
 
 
+#: The digests a ``fitch_wrf`` run document binds beside its turbine path
+#: (woof.core.windfarm_coupling.windfarm_input_digests).
+WRF_FITCH_IDENTITY_KEYS = ("windfarm_turbine_sha256", "windfarm_curves_sha256")
+
+
 def drop_inert_config(values):
     """Preserve old checkpoint headers and identities when turbines are off."""
     if values.get("wind_farm_scheme", "off") == "off":
-        for key in ("wind_farm_scheme", "wind_farm_table", "wind_farm_max_dx_m", "wind_farms", "windfarm_tke_factor"):
+        for key in ("wind_farm_scheme", "wind_farm_table", "wind_farm_max_dx_m", "wind_farms", "windfarm_tke_factor",
+                    *WRF_FITCH_IDENTITY_KEYS):
             values.pop(key, None)
+    elif values.get("wind_farm_scheme") == WRF_FITCH_SCHEME:
+        bind_wrf_fitch_identity(values)
+
+
+def bind_wrf_fitch_identity(values):
+    """``fitch_wrf``: bind the turbine list's and its curves' SHA-256.
+
+    The path alone does not say which turbines ran: a WRF list's
+    wind-turbine-N.tbl tables, or the turbine library a woof table takes
+    its curves from, change the forcing without the path moving.  A saved
+    digest stays saved -- digesting a stored checkpoint must not replace
+    the bytes it ran with by the file now at that path, which is what lets
+    a resume refuse a file changed under it.
+    """
+    from woof.core.windfarm_coupling import bind_windfarm_identity
+    return bind_windfarm_identity(values)

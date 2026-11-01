@@ -915,6 +915,12 @@ def restart_identity_payload(exp) -> dict:
             run.pop("wind_farm_max_dx_m", None)
             run.pop("wind_farms", None)
             run.pop("windfarm_tke_factor", None)
+        elif run["wind_farm_scheme"] == "fitch_wrf":
+            # WRF's own turbine list (or a woof table with library curves):
+            # its bytes and its curves' bytes bind beside the path
+            # (woof.core.windfarm_coupling.windfarm_input_digests).
+            from woof.wind_table import bind_wrf_fitch_identity
+            bind_wrf_fitch_identity(run)
         else:
             from woof.wind_table import read_table
             _, run["wind_farm_table_sha256"] = read_table(
@@ -1050,12 +1056,6 @@ def restart_identity_payload(exp) -> dict:
         # land/water type binds.
         if run.get("rrtmg_aer3_type_source", "rural") == "rural":
             run.pop("rrtmg_aer3_type_source", None)
-        # WRF's windfarm_opt, absent-stays-absent: off, no turbine is placed
-        # and nothing launches, so all four keys leave and every earlier
-        # fingerprint keeps its value; on, they bind with the turbine
-        # file's and its curves' SHA-256 (woof.core.windfarm_coupling).
-        from woof.core.windfarm_coupling import bind_windfarm_identity
-        bind_windfarm_identity(run)
         # Source members, not a path alone, identify prescribed radiation.
         from woof.core.rrtmg_smoke_identity import bind_smoke_source_identity
         if run.get("rrtmg_smoke_manifest", ""):

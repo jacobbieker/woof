@@ -37,7 +37,9 @@ without the matching TKE source. Runs without the option retain their fields.
 ## WRF input
 
 Set `windfarm_opt = 1` in `&physics`, with `bl_pbl_physics = 5`, and place
-`windturbines.txt` beside `namelist.input`. Import the pair normally:
+`windturbines.txt` (or, with `windfarm_ij = 1`, `windturbines-ij.txt`)
+beside `namelist.input`. Import the pair normally; the import selects
+`fitch_wrf` (below), WRF's own scheme:
 
 ```sh
 woof import-namelist namelist.wps namelist.input --output forecast.toml
@@ -50,6 +52,43 @@ standing thrust coefficient and rated power (kW), followed by rows of wind
 speed (m/s), thrust coefficient and power (kW). The native decoder checks the
 table and includes every referenced curve in its identity. `windfarm_opt=2`
 remains refused: the MAV momentum and TKE coupling is not implemented.
+
+## WRF v4.7.1's Fitch scheme word for word (`fitch_wrf`)
+
+`wind_farm_scheme = "fitch_wrf"` runs WRF v4.7.1's `windfarm_opt = 1`
+(`phys/module_wind_fitch.F`) word for word instead of the GPU Fitch above:
+the kernel (`woof/core/kernels/windfarm_fitch.cu`) is held to WRF's own
+Fortran by `tools/windfarm_fitch_wrf471_oracle`, the turbine list is read as
+`init_module_wind_fitch` reads it (`tools/windfarm_reader_wrf471_oracle`),
+and lat/lon turbines are placed with WRF's own `llij` map code
+(`tools/windfarm_layout_wrf471_oracle`). It reads its turbines from
+`wind_farms` (per domain or shared), and WRF's file name says how:
+
+- `windturbines.txt`: `lat lon type` rows (WRF's `windfarm_ij = 0`);
+- `windturbines-ij.txt`: `i j type` rows, 1-based mass indices (WRF's
+  `windfarm_ij = 1`);
+- a woof turbine table (`.csv`, `.geojson` or a sites.v1 `.json`), whose
+  curves come from the turbine library (`woof windfarm layout` prints the
+  placement).
+
+```toml
+[[domain]]
+grid_id = 1
+wind_farm_scheme = "fitch_wrf"
+wind_farms = "windturbines.txt"
+```
+
+It requires MYNN (`bl_pbl_physics = 5`) and, like WRF, adds the TKE source
+into MYNN's QKE alone with the model time step as `DT` (so `bldt > 0` is
+admitted, as in WRF). `windfarm_tke_factor` scales it. Checkpoints and
+fingerprints bind the list's bytes and its tables' (or the library's).
+`woof import-namelist` writes `fitch_wrf` for a namelist with
+`windfarm_opt = 1`, on each domain it is on, with the `windturbines.txt` or
+`windturbines-ij.txt` beside `namelist.input`. On hex it runs on WOOF's
+physics (`--physics wind_farm_scheme=fitch_wrf --physics wind_farms=FILE`),
+each Voronoi column's own area taking WRF's `dx*dx`; there POWER is the
+history field `power`, and a woof turbine table also writes per-turbine
+power beside every frame.
 
 ## History and interpretation
 

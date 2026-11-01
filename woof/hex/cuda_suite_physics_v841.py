@@ -447,16 +447,17 @@ def constructor_values_for(
         mapped["physics"] = dict(suite["physics"])
         if cell_area_m2 is not None:
             mapped["cell_area_m2"] = np.asarray(cell_area_m2, dtype=np.float64)
-        if int(mapped["physics"].get("windfarm_opt", 0) or 0):
-            # WRF's windfarm_opt = 1 (woof.hex.windfarm): the turbines go to
+        from .wind_farm import wrf_fitch_physics
+        if wrf_fitch_physics(mapped["physics"]):
+            # wind_farm_scheme = "fitch_wrf" (woof.hex.wind_farm): the turbines go to
             # the nearest MODELLED column, so the seam is told which columns
             # a limited-area mesh models.  Only with the wind farm on, so
             # every other run's mapping (and its identity) is unchanged.
             if interior_column is None:
                 raise ValueError(
-                    "windfarm_opt = 1 needs interior_column, the physics "
-                    "columns a turbine may stand in "
-                    "(woof.hex.windfarm.interior_columns); without it a "
+                    'wind_farm_scheme = "fitch_wrf" needs interior_column, the '
+                    "physics columns a turbine may stand in "
+                    "(woof.hex.wind_farm.interior_columns); without it a "
                     "limited-area mesh's boundary columns would take turbines")
             mapped["interior_column"] = np.asarray(interior_column,
                                                    dtype=np.bool_)
@@ -813,15 +814,16 @@ class SealedSuiteConstructorV841:
             if np.any(area <= 0):
                 raise ValueError("cell_area_m2 must be positive")
             arrays["cell_area_m2"] = area
-        windfarm = int(physics.get("windfarm_opt", 0) or 0)
+        from .wind_farm import wrf_fitch_physics
+        windfarm = wrf_fitch_physics(physics)
         if (values.get("interior_column") is not None) != bool(windfarm):
             raise ValueError(
-                "interior_column is sealed exactly when windfarm_opt = 1 places "
-                "turbines on the mesh's modelled columns")
+                'interior_column is sealed exactly when wind_farm_scheme = "fitch_wrf" '
+                "places turbines on the mesh's modelled columns")
         if windfarm:
             if values.get("cell_area_m2") is None:
                 raise ValueError(
-                    "windfarm_opt = 1 divides each column's drag by its own "
+                    'wind_farm_scheme = "fitch_wrf" divides each column\'s drag by its own '
                     "volume and needs the mesh's cell_area_m2")
             arrays["interior_column"] = _host_exact_array(
                 values, "interior_column", dtype=np.dtype(np.bool_), shape=(ncol,))
@@ -1015,7 +1017,7 @@ class SealedSuiteConstructorV841:
             "cell_area_m2": values.get("cell_area_m2"),
             "surface": surface,
             "statics": {} if oro is None else dict(oro),
-            # Only with windfarm_opt = 1: every other seam is built with
+            # Only with wind_farm_scheme = "fitch_wrf": every other seam is built with
             # exactly the keywords it was built with before.
             **({} if values.get("interior_column") is None
                else {"interior_column": values["interior_column"]}),
@@ -1407,16 +1409,17 @@ class PersistentSuiteCudaPhysicsBackendV841(PersistentTwoPhaseCudaPhysicsBackend
         self._helper_scope = bind_arwen_helpers_v2(root)
         self._rollback_snapshot = rollback_snapshot
         self._seam = self._new_seam()
-        # WRF's windfarm_opt = 1 (woof.hex.windfarm): the engine's PBL slot
+        # wind_farm_scheme = "fitch_wrf" (woof.hex.wind_farm): the engine's PBL slot
         # runs the drag; the per-turbine power window folds on the seam's
         # phase two.  None with the wind farm off, which builds nothing.
         self.windfarm_power = None
         physics = constructor.physics or {}
-        if int(physics.get("windfarm_opt", 0) or 0):
-            from .windfarm import attach_power
+        from .wind_farm import wrf_fitch_physics, wrf_fitch_turbine_file
+        if wrf_fitch_physics(physics):
+            from .wind_farm import attach_power
 
             self.windfarm_power = attach_power(
-                self._seam, turbine_file=physics["windfarm_turbine_file"],
+                self._seam, turbine_file=wrf_fitch_turbine_file(physics),
                 placement=self._seam.windfarm_placement)
         self._phase = "boundary"
         self._boundary_snapshot = None
@@ -1461,8 +1464,8 @@ class PersistentSuiteCudaPhysicsBackendV841(PersistentTwoPhaseCudaPhysicsBackend
         power = getattr(self, "windfarm_power", None)
         if power is not None:
             # A seam rebuilt on a resume or a rollback keeps the power
-            # window's observer (woof.hex.windfarm).
-            from .windfarm import hook
+            # window's observer (woof.hex.wind_farm).
+            from .wind_farm import hook
 
             hook(seam, power)
         # A coupled hex ocean owns ocean ice through the Noah-MP sea-ice hook,
@@ -1710,7 +1713,8 @@ class PersistentSuiteCudaPhysicsBackendV841(PersistentTwoPhaseCudaPhysicsBackend
             raise RuntimeError("diagnostic_snapshot is legal only at a committed boundary")
         self._private_binding_guard()
         names = (*_REQUIRED_ARWEN_EXPORT_FIELDS, *_OPTIONAL_ARWEN_EXPORT_FIELDS)
-        if int((self._constructor.physics or {}).get("windfarm_opt", 0) or 0):
+        from .wind_farm import wrf_fitch_physics
+        if wrf_fitch_physics(self._constructor.physics):
             # WRF's POWER (W per cell), the history field ``power``.
             names = (*names, "power")
         exported, export_inventory = diagnostic_export(self._seam, names)

@@ -1,4 +1,14 @@
-"""WRF's ``windfarm_opt = 1`` in the running model: the Fitch scheme's seam.
+"""WRF's ``windfarm_opt = 1`` in the running model: ``wind_farm_scheme =
+"fitch_wrf"``, the Fitch scheme word for word behind woof.core.wind_farm.
+
+Upstream's wind-farm design owns the switch (``wind_farm_scheme``), the
+turbine input (``wind_farms`` / ``wind_farm_table``), the TKE factor
+(``windfarm_tke_factor``) and the driver seam (``PhysicsDriver.wind_farm``,
+its ``apply_mynn`` in the MYNN slot); ``fitch_wrf`` is the scheme value whose
+implementation is this module and :mod:`woof.core.windfarm_fitch`.
+:func:`woof.core.wind_farm.attach_wind_farm` builds it through
+:func:`build_windfarm` and wraps it as
+:class:`woof.core.wind_farm.WrfFitchFarm`.
 
 WRF v4.7.1 calls the Fitch wind-farm drag from its PBL driver, right after
 the PBL scheme and before the orographic drag
@@ -25,9 +35,10 @@ module holds what that call needs and nothing it computes:
   ``windturbines.txt`` (``windfarm_ij = 0``) / ``windturbines-ij.txt``
   (``windfarm_ij = 1``) with its ``wind-turbine-N.tbl`` tables, read as
   ``init_module_wind_fitch`` reads them (``module_wind_fitch.F:341-517``).
-* :func:`bind_windfarm_identity`, the identity rule: off, every windfarm
-  key leaves the document (so every earlier fingerprint and checkpoint is
-  unchanged); on, the turbine file's and its curves' SHA-256 bind.
+* :func:`bind_windfarm_identity`, the identity rule for ``fitch_wrf``: the
+  turbine file's and its curves' SHA-256 bind beside the path (off, every
+  wind-farm key leaves the document through
+  :func:`woof.wind_table.drop_inert_config`).
 * :func:`windfarm_array_shapes`, the device arrays the preflight prices.
 
 THE ARGUMENTS WRF PASSES.  ``u_phy``/``v_phy`` are phy_prep's mass-point
@@ -54,7 +65,8 @@ from typing import Mapping
 
 import numpy as np
 
-from woof.config import WINDFARM_RUN_DEFAULTS, WINDFARM_TABLE_SUFFIXES
+from woof.config import (WINDFARM_TABLE_SUFFIXES, WRF_FITCH_SCHEME,
+                         wrf_turbine_list_ij)
 
 F = np.float32
 
@@ -346,8 +358,8 @@ def _place(rows, ij: int, *, grid, shape, path) -> list[tuple[int, int]]:
         raise WindFarmRefused(
             f"{path}: turbine(s) {names} lie outside this {nx} x {ny} domain "
             "or in its outermost row or column.  Drop them, give this domain "
-            "its own [[domain]] windfarm_turbine_file, or set windfarm_opt = "
-            "0 on it.  (WRF skips a turbine outside a domain; woof refuses "
+            "its own [[domain]] wind_farms, or set wind_farm_scheme = "
+            "\"off\" on it.  (WRF skips a turbine outside a domain; woof refuses "
             "it, so a mistyped coordinate cannot drop a turbine unseen, and "
             "the edge cells are boundary-forced, not modelled.)")
     return cells
@@ -449,7 +461,7 @@ def fitch_layout_for_file(path, *, ij: int = 0, shape, grid=None,
     """
     path = Path(path)
     if not path.is_file():
-        raise WindFarmRefused(f"windfarm_turbine_file {path} does not exist")
+        raise WindFarmRefused(f"wind_farms {path} does not exist")
     if turbine_file_kind(path) == "wrf":
         layout, _ = wrf_fitch_layout(path, ij=ij, shape=shape, grid=grid)
         return layout
@@ -457,7 +469,7 @@ def fitch_layout_for_file(path, *, ij: int = 0, shape, grid=None,
         if grid is not None and _is_cells(grid):
             raise _ij_on_cells(path)
         raise WindFarmRefused(
-            f"windfarm_ij = 1 with {path}: i/j rows are read from a WRF "
+            f"{path}: i/j rows (WRF windfarm_ij = 1) are read from a WRF "
             "windturbines-ij.txt only; a woof turbine table is lat/lon")
     if grid is not None and _is_cells(grid):
         from woof.windfarm.layout import (WindFarmLayoutRefused,
@@ -484,7 +496,7 @@ def fitch_layout_for_file(path, *, ij: int = 0, shape, grid=None,
         hint = ""
         if "outside" in str(error) or "outermost" in str(error):
             hint = ("  Give this domain its own [[domain]] "
-                    "windfarm_turbine_file, or set windfarm_opt = 0 on it.")
+                    "wind_farms, or set wind_farm_scheme = \"off\" on it.")
         raise WindFarmRefused(str(error) + hint) from error
     if (built.ny, built.nx) != tuple(shape):
         raise WindFarmRefused(
@@ -539,22 +551,22 @@ def windfarm_input_digests(path) -> tuple[str, str]:
 
 
 def bind_windfarm_identity(values) -> dict:
-    """Apply the wind-farm identity rule to a run document, in place.
+    """Apply the ``fitch_wrf`` identity rule to a run document, in place.
 
-    Off (``windfarm_opt`` 0 or absent): every windfarm key and digest
-    leaves the document, so it is the document every build before the
-    scheme wrote.  On: the four settings stay, and the turbine file's and
-    its curves' SHA-256 bind beside the path.  A saved digest stays saved
-    -- digesting a stored checkpoint must not replace the bytes it ran with
-    by the file now at that path, which is what lets a resume refuse a file
+    Another scheme (or off): the two digests leave, so the document is the
+    one upstream's rule (woof.wind_table.drop_inert_config) writes.
+    ``fitch_wrf``: the turbine file's and its curves' SHA-256 bind beside
+    the path (``wind_farm_table``).  A saved digest stays saved --
+    digesting a stored checkpoint must not replace the bytes it ran with by
+    the file now at that path, which is what lets a resume refuse a file
     changed under it.
     """
-    if not values.get("windfarm_opt", 0):
-        for key in (*WINDFARM_RUN_DEFAULTS, TURBINE_FILE_IDENTITY_KEY,
-                    CURVES_IDENTITY_KEY):
+    if values.get("wind_farm_scheme", "off") != WRF_FITCH_SCHEME:
+        for key in (TURBINE_FILE_IDENTITY_KEY, CURVES_IDENTITY_KEY):
             values.pop(key, None)
         return values
-    path = values.get("windfarm_turbine_file", "") or ""
+    path = (values.get("wind_farm_table", "") or values.get("wind_farms", "")
+            or "")
     if path and TURBINE_FILE_IDENTITY_KEY not in values:
         try:
             # The bytes the running model was built from, when it was; the
@@ -612,6 +624,21 @@ class WindFarm:
 
 
 
+def wrf_fitch_selected(cfg) -> bool:
+    """Whether ``cfg`` (a RunConfig or a run mapping) runs ``fitch_wrf``."""
+    get = cfg.get if isinstance(cfg, Mapping) else (
+        lambda key, default=None: getattr(cfg, key, default))
+    return get("wind_farm_scheme", "off") == WRF_FITCH_SCHEME
+
+
+def turbine_file_of(cfg) -> str:
+    """The ``fitch_wrf`` turbine file: ``wind_farm_table`` (which RunConfig
+    sets from ``wind_farms``), else ``wind_farms``."""
+    get = cfg.get if isinstance(cfg, Mapping) else (
+        lambda key, default=None: getattr(cfg, key, default))
+    return str(get("wind_farm_table", "") or get("wind_farms", "") or "")
+
+
 def build_windfarm(cfg, *, shape, grid=None) -> WindFarm:
     """The domain's :class:`WindFarm`, its layout uploaded once.
 
@@ -619,10 +646,11 @@ def build_windfarm(cfg, *, shape, grid=None) -> WindFarm:
     kept by path, so a checkpoint names the bytes the model runs, not a
     file edited under it later.
     """
-    path = Path(cfg.windfarm_turbine_file).expanduser().resolve()
+    turbine_file = turbine_file_of(cfg)
+    path = Path(turbine_file).expanduser().resolve()
     before = windfarm_input_digests(path) if path.is_file() else None
     layout = fitch_layout_for_file(
-        cfg.windfarm_turbine_file, ij=int(cfg.windfarm_ij), shape=shape,
+        turbine_file, ij=wrf_turbine_list_ij(turbine_file), shape=shape,
         grid=grid, grid_id=int(getattr(cfg, "grid_id", 1) or 1))
     after = windfarm_input_digests(path)
     if before is not None and before != after:
@@ -641,11 +669,132 @@ def build_windfarm(cfg, *, shape, grid=None) -> WindFarm:
 
 
 # --------------------------------------------------------------------------
+# upstream's seam: the carrier woof.core.wind_farm attaches
+
+
+class WrfFitchFarm:
+    """``fitch_wrf``: WRF v4.7.1's ``dragforce`` call behind upstream's seam.
+
+    Holds the fork's :class:`woof.core.windfarm_coupling.WindFarm` (the
+    uploaded layout, the TKE factor and an unstructured mesh's per-column
+    density) and WRF's POWER plane, which lives in the driver's serialized
+    ``fields`` so a resumed run carries it.  :meth:`apply_mynn` is the call
+    module_pbl_driver.F:2045-2125 makes right after MYNN and before the
+    orographic drag: the turbines' drag into the slot's A-grid ``du``/``dv``,
+    their TKE into MYNN's QKE as MYNN left it (WRF adds to QKE alone), and
+    POWER overwritten.  ``DT=dt`` is the MODEL step (module_pbl_driver.F:
+    2056), not the PBL interval: with ``bldt > 0`` WRF adds one model
+    step's TKE per PBL call, so the live ``cfg.dt`` (an adaptive clock
+    rewrites it per step) is read at each call.
+    """
+
+    scheme = "fitch_wrf"
+
+    def __init__(self, farm, power, cfg, *, turbine_file):
+        self.farm = farm
+        self.power = power
+        self.dx = float(cfg.dx)
+        self.dt = float(cfg.dt)
+        self.turbine_file = str(turbine_file)
+
+    def sample(self, atmosphere, fields):
+        """WRF writes POWER only inside dragforce; the initial frame keeps
+        the zero plane it was allocated with."""
+        return None
+
+    def apply_mynn(self, atmosphere, fields, rates, *, step_seconds=None, cfg=None):
+        from woof.core.physics import _pbl_momentum_targets
+
+        du, dv = _pbl_momentum_targets(rates, "wind_farm_scheme = fitch_wrf")
+        dt = float(cfg.dt) if cfg is not None else self.dt
+        self.farm.apply(atmosphere, du, dv, qke=fields["qke"], power=self.power,
+                        dx=self.dx, dt=dt)
+
+    def history_fields(self):
+        """WRF's POWER (Registry.EM_COMMON:413, package fitchscheme)."""
+        return {"POWER": self.power}
+
+    def write_replay(self, path):
+        return None
+
+    def receipt(self):
+        layout = self.farm.layout
+        try:
+            turbine_sha256, curves_sha256 = windfarm_input_digests(self.turbine_file)
+        except OSError:
+            turbine_sha256 = curves_sha256 = "missing"
+        return dict(schema="gpuwm-wind-receipt.v1", scheme=self.scheme,
+                    implementation="WRF v4.7.1 module_wind_fitch.F word for word "
+                                   "(woof.core.windfarm_fitch)",
+                    turbine_file=self.turbine_file,
+                    turbine_count=int(np.asarray(layout.count).sum()),
+                    tke_factor=float(self.farm.tke_factor),
+                    unequal_area_columns=self.farm.wfdensity is not None,
+                    windfarm_turbine_sha256=turbine_sha256,
+                    windfarm_curves_sha256=curves_sha256)
+
+
+def attach_wrf_fitch(state, cfg, fields, grid):
+    """``fitch_wrf`` on one domain: the layout placed and uploaded once.
+
+    ``grid`` is the domain's projected grid (lat/lon placement needs it) or
+    an unstructured mesh's columns (:class:`woof.windfarm.cells.
+    CellPlacement`).  Refused by name when the route hands a grid for other
+    columns than this state's (a streamed slab, a tile, a rank's window):
+    the layout's cell indices are whole-domain columns.
+    """
+    import cupy as cp
+    from woof.core.state import DTYPE
+
+    shape = tuple(int(n) for n in state.mup.shape)
+    turbine_file = turbine_file_of(cfg)
+    where = (f'wind_farm_scheme = "fitch_wrf" on grid_id = {cfg.grid_id} '
+             f"(wind_farms = {turbine_file!r})")
+    if grid is None:
+        raise ValueError(
+            f"{where}: this initialization route hands the physics no "
+            "projected grid, so the turbines cannot be placed and nothing "
+            "says this state holds the whole domain.  [tiles] / streamed "
+            "tile buffers, the offline child, the WRF-input route and the "
+            "idealized harnesses are such routes; the wind farm runs on a "
+            "resident real-case domain (woof go, the prepared single-domain "
+            "and domain-tree forecasts without [tiles]), which passes the "
+            "domain's grid.")
+    elif _is_cells(grid):
+        # An unstructured mesh's columns (woof.windfarm.cells.CellPlacement,
+        # hex's generic column seam): one row of columns, each its own area.
+        if tuple(grid.shape) != shape:
+            raise ValueError(
+                f"{where}: this state's columns are {shape} and the mesh "
+                f"placement holds {tuple(grid.shape)}; the wind farm's cells "
+                "are whole-mesh columns.")
+    else:
+        grid_shape = (int(grid.e_sn) - 1, int(grid.e_we) - 1)
+        if grid_shape != shape:
+            raise ValueError(
+                f"{where}: this state's columns are {shape} and the domain's "
+                f"mass grid is {grid_shape} (a streamed slab, a tile or a "
+                "rank's window).  The wind farm's cells are whole-domain "
+                "columns, so it runs on a resident single-device domain "
+                "only; run without [tiles] / streaming, on one device.")
+    try:
+        farm = build_windfarm(cfg, shape=shape, grid=grid)
+    except WindFarmRefused as error:
+        raise ValueError(f"{where}: {error}") from error
+    fields["power"] = cp.zeros(shape, dtype=DTYPE)
+    wrapped = WrfFitchFarm(farm, fields["power"], cfg, turbine_file=turbine_file)
+    detection = dict(requested="fitch_wrf", enabled=True,
+                     reason="WRF v4.7.1 Fitch turbines placed on this domain",
+                     turbine_count=int(np.asarray(farm.layout.count).sum()))
+    return wrapped, detection
+
+
+# --------------------------------------------------------------------------
 # pricing
 
 
 def windfarm_array_shapes(cfg) -> dict[str, tuple[int, ...]]:
-    """The device arrays windfarm_opt = 1 holds for the run.
+    """The device arrays ``fitch_wrf`` holds for the run.
 
     ``fields/power`` (WRF's POWER, serialized) and the layout's
     ``cell_offsets`` (ny*nx + 1 int32) are exact.  The group and curve
@@ -654,11 +803,11 @@ def windfarm_array_shapes(cfg) -> dict[str, tuple[int, ...]]:
     three MAXVALS2-row tables plus two words), and at one group per column
     and one curve otherwise.
     """
-    if not int(getattr(cfg, "windfarm_opt", 0) or 0):
+    if not wrf_fitch_selected(cfg):
         return {}
     ny, nx = int(cfg.ny), int(cfg.nx)
     turbines, curves = ny * nx, 1
-    path = getattr(cfg, "windfarm_turbine_file", "") or ""
+    path = turbine_file_of(cfg)
     try:
         source = Path(path)
         if turbine_file_kind(source) == "wrf":
@@ -682,9 +831,10 @@ def windfarm_array_shapes(cfg) -> dict[str, tuple[int, ...]]:
 
 __all__ = [
     "CURVES_IDENTITY_KEY", "TURBINE_FILE_IDENTITY_KEY",
-    "WINDFARM_RUN_DEFAULTS", "WindFarm", "WindFarmRefused",
+    "WindFarm", "WindFarmRefused", "WrfFitchFarm", "attach_wrf_fitch",
     "WrfTurbineTable", "bind_windfarm_identity", "build_windfarm",
     "fitch_layout_for_file", "fitch_layout_from_layout", "read_wrf_table",
-    "turbine_file_kind", "windfarm_array_shapes", "windfarm_input_digests",
-    "wrf_fitch_layout", "wrf_table_paths",
+    "turbine_file_kind", "turbine_file_of", "windfarm_array_shapes",
+    "windfarm_input_digests", "wrf_fitch_layout", "wrf_fitch_selected",
+    "wrf_table_paths",
 ]

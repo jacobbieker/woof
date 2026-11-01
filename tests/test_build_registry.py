@@ -405,7 +405,7 @@ def test_a_remedy_label_names_exactly_the_edit_its_remedy_settings_makes(
     # five closures; their labels name only the selector their edit sets
     # to zero.  FAST_SBM (mp30) refuses RRTMGP with the legacy-RRTMG
     # remedy, and Purdue Lin (mp2) does the same.  1 + 3 + 5 + 5 + 1 + 1, and the wind farm adds one
-    # windfarm_opt remedy (MYNN only) on each of the five.
+    # wind_farm_scheme remedy (MYNN only) on each of the five.
     assert checked == 21
 
 

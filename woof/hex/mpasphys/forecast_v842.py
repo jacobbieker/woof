@@ -385,8 +385,9 @@ def native_route(arguments: Any, *, default_mode: str = 'exact'):
                          'or config_physics_suite); this run has none')
     if config is not None:
         # WRF's wind-farm keys have no MPAS Registry row: refused by name rather
-        # than written into a namelist nothing reads (woof.hex.windfarm).
-        from ..windfarm import mpas_route_refusal
+        # than written into a namelist nothing reads (woof.hex.wind_farm;
+        # --wind-farms is this route's switch).
+        from ..wind_farm import mpas_route_refusal
         named = [override.partition('=')[0] for override in overrides]
         named += [key for options in groups.values() for key in options]
         refusal = mpas_route_refusal(named)

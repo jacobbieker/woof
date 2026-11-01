@@ -1,11 +1,12 @@
-"""WRF's windfarm_opt = 1 as a setting: config, files, identity, pricing.
+"""WRF's windfarm_opt = 1 as ``wind_farm_scheme = "fitch_wrf"``: config,
+files, identity, pricing.
 
 The kernel is graded against WRF v4.7.1 in
 tests/test_windfarm_fitch_wrf471_parity.py and the driver seam on the
 device in tests/test_windfarm_coupling_gpu.py; this file holds what decides
 whether and with which turbines the scheme runs.  Off is the default, and a
 run without it must resolve, fingerprint and checkpoint exactly as before
-the four fields existed.  Synthetic farms only.
+the wind-farm fields existed.  Synthetic farms only.
 """
 from __future__ import annotations
 
@@ -22,8 +23,9 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from woof.config import (WINDFARM_RUN_DEFAULTS, RunConfig, validate_run_config,
-                          windfarm_refusal)
+from woof.config import (WRF_FITCH_SCHEME, RunConfig, validate_run_config,
+                          wrf_fitch_refusal)
+from woof.wind_table import RUN_DEFAULTS as WIND_FARM_RUN_DEFAULTS
 from woof.core import windfarm_coupling as wc
 from woof.static.lambert import LambertGrid
 from woof.windfarm import layout as wl
@@ -39,6 +41,12 @@ def _cfg(**over) -> RunConfig:
                 sf_sfclay_physics=5)
     base.update(over)
     return RunConfig(**base)
+
+
+def _on(path, **over) -> RunConfig:
+    """``fitch_wrf`` with ``path`` as its turbines (``wind_farms``)."""
+    return _cfg(wind_farm_scheme=WRF_FITCH_SCHEME, wind_farms=str(path),
+                **over)
 
 
 def _grid(n=41, dx=1000.0):
@@ -98,50 +106,63 @@ def _assert_same_layout(a, b):
 # RunConfig
 # ---------------------------------------------------------------------------
 
-def test_the_fields_are_appended_last_at_wrfs_defaults():
+def test_upstreams_keys_carry_the_wrf_scheme():
+    """The fork's windfarm_opt / windfarm_ij / windfarm_turbine_file moved
+    onto upstream's keys: fitch_wrf is a wind_farm_scheme value, its
+    turbines come from wind_farms, and an i/j list is WRF's own file name."""
     names = [f.name for f in dataclasses.fields(RunConfig)]
-    assert names[-4:] == ["windfarm_opt", "windfarm_ij",
-                          "windfarm_tke_factor", "windfarm_turbine_file"]
-    for name, default in WINDFARM_RUN_DEFAULTS.items():
+    assert not {"windfarm_opt", "windfarm_ij", "windfarm_turbine_file"} & \
+        set(names)
+    for name, default in WIND_FARM_RUN_DEFAULTS.items():
         assert RunConfig.__dataclass_fields__[name].default == default
-    # Registry.EM_COMMON:3003-3005.
-    assert wc.WINDFARM_RUN_DEFAULTS["windfarm_tke_factor"] == 0.25
+    # Registry.EM_COMMON:3005.
+    assert WIND_FARM_RUN_DEFAULTS["windfarm_tke_factor"] == 0.25
+    from woof.wind_table import SCHEMES
+    assert WRF_FITCH_SCHEME in SCHEMES
+    cfg = _on("windturbines-ij.txt")
+    assert cfg.wind_farm_scheme == WRF_FITCH_SCHEME
+    assert cfg.wind_farm_table == "windturbines-ij.txt"
+    # Without fitch_wrf, wind_farms selects upstream's scheme.
+    assert _cfg(wind_farms="farm.txt").wind_farm_scheme == "fitch"
+    from woof.config import wrf_turbine_list_ij
+    assert wrf_turbine_list_ij("/x/windturbines-ij.txt") == 1
+    assert wrf_turbine_list_ij("/x/windturbines.txt") == 0
 
 
 @pytest.mark.parametrize("kwargs, needle", [
-    (dict(windfarm_opt=2), "MAV"),
-    (dict(windfarm_opt=True), "windfarm_opt = True"),
-    (dict(windfarm_opt=0, windfarm_ij=2), "windfarm_ij = 2"),
-    (dict(windfarm_opt=0, windfarm_tke_factor=-0.1), "finite number >= 0"),
-    (dict(windfarm_opt=0, windfarm_tke_factor=float("nan")), ">= 0"),
-    (dict(windfarm_opt=1, bl_pbl_physics=5), "needs windfarm_turbine_file"),
-    (dict(windfarm_opt=1, windfarm_turbine_file="f.csv", bl_pbl_physics=1),
-     "needs MYNN"),
-    (dict(windfarm_opt=1, windfarm_turbine_file="f.csv", bl_pbl_physics=0),
-     "km_opt = 2"),
-    (dict(windfarm_opt=1, windfarm_ij=1, windfarm_turbine_file="f.csv",
-          bl_pbl_physics=5), "windfarm_ij = 1"),
+    (dict(wind_farm_scheme="fitch_wrf", wind_farm_table="f.csv",
+          windfarm_tke_factor=-0.1, bl_pbl_physics=5), "finite number >= 0"),
+    (dict(wind_farm_scheme="fitch_wrf", wind_farm_table="f.csv",
+          windfarm_tke_factor=float("nan"), bl_pbl_physics=5), ">= 0"),
+    (dict(wind_farm_scheme="fitch_wrf", bl_pbl_physics=5), "needs wind_farms"),
+    (dict(wind_farm_scheme="fitch_wrf", wind_farm_table="uswtdb",
+          bl_pbl_physics=5), "needs wind_farms"),
+    (dict(wind_farm_scheme="fitch_wrf", wind_farm_table="f.csv",
+          bl_pbl_physics=1), "needs MYNN"),
+    (dict(wind_farm_scheme="fitch_wrf", wind_farm_table="f.csv",
+          bl_pbl_physics=0), "km_opt = 2"),
 ])
 def test_each_refusal_names_what_would_break(kwargs, needle):
-    why = windfarm_refusal(**kwargs)
+    why = wrf_fitch_refusal(**kwargs)
     assert why is not None and needle in why
 
 
 @pytest.mark.parametrize("kwargs", [
-    dict(windfarm_opt=0),
-    # A shared file with the switch on other domains only: inert here.
-    dict(windfarm_opt=0, windfarm_turbine_file="farm.csv", bl_pbl_physics=1),
-    dict(windfarm_opt=1, windfarm_turbine_file="farm.csv", bl_pbl_physics=5),
-    dict(windfarm_opt=1, windfarm_ij=1, windfarm_tke_factor=1.0,
-         windfarm_turbine_file="windturbines-ij.txt", bl_pbl_physics=5),
+    dict(wind_farm_scheme="off"),
+    # upstream's own scheme is upstream's to judge.
+    dict(wind_farm_scheme="fitch", wind_farm_table="farm.csv",
+         bl_pbl_physics=1),
+    dict(wind_farm_scheme="fitch_wrf", wind_farm_table="farm.csv",
+         bl_pbl_physics=5),
+    dict(wind_farm_scheme="fitch_wrf", windfarm_tke_factor=1.0,
+         wind_farm_table="windturbines-ij.txt", bl_pbl_physics=5),
 ])
 def test_the_ported_combinations_pass(kwargs):
-    assert windfarm_refusal(**kwargs) is None
+    assert wrf_fitch_refusal(**kwargs) is None
 
 
 def test_validate_run_config_refuses_the_farm_without_mynn():
-    cfg = _cfg(bl_pbl_physics=1, sf_sfclay_physics=1, windfarm_opt=1,
-               windfarm_turbine_file="farm.csv")
+    cfg = _on("farm.csv", bl_pbl_physics=1, sf_sfclay_physics=1)
     with pytest.raises(ValueError, match="needs MYNN"):
         validate_run_config(cfg)
 
@@ -149,29 +170,28 @@ def test_validate_run_config_refuses_the_farm_without_mynn():
 def test_direct_physics_initialization_has_the_same_refusal():
     from woof.core.physics import initialize_physics
 
-    cfg = _cfg(bl_pbl_physics=1, sf_sfclay_physics=1, windfarm_opt=1,
-               windfarm_turbine_file="farm.csv")
+    cfg = _on("farm.csv", bl_pbl_physics=1, sf_sfclay_physics=1)
     with pytest.raises(ValueError, match="needs MYNN"):
         initialize_physics(SimpleNamespace(), cfg)
 
 
 def test_a_route_without_a_grid_or_with_a_slab_is_refused(tmp_path):
-    from woof.core.physics import _attach_windfarm
+    from woof.core.windfarm_coupling import attach_wrf_fitch
 
     path = _write_csv(tmp_path / "farm.csv", _farm())
-    cfg = _cfg(windfarm_opt=1, windfarm_turbine_file=str(path))
+    cfg = _on(path)
     state = SimpleNamespace(mup=np.zeros((41, 41), np.float32))
     with pytest.raises(ValueError, match="no projected grid"):
-        _attach_windfarm(state, cfg, {}, None)
+        attach_wrf_fitch(state, cfg, {}, None)
     slab = SimpleNamespace(mup=np.zeros((16, 41), np.float32))
     with pytest.raises(ValueError, match="streamed slab"):
-        _attach_windfarm(slab, cfg, {}, _grid())
+        attach_wrf_fitch(slab, cfg, {}, _grid())
 
 
 def test_moving_and_spawned_nests_are_refused_by_name():
     from woof.experiment import _refuse_moving_windfarm
 
-    on = SimpleNamespace(windfarm_opt=1)
+    on = SimpleNamespace(wind_farm_scheme="fitch_wrf")
     domains = [SimpleNamespace(grid_id=1, run=on, follow=None, spawn=None),
                SimpleNamespace(grid_id=2, run=on, follow=object(),
                                spawn=None)]
@@ -179,7 +199,7 @@ def test_moving_and_spawned_nests_are_refused_by_name():
         _refuse_moving_windfarm(domains, None, "test")
     domains[1].follow = None
     domains[1].spawn = object()
-    with pytest.raises(ValueError, match="windfarm_opt = 1"):
+    with pytest.raises(ValueError, match="runs a wind farm"):
         _refuse_moving_windfarm(domains, None, "test")
     domains[1].spawn = None
     _refuse_moving_windfarm(domains, None, "test")
@@ -193,22 +213,19 @@ def test_per_domain_keys_and_preparation_inert():
     from woof.experiment import _DOMAIN_RUN_OVERRIDES
     from woof.ingest.prepared_cache import PREPARATION_INERT_RUN_FIELDS
 
-    assert {"windfarm_opt", "windfarm_turbine_file"} <= set(
-        _DOMAIN_RUN_OVERRIDES)
-    # WRF scope 1: one value for the whole run.
-    assert not {"windfarm_ij", "windfarm_tke_factor"} & set(
-        _DOMAIN_RUN_OVERRIDES)
-    assert {f"run.{name}" for name in WINDFARM_RUN_DEFAULTS} <= \
+    # Each domain places its own turbines (WRF's windfarm_opt is
+    # max_domains), so the scheme and the turbine input are per domain.
+    assert {"wind_farm_scheme", "wind_farms"} <= set(_DOMAIN_RUN_OVERRIDES)
+    assert {f"run.{name}" for name in WIND_FARM_RUN_DEFAULTS} <= \
         PREPARATION_INERT_RUN_FIELDS
 
 
 def test_the_packed_ensemble_is_routed_to_the_member_driver():
     from woof.ensemble.suite_capabilities import plan_suite
 
-    plan = plan_suite(_cfg(windfarm_opt=1, windfarm_turbine_file="farm.csv"),
-                      members=2)
+    plan = plan_suite(_on("farm.csv"), members=2)
     assert plan.mode == "member_local"
-    assert any("windfarm_opt=1" in reason
+    assert any("wind_farm_scheme='fitch_wrf'" in reason
                for reason in plan.native_fallback_reasons)
 
 
@@ -347,7 +364,7 @@ def test_a_checkpoint_names_the_bytes_the_model_was_built_from(tmp_path):
     from woof.io.restart import configuration_echo
 
     path = _write_csv(tmp_path / "farm.csv", _farm())
-    cfg = _cfg(windfarm_opt=1, windfarm_turbine_file=str(path))
+    cfg = _on(path)
     # What build_windfarm records as it uploads the layout (a GPU step;
     # tests/test_windfarm_coupling_gpu.py builds it for real).
     wc._BUILT[str(path.resolve())] = wc.windfarm_input_digests(path)
@@ -364,8 +381,8 @@ def test_a_streamed_domain_is_refused_before_preparation():
     from woof.core.streaming import StreamingOptions
     from woof.experiment import _refuse_streamed_windfarm
 
-    on = SimpleNamespace(windfarm_opt=1)
-    off = SimpleNamespace(windfarm_opt=0)
+    on = SimpleNamespace(wind_farm_scheme="fitch_wrf")
+    off = SimpleNamespace(wind_farm_scheme="off")
     tiles = StreamingOptions(mode="on")
     with pytest.raises(ValueError, match="streams its columns"):
         _refuse_streamed_windfarm(tiles, [SimpleNamespace(
@@ -420,24 +437,23 @@ def test_off_leaves_the_checkpoint_echo_and_digest_alone(tmp_path):
                                   configuration_echo)
 
     plain = configuration_echo(_cfg())
-    # A shared file with the switch off on this domain is inert too.
-    shared = configuration_echo(_cfg(windfarm_turbine_file="x.csv",
-                                     windfarm_tke_factor=1.0))
+    # A TKE factor with the scheme off on this domain is inert too.
+    shared = configuration_echo(_cfg(windfarm_tke_factor=1.0))
     assert plain == shared
-    for name in (*WINDFARM_RUN_DEFAULTS, wc.TURBINE_FILE_IDENTITY_KEY,
+    for name in (*WIND_FARM_RUN_DEFAULTS, wc.TURBINE_FILE_IDENTITY_KEY,
                  wc.CURVES_IDENTITY_KEY):
         assert name not in plain
     digest = _configuration_digest_values(dataclasses.asdict(_cfg()))
-    assert not set(WINDFARM_RUN_DEFAULTS) & set(digest)
+    assert not set(WIND_FARM_RUN_DEFAULTS) & set(digest)
 
 
 def test_on_binds_the_file_bytes_and_a_saved_digest_stays(tmp_path):
     from woof.io.restart import configuration_echo
 
     path = _write_csv(tmp_path / "farm.csv", _farm())
-    cfg = _cfg(windfarm_opt=1, windfarm_turbine_file=str(path))
+    cfg = _on(path)
     echo = configuration_echo(cfg)
-    assert echo["windfarm_opt"] == 1
+    assert echo["wind_farm_scheme"] == "fitch_wrf"
     assert echo[wc.TURBINE_FILE_IDENTITY_KEY] == wc._sha256(path)
     from woof.energy.turbine_library import load_turbine_library
     assert echo[wc.CURVES_IDENTITY_KEY] == load_turbine_library().sha256
@@ -470,12 +486,11 @@ def test_restart_identity_payload_drops_off_and_binds_on(tmp_path):
     start = datetime(2026, 1, 1, tzinfo=timezone.utc)
     off = restart_identity_payload(experiment_from_run_config(_cfg(), start))
     for domain in off["domains"]:
-        assert not set(WINDFARM_RUN_DEFAULTS) & set(domain["run"])
+        assert not set(WIND_FARM_RUN_DEFAULTS) & set(domain["run"])
     path = _write_csv(tmp_path / "farm.csv", _farm())
-    on = restart_identity_payload(experiment_from_run_config(
-        _cfg(windfarm_opt=1, windfarm_turbine_file=str(path)), start))
+    on = restart_identity_payload(experiment_from_run_config(_on(path), start))
     run = on["domains"][0]["run"]
-    assert run["windfarm_opt"] == 1
+    assert run["wind_farm_scheme"] == "fitch_wrf"
     assert run[wc.TURBINE_FILE_IDENTITY_KEY] == wc._sha256(path)
 
 
@@ -485,16 +500,17 @@ def test_a_resume_refuses_a_flipped_farm_and_tolerates_absent_keys():
     live = _cfg()
     stored = configuration_echo(live)
     _require_config_match(stored, live, "ck.npz")
-    on = dataclasses.replace(live, windfarm_opt=1,
-                             windfarm_turbine_file="missing.csv")
-    with pytest.raises(Exception, match="windfarm"):
+    on = dataclasses.replace(live, wind_farm_scheme="fitch_wrf",
+                             wind_farms="missing.csv")
+    with pytest.raises(Exception, match="wind_farm"):
         _require_config_match(stored, on, "ck.npz")
 
 
 def test_the_driver_carrier_is_classified_as_rebuilt():
     from woof.io.restart import DRIVER_REBUILT_ATTRS
 
-    assert "windfarm" in DRIVER_REBUILT_ATTRS
+    assert "wind_farm" in DRIVER_REBUILT_ATTRS
+    assert "windfarm" not in DRIVER_REBUILT_ATTRS
 
 
 # ---------------------------------------------------------------------------
@@ -519,7 +535,7 @@ def test_on_prices_the_layout_and_writes_power(tmp_path):
     from woof.io.history_layout import produced_history_shapes
 
     path = _write_csv(tmp_path / "farm.csv", _farm())
-    cfg = _cfg(windfarm_opt=1, windfarm_turbine_file=str(path))
+    cfg = _on(path)
     shapes = wc.windfarm_array_shapes(cfg)
     assert shapes == {"fields/power": (41, 41),
                       "windfarm/cell_offsets": (41 * 41 + 1,),
@@ -537,30 +553,32 @@ def test_on_prices_the_layout_and_writes_power(tmp_path):
         dc, prices_refl=False)
     # The bound when the file cannot be read: one group per column.
     bound = wc.windfarm_array_shapes(dataclasses.replace(
-        cfg, windfarm_turbine_file=str(tmp_path / "gone.csv")))
+        cfg, wind_farms=str(tmp_path / "gone.csv")))
     assert bound["windfarm/groups"] == (5, 41 * 41)
 
 
-def test_power_is_wrfs_registry_row_and_in_the_windfarm_preset():
+def test_power_is_upstreams_row_and_in_the_windfarm_preset():
     from woof.io.history_selection import HISTORY_PRESETS
     from woof.io.wrf_output_schema import REGISTRY_VAR_META
 
-    assert REGISTRY_VAR_META["POWER"] == ("Power production", "W")
+    # One POWER row for both schemes: upstream's (W per cell).
+    assert REGISTRY_VAR_META["POWER"][1] == "W"
     assert "POWER" in HISTORY_PRESETS["windfarm"]
 
 
-def test_the_registry_lists_the_four_keys_and_the_mynn_rule():
+def test_the_registry_lists_the_keys_and_the_mynn_rule():
     import json
 
     registry = json.loads((REPO / "woof" / "physics_registry_v2.json")
                           .read_text(encoding="utf-8"))
     rows = registry["parameters"]
-    assert rows["windfarm_opt"]["enum"] == [0, 1]
-    assert rows["windfarm_ij"]["enum"] == [0, 1]
+    assert rows["wind_farm_scheme"]["enum"] == ["off", "fitch", "fitch_wrf"]
+    assert rows["wind_farms"]["default"] == ""
     assert rows["windfarm_tke_factor"]["default"] == 0.25
-    assert rows["windfarm_turbine_file"]["default"] == ""
+    for gone in ("windfarm_opt", "windfarm_ij", "windfarm_turbine_file"):
+        assert gone not in rows
     text = json.dumps(registry)
-    assert "Set windfarm_opt=0." in text
+    assert "Set wind_farm_scheme=off." in text
 
 
 # ---------------------------------------------------------------------------
@@ -601,12 +619,14 @@ def test_windfarm_keys_translate(tmp_path):
                                 " windfarm_tke_factor = 1.0,\n")
     raw = tomllib.loads(text)
     shared = raw["shared"]
-    assert shared["windfarm_opt"] == 1
-    assert shared["windfarm_ij"] == 1
+    assert "wind_farm_scheme" not in shared and "wind_farms" not in shared
     assert shared["windfarm_tke_factor"] == 1.0
-    assert shared["windfarm_turbine_file"] == str(
+    first, second = raw["domain"][0], raw["domain"][1]
+    # WRF's windfarm_ij = 1 opens windturbines-ij.txt; the name carries it.
+    assert first["wind_farm_scheme"] == "fitch_wrf"
+    assert first["wind_farms"] == str(
         (tmp_path / "windturbines-ij.txt").resolve())
-    assert raw["domain"][1]["windfarm_opt"] == 0
+    assert "wind_farm_scheme" not in second and "wind_farms" not in second
 
 
 def test_lat_lon_list_is_the_default_and_omitted_keys_change_nothing(
@@ -615,9 +635,11 @@ def test_lat_lon_list_is_the_default_and_omitted_keys_change_nothing(
     zero, _ = _import(tmp_path, " windfarm_opt = 0, 0,\n")
     assert zero == plain and "windfarm" not in plain
     text, _ = _import(tmp_path, " windfarm_opt = 1, 1,\n")
-    shared = tomllib.loads(text)["shared"]
-    assert shared["windfarm_turbine_file"].endswith("windturbines.txt")
-    assert "windfarm_ij" not in shared and "windfarm_tke_factor" not in shared
+    raw = tomllib.loads(text)
+    for domain in raw["domain"]:
+        assert domain["wind_farm_scheme"] == "fitch_wrf"
+        assert domain["wind_farms"].endswith("/windturbines.txt")
+    assert raw["shared"]["windfarm_tke_factor"] == 0.25
 
 
 @pytest.mark.parametrize("physics, needle", [

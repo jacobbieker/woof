@@ -1090,7 +1090,7 @@ def _initialize_real_case_physics(
         radiation_start_time=start_time, radiation_latitude=lat,
         radiation_longitude=lon,
         terrain_drag_static=static,
-        # WRF's windfarm_opt = 1 places its turbines on this grid; a row
+        # wind_farm_scheme = "fitch_wrf" places its turbines on this grid; a row
         # window's state is refused against it by shape.
         windfarm_grid=grid,
         **lake_physics_inputs(cfg, static),

@@ -6136,7 +6136,7 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
                 drop("physics", key, lightning_values[key],
                      "inert: lightning_option = 0 reads no lightning control")
         lightning_values = {}
-    # ---- wind farm (woof.core.windfarm_coupling) -------------------------
+    # ---- wind farm (wind_farm_scheme = "fitch_wrf", woof.core.wind_farm) --
     # WRF's &physics windfarm_opt is a max_domains column (Registry default
     # 0), windfarm_ij and windfarm_tke_factor scope-1 scalars (defaults 0
     # and 0.25).  woof ports windfarm_opt = 1 (Fitch) under MYNN, and reads
@@ -6183,7 +6183,7 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
                 and float(windfarm_tke) >= 0.0):
             raise _err("physics", "windfarm_tke_factor", windfarm_tke_raw,
                        "must be a finite number >= 0 (WRF's default 0.25).")
-    windfarm_shared: list[str] = []
+    windfarm_turbine_list = None
     if any(windfarm_column):
         # The MAV scheme's own keys (windfarm_deg, windfarm_wake_model,
         # windfarm_overlap_method): with the Fitch scheme on they would be
@@ -6198,15 +6198,17 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
                            "(windfarm_opt = 2), which is not ported; the "
                            "Fitch scheme (windfarm_opt = 1) does not read it. "
                            "Remove it.")
-        turbine_list = Path(input_path).resolve().parent / (
+        # WRF opens windturbines-ij.txt at windfarm_ij = 1 and
+        # windturbines.txt at 0 (module_wind_fitch.F:91-95); the list's name
+        # carries the mode to wind_farm_scheme = "fitch_wrf"
+        # (woof.config.wrf_turbine_list_ij).
+        windfarm_turbine_list = Path(input_path).resolve().parent / (
             "windturbines-ij.txt" if windfarm_ij else "windturbines.txt")
-        windfarm_shared.append(
-            f"windfarm_turbine_file = {_toml_string(str(turbine_list))}")
-        if windfarm_ij:
-            windfarm_shared.append("windfarm_ij = 1")
-        if float(windfarm_tke) != 0.25:
-            windfarm_shared.append(
-                f"windfarm_tke_factor = {_fmt(float(windfarm_tke))}")
+        fix("physics", "windfarm_opt", windfarm_column, windfarm_column,
+            'WRF v4.7.1\'s Fitch scheme word for word (wind_farm_scheme = '
+            '"fitch_wrf" on each domain it is on): GPU drag and '
+            "turbine-added TKE in MYNN's QKE, turbines from "
+            f"{windfarm_turbine_list.name} beside namelist.input")
     else:
         for key, raw in (("windfarm_ij", windfarm_ij_raw),
                          ("windfarm_tke_factor", windfarm_tke_raw)):
@@ -6277,28 +6279,9 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
         radar_tendency_domains=frozenset(
             int(gid) for gid in wrfinput_radar_tendency_domains),
         grid_ids=tuple(grid_ids[:max_dom]))
-    windfarm_col = [0] * max_dom
-    windfarm_tke_factor = 0.25
-    if any(value != 0 for value in ph.entries.get("windfarm_opt", [])):
-        windfarm_col = ph.col("windfarm_opt", max_dom, 0)
-        if any(type(value) is not int or value not in (0, 1) for value in windfarm_col):
-            raise _err("physics", "windfarm_opt", windfarm_col,
-                       "only 0 (off) and 1 (Fitch) are implemented; MAV option 2 requires subgrid wakes that this coupling does not calculate")
-        if any(option and pbl != 5 for option, pbl in zip(windfarm_col, bl_pbl_col)):
-            raise _err("physics", "windfarm_opt", windfarm_col,
-                       "Fitch requires MYNN bl_pbl_physics=5; other PBL schemes do not receive the turbine TKE source")
-        ij = ph.take("windfarm_ij")
-        if ij is not None and any(value != 0 for value in ij):
-            raise _err("physics", "windfarm_ij", ij,
-                       "grid-index turbine ownership is not mapped across nested domains; use geographic windturbines.txt and windfarm_ij=0")
-        factor = ph.take("windfarm_tke_factor")
-        if factor is not None:
-            windfarm_tke_factor = _uniform("physics", "windfarm_tke_factor", factor)
-            if isinstance(windfarm_tke_factor, bool) or not isinstance(windfarm_tke_factor, (int, float)) or not math.isfinite(windfarm_tke_factor) or windfarm_tke_factor < 0:
-                raise _err("physics", "windfarm_tke_factor", factor,
-                           "must be finite and nonnegative to prevent a negative or nonfinite TKE source")
-        fix("physics", "windfarm_opt", windfarm_col, windfarm_col,
-            "Fitch GPU drag and turbine-added TKE; geographic windturbines.txt beside namelist.input")
+    # Upstream's wind-farm emission reads these two names.
+    windfarm_col = list(windfarm_column)
+    windfarm_tke_factor = float(windfarm_tke)
     _consume_unported_package_selectors(ph, "physics", max_dom, drop)
     ph.finish()
 
@@ -7295,9 +7278,6 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
         lines.append(f"{_topo_key} = {_topo_col[0]}")
     for _drag_key, _drag_col in terrain_drag_columns.items():
         lines.append(f"{_drag_key} = {_drag_col[0]}")
-    if any(windfarm_column):
-        lines.append(f"windfarm_opt = {windfarm_column[0]}")
-        lines += windfarm_shared
     if shadlen is not None:
         lines.append(f"shadlen = {_fmt(shadlen)}")
     lines += [
@@ -7545,7 +7525,8 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
         if bl_pbl_col[n] != bl_pbl_col[0]:
             lines.append(f"bl_pbl_physics = {bl_pbl_col[n]}")
         if windfarm_col[n]:
-            lines.append("wind_farms = " + _toml_string(str(Path(input_path).resolve().parent / "windturbines.txt")))
+            lines.append('wind_farm_scheme = "fitch_wrf"')
+            lines.append("wind_farms = " + _toml_string(str(windfarm_turbine_list)))
         # The km_opt=2/3 turbulence parameter row, same rule: c_k on an
         # LES child beside its parents' default is the case that opened
         # this path (see the read side above).
@@ -7577,8 +7558,6 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
         for key, column in precipitation_columns.items():
             if column[n] != column[0]:
                 lines.append(f"{key} = {_fmt(column[n])}")
-        if any(windfarm_column) and windfarm_column[n] != windfarm_column[0]:
-            lines.append(f"windfarm_opt = {windfarm_column[n]}")
         # The adaptive clock's max_domains targets and clamps, same rule.
         for _clock_key, _, _ in ADAPTIVE_CLOCK_COLUMNS:
             _clock_col = adaptive_columns[_clock_key]

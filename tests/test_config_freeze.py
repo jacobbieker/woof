@@ -96,18 +96,6 @@ def test_new_fields_are_reviewed_defaults_appended_last():
     """
     from woof.config import CHEM_RUN_FIELDS, FIRE_RUN_FIELDS
     names = [f.name for f in dataclasses.fields(RunConfig)]
-    # WRF's windfarm_opt and its companions (the fork's Fitch coupling),
-    # appended off after upstream's fields: no turbine is placed and nothing
-    # launches (tests/test_windfarm_coupling.py).  windfarm_tke_factor is
-    # upstream's field, shared.
-    assert names.pop() == "windfarm_turbine_file"
-    assert RunConfig.__dataclass_fields__["windfarm_turbine_file"].default == ""
-    assert names.pop() == "windfarm_ij"
-    assert RunConfig.__dataclass_fields__["windfarm_ij"].default == 0
-    assert names.pop() == "windfarm_opt"
-    assert RunConfig.__dataclass_fields__["windfarm_opt"].default == 0
-    for name in ("windfarm_opt", "windfarm_ij", "windfarm_turbine_file"):
-        assert RunConfig.__dataclass_fields__[name].kw_only, name
     # fix/hailcast, keyword-only and appended last: the HAILCAST generation
     # (operational HRRR v4's by default; output-only).
     assert names.pop() == "hailcast_version"

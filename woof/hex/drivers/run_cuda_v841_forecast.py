@@ -576,12 +576,12 @@ def _rebind_soil_levels(levels: int) -> None:
 
 def _windfarm_interior_columns(mesh: Any, *, is_regional: bool, physics: Any):
     """The physics columns a wind farm may stand in, or ``None`` with the
-    wind farm off (woof.hex.windfarm.interior_columns)."""
+    wind farm off (woof.hex.wind_farm.interior_columns, fitch_wrf)."""
 
     engine = getattr(physics, "engine_physics", None) or {}
-    if not int(engine.get("windfarm_opt", 0) or 0):
+    from woof.hex.wind_farm import interior_columns, wrf_fitch_physics
+    if not wrf_fitch_physics(engine):
         return None
-    from woof.hex.windfarm import interior_columns
 
     return interior_columns(mesh, is_regional=is_regional)
 
@@ -647,7 +647,7 @@ def _suite_host(
         )
     extra = {}
     if interior_column is not None:
-        # Read by windfarm_opt = 1 alone (woof.hex.windfarm); an adapter that
+        # Read by wind_farm_scheme = "fitch_wrf" alone (woof.hex.wind_farm); an adapter that
         # predates it is handed exactly the keywords it was handed before.
         extra["interior_column"] = interior_column
     mapped = adapter.constructor_values_for(
@@ -3715,7 +3715,7 @@ def execute_forecast(
                                                       tables=_Namespace(rate=1))])
         balance.sample(balance_view, float(start_step) * float(DT_SECONDS), cp)
     static = proof._static_output_fields(host)
-    # WRF's windfarm_opt = 1 (woof.hex.windfarm): the per-turbine power
+    # wind_farm_scheme = "fitch_wrf" (woof.hex.wind_farm): the per-turbine power
     # window, folded by the physics seam every step, published beside every
     # history frame.  Nothing exists with the wind farm off.
     windfarm_power = getattr(stack["backend"], "windfarm_power", None)

@@ -3315,7 +3315,8 @@ CHAINED_TRANSLATION_UNIT_FRAMES: dict[str, ChainedTranslationUnitFrame] = {
         module="terrain_drag_composed",
         max_local_size_bytes=2208,
         covers=frozenset({"terrain_drag"})),
-    # The Fitch wind-farm drag (WRF windfarm_opt = 1): glibc_flt32.cuh +
+    # The WRF Fitch wind-farm drag (wind_farm_scheme = "fitch_wrf", WRF's
+    # windfarm_opt = 1): glibc_flt32.cuh +
     # glibc_trig_flt32.cuh + windfarm_fitch.cu through
     # woof/core/windfarm_fitch.py's direct NVRTC loader.  fitch_column keeps
     # no per-level arrays: 0 B local through the loader on an RTX A6000
@@ -3352,7 +3353,7 @@ CHAINED_TRANSLATION_UNIT_FRAMES: dict[str, ChainedTranslationUnitFrame] = {
         module="nest_vertical_composed",
         max_local_size_bytes=0,
         covers=frozenset({"nest_vertical"})),
-    # hex's wind farm (woof.hex.windfarm): glibc_flt32.cuh +
+    # hex's fitch_wrf wind farm (woof.hex.wind_farm): glibc_flt32.cuh +
     # glibc_trig_flt32.cuh + windfarm_fitch.cu + windfarm_fitch_cells.cu
     # through woof/core/windfarm_fitch.py's _cells_module.
     # fitch_column_cells, like fitch_column, keeps no per-level array: 0 B
@@ -3910,7 +3911,7 @@ def domain_kernel_modules(dc: DomainConfig, *,
         modules.add("terrain_drag_composed")
     if int(getattr(dc.run, "zadvect_implicit", 0) or 0) > 0:
         modules.add("ieva")                    # A158, woof/core/ieva.py
-    if int(getattr(dc.run, "windfarm_opt", 0) or 0):
+    if getattr(dc.run, "wind_farm_scheme", "off") == "fitch_wrf":
         modules.add("windfarm_fitch_composed")  # woof/core/windfarm_fitch.py
     # WRF swint_opt = 1 (woof/core/swint.py) and aer_opt = 3 on the
     # legacy RRTMG shortwave (woof/core/rrtmg_aerosol_optics.py).
@@ -5490,7 +5491,7 @@ def physics_array_shapes(cfg: RunConfig, *, cam_ozone: bool = False,
     from woof.core.physics_inventory import (
         PBL_OPTIONAL_TENDENCIES, terrain_drag_array_shapes)
     shapes.update(terrain_drag_array_shapes(cfg))
-    # WRF's windfarm_opt = 1 (woof.core.windfarm_coupling): POWER in the
+    # wind_farm_scheme = "fitch_wrf" (woof.core.windfarm_coupling): POWER in the
     # serialized fields and the turbine layout, uploaded once.
     from woof.core.windfarm_coupling import windfarm_array_shapes
     shapes.update(windfarm_array_shapes(cfg))

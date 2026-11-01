@@ -509,19 +509,21 @@ refused by name.
 
 The diagnostic above reads the turbines' power curves at the resolved
 wind; it does not slow the flow. The turbines' own effect on the flow is
-WRF's Fitch scheme, `windfarm_opt = 1` (see
-[CONFIGURATION.md](CONFIGURATION.md#wind-farms)), which writes WRF's own
-row on every domain where it runs:
+the Fitch scheme, `wind_farm_scheme` `fitch` or `fitch_wrf` (WRF's
+`windfarm_opt = 1` word for word; see [the wind-farm guide](../wind-farms.md)),
+which writes this row on every domain where it runs:
 
 | variable | units | meaning |
 |---|---|---|
-| `POWER` | W | `Power production` (Registry.EM_COMMON:413): each mass cell's turbine power from the last PBL call, summed over the cell's turbines; `Time, south_north, west_east` |
+| `POWER` | W | each mass cell's turbine power from the last PBL call, summed over the cell's turbines (WRF's Registry.EM_COMMON:413 row under `fitch_wrf`); `Time, south_north, west_east` |
 
-It is absent with the scheme off. `POWER` is WRF's power-table value at the
+It is absent with the scheme off; `fitch` also writes upstream's per-turbine
+and per-farm rows (`TURBINE_POWER`, `FARM_POWER`, ...). `POWER` is WRF's power-table value at the
 hub-height wind of the model's own (waked) flow, so a farm's downstream
 rows read less than its front row. The `windfarm` preset keeps it.
 
-On hex (`woof hex forecast` with `--physics windfarm_opt=1`) the frame
+On hex (`woof hex forecast` with `--physics wind_farm_scheme=fitch_wrf
+--physics wind_farms=FILE`) the frame
 field is `power` (`Time, nCells`, W), and a woof turbine table also writes
 the `windfarm_d01_<time>.nc` sidecar above beside every history frame. Its
 window folds once per step, on the post-dynamics state before microphysics

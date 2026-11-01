@@ -1991,6 +1991,11 @@ def _prepare_atmosphere_fused(state: DomainState):
         # scalar WRF power, the reciprocal-first rho); the fused body is the
         # default arithmetic only, so strict runs keep the unfused chain.
         return None
+    if getattr(state, "dnw", None) is None:
+        # A column state without eta layer weights (the fork's generic
+        # column seam, woof.core.mpas_column_suite._GenericColumnState)
+        # keeps the unfused chain, which never reads dnw.
+        return None
     nz, ny, nx = state.p.shape
     species = tuple(name for name in ("qv", "qc", "qr", "qi", "qs", "qg", "qh")
                     if getattr(state, name, None) is not None)
@@ -2145,10 +2150,10 @@ class PhysicsDriver:
     #: WRF's topo_wind or gwd_opt (initialize_physics attaches it); ``None``
     #: keeps every other domain's PBL call untouched.
     terrain_drag: object | None = None
-    #: :class:`woof.core.windfarm_coupling.WindFarm` when this domain runs
-    #: WRF's windfarm_opt = 1 (initialize_physics attaches it); ``None``
-    #: keeps every other domain's PBL call untouched.
-    windfarm: object | None = None
+    #: The domain's turbines (woof.core.wind_farm: upstream's
+    #: :class:`WindFarm`, or :class:`WrfFitchFarm` for WRF v4.7.1's
+    #: ``fitch_wrf``) when ``wind_farm_scheme`` is on; ``None`` keeps every
+    #: other domain's PBL call untouched.
     wind_farm: object | None = None
 
     #: CLASS DEFAULTS for the three bookkeeping slots the hot path reads
@@ -2217,9 +2222,9 @@ class PhysicsDriver:
         # WRF's topo_wind / gwd_opt; initialize_physics attaches it where
         # either is on (restart: rebuilt from the prepared statics).
         self.terrain_drag = None
-        # WRF's windfarm_opt = 1; initialize_physics attaches it where it is
-        # on (restart: rebuilt from the turbine file; POWER rides fields).
-        self.windfarm = None
+        # wind_farm_scheme; initialize_physics attaches it where it is on
+        # (restart: rebuilt from the turbine input; fitch_wrf's POWER rides
+        # fields).
         self.wind_farm = None
         self.wind_farm_detection = None
         # WRF's swint_opt = 1 carrier (woof.core.swint); initialize_physics
@@ -4138,13 +4143,6 @@ class PhysicsDriver:
         that a PBL scheme added later cannot be wired up correctly and
         still silently starve the cumulus scheme.
         """
-        # WRF's windfarm_opt = 1 (woof.core.windfarm_coupling): the PBL
-        # driver calls dragforce right after the PBL scheme and BEFORE the
-        # orographic drag (module_pbl_driver.F:2045-2125, then :2129), adding
-        # into RUBLTEN/RVBLTEN and the QKE the scheme just wrote.
-        farm = getattr(self, "windfarm", None)
-        if farm is not None:
-            self._apply_windfarm(farm, cfg, rates, atmosphere)
         # WRF's gwd_opt (woof.core.terrain_drag): the orographic drag joins
         # RUBLTEN/RVBLTEN right after the PBL scheme, in the PBL driver
         # (module_pbl_driver.F:2129-2185), on the same pre-PBL winds and
@@ -4187,29 +4185,6 @@ class PhysicsDriver:
                                   or "dqi" not in rates) else
                         {name: value for name, value in rates.items() if name != "dqi"})
         return couple_ysu_tendencies(active_state, cfg, active_rates)
-
-    def _apply_windfarm(self, farm, cfg: RunConfig,
-                        rates: Mapping[str, cp.ndarray],
-                        atmosphere: Mapping[str, cp.ndarray] | None) -> None:
-        """WRF's ``dragforce`` call: the turbines' drag into the PBL slot's
-        A-grid momentum rates, their TKE into MYNN's QKE, POWER written.
-
-        ``DT=dt`` is the model step (module_pbl_driver.F:2056), not the PBL
-        interval: WRF adds one model step's TKE per PBL call.  The step is
-        ``cfg.dt``, the interval this slot's cadence is counted in (an
-        adaptive clock rewrites it per step), not the clock_dt of the
-        reference-case integrator, whose internal substeps each call the
-        PBL slot.
-        """
-        if atmosphere is None:
-            raise RuntimeError(
-                "windfarm_opt = 1 reached the PBL coupling seam without the "
-                "step's phy_prep atmosphere; the PBL scheme's caller must "
-                "hand it over")
-        du, dv = _pbl_momentum_targets(rates, "windfarm_opt")
-        f = self.fields
-        farm.apply(atmosphere, du, dv, qke=f["qke"], power=f["power"],
-                   dx=float(cfg.dx), dt=float(cfg.dt))
 
     def _apply_gwd(self, drag, cfg: RunConfig,
                    rates: Mapping[str, cp.ndarray],
@@ -4975,7 +4950,11 @@ class PhysicsDriver:
                if cfg.bl_mynn_version != "wrf_461" else {}))
         validate_mynn_tendencies(out)
         if self.wind_farm is not None:
-            self.wind_farm.apply_mynn(atmosphere, f, out, step_seconds=self.bldt_seconds)
+            # The turbines (wind_farm_scheme) right after MYNN and BEFORE the
+            # orographic drag the slot coupling adds: WRF's PBL driver calls
+            # dragforce there (module_pbl_driver.F:2045-2125, then :2129).
+            self.wind_farm.apply_mynn(atmosphere, f, out, step_seconds=self.bldt_seconds,
+                                      cfg=cfg)
         self.pbl_tendencies = self._couple_pbl_slot(
             cfg, out, atmosphere=atmosphere)
         if mixing_qn:
@@ -6828,59 +6807,6 @@ def _pbl_momentum_targets(rates, option: str):
     return targets
 
 
-def _is_cell_placement(grid) -> bool:
-    from woof.core.windfarm_coupling import _is_cells
-    return _is_cells(grid)
-
-
-def _attach_windfarm(state, cfg, fields, grid):
-    """The domain's :class:`woof.core.windfarm_coupling.WindFarm`.
-
-    ``grid`` is the domain's projected grid (lat/lon placement needs it).
-    Refused by name when the route hands a grid for other columns than this
-    state's (a streamed slab, a tile, a rank's window): the layout's cell
-    indices are whole-domain columns.
-    """
-    from woof.core.windfarm_coupling import WindFarmRefused, build_windfarm
-
-    shape = tuple(int(n) for n in state.mup.shape)
-    where = (f"windfarm_opt = 1 on grid_id = {cfg.grid_id} "
-             f"(windfarm_turbine_file = {cfg.windfarm_turbine_file!r})")
-    if grid is None:
-        raise ValueError(
-            f"{where}: this initialization route hands the physics no "
-            "projected grid, so the turbines cannot be placed and nothing "
-            "says this state holds the whole domain.  [tiles] / streamed "
-            "tile buffers, the offline child, the WRF-input route and the "
-            "idealized harnesses are such routes; the wind farm runs on a "
-            "resident real-case domain (woof go, the prepared single-domain "
-            "and domain-tree forecasts without [tiles]), which passes the "
-            "domain's grid.")
-    elif _is_cell_placement(grid):
-        # An unstructured mesh's columns (woof.windfarm.cells.CellPlacement,
-        # hex's generic column seam): one row of columns, each its own area.
-        if tuple(grid.shape) != shape:
-            raise ValueError(
-                f"{where}: this state's columns are {shape} and the mesh "
-                f"placement holds {tuple(grid.shape)}; the wind farm's cells "
-                "are whole-mesh columns.")
-    else:
-        grid_shape = (int(grid.e_sn) - 1, int(grid.e_we) - 1)
-        if grid_shape != shape:
-            raise ValueError(
-                f"{where}: this state's columns are {shape} and the domain's "
-                f"mass grid is {grid_shape} (a streamed slab, a tile or a "
-                "rank's window).  The wind farm's cells are whole-domain "
-                "columns, so it runs on a resident single-device domain "
-                "only; run without [tiles] / streaming, on one device.")
-    try:
-        farm = build_windfarm(cfg, shape=shape, grid=grid)
-    except WindFarmRefused as error:
-        raise ValueError(f"{where}: {error}") from error
-    fields["power"] = cp.zeros(shape, dtype=DTYPE)
-    return farm
-
-
 def initialize_physics(
         state: DomainState, cfg: RunConfig, *, landmask=1.0, tsk=300.0,
         soil_temperature=285.0, soil_moisture=0.30, liquid_moisture=None,
@@ -6993,12 +6919,11 @@ def initialize_physics(
         sf_urban_physics=cfg.sf_urban_physics)
     if terrain_drag_why is not None:
         raise ValueError(terrain_drag_why)
-    from woof.config import windfarm_refusal
-    windfarm_why = windfarm_refusal(
-        windfarm_opt=getattr(cfg, "windfarm_opt", 0),
-        windfarm_ij=getattr(cfg, "windfarm_ij", 0),
+    from woof.config import wrf_fitch_refusal
+    windfarm_why = wrf_fitch_refusal(
+        wind_farm_scheme=getattr(cfg, "wind_farm_scheme", "off"),
+        wind_farm_table=getattr(cfg, "wind_farm_table", ""),
         windfarm_tke_factor=getattr(cfg, "windfarm_tke_factor", 0.25),
-        windfarm_turbine_file=getattr(cfg, "windfarm_turbine_file", ""),
         bl_pbl_physics=cfg.bl_pbl_physics)
     if windfarm_why is not None:
         raise ValueError(windfarm_why)
@@ -7888,13 +7813,16 @@ def initialize_physics(
     if int(getattr(cfg, "topo_wind", 0) or 0)             or int(getattr(cfg, "gwd_opt", 0) or 0):
         driver.terrain_drag = _attach_terrain_drag(
             state, cfg, f, terrain_drag_static)
-    # WRF's windfarm_opt = 1 (woof.core.windfarm_coupling): the turbines
-    # placed on this domain and uploaded once, and WRF's POWER plane in the
-    # serialized fields.  Only where it is on, so every other driver is
-    # built exactly as before.
-    if int(getattr(cfg, "windfarm_opt", 0) or 0):
-        driver.windfarm = _attach_windfarm(state, cfg, f, windfarm_grid)
-    if cfg.wind_farm_scheme != "off":
+    # wind_farm_scheme = "fitch_wrf" (WRF v4.7.1's windfarm_opt = 1, word
+    # for word): the turbines placed on this domain (its projected grid, or
+    # an unstructured mesh's columns) and uploaded once, and WRF's POWER
+    # plane in the serialized fields.  Any other scheme is upstream's.  Only
+    # where one is on, so every other driver is built exactly as before.
+    if cfg.wind_farm_scheme == "fitch_wrf":
+        from woof.core.windfarm_coupling import attach_wrf_fitch
+        driver.wind_farm, driver.wind_farm_detection = attach_wrf_fitch(
+            state, cfg, f, windfarm_grid)
+    elif cfg.wind_farm_scheme != "off":
         if getattr(state, "_tile_buffer", False) or state.p.shape != (cfg.nz, cfg.ny, cfg.nx):
             raise ValueError("wind farms currently require a resident whole domain; tiled/ranked turbine ownership is not implemented")
         from woof.core.wind_farm import attach_wind_farm
@@ -7994,9 +7922,11 @@ def initialize_physics(
     attach_atmosphere(driver, cfg,
         latitude=radiation_latitude if radiation_latitude is not None else noahmp_latitude,
         longitude=radiation_longitude if radiation_longitude is not None else noahmp_longitude)
-    if driver.wind_farm is not None:
+    if driver.wind_farm is not None and driver.wind_farm.scheme != "fitch_wrf":
         # Initial-time power and hub wind are diagnostics of the initial state.
         # Sampling applies no momentum or TKE tendency before the first step.
+        # (fitch_wrf writes POWER only inside dragforce, as WRF does, and the
+        # generic column seam's state carries no staggered winds to sample.)
         driver.wind_farm.sample(_prepare_atmosphere(state), f)
     return driver
 
