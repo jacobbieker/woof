@@ -382,9 +382,10 @@ IMPLEMENTED: dict[str, dict] = {
     "wind_farms": {
         "type": "string", "default": "",
         "per_domain": True, "component_id": "pbl",
-        "read_when": {"wind_farm_scheme": "fitch_wrf"},
-        # fitch_wrf with no turbines is refused (validate_run_config,
-        # woof.config.wrf_fitch_refusal); upstream's fitch reads it too.
+        "read_when": {"wind_farm_scheme": ["fitch", "fitch_wrf"]},
+        # Either scheme with no turbines is refused by validate_run_config
+        # (upstream's woof.wind_table.validate_config for fitch,
+        # woof.config.wrf_fitch_refusal for fitch_wrf).
         "active_value_policy": "required-when-read",
         "warnings": ["The turbines: uswtdb (the US Wind Turbine Database, "
                      "fitch only), a WRF windturbines.txt (lat lon type) or "
