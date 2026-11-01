@@ -565,9 +565,12 @@ def build_parser(*, render_only: bool = False, preset_only: bool = False,
     if go_only:
         # Use the complete go registrar without importing unrelated products.
         go_register_cli(sub)
+        # The full surface sweeps --explain onto every subcommand before it
+        # adds --accept-licence; the same order keeps `woof go --help`
+        # identical on both parsers.
+        add_explain_flag(sub.choices["go"])
         from woof.earth2_licensing import add_licence_argument
         add_licence_argument(sub.choices["go"])
-        add_explain_flag(sub.choices["go"])
         return parser
     if run_only:
         # A native forecast does not need to import every product's parser.
