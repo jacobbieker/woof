@@ -1090,7 +1090,10 @@ def _archive_test_cycle(source):
         return f"{ukv_source.COVERAGE_START:%Y-%m-%dT%H}"
     if fetch.native_cf_fetch_contract(source) is not None:
         return cf_archive_fetch.row(fetch_routes.canonical_source(source))["coverage_start"][:13]
-    return "2026-08-17T00"
+    # A route row plans only inside its publication era and a cycle some
+    # host holds: the shared cycle moves there, decided from the row.
+    from route_cycle_fit import route_cycle_text
+    return route_cycle_text(source, "2026-08-17T00")
 
 
 def _emit_domain(tmp_path, source, accepted=()):

@@ -58,7 +58,11 @@ def cycle_for(source, default=WALK_CYCLE):
     try:
         metadata = cf_archive_fetch.row(source)
     except KeyError:
-        return default
+        # A fetch route row plans only inside its publication era and a
+        # cycle some host holds (route_cycle_fit); the same rule, read
+        # from that row.
+        from route_cycle_fit import route_cycle_text
+        return route_cycle_text(source, default, "%Y%m%d%H")
     first = datetime.fromisoformat(metadata["coverage_start"])
     last = datetime.fromisoformat(metadata["coverage_end"])
     wanted = datetime.strptime(default, "%Y%m%d%H")

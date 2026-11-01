@@ -572,9 +572,19 @@ def test_real_planner_declared_hardware_no_gpu_probe(monkeypatch):
     # against a card that holds the tree resident cost the whole middle of
     # this sweep: 5 and 6 GiB were REFUSED outright, 7.25 and 7.5 GiB were
     # REDUCED (to 130x104 and 160x128), and only 8 and 12 GiB admitted the
-    # requested ground.  5 GiB now proposes a real smaller layout and every
-    # rung above it admits the request, which `unreduced` below pins.
+    # requested ground.  5 GiB then proposed a real smaller layout and every
+    # rung above it admitted the request.  Since 1.1.0 the reducing rung is
+    # 6 GiB (180x144) and 5 GiB refuses (even the smallest rung, 130x104,
+    # prices over its fit target there): HAILCAST switches on by
+    # itself on the 3 km Morrison nest (`hailcast_opt = -1`, dx <= 4 km,
+    # docs/public/HAIL-DIAMETER.md), so the 7,392 B `hail` frame becomes
+    # the widest local frame the reservation is sized to, and 1.1.1's
+    # 128 MiB Morrison WORK floor (`morrison_constants.WORK_FLOOR_BYTES`)
+    # takes small domains' WORK stack whole.  Read at 3, 5, 6, 6.25, 6.5,
+    # 6.75, 7, 7.25, 7.5, 8 and 12 GiB: 6 and 6.25 reduce, 6.5 up admit.
+    # `unreduced` below pins the admitted rungs, `reduced` the reducing one.
     unreduced = set()
+    reduced = set()
     for free_gib in (3., 5., 6., 7.25, 7.5, 8., 12.):
         free = int(free_gib * GIB)
         sizing = dw.SizingBudget(free_gib + .75, free, None, "CPU declaration", measured=False)
@@ -592,13 +602,16 @@ def test_real_planner_declared_hardware_no_gpu_probe(monkeypatch):
         assert priced.peak_envelope_bytes <= budget - result["memory"]["fit_headroom_bytes"]
         assert tc.plan_cyclone(**INTENT, sizing=sizing, target_machine=machine) == result
         found_reduction |= result["fitting"]["changed"]
-        if not result["fitting"]["changed"]:
+        if result["fitting"]["changed"]:
+            reduced.add(free_gib)
+        else:
             unreduced.add(free_gib)
             assert result["streaming"]["road"] == "resident"
             assert result["fitting"]["proposed_dimensions"] == [
                 list(tc.ROOT_DIMS), list(tc.CHILD_DIMS)]
     assert found_reduction, "declared hardware sweep must exercise an actual reduced plan"
-    assert {6., 7.25, 7.5, 8., 12.} <= unreduced
+    assert reduced == {6.}
+    assert {7.25, 7.5, 8., 12.} <= unreduced
 
 
 def test_real_fixed_floor_excludes_grid_sized_column_workspaces():
@@ -897,30 +910,69 @@ def test_a_refusal_names_the_resident_layout_it_measured(monkeypatch, hardware):
 #: gigabyte of budget lower, refused a SMALLER pole-reaching rung for
 #: exactly that reason.  Reproduced on the real door at --point=82,-20:
 #: 9 GiB emitted 200x160 (unpreparable), 8.45 GiB proposed 160x128.
+#:
+#: From 1.1.0 that point is no longer a bound at all: the door's `auto`
+#: projection puts it on polar stereographic, which is regular through
+#: its hemisphere's pole with periodic source and static donors
+#: (`dw._pole_clearance_refusal`, `dw.point_request_bound` exempt
+#: `polar`), so the requested 200x160 is authored as asked.  The pole
+#: bound is a LAMBERT bound, and a cyclone parent (200 x 12 km, under
+#: the 6,000 km point cap) reaches no other, so the cells below that
+#: exercise the door's handling of a request bound pin the projection
+#: choice to Lambert (`lambert_projection`), which is what
+#: `--projection lambert` selects on the wizard's point door.  The
+#: geometry, the bound and the ladder stay the real ones.
 POLAR = dict(INTENT, point=(82., -20.))
 
 
-def test_a_polar_request_is_sized_off_the_pole_not_emitted_into_it(
+@pytest.fixture
+def lambert_projection(monkeypatch):
+    real = dw._projection_entries
+    monkeypatch.setattr(
+        dw, "_projection_entries",
+        lambda lat, lon, choice="auto": real(
+            lat, lon, "lambert" if choice == "auto" else choice))
+
+
+def test_a_polar_request_is_authored_through_the_pole_on_polar_stereographic(
         monkeypatch, hardware):
     monkeypatch.setattr(dw, "_sizing_phases", lambda exp, **kw: phases(GIB))
     result = tc.plan_cyclone(**POLAR, **hardware)
 
+    assert result["kind"] == "configuration"
+    assert result["fitting"]["proposed_dimensions"] == [
+        list(tc.ROOT_DIMS), list(tc.CHILD_DIMS)]
+    assert result["fitting"]["stopped_by"] is None
+    projection = tomllib.loads(result["config_text"])["projection"]
+    assert projection["map_proj"] == "polar"
+    # It DOES enclose the pole, and that is no longer a bound: the
+    # projection is regular there.
+    assert dw._footprint_contains_pole(projection, *tc.ROOT_DIMS, tc.ROOT_DX_M)
+    assert dw.point_request_bound(projection, *tc.ROOT_DIMS, tc.ROOT_DX_M) is None
+
+
+def test_a_lambert_polar_request_is_sized_off_the_pole_not_emitted_into_it(
+        monkeypatch, hardware, lambert_projection):
+    monkeypatch.setattr(dw, "_sizing_phases", lambda exp, **kw: phases(GIB))
+    result = tc.plan_cyclone(**POLAR, **hardware)
+
     assert result["kind"] == "proposal"
-    assert result["fitting"]["proposed_dimensions"] == [[160, 128], [128, 128]]
+    assert result["fitting"]["proposed_dimensions"] == [[180, 144], [144, 144]]
     assert "reaches the north pole" in result["fitting"]["reason"]
     # The bound the SEARCH stopped on, carried out of the fitter rather
     # than re-derived from the emitted root.
     assert result["fitting"]["stopped_by"]["scope"] == dw.POINT_FIT_PROJECTION_SCOPE
-    assert "170 x 136" in result["fitting"]["stopped_by"]["reason"]
+    assert "190 x 152" in result["fitting"]["stopped_by"]["reason"]
     assert "The next larger layout was rejected on the PROJECTION" in         result["fitting"]["notice"]
     # The layout it proposes is one the pole guard passes -- which is the
     # whole point of shrinking rather than emitting.
     projection = tomllib.loads(result["config_text"])["projection"]
-    assert not dw._footprint_contains_pole(projection, 160, 128, tc.ROOT_DX_M)
+    assert projection["map_proj"] == "lambert"
+    assert not dw._footprint_contains_pole(projection, 180, 144, tc.ROOT_DX_M)
 
 
 def test_a_request_bound_reduction_is_never_offered_a_tile_mode(
-        monkeypatch, hardware):
+        monkeypatch, hardware, lambert_projection):
     """`--tiles off` moves where the bytes land, not where the domain
     sits.  Naming it against a bound no memory mode can fix would send
     the reader after a remedy that cannot help -- and the resident probe
@@ -935,6 +987,9 @@ def test_a_request_bound_reduction_is_never_offered_a_tile_mode(
 
     monkeypatch.setattr(dw, "_sizing_phases", price)
     result = tc.plan_cyclone(**POLAR, **hardware)
+    # A reduction the request bound made, or the gate below is vacuous.
+    assert result["fitting"]["changed"] is True
+    assert result["fitting"]["stopped_by"]["scope"] == dw.POINT_FIT_PROJECTION_SCOPE
     assert result["fitting"]["keeps_coverage"] is None
     assert "--tiles off" not in result["fitting"]["notice"]
     # And the probe was never even priced: no claim, and no cost.
@@ -960,16 +1015,20 @@ def test_a_request_bound_reduction_is_never_offered_a_tile_mode(
 #: a 7,730,941,132 byte budget), while `--tiles off` at that point and
 #: that budget authors 160x128 / 128x128 -- the layout auto had already
 #: proposed.  `fitting.keeps_coverage` carried the same false payload to
-#: a machine reader.
+#: a machine reader.  (On the Lambert projection the cells above pin, since
+#: 1.1.0 put this point on polar stereographic; there the pole stops the
+#: ladder past 180x144.)
 def test_a_polar_request_that_binds_on_memory_too_is_offered_no_tile_mode(
-        monkeypatch, hardware):
+        monkeypatch, hardware, lambert_projection):
     def price(exp, **kw):
         # The resident route ADMITS the unreduced domain here.  That is
         # the point: nothing about memory suppresses the claim, so what
         # the assertions below see is the request bound doing it.
         if is_resident_probe(exp):
             return phases(4 * GIB)
-        return phases(11 * GIB if exp.domains[0].run.nx > 170 else GIB)
+        # Memory binds exactly where the (Lambert) pole bound does: past
+        # 180x144.
+        return phases(11 * GIB if exp.domains[0].run.nx > 180 else GIB)
 
     monkeypatch.setattr(dw, "_sizing_phases", price)
     polar = tc.plan_cyclone(**POLAR, **hardware)
@@ -978,7 +1037,7 @@ def test_a_polar_request_that_binds_on_memory_too_is_offered_no_tile_mode(
     # And the notice still says what DID stop the fit, so withholding the
     # remedy does not cost the reader the reason.
     assert "reaches the north pole" in polar["fitting"]["notice"]
-    assert polar["fitting"]["proposed_dimensions"] == [[160, 128], [128, 128]]
+    assert polar["fitting"]["proposed_dimensions"] == [[180, 144], [144, 144]]
 
     # CONTROL: the same fixture, the same budget, the same refusal
     # resource -- one thing different, a point the request bound does not

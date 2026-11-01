@@ -78,7 +78,10 @@ def _plan_cycle(source: str) -> str:
     except (KeyError, ValueError):
         contract = None
     if contract is None:
-        return _PLAN_CYCLE
+        # A route row plans only inside its publication era and a cycle
+        # some host holds: the shared cycle moves there, read off the row.
+        from route_cycle_fit import route_cycle_text
+        return route_cycle_text(source, _PLAN_CYCLE)
     from woof.cf_archive_fetch import row
     end = datetime.fromisoformat(row(get_source_adapter(source).source_id)[
         "coverage_end"])
