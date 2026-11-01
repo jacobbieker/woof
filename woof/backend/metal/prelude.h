@@ -367,6 +367,8 @@ static inline float __woof_selmin(float a, float b) {
 static inline float fmin(float a, float b) { return fminf(a, b); }
 static inline float fmax(float a, float b) { return fmaxf(a, b); }
 static inline float ldexpf(float a, int n) { return metal::ldexp(a, n); }
+// FLT_RADIX is 2, so scalbnf is ldexpf.
+static inline float scalbnf(float a, int n) { return ldexpf(a, n); }
 static inline bool isnan(float a) { return metal::isnan(a); }
 static inline bool isinf(float a) { return metal::isinf(a); }
 static inline bool isfinite(float a) { return metal::isfinite(a); }
