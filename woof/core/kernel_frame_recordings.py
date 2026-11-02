@@ -786,6 +786,15 @@ SM86_NVRTC_13_4_92 = KernelFrameRecording(
         # .local_size_bytes), CuPy 14.2.0: 0 B, 72 registers -- and the
         # same 0 B / 72 registers under this box's NVRTC 12.9.
         'wind_gust_diag': 0,
+        # mp_physics = 40's unit, read 2026-11-02 with
+        # `tools/vram_reserve_probe.py frames`: 0 B, because the probe reads
+        # the symbols of morrison_aero.cu itself, which declares none (its
+        # entry points are morrison.cu's, composed as a header).  Read by
+        # their names through the production loader the composed kernels
+        # are 4096 B, this build's mp_physics = 10 morrison reading; the
+        # preflight prices them through the "morrison" row, which the
+        # mp_physics = 40 module list carries.
+        'morrison_aero': 0,
     }),
 )
 

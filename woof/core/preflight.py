@@ -2398,6 +2398,11 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     "milbrandt2_zet": 0,
     "mono_advection": 0,
     "morrison": 5120,
+    # mp_physics = 40's unit as the frame probe reads it (its kernels are
+    # morrison.cu's; see kernel_frame_recordings.SM86_NVRTC_13_4_92): the
+    # composed kernels' frame is priced by the "morrison" row, which
+    # _MICROPHYSICS_KERNEL_MODULES[40] lists beside it.
+    "morrison_aero": 0,
     "microphysics_validation": 0,
     "wsm5": 7072,  # sm_120, NVRTC 12.9.86, unflushed WSM5_KMAX=80, 2026-10-08.
     # MYJ.  0 B since 2026-10-12, on every compiler that could re-read it
