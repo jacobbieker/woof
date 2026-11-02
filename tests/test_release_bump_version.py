@@ -230,6 +230,6 @@ def test_wheel_doc_links_name_the_installed_release():
     from woof.docs_links import release_ref, tree_url
 
     assert release_ref("2.9.1") == "v2.9.1"
-    assert tree_url("blob", "2.9.1") == "https://github.com/FahrenheitResearch/arwen/blob/v2.9.1/"
+    assert tree_url("blob", "2.9.1") == "https://github.com/recastsystems/woof/blob/v2.9.1/"
     for untagged in ("0+unknown", "2.9.1.dev0", "2.9.1rc1"):
         assert release_ref(untagged) == "main"

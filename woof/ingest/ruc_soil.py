@@ -1163,7 +1163,10 @@ def preprocess_land_surface_soil(
     fields, land_receipt = convert_source_soil_moisture(
         fields, sf_surface_physics=scheme, soil_type=soil_type,
         landmask=landmask, lake_mask=lake_mask,
-        soil_layer_contract=soil_layer_contract)
+        soil_layer_contract=soil_layer_contract,
+        # The island column is already the target soil's field capacity,
+        # not source moisture: remapping it again moved RUC's 0.192 to 0.134.
+        no_source_land=soil_no_source_land)
     state = _route_land_surface_soil(
         fields, scheme=scheme, soil_type=soil_type,
         deep_soil_temperature=deep_soil_temperature, lake_mask=lake_mask,

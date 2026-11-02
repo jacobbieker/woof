@@ -84,7 +84,9 @@ def test_the_receipts_exist_and_describe_the_case_this_document_describes():
 
     # And the runs really were ArWen on the device the document names.
     run = _load(RECEIPTS / "arwen-mp28-a-run.json")
-    assert run["model"] == "woof" and run["mp_physics"] == 28
+    # The receipt is immutable: it records the engine under the name it
+    # carried when the run was made (gpuwm, before the woof rename).
+    assert run["model"] == "gpuwm" and run["mp_physics"] == 28
     assert (run["nx"], run["ny"], run["nz"]) == (120, 120, 40)
     assert run["dx"] == 2000.0 and run["steps"] == 600
     assert "5090" in run["device"], run["device"]

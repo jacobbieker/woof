@@ -169,6 +169,11 @@ def test_health_cuda_source_compiles_offline_with_nvrtc():
     assert ptx
 
 
+#: The default process's inventory.  The SCM surface forcing scalars and the
+#: raw PBL/cumulus history rates are carried only by the exact chain
+#: (GPUWM_WRF_EXACT: physics_inventory.scm_forcing_fields,
+#: history_tendency_rows); the RRTMG selector-4 boundary fluxes and the
+#: surface solar carriers (COSZEN, SWDDIR/SWDDNI/SWDDIF) are carried here.
 _REAL_DRIVER_INVENTORY = tuple("""
 u v w thp php mup
 p al alt qv qc qr
@@ -180,30 +185,33 @@ held.radiation.rqv held.radiation.rqc held.cumulus.ru held.cumulus.rv held.cumul
 held.cumulus.rqc held.cumulus.rqr held.cumulus.rqi held.cumulus.rqs held.rthratenlw held.rthratensw
 held.cu_nca held.cu_pratec held.cu_raincv held.cu_rates.rqccuten held.cu_rates.rqicuten held.cu_rates.rqrcuten
 held.cu_rates.rqscuten held.cu_rates.rqvcuten held.cu_rates.rthcuten held._pending_rainbl surface.acgrdflx surface.achfx
-surface.aclhf surface.acsnom surface.acsnow surface.albbck surface.albedo surface.br
-surface.canwat surface.cd surface.cda surface.chklowq surface.chs surface.chs2
-surface.ck surface.cka surface.cpm surface.cqs2 surface.dz8w1 surface.ebal
-surface.embck surface.emiss surface.exch_h surface.exch_m surface.fh surface.flhc
-surface.flqc surface.fm surface.glw surface.grdflx surface.gz1oz0 surface.hfx
-surface.hfx_force surface.hfx_force_tend surface.isltyp surface.ivgtyp surface.kpbl surface.lai
-surface.lakemask surface.landmask surface.lh surface.lh_force surface.lh_force_tend surface.mavail
-surface.mol surface.noahres surface.p_hyd surface.pblh surface.potevp surface.psfc
-surface.psih surface.psim surface.q2 surface.qfx surface.qgh surface.qsfc
-surface.qv1 surface.rainbl surface.refd_max surface.regime surface.reslin surface.rib
-surface.rmol surface.rqcblten surface.rqccuten surface.rqicuten surface.rqrcuten surface.rqscuten
-surface.rqvblten surface.rqvcuten surface.rthblten surface.rthcuten surface.rublten surface.rucuten
-surface.rvblten surface.rvcuten surface.sfcprs surface.sfcrunoff surface.sfctmp surface.sh2o
-surface.shdmax surface.shdmin surface.smcrel surface.smois surface.smstav surface.smstot
-surface.snoalb surface.snopcx surface.snotime surface.snow surface.snowc surface.snowh
-surface.sr surface.sst surface.sstsk surface.swdown surface.swnorm surface.t2
-surface.th2 surface.tmn surface.tsk surface.tsk_force surface.tsk_force_tend surface.tslb
-surface.u10 surface.udrunoff surface.ust surface.ustm surface.v10 surface.vegfra
-surface.wspd surface.xice surface.xicem surface.xland surface.z0 surface.znt
-surface.zol surface.microphysics.rainnc surface.microphysics.rainncv surface.microphysics.sr surface.microphysics.snownc surface.microphysics.snowncv
-surface.microphysics.graupelnc surface.microphysics.graupelncv held.scratch.cu_nca held.scratch.cu_pratec held.scratch.cu_rainc held.scratch.cu_raincv
-held.scratch.cu_rqccuten held.scratch.cu_rqicuten held.scratch.cu_rqrcuten held.scratch.cu_rqscuten held.scratch.cu_rqvcuten held.scratch.cu_rthcuten
-surface.microphysics.scratch.mp_graupelnc surface.microphysics.scratch.mp_graupelncv surface.microphysics.scratch.mp_rainnc surface.microphysics.scratch.mp_rainncv surface.microphysics.scratch.mp_snownc surface.microphysics.scratch.mp_snowncv
-surface.microphysics.scratch.mp_sr lbc.forcing_tables lbc.lbc_weights_0
+surface.aclhf surface.aclwdnb surface.aclwdnbc surface.aclwdnt surface.aclwdntc surface.aclwupb
+surface.aclwupbc surface.aclwupt surface.aclwuptc surface.acsnom surface.acsnow surface.acswdnb
+surface.acswdnbc surface.acswdnt surface.acswdntc surface.acswupb surface.acswupbc surface.acswupt
+surface.acswuptc surface.albbck surface.albedo surface.br surface.canwat surface.cd
+surface.cda surface.chklowq surface.chs surface.chs2 surface.ck surface.cka
+surface.coszen surface.cpm surface.cqs2 surface.dz8w1 surface.ebal surface.embck
+surface.emiss surface.exch_h surface.exch_m surface.fh surface.flhc surface.flqc
+surface.fm surface.glw surface.grdflx surface.gz1oz0 surface.hfx surface.isltyp
+surface.ivgtyp surface.kpbl surface.lai surface.lakemask surface.landmask surface.lh
+surface.lwdnb surface.lwdnbc surface.lwdnt surface.lwdntc surface.lwupb surface.lwupbc
+surface.lwupt surface.lwuptc surface.mavail surface.mol surface.noahres surface.p_hyd
+surface.pblh surface.potevp surface.psfc surface.psih surface.psim surface.q2
+surface.qfx surface.qgh surface.qsfc surface.qv1 surface.rainbl surface.refd_max
+surface.regime surface.reslin surface.rib surface.rmol surface.sfcprs surface.sfcrunoff
+surface.sfctmp surface.sh2o surface.shdmax surface.shdmin surface.smcrel surface.smois
+surface.smstav surface.smstot surface.snoalb surface.snopcx surface.snotime surface.snow
+surface.snowc surface.snowh surface.sr surface.sst surface.sstsk surface.swddif
+surface.swddir surface.swddni surface.swdnb surface.swdnbc surface.swdnt surface.swdntc
+surface.swdown surface.swnorm surface.swupb surface.swupbc surface.swupt surface.swuptc
+surface.t2 surface.th2 surface.tmn surface.tsk surface.tslb surface.u10
+surface.udrunoff surface.ust surface.ustm surface.v10 surface.vegfra surface.wspd
+surface.xice surface.xicem surface.xland surface.z0 surface.znt surface.zol
+surface.microphysics.rainnc surface.microphysics.rainncv surface.microphysics.sr surface.microphysics.snownc surface.microphysics.snowncv surface.microphysics.graupelnc
+surface.microphysics.graupelncv held.scratch.cu_nca held.scratch.cu_pratec held.scratch.cu_rainc held.scratch.cu_raincv held.scratch.cu_rqccuten
+held.scratch.cu_rqicuten held.scratch.cu_rqrcuten held.scratch.cu_rqscuten held.scratch.cu_rqvcuten held.scratch.cu_rthcuten surface.microphysics.scratch.mp_graupelnc
+surface.microphysics.scratch.mp_graupelncv surface.microphysics.scratch.mp_rainnc surface.microphysics.scratch.mp_rainncv surface.microphysics.scratch.mp_snownc surface.microphysics.scratch.mp_snowncv surface.microphysics.scratch.mp_sr
+lbc.forcing_tables lbc.lbc_weights_0
 """.split())
 
 

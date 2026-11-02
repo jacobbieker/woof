@@ -217,3 +217,19 @@ tests/test_g3_cu5_parity.py  needs a CUDA device; CPU legs skip this module, whi
 tests/test_fast_sbm_port_oracle.py  needs a C++ compiler (g++, c++ or clang++) on PATH to build the fast-SBM host replay library from tools/fast_sbm_host; the WRF fixtures ship, so every Linux leg with a compiler runs it (767819c79).
 tests/test_owner_identity_scan.py  needs the release cut tooling (tools/release/cut/drivers/owner_identity_scan.py), which RELEASE-EXCLUDE.txt drops from the public snapshot; every leg on the private tree runs it (7321ad1ea).
 tests/test_icechunk_door_gpu.py  needs a CUDA device, provider network, rw_icechunk and WOOF_ICECHUNK_CASE naming a domain-door TOML; a leased GPU leg runs the real go door and compares every native field at each snapshot.
+# Module-level skips the Recast WOOF tree added without an entry here,
+# declared when the hosted CPU lanes first ran this check (each with the
+# commit that added it).
+tests/test_metal_launch_ordering.py  needs the mlx package (an Apple-silicon Metal host, pixi environment mlx); the macOS mlx leg runs it, and no CUDA or Linux leg can (bba012177).
+tests/test_metal_mapped_host_memory.py  needs the mlx package (an Apple-silicon Metal host, pixi environment mlx); the macOS mlx leg runs it, and no CUDA or Linux leg can (198ab0d62).
+tests/test_metal_memory_order.py  needs the mlx package (an Apple-silicon Metal host, pixi environment mlx); the macOS mlx leg runs it, and no CUDA or Linux leg can (6db8a85a5).
+tests/test_metal_translation_gaps.py  needs the mlx package (an Apple-silicon Metal host, pixi environment mlx); the macOS mlx leg runs it, and no CUDA or Linux leg can (234f3525d).
+tests/test_posted_model_source.py  needs WOOF_POSTED_TEST_INPUTS naming real posted GRIB2 files and WOOF_POSTED_TEST_LIBRARY naming a built native GRIB2 reader, neither of which ships in this repository; a leg that stages both runs it (9c5ebdda9).
+tests/test_radtran_reference.py  needs a host C++ compiler (clang++, g++ or c++) on PATH to build the radiative-transfer reference; every hosted leg has one, so it runs there (cc980b540).
+tests/test_theta_m_whole_model.py  needs a CUDA device, and skips under GPUWM_WRF_EXACT=1 because the idealized base state is not the strict thb = 300 carrier; tests/test_bigstep_thetam_wrf471_parity.py grades the strict words (c783c9393).
+tests/test_tui_worker.py  runs woof/tui_worker.py as a child process, and the Recast WOOF tree leaves that worker out (tests/_woof_left_out.txt: woof/tui_worker.py), so the module skips by that named rule; the engine's tree, which ships the worker, runs every case.
+tests/test_cumulus_rain_number.py  needs CuPy and a CUDA device (it seeds the fed rain number on the card); CPU legs skip the module, which a leased GPU leg runs (6aed31a31).
+tests/test_nudging_gpu.py  needs WOOF_DOWNSCALE_GPU_TEST=1 inside a GPU pool lease: it runs the captured nudging operator on a CUDA device, which no hosted leg has (6aed31a31).
+tests/test_nudging_forecast_gpu.py  needs WOOF_DOWNSCALE_GPU_TEST=1 inside a GPU pool lease: it checks WRF's nudging masks and cadence on a CUDA device, which no hosted leg has (6aed31a31).
+tests/test_timeline_qualification_receipts.py  imports tools/timeline/verify_qualification.py, which imports the speed-lane bench harness (tools/bench), and RELEASE-EXCLUDE.txt drops that harness from the public export; the module skips by that rule there, and every development tree runs it.
+tests/test_host_backend.py  needs a host C++ compiler (clang++, g++ or c++) on PATH to build the host backend's kernels; every hosted leg has one, so it runs there (029d11853).

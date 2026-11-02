@@ -45,7 +45,7 @@
     "hailcast_support.cuh": "a6b82a22fc3d4a8071e1fcd83c3d39ed2d7e17c97f59878cc8dfd68e8787a817",
     "hailcast_wrf.cuh": "4cf483057a46b81514c2df4c0c0bc6d15a93a7a163b3a6cc308a825a226e9e73",
     "sinhf_flt32.cuh": "cff7b61810ad14c46916c9dbd864f26565ccab1c932c1780c856e307aa831827",
-    "acoustic.cu": "92d0a3e4bf0312e16ebcc4714a40729e0f9c67cceb794b2ccf07bbd85c51f745",
+    "acoustic.cu": "14f8d637ecfa54b7b8c19d80fc2bbf5ad5566f6fdc57b9671d0cfa8566f4331b",
     "corem_log10f.cuh": "bcede6f5758979b534bb73754310ad0e631db50b99a8fdcb7fd76f766241cdd5",
     "smag2d.cu": "731d7f64e86af2d17344be7328fda2a3ecfd4f2e22371f6093128ca2f3192500",
     "hailcast_wrf39.cuh": "1057e2bde6bebbc2632ad1921afd2246d6f35753e74b12c30b085529160ebc1b",

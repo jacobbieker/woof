@@ -349,6 +349,12 @@ def test_actual_toml_planner_connects_to_runtime_without_gpu_launch(tmp_path):
     from woof.nwpsuite.validator import load_suite
     suite = load_suite(ROOT / "configs/suites/us-1box.toml")
     suite["system"] = [next(r for r in suite["system"] if r["id"] == "cam-det")]
+    # The template's 500 GB disk floor is a deployment's policy and reads
+    # the free space of whatever disk holds tmp_path; a workstation or a
+    # hosted runner holds far less, and the run then halts every row on
+    # "disk_floor" (exit 2) before the launch this test is about.  The
+    # floor's own halt is exercised in test_nwpsuite_runtime.py.
+    suite["defaults"]["retention"]["disk_floor_gb"] = 0
     path = tmp_path / "country.suite.toml"
     write_suite(path, suite)
     planned = plan_suite(load_suite(path), base=tmp_path)

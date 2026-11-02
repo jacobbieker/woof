@@ -1631,9 +1631,10 @@ _PHYSICS_ALLOCATION_INVENTORY['woof/core/wind_gust_diag.py'] = {}
 _PHYSICS_ALLOCATION_INVENTORY['woof/core/gf.py']['__call__'] = 14
 # Driver construction: the FARMS SW*2 fields, the radtran diagnostic
 # planes and Deng's carried state (__init__ 22 -> 25, initialize_physics
-# 37 -> 40), and the wind farm's one attach-time plane.
+# 37 -> 40).  The fork's wind farm now runs on upstream's
+# woof/core/wind_farm.py, whose row carries its allocations (ac097ff27).
 _PHYSICS_ALLOCATION_INVENTORY['woof/core/physics.py'].update(
-    {'__init__': 25, '_attach_windfarm': 1, 'initialize_physics': 40})
+    {'__init__': 25, 'initialize_physics': 40})
 # WRF-Solar EPS (multi_perturb): each pert3d field and its two spectra at
 # driver construction (allocate_multi_perturb_fields); per generator SP_AMP,
 # its ZCHI scratch and the three scalars (__init__), per update the two

@@ -1,6 +1,6 @@
 {
   "revision": "bf8a9a71d93e24748a872f04bea23d5bfe818ecd",
-  "source_adapters_sha256": "d5a7096f3c9db505341d234f1bea183fb9677bcbed7beaded84ec20913884634",
+  "source_adapters_sha256": "e84102e55ad5a246302a3bec395dd6ce6effdd7732f4aa557a1df279644e172d",
   "frame_header_sha256": "834081c12b05041e1cadf2011ba4b10d56613b77a5eaef600e927a9d5a05e8eb",
   "source_files": [
     "woof/source_adapters.py",
@@ -18,6 +18,10 @@
     {
       "commit": "c13785dfb341ad561416b6f3d951058f80c3268e",
       "why": "Refresh acquired, generated and exported source metadata at the reviewed release candidate. Remove only the source row exact-grid opt-ins; retain the original frame-header oracle."
+    },
+    {
+      "commit": "254689a4814ed42234fd09e0a59931f0ba9e4bde",
+      "why": "The retained copy still imported the pre-rename gpuwm package (No module named 'gpuwm') and predated every later source-metadata change: the gpuwm/ArWen -> woof/WOOF renames in notes, required_products and owner module names, and the source_top_eras field added to every row. Retaken from woof/source_adapters.py at this commit the way tools/update_projected_grid_baseline.py does (only its three same_grid_pairing=\"identity\" opt-ins, hrrr, hrrr-prs and hrrr-native, removed); the frame-header oracle is untouched."
     }
   ]
 }

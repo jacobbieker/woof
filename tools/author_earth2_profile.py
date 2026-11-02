@@ -316,8 +316,11 @@ def donor_mapping():
         "sea_ice_fraction": surface("SEAICE", "1", missing="preserve_mask"),
         "snow_water_equivalent": surface("SNOW_EC", "m", "kg m-2", 1000.0),
     }
+    # The target name is part of the shipped donor mapping's bytes, which
+    # woof/source_authorities.py pins by SHA-256; it keeps the spelling every
+    # packaged authority's target name carries ("gpuwm/WRF-real ...").
     target = _target(
-        "woof/WRF-real ECMWF ERA5 (Google ARCO public Zarr as woof fetch writes it), "
+        "gpuwm/WRF-real ECMWF ERA5 (Google ARCO public Zarr as gpuwm fetch writes it), "
         "authored as the cross-source land-surface donor for AI-model atmospheres", 21600)
     target["initialization_policies"] = {
         "cloud_water_mixing_ratio": "explicit_zero_with_adapter_validation",

@@ -219,7 +219,8 @@ def test_the_declaration_is_restricted_to_the_hydrometeor_masses(tmp_path):
     ({"levels": [5000, 7], "absent": "zero"}, "does not declare"),
     ({"levels": [], "absent": "zero"}, "non-empty"),
     ({"levels": [5000, 5000], "absent": "zero"}, "unique"),
-    ({"levels": [5000], "absent": "nan"}, "must be 'zero'"),
+    ({"levels": [5000], "absent": "nan"},
+     "must be zero or nearest_upper_boundary"),
     ({"levels": [5000]}, "absent"),
 ])
 def test_a_malformed_declaration_refuses_by_name(tmp_path, declaration, message):

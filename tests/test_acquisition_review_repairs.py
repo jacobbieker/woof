@@ -160,8 +160,31 @@ def test_local_chain_stops_before_completion_binding_when_inputs_change(tmp_path
     plan = SimpleNamespace(run_options={'geog_root':str(tmp_path)}, config_intent=None)
     observer = SimpleNamespace(enter_stage=lambda *a,**k:None, finish_stage=lambda *a,**k:None)
     from woof.experiment import RelocationConfig
-    exp = SimpleNamespace(relocation=RelocationConfig(), domains=())
+    # A real experiment has a root domain and a start: the chain reads the
+    # root's chem selection (_staged_chem_fetch) and the start the upper
+    # source is fetched for (upper_fetch_plan); this one selects no chem.
+    from datetime import datetime
+    exp = _stationary_experiment()
     with pytest.raises(ValueError, match='changed'):
         runplan._staged_chain(plan, config_path=config, exp=exp, observer=observer, run_dir=run_dir)
     assert completed == []
     assert previous.read_bytes() == b'prior completed state'
+
+
+def _stationary_experiment():
+    """A real one-domain experiment for 2026-07-29 that declares no relocation.
+
+    The chain reads the root's chem selection (none here), the start the
+    upper source is fetched for and the relocation contract before it
+    prepares anything, so a stand-in with no domains or start no longer
+    reaches the preparation these cases are about.
+    """
+    import dataclasses
+    from datetime import datetime as _datetime
+
+    from woof.config import RunConfig
+    from woof.experiment import RelocationConfig, experiment_from_run_config
+    exp = experiment_from_run_config(
+        RunConfig(nx=10, ny=10, nz=10, dx=3000.0, dy=3000.0, ztop=16000.0,
+                  dt=10.0, run_seconds=600.0), _datetime(2026, 7, 29))
+    return dataclasses.replace(exp, relocation=RelocationConfig())

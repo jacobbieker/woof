@@ -49,7 +49,9 @@ def test_the_receipt_exists_and_is_the_declared_design():
     assert g["g1_ratio"] == 3.0 and g["g0_tol"] == 1.0e-8
 
     run = json.loads((RECEIPTS / "sw-arwen-mp28-run.json").read_text())
-    assert run["model"] == "woof" and run["mp_physics"] == 28
+    # The receipt is immutable: it records the engine under the name it
+    # carried when the run was made (gpuwm, before the woof rename).
+    assert run["model"] == "gpuwm" and run["mp_physics"] == 28
     assert (run["nx"], run["ny"], run["nz"]) == (120, 120, 40)
     assert run["steps"] == 50 and run["frame_steps"] == 5
     assert "5090" in run["device"]

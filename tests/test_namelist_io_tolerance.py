@@ -96,7 +96,9 @@ def test_auxiliary_stream_does_not_bypass_active_sst_update_or_nudging():
     inp["physics"].pop("sst_update")
     inp["fdda"] = {"grid_fdda": [1, 1], "gfdda_inname": ["synthetic"]}
     refusals = [str(error) for error in namelist_refusals(wps, inp)]
-    assert any("grid_fdda" in message and "set it to 0" in message
+    # Analysis nudging is implemented since 1.1.5, so the block is read,
+    # not refused whole: an incomplete one is still refused by name.
+    assert any("grid_fdda" in message and "gfdda_interval_m" in message
                for message in refusals)
 
 

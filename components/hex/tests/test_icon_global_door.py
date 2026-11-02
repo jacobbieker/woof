@@ -160,7 +160,9 @@ def test_grid_is_refused_by_the_rows_that_do_not_read_it(tmp_path: Path) -> None
         "intermediate", "--source", "hrrr", "--grib-dir", str(tmp_path), "--cycle",
         "2026-09-27T12", "--out-dir", str(tmp_path / "o"), "--grid", str(tmp_path / "g.nc"),
         "--point", "40,-100", "--radius-km", "50"])
-    with pytest.raises(IntermediateRefusal, match="--grid places the remap window of icon-global"):
+    # The GRIB rows read --grid as their box since 1.1.5 (target_from_mesh);
+    # beside --point it is one box too many.
+    with pytest.raises(IntermediateRefusal, match="--point and --grid were all given"):
         hi.request_from_arguments(hrrr)
 
 

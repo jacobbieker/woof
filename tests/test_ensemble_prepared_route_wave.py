@@ -146,6 +146,11 @@ def test_native_memory_refusal_before_threads_uses_the_admitted_concurrent_origi
 
 @pytest.mark.parametrize("failure", ["initialization", "callback", "finalization"])
 def test_original_route_failure_wakes_and_joins_every_worker_without_retry(failure):
+    # The healthy member builds its model through woof.core.physics, which
+    # imports CuPy.  Asked here, so an install without it is the named CuPy
+    # skip its siblings take rather than a missing writers-ready hidden
+    # behind the injected failure.
+    import woof.core.physics  # noqa: F401
     error = RuntimeError(f"injected {failure}")
     options = {failure + "_error": error}
     if failure == "callback":

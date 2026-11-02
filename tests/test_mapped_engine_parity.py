@@ -2692,6 +2692,18 @@ def test_the_compose_registry_covers_every_registered_composition_source():
         "rrfs-ens": "no staged member+companion bytes; the row recipe "
                     "hands one supplement role and this composition binds "
                     "two",
+        # The 0.1-degree open data decodes through the 0.25-degree oper
+        # profile (ecmwf-open-data-oper-grib2-v1, whose compose golden row is
+        # "ecmwf-open-data" above) once the route has concatenated each
+        # lead's pressure-level and surface files.  Its objects begin with
+        # the 2026-10-20 cycles and none are in the staging corpus.
+        "ecmwf-open-data-0p1": "no staged 0.1-degree corpus (published from "
+                               "2026-10-20); its profile's composition is "
+                               "the ecmwf-open-data row's",
+        # The Met Office UKV arrives as Icechunk/Zarr NetCDF variables from
+        # the Source Cooperative archive; like met-office-global, no corpus
+        # of it is staged on any box this battery has run on.
+        "ukv": "no staged UKV NetCDF corpus",
     }
     # Inference products are generated with a same-cycle donor, rather than
     # published objects in this battery's agency staging corpus. Whole-job

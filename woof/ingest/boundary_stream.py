@@ -1324,8 +1324,8 @@ def process_memory_bytes() -> tuple[int, int] | None:
     """This process's ``(resident, peak resident)`` bytes, or ``None``.
 
     Linux reads ``VmRSS`` and ``VmHWM`` from ``/proc/self/status``;
-    Windows reads the working set and its peak.  Anything else is
-    unmeasured.
+    Windows reads the working set and its peak; macOS the task's resident
+    size and ``getrusage``'s peak.  Anything else is unmeasured.
     """
 
     if os.name == "nt":
@@ -1362,6 +1362,20 @@ def process_memory_bytes() -> tuple[int, int] | None:
                     int(counters.PeakWorkingSetSize))
         except Exception:  # noqa: BLE001 - unmeasured, said so by None
             return None
+    if sys.platform == "darwin":
+        # No procfs: the resident set from the task info (psutil, a base
+        # dependency) and the peak from getrusage, whose ru_maxrss is in
+        # BYTES on macOS (kilobytes on Linux).
+        try:
+            import resource
+
+            import psutil
+
+            resident = int(psutil.Process().memory_info().rss)
+            peak = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+        except Exception:  # noqa: BLE001 - unmeasured, said so by None
+            return None
+        return resident, max(resident, peak)
     values = {}
     try:
         with open("/proc/self/status", encoding="ascii") as status:

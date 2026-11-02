@@ -172,7 +172,8 @@ Everything above describes Recast WOOF, and is kept as upstream wrote it.
 This section is the fork's own. Its additions sit on top of the latest
 upstream release and do not change upstream's defaults: each new option is
 off until selected, and a configuration that selects none of them runs as
-upstream's does.
+upstream's does. The fork's own changes are recorded in
+[FORK-CHANGELOG.md](FORK-CHANGELOG.md).
 
 ### What it adds
 

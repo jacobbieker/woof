@@ -173,6 +173,13 @@ _PROVIDERS: dict[str, tuple[str, ...]] = {
     "cupti_counter": (),
     "test_smallstep_vertical_wrf471_parity": (),
     "test_smallstep_horizontal_wrf471_parity": (),
+    # The storage formats and queue backends 1.1.5 added beside netCDF:
+    # each import is lazy and refuses by name -- see _OPTIONAL_BY_DESIGN.
+    "icechunk": ("icechunk",),
+    "zarr": ("zarr",),
+    "numcodecs": ("numcodecs",),
+    "google": ("google-cloud-storage",),
+    "osmium": ("osmium",),
 }
 
 #: Modules this project deliberately never declares, because a *declared*
@@ -379,6 +386,36 @@ _OPTIONAL_BY_DESIGN: dict[str, str] = {
         "that does it. The controller runs only in publish.yml, which "
         "installs setuptools>=77 explicitly beside twine before calling it; "
         "a user's install never reaches that function."
+    ),
+    "icechunk": (
+        "The Icechunk exports and archive reads (woof/ml_export.py, "
+        "woof/energy/extract.py --format icechunk, woof/ukv_source.py's "
+        "--source ukv archive) import icechunk inside the function that "
+        "needs it and refuse by name without it; netCDF output and every "
+        "other source never reach it."
+    ),
+    "zarr": (
+        "woof/energy/extract.py --format zarr/icechunk, "
+        "woof/energy/icechunk_store.py and woof/ukv_source.py's --source ukv "
+        "archive import zarr lazily, beside icechunk, and refuse by name "
+        "without it; the default netCDF route never reaches it."
+    ),
+    "numcodecs": (
+        "woof/ukv_source.py's ERA5 land-state read decodes the archive's "
+        "Blosc chunks with numcodecs, which zarr requires; it runs only "
+        "inside --source ukv, after open_store has refused an environment "
+        "without zarr."
+    ),
+    "google": (
+        "woof/energy/workqueue.py imports google.cloud.storage only for a "
+        "gs:// queue and raises QueueBackendUnavailable naming "
+        "google-cloud-storage without it; directory and s3:// queues never "
+        "reach it."
+    ),
+    "osmium": (
+        "woof/energy/inventory_global.py reads .osm.pbf extracts with "
+        "pyosmium only for --format osm-pbf and raises InventoryRefused "
+        "naming the install (and the Overpass alternative) without it."
     ),
 }
 

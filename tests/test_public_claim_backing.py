@@ -358,7 +358,7 @@ def check_published(root: Path) -> list[Finding]:
 #: provable rather than asserted.  It is the negative-control fixture's
 #: text, and a test below requires it to be ABSENT from the live document.
 RETIRED_OVERREACH = (
-    "WOOF's ingest reproduces the WRF initial surface state at the\n"
+    "ArWen's ingest reproduces the WRF initial surface state at the\n"
     "FP32/operator floor on every domain, so everything in the tables below\n"
     "is forecast divergence, not initial-condition error.")
 
@@ -470,7 +470,7 @@ def test_quoted_bullets_are_read_one_at_a_time():
     findings = _fixture_findings("quoted_bullets_do_not_bleed.md")
     assert [finding.rule for finding in findings] == ["unbacked-claim"], (
         findings)
-    assert "WOOF reproduces the WRF initial state" in findings[0].quote
+    assert "ArWen reproduces the WRF initial state" in findings[0].quote
     assert "REFL_10CM" not in findings[0].quote
     assert "coverage floor" not in findings[0].quote
 
@@ -563,8 +563,14 @@ def test_every_root_release_document_is_inside_the_scan():
     """
     scanned = {path.relative_to(REPO_ROOT).as_posix()
                for path in published_markdown(REPO_ROOT)}
-    assert {"README.md", "CHANGELOG.md", "PROVENANCE.md", "SPEEDRUN.md",
-            "PUBLIC_RELEASE_ACCEPTANCE.md"} <= scanned
+    from _woof_snapshot import left_out
+    # SPEEDRUN.md and PUBLIC_RELEASE_ACCEPTANCE.md are left out of the Recast
+    # WOOF export by named rules (tests/_woof_left_out.txt); where they ship,
+    # they are scanned.
+    published = {"README.md", "CHANGELOG.md", "PROVENANCE.md", "SPEEDRUN.md",
+                 "PUBLIC_RELEASE_ACCEPTANCE.md"}
+    assert {"README.md", "CHANGELOG.md", "PROVENANCE.md"} <= scanned
+    assert {name for name in published if not left_out(name)} <= scanned
     assert "docs/public/VERIFICATION.md" in scanned
     # Working material and the negative-control fixtures stay out: the
     # fixtures are written to fail this guard, so scanning them would make

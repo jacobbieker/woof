@@ -172,6 +172,12 @@ def _cpu_driver(monkeypatch, *, sf_sfclay_physics, sf_surface_physics,
     # WRF swint_opt = 1's carrier (89aba028e): the real constructor leaves
     # this slot None when swint_opt is 0, and compute() reads it every step.
     driver.swint = None
+    # WRF's shallowcu_driver slot: the real constructor leaves it None when
+    # shcu_physics is 0, and compute() reads it every step.
+    driver.shallow_cumulus = None
+    # No stochastic perturbation set (the constructor's None when no
+    # multi_perturb switch is on); the shallow-cumulus branch reads it.
+    driver.multi_perturb = None
     driver.stepbl = 1
     driver.radt_minutes = 12.0
     driver.radt_seconds = 720.0

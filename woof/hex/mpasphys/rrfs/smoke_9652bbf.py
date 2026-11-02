@@ -6285,9 +6285,11 @@ def cuda_options(*, columns=False):
     if not columns:
         return CUDA_OPTIONS
     import importlib.util
-    if importlib.util.find_spec('cupy') is None:
+    from woof import backend
+    if backend.requested() != 'cuda' or importlib.util.find_spec('cupy') is None:
         # THE BREAKAGE THIS ENDS: on a host with no CuPy (the public CPU CI, the Linux CPU tier) the AOT
-        # physics_inventory raised ModuleNotFoundError here, so every inventory test failed. Such a host
+        # physics_inventory raised ModuleNotFoundError here, so every inventory test failed. A facade
+        # backend's `cupy` (WOOF_BACKEND=mlx) carries no CUDA headers either. Such a host
         # compiles nothing; it lists the cupy-cuda12x wheel layout in the kernel packs' portable form
         # (cuda_backend.aot.portable_options), which is what the cuda12 pack holds for these rows.
         return CUDA_OPTIONS + NO_CUPY_COLUMN_INCLUDES

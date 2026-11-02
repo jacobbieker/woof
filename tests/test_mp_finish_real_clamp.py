@@ -32,6 +32,16 @@ f32 = np.float32
 PAIRS = [(0.07, 12.0), (0.001, 20.0), (0.02, 15.0)]
 
 
+class _State(SimpleNamespace):
+    """A stand-in model state.  A subclass, because the finish looks the
+    state up in woof.core.theta_m's WeakKeyDictionary (is it inside a
+    theta_m microphysics window?), and a bare SimpleNamespace cannot be
+    weakly referenced; a real State can.  Hashed by identity, as a State
+    is: SimpleNamespace's value equality would leave it unhashable."""
+
+    __hash__ = object.__hash__
+
+
 def _wrf_lim(mp_tend_lim, dt):
     return f32(f32(mp_tend_lim) * f32(dt))
 
@@ -53,7 +63,7 @@ def test_production_finish_clamps_at_wrf_real_product(mp_tend_lim, dt,
     saved = np.full((1, 1, 3), f32(300.0), dtype=f32)
     # increments far beyond the clamp, and one well inside it
     th_phy = saved + np.array([5.0, -5.0, 0.0], dtype=f32).reshape(1, 1, 3)
-    state = SimpleNamespace(h_diabatic=saved.copy(),
+    state = _State(h_diabatic=saved.copy(),
                             thp=np.zeros((1, 1, 3), dtype=f32))
     cfg = SimpleNamespace(no_mp_heating=0, mp_tend_lim=mp_tend_lim)
     microphysics.moist_physics_finish(state, cfg, th_phy, dt)
@@ -90,7 +100,7 @@ def test_production_finish_on_the_card_matches_wrf_real_product(mp_tend_lim,
     saved = cp.full((1, 1, 3), f32(300.0), dtype=cp.float32)
     th_phy = saved + cp.asarray([5.0, -5.0, 0.0],
                                 dtype=cp.float32).reshape(1, 1, 3)
-    state = SimpleNamespace(h_diabatic=saved.copy(),
+    state = _State(h_diabatic=saved.copy(),
                             thp=cp.zeros((1, 1, 3), dtype=cp.float32))
     cfg = SimpleNamespace(no_mp_heating=0, mp_tend_lim=mp_tend_lim)
     microphysics.moist_physics_finish(state, cfg, th_phy, dt)

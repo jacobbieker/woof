@@ -40,9 +40,12 @@ def test_a_poisoned_working_directory_cannot_hijack_a_stage_import(
     import subprocess
     import sys
 
-    (tmp_path / "json.py").write_text(
+    # A module interpreter startup has not imported already: under the mlx
+    # environment's startup hook (WOOF_BACKEND=mlx imports woof, and with
+    # it json) a json.py in the cwd would never be looked up.
+    (tmp_path / "colorsys.py").write_text(
         "raise SystemExit('HIJACKED')\n", encoding="utf-8")
-    probe = ["-c", "import json; print(json.__name__)"]
+    probe = ["-c", "import colorsys; print(colorsys.__name__)"]
 
     # The control arm has to be genuinely UNPROTECTED, which means
     # stripping PYTHONSAFEPATH out of the inherited environment rather
@@ -64,7 +67,7 @@ def test_a_poisoned_working_directory_cannot_hijack_a_stage_import(
 
     assert "HIJACKED" in (poisoned.stdout + poisoned.stderr)
     assert protected.returncode == 0
-    assert protected.stdout.strip() == "json"
+    assert protected.stdout.strip() == "colorsys"
 
 
 def test_every_stage_spawn_goes_through_the_hardened_environment():

@@ -80,15 +80,26 @@ def test_non_fork_import_is_byte_identical_to_the_previous_importer(tmp_path):
     # top.  Exactly that TOML line and that report line, once each.
     open_top, rigid = "\ntop_lid = false\n", "\ntop_lid = true\n"
     assert actual.count(open_top) == 1 and expected.count(rigid) == 1
-    assert without_wrf_clock_lines(actual).replace(
-        open_top, rigid).encode() == expected.encode()
+    # And the three default-on lines later import capability lanes added
+    # (d4ce97c6bbc GPU eclipse shortwave, ra_sw_eclipse = 1; 97e9a3ca061
+    # GPU HAILCAST, hailcast_opt = -1 and haildt = 60 s), exactly once each
+    # (test_audit_parent_generic_bytes), plus the eclipse decision's one
+    # report line naming the run window.
+    from test_audit_parent_generic_bytes import without_import_capability_lines
+    assert "ra_sw_eclipse" not in expected and "hailcast_opt" not in expected
+    assert without_import_capability_lines(without_wrf_clock_lines(
+        actual)).replace(open_top, rigid).encode() == expected.encode()
     old_lines = old_report.format().splitlines()
     lid_rows = [line for line in old_lines
                 if line.startswith("  top_lid = True: ")]
     assert len(lid_rows) == 1
     old_lines.remove(lid_rows[0])
-    assert (without_wrf_clock_report(report.format()).splitlines()
-            == old_lines)
+    new_lines = without_wrf_clock_report(report.format()).splitlines()
+    eclipse_rows = [line for line in new_lines
+                    if line.startswith("  &physics ra_sw_eclipse = 1, 1 [fixed: ")]
+    assert len(eclipse_rows) == 1
+    new_lines.remove(eclipse_rows[0])
+    assert new_lines == old_lines
 
 
 @pytest.mark.parametrize("name", ["hrrr_configuration_cut.toml",

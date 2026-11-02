@@ -159,8 +159,12 @@ def test_the_document_prices_the_cadence_the_check_prices(tmp_path, monkeypatch)
     from woof.source_adapters import source_forcing_interval_seconds
 
     monkeypatch.setattr(pf, "device_memory_probe_subprocess", lambda **_: None)
+    # The whole schedule on the card, so the cadence moves the figure: a
+    # chained run holds one slot whatever the cadence.
+    monkeypatch.setenv("WOOF_CHAINED_PREP", "0")
     config = _six_hour_config(tmp_path)
     document = _estimate(tmp_path, config)
+    assert document["vram"]["retained_forcing_intervals"] is None
     published = source_forcing_interval_seconds("hrrr")
     assert published != pf.DEFAULT_FORCING_INTERVAL_SECONDS
     assert document["vram"]["forcing_interval_seconds"] == published
@@ -393,6 +397,7 @@ def test_the_cpu_only_check_route_prices_a_declared_card_that_is_elsewhere_on_th
     assert elsewhere["resident_forecast_peak_envelope_bytes"] == pf.estimate_experiment(
         load_experiment(config), vram_gib=48.0,
         forcing_interval_seconds=document["vram"]["forcing_interval_seconds"],
+        forcing_intervals=document["vram"]["retained_forcing_intervals"],
         boundary_species=source_boundary_species("hrrr")).peak_envelope_bytes
     code, out = _check_cpu_only(capsys, config, "--json", "--vram-gib", "10")
     same = json.loads(out)["required_memory"]

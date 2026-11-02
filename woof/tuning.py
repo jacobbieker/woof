@@ -189,7 +189,8 @@ def prepare(packet, shared, geog, day=None):
     verify_packet(packet)
     from woof.tuning_prepare import prepare_group
     os.environ["CUDA_VISIBLE_DEVICES"] = ""
-    os.environ["GPUWM_NO_LOCAL_GPU"] = "1"
+    from woof.local_gpu import NO_LOCAL_GPU_ENV
+    os.environ[NO_LOCAL_GPU_ENV] = "1"
     os.environ.pop("WOOF_PHYSICS_PARAMS", None)
     budget = cpu_limit()
     for key in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "RAYON_NUM_THREADS",

@@ -67,8 +67,9 @@ def _plan_for(request, out):
 class FakeFetcher:
     """``fetcher(request, out)``: the real route fetch, synthetic bytes."""
 
-    def __init__(self):
+    def __init__(self, *, donors=True):
         self.calls = []
+        self.donors = donors
 
     def __call__(self, request, out):
         self.calls.append(dict(request))
@@ -88,7 +89,16 @@ class FakeFetcher:
                               probe=lambda *a, **k: True,
                               lister=lambda *a, **k: keys,
                               progress=lambda *a, **k: None)
-        fetch_routes.write_handoff(plan, Path(out))
+        # A declared donor (1.1.5: ECMWF open data's same-cycle GFS sea
+        # ice) is a second download into donor-<source>/, as woof fetch
+        # moves it, bound in the handoff.
+        donor_files = {}
+        for donor in plan.donors if self.donors else ():
+            path = Path(out) / f"donor-{donor.source}" / f"{donor.role}.grib2"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(synthetic_payload("GRIB", str(path.name)))
+            donor_files[donor.role] = path
+        fetch_routes.write_handoff(plan, Path(out), donor_files=donor_files)
         return {"objects": len(plan.objects)}
 
 
@@ -275,7 +285,8 @@ def test_prefetch_publishes_once_and_reruns_are_idempotent(tmp_path):
     assert (tmp_path / "cache" / objects[0]["blob"]).is_file()
     assert repaired["reused_blobs"] >= 2      # the other objects stayed
     assert {f["path"] for f in entry["files"]} == {
-        *(o["path"] for o in objects), "fetch-manifest.json", "SHA256SUMS"}
+        *(o["path"] for o in objects), "fetch-manifest.json", "SHA256SUMS",
+        "donor-gfs/seaice_data.grib2"}
     assert len(fetcher.calls) == 2
 
 
@@ -588,7 +599,8 @@ def test_a_prefetch_job_carried_away_from_its_directory_runs(planned,
     assert (carried.parent / fc.PREFETCH_RECEIPT_NAME).is_file()
     dry = hc.run_local(carried, dry_run=True)
     assert dry["dry_run"] and dry["argv"][:2] == ["woof", "fetch"]
-    assert dry["download_estimate"]["objects"] == 3
+    # The three forcing objects and the GFS sea-ice donor's record file.
+    assert dry["download_estimate"]["objects"] == 4
 
 
 def test_a_declared_donor_folder_is_cached_and_mirrored_whole(tmp_path):
@@ -598,7 +610,7 @@ def test_a_declared_donor_folder_is_cached_and_mirrored_whole(tmp_path):
     assert [d.source for d in plan.donors] == ["gdas"]
 
     def with_donor(req, out):
-        FakeFetcher()(req, out)
+        FakeFetcher(donors=False)(req, out)
         donor = Path(out) / "donor-gdas"
         donor.mkdir()
         (donor / "gdas.t00z.pgrb2.0p25.f000").write_bytes(

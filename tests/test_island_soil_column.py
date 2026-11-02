@@ -112,14 +112,18 @@ def test_the_noah_column_is_the_skin_temperature_at_field_capacity(capsys):
     refsmc = load_tables().refsmc
 
     before = _noah(met, island, soil_type)
-    # Without the repair the island carries the sea's 1.0, which the init
-    # porosity cap (woof.ingest.soil.cap_land_moisture_at_smcmax) then puts
-    # on sand's SMCMAX, 0.339; the land cell whose soil is water keeps 1.0.
-    # Before the cap existed every island cell here read 1.0.
+    # Without the repair the island carries the sea's 1.0, which the
+    # HTESSEL -> Noah soil-moisture index remap (woof.ingest.land_state)
+    # bounds at sand's saturation, SMCMAX 0.339, before the init porosity
+    # cap (woof.ingest.soil.cap_land_moisture_at_smcmax) ever sees it; the
+    # land cell whose soil is water has no hydraulics and keeps 1.0.
+    # Before the cap and the remap existed every island cell here read 1.0.
     np.testing.assert_array_equal(
         before.soil_moisture[:, island],
         np.broadcast_to(np.where(soil_type[island] == 1.0, 0.339, 1.0), (4, 4)))
-    assert before.init_caps["soil_moisture"]["cells_capped"] == 3
+    assert before.land_state["land_cells_converted"] == 3
+    assert before.land_state["values_bounded"] == 3 * 4
+    assert "soil_moisture" not in before.init_caps
     assert np.all(before.soil_temperature[:, island] == 285.0)
 
     state = _noah(met, island, soil_type,

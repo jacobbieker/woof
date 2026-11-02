@@ -450,8 +450,8 @@ def test_native_publication_accepts_an_output_table(tmp_path):
     from woof.experiment_document import publish_experiment_document
     exp, target, source, namelist, wps = _case(tmp_path)
     source.write_text(source.read_text() +
-        '\n[output]\npreset = "minimal"\n'
-        '\n[output.icechunk]\nurl = "file:///tmp/x/{name}.icechunk"\n',
+        '\n[output]\npreset = "minimal"\nformats = ["netcdf", "icechunk"]\n'
+        'icechunk_store = "file:///tmp/x/{name}.icechunk"\n',
         encoding="utf-8")
     actual, raw = resolve_root_experiment(target=target, vertical=exp.vertical,
         namelist_input=namelist, start_time=exp.start_time, run_seconds=exp.run_seconds,

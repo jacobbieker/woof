@@ -169,6 +169,24 @@ KNOWN_SCALAR_POW_LIBMS: dict[str, dict[str, str]] = {
             "consequence the equivalence tests must honour."
         ),
     },
+    "93aedca940193b22": {
+        "libm": "Apple libsystem_m (/usr/lib/libm.dylib), arm64 macOS",
+        "measured_on": (
+            "an Apple M3 Max, macOS 26.5.2, and the GitHub macos-15 arm64 "
+            "runner (the hosted CI's mlx legs, 2026-11-01)"
+        ),
+        "numpy": "2.5.4",
+        "measured_date": "2026-11-01",
+        "note": (
+            "the platform powf itself: the same probe through ctypes "
+            "libm.powf, through numpy's element-wise scalar ** and through "
+            "the two-array np.power all digest 93aedca940193b22 on the M3 "
+            "Max, so numpy's array dispatch does not leave the libm here.  "
+            "The correctly-rounded square control is d026ac1b6fd1ea85, as on "
+            "every other box named here, and differs from powf on 6,623 of "
+            "the 1,048,576 probe values."
+        ),
+    },
 }
 
 

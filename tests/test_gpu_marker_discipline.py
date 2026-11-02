@@ -569,6 +569,13 @@ def test_the_ban_hides_every_device_from_an_unmarked_escapee(tmp_path):
         # cannot reach a card at all, and there is nothing here to see.
         pytest.skip("this gate needs the array library, because the escape "
                     "it reproduces imports it")
+    from woof import backend
+    if backend.requested() != "cuda":
+        # The backstop is CUDA_VISIBLE_DEVICES, a CUDA device mask; the
+        # Metal facade (WOOF_BACKEND=mlx) serves `import cupy` with one
+        # Apple GPU that no CUDA mask hides.
+        pytest.skip("the backstop under test is a CUDA device mask; this "
+                    f"process runs WOOF_BACKEND={backend.requested()}")
     helper = tmp_path / "scratch_gpu_helper.py"
     helper.write_text(
         "import cupy\n\n\n"

@@ -296,7 +296,7 @@ class _TerrainCpuState:
         return None
 
 
-def _fake_diagnostics(state, _hyp):
+def _fake_diagnostics(state, _hyp, preparation=False):
     """A pure function of the state, identical in every arm."""
     state.p = np.asarray(state.pb, F32).copy()
     state.al = np.asarray(state.alb, F32).copy()
@@ -328,7 +328,10 @@ def _cpu_initializer(monkeypatch, parent_node, reference_dc,
     monkeypatch.setattr(ni, "DomainState", _TerrainCpuState)
     monkeypatch.setattr(
         ni, "sint",
-        lambda field, reg: np_sint(field, reg, dtype=np.float64).astype(F32))
+        # preparation=True selects the CUDA preparation module's numerics;
+        # the float64 reference is the same either way.
+        lambda field, reg, preparation=False:
+        np_sint(field, reg, dtype=np.float64).astype(F32))
     monkeypatch.setattr(ni, "update_diagnostics", _fake_diagnostics)
 
     def fake_statics(grid, _catalog, child_dc):
@@ -773,7 +776,10 @@ def _corridor_initializer(monkeypatch, reference_dc, reference_grid):
     monkeypatch.setattr(ni, "DomainState", _TerrainCpuState)
     monkeypatch.setattr(
         ni, "sint",
-        lambda field, reg: np_sint(field, reg, dtype=np.float64).astype(F32))
+        # preparation=True selects the CUDA preparation module's numerics;
+        # the float64 reference is the same either way.
+        lambda field, reg, preparation=False:
+        np_sint(field, reg, dtype=np.float64).astype(F32))
     monkeypatch.setattr(ni, "update_diagnostics", _fake_diagnostics)
 
     # Absolute-ground corridor over the whole 14x14 parent (ratio 1):
@@ -857,7 +863,10 @@ def _framed_corridor_arm(monkeypatch, reference_dc, reference_grid, window,
     monkeypatch.setattr(ni, "DomainState", _TerrainCpuState)
     monkeypatch.setattr(
         ni, "sint",
-        lambda field, reg: np_sint(field, reg, dtype=np.float64).astype(F32))
+        # preparation=True selects the CUDA preparation module's numerics;
+        # the float64 reference is the same either way.
+        lambda field, reg, preparation=False:
+        np_sint(field, reg, dtype=np.float64).astype(F32))
     monkeypatch.setattr(ni, "update_diagnostics", _fake_diagnostics)
     x = np.arange(1, _PNX + 1)[None, :].astype(np.float64)
     y = np.arange(1, _PNY + 1)[:, None].astype(np.float64)

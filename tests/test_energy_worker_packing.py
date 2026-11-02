@@ -20,6 +20,9 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+import shutil
+import tempfile
+
 import pytest
 
 from woof.energy import cost
@@ -352,20 +355,36 @@ def test_mps_refuses_a_socket_path_too_long(tmp_path, monkeypatch):
         wk.MpsDaemon(tmp_path / ("d" * 120), ["GPU-x"]).start()
 
 
-def test_mps_starts_reuses_and_stops(tmp_path, monkeypatch):
+@pytest.fixture
+def mps_root():
+    """A short ``--mps-dir``, as an operator gives one.
+
+    The control socket ``<mps-dir>/pipe/control`` must stay under
+    :data:`woof.gpu_packing.MPS_PIPE_PATH_MAX` characters, and ``tmp_path``
+    does not on every host: macOS puts it under ``/private/var/folders``,
+    where the socket path ran to 141 characters and the daemon was refused
+    (correctly) before the case reached what it checks.
+    """
+
+    root = Path(tempfile.mkdtemp(prefix="mps-", dir="/tmp"))
+    yield root / "mps"
+    shutil.rmtree(root, ignore_errors=True)
+
+
+def test_mps_starts_reuses_and_stops(tmp_path, monkeypatch, mps_root):
     bin_dir, calls = _fake_mps(tmp_path)
     monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
     monkeypatch.setenv("FAKE_MPS_LOG", str(calls))
     monkeypatch.delenv("CUDA_MPS_PIPE_DIRECTORY", raising=False)
-    daemon = wk.MpsDaemon(tmp_path / "mps", ["GPU-a", "GPU-b"],
+    daemon = wk.MpsDaemon(mps_root, ["GPU-a", "GPU-b"],
                           thread_percentage=50).start()
     assert daemon.started and not daemon.reused
     assert daemon.environment() == {
-        "CUDA_MPS_PIPE_DIRECTORY": str(tmp_path / "mps" / "pipe"),
-        "CUDA_MPS_LOG_DIRECTORY": str(tmp_path / "mps" / "log"),
+        "CUDA_MPS_PIPE_DIRECTORY": str(mps_root / "pipe"),
+        "CUDA_MPS_LOG_DIRECTORY": str(mps_root / "log"),
         "CUDA_MPS_ACTIVE_THREAD_PERCENTAGE": "50"}
     # A second worker finds it answering and leaves it alone.
-    other = wk.MpsDaemon(tmp_path / "mps", ["GPU-a"]).start()
+    other = wk.MpsDaemon(mps_root, ["GPU-a"]).start()
     assert other.reused and not other.started
     other.stop()
     daemon.stop()
@@ -374,9 +393,9 @@ def test_mps_starts_reuses_and_stops(tmp_path, monkeypatch):
     assert rows[0]["visible"] == "GPU-a,GPU-b"
     # An externally owned daemon (CUDA_MPS_PIPE_DIRECTORY set) is used,
     # never started or stopped here.
-    external = wk.MpsDaemon(tmp_path / "mps", ["GPU-a"]).start()
+    external = wk.MpsDaemon(mps_root, ["GPU-a"]).start()
     external.stop()
-    monkeypatch.setenv("CUDA_MPS_PIPE_DIRECTORY", str(tmp_path / "plugin"))
+    monkeypatch.setenv("CUDA_MPS_PIPE_DIRECTORY", str(mps_root.parent / "plugin"))
     with pytest.raises(wk.MPSUnavailable, match="no MPS control daemon"):
         wk.MpsDaemon(None, ["GPU-a"]).start()
 
@@ -390,7 +409,7 @@ json.dump({k: os.environ.get(k) for k in (
 """
 
 
-def test_the_worker_runs_packed_slots_under_mps(tmp_path):
+def test_the_worker_runs_packed_slots_under_mps(tmp_path, mps_root):
     bin_dir, calls = _fake_mps(tmp_path)
     url = f"file://{tmp_path / 'q'}"
     _woof("energy", "queue", "init", url, "--lease-s", "20")
@@ -405,7 +424,7 @@ def test_the_worker_runs_packed_slots_under_mps(tmp_path):
     result = _woof(
         "energy", "worker", "--queue", url, "--fake-gpus", "1",
         "--slots-per-gpu", "2", "--gpu-mem-gib", "16", "--mps",
-        "--mps-dir", str(tmp_path / "mps"),
+        "--mps-dir", str(mps_root),
         "--mps-active-thread-percentage", "50",
         "--runner-cmd", f"{{python}} {runner} {{result}}",
         "--exit-when-empty", "--poll-s", "0.2",
@@ -420,7 +439,7 @@ def test_the_worker_runs_packed_slots_under_mps(tmp_path):
     seen = [json.loads(store.get(f"done/m{i}.json")[0])["result"]
             for i in range(2)]
     for env in seen:
-        assert env["CUDA_MPS_PIPE_DIRECTORY"] == str(tmp_path / "mps" / "pipe")
+        assert env["CUDA_MPS_PIPE_DIRECTORY"] == str(mps_root / "pipe")
         assert env["CUDA_MPS_ACTIVE_THREAD_PERCENTAGE"] == "50"
         assert env["CUDA_VISIBLE_DEVICES"] == "GPU-fake-0000"
         assert Path(env["WOOF_GPU_LOCK_ROOT"]).parent == locks
@@ -429,10 +448,23 @@ def test_the_worker_runs_packed_slots_under_mps(tmp_path):
             calls.read_text().splitlines()] == ["start", "quit"]
 
 
+#: Each job records its slot's environment, then waits (up to a minute)
+#: until the other job has started.  Without the wait the two cases below
+#: raced: on a two-core hosted runner one slot finished its job and claimed
+#: the second before the other slot polled, so both jobs reported one
+#: slot's TMPDIR.  With it, one slot cannot hold both jobs at once, so the
+#: second job is claimed by the other slot whatever the host's speed.
 CACHE_RUNNER = """
-import json, os, sys
+import json, os, sys, time
+from pathlib import Path
 json.dump({k: os.environ.get(k) for k in (
     "CUPY_CACHE_DIR", "CUDA_CACHE_PATH", "TMPDIR")}, open(sys.argv[1], "w"))
+barrier = Path(sys.argv[2])
+barrier.mkdir(parents=True, exist_ok=True)
+(barrier / str(os.getpid())).touch()
+deadline = time.monotonic() + 60.0
+while len(list(barrier.iterdir())) < 2 and time.monotonic() < deadline:
+    time.sleep(0.05)
 """
 
 
@@ -449,7 +481,8 @@ def _cache_worker(tmp_path, *flags):
     result = _woof(
         "energy", "worker", "--queue", url, "--fake-gpus", "1",
         "--slots-per-gpu", "2", "--gpu-mem-gib", "16", *flags,
-        "--runner-cmd", f"{{python}} {runner} {{result}}",
+        "--runner-cmd",
+        f"{{python}} {runner} {{result}} {tmp_path / 'barrier'}",
         "--exit-when-empty", "--poll-s", "0.2",
         "--workdir", str(tmp_path / "w"),
         env={"WOOF_GPU_LOCK_ROOT": str(tmp_path / "locks"),

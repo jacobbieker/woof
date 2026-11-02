@@ -160,13 +160,15 @@ def restart_dead_products(segments, log, popen=None, alive=None) -> list[str]:
 
 def product_stage_alive(fc: Path) -> bool:
     """True when a live process is a product door for this forecast folder."""
+    import psutil
+
     target = str(fc)
-    for proc in Path('/proc').iterdir():
-        if not proc.name.isdigit():
-            continue
+    # psutil, not /proc: macOS has no /proc, and the product-stage check
+    # raised FileNotFoundError there instead of answering.
+    for proc in psutil.process_iter():
         try:
-            argv = (proc / 'cmdline').read_bytes().decode(errors='replace').split('\0')
-        except OSError:
+            argv = proc.cmdline()
+        except (psutil.Error, OSError):
             continue
         if 'products' in argv and any(a == target and i and argv[i - 1] == '--forecast'
                                       for i, a in enumerate(argv)):

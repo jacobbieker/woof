@@ -39,10 +39,12 @@ def test_D16_source_local_metadata_is_editable(tmp_path):
     package = tmp_path / "woof"
     package.mkdir()
     (package / "__init__.py").write_text("")
-    (tmp_path / "pyproject.toml").write_text('[project]\nname="woof"\nversion="2.8.8"\n')
-    info = tmp_path / "gpuwm.egg-info"
+    # The project name is the published distribution's (recast-woof):
+    # pyproject_version binds only a project that publishes this package.
+    (tmp_path / "pyproject.toml").write_text('[project]\nname="recast-woof"\nversion="2.8.8"\n')
+    info = tmp_path / "recast_woof.egg-info"
     info.mkdir()
-    (info / "PKG-INFO").write_text("Metadata-Version: 2.1\nName: woof\nVersion: 2.8.8\n")
+    (info / "PKG-INFO").write_text("Metadata-Version: 2.1\nName: recast-woof\nVersion: 2.8.8\n")
     (info / "SOURCES.txt").write_text("woof/__init__.py\npyproject.toml\n")
     shape = describe_install(package, PathDistribution(info))
     assert shape["editable"]
@@ -159,7 +161,7 @@ def test_D12_stale_physics_proof_names_prepare_again(tmp_path):
 
 
 @pytest.mark.parametrize("has_fetch", [True, False])
-def test_D13_prepared_resume_names_the_correct_door(tmp_path, has_fetch):
+def test_D13_prepared_resume_names_the_correct_door(tmp_path, has_fetch, monkeypatch, capsys):
     config = tmp_path / "experiment.toml"
     emitted = cli("domain", "--point=38.5,-98", "--point-extent-km", "90",
                   "--root-dx", "3", "--vram-gib", "96", "--source", "gfs",
@@ -167,10 +169,20 @@ def test_D13_prepared_resume_names_the_correct_door(tmp_path, has_fetch):
     assert emitted.returncode == 0, emitted.stderr
     if not has_fetch:
         config.write_text(config.read_text().split("[fetch]", 1)[0])
-    answer = cli("resume", config, "--from", tmp_path / "checkpoint.npz", "--outdir", tmp_path / "out")
-    assert answer.returncode == 2
-    assert "go CONFIG --restart" in answer.stderr
-    assert "--source era5" not in answer.stderr
+    # The host fact this door reads first: a GPU runtime is installed.  On
+    # an install without one (a CPU-only runner), the front door's
+    # capability preflight refuses `resume` for CuPy before the handler
+    # reads the configuration; that refusal is covered by the capability
+    # tests.  Pinned here so the route refusal under test is reached.
+    from woof import capabilities
+    from woof.cli import main
+    monkeypatch.setattr(capabilities, "require_for_command", lambda command: None)
+    code = main(["resume", str(config), "--from", str(tmp_path / "checkpoint.npz"),
+                 "--outdir", str(tmp_path / "out")])
+    err = capsys.readouterr().err
+    assert code == 2
+    assert "go CONFIG --restart" in err
+    assert "--source era5" not in err
 
 
 def test_D19_prepared_readiness_validates_the_supplied_tree(tmp_path):

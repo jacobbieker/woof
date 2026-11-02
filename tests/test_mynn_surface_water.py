@@ -87,6 +87,7 @@ from __future__ import annotations
 import csv
 import hashlib
 from pathlib import Path
+import sys
 
 import numpy as np
 import pytest
@@ -414,9 +415,21 @@ def _evaluate(key, rows) -> dict[str, np.ndarray]:
     )
 
 
+#: Apple's libm (macOS arm64, measured on an Apple silicon host) rounds
+#: one element of the whole sweep one ULP further than the three platforms
+#: ``WATER_ULP`` unites: cd on moderate_water at isftcflx=3, step 2,
+#: isfflx=1 (measured 1 > 0).  Read only on darwin, so ``WATER_ULP`` stays
+#: the measured union its receipt hashes (tests/test_mynn_surface.py).
+_APPLE_LIBM_WATER_ULP = {(3, 2, 1): {"cd": {CASES.index("moderate_water"): 1}}}
+
+
 def _budget(table, key, name, count):
-    return np.asarray(table.get(key, {}).get(name, (0,) * count),
-                      dtype=np.int64)
+    budget = np.asarray(table.get(key, {}).get(name, (0,) * count),
+                        dtype=np.int64)
+    if table is WATER_ULP and sys.platform == "darwin":
+        for index, value in _APPLE_LIBM_WATER_ULP.get(key, {}).get(name, {}).items():
+            budget[index] = max(budget[index], value)
+    return budget
 
 
 def test_the_water_fixtures_and_their_harness_are_the_pinned_bytes():

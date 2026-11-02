@@ -282,8 +282,10 @@ _LABEL_NOISE = frozenset(
     "aerosol aware no physics microphysics cumulus four moisture ice "
     # Fragments of a selector KEY quoted inside a label ("no km_opt
     # operator"): the word splitter breaks on the underscore, and "opt"
-    # is not a scheme.
-    "opt".split())
+    # is not a scheme.  Nor is "option", from a label that cites WRF's
+    # number for the scheme ("Revised MM5 surface layer (Jimenez, WRF
+    # option 1)").
+    "opt option".split())
 
 
 def _scheme_markers() -> list[str]:

@@ -27,11 +27,18 @@ def test_explicit_order3_keeps_exact_current_staging_importer_bytes(tmp_path):
     assert WRF_CLOCK_BLOCK in explicit
     # Pinned before 2026-10-12: the input now asks for Morrison by its own
     # number (55 is refused) and the omitted lid is WRF's open top; with
-    # exactly those two lines put back the parent's hash holds.
+    # exactly those two lines put back, the comment header in the engine's
+    # gpuwm spelling (woof_engine_spelling), and less the three default-on
+    # lines later import capability lanes added (ra_sw_eclipse, hailcast_opt,
+    # haildt; test_audit_parent_generic_bytes), the parent's hash holds --
+    # the same projection tests/test_dycore_configuration_doors.py applies
+    # to its sibling e62a72e48 control.
     from ishmael_retirement import with_retired_line
-    assert hashlib.sha256(with_retired_line(
-        without_wrf_clock_lines(explicit)).encode()
-                          ).hexdigest() == baseline["explicit_order3"]
+    from woof_engine_spelling import engine_spelling
+    from test_audit_parent_generic_bytes import without_import_capability_lines
+    assert hashlib.sha256(engine_spelling(with_retired_line(
+        without_import_capability_lines(without_wrf_clock_lines(explicit))))
+        .encode()).hexdigest() == baseline["explicit_order3"]
 
 
 def test_root_recipe_defaults_preserve_explicit_shared_root_and_nest_choices():

@@ -13,7 +13,7 @@ import woof.cli as cli
 import woof.update_cli as update_cli
 
 
-def _installed(name="woof"):
+def _installed(name="recast-woof"):
     return SimpleNamespace(metadata={"Name": name}, version="1.5.0")
 
 
@@ -41,7 +41,7 @@ def test_update_names_the_resolved_distribution_and_this_interpreter(
     # environments has several pips and only one of them owns this one.
     assert sys.executable in out
     assert "-m pip install --upgrade recast-woof" in out
-    assert update_cli.upgrade_command("woof") in out
+    assert update_cli.upgrade_command("recast-woof") in out
 
 
 def test_update_upgrades_the_distribution_that_actually_provides_gpuwm(

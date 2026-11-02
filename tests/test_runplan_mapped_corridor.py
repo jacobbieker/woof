@@ -71,9 +71,14 @@ def test_authored_mapped_tc_resolves_to_corridor_preparation(tmp_path):
 
 def test_each_preparer_consumes_its_declared_corridor_option(tmp_path):
     from woof import source_cli
+    from woof.source_adapters import source_adapters
 
-    for row in source_cli.preparation_runners().values():
-        args = source_cli._parser().parse_args(["--statics-corridor"])
+    for runner_id, row in source_cli.preparation_runners().items():
+        # The dispatcher always runs a preparer FOR a registered source (the
+        # command binds it and reads the row's table data), so each runner is
+        # driven with a source row it serves.
+        served = next(a.source_id for a in source_adapters() if a.runner == runner_id)
+        args = source_cli._parser().parse_args(["--statics-corridor", "--source", served])
         # A split root/hierarchy preparer receives this option at its child
         # stage. This is the real dispatcher command callback in every case.
         args.root_preparation = tmp_path / "root"

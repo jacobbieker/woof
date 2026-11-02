@@ -21,6 +21,7 @@ import time
 import tomllib
 import traceback
 
+from woof import linux_handles
 from woof.remote_artifacts import _file_sha, _sha
 
 SCHEMA = "gpuwm.remote.result.v1"
@@ -159,14 +160,14 @@ def _signal_owned(identity, token, signum):
     # A pidfd pins the process between identity verification and the signal;
     # a PID reused during that interval can never receive this job's signal.
     try:
-        handle = os.pidfd_open(identity["pid"], 0)
+        handle = linux_handles.pidfd_open(identity["pid"], 0)
     except ProcessLookupError:
         return False
     try:
         if _process(identity["pid"]) != identity or identity not in _owned_processes(token):
             return False
         try:
-            signal.pidfd_send_signal(handle, signum, None, 0)
+            linux_handles.pidfd_send_signal(handle, signum, None, 0)
             return True
         except ProcessLookupError:
             return False
@@ -1132,9 +1133,9 @@ def dispatch(request):
             return {"dry_run": True, "review": value}
         return remote_plan.launch(request, workspace)
     if action == "probe":
-        if not hasattr(os, "pidfd_open") or not hasattr(signal, "pidfd_send_signal"):
+        if not linux_handles.has_pidfd():
             raise ValueError("remote Python needs Linux pidfd process handles for safe job ownership")
-        handle = os.pidfd_open(os.getpid(), 0)
+        handle = linux_handles.pidfd_open(os.getpid(), 0)
         os.close(handle)
         from woof.remote_plan import hardware_probe
         probe = hardware_probe()
@@ -1183,9 +1184,9 @@ def run_worker(directory, token):
     record = _record(directory)
     if token != record["token"] or os.environ.get(TOKEN_ENV) != token:
         raise ValueError("worker token does not match its durable job record")
-    if not hasattr(os, "pidfd_open") or not hasattr(signal, "pidfd_send_signal"):
+    if not linux_handles.has_pidfd():
         raise ValueError("remote Python needs Linux pidfd process handles for safe job ownership")
-    handle = os.pidfd_open(os.getpid(), 0)
+    handle = linux_handles.pidfd_open(os.getpid(), 0)
     os.close(handle)
     import ctypes
     libc = ctypes.CDLL(None, use_errno=True)

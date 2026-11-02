@@ -59,7 +59,7 @@ def dump(path, value):
 def binary(name):
     """Resolve native tracker tools through the engine's normal artifact ladder."""
     from woof import bridges, rustwx
-    env = 'GPUWM_' + name.upper()
+    env = 'WOOF_' + name.upper()
     candidate = (rustwx.find_renderer() if name == 'rw_wrfbatch' else
                  bridges.find_artifact(env, bridges.executable_name(name),
                                        crate_relative='tools/rustwx'))

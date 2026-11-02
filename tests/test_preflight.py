@@ -5106,10 +5106,13 @@ CONFIG_4DOM_MYNN_NOCU = (
 
 @pytest.mark.parametrize(
     ("nz", "p_top", "frame"),
-    # (nz + nint(p_top / 400 Pa)) radiation layers -> RLW_MAXLAY tier
-    # (128, else a multiple of 64) -> 16 B per tier layer.
-    ((40, 0.0, 2048), (128, 0.0, 2048), (129, 0.0, 3072),
-     (200, 0.0, 4096), (256, 0.0, 4096), (256, 100.0, 4096),
+    # (nz + max(1, nint(p_top / 400 Pa))) radiation layers -> RLW_MAXLAY
+    # tier (128, else a multiple of 64) -> 16 B per tier layer.  The runtime
+    # keeps one clear buffer layer above a top below 2 hPa
+    # (rrtmg_legacy_prep.compute_lw_nlayers), so 127 levels is the last
+    # count on the shipped tier at p_top = 0.
+    ((40, 0.0, 2048), (127, 0.0, 2048), (128, 0.0, 3072), (129, 0.0, 3072),
+     (200, 0.0, 4096), (256, 0.0, 5120), (256, 100.0, 5120),
      (256, 5000.0, 5120), (100, 26000.0, 3072)))
 def test_legacy_lw_chain_frame_follows_the_compiled_layer_tier(
         nz, p_top, frame):
@@ -5124,7 +5127,7 @@ def test_legacy_lw_chain_frame_follows_the_compiled_layer_tier(
     exp = dataclasses.replace(
         exp, vertical=dataclasses.replace(exp.vertical, p_top=p_top))
     assert pf.rrtmg_lw_legacy_chain_frame_bytes(
-        nz + int(p_top / 400.0 + 0.5)) == frame
+        nz + max(1, int(p_top / 400.0 + 0.5))) == frame
     assert pf.kernel_local_frame_bytes(exp)["rrtmg_lw_legacy_chain"] == frame
     assert (pf.kernel_local_memory_bytes(exp)
             >= pf.MEASURED_LOCAL_MEMORY_PROFILE.reservation_bytes(frame))

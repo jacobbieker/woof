@@ -21,6 +21,17 @@ from woof import capabilities
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 
+@pytest.fixture(autouse=True)
+def cuda_backend(monkeypatch):
+    """These cases are CuPy's floor, the CUDA backend's.  The mlx environment
+    selects the Metal facade: there GPU_RUNTIME reads as the MLX runtime, and
+    ``import cupy`` resolves through the facade's finder, not a package."""
+    monkeypatch.setenv("WOOF_BACKEND", "cuda")
+    monkeypatch.setattr(sys, "meta_path", [
+        finder for finder in sys.meta_path
+        if type(finder).__name__ != "_FacadeFinder"])
+
+
 def _fake_cupy(root: Path, version: str) -> None:
     package = root / "cupy"
     package.mkdir()

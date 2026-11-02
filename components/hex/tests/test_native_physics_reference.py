@@ -3,6 +3,11 @@ import site_support
 import importlib.util
 import json
 from pathlib import Path
+import shutil
+
+#: A program that exits 0, wherever the platform keeps it (/bin/true on
+#: Linux, /usr/bin/true on macOS).
+_TRUE = shutil.which("true") or "/bin/true"
 
 TOOLS = Path(__file__).resolve().parents[1]/'tools/native_physics_reference'
 
@@ -547,7 +552,7 @@ def test_shared_decode_preserves_unrecognized_interrupted_stage(tmp_path,monkeyp
     stage=directory/'.pending-GFS_2001-01-01_00';stage.mkdir()
     sentinel=stage/'unrelated-file';sentinel.write_bytes(b'preserve unrelated bytes')
     with pytest.raises(ValueError,match='unrecognized interrupted native decoder file'):
-        module.decode(source,'2001-01-01_00:00:00',directory,'/bin/true',vtable)
+        module.decode(source,'2001-01-01_00:00:00',directory,_TRUE,vtable)
     assert sentinel.read_bytes()==b'preserve unrelated bytes'
     assert source.read_bytes()==b'encoded-source'
     assert not (directory/'MANIFEST.json').exists()
@@ -680,14 +685,14 @@ def test_shared_restore_requires_original_encoded_source_before_decoder(tmp_path
     source=tmp_path/'source.grib';source.write_bytes(b'changed encoded source')
     vtable=tmp_path/'Vtable';vtable.write_text('explicit decoder table')
     directory=tmp_path/'shared';directory.mkdir();name='GFS:2001-01-01_00'
-    manifest={'schema':'mpas.shared-ungrib/v1','ungrib_sha256':module.sha(Path('/bin/true')),
+    manifest={'schema':'mpas.shared-ungrib/v1','ungrib_sha256':module.sha(Path(_TRUE)),
               'vtable_sha256':module.sha(vtable),'files':{name:'original-native-output'},
               'sources':{name:{'sha256':'original-encoded-source','bytes':10}}}
     encoded=json.dumps(manifest);(directory/'MANIFEST.json').write_text(encoded)
     with pytest.raises(ValueError,match='missing or changed'):
-        module.decode(source,'2001-01-01_00:00:00',directory,'/bin/true',vtable)
+        module.decode(source,'2001-01-01_00:00:00',directory,_TRUE,vtable)
     with pytest.raises(ValueError,match='restoration raw source differs'):
-        module.decode(source,'2001-01-01_00:00:00',directory,'/bin/true',vtable,restore_missing=True)
+        module.decode(source,'2001-01-01_00:00:00',directory,_TRUE,vtable,restore_missing=True)
     assert (directory/'MANIFEST.json').read_text()==encoded
     assert not (directory/name).exists()
     assert source.read_bytes()==b'changed encoded source'

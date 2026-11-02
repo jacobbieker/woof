@@ -119,7 +119,7 @@ def _snapshot_history(state, cfg, grid, valid_time, directory):
     words. Its temporary history preserves the native grid instead.
     """
     import cupy as cp
-    from woof.core.refl import analysis_refl_10cm
+    from woof.core.refl import analysis_refl_10cm, peek_refl_10cm
     from woof.io.wrfout import (
         WrfoutWriter, _device_state_frame, _state_device_context, wrf_global_attrs, wrfout_filename,
     )
@@ -136,8 +136,7 @@ def _snapshot_history(state, cfg, grid, valid_time, directory):
     with _state_device_context(state):
         fields = _device_state_frame(state)
         fields = {name: cp.asnumpy(value) for name, value in fields.items() if name in keep}
-        driver = getattr(state, "physics", None)
-        refl = getattr(driver, "refl_10cm", None)
+        refl = peek_refl_10cm(state)
         if refl is None:
             refl = analysis_refl_10cm(state, cfg)
         fields["REFL_10CM"] = cp.asnumpy(refl)

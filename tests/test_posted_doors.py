@@ -868,16 +868,20 @@ def test_only_a_runner_that_waits_on_posted_leads_prepares_as_posted():
 def _flaky_reads(monkeypatch, path: Path, failures: int):
     """``path`` fails to read ``failures`` times, as a read meeting a replace does."""
 
-    real = Path.read_text
+    # The reader opens through filesystem_paths.read_shared_bytes (delete
+    # sharing on Windows), so that is where a read meets the replace.
+    from woof import filesystem_paths
+
+    real = filesystem_paths.read_shared_bytes
     left = {"count": failures}
 
-    def read_text(self, *args, **kwargs):
-        if Path(self) == path and left["count"] > 0:
+    def read_shared_bytes(target, *args, **kwargs):
+        if Path(target) == path and left["count"] > 0:
             left["count"] -= 1
             raise PermissionError(13, "The process cannot access the file")
-        return real(self, *args, **kwargs)
+        return real(target, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "read_text", read_text)
+    monkeypatch.setattr(filesystem_paths, "read_shared_bytes", read_shared_bytes)
     return left
 
 

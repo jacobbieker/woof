@@ -1107,10 +1107,31 @@ def _windows_memtotal() -> int | None:
     return None if status is None else status[0]
 
 
+def _darwin_memory() -> tuple[int, int] | None:
+    """This Mac's ``(total, available)`` physical RAM, via psutil.
+
+    macOS has no procfs either, and no memory cgroup.  psutil (a base
+    dependency) reads ``hw.memsize`` and the Mach VM statistics: available
+    is free (not speculative) plus inactive pages, the same reading the
+    native side takes (``rw-host-memory`` ``available_bytes``).
+    """
+    try:
+        import psutil
+
+        vm = psutil.virtual_memory()
+    except Exception:  # noqa: BLE001 - unmeasured, said so by None
+        return None
+    total, available = int(vm.total), int(vm.available)
+    return (total, available) if total > 0 and 0 <= available <= total else None
+
+
 def _host_memavailable() -> int | None:
     """Available physical RAM from the OS, excluding swap/pagefile capacity."""
     if sys.platform == "win32":
         status = _windows_memory_status()
+        return None if status is None else status[1]
+    if sys.platform == "darwin":
+        status = _darwin_memory()
         return None if status is None else status[1]
     try:
         with open(_PROC_MEMINFO, "r", encoding="ascii") as handle:
@@ -1127,11 +1148,15 @@ def _host_memtotal() -> int | None:
     """This box's physical RAM, from whichever source this OS has.
 
     Windows first, because on Windows the procfs read below cannot succeed
-    and its failure is not evidence of anything.  Everywhere else this is
-    ``/proc/meminfo``'s ``MemTotal``, unchanged.
+    and its failure is not evidence of anything; macOS likewise asks the OS
+    (:func:`_darwin_memory`).  Everywhere else this is ``/proc/meminfo``'s
+    ``MemTotal``, unchanged.
     """
     if sys.platform == "win32":
         return _windows_memtotal()
+    if sys.platform == "darwin":
+        status = _darwin_memory()
+        return None if status is None else status[0]
     try:
         with open(_PROC_MEMINFO, "r", encoding="ascii") as handle:
             for line in handle:
@@ -1144,8 +1169,11 @@ def _host_memtotal() -> int | None:
 
 def _memtotal_source() -> str:
     """What :func:`_host_memtotal` read, named for a receipt."""
-    return ("GlobalMemoryStatusEx ullTotalPhys" if sys.platform == "win32"
-            else "/proc/meminfo MemTotal")
+    if sys.platform == "win32":
+        return "GlobalMemoryStatusEx ullTotalPhys"
+    if sys.platform == "darwin":
+        return "sysctl hw.memsize (psutil)"
+    return "/proc/meminfo MemTotal"
 
 
 # --------------------------------------------------------------------------

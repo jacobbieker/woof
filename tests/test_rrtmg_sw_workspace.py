@@ -316,7 +316,8 @@ def test_the_scratch_price_is_the_slot_table_at_the_chunk():
     s.take("swhr", (nc, nl), np.float32)
     s.take("swhrc", (nc, nl), np.float32)
     assert set(s.slots()) == {k for k, _, _ in SW_SCRATCH_SLOTS
-                              if k not in SW_CHUNK_ZEROED_SLOTS + sw.SW_CALL_ZEROED_SLOTS}
+                              if k not in SW_CHUNK_ZEROED_SLOTS + sw.SW_CALL_ZEROED_SLOTS
+                              + sw.SW_OPTIONAL_TAKE_SLOTS}
     held = s.held_bytes()
     priced = sw_batched_scratch_bytes(nc, nl)
     # Priced at the 512-byte pool quantum per slot: at most 511 B over

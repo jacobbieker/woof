@@ -793,7 +793,10 @@ def test_every_door_that_commits_to_a_forecast_asks_the_precondition():
     # rather than spelling the question again.  A door that grew its own
     # copy of the sentence is what this catches; that each one FIRES is
     # measured behaviourally, above and in test_mp28_runnable.py.
-    for door in (go_cli.plan_from_config, cli._dispatch, runplan.resolve_plan):
+    # `woof run`'s door is the dispatch body since 1.1.4 split cli._dispatch
+    # into the output-format scope and _dispatch_with_outputs.
+    for door in (go_cli.plan_from_config, cli._dispatch_with_outputs,
+                 runplan.resolve_plan):
         source = inspect.getsource(door)
         assert ("experiment_preparation_refusals" in source
                 or "validate_experiment_preparation" in source), door
