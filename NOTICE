@@ -778,8 +778,9 @@ the platform C library's binary64 transcendentals differ in the last bits
 between glibc releases, macOS and the Windows UCRT.  The first-party crate
 tools/rustwx/crates/glibc239-libm transcribes glibc 2.39's own exp, log,
 log10, pow, sin, cos, tan, atan, atan2, asin and acos, in the form of
-glibc's x86-64 FMA IFUNC variants, so that a build which uses it gives
-glibc 2.39's results on every platform.
+glibc's x86-64 FMA IFUNC variants, and its binary32 asinf, so that a build
+which uses it gives glibc 2.39's results on every platform.  (asinf is the
+strict terrain-rotation reference in static-fields' src/capi/scalar.rs.)
 
 THE CRATE IS OPT-IN.  No default build compiles it: tools/rustwx excludes
 it from its workspace, and the CPU preprocessing bridge (tools/grib1_bridge)
@@ -817,8 +818,14 @@ Its licence is by file; the crate declares
     tools/uwpbl_wrf471_oracle/libm64/upstream/, as in the FP64 section above.
   * log10 (src/log10.rs) is FDLIBM's e_log10.c under Sun's notice, as
     reproduced in the FDLIBM section above.
+  * asinf (src/asinf.rs) is glibc 2.39's sysdeps/ieee754/flt-32/e_asinf.c:
+    FDLIBM under Sun's notice, with single-precision modifications
+    "Copyright (C) 2001 Stephen L. Moshier" that glibc carries under the
+    GNU Lesser General Public License, version 2.1 or later.  The file
+    keeps both notices and states that it was modified.
 
-Only those eleven files are offered under the LGPL.  A binary built with
+Only those twelve files (the eleven IBM files and asinf.rs) are offered
+under the LGPL.  A binary built with
 the opt-in contains them and is otherwise under its own licences.  LGPL
 2.1 section 6 conditions distributing such a binary on the recipient being
 able to modify the Library and relink: the complete source of the crate,

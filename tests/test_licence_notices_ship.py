@@ -577,7 +577,7 @@ MARKER_FILES: dict[str, str] = {
     # math the WRF references' glibc computes.
     **{f"tools/rustwx/crates/glibc239-libm/src/{name}.rs":
        "glibc 2.39 binary64 libm in Rust -- IBM Accurate Mathematical Library"
-       for name in ("asin", "asincos_tbl", "atan", "atan2", "branred", "dla",
+       for name in ("asin", "asinf", "asincos_tbl", "atan", "atan2", "branred", "dla",
                     "exp", "log", "log10", "pow", "sincos", "sincostab", "tan",
                     "uatan_tbl", "utan_tbl")},
 }
