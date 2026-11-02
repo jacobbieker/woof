@@ -1177,8 +1177,7 @@ def test_async_interrupted_admission_after_insert_stays_balanced_and_drains(
 
         def __exit__(self, *_args):
             # The worker releases the frame's staging (pending -= 1) inside
-            # the writer's ``with`` block, after write_frame returns; signal
-            # from __exit__ so the read below cannot race that release.
+            # the writer's ``with`` block, after write_frame returns.
             consumed.set()
             return False
 
@@ -1208,6 +1207,12 @@ def test_async_interrupted_admission_after_insert_stays_balanced_and_drains(
             writer._admit(ticket)
         assert ticket.admitted
         _await_worker(consumed, writer, reaching="consuming the ticket")
+        # The frame's output identity stays pending until the worker's
+        # completion block publishes the ticket as finished; read after it.
+        with writer._condition:
+            while (writer._finished_count < 1
+                   and writer._thread.is_alive()):
+                writer._condition.wait(timeout=_HANDOFF_POLL_SECONDS)
         pending_after_consume = writer.pending
 
         def drain():
