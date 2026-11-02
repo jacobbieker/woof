@@ -1198,7 +1198,7 @@ class _Rewriter:
                 tops.append(next(k for k, st in enumerate(stmts) if self.span(st) == self.span(top)))
             else:
                 if tops and all(i < j for i in tops):
-                    spans[(name, (ls, le))] = [self.span(block), "forward", min(tops), j]
+                    spans[(name, (ls, le))] = [self.span(block), "forward", min(tops), j, max(tops)]
                 elif tops and all(i > j for i in tops):
                     spans[(name, (ls, le))] = [self.span(block), "backward", j, max(tops) + 1]
         changed = True
@@ -1214,14 +1214,17 @@ class _Rewriter:
         # A forward jump into a retry loop from before it (RUC's ``IF (..)
         # GOTO 100`` / ``90 ...`` / ``100 ...`` / ``IF (..) GOTO 90``): the
         # loop's statements before the label are guarded by the jump's flag,
-        # which the label clears.  Only when no other region of the block
-        # starts or ends among the guarded statements.
+        # which the label clears.  Only when every jump to the label comes
+        # before the loop (a jump from the guarded statements would break out
+        # of the retry loop instead), and no other region of the block starts
+        # or ends among the guarded statements.
         entries = {}
         for key, f in spans.items():
             if f[1] != "forward":
                 continue
             for r in spans.values():
-                if not (r[1] == "backward" and r[0] == f[0] and f[2] < r[2] < f[3] < r[3]):
+                if not (r[1] == "backward" and r[0] == f[0] and f[2] < r[2] < f[3] < r[3]
+                        and f[4] < r[2]):
                     continue
                 clear = all(o is f or o is r or o[0] != f[0] or o[3] <= r[2] or o[2] >= f[3]
                             or (o[2] <= r[2] and o[3] >= r[3]) for o in spans.values())

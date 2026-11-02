@@ -279,3 +279,18 @@ def test_forward_goto_into_a_retry_loop(cp):
     out = cp.zeros(q.size, dtype=cp.float32)
     cp.RawKernel(_ENTRY, "entry")((1,), (8,), (cp.asarray(q), cp.asarray(qs), out, np.int32(q.size)))
     assert cp.asnumpy(out).tobytes() == want.tobytes()
+
+
+_ENTRY_FROM_INSIDE = _ENTRY.replace(
+    "    r = r + 1.0f;\n    visits = visits + 1;\n",
+    "    r = r + 1.0f;\n    if ((r > 5.0f)) { goto label_100; }\n    visits = visits + 1;\n")
+
+
+def test_a_second_jump_from_inside_the_retry_loop_is_refused():
+    """The entry guard skips the loop's head only on the first pass: a jump
+    to the same label from inside the guarded statements cannot be spelled
+    that way (its break would leave the retry loop), so it is refused."""
+    from woof.backend.translate import TranslationError, translate
+    assert "goto label_100; }\n    visits" in _ENTRY_FROM_INSIDE
+    with pytest.raises(TranslationError, match="goto"):
+        translate(_ENTRY_FROM_INSIDE, unit="entry_from_inside")

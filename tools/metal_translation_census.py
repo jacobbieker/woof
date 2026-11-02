@@ -139,7 +139,9 @@ def _normalise(message: str) -> str:
 
 
 def census_one(name: str, retain: bool, translate_only: bool = False) -> dict:
-    os.environ.setdefault("WOOF_BACKEND", "mlx")
+    if not translate_only:
+        # translation alone touches no device: a Linux host keeps its backend
+        os.environ.setdefault("WOOF_BACKEND", "mlx")
     if retain:
         os.environ["GPUWM_WRF_EXACT"] = "1"
     import woof  # noqa: F401  -- installs the facade

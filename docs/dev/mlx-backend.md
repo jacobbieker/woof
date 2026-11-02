@@ -278,9 +278,22 @@ opt-in.
 `tools/metal_translation_census.py --hex --translate-only` translates every
 unit the hex kernel pack holds (`woof.hex.cuda_backend.aot_build.pack_inventory`:
 the KernelCache declarations and the recorded direct and raw NVRTC compiles,
-strict and fast; CuPy's generated kernels are the facade's). It needs only
-libclang, so it runs on Linux too. 353 of the 361 units translate. The rest
-are refused by name:
+strict and fast; CuPy's generated kernels are the facade's). Translation
+needs no Metal device and no MLX: only libclang's Python bindings and a
+`clang` or `clang++` on `PATH` (the preprocessor). On Linux the `mlx` pixi
+environment does not exist (it is osx-arm64 only), so put the bindings of
+the `libclang` 18.1.1 wheel the `mlx` environment pins on `PYTHONPATH` in
+the `default` environment:
+
+```
+pip download libclang==18.1.1 --no-deps --platform manylinux2010_x86_64 -d /tmp/lc
+python -m zipfile -e /tmp/lc/libclang-18.1.1-*.whl /tmp/lc/site
+PYTHONPATH=/tmp/lc/site/libclang-18.1.1.data/platlib pixi run -e default \
+    python tools/metal_translation_census.py --hex --translate-only --out /tmp/hex.jsonl
+```
+
+With `--translate-only` the census leaves `WOOF_BACKEND` as the host has it.
+353 of the 361 units translate. The rest are refused by name:
 
 - RRFS smoke (4 units) includes `<cuda/barrier>` for a block-scope
   `cuda::barrier`;
@@ -300,8 +313,12 @@ The hex units brought in these translator constructs:
 - `__ldg`, `__maxnreg__`, `clock64` and `__reduce_*_sync` are provided;
 - a `cupy/complex.cuh` stand-in carries Thrust's division and `csqrtf`.
 
-`tests/test_metal_hex_translation.py` checks each construct's words on the
-device (6 of 6 pass on an M3 Max).
+`tests/test_metal_hex_translation.py` checks on the device the gotos, the
+PTX bit operations, string literals in a struct and the Thrust complex
+division and square root (6 of 6 pass on an M3 Max). The `static const`
+arrays, `__ldg`, `__maxnreg__`, `clock64` and `__reduce_*_sync` are
+checked only by the census, which translates the MYNN, TEMPO and RRFS
+units that use them.
 
 A `woof hex regional` forecast runs end to end on Metal with
 `WOOF_HEX_METAL=1`: a 1,607-cell generated limited-area mesh, HRRR
