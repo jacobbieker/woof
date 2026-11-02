@@ -119,7 +119,12 @@ class ElementwiseKernel:
             if k < len(outs):
                 o = outs[k]
                 if not p.raw and not o.is_c_contiguous():
-                    tmp = _ops.empty(o.shape, dt)
+                    # An output parameter is read-write, as in CuPy: the
+                    # operation may read it (``if (x < t) x = 0``), so the
+                    # dense stand-in starts with the view's words.
+                    tmp = _ops.ascontiguousarray(o)
+                    if tmp.dtype != dt:
+                        tmp = tmp.astype(dt)
                     temps.append((o, tmp))
                     call_args.append(tmp)
                 else:

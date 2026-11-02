@@ -232,6 +232,18 @@ def copyto(dst, src, casting="same_kind", where=None):
 #: whose float is then f32s (tests/test_bandwidth_glue.py compares glue
 #: kernels with eager `dst + src` on subnormal words).
 _SUBNORMAL_ARITH = {"add": "+", "subtract": "-", "multiply": "*", "divide": "/", "true_divide": "/"}
+#: The same holds for comparisons and min/max: Metal's compare and
+#: fmax/fmin instructions treat a subnormal as zero (1e-40 > 0 is false,
+#: maximum(1e-40, 0) is 0), where CUDA under --ftz=false keeps it.  So in
+#: that process these take the translated f32s kernel too.  maximum and
+#: minimum propagate a NaN, as NumPy's and CuPy's do; fmax/fmin drop it.
+_SUBNORMAL_EXPR = {
+    "maximum": "z = (x != x) ? x : ((y != y) ? y : fmaxf(x, y))",
+    "minimum": "z = (x != x) ? x : ((y != y) ? y : fminf(x, y))",
+    "fmax": "z = fmaxf(x, y)", "fmin": "z = fminf(x, y)",
+}
+_SUBNORMAL_COMPARE = {"less": "<", "less_equal": "<=", "greater": ">",
+                      "greater_equal": ">=", "equal": "==", "not_equal": "!="}
 _SUBNORMAL_KERNELS: dict = {}
 
 
@@ -240,13 +252,25 @@ def _keeps_subnormals() -> bool:
     return os.environ.get("GPUWM_WRF_EXACT", "0") == "1"
 
 
+def _operands_f32(hints) -> bool:
+    try:
+        return np.result_type(*hints) == np.float32
+    except TypeError:
+        return False
+
+
 def _subnormal_arith(np_name, a, b):
     from woof.backend.facade._elementwise import ElementwiseKernel
-    op = _SUBNORMAL_ARITH[np_name]
-    k = _SUBNORMAL_KERNELS.get(op)
+    if np_name in _SUBNORMAL_ARITH:
+        key, out, body = _SUBNORMAL_ARITH[np_name], "float32 z", f"z = x {_SUBNORMAL_ARITH[np_name]} y"
+    elif np_name in _SUBNORMAL_EXPR:
+        key, out, body = np_name, "float32 z", _SUBNORMAL_EXPR[np_name]
+    else:
+        key, out, body = np_name, "bool z", f"z = x {_SUBNORMAL_COMPARE[np_name]} y"
+    k = _SUBNORMAL_KERNELS.get(key)
     if k is None:
-        k = _SUBNORMAL_KERNELS[op] = ElementwiseKernel(
-            "float32 x, float32 y", "float32 z", f"z = x {op} y", f"woof_f32_{np_name}")
+        k = _SUBNORMAL_KERNELS[key] = ElementwiseKernel(
+            "float32 x, float32 y", out, body, f"woof_f32_{np_name}")
     if not isinstance(a, (ndarray, np.ndarray)):
         a = np.float32(a)
     if not isinstance(b, (ndarray, np.ndarray)):
@@ -267,8 +291,10 @@ def _apply(np_name, mx_name, *args, out=None, dtype=None, result_dtype=None):
     involves_f64 = (np.dtype(result_dtype) == np.float64
                     or any(isinstance(h, np.dtype) and h == np.float64 for h in hints))
     mx = _mx()
-    if (not involves_f64 and np_name in _SUBNORMAL_ARITH and np.dtype(result_dtype) == np.float32
-            and _keeps_subnormals()):
+    if (not involves_f64 and _keeps_subnormals()
+            and ((np_name in _SUBNORMAL_ARITH or np_name in _SUBNORMAL_EXPR)
+                 and np.dtype(result_dtype) == np.float32
+                 or np_name in _SUBNORMAL_COMPARE and _operands_f32(hints))):
         result = _subnormal_arith(np_name, args[0], args[1])
         if out is not None:
             copyto(out, result)

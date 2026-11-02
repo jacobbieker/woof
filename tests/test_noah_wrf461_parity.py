@@ -226,6 +226,9 @@ BASELINE_MAX_ULP_BY_ARCH_AND_BUILD: dict[tuple[str, str], dict[str, int]] = {}
 #: hfx 802, grdflx 2089, snopcx 545 and noahres 606208 ULP with contraction.
 DEFAULT_ARITHMETIC_MAX_ULP_BY_ARCH_AND_BUILD: dict[tuple[str, str], dict[str, int]] = {
     ("120", "13.4.92"): dict(BASELINE_MAX_ULP),
+    # Zero in every field as well on an RTX A6000 (sm_86, NVRTC 13.4.92),
+    # read 2026-11-02.
+    ("86", "13.4.92"): dict(BASELINE_MAX_ULP),
     # The MLX backend (woof's Metal translation, which never contracts):
     # zero in every field, read 2026-10-29 on an M3 Max.
     ("metal", "metal"): dict(BASELINE_MAX_ULP),

@@ -283,6 +283,8 @@ static inline f32s trunc(f32s a) { return truncf(a); }
 static inline f32s round(f32s a) { return roundf(a); }
 static inline f32s rint(f32s a) { return rintf(a); }
 static inline f32s ldexpf(f32s a, int n) { return f32s(__woof_n(ldexp(f64::bits(__woof_w(a.v)), n).b)); }
+static inline f32s scalbnf(f32s a, int n) { return ldexpf(a, n); }
+static inline f32s frexpf(f32s a, thread int* e) { return f32s(frexpf(a.v, e)); }
 
 // CUDA's binary32 intrinsics.
 static inline f32s __fadd_rn(f32s a, f32s b) { return a + b; }
