@@ -4882,7 +4882,9 @@ _MOMENT_ROWS: dict[int, dict | None] = {
                    {"species": "graupel", "mass": "qg", "number": "ng"}],
          "unpaired": [], "repair_authority": _MORRISON_REPAIR_AUTHORITY,
          "q_threshold": 1.0e-14},
-    # Morrison with CESM aerosol: Morrison's pairs, nc now advected.
+    # Morrison with CESM aerosol: Morrison's pairs, nc now advected.  No
+    # repair authority: Morrison's PSD limiter carries mp=10's ice lambda
+    # floor, and mp=40's (LAMMINI from DCS 350 um) differs.
     40: {"name": "Morrison two-moment with CESM aerosol",
          "mass_only": ["qv"],
          "pairs": [{"species": "cloud", "mass": "qc", "number": "nc"},
@@ -4890,7 +4892,7 @@ _MOMENT_ROWS: dict[int, dict | None] = {
                    {"species": "ice", "mass": "qi", "number": "ni"},
                    {"species": "snow", "mass": "qs", "number": "ns"},
                    {"species": "graupel", "mass": "qg", "number": "ng"}],
-         "unpaired": [], "repair_authority": _MORRISON_REPAIR_AUTHORITY,
+         "unpaired": [], "repair_authority": None,
          "q_threshold": 1.0e-14},
     # WDM6: double-moment warm rain (nc, nr) over WSM6's ice; the CCN
     # reservoir nn is prognostic and has no mass partner
