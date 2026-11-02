@@ -835,6 +835,19 @@ def source_reaches_forecast_leads(source: str) -> bool:
     return get_source_adapter(source).max_forecast_hour > 0
 
 
+def _named_or_first_lead(args) -> int:
+    """``--forecast-start-hour``, or the source's first published lead."""
+
+    named = getattr(args, "forecast_start_hour", None)
+    if named is not None:
+        return named
+    if not getattr(args, "source", None):
+        return 0
+    from woof.fetch_routes import first_published_lead
+
+    return first_published_lead(args.source)
+
+
 def forecast_start_hour_refusal(source: str, start_hour: int,
                                 hours: float) -> str | None:
     """Why a run of ``hours`` cannot begin at lead f{start_hour}, or None.
@@ -7042,7 +7055,7 @@ def _keyless_default_source(args) -> None:
     args.era5_provider = "arco"
     raw = str(args.cycle).strip()
     cycle = None if raw.lower() == "latest" else parse_cycle(raw, args.source)
-    start_hour = getattr(args, "forecast_start_hour", None) or 0
+    start_hour = _named_or_first_lead(args)
     hours = int(getattr(args, "hours", 0) or 0)
     newest = None
     if cycle is not None:
@@ -7607,8 +7620,10 @@ def domain_main(args, *, sizing_budget: SizingBudget | None = None,
     # be impossible to ask for on this door.  Checked BEFORE the cycle is
     # resolved, because `--cycle latest` probes the mirrors for a cycle
     # complete through lead + length and a bad lead should not spend a
-    # network round trip to be refused.
-    start_hour = getattr(args, "forecast_start_hour", None) or 0
+    # network round trip to be refused.  A door that names no lead opens
+    # at the source's first published one (f003 for the GEFSv12
+    # reforecast, which publishes no analysis), as a bare [fetch] does.
+    start_hour = _named_or_first_lead(args)
     lead_refusal = forecast_start_hour_refusal(args.source, start_hour, args.hours)
     if lead_refusal:
         raise ValueError(lead_refusal)

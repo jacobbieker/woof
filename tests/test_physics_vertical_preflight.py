@@ -177,9 +177,11 @@ def test_legacy_rrtmg_engine_bounds_inside_and_outside():
 
 @pytest.mark.parametrize(
     ("p_top", "cap"),
-    # nint(p_top / 400 Pa), WRF's 4 hPa buffer layers above the model top:
-    # 1 hPa builds none, 50 hPa builds 12.5 -> 13 (half away from zero).
-    ((100.0, 0), (5000.0, 13), (26000.0, 65)))
+    # nint(p_top / 400 Pa), WRF's 4 hPa buffer layers above the model top
+    # (50 hPa builds 12.5 -> 13, half away from zero), with the one clear
+    # layer the runtime keeps where that rounds to none (1 hPa;
+    # rrtmg_legacy_prep.compute_lw_nlayers).
+    ((100.0, 1), (5000.0, 13), (26000.0, 65)))
 def test_legacy_rrtmg_longwave_is_bounded_by_model_depth_256(p_top, cap):
     """Legacy LW refuses only past the dycore's nz <= 256, at any p_top;
     the radiation column then carries WRF's cap layers on top of it."""

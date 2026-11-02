@@ -34,10 +34,15 @@ def test_generic_namelist_keeps_current_staging_bytes_and_legacy_defaults(tmp_pa
     assert WRF_CLOCK_BLOCK in text
     # Pinned before 2026-10-12: the input now asks for Morrison by its own
     # number (55 is refused) and the omitted lid is WRF's open top; with
-    # exactly those two lines put back the parent's hash holds.
+    # exactly those two lines put back, and the comment header in the
+    # engine's gpuwm spelling (woof_engine_spelling), less the three
+    # default-on lines later import capability lanes added, the parent's
+    # hash holds.
     from ishmael_retirement import with_retired_line
-    assert hashlib.sha256(with_retired_line(
-        without_wrf_clock_lines(text)).encode()
+    from woof_engine_spelling import engine_spelling
+    from test_audit_parent_generic_bytes import without_import_capability_lines
+    assert hashlib.sha256(engine_spelling(with_retired_line(
+        without_import_capability_lines(without_wrf_clock_lines(text)))).encode()
                           ).hexdigest() == baseline["namelist"]
     raw = tomllib.loads(text)
     emitted = set(raw["shared"]) | {key for row in raw["domain"] for key in row}

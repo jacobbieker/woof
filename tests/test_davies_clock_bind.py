@@ -34,6 +34,7 @@ import numpy as np
 import pytest
 
 from conftest import requires_gpu
+from _woof_snapshot import left_out
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -180,7 +181,11 @@ def test_binder_references_are_exactly_the_sanctioned_callers():
     else.  Retains the F20 review hardening (names, attributes, string
     literals, import aliases) as a positive inventory."""
     package_root = REPO_ROOT / "woof"
-    expected = {package_root / rel for rel in SANCTIONED_BINDER_MODULES}
+    # A sanctioned caller this tree leaves out (tests/_woof_left_out.txt,
+    # e.g. woof/verify/cases/real74_n5s.py) cannot reference anything here;
+    # every caller that is present must still be exactly the inventory.
+    expected = {package_root / rel for rel in SANCTIONED_BINDER_MODULES
+                if not left_out(f"woof/{rel.as_posix()}")}
     referencing = set()
     for path in sorted(package_root.rglob("*.py")):
         if _binder_references(path):

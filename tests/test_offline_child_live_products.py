@@ -191,7 +191,10 @@ def test_each_child_frame_is_drawn_as_it_is_committed(child, monkeypatch):
         ("output_committed", frames[2].name),
         ("live_products_ready", frames[2].name),
     ]
-    assert renderer.frames == [frame.name for frame in frames]
+    # The analysis is the early render's single pass; each later frame
+    # is the live pass's two (the headline set first, then the rest).
+    assert renderer.frames == [frames[0].name] + [
+        frame.name for frame in frames[1:] for _ in range(2)]
     # Published into the layout the finalize render uses, and recorded.
     for frame in frames:
         assert (outdir / "png" / "d02-250m" / "composite_reflectivity"
@@ -316,6 +319,12 @@ def test_a_stopped_child_draws_nothing_more(tmp_path, monkeypatch, width):
     # it ends a real render's process.  A fixed hold ran out first on a
     # loaded machine, and the render then finished and published.
     monkeypatch.setattr(live_products, "_render_concurrency", lambda: width)
+    # Width alone admits the frames: the adaptive admission (on by default)
+    # reads this host's memory now and the stand-in renders' expected
+    # peaks, and held all but the first frame wherever little memory was
+    # available (a hosted runner; a workstation with 10 GiB free), so the
+    # slots this stop must end were never all in flight.
+    monkeypatch.setenv(live_products.LIVE_RENDER_ADAPTIVE_ENV, "0")
     held = {(_START + timedelta(hours=hour)).strftime("wrfout_d02_%Y-%m-%d_%H_%M_%S")
             for hour in range(1, width + 1)}
     renderer = _Renderer(hold=held)

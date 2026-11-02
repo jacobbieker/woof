@@ -32,6 +32,13 @@ CHANGELOG = REPO_ROOT / "CHANGELOG.md"
 def _release_section(text: str, release: str) -> str:
     """The CHANGELOG text between ``## <release>`` and the next ``## ``."""
 
+    if f"## {release} (" not in text and int(release.split(".")[0]) >= 2 \
+            and "\n## 1.0.0 (" in text:
+        # The 2.x line is the pre-renumbering history: CHANGELOG.md begins
+        # at the 1.0.0 cut and carries none of its sections, so there is no
+        # section here to pin the table to.
+        pytest.skip(f"CHANGELOG.md begins at 1.0.0; the {release} section "
+                    "predates it")
     start = text.index(f"## {release} (")
     end = text.find("\n## ", start + 1)
     return text[start:] if end < 0 else text[start:end]

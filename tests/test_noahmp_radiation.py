@@ -494,6 +494,36 @@ def _libm_fork_offenders(tree) -> list[str]:
     )
 
 
+#: Modules that BIND a C library's entry points rather than transcribe them,
+#: each with why the owner's transcription is not the right import.  The
+#: binding is held to its shape below: every entry point it defines is one
+#: ``return`` statement handing the argument to the bound library, so a
+#: transcription (constants, reductions, polynomials) still fails here.
+_HOST_LIBM_BINDINGS = {
+    # WRF's turbine placement calls the C library WRF's gfortran object code
+    # calls (ctypes on glibc, woof's compiled glibc ports elsewhere), so its
+    # words follow the host's glibc version, as a WRF built there does.  The
+    # owner pins glibc 2.39, and glibc 2.44's log10f differs from that
+    # transcription on 2,793 of 200,000 uniformly drawn positive normal
+    # float32 bit patterns (measured 2026-11-01; logf and powf agree on every
+    # sample), so importing the owner would change the words, not merge them.
+    "woof/windfarm/wrf_llij.py": "binds the host C library through ctypes",
+}
+
+
+def _binding_offenders(tree) -> list[str]:
+    """Entry points a declared binding defines with more than one return."""
+    import ast
+
+    return sorted(
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name in _LIBM_ENTRY_POINTS
+        and not (len(node.body) == 1 and isinstance(node.body[0], ast.Return))
+    )
+
+
 def test_logf_has_not_forked_between_the_two_libm_modules():
     """One transcription of each glibc entry point, imported everywhere.
 
@@ -526,7 +556,8 @@ def test_logf_has_not_forked_between_the_two_libm_modules():
             tree = ast.parse(path.read_text(encoding="utf-8"))
         except (SyntaxError, UnicodeDecodeError):
             continue
-        defined = _libm_fork_offenders(tree)
+        defined = (_binding_offenders(tree) if rel in _HOST_LIBM_BINDINGS
+                   else _libm_fork_offenders(tree))
         if defined:
             offenders[rel] = defined
     assert offenders == {}, (

@@ -348,7 +348,13 @@ def test_a_bare_gdas_fetch_takes_the_row_spacing():
 #: The routes added after 2.8.0: 69a0baec1 (rap-native, hrrr-native) and
 #: 86dfe06f0 (rrfs-ens, ecmwf-ens).  They had no 2.8.0 behaviour to keep,
 #: and are pinned so a further route is a decision rather than a skip.
-ROUTES_AFTER_280 = ("ecmwf-ens", "hrrr-native", "rap-native", "rrfs-ens")
+ROUTES_AFTER_280 = ("ecmwf-ens", "hrrr-native", "rap-native", "rrfs-ens",
+                    # the 0.1-degree ECMWF open data, the GEFSv12 reforecast
+                    # and GEFS v11 archive rows and the NOAA surface donors,
+                    # each added to the route table after 2.8.0
+                    "ecmwf-open-data-0p1", "gefs-reforecast",
+                    "gefs-reforecast-weekly", "gefs-reforecast-land",
+                    "gefs-v11", "gefs-v11-flat", "ncep-r1-seaice")
 
 #: The per-route cadences lists 2.8.0 shipped, kept only to show that a
 #: window which names no cadence resolves exactly as it did then.

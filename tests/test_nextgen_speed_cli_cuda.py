@@ -11,6 +11,12 @@ import tempfile
 import textwrap
 import unittest
 
+import pytest
+
+# The child compiles and launches a CUDA kernel through cupy, imported in a
+# script string the conftest's AST scan cannot see.
+pytestmark = pytest.mark.gpu
+
 
 class CompilerModeTests(unittest.TestCase):
     def test_default_fast_and_explicit_strict(self):

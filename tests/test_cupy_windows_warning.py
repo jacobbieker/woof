@@ -76,6 +76,9 @@ def _without_cuda_variables() -> dict[str, str]:
     env["PYTHONPATH"] = str(REPO)
     env.pop("PYTHONSAFEPATH", None)
     env.pop("PYTHONWARNINGS", None)
+    # The Windows process imports CuPy itself: the CUDA backend, not the
+    # Metal facade the mlx environment's WOOF_BACKEND=mlx would serve.
+    env["WOOF_BACKEND"] = "cuda"
     return env
 
 

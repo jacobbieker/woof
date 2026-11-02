@@ -104,10 +104,11 @@ auditable local deltas required by the native GFS bridge:
   `b261ac24e406acc2c77f26134bcff43b00d29bd097c70073f565bf0ceadd1e59`.
 - `src/grib2/mod.rs` re-exports that identification value object and
   `DECODE_TEMPLATES`, `StatisticalTimeRange`, and `MissingValueMode` / `missing_value_mode`
-  beside the unpackers, and (A135, 2026-09-30) `StoredRect` and
-  `unpack_message_stored_rect`.
+  beside the unpackers, (A135, 2026-09-30) `StoredRect` and
+  `unpack_message_stored_rect`, and (1.1.4) `unpack_message_wps32`, the
+  WPS/g2lib binary32 unpack arithmetic in `src/grib2/unpack.rs`.
   Patched-file SHA-256:
-  `1f751bdf0f8b82f39658b8f2536f554dfc2d7796d53a36d9de4383e122bc86de`.
+  `7ffe9ee7c71a7c1f3158c02651d849c31f0d00f366e6b52e312c3e75cab8cda3`.
 - `src/grib2/search.rs` initializes the new identity in its pre-existing
   synthetic test messages. `src/grib2/unpack.rs` additionally enforces
   Section-5/7 simple- and complex-packing cardinality, checked bit reads, a
@@ -155,9 +156,11 @@ auditable local deltas required by the native GFS bridge:
   to the final octet), decodes as all-missing; data bytes, a malformed
   bitmap or a nonempty group table are still decode errors
   (`tests/all_missing_complex.rs`).
+  1.1.4 adds `unpack_message_wps32`: integer-packed fields through the same
+  validated unpacker, then WPS/g2lib's binary32 scaling arithmetic.
   Patched-file SHA-256 values are respectively
   `22254047da83fafcc06816170b7687127cb9f64bc7e82e4de2d239861c149547`
-  and `be1485f980301df6c99a91b8b7d1440fc6c90da526627e36494d92662bdc6297`.
+  and `d3f9f4481e47e507066e844e6138e5528c8f3512ad46c125149e09cf2838689e`.
 - `src/grib2/grid.rs` fails closed on a grid-definition template it has no
   point placement for: `grid_latlon` returns `crate::Result` and refuses
   naming the template number (and that supporting it needs the template's

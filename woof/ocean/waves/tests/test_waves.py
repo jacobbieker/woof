@@ -42,7 +42,8 @@ def test_verification_door_dispatches_the_requested_native_operation(monkeypatch
 
 
 def device():
-    if os.environ.get("GPUWM_NO_LOCAL_GPU") == "1":
+    from woof.local_gpu import no_local_gpu
+    if no_local_gpu():
         pytest.skip("GPU tests run under the V58 shared lease")
     cp = pytest.importorskip("cupy")
     try:

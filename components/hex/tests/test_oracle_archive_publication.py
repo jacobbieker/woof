@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import json
 import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -64,6 +65,9 @@ def publish(c,suite='configured-suite'):
     return publisher.publish_archive(c.index,c.merged,c.capture,c.inventory,c.campaign,suite,'test-lane')
 
 
+@pytest.mark.skipif(sys.platform == "darwin", reason=(
+    "the capture-matrix unpack pipes the archive through GNU tar (--wildcards, "
+    "--ignore-zeros), as on the Linux oracle host it runs on; macOS ships bsdtar"))
 def test_archive_publication_relocated_transport_and_truthful_failure(catalogue):
     c=catalogue;r=publish(c);root=Path(r['path'])
     assert not r['all_outputs_bitwise_equal'] and not r['forecast_proven']

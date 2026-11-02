@@ -121,3 +121,8 @@ tests/test_pypi_capacity.py
 tests/test_ci_workflow.py
 tests/test_public_ci_contract.py
 tests/test_workflow_rehearsals.py
+# The campaign ensemble harness and its test (RELEASE-EXCLUDE.txt: tools/n5s/**,
+# tests/test_n5s_toolchain.py); tests/test_mynn_tke_advection.py builds its
+# wrfinput/wrfbdy fixtures with that test's helpers.
+tools/n5s/**
+tests/test_n5s_toolchain.py

@@ -8645,7 +8645,7 @@ def _apply_validated_restart(validated: _ValidatedRestart,
     # values a move shifted there out of the interior -- real history for
     # ground that is still in the domain, and zeroing it loses rain the
     # rest of the forecast never puts back.
-    from woof.core.microphysics import normalize_spec_zone_ring_after_restore
+    from woof.core.microphysics_ring import normalize_spec_zone_ring_after_restore
     normalize_spec_zone_ring_after_restore(
         state, cfg, relocated=_grid_relocated(
             header, cfg, parent_by_grid=parent_by_grid))

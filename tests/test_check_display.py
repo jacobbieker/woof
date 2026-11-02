@@ -15,6 +15,13 @@ def config(tmp_path, monkeypatch):
     monkeypatch.setenv("GPUWM_NO_LOCAL_GPU", "1")
     monkeypatch.setattr(pf, "device_physical_total_bytes", lambda **_: None)
     monkeypatch.setattr(pf, "host_available_bytes", lambda: 128 * pf.GIB)
+    # The streaming host claim and the decode window read the host too; one
+    # machine for every gate, not the runner's (7 GiB on hosted macOS).
+    from woof.core import streaming
+    from woof.ingest import host_decode_window
+    monkeypatch.setattr(streaming, "_host_total_bytes", lambda: 128 * pf.GIB)
+    monkeypatch.setattr(host_decode_window, "available_host_bytes",
+                        lambda: 128 * pf.GIB)
     return _fetch_only_config(tmp_path)
 
 

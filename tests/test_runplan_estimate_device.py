@@ -98,7 +98,11 @@ def test_unmeasured_device_keeps_conservative_workspace_without_cuda(
     assert result["peak_envelope_bytes"] > 0
 
 
-def test_native_plan_prices_declared_fetch_cadence(tmp_path, observed_device):
+def test_native_plan_prices_declared_fetch_cadence(tmp_path, observed_device,
+                                                  monkeypatch):
+    # The whole schedule on the card, so the cadence moves the figure: a
+    # chained one-domain run holds one forcing slot whatever the cadence.
+    monkeypatch.setenv("WOOF_CHAINED_PREP", "0")
     path = _case(tmp_path)
     raw = tomllib.loads(path.read_text())
     raw.pop("case_data")

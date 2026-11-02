@@ -9415,6 +9415,7 @@ def estimate_plan(plan: RunPlan) -> dict[str, Any]:
     if payload is None:
         payload = plan.config_bytes().decode("utf-8")
     raw = tomllib.loads(payload)
+    resident_slots = None
     if data is not None:
         forcing_interval, intervals = case_forcing_schedule(data, exp)
     else:
@@ -9425,6 +9426,11 @@ def estimate_plan(plan: RunPlan) -> dict[str, Any]:
         # priced the same file at the producer's own cadence.
         forcing_interval = recorded_forcing_interval_seconds(raw)
         intervals = None
+        # And the forcing slots the card holds, as the check prices them:
+        # a one-domain plan runs chained on its preparation's head and
+        # streams its lateral intervals through one device slot.
+        from woof.ingest.boundary_stream import chained_resident_forcing_slots
+        resident_slots = chained_resident_forcing_slots(exp)
     # THE TABLES THE RUN HOLDS, as `woof check` prices this file: the
     # root's boundary carries the analysed hydrometeors the recorded
     # source publishes.  Named as the boundary source only, so this
@@ -9448,7 +9454,7 @@ def estimate_plan(plan: RunPlan) -> dict[str, Any]:
         machine=machine, profile=profile, vram_gib=capacity,
         forcing_interval_seconds=(forcing_interval if forcing_interval is not None else
                                   DEFAULT_FORCING_INTERVAL_SECONDS),
-        forcing_intervals=intervals)
+        forcing_intervals=intervals, resident_forcing_intervals=resident_slots)
     estimate = phases.forecast
     streamed = phases.streamed
     # ONE DECISION PER DOCUMENT.  The envelope this document quotes is
@@ -9499,7 +9505,9 @@ def estimate_plan(plan: RunPlan) -> dict[str, Any]:
             "device_free_bytes": free,
             "forcing_interval_seconds": (forcing_interval if forcing_interval is not None else
                                          DEFAULT_FORCING_INTERVAL_SECONDS),
-            "retained_forcing_intervals": intervals,
+            # The slots priced: one when the plan runs chained.
+            "retained_forcing_intervals": (intervals if resident_slots is None
+                                           else resident_slots),
             # The hydrometeor masses the recorded source publishes, which
             # the root's boundary tables are priced with (those the
             # microphysics carries), stated beside the device and the

@@ -300,7 +300,17 @@ def test_preprocess_workers_two_reach_the_water_entries(monkeypatch):
     assert all(count == 2 for _, count in calls), calls
 
 
-def test_no_worker_count_takes_the_automatic_one():
+def test_no_worker_count_takes_the_automatic_one(monkeypatch):
+    # An explicit count is clamped to the host's CPU/memory budget
+    # (preparation_workers.effective_workers), so a 4-CPU runner turns 5
+    # into 4.  Pin an 8-CPU budget so the explicit count is the one taken.
+    from woof.ingest import preparation_workers
+    monkeypatch.setattr(preparation_workers, "cpu_budget", lambda: {
+        "affinity_cpus": 8, "cgroup_cpus": None, "available_cpus": 8})
+    monkeypatch.setattr(preparation_workers, "memory_worker_limit", lambda: None)
+    monkeypatch.delenv(preparation_workers.PREPARATION_THREADS_ENV, raising=False)
+    monkeypatch.setattr(cpu_backend, "_AUTOMATIC_WORKERS", {})
+    assert automatic_workers() == 8
     assert CpuPreprocessBackend._water_workers(None) == automatic_workers()
     assert host_step_workers(None) == automatic_workers()
     assert host_step_workers("cpu") == automatic_workers()

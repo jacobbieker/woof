@@ -168,6 +168,11 @@ def fake_cupy(monkeypatch):
     cp.RawModule, cp.cuda = Module, cuda
     for name, module in (("cupy", cp), ("cupy.cuda", cuda)):
         monkeypatch.setitem(sys.modules, name, module)
+    # The stand-in is CuPy on CUDA: the factories must take the CUDA route.
+    # Left to choose, backend selection probes find_spec("cupy") (which this
+    # spec-less module answers with ValueError on a CuPy-less host) or, on an
+    # Apple host, picks mlx and hands NVRTC the Metal translation instead.
+    monkeypatch.setattr("woof.backend.active", lambda: "cuda")
     from woof.certify import compile_platform
     fingerprint = {key: "SYNTHETIC" for key in compile_platform.FINGERPRINT_KEYS}
     fingerprint.update(device_compute_capability=SYNTHETIC_PLATFORM[0],

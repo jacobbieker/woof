@@ -566,6 +566,9 @@ def test_the_ensemble_alias_has_go_s_preflight_and_interrupt_notice(monkeypatch,
 
     # The front door refuses an install with no GPU runtime before any member
     # is fetched or prepared, in the reader's own command.
+    # On the CUDA backend the GPU runtime is CuPy; the mlx environment would
+    # ask for MLX instead, which this install has.
+    monkeypatch.setenv("WOOF_BACKEND", "cuda")
     monkeypatch.setattr(capabilities, "is_installed", lambda module: module != "cupy")
     with pytest.raises(capabilities.CapabilityMissing) as caught:
         capabilities.require_for_command("ensemble")

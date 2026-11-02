@@ -160,10 +160,10 @@
         "woof/core/rrtmg_legacy_prep.py": "f7e6ac7a6aef36113bf8592f8e856361684c268937eea7f2c6833ed3c58b6a8e",
         "woof/core/rrtmg_lw.py": "0d553e50906a7ae9878db7118e2ff4b2ad4de859257083b9ad1c4e14aa047b8b",
         "woof/core/rrtmg_mcica.py": "e1cdee16f2929ec3722882b953314316ba16160bd71a1974ee097ba06a861800",
-        "woof/core/rrtmg_sw.py": "01b72340e2dd03fd97a4922d0563a105f898b50dfe28ef9771d7df14b3a9ef6f",
+        "woof/core/rrtmg_sw.py": "a7dcf98a0a0aab8a9c94ecfa148fc17ad67c35bcbbe86edbb2288202794ecf2b",
         "woof/ingest/wrf_ozone.py": "6eebfaa389801460885a66844cd020ad8847c69a9af42d4c1b07f3e294fc8b2c"
       },
-      "description": "Recast WOOF 1.1.5 merged with the fork's engine changes (the per-run RRTMG LW layer tier, the surface-solar carriers, the 256-level radiation ceilings and the per-band / per-g-point RRTMG flux outputs): the radiation helpers as this tree carries them. Admission establishes source identity only."
+      "description": "Recast WOOF 1.1.5 merged with the fork's engine changes (the per-run RRTMG LW layer tier, the surface-solar carriers, the 256-level radiation ceilings and the per-band / per-g-point RRTMG flux outputs, whose spectral-output part comes from the SW scratch): the radiation helpers as this tree carries them. Admission establishes source identity only."
     }
   ]
 }

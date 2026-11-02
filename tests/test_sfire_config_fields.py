@@ -15,18 +15,30 @@ from woof.sfire_config import FireRunFields
 def test_fire_fields_follow_every_existing_field_in_order():
     names = [f.name for f in dataclasses.fields(RunConfig)]
     fire = [f.name for f in dataclasses.fields(FireRunFields)]
-    assert names[-len(fire):] == fire
-    # The last positional field is the chem block's last; 253 positional
-    # fields since the urban line appended surface_energy_diag (was 252),
-    # 259 since the 2.8.8 line declared six more ahead of the chem block:
-    # cycling (01402fcb1) and the five RRFS aer3/MYNN/TEMPO switches
-    # (809cdc87b).
+    start = names.index(fire[0])
+    # One contiguous block, in FireRunFields' order.
+    assert names[start:start + len(fire)] == fire
+    # Every positional field precedes it: the block is never ahead of an
+    # existing field.  The last positional field is the chem block's last;
+    # 253 positional fields since the urban line appended
+    # surface_energy_diag (was 252), 259 since the 2.8.8 line declared six
+    # more ahead of the chem block: cycling (01402fcb1) and the five RRFS
+    # aer3/MYNN/TEMPO switches (809cdc87b).
     # 305 at 2.9.0 (the solar, YSU, lightning and correct-mode lines added
     # positional fields without moving this count; the test failed there),
     # 309 since WRF's ocean mixed layer (sf_ocean_physics and its three
-    # oml_* settings, beside the CLM lake).
-    assert len(names) - len(fire) == 309
-    assert names[:-len(fire)][-1] == "aerosol_mp_coupling"
+    # oml_* settings, beside the CLM lake), 321 in the 1.1.x exports.
+    positional = [f.name for f in dataclasses.fields(RunConfig) if not f.kw_only]
+    assert positional[-1] == "aerosol_mp_coupling"
+    assert names.index("aerosol_mp_coupling") == 320
+    # Between the chem block and the fire block: the four HRRR v4.1.21 fork
+    # smoke keys, keyword-only so the positional API is unchanged.
+    assert names[321:start] == ["simple_dir_fdb", "enh_vermix", "flam_part",
+                                "aer_drydep_opt"]
+    # Keys declared after the fire namelist (ocean door, hail, sea ice,
+    # eclipse, lake state, WRF-Solar, radtran, theta_m, MAD-WRF, ...) are
+    # all keyword-only appends, so no positional field moved.
+    assert all(f.kw_only for f in dataclasses.fields(RunConfig)[start:])
 
 
 def test_fire_fields_match_their_declaration():

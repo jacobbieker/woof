@@ -169,10 +169,13 @@ def test_straight_track_plans_a_loadable_three_domain_tree(tmp_path):
         assert domains[gid]["diff_opt"] == 2
     assert shared["bl_pbl_physics"] != 0
 
-    # Output: d03 only, to the {name} store, frames removed once committed.
-    icechunk = document["output"]["icechunk"]
-    assert icechunk == {"url": "{name}.icechunk", "domains": [1, 2, 3],
-                        "delete_after_commit": True, "compress": True}
+    # Output: the track domains, to the {name} store, frames removed once
+    # committed (upstream's store export with the fork's policy).
+    output = document["output"]
+    assert output["formats"] == ["netcdf", "icechunk"]
+    assert output["icechunk_store"] == "{name}.icechunk"
+    assert output["icechunk_domains"] == [1, 2, 3]
+    assert output["icechunk_delete_after_commit"] is True
 
     assert plan["schema"] == tp.PLAN_SCHEMA
     assert plan["source"] in ("hrrr", "gfs")
@@ -603,7 +606,10 @@ def test_generated_config_passes_woof_go_dry_run(tmp_path, monkeypatch, capsys):
                      "none", "--outdir", str(tmp_path / "go")])
         printed = capsys.readouterr().out
         assert code == 0, printed
-        assert f"dry-{source}.icechunk as it lands" in printed
+        # The export policy woof go reads from the generated [output].
+        policy = go_cli.icechunk_request(types.SimpleNamespace(), run.config)
+        assert policy is not None and policy.delete_after_commit
+        assert policy.domains == (1, 2, 3)
         if run.plan["source"] == "gfs":
             assert "prepared_domain_tree_forecast" in printed
         assert not (tmp_path / "go").exists()
@@ -802,7 +808,7 @@ def test_every_grid_writes_the_flight_window_on_one_interval(tmp_path):
         assert table["history_interval_s"] == d03["history_interval_s"]
         assert table["history_begin_s"] == d03["history_begin_s"] + born
         assert table["history_end_s"] == d03["history_end_s"] + born
-    assert document["output"]["icechunk"]["domains"] == [1, 2, 3]
+    assert document["output"]["icechunk_domains"] == [1, 2, 3]
     out = run.plan["estimate"]["output"]
     assert set(out["bytes_per_frame_by_grid"]) == {"d01", "d02", "d03"}
     assert out["bytes"] == out["bytes_per_frame"] * out["frames"]

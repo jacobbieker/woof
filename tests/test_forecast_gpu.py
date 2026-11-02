@@ -13,6 +13,14 @@ def clean_runtime(monkeypatch):
     monkeypatch.setattr(forecast_gpu, '_working_runtime', None)
     monkeypatch.delenv('GPUWM_NO_LOCAL_GPU', raising=False)
     monkeypatch.delenv('CUDA_VISIBLE_DEVICES', raising=False)
+    # These cases are the CUDA requirement.  The mlx environment installs the
+    # Metal backend, whose Apple GPU answers the requirement before any of
+    # them is asked; pin the CUDA backend for the question under test.
+    import sys
+    monkeypatch.setenv('WOOF_BACKEND', 'cuda')
+    backend = sys.modules.get('woof.backend')
+    if backend is not None:
+        monkeypatch.setattr(backend, '_active', None)
 
 
 @pytest.mark.parametrize('kind', ['missing', 'unloadable', 'driver', 'zero'])

@@ -110,9 +110,11 @@ def test_the_profile_binds_ifs_sd_as_snow_water_at_water_density():
     policies = target["initialization_policies"]
     assert policies["snow_water_equivalent"].startswith("bound_as_")
     assert "snow_depth" not in mapping["fields"]
-    assert "sea_ice_fraction" not in mapping["fields"]
-    assert policies["sea_ice_fraction"] == (
-        "source_publishes_sea_ice_thickness_only_no_area_fraction")
+    # IFS publishes sea-ice thickness, not an area fraction: the fraction
+    # is the composition's, borrowed from the companion analysis (1.1.5).
+    assert mapping["fields"]["sea_ice_fraction"]["provider"] == (
+        "composition_bound")
+    assert policies["sea_ice_fraction"] == "borrowed_from_companion_analysis"
 
 
 def test_the_inventory_reads_sd_and_not_density_or_ice_thickness():

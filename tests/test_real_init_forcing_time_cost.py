@@ -121,14 +121,29 @@ def test_the_default_column_workers_give_the_serial_bytes_on_the_rh_lane():
 
 
 def test_every_column_pool_returns_its_threads_freed_memory(monkeypatch):
+    from contextlib import contextmanager
+
+    from woof.ingest import preparation_workers
+
     pools, trims = [], []
+    # The column pools now borrow the process's shared host threads
+    # (woof.ingest.host_parallel) rather than constructing an executor, so
+    # a pool is counted where it opens: real._column_pool.  The worker
+    # count is capped by this host's CPUs and RAM (effective_workers); the
+    # host facts are pinned so three workers are three on any runner.
+    monkeypatch.setattr(preparation_workers, "cpu_budget", lambda: {
+        "affinity_cpus": 4, "cgroup_cpus": None, "available_cpus": 4})
+    monkeypatch.setattr(preparation_workers, "memory_worker_limit",
+                        lambda: None)
+    column_pool = real._column_pool
 
-    class CountingPool(real.ThreadPoolExecutor):
-        def __init__(self, *args, **kwargs):
-            pools.append(1)
-            super().__init__(*args, **kwargs)
+    @contextmanager
+    def counting_pool(max_workers):
+        pools.append(max_workers)
+        with column_pool(max_workers) as executor:
+            yield executor
 
-    monkeypatch.setattr(real, "ThreadPoolExecutor", CountingPool)
+    monkeypatch.setattr(real, "_column_pool", counting_pool)
     monkeypatch.setattr(real, "_return_freed_host_memory",
                         lambda: trims.append(1))
     serial, _ = _analyzed_hrrr_real_init(

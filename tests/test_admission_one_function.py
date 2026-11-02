@@ -213,6 +213,9 @@ def _built_model_stub(monkeypatch, exp, ledger_estimate):
     from woof.io import wrfout as io_wrfout
 
     live = st._config_tree_nodes(exp.domains)
+    # The hydro receipt reads the root clock before the writers open
+    # (runtime._run_built_experiment); a cold start is at elapsed zero.
+    live[0].clock = SimpleNamespace(elapsed_seconds=0.0)
     model = SimpleNamespace(
         walk_parent_first=lambda: live,
         nodes_by_grid_id={int(node.cfg.grid_id): node for node in live},
@@ -239,7 +242,8 @@ def _built_model_stub(monkeypatch, exp, ledger_estimate):
 
     @contextlib.contextmanager
     def writers(*args, **kwargs):
-        yield SimpleNamespace(attach_writers=lambda *a, **k: None)
+        yield SimpleNamespace(attach_writers=lambda *a, **k: None,
+                              attach_progress_callback=lambda *a, **k: None)
 
     monkeypatch.setattr(io_wrfout, "PerDomainWrfoutWriters", writers)
     return model

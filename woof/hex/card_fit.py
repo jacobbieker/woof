@@ -607,21 +607,30 @@ def comparison(prediction: Mapping[str, Any], measured: Mapping[str, Any]) -> di
 
 
 def _process_group(group: int) -> tuple[set[int], float, int]:
+    """The stage process group's pids, summed CPU seconds and threads.
+
+    Read through psutil rather than /proc, which macOS does not have: the
+    stage refused there with FileNotFoundError '/proc' before it sampled
+    anything.  Same fields as /proc/<pid>/stat's pgrp, utime + stime and
+    num_threads.
+    """
+    import psutil
+
     pids: set[int] = set()
     ticks = 0.0
     threads = 0
-    hz = os.sysconf("SC_CLK_TCK")
-    for entry in Path("/proc").iterdir():
-        if not entry.name.isdigit():
-            continue
+    for process in psutil.process_iter():
         try:
-            fields = (entry / "stat").read_text().rsplit(")", 1)[1].split()
-            if int(fields[2]) == group:
-                pids.add(int(entry.name))
-                ticks += (int(fields[11]) + int(fields[12])) / hz
-                threads += int(fields[17])
-        except (OSError, ValueError, IndexError):
+            if os.getpgid(process.pid) != group:
+                continue
+            with process.oneshot():
+                times = process.cpu_times()
+                count = process.num_threads()
+        except (psutil.Error, OSError):
             continue
+        pids.add(process.pid)
+        ticks += times.user + times.system
+        threads += count
     return pids, ticks, threads
 
 

@@ -111,7 +111,7 @@ def _start_hour(value, *, source: str, moment: datetime, hours: int = 0) -> int:
 
 
 def latest_map(cycle: str = "latest", *, source: str = DEFAULT_SOURCE,
-               member: str | None = None, start_hour: int = 0) -> dict:
+               member: str | None = None, start_hour: int | None = None) -> dict:
     """The selection map for the lead the run will START at.
 
     THE MAP AND THE RUN SHOW THE SAME MOMENT.  The centre is clicked on
@@ -262,7 +262,7 @@ def configuration_text(*, cycle: str, point: tuple[float, float], hours: int = 6
                        source: str = "cyclone-setup.toml",
                        forcing_source: str = DEFAULT_SOURCE,
                        member: str | None = None,
-                       start_hour: int = 0,
+                       start_hour: int | None = None,
                        dimensions=None,
                        isftcflx: int | None = None,
                        history_interval_s: float | None = None,
@@ -1267,7 +1267,7 @@ def plan_cyclone(*, cycle: str, point: tuple[float, float], sizing, target_machi
                  hours: int = 6, name: str | None = None,
                  tiles: str = "auto", source: str = "cyclone-setup.toml",
                  forcing_source: str = DEFAULT_SOURCE, member: str | None = None,
-                 start_hour: int = 0, nest_budget_gib: float | None = None,
+                 start_hour: int | None = None, nest_budget_gib: float | None = None,
                  cancelled=None, isftcflx: int | None = None,
                  history_interval_s: float | None = None,
                  nest_history_interval_s: float | None = None,
@@ -1289,6 +1289,9 @@ def plan_cyclone(*, cycle: str, point: tuple[float, float], sizing, target_machi
     model = acquisition_hints(forcing_source, model).get("model")
     adapter = source_adapter(forcing_source)
     forcing_source = adapter.source_id
+    if start_hour is None:
+        from woof.fetch_routes import first_published_lead
+        start_hour = first_published_lead(forcing_source)
     interval_s = _forcing_interval(forcing_source, cycle=cycle,
                                    start_hour=start_hour, hours=hours)
     # ONE intent, carried by every re-price on this door -- the requested
@@ -1816,7 +1819,12 @@ def _main(args) -> int:
         with contextlib.redirect_stdout(sys.stderr):
             forcing_source = getattr(args, "source", None) or DEFAULT_SOURCE
             member = getattr(args, "member", None)
-            start_hour = int(getattr(args, "start_hour", 0) or 0)
+            start_hour = getattr(args, "start_hour", None)
+            if start_hour is None:
+                # No --start-hour: the source's first published lead.
+                from woof.fetch_routes import first_published_lead
+                start_hour = first_published_lead(forcing_source)
+            start_hour = int(start_hour)
             if getattr(args, "list_sources", False):
                 # A THIRD KIND, not a third schema.  `kind` already tells a
                 # reader which document this is; a menu is one more value of
@@ -2056,9 +2064,11 @@ def register_cli(subparsers):
                         help="advisory center; bounds the field search and is the last fallback")
     parser.add_argument("--seed-radius-km", type=positive_float, default=500.,
                         help="how far from the advisory position the field search may look")
-    parser.add_argument("--start-hour", type=int, default=0, metavar="N",
+    parser.add_argument("--start-hour", type=int, default=None, metavar="N",
                         help="forecast lead of the selected cycle to begin at "
-                             "(default 0, the analysis); the run initialises "
+                             "(default: the source's first published lead, "
+                             "0 -- the analysis -- for every source that "
+                             "publishes one); the run initialises "
                              "from fN and is forced from fN onward at the "
                              "source's own cadence")
     parser.add_argument("--hours", type=int, default=6)

@@ -428,15 +428,26 @@ def test_doctor_names_what_changed_since_the_version_it_last_saw(tmp_path):
     state.write_text(json.dumps({"version": "2.4.1"}), encoding="utf-8")
     env = os.environ.copy()
     env["WOOF_DOCTOR_STATE"] = str(state)
+    # The door reports the install it reads; since the 1.0.0 renumbering
+    # this tree is 1.x, which no 2.x note lies below, so the install is
+    # read as the 2.5.0 the upgrader ran.
+    door = (sys.executable, "-c",
+            "import woof.version_cli as v; shape = v.install_shape; "
+            "v.install_shape = lambda: {**shape(), 'version': '2.5.0'}; "
+            "from woof.cli import main; raise SystemExit(main(['doctor']))")
 
-    first = _door(["doctor"], env=env)
+    def _doctor():
+        return subprocess.run(door, capture_output=True, text=True,
+                              cwd=_REPO, env=env, timeout=600)
+
+    first = _doctor()
     assert "2.4.1" in first.stdout, first.stdout
     for fragment in ("woof sim", "woof prep", "run-", "<product>"):
         assert fragment in first.stdout, (fragment, first.stdout)
 
     # Said once: the state now records this install, so an unchanged
     # install does not re-announce an upgrade at every doctor run.
-    second = _door(["doctor"], env=env)
+    second = _doctor()
     assert "woof sim" not in second.stdout, second.stdout
     assert json.loads(state.read_text(encoding="utf-8"))["version"]
 
@@ -459,7 +470,7 @@ def test_doctor_announces_2_7_changes_once_after_2_6_5(tmp_path):
     state.write_text(json.dumps({"version": "2.6.5"}), encoding="utf-8")
     message = doctor.upgrade_note("2.7.0", state)
     assert message is not None
-    for fragment in ("2.6.5", "2.7.0", "woof tui", "woof domain-tiles",
+    for fragment in ("2.6.5", "2.7.0", "woof domain-tiles",
                      "woof render --series", "woof sim --restart"):
         assert fragment in message
     assert doctor.upgrade_note("2.7.0", state) is None

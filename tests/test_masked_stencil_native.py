@@ -337,7 +337,7 @@ def test_a_receipt_names_no_entry_its_library_lacks():
     assert live["workers"] == 3
 
 
-def test_the_cuda_backend_takes_host_workers_for_its_host_steps(monkeypatch):
+def test_the_cuda_backend_takes_host_workers_for_its_host_steps(monkeypatch, eight_cpu_host):
     from woof.ingest import preprocess_backend
 
     # The argument check is asked of a machine that allows its card: since

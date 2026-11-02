@@ -490,13 +490,17 @@ def _bridge_status_identity(value: os.stat_result) -> tuple[int, ...]:
 def _bridge_binary_format(payload: bytes, path: Path) -> str:
     if payload[:4] == b"\x7fELF":
         return "elf"
+    # 64-bit Mach-O (MH_MAGIC_64, little-endian) and a universal binary:
+    # what cargo builds on macOS.
+    if payload[:4] in (b"\xcf\xfa\xed\xfe", b"\xca\xfe\xba\xbe"):
+        return "macho"
     if payload[:2] == b"MZ" and len(payload) >= 0x40:
         pe_offset = int.from_bytes(payload[0x3c:0x40], "little")
         if pe_offset <= len(payload) - 4 \
                 and payload[pe_offset:pe_offset + 4] == b"PE\0\0":
             return "pe"
     raise RuntimeError(
-        f"native bridge is not an ELF or PE executable: {path}"
+        f"native bridge is not an ELF, Mach-O or PE executable: {path}"
     )
 
 
@@ -523,7 +527,7 @@ def bridge_identity(path: Path, name: str) -> dict[str, Any]:
             or observed != _bridge_status_identity(current):
         raise RuntimeError(f"native bridge changed while identifying it: {path}")
     binary_format = _bridge_binary_format(payload, path)
-    if binary_format == "elf" and not os.access(path, os.X_OK):
+    if binary_format != "pe" and not os.access(path, os.X_OK):
         raise FileNotFoundError(
             f"native bridge is not executable: {path}")
     abi_marker = _BRIDGE_ABI_MARKERS.get(name)
@@ -600,7 +604,8 @@ def cpu_backend_identity(path: Path) -> dict[str, Any]:
             f"native CPU preprocessing backend is missing: {path}")
     payload = path.read_bytes()
     binary_format = _bridge_binary_format(payload, path)
-    expected_format = "pe" if platform.system() == "Windows" else "elf"
+    expected_format = {"Windows": "pe", "Darwin": "macho"}.get(
+        platform.system(), "elf")
     if binary_format != expected_format:
         raise RuntimeError(
             "native CPU preprocessing backend format does not match host: "

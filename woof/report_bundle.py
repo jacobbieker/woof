@@ -893,8 +893,16 @@ def _refusal(path: Path, root: Path) -> str | None:
         return _REFUSAL_UNRESOLVABLE
     if not _within(resolved, root):
         return _REFUSAL_ESCAPE
+    # Only the directories BELOW the root are judged: the root is the run
+    # directory the reporter named, and the ancestors above it are not
+    # read.  Testing every absolute part refused every run on macOS, whose
+    # temporary and per-user directories resolve under /private.
     for candidate in (path, resolved):
-        for part in candidate.parts[:-1]:
+        try:
+            below = candidate.relative_to(root)
+        except ValueError:
+            below = candidate
+        for part in below.parts[:-1]:
             reason = _denied_directory(part)
             if reason is not None:
                 return reason

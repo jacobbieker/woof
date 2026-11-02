@@ -209,15 +209,17 @@ def test_auto_never_streams_past_the_redundancy_limit(free_gib):
             f"redundancy with {free_gib} GiB free")
 
 
-@pytest.mark.parametrize("free_gib", [3.74, 3.99, 4.0, 4.32])
+@pytest.mark.parametrize("free_gib", [3.99, 4.0, 4.32])
 def test_a_near_miss_runs_resident_inside_the_margin(free_gib):
     """The tiles-off run that finished, chosen by auto itself.
 
-    The resident envelope of this domain is about 3.53 GiB.  From 3.74
-    GiB free it misses the admission budget (free less the external
-    margin) but fits what the card has, which is where ``woof go``
+    The resident envelope of this domain was about 3.53 GiB.  From 3.74
+    GiB free it missed the admission budget (free less the external
+    margin) but fit what the card has, which is where ``woof go``
     already runs a tiles-off plan with a warning.  4.32 GiB, the door's
-    other reading, admits it outright.
+    other reading, admits it outright.  Upstream 1.1.5 prices the
+    envelope at 3.79 GiB, so the recorded 3.74 GiB no longer holds it and
+    is refused below; 3.99 and 4.0 are still near misses.
     """
     exp = _recorded()
     decision, estimate = _decide(exp, free_gib)
@@ -241,9 +243,14 @@ def test_a_near_miss_runs_resident_inside_the_margin(free_gib):
         assert "s per step" in decision.reason or "s against" in decision.reason
 
 
-@pytest.mark.parametrize("free_gib", [2.85, 3.2, 3.4])
+@pytest.mark.parametrize("free_gib", [2.85, 3.2, 3.4, 3.74])
 def test_a_card_that_cannot_hold_it_is_refused_in_plain_words(free_gib):
     """1.15 GiB more held on the same card: no road is usable, so say so.
+
+    Since upstream 1.1.5 priced the resident envelope at 3.79 GiB, the
+    recorded forecast stage's 3.74 GiB is such a card too: read at 0.04
+    GiB steps from 3.60, auto refuses through 3.76 and runs resident from
+    3.80.
 
     Before the fix this configuration either streamed in 3x3 tiles at
     about 170x or refused with the planner's arithmetic alone.  The
@@ -277,16 +284,20 @@ def test_an_explicit_max_redundancy_false_still_streams_the_slow_tiling():
     6x6, which put a seam 20 cells from the east edge, so there was no
     slow tiling to ask for.  Since 06a93aa31 (the startup-speed merge) a
     tile costs less and the legal 8x6 fits at 3.74 GiB, so asking for the
-    slow tiling there streams it: 884 tiles at 38.87x.
+    slow tiling there streams it: 884 tiles at 38.87x.  Upstream 1.1.5
+    prices a tile higher again: read at 0.01 GiB steps from 3.96 to 4.32,
+    no legal tile fits through 3.98, 8x6 (884 at 38.87x) streams from 3.99
+    to 4.05 and 494 tiles at 24.31x from 4.20 to 4.26, so the two readings
+    move to 4.02 and 4.23.
     """
     exp = _recorded()
     exp = replace(exp, tiles=replace(exp.tiles, max_redundancy=False))
-    decision, _ = _decide(exp, 3.98)
+    decision, _ = _decide(exp, 4.23)
     assert decision.stream
     assert decision.redundancy > autoplan.MAX_REDUNDANCY
     assert f"{decision.ntiles:,} tiles" in decision.explain()
     assert (decision.ntiles, round(decision.redundancy, 2)) == (494, 24.31)
-    decision, _ = _decide(exp, 3.74)
+    decision, _ = _decide(exp, 4.02)
     assert decision.stream
     assert (decision.tile_nx, decision.tile_ny) == (8, 6)
     assert (decision.ntiles, round(decision.redundancy, 2)) == (884, 38.87)
@@ -389,9 +400,12 @@ def test_the_near_miss_line_quotes_a_step_that_holds_the_measured_one():
     the subtotal.  Since 06a93aa31 a tile costs less, and read at 0.01 GiB
     steps from 3.60 to 3.99 the declined tiling is 8x9 from 3.88 to 3.90,
     6x12 above and 6x9 below.  The 2.9.2 RRTMGP flux rows moved the
-    resident envelope, and with it that band, to 3.90 through 3.92.)
+    resident envelope, and with it that band, to 3.90 through 3.92.
+    Upstream 1.1.5 prices the envelope at 3.83 GiB and a tile higher: read
+    at 0.01 GiB steps from 3.92 to 4.36, 8x9 is declined from 4.15 to 4.18,
+    326 to 356 MiB above the envelope, 6x9 below and 6x12 above.)
 
-    Price the card 320 MiB above the resident envelope, leaving a 192 MiB
+    Price the card 340 MiB above the resident envelope, leaving a 172 MiB
     shortfall against the external 512 MiB margin.  This keeps the fixture
     at the measured near miss as the envelope moves without searching for
     a card whose answer already matches the assertion below.
@@ -400,7 +414,7 @@ def test_the_near_miss_line_quotes_a_step_that_holds_the_measured_one():
     options = streaming.options_for_domain(exp.root, exp.tiles)
     estimate = streaming.cold_single_domain_admission(
         exp, machine=_card_5070ti(16), options=options)
-    free = (estimate.peak_envelope_bytes + 320 * 1024 ** 2) / GIB
+    free = (estimate.peak_envelope_bytes + 340 * 1024 ** 2) / GIB
     decision, _ = _decide(exp, free, _card_5070ti(free))
     assert not decision.stream, decision.explain()
     declined = decision.detail["tile_road_declined"]

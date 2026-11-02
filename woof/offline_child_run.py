@@ -2541,6 +2541,9 @@ def _run_with_receipts(args: argparse.Namespace) -> dict[str, object]:
             progress.end("failed")
             progress.close()
             raise
+    # The column store settles before the terminal event, on the render
+    # route as on the no-render one (_finish_child_render).
+    progress.stop_columns()
     progress.emit(
         "completed", stage="forecast", result=report["result"],
         outputs=len(report.get("outputs", []) or []),

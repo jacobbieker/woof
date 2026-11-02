@@ -9,13 +9,13 @@
       "cards": 4,
       "build": "68c1f4092",
       "published_under": "2.8.6",
-      "build_source": "gpuwm/data/nwpsuite/receipts.v1.json#hrrr-conus-multicard-2026-10-03",
+      "build_source": "woof/data/nwpsuite/receipts.v1.json#hrrr-conus-multicard-2026-10-03",
       "stepping_s_per_fh": 130,
       "all_in_s_per_fh": 130,
       "startup_s": 0,
       "peak_mib_per_card": null,
       "kind": "M",
-      "source": "gpuwm/data/nwpsuite/receipts.v1.json#hrrr-conus-multicard-2026-10-03",
+      "source": "woof/data/nwpsuite/receipts.v1.json#hrrr-conus-multicard-2026-10-03",
       "memory_admission": "recipe",
       "startup_measured": false,
       "all_in_measured": false,
@@ -33,7 +33,7 @@
       "startup_s": 0,
       "peak_mib_per_card": null,
       "kind": "M",
-      "source": "gpuwm/data/nwpsuite/receipts.v1.json#hrrr-conus-8card-48h-2026-10-04",
+      "source": "woof/data/nwpsuite/receipts.v1.json#hrrr-conus-8card-48h-2026-10-04",
       "memory_admission": "recipe",
       "primary_report_missing": true,
       "startup_measured": false,
@@ -52,10 +52,10 @@
       "startup_s": 0,
       "peak_mib_per_card": null,
       "kind": "M",
-      "source": "gpuwm/data/nwpsuite/receipts.v1.json#hrrr-conus-multicard-2026-10-03",
+      "source": "woof/data/nwpsuite/receipts.v1.json#hrrr-conus-multicard-2026-10-03",
       "memory_admission": "recipe",
       "reservation_floor_s": 4020,
-      "reservation_basis": "gpuwm/data/nwpsuite/receipts.v1.json#suite-capacity-plan-2026-10-12",
+      "reservation_basis": "woof/data/nwpsuite/receipts.v1.json#suite-capacity-plan-2026-10-12",
       "door_qualification": "two-card full-grid ensemble not proven",
       "startup_measured": false,
       "all_in_measured": false,
@@ -73,9 +73,9 @@
       "startup_s": 0,
       "peak_mib_per_card": null,
       "kind": "M",
-      "source": "gpuwm/data/nwpsuite/receipts.v1.json#rrfs-conus12km-1card-2026-10-08",
+      "source": "woof/data/nwpsuite/receipts.v1.json#rrfs-conus12km-1card-2026-10-08",
       "reservation_floor_s": 3480,
-      "reservation_basis": "gpuwm/data/nwpsuite/receipts.v1.json#suite-capacity-plan-2026-10-12",
+      "reservation_basis": "woof/data/nwpsuite/receipts.v1.json#suite-capacity-plan-2026-10-12",
       "memory_admission": "capacity-bound",
       "capacity_bound_mib": 97887,
       "memory_basis": "Passed on one 96 GB card; peak absent. Conservative full-card bound.",
@@ -93,7 +93,7 @@
       "startup_s": 3180,
       "peak_mib_per_card": 54074,
       "kind": "M",
-      "source": "gpuwm/data/nwpsuite/receipts.v1.json#rrfs-conus3km-8card-2026-10-05"
+      "source": "woof/data/nwpsuite/receipts.v1.json#rrfs-conus3km-8card-2026-10-05"
     },
     {
       "id": "patch-1",
@@ -107,9 +107,9 @@
       "startup_s": 0,
       "peak_mib_per_card": 34035,
       "kind": "M",
-      "source": "gpuwm/data/nwpsuite/receipts.v1.json#hex-patch48-3-lts-1card-2026-10-11",
+      "source": "woof/data/nwpsuite/receipts.v1.json#hex-patch48-3-lts-1card-2026-10-11",
       "reservation_floor_s": 1380,
-      "reservation_basis": "gpuwm/data/nwpsuite/receipts.v1.json#suite-capacity-plan-2026-10-12",
+      "reservation_basis": "woof/data/nwpsuite/receipts.v1.json#suite-capacity-plan-2026-10-12",
       "startup_measured": false
     },
     {
@@ -124,8 +124,8 @@
       "startup_s": 792,
       "peak_mib_per_card": 62967,
       "kind": "M",
-      "source": "gpuwm/data/nwpsuite/receipts.v1.json#hex-global-15km-8card-2026-10-10",
-      "memory_source": "gpuwm/data/nwpsuite/receipts.v1.json#hex-global-15km-8card-2026-10-10"
+      "source": "woof/data/nwpsuite/receipts.v1.json#hex-global-15km-8card-2026-10-10",
+      "memory_source": "woof/data/nwpsuite/receipts.v1.json#hex-global-15km-8card-2026-10-10"
     },
     {
       "id": "global-coarse-2",
@@ -139,10 +139,10 @@
       "startup_s": 86,
       "peak_mib_per_card": 58967,
       "kind": "M",
-      "source": "gpuwm/data/nwpsuite/receipts.v1.json#hex-global-30km-2card-2026-10-11",
+      "source": "woof/data/nwpsuite/receipts.v1.json#hex-global-30km-2card-2026-10-11",
       "reservation_floor_s": 2940,
-      "reservation_basis": "gpuwm/data/nwpsuite/receipts.v1.json#suite-capacity-plan-2026-10-12",
-      "startup_source": "gpuwm/data/nwpsuite/receipts.v1.json#hex-global-30km-2card-2026-10-11"
+      "reservation_basis": "woof/data/nwpsuite/receipts.v1.json#suite-capacity-plan-2026-10-12",
+      "startup_source": "woof/data/nwpsuite/receipts.v1.json#hex-global-30km-2card-2026-10-11"
     },
     {
       "id": "global-member-1",
@@ -156,7 +156,7 @@
       "startup_s": 0,
       "peak_mib_per_card": 84334,
       "kind": "M",
-      "source": "gpuwm/data/nwpsuite/receipts.v1.json#hex-global-30km-ensemble-member-2026-10-11",
+      "source": "woof/data/nwpsuite/receipts.v1.json#hex-global-30km-ensemble-member-2026-10-11",
       "measured_lead_hours": 72,
       "frame_mode": true
     },
@@ -172,7 +172,7 @@
       "startup_s": 482,
       "peak_mib_per_card": 46731,
       "kind": "M",
-      "source": "gpuwm/data/nwpsuite/receipts.v1.json#hex-country-patch-2card-2026-10-11",
+      "source": "woof/data/nwpsuite/receipts.v1.json#hex-country-patch-2card-2026-10-11",
       "all_in_includes_startup": true
     },
     {
@@ -187,7 +187,7 @@
       "startup_s": 0,
       "peak_mib_per_card": 64205,
       "kind": "P",
-      "source": "gpuwm/data/nwpsuite/receipts.v1.json#hex-variable-mesh-plan-2026-10-12",
+      "source": "woof/data/nwpsuite/receipts.v1.json#hex-variable-mesh-plan-2026-10-12",
       "projection_warning": "Underestimated the measured coarse variable-mesh case by 1.7x"
     },
     {
@@ -202,10 +202,10 @@
       "startup_s": 86,
       "peak_mib_per_card": 58967,
       "kind": "M",
-      "source": "gpuwm/data/nwpsuite/receipts.v1.json#hex-global-30km-2card-2026-10-11",
+      "source": "woof/data/nwpsuite/receipts.v1.json#hex-global-30km-2card-2026-10-11",
       "role": "da-forecast",
       "reservation_floor_s": 960,
-      "reservation_basis": "gpuwm/data/nwpsuite/receipts.v1.json#suite-capacity-plan-2026-10-12",
+      "reservation_basis": "woof/data/nwpsuite/receipts.v1.json#suite-capacity-plan-2026-10-12",
       "host_memory_mib": 245760
     },
     {
@@ -220,7 +220,7 @@
       "startup_s": 543,
       "peak_mib_per_card": 0,
       "kind": "M",
-      "source": "gpuwm/data/nwpsuite/receipts.v1.json#stock-mpas-jedi-30km-cycling-2026-10-04",
+      "source": "woof/data/nwpsuite/receipts.v1.json#stock-mpas-jedi-30km-cycling-2026-10-04",
       "role": "da-solve",
       "host_memory_mib": 245760
     },
@@ -236,7 +236,7 @@
       "startup_s": 233,
       "peak_mib_per_card": 0,
       "kind": "M",
-      "source": "gpuwm/data/nwpsuite/receipts.v1.json#hex-products-30km-48h-2026-10-11",
+      "source": "woof/data/nwpsuite/receipts.v1.json#hex-products-30km-48h-2026-10-11",
       "role": "products"
     }
   ]

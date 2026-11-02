@@ -1014,10 +1014,18 @@ def _a_render_catalog_cache_of_its_own(monkeypatch):
     monkeypatch.setattr(runplan, "_RENDER_CATALOG_CACHE", {})
 
 
+#: The process-identity probe woof.proc_identity runs where there is no
+#: /proc (macOS): a recorded PID's start time, read with ``ps``.  It is not
+#: a chain stage, so the stage doubles hand it to the real Popen.
+_REAL_POPEN = subprocess.Popen
+
+
 def _popen_double(fake_run):
     """Adapt a ``(command, **kwargs) -> CompletedProcess`` double."""
 
     def factory(command, **kwargs):
+        if list(command[:2]) == ["ps", "-o"]:
+            return _REAL_POPEN(command, **kwargs)
         answer = _stand_in_renderer(command)
         if answer is None:
             answer = fake_run(command, **kwargs)

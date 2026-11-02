@@ -1035,14 +1035,22 @@ def _selection_assignments(physics) -> dict:
 
 def _selection_config(chosen, *, nz, ncol, ny, dx, ztop, cadences):
     """The RunConfig of one selection, judged by the engine itself."""
-    from woof.config import RunConfig, validate_run_config
+    from woof.config import (CCPP_TKE_EDMF_PBL_SCHEME, RunConfig,
+                              validate_run_config)
     from woof.physics_compat import validate_physics_capabilities
+    bldt = cadences["bldt_minutes"]
+    if (chosen.get("bl_pbl_physics") == CCPP_TKE_EDMF_PBL_SCHEME
+            and cadences["stepbl"] == 1):
+        # A PBL call every step is WRF's bldt = 0, the only cadence
+        # CCPP TKE-EDMF admits (woof.config); the seam's minutes spelling
+        # of the same step is refused there.
+        bldt = 0.0
     cfg = RunConfig(
         nx=ncol, ny=ny, nz=nz, dx=dx, dy=dx, ztop=ztop,
         dt=float(cadences["dt"]), run_seconds=0.0, moist=True,
         radt=cadences["radt_minutes"],
         radt_minutes=cadences["radt_minutes"],
-        bldt=cadences["bldt_minutes"],
+        bldt=bldt,
         cudt_minutes=cadences["cudt_minutes"],
         **chosen)
     validate_run_config(cfg)

@@ -116,6 +116,7 @@ def test_legacy_adapter_o3input_identity_must_match_run_config():
 
     adapter = object.__new__(RRTMGLegacyRadiation)
     adapter.o3input = 0
+    adapter.ghg_input = 0
     # the adapter's shortwave aerosol identity, which _check_pins also holds
     adapter.shortwave = True
     adapter.aer_opt = 0

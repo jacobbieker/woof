@@ -305,7 +305,9 @@ def test_grid_is_refused_for_the_lat_lon_rows_and_hrrr(tmp_path: Path) -> None:
 
     with pytest.raises(GlobalIntermediateRefusal, match="--grid places the remap window"):
         door.request_from_arguments(_parse(tmp_path, "--source", "gfs", "--grid", "g.nc"))
-    with pytest.raises(IntermediateRefusal, match="--grid places the remap window"):
+    # The GRIB rows read --grid as their box since 1.1.5 (target_from_mesh);
+    # beside --point it is one box too many.
+    with pytest.raises(IntermediateRefusal, match="--point and --grid were all given"):
         hi.request_from_arguments(_parse(tmp_path, "--source", "hrrr", "--grid", "g.nc",
                                          "--point", "40,-100", "--radius-km", "50"))
 

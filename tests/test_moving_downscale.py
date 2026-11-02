@@ -272,8 +272,10 @@ def _history(path, when, *, fields, nx, ny, attrs=None, xtime=0.0):
         for name, value in (attrs or {}).items():
             ds.setncattr(name, value)
         times = ds.createVariable("Times", "S1", ("Time", "DateStrLen"))
-        times[0, :] = netCDF4.stringtochar(
-            np.array([when.strftime("%Y-%m-%d_%H:%M:%S")], dtype="S19"))[0]
+        # Built by hand, as woof/io/wrfout.py writes it: netCDF4 1.7.x's
+        # stringtochar cannot take an S-dtype input under numpy 2.
+        times[0, :] = np.frombuffer(
+            when.strftime("%Y-%m-%d_%H:%M:%S").encode("ascii"), dtype="S1")
         xt = ds.createVariable("XTIME", "f4", ("Time",))
         xt.units = "minutes since 2025-05-19 19:00:00"
         xt[0] = xtime

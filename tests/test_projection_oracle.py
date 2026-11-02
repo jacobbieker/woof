@@ -30,6 +30,7 @@ from __future__ import annotations
 from decimal import Decimal, localcontext
 import json
 import struct
+import sys
 from collections import defaultdict
 from pathlib import Path
 
@@ -50,7 +51,7 @@ MISMATCH = 1 << 70
 
 #: Measured max-ULP ceilings (this box: numpy vs glibc 2.39 libm),
 #: pinned exactly.  Keys: (class name, row tag, output slot).
-ULP_CEILINGS = {
+GLIBC_ULP_CEILINGS = ULP_CEILINGS = {
     ("LambertGrid", "SETUP", "cone"): 2,
     ("LambertGrid", "SETUP", "rebydx"): 0,
     ("LambertGrid", "SETUP", "rsw"): 2,
@@ -87,6 +88,32 @@ ULP_CEILINGS = {
 #: Lambert map factor: equivalent-formula relative bound (see module
 #: docstring); measured 2.3e-16.
 LAMBERT_MAPF_RELTOL = 5.0e-16
+
+#: The same gates on Apple's libm (libsystem_m, the C library woof.core.
+#: host_libm calls on macOS), whose transcendentals round differently from
+#: glibc's.  Measured max-ULP over the whole deck on macOS 26.5 arm64 and
+#: pinned exactly; only the slots that exceed the glibc ceiling are listed.
+#: The fixture and the glibc ceilings are unchanged.
+APPLE_LIBM_ULP_CEILINGS = {
+    ("LambertGrid", "SETUP", "cone"): 7,
+    ("LambertGrid", "SETUP", "rsw"): 8,
+    ("LambertGrid", "SETUP", "polej"): 8,
+    ("LambertGrid", "LLIJ", "i"): 128,
+    ("LambertGrid", "LLIJ", "j"): 128,
+    ("LambertGrid", "IJLL", "lat"): 8,
+    ("LambertGrid", "IJLL", "lon"): 4,
+    ("LambertGrid", "MAPF", "m"): 5,
+    ("LambertGrid", "ROTA", "sina"): 7,
+    ("LambertGrid", "ROTA", "cosa"): 79,
+    ("MercatorGrid", "SETUP", "rsw"): 5,
+    ("MercatorGrid", "LLIJ", "j"): 16,
+    ("PolarStereoGrid", "IJLL", "lon"): 4,
+    ("PolarStereoGrid", "ROTA", "cosa"): 1,
+}
+if sys.platform == "darwin":
+    ULP_CEILINGS = {**ULP_CEILINGS, **APPLE_LIBM_ULP_CEILINGS}
+    # Measured 5.75e-16 on the same host.
+    LAMBERT_MAPF_RELTOL = 6.0e-16
 
 CLASSES = {1: LambertGrid, 2: PolarStereoGrid, 3: MercatorGrid}
 
@@ -246,7 +273,11 @@ def test_mercator_exp_rounding_has_an_independent_decimal_witness():
 ])
 @pytest.mark.parametrize("mutation", ["output", "argument", "context"])
 def test_rounding_is_an_exact_signature_not_a_wider_tolerance(
-        projection, context, got, want, signature, mutation):
+        projection, context, got, want, signature, mutation, monkeypatch):
+    # The signature is glibc's rounding chain, graded against glibc's
+    # ceilings; Apple's libm reaches 8 ULP on this row without it.
+    monkeypatch.setattr(sys.modules[__name__], "ULP_CEILINGS",
+                        GLIBC_ULP_CEILINGS)
     got, want = map(float.fromhex, (got, want))
     if mutation == "output":
         got = float(np.nextafter(got, want))  # closer still fails: no interval

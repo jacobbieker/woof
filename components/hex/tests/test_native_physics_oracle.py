@@ -91,6 +91,10 @@ def test_trial_forecast_matrix_preserves_all_explicit_cases_and_rejects_bad_over
         with pytest.raises(ValueError, match='case|matrix'):
             forecast_cases(dict(profile, cases=items))
 
+@pytest.mark.skipif(sys.platform == "darwin", reason=(
+    "the replay raises the child's stack soft limit to the hard limit for the "
+    "Linux-built Intel Fortran oracle; macOS reports an unlimited hard stack "
+    "that setrlimit refuses to grant, and the oracle never runs there"))
 def test_native_replay_large_table_stack_limit_is_child_only():
     import resource
     spec = importlib.util.spec_from_file_location('stack_replay', ORACLE.parent.parent / 'column_oracle_replay.py')

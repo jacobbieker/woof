@@ -1175,9 +1175,9 @@ def _column_state(nx=40, ny=32, nz=12, *, dtype=np.float32):
     eta = np.linspace(1.0, 0.0, nz + 1)
     dnw = np.diff(eta)                                   # negative, WRF's
     rdnw = 1.0 / dnw
-    dn = np.zeros(nz + 1)
+    dn = np.zeros(nz)                                 # DomainState.dn: nz
     dn[1:nz] = 0.5 * (dnw[:-1] + dnw[1:])
-    rdn = np.zeros(nz + 1)
+    rdn = np.zeros(nz)                                # DomainState.rdn: nz
     rdn[1:nz] = 1.0 / dn[1:nz]
     half = 0.5 * (eta[:-1] + eta[1:])
     p_top, mub = 5000.0, 9.5e4

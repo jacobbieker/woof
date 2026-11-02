@@ -192,7 +192,7 @@ def test_ready_member_admission_uses_current_fix_and_core_margin():
 def test_preparation_defaults_use_all_available_cores_and_propagate(monkeypatch):
     from woof.hex import moving_door, moving_members
     from woof.hex.cli import build_parser
-    monkeypatch.setattr(moving_door.os, 'sched_getaffinity', lambda _: set(range(48)))
+    monkeypatch.setattr(moving_door.os, 'sched_getaffinity', lambda _: set(range(48)), raising=False)
     parser = build_parser()
     run = parser.parse_args(['moving', 'run', '--case', 'c', '--casedir', 'd', '--out', 'r', '--hours', '3'])
     prep = parser.parse_args(['moving', 'prepare', '--case', 'c', '--casedir', 'd'])

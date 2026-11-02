@@ -125,6 +125,7 @@ def _worker_door(monkeypatch, tmp_path, *, frames=True):
     monkeypatch.setattr(
         wrfinput_door, 'resolve_wrfinput_run',
         lambda directory, **kwargs: SimpleNamespace(
+            experiment=None,
             substitution_report=SimpleNamespace(substitutions=())))
     import datetime
 
