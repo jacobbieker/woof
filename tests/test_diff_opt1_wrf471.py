@@ -170,6 +170,8 @@ def test_merged_coordinate_moved_words_are_only_the_tensor_donor_fix(tmp_path):
 
 @pytest.mark.gpu
 @requires_gpu
+@pytest.mark.skipif(__import__("woof.wrf_exact", fromlist=["ENABLED"]).ENABLED,
+                    reason="pins the default build's 2.8.8 trajectory words; a strict process integrates the WRF-exact sources")
 def test_metric_diffusion_matches_merged_oracle_fix_baseline():
     """The 2.8.8 trajectory has an exact, separately named pin.
 
@@ -225,6 +227,9 @@ def test_coordinate_restart_retains_original_theta_and_exact_trajectory(tmp_path
 @pytest.mark.gpu
 @requires_gpu
 @pytest.mark.parametrize("km",[2,4])
+@pytest.mark.skipif(__import__("woof.wrf_exact", fromlist=["ENABLED"]).ENABLED,
+                    reason="the sealed checkpoints were written by a default process; a strict state also carries "
+                           "WRF's p_perturbation word, which restore refuses to invent from that file")
 def test_legacy_metric_checkpoint_resumes_exact_trajectory(tmp_path,km):
     """The metric form resumes exactly from a checkpoint this build wrote.
 
@@ -292,6 +297,8 @@ def test_legacy_metric_checkpoint_resumes_exact_trajectory(tmp_path,km):
 @pytest.mark.gpu
 @requires_gpu
 @pytest.mark.parametrize("km",[2,4])
+@pytest.mark.skipif(__import__("woof.wrf_exact", fromlist=["ENABLED"]).ENABLED,
+                    reason="pins the default build's 2.8.8 trajectory words; a strict process integrates the WRF-exact sources")
 def test_legacy_metric_payload_continues_onto_288_pins(km):
     """The genuine a4177ebbf state, advanced by this build, keeps its 2.8.8 pins.
 
