@@ -21,7 +21,8 @@
 //!                          tan, and a special-value grid for pow and atan2
 //!   f32 <f>                expf and logf on all 2^32 arguments, powf on
 //!                          1e9 random pairs (the scalar binary32 entries,
-//!                          rw-libm's transcriptions)
+//!                          rw-libm's transcriptions); asinf, glibc239-libm's
+//!                          binary32 asinf, on all 2^32 arguments
 //! A mismatch is a different word; two NaNs with different payloads are
 //! counted separately.  Up to 20 mismatches are printed.
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -32,6 +33,7 @@ unsafe extern "C" {
     fn atan(x: f64) -> f64; fn asin(x: f64) -> f64; fn acos(x: f64) -> f64;
     fn pow(x: f64, y: f64) -> f64; fn atan2(y: f64, x: f64) -> f64;
     fn expf(x: f32) -> f32; fn logf(x: f32) -> f32; fn powf(x: f32, y: f32) -> f32;
+    fn dlsym(handle: *mut std::ffi::c_void, name: *const std::ffi::c_char) -> *mut std::ffi::c_void;
 }
 
 const THREADS: u64 = 12;
@@ -259,7 +261,16 @@ fn edges(name: &str) {
     tally.report(&format!("{name} edges"), n.load(Ordering::Relaxed));
 }
 
+/// The process's default `asinf`, looked up at run time: a direct link
+/// would bind glibc 2.43's versioned symbol, which glibc 2.39 lacks.
+fn libm_asinf() -> unsafe extern "C" fn(f32) -> f32 {
+    let f = unsafe { dlsym(std::ptr::null_mut(), c"asinf".as_ptr()) };
+    assert!(!f.is_null(), "asinf is not in the process");
+    unsafe { std::mem::transmute(f) }
+}
+
 fn f32_mode(name: &str) {
+    let asinf = libm_asinf();
     let tally = Tally::new();
     let n = if name == "powf" { 1_000_000_000u64 } else { 1u64 << 32 };
     let per = n / THREADS;
@@ -271,6 +282,7 @@ fn f32_mode(name: &str) {
                 let (x, y, got, want) = match name {
                     "expf" => { let x = f32::from_bits(i as u32); (x, 0.0, rw_libm::expf(x), unsafe { expf(x) }) }
                     "logf" => { let x = f32::from_bits(i as u32); (x, 0.0, rw_libm::logf(x), unsafe { logf(x) }) }
+                    "asinf" => { let x = f32::from_bits(i as u32); (x, 0.0, glibc239_libm::asinf(x), unsafe { asinf(x) }) }
                     _ => {
                         let w = r.next();
                         let x = if w & 3 == 0 { f32::from_bits(w as u32) } else { f32::from_bits(w as u32 & 0x7fffffff) % 4096.0 };
@@ -291,6 +303,6 @@ fn main() {
         Some("random") => random(&a[2], a[3].parse().unwrap(), a[4].parse().unwrap()),
         Some("edges") => edges(&a[2]),
         Some("f32") => f32_mode(&a[2]),
-        _ => eprintln!("usage: harness random <f> <n> <seed> | edges <f> | f32 <expf|logf|powf>"),
+        _ => eprintln!("usage: harness random <f> <n> <seed> | edges <f> | f32 <expf|logf|powf|asinf>"),
     }
 }

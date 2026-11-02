@@ -23,7 +23,9 @@
 //! dla.rs, branred.rs, sincos.rs, tan.rs, atan.rs, atan2.rs, asin.rs and
 //! their tables are the IBM Accurate Mathematical Library as glibc
 //! distributes it, under the GNU Lesser General Public License 2.1 or
-//! later.  Each file opens with its own notice; see NOTICE.
+//! later; asinf.rs (binary32) is FDLIBM with Stephen L. Moshier's
+//! single-precision modifications, which glibc carries under the same
+//! licence.  Each file opens with its own notice; see NOTICE.
 
 mod exp;
 mod log;
@@ -36,6 +38,7 @@ mod tan;
 mod atan;
 mod atan2;
 mod asin;
+mod asinf;
 
 pub use self::exp::exp;
 pub use self::log::log;
@@ -46,6 +49,7 @@ pub use self::tan::tan;
 pub use self::atan::atan;
 pub use self::atan2::atan2;
 pub use self::asin::{asin, acos};
+pub use self::asinf::asinf;
 
 #[cfg(test)]
 mod tests {

@@ -110,3 +110,8 @@ atan2 special grid                       n=       16820 mismatches=0 nan_payload
 atan2 near-boundary pairs                n=    50000000 mismatches=0 nan_payload_diffs=0
 asin edges                               n=    22148648 mismatches=0 nan_payload_diffs=0
 acos edges                               n=    22148648 mismatches=0 nan_payload_diffs=0
+
+# Added with asinf (binary32, e_asinf.c), the same binary and host: first line inside docker ubuntu:24.04
+# (glibc 2.39), second on the host's glibc 2.44, whose asinf is CORE-MATH's correctly rounded one.
+asinf (binary32)                         n=  4294967292 mismatches=0 nan_payload_diffs=0
+asinf (binary32)                         n=  4294967292 mismatches=4581700 nan_payload_diffs=2147483648
