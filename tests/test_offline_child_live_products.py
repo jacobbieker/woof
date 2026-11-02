@@ -319,6 +319,12 @@ def test_a_stopped_child_draws_nothing_more(tmp_path, monkeypatch, width):
     # it ends a real render's process.  A fixed hold ran out first on a
     # loaded machine, and the render then finished and published.
     monkeypatch.setattr(live_products, "_render_concurrency", lambda: width)
+    # Width alone admits the frames: the adaptive admission (on by default)
+    # reads this host's memory now and the stand-in renders' expected
+    # peaks, and held all but the first frame wherever little memory was
+    # available (a hosted runner; a workstation with 10 GiB free), so the
+    # slots this stop must end were never all in flight.
+    monkeypatch.setenv(live_products.LIVE_RENDER_ADAPTIVE_ENV, "0")
     held = {(_START + timedelta(hours=hour)).strftime("wrfout_d02_%Y-%m-%d_%H_%M_%S")
             for hour in range(1, width + 1)}
     renderer = _Renderer(hold=held)
