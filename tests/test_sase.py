@@ -1461,14 +1461,15 @@ def test_sase_moist_n2_is_not_exempt_from_the_restart_config_match(tmp_path):
          "surface_energy_diag", "thompson_cloud_surface_booking",
          # Later members, each with its own inertness statement beside it
          # in woof/checkpoint_identity.py: the GPU HAILCAST diagnostic
-         # (hailcast_opt, haildt; 97e9a3ca061, in the 1.1.0 export),
+         # (hailcast_opt, haildt; 97e9a3ca061, in the 1.1.0 export, and
+         # 1.1.4's hailcast_version, its output-only port selector),
          # band-resolved RRTMG fluxes (rrtmg_spectral_output, ed30e1340;
          # tests/test_rrtmg_spectral_output.py), the radtran spectral
          # diagnostic's RT_* planes (radtran_*, f7ff5a72d and c0e5c1c14;
          # tests/test_radtran_wrf_diagnostic.py), WRF-Solar diagnostics
          # (solar_diagnostics, 1ea7cc084) and AVGFLX_* means (do_avgflx_em,
          # c783c9393).
-         "hailcast_opt", "haildt", "rrtmg_spectral_output",
+         "hailcast_opt", "haildt", "hailcast_version", "rrtmg_spectral_output",
          "radtran_wavelengths", "radtran_interval_s", "radtran_umu",
          "radtran_phi", "radtran_mol_abs_param", "radtran_solver",
          "radtran_streams", "radtran_pseudospherical", "radtran_aerosol",
@@ -1873,8 +1874,13 @@ def _sase_shim_driver(monkeypatch, calls, mix_rates=(3.0e-5, 1.0e-7,
 
     def radiation(**kw):
         calls.append("radiation")
-        return physics.RadiationResult(zeros3.copy(), zeros3.copy(),
-                                       zeros2.copy(), zeros2.copy())
+        # Selector 4 declares WRF's top/bottom fluxes and carries COSZEN,
+        # which the driver refuses a result to omit.
+        return physics.RadiationResult(
+            zeros3.copy(), zeros3.copy(), zeros2.copy(), zeros2.copy(),
+            coszen=zeros2.copy(),
+            boundary_fluxes={name: zeros2.copy() for name in
+                             physics.radiation_boundary_flux_names(kw["cfg"])})
 
     # The admitted SASE configuration no longer pins a radiation scheme
     # (the closure does not read one), so the radiation callable is
