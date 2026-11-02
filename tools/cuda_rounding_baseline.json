@@ -3419,11 +3419,11 @@
    },
    {
     "file": "woof/core/preflight.py",
-    "sha256": "f4af40ca2f80dfea375adff61d4fa4f8f8cda2eed0eba1ffe106b9a4718715ab"
+    "sha256": "dadaacf31e858c323d131c8fe1c994d88b72603de4b1cdabb290aa7a706ad9e9"
    },
    {
     "file": "woof/core/refl.py",
-    "sha256": "c196098350186e6673043d627f0eb460987e749ee2b006bd8b84e1438091f3ef"
+    "sha256": "5b023e534fd2d9684195e8f02b409d810c483320c6f1cc7d1c16e9115f5384b1"
    },
    {
     "file": "woof/core/rrtm_lw.py",
@@ -3571,7 +3571,7 @@
    },
    {
     "file": "woof/doctor.py",
-    "sha256": "4a3b2f3efef627852b4e1fd1d07a044210ddb86e09d995c673b7309dc17ba5c2"
+    "sha256": "adce10928d83c5764dbf4ba5eff29d71da4ca07c17b6113439b07f088555c762"
    },
    {
     "file": "woof/eclipse_windows.py",
