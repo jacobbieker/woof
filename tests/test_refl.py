@@ -708,7 +708,8 @@ def test_native_reflectivity_table_is_the_consumer_minus_producer_set():
     from woof import runtime
     from woof.core.refl import SCHEME_NATIVE_REFL_10CM
 
-    producer = frozenset({1, 2, 3, 4, 6, 8, 10, 16, 28, 96, 106})
+    # 40 (Morrison with CESM aerosol) takes the Morrison operator arm.
+    producer = frozenset({1, 2, 3, 4, 6, 8, 10, 16, 28, 40, 96, 106})
     consumer = frozenset(runtime.REFL_10CM_MICROPHYSICS)
     # FAST_SBM (30) is recorded here without being a consumer: it writes no
     # REFL_10CM at all (woof.core.fast_sbm_runtime.apply refuses a due
