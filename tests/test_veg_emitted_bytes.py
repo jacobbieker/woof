@@ -14,6 +14,16 @@ from test_tolerance_parent_generic_bytes import without_recipe_generation
 
 VEG_AUDIT_PARENT = "1077c6e8abe502aab59de103d7e6d70dbb8588a1"
 SWITCHES = ("usemonalb", "rdlai2d", "fractional_seaice")
+#: The line a RUC recipe gained after the parent was pinned: 1.1.4's
+#: authoring doors write ``ruc_qvg_cold_start = "air"`` for RUC land
+#: (woof.physics_source_defaults.AUTHORED_RUC_DEFAULTS).
+AUTHORED_RUC_LINE = 'ruc_qvg_cold_start = "air"\n'
+
+
+def without_authored_ruc_default(emitted):
+    """``emitted`` with the authored RUC default taken back out."""
+    assert emitted.count(AUTHORED_RUC_LINE) == 1, emitted
+    return emitted.replace(AUTHORED_RUC_LINE, "")
 
 
 def assert_generic_runtime_off(text):
@@ -59,5 +69,6 @@ def test_generic_vegetation_recipe_bytes_match_original_parent(source):
     )
     assert set(SWITCHES).isdisjoint(tomllib.loads(emitted)["shared"])
     assert_old_bytes(VEG_AUDIT_PARENT, pins, "recipe/" + source,
-                     without_recipe_generation(source, emitted))
+                     without_authored_ruc_default(
+                         without_recipe_generation(source, emitted)))
     assert_generic_runtime_off(emitted)
