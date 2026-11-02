@@ -75,7 +75,7 @@ pub fn log(x: f64) -> f64 {
         if top & 0x8000 != 0 || top & 0x7ff0 == 0x7ff0 {
             return (x - x) / (x - x);
         }
-        // Subnormal: normalize.
+        // Below 2^-1022: scale into the normal range.
         ix = (x * f64::from_bits(0x4330000000000000)).to_bits();
         ix = ix.wrapping_sub(52u64 << 52);
     }

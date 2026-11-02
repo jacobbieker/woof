@@ -46,8 +46,7 @@ DASH = "-" * 78
 # The source notice's section 2 subsections (ported third-party code inside
 # ArWen's own crates), each reproduced when a program links the crate named.
 SECTION_TWO = {"2.1": ("region_global_dealias", "region-global-dealias"),
-               "2.2": ("rustwx-render",), "2.3": ("rw-mpas",), "2.4": ("static-fields",), "2.5": ("rw-libm",),
-               "2.6": ("glibc239-libm",)}
+               "2.2": ("rustwx-render",), "2.3": ("rw-mpas",), "2.4": ("static-fields",), "2.5": ("rw-libm",)}
 PROGRAMS = (("S", "hex_obs_scorecard", "the observation scorer (rust/obs-scorecard)"),
             ("B", "rw_mpas_geometry, rw_mpas_stream, rw_mpas_static, rw_mpas_mesh, librw_surface.so, rw_mpas_lbc and the RRFS programs "
                   "rw_mpas_rrfs_connectivity, rw_mpas_rrfs_damping and rw_mpas_rrfs_deformation",

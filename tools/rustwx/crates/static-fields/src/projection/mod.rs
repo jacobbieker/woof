@@ -10,9 +10,10 @@
 //! reconciliation inputs -- the twins select source stencils, so their
 //! float32 arithmetic is part of the byte-parity contract.
 //!
-//! Public coordinates and derived fields take glibc 2.39's binary64
-//! transcendentals ([`Glibc239`]), as `woof.core.host_libm` gives the
-//! Python transcription, so they are the same words on every host.
+//! Public coordinates and derived fields take their binary64
+//! transcendentals through [`Glibc239`]: glibc 2.39's words on every host in
+//! a build with the opt-in `glibc239` feature (as `woof.core.host_libm`
+//! then gives the Python transcription), the platform libm's otherwise.
 //! Sampling coordinates use fixed arithmetic in `portable` and `npmath`,
 //! with exact portable fixtures and independent NumPy bounds.
 //!
@@ -39,9 +40,10 @@ use crate::error::{Result, StaticError};
 use crate::types::{Grid2, Stagger};
 use crate::OMEGA_E;
 
-/// glibc 2.39's binary64 functions (the glibc239-libm crate) as methods,
-/// so the transcriptions keep the Fortran's reading order.  The platform C
-/// library's `f64::sin` and friends differ by host in the last bits.
+/// The public coordinates' binary64 transcendentals, as methods so the
+/// transcriptions keep the Fortran's reading order.  With the opt-in
+/// `glibc239` feature they are glibc 2.39's words (the glibc239-libm crate);
+/// otherwise the platform C library's `f64::sin` and friends.
 pub(crate) trait Glibc239 {
     fn glibc_sin(self) -> f64;
     fn glibc_cos(self) -> f64;
@@ -55,6 +57,7 @@ pub(crate) trait Glibc239 {
     fn glibc_atan2(self, x: f64) -> f64;
 }
 
+#[cfg(feature = "glibc239")]
 impl Glibc239 for f64 {
     fn glibc_sin(self) -> f64 { glibc239_libm::sin(self) }
     fn glibc_cos(self) -> f64 { glibc239_libm::cos(self) }
@@ -66,6 +69,20 @@ impl Glibc239 for f64 {
     fn glibc_ln(self) -> f64 { glibc239_libm::log(self) }
     fn glibc_log10(self) -> f64 { glibc239_libm::log10(self) }
     fn glibc_atan2(self, x: f64) -> f64 { glibc239_libm::atan2(self, x) }
+}
+
+#[cfg(not(feature = "glibc239"))]
+impl Glibc239 for f64 {
+    fn glibc_sin(self) -> f64 { self.sin() }
+    fn glibc_cos(self) -> f64 { self.cos() }
+    fn glibc_tan(self) -> f64 { self.tan() }
+    fn glibc_atan(self) -> f64 { self.atan() }
+    fn glibc_asin(self) -> f64 { self.asin() }
+    fn glibc_acos(self) -> f64 { self.acos() }
+    fn glibc_exp(self) -> f64 { self.exp() }
+    fn glibc_ln(self) -> f64 { self.ln() }
+    fn glibc_log10(self) -> f64 { self.log10() }
+    fn glibc_atan2(self, x: f64) -> f64 { self.atan2(x) }
 }
 
 pub(crate) const RAD_PER_DEG: f64 = std::f64::consts::PI / 180.0;

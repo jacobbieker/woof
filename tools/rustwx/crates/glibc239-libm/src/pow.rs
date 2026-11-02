@@ -168,7 +168,7 @@ pub fn pow(x: f64, y: f64) -> f64 {
     let topy = top12(y);
     if topx.wrapping_sub(0x001) >= 0x7ff - 0x001
         || (topy & 0x7ff).wrapping_sub(0x3be) >= 0x43e - 0x3be {
-        // x is subnormal, zero, inf, nan or negative, or |y| is tiny or huge.
+        // x is below 2^-1022, zero, inf, nan or negative, or |y| is tiny or huge.
         if zeroinfnan(iy) {
             if iy.wrapping_mul(2) == 0 {
                 return if issignaling(x) { x + y } else { 1.0 };
@@ -220,7 +220,7 @@ pub fn pow(x: f64, y: f64) -> f64 {
             return if (ix > 1.0f64.to_bits()) == (topy < 0x800) { f64::INFINITY } else { 0.0 };
         }
         if topx == 0 {
-            // Normalize subnormal x so exponent becomes negative.
+            // Scale x below 2^-1022 into the normal range; its exponent goes negative.
             ix = (x * f64::from_bits(0x4330000000000000)).to_bits();
             ix &= 0x7fffffffffffffff;
             ix = ix.wrapping_sub(52u64 << 52);

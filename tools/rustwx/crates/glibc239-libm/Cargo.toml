@@ -13,10 +13,17 @@
 # acos) are LGPL-2.1-or-later as glibc distributes them; exp, log and pow
 # are Arm optimized-routines under MIT; log10 is FDLIBM under Sun's notice.
 # No dependencies.
+#
+# OPT-IN ONLY.  Nothing builds this crate by default: tools/rustwx excludes
+# it from its workspace, and the CPU preprocessing bridge and static-fields
+# reach it only through their `glibc239` cargo feature, off by default
+# (`pixi run build-native-glibc239` builds both with it).  Default builds,
+# wheels and release bridges therefore contain none of its code and use
+# the platform libm.
 [package]
 name = "glibc239-libm"
 version = "0.1.0"
-edition.workspace = true
+edition = "2024"
 license = "LGPL-2.1-or-later AND MIT AND SunPro"
-publish.workspace = true
-rust-version.workspace = true
+publish = false
+rust-version = "1.94"

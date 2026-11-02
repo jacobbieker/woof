@@ -253,14 +253,12 @@ def _frozen(a: np.ndarray) -> np.ndarray:
 def _log_bins(dmax: float) -> tuple[np.ndarray, np.ndarray]:
     """Log-spaced bin centers/widths from 100 um to ``dmax``
     (module_mp_radar.F:124-146)."""
-    from woof.core import host_libm
-    exp, log = host_libm.scalar("exp"), host_libm.scalar("log")  # glibc's words
     edges = np.empty(NRBINS + 1, dtype=np.float64)
     edges[0] = 100.0e-6
     edges[NRBINS] = dmax
     for n in range(1, NRBINS):
-        edges[n] = exp(n / NRBINS * log(edges[NRBINS] / edges[0])
-                       + log(edges[0]))
+        edges[n] = math.exp(n / NRBINS * math.log(edges[NRBINS] / edges[0])
+                            + math.log(edges[0]))
     return np.sqrt(edges[:-1] * edges[1:]), np.diff(edges)
 
 
@@ -1132,16 +1130,6 @@ def refl_10cm_is_stashed(state) -> bool:
     """Return the D2 handoff state without exposing its array to callers."""
     driver = getattr(state, "physics", None)
     return driver is not None and driver.refl_10cm is not None
-
-
-def peek_refl_10cm(state):
-    """The stashed one-frame REFL_10CM handoff, or None, left in place.
-
-    For a reader that snapshots the frame beside the history door (the
-    in-memory simulated radar); the history output still consumes it.
-    """
-    driver = getattr(state, "physics", None)
-    return None if driver is None else driver.refl_10cm
 
 
 def refl_10cm_stash_is_due(ticks: int, *, domain_start_ticks: int = 0

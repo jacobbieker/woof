@@ -33,7 +33,7 @@ fn ieee754_log10(mut x: f64) -> f64 {
             return (x - x) / (x - x); // log(-#) = NaN
         }
         k -= 54;
-        x *= TWO54; // subnormal number, scale up x
+        x *= TWO54; // below 2^-1022: scale up x
         hx = x.to_bits() as i64;
     }
     if hx >= 0x7ff0000000000000 {

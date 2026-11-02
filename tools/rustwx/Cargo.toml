@@ -11,7 +11,6 @@
 [workspace]
 members = [
     "crates/fire-indices",
-    "crates/glibc239-libm",
     "crates/netcdf-writer",
     "crates/obs-regrid",
     "crates/obs-score",
@@ -66,7 +65,12 @@ members = [
 ## `missing_value_management`, so every renderer and ingest read of a
 ## complex-packed message decoded the encoder's missing-value markers as
 ## physical data.  Do not re-vendor a second copy here.
+## `crates/glibc239-libm` is excluded too: part of it is LGPL-2.1-or-later,
+## so it is built only when a build opts in (static-fields' `glibc239`
+## feature; `pixi run build-native-glibc239`), never by a default workspace
+## build.
 exclude = [
+    "crates/glibc239-libm",
     "vendor/bowecho",
     "vendor/recast-radar-tools",
     "vendor/ecape-rs",
