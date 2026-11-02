@@ -460,8 +460,13 @@ def _assert_one_answer(dropped, flagged, reason):
 # 0.025 / 0.05 GiB steps: `--tiles off` refuses through 5.325 and admits from
 # 5.35, and `--tiles auto` refuses through 5.6 and admits from 5.65, both
 # doors agreeing at every step; the auto sweep moves up to cross its edge.
-CARD_SWEEP_OFF = [round(5.2 + 0.025 * k, 3) for k in range(15)]
-CARD_SWEEP_AUTO = [round(5.5 + 0.05 * k, 3) for k in range(8)]
+# Upstream 1.1.5 prices the floor at 5,978,282,299 B (it was 5,254,488,212 B
+# at 2.9.2); read at this tip from 5.6 at 0.05 GiB steps and across each
+# edge at 0.025: `--tiles off` refuses through 6.05 and admits from 6.075,
+# and `--tiles auto` refuses through 6.3 and admits from 6.35, both doors
+# agreeing at every step.  Both sweeps move up to cross their edges.
+CARD_SWEEP_OFF = [round(5.9 + 0.025 * k, 3) for k in range(15)]
+CARD_SWEEP_AUTO = [round(6.2 + 0.05 * k, 3) for k in range(8)]
 
 
 @pytest.mark.parametrize("tiles,free_gib",
@@ -541,8 +546,14 @@ def test_the_request_bound_flag_and_the_flagless_door_give_one_answer(
 # 63063559075.  The speed2 held-storage sharing (c563a6f8860: structurally
 # zero held radiation and KF tendency storage) moved it to 5.105 through
 # 5.115, admitting at 5.125, read at 0.005 GiB steps from 5.00 to 5.40 at
-# 3d4bfffd093.)
-TILE_BAND = [5.105, 5.11, 5.115]
+# 3d4bfffd093.  Upstream 1.1.5 prices the floor at 5,978,282,299 B with
+# the same 293,734,748 B withheld for d02's rebuild: read at 0.005 GiB steps
+# from 5.80 to 5.90, the tile road refuses through 5.84 and admits from
+# 5.845.  The fit headroom, 5% of the budget, is now LARGER than that
+# withholding, so the fit target sits under the price across the whole
+# band and the flag's own budget is the number that clears it: from 5.57
+# the budget is above the price and the run is refused anyway.)
+TILE_BAND = [5.83, 5.835, 5.84]
 
 
 @pytest.mark.parametrize("budget_gib", TILE_BAND)
@@ -556,9 +567,10 @@ def test_the_default_tile_modes_refusal_quotes_the_bound_that_bound_it(budget_gi
                            text).group(1))
     budget = refusal.value.memory["budget_bytes"]
     target = budget - dw.fit_headroom_bytes(budget)
-    # The band this sentence was wrong in, one road over: the fit target is
-    # ABOVE the price and the run is refused anyway.
-    assert target > cost
+    # The band this sentence was wrong in, one road over: the budget the
+    # flag names is ABOVE the price and the run is refused anyway (the fit
+    # target was too while the withholding exceeded the fit headroom).
+    assert budget > cost
     # What is quoted is what refused, and the flat road's number is not
     # printed beside it for a reader to raise the flag against.
     assert quoted <= cost
@@ -571,7 +583,7 @@ def test_the_tile_roads_band_ends_where_its_own_budget_clears_the_price():
     """And it ends there rather than where the flat road's budget or the fit
     target does, which is the whole reason neither can be the number quoted."""
     plan = tc.plan_cyclone(cycle=CYCLE, point=POINT, sizing=CARD, hours=3,
-                           tiles="auto", nest_budget_gib=5.125)
+                           tiles="auto", nest_budget_gib=5.845)
     assert plan["nest"]["dimensions"] == list(tc.CHILD_DIMS)
 
 

@@ -1034,9 +1034,15 @@ def test_a_polar_request_that_binds_on_memory_too_is_offered_no_tile_mode(
     polar = tc.plan_cyclone(**POLAR, **hardware)
     assert polar["fitting"]["keeps_coverage"] is None
     assert "--tiles off" not in polar["fitting"]["notice"]
-    # And the notice still says what DID stop the fit, so withholding the
-    # remedy does not cost the reader the reason.
-    assert "reaches the north pole" in polar["fitting"]["notice"]
+    # And the document still says what DID stop the fit, so withholding the
+    # remedy does not cost the reader the reason.  Memory rejects the rungs
+    # past 180x144 before the pole is asked of them, and a memory rejection
+    # carries no request bound out of the ladder (domain_wizard.fit_ladder's
+    # stop_out: claiming a cap that did not bind is the misattribution), so
+    # the reason is the memory verdict and no stop is claimed.
+    assert polar["fitting"]["reason"] == (
+        f"fixture peak {11 * GIB} exceeds budget {10 * GIB}")
+    assert polar["fitting"]["stopped_by"] is None
     assert polar["fitting"]["proposed_dimensions"] == [[180, 144], [144, 144]]
 
     # CONTROL: the same fixture, the same budget, the same refusal
