@@ -615,7 +615,7 @@ def microphysics_scheme_sr_available(mp_physics: int) -> bool:
     the frozen share of the surface precipitation
     (module_mp_fer_hires.F:970-974).
     """
-    if int(mp_physics) in (1, 2, 3, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 30, 50):
+    if int(mp_physics) in (1, 2, 3, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 30, 40, 50):
         return True
     from woof.microphysics_schemes import scheme as _named_scheme
     named = _named_scheme(mp_physics)

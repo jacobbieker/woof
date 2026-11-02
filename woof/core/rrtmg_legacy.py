@@ -400,6 +400,7 @@ _MP_DECLARES_RADII = {
     # own radii exactly as it does under any has_reqc=0 scheme.
     9: False,
     10: False,   # Morrison two-moment: NOT in WRF's use_mp_re list
+    40: False,   # Morrison with CESM aerosol: not in the use_mp_re list either
     # WDM6.  WRF lists WDM6SCHEME explicitly in the use_mp_re disjunction
     # (module_physics_init.F:1013, beside WSM6SCHEME at :1010) and the
     # P3/Jensen-Ishmael has_reqs=0 override (:1027-1033) does not name it,

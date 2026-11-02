@@ -95,7 +95,8 @@ IMPLEMENTED: dict[str, dict] = {
             "pbl": ["myj", "mynn"],
             "microphysics": [
                 "fast-sbm-mp30", "ferrier-aligo-mp5", "kessler-mp1", "lin-mp2",
-                "madwrf", "milbrandt2mom-mp9", "morrison-mp10", "nssl2-mp18",
+                "madwrf", "milbrandt2mom-mp9", "morrison-mp10",
+                "morrison-aero-mp40", "nssl2-mp18",
                 "p3-mp50", "tempo", "thompson-aerosol-mp28", "thompson-mp8",
                 "wdm6-mp16", "wsm3-mp3", "wsm5-mp4", "wsm6-mp6",
                 "wsm6r-mp106", "wsm7-mp24"],
@@ -4254,6 +4255,76 @@ _NO_RTE_RRTMGP_CLOUD_OPTICS_REASON: dict[int, str] = {
 #: refusal, so it stays -- one clause earlier.
 
 
+MORRISON_AERO_OPTION_ID = "morrison-aero-mp40"
+
+
+def _morrison_aero_mp40(registry: dict) -> None:
+    """Register Morrison with CESM aerosol (mp_physics=40).
+
+    ``implemented: true`` -- ``woof/core/morrison_aero.py`` launches
+    ``kernels/morrison.cu`` compiled as the ``morrison_aero`` module
+    (MORR_AERO blocks: WRF v4.7.1 module_mp_morr_two_moment_aero.F's
+    additions), dispatched by ``woof/core/microphysics.py``; the namelist
+    importer maps 40 natively.  ``maturity: implemented-unverified``: a
+    column oracle, no matched forecast trajectory.  ``reachability:
+    component-override``.
+    """
+    options = registry["components"]["microphysics"]["options"]
+    options[MORRISON_AERO_OPTION_ID] = {
+        "asset_requirements": [],
+        "constraints": {"required_settings": {"moist": True}},
+        "extensions": {
+            "wrf_package": (
+                "Registry/Registry.EM_COMMON:3047 (WRF v4.7.1) binds "
+                "mp_physics==40 to morr_tm_aero: moist qv,qc,qr,qi,qs,qg; "
+                "scalar qnc,qni,qns,qnr,qng"),
+            "prognostic_species": {
+                "transported": ["qi", "qs", "qg", "nc", "nr", "ni", "ns",
+                                "ng"],
+                "not_ported": ["EFCG", "EFIG", "EFSG", "WACT", "CCN1_GS",
+                               "CCN2_GS", "CCN3_GS", "CCN4_GS", "CCN5_GS",
+                               "CCN6_GS", "CCN7_GS", "MSKF_REFL_10CM"],
+                "note": (
+                    "The package's aercu_opt>0 state (radii for RRTMG, "
+                    "activation updraft, diagnostic CCN) is written by WRF "
+                    "only with aercu_opt>0, which WRF refuses without "
+                    "cu_physics=11 (MSKF, not ported); at aercu_opt=0 WRF "
+                    "leaves them zero and MSKF_REFL_10CM equals REFL_10CM "
+                    "(no MSKF hydrometeors). woof neither stores nor "
+                    "writes them."),
+            },
+        },
+        "implemented": True,
+        "label": "Morrison two-moment with CESM aerosol / MP40",
+        "maturity": "implemented-unverified",
+        "parameters": {"moist": True, "moist_cq": True, "morr_rimed_ice": 1},
+        "reachability": {"state": "component-override"},
+        "scientific_evidence": "none",
+        "selectors": {"mp_physics": 40},
+        "warnings": [
+            "CONFORMANCE EVIDENCE, COLUMN LEVEL: the CUDA unit is graded "
+            "word for word against WRF v4.7.1's unmodified "
+            "phys/module_mp_morr_two_moment_aero.F (gfortran 13.3.0 -O0, "
+            "glibc 2.39) over 119 columns x 50 levels in three sets "
+            "(aercu_opt=0 hail 10 calls; aercu_opt=2 graupel 1 call; "
+            "aercu_opt=2 hail 20 calls) by "
+            "tests/test_morrison_aero_wrf471_oracle.py: with MORR_ROW37_OFF "
+            "every returned word is WRF's under GPUWM_WRF_EXACT=1. No "
+            "matched forecast trajectory against WRF exists.",
+            "aercu_opt=0 ONLY: WRF refuses aercu_opt>0 unless cu_physics=11 "
+            "(MSKF, share/module_check_a_mundo.F:1400-1420), which woof "
+            "does not port, and reads the prescribed aerosol from "
+            "CESM_RCP4.5_Aerosol_Data.dat in the cumulus driver. The "
+            "kernel's aercu_opt=2 path (Abdul-Razzak-Ghan activation and "
+            "Liu-Penner ice nucleation on ten CESM modes) is held to WRF's "
+            "words by the oracle but is not reachable from a run.",
+            "DECLARED DIVERGENCE (row 37, as mp_physics=10): production "
+            "keeps the deposition-nucleation vapour cap, the wide "
+            "non-finite freezing rates and nonnegative sedimentation mass.",
+        ],
+    }
+
+
 FERRIER_OPTION_ID = "ferrier-aligo-mp5"
 
 
@@ -4697,6 +4768,10 @@ _VERTICAL_BOUND_SOURCES: dict[str, dict[str, tuple[str, str]]] = {
                                   "THOMPSON_AEROSOL_VERTICAL_LEVEL_BOUNDS"),
         "morrison-mp10": ("Morrison microphysics",
                           "MORRISON_VERTICAL_LEVEL_BOUNDS"),
+        # The same three launches over the same WORK stack (MORR_AERO
+        # blocks of kernels/morrison.cu).
+        "morrison-aero-mp40": ("Morrison CESM-aerosol microphysics",
+                               "MORRISON_VERTICAL_LEVEL_BOUNDS"),
         "nssl2-mp18": ("NSSL-2 microphysics", "NSSL2_VERTICAL_LEVEL_BOUNDS"),
         "milbrandt2mom-mp9": ("Milbrandt-Yau microphysics",
                               "MILBRANDT2_VERTICAL_LEVEL_BOUNDS"),
@@ -4807,6 +4882,16 @@ _MOMENT_ROWS: dict[int, dict | None] = {
                    {"species": "graupel", "mass": "qg", "number": "ng"}],
          "unpaired": [], "repair_authority": _MORRISON_REPAIR_AUTHORITY,
          "q_threshold": 1.0e-14},
+    # Morrison with CESM aerosol: Morrison's pairs, nc now advected.
+    40: {"name": "Morrison two-moment with CESM aerosol",
+         "mass_only": ["qv"],
+         "pairs": [{"species": "cloud", "mass": "qc", "number": "nc"},
+                   {"species": "rain", "mass": "qr", "number": "nr"},
+                   {"species": "ice", "mass": "qi", "number": "ni"},
+                   {"species": "snow", "mass": "qs", "number": "ns"},
+                   {"species": "graupel", "mass": "qg", "number": "ng"}],
+         "unpaired": [], "repair_authority": _MORRISON_REPAIR_AUTHORITY,
+         "q_threshold": 1.0e-14},
     # WDM6: double-moment warm rain (nc, nr) over WSM6's ice; the CCN
     # reservoir nn is prognostic and has no mass partner
     # (woof/core/wdm6_constants.py WDM6_NUMBER_SPECIES).
@@ -4870,6 +4955,13 @@ _OFFLINE_CHILD_ROWS: dict[int, dict] = {
     # (F_RIMEF = 1) under rimed parent ice, changing fall speeds and
     # riming from the first step.  Admission is a wrfout map row, not a
     # code path.
+    # Morrison with CESM aerosol: the lane's morr_rimed_ice identity check
+    # (woof/offline_child.py) is spelled for mp_physics=10 only.
+    40: {"same_scheme": False,
+         "refusal": (
+             "the offline child lane checks the parent's morr_rimed_ice "
+             "identity for mp_physics=10 only; an mp_physics=40 child would "
+             "start without that check")},
     5: {"same_scheme": False,
         "refusal": (
             "the offline child lane has no wrfout map row for F_RIMEF_PHY, "
@@ -4941,6 +5033,8 @@ _RING_STATE_ROWS: dict[int, list[str]] = {
         "nc", "nr", "ni", "ns", "ng", "nh", "effc", "effi", "effs"],
     10: ["thp", "qv", "qc", "qr", "qi", "qs", "qg",
          "nc", "nr", "ni", "ns", "ng", "effc", "effi", "effs", "effr"],
+    40: ["thp", "qv", "qc", "qr", "qi", "qs", "qg",
+         "nc", "nr", "ni", "ns", "ng", "effc", "effi", "effs", "effr"],
     # WDM6's three transported moments; nn is in the set because the scheme
     # WRITES it (fully evaporated rain and cloud return their number to the
     # reservoir, module_mp_wdm6.F:1249-1252, :1990-1994).
@@ -4984,6 +5078,7 @@ _RING_SURFACE_ROWS: dict[int, list[str]] = {
     8: list(_RING_SURFACE_STANDARD),
     9: _RING_SURFACE_STANDARD + ["mp_hailnc", "mp_hailncv"],
     10: list(_RING_SURFACE_STANDARD),
+    40: list(_RING_SURFACE_STANDARD),
     16: list(_RING_SURFACE_STANDARD),
     18: _RING_SURFACE_STANDARD + ["mp_hailnc", "mp_hailncv"],
     24: _RING_SURFACE_STANDARD + ["mp_hailnc", "mp_hailncv"],
@@ -6043,6 +6138,7 @@ def build(registry: dict) -> dict:
     _single_moment_column_options(registry)
     _wsm6r_mp106(registry)
     _wsm7_mp24(registry)
+    _morrison_aero_mp40(registry)
     from tools.morrison_wrf461_oracle.patch_registry_morrison import (
         MORRISON_WARNINGS)
     registry["components"]["microphysics"]["options"]["morrison-mp10"][

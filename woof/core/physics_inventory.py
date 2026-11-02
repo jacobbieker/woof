@@ -271,7 +271,7 @@ PBL_RQI_MICROPHYSICS = (2, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 30, 50, 106) + tup
 
 
 #: Microphysics producers with an output-due radar reflectivity carrier.
-REFL_10CM_MICROPHYSICS = tuple(sorted((1, 2, 3, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 50, 106) + tuple(
+REFL_10CM_MICROPHYSICS = tuple(sorted((1, 2, 3, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 40, 50, 106) + tuple(
     _s.mp_id for _s in _NAMED_MP_SCHEMES.values())))
 # Kessler has no stock microphysics reflectivity writer. The default
 # diagnostic remains available; strict forecast history retains the
@@ -397,7 +397,7 @@ def microphysics_scratch_slots(
         return (("rainnc", "mp_rainnc"),
                 ("rainncv", "mp_rainncv"),
                 ("sr", "mp_sr"))
-    if mp_physics in (2, 6, 8, 10, 16, 28, 30) or mp_physics in _NAMED_MP_SCHEMES_BY_ID:
+    if mp_physics in (2, 6, 8, 10, 16, 28, 30, 40) or mp_physics in _NAMED_MP_SCHEMES_BY_ID:
         return (("rainnc", "mp_rainnc"),
                 ("rainncv", "mp_rainncv"),
                 ("sr", "mp_sr"),

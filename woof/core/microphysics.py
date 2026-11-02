@@ -1239,6 +1239,11 @@ def _dispatch_scheme(state: DomainState, cfg: RunConfig, dt: float, *,
         from woof.core.morrison import apply as apply_morrison
         return apply_morrison(
             state, cfg, dt, refl_10cm_due=refl_10cm_due)
+    elif cfg.mp_physics == 40:
+        # Morrison with CESM aerosol: its own module ("morrison_aero").
+        from woof.core.morrison_aero import apply as apply_morrison_aero
+        return apply_morrison_aero(
+            state, cfg, dt, refl_10cm_due=refl_10cm_due)
     elif cfg.mp_physics == 28:
         # Thompson aerosol-aware.  A SIBLING adapter, not a branch inside
         # _apply_thompson: port-era isolation is recorded in
@@ -1621,7 +1626,7 @@ def _apply_scheme(state: DomainState, cfg: RunConfig, dt: float, *,
         if refl_10cm_due:
             raise ValueError("REFL_10CM is due without active microphysics")
         return None
-    if (cfg.mp_physics not in (1, 2, 3, 5, 6, 8, 9, 10, 16, 18, 24, 28, 30, 50, 106)
+    if (cfg.mp_physics not in (1, 2, 3, 5, 6, 8, 9, 10, 16, 18, 24, 28, 30, 40, 50, 106)
             and _named_scheme(cfg.mp_physics) is None
             and int(cfg.mp_physics) not in COLUMN_SCHEMES):
         raise ValueError(f"unknown mp_physics={cfg.mp_physics} "
@@ -1630,6 +1635,7 @@ def _apply_scheme(state: DomainState, cfg: RunConfig, dt: float, *,
                          "8 = Thompson, 9 = Milbrandt-Yau, "
                          "10 = Morrison, 16 = WDM6, "
                          "18 = NSSL, 24 = WSM7, 28 = Thompson aerosol-aware, "
+                         "40 = Morrison with CESM aerosol, "
                          "50 = P3 one-category, 106 = WSM6R)")
     if state.qv is None:
         raise ValueError(f"mp_physics={cfg.mp_physics} requires "
@@ -1682,6 +1688,7 @@ WRF_FIRST_SCALAR_SPECIES: dict[int, str] = {
     30: "ff1i01",
     8: "ni", 10: "ni", 28: "ni", 50: "ni",   # qni
     9: "nc",                                 # qnc (milbrandt2mom)
+    40: "nc",                                # qnc (morr_tm_aero)
     16: "nn",                                # qnn (wdm6scheme)
     18: "qndrop",                            # qndrop (v4.6.1 nssl2mconc)
 }

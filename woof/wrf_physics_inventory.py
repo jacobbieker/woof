@@ -365,6 +365,27 @@ _INVENTORIES = {
             RuntimeStateField("rqicuten", "RQICUTEN"),
         ),
     ),
+    # Registry.EM_COMMON:3047 (WRF v4.7.1): Morrison's moments plus the
+    # advected droplet number qnc.  The package's EFCG/EFIG/EFSG/WACT,
+    # CCN1_GS..CCN7_GS and MSKF_REFL_10CM are aercu_opt>0/MSKF state that
+    # woof's aercu_opt=0 run neither prepares nor writes.
+    40: StockWrfPhysicsInventory(
+        mp_physics=40,
+        scheme="Morrison two-moment with CESM aerosol",
+        registry_package="morr_tm_aero",
+        wrfinput_fields=_ICE_MASS + (
+            _scalar("qnc", "QNCLOUD", units="# kg(-1)", state_name="nc"),
+            _scalar("qni", "QNICE", state_name="ni"),
+            _scalar("qns", "QNSNOW", units="# kg(-1)", state_name="ns"),
+            _scalar("qnr", "QNRAIN", units="# kg(-1)", state_name="nr"),
+            _scalar("qng", "QNGRAUPEL", units="# kg(-1)", state_name="ng"),
+        ),
+        runtime_state_not_wrfinput=(
+            RuntimeStateField("rqrcuten", "RQRCUTEN"),
+            RuntimeStateField("rqscuten", "RQSCUTEN"),
+            RuntimeStateField("rqicuten", "RQICUTEN"),
+        ),
+    ),
     # Registry.EM_COMMON:3033,3049,3052,3054,3056 after WRF's option-18
     # selector defaults resolve to two moments, hail, predicted CCN, and
     # predicted graupel/hail volume (density).

@@ -844,6 +844,9 @@ REFL_10CM_INPUT_SPECIES: dict[int, tuple[str, ...]] = {
     8: ("qv", "qr", "nr", "qs", "qg"),
     # Morrison: three two-moment species (``launch_refl10cm_morrison``).
     10: ("qv", "qr", "nr", "qs", "ns", "qg", "ng"),
+    # Morrison with CESM aerosol: the same refl10cm_hm call
+    # (module_mp_morr_two_moment_aero.F:1182-1190).
+    40: ("qv", "qr", "nr", "qs", "ns", "qg", "ng"),
     # WDM6: Thompson's list with WDM6's own kernel (``launch_refl10cm_wdm6``).
     16: ("qv", "qr", "nr", "qs", "qg"),
     # Aerosol-aware Thompson: mp=8's list exactly -- see the docstring of
@@ -990,10 +993,10 @@ def compute_refl_10cm(
         if missing:
             raise ValueError(f"{row.label} reflectivity lacks fields: " + ", ".join(missing))
         launch_column_refl(row, [getattr(state, n) for n in row.refl_species], t, p, refl)
-    elif cfg.mp_physics == 10:
-        missing = _missing_refl_inputs(state, 10)
+    elif cfg.mp_physics in (10, 40):
+        missing = _missing_refl_inputs(state, int(cfg.mp_physics))
         if missing:
-            raise ValueError("mp_physics=10 reflectivity lacks Morrison "
+            raise ValueError(f"mp_physics={cfg.mp_physics} reflectivity lacks Morrison "
                              "moments: " + ", ".join(missing))
         launch_refl10cm_morrison(state.qv, state.qr, state.nr,
                                  state.qs, state.ns, state.qg, state.ng,
