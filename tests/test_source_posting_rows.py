@@ -226,6 +226,9 @@ def test_check_4_a_waited_row_with_nothing_to_probe_is_refused(monkeypatch):
 
 def test_check_5_an_index_check_on_a_file_without_an_index_is_refused(monkeypatch):
     document = _document()
+    # pgrb2b also selects records by its index (1.1.5), which is refused
+    # for the same absence one check earlier; this case is the probe's.
+    document["routes"]["gefs"]["files"][1].pop("record_index", None)
     document["routes"]["gefs"]["files"][1]["idx_sidecar"] = None
     with pytest.raises(ValueError, match="pgrb2b declare no idx_sidecar"):
         _rebuild(monkeypatch, document)
