@@ -20,7 +20,7 @@ WRF source: https://github.com/wrf-model/WRF at v4.7.1 (f52c197ed39d).
 
 | selector | imports | refused |
 |---|---|---|
-| `mp_physics` | 0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 30, 50, 96, 106 | 7, 11, 13, 14, 15, 26, 27, 29, 32, 38, 40, 51, 52, 53, 55, 56, 95, 97, 98, 99 |
+| `mp_physics` | 0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 30, 40, 50, 96, 106 | 7, 11, 13, 14, 15, 26, 27, 29, 32, 38, 51, 52, 53, 55, 56, 95, 97, 98, 99 |
 | `cu_physics` | 0, 1, 3, 5, 6, 16, 96 | 2, 4, 7, 10, 11, 14, 93, 94, 95, 98, 99 |
 | `shcu_physics` | 0, 5 | 1, 2, 3, 4 |
 | `bl_pbl_physics` | 0, 1, 2, 5, 9, 11 | 3, 4, 7, 8, 10, 12, 16, 17, 98, 99 |
@@ -67,7 +67,7 @@ WRF source: https://github.com/wrf-model/WRF at v4.7.1 (f52c197ed39d).
 | `30` | fast_khain_lynn_shpund | imports with `--rrtmg-variant rrtmg_legacy` (WRF's own RRTMG) |
 | `32` | full_khain_lynn | refused: namelist.input &physics: mp_physics=32 (full Khain-Lynn spectral bin microphysics, package full_khain_lynn) is not ported. It carries mass and number in dozens of size bins per hydrometeor class; the fast spectral bin scheme (mp_physics=30) is a different, reduced scheme and is not run in its place. |
 | `38` | thompsongh | refused: namelist.input &physics: mp_physics=38 (Thompson graupel-hail, package thompsongh) is not ported. It predicts graupel number and volume (qng, qvolg), so graupel density varies toward hail; Thompson (mp_physics=8 or 28) carries fixed-density graupel and is not run in its place. |
-| `40` | morr_tm_aero | refused: namelist.input &physics: mp_physics=40 (Morrison with CESM aerosol, package morr_tm_aero) is not ported. It activates droplets from prescribed aerosol modes (CCN1-CCN7) that woof does not prepare; Morrison (mp_physics=10) uses a fixed droplet number and is not run in its place. |
+| `40` | morr_tm_aero | imports |
 | `50` | p3_1category | imports |
 | `51` | p3_1category_nc | refused: namelist.input &physics: mp_physics=51 (P3 with prognostic droplet number, Registry.EM_COMMON:3039) is not ported. woof ports mp_physics=50, which runs P3 with SPECIFIED droplet number (nccnst/rho, module_mp_p3.F:2350) -- mp=51 passes nc_3d, which switches on the CCN-activation path (:3313-3339) that this port does not carry. Use mp_physics=50 for P3 one-category. |
 | `52` | p3_2category | refused: namelist.input &physics: mp_physics=52 (P3 two ice categories, Registry.EM_COMMON:3040) is not ported. woof ports the nCat=1 configuration only: the inter-category collection (module_mp_p3.F:2754-2829), the category-merge pass (:4615-4697) and the second lookup table p3_lookupTable_2 are structurally absent from this port, and its state carries one ice category. Use mp_physics=50 for P3 one-category. |
