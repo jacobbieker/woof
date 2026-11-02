@@ -358,7 +358,7 @@ in tools/grib1_bridge/src/glibc239_math.rs, transcribed from the same
 Arm optimized-routines implementation retained in woof/core/noahmp_libm.py.
 The 2017-2018 Arm copyright and MIT grant below apply to that compiled
 copy. Its separate FP64 host-math entries call the platform C library and
-do not transcribe its implementation.
+do not transcribe its implementation (section 2.6).
 
 Arm optimized-routines:
 
@@ -408,6 +408,21 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+
+2.6  glibc239-libm  (NOT in these binaries)
+
+The binaries in this bundle are built without the opt-in `glibc239` cargo
+feature, so they contain none of the first-party crate
+tools/rustwx/crates/glibc239-libm, whose sin, cos, tan, atan, atan2, asin
+and acos transcribe the IBM Accurate Mathematical Library, and whose asinf
+carries Stephen L. Moshier's modifications, under the GNU Lesser General
+Public License 2.1 or later; their host math, and static_fields' strict
+scalar asin, call the platform libm.  Binaries built with that opt-in (`pixi run
+build-native-glibc239`) do contain it; whoever distributes them owes their
+recipients the LGPL's text (licenses/LICENSE-glibc-LGPL-2.1.txt in the
+source distribution), the crate's notices and the relinking terms the
+repository NOTICE states for those builds.
 
 
 ==============================================================================

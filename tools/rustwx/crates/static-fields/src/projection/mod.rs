@@ -10,7 +10,10 @@
 //! reconciliation inputs -- the twins select source stencils, so their
 //! float32 arithmetic is part of the byte-parity contract.
 //!
-//! Public coordinates retain their existing platform NumPy qualification.
+//! Public coordinates and derived fields take their binary64
+//! transcendentals through [`Glibc239`]: glibc 2.39's words on every host in
+//! a build with the opt-in `glibc239` feature (as `woof.core.host_libm`
+//! then gives the Python transcription), the platform libm's otherwise.
 //! Sampling coordinates use fixed arithmetic in `portable` and `npmath`,
 //! with exact portable fixtures and independent NumPy bounds.
 //!
@@ -36,6 +39,51 @@ use rayon::prelude::*;
 use crate::error::{Result, StaticError};
 use crate::types::{Grid2, Stagger};
 use crate::OMEGA_E;
+
+/// The public coordinates' binary64 transcendentals, as methods so the
+/// transcriptions keep the Fortran's reading order.  With the opt-in
+/// `glibc239` feature they are glibc 2.39's words (the glibc239-libm crate);
+/// otherwise the platform C library's `f64::sin` and friends.
+pub(crate) trait Glibc239 {
+    fn glibc_sin(self) -> f64;
+    fn glibc_cos(self) -> f64;
+    fn glibc_tan(self) -> f64;
+    fn glibc_atan(self) -> f64;
+    fn glibc_asin(self) -> f64;
+    fn glibc_acos(self) -> f64;
+    fn glibc_exp(self) -> f64;
+    fn glibc_ln(self) -> f64;
+    fn glibc_log10(self) -> f64;
+    fn glibc_atan2(self, x: f64) -> f64;
+}
+
+#[cfg(feature = "glibc239")]
+impl Glibc239 for f64 {
+    fn glibc_sin(self) -> f64 { glibc239_libm::sin(self) }
+    fn glibc_cos(self) -> f64 { glibc239_libm::cos(self) }
+    fn glibc_tan(self) -> f64 { glibc239_libm::tan(self) }
+    fn glibc_atan(self) -> f64 { glibc239_libm::atan(self) }
+    fn glibc_asin(self) -> f64 { glibc239_libm::asin(self) }
+    fn glibc_acos(self) -> f64 { glibc239_libm::acos(self) }
+    fn glibc_exp(self) -> f64 { glibc239_libm::exp(self) }
+    fn glibc_ln(self) -> f64 { glibc239_libm::log(self) }
+    fn glibc_log10(self) -> f64 { glibc239_libm::log10(self) }
+    fn glibc_atan2(self, x: f64) -> f64 { glibc239_libm::atan2(self, x) }
+}
+
+#[cfg(not(feature = "glibc239"))]
+impl Glibc239 for f64 {
+    fn glibc_sin(self) -> f64 { self.sin() }
+    fn glibc_cos(self) -> f64 { self.cos() }
+    fn glibc_tan(self) -> f64 { self.tan() }
+    fn glibc_atan(self) -> f64 { self.atan() }
+    fn glibc_asin(self) -> f64 { self.asin() }
+    fn glibc_acos(self) -> f64 { self.acos() }
+    fn glibc_exp(self) -> f64 { self.exp() }
+    fn glibc_ln(self) -> f64 { self.ln() }
+    fn glibc_log10(self) -> f64 { self.log10() }
+    fn glibc_atan2(self, x: f64) -> f64 { self.atan2(x) }
+}
 
 pub(crate) const RAD_PER_DEG: f64 = std::f64::consts::PI / 180.0;
 pub(crate) const DEG_PER_RAD: f64 = 180.0 / std::f64::consts::PI;
@@ -333,17 +381,17 @@ impl ProjectedGrid {
         let (lat, _) = self.latlon(stagger);
         let mut f = Grid2::filled(lat.ny, lat.nx, 0.0);
         let mut e = Grid2::filled(lat.ny, lat.nx, 0.0);
-        // Two passes, as derived_arrays and WRF evaluate them: in one body
-        // LLVM fuses sin and cos of one argument into a sincos call, and
-        // Apple's __sincos_stret rounds the sine differently from sin.
+        // Two passes, as derived_arrays and WRF evaluate them.  (With f64::sin
+        // and cos, LLVM fused one argument's pair into a sincos call, and
+        // Apple's __sincos_stret rounds the sine differently from sin.)
         f.data
             .par_iter_mut()
             .zip(lat.data.par_iter())
-            .for_each(|(fv, &la)| *fv = 2.0 * OMEGA_E * (la * RAD_PER_DEG).sin());
+            .for_each(|(fv, &la)| *fv = 2.0 * OMEGA_E * (la * RAD_PER_DEG).glibc_sin());
         e.data
             .par_iter_mut()
             .zip(lat.data.par_iter())
-            .for_each(|(ev, &la)| *ev = 2.0 * OMEGA_E * (la * RAD_PER_DEG).cos());
+            .for_each(|(ev, &la)| *ev = 2.0 * OMEGA_E * (la * RAD_PER_DEG).glibc_cos());
         (f, e)
     }
 
@@ -375,8 +423,8 @@ impl ProjectedGrid {
                     0 => lat.data[i],
                     1 => lon.data[i],
                     2 => self.map_factor(lat.data[i]),
-                    3 => 2.0 * OMEGA_E * (lat.data[i] * RAD_PER_DEG).sin(),
-                    4 => 2.0 * OMEGA_E * (lat.data[i] * RAD_PER_DEG).cos(),
+                    3 => 2.0 * OMEGA_E * (lat.data[i] * RAD_PER_DEG).glibc_sin(),
+                    4 => 2.0 * OMEGA_E * (lat.data[i] * RAD_PER_DEG).glibc_cos(),
                     5 => self.rotation(lon.data[i]).0,
                     _ => self.rotation(lon.data[i]).1,
                 };

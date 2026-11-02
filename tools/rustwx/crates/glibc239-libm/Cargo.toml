@@ -1,0 +1,29 @@
+# glibc 2.39's binary64 libm, transcribed so that a double result is the
+# same bits on every platform: exp, log, log10, pow, sin, cos, tan, atan,
+# atan2, asin and acos as glibc 2.39 computes them on x86-64 with FMA, the
+# C library WRF's reference fixtures were computed against.
+#
+# Rust's f64 `sin`, `powf`, `atan2` and friends call the platform C library.
+# macOS's libm, the Windows UCRT and other glibc releases return different
+# last bits for the same argument, so static grid geometry and host-side
+# setup graded against those fixtures came out differently by host.
+#
+# Mixed licence, by file (see src/lib.rs and the repository NOTICE): the
+# IBM Accurate Mathematical Library parts (sin, cos, tan, atan, atan2, asin,
+# acos) are LGPL-2.1-or-later as glibc distributes them; exp, log and pow
+# are Arm optimized-routines under MIT; log10 is FDLIBM under Sun's notice.
+# No dependencies.
+#
+# OPT-IN ONLY.  Nothing builds this crate by default: tools/rustwx excludes
+# it from its workspace, and the CPU preprocessing bridge and static-fields
+# reach it only through their `glibc239` cargo feature, off by default
+# (`pixi run build-native-glibc239` builds both with it).  Default builds,
+# wheels and release bridges therefore contain none of its code and use
+# the platform libm.
+[package]
+name = "glibc239-libm"
+version = "0.1.0"
+edition = "2024"
+license = "LGPL-2.1-or-later AND MIT AND SunPro"
+publish = false
+rust-version = "1.94"

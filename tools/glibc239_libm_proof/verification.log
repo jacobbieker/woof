@@ -1,0 +1,120 @@
+# glibc239-libm verification (tools/glibc239_libm_proof/harness.rs), 2026-11-02.
+# Reference: the process libm.  First block: inside docker ubuntu:24.04, whose libc6 is glibc 2.39 (the
+# references' C library), on an x86-64 CPU with FMA and AVX2, so glibc's ifunc picks the FMA variants the port
+# transcribes.  Second block: the same binary and seeds on the host's glibc 2.44, which reduces huge sin, cos and
+# tan arguments differently from 2.39; the port gives 2.39's word on every one of those (first block, same seed).
+# Indented lines are the first 20 mismatches of a run, printed before its summary line; 'port' is
+# glibc239-libm, 'libm' the process libm. The binary32 lines grade rw-libm's expf, logf and powf.
+
+# ldd (Ubuntu GLIBC 2.39-0ubuntu8.9) 2.39, AMD Ryzen 9 5950X 16-Core Processor, 2026-11-02T05:52Z, threads 12
+exp random seed 2039                     n=   999999996 mismatches=0 nan_payload_diffs=0
+log random seed 2039                     n=   999999996 mismatches=0 nan_payload_diffs=0
+log10 random seed 2039                   n=   999999996 mismatches=0 nan_payload_diffs=0
+pow random seed 2039                     n=   999999996 mismatches=0 nan_payload_diffs=0
+sin random seed 2039                     n=   999999996 mismatches=0 nan_payload_diffs=0
+cos random seed 2039                     n=   999999996 mismatches=0 nan_payload_diffs=0
+tan random seed 2039                     n=   999999996 mismatches=0 nan_payload_diffs=0
+atan random seed 2039                    n=   999999996 mismatches=0 nan_payload_diffs=0
+atan2 random seed 2039                   n=   999999996 mismatches=0 nan_payload_diffs=0
+asin random seed 2039                    n=   999999996 mismatches=0 nan_payload_diffs=0
+acos random seed 2039                    n=   999999996 mismatches=0 nan_payload_diffs=0
+exp edges                                n=    22124066 mismatches=0 nan_payload_diffs=0
+log edges                                n=    22115872 mismatches=0 nan_payload_diffs=0
+log10 edges                              n=    22115872 mismatches=0 nan_payload_diffs=0
+pow special grid                         n=       16820 mismatches=0 nan_payload_diffs=0
+pow near-boundary pairs                  n=    50000000 mismatches=0 nan_payload_diffs=0
+sin edges                                n=    26156832 mismatches=0 nan_payload_diffs=0
+cos edges                                n=    26156832 mismatches=0 nan_payload_diffs=0
+tan edges                                n=    26115862 mismatches=0 nan_payload_diffs=0
+atan edges                               n=    22140454 mismatches=0 nan_payload_diffs=0
+atan2 special grid                       n=       16820 mismatches=0 nan_payload_diffs=0
+atan2 near-boundary pairs                n=    50000000 mismatches=0 nan_payload_diffs=0
+asin edges                               n=    22148648 mismatches=0 nan_payload_diffs=0
+acos edges                               n=    22148648 mismatches=0 nan_payload_diffs=0
+expf (binary32)                          n=  4294967296 mismatches=0 nan_payload_diffs=0
+logf (binary32)                          n=  4294967296 mismatches=0 nan_payload_diffs=0
+powf (binary32)                          n=   999999996 mismatches=0 nan_payload_diffs=3831
+
+# ldd (GNU libc) 2.44, AMD Ryzen 9 5950X 16-Core Processor, 2026-11-02T05:54Z, threads 12
+exp random seed 2039                     n=   999999996 mismatches=0 nan_payload_diffs=0
+log random seed 2039                     n=   999999996 mismatches=0 nan_payload_diffs=0
+log10 random seed 2039                   n=   999999996 mismatches=0 nan_payload_diffs=0
+pow random seed 2039                     n=   999999996 mismatches=0 nan_payload_diffs=0
+  sin(6.77458729005453e19 [0x440d614d83c29e1e]) port 0x3fb79580dbb00036 libm 0x3fb79580dbb00035
+  sin(1.3671917129260873e214 [0x6c644e503274dc17]) port 0x3fae5fe0e5309805 libm 0x3fae5fe0e5309804
+  sin(-4.5990722342469906e113 [0xd787e79530a25f8f]) port 0xbfb125fb3610740f libm 0xbfb125fb3610740e
+  sin(-2.8342883077543265e42 [0xc8c0449cc4258343]) port 0xbfe25ffed63f8d70 libm 0xbfe25ffed63f8d6f
+  sin(-2.4763883250352645e113 [0xd779be39ed016365]) port 0x3fb802ebf31bf400 libm 0x3fb802ebf31bf401
+  sin(4.467615405224936e198 [0x692de2203e1a5357]) port 0x3f7ec9b295f7351c libm 0x3f7ec9b295f7351d
+  sin(-5.476758286024673e19 [0xc407c06c5385be3a]) port 0xbfb6aecddf3199db libm 0xbfb6aecddf3199da
+  sin(6.439517294717267e265 [0x771ff4123d2dbbdd]) port 0xbfb7a5e93b5aba88 libm 0xbfb7a5e93b5aba89
+  sin(-7.565835014824015e12 [0xc29b863ba24aa00f]) port 0x3fb7d7bf80fb58ac libm 0x3fb7d7bf80fb58ad
+  sin(-4.2991958626791716e200 [0xe996775a8366cb35]) port 0xbfbdccd0b813f565 libm 0xbfbdccd0b813f566
+  sin(1.1084382113096004e171 [0x63725b4ed18e76d0]) port 0x3fbb4e955b303bd2 libm 0x3fbb4e955b303bd3
+  sin(2.9934007833481736e221 [0x6dea7fe0a9db4a6f]) port 0xbfbf11785a245a5f libm 0xbfbf11785a245a5e
+  sin(-3.9675367409922796e200 [0xe994bbab24db8ed8]) port 0xbfb733de325e27c4 libm 0xbfb733de325e27c3
+  sin(-5.213082378042712e84 [0xd18577bc10ddf0cc]) port 0xbfa905dc4f572eb9 libm 0xbfa905dc4f572eba
+  sin(-9.513483514096521e243 [0xf2964aefb5af922b]) port 0x3fbf5728b782365f libm 0x3fbf5728b782365e
+  sin(1.9253121085627393e128 [0x5a91c6bfe4350f24]) port 0xbfb89d956fbcde9d libm 0xbfb89d956fbcde9e
+  sin(3.960284904591699e13 [0x42c20260dfeece7f]) port 0xbfeafa19de160189 libm 0xbfeafa19de16018a
+  sin(1.1012708175896027e215 [0x6c94720aaa26f620]) port 0x3fbf3f3ba70c6dc5 libm 0x3fbf3f3ba70c6dc4
+  sin(-4.848142479969899e12 [0xc291a32f3dc98799]) port 0xbfaf11e7a96d84e2 libm 0xbfaf11e7a96d84e3
+  sin(-3.5455328574923965e135 [0xdc138317529e6c56]) port 0xbfb8aee6a37bbe12 libm 0xbfb8aee6a37bbe11
+sin random seed 2039                     n=   999999996 mismatches=104 nan_payload_diffs=0
+  cos(3.1791321931029477e215 [0x6cad82c6d91fdea8]) port 0x3fbea09312471b6c libm 0x3fbea09312471b6b
+  cos(-1.2527511090595083e186 [0xe6926d3be9db3170]) port 0x3fbf86dcd6d51676 libm 0x3fbf86dcd6d51677
+  cos(-4.741175269859704e48 [0xca09f3cd3747917e]) port 0x3fb71a7d8a9cc4ce libm 0x3fb71a7d8a9cc4cd
+  cos(1.7007394378170383e150 [0x5f20a046efd7ad10]) port 0xbfbef5fe1ed85243 libm 0xbfbef5fe1ed85242
+  cos(-2.7637033149466015e33 [0xc6e1085ae11f1d99]) port 0x3fd8c1625f332dc3 libm 0x3fd8c1625f332dc2
+  cos(-3.437638213887348e12 [0xc2890319a307fac9]) port 0x3fb915b7b1f19ef6 libm 0x3fb915b7b1f19ef5
+  cos(2.334872396356852e171 [0x6383556f2ffeef23]) port 0x3fa684fdb6b5207a libm 0x3fa684fdb6b5207b
+  cos(1.5259979457589456e264 [0x76c83b15a402764c]) port 0x3fb9bfe59e9101ab libm 0x3fb9bfe59e9101aa
+  cos(-1.206549772017742e13 [0xc2a5f26f694ae2d7]) port 0x3fbfcb938d13525e libm 0x3fbfcb938d13525d
+  cos(1.3467872815730863e207 [0x6af0c794cc863065]) port 0xbfb82e99ef6ec707 libm 0xbfb82e99ef6ec708
+  cos(-7.249947249898789e40 [0xc86aa1d1501f31e3]) port 0x3fbc1e2b818b6688 libm 0x3fbc1e2b818b6687
+  cos(-5.800350499325361e243 [0xf28b2f0383da2155]) port 0x3fb6658c78a47439 libm 0x3fb6658c78a4743a
+  cos(1.2904953996330665e244 [0x729e3d6848877526]) port 0xbfbbb477e206349f libm 0xbfbbb477e20634a0
+  cos(-2.6168520919032476e12 [0xc2830a44509ff9fb]) port 0x3fbde52e86793279 libm 0x3fbde52e86793278
+  cos(3.309227287303146e13 [0x42be18e52b5e4776]) port 0x3fd17115ebd4733c libm 0x3fd17115ebd4733d
+  cos(7.465248238456122e207 [0x6b17409b54e41240]) port 0xbfbf456b69de9378 libm 0xbfbf456b69de9379
+  cos(2.6242387809536483e186 [0x66a34cc908a70856]) port 0xbfbbc71796772f10 libm 0xbfbbc71796772f11
+  cos(5.355056890702041e19 [0x4407394eb595383d]) port 0x3fbd7a6a5f145e0a libm 0x3fbd7a6a5f145e0b
+  cos(-5.576287577955118e47 [0xc9d86b3c0d2725d6]) port 0x3fb58c3d9cf878bf libm 0x3fb58c3d9cf878be
+  cos(3.086459915921695e19 [0x43fac5515685bf25]) port 0xbfa6351fc4cbb240 libm 0xbfa6351fc4cbb23f
+cos random seed 2039                     n=   999999996 mismatches=121 nan_payload_diffs=0
+  tan(-3.154689035475677e150 [0xdf2ed6efde49e977]) port 0xc0193c938344cc4f libm 0xc0193c938344cc4e
+  tan(4.081943836145512e20 [0x443620d5c530dedb]) port 0x3ffd8c768168e053 libm 0x3ffd8c768168e052
+  tan(-7.833415029620086e20 [0xc4453b86094fb790]) port 0x3fecf4acc8769f5a libm 0x3fecf4acc8769f5b
+  tan(-8.218747921346962e150 [0xdf4416114d59d55f]) port 0x3ff9cfbb9fdf0321 libm 0x3ff9cfbb9fdf0322
+  tan(2.0759626241485333e259 [0x75c59a5b8954c83f]) port 0x3feb2b9855d1c7e6 libm 0x3feb2b9855d1c7e5
+  tan(5.22216382702567e185 [0x667eb99f6a50887c]) port 0x404e0da7d57af15d libm 0x404e0da7d57af15c
+  tan(2.7811227753304395e13 [0x42b94b4e59db5865]) port 0xbfe6eaddc85d7bf2 libm 0xbfe6eaddc85d7bf3
+  tan(-2.193154477714517e13 [0xc2b3f255ef91b92c]) port 0x3fe91445006fa388 libm 0x3fe91445006fa389
+  tan(1.8663405719398127e208 [0x6b2d10df43edddd7]) port 0xbfe15ba41181570c libm 0xbfe15ba41181570d
+  tan(-3.574019953113814e208 [0xeb3bd49739d7bb58]) port 0x3ff0b540bb5647c1 libm 0x3ff0b540bb5647c2
+tan random seed 2039                     n=   999999996 mismatches=10 nan_payload_diffs=0
+atan random seed 2039                    n=   999999996 mismatches=0 nan_payload_diffs=0
+atan2 random seed 2039                   n=   999999996 mismatches=0 nan_payload_diffs=0
+asin random seed 2039                    n=   999999996 mismatches=0 nan_payload_diffs=0
+acos random seed 2039                    n=   999999996 mismatches=0 nan_payload_diffs=0
+exp edges                                n=    22124066 mismatches=0 nan_payload_diffs=0
+log edges                                n=    22115872 mismatches=0 nan_payload_diffs=0
+log10 edges                              n=    22115872 mismatches=0 nan_payload_diffs=0
+pow special grid                         n=       16820 mismatches=0 nan_payload_diffs=0
+pow near-boundary pairs                  n=    50000000 mismatches=0 nan_payload_diffs=0
+sin edges                                n=    26156832 mismatches=0 nan_payload_diffs=0
+cos edges                                n=    26156832 mismatches=0 nan_payload_diffs=0
+tan edges                                n=    26115862 mismatches=0 nan_payload_diffs=0
+atan edges                               n=    22140454 mismatches=0 nan_payload_diffs=0
+atan2 special grid                       n=       16820 mismatches=0 nan_payload_diffs=0
+atan2 near-boundary pairs                n=    50000000 mismatches=0 nan_payload_diffs=0
+asin edges                               n=    22148648 mismatches=0 nan_payload_diffs=0
+acos edges                               n=    22148648 mismatches=0 nan_payload_diffs=0
+
+# Added with asinf (binary32, e_asinf.c), the same binary and host: first line inside docker ubuntu:24.04
+# (glibc 2.39), second on the host's glibc 2.44, whose asinf is CORE-MATH's correctly rounded one.
+asinf (binary32)                         n=  4294967296 mismatches=0 nan_payload_diffs=0
+asinf (binary32)                         n=  4294967292 mismatches=4581700 nan_payload_diffs=2147483648
+
+# The expf, logf and asinf lines inside docker were rerun after the harness's last thread took the
+# remainder of 2^32 (earlier runs left the final four bit patterns, NaNs, unchecked): n = 2^32 each.

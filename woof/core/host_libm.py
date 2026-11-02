@@ -10,9 +10,10 @@ code computes through the same C library, cannot take them.  These take
 :mod:`math` one element at a time, which is the C library on every host and
 the answer NumPy gives wherever its vector loops are not in use.
 
-``sin``, ``cos``, ``sqrt`` and ``x ** 2`` are not here: NumPy gives the C
-library's (or the correctly rounded) answer for them with and without its
-AVX-512 loops.  ``arctan2`` is: NumPy 2.5.3's AVX-512 float64 loop differs
+``sqrt`` and ``x ** 2`` are not here: NumPy gives the correctly rounded
+answer for them.  ``sin`` and ``cos`` are here only for the transcription
+below; without it they are NumPy's, which is the C library's answer with
+and without its AVX-512 loops.  ``arctan2`` is: NumPy 2.5.3's AVX-512 float64 loop differs
 from the C library's ``atan2`` on 32,883 of 400,000 random argument pairs
 and on 6,096 of 400,000 Lambert-inverse-shaped ones (WSL Ubuntu 24.04,
 glibc 2.39), and on none with ``NPY_DISABLE_CPU_FEATURES="X86_V4
@@ -24,33 +25,90 @@ math contract, including the domain handling below; it does not use the
 different portable musl implementation. An older installed bridge retains
 the scalar Python reference. These are for initialization and setup, not
 per-step fields.
+
+That C library is glibc 2.39, the one WRF's reference fixtures were
+computed against, only on a glibc 2.39 host: macOS's libm differs by an ULP
+on many arguments (128 ULP once the Lambert transforms amplify it), and
+glibc 2.44 reduces huge ``sin``, ``cos`` and ``tan`` arguments differently.
+A bridge built with the opt-in ``glibc239`` feature (``pixi run
+build-native-glibc239``) runs glibc 2.39's own functions instead, transcribed
+in tools/rustwx/crates/glibc239-libm (LGPL-2.1-or-later in part, so default
+builds and published wheels never contain it), so the words are glibc 2.39's
+on any host; its host entries gain ``sin`` and ``cos``.
+:func:`implementation` says which is running.
 """
 
 from __future__ import annotations
 
 import math
 import ctypes
+import os
 
 import numpy as np
 
-__all__ = ["exp", "log", "log10", "tan", "arctan", "arctan2", "arcsin",
-           "arccos", "power"]
+__all__ = ["exp", "log", "log10", "sin", "cos", "tan", "arctan", "arctan2",
+           "arcsin", "arccos", "power", "scalar", "implementation",
+           "GLIBC239", "C_LIBRARY"]
+
+#: :func:`implementation` when the bridge's opt-in glibc 2.39 transcription
+#: runs.
+GLIBC239 = "glibc-2.39-transcription"
+#: :func:`implementation` when the host C library runs (the default build).
+C_LIBRARY = "host-c-library"
+#: The bridge export that marks the transcription (and its sin and cos).
+_PORT_MARKER = "gpuwm_glibc239_sin"
+#: The operation codes the transcription added to the host entries.
+_PORT_ONLY = frozenset({"sin", "cos"})
 
 
-def _host_entry(pm, name):
+def _library(pm):
     try:
-        library = pm._load()
+        return pm._load()
     except FileNotFoundError:
         # Geometry/configuration callers also use this module before
         # preparation's native assets have been installed. Keep their
         # original scalar math path. Other load or ABI errors are real.
         return None
+
+
+def _host_entry(pm, name, operation=None):
+    library = _library(pm)
+    if operation in _PORT_ONLY and not hasattr(library, _PORT_MARKER):
+        return None  # an older bridge has no host sin or cos
     return getattr(library, name, None)
+
+
+def implementation() -> str:
+    """:data:`GLIBC239` where the installed bridge was built with the opt-in
+    glibc 2.39 transcription (``pixi run build-native-glibc239``), else
+    :data:`C_LIBRARY`."""
+    from woof.core import portable_math as pm
+    return GLIBC239 if hasattr(_library(pm), _PORT_MARKER) else C_LIBRARY
+
+
+def scalar(name: str):
+    """The scalar C function ``name`` (``"exp"``, ``"pow"``, ``"expf"`` ...):
+    glibc 2.39's words from the bridge's opt-in transcription where it is
+    installed, else the host C library's.  No domain handling: these are
+    the C functions' values, for scalar references that transcribe C or
+    Fortran calls one at a time.  The ``f`` functions are binary32."""
+    from woof.core import portable_math as pm
+    library = _library(pm)
+    binary = name.startswith(("pow", "atan2"))
+    kind = ctypes.c_float if name in ("expf", "logf", "powf") else ctypes.c_double
+    if hasattr(library, _PORT_MARKER):
+        function = getattr(library, "gpuwm_glibc239_" + name)
+    else:
+        process = ctypes.cdll.ucrtbase if os.name == "nt" else ctypes.CDLL(None)
+        function = getattr(process, name)
+    function.argtypes = [kind, kind] if binary else [kind]
+    function.restype = kind
+    return function
 
 
 def _unary(function, values, name):
     from woof.core import portable_math as pm
-    entry = _host_entry(pm, "gpuwm_host_unary_f64")
+    entry = _host_entry(pm, "gpuwm_host_unary_f64", name)
     array = np.require(values, dtype=np.float64, requirements=["C", "A"])
     if entry is not None:
         pointer, size = ctypes.c_void_p, ctypes.c_size_t
@@ -142,10 +200,19 @@ def _exp(value):
         return math.inf
 
 
-def _tan(value):
-    if math.isinf(value):
-        return math.nan
-    return math.tan(value)
+def _periodic(function):
+    """``function`` with NumPy's NaN, not :mod:`math`'s ValueError, at an
+    infinity."""
+    def guarded(value):
+        if math.isinf(value):
+            return math.nan
+        return function(value)
+    return guarded
+
+
+_SIN = _periodic(math.sin)
+_COS = _periodic(math.cos)
+_tan = _periodic(math.tan)
 
 
 def exp(values) -> np.ndarray:
@@ -158,6 +225,20 @@ def log(values) -> np.ndarray:
 
 def log10(values) -> np.ndarray:
     return _unary(_LOG10, values, "log10")
+
+
+def sin(values) -> np.ndarray:
+    """glibc 2.39's ``sin`` with the opt-in transcription, else NumPy's."""
+    if implementation() != GLIBC239:
+        return np.sin(np.asarray(values, dtype=np.float64))
+    return _unary(_SIN, values, "sin")
+
+
+def cos(values) -> np.ndarray:
+    """glibc 2.39's ``cos`` with the opt-in transcription, else NumPy's."""
+    if implementation() != GLIBC239:
+        return np.cos(np.asarray(values, dtype=np.float64))
+    return _unary(_COS, values, "cos")
 
 
 def tan(values) -> np.ndarray:
