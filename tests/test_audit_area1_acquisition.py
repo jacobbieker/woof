@@ -322,7 +322,11 @@ def test_c015_staged_chain_consumes_local_manifest_without_network(tmp_path, mon
     # A stationary experiment: the chain reads its relocation contract
     # before it composes the preparation.
     from woof.experiment import RelocationConfig
-    exp = SimpleNamespace(relocation=RelocationConfig(), domains=())
+    # Its one domain names no chem sets, so the chain's data-store chem
+    # fetch (runplan._staged_chem_fetch, which reads domains[0]) has
+    # nothing to fetch.
+    exp = SimpleNamespace(relocation=RelocationConfig(),
+                          domains=(SimpleNamespace(run=SimpleNamespace()),))
     with pytest.raises(Prepared):
         runplan._staged_chain(plan, exp=exp, config_path=config,
                               run_dir=tmp_path / "run", observer=observer)

@@ -2,12 +2,16 @@
 forecast that ends without a frame ends the wait; every later frame is drawn the moment it is listed, several draws at
 once, and finish() draws what is left before it returns."""
 import json
+import subprocess
 import threading
 import time
 from pathlib import Path
 from unittest import mock
 
 from woof.hex import first_look
+
+
+_POPEN = subprocess.Popen
 
 
 class _Draws:
@@ -20,6 +24,11 @@ class _Draws:
         self.lock = threading.Lock()
 
     def __call__(self, argv, **kw):
+        if "--history" not in argv:
+            # Not a draw: the patch is on the subprocess module itself, so a
+            # thread an earlier test on this worker left running (an
+            # rw_netcdf inventory) reaches it too, and runs as it would.
+            return _POPEN(argv, **kw)
         with self.lock:
             self.argvs.append(list(argv))
             index = len(self.argvs) - 1
