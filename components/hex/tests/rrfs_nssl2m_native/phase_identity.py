@@ -34,8 +34,10 @@ wrapper += f'}} nssl_phase_body<4>(nmicro+1,input,{names}); }}\n'
 wrapper += 'extern "C" unsigned long long nssl_host_parameter_bytes(){return sizeof(NsslState);}\n'
 cpp=root/'phase.cpp'; library=root/'phase.so'
 cpp.write_text(HOST_MATH+'\n#define __forceinline__ inline\n'+source+wrapper)
-subprocess.run(['timeout','180','g++','-std=c++17','-O1','-fno-fast-math',
-                '-ffp-contract=off','-fno-strict-aliasing','-shared','-fPIC',str(cpp),'-o',str(library)],check=True)
+# subprocess's own bound, not GNU timeout(1), which macOS does not ship.
+subprocess.run(['g++','-std=c++17','-O1','-fno-fast-math',
+                '-ffp-contract=off','-fno-strict-aliasing','-shared','-fPIC',str(cpp),'-o',str(library)],
+               check=True,timeout=180)
 rows=[]
 for moments in (2,3):
     original=Host(library,moments=moments)

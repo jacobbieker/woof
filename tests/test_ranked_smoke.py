@@ -111,6 +111,12 @@ def test_go_tiles_reaches_launch_with_chemistry_off(tmp_path, monkeypatch, capsy
         return 0
 
     monkeypatch.setattr(go_cli, '_registered_launch', launch)
+    # The door's GPU-runtime refusal is its own case (test_capabilities);
+    # this one is about the plan the door builds, and the CPU tier's
+    # environment carries no CuPy.
+    from woof import capabilities
+    monkeypatch.setattr(capabilities, "require_for_command", lambda *a, **k: None)
+    monkeypatch.setattr(capabilities, "missing", lambda *a, **k: [])
     assert main(['go', str(RECIPE), '--smoke', '--tiles', 'on', '--outdir', str(tmp_path/'run'),
                  '--wps-namelist', str(tmp_path/'input.namelist.wps')]) == 0
     assert captured['config'].root.run.chem_sets == ''

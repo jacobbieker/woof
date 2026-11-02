@@ -149,6 +149,12 @@ def resolve_start_hour(start_hour, *, source: str, moment: datetime,
     from woof import domain_wizard as dw
 
     adapter = source_adapter(source)
+    if start_hour is None:
+        # No lead named: the source's first published one -- the analysis,
+        # or f003 for the GEFSv12 reforecast, which publishes no f000 and
+        # whose bare [fetch] table opens there.
+        from woof.fetch_routes import first_published_lead
+        start_hour = first_published_lead(adapter.source_id)
     if type(start_hour) is not int or start_hour < 0:
         raise ValueError("--start-hour must be a nonnegative whole forecast lead")
     if start_hour and not dw.source_reaches_forecast_leads(adapter.source_id):
@@ -193,7 +199,7 @@ def window_cadence_hours(source: str, *, moment: datetime, start_hour: int,
 
 def fetch_hints(*, source: str, moment: datetime, hours: int,
                 projection: dict, dims: tuple[int, int], dx_m: float,
-                member: str | None = None, start_hour: int = 0,
+                member: str | None = None, start_hour: int | None = None,
                 model: str | None = None) -> dict:
     """A source's actual fetch contract, validated before configuration output.
 

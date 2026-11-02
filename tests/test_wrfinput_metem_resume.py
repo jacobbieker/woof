@@ -62,7 +62,7 @@ def test_a_non_empty_outdir_is_refused_before_the_card(tmp_path, monkeypatch, ca
 
     _no_gpu(monkeypatch)
     monkeypatch.setattr(wrfinput_door, 'resolve_wrfinput_run',
-                        lambda *args, **kwargs: SimpleNamespace())
+                        lambda *args, **kwargs: SimpleNamespace(experiment=None))
     outdir = tmp_path / 'out'
     (outdir / 'wrfout').mkdir(parents=True)
     (outdir / 'wrfout' / 'wrfout_d01_2026-05-17_18_00_00').write_bytes(b'CDF')
@@ -83,6 +83,7 @@ def _adoption_door(monkeypatch, recorded):
     monkeypatch.setattr(
         wrfinput_door, 'resolve_wrfinput_run',
         lambda directory, **kwargs: SimpleNamespace(
+            experiment=None,
             substitution_report=SimpleNamespace(substitutions=())))
     inputs = SimpleNamespace(experiment=SimpleNamespace(
         start_time=datetime.datetime(2026, 5, 17, 18, tzinfo=datetime.timezone.utc)))

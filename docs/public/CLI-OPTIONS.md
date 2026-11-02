@@ -477,7 +477,7 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 | `--seed-fields NPZ` | canonical source-analysis arrays carrying that source's own cycle and member identity, to locate the center from |
 | `--seed-radius-km` | how far from the advisory position the field search may look |
 | `--source SOURCE` | forcing source to initialize from (default gfs); --list-sources prints the planable set |
-| `--start-hour N` | forecast lead of the selected cycle to begin at (default 0, the analysis); the run initialises from fN and is forced from fN onward at the source's own cadence |
+| `--start-hour N` | forecast lead of the selected cycle to begin at (default: the source's first published lead, 0 -- the analysis -- for every source that publishes one); the run initialises from fN and is forced from fN onward at the source's own cadence |
 | `--storm auto\|ID\|NAME` | strongest eligible system at the cycle, or a track id, ATCF id or storm name |
 | `--target-host-memory-json` | _(the parser declares no help text for this option)_ |
 | `--tiles {off,auto,on}` | _(the parser declares no help text for this option)_ |

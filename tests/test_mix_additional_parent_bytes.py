@@ -10,6 +10,8 @@ import pytest
 from ishmael_retirement import requested_by_own_number, without_retired_line
 from test_mix_selection_byte_controls import build_experiment, import_documents
 from wrf_clock_lines import without_wrf_clock_lines
+from woof_engine_spelling import engine_spelling
+from test_audit_parent_generic_bytes import without_import_capability_lines
 
 
 PARENT = "1077c6e8abe502aab59de103d7e6d70dbb8588a1"
@@ -40,8 +42,11 @@ def test_generic_false_and_omitted_theta_bytes_match_original_parent(case, parse
     row["input"] = requested_by_own_number(row["input"])
     emitted, _ = import_documents(tmp_path, row, parsed=parsed)
     # The pinned parent predates the 2.8.9 D8 fixed-step clock block; the
-    # sibling byte controls take out exactly those lines (wrf_clock_lines).
-    assert without_wrf_clock_lines(emitted).encode("utf-8") \
+    # sibling byte controls take out exactly those lines (wrf_clock_lines),
+    # the engine-era comment header says gpuwm (woof_engine_spelling), and
+    # the import capability lanes since added exactly three default-on lines.
+    assert engine_spelling(without_import_capability_lines(
+        without_wrf_clock_lines(emitted))).encode("utf-8") \
         == without_retired_line(expected)
     exp = build_experiment(tomllib.loads(emitted), source="original generic bytes")
     assert [domain.run.mix_full_fields for domain in exp.domains] == [True, True]

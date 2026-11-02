@@ -176,7 +176,11 @@ def truncate_state(parent: DomainState, cfg: RunConfig, k_top: int, *,
             dev[...] = src[:dev.shape[0]]
         elif src.shape == dev.shape:
             dev[...] = src
-    for name in ("cf1", "cf2", "cf3", "cfn", "cfn1", "p_top", "mub", "has_msf"):
+    # elapsed_seconds rides along: the child is the parent's column at the
+    # parent's instant (woof/core/model.py no longer assigns it, so the
+    # clock-module audit in tests/test_clock.py stays a tripwire).
+    for name in ("cf1", "cf2", "cf3", "cfn", "cfn1", "p_top", "mub", "has_msf",
+                 "elapsed_seconds"):
         if hasattr(parent, name):
             setattr(child, name, getattr(parent, name))
     if coord is not None:

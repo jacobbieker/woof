@@ -49,6 +49,43 @@ CASES = tuple(sorted(p.name for p in ROOT.iterdir()
 DRAG_FIELDS = ("thrcof", "powcof", "tkecof", "power1")
 
 
+def _oracle_glibc() -> str:
+    """The glibc version the oracle's WRF called (TOOLCHAIN.txt)."""
+    for line in (ROOT / "TOOLCHAIN.txt").read_text().splitlines():
+        if line.startswith("glibc:"):
+            return line.split()[-1]
+    raise AssertionError("TOOLCHAIN.txt names no glibc")
+
+
+@pytest.fixture(autouse=True)
+def _oracle_libm(monkeypatch):
+    """Grade against the C library the oracle's WRF called.
+
+    woof.windfarm.wrf_llij calls the HOST glibc through ctypes, as a WRF
+    built on that host does, so on a glibc other than the oracle's its words
+    are that glibc's.  The oracle was recorded on glibc 2.44; ubuntu-24.04's
+    glibc 2.39 is one ulp off it in lc_ladder_d02_3km's proj_info, which
+    moves that case's turbine cells (hosted CI, 2026-11-01).  With logf, log10f and powf held to
+    the glibc 2.39 transcription (woof.core.noahmp_libm) every case still
+    matches on glibc 2.44, so the difference is 2.39's cosf/sinf/tanf, which
+    glibc has since replaced.  On such a host the placement takes woof's
+    word-exact glibc ports instead (woof.backend.host.libm32, the route every
+    non-glibc host takes), so the whole arithmetic is still graded at
+    max_ulp 0.  Every test here builds its layout under the same choice, so
+    _case's cache never mixes the two.
+    """
+    import platform as _platform
+
+    from woof.windfarm import wrf_llij
+
+    libc, version = _platform.libc_ver()
+    if libc == "glibc" and version != _oracle_glibc():
+        from woof.backend.host import libm32
+        ported = wrf_llij._Ported(libm32())
+        monkeypatch.setattr(wrf_llij, "_libm", lambda: ported)
+    yield
+
+
 def _words(a) -> np.ndarray:
     a = np.ascontiguousarray(a)
     return a.view(np.uint32) if a.dtype == np.float32 else a

@@ -62,7 +62,8 @@ def test_an_experiment_naming_a_host_loads(tmp_path):
     ({"source": "rap", "transport": "s3"},
      "--transport s3: --source rap publishes on nomads, aws"),
     ({"source": "era5", "transport": "s3"}, "era5 has no host to choose between"),
-    ({"source": "gfs", "transport": "s3"}, "--mode full-file"),
+    ({"source": "gfs", "transport": "nomads"},
+     "transport pins whole archive objects"),
     ({"source": "hrrr", "transport": 3}, "transport in [fetch] of case.toml must be"),
 ])
 def test_a_host_the_fetch_would_refuse_is_refused_by_name(table, words):

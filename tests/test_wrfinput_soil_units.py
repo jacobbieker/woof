@@ -63,6 +63,14 @@ def test_conversion_does_not_hide_unphysical_volume_fraction_by_clipping(tmp_pat
 def test_invalid_layer_geometry_fails_at_read_before_gpu(tmp_path, thickness):
     cfg = _cfg()
     path = _soil(tmp_path / "input", cfg, "mm", thickness=thickness)
+    if np.isnan(thickness):
+        # A non-finite DZS never reaches the soil-layer conversion: the
+        # reader's numeric guard (woof.ingest.wrfinput._read_numeric)
+        # refuses every non-finite WRF input variable by name first.
+        from woof.config import ConfigurationRefused
+        with pytest.raises(ConfigurationRefused, match="WRF input DZS contains non-finite values"):
+            _read(path, cfg)
+        return
     with pytest.raises(wi.netcdf_bridge.NetcdfDecodeError, match="thickness.*finite and positive"):
         _read(path, cfg)
 

@@ -333,14 +333,17 @@ impl ProjectedGrid {
         let (lat, _) = self.latlon(stagger);
         let mut f = Grid2::filled(lat.ny, lat.nx, 0.0);
         let mut e = Grid2::filled(lat.ny, lat.nx, 0.0);
+        // Two passes, as derived_arrays and WRF evaluate them: in one body
+        // LLVM fuses sin and cos of one argument into a sincos call, and
+        // Apple's __sincos_stret rounds the sine differently from sin.
         f.data
             .par_iter_mut()
-            .zip(e.data.par_iter_mut())
             .zip(lat.data.par_iter())
-            .for_each(|((fv, ev), &la)| {
-                *fv = 2.0 * OMEGA_E * (la * RAD_PER_DEG).sin();
-                *ev = 2.0 * OMEGA_E * (la * RAD_PER_DEG).cos();
-            });
+            .for_each(|(fv, &la)| *fv = 2.0 * OMEGA_E * (la * RAD_PER_DEG).sin());
+        e.data
+            .par_iter_mut()
+            .zip(lat.data.par_iter())
+            .for_each(|(ev, &la)| *ev = 2.0 * OMEGA_E * (la * RAD_PER_DEG).cos());
         (f, e)
     }
 

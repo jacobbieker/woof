@@ -277,11 +277,18 @@ def _component_owner_of_source(labels, source_lat, source_lon,
     ny, nx = source_shape
     lat = np.asarray(source_lat, dtype=np.float64)
     lon = np.asarray(source_lon, dtype=np.float64)
-    y = np.rint((np.asarray(target_lat, dtype=np.float64) - lat[0])
-                / (lat[1] - lat[0])).astype(np.intp)
-    x = np.rint((_target_longitude_in_source_frame(lon, target_lon) - lon[0])
-                / (lon[1] - lon[0])).astype(np.intp)
-    inside = (y >= 0) & (y < ny) & (x >= 0) & (x < nx) & (labels > 0)
+    fy = np.rint((np.asarray(target_lat, dtype=np.float64) - lat[0])
+                 / (lat[1] - lat[0]))
+    fx = np.rint((_target_longitude_in_source_frame(lon, target_lon) - lon[0])
+                 / (lon[1] - lon[0]))
+    # A non-finite target falls nearest to no cell.  Casting NaN or inf to an
+    # integer is undefined: x86-64 yields INT64_MIN (outside, by accident),
+    # arm64 saturates (NaN -> 0, a real row), so the cast must not decide.
+    finite = np.isfinite(fy) & np.isfinite(fx)
+    y = np.where(finite, fy, -1.0).astype(np.intp)
+    x = np.where(finite, fx, -1.0).astype(np.intp)
+    inside = (finite & (y >= 0) & (y < ny) & (x >= 0) & (x < nx)
+              & (labels > 0))
     flat = (y[inside] * nx + x[inside]).astype(np.int64)
     lab = labels[inside].astype(np.int64)
     if flat.size == 0:

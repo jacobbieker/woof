@@ -23,6 +23,8 @@ from pathlib import Path
 import subprocess
 from typing import Any
 
+from woof import linux_handles
+
 
 _KERNEL32 = None
 
@@ -198,7 +200,7 @@ def _pidfd(pid: int, record: Any) -> int | None:
     if not alive(record, pid):
         return None
     try:
-        handle = os.pidfd_open(pid)
+        handle = linux_handles.pidfd_open(pid)
     except ProcessLookupError:
         return None
     try:
@@ -235,9 +237,7 @@ def signal_process(record: Any, sig: int, *, tree: bool = False) -> bool:
         return False
     if os.name == "nt":
         return _windows_end(pid, record, tree)
-    import signal
-
-    if not (hasattr(os, "pidfd_open") and hasattr(signal, "pidfd_send_signal") and Path("/proc/self/fdinfo").is_dir()):
+    if not (linux_handles.has_pidfd() and Path("/proc/self/fdinfo").is_dir()):
         if not alive(record, pid):
             return False
         try:
@@ -275,10 +275,10 @@ def signal_process(record: Any, sig: int, *, tree: bool = False) -> bool:
                 return False
         for member in members:
             try:
-                signal.pidfd_send_signal(member, sig)
+                linux_handles.pidfd_send_signal(member, sig)
             except ProcessLookupError:
                 pass
-        signal.pidfd_send_signal(handle, sig)
+        linux_handles.pidfd_send_signal(handle, sig)
         return True
     except ProcessLookupError:
         return False

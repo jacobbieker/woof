@@ -595,16 +595,36 @@ def check_identity_copy(mapped, snapshot, landmask, flipped_to_land,
     count of compared arrays.  Shared with the GPU proof script."""
     source = snapshot.fields
     compared = 0
+    land = landmask >= 0.5
+    source_land = source["LANDSEA"] >= 0.5
+    # The surface fields WPS interpolates masked by LANDSEA (SKINTEMP, T2,
+    # Q2, SNOW, SNOWH, XICE) take a donor of the TARGET's surface where the
+    # two masks disagree (the receipt's coastal "mixed_surface" count), so
+    # exactly the flipped cells move; everywhere else they are copies.
+    flipped = np.zeros(land.shape, dtype=bool)
+    for cell in (*flipped_to_land, *flipped_to_water):
+        flipped[cell] = True
+    repairs = getattr(mapped, "masked_field_repairs", None) or {}
     for name in ("PRES", "HGT", "TT", "SPFH", "PSFC", "SOILHGT", "SKINTEMP",
                  "SNOW", "SNOWH", "T2", "Q2", "QC", "QI", "QR", "QS", "QG",
                  "XICE"):
         got = np.asarray(host(mapped.fields[name]), dtype=np.float32)
-        assert got.tobytes() == source[name].tobytes(), name
+        counts = repairs.get(name, {})
+        if not counts.get("mixed_surface"):
+            assert got.tobytes() == source[name].tobytes(), name
+            compared += 1
+            continue
+        assert counts["mixed_surface"] == int(flipped.sum()), (name, counts)
+        assert got[~flipped].tobytes() == source[name][~flipped].tobytes(), name
+        if counts.get("matched_surface") == counts["mixed_surface"]:
+            # every flipped cell took a value its own surface holds
+            for cell in zip(*np.nonzero(flipped)):
+                surface = source_land if land[cell] else ~source_land
+                assert np.isin(got[cell], source[name][surface]), (name, cell)
         compared += 1
-    land = landmask >= 0.5
-    source_land = source["LANDSEA"] >= 0.5
     same = land & source_land
-    skin = source["SKINTEMP"]
+    # target-water SOILT is the domain's own (mapped) SKINTEMP
+    skin = np.asarray(host(mapped.fields["SKINTEMP"]), dtype=np.float32)
     for name, fill in (("SOILT", skin), ("SOILW", np.float32(1.0))):
         got = np.asarray(host(mapped.fields[name]), dtype=np.float32)
         want = source[name]

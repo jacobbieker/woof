@@ -152,7 +152,7 @@ def test_in_process_adapter_keeps_context_and_does_not_spawn(monkeypatch):
                         lambda *a, **k: pytest.fail("spawned an adapter"))
     try:
         with source_cli.in_process_adapters():
-            result = source_cli._run_adapter_command(["python", "-m", "gpuwm.arbitrary", "--arg"])
+            result = source_cli._run_adapter_command(["python", "-m", "woof.arbitrary", "--arg"])
         assert result.returncode == 0
         assert seen == [(["--arg"], resident)]
         assert source_cli._IN_PROCESS_ADAPTERS.get() is False

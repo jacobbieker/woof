@@ -1073,6 +1073,11 @@ def test_a_second_gpuwm_on_the_path_does_not_lend_its_version(
         sites.reverse()
     environment = dict(os.environ)
     environment["PYTHONPATH"] = os.pathsep.join(sites)
+    # The installed copy carries only the version modules; on a Mac (or under
+    # the mlx environment's WOOF_BACKEND=mlx) woof/__init__ would install the
+    # Metal backend, whose package is not in it.  The backend is not this
+    # case's subject.
+    environment["WOOF_BACKEND"] = "cuda"
     program = ("import json, woof;"
                "d = woof.version_distribution();"
                "print(json.dumps({'version': woof.__version__,"

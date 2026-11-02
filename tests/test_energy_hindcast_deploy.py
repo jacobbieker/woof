@@ -310,7 +310,12 @@ def test_k8s_indexed_job_and_workload_identity(tmp_path, example, annotation):
     path = tmp_path / "job.yaml"
     path.write_text(files["job.yaml"])
     kubectl = shutil.which("kubectl")
-    if kubectl:
+    # Client-side dry run still asks a cluster for its API groups (kubectl's
+    # REST mapping), so it needs a configured context; a hosted runner ships
+    # kubectl with none and answered 'connection refused' on localhost:8080.
+    context = kubectl and subprocess.run(
+        [kubectl, "config", "current-context"], capture_output=True, text=True)
+    if kubectl and context.returncode == 0:
         result = subprocess.run(
             [kubectl, "apply", "--dry-run=client", "--validate=false",
              "-f", str(path)], capture_output=True, text=True)
@@ -513,6 +518,9 @@ def test_cli_refusal_exits_2_with_a_reason_on_stderr(tmp_path, capsys):
 # Container
 
 
+@pytest.mark.skipif(shutil.which("flock") is None, reason=(
+    "deploy/entrypoint.sh runs inside the Linux worker container (deploy/Dockerfile) "
+    "and serializes node staging with util-linux flock, which macOS does not ship"))
 def test_entrypoint_is_valid_bash_and_stages_a_file_url(tmp_path):
     entrypoint = DEPLOY_DIR / "entrypoint.sh"
     _bash_n(entrypoint)

@@ -138,6 +138,7 @@ def test_schema_rows_cite_the_pinned_registry_or_declare_themselves_gpuwm():
     module exists to end.
     """
     cited = 0
+    declared: set[str] = set()
     for name, field in SCHEME_OUTPUT_FIELDS.items():
         if field.registry:
             assert (field.registry.startswith("Registry.EM_COMMON:")
@@ -147,8 +148,15 @@ def test_schema_rows_cite_the_pinned_registry_or_declare_themselves_gpuwm():
             cited += 1
         else:
             assert "no WRF Registry counterpart" in field.description, name
-            assert field.netcdf_name.startswith("RUC_"), name
-    assert cited == len(SCHEME_OUTPUT_FIELDS) - 4
+            declared.add(field.netcdf_name)
+    # The self-declared additions, by name: the four LSMRUC fluxes, the
+    # coupled ocean's two SST rows, the PWP density column and the
+    # prognostic sea-ice extensions (woof.ocean.seaice.OUTPUT).
+    from woof.ocean.seaice import OUTPUT as SEAICE_OUTPUT
+    assert declared == ({"RUC_INFILTR", "RUC_SMELT", "RUC_RUNOFF1", "RUC_RUNOFF2",
+                         "OCEAN_SST", "OCEAN_SST_CHANGE", "OM_DENSITY"}
+                        | {external for external, _ in SEAICE_OUTPUT.values()})
+    assert cited == len(SCHEME_OUTPUT_FIELDS) - len(declared)
 
 
 def test_no_two_gpuwm_fields_claim_one_netcdf_name():

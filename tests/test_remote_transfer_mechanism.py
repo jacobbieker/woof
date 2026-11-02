@@ -5,6 +5,7 @@ CPU-only: bytes are protocol fixtures, nothing is fetched and no run starts.
 import base64
 import hashlib
 import json
+import sys
 import tomllib
 from datetime import datetime
 from pathlib import Path
@@ -112,6 +113,9 @@ def test_the_inline_manifest_refusal_names_its_measured_bytes(saved, monkeypatch
     assert "existing remote-input route" in message
 
 
+@pytest.mark.skipif(sys.platform not in rw.OWNERSHIP_PROVIDERS, reason=(
+    "the bundle review is the remote worker's door, Linux-only (ownership through /proc and "
+    "pidfd); elsewhere it refuses, as test_remote_ownership_and_capabilities asserts"))
 def test_the_review_states_the_measured_manifest_size(saved, tmp_path, monkeypatch):
     monkeypatch.setattr("woof.remote_plan.memory_review", lambda *_a, **_k:
         {"measured": False, "free_bytes": None, "refuse": False, "warn": True, "verdict": "CPU-only"})

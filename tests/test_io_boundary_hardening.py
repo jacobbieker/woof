@@ -178,7 +178,7 @@ def test_producer_identity_is_the_installed_distribution():
     assert identity["distribution"] == woof.DISTRIBUTION_NAME
     assert identity["version"] == woof.__version__
     from woof.io.restart import RESTART_FORMAT_VERSION
-    assert identity["restart_format_version"] == str(RESTART_FORMAT_VERSION) == "6"
+    assert identity["restart_format_version"] == str(RESTART_FORMAT_VERSION) == "7"
 
 
 # ---------------------------------------------------------------------------

@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import sys
 import xml.etree.ElementTree as ET
 import pytest
 
@@ -30,6 +31,12 @@ def _ruling_record(request):
         pytest.skip("source-authority ruling record not supplied (RRFS_SOURCE_AUTHORITY_RULING)")
 
 ROOT = Path(__file__).parents[1] / 'tools/native_physics_reference/rrfs'
+#: The publication, staging and recompare tools drive GNU cp (--reflink,
+#: --sparse) and GNU tar (--quoting-style): the Linux oracle host's
+#: coreutils.  macOS ships BSD cp and bsdtar, and the oracle never runs there.
+GNU_ORACLE_HOST = pytest.mark.skipif(sys.platform == 'darwin', reason=(
+    'drives GNU cp and GNU tar, the Linux oracle host\'s coreutils; macOS '
+    'ships BSD cp and bsdtar'))
 spec = importlib.util.spec_from_file_location('rrfs_flags', ROOT / 'audit_flags.py')
 flags = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(flags)
@@ -595,6 +602,7 @@ def test_published_rank_replay_refuses_changed_partition_or_weather_replacement(
         module.expand_replays([row], [phase])
 
 
+@GNU_ORACLE_HOST
 def test_sparse_publication_preserves_native_bytes_and_seals_original_inventory(tmp_path):
     spec = importlib.util.spec_from_file_location('rrfs_sparse_publication', ROOT / 'publish_sparse.py')
     module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
@@ -941,6 +949,7 @@ def test_published_field_recomparison_rejects_ambiguous_proof_requests(tmp_path,
     with pytest.raises(ValueError): module.recompare(request, executable, tmp_path/'result', replicas)
 
 
+@GNU_ORACLE_HOST
 @pytest.mark.parametrize('defect', ['parent-member', 'absolute-member', 'symlink', 'oversized'])
 def test_published_field_transport_rejects_escape_and_unbounded_members(tmp_path, monkeypatch, defect):
     monkeypatch.syspath_prepend(str(ROOT))
@@ -1163,6 +1172,7 @@ def test_complete_io_replay_rejects_changed_runtime_before_native_execution(tmp_
     assert not (tmp_path / 'whole-attempt/SUMMARY.json').exists()
 
 
+@GNU_ORACLE_HOST
 def test_received_forecast_authenticates_build_and_unchanged_source_witness(tmp_path):
     spec = importlib.util.spec_from_file_location('rrfs_received_forecast_guard', ROOT / 'receive_forecast.py')
     module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
@@ -1246,6 +1256,7 @@ def test_decode_reuse_binds_bytes_after_storage_relocation(tmp_path):
         module.verified_decode(row,decoded,binary,table)
 
 
+@GNU_ORACLE_HOST
 def test_forecast_publication_checks_recorded_bytes_and_retains_only_outputs(tmp_path):
     spec = importlib.util.spec_from_file_location('rrfs_forecast_publication', ROOT / 'publish_forecast.py')
     module = importlib.util.module_from_spec(spec)
@@ -1269,6 +1280,7 @@ def test_forecast_publication_checks_recorded_bytes_and_retains_only_outputs(tmp
     assert not (published / 'init.nc').exists()
 
 
+@GNU_ORACLE_HOST
 def test_case_reuse_and_publication_bind_inputs_outputs_and_workflow_deck(tmp_path):
     spec = importlib.util.spec_from_file_location('rrfs_case_reuse', ROOT / 'cache_cases.py')
     module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
@@ -1376,6 +1388,7 @@ def test_diagnostic_initialized_weather_cannot_become_primary(tmp_path):
     assert not (tmp_path / 'READY.md').exists()
 
 
+@GNU_ORACLE_HOST
 def test_received_case_rejects_changed_geography_and_initializer(tmp_path):
     spec = importlib.util.spec_from_file_location('rrfs_case_receiver_guard', ROOT / 'receive_case.py')
     module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
@@ -1597,6 +1610,7 @@ def test_case_without_weather_inputs_requires_explicit_disabled_stages():
             module.decoded_directory({}, {'namelist.init_atmosphere':changed})
 
 
+@GNU_ORACLE_HOST
 def test_geography_archive_guards_before_native_extraction(tmp_path):
     import io
     import shutil
@@ -1623,6 +1637,7 @@ def test_geography_archive_guards_before_native_extraction(tmp_path):
         module.preflight(dict(archives=[row]),tar)
 
 
+@GNU_ORACLE_HOST
 def test_sparse_geography_preserves_bytes_and_bounds_each_member(tmp_path):
     import io
     import shutil
@@ -1650,6 +1665,7 @@ def test_sparse_geography_preserves_bytes_and_bounds_each_member(tmp_path):
     assert not (tmp_path/'bounded/dataset/field').exists()
 
 
+@GNU_ORACLE_HOST
 def test_compressed_geography_checks_source_and_owned_paths_before_mount(tmp_path, monkeypatch):
     import hashlib
     import io

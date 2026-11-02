@@ -52,6 +52,12 @@ def test_every_product_price_rebuilds_from_recorded_bracket_maxima():
 
 
 def test_collector_rebuild_needs_only_the_committed_record(tmp_path):
+    from _woof_snapshot import left_out_reason
+
+    # The collector runs as a child process, where a left-out script is a
+    # "can't open file" the named rule in conftest.py never sees.
+    if (reason := left_out_reason("tools/wiki_seed/collect_picture_sizes.py")) is not None:
+        pytest.skip(reason)
     table = tmp_path / "table.json"
     result = subprocess.run([sys.executable, str(ROOT / "tools/wiki_seed/collect_picture_sizes.py"),
                              "--rebuild", "--record", str(RECORD), "--table", str(table)],

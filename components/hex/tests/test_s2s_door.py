@@ -17,7 +17,7 @@ def arguments(tmp_path, *extra):
 
 
 def test_cpu_budget_respects_affinity_and_native_thread_limit(monkeypatch):
-    monkeypatch.setattr(s2s_door.os, 'sched_getaffinity', lambda _: set(range(8)))
+    monkeypatch.setattr(s2s_door.os, 'sched_getaffinity', lambda _: set(range(8)), raising=False)
     monkeypatch.setenv('RAYON_NUM_THREADS', '3')
     assert s2s_door.cores() == 3
     monkeypatch.setenv('RAYON_NUM_THREADS', '14')

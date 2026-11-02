@@ -17,13 +17,16 @@ def test_go_help_defaults_and_options_match_full_surface():
         ['go', 'forecast.toml', '--cycle', '2026-02-28T00', '--whole-cycle', '--prepare-only', '--explain'],
         ['go', 'forecast.toml', '--dry-run', '--data-dir', '/forcing', '--geog-root', '/geog'],
         ['go', 'forecast.toml', '--readiness'],
+        # CONFIG is optional on the parser (`woof go --source ...` builds its
+        # own domain); a bare `woof go` is refused by the handler, not here.
+        ['go'],
     ]:
         expected = vars(full.parse_args(argv))
         expected.pop('ingest_preflight_handler', None)  # Check-only default leaks from its registrar.
         assert expected == vars(focused.parse_args(argv))
 
 
-@pytest.mark.parametrize('tail', [[], ['forecast.toml', '--devices', 'bad'], ['forecast.toml', '--unknown-option']])
+@pytest.mark.parametrize('tail', [['forecast.toml', '--devices', 'bad'], ['forecast.toml', '--unknown-option']])
 def test_go_refusal_matches_full_surface(tail, capsys):
     messages=[]
     for parser in [cli.build_parser(), cli.build_parser(go_only=True)]:

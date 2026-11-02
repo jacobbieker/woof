@@ -20,6 +20,7 @@ a stale woof whose __file__ is None.
 from __future__ import annotations
 
 import json
+import subprocess
 import urllib.error
 from pathlib import Path
 from importlib.metadata import PathDistribution
@@ -204,7 +205,14 @@ def test_this_checkout_reports_its_own_sha_and_branch():
     if not git:
         pytest.skip("the suite is not running from a git checkout")
     assert len(git["commit"]) >= 7
-    assert git["branch"]
+    # A pull_request checkout is a detached merge commit, which names no
+    # branch; _git_identity omits it there by design.
+    detached = subprocess.run(["git", "-C", str(root), "symbolic-ref", "-q", "HEAD"],
+                              capture_output=True).returncode != 0
+    if detached:
+        assert "branch" not in git
+    else:
+        assert git["branch"]
     assert version_cli.headline(
         version_cli.describe_install(root / "woof", None))
 

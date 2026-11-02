@@ -16,6 +16,8 @@ from woof import fetch, fetch_routes
 from woof.era5_member import validate_selection
 from woof.source_cycles import CycleGrid
 
+from route_cycle_fit import first_window, route_cycle
+
 
 def args(*words):
     parser = argparse.ArgumentParser()
@@ -26,14 +28,21 @@ def args(*words):
 @pytest.mark.parametrize("source", fetch_routes.route_ids())
 def test_every_route_rejects_a_partial_final_cadence(source):
     route = fetch_routes.route_for(source)
-    cycle = datetime(2026, 8, 17, route.cycle_hours[0])
-    # A173: the route lists no spacings; take the first coarser than an
-    # hour that its ladder publishes and its preparation takes.
-    cadence = next((step for step in fetch_routes.window_spacings(
-        route, 0, 12, cycle=cycle) if step > 1), None)
+    cycle = route_cycle(route, datetime(2026, 8, 17, route.cycle_hours[0]))
+    start = route.first_lead
+    if len(fetch_routes.ladder_for(route, cycle)) == 1:
+        # An analysis-only donor publishes one frame: no spacing serves a
+        # window, and the same arithmetic refuses its default cadence.
+        cadence = route.default_cadence
+    else:
+        # A173: the route lists no spacings; take the first coarser than
+        # an hour that its ladder publishes and its preparation takes.
+        cadence = next((step for step in fetch_routes.window_spacings(
+            route, start, 12, cycle=cycle) if step > 1), None)
     assert cadence is not None
     with pytest.raises(ValueError, match="multiple"):
-        fetch_routes.resolve_leads(route, cycle, cadence + 1, cadence=cadence)
+        fetch_routes.resolve_leads(route, cycle, cadence + 1, cadence=cadence,
+                                   start_hour=start)
 
 
 @pytest.mark.parametrize("field,value", [
@@ -179,7 +188,8 @@ def test_bad_fetch_hints_are_refused_before_any_io(table):
 @pytest.mark.parametrize("source", fetch_routes.route_ids())
 def test_table_cli_resolves_latest_and_keeps_the_resolved_request(source, tmp_path, monkeypatch):
     route = fetch_routes.route_for(source)
-    selected = datetime(2026, 8, 17, route.cycle_hours[0])
+    selected = route_cycle(route, datetime(2026, 8, 17, route.cycle_hours[0]))
+    start, hours = first_window(route, route.default_cadence)
     calls = []
     def latest(name, last_hour, **kwargs):
         calls.append(("latest", name, last_hour, kwargs))
@@ -193,10 +203,10 @@ def test_table_cli_resolves_latest_and_keeps_the_resolved_request(source, tmp_pa
     monkeypatch.setattr(fetch_routes, "handoff_lines", lambda *a: ())
     # The whole-cycle rule (A136 L2: as-posted is the default, so this
     # names --whole-cycle and keeps every assertion).
-    parsed = args("--whole-cycle", "--source", source, "--cycle", "latest", "--hours", str(route.default_cadence),
-                  "--out", str(tmp_path / source))
+    parsed = args("--whole-cycle", "--source", source, "--cycle", "latest", "--hours", str(hours),
+                  "--forecast-start-hour", str(start), "--out", str(tmp_path / source))
     assert fetch.fetch_main(parsed) == 0
-    assert calls[0][:3] == ("latest", source, route.default_cadence)
+    assert calls[0][:3] == ("latest", source, start + hours)
     # Resolving latest already asked about the primary; only a declared
     # donor is asked again, and before the download.
     donors = [("published", row.source, selected, max(row.leads)) for row in route.donors]
@@ -349,8 +359,13 @@ def test_each_acquisition_ladder_accepts_one_analysis(source):
         assert fetch._era5_times(cycle, 0, 6) == (cycle,)
         return
     else:
+        # A route whose ladder starts past f000 (the GEFS reforecast's
+        # f003) takes its one first frame; a cycle inside its era.
         route = fetch_routes.route_for(source)
-        values = fetch_routes.resolve_leads(route, cycle, 0)
+        values = fetch_routes.resolve_leads(route, route_cycle(route, cycle), 0,
+                                            start_hour=route.first_lead)
+        assert values == (route.first_lead,)
+        return
     assert values == (0,)
 
 

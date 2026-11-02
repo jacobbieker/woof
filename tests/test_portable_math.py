@@ -148,7 +148,7 @@ def test_a_worker_limit_bounds_the_library_threads(monkeypatch):
                 pass
 
 
-def test_real_init_serial_helpers_pass_their_worker_count(monkeypatch):
+def test_real_init_serial_helpers_pass_their_worker_count(monkeypatch, eight_cpu_host):
     _library_or_skip()
     from woof.ingest import cpu_backend
     from woof.ingest.real import (_make_real_base, _moist_specific_volume,

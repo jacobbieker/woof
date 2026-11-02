@@ -238,7 +238,10 @@ fn dry_run(args: &[&str]) -> serde_json::Value {
 }
 
 #[test]
-fn the_triangulation_rule_is_rebuild_globally_and_incremental_with_a_window() {
+fn the_triangulation_is_incremental_by_default_and_rebuild_when_named() {
+    // The default became incremental for every mesh, global or windowed, once
+    // rings started at a canonical slot and both arms wrote the same bytes
+    // (hull.rs, TriangulationMode::default); `rebuild` stays selectable.
     let spec = write("rule.spec.json", &serde_json::to_string(&small_spec()).unwrap());
     let win = write(
         "rule.window.geojson",
@@ -247,7 +250,7 @@ fn the_triangulation_rule_is_rebuild_globally_and_incremental_with_a_window() {
     let spec = spec.to_str().unwrap();
     let win = win.to_str().unwrap();
     let global = dry_run(&["--spec", spec]);
-    assert_eq!(global["triangulation"], "rebuild");
+    assert_eq!(global["triangulation"], "incremental");
     assert!(global["regional_window"].is_null());
     let regional = dry_run(&["--spec", spec, "--regional-window", win]);
     assert_eq!(regional["triangulation"], "incremental");
@@ -255,6 +258,8 @@ fn the_triangulation_rule_is_rebuild_globally_and_incremental_with_a_window() {
     assert_eq!(regional["regional_window"]["status"], "experimental");
     let named = dry_run(&["--spec", spec, "--regional-window", win, "--triangulation", "rebuild"]);
     assert_eq!(named["triangulation"], "rebuild");
+    let named_global = dry_run(&["--spec", spec, "--triangulation", "rebuild"]);
+    assert_eq!(named_global["triangulation"], "rebuild");
 }
 
 #[test]

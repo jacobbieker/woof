@@ -1446,7 +1446,18 @@ class LiveProducts:
                     {**plan, "render": scratch,
                      "render_products": ",".join(priority)}, [frame],
                     context_frames=baselines))
-                if self._abandoned or _render_was_stopped(priority_done.returncode):
+                if self._abandoned:
+                    return
+                if _render_was_stopped(priority_done.returncode):
+                    # Stopped in the headline pass: said as the full pass
+                    # says it, and the full pass is not started.
+                    self._warn(
+                        "live_products_stopped",
+                        f"drawing {frame.name} was stopped before it finished "
+                        f"(render exited {priority_done.returncode}), so none of "
+                        "it was published; the frame is on disk and draws "
+                        "with woof render",
+                        frame=str(frame))
                     return
                 pictures = finished_pictures(scratch, iter_rendered(scratch),
                                              priority_done.returncode)

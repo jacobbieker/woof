@@ -129,7 +129,7 @@
   "templates": {},
   "documents": [
     {
-      "output": "gpuwm/authorities/rw-wps-aigefs-member-hybrid-grib2.mapping.json",
+      "output": "woof/authorities/rw-wps-aigefs-member-hybrid-grib2.mapping.json",
       "format": {"indent": 2},
       "base": {
         "kind": "file",
@@ -151,7 +151,7 @@
       ]
     },
     {
-      "output": "gpuwm/authorities/rw-wps-gdas-pgrb2-donor.mapping.json",
+      "output": "woof/authorities/rw-wps-gdas-pgrb2-donor.mapping.json",
       "format": {"indent": 2},
       "base": {
         "kind": "file",
@@ -195,7 +195,7 @@
       ]
     },
     {
-      "output": "gpuwm/authorities/rw-wps-aigefs-member-hybrid-grib2.composition.json",
+      "output": "woof/authorities/rw-wps-aigefs-member-hybrid-grib2.composition.json",
       "format": {"indent": 2},
       "base": {
         "kind": "file",
@@ -208,13 +208,13 @@
         {
           "op": "set",
           "path": ["field_sources", "physical_analysis_surface", "mapping_sha256"],
-          "value": {"$sha256_of": "gpuwm/authorities/rw-wps-gdas-pgrb2-donor.mapping.json"}
+          "value": {"$sha256_of": "woof/authorities/rw-wps-gdas-pgrb2-donor.mapping.json"}
         },
         {"op": "set", "path": ["field_sources", "physical_analysis_surface", "fields"], "value": {"$const": "BORROWED_FIELDS"}}
       ]
     },
     {
-      "output": "gpuwm/authorities/rw-wps-aigefs-member-hybrid-grib2.provenance.json",
+      "output": "woof/authorities/rw-wps-aigefs-member-hybrid-grib2.provenance.json",
       "format": {"indent": 2},
       "base": {"kind": "empty"},
       "steps": [

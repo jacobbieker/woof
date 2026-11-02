@@ -14,6 +14,8 @@ import threading
 
 import numpy as np
 
+from woof import linux_handles
+
 SCHEMA = "gpuwm.da.vts-ram/v1"
 MAX_HEADER = 16 * 1024 * 1024
 
@@ -47,7 +49,7 @@ _LINUX_MEMFD_ABI = {"MFD_CLOEXEC": 0x0001, "MFD_ALLOW_SEALING": 0x0002}
 def _sealing():
     """``(fcntl, add, get, seals, memfd_flags)`` from the module or the ABI."""
     fcntl = _fcntl()
-    if not hasattr(os, "memfd_create"):
+    if not linux_handles.has_memfd():
         raise RetentionError("VTSM packed retention needs Linux memfd_create; ordinary state files would duplicate the forecast roster")
     value = {name: getattr(fcntl, name, number) for name, number in _LINUX_SEALING_ABI.items()}
     flags = {name: getattr(os, name, number) for name, number in _LINUX_MEMFD_ABI.items()}
@@ -142,7 +144,7 @@ def put(path, key, fields, metadata):
                         "offset": offset, "bytes": value.nbytes})
         offset = (offset+value.nbytes+7)//8*8
     record = {"schema": SCHEMA, "bytes": max(1, offset), "fields": entries, "metadata": metadata}
-    fd = os.memfd_create("gpuwm-vts", memfd_flags)
+    fd = linux_handles.memfd_create("gpuwm-vts", memfd_flags)
     try:
         os.ftruncate(fd, record["bytes"])
         with mmap.mmap(fd, record["bytes"], access=mmap.ACCESS_WRITE) as storage:
@@ -263,7 +265,9 @@ class RetainedRam:
                 pool.submit(self._handle, stream)
 
     def start(self):
-        _fcntl()
+        # Refuse where no state could ever be sealed (no memfd: macOS,
+        # Windows) before a socket is bound that every put would refuse.
+        _sealing()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if self.path.exists():
             raise RetentionError("retained forecast socket exists; another cycle's server must not be replaced")

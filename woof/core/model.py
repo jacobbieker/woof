@@ -24,6 +24,9 @@ from woof.core.restart_handler_traits import durable_waiter, orders_history_itse
 from woof.config import (SURFACE_RADIATION_POLICY_REQUIRED,
                           radiation_scheme_ids)
 from woof.core.state import DomainState
+# Probes optional writer attributes, so it lives outside this clock-audited
+# module (tests/test_clock.py bans getattr reflection here).
+from woof.io.output_refs import release_output_device_refs  # noqa: F401
 from woof.experiment import DomainConfig
 from woof.static.lambert import LambertGrid
 
@@ -187,6 +190,10 @@ class ExperimentState:
     #: shared by every leg.  Class attributes for the reason above.
     _checkpoint_writer = None
     _checkpoint_receipt = None
+    #: The partial-depth bands realize_partial_nests attaches; None for
+    #: every tree without a partial_nest table.  Class attribute for the
+    #: reason above.
+    _partial_nests = None
 
     def node(self, grid_id: int) -> DomainNode:
         """Return one domain node by its configured grid identifier."""
@@ -1629,38 +1636,6 @@ def _admit_nest_activation(node, catalog, exp, *, streamed_owner=None):
                 "other programs using the GPU); or use a smaller nest"))
 
 
-def release_output_device_refs(model) -> dict[str, int]:
-    """Make in-flight outputs stop pinning live state arrays.
-
-    The asynchronous checkpoint and the asynchronous history writers both
-    stage straight from the live state: until a snapshot or a queued
-    frame lets go of its source arrays, those arrays outlive whatever
-    drops the state.  A relocation drops the moving domain's state and
-    rebuilds it at once, so a reference still held there meant TWO copies
-    of the domain on the card for as long as the output took -- on a
-    long moving-nest run that is what ran a card out of memory at a
-    move.  Called immediately before such a release.  Each output waits
-    only for its own already-queued copy; nothing is drained, and no
-    file or number changes.  Returns the references each dropped.
-
-    One call covers every domain: the checkpoint snapshot and each
-    domain's history writer are released whole, so the descendants a
-    containment slide re-grounds after the mover are covered by the
-    mover's call.  Restore-time relocations run before any output is in
-    flight and need none.
-    """
-    released = {"checkpoint": 0, "history": 0}
-    writer = getattr(model, "_checkpoint_writer", None)
-    release = getattr(writer, "release_device_refs", None)
-    if release is not None:
-        released["checkpoint"] = int(release() or 0)
-    writers = getattr(model, "_io_manager", None)
-    release = getattr(writers, "release_device_refs", None)
-    if release is not None:
-        released["history"] = int(release() or 0)
-    return released
-
-
 def _release_startup_build(model, node, validators, *,
                            streamed_owner=None) -> None:
     """Drop every owner of a delayed child's startup build before its rebuild.
@@ -1974,7 +1949,7 @@ def execute_experiment(
     # that joins the tree later falls back to the dycore's own step rather
     # than to whatever the last domain happened to bind.
     steppers = dict(steppers or {})
-    if getattr(model, "_partial_nests", None):
+    if model._partial_nests:
         # Partial-depth bands (realize_partial_nests): their own steps and
         # their parents' interface snapshots.  Absent -- every experiment
         # without a partial_nest table -- this adds nothing.
@@ -2029,12 +2004,8 @@ def execute_experiment(
     if seam_experiment is None and context is not None:
         seam_experiment = context.get("experiment")
     spectral_seam = attach_seam(model, seam_experiment, steppers)
-    nudging = getattr(seam_experiment, "nudging", None)
-    if nudging is not None:
-        for node in model.walk_parent_first():
-            if (nudging.for_domain(node.cfg.grid_id) is not None
-                    and getattr(node.state, "_spectral_nudging_owner", None) is None):
-                raise ValueError("NUDGING_ANALYSES_UNBOUND: this domain has no prepared analysis forcing; use the prepared forecast route")
+    from woof.spectral_nudging import nudging_owner, require_bound_nudging
+    require_bound_nudging(model, seam_experiment)
     feedback_scratch = {
         node.cfg.grid_id: FeedbackScratch()
         for node in model.walk_parent_first() if node.parent is not None}
@@ -2342,7 +2313,7 @@ def execute_experiment(
             # cadence -- and dtbc -- is evaluated against it.
             streamed_here = _streamed(grid_id)
             if streamed_here is not None:
-                if int(getattr(node.cfg.run, "do_avgflx_em", 0)) == 1:
+                if int(node.cfg.run.do_avgflx_em) == 1:
                     raise RuntimeError(
                         "do_avgflx_em = 1 on a streamed domain is not wired: "
                         "the tile sweep carries no AVGFLX means")
@@ -2377,7 +2348,7 @@ def execute_experiment(
                     # do_avgflx_em = 1: the means restart after each
                     # history write (solve_em.F:3498-3534).
                     **({"avgflx_history_due": clock.history_rings_within_step()}
-                       if int(getattr(node.cfg.run, "do_avgflx_em", 0)) == 1
+                       if int(node.cfg.run.do_avgflx_em) == 1
                        else {}))
             if not lagged_here and step_ledger is not None:
                 # One read for every scheme site of this step; raises the
@@ -2579,9 +2550,9 @@ def execute_experiment(
                 validators[grid_id].require_healthy(
                     phase=f"pre-history.d{grid_id:02d}")
             node = model.node(grid_id)
-            nudging_owner = getattr(node.state, '_spectral_nudging_owner', None)
-            if nudging_owner is not None:
-                nudging_owner.check_at_seam()
+            nudger = nudging_owner(node.state)
+            if nudger is not None:
+                nudger.check_at_seam()
             from woof.wrf_exact import ENABLED as wrf_exact
             if wrf_exact and node.parent is not None:
                 # WRF writes a nest's frame at an instant it shares with its
@@ -2911,7 +2882,7 @@ def refuse_real_partial_nests(exp, route: str) -> None:
     wired yet.  The idealized tree (``nest_ideal_common
     .assemble_idealized_tree``) carries them."""
     named = [int(dc.grid_id) for dc in exp.domains
-             if getattr(dc, "partial_nest", None) is not None]
+             if dc.partial_nest is not None]
     if named:
         raise ValueError(
             f"{route}: d{named[0]:02d} declares partial_nest; partial-depth bands "
@@ -2943,13 +2914,13 @@ def realize_partial_nests(model, exp, coord, *, physics=None):
     from woof.core.physics import physics_driver_required
     nests: dict[int, object] = {}
     for node in model.walk_parent_first():
-        band = getattr(node.cfg, "partial_nest", None)
+        band = node.cfg.partial_nest
         if band is None:
             continue
         parent = node.parent
         chain = []
         walk = node
-        while getattr(walk.cfg, "partial_nest", None) is not None:
+        while walk.cfg.partial_nest is not None:
             chain.append(walk.cfg.partial_nest)
             walk = walk.parent
         validate_band_chain(tuple(reversed(chain)), walk.cfg.run, coord)
@@ -2958,7 +2929,6 @@ def realize_partial_nests(model, exp, coord, *, physics=None):
                   else truncated_vertical_coord(coord, parent_nest.k))
         child, ccfg = truncate_state(node.state, node.cfg.run, int(band.k_top),
                                      coord=coord)
-        child.elapsed_seconds = node.state.elapsed_seconds
         nest = PartialNest(parent.state, parent.cfg.run, pcoord, child, ccfg, band,
                            parent_nest=parent_nest)
         if physics is not None:
@@ -2984,7 +2954,7 @@ def partial_nest_steppers(model, steppers=None) -> dict:
     band's parent."""
     from woof.core import dycore
     out = dict(steppers or {})
-    nests = getattr(model, "_partial_nests", {}) or {}
+    nests = model._partial_nests or {}
     claimed = set(out) & ({gid for gid in nests}
                           | {int(model.node(gid).parent.cfg.grid_id) for gid in nests})
     if claimed:

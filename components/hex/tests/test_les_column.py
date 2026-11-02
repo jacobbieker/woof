@@ -575,6 +575,9 @@ def test_the_sealed_constructor_refuses_a_bad_pbl_slot():
         )
 
 
+# woof.core.mpas_column_batch imports the ARW microphysics, which imports
+# cupy at module scope: the refusal precedes the device, not the import.
+@pytest.mark.gpu
 def test_the_engine_seam_refuses_a_bad_pbl_slot_before_the_device():
     from woof.core import mpas_column_batch as mcb
 

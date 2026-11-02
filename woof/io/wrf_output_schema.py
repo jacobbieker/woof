@@ -119,12 +119,6 @@ MYNN_PBL_OUTPUT_FIELDS: dict[str, WrfOutputField] = {
         'total water-liquid water pottemp covariance',
         'K kg/kg',
         "Registry.EM_COMMON:1127", wrf_history=False),
-    "u10e": WrfOutputField(
-        "U10E", "f4", "", "Special U at 10 M from MYJSFC", "m s-1",
-        "Registry.EM_COMMON:1069", wrf_history=True),
-    "v10e": WrfOutputField(
-        "V10E", "f4", "", "Special V at 10 M from MYJSFC", "m s-1",
-        "Registry.EM_COMMON:1070", wrf_history=True),
     "el_pbl": WrfOutputField(
         "EL_PBL", "f4", "Z",
         'Length scale from PBL',
@@ -799,20 +793,25 @@ OCEAN_OUTPUT_FIELDS = {
                  'TMOML', 'OCEAN LAYER MEAN TEMPERATURE   ',
                  'K', 'Registry.EM_COMMON:2113'),
 }
+#: WRF's 3-D PWP ocean state (``sf_ocean_physics = 2``), each row citing
+#: its pinned Registry.EM_COMMON line; woof's descriptions and units are
+#: its own spelling of that row.
 PWP_OUTPUT_FIELDS = {
-    'om_tmp': WrfOutputField('OM_TMP', "f4", "", 'OCEAN TEMPERATURE', 'K', "WRF v4.6.1 module_sf_3dpwp.F", wrf_history=True),
-    'om_s': WrfOutputField('OM_S', "f4", "", 'OCEAN SALINITY', 'PSU', "WRF v4.6.1 module_sf_3dpwp.F", wrf_history=True),
-    'om_u': WrfOutputField('OM_U', "f4", "", 'OCEAN X CURRENT', 'm s-1', "WRF v4.6.1 module_sf_3dpwp.F", wrf_history=True),
-    'om_v': WrfOutputField('OM_V', "f4", "", 'OCEAN Y CURRENT', 'm s-1', "WRF v4.6.1 module_sf_3dpwp.F", wrf_history=True),
-    'om_depth': WrfOutputField('OM_DEPTH', "f4", "", 'OCEAN LAYER BOTTOM DEPTH', 'm', "WRF v4.6.1 module_sf_3dpwp.F", wrf_history=True),
-    'om_density': WrfOutputField('OM_DENSITY', "f4", "", 'OCEAN DENSITY', 'kg m-3', "WRF v4.6.1 module_sf_3dpwp.F", wrf_history=True),
-    'om_tini': WrfOutputField('OM_TINI', "f4", "", 'INITIAL OCEAN TEMPERATURE', 'K', "WRF v4.6.1 module_sf_3dpwp.F", wrf_history=True),
-    'om_sini': WrfOutputField('OM_SINI', "f4", "", 'INITIAL OCEAN SALINITY', 'PSU', "WRF v4.6.1 module_sf_3dpwp.F", wrf_history=True),
-    'om_ml': WrfOutputField('OM_ML', "f4", "", 'OCEAN MIXED LAYER DEPTH', 'm', "WRF v4.6.1 module_sf_3dpwp.F", wrf_history=True),
+    'om_tmp': WrfOutputField('OM_TMP', "f4", "", 'OCEAN TEMPERATURE', 'K', "Registry.EM_COMMON:1339", wrf_history=True),
+    'om_s': WrfOutputField('OM_S', "f4", "", 'OCEAN SALINITY', 'PSU', "Registry.EM_COMMON:1340", wrf_history=True),
+    'om_u': WrfOutputField('OM_U', "f4", "", 'OCEAN X CURRENT', 'm s-1', "Registry.EM_COMMON:1342", wrf_history=True),
+    'om_v': WrfOutputField('OM_V', "f4", "", 'OCEAN Y CURRENT', 'm s-1', "Registry.EM_COMMON:1343", wrf_history=True),
+    'om_depth': WrfOutputField('OM_DEPTH', "f4", "", 'OCEAN LAYER BOTTOM DEPTH', 'm', "Registry.EM_COMMON:1341", wrf_history=True),
+    # WRF's 3-D PWP carries no density state (module_sf_3dpwp.F computes it
+    # locally); woof publishes the column it integrates with.
+    'om_density': WrfOutputField('OM_DENSITY', "f4", "", 'woof diagnostic: 3-D PWP OCEAN DENSITY (no WRF Registry counterpart)', 'kg m-3', "", wrf_history=True),
+    'om_tini': WrfOutputField('OM_TINI', "f4", "", 'INITIAL OCEAN TEMPERATURE', 'K', "Registry.EM_COMMON:1347", wrf_history=True),
+    'om_sini': WrfOutputField('OM_SINI', "f4", "", 'INITIAL OCEAN SALINITY', 'PSU', "Registry.EM_COMMON:1348", wrf_history=True),
+    'om_ml': WrfOutputField('OM_ML', "f4", "", 'OCEAN MIXED LAYER DEPTH', 'm', "Registry.EM_COMMON:1346", wrf_history=True),
 }
 OCEAN_DIAGNOSTIC_FIELDS = {
-    'ocean_sst': WrfOutputField('OCEAN_SST', "f4", "", 'PROGNOSTIC OCEAN SURFACE TEMPERATURE; LAND AND LAKES MISSING', 'K', "coupled ocean diagnostics", wrf_history=True),
-    'ocean_sst_change': WrfOutputField('OCEAN_SST_CHANGE', "f4", "", 'OCEAN SURFACE TEMPERATURE CHANGE FROM COUPLED INITIAL STATE', 'K', "coupled ocean diagnostics", wrf_history=True),
+    'ocean_sst': WrfOutputField('OCEAN_SST', "f4", "", 'woof coupled ocean diagnostic: PROGNOSTIC OCEAN SURFACE TEMPERATURE; LAND AND LAKES MISSING (no WRF Registry counterpart)', 'K', "", wrf_history=True),
+    'ocean_sst_change': WrfOutputField('OCEAN_SST_CHANGE', "f4", "", 'woof coupled ocean diagnostic: OCEAN SURFACE TEMPERATURE CHANGE FROM COUPLED INITIAL STATE (no WRF Registry counterpart)', 'K', "", wrf_history=True),
 }
 SCHEME_OUTPUT_FIELDS: dict[str, WrfOutputField] = {}
 from woof.io.wrf_input_history_schema import (WRF_INPUT_HISTORY_ROWS,
@@ -913,6 +912,16 @@ NOAH_OUTPUT_FIELDS = {
                    'NOAHRES', 'RESIDUAL OF THE NOAH SURFACE ENERGY BUDGET',
                    'W m{-2}', 'Registry.EM_COMMON:1851'),
 }
+#: MYJSFC's special 10 m winds: the MYJ surface layer's rows, not MYNN's
+#: (the MYNN block publishes neither).
+MYJ_SURFACE_OUTPUT_FIELDS = {
+    "u10e": WrfOutputField(
+        "U10E", "f4", "", "Special U at 10 M from MYJSFC", "m s-1",
+        "Registry.EM_COMMON:1069", wrf_history=True),
+    "v10e": WrfOutputField(
+        "V10E", "f4", "", "Special V at 10 M from MYJSFC", "m s-1",
+        "Registry.EM_COMMON:1070", wrf_history=True),
+}
 CARRIED_SURFACE_OUTPUT_FIELDS = {
     "sst": _output_field(
                'SST', 'SEA SURFACE TEMPERATURE',
@@ -980,7 +989,8 @@ for _group in (CARRIED_SURFACE_OUTPUT_FIELDS, NOAH_OUTPUT_FIELDS, RADIATION_BOUN
                PBL_RATE_OUTPUT_FIELDS,
                SCM_FORCING_OUTPUT_FIELDS,
                INACTIVE_DIAGNOSTIC_OUTPUT_FIELDS,
-               MYNN_PBL_OUTPUT_FIELDS, NOAHMP_OUTPUT_FIELDS,
+               MYNN_PBL_OUTPUT_FIELDS, MYJ_SURFACE_OUTPUT_FIELDS,
+               NOAHMP_OUTPUT_FIELDS,
                RUC_OUTPUT_FIELDS, SOLAR_ALBEDO_OUTPUT_FIELDS,
                OCEAN_OUTPUT_FIELDS, PWP_OUTPUT_FIELDS, OCEAN_DIAGNOSTIC_FIELDS):
     for _key, _field in _group.items():
@@ -1633,7 +1643,8 @@ REGISTRY_VAR_META.update({row["history_name"]: (row["title"], row.get("storage_u
 # Prognostic sea-ice extensions, no WRF Registry identity is claimed.
 from woof.ocean.seaice import OUTPUT as _SEAICE_OUTPUT
 for _key, (_external, _units) in _SEAICE_OUTPUT.items():
-    _schema = WrfOutputField(_external, "f4", "", _external, _units, "", False)
+    _schema = WrfOutputField(_external, "f4", "", f"woof sea-ice extension: {_external} "
+                             "(no WRF Registry counterpart)", _units, "", False)
     SCHEME_OUTPUT_FIELDS[_key] = _schema
     OUTPUT_FIELDS_BY_NETCDF_NAME[_external] = _schema
     HISTORY_FIELDS_BY_NETCDF_NAME[_external] = _schema

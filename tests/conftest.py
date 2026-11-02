@@ -1590,3 +1590,22 @@ if os.environ.get("WOOF_LAUNCH_TRACE_DIR"):
         name = _re.sub(r"[^A-Za-z0-9_.-]+", "_", request.node.nodeid)[:200] + ".jsonl"
         launch_trace.install(os.path.join(directory, name))
         yield
+
+
+@pytest.fixture
+def eight_cpu_host(monkeypatch):
+    """Pin the preparation's host budget at eight CPUs and no memory cap.
+
+    An explicit worker count is clamped to the host's CPU and memory budget
+    (woof.ingest.preparation_workers.effective_workers), so a case asking for
+    four or five workers read three on a 3-CPU macOS runner and four on a
+    4-CPU Linux one.  Cases about the count a caller names pin the host the
+    count was written for instead of reading the box they land on.
+    """
+    from woof.ingest import cpu_backend, preparation_workers
+
+    monkeypatch.setattr(preparation_workers, "cpu_budget", lambda: {
+        "affinity_cpus": 8, "cgroup_cpus": None, "available_cpus": 8})
+    monkeypatch.setattr(preparation_workers, "memory_worker_limit", lambda: None)
+    monkeypatch.delenv(preparation_workers.PREPARATION_THREADS_ENV, raising=False)
+    monkeypatch.setattr(cpu_backend, "_AUTOMATIC_WORKERS", {})

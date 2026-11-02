@@ -17,6 +17,7 @@ import sys
 import threading
 import time
 
+from woof import linux_handles
 from woof.remote_artifact_cache import _hash as _file_sha
 
 SCHEMA = "gpuwm.remote-artifacts.v1"
@@ -390,7 +391,7 @@ def cancel_on_shutdown(numbers=None):
 def _completion_platform():
     """Name the platform breakage before any attribute is reached for it."""
     import select
-    if not (hasattr(os, "pidfd_open") and hasattr(os, "getuid") and hasattr(select, "poll")):
+    if not (linux_handles.has_pidfd() and hasattr(os, "getuid") and hasattr(select, "poll")):
         raise ProducerCompletionUnprovable(
             "Producer completion needs Linux pidfd process handles and POSIX file ownership "
             "for safe job ownership; on this platform the runner-exit window cannot be proved, "
@@ -401,7 +402,7 @@ def _exited(pid):
     """Do not mistake an unreadable /proc identity for an exited process."""
     import select
     try:
-        handle = os.pidfd_open(pid, 0)
+        handle = linux_handles.pidfd_open(pid, 0)
     except ProcessLookupError:
         return True
     try:

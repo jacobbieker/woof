@@ -50,8 +50,13 @@ def test_policy_import_needs_only_the_standard_library():
             "from woof.preprocess_policy import resolve_preprocess_backend; "
             "assert resolve_preprocess_backend(source='gfs',tables={'tiles':{'mode':'auto'},'domain':[{}]})=='cpu'; "
             "assert not any(name.split('.')[0] in ('numpy','cupy') for name in sys.modules)")
+    # The default CUDA state, not the mlx environment's WOOF_BACKEND (or the
+    # GPUWM_* twin woof copies back onto it), whose Metal backend -S cannot
+    # import.
+    env = {key: value for key, value in os.environ.items() if key != "GPUWM_BACKEND"}
     done = subprocess.run([sys.executable, "-S", "-c", code, str(root)],
-                          capture_output=True, text=True, env=dict(os.environ, GPUWM_NO_LOCAL_GPU="1"))
+                          capture_output=True, text=True,
+                          env=dict(env, GPUWM_NO_LOCAL_GPU="1", WOOF_BACKEND="cuda"))
     assert done.returncode == 0, done.stdout + done.stderr
 
 

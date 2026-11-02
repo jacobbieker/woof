@@ -26,7 +26,8 @@ extern "C" void run(int variant,int nz,int id,int stride,float* a,float* vt,floa
 '''
 cpp=root/'probe.cpp';lib=root/'probe.so'
 cpp.write_text(HOST_MATH+'\n#include <vector>\n'+m.ARRAY_SUPPORT+m.OPERATOR_SUPPORT+'\nstruct Probe { NsslArena& arena;\n'+original+'\n'+new+'\n};\n'+wrapper)
-subprocess.run(['timeout','60','nice','-n','10','g++','-std=c++17','-O1','-fno-fast-math','-ffp-contract=off','-shared','-fPIC',str(cpp),'-o',str(lib)],check=True)
+# subprocess's own bound, not GNU timeout(1), which macOS does not ship.
+subprocess.run(['nice','-n','10','g++','-std=c++17','-O1','-fno-fast-math','-ffp-contract=off','-shared','-fPIC',str(cpp),'-o',str(lib)],check=True,timeout=60)
 f=ctypes.CDLL(str(lib)).run;f.argtypes=[ctypes.c_int]*4+[ctypes.c_void_p]*5
 rng=np.random.default_rng(912);words=0;cases=0;diff=0
 for nz in (1,2,3,12,59):

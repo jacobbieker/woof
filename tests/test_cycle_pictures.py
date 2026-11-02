@@ -125,6 +125,14 @@ class _Renderer:
         return subprocess.CompletedProcess(list(command), 0, "", "")
 
 
+def _two_passes(frames: list[str]) -> list[str]:
+    """The renders of FRAMES as the live pass makes them: a request that
+    covers the headline set and more draws the headline set first and then
+    the full set (woof.live_products' priority pass), two renders a frame."""
+
+    return [frame for frame in frames for _ in range(2)]
+
+
 def _events(root: Path, name: str | None = None) -> list[dict]:
     path = root / pictures.EVENTS_FILENAME
     if not path.exists():
@@ -182,7 +190,7 @@ def test_every_boundary_the_cycle_keeps_is_drawn(tmp_path, renderer):
     assert all(event["pictures"] == 1 and event["domain"] == 1
                for event in ready)
     # Each drawn as it landed: the finalize stage had nothing left.
-    assert renderer.frames == frames
+    assert renderer.frames == _two_passes(frames)
     pngs = sorted((root / "png").rglob("*.png"))
     assert len(pngs) == 3
 
@@ -421,7 +429,7 @@ def _finalize_on_an_hourly_cycle(tmp_path, monkeypatch, *, window_status):
                             "--parent-state", _hourly_series(tmp_path)],
                  root=root)
     assert cycle_main(args) == 0
-    assert renderer.frames == [_hour_name(k) for k in (1, 2, 3)]
+    assert renderer.frames == _two_passes([_hour_name(k) for k in (1, 2, 3)])
     return staged, asked
 
 

@@ -3850,7 +3850,8 @@ class CudaSW:
                 # separate launches over the same buffers: the broadband
                 # words above are unchanged by the option
                 width = NBNDSW if spectral == "bands" else NGPTSW
-                part = cp.empty((len(SPECTRAL_QUANTITIES), nc, nl1, width), f32)
+                part = scratch.take("spectral",
+                                    (len(SPECTRAL_QUANTITIES), nc, nl1, width), f32)
                 total = part.size
                 if spectral == "bands":
                     self._k("rsw_spc_band_accum_b")(
@@ -4119,7 +4120,17 @@ SW_TAKE_SLOTS = (
           "register sum") for k in SPC_ACCUM_SLOTS),
     ("swhr", "rsw_post_b, every (column, layer), both branches"),
     ("swhrc", "rsw_post_b, every (column, layer), both branches"),
+    # Only with rrtmg_spectral_output (SW_OPTIONAL_TAKE_SLOTS): one thread
+    # per output word, each stores.
+    ("spectral", "rsw_spc_band_accum_b / rsw_spc_gpt_b, every "
+                 "(quantity, column, level, band or g-point)"),
 )
+
+#: Take slots the default call never takes: the spectral output part
+#: (rrtmg_spectral_output = bands|gpoints).  sw_batched_scratch_bytes and
+#: sw_batched_vram_bytes price the default call, which holds neither it nor
+#: the spectral output slabs (an unpriced option since ca707e731).
+SW_OPTIONAL_TAKE_SLOTS = ("spectral",)
 
 #: Every workspace slot with its class: the audit surface for
 #: tests/test_rrtmg_sw_workspace.py.
