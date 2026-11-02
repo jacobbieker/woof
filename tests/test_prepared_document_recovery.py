@@ -89,6 +89,12 @@ def test_wrf_preparation_reuses_documents_without_rewriting_or_changes_generatio
     monkeypatch.setattr(wrfinput, 'read_wrfbdy', lambda *a, **kw: object())
     monkeypatch.setattr(landuse, 'initialize_landuse', lambda *a, **kw: object())
     monkeypatch.setattr(projection, 'grids_from_projection_config', lambda exp: [object() for _ in exp.domains])
+    # The nest opens by med_nest_initial since 1.1.4 (nest_input_start); the
+    # 2x2 stand-in words hold no nest, and the documents are under test.
+    from woof.ingest import wrfinput_nest_initial
+    monkeypatch.setattr(wrfinput_nest_initial, 'nest_input_start',
+                        lambda restored, parent, **kw: SimpleNamespace(
+                            restored=restored, receipt={'stand_in': True}))
     original = tmp_path/'prepared'
     first = wrfinput_forecast.prepare_wrf_run(run, original)
     before = _snapshot(original)
