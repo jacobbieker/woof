@@ -33,14 +33,19 @@ def load_momentum_measurement_pins():
     if their measured words drift; this never skips a device comparison.
     Metal (the MLX backend) never contracts, so it has its own words: those
     of CUDA built with ``--fmad=false``, rw_t equal to WRF's in every case.
+    A GPUWM_WRF_EXACT=1 CUDA process compiles the WRF-exact sources without
+    contraction and has its own words on every device.
     """
     import cupy as cp
     from woof.certify.compile_platform import nvrtc_build
+    from woof.verify.platform_pins import backend_variant
 
     platform = (str(cp.cuda.Device().compute_capability), nvrtc_build())
-    filename = ("momentum-measurements-sm89-nvrtc12.9.86.json"
+    filename = ("momentum-measurements-metal.json" if platform[0] == "metal" else
+                "momentum-measurements-wrf-exact.json"
+                if backend_variant() == "wrf-exact" else
+                "momentum-measurements-sm89-nvrtc12.9.86.json"
                 if platform == ("89", "12.9.86") else
-                "momentum-measurements-metal.json" if platform[0] == "metal" else
                 "momentum-measurements.json")
     directory = require_fixture_dir(MOMENTUM_ORACLE_DIR, "big-step momentum")
     return json.loads((directory / filename).read_text()), platform
