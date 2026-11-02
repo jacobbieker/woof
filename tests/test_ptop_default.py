@@ -108,6 +108,21 @@ def _mapping_top_pa(profile_id: str) -> float | None:
     if str(vertical.get("kind", "")) != "pressure":
         # Coefficient-based coordinates need their own pressure coverage evidence.
         return None
+    # A companion that stacks its own pressure levels above the primary's
+    # top (RRFS ensemble members under the deterministic run, 1.1.5)
+    # carries the column to the companion's top: the bound is the
+    # companion's ladder.
+    authorities = packaged_authorities(profile_id)
+    if "composition" in authorities:
+        from woof.source_authorities import packaged_contributing_mappings
+        composition = json.loads(authorities["composition"].read_text(encoding="utf-8"))
+        for binding in composition.get("field_sources", {}).values():
+            if (binding.get("companion") or {}).get("vertical_extension") == "above_primary_top":
+                donor = json.loads(packaged_contributing_mappings(profile_id)[
+                    binding["mapping_role"]].read_text(encoding="utf-8"))
+                vertical = donor.get("coordinates", {}).get("vertical", {})
+                assert vertical.get("kind") == "pressure", (
+                    f"{profile_id}: its companion's column is not a pressure ladder")
     levels = vertical.get("levels")
     if not levels:
         return None

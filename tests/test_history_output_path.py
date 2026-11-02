@@ -2,7 +2,9 @@
 
 CPU tier.  Pinned here:
 
-* the Rust engine hashes each tape WHILE writing it, and that digest is the
+* the Rust engine hashes each classic tape WHILE writing it (the deflated
+  NetCDF-4 default since 1.1.4 has no streamed digest, so these cases ask
+  for classic frames), and that digest is the
   SHA-256 of the published file, so the output identity reads no payload;
   ``WOOF_OUTPUT_IDENTITY_VERIFY`` re-reads and refuses a disagreement; an
   older library falls back to the re-read, by name;
@@ -70,7 +72,7 @@ def _async_writer_one_frame(tmp_path, fields=None):
 
 @needs_digest
 def test_streamed_identity_is_the_file_digest_and_reads_no_payload(
-        tmp_path, monkeypatch):
+        tmp_path, monkeypatch, classic_history_frames):
     def forbidden(*_args, **_kwargs):
         raise AssertionError("the identity re-read the payload")
 
@@ -99,7 +101,7 @@ def test_async_tape_is_byte_identical_to_the_plain_writer(tmp_path):
 
 @needs_digest
 def test_strict_verify_reads_back_and_refuses_a_wrong_digest(
-        tmp_path, monkeypatch):
+        tmp_path, monkeypatch, classic_history_frames):
     monkeypatch.setenv(output_identity.IDENTITY_VERIFY_ENV, "1")
     writer, path = _async_writer_one_frame(tmp_path)
     assert writer._identity_modes == {"streamed+verified": 1}
@@ -119,7 +121,7 @@ def test_strict_verify_reads_back_and_refuses_a_wrong_digest(
 
 
 def test_library_without_the_digest_falls_back_to_the_reread(
-        tmp_path, monkeypatch):
+        tmp_path, monkeypatch, classic_history_frames):
     monkeypatch.setattr(nc_writer_bridge, "_bind_digest", lambda _lib: False)
     writer, path = _async_writer_one_frame(tmp_path)
     proof, = writer.completed_records
@@ -145,7 +147,8 @@ def test_frame_written_out_of_file_order_rereads(tmp_path):
 
 
 @needs_digest
-def test_final_name_appears_only_after_the_identity(tmp_path, monkeypatch):
+def test_final_name_appears_only_after_the_identity(tmp_path, monkeypatch,
+                                                    classic_history_frames):
     capture = output_identity.completed_file_record
     seen = []
 
@@ -167,7 +170,7 @@ def test_final_name_appears_only_after_the_identity(tmp_path, monkeypatch):
 
 @needs_digest
 def test_rust_engine_writes_of_two_domains_overlap_and_validate_locked(
-        tmp_path, monkeypatch):
+        tmp_path, monkeypatch, classic_history_frames):
     import woof.io.wrfout as wrfout
     from woof.io.netcdf_serialization import NETCDF4_IO_LOCK
 
