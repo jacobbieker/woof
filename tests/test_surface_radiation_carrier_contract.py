@@ -751,6 +751,8 @@ def _hand_built_compute_driver(monkeypatch, *, carriers):
     # Likewise the constructor's inactive shallow-cumulus slot
     # (PhysicsDriver.__init__: None unless shcu_physics selects one).
     driver.shallow_cumulus = None
+    # And the inactive WRF-Solar EPS pattern provider (multi_perturb = 0).
+    driver.multi_perturb = None
     driver.stepbl = 1
     driver.radt_minutes = 12.0
     driver.radt_seconds = 720.0
