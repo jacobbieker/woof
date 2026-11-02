@@ -430,6 +430,9 @@ runtime = types.SimpleNamespace(
     memoryTypeDevice=_MEMORY_DEVICE,
     # cudaDeviceGetLimit: Metal has no CUDA stack/heap limit to report (0)
     deviceGetLimit=lambda limit: 0,
+    # cudaDeviceSetLimit: nothing to raise (the stack is the pipeline's own)
+    deviceSetLimit=lambda limit, value: None,
+    cudaLimitStackSize=0, cudaLimitPrintfFifoSize=1, cudaLimitMallocHeapSize=2,
     freeHost=_free_host,
     getDeviceProperties=_properties,
     deviceGetAttribute=_device_get_attribute,
