@@ -297,12 +297,34 @@ def test_the_binary_form_notice_covers_the_first_party_ports() -> None:
                   "NumPy Developers", "SIL OPEN FONT LICENSE",
                   "rw-libm", "Arm Limited", "Alexei Sibidanov",
                   "tools/grib1_bridge/src/glibc239_math.rs",
-                  "glibc239-libm", "IBM Accurate Mathematical Library",
-                  "GNU LESSER GENERAL PUBLIC LICENSE"):
+                  "glibc239-libm"):
         assert token in text, (
             f"the binary-form notice does not reproduce {token!r}; a compiled "
             "consumer never sees the source tree, so this is the only copy "
             "that reaches them")
+
+
+def test_the_binary_notice_does_not_claim_the_opt_in_lgpl_code() -> None:
+    """The bundle and wheel binaries are built without the `glibc239` cargo
+    feature, so they carry no LGPL code, and their notice must say so rather
+    than reproduce the LGPL as if they did.  The source tree keeps the text
+    and NOTICE states the opt-in builds' terms."""
+    _requires_source_tree()
+    text = _read(LICENSES / "THIRD-PARTY-LICENSES-bridge-binaries.txt")
+    assert "GNU LESSER GENERAL PUBLIC LICENSE" not in text
+    assert "glibc239-libm  (NOT in these binaries)" in text
+    assert "build-native-glibc239" in text
+    notice = _read(NOTICE)
+    assert "THE CRATE IS OPT-IN." in notice
+    assert "licenses/LICENSE-glibc-LGPL-2.1.txt" in notice
+    for manifest in ("tools/grib1_bridge/Cargo.toml",
+                     "tools/rustwx/crates/static-fields/Cargo.toml"):
+        cargo = tomllib.loads(_read(ROOT / manifest))
+        assert cargo["dependencies"]["glibc239-libm"]["optional"] is True, manifest
+        assert "glibc239" not in cargo["features"].get("default", []), manifest
+    workspace = tomllib.loads(_read(ROOT / "tools/rustwx/Cargo.toml"))["workspace"]
+    assert "crates/glibc239-libm" in workspace["exclude"]
+    assert "crates/glibc239-libm" not in workspace["members"]
 
 
 # ---------------------------------------------------------------------------

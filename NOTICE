@@ -51,8 +51,9 @@ woof/core/noahmp_libm.py. These are Arm optimized-routines under MIT,
 Copyright (c) 2017-2018, Arm Limited. The complete grant is reproduced
 beside the Rust code and in licenses/LICENSE-Arm-optimized-routines-MIT.txt.
 The binary-form bridge notice covers this compiled copy too. The separate
-host FP64 entries call the glibc239-libm crate (the glibc 2.39 section
-below), not the platform C library.
+host FP64 entries call the platform C library; they do not transcribe it,
+except in a build made with the opt-in described in the glibc 2.39 section
+below.
 
 The native regular-grid Zarr reader's locked dependencies, including codec
 and TLS libraries, are inventoried with their licence texts in
@@ -702,8 +703,8 @@ The binary64 cos and acos are CORE-MATH's correctly rounded functions
 Paul Zimmermann and Tom Hubrecht" and acos "Copyright (c) 2024-2025 Alexei
 Sibidanov.", both under MIT. glibc's own binary64 cos and acos, which are
 the IBM Accurate Mathematical Library under the LGPL, are NOT transcribed
-in this header (the host-side crate in the glibc 2.39 section below is
-this repository's only LGPL transcription); that is why the kernel's cos
+in this header (the opt-in host-side crate in the glibc 2.39 section below
+is this repository's only LGPL transcription); that is why the kernel's cos
 and acos are different functions from WRF's, a residual measured and
 stated in the header and in the UW registry option. The copyright lines and the
 permission text are at licenses/LICENSE-CORE-MATH-binary64-MIT.txt and
@@ -775,14 +776,23 @@ glibc 2.39 binary64 libm in Rust -- IBM Accurate Mathematical Library (LGPL)
 WRF's reference fixtures were computed by gfortran against glibc 2.39, and
 the platform C library's binary64 transcendentals differ in the last bits
 between glibc releases, macOS and the Windows UCRT.  The first-party crate
-tools/rustwx/crates/glibc239-libm therefore transcribes glibc 2.39's own
-exp, log, log10, pow, sin, cos, tan, atan, atan2, asin and acos, in the
-form of glibc's x86-64 FMA IFUNC variants, so that the results are glibc
-2.39's on every platform.  It is compiled into the CPU preprocessing bridge
-(gpuwm_preprocess_cpu, built from tools/grib1_bridge), whose host-math
-entries woof/core/host_libm.py and the host builds of the reference mirrors
-call, into the static_fields library (the projection grids), and into the
-executables that link static_fields (the rw_mpas_* tools and rw_mlexport).
+tools/rustwx/crates/glibc239-libm transcribes glibc 2.39's own exp, log,
+log10, pow, sin, cos, tan, atan, atan2, asin and acos, in the form of
+glibc's x86-64 FMA IFUNC variants, so that a build which uses it gives
+glibc 2.39's results on every platform.
+
+THE CRATE IS OPT-IN.  No default build compiles it: tools/rustwx excludes
+it from its workspace, and the CPU preprocessing bridge (tools/grib1_bridge)
+and static-fields reach it only through their `glibc239` cargo feature,
+which is off by default.  `pixi run build-native-glibc239` turns it on, in
+which case it is compiled into the CPU preprocessing bridge
+(gpuwm_preprocess_cpu), the static_fields library and the executables that
+link static_fields (the rw_mpas_* tools and rw_mlexport).  The default
+native build, the recast-woof and metal-woof wheels and the release bridge
+bundles are built without it, contain none of its code, and call the
+platform libm; nothing in this section applies to them.
+woof.core.host_libm.implementation() reports which a running installation
+uses.
 
 Its licence is by file; the crate declares
 "LGPL-2.1-or-later AND MIT AND SunPro".
@@ -808,16 +818,16 @@ Its licence is by file; the crate declares
   * log10 (src/log10.rs) is FDLIBM's e_log10.c under Sun's notice, as
     reproduced in the FDLIBM section above.
 
-Only those eleven files are offered under the LGPL; every binary that
-contains them is otherwise under its own licences.  LGPL 2.1 section 6
-conditions distributing such a binary on the recipient being able to modify
-the Library and relink: the complete source of the crate, and of every
-binary that links it, is this source distribution and repository, and each
-of those binaries rebuilds from it with cargo (`pixi run build-native`),
-so a modified crate can be linked in its place.  A redistributor of the
-compiled bridges must keep that source available to its recipients as
-section 6 requires.  The binary-form bridge notice carries the full licence
-text with the binaries.
+Only those eleven files are offered under the LGPL.  A binary built with
+the opt-in contains them and is otherwise under its own licences.  LGPL
+2.1 section 6 conditions distributing such a binary on the recipient being
+able to modify the Library and relink: the complete source of the crate,
+and of every binary that links it, is this source distribution and
+repository, and each of those binaries rebuilds from it with cargo
+(`pixi run build-native-glibc239`), so a modified crate can be linked in
+its place.  Whoever distributes an opt-in build must keep that source
+available to its recipients, as section 6 requires, and give them
+licenses/LICENSE-glibc-LGPL-2.1.txt with it.
 
 The verification record (a billion random arguments per function and an
 edge-case sweep, against glibc 2.39 itself, with zero mismatches) is
