@@ -64,6 +64,16 @@ def publish(c,suite='configured-suite'):
     return publisher.publish_archive(c.index,c.merged,c.capture,c.inventory,c.campaign,suite,'test-lane')
 
 
+def _gnu_tar_with_zstd():
+    import shutil
+    if shutil.which('zstd') is None or shutil.which('tar') is None:
+        return False
+    version = subprocess.run(['tar', '--version'], capture_output=True, text=True).stdout
+    return 'GNU tar' in version
+
+
+@pytest.mark.skipif(not _gnu_tar_with_zstd(), reason='the capture-matrix transport pipes through GNU tar '
+                    '(--wildcards, --ignore-zeros) and zstd, as on the Linux build hosts; this host has not both')
 def test_archive_publication_relocated_transport_and_truthful_failure(catalogue):
     c=catalogue;r=publish(c);root=Path(r['path'])
     assert not r['all_outputs_bitwise_equal'] and not r['forecast_proven']
