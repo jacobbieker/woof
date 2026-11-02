@@ -1132,6 +1132,16 @@ def refl_10cm_is_stashed(state) -> bool:
     return driver is not None and driver.refl_10cm is not None
 
 
+def peek_refl_10cm(state):
+    """The stashed one-frame REFL_10CM handoff, or None, left in place.
+
+    For a reader that snapshots the frame beside the history door (the
+    in-memory simulated radar); the history output still consumes it.
+    """
+    driver = getattr(state, "physics", None)
+    return None if driver is None else driver.refl_10cm
+
+
 def refl_10cm_stash_is_due(ticks: int, *, domain_start_ticks: int = 0
                            ) -> bool:
     """Does a history frame at ``ticks`` consume a microphysics stash?
