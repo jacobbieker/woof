@@ -63,6 +63,7 @@ def replay_rk_case(arrays,case):
         state.msft=cp.asarray(maps[1,4:4+ny,4:4+nx])
         state.msfu=cp.asarray(maps[3,4:4+ny,4:5+nx])
         state.msfv=cp.asarray(maps[4,4:5+ny,4:4+nx])
+        state.msfv_inv=cp.asarray(maps[5,4:5+ny,4:4+nx])
         state.mub2d=cp.asarray(arrays[prefix+"mut"][4:4+ny,4:4+nx])
         state.mup=cp.zeros((ny,nx),cp.float32)
         state.h_diabatic=cp.asarray(_crop3(arrays[prefix+"saves"][5],nz,ny,nx))
@@ -178,7 +179,7 @@ def replay_rk_tendency_case(arrays,case):
     state.p=cp.asarray(_crop3(x[7]+x[6],nz,ny,nx))
     state.al=cp.asarray(_crop3(x[8],nz,ny,nx))
     state.alt=cp.asarray(_crop3(native_prep[5],nz,ny,nx))
-    for n,name in enumerate(("mup","mub2d","_msftx","msft","_msfux","msfu", "msfv","_msfv_inv","_msfvy",
+    for n,name in enumerate(("mup","mub2d","_msftx","msft","_msfux","msfu", "msfv","msfv_inv","_msfvy",
                              "_clat","f","e","sina","cosa","_ht")):
         nj=ny+1 if n in (6,7,8) else ny
         ni=nx+1 if n in (4,5) else nx

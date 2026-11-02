@@ -215,6 +215,9 @@ def momentum_port_outputs(fixture, routine):
     metadata = fixture.metadata
     if routine == "horizontal_pressure_gradient":
         state = SimpleNamespace(**device)
+        # A strict state carries WRF's perturbation pressure word itself
+        # (calc_p_alpha's p_perturbation), the fixture's raw P.
+        state.p_perturbation = device["p_raw"]
         # RawKernel scalar arguments must be host scalar words. A zero-rank
         # device array passes an address, even when the signature wants REAL.
         for name in ("cf1", "cf2", "cf3", "cfn", "cfn1"):

@@ -92,7 +92,7 @@ def coupling_port_outputs(case):
     fields, control = case["fields"], case["control"]
     nz, ny, nx = fields["T"].shape
     cfg = RunConfig(nx=nx, ny=ny, nz=nz, dx=3000., dy=3000., ztop=20000., run_seconds=12., dt=float(control["dt"]), mp_physics=8, moist_cq=True, open_x=not control["periodic"], open_y=not control["periodic"], w_damping=control["w_damping"], zadvect_implicit=control["ieva"], w_crit_cfl=float(control["w_crit_cfl"]))
-    bindings = dict(u="U", v="V", w="W", p="P", mup="MU", mub2d="MUB", c1h="C1H", c2h="C2H", c1f="C1F", c2f="C2F", dnw="DNW", rdnw="RDNW", msft="MAPFAC_M", msfu="MAPFAC_U", msfv="MAPFAC_V", qv="QVAPOR", qc="QCLOUD", qr="QRAIN", qi="QICE", qs="QSNOW", qg="QGRAUP")
+    bindings = dict(u="U", v="V", w="W", p="P", mup="MU", mub2d="MUB", c1h="C1H", c2h="C2H", c1f="C1F", c2f="C2F", dnw="DNW", rdnw="RDNW", msft="MAPFAC_M", msfu="MAPFAC_U", msfv="MAPFAC_V", msfv_inv="MF_VX_INV", qv="QVAPOR", qc="QCLOUD", qr="QRAIN", qi="QICE", qs="QSNOW", qg="QGRAUP")
     state = _LaunchState(**{key: cp.asarray(fields[value], dtype=cp.float32) for key, value in bindings.items()}, has_msf=True, _scratch={})
     state.rw_t = cp.zeros_like(state.w)
     mux, muy = stage_face_masses(state, cfg, state.total_mu())
@@ -125,6 +125,7 @@ def coupling_php_consumer(case):
     computes that same isolated response from its actual calc_php words.
     """
     import cupy as cp
+    from woof.core.acoustic import _uv_emdiv_args
     from woof.core.kernels import get_kernel
     f,c=case["fields"],case["control"]
     nz,ny,nx=f["T"].shape
@@ -144,7 +145,11 @@ def coupling_php_consumer(case):
          np.float32(f["CF1"].item()),np.float32(f["CF2"].item()),np.float32(f["CF3"].item()),np.int32(1),
          c["rdx"],c["rdy"],np.float32(1.),np.float32(0.),
          np.int32(0 if c["periodic"] else 1),np.int32(1),
-         np.int32(nz),np.int32(ny),np.int32(nx)))
+         np.int32(nz),np.int32(ny),np.int32(nx))
+        # The strict signature's in-statement emdiv operands, as the
+        # production launcher passes them; without MUDF they are inert.
+        +_uv_emdiv_args(SimpleNamespace(mup=g("MU"),msfu=g("MAPFAC_U"),msfv_inv=g("MF_VX_INV"),has_msf=True),
+                        SimpleNamespace(emdiv=0.,dx=3000.,dy=3000.),None))
     return {"php_ru":cp.asnumpy(upp),"php_rv":cp.asnumpy(vpp)}
 
 

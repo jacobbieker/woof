@@ -115,6 +115,8 @@ def _state(fixture):
                                fixture.items() if key.startswith("in_")})
     nz, ny, nx = state.p.shape
     state.has_msf = bool(fixture["has_msf"])
+    # DomainState.set_map_factors' stored reciprocal (WRF's MF_VX_INV).
+    state.msfv_inv = cp.float32(1.0) / state.msfv
     state.qv = None
     state.tke = None
     state.total_mu = lambda: state.mub2d + state.mup

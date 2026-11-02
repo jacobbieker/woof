@@ -28,6 +28,9 @@ def device_state(arrays, *, cf=(1., 0., 0.)):
     values.setdefault("thp", cp.zeros_like(values["alt"]))
     values.setdefault("thb", cp.full_like(values["alt"], 300.))
     values.update(dict(zip(("cf1", "cf2", "cf3"), cf)))
+    if "msfv" in values:
+        # DomainState.set_map_factors' stored reciprocal (WRF's MF_VX_INV).
+        values.setdefault("msfv_inv", cp.float32(1.0) / values["msfv"])
     cache = {}
     def scratch(shape, slot):
         key = (tuple(shape), slot)

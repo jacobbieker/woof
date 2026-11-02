@@ -438,6 +438,12 @@ def advect_port_outputs(case: AdvectOracleCase, *, variant="production") -> dict
     validate_case(case)
     a = {key: cp.asarray(value) for key, value in case.inputs.items() if value.dtype == np.float32}
     coord = SimpleNamespace(**{key: a[key] for key in ("rdnw", "rdn", "fnm", "fnp", "c1h", "c2h")})
+    # The strict PD renormalisation reads the old mass as its WRF parts, the
+    # same base and perturbation words the compiled oracle is handed.
+    mub = case.inputs.get("mub", case.inputs["mu_old"])
+    coord.mub2d = cp.asarray(mub)
+    coord.mup0 = cp.asarray(case.inputs.get("mu_perturbation", case.inputs.get(
+        "mu", np.asarray(case.inputs["mu_old"] - mub, dtype=np.float32))))
     m = case.metadata
     common = dict(open_x=bool(m["open_x"]), open_y=bool(m["open_y"]), has_msf=True)
     orders = advection_orders(m)
