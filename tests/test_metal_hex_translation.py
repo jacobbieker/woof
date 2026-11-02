@@ -233,3 +233,49 @@ def test_thrust_complex_division_and_square_root(cp):
     got_r = cp.asnumpy(r).reshape(-1, 2)
     assert got_r[1].tolist() == [2.0, 1.0] and got_r[2].tolist() == [1.0, 2.0]
     assert got_r[3].tolist() == [0.0, 0.0]
+
+
+_ENTRY = r'''
+extern "C" __global__ void entry(const float* q, const float* qs, float* out, int n) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n) return;
+    float q1 = q[i], qs1 = qs[i];
+    float r = 0.0f;
+    int visits = 0;
+    if ((q1 < qs1)) { goto label_100; }
+    label_90: ;
+    r = r + 1.0f;
+    visits = visits + 1;
+    goto label_200;
+    label_100: ;
+    r = r + 10.0f;
+    q1 = q1 + 1.0f;
+    if ((q1 > qs1)) { goto label_90; }
+    label_200: ;
+    out[i] = r * 100.0f + (float)visits;
+}
+'''
+
+
+def test_forward_goto_into_a_retry_loop(cp):
+    """RUC LSM's shape: a jump from before a retry loop to a label inside it;
+    the loop's statements before that label are skipped on the first pass."""
+    q = np.array([0.0, 2.0, 1.5, -3.0, 5.0], dtype=np.float32)
+    qs = np.array([1.0, 1.0, 2.0, 0.0, 5.0], dtype=np.float32)
+    want = []
+    for q1, qs1 in zip(q, qs):
+        r, visits = np.float32(0), 0
+        if q1 < qs1:
+            r += np.float32(10)
+            q1 = q1 + np.float32(1)
+            if q1 > qs1:
+                r += np.float32(1)
+                visits += 1
+        else:
+            r += np.float32(1)
+            visits += 1
+        want.append(r * np.float32(100) + np.float32(visits))
+    want = np.array(want, dtype=np.float32)
+    out = cp.zeros(q.size, dtype=cp.float32)
+    cp.RawKernel(_ENTRY, "entry")((1,), (8,), (cp.asarray(q), cp.asarray(qs), out, np.int32(q.size)))
+    assert cp.asnumpy(out).tobytes() == want.tobytes()

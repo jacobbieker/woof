@@ -1068,7 +1068,7 @@ class _Rewriter:
             if target is None:
                 self.refuse(g, "goto whose label clang could not resolve")
             by_label.setdefault((target.spelling, self.span(target)), []).append(g)
-        starts = self._nested_goto_starts(by_label, labels, parent, chain)
+        starts, entries = self._nested_goto_starts(by_label, labels, parent, chain)
         regions, wrappers = [], []
         for (name, (ls, le)), jumps in by_label.items():
             label = next(l for l in labels.get(name, []) if self.span(l) == (ls, le))
@@ -1099,15 +1099,31 @@ class _Rewriter:
                     if a.kind.name in self._LOOPS:
                         inner_loops.append(a)
             first = min(first, starts.get((name, (ls, le)), first))
-            region = stmts[first:j]
-            rs, re_ = self.span(region[0])[0], ls
+            # a jump into a retry loop's body: the wrapper ends at the loop's
+            # label, and the loop's statements before this label are skipped
+            # on that first pass (_nested_goto_starts)
+            entry = entries.get((name, (ls, le)))
+            end = j if entry is None else entry
+            region = stmts[first:end]
+            rs, re_ = self.span(region[0])[0], (ls if entry is None else self.span(stmts[entry])[0])
             for (a, b) in regions:
                 if a < re_ and rs < b and not (a <= rs and re_ <= b) and not (rs <= a and b <= re_):
                     self.refuse(label, f"goto regions overlap at label {name!r}")
             regions.append((rs, re_))
             # retargeted break/continue, and declarations used after the label
-            after = stmts[j:]
-            for st in region:
+            after = stmts[end:]
+            for st in region + ([] if entry is None else stmts[entry:j]):
+                if st not in region:
+                    # skipped by the entry guard, a block: scoped to it
+                    if st.kind == K.DECL_STMT:
+                        for var in st.get_children():
+                            usr = var.get_usr()
+                            if any(n.kind == K.DECL_REF_EXPR and n.referenced is not None
+                                   and n.referenced.get_usr() == usr
+                                   for later in stmts[j:] for n in later.walk_preorder()):
+                                self.refuse(var, f"{var.spelling!r} is declared in a loop before "
+                                                 f"label {name!r} and used after it")
+                    continue
                 if st.kind == K.DECL_STMT:
                     for var in st.get_children():
                         usr = var.get_usr()
@@ -1122,8 +1138,14 @@ class _Rewriter:
             flag = f"__woof_goto_{name}"
             # Wrappers opening at one offset nest outer first: the longer one.
             self.edits.insert(rs, f"bool {flag} = false; do {{ ", rank=-50_000 - (re_ - rs))
-            self.edits.insert(ls, f"}} while (false); ", rank=50_000)
-            wrappers.append({"kind": "forward", "rs": rs, "close": ls, "flag": flag, "name": name,
+            if entry is None:
+                self.edits.insert(ls, f"}} while (false); ", rank=50_000)
+            else:
+                # closed before the loop opens; the guard opens inside it
+                self.edits.insert(re_, f"}} while (false); ", rank=-100_000_000)
+                self.edits.insert(re_, f"if (!{flag}) {{ ", rank=-49_999)
+                self.edits.insert(ls, f"}} {flag} = false; ", rank=-100_000_000)
+            wrappers.append({"kind": "forward", "rs": rs, "close": re_, "flag": flag, "name": name,
                              "jumps": [self.span(g)[0] for g in jumps], "node": label})
             label_tokens = list(label.get_tokens())
             if len(label_tokens) >= 2 and label_tokens[1].spelling == ":":
@@ -1183,7 +1205,23 @@ class _Rewriter:
                     if r is not f and r[0] == f[0] and r[2] < f[2] < r[3] <= f[3]:
                         f[2] = r[2]
                         changed = True
-        return {key: s[2] for key, s in spans.items() if s[1] == "forward"}
+        # A forward jump into a retry loop from before it (RUC's ``IF (..)
+        # GOTO 100`` / ``90 ...`` / ``100 ...`` / ``IF (..) GOTO 90``): the
+        # loop's statements before the label are guarded by the jump's flag,
+        # which the label clears.  Only when no other region of the block
+        # starts or ends among the guarded statements.
+        entries = {}
+        for key, f in spans.items():
+            if f[1] != "forward":
+                continue
+            for r in spans.values():
+                if not (r[1] == "backward" and r[0] == f[0] and f[2] < r[2] < f[3] < r[3]):
+                    continue
+                clear = all(o is f or o is r or o[0] != f[0] or o[3] <= r[2] or o[2] >= f[3]
+                            or (o[2] <= r[2] and o[3] >= r[3]) for o in spans.values())
+                if clear:
+                    entries[key] = r[2]
+        return {key: s[2] for key, s in spans.items() if s[1] == "forward"}, entries
 
     def _nested_wrapper_exits(self, wrappers):
         """A jump that crosses another region's wrapper on its way out: the
