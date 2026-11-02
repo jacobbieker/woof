@@ -344,6 +344,16 @@ DEFAULT_TOLERANT_IDENTITY_FIELDS = frozenset({
     "run.spdt", "run.num_pert_3d", "run.nens", "run.stochpert_tbl",
     "run.madwrf_opt", "run.madwrf_dt_relax", "run.madwrf_dt_nudge",
     "run.madwrf_cldinit",
+    # WRF's ghg_input (time-varying radiation gases), read only by the
+    # radiation calls of the forecast.  0, its default, is the fixed-gas
+    # state every older tree was run with; a stated 1 against an older
+    # header re-prepares (the safe side).
+    "run.ghg_input",
+    # The constant moving frame (1.1.4, docs/moving-frame.md): refused on
+    # anything but a flat idealized Cartesian single domain
+    # (woof.moving_frame), so a prepared tree cannot have selected it; 0.0,
+    # the default, is the ground frame every older tree describes.
+    "run.umove", "run.vmove",
     # 2.6.1 added run.p3_backend to RunConfig without adding it here,
     # which refused EVERY tree prepared before it -- 16 of them on the
     # box that found this.  The FOURTH instance of this exact trap in
