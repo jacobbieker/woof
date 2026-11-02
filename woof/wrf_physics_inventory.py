@@ -365,7 +365,8 @@ _INVENTORIES = {
             RuntimeStateField("rqicuten", "RQICUTEN"),
         ),
     ),
-    # Registry.EM_COMMON:3047 (WRF v4.7.1): Morrison's moments plus the
+    # Registry.EM_COMMON:3042 (WRF v4.6.1; the same line is :3047 of
+    # v4.7.1, and the scheme's module is byte-identical in both): Morrison's moments plus the
     # advected droplet number qnc.  The package's EFCG/EFIG/EFSG/WACT,
     # CCN1_GS..CCN7_GS and MSKF_REFL_10CM are aercu_opt>0/MSKF state that
     # woof's aercu_opt=0 run neither prepares nor writes; the package's

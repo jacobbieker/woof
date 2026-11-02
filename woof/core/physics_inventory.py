@@ -266,7 +266,7 @@ def physics_reuses_pbl_composition(cfg: RunConfig) -> bool:
 #: mp=16 reached production having moved only two of them.
 from woof.microphysics_schemes import NAMED_SCHEMES as _NAMED_MP_SCHEMES
 from woof.microphysics_schemes import SCHEMES_BY_ID as _NAMED_MP_SCHEMES_BY_ID
-PBL_RQI_MICROPHYSICS = (2, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 30, 50, 106) + tuple(
+PBL_RQI_MICROPHYSICS = (2, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 30, 40, 50, 106) + tuple(
     _s.mp_id for _s in _NAMED_MP_SCHEMES.values() if "qi" in _s.ice_mass_species)
 
 
