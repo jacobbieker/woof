@@ -371,7 +371,7 @@ def test_rrtmg_noaa_wrf39_cloud_form_matches_the_branch_rules(regime, monkeypatc
     meta = json.loads((RRTMG_FIXTURE / "regimes.json").read_text())
     woof = run_woof.run_regime(RRTMG_FIXTURE, meta, regime)
     want = _load("rrtmg_fork_cloud.npz")
-    graded = {"rthratenlw": "rthratenlw", "rthratensw_wrapper": "rthratensw",
+    graded = {"rthratenlw": "rthratenlw", "rthratensw": "rthratensw",
               "rthraten": "rthraten", "glw": "glw", "olr": "olr", "gsw": "gsw",
               "swdown": "swdown", "coszen": "coszen", "cldfra": "cldfra",
               "swddir": "swddir", "swddif": "swddif", "o3rad": "o3rad"}
