@@ -637,6 +637,8 @@ class SpaceAnalysis:
             return self.space(children[-1], env, lvalue=lvalue)
         if kind in ("CXX_NULL_PTR_LITERAL_EXPR", "GNU_NULL_EXPR", "INTEGER_LITERAL"):
             return NULL
+        if kind == "STRING_LITERAL":
+            return CONSTANT     # program-scope data, as Metal places a string literal
         if kind == "DECL_REF_EXPR":
             d = e.referenced
             if d is None:

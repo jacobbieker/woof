@@ -71,6 +71,8 @@ PARSE_DEFINES = (
     f'-D__constant__=__attribute__((annotate("{_CONSTANT}")))',
     "-D__device__=", "-D__host__=", "-D__forceinline__=inline",
     "-D__noinline__=__attribute__((noinline))", "-D__restrict__=", "-D__launch_bounds__(...)=",
+    # register-count hints have no Metal meaning; __ldg is a plain load
+    "-D__maxnreg__(...)=", "-D__ldg(p)=(*(p))",
     "-D__CUDACC__=1", "-D__CUDACC_RTC__=1", "-D__WOOF_METAL__=1", "-D__align__(n)=alignas(n)",
     # A by-value kernel parameter is constant data in Metal already:
     # __grid_constant__ is moot.
@@ -2615,9 +2617,14 @@ class _Rewriter:
         value initialised per call, so ``static`` just goes; a mutable one
         (state kept across calls) has no spelling and is refused."""
         t = node.type
+        const = t.is_const_qualified()
         while t.get_canonical().kind.name in ("CONSTANTARRAY", "INCOMPLETEARRAY"):
+            # libclang puts an array's const on the canonical array and can
+            # drop it from that array's element type (``static const double
+            # tr[] = {...}`` in core-math's log10f read as mutable)
+            const = const or t.get_canonical().is_const_qualified()
             t = t.get_canonical().element_type
-        if not t.is_const_qualified():
+        if not (const or t.is_const_qualified()):
             self.refuse(node, f"function-scope static {node.spelling!r} is mutable")
         tok = next((t for t in node.get_tokens() if t.spelling == "static"), None)
         if tok is not None:

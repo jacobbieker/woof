@@ -514,6 +514,13 @@ static inline uint __ballot_sync(uint mask, int pred) {
 }
 static inline int __any_sync(uint mask, int pred) { return metal::simd_any(pred != 0) ? 1 : 0; }
 static inline int __all_sync(uint mask, int pred) { return metal::simd_all(pred != 0) ? 1 : 0; }
+// redux.sync (sm_80's __reduce_<op>_sync): the SIMD-group's reduction.
+static inline uint __reduce_add_sync(uint mask, uint v) { return metal::simd_sum(v); }
+static inline int __reduce_add_sync(uint mask, int v) { return metal::simd_sum(v); }
+static inline uint __reduce_min_sync(uint mask, uint v) { return metal::simd_min(v); }
+static inline int __reduce_min_sync(uint mask, int v) { return metal::simd_min(v); }
+static inline uint __reduce_max_sync(uint mask, uint v) { return metal::simd_max(v); }
+static inline int __reduce_max_sync(uint mask, int v) { return metal::simd_max(v); }
 template <typename T> static inline T __woof_shfl(T v, uint src) { return metal::simd_shuffle(v, ushort(src)); }
 static inline ulong __woof_shfl(ulong v, uint src) {
   uint lo = metal::simd_shuffle((uint)v, ushort(src));
@@ -618,6 +625,9 @@ static inline long __float2ll_rn(float a) { return (long)metal::rint(a); }
 // No trap on Metal: the thread carries on (woof's kernels trap only on
 // states their launchers already refuse).
 static inline void __trap() {}
+// No cycle counter in a Metal shader: clock64() is 0.  woof's kernels read it
+// only for a cost that orders work (TEMPO's column order), never a word.
+static inline long clock64() { return 0; }
 // binary64 -> binary32 toward zero / up / down: the nearest result, stepped
 // back across x when it rounded the wrong way.
 static inline float __woof_f2f_dir(f64 a, int dir) {
