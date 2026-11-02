@@ -177,6 +177,8 @@ def replay_rk_tendency_case(arrays,case):
     state.pb=cp.asarray(_crop3(x[6],nz,ny,nx))
     # WRF stores perturbation P; the engine stores total pressure P+PB.
     state.p=cp.asarray(_crop3(x[7]+x[6],nz,ny,nx))
+    # A strict state also carries WRF's perturbation P word itself.
+    state.p_perturbation=cp.asarray(_crop3(x[7],nz,ny,nx))
     state.al=cp.asarray(_crop3(x[8],nz,ny,nx))
     state.alt=cp.asarray(_crop3(native_prep[5],nz,ny,nx))
     for n,name in enumerate(("mup","mub2d","_msftx","msft","_msfux","msfu", "msfv","msfv_inv","_msfvy",
