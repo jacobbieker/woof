@@ -167,23 +167,23 @@
     "mapping": "rw-wps-ecmwf-open-data-oper-grib2.mapping.json",
     "grid": "1440 x 721, 0.25 degree global",
     "grid_points": 1038240,
-    "layers_per_valid_time": 102,
+    "layers_per_valid_time": 103,
     "soil_layers": 8,
     "windowed_layers": 84,
     "global_axes": {"longitude_first": -180.0, "latitude_first": -90.0, "step_degrees": 0.25, "nx": 1440, "ny": 721},
     "bytes_per_value": 8,
-    "measured": "the engine's frame stream for a real two-time fetch of 2026-09-27 00Z, composed whole by gpuwm_mapped_engine on 2026-09-28: 838,897,920 bytes per valid time; plus the composed sea-ice layer bound from the same cycle's GFS analysis (the engine's frame count went 17 -> 18 fields on a real 0.1-degree compose, 2026-10-29): 847,203,840 bytes per valid time"
+    "measured": "the engine's frame stream for a real two-time fetch of 2026-09-27 00Z, composed whole by gpuwm_mapped_engine on 2026-09-28: 838,897,920 bytes per valid time; plus the composed sea-ice layer bound from the same cycle's GFS analysis (the engine's frame count went 17 -> 18 fields on a real 0.1-degree compose, 2026-10-29): 847,203,840 bytes per valid time; plus the IFS snow depth (sd) the mapping binds as snow_water_equivalent, one surface layer counted from the mapping, not measured: 855,509,760 bytes per valid time"
    },
    "ecmwf-open-data-0p1": {
     "mapping": "rw-wps-ecmwf-open-data-oper-grib2.mapping.json",
     "grid": "3600 x 1801, 0.1 degree global",
     "grid_points": 6483600,
-    "layers_per_valid_time": 102,
+    "layers_per_valid_time": 103,
     "soil_layers": 8,
     "windowed_layers": 84,
     "global_axes": {"longitude_first": -180.0, "latitude_first": -90.0, "step_degrees": 0.1, "nx": 3600, "ny": 1801},
     "bytes_per_value": 8,
-    "measured": "scaled from the 0.25-degree oper frame stream (838,897,920 bytes per valid time at 1,038,240 points; the same 101 layers) to the 0.1-degree grid, plus the composed sea-ice layer (the same 102 layers): 5,290,617,600 bytes per valid time"
+    "measured": "scaled from the 0.25-degree oper frame stream (838,897,920 bytes per valid time at 1,038,240 points; the same 101 layers) to the 0.1-degree grid, plus the composed sea-ice layer (the same 102 layers): 5,290,617,600 bytes per valid time; plus the IFS snow depth layer (snow_water_equivalent), counted from the mapping: 103 layers, 5,342,486,400 bytes per valid time"
    },
    "ecmwf-ens": {
     "mapping": "rw-wps-ecmwf-ens-open-grib2.mapping.json",
