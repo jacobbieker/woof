@@ -17,7 +17,6 @@ for the other.
 from __future__ import annotations
 
 import builtins
-import ctypes
 import types
 
 import numpy as np
@@ -50,14 +49,14 @@ class ndarray:
         if memptr is None:
             self._a = np.ndarray(shape, dtype, strides=strides, order=order)
             return
-        # CuPy's ndarray over an existing allocation (a MemoryPointer)
-        count = int(np.prod(shape)) if shape else 1
-        if strides is not None:
-            span = sum((n - 1) * abs(st) for n, st in zip(shape, strides)) + dtype.itemsize if count else 0
-        else:
-            span = count * dtype.itemsize
-        raw = (ctypes.c_char * builtins.max(span, 1)).from_address(int(memptr.ptr))
-        self._a = np.ndarray(shape, dtype, buffer=raw, strides=strides, order=order)
+        # CuPy's ndarray over an existing allocation (a MemoryPointer).  The
+        # host array's base is a holder of the pointer, so every view of it
+        # keeps the allocation's owner alive, as CuPy's views keep their
+        # memory (a mapped hostAlloc block freed under a live view was
+        # reused, and the view read another array's words).
+        if strides is None and order == "F" and len(shape) > 1:
+            strides = tuple(int(np.prod(shape[:i])) * dtype.itemsize for i in range(len(shape)))
+        self._a = np.asarray(_Buffer(memptr, shape, dtype, strides))
         self._owner = memptr
 
     @classmethod
@@ -218,6 +217,20 @@ class ndarray:
         return (_unpickle, (np.array(self._a, copy=True),))
 
     __hash__ = None
+
+
+class _Buffer:
+    """Memory at a MemoryPointer, as NumPy's array interface; holds the
+    pointer (and through it the allocation's owner)."""
+
+    __slots__ = ("__array_interface__", "memptr")
+
+    def __init__(self, memptr, shape, dtype, strides):
+        self.memptr = memptr
+        self.__array_interface__ = {"data": (int(memptr.ptr), False), "shape": tuple(shape),
+                                    "typestr": np.dtype(dtype).str, "strides": strides, "version": 3}
+        if np.dtype(dtype).fields is not None:
+            self.__array_interface__["descr"] = np.dtype(dtype).descr
 
 
 #: Methods whose NumPy results are host values in CuPy too.
@@ -579,7 +592,14 @@ _NOT_CUPY = frozenset(("matrix", "char", "rec", "ctypeslib", "lib", "ma", "polyn
                        "distutils", "core", "emath", "typing", "exceptions", "dtypes"))
 
 
+#: NumPy functions wrapped on first use.  Not this module's globals: a
+#: global ``sum`` or ``max`` would shadow the builtin in the code above.
+_WRAPPED: dict = {}
+
+
 def __getattr__(name):
+    if name in _WRAPPED:
+        return _WRAPPED[name]
     if name.startswith("__") or name in _NOT_CUPY:
         raise AttributeError(name)
     try:
@@ -589,5 +609,5 @@ def __getattr__(name):
     if isinstance(value, type) or not callable(value):
         return value
     wrapped = _UFunc(value) if isinstance(value, np.ufunc) else _wrap(value)
-    globals()[name] = wrapped
+    _WRAPPED[name] = wrapped
     return wrapped
