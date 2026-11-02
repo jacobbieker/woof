@@ -8,6 +8,7 @@ import ctypes as ct
 import re
 import shutil
 import subprocess
+import sys
 from types import SimpleNamespace
 
 import numpy as np
@@ -90,7 +91,11 @@ inline void atomicExch(int* p, int v) { __atomic_store_n(p,v,__ATOMIC_RELAXED); 
         cpp = directory / 'transport.cpp'
         so = directory / 'transport.so'
         cpp.write_text(shim + source + '\n' + '\n'.join(wrappers))
-        result = subprocess.run([compiler, '-shared', '-fPIC', '-O2', '-fopenmp', '-ffp-contract=off', str(cpp), '-o', str(so)], capture_output=True, text=True)
+        # OpenMP only spreads the independent thread iterations over cores.
+        # macOS's g++ is Apple clang, which has no -fopenmp; there the loop
+        # runs serially and every word is the same.
+        parallel = [] if sys.platform == 'darwin' else ['-fopenmp']
+        result = subprocess.run([compiler, '-shared', '-fPIC', '-O2', *parallel, '-ffp-contract=off', str(cpp), '-o', str(so)], capture_output=True, text=True)
         if result.returncode:
             raise RuntimeError(result.stderr)
         self.library = ct.CDLL(str(so))
