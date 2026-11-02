@@ -192,6 +192,7 @@ WOOF_F32S_ASSIGN(threadgroup)
 // ---------------------------------------------------------------- math
 static inline f32s fabsf(f32s a) { return f32s::bits(as_type<uint>(a.v) & 0x7FFFFFFFu); }
 static inline f32s fabs(f32s a) { return fabsf(a); }
+static inline f32s abs(f32s a) { return fabsf(a); }
 static inline f32s copysignf(f32s a, f32s b) {
   return f32s::bits((as_type<uint>(a.v) & 0x7FFFFFFFu) | (as_type<uint>(b.v) & 0x80000000u));
 }

@@ -118,6 +118,7 @@ long lrintf(float); long lrint(double);
 int isnan(float); int isnan(double); int isinf(float); int isinf(double);
 int isfinite(float); int isfinite(double); int signbit(float); int signbit(double);
 int abs(int); long long llabs(long long); long labs(long);
+float abs(float); double abs(double);
 int printf(const char*, ...);
 void* memcpy(void*, const void*, size_t);
 void* memset(void*, int, size_t);

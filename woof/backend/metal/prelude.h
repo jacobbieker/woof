@@ -430,6 +430,9 @@ static inline ulong max(ulong a, ulong b) { return metal::max(a, b); }
 static inline float min(float a, float b) { return fminf(a, b); }
 static inline float max(float a, float b) { return fmaxf(a, b); }
 static inline int abs(int a) { return metal::abs(a); }
+// CUDA's abs(float) / abs(double) are fabsf / fabs (Thrust's complex division calls them)
+static inline float abs(float a) { return fabs(a); }
+static inline f64 abs(f64 a) { return fabs(a); }
 static inline long llabs(long a) { return metal::abs(a); }
 static inline int __clz(int a) { return metal::clz(a); }
 static inline int __clzll(long a) { return (int)metal::clz(a); }
