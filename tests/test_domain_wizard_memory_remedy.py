@@ -117,7 +117,11 @@ def test_a_named_shallower_ladder_is_the_deepest_one_that_fits(
 
     shallower_presets = ("12-3-1", "12-3", "12")
     named_any = False
-    for vram in ("4", "4.5", "4.6"):
+    # Read at the 1.1.5 estimator: the deep ladder has no budget at all
+    # through 4.12 GiB and is admitted from 5.7; between, the minimum
+    # layout is refused and the shallower ladder named moves from 12
+    # (4.13-5.1) to 12-3 (5.2-5.4) to 12-3-1 (5.5-5.6).  One card in each.
+    for vram in ("4.2", "5.2", "5.6"):
         rc, message = _run("12-3-1-0.5", vram, tmp_path / f"deep-{vram}.toml")
         # Watched firing: the minimum-layout memory refusal on every card.
         assert rc == 2, message
@@ -330,12 +334,14 @@ def test_the_source_default_is_named_first_when_it_fits():
 
 def test_a_small_card_names_the_source_default_and_prints_no_candidate_warnings(
         tmp_path, capsys):
-    """5.5 GiB, the 500 m ladder, no suite named.
+    """6.25 GiB, the 500 m ladder, no suite named.
 
     (6 GiB until dad24232a priced the Thompson kernels at the shallow
     exports nz <= 64 launches: the sub-km default's 4.68 GiB envelope now
     fits a 6 GiB card's 4.75 GiB budget, and 5.5 GiB is the card this
-    refusal is still about.)
+    refusal is still about.  Read again at the 1.1.5 estimator, at 0.05
+    GiB steps: the source's own default fits from 5.7 GiB, the sub-km
+    default from 6.95, so 6.25 sits inside the band.)
 
     The sub-km default does not fit the card at the ladder's minimum
     layout.  The refusal names the source's own default, which fits, and
@@ -346,7 +352,7 @@ def test_a_small_card_names_the_source_default_and_prints_no_candidate_warnings(
 
     from woof.physics_menu import default_profile_for
 
-    request = ["domain", "--point", "39.1,-94.6", "--vram-gib", "5.5",
+    request = ["domain", "--point", "39.1,-94.6", "--vram-gib", "6.25",
                "--ladder", "12-3-1-0.5", "--source", "gfs", "--hours", "6",
                "--cycle", "2026-08-12T00"]
     rc = cli_main([*request, "--out", str(tmp_path / "refused.toml")])
