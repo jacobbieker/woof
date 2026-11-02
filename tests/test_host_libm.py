@@ -237,10 +237,12 @@ def test_native_host_math_preserves_scalar_bits_and_special_values(workers):
     references = (
         (host_libm.exp, host_libm._exp), (host_libm.log, host_libm._LOG),
         (host_libm.log10, host_libm._LOG10), (host_libm.tan, host_libm._tan),
-        (host_libm.sin, host_libm._SIN), (host_libm.cos, host_libm._COS),
         (host_libm.arctan, math.atan), (host_libm.arcsin, host_libm._ASIN),
         (host_libm.arccos, host_libm._ACOS),
     )
+    if host_libm.implementation() == host_libm.GLIBC239:
+        # Without the transcription sin and cos are NumPy's, not host entries.
+        references += ((host_libm.sin, host_libm._SIN), (host_libm.cos, host_libm._COS))
     with pm.worker_limit(workers):
         for function, reference in references:
             expected = np.array([reference(float(value)) for value in values])

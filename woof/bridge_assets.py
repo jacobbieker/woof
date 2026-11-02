@@ -1542,6 +1542,16 @@ for _hydro_crate in ("tools/nextgen_forcing", "tools/nextgen_verify"):
 # Gauge discovery and matching also compile the worldwide fabric reader.
 NATIVE_BUILD_INPUTS["tools/nextgen_verify"] += ("tools/hydro_world",)
 
+# The opt-in glibc 2.39 libm (`glibc239` feature): the CPU bridge reaches
+# glibc239-libm and rw-libm, a rustwx workspace member, so it carries that
+# workspace's inputs; rw_wps reaches both through static-fields.
+NATIVE_BUILD_INPUTS["tools/grib1_bridge"] += tuple(
+    path for path in ("tools/rustwx/crates/glibc239-libm",
+                      *NATIVE_BUILD_INPUTS["tools/rustwx"])
+    if path not in NATIVE_BUILD_INPUTS["tools/grib1_bridge"])
+NATIVE_BUILD_INPUTS["tools/rw_wps"] += ("tools/rustwx/crates/glibc239-libm",
+                                        "tools/rustwx/crates/rw-libm")
+
 # The default-on hydro door's provider tools (2.9.3 improve-1).
 NATIVE_BUILD_INPUTS["tools/hydro_world"] = ("tools/hydro_world",)
 NATIVE_BUILD_INPUTS["tools/nextgen_output"] = (
