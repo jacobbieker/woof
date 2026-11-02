@@ -32,6 +32,8 @@ HEADERS = ("fast_sbm_common.cuh", "fast_sbm_coll.cuh", "fast_sbm_aux.cuh",
            "fast_sbm_nucl.cuh", "fast_sbm_core.cuh", "fast_sbm_column.cuh",
            "fast_sbm_init.cuh", "fast_sbm_driver.cuh")
 SOURCE = HERE / "fsbm_host.cpp"
+#: Routes the headers' libm calls through rebindable pointers (see there).
+LIBM_SHIM = HERE / "glibc_libm_shim.h"
 # Strict IEEE: no contraction, no fast-math; the arithmetic is the
 # Fortran oracle's (-O0 -ffp-contract=off) operation for operation.
 CXXFLAGS = ("-std=c++17", "-O2", "-ffp-contract=off", "-fno-fast-math",
@@ -57,17 +59,28 @@ def _gnu_libc() -> str:
         return ""
 
 
-#: Whether the platform libm is glibc's.  The host build calls the platform
-#: libm (fast_sbm_common.cuh "libm"; fast_sbm_init.cuh calls it directly),
-#: and the reference bits were computed calling glibc's exp, log and pow:
-#: WRF's Fortran oracle, and the packed tables checked against it.  So bit
-#: identity with them is the port's property only where that libm is glibc.
-GLIBC_LIBM = _gnu_libc().startswith("glibc")
+def _transcribed_libm() -> bool:
+    from woof.core import host_libm
+    return host_libm.implementation() == host_libm.GLIBC239
+
+
+#: The host build's C library calls (fast_sbm_common.cuh "libm";
+#: fast_sbm_init.cuh calls it directly) go through pointers that
+#: :func:`library` binds to the CPU bridge's glibc 2.39 transcription where
+#: it is installed, and otherwise reach the platform libm.
+TRANSCRIBED_LIBM = _transcribed_libm()
+#: Whether those calls give glibc's words.  The reference bits were computed
+#: calling glibc's exp, log and pow: WRF's Fortran oracle, and the packed
+#: tables checked against it.  So bit identity with them is the port's
+#: property only where the transcription is bound or the platform libm is
+#: glibc.
+GLIBC_LIBM = TRANSCRIBED_LIBM or _gnu_libc().startswith("glibc")
 NOT_GLIBC_REASON = (
     "bit identity with WRF's Fortran oracle needs glibc's libm: the oracle's "
     "bits (and the packed tables checked against them) were computed calling "
-    "glibc's exp/log/pow, and this host build calls the platform libm, which "
-    f"on {sys.platform} is not glibc")
+    "glibc's exp/log/pow, and without the CPU bridge's glibc 2.39 "
+    "transcription this host build calls the platform libm, which on "
+    f"{sys.platform} is not glibc")
 
 def flags_wrf(hail: int = 1) -> dict:
     """WRF as written (the oracle preset)."""
@@ -99,6 +112,7 @@ def _source_digest() -> str:
     for name in HEADERS:
         h.update((KERNEL_DIR / name).read_bytes())
     h.update(SOURCE.read_bytes())
+    h.update(LIBM_SHIM.read_bytes())
     h.update(" ".join(BUILD_FLAGS).encode())
     return h.hexdigest()[:16]
 
@@ -120,7 +134,8 @@ def library() -> ctypes.CDLL:
     so = cache / f"libfsbm_host_{_source_digest()}{LIB_SUFFIX}"
     if not so.exists():
         tmp = so.with_suffix(f".{os.getpid()}.tmp")
-        cmd = [cxx, *BUILD_FLAGS, f"-I{KERNEL_DIR}", "-o", str(tmp), str(SOURCE)]
+        cmd = [cxx, *BUILD_FLAGS, f"-I{KERNEL_DIR}", "-include", str(LIBM_SHIM),
+               "-o", str(tmp), str(SOURCE)]
         r = subprocess.run(cmd, capture_output=True, text=True)
         if r.returncode != 0:
             raise RuntimeError(f"host build failed:\n{' '.join(cmd)}\n{r.stderr}")
@@ -148,6 +163,15 @@ def library() -> ctypes.CDLL:
         getattr(lib, f"fsbm_host_call_{p}").restype = ctypes.c_int
     if lib.fsbm_host_flag_count() != len(FLAG_FIELDS):
         raise RuntimeError("FsbmFlags and FLAG_FIELDS disagree")
+    if TRANSCRIBED_LIBM:
+        from woof.core import portable_math
+        bridge = portable_math._load()
+        names = ("expf", "logf", "powf", "exp", "log", "pow", "sin", "cos")
+        table = (ctypes.c_void_p * len(names))(*(
+            ctypes.cast(getattr(bridge, "gpuwm_glibc239_" + name), ctypes.c_void_p).value
+            for name in names))
+        lib.fsbm_host_bind_libm.argtypes = [ctypes.c_void_p]
+        lib.fsbm_host_bind_libm(table)
     lib.fsbm_host_ledger_f64.argtypes = lib.fsbm_host_call_f64.argtypes + [ctypes.c_void_p]
     lib.fsbm_host_ledger_f64.restype = ctypes.c_int
     _LIB = lib
