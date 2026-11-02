@@ -199,11 +199,26 @@ def port_prep(fixture):
     return values
 
 
+def _finish_state(fixture):
+    """The stand-in with the strict acoustic MUTS carrier finish reads.
+
+    After the acoustic loop the real state's carrier holds WRF's
+    ``muts = mut + mu''``, the same words the compiled harness passes.
+    """
+    import cupy as cp
+    from woof.core.acoustic import WRF_EXACT, wrf_acoustic_muts
+    state = _state(fixture)
+    if WRF_EXACT:
+        cp.add(cp.add(state.mub2d, state.mup), state.mu_pp,
+               out=wrf_acoustic_muts(state))
+    return state
+
+
 def port_finish(fixture):
     """Execute the engine's uncoupling launcher, including retained heating."""
     import cupy as cp
     from woof.core.dycore import _finish_small_steps, _sumflux_launch
-    state = _state(fixture)
+    state = _finish_state(fixture)
     saved_mu = cp.asnumpy(state.mup)
     _finish_small_steps(state, _cfg(fixture), float(fixture["hdiab_dt"]))
     cp.cuda.get_current_stream().synchronize()
@@ -219,7 +234,7 @@ def port_finish(fixture):
     _sumflux_launch("accumulate_sumflux", targets, (state.u_pp, state.v_pp, state.ww_pp))
     _sumflux_launch("finish_sumflux", targets, (state.u, state.v, state.ww), 1)
     values["ww"] = cp.asnumpy(targets[2])
-    observed_state = _state(fixture)
+    observed_state = _finish_state(fixture)
     observed = {name: cp.empty(shape, cp.float32) for name, shape in
                 (("muu", state.msfu.shape), ("muus", state.msfu.shape),
                  ("muv", state.msfv.shape), ("muvs", state.msfv.shape),
