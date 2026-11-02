@@ -328,6 +328,14 @@ def test_device_selection_uses_all_visible_cards_without_changing_spatial_group(
     assert member_device_ids_for_request(inputs, 20, visible_count=2) == (0, 1)
     assert member_device_ids_for_request(inputs, {"members": 20, "member_device_ids": (1,)}, visible_count=2) == (1,)
     inputs.experiment.devices = DeviceOptions(count=2, ids=(0, 1))
+    from woof import backend
+    if backend.active() != "cuda":
+        # The two-card split is CUDA's (peer copies, streams); a facade
+        # backend refuses it by name before choosing any member device.
+        from woof.core.devices import DevicesRefused
+        with pytest.raises(DevicesRefused, match="needs the CUDA backend"):
+            member_device_ids_for_request(inputs, 20, visible_count=2)
+        return
     assert member_device_ids_for_request(inputs, 20, visible_count=2) == (0,)
     with pytest.raises(ValueError, match="overlap"):
         member_device_ids_for_request(inputs, {"members": 20, "member_device_ids": (0, 1)}, visible_count=2)
