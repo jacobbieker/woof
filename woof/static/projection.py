@@ -538,8 +538,8 @@ class ProjectedGrid:
         if routed is not None:
             return routed
         lat = self.latlon_mass()[0]
-        return (2.0 * OMEGA_E * np.sin(lat * _RAD_PER_DEG),
-                2.0 * OMEGA_E * np.cos(lat * _RAD_PER_DEG))
+        return (2.0 * OMEGA_E * host_libm.sin(lat * _RAD_PER_DEG),
+                2.0 * OMEGA_E * host_libm.cos(lat * _RAD_PER_DEG))
 
     def rotation_m(self):
         """(SINALPHA, COSALPHA) at mass points."""
@@ -716,7 +716,7 @@ class MercatorGrid(ProjectedGrid):
 
     def _setup(self) -> None:
         # --- set_merc transcription (module_llxy.F:1307) ---
-        clain = np.cos(_RAD_PER_DEG * self.truelat1)
+        clain = host_libm.cos(_RAD_PER_DEG * self.truelat1)
         self.dlon = self.dx / (EARTH_RADIUS_M * clain)
         self.rsw = 0.0
         if self.ref_lat != 0.0:
@@ -756,7 +756,7 @@ class MercatorGrid(ProjectedGrid):
         lat = np.asarray(lat, dtype=np.float64)
         colat0 = _RAD_PER_DEG * (90.0 - self.truelat1)
         colat = _RAD_PER_DEG * (90.0 - lat)
-        return np.sin(colat0) / np.sin(colat)
+        return host_libm.sin(colat0) / host_libm.sin(colat)
 
     def rotation(self, lon):
         """get_rotang PROJ_MERC branch: rotation is identically zero."""
@@ -781,21 +781,21 @@ class PolarStereoGrid(ProjectedGrid):
         # --- set_ps transcription (module_llxy.F:696) ---
         self.rebydx = EARTH_RADIUS_M / self.dx
         reflon = self.stand_lon + 90.0
-        scale_top = 1.0 + self.hemi * np.sin(self.truelat1 * _RAD_PER_DEG)
+        scale_top = 1.0 + self.hemi * host_libm.sin(self.truelat1 * _RAD_PER_DEG)
         ala1 = self.ref_lat * _RAD_PER_DEG
-        self.rsw = float(self.rebydx * np.cos(ala1) * scale_top
-                         / (1.0 + self.hemi * np.sin(ala1)))
+        self.rsw = float(self.rebydx * host_libm.cos(ala1) * scale_top
+                         / (1.0 + self.hemi * host_libm.sin(ala1)))
         alo1 = (self.ref_lon - reflon) * _RAD_PER_DEG
-        self.polei = float(self.known_x - self.rsw * np.cos(alo1))
+        self.polei = float(self.known_x - self.rsw * host_libm.cos(alo1))
         self.polej = float(self.known_y
-                           - self.hemi * self.rsw * np.sin(alo1))
+                           - self.hemi * self.rsw * host_libm.sin(alo1))
 
     def ij_to_latlon(self, x, y):
         """Transcription of ijll_ps (module_llxy.F:777), vectorized."""
         x = np.asarray(x, dtype=np.float64)
         y = np.asarray(y, dtype=np.float64)
         reflon = self.stand_lon + 90.0
-        scale_top = 1.0 + self.hemi * np.sin(self.truelat1 * _RAD_PER_DEG)
+        scale_top = 1.0 + self.hemi * host_libm.sin(self.truelat1 * _RAD_PER_DEG)
         xx = x - self.polei
         yy = (y - self.polej) * self.hemi
         r2 = xx ** 2 + yy ** 2
@@ -822,28 +822,28 @@ class PolarStereoGrid(ProjectedGrid):
         lat = np.asarray(lat, dtype=np.float64)
         lon = np.asarray(lon, dtype=np.float64)
         reflon = self.stand_lon + 90.0
-        scale_top = 1.0 + self.hemi * np.sin(self.truelat1 * _RAD_PER_DEG)
+        scale_top = 1.0 + self.hemi * host_libm.sin(self.truelat1 * _RAD_PER_DEG)
         ala = lat * _RAD_PER_DEG
-        rm = (self.rebydx * np.cos(ala) * scale_top
-              / (1.0 + self.hemi * np.sin(ala)))
+        rm = (self.rebydx * host_libm.cos(ala) * scale_top
+              / (1.0 + self.hemi * host_libm.sin(ala)))
         alo = (lon - reflon) * _RAD_PER_DEG
-        i = self.polei + rm * np.cos(alo)
-        j = self.polej + self.hemi * rm * np.sin(alo)
+        i = self.polei + rm * host_libm.cos(alo)
+        j = self.polej + self.hemi * rm * host_libm.sin(alo)
         return i, j
 
     def map_factor(self, lat):
         """get_map_factor PROJ_PS branch (process_tile_module.F:1791):
         (1 + sin|truelat1|) / (1 + sin(sign(truelat1) * lat))."""
         lat = np.asarray(lat, dtype=np.float64)
-        return ((1.0 + np.sin(_RAD_PER_DEG * abs(self.truelat1)))
-                / (1.0 + np.sin(_RAD_PER_DEG
+        return ((1.0 + host_libm.sin(_RAD_PER_DEG * abs(self.truelat1)))
+                / (1.0 + host_libm.sin(_RAD_PER_DEG
                                 * np.copysign(1.0, self.truelat1) * lat)))
 
     def rotation(self, lon):
         """get_rotang PROJ_PS branch: alpha = wrap(stand_lon - lon)."""
         lon = np.asarray(lon, dtype=np.float64)
         alpha = _wrap180(self.stand_lon - lon) * _RAD_PER_DEG
-        return np.sin(alpha), np.cos(alpha)
+        return host_libm.sin(alpha), host_libm.cos(alpha)
 
 
 # ---------------------------------------------------------------------------

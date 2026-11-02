@@ -711,7 +711,10 @@ def scalar_reference_asin_f32(values) -> np.ndarray:
     if not np.array_equal(evaluate(probes).view(np.uint32), expected):
         raise StaticBridgeError(
             "this native scalar rounding changes SLP_AZI and SWNORM before "
-            "Noah, or solar COSZEN; it cannot match the scalar reference")
+            "Noah, or solar COSZEN; it cannot match the scalar reference "
+            "(the process libm's asinf is not glibc 2.39's; a static-fields "
+            "library built with `pixi run build-native-glibc239` carries "
+            "glibc 2.39's own)")
     return evaluate(np.ascontiguousarray(values, dtype=np.float32))
 
 

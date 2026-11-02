@@ -1,7 +1,7 @@
 """Literal binary64 UW PBL transcription. Source comments identify WRF lines."""
 import math
 from woof.core.uwpbl_constants import CPAIR, RAIR, ZVIR, LATVAP, LATICE, GRAVIT, KARMAN, B123
-from .fortran import fmax as uw_fmax, fmin as uw_fmin, F32, fint, powi
+from .fortran import fmax as uw_fmax, fmin as uw_fmin, F32, fint, powi, libm
 
 def caleddy(pver, sl, qt, ql, slv, u, v, pi, z, zi, qflx, shflx, slslope, qtslope, chu, chs, cmu, cms, sfuh, sflh, n2, s2, ri, rrho, pblh, ustar, kvh_in, kvm_in, kvh, kvm, tpert, qpert, qrlin, kvf, tke, wstarent, bprod, sprod, minpblh, wpert, tkes, turbtype_f, sm_aw, kbase_o, ktop_o, ncvfin_o, kbase_mg, ktop_mg, ncvfin_mg, kbase_f, ktop_f, ncvfin_f, wet_CL, web_CL, jtbu_CL, jbbu_CL, evhc_CL, jt2slv_CL, n2ht_CL, n2hb_CL, lwp_CL, opt_depth_CL, radinvfrac_CL, radf_CL, wstar_CL, wstar3fact_CL, ebrk, wbrk, lbrk, ricl, ghcl, shcl, smcl, gh_a, sh_a, sm_a, ri_a, leng, wcap, pblhp, cld, ipbl, kpblh, wsedl):
     ncvmax = pver
@@ -111,7 +111,7 @@ def caleddy(pver, sl, qt, ql, slv, u, v, pi, z, zi, qflx, shflx, slslope, qtslop
         kbase_o[k] = float(kbase[k])  # F:1793 kbase_o(i,k) = real(kbase(i,k),r8)
         ktop_o[k] = float(ktop[k])  # F:1794 ktop_o(i,k)  = real(ktop(i,k),r8)
         ncvfin_o[1] = float(ncvfin[1])  # F:1795 ncvfin_o(i)  = real(ncvfin(i),r8)
-    tkes[1] = math.pow(uw_fmax((((float.fromhex('0x1.7333333333333p+2') * vk) * z[pver]) * (bprod[(pver + 1)] + sprod[(pver + 1)])), float.fromhex('0x1.ad7f29abcaf48p-24')), float.fromhex('0x1.5555555555555p-1'))  # F:1822 tkes(i) = max(b1*vk*z(i,pver)*(bprod(i,pver+1)+sprod(i,pver+1)), 1.e-7_r8)**(2._r8/3._r8)
+    tkes[1] = libm.pow(uw_fmax((((float.fromhex('0x1.7333333333333p+2') * vk) * z[pver]) * (bprod[(pver + 1)] + sprod[(pver + 1)])), float.fromhex('0x1.ad7f29abcaf48p-24')), float.fromhex('0x1.5555555555555p-1'))  # F:1822 tkes(i) = max(b1*vk*z(i,pver)*(bprod(i,pver+1)+sprod(i,pver+1)), 1.e-7_r8)**(2._r8/3._r8)
     tkes[1] = uw_fmin(tkes[1], float.fromhex('0x1.4000000000000p+4'))  # F:1823 tkes(i) = min(tkes(i), tkemax)
     tke[(pver + 1)] = tkes[1]  # F:1824 tke(i,pver+1)  = tkes(i)
     wcap[(pver + 1)] = (tkes[1] / float.fromhex('0x1.7333333333333p+2'))  # F:1825 wcap(i,pver+1) = tkes(i)/b1
@@ -172,7 +172,7 @@ def caleddy(pver, sl, qt, ql, slv, u, v, pi, z, zi, qflx, shflx, slslope, qtslop
                             ebrk[ncvnew] = float.fromhex('0x0.0p+0')  # F:2040 ebrk(i,ncvnew) = 0._r8
                             lbrk[ncvnew] = float.fromhex('0x0.0p+0')  # F:2041 lbrk(i,ncvnew) = 0._r8
                             wbrk[ncvnew] = float.fromhex('0x0.0p+0')  # F:2042 wbrk(i,ncvnew) = 0._r8
-                        gg = ((((float.fromhex('0x1.0000000000000p-1') * vk) * z[pver]) * bprod[(pver + 1)]) / math.pow(tkes[1], float.fromhex('0x1.8000000000000p+0')))  # F:2056 gg = 0.5_r8 * vk * z(i,pver) * bprod(i,pver+1) / ( tkes(i)**(3._r8/2._r8) )
+                        gg = ((((float.fromhex('0x1.0000000000000p-1') * vk) * z[pver]) * bprod[(pver + 1)]) / libm.pow(tkes[1], float.fromhex('0x1.8000000000000p+0')))  # F:2056 gg = 0.5_r8 * vk * z(i,pver) * bprod(i,pver+1) / ( tkes(i)**(3._r8/2._r8) )
                         if (abs((float.fromhex('0x1.65aee631f8a09p-1') - (gg * float.fromhex('-0x1.15694467381d8p+5')))) <= float.fromhex('0x1.ad7f29abcaf48p-24')):  # F:2057 if( abs(alph5-gg*alph3) .le. 1.e-7_r8 ) then
                             gh = ghmin  # F:2060 gh = ghmin
                         else:
@@ -196,9 +196,9 @@ def caleddy(pver, sl, qt, ql, slv, u, v, pi, z, zi, qflx, shflx, slslope, qtslop
         else:
             lbulk = (zi[kt] - zi[kb])  # F:2143 lbulk = zi(i,kt) - zi(i,kb)
         for k in range(min(kb, pver), kt - 1, -1):  # F:2152 do k = min(kb,pver), kt, -1
-            tunlramp = (float.fromhex('0x1.5c28f5c28f5c3p-3') * (float.fromhex('0x1.0000000000000p+0') - (float.fromhex('0x1.0000000000000p-1') * math.exp(uw_fmin(float.fromhex('0x0.0p+0'), ricl[ncv])))))  # F:2158 tunlramp = ctunl*tunl*(1._r8-(1._r8-1._r8/ctunl)*exp(min(0._r8,ricl(i,ncv))))
+            tunlramp = (float.fromhex('0x1.5c28f5c28f5c3p-3') * (float.fromhex('0x1.0000000000000p+0') - (float.fromhex('0x1.0000000000000p-1') * libm.exp(uw_fmin(float.fromhex('0x0.0p+0'), ricl[ncv])))))  # F:2158 tunlramp = ctunl*tunl*(1._r8-(1._r8-1._r8/ctunl)*exp(min(0._r8,ricl(i,ncv))))
             tunlramp = uw_fmin(uw_fmax(tunlramp, float.fromhex('0x1.5c28f5c28f5c3p-4')), float.fromhex('0x1.5c28f5c28f5c3p-3'))  # F:2159 tunlramp = min(max(tunlramp,tunl),ctunl*tunl)
-            leng[k] = math.pow((math.pow((vk * zi[k]), float.fromhex('-0x1.8000000000000p+1')) + math.pow((tunlramp * lbulk), float.fromhex('-0x1.8000000000000p+1'))), float.fromhex('-0x1.5555555555555p-2'))  # F:2167 leng(i,k) = ( (vk*zi(i,k))**(-cleng) + (tunlramp*lbulk)**(-cleng) )**(-1._r8/cleng)
+            leng[k] = libm.pow((libm.pow((vk * zi[k]), float.fromhex('-0x1.8000000000000p+1')) + libm.pow((tunlramp * lbulk), float.fromhex('-0x1.8000000000000p+1'))), float.fromhex('-0x1.5555555555555p-2'))  # F:2167 leng(i,k) = ( (vk*zi(i,k))**(-cleng) + (tunlramp*lbulk)**(-cleng) )**(-1._r8/cleng)
             wcap[k] = ((leng[k] * leng[k]) * ((-(shcl[ncv] * n2[k])) + (smcl[ncv] * s2[k])))  # F:2172 wcap(i,k) = (leng(i,k)**2) * (-shcl(i,ncv)*n2(i,k)+smcl(i,ncv)*s2(i,k))
         if (kb < (pver + 1)):  # F:2178 if( kb .lt. pver+1 ) then
             jbzm = (z[(kb - 1)] - z[kb])  # F:2180 jbzm = z(i,kb-1) - z(i,kb)
@@ -277,7 +277,7 @@ def caleddy(pver, sl, qt, ql, slv, u, v, pi, z, zi, qflx, shflx, slslope, qtslop
         trmq = ((float.fromhex('0x1.7333333333333p+1') * (leng[kt] / lbulk)) * ((radf * dzht) + ((float.fromhex('0x1.999999999999ap-3') * fact) * wstar3)))  # F:2477 trmq = 0.5_r8 * b1 * ( leng(i,kt)  / lbulk ) * ( radf * dzht + a1i * fact * wstar3 )
         rmin = math.sqrt(trmp)  # F:2483 rmin  = sqrt(trmp)
         fmin = ((rmin * ((rmin * rmin) - (float.fromhex('0x1.8000000000000p+1') * trmp))) - (float.fromhex('0x1.0000000000000p+1') * trmq))  # F:2484 fmin  = rmin * ( rmin * rmin - 3._r8 * trmp ) - 2._r8 * trmq
-        wstar = math.pow(wstar3, float.fromhex('0x1.5555555555555p-2'))  # F:2485 wstar = wstar3**onet
+        wstar = libm.pow(wstar3, float.fromhex('0x1.5555555555555p-2'))  # F:2485 wstar = wstar3**onet
         rcrit = (float.fromhex('0x1.0000000000000p-1') * wstar)  # F:2486 rcrit = ccrit * wstar
         fcrit = ((rcrit * ((rcrit * rcrit) - (float.fromhex('0x1.8000000000000p+1') * trmp))) - (float.fromhex('0x1.0000000000000p+1') * trmq))  # F:2487 fcrit = rcrit * ( rcrit * rcrit - 3._r8 * trmp ) - 2._r8 * trmq
         noroot = (((rmin < rcrit) and (fcrit > float.fromhex('0x0.0p+0'))) or ((rmin >= rcrit) and (fmin > float.fromhex('0x0.0p+0'))))  # F:2499 noroot = ( ( rmin .lt. rcrit ) .and. ( fcrit .gt. 0._r8 ) ) .or. ( ( rmin .ge. rcrit ) .and. ( fmin  .gt. 0._r8 ) )
@@ -288,9 +288,9 @@ def caleddy(pver, sl, qt, ql, slv, u, v, pi, z, zi, qflx, shflx, slslope, qtslop
             trmq = ((((float.fromhex('0x1.7333333333333p+1') * (leng[kt] / lbulk)) * radf) * dzht) / trma)  # F:2505 trmq = 0.5_r8 * b1 * ( leng(i,kt) / lbulk ) * radf * dzht / trma
         qq = ((trmq * trmq) - powi(trmp, 3))  # F:2510 qq = trmq**2 - trmp**3
         if (qq >= float.fromhex('0x0.0p+0')):  # F:2511 if( qq .ge. 0._r8 ) then
-            rootp = (math.pow((trmq + math.sqrt(qq)), float.fromhex('0x1.5555555555555p-2')) + math.pow(uw_fmax((trmq - math.sqrt(qq)), float.fromhex('0x0.0p+0')), float.fromhex('0x1.5555555555555p-2')))  # F:2512 rootp = ( trmq + sqrt(qq) )**(1._r8/3._r8) + ( max( trmq - sqrt(qq), 0._r8 ) )**(1._r8/3._r8)
+            rootp = (libm.pow((trmq + math.sqrt(qq)), float.fromhex('0x1.5555555555555p-2')) + libm.pow(uw_fmax((trmq - math.sqrt(qq)), float.fromhex('0x0.0p+0')), float.fromhex('0x1.5555555555555p-2')))  # F:2512 rootp = ( trmq + sqrt(qq) )**(1._r8/3._r8) + ( max( trmq - sqrt(qq), 0._r8 ) )**(1._r8/3._r8)
         else:
-            rootp = ((float.fromhex('0x1.0000000000000p+1') * math.sqrt(trmp)) * math.cos((math.acos((trmq / math.sqrt(powi(trmp, 3)))) / float.fromhex('0x1.8000000000000p+1'))))  # F:2514 rootp = 2._r8 * sqrt(trmp) * cos( acos( trmq / sqrt(trmp**3) ) / 3._r8 )
+            rootp = ((float.fromhex('0x1.0000000000000p+1') * math.sqrt(trmp)) * libm.cos((libm.acos((trmq / math.sqrt(powi(trmp, 3)))) / float.fromhex('0x1.8000000000000p+1'))))  # F:2514 rootp = 2._r8 * sqrt(trmp) * cos( acos( trmq / sqrt(trmp**3) ) / 3._r8 )
         if noroot:  # F:2520 if( noroot )  wstar3 = ( rootp / ccrit )**3
             wstar3 = powi((rootp / float.fromhex('0x1.0000000000000p-1')), 3)  # F:2520 if( noroot )  wstar3 = ( rootp / ccrit )**3
         wet = (cet * wstar3)  # F:2521 wet = cet * wstar3
@@ -320,8 +320,8 @@ def caleddy(pver, sl, qt, ql, slv, u, v, pi, z, zi, qflx, shflx, slslope, qtslop
         sprod[kt] = (kentr * s2[kt])  # F:2609 sprod(i,kt) =  kentr * s2(i,kt)
         turbtype[kt] = 4  # F:2610 turbtype(i,kt) = 4
         trmp = float.fromhex('-0x1.b4b4b4b4b4b4bp-1')  # F:2611 trmp = -b1 * ae / ( 1._r8 + b1 * ae )
-        trmq = (-(((((bprod[kt] + sprod[kt]) * float.fromhex('0x1.7333333333333p+2')) * leng[kt]) / float.fromhex('0x1.b333333333333p+2')) / math.pow(ebrk[ncv], float.fromhex('0x1.8000000000000p+0'))))  # F:2612 trmq = -(bprod(i,kt)+sprod(i,kt))*b1*leng(i,kt)/(1._r8+b1*ae)/(ebrk(i,ncv)**(3._r8/2._r8))
-        rcap = math.pow(compute_cubic(float.fromhex('0x0.0p+0'), trmp, trmq), float.fromhex('0x1.0000000000000p+1'))  # F:2613 rcap = compute_cubic(0._r8,trmp,trmq)**2._r8
+        trmq = (-(((((bprod[kt] + sprod[kt]) * float.fromhex('0x1.7333333333333p+2')) * leng[kt]) / float.fromhex('0x1.b333333333333p+2')) / libm.pow(ebrk[ncv], float.fromhex('0x1.8000000000000p+0'))))  # F:2612 trmq = -(bprod(i,kt)+sprod(i,kt))*b1*leng(i,kt)/(1._r8+b1*ae)/(ebrk(i,ncv)**(3._r8/2._r8))
+        rcap = libm.pow(compute_cubic(float.fromhex('0x0.0p+0'), trmp, trmq), float.fromhex('0x1.0000000000000p+1'))  # F:2613 rcap = compute_cubic(0._r8,trmp,trmq)**2._r8
         rcap = uw_fmin(uw_fmax(rcap, float.fromhex('0x1.999999999999ap-4')), float.fromhex('0x1.0000000000000p+1'))  # F:2614 rcap = min( max(rcap,rcapmin), rcapmax )
         tke[kt] = (ebrk[ncv] * rcap)  # F:2615 tke(i,kt)  = ebrk(i,ncv) * rcap
         tke[kt] = uw_fmin(tke[kt], float.fromhex('0x1.4000000000000p+4'))  # F:2616 tke(i,kt)  = min( tke(i,kt), tkemax )
@@ -335,8 +335,8 @@ def caleddy(pver, sl, qt, ql, slv, u, v, pi, z, zi, qflx, shflx, slslope, qtslop
                 sprod[kb] = (kvm[kb] * s2[kb])  # F:2634 sprod(i,kb) =  kvm(i,kb)*s2(i,kb)
                 turbtype[kb] = 3  # F:2635 turbtype(i,kb) = 3
                 trmp = float.fromhex('-0x1.b4b4b4b4b4b4bp-1')  # F:2636 trmp = -b1*ae/(1._r8+b1*ae)
-                trmq = (-(((((bprod[kb] + sprod[kb]) * float.fromhex('0x1.7333333333333p+2')) * leng[kb]) / float.fromhex('0x1.b333333333333p+2')) / math.pow(ebrk[ncv], float.fromhex('0x1.8000000000000p+0'))))  # F:2637 trmq = -(bprod(i,kb)+sprod(i,kb))*b1*leng(i,kb)/(1._r8+b1*ae)/(ebrk(i,ncv)**(3._r8/2._r8))
-                rcap = math.pow(compute_cubic(float.fromhex('0x0.0p+0'), trmp, trmq), float.fromhex('0x1.0000000000000p+1'))  # F:2638 rcap = compute_cubic(0._r8,trmp,trmq)**2._r8
+                trmq = (-(((((bprod[kb] + sprod[kb]) * float.fromhex('0x1.7333333333333p+2')) * leng[kb]) / float.fromhex('0x1.b333333333333p+2')) / libm.pow(ebrk[ncv], float.fromhex('0x1.8000000000000p+0'))))  # F:2637 trmq = -(bprod(i,kb)+sprod(i,kb))*b1*leng(i,kb)/(1._r8+b1*ae)/(ebrk(i,ncv)**(3._r8/2._r8))
+                rcap = libm.pow(compute_cubic(float.fromhex('0x0.0p+0'), trmp, trmq), float.fromhex('0x1.0000000000000p+1'))  # F:2638 rcap = compute_cubic(0._r8,trmp,trmq)**2._r8
                 rcap = uw_fmin(uw_fmax(rcap, float.fromhex('0x1.999999999999ap-4')), float.fromhex('0x1.0000000000000p+1'))  # F:2639 rcap = min( max(rcap,rcapmin), rcapmax )
                 tke[kb] = (ebrk[ncv] * rcap)  # F:2640 tke(i,kb)  = ebrk(i,ncv) * rcap
                 tke[kb] = uw_fmin(tke[kb], float.fromhex('0x1.4000000000000p+4'))  # F:2641 tke(i,kb)  = min( tke(i,kb),tkemax )
@@ -348,8 +348,8 @@ def caleddy(pver, sl, qt, ql, slv, u, v, pi, z, zi, qflx, shflx, slslope, qtslop
                 bprod[kb] = (((dzht5 * bprod[kb]) - ((dzhb5 * kentr) * n2hb)) / (dzhb5 + dzht5))  # F:2651 bprod(i,kb) = ( dzht5*bprod(i,kb) - dzhb5*kentr*n2hb )     / ( dzhb5 + dzht5 )
                 sprod[kb] = (((dzht5 * sprod[kb]) + ((dzhb5 * kentr) * s2[kb])) / (dzhb5 + dzht5))  # F:2652 sprod(i,kb) = ( dzht5*sprod(i,kb) + dzhb5*kentr*s2(i,kb) ) / ( dzhb5 + dzht5 )
                 trmp = float.fromhex('-0x1.b4b4b4b4b4b4bp-1')  # F:2653 trmp = -b1*ae/(1._r8+b1*ae)
-                trmq = (-(((((kentr * (s2[kb] - n2hb)) * float.fromhex('0x1.7333333333333p+2')) * leng[kb]) / float.fromhex('0x1.b333333333333p+2')) / math.pow(ebrk[ncv], float.fromhex('0x1.8000000000000p+0'))))  # F:2654 trmq = -kentr*(s2(i,kb)-n2hb)*b1*leng(i,kb)/(1._r8+b1*ae)/(ebrk(i,ncv)**(3._r8/2._r8))
-                rcap = math.pow(compute_cubic(float.fromhex('0x0.0p+0'), trmp, trmq), float.fromhex('0x1.0000000000000p+1'))  # F:2655 rcap = compute_cubic(0._r8,trmp,trmq)**2._r8
+                trmq = (-(((((kentr * (s2[kb] - n2hb)) * float.fromhex('0x1.7333333333333p+2')) * leng[kb]) / float.fromhex('0x1.b333333333333p+2')) / libm.pow(ebrk[ncv], float.fromhex('0x1.8000000000000p+0'))))  # F:2654 trmq = -kentr*(s2(i,kb)-n2hb)*b1*leng(i,kb)/(1._r8+b1*ae)/(ebrk(i,ncv)**(3._r8/2._r8))
+                rcap = libm.pow(compute_cubic(float.fromhex('0x0.0p+0'), trmp, trmq), float.fromhex('0x1.0000000000000p+1'))  # F:2655 rcap = compute_cubic(0._r8,trmp,trmq)**2._r8
                 rcap = uw_fmin(uw_fmax(rcap, float.fromhex('0x1.999999999999ap-4')), float.fromhex('0x1.0000000000000p+1'))  # F:2656 rcap = min( max(rcap,rcapmin), rcapmax )
                 tke_imsi = (ebrk[ncv] * rcap)  # F:2657 tke_imsi = ebrk(i,ncv) * rcap
                 tke_imsi = uw_fmin(tke_imsi, float.fromhex('0x1.4000000000000p+4'))  # F:2658 tke_imsi = min( tke_imsi, tkemax )
@@ -403,7 +403,7 @@ def caleddy(pver, sl, qt, ql, slv, u, v, pi, z, zi, qflx, shflx, slslope, qtslop
             lbulk = (z[(kt - 1)] - z[kb])  # F:2762 lbulk = z(i,kt-1) - z(i,kb)
             for ks in range(kt, kb + 1, 1):  # F:2763 do ks = kt, kb
                 tunlramp = float.fromhex('0x1.5c28f5c28f5c3p-4')  # F:2765 tunlramp = tunl
-                leng[ks] = math.pow((math.pow((vk * zi[ks]), float.fromhex('-0x1.8000000000000p+1')) + math.pow((tunlramp * lbulk), float.fromhex('-0x1.8000000000000p+1'))), float.fromhex('-0x1.5555555555555p-2'))  # F:2773 leng(i,ks) = ( (vk*zi(i,ks))**(-cleng) + (tunlramp*lbulk)**(-cleng) )**(-1._r8/cleng)
+                leng[ks] = libm.pow((libm.pow((vk * zi[ks]), float.fromhex('-0x1.8000000000000p+1')) + libm.pow((tunlramp * lbulk), float.fromhex('-0x1.8000000000000p+1'))), float.fromhex('-0x1.5555555555555p-2'))  # F:2773 leng(i,ks) = ( (vk*zi(i,ks))**(-cleng) + (tunlramp*lbulk)**(-cleng) )**(-1._r8/cleng)
     belongst[(pver + 1)] = (not belongcv[(pver + 1)])  # F:2788 belongst(i,pver+1) = .not. belongcv(i,pver+1)
     if belongst[(pver + 1)]:  # F:2790 if( belongst(i,pver+1) ) then
         turbtype[(pver + 1)] = 1  # F:2792 turbtype(i,pver+1) = 1
@@ -417,7 +417,7 @@ def caleddy(pver, sl, qt, ql, slv, u, v, pi, z, zi, qflx, shflx, slslope, qtslop
         pblhp[1] = (float.fromhex('0x1.0000000000000p-1') * (pi[ktopbl[1]] + pi[(ktopbl[1] + 1)]))  # F:2809 pblhp(i)  = 0.5_r8 * ( pi(i,ktopbl(i)) + pi(i,ktopbl(i)+1) )
         for ks in range(kt, pver + 1, 1):  # F:2814 do ks = kt, pver
             tunlramp = float.fromhex('0x1.5c28f5c28f5c3p-4')  # F:2816 tunlramp = tunl
-            leng[ks] = math.pow((math.pow((vk * zi[ks]), float.fromhex('-0x1.8000000000000p+1')) + math.pow((tunlramp * lbulk), float.fromhex('-0x1.8000000000000p+1'))), float.fromhex('-0x1.5555555555555p-2'))  # F:2824 leng(i,ks) = ( (vk*zi(i,ks))**(-cleng) + (tunlramp*lbulk)**(-cleng) )**(-1._r8/cleng)
+            leng[ks] = libm.pow((libm.pow((vk * zi[ks]), float.fromhex('-0x1.8000000000000p+1')) + libm.pow((tunlramp * lbulk), float.fromhex('-0x1.8000000000000p+1'))), float.fromhex('-0x1.5555555555555p-2'))  # F:2824 leng(i,ks) = ( (vk*zi(i,ks))**(-cleng) + (tunlramp*lbulk)**(-cleng) )**(-1._r8/cleng)
         wpert[1] = float.fromhex('0x0.0p+0')  # F:2834 wpert(i) = 0._r8
         tpert[1] = uw_fmax(((((shflx[1] * rrho[1]) / cpair) * float.fromhex('0x1.1000000000000p+3')) / ustar[1]), float.fromhex('0x0.0p+0'))  # F:2835 tpert(i) = max(shflx(i)*rrho(i)/cpair*fak/ustar(i),0._r8)
         qpert[1] = uw_fmax((((qflx[1] * rrho[1]) * float.fromhex('0x1.1000000000000p+3')) / ustar[1]), float.fromhex('0x0.0p+0'))  # F:2836 qpert(i) = max(qflx(i)*rrho(i)*fak/ustar(i),0._r8)
@@ -456,7 +456,7 @@ def caleddy(pver, sl, qt, ql, slv, u, v, pi, z, zi, qflx, shflx, slslope, qtslop
             sm = uw_fmax(float.fromhex('0x0.0p+0'), (((float.fromhex('0x1.1cc63f141205cp-1') + (float.fromhex('-0x1.174bc6a7ef9dbp+2') * gh)) / (float.fromhex('0x1.0000000000000p+0') + (float.fromhex('-0x1.15694467381d8p+5') * gh))) / (float.fromhex('0x1.0000000000000p+0') + (alph4exs * gh))))  # F:2918 sm   = max(0._r8,(alph1 + alph2*gh)/(1._r8+alph3*gh)/(1._r8+alph4exs*gh))
             lbulk = (z[(k - 1)] - z[k])  # F:2920 lbulk = z(i,k-1) - z(i,k)
             tunlramp = float.fromhex('0x1.5c28f5c28f5c3p-4')  # F:2923 tunlramp = tunl
-            leng_imsi = math.pow((math.pow((vk * zi[k]), float.fromhex('-0x1.8000000000000p+1')) + math.pow((tunlramp * lbulk), float.fromhex('-0x1.8000000000000p+1'))), float.fromhex('-0x1.5555555555555p-2'))  # F:2931 leng_imsi = ( (vk*zi(i,k))**(-cleng) + (tunlramp*lbulk)**(-cleng) )**(-1._r8/cleng)
+            leng_imsi = libm.pow((libm.pow((vk * zi[k]), float.fromhex('-0x1.8000000000000p+1')) + libm.pow((tunlramp * lbulk), float.fromhex('-0x1.8000000000000p+1'))), float.fromhex('-0x1.5555555555555p-2'))  # F:2931 leng_imsi = ( (vk*zi(i,k))**(-cleng) + (tunlramp*lbulk)**(-cleng) )**(-1._r8/cleng)
             tke_imsi = ((float.fromhex('0x1.7333333333333p+2') * (leng_imsi * leng_imsi)) * ((-(sh * n2[k])) + (sm * s2[k])))  # F:2937 tke_imsi = b1*(leng_imsi**2)*(-sh*n2(i,k)+sm*s2(i,k))
             tke_imsi = uw_fmin(uw_fmax(tke_imsi, float.fromhex('0x0.0p+0')), float.fromhex('0x1.4000000000000p+4'))  # F:2938 tke_imsi = min(max(tke_imsi,0._r8),tkemax)
             kvh_imsi = ((leng_imsi * math.sqrt(tke_imsi)) * sh)  # F:2939 kvh_imsi = leng_imsi * sqrt(tke_imsi) * sh
@@ -472,7 +472,7 @@ def caleddy(pver, sl, qt, ql, slv, u, v, pi, z, zi, qflx, shflx, slslope, qtslop
                 sm_aw[k] = (sm / float.fromhex('0x1.1cc63f141205cp-1'))  # F:2950 sm_aw(i,k) =  sm/alph1
                 turbtype[k] = 1  # F:2951 turbtype(i,k) = 1
     bprod[(pver + 1)] = bflxs[1]  # F:2987 bprod(i,pver+1) = bflxs(i)
-    gg = ((((float.fromhex('0x1.0000000000000p-1') * vk) * z[pver]) * bprod[(pver + 1)]) / math.pow(tkes[1], float.fromhex('0x1.8000000000000p+0')))  # F:2989 gg = 0.5_r8*vk*z(i,pver)*bprod(i,pver+1)/(tkes(i)**(3._r8/2._r8))
+    gg = ((((float.fromhex('0x1.0000000000000p-1') * vk) * z[pver]) * bprod[(pver + 1)]) / libm.pow(tkes[1], float.fromhex('0x1.8000000000000p+0')))  # F:2989 gg = 0.5_r8*vk*z(i,pver)*bprod(i,pver+1)/(tkes(i)**(3._r8/2._r8))
     if (abs((float.fromhex('0x1.65aee631f8a09p-1') - (gg * float.fromhex('-0x1.15694467381d8p+5')))) <= float.fromhex('0x1.ad7f29abcaf48p-24')):  # F:2990 if( abs(alph5-gg*alph3) .le. 1.e-7_r8 ) then
         if (bprod[(pver + 1)] > float.fromhex('0x0.0p+0')):  # F:2992 if( bprod(i,pver+1) .gt. 0._r8 ) then
             gh = float.fromhex('-0x1.c4467381d7dbfp+1')  # F:2993 gh = -3.5334_r8
@@ -599,7 +599,7 @@ def zisocl(pver, z, zi, n2, s2, bprod, sprod, bflxs, tkes, ncvfin, kbase, ktop, 
         dw_surf = float.fromhex('0x0.0p+0')  # F:3363 dw_surf    = 0._r8
         if (kb == (pver + 1)):  # F:3364 if( kb .eq. pver+1 ) then
             if (bflxs[1] > float.fromhex('0x0.0p+0')):  # F:3366 if( bflxs(i) .gt. 0._r8 ) then
-                gg = ((((float.fromhex('0x1.0000000000000p-1') * vk) * z[pver]) * bprod[(pver + 1)]) / math.pow(tkes[1], float.fromhex('0x1.8000000000000p+0')))  # F:3373 gg    = 0.5_r8*vk*z(i,pver)*bprod(i,pver+1)/(tkes(i)**(3._r8/2._r8))
+                gg = ((((float.fromhex('0x1.0000000000000p-1') * vk) * z[pver]) * bprod[(pver + 1)]) / libm.pow(tkes[1], float.fromhex('0x1.8000000000000p+0')))  # F:3373 gg    = 0.5_r8*vk*z(i,pver)*bprod(i,pver+1)/(tkes(i)**(3._r8/2._r8))
                 gh = (gg / (float.fromhex('0x1.65aee631f8a09p-1') - (gg * float.fromhex('-0x1.15694467381d8p+5'))))  # F:3374 gh    = gg/(alph5-gg*alph3)
                 gh = uw_fmin(uw_fmax(gh, float.fromhex('-0x1.c4467381d7dbfp+1')), float.fromhex('0x1.7dbf487fcb924p-6'))  # F:3376 gh    = min(max(gh,-3.5334_r8),0.0233_r8)
                 sh = (float.fromhex('0x1.65aee631f8a09p-1') / (float.fromhex('0x1.0000000000000p+0') + (float.fromhex('-0x1.15694467381d8p+5') * gh)))  # F:3377 sh    = alph5/(1._r8+alph3*gh)
@@ -620,7 +620,7 @@ def zisocl(pver, z, zi, n2, s2, bprod, sprod, bflxs, tkes, ncvfin, kbase, ktop, 
         if (kt < (kb - 1)):  # F:3421 if( kt .lt. kb - 1 ) then
             for k in range((kb - 1), (kt + 1) - 1, -1):  # F:3423 do k = kb - 1, kt + 1, -1
                 tunlramp = float.fromhex('0x1.051eb851eb852p-3')  # F:3426 tunlramp = 0.5_r8*(1._r8+ctunl)*tunl
-                lz = math.pow((math.pow((vk * zi[k]), float.fromhex('-0x1.8000000000000p+1')) + math.pow((tunlramp * lbulk), float.fromhex('-0x1.8000000000000p+1'))), float.fromhex('-0x1.5555555555555p-2'))  # F:3434 lz = ( (vk*zi(i,k))**(-cleng) + (tunlramp*lbulk)**(-cleng) )**(-1._r8/cleng)
+                lz = libm.pow((libm.pow((vk * zi[k]), float.fromhex('-0x1.8000000000000p+1')) + libm.pow((tunlramp * lbulk), float.fromhex('-0x1.8000000000000p+1'))), float.fromhex('-0x1.5555555555555p-2'))  # F:3434 lz = ( (vk*zi(i,k))**(-cleng) + (tunlramp*lbulk)**(-cleng) )**(-1._r8/cleng)
                 dzinc = (z[(k - 1)] - z[k])  # F:3439 dzinc = z(i,k-1) - z(i,k)
                 l2n2 = (l2n2 + (((lz * lz) * n2[k]) * dzinc))  # F:3440 l2n2  = l2n2 + lz*lz*n2(i,k)*dzinc
                 l2s2 = (l2s2 + (((lz * lz) * s2[k]) * dzinc))  # F:3441 l2s2  = l2s2 + lz*lz*s2(i,k)*dzinc
@@ -644,7 +644,7 @@ def zisocl(pver, z, zi, n2, s2, bprod, sprod, bflxs, tkes, ncvfin, kbase, ktop, 
         l2s2 = uw_fmin(l2s2, ((float.fromhex('0x1.4000000000000p+4') * lint) / (float.fromhex('0x1.7333333333333p+2') * sm)))  # F:3500 l2s2 =  min( l2s2, tkemax*lint/(b1*sm))
         extend[1] = False  # F:3530 extend = .false.
         tunlramp = float.fromhex('0x1.051eb851eb852p-3')  # F:3535 tunlramp = 0.5_r8*(1._r8+ctunl)*tunl
-        lz = math.pow((math.pow((vk * zi[kt]), float.fromhex('-0x1.8000000000000p+1')) + math.pow((tunlramp * lbulk), float.fromhex('-0x1.8000000000000p+1'))), float.fromhex('-0x1.5555555555555p-2'))  # F:3543 lz = ( (vk*zi(i,kt))**(-cleng) + (tunlramp*lbulk)**(-cleng) )**(-1._r8/cleng)
+        lz = libm.pow((libm.pow((vk * zi[kt]), float.fromhex('-0x1.8000000000000p+1')) + libm.pow((tunlramp * lbulk), float.fromhex('-0x1.8000000000000p+1'))), float.fromhex('-0x1.5555555555555p-2'))  # F:3543 lz = ( (vk*zi(i,kt))**(-cleng) + (tunlramp*lbulk)**(-cleng) )**(-1._r8/cleng)
         dzinc = (z[(kt - 1)] - z[kt])  # F:3549 dzinc = z(i,kt-1)-z(i,kt)
         dl2n2 = (((lz * lz) * n2[kt]) * dzinc)  # F:3550 dl2n2 = lz*lz*n2(i,kt)*dzinc
         dl2s2 = (((lz * lz) * s2[kt]) * dzinc)  # F:3551 dl2s2 = lz*lz*s2(i,kt)*dzinc
@@ -664,7 +664,7 @@ def zisocl(pver, z, zi, n2, s2, bprod, sprod, bflxs, tkes, ncvfin, kbase, ktop, 
             if (kt == ktinc):  # F:3601 if( kt .eq. ktinc ) then
                 for k in range((kbase[((ncv + cntu) + 1)] - 1), (ktop[((ncv + cntu) + 1)] + 1) - 1, -1):  # F:3603 do k = kbase(i,ncv+cntu+1) - 1, ktop(i,ncv+cntu+1) + 1, -1
                     tunlramp = float.fromhex('0x1.051eb851eb852p-3')  # F:3606 tunlramp = 0.5_r8*(1._r8+ctunl)*tunl
-                    lz = math.pow((math.pow((vk * zi[k]), float.fromhex('-0x1.8000000000000p+1')) + math.pow((tunlramp * lbulk), float.fromhex('-0x1.8000000000000p+1'))), float.fromhex('-0x1.5555555555555p-2'))  # F:3614 lz = ( (vk*zi(i,k))**(-cleng) + (tunlramp*lbulk)**(-cleng) )**(-1._r8/cleng)
+                    lz = libm.pow((libm.pow((vk * zi[k]), float.fromhex('-0x1.8000000000000p+1')) + libm.pow((tunlramp * lbulk), float.fromhex('-0x1.8000000000000p+1'))), float.fromhex('-0x1.5555555555555p-2'))  # F:3614 lz = ( (vk*zi(i,k))**(-cleng) + (tunlramp*lbulk)**(-cleng) )**(-1._r8/cleng)
                     dzinc = (z[(k - 1)] - z[k])  # F:3620 dzinc = z(i,k-1)-z(i,k)
                     dl2n2 = (((lz * lz) * n2[k]) * dzinc)  # F:3621 dl2n2 = lz*lz*n2(i,k)*dzinc
                     dl2s2 = (((lz * lz) * s2[k]) * dzinc)  # F:3622 dl2s2 = lz*lz*s2(i,k)*dzinc
@@ -678,7 +678,7 @@ def zisocl(pver, z, zi, n2, s2, bprod, sprod, bflxs, tkes, ncvfin, kbase, ktop, 
                 ncvfin[1] = (ncvfin[1] - 1)  # F:3634 ncvfin(i) = ncvfin(i) - 1
                 cntu = (cntu + 1)  # F:3635 cntu      = cntu + 1
             tunlramp = float.fromhex('0x1.051eb851eb852p-3')  # F:3643 tunlramp = 0.5_r8*(1._r8+ctunl)*tunl
-            lz = math.pow((math.pow((vk * zi[kt]), float.fromhex('-0x1.8000000000000p+1')) + math.pow((tunlramp * lbulk), float.fromhex('-0x1.8000000000000p+1'))), float.fromhex('-0x1.5555555555555p-2'))  # F:3651 lz = ( (vk*zi(i,kt))**(-cleng) + (tunlramp*lbulk)**(-cleng) )**(-1._r8/cleng)
+            lz = libm.pow((libm.pow((vk * zi[kt]), float.fromhex('-0x1.8000000000000p+1')) + libm.pow((tunlramp * lbulk), float.fromhex('-0x1.8000000000000p+1'))), float.fromhex('-0x1.5555555555555p-2'))  # F:3651 lz = ( (vk*zi(i,kt))**(-cleng) + (tunlramp*lbulk)**(-cleng) )**(-1._r8/cleng)
             dzinc = (z[(kt - 1)] - z[kt])  # F:3657 dzinc = z(i,kt-1)-z(i,kt)
             dl2n2 = (((lz * lz) * n2[kt]) * dzinc)  # F:3658 dl2n2 = lz*lz*n2(i,kt)*dzinc
             dl2s2 = (((lz * lz) * s2[kt]) * dzinc)  # F:3659 dl2s2 = lz*lz*s2(i,kt)*dzinc
@@ -689,7 +689,7 @@ def zisocl(pver, z, zi, n2, s2, bprod, sprod, bflxs, tkes, ncvfin, kbase, ktop, 
                 ktop[(ncv + incv)] = ktop[((ncv + cntu) + incv)]  # F:3673 ktop(i,ncv+incv)  = ktop(i,ncv+cntu+incv)
         if (kb != (pver + 1)):  # F:3681 if( kb .ne. pver + 1 ) then
             tunlramp = float.fromhex('0x1.051eb851eb852p-3')  # F:3686 tunlramp = 0.5_r8*(1._r8+ctunl)*tunl
-            lz = math.pow((math.pow((vk * zi[kb]), float.fromhex('-0x1.8000000000000p+1')) + math.pow((tunlramp * lbulk), float.fromhex('-0x1.8000000000000p+1'))), float.fromhex('-0x1.5555555555555p-2'))  # F:3694 lz = ( (vk*zi(i,kb))**(-cleng) + (tunlramp*lbulk)**(-cleng) )**(-1._r8/cleng)
+            lz = libm.pow((libm.pow((vk * zi[kb]), float.fromhex('-0x1.8000000000000p+1')) + libm.pow((tunlramp * lbulk), float.fromhex('-0x1.8000000000000p+1'))), float.fromhex('-0x1.5555555555555p-2'))  # F:3694 lz = ( (vk*zi(i,kb))**(-cleng) + (tunlramp*lbulk)**(-cleng) )**(-1._r8/cleng)
             dzinc = (z[(kb - 1)] - z[kb])  # F:3700 dzinc = z(i,kb-1)-z(i,kb)
             dl2n2 = (((lz * lz) * n2[kb]) * dzinc)  # F:3701 dl2n2 = lz*lz*n2(i,kb)*dzinc
             dl2s2 = (((lz * lz) * s2[kb]) * dzinc)  # F:3702 dl2s2 = lz*lz*s2(i,kb)*dzinc
@@ -709,7 +709,7 @@ def zisocl(pver, z, zi, n2, s2, bprod, sprod, bflxs, tkes, ncvfin, kbase, ktop, 
                 if (kb == kbinc):  # F:3746 if( kb .eq. kbinc ) then
                     for k in range((ktop[(ncv - 1)] + 1), (kbase[(ncv - 1)] - 1) + 1, 1):  # F:3748 do k =  ktop(i,ncv-1) + 1, kbase(i,ncv-1) - 1
                         tunlramp = float.fromhex('0x1.051eb851eb852p-3')  # F:3751 tunlramp = 0.5_r8*(1._r8+ctunl)*tunl
-                        lz = math.pow((math.pow((vk * zi[k]), float.fromhex('-0x1.8000000000000p+1')) + math.pow((tunlramp * lbulk), float.fromhex('-0x1.8000000000000p+1'))), float.fromhex('-0x1.5555555555555p-2'))  # F:3759 lz = ( (vk*zi(i,k))**(-cleng) + (tunlramp*lbulk)**(-cleng) )**(-1._r8/cleng)
+                        lz = libm.pow((libm.pow((vk * zi[k]), float.fromhex('-0x1.8000000000000p+1')) + libm.pow((tunlramp * lbulk), float.fromhex('-0x1.8000000000000p+1'))), float.fromhex('-0x1.5555555555555p-2'))  # F:3759 lz = ( (vk*zi(i,k))**(-cleng) + (tunlramp*lbulk)**(-cleng) )**(-1._r8/cleng)
                         dzinc = (z[(k - 1)] - z[k])  # F:3765 dzinc = z(i,k-1)-z(i,k)
                         dl2n2 = (((lz * lz) * n2[k]) * dzinc)  # F:3766 dl2n2 = lz*lz*n2(i,k)*dzinc
                         dl2s2 = (((lz * lz) * s2[k]) * dzinc)  # F:3767 dl2s2 = lz*lz*s2(i,k)*dzinc
@@ -725,14 +725,14 @@ def zisocl(pver, z, zi, n2, s2, bprod, sprod, bflxs, tkes, ncvfin, kbase, ktop, 
                     cntd = (cntd + 1)  # F:3784 cntd      = cntd + 1
                 if (kb == (pver + 1)):  # F:3792 if( kb .eq. pver + 1 ) then
                     if (bflxs[1] > float.fromhex('0x0.0p+0')):  # F:3794 if( bflxs(i) .gt. 0._r8 ) then
-                        gg = ((((float.fromhex('0x1.0000000000000p-1') * vk) * z[pver]) * bprod[(pver + 1)]) / math.pow(tkes[1], float.fromhex('0x1.8000000000000p+0')))  # F:3796 gg = 0.5_r8*vk*z(i,pver)*bprod(i,pver+1)/(tkes(i)**(3._r8/2._r8))
+                        gg = ((((float.fromhex('0x1.0000000000000p-1') * vk) * z[pver]) * bprod[(pver + 1)]) / libm.pow(tkes[1], float.fromhex('0x1.8000000000000p+0')))  # F:3796 gg = 0.5_r8*vk*z(i,pver)*bprod(i,pver+1)/(tkes(i)**(3._r8/2._r8))
                         gh_surf = (gg / (float.fromhex('0x1.65aee631f8a09p-1') - (gg * float.fromhex('-0x1.15694467381d8p+5'))))  # F:3797 gh_surf = gg/(alph5-gg*alph3)
                         gh_surf = uw_fmin(uw_fmax(gh_surf, float.fromhex('-0x1.c4467381d7dbfp+1')), float.fromhex('0x1.7dbf487fcb924p-6'))  # F:3799 gh_surf = min(max(gh_surf,-3.5334_r8),0.0233_r8)
                         sh_surf = (float.fromhex('0x1.65aee631f8a09p-1') / (float.fromhex('0x1.0000000000000p+0') + (float.fromhex('-0x1.15694467381d8p+5') * gh_surf)))  # F:3800 sh_surf = alph5/(1._r8+alph3*gh_surf)
                         sm_surf = (((float.fromhex('0x1.1cc63f141205cp-1') + (float.fromhex('-0x1.174bc6a7ef9dbp+2') * gh_surf)) / (float.fromhex('0x1.0000000000000p+0') + (float.fromhex('-0x1.15694467381d8p+5') * gh_surf))) / (float.fromhex('0x1.0000000000000p+0') + (float.fromhex('-0x1.88240b780346ep+2') * gh_surf)))  # F:3801 sm_surf = (alph1 + alph2*gh_surf)/(1._r8+alph3*gh_surf)/(1._r8+alph4*gh_surf)
                         dlint_surf = z[pver]  # F:3804 dlint_surf = z(i,pver)
-                        dl2n2_surf = (-(((vk * math.pow(z[pver], float.fromhex('0x1.0000000000000p+1'))) * bprod[(pver + 1)]) / (sh_surf * math.sqrt(tkes[1]))))  # F:3805 dl2n2_surf = -vk*(z(i,pver)**2._r8)*bprod(i,pver+1)/(sh_surf*sqrt(tkes(i)))
-                        dl2s2_surf = (((vk * math.pow(z[pver], float.fromhex('0x1.0000000000000p+1'))) * sprod[(pver + 1)]) / (sm_surf * math.sqrt(tkes[1])))  # F:3806 dl2s2_surf =  vk*(z(i,pver)**2._r8)*sprod(i,pver+1)/(sm_surf*sqrt(tkes(i)))
+                        dl2n2_surf = (-(((vk * libm.pow(z[pver], float.fromhex('0x1.0000000000000p+1'))) * bprod[(pver + 1)]) / (sh_surf * math.sqrt(tkes[1]))))  # F:3805 dl2n2_surf = -vk*(z(i,pver)**2._r8)*bprod(i,pver+1)/(sh_surf*sqrt(tkes(i)))
+                        dl2s2_surf = (((vk * libm.pow(z[pver], float.fromhex('0x1.0000000000000p+1'))) * sprod[(pver + 1)]) / (sm_surf * math.sqrt(tkes[1])))  # F:3806 dl2s2_surf =  vk*(z(i,pver)**2._r8)*sprod(i,pver+1)/(sm_surf*sqrt(tkes(i)))
                         dw_surf = ((tkes[1] / float.fromhex('0x1.7333333333333p+2')) * z[pver])  # F:3807 dw_surf = (tkes(i)/b1)*z(i,pver)
                     else:
                         dlint_surf = float.fromhex('0x0.0p+0')  # F:3809 dlint_surf = 0._r8
@@ -746,7 +746,7 @@ def zisocl(pver, z, zi, n2, s2, bprod, sprod, bflxs, tkes, ncvfin, kbase, ktop, 
                     wint = (wint + dw_surf)  # F:3825 wint = wint + dw_surf
                 else:
                     tunlramp = float.fromhex('0x1.051eb851eb852p-3')  # F:3830 tunlramp = 0.5_r8*(1._r8+ctunl)*tunl
-                    lz = math.pow((math.pow((vk * zi[kb]), float.fromhex('-0x1.8000000000000p+1')) + math.pow((tunlramp * lbulk), float.fromhex('-0x1.8000000000000p+1'))), float.fromhex('-0x1.5555555555555p-2'))  # F:3838 lz = ( (vk*zi(i,kb))**(-cleng) + (tunlramp*lbulk)**(-cleng) )**(-1._r8/cleng)
+                    lz = libm.pow((libm.pow((vk * zi[kb]), float.fromhex('-0x1.8000000000000p+1')) + libm.pow((tunlramp * lbulk), float.fromhex('-0x1.8000000000000p+1'))), float.fromhex('-0x1.5555555555555p-2'))  # F:3838 lz = ( (vk*zi(i,kb))**(-cleng) + (tunlramp*lbulk)**(-cleng) )**(-1._r8/cleng)
                     dzinc = (z[(kb - 1)] - z[kb])  # F:3844 dzinc = z(i,kb-1)-z(i,kb)
                     dl2n2 = (((lz * lz) * n2[kb]) * dzinc)  # F:3845 dl2n2 = lz*lz*n2(i,kb)*dzinc
                     dl2s2 = (((lz * lz) * s2[kb]) * dzinc)  # F:3846 dl2s2 = lz*lz*s2(i,kb)*dzinc
@@ -769,14 +769,14 @@ def zisocl(pver, z, zi, n2, s2, bprod, sprod, bflxs, tkes, ncvfin, kbase, ktop, 
             dw_surf = float.fromhex('0x0.0p+0')  # F:3905 dw_surf    = 0._r8
             if (kb == (pver + 1)):  # F:3906 if( kb .eq. pver + 1 ) then
                 if (bflxs[1] > float.fromhex('0x0.0p+0')):  # F:3907 if( bflxs(i) .gt. 0._r8 ) then
-                    gg = ((((float.fromhex('0x1.0000000000000p-1') * vk) * z[pver]) * bprod[(pver + 1)]) / math.pow(tkes[1], float.fromhex('0x1.8000000000000p+0')))  # F:3909 gg = 0.5_r8*vk*z(i,pver)*bprod(i,pver+1)/(tkes(i)**(3._r8/2._r8))
+                    gg = ((((float.fromhex('0x1.0000000000000p-1') * vk) * z[pver]) * bprod[(pver + 1)]) / libm.pow(tkes[1], float.fromhex('0x1.8000000000000p+0')))  # F:3909 gg = 0.5_r8*vk*z(i,pver)*bprod(i,pver+1)/(tkes(i)**(3._r8/2._r8))
                     gh = (gg / (float.fromhex('0x1.65aee631f8a09p-1') - (gg * float.fromhex('-0x1.15694467381d8p+5'))))  # F:3910 gh = gg/(alph5-gg*alph3)
                     gh = uw_fmin(uw_fmax(gh, float.fromhex('-0x1.c4467381d7dbfp+1')), float.fromhex('0x1.7dbf487fcb924p-6'))  # F:3912 gh = min(max(gh,-3.5334_r8),0.0233_r8)
                     sh = (float.fromhex('0x1.65aee631f8a09p-1') / (float.fromhex('0x1.0000000000000p+0') + (float.fromhex('-0x1.15694467381d8p+5') * gh)))  # F:3913 sh = alph5/(1._r8+alph3*gh)
                     sm = (((float.fromhex('0x1.1cc63f141205cp-1') + (float.fromhex('-0x1.174bc6a7ef9dbp+2') * gh)) / (float.fromhex('0x1.0000000000000p+0') + (float.fromhex('-0x1.15694467381d8p+5') * gh))) / (float.fromhex('0x1.0000000000000p+0') + (float.fromhex('-0x1.88240b780346ep+2') * gh)))  # F:3914 sm = (alph1 + alph2*gh)/(1._r8+alph3*gh)/(1._r8+alph4*gh)
                     dlint_surf = z[pver]  # F:3917 dlint_surf = z(i,pver)
-                    dl2n2_surf = (-(((vk * math.pow(z[pver], float.fromhex('0x1.0000000000000p+1'))) * bprod[(pver + 1)]) / (sh * math.sqrt(tkes[1]))))  # F:3918 dl2n2_surf = -vk*(z(i,pver)**2._r8)*bprod(i,pver+1)/(sh*sqrt(tkes(i)))
-                    dl2s2_surf = (((vk * math.pow(z[pver], float.fromhex('0x1.0000000000000p+1'))) * sprod[(pver + 1)]) / (sm * math.sqrt(tkes[1])))  # F:3919 dl2s2_surf =  vk*(z(i,pver)**2._r8)*sprod(i,pver+1)/(sm*sqrt(tkes(i)))
+                    dl2n2_surf = (-(((vk * libm.pow(z[pver], float.fromhex('0x1.0000000000000p+1'))) * bprod[(pver + 1)]) / (sh * math.sqrt(tkes[1]))))  # F:3918 dl2n2_surf = -vk*(z(i,pver)**2._r8)*bprod(i,pver+1)/(sh*sqrt(tkes(i)))
+                    dl2s2_surf = (((vk * libm.pow(z[pver], float.fromhex('0x1.0000000000000p+1'))) * sprod[(pver + 1)]) / (sm * math.sqrt(tkes[1])))  # F:3919 dl2s2_surf =  vk*(z(i,pver)**2._r8)*sprod(i,pver+1)/(sm*sqrt(tkes(i)))
                     dw_surf = ((tkes[1] / float.fromhex('0x1.7333333333333p+2')) * z[pver])  # F:3920 dw_surf    = (tkes(i)/b1)*z(i,pver)
                 else:
                     lbulk = (zi[kt] - z[pver])  # F:3922 lbulk = zi(i,kt) - z(i,pver)
@@ -788,7 +788,7 @@ def zisocl(pver, z, zi, n2, s2, bprod, sprod, bflxs, tkes, ncvfin, kbase, ktop, 
             l2s2 = float.fromhex('0x0.0p+0')  # F:3931 l2s2 = 0._r8
             for k in range((kt + 1), (kb - 1) + 1, 1):  # F:3940 do k = kt + 1, kb - 1
                 tunlramp = float.fromhex('0x1.051eb851eb852p-3')  # F:3942 tunlramp = 0.5_r8*(1._r8+ctunl)*tunl
-                lz = math.pow((math.pow((vk * zi[k]), float.fromhex('-0x1.8000000000000p+1')) + math.pow((tunlramp * lbulk), float.fromhex('-0x1.8000000000000p+1'))), float.fromhex('-0x1.5555555555555p-2'))  # F:3950 lz = ( (vk*zi(i,k))**(-cleng) + (tunlramp*lbulk)**(-cleng) )**(-1._r8/cleng)
+                lz = libm.pow((libm.pow((vk * zi[k]), float.fromhex('-0x1.8000000000000p+1')) + libm.pow((tunlramp * lbulk), float.fromhex('-0x1.8000000000000p+1'))), float.fromhex('-0x1.5555555555555p-2'))  # F:3950 lz = ( (vk*zi(i,k))**(-cleng) + (tunlramp*lbulk)**(-cleng) )**(-1._r8/cleng)
                 dzinc = (z[(k - 1)] - z[k])  # F:3955 dzinc = z(i,k-1) - z(i,k)
                 lint = (lint + dzinc)  # F:3956 lint = lint + dzinc
                 l2n2 = (l2n2 + (((lz * lz) * n2[k]) * dzinc))  # F:3957 l2n2 = l2n2 + lz*lz*n2(i,k)*dzinc
@@ -827,16 +827,16 @@ def compute_cubic(a, b, c):
     rr = ((((float.fromhex('0x1.0000000000000p+1') * powi(a, 3)) - ((float.fromhex('0x1.2000000000000p+3') * a) * b)) + (float.fromhex('0x1.b000000000000p+4') * c)) / float.fromhex('0x1.b000000000000p+5'))  # F:4039 rr = (2._r8*a**3 - 9._r8*a*b + 27._r8*c)/54._r8
     dd = ((rr * rr) - powi(qq, 3))  # F:4041 dd = rr**2 - qq**3
     if (dd <= float.fromhex('0x0.0p+0')):  # F:4042 if( dd .le. 0._r8 ) then
-        theta = math.acos((rr / math.pow(qq, float.fromhex('0x1.8000000000000p+0'))))  # F:4043 theta = acos(rr/qq**(3._r8/2._r8))
-        x1 = ((-((float.fromhex('0x1.0000000000000p+1') * math.sqrt(qq)) * math.cos((theta / float.fromhex('0x1.8000000000000p+1'))))) - (a / float.fromhex('0x1.8000000000000p+1')))  # F:4044 x1 = -2._r8*sqrt(qq)*cos(theta/3._r8) - a/3._r8
-        x2 = ((-((float.fromhex('0x1.0000000000000p+1') * math.sqrt(qq)) * math.cos(((theta + float.fromhex('0x1.921fb00000000p+2')) / float.fromhex('0x1.8000000000000p+1'))))) - (a / float.fromhex('0x1.8000000000000p+1')))  # F:4045 x2 = -2._r8*sqrt(qq)*cos((theta+2._r8*3.141592)/3._r8) - a/3._r8
-        x3 = ((-((float.fromhex('0x1.0000000000000p+1') * math.sqrt(qq)) * math.cos(((theta - float.fromhex('0x1.921fb00000000p+2')) / float.fromhex('0x1.8000000000000p+1'))))) - (a / float.fromhex('0x1.8000000000000p+1')))  # F:4046 x3 = -2._r8*sqrt(qq)*cos((theta-2._r8*3.141592)/3._r8) - a/3._r8
+        theta = libm.acos((rr / libm.pow(qq, float.fromhex('0x1.8000000000000p+0'))))  # F:4043 theta = acos(rr/qq**(3._r8/2._r8))
+        x1 = ((-((float.fromhex('0x1.0000000000000p+1') * math.sqrt(qq)) * libm.cos((theta / float.fromhex('0x1.8000000000000p+1'))))) - (a / float.fromhex('0x1.8000000000000p+1')))  # F:4044 x1 = -2._r8*sqrt(qq)*cos(theta/3._r8) - a/3._r8
+        x2 = ((-((float.fromhex('0x1.0000000000000p+1') * math.sqrt(qq)) * libm.cos(((theta + float.fromhex('0x1.921fb00000000p+2')) / float.fromhex('0x1.8000000000000p+1'))))) - (a / float.fromhex('0x1.8000000000000p+1')))  # F:4045 x2 = -2._r8*sqrt(qq)*cos((theta+2._r8*3.141592)/3._r8) - a/3._r8
+        x3 = ((-((float.fromhex('0x1.0000000000000p+1') * math.sqrt(qq)) * libm.cos(((theta - float.fromhex('0x1.921fb00000000p+2')) / float.fromhex('0x1.8000000000000p+1'))))) - (a / float.fromhex('0x1.8000000000000p+1')))  # F:4046 x3 = -2._r8*sqrt(qq)*cos((theta-2._r8*3.141592)/3._r8) - a/3._r8
         return uw_fmax(uw_fmax(uw_fmax(x1, x2), x3), float.fromhex('0x1.47ae147ae147bp-7'))  # F:4047 compute_cubic = max(max(max(x1,x2),x3),xmin)
     else:
         if (rr >= float.fromhex('0x0.0p+0')):  # F:4050 if( rr .ge. 0._r8 ) then
-            aa = (-math.pow((math.sqrt(((rr * rr) - powi(qq, 3))) + rr), float.fromhex('0x1.5555555555555p-2')))  # F:4051 aa = -(sqrt(rr**2-qq**3)+rr)**(1._r8/3._r8)
+            aa = (-libm.pow((math.sqrt(((rr * rr) - powi(qq, 3))) + rr), float.fromhex('0x1.5555555555555p-2')))  # F:4051 aa = -(sqrt(rr**2-qq**3)+rr)**(1._r8/3._r8)
         else:
-            aa = math.pow((math.sqrt(((rr * rr) - powi(qq, 3))) - rr), float.fromhex('0x1.5555555555555p-2'))  # F:4053 aa =  (sqrt(rr**2-qq**3)-rr)**(1._r8/3._r8)
+            aa = libm.pow((math.sqrt(((rr * rr) - powi(qq, 3))) - rr), float.fromhex('0x1.5555555555555p-2'))  # F:4053 aa =  (sqrt(rr**2-qq**3)-rr)**(1._r8/3._r8)
         if (aa == float.fromhex('0x0.0p+0')):  # F:4055 if( aa .eq. 0._r8 ) then
             bb = float.fromhex('0x0.0p+0')  # F:4056 bb = 0._r8
         else:

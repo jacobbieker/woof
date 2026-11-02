@@ -1,0 +1,481 @@
+
+libm.so.6:     file format elf64-x86-64
+
+
+Disassembly of section .text:
+
+000000000007cac0 <f64xsubf128@@GLIBC_2.28+0x5230>:
+   7cac0:	endbr64
+   7cac4:	push   %rbp
+   7cac5:	mov    %rsp,%rbp
+   7cac8:	push   %r12
+   7caca:	push   %rbx
+   7cacb:	sub    $0x20,%rsp
+   7cacf:	mov    %fs:0x28,%rax
+   7cad8:	mov    %rax,-0x18(%rbp)
+   7cadc:	xor    %eax,%eax
+   7cade:	vstmxcsr -0x28(%rbp)
+   7cae3:	mov    -0x28(%rbp),%eax
+   7cae6:	mov    %eax,%edx
+   7cae8:	and    $0x9f,%dh
+   7caeb:	and    $0x6000,%eax
+   7caf0:	mov    %edx,-0x20(%rbp)
+   7caf3:	mov    %eax,%ebx
+   7caf5:	jne    7cfb0 <f64xsubf128@@GLIBC_2.28+0x5720>
+   7cafb:	xor    %r12d,%r12d
+   7cafe:	vmovq  %xmm0,%rax
+   7cb03:	sar    $0x20,%rax
+   7cb07:	mov    %eax,%edx
+   7cb09:	not    %edx
+   7cb0b:	and    $0x7ff00000,%edx
+   7cb11:	je     7cd10 <f64xsubf128@@GLIBC_2.28+0x5480>
+   7cb17:	vxorpd %xmm2,%xmm2,%xmm2
+   7cb1b:	vxorpd 0x12f6d(%rip),%xmm0,%xmm3        # 8fa90 <f64xsubf128@@GLIBC_2.28+0x18200>
+   7cb23:	vcmpltsd %xmm2,%xmm0,%xmm2
+   7cb28:	vblendvpd %xmm2,%xmm3,%xmm0,%xmm1
+   7cb2e:	vmovsd 0x1d23a(%rip),%xmm2        # 99d70 <f64xsubf128@@GLIBC_2.28+0x224e0>
+   7cb36:	vcomisd %xmm1,%xmm2
+   7cb3a:	jae    7ccd8 <f64xsubf128@@GLIBC_2.28+0x5448>
+   7cb40:	vmovsd 0x1d230(%rip),%xmm2        # 99d78 <f64xsubf128@@GLIBC_2.28+0x224e8>
+   7cb48:	vcomisd %xmm1,%xmm2
+   7cb4c:	jae    7cd30 <f64xsubf128@@GLIBC_2.28+0x54a0>
+   7cb52:	vmovsd 0x1d246(%rip),%xmm3        # 99da0 <f64xsubf128@@GLIBC_2.28+0x22510>
+   7cb5a:	vcomisd %xmm1,%xmm3
+   7cb5e:	jae    7cf18 <f64xsubf128@@GLIBC_2.28+0x5688>
+   7cb64:	vmovsd 0x1d254(%rip),%xmm3        # 99dc0 <f64xsubf128@@GLIBC_2.28+0x22530>
+   7cb6c:	vcomisd %xmm1,%xmm3
+   7cb70:	jb     7cd70 <f64xsubf128@@GLIBC_2.28+0x54e0>
+   7cb76:	vmovsd 0x1ce12(%rip),%xmm1        # 99990 <f64xsubf128@@GLIBC_2.28+0x22100>
+   7cb7e:	vmovsd %xmm0,%xmm0,%xmm3
+   7cb82:	vfmadd132sd 0x1c7dd(%rip),%xmm1,%xmm3        # 99368 <f64xsubf128@@GLIBC_2.28+0x21ad8>
+   7cb8b:	vmovsd 0x1d235(%rip),%xmm4        # 99dc8 <f64xsubf128@@GLIBC_2.28+0x22538>
+   7cb93:	vsubsd %xmm1,%xmm3,%xmm1
+   7cb97:	vmovq  %xmm3,%rax
+   7cb9c:	vfnmadd231sd 0x1d1ab(%rip),%xmm1,%xmm0        # 99d50 <f64xsubf128@@GLIBC_2.28+0x224c0>
+   7cba5:	and    $0x1,%eax
+   7cba8:	vfnmadd231sd 0x1d1a7(%rip),%xmm1,%xmm0        # 99d58 <f64xsubf128@@GLIBC_2.28+0x224c8>
+   7cbb1:	vmovsd %xmm1,%xmm1,%xmm3
+   7cbb5:	vfnmadd132sd %xmm4,%xmm0,%xmm3
+   7cbba:	vsubsd %xmm3,%xmm0,%xmm0
+   7cbbe:	vmovsd %xmm3,-0x28(%rbp)
+   7cbc3:	vfnmadd132sd %xmm4,%xmm0,%xmm1
+   7cbc8:	vxorpd %xmm0,%xmm0,%xmm0
+   7cbcc:	vcomisd %xmm3,%xmm0
+   7cbd0:	vmovsd %xmm1,-0x20(%rbp)
+   7cbd5:	ja     7d068 <f64xsubf128@@GLIBC_2.28+0x57d8>
+   7cbdb:	vmovsd 0x1c235(%rip),%xmm4        # 98e18 <f64xsubf128@@GLIBC_2.28+0x21588>
+   7cbe3:	vmovsd 0x1c775(%rip),%xmm7        # 99360 <f64xsubf128@@GLIBC_2.28+0x21ad0>
+   7cbeb:	vmovsd %xmm1,%xmm1,%xmm5
+   7cbef:	vmovsd %xmm3,%xmm3,%xmm0
+   7cbf3:	vmovsd %xmm4,%xmm4,%xmm6
+   7cbf7:	vcomisd %xmm0,%xmm2
+   7cbfb:	jb     7cfc0 <f64xsubf128@@GLIBC_2.28+0x5730>
+   7cc01:	vmulsd %xmm3,%xmm3,%xmm0
+   7cc05:	vmovsd 0x1d173(%rip),%xmm2        # 99d80 <f64xsubf128@@GLIBC_2.28+0x224f0>
+   7cc0d:	vfmadd213sd 0x1d172(%rip),%xmm0,%xmm2        # 99d88 <f64xsubf128@@GLIBC_2.28+0x224f8>
+   7cc16:	vfmadd213sd 0x1d171(%rip),%xmm0,%xmm2        # 99d90 <f64xsubf128@@GLIBC_2.28+0x22500>
+   7cc1f:	vfmadd213sd 0x1d170(%rip),%xmm0,%xmm2        # 99d98 <f64xsubf128@@GLIBC_2.28+0x22508>
+   7cc28:	vfmadd213sd 0x1c39f(%rip),%xmm0,%xmm2        # 98fd0 <f64xsubf128@@GLIBC_2.28+0x21740>
+   7cc31:	vmulsd %xmm0,%xmm3,%xmm0
+   7cc35:	vfmadd231sd %xmm2,%xmm0,%xmm1
+   7cc3a:	vaddsd %xmm1,%xmm3,%xmm0
+   7cc3e:	test   %eax,%eax
+   7cc40:	je     7ccb0 <f64xsubf128@@GLIBC_2.28+0x5420>
+   7cc42:	vmovq  0x12e36(%rip),%xmm2        # 8fa80 <f64xsubf128@@GLIBC_2.28+0x181f0>
+   7cc4a:	vandpd %xmm2,%xmm3,%xmm5
+   7cc4e:	vandpd %xmm2,%xmm1,%xmm2
+   7cc52:	vcomisd %xmm2,%xmm5
+   7cc56:	jbe    7d2c8 <f64xsubf128@@GLIBC_2.28+0x5a38>
+   7cc5c:	vsubsd %xmm0,%xmm3,%xmm3
+   7cc60:	vaddsd %xmm1,%xmm3,%xmm1
+   7cc64:	vdivsd %xmm0,%xmm4,%xmm2
+   7cc68:	vmulsd %xmm0,%xmm2,%xmm3
+   7cc6c:	vmovsd %xmm2,%xmm2,%xmm5
+   7cc70:	vfmsub132sd %xmm0,%xmm3,%xmm5
+   7cc75:	vsubsd %xmm3,%xmm4,%xmm3
+   7cc79:	vxorpd %xmm4,%xmm4,%xmm4
+   7cc7d:	vsubsd %xmm5,%xmm3,%xmm3
+   7cc81:	vaddsd %xmm4,%xmm3,%xmm3
+   7cc85:	vfnmadd132sd %xmm2,%xmm3,%xmm1
+   7cc8a:	vdivsd %xmm0,%xmm1,%xmm0
+   7cc8e:	vaddsd %xmm0,%xmm2,%xmm1
+   7cc92:	vsubsd %xmm1,%xmm2,%xmm2
+   7cc96:	vaddsd %xmm0,%xmm2,%xmm2
+   7cc9a:	vaddsd %xmm1,%xmm2,%xmm2
+   7cc9e:	vxorpd 0x12dea(%rip),%xmm2,%xmm0        # 8fa90 <f64xsubf128@@GLIBC_2.28+0x18200>
+   7cca6:	cs nopw 0x0(%rax,%rax,1)
+   7ccb0:	test   %r12b,%r12b
+   7ccb3:	jne    7ccf0 <f64xsubf128@@GLIBC_2.28+0x5460>
+   7ccb5:	mov    -0x18(%rbp),%rax
+   7ccb9:	sub    %fs:0x28,%rax
+   7ccc2:	jne    7d2ef <f64xsubf128@@GLIBC_2.28+0x5a5f>
+   7ccc8:	add    $0x20,%rsp
+   7cccc:	pop    %rbx
+   7cccd:	pop    %r12
+   7cccf:	pop    %rbp
+   7ccd0:	ret
+   7ccd1:	nopl   0x0(%rax)
+   7ccd8:	vmovsd 0x1c200(%rip),%xmm2        # 98ee0 <f64xsubf128@@GLIBC_2.28+0x21650>
+   7cce0:	vcomisd %xmm1,%xmm2
+   7cce4:	jbe    7ccb0 <f64xsubf128@@GLIBC_2.28+0x5420>
+   7cce6:	vmulsd %xmm1,%xmm1,%xmm1
+   7ccea:	test   %r12b,%r12b
+   7cced:	je     7ccb5 <f64xsubf128@@GLIBC_2.28+0x5425>
+   7ccef:	nop
+   7ccf0:	vstmxcsr -0x2c(%rbp)
+   7ccf5:	mov    -0x2c(%rbp),%eax
+   7ccf8:	and    $0x9f,%ah
+   7ccfb:	or     %ebx,%eax
+   7ccfd:	mov    %eax,-0x2c(%rbp)
+   7cd00:	vldmxcsr -0x2c(%rbp)
+   7cd05:	jmp    7ccb5 <f64xsubf128@@GLIBC_2.28+0x5425>
+   7cd07:	nopw   0x0(%rax,%rax,1)
+   7cd10:	and    $0x7fffffff,%eax
+   7cd15:	cmp    $0x7ff00000,%eax
+   7cd1a:	je     7cf00 <f64xsubf128@@GLIBC_2.28+0x5670>
+   7cd20:	vsubsd %xmm0,%xmm0,%xmm0
+   7cd24:	jmp    7ccb0 <f64xsubf128@@GLIBC_2.28+0x5420>
+   7cd26:	cs nopw 0x0(%rax,%rax,1)
+   7cd30:	vmulsd %xmm0,%xmm0,%xmm2
+   7cd34:	vmovsd 0x1d044(%rip),%xmm1        # 99d80 <f64xsubf128@@GLIBC_2.28+0x224f0>
+   7cd3c:	vfmadd213sd 0x1d043(%rip),%xmm2,%xmm1        # 99d88 <f64xsubf128@@GLIBC_2.28+0x224f8>
+   7cd45:	vfmadd213sd 0x1d042(%rip),%xmm2,%xmm1        # 99d90 <f64xsubf128@@GLIBC_2.28+0x22500>
+   7cd4e:	vfmadd213sd 0x1d041(%rip),%xmm2,%xmm1        # 99d98 <f64xsubf128@@GLIBC_2.28+0x22508>
+   7cd57:	vfmadd213sd 0x1c270(%rip),%xmm2,%xmm1        # 98fd0 <f64xsubf128@@GLIBC_2.28+0x21740>
+   7cd60:	vmulsd %xmm2,%xmm0,%xmm2
+   7cd64:	vfmadd231sd %xmm1,%xmm2,%xmm0
+   7cd69:	jmp    7ccb0 <f64xsubf128@@GLIBC_2.28+0x5420>
+   7cd6e:	xchg   %ax,%ax
+   7cd70:	vmovsd 0x1d058(%rip),%xmm3        # 99dd0 <f64xsubf128@@GLIBC_2.28+0x22540>
+   7cd78:	vcomisd %xmm1,%xmm3
+   7cd7c:	jb     7d0f0 <f64xsubf128@@GLIBC_2.28+0x5860>
+   7cd82:	vmovsd 0x1cc06(%rip),%xmm1        # 99990 <f64xsubf128@@GLIBC_2.28+0x22100>
+   7cd8a:	vmovsd %xmm0,%xmm0,%xmm3
+   7cd8e:	vfmadd132sd 0x1c5d1(%rip),%xmm1,%xmm3        # 99368 <f64xsubf128@@GLIBC_2.28+0x21ad8>
+   7cd97:	vmovsd 0x1cfc9(%rip),%xmm5        # 99d68 <f64xsubf128@@GLIBC_2.28+0x224d8>
+   7cd9f:	vsubsd %xmm1,%xmm3,%xmm1
+   7cda3:	vmovq  %xmm3,%rax
+   7cda8:	vmovsd 0x1cfb0(%rip),%xmm3        # 99d60 <f64xsubf128@@GLIBC_2.28+0x224d0>
+   7cdb0:	vfnmadd231sd 0x1cf97(%rip),%xmm1,%xmm0        # 99d50 <f64xsubf128@@GLIBC_2.28+0x224c0>
+   7cdb9:	and    $0x1,%eax
+   7cdbc:	vfnmadd231sd 0x1cf93(%rip),%xmm1,%xmm0        # 99d58 <f64xsubf128@@GLIBC_2.28+0x224c8>
+   7cdc5:	vmovsd %xmm1,%xmm1,%xmm4
+   7cdc9:	vfnmadd132sd %xmm3,%xmm0,%xmm4
+   7cdce:	vsubsd %xmm4,%xmm0,%xmm0
+   7cdd2:	vfnmadd231sd %xmm3,%xmm1,%xmm0
+   7cdd7:	vmovsd %xmm1,%xmm1,%xmm3
+   7cddb:	vfnmadd132sd %xmm5,%xmm4,%xmm3
+   7cde0:	vsubsd %xmm3,%xmm4,%xmm4
+   7cde4:	vfnmadd132sd %xmm5,%xmm4,%xmm1
+   7cde9:	vmovq  0x12c8f(%rip),%xmm5        # 8fa80 <f64xsubf128@@GLIBC_2.28+0x181f0>
+   7cdf1:	vandpd %xmm5,%xmm3,%xmm6
+   7cdf5:	vaddsd %xmm1,%xmm0,%xmm0
+   7cdf9:	vandpd %xmm5,%xmm0,%xmm4
+   7cdfd:	vaddsd %xmm0,%xmm3,%xmm1
+   7ce01:	vcomisd %xmm4,%xmm6
+   7ce05:	ja     7d058 <f64xsubf128@@GLIBC_2.28+0x57c8>
+   7ce0b:	vsubsd %xmm1,%xmm0,%xmm0
+   7ce0f:	vaddsd %xmm3,%xmm0,%xmm0
+   7ce13:	vxorpd %xmm3,%xmm3,%xmm3
+   7ce17:	vmovsd %xmm1,-0x28(%rbp)
+   7ce1c:	vcomisd %xmm1,%xmm3
+   7ce20:	vmovsd %xmm0,-0x20(%rbp)
+   7ce25:	ja     7d220 <f64xsubf128@@GLIBC_2.28+0x5990>
+   7ce2b:	vmovsd 0x1bfe5(%rip),%xmm4        # 98e18 <f64xsubf128@@GLIBC_2.28+0x21588>
+   7ce33:	vmovsd 0x1c525(%rip),%xmm7        # 99360 <f64xsubf128@@GLIBC_2.28+0x21ad0>
+   7ce3b:	vmovsd %xmm0,%xmm0,%xmm8
+   7ce3f:	vmovsd %xmm1,%xmm1,%xmm3
+   7ce43:	vmovsd %xmm4,%xmm4,%xmm6
+   7ce47:	vcomisd %xmm3,%xmm2
+   7ce4b:	jb     7d098 <f64xsubf128@@GLIBC_2.28+0x5808>
+   7ce51:	vmulsd %xmm1,%xmm1,%xmm2
+   7ce55:	vmovsd 0x1cf23(%rip),%xmm3        # 99d80 <f64xsubf128@@GLIBC_2.28+0x224f0>
+   7ce5d:	vfmadd213sd 0x1cf22(%rip),%xmm2,%xmm3        # 99d88 <f64xsubf128@@GLIBC_2.28+0x224f8>
+   7ce66:	vfmadd213sd 0x1cf21(%rip),%xmm2,%xmm3        # 99d90 <f64xsubf128@@GLIBC_2.28+0x22500>
+   7ce6f:	vfmadd213sd 0x1cf20(%rip),%xmm2,%xmm3        # 99d98 <f64xsubf128@@GLIBC_2.28+0x22508>
+   7ce78:	vfmadd213sd 0x1c14f(%rip),%xmm2,%xmm3        # 98fd0 <f64xsubf128@@GLIBC_2.28+0x21740>
+   7ce81:	vmulsd %xmm2,%xmm1,%xmm2
+   7ce85:	vfmadd132sd %xmm3,%xmm0,%xmm2
+   7ce8a:	vaddsd %xmm2,%xmm1,%xmm0
+   7ce8e:	test   %eax,%eax
+   7ce90:	je     7ccb0 <f64xsubf128@@GLIBC_2.28+0x5420>
+   7ce96:	vandpd %xmm5,%xmm1,%xmm3
+   7ce9a:	vandpd %xmm5,%xmm2,%xmm5
+   7ce9e:	vcomisd %xmm5,%xmm3
+   7cea2:	jbe    7d2d5 <f64xsubf128@@GLIBC_2.28+0x5a45>
+   7cea8:	vsubsd %xmm0,%xmm1,%xmm1
+   7ceac:	vaddsd %xmm2,%xmm1,%xmm2
+   7ceb0:	vdivsd %xmm0,%xmm4,%xmm1
+   7ceb4:	vmulsd %xmm0,%xmm1,%xmm3
+   7ceb8:	vmovsd %xmm1,%xmm1,%xmm5
+   7cebc:	vfmsub132sd %xmm0,%xmm3,%xmm5
+   7cec1:	vsubsd %xmm3,%xmm4,%xmm3
+   7cec5:	vxorpd %xmm4,%xmm4,%xmm4
+   7cec9:	vsubsd %xmm5,%xmm3,%xmm3
+   7cecd:	vaddsd %xmm4,%xmm3,%xmm3
+   7ced1:	vfnmadd132sd %xmm1,%xmm3,%xmm2
+   7ced6:	vdivsd %xmm0,%xmm2,%xmm0
+   7ceda:	vaddsd %xmm0,%xmm1,%xmm2
+   7cede:	vsubsd %xmm2,%xmm1,%xmm1
+   7cee2:	vaddsd %xmm0,%xmm1,%xmm1
+   7cee6:	vaddsd %xmm2,%xmm1,%xmm1
+   7ceea:	vxorpd 0x12b9e(%rip),%xmm1,%xmm0        # 8fa90 <f64xsubf128@@GLIBC_2.28+0x18200>
+   7cef2:	jmp    7ccb0 <f64xsubf128@@GLIBC_2.28+0x5420>
+   7cef7:	nopw   0x0(%rax,%rax,1)
+   7cf00:	mov    0x6b0b1(%rip),%rax        # e7fb8 <f64xsubf128@@GLIBC_2.28+0x70728>
+   7cf07:	movl   $0x21,%fs:(%rax)
+   7cf0e:	jmp    7cd20 <f64xsubf128@@GLIBC_2.28+0x5490>
+   7cf13:	nopl   0x0(%rax,%rax,1)
+   7cf18:	vmovsd 0x1c0b8(%rip),%xmm2        # 98fd8 <f64xsubf128@@GLIBC_2.28+0x21748>
+   7cf20:	lea    0x494f9(%rip),%rax        # c6420 <f64xsubf128@@GLIBC_2.28+0x4eb90>
+   7cf27:	vfmadd213sd 0x1d0f8(%rip),%xmm1,%xmm2        # 9a028 <f64xsubf128@@GLIBC_2.28+0x22798>
+   7cf30:	vmovsd 0x1c428(%rip),%xmm4        # 99360 <f64xsubf128@@GLIBC_2.28+0x21ad0>
+   7cf38:	vmovsd 0x1ce78(%rip),%xmm7        # 99db8 <f64xsubf128@@GLIBC_2.28+0x22528>
+   7cf40:	vcvttsd2si %xmm2,%edx
+   7cf44:	vxorpd %xmm2,%xmm2,%xmm2
+   7cf48:	vcmpnltsd %xmm2,%xmm0,%xmm2
+   7cf4d:	vmovsd 0x1bec3(%rip),%xmm0        # 98e18 <f64xsubf128@@GLIBC_2.28+0x21588>
+   7cf55:	movslq %edx,%rdx
+   7cf58:	vblendvpd %xmm2,%xmm0,%xmm4,%xmm4
+   7cf5e:	shl    $0x5,%rdx
+   7cf62:	add    %rdx,%rax
+   7cf65:	vsubsd (%rax),%xmm1,%xmm1
+   7cf69:	vmulsd %xmm1,%xmm1,%xmm3
+   7cf6d:	vmulsd %xmm3,%xmm1,%xmm2
+   7cf71:	vfmadd132sd 0x1ce36(%rip),%xmm7,%xmm3        # 99db0 <f64xsubf128@@GLIBC_2.28+0x22520>
+   7cf7a:	vfmadd132sd %xmm3,%xmm1,%xmm2
+   7cf7f:	vmovsd 0x8(%rax),%xmm3
+   7cf84:	vmovsd 0x10(%rax),%xmm1
+   7cf89:	vaddsd %xmm1,%xmm3,%xmm0
+   7cf8d:	vmulsd %xmm2,%xmm0,%xmm0
+   7cf91:	vsubsd %xmm2,%xmm1,%xmm1
+   7cf95:	vdivsd %xmm1,%xmm0,%xmm0
+   7cf99:	vaddsd %xmm3,%xmm0,%xmm0
+   7cf9d:	vmulsd %xmm4,%xmm0,%xmm0
+   7cfa1:	jmp    7ccb0 <f64xsubf128@@GLIBC_2.28+0x5420>
+   7cfa6:	cs nopw 0x0(%rax,%rax,1)
+   7cfb0:	vldmxcsr -0x20(%rbp)
+   7cfb5:	mov    $0x1,%r12d
+   7cfbb:	jmp    7cafe <f64xsubf128@@GLIBC_2.28+0x526e>
+   7cfc0:	vmovsd 0x1c010(%rip),%xmm1        # 98fd8 <f64xsubf128@@GLIBC_2.28+0x21748>
+   7cfc8:	lea    0x49451(%rip),%rdx        # c6420 <f64xsubf128@@GLIBC_2.28+0x4eb90>
+   7cfcf:	vfmadd213sd 0x1d050(%rip),%xmm0,%xmm1        # 9a028 <f64xsubf128@@GLIBC_2.28+0x22798>
+   7cfd8:	vcvttsd2si %xmm1,%ecx
+   7cfdc:	movslq %ecx,%rcx
+   7cfdf:	shl    $0x5,%rcx
+   7cfe3:	add    %rcx,%rdx
+   7cfe6:	vsubsd (%rdx),%xmm0,%xmm0
+   7cfea:	vaddsd %xmm5,%xmm0,%xmm0
+   7cfee:	vmulsd %xmm0,%xmm0,%xmm2
+   7cff2:	vmovsd 0x1cdbe(%rip),%xmm5        # 99db8 <f64xsubf128@@GLIBC_2.28+0x22528>
+   7cffa:	vmulsd %xmm2,%xmm0,%xmm1
+   7cffe:	vfmadd132sd 0x1cda9(%rip),%xmm5,%xmm2        # 99db0 <f64xsubf128@@GLIBC_2.28+0x22520>
+   7d007:	vfmadd132sd %xmm2,%xmm0,%xmm1
+   7d00c:	vmovsd 0x8(%rdx),%xmm3
+   7d011:	vmovsd 0x10(%rdx),%xmm2
+   7d016:	vaddsd %xmm2,%xmm3,%xmm0
+   7d01a:	vmulsd %xmm1,%xmm0,%xmm0
+   7d01e:	test   %eax,%eax
+   7d020:	je     7d040 <f64xsubf128@@GLIBC_2.28+0x57b0>
+   7d022:	vaddsd %xmm3,%xmm1,%xmm1
+   7d026:	vdivsd %xmm1,%xmm0,%xmm0
+   7d02a:	vsubsd %xmm0,%xmm2,%xmm2
+   7d02e:	vmulsd %xmm7,%xmm2,%xmm0
+   7d032:	jmp    7ccb0 <f64xsubf128@@GLIBC_2.28+0x5420>
+   7d037:	nopw   0x0(%rax,%rax,1)
+   7d040:	vsubsd %xmm1,%xmm2,%xmm2
+   7d044:	vdivsd %xmm2,%xmm0,%xmm0
+   7d048:	vaddsd %xmm3,%xmm0,%xmm0
+   7d04c:	vmulsd %xmm6,%xmm0,%xmm0
+   7d050:	jmp    7ccb0 <f64xsubf128@@GLIBC_2.28+0x5420>
+   7d055:	nopl   (%rax)
+   7d058:	vsubsd %xmm1,%xmm3,%xmm3
+   7d05c:	vaddsd %xmm0,%xmm3,%xmm0
+   7d060:	jmp    7ce13 <f64xsubf128@@GLIBC_2.28+0x5583>
+   7d065:	nopl   (%rax)
+   7d068:	vmovq  0x12a20(%rip),%xmm5        # 8fa90 <f64xsubf128@@GLIBC_2.28+0x18200>
+   7d070:	vmovsd 0x1bda0(%rip),%xmm4        # 98e18 <f64xsubf128@@GLIBC_2.28+0x21588>
+   7d078:	vmovsd 0x1c2e0(%rip),%xmm6        # 99360 <f64xsubf128@@GLIBC_2.28+0x21ad0>
+   7d080:	vxorpd %xmm5,%xmm3,%xmm0
+   7d084:	vmovsd %xmm4,%xmm4,%xmm7
+   7d088:	vxorpd %xmm5,%xmm1,%xmm5
+   7d08c:	jmp    7cbf7 <f64xsubf128@@GLIBC_2.28+0x5367>
+   7d091:	nopl   0x0(%rax)
+   7d098:	vmovsd 0x1bf38(%rip),%xmm0        # 98fd8 <f64xsubf128@@GLIBC_2.28+0x21748>
+   7d0a0:	lea    0x49379(%rip),%rdx        # c6420 <f64xsubf128@@GLIBC_2.28+0x4eb90>
+   7d0a7:	vfmadd213sd 0x1cf78(%rip),%xmm3,%xmm0        # 9a028 <f64xsubf128@@GLIBC_2.28+0x22798>
+   7d0b0:	vmovsd 0x1cd00(%rip),%xmm5        # 99db8 <f64xsubf128@@GLIBC_2.28+0x22528>
+   7d0b8:	vcvttsd2si %xmm0,%ecx
+   7d0bc:	movslq %ecx,%rcx
+   7d0bf:	shl    $0x5,%rcx
+   7d0c3:	add    %rcx,%rdx
+   7d0c6:	vsubsd (%rdx),%xmm3,%xmm3
+   7d0ca:	vaddsd %xmm8,%xmm3,%xmm3
+   7d0cf:	vmulsd %xmm3,%xmm3,%xmm0
+   7d0d3:	vmulsd %xmm0,%xmm3,%xmm1
+   7d0d7:	vfmadd132sd 0x1ccd0(%rip),%xmm5,%xmm0        # 99db0 <f64xsubf128@@GLIBC_2.28+0x22520>
+   7d0e0:	vfmadd132sd %xmm0,%xmm3,%xmm1
+   7d0e5:	jmp    7d00c <f64xsubf128@@GLIBC_2.28+0x577c>
+   7d0ea:	nopw   0x0(%rax,%rax,1)
+   7d0f0:	lea    -0x20(%rbp),%rsi
+   7d0f4:	lea    -0x28(%rbp),%rdi
+   7d0f8:	call   71170 <__iscanonicall@@GLIBC_2.25+0x180>
+   7d0fd:	vmovsd -0x28(%rbp),%xmm0
+   7d102:	vmovsd -0x20(%rbp),%xmm1
+   7d107:	vmovq  0x12971(%rip),%xmm5        # 8fa80 <f64xsubf128@@GLIBC_2.28+0x181f0>
+   7d10f:	and    $0x1,%eax
+   7d112:	vmovsd 0x1cc5e(%rip),%xmm2        # 99d78 <f64xsubf128@@GLIBC_2.28+0x224e8>
+   7d11a:	vaddsd %xmm1,%xmm0,%xmm3
+   7d11e:	vandpd %xmm5,%xmm0,%xmm6
+   7d122:	vandpd %xmm5,%xmm1,%xmm4
+   7d126:	vcomisd %xmm4,%xmm6
+   7d12a:	jbe    7d288 <f64xsubf128@@GLIBC_2.28+0x59f8>
+   7d130:	vsubsd %xmm3,%xmm0,%xmm0
+   7d134:	vaddsd %xmm1,%xmm0,%xmm1
+   7d138:	vxorpd %xmm0,%xmm0,%xmm0
+   7d13c:	vmovsd %xmm3,-0x28(%rbp)
+   7d141:	vcomisd %xmm3,%xmm0
+   7d145:	vmovsd %xmm1,-0x20(%rbp)
+   7d14a:	ja     7d298 <f64xsubf128@@GLIBC_2.28+0x5a08>
+   7d150:	vmovsd 0x1bcc0(%rip),%xmm4        # 98e18 <f64xsubf128@@GLIBC_2.28+0x21588>
+   7d158:	vmovsd 0x1c200(%rip),%xmm7        # 99360 <f64xsubf128@@GLIBC_2.28+0x21ad0>
+   7d160:	vmovsd %xmm1,%xmm1,%xmm8
+   7d164:	vmovsd %xmm3,%xmm3,%xmm0
+   7d168:	vmovsd %xmm4,%xmm4,%xmm6
+   7d16c:	vcomisd %xmm0,%xmm2
+   7d170:	jb     7d250 <f64xsubf128@@GLIBC_2.28+0x59c0>
+   7d176:	vmulsd %xmm3,%xmm3,%xmm0
+   7d17a:	vmovsd 0x1cbfe(%rip),%xmm2        # 99d80 <f64xsubf128@@GLIBC_2.28+0x224f0>
+   7d182:	vfmadd213sd 0x1cbfd(%rip),%xmm0,%xmm2        # 99d88 <f64xsubf128@@GLIBC_2.28+0x224f8>
+   7d18b:	vfmadd213sd 0x1cbfc(%rip),%xmm0,%xmm2        # 99d90 <f64xsubf128@@GLIBC_2.28+0x22500>
+   7d194:	vfmadd213sd 0x1cbfb(%rip),%xmm0,%xmm2        # 99d98 <f64xsubf128@@GLIBC_2.28+0x22508>
+   7d19d:	vfmadd213sd 0x1be2a(%rip),%xmm0,%xmm2        # 98fd0 <f64xsubf128@@GLIBC_2.28+0x21740>
+   7d1a6:	vmulsd %xmm0,%xmm3,%xmm0
+   7d1aa:	vfmadd132sd %xmm0,%xmm1,%xmm2
+   7d1af:	vaddsd %xmm2,%xmm3,%xmm0
+   7d1b3:	test   %eax,%eax
+   7d1b5:	je     7ccb0 <f64xsubf128@@GLIBC_2.28+0x5420>
+   7d1bb:	vandpd %xmm5,%xmm3,%xmm6
+   7d1bf:	vandpd %xmm5,%xmm2,%xmm1
+   7d1c3:	vcomisd %xmm1,%xmm6
+   7d1c7:	jbe    7d2e2 <f64xsubf128@@GLIBC_2.28+0x5a52>
+   7d1cd:	vsubsd %xmm0,%xmm3,%xmm3
+   7d1d1:	vaddsd %xmm2,%xmm3,%xmm2
+   7d1d5:	vdivsd %xmm0,%xmm4,%xmm3
+   7d1d9:	vmulsd %xmm0,%xmm3,%xmm1
+   7d1dd:	vmovsd %xmm3,%xmm3,%xmm5
+   7d1e1:	vfmsub132sd %xmm0,%xmm1,%xmm5
+   7d1e6:	vsubsd %xmm1,%xmm4,%xmm1
+   7d1ea:	vxorpd %xmm4,%xmm4,%xmm4
+   7d1ee:	vsubsd %xmm5,%xmm1,%xmm1
+   7d1f2:	vaddsd %xmm4,%xmm1,%xmm1
+   7d1f6:	vfnmadd132sd %xmm3,%xmm1,%xmm2
+   7d1fb:	vdivsd %xmm0,%xmm2,%xmm0
+   7d1ff:	vaddsd %xmm0,%xmm3,%xmm1
+   7d203:	vsubsd %xmm1,%xmm3,%xmm3
+   7d207:	vaddsd %xmm0,%xmm3,%xmm0
+   7d20b:	vaddsd %xmm1,%xmm0,%xmm0
+   7d20f:	vxorpd 0x12879(%rip),%xmm0,%xmm0        # 8fa90 <f64xsubf128@@GLIBC_2.28+0x18200>
+   7d217:	jmp    7ccb0 <f64xsubf128@@GLIBC_2.28+0x5420>
+   7d21c:	nopl   0x0(%rax)
+   7d220:	vmovq  0x12868(%rip),%xmm8        # 8fa90 <f64xsubf128@@GLIBC_2.28+0x18200>
+   7d228:	vmovsd 0x1bbe8(%rip),%xmm4        # 98e18 <f64xsubf128@@GLIBC_2.28+0x21588>
+   7d230:	vmovsd 0x1c128(%rip),%xmm6        # 99360 <f64xsubf128@@GLIBC_2.28+0x21ad0>
+   7d238:	vxorpd %xmm8,%xmm1,%xmm3
+   7d23d:	vmovsd %xmm4,%xmm4,%xmm7
+   7d241:	vxorpd %xmm8,%xmm0,%xmm8
+   7d246:	jmp    7ce47 <f64xsubf128@@GLIBC_2.28+0x55b7>
+   7d24b:	nopl   0x0(%rax,%rax,1)
+   7d250:	vmovsd 0x1bd80(%rip),%xmm1        # 98fd8 <f64xsubf128@@GLIBC_2.28+0x21748>
+   7d258:	lea    0x491c1(%rip),%rdx        # c6420 <f64xsubf128@@GLIBC_2.28+0x4eb90>
+   7d25f:	vfmadd213sd 0x1cdc0(%rip),%xmm0,%xmm1        # 9a028 <f64xsubf128@@GLIBC_2.28+0x22798>
+   7d268:	vcvttsd2si %xmm1,%ecx
+   7d26c:	movslq %ecx,%rcx
+   7d26f:	shl    $0x5,%rcx
+   7d273:	add    %rcx,%rdx
+   7d276:	vsubsd (%rdx),%xmm0,%xmm0
+   7d27a:	vaddsd %xmm8,%xmm0,%xmm0
+   7d27f:	jmp    7cfee <f64xsubf128@@GLIBC_2.28+0x575e>
+   7d284:	nopl   0x0(%rax)
+   7d288:	vsubsd %xmm3,%xmm1,%xmm1
+   7d28c:	vaddsd %xmm0,%xmm1,%xmm1
+   7d290:	jmp    7d138 <f64xsubf128@@GLIBC_2.28+0x58a8>
+   7d295:	nopl   (%rax)
+   7d298:	vmovq  0x127f0(%rip),%xmm8        # 8fa90 <f64xsubf128@@GLIBC_2.28+0x18200>
+   7d2a0:	vmovsd 0x1bb70(%rip),%xmm4        # 98e18 <f64xsubf128@@GLIBC_2.28+0x21588>
+   7d2a8:	vmovsd 0x1c0b0(%rip),%xmm6        # 99360 <f64xsubf128@@GLIBC_2.28+0x21ad0>
+   7d2b0:	vxorpd %xmm8,%xmm3,%xmm0
+   7d2b5:	vmovsd %xmm4,%xmm4,%xmm7
+   7d2b9:	vxorpd %xmm8,%xmm1,%xmm8
+   7d2be:	jmp    7d16c <f64xsubf128@@GLIBC_2.28+0x58dc>
+   7d2c3:	nopl   0x0(%rax,%rax,1)
+   7d2c8:	vsubsd %xmm0,%xmm1,%xmm1
+   7d2cc:	vaddsd %xmm3,%xmm1,%xmm1
+   7d2d0:	jmp    7cc64 <f64xsubf128@@GLIBC_2.28+0x53d4>
+   7d2d5:	vsubsd %xmm0,%xmm2,%xmm2
+   7d2d9:	vaddsd %xmm1,%xmm2,%xmm2
+   7d2dd:	jmp    7ceb0 <f64xsubf128@@GLIBC_2.28+0x5620>
+   7d2e2:	vsubsd %xmm0,%xmm2,%xmm2
+   7d2e6:	vaddsd %xmm3,%xmm2,%xmm2
+   7d2ea:	jmp    7d1d5 <f64xsubf128@@GLIBC_2.28+0x5945>
+   7d2ef:	call   10290 <__stack_chk_fail@plt>
+   7d2f4:	cs nopw 0x0(%rax,%rax,1)
+   7d2fe:	xchg   %ax,%ax
+   7d300:	endbr64
+   7d304:	movd   %xmm0,%edx
+   7d308:	pxor   %xmm1,%xmm1
+   7d30c:	mov    %edx,%eax
+   7d30e:	cvtss2sd %xmm0,%xmm1
+   7d312:	shr    $0x14,%eax
+   7d315:	and    $0x7ff,%eax
+   7d31a:	cmp    $0x3f3,%eax
+   7d31f:	ja     7d388 <f64xsubf128@@GLIBC_2.28+0x5af8>
+   7d321:	mulsd  %xmm1,%xmm1
+   7d325:	cmp    $0x397,%eax
+   7d32a:	jbe    7d460 <f64xsubf128@@GLIBC_2.28+0x5bd0>
+   7d330:	movapd %xmm1,%xmm3
+   7d334:	movsd  0x3ae2c(%rip),%xmm2        # b8168 <f64xsubf128@@GLIBC_2.28+0x408d8>
+   7d33c:	movsd  0x3ae14(%rip),%xmm0        # b8158 <f64xsubf128@@GLIBC_2.28+0x408c8>
+   7d344:	mulsd  %xmm1,%xmm3
+   7d348:	mulsd  %xmm1,%xmm0
+   7d34c:	addsd  0x3adfc(%rip),%xmm0        # b8150 <f64xsubf128@@GLIBC_2.28+0x408c0>
+   7d354:	mulsd  %xmm3,%xmm2
+   7d358:	addsd  %xmm2,%xmm0
+   7d35c:	movsd  0x3ae24(%rip),%xmm2        # b8188 <f64xsubf128@@GLIBC_2.28+0x408f8>
+   7d364:	mulsd  %xmm1,%xmm2
+   7d368:	mulsd  %xmm3,%xmm1
+   7d36c:	addsd  0x3ae04(%rip),%xmm2        # b8178 <f64xsubf128@@GLIBC_2.28+0x408e8>
+   7d374:	mulsd  %xmm2,%xmm1
+   7d378:	addsd  %xmm1,%xmm0
+   7d37c:	cvtsd2ss %xmm0,%xmm0
+   7d380:	ret
+   7d381:	nopl   0x0(%rax)
+   7d388:	cmp    $0x42e,%eax
+   7d38d:	ja     7d470 <f64xsubf128@@GLIBC_2.28+0x5be0>
+   7d393:	movsd  0x3ada5(%rip),%xmm0        # b8140 <f64xsubf128@@GLIBC_2.28+0x408b0>
+   7d39b:	lea    0x3ad7e(%rip),%rcx        # b8120 <f64xsubf128@@GLIBC_2.28+0x40890>
+   7d3a2:	lea    0x70(%rcx),%rdx
+   7d3a6:	mulsd  %xmm1,%xmm0
+   7d3aa:	cvttsd2si %xmm0,%eax
+   7d3ae:	pxor   %xmm0,%xmm0
+   7d3b2:	add    $0x800000,%eax
+   7d3b7:	sar    $0x18,%eax
+   7d3ba:	cvtsi2sd %eax,%xmm0
+   7d3be:	mulsd  0x3ad82(%rip),%xmm0        # b8148 <f64xsubf128@@GLIBC_2.28+0x408b8>
+   7d3c6:	test   $0x2,%al
+   7d3c8:	cmove  %rcx,%rdx
+   7d3cc:	subsd  %xmm0,%xmm1
+   7d3d0:	movapd %xmm1,%xmm2
+   7d3d4:	mulsd  %xmm1,%xmm2
+   7d3d8:	test   $0x1,%al
+   7d3da:	je     7d418 <f64xsubf128@@GLIBC_2.28+0x5b88>
+   7d3dc:	and    $0x3,%eax
+   7d3df:	movapd %xmm2,%xmm3
+   7d3e3:	movsd  0x60(%rdx),%xmm0
+   7d3e8:	mulsd  (%rcx,%rax,8),%xmm1
+   7d3ed:	mulsd  %xmm2,%xmm0
+   7d3f1:	addsd  0x50(%rdx),%xmm0
+   7d3f6:	mulsd  %xmm1,%xmm3
+   7d3fa:	mulsd  %xmm3,%xmm2
+   7d3fe:	repnz
+   7d3ff:	.byte 0xf

@@ -5,56 +5,16 @@
 
 use super::{clear_error, guard, set_error, ERR, OK};
 
-/// glibc 2.39 `sysdeps/ieee754/flt-32/e_asinf.c` (the Sun/Cephes form every
-/// glibc before 2.41 carries), statement for statement in binary32.  The
-/// reference WRF builds link glibc 2.39; a host libm from glibc 2.41 on is
-/// CORE-MATH's correctly rounded `asinf`, which differs by one word on
-/// arguments such as the contract probes, so the bridge does not call the
-/// process libm.  Rust never contracts these into FMA.
-fn glibc239_asinf(x: f32) -> f32 {
-    const ONE: f32 = 1.0;
-    const HUGE: f32 = 1.000e+30;
-    const PIO2_HI: f32 = 1.57079637050628662109375;
-    const PIO2_LO: f32 = -4.37113900018624283e-8;
-    const PIO4_HI: f32 = 0.785398185253143310546875;
-    const P0: f32 = 1.666675248e-1;
-    const P1: f32 = 7.495297643e-2;
-    const P2: f32 = 4.547037598e-2;
-    const P3: f32 = 2.417951451e-2;
-    const P4: f32 = 4.216630880e-2;
-    let hx = x.to_bits() as i32;
-    let ix = hx & 0x7fff_ffff;
-    if ix == 0x3f80_0000 {
-        return x * PIO2_HI + x * PIO2_LO;
-    } else if ix > 0x3f80_0000 {
-        return (x - x) / (x - x);
-    } else if ix < 0x3f00_0000 {
-        if ix < 0x3200_0000 {
-            if HUGE + x > ONE {
-                return x;
-            }
-        } else {
-            let t = x * x;
-            let w = t * (P0 + t * (P1 + t * (P2 + t * (P3 + t * P4))));
-            return x + x * w;
-        }
-    }
-    let w = ONE - x.abs();
-    let mut t = w * 0.5;
-    let mut p = t * (P0 + t * (P1 + t * (P2 + t * (P3 + t * P4))));
-    let s = t.sqrt();
-    if ix >= 0x3F79_999A {
-        t = PIO2_HI - (2.0 * (s + s * p) - PIO2_LO);
-    } else {
-        let w = f32::from_bits(s.to_bits() & 0xffff_f000);
-        let c = (t - w * w) / (s + w);
-        let r = p;
-        p = 2.0 * s * r - (PIO2_LO - 2.0 * c);
-        let q = PIO4_HI - 2.0 * w;
-        t = PIO4_HI - (p - q);
-    }
-    if hx > 0 { t } else { -t }
-}
+/// The reference scalar inverse sine.  With the opt-in `glibc239` feature it
+/// is glibc 2.39's `asinf` (the glibc239-libm crate), the C library the WRF
+/// references link, on any host; otherwise the process libm's, which the
+/// caller's qualification probes accept only where it rounds as glibc 2.39
+/// does (a glibc 2.41+ libm, CORE-MATH's correctly rounded `asinf`, fails
+/// them).
+#[cfg(feature = "glibc239")]
+fn reference_asinf(x: f32) -> f32 { glibc239_libm::asinf(x) }
+#[cfg(not(feature = "glibc239"))]
+fn reference_asinf(x: f32) -> f32 { x.asin() }
 
 /// Evaluate the reference scalar inverse sine on input binary32 words.
 /// The caller validates the scalar-rounding contract before using this
@@ -81,7 +41,7 @@ pub unsafe extern "C" fn gpuwm_static_scalar_asin_f32(
         let input = unsafe { std::slice::from_raw_parts(input, count) };
         let output = unsafe { std::slice::from_raw_parts_mut(output, count) };
         for (&value, result) in input.iter().zip(output.iter_mut()) {
-            *result = glibc239_asinf(value);
+            *result = reference_asinf(value);
         }
         OK
     })
@@ -101,6 +61,7 @@ mod tests {
         assert_eq!(output.map(f32::to_bits), [0, 0x8000_0000, 0x3fc9_0fdb, 0xbfc9_0fdb]);
     }
 
+    #[cfg(feature = "glibc239")]
     #[test]
     fn scalar_rotation_is_glibc_2_39_asinf_not_the_process_libm() {
         // The bridge's qualification probes: glibc 2.39 words, one above

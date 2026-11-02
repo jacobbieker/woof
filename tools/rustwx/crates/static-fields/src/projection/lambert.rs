@@ -9,6 +9,7 @@
 //! `tests/lane1_goldens.rs` against arrays extracted from the real
 //! Python on the harness domains.
 
+use super::Glibc239;
 use super::npmath::{np_mod, np_pow};
 use super::{wrap180, GridSpec, DEG_PER_RAD, RAD_PER_DEG};
 use crate::EARTH_RADIUS_M;
@@ -27,13 +28,13 @@ pub struct LambertState {
 pub fn lc_cone(truelat1: f64, truelat2: f64) -> f64 {
     if (truelat1 - truelat2).abs() > 0.1 {
         // secant
-        let num = (truelat1 * RAD_PER_DEG).cos().log10()
-            - (truelat2 * RAD_PER_DEG).cos().log10();
-        let den = ((45.0 - truelat1.abs() / 2.0) * RAD_PER_DEG).tan().log10()
-            - ((45.0 - truelat2.abs() / 2.0) * RAD_PER_DEG).tan().log10();
+        let num = (truelat1 * RAD_PER_DEG).glibc_cos().glibc_log10()
+            - (truelat2 * RAD_PER_DEG).glibc_cos().glibc_log10();
+        let den = ((45.0 - truelat1.abs() / 2.0) * RAD_PER_DEG).glibc_tan().glibc_log10()
+            - ((45.0 - truelat2.abs() / 2.0) * RAD_PER_DEG).glibc_tan().glibc_log10();
         num / den
     } else {
-        (truelat1.abs() * RAD_PER_DEG).sin() // tangent
+        (truelat1.abs() * RAD_PER_DEG).glibc_sin() // tangent
     }
 }
 
@@ -42,16 +43,16 @@ pub fn setup(spec: &GridSpec, hemi: f64) -> LambertState {
     let cone = lc_cone(spec.truelat1, spec.truelat2);
     let rebydx = EARTH_RADIUS_M / spec.dx;
     let deltalon1 = wrap180(spec.ref_lon - spec.stand_lon);
-    let ctl1r = (spec.truelat1 * RAD_PER_DEG).cos();
+    let ctl1r = (spec.truelat1 * RAD_PER_DEG).glibc_cos();
     let rsw = rebydx * ctl1r / cone
         * np_pow(
-            ((90.0 * hemi - spec.ref_lat) * RAD_PER_DEG / 2.0).tan()
-                / ((90.0 * hemi - spec.truelat1) * RAD_PER_DEG / 2.0).tan(),
+            ((90.0 * hemi - spec.ref_lat) * RAD_PER_DEG / 2.0).glibc_tan()
+                / ((90.0 * hemi - spec.truelat1) * RAD_PER_DEG / 2.0).glibc_tan(),
             cone,
         );
     let arg = cone * (deltalon1 * RAD_PER_DEG);
-    let polei = hemi * spec.known_x - hemi * rsw * arg.sin();
-    let polej = hemi * spec.known_y + rsw * arg.cos();
+    let polei = hemi * spec.known_x - hemi * rsw * arg.glibc_sin();
+    let polej = hemi * spec.known_y + rsw * arg.glibc_cos();
     LambertState { cone, rebydx, rsw, polei, polej }
 }
 
@@ -70,17 +71,17 @@ pub fn ij_to_latlon(
     let r2 = xx * xx + yy * yy;
     let r = r2.sqrt() / state.rebydx;
     let mut lon =
-        spec.stand_lon + DEG_PER_RAD * (hemi * xx).atan2(yy) / state.cone;
+        spec.stand_lon + DEG_PER_RAD * (hemi * xx).glibc_atan2(yy) / state.cone;
     lon = np_mod(lon + 360.0, 360.0);
     let chi = if chi1 == chi2 {
         // tangent (exact-equality branch, as in Fortran)
-        2.0 * (np_pow(r / chi1.tan(), 1.0 / state.cone) * (chi1 * 0.5).tan())
-            .atan()
+        2.0 * (np_pow(r / chi1.glibc_tan(), 1.0 / state.cone) * (chi1 * 0.5).glibc_tan())
+            .glibc_atan()
     } else {
         // secant
-        2.0 * (np_pow(r * state.cone / chi1.sin(), 1.0 / state.cone)
-            * (chi1 * 0.5).tan())
-        .atan()
+        2.0 * (np_pow(r * state.cone / chi1.glibc_sin(), 1.0 / state.cone)
+            * (chi1 * 0.5).glibc_tan())
+        .glibc_atan()
     };
     let mut lat = (90.0 - chi * DEG_PER_RAD) * hemi;
     // pole point (r2 == 0): mirror the Fortran branch explicitly.
@@ -106,16 +107,16 @@ pub fn latlon_to_ij(
     lon: f64,
 ) -> (f64, f64) {
     let deltalon = wrap180(lon - spec.stand_lon);
-    let ctl1r = (spec.truelat1 * RAD_PER_DEG).cos();
+    let ctl1r = (spec.truelat1 * RAD_PER_DEG).glibc_cos();
     let rm = state.rebydx * ctl1r / state.cone
         * np_pow(
-            ((90.0 * hemi - lat) * RAD_PER_DEG / 2.0).tan()
-                / ((90.0 * hemi - spec.truelat1) * RAD_PER_DEG / 2.0).tan(),
+            ((90.0 * hemi - lat) * RAD_PER_DEG / 2.0).glibc_tan()
+                / ((90.0 * hemi - spec.truelat1) * RAD_PER_DEG / 2.0).glibc_tan(),
             state.cone,
         );
     let arg = state.cone * (deltalon * RAD_PER_DEG);
-    let x = state.polei + hemi * rm * arg.sin();
-    let y = state.polej - rm * arg.cos();
+    let x = state.polei + hemi * rm * arg.glibc_sin();
+    let y = state.polej - rm * arg.glibc_cos();
     (hemi * x, hemi * y)
 }
 
@@ -123,13 +124,13 @@ pub fn latlon_to_ij(
 pub fn map_factor(state: &LambertState, spec: &GridSpec, hemi: f64, lat: f64) -> f64 {
     let half_colat = (90.0 * hemi - lat) * RAD_PER_DEG / 2.0;
     let half_colat1 = (90.0 * hemi - spec.truelat1) * RAD_PER_DEG / 2.0;
-    (spec.truelat1 * RAD_PER_DEG).cos() / (lat * RAD_PER_DEG).cos()
-        * np_pow(half_colat.tan() / half_colat1.tan(), state.cone)
+    (spec.truelat1 * RAD_PER_DEG).glibc_cos() / (lat * RAD_PER_DEG).glibc_cos()
+        * np_pow(half_colat.glibc_tan() / half_colat1.glibc_tan(), state.cone)
 }
 
 /// (SINALPHA, COSALPHA): alpha = cone * (stand_lon - lon), geogrid
 /// get_rotang PROJ_LC (no hemisphere factor).
 pub fn rotation(state: &LambertState, spec: &GridSpec, lon: f64) -> (f64, f64) {
     let alpha = state.cone * RAD_PER_DEG * wrap180(spec.stand_lon - lon);
-    (alpha.sin(), alpha.cos())
+    (alpha.glibc_sin(), alpha.glibc_cos())
 }

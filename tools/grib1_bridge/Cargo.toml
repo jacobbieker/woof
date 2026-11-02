@@ -9,6 +9,11 @@ name = "gpuwm_preprocess_cpu"
 path = "src/lib.rs"
 crate-type = ["cdylib", "rlib"]
 
+[features]
+# Off by default, so a default build contains no LGPL code and calls the
+# platform libm; `pixi run build-native-glibc239` turns it on.
+glibc239 = ["dep:glibc239-libm", "dep:rw-libm"]
+
 [dependencies]
 chrono = { version = "0.4", default-features = false }
 # jpeg2000 (GRIB2 DRT 5.40) is ON: several agencies pack operational
@@ -26,6 +31,13 @@ grib-core = { path = "vendor/grib-core", default-features = false, features = ["
 # A pure Rust port of musl's libm, for the portable transcendentals in
 # src/portable_math.rs: the same bits on every CPU and C library.
 libm = "0.2.16"
+# Opt-in (`glibc239` feature, off by default): glibc 2.39's words for the
+# host-math entries in src/portable_math.rs on every host -- its binary64
+# functions (first-party transcription, LGPL-2.1-or-later in part; see the
+# crate and NOTICE) and its binary32 expf, logf and powf (Arm
+# optimized-routines, MIT, which rw-libm transcribes).
+glibc239-libm = { path = "../rustwx/crates/glibc239-libm", optional = true }
+rw-libm = { path = "../rustwx/crates/rw-libm", optional = true }
 # Inflates the IMS snow and ice product (src/ims_snow_ice.rs).  The same
 # versions rw_wps vendors, copied unchanged with their checksums.
 miniz_oxide = "0.8.9"

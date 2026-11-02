@@ -32,6 +32,10 @@ name = "static_fields"
 # rlib:   Rust callers and the crate's own tests.
 crate-type = ["cdylib", "rlib"]
 
+[features]
+# Off by default; see glibc239-libm above and tools/rustwx/Cargo.toml.
+glibc239 = ["dep:glibc239-libm"]
+
 [dependencies]
 # Fixed software arithmetic for cross-machine WPS sampling positions.
 libm = { version = "0.2.16", default-features = false, features = ["force-soft-floats"] }
@@ -42,6 +46,12 @@ rayon = { workspace = true }
 # differ between glibc versions and the UCRT, and the terrain-drag statics
 # must not.
 rw-libm = { path = "../rw-libm" }
+# Opt-in (`glibc239` feature, off by default; LGPL-2.1-or-later in part):
+# the public projection coordinates and derived fields' binary64
+# transcendentals with glibc 2.39's words on every platform (the C library
+# the WRF and WPS references link) instead of the platform libm's; see
+# src/projection/mod.rs.
+glibc239-libm = { path = "../glibc239-libm", optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = "0.10"

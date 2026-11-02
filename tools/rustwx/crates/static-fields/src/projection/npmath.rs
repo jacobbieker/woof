@@ -288,10 +288,17 @@ pub fn np_logf(x_in: f32) -> f32 {
 
 /// numpy's float64 power ufunc: `x ** 2.0` is exactly `x * x`
 /// (measured; libm `pow` disagrees on some inputs), general exponents
-/// go to libm `pow` which numpy and Rust `std` share bit-for-bit.
+/// go to libm `pow` which numpy and Rust `std` share bit-for-bit, or with
+/// the opt-in `glibc239` feature to glibc 2.39's `pow`, which
+/// `woof.core.host_libm.power` then gives the Python transcription.
 pub fn np_pow(a: f64, b: f64) -> f64 {
-    if b == 2.0 { a * a } else { a.powf(b) }
+    if b == 2.0 { a * a } else { libm_pow(a, b) }
 }
+
+#[cfg(feature = "glibc239")]
+fn libm_pow(a: f64, b: f64) -> f64 { glibc239_libm::pow(a, b) }
+#[cfg(not(feature = "glibc239"))]
+fn libm_pow(a: f64, b: f64) -> f64 { a.powf(b) }
 
 /// numpy's float32 power ufunc (same `** 2.0` special case, measured).
 pub fn np_powf(a: f32, b: f32) -> f32 {

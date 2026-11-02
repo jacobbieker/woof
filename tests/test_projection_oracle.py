@@ -93,7 +93,10 @@ LAMBERT_MAPF_RELTOL = 5.0e-16
 #: host_libm calls on macOS), whose transcendentals round differently from
 #: glibc's.  Measured max-ULP over the whole deck on macOS 26.5 arm64 and
 #: pinned exactly; only the slots that exceed the glibc ceiling are listed.
-#: The fixture and the glibc ceilings are unchanged.
+#: The fixture and the glibc ceilings are unchanged.  A CPU bridge built
+#: with the opt-in glibc 2.39 transcription (``pixi run
+#: build-native-glibc239``) gives glibc's words on macOS too, and is graded
+#: on the glibc ceilings.
 APPLE_LIBM_ULP_CEILINGS = {
     ("LambertGrid", "SETUP", "cone"): 7,
     ("LambertGrid", "SETUP", "rsw"): 8,
@@ -110,7 +113,7 @@ APPLE_LIBM_ULP_CEILINGS = {
     ("PolarStereoGrid", "IJLL", "lon"): 4,
     ("PolarStereoGrid", "ROTA", "cosa"): 1,
 }
-if sys.platform == "darwin":
+if sys.platform == "darwin" and host_libm.implementation() != host_libm.GLIBC239:
     ULP_CEILINGS = {**ULP_CEILINGS, **APPLE_LIBM_ULP_CEILINGS}
     # Measured 5.75e-16 on the same host.
     LAMBERT_MAPF_RELTOL = 6.0e-16

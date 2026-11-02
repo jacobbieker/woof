@@ -275,19 +275,38 @@ def test_the_reflectivity_bin_tables_are_wrf_s():
 # The host mirror of the kernel source (CPU, glibc host)
 # ---------------------------------------------------------------------------
 
+def _transcribed_libm() -> bool:
+    """Whether the CPU bridge carries the opt-in glibc 2.39 transcription
+    (``pixi run build-native-glibc239``), which gives the oracle's glibc
+    words on any host."""
+    from woof.core import host_libm
+    return host_libm.implementation() == host_libm.GLIBC239
+
+
 @pytest.mark.parametrize("config", ("dt20_hail0", "dt300_hail0",
                                     "dt150_hail1_x3"))
 def test_the_kernel_source_on_the_host_is_the_defined_arm(tmp_path, config):
-    """wdm6.cu compiled for the host (its WDM6_CPU_MIRROR arm, the C
-    library's float32 exp/log/pow) lands on every state and radius word of
-    WRF's defined arm.  Reflectivity has no host mirror."""
+    """wdm6.cu compiled for the host (its WDM6_CPU_MIRROR arm, glibc's
+    float32 exp/log/pow: the CPU bridge's glibc 2.39 transcription where it
+    is installed, else the C library's) lands on every state and radius
+    word of WRF's defined arm.  Reflectivity has no host mirror."""
     compiler = shutil.which("g++")
-    if compiler is None or platform.libc_ver()[0] != "glibc":
-        pytest.skip("the host mirror is graded with g++ on a glibc host")
+    transcribed = sys.platform != "win32" and _transcribed_libm()
+    if compiler is None or (platform.libc_ver()[0] != "glibc" and not transcribed):
+        pytest.skip("the host mirror is graded with g++ on a glibc host, or "
+                    "on any host with g++ once the CPU bridge is built with "
+                    "`pixi run build-native-glibc239` (glibc 2.39's own "
+                    "expf/logf/powf)")
     exe = tmp_path / "wdm6_mirror"
+    link = []
+    if transcribed:
+        from woof.ingest.cpu_backend import resolve_cpu_bridge
+        bridge = Path(resolve_cpu_bridge()).resolve().parent
+        link = ["-include", str(TOOLS / "glibc_libm_shim.h"), "-L", str(bridge),
+                "-lgpuwm_preprocess_cpu", f"-Wl,-rpath,{bridge}"]
     subprocess.run([compiler, "-std=c++17", "-O0", "-ffp-contract=off",
                     "-I", str(ROOT), str(TOOLS / "mirror_main.cpp"), "-o",
-                    str(exe)], check=True, capture_output=True, text=True)
+                    str(exe), *link], check=True, capture_output=True, text=True)
     inp, case = _case(tmp_path, config)
     out = tmp_path / f"{config}.mirror.out"
     subprocess.run([str(exe), str(inp), str(out)], check=True)
