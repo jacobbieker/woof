@@ -87,6 +87,7 @@ from __future__ import annotations
 import csv
 import hashlib
 from pathlib import Path
+import sys
 
 import numpy as np
 import pytest
@@ -343,9 +344,7 @@ WATER_ULP = {
         "zol": (0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0),
     },
     (3, 2, 1): {
-        # moderate_water 0 -> 1 on macOS arm64 (Apple libm), the one
-        # element of the whole sweep it adds to the union.
-        "cd": (0, 0, 1, 0, 2, 0, 0, 0, 0, 0, 0, 3),
+        "cd": (0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 3),
         "cda": (0, 0, 3, 0, 0, 0, 0, 0, 0, 2, 2, 0),
         "ch": (0, 0, 1, 0, 0, 0, 0, 0, 0, 2, 1, 0),
         "chs": (0, 0, 2, 0, 0, 0, 0, 0, 0, 1, 3, 0),
@@ -416,9 +415,21 @@ def _evaluate(key, rows) -> dict[str, np.ndarray]:
     )
 
 
+#: Apple's libm (macOS arm64, measured on an Apple silicon host) rounds
+#: one element of the whole sweep one ULP further than the three platforms
+#: ``WATER_ULP`` unites: cd on moderate_water at isftcflx=3, step 2,
+#: isfflx=1 (measured 1 > 0).  Read only on darwin, so ``WATER_ULP`` stays
+#: the measured union its receipt hashes (tests/test_mynn_surface.py).
+_APPLE_LIBM_WATER_ULP = {(3, 2, 1): {"cd": {CASES.index("moderate_water"): 1}}}
+
+
 def _budget(table, key, name, count):
-    return np.asarray(table.get(key, {}).get(name, (0,) * count),
-                      dtype=np.int64)
+    budget = np.asarray(table.get(key, {}).get(name, (0,) * count),
+                        dtype=np.int64)
+    if table is WATER_ULP and sys.platform == "darwin":
+        for index, value in _APPLE_LIBM_WATER_ULP.get(key, {}).get(name, {}).items():
+            budget[index] = max(budget[index], value)
+    return budget
 
 
 def test_the_water_fixtures_and_their_harness_are_the_pinned_bytes():
