@@ -6725,9 +6725,9 @@ def scratch_slot_registry(cfg: RunConfig, *,
         # and_not_the_present_ice_one, which measures the prep's own
         # scratch requests on a real mp=50 state; before it existed that
         # edit left this whole module green.
-        if cfg.mp_physics not in (2, 5, 6, 8, 10, 16, 18, 24, 28, 30, 50, 106):
+        if cfg.mp_physics not in (2, 5, 6, 8, 10, 16, 18, 24, 28, 30, 40, 50, 106):
             slots["physics_qi"] = m                 # physics.py:1541-1545
-        if cfg.mp_physics not in (2, 6, 8, 10, 16, 18, 24, 28, 30, 106):
+        if cfg.mp_physics not in (2, 6, 8, 10, 16, 18, 24, 28, 30, 40, 106):
             slots["physics_qs"] = m                 # physics.py:1546-1550
     # FOUR producers write this one uint32 word and the disjunction has to
     # name every one of them: YSU (physics.py:_run_ysu), Shin-Hong

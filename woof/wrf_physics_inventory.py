@@ -368,7 +368,9 @@ _INVENTORIES = {
     # Registry.EM_COMMON:3047 (WRF v4.7.1): Morrison's moments plus the
     # advected droplet number qnc.  The package's EFCG/EFIG/EFSG/WACT,
     # CCN1_GS..CCN7_GS and MSKF_REFL_10CM are aercu_opt>0/MSKF state that
-    # woof's aercu_opt=0 run neither prepares nor writes.
+    # woof's aercu_opt=0 run neither prepares nor writes; the package's
+    # re_cloud/re_ice/re_snow are runtime state like the other radius
+    # packages'.
     40: StockWrfPhysicsInventory(
         mp_physics=40,
         scheme="Morrison two-moment with CESM aerosol",
@@ -380,7 +382,7 @@ _INVENTORIES = {
             _scalar("qnr", "QNRAIN", units="# kg(-1)", state_name="nr"),
             _scalar("qng", "QNGRAUPEL", units="# kg(-1)", state_name="ng"),
         ),
-        runtime_state_not_wrfinput=(
+        runtime_state_not_wrfinput=_EFFECTIVE_RADII + (
             RuntimeStateField("rqrcuten", "RQRCUTEN"),
             RuntimeStateField("rqscuten", "RQSCUTEN"),
             RuntimeStateField("rqicuten", "RQICUTEN"),
