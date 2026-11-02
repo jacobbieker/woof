@@ -832,6 +832,13 @@ def _translated_module(name: str, source: str, *, key: str | None = None, option
         # same entry the CUDA route records
         record_module(f"{MODULE_KEY_ROOT}:{key or name}", source=source, options=options, module=None)
         return module
+    if backend.active() == "host":
+        from woof.backend.host.loader import load_unit
+        from woof.certify.kernel_manifest import record_module
+        options = module_options(name) if options is None else options
+        module = load_unit(key or name, source, options=options)
+        record_module(f"{MODULE_KEY_ROOT}:{key or name}", source=source, options=options, module=None)
+        return module
     raise backend.BackendUnavailable(f"backend {backend.active()!r} cannot load kernel units yet")
 
 

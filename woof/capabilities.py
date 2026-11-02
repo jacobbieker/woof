@@ -136,14 +136,28 @@ MLX_RUNTIME = Requirement(
             "  #   or: pip install 'recast-woof[gpu-mlx]'\n"
             "  # `woof doctor` translates, compiles and runs a probe kernel."))
 
+#: The host backend (woof/backend/host): NumPy under a CuPy facade, the same
+#: CUDA kernels built by the host C++ compiler.  Stands in for GPU_RUNTIME
+#: when the process's backend is ``host`` (only by name: WOOF_BACKEND=host).
+HOST_RUNTIME = Requirement(
+    module="numpy",
+    distribution="numpy",
+    extras=(),
+    unlocks="every path that integrates the model, on the CPU",
+    remedy=("  remedy: install a C++17 compiler (clang++ or g++)\n"
+            "  # WOOF_BACKEND=host builds the CUDA kernels for the host."))
+
 
 def _runtime_for(requirement: Requirement) -> Requirement:
-    """GPU_RUNTIME means MLX_RUNTIME on a process whose backend is mlx."""
+    """GPU_RUNTIME means MLX_RUNTIME on a process whose backend is mlx, and
+    HOST_RUNTIME on one whose backend is host."""
 
     if requirement is not GPU_RUNTIME:
         return requirement
     try:
         from woof import backend
+        if backend.requested() == "host":
+            return HOST_RUNTIME
         if backend.requested() == "mlx":
             return MLX_RUNTIME
     except Exception:  # noqa: BLE001 -- an unreadable choice keeps the CUDA answer

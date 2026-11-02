@@ -14,7 +14,8 @@ the first kernel to check, given that every launch before it agreed.
 On CUDA the hook wraps ``cupy.RawModule``, ``cupy.RawKernel`` and woof's
 own direct-NVRTC module wrapper (CuPy's classes are Cython, so their
 methods cannot be patched in place); on MLX it wraps
-``woof.backend.metal.loader.MetalFunction.__call__``.
+``woof.backend.metal.loader.MetalFunction.__call__``, and on the host
+backend ``woof.backend.host.loader.HostFunction.__call__``.
 
 Usage::
 
@@ -127,6 +128,22 @@ def install(path: str | None = None) -> None:
     _STATE["installed"] = True
     set_output(path or os.environ["WOOF_LAUNCH_TRACE"])
     from woof import backend
+    if backend.requested() == "host":
+        from woof.backend.host import loader as host_loader
+        original_host = host_loader.HostFunction.__call__
+
+        def host_call(self, grid, block, args, shared_mem=0, stream=None):
+            # CuPy's own ElementwiseKernels are not traced on CUDA: the
+            # host facade's builds of them are not traced here either
+            if self.module.name.startswith("elementwise-"):
+                return original_host(self, grid, block, args, shared_mem=shared_mem, stream=stream)
+            _save_before(args)
+            before = _before(args)
+            out = original_host(self, grid, block, args, shared_mem=shared_mem, stream=stream)
+            _record(self.name, args, before)
+            return out
+        host_loader.HostFunction.__call__ = host_call
+        return
     if backend.requested() != "cuda":
         from woof.backend.metal import loader
         original = loader.MetalFunction.__call__
