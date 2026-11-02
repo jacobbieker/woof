@@ -354,6 +354,20 @@ static inline f32s __woof_ieee_mul(f32s a, f32s b) { return a * b; }
 static inline f32s __woof_ieee_div(f32s a, f32s b) { return a / b; }
 static inline f32s __woof_ieee_min(f32s a, f32s b) { return fminf(a, b); }
 static inline f32s __woof_ieee_max(f32s a, f32s b) { return fmaxf(a, b); }
+// setp.<cmp>.f32 without .ftz: an ordered comparison that reads a subnormal
+// as itself (Metal's compare reads it as zero); ne is false for a NaN.
+static inline bool __woof_ieee_eq(f32s a, f32s b) { return a == b; }
+static inline bool __woof_ieee_lt(f32s a, f32s b) { return a < b; }
+static inline bool __woof_ieee_le(f32s a, f32s b) { return a <= b; }
+static inline bool __woof_ieee_gt(f32s a, f32s b) { return a > b; }
+static inline bool __woof_ieee_ge(f32s a, f32s b) { return a >= b; }
+static inline bool __woof_ieee_ne(f32s a, f32s b) { return a < b || a > b; }
+static inline bool __woof_ieee_eq(float a, float b) { return f32s(a) == f32s(b); }
+static inline bool __woof_ieee_lt(float a, float b) { return f32s(a) < f32s(b); }
+static inline bool __woof_ieee_le(float a, float b) { return f32s(a) <= f32s(b); }
+static inline bool __woof_ieee_gt(float a, float b) { return f32s(a) > f32s(b); }
+static inline bool __woof_ieee_ge(float a, float b) { return f32s(a) >= f32s(b); }
+static inline bool __woof_ieee_ne(float a, float b) { return __woof_ieee_lt(a, b) || __woof_ieee_gt(a, b); }
 static inline f32s __woof_selmax(f32s a, f32s b) {
   return a > b ? a : (a == b ? f32s(as_type<float>(as_type<uint>(a.v) & as_type<uint>(b.v))) : b);
 }

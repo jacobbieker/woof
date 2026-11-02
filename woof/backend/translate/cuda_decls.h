@@ -160,4 +160,6 @@ void __woof_compiler_fence();
 float __woof_ieee_add(float, float); float __woof_ieee_sub(float, float);
 float __woof_ieee_mul(float, float); float __woof_ieee_div(float, float);
 float __woof_ieee_min(float, float); float __woof_ieee_max(float, float);
+bool __woof_ieee_eq(float, float); bool __woof_ieee_ne(float, float); bool __woof_ieee_lt(float, float);
+bool __woof_ieee_le(float, float); bool __woof_ieee_gt(float, float); bool __woof_ieee_ge(float, float);
 float __woof_selmax(float, float); float __woof_selmin(float, float);
