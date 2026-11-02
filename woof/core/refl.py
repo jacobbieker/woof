@@ -253,12 +253,14 @@ def _frozen(a: np.ndarray) -> np.ndarray:
 def _log_bins(dmax: float) -> tuple[np.ndarray, np.ndarray]:
     """Log-spaced bin centers/widths from 100 um to ``dmax``
     (module_mp_radar.F:124-146)."""
+    from woof.core import host_libm
+    exp, log = host_libm.scalar("exp"), host_libm.scalar("log")  # glibc's words
     edges = np.empty(NRBINS + 1, dtype=np.float64)
     edges[0] = 100.0e-6
     edges[NRBINS] = dmax
     for n in range(1, NRBINS):
-        edges[n] = math.exp(n / NRBINS * math.log(edges[NRBINS] / edges[0])
-                            + math.log(edges[0]))
+        edges[n] = exp(n / NRBINS * log(edges[NRBINS] / edges[0])
+                       + log(edges[0]))
     return np.sqrt(edges[:-1] * edges[1:]), np.diff(edges)
 
 
