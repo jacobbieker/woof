@@ -91,9 +91,16 @@ def wrf():
 
 @pytest.fixture(scope="module")
 def run_regime():
-    sys.path.insert(0, str(TOOLS))
-    from run_woof import run_regime as run
-    return run
+    # By path under a name of its own: the RUC and RRTMG oracle directories
+    # both hold a run_woof.py, and a bare import would hand one the other's.
+    import importlib.util
+    key = "_rrtmg_legacy_column_oracle_run_woof"
+    if key not in sys.modules:
+        spec = importlib.util.spec_from_file_location(key, TOOLS / "run_woof.py")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[key] = module
+        spec.loader.exec_module(module)
+    return sys.modules[key].run_regime
 
 
 def test_fixture_covers_every_regime_and_field(wrf):
