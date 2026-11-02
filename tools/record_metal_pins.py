@@ -139,7 +139,33 @@ def coupling():
     _write(ORACLE_DIR / "coupling-baseline.json", pin)
 
 
-FAMILIES = {f.__name__: f for f in (momentum, prep, rk, vertical, horizontal, coupling)}
+def bookkeeping():
+    from woof.verify.smallstep_bookkeeping_oracle import (
+        BOOKKEEPING_DIR, PORT_RUNNERS, ROUNDING_TRACES, load_bookkeeping)
+    from woof.verify.smallstep_oracle import word_metrics
+    from woof.verify.platform_pins import backend_variant
+    pins = json.loads((BOOKKEEPING_DIR / "measurements.json").read_text())
+    manifest = json.loads((BOOKKEEPING_DIR / "manifest.json").read_text())
+    for name, entry in manifest["files"].items():
+        routine = entry["routine"]
+        if routine == "emdiv" and backend_variant() == "wrf-exact":
+            continue    # applied inside advance_uv in this build (the test skips it)
+        fixture = load_bookkeeping(BOOKKEEPING_DIR / name)
+        actual = PORT_RUNNERS[routine](fixture)
+        row = {"routine": routine, "native": {}, "isolation": {}}
+        for key, value in fixture.items():
+            if key.startswith("ref_") and key[4:] in actual:
+                row["native"][key[4:]] = word_metrics(actual[key[4:]], value)
+            if key.startswith("isolation_") and key[10:] in actual:
+                row["isolation"][key[10:]] = word_metrics(actual[key[10:]], value)
+        row["causal_trace"] = {key: word_metrics(actual[key], value)
+                               for key, value in ROUNDING_TRACES[routine](fixture).items()}
+        pins["files"][name] = row
+    _write(BOOKKEEPING_DIR / "measurements.json", pins)
+
+
+FAMILIES = {f.__name__: f for f in (momentum, prep, rk, vertical, horizontal, coupling,
+                                    bookkeeping)}
 
 
 def main(argv=None):
