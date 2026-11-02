@@ -83,6 +83,8 @@ def test_actual_tree_door_uses_both_stores_and_reseeds_after_validation(tmp_path
         validate_restart = StreamedDomain.validate_restart
         apply_restart = StreamedDomain.apply_restart
         impose_clock = StreamedDomain.impose_clock
+        _nest_archive_state = StreamedDomain._nest_archive_state
+        _template = None  # no store-direct template: the archive is the template state
 
     def attach(node, *, clear):
         endpoint = Endpoint()

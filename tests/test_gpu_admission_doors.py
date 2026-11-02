@@ -291,6 +291,9 @@ def test_wrfinput_run_door_prices_the_experiment_the_directory_declares(
 
     seen: dict[str, object] = {}
     _stub_supervisor(monkeypatch, supervisor, seen, 5 * 2 ** 30)
+    # The door honours a hidden device mask by pricing no card; the
+    # GPU-less conftest backstop plants one, and the pricing is under test.
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
 
     # The --outdir claim refuses an output inside the input tree, so the
     # two are siblings here as they are on a real command line.

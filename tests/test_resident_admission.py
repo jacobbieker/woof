@@ -240,7 +240,10 @@ def test_an_idealized_state_too_big_for_the_card_is_refused_first(
 
     cfg = RunConfig(nx=8, ny=8, nz=4, dx=1000.0, dy=1000.0, ztop=10000.0,
                     dt=3.0, run_seconds=3600.0)
-    _stand_in_runtime(monkeypatch, free_bytes=64)
+    fake = _stand_in_runtime(monkeypatch, free_bytes=64)
+    # init_at_rest asks the module's own CuPy binding before it admits, so
+    # on a host without CuPy the stand-in runtime is that binding too.
+    monkeypatch.setattr(state_module, "cp", fake)
     monkeypatch.setattr(state_module, "DomainState", _reached)
     with pytest.raises(MemoryError, match=REFUSAL) as refused:
         state_module.init_at_rest(cfg, make_vertical_coord(4, hybrid_opt=0),
