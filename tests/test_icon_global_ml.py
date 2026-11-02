@@ -153,8 +153,10 @@ def test_height_places_every_mass_level_and_pressure_is_published(mapping):
 # ---------------------------------------------------------------------------
 
 def test_objects_are_named_by_the_v1_tree_below_p_on_both_rungs():
+    # Four hours after the cycle, while DWD still serves it (it keeps about
+    # 27 h): a run DWD has dropped is planned on the source.coop mirror.
     plan = fetch_routes.resolve_request("icon-global-ml", cycle=CYCLE, hours=1,
-                                        cadence=1)
+                                        cadence=1, now=CYCLE + timedelta(hours=4))
     names = {obj.relpath for obj in plan.objects}
     assert f"T/lvt1/150/lv1/120/r/{LOCAL_RUN}/s/PT001H00M.grib2" in names
     assert f"HHL/lvt1/150/lv1/121/r/{LOCAL_RUN}/s/PT000H00M.grib2" in names
