@@ -36,6 +36,7 @@ def _inventory(paths, writers):
     return runtime._frame_records(paths)
 
 
+@pytest.mark.usefixtures("classic_history_frames")
 def test_native_completion_preserves_bytes_and_avoids_final_payload_read(
         tmp_path, monkeypatch):
     fields = {"T": np.full((1, 1, 1), 271.5, np.float32)}
@@ -270,6 +271,16 @@ def test_temp_mutation_after_hash_with_restored_mtime_never_publishes(
         before = candidate.stat()
         original = candidate.read_bytes()
         assert hashlib.sha256(original).hexdigest() == proof.sha256
+        # A later writer: wait for the filesystem's (coarse, often one
+        # scheduler tick) change-time clock to move past the written file's,
+        # or the rewrite below lands in the same ctime and no stat can see it.
+        tick = candidate.with_name(candidate.name + ".tick")
+        while True:
+            tick.touch()
+            ticked = tick.stat().st_ctime_ns
+            tick.unlink()
+            if ticked > before.st_ctime_ns:
+                break
         payload = bytearray(original)
         payload[-1] ^= 1
         candidate.write_bytes(payload)
