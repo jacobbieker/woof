@@ -51,10 +51,15 @@ except pytest.skip.Exception as exc:
     print(str(exc))
     sys.exit(77)
 """
+        from woof import backend
+        # Metal compiles a strict unit's soft-float pipeline on first use and
+        # caches it (~/.cache/woof/metal-pipelines); NSSL-2's took 13 min cold
+        # on an M3 Max and seconds warm.  CUDA's NVRTC compiles fit in 240 s.
+        timeout = 2400 if backend.active() == "mlx" else 240
         result = subprocess.run(
             [sys.executable, "-c", command, inspect.getfile(test), test.__name__,
              json.dumps(arguments, default=os.fspath)],
-            cwd=root, env=env, capture_output=True, text=True, timeout=240)
+            cwd=root, env=env, capture_output=True, text=True, timeout=timeout)
         if result.returncode == 77:
             pytest.skip(result.stdout.strip())
         assert result.returncode == 0, result.stdout + result.stderr

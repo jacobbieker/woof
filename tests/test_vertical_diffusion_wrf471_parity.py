@@ -101,6 +101,8 @@ def test_tke_vertical_self_diffusion_wrf471_open_boundary_words():
     state.mup = cp.zeros_like(state.mut)
     state.mup0 = cp.zeros_like(state.mut)
     state.has_msf = True
+    # DomainState.set_map_factors' stored reciprocal (WRF's MF_VX_INV).
+    state.msfv_inv = cp.float32(1.0) / state.msfv
     state.qr = cp.zeros_like(state.alt)
     state.qs = cp.zeros_like(state.alt)
     state.qg = cp.zeros_like(state.alt)

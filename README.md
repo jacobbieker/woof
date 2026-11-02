@@ -182,6 +182,11 @@ upstream's does. The fork's own changes are recorded in
   is translated to Metal when it first loads, and `import cupy` resolves to a
   CuPy-compatible layer over MLX. CUDA runs exactly as before. Design and
   details: [docs/dev/mlx-backend.md](docs/dev/mlx-backend.md).
+- **A host (CPU) backend.** `WOOF_BACKEND=host` runs the same GPU code on
+  any CPU. Each `.cu` unit is compiled by the host C++ compiler, and
+  `import cupy` resolves to a CuPy-compatible layer over NumPy. It is never
+  selected by default. Design and measurements:
+  [docs/dev/host-backend.md](docs/dev/host-backend.md).
 - **Further WRF physics,** each held word for word to compiled WRF v4.7.1
   Fortran where the port says so:
   - SMS-3DTKE (`km_opt = 5`);
@@ -248,6 +253,21 @@ on it:
   Apple GPUs.
 - **Some checks do not run on Metal.** A few test helpers capture CUDA-only
   compiler output. They are reported as failing on Metal rather than skipped.
+
+### Limitations of the host backend
+
+- **It is slow.** On a 128×128×40 moist bubble it runs about 100× slower
+  than an RTX A6000. It is for checking results and for machines with no
+  GPU, not for production forecasts.
+- **The first run compiles.** Each unit is built once and then cached in
+  `~/.cache/woof/host-kernels`.
+- **The answers are CUDA's `--fmad=false` words, except for libm.** Nothing
+  is contracted. libdevice calls (`expf`, `powf` …) become glibc's, and
+  NaN payloads are x86's. Under strict numerics, a one-hour moist bubble is
+  bit-identical to CUDA.
+- **Not supported:** cooperative launches and grid sync, textures, `__half`
+  arithmetic, partial warp masks, and inline PTX outside woof's idioms. The
+  hex lane is not measured on this backend.
 
 ## Licence
 

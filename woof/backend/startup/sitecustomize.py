@@ -9,5 +9,5 @@ test subprocesses that import cupy before woof included.
 """
 import os
 
-if os.environ.get("WOOF_BACKEND", "").strip().lower() in ("mlx", "cpu"):
+if os.environ.get("WOOF_BACKEND", "").strip().lower() in ("mlx", "cpu", "host"):
     __import__("woof")

@@ -60,7 +60,7 @@ import os as _os  # noqa: E402
 import sys as _sys  # noqa: E402
 
 _requested_backend = _os.environ.get("WOOF_BACKEND", "").strip().lower()
-if _requested_backend in ("mlx", "cpu"):
+if _requested_backend in ("mlx", "cpu", "host"):
     from woof import backend as _backend
 
     _backend.install()

@@ -6,12 +6,16 @@
           ``mlx.core``; kernels are the same CUDA sources translated to Metal
           (:mod:`woof.backend.translate`) and launched in place
           (:mod:`woof.backend.metal`).
-``cpu``   planned: the same facade over NumPy, kernels compiled as host
-          C++.  Until it exists ``cpu`` installs no facade, so ``import
-          cupy`` stays an ImportError on a machine without CuPy.
+``host``  any CPU: ``import cupy`` resolves to
+          :mod:`woof.backend.hostfacade`, a CuPy-compatible module over
+          NumPy; kernels are the same CUDA sources compiled by the host C++
+          compiler (:mod:`woof.backend.host.loader`).  Only by name.
+``cpu``   no GPU code: ``cpu`` installs no facade, so ``import cupy``
+          stays an ImportError on a machine without CuPy.
 
 Selection: ``$WOOF_BACKEND`` when set, else ``cuda`` when CuPy is importable,
-else ``mlx`` on darwin-arm64 with MLX installed, else ``cpu``.  The choice is
+else ``mlx`` on darwin-arm64 with MLX installed, else ``cpu``.  ``host`` is
+never chosen by default: it runs the GPU code at CPU speed.  The choice is
 made once per process by :func:`install`, before any ``woof.core`` module
 imports cupy; it refuses to swap backends under a process that already
 imported the real CuPy, because mixing device and facade arrays cannot be
@@ -25,9 +29,12 @@ import os
 import platform
 import sys
 
-BACKENDS = ("cuda", "mlx", "cpu")
-#: The backends :mod:`woof.backend.facade` can serve ``import cupy`` for.
-FACADE_BACKENDS = ("mlx",)
+BACKENDS = ("cuda", "mlx", "cpu", "host")
+#: The backends a facade serves ``import cupy`` for (mlx:
+#: :mod:`woof.backend.facade`; host: :mod:`woof.backend.hostfacade`).
+FACADE_BACKENDS = ("mlx", "host")
+#: The package that is ``cupy`` under each facade backend.
+FACADE_PACKAGES = {"mlx": "woof.backend.facade", "host": "woof.backend.hostfacade"}
 ENV = "WOOF_BACKEND"
 
 _active: str | None = None
@@ -78,6 +85,12 @@ def install(name: str | None = None) -> str:
         raise BackendUnavailable(
             f"backend {name!r} needs `import cupy` to resolve to woof's facade, "
             "but the real CuPy is already imported in this process")
+    if name == "host":
+        from woof.backend.host.loader import CompileError, compiler
+        try:
+            compiler()
+        except CompileError as exc:
+            raise BackendUnavailable(str(exc)) from None
     if name == "mlx":
         if importlib.util.find_spec("mlx") is None:
             raise BackendUnavailable("backend 'mlx' needs the mlx package "
@@ -106,7 +119,8 @@ class _FacadeLoader:
         self.backend = backend
 
     def create_module(self, spec):
-        from woof.backend import facade
+        import importlib
+        facade = importlib.import_module(FACADE_PACKAGES[self.backend])
         if not getattr(facade, "_configured", False):
             facade.configure(self.backend)
             facade._configured = True
@@ -139,14 +153,20 @@ class _FacadeFinder:
         self.backend = backend
 
     def find_spec(self, fullname, path=None, target=None):
+        package = FACADE_PACKAGES[self.backend]
         if fullname.startswith("cupy.") and fullname.count(".") == 1:
             # `import cupy.cuda`: the facade's own module object, not a
             # second execution of its file (which kept a second registry of
             # hostAlloc blocks: alloc_pinned_memory registered in one copy and
             # pointerGetAttributes looked in the other)
+            import importlib
             import importlib.machinery
             import importlib.util
-            own = "woof.backend.facade." + fullname.split(".", 1)[1]
+            # cupy.linalg, cupy.fft, ...: namespaces a facade serves itself
+            served = getattr(importlib.import_module(package), "SUBMODULES", {})
+            if fullname in served:
+                return importlib.machinery.ModuleSpec(fullname, _FacadeLoader(self.backend))
+            own = package + "." + fullname.split(".", 1)[1]
             try:
                 found = importlib.util.find_spec(own)
             except (ImportError, ValueError):
@@ -169,5 +189,5 @@ class _FacadeFinder:
         if fullname == "cupy":
             # `import cupy.cuda`: the facade package's own submodules
             spec.submodule_search_locations = list(
-                importlib.util.find_spec("woof.backend.facade").submodule_search_locations)
+                importlib.util.find_spec(package).submodule_search_locations)
         return spec

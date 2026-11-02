@@ -58,9 +58,13 @@ def _observed_module():
     finish_column_start = source.index("void small_step_finish_column(")
     uv = source[uv_start:column_start]
     column = source[column_start:finish_start]
+    from woof.wrf_exact import ENABLED as strict
     uv = _append_observer_parameters(uv, "small_step_init_uv",
                                     "real* oracle_muus, real* oracle_muvs")
-    needle = "real mtf = rn_mul(0.5f, rn_add(mt_a, mt_b));"
+    # A strict compile recomputes mtf (and finish's msf) after the default
+    # statement; observe the final register, where the coupling reads it.
+    needle = ("real ct = rn_add(rn_mul(c1h[k], mtf), c2h[k]);" if strict else
+              "real mtf = rn_mul(0.5f, rn_add(mt_a, mt_b));")
     assert uv.count(needle) == 2
     uv = uv.replace(needle, needle + "\n        if (k == 0) oracle_muus[(size_t)j * nxf + i] = mtf;", 1)
     offset = uv.index(needle, uv.index(needle) + len(needle))
@@ -78,7 +82,8 @@ def _observed_module():
     finish_column = source[finish_column_start:]
     finish_uv = _append_observer_parameters(finish_uv, "small_step_finish_uv",
         "real* oracle_muu, real* oracle_muus, real* oracle_muv, real* oracle_muvs")
-    needle = "real mnf = rn_mul(0.5f, rn_add(mna, mnb));"
+    needle = ("real cs = rn_add(rn_mul(c1h[k], msf), c2h[k]);" if strict else
+              "real mnf = rn_mul(0.5f, rn_add(mna, mnb));")
     assert finish_uv.count(needle) == 2
     finish_uv = finish_uv.replace(needle, needle + "\n        if (k == 0) { oracle_muu[(size_t)j * nxf + i] = msf; oracle_muus[(size_t)j * nxf + i] = mnf; }", 1)
     offset = finish_uv.index(needle, finish_uv.index(needle) + len(needle))
@@ -86,7 +91,8 @@ def _observed_module():
         needle, needle + "\n        if (k == 0) { oracle_muv[(size_t)j * nx + i] = msf; oracle_muvs[(size_t)j * nx + i] = mnf; }", 1)
     finish_column = _append_observer_parameters(finish_column, "small_step_finish_column",
                                               "real* oracle_mut, real* oracle_muts")
-    needle = "real mun = rn_add(mus, mu_pp[c]);"
+    needle = ("real mun = rn_add(mus, mu_pp[c]);\n#endif" if strict else
+              "real mun = rn_add(mus, mu_pp[c]);")
     assert finish_column.count(needle) == 1
     finish_column = finish_column.replace(needle, needle + "\n    oracle_mut[c] = mus; oracle_muts[c] = mun;")
     instrumented = source[:uv_start] + uv + column + finish_uv + finish_column
@@ -106,6 +112,8 @@ def _cfg(fixture):
         open_x=not periodic, open_y=not periodic, specified=False,
         nested=False, spec_zone=1, emdiv=float(fixture.get("emdiv", 0.01)),
         dx=float(fixture["dx"]), dy=float(fixture["dy"]),
+        # The stage the RK driver sets on cfg; the strict prep reads it.
+        rk_step=int(fixture.get("rk_step", 1)),
     )
 
 
@@ -113,8 +121,16 @@ def _state(fixture):
     import cupy as cp
     state = SimpleNamespace(**{key[3:]: cp.asarray(value) for key, value in
                                fixture.items() if key.startswith("in_")})
+    from woof.wrf_exact import ENABLED
+    if ENABLED and "in_th_pp" in fixture:
+        # A strict state carries WRF's t_2 word, th'' - c1h*mu''*300: the
+        # native_pp the compiled harness hands small_step_finish.
+        state.th_pp = cp.asarray(fixture["in_th_pp"] - (
+            fixture["in_c1h"][:, None, None] * fixture["in_mu_pp"][None] * np.float32(300)))
     nz, ny, nx = state.p.shape
     state.has_msf = bool(fixture["has_msf"])
+    # DomainState.set_map_factors' stored reciprocal (WRF's MF_VX_INV).
+    state.msfv_inv = cp.float32(1.0) / state.msfv
     state.qv = None
     state.tke = None
     state.total_mu = lambda: state.mub2d + state.mup
@@ -150,7 +166,9 @@ def port_prep(fixture):
     # not a tolerance or a replacement reference.  Every operation rounds.
     offset = (fixture["in_c1h"][:, None, None] * values["mu_pp"][None]
               * np.float32(300.0))
-    values["native_th_pp"] = values["th_pp"] - offset
+    from woof.wrf_exact import ENABLED
+    # A strict prep stores WRF's t_2 itself; there is nothing to map.
+    values["native_th_pp"] = values["th_pp"].copy() if ENABLED else values["th_pp"] - offset
     # Snapshots and saves are real retained device arrays in the engine,
     # rather than additional copies allocated by WRF's driver.
     for target, source in (("u", "u"), ("v", "v"), ("w", "w"),
@@ -197,11 +215,26 @@ def port_prep(fixture):
     return values
 
 
+def _finish_state(fixture):
+    """The stand-in with the strict acoustic MUTS carrier finish reads.
+
+    After the acoustic loop the real state's carrier holds WRF's
+    ``muts = mut + mu''``, the same words the compiled harness passes.
+    """
+    import cupy as cp
+    from woof.core.acoustic import WRF_EXACT, wrf_acoustic_muts
+    state = _state(fixture)
+    if WRF_EXACT:
+        cp.add(cp.add(state.mub2d, state.mup), state.mu_pp,
+               out=wrf_acoustic_muts(state))
+    return state
+
+
 def port_finish(fixture):
     """Execute the engine's uncoupling launcher, including retained heating."""
     import cupy as cp
     from woof.core.dycore import _finish_small_steps, _sumflux_launch
-    state = _state(fixture)
+    state = _finish_state(fixture)
     saved_mu = cp.asnumpy(state.mup)
     _finish_small_steps(state, _cfg(fixture), float(fixture["hdiab_dt"]))
     cp.cuda.get_current_stream().synchronize()
@@ -217,7 +250,7 @@ def port_finish(fixture):
     _sumflux_launch("accumulate_sumflux", targets, (state.u_pp, state.v_pp, state.ww_pp))
     _sumflux_launch("finish_sumflux", targets, (state.u, state.v, state.ww), 1)
     values["ww"] = cp.asnumpy(targets[2])
-    observed_state = _state(fixture)
+    observed_state = _finish_state(fixture)
     observed = {name: cp.empty(shape, cp.float32) for name, shape in
                 (("muu", state.msfu.shape), ("muus", state.msfu.shape),
                  ("muv", state.msfv.shape), ("muvs", state.msfv.shape),

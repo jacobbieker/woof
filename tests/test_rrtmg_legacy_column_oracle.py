@@ -29,9 +29,12 @@ own aer_opt = 3 optics differ from that generation in two lines of gt_aod
 report, not graded here.
 
 WRF's published RTHRATENSW is RTHRATEN - RTHRATENLW (driver :2866-2872),
-not RRTMG_SWRAD's own heating rate; WOOF publishes the latter and its
-theta tendency RTHRATENLW + RTHRATENSW equals WRF's RTHRATEN bit for bit
-(graded as ``rthraten``).
+not RRTMG_SWRAD's own heating rate.  Since 1.1.4 WOOF's adapter publishes
+that same driver round trip (rla_driver_sw_tendency), so its rthratensw is
+graded against the published ``rthratensw``; the fixture keeps
+RRTMG_SWRAD's own rate as ``rthratensw_wrapper``.  The theta tendency
+RTHRATENLW + RTHRATENSW equals WRF's RTHRATEN bit for bit (graded as
+``rthraten``).
 """
 from __future__ import annotations
 
@@ -49,7 +52,7 @@ FIXTURE = REPO / "tests" / "data" / "oracles" / "rrtmg_legacy" / "column"
 TOOLS = REPO / "tools" / "rrtmg_legacy_column_oracle"
 
 #: WRF field -> WOOF output (tools/rrtmg_legacy_column_oracle/compare.py).
-GRADED = {"rthratenlw": "rthratenlw", "rthratensw_wrapper": "rthratensw",
+GRADED = {"rthratenlw": "rthratenlw", "rthratensw": "rthratensw",
           "rthraten": "rthraten", "glw": "glw", "olr": "olr", "gsw": "gsw",
           "swdown": "swdown", "coszen": "coszen", "cldfra": "cldfra",
           "swddir": "swddir", "swddif": "swddif", "o3rad": "o3rad"}
@@ -88,9 +91,16 @@ def wrf():
 
 @pytest.fixture(scope="module")
 def run_regime():
-    sys.path.insert(0, str(TOOLS))
-    from run_woof import run_regime as run
-    return run
+    # By path under a name of its own: the RUC and RRTMG oracle directories
+    # both hold a run_woof.py, and a bare import would hand one the other's.
+    import importlib.util
+    key = "_rrtmg_legacy_column_oracle_run_woof"
+    if key not in sys.modules:
+        spec = importlib.util.spec_from_file_location(key, TOOLS / "run_woof.py")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[key] = module
+        spec.loader.exec_module(module)
+    return sys.modules[key].run_regime
 
 
 def test_fixture_covers_every_regime_and_field(wrf):

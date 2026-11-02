@@ -12,6 +12,7 @@ memory.  No CPU mirror is a reference.
 from pathlib import Path
 from types import SimpleNamespace
 import json
+import os
 import subprocess
 import sys
 
@@ -61,10 +62,14 @@ def rows_for(nrow):
 
 
 def test_import_is_cupy_free():
+    # A GPUWM_WRF_EXACT process installs its NVRTC hook at ``import woof``
+    # (woof/__init__.py), which imports CuPy by design; the module's own
+    # imports are what this measures.
+    env = {k: v for k, v in os.environ.items() if not k.startswith('GPUWM_WRF_EXACT')}
     result = subprocess.run(
         [sys.executable, '-c', "import sys; import woof.core.chem_drydep_gas; "
          "assert 'cupy' not in sys.modules"],
-        cwd=ROOT, capture_output=True, text=True)
+        cwd=ROOT, capture_output=True, text=True, env=env)
     assert result.returncode == 0, result.stderr
 
 
