@@ -343,7 +343,9 @@ WATER_ULP = {
         "zol": (0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0),
     },
     (3, 2, 1): {
-        "cd": (0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 3),
+        # moderate_water 0 -> 1 on macOS arm64 (Apple libm), the one
+        # element of the whole sweep it adds to the union.
+        "cd": (0, 0, 1, 0, 2, 0, 0, 0, 0, 0, 0, 3),
         "cda": (0, 0, 3, 0, 0, 0, 0, 0, 0, 2, 2, 0),
         "ch": (0, 0, 1, 0, 0, 0, 0, 0, 0, 2, 1, 0),
         "chs": (0, 0, 2, 0, 0, 0, 0, 0, 0, 1, 3, 0),

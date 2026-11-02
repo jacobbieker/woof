@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import sys
 import zipfile
 
 import numpy as np
@@ -83,6 +84,17 @@ def _measure(actual, expected):
             for name, value in expected.items()}
 
 
+#: Apple's libm (macOS arm64) rounds three elements of the CPU surface
+#: layer one ULP further than the glibc 2.43 capture the budget was measured
+#: against: measured over every surface label, pinned exactly, read only on
+#: darwin.  Every other element and label is the budget as recorded.
+_APPLE_LIBM_SURFACE_ULP = {
+    "cpu.surface/2.1.zol": {(0, 1): 1},
+    "cpu.surface/2.1.rmol": {(0, 1): 1},
+    "cpu.surface/2.1.psih": {(0, 1): 1},
+}
+
+
 def _gate(label, actual, expected):
     metrics = _measure(actual, expected)
     print("SPP_NATIVE " + json.dumps({"name": label, "ulp": {k:v for k,v in metrics.items() if v}, "fields": len(metrics)}, sort_keys=True))
@@ -104,6 +116,11 @@ def _gate(label, actual, expected):
         for name,value in expected.items():
             distance = fp32_ulp_distance(actual[name],value)
             bound = budget[label+"/"+name]
+            if sys.platform == "darwin":
+                bound = bound.copy()
+                for index, value in _APPLE_LIBM_SURFACE_ULP.get(
+                        label + "/" + name, {}).items():
+                    bound[index] = max(bound[index], value)
             assert distance.shape == bound.shape
             assert np.isfinite(actual[name]).all(), (label,name)
             assert np.all(distance <= bound), (label,name,metrics[name],int(bound.max(initial=0)))
