@@ -14,7 +14,15 @@ kernel's pipeline).  Each unit lands in one class:
                     compiled, so no Metal device is needed.
 
 ``--translate-only`` stops after translation: it is the half of the census a
-machine without a Metal device (a GitHub macOS VM) can run.  ``--gate`` exits
+machine without a Metal device (a GitHub macOS VM) can run.
+
+``--hex`` takes the hex lane's units instead: every module the hex kernel
+pack holds (``woof.hex.cuda_backend.aot_build.pack_inventory``: the
+KernelCache declarations and the recorded direct and raw NVRTC compiles, in
+strict and fast numerics), less CuPy's own generated kernels, which the
+facade implements itself.  A unit is ``hex:<first kernel>:<digest>``; the
+inventory is written beside ``--out`` (``.hex-units.json``) for the
+isolated workers to read.  ``--gate`` exits
 non-zero when any unit is ``refused``, ``metal_error``, ``crash`` or
 ``timeout``; ``source_error`` is the documented class of units that are only
 ever compiled with their loader's defines, and does not fail the gate.
@@ -80,6 +88,27 @@ def composed_units() -> list[str]:
     return out
 
 
+def hex_inventory() -> list[dict]:
+    """The hex lane's translation units: source and options, named."""
+    import hashlib
+    from woof.hex.cuda_backend import aot_build
+    rows = {}
+    for row in aot_build.pack_inventory(compiler_family=13):
+        if row["source"].lstrip().startswith("#include <cupy/"):
+            continue        # CuPy's own generated kernels: the facade's
+        digest = hashlib.sha256(json.dumps([row["source"], list(row["options"])]).encode()).hexdigest()
+        kernel = re.search(r'extern\s+"C"\s+__global__\s+void\s+(?:__launch_bounds__\s*\([^)]*\)\s*)?(\w+)',
+                           row["source"])
+        name = f"hex:{kernel.group(1) if kernel else 'unit'}:{digest[:10]}"
+        rows[name] = {"unit": name, "source": row["source"], "options": list(row["options"])}
+    return [rows[k] for k in sorted(rows)]
+
+
+def _hex_row(name: str) -> dict:
+    rows = json.loads(Path(os.environ["WOOF_CENSUS_HEX_UNITS"]).read_text())
+    return next(r for r in rows if r["unit"] == name)
+
+
 def fingerprint() -> str:
     """sha256 over what decides a unit's class: the translator, the Metal
     loader/launcher and headers, and every kernel source."""
@@ -119,7 +148,10 @@ def census_one(name: str, retain: bool, translate_only: bool = False) -> dict:
     from woof.core import kernels
     t0 = time.perf_counter()
     try:
-        if name.startswith("composed:"):
+        if name.startswith("hex:"):
+            row = _hex_row(name)
+            source, options = row["source"], tuple(row["options"])
+        elif name.startswith("composed:"):
             import importlib
             mod = importlib.import_module(f"woof.core.{name.split(':', 1)[1]}")
             source, options = mod.module_source(), tuple(mod.MODULE_OPTIONS)
@@ -179,6 +211,8 @@ def main(argv=None) -> int:
     parser.add_argument("--fresh", action="store_true", help="ignore results already in --out")
     parser.add_argument("--translate-only", action="store_true",
                         help="translate to MSL and stop: no Metal device is touched")
+    parser.add_argument("--hex", action="store_true",
+                        help="the hex lane's kernel units (woof.hex's kernel pack inventory)")
     parser.add_argument("--gate", action="store_true",
                         help="exit 1 if any unit is refused, metal_error, crash or timeout")
     args = parser.parse_args(argv)
@@ -187,7 +221,17 @@ def main(argv=None) -> int:
         return 0
     done = {}
     stamp = fingerprint()
-    current = set(units())
+    all_units = units()
+    if args.hex:
+        import hashlib
+        rows = hex_inventory()
+        listing = args.out.with_suffix(".hex-units.json")
+        listing.write_text(json.dumps(rows))
+        os.environ["WOOF_CENSUS_HEX_UNITS"] = str(listing.resolve())
+        all_units = [r["unit"] for r in rows]
+        # a hex unit's class depends on its text and options as well
+        stamp = hashlib.sha256((stamp + listing.read_text()).encode()).hexdigest()[:16]
+    current = set(all_units)
     stale = set()
     if args.out.exists() and not args.fresh:
         for line in args.out.read_text().splitlines():
@@ -202,7 +246,7 @@ def main(argv=None) -> int:
                     done.pop(r["unit"], None)
                     continue
                 done[r["unit"]] = r
-    names = [n for n in (args.only or units()) if args.only or n not in done]
+    names = [n for n in (args.only or all_units) if args.only or n not in done]
     print(f"toolchain {stamp}: {len(done)} cached, {len(names)} to run"
           + (f" ({len(stale - set(done))} stale results ignored)" if stale else ""), flush=True)
     from concurrent.futures import ThreadPoolExecutor
