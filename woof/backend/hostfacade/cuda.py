@@ -229,33 +229,43 @@ def _root(a):
     return a
 
 
+#: id(root host array) -> (weakref to it, its allocation)
+_MEMS: dict = {}
+
+
 def _memory_of(a):
-    """(allocation, byte offset) of an array: one allocation object per
-    buffer, so every view's ``x.data.mem`` is the same object, as CuPy's."""
-    root = _root(a)
-    mem = getattr(root, "_woof_mem", None)
-    if mem is None:
-        owner = getattr(root, "_owner", None)
-        if owner is not None:
-            mem = owner.mem
-        else:
-            mem = _Memory(root.__array_interface__["data"][0], root.nbytes, root)
-        try:
-            root._woof_mem = mem
-        except AttributeError:          # a plain NumPy root keeps no attributes
-            pass
-    return mem, a.__array_interface__["data"][0] - mem.ptr
+    """(allocation, byte offset) of a facade or NumPy array: one allocation
+    object per buffer, so every view's ``x.data.mem`` is the same object,
+    as CuPy's."""
+    import weakref
+    host = getattr(a, "_a", a)
+    root = _root(host)
+    entry = _MEMS.get(id(root))
+    if entry is not None and entry[0]() is root:
+        mem = entry[1]
+    else:
+        owner = getattr(a, "_owner", None)
+        mem = owner.mem if owner is not None else \
+            _Memory(root.__array_interface__["data"][0], root.nbytes)
+        if len(_MEMS) > 4096:
+            for key in [k for k, (ref, _) in _MEMS.items() if ref() is None]:
+                del _MEMS[key]
+        _MEMS[id(root)] = (weakref.ref(root), mem)
+    return mem, host.__array_interface__["data"][0] - mem.ptr
 
 
 class MemoryPointer:
-    """``cupy.cuda.MemoryPointer(mem, offset)``: an address in an allocation."""
+    """``cupy.cuda.MemoryPointer(mem, offset)``: an address in an allocation.
+    ``keep`` holds the array whose bytes these are (``x.data``)."""
 
-    def __init__(self, mem, offset=0):
+    def __init__(self, mem, offset=0, keep=None):
         if isinstance(mem, MemoryPointer):
             offset += mem.offset
+            keep = keep if keep is not None else mem._keep
             mem = mem.mem
         self.mem = mem
         self.offset = int(offset)
+        self._keep = keep
 
     @property
     def ptr(self):
@@ -269,7 +279,7 @@ class MemoryPointer:
         return self.ptr
 
     def __add__(self, n):
-        return MemoryPointer(self.mem, self.offset + int(n))
+        return MemoryPointer(self.mem, self.offset + int(n), self._keep)
 
     def copy_from_host(self, src, size):
         ctypes.memmove(self.ptr, int(_address(src)), int(size))

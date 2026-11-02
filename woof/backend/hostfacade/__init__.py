@@ -30,55 +30,89 @@ class BackendUnsupported(AttributeError):
     """A CuPy attribute the host facade does not implement."""
 
 
-class ndarray(np.ndarray):
-    """CuPy's ndarray as a NumPy array in host memory."""
+class ndarray:
+    """CuPy's ndarray over a NumPy array in host memory (``_a``).
 
-    def __new__(cls, shape, dtype=float, memptr=None, strides=None, order="C"):
+    Not a NumPy subclass: woof tells device arrays from host ones with
+    ``isinstance(x, np.ndarray)`` (and ``__cuda_array_interface__``), as it
+    does under CuPy.  NumPy's protocols (``__array_ufunc__``,
+    ``__array_function__``) run NumPy on the host array and hand facade
+    arrays back, so ``np.where(m, x, y)`` on facade arrays is one, as it is
+    on CuPy's."""
+
+    __slots__ = ("_a", "_owner", "__weakref__")
+    __array_priority__ = 100
+
+    def __init__(self, shape, dtype=float, memptr=None, strides=None, order="C"):
         dtype = np.dtype(dtype)
         shape = (shape,) if isinstance(shape, (int, np.integer)) else tuple(int(s) for s in shape)
-        if memptr is not None:
-            # CuPy's ndarray over an existing allocation (MemoryPointer)
-            count = int(np.prod(shape)) if shape else 1
-            if strides is not None:
-                span = (sum((n - 1) * abs(s) for n, s in zip(shape, strides)) + dtype.itemsize
-                        if count else 0)
-            else:
-                span = count * dtype.itemsize
-            raw = (ctypes.c_char * builtins.max(span, 1)).from_address(int(memptr.ptr))
-            arr = np.ndarray.__new__(cls, shape, dtype, buffer=raw, strides=strides, order=order)
-            arr._owner = memptr
-            return arr
-        return np.ndarray.__new__(cls, shape, dtype, strides=strides, order=order)
+        self._owner = None
+        if memptr is None:
+            self._a = np.ndarray(shape, dtype, strides=strides, order=order)
+            return
+        # CuPy's ndarray over an existing allocation (a MemoryPointer)
+        count = int(np.prod(shape)) if shape else 1
+        if strides is not None:
+            span = sum((n - 1) * abs(st) for n, st in zip(shape, strides)) + dtype.itemsize if count else 0
+        else:
+            span = count * dtype.itemsize
+        raw = (ctypes.c_char * builtins.max(span, 1)).from_address(int(memptr.ptr))
+        self._a = np.ndarray(shape, dtype, buffer=raw, strides=strides, order=order)
+        self._owner = memptr
 
-    def __array_finalize__(self, obj):
-        return None
+    @classmethod
+    def _of(cls, a):
+        self = cls.__new__(cls)
+        self._a = a
+        self._owner = None
+        return self
 
-    def __array_wrap__(self, arr, context=None, return_scalar=False):
-        # CuPy returns 0-d arrays where NumPy returns scalars (reductions)
-        arr = arr.view(type(self)) if isinstance(arr, np.ndarray) else np.asarray(arr).view(type(self))
-        return arr
+    # -- NumPy's view of it: the host array itself
+    @property
+    def __array_interface__(self):
+        return self._a.__array_interface__
 
-    def __getitem__(self, key):
-        r = np.ndarray.__getitem__(self, key)
-        if isinstance(r, np.generic):
-            return np.asarray(r).view(ndarray)
-        return r
+    @property
+    def __cuda_array_interface__(self):
+        """The array interface, as CuPy's arrays carry it: woof also asks
+        ``hasattr(x, "__cuda_array_interface__")`` to tell device arrays."""
+        iface = dict(self._a.__array_interface__)
+        iface["version"] = 3
+        iface.setdefault("strides", None)
+        return iface
 
+    def __array__(self, dtype=None, copy=None):
+        if copy:
+            return np.array(self._a, dtype=dtype, copy=True)
+        return self._a if dtype is None else self._a.astype(dtype, copy=False)
+
+    def __array_ufunc__(self, ufunc, method, *inputs, out=None, **kwargs):
+        if out is not None:
+            kwargs["out"] = tuple(_down(o) for o in out)
+        result = getattr(ufunc, method)(*_down(inputs), **_down(kwargs))
+        if out is not None:
+            return out[0] if len(out) == 1 else out
+        return _up(result, scalars=True)
+
+    def __array_function__(self, func, types, args, kwargs):
+        return _up(func(*_down(args), **_down(kwargs)), scalars=True)
+
+    # -- the attributes CuPy adds
     def get(self, stream=None, order="C", out=None, blocking=True):
-        host = np.array(self, order=order, subok=False, copy=True)
+        host = np.array(self._a, order=order, copy=True)
         if out is not None:
             out[...] = host
             return out
         return host
 
     def set(self, arr, stream=None):
-        self[...] = np.asarray(arr)
+        self._a[...] = _down(arr)
 
     @property
     def data(self):
         from woof.backend.hostfacade.cuda import MemoryPointer, _memory_of
         mem, offset = _memory_of(self)
-        return MemoryPointer(mem, offset)
+        return MemoryPointer(mem, offset, keep=self)
 
     @property
     def device(self):
@@ -89,31 +123,193 @@ class ndarray(np.ndarray):
         return self
 
     def toDlpack(self):
-        return np.asarray(self).__dlpack__()
+        return self._a.__dlpack__()
+
+    def __dlpack__(self, *args, **kwargs):
+        return self._a.__dlpack__(*args, **kwargs)
+
+    def __dlpack_device__(self):
+        return self._a.__dlpack_device__()
+
+    # -- NumPy's own attributes and methods, results as facade arrays
+    shape = property(lambda self: self._a.shape)
+    dtype = property(lambda self: self._a.dtype)
+    ndim = property(lambda self: self._a.ndim)
+    size = property(lambda self: self._a.size)
+    nbytes = property(lambda self: self._a.nbytes)
+    itemsize = property(lambda self: self._a.itemsize)
+    strides = property(lambda self: self._a.strides)
+    flags = property(lambda self: self._a.flags)
+    T = property(lambda self: ndarray._of(self._a.T))
+    base = property(lambda self: _up(self._a.base))
+
+    @shape.setter
+    def shape(self, value):
+        self._a.shape = value
+
+    @property
+    def real(self):
+        return ndarray._of(self._a.real)
+
+    @property
+    def imag(self):
+        return ndarray._of(self._a.imag)
+
+    def __getattr__(self, name):
+        value = getattr(self._a, name)
+        if callable(value):
+            def method(*args, **kwargs):
+                return _up(value(*_down(args), **_down(kwargs)), scalars=name not in _SCALAR_METHODS)
+            method.__name__ = name
+            return method
+        return _up(value)
+
+    def __getitem__(self, key):
+        return _up(self._a[_down(key)], scalars=True)
+
+    def __setitem__(self, key, value):
+        self._a[_down(key)] = _down(value)
+
+    def __len__(self):
+        return len(self._a)
+
+    def __iter__(self):
+        for row in self._a:
+            yield _up(row, scalars=True)
+
+    def __bool__(self):
+        return bool(self._a)
+
+    def __float__(self):
+        return float(self._a)
+
+    def __int__(self):
+        return int(self._a)
+
+    def __index__(self):
+        return self._a.__index__()
+
+    def __complex__(self):
+        return complex(self._a)
+
+    def __round__(self, ndigits=None):
+        return _up(round(self._a, ndigits) if ndigits is not None else self._a.round(), scalars=True)
+
+    def __format__(self, spec):
+        return format(self._a, spec)
+
+    def __contains__(self, value):
+        return _down(value) in self._a
+
+    def __repr__(self):
+        return repr(self._a)
+
+    def __str__(self):
+        return str(self._a)
+
+    def __copy__(self):
+        return ndarray._of(self._a.copy())
+
+    def __deepcopy__(self, memo):
+        return ndarray._of(self._a.copy())
 
     def __reduce__(self):
-        # pickles as the host array it is (as CuPy's pickles its values)
-        return (_unpickle, (np.array(self, subok=False),))
+        # pickles as its values (CuPy's arrays pickle their values too)
+        return (_unpickle, (np.array(self._a, copy=True),))
+
+    __hash__ = None
+
+
+#: Methods whose NumPy results are host values in CuPy too.
+_SCALAR_METHODS = frozenset(("item", "tolist", "tobytes", "tofile", "dumps", "dump", "__index__"))
+
+
+def _binary(ufunc):
+    def op(self, other):
+        return ufunc(self, other)
+
+    def rop(self, other):
+        return ufunc(other, self)
+
+    def iop(self, other):
+        ufunc(self._a, _down(other), out=self._a)
+        return self
+    return op, rop, iop
+
+
+for _name, _ufunc in (("add", np.add), ("sub", np.subtract), ("mul", np.multiply),
+                      ("truediv", np.true_divide), ("floordiv", np.floor_divide), ("mod", np.remainder),
+                      ("pow", np.power), ("lshift", np.left_shift), ("rshift", np.right_shift),
+                      ("and", np.bitwise_and), ("or", np.bitwise_or), ("xor", np.bitwise_xor),
+                      ("matmul", np.matmul)):
+    _op, _rop, _iop = _binary(_ufunc)
+    setattr(ndarray, f"__{_name}__", _op)
+    setattr(ndarray, f"__r{_name}__", _rop)
+    setattr(ndarray, f"__i{_name}__", _iop)
+for _name, _ufunc in (("eq", np.equal), ("ne", np.not_equal), ("lt", np.less), ("le", np.less_equal),
+                      ("gt", np.greater), ("ge", np.greater_equal)):
+    setattr(ndarray, f"__{_name}__", _binary(_ufunc)[0])
+for _name, _ufunc in (("neg", np.negative), ("pos", np.positive), ("abs", np.absolute),
+                      ("invert", np.invert)):
+    setattr(ndarray, f"__{_name}__", lambda self, _u=_ufunc: _u(self))
+ndarray.__divmod__ = lambda self, other: np.divmod(self, other)
 
 
 def _unpickle(host):
-    return host.view(ndarray)
+    return ndarray._of(host)
 
 
-def _up(r):
-    """A NumPy result as the facade's: arrays as :class:`ndarray`."""
-    if type(r) is np.ndarray:
-        return r.view(ndarray)
+def _down(x):
+    """Facade arrays inside ``x`` (tuples, lists, dicts) as their host arrays."""
+    if isinstance(x, ndarray):
+        return x._a
+    if isinstance(x, tuple):
+        return tuple(_down(y) for y in x)
+    if isinstance(x, list):
+        return [_down(y) for y in x]
+    if isinstance(x, dict):
+        return {k: _down(v) for k, v in x.items()}
+    return x
+
+
+def _up(r, scalars=False):
+    """A NumPy result as the facade's: arrays as :class:`ndarray`, and with
+    ``scalars`` a NumPy scalar as a 0-d array (CuPy returns arrays where
+    NumPy returns scalars: reductions, element reads)."""
+    if isinstance(r, np.ndarray):
+        return ndarray._of(r)
+    if scalars and isinstance(r, np.generic):
+        return ndarray._of(np.asarray(r))
     if isinstance(r, tuple):
-        return tuple(_up(x) for x in r)
+        return tuple(_up(x, scalars) for x in r)
     if isinstance(r, list):
-        return [_up(x) for x in r]
+        return [_up(x, scalars) for x in r]
     return r
+
+
+class _UFunc:
+    """A NumPy ufunc whose results are facade arrays (CuPy's ufuncs return
+    device arrays whatever the operands)."""
+
+    def __init__(self, ufunc):
+        self._u = ufunc
+        self.__name__ = ufunc.__name__
+
+    def __call__(self, *args, **kwargs):
+        out = kwargs.get("out")
+        r = self._u(*_down(args), **_down(kwargs))
+        if out is not None:
+            return out
+        return _up(r, scalars=True)
+
+    def __getattr__(self, name):
+        value = getattr(self._u, name)
+        return _wrap(value) if callable(value) else value
 
 
 def _wrap(fn):
     def call(*args, **kwargs):
-        return _up(fn(*args, **kwargs))
+        return _up(fn(*_down(args), **_down(kwargs)), scalars=True)
     call.__name__ = getattr(fn, "__name__", "fn")
     call.__doc__ = f"NumPy's {call.__name__} (woof host facade)."
     call.__wrapped__ = fn
@@ -135,51 +331,55 @@ def asnumpy(a, stream=None, order="C", out=None, blocking=True):
 def array(obj, dtype=None, copy=True, order="K", subok=False, ndmin=0, blocking=False):
     if isinstance(obj, ndarray) and not copy and (dtype is None or np.dtype(dtype) == obj.dtype):
         return obj
-    return np.array(obj, dtype=dtype, copy=True, order=order, ndmin=ndmin).view(ndarray)
+    return ndarray._of(np.array(_down(obj), dtype=dtype, copy=True, order=order, ndmin=ndmin))
 
 
 def asarray(a, dtype=None, order=None, blocking=False):
     if isinstance(a, ndarray):
-        if (dtype is None or np.dtype(dtype) == a.dtype) and (
-                order in (None, "K", "A") or (order == "C" and a.flags.c_contiguous)
-                or (order == "F" and a.flags.f_contiguous)):
+        h = a._a
+        if (dtype is None or np.dtype(dtype) == h.dtype) and (
+                order in (None, "K", "A") or (order == "C" and h.flags.c_contiguous)
+                or (order == "F" and h.flags.f_contiguous)):
             return a
-        return np.asarray(a, dtype=dtype, order=order).view(ndarray) if order else \
-            a.astype(dtype, copy=False)
+        return ndarray._of(np.asarray(h, dtype=dtype, order=order))
     # host data: a copy, as an upload is
-    return np.array(a, dtype=dtype, order=order or "K", copy=True).view(ndarray)
+    return ndarray._of(np.array(_down(a), dtype=dtype, order=order or "K", copy=True))
 
 
 asanyarray = asarray
 
 
 def ascontiguousarray(a, dtype=None):
-    return np.ascontiguousarray(asarray(a), dtype=dtype).view(ndarray)
+    a = asarray(a)
+    h = np.ascontiguousarray(a._a, dtype=dtype)
+    return a if h is a._a else ndarray._of(h)
 
 
 def asfortranarray(a, dtype=None):
-    return np.asfortranarray(asarray(a), dtype=dtype).view(ndarray)
+    a = asarray(a)
+    h = np.asfortranarray(a._a, dtype=dtype)
+    return a if h is a._a else ndarray._of(h)
 
 
 def empty(shape, dtype=float, order="C"):
-    return np.empty(shape, dtype=dtype, order=order).view(ndarray)
+    return ndarray._of(np.empty(shape, dtype=dtype, order=order))
 
 
 def zeros(shape, dtype=float, order="C"):
-    return np.zeros(shape, dtype=dtype, order=order).view(ndarray)
+    return ndarray._of(np.zeros(shape, dtype=dtype, order=order))
 
 
 def ones(shape, dtype=float, order="C"):
-    return np.ones(shape, dtype=dtype, order=order).view(ndarray)
+    return ndarray._of(np.ones(shape, dtype=dtype, order=order))
 
 
 def full(shape, fill_value, dtype=None, order="C"):
-    return np.full(shape, fill_value, dtype=dtype, order=order).view(ndarray)
+    return ndarray._of(np.full(shape, _down(fill_value), dtype=dtype, order=order))
 
 
 def _like(np_fn):
     def fn(a, *args, dtype=None, order="K", subok=None, shape=None, **kw):
-        return np_fn(np.asarray(a), *args, dtype=dtype, order=order, shape=shape, **kw).view(ndarray)
+        return ndarray._of(np_fn(_down(a), *_down(args), dtype=dtype, order=order, shape=shape, **kw))
     fn.__name__ = np_fn.__name__
     return fn
 
@@ -194,7 +394,7 @@ def get_array_module(*args):
 
 
 def fromDlpack(capsule):
-    return np.from_dlpack(capsule).view(ndarray)
+    return ndarray._of(np.from_dlpack(capsule))
 
 
 from_dlpack = fromDlpack
@@ -343,7 +543,7 @@ def _scipy_on_host(module, name):
     def fn(*a, **k):
         import importlib
         target = getattr(importlib.import_module(f"scipy.{module}"), name)
-        return _up(target(*[np.asarray(x) if isinstance(x, ndarray) else x for x in a], **k))
+        return _up(target(*_down(a), **_down(k)))
     fn.__name__ = name
     return fn
 
@@ -386,8 +586,8 @@ def __getattr__(name):
         value = getattr(np, name)
     except AttributeError:
         raise BackendUnsupported(f"cupy.{name} is not implemented by woof's host backend") from None
-    if isinstance(value, (np.ufunc, type)) or not callable(value):
+    if isinstance(value, type) or not callable(value):
         return value
-    wrapped = _wrap(value)
+    wrapped = _UFunc(value) if isinstance(value, np.ufunc) else _wrap(value)
     globals()[name] = wrapped
     return wrapped

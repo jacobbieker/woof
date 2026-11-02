@@ -50,7 +50,8 @@ def _module(code, options, name):
 
 
 def _is_array(a):
-    return isinstance(a, np.ndarray)
+    from woof.backend.hostfacade import ndarray
+    return isinstance(a, (np.ndarray, ndarray))
 
 
 class ElementwiseKernel:
@@ -129,7 +130,7 @@ class ElementwiseKernel:
                     call_args.append(o)
                 results.append(o)
             else:
-                o = np.empty(shape, dt).view(ndarray)
+                o = ndarray._of(np.empty(shape, dt))
                 call_args.append(o)
                 results.append(o)
         call_args.append(np.int64(n))
@@ -245,7 +246,7 @@ class ReductionKernel:
                 call_args.append(dt.type(a))
                 is_array.append(False)
         odt = dtype_of(self.outputs[0])
-        result = np.empty((n_out,), odt).view(ndarray)
+        result = ndarray._of(np.empty((n_out,), odt))
         call_args += [result, np.int64(n_out), np.int64(n_red)]
         key = (tuple(str(types.get(t)) for t in sorted(types)), tuple(is_array))
         fn = self._functions.get(key)

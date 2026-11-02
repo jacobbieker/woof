@@ -232,18 +232,19 @@ class HostFunction:
                 raise LaunchError(f"{self.name}: argument {i} is a pointer; got a bool")
             if isinstance(value, (int, np.integer)):
                 return ctypes.c_void_p(int(value))
-            ptr = getattr(value, "ptr", None)          # a MemoryPointer
-            if ptr is not None and not isinstance(value, np.ndarray):
-                return ctypes.c_void_p(int(ptr))
-            if isinstance(value, np.ndarray):
+            iface = getattr(value, "__array_interface__", None)   # a facade or NumPy array
+            if iface is not None:
                 keep.append(value)
-                return ctypes.c_void_p(value.__array_interface__["data"][0])
+                return ctypes.c_void_p(iface["data"][0])
+            ptr = getattr(value, "ptr", None)                      # a MemoryPointer
+            if ptr is not None:
+                return ctypes.c_void_p(int(ptr))
             raise LaunchError(f"{self.name}: argument {i} is a pointer; got {type(value).__name__}")
         if kind == "s":
             if isinstance(value, (bytes, bytearray)):
                 raw = bytes(value)
-            elif isinstance(value, (np.ndarray, np.generic)):
-                raw = np.ascontiguousarray(value).tobytes()
+            elif isinstance(value, (np.ndarray, np.generic)) or hasattr(value, "__array_interface__"):
+                raw = np.ascontiguousarray(np.asarray(value)).tobytes()
             else:
                 try:
                     raw = bytes(memoryview(value))
@@ -253,6 +254,8 @@ class HostFunction:
             if len(raw) != size:
                 raise LaunchError(f"{self.name}: argument {i} is a {size}-byte struct; got {len(raw)} bytes")
             return ctypes.create_string_buffer(raw, size)
+        if not isinstance(value, np.ndarray) and hasattr(value, "__array_interface__"):
+            value = np.asarray(value)
         if isinstance(value, np.ndarray):
             if value.size != 1:
                 raise LaunchError(f"{self.name}: argument {i} is a scalar; got an array of {value.size}")
