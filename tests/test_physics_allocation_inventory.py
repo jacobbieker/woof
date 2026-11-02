@@ -599,6 +599,14 @@ _PHYSICS_ALLOCATION_INVENTORY = {
         # allocates nothing here.
         'launch_morrison': 3,
     },
+    'woof/core/morrison_aero.py': {
+        # mp_physics = 40's launcher: launch_morrison's three standalone
+        # fallbacks plus the reflectivity temperature and reflectivity
+        # fallbacks and the prescribed path's nucleation STOP flag.  apply()
+        # hands every slot (morr_work, morr_ltrue, refl_t, refl_10cm) and
+        # runs aercu_opt = 0, so a forecast step allocates nothing here.
+        'launch_morrison_aero': 6,
+    },
     # MYJ (the 2/2 pair).  Entered here by the commit that closed the MYJ
     # port's review -- the port itself added the two modules and never
     # entered them, which is exactly the "appeared or vanished" case this

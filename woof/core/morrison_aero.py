@@ -154,7 +154,10 @@ def launch_morrison_aero(theta, qv, qc, qr, qi, qs, qg,
              if _ltrue_scratch is None else _ltrue_scratch)
     _check("_ltrue_scratch", ltrue, (ny, nx), cp.int32)
     ltrue.fill(0)
-    stop = cp.zeros((1,), dtype=cp.int32)
+    # The nucleation STOP flag is written only on the prescribed path; the
+    # constant-droplet forecast step passes LTRUE in its place and
+    # allocates nothing.
+    stop = cp.zeros((1,), dtype=cp.int32) if prescribed else ltrue
     aero_in = aerocu if prescribed else rho
 
     rimed = np.int32(morr_rimed_ice)
