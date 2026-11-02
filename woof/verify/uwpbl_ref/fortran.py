@@ -8,12 +8,24 @@ gfortran 15.2.0 at -O0 (tools/uwpbl_wrf471_oracle/README.md):
   used for real values.
 * ``x**n`` with an integer constant ``n`` is ``x*x`` for n = 2 and libgcc's
   ``__powidf2`` otherwise; a real exponent is the C library's ``pow``.
+* The C library is glibc: :data:`libm` gives its words on any host.
 * A literal with no kind suffix is single precision.
 """
 from __future__ import annotations
 
 import math
 import struct
+from types import SimpleNamespace
+
+from woof.core import host_libm
+
+#: The C library calls the Fortran makes (``exp``, ``pow``, ``cos``,
+#: ``acos``), as glibc's words: host_libm's glibc 2.39 transcription where
+#: the CPU bridge is installed, on any host, else the host C library.
+#: glibc's binary64 exp, pow, cos and acos are the same code from 2.28 on,
+#: so these are the words of the oracle's glibc 2.43 too.
+libm = SimpleNamespace(**{name: host_libm.scalar(name)
+                          for name in ("exp", "pow", "cos", "acos")})
 
 
 def fmax(a: float, b: float, *more: float) -> float:

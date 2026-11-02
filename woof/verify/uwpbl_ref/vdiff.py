@@ -1,7 +1,7 @@
 """WRF diffusion_solver, non-molecular WRF_PORT path."""
 import math
 from woof.core.uwpbl_constants import GRAVIT, RAIR
-from .fortran import fmax
+from .fortran import fmax, libm
 
 def vd_lu_decomp(pver, ksrf, kv, tmpi, rpdel, ztodt, cc_top, ca, cc, dnom, ze, ntop, nbot):
     for k in range(nbot-1, ntop-1, -1):
@@ -46,8 +46,8 @@ def compute_vdiff(pver, ncnst, pmid, pint, rpdel, t, ztodt, taux, tauy, shflx, c
         du[pver+1], dv[pver+1] = -u[pver], -v[pver]
         for k in range(2, pver+1):
             du[k], dv[k] = u[k]-u[k-1], v[k]-v[k-1]
-        ws = fmax(math.sqrt(math.pow(u[pver],2.0)+math.pow(v[pver],2.0)),1.0)
-        tau = math.sqrt(math.pow(taux[1],2.0)+math.pow(tauy[1],2.0))
+        ws = fmax(math.sqrt(libm.pow(u[pver],2.0)+libm.pow(v[pver],2.0)),1.0)
+        tau = math.sqrt(libm.pow(taux[1],2.0)+libm.pow(tauy[1],2.0))
         ksrf = fmax(tau/ws,1.e-4)+ksrftms[1]
         usum, vsum = 0.0, 0.0
         for k in range(1, pver+1):
