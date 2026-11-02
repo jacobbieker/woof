@@ -275,6 +275,34 @@ Only the partial-depth band (Phase D5) is measured on Metal:
 The rest of the hex lane is not measured on Metal, which is why the lane is
 opt-in.
 
+`tools/metal_translation_census.py --hex --translate-only` translates every
+unit the hex kernel pack holds (`woof.hex.cuda_backend.aot_build.pack_inventory`:
+the KernelCache declarations and the recorded direct and raw NVRTC compiles,
+strict and fast; CuPy's generated kernels are the facade's). It needs only
+libclang, so it runs on Linux too. 353 of the 361 units translate. The rest
+are refused by name:
+
+- RRFS smoke (4 units) includes `<cuda/barrier>` for a block-scope
+  `cuda::barrier`;
+- RRFS NSSL (2) aggregate-initialises a derived struct through its base
+  (`NsslColumn column{{}, arena}`) and slices it back to the base, which
+  the flattened struct cannot take;
+- Grell-Freitas (2) has two retry loops that cross and share a label.
+
+The hex units brought in these translator constructs:
+
+- crossing forward gotos nest;
+- a forward goto into a retry loop guards the loop's head on the first pass;
+- PTX bit operations are translated (`xor`/`and`/`mov`, `setp`/`selp` without
+  `.ftz`);
+- a string literal is `constant` data;
+- `static const` arrays are recognised as constant;
+- `__ldg`, `__maxnreg__`, `clock64` and `__reduce_*_sync` are provided;
+- a `cupy/complex.cuh` stand-in carries Thrust's division and `csqrtf`.
+
+`tests/test_metal_hex_translation.py` checks each construct's words on the
+device.
+
 ## Finding a difference
 
 1. `tools/launch_trace.py`: run the same scenario on CUDA (`ssh pb`) and on
@@ -289,7 +317,8 @@ opt-in.
    gives a 3-D launch.
 3. `tools/metal_unit_errors.py UNIT`: show each Metal compile error beside its
    MSL line.
-4. `tools/metal_translation_census.py`: which units translate and compile. Cached
+4. `tools/metal_translation_census.py`: which units translate and compile
+   (`--hex`: the hex lane's units). Cached
    results are keyed on a fingerprint of the translator, the Metal headers
    and the kernel sources, so a stale result is never reported.
 5. `tools/cupy_surface_census.py --gate`: which CuPy paths the facade lacks.
