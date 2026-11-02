@@ -575,7 +575,7 @@ def legacy_scheme_has_req(mp_physics, use_mp_re):
 #: would assert a ``qs`` its Registry package never declares.  Resolve the
 #: pair through :func:`legacy_cloud_fraction_flags`, never by reading one
 #: boolean into both flags.
-_LEGACY_ICE_ACTIVE_MICROPHYSICS = frozenset((2, 4, 6, 8, 9, 10, 16, 18, 24, 28, 30, 106))
+_LEGACY_ICE_ACTIVE_MICROPHYSICS = frozenset((2, 4, 6, 8, 9, 10, 16, 18, 24, 28, 30, 40, 106))
 # Named schemes carrying both qi and qs (capability row).
 _LEGACY_ICE_ACTIVE_MICROPHYSICS = _LEGACY_ICE_ACTIVE_MICROPHYSICS | frozenset(
     _s.mp_id for _s in _NAMED_MP_SCHEMES.values()
