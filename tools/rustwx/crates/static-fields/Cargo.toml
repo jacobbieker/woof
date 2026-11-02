@@ -42,6 +42,10 @@ rayon = { workspace = true }
 # differ between glibc versions and the UCRT, and the terrain-drag statics
 # must not.
 rw-libm = { path = "../rw-libm" }
+# The public projection coordinates and derived fields' binary64
+# transcendentals, with glibc 2.39's words on every platform (the C library
+# the WRF and WPS references link); see src/projection/mod.rs.
+glibc239-libm = { path = "../glibc239-libm" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = "0.10"

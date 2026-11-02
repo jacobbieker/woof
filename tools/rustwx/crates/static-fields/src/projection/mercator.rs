@@ -4,6 +4,7 @@
 //! zero (get_rotang PROJ_MERC).  Operation order matches the Python
 //! float64 spelling exactly.
 
+use super::Glibc239;
 use super::{wrap180, GridSpec, DEG_PER_RAD, RAD_PER_DEG};
 use crate::EARTH_RADIUS_M;
 
@@ -16,11 +17,11 @@ pub struct MercatorState {
 
 /// set_merc transcription (module_llxy.F:1307).
 pub fn setup(spec: &GridSpec) -> MercatorState {
-    let clain = (RAD_PER_DEG * spec.truelat1).cos();
+    let clain = (RAD_PER_DEG * spec.truelat1).glibc_cos();
     let dlon = spec.dx / (EARTH_RADIUS_M * clain);
     let mut rsw = 0.0;
     if spec.ref_lat != 0.0 {
-        rsw = (0.5 * ((spec.ref_lat + 90.0) * RAD_PER_DEG)).tan().ln() / dlon;
+        rsw = (0.5 * ((spec.ref_lat + 90.0) * RAD_PER_DEG)).glibc_tan().glibc_ln() / dlon;
     }
     MercatorState { dlon, rsw }
 }
@@ -33,7 +34,7 @@ pub fn ij_to_latlon(
     y: f64,
 ) -> (f64, f64) {
     let lat = 2.0
-        * (state.dlon * (state.rsw + y - spec.known_y)).exp().atan()
+        * (state.dlon * (state.rsw + y - spec.known_y)).glibc_exp().glibc_atan()
         * DEG_PER_RAD
         - 90.0;
     let mut lon = (x - spec.known_x) * state.dlon * DEG_PER_RAD + spec.ref_lon;
@@ -56,7 +57,7 @@ pub fn latlon_to_ij(
     let deltalon = wrap180(lon - spec.ref_lon);
     let i = spec.known_x + (deltalon / (state.dlon * DEG_PER_RAD));
     let j = spec.known_y
-        + (0.5 * ((lat + 90.0) * RAD_PER_DEG)).tan().ln() / state.dlon
+        + (0.5 * ((lat + 90.0) * RAD_PER_DEG)).glibc_tan().glibc_ln() / state.dlon
         - state.rsw;
     (i, j)
 }
@@ -66,7 +67,7 @@ pub fn latlon_to_ij(
 pub fn map_factor(spec: &GridSpec, lat: f64) -> f64 {
     let colat0 = RAD_PER_DEG * (90.0 - spec.truelat1);
     let colat = RAD_PER_DEG * (90.0 - lat);
-    colat0.sin() / colat.sin()
+    colat0.glibc_sin() / colat.glibc_sin()
 }
 
 /// get_rotang PROJ_MERC branch: rotation is identically zero.

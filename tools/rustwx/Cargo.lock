@@ -4664,6 +4664,7 @@ name = "static-fields"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "glibc239-libm",
  "libm",
  "miniz_oxide",
  "rayon",

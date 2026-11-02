@@ -164,6 +164,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "glibc239-libm"
+version = "0.1.0"
+
+[[package]]
 name = "hashbrown"
 version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -513,6 +517,7 @@ name = "static-fields"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "glibc239-libm",
  "libm",
  "miniz_oxide 0.8.9",
  "rayon",

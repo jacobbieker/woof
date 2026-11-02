@@ -10,7 +10,9 @@
 //! reconciliation inputs -- the twins select source stencils, so their
 //! float32 arithmetic is part of the byte-parity contract.
 //!
-//! Public coordinates retain their existing platform NumPy qualification.
+//! Public coordinates and derived fields take glibc 2.39's binary64
+//! transcendentals ([`Glibc239`]), as `woof.core.host_libm` gives the
+//! Python transcription, so they are the same words on every host.
 //! Sampling coordinates use fixed arithmetic in `portable` and `npmath`,
 //! with exact portable fixtures and independent NumPy bounds.
 //!
@@ -36,6 +38,35 @@ use rayon::prelude::*;
 use crate::error::{Result, StaticError};
 use crate::types::{Grid2, Stagger};
 use crate::OMEGA_E;
+
+/// glibc 2.39's binary64 functions (the glibc239-libm crate) as methods,
+/// so the transcriptions keep the Fortran's reading order.  The platform C
+/// library's `f64::sin` and friends differ by host in the last bits.
+pub(crate) trait Glibc239 {
+    fn glibc_sin(self) -> f64;
+    fn glibc_cos(self) -> f64;
+    fn glibc_tan(self) -> f64;
+    fn glibc_atan(self) -> f64;
+    fn glibc_asin(self) -> f64;
+    fn glibc_acos(self) -> f64;
+    fn glibc_exp(self) -> f64;
+    fn glibc_ln(self) -> f64;
+    fn glibc_log10(self) -> f64;
+    fn glibc_atan2(self, x: f64) -> f64;
+}
+
+impl Glibc239 for f64 {
+    fn glibc_sin(self) -> f64 { glibc239_libm::sin(self) }
+    fn glibc_cos(self) -> f64 { glibc239_libm::cos(self) }
+    fn glibc_tan(self) -> f64 { glibc239_libm::tan(self) }
+    fn glibc_atan(self) -> f64 { glibc239_libm::atan(self) }
+    fn glibc_asin(self) -> f64 { glibc239_libm::asin(self) }
+    fn glibc_acos(self) -> f64 { glibc239_libm::acos(self) }
+    fn glibc_exp(self) -> f64 { glibc239_libm::exp(self) }
+    fn glibc_ln(self) -> f64 { glibc239_libm::log(self) }
+    fn glibc_log10(self) -> f64 { glibc239_libm::log10(self) }
+    fn glibc_atan2(self, x: f64) -> f64 { glibc239_libm::atan2(self, x) }
+}
 
 pub(crate) const RAD_PER_DEG: f64 = std::f64::consts::PI / 180.0;
 pub(crate) const DEG_PER_RAD: f64 = 180.0 / std::f64::consts::PI;
@@ -338,8 +369,8 @@ impl ProjectedGrid {
             .zip(e.data.par_iter_mut())
             .zip(lat.data.par_iter())
             .for_each(|((fv, ev), &la)| {
-                *fv = 2.0 * OMEGA_E * (la * RAD_PER_DEG).sin();
-                *ev = 2.0 * OMEGA_E * (la * RAD_PER_DEG).cos();
+                *fv = 2.0 * OMEGA_E * (la * RAD_PER_DEG).glibc_sin();
+                *ev = 2.0 * OMEGA_E * (la * RAD_PER_DEG).glibc_cos();
             });
         (f, e)
     }
@@ -372,8 +403,8 @@ impl ProjectedGrid {
                     0 => lat.data[i],
                     1 => lon.data[i],
                     2 => self.map_factor(lat.data[i]),
-                    3 => 2.0 * OMEGA_E * (lat.data[i] * RAD_PER_DEG).sin(),
-                    4 => 2.0 * OMEGA_E * (lat.data[i] * RAD_PER_DEG).cos(),
+                    3 => 2.0 * OMEGA_E * (lat.data[i] * RAD_PER_DEG).glibc_sin(),
+                    4 => 2.0 * OMEGA_E * (lat.data[i] * RAD_PER_DEG).glibc_cos(),
                     5 => self.rotation(lon.data[i]).0,
                     _ => self.rotation(lon.data[i]).1,
                 };
