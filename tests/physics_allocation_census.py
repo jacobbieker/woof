@@ -288,6 +288,16 @@ def census() -> dict[str, dict]:
 
     ieee_module.compile_module = compile_module
 
+    # The load-time table admission (woof.tables) asks whether coefficient
+    # files are on disk, not what the driver allocates.  On a fresh host it
+    # would generate SATMEDMF's fpvs table (pbl 901) with a compiled unit,
+    # which the stand-in cannot run, and its deferral for host stand-ins
+    # keys on a cupy without cuda.Device, which this one carries.  The
+    # census builds drivers without it, whatever the host has cached.
+    from woof import tables
+
+    tables._ensure_for_load = lambda *args, **kwargs: None
+
     report: dict[str, dict] = {}
     for cell in admitted_cells():
         cfg = cell_config(cell)
