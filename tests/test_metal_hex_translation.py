@@ -10,6 +10,8 @@
   which keep subnormals, signed zeros and NaN payloads.
 * A string literal stored in a struct (MYNN's ``MynnText``) lives in
   ``constant`` memory.
+* ``#include <cupy/complex.cuh>`` (MPAS WSM6's radar arithmetic): a Mac has
+  no CuPy headers; the translator's stand-in is Thrust's text.
 """
 
 import importlib.util
@@ -188,3 +190,46 @@ def test_string_literals_held_in_a_struct(cp):
     out = cp.zeros(3, dtype=cp.int32)
     cp.RawKernel(_TEXT, "texts")((1,), (1,), (out,))
     assert cp.asnumpy(out).tolist() == [1, 0, 1]
+
+
+_COMPLEX = r'''
+#include <cupy/complex.cuh>
+extern "C" __global__ void cdiv(const float* a, const float* b, float* q, float* r, int n) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n) return;
+    thrust::complex<float> x(a[2 * i], a[2 * i + 1]), y(b[2 * i], b[2 * i + 1]);
+    thrust::complex<float> z = x / y;
+    q[2 * i] = z.real();
+    q[2 * i + 1] = z.imag();
+    thrust::complex<float> s = thrust::sqrt(x);
+    r[2 * i] = s.real();
+    r[2 * i + 1] = s.imag();
+}
+'''
+
+
+def test_thrust_complex_division_and_square_root(cp):
+    """MPAS WSM6's radar arithmetic includes <cupy/complex.cuh>; a Mac has no
+    CuPy headers, so the translator's stand-in carries Thrust's division
+    (scaled by |re| + |im|) and csqrtf, operation for operation."""
+    a = np.array([[1.5, -2.0], [3.0, 4.0], [-3.0, 4.0], [0.0, 0.0], [1e-3, 7.25]], dtype=np.float32)
+    b = np.array([[0.5, 0.25], [2.0, -1.0], [1.0, 0.0], [3.0, 4.0], [-6.0, 8.0]], dtype=np.float32)
+    f = np.float32
+    want_q = []
+    for (ar, ai), (br, bi) in zip(a, b):
+        s = abs(br) + abs(bi)
+        oos = f(1) / s
+        ars, ais, brs, bis = ar * oos, ai * oos, br * oos, bi * oos
+        s = (brs * brs) + (bis * bis)
+        oos = f(1) / s
+        want_q += [((ars * brs) + (ais * bis)) * oos, ((ais * brs) - (ars * bis)) * oos]
+    want_q = np.array(want_q, dtype=np.float32)
+    q = cp.zeros(a.size, dtype=cp.float32)
+    r = cp.zeros(a.size, dtype=cp.float32)
+    cp.RawKernel(_COMPLEX, "cdiv")((1,), (8,), (cp.asarray(a.ravel()), cp.asarray(b.ravel()), q, r,
+                                                 np.int32(len(a))))
+    assert cp.asnumpy(q).view(np.uint32).tolist() == want_q.view(np.uint32).tolist()
+    # sqrt(3+4i) = 2+i and sqrt(-3+4i) = 1+2i: hypot(3, 4) = 5 is exact in any libm
+    got_r = cp.asnumpy(r).reshape(-1, 2)
+    assert got_r[1].tolist() == [2.0, 1.0] and got_r[2].tolist() == [1.0, 2.0]
+    assert got_r[3].tolist() == [0.0, 0.0]
