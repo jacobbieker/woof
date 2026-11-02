@@ -301,7 +301,21 @@ The hex units brought in these translator constructs:
 - a `cupy/complex.cuh` stand-in carries Thrust's division and `csqrtf`.
 
 `tests/test_metal_hex_translation.py` checks each construct's words on the
-device.
+device (6 of 6 pass on an M3 Max).
+
+A `woof hex regional` forecast runs end to end on Metal with
+`WOOF_HEX_METAL=1`: a 1,607-cell generated limited-area mesh, HRRR
+initial and boundary states, `arwen_mpas_column` physics, 40 steps of
+90 s. Two things keep it from matching CUDA yet:
+
+- Under fast numerics it stops at the first physics call.
+  `validate_prep_v841_f32` recomputes MPAS_to_physics' prepared fields
+  bit for bit, and Metal's `fp contract(fast)` fuses the producer and the
+  validator differently. With `WOOF_FMAD_OFF=1` it runs.
+- Against CUDA's `--fmad=false` run, the initial frame is word-identical
+  except `hfx`, so the first surface-layer call differs. The cause, vendor
+  libm or a defect, has not been traced. After 1 h the fields differ by
+  about as much as contraction alone moves CUDA's own run.
 
 ## Finding a difference
 
