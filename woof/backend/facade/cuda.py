@@ -395,6 +395,25 @@ def _memset(ptr, value, size):
         view.fill(np.uint8(int(value) & 0xFF))
 
 
+#: cudaDeviceAttr's numbers for the attributes _attributes answers.
+_DEVICE_ATTRIBUTE_IDS = {
+    "MaxThreadsPerBlock": 1, "MaxBlockDimX": 2, "MaxBlockDimY": 3, "MaxBlockDimZ": 4,
+    "MaxGridDimX": 5, "MaxGridDimY": 6, "MaxGridDimZ": 7, "MaxSharedMemoryPerBlock": 8,
+    "WarpSize": 10, "MaxRegistersPerBlock": 12, "MultiProcessorCount": 16, "ConcurrentKernels": 31,
+    "MaxThreadsPerMultiProcessor": 39, "UnifiedAddressing": 41, "ComputeCapabilityMajor": 75,
+    "ComputeCapabilityMinor": 76, "MaxSharedMemoryPerMultiprocessor": 81,
+    "MaxRegistersPerMultiprocessor": 82, "ManagedMemory": 83,
+}
+
+
+def _device_get_attribute(attribute, device=0):
+    """cudaDeviceGetAttribute: the same answers as Device().attributes."""
+    for name, number in _DEVICE_ATTRIBUTE_IDS.items():
+        if number == int(attribute):
+            return _attributes()[name]
+    raise RuntimeError(f"cudaErrorInvalidValue: device attribute {attribute} (woof mlx backend)")
+
+
 runtime = types.SimpleNamespace(
     memcpy=_memcpy, memcpyAsync=_memcpy_async, memset=_memset,
     memcpy2D=_memcpy2d, memcpy2DAsync=_memcpy2d, memcpy3D=_memcpy3d, memcpy3DAsync=_memcpy3d,
@@ -413,6 +432,8 @@ runtime = types.SimpleNamespace(
     deviceGetLimit=lambda limit: 0,
     freeHost=_free_host,
     getDeviceProperties=_properties,
+    deviceGetAttribute=_device_get_attribute,
+    **{f"cudaDevAttr{name}": number for name, number in _DEVICE_ATTRIBUTE_IDS.items()},
     runtimeGetVersion=lambda: 0,
     deviceGetPCIBusId=lambda device=0: _PCI_BUS_ID,
     # one device: a peer copy is a copy
