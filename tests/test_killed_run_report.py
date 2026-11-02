@@ -165,7 +165,12 @@ def test_a_real_sigterm_is_reported_and_then_still_kills_the_process(
     report = finished.stderr
     assert "SIGTERM (signal 15)" in report
     assert "preparing:build-domain-tree" in report      # the phase
-    assert "resident (RSS)" in report                   # host memory
+    if sys.platform.startswith("linux"):
+        assert "resident (RSS)" in report               # host memory
+    else:
+        # The counter is /proc/self/statm, Linux's; elsewhere the line says
+        # it was not read rather than inventing a number.
+        assert "RSS is not readable on this platform" in report
     assert "OOM killer" in report and "journalctl" in report
     assert str(outdir / WORKER_STDERR_NAME.format(attempt=1)) in report
 
