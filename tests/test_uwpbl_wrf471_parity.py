@@ -80,17 +80,26 @@ def _host_libm_is_the_oracles() -> str | None:
     x86-64, where ifunc picks the FMA variants of exp/log/pow; glibc's
     binary64 exp/log/pow (Arm optimized-routines) and cos/acos (IBM, slow
     paths removed) are the same code from glibc 2.28 on.  Where the CPU
-    bridge carries woof.core.host_libm's glibc 2.39 transcription of those
-    variants, the reference computes the oracle's words on any host.
-    Without it the reference calls the host C library, and another C
-    library, or a CPU without FMA, is a different set of functions: the
-    reference would be graded against words its own libm cannot produce.
+    bridge carries the opt-in glibc 2.39 transcription of those variants
+    (``pixi run build-native-glibc239``), the reference computes the
+    oracle's words on any host.  Without it the reference calls the host C
+    library, and another C library, or a CPU without FMA, is a different set
+    of functions: the reference would be graded against words its own libm
+    cannot produce.
     """
-    import platform
-    import sys
     from woof.core import host_libm
     if host_libm.implementation() == host_libm.GLIBC239:
         return None
+    reason = _host_libm_reason()
+    if reason is None:
+        return None
+    return (reason + "; a CPU bridge built with `pixi run "
+            "build-native-glibc239` grades it on any host")
+
+
+def _host_libm_reason() -> str | None:
+    import platform
+    import sys
     if not sys.platform.startswith("linux") or platform.machine() != "x86_64":
         return f"{sys.platform}/{platform.machine()} is not linux/x86_64"
     libc, version = platform.libc_ver()

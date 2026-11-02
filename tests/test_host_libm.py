@@ -1,14 +1,14 @@
-"""woof.core.host_libm is glibc 2.39's words, element by element, with
-NumPy's domain answers.
+"""woof.core.host_libm is the C library -- or, in an opt-in build, glibc
+2.39's words -- element by element, with NumPy's domain answers.
 
 Its callers (the projection transcriptions, beside the static-fields crate
-that computes the same values in Rust) need the words of the C library the
-WRF references link, glibc 2.39, on every machine; NumPy 2.5's AVX-512
-loops, macOS's libm and other glibc releases round differently.  These
-tests hold each function to glibc 2.39's recorded words, to the scalar
-entries of the same transcription and, on a glibc host, to :mod:`math`;
-to NumPy's NaN and infinity answers outside the domain, and to the input's
-shape.
+that computes the same values in Rust) need the bits the native code
+computes through the same library, on every machine; NumPy 2.5's AVX-512
+loops round differently.  These tests hold each function to :mod:`math`
+(on a glibc host in an opt-in build), to NumPy's NaN and infinity answers
+outside the domain, and to the input's shape; and, where the CPU bridge
+carries the opt-in glibc 2.39 transcription, to glibc 2.39's recorded words
+and to the transcription's scalar entries.
 """
 
 from __future__ import annotations
@@ -26,8 +26,8 @@ from woof.core import host_libm
 #: on a host whose libm is not glibc's (macOS, Windows) or not 2.39's.
 REQUIRES_TRANSCRIPTION = pytest.mark.skipif(
     host_libm.implementation() != host_libm.GLIBC239,
-    reason="the installed CPU bridge does not carry the glibc 2.39 "
-           "transcription (build tools/grib1_bridge)")
+    reason="the installed CPU bridge does not carry the opt-in glibc 2.39 "
+           "transcription; `pixi run build-native-glibc239` builds it")
 #: math.* is glibc 2.39's word on these arguments only on a glibc host
 #: (glibc 2.28 through 2.44 agree with 2.39 away from huge sin/cos/tan
 #: arguments, which _CASES does not use).
@@ -51,10 +51,12 @@ _CASES = (
 )
 
 
-@pytest.mark.skipif(not _GLIBC_HOST, reason="math.* is glibc's words only on a glibc host")
+@pytest.mark.skipif(host_libm.implementation() == host_libm.GLIBC239 and not _GLIBC_HOST,
+                    reason="the transcription is glibc's words and math.* is "
+                           "this host's libm, which is not glibc")
 @pytest.mark.parametrize("ours,libm,values", _CASES,
                          ids=[c[0].__name__ for c in _CASES])
-def test_each_function_is_the_glibc_c_library_element_by_element(ours, libm, values):
+def test_each_function_is_the_c_library_element_by_element(ours, libm, values):
     got = ours(values.reshape(40, 50))
     assert got.shape == (40, 50) and got.dtype == np.float64
     want = np.array([libm(float(v)) for v in values]).reshape(40, 50)

@@ -20,12 +20,14 @@ from types import SimpleNamespace
 from woof.core import host_libm
 
 #: The C library calls the Fortran makes (``exp``, ``pow``, ``cos``,
-#: ``acos``), as glibc's words: host_libm's glibc 2.39 transcription where
-#: the CPU bridge is installed, on any host, else the host C library.
+#: ``acos``): glibc's words on any host where the CPU bridge carries the
+#: opt-in glibc 2.39 transcription (``pixi run build-native-glibc239``;
 #: glibc's binary64 exp, pow, cos and acos are the same code from 2.28 on,
-#: so these are the words of the oracle's glibc 2.43 too.
-libm = SimpleNamespace(**{name: host_libm.scalar(name)
-                          for name in ("exp", "pow", "cos", "acos")})
+#: so these are the oracle's glibc 2.43 words too), else :mod:`math`, the
+#: host C library.
+libm = (SimpleNamespace(**{name: host_libm.scalar(name)
+                           for name in ("exp", "pow", "cos", "acos")})
+        if host_libm.implementation() == host_libm.GLIBC239 else math)
 
 
 def fmax(a: float, b: float, *more: float) -> float:

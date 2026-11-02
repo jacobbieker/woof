@@ -66,8 +66,9 @@ def _transcribed_libm() -> bool:
 
 #: The host build's C library calls (fast_sbm_common.cuh "libm";
 #: fast_sbm_init.cuh calls it directly) go through pointers that
-#: :func:`library` binds to the CPU bridge's glibc 2.39 transcription where
-#: it is installed, and otherwise reach the platform libm.
+#: :func:`library` binds to the CPU bridge's opt-in glibc 2.39 transcription
+#: where it is installed (``pixi run build-native-glibc239``), and otherwise
+#: reach the platform libm, exactly as a direct call would.
 TRANSCRIBED_LIBM = _transcribed_libm()
 #: Whether those calls give glibc's words.  The reference bits were computed
 #: calling glibc's exp, log and pow: WRF's Fortran oracle, and the packed
@@ -78,9 +79,9 @@ GLIBC_LIBM = TRANSCRIBED_LIBM or _gnu_libc().startswith("glibc")
 NOT_GLIBC_REASON = (
     "bit identity with WRF's Fortran oracle needs glibc's libm: the oracle's "
     "bits (and the packed tables checked against them) were computed calling "
-    "glibc's exp/log/pow, and without the CPU bridge's glibc 2.39 "
-    "transcription this host build calls the platform libm, which on "
-    f"{sys.platform} is not glibc")
+    "glibc's exp/log/pow, and this host build calls the platform libm, which "
+    f"on {sys.platform} is not glibc; a CPU bridge built with `pixi run "
+    "build-native-glibc239` binds glibc 2.39's own and removes this skip")
 
 def flags_wrf(hail: int = 1) -> dict:
     """WRF as written (the oracle preset)."""

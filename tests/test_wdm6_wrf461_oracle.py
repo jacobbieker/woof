@@ -252,19 +252,11 @@ def test_the_reflectivity_words_are_wrf_s():
                              "m_i_0_re", "m_i_0_im")]
 
 
-def _transcribed_libm() -> bool:
-    """Whether the CPU bridge carries woof.core.host_libm's glibc 2.39
-    transcription, which gives the oracle's glibc words on any host."""
-    from woof.core import host_libm
-    return host_libm.implementation() == host_libm.GLIBC239
-
-
 def test_the_reflectivity_bin_tables_are_wrf_s():
     """radar_init's bins and Simpson weights, computed on this host, are
     WRF's words (the device kernel reads them from woof.core.refl)."""
-    if platform.libc_ver()[0] != "glibc" and not _transcribed_libm():
-        pytest.skip("the bin tables are graded on a glibc host or with the "
-                    "CPU bridge's glibc 2.39 transcription")
+    if platform.libc_ver()[0] != "glibc":
+        pytest.skip("the bin tables are graded on a glibc host")
     from woof.core.refl import radar_init
 
     rc = radar_init()
@@ -283,6 +275,14 @@ def test_the_reflectivity_bin_tables_are_wrf_s():
 # The host mirror of the kernel source (CPU, glibc host)
 # ---------------------------------------------------------------------------
 
+def _transcribed_libm() -> bool:
+    """Whether the CPU bridge carries the opt-in glibc 2.39 transcription
+    (``pixi run build-native-glibc239``), which gives the oracle's glibc
+    words on any host."""
+    from woof.core import host_libm
+    return host_libm.implementation() == host_libm.GLIBC239
+
+
 @pytest.mark.parametrize("config", ("dt20_hail0", "dt300_hail0",
                                     "dt150_hail1_x3"))
 def test_the_kernel_source_on_the_host_is_the_defined_arm(tmp_path, config):
@@ -294,7 +294,9 @@ def test_the_kernel_source_on_the_host_is_the_defined_arm(tmp_path, config):
     transcribed = sys.platform != "win32" and _transcribed_libm()
     if compiler is None or (platform.libc_ver()[0] != "glibc" and not transcribed):
         pytest.skip("the host mirror is graded with g++ on a glibc host, or "
-                    "linked to the CPU bridge's glibc 2.39 transcription")
+                    "on any host with g++ once the CPU bridge is built with "
+                    "`pixi run build-native-glibc239` (glibc 2.39's own "
+                    "expf/logf/powf)")
     exe = tmp_path / "wdm6_mirror"
     link = []
     if transcribed:

@@ -1,34 +1,41 @@
-"""Binary64 transcendentals with glibc 2.39's words, element by element.
+"""Binary64 transcendentals through the C library, element by element.
 
-WRF's reference fixtures were computed by gfortran against glibc 2.39, so a
-value graded against them -- static grid geometry, the projection
-transcriptions, setup tables -- must be glibc 2.39's word on every machine.
-NumPy's float64 ``exp``, ``log``, ``sin`` and friends call the C library on
-most hosts, but NumPy 2.5 on an AVX-512 Linux machine runs its own vector
-loops for several of them, and those round the last bit differently on a
-few percent of arguments (scalars included: a 0-d call takes the same loop).
-The C library itself is not glibc 2.39 everywhere either: macOS's libm
-differs by an ULP on many arguments (128 ULP after the Lambert transforms
-amplify it), and glibc 2.44 reduces huge arguments of ``sin``, ``cos`` and
-``tan`` differently from 2.39.
+NumPy's float64 ``exp``, ``log``, ``log10``, ``tan``, ``arctan``,
+``arcsin``, ``arccos`` and ``power`` call the C library on most hosts, but
+NumPy 2.5 on an AVX-512 Linux machine runs its own vector loops for them
+instead, and those round the last bit differently on a few percent of
+arguments (scalars included: a 0-d call takes the same loop).  A value that
+must come out the same on every machine, or equal what the native Rust
+code computes through the same C library, cannot take them.  These take
+:mod:`math` one element at a time, which is the C library on every host and
+the answer NumPy gives wherever its vector loops are not in use.
 
-These therefore take the CPU preprocessing bridge's host entries, which run
-``tools/grib1_bridge/src/glibc239``: glibc 2.39's own ``exp``, ``log``,
-``log10``, ``pow``, ``sin``, ``cos``, ``tan``, ``atan``, ``atan2``, ``asin``
-and ``acos``, transcribed with the fused multiply-adds of the x86-64 FMA
-build the references ran, so the words are glibc 2.39's on any host.  The
-bridge splits the work over disjoint ranges on its explicit Rust worker
-pool, which never changes an element, and applies the domain handling
-below.  ``sqrt`` and ``x ** 2`` are not here: they are correctly rounded
-everywhere.
+``sqrt`` and ``x ** 2`` are not here: NumPy gives the correctly rounded
+answer for them.  ``sin`` and ``cos`` are here only for the transcription
+below; without it they are NumPy's, which is the C library's answer with
+and without its AVX-512 loops.  ``arctan2`` is: NumPy 2.5.3's AVX-512 float64 loop differs
+from the C library's ``atan2`` on 32,883 of 400,000 random argument pairs
+and on 6,096 of 400,000 Lambert-inverse-shaped ones (WSL Ubuntu 24.04,
+glibc 2.39), and on none with ``NPY_DISABLE_CPU_FEATURES="X86_V4
+AVX512_ICL"``.
 
-Where the bridge is not installed (geometry is also used before
-preparation's native assets are), every function falls back to :mod:`math`
-one element at a time, which is the host C library: glibc 2.39's words only
-on a glibc host whose functions match 2.39's.  An older installed bridge
-holds host entries that call the C library; it serves the functions it has
-and ``sin`` and ``cos`` fall back.  :func:`implementation` says which.
-These are for initialization and setup, not per-step fields.
+The CPU preprocessing bridge calls those same C-library functions over
+disjoint ranges on its explicit Rust worker pool. This preserves the host
+math contract, including the domain handling below; it does not use the
+different portable musl implementation. An older installed bridge retains
+the scalar Python reference. These are for initialization and setup, not
+per-step fields.
+
+That C library is glibc 2.39, the one WRF's reference fixtures were
+computed against, only on a glibc 2.39 host: macOS's libm differs by an ULP
+on many arguments (128 ULP once the Lambert transforms amplify it), and
+glibc 2.44 reduces huge ``sin``, ``cos`` and ``tan`` arguments differently.
+A bridge built with the opt-in ``glibc239`` feature (``pixi run
+build-native-glibc239``) runs glibc 2.39's own functions instead, transcribed
+in tools/rustwx/crates/glibc239-libm (LGPL-2.1-or-later in part, so default
+builds and published wheels never contain it), so the words are glibc 2.39's
+on any host; its host entries gain ``sin`` and ``cos``.
+:func:`implementation` says which is running.
 """
 
 from __future__ import annotations
@@ -43,9 +50,10 @@ __all__ = ["exp", "log", "log10", "sin", "cos", "tan", "arctan", "arctan2",
            "arcsin", "arccos", "power", "scalar", "implementation",
            "GLIBC239", "C_LIBRARY"]
 
-#: :func:`implementation` when the bridge's glibc 2.39 transcription runs.
+#: :func:`implementation` when the bridge's opt-in glibc 2.39 transcription
+#: runs.
 GLIBC239 = "glibc-2.39-transcription"
-#: :func:`implementation` when the host C library runs.
+#: :func:`implementation` when the host C library runs (the default build).
 C_LIBRARY = "host-c-library"
 #: The bridge export that marks the transcription (and its sin and cos).
 _PORT_MARKER = "gpuwm_glibc239_sin"
@@ -71,15 +79,16 @@ def _host_entry(pm, name, operation=None):
 
 
 def implementation() -> str:
-    """:data:`GLIBC239` where the installed bridge carries the glibc 2.39
-    transcription, else :data:`C_LIBRARY`."""
+    """:data:`GLIBC239` where the installed bridge was built with the opt-in
+    glibc 2.39 transcription (``pixi run build-native-glibc239``), else
+    :data:`C_LIBRARY`."""
     from woof.core import portable_math as pm
     return GLIBC239 if hasattr(_library(pm), _PORT_MARKER) else C_LIBRARY
 
 
 def scalar(name: str):
-    """The scalar C function ``name`` (``"exp"``, ``"pow"``, ``"expf"`` ...)
-    with glibc 2.39's words: the bridge's transcription where it is
+    """The scalar C function ``name`` (``"exp"``, ``"pow"``, ``"expf"`` ...):
+    glibc 2.39's words from the bridge's opt-in transcription where it is
     installed, else the host C library's.  No domain handling: these are
     the C functions' values, for scalar references that transcribe C or
     Fortran calls one at a time.  The ``f`` functions are binary32."""
@@ -219,10 +228,16 @@ def log10(values) -> np.ndarray:
 
 
 def sin(values) -> np.ndarray:
+    """glibc 2.39's ``sin`` with the opt-in transcription, else NumPy's."""
+    if implementation() != GLIBC239:
+        return np.sin(np.asarray(values, dtype=np.float64))
     return _unary(_SIN, values, "sin")
 
 
 def cos(values) -> np.ndarray:
+    """glibc 2.39's ``cos`` with the opt-in transcription, else NumPy's."""
+    if implementation() != GLIBC239:
+        return np.cos(np.asarray(values, dtype=np.float64))
     return _unary(_COS, values, "cos")
 
 
@@ -235,7 +250,7 @@ def arctan(values) -> np.ndarray:
 
 
 def arctan2(y, x) -> np.ndarray:
-    """glibc 2.39's ``atan2(y, x)``, over the broadcast operands.
+    """``atan2(y, x)`` through the C library, over the broadcast operands.
 
     :func:`math.atan2` raises for no argument, and its answers for zeros,
     infinities and NaNs are the C library's, which are NumPy's.
@@ -264,7 +279,7 @@ def _pow(base, exponent):
 
 
 def power(base, exponent) -> np.ndarray:
-    """``base ** exponent`` through glibc 2.39's ``pow``.
+    """``base ** exponent`` through the C library's ``pow``.
 
     A scalar exponent of 2 or 0.5 is NumPy's square or square root, not
     ``pow``, in NumPy's own ``**``; callers that write those keep ``**``.
