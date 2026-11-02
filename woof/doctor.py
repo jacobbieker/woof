@@ -102,17 +102,18 @@ GPU_EXTRA_HINT = ("nvidia-smi\n"
                   "  # read the CUDA version out of that header.  CuPy\n"
                   "  # ships one wheel per CUDA major and pip cannot\n"
                   "  # detect which one this box serves, so the extra\n"
-                  "  # has to name it.  Then, for a CUDA 12.x box:\n"
-                  "pip install 'recast-woof[gpu-cu12]'\n"
-                  "  # or, for a box whose CUDA is 13-only:\n"
-                  "pip install 'recast-woof[gpu-cu13]'")
+                  "  # has to name it.  Then, for a CUDA 13 box:\n"
+                  "pip install 'recast-woof[gpu-cu13]'\n"
+                  "  # or, for a box whose driver serves only CUDA 12.x:\n"
+                  "pip install 'recast-woof[gpu-cu12]'")
 
 #: The brief report has room for exactly one command.  It carries the
-#: cu12 wheel with the cu13 alternative fused on as a shell comment --
-#: which runs as printed in sh and in PowerShell alike -- because the
-#: one thing this line may never do is imply cu12 is simply correct.
-GPU_EXTRA_UNKNOWN_ACTION = ("pip install 'recast-woof[gpu-cu12]'  "
-                            "# CUDA 12.x; cu13 box: recast-woof[gpu-cu13]")
+#: cu13 wheel, the default install, with the cu12 alternative fused on as
+#: a shell comment -- which runs as printed in sh and in PowerShell alike
+#: -- because the one thing this line may never do is imply cu13 is
+#: simply correct.
+GPU_EXTRA_UNKNOWN_ACTION = ("pip install 'recast-woof[gpu-cu13]'  "
+                            "# CUDA 13; CUDA-12-only driver: recast-woof[gpu-cu12]")
 #: NOT "wrf-rust + matplotlib".  matplotlib is a BASE dependency, on
 #: every install already; the extra's second package is pyshp, the
 #: shapefile reader every basemap needs, and naming matplotlib here left
