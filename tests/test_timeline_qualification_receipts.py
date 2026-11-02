@@ -1,6 +1,16 @@
 """The comparison view retains complete scientific evidence metadata."""
 
-from tools.timeline.verify_qualification import science_evidence
+import pytest
+
+from _release_export import export_skip_reason
+
+# verify_qualification imports the speed-lane bench harness at its top,
+# which the public export drops (RELEASE-EXCLUDE.txt: tools/bench/**).
+_DROPPED = export_skip_reason("tools/bench")
+if _DROPPED is not None:
+    pytest.skip(_DROPPED, allow_module_level=True)
+
+from tools.timeline.verify_qualification import science_evidence  # noqa: E402
 
 
 def test_all_scientific_evidence_is_retained_with_original_nesting():

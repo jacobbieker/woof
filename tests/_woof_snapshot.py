@@ -64,7 +64,12 @@ def _relative(path: str | Path) -> str | None:
 
 def _module_paths(module: str) -> list[str]:
     stem = module.replace(".", "/")
-    return [stem + ".py", stem]
+    paths = [stem + ".py", stem]
+    if "." not in module:
+        # A test imports a sibling test module by its bare name (tests/ is
+        # on sys.path), so that name is also a file under tests/.
+        paths.append(f"tests/{stem}.py")
+    return paths
 
 
 def _inputs(error: BaseException) -> list[str]:

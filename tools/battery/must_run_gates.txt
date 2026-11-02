@@ -231,3 +231,4 @@ tests/test_tui_worker.py  runs woof/tui_worker.py as a child process, and the Re
 tests/test_cumulus_rain_number.py  needs CuPy and a CUDA device (it seeds the fed rain number on the card); CPU legs skip the module, which a leased GPU leg runs (6aed31a31).
 tests/test_nudging_gpu.py  needs WOOF_DOWNSCALE_GPU_TEST=1 inside a GPU pool lease: it runs the captured nudging operator on a CUDA device, which no hosted leg has (6aed31a31).
 tests/test_nudging_forecast_gpu.py  needs WOOF_DOWNSCALE_GPU_TEST=1 inside a GPU pool lease: it checks WRF's nudging masks and cadence on a CUDA device, which no hosted leg has (6aed31a31).
+tests/test_timeline_qualification_receipts.py  imports tools/timeline/verify_qualification.py, which imports the speed-lane bench harness (tools/bench), and RELEASE-EXCLUDE.txt drops that harness from the public export; the module skips by that rule there, and every development tree runs it.
