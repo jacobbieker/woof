@@ -119,12 +119,6 @@ MYNN_PBL_OUTPUT_FIELDS: dict[str, WrfOutputField] = {
         'total water-liquid water pottemp covariance',
         'K kg/kg',
         "Registry.EM_COMMON:1127", wrf_history=False),
-    "u10e": WrfOutputField(
-        "U10E", "f4", "", "Special U at 10 M from MYJSFC", "m s-1",
-        "Registry.EM_COMMON:1069", wrf_history=True),
-    "v10e": WrfOutputField(
-        "V10E", "f4", "", "Special V at 10 M from MYJSFC", "m s-1",
-        "Registry.EM_COMMON:1070", wrf_history=True),
     "el_pbl": WrfOutputField(
         "EL_PBL", "f4", "Z",
         'Length scale from PBL',
@@ -918,6 +912,16 @@ NOAH_OUTPUT_FIELDS = {
                    'NOAHRES', 'RESIDUAL OF THE NOAH SURFACE ENERGY BUDGET',
                    'W m{-2}', 'Registry.EM_COMMON:1851'),
 }
+#: MYJSFC's special 10 m winds: the MYJ surface layer's rows, not MYNN's
+#: (the MYNN block publishes neither).
+MYJ_SURFACE_OUTPUT_FIELDS = {
+    "u10e": WrfOutputField(
+        "U10E", "f4", "", "Special U at 10 M from MYJSFC", "m s-1",
+        "Registry.EM_COMMON:1069", wrf_history=True),
+    "v10e": WrfOutputField(
+        "V10E", "f4", "", "Special V at 10 M from MYJSFC", "m s-1",
+        "Registry.EM_COMMON:1070", wrf_history=True),
+}
 CARRIED_SURFACE_OUTPUT_FIELDS = {
     "sst": _output_field(
                'SST', 'SEA SURFACE TEMPERATURE',
@@ -985,7 +989,8 @@ for _group in (CARRIED_SURFACE_OUTPUT_FIELDS, NOAH_OUTPUT_FIELDS, RADIATION_BOUN
                PBL_RATE_OUTPUT_FIELDS,
                SCM_FORCING_OUTPUT_FIELDS,
                INACTIVE_DIAGNOSTIC_OUTPUT_FIELDS,
-               MYNN_PBL_OUTPUT_FIELDS, NOAHMP_OUTPUT_FIELDS,
+               MYNN_PBL_OUTPUT_FIELDS, MYJ_SURFACE_OUTPUT_FIELDS,
+               NOAHMP_OUTPUT_FIELDS,
                RUC_OUTPUT_FIELDS, SOLAR_ALBEDO_OUTPUT_FIELDS,
                OCEAN_OUTPUT_FIELDS, PWP_OUTPUT_FIELDS, OCEAN_DIAGNOSTIC_FIELDS):
     for _key, _field in _group.items():
