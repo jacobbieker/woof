@@ -21,6 +21,10 @@
   non-contiguous view (a ring or interior slice of a 3-D field) the facade
   ran the operation on an empty dense stand-in, so ``if (x < t) x = 0``
   read zeros and wrote zeros everywhere (microphysics_zero_out).
+* Metal's compare and fmax/fmin instructions treat a subnormal as zero, so
+  under GPUWM_WRF_EXACT=1 ``cp.maximum(qr, 0)`` zeroed a subnormal rain
+  mixing ratio that CUDA keeps (RRTM's rain path).  Float32 comparisons
+  and min/max take the f32s kernels in that process.
 """
 
 import importlib.util
@@ -198,3 +202,16 @@ def test_elementwise_output_on_a_strided_view_is_read_write(cp):
     for view in (want[:, 1:3, 1:4], want[:, 0, :]):
         view[view < np.float32(0.5)] = 0
     assert cp.asnumpy(field).tobytes() == want.tobytes()
+
+
+@pytest.mark.parametrize("name", ["maximum", "minimum", "fmax", "fmin", "greater",
+                                  "greater_equal", "less", "less_equal", "equal",
+                                  "not_equal"])
+def test_strict_compare_and_minmax_keep_subnormals(cp, monkeypatch, name):
+    monkeypatch.setenv("GPUWM_WRF_EXACT", "1")
+    info = np.finfo(np.float32)
+    x = np.array([info.smallest_subnormal, -info.smallest_subnormal, 3e-39, -0.0,
+                  0.0, 2.0, np.nan, -np.inf], dtype=np.float32)
+    zero = np.float32(0)
+    got = cp.asnumpy(getattr(cp, name)(cp.asarray(x), zero))
+    assert got.tobytes() == np.asarray(getattr(np, name)(x, zero)).tobytes()
