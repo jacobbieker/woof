@@ -176,6 +176,7 @@ def test_the_notice_names_every_grant_that_conditions_reproduction() -> None:
         "BowEcho",                       # vendored simulation, MIT OR Apache-2.0
         "recast-radar-tools",             # compiled writers, MIT OR Apache-2.0
         "recast-radar-bzip2",             # retained libbzip2 randomisation table
+        "GNU Lesser General Public License",   # glibc239-libm's IBM code
     )
     missing = [token for token in required if token not in notice]
     assert missing == [], f"the NOTICE no longer names: {missing}"
@@ -295,7 +296,9 @@ def test_the_binary_form_notice_covers_the_first_party_ports() -> None:
     for token in ("UChicago Argonne", "Los Alamos National Security",
                   "NumPy Developers", "SIL OPEN FONT LICENSE",
                   "rw-libm", "Arm Limited", "Alexei Sibidanov",
-                  "tools/grib1_bridge/src/glibc239_math.rs"):
+                  "tools/grib1_bridge/src/glibc239_math.rs",
+                  "glibc239-libm", "IBM Accurate Mathematical Library",
+                  "GNU LESSER GENERAL PUBLIC LICENSE"):
         assert token in text, (
             f"the binary-form notice does not reproduce {token!r}; a compiled "
             "consumer never sees the source tree, so this is the only copy "
@@ -547,6 +550,14 @@ MARKER_FILES: dict[str, str] = {
     # libm (public CI run 37036982597 failed it on the platform libm).
     "tools/rustwx/crates/rw-libm/src/lib.rs":
         "Portable libm in Rust -- Arm optimized-routines and CORE-MATH",
+    # glibc 2.39's binary64 libm: the IBM Accurate Mathematical Library
+    # (LGPL-2.1-or-later), Arm exp/log/pow (MIT) and FDLIBM log10, the host
+    # math the WRF references' glibc computes.
+    **{f"tools/rustwx/crates/glibc239-libm/src/{name}.rs":
+       "glibc 2.39 binary64 libm in Rust -- IBM Accurate Mathematical Library"
+       for name in ("asin", "asincos_tbl", "atan", "atan2", "branred", "dla",
+                    "exp", "log", "log10", "pow", "sincos", "sincostab", "tan",
+                    "uatan_tbl", "utan_tbl")},
 }
 
 

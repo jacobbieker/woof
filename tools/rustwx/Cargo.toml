@@ -11,6 +11,7 @@
 [workspace]
 members = [
     "crates/fire-indices",
+    "crates/glibc239-libm",
     "crates/netcdf-writer",
     "crates/obs-regrid",
     "crates/obs-score",
