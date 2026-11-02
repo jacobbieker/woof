@@ -31,8 +31,8 @@ atan2 special grid                       n=       16820 mismatches=0 nan_payload
 atan2 near-boundary pairs                n=    50000000 mismatches=0 nan_payload_diffs=0
 asin edges                               n=    22148648 mismatches=0 nan_payload_diffs=0
 acos edges                               n=    22148648 mismatches=0 nan_payload_diffs=0
-expf (binary32)                          n=  4294967292 mismatches=0 nan_payload_diffs=0
-logf (binary32)                          n=  4294967292 mismatches=0 nan_payload_diffs=0
+expf (binary32)                          n=  4294967296 mismatches=0 nan_payload_diffs=0
+logf (binary32)                          n=  4294967296 mismatches=0 nan_payload_diffs=0
 powf (binary32)                          n=   999999996 mismatches=0 nan_payload_diffs=3831
 
 # ldd (GNU libc) 2.44, AMD Ryzen 9 5950X 16-Core Processor, 2026-11-02T05:54Z, threads 12
@@ -113,5 +113,8 @@ acos edges                               n=    22148648 mismatches=0 nan_payload
 
 # Added with asinf (binary32, e_asinf.c), the same binary and host: first line inside docker ubuntu:24.04
 # (glibc 2.39), second on the host's glibc 2.44, whose asinf is CORE-MATH's correctly rounded one.
-asinf (binary32)                         n=  4294967292 mismatches=0 nan_payload_diffs=0
+asinf (binary32)                         n=  4294967296 mismatches=0 nan_payload_diffs=0
 asinf (binary32)                         n=  4294967292 mismatches=4581700 nan_payload_diffs=2147483648
+
+# The expf, logf and asinf lines inside docker were rerun after the harness's last thread took the
+# remainder of 2^32 (earlier runs left the final four bit patterns, NaNs, unchecked): n = 2^32 each.

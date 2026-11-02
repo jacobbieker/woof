@@ -790,8 +790,11 @@ which case it is compiled into the CPU preprocessing bridge
 (gpuwm_preprocess_cpu), the static_fields library and the executables that
 link static_fields (the rw_mpas_* tools and rw_mlexport).  The default
 native build, the recast-woof and metal-woof wheels and the release bridge
-bundles are built without it, contain none of its code, and call the
-platform libm; nothing in this section applies to them.
+bundles are built without it and contain none of its code: their host math,
+static_fields' public projections and its strict scalar asin call the
+platform libm, and static_fields' orographic projection and sampling lanes
+keep their rw-libm and fixed-arithmetic paths, as before.  Nothing in this
+section applies to those builds.
 woof.core.host_libm.implementation() reports which a running installation
 uses.
 

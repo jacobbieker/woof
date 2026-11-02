@@ -278,7 +278,9 @@ fn f32_mode(name: &str) {
         let tally = &tally;
         s.spawn(move || {
             let mut r = Rng(0x5eed ^ t);
-            for i in t * per..(t + 1) * per {
+            // The last thread takes the remainder, so all of 0..n is covered.
+            let end = if t == THREADS - 1 { n } else { (t + 1) * per };
+            for i in t * per..end {
                 let (x, y, got, want) = match name {
                     "expf" => { let x = f32::from_bits(i as u32); (x, 0.0, rw_libm::expf(x), unsafe { expf(x) }) }
                     "logf" => { let x = f32::from_bits(i as u32); (x, 0.0, rw_libm::logf(x), unsafe { logf(x) }) }
@@ -294,7 +296,7 @@ fn f32_mode(name: &str) {
             }
         });
     });
-    tally.report(&format!("{name} (binary32)"), per * THREADS);
+    tally.report(&format!("{name} (binary32)"), n);
 }
 
 fn main() {
