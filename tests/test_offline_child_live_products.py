@@ -191,7 +191,10 @@ def test_each_child_frame_is_drawn_as_it_is_committed(child, monkeypatch):
         ("output_committed", frames[2].name),
         ("live_products_ready", frames[2].name),
     ]
-    assert renderer.frames == [frame.name for frame in frames]
+    # The analysis is the early render's single pass; each later frame
+    # is the live pass's two (the headline set first, then the rest).
+    assert renderer.frames == [frames[0].name] + [
+        frame.name for frame in frames[1:] for _ in range(2)]
     # Published into the layout the finalize render uses, and recorded.
     for frame in frames:
         assert (outdir / "png" / "d02-250m" / "composite_reflectivity"
