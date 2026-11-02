@@ -2946,23 +2946,23 @@ def test_the_gpu_extras_pin_one_cupy_wheel_per_cuda_major():
     The doctor remedy names these extras, so their existence and their
     wheels are part of the check's contract, not just packaging.
 
-    `gpu`/`all` are kept as cu12 ALIASES rather than second definitions:
-    every install that already works names them, so they may not change
-    meaning, but they also may not be a place a wheel is pinned twice --
-    the 1.8.0 table pinned cu12 in `[gpu]` and had no cu13 one-liner at
-    all, which is how a CUDA-13 box following the quickstart got a wheel
-    that cannot load cuBLAS on it (issue #76).
+    `gpu`/`all` are ALIASES rather than second definitions, so they may
+    not be a place a wheel is pinned twice -- the 1.8.0 table pinned cu12
+    in `[gpu]` and had no cu13 one-liner at all, which is how a CUDA-13
+    box following the quickstart got a wheel that cannot load cuBLAS on
+    it (issue #76).  This fork makes CUDA 13 the default: the aliases name
+    the cu13 pair, and CUDA 12 is installed only by naming its extra.
     """
     extras = _extras()
     assert _cupy_wheels(_resolve_extra(extras, "gpu-cu12")) == {
         "cupy-cuda12x"}
     assert _cupy_wheels(_resolve_extra(extras, "gpu-cu13")) == {
         "cupy-cuda13x"}
-    # The aliases: same wheel, no drift, and no cu13 leaking into cu12.
+    # The aliases: same wheel, no drift, and no cu12 leaking into cu13.
     assert _resolve_extra(extras, "gpu") == _resolve_extra(
-        extras, "gpu-cu12")
+        extras, "gpu-cu13")
     assert _resolve_extra(extras, "all") == _resolve_extra(
-        extras, "all-cu12")
+        extras, "all-cu13")
     # A one-liner per major, each carrying the renderer too.
     for major, wheel in ((12, "cupy-cuda12x"), (13, "cupy-cuda13x")):
         resolved = _resolve_extra(extras, f"all-cu{major}")

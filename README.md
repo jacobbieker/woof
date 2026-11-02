@@ -45,10 +45,10 @@ pixi run doctor
 ```
 
 The default Pixi environment installs this checkout in editable mode with the
-`all-cu12` extra. For a CUDA 13 setup use:
+`all-cu13` extra. CUDA 12 is an explicit choice:
 
 ```bash
-pixi install -e cuda13
+pixi install -e cuda12
 ```
 
 On a source checkout, `pixi run setup` builds the native Rust tools locally.
@@ -57,13 +57,14 @@ outside a published wheel install.
 
 ```bash
 python3 -m venv ~/woof-env
-~/woof-env/bin/python -m pip install 'recast-woof[all-cu12]'
+~/woof-env/bin/python -m pip install 'recast-woof[all-cu13]'
 ~/woof-env/bin/woof fetch-tables
 ~/woof-env/bin/woof fetch-geog --datasets wrf
 ~/woof-env/bin/woof doctor
 ```
 
-For a CUDA 13 setup use `all-cu13`. The hex model runs on either extra:
+For a driver that serves only CUDA 12, install `all-cu12` explicitly
+instead; `all` and `gpu` mean the CUDA 13 pair. The hex model runs on either extra:
 `all-cu12` works on a CUDA 12 or CUDA 13 driver, `all-cu13` needs a CUDA 13
 driver, and `woof hex doctor` names the one for your driver. Install one
 CuPy/CUDA major per environment.

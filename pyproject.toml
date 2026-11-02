@@ -43,7 +43,7 @@ Changelog = "https://github.com/recastsystems/woof/blob/main/CHANGELOG.md"
 # One CuPy/CUDA major per environment.
 gpu-cu12 = ["cupy-cuda12x[ctk]>=14.0"]
 gpu-cu13 = ["cupy-cuda13x[ctk]>=14.0"]
-gpu = ["recast-woof[gpu-cu12]"]
+gpu = ["recast-woof[gpu-cu13]"]
 # Apple-silicon GPU through MLX (Metal); the forecast's cupy calls run on a
 # facade over mlx.core (woof.backend), its kernels translated to Metal.
 # libclang: the CUDA-to-Metal translator's typed front end (woof.backend.translate).
@@ -75,7 +75,7 @@ all-cu13 = ["recast-woof[gpu-cu13]", "recast-woof[render]", "recast-woof[obs]",
             "recast-woof[geog]"]
 all-mlx = ["recast-woof[gpu-mlx]", "recast-woof[render]", "recast-woof[obs]",
            "recast-woof[geog]"]
-all = ["recast-woof[all-cu12]"]
+all = ["recast-woof[all-cu13]"]
 
 [project.scripts]
 woof = "woof.cli:main"
@@ -240,8 +240,8 @@ numpy = "*"
 netcdf4 = "*"
 
 [tool.pixi.environments]
-default = { features = ["base", "cu12"], no-default-feature = true }
-cuda13 = { features = ["base", "cu13"], no-default-feature = true }
+default = { features = ["base", "cu13"], no-default-feature = true }
+cuda12 = { features = ["base", "cu12"], no-default-feature = true }
 mlx = { features = ["base", "mlx"], no-default-feature = true }
 cpu = { features = ["base", "cpu"], no-default-feature = true }
 libradtran = { features = ["libradtran"], no-default-feature = true }
