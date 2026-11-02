@@ -24,7 +24,8 @@ template <typename T>
 struct complex {
   T __woof_re;
   T __woof_im;
-  __device__ complex(const T& re = T(), const T& im = T()) : __woof_re(re), __woof_im(im) {}
+  // by value: Metal binds a const reference to one address space only
+  __device__ complex(T re = T(), T im = T()) : __woof_re(re), __woof_im(im) {}
   template <typename U>
   __device__ complex(const complex<U>& z) : __woof_re(T(z.real())), __woof_im(T(z.imag())) {}
   __device__ T real() const { return __woof_re; }
@@ -173,7 +174,6 @@ __device__ inline complex<float> sqrt(const complex<float>& z) {
 
 }  // namespace thrust
 
-using thrust::complex;
 using thrust::conj;
 using thrust::real;
 using thrust::imag;

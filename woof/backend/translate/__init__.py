@@ -415,6 +415,12 @@ def parse(text: str):
 
 # ---------------------------------------------------------------- edits
 
+#: The rank of a goto wrapper's closing text.  A wrapper that closes where
+#: another opens (a label right after the statement a region starts at)
+#: closes first; inner closings still precede outer ones (rank + 1).
+_GOTO_CLOSE = -200_000_000
+
+
 class Edits:
     """Byte-range edits on one text, applied in one pass.
 
@@ -1139,7 +1145,7 @@ class _Rewriter:
             # Wrappers opening at one offset nest outer first: the longer one.
             self.edits.insert(rs, f"bool {flag} = false; do {{ ", rank=-50_000 - (re_ - rs))
             if entry is None:
-                self.edits.insert(ls, f"}} while (false); ", rank=50_000)
+                self.edits.insert(ls, f"}} while (false); ", rank=_GOTO_CLOSE)
             else:
                 # closed before the loop opens; the guard opens inside it
                 self.edits.insert(re_, f"}} while (false); ", rank=-100_000_000)
@@ -1160,7 +1166,7 @@ class _Rewriter:
                     continue
                 seen.add(key)
                 end = self._statement_end(loop)
-                self.edits.insert(end, f" if ({flag}) break;", rank=50_000)
+                self.edits.insert(end, f" if ({flag}) break;", rank=_GOTO_CLOSE)
         self._nested_wrapper_exits(wrappers)
 
     def _nested_goto_starts(self, by_label, labels, parent, chain):
@@ -1245,7 +1251,7 @@ class _Rewriter:
                     key = (id(inner), id(outer))
                     if key not in done:
                         done.add(key)
-                        self.edits.insert(inner["close"], f" if ({outer['flag']}) break; ", rank=50_001)
+                        self.edits.insert(inner["close"], f" if ({outer['flag']}) break; ", rank=_GOTO_CLOSE + 1)
 
     def _backward_goto(self, name, label, stmts, j, jumps, chain, parent, block, regions, wrappers):
         """Backward ``goto L;`` (a Fortran retry: ``100 CONTINUE ... GOTO 100``)
@@ -1294,7 +1300,7 @@ class _Rewriter:
                 self.refuse(label, f"goto regions overlap at label {name!r}")
         regions.append((rs, re_))
         self.edits.insert(rs, "while (true) { ", rank=-50_000 - (re_ - rs))
-        self.edits.insert(re_, " break; }", rank=50_000)
+        self.edits.insert(re_, " break; }", rank=_GOTO_CLOSE)
         wrappers.append({"kind": "backward", "rs": rs, "close": re_, "flag": None, "name": name,
                          "jumps": [self.span(g)[0] for g, _, _ in tops], "node": label})
         label_tokens = list(label.get_tokens())
