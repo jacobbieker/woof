@@ -43,11 +43,30 @@ def test_mp8_finish_clamps_with_the_real_product_wrf_forms():
                           np.asarray([0.27, 0.23], np.float32))
 
 
+def _corrected_mp28():
+    """corrected_mp28 imports the aerosol tool's oracle_io and compare by bare
+    name; four oracle tools ship an oracle_io.py (and several a compare.py),
+    so an xdist worker that ran another oracle file first handed it theirs.
+    Load it with those bare names cleared, as test_wdm6_wrf461_oracle does,
+    and put the caller's entries back afterwards."""
+    if 'corrected_mp28' in sys.modules:
+        return sys.modules['corrected_mp28']
+    siblings = ('oracle_io', 'compare')
+    saved = {key: sys.modules.pop(key) for key in siblings if key in sys.modules}
+    try:
+        import corrected_mp28
+    finally:
+        for key in siblings:
+            sys.modules.pop(key, None)
+        sys.modules.update(saved)
+    return corrected_mp28
+
+
 @pytest.mark.parametrize('dt', [5, 20])
 def test_aerosol_all_columns_against_only_index_corrected_wrf(tmp_path, dt):
     build = os.environ.get('THOMPSON_MP28_ORACLE_BUILD')
     pytest.importorskip('cupy')
-    import corrected_mp28
+    corrected_mp28 = _corrected_mp28()
     pin = json.loads((ROOT / 'tests/data/thompson_slab1_corrected_mp28.json').read_text())
     assert pin['source']['new'] == corrected_mp28.NEW
     assert pin['source']['stock_module_sha256'] == corrected_mp28.PINNED

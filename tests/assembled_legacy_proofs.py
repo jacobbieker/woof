@@ -24,8 +24,29 @@ def _load(root, name):
     return json.loads(path.read_text())
 
 
+def _default_process_modules(modules):
+    """Each module's source digest and options as a default process composes them.
+
+    The receipts were captured by a default (``strict`` False) process; a
+    GPUWM_WRF_EXACT process composes the WRF-exact sources instead, so it
+    asks a default child process for the identity the receipts describe.
+    """
+    import os
+    import subprocess
+    import sys
+    code = ("import hashlib, json, sys\n"
+            "from woof.core.kernels import module_options, module_source\n"
+            "print(json.dumps({m: [hashlib.sha256(module_source(m).encode()).hexdigest(),"
+            " list(module_options(m))] for m in sys.argv[1:]}))\n")
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GPUWM_WRF_EXACT")}
+    done = subprocess.run([sys.executable, "-c", code, *modules], env=env,
+                          capture_output=True, text=True, check=True)
+    return json.loads(done.stdout.strip().splitlines()[-1])
+
+
 def _identity(proof, modules):
     from woof.core.kernels import module_options, module_source
+    from woof.wrf_exact import ENABLED
     capture = proof["capture_identity"]
     assert capture["device"] == "b'NVIDIA RTX PRO 6000 Blackwell Server Edition'"
     assert capture["compute_capability"] == [12, 0]
@@ -33,11 +54,16 @@ def _identity(proof, modules):
     assert capture["cupy_version"] == "14.2.0"
     assert capture["strict"] is False
     assert capture["default_diffusion"] is True
+    default = _default_process_modules(modules) if ENABLED else None
     for module in modules:
-        current = hashlib.sha256(module_source(module).encode()).hexdigest()
+        if default is None:
+            current = hashlib.sha256(module_source(module).encode()).hexdigest()
+            options = list(module_options(module))
+        else:
+            current, options = default[module]
         if capture["module_source_sha256"][module] != current:
             _module_source_extension(module, capture["module_source_sha256"][module], current)
-        assert capture["module_options"][module] == list(module_options(module))
+        assert capture["module_options"][module] == options
 
 
 def _sealed_extension(root):

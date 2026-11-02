@@ -84,6 +84,11 @@ def exact_adapters():
         '    old_mu=s.scratch((ny,nx),"acoustic_mu_pp_old")\n'
         '    old[...] -= s.c1h[:nz,None,None]*old_mu[None]*np.float32(300)\n'
         '    return s, cfg\n')
+    # make_vertical_state above already holds the t_2 words, so the oracle's
+    # own strict conversion (vertical_port_outputs) must not apply twice.
+    vs = vs.replace("    _strict_theta_words(s, metadata)\n", "")
+    vs = vs.replace("    _strict_theta_words(witness, metadata)\n", "")
+    vs = vs.replace("    _strict_theta_words(diagnosis, metadata)\n", "")
     vs = vs.replace('t2 = before["th_pp"] - (c1h * before["mu_pp"]) * theta_offset',
                     't2 = before["th_pp"].copy()')
     vs = vs.replace('t2old = old_th - (c1h * old_mu) * theta_offset',
@@ -96,27 +101,11 @@ def exact_adapters():
 
 
 def exact_bookkeeping_adapter():
+    """The bookkeeping oracle runs a strict process's representation itself:
+    rk_step on the stand-in cfg, WRF's t_2 carrier and the final-register
+    observers (woof.verify.smallstep_bookkeeping_oracle)."""
     from woof.verify import smallstep_bookkeeping_oracle as b
-    source=Path(b.__file__).read_text(encoding="utf-8")
-    source=source.replace('dx=float(fixture["dx"]), dy=float(fixture["dy"]),',
-        'dx=float(fixture["dx"]), dy=float(fixture["dy"]),\n'
-        '        rk_step=int(fixture.get("rk_step",1)),')
-    source=source.replace('values["native_th_pp"] = values["th_pp"] - offset',
-                          'values["native_th_pp"] = values["th_pp"].copy()')
-    source=source.replace('    return state\n',
-        '    if "hdiab_dt" in fixture:\n'
-        '        state.th_pp[...] = cp.asarray(fixture["in_th_pp"]\n'
-        '          -(fixture["in_c1h"][:,None,None]*fixture["in_mu_pp"][None])*np.float32(300))\n'
-        '    return state\n')
-    # Observe the final masses used by production, after exact-mode overrides.
-    source=source.replace('needle = "real mtf = rn_mul(0.5f, rn_add(mt_a, mt_b));"',
-        'needle = "real ct = rn_add(rn_mul(c1h[k], mtf), c2h[k]);"')
-    source=source.replace('needle = "real mnf = rn_mul(0.5f, rn_add(mna, mnb));"',
-        'needle = "real cs = rn_add(rn_mul(c1h[k], msf), c2h[k]);"')
-    module=ModuleType("smallstep_exact_bookkeeping")
-    module.__file__=b.__file__
-    exec(compile(source,b.__file__,"exec"),module.__dict__)
-    return module
+    return b
 
 
 def compare_frame_driver(library):

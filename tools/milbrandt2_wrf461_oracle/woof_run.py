@@ -22,12 +22,25 @@ from pathlib import Path
 import numpy as np
 
 
+def _sibling(name):
+    # By path, not by sys.path: a test process may already hold another
+    # tool's ``compare`` or ``gen_columns`` under the same bare name.
+    import importlib.util
+    path = Path(__file__).resolve().parent / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(f"my2_oracle_{name}", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def run(in_path, out_path, layout=None):
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
     import cupy as cp
     import woof  # noqa: F401  (installs the strict-arithmetic hook first)
-    from gen_columns import read_stream
-    from compare import write_output, LEVEL_FIELDS, SURFACE_FIELDS
+    read_stream = _sibling("gen_columns").read_stream
+    compare = _sibling("compare")
+    write_output = compare.write_output
+    LEVEL_FIELDS, SURFACE_FIELDS = compare.LEVEL_FIELDS, compare.SURFACE_FIELDS
     from woof.core.milbrandt2 import launch_milbrandt2
 
     ncol, nz, nsteps, dt, arr, sfc = read_stream(in_path)

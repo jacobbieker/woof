@@ -15,6 +15,8 @@ from conftest import requires_gpu
 from woof.verify.smallstep_bookkeeping_oracle import (
     BOOKKEEPING_DIR, OUTPUT_COVERAGE, PORT_RUNNERS, ROUNDING_TRACES, load_bookkeeping)
 from woof.verify.smallstep_oracle import word_metrics
+from woof.verify.platform_pins import pin_path
+from woof.wrf_exact import ENABLED as WRF_EXACT
 
 
 def _manifest():
@@ -60,7 +62,7 @@ def test_every_compiled_wrf_bookkeeping_output_array_has_a_comparison():
 
 
 def _assert_measurement(name, routine):
-    pins = json.loads((BOOKKEEPING_DIR / "measurements.json").read_text())
+    pins = json.loads(pin_path(BOOKKEEPING_DIR / "measurements.json").read_text())
     fixture = load_bookkeeping(BOOKKEEPING_DIR / name)
     actual = PORT_RUNNERS[routine](fixture)
     assert all(key[4:] in actual for key in fixture if key.startswith("ref_"))
@@ -72,8 +74,10 @@ def _assert_measurement(name, routine):
             row["isolation"][key[10:]] = word_metrics(actual[key[10:]], value)
     row["causal_trace"] = {key: word_metrics(actual[key], value)
                            for key, value in ROUNDING_TRACES[routine](fixture).items()}
-    assert all(metric["different_words"] == 0
-               for metric in row["causal_trace"].values())
+    # The traces spell the default build's rounding; a WRF-exact build runs
+    # WRF's own order instead, and its distances to them are pinned below.
+    assert WRF_EXACT or all(metric["different_words"] == 0
+                            for metric in row["causal_trace"].values())
     assert row == pins["files"][name], name
 
 
@@ -101,5 +105,7 @@ def test_sumflux_against_compiled_wrf471(name):
 @pytest.mark.gpu
 @requires_gpu
 @pytest.mark.parametrize("name", _names("emdiv"))
+@pytest.mark.skipif(WRF_EXACT, reason="a strict process applies emdiv inside advance_uv "
+                    "(acoustic._uv_emdiv_args); its standalone launch only saves mu''")
 def test_apply_emdiv_against_compiled_wrf471(name):
     _assert_measurement(name, "emdiv")
