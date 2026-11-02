@@ -106,6 +106,8 @@ def _cfg(fixture):
         open_x=not periodic, open_y=not periodic, specified=False,
         nested=False, spec_zone=1, emdiv=float(fixture.get("emdiv", 0.01)),
         dx=float(fixture["dx"]), dy=float(fixture["dy"]),
+        # The stage the RK driver sets on cfg; the strict prep reads it.
+        rk_step=int(fixture.get("rk_step", 1)),
     )
 
 
