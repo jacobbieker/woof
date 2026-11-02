@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import importlib.util
 import json
 from pathlib import Path
 import sys
@@ -40,9 +41,19 @@ CASES = ("wrf461-nzs9.npz", "wrf461-nzs6.npz", "wrf461-mosaic.npz")
 
 
 def _tool(name):
+    # Loaded from this tool's directory under its own module name: several
+    # oracle tools ship a run_woof.py, and a bare import returned whichever
+    # one another test file in the same xdist worker had imported first.
     if str(TOOL) not in sys.path:
         sys.path.insert(0, str(TOOL))
-    return importlib.import_module(name)
+    unique = f"ruc_lsm_gpu_oracle_{name}"
+    module = sys.modules.get(unique)
+    if module is None:
+        spec = importlib.util.spec_from_file_location(unique, TOOL / f"{name}.py")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[unique] = module
+        spec.loader.exec_module(module)
+    return module
 
 
 def _fixture(name):
