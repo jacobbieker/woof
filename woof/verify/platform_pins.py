@@ -5,7 +5,9 @@ distance from compiled WRF.  CUDA's pins carry NVRTC's multiply-add
 contraction (``--fmad=true`` is the default, and fast numerics drops
 ``--fmad=false``).  The Metal translation never contracts, so on the MLX
 backend the same measurement gives CUDA's ``--fmad=false`` words; those are
-recorded beside the CUDA pin as ``<stem>-metal<suffix>``.
+recorded beside the CUDA pin as ``<stem>-metal<suffix>``.  A CUDA process
+under ``GPUWM_WRF_EXACT=1`` compiles the WRF-exact sources without
+contraction; its words are recorded as ``<stem>-wrf-exact<suffix>``.
 
 There is no fallback that loosens a gate: a backend without its own file is
 held to the CUDA pin, and fails on any drift.
@@ -15,12 +17,16 @@ from __future__ import annotations
 from pathlib import Path
 
 METAL_SUFFIX = "-metal"
+WRF_EXACT_SUFFIX = "-wrf-exact"
 
 
 def backend_variant() -> str | None:
-    """The pin variant of the active kernel backend (None for CUDA)."""
+    """The pin variant of the active kernel backend (None for default CUDA)."""
     from woof import backend
-    return "metal" if backend.active() == "mlx" else None
+    if backend.active() == "mlx":
+        return "metal"
+    from woof.wrf_exact import ENABLED
+    return "wrf-exact" if ENABLED else None
 
 
 def variant_path(path: Path, variant: str) -> Path:

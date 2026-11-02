@@ -53,9 +53,20 @@ def run_regime(cols_dir: Path, meta: dict, name: str) -> dict:
     for q, on in present.items():
         setattr(state, q, grid3(g[q]) if on else None)
     hc, hi, hs = r["has_req"]
-    state.effc = grid3(g["effc"]) if hc else None
-    state.effi = grid3(g["effi"]) if hi else None
-    state.effs = grid3(g["effs"]) if hs else None
+    from woof.wrf_exact import ENABLED as strict
+
+    def radius(um):
+        # The wrapper reads make_columns' metre word.  The default adapter
+        # derives that word from microns itself; the strict route reads the
+        # state's micron word unchanged, which a strict microphysics port
+        # stores as WRF's metre word times 1.0e6f (wsm6.cu, wsm6r.cu).
+        if not strict:
+            return grid3(um)
+        meters = (np.asarray(um, F) * F(1.0e-6)).astype(F)
+        return grid3((meters * F(1.0e6)).astype(F))
+    state.effc = radius(g["effc"]) if hc else None
+    state.effi = radius(g["effi"]) if hi else None
+    state.effs = radius(g["effs"]) if hs else None
     if r["aer_opt"] == 3:
         state.nwfa = grid3(g["nwfa"])
         state.nifa = grid3(g["nifa"])

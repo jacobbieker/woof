@@ -110,6 +110,7 @@ WOOF_F2(hypot) WOOF_F2(fdim) WOOF_F2(remainder)
 float nextafterf(float, float); double nextafter(double, double);
 float fmaf(float, float, float); double fma(double, double, double); float fma(float, float, float);
 float ldexpf(float, int); double ldexp(double, int); float ldexp(float, int);
+float scalbnf(float, int);
 float frexpf(float, int*); double frexp(double, int*);
 float modff(float, float*); double modf(double, double*);
 void sincosf(float, float*, float*); void sincos(double, double*, double*);

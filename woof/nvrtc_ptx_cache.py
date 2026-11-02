@@ -272,6 +272,10 @@ def compile_using_nvrtc(source, options=(), arch=None, filename="kern.cu",
     if backend.active() != "cuda":
         # woof's facade backends: an image naming the source, which
         # cupy.cuda.function.Module().load translates (woof.backend.facade.cuda)
+        # or builds for the host (woof.backend.hostfacade.cuda)
+        if backend.active() == "host":
+            from woof.backend.hostfacade.cuda import host_image
+            return host_image(source, tuple(options or ()), filename), ""
         from woof.backend.facade.cuda import translated_image
         return translated_image(source, tuple(options or ()), filename), ""
     cupy, compiler = _compiler_runtime()

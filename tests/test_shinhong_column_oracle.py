@@ -63,6 +63,12 @@ OOB_COLUMNS = tuple(range(840, 846))
 
 #: NaN lanes WRF writes in the probe columns, per field, every build.
 WRF_NAN_LANES = {"dtheta": 700, "exch_h": 259}
+#: Of those, the lanes whose NaN payload is not WRF's, per backend.  CUDA's
+#: canonical NaN differs from x86's on every one.  On Metal, dtheta's NaNs
+#: carry x86's payload and exch_h's do not (measured on an M3 Max, both
+#: arithmetic modes); payloads are a recorded MLX difference
+#: (docs/dev/mlx-backend.md).
+NAN_PAYLOAD_LANES = {"cuda": WRF_NAN_LANES, "mlx": {"exch_h": 259}}
 #: tke lanes in the probe columns where the scheme's amax1(q2xk, epsq2l)
 #: (:1602) meets a NaN.  Fortran leaves MAX of a NaN processor dependent:
 #: WRF's optimised builds (maxss) return epsq2l, so tke = 0.005, while -O0
@@ -223,6 +229,11 @@ def _strict() -> bool:
 
 @pytest.mark.gpu
 @requires_gpu
+def _payload_lanes():
+    from woof import backend
+    return NAN_PAYLOAD_LANES["mlx" if backend.active() == "mlx" else "cuda"]
+
+
 def test_the_kernel_is_wrf_word_for_word_on_every_arithmetic_lane():
     import cupy  # noqa: F401
 
@@ -239,7 +250,7 @@ def test_the_kernel_is_wrf_word_for_word_on_every_arithmetic_lane():
         geo = st.nan_geometry_mismatch
         expect_geo = TKE_MAX_NAN_LANES if name == "tke" else 0
         assert geo == expect_geo, (name, st.as_dict())
-        assert nan_pay == WRF_NAN_LANES.get(name, 0), (name, st.as_dict())
+        assert nan_pay == _payload_lanes().get(name, 0), (name, st.as_dict())
         arithmetic = st.differing - nan_pay - geo
         assert (arithmetic, st.ftz_lanes, st.max_ulp_outside_ftz) == (
             flush.get(name, (0, 0, 0))), (name, st.as_dict())

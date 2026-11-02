@@ -333,10 +333,33 @@ extern "C" __global__ void oracle_pdmp_words(
     return cp.asnumpy(output)
 
 
+def _strict_theta_words(state, metadata):
+    """A strict state's acoustic theta carriers hold WRF's t_2 words.
+
+    make_vertical_state builds the full-theta increments a default state
+    carries; a GPUWM_WRF_EXACT state stores WRF's coupled perturbation
+    (``t_2 = th'' - c1h*mu''*t0``), exactly the words measure_vertical_case
+    hands the compiled routine as t_2 and t_2ave.  No-op in a default process.
+    """
+    from woof.wrf_exact import ENABLED
+    if not ENABLED:
+        return state
+    import cupy as cp
+    nz, ny, nx = state.th_pp.shape
+    c1h = _host(state, "c1h")[:nz, None, None]
+    theta_offset = np.float32(metadata.get("theta_offset", 300.0))
+    old_th = state.scratch((nz, ny, nx), "acoustic_th_pp_old")
+    old_mu = cp.asnumpy(state.scratch((ny, nx), "acoustic_mu_pp_old"))
+    state.th_pp[...] = cp.asarray(_host(state, "th_pp") - (c1h * _host(state, "mu_pp")) * theta_offset)
+    old_th[...] = cp.asarray(cp.asnumpy(old_th) - (c1h * old_mu) * theta_offset)
+    return state
+
+
 def vertical_port_outputs(raw, metadata, *, reference_inputs=None):
     """Run the native path against packaged reference arrays, without Fortran."""
     import cupy as cp
     s, cfg = make_vertical_state(raw, metadata)
+    _strict_theta_words(s, metadata)
     dtau = float(metadata.get("dtau", 0.5))
     coefficients, _ = _vertical_coefficients(s, cfg, raw, metadata)
     selected_vertical_launch(s, cfg, dtau, coefficients)
@@ -346,12 +369,14 @@ def vertical_port_outputs(raw, metadata, *, reference_inputs=None):
     c1h = _host(witness, "c1h")[:cfg.nz, None, None]
     theta_offset = np.float32(metadata.get("theta_offset", 300.0))
     t2 = cp.asarray(old_th - (c1h * old_mu) * theta_offset)
+    _strict_theta_words(witness, metadata)
     mu = cp.zeros((2, cfg.ny, cfg.nx), dtype=cp.float32)
     selected_vertical_launch(witness, witness_cfg, dtau, coefficients, workspace=(t2, mu))
     for name in ("w_pp", "ph_pp", "p_pp", "al_pp"):
         if _measure(_host(witness, name), _host(s, name))["differing_words"]:
             raise RuntimeError(f"workspace witness altered native {name}")
     diagnosis, diagnosis_cfg = make_vertical_state(raw, metadata)
+    _strict_theta_words(diagnosis, metadata)
     diagnosis_cfg = replace(diagnosis_cfg, top_lid=False, damp_opt=0)
     selected_vertical_launch(diagnosis, diagnosis_cfg, 0.0, coefficients)
     mask = np.ones((cfg.ny, cfg.nx), dtype=bool)

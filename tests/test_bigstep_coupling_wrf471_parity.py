@@ -15,6 +15,8 @@ from conftest import requires_gpu
 from woof.verify.bigstep_coupling_oracle import (ORACLE_DIR, CASE_NAMES,
     coupling_cases, load_coupling_oracle, coupling_port_outputs,
     coupling_wrf_flux_trace, coupling_php_order_trace, word_measurement)
+from woof.verify.platform_pins import pin_path
+from woof.wrf_exact import ENABLED as WRF_EXACT
 
 
 def test_coupling_fixture_words_and_fortran_pin():
@@ -47,7 +49,7 @@ def reference():
 
 @pytest.fixture(scope="module")
 def baseline():
-    return json.loads((ORACLE_DIR/"coupling-baseline.json").read_text())
+    return json.loads(pin_path(ORACLE_DIR/"coupling-baseline.json").read_text())
 
 
 def assert_words_equal(a,b):
@@ -83,7 +85,8 @@ def test_calc_mu_uv_against_compiled_wrf(name,results,reference,baseline):
         actual,expected=results[name][key],reference[name+"/"+key]
         measured=word_measurement(actual,expected)
         assert measured==baseline[name][key]
-        assert measured["max_ulp"]==(1 if name=="mass_perturbation" else 0)
+        # The WRF-exact build sums the face mass in WRF's order (no ULP).
+        assert measured["max_ulp"]==(1 if name=="mass_perturbation" and not WRF_EXACT else 0)
 
 
 @pytest.mark.gpu
@@ -92,7 +95,10 @@ def test_calc_mu_uv_against_compiled_wrf(name,results,reference,baseline):
 def test_calc_ww_cp_against_compiled_wrf(name,results,reference,baseline):
     # Direct division in the port versus WRF's stored reciprocal multiply
     # changes a flux's last bit; cancellation amplifies its relative ULPs.
+    # The WRF-exact build multiplies by the stored reciprocal: every word.
     assert word_measurement(results[name]["ww"],reference[name+"/ww"])==baseline[name]["ww"]
+    if WRF_EXACT:
+        assert_words_equal(results[name]["ww"],reference[name+"/ww"])
 
 
 @pytest.mark.gpu
@@ -118,7 +124,9 @@ def test_calc_php_fused_consumer_against_compiled_wrf(name,results,reference,bas
     for key in ("php_ru","php_rv"):
         actual,expected=results[name][key],reference[name+"/"+key]
         assert word_measurement(actual,expected)==baseline[name][key]
-        assert_words_equal(actual,trace[key])
+        # The WRF-exact build rounds the full half-level geopotential first,
+        # as WRF does, so its words are WRF's rather than the fused trace's.
+        assert_words_equal(actual,expected if WRF_EXACT else trace[key])
 
 
 @pytest.mark.gpu
