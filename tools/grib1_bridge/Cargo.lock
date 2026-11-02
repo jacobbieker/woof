@@ -149,6 +149,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "glibc239-libm"
+version = "0.1.0"
+
+[[package]]
 name = "grib-core"
 version = "0.1.0"
 dependencies = [
@@ -163,10 +167,12 @@ name = "grib1_bridge"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "glibc239-libm",
  "grib-core",
  "libm",
  "miniz_oxide",
  "rayon",
+ "rw-libm",
  "sha2",
 ]
 
@@ -271,6 +277,10 @@ dependencies = [
  "crossbeam-deque",
  "crossbeam-utils",
 ]
+
+[[package]]
+name = "rw-libm"
+version = "0.1.0"
 
 [[package]]
 name = "sha2"

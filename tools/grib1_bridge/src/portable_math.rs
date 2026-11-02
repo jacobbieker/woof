@@ -19,6 +19,8 @@
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
+use glibc239_libm as glibc239;
+
 use crate::{ERR_DIMENSION, ERR_NULL, ERR_PANIC, OK};
 
 /// Unary operation codes, shared with `gpuwm/core/portable_math.py`.
@@ -36,46 +38,39 @@ pub const UNARY_ACOS: u32 = 9;
 pub const BINARY_POW: u32 = 0;
 pub const BINARY_ATAN2: u32 = 1;
 
-// Separate host-libm entries preserve gpuwm.core.host_libm's existing
-// contract. They must never replace the portable musl entries above.
-// This is the same C ABI used by water_blend::python_square and CPython
-// math. A black-box exponent prevents LLVM from replacing pow(x, 2)
-// with multiplication, which is a different last bit for some x.
-extern "C" {
-    #[link_name = "exp"] fn host_c_exp(x: f64) -> f64;
-    #[link_name = "log"] fn host_c_log(x: f64) -> f64;
-    #[link_name = "log10"] fn host_c_log10(x: f64) -> f64;
-    #[link_name = "tan"] fn host_c_tan(x: f64) -> f64;
-    #[link_name = "atan"] fn host_c_atan(x: f64) -> f64;
-    #[link_name = "asin"] fn host_c_asin(x: f64) -> f64;
-    #[link_name = "acos"] fn host_c_acos(x: f64) -> f64;
-    #[link_name = "atan2"] fn host_c_atan2(y: f64, x: f64) -> f64;
-    #[link_name = "pow"] fn host_c_pow(x: f64, y: f64) -> f64;
-}
-
-fn host_exp(x: f64) -> f64 { unsafe { host_c_exp(x) } }
+// Separate host-libm entries preserve gpuwm.core.host_libm's contract:
+// glibc 2.39's words (the glibc239-libm crate; the WRF references link
+// glibc 2.39), with the Python helper's domain handling, on every host.
+// They must never replace the portable musl entries above.
+fn host_exp(x: f64) -> f64 { glibc239::exp(x) }
 fn host_log(x: f64) -> f64 {
-    if x > 0.0 { unsafe { host_c_log(x) } }
+    if x > 0.0 { glibc239::log(x) }
     else if x == 0.0 { f64::NEG_INFINITY } else { f64::NAN }
 }
 fn host_log10(x: f64) -> f64 {
-    if x > 0.0 { unsafe { host_c_log10(x) } }
+    if x > 0.0 { glibc239::log10(x) }
     else if x == 0.0 { f64::NEG_INFINITY } else { f64::NAN }
 }
-fn host_tan(x: f64) -> f64 {
-    if x.is_infinite() { f64::NAN } else { unsafe { host_c_tan(x) } }
+fn host_sin(x: f64) -> f64 {
+    if x.is_infinite() { f64::NAN } else { glibc239::sin(x) }
 }
-fn host_atan(x: f64) -> f64 { unsafe { host_c_atan(x) } }
+fn host_cos(x: f64) -> f64 {
+    if x.is_infinite() { f64::NAN } else { glibc239::cos(x) }
+}
+fn host_tan(x: f64) -> f64 {
+    if x.is_infinite() { f64::NAN } else { glibc239::tan(x) }
+}
+fn host_atan(x: f64) -> f64 { glibc239::atan(x) }
 fn host_asin(x: f64) -> f64 {
-    if (-1.0..=1.0).contains(&x) { unsafe { host_c_asin(x) } } else { f64::NAN }
+    if (-1.0..=1.0).contains(&x) { glibc239::asin(x) } else { f64::NAN }
 }
 fn host_acos(x: f64) -> f64 {
-    if (-1.0..=1.0).contains(&x) { unsafe { host_c_acos(x) } } else { f64::NAN }
+    if (-1.0..=1.0).contains(&x) { glibc239::acos(x) } else { f64::NAN }
 }
 fn host_atan2(y: f64, x: f64) -> f64 {
     // CPython 3.14's math.atan2 (pixi pins 3.14) propagates a NaN operand,
     // quieted, and x's when both are NaN -- what x + y gives.
-    if y.is_nan() || x.is_nan() { x + y } else { unsafe { host_c_atan2(y, x) } }
+    if y.is_nan() || x.is_nan() { x + y } else { glibc239::atan2(y, x) }
 }
 pub(crate) fn host_pow(x: f64, y: f64) -> f64 {
     // CPython handles NaN operands before the C call. Preserve their
@@ -88,12 +83,13 @@ pub(crate) fn host_pow(x: f64, y: f64) -> f64 {
     if x < 0.0 && x.is_finite() && y.is_finite() && y.trunc() != y {
         return f64::NAN;
     }
-    unsafe { host_c_pow(x, std::hint::black_box(y)) }
+    glibc239::pow(x, y)
 }
 
 fn host_unary_f64(op: u32) -> Option<fn(f64) -> f64> {
     Some(match op {
         UNARY_EXP => host_exp, UNARY_LOG => host_log, UNARY_LOG10 => host_log10,
+        UNARY_SIN => host_sin, UNARY_COS => host_cos,
         UNARY_TAN => host_tan, UNARY_ATAN => host_atan,
         UNARY_ASIN => host_asin, UNARY_ACOS => host_acos,
         _ => return None,
@@ -367,7 +363,7 @@ pub unsafe extern "C" fn gpuwm_portable_binary_f32(
     .unwrap_or(ERR_PANIC)
 }
 
-/// Host C-library unary math with the existing Python helper's domains.
+/// glibc 2.39 unary math with the existing Python helper's domains.
 ///
 /// # Safety
 /// As [`gpuwm_portable_unary_f64`]. The host and portable ABIs are separate.
@@ -385,7 +381,7 @@ pub unsafe extern "C" fn gpuwm_host_unary_f64(
     })).unwrap_or(ERR_PANIC)
 }
 
-/// Host C-library binary math with the existing Python helper's domains.
+/// glibc 2.39 binary math with the existing Python helper's domains.
 ///
 /// # Safety
 /// As [`gpuwm_portable_binary_f64`]. The host and portable ABIs are separate.
@@ -404,6 +400,37 @@ pub unsafe extern "C" fn gpuwm_host_binary_f64(
         binary(function, (left, left_length), (right, right_length), output, length, workers);
         OK
     })).unwrap_or(ERR_PANIC)
+}
+
+/// Scalar glibc 2.39 words for code that is not elementwise over arrays:
+/// the host builds of the reference mirrors (tools/fast_sbm_host, the WDM6
+/// CPU mirror) bind these through function pointers in place of the
+/// platform C library, and so do the scalar Python references.  No domain
+/// handling: these are the C functions' values.  The binary32 functions are
+/// rw-libm's transcriptions of the Arm code glibc 2.39 runs for them, which
+/// equal glibc 2.39's words on every argument.
+macro_rules! glibc239_scalar {
+    ($($name:ident: $function:path, ($($arg:ident),+): $ty:ty;)+) => {$(
+        #[no_mangle]
+        pub extern "C" fn $name($($arg: $ty),+) -> $ty { $function($($arg),+) }
+    )+};
+}
+
+glibc239_scalar! {
+    gpuwm_glibc239_exp: glibc239::exp, (x): f64;
+    gpuwm_glibc239_log: glibc239::log, (x): f64;
+    gpuwm_glibc239_log10: glibc239::log10, (x): f64;
+    gpuwm_glibc239_sin: glibc239::sin, (x): f64;
+    gpuwm_glibc239_cos: glibc239::cos, (x): f64;
+    gpuwm_glibc239_tan: glibc239::tan, (x): f64;
+    gpuwm_glibc239_atan: glibc239::atan, (x): f64;
+    gpuwm_glibc239_asin: glibc239::asin, (x): f64;
+    gpuwm_glibc239_acos: glibc239::acos, (x): f64;
+    gpuwm_glibc239_atan2: glibc239::atan2, (y, x): f64;
+    gpuwm_glibc239_pow: glibc239::pow, (x, y): f64;
+    gpuwm_glibc239_expf: rw_libm::expf, (x): f32;
+    gpuwm_glibc239_logf: rw_libm::logf, (x): f32;
+    gpuwm_glibc239_powf: rw_libm::powf, (x, y): f32;
 }
 
 #[cfg(test)]

@@ -26,6 +26,12 @@ grib-core = { path = "vendor/grib-core", default-features = false, features = ["
 # A pure Rust port of musl's libm, for the portable transcendentals in
 # src/portable_math.rs: the same bits on every CPU and C library.
 libm = "0.2.16"
+# glibc 2.39's words for the host-math entries in src/portable_math.rs:
+# its binary64 functions (first-party transcription, LGPL-2.1-or-later in
+# part; see the crate and NOTICE) and its binary32 expf, logf and powf
+# (Arm optimized-routines, MIT, which rw-libm transcribes).
+glibc239-libm = { path = "../rustwx/crates/glibc239-libm" }
+rw-libm = { path = "../rustwx/crates/rw-libm" }
 # Inflates the IMS snow and ice product (src/ims_snow_ice.rs).  The same
 # versions rw_wps vendors, copied unchanged with their checksums.
 miniz_oxide = "0.8.9"
