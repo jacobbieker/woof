@@ -689,7 +689,8 @@ def test_p3_refuses_by_name_rather_than_being_absent_from_the_gate():
     from woof.core.refl import REFL_10CM_INPUT_SPECIES
     # 96 (MAD-WRF passive hydrometeors, 61107f3fe) dispatches Kessler's
     # rain-only form on its never-written qr: the clear-air floor.
-    assert set(REFL_10CM_INPUT_SPECIES) == {1, 2, 3, 4, 6, 8, 10, 16, 28, 96, 106}
+    # 40 (Morrison with CESM aerosol): Morrison's row.
+    assert set(REFL_10CM_INPUT_SPECIES) == {1, 2, 3, 4, 6, 8, 10, 16, 28, 40, 96, 106}
     import woof.core.refl as refl_module
     source = Path(refl_module.__file__).read_text(encoding="utf-8")
     assert "cfg.mp_physics not in REFL_10CM_INPUT_SPECIES" in source

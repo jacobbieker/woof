@@ -105,7 +105,7 @@ verdict. `docs/public/receipts/physics-composition-walk.json` is that
 record, and `tests/test_physics_composition_walk.py` regenerates it on
 every release cut and compares it byte for byte. As measured:
 
-- **6777 of 24717 admission attempts are accepted**, covering **6769 distinct
+- **6811 of 24752 admission attempts are accepted**, covering **6803 distinct
   accepted suites**, against 37 registered templates. The presets are a
   corner of the space, not the space.
 - **Every accepted run keeps every switch the file set**, checked
@@ -115,7 +115,7 @@ every release cut and compares it byte for byte. As measured:
   no exceptions left. `ra_lw_physics = 1` (WRF RRTM longwave) was the
   last one; 1.9 ports it, and it now reaches 1230 distinct accepted suites,
   including 233 paired with Dudhia shortwave.
-- **17940 refusals fall into 22 distinct rules**, every one of which
+- **17941 refusals fall into 22 distinct rules**, every one of which
   names the selector to change, and each of which has a
   demonstrated remedy -- the receipt carries a before/after pair per
   rule showing that doing what the message says reaches an accepted
@@ -1354,12 +1354,12 @@ why these pairings are refused:
 ```
 
 The MYNN *PBL* carries no such restriction: 5/91, 5/1 and 5/5 are all
-accepted -- **300, 300 and 422 distinct accepted combinations**
+accepted -- **300, 300 and 429 distinct accepted combinations**
 respectively, counted from the walk receipt's `accepted_combinations`.
 Which field is counted matters, so it is said rather than left to be
-inferred: `mynn_slice.accepted` in the same receipt reads **423** for
+inferred: `mynn_slice.accepted` in the same receipt reads **430** for
 the 5/5 pairing because that field counts ATTEMPTS, and the walk
-re-tries its 5/5 anchor suite in a second tier -- 423 attempts over 422
+re-tries its 5/5 anchor suite in a second tier -- 430 attempts over 429
 distinct configurations. Distinct configurations are what a reader
 asking "what may I compose?" wants, so that is what the three numbers
 above are. Earlier revisions of this page described the 5/5 pairing as
@@ -1404,7 +1404,7 @@ calls (`tests/test_sfclayrev_nonfinite.py`,
 All four run. In plain words: `template` means **a preset exists**, and
 `component-override` means **a preset exists** on the routes that
 declare it and you **type it in your config** anywhere else -- which is
-how the revised MM5 row's 2444 distinct accepted combinations were measured.
+how the revised MM5 row's 2458 distinct accepted combinations were measured.
 Maturity and reachability are separate registry axes, quoted verbatim
 from the registry: `maturity` is the option's evidence tier and
 `reachability.state` is how a NAMED route can offer it. Neither column
