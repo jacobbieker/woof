@@ -71,6 +71,7 @@ def _words(a):
 @wrf_exact_process
 def test_exner_power_matches_cuda_words():
     """(p/P0)**RCP on the oracle's pressures gives the CUDA adapter's pii."""
+    import woof  # noqa: F401  (the backend and strict options before CuPy)
     import cupy as cp
 
     from woof.core import constants as c
@@ -86,9 +87,8 @@ def test_exner_power_matches_cuda_words():
 @wrf_exact_process
 def test_power_matches_cuda_powf_words():
     """Rows of CuPy's powf words, subnormal and special cases among them."""
+    import woof  # noqa: F401  (the backend and strict options before CuPy)
     import cupy as cp
-
-    import woof  # noqa: F401  (strict NVRTC options for CuPy's own kernels)
 
     table = np.array(_CUDA_WORDS, dtype=np.uint32)
     x, y = table[:, 0].view(np.float32), table[:, 1].view(np.float32)
