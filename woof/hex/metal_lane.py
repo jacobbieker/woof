@@ -33,6 +33,10 @@ three module globals of the hex runtime instead of editing them.
   source and options.
 * the facade's ``nvrtc.getSupportedArchs`` (absent from the facade) reports
   the one architecture the translator stands in for.
+* the MPAS_to_physics preparation unit (``cuda_physics_prep_v841``) is
+  translated without contraction in fast numerics too: its validator
+  recomputes the producers' words, and Metal's ``fp contract(fast)`` may
+  fuse the producer and the checker differently.
 """
 
 from __future__ import annotations
@@ -167,6 +171,13 @@ def install() -> bool:
         return module, evidence
 
     regional._direct_regional_module = direct_regional_module
+
+    # MPAS_to_physics preparation: validate_prep_v841_f32 recomputes the
+    # producers' fields and compares words, which holds on Metal only when
+    # neither side contracts (loader.uncontracted_source).
+    from woof.backend.metal import loader
+    from . import cuda_physics_prep_v841 as prep
+    loader.uncontracted_source(prep._CUDA_SOURCE)
     _INSTALLED = True
     return True
 

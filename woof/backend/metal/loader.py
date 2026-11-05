@@ -350,7 +350,29 @@ class MetalModule:
         return None
 
 
-def contracts(options) -> bool:
+#: SHA-256 digests of CUDA sources whose Metal translation never contracts
+#: (:func:`uncontracted_source`).
+_UNCONTRACTED_SOURCES: set[str] = set()
+
+
+def _source_digest(source: str) -> str:
+    import hashlib
+    return hashlib.sha256(source.encode("utf-8")).hexdigest()
+
+
+def uncontracted_source(source: str) -> None:
+    """Translate ``source`` without contraction in every mode.
+
+    For a unit whose kernels check each other's words: one kernel recomputes
+    what another wrote and compares bits (hex's MPAS_to_physics preparation,
+    ``validate_prep_v841_f32``).  NVRTC fuses the same expression the same
+    way in both kernels.  Metal's ``fp contract(fast)`` lets the backend
+    choose per site, so the producer and the checker can round differently.
+    With no contraction both sides round every operation as written."""
+    _UNCONTRACTED_SOURCES.add(_source_digest(source))
+
+
+def contracts(options, source: str | None = None) -> bool:
     """Whether a unit's Metal translation may contract multiply-adds.
 
     ``fast`` numerics: as NVRTC would after woof.numerics' compile boundary
@@ -358,9 +380,12 @@ def contracts(options) -> bool:
     ``strict``: never.  NVRTC's own contraction choices cannot be reproduced
     on Metal, so strict Metal keeps every operation rounded as written --
     the host tier's ``-ffp-contract=off`` and gfortran -O0's arithmetic.
+    A source registered with :func:`uncontracted_source`: never.
     """
     from woof import numerics
     if numerics.is_strict():
+        return False
+    if source is not None and _UNCONTRACTED_SOURCES and _source_digest(source) in _UNCONTRACTED_SOURCES:
         return False
     effective = numerics.effective_options(tuple(options or ()))
     return not any(o in ("--fmad=false", "-fmad=false") for o in effective)
@@ -395,7 +420,7 @@ def translate_unit(name: str, source: str, *, options=()) -> TranslatedUnit:
     from woof import numerics
     from woof.backend.translate import option_defines, option_include_dirs
     effective = numerics.effective_options(tuple(options or ()))
-    return _translated(source, name, contracts(options), retains_subnormals(name, source, options),
+    return _translated(source, name, contracts(options, source), retains_subnormals(name, source, options),
                        option_defines(effective), option_include_dirs(effective))
 
 

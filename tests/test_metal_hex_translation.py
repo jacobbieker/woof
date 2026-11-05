@@ -294,3 +294,47 @@ def test_a_second_jump_from_inside_the_retry_loop_is_refused():
     assert "goto label_100; }\n    visits" in _ENTRY_FROM_INSIDE
     with pytest.raises(TranslationError, match="goto"):
         translate(_ENTRY_FROM_INSIDE, unit="entry_from_inside")
+
+
+_CHECKED = r'''
+extern "C" __global__ void produce(const float* a, const float* b, float* y, int n) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) y[i] = a[i] * b[i] + b[i] * a[i + 1];
+}
+'''
+
+
+@pytest.fixture
+def fast(monkeypatch):
+    """Fast numerics for this test (the battery runs strict)."""
+    from woof import numerics
+    monkeypatch.setattr(numerics, "_mode", "fast")
+
+
+def test_a_registered_source_never_contracts(fast):
+    """A unit whose kernels compare each other's words translates without
+    contraction in fast numerics too; any other unit still contracts."""
+    from woof.backend.metal import loader
+    fast = ("--std=c++17", "--fmad=true")
+    other = _CHECKED.replace("produce", "produce_other")
+    assert loader.contracts(fast, _CHECKED) and loader.contracts(fast, other)
+    assert "fp contract(fast)" in loader.translate_unit("checked", _CHECKED, options=fast).msl
+    loader.uncontracted_source(_CHECKED)
+    assert not loader.contracts(fast, _CHECKED)
+    assert loader.contracts(fast, other)
+    assert "fp contract(fast)" not in loader.translate_unit("checked", _CHECKED, options=fast).msl
+
+
+def test_the_hex_lane_prepares_mpas_to_physics_uncontracted(cp, fast, monkeypatch):
+    """validate_prep_v841_f32 recomputes the preparation's words and compares
+    them.  Metal's contract(fast) fused the producer and the checker
+    differently on a real HRRR start, and every fast run refused at step 0."""
+    from woof.backend.metal import loader
+    from woof.hex import metal_lane
+    from woof.hex import numerics as hex_numerics
+    from woof.hex.cuda_physics_prep_v841 import _CUDA_SOURCE
+    monkeypatch.setenv("WOOF_HEX_METAL", "1")
+    assert metal_lane.install()
+    options = hex_numerics.FAST_KERNEL_BASE
+    assert not loader.contracts(options, _CUDA_SOURCE)
+    assert "fp contract(fast)" not in loader.translate_unit("prep", _CUDA_SOURCE, options=options).msl
