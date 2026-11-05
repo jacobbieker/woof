@@ -641,6 +641,9 @@ class _Rewriter:
         self._kernel_cursors = self._kernels(top)
         self.generic_structs = self._space_generic_structs(top)
         self.spaces = SpaceAnalysis(self)
+        # a field given constant data anywhere (the probe saw every function)
+        # is constant before the first call passes it on
+        self.spaces.field_spaces.update(self._constant_fields)
         self.spaces.collect(top)
         self.spaces.run(self._kernel_cursors)
         self.eliminate_gotos()
@@ -676,6 +679,7 @@ class _Rewriter:
         templated on the space of their data (generic_struct)."""
         from woof.backend.translate.spaces import SpaceAnalysis
         self.generic_structs = set()
+        self._constant_fields = {}
         self._probing_fields = True
         try:
             probe = self.spaces = SpaceAnalysis(self)
@@ -686,6 +690,8 @@ class _Rewriter:
         finally:
             self._probing_fields = False
             self.spaces = None
+        self._constant_fields = {key: set(spaces) for key, spaces in probe.field_spaces.items()
+                                 if spaces == {"constant"}}
         return {owner for (owner, _field), spaces in probe.field_spaces.items() if len(spaces) > 1}
 
     def visit_top(self, cursor):
@@ -2115,6 +2121,9 @@ class _Rewriter:
             return                      # (class templates: their members stay folded)
         if any(c.kind.name.startswith("TEMPLATE") for c in owner.get_children()):
             return
+        first = next(owner.get_tokens(), None)
+        if first is not None and first.spelling == "template":
+            return                      # an explicit specialization (``template<> struct S<int>``): folded too
         end = self._statement_end(owner)
         spelled = self._spell_type(member.type, drop_const=True)
         self.edits.insert(end, f"\nconstant constexpr {spelled} {owner.spelling}::{member.spelling};",
@@ -2513,6 +2522,8 @@ class _Rewriter:
                 self.flushing_negation(node)
             if kind == K.CONDITIONAL_OPERATOR and _is_float(node.type):
                 self.select_minmax(node)
+            if kind == K.CXX_STATIC_CAST_EXPR:
+                self.volatile_load(node)
             if kind == K.UNARY_OPERATOR and _is_double(node.type):
                 inner = list(node.get_children())
                 toks = [t.spelling for t in node.get_tokens()]
@@ -2641,6 +2652,34 @@ class _Rewriter:
         self.edits.replace(s, ys, f"__woof_sel{kind}(")
         self.edits.replace(ye, ns, ", ")
         self.edits.replace(ne, e, ")")
+
+    def volatile_load(self, node):
+        """``static_cast<volatile T&>(x)`` read as a value (convective_rrfs
+        keeps a load from sinking this way): MSL's reference cast must name
+        x's address space, which a by-value accessor's ``operator[]`` in a
+        template does not tell; ``__woof_vload(x)`` finds it by overload and
+        loads through a volatile pointer.  A write through the cast is
+        refused."""
+        toks = list(node.get_tokens())
+        spelled = [t.spelling for t in toks]
+        if len(spelled) < 5 or spelled[0] != "static_cast" or spelled[1] != "<":
+            return
+        depth = 0
+        for close, t in enumerate(spelled):
+            depth += t == "<"
+            depth -= t == ">"
+            if depth == 0 and close > 1:
+                break
+        target = spelled[2:close]
+        if not target or target[-1] != "&" or "volatile" not in target or close + 1 >= len(toks) \
+                or spelled[close + 1] != "(":
+            return
+        after = self.tu.get_tokens(extent=self.tu.get_extent(
+            "unit.cpp", (toks[-1].extent.end.offset, toks[-1].extent.end.offset + 3)))
+        following = next(iter(after), None)
+        if following is not None and following.spelling in ("=", "+=", "-=", "*=", "/=", "++", "--"):
+            self.refuse(node, "a write through static_cast<volatile T&> has no Metal spelling")
+        self.edits.replace(toks[0].extent.start.offset, toks[close + 1].extent.end.offset, "__woof_vload(")
 
     def flushing_negation(self, node):
         """``-x`` on a binary32 value in a -ftz=true unit: CUDA's neg.ftz

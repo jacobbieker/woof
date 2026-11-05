@@ -125,7 +125,10 @@ __device__ inline complex<float> sqrt(const complex<float>& z) {
   const float THRESH = 1.40949553037932e+38f;
 
   /* Handle special cases. */
-  if (z == 0.0f) return (complex<float>(0, b));
+  // z == 0.0f and result * 2.0f, spelled out (complex_inl.h's operator==,
+  // arithmetic.h's scalar product): in a unit that keeps subnormals float
+  // is f32s, and a float literal does not deduce the template's T.
+  if (z.real() == 0.0f && z.imag() == 0.0f) return (complex<float>(0, b));
   if (isinf(b)) return (complex<float>(__int_as_float(0x7f800000), b));
   if (isnan(a)) {
     t = (b - b) / (b - b);         /* raise invalid if b is not a NaN */
@@ -165,11 +168,184 @@ __device__ inline complex<float> sqrt(const complex<float>& z) {
 
   /* Rescale. */
   if (scale == 1)
-    return (result * 2.0f);
+    return (complex<float>(result.real() * 2.0f, result.imag() * 2.0f));
   else if (scale == 2)
-    return (result * 0.5f);
+    return (complex<float>(result.real() * 0.5f, result.imag() * 0.5f));
   else
     return (result);
+}
+
+// binary64: arithmetic.h's abs, arg and norm; csqrt.h; clog.h (FreeBSD msun's
+// clog by Stephen Montgomery-Smith, Copyright (c) 2012, BSD 2-Clause, under
+// the notice above).
+__device__ inline double abs(const complex<double>& z) { return ::hypot(z.real(), z.imag()); }
+__device__ inline double arg(const complex<double>& z) { return ::atan2(z.imag(), z.real()); }
+__device__ inline double norm(const complex<double>& z) {
+  if (::fabs(z.real()) < ::sqrt(2.2250738585072014e-308) && ::fabs(z.imag()) < ::sqrt(2.2250738585072014e-308)) {
+    double a = z.real() * 4.0;
+    double b = z.imag() * 4.0;
+    return (a * a + b * b) / 16.0;
+  }
+  return z.real() * z.real() + z.imag() * z.imag();
+}
+
+__device__ inline complex<double> sqrt(const complex<double>& z) {
+  complex<double> result;
+  double a, b;
+  double t;
+  int scale;
+
+  /* We risk spurious overflow for components >= DBL_MAX / (1 + ::sqrt(2)). */
+  const double THRESH = 7.446288774449766337959726e+307;
+
+  a = z.real();
+  b = z.imag();
+
+  /* Handle special cases. */
+  if (a == 0.0 && b == 0.0) return (complex<double>(0.0, b));
+  if (isinf(b)) return (complex<double>(__longlong_as_double(0x7ff0000000000000LL), b));
+  if (isnan(a)) {
+    t = (b - b) / (b - b);          /* raise invalid if b is not a NaN */
+    return (complex<double>(a, t)); /* return NaN + NaN i */
+  }
+  if (isinf(a)) {
+    if (signbit(a))
+      return (complex<double>(::fabs(b - b), ::copysign(a, b)));
+    else
+      return (complex<double>(a, ::copysign(b - b, b)));
+  }
+
+  // DBL_MIN*2
+  const double low_thresh = 4.450147717014402766180465e-308;
+  scale = 0;
+
+  if (::fabs(a) >= THRESH || ::fabs(b) >= THRESH) {
+    /* Scale to avoid overflow. */
+    a *= 0.25;
+    b *= 0.25;
+    scale = 1;
+  } else if (::fabs(a) <= low_thresh && ::fabs(b) <= low_thresh) {
+    /* Scale to avoid underflow. */
+    a *= 4.0;
+    b *= 4.0;
+    scale = 2;
+  }
+
+  /* Algorithm 312, CACM vol 10, Oct 1967. */
+  if (a >= 0.0) {
+    t = ::sqrt((a + ::hypot(a, b)) * 0.5);
+    result = complex<double>(t, b / (2 * t));
+  } else {
+    t = ::sqrt((-a + ::hypot(a, b)) * 0.5);
+    result = complex<double>(::fabs(b) / (2 * t), ::copysign(t, b));
+  }
+
+  /* Rescale. */
+  if (scale == 1)
+    return (complex<double>(result.real() * 2.0, result.imag() * 2.0));
+  else if (scale == 2)
+    return (complex<double>(result.real() * 0.5, result.imag() * 0.5));
+  else
+    return (result);
+}
+
+/* round down to 18 = 54/3 bits */
+__device__ inline double __woof_clog_trim(double x) {
+  unsigned long long w = (unsigned long long)__double_as_longlong(x);
+  return __longlong_as_double((long long)(w & 0xfffffff800000000ULL));
+}
+
+__device__ inline complex<double> log(const complex<double>& z) {
+  // Adapted from FreeBSDs msun
+  double x, y;
+  double ax, ay;
+  double x0, y0, x1, y1, x2, y2, t, hm1;
+  double val[12];
+  int i, sorted;
+  const double e = 2.7182818284590452354;
+
+  x = z.real();
+  y = z.imag();
+
+  /* Handle NaNs using the general formula to mix them right. */
+  if (x != x || y != y) {
+    return (complex<double>(::log(norm(z)), ::atan2(y, x)));
+  }
+
+  ax = ::fabs(x);
+  ay = ::fabs(y);
+  if (ax < ay) {
+    t = ax;
+    ax = ay;
+    ay = t;
+  }
+
+  if (ay > 5e307) {
+    return (complex<double>(::log(::hypot(x / e, y / e)) + 1.0, ::atan2(y, x)));
+  }
+  if (ax == 1.) {
+    if (ay < 1e-150) {
+      return (complex<double>((ay * 0.5) * ay, ::atan2(y, x)));
+    }
+    return (complex<double>(::log1p(ay * ay) * 0.5, ::atan2(y, x)));
+  }
+
+  if (ax < 1e-50 || ay < 1e-50 || ax > 1e50 || ay > 1e50) {
+    return (complex<double>(::log(::hypot(x, y)), ::atan2(y, x)));
+  }
+
+  /* Some easy cases. */
+
+  if (ax >= 1.0) {
+    return (complex<double>(::log1p((ax - 1) * (ax + 1) + ay * ay) * 0.5,
+                            ::atan2(y, x)));
+  }
+
+  if (ax * ax + ay * ay <= 0.7) {
+    return (complex<double>(::log(ax * ax + ay * ay) * 0.5, ::atan2(y, x)));
+  }
+
+  x0 = __woof_clog_trim(ax);
+  ax = ax - x0;
+  x1 = __woof_clog_trim(ax);
+  x2 = ax - x1;
+  y0 = __woof_clog_trim(ay);
+  ay = ay - y0;
+  y1 = __woof_clog_trim(ay);
+  y2 = ay - y1;
+
+  val[0] = x0 * x0;
+  val[1] = y0 * y0;
+  val[2] = 2 * x0 * x1;
+  val[3] = 2 * y0 * y1;
+  val[4] = x1 * x1;
+  val[5] = y1 * y1;
+  val[6] = 2 * x0 * x2;
+  val[7] = 2 * y0 * y2;
+  val[8] = 2 * x1 * x2;
+  val[9] = 2 * y1 * y2;
+  val[10] = x2 * x2;
+  val[11] = y2 * y2;
+
+  /* Bubble sort. */
+
+  do {
+    sorted = 1;
+    for (i = 0; i < 11; i++) {
+      if (val[i] < val[i + 1]) {
+        sorted = 0;
+        t = val[i];
+        val[i] = val[i + 1];
+        val[i + 1] = t;
+      }
+    }
+  } while (!sorted);
+
+  hm1 = -1;
+  for (i = 0; i < 12; i++) {
+    hm1 += val[i];
+  }
+  return (complex<double>(0.5 * ::log1p(hm1), ::atan2(y, x)));
 }
 
 }  // namespace thrust

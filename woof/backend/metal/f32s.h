@@ -308,6 +308,13 @@ WOOF_F32S_VENDOR1(log10) WOOF_F32S_VENDOR1(sin) WOOF_F32S_VENDOR1(cos) WOOF_F32S
 WOOF_F32S_VENDOR1(asin) WOOF_F32S_VENDOR1(acos) WOOF_F32S_VENDOR1(atan) WOOF_F32S_VENDOR1(sinh)
 WOOF_F32S_VENDOR1(cosh) WOOF_F32S_VENDOR1(tanh)
 #undef WOOF_F32S_VENDOR1
+// a volatile load of an f32s reads its float's bits (prelude __woof_vload)
+#define WOOF_F32S_VLOAD(AS) \
+  static inline f32s __woof_vload(const AS f32s& x) { return f32s(*(const volatile AS float*)&x.v); }
+WOOF_F32S_VLOAD(thread) WOOF_F32S_VLOAD(device) WOOF_F32S_VLOAD(threadgroup)
+#undef WOOF_F32S_VLOAD
+static inline f32s __expf(f32s a) { return f32s(__expf(a.v)); }
+static inline f32s __logf(f32s a) { return f32s(__logf(a.v)); }
 static inline f32s powf(f32s a, f32s b) { return f32s(powf(a.v, b.v)); }
 static inline f32s atan2f(f32s a, f32s b) { return f32s(atan2f(a.v, b.v)); }
 static inline f32s fmodf(f32s a, f32s b) { return f32s(__woof_n(fmod(f64(a), f64(b)).b)); }

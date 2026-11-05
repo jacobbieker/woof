@@ -235,6 +235,51 @@ def test_thrust_complex_division_and_square_root(cp):
     assert got_r[3].tolist() == [0.0, 0.0]
 
 
+
+_COMPLEX64 = r"""
+#include <cupy/complex.cuh>
+extern "C" __global__ void cz(const double* a, double* l, double* r, double* m, int n) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n) return;
+    thrust::complex<double> x(a[2 * i], a[2 * i + 1]);
+    thrust::complex<double> lg = thrust::log(x), sq = thrust::sqrt(x);
+    l[2 * i] = lg.real();
+    l[2 * i + 1] = lg.imag();
+    r[2 * i] = sq.real();
+    r[2 * i + 1] = sq.imag();
+    m[i] = thrust::abs(x);
+}
+"""
+
+
+def test_thrust_binary64_complex_log_square_root_and_abs(cp):
+    """MPAS WSM6's diagnostic radar header takes Thrust's complex<double>
+    log (FreeBSD's clog: log1p near |z| = 1, the trimmed sum of squares
+    between), csqrt and abs.  Every branch against NumPy's complex128."""
+    a = np.array([[1.5, -2.0], [3.0, 4.0], [-3.0, 4.0], [0.6, 0.7], [0.2, 0.3],
+                  [1.0, 1e-200], [1.0, 0.5], [1e-60, 2.0], [0.0, 0.0], [-0.75, -0.1]])
+    n = len(a)
+    l, r, m = (cp.zeros(2 * n, dtype=cp.float64), cp.zeros(2 * n, dtype=cp.float64),
+               cp.zeros(n, dtype=cp.float64))
+    cp.RawKernel(_COMPLEX64, "cz")((1,), (16,), (cp.asarray(a.ravel()), l, r, m, np.int32(n)))
+    z = a[:, 0] + 1j * a[:, 1]
+    got_l = cp.asnumpy(l).reshape(-1, 2)
+    got_r = cp.asnumpy(r).reshape(-1, 2)
+    with np.errstate(divide="ignore"):
+        want_l = np.log(z)
+    finite = np.isfinite(want_l.real)
+    # clog is not correctly rounded (0.6+0.7i: one ulp from NumPy's, the trimmed sum's own word)
+    np.testing.assert_allclose(got_l[finite, 0], want_l.real[finite], rtol=2e-15, atol=1e-300)
+    np.testing.assert_allclose(got_l[:, 1], want_l.imag, rtol=4e-16)
+    assert got_l[8, 0] == -np.inf                      # log(0): -inf + 0i
+    np.testing.assert_allclose(got_r[:, 0], np.sqrt(z).real, rtol=4e-16)
+    keep = np.arange(n) != 5                           # NumPy loses 1e-200i's half; csqrt keeps it
+    np.testing.assert_allclose(got_r[keep, 1], np.sqrt(z).imag[keep], rtol=4e-16)
+    assert got_r[5].tolist() == [1.0, 5e-201]
+    np.testing.assert_allclose(cp.asnumpy(m), np.abs(z), rtol=4e-16)
+    assert got_r[1].tolist() == [2.0, 1.0] and got_r[2].tolist() == [1.0, 2.0]
+
+
 _ENTRY = r'''
 extern "C" __global__ void entry(const float* q, const float* qs, float* out, int n) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -338,3 +383,46 @@ def test_the_hex_lane_prepares_mpas_to_physics_uncontracted(cp, fast, monkeypatc
     options = hex_numerics.FAST_KERNEL_BASE
     assert not loader.contracts(options, _CUDA_SOURCE)
     assert "fp contract(fast)" not in loader.translate_unit("prep", _CUDA_SOURCE, options=options).msl
+
+
+_WSM6_SHAPES = r'''
+namespace detail {
+template <class A> struct is_arithmetic { static constexpr bool value = false; };
+template <> struct is_arithmetic<int> { static constexpr bool value = true; };
+template <> struct is_arithmetic<float> { static constexpr bool value = true; };
+template <bool, class T = int> struct enable_if {};
+template <class T> struct enable_if<true, T> { using type = T; };
+}
+template <class B, typename detail::enable_if<detail::is_arithmetic<B>::value, int>::type = 0>
+__device__ float twice(B b) { return 2.0f * (float)b; }
+struct State { const char* last_message; int flag; };
+__device__ void init(State& s) { s.last_message = "mp_init OK"; s.flag = 0; }
+__device__ int length(const char* text) { int n = 0; while (text[n]) ++n; return n; }
+struct Rows { float* p; long long n; __device__ float& operator[](int k) const { return p[k * n]; } };
+template <class A> __device__ float settle(A rows, int s) {
+    float v = static_cast<volatile float&>(rows[s + 1]);
+    return v + __expf(0.0f);
+}
+extern "C" __global__ void shapes(float* work, int* out) {
+    State s;
+    init(s);
+    out[0] = length(s.last_message);
+    out[1] = (int)twice(3) + (int)twice(1.5f);
+    const Rows rows{work, 1};
+    work[0] = settle(rows, 0);
+}
+'''
+
+
+def test_wsm6_radar_unit_shapes(cp):
+    """Constructs MPAS WSM6's radar unit and RRFS's convective diagnostics
+    brought in: a type trait's explicit specializations (their static
+    members stay folded, as a class template's do), a state field given a
+    string literal by a free function and then passed on (constant data),
+    a volatile load through a by-value accessor (``__woof_vload`` finds the
+    space), and CUDA's ``__expf``."""
+    work = cp.asarray(np.array([0.0, 2.5], dtype=np.float32))
+    out = cp.zeros(2, dtype=cp.int32)
+    cp.RawKernel(_WSM6_SHAPES, "shapes")((1,), (1,), (work, out))
+    assert cp.asnumpy(out).tolist() == [len("mp_init OK"), 9]
+    assert float(cp.asnumpy(work)[0]) == 3.5          # 2.5 + __expf(0) == 2.5 + 1

@@ -406,6 +406,12 @@ static inline float sinhf(float a) { return metal::precise::sinh(a); }
 static inline float coshf(float a) { return metal::precise::cosh(a); }
 static inline float tanhf(float a) { return metal::precise::tanh(a); }
 static inline float fmodf(float a, float b) { return metal::precise::fmod(a, b); }
+// CUDA's fast intrinsics: ex2.approx / lg2.approx on a rounded product, as
+// CUDA documents them (__expf(x) = 2^(x log2 e), __logf(x) = log2(x) ln 2),
+// on Metal's fast:: approximations.  Approximate on both: known deltas.
+static inline float __expf(float a) { return metal::fast::exp2(a * 1.4426950408889634f); }
+static inline float __logf(float a) { return metal::fast::log2(a) * 0.6931471805599453f; }
+static inline float __fdividef(float a, float b) { return metal::fast::divide(a, b); }
 // hypotf and remainderf have no MSL builtin; upstream's wind_farm.cu (1.1.5)
 // calls both.  hypotf scales by the larger magnitude so neither the square
 // nor the sum overflows or flushes (CUDA's is within 2 ulp, as this is).
@@ -464,6 +470,13 @@ static inline uint __brev(uint a) { return metal::reverse_bits(a); }
 static inline void __syncthreads() { metal::threadgroup_barrier(metal::mem_flags::mem_threadgroup | metal::mem_flags::mem_device); }
 static inline void __threadfence() { metal::atomic_thread_fence(metal::mem_flags::mem_device, metal::memory_order_seq_cst, metal::thread_scope_device); }
 static inline void __woof_compiler_fence() { metal::atomic_thread_fence(metal::mem_flags::mem_device, metal::memory_order_seq_cst, metal::thread_scope_thread); }
+// `static_cast<volatile T&>(x)` read as a value: a volatile load of x in
+// whichever space x lives (a reference cast must name one; the overload
+// finds it).
+#define WOOF_VLOAD(AS) \
+  template <typename T> static inline T __woof_vload(const AS T& x) { return *(const volatile AS T*)&x; }
+WOOF_VLOAD(thread) WOOF_VLOAD(device) WOOF_VLOAD(threadgroup)
+#undef WOOF_VLOAD
 static inline void __threadfence_block() { metal::threadgroup_barrier(metal::mem_flags::mem_threadgroup); }
 
 constant f64 DBL_MAX = f64::bits(0x7FEFFFFFFFFFFFFFUL);
