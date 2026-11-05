@@ -1019,8 +1019,20 @@ FROZEN_MODULE_DIGESTS = {
         # (an RTX 4090, shared card, 50 back-to-back launches); the 15-min
         # whole forecast's wrfout 0 of 31,808,221 words differ.
         # Previously 741d71ee/09b1d5a5.
-        '3fd84d25ccae3b3616be2f99e5f4ddc594256c2ecbb457aa0381f724db481054',
-        '7655b4e64f892082b0a0eecfee2db62fb566cf2bb24393976c23163ad822553c'),
+        # RE-PINNED by morrison-aero (mp_physics = 40, WRF v4.7.1
+        # morr_tm_aero): morrison.cu carries the aero module's lines as
+        # MORR_AERO blocks, compiled only by the new "morrison_aero" module
+        # (morrison_aero_constants.cuh defines MORR_AERO); the mp_physics =
+        # 10 unit defines no MORR_AERO, so its preprocessed text is the old
+        # one with MO_IINUM_ONE = 1 and MO_EFFC_NONE = MO_EFFI_NONE = 25.0f
+        # spelled in.  No mp_physics = 10 word moves.  Reading (pb, RTX
+        # A6000, GPUWM_WRF_EXACT=1): tests/test_morrison_wrf461_parity.py
+        # and the row37-off regime oracle bitwise as before (the
+        # production-regime count test fails identically on the base,
+        # 10 columns vs its pinned 4, before this change).
+        # Previously 3fd84d25/7655b4e6.
+        '010c56a68408bc648a30eec3e13888ff9cd638772ffa96968d1d8dcf7fb8f25a',
+        'fce54b54cfd86b8b1a215ab6cd943854965686c5847477b346593424178e0102'),
 
     'mynn_pbl': (
         # RE-PINNED by the level-major MYNN layout (speed lane, 2.8.1):
@@ -3304,6 +3316,13 @@ def test_loader_hook_is_inert_for_every_frozen_module(r1):
         'shcu_deng': ('glibc_flt32.cuh',),
         'radtran_disort': ('glibc_flt64.cuh',),
         'nest_top': ('glibc_trig_flt32.cuh', 'acoustic.cu'),
+        # mp_physics = 40: morrison.cu composed after the aero module's init
+        # words and procedures (kernel_source_pins.json pins all three).
+        'morrison_aero': ('glibc_flt32.cuh', 'glibc_flt32_extra.cuh',
+                          'glibc_flt64.cuh', 'glibc_trig_flt32.cuh',
+                          'morrison_constants.cuh',
+                          'morrison_aero_constants.cuh',
+                          'morrison_aero_support.cuh', 'morrison.cu'),
     })
 
     # The header grant stays a CLOSED literal: the loader's own allow-list

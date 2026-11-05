@@ -1,0 +1,18 @@
+# gfortran: GNU Fortran (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
+# glibc:    ldd (Ubuntu GLIBC 2.39-0ubuntu8.9) 2.39
+# libm symbols of the -O0 object:
+U expf
+U log10f
+U logf
+U powf
+d512aa16ad862b04c7278540a207a56aa10955e052bd9b9bc870e9a4f0812180  /wrf/phys/module_mp_morr_two_moment_aero.F
+ca069a12cc149313456fa8ee08a827e0f542768b66ff6c1ece95a40ab208fb88  /wrf/phys/module_mp_radar.F
+5b80377fecdc18a5f0ad38d3b6c15cfc86ad5d76701adbbbb08a08698d0f7062  /wrf/share/module_model_constants.F
+4010d74a9939a757e58e38db4216e4f38758345ff8d9323f8984cd24c6ce797b  tools/morrison_aero_wrf471_oracle/run_morrison_aero.F90
+8c6cb9bbfa82606d2cd42252437e87ba8c6a1b90e98edb45bb1a9d8452693c27  SETS/a0_m1_dt20_nz50_x10.in.bin
+d226df31c532dcca46e4520db578169a9cb467e1a2826a85c504854ddb07587d  SETS/a2_m0_dt72_nz50.in.bin
+e67d48be8a08b119e980d8e8d327aebdade38f3faca3a8823284b75de69eaf3d  SETS/a2_m1_dt20_nz50_x20.in.bin
+adedc0004f0b3f27f2a4994fe26e14673c51250508f4fa695fc59e9908677b85  SETS/a0_m1_dt20_nz50_x10.wrf.bin
+af441ad72fa30bbc523a515277e377c248d1eeae7045028e4ff4b32eb5bb7c35  SETS/a2_m0_dt72_nz50.wrf.bin
+ff828e3cc36cf3178463788fc19a0a2bba207ec227a2b102fcc701a33c13628b  SETS/a2_m1_dt20_nz50_x20.wrf.bin
+5c2fcd597da83dcff629f32bc1868235f7947570bb9fb007a217fd2242bbbdb3  constants-aero.txt

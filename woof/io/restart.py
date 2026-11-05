@@ -3728,7 +3728,7 @@ def physics_setup_identity(state, cfg) -> dict:
             "bvtg": float(constants.bvtg),
             "lamdagmax": float(constants.lamdagmax),
         }
-    if int(cfg.mp_physics) == 10:
+    if int(cfg.mp_physics) in (10, 40):
         from woof.core.morrison_constants import rimed_ice_constants
         selection = int(cfg.morr_rimed_ice)
         constants = rimed_ice_constants(selection)

@@ -639,7 +639,7 @@ class DomainState:
                 for name, value in zip(("effc", "effi", "effs"), row.background_radii):
                     setattr(self, name, zeros(nz, ny, nx))
                     getattr(self, name)[...] = DTYPE(value)
-            elif cfg.mp_physics in (6, 8, 9, 10, 16, 18, 24, 28, 106):
+            elif cfg.mp_physics in (6, 8, 9, 10, 16, 18, 24, 28, 40, 106):
                 common = ("qi", "qs", "qg", "effc", "effi", "effs")
                 number_and_radius = (
                     ("nr", "ni") if cfg.mp_physics == 8 else
@@ -651,7 +651,7 @@ class DomainState:
                     (("qh", "nc", "nr", "ni", "ns", "ng", "nh")
                      if cfg.mp_physics == 9 else
                     (("nc", "nr", "ni", "ns", "ng", "effr")
-                     if cfg.mp_physics == 10 else
+                     if cfg.mp_physics in (10, 40) else
                     # mp=16 (WDM6, Registry.EM_COMMON:3031) transports CCN,
                     # cloud droplet number and rain number as
                     # scalar:qnn,qnc,qnr beside WSM6's six masses.  The set
@@ -748,7 +748,7 @@ class DomainState:
                     self.effc[...] = DTYPE(c_bg)
                     self.effi[...] = DTYPE(i_bg)
                     self.effs[...] = DTYPE(s_bg)
-                elif cfg.mp_physics in (9, 10):
+                elif cfg.mp_physics in (9, 10, 40):
                     self.effc[...] = DTYPE(2.5)
                     self.effi[...] = DTYPE(5.0)
                     self.effs[...] = DTYPE(10.0)
@@ -784,6 +784,9 @@ class DomainState:
                         "qh0", "nc0", "nr0", "ni0", "ns0", "ng0", "nh0")
                 elif cfg.mp_physics == 10:
                     time_copies += ("nr0", "ni0", "ns0", "ng0")
+                elif cfg.mp_physics == 40:
+                    # morr_tm_aero advects qnc beside Morrison's four.
+                    time_copies += ("nc0", "nr0", "ni0", "ns0", "ng0")
                 elif cfg.mp_physics == 24:
                     time_copies += ("qh0",)
                 elif cfg.mp_physics == 16:

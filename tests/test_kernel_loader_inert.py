@@ -261,7 +261,9 @@ def test_lake_compile_options_do_not_change_existing_modules(monkeypatch, strict
             "rrtmgp_cloud", "noah", "myjsfc", "kessler", "thompson_classic",
             "myjpbl", "wsm6",
             # labs/windfarm (2.9.11): the Fitch unit joins the strict no-FMA set.
-            "wind_farm"}
+            "wind_farm",
+            # mp_physics = 40 (morrison.cu as the morrison_aero module).
+            "morrison_aero"}
     no_ftz = {"g3", "sfclay", "myjsfc", "mynn_surface", "mynn_pbl", "thompson_column",
               "ysu_480", "wsm6r", "aer_opt2"}
     diffusion = {"smag2d", "diffusion", "diff_opt1", "diff6", "diff6_seam",
@@ -432,6 +434,7 @@ def test_allow_listed_headers_exist_and_translation_units_are_explicit():
                 ("gsd_helicity", "uh_diag.cu"),
                 ("gsd_initial_reflectivity", "thompson_fork.cu"),
                 ("nest_top", "acoustic.cu"),
+                ("morrison_aero", "morrison.cu"),
                 ("smag2d_theta_m", "smag2d.cu")), (
                 "only the explicitly reused initialization and scalar units may supply a .cu header")
 

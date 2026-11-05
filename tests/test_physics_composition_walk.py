@@ -455,7 +455,7 @@ def test_the_mynn_matrix_is_the_same_in_every_land_surface_column(
 #: evaluated over the transported number moments -- so the pairing
 #: resolves, and woof.config.validate_milbrandt2_options no longer
 #: carries the refusal.
-MYNN_MICROPHYSICS_ACCEPTED = [0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 50, 106, 900]
+MYNN_MICROPHYSICS_ACCEPTED = [0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 40, 50, 106, 900]
 
 #: The admitted microphysics values the MYNN slice does not reach.  50 was
 #: here from the 1.9 gate until the P3 cloud-optics row landed, and 9 until

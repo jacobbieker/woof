@@ -32,7 +32,8 @@
     "wrfsolar_eps": "c312b1fba916461bac63332e911d1e2d9968924adf5466c562649a790dfda58d",
     "madwrf": "cefa3f49219aae1d562848db1e1cbad6362fb3478666e3e6c3b00c5f4cb99650",
     "theta_m_cumulus": "580dfc42c040cb87474f33a32a15427681e92feac2c1bf7283ed9418d923f7d3",
-    "smag2d_theta_m": "85e469baf5494063679403def8bc1256932ebe972cf4ebb53fd1b44bbe2b9f5a"
+    "smag2d_theta_m": "85e469baf5494063679403def8bc1256932ebe972cf4ebb53fd1b44bbe2b9f5a",
+    "morrison_aero": "5fb9886ce8254454859bf31dcb5b5da605a230d57ed59e7c7f9bb5193e5441ed"
   },
   "headers": {
     "gsd_hail_bins.cuh": "55646c988bc37b59911385010843d1f48b1644e659390876f3f0581c923c9bed",
@@ -47,7 +48,10 @@
     "acoustic.cu": "14f8d637ecfa54b7b8c19d80fc2bbf5ad5566f6fdc57b9671d0cfa8566f4331b",
     "corem_log10f.cuh": "bcede6f5758979b534bb73754310ad0e631db50b99a8fdcb7fd76f766241cdd5",
     "smag2d.cu": "731d7f64e86af2d17344be7328fda2a3ecfd4f2e22371f6093128ca2f3192500",
-    "hailcast_wrf39.cuh": "1057e2bde6bebbc2632ad1921afd2246d6f35753e74b12c30b085529160ebc1b"
+    "hailcast_wrf39.cuh": "1057e2bde6bebbc2632ad1921afd2246d6f35753e74b12c30b085529160ebc1b",
+    "morrison_aero_constants.cuh": "41218f02d92fe6d1de4a73d40e954ec80854c140721785ee6d9ed4c5fd966917",
+    "morrison_aero_support.cuh": "2e561bb61723399da409eef657e15c90f47edde9ba1fb76d4c02850b6f0c6287",
+    "morrison.cu": "010c56a68408bc648a30eec3e13888ff9cd638772ffa96968d1d8dcf7fb8f25a"
   },
   "composed_headers": {
     "nextgen_reservoirs.cuh": "add8702c3e80c0514326e0cc2efbd0d149d2e1ca1228ce81d88a204c865a7526",
@@ -127,6 +131,16 @@
     "smag2d_theta_m": [
       "glibc_flt32.cuh",
       "smag2d.cu"
+    ],
+    "morrison_aero": [
+      "glibc_flt32.cuh",
+      "glibc_flt32_extra.cuh",
+      "glibc_flt64.cuh",
+      "glibc_trig_flt32.cuh",
+      "morrison_constants.cuh",
+      "morrison_aero_constants.cuh",
+      "morrison_aero_support.cuh",
+      "morrison.cu"
     ]
   }
 }

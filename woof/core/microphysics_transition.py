@@ -286,7 +286,7 @@ _DUAL_RIMED_SELECTORS = (9, 18, 24)
 #:
 #: mp=3 (WSM3) is a member for a reason of its own: WSM3 has no
 #: moments at all; what a mixed edge lacks for it is a PHASE closure.
-UNVALIDATED_MIXED_EDGE_SELECTORS: tuple[int, ...] = (3, 5, 30)
+UNVALIDATED_MIXED_EDGE_SELECTORS: tuple[int, ...] = (3, 5, 30, 40)
 
 _MASS_FIELDS = {
     2: ("qv", "qc", "qr", "qi", "qs", "qg"),
@@ -374,6 +374,7 @@ UNVALIDATED_MIXED_EDGE_MOMENTS: dict[int, tuple[str, ...]] = {
     3: (),
     5: ("f_rimef",),
     30: _FSBM_BIN_SPECIES,
+    40: ("nc", "nr", "ni", "ns", "ng"),
 }
 
 #: The scheme's own name, and the paragraph that says why ITS closure is
@@ -406,6 +407,11 @@ _UNVALIDATED_MIXED_EDGE_REASONS: dict[int, tuple[str, str]] = {
         "without a rime-factor closure changes sedimentation. Same-scheme "
         "nests preserve the Ferrier state; mixed edges need that closure."),
     30: ("FAST_SBM", "142 spectral distributions have no validated cross-scheme entry closure; transferring bulk moisture would not specify their shape"),
+    40: ("Morrison with CESM aerosol",
+         "its droplet number is advected (scalar qnc) where Morrison's "
+         "(mp_physics=10) is a diagnosed constant, and the nest kernel's "
+         "Morrison closure has no droplet-number entry measured for it; "
+         "same-scheme nests carry every moment"),
 }
 
 # Named schemes (woof.microphysics_schemes) run same-scheme nests; a mixed

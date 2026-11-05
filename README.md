@@ -198,7 +198,8 @@ upstream's does. The fork's own changes are recorded in
     `wind_farm_scheme = "fitch_wrf"` beside upstream's `fitch`, reading
     WRF's turbine files and layout (or a turbine-library table) from
     `wind_farms`, also on hex's unequal-area cells;
-  - coupled fire spread and smoke.
+  - coupled fire spread and smoke;
+  - Morrison with CESM aerosol (`mp_physics = 40`, `aercu_opt = 0`).
 - **Height-dependent resolution:** a partial-depth two-way nest, fine near
   the ground and coarser aloft, on WRF and (dry dynamics only) on MPAS; and
   WRF's live vertical nesting (`vert_refine_method = 2`).
