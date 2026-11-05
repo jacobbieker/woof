@@ -750,14 +750,6 @@
     "status": "unresolved"
    },
    {
-    "call_sha256": "6833c7059ab9e0939a8a4f1bbc21a7ba56ec07329f90c73b3704ae55b341b4d7",
-    "constructor": "ElementwiseKernel",
-    "factory": "_subnormal_arith",
-    "factory_sha256": "b68604b06c0c83696348c496c6923be7f5d4afe411bf9ec1f8d31940c95d3536",
-    "file": "woof/backend/facade/_ops.py",
-    "status": "unresolved"
-   },
-   {
     "call_sha256": "689c2f7a67d52a1e4ca6f872f724f5018ea564c5bc61f4a10bd1358263107936",
     "constructor": "compile_using_nvrtc",
     "factory": "_adapter_module",
@@ -1334,6 +1326,14 @@
     "status": "resolved_literal"
    },
    {
+    "call_sha256": "b48fdbd7eb956be44e09b9bf49b2bcc050129607422040e5118ae28dfc3a7e6a",
+    "constructor": "ElementwiseKernel",
+    "factory": "_subnormal_arith",
+    "factory_sha256": "e1926b07eec64d695c126a816de40ebe0a6a3221ec13f7d9ef8c0b0c8212f417",
+    "file": "woof/backend/facade/_ops.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "b716c0ff8c7ba8441e590cc9f564b47e6f59bce66ea9c7690c131f8e0e6c79a0",
     "constructor": "compile_using_nvrtc",
     "factory": "_module",
@@ -1895,6 +1895,10 @@
    }
   ],
   "cuda_files": [
+   {
+    "file": "woof/backend/translate/cuda_powf.cuh",
+    "sha256": "9d3fff2bea90e23d4d74f12fe840cbb698d4652140fbe8da305937cf2a9397f2"
+   },
    {
     "file": "woof/backend/translate/vendor_libm64.cuh",
     "sha256": "a60f95c676724e7ef13d4b105c19f2df09c98625e813fd3c9dc3626122665f67"
@@ -3271,7 +3275,7 @@
    },
    {
     "file": "woof/backend/facade/_ops.py",
-    "sha256": "786dad7eb29977dfc0d47fc748bcd60bad00eefeb1c170c5049a72607f937b91"
+    "sha256": "0508d5db2ac4c0e41408fdccff6d6d3b08cad63f7c9d660fec5a84c3ea8e6095"
    },
    {
     "file": "woof/backend/facade/cuda.py",
@@ -3291,7 +3295,7 @@
    },
    {
     "file": "woof/backend/translate/__init__.py",
-    "sha256": "b1c04992df09c9b1613fc59b67c7067819351d7afc5094648242aa91c90b39fa"
+    "sha256": "6f3d10ca2a606ff2b7404a84f5fc142abd7789aac5ede57ce7ec37214682a133"
    },
    {
     "file": "woof/compiler_metadata.py",
