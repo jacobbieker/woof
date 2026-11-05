@@ -244,6 +244,12 @@ _SUBNORMAL_EXPR = {
 }
 _SUBNORMAL_COMPARE = {"less": "<", "less_equal": "<=", "greater": ">",
                       "greater_equal": ">=", "equal": "==", "not_equal": "!="}
+#: binary32 power: MLX's is Metal's pow, which is not CUDA's powf (on the
+#: NSSL column oracle's Exner function, (p/p0)**rcp, 1601 of 4800 words
+#: differed by 1 ULP, and every kernel fed theta*pii inherited them).  Under
+#: GPUWM_WRF_EXACT=1 it is the transcription of CUDA's powf in
+#: woof/backend/translate/cuda_powf.cuh.
+_STRICT_POWER = {"power": "z = woof_cuda_powf(x, y)"}
 _SUBNORMAL_KERNELS: dict = {}
 
 
@@ -265,12 +271,18 @@ def _subnormal_arith(np_name, a, b):
         key, out, body = _SUBNORMAL_ARITH[np_name], "float32 z", f"z = x {_SUBNORMAL_ARITH[np_name]} y"
     elif np_name in _SUBNORMAL_EXPR:
         key, out, body = np_name, "float32 z", _SUBNORMAL_EXPR[np_name]
+    elif np_name in _STRICT_POWER:
+        key, out, body = np_name, "float32 z", _STRICT_POWER[np_name]
     else:
         key, out, body = np_name, "bool z", f"z = x {_SUBNORMAL_COMPARE[np_name]} y"
     k = _SUBNORMAL_KERNELS.get(key)
     if k is None:
+        preamble = ""
+        if np_name in _STRICT_POWER:
+            from woof.backend.translate import CUDA_POWF
+            preamble = CUDA_POWF.read_text(encoding="utf-8")
         k = _SUBNORMAL_KERNELS[key] = ElementwiseKernel(
-            "float32 x, float32 y", out, body, f"woof_f32_{np_name}")
+            "float32 x, float32 y", out, body, f"woof_f32_{np_name}", preamble=preamble)
     if not isinstance(a, (ndarray, np.ndarray)):
         a = np.float32(a)
     if not isinstance(b, (ndarray, np.ndarray)):
@@ -292,7 +304,8 @@ def _apply(np_name, mx_name, *args, out=None, dtype=None, result_dtype=None):
                     or any(isinstance(h, np.dtype) and h == np.float64 for h in hints))
     mx = _mx()
     if (not involves_f64 and _keeps_subnormals()
-            and ((np_name in _SUBNORMAL_ARITH or np_name in _SUBNORMAL_EXPR)
+            and ((np_name in _SUBNORMAL_ARITH or np_name in _SUBNORMAL_EXPR
+                  or np_name in _STRICT_POWER)
                  and np.dtype(result_dtype) == np.float32
                  or np_name in _SUBNORMAL_COMPARE and _operands_f32(hints))):
         result = _subnormal_arith(np_name, args[0], args[1])
