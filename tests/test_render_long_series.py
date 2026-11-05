@@ -219,7 +219,17 @@ def test_the_stage_event_names_the_frames_not_the_frame_file(
         def communicate(self):
             return "", ""
 
-    monkeypatch.setattr(go_cli.subprocess, "Popen", _Renderer)
+    real_popen = go_cli.subprocess.Popen
+
+    def popen(command, **kwargs):
+        # Only the render process is the stand-in: on macOS the event
+        # stream's owner record reads its process's start from ps
+        # (woof.proc_identity), which runs as itself.
+        if list(command)[:1] == ["ps"]:
+            return real_popen(command, **kwargs)
+        return _Renderer(command, **kwargs)
+
+    monkeypatch.setattr(go_cli.subprocess, "Popen", popen)
     stream = tmp_path / "events.jsonl"
     observer = GoChainEvents()
     observer.open(stream)
