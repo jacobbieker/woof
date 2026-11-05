@@ -17,7 +17,7 @@
     "call_sha256": "0127de043489f57c52d8ae26b584d5a9d9811555500e57d6cdae106fe39d1518",
     "constructor": "RawModule",
     "factory": "_observed_module",
-    "factory_sha256": "dabe5d612330492af01193e37e3327a3278a5a28f9150e6aa8a105615a10ff63",
+    "factory_sha256": "9463c85e194a7289d4117af5ad3418b85e31e085c1070035d18a894901348482",
     "file": "woof/verify/smallstep_bookkeeping_oracle.py",
     "status": "unresolved"
    },
@@ -129,7 +129,7 @@
     "call_sha256": "08b412438fea2e6dba53d679fc2ae725f2afef478998519b9395664a71b27959",
     "constructor": "RawModule",
     "factory": "horizontal_port_outputs",
-    "factory_sha256": "34e2b0b04b91fc4d3a2cd87613bd2244913abb422f3c45743b1a91e5e68857e0",
+    "factory_sha256": "d80af78d388ebfcd114d0cc32aa987df0ddfa84aed6f14612a18faa5a8b9fd52",
     "file": "woof/verify/smallstep_horizontal_oracle.py",
     "status": "unresolved"
    },
@@ -542,14 +542,6 @@
     "status": "unresolved"
    },
    {
-    "call_sha256": "520020c6925b957b22c1a60df15a4f664ff4dfafbb56c89d75db50cd4d489686",
-    "constructor": "ElementwiseKernel",
-    "factory": "_subnormal_arith",
-    "factory_sha256": "ea09c5e736c0cca0962b9f67d84b85c4d845993b52a5e1e710fd775d2f6e5310",
-    "file": "woof/backend/facade/_ops.py",
-    "status": "unresolved"
-   },
-   {
     "call_sha256": "529a111e9cb4230800289db2d8008a6c688c7e4a48d5b0aeaa73316db7ee3c7f",
     "constructor": "RawKernel",
     "factory": "_kernel",
@@ -721,6 +713,14 @@
     "call_sha256": "651db60f8182e91ed6265be92900084c8b35967783f3aa53f3c3f5fd4d3994f3",
     "constructor": "RawModule",
     "factory": "__init__",
+    "factory_sha256": "40c8f1a5df68275bae6a29b680b7598b8d40c0b299614cdcbba5129ebda8bd3f",
+    "file": "woof/backend/hostfacade/__init__.py",
+    "status": "unresolved"
+   },
+   {
+    "call_sha256": "651db60f8182e91ed6265be92900084c8b35967783f3aa53f3c3f5fd4d3994f3",
+    "constructor": "RawModule",
+    "factory": "__init__",
     "factory_sha256": "44819f5afe594da0cca391170edd6a3e72c51fdbc0afed8b2d4bfdab66f03387",
     "file": "woof/backend/facade/__init__.py",
     "status": "unresolved"
@@ -747,6 +747,14 @@
     "factory": "direct_regional_module",
     "factory_sha256": "2d91568b5d8e00a44ccb23ef64aa812f5d2dbd1a51ce31213833ef44b886a0fe",
     "file": "woof/hex/metal_lane.py",
+    "status": "unresolved"
+   },
+   {
+    "call_sha256": "6833c7059ab9e0939a8a4f1bbc21a7ba56ec07329f90c73b3704ae55b341b4d7",
+    "constructor": "ElementwiseKernel",
+    "factory": "_subnormal_arith",
+    "factory_sha256": "b68604b06c0c83696348c496c6923be7f5d4afe411bf9ec1f8d31940c95d3536",
+    "file": "woof/backend/facade/_ops.py",
     "status": "unresolved"
    },
    {
@@ -3247,15 +3255,27 @@
    },
    {
     "file": "woof/backend/facade/_elementwise.py",
-    "sha256": "0bc114de875b64005531b944ef5fe2ce37fdc348551da33429ceefe95f9024cb"
+    "sha256": "b30dc707cb06cb2ede9a61d61d991f28b4ae7ca1c1dca77ed9dfd95c4b9e6d5a"
    },
    {
     "file": "woof/backend/facade/_ops.py",
-    "sha256": "49b955a3a67f835f65cf61b8e510b093c554f81a2b553db87f94670a2822f1cc"
+    "sha256": "786dad7eb29977dfc0d47fc748bcd60bad00eefeb1c170c5049a72607f937b91"
    },
    {
     "file": "woof/backend/facade/cuda.py",
     "sha256": "63f28d0c8b495bd5e2b352855379828465ee7ee255e9b9441a3d6d8d796180d0"
+   },
+   {
+    "file": "woof/backend/host/loader.py",
+    "sha256": "44224433f68f98939313f8d10aac5c702e94fff2d80d6c533193392a6619c531"
+   },
+   {
+    "file": "woof/backend/hostfacade/__init__.py",
+    "sha256": "b8921475fbb0a97f009dba15d5cf3cf08879eb5e05a5c384a377c41655520531"
+   },
+   {
+    "file": "woof/backend/hostfacade/_elementwise.py",
+    "sha256": "d4bef406409d6923be0c41b76497b1813d06cabf8f6c9694d9bc9cba1069a856"
    },
    {
     "file": "woof/backend/translate/__init__.py",
@@ -3327,7 +3347,7 @@
    },
    {
     "file": "woof/core/kernels/__init__.py",
-    "sha256": "3bb046593576af8802f7267c169997254aadcea46ad951f95a969f3b1a3be902"
+    "sha256": "64c7b4521d4ccfd3cb351bf08d09dca3b18b4fcc6add66334176047eacc67a83"
    },
    {
     "file": "woof/core/kf.py",
@@ -4247,7 +4267,7 @@
    },
    {
     "file": "woof/nvrtc_ptx_cache.py",
-    "sha256": "9c159c98ac13e92eb0423c7a61c998a4d221e4ec715befd6c926fdc46e087459"
+    "sha256": "473ef0ed3efcdc1b0d6c33e99e7889fed4b119829bdd6110088d0ffd27e57a55"
    },
    {
     "file": "woof/ocean/coupling.py",
@@ -4287,7 +4307,7 @@
    },
    {
     "file": "woof/verify/advect_oracle.py",
-    "sha256": "2e8e2aec73e5ceecd7430657b4cee5fea82894deaeec390edab7a9a4e6791a6d"
+    "sha256": "ccbfc38305e57c76014ffb8176bd76e1107076ba48bf4e4ac639c7cb4b30f709"
    },
    {
     "file": "woof/verify/gwdo_kim_oracle.py",
@@ -4299,15 +4319,15 @@
    },
    {
     "file": "woof/verify/smallstep_bookkeeping_oracle.py",
-    "sha256": "aa65f7af6e22588e81d134fb596a867267294c731c679892d5e4e87b80671db4"
+    "sha256": "ff4a0ca52b84e63a5faec4623235330172a60b60e49aa51a1761816612f05499"
    },
    {
     "file": "woof/verify/smallstep_horizontal_oracle.py",
-    "sha256": "ccadf0099ca5e4b191148cdee7022b28e09c4fffba523d2a05ee0f9f8dd20758"
+    "sha256": "c03fec104a0dbaff61ed61582944e80d2c201467f6da78649ca7589455b34dca"
    },
    {
     "file": "woof/verify/smallstep_vertical_oracle.py",
-    "sha256": "e4ceef690dd5c802230d9b2822a49510439197917411eef9879404dda997a2c7"
+    "sha256": "1eff93944485027a42aed2f786071901b5c8192389171617bb68075e025b824a"
    },
    {
     "file": "woof/verify/wsm6_process_budget.py",
@@ -4321,6 +4341,26 @@
    },
    {
     "file": "woof/backend/facade/_elementwise.py",
+    "sha256": "126819c122e8957029943dedc0e682d11ad0e7ab9f6a58326ef30aa67c002206"
+   },
+   {
+    "file": "woof/backend/host/loader.py",
+    "sha256": "87cf8eb09a6787526bdc8446a76383298fd5f57b6fd4f7b6abaf65d0e2074267"
+   },
+   {
+    "file": "woof/backend/host/loader.py",
+    "sha256": "94485b54350ca55089502cdf5951120a58b6def7f95d56090b89a9f76933e5c7"
+   },
+   {
+    "file": "woof/backend/host/loader.py",
+    "sha256": "c77cee97ba0ad9608c3c9d1762c2b61d55cdc2eb84394d812cf560d2025064ae"
+   },
+   {
+    "file": "woof/backend/hostfacade/_elementwise.py",
+    "sha256": "126819c122e8957029943dedc0e682d11ad0e7ab9f6a58326ef30aa67c002206"
+   },
+   {
+    "file": "woof/backend/hostfacade/_elementwise.py",
     "sha256": "126819c122e8957029943dedc0e682d11ad0e7ab9f6a58326ef30aa67c002206"
    },
    {

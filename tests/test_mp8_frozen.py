@@ -2233,7 +2233,15 @@ FROZEN_MODULE_DIGESTS = {
         # RE-PINNED at the 1.1.0 upstream merge: YSU_KMAX 256 (the fork's ceiling). Previously f56e3ec7.
         '7192b5b10c683718a9395682bde12a7145c2ca20318047d5a7998b1e87b1fbf2',
         # ysu_default.cu names a test host instead of a lab host since 2.9.1 (comment only).
-        '6261061b62ef15ca30cf3746baf9177cdc1a0eafc2544937f41c674e0fd5a932'),
+        # Compile string re-pinned with the file's YSU_KMAX 256 above, which
+        # the 1.1.0 merge left at 6261061b: no tree since reproduces that
+        # string (the loader's at 9c5ebdda9 is 913bf9ed, YSU_KMAX 128), and
+        # the hosted macOS leg, the first CPU leg where ``cupy`` imports
+        # (woof's facade), read it as drift.  913bf9ed and this string
+        # differ only in that line, which is ysu_column's refusal ceiling
+        # (`nz > YSU_KMAX` returns; no array is sized by it): no column of
+        # 128 levels or fewer compiles from different statements.
+        'b1ccb448aa5ce0d20bdb0f3423c2b155e532b3f929a7e86e15495a89df9b7b39'),
 }
 
 # -- R2 --------------------------------------------------------------------

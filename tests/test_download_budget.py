@@ -190,7 +190,15 @@ def _ef4_floor() -> float:
 
 
 @pytest.mark.usefixtures("classic_history_frames")
-def test_the_projection_counts_what_the_ef4_run_wrote_before_its_first_step():
+def test_the_projection_counts_what_the_ef4_run_wrote_before_its_first_step(monkeypatch):
+    # The pictures that run drew are the measured table's.  A built renderer
+    # offers its own catalog instead, and since upstream 1.1.0 that carries
+    # 38 products the EF4 run (2026-09-26) never drew and the table has no
+    # size for, each priced at the largest picture measured: 1.1 GB over 16
+    # frames, past the bound below on any host with rw_wrfbatch built.
+    from woof import runplan
+
+    monkeypatch.setattr(runplan, "render_catalog", lambda: {})
     p = disk_budget.projected_run_bytes(_ef4_layout(), keep_checkpoints=1, fetch=EF4_REQUEST,
                                         chain="prepared:hrrr", render=True)
     assert p["unpriced"] == []
