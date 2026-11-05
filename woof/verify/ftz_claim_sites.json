@@ -11,10 +11,10 @@
   ],
   "attribution_note": "route/mechanism attribution is judgment across five measured routes and is not machine-derivable; unattributed records carry asserted_token: null and the gate requires only that a token, once written, agrees with the receipt",
   "anchoring_note": "a site is its file plus the exact text of its line (anchor, anchor_sha256), and identical lines in one file are counted; line is where the generator last found the site, a hint the check does not fail on, so lines added or removed above a claim leave the census valid",
-  "site_count": 4590,
+  "site_count": 4595,
   "site_count_by_kind": {
     "behavioural": 67,
-    "prose": 4523
+    "prose": 4528
   },
   "sites": [
     {
@@ -593,8 +593,8 @@
       "file": "docs/dev/host-backend.md",
       "line": 96,
       "kind": "prose",
-      "anchor": "| `-ftz=true` (CuPy's default) | the SSE flush-to-zero and denormals-are-zero modes are set for the launch |",
-      "anchor_sha256": "afa5d5ed1008ec80d480922462c7a007973d5b495cc74122129ba7af42e9bc86",
+      "anchor": "| `-ftz=true` (CuPy's default) | the SSE flush-to-zero and denormals-are-zero modes (AArch64: `FPCR.FZ`) are set for the launch |",
+      "anchor_sha256": "9dd3d36d4b3e33b866d25456d1bcd638a0cc58fbb8e3b02fd264e139eb2bdfc8",
       "route": null,
       "mechanism": null,
       "asserted_token": null,
@@ -14605,7 +14605,7 @@
     },
     {
       "file": "tests/test_kernel_manifest.py",
-      "line": 453,
+      "line": 454,
       "kind": "prose",
       "anchor": "# since the land no-FTZ route; it constructs no RawModule any more.",
       "anchor_sha256": "fd3c1961a2d2f7b8c893fbcb33c06f425d2d2694c0a11878df92b53959fe876a",
@@ -14616,7 +14616,7 @@
     },
     {
       "file": "tests/test_kernel_manifest.py",
-      "line": 487,
+      "line": 488,
       "kind": "prose",
       "anchor": "def test_preparation_nvrtc_route_preserves_subnormals_and_records_its_options():",
       "anchor_sha256": "80a1040a9f06083acb4675ca91433ceda1c1578a87fd4096ba345f0658c8d559",
@@ -14627,7 +14627,7 @@
     },
     {
       "file": "tests/test_kernel_manifest.py",
-      "line": 488,
+      "line": 489,
       "kind": "prose",
       "anchor": "from tools.ftz_receipt import route_inventory",
       "anchor_sha256": "6088a01a0e53f748093356e2cee0c9141e0f15cf903c5608a3456543f938f6db",
@@ -14638,7 +14638,7 @@
     },
     {
       "file": "tests/test_kernel_manifest.py",
-      "line": 498,
+      "line": 499,
       "kind": "prose",
       "anchor": "assert recentered._CUDA_OPTIONS == (\"-std=c++17\", \"--fmad=false\", \"--ftz=false\")",
       "anchor_sha256": "e19c519096dff44dc911bbc613cb830120174d760278ca38fc9e5b7c182b00d3",
@@ -14649,7 +14649,7 @@
     },
     {
       "file": "tests/test_kernel_manifest.py",
-      "line": 502,
+      "line": 503,
       "kind": "prose",
       "anchor": "from tools.ftz_receipt import route_inventory",
       "anchor_sha256": "6088a01a0e53f748093356e2cee0c9141e0f15cf903c5608a3456543f938f6db",
@@ -14660,7 +14660,7 @@
     },
     {
       "file": "tests/test_kernel_manifest.py",
-      "line": 509,
+      "line": 510,
       "kind": "prose",
       "anchor": "assert ruc_spp.MODULE_OPTIONS == (\"-std=c++17\", \"--fmad=false\", \"--ftz=false\")",
       "anchor_sha256": "8f343bf7035c8f1fe66eb17c2acaa252d8231879385aca6c94e3d2f511bb2263",
@@ -14671,7 +14671,7 @@
     },
     {
       "file": "tests/test_kernel_manifest.py",
-      "line": 512,
+      "line": 513,
       "kind": "prose",
       "anchor": "def test_kf_nvrtc_route_keeps_subnormals_and_contracts_nothing():",
       "anchor_sha256": "0fdad93e32735cf015d68d2d191298ff56cdf7439a18ec7b53db492a2e4a8b20",
@@ -14682,7 +14682,7 @@
     },
     {
       "file": "tests/test_kernel_manifest.py",
-      "line": 514,
+      "line": 515,
       "kind": "prose",
       "anchor": "and no flush -- CuPy's RawModule appends -ftz=true, and the flushed",
       "anchor_sha256": "ae4ae71eacbe36a35b9a6b76d613f6eddedb8b5b5b9667d72c5a5220c9a99e11",
@@ -14693,7 +14693,7 @@
     },
     {
       "file": "tests/test_kernel_manifest.py",
-      "line": 516,
+      "line": 517,
       "kind": "prose",
       "anchor": "from tools.ftz_receipt import route_inventory",
       "anchor_sha256": "6088a01a0e53f748093356e2cee0c9141e0f15cf903c5608a3456543f938f6db",
@@ -14704,7 +14704,7 @@
     },
     {
       "file": "tests/test_kernel_manifest.py",
-      "line": 523,
+      "line": 524,
       "kind": "prose",
       "anchor": "assert kf.KF_MODULE_OPTIONS == (\"-std=c++17\", \"--fmad=false\", \"--ftz=false\")",
       "anchor_sha256": "03e0554a96007cd464704a4d4ec93d3d12ab680f31fd5cc66f3d342b9524f3fb",
@@ -14715,7 +14715,7 @@
     },
     {
       "file": "tests/test_kernel_manifest.py",
-      "line": 547,
+      "line": 548,
       "kind": "prose",
       "anchor": "assert shortwave == [\"('-std=c++17', '--ftz=false')\"]",
       "anchor_sha256": "cf87a9ae8192178fb2bf95009498c4b859c19b9d1c497e094f6f50199b2c3e13",
@@ -14726,7 +14726,7 @@
     },
     {
       "file": "tests/test_kernel_manifest.py",
-      "line": 587,
+      "line": 588,
       "kind": "prose",
       "anchor": "``rrtmg_sw`` compiles with ``--ftz=false`` because CuPy's RawModule route",
       "anchor_sha256": "8619333d555df2a705d6f0a34eb360732d8e932be40695f3c7f16d6f93e8a667",
@@ -14737,7 +14737,7 @@
     },
     {
       "file": "tests/test_kernel_manifest.py",
-      "line": 588,
+      "line": 589,
       "kind": "prose",
       "anchor": "would inject ``-ftz=true`` and flush the subnormal transmittance products",
       "anchor_sha256": "24e63fdad9019002a23c6afc6955de6a38241327801293327ca31cc68dcd5bbb",
@@ -14748,7 +14748,7 @@
     },
     {
       "file": "tests/test_kernel_manifest.py",
-      "line": 598,
+      "line": 599,
       "kind": "prose",
       "anchor": "'                      options=(\"-std=c++17\", \"--ftz=false\"),',",
       "anchor_sha256": "0b18200d28df69cd9aff0845a1717d945564724634663be3ac7acaa097a19897",
@@ -14759,7 +14759,7 @@
     },
     {
       "file": "tests/test_kernel_manifest.py",
-      "line": 703,
+      "line": 704,
       "kind": "prose",
       "anchor": "expected_options = [\"-std=c++17\", \"--fmad=false\", \"--ftz=false\",",
       "anchor_sha256": "af094699b2ef5e660da2d0169d6c761c0e341b06a4d5aaa6d0f172e98a7a4c50",
@@ -14770,7 +14770,7 @@
     },
     {
       "file": "tests/test_kernel_manifest.py",
-      "line": 708,
+      "line": 709,
       "kind": "prose",
       "anchor": "expected_options = [\"-std=c++17\", \"--fmad=false\", \"--ftz=false\",",
       "anchor_sha256": "af094699b2ef5e660da2d0169d6c761c0e341b06a4d5aaa6d0f172e98a7a4c50",
@@ -22030,7 +22030,7 @@
     },
     {
       "file": "tests/test_wdm6_wrf461_oracle.py",
-      "line": 324,
+      "line": 343,
       "kind": "prose",
       "anchor": "# into which a subnormal value enters a call; every other column's",
       "anchor_sha256": "691b6736d8e1099d7ab0cb4edd57ee3eff0650b0c2911bcad824e728ca069cdd",
@@ -22041,7 +22041,7 @@
     },
     {
       "file": "tests/test_wdm6_wrf461_oracle.py",
-      "line": 328,
+      "line": 347,
       "kind": "prose",
       "anchor": "fed = _columns_fed_a_subnormal(case, defined)",
       "anchor_sha256": "651c5a2cc40ad684524ffb65364803d64bfa34acfe70a0ba2887e1a09dcd8f65",
@@ -38123,7 +38123,7 @@
     },
     {
       "file": "tools/rustwx/crates/static-fields/src/projection/npmath.rs",
-      "line": 341,
+      "line": 348,
       "kind": "prose",
       "anchor": "return f32::from_bits(1); // smallest positive subnormal",
       "anchor_sha256": "edc4a0083e7ad3f40577136170b44d3981a0e6ec9da8835cfd0e1456f3823d2b",
@@ -38134,7 +38134,7 @@
     },
     {
       "file": "tools/rustwx/crates/static-fields/src/projection/npmath.rs",
-      "line": 357,
+      "line": 364,
       "kind": "prose",
       "anchor": "return f32::from_bits(0x8000_0001); // smallest negative subnormal",
       "anchor_sha256": "5c097cdfd085578f8cf5b754d7cd8bdfa80e4999b7fa7deccfcf0fb1234c8941",
@@ -41447,8 +41447,8 @@
       "file": "woof/backend/host/rt.h",
       "line": 20,
       "kind": "prose",
-      "anchor": "//   modes set for the launch; a --ftz=false unit keeps subnormals.",
-      "anchor_sha256": "22780625e7342d38f8c8e313393a8c035065afb215a1faab6a441081b5d72d02",
+      "anchor": "//   modes (AArch64: FPCR.FZ) set for the launch; a --ftz=false unit keeps",
+      "anchor_sha256": "3add781bf83f13789a91715ba6d339aea78acac1f0a500f8e89f4c606829044d",
       "route": null,
       "mechanism": null,
       "asserted_token": null,
@@ -41456,7 +41456,18 @@
     },
     {
       "file": "woof/backend/host/rt.h",
-      "line": 177,
+      "line": 21,
+      "kind": "prose",
+      "anchor": "//   subnormals.",
+      "anchor_sha256": "6f1a020aa95d029a86f2adb85b67dee7124559d006c1c1e12dddaab50f55c72b",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "woof/backend/host/rt.h",
+      "line": 178,
       "kind": "prose",
       "anchor": "static thread_local int ftz = 0;            // this launch flushes binary32 subnormals",
       "anchor_sha256": "dd53899a7d2ddb91a2ca7e22565cbfcd890d2a465e2e44d5f3a551c743074475",
@@ -41467,7 +41478,29 @@
     },
     {
       "file": "woof/backend/host/rt.h",
-      "line": 840,
+      "line": 181,
+      "kind": "prose",
+      "anchor": "// FPCR.FZ flushes subnormal inputs and results, single and double, as SSE's",
+      "anchor_sha256": "b77ca308ccb4261ff178fc4b7390474174e54ba227ac66244fa84336236579d5",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "woof/backend/host/rt.h",
+      "line": 182,
+      "kind": "prose",
+      "anchor": "// FTZ and DAZ together do.",
+      "anchor_sha256": "c04853ff09242e2eaf6cc9670e21154d8f9b00f17b9f9d8b9aaea1b27bcc6c4b",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "woof/backend/host/rt.h",
+      "line": 867,
       "kind": "prose",
       "anchor": "// PTX without .ftz keeps binary32 subnormals whatever -ftz says: in a",
       "anchor_sha256": "0da1638e484e23f2696595db17c8ff7ea3eebecf17de832ded0cecacda735ebe",
@@ -41478,7 +41511,7 @@
     },
     {
       "file": "woof/backend/host/rt.h",
-      "line": 846,
+      "line": 874,
       "kind": "prose",
       "anchor": "if (!woof_host::ftz) return __woof_ieee_plain_##name(a, b); \\",
       "anchor_sha256": "70ccff5b81703995d96dbdaf425dd7d985f2bb744211b6535c1c3bcaf0a60942",
@@ -41489,7 +41522,18 @@
     },
     {
       "file": "woof/backend/host/rt.h",
-      "line": 874,
+      "line": 884,
+      "kind": "prose",
+      "anchor": "if (!woof_host::ftz) return __woof_ieee_plain_##name(a, b); \\",
+      "anchor_sha256": "70ccff5b81703995d96dbdaf425dd7d985f2bb744211b6535c1c3bcaf0a60942",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "woof/backend/host/rt.h",
+      "line": 916,
       "kind": "prose",
       "anchor": "int ftz;",
       "anchor_sha256": "447565c96921d6e5227db9f450645278ec2f753ebf2a7221962bbb4efbbc85df",
@@ -41500,7 +41544,7 @@
     },
     {
       "file": "woof/backend/host/rt.h",
-      "line": 934,
+      "line": 976,
       "kind": "prose",
       "anchor": "ftz = L.ftz;",
       "anchor_sha256": "9c7a99ad2512ee5539c8d7d95489df2cbc58db2b7f6c088c00e1489d35159214",
@@ -41511,10 +41555,21 @@
     },
     {
       "file": "woof/backend/host/rt.h",
-      "line": 937,
+      "line": 979,
       "kind": "prose",
       "anchor": "_mm_setcsr(L.ftz ? (saved | 0x8040u) : (saved & ~0x8040u));",
       "anchor_sha256": "06f19a6c9f2c34e6917c329a11b7cfaacc0df41ef42b8ddd159bf0459f58b870",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "woof/backend/host/rt.h",
+      "line": 982,
+      "kind": "prose",
+      "anchor": "set_fpcr(L.ftz ? (saved | WOOF_FPCR_FZ) : (saved & ~WOOF_FPCR_FZ));",
+      "anchor_sha256": "abdf70feaf1b86530d4dc8d0308af509f60dc0a96b9ae25e4860f3c6b75c7729",
       "route": null,
       "mechanism": null,
       "asserted_token": null,

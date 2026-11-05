@@ -12,8 +12,9 @@
 //
 // Fibers: a block whose kernel calls __syncthreads, __syncwarp or a warp
 // collective runs each of its threads as a fiber on the worker that owns the
-// block.  Switching is a few instructions (x86-64 below; any other machine
-// uses ucontext).  A fiber's stack is mapped once per worker and reused.
+// block.  Switching is a few instructions (x86-64 and AArch64 below, ELF or
+// Mach-O; any other machine uses ucontext).  A fiber's stack is mapped once
+// per worker and reused.
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
@@ -28,7 +29,9 @@
 #include <pthread.h>
 #include <sys/mman.h>
 #include <unistd.h>
-#if !defined(__x86_64__)
+#if defined(__x86_64__) || defined(__aarch64__)
+#define WOOF_RT_ASM_SWITCH 1
+#else
 #include <ucontext.h>
 #endif
 
@@ -83,7 +86,7 @@ extern "C" int woof_rt_take_error(char *out, int size)
 struct woof_fiber {
     void *stack = nullptr;
     size_t size = 0;
-#if defined(__x86_64__)
+#if defined(WOOF_RT_ASM_SWITCH)
     void *sp = nullptr;
 #else
     ucontext_t uc;
@@ -93,7 +96,7 @@ struct woof_fiber {
 namespace {
 
 struct WorkerFibers {
-#if defined(__x86_64__)
+#if defined(WOOF_RT_ASM_SWITCH)
     void *home_sp = nullptr;
 #else
     ucontext_t home;
@@ -112,16 +115,27 @@ thread_local WorkerFibers worker_fibers;
 
 }  // namespace
 
-#if defined(__x86_64__)
+#if defined(WOOF_RT_ASM_SWITCH)
 // woof_rt_switch(save, to): save the callee-saved registers on this stack,
-// store its pointer in *save, and continue on the stack ``to``.
+// store its pointer in *save, and continue on the stack ``to``.  Mach-O
+// prefixes C symbols with an underscore and has no .type, .size or
+// .note.GNU-stack, so those come from these macros.
 extern "C" void woof_rt_switch(void **save, void *to);
 extern "C" void woof_rt_trampoline();
-asm(R"(
-    .text
-    .globl woof_rt_switch
-    .type woof_rt_switch, @function
-woof_rt_switch:
+#if defined(__APPLE__)
+#define WOOF_RT_BEGIN(name) "    .globl _" #name "\n    .p2align 4\n_" #name ":\n"
+#define WOOF_RT_END(name)
+#define WOOF_RT_NOTE
+#else
+#define WOOF_RT_BEGIN(name) "    .globl " #name "\n    .type " #name ", %function\n" #name ":\n"
+#define WOOF_RT_END(name) "    .size " #name ", .-" #name "\n"
+#define WOOF_RT_NOTE "    .section .note.GNU-stack,\"\",%progbits\n"
+#endif
+#endif
+
+#if defined(__x86_64__)
+asm("    .text\n"
+    WOOF_RT_BEGIN(woof_rt_switch) R"(
     pushq %rbp
     pushq %rbx
     pushq %r12
@@ -137,18 +151,54 @@ woof_rt_switch:
     popq %rbx
     popq %rbp
     ret
-    .size woof_rt_switch, .-woof_rt_switch
-
-    .globl woof_rt_trampoline
-    .type woof_rt_trampoline, @function
-woof_rt_trampoline:
+)" WOOF_RT_END(woof_rt_switch)
+    WOOF_RT_BEGIN(woof_rt_trampoline) R"(
     movq %r12, %rdi
     callq *%r13
     ud2
-    .size woof_rt_trampoline, .-woof_rt_trampoline
-    .section .note.GNU-stack,"",@progbits
-    .text
-)");
+)" WOOF_RT_END(woof_rt_trampoline)
+    WOOF_RT_NOTE
+    "    .text\n");
+#elif defined(__aarch64__)
+// AAPCS64: x19-x28, the frame pointer x29, the link register x30 and the low
+// halves of v8-v15 are callee-saved; x18 (Apple's platform register) is not
+// touched.  The frame is 160 bytes, so the stack stays 16-byte aligned.
+asm("    .text\n"
+    WOOF_RT_BEGIN(woof_rt_switch) R"(
+    sub sp, sp, #160
+    stp x19, x20, [sp, #0]
+    stp x21, x22, [sp, #16]
+    stp x23, x24, [sp, #32]
+    stp x25, x26, [sp, #48]
+    stp x27, x28, [sp, #64]
+    stp x29, x30, [sp, #80]
+    stp d8, d9, [sp, #96]
+    stp d10, d11, [sp, #112]
+    stp d12, d13, [sp, #128]
+    stp d14, d15, [sp, #144]
+    mov x9, sp
+    str x9, [x0]
+    mov sp, x1
+    ldp x19, x20, [sp, #0]
+    ldp x21, x22, [sp, #16]
+    ldp x23, x24, [sp, #32]
+    ldp x25, x26, [sp, #48]
+    ldp x27, x28, [sp, #64]
+    ldp x29, x30, [sp, #80]
+    ldp d8, d9, [sp, #96]
+    ldp d10, d11, [sp, #112]
+    ldp d12, d13, [sp, #128]
+    ldp d14, d15, [sp, #144]
+    add sp, sp, #160
+    ret
+)" WOOF_RT_END(woof_rt_switch)
+    WOOF_RT_BEGIN(woof_rt_trampoline) R"(
+    mov x0, x19
+    blr x20
+    brk #0
+)" WOOF_RT_END(woof_rt_trampoline)
+    WOOF_RT_NOTE
+    "    .text\n");
 #endif
 
 // The ``index``-th fiber of the calling worker, its stack mapped on first use.
@@ -185,6 +235,14 @@ extern "C" void woof_rt_fiber_start(woof_fiber *f, void (*entry)(void *), void *
     *--sp = nullptr;                      // r14
     *--sp = nullptr;                      // r15
     f->sp = sp;
+#elif defined(__aarch64__)
+    uintptr_t top = ((uintptr_t)f->stack + f->size) & ~(uintptr_t)15;
+    void **frame = (void **)(top - 160);  // woof_rt_switch's saved registers
+    std::memset(frame, 0, 160);
+    frame[0] = arg;                       // x19
+    frame[1] = (void *)entry;             // x20
+    frame[11] = (void *)woof_rt_trampoline;  // x30, woof_rt_switch's ret
+    f->sp = frame;
 #else
     getcontext(&f->uc);
     const size_t page = (size_t)sysconf(_SC_PAGESIZE);
@@ -198,7 +256,7 @@ extern "C" void woof_rt_fiber_start(woof_fiber *f, void (*entry)(void *), void *
 // From the worker's own context into ``f``; returns when ``f`` yields.
 extern "C" void woof_rt_resume(woof_fiber *f)
 {
-#if defined(__x86_64__)
+#if defined(WOOF_RT_ASM_SWITCH)
     woof_rt_switch(&worker_fibers.home_sp, f->sp);
 #else
     swapcontext(&worker_fibers.home, &f->uc);
@@ -208,7 +266,7 @@ extern "C" void woof_rt_resume(woof_fiber *f)
 // From fiber ``f`` back to its worker's context.
 extern "C" void woof_rt_yield(woof_fiber *f)
 {
-#if defined(__x86_64__)
+#if defined(WOOF_RT_ASM_SWITCH)
     woof_rt_switch(&f->sp, worker_fibers.home_sp);
 #else
     swapcontext(&f->uc, &worker_fibers.home);

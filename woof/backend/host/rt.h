@@ -17,7 +17,8 @@
 // * binary32/binary64 arithmetic is the host's IEEE arithmetic, compiled
 //   with -ffp-contract=off: CUDA's --fmad=false words.  A unit CUDA builds
 //   with -ftz=true runs with the SSE flush-to-zero and denormals-are-zero
-//   modes set for the launch; a --ftz=false unit keeps subnormals.
+//   modes (AArch64: FPCR.FZ) set for the launch; a --ftz=false unit keeps
+//   subnormals.
 //
 // The launcher at the end (woof_host::launch) is instantiated once per
 // kernel by loader.py's generated tail.
@@ -175,6 +176,19 @@ struct Sched {
 
 static thread_local Sched *sched = nullptr;
 static thread_local int ftz = 0;            // this launch flushes binary32 subnormals
+
+#if defined(__aarch64__)
+// FPCR.FZ flushes subnormal inputs and results, single and double, as SSE's
+// FTZ and DAZ together do.
+#define WOOF_FPCR_FZ (1ull << 24)
+static inline unsigned long long get_fpcr()
+{
+    unsigned long long v;
+    __asm__ volatile("mrs %0, fpcr" : "=r"(v));
+    return v;
+}
+static inline void set_fpcr(unsigned long long v) { __asm__ volatile("msr fpcr, %0" : : "r"(v)); }
+#endif
 static thread_local unsigned char *dynamic_shared = nullptr;
 
 static inline void fail(const char *what) { woof_rt_fail(what); throw Trap(); }
@@ -452,6 +466,13 @@ static inline void __brkpt() {}
 static inline void __nanosleep(unsigned) {}
 #if defined(__x86_64__)
 static inline long long clock64() { return (long long)__builtin_ia32_rdtsc(); }
+#elif defined(__aarch64__)
+static inline long long clock64()
+{
+    unsigned long long t;
+    __asm__ volatile("mrs %0, cntvct_el0" : "=r"(t));
+    return (long long)t;
+}
 #else
 static inline long long clock64() { return 0; }
 #endif
@@ -639,9 +660,15 @@ static inline float __woof_rsqrt(float x) { return __woof_rsqrtf(x); }
 static inline float __woof_rcbrtf(float x) { return 1.0f / cbrtf(x); }
 static inline double __woof_rcbrt(double x) { return 1.0 / std::cbrt(x); }
 static inline float __woof_rcbrt(float x) { return __woof_rcbrtf(x); }
+#if defined(__APPLE__)
+// Apple's libm spells the GNU exp10 functions __exp10f and __exp10.
+static inline float __woof_exp10f(float x) { return ::__exp10f(x); }
+static inline double __woof_exp10(double x) { return ::__exp10(x); }
+#else
 static inline float __woof_exp10f(float x) { return exp10f(x); }
 static inline double __woof_exp10(double x) { return ::exp10(x); }
-static inline float __woof_exp10(float x) { return exp10f(x); }
+#endif
+static inline float __woof_exp10(float x) { return __woof_exp10f(x); }
 static inline float __woof_sinpif(float x) { return sinf((float)M_PI * x); }
 static inline float __woof_cospif(float x) { return cosf((float)M_PI * x); }
 static inline double __woof_sinpi(double x) { return std::sin(M_PI * x); }
@@ -838,7 +865,8 @@ template <class T> static inline T __ldg(const T *p) { return *p; }
 static inline void __woof_compiler_fence() { __atomic_signal_fence(__ATOMIC_SEQ_CST); }
 
 // PTX without .ftz keeps binary32 subnormals whatever -ftz says: in a
-// flushing launch these clear the SSE flush modes around the one operation.
+// flushing launch these clear the SSE flush modes (AArch64: FPCR.FZ) around
+// the one operation.
 #if defined(__x86_64__)
 #define WOOF_IEEE_OP(name, insn) \
     static inline float __woof_ieee_##name(float a, float b) \
@@ -849,6 +877,16 @@ static inline void __woof_compiler_fence() { __atomic_signal_fence(__ATOMIC_SEQ_
                          : "+x"(a) : "x"(b), "m"(ieee), "m"(saved)); \
         return a; \
     }
+#elif defined(__aarch64__)
+#define WOOF_IEEE_OP(name, insn) \
+    static inline float __woof_ieee_##name(float a, float b) \
+    { \
+        if (!woof_host::ftz) return __woof_ieee_plain_##name(a, b); \
+        const unsigned long long saved = woof_host::get_fpcr(), ieee = saved & ~WOOF_FPCR_FZ; \
+        __asm__ volatile("msr fpcr, %2\n\t" insn " %s0, %s0, %s1\n\tmsr fpcr, %3" \
+                         : "+w"(a) : "w"(b), "r"(ieee), "r"(saved)); \
+        return a; \
+    }
 #else
 #define WOOF_IEEE_OP(name, insn) \
     static inline float __woof_ieee_##name(float a, float b) { return __woof_ieee_plain_##name(a, b); }
@@ -857,7 +895,11 @@ static inline float __woof_ieee_plain_add(float a, float b) { return a + b; }
 static inline float __woof_ieee_plain_sub(float a, float b) { return a - b; }
 static inline float __woof_ieee_plain_mul(float a, float b) { return a * b; }
 static inline float __woof_ieee_plain_div(float a, float b) { return a / b; }
+#if defined(__aarch64__)
+WOOF_IEEE_OP(add, "fadd") WOOF_IEEE_OP(sub, "fsub") WOOF_IEEE_OP(mul, "fmul") WOOF_IEEE_OP(div, "fdiv")
+#else
 WOOF_IEEE_OP(add, "addss") WOOF_IEEE_OP(sub, "subss") WOOF_IEEE_OP(mul, "mulss") WOOF_IEEE_OP(div, "divss")
+#endif
 #undef WOOF_IEEE_OP
 static inline float __woof_ieee_min(float a, float b) { return __woof_fminf(a, b); }
 static inline float __woof_ieee_max(float a, float b) { return __woof_fmaxf(a, b); }
@@ -935,6 +977,9 @@ static void run_block(void *ctx, unsigned long long b)
 #if defined(__x86_64__)
     const unsigned int saved = _mm_getcsr();
     _mm_setcsr(L.ftz ? (saved | 0x8040u) : (saved & ~0x8040u));
+#elif defined(__aarch64__)
+    const unsigned long long saved = get_fpcr();
+    set_fpcr(L.ftz ? (saved | WOOF_FPCR_FZ) : (saved & ~WOOF_FPCR_FZ));
 #endif
     if (L.fibers && L.block[0] * L.block[1] * L.block[2] > 1) {
         if (worker_sched == nullptr) worker_sched = new Sched;
@@ -959,6 +1004,8 @@ static void run_block(void *ctx, unsigned long long b)
 out:
 #if defined(__x86_64__)
     _mm_setcsr(saved);
+#elif defined(__aarch64__)
+    set_fpcr(saved);
 #endif
     return;
 }
