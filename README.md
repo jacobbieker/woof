@@ -245,8 +245,8 @@ on it:
   first load. Pipelines are then kept on disk (`~/.cache/woof/metal-pipelines`),
   but a cold start can take minutes, and the largest units (CLM lake's step
   kernel, for one) about twenty.
-- **The hex (MPAS) model runs on Metal by default** (`WOOF_HEX_METAL=0` opts
-  out). Its words differ from CUDA's where binary32 libm does (`precise::`
+- **The hex (MPAS) model runs on Metal by default** on an Apple GPU
+  (`WOOF_HEX_METAL=0` opts out; on a virtual Mac it refuses). Its words differ from CUDA's where binary32 libm does (`precise::`
   against libdevice), so a forecast drifts about as far from CUDA as CUDA's
   own run does with contraction off. Within hex:
   - 8 of the 361 kernel units are refused by name: RRFS smoke, RRFS NSSL and

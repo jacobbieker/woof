@@ -445,3 +445,13 @@ def test_a_loop_that_ends_at_its_jumps_label(cp):
     out = cp.zeros(3, dtype=cp.int32)
     cp.RawKernel(_LOOP_AT_LABEL, "loop_at_label")((1,), (4,), (cp.asarray(q), out, np.int32(3)))
     assert cp.asnumpy(out).tolist() == [21, 50, 51]
+
+
+def test_the_hex_lane_refuses_a_paravirtual_device(cp, monkeypatch):
+    """A virtual Mac's "Apple Paravirtual device" computes NaN where an
+    M-series GPU matches: the hex lane is the default on an Apple GPU only."""
+    from woof.hex import metal_lane
+    assert metal_lane.apple_gpu()
+    props = dict(cp.cuda.runtime.getDeviceProperties(0), architecture="Apple Paravirtual device")
+    monkeypatch.setattr(cp.cuda.runtime, "getDeviceProperties", lambda device: props)
+    assert not metal_lane.apple_gpu()

@@ -11,7 +11,7 @@ Metal Shading Language exactly as it does for the WRF core
 (docs/dev/mlx-backend.md).
 
 This module answers those questions for the Metal translation on the
-``mlx`` backend, by default; ``WOOF_HEX_METAL=0`` opts out (then
+``mlx`` backend on an Apple GPU, by default; ``WOOF_HEX_METAL=0`` opts out (then
 :func:`install` returns without touching anything, and the hex lane refuses
 on a Mac).  The hex GPU gates and an end-to-end regional forecast are
 measured against CUDA on Metal, and every word they differ in is attributed
@@ -139,6 +139,19 @@ def metal_fingerprint() -> dict[str, str]:
     }
 
 
+def apple_gpu() -> bool:
+    """Whether the Metal device is an Apple GPU (``applegpu_*``).  A virtual
+    Mac's "Apple Paravirtual device" computes wrong answers (NaN where an
+    M-series GPU matches), so the hex lane refuses there as it did before
+    it was the default."""
+    try:
+        import cupy
+        architecture = str(dict(cupy.cuda.runtime.getDeviceProperties(0)).get("architecture", ""))
+    except Exception:
+        return False
+    return architecture.startswith("applegpu")
+
+
 def install() -> bool:
     """Admit the hex CUDA lane on the Metal translation (``mlx``, unless
     ``WOOF_HEX_METAL=0``).  Idempotent; returns whether the Metal answers
@@ -149,6 +162,8 @@ def install() -> bool:
     if _backend() != "mlx" or os.environ.get("WOOF_HEX_METAL", "").strip() == "0":
         return False
     import cupy
+    if not apple_gpu():
+        return False
     from cupy.cuda import nvrtc
     if not hasattr(nvrtc, "getSupportedArchs"):
         architecture = METAL_STANDIN_COMPUTE[0] * 10 + METAL_STANDIN_COMPUTE[1]
@@ -200,4 +215,4 @@ def installed() -> bool:
     return sys.modules.get("cupy") is facade
 
 
-__all__ = ["METAL_STANDIN_COMPUTE", "install", "installed", "metal_fingerprint", "translator_sha256"]
+__all__ = ["METAL_STANDIN_COMPUTE", "apple_gpu", "install", "installed", "metal_fingerprint", "translator_sha256"]

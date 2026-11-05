@@ -256,8 +256,9 @@ The hex lane resolves kernels through `woof.hex.cuda_backend.KernelCache`. Its
 admission asks CUDA questions: the runtime version, the compute capability,
 NVRTC's architectures and NVRTC's build identity. The facade answers these
 with zeros. On the `mlx` backend `woof/hex/metal_lane.py` answers them for
-the Metal translation instead; `WOOF_HEX_METAL=0` opts out, and then hex
-refuses on a Mac. The lane:
+the Metal translation instead, on an Apple GPU (`applegpu_*`; a virtual
+Mac's paravirtual device computes wrong answers, so hex refuses there).
+`WOOF_HEX_METAL=0` opts out, and then hex refuses on a Mac. The lane:
 
 - stands in for compute 12.0;
 - names the translator in its compile fingerprint, never NVRTC;
