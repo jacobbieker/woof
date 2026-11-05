@@ -283,8 +283,10 @@ def _subnormal_arith(np_name, a, b):
             preamble = CUDA_POWF.read_text(encoding="utf-8")
         k = _SUBNORMAL_KERNELS[key] = ElementwiseKernel(
             "float32 x, float32 y", out, body, f"woof_f32_{np_name}", preamble=preamble)
+    scalars = not isinstance(a, (ndarray, np.ndarray)) and not isinstance(b, (ndarray, np.ndarray))
     if not isinstance(a, (ndarray, np.ndarray)):
-        a = np.float32(a)
+        # two scalars: a 0-d operand fixes the loop, as CuPy returns 0-d
+        a = np.asarray(a, dtype=np.float32) if scalars else np.float32(a)
     if not isinstance(b, (ndarray, np.ndarray)):
         b = np.float32(b)
     return k(a, b)

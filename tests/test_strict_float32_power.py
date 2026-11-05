@@ -63,12 +63,14 @@ _CUDA_WORDS = (
 
 
 def _words(a):
+    """The binary32 words of ``a``."""
     return np.asarray(a, dtype=np.float32).view(np.uint32)
 
 
 @pytest.mark.gpu
 @wrf_exact_process
 def test_exner_power_matches_cuda_words():
+    """(p/P0)**RCP on the oracle's pressures gives the CUDA adapter's pii."""
     import cupy as cp
 
     from woof.core import constants as c
@@ -83,6 +85,7 @@ def test_exner_power_matches_cuda_words():
 @pytest.mark.gpu
 @wrf_exact_process
 def test_power_matches_cuda_powf_words():
+    """Rows of CuPy's powf words, subnormal and special cases among them."""
     import cupy as cp
 
     import woof  # noqa: F401  (strict NVRTC options for CuPy's own kernels)
@@ -93,3 +96,6 @@ def test_power_matches_cuda_powf_words():
     bad = [(f"{a:08X}", f"{b:08X}", f"{w:08X}", f"{g:08X}")
            for (a, b, w), g in zip(_CUDA_WORDS, got) if w != g]
     assert not bad, bad
+    # two scalars give a 0-d array, as CuPy's ufunc does
+    root = cp.power(np.float32(2.0), np.float32(0.5))
+    assert root.shape == () and _words(cp.asnumpy(root)) == 0x3FB504F3
