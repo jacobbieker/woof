@@ -209,7 +209,7 @@ bytes are outside the numerical oracle.
     other site(s)
   - `--fmad=false` -- `woof/hex/moving_vertical_cuda.py:21` (cp.RawKernel),
     and 1 other site(s)
-  - `-std=c++17` `--fmad=false` -- `woof/core/kernels/__init__.py:750`
+  - `-std=c++17` `--fmad=false` -- `woof/core/kernels/__init__.py:758`
     (cp.RawModule), and 1 other site(s)
   - `-std=c++17` `--fmad=false` `--ftz=false` --
     `woof/core/thompson_fork.py:109` (compiler.compile_using_nvrtc), and 1
@@ -219,7 +219,7 @@ bytes are outside the numerical oracle.
   - `--std=c++17` a target flag built from the device architecture at run
     time -- `woof/ocean/waves/model.py:73` (cp.RawModule)
   - `-std=c++17` `--ftz=false` `--fmad=false` --
-    `woof/core/kernels/__init__.py:896` (compiler.compile_using_nvrtc)
+    `woof/core/kernels/__init__.py:904` (compiler.compile_using_nvrtc)
   - a target flag built from the device architecture at run time a target
     flag built from the device architecture at run time --
     `woof/hex/mpasphys/surface_update_v842.py:148`

@@ -883,6 +883,10 @@ _MP_MAP = {
     # Milbrandt-Yau prognoses it.
     9: (9, "Milbrandt-Yau 2-moment", "Milbrandt-Yau 2-moment"),
     10: (10, "Morrison 2-moment", "Morrison 2-moment"),
+    # Morrison with CESM aerosol (WRF v4.7.1 morr_tm_aero), aercu_opt = 0;
+    # WRF itself refuses aercu_opt > 0 without MSKF (cu_physics = 11).
+    40: (40, "Morrison 2-moment with CESM aerosol",
+         "Morrison 2-moment with CESM aerosol"),
     # WDM6, native since the WDM6 port.  A TRANSLATION, not a substitution
     # (the mapped value equals the WRF value), for the same reason the 28
     # row below is one: WDM6 predicts cloud/rain number and a CCN

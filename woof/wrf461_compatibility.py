@@ -138,6 +138,12 @@ AXIS_EXCLUSIONS = MappingProxyType({
         "MAD-WRF's passive hydrometeors (madwrf_mp) are a WRF v4.7.1 package "
         "with no microphysical process; this matrix transcribes WRF v4.6.1 "
         "and WRF has no pairing law for mp_physics=96 to transcribe."),
+    ("mp_physics", 40): (
+        "Morrison with CESM aerosol (morr_tm_aero) is ported from WRF v4.7.1 "
+        "(module_mp_morr_two_moment_aero.F); this matrix transcribes WRF "
+        "v4.6.1's pairing laws, and its one mp_physics=40 law "
+        "(module_check_a_mundo.F: aercu_opt > 0 needs cu_physics = 11) is "
+        "about aercu_opt, which woof holds at 0."),
     ("mp_physics", 900): (
         "TEMPO is a WOOF named scheme (woof.microphysics_schemes, id 900, "
         "outside WRF's mp_physics range): WRF v4.6.1 has no TEMPO option, so "

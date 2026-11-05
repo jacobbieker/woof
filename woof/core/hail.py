@@ -37,6 +37,7 @@ PSD_ROWS = {
     8: {"density_g": 500., "thompson": True},
     9: {"density_g": 400., "density_h": 900.},
     10: {"density_g": ("morr_rimed_ice", {0: 400., 1: 900.})},
+    40: {"density_g": ("morr_rimed_ice", {0: 400., 1: 900.})},
     16: {"density_g": ("wdm6_hail_opt", {0: 500., 1: 700.}),
          "intercept": ("wdm6_hail_opt", {0: 4.e6, 1: 4.e4})},
     18: {"density_g": 500., "density_h": 900., "alpha_h": 1.,

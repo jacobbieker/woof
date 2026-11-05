@@ -298,6 +298,12 @@ MICROPHYSICS_ALGORITHM_IDENTITIES = {
     # preservation change subsequent tendencies even from finite inputs.
     10: ("morrison-two-moment-v5-nonnegative-sedimentation-kf-number-seeding-finite-freezing-"
          "final-vapor-in-range-number-real-clamp-product"),
+    # Morrison with CESM aerosol (WRF v4.7.1 morr_tm_aero): mp=10's
+    # production kernel with the aero module's init words (DCS 350 um), its
+    # 2.49/4.99 um no-hydrometeor radii and the advected droplet number;
+    # aercu_opt=0, the constant-droplet path.
+    40: ("morrison-tm-aero-wrf-v4.7.1-v1-dcs350-advected-qnc-aercu0-"
+         "nonnegative-sedimentation-kf-number-seeding-real-clamp-product"),
     # WDM6 (WRF v4.6.1 WDM6SCHEME, Registry/Registry.EM_COMMON:3031).  Named
     # at the mp=8/28 granularity -- the trajectory-defining pieces, not the
     # scheme name.  "prognostic-nc-nr-ccn" is the change everything else
