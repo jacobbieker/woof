@@ -406,6 +406,12 @@ static inline float sinhf(float a) { return metal::precise::sinh(a); }
 static inline float coshf(float a) { return metal::precise::cosh(a); }
 static inline float tanhf(float a) { return metal::precise::tanh(a); }
 static inline float fmodf(float a, float b) { return metal::precise::fmod(a, b); }
+// CUDA's fast intrinsics: ex2.approx / lg2.approx on a rounded product, as
+// CUDA documents them (__expf(x) = 2^(x log2 e), __logf(x) = log2(x) ln 2),
+// on Metal's fast:: approximations.  Approximate on both: known deltas.
+static inline float __expf(float a) { return metal::fast::exp2(a * 1.4426950408889634f); }
+static inline float __logf(float a) { return metal::fast::log2(a) * 0.6931471805599453f; }
+static inline float __fdividef(float a, float b) { return metal::fast::divide(a, b); }
 // hypotf and remainderf have no MSL builtin; upstream's wind_farm.cu (1.1.5)
 // calls both.  hypotf scales by the larger magnitude so neither the square
 // nor the sum overflows or flushes (CUDA's is within 2 ulp, as this is).
@@ -446,6 +452,9 @@ static inline ulong max(ulong a, ulong b) { return metal::max(a, b); }
 static inline float min(float a, float b) { return fminf(a, b); }
 static inline float max(float a, float b) { return fmaxf(a, b); }
 static inline int abs(int a) { return metal::abs(a); }
+// CUDA's abs(float) / abs(double) are fabsf / fabs (Thrust's complex division calls them)
+static inline float abs(float a) { return fabs(a); }
+static inline f64 abs(f64 a) { return fabs(a); }
 static inline long llabs(long a) { return metal::abs(a); }
 static inline int __clz(int a) { return metal::clz(a); }
 static inline int __clzll(long a) { return (int)metal::clz(a); }
@@ -461,6 +470,13 @@ static inline uint __brev(uint a) { return metal::reverse_bits(a); }
 static inline void __syncthreads() { metal::threadgroup_barrier(metal::mem_flags::mem_threadgroup | metal::mem_flags::mem_device); }
 static inline void __threadfence() { metal::atomic_thread_fence(metal::mem_flags::mem_device, metal::memory_order_seq_cst, metal::thread_scope_device); }
 static inline void __woof_compiler_fence() { metal::atomic_thread_fence(metal::mem_flags::mem_device, metal::memory_order_seq_cst, metal::thread_scope_thread); }
+// `static_cast<volatile T&>(x)` read as a value: a volatile load of x in
+// whichever space x lives (a reference cast must name one; the overload
+// finds it).
+#define WOOF_VLOAD(AS) \
+  template <typename T> static inline T __woof_vload(const AS T& x) { return *(const volatile AS T*)&x; }
+WOOF_VLOAD(thread) WOOF_VLOAD(device) WOOF_VLOAD(threadgroup)
+#undef WOOF_VLOAD
 static inline void __threadfence_block() { metal::threadgroup_barrier(metal::mem_flags::mem_threadgroup); }
 
 constant f64 DBL_MAX = f64::bits(0x7FEFFFFFFFFFFFFFUL);
@@ -530,6 +546,13 @@ static inline uint __ballot_sync(uint mask, int pred) {
 }
 static inline int __any_sync(uint mask, int pred) { return metal::simd_any(pred != 0) ? 1 : 0; }
 static inline int __all_sync(uint mask, int pred) { return metal::simd_all(pred != 0) ? 1 : 0; }
+// redux.sync (sm_80's __reduce_<op>_sync): the SIMD-group's reduction.
+static inline uint __reduce_add_sync(uint mask, uint v) { return metal::simd_sum(v); }
+static inline int __reduce_add_sync(uint mask, int v) { return metal::simd_sum(v); }
+static inline uint __reduce_min_sync(uint mask, uint v) { return metal::simd_min(v); }
+static inline int __reduce_min_sync(uint mask, int v) { return metal::simd_min(v); }
+static inline uint __reduce_max_sync(uint mask, uint v) { return metal::simd_max(v); }
+static inline int __reduce_max_sync(uint mask, int v) { return metal::simd_max(v); }
 template <typename T> static inline T __woof_shfl(T v, uint src) { return metal::simd_shuffle(v, ushort(src)); }
 static inline ulong __woof_shfl(ulong v, uint src) {
   uint lo = metal::simd_shuffle((uint)v, ushort(src));
@@ -634,6 +657,9 @@ static inline long __float2ll_rn(float a) { return (long)metal::rint(a); }
 // No trap on Metal: the thread carries on (woof's kernels trap only on
 // states their launchers already refuse).
 static inline void __trap() {}
+// No cycle counter in a Metal shader: clock64() is 0.  woof's kernels read it
+// only for a cost that orders work (TEMPO's column order), never a word.
+static inline long clock64() { return 0; }
 // binary64 -> binary32 toward zero / up / down: the nearest result, stepped
 // back across x when it rounded the wrong way.
 static inline float __woof_f2f_dir(f64 a, int dir) {

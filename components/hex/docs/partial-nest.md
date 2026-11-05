@@ -76,9 +76,10 @@ exactly as before.
 
 ## Metal
 
-The hex lane runs on Metal only with `WOOF_HEX_METAL=1`
-(`woof/hex/metal_lane.py`). The band's oracle and envelope have been
-measured there. The rest of the hex lane has not.
+The hex lane runs on Metal by default (`woof/hex/metal_lane.py`;
+`WOOF_HEX_METAL=0` opts out). The band's oracle and envelope have been
+measured there; the rest of the lane against CUDA is in
+`docs/dev/mlx-backend.md`.
 
 ## Evidence
 

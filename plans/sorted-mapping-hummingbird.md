@@ -203,8 +203,8 @@ The first task is to confirm each source file below in the WRF 4.7.1 tree. MAD-W
     init_atmosphere files), so the moist bubble with radiation is not run;
     moist dynamics; feedback of w, rho_zz, the coordinate or u.
   - Chains run through `run()` but are not measured.
-  - Metal: the hex lane is opt-in (`WOOF_HEX_METAL=1`); the band's oracle
-    and envelope pass there.
+  - Metal: the hex lane runs there by default (`WOOF_HEX_METAL=0` opts
+    out); the band's oracle and envelope pass there.
 
 **Oracles.**
 - (a) The existing WRF and MPAS suites with a single band, plus kernel hashes.
