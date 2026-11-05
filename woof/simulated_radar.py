@@ -382,7 +382,12 @@ class LiveSimulatedRadar:
     def __init__(self, options, outdir, *, runner=None, idle_timeout_seconds=None,
                  progress_interval_seconds=5.0, isolate_failures=None):
         self.options = options
-        self.outdir = Path(outdir)
+        # Resolved, as output_committed resolves each landing: the snapshots
+        # are owned under this directory by path, and on macOS (/var is
+        # /private/var) an unresolved one never matched its landing, so no
+        # snapshot was released, the scratch slots ran out and the next
+        # capture waited for ever.
+        self.outdir = Path(outdir).resolve()
         if runner is None:
             from woof.rustwx import require_simulated_radar_binary, simulate_radar
             runner = functools.partial(simulate_radar, binary=require_simulated_radar_binary())
