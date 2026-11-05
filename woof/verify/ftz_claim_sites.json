@@ -11,10 +11,10 @@
   ],
   "attribution_note": "route/mechanism attribution is judgment across five measured routes and is not machine-derivable; unattributed records carry asserted_token: null and the gate requires only that a token, once written, agrees with the receipt",
   "anchoring_note": "a site is its file plus the exact text of its line (anchor, anchor_sha256), and identical lines in one file are counted; line is where the generator last found the site, a hint the check does not fail on, so lines added or removed above a claim leave the census valid",
-  "site_count": 4611,
+  "site_count": 4618,
   "site_count_by_kind": {
     "behavioural": 67,
-    "prose": 4544
+    "prose": 4551
   },
   "sites": [
     {
@@ -593,8 +593,8 @@
       "file": "docs/dev/host-backend.md",
       "line": 96,
       "kind": "prose",
-      "anchor": "| `-ftz=true` (CuPy's default) | the SSE flush-to-zero and denormals-are-zero modes are set for the launch |",
-      "anchor_sha256": "afa5d5ed1008ec80d480922462c7a007973d5b495cc74122129ba7af42e9bc86",
+      "anchor": "| `-ftz=true` (CuPy's default) | the SSE flush-to-zero and denormals-are-zero modes (AArch64: `FPCR.FZ`) are set for the launch |",
+      "anchor_sha256": "9dd3d36d4b3e33b866d25456d1bcd638a0cc58fbb8e3b02fd264e139eb2bdfc8",
       "route": null,
       "mechanism": null,
       "asserted_token": null,
@@ -712,7 +712,7 @@
     },
     {
       "file": "docs/dev/mlx-backend.md",
-      "line": 380,
+      "line": 381,
       "kind": "prose",
       "anchor": "`.ftz`);",
       "anchor_sha256": "527adfd4b49e44eb59dad37456dfe6dc5874dc4b97390be37d7e0162a40973e3",
@@ -14022,7 +14022,7 @@
     },
     {
       "file": "tests/test_host_backend.py",
-      "line": 121,
+      "line": 122,
       "kind": "prose",
       "anchor": "for label, opts in ((\"ftz\", (\"-std=c++17\",)), (\"keep\", (\"-std=c++17\", \"--ftz=false\"))):",
       "anchor_sha256": "d3efb8b3f6b9ca1cd870e755dcda53da25ecebafc7b4a5d27797eb986052d9bc",
@@ -14033,7 +14033,7 @@
     },
     {
       "file": "tests/test_host_backend.py",
-      "line": 127,
+      "line": 128,
       "kind": "prose",
       "anchor": "for label in (\"ftz\", \"keep\"):",
       "anchor_sha256": "52064e5feb486989ea12a5b78689e91e8615a7c7134cb2cc84667f0917bf98d9",
@@ -14044,7 +14044,7 @@
     },
     {
       "file": "tests/test_host_backend.py",
-      "line": 129,
+      "line": 130,
       "kind": "prose",
       "anchor": "assert out[label][2] == sub, out           # PTX without .ftz keeps subnormals",
       "anchor_sha256": "e0b6046b3c989b2050df043e3dcc63be63c71dbcee4c8aa0c70138e8ff275bb8",
@@ -14056,6 +14056,17 @@
     {
       "file": "tests/test_host_backend.py",
       "line": 131,
+      "kind": "prose",
+      "anchor": "assert out[label][5] == 0.0, out           # PTX min.f32 orders a subnormal above +0",
+      "anchor_sha256": "f584dd04c7809656cbe276539ce42299a1ea34838019da84449fe6382af720ae",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/test_host_backend.py",
+      "line": 133,
       "kind": "prose",
       "anchor": "assert out[\"ftz\"][1] == 0.0, out",
       "anchor_sha256": "83f625bb6c259b77b15307a4d05dd8af8eed14420423d0fc88b3f2e872fb5724",
@@ -41612,8 +41623,8 @@
       "file": "woof/backend/host/rt.h",
       "line": 20,
       "kind": "prose",
-      "anchor": "//   modes set for the launch; a --ftz=false unit keeps subnormals.",
-      "anchor_sha256": "22780625e7342d38f8c8e313393a8c035065afb215a1faab6a441081b5d72d02",
+      "anchor": "//   modes (AArch64: FPCR.FZ) set for the launch; a --ftz=false unit keeps",
+      "anchor_sha256": "3add781bf83f13789a91715ba6d339aea78acac1f0a500f8e89f4c606829044d",
       "route": null,
       "mechanism": null,
       "asserted_token": null,
@@ -41621,7 +41632,18 @@
     },
     {
       "file": "woof/backend/host/rt.h",
-      "line": 177,
+      "line": 21,
+      "kind": "prose",
+      "anchor": "//   subnormals.",
+      "anchor_sha256": "6f1a020aa95d029a86f2adb85b67dee7124559d006c1c1e12dddaab50f55c72b",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "woof/backend/host/rt.h",
+      "line": 178,
       "kind": "prose",
       "anchor": "static thread_local int ftz = 0;            // this launch flushes binary32 subnormals",
       "anchor_sha256": "dd53899a7d2ddb91a2ca7e22565cbfcd890d2a465e2e44d5f3a551c743074475",
@@ -41632,7 +41654,29 @@
     },
     {
       "file": "woof/backend/host/rt.h",
-      "line": 840,
+      "line": 181,
+      "kind": "prose",
+      "anchor": "// FPCR.FZ flushes subnormal inputs and results, single and double, as SSE's",
+      "anchor_sha256": "b77ca308ccb4261ff178fc4b7390474174e54ba227ac66244fa84336236579d5",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "woof/backend/host/rt.h",
+      "line": 182,
+      "kind": "prose",
+      "anchor": "// FTZ and DAZ together do.",
+      "anchor_sha256": "c04853ff09242e2eaf6cc9670e21154d8f9b00f17b9f9d8b9aaea1b27bcc6c4b",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "woof/backend/host/rt.h",
+      "line": 867,
       "kind": "prose",
       "anchor": "// PTX without .ftz keeps binary32 subnormals whatever -ftz says: in a",
       "anchor_sha256": "0da1638e484e23f2696595db17c8ff7ea3eebecf17de832ded0cecacda735ebe",
@@ -41643,7 +41687,7 @@
     },
     {
       "file": "woof/backend/host/rt.h",
-      "line": 846,
+      "line": 874,
       "kind": "prose",
       "anchor": "if (!woof_host::ftz) return __woof_ieee_plain_##name(a, b); \\",
       "anchor_sha256": "70ccff5b81703995d96dbdaf425dd7d985f2bb744211b6535c1c3bcaf0a60942",
@@ -41654,7 +41698,29 @@
     },
     {
       "file": "woof/backend/host/rt.h",
-      "line": 874,
+      "line": 884,
+      "kind": "prose",
+      "anchor": "if (!woof_host::ftz) return __woof_ieee_plain_##name(a, b); \\",
+      "anchor_sha256": "70ccff5b81703995d96dbdaf425dd7d985f2bb744211b6535c1c3bcaf0a60942",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "woof/backend/host/rt.h",
+      "line": 904,
+      "kind": "prose",
+      "anchor": "// min.f32/max.f32 without .ftz order subnormals as themselves, where a",
+      "anchor_sha256": "69e9e19fb093e53eec9f1112d50785a4b1cc25abef940afdc7ee43a42b3113d8",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "woof/backend/host/rt.h",
+      "line": 942,
       "kind": "prose",
       "anchor": "int ftz;",
       "anchor_sha256": "447565c96921d6e5227db9f450645278ec2f753ebf2a7221962bbb4efbbc85df",
@@ -41665,7 +41731,7 @@
     },
     {
       "file": "woof/backend/host/rt.h",
-      "line": 934,
+      "line": 1002,
       "kind": "prose",
       "anchor": "ftz = L.ftz;",
       "anchor_sha256": "9c7a99ad2512ee5539c8d7d95489df2cbc58db2b7f6c088c00e1489d35159214",
@@ -41676,10 +41742,21 @@
     },
     {
       "file": "woof/backend/host/rt.h",
-      "line": 937,
+      "line": 1005,
       "kind": "prose",
       "anchor": "_mm_setcsr(L.ftz ? (saved | 0x8040u) : (saved & ~0x8040u));",
       "anchor_sha256": "06f19a6c9f2c34e6917c329a11b7cfaacc0df41ef42b8ddd159bf0459f58b870",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "woof/backend/host/rt.h",
+      "line": 1008,
+      "kind": "prose",
+      "anchor": "set_fpcr(L.ftz ? (saved | WOOF_FPCR_FZ) : (saved & ~WOOF_FPCR_FZ));",
+      "anchor_sha256": "abdf70feaf1b86530d4dc8d0308af509f60dc0a96b9ae25e4860f3c6b75c7729",
       "route": null,
       "mechanism": null,
       "asserted_token": null,
