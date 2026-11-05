@@ -114,12 +114,13 @@ extern "C" __global__ void k(const float* a, const float* b, const float* c, flo
   float q; asm("mul.rn.f32 %0, %1, %2;" : "=f"(q) : "f"(a[1]), "f"(b[1])); r[2] = q;
   r[3] = fminf(-0.0f, 0.0f);
   r[4] = fmaxf(-0.0f, 0.0f);
+  float m; asm("min.f32 %0, %1, %2;" : "=f"(m) : "f"(0.0f), "f"(c[1])); r[5] = m;
 }
 """
 a = np.array([1.1, 1e-20], np.float32); b = np.array([1.3, 1e-20], np.float32)
-c = np.array([-(np.float32(1.1) * np.float32(1.3))], np.float32)
+c = np.array([-(np.float32(1.1) * np.float32(1.3)), 1e-40], np.float32)
 for label, opts in (("ftz", ("-std=c++17",)), ("keep", ("-std=c++17", "--ftz=false"))):
-    r = cp.zeros(5, cp.float32)
+    r = cp.zeros(6, cp.float32)
     cp.RawModule(code=src, options=opts).get_function("k")((1,), (1,), (cp.asarray(a), cp.asarray(b), cp.asarray(c), r))
     out[label] = [float(v) for v in r.get()] + [bool(np.signbit(r.get()[3])), bool(np.signbit(r.get()[4]))]
 ''')
@@ -127,7 +128,8 @@ for label, opts in (("ftz", ("-std=c++17",)), ("keep", ("-std=c++17", "--ftz=fal
     for label in ("ftz", "keep"):
         assert out[label][0] == 0.0, out           # a*b+c with c = -(a*b): no FMA
         assert out[label][2] == sub, out           # PTX without .ftz keeps subnormals
-        assert out[label][5] is True and out[label][6] is False, out   # -0 < +0
+        assert out[label][5] == 0.0, out           # PTX min.f32 orders a subnormal above +0
+        assert out[label][6] is True and out[label][7] is False, out   # -0 < +0
     assert out["ftz"][1] == 0.0, out
     assert out["keep"][1] == sub, out
 

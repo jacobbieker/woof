@@ -901,8 +901,34 @@ WOOF_IEEE_OP(add, "fadd") WOOF_IEEE_OP(sub, "fsub") WOOF_IEEE_OP(mul, "fmul") WO
 WOOF_IEEE_OP(add, "addss") WOOF_IEEE_OP(sub, "subss") WOOF_IEEE_OP(mul, "mulss") WOOF_IEEE_OP(div, "divss")
 #endif
 #undef WOOF_IEEE_OP
-static inline float __woof_ieee_min(float a, float b) { return __woof_fminf(a, b); }
-static inline float __woof_ieee_max(float a, float b) { return __woof_fmaxf(a, b); }
+// min.f32/max.f32 without .ftz order subnormals as themselves, where a
+// flushing launch's comparison would read them as zero (MXCSR DAZ, FPCR.FZ),
+// so the order is read off the words: a sign-magnitude word made monotonic.
+// NaN yields the other operand and -0 orders below +0, as __woof_fminf.
+static inline uint32_t __woof_ieee_order(float x)
+{
+    uint32_t u;
+    std::memcpy(&u, &x, sizeof u);
+    return (u & 0x80000000u) ? ~u : (u | 0x80000000u);
+}
+static inline bool __woof_ieee_nan(float x)
+{
+    uint32_t u;
+    std::memcpy(&u, &x, sizeof u);
+    return (u & 0x7fffffffu) > 0x7f800000u;
+}
+static inline float __woof_ieee_min(float a, float b)
+{
+    if (__woof_ieee_nan(a)) return __woof_ieee_nan(b) ? __builtin_nanf("") : b;
+    if (__woof_ieee_nan(b)) return a;
+    return __woof_ieee_order(a) <= __woof_ieee_order(b) ? a : b;
+}
+static inline float __woof_ieee_max(float a, float b)
+{
+    if (__woof_ieee_nan(a)) return __woof_ieee_nan(b) ? __builtin_nanf("") : b;
+    if (__woof_ieee_nan(b)) return a;
+    return __woof_ieee_order(a) >= __woof_ieee_order(b) ? a : b;
+}
 
 // ---------------------------------------------------------------- the launcher
 
