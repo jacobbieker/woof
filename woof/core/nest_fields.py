@@ -62,7 +62,7 @@ def nest_field_kinds(cfg: RunConfig) -> tuple[str, ...]:
         from woof.core.column_schemes import COLUMN_SCHEMES
         if cfg.mp_physics in COLUMN_SCHEMES:
             kinds += [n for n in COLUMN_SCHEMES[cfg.mp_physics].species if n not in ("qv", "qc", "qr")]
-        if cfg.mp_physics in (2, 6, 8, 9, 10, 16, 18, 24, 28, 106):
+        if cfg.mp_physics in (2, 6, 8, 9, 10, 16, 18, 24, 28, 40, 106):
             kinds += ["qi", "qs", "qg"]
         if cfg.mp_physics == 30:
             from woof.core.fast_sbm_contract import EXTRA_SPECIES
@@ -87,6 +87,8 @@ def nest_field_kinds(cfg: RunConfig) -> tuple[str, ...]:
             kinds += ["nr", "ni", "nc", "nwfa", "nifa"]
         if cfg.mp_physics == 10:
             kinds += ["nr", "ni", "ns", "ng"]
+        if cfg.mp_physics == 40:
+            kinds += ["nc", "nr", "ni", "ns", "ng"]
         if cfg.mp_physics == 18:
             kinds += ["qh", "qndrop", "qnr", "qni", "qns", "qng",
                       "qnh", "qnn", "qvolg", "qvolh"]

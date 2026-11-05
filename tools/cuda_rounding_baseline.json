@@ -2321,7 +2321,19 @@
    },
    {
     "file": "woof/core/kernels/morrison.cu",
-    "sha256": "3fd84d25ccae3b3616be2f99e5f4ddc594256c2ecbb457aa0381f724db481054"
+    "sha256": "010c56a68408bc648a30eec3e13888ff9cd638772ffa96968d1d8dcf7fb8f25a"
+   },
+   {
+    "file": "woof/core/kernels/morrison_aero.cu",
+    "sha256": "5fb9886ce8254454859bf31dcb5b5da605a230d57ed59e7c7f9bb5193e5441ed"
+   },
+   {
+    "file": "woof/core/kernels/morrison_aero_constants.cuh",
+    "sha256": "41218f02d92fe6d1de4a73d40e954ec80854c140721785ee6d9ed4c5fd966917"
+   },
+   {
+    "file": "woof/core/kernels/morrison_aero_support.cuh",
+    "sha256": "2e561bb61723399da409eef657e15c90f47edde9ba1fb76d4c02850b6f0c6287"
    },
    {
     "file": "woof/core/kernels/morrison_constants.cuh",
@@ -3343,27 +3355,27 @@
    },
    {
     "file": "woof/core/kernel_frame_recordings.py",
-    "sha256": "7dacad1fe548e49b4d1613e3422694856bb79f7caee1a5192668e777485a1fca"
+    "sha256": "90515d25e5009e2894db1b63ce64dd0e65b5908bbd70426d654f2c01cffd0811"
    },
    {
     "file": "woof/core/kernels/__init__.py",
-    "sha256": "64c7b4521d4ccfd3cb351bf08d09dca3b18b4fcc6add66334176047eacc67a83"
+    "sha256": "a0a3e1baf0c93375993be05f8c895ae3cbc162ca1881f6fbf192566f54209ab1"
    },
    {
     "file": "woof/core/kf.py",
-    "sha256": "148a22017a18cec3177bd0112b23ed291bbf8395a553e9e948ecb361faa72b50"
+    "sha256": "379c00d8c54e68440b80e7ae41eab83f4c74d454040a787cc258d99f2eabe3e7"
    },
    {
     "file": "woof/core/microphysics.py",
-    "sha256": "f92bca73ce7072a1ff5e6a3ffb37aa36d535c1c8ccb18743a4b29bb61d51f849"
+    "sha256": "a4d1e8d24714ec8e00aca2f4407c8b0f8a8b4c90ab6cc155fad97b5eb491abe6"
    },
    {
     "file": "woof/core/microphysics_transition.py",
-    "sha256": "ffd647fd9e1ace351f722965943056a282681a963086a2f3e64269673de84943"
+    "sha256": "02034f34534e884d2aef193875f8607aed95a11551edbc1cf667b3dfb8b0729d"
    },
    {
     "file": "woof/core/moist.py",
-    "sha256": "823ec60d8524473737d449db8ea9cfb7d3a95156d5864091f6ead117e302fb0a"
+    "sha256": "3bc29028065dcd7add7501b0130501615517a2aa9927b2138e795d13a1b655ef"
    },
    {
     "file": "woof/core/morrison.py",
@@ -3435,15 +3447,15 @@
    },
    {
     "file": "woof/core/physics.py",
-    "sha256": "9fc2ad5968e711a6867036b2057fd81aef41fb29e92cdca4e4a06794689793e1"
+    "sha256": "0123650f5762bc92ebe008c5088270a6b4ec6e3a6463ffb2fa57e8949849e0f6"
    },
    {
     "file": "woof/core/preflight.py",
-    "sha256": "dadaacf31e858c323d131c8fe1c994d88b72603de4b1cdabb290aa7a706ad9e9"
+    "sha256": "53b3b90f2fcf1985f6450ddb138d8680d16b24d972d57d7e1696fe40934a8176"
    },
    {
     "file": "woof/core/refl.py",
-    "sha256": "5b023e534fd2d9684195e8f02b409d810c483320c6f1cc7d1c16e9115f5384b1"
+    "sha256": "072a27dccdf4471a1cc78039066f7ed5fee42b537d97bda71253d9ccbc183669"
    },
    {
     "file": "woof/core/rrtm_lw.py",
@@ -3455,7 +3467,7 @@
    },
    {
     "file": "woof/core/rrtmg_legacy.py",
-    "sha256": "150235cc8bbb56f25e180896f2e15e2dea1a33a3f1e70e3c3b18b7eae30f2d96"
+    "sha256": "577a6863c0ee8f6e048f697c6bc80bdad262f978993b81725b2430b9f019c3b6"
    },
    {
     "file": "woof/core/rrtmg_legacy_device.py",

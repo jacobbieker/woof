@@ -284,7 +284,7 @@ def state_array_shapes(cfg: RunConfig) -> dict[str, tuple[int, ...]]:
                     shapes[name] = shapes[name + "0"] = m
             for name in ("effc", "effi", "effs"):
                 shapes[name] = m
-        elif cfg.mp_physics in (6, 8, 9, 10, 16, 18, 24, 28, 106):
+        elif cfg.mp_physics in (6, 8, 9, 10, 16, 18, 24, 28, 40, 106):
             # WRF's SIX-MASS moist package, transcribed.  This tuple is
             # not "the schemes with ice" -- it is the schemes whose
             # Registry package is moist:qv,qc,qr,qi,qs,qg
@@ -362,6 +362,11 @@ def state_array_shapes(cfg: RunConfig) -> dict[str, tuple[int, ...]]:
                 shapes[name] = m
         if cfg.mp_physics == 10:
             for name in ("nc", "nr", "ni", "ns", "ng", "nr0", "ni0",
+                         "ns0", "ng0", "effr"):
+                shapes[name] = m
+        if cfg.mp_physics == 40:
+            # morr_tm_aero: Morrison's moments with nc advected (nc0).
+            for name in ("nc", "nr", "ni", "ns", "ng", "nc0", "nr0", "ni0",
                          "ns0", "ng0", "effr"):
                 shapes[name] = m
         if cfg.mp_physics == 18:

@@ -397,7 +397,7 @@ def test_no_new_scheme_keyed_dict_omits_28():
     assert (set(mt.UNVALIDATED_MIXED_EDGE_MOMENTS)
             == set(mt.UNVALIDATED_MIXED_EDGE_SELECTORS)
             == set(mt._UNVALIDATED_MIXED_EDGE_REASONS)
-            == {3, 5, 30} | set(NAMED_MP_IDS))
+            == {3, 5, 30, 40} | set(NAMED_MP_IDS))
     # WDM6 is double-moment in cloud AND rain and carries a CCN reservoir:
     # ncr(:,:,1)=nn, ncr(:,:,2)=nc, ncr(:,:,3)=nr (module_mp_wdm6.F:238-240),
     # all three prognostic scalars in the WRF Registry.  It has no ni/ns/ng.
@@ -483,10 +483,12 @@ def test_the_hrrr_route_admission_is_derived_not_respelled():
     # genuine missing closure (no
     # bulk-to-spectrum entry closure is validated for a mixed edge), and the
     # named schemes are refused by name; both are therefore outside
-    # PORTED_MP_PHYSICS and this route's admission.  Any other refused
-    # selector is a regression.
-    assert set(mt.UNVALIDATED_MIXED_EDGE_SELECTORS) == {3, 5, 30} | set(NAMED_MP_IDS), (
-        "a selector other than WSM3, Ferrier-Aligo, FAST_SBM or a named scheme is refused for a "
+    # PORTED_MP_PHYSICS and this route's admission.  Morrison with CESM
+    # aerosol (40) arrived refused at a mixed edge (its advected droplet
+    # number has no nest-kernel entry closure).  Any other refused selector
+    # is a regression.
+    assert set(mt.UNVALIDATED_MIXED_EDGE_SELECTORS) == {3, 5, 30, 40} | set(NAMED_MP_IDS), (
+        "a selector other than WSM3, Ferrier-Aligo, FAST_SBM, Morrison-aero or a named scheme is refused for a "
         "missing closure again; every other mixed edge in this release runs "
         "with its mapping named")
 
@@ -1204,9 +1206,10 @@ def test_the_restart_identity_names_the_scheme_and_its_provenance():
     # RE-DERIVED with the RRFS v2 intake: the named schemes (TEMPO, 900)
     # carry their own identity rows.  RE-DERIVED for 2.8.9: 30 (FAST_SBM)
     # registered its own identity with the port, held to the same two
-    # properties below.  The WRF-numbered rows are otherwise unchanged.
+    # properties below, and 40 (Morrison with CESM aerosol) with its port.
+    # The WRF-numbered rows are otherwise unchanged.
     assert set(restart.MICROPHYSICS_ALGORITHM_IDENTITIES) == {
-        0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 30, 50, 106} | set(NAMED_MP_IDS)
+        0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 30, 40, 50, 106} | set(NAMED_MP_IDS)
     fsbm_identity = restart.MICROPHYSICS_ALGORITHM_IDENTITIES[30]
     assert fsbm_identity not in {
         value for key, value in restart.MICROPHYSICS_ALGORITHM_IDENTITIES.items()
