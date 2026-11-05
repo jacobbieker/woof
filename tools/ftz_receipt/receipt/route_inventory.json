@@ -5377,7 +5377,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 272,
+      "line": 284,
       "column": 38,
       "surface": "package",
       "constructor": "ElementwiseKernel",
