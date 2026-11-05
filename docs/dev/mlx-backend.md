@@ -336,8 +336,13 @@ The partial-depth band (Phase D5) keeps its own measurements:
 
 `tools/metal_translation_census.py --hex --translate-only` translates every
 unit the hex kernel pack holds (`woof.hex.cuda_backend.aot_build.pack_inventory`:
-the KernelCache declarations and the recorded direct and raw NVRTC compiles,
-strict and fast; CuPy's generated kernels are the facade's). Translation
+the KernelCache declarations and the recorded direct and raw NVRTC compiles;
+CuPy's generated kernels are the facade's). The inventory's sources and
+options come from both numerics modes, but the census translates every row
+under the process's own numerics: fast by default, where a strict row's
+`--fmad=false` is dropped as a fast compile drops it (rows marked
+`-DGPUWM_PREPARATION_IDENTITY=1` keep it); `--retain` translates as
+`GPUWM_WRF_EXACT=1`, strict. Translation
 needs no Metal device and no MLX: only libclang's Python bindings and a
 `clang` or `clang++` on `PATH` (the preprocessor). On Linux the `mlx` pixi
 environment does not exist (it is osx-arm64 only), so put the bindings of
