@@ -37,6 +37,8 @@ three module globals of the hex runtime instead of editing them.
   translated without contraction in fast numerics too: its validator
   recomputes the producers' words, and Metal's ``fp contract(fast)`` may
   fuse the producer and the checker differently.
+* ``cuda_subcycle_graphs.graphs_enabled`` answers no: the facade captures
+  no CUDA graph, so the dynamics subcycle runs eager.
 """
 
 from __future__ import annotations
@@ -178,6 +180,12 @@ def install() -> bool:
     from woof.backend.metal import loader
     from . import cuda_physics_prep_v841 as prep
     loader.uncontracted_source(prep._CUDA_SOURCE)
+
+    # The facade's stream capture records no graph (MLX keeps its own lazy
+    # graph) and a replay launches nothing, so the dynamics subcycle runs
+    # eager: a replay would hand back the captured subcycle's words.
+    from . import cuda_subcycle_graphs
+    cuda_subcycle_graphs.graphs_enabled = lambda cells=None: False
     _INSTALLED = True
     return True
 
