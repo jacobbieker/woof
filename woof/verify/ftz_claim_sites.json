@@ -11,10 +11,10 @@
   ],
   "attribution_note": "route/mechanism attribution is judgment across five measured routes and is not machine-derivable; unattributed records carry asserted_token: null and the gate requires only that a token, once written, agrees with the receipt",
   "anchoring_note": "a site is its file plus the exact text of its line (anchor, anchor_sha256), and identical lines in one file are counted; line is where the generator last found the site, a hint the check does not fail on, so lines added or removed above a claim leave the census valid",
-  "site_count": 4590,
+  "site_count": 4597,
   "site_count_by_kind": {
     "behavioural": 67,
-    "prose": 4523
+    "prose": 4530
   },
   "sites": [
     {
@@ -14605,7 +14605,7 @@
     },
     {
       "file": "tests/test_kernel_manifest.py",
-      "line": 453,
+      "line": 454,
       "kind": "prose",
       "anchor": "# since the land no-FTZ route; it constructs no RawModule any more.",
       "anchor_sha256": "fd3c1961a2d2f7b8c893fbcb33c06f425d2d2694c0a11878df92b53959fe876a",
@@ -14616,7 +14616,7 @@
     },
     {
       "file": "tests/test_kernel_manifest.py",
-      "line": 487,
+      "line": 488,
       "kind": "prose",
       "anchor": "def test_preparation_nvrtc_route_preserves_subnormals_and_records_its_options():",
       "anchor_sha256": "80a1040a9f06083acb4675ca91433ceda1c1578a87fd4096ba345f0658c8d559",
@@ -14627,7 +14627,7 @@
     },
     {
       "file": "tests/test_kernel_manifest.py",
-      "line": 488,
+      "line": 489,
       "kind": "prose",
       "anchor": "from tools.ftz_receipt import route_inventory",
       "anchor_sha256": "6088a01a0e53f748093356e2cee0c9141e0f15cf903c5608a3456543f938f6db",
@@ -14638,7 +14638,7 @@
     },
     {
       "file": "tests/test_kernel_manifest.py",
-      "line": 498,
+      "line": 499,
       "kind": "prose",
       "anchor": "assert recentered._CUDA_OPTIONS == (\"-std=c++17\", \"--fmad=false\", \"--ftz=false\")",
       "anchor_sha256": "e19c519096dff44dc911bbc613cb830120174d760278ca38fc9e5b7c182b00d3",
@@ -14649,7 +14649,7 @@
     },
     {
       "file": "tests/test_kernel_manifest.py",
-      "line": 502,
+      "line": 503,
       "kind": "prose",
       "anchor": "from tools.ftz_receipt import route_inventory",
       "anchor_sha256": "6088a01a0e53f748093356e2cee0c9141e0f15cf903c5608a3456543f938f6db",
@@ -14660,7 +14660,7 @@
     },
     {
       "file": "tests/test_kernel_manifest.py",
-      "line": 509,
+      "line": 510,
       "kind": "prose",
       "anchor": "assert ruc_spp.MODULE_OPTIONS == (\"-std=c++17\", \"--fmad=false\", \"--ftz=false\")",
       "anchor_sha256": "8f343bf7035c8f1fe66eb17c2acaa252d8231879385aca6c94e3d2f511bb2263",
@@ -14671,7 +14671,7 @@
     },
     {
       "file": "tests/test_kernel_manifest.py",
-      "line": 512,
+      "line": 513,
       "kind": "prose",
       "anchor": "def test_kf_nvrtc_route_keeps_subnormals_and_contracts_nothing():",
       "anchor_sha256": "0fdad93e32735cf015d68d2d191298ff56cdf7439a18ec7b53db492a2e4a8b20",
@@ -14682,7 +14682,7 @@
     },
     {
       "file": "tests/test_kernel_manifest.py",
-      "line": 514,
+      "line": 515,
       "kind": "prose",
       "anchor": "and no flush -- CuPy's RawModule appends -ftz=true, and the flushed",
       "anchor_sha256": "ae4ae71eacbe36a35b9a6b76d613f6eddedb8b5b5b9667d72c5a5220c9a99e11",
@@ -14693,7 +14693,7 @@
     },
     {
       "file": "tests/test_kernel_manifest.py",
-      "line": 516,
+      "line": 517,
       "kind": "prose",
       "anchor": "from tools.ftz_receipt import route_inventory",
       "anchor_sha256": "6088a01a0e53f748093356e2cee0c9141e0f15cf903c5608a3456543f938f6db",
@@ -14704,7 +14704,7 @@
     },
     {
       "file": "tests/test_kernel_manifest.py",
-      "line": 523,
+      "line": 524,
       "kind": "prose",
       "anchor": "assert kf.KF_MODULE_OPTIONS == (\"-std=c++17\", \"--fmad=false\", \"--ftz=false\")",
       "anchor_sha256": "03e0554a96007cd464704a4d4ec93d3d12ab680f31fd5cc66f3d342b9524f3fb",
@@ -14715,7 +14715,7 @@
     },
     {
       "file": "tests/test_kernel_manifest.py",
-      "line": 547,
+      "line": 548,
       "kind": "prose",
       "anchor": "assert shortwave == [\"('-std=c++17', '--ftz=false')\"]",
       "anchor_sha256": "cf87a9ae8192178fb2bf95009498c4b859c19b9d1c497e094f6f50199b2c3e13",
@@ -14726,7 +14726,7 @@
     },
     {
       "file": "tests/test_kernel_manifest.py",
-      "line": 587,
+      "line": 588,
       "kind": "prose",
       "anchor": "``rrtmg_sw`` compiles with ``--ftz=false`` because CuPy's RawModule route",
       "anchor_sha256": "8619333d555df2a705d6f0a34eb360732d8e932be40695f3c7f16d6f93e8a667",
@@ -14737,7 +14737,7 @@
     },
     {
       "file": "tests/test_kernel_manifest.py",
-      "line": 588,
+      "line": 589,
       "kind": "prose",
       "anchor": "would inject ``-ftz=true`` and flush the subnormal transmittance products",
       "anchor_sha256": "24e63fdad9019002a23c6afc6955de6a38241327801293327ca31cc68dcd5bbb",
@@ -14748,7 +14748,7 @@
     },
     {
       "file": "tests/test_kernel_manifest.py",
-      "line": 598,
+      "line": 599,
       "kind": "prose",
       "anchor": "'                      options=(\"-std=c++17\", \"--ftz=false\"),',",
       "anchor_sha256": "0b18200d28df69cd9aff0845a1717d945564724634663be3ac7acaa097a19897",
@@ -14759,7 +14759,7 @@
     },
     {
       "file": "tests/test_kernel_manifest.py",
-      "line": 703,
+      "line": 704,
       "kind": "prose",
       "anchor": "expected_options = [\"-std=c++17\", \"--fmad=false\", \"--ftz=false\",",
       "anchor_sha256": "af094699b2ef5e660da2d0169d6c761c0e341b06a4d5aaa6d0f172e98a7a4c50",
@@ -14770,7 +14770,7 @@
     },
     {
       "file": "tests/test_kernel_manifest.py",
-      "line": 708,
+      "line": 709,
       "kind": "prose",
       "anchor": "expected_options = [\"-std=c++17\", \"--fmad=false\", \"--ftz=false\",",
       "anchor_sha256": "af094699b2ef5e660da2d0169d6c761c0e341b06a4d5aaa6d0f172e98a7a4c50",
@@ -21105,6 +21105,28 @@
       "attribution": "unattributed"
     },
     {
+      "file": "tests/test_strict_float32_power.py",
+      "line": 14,
+      "kind": "prose",
+      "anchor": "subnormal and negative bases, and IEEE special cases).",
+      "anchor_sha256": "f7dd4fdb6c244990a290df79cdde51a016033ca07d334dca7bedb81a5043f092",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/test_strict_float32_power.py",
+      "line": 89,
+      "kind": "prose",
+      "anchor": "\"\"\"Rows of CuPy's powf words, subnormal and special cases among them.\"\"\"",
+      "anchor_sha256": "f43a8c27654f46705077a59c45ff50de5ebebb3b3c808ec6ce46f93a4d64dbcb",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
       "file": "tests/test_surface_subnormal_units_gpu.py",
       "line": 8,
       "kind": "prose",
@@ -22030,7 +22052,7 @@
     },
     {
       "file": "tests/test_wdm6_wrf461_oracle.py",
-      "line": 324,
+      "line": 343,
       "kind": "prose",
       "anchor": "# into which a subnormal value enters a call; every other column's",
       "anchor_sha256": "691b6736d8e1099d7ab0cb4edd57ee3eff0650b0c2911bcad824e728ca069cdd",
@@ -22041,7 +22063,7 @@
     },
     {
       "file": "tests/test_wdm6_wrf461_oracle.py",
-      "line": 328,
+      "line": 347,
       "kind": "prose",
       "anchor": "fed = _columns_fed_a_subnormal(case, defined)",
       "anchor_sha256": "651c5a2cc40ad684524ffb65364803d64bfa34acfe70a0ba2887e1a09dcd8f65",
@@ -38123,7 +38145,7 @@
     },
     {
       "file": "tools/rustwx/crates/static-fields/src/projection/npmath.rs",
-      "line": 341,
+      "line": 348,
       "kind": "prose",
       "anchor": "return f32::from_bits(1); // smallest positive subnormal",
       "anchor_sha256": "edc4a0083e7ad3f40577136170b44d3981a0e6ec9da8835cfd0e1456f3823d2b",
@@ -38134,7 +38156,7 @@
     },
     {
       "file": "tools/rustwx/crates/static-fields/src/projection/npmath.rs",
-      "line": 357,
+      "line": 364,
       "kind": "prose",
       "anchor": "return f32::from_bits(0x8000_0001); // smallest negative subnormal",
       "anchor_sha256": "5c097cdfd085578f8cf5b754d7cd8bdfa80e4999b7fa7deccfcf0fb1234c8941",
@@ -41192,7 +41214,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 247,
+      "line": 253,
       "kind": "prose",
       "anchor": "_SUBNORMAL_KERNELS: dict = {}",
       "anchor_sha256": "a52ccbed91691f80f17e3058a1fe98466f823e158ac784968051f214c40bf31e",
@@ -41203,7 +41225,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 250,
+      "line": 256,
       "kind": "prose",
       "anchor": "def _keeps_subnormals() -> bool:",
       "anchor_sha256": "79a90ae29e2d4def4dfe467674c3ae1adbfb619c944fc855578f9cba06191075",
@@ -41214,7 +41236,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 262,
+      "line": 268,
       "kind": "prose",
       "anchor": "def _subnormal_arith(np_name, a, b):",
       "anchor_sha256": "06202aafff6ab27a0bf6d4e9be09bea949eb921408fcc8bb3514cab3e2d461df",
@@ -41225,7 +41247,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 264,
+      "line": 270,
       "kind": "prose",
       "anchor": "if np_name in _SUBNORMAL_ARITH:",
       "anchor_sha256": "d483f4c64b67846cd183014f2bcdc753f17f36360728e58224f6a74dcfc88c33",
@@ -41236,7 +41258,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 265,
+      "line": 271,
       "kind": "prose",
       "anchor": "key, out, body = _SUBNORMAL_ARITH[np_name], \"float32 z\", f\"z = x {_SUBNORMAL_ARITH[np_name]} y\"",
       "anchor_sha256": "e68e347b3193a8a0c45e6ec7ae862840b425bb84c4434633d04b075cf203564a",
@@ -41247,7 +41269,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 266,
+      "line": 272,
       "kind": "prose",
       "anchor": "elif np_name in _SUBNORMAL_EXPR:",
       "anchor_sha256": "4bc5965e314234e1b1adfa0b29e30358a678b11919f1cb23beaa3df99127d2c8",
@@ -41258,7 +41280,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 267,
+      "line": 273,
       "kind": "prose",
       "anchor": "key, out, body = np_name, \"float32 z\", _SUBNORMAL_EXPR[np_name]",
       "anchor_sha256": "afa450915969ff30f2bb19502dda5e9f9ac8c8378661ac9aaf2e8c7c6c716b99",
@@ -41269,7 +41291,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 269,
+      "line": 277,
       "kind": "prose",
       "anchor": "key, out, body = np_name, \"bool z\", f\"z = x {_SUBNORMAL_COMPARE[np_name]} y\"",
       "anchor_sha256": "5764164d1fc06eea1874484d2f52e16485aa9addc85a8ccf721c9303c5aa36ea",
@@ -41280,7 +41302,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 270,
+      "line": 278,
       "kind": "prose",
       "anchor": "k = _SUBNORMAL_KERNELS.get(key)",
       "anchor_sha256": "e440ca680d7bcc6842819faee4a4dc15579216a7ec64a41ee0f32c563ec00a71",
@@ -41291,7 +41313,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 272,
+      "line": 284,
       "kind": "prose",
       "anchor": "k = _SUBNORMAL_KERNELS[key] = ElementwiseKernel(",
       "anchor_sha256": "89e663ae5cb590f96d92847a797fba1ce0570987645aa77d460aeb9be9aff5db",
@@ -41302,7 +41324,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 294,
+      "line": 308,
       "kind": "prose",
       "anchor": "if (not involves_f64 and _keeps_subnormals()",
       "anchor_sha256": "32bd6cd1e11c0767c0558428190e8d382b3ab2833fde4c522bba729033de1612",
@@ -41313,10 +41335,10 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 295,
+      "line": 309,
       "kind": "prose",
-      "anchor": "and ((np_name in _SUBNORMAL_ARITH or np_name in _SUBNORMAL_EXPR)",
-      "anchor_sha256": "ee17c31c1ec38668b04f9927484a711db6e328c2de76a0aa122e78e8ac690439",
+      "anchor": "and ((np_name in _SUBNORMAL_ARITH or np_name in _SUBNORMAL_EXPR",
+      "anchor_sha256": "50dd5f1d69c9190dbb48d4ab7e4e1cc90d35851dba62df615df0513fee6b6413",
       "route": null,
       "mechanism": null,
       "asserted_token": null,
@@ -41324,7 +41346,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 297,
+      "line": 312,
       "kind": "prose",
       "anchor": "or np_name in _SUBNORMAL_COMPARE and _operands_f32(hints))):",
       "anchor_sha256": "fc24c687633e78dd061f9aaf32922e7fe7f8efe894e8e61553e9a7ad384a6e0e",
@@ -41335,7 +41357,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 298,
+      "line": 313,
       "kind": "prose",
       "anchor": "result = _subnormal_arith(np_name, args[0], args[1])",
       "anchor_sha256": "341ba2e9af3e5e2c17dc31a4d3d6c7a557027554e53ab8ef65655175fe0b7542",
@@ -42688,7 +42710,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 2973,
+      "line": 2975,
       "kind": "prose",
       "anchor": "\"\"\"``retain_subnormals`` with inheritance: ``f32s`` converts to the",
       "anchor_sha256": "12b6d2626363800c88805ed13cbec521d5d3b83fca81a41a14a441a1b9c5a075",
@@ -42699,7 +42721,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 3201,
+      "line": 3203,
       "kind": "prose",
       "anchor": "retain_subnormals: bool = False, defines=(), include_dirs=()) -> TranslatedUnit:",
       "anchor_sha256": "47fd7ebc528620cc2464226557940435e6b31ff69d0a6823a16e68815c3e9e9c",
@@ -42710,7 +42732,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 3204,
+      "line": 3206,
       "kind": "prose",
       "anchor": "``retain_subnormals``: the unit's ``float`` is ``f32s`` (gradual",
       "anchor_sha256": "462887cb8437e000a5a26f34dc6f0238ecf1081bee9e8728a5ed4a8f7bd4c853",
@@ -42721,7 +42743,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 3206,
+      "line": 3208,
       "kind": "prose",
       "anchor": "f32s.h) -- CUDA's --ftz=false.",
       "anchor_sha256": "9b45fddd4b1773c521d687ae9d3267b6cff3522013530e18c9d88932ca68cbff",
@@ -42732,7 +42754,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 3212,
+      "line": 3214,
       "kind": "prose",
       "anchor": "if retain_subnormals:",
       "anchor_sha256": "8747498c0775c864e7c0df98116ca012f99107565ff4d5a71c1c75fc64505c17",
@@ -42743,7 +42765,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 3216,
+      "line": 3218,
       "kind": "prose",
       "anchor": "result = _Rewriter(text, tu, unit=unit, retain_subnormals=retain_subnormals,",
       "anchor_sha256": "22ac765d2130695c1bc0cd1ff567ecfa927cca0ef9a3e1254530b4453c41e017",
@@ -42754,7 +42776,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 3218,
+      "line": 3220,
       "kind": "prose",
       "anchor": "result.msl = (prelude(contract=contract, retain_subnormals=retain_subnormals,",
       "anchor_sha256": "723e62201b59b0b79a02ae919fe3bdce0c3c3034cf88dcffde5e9b6d8854bdcb",
@@ -42769,6 +42791,61 @@
       "kind": "prose",
       "anchor": "// Inline PTX without .ftz, rewritten (rewrite_ptx_asm): IEEE binary32 with subnormals.",
       "anchor_sha256": "d3228d2b442fc8800196511a8a4640dd2ed999ab9b96c5b4f824ff044e772280",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "woof/backend/translate/cuda_powf.cuh",
+      "line": 6,
+      "kind": "prose",
+      "anchor": "// strict options woof/wrf_exact.py gives CuPy's kernels (--ftz=false,",
+      "anchor_sha256": "6fa61bfe5cb4149640aa9102927e2661d3761d460fea46e190f59bf33e0db524",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "woof/backend/translate/cuda_powf.cuh",
+      "line": 9,
+      "kind": "prose",
+      "anchor": "// rounded to nearest, with subnormals kept (float is f32s in this process).",
+      "anchor_sha256": "87d270bec2a3a0c0c97987031b981e3ca55b20709ffed5cfb7ae45d1416e4b79",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "woof/backend/translate/cuda_powf.cuh",
+      "line": 11,
+      "kind": "prose",
+      "anchor": "// One step is not transcribed: the PTX's rcp.approx.ftz.f32 (the MUFU",
+      "anchor_sha256": "d269b4d7339126b04130dd8bd23bf12131dee7404469b61b36ef61df265f2df1",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "woof/backend/translate/cuda_powf.cuh",
+      "line": 19,
+      "kind": "prose",
+      "anchor": "// pairs (subnormal, negative and integer-y cases among them) and for 234",
+      "anchor_sha256": "f91de53e415a0d61f48ff30d16432ba1bf14f25cf7bb58a5a78ee03674a8c456",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "woof/backend/translate/cuda_powf.cuh",
+      "line": 42,
+      "kind": "prose",
+      "anchor": "const float r = __frcp_rn(__fadd_rn(m, 1.0f));  // CUDA: rcp.approx.ftz.f32",
+      "anchor_sha256": "24b8dbcd22826486edbac71aa01d3a822890c5797cff8355856a0226d3af7196",
       "route": null,
       "mechanism": null,
       "asserted_token": null,
