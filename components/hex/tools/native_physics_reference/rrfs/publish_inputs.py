@@ -35,10 +35,12 @@ def publish_inputs(source, destination, ready, staging_ready):
     # does not ask), so the stage is writable for the rename alone and is
     # sealed again under whichever name it then holds, the rename failed or not.
     stage.chmod(stage.stat().st_mode | 0o200)
+    renamed = False
     try:
         stage.rename(destination)
+        renamed = True
     finally:
-        sealed = destination if destination.exists() else stage
+        sealed = destination if renamed else stage
         sealed.chmod(sealed.stat().st_mode & ~0o222)
     with ready.open('a') as stream:
         fcntl.flock(stream, fcntl.LOCK_EX)
