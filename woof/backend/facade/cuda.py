@@ -9,6 +9,7 @@ stream has drained, which is what woof's timing code reads them for.
 
 from __future__ import annotations
 
+import threading
 import time
 import types
 
@@ -122,9 +123,13 @@ def _attributes() -> dict:
     return _ATTRIBUTES
 
 
-class Stream:
-    _current: "Stream | None" = None
+#: Each thread's current stream and the ones its ``with`` blocks replaced,
+#: as CuPy keeps them (thread-local): a worker thread's ``with Stream()``
+#: must not change the stream its caller sees.
+_STREAMS = threading.local()
 
+
+class Stream:
     def __init__(self, null=False, non_blocking=False, ptr=0, priority=0):
         self._null = null
         self.ptr = 0 if null else id(self)
@@ -132,16 +137,18 @@ class Stream:
         self.priority = int(priority)
 
     def __enter__(self):
-        self._prev = Stream._current
-        Stream._current = self
+        if not hasattr(_STREAMS, "saved"):
+            _STREAMS.saved = []
+        _STREAMS.saved.append(getattr(_STREAMS, "current", None))
+        _STREAMS.current = self
         return self
 
     def __exit__(self, *exc):
-        Stream._current = self._prev
+        _STREAMS.current = _STREAMS.saved.pop()
         return False
 
     def use(self):
-        Stream._current = self
+        _STREAMS.current = self
         return self
 
     def synchronize(self):
@@ -179,7 +186,7 @@ Stream.null = Stream(null=True)
 
 
 def get_current_stream(device_id=None):
-    return Stream._current or Stream.null
+    return getattr(_STREAMS, "current", None) or Stream.null
 
 
 class Event:
@@ -668,8 +675,18 @@ def _func_get_attribute(attribute, function_ptr):
     return 0
 
 
+def _occupancy_max_active_blocks(function_ptr, block_size, dynamic_smem_bytes=0):
+    """cuOccupancyMaxActiveBlocksPerMultiprocessor: the blocks of
+    ``block_size`` threads one core's thread budget holds (no register or
+    local-frame limit to report).  Callers size column tiles with it; the
+    tile does not change any kernel's words."""
+    per_core = int(_attributes()["MaxThreadsPerMultiProcessor"])
+    return max(1, per_core // max(1, int(block_size)))
+
+
 driver = types.SimpleNamespace(
     CUDADriverError=RuntimeError, funcGetAttribute=_func_get_attribute,
+    occupancyMaxActiveBlocksPerMultiprocessor=_occupancy_max_active_blocks,
     CU_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK=0, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES=1,
     CU_FUNC_ATTRIBUTE_CONST_SIZE_BYTES=2, CU_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES=3,
     CU_FUNC_ATTRIBUTE_NUM_REGS=4, CU_FUNC_ATTRIBUTE_PTX_VERSION=5,
@@ -814,7 +831,7 @@ def __getattr__(name):
 # package path.
 import sys as _sys  # noqa: E402
 
-for _name in ("compiler", "runtime", "driver", "nvrtc"):
+for _name in ("compiler", "runtime", "driver", "nvrtc", "function"):
     _sys.modules.setdefault(f"cupy.cuda.{_name}", globals()[_name])
 # CuPy's low-level bindings package, by the names woof imports them
 for _name, _value in (("cupy_backends.cuda.api.runtime", runtime), ("cupy_backends.cuda.api.driver", driver),
