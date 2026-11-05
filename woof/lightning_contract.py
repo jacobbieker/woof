@@ -22,7 +22,7 @@ LIGHTNING_OPTIONS = {
 }
 # Producers exposed by this engine base, distinct from WRF admission.
 CLOUD_TOP_PROVIDERS = {3: "ltng_ktop_deep", 5: "ltng_ktop_deep"}
-GRAUPEL_PROVIDERS = (2, 6, 8, 9, 10, 16, 18, 24, 28, 30, 106, 900)
+GRAUPEL_PROVIDERS = (2, 6, 8, 9, 10, 16, 18, 24, 28, 30, 40, 106, 900)
 FIELD_METADATA = {
     "ic_flashcount": {"restart": True, "history": True, "units": "#", "description": "Accumulated IC flash count"},
     "cg_flashcount": {"restart": True, "history": True, "units": "#", "description": "Accumulated CG flash count"},

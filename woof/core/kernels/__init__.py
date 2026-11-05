@@ -316,6 +316,14 @@ _EXTRA_HEADERS: dict[str, tuple[str, ...]] = {
                          "glibc_flt64.cuh", "thompson_classic_constants.cuh"),
     "morrison": ("glibc_flt32.cuh", "glibc_flt32_extra.cuh", "glibc_flt64.cuh",
                  "glibc_trig_flt32.cuh", "morrison_constants.cuh"),
+    # mp_physics = 40 (WRF v4.7.1 morr_tm_aero): morrison.cu compiled after
+    # the aero module's init words and prescribed-aerosol procedures, which
+    # define MORR_AERO (morrison_aero.cu says why).  A new module, so the
+    # "morrison" unit's assembled source keeps its bytes.
+    "morrison_aero": ("glibc_flt32.cuh", "glibc_flt32_extra.cuh",
+                      "glibc_flt64.cuh", "glibc_trig_flt32.cuh",
+                      "morrison_constants.cuh", "morrison_aero_constants.cuh",
+                      "morrison_aero_support.cuh", "morrison.cu"),
     "gsd_initial_reflectivity": ("glibc_flt32.cuh", "glibc_flt64.cuh",
                                  "thompson_fork_constants.cuh", "thompson_fork.cu"),
     "thompson_fork": ("glibc_flt32.cuh", "glibc_flt64.cuh",
@@ -543,7 +551,7 @@ _NO_FTZ_MODULES = frozenset({"g3", "nsas", "sfclay", "myjsfc", "mynn_surface", "
 # The exact chain's strict intake contracts (GPUWM_WRF_EXACT=1): these units
 # also compile without contraction in a strict process.  A default process
 # keeps the grants above, so its options are 2.9.1's.
-_STRICT_NO_FMAD_MODULES = frozenset({"morrison", "rrtmgp_rte", "noah_init",
+_STRICT_NO_FMAD_MODULES = frozenset({"morrison", "morrison_aero", "rrtmgp_rte", "noah_init",
     "wdm6", "milbrandt2_zet", "wdm6_refl", "rrtmgp_gas", "milbrandt2",
     "rrtmgp_cloud", "noah", "myjsfc", "kessler", "thompson_classic",
     "myjpbl", "wsm6", "wind_farm"})

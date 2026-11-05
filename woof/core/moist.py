@@ -109,6 +109,12 @@ MORRISON_SPECIES = ICE_MASS_SPECIES + MORRISON_NUMBER_SPECIES
 THOMPSON_NUMBER_SPECIES = ("nr", "ni")
 TRANSPORTED_NUMBER_SPECIES = MORRISON_NUMBER_SPECIES
 
+#: Morrison with CESM aerosol (mp=40, package morr_tm_aero) transports the
+#: droplet number too: Registry.EM_COMMON:3047 scalar:qnc,qni,qns,qnr,qng,
+#: and its driver writes NC back every call (module_mp_morr_two_moment_
+#: aero.F:1142-1145).
+MORR_AERO_NUMBER_SPECIES = ("nc",) + MORRISON_NUMBER_SPECIES
+
 # Thompson mp=28 (aerosol-aware) additionally transports the prognostic cloud
 # droplet number and the two aerosol number tracers.  WRF registers qnwfa and
 # qnifa in the same ``scalar`` package as qnc/qnr/qni
@@ -303,6 +309,10 @@ def _extra_water_species(state: DomainState) -> tuple[str, ...]:
     # filter below intentionally excludes diagnostic nc and cannot own it.
     if getattr(state, "nn", None) is not None:
         return ICE_MASS_SPECIES + WDM6_NUMBER_SPECIES
+    # mp=40 alone keeps an RK time copy of nc among the states that reach
+    # here (mp=9 and mp=28, the others with nc0, are selected above).
+    if getattr(state, "nc0", None) is not None:
+        return ICE_MASS_SPECIES + MORR_AERO_NUMBER_SPECIES
     numbers = tuple(name for name in TRANSPORTED_NUMBER_SPECIES
                     if getattr(state, name, None) is not None)
     return tuple(n for n in ICE_MASS_SPECIES

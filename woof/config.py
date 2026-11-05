@@ -2292,6 +2292,8 @@ MYNN_QN_FLAG_SPECIES: dict[int, tuple[str, ...]] = {
     8: ("qni",), 9: ("qnc", "qni"), 10: ("qni",), 16: ("qnc",),
     18: ("qni",), 28: ("qnc", "qni", "qnwfa", "qnifa", "qnbca"),
     30: ("qnc", "qni"), 50: ("qni",),
+    # morr_tm_aero (40): scalar:qnc,qni,qns,qnr,qng (Registry.EM_COMMON:3047).
+    40: ("qnc", "qni"),
     # TEMPO aerosol-aware: f_nc/f_ni/f_nwfa/f_nifa true, no nbca (NOAA
     # MPAS 1d6e370e mpas_atmphys_driver_pbl.F:1119 stages nc/nifa/nwfa
     # together; the engine's TEMPO row carries no nbca scalar).
@@ -2437,6 +2439,8 @@ SCALAR_PBLMIX_SPECIES: dict[int, tuple[str, ...]] = {
     18: ("qndrop", "qni", "qnn", "qvolh"),
     28: ("nc", "ni", "nwfa", "nifa"),
     50: ("ni", "qir", "qib"),
+    # morr_tm_aero (40) qnc,qni,qns,qnr,qng -> nc,ni.
+    40: ("nc", "ni"),
     900: ("nc", "ni", "nwfa", "nifa"),
 }
 
@@ -2778,9 +2782,10 @@ UW_PBL_SCHEME = 9
 #: arm); for every other scheme WRF hands the PBL its zero dummy slot and
 #: the tendency goes nowhere.  Registry.EM_COMMON package lines: thompson
 #: (8) and thompsonaero (28) scalar:qni; milbrandt2mom (9) qni; morr_two_
-#: moment (10) qni; nssl_2mom (18) qni; p3_1category (50) qni.
+#: moment (10) and morr_tm_aero (40) qni; nssl_2mom (18) qni;
+#: p3_1category (50) qni.
 UW_PBL_ICE_NUMBER_SPECIES = {8: "ni", 9: "ni", 10: "ni", 18: "qni",
-                             28: "ni", 50: "ni"}
+                             28: "ni", 40: "ni", 50: "ni"}
 
 #: ``bl_pbl_physics`` values in woof's schema.  0/1/2/5/9/11 are WRF's --
 #: 2 is MYJ (module_bl_myjpbl.F), 9 the UW moist-turbulence PBL
@@ -3563,7 +3568,8 @@ _MP_PHYSICS_SCHEMA_MENU = (
     "(Milbrandt-Yau two-moment), 10 (Morrison two-moment), 16 (WDM6 "
     "double-moment warm rain), 18 (NSSL two-moment), 24 (WSM7 "
     "single-moment with hail), 28 (Thompson aerosol-aware), 30 "
-    "(FAST_SBM spectral bin), 50 (P3 one-category), 96 (MAD-WRF passive "
+    "(FAST_SBM spectral bin), 40 (Morrison with CESM aerosol, "
+    "aercu_opt = 0), 50 (P3 one-category), 96 (MAD-WRF passive "
     "hydrometeors), 106 (WSM6R, the revised WSM6), or \"tempo\" (TEMPO, "
     "WOOF id 900)"
 )
@@ -3577,7 +3583,7 @@ _MP_PHYSICS_SCHEMA_MENU = (
 #: and its refusal text disagree in front of a user.
 #: Sorted; it holds the named rows of woof.microphysics_schemes too
 #: (NAMED_MP_IDS: MAD-WRF's 96 and TEMPO's 900).
-MP_PHYSICS_ACCEPTED = (0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 30, 50, 96, 106, 900)
+MP_PHYSICS_ACCEPTED = (0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 30, 40, 50, 96, 106, 900)
 
 
 #: WDM6's two unported siblings, held as a table for the reason
@@ -3663,12 +3669,6 @@ _MP_UNPORTED_SCHEMES = {
         "ported. It predicts graupel number and volume (qng, qvolg), so "
         "graupel density varies toward hail; Thompson (mp_physics=8 or 28) "
         "carries fixed-density graupel and is not run in its place."
-    ),
-    40: (
-        "mp_physics=40 (Morrison with CESM aerosol, package morr_tm_aero) is "
-        "not ported. It activates droplets from prescribed aerosol modes "
-        "(CCN1-CCN7) that woof does not prepare; Morrison (mp_physics=10) "
-        "uses a fixed droplet number and is not run in its place."
     ),
     56: (
         "mp_physics=56 (NTU multi-moment, package ntu) is not ported. It "

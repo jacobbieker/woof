@@ -11,7 +11,7 @@ import pytest
 #: production validator over range(0, 107), exactly as
 #: ``test_the_accepted_selector_list_this_module_uses_is_the_real_one``
 #: does; not hand-extended.
-_ACCEPTED_MP_PHYSICS = (0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 30, 50, 96, 106, 900)
+_ACCEPTED_MP_PHYSICS = (0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 30, 40, 50, 96, 106, 900)
 
 #: The admitted selectors without a cloud-optics coupling: FAST_SBM (30)
 #: alone, refused against the 4/4 pair with the legacy-RRTMG remedy until

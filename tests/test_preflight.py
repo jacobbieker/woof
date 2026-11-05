@@ -2473,7 +2473,7 @@ def test_mp50_is_deliberately_out_of_the_six_mass_shape_package():
     chained = orelse[0].test
     assert isinstance(chained, ast.Compare)
     assert isinstance(chained.ops[0], ast.In)
-    assert list(eval(compile(ast.Expression(chained.comparators[0]), "<six-mass-membership>", "eval"), pf.__dict__)) == [6, 8, 9, 10, 16, 18, 24, 28, 106], (  # Lin (2) and FAST_SBM (30) own arms; TEMPO is a named row
+    assert list(eval(compile(ast.Expression(chained.comparators[0]), "<six-mass-membership>", "eval"), pf.__dict__)) == [6, 8, 9, 10, 16, 18, 24, 28, 40, 106], (  # Morrison-aero (40) carries the six masses; Lin (2) and FAST_SBM (30) own arms; TEMPO is a named row
         "the six-mass membership tuple moved; see Registry.EM_COMMON "
         ":3021/:3024/:3025/:3026/:3031/:3033/:3036 for its members and "
         ":3038 for why 50 is not one of them")

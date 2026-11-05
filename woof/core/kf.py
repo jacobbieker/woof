@@ -168,7 +168,7 @@ def kf_phase_mode_for_microphysics(mp_physics: int) -> KFPhaseMode:
         return (KFPhaseMode.SEPARATE_ICE_SNOW if "qi" in row.species and "qs" in row.species
                 else KFPhaseMode.SEPARATE_SNOW if "qs" in row.species
                 else KFPhaseMode.NO_SEPARATE_SNOW)
-    if int(mp_physics) in (2, 6, 8, 9, 10, 16, 18, 24, 28, 30, 106):
+    if int(mp_physics) in (2, 6, 8, 9, 10, 16, 18, 24, 28, 30, 40, 106):
         return KFPhaseMode.SEPARATE_ICE_SNOW
     if int(mp_physics) == 1:
         return KFPhaseMode.WARM_RAIN

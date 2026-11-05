@@ -2398,6 +2398,11 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     "milbrandt2_zet": 0,
     "mono_advection": 0,
     "morrison": 5120,
+    # mp_physics = 40's unit as the frame probe reads it (its kernels are
+    # morrison.cu's; see kernel_frame_recordings.SM86_NVRTC_13_4_92): the
+    # composed kernels' frame is priced by the "morrison" row, which
+    # _MICROPHYSICS_KERNEL_MODULES[40] lists beside it.
+    "morrison_aero": 0,
     "microphysics_validation": 0,
     "wsm5": 7072,  # sm_120, NVRTC 12.9.86, unflushed WSM5_KMAX=80, 2026-10-08.
     # MYJ.  0 B since 2026-10-12, on every compiler that could re-read it
@@ -3534,6 +3539,8 @@ _MICROPHYSICS_KERNEL_MODULES: dict[int, tuple[str, ...]] = {
     # (woof/core/milbrandt2.py:291-296), so no refl kernel is ever loaded.
     9: ("milbrandt2", "microphysics_validation"),
     10: ("morrison", "microphysics_validation"),
+    # mp=40 runs the aero module and the Morrison refl10cm_hm kernel.
+    40: ("morrison_aero", "morrison", "microphysics_validation"),
     # WDM6 launches ONE column kernel plus the shared moisture validation
     # pass; its cold half is transcribed inside wdm6.cu rather than shared
     # with wsm6.cu, so mp=16 never loads the WSM6 translation unit.
@@ -3625,7 +3632,7 @@ _MICROPHYSICS_KERNEL_MODULES.update({
 #: 28 to the shared operator -- so an NSSL domain reserved refl.cu's
 #: per-thread frame for a translation unit the run cannot launch, and a
 #: reservation that is too large refuses a run that would have fit.
-_REFLECTIVITY_MICROPHYSICS = frozenset({1, 2, 3, 6, 8, 10, 16, 28, 96, 106})
+_REFLECTIVITY_MICROPHYSICS = frozenset({1, 2, 3, 6, 8, 10, 16, 28, 40, 96, 106})
 
 #: The DELIBERATE absences from :data:`_REFLECTIVITY_MICROPHYSICS`, each
 #: with the reason it is a decision and not an omission.  The pattern is
@@ -6450,8 +6457,8 @@ def scratch_slot_registry(cfg: RunConfig, *,
                      # for the same operator's NSSL arm -- a mass-shaped
                      # float32 the arena estimator otherwise never saw.
                      my2_zet_t=m)
-    if cfg.mp_physics == 10:
-        # woof/core/morrison.py apply, the slots it draws from its own
+    if cfg.mp_physics in (10, 40):
+        # woof/core/morrison.py apply (and morrison_aero.py's), the slots it draws from its own
         # lists (morrison_constants, CPU-only): the WRF preparation fields,
         # the WORK stack for one column call (tendencies, the scheme's
         # temperature, the stage hand-offs; the scheme runs in
@@ -6474,6 +6481,9 @@ def scratch_slot_registry(cfg: RunConfig, *,
                      mp_rainnc=s2, mp_rainncv=s2, mp_snownc=s2,
                      mp_snowncv=s2, mp_graupelnc=s2, mp_graupelncv=s2,
                      mp_sr=s2, refl_t=m, refl_10cm=m)
+        if cfg.mp_physics == 40:
+            # morrison_aero.kzh_on_w_levels: the PBL's exch_h on w levels.
+            slots.update(morr_aero_kzh=fl)
     if cfg.mp_physics:
         # microphysics.py spec-zone ring guard: per-edge snapshot buffers
         # for the WRF tile-clip exclusion (specified/nested only; exact
@@ -6609,7 +6619,7 @@ def scratch_slot_registry(cfg: RunConfig, *,
                 for name in column_row.species:
                     if name not in ("qv", "qc", "qr"):
                         slots["smag_r" + name] = m
-            if cfg.mp_physics in (2, 6, 8, 9, 10, 16, 18, 28, 30, 106):
+            if cfg.mp_physics in (2, 6, 8, 9, 10, 16, 18, 28, 30, 40, 106):
                 for name in ("qi", "qs", "qg"):
                     slots["smag_r" + name] = m
             if cfg.mp_physics == 30:
@@ -6640,6 +6650,10 @@ def scratch_slot_registry(cfg: RunConfig, *,
                     slots["smag_r" + name] = m
             if cfg.mp_physics == 10:
                 for name in ("nr", "ni", "ns", "ng"):
+                    slots["smag_r" + name] = m
+            if cfg.mp_physics == 40:
+                # woof/core/moist.py::MORR_AERO_NUMBER_SPECIES.
+                for name in ("nc", "nr", "ni", "ns", "ng"):
                     slots["smag_r" + name] = m
             if cfg.mp_physics == 5:
                 # woof/core/moist.py::FERRIER_SPECIES.
@@ -6716,9 +6730,9 @@ def scratch_slot_registry(cfg: RunConfig, *,
         # and_not_the_present_ice_one, which measures the prep's own
         # scratch requests on a real mp=50 state; before it existed that
         # edit left this whole module green.
-        if cfg.mp_physics not in (2, 5, 6, 8, 10, 16, 18, 24, 28, 30, 50, 106):
+        if cfg.mp_physics not in (2, 5, 6, 8, 10, 16, 18, 24, 28, 30, 40, 50, 106):
             slots["physics_qi"] = m                 # physics.py:1541-1545
-        if cfg.mp_physics not in (2, 6, 8, 10, 16, 18, 24, 28, 30, 106):
+        if cfg.mp_physics not in (2, 6, 8, 10, 16, 18, 24, 28, 30, 40, 106):
             slots["physics_qs"] = m                 # physics.py:1546-1550
     # FOUR producers write this one uint32 word and the disjunction has to
     # name every one of them: YSU (physics.py:_run_ysu), Shin-Hong
@@ -7438,8 +7452,10 @@ SCRATCH_SLOT_LIFETIME_AUDIT = (
         "or any dependent read"),
     ScratchSlotLifetime(
         ("morr_theta", "morr_rho", "morr_pii", "morr_dz",
-         "morr_work", "morr_ltrue", "morr_z8w"), "write_before_read",
-        "woof/core/morrison.py:apply; woof/core/kernels/morrison.cu:"
+         "morr_work", "morr_ltrue", "morr_z8w", "morr_aero_kzh"),
+        "write_before_read",
+        "woof/core/morrison.py:apply; woof/core/morrison_aero.py:apply "
+        "(morr_aero_kzh filled by kzh_on_w_levels); woof/core/kernels/morrison.cu:"
         "mo_process, mo_sediment_64/_256, mo_finalize",
         "Morrison preparation fields are rebuilt for every scheme call; "
         "LTRUE is zeroed before the first column call; each column call's "
@@ -8231,7 +8247,7 @@ def rrtmgp_column_shapes(
     shapes: dict[str, tuple[tuple[int, ...], int]] = {}
     lay = ["play", "tlay", "qv", "exner", "qc", "qr", "qi", "qs", "cldfra",
            "clwp", "ciwp", "reliq", "dgice"]
-    if cfg.mp_physics == 10:
+    if cfg.mp_physics in (10, 40):
         lay += ["nc", "nr", "ni", "ns", "effc", "effr", "effi", "effs"]
     elif (cfg.mp_physics in (3, 4, 6, 8, 16, 18, 24, 28, 106)
           or cfg.mp_physics in _named_three_radius_schemes()):

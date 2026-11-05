@@ -141,7 +141,7 @@ def prepare_moist_cq(state, cfg):
         qs = qg = state.scratch((nz, ny, nx), "moist_absent_mass")
         qs[...] = 0.0
         n_mass = 6
-    elif cfg.mp_physics in (2, 6, 8, 9, 10, 16, 18, 24, 28, 30, 106):
+    elif cfg.mp_physics in (2, 6, 8, 9, 10, 16, 18, 24, 28, 30, 40, 106):
         qi, qs, qg = state.qi, state.qs, state.qg
         n_mass = 7 if cfg.mp_physics in (9, 18, 24) else 6
     elif _mass_loading_species(cfg.mp_physics) == ("qi", "qs", "qg"):

@@ -1003,6 +1003,14 @@ def repair_moments(state: Mapping[str, object], *,
         # for P3 -- is the question genuinely open.
         exact = sorted(mp for mp, candidate in _STATIC_SCHEMES.items()
                        if detected == set(candidate.number_fields))
+        # Morrison with CESM aerosol (40) spells Morrison's five moments
+        # and has no ported repair: like Milbrandt-Yau it offers a rival
+        # identity, not a rival answer, so an exact tie is settled by the
+        # one scheme that carries an authority.
+        authored = [mp for mp in exact
+                    if _STATIC_SCHEMES[mp].repair_authority is not None]
+        if len(exact) > 1 and len(authored) == 1:
+            exact = authored
         candidates = exact if len(exact) == 1 else sorted(
             mp for mp, candidate in _STATIC_SCHEMES.items()
             if detected <= set(candidate.number_fields))
