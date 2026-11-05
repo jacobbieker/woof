@@ -232,6 +232,9 @@ CLEAR_AIR_FLOOR_DBZ: dict[int, float] = {
     # absence was drift, not a decision (audit R-015).
     16: -35.0,
     10: -35.0,
+    # Morrison with CESM aerosol: the same refl10cm_hm and -35 floor
+    # (module_mp_morr_two_moment_aero.F:1182-1190).
+    40: -35.0,
     18: 0.0,
     28: -35.0,
     # Milbrandt-Yau reports ONE clear-air number and it is not -35.  Its Z
@@ -816,7 +819,7 @@ def _host_reflectivity(state, cfg, temperature, pressure):
 
     out = np.empty((nz, ny, nx), dtype=np.float32)
     mp = int(cfg.mp_physics)
-    if mp == 10:
+    if mp in (10, 40):
         qr, nr = field("qr"), field("nr")
         qs, ns = field("qs"), field("ns")
         qg, ng = field("qg"), field("ng")

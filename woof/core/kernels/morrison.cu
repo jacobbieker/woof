@@ -39,6 +39,38 @@
 #define MORR_ROW37 1
 #endif
 
+// mp_physics = 40 (morr_tm_aero) is this unit compiled with the headers
+// morrison_aero_constants.cuh and morrison_aero_support.cuh in front
+// (module "morrison_aero"): MORR_AERO is then defined and the blocks below
+// marked MORR_AERO are the lines module_mp_morr_two_moment_aero.F adds to
+// or changes in this transcription (its init words: DCS and the three
+// words derived from it, morrison_aero_constants.cuh).  aercu_opt = 2
+// takes WRF's prescribed-aerosol path (iinum = INUM = 0, IACT = 4,
+// INUC = 2); any other value is the constant-droplet path (iinum = 1).
+#ifdef MORR_AERO
+#define MO_IINUM_ONE (aercu_opt != 2)
+#define MO_EFFC_NONE 2.49f
+#define MO_EFFI_NONE 4.99f
+#define MO_AERO_PROCESS_PARAMS , const float* __restrict__ w,             \
+    const float* __restrict__ kzh, const float* __restrict__ aerocu,      \
+    float* __restrict__ ccn, int write_ccn, int aercu_opt,                \
+    float aercu_fct, int* __restrict__ nuc_stop, long long ncell
+#define MO_AERO_SEDIMENT_PARAMS , int aercu_opt
+#define MO_AERO_SEDIMENT_ARGS , aercu_opt
+#define MO_AERO_FINALIZE_PARAMS , const float* __restrict__ w,            \
+    const float* __restrict__ kzh, float* __restrict__ efcg,              \
+    float* __restrict__ efig, float* __restrict__ efsg,                   \
+    float* __restrict__ wact, int aercu_opt
+#else
+#define MO_IINUM_ONE 1
+#define MO_EFFC_NONE 25.0f
+#define MO_EFFI_NONE 25.0f
+#define MO_AERO_PROCESS_PARAMS
+#define MO_AERO_SEDIMENT_PARAMS
+#define MO_AERO_SEDIMENT_ARGS
+#define MO_AERO_FINALIZE_PARAMS
+#endif
+
 #define MORR_KMAX_GENERIC 256
 #define MORR_KMAX_SHALLOW 64
 
@@ -264,6 +296,29 @@ __device__ float mo_gamma(float x)
 #define MO_QGSTEN 20
 #define MO_NWORK 21
 
+#ifdef MORR_AERO
+// MORR_AERO MICRO :2388-2687 (warm) and :3903-4218 (cold): droplet
+// activation, the branch WRF's switches reach (INUM = 0, ISUB = 0,
+// IBASE = 2, IACT = 4).
+__device__ __forceinline__ void mo_aero_activate(
+    float qc3d, float qc3dten, float dt, float w3d, float wvar, float t3d,
+    float rho, const float* naero, const float* maero, float xxlv,
+    float nc3d, float& nc3dten)
+{
+    if (qc3d + qc3dten * dt >= MO_QSMALL) {
+        float dum = w3d + wvar;
+        dum = FMAXK(dum, 0.10f);
+        if (dum >= 0.001f) {
+            dum = w3d + wvar;
+            float dum2 = ma_activate(dum, t3d, rho, naero, maero, xxlv);
+            dum2 = FDIV(dum2 - nc3d, dt);
+            dum2 = FMAXK(dum2, 0.0f);
+            nc3dten = nc3dten + dum2;
+        }
+    }
+}
+#endif
+
 // ---------------------------------------------------------------------
 // The per-level body of MORR_TWO_MOMENT_MICRO's first K loop
 // (:1275-3334).  One thread per cell; LTRUE is OR-ed per column.
@@ -279,13 +334,51 @@ extern "C" __global__ void mo_process(
     const float* __restrict__ qicuten, int has_cu,
     float* __restrict__ rho_out, float* __restrict__ work,
     int* __restrict__ ltrue, float dt, int rimed, long long nlocal,
-    int ncol, int col0, int ccols)
+    int ncol, int col0, int ccols MO_AERO_PROCESS_PARAMS)
 {
     const long long li = (long long)blockIdx.x * blockDim.x + threadIdx.x;
     if (li >= nlocal) return;
     const int col = col0 + (int)(li % ccols);
     const long long idx = (li / ccols) * ncol + col;
 #define W(p) work[(long long)(p) * nlocal + li]
+#ifdef MORR_AERO
+    // MORR_AERO driver :930-933 (WVAR from the PBL's KZH one w level up),
+    // :962-968 (CCN1_GS..CCN7_GS cleared) and :1018-1071 (aercu_opt = 2:
+    // NC is the scheme's input and the prescribed CESM aerosol becomes ten
+    // modes' mass and number, MICRO :1592-1597).
+    const bool prescribed = aercu_opt == 2;
+    float wvar = FDIV(kzh[idx + ncol], 20.0f);
+    wvar = FMAXK(wvar, 0.10f);
+    wvar = FMINK(wvar, 50.0f);
+    const float w3d = w[idx];
+    float maero[MA_NMODE], naero[MA_NMODE];
+    for (int m = 0; m < MA_NMODE; ++m) { maero[m] = 0.0f; naero[m] = 0.0f; }
+    if (write_ccn)
+        for (int s = 0; s < 7; ++s) ccn[s * ncell + idx] = 0.0f;
+    if (prescribed) {
+#define MA_AEROCU(s) aerocu[(long long)((s) - 1) * ncell + idx]
+        maero[0] = (aercu_fct * MA_AEROCU(6)) * 1E-9f;
+        naero[0] = gfk_pow(maero[0], 0.58f) * 5.64259e13f;
+        maero[1] = (aercu_fct * MA_AEROCU(5)) * 1E-9f;
+        maero[2] = ((aercu_fct * 1.44f) * MA_AEROCU(1)) * 1E-9f;
+        maero[3] = ((aercu_fct * 1.44f) * MA_AEROCU(2)) * 1E-9f;
+        maero[4] = ((aercu_fct * 1.44f) * MA_AEROCU(3)) * 1E-9f;
+        maero[5] = ((aercu_fct * 1.44f) * MA_AEROCU(4)) * 1E-9f;
+        maero[6] = ((aercu_fct * 1.54f) * MA_AEROCU(9)) * 1E-9f;
+        maero[7] = ((aercu_fct * 1.37f) * MA_AEROCU(7)) * 1E-9f;
+        maero[8] = ((aercu_fct * 1.25f) * MA_AEROCU(10)) * 1E-9f;
+        maero[9] = ((aercu_fct * 1.37f) * MA_AEROCU(8)) * 1E-9f;
+#undef MA_AEROCU
+        for (int m = 1; m < MA_NMODE; ++m)
+            naero[m] = maero[m] * ma_num_to_mass_aer[m];
+        for (int s = 0; s < 7; ++s) {
+            float sum = 0.0f;
+            for (int m = 0; m < MA_NMODE; ++m)
+                sum = sum + naero[m] * ma_ccnfact_pamdm[m * 7 + s];
+            if (write_ccn) ccn[s * ncell + idx] = sum;
+        }
+    }
+#endif
 
     // Driver :744, :778-802 (nc1d = 0 placeholder, iinum = 1).
     float t3d = theta[idx] * pii[idx];
@@ -293,6 +386,9 @@ extern "C" __global__ void mo_process(
     float qni3d = qs[idx], qg3d = qg[idx];
     float nc3d = 0.0f, nr3d = nr[idx], ni3d = ni[idx], ns3d = ns[idx];
     float ng3d = ng[idx];
+#ifdef MORR_AERO
+    if (prescribed) nc3d = nc[idx];     // MORR_AERO driver :1021
+#endif
     const float pres = pressure[idx];
     float t3dten = 0.0f, qv3dten = 0.0f, qc3dten = 0.0f, qi3dten = 0.0f;
     float qni3dten = 0.0f, qr3dten = 0.0f, ni3dten = 0.0f, ns3dten = 0.0f;
@@ -412,7 +508,7 @@ extern "C" __global__ void mo_process(
 
         if (t3d >= 273.15f) {
             // ----------------------------------------- :1493-2076 warm
-            nc3d = FDIV(MO_NDCNST * 1.E6f, rho);
+            if (MO_IINUM_ONE) nc3d = FDIV(MO_NDCNST * 1.E6f, rho);
             // :1501-1514 melt very small snow and graupel.
             if (qni3d < 1.E-6f) {
                 qr3d = qr3d + qni3d;
@@ -742,9 +838,14 @@ extern "C" __global__ void mo_process(
                 t3dten = t3dten + FDIV(pcc * xxlv, cpm);
                 qc3dten = qc3dten + pcc;
             }
+#ifdef MORR_AERO
+            if (prescribed)
+                mo_aero_activate(qc3d, qc3dten, dt, w3d, wvar, t3d, rho,
+                                 naero, maero, xxlv, nc3d, nc3dten);
+#endif
         } else {
             // ----------------------------------------- :2108-3327 cold
-            nc3d = FDIV(MO_NDCNST * 1.E6f, rho);
+            if (MO_IINUM_ONE) nc3d = FDIV(MO_NDCNST * 1.E6f, rho);
             ni3d = FMAXK(ni3d, 0.0f);
             ns3d = FMAXK(ns3d, 0.0f);
             nc3d = FMAXK(nc3d, 0.0f);
@@ -1188,6 +1289,30 @@ extern "C" __global__ void mo_process(
             }
             // :2889-2907 deposition/condensation-freezing nucleation
             // (INUC = 0, Cooper 1986).
+#ifdef MORR_AERO
+            // MORR_AERO MICRO :3528-3547: INUC = 2, Liu and Penner on the
+            // prescribed aerosol.
+            if (prescribed) {
+                if ((qvqvs >= 0.999f && t3d <= 265.15f) || qvqvsi >= 1.08f) {
+                    const float kc2 = ma_nucleati(w3d + wvar, t3d, qvqvs,
+                                                  qvqvsi, qc3d, rho, naero,
+                                                  nuc_stop);
+                    if (kc2 > (ni3d + ns3d) + ng3d) {
+                        nnuccd = FDIV(((kc2 - ni3d) - ns3d) - ng3d, dt);
+                        nnuccd = FMAXK(nnuccd, 0.0f);
+                        mnuccd = nnuccd * MO_MI0;
+#ifdef MORR_ROW37
+                        // Row 37, as for INUC = 0 below.
+                        const float avail = FDIV(fmaxf(qv3d - qvi, 0.0f), dt);
+                        if (mnuccd > avail) {
+                            nnuccd = nnuccd * FDIV(avail, mnuccd);
+                            mnuccd = avail;
+                        }
+#endif
+                    }
+                }
+            } else
+#endif
             if ((qvqvs >= 0.999f && t3d <= 265.15f) || qvqvsi >= 1.08f) {
                 float kc2 = (gfk_exp((273.15f - t3d) * 0.304f) * 0.005f)
                     * 1000.0f;
@@ -1445,6 +1570,11 @@ extern "C" __global__ void mo_process(
                 t3dten = t3dten + FDIV(pcc * xxlv, cpm);
                 qc3dten = qc3dten + pcc;
             }
+#ifdef MORR_AERO
+            if (prescribed)
+                mo_aero_activate(qc3d, qc3dten, dt, w3d, wvar, t3d, rho,
+                                 naero, maero, xxlv, nc3d, nc3dten);
+#endif
             // :3285-3316
             if (eprd < 0.0f) {
                 dum = FDIV(eprd * dt, qi3d);
@@ -1536,7 +1666,7 @@ __device__ __forceinline__ void mo_sediment_impl(
     float* __restrict__ snownc, float* __restrict__ snowncv,
     float* __restrict__ graupelnc, float* __restrict__ graupelncv,
     float* __restrict__ sr, float dt, int rimed, int nz, int ncol,
-    int col0, int ccols)
+    int col0, int ccols MO_AERO_SEDIMENT_PARAMS)
 {
     __shared__ int s_nstep[5][32];
     __shared__ float s_fall[5][32];
@@ -1580,7 +1710,8 @@ __device__ __forceinline__ void mo_sediment_impl(
             dmass = FMAXK(dmass, 0.0f);
 #endif
             float dnum = mo_add(qnum[AT(k)], mo_mul(WP(nten, k), dt));
-            if (cat == 0) dnum = qnum[AT(k)];   // iinum = 1 (:3372-3374)
+            if (cat == 0 && MO_IINUM_ONE)
+                dnum = qnum[AT(k)];   // iinum = 1 (:3372-3374)
             dnum = FMAXK(dnum, 0.0f);
             float um = 0.0f, un = 0.0f;
             // DUM is read by rain, snow and graupel only; (RHOSU/RHO)**0.35
@@ -1789,11 +1920,11 @@ __device__ __forceinline__ void mo_sediment_impl(
     float* __restrict__ rainnc, float* __restrict__ rainncv,                 \
     float* __restrict__ snownc, float* __restrict__ snowncv,                 \
     float* __restrict__ graupelnc, float* __restrict__ graupelncv,           \
-    float* __restrict__ sr, float dt, int rimed, int nz, int ncol,              int col0, int ccols
+    float* __restrict__ sr, float dt, int rimed, int nz, int ncol,              int col0, int ccols MO_AERO_SEDIMENT_PARAMS
 #define MO_SEDIMENT_ARGUMENTS                                                \
     pressure, dz, rho_in, qc, qr, qi, qs, qg, nc, nr, ni, ns, ng, work,      \
     ltrue, rainnc, rainncv, snownc, snowncv, graupelnc, graupelncv, sr, dt,  \
-    rimed, nz, ncol, col0, ccols
+    rimed, nz, ncol, col0, ccols MO_AERO_SEDIMENT_ARGS
 
 extern "C" __global__ void mo_sediment_64(MO_SEDIMENT_PARAMETERS)
 {
@@ -1825,18 +1956,38 @@ extern "C" __global__ void mo_finalize(
     float* __restrict__ work, const int* __restrict__ ltrue,
     float* __restrict__ effc, float* __restrict__ effi,
     float* __restrict__ effs, float* __restrict__ effr, float dt,
-    int rimed, long long nlocal, int ncol, int col0, int ccols)
+    int rimed, long long nlocal, int ncol, int col0, int ccols
+    MO_AERO_FINALIZE_PARAMS)
 {
     const long long li = (long long)blockIdx.x * blockDim.x + threadIdx.x;
     if (li >= nlocal) return;
     const int col = col0 + (int)(li % ccols);
     const long long idx = (li / ccols) * ncol + col;
 #define W(p) work[(long long)(p) * nlocal + li]
+#ifdef MORR_AERO
+    // MORR_AERO driver :1131-1136, for aercu_opt > 0: the radii clamped
+    // for RRTMG and the activation updraft.  A LTRUE = 0 column returns
+    // the radii the first loop zeroed (MICRO :1690-1714: every level of
+    // such a column is below QSMALL), so its clamps are the floors.
+#define MO_AERO_RADII(c, i, s)                                             \
+    if (aercu_opt > 0) {                                                   \
+        efcg[idx] = FMAXK(FMINK((c), 50.0f), 2.49f);                       \
+        efig[idx] = FMAXK(FMINK((i), 120.0f), 4.99f);                      \
+        efsg[idx] = FMAXK(FMINK((s), 999.0f), 9.99f);                      \
+        float wvar = FDIV(kzh[idx + ncol], 20.0f);                         \
+        wvar = FMAXK(wvar, 0.10f);                                         \
+        wvar = FMINK(wvar, 50.0f);                                         \
+        wact[idx] = wvar + w[idx];                                         \
+    }
+#else
+#define MO_AERO_RADII(c, i, s)
+#endif
     float t3d = W(MO_T3D);
     if (ltrue[col] == 0) {
         theta[idx] = FDIV(t3d, pii[idx]);
         effc[idx] = 25.0f; effi[idx] = 25.0f;
         effs[idx] = 25.0f; effr[idx] = 25.0f;
+        MO_AERO_RADII(0.0f, 0.0f, 0.0f)
         return;
     }
     const float pres = pressure[idx], rho = rho_in[idx];
@@ -2049,7 +2200,7 @@ extern "C" __global__ void mo_finalize(
     }
     // 500 CONTINUE: :4006-4035 effective radii.
     effi[idx] = qi3d >= MO_QSMALL
-        ? FDIV(FDIV(3.0f, lami), 2.0f) * 1.E6f : 25.0f;
+        ? FDIV(FDIV(3.0f, lami), 2.0f) * 1.E6f : MO_EFFI_NONE;
     effs[idx] = qni3d >= MO_QSMALL
         ? FDIV(FDIV(3.0f, lams), 2.0f) * 1.E6f : 25.0f;
     effr[idx] = qr3d >= MO_QSMALL
@@ -2057,16 +2208,18 @@ extern "C" __global__ void mo_finalize(
     effc[idx] = qc3d >= MO_QSMALL
         ? FDIV(FDIV(FDIV(mo_gamma(pgam + 4.0f), mo_gamma(pgam + 3.0f)),
                     lamc), 2.0f) * 1.E6f
-        : 25.0f;
+        : MO_EFFC_NONE;
     // :4044-4054
     ni3d = FMIN(ni3d, FDIV(0.3E6f, rho));
-    nc3d = FDIV(MO_NDCNST * 1.E6f, rho);
+    if (MO_IINUM_ONE) nc3d = FDIV(MO_NDCNST * 1.E6f, rho);
     // Driver write-back.
     qv[idx] = qv3d; qc[idx] = qc3d; qr[idx] = qr3d; qi[idx] = qi3d;
     qs[idx] = qni3d; qg[idx] = qg3d; nc[idx] = nc3d; nr[idx] = nr3d;
     ni[idx] = ni3d; ns[idx] = ns3d; ng[idx] = ng3d;
     theta[idx] = FDIV(t3d, pii[idx]);
     W(MO_T3D) = t3d;   // T1D, the reflectivity's temperature
+    MO_AERO_RADII(effc[idx], effi[idx], effs[idx])
+#undef MO_AERO_RADII
 #undef W
 }
 

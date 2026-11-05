@@ -400,6 +400,7 @@ _MP_DECLARES_RADII = {
     # own radii exactly as it does under any has_reqc=0 scheme.
     9: False,
     10: False,   # Morrison two-moment: NOT in WRF's use_mp_re list
+    40: False,   # Morrison with CESM aerosol: not in the use_mp_re list either
     # WDM6.  WRF lists WDM6SCHEME explicitly in the use_mp_re disjunction
     # (module_physics_init.F:1013, beside WSM6SCHEME at :1010) and the
     # P3/Jensen-Ishmael has_reqs=0 override (:1027-1033) does not name it,
@@ -574,7 +575,7 @@ def legacy_scheme_has_req(mp_physics, use_mp_re):
 #: would assert a ``qs`` its Registry package never declares.  Resolve the
 #: pair through :func:`legacy_cloud_fraction_flags`, never by reading one
 #: boolean into both flags.
-_LEGACY_ICE_ACTIVE_MICROPHYSICS = frozenset((2, 4, 6, 8, 9, 10, 16, 18, 24, 28, 30, 106))
+_LEGACY_ICE_ACTIVE_MICROPHYSICS = frozenset((2, 4, 6, 8, 9, 10, 16, 18, 24, 28, 30, 40, 106))
 # Named schemes carrying both qi and qs (capability row).
 _LEGACY_ICE_ACTIVE_MICROPHYSICS = _LEGACY_ICE_ACTIVE_MICROPHYSICS | frozenset(
     _s.mp_id for _s in _NAMED_MP_SCHEMES.values()

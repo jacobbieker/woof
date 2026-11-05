@@ -588,6 +588,7 @@ SUPPORTED_MICROPHYSICS: Mapping[int, str] = MappingProxyType({
     106: "WSM6R (revised WSM6)",
     9: "Milbrandt-Yau double-moment (seven class)",
     10: "Morrison double-moment",
+    40: "Morrison double-moment with CESM aerosol (aercu_opt = 0)",
     16: "WDM6 double-moment warm rain",
     18: "NSSL double-moment",
     5: "Ferrier-Aligo",
@@ -623,7 +624,6 @@ UNSUPPORTED_MICROPHYSICS: Mapping[int, str] = MappingProxyType({
     26: "WDM7",
     32: "HUJI spectral bin (full)",
     38: "Thompson graupel-hail",
-    40: "Morrison + CESM aerosol",
     51: "P3 with prognostic droplet number",
     52: "P3, two ice categories",
     53: "P3 one category, three-moment ice",
@@ -1023,7 +1023,7 @@ def active_moisture_inventory(cfg) -> tuple[frozenset[str], frozenset[str]]:
     if mp_physics in COLUMN_SCHEMES:
         names = {"qi": "QICE", "qs": "QSNOW", "qg": "QGRAUP"}
         required += tuple(names[n] for n in COLUMN_SCHEMES[mp_physics].species if n in names)
-    if mp_physics in (2, 6, 8, 9, 10, 16, 18, 24, 28, 30, 106):
+    if mp_physics in (2, 6, 8, 9, 10, 16, 18, 24, 28, 30, 40, 106):
         required += ICE_MASS_WRFINPUT
     if mp_physics == 30:
         required += _FSBM_BIN_SPECIES + ("QNCCN","QNCLOUD","QNRAIN","QNICE","QNSNOW","QNGRAUPEL","EFF_RADIUS","ICE_EFF_RADIUS","TOT_EFF_RADIUS")
@@ -1041,8 +1041,11 @@ def active_moisture_inventory(cfg) -> tuple[frozenset[str], frozenset[str]]:
         # Thompson aerosol-aware: classic Thompson's two moments plus the
         # prognostic droplet number and the two aerosol tracers.
         required += THOMPSON_AEROSOL_NUMBER_WRFINPUT
-    elif mp_physics == 10:
+    elif mp_physics in (10, 40):
         required += MORRISON_NUMBER_WRFINPUT
+        if mp_physics == 40:
+            # morr_tm_aero's qnc is a scalar real.exe writes (QNCLOUD).
+            required += MORRISON_OPTIONAL_MOISTURE_WRFINPUT
     elif mp_physics == 18:
         required += nssl_moisture_wrfinput(cfg)
     elif mp_physics == 50:
@@ -1057,7 +1060,7 @@ def active_moisture_inventory(cfg) -> tuple[frozenset[str], frozenset[str]]:
     elif mp_physics == 5:
         required += FERRIER_MOISTURE_WRFINPUT
     allowed = frozenset(required)
-    if mp_physics == 10:
+    if mp_physics in (10, 40):
         allowed |= frozenset(MORRISON_OPTIONAL_MOISTURE_WRFINPUT)
     if mp_physics == 5:
         allowed |= frozenset(FERRIER_OPTIONAL_MOISTURE_WRFINPUT)

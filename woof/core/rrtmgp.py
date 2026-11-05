@@ -489,6 +489,7 @@ _MP_CLOUD_OPTICS_SCHEME = {
     # RTE+RRTMGP the exclusion refused mp=9 outright on every bare run.
     9: "milbrandt2",  # Registry.EM_COMMON:3025, milbrandt2mom
     10: "morrison",  # Registry.EM_COMMON:3026, morr_two_moment
+    40: "morrison",  # Registry.EM_COMMON:3047, morr_tm_aero (the same moments)
     # WDM6.  The VALUE names a COUPLING, not a scheme -- 28 resolves to
     # "thompson" on the same principle -- and WDM6's coupling is WSM6's,
     # for the two reasons that decide this table:

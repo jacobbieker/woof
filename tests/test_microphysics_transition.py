@@ -987,13 +987,17 @@ def test_no_selector_is_refused_for_a_missing_closure():
     # Every ported WRF scheme has its closure.  Ferrier-Aligo (5) is refused
     # at a mixed edge for its rime factor, FAST_SBM (30) for its 142 bins.  The named WOOF schemes (2.8.8: TEMPO,
     # for the RRFS v2 hex preset) run same-scheme nests and are refused at
-    # a mixed edge by name, with their own moment list.
+    # a mixed edge by name, with their own moment list.  Morrison with
+    # CESM aerosol (40) joined with its port: its advected droplet number
+    # has no nest-kernel entry closure yet, so a mixed edge is refused by
+    # name and same-scheme nests carry every moment.
     named = tuple(s.mp_id for s in NAMED_SCHEMES.values())
-    assert mt.UNVALIDATED_MIXED_EDGE_SELECTORS == (3, 5, 30) + named
+    assert mt.UNVALIDATED_MIXED_EDGE_SELECTORS == (3, 5, 30, 40) + named
     assert mt.UNVALIDATED_MIXED_EDGE_MOMENTS == {
         3: (),
         5: ("f_rimef",),
         30: BIN_SPECIES,
+        40: ("nc", "nr", "ni", "ns", "ng"),
         **{s.mp_id: s.moment_species + s.aerosol_species
            for s in NAMED_SCHEMES.values()}}
 
