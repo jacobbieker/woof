@@ -84,6 +84,8 @@ def test_doctor_names_missing_extras_with_exact_remedies(monkeypatch):
     # remedy is now a function of the box's CUDA major, so an
     # unpinned run would assert different things on different hosts.
     monkeypatch.setattr(doctor, "_driver_cuda_major", lambda: None)
+    # The CuPy row is the CUDA backend's; on mlx the mlx row stands there.
+    monkeypatch.setattr(doctor, "_backend_requested", lambda: "cuda")
     by_name = {check.name: check for check in doctor.collect_checks()}
     cupy = by_name["cupy (GPU runtime)"]
     assert cupy.status == "missing"
@@ -152,6 +154,8 @@ def test_doctor_cli_exit_codes_and_report_shape(monkeypatch, capsys,
     assert rc_healthy_or_not in (0, 1)
 
     monkeypatch.setattr(doctor, "find_spec", lambda name: None)
+    # The CuPy line is the CUDA backend's; on mlx the mlx row stands there.
+    monkeypatch.setattr(doctor, "_backend_requested", lambda: "cuda")
     rc = cli.main(argv)
     # Un-importing every package is not "warn-not-block" any more, and
     # this assertion is the one that used to say it was.  A box whose
@@ -2599,14 +2603,22 @@ def test_the_probe_does_not_wait_on_a_bridge_that_reads_stdin(tmp_path, monkeypa
 
     import shutil
     import subprocess
+    import sys
     import time
 
     cat = shutil.which("cat")
     if os.name == "nt" or not cat:
         pytest.skip("the stdin-reading stand-in is POSIX cat (a real ELF that reads stdin to EOF)")
     fake = tmp_path / doctor.bridges.executable_name("rw_globe_pack")
-    shutil.copy2(cat, fake)
-    fake.chmod(0o755)
+    if sys.platform == "darwin":
+        # A copy of macOS's /bin/cat cannot stand in: copy2 carries its
+        # system file flags, which chflags refuses on a user's file, and a
+        # byte copy of the platform binary is killed (SIGKILL) at launch.
+        # A link launches the system's own.
+        fake.symlink_to(cat)
+    else:
+        shutil.copy2(cat, fake)
+        fake.chmod(0o755)
     launches = []
     real_run = subprocess.run
 
@@ -3141,6 +3153,8 @@ def test_the_driver_probe_reads_the_major_out_of_cudrivergetversion(
         monkeypatch):
     """13040 is CUDA 13.4, so the major is 13."""
     monkeypatch.delenv("GPUWM_NO_LOCAL_GPU", raising=False)
+    # macOS names no driver library to try; the reading is the same anywhere.
+    monkeypatch.setattr(doctor, "_driver_library_names", lambda: ("libcuda.so.1",))
 
     class _Driver:
         @staticmethod

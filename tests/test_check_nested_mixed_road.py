@@ -134,6 +134,22 @@ def _nested_auto_tiles(tmp_path, name="tree", *, tree_tiles=_TREE_AUTO,
     return path
 
 
+#: The host the tree is priced on.  The streamed child page-locks a
+#: 4.16 GB store, and the planner allows half the host's RAM for it, so
+#: the mixed road needs a host of at least 8.4 GB; on a 7 GB one (GitHub's
+#: hosted macOS runner) the child cannot stream for the HOST, and the tree
+#: never reaches the VRAM question these tests ask.  The card stays the
+#: declared ``--budget-gib``.
+_HOST_BYTES = 32 * GIB
+
+
+@pytest.fixture(autouse=True)
+def _declared_host(monkeypatch):
+    from woof.core import streaming
+
+    monkeypatch.setattr(streaming, "_host_total_bytes", lambda: _HOST_BYTES)
+
+
 def _check(capsys, config, *flags):
     code = cli.main(["check", str(config), "--explain", *flags])
     captured = capsys.readouterr()
