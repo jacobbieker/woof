@@ -155,12 +155,30 @@ def export_policy_from_table(block, *, source="<config>") -> ExportPolicy:
     return ExportPolicy(delete_after_commit=delete, domains=domains)
 
 
+def _config_document(config):
+    """The TOML document at CONFIG, or None when there is none to read.
+
+    A multi-run child reads the configuration it was started with from the
+    captured payload (woof.config_authority), never from the source path,
+    which may have changed since the capture."""
+    if not config or Path(config).suffix != ".toml":
+        return None
+    from woof.config_authority import CONFIG_SOURCE_ENV, read_config_authority
+    bound = os.environ.get(CONFIG_SOURCE_ENV)
+    if bound and Path(bound).expanduser().resolve() == Path(config).expanduser().resolve():
+        return tomllib.loads(read_config_authority(config).payload.decode("utf-8"))
+    if not Path(config).is_file():
+        return None
+    with Path(config).open("rb") as stream:
+        return tomllib.load(stream)
+
+
 def _output_block(arguments):
     config = (getattr(arguments, "output_config", None) or getattr(arguments, "config", None)
               or getattr(arguments, "experiment_config", None))
-    if config and Path(config).is_file() and Path(config).suffix == ".toml":
-        with Path(config).open("rb") as stream:
-            return tomllib.load(stream).get("output", {}), str(config)
+    document = _config_document(config)
+    if document is not None:
+        return document.get("output", {}), str(config)
     return {}, "<config>"
 
 
@@ -193,9 +211,8 @@ def options(arguments):
     config = (getattr(arguments, "output_config", None) or getattr(arguments, "config", None) or getattr(arguments, "experiment_config", None))
     block = {}
     name = None
-    if config and Path(config).is_file() and Path(config).suffix == ".toml":
-        with Path(config).open("rb") as stream:
-            document = tomllib.load(stream)
+    document = _config_document(config)
+    if document is not None:
         block = document.get("output", {})
         name = (document.get("experiment") or {}).get("name")
     formats = getattr(arguments, "output_format", None)
@@ -476,9 +493,9 @@ def command_scope(arguments, *, engine="woof"):
     if engine == "woof":
         ensemble = getattr(arguments, "members", None)
         config = getattr(arguments, "config", None) or getattr(arguments, "experiment_config", None)
-        if config and Path(config).is_file() and Path(config).suffix == ".toml":
-            with Path(config).open("rb") as stream:
-                ensemble = ensemble or tomllib.load(stream).get("ensemble")
+        document = _config_document(config)
+        if document is not None:
+            ensemble = ensemble or document.get("ensemble")
         if ensemble:
             arguments.keep_member_files = True
     root = getattr(arguments, "outdir", None) or getattr(arguments, "out", None)

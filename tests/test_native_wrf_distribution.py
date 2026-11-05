@@ -65,8 +65,15 @@ ROOT = Path(__file__).parents[1]
 
 
 def _run_python(*arguments, **options):
+    # These children are the default CUDA state these cases describe, not
+    # the mlx environment's WOOF_BACKEND (nor its GPUWM_* twin, which woof
+    # copies back), and not a Mac's automatic Metal selection: either would
+    # install a facade that serves `import cupy`.
+    env = dict(options.pop("env", None) or os.environ)
+    env.pop("GPUWM_BACKEND", None)
+    env["WOOF_BACKEND"] = "cuda"
     return subprocess.run([sys.executable, *arguments], capture_output=True,
-                          text=True, check=False, **options)
+                          text=True, check=False, env=env, **options)
 
 
 def _stage_or_skip(destination):

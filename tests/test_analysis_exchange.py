@@ -176,7 +176,14 @@ def test_the_reader_takes_a_complete_analysis_file_and_names_every_variable(
     for name in ("T", "QVAPOR", "U", "V", "MU", "TSK", "SMOIS", "Q2",
                  "SOILT1", "TH2", "QNRAIN", "ISLTYP", "SST", "SEAICE"):
         assert dispositions[name][0] == exchange.REWRITTEN, name
-    for name in ("Times", "THM", "RDX", "CLDFRA"):
+    # RDX is in IGNORED_WRFINPUT (no model state) but is a stock record the
+    # history writer copies from wrfinput (WRF_INPUT_HISTORY_ROWS), so the
+    # reader carries it in ``raw`` and the write-back rewrites the bytes it
+    # read; THM and CLDFRA are carried for nobody and stay passed through.
+    from woof.io.wrf_input_history_schema import WRF_INPUT_HISTORY_ROWS
+    assert "RDX" in wi.IGNORED_WRFINPUT and "RDX" in WRF_INPUT_HISTORY_ROWS
+    assert dispositions["RDX"][0] == exchange.REWRITTEN
+    for name in ("Times", "THM", "CLDFRA"):
         assert dispositions[name][0] == exchange.PASSED_THROUGH, name
 
 

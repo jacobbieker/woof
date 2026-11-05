@@ -12568,8 +12568,18 @@ def _required_memory_without_kernels(exp, args, *,
 
     recorded = (prepared.boundary_source if prepared is not None else
                 config_forcing_source(args.config, priced_only=False))
+    # THE FORCING SLOTS THE CARD HOLDS, as check_main's declared and
+    # measured routes price them: a chained run streams its lateral
+    # intervals through one device slot.  The ingest phase keeps the
+    # whole schedule.
+    from woof.ingest.boundary_stream import chained_resident_forcing_slots
+    resident_slots = (chained_resident_forcing_slots(exp)
+                      if prepared is None else None)
+    resident_intervals = (forcing_intervals if resident_slots is None
+                          else resident_slots if forcing_intervals is None
+                          else min(int(forcing_intervals), resident_slots))
     estimate = estimate_experiment(
-        exp, column_chunk=args.column_chunk, forcing_intervals=forcing_intervals,
+        exp, column_chunk=args.column_chunk, forcing_intervals=resident_intervals,
         forcing_interval_seconds=interval, vram_gib=vram_gib,
         profile=profile, boundary_species=source_boundary_species(recorded),
         urban_columns=urban_columns)

@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 
 from woof.da import member_wave as wave
+from woof.io.restart import RESTART_FORMAT_VERSION
 
 
 def uuid(index=0):
@@ -28,7 +29,7 @@ def jobs(tmp_path, count=4):
 
 def native_restart(path, member, *, domains=(1,), seconds=60.0):
     path.parent.mkdir(parents=True, exist_ok=True)
-    header = {"format_version": 6, "domain_ids": list(domains), "elapsed_ticks": int(seconds),
+    header = {"format_version": RESTART_FORMAT_VERSION, "domain_ids": list(domains), "elapsed_ticks": int(seconds),
               "tick_den": 1, "elapsed_seconds": seconds, "step_count": int(seconds//15),
               "domain_start_ticks": 0, "domain_lifecycle": "ACTIVE", "dtbc_fp32_bits": 0,
               "experiment_fingerprint_components": {"trajectory": str(member)}, "is_stub": True}
@@ -168,12 +169,13 @@ FAKE_WORKER = r'''
 import hashlib,json,os,sys,time
 from pathlib import Path
 import numpy as np
+from woof.io.restart import RESTART_FORMAT_VERSION
 task=json.loads(Path(sys.argv[1]).read_text())
 root=Path(task['output_root']); root.mkdir(parents=True,exist_ok=True)
 (root/'started.json').write_text(json.dumps({'pid':os.getpid(),'uuid':os.environ.get('CUDA_VISIBLE_DEVICES'), 'threads':os.environ.get('GPUWM_MAPPED_ENGINE_THREADS'),'budget':os.environ.get('GPUWM_MAPPED_ENGINE_MEMORY_BUDGET_BYTES')}))
 if task.get('behavior')=='fail':time.sleep(.2);sys.exit(7)
 if task.get('behavior')=='sleep':time.sleep(30)
-header={'format_version':6,'domain_ids':[1],'elapsed_ticks':60,'tick_den':1,'elapsed_seconds':60.0,'step_count':4,'domain_start_ticks':0,'domain_lifecycle':'ACTIVE','dtbc_fp32_bits':0,'experiment_fingerprint_components':{'trajectory':str(task['member'])},'is_stub':True}
+header={'format_version':RESTART_FORMAT_VERSION,'domain_ids':[1],'elapsed_ticks':60,'tick_den':1,'elapsed_seconds':60.0,'step_count':4,'domain_start_ticks':0,'domain_lifecycle':'ACTIVE','dtbc_fp32_bits':0,'experiment_fingerprint_components':{'trajectory':str(task['member'])},'is_stub':True}
 restart=root/'gpuwmrst_d01_end.npz';np.savez(restart,__gpuwm_restart_header__=np.frombuffer(json.dumps(header).encode(),np.uint8))
 arrays=root/'arrays.npz';np.savez(arrays,**{'snapshot/theta':np.array([300.0],np.float32)})
 def record(p):return {'path':str(p.resolve()),'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()}

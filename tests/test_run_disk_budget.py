@@ -100,8 +100,13 @@ def test_projection_counts_frames_and_held_checkpoints():
 
 
 @pytest.mark.parametrize("delay,interval", [(0, 60), (120, 60), (120, 180), (540, 60)])
-def test_a_late_nest_is_charged_the_frames_its_clock_writes(delay, interval):
+def test_a_late_nest_is_charged_the_frames_its_clock_writes(
+        delay, interval, classic_history_frames):
     """A nest that starts late writes history from its own start.
+
+    Priced in classic frames (``classic_history_frames``): the bytes below
+    are the writer inventory's, which deflate (the default since 1.1.4)
+    scales by COMPRESSED_HISTORY_FRACTION.
 
     Admission charged it every frame of the whole run: a nest starting
     540 s into a 600 s run at one frame a minute was priced at 11 frames

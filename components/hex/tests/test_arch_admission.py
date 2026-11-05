@@ -489,6 +489,10 @@ def test_doctor_card_probe_reads_the_card_and_nvrtc_in_its_own_process(
     top = importlib.import_module(doctor.__package__.split(".")[0])
     package_root = Path(top.__file__).resolve().parent.parent
     monkeypatch.setenv("PYTHONPATH", os.pathsep.join([str(tmp_path), str(package_root)]))
+    # The probe asks an NVIDIA card and NVRTC: the CUDA backend.  The mlx
+    # environment sets WOOF_BACKEND=mlx, under which `import cupy` must be
+    # woof's Metal facade and the stand-in is refused as a real CuPy.
+    monkeypatch.setenv("WOOF_BACKEND", "cuda")
     probe = doctor._card_probe()
     assert probe == {
         "device_count": 1, "name": "Stand-in GPU", "compute": [8, 9],

@@ -223,7 +223,10 @@ def test_partial_cover_falls_through_to_next_row(tmp_path):
     rows = json.loads(table.read_text())
     rows["providers"][0]["min_covered_fraction"] = 1.0
     table.write_text(json.dumps(rows))
-    decision = door.decide(settings={}, requested="", table=table, geometry=box_geometry())
+    # The global builder row would cover the box wherever rw_hydro_world is
+    # built; this case is about the prepared row, so its tools are absent.
+    decision = door.decide(settings={}, requested="", table=table, geometry=box_geometry(),
+                           probe_row=_tools_missing)
     assert decision["enabled"] is False
     assert decision["candidates"][0]["covered_fraction"] == 0.6
     assert "covers 0.600" in decision["candidates"][0]["reasons"][0]
@@ -235,7 +238,8 @@ def test_unverified_licence_or_missing_realization_never_turns_on(tmp_path):
                            ({"realization": None}, "no admitted coupled realization"),
                            ({"realization": "no-such-row"}, "unknown realization")):
         table, _ = prepared_table(tmp_path, **kwargs)
-        decision = door.decide(settings={}, requested="", table=table, geometry=box_geometry())
+        decision = door.decide(settings={}, requested="", table=table, geometry=box_geometry(),
+                               probe_row=_tools_missing)
         assert decision["enabled"] is False
         assert needle in json.dumps(decision["candidates"][0]["reasons"])
 
@@ -264,7 +268,10 @@ def test_explicit_settings_pass_through_unchanged(tmp_path):
     assert decision["enabled"] is True and decision["fabric"] == "explicit settings"
 
 
-def test_bare_hydro_flag_without_fabric_refuses_with_gaps(tmp_path):
+def test_bare_hydro_flag_without_fabric_refuses_with_gaps(tmp_path, monkeypatch):
+    # Without its builder the global row is a gap too, as on a host that
+    # has not built rw_hydro_world.
+    monkeypatch.setattr(door, "probe", _tools_missing)
     with pytest.raises(door.HydroDoorRefusal, match="no hydrofabric covers") as error:
         door.resolve_launch({"enabled": True, "activation_reason": "cli_enabled"},
                             requested="", config_path=conus_copy(tmp_path, 4))

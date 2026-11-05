@@ -21,8 +21,12 @@ def _cycle(tmp_path, *extra):
 
 
 def test_a_cycle_refusal_is_a_sentence_at_exit_2(tmp_path, capsys):
-    # 900 s is not a whole number of the default 120 s parent steps.
-    assert main(_cycle(tmp_path, "--cycle-seconds", "900", "--cycles", "2")) == 2
+    # 900 s is not a whole number of 120 s parent steps.  The step is
+    # stated: an unset one now defaults to a step that divides the cycle
+    # (60 s here; woof.cycle.cli._default_parent_dt_seconds), so only the
+    # user's own step can trip this refusal.
+    assert main(_cycle(tmp_path, "--cycle-seconds", "900", "--cycles", "2",
+                       "--parent-dt-seconds", "120")) == 2
     err = capsys.readouterr().err
     assert "woof cycle:" in err and "observed:" in err
     assert "Traceback" not in err

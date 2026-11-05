@@ -154,7 +154,15 @@ def test_the_load_time_probeable_rule_is_the_fetch_s():
 
     for source in fetch_routes.posting_sources():
         row = fetch_routes.posting_for(source)
-        assert row.waited == fetch.cycle_is_probeable(source), source
+        if row.waited:
+            assert fetch.cycle_is_probeable(source), source
+        elif not fetch.cycle_is_probeable(source):
+            # Nothing to ask a server about (a keyed job API): never waited.
+            assert row.shape in {"brokered", "private"}, source
+        else:
+            # A fixed historical archive route: its objects can be asked
+            # about, but a run never waits for them to post.
+            assert row.shape == "archive", source
 
 
 # --------------------------------------------------------------------------
@@ -218,6 +226,9 @@ def test_check_4_a_waited_row_with_nothing_to_probe_is_refused(monkeypatch):
 
 def test_check_5_an_index_check_on_a_file_without_an_index_is_refused(monkeypatch):
     document = _document()
+    # pgrb2b also selects records by its index (1.1.5), which is refused
+    # for the same absence one check earlier; this case is the probe's.
+    document["routes"]["gefs"]["files"][1].pop("record_index", None)
     document["routes"]["gefs"]["files"][1]["idx_sidecar"] = None
     with pytest.raises(ValueError, match="pgrb2b declare no idx_sidecar"):
         _rebuild(monkeypatch, document)
@@ -344,8 +355,10 @@ def test_expected_at_is_the_rule_s_arithmetic(source, cycle, rule):
         assert source_posting.expected_at(source, cycle, lead) == (
             cycle + timedelta(hours=cycle_grid_for(source, posting=True).delay(cycle, lead)))
         budget = fetch_routes.posting_for(source).late_after_minutes
+        # An archive is never waited on: it has no lateness budget, and
+        # late_at says so with None rather than a time.
         assert source_posting.late_at(source, cycle, lead) == (
-            expected + timedelta(minutes=budget))
+            None if budget is None else expected + timedelta(minutes=budget))
         assert source_posting.publication_rule(source, cycle, lead) is rule
 
 

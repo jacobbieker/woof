@@ -119,7 +119,9 @@ def test_check_and_list_count_a_missing_runner_package_as_a_blocker(monkeypatch,
     assert document["launchable"] is False
     assert {r["id"] for r in document["blockers"]} == {
         "prepare-runner-importable", "run-runner-importable"}
-    assert all(r["remedy"] == 'pip install "recast-woof>=0.4.0,<0.5"'
+    # The runners ship inside recast-woof (woof.hex) since 1.1; the remedy
+    # is the registry row's own pairing.
+    assert all(r["remedy"] == 'pip install "recast-woof>=1.1.0,<2"'
                for r in document["blockers"])
     assert document["paired_package"]["installed"] is None
     assert model_presets.main(parser.parse_args(["preset", "list"])) == 0
@@ -143,24 +145,31 @@ def test_run_refuses_a_missing_runner_even_when_experimental(tmp_path, monkeypat
 
 
 def test_an_installed_hex_outside_the_pair_is_a_blocker(tmp_path_factory):
-    # woof hex 0.3.3 is the newest release on the index today; it ships neither
-    # runner and declares woof>=2.8.0,<2.8.1.
-    site = _fake_hex(tmp_path_factory.mktemp("site") / "site", "0.3.3", runners=False)
+    # The row pairs its runners with recast-woof>=1.1.0,<2 (the hex model
+    # rides inside it as woof.hex).  Distribution metadata that claims a
+    # release outside that range -- here 0.3.3, ahead of site-packages on the
+    # path -- is a blocker even though the runner modules import.  Run from
+    # the fake site, not ROOT: a source checkout's own recast_woof.egg-info
+    # sits in the working directory, which leads the path.
+    site = tmp_path_factory.mktemp("site") / "site"
+    info = site / "recast_woof-0.3.3.dist-info"
+    info.mkdir(parents=True)
+    (info / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: recast-woof\nVersion: 0.3.3\n", encoding="utf-8")
     env = dict(os.environ, CUDA_VISIBLE_DEVICES="", GPUWM_NO_LOCAL_GPU="1",
                PYTHONPATH=os.pathsep.join([str(site), str(ROOT)]))
     result = subprocess.run([sys.executable, "-m", "woof.cli", "preset", "check", NAME],
-                            cwd=ROOT, env=env, capture_output=True, text=True)
+                            cwd=site, env=env, capture_output=True, text=True)
     assert result.returncode == 3, result.stdout + result.stderr
     document = json.loads(result.stdout)
     assert document["paired_package"]["installed"] == "0.3.3"
-    assert {r["id"] for r in document["blockers"]} == {
-        "paired-package-release", "prepare-runner-importable", "run-runner-importable"}
+    assert {r["id"] for r in document["blockers"]} == {"paired-package-release"}
     prepare = subprocess.run(
         [sys.executable, "-m", "woof.cli", "preset", "prepare", NAME, "--cycle",
          "2026101412", "--mesh", "conus12km", "--out", str(site / "out")],
-        cwd=ROOT, env=env, capture_output=True, text=True)
+        cwd=site, env=env, capture_output=True, text=True)
     assert prepare.returncode == 2
-    assert "woof hex 0.3.3 is installed" in prepare.stderr + prepare.stdout
+    assert "recast-woof 0.3.3 is installed" in prepare.stderr + prepare.stdout
     assert not (site / "out").exists()
 
 

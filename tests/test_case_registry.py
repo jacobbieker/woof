@@ -77,12 +77,20 @@ def test_shipped_cases_are_discovered_with_their_capabilities():
     Superset assertions: adding a case must not fail this test.  What is
     pinned is that nothing that used to be dispatchable stopped being so,
     and that the shared nest helper is still not mistaken for a case."""
+    from _woof_snapshot import left_out
     found = cases.discover()
-    assert {"straka", "igw", "hill2d", "moist_bubble", "wk82",
-            "real74_d01"} <= set(cases.names(cases.VERIFY))
-    assert "real74_d01" in cases.names(cases.CONFIG)
-    assert cases.CONFIG in found["real74_d01"].capabilities
-    assert cases.VERIFY in found["real74_d01"].capabilities
+    assert {"straka", "igw", "hill2d", "moist_bubble", "wk82"} <= set(cases.names(cases.VERIFY))
+    # The real-data case module is one the Recast WOOF tree leaves out
+    # (tests/_woof_left_out.txt); where it ships it is both a config and a
+    # verify case.  The config capability's classification itself is pinned
+    # on a planted module by test_capabilities_come_from_declared_entry_points.
+    if not left_out("woof/verify/cases/real74_d01.py"):
+        assert "real74_d01" in cases.names(cases.VERIFY)
+        assert "real74_d01" in cases.names(cases.CONFIG)
+        assert cases.CONFIG in found["real74_d01"].capabilities
+        assert cases.VERIFY in found["real74_d01"].capabilities
+    else:
+        assert "real74_d01" not in found
     # nest_ideal_common is a helper shared by the nest cases, not a case.
     assert "nest_ideal_common" not in found
 

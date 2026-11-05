@@ -176,9 +176,17 @@ def capture_compiled_source(name: str) -> tuple[str, str]:
         def get_function(self, _func):                   # pragma: no cover
             raise RuntimeError("freeze receipt module is not executable")
 
+    from woof import backend
+
     kernels.load_module.cache_clear()
     try:
-        with _patched(cp, "RawModule", _RecordingRawModule):
+        # The receipt is the string NVRTC compiles: the CUDA route of the
+        # loader, whichever backend this process runs.  Under the Metal
+        # backend (WOOF_BACKEND=mlx, where ``cupy`` is woof's facade) the
+        # loader would otherwise take the translation route, construct no
+        # RawModule, and leave nothing recorded.
+        with _patched(cp, "RawModule", _RecordingRawModule), \
+                _patched(backend, "active", lambda: "cuda"):
             # Capture the real assembly factory without querying a device
             # merely to key its cache during this source-only inspection.
             factory = getattr(kernels.load_module, "__wrapped__", kernels.load_module)

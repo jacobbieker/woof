@@ -769,8 +769,12 @@ def test_the_route_still_reaches_the_admission_seam():
 
     from woof import runtime
 
+    # run_experiment opens the step log and delegates to _run_experiment
+    # (2026-10-18), which reaches the shared seam on both of its arms.
     source = inspect.getsource(runtime.run_experiment)
-    assert "_run_built_experiment(" in source
+    assert "_run_experiment(" in source
+    routed = inspect.getsource(runtime._run_experiment)
+    assert "_run_built_experiment(" in routed
     shared = inspect.getsource(runtime._run_built_experiment)
     assert "admit_restart_with_lifecycle(exp, restart)" in shared
 

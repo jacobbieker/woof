@@ -1835,8 +1835,19 @@ def probe_cycle_window(source: str, cycle: datetime, leads, *,
         seen = set()
         complete = True
         for lead in (values[-1], *values[:-1]):
-            urls = cycle_probe_urls(source, cycle, lead, transport=endpoint.name,
-                                    cadence=cadence, start_hour=values[0], member=member)
+            try:
+                urls = cycle_probe_urls(source, cycle, lead, transport=endpoint.name,
+                                        cadence=cadence, start_hour=values[0], member=member)
+            except ValueError as refusal:
+                # A rung whose declared layout has no object for this lead (an
+                # archive that keeps only 3-hourly leads, asked for f001) does
+                # not hold the set: the next rung is asked.  Raising here
+                # aborted the whole probe on the first such rung, although the
+                # live host above or below it could serve every lead.
+                checks.append(dict(endpoint=endpoint.name, lead=lead, url=None,
+                                   available=False, why=str(refusal)))
+                complete = False
+                break
             for url in urls:
                 if url in seen:
                     continue
@@ -2255,6 +2266,15 @@ def resolve_latest_cycle(source: str, last_hour: int, *,
         now = datetime.now(timezone.utc).replace(tzinfo=None)
     elif now.tzinfo is not None:
         now = now.astimezone(timezone.utc).replace(tzinfo=None)
+    if (route is not None and route.publication_eras
+            and all(era.valid_until is not None for era in route.publication_eras)):
+        # A closed archive (every publication era has ended: GEFS v11 stopped
+        # in 2020) has no cycle after its last era, so "latest" is its final
+        # published cycle, as a closed CF archive's is its coverage end.
+        # Walking back from the wall clock found no era at all and refused.
+        closed = max(era.valid_until for era in route.publication_eras)
+        if now >= closed:
+            now = closed - timedelta(seconds=1)
     # ``provider`` is a transport the source's archive windows name (the
     # keyless ARCO copy of ERA5): it can trail the source's usual delay.
     grid, _basis = provider_cycle_grid(source, provider, now=now)

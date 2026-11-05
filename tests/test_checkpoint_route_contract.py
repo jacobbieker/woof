@@ -576,9 +576,15 @@ def test_the_permitted_keys_are_the_ones_the_help_text_publishes():
     # cadence stays bound after all.
     # Preparation also ignores the declared execution layout. Its existing
     # resident/streamed equivalence does not change a meteorological array.
+    # The per-domain history selection (`output`) and the quick-look
+    # stream (`full_history_interval_s`, `quicklook_output`) are output-only
+    # on the restart identity's own terms -- woof.core.model drops all three
+    # from a domain's restart identity -- so preparation binds none of
+    # them either (WOOF run-controls feasibility, defect 7).
+    quicklook = ("output", "full_history_interval_s", "quicklook_output")
     assert NON_TRAJECTORY_IDENTITY_FIELDS == frozenset(
         f"run.{name}" for name in CONFIG_RUN_LENGTH_FIELDS
-    ) | {"history_interval_s", "tiles", *window}
+    ) | {"history_interval_s", "tiles", *window, *quicklook}
 
     # THE TEXT ITSELF: every tolerated domain field is named by both
     # published --restart contracts, so a key tolerated in code and

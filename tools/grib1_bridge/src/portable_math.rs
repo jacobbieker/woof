@@ -41,6 +41,7 @@ pub const BINARY_ATAN2: u32 = 1;
 // This is the same C ABI used by water_blend::python_square and CPython
 // math. A black-box exponent prevents LLVM from replacing pow(x, 2)
 // with multiplication, which is a different last bit for some x.
+#[cfg(not(feature = "glibc239"))]
 extern "C" {
     #[link_name = "exp"] fn host_c_exp(x: f64) -> f64;
     #[link_name = "log"] fn host_c_log(x: f64) -> f64;
@@ -53,6 +54,27 @@ extern "C" {
     #[link_name = "pow"] fn host_c_pow(x: f64, y: f64) -> f64;
 }
 
+// With the opt-in `glibc239` feature (`pixi run build-native-glibc239`) the
+// same entries compute glibc 2.39's words, the C library the WRF references
+// link, on every host: the glibc239-libm crate, LGPL-2.1-or-later in part
+// (NOTICE), which a default build does not contain.  They gain sin and cos.
+#[cfg(feature = "glibc239")]
+mod glibc239_c {
+    pub(super) unsafe fn host_c_exp(x: f64) -> f64 { glibc239_libm::exp(x) }
+    pub(super) unsafe fn host_c_log(x: f64) -> f64 { glibc239_libm::log(x) }
+    pub(super) unsafe fn host_c_log10(x: f64) -> f64 { glibc239_libm::log10(x) }
+    pub(super) unsafe fn host_c_sin(x: f64) -> f64 { glibc239_libm::sin(x) }
+    pub(super) unsafe fn host_c_cos(x: f64) -> f64 { glibc239_libm::cos(x) }
+    pub(super) unsafe fn host_c_tan(x: f64) -> f64 { glibc239_libm::tan(x) }
+    pub(super) unsafe fn host_c_atan(x: f64) -> f64 { glibc239_libm::atan(x) }
+    pub(super) unsafe fn host_c_asin(x: f64) -> f64 { glibc239_libm::asin(x) }
+    pub(super) unsafe fn host_c_acos(x: f64) -> f64 { glibc239_libm::acos(x) }
+    pub(super) unsafe fn host_c_atan2(y: f64, x: f64) -> f64 { glibc239_libm::atan2(y, x) }
+    pub(super) unsafe fn host_c_pow(x: f64, y: f64) -> f64 { glibc239_libm::pow(x, y) }
+}
+#[cfg(feature = "glibc239")]
+use glibc239_c::*;
+
 fn host_exp(x: f64) -> f64 { unsafe { host_c_exp(x) } }
 fn host_log(x: f64) -> f64 {
     if x > 0.0 { unsafe { host_c_log(x) } }
@@ -61,6 +83,14 @@ fn host_log(x: f64) -> f64 {
 fn host_log10(x: f64) -> f64 {
     if x > 0.0 { unsafe { host_c_log10(x) } }
     else if x == 0.0 { f64::NEG_INFINITY } else { f64::NAN }
+}
+#[cfg(feature = "glibc239")]
+fn host_sin(x: f64) -> f64 {
+    if x.is_infinite() { f64::NAN } else { unsafe { host_c_sin(x) } }
+}
+#[cfg(feature = "glibc239")]
+fn host_cos(x: f64) -> f64 {
+    if x.is_infinite() { f64::NAN } else { unsafe { host_c_cos(x) } }
 }
 fn host_tan(x: f64) -> f64 {
     if x.is_infinite() { f64::NAN } else { unsafe { host_c_tan(x) } }
@@ -96,6 +126,10 @@ fn host_unary_f64(op: u32) -> Option<fn(f64) -> f64> {
         UNARY_EXP => host_exp, UNARY_LOG => host_log, UNARY_LOG10 => host_log10,
         UNARY_TAN => host_tan, UNARY_ATAN => host_atan,
         UNARY_ASIN => host_asin, UNARY_ACOS => host_acos,
+        #[cfg(feature = "glibc239")]
+        UNARY_SIN => host_sin,
+        #[cfg(feature = "glibc239")]
+        UNARY_COS => host_cos,
         _ => return None,
     })
 }
@@ -404,6 +438,39 @@ pub unsafe extern "C" fn gpuwm_host_binary_f64(
         binary(function, (left, left_length), (right, right_length), output, length, workers);
         OK
     })).unwrap_or(ERR_PANIC)
+}
+
+/// Scalar glibc 2.39 words (opt-in `glibc239` builds only) for code that is
+/// not elementwise over arrays:
+/// the host builds of the reference mirrors (tools/fast_sbm_host, the WDM6
+/// CPU mirror) bind these through function pointers in place of the
+/// platform C library, and so do the scalar Python references.  No domain
+/// handling: these are the C functions' values.  The binary32 functions are
+/// rw-libm's transcriptions of the Arm code glibc 2.39 runs for them, which
+/// equal glibc 2.39's words on every argument.
+macro_rules! glibc239_scalar {
+    ($($name:ident: $function:path, ($($arg:ident),+): $ty:ty;)+) => {$(
+        #[cfg(feature = "glibc239")]
+        #[no_mangle]
+        pub extern "C" fn $name($($arg: $ty),+) -> $ty { $function($($arg),+) }
+    )+};
+}
+
+glibc239_scalar! {
+    gpuwm_glibc239_exp: glibc239_libm::exp, (x): f64;
+    gpuwm_glibc239_log: glibc239_libm::log, (x): f64;
+    gpuwm_glibc239_log10: glibc239_libm::log10, (x): f64;
+    gpuwm_glibc239_sin: glibc239_libm::sin, (x): f64;
+    gpuwm_glibc239_cos: glibc239_libm::cos, (x): f64;
+    gpuwm_glibc239_tan: glibc239_libm::tan, (x): f64;
+    gpuwm_glibc239_atan: glibc239_libm::atan, (x): f64;
+    gpuwm_glibc239_asin: glibc239_libm::asin, (x): f64;
+    gpuwm_glibc239_acos: glibc239_libm::acos, (x): f64;
+    gpuwm_glibc239_atan2: glibc239_libm::atan2, (y, x): f64;
+    gpuwm_glibc239_pow: glibc239_libm::pow, (x, y): f64;
+    gpuwm_glibc239_expf: rw_libm::expf, (x): f32;
+    gpuwm_glibc239_logf: rw_libm::logf, (x): f32;
+    gpuwm_glibc239_powf: rw_libm::powf, (x, y): f32;
 }
 
 #[cfg(test)]

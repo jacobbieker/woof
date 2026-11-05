@@ -364,6 +364,9 @@ def test_both_doors_carry_the_shared_gpu_remedy_their_own_preflight_prints(
     import subprocess
     from woof import metem_door, metem_forecast, supervisor, wrfinput_forecast, wrfinput_door
     calls = []
+    # The wrfinput door honours a hidden device mask by taking no lease;
+    # the GPU-less conftest backstop plants one, and the lease is under test.
+    monkeypatch.delenv('CUDA_VISIBLE_DEVICES', raising=False)
 
     class _Lock:
         def __init__(self, *arguments, **keywords):

@@ -623,9 +623,13 @@ def test_tracker_receipts_open_with_the_echoed_config():
     assert first["decision"] == "configured"
     assert first["config"]["threshold"] == 50.0
     # Both optional keys are echoed only when configured, so neither
-    # is required in the receipt of a config that did not set it.
+    # is required in the receipt of a config that did not set it; the
+    # sea-level-pressure tracker's own keys (pressure_center and its
+    # fallback level) are echoed only for field = "pressure", not "uh".
     assert set(first["config"]) >= (
-        FOLLOW_KEYS - st.ATTRIBUTE_KEYS - {"fallback_threshold", "level_hpa", "refine_grid_id"})
+        FOLLOW_KEYS - st.ATTRIBUTE_KEYS - {"fallback_threshold", "level_hpa", "refine_grid_id",
+                                           "pressure_center", "fallback_level_hpa",
+                                           "fallback_deficit_m"})
     assert tracker.drain_receipts()          # hands them over ...
     assert tracker.receipts == []            # ... and clears the ledger
 

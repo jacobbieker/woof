@@ -51,7 +51,9 @@ woof/core/noahmp_libm.py. These are Arm optimized-routines under MIT,
 Copyright (c) 2017-2018, Arm Limited. The complete grant is reproduced
 beside the Rust code and in licenses/LICENSE-Arm-optimized-routines-MIT.txt.
 The binary-form bridge notice covers this compiled copy too. The separate
-host FP64 entries call the platform C library; they do not transcribe it.
+host FP64 entries call the platform C library; they do not transcribe it,
+except in a build made with the opt-in described in the glibc 2.39 section
+below.
 
 The native regular-grid Zarr reader's locked dependencies, including codec
 and TLS libraries, are inventoried with their licence texts in
@@ -701,9 +703,10 @@ The binary64 cos and acos are CORE-MATH's correctly rounded functions
 Paul Zimmermann and Tom Hubrecht" and acos "Copyright (c) 2024-2025 Alexei
 Sibidanov.", both under MIT. glibc's own binary64 cos and acos, which are
 the IBM Accurate Mathematical Library under the LGPL, are NOT transcribed
-anywhere in this repository; that is why the kernel's cos and acos are
-different functions from WRF's, a residual measured and stated in the
-header and in the UW registry option. The copyright lines and the
+in this header (the opt-in host-side crate in the glibc 2.39 section below
+is this repository's only LGPL transcription); that is why the kernel's cos
+and acos are different functions from WRF's, a residual measured and
+stated in the header and in the UW registry option. The copyright lines and the
 permission text are at licenses/LICENSE-CORE-MATH-binary64-MIT.txt and
 beside the code in woof/core/kernels/LICENSE-third-party.txt.
 
@@ -750,7 +753,8 @@ src/binary32/atan/atanf.c, src/binary32/atan2/atan2f.c,
 src/binary32/log10/log10f.c, src/binary64/asin/asin.c,
 src/binary64/acos/acos.c).  glibc 2.43 distributes the binary32 four;
 glibc's own binary64 asin and acos are the IBM Accurate Mathematical
-Library under the LGPL and are NOT transcribed.  The copyright lines and
+Library under the LGPL and are NOT transcribed in rw-libm (see the glibc
+2.39 section below for the crate that does).  The copyright lines and
 the permission text are at licenses/LICENSE-CORE-MATH-rw-libm-MIT.txt:
 
     Copyright (c) 2022-2025 Alexei Sibidanov.
@@ -764,6 +768,82 @@ static_fields.  The verification record (every binary32 argument for the
 univariate functions, a billion random pairs for powf and atan2f, and the
 CORE-MATH worst-case files) is tools/rw_libm_proof/verification.log, beside
 the harness that produced it.
+
+--------------------------------------------------------------------------
+
+glibc 2.39 binary64 libm in Rust -- IBM Accurate Mathematical Library (LGPL)
+
+WRF's reference fixtures were computed by gfortran against glibc 2.39, and
+the platform C library's binary64 transcendentals differ in the last bits
+between glibc releases, macOS and the Windows UCRT.  The first-party crate
+tools/rustwx/crates/glibc239-libm transcribes glibc 2.39's own exp, log,
+log10, pow, sin, cos, tan, atan, atan2, asin and acos, in the form of
+glibc's x86-64 FMA IFUNC variants, and its binary32 asinf, so that a build
+which uses it gives glibc 2.39's results on every platform.  (asinf is the
+strict terrain-rotation reference in static-fields' src/capi/scalar.rs.)
+
+THE CRATE IS OPT-IN.  No default build compiles it: tools/rustwx excludes
+it from its workspace, and the CPU preprocessing bridge (tools/grib1_bridge)
+and static-fields reach it only through their `glibc239` cargo feature,
+which is off by default.  `pixi run build-native-glibc239` turns it on, in
+which case it is compiled into the CPU preprocessing bridge
+(gpuwm_preprocess_cpu), the static_fields library and the executables that
+link static_fields (the rw_mpas_* tools and rw_mlexport).  The default
+native build, the recast-woof and metal-woof wheels and the release bridge
+bundles are built without it and contain none of its code: their host math,
+static_fields' public projections and its strict scalar asin call the
+platform libm, and static_fields' orographic projection and sampling lanes
+keep their rw-libm and fixed-arithmetic paths, as before.  Nothing in this
+section applies to those builds.
+woof.core.host_libm.implementation() reports which a running installation
+uses.
+
+Its licence is by file; the crate declares
+"LGPL-2.1-or-later AND MIT AND SunPro".
+
+  * sin, cos, tan, atan, atan2, asin and acos, their shared argument
+    reduction and the dla.h helpers (src/sincos.rs, sincostab.rs,
+    branred.rs, tan.rs, utan_tbl.rs, atan.rs, atan2.rs, uatan_tbl.rs,
+    asin.rs, asincos_tbl.rs and dla.rs) transcribe the IBM Accurate
+    Mathematical Library as glibc 2.39 distributes it
+    (sysdeps/ieee754/dbl-64/s_sin.c, usncs.h, sincostab.c, branred.c,
+    branred.h, s_tan.c, utan.h, utan.tbl, s_atan.c, atnat.h, e_atan2.c,
+    atnat2.h, uatan.tbl, e_asin.c, uasncs.h, asincos.tbl, root.tbl,
+    powtwo.tbl and dla.h).  Their notice reads "IBM Accurate Mathematical
+    Library, written by International Business Machines Corp., Copyright
+    (C) 2001-2024 Free Software Foundation, Inc.", under the GNU Lesser
+    General Public License, version 2.1 or (at your option) any later
+    version.  Each of these files keeps that notice and states that it was
+    modified (transcribed to Rust in 2026).  The licence text is at
+    licenses/LICENSE-glibc-LGPL-2.1.txt.
+  * exp, log and pow (src/exp.rs, log.rs and pow.rs) are Arm's
+    optimized-routines under MIT, taken from the upstream files at
+    tools/uwpbl_wrf471_oracle/libm64/upstream/, as in the FP64 section above.
+  * log10 (src/log10.rs) is FDLIBM's e_log10.c under Sun's notice, as
+    reproduced in the FDLIBM section above.
+  * asinf (src/asinf.rs) is glibc 2.39's sysdeps/ieee754/flt-32/e_asinf.c:
+    FDLIBM under Sun's notice, with single-precision modifications
+    "Copyright (C) 2001 Stephen L. Moshier" that glibc carries under the
+    GNU Lesser General Public License, version 2.1 or later.  The file
+    keeps both notices and states that it was modified.
+
+Only those twelve files (the eleven IBM files and asinf.rs) are offered
+under the LGPL.  A binary built with
+the opt-in contains them and is otherwise under its own licences.  LGPL
+2.1 section 6 conditions distributing such a binary on the recipient being
+able to modify the Library and relink: the complete source of the crate,
+and of every binary that links it, is this source distribution and
+repository, and each of those binaries rebuilds from it with cargo
+(`pixi run build-native-glibc239`), so a modified crate can be linked in
+its place.  Whoever distributes an opt-in build must keep that source
+available to its recipients, as section 6 requires, and give them
+licenses/LICENSE-glibc-LGPL-2.1.txt with it.
+
+The verification record (a billion random arguments per function and an
+edge-case sweep, against glibc 2.39 itself, with zero mismatches) is
+tools/glibc239_libm_proof/verification.log, beside its harness, the table
+generators and the disassembly of the FMA variants that fixes each fused
+operation.
 
 --------------------------------------------------------------------------
 

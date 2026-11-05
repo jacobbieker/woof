@@ -402,7 +402,8 @@ class ConservativeMap:
         # Radius buckets avoid querying every fine cell against the largest
         # coarse cell's bound. Each bucket still has a complete cap bound.
         n_target = len(target.area)
-        workers = int(os.environ.get('WOOF_HEX_OVERLAP_THREADS', '0')) or len(os.sched_getaffinity(0))
+        from woof.hex.cpu_budget import affinity_cpus  # sched_getaffinity is Linux-only
+        workers = int(os.environ.get('WOOF_HEX_OVERLAP_THREADS', '0')) or affinity_cpus()
         workers = max(1, min(workers, n_target))
         gil_enabled = getattr(sys, '_is_gil_enabled', lambda: True)()
         backend = os.environ.get('WOOF_HEX_OVERLAP_EXECUTOR', 'auto')

@@ -20,7 +20,7 @@ are bound to PyPI trusted publishing.
 |---|---|---|---|---|
 | `lint` | ubuntu-24.04 | `cpu` | `actionlint`; `tests/test_no_undefined_names.py` (ruff F821/F822/F823 over `woof`, `tools`, `tilestream`); `compileall` over the owned Python trees; `python -m tools.import_sweep`; a check that the test legs partition `tests/` | No undefined names, no syntax errors, and every shipped module imports (or names a declared optional extra) |
 | `native (ubuntu-24.04)` | ubuntu-24.04 | `cpu` | `cargo build --release --locked --offline` in every workspace that the `build-native` pixi task names, read from `pyproject.toml` | The vendored Rust bridges build offline. Their executables and shared libraries are packed as the `native-linux` artifact |
-| `cpu (ubuntu-24.04, N)` | ubuntu-24.04 | `cpu` | Legs `0`–`7`: `tests/test_*.py` split into 8 legs by a hash of each path. `hex`: `components/hex/tools/battery/cpu_files.txt`, run from `components/hex`. `stage1`: `tools/battery/run_stage1.py`, the maintained Stage 1 list. Every leg uses `-m "not gpu and not bigcard and not assets"` and `pytest-xdist -n auto --dist loadfile` | The CPU tier passes on Linux, with the bridges present |
+| `cpu (ubuntu-24.04, N)` | ubuntu-24.04 | `cpu` | Legs `0`–`7`: `tests/test_*.py` split into 8 legs by a hash of each path. `hex`: `components/hex/tools/battery/cpu_files.txt`, run from `components/hex`. `stage1`: `tools/battery/run_stage1.py`, the maintained Stage 1 list. Every leg first stages the externalized Thompson tables (`qr_acr_qg_V4.dat`, `freezeH2O.dat`, left out of the `recast-woof-data` wheel) with `woof fetch-tables`, SHA-256 verified against the pins, cached under `~/.woof/tables/thompson`. Every leg uses `-m "not gpu and not bigcard and not assets"` and `pytest-xdist -n auto --dist loadfile` | The CPU tier passes on Linux, with the bridges and the Thompson tables present |
 | `native (macos-15)` | macos-15 (arm64) | `mlx` | The same Rust build on macOS | The bridges build on macOS |
 | `macos (macos-15, mlx env, N)` | macos-15 | `mlx` | The same legs as `cpu` | The CPU tier passes on macOS in the environment Mac users run (`WOOF_BACKEND=mlx` is set by the env) |
 | `metal probe + device-free translator checks` | macos-15 | `mlx` | Checks for an Apple-silicon GPU (`mx.metal.device_info()` architecture `applegpu_*`). Without one it still runs `tools/metal_translation_census.py --translate-only --gate` (both rounding modes) and `tools/f64_soft_grade.py host` | Every CUDA kernel unit translates to MSL, and the soft-binary64 header is word-exact on the host. Whether Metal exists is reported |
@@ -70,6 +70,26 @@ not a pass.
 - **Rust formatting.** `cargo fmt --check` is not clean across the path
   dependencies into vendored crates, so it is not enforced.
 - **Windows.** No job runs on Windows.
+- **Inputs the Recast WOOF tree leaves out.** A case that reads or runs a
+  file `tests/_woof_left_out.txt` names (the desktop and terminal front
+  ends, the release-cut tools, campaign evidence, `tools/n5s`) skips with
+  the input and the rule in its reason, at collection or at run time
+  (`conftest.py`, `tests/_woof_snapshot.py`). It runs in the engine's tree.
+  `test_doc_anchors.py::test_a_document_that_names_its_revision_is_resolved_there`
+  skips because the B4 receipt pins engine revision `fc15d9ae`, which this
+  export's history does not hold.
+- **Linux-only machinery on the macOS legs**, each skipped on darwin by
+  name with the reason: the remote worker's node-side cases
+  (`tests/test_remote_*.py`; job ownership reads `/proc` and signals through
+  a pidfd, and every other platform is refused by name, which
+  `test_every_door_refuses_an_unsupported_platform_with_one_sentence`
+  still asserts there); the worker container's `deploy/entrypoint.sh`
+  (`util-linux flock`); the hex native oracle harnesses' GNU tar unpack
+  (`test_oracle_archive_publication.py`) and unlimited-stack replay
+  (`test_native_physics_oracle.py`).
+- **kubectl's client dry run** in `test_energy_hindcast_deploy.py` runs
+  only where a cluster context is configured: it still asks a cluster for
+  its API groups, and the hosted Ubuntu image ships kubectl with none.
 
 ## The opt-in CUDA runner
 
@@ -105,8 +125,9 @@ pixi run -e cpu python -m pytest -q tests/test_no_undefined_names.py
 pixi run -e cpu python -m tools.import_sweep
 pixi exec --spec actionlint==1.7.12 actionlint
 
-# natives, then one CPU leg (0..7), the hex tier, Stage 1
+# natives and the Thompson tables, then one CPU leg (0..7), the hex tier, Stage 1
 pixi run -e cpu python .github/ci/build_native.py build
+pixi run -e cpu woof fetch-tables
 GPUWM_NO_LOCAL_GPU=1 pixi run -e cpu python -m pytest -q -n auto --dist loadfile \
     -m "not gpu and not bigcard and not assets" $(python3 .github/ci/select_tests.py shard 0 8)
 (cd components/hex && GPUWM_NO_LOCAL_GPU=1 pixi run -e cpu python -m pytest -q -n auto \

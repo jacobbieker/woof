@@ -74,9 +74,13 @@ def test_an_unknown_engine_is_refused_by_name(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# The default writes the classic container through the Rust seam.
+# The default writes the classic container through the Rust seam.  The
+# default history STORAGE is deflated NetCDF-4 (1.1.4; tested in
+# tests/test_compressed_history_pricing.py); the classic container is
+# ``--history-compression none``, which these cases select.
 # ---------------------------------------------------------------------------
 
+@pytest.mark.usefixtures("classic_history_frames")
 def test_default_writer_emits_a_classic_tape(tmp_path, monkeypatch):
     _require_rust_writer()
     monkeypatch.delenv(WRFOUT_WRITER_ENV, raising=False)
@@ -265,6 +269,7 @@ def test_an_aborted_default_write_leaves_no_final_file(tmp_path, monkeypatch):
 # The async production path inherits the default.
 # ---------------------------------------------------------------------------
 
+@pytest.mark.usefixtures("classic_history_frames")
 def test_the_async_worker_writes_through_the_default_engine(
         tmp_path, monkeypatch):
     """The worker constructs the plain ``WrfoutWriter``, so one default

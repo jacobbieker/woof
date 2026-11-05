@@ -153,12 +153,16 @@ def test_metem_estimate_and_preparation_use_one_policy(tmp_path, monkeypatch, re
 
 
 @pytest.mark.parametrize('requested', ['cuda', 'auto'])
+@pytest.mark.parametrize('card', ['too-small', 'occupied'])
 def test_metem_preparation_is_priced_and_decided_before_it_allocates(
-        tmp_path, monkeypatch, capsys, requested):
+        tmp_path, monkeypatch, capsys, requested, card):
     """A65 on the met_em door: the advisory that warned and allocated is
-    replaced by the price.  On a stand-in card with almost nothing free an
-    explicit cuda is refused by name before the output directory exists,
-    and auto moves the preparation to the CPU with its reason recorded."""
+    replaced by the price, decided before the output directory exists.
+    A card whose capacity is below the price is refused by name, explicit
+    cuda and auto alike, with the CPU line as the remedy; a card other work
+    occupies is waited for, keeping CUDA: load never changes the backend
+    (woof.ingest.preprocess_backend.admit_preparation)."""
+    import time
     from types import SimpleNamespace
     from woof.core import device_probe
     from woof.ingest import preprocess_backend
@@ -180,23 +184,32 @@ def test_metem_preparation_is_priced_and_decided_before_it_allocates(
                         lambda **_: cpu)
     monkeypatch.setattr(preprocess_backend, '_gpu_runtime_installed', lambda: True)
     monkeypatch.setattr(preprocess_backend, '_ANNOUNCED_AUTO_REASONS', set())
+    total = 2 * 2**20 if card == 'too-small' else 24 * 2**30
     monkeypatch.setattr(device_probe, 'device_memory_probe_subprocess', lambda **_: {
-        'free_bytes': 2**20, 'total_bytes': 24 * 2**30,
+        'free_bytes': 2**20, 'total_bytes': total,
         'utilization_gpu_percent': 0})
     # The CUDA stack here is a stand-in, so this machine allows its card:
     # since 083ac7cd0 the backend choice honours GPUWM_NO_LOCAL_GPU first,
     # and the CPU legs set it.
     monkeypatch.delenv('GPUWM_NO_LOCAL_GPU', raising=False)
-    if requested == 'cuda':
+
+    class Waited(Exception):
+        pass
+
+    def sleep(_seconds):
+        # The occupied card would be polled until it frees; one poll is
+        # the observation.
+        raise Waited
+    monkeypatch.setattr(time, 'sleep', sleep)
+    if card == 'too-small':
         with pytest.raises(preprocess_backend.PreparationDeviceRefused,
                            match='--preprocess-backend cpu'):
             metem_forecast.prepare_metem_run(run, tmp_path / 'prepared',
-                                             preprocess_backend='cuda')
+                                             preprocess_backend=requested)
     else:
-        with pytest.raises(Reached):
+        with pytest.raises(Waited):
             metem_forecast.prepare_metem_run(run, tmp_path / 'prepared',
-                                             preprocess_backend='auto')
-        assert cpu.selection['device_fit']['fits'] is False
-        assert cpu.selection['device_fit']['route'] == 'met_em'
-        assert 'the CUDA preparation needs' in capsys.readouterr().err
+                                             preprocess_backend=requested)
+        assert 'keeping CUDA to preserve the prepared fields' in capsys.readouterr().err
+    assert not hasattr(cpu, 'selection')
     assert not (tmp_path / 'prepared').exists()

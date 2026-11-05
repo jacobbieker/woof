@@ -6,10 +6,17 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from woof import linux_handles
 from woof.da import spread_vts as vts, spread_vts_ram as ram
+
+#: Sealed RAM is Linux by nature: memfd_create plus F_ADD_SEALS.  Elsewhere the
+#: server refuses at start (test_a_platform_without_memfd_refuses_at_start).
+_SEALED_RAM = pytest.mark.skipif(not linux_handles.has_memfd(),
+                                 reason="VTSM sealed RAM needs Linux memfd_create and file seals")
 
 
 @pytest.mark.parametrize("dtype", [np.float32, np.float64, np.int64, np.uint8])
+@_SEALED_RAM
 def test_sealed_ram_preserves_native_bytes_and_lifetime(tmp_path, dtype):
     original = np.arange(24, dtype=dtype).reshape(2, 3, 4)
     expected = original.tobytes()
@@ -34,6 +41,7 @@ def test_sealed_ram_preserves_native_bytes_and_lifetime(tmp_path, dtype):
     assert not server.path.exists()
 
 
+@_SEALED_RAM
 def test_ram_refuses_duplicate_and_budget_without_replacing_prior(tmp_path):
     server = ram.RetainedRam(tmp_path/"s", max_bytes=32).start()
     try:
@@ -89,6 +97,7 @@ def test_the_kernel_abi_table_matches_every_name_the_interpreter_publishes():
             assert getattr(os, name) == number, name
 
 
+@_SEALED_RAM
 @pytest.mark.parametrize("names_shown", [True, False],
                          ids=["module-names", "kernel-abi"])
 def test_sealed_ram_runs_with_and_without_the_module_sealing_names(
@@ -109,6 +118,7 @@ def test_sealed_ram_runs_with_and_without_the_module_sealing_names(
         server.clear()
 
 
+@_SEALED_RAM
 def test_a_kernel_that_refuses_the_seals_is_refused_by_name(tmp_path,
                                                             monkeypatch):
     view = _FcntlView(False, refuse_add=True)
@@ -122,6 +132,13 @@ def test_a_kernel_that_refuses_the_seals_is_refused_by_name(tmp_path,
                 pass
     finally:
         server.clear()
+
+
+def test_a_platform_without_memfd_refuses_at_start(tmp_path, monkeypatch):
+    monkeypatch.setattr(ram.linux_handles, "has_memfd", lambda: False)
+    with pytest.raises(ram.RetentionError, match="needs Linux memfd_create"):
+        ram.RetainedRam(tmp_path/"s", max_bytes=4096).start()
+    assert not (tmp_path/"s").exists(), "no socket is bound for a server that can seal nothing"
 
 
 @pytest.mark.parametrize("kwargs,reason", [

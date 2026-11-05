@@ -319,7 +319,81 @@ fn stat_field(stat: &str, key: &str) -> Option<u64> {
 }
 
 /// Physical memory not currently in use, in bytes.
-#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+///
+/// The Mach VM statistics: free pages that are not speculative, plus
+/// inactive pages, the pages the kernel can hand out without paging
+/// anything in use.  The same reading as psutil's `available` on macOS,
+/// which the Python side (`tilestream.autoplan._host_memavailable`) takes,
+/// so both halves of one run admit against one number.  macOS has no
+/// memory cgroup, so nothing caps it.
+#[cfg(target_os = "macos")]
+pub fn available_bytes() -> Option<u64> {
+    // `struct vm_statistics64` from <mach/vm_statistics.h>; every field is
+    // part of the layout the call writes into.
+    #[repr(C, align(8))]
+    #[allow(dead_code)]
+    #[derive(Default)]
+    struct VmStatistics64 {
+        free_count: u32,
+        active_count: u32,
+        inactive_count: u32,
+        wire_count: u32,
+        zero_fill_count: u64,
+        reactivations: u64,
+        pageins: u64,
+        pageouts: u64,
+        faults: u64,
+        cow_faults: u64,
+        lookups: u64,
+        hits: u64,
+        purges: u64,
+        purgeable_count: u32,
+        speculative_count: u32,
+        decompressions: u64,
+        compressions: u64,
+        swapins: u64,
+        swapouts: u64,
+        compressor_page_count: u32,
+        throttled_count: u32,
+        external_page_count: u32,
+        internal_page_count: u32,
+        total_uncompressed_pages_in_compressor: u64,
+    }
+
+    const HOST_VM_INFO64: i32 = 4;
+    const KERN_SUCCESS: i32 = 0;
+
+    unsafe extern "C" {
+        fn mach_host_self() -> u32;
+        fn host_statistics64(host: u32, flavor: i32, info: *mut i32, count: *mut u32) -> i32;
+        fn getpagesize() -> i32;
+    }
+
+    let mut stats = VmStatistics64::default();
+    let mut count = (size_of::<VmStatistics64>() / size_of::<i32>()) as u32;
+    // Safety: `stats` is a live `vm_statistics64` and `count` is its size
+    // in `integer_t` words, as HOST_VM_INFO64 requires; the call only
+    // writes into it.  The host port is the caller's own.
+    let status = unsafe {
+        host_statistics64(
+            mach_host_self(),
+            HOST_VM_INFO64,
+            (&mut stats as *mut VmStatistics64).cast::<i32>(),
+            &mut count,
+        )
+    };
+    // Safety: getpagesize takes nothing and returns the VM page size.
+    let page = unsafe { getpagesize() };
+    if status != KERN_SUCCESS || page <= 0 {
+        return None;
+    }
+    let pages = u64::from(stats.free_count.saturating_sub(stats.speculative_count))
+        + u64::from(stats.inactive_count);
+    pages.checked_mul(page as u64)
+}
+
+/// Physical memory not currently in use, in bytes.
+#[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
 pub fn available_bytes() -> Option<u64> {
     None
 }
@@ -340,6 +414,15 @@ mod tests {
         // mistake, which is the failure this test exists to catch.
         assert!(bytes > 64 * 1024 * 1024, "{bytes} bytes free is not plausible");
         assert!(bytes < 1 << 50, "{bytes} bytes free is not plausible");
+    }
+
+    /// macOS is asked, not skipped: a None here sends every admission that
+    /// needs a host-memory reading (the simulated radar's polar budget among
+    /// them) into a refusal on every Mac.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_answers_from_the_mach_vm_statistics() {
+        assert!(available_bytes().is_some());
     }
 
     /// Writes one case of `host_memory_cgroup_cases.json` under a fresh

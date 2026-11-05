@@ -48,7 +48,7 @@ class _FlakyOrigin:
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):          # noqa: N802 - http.server API
-                if self.path.endswith(".index"):
+                if self.path.endswith((".index", ".idx")):
                     # A host that keeps no record index: the fetch takes
                     # the whole object, which is what these tests retry.
                     self.send_response(404, "Not Found")

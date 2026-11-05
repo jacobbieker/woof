@@ -60,7 +60,8 @@ def test_external_mode_scale_is_formed_in_real():
     """advance_uv: mudf_xy = -emdiv*dx*(...), -emdiv*dx a REAL product."""
     from woof.core.acoustic import _uv_emdiv_args
 
-    state = SimpleNamespace(mup=object(), msfu=object(), msfv=object(), has_msf=True)
+    state = SimpleNamespace(mup=object(), msfu=object(), msfv=object(), msfv_inv=object(),
+                            has_msf=True)
     cfg = SimpleNamespace(emdiv=0.01, dx=3000.0, dy=2500.0)
     args = _uv_emdiv_args(state, cfg, mudf=np.zeros(1, np.float32))
     assert args[3] == f32(f32(-0.01) * f32(3000.0))
@@ -108,13 +109,17 @@ def test_step_end_follows_solve_ems_order(monkeypatch):
                         lambda state, cfg, t: calls.append(("bdy",)))
     monkeypatch.setattr(dycore, "set_w_surface", lambda state, cfg: calls.append(("wsfc",)))
     monkeypatch.setattr(dycore, "_wrf_muts", lambda state: "muts")
+    # The end-of-step diagnostic packages follow this order and read a full
+    # configuration; they are not part of the solve_em sequence pinned here.
+    monkeypatch.setattr(dycore.interval_diagnostics, "step", lambda state, cfg: None)
+    monkeypatch.setattr(dycore, "_post_step_diagnostics", lambda state, cfg, due: None)
     physics = SimpleNamespace(accept_microphysics=lambda r, dt: calls.append(("accept",)))
     mu = np.ones((3, 4), np.float32)
     halo = np.zeros_like(mu)
     state = SimpleNamespace(physics=physics, elapsed_seconds=0.0, mup=mu,
                             scratch=lambda shape, name: halo)
     cfg = SimpleNamespace(hypsometric_opt=2, mp_physics=6, dt=15.0, nwp_diagnostics=0,
-                          specified=True, nested=False)
+                          specified=True, nested=False, lightning_option=0)
     dycore._wrf_step_epilogue(state, cfg, False)
     assert calls == [("diag", "muts"), ("mp",), ("accept",), ("diag", "muts"), ("bdy",), ("wsfc",)]
     np.testing.assert_array_equal(halo, mu)

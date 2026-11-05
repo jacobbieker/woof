@@ -1305,6 +1305,20 @@ def table_route(source: str) -> Route | None:
     return _ROUTES.get(_canonical(source))
 
 
+def first_published_lead(source: str) -> int:
+    """The lead a window that names no start opens at: the route's first.
+
+    f000 for every source outside the table and for every route that
+    publishes its analysis; the GEFSv12 reforecast (``first_lead = 3``)
+    publishes no f000, so a door that defaults to the analysis plans a
+    window its own fetch refuses.  One answer for the fetch's bare
+    ``[fetch]`` table and for the doors that write one.
+    """
+
+    route = table_route(source)
+    return 0 if route is None else int(route.first_lead)
+
+
 def route_for(source: str) -> Route:
     """The route for ``source``, or the refusal that names why there is none."""
 
@@ -1418,10 +1432,44 @@ def first_preparable_cycle(route: Route) -> datetime | None:
                 for cycle in _era_cycles(era)), default=None)
 
 
+def _own_stand_in(source: str, hour: int) -> datetime:
+    """A stand-in cycle at ``hour`` that this route itself serves.
+
+    A route with no publication eras is priced on an arbitrary date, but
+    the dated-publication table (source-publications.v1.json) hands some
+    dates of a source to another row: ``gefs`` before 2020-09-23 12Z is
+    GEFS v11, whose route refuses a 2001 cycle as predating it, so every
+    stand-in was refused and the plain ``gefs`` request went unpriced.
+    The stand-in moves forward to the first date the table leaves to
+    this route.
+    """
+
+    from woof import source_adapters
+
+    candidate = datetime(2001, 1, 1, hour)
+    for _ in range(64):
+        chosen = source_adapters.source_for_cycle(source, candidate)
+        if chosen == source:
+            return candidate
+        candidate += timedelta(days=1)
+        rows = json.loads((Path(source_adapters.__file__).parent / "authorities"
+                           / "source-publications.v1.json").read_text(encoding="utf-8"))
+        bounds = [datetime.fromisoformat(row["valid_until"])
+                  for row in rows["sources"].get(source, [])
+                  if row.get("valid_until")
+                  and datetime.fromisoformat(row["valid_until"]) > candidate]
+        if bounds:
+            first = min(bounds)
+            candidate = first.replace(hour=hour, minute=0, second=0, microsecond=0)
+            if candidate < first:
+                candidate += timedelta(days=1)
+    return datetime(2001, 1, 1, hour)
+
+
 def planning_cycles(route: Route) -> tuple[datetime, ...]:
     """Stand-in cycles for pricing the newest preparable layout at each hour."""
     if not route.publication_eras:
-        return tuple(datetime(2001, 1, 1, hour) for hour in route.cycle_hours)
+        return tuple(_own_stand_in(route.source_id, hour) for hour in route.cycle_hours)
     cycles = [cycle for era in route.publication_eras if not era.prep_refusal
               for cycle in _era_cycles(era)]
     return tuple(max(cycle for cycle in cycles if cycle.hour == hour)
@@ -4076,7 +4124,8 @@ __all__ = [
     "LATE_BUDGET_MARGIN_MINUTES", "late_spread_minutes",
     "PostingRow", "READY_CHECKS", "WAITED_POSTING_SHAPES", "legacy_posting",
     "legacy_publication_lag", "posting_for", "posting_sources",
-    "endpoint_ladder", "first_preparable_cycle", "handoff_lines", "ladder_for",
+    "endpoint_ladder", "first_preparable_cycle", "first_published_lead",
+    "handoff_lines", "ladder_for",
     "member_tokens", "named_flags", "packaged_route_table_sha256", "planning_cycles",
     "prep_handoff_lines", "publication_era", "refusal_ids", "render_prep_command",
     "resolve_cycle",

@@ -1,4 +1,6 @@
 from datetime import datetime
+import os
+import sys
 import pytest
 from woof import fetch, fetch_endpoints as endpoints, source_readiness as readiness
 
@@ -117,6 +119,12 @@ def test_archive_rename_preserves_verified_publication(tmp_path, monkeypatch, mu
         assert canonical.read_bytes() == payload
         assert not landed.exists()
         assert result["publication"] == fetch._publication(fetch._stat_identity(canonical))
+        if not (sys.platform.startswith("linux") or os.name == "nt"):
+            # No kernel change notice here (woof.file_change_watch watches
+            # with inotify or a Windows oplock), so the stream receipt is
+            # never reused: the digest is read again from the bytes.
+            assert fetch._fetched_digest(canonical) == receipt["sha256"]
+            return
         monkeypatch.setattr(fetch, "sha256_file", lambda p: pytest.fail("lost receipt"))
         assert fetch._fetched_digest(canonical) == receipt["sha256"]
         assert fetch._fetched_records(canonical) == 7

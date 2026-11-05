@@ -13,9 +13,20 @@ workspace), so the build needs no network.
 The tests find these binaries where a source checkout keeps them,
 ``tools/<workspace>/target/release`` (woof.rustwx, woof.bridges), so the pack
 keeps those paths.
+
+A checkout-built bridge is refused when a source it is built from was written
+after it (woof.bridges.require_current_checkout_build).  A test leg checks the
+sources out AFTER the native job built the binaries, and actions/checkout
+stamps every file with the time it wrote it, so on mtime alone every unpacked
+bridge reads as stale.  The pack therefore records the commit it was built
+from and refuses a tree with tracked modifications; the unpack refuses a
+checkout of any other commit (or with tracked modifications), and only then
+stamps the unpacked files with the current time: the binaries are, by that
+check, the build of exactly these sources.
 """
 from __future__ import annotations
 
+import io
 import os
 import re
 import stat
@@ -27,6 +38,23 @@ import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+
+#: The tar member that names the commit the pack was built from.
+REVISION_MEMBER = "native-build-revision"
+
+
+def checkout_revision() -> str:
+    """HEAD, refusing a tree whose tracked files differ from it."""
+
+    head = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "HEAD"],
+                          capture_output=True, text=True, check=True).stdout.strip()
+    dirty = subprocess.run(["git", "-C", str(ROOT), "status", "--porcelain",
+                            "--untracked-files=no"],
+                           capture_output=True, text=True, check=True).stdout.strip()
+    if dirty:
+        raise SystemExit(f"the checkout has tracked modifications; a pack or unpack "
+                         f"cannot vouch that the bridges match it:\n{dirty}")
+    return head
 
 
 def workspaces() -> list[str]:
@@ -79,15 +107,34 @@ def main(argv: list[str]) -> int:
         files = built_files()
         if not files:
             raise SystemExit("nothing built to pack")
+        revision = checkout_revision()
         with tarfile.open(argv[1], "w") as tar:
             for path in files:
                 tar.add(path, arcname=path.relative_to(ROOT).as_posix())
-        print(f"packed {len(files)} files into {argv[1]}")
+            data = (revision + "\n").encode()
+            info = tarfile.TarInfo(REVISION_MEMBER)
+            info.size = len(data)
+            info.mtime = int(time.time())
+            tar.addfile(info, io.BytesIO(data))
+        print(f"packed {len(files)} files built at {revision} into {argv[1]}")
         return 0
     if argv[:1] == ["unpack"] and len(argv) == 2:
         with tarfile.open(argv[1]) as tar:
-            tar.extractall(ROOT, filter="tar")
-            print(f"unpacked {len(tar.getnames())} files")
+            record = tar.extractfile(REVISION_MEMBER)
+            built = record.read().decode().strip() if record else ""
+            here = checkout_revision()
+            if built != here:
+                raise SystemExit(f"the pack was built at {built or 'an unrecorded revision'}; "
+                                 f"this checkout is {here}")
+            members = [m for m in tar.getmembers() if m.name != REVISION_MEMBER]
+            tar.extractall(ROOT, members=members, filter="tar")
+        # Same commit, clean tree: these are the build of these sources, so
+        # they take a time after the checkout wrote them (see the docstring).
+        now = time.time()
+        for member in members:
+            if member.isfile():
+                os.utime(ROOT / member.name, (now, now))
+        print(f"unpacked {len(members)} files built at {built}")
         return 0
     raise SystemExit(__doc__)
 

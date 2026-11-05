@@ -2400,7 +2400,13 @@ C_GATE = 3.0
 #: trade-off of one-constant e-l closures: matching the flux K_v puts
 #: the e level at ~1.05 u*^2 vs the observed ~3.5 u*^2; the flux is
 #: what acts dynamically, the e level is diagnostic.)
-C_KV = C_E ** (1.0 / 3.0)
+#: Spelled as the correctly rounded binary64 value of C_E ** (1.0 / 3.0)
+#: rather than computed: the exact power lies within 0.002 ULP of the
+#: midpoint between two doubles, and the C library's pow picks different
+#: sides on different hosts (glibc ...f88b, macOS libm ...f88a), which made
+#: this registered constant -- and Ri* below -- depend on the platform.
+C_KV = float.fromhex("0x1.f3c361551f88bp-1")
+assert abs(C_KV - C_E ** (1.0 / 3.0)) <= 2.0 ** -53
 #: S3-6f partition-cap constants (module docstring, S3-6f section).
 #: F_CAP_KNEE is the delta/z_i ratio below which the cap is FP-exact 1
 #: (the LES/gray-zone side); F_CAP_WIDTH the Gaussian ramp width above

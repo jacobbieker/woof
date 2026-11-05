@@ -242,13 +242,21 @@ def test_vertical_bounds_are_the_preflights_own_bounds(capsys):
         assert entry["vertical_levels"]["bounds"]
     # YSU's ceiling is the one that killed a run; it must be present and
     # it must be the contract's number, not a number spelled here.
-    from woof.physics_vertical_contract import YSU_VERTICAL_LEVEL_BOUNDS
+    # The default suite's other ceilings are the contract's too (4b3747e7e
+    # raised Kain-Fritsch's from 128 to 256 with YSU's): Kain-Fritsch,
+    # Morrison and RTE+RRTMGP.
+    from woof.physics_vertical_contract import (
+        KF_VERTICAL_LEVEL_BOUNDS, MAX_RRTMGP_MODEL_LEVELS,
+        MORRISON_VERTICAL_LEVEL_BOUNDS, YSU_VERTICAL_LEVEL_BOUNDS)
     from woof.domain_wizard import DEFAULT_PHYSICS_PROFILE
 
     default = next(entry for entry in document["profiles"]
                    if entry["profile_id"] == DEFAULT_PHYSICS_PROFILE)
     assert default["vertical_levels"]["maximum"] == min(
-        bound for bound in (YSU_VERTICAL_LEVEL_BOUNDS[1], 128, 256)
+        bound for bound in (YSU_VERTICAL_LEVEL_BOUNDS[1],
+                            KF_VERTICAL_LEVEL_BOUNDS[1],
+                            MORRISON_VERTICAL_LEVEL_BOUNDS[1],
+                            MAX_RRTMGP_MODEL_LEVELS)
         if bound is not None)
 
 

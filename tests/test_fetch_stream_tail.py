@@ -15,6 +15,15 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 from woof import fetch_connections, fetch, fetch_pool, fetch_routes
 
+#: A fresh stream receipt is reused only while a kernel change notice
+#: watches its file (woof.file_change_watch: inotify on Linux, a read
+#: oplock on Windows).  macOS has neither, so there every digest is read
+#: again from the bytes, by design, and these reuse cases cannot hold.
+CHANGE_NOTICE = pytest.mark.skipif(
+    not (sys.platform.startswith("linux") or os.name == "nt"),
+    reason="no kernel change notice on this OS (woof.file_change_watch): "
+           "stream receipts are never reused, so every digest is re-read")
+
 
 def grib(length=113):
     data = bytearray(length)
@@ -66,6 +75,7 @@ def test_identity_names_the_file_its_size_and_a_change_time_that_moves(tmp_path)
     assert rewritten["ctime_ns"] != renamed["ctime_ns"]
 
 
+@CHANGE_NOTICE
 def test_fresh_receipt_avoids_payload_read_and_append_invalidates_it(tmp_path, monkeypatch):
     path = tmp_path / "fresh.grib2"
     payload = grib() * 3
@@ -158,6 +168,7 @@ def test_another_process_writing_invalidates_digest_even_if_stat_clock_does_not_
     assert path.read_bytes() != payload
 
 
+@CHANGE_NOTICE
 def test_reading_a_fresh_payload_keeps_its_receipt(tmp_path, monkeypatch):
     path = tmp_path / "read.grib2"
     payload = grib() * 2
@@ -176,6 +187,7 @@ def test_reading_a_fresh_payload_keeps_its_receipt(tmp_path, monkeypatch):
     assert fetch._fetched_digest(path) == digest
 
 
+@CHANGE_NOTICE
 def test_fetch_out_end_frees_the_folder_and_file_it_published(tmp_path, monkeypatch):
     out = tmp_path / "out"
     out.mkdir()
@@ -201,6 +213,7 @@ def test_fetch_out_end_frees_the_folder_and_file_it_published(tmp_path, monkeypa
     assert fetch._fetched_digest(moved) == hashlib.sha256(grib(200)).hexdigest()
 
 
+@CHANGE_NOTICE
 def test_soil_rename_keeps_verified_digest_without_reopening_bytes(tmp_path, monkeypatch):
     landed = tmp_path / "source.grib2"
     dest = tmp_path / "soil.grib2"

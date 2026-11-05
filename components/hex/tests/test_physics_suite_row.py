@@ -84,7 +84,8 @@ def test_the_frozen_row_is_untouched_and_still_the_default():
     frozen = admission.resolve_backend()
     assert frozen is admission.FROZEN_WSM6_COLUMN_ROW
     assert frozen.batch_module == "woof.core.mpas_column_batch"
-    assert frozen.adapter_module == "hexcore.cuda_arwen_physics_v841"
+    # the module the row loads, under its package name since the fold into woof.hex
+    assert frozen.adapter_module == "woof.hex.cuda_arwen_physics_v841"
     assert frozen.driven_scalar_names == ("qv", "qc", "qr", "qi", "qs", "qg")
 
 

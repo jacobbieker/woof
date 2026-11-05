@@ -245,7 +245,10 @@ def _write_case(directory, case, engine):
     writer = WrfoutWriter(
         path, nx=_NX, ny=_NY, nz=_NZ, dx=spec["dx"], dy=spec["dx"],
         global_attrs=spec["attrs"], soil_layers=spec["soil_layers"],
-        field_schema=spec["frames"][0], engine=engine)
+        field_schema=spec["frames"][0], engine=engine,
+        # The classic container the flip is about; the default deflated
+        # NetCDF-4 storage is tested in tests/test_compressed_history_pricing.py.
+        compression="none")
     try:
         for stamp, frame in zip(spec["stamps"], spec["frames"]):
             writer.write_frame(stamp, frame)

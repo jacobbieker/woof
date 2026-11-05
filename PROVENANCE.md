@@ -193,10 +193,10 @@ bytes are outside the numerical oracle.
   `cupy.cuda.compiler` line 585 (`options += ('-ftz=true',)`), after the
   caller's options, and NVRTC honours the last occurrence.
   The inventory records 13 distinct caller-supplied option tuples across the
-  226 compile sites in the shipped package, each listed here with a site
+  227 compile sites in the shipped package, each listed here with a site
   that supplies it:
   - no caller options -- `woof/backend/facade/__init__.py:356` (RawModule),
-    and 172 other site(s)
+    and 173 other site(s)
   - `-std=c++17` -- `woof/core/acoustic_fusion.py:403` (cp.RawModule), and
     15 other site(s)
   - `--std=c++17` -- `woof/ensemble/batch_perturbation.py:51`
@@ -219,7 +219,7 @@ bytes are outside the numerical oracle.
   - `--std=c++17` a target flag built from the device architecture at run
     time -- `woof/ocean/waves/model.py:73` (cp.RawModule)
   - `-std=c++17` `--ftz=false` `--fmad=false` --
-    `woof/core/kernels/__init__.py:889` (compiler.compile_using_nvrtc)
+    `woof/core/kernels/__init__.py:896` (compiler.compile_using_nvrtc)
   - a target flag built from the device architecture at run time a target
     flag built from the device architecture at run time --
     `woof/hex/mpasphys/surface_update_v842.py:148`

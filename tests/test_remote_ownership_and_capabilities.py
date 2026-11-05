@@ -2,9 +2,15 @@
 
 CPU-only: no process is started and no card is opened.
 """
+import sys
+
 import pytest
 
 from woof import remote_input_transfer as transfer, remote_worker as rw
+
+_LINUX_NODE = pytest.mark.skipif(
+    sys.platform != "linux",
+    reason="the remote worker is a Linux node service: job ownership reads /proc and signals through a pidfd, and every other platform refuses by name (test_every_door_refuses_an_unsupported_platform_with_one_sentence)")
 
 
 def test_every_door_refuses_an_unsupported_platform_with_one_sentence(monkeypatch, capsysbinary):
@@ -34,6 +40,7 @@ def test_every_door_refuses_an_unsupported_platform_with_one_sentence(monkeypatc
     assert "linux" in worker
 
 
+@_LINUX_NODE
 def test_linux_passes_both_doors_unchanged(monkeypatch):
     assert rw.sys.platform == "linux"
     assert rw._ownership_provider()["signal"] == "Linux pidfd"
@@ -44,6 +51,7 @@ def test_the_ownership_provider_is_a_table_row_not_a_branch():
     assert set(rw.OWNERSHIP_PROVIDERS["linux"]) == {"identity", "membership", "descendants", "signal"}
 
 
+@_LINUX_NODE
 def test_the_node_states_its_capabilities_on_every_reply_a_client_keeps(tmp_path, monkeypatch):
     from woof import remote_plan as rp
     declared = rw.capabilities()
@@ -55,6 +63,7 @@ def test_the_node_states_its_capabilities_on_every_reply_a_client_keeps(tmp_path
     assert reply["capabilities"] == declared
 
 
+@_LINUX_NODE
 def test_a_status_reply_carries_the_artifact_capabilities_too(tmp_path):
     store = tmp_path / ".arwen-jobs"
     store.mkdir(mode=0o700)
@@ -197,6 +206,7 @@ def test_a_node_too_old_for_the_keepalive_or_the_named_attempt_is_named_with_the
     assert seen.count("probe") == 1
 
 
+@_LINUX_NODE
 def test_a_current_node_declares_the_protocol_facts_the_client_depends_on():
     """The verdict above is keyed on capabilities the node states on every reply it keeps."""
     from woof import remote_cli as rc

@@ -623,9 +623,11 @@ def test_the_registry_publishes_the_mynn_snow_species_contract():
     # shipped runtime applies (mynn_pbl_runtime.MYNN_SNOW_MICROPHYSICS),
     # which is asserted directly below.
     # 900 (TEMPO, a named scheme) joins from its capability row, whose
-    # ice masses carry qs (woof/microphysics_schemes.py).
+    # ice masses carry qs (woof/microphysics_schemes.py), and so does 96
+    # (MAD-WRF's passive hydrometeors: package madwrf_mp is
+    # moist:qv,qc,qi,qs at Registry.EM_COMMON:3052).
     assert species["flag_qs_true_microphysics_selectors"] == [
-        2, 4, 6, 8, 9, 10, 16, 18, 24, 28, 30, 106, 900]
+        2, 4, 6, 8, 9, 10, 16, 18, 24, 28, 30, 96, 106, 900]
     # 50 (P3) is on the FALSE side substantively, not by omission: the
     # p3_1category package is moist:qv,qc,qr,qi with no qs at all
     # (Registry.EM_COMMON:3038), so WRF's F_QS is false and MYNN's sqs = 0

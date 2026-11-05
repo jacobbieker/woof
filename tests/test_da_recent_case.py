@@ -82,8 +82,12 @@ def test_author_declares_actual_large_domain_coverage_refusal(tmp_path):
     # own edge), one cell narrower each side than the parabolic halo the
     # refusal named before (j=-39..565); the domain still leaves HRRR.
     assert "j=-38..564" in doc["initial_source_coverage"]["error"]
-    # About 27 GiB per member: one per card inside the 28 GiB budget, never two.
-    assert doc["native_memory_plan"]["packing_candidate_per_32gib_card"] == 1
+    # About 27 GiB per member until 1.1.4/1.1.5 moved the estimator; read
+    # again there it is about 29.1 GiB (upstream 1.1.5 alone: 29.11), over
+    # the 28 GiB budget, so a 32 GiB card packs no member of this domain.
+    plan = doc["native_memory_plan"]
+    assert 28 < plan["estimated_member_peak_gib"] < 30
+    assert plan["packing_candidate_per_32gib_card"] == 0
 
 
 def fixture(tmp_path, monkeypatch):

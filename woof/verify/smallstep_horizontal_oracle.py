@@ -158,7 +158,7 @@ def make_horizontal_state(raw, metadata, *, mode="reference", boundary="periodic
                           dy=float(metadata.get("DY",metadata.get("dy",3000))),
                           open_x=boundary=="open",open_y=boundary=="open",
                           specified=boundary=="specified",nested=False,spec_zone=1,
-                          top_lid=bool(top_lid),smdiv=.1,epssm=.1,moist_cq=bool(moist_loading),mp_physics=8,
+                          top_lid=bool(top_lid),smdiv=.1,emdiv=0.,epssm=.1,moist_cq=bool(moist_loading),mp_physics=8,
                           damp_opt=0,dampcoef=0.,zdamp=5000.,relax_w=False,first=bool(first))
     return data, cfg
 
@@ -287,8 +287,10 @@ def _device_state(data):
             if slot not in self.buffers:
                 self.buffers[slot]=cp.zeros(shape,dtype=F)
             return self.buffers[slot]
+    # msfv_inv: set_map_factors' stored reciprocal, the harness's msfvx_inv.
     return State(**{k:cp.asarray(v) if isinstance(v,np.ndarray) else v for k,v in data.items()},
-                 buffers={},has_msf=bool(np.any(data["msft"]!=F(1))))
+                 buffers={},has_msf=bool(np.any(data["msft"]!=F(1))),
+                 msfv_inv=cp.asarray(F(1)/data["msfv"]))
 
 
 def horizontal_port_outputs(data,cfg,*,full_theta_probe=False,no_fma_probe=False,
@@ -306,15 +308,20 @@ def horizontal_port_outputs(data,cfg,*,full_theta_probe=False,no_fma_probe=False
         from unittest.mock import patch
         from woof.core.kernels import get_kernel, module_source
         from woof.verify.default_kernel_source import default_source
-        # The probe is a default compile: mutate the branch it runs, not an
-        # opt-in WRF-exact copy of the same pressure term.
-        source=default_source(module_source("acoustic"))
+        from woof.wrf_exact import ENABLED, effective_options
+        # The probe compiles like the process: mutate the branch it runs.  A
+        # default compile drops the opt-in WRF-exact copy of the pressure
+        # term; a GPUWM_WRF_EXACT=1 process runs exactly that copy.
+        source=module_source("acoustic") if ENABLED else default_source(module_source("acoustic"))
         if drop_pressure_term:
-            original="dpxy += rd * dphp *"
+            original=("dpxy += rd * dphp * (rdnw[k] * (dpn_up - dpn_dn)\n"
+                      "                         - 0.5f * ((c1h") if ENABLED else "dpxy += rd * dphp *"
             if source.count(original)!=1:
                 raise AssertionError("pressure-term mutation site drifted")
-            source=source.replace(original,"dpxy += 0.0f * dphp *")
+            source=source.replace(original,original.replace("rd * dphp","0.0f * dphp"))
         options=("-std=c++17","--fmad=false") if no_fma_probe else ("-std=c++17",)
+        if ENABLED:
+            options=effective_options(options)
         probe=cp.RawModule(code=source,options=options)
         def probe_kernel(module,name,shape=()):
             return probe.get_function(name) if module=="acoustic" else get_kernel(module,name,shape)
@@ -413,4 +420,5 @@ def load_horizontal_fixture(path):
             for key in ("cf1","cf2","cf3"):
                 data[key]=F(data[key])
             expected={key[len(prefix)+4:]:fixture[key].copy() for key in fixture.files if key.startswith(prefix+"wrf_")}
-            yield case["name"],data,SimpleNamespace(**case["cfg"]),expected,case["full_theta_probe"]
+            # The compiled harness runs advance_uv with emdiv = 0 (_pack_args).
+            yield case["name"],data,SimpleNamespace(**{"emdiv":0.,**case["cfg"]}),expected,case["full_theta_probe"]

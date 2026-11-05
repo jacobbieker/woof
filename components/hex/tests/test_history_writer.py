@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 
 import numpy as np
 import pytest
@@ -85,7 +86,9 @@ def test_background_frames_are_the_direct_bytes(tmp_path, small_mesh, monkeypatc
     assert [row["how"] for row in receipt["frames"]] == ["background"] * 3
     assert all(row["transport"]["mode"] == "mapped-protocol5" for row in receipt["frames"])
     assert not list((tmp_path / "background").glob("hex-history-*"))
-    assert writer.ready['io_priority'] == 'idle'
+    # ionice (util-linux) idles the writer's I/O on Linux; macOS has no ionice,
+    # and the writer says so rather than claiming a priority it never set.
+    assert writer.ready['io_priority'] == ('idle' if shutil.which('ionice') else 'unavailable')
     import importlib.util
     if importlib.util.find_spec("woof") is None or importlib.util.find_spec("woof.timeline") is None:
         return  # no engine ledger (woof 2.8.7 and earlier): the frames above are the test

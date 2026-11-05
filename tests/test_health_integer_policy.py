@@ -901,6 +901,8 @@ def test_the_ebal_range_admits_every_case_the_noah_kernel_writes():
         r"\bebal_(?:case|a\[idx\])\s*=\s*(\d+)\s*;", source)}
     codes |= {int(v) for pair in re.findall(
         r"ebal_case\s*=\s*\w+\s*\?\s*(\d+)\s*:\s*(\d+)", source) for v in pair}
-    assert codes == {0, 1, 2, 3, 4}, codes
+    # noah_glacial_column (the full SFLX_GLACIAL port) stores the land
+    # branch codes; the earlier port's land-ice 4 is gone.
+    assert codes == {0, 1, 2, 3}, codes
     rule = rule_for_field("surface.ebal")
     assert (rule.lower, rule.upper) == (min(codes), max(codes))

@@ -8,7 +8,8 @@ branch-probe columns, each step's exact float32 inputs recorded beside its
 outputs.  Pinned here, without a device: the fixture words (sha256), the
 saturation table the kernel is given against the one the oracle recorded,
 and the binary64 CPU reference ``woof.verify.uwpbl_ref`` against every
-output word of every column-step, on a host whose libm is the oracle's.
+output word of every column-step, wherever its libm is the oracle's (the
+CPU bridge's glibc 2.39 transcription makes that any host).
 
 The product launcher on the card is graded against the same words in
 tests/test_uwpbl_launcher_wrf471_parity.py.
@@ -74,14 +75,29 @@ def test_the_saturation_table_is_the_oracles():
 def _host_libm_is_the_oracles() -> str | None:
     """Why this host's libm is not the oracle's, or None when it is.
 
-    The CPU reference calls Python's ``math.exp/log/pow/cos/acos``, which are
-    the C library's.  The oracle linked glibc 2.43 on x86-64, where ifunc
-    picks the FMA variants of exp/log/pow; glibc's binary64 exp/log/pow
-    (Arm optimized-routines) and cos/acos (IBM, slow paths removed) are the
-    same code from glibc 2.28 on.  Another C library, or a CPU without FMA,
-    is a different set of functions, and the reference would be graded
-    against words its own libm cannot produce.
+    The CPU reference calls ``exp/pow/cos/acos`` through
+    ``woof.verify.uwpbl_ref.fortran.libm``.  The oracle linked glibc 2.43 on
+    x86-64, where ifunc picks the FMA variants of exp/log/pow; glibc's
+    binary64 exp/log/pow (Arm optimized-routines) and cos/acos (IBM, slow
+    paths removed) are the same code from glibc 2.28 on.  Where the CPU
+    bridge carries the opt-in glibc 2.39 transcription of those variants
+    (``pixi run build-native-glibc239``), the reference computes the
+    oracle's words on any host.  Without it the reference calls the host C
+    library, and another C library, or a CPU without FMA, is a different set
+    of functions: the reference would be graded against words its own libm
+    cannot produce.
     """
+    from woof.core import host_libm
+    if host_libm.implementation() == host_libm.GLIBC239:
+        return None
+    reason = _host_libm_reason()
+    if reason is None:
+        return None
+    return (reason + "; a CPU bridge built with `pixi run "
+            "build-native-glibc239` grades it on any host")
+
+
+def _host_libm_reason() -> str | None:
     import platform
     import sys
     if not sys.platform.startswith("linux") or platform.machine() != "x86_64":
@@ -107,8 +123,9 @@ def test_the_cpu_reference_is_wrfs_words(grid):
 
     ``woof.verify.uwpbl_ref`` is pure Python float arithmetic (binary64,
     no contraction) transcribing the same Fortran as the kernel, with
-    glibc's own transcendentals, so on a glibc x86-64 host it must equal
-    the oracle bit for bit, cos and acos included.
+    glibc's own transcendentals, so wherever those are the oracle's (the
+    glibc 2.39 transcription, any host; else a glibc x86-64 FMA host) it
+    must equal the oracle bit for bit, cos and acos included.
     """
     reason = _host_libm_is_the_oracles()
     if reason is not None:

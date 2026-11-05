@@ -40,6 +40,24 @@ GIB = 1024 ** 3
 #: which is what made the old gate refuse against this exact number.
 CARD_FREE_BYTES = int(15.24 * GIB)
 
+#: The host these fixtures were written on: a 16 GiB hosted Linux runner.
+#: Read off the real machine, a 7 GiB macOS runner refuses the streamed
+#: forecast's pinned host store (4.46 GiB against a 3.29 GiB host budget)
+#: before the card is weighed, which is not the question here.
+HOST_BYTES = 16 * GIB
+
+
+@pytest.fixture()
+def host(monkeypatch):
+    """Stand in for the host's RAM, so the gates read one machine."""
+    from woof.core import streaming
+    from woof.ingest import host_decode_window
+
+    monkeypatch.setattr(streaming, "_host_total_bytes", lambda: HOST_BYTES)
+    monkeypatch.setattr(host_decode_window, "available_host_bytes",
+                        lambda: HOST_BYTES)
+    monkeypatch.setattr(preflight, "host_available_bytes", lambda: HOST_BYTES)
+
 _TILES = """\
 [tiles]
 mode = "on"
@@ -167,7 +185,7 @@ def _plan(config_path):
 
 
 @pytest.fixture()
-def card(monkeypatch):
+def card(monkeypatch, host):
     """Stand in for the device probe, so the gate is testable off a card.
 
     Patched at ``woof.core.preflight`` because that is where
@@ -372,7 +390,7 @@ def _streamed(config, **kwargs):
 
 
 def test_check_prices_the_streamed_forecast_when_ingest_is_unpriced(
-        tmp_path, capsys):
+        tmp_path, capsys, host):
     """THE REGRESSION, at the door that reports rather than runs.
 
     A source this estimator does not model costs the reader the INGEST
@@ -413,7 +431,7 @@ def test_check_prices_the_streamed_forecast_when_ingest_is_unpriced(
 
 
 def test_check_alloc_gate_admits_a_streamed_config_that_fits(
-        tmp_path, capsys):
+        tmp_path, capsys, host):
     """The N0 alloc leg priced a resident allocation on a streamed run.
 
     Fed the itemized resident estimate, ``alloc_estimate_le_wddm_budget``
@@ -449,7 +467,7 @@ def test_check_alloc_gate_still_refuses_what_even_streaming_cannot_fit(
 
 
 def test_check_prices_an_auto_tiling_against_the_card_it_was_told_about(
-        tmp_path, capsys):
+        tmp_path, capsys, host):
     """``mode = "auto"`` is the planner's decision, and the planner needs a
     card.  Asked without one it consults ``Machine.detect``, which reads
     whatever is under the desk -- so a report sizing a 6 GiB target
@@ -478,7 +496,7 @@ def test_check_prices_an_auto_tiling_against_the_card_it_was_told_about(
     assert rc == 0
 
 
-def test_the_report_names_one_tiling_not_two(tmp_path, capsys):
+def test_the_report_names_one_tiling_not_two(tmp_path, capsys, host):
     """The advisory and the verdict describe the same run.
 
     ``streaming_advisory`` derived its own envelope, and under
@@ -949,7 +967,7 @@ def test_check_alloc_gate_refuses_a_budget_that_only_fits_the_steady_state(
 
 
 def test_check_alloc_gate_still_admits_a_budget_that_fits_the_peak(
-        tmp_path, capsys):
+        tmp_path, capsys, host):
     """THE CONTROL for the leg above, one budget step up."""
     config = _config(tmp_path, source="hrrr")
     rc, payload = _check(capsys, config, "--budget-gib",

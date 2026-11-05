@@ -51,9 +51,9 @@ def forecast_gpu_gap() -> str | None:
     global _working_runtime
     import sys
     backend = sys.modules.get("woof.backend")
-    if backend is not None and getattr(backend, "_active", None) == "mlx":
-        # The Metal backend (woof.backend): ``cupy`` is its facade over MLX,
-        # and its device is the Apple GPU, not an NVIDIA card.
+    if backend is not None and getattr(backend, "_active", None) in ("mlx", "host"):
+        # The Metal and host backends (woof.backend): ``cupy`` is a facade
+        # (over MLX, or over NumPy on the CPU), not an NVIDIA card.
         return None
     if no_local_gpu():
         return "local GPU access disabled by GPUWM_NO_LOCAL_GPU"

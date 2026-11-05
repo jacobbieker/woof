@@ -1,0 +1,1574 @@
+{
+  "gpu_sha256": {
+    "map_extremes_flat": {
+      "mu_pp": "cee2d492d6be44bc8562a8a12b576073671b734cb57b119503e1287dd7cef571",
+      "muave": "b4c4523bb75a69ae9dbb36758e977e75461c77da109d38b8b9d6cdce42d203fe",
+      "mudf": "69c568ed15b9ccd593c0d561b10a315ea7ee4cf5c5f03a9e2439c7a24ba733c5",
+      "muts": "eec0970ce4d8686079ccd2ce9b08926b544e9df77633e77f8467ff0d0feb54d3",
+      "t_ave": "fbd135a6da7898b9a2e5576f86ad3738f7a7cebb97a1111ad7d47c497df4389d",
+      "th_pp": "5986095e231e2aa31b186531cc41f32ecc028aed4ff3836adc1bdee07cf9303a",
+      "u_pp": "7e76a41ea91ce6b1f40aee525bea89a07edb542320a4060377e5523e65ca579c",
+      "v_pp": "b8442839b1c485d708319f0279538367eabbfbc7334a2cf9e28274478bf0eb3b",
+      "ww_pp": "9e215d166298a271d68d15a113bcbfeadd47ee138a204ba39b74b90b785dbde5"
+    },
+    "map_extremes_map": {
+      "mu_pp": "f6b79e43dd184ef1192c9f0b66b6de838bd51547acd7d363a024eace484aeabd",
+      "muave": "0cf493417f84385689694ceb54dfc0a14e64dd508809ca7274721ea4eb0c3c17",
+      "mudf": "4b92c9e4b290e9248c2a4821b8c7796abe6cb029fef19f11f40049254c8ffe5c",
+      "muts": "172f906752c315ec66c64a6b2988a881884c88781ae36ee7c1df2b8bf12645e7",
+      "t_ave": "fbd135a6da7898b9a2e5576f86ad3738f7a7cebb97a1111ad7d47c497df4389d",
+      "th_pp": "be3b1afb517315249edf23f47f2ae192a15195f368121b8fafa9bd1df79b1769",
+      "u_pp": "ac21e1d58e0acfc65d1a9d08f4b825d7ff5272b801d4e300c7f159247d77440b",
+      "v_pp": "ad76952c7a19bfde7780e57b486955c7e008fd575d2c8d31f456848544aab905",
+      "ww_pp": "bd977084bf5b343560d9aea1a397be7cfd6dbb01e30dfe1620242134f72b163a"
+    },
+    "map_extremes_moist_map": {
+      "mu_pp": "132e755ae6c39cef40aef937393adc01bab1d712bc19f646c672877bd76dc15e",
+      "muave": "7933328c67a2091589f94ebc292375837a3f9d0b84ddd5f31daf976f326cd00e",
+      "mudf": "271d5495ea2397850d23689f328cd09ceec7d1e8205c379e50b33fba06fd1a85",
+      "muts": "172f906752c315ec66c64a6b2988a881884c88781ae36ee7c1df2b8bf12645e7",
+      "t_ave": "fbd135a6da7898b9a2e5576f86ad3738f7a7cebb97a1111ad7d47c497df4389d",
+      "th_pp": "b74e39a142e7e1a34d296d25690d746494f55c1813e84698448a480ff715a379",
+      "u_pp": "083ca8061a79192eb852d42140f599fd08b09051a6614b5a9fa8fe2386d9e481",
+      "v_pp": "817def0b9585b2d63bb7d1945941dab04f9dd5417900bd2e6090540b4a01aa3e",
+      "ww_pp": "e1854094b3993163f07a199f20d886961bdd82ba85081d7aefec3e16cfc7dad3"
+    },
+    "real_evolved_flat": {
+      "mu_pp": "c78fb1499757bf83af1b548c89658b564a4afed575b3c24a86ac66dc1f71220b",
+      "muave": "50ba53e185ac77741c92cfadd2c158550fd0d7745e9632884b8bcb5152c15483",
+      "mudf": "cdadb76571e5d3b004ace8da276b5aa4fafc6f69c6e57838601a50b3e4ed4e46",
+      "muts": "b3bedff51a19046c72cb7b5ef0bdf0d2400d7873cb45e104f8d66b0f49ca1f38",
+      "t_ave": "fbd135a6da7898b9a2e5576f86ad3738f7a7cebb97a1111ad7d47c497df4389d",
+      "th_pp": "4fd4309fe8dc961c404e55e76344adc628f170215e0589b2625b0f58dac64df8",
+      "u_pp": "2140369bf29c01391eee3b057dd77d236b76efff8bdb02a5a25e9285a8f8abc0",
+      "v_pp": "4b29b7bf8206fcf288ba09cb7bb810fb7e9063c239bc61cf90762a2ab4338c80",
+      "ww_pp": "b398897ab77a691a760c313c36fb7c1ac65b063f97811b9ac83785be009ff3b7"
+    },
+    "real_evolved_map": {
+      "mu_pp": "d4339af133ec220598cabf04edb252598b729af91862b74846e2994e3732ab1e",
+      "muave": "1e3c476a318b8147120f674dca1e6c9bffff3c234268b9d5e54493f0ca186d06",
+      "mudf": "56a59bbba138f6ecc8af67f7bb30ea07e8c9842de1591559b42ce2727007b7e3",
+      "muts": "618d7c26fb59dcbfa4f660c0617ac7b2b7231d0388b2085ad249dab02623339e",
+      "t_ave": "fbd135a6da7898b9a2e5576f86ad3738f7a7cebb97a1111ad7d47c497df4389d",
+      "th_pp": "13d1316a23e8975fcd436f7c8237f0ced4f819d8a1a0790b6d9143c591f42ac9",
+      "u_pp": "4b44ec34af80ea152faf9cc8ef4729f7633342d7b1515f0e391c4d1d44fd7863",
+      "v_pp": "675aab86eb460802045dbd39f988f38e31c4c211aac535c3e7608781ac2ab872",
+      "ww_pp": "5d6d7f051151b0e7b1727751e8ca22a3d806b08c7a2db003791bb3f24c7d3913"
+    },
+    "real_initial_flat": {
+      "mu_pp": "cee2d492d6be44bc8562a8a12b576073671b734cb57b119503e1287dd7cef571",
+      "muave": "b4c4523bb75a69ae9dbb36758e977e75461c77da109d38b8b9d6cdce42d203fe",
+      "mudf": "69c568ed15b9ccd593c0d561b10a315ea7ee4cf5c5f03a9e2439c7a24ba733c5",
+      "muts": "eec0970ce4d8686079ccd2ce9b08926b544e9df77633e77f8467ff0d0feb54d3",
+      "t_ave": "fbd135a6da7898b9a2e5576f86ad3738f7a7cebb97a1111ad7d47c497df4389d",
+      "th_pp": "5986095e231e2aa31b186531cc41f32ecc028aed4ff3836adc1bdee07cf9303a",
+      "u_pp": "7e76a41ea91ce6b1f40aee525bea89a07edb542320a4060377e5523e65ca579c",
+      "v_pp": "b8442839b1c485d708319f0279538367eabbfbc7334a2cf9e28274478bf0eb3b",
+      "ww_pp": "9e215d166298a271d68d15a113bcbfeadd47ee138a204ba39b74b90b785dbde5"
+    },
+    "real_initial_full_theta_probe": {
+      "mu_pp": "5926c2c9978ccf942a8a63459e8aef59dca451ca546d21011e29672e7b915a3d",
+      "muave": "d711ae7cfc13243a32e691d26a4e44cadd5de5991f6b711e4a9e821212c5b1e4",
+      "mudf": "6a948ad1cab4ae8522fa4d7cda1a78757943f1afdbfe9d0f5ae15c196abb9295",
+      "muts": "51d77523da48333e56d5867f337055b208e0a3766ccf800008debd49b27b4844",
+      "t_ave": "5e580419bd98427cf55f371923beced4599ef717eb0284672eda329a9b7de7e4",
+      "th_pp": "f78a1c18c010a9e38a5353f925c59d6ee6c63ef19599e98444bc1de3353cd445",
+      "u_pp": "7e24877f0438283bf025bccee038c50e207437bf2a1f4f9990d352bbda8c222e",
+      "v_pp": "28d3e9a5234fd354775ab47f306f830b446f38f7d17bb341a0fe6e3a59c827f6",
+      "ww_pp": "0ffe4e66c847a19cb82e4b624988f9070ef93cb76398ab568404572bf6e3f404"
+    },
+    "real_initial_later_substep": {
+      "mu_pp": "fc235ddb89016b7efd5c41347a5c50b518d310a98b6a382d9520c11de6aa5062",
+      "muave": "f025d3a0aca1cc52e492ce125b94a37a788460e76e6d04a2416f92be08a7bbd9",
+      "mudf": "0435aab590f237e3f26913c5f1fb60bda04e1823b13b15cf8f1dd08cc1d37a63",
+      "muts": "cb68a13d1d3a7c917e2e08efa00e7cd4cedf18f23fa71c7f92a39945369eba01",
+      "t_ave": "fbd135a6da7898b9a2e5576f86ad3738f7a7cebb97a1111ad7d47c497df4389d",
+      "th_pp": "36379b4356a4cdab0e8a4911a67363d579eb82ff31a79aa50d984ddc5829548c",
+      "u_pp": "e998c275c8196c0031fc22ac018418f623e1ffcee70e1e39f99b24cc07876d19",
+      "v_pp": "19051aa51368794e583efe0b03d0a01e60cc4bfd33a6a68e5c3b2a6c25911243",
+      "ww_pp": "638ca63e88fd254b7595174c86f3c1bc7df2bdb63da4f9b3299216ff2f67cd74"
+    },
+    "real_initial_map": {
+      "mu_pp": "d7aff8fc4817cb8c84f2712d6982486f612e02c50bc7d0bf37e76633114d2ece",
+      "muave": "1c7bdd264be76d8ebe0d01ac1ef9ecef2aa3bc96030d870bb0839077ba650807",
+      "mudf": "51dbde2446d951a835ee0c34527dece7886a1e89366227cbda0ab896c0027c76",
+      "muts": "cb68a13d1d3a7c917e2e08efa00e7cd4cedf18f23fa71c7f92a39945369eba01",
+      "t_ave": "fbd135a6da7898b9a2e5576f86ad3738f7a7cebb97a1111ad7d47c497df4389d",
+      "th_pp": "79dfb6e18f6e243efdbf135aeb3db455290ec49a7f574b5dfb20e9c498f41a7c",
+      "u_pp": "7e24877f0438283bf025bccee038c50e207437bf2a1f4f9990d352bbda8c222e",
+      "v_pp": "28d3e9a5234fd354775ab47f306f830b446f38f7d17bb341a0fe6e3a59c827f6",
+      "ww_pp": "ea4ba151ffb8edc4c3efdfea149f839372bd0dd0d29861897586cf37143efdc7"
+    },
+    "real_initial_moist_flat": {
+      "mu_pp": "3534b62f76dc12e102ac3e96645f890133e162f7c21b2a5dacdbebc46f0f860e",
+      "muave": "388a62eadcf2f6537925c6633b92a2f11e990a9a82a2f1ac128e69a61c819067",
+      "mudf": "614ac6804003a9ea09ca75f34ef52b765ce0fdc6245fd45c61e185367d96336d",
+      "muts": "eec0970ce4d8686079ccd2ce9b08926b544e9df77633e77f8467ff0d0feb54d3",
+      "t_ave": "fbd135a6da7898b9a2e5576f86ad3738f7a7cebb97a1111ad7d47c497df4389d",
+      "th_pp": "86a6e94933332516f1cf8d23725ed28bb4f303fb9f40f57e029badf5b71a63bc",
+      "u_pp": "b2d968f8a84e2f42662832e1a59c4ad85a69cd8ee5354048f6caca5dd5e4a4ae",
+      "v_pp": "265fd5835e842b17012e22546af74e369ff8e7b729fa336a278de28fbb6bf4c5",
+      "ww_pp": "fb11015a6ae309155387bf2c9a4faf1b0af93a730499e2d3893e37d0bf46f340"
+    },
+    "real_initial_moist_map": {
+      "mu_pp": "491fadf519a697cc991dd0aee40a62c5ec89f80d76b1daab0694e1ce61e49198",
+      "muave": "e8ea953182f89f83a0730da9c31a195cfaa3b4c608c9d45d3b15e32e522bc808",
+      "mudf": "207050772da602c8cce2945affeb0e754c9f9023c079fc5fb02dcef77abe0d71",
+      "muts": "cb68a13d1d3a7c917e2e08efa00e7cd4cedf18f23fa71c7f92a39945369eba01",
+      "t_ave": "fbd135a6da7898b9a2e5576f86ad3738f7a7cebb97a1111ad7d47c497df4389d",
+      "th_pp": "bdb19241091606108ceedd0b3c2c31b9b23bf4122e7b5423e3c9b70808cf1958",
+      "u_pp": "267457df0751ba926fee117df5454e9a614911d396cb4f2c302d7012c85640b7",
+      "v_pp": "bba78ec126d5b0c1f6048297f60f52f0bddf0b34cefc5f1382b8e2d5e6a6379c",
+      "ww_pp": "a22e7a434ecdde3444b0d397b3d954e8e414256e492a6dbb959bb4465df08780"
+    },
+    "real_initial_open": {
+      "mu_pp": "9f9d0a5701d11985bab3ba99b0b6af59dd1b3bd4a3b4db09a960c6b0f9b79239",
+      "muave": "afc4f5f332d20e21dd9fb3382c23358484d1b352e205d98eff8365fca3bdc230",
+      "mudf": "dbe79fb578d9f2b7e30e5d0391dd8fa00b63c01584e1d362cdd313105e198d1a",
+      "muts": "08b31e68547c22e2b223f7eac88a8d3da9a1dec84051050a145d64ab76e29c45",
+      "t_ave": "19dffe104d12886f9a5a1e9b184066fdc173adddb85bc73104f509541539ef8f",
+      "th_pp": "6a05239d59d6235985a336a0692e12532203d42b23f3a3f639ed52b15a8229cf",
+      "u_pp": "46aaea2efcc2c033a677c5a148f626fa02b1c5ee9eb79fd01b3424e3a1afbed8",
+      "v_pp": "42ef724c53003bbcd4857c36d356deb405a3546876b54c751e351644208fea7a",
+      "ww_pp": "8d676696f82065d8198142f2ba026409182dead6ff5d397ab08e683922861c6d"
+    },
+    "real_initial_periodic": {
+      "mu_pp": "abb6f3f978d53eabf666bab8b5656d59acfffd63cd76abbad97e0c4e1063422c",
+      "muave": "3884ae36228f62d5f941dcfa103f9c51ec5c74a9da5035e37b9d3db6780f8c7e",
+      "mudf": "602508dacd33b0bbb346496990153d0285ec1dc8d4303eb0a512276ce3ddb59e",
+      "muts": "b769a754b0ea42ba67c9084dd18855b8e13f18359d6c4d09858169b9b9bfb3b9",
+      "t_ave": "19dffe104d12886f9a5a1e9b184066fdc173adddb85bc73104f509541539ef8f",
+      "th_pp": "bfca976ea920e1299e59f902efa1fdfe857c8e75794013166c1bc729aac37b85",
+      "u_pp": "a915930665c16ace1e8b08558ede2ee6eceab7f7d2e8062e3bb7e387c3852bd3",
+      "v_pp": "f7cf3a04545b6c4ab1fee365f8381011d107f4cbb5ee593df34385329b82dab0",
+      "ww_pp": "433027713297e18abd943a70f2a4cfbd54f7b345ca0e0ddba8f10a4c4d432606"
+    },
+    "real_initial_top_lid": {
+      "mu_pp": "52343852c27670c8a0040a2235e56e24a6adb88bea34d006b755ce7246ff8ab9",
+      "muave": "60344329360893448633c2e09cfc1e9318dbbf8e41ff48b849c3a3195b96838f",
+      "mudf": "0a2a850c0863f13c96d2bcf5146b89c4644e772c5024b7e474066e652b551887",
+      "muts": "cb68a13d1d3a7c917e2e08efa00e7cd4cedf18f23fa71c7f92a39945369eba01",
+      "t_ave": "fbd135a6da7898b9a2e5576f86ad3738f7a7cebb97a1111ad7d47c497df4389d",
+      "th_pp": "d1a6d8ce1c556736a3e090aee5239894ab1695dbec9dbbd5695fcc18d270154a",
+      "u_pp": "b1d12013803a3c961cf14f36c0147c4e341ae54e7a6a86553ae2e2107572099e",
+      "v_pp": "c7b22f1f9526b4aaef1f9ecece5d4f79b84239a7021327dc093f914764c45e92",
+      "ww_pp": "7035fde07138d2855699e4f0de9659bebb221515d2f5c3536c5e6399276c7e6b"
+    },
+    "real_initial_zero_reference": {
+      "mu_pp": "5926c2c9978ccf942a8a63459e8aef59dca451ca546d21011e29672e7b915a3d",
+      "muave": "d711ae7cfc13243a32e691d26a4e44cadd5de5991f6b711e4a9e821212c5b1e4",
+      "mudf": "6a948ad1cab4ae8522fa4d7cda1a78757943f1afdbfe9d0f5ae15c196abb9295",
+      "muts": "51d77523da48333e56d5867f337055b208e0a3766ccf800008debd49b27b4844",
+      "t_ave": "fbd135a6da7898b9a2e5576f86ad3738f7a7cebb97a1111ad7d47c497df4389d",
+      "th_pp": "7efd9b6a0c83b07f25d5302c48714b44f530ec4314a297a0680ecd555ee3b1af",
+      "u_pp": "7e24877f0438283bf025bccee038c50e207437bf2a1f4f9990d352bbda8c222e",
+      "v_pp": "28d3e9a5234fd354775ab47f306f830b446f38f7d17bb341a0fe6e3a59c827f6",
+      "ww_pp": "0ffe4e66c847a19cb82e4b624988f9070ef93cb76398ab568404572bf6e3f404"
+    },
+    "southern_hemisphere_flat": {
+      "mu_pp": "edf52260ac7f75c6f40b3ebf129e77bc1037e3dcd729ed7d549e461a8d320399",
+      "muave": "0659f9400a822f941c590238dc365a22f6da20611169a2f5d671446a4855ab95",
+      "mudf": "9cbb56faae0b521f85de996d9fb900f5008b5d0d6ae3e605d79027f44c840488",
+      "muts": "df137f3dc25f9c9a70c4562740a7b0794ee3974fbf40bec83ccc2b70518ed917",
+      "t_ave": "fbd135a6da7898b9a2e5576f86ad3738f7a7cebb97a1111ad7d47c497df4389d",
+      "th_pp": "5bbaa6c18a6bab36f36c55577e6ff5a3c398d18c8b0067db396cc53df672d248",
+      "u_pp": "7e76a41ea91ce6b1f40aee525bea89a07edb542320a4060377e5523e65ca579c",
+      "v_pp": "be152cf05c4ef4ce0d9260c9893ca774e90d933c1400332f429a87f9b3069f65",
+      "ww_pp": "a73db4d906f2030fb0ef91fb5a901923744a3ef63f85b279fa829cb0a22890ef"
+    },
+    "southern_hemisphere_map": {
+      "mu_pp": "5a07fa08d8d697691ecaa5d7081e77035cb8bf00c9e3669f2bc88f403e020789",
+      "muave": "ea9c923c236d2a9f4607bedd509e3823348c021bf9241cd3a51c3f0a1374b60c",
+      "mudf": "5851b234030f5e238b695f596246fc46e040dff0e7e5224a3c558ef7556611c8",
+      "muts": "89bb830bbe8b08782e4537c4edc1733220194bdfbdd56e12729438a9df0e898c",
+      "t_ave": "fbd135a6da7898b9a2e5576f86ad3738f7a7cebb97a1111ad7d47c497df4389d",
+      "th_pp": "b0902965917f75056336c2bae944e54b8343028eac48fc8303ca2112df1c089d",
+      "u_pp": "7e24877f0438283bf025bccee038c50e207437bf2a1f4f9990d352bbda8c222e",
+      "v_pp": "9a24950f35ad95615ea741d0cd02a0edb8a774ba8f8ffc7ca304b0e5e56402cb",
+      "ww_pp": "2d9222c2b7a8bd5f06d6d63b67cad9fdb364409de10a32b5689e103891de567b"
+    },
+    "steep_terrain_flat": {
+      "mu_pp": "1d81fcc1af95e7c41bc84e5f07cc3d40ceaefac02e82d24233c573367b4d0b96",
+      "muave": "c746a8e94d0c3fc9c786f93b8e3234aa73ab7a91444bdfcefc7f8555b74cd237",
+      "mudf": "e5eeb5fcf362fb05519c00cec5fe5af90c37cb3ba8881d07db01543a3d648c04",
+      "muts": "eec0970ce4d8686079ccd2ce9b08926b544e9df77633e77f8467ff0d0feb54d3",
+      "t_ave": "fbd135a6da7898b9a2e5576f86ad3738f7a7cebb97a1111ad7d47c497df4389d",
+      "th_pp": "8da18ddbf0037c9ffabf2ca5eb984025276fec8ecd214e7777993fd68033837b",
+      "u_pp": "f4e006abfecf41d061c257a7db3d9acd3a6e2d2e38693a599cc33f2f698e50e4",
+      "v_pp": "e7b8b2b5e4b38ce31c374cf91b84ef75e632e7d85a452513eb4df8c7090b3497",
+      "ww_pp": "555c7d0b9ac50cc71bd2ed873856d7f78fc8bce6b28385f1491d9741c5f4a764"
+    },
+    "steep_terrain_map": {
+      "mu_pp": "24106eb36522d6c3b65b898d346abad19dfaec50b65a31acb21e3009c78f6ae9",
+      "muave": "1935410162c44288f7461acdb71f4bb8ff43d727924d233587d215c5bb91ccf1",
+      "mudf": "79109dbc57bef1d6eee1c8d7a412101fe5b746b1570a06a9927ab77d24c91152",
+      "muts": "c3711e2b96c6e8f3c7846b16221bc188048521fc70041becdc282616e257195a",
+      "t_ave": "fbd135a6da7898b9a2e5576f86ad3738f7a7cebb97a1111ad7d47c497df4389d",
+      "th_pp": "b38c9d999c43a3c9a7b7b39471d2d9d3f6f13733189d7ced824774fe0001370c",
+      "u_pp": "c6901a10de9b36d4b1cbe64e14a4890335dfb8114699e780e708f899ea49338a",
+      "v_pp": "b93dac62f75ebac67cfaa01fe764630d8a868f58d7de5cf22ce951d8c4259f4b",
+      "ww_pp": "36b63d713745f4b9af5106b79b56fcdfda7639e33739b17a71927b4e04fe9f6d"
+    },
+    "zero_near_zero_flat": {
+      "mu_pp": "22e3ecd1c2c294503cdf6f563d2f84e5b16324ee6c20f852315acc2caf5610dc",
+      "muave": "6dc3945500af64cbbe66c63a947ceb76ae99391ce066968f73a9cf36a98a93f1",
+      "mudf": "bbc7bd5b55b7ccdaa5adf8a977a502c3a2978a01dab05acd7079cba88c52184c",
+      "muts": "7713049a71dca41281e38566e5568dc9cbac7c6dcec1fa4ae51c1cb564beb49c",
+      "t_ave": "fbd135a6da7898b9a2e5576f86ad3738f7a7cebb97a1111ad7d47c497df4389d",
+      "th_pp": "e6a165d26dff77108814ab418b38c2f87d108d439c5afedf8be7b46a87e53c88",
+      "u_pp": "4f73d7b54de5879dc68cf6c9060c13ad9506a1c6c81f703f274e5ac8971d1b1e",
+      "v_pp": "1e856886eefa2eb7912070667296dd67b53de110f35c9200e855adbb080b4576",
+      "ww_pp": "3cd4c64637a84be482b071849df24438827f886819e34447db2adab8be29e619"
+    },
+    "zero_near_zero_map": {
+      "mu_pp": "51b12bd0854d60d413938d2edbd968fd9f7d06fb9c2d492704f879660ac68db0",
+      "muave": "33e83fc8ebc3c9688d1d17b06c79058215a80779e6455c6dceb97e590712d893",
+      "mudf": "6ccea669976540fd8102973400af54115e5b002010beff35751e49a33778e3f3",
+      "muts": "7713049a71dca41281e38566e5568dc9cbac7c6dcec1fa4ae51c1cb564beb49c",
+      "t_ave": "fbd135a6da7898b9a2e5576f86ad3738f7a7cebb97a1111ad7d47c497df4389d",
+      "th_pp": "703d0c8d7418ada12a25c3aa7488d74416c3407eb844457253b82bdc97521bc7",
+      "u_pp": "d4683f4f6a8a5df6e631877be63619692703e9fa0ccf9b63091a0695c2b4868a",
+      "v_pp": "9cab46969e4f669da6a2712efee1720af806891bb1e80b60d4cac1e16f209b94",
+      "ww_pp": "4bb01ef2f78ceca531421b2243d77629b681dbf71dfb149680b39be7f5f00c48"
+    }
+  },
+  "map_extremes_flat": {
+    "mu_pp": {
+      "different_words": 4,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "muave": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "mudf": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "muts": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "t_ave": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 2744
+    },
+    "th_pp": {
+      "different_words": 1554,
+      "max_ulp": 2179641174,
+      "words": 2744
+    },
+    "u_pp": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 3087
+    },
+    "v_pp": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 3136
+    },
+    "ww_pp": {
+      "different_words": 1440,
+      "max_ulp": 2056506865,
+      "words": 2800
+    }
+  },
+  "map_extremes_map": {
+    "mu_pp": {
+      "different_words": 4,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "muave": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "mudf": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "muts": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "t_ave": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 2744
+    },
+    "th_pp": {
+      "different_words": 1554,
+      "max_ulp": 2218691769,
+      "words": 2744
+    },
+    "u_pp": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 3087
+    },
+    "v_pp": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 3136
+    },
+    "ww_pp": {
+      "different_words": 1440,
+      "max_ulp": 2109845683,
+      "words": 2800
+    }
+  },
+  "map_extremes_moist_map": {
+    "mu_pp": {
+      "different_words": 4,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "muave": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "mudf": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "muts": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "t_ave": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 2744
+    },
+    "th_pp": {
+      "different_words": 1554,
+      "max_ulp": 2218682907,
+      "words": 2744
+    },
+    "u_pp": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 3087
+    },
+    "v_pp": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 3136
+    },
+    "ww_pp": {
+      "different_words": 1440,
+      "max_ulp": 2109837492,
+      "words": 2800
+    }
+  },
+  "real_evolved_flat": {
+    "mu_pp": {
+      "different_words": 16,
+      "max_ulp": 6209,
+      "words": 56
+    },
+    "muave": {
+      "different_words": 12,
+      "max_ulp": 6830,
+      "words": 56
+    },
+    "mudf": {
+      "different_words": 12,
+      "max_ulp": 6209,
+      "words": 56
+    },
+    "muts": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "t_ave": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 2744
+    },
+    "th_pp": {
+      "different_words": 1554,
+      "max_ulp": 2183678560,
+      "words": 2744
+    },
+    "u_pp": {
+      "different_words": 62,
+      "max_ulp": 48,
+      "words": 3087
+    },
+    "v_pp": {
+      "different_words": 54,
+      "max_ulp": 256,
+      "words": 3136
+    },
+    "ww_pp": {
+      "different_words": 1440,
+      "max_ulp": 2052517114,
+      "words": 2800
+    }
+  },
+  "real_evolved_map": {
+    "mu_pp": {
+      "different_words": 16,
+      "max_ulp": 6232,
+      "words": 56
+    },
+    "muave": {
+      "different_words": 12,
+      "max_ulp": 6855,
+      "words": 56
+    },
+    "mudf": {
+      "different_words": 12,
+      "max_ulp": 6232,
+      "words": 56
+    },
+    "muts": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "t_ave": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 2744
+    },
+    "th_pp": {
+      "different_words": 1554,
+      "max_ulp": 2183432616,
+      "words": 2744
+    },
+    "u_pp": {
+      "different_words": 64,
+      "max_ulp": 24,
+      "words": 3087
+    },
+    "v_pp": {
+      "different_words": 53,
+      "max_ulp": 128,
+      "words": 3136
+    },
+    "ww_pp": {
+      "different_words": 1440,
+      "max_ulp": 2052310017,
+      "words": 2800
+    }
+  },
+  "real_initial_flat": {
+    "mu_pp": {
+      "different_words": 4,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "muave": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "mudf": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "muts": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "t_ave": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 2744
+    },
+    "th_pp": {
+      "different_words": 1554,
+      "max_ulp": 2179641174,
+      "words": 2744
+    },
+    "u_pp": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 3087
+    },
+    "v_pp": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 3136
+    },
+    "ww_pp": {
+      "different_words": 1440,
+      "max_ulp": 2056506865,
+      "words": 2800
+    }
+  },
+  "real_initial_full_theta_no_fma_probe": {
+    "mu_pp": {
+      "different_words": 4,
+      "got": 0.0,
+      "location": [
+        0,
+        0
+      ],
+      "max_abs": 0.0,
+      "max_ulp": 0,
+      "words": 56,
+      "wrf": 0.0
+    },
+    "muave": {
+      "different_words": 0,
+      "got": 0.0,
+      "location": [
+        0,
+        0
+      ],
+      "max_abs": 0.0,
+      "max_ulp": 0,
+      "words": 56,
+      "wrf": 0.0
+    },
+    "mudf": {
+      "different_words": 0,
+      "got": 0.0,
+      "location": [
+        0,
+        0
+      ],
+      "max_abs": 0.0,
+      "max_ulp": 0,
+      "words": 56,
+      "wrf": 0.0
+    },
+    "muts": {
+      "different_words": 0,
+      "got": 0.0,
+      "location": [
+        0,
+        0
+      ],
+      "max_abs": 0.0,
+      "max_ulp": 0,
+      "words": 56,
+      "wrf": 0.0
+    },
+    "t_ave": {
+      "different_words": 0,
+      "got": 0.0,
+      "location": [
+        0,
+        0,
+        0
+      ],
+      "max_abs": 0.0,
+      "max_ulp": 0,
+      "words": 2744,
+      "wrf": 0.0
+    },
+    "th_pp": {
+      "different_words": 791,
+      "got": -0.4882288873195648,
+      "location": [
+        0,
+        4,
+        6
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "max_ulp": 2,
+      "words": 2744,
+      "wrf": -0.48822882771492004
+    },
+    "u_pp": {
+      "different_words": 656,
+      "got": 0.09813690185546875,
+      "location": [
+        43,
+        4,
+        3
+      ],
+      "max_abs": 0.0001583099365234375,
+      "max_ulp": 448,
+      "words": 3087,
+      "wrf": 0.09814023971557617
+    },
+    "v_pp": {
+      "different_words": 724,
+      "got": 4.94555139541626,
+      "location": [
+        48,
+        4,
+        6
+      ],
+      "max_abs": 0.00018548965454101562,
+      "max_ulp": 389,
+      "words": 3136,
+      "wrf": 4.945365905761719
+    },
+    "ww_pp": {
+      "different_words": 0,
+      "got": 0.0,
+      "location": [
+        0,
+        0,
+        0
+      ],
+      "max_abs": 0.0,
+      "max_ulp": 0,
+      "words": 2800,
+      "wrf": 0.0
+    }
+  },
+  "real_initial_full_theta_probe": {
+    "mu_pp": {
+      "different_words": 29,
+      "max_ulp": 750,
+      "words": 56
+    },
+    "muave": {
+      "different_words": 18,
+      "max_ulp": 825,
+      "words": 56
+    },
+    "mudf": {
+      "different_words": 25,
+      "max_ulp": 750,
+      "words": 56
+    },
+    "muts": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "t_ave": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 2744
+    },
+    "th_pp": {
+      "different_words": 1662,
+      "max_ulp": 2082303053,
+      "words": 2744
+    },
+    "u_pp": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 3087
+    },
+    "v_pp": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 3136
+    },
+    "ww_pp": {
+      "different_words": 1316,
+      "max_ulp": 90112,
+      "words": 2800
+    }
+  },
+  "real_initial_later_substep": {
+    "mu_pp": {
+      "different_words": 4,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "muave": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "mudf": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "muts": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "t_ave": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 2744
+    },
+    "th_pp": {
+      "different_words": 1554,
+      "max_ulp": 2179453271,
+      "words": 2744
+    },
+    "u_pp": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 3087
+    },
+    "v_pp": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 3136
+    },
+    "ww_pp": {
+      "different_words": 1440,
+      "max_ulp": 2056400132,
+      "words": 2800
+    }
+  },
+  "real_initial_map": {
+    "mu_pp": {
+      "different_words": 4,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "muave": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "mudf": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "muts": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "t_ave": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 2744
+    },
+    "th_pp": {
+      "different_words": 1554,
+      "max_ulp": 2179444632,
+      "words": 2744
+    },
+    "u_pp": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 3087
+    },
+    "v_pp": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 3136
+    },
+    "ww_pp": {
+      "different_words": 1440,
+      "max_ulp": 2056346327,
+      "words": 2800
+    }
+  },
+  "real_initial_moist_flat": {
+    "mu_pp": {
+      "different_words": 4,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "muave": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "mudf": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "muts": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "t_ave": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 2744
+    },
+    "th_pp": {
+      "different_words": 1554,
+      "max_ulp": 2179639200,
+      "words": 2744
+    },
+    "u_pp": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 3087
+    },
+    "v_pp": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 3136
+    },
+    "ww_pp": {
+      "different_words": 1440,
+      "max_ulp": 2056509670,
+      "words": 2800
+    }
+  },
+  "real_initial_moist_map": {
+    "mu_pp": {
+      "different_words": 4,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "muave": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "mudf": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "muts": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "t_ave": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 2744
+    },
+    "th_pp": {
+      "different_words": 1554,
+      "max_ulp": 2179443057,
+      "words": 2744
+    },
+    "u_pp": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 3087
+    },
+    "v_pp": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 3136
+    },
+    "ww_pp": {
+      "different_words": 1440,
+      "max_ulp": 2056348622,
+      "words": 2800
+    }
+  },
+  "real_initial_no_fma_probe": {
+    "mu_pp": {
+      "different_words": 34,
+      "got": -0.008138872683048248,
+      "location": [
+        1,
+        2
+      ],
+      "max_abs": 4.842877388000488e-06,
+      "max_ulp": 2097,
+      "words": 56,
+      "wrf": -0.008140825666487217
+    },
+    "muave": {
+      "different_words": 30,
+      "got": -0.0036346688866615295,
+      "location": [
+        1,
+        2
+      ],
+      "max_abs": 2.6598572731018066e-06,
+      "max_ulp": 4614,
+      "words": 56,
+      "wrf": -0.0036357431672513485
+    },
+    "mudf": {
+      "different_words": 30,
+      "got": -0.0400373674929142,
+      "location": [
+        1,
+        2
+      ],
+      "max_abs": 1.9371509552001953e-05,
+      "max_ulp": 2097,
+      "words": 56,
+      "wrf": -0.040045179426670074
+    },
+    "muts": {
+      "different_words": 0,
+      "got": 0.0,
+      "location": [
+        0,
+        0
+      ],
+      "max_abs": 0.0,
+      "max_ulp": 0,
+      "words": 56,
+      "wrf": 0.0
+    },
+    "t_ave": {
+      "different_words": 0,
+      "got": 0.0,
+      "location": [
+        0,
+        0,
+        0
+      ],
+      "max_abs": 0.0,
+      "max_ulp": 0,
+      "words": 2744,
+      "wrf": 0.0
+    },
+    "th_pp": {
+      "different_words": 1554,
+      "got": 0.00048521652934141457,
+      "location": [
+        39,
+        5,
+        4
+      ],
+      "max_abs": 0.0038914515171200037,
+      "max_ulp": 1958996572,
+      "words": 2744,
+      "wrf": -0.0015069752698764205
+    },
+    "u_pp": {
+      "different_words": 656,
+      "got": 0.09813690185546875,
+      "location": [
+        43,
+        4,
+        3
+      ],
+      "max_abs": 0.0001583099365234375,
+      "max_ulp": 448,
+      "words": 3087,
+      "wrf": 0.09814023971557617
+    },
+    "v_pp": {
+      "different_words": 724,
+      "got": 4.94555139541626,
+      "location": [
+        48,
+        4,
+        6
+      ],
+      "max_abs": 0.00018548965454101562,
+      "max_ulp": 389,
+      "words": 3136,
+      "wrf": 4.945365905761719
+    },
+    "ww_pp": {
+      "different_words": 1440,
+      "got": -1.388366513310757e-06,
+      "location": [
+        19,
+        1,
+        4
+      ],
+      "max_abs": 1.1125113815069199e-05,
+      "max_ulp": 1807570921,
+      "words": 2800,
+      "wrf": 1.952052116394043e-06
+    }
+  },
+  "real_initial_open": {
+    "mu_pp": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "muave": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "mudf": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "muts": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "t_ave": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 2744
+    },
+    "th_pp": {
+      "different_words": 2744,
+      "max_ulp": 2179444632,
+      "words": 2744
+    },
+    "u_pp": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 3087
+    },
+    "v_pp": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 3136
+    },
+    "ww_pp": {
+      "different_words": 2688,
+      "max_ulp": 2057147204,
+      "words": 2800
+    }
+  },
+  "real_initial_periodic": {
+    "mu_pp": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "muave": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "mudf": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "muts": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "t_ave": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 2744
+    },
+    "th_pp": {
+      "different_words": 2744,
+      "max_ulp": 2187455773,
+      "words": 2744
+    },
+    "u_pp": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 3087
+    },
+    "v_pp": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 3136
+    },
+    "ww_pp": {
+      "different_words": 2688,
+      "max_ulp": 2070364706,
+      "words": 2800
+    }
+  },
+  "real_initial_top_lid": {
+    "mu_pp": {
+      "different_words": 4,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "muave": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "mudf": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "muts": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "t_ave": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 2744
+    },
+    "th_pp": {
+      "different_words": 1554,
+      "max_ulp": 2179444621,
+      "words": 2744
+    },
+    "u_pp": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 3087
+    },
+    "v_pp": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 3136
+    },
+    "ww_pp": {
+      "different_words": 1440,
+      "max_ulp": 2056346072,
+      "words": 2800
+    }
+  },
+  "real_initial_zero_reference": {
+    "mu_pp": {
+      "different_words": 29,
+      "max_ulp": 750,
+      "words": 56
+    },
+    "muave": {
+      "different_words": 18,
+      "max_ulp": 825,
+      "words": 56
+    },
+    "mudf": {
+      "different_words": 25,
+      "max_ulp": 750,
+      "words": 56
+    },
+    "muts": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "t_ave": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 2744
+    },
+    "th_pp": {
+      "different_words": 1505,
+      "max_ulp": 1929551613,
+      "words": 2744
+    },
+    "u_pp": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 3087
+    },
+    "v_pp": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 3136
+    },
+    "ww_pp": {
+      "different_words": 1316,
+      "max_ulp": 90112,
+      "words": 2800
+    }
+  },
+  "recorded_on": {
+    "GPUWM_WRF_EXACT": "1",
+    "backend": "cuda",
+    "device": "b'NVIDIA RTX A6000'",
+    "numerics": "strict",
+    "tool": "tools/record_metal_pins.py"
+  },
+  "southern_hemisphere_flat": {
+    "mu_pp": {
+      "different_words": 4,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "muave": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "mudf": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "muts": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "t_ave": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 2744
+    },
+    "th_pp": {
+      "different_words": 1554,
+      "max_ulp": 2166906714,
+      "words": 2744
+    },
+    "u_pp": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 3087
+    },
+    "v_pp": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 3136
+    },
+    "ww_pp": {
+      "different_words": 1440,
+      "max_ulp": 2055600106,
+      "words": 2800
+    }
+  },
+  "southern_hemisphere_map": {
+    "mu_pp": {
+      "different_words": 4,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "muave": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "mudf": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "muts": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "t_ave": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 2744
+    },
+    "th_pp": {
+      "different_words": 1554,
+      "max_ulp": 2166728333,
+      "words": 2744
+    },
+    "u_pp": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 3087
+    },
+    "v_pp": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 3136
+    },
+    "ww_pp": {
+      "different_words": 1440,
+      "max_ulp": 2055399564,
+      "words": 2800
+    }
+  },
+  "steep_terrain_flat": {
+    "mu_pp": {
+      "different_words": 4,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "muave": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "mudf": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "muts": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "t_ave": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 2744
+    },
+    "th_pp": {
+      "different_words": 1554,
+      "max_ulp": 2179556753,
+      "words": 2744
+    },
+    "u_pp": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 3087
+    },
+    "v_pp": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 3136
+    },
+    "ww_pp": {
+      "different_words": 1440,
+      "max_ulp": 2056214932,
+      "words": 2800
+    }
+  },
+  "steep_terrain_map": {
+    "mu_pp": {
+      "different_words": 4,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "muave": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "mudf": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "muts": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "t_ave": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 2744
+    },
+    "th_pp": {
+      "different_words": 1554,
+      "max_ulp": 2179361981,
+      "words": 2744
+    },
+    "u_pp": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 3087
+    },
+    "v_pp": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 3136
+    },
+    "ww_pp": {
+      "different_words": 1440,
+      "max_ulp": 2056042051,
+      "words": 2800
+    }
+  },
+  "zero_near_zero_flat": {
+    "mu_pp": {
+      "different_words": 21,
+      "max_ulp": 10013,
+      "words": 56
+    },
+    "muave": {
+      "different_words": 13,
+      "max_ulp": 11015,
+      "words": 56
+    },
+    "mudf": {
+      "different_words": 17,
+      "max_ulp": 10013,
+      "words": 56
+    },
+    "muts": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "t_ave": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 2744
+    },
+    "th_pp": {
+      "different_words": 924,
+      "max_ulp": 1810618878,
+      "words": 2744
+    },
+    "u_pp": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 3087
+    },
+    "v_pp": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 3136
+    },
+    "ww_pp": {
+      "different_words": 1161,
+      "max_ulp": 1652124,
+      "words": 2800
+    }
+  },
+  "zero_near_zero_map": {
+    "mu_pp": {
+      "different_words": 21,
+      "max_ulp": 9680,
+      "words": 56
+    },
+    "muave": {
+      "different_words": 12,
+      "max_ulp": 10648,
+      "words": 56
+    },
+    "mudf": {
+      "different_words": 17,
+      "max_ulp": 9680,
+      "words": 56
+    },
+    "muts": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 56
+    },
+    "t_ave": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 2744
+    },
+    "th_pp": {
+      "different_words": 924,
+      "max_ulp": 1810199413,
+      "words": 2744
+    },
+    "u_pp": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 3087
+    },
+    "v_pp": {
+      "different_words": 0,
+      "max_ulp": 0,
+      "words": 3136
+    },
+    "ww_pp": {
+      "different_words": 1149,
+      "max_ulp": 1757118,
+      "words": 2800
+    }
+  },
+  "zero_near_zero_no_fma_probe": {
+    "mu_pp": {
+      "different_words": 4,
+      "got": 0.0,
+      "location": [
+        0,
+        0
+      ],
+      "max_abs": 0.0,
+      "max_ulp": 0,
+      "words": 56,
+      "wrf": 0.0
+    },
+    "muave": {
+      "different_words": 0,
+      "got": 0.0,
+      "location": [
+        0,
+        0
+      ],
+      "max_abs": 0.0,
+      "max_ulp": 0,
+      "words": 56,
+      "wrf": 0.0
+    },
+    "mudf": {
+      "different_words": 0,
+      "got": 0.0,
+      "location": [
+        0,
+        0
+      ],
+      "max_abs": 0.0,
+      "max_ulp": 0,
+      "words": 56,
+      "wrf": 0.0
+    },
+    "muts": {
+      "different_words": 0,
+      "got": 0.0,
+      "location": [
+        0,
+        0
+      ],
+      "max_abs": 0.0,
+      "max_ulp": 0,
+      "words": 56,
+      "wrf": 0.0
+    },
+    "t_ave": {
+      "different_words": 0,
+      "got": 0.0,
+      "location": [
+        0,
+        0,
+        0
+      ],
+      "max_abs": 0.0,
+      "max_ulp": 0,
+      "words": 2744,
+      "wrf": 0.0
+    },
+    "th_pp": {
+      "different_words": 1328,
+      "got": -1.710957597822471e-08,
+      "location": [
+        30,
+        3,
+        4
+      ],
+      "max_abs": 3.310525789856911e-05,
+      "max_ulp": 1670910168,
+      "words": 2744,
+      "wrf": 1.9367967230010663e-09
+    },
+    "u_pp": {
+      "different_words": 0,
+      "got": 0.0,
+      "location": [
+        0,
+        0,
+        0
+      ],
+      "max_abs": 0.0,
+      "max_ulp": 0,
+      "words": 3087,
+      "wrf": 0.0
+    },
+    "v_pp": {
+      "different_words": 17,
+      "got": 2.0992578721129284e-33,
+      "location": [
+        48,
+        4,
+        1
+      ],
+      "max_abs": 2.0992578721129284e-33,
+      "max_ulp": 154035783,
+      "words": 3136,
+      "wrf": 0.0
+    },
+    "ww_pp": {
+      "different_words": 0,
+      "got": 0.0,
+      "location": [
+        0,
+        0,
+        0
+      ],
+      "max_abs": 0.0,
+      "max_ulp": 0,
+      "words": 2800,
+      "wrf": 0.0
+    }
+  }
+}

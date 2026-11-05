@@ -254,10 +254,15 @@ def _planned_objects(source: str, request: Mapping[str, Any], row: Mapping[str, 
     hours = _int(request, "hours", None)
     if hours is None:
         raise ValueError("the request names no hours")
-    start = _int(request, "forecast_start_hour", 0) or 0
     cadence = _int(request, "cadence", None)
     cycle = _cycle(request, source)
     legacy = _legacy(source)
+    start = _int(request, "forecast_start_hour", None)
+    if start is None:
+        # A [fetch] table that names no start opens at the route's first
+        # published lead (f003 for the GEFSv12 reforecast, which publishes
+        # no f000), exactly as the fetch it prices does.
+        start = 0 if legacy is not None else fetch_routes.first_published_lead(source)
     if legacy is None:
         route = fetch_routes.route_for(source)
         stand_ins = ([cycle] if cycle is not None else

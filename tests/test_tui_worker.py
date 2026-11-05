@@ -8,7 +8,16 @@ import time
 
 import pytest
 
+from _woof_snapshot import left_out_reason
+
 ROOT = Path(__file__).resolve().parents[1]
+WORKER = "woof/tui_worker.py"
+
+# Every case runs the worker as a child process, so a tree that leaves the
+# worker out fails inside the child (``can't open file``), where the named
+# rule in conftest.py cannot see it.  The same rule is applied here instead.
+pytestmark = pytest.mark.skipif(left_out_reason(WORKER) is not None,
+                                reason=left_out_reason(WORKER) or "")
 
 
 def _run(tmp_path, code, args=("probe",)):
@@ -24,7 +33,7 @@ def _run(tmp_path, code, args=("probe",)):
     environment = dict(os.environ, PYTHONPATH=str(tmp_path))
     with (directory / "job.log").open("wb") as output:
         process = subprocess.Popen(
-            [sys.executable, "-u", str(ROOT / "woof/tui_worker.py"),
+            [sys.executable, "-u", str(ROOT / WORKER),
              "--job-dir", str(directory), "--", *args],
             cwd=tmp_path, env=environment, stdin=subprocess.DEVNULL,
             stdout=output, stderr=output)

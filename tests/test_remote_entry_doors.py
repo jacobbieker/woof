@@ -12,6 +12,10 @@ import pytest
 
 from woof import remote_plan as rp, remote_worker as rw
 
+_LINUX_NODE = pytest.mark.skipif(
+    sys.platform != "linux",
+    reason="the remote worker is a Linux node service: job ownership reads /proc and signals through a pidfd, and every other platform refuses by name (test_remote_ownership_and_capabilities.py::test_every_door_refuses_an_unsupported_platform_with_one_sentence)")
+
 
 @pytest.fixture(autouse=True)
 def cpu_only_memory_review(monkeypatch):
@@ -152,6 +156,7 @@ def test_the_configuration_route_claims_a_run_folder_instead_of_the_workaround(t
     assert review["argv"] == rw.compose_argv(review["entry"])
 
 
+@_LINUX_NODE
 def test_a_second_run_into_one_case_folder_claims_a_sibling_and_the_pointer_names_it(tmp_path):
     """C-224: the case folder collects runs, exactly as the local front door lays them."""
     from woof import run_stamp
@@ -350,8 +355,11 @@ def test_a_prepared_route_plan_with_no_recorded_bundle_refuses_at_review(staged_
     with pytest.raises(ValueError) as failure:
         rw._launch(request, tmp_path)
     message = str(failure.value)
-    assert "prepared bundle that wrote it" in message
-    assert "Start a new run from that bundle" in message
+    # 1.1.1 binds the bundle through woof.resume.select_prepared_root, whose
+    # refusal names the missing bundle and the request field that supplies it.
+    assert "no prepared input bundle to bind" in message
+    assert "carries no bundle document" in message
+    assert "pass prepared_root" in message
     assert not (tmp_path / "new output").exists()
 
 
@@ -422,6 +430,7 @@ def test_a_card_this_node_does_not_have_is_refused_naming_the_cards_it_has(tmp_p
     assert not (tmp_path / "new output").exists()
 
 
+@_LINUX_NODE
 def test_the_selected_card_is_exported_to_the_forecast_child(tmp_path, two_cards, monkeypatch):
     """C-303: a selector that reaches the record reaches the run's environment."""
     source = config(tmp_path)
@@ -472,6 +481,7 @@ def test_a_resume_option_the_plans_route_does_not_carry_names_that_route(staged_
     assert not (tmp_path / "new output").exists()
 
 
+@_LINUX_NODE
 def test_a_staged_plan_job_records_the_wps_authority_the_plan_binds_not_a_phantom_capture(tmp_path, monkeypatch):
     """The run-plan door captures no prepared-inputs namelist, so its record must not name one."""
     directory = tmp_path / "bundle"
@@ -498,6 +508,7 @@ def test_a_staged_plan_job_records_the_wps_authority_the_plan_binds_not_a_phanto
     assert record["snapshot_wps_namelist"] == str(node_wps)
     assert Path(record["snapshot_wps_namelist"]).is_file()
     assert not (Path(record["snapshot_config"]).parent / "prepared-inputs").exists()
+@_LINUX_NODE
 def test_a_retried_launch_request_reconciles_with_the_job_it_already_created(tmp_path):
     """C-287: a retry of one attempt is that attempt, not a second forecast."""
     source = config(tmp_path)

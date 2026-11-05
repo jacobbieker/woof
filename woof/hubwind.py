@@ -101,8 +101,13 @@ def render(args):
         # with "missing native field V".  Named hub_* products still refuse.
         if args.engine == 'matplotlib':
             return None
+        # An input whose variables cannot be read is not known to carry
+        # them either: the pre-check abstains and the ordinary render
+        # decides, so `woof render missing.nc` is refused by the render
+        # door in its own words, not as an "unreadable hubwind input" the
+        # reader never asked for.
         variables = rendering._file_variables(Path(args.wrfout[0]))
-        if variables is not None and not _HUB_FIELDS <= variables:
+        if variables is None or not _HUB_FIELDS <= variables:
             return None
     known = product_names()
     unknown = sorted(set(named) - known)

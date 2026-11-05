@@ -61,7 +61,10 @@ def test_parameterized_route_is_generic_table_data(tmp_path, monkeypatch):
     table.write_text(json.dumps({'models': {'example': {
         'aliases': ['other'], 'profile': 'earth2-pl13-q-netcdf-v1', 'step_hours': 3,
     }}}))
-    row = replace(get_source_adapter('earth2'), source_id='synthetic', aliases=(), model_table=str(table))
+    # The synthetic table's rows are not earth2_run's: its acquisition owner
+    # validates members against the earth2 table, so the row names none.
+    row = replace(get_source_adapter('earth2'), source_id='synthetic', aliases=(), model_table=str(table),
+                  acquisition_owner=None)
     monkeypatch.setattr(registry, '_ADAPTERS', (*registry.source_adapters(), row))
     monkeypatch.setattr(registry, '_ALIASES', {**registry._ALIASES, 'synthetic': row})
     chosen = get_source_adapter('synthetic-other')

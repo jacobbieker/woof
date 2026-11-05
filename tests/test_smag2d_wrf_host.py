@@ -143,12 +143,20 @@ def test_step_refreshes_density_before_first_smag_evaluation():
     source = (Path(__file__).parents[1] / "woof" / "core" / "dycore.py").read_text()
     step_source = source[source.index("def step("):]
     # Since 01402fcb1 the refresh passes WRF's own muts (_wrf_muts) and runs
-    # whenever a WRF mixing package is active; it still sits immediately
-    # before the time-t fixed tendencies the first Smagorinsky K reads.
-    refresh = ("update_diagnostics(state, cfg.hypsometric_opt,\n"
-               "                           muts=_wrf_muts(state))\n"
-               "    prepare_fixed_tendencies")
-    assert refresh in step_source
+    # whenever a WRF mixing package is active (and the diagnostics are not
+    # reused); it still precedes the time-t fixed tendencies the first
+    # Smagorinsky K reads.
+    refresh = ("    if wrf_mixing_package_active(cfg) and not _wrf_reuse_diagnostics(state):\n"
+               "        update_diagnostics(state, cfg.hypsometric_opt,\n"
+               "                           muts=_wrf_muts(state))\n")
+    assert step_source.count(refresh) == 1
+    between = step_source[step_source.index(refresh) + len(refresh):
+                          step_source.index("    prepare_fixed_tendencies(")]
+    # Only the GSD helicity diagnostic (1.1.0) sits between them, and it
+    # reads the refreshed time-t state (alt among it) without writing it.
+    assert between == ("    if cfg.gsd_diagnostics:\n"
+                       "        from woof.core.gsd_diagnostics import update_helicity\n"
+                       "        update_helicity(state, cfg, history_due=refl_10cm_due)\n")
 
 
 def test_smag_memory_manifest_includes_shared_face_workspaces():

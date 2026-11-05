@@ -140,6 +140,8 @@ _METAL_COLUMN_24_SHA256 = {
     'sh2o_mosaic': '6144926af4fa5e048495ac7ae61f48853860aa28e5b4dfb1753c642161ca3873',
 }
 _METAL_COLUMN_24_BITWISE = ('tsk', 'tsk_mosaic', 'grdflx_mosaic')
+_METAL_STRICT_FROM_TSK = ('hfx', 'lh', 'grdflx', 'noahres', 'potevp', 'tslb',
+                          'hfx_mosaic', 'lh_mosaic', 'tslb_mosaic')
 
 
 def _metal_pins(table):
@@ -151,7 +153,19 @@ def _metal_pins(table):
 def pinned_pairs():
     """The held-out pairs for this process's arithmetic."""
     from woof import backend, wrf_exact
-    table = STRICT_PINNED_SHA256 if wrf_exact.ENABLED else FTZ_PINNED_SHA256
+    if wrf_exact.ENABLED:
+        if backend.active() != "mlx":
+            return STRICT_PINNED_SHA256
+        # Metal, strict: column 24's tsk, tsk_mosaic and grdflx_mosaic are
+        # WRF's words, so the fluxes and soil temperatures computed from tsk
+        # carry the Metal digests the default build pins too; the moisture
+        # fields are CUDA's strict words (measured on an M3 Max).
+        return {key: (_METAL_COLUMN_24_SHA256[key[3]]
+                      if key[2] == 24 and key[3] in _METAL_STRICT_FROM_TSK
+                      else digest)
+                for key, digest in STRICT_PINNED_SHA256.items()
+                if not (key[2] == 24 and key[3] in _METAL_COLUMN_24_BITWISE)}
+    table = FTZ_PINNED_SHA256
     return _metal_pins(table) if backend.active() == "mlx" else table
 
 

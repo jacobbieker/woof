@@ -127,6 +127,16 @@ def host_available_bytes(root=Path("/sys/fs/cgroup"), membership=None,
         if windll is None or not windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
             return None
         return int(status.avail_phys)
+    if sys.platform == "darwin" and not Path(meminfo).exists():
+        # No procfs and no memory cgroup: psutil reads the Mach VM statistics
+        # (free plus inactive pages), as tilestream.autoplan does on a Mac.
+        try:
+            import psutil
+
+            available = int(psutil.virtual_memory().available)
+        except Exception:  # noqa: BLE001 - unmeasured, said so by None
+            return None
+        return available if available >= 0 else None
     try:
         available = next(int(line.split()[1]) * 1024
                          for line in Path(meminfo).read_text().splitlines()

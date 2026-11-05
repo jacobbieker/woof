@@ -389,6 +389,7 @@ def runs():
     return out
 
 
+@pytest.mark.gpu  # the runs fixture launches the RRTMG kernels on a device
 def test_every_existing_word_is_unchanged(runs):
     for side in ("sw", "lw"):
         base = runs["none"][side]
@@ -399,11 +400,13 @@ def test_every_existing_word_is_unchanged(runs):
                 assert np.array_equal(value.view(np.uint32), other[key].view(np.uint32)), (mode, key)
 
 
+@pytest.mark.gpu  # the runs fixture launches the RRTMG kernels on a device
 def test_some_columns_are_day_and_some_night(runs):
     coszr = runs["none"]["sw"]["diag_physics/coszr"][:NC]
     assert (coszr > 0).sum() >= 2 and (coszr <= 0).sum() >= 2
 
 
+@pytest.mark.gpu  # the runs fixture launches the RRTMG kernels on a device
 def test_fields_have_their_shapes_and_keep_the_halo(runs):
     for mode, width in (("bands", 14), ("gpoints", 112)):
         for side, count in (("sw", width), ("lw", 16)):
@@ -414,6 +417,7 @@ def test_fields_have_their_shapes_and_keep_the_halo(runs):
                 assert np.isfinite(value[:, :NC]).all() and (value[:, :NC] >= 0).all(), name
 
 
+@pytest.mark.gpu  # the runs fixture launches the RRTMG kernels on a device
 def test_night_shortwave_columns_are_zero(runs):
     night = runs["none"]["sw"]["diag_physics/coszr"][:NC] <= 0
     for mode in ("bands", "gpoints"):
@@ -423,6 +427,7 @@ def test_night_shortwave_columns_are_zero(runs):
             assert (value[:, ~night].sum(axis=0) > 0).any() or name.startswith("swup"), name
 
 
+@pytest.mark.gpu  # the runs fixture launches the RRTMG kernels on a device
 def test_bands_add_up_to_the_broadband_boundary_fluxes(runs):
     for mode in ("bands", "gpoints"):
         for side in ("sw", "lw"):
@@ -436,6 +441,7 @@ def test_bands_add_up_to_the_broadband_boundary_fluxes(runs):
                                            err_msg=f"{mode} {name}")
 
 
+@pytest.mark.gpu  # the runs fixture launches the RRTMG kernels on a device
 def test_gpoints_sum_to_their_bands(runs):
     from woof.core.rrtmg_sw import gpoint_bands
     owner = np.asarray(gpoint_bands())

@@ -174,8 +174,11 @@ def test_bridge_reserves_active_and_possible_idle_sockets(tmp_path, monkeypatch,
 
 
 @pytest.mark.parametrize("host,configured,reported", [
-    ("noaa-hrrr-bdp-pds.s3.amazonaws.com", 3, 3),
-    ("noaa-hrrr-bdp-pds.s3.amazonaws.com", 3, 1),
+    # The balanced row's 10 file workers share this process's slots: the
+    # cap of 30 less the fifth kept for other woof processes
+    # (fetch_connections.process_share, V56), 24 // 10 = 2 per file.
+    ("noaa-hrrr-bdp-pds.s3.amazonaws.com", 2, 2),
+    ("noaa-hrrr-bdp-pds.s3.amazonaws.com", 2, 1),
     ("nomads.ncep.noaa.gov", 1, 1),
 ])
 def test_promoted_mirror_sets_native_width_and_actual_receipt(
@@ -192,7 +195,11 @@ def test_promoted_mirror_sets_native_width_and_actual_receipt(
     monkeypatch.setattr(rustwx_fetch, "_idle_capable", lambda *a: True)
     monkeypatch.setattr(fetch, "_stream_capable", lambda *a: True)
     monkeypatch.setattr(fetch, "_remember_stream_facts", lambda *a: None)
-    plan = fetch_routes.resolve_request("hrrr-prs", cycle=datetime(2026, 10, 18, 12), hours=24)
+    # Resolved as of two hours after the cycle: the host ladder reads the
+    # clock (NOMADS keeps two days), so on the wall clock this cycle has aged
+    # off NOMADS and the AWS mirror leads instead.
+    plan = fetch_routes.resolve_request("hrrr-prs", cycle=datetime(2026, 10, 18, 12), hours=24,
+                                        now=datetime(2026, 10, 18, 14))
     assert fetch_pool.host_key(plan.objects[0].url) == "nomads.ncep.noaa.gov"
     download = fetch._route_stream_downloader(plan, SimpleNamespace(fetch_workers=None))
     def process(command, *, env, **kwargs):
