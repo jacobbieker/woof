@@ -326,6 +326,12 @@ that passes on CUDA passes on Metal or skips by name:
 - `test_stochastic`'s host regressions and `test_partial_nest_kernels_v841`'s
   local-frame test name Linux g++ and NVRTC.
 
+The MPAS WSM6 water-budget gates (`mpas_wb3_v842`, `mpas_wb5_v842`) run
+apart: their WSM6 unit carries binary64 (soft-float on Metal) and Thrust's
+`complex<double>`. The Kessler and Thompson writebacks and the referee pass
+(5 of 10). The WSM6 unit had not finished its cold Metal compile after
+1 h 45 min of compiler time on an M3 Max, so its 5 tests are not measured.
+
 The partial-depth band (Phase D5) keeps its own measurements:
 
 - `components/hex/tests/test_partial_nest_oracle_v841.py`: the device
