@@ -91,16 +91,16 @@ process with SIGSEGV.
 
 | CUDA | host |
 |---|---|
-| binary32/binary64 `+ - * /`, `sqrt`, `fma` | the host's IEEE operations (SSE2/AVX on x86-64), round to nearest |
+| binary32/binary64 `+ - * /`, `sqrt`, `fma` | the host's IEEE operations (SSE2/AVX on x86-64, the FP/SIMD unit on AArch64), round to nearest |
 | `--fmad=true` / `false` | never contracted (`-ffp-contract=off`): CUDA's `--fmad=false` words in every unit |
-| `-ftz=true` (CuPy's default) | the SSE flush-to-zero and denormals-are-zero modes are set for the launch |
+| `-ftz=true` (CuPy's default) | the SSE flush-to-zero and denormals-are-zero modes (AArch64: `FPCR.FZ`) are set for the launch |
 | `--ftz=false` units | subnormals kept |
 | inline PTX without `.ftz` (`add.rn.f32` …) | the operation with the flush modes cleared around it, so subnormals are kept in any unit |
 | `fminf`/`fmaxf`/`min`/`max` | CUDA's: −0 orders below +0, and a NaN operand yields the other operand |
 | `__float2int_*` and similar | saturating, with NaN giving 0 (`cvt.*i`) |
-| libdevice binary32/binary64 (`expf`, `powf` …) | the C library's (glibc): a vendor-libm difference, as on Metal. Units built on woof's glibc ports are exact. |
+| libdevice binary32/binary64 (`expf`, `powf` …) | the C library's (glibc; Apple's libm on macOS): a vendor-libm difference, as on Metal. Units built on woof's glibc ports are exact. |
 | `__expf`, `__powf`, `__fdividef`, `rsqrtf` … | the accurate functions, where CUDA's hardware approximates |
-| NaN results | x86's: the default NaN is `0xffc00000` and payloads propagate, where CUDA gives `0x7fffffff` |
+| NaN results | the host's: x86's default NaN is `0xffc00000` (AArch64's `0x7fc00000`) and payloads propagate, where CUDA gives `0x7fffffff` |
 
 ## Measured against CUDA
 
