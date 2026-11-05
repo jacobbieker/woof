@@ -33,10 +33,13 @@ def publish_inputs(source, destination, ready, staging_ready):
     # publish() sealed the stage read-only, and macOS 15 refuses to rename a
     # directory its owner may not write (EACCES on the hosted runner; Linux
     # does not ask), so the stage is writable for the rename alone and is
-    # sealed again under its published name.
+    # sealed again under whichever name it then holds, the rename failed or not.
     stage.chmod(stage.stat().st_mode | 0o200)
-    stage.rename(destination)
-    destination.chmod(destination.stat().st_mode & ~0o222)
+    try:
+        stage.rename(destination)
+    finally:
+        sealed = destination if destination.exists() else stage
+        sealed.chmod(sealed.stat().st_mode & ~0o222)
     with ready.open('a') as stream:
         fcntl.flock(stream, fcntl.LOCK_EX)
         stream.write(f'{description}: `{destination}`; PUBLICATION.json sha256 `{result["publication_sha256"]}`.\n')

@@ -190,7 +190,7 @@ def test_full_hrrr_1x4_prices_bound_the_measured_cards():
     """The layout the receipts measured: with the bound, every card's
     price covers the peak that card measured."""
     estimate = _price("1x4")
-    measured = {row[3]: row[6] for row in pf.RANK_POOL_RESIDUE_BATTERY}
+    measured = {row[3]: row[6] for row in pf.RANK_POOL_RESIDUE_BATTERY if row[2] == "1x4"}
     for card in estimate["cards"]:
         assert card["total_bytes"] >= measured[card["card"]], card
 
