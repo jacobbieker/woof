@@ -1172,7 +1172,8 @@ class _Rewriter:
                     continue
                 seen.add(key)
                 end = self._statement_end(loop)
-                self.edits.insert(end, f" if ({flag}) break;", rank=_GOTO_CLOSE)
+                # before the wrapper's close when the loop ends at the label
+                self.edits.insert(end, f" if ({flag}) break;", rank=_GOTO_CLOSE - 1)
         self._nested_wrapper_exits(wrappers)
 
     def _nested_goto_starts(self, by_label, labels, parent, chain):
