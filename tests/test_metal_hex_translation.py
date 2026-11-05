@@ -378,7 +378,7 @@ def test_the_hex_lane_prepares_mpas_to_physics_uncontracted(cp, fast, monkeypatc
     from woof.hex import metal_lane
     from woof.hex import numerics as hex_numerics
     from woof.hex.cuda_physics_prep_v841 import _CUDA_SOURCE
-    monkeypatch.setenv("WOOF_HEX_METAL", "1")
+    monkeypatch.delenv("WOOF_HEX_METAL", raising=False)     # the default on mlx
     assert metal_lane.install()
     options = hex_numerics.FAST_KERNEL_BASE
     assert not loader.contracts(options, _CUDA_SOURCE)
@@ -426,3 +426,22 @@ def test_wsm6_radar_unit_shapes(cp):
     cp.RawKernel(_WSM6_SHAPES, "shapes")((1,), (1,), (work, out))
     assert cp.asnumpy(out).tolist() == [len("mp_init OK"), 9]
     assert float(cp.asnumpy(work)[0]) == 3.5          # 2.5 + __expf(0) == 2.5 + 1
+
+
+_LOOP_AT_LABEL = r'''
+extern "C" __global__ void loop_at_label(const int* q, int* out, int n) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n) return;
+    int k = 0;
+    while (k < 5) { k = k + 1; if (k == q[i]) goto L; }L: out[i] = k * 10 + (k == q[i] ? 1 : 0);
+}
+'''
+
+
+def test_a_loop_that_ends_at_its_jumps_label(cp):
+    """The loop's ``if (flag) break;`` and the wrapper's close land at one
+    offset: the break goes first, inside the wrapper."""
+    q = np.array([2, 7, 5], dtype=np.int32)
+    out = cp.zeros(3, dtype=cp.int32)
+    cp.RawKernel(_LOOP_AT_LABEL, "loop_at_label")((1,), (4,), (cp.asarray(q), out, np.int32(3)))
+    assert cp.asnumpy(out).tolist() == [21, 50, 51]

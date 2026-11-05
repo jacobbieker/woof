@@ -351,8 +351,10 @@ class MetalModule:
 
 
 #: SHA-256 digests of CUDA sources whose Metal translation never contracts
-#: (:func:`uncontracted_source`).
+#: (:func:`uncontracted_source`), and (module, attribute) names of sources
+#: still to be read.
 _UNCONTRACTED_SOURCES: set[str] = set()
+_UNCONTRACTED_PENDING: list[tuple[str, str]] = []
 
 
 def _source_digest(source: str) -> str:
@@ -360,7 +362,8 @@ def _source_digest(source: str) -> str:
     return hashlib.sha256(source.encode("utf-8")).hexdigest()
 
 
-def uncontracted_source(source: str) -> None:
+def uncontracted_source(source: str | None = None, *, module: str | None = None,
+                        attribute: str | None = None) -> None:
     """Translate ``source`` without contraction in every mode.
 
     For a unit whose kernels check each other's words: one kernel recomputes
@@ -368,8 +371,24 @@ def uncontracted_source(source: str) -> None:
     ``validate_prep_v841_f32``).  NVRTC fuses the same expression the same
     way in both kernels.  Metal's ``fp contract(fast)`` lets the backend
     choose per site, so the producer and the checker can round differently.
-    With no contraction both sides round every operation as written."""
-    _UNCONTRACTED_SOURCES.add(_source_digest(source))
+    With no contraction both sides round every operation as written.
+
+    ``module``/``attribute`` name the source instead, read at the first
+    compile (a caller that runs while that module is still importing)."""
+    if source is not None:
+        _UNCONTRACTED_SOURCES.add(_source_digest(source))
+    if module is not None:
+        _UNCONTRACTED_PENDING.append((module, attribute))
+
+
+def _uncontracted(source: str) -> bool:
+    for module, attribute in list(_UNCONTRACTED_PENDING):
+        import importlib
+        text = getattr(importlib.import_module(module), attribute, None)
+        if text is not None:            # (None: that module is still importing)
+            _UNCONTRACTED_SOURCES.add(_source_digest(text))
+            _UNCONTRACTED_PENDING.remove((module, attribute))
+    return bool(_UNCONTRACTED_SOURCES) and _source_digest(source) in _UNCONTRACTED_SOURCES
 
 
 def contracts(options, source: str | None = None) -> bool:
@@ -385,7 +404,7 @@ def contracts(options, source: str | None = None) -> bool:
     from woof import numerics
     if numerics.is_strict():
         return False
-    if source is not None and _UNCONTRACTED_SOURCES and _source_digest(source) in _UNCONTRACTED_SOURCES:
+    if source is not None and _uncontracted(source):
         return False
     effective = numerics.effective_options(tuple(options or ()))
     return not any(o in ("--fmad=false", "-fmad=false") for o in effective)

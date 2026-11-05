@@ -244,9 +244,15 @@ on it:
   first load. Pipelines are then kept on disk (`~/.cache/woof/metal-pipelines`),
   but a cold start can take minutes, and the largest units (CLM lake's step
   kernel, for one) about twenty.
-- **The hex (MPAS) model on Metal is opt-in** (`WOOF_HEX_METAL=1`). Only the
-  partial-depth band is measured against MPAS on Metal. The rest of the hex
-  lane runs, but is not yet held to its CUDA words there.
+- **The hex (MPAS) model runs on Metal by default** (`WOOF_HEX_METAL=0` opts
+  out). Its words differ from CUDA's where binary32 libm does (`precise::`
+  against libdevice), so a forecast drifts about as far from CUDA as CUDA's
+  own run does with contraction off. Within hex:
+  - 8 of the 361 kernel units are refused by name: RRFS smoke, RRFS NSSL and
+    the Grell-Freitas MPAS-columns route;
+  - the LTS executor's reserve census needs 64-bit atomic adds, which Apple
+    GPUs lack;
+  - the dynamics subcycle runs eager, because the facade has no CUDA graphs.
 - **Virtual Macs are not supported.** GitHub's hosted macOS runners expose an
   "Apple Paravirtual device" that computes wrong answers (NaN) where an
   M-series GPU matches WRF, so CI runs the Metal parity gates only on real
