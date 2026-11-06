@@ -120,6 +120,18 @@ def set_output(path: str) -> None:
     open(path, "w").close()
 
 
+def _zero_empty() -> None:
+    """WOOF_LAUNCH_TRACE_ZERO_EMPTY=1: ``cupy.empty``/``empty_like`` give
+    zeros.  An uninitialised buffer holds the pool's old words on CUDA and
+    other words on MLX; a launch that writes part of it, or writes a value
+    the old words already held, then digests differently on the two
+    backends although it computed the same words.  With zeros on both, the
+    traces compare what the kernels computed."""
+    import cupy
+    cupy.empty = cupy.zeros
+    cupy.empty_like = cupy.zeros_like
+
+
 def install(path: str | None = None) -> None:
     if _STATE.get("installed"):
         if path:
@@ -127,6 +139,8 @@ def install(path: str | None = None) -> None:
         return
     _STATE["installed"] = True
     set_output(path or os.environ["WOOF_LAUNCH_TRACE"])
+    if os.environ.get("WOOF_LAUNCH_TRACE_ZERO_EMPTY") == "1":
+        _zero_empty()
     from woof import backend
     if backend.requested() == "host":
         from woof.backend.host import loader as host_loader

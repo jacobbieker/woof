@@ -1,0 +1,2947 @@
+{
+ "schema": "woof.backend-parity-ledger/v1",
+ "receipts": {
+  "cuda": "tests/data/backend_receipts/cuda.json",
+  "mlx": "tests/data/backend_receipts/mlx.json"
+ },
+ "environment": {
+  "GPUWM_WRF_EXACT": "1",
+  "GPUWM_NUMERICS": "strict",
+  "WOOF_LAUNCH_TRACE_ZERO_EMPTY": "1"
+ },
+ "sweep_tests": [
+  "tests/test_dudhia_sw_wrf461_parity.py",
+  "tests/test_gf_wrf461_parity.py",
+  "tests/test_gwdo_kim_wrf461_parity.py",
+  "tests/test_kessler_wrf461_parity.py",
+  "tests/test_lin_wrf461_parity.py",
+  "tests/test_morrison_wrf461_parity.py",
+  "tests/test_myjpbl_wrf461_parity.py",
+  "tests/test_myjsfc_wrf461_parity.py",
+  "tests/test_noah_seaice_wrf461_parity.py",
+  "tests/test_noah_wrf461_parity.py",
+  "tests/test_rrtm_lw_wrf461_parity.py",
+  "tests/test_sfclay_classic_wrf461_parity.py",
+  "tests/test_sfclayrev_wrf461_parity.py",
+  "tests/test_shinhong_wrf461_parity.py",
+  "tests/test_topo_wind_wrf461_chain_parity.py",
+  "tests/test_uh_wrf461_parity.py",
+  "tests/test_urban_ucm_wrf461_parity.py",
+  "tests/test_wsm3_wrf461_column_exact.py",
+  "tests/test_wsm6_wrf461_column_exact.py",
+  "tests/test_wsm6_wrf461_gpu_parity.py",
+  "tests/test_wsm6r_wrf461_column_exact.py",
+  "tests/test_wsm7_wrf461_column_exact.py",
+  "tests/test_ysu_wrf461_parity.py",
+  "tests/test_ysu_wrf461_wide_parity.py",
+  "tests/test_nssl2_column_oracle.py",
+  "tests/test_strict_float32_power.py",
+  "tests/test_partial_nest_kernel_words.py",
+  "tests/test_partial_nest_d4_kernel_words.py",
+  "tests/test_projection_oracle.py",
+  "tests/test_lambert.py"
+ ],
+ "causes": {
+  "nan-payload": {
+   "summary": "Only NaN words differ: a NaN that the arithmetic makes is CUDA's canonical 0x7FFFFFFF but Metal's 0x7FC00000. The numbers are the same.",
+   "evidence": "The arrays after the first launch that parts were saved on both machines from identical inputs (WOOF_LAUNCH_SAVE_BEFORE/WOOF_LAUNCH_SAVE). Every differing word was a NaN on both sides: noah_column 11 words, shinhong_column 1464, sfclay_classic_atanf_probe 4093, wsm6r_column 14, the topo-wind chain's shinhong_column 853. Every case was 0x7FC00000 (Metal) against 0x7FFFFFFF (CUDA).",
+   "closes_when": "the Metal translation canonicalises the NaN an operation produces to CUDA's 0x7FFFFFFF"
+  },
+  "vendor-tgamma": {
+   "summary": "nssl2_fill_velocity_gamma calls binary64 tgamma. On Metal that is the vendored Rust-libm transcription (woof/backend/translate/vendor_libm64.cuh); on CUDA it is libdevice. 12 of the table's 240 words differ by 1 ULP.",
+   "evidence": "With the table as the only differing input, nssl2_sediment_all_parallel_64 on Metal gives CUDA's words (tools/kernel_probe.py replay, PR #148), and the production step matches WRF on both backends. The first-step case receives the same cached table.",
+   "closes_when": "a transcription of libdevice's tgamma replaces the vendored one"
+  },
+  "pointer-table": {
+   "summary": "ucm_column_test takes three uint64 tables of device addresses (its inputs, outputs and state), so their words are each process's own pointers. The outputs written through them are not launch arguments and are not digested.",
+   "evidence": "With the launch's arrays saved on both machines, only the three address tables (17, 19 and 43 words) differ. The test compares every output word with WRF 4.6.1 and passes on both backends.",
+   "closes_when": "never on this comparison: an address is not a computed word"
+  },
+  "cuda-only-test": {
+   "summary": "The test checks NVRTC's compiler identity, so it skips on the MLX backend, which has no NVRTC.",
+   "evidence": "junit: passed on CUDA, skipped on MLX.",
+   "closes_when": "never: the subject is CUDA's compiler"
+  },
+  "projection-libm": {
+   "summary": "The Lambert projection (woof.static.lambert) runs on the host through the platform's C library (woof.core.host_libm), which is macOS's libm on the Mac and glibc on pb. Every field of every portable grid differs, and the projection's words feed the kernels' map factors, Coriolis and rotation.",
+   "evidence": "The grids of tests/fixtures/portable_static_grids.json, in binary64: 277,294 of 667,996 words differ, mostly by 1 to 5 ULP (rotation_m is larger near zero). The projection tests pass on both machines because each compares with its own libm.",
+   "closes_when": "both hosts carry the opt-in glibc 2.39 transcription (`pixi run build-native-glibc239`; tests/test_host_libm.py), which is off by default because it is LGPL"
+  }
+ },
+ "kernel_causes": {},
+ "test_causes": {
+  "tests/test_noah_wrf461_parity.py::test_case_18_takes_wrfs_snow_branch_on_a_subnormal_snow": "nan-payload",
+  "tests/test_noah_wrf461_parity.py::test_case_25_is_unusable_in_wrf_too": "nan-payload",
+  "tests/test_noah_wrf461_parity.py::test_land_ice_columns_are_bitwise_against_wrf": "nan-payload",
+  "tests/test_noah_wrf461_parity.py::test_noah_cuda_column_holds_its_measured_distance_from_wrf": "nan-payload",
+  "tests/test_noah_wrf461_parity.py::test_sfcdiags_after_the_column_is_bitwise_against_wrf": "nan-payload",
+  "tests/test_nssl2_column_oracle.py::test_production_step_matches_wrf[first-step]": "vendor-tgamma",
+  "tests/test_nssl2_column_oracle.py::test_production_step_matches_wrf[itimestep2]": "vendor-tgamma",
+  "tests/test_sfclay_classic_wrf461_parity.py::test_classic_atanf_is_the_mynn_units_atanf_everywhere": "nan-payload",
+  "tests/test_shinhong_wrf461_parity.py::test_shinhong_cuda_column_holds_its_measured_distance_from_wrf": "nan-payload",
+  "tests/test_shinhong_wrf461_parity.py::test_shinhong_cuda_determinism_pair_is_bit_identical": "nan-payload",
+  "tests/test_shinhong_wrf461_parity.py::test_shinhong_cuda_validator_reports_wrfs_nan_and_stays_quiet_otherwise": "nan-payload",
+  "tests/test_shinhong_wrf461_parity.py::test_the_kernel_compiler_identifies_itself_to_four_parts": "cuda-only-test",
+  "tests/test_topo_wind_wrf461_chain_parity.py::test_woof_stays_defined_where_wrf_does_not": "nan-payload",
+  "tests/test_urban_ucm_wrf461_parity.py::test_gpu_replays_original_v461_words[ucm-lcz-default]": "pointer-table",
+  "tests/test_urban_ucm_wrf461_parity.py::test_gpu_replays_original_v461_words[ucm-lcz-gr]": "pointer-table",
+  "tests/test_urban_ucm_wrf461_parity.py::test_gpu_replays_original_v461_words[ucm-nlcd-ahalh]": "pointer-table",
+  "tests/test_urban_ucm_wrf461_parity.py::test_gpu_replays_original_v461_words[ucm-nlcd-bound2]": "pointer-table",
+  "tests/test_urban_ucm_wrf461_parity.py::test_gpu_replays_original_v461_words[ucm-nlcd-ch1]": "pointer-table",
+  "tests/test_urban_ucm_wrf461_parity.py::test_gpu_replays_original_v461_words[ucm-nlcd-ch1ts2]": "pointer-table",
+  "tests/test_urban_ucm_wrf461_parity.py::test_gpu_replays_original_v461_words[ucm-nlcd-default]": "pointer-table",
+  "tests/test_urban_ucm_wrf461_parity.py::test_gpu_replays_original_v461_words[ucm-nlcd-gr]": "pointer-table",
+  "tests/test_urban_ucm_wrf461_parity.py::test_gpu_replays_original_v461_words[ucm-nlcd-ts2]": "pointer-table",
+  "tests/test_wsm6r_wrf461_column_exact.py::test_wsm6r_revised_term_one_bit_control": "nan-payload",
+  "tests/test_wsm6r_wrf461_column_exact.py::test_wsm6r_strict_full_field_hashes": "nan-payload"
+ },
+ "host_causes": {
+  "lambert": "projection-libm"
+ },
+ "host_entries": {
+  "lambert:1000:coriolis_m": {
+   "equal": false,
+   "cause": "projection-libm"
+  },
+  "lambert:1000:latlon_mass": {
+   "equal": false,
+   "cause": "projection-libm"
+  },
+  "lambert:1000:mapfac_m": {
+   "equal": false,
+   "cause": "projection-libm"
+  },
+  "lambert:1000:rotation_m": {
+   "equal": false,
+   "cause": "projection-libm"
+  },
+  "lambert:2000:coriolis_m": {
+   "equal": false,
+   "cause": "projection-libm"
+  },
+  "lambert:2000:latlon_mass": {
+   "equal": false,
+   "cause": "projection-libm"
+  },
+  "lambert:2000:mapfac_m": {
+   "equal": false,
+   "cause": "projection-libm"
+  },
+  "lambert:2000:rotation_m": {
+   "equal": false,
+   "cause": "projection-libm"
+  },
+  "lambert:500:coriolis_m": {
+   "equal": false,
+   "cause": "projection-libm"
+  },
+  "lambert:500:latlon_mass": {
+   "equal": false,
+   "cause": "projection-libm"
+  },
+  "lambert:500:mapfac_m": {
+   "equal": false,
+   "cause": "projection-libm"
+  },
+  "lambert:500:rotation_m": {
+   "equal": false,
+   "cause": "projection-libm"
+  },
+  "lambert:off_center_2000:coriolis_m": {
+   "equal": false,
+   "cause": "projection-libm"
+  },
+  "lambert:off_center_2000:latlon_mass": {
+   "equal": false,
+   "cause": "projection-libm"
+  },
+  "lambert:off_center_2000:mapfac_m": {
+   "equal": false,
+   "cause": "projection-libm"
+  },
+  "lambert:off_center_2000:rotation_m": {
+   "equal": false,
+   "cause": "projection-libm"
+  },
+  "lambert:root_9000:coriolis_m": {
+   "equal": false,
+   "cause": "projection-libm"
+  },
+  "lambert:root_9000:latlon_mass": {
+   "equal": false,
+   "cause": "projection-libm"
+  },
+  "lambert:root_9000:mapfac_m": {
+   "equal": false,
+   "cause": "projection-libm"
+  },
+  "lambert:root_9000:rotation_m": {
+   "equal": false,
+   "cause": "projection-libm"
+  }
+ },
+ "entries": {
+  "tests/test_dudhia_sw_wrf461_parity.py::test_device_dudhia_is_bitwise_wrf[adapter]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_dudhia_sw_wrf461_parity.py::test_device_dudhia_is_bitwise_wrf[columns]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_dudhia_sw_wrf461_parity.py::test_fixture_is_the_documented_oracle": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_dudhia_sw_wrf461_parity.py::test_float64_coszen_is_rounded_to_wrf_real_first": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_dudhia_sw_wrf461_parity.py::test_host_mirror_tracks_the_oracle": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_dudhia_sw_wrf461_parity.py::test_kernel_spells_the_wrf_arithmetic": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gf_wrf461_parity.py::test_column_independence_holds": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gf_wrf461_parity.py::test_driver_prep_levels_bitwise[dhdt]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gf_wrf461_parity.py::test_driver_prep_levels_bitwise[po]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gf_wrf461_parity.py::test_driver_prep_levels_bitwise[q2d]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gf_wrf461_parity.py::test_driver_prep_levels_bitwise[qo]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gf_wrf461_parity.py::test_driver_prep_levels_bitwise[qshall]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gf_wrf461_parity.py::test_driver_prep_levels_bitwise[rhoi]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gf_wrf461_parity.py::test_driver_prep_levels_bitwise[t2d]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gf_wrf461_parity.py::test_driver_prep_levels_bitwise[tn]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gf_wrf461_parity.py::test_driver_prep_levels_bitwise[tshall]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gf_wrf461_parity.py::test_driver_prep_levels_bitwise[us]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gf_wrf461_parity.py::test_driver_prep_levels_bitwise[vs]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gf_wrf461_parity.py::test_driver_prep_levels_bitwise[zo]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gf_wrf461_parity.py::test_driver_prep_mconv_bitwise": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gf_wrf461_parity.py::test_driver_prep_omeg_bitwise": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gf_wrf461_parity.py::test_driver_prep_surface_bitwise[ccn]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gf_wrf461_parity.py::test_driver_prep_surface_bitwise[hfxi]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gf_wrf461_parity.py::test_driver_prep_surface_bitwise[psur]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gf_wrf461_parity.py::test_driver_prep_surface_bitwise[qfxi]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gf_wrf461_parity.py::test_driver_prep_surface_bitwise[ter11]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gf_wrf461_parity.py::test_driver_prep_surface_bitwise[xlandi]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gf_wrf461_parity.py::test_fixture_shape": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gf_wrf461_parity.py::test_gfs_constants_are_wrfs_own_words": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gf_wrf461_parity.py::test_kpbl_passes_through": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gf_wrf461_parity.py::test_stage_fixture_reproduces_gfdrv_on_every_row": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gf_wrf461_parity.py::test_the_kernel_carries_the_same_words": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gf_wrf461_parity.py::test_the_two_constant_sets_disagree": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gwdo_kim_wrf461_parity.py::test_device_gwdo_is_bitwise_wrf461[L50]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gwdo_kim_wrf461_parity.py::test_device_gwdo_is_bitwise_wrf461[L90]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gwdo_kim_wrf461_parity.py::test_every_branch_control_moves_a_wrf_word[critical_level]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gwdo_kim_wrf461_parity.py::test_every_branch_control_moves_a_wrf_word[dtfac_limiter]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gwdo_kim_wrf461_parity.py::test_every_branch_control_moves_a_wrf_word[efmax_clamp]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gwdo_kim_wrf461_parity.py::test_every_branch_control_moves_a_wrf_word[flow_blocking]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gwdo_kim_wrf461_parity.py::test_every_branch_control_moves_a_wrf_word[frmax_cap]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gwdo_kim_wrf461_parity.py::test_every_branch_control_moves_a_wrf_word[kbl_floor]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gwdo_kim_wrf461_parity.py::test_every_branch_control_moves_a_wrf_word[light_wind]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gwdo_kim_wrf461_parity.py::test_every_branch_control_moves_a_wrf_word[low_level_reversal]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gwdo_kim_wrf461_parity.py::test_every_branch_control_moves_a_wrf_word[no_breaking_carry]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gwdo_kim_wrf461_parity.py::test_every_branch_control_moves_a_wrf_word[odmax_clamp]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gwdo_kim_wrf461_parity.py::test_every_branch_control_moves_a_wrf_word[odmin_clamp]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gwdo_kim_wrf461_parity.py::test_every_branch_control_moves_a_wrf_word[subgrid_rho_weights]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gwdo_kim_wrf461_parity.py::test_every_branch_control_moves_a_wrf_word[velco_clamp]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gwdo_kim_wrf461_parity.py::test_every_branch_control_moves_a_wrf_word[wave_breaking]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gwdo_kim_wrf461_parity.py::test_every_branch_control_moves_a_wrf_word[wind_sector_atan2]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gwdo_kim_wrf461_parity.py::test_every_branch_control_moves_a_wrf_word[zero_variance]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gwdo_kim_wrf461_parity.py::test_fixture_is_the_documented_oracle": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gwdo_kim_wrf461_parity.py::test_kernel_spells_the_reference_platform_atan2f": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gwdo_kim_wrf461_parity.py::test_td_atan2f_returns_the_reference_platforms_words_and_sectors": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gwdo_kim_wrf461_parity.py::test_the_drag_is_not_vacuous": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_gwdo_kim_wrf461_parity.py::test_the_oracle_rejects_the_correctly_rounded_atan2": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_kessler_wrf461_parity.py::test_cpu_mirror_follows_the_file_expression": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_kessler_wrf461_parity.py::test_device_kessler_is_bitwise_wrf_on_every_call[free]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_kessler_wrf461_parity.py::test_device_kessler_is_bitwise_wrf_on_every_call[replay]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_kessler_wrf461_parity.py::test_fixture_is_the_documented_oracle": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_kessler_wrf461_parity.py::test_kernel_spells_the_wrf_arithmetic": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_lambert.py::test_a_declared_window_start_does_not_translate_the_grid": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_lambert.py::test_all_outputs_float64": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_lambert.py::test_cone_secant_30_60": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_lambert.py::test_cone_tangent_equals_sin_truelat": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_lambert.py::test_config_driven_d01_reproduces_geo_em_projection_fields": {
+   "cuda": "skipped",
+   "mlx": "skipped",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_lambert.py::test_constants_are_wps_values": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_lambert.py::test_d01_center_is_ref_point": {
+   "cuda": "skipped",
+   "mlx": "skipped",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_lambert.py::test_dx_dy_mismatch_raises": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_lambert.py::test_geo_em_coriolis[1]": {
+   "cuda": "skipped",
+   "mlx": "skipped",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_lambert.py::test_geo_em_coriolis[2]": {
+   "cuda": "skipped",
+   "mlx": "skipped",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_lambert.py::test_geo_em_coriolis[3]": {
+   "cuda": "skipped",
+   "mlx": "skipped",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_lambert.py::test_geo_em_coriolis[4]": {
+   "cuda": "skipped",
+   "mlx": "skipped",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_lambert.py::test_geo_em_latlon[1]": {
+   "cuda": "skipped",
+   "mlx": "skipped",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_lambert.py::test_geo_em_latlon[2]": {
+   "cuda": "skipped",
+   "mlx": "skipped",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_lambert.py::test_geo_em_latlon[3]": {
+   "cuda": "skipped",
+   "mlx": "skipped",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_lambert.py::test_geo_em_latlon[4]": {
+   "cuda": "skipped",
+   "mlx": "skipped",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_lambert.py::test_geo_em_map_factors[1]": {
+   "cuda": "skipped",
+   "mlx": "skipped",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_lambert.py::test_geo_em_map_factors[2]": {
+   "cuda": "skipped",
+   "mlx": "skipped",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_lambert.py::test_geo_em_map_factors[3]": {
+   "cuda": "skipped",
+   "mlx": "skipped",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_lambert.py::test_geo_em_map_factors[4]": {
+   "cuda": "skipped",
+   "mlx": "skipped",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_lambert.py::test_geo_em_wind_rotation[1]": {
+   "cuda": "skipped",
+   "mlx": "skipped",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_lambert.py::test_geo_em_wind_rotation[2]": {
+   "cuda": "skipped",
+   "mlx": "skipped",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_lambert.py::test_geo_em_wind_rotation[3]": {
+   "cuda": "skipped",
+   "mlx": "skipped",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_lambert.py::test_geo_em_wind_rotation[4]": {
+   "cuda": "skipped",
+   "mlx": "skipped",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_lambert.py::test_ij_latlon_roundtrip": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_lambert.py::test_map_factor_is_one_at_both_true_latitudes": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_lambert.py::test_namelist_grid_count_and_dx": {
+   "cuda": "skipped",
+   "mlx": "skipped",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_lambert.py::test_parse_minimal_wps_namelist": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_lambert.py::test_projection_config_builds_every_registered_domain": {
+   "cuda": "skipped",
+   "mlx": "skipped",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_lambert.py::test_ratio_one_nest_is_identity": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_lambert.py::test_southern_hemisphere_mirror": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_lambert.py::test_staggered_shapes": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_lambert.py::test_the_wps_reader_honours_an_explicit_reference_cell": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_lambert.py::test_unimplemented_projection_namelist_rejected": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_lambert.py::test_wps_twin_without_geogrid_arrays_names_the_missing_fields": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_lin_wrf461_parity.py::test_fixture_is_wrf_output_over_every_regime": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_lin_wrf461_parity.py::test_lin_default_arithmetic_is_measured_per_field": {
+   "cuda": "skipped",
+   "mlx": "skipped",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_lin_wrf461_parity.py::test_lin_dispatch_updates_a_real_domain_state": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_lin_wrf461_parity.py::test_lin_matches_wrf_bitwise_under_strict_arithmetic": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_lin_wrf461_parity.py::test_lin_radar_diagnostic_against_native_wrf": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_lin_wrf461_parity.py::test_planted_one_ulp_constant_breaks_parity": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_morrison_wrf461_parity.py::test_fixture_is_from_the_pinned_unmodified_wrf_sources": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_morrison_wrf461_parity.py::test_fixture_spans_phases_thresholds_signed_zero_and_subnormals": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_morrison_wrf461_parity.py::test_graupel_and_hail_are_distinct_and_plumbed_through_both_diagnostics": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_morrison_wrf461_parity.py::test_isolated_row37_corrections_retain_their_pinned_differences": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_morrison_wrf461_parity.py::test_morrison_wrf_acceptance_is_bitwise": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_morrison_wrf461_parity.py::test_oracle_build_excludes_libmvec_and_proves_guard_can_fire": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_morrison_wrf461_parity.py::test_production_transport_does_not_export_negative_water": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_morrison_wrf461_parity.py::test_the_unit_is_routed_through_wrfs_libm_and_no_contraction": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_morrison_wrf461_parity.py::test_wrf_comparison_detects_a_latent_heat_perturbation": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_morrison_wrf461_parity.py::test_wrf_measurement_retains_complete_comparison_and_finite_outputs": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_myjpbl_wrf461_parity.py::test_myjpbl_matches_wrf_word_for_word": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_myjpbl_wrf461_parity.py::test_the_engine_hands_myj_the_terrain_height": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_myjpbl_wrf461_parity.py::test_the_fixture_reaches_the_regimes_and_arms": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_myjpbl_wrf461_parity.py::test_the_kernel_constants_are_wrfs_folded_words": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_myjpbl_wrf461_parity.py::test_zeroing_ht_is_seen": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_myjsfc_wrf461_parity.py::test_every_field_of_every_call_is_wrfs": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "reordered",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_myjsfc_wrf461_parity.py::test_the_cpu_authority_is_myjsfc_word_for_word": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_myjsfc_wrf461_parity.py::test_the_fixture_covers_the_regimes_it_claims": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_myjsfc_wrf461_parity.py::test_the_host_tables_are_myjsfcinits_word_for_word": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_myjsfc_wrf461_parity.py::test_the_terrain_seed_is_visible_to_the_fixture": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "reordered",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_noah_seaice_wrf461_parity.py::test_an_impossible_initial_snowpack_is_refused_with_wrfs_words": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_noah_seaice_wrf461_parity.py::test_fixture_covers_the_branches_that_matter": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_noah_seaice_wrf461_parity.py::test_fixture_is_the_pinned_wrf_driver_and_its_own_receipts": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_noah_seaice_wrf461_parity.py::test_noah_seaice_column_holds_its_measured_distance_from_wrf": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_noah_seaice_wrf461_parity.py::test_the_switch_fixtures_discriminate_their_switch": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_noah_wrf461_parity.py::test_a_compiler_row_moves_only_what_the_compiler_reaches": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_noah_wrf461_parity.py::test_case_18_takes_wrfs_snow_branch_on_a_subnormal_snow": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "diverge",
+   "first_divergence": {
+    "cuda": [
+     0,
+     "noah_column"
+    ],
+    "mlx": [
+     0,
+     "noah_column"
+    ],
+    "unmatched": {
+     "cuda": 1,
+     "mlx": 1
+    }
+   },
+   "cause": "nan-payload"
+  },
+  "tests/test_noah_wrf461_parity.py::test_case_25_is_unusable_in_wrf_too": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "diverge",
+   "first_divergence": {
+    "cuda": [
+     0,
+     "noah_column"
+    ],
+    "mlx": [
+     0,
+     "noah_column"
+    ],
+    "unmatched": {
+     "cuda": 1,
+     "mlx": 1
+    }
+   },
+   "cause": "nan-payload"
+  },
+  "tests/test_noah_wrf461_parity.py::test_fixture_covers_the_branches_that_matter": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_noah_wrf461_parity.py::test_fixture_is_the_pinned_wrf_driver_and_its_own_receipts": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_noah_wrf461_parity.py::test_land_ice_columns_are_bitwise_against_wrf": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "diverge",
+   "first_divergence": {
+    "cuda": [
+     0,
+     "noah_column"
+    ],
+    "mlx": [
+     0,
+     "noah_column"
+    ],
+    "unmatched": {
+     "cuda": 4,
+     "mlx": 4
+    }
+   },
+   "cause": "nan-payload"
+  },
+  "tests/test_noah_wrf461_parity.py::test_libmvec_receipt_shows_the_reference_is_scalar_libm": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_noah_wrf461_parity.py::test_noah_cuda_column_holds_its_measured_distance_from_wrf": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "diverge",
+   "first_divergence": {
+    "cuda": [
+     0,
+     "noah_column"
+    ],
+    "mlx": [
+     0,
+     "noah_column"
+    ],
+    "unmatched": {
+     "cuda": 4,
+     "mlx": 4
+    }
+   },
+   "cause": "nan-payload"
+  },
+  "tests/test_noah_wrf461_parity.py::test_noah_cuda_glacial_fixtures_are_bitwise_against_wrf": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_noah_wrf461_parity.py::test_sfcdiags_after_the_column_is_bitwise_against_wrf": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "diverge",
+   "first_divergence": {
+    "cuda": [
+     0,
+     "noah_column"
+    ],
+    "mlx": [
+     0,
+     "noah_column"
+    ],
+    "unmatched": {
+     "cuda": 8,
+     "mlx": 8
+    }
+   },
+   "cause": "nan-payload"
+  },
+  "tests/test_noah_wrf461_parity.py::test_the_baseline_table_names_every_measured_field": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_noah_wrf461_parity.py::test_the_four_switch_fixtures_are_not_the_same_file": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_noah_wrf461_parity.py::test_the_glacial_fixtures_reach_the_branches_they_claim": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_noah_wrf461_parity.py::test_the_kernel_hands_smflx_the_same_word_the_mirror_does": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_noah_wrf461_parity.py::test_the_land_ice_and_urban_categories_follow_the_dataset": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_noah_wrf461_parity.py::test_the_mirror_reproduces_wrfs_frozen_ground_infiltration": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_noah_wrf461_parity.py::test_the_mirror_reproduces_wrfs_land_ice_columns": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_nssl2_column_oracle.py::test_contact_freezing_new_ice_matches_wrf": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_nssl2_column_oracle.py::test_fixture_is_the_recorded_wrf_column_set[path0-2-True]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_nssl2_column_oracle.py::test_fixture_is_the_recorded_wrf_column_set[path1-1-False]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_nssl2_column_oracle.py::test_gs_hands_wrf_negative_mass_residues_to_nucond": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_nssl2_column_oracle.py::test_gs_is_bitwise_wrf_under_the_strict_build": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_nssl2_column_oracle.py::test_nucond_is_bitwise_wrf": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_nssl2_column_oracle.py::test_production_step_matches_wrf[first-step]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "diverge",
+   "first_divergence": {
+    "cuda": [
+     1,
+     "nssl2_sediment_all_parallel_64"
+    ],
+    "mlx": [
+     1,
+     "nssl2_sediment_all_parallel_64"
+    ],
+    "unmatched": {
+     "cuda": 1,
+     "mlx": 1
+    }
+   },
+   "cause": "vendor-tgamma"
+  },
+  "tests/test_nssl2_column_oracle.py::test_production_step_matches_wrf[itimestep2]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "diverge",
+   "first_divergence": {
+    "cuda": [
+     1,
+     "nssl2_fill_velocity_gamma"
+    ],
+    "mlx": [
+     1,
+     "nssl2_fill_velocity_gamma"
+    ],
+    "unmatched": {
+     "cuda": 2,
+     "mlx": 2
+    }
+   },
+   "cause": "vendor-tgamma"
+  },
+  "tests/test_partial_nest_d4_kernel_words.py::test_extended_column_fill_words[0]": {
+   "cuda": "skipped",
+   "mlx": "skipped",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_partial_nest_d4_kernel_words.py::test_extended_column_fill_words[1]": {
+   "cuda": "skipped",
+   "mlx": "skipped",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_partial_nest_d4_kernel_words.py::test_fused_face_flux_words[0]": {
+   "cuda": "skipped",
+   "mlx": "skipped",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_partial_nest_d4_kernel_words.py::test_fused_face_flux_words[1]": {
+   "cuda": "skipped",
+   "mlx": "skipped",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_partial_nest_d4_kernel_words.py::test_fused_held_is_the_single_field_entry_point[0]": {
+   "cuda": "skipped",
+   "mlx": "skipped",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_partial_nest_d4_kernel_words.py::test_fused_held_is_the_single_field_entry_point[2]": {
+   "cuda": "skipped",
+   "mlx": "skipped",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_partial_nest_d4_kernel_words.py::test_fused_stage_forcing_is_d3s_four_launches": {
+   "cuda": "skipped",
+   "mlx": "skipped",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_partial_nest_d4_kernel_words.py::test_scalar_interface_flux_and_update_words": {
+   "cuda": "skipped",
+   "mlx": "skipped",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_partial_nest_kernel_words.py::test_budget_residual_words": {
+   "cuda": "skipped",
+   "mlx": "skipped",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_partial_nest_kernel_words.py::test_relaxation_and_held_words[0-0]": {
+   "cuda": "skipped",
+   "mlx": "skipped",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_partial_nest_kernel_words.py::test_relaxation_and_held_words[0-2]": {
+   "cuda": "skipped",
+   "mlx": "skipped",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_partial_nest_kernel_words.py::test_relaxation_and_held_words[1-0]": {
+   "cuda": "skipped",
+   "mlx": "skipped",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_partial_nest_kernel_words.py::test_relaxation_and_held_words[1-2]": {
+   "cuda": "skipped",
+   "mlx": "skipped",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_partial_nest_kernel_words.py::test_specified_predictor_words": {
+   "cuda": "skipped",
+   "mlx": "skipped",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_partial_nest_kernel_words.py::test_stage_forcing_words": {
+   "cuda": "skipped",
+   "mlx": "skipped",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_partial_nest_kernel_words.py::test_strip_gather_and_tables_words": {
+   "cuda": "skipped",
+   "mlx": "skipped",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_projection_oracle.py::test_actual_arithmetic_mutations_cannot_use_rounding_exception[coefficient-lc_sh_sec-97.5--0x1.5866f3a590adcp+4-cone]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_projection_oracle.py::test_actual_arithmetic_mutations_cannot_use_rounding_exception[coefficient-merc_trop-89.0-0x1.85f31af494350p+2-dlon]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_projection_oracle.py::test_actual_arithmetic_mutations_cannot_use_rounding_exception[operation-lc_sh_sec-97.5--0x1.5866f3a590adcp+4-cone]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_projection_oracle.py::test_actual_arithmetic_mutations_cannot_use_rounding_exception[operation-merc_trop-89.0-0x1.85f31af494350p+2-dlon]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_projection_oracle.py::test_deck_covers_all_projection_families": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_projection_oracle.py::test_fixture_provenance": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_projection_oracle.py::test_ij_to_latlon_matches_oracle": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_projection_oracle.py::test_input_echoes_match_python_parse": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_projection_oracle.py::test_inverse_atan_rounding_has_an_independent_series_witness[0x1.1cc7f434ab8cdp+0-0x1.ad58f46ab6c36p-1]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_projection_oracle.py::test_inverse_atan_rounding_has_an_independent_series_witness[0x1.1cc7f434ab8cep+0-0x1.ad58f46ab6c37p-1]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_projection_oracle.py::test_inverse_atan_rounding_has_an_independent_series_witness[0x1.5c71ad4b712b6p-1-0x1.31f2d9b937d79p-1]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_projection_oracle.py::test_latlon_to_ij_matches_oracle": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_projection_oracle.py::test_map_factor_matches_oracle": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_projection_oracle.py::test_mercator_exp_rounding_has_an_independent_decimal_witness": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_projection_oracle.py::test_mercator_library_counterfactual_recovers_the_wrf_fixture": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_projection_oracle.py::test_mutated_grid_overflows_the_gates": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_projection_oracle.py::test_nest_registration_round_trip": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_projection_oracle.py::test_polar_pole_point_branch": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_projection_oracle.py::test_projection_class_dispatch": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_projection_oracle.py::test_rotation_matches_oracle": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_projection_oracle.py::test_rounding_is_an_exact_signature_not_a_wider_tolerance[argument-LambertGrid-context0--0x1.5866f3a590ad4p+4--0x1.5866f3a590adcp+4-signature0]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_projection_oracle.py::test_rounding_is_an_exact_signature_not_a_wider_tolerance[context-LambertGrid-context0--0x1.5866f3a590ad4p+4--0x1.5866f3a590adcp+4-signature0]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_projection_oracle.py::test_rounding_is_an_exact_signature_not_a_wider_tolerance[output-LambertGrid-context0--0x1.5866f3a590ad4p+4--0x1.5866f3a590adcp+4-signature0]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_projection_oracle.py::test_setup_state_matches_oracle": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_projection_oracle.py::test_southern_coriolis_is_negative": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_projection_oracle.py::test_wrf_map_proj_codes": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_rrtm_lw_wrf461_parity.py::test_a_340_kelvin_surface_reads_the_last_planck_row": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_rrtm_lw_wrf461_parity.py::test_every_output_and_stage_is_wrfs_word_on_the_gpu": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "reordered",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_rrtm_lw_wrf461_parity.py::test_every_output_and_stage_is_wrfs_word_on_the_numpy_path": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_rrtm_lw_wrf461_parity.py::test_stock_wrf_moves_only_taucloud_on_this_fixture": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_rrtm_lw_wrf461_parity.py::test_the_gpu_sum_runs_in_fortran_order": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_rrtm_lw_wrf461_parity.py::test_the_lookup_tables_are_wrfs": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_rrtm_lw_wrf461_parity.py::test_the_sums_run_in_fortran_order": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_rrtm_lw_wrf461_parity.py::test_the_trace_gases_and_buffer_count_are_wrfs": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_sfclay_classic_wrf461_parity.py::test_classic_atanf_is_the_mynn_units_atanf_everywhere": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "diverge",
+   "first_divergence": {
+    "cuda": [
+     0,
+     "sfclay_classic_atanf_probe"
+    ],
+    "mlx": [
+     0,
+     "sfclay_classic_atanf_probe"
+    ],
+    "unmatched": {
+     "cuda": 3,
+     "mlx": 2
+    }
+   },
+   "cause": "nan-payload"
+  },
+  "tests/test_sfclay_classic_wrf461_parity.py::test_classic_atanf_words_are_the_mynn_units_words": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_sfclay_classic_wrf461_parity.py::test_ensemble_shared_compile_takes_the_units_own_options": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_sfclay_classic_wrf461_parity.py::test_every_output_word_is_wrfs_word[free]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "reordered",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_sfclay_classic_wrf461_parity.py::test_every_output_word_is_wrfs_word[replay]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "reordered",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_sfclay_classic_wrf461_parity.py::test_fixture_files_are_the_ones_the_oracle_wrote": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_sfclay_classic_wrf461_parity.py::test_fixture_reaches_every_regime_surface_and_option_group": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_sfclay_classic_wrf461_parity.py::test_sfclay_compiles_without_contraction_and_with_its_headers": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_sfclay_classic_wrf461_parity.py::test_stability_tables_are_wrfs_words": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "reordered",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_sfclay_classic_wrf461_parity.py::test_stock_wrf_object_differs_from_the_scalar_reference_only_by_libmvec": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_sfclayrev_wrf461_parity.py::test_ensemble_shared_mask_launch_is_the_scalar_launch_word_for_word": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "reordered",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_sfclayrev_wrf461_parity.py::test_fixture_is_complete_and_matches_its_receipt": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_sfclayrev_wrf461_parity.py::test_fixture_reaches_every_regime_and_switch_branch": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_sfclayrev_wrf461_parity.py::test_make_inputs_reproduces_the_committed_columns": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_sfclayrev_wrf461_parity.py::test_only_the_wrf_undefined_lh_word_is_excluded": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_sfclayrev_wrf461_parity.py::test_reference_object_carries_no_vector_libm": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_sfclayrev_wrf461_parity.py::test_revised_mm5_is_wrfs_word_on_every_field": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "reordered",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_sfclayrev_wrf461_parity.py::test_sfclay_atanf_table_is_mynns_word_for_word": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_sfclayrev_wrf461_parity.py::test_sfclay_unit_uses_no_cuda_libm_and_no_contraction": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_sfclayrev_wrf461_parity.py::test_strict_reference_is_the_folded_build_and_differs_from_O0_only_there": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_sfclayrev_wrf461_parity.py::test_surface_slice_freeze_pin_matches_the_fixed_production_source": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_shinhong_wrf461_parity.py::test_arm_b_is_bitwise_too": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_shinhong_wrf461_parity.py::test_case13_nan_column_is_wrfs_own_0_over_0": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_shinhong_wrf461_parity.py::test_fixture_covers_the_branches_that_matter": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_shinhong_wrf461_parity.py::test_fixture_is_the_pinned_wrf_module_and_its_own_receipts": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_shinhong_wrf461_parity.py::test_libmvec_receipt_shows_the_reference_is_scalar_libm": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_shinhong_wrf461_parity.py::test_partition_functions_are_bitwise_against_the_direct_probe": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_shinhong_wrf461_parity.py::test_partition_probe_discriminates_the_coefficients": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_shinhong_wrf461_parity.py::test_partition_probe_reaches_the_clamps": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_shinhong_wrf461_parity.py::test_scale_awareness_is_alive": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_shinhong_wrf461_parity.py::test_shinhong_cuda_br_countermeasure_holds_wrfs_branch": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_shinhong_wrf461_parity.py::test_shinhong_cuda_column_holds_its_measured_distance_from_wrf": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "diverge",
+   "first_divergence": {
+    "cuda": [
+     0,
+     "shinhong_column"
+    ],
+    "mlx": [
+     0,
+     "shinhong_column"
+    ],
+    "unmatched": {
+     "cuda": 24,
+     "mlx": 24
+    }
+   },
+   "cause": "nan-payload"
+  },
+  "tests/test_shinhong_wrf461_parity.py::test_shinhong_cuda_determinism_pair_is_bit_identical": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "diverge",
+   "first_divergence": {
+    "cuda": [
+     0,
+     "shinhong_column"
+    ],
+    "mlx": [
+     0,
+     "shinhong_column"
+    ],
+    "unmatched": {
+     "cuda": 48,
+     "mlx": 48
+    }
+   },
+   "cause": "nan-payload"
+  },
+  "tests/test_shinhong_wrf461_parity.py::test_shinhong_cuda_ftz_flushes_every_subnormal_tendency_wrf_wrote": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_shinhong_wrf461_parity.py::test_shinhong_cuda_kpbl_matches_wrf_exactly": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_shinhong_wrf461_parity.py::test_shinhong_cuda_nan_geometry_is_wrfs_own_0_over_0": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_shinhong_wrf461_parity.py::test_shinhong_cuda_partition_curves_hold_their_distance_from_glibc": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_shinhong_wrf461_parity.py::test_shinhong_cuda_scale_awareness_is_alive_on_device": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_shinhong_wrf461_parity.py::test_shinhong_cuda_validator_reports_wrfs_nan_and_stays_quiet_otherwise": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "diverge",
+   "first_divergence": {
+    "cuda": [
+     0,
+     "shinhong_column"
+    ],
+    "mlx": [
+     0,
+     "shinhong_column"
+    ],
+    "unmatched": {
+     "cuda": 2,
+     "mlx": 2
+    }
+   },
+   "cause": "nan-payload"
+  },
+  "tests/test_shinhong_wrf461_parity.py::test_the_authority_is_bitwise_wherever_wrf_arithmetic_is_defined": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_shinhong_wrf461_parity.py::test_the_kernel_compiler_identifies_itself_to_four_parts": {
+   "cuda": "passed",
+   "mlx": "skipped",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": "cuda-only-test"
+  },
+  "tests/test_shinhong_wrf461_parity.py::test_the_oob_tke_arm_is_guarded_and_fixture_less": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_shinhong_wrf461_parity.py::test_the_rows_only_differ_where_the_compiler_or_the_card_reaches": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_shinhong_wrf461_parity.py::test_the_topo_wind_arm_is_real_and_this_far_from_arm_a": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_shinhong_wrf461_parity.py::test_tke_diag_off_leaves_tke_alone_and_still_zeroes_el": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_strict_float32_power.py::test_exner_power_matches_cuda_words": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_strict_float32_power.py::test_power_matches_cuda_powf_words": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_topo_wind_wrf461_chain_parity.py::test_every_shinhong_word_of_the_chain_is_wrfs": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_topo_wind_wrf461_chain_parity.py::test_every_ysu_word_of_the_chain_is_wrfs": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_topo_wind_wrf461_chain_parity.py::test_fixture_hashes_and_build_receipt": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_topo_wind_wrf461_chain_parity.py::test_fixture_spans_terrain_regimes_and_thresholds": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_topo_wind_wrf461_chain_parity.py::test_shinhong_drag_responds_to_ctopo": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_topo_wind_wrf461_chain_parity.py::test_shinhong_nan_cells_keep_wrfs_nan_geometry": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_topo_wind_wrf461_chain_parity.py::test_shinhong_reference_and_wrfs_exact_flags_agree_on_defined_lanes": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_topo_wind_wrf461_chain_parity.py::test_static_coefficients_are_wrfs_bit_for_bit": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_topo_wind_wrf461_chain_parity.py::test_the_calls_outside_the_claim_are_exactly_the_named_ones": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "reordered",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_topo_wind_wrf461_chain_parity.py::test_the_harness_that_wrote_the_fixture_is_this_one": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_topo_wind_wrf461_chain_parity.py::test_the_o0_build_differs_from_wrfs_own_only_where_it_should": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_topo_wind_wrf461_chain_parity.py::test_woof_stays_defined_where_wrf_does_not": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "diverge",
+   "first_divergence": {
+    "cuda": [
+     630,
+     "shinhong_column"
+    ],
+    "mlx": [
+     630,
+     "shinhong_column"
+    ],
+    "unmatched": {
+     "cuda": 18,
+     "mlx": 18
+    }
+   },
+   "cause": "nan-payload"
+  },
+  "tests/test_uh_wrf461_parity.py::test_cuda_kernel_matches_the_oracle_at_the_pinned_ulp": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_uh_wrf461_parity.py::test_cuda_negative_control_actually_fires": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_uh_wrf461_parity.py::test_fixture_exercises_the_branches": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_uh_wrf461_parity.py::test_numpy_mirror_matches_the_oracle_at_the_pinned_ulp": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_uh_wrf461_parity.py::test_oracle_fixture_hashes_match_the_build_receipt": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_uh_wrf461_parity.py::test_oracle_reference_is_pure_arithmetic_and_guard_can_fire": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_urban_ucm_wrf461_parity.py::test_corrected_retention_is_a_measured_upstream_difference[ucm-lcz-imp2ahalh-165]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_urban_ucm_wrf461_parity.py::test_corrected_retention_is_a_measured_upstream_difference[ucm-nlcd-griri-45]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_urban_ucm_wrf461_parity.py::test_corrected_retention_is_a_measured_upstream_difference[ucm-nlcd-imp2-45]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_urban_ucm_wrf461_parity.py::test_gpu_replays_original_v461_words[ucm-lcz-default]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "diverge",
+   "first_divergence": {
+    "cuda": [
+     0,
+     "ucm_column_test"
+    ],
+    "mlx": [
+     0,
+     "ucm_column_test"
+    ],
+    "unmatched": {
+     "cuda": 7,
+     "mlx": 7
+    }
+   },
+   "cause": "pointer-table"
+  },
+  "tests/test_urban_ucm_wrf461_parity.py::test_gpu_replays_original_v461_words[ucm-lcz-gr]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "diverge",
+   "first_divergence": {
+    "cuda": [
+     0,
+     "ucm_column_test"
+    ],
+    "mlx": [
+     0,
+     "ucm_column_test"
+    ],
+    "unmatched": {
+     "cuda": 7,
+     "mlx": 7
+    }
+   },
+   "cause": "pointer-table"
+  },
+  "tests/test_urban_ucm_wrf461_parity.py::test_gpu_replays_original_v461_words[ucm-nlcd-ahalh]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "diverge",
+   "first_divergence": {
+    "cuda": [
+     0,
+     "ucm_column_test"
+    ],
+    "mlx": [
+     0,
+     "ucm_column_test"
+    ],
+    "unmatched": {
+     "cuda": 7,
+     "mlx": 7
+    }
+   },
+   "cause": "pointer-table"
+  },
+  "tests/test_urban_ucm_wrf461_parity.py::test_gpu_replays_original_v461_words[ucm-nlcd-bound2]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "diverge",
+   "first_divergence": {
+    "cuda": [
+     0,
+     "ucm_column_test"
+    ],
+    "mlx": [
+     0,
+     "ucm_column_test"
+    ],
+    "unmatched": {
+     "cuda": 7,
+     "mlx": 7
+    }
+   },
+   "cause": "pointer-table"
+  },
+  "tests/test_urban_ucm_wrf461_parity.py::test_gpu_replays_original_v461_words[ucm-nlcd-ch1]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "diverge",
+   "first_divergence": {
+    "cuda": [
+     0,
+     "ucm_column_test"
+    ],
+    "mlx": [
+     0,
+     "ucm_column_test"
+    ],
+    "unmatched": {
+     "cuda": 7,
+     "mlx": 7
+    }
+   },
+   "cause": "pointer-table"
+  },
+  "tests/test_urban_ucm_wrf461_parity.py::test_gpu_replays_original_v461_words[ucm-nlcd-ch1ts2]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "diverge",
+   "first_divergence": {
+    "cuda": [
+     0,
+     "ucm_column_test"
+    ],
+    "mlx": [
+     0,
+     "ucm_column_test"
+    ],
+    "unmatched": {
+     "cuda": 7,
+     "mlx": 7
+    }
+   },
+   "cause": "pointer-table"
+  },
+  "tests/test_urban_ucm_wrf461_parity.py::test_gpu_replays_original_v461_words[ucm-nlcd-default]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "diverge",
+   "first_divergence": {
+    "cuda": [
+     0,
+     "ucm_column_test"
+    ],
+    "mlx": [
+     0,
+     "ucm_column_test"
+    ],
+    "unmatched": {
+     "cuda": 7,
+     "mlx": 7
+    }
+   },
+   "cause": "pointer-table"
+  },
+  "tests/test_urban_ucm_wrf461_parity.py::test_gpu_replays_original_v461_words[ucm-nlcd-gr]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "diverge",
+   "first_divergence": {
+    "cuda": [
+     0,
+     "ucm_column_test"
+    ],
+    "mlx": [
+     0,
+     "ucm_column_test"
+    ],
+    "unmatched": {
+     "cuda": 7,
+     "mlx": 7
+    }
+   },
+   "cause": "pointer-table"
+  },
+  "tests/test_urban_ucm_wrf461_parity.py::test_gpu_replays_original_v461_words[ucm-nlcd-ts2]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "diverge",
+   "first_divergence": {
+    "cuda": [
+     0,
+     "ucm_column_test"
+    ],
+    "mlx": [
+     0,
+     "ucm_column_test"
+    ],
+    "unmatched": {
+     "cuda": 7,
+     "mlx": 7
+    }
+   },
+   "cause": "pointer-table"
+  },
+  "tests/test_urban_ucm_wrf461_parity.py::test_host_replays_original_v461_words[ucm-lcz-default]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_urban_ucm_wrf461_parity.py::test_host_replays_original_v461_words[ucm-lcz-gr]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_urban_ucm_wrf461_parity.py::test_host_replays_original_v461_words[ucm-nlcd-ahalh]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_urban_ucm_wrf461_parity.py::test_host_replays_original_v461_words[ucm-nlcd-bound2]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_urban_ucm_wrf461_parity.py::test_host_replays_original_v461_words[ucm-nlcd-ch1]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_urban_ucm_wrf461_parity.py::test_host_replays_original_v461_words[ucm-nlcd-ch1ts2]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_urban_ucm_wrf461_parity.py::test_host_replays_original_v461_words[ucm-nlcd-default]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_urban_ucm_wrf461_parity.py::test_host_replays_original_v461_words[ucm-nlcd-gr]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_urban_ucm_wrf461_parity.py::test_host_replays_original_v461_words[ucm-nlcd-ts2]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_urban_ucm_wrf461_parity.py::test_original_v461_and_v471_match_without_retention[ucm-lcz-default]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_urban_ucm_wrf461_parity.py::test_original_v461_and_v471_match_without_retention[ucm-lcz-gr]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_urban_ucm_wrf461_parity.py::test_original_v461_and_v471_match_without_retention[ucm-nlcd-ahalh]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_urban_ucm_wrf461_parity.py::test_original_v461_and_v471_match_without_retention[ucm-nlcd-bound2]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_urban_ucm_wrf461_parity.py::test_original_v461_and_v471_match_without_retention[ucm-nlcd-ch1]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_urban_ucm_wrf461_parity.py::test_original_v461_and_v471_match_without_retention[ucm-nlcd-ch1ts2]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_urban_ucm_wrf461_parity.py::test_original_v461_and_v471_match_without_retention[ucm-nlcd-default]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_urban_ucm_wrf461_parity.py::test_original_v461_and_v471_match_without_retention[ucm-nlcd-gr]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_urban_ucm_wrf461_parity.py::test_original_v461_and_v471_match_without_retention[ucm-nlcd-ts2]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_urban_ucm_wrf461_parity.py::test_original_v461_fixture_hashes": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_wsm3_wrf461_column_exact.py::test_a_planted_one_ulp_change_is_caught": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_wsm3_wrf461_column_exact.py::test_default_build_counts_every_column_and_field": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_wsm3_wrf461_column_exact.py::test_every_fixture_field_matches_the_unmodified_wrf_digests": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_wsm3_wrf461_column_exact.py::test_frozen_init_words_are_the_words_wrf_computed": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_wsm3_wrf461_column_exact.py::test_strict_build_is_wrf461_on_every_word_of_every_step[64]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_wsm3_wrf461_column_exact.py::test_strict_build_is_wrf461_on_every_word_of_every_step[80]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_wsm3_wrf461_column_exact.py::test_the_column_set_is_the_oracle_input_and_spans_the_regimes": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_wsm3_wrf461_column_exact.py::test_the_declared_divergence_is_one_moved_line_and_moves_only_rain": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_wsm3_wrf461_column_exact.py::test_the_kernel_reads_the_words_in_the_order_they_are_frozen": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_wsm3_wrf461_column_exact.py::test_the_reference_was_built_without_vector_libm": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_wsm6_wrf461_column_exact.py::test_default_build_is_wrf461_outside_the_subnormal_columns": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_wsm6_wrf461_column_exact.py::test_frozen_init_and_radar_words_are_the_words_wrf_computed": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_wsm6_wrf461_column_exact.py::test_strict_build_is_wrf461_on_every_word_of_every_step[64]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_wsm6_wrf461_column_exact.py::test_strict_build_is_wrf461_on_every_word_of_every_step[80]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_wsm6_wrf461_column_exact.py::test_the_column_set_is_the_oracle_input_and_spans_the_regimes": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_wsm6_wrf461_column_exact.py::test_the_reference_was_built_without_vector_libm": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_wsm6_wrf461_gpu_parity.py::test_cuda_wsm6_is_within_the_committed_ulp_table_of_wrf461": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_wsm6_wrf461_gpu_parity.py::test_the_ulp_table_covers_every_oracle_scenario_and_field": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_wsm6r_wrf461_column_exact.py::test_wsm6r_default_full_field_hashes": {
+   "cuda": "skipped",
+   "mlx": "skipped",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_wsm6r_wrf461_column_exact.py::test_wsm6r_revised_term_one_bit_control": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "diverge",
+   "first_divergence": {
+    "cuda": [
+     72,
+     "wsm6r_column"
+    ],
+    "mlx": [
+     36,
+     "wsm6r_column"
+    ],
+    "unmatched": {
+     "cuda": 24,
+     "mlx": 12
+    }
+   },
+   "cause": "nan-payload"
+  },
+  "tests/test_wsm6r_wrf461_column_exact.py::test_wsm6r_strict_full_field_hashes": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "diverge",
+   "first_divergence": {
+    "cuda": [
+     72,
+     "wsm6r_column"
+    ],
+    "mlx": [
+     36,
+     "wsm6r_column"
+    ],
+    "unmatched": {
+     "cuda": 12,
+     "mlx": 6
+    }
+   },
+   "cause": "nan-payload"
+  },
+  "tests/test_wsm7_wrf461_column_exact.py::test_a_planted_one_bit_change_in_a_hail_term_is_caught": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_wsm7_wrf461_column_exact.py::test_d1_moves_only_the_probe_identified_columns_and_d2_only_reflectivity": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_wsm7_wrf461_column_exact.py::test_default_build_is_the_defined_arm_on_every_word_of_every_step": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_wsm7_wrf461_column_exact.py::test_frozen_words_are_the_words_wrf_computed": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_wsm7_wrf461_column_exact.py::test_strict_build_is_the_defined_arm_on_every_word_of_every_step[64]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_wsm7_wrf461_column_exact.py::test_strict_build_is_the_defined_arm_on_every_word_of_every_step[80]": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_wsm7_wrf461_column_exact.py::test_the_column_sets_are_the_oracle_input_and_span_the_regimes": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_wsm7_wrf461_column_exact.py::test_the_kernel_enums_follow_the_table_order": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_wsm7_wrf461_column_exact.py::test_the_reference_was_built_without_vector_libm": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_ysu_wrf461_parity.py::test_a_calm_column_runs_wrfs_whole_scheme": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "reordered",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_ysu_wrf461_parity.py::test_a_positive_subnormal_br_takes_wrfs_stable_arm": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "reordered",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_ysu_wrf461_parity.py::test_case_13_is_wrfs_word_wherever_wrf_wrote_a_number": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "reordered",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_ysu_wrf461_parity.py::test_fixture_covers_the_branches_that_matter": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_ysu_wrf461_parity.py::test_fixture_is_the_pinned_wrf_module_and_its_own_receipts": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_ysu_wrf461_parity.py::test_ftz_flushes_every_subnormal_tendency_wrf_wrote": {
+   "cuda": "skipped",
+   "mlx": "skipped",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_ysu_wrf461_parity.py::test_libmvec_receipt_shows_the_reference_is_scalar_libm": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_ysu_wrf461_parity.py::test_strict_build_writes_every_subnormal_tendency_wrf_wrote": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "reordered",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_ysu_wrf461_parity.py::test_wrfs_default_ctopo_arm_differs_from_the_ctopo_absent_arm": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_ysu_wrf461_parity.py::test_ysu_cuda_column_holds_its_measured_distance_from_wrf": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "reordered",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_ysu_wrf461_parity.py::test_ysu_is_bitwise_wrf_outside_the_flushed_subnormal_lanes": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "reordered",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_ysu_wrf461_parity.py::test_ysu_kpbl_matches_wrf_exactly_on_every_column": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "reordered",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_ysu_wrf461_parity.py::test_ysu_momentum_is_this_far_from_wrfs_ctopo_absent_arm": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "reordered",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_ysu_wrf461_parity.py::test_ysu_takes_wrfs_default_ctopo_drag_arm": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "reordered",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_ysu_wrf461_wide_parity.py::test_fixture_hashes_and_build_receipt": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_ysu_wrf461_wide_parity.py::test_fixture_spans_the_regimes_and_the_edges": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_ysu_wrf461_wide_parity.py::test_wrf_nonfinite_columns_are_exactly_its_underflowed_ust_cubed_ones": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_ysu_wrf461_wide_parity.py::test_wrfs_own_two_builds_differ_and_the_reference_is_wrfs_flags": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_ysu_wrf461_wide_parity.py::test_ysu_differs_from_the_O0_build_only_where_wrfs_builds_do": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "reordered",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_ysu_wrf461_wide_parity.py::test_ysu_is_finite_where_wrf_divides_zero_by_zero": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "reordered",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_ysu_wrf461_wide_parity.py::test_ysu_is_wrf_word_for_word_on_every_finite_column": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "reordered",
+   "first_divergence": null,
+   "cause": null
+  },
+  "tests/test_ysu_wrf461_wide_parity.py::test_ysu_tanhf_is_the_reference_platforms_tanhf": {
+   "cuda": "passed",
+   "mlx": "passed",
+   "launches": "agree",
+   "first_divergence": null,
+   "cause": null
+  }
+ },
+ "summary": {
+  "tests": 350,
+  "agree": 326,
+  "gaps": 24,
+  "gaps_by_cause": {
+   "cuda-only-test": 1,
+   "nan-payload": 12,
+   "pointer-table": 9,
+   "vendor-tgamma": 2
+  },
+  "host_words": 20,
+  "host_words_differing": 20
+ }
+}
