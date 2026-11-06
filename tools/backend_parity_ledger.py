@@ -253,6 +253,7 @@ def build_ledger(receipts: dict, previous: dict | None) -> dict:
         "kernel_causes": previous.get("kernel_causes", {}),
         "test_causes": previous.get("test_causes", {}),
         "host_causes": previous.get("host_causes", {}),
+        "residual_causes": previous.get("residual_causes", {}),
         "host_entries": {},
         "entries": {},
     }
@@ -272,8 +273,16 @@ def build_ledger(receipts: dict, previous: dict | None) -> dict:
         label = CLOSED_BY_OPT_IN.get(entry["cause"])
         if label is not None and label in receipts:
             o = receipts[label]["tests"].get(nodeid, {"outcome": "absent", "launches": []})
-            closed = {"cuda": c["outcome"], "mlx": o["outcome"], **compare(c, o, traced_on_cuda)}
-            entry["closed_by_opt_in"] = {"receipt": label, "closed": not is_gap(closed)}
+            # With the opt-in the test must do what it does on CUDA; launches
+            # that still part must part for the entry's residual cause (a
+            # second, smaller gap the opt-in does not touch).
+            with_opt_in = compare(c, o, traced_on_cuda)
+            residual = ledger["residual_causes"].get(nodeid)
+            entry["closed_by_opt_in"] = {
+                "receipt": label, "outcome": o["outcome"], "launches": with_opt_in["launches"],
+                "residual_cause": residual if with_opt_in["launches"] == "diverge" else None,
+                "closed": o["outcome"] == c["outcome"] and (
+                    with_opt_in["launches"] != "diverge" or residual in ledger["causes"])}
         ledger["entries"][nodeid] = entry
     gaps = [e for e in ledger["entries"].values() if is_gap(e)]
     ledger["summary"] = {

@@ -56,6 +56,8 @@ def test_every_gap_has_a_defined_cause(ledger):
 def test_every_cause_is_used_and_explained(ledger):
     used = {e["cause"] for e in ledger["entries"].values() if e["cause"]}
     used |= {e["cause"] for e in ledger["host_entries"].values() if e["cause"]}
+    used |= {e["closed_by_opt_in"]["residual_cause"] for e in ledger["entries"].values()
+             if e.get("closed_by_opt_in", {}).get("residual_cause")}
     assert used == set(ledger["causes"]), set(ledger["causes"]) ^ used
     for name, cause in ledger["causes"].items():
         assert cause.get("summary") and cause.get("evidence"), name
