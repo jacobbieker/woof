@@ -11,10 +11,10 @@
   ],
   "attribution_note": "route/mechanism attribution is judgment across five measured routes and is not machine-derivable; unattributed records carry asserted_token: null and the gate requires only that a token, once written, agrees with the receipt",
   "anchoring_note": "a site is its file plus the exact text of its line (anchor, anchor_sha256), and identical lines in one file are counted; line is where the generator last found the site, a hint the check does not fail on, so lines added or removed above a claim leave the census valid",
-  "site_count": 4606,
+  "site_count": 4650,
   "site_count_by_kind": {
     "behavioural": 67,
-    "prose": 4539
+    "prose": 4583
   },
   "sites": [
     {
@@ -705,6 +705,17 @@
       "kind": "prose",
       "anchor": "* **Float vectors in an `--ftz=false` unit** keep `float` components (Metal",
       "anchor_sha256": "f27e60e967870ab4694078c584602f583c62478fa24d42189933e74328e37731",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "docs/dev/mlx-backend.md",
+      "line": 401,
+      "kind": "prose",
+      "anchor": "`.ftz`);",
+      "anchor_sha256": "527adfd4b49e44eb59dad37456dfe6dc5874dc4b97390be37d7e0162a40973e3",
       "route": null,
       "mechanism": null,
       "asserted_token": null,
@@ -2762,6 +2773,182 @@
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/data/backend_receipts/cuda.json",
+      "line": 105,
+      "kind": "prose",
+      "anchor": "\"tests/test_morrison_wrf461_parity.py::test_fixture_spans_phases_thresholds_signed_zero_and_subnormals\": {\"outcome\":\"passed\",\"launches\":[]},",
+      "anchor_sha256": "b7abb5be3f548d001b15d29edd478e5ed403af12a8eaf9ae4eaf997a28de1d10",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/data/backend_receipts/cuda.json",
+      "line": 130,
+      "kind": "prose",
+      "anchor": "\"tests/test_noah_wrf461_parity.py::test_case_18_takes_wrfs_snow_branch_on_a_subnormal_snow\": {\"outcome\":\"passed\",\"launches\":[[\"noah_column\",\"240955100370\"]]},",
+      "anchor_sha256": "367fdbe4643eded9e110a41cb071e0a514f5e5de89ac577b03ae01ac92f6f70c",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/data/backend_receipts/cuda.json",
+      "line": 237,
+      "kind": "prose",
+      "anchor": "\"tests/test_shinhong_wrf461_parity.py::test_shinhong_cuda_ftz_flushes_every_subnormal_tendency_wrf_wrote\": {\"outcome\":\"passed\",\"launches\":[]},",
+      "anchor_sha256": "8999c3e6457c420b1353d9323d05c8a2da9be19849822ee25d842ea0b6cbfc7b",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/data/backend_receipts/cuda.json",
+      "line": 310,
+      "kind": "prose",
+      "anchor": "\"tests/test_wsm6_wrf461_column_exact.py::test_default_build_is_wrf461_outside_the_subnormal_columns\": {\"outcome\":\"passed\",\"launches\":[]},",
+      "anchor_sha256": "3a39b243d180da2ee8001667e7ffaf1a6148e958da4a118ac6c9e5ad7e6ad5b0",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/data/backend_receipts/cuda.json",
+      "line": 331,
+      "kind": "prose",
+      "anchor": "\"tests/test_ysu_wrf461_parity.py::test_a_positive_subnormal_br_takes_wrfs_stable_arm\": {\"outcome\":\"passed\",\"launches\":[[\"ysu_column\",\"d260481049e4\"],[\"ysu_column\",\"d260481049e4\"],[\"ysu_column\",\"bdd3668bdb19\"],[\"ysu_column\",\"bdd3668bdb19\"]]},",
+      "anchor_sha256": "f5b4eb986291598bde98dd8348c9562208c0413c7df5e45bc01f96065facdf44",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/data/backend_receipts/cuda.json",
+      "line": 335,
+      "kind": "prose",
+      "anchor": "\"tests/test_ysu_wrf461_parity.py::test_ftz_flushes_every_subnormal_tendency_wrf_wrote\": {\"outcome\":\"skipped\",\"launches\":[]},",
+      "anchor_sha256": "c7f69b5aa2ef7057b3817b0ec6fa663e227bb72c87940baa032a14b82fbc1632",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/data/backend_receipts/cuda.json",
+      "line": 337,
+      "kind": "prose",
+      "anchor": "\"tests/test_ysu_wrf461_parity.py::test_strict_build_writes_every_subnormal_tendency_wrf_wrote\": {\"outcome\":\"passed\",\"launches\":[[\"ysu_column\",\"d260481049e4\"],[\"ysu_column\",\"d260481049e4\"],[\"ysu_column\",\"bdd3668bdb19\"],[\"ysu_column\",\"bdd3668bdb19\"]]},",
+      "anchor_sha256": "7007d90597c58ec7f9ec834f107d2f60fe1a9d176d16d8c592d31e29a43728f9",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/data/backend_receipts/cuda.json",
+      "line": 340,
+      "kind": "prose",
+      "anchor": "\"tests/test_ysu_wrf461_parity.py::test_ysu_is_bitwise_wrf_outside_the_flushed_subnormal_lanes\": {\"outcome\":\"passed\",\"launches\":[[\"ysu_column\",\"d260481049e4\"],[\"ysu_column\",\"d260481049e4\"],[\"ysu_column\",\"bdd3668bdb19\"],[\"ysu_column\",\"bdd3668bdb19\"]]},",
+      "anchor_sha256": "8381ad33448c61c4b99359788fb35da6464eae8fb8b25b1a44f7d546471aeb4a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/data/backend_receipts/mlx.json",
+      "line": 105,
+      "kind": "prose",
+      "anchor": "\"tests/test_morrison_wrf461_parity.py::test_fixture_spans_phases_thresholds_signed_zero_and_subnormals\": {\"outcome\":\"passed\",\"launches\":[]},",
+      "anchor_sha256": "b7abb5be3f548d001b15d29edd478e5ed403af12a8eaf9ae4eaf997a28de1d10",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/data/backend_receipts/mlx.json",
+      "line": 130,
+      "kind": "prose",
+      "anchor": "\"tests/test_noah_wrf461_parity.py::test_case_18_takes_wrfs_snow_branch_on_a_subnormal_snow\": {\"outcome\":\"passed\",\"launches\":[[\"noah_column\",\"41a36ba0d32a\"]]},",
+      "anchor_sha256": "9d09988542b4ca32b98b8ad0fab181fa750250730c5c2851ccddd365421c478a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/data/backend_receipts/mlx.json",
+      "line": 237,
+      "kind": "prose",
+      "anchor": "\"tests/test_shinhong_wrf461_parity.py::test_shinhong_cuda_ftz_flushes_every_subnormal_tendency_wrf_wrote\": {\"outcome\":\"passed\",\"launches\":[]},",
+      "anchor_sha256": "8999c3e6457c420b1353d9323d05c8a2da9be19849822ee25d842ea0b6cbfc7b",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/data/backend_receipts/mlx.json",
+      "line": 310,
+      "kind": "prose",
+      "anchor": "\"tests/test_wsm6_wrf461_column_exact.py::test_default_build_is_wrf461_outside_the_subnormal_columns\": {\"outcome\":\"passed\",\"launches\":[]},",
+      "anchor_sha256": "3a39b243d180da2ee8001667e7ffaf1a6148e958da4a118ac6c9e5ad7e6ad5b0",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/data/backend_receipts/mlx.json",
+      "line": 331,
+      "kind": "prose",
+      "anchor": "\"tests/test_ysu_wrf461_parity.py::test_a_positive_subnormal_br_takes_wrfs_stable_arm\": {\"outcome\":\"passed\",\"launches\":[[\"ysu_column\",\"d260481049e4\"],[\"ysu_column\",\"bdd3668bdb19\"]]},",
+      "anchor_sha256": "8ef620f8d92876fcc409ca06942c1fa88a5f3e186a270369bb317c7364b67387",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/data/backend_receipts/mlx.json",
+      "line": 335,
+      "kind": "prose",
+      "anchor": "\"tests/test_ysu_wrf461_parity.py::test_ftz_flushes_every_subnormal_tendency_wrf_wrote\": {\"outcome\":\"skipped\",\"launches\":[]},",
+      "anchor_sha256": "c7f69b5aa2ef7057b3817b0ec6fa663e227bb72c87940baa032a14b82fbc1632",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/data/backend_receipts/mlx.json",
+      "line": 337,
+      "kind": "prose",
+      "anchor": "\"tests/test_ysu_wrf461_parity.py::test_strict_build_writes_every_subnormal_tendency_wrf_wrote\": {\"outcome\":\"passed\",\"launches\":[[\"ysu_column\",\"d260481049e4\"],[\"ysu_column\",\"bdd3668bdb19\"]]},",
+      "anchor_sha256": "0f1388d91782e49be17e5b21bd469f1b1f9254b04a28d4cffa47d394e4a15ec5",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/data/backend_receipts/mlx.json",
+      "line": 340,
+      "kind": "prose",
+      "anchor": "\"tests/test_ysu_wrf461_parity.py::test_ysu_is_bitwise_wrf_outside_the_flushed_subnormal_lanes\": {\"outcome\":\"passed\",\"launches\":[[\"ysu_column\",\"d260481049e4\"],[\"ysu_column\",\"bdd3668bdb19\"]]},",
+      "anchor_sha256": "d5910f6762304fe4da87bdab449f73360d655e1dbbc667a43dee3949378d5420",
       "route": null,
       "mechanism": null,
       "asserted_token": null,
@@ -15968,6 +16155,61 @@
       "attribution": "unattributed"
     },
     {
+      "file": "tests/test_metal_hex_translation.py",
+      "line": 9,
+      "kind": "prose",
+      "anchor": "NaN-ordered selects (``setp.lt.f32 p; selp.f32``) without ``.ftz``,",
+      "anchor_sha256": "7eab2692aec7c3cb4087fc0ba38db70dd78be8886bc25f7996c2b6db35a06e7c",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/test_metal_hex_translation.py",
+      "line": 10,
+      "kind": "prose",
+      "anchor": "which keep subnormals, signed zeros and NaN payloads.",
+      "anchor_sha256": "50f97645fd04cfa2e7707d9471b01362101a3572a43ff2182616d3d51419aa8c",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/test_metal_hex_translation.py",
+      "line": 144,
+      "kind": "prose",
+      "anchor": "def test_ptx_bit_operations_keep_subnormals_zeros_and_payloads(cp):",
+      "anchor_sha256": "0c86354776f899cd45331c3eb9f0ff3d70adaff47019ea9c9be5fba70b917b46",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/test_metal_hex_translation.py",
+      "line": 145,
+      "kind": "prose",
+      "anchor": "sub = np.float32(1e-40)                         # a binary32 subnormal",
+      "anchor_sha256": "5436549bf3886dea323e2287db6b1ba17fc312c400c72d9e6a8c5f63c5212680",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/test_metal_hex_translation.py",
+      "line": 156,
+      "kind": "prose",
+      "anchor": "lo = np.where(a < b, a, b)                  # NumPy compares subnormals exactly",
+      "anchor_sha256": "bc5ec884f101b7b35719fb2e42bad79ed7a997513f73e82585b77714cf7e2c98",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
       "file": "tests/test_metal_translation_gaps.py",
       "line": 12,
       "kind": "prose",
@@ -21154,6 +21396,28 @@
       "kind": "prose",
       "anchor": "assert module_options(\"mynn_surface\") == (\"-std=c++17\", \"--fmad=false\", \"--ftz=false\")",
       "anchor_sha256": "73b6585c933fad7c305bacd84f772b62d9ef8d98ff0a92762bc80dcb1c4c2800",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/test_strict_float32_power.py",
+      "line": 14,
+      "kind": "prose",
+      "anchor": "subnormal and negative bases, and IEEE special cases).",
+      "anchor_sha256": "f7dd4fdb6c244990a290df79cdde51a016033ca07d334dca7bedb81a5043f092",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/test_strict_float32_power.py",
+      "line": 89,
+      "kind": "prose",
+      "anchor": "\"\"\"Rows of CuPy's powf words, subnormal and special cases among them.\"\"\"",
+      "anchor_sha256": "f43a8c27654f46705077a59c45ff50de5ebebb3b3c808ec6ce46f93a4d64dbcb",
       "route": null,
       "mechanism": null,
       "asserted_token": null,
@@ -33734,7 +33998,7 @@
     },
     {
       "file": "tools/metal_translation_census.py",
-      "line": 23,
+      "line": 31,
       "kind": "prose",
       "anchor": "is fixed first.  ``--retain`` translates with subnormal retention (``f32s``)",
       "anchor_sha256": "6746d3fbc5f256e3412d730eed551718f5848e017ce865355d668e8253e02d74",
@@ -41302,7 +41566,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 247,
+      "line": 253,
       "kind": "prose",
       "anchor": "_SUBNORMAL_KERNELS: dict = {}",
       "anchor_sha256": "a52ccbed91691f80f17e3058a1fe98466f823e158ac784968051f214c40bf31e",
@@ -41313,7 +41577,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 250,
+      "line": 256,
       "kind": "prose",
       "anchor": "def _keeps_subnormals() -> bool:",
       "anchor_sha256": "79a90ae29e2d4def4dfe467674c3ae1adbfb619c944fc855578f9cba06191075",
@@ -41324,7 +41588,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 262,
+      "line": 268,
       "kind": "prose",
       "anchor": "def _subnormal_arith(np_name, a, b):",
       "anchor_sha256": "06202aafff6ab27a0bf6d4e9be09bea949eb921408fcc8bb3514cab3e2d461df",
@@ -41335,7 +41599,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 264,
+      "line": 270,
       "kind": "prose",
       "anchor": "if np_name in _SUBNORMAL_ARITH:",
       "anchor_sha256": "d483f4c64b67846cd183014f2bcdc753f17f36360728e58224f6a74dcfc88c33",
@@ -41346,7 +41610,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 265,
+      "line": 271,
       "kind": "prose",
       "anchor": "key, out, body = _SUBNORMAL_ARITH[np_name], \"float32 z\", f\"z = x {_SUBNORMAL_ARITH[np_name]} y\"",
       "anchor_sha256": "e68e347b3193a8a0c45e6ec7ae862840b425bb84c4434633d04b075cf203564a",
@@ -41357,7 +41621,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 266,
+      "line": 272,
       "kind": "prose",
       "anchor": "elif np_name in _SUBNORMAL_EXPR:",
       "anchor_sha256": "4bc5965e314234e1b1adfa0b29e30358a678b11919f1cb23beaa3df99127d2c8",
@@ -41368,7 +41632,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 267,
+      "line": 273,
       "kind": "prose",
       "anchor": "key, out, body = np_name, \"float32 z\", _SUBNORMAL_EXPR[np_name]",
       "anchor_sha256": "afa450915969ff30f2bb19502dda5e9f9ac8c8378661ac9aaf2e8c7c6c716b99",
@@ -41379,7 +41643,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 269,
+      "line": 277,
       "kind": "prose",
       "anchor": "key, out, body = np_name, \"bool z\", f\"z = x {_SUBNORMAL_COMPARE[np_name]} y\"",
       "anchor_sha256": "5764164d1fc06eea1874484d2f52e16485aa9addc85a8ccf721c9303c5aa36ea",
@@ -41390,7 +41654,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 270,
+      "line": 278,
       "kind": "prose",
       "anchor": "k = _SUBNORMAL_KERNELS.get(key)",
       "anchor_sha256": "e440ca680d7bcc6842819faee4a4dc15579216a7ec64a41ee0f32c563ec00a71",
@@ -41401,7 +41665,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 272,
+      "line": 284,
       "kind": "prose",
       "anchor": "k = _SUBNORMAL_KERNELS[key] = ElementwiseKernel(",
       "anchor_sha256": "89e663ae5cb590f96d92847a797fba1ce0570987645aa77d460aeb9be9aff5db",
@@ -41412,7 +41676,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 294,
+      "line": 308,
       "kind": "prose",
       "anchor": "if (not involves_f64 and _keeps_subnormals()",
       "anchor_sha256": "32bd6cd1e11c0767c0558428190e8d382b3ab2833fde4c522bba729033de1612",
@@ -41423,10 +41687,10 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 295,
+      "line": 309,
       "kind": "prose",
-      "anchor": "and ((np_name in _SUBNORMAL_ARITH or np_name in _SUBNORMAL_EXPR)",
-      "anchor_sha256": "ee17c31c1ec38668b04f9927484a711db6e328c2de76a0aa122e78e8ac690439",
+      "anchor": "and ((np_name in _SUBNORMAL_ARITH or np_name in _SUBNORMAL_EXPR",
+      "anchor_sha256": "50dd5f1d69c9190dbb48d4ab7e4e1cc90d35851dba62df615df0513fee6b6413",
       "route": null,
       "mechanism": null,
       "asserted_token": null,
@@ -41434,7 +41698,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 297,
+      "line": 312,
       "kind": "prose",
       "anchor": "or np_name in _SUBNORMAL_COMPARE and _operands_f32(hints))):",
       "anchor_sha256": "fc24c687633e78dd061f9aaf32922e7fe7f8efe894e8e61553e9a7ad384a6e0e",
@@ -41445,7 +41709,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 298,
+      "line": 313,
       "kind": "prose",
       "anchor": "result = _subnormal_arith(np_name, args[0], args[1])",
       "anchor_sha256": "341ba2e9af3e5e2c17dc31a4d3d6c7a557027554e53ab8ef65655175fe0b7542",
@@ -41456,7 +41720,7 @@
     },
     {
       "file": "woof/backend/facade/cuda.py",
-      "line": 616,
+      "line": 647,
       "kind": "prose",
       "anchor": "woof.cuda_subnormals) install; the facade never runs NVRTC.\"\"\"",
       "anchor_sha256": "63fbbb37d065cba3aa8157c966639b3b132e9ea6e5b4a9610ddac382c0d4c856",
@@ -42171,7 +42435,7 @@
     },
     {
       "file": "woof/backend/metal/f32s.h",
-      "line": 229,
+      "line": 230,
       "kind": "prose",
       "anchor": "// on the bits, ordered as sign-magnitude integers: exact for subnormals",
       "anchor_sha256": "e0f901391d4eff0989c3238fe42a8dae6b3acbb1c0995fe782d6a0a3d8722e88",
@@ -42182,7 +42446,7 @@
     },
     {
       "file": "woof/backend/metal/f32s.h",
-      "line": 264,
+      "line": 265,
       "kind": "prose",
       "anchor": "// Integral rounding: a subnormal rounds to a signed zero or to +-1.",
       "anchor_sha256": "508a024a3f73446b7994cc90227e167748070950b46079e2a143cee1afa4c90c",
@@ -42193,7 +42457,7 @@
     },
     {
       "file": "woof/backend/metal/f32s.h",
-      "line": 334,
+      "line": 342,
       "kind": "prose",
       "anchor": "// Atomics: CUDA's atom.add.f32 flushes subnormal inputs and results even in",
       "anchor_sha256": "ba849cc3680a817a72527efc477c4e1de1dedc2a9d25d76eb98d930550d67632",
@@ -42204,7 +42468,7 @@
     },
     {
       "file": "woof/backend/metal/f32s.h",
-      "line": 335,
+      "line": 343,
       "kind": "prose",
       "anchor": "// a --ftz=false unit (PTX ISA), as Metal's hardware float atomics do, so",
       "anchor_sha256": "33632a7057cc1783e586e8a0fc150c47ec19614da35aae559142febdc84a4897",
@@ -42215,7 +42479,7 @@
     },
     {
       "file": "woof/backend/metal/f32s.h",
-      "line": 343,
+      "line": 351,
       "kind": "prose",
       "anchor": "// PTX arithmetic without .ftz (add/sub/mul/div.rn.f32, min/max.f32): IEEE",
       "anchor_sha256": "e163d89ad8ef3a6aafbc2d0efd2901feb1f8ce5d2b30f55588fc7e7e3d96bda5",
@@ -42226,7 +42490,7 @@
     },
     {
       "file": "woof/backend/metal/f32s.h",
-      "line": 344,
+      "line": 352,
       "kind": "prose",
       "anchor": "// binary32 with its subnormals in any unit, flushing or not -- CUDA executes",
       "anchor_sha256": "512e3b56571264d466cdeef5db92decc1b572c2d62a4f204d6a317b006e9b564",
@@ -42237,10 +42501,21 @@
     },
     {
       "file": "woof/backend/metal/f32s.h",
-      "line": 345,
+      "line": 353,
       "kind": "prose",
       "anchor": "// these unflushed whatever -ftz says, and woof's kernels use them to pin a",
       "anchor_sha256": "3ba8001c742832f8460df34aa282b67e8f24b9d715bc1bccd084d6057d00ff66",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "woof/backend/metal/f32s.h",
+      "line": 367,
+      "kind": "prose",
+      "anchor": "// setp.<cmp>.f32 without .ftz: an ordered comparison that reads a subnormal",
+      "anchor_sha256": "ffe29dbbe9f1cb125dcad78019598c5ef1f960c57425396a414804ac48bb3388",
       "route": null,
       "mechanism": null,
       "asserted_token": null,
@@ -42369,7 +42644,7 @@
     },
     {
       "file": "woof/backend/metal/loader.py",
-      "line": 369,
+      "line": 413,
       "kind": "prose",
       "anchor": "def retains_subnormals(name: str, source: str, options) -> bool:",
       "anchor_sha256": "765682f6e2b58d9264cf970d601a22533c724756b18065c68d560b8e4a4c6577",
@@ -42380,7 +42655,7 @@
     },
     {
       "file": "woof/backend/metal/loader.py",
-      "line": 370,
+      "line": 414,
       "kind": "prose",
       "anchor": "\"\"\"Whether CUDA keeps this unit's binary32 subnormals (--ftz=false):",
       "anchor_sha256": "e3537b2d79a4c272f7539f9cee09ca30bfaa6e345501610d75e43b8923fb5452",
@@ -42391,7 +42666,7 @@
     },
     {
       "file": "woof/backend/metal/loader.py",
-      "line": 374,
+      "line": 418,
       "kind": "prose",
       "anchor": "from woof.cuda_subnormals import MARKER",
       "anchor_sha256": "260b1a19df889f546a544188abceb44bab9497b2a37dd1ba163f03581a8bb61a",
@@ -42402,7 +42677,7 @@
     },
     {
       "file": "woof/backend/metal/loader.py",
-      "line": 376,
+      "line": 420,
       "kind": "prose",
       "anchor": "if any(o in (\"--ftz=false\", \"-ftz=false\") for o in effective):",
       "anchor_sha256": "5b789dff8e16411682a2bfa81ad04c5560628007702b392127314302560e3df2",
@@ -42413,7 +42688,7 @@
     },
     {
       "file": "woof/backend/metal/loader.py",
-      "line": 381,
+      "line": 425,
       "kind": "prose",
       "anchor": "sets = (kernels._NO_FTZ_MODULES, kernels._SOLAR_NO_FTZ_MODULES,",
       "anchor_sha256": "723647390b1f1b626bb4cf5dba5a9016d0d26580426477e0397f552d49ec9655",
@@ -42424,7 +42699,7 @@
     },
     {
       "file": "woof/backend/metal/loader.py",
-      "line": 382,
+      "line": 426,
       "kind": "prose",
       "anchor": "kernels._URBAN_NO_FTZ_MODULES, kernels._UNFLUSHED_MODULES)",
       "anchor_sha256": "e96a829e9f0ac79a97eb3c0a3682e2752d3356a6b6f6d6d1340c930b600f065d",
@@ -42435,7 +42710,7 @@
     },
     {
       "file": "woof/backend/metal/loader.py",
-      "line": 389,
+      "line": 433,
       "kind": "prose",
       "anchor": "return translate(source, unit=unit, contract=contract, retain_subnormals=retain, defines=defines,",
       "anchor_sha256": "a9cd8b81457e88f1c6f4cc17be294d98c23e8c353b27c62c6a056d12a62d743a",
@@ -42446,10 +42721,10 @@
     },
     {
       "file": "woof/backend/metal/loader.py",
-      "line": 398,
+      "line": 442,
       "kind": "prose",
-      "anchor": "return _translated(source, name, contracts(options), retains_subnormals(name, source, options),",
-      "anchor_sha256": "64e946e593150d86a59e1cefa553cf62c294e457d7eef4e908e34bac93a963dc",
+      "anchor": "return _translated(source, name, contracts(options, source), retains_subnormals(name, source, options),",
+      "anchor_sha256": "be616a59847e24c3f95e1e8bd0695d4cf19355a771f3fca561893f875c93bc54",
       "route": null,
       "mechanism": null,
       "asserted_token": null,
@@ -42688,7 +42963,51 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 228,
+      "line": 231,
+      "kind": "prose",
+      "anchor": "``.b32``/``.b64``, ``setp.<cmp>.f32|f64`` (no ``.ftz``) and ``selp``.",
+      "anchor_sha256": "a88c93e1ed1666f77822834f03aa81c6cf593451b82a362c20ced1283676b360",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "woof/backend/translate/__init__.py",
+      "line": 234,
+      "kind": "prose",
+      "anchor": "its bit pattern, so a move or a select keeps a subnormal, a signed zero",
+      "anchor_sha256": "67e6eaef47095c6d2cf65f4f7a81cded5af5de64ce6de0782e416dd110c77f4d",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "woof/backend/translate/__init__.py",
+      "line": 236,
+      "kind": "prose",
+      "anchor": "``__woof_ieee_<cmp>`` (f32s.h), which reads a subnormal as itself, as",
+      "anchor_sha256": "3577bcdae47cc810bae111bcf4c7918bb3c10de39c8037f3f19f45cedeab2ff7",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "woof/backend/translate/__init__.py",
+      "line": 237,
+      "kind": "prose",
+      "anchor": "``setp`` without ``.ftz`` does; Metal's own compare reads it as zero.",
+      "anchor_sha256": "a30824c6b411dd9b1ebe6503454d2778543a9adf2b7b41d64c0512e55326fa94",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "woof/backend/translate/__init__.py",
+      "line": 358,
       "kind": "prose",
       "anchor": "# No .ftz: CUDA keeps binary32 subnormals here whatever -ftz says,",
       "anchor_sha256": "91f4045fd7a2afa133829b54ed4f15004b7bd53b7633053f28ac412a40c4d38b",
@@ -42699,7 +43018,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 401,
+      "line": 542,
       "kind": "prose",
       "anchor": "e = max(e, -126)                      # subnormal spacing below 2^-126",
       "anchor_sha256": "a453e5fba9c9f7a5150acd7588fcf33add574b7b8b11931226544e141c3f9a12",
@@ -42710,7 +43029,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 449,
+      "line": 590,
       "kind": "prose",
       "anchor": "def __init__(self, text: str, tu, *, unit: str, retain_subnormals: bool = False, macros=None):",
       "anchor_sha256": "75d57cfe056c009b719d5f81a797d1855217387061b49b6d3f14423a4c8a4fe0",
@@ -42721,7 +43040,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 456,
+      "line": 597,
       "kind": "prose",
       "anchor": "self.retain = retain_subnormals",
       "anchor_sha256": "1843f38d95fb3ad1274f904f51a50971864fe55e1776cb34443dd58117242fc4",
@@ -42732,7 +43051,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 721,
+      "line": 868,
       "kind": "prose",
       "anchor": "to exact words.  (In a subnormal-retaining unit binary32 constants",
       "anchor_sha256": "a996d253054b57641107eaed548e14d0e5b98a24214a28dcb843335c81847436",
@@ -42743,7 +43062,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 2417,
+      "line": 2686,
       "kind": "prose",
       "anchor": "\"\"\"``-x`` on a binary32 value in a -ftz=true unit: CUDA's neg.ftz",
       "anchor_sha256": "6a004e80fe164bd982a267040947baea0cea8d8d482c7071cd4c9b721bb9d331",
@@ -42754,7 +43073,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 2418,
+      "line": 2687,
       "kind": "prose",
       "anchor": "flushes a subnormal x to -0, Metal's negation flips the bit and keeps",
       "anchor_sha256": "6e6b096bcb33a4faa1f0627210c7289959330dd61379f474a383b199a25423d9",
@@ -42765,7 +43084,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 2487,
+      "line": 2761,
       "kind": "prose",
       "anchor": "\"\"\"In a subnormal-retaining unit ``float`` is ``f32s``, but a float",
       "anchor_sha256": "b20dd5541efeb12fafa00081793a92b06bf52512e3e8dbff7a73d4e220cb293b",
@@ -42776,7 +43095,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 2734,
+      "line": 3008,
       "kind": "prose",
       "anchor": "\"\"\"``retain_subnormals``: float vector components stay ``float`` (a",
       "anchor_sha256": "425d6634b3426123a07cb7f50d6a03668330502bf2e5cd1b8d755c4db57e52d1",
@@ -42787,7 +43106,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 2739,
+      "line": 3013,
       "kind": "prose",
       "anchor": "keeps subnormals, as CUDA's --ftz=false does;",
       "anchor_sha256": "7b3cc7a06f756827321c22a31bb98b2962ad9d4c3eed6bace57828bcba4847a0",
@@ -42798,7 +43117,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 2890,
+      "line": 3164,
       "kind": "prose",
       "anchor": "def prelude(*, contract: bool, retain_subnormals: bool = False, ieee_helpers: bool = False) -> str:",
       "anchor_sha256": "cd24ac84ce39dad8ca7cd11b5c16fb002ae9efedc571482484e6e5fb8101ed6f",
@@ -42809,7 +43128,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 2891,
+      "line": 3165,
       "kind": "prose",
       "anchor": "\"\"\"``retain_subnormals``: the unit is --ftz=false (float is f32s);",
       "anchor_sha256": "5db4f8ba7ba2cfd0444abcd53d8613c6444d3a2d7e866579bc3dd34ef6a25ae1",
@@ -42820,7 +43139,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 2892,
+      "line": 3166,
       "kind": "prose",
       "anchor": "``ieee_helpers``: it uses the subnormal-keeping ops of non-.ftz PTX,",
       "anchor_sha256": "57d2b149ff107b2be641232518c75d1844af0937289d0f3731f77e9169ddbb41",
@@ -42831,7 +43150,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 2896,
+      "line": 3170,
       "kind": "prose",
       "anchor": "if retain_subnormals:",
       "anchor_sha256": "8747498c0775c864e7c0df98116ca012f99107565ff4d5a71c1c75fc64505c17",
@@ -42842,7 +43161,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 2897,
+      "line": 3171,
       "kind": "prose",
       "anchor": "text = \"#define WOOF_RETAIN_SUBNORMALS 1\\n\" + text",
       "anchor_sha256": "4b3c45afa52c0b892352effc29d7f8635ff93fbb80865a365900bd5125d28078",
@@ -42853,7 +43172,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 2898,
+      "line": 3172,
       "kind": "prose",
       "anchor": "if retain_subnormals or ieee_helpers:",
       "anchor_sha256": "4437f4782795f6038d9c103293cd2b9cef1a91888afa6339960c2a105df25069",
@@ -42864,7 +43183,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 2973,
+      "line": 3249,
       "kind": "prose",
       "anchor": "\"\"\"``retain_subnormals`` with inheritance: ``f32s`` converts to the",
       "anchor_sha256": "12b6d2626363800c88805ed13cbec521d5d3b83fca81a41a14a441a1b9c5a075",
@@ -42875,7 +43194,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 3201,
+      "line": 3477,
       "kind": "prose",
       "anchor": "retain_subnormals: bool = False, defines=(), include_dirs=()) -> TranslatedUnit:",
       "anchor_sha256": "47fd7ebc528620cc2464226557940435e6b31ff69d0a6823a16e68815c3e9e9c",
@@ -42886,7 +43205,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 3204,
+      "line": 3480,
       "kind": "prose",
       "anchor": "``retain_subnormals``: the unit's ``float`` is ``f32s`` (gradual",
       "anchor_sha256": "462887cb8437e000a5a26f34dc6f0238ecf1081bee9e8728a5ed4a8f7bd4c853",
@@ -42897,7 +43216,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 3206,
+      "line": 3482,
       "kind": "prose",
       "anchor": "f32s.h) -- CUDA's --ftz=false.",
       "anchor_sha256": "9b45fddd4b1773c521d687ae9d3267b6cff3522013530e18c9d88932ca68cbff",
@@ -42908,7 +43227,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 3212,
+      "line": 3488,
       "kind": "prose",
       "anchor": "if retain_subnormals:",
       "anchor_sha256": "8747498c0775c864e7c0df98116ca012f99107565ff4d5a71c1c75fc64505c17",
@@ -42919,7 +43238,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 3216,
+      "line": 3492,
       "kind": "prose",
       "anchor": "result = _Rewriter(text, tu, unit=unit, retain_subnormals=retain_subnormals,",
       "anchor_sha256": "22ac765d2130695c1bc0cd1ff567ecfa927cca0ef9a3e1254530b4453c41e017",
@@ -42930,7 +43249,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 3218,
+      "line": 3494,
       "kind": "prose",
       "anchor": "result.msl = (prelude(contract=contract, retain_subnormals=retain_subnormals,",
       "anchor_sha256": "723e62201b59b0b79a02ae919fe3bdce0c3c3034cf88dcffde5e9b6d8854bdcb",
@@ -42941,10 +43260,76 @@
     },
     {
       "file": "woof/backend/translate/cuda_decls.h",
-      "line": 159,
+      "line": 164,
       "kind": "prose",
       "anchor": "// Inline PTX without .ftz, rewritten (rewrite_ptx_asm): IEEE binary32 with subnormals.",
       "anchor_sha256": "d3228d2b442fc8800196511a8a4640dd2ed999ab9b96c5b4f824ff044e772280",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "woof/backend/translate/cuda_powf.cuh",
+      "line": 6,
+      "kind": "prose",
+      "anchor": "// strict options woof/wrf_exact.py gives CuPy's kernels (--ftz=false,",
+      "anchor_sha256": "6fa61bfe5cb4149640aa9102927e2661d3761d460fea46e190f59bf33e0db524",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "woof/backend/translate/cuda_powf.cuh",
+      "line": 9,
+      "kind": "prose",
+      "anchor": "// rounded to nearest, with subnormals kept (float is f32s in this process).",
+      "anchor_sha256": "87d270bec2a3a0c0c97987031b981e3ca55b20709ffed5cfb7ae45d1416e4b79",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "woof/backend/translate/cuda_powf.cuh",
+      "line": 11,
+      "kind": "prose",
+      "anchor": "// One step is not transcribed: the PTX's rcp.approx.ftz.f32 (the MUFU",
+      "anchor_sha256": "d269b4d7339126b04130dd8bd23bf12131dee7404469b61b36ef61df265f2df1",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "woof/backend/translate/cuda_powf.cuh",
+      "line": 19,
+      "kind": "prose",
+      "anchor": "// pairs (subnormal, negative and integer-y cases among them) and for 234",
+      "anchor_sha256": "f91de53e415a0d61f48ff30d16432ba1bf14f25cf7bb58a5a78ee03674a8c456",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "woof/backend/translate/cuda_powf.cuh",
+      "line": 42,
+      "kind": "prose",
+      "anchor": "const float r = __frcp_rn(__fadd_rn(m, 1.0f));  // CUDA: rcp.approx.ftz.f32",
+      "anchor_sha256": "24b8dbcd22826486edbac71aa01d3a822890c5797cff8355856a0226d3af7196",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "woof/backend/translate/include/cupy/complex.cuh",
+      "line": 129,
+      "kind": "prose",
+      "anchor": "// arithmetic.h's scalar product): in a unit that keeps subnormals float",
+      "anchor_sha256": "f341e1f1d4546a63fa3dba7e3edc313b5e9815c9a2aaf0ad81380a79734b723b",
       "route": null,
       "mechanism": null,
       "asserted_token": null,
@@ -50007,6 +50392,105 @@
       "kind": "prose",
       "anchor": "order, never fused, and subnormals are kept.",
       "anchor_sha256": "25f9b0462592750aa72313e8c53d2b6401ae7eb815ab0b9590171c01c7f06eba",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "woof/verify/backend_parity_ledger.json",
+      "line": 73,
+      "kind": "prose",
+      "anchor": "\"tests/test_noah_wrf461_parity.py::test_case_18_takes_wrfs_snow_branch_on_a_subnormal_snow\": \"nan-payload\",",
+      "anchor_sha256": "43834525038d5002937c5f6523f583a57fc6f1d68a5cec916ec8a0221dde6ce4",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "woof/verify/backend_parity_ledger.json",
+      "line": 905,
+      "kind": "prose",
+      "anchor": "\"tests/test_morrison_wrf461_parity.py::test_fixture_spans_phases_thresholds_signed_zero_and_subnormals\": {",
+      "anchor_sha256": "6b7deb8e07208ea0e61f87c0d2ef066ae4103f429f581eabebd7ae4750663e58",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "woof/verify/backend_parity_ledger.json",
+      "line": 1080,
+      "kind": "prose",
+      "anchor": "\"tests/test_noah_wrf461_parity.py::test_case_18_takes_wrfs_snow_branch_on_a_subnormal_snow\": {",
+      "anchor_sha256": "6210368604643c0fb464cb11edc2bebd29ecea7a9f2404f0ca18349a75549c50",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "woof/verify/backend_parity_ledger.json",
+      "line": 1959,
+      "kind": "prose",
+      "anchor": "\"tests/test_shinhong_wrf461_parity.py::test_shinhong_cuda_ftz_flushes_every_subnormal_tendency_wrf_wrote\": {",
+      "anchor_sha256": "cf4fd1c3e64893ff4d170712b4cc1ef2bade1218ff0b06dab5803143b24c34f3",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "woof/verify/backend_parity_ledger.json",
+      "line": 2613,
+      "kind": "prose",
+      "anchor": "\"tests/test_wsm6_wrf461_column_exact.py::test_default_build_is_wrf461_outside_the_subnormal_columns\": {",
+      "anchor_sha256": "90bf14ecd2667f7991fc0fd05bfd9e4a1dc74829f59d70e7a91c5aace4eebc19",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "woof/verify/backend_parity_ledger.json",
+      "line": 2786,
+      "kind": "prose",
+      "anchor": "\"tests/test_ysu_wrf461_parity.py::test_a_positive_subnormal_br_takes_wrfs_stable_arm\": {",
+      "anchor_sha256": "2b326513162b8bb7cf094ccee9fcdc8956dde46ae7b038251bc52c9a5855ef40",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "woof/verify/backend_parity_ledger.json",
+      "line": 2814,
+      "kind": "prose",
+      "anchor": "\"tests/test_ysu_wrf461_parity.py::test_ftz_flushes_every_subnormal_tendency_wrf_wrote\": {",
+      "anchor_sha256": "1cc587dc3573d7714c7eb88be386c60c476455fc28113ea715670c2c2ca1c9ec",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "woof/verify/backend_parity_ledger.json",
+      "line": 2828,
+      "kind": "prose",
+      "anchor": "\"tests/test_ysu_wrf461_parity.py::test_strict_build_writes_every_subnormal_tendency_wrf_wrote\": {",
+      "anchor_sha256": "3efd2748e3293bb591490401649af3ec7525336093370ce467ebc47105541a01",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "woof/verify/backend_parity_ledger.json",
+      "line": 2849,
+      "kind": "prose",
+      "anchor": "\"tests/test_ysu_wrf461_parity.py::test_ysu_is_bitwise_wrf_outside_the_flushed_subnormal_lanes\": {",
+      "anchor_sha256": "4fe895e0dee5e9c54f0cda4bef8e3082081d27bfd49fd19279737784b2051a7e",
       "route": null,
       "mechanism": null,
       "asserted_token": null,

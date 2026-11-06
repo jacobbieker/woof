@@ -71,6 +71,8 @@ PARSE_DEFINES = (
     f'-D__constant__=__attribute__((annotate("{_CONSTANT}")))',
     "-D__device__=", "-D__host__=", "-D__forceinline__=inline",
     "-D__noinline__=__attribute__((noinline))", "-D__restrict__=", "-D__launch_bounds__(...)=",
+    # register-count hints have no Metal meaning; __ldg is a plain load
+    "-D__maxnreg__(...)=", "-D__ldg(p)=(*(p))",
     "-D__CUDACC__=1", "-D__CUDACC_RTC__=1", "-D__WOOF_METAL__=1", "-D__align__(n)=alignas(n)",
     # A by-value kernel parameter is constant data in Metal already:
     # __grid_constant__ is moot.
@@ -202,14 +204,141 @@ def preprocess(source: str, defines=(), include_dirs=()) -> str:
 
 # ---------------------------------------------------------------- inline PTX
 
+#: An operand expression: parentheses nest three deep
+#: (``"l"((unsigned long long)__double_as_longlong(a))``).
+_ASM_EXPR = r'(?:[^()]|\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\))*'
 _ASM = re.compile(
     r'\basm\s*(?:volatile\s*)?\(\s*((?:"(?:[^"\\]|\\.)*"\s*)+)'
-    r':\s*"=([a-z])"\s*\(([^()]*)\)\s*'
-    r':\s*((?:"[a-z]"\s*\([^()]*\)\s*,?\s*)+)\)\s*;')
-_ASM_IN = re.compile(r'"[a-z]"\s*\(([^()]*)\)')
+    r':\s*"=([a-z])"\s*\((' + _ASM_EXPR + r')\)\s*'
+    r':\s*((?:"[a-z]"\s*\(' + _ASM_EXPR + r'\)\s*,?\s*)+)\)\s*;')
+_ASM_IN = re.compile(r'"([a-z])"\s*\((' + _ASM_EXPR + r')\)')
 _PTX_CMP = {"eq": "(({a}) == ({b}))", "ne": "(({a}) < ({b}) || ({a}) > ({b}))",
             "lt": "(({a}) < ({b}))", "le": "(({a}) <= ({b}))",
             "gt": "(({a}) > ({b}))", "ge": "(({a}) >= ({b}))"}
+
+
+#: Register widths of the asm operand constraints the bit translation reads.
+_PTX_BITS = {"f": 32, "r": 32, "d": 64, "l": 64}
+_PTX_WIDTH = {"pred": 1, "b32": 32, "u32": 32, "s32": 32, "f32": 32,
+              "b64": 64, "u64": 64, "s64": 64, "f64": 64}
+_PTX_BITOP = {"and": "&", "or": "|", "xor": "^"}
+
+
+def _ptx_bit_block(template: str, out_constraint: str, out: str, constraints, ins):
+    """Straight-line PTX on register bits -> a C++ block, or None.
+
+    Reads ``.reg`` declarations, ``mov``, ``and``/``or``/``xor`` on
+    ``.b32``/``.b64``, ``setp.<cmp>.f32|f64`` (no ``.ftz``) and ``selp``.
+    Every register is its bits (``unsigned int``, ``unsigned long long``;
+    a predicate is ``bool``), and an ``f``/``d`` operand enters and leaves by
+    its bit pattern, so a move or a select keeps a subnormal, a signed zero
+    and a NaN payload as the PTX does.  A binary32 comparison is
+    ``__woof_ieee_<cmp>`` (f32s.h), which reads a subnormal as itself, as
+    ``setp`` without ``.ftz`` does; Metal's own compare reads it as zero.
+    Breakage it prevents: the MPAS physics units' sign flips (``xor.b32
+    ..., 0x80000000``), bit moves and NaN-ordered min/max selects were
+    refused, so the hex lane's physics could not load on Metal."""
+    operands = [(out_constraint, out)] + list(zip(constraints, ins))
+    if any(c not in _PTX_BITS for c, _ in operands):
+        return None
+    regs: dict[str, int] = {}
+    decls, code = [], []
+
+    def name(reg):
+        return "__woof_ptx_" + reg
+
+    def ctype(width):
+        return {1: "bool", 32: "unsigned int", 64: "unsigned long long"}[width]
+
+    def value(tok, width):
+        m = re.fullmatch(r"%(\d+)", tok)
+        if m:
+            k = int(m.group(1))
+            if k == 0 or k >= len(operands) or _PTX_BITS[operands[k][0]] != width:
+                return None
+            c, e = operands[k]
+            return {"f": f"__float_as_uint({e})", "r": f"((unsigned int)({e}))",
+                    "d": f"((unsigned long long)__double_as_longlong({e}))",
+                    "l": f"((unsigned long long)({e}))"}[c]
+        m = re.fullmatch(r"%?([A-Za-z_]\w*)", tok)
+        if m:
+            return name(m.group(1)) if regs.get(m.group(1)) == width else None
+        m = re.fullmatch(r"0[fF]([0-9a-fA-F]{8})|0[dD]([0-9a-fA-F]{16})", tok)
+        if m:
+            digits = m.group(1) if width == 32 else m.group(2)
+            return None if digits is None else f"0x{digits}{'u' if width == 32 else 'ull'}"
+        m = re.fullmatch(r"0[xX][0-9a-fA-F]+|\d+", tok)
+        if m:
+            return f"{tok}{'u' if width == 32 else 'ull'}"
+        return None
+
+    def target(tok, width):
+        if tok == "%0":
+            if _PTX_BITS[out_constraint] != width:
+                return None
+            regs.setdefault("0", width)
+            return name("0")
+        m = re.fullmatch(r"%?([A-Za-z_]\w*)", tok)
+        return name(m.group(1)) if m and regs.get(m.group(1)) == width else None
+
+    def compare(cmp, s, t, width):
+        if width == 32:
+            return f"__woof_ieee_{cmp}(__uint_as_float({s}), __uint_as_float({t}))"
+        return _PTX_CMP[cmp].format(a=f"__longlong_as_double((long long)({s}))",
+                                    b=f"__longlong_as_double((long long)({t}))")
+
+    for instr in (s.strip() for s in template.replace("{", " ").replace("}", " ").split(";")):
+        if not instr:
+            continue
+        op, _, rest = instr.partition(" ")
+        args = [t.strip() for t in rest.split(",")] if rest.strip() else []
+        parts = op.split(".")
+        if op == ".reg":
+            kind, _, names = rest.strip().partition(" ")
+            if kind.lstrip(".") not in _PTX_WIDTH:
+                return None
+            for reg in names.split(","):
+                reg = reg.strip().lstrip("%")
+                if not re.fullmatch(r"[A-Za-z_]\w*", reg) or reg in regs:
+                    return None
+                regs[reg] = _PTX_WIDTH[kind.lstrip(".")]
+                decls.append(f"{ctype(regs[reg])} {name(reg)};")
+            continue
+        width = _PTX_WIDTH.get(parts[-1])
+        if width in (None, 1):
+            return None
+        if parts[0] == "mov" and len(parts) == 2 and len(args) == 2:
+            d, s = target(args[0], width), value(args[1], width)
+            if d is None or s is None:
+                return None
+            code.append(f"{d} = {s};")
+        elif parts[0] in ("and", "or", "xor") and len(parts) == 2 and len(args) == 3:
+            d, s, t = target(args[0], width), value(args[1], width), value(args[2], width)
+            if None in (d, s, t):
+                return None
+            code.append(f"{d} = {s} {_PTX_BITOP[parts[0]]} {t};")
+        elif (parts[0] == "setp" and len(parts) == 3 and parts[1] in _PTX_CMP
+              and parts[2] in ("f32", "f64") and len(args) == 3):
+            p = args[0].lstrip("%")
+            s, t = value(args[1], width), value(args[2], width)
+            if regs.get(p) != 1 or None in (s, t):
+                return None
+            code.append(f"{name(p)} = {compare(parts[1], s, t, width)};")
+        elif parts[0] == "selp" and len(parts) == 2 and len(args) == 4:
+            p = args[3].lstrip("%")
+            d, s, t = target(args[0], width), value(args[1], width), value(args[2], width)
+            if regs.get(p) != 1 or None in (d, s, t):
+                return None
+            code.append(f"{d} = {name(p)} ? {s} : {t};")
+        else:
+            return None
+    if regs.get("0") is None:
+        return None
+    result = name("0")
+    store = {"f": f"__uint_as_float({result})", "r": result,
+             "d": f"__longlong_as_double((long long){result})", "l": result}[out_constraint]
+    return ("{ " + " ".join([f"{ctype(regs['0'])} {result};", *decls, *code, f"{out} = {store};"])
+            + " }")
 
 
 def rewrite_ptx_asm(text: str, unit: str) -> str:
@@ -222,7 +351,8 @@ def rewrite_ptx_asm(text: str, unit: str) -> str:
         body = re.sub(r"\.reg\s+\.pred\s+%?\w+\s*;", "", template)
         body = " ".join(body.replace("{", " ").replace("}", " ").split())
         out = m.group(3).strip()
-        ins = [x.strip() for x in _ASM_IN.findall(m.group(4))]
+        constraints = [c for c, _ in _ASM_IN.findall(m.group(4))]
+        ins = [x.strip() for _, x in _ASM_IN.findall(m.group(4))]
         a = ins[0] if ins else None
         b = ins[1] if len(ins) > 1 else None
         # No .ftz: CUDA keeps binary32 subnormals here whatever -ftz says,
@@ -243,8 +373,13 @@ def rewrite_ptx_asm(text: str, unit: str) -> str:
             return f"{out} = __woof_ieee_max({a}, {b});"
         if re.fullmatch(r"cvt\.rn\.f32\.f64 %0, ?%1;", body):
             return f"{out} = __double2float_rn({a});"
+        block = _ptx_bit_block(template, m.group(2), out, constraints, ins)
+        if block is not None:
+            return block
         raise TranslationError(f"{unit}: inline PTX with no Metal translation: {body!r}")
     out = _ASM.sub(one, text)
+    # `asm("trap;")`: the prelude's __trap, as CUDA's own spelling.
+    out = re.sub(r'\basm\s*(?:volatile\s*)?\(\s*"\s*trap\s*;\s*"\s*\)\s*;', "__trap();", out)
     # `asm volatile("" ::: "memory")`: a compiler barrier (no instruction).
     # Values cross it through memory: a fence on this thread's device
     # memory, the same promise to Metal's compiler (acoustic_fusion's
@@ -279,6 +414,12 @@ def parse(text: str):
 
 
 # ---------------------------------------------------------------- edits
+
+#: The rank of a goto wrapper's closing text.  A wrapper that closes where
+#: another opens (a label right after the statement a region starts at)
+#: closes first; inner closings still precede outer ones (rank + 1).
+_GOTO_CLOSE = -200_000_000
+
 
 class Edits:
     """Byte-range edits on one text, applied in one pass.
@@ -500,6 +641,9 @@ class _Rewriter:
         self._kernel_cursors = self._kernels(top)
         self.generic_structs = self._space_generic_structs(top)
         self.spaces = SpaceAnalysis(self)
+        # a field given constant data anywhere (the probe saw every function)
+        # is constant before the first call passes it on
+        self.spaces.field_spaces.update(self._constant_fields)
         self.spaces.collect(top)
         self.spaces.run(self._kernel_cursors)
         self.eliminate_gotos()
@@ -535,6 +679,7 @@ class _Rewriter:
         templated on the space of their data (generic_struct)."""
         from woof.backend.translate.spaces import SpaceAnalysis
         self.generic_structs = set()
+        self._constant_fields = {}
         self._probing_fields = True
         try:
             probe = self.spaces = SpaceAnalysis(self)
@@ -545,6 +690,8 @@ class _Rewriter:
         finally:
             self._probing_fields = False
             self.spaces = None
+        self._constant_fields = {key: set(spaces) for key, spaces in probe.field_spaces.items()
+                                 if spaces == {"constant"}}
         return {owner for (owner, _field), spaces in probe.field_spaces.items() if len(spaces) > 1}
 
     def visit_top(self, cursor):
@@ -933,6 +1080,7 @@ class _Rewriter:
             if target is None:
                 self.refuse(g, "goto whose label clang could not resolve")
             by_label.setdefault((target.spelling, self.span(target)), []).append(g)
+        starts, entries = self._nested_goto_starts(by_label, labels, parent, chain)
         regions, wrappers = [], []
         for (name, (ls, le)), jumps in by_label.items():
             label = next(l for l in labels.get(name, []) if self.span(l) == (ls, le))
@@ -962,15 +1110,32 @@ class _Rewriter:
                         break
                     if a.kind.name in self._LOOPS:
                         inner_loops.append(a)
-            region = stmts[first:j]
-            rs, re_ = self.span(region[0])[0], ls
+            first = min(first, starts.get((name, (ls, le)), first))
+            # a jump into a retry loop's body: the wrapper ends at the loop's
+            # label, and the loop's statements before this label are skipped
+            # on that first pass (_nested_goto_starts)
+            entry = entries.get((name, (ls, le)))
+            end = j if entry is None else entry
+            region = stmts[first:end]
+            rs, re_ = self.span(region[0])[0], (ls if entry is None else self.span(stmts[entry])[0])
             for (a, b) in regions:
                 if a < re_ and rs < b and not (a <= rs and re_ <= b) and not (rs <= a and b <= re_):
                     self.refuse(label, f"goto regions overlap at label {name!r}")
             regions.append((rs, re_))
             # retargeted break/continue, and declarations used after the label
-            after = stmts[j:]
-            for st in region:
+            after = stmts[end:]
+            for st in region + ([] if entry is None else stmts[entry:j]):
+                if st not in region:
+                    # skipped by the entry guard, a block: scoped to it
+                    if st.kind == K.DECL_STMT:
+                        for var in st.get_children():
+                            usr = var.get_usr()
+                            if any(n.kind == K.DECL_REF_EXPR and n.referenced is not None
+                                   and n.referenced.get_usr() == usr
+                                   for later in stmts[j:] for n in later.walk_preorder()):
+                                self.refuse(var, f"{var.spelling!r} is declared in a loop before "
+                                                 f"label {name!r} and used after it")
+                    continue
                 if st.kind == K.DECL_STMT:
                     for var in st.get_children():
                         usr = var.get_usr()
@@ -983,9 +1148,16 @@ class _Rewriter:
                     self.refuse(n, f"a {n.kind.name.split('_')[0].lower()} between a goto and label "
                                    f"{name!r} would leave the wrapper instead of its loop")
             flag = f"__woof_goto_{name}"
-            self.edits.insert(rs, f"bool {flag} = false; do {{ ", rank=-50_000)
-            self.edits.insert(ls, f"}} while (false); ", rank=50_000)
-            wrappers.append({"kind": "forward", "rs": rs, "close": ls, "flag": flag, "name": name,
+            # Wrappers opening at one offset nest outer first: the longer one.
+            self.edits.insert(rs, f"bool {flag} = false; do {{ ", rank=-50_000 - (re_ - rs))
+            if entry is None:
+                self.edits.insert(ls, f"}} while (false); ", rank=_GOTO_CLOSE)
+            else:
+                # closed before the loop opens; the guard opens inside it
+                self.edits.insert(re_, f"}} while (false); ", rank=-100_000_000)
+                self.edits.insert(re_, f"if (!{flag}) {{ ", rank=-49_999)
+                self.edits.insert(ls, f"}} {flag} = false; ", rank=-100_000_000)
+            wrappers.append({"kind": "forward", "rs": rs, "close": re_, "flag": flag, "name": name,
                              "jumps": [self.span(g)[0] for g in jumps], "node": label})
             label_tokens = list(label.get_tokens())
             if len(label_tokens) >= 2 and label_tokens[1].spelling == ":":
@@ -1000,8 +1172,72 @@ class _Rewriter:
                     continue
                 seen.add(key)
                 end = self._statement_end(loop)
-                self.edits.insert(end, f" if ({flag}) break;", rank=50_000)
+                # before the wrapper's close when the loop ends at the label
+                self.edits.insert(end, f" if ({flag}) break;", rank=_GOTO_CLOSE - 1)
         self._nested_wrapper_exits(wrappers)
+
+    def _nested_goto_starts(self, by_label, labels, parent, chain):
+        """Where each forward region starts so that the regions of one block
+        nest.  Fortran's spaghetti (``IF (..) GOTO 270`` ... ``GOTO 320``
+        ``270 ...``, or a ``GOTO 1002`` out of a ``1001 ... GOTO 1001`` retry
+        loop) gives regions that cross: one starts inside another and ends
+        after it.  Starting the later region at the earlier one's start makes
+        it the outer wrapper; its jumps out of the inner wrapper leave both
+        (:meth:`_nested_wrapper_exits`).  A backward region starts at its
+        label and is never moved.  Breakage it prevents: MM5 sfclay's
+        regime branches and Noah's frh2o iteration were refused as
+        overlapping."""
+        K = self.ci.CursorKind
+        spans = {}
+        for (name, (ls, le)), jumps in by_label.items():
+            label = next((l for l in labels.get(name, []) if self.span(l) == (ls, le)), None)
+            block = None if label is None else parent(label)
+            if block is None or block.kind != K.COMPOUND_STMT:
+                continue
+            stmts = list(block.get_children())
+            j = next(i for i, st in enumerate(stmts) if self.span(st) == (ls, le))
+            tops = []
+            for g in jumps:
+                top = next((a for a in chain(g) if parent(a) is not None and self.span(parent(a)) == self.span(block)
+                            and parent(a).kind == K.COMPOUND_STMT), None)
+                if top is None:
+                    break
+                tops.append(next(k for k, st in enumerate(stmts) if self.span(st) == self.span(top)))
+            else:
+                if tops and all(i < j for i in tops):
+                    spans[(name, (ls, le))] = [self.span(block), "forward", min(tops), j, max(tops)]
+                elif tops and all(i > j for i in tops):
+                    spans[(name, (ls, le))] = [self.span(block), "backward", j, max(tops) + 1]
+        changed = True
+        while changed:
+            changed = False
+            for f in spans.values():
+                if f[1] != "forward":
+                    continue
+                for r in spans.values():
+                    if r is not f and r[0] == f[0] and r[2] < f[2] < r[3] <= f[3]:
+                        f[2] = r[2]
+                        changed = True
+        # A forward jump into a retry loop from before it (RUC's ``IF (..)
+        # GOTO 100`` / ``90 ...`` / ``100 ...`` / ``IF (..) GOTO 90``): the
+        # loop's statements before the label are guarded by the jump's flag,
+        # which the label clears.  Only when every jump to the label comes
+        # before the loop (a jump from the guarded statements would break out
+        # of the retry loop instead), and no other region of the block starts
+        # or ends among the guarded statements.
+        entries = {}
+        for key, f in spans.items():
+            if f[1] != "forward":
+                continue
+            for r in spans.values():
+                if not (r[1] == "backward" and r[0] == f[0] and f[2] < r[2] < f[3] < r[3]
+                        and f[4] < r[2]):
+                    continue
+                clear = all(o is f or o is r or o[0] != f[0] or o[3] <= r[2] or o[2] >= f[3]
+                            or (o[2] <= r[2] and o[3] >= r[3]) for o in spans.values())
+                if clear:
+                    entries[key] = r[2]
+        return {key: s[2] for key, s in spans.items() if s[1] == "forward"}, entries
 
     def _nested_wrapper_exits(self, wrappers):
         """A jump that crosses another region's wrapper on its way out: the
@@ -1025,7 +1261,7 @@ class _Rewriter:
                     key = (id(inner), id(outer))
                     if key not in done:
                         done.add(key)
-                        self.edits.insert(inner["close"], f" if ({outer['flag']}) break; ", rank=50_001)
+                        self.edits.insert(inner["close"], f" if ({outer['flag']}) break; ", rank=_GOTO_CLOSE + 1)
 
     def _backward_goto(self, name, label, stmts, j, jumps, chain, parent, block, regions, wrappers):
         """Backward ``goto L;`` (a Fortran retry: ``100 CONTINUE ... GOTO 100``)
@@ -1073,8 +1309,8 @@ class _Rewriter:
             if a < re_ and rs < b and not (a <= rs and re_ <= b) and not (rs <= a and b <= re_):
                 self.refuse(label, f"goto regions overlap at label {name!r}")
         regions.append((rs, re_))
-        self.edits.insert(rs, "while (true) { ", rank=-50_000)
-        self.edits.insert(re_, " break; }", rank=50_000)
+        self.edits.insert(rs, "while (true) { ", rank=-50_000 - (re_ - rs))
+        self.edits.insert(re_, " break; }", rank=_GOTO_CLOSE)
         wrappers.append({"kind": "backward", "rs": rs, "close": re_, "flag": None, "name": name,
                          "jumps": [self.span(g)[0] for g, _, _ in tops], "node": label})
         label_tokens = list(label.get_tokens())
@@ -1886,6 +2122,9 @@ class _Rewriter:
             return                      # (class templates: their members stay folded)
         if any(c.kind.name.startswith("TEMPLATE") for c in owner.get_children()):
             return
+        first = next(owner.get_tokens(), None)
+        if first is not None and first.spelling == "template":
+            return                      # an explicit specialization (``template<> struct S<int>``): folded too
         end = self._statement_end(owner)
         spelled = self._spell_type(member.type, drop_const=True)
         self.edits.insert(end, f"\nconstant constexpr {spelled} {owner.spelling}::{member.spelling};",
@@ -2284,6 +2523,8 @@ class _Rewriter:
                 self.flushing_negation(node)
             if kind == K.CONDITIONAL_OPERATOR and _is_float(node.type):
                 self.select_minmax(node)
+            if kind == K.CXX_STATIC_CAST_EXPR:
+                self.volatile_load(node)
             if kind == K.UNARY_OPERATOR and _is_double(node.type):
                 inner = list(node.get_children())
                 toks = [t.spelling for t in node.get_tokens()]
@@ -2413,6 +2654,34 @@ class _Rewriter:
         self.edits.replace(ye, ns, ", ")
         self.edits.replace(ne, e, ")")
 
+    def volatile_load(self, node):
+        """``static_cast<volatile T&>(x)`` read as a value (convective_rrfs
+        keeps a load from sinking this way): MSL's reference cast must name
+        x's address space, which a by-value accessor's ``operator[]`` in a
+        template does not tell; ``__woof_vload(x)`` finds it by overload and
+        loads through a volatile pointer.  A write through the cast is
+        refused."""
+        toks = list(node.get_tokens())
+        spelled = [t.spelling for t in toks]
+        if len(spelled) < 5 or spelled[0] != "static_cast" or spelled[1] != "<":
+            return
+        depth = 0
+        for close, t in enumerate(spelled):
+            depth += t == "<"
+            depth -= t == ">"
+            if depth == 0 and close > 1:
+                break
+        target = spelled[2:close]
+        if not target or target[-1] != "&" or "volatile" not in target or close + 1 >= len(toks) \
+                or spelled[close + 1] != "(":
+            return
+        after = self.tu.get_tokens(extent=self.tu.get_extent(
+            "unit.cpp", (toks[-1].extent.end.offset, toks[-1].extent.end.offset + 3)))
+        following = next(iter(after), None)
+        if following is not None and following.spelling in ("=", "+=", "-=", "*=", "/=", "++", "--"):
+            self.refuse(node, "a write through static_cast<volatile T&> has no Metal spelling")
+        self.edits.replace(toks[0].extent.start.offset, toks[close + 1].extent.end.offset, "__woof_vload(")
+
     def flushing_negation(self, node):
         """``-x`` on a binary32 value in a -ftz=true unit: CUDA's neg.ftz
         flushes a subnormal x to -0, Metal's negation flips the bit and keeps
@@ -2435,9 +2704,14 @@ class _Rewriter:
         value initialised per call, so ``static`` just goes; a mutable one
         (state kept across calls) has no spelling and is refused."""
         t = node.type
+        const = t.is_const_qualified()
         while t.get_canonical().kind.name in ("CONSTANTARRAY", "INCOMPLETEARRAY"):
+            # libclang puts an array's const on the canonical array and can
+            # drop it from that array's element type (``static const double
+            # tr[] = {...}`` in core-math's log10f read as mutable)
+            const = const or t.get_canonical().is_const_qualified()
             t = t.get_canonical().element_type
-        if not t.is_const_qualified():
+        if not (const or t.is_const_qualified()):
             self.refuse(node, f"function-scope static {node.spelling!r} is mutable")
         tok = next((t for t in node.get_tokens() if t.spelling == "static"), None)
         if tok is not None:
@@ -2905,6 +3179,8 @@ def prelude(*, contract: bool, retain_subnormals: bool = False, ieee_helpers: bo
 
 
 VENDOR_LIBM64 = HERE / "vendor_libm64.cuh"
+#: CUDA's powf, for the MLX facade's strict float32 power (facade/_ops.py)
+CUDA_POWF = HERE / "cuda_powf.cuh"
 F64CR = HERE.parents[1] / "core" / "kernels" / "f64cr.cuh"
 _VENDOR_CALL = re.compile(r"\b(exp|log|log10|sin|cos|tan|atan|pow|atan2|hypot|log2|expm1|tanh|tgammaf?|lgamma|log1pf?|cbrtf?|erfc?)\s*\(")
 CR_CBRT = HERE.parents[1] / "core" / "kernels" / "cr_cbrt_flt64.cuh"

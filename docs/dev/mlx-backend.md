@@ -250,30 +250,174 @@ Traced on both machines, its word tests, D3's and the WRF oracle tests agree
 launch for launch (`tests/data/receipts/partial-nest-d4/backend-launch-words.txt`).
 The envelope receipts per backend are in the same directory.
 
-## hex (MPAS) on Metal: opt-in
+## The parity ledger
+
+`woof/verify/backend_parity_ledger.json` records each test of a strict sweep
+(the WRF 4.6.1 parity and column-exact tests, NSSL-2, the partial-nest
+kernel words and the projection tests). For each test it gives the outcome
+on both backends and whether the words of every kernel launch agree.
+Each open gap names its cause. The causes so far are:
+
+- NaN payloads (`0x7FC00000` on Metal, `0x7FFFFFFF` on CUDA);
+- the vendored binary64 `tgamma`;
+- the urban kernel's device-address tables;
+- a CUDA-only test;
+- the projection's host libm (macOS against glibc).
+
+The per-backend receipts are in `tests/data/backend_receipts`.
+`tools/backend_parity_ledger.py` documents the sweep and regenerates both.
+`tests/test_backend_parity_ledger.py` holds the ledger to the receipts.
+When a gap closes, regenerate the receipts and the ledger, then drop the
+gap's cause.
+
+## hex (MPAS) on Metal
 
 The hex lane resolves kernels through `woof.hex.cuda_backend.KernelCache`. Its
 admission asks CUDA questions: the runtime version, the compute capability,
 NVRTC's architectures and NVRTC's build identity. The facade answers these
-with zeros, so hex refuses on a Mac by default.
+with zeros. On the `mlx` backend `woof/hex/metal_lane.py` answers them for
+the Metal translation instead, on an Apple GPU (`applegpu_*`; a virtual
+Mac's paravirtual device computes wrong answers, so hex refuses there).
+`WOOF_HEX_METAL=0` opts out, and then hex refuses on a Mac. The lane:
 
-`WOOF_HEX_METAL=1` installs `woof/hex/metal_lane.py`, which answers those
-questions for the Metal translation:
+- stands in for compute 12.0;
+- names the translator in its compile fingerprint, never NVRTC;
+- needs nothing for the regional unit's direct NVRTC compile: the facade's
+  `compile_using_nvrtc` translates it and `function.Module().load` loads
+  the translation;
+- translates the MPAS_to_physics preparation (`cuda_physics_prep_v841`)
+  without contraction in fast numerics too. `validate_prep_v841_f32`
+  recomputes the prepared fields and compares words, and Metal's
+  `fp contract(fast)` may fuse the producer and the checker differently
+  (it did on a real HRRR start, and every fast run refused at step 0);
+- runs the dynamics subcycle eager: the forecast attaches no subcycle
+  graph, because the facade's stream capture records no CUDA graph and a
+  replay would launch nothing.
 
-- it stands in for compute 12.0;
-- its compile fingerprint names the translator, never NVRTC;
-- the regional unit's cubin load becomes a facade `RawModule`.
+Each answer is the Metal one only while `cupy` is woof's facade, so a test
+that stubs `cupy` gets the hex runtime's own answers.
 
 No kernel source changes.
 
-Only the partial-depth band (Phase D5) is measured on Metal:
+### What is measured, and what differs
+
+**End to end.** `woof hex regional` on a 1,607-cell generated limited-area
+mesh (15 km core, 60 km background, 55 levels), HRRR initial and boundary
+states, `arwen_mpas_column` physics, 40 steps of 90 s, on an M3 Max and on
+an RTX A6000:
+
+- Fast numerics (the default) runs to the end on Metal. At 1 h Metal and
+  CUDA differ by 0.29 K in theta (rms 5.3e-3 K). CUDA against itself with
+  `--fmad=false` differs by 0.51 K (rms 5.5e-3 K).
+- With `WOOF_FMAD_OFF=1` on both, the initial frame is word-identical except
+  `hfx` (567 of 1,607 cells, up to 2.3 W/m²).
+
+**Where the first step parts.** `tools/launch_trace.py` traced the first
+step on both machines with contraction off: 1,709 launches, aligned by
+kernel name. Each Metal launch was then replayed on CUDA's input words and
+compared with CUDA's output words. 1,627 replay word for word, including
+every surface-layer, Noah-MP, YSU and dynamics kernel. 29 were not
+replayed (device pointer tables, or a validation kernel whose launch order
+differs). The 53 that differ:
+
+| kernels | cause |
+|---|---|
+| `reconstruct_winds_v841_f32` (4) | `sinf`/`cosf` of latitude and longitude: libdevice and `precise::` differ in 444 to 917 of 1,608 words. Each side reproduces its own u and v from its own sines with uncontracted binary32 arithmetic. |
+| `prep_interfaces_v841_f32` (5) | `logf`/`expf` of the top-interface extrapolation. Each side reproduces its own words from its own `logf` and `expf`. The hydrostatic integration then carries them down. |
+| `mixing_scaling_f32` (4), `recover_pressure_f32` (1) | `powf`, the only non-IEEE operation in each. |
+| `bl_ysu_gwdo_v841_f32` (1) | `atan2f` and three `powf`. Taken through binary64 on both machines, the replay differs in 0 words. |
+| `momentum_filter_seed`/`lap4_v841_f32` (8) | NaN payload on the padding edge (`dc_edge` = 0): CUDA writes 0x7fffffff, Metal 0x7fc00000. |
+| `rp_probe` (1) | RRTMG's signed-zero probe (`max(+0, -0)`), the translator's `__woof_selmax`. The probe is compared on each host, not carried. |
+| `pv_apvm_v841_f32` (12), `noahmp_scatter_fields` (1), `solve_region_validate`/`envelope_v841` (16) | The replay itself: aliased outputs, strides baked into a generated source, device-address tables. These launches agree in the real runs. |
+
+So `hfx`'s first difference is vendor binary32 libm in the prepared winds
+and pressures. The surface layer reproduces CUDA's words on CUDA's inputs.
+
+**Hex GPU gates** (`components/hex/tools/battery/gpu_gates.txt`,
+`-m "not assets"`, `-n 3`), test by test against CUDA (`WOOF_HEX_AOT=off`):
+see the PR description of jacobbieker/woof#142 for the table. Every test
+that passes on CUDA passes on Metal or skips by name:
+
+- graph-replay tests (`test_cuda_subcycle_graphs*`): the facade captures no
+  CUDA graph;
+- `test_hex_aot_gpu`: the kernel pack holds NVRTC images;
+- `test_moving_check_gpu` (LTS executor): its reserve census adds binary64
+  and 64-bit counters atomically, and Apple GPUs have 64-bit atomic
+  min/max only;
+- `test_stochastic`'s host regressions and `test_partial_nest_kernels_v841`'s
+  local-frame test name Linux g++ and NVRTC.
+
+The MPAS WSM6 water-budget gates (`mpas_wb3_v842`, `mpas_wb5_v842`) run
+apart: their WSM6 unit carries binary64 (soft-float on Metal) and Thrust's
+`complex<double>`. The Kessler and Thompson writebacks and the referee pass
+(5 of 10). The WSM6 unit had not finished its cold Metal compile after
+1 h 45 min of compiler time on an M3 Max, so its 5 tests are not measured.
+
+The partial-depth band (Phase D5) keeps its own measurements:
 
 - `components/hex/tests/test_partial_nest_oracle_v841.py`: the device
   operators are bitwise to compiled MPAS v8.4.1 on Metal;
 - the envelope receipt `tests/data/receipts/partial-nest-d5/envelope-mlx.json`.
 
-The rest of the hex lane is not measured on Metal, which is why the lane is
-opt-in.
+### Translation
+
+`tools/metal_translation_census.py --hex --translate-only` translates every
+unit the hex kernel pack holds (`woof.hex.cuda_backend.aot_build.pack_inventory`:
+the KernelCache declarations and the recorded direct and raw NVRTC compiles;
+CuPy's generated kernels are the facade's). The inventory's sources and
+options come from both numerics modes, but the census translates every row
+under the process's own numerics: fast by default, where a strict row's
+`--fmad=false` is dropped as a fast compile drops it (rows marked
+`-DGPUWM_PREPARATION_IDENTITY=1` keep it); `--retain` translates as
+`GPUWM_WRF_EXACT=1`, strict. Translation
+needs no Metal device and no MLX: only libclang's Python bindings and a
+`clang` or `clang++` on `PATH` (the preprocessor). On Linux the `mlx` pixi
+environment does not exist (it is osx-arm64 only), so put the bindings of
+the `libclang` 18.1.1 wheel the `mlx` environment pins on `PYTHONPATH` in
+the `default` environment:
+
+```
+pip download libclang==18.1.1 --no-deps --platform manylinux2010_x86_64 -d /tmp/lc
+python -m zipfile -e /tmp/lc/libclang-18.1.1-*.whl /tmp/lc/site
+PYTHONPATH=/tmp/lc/site/libclang-18.1.1.data/platlib pixi run -e default \
+    python tools/metal_translation_census.py --hex --translate-only --out /tmp/hex.jsonl
+```
+
+With `--translate-only` the census leaves `WOOF_BACKEND` as the host has it.
+353 of the 361 units translate. The rest are refused by name:
+
+- RRFS smoke (4 units) includes `<cuda/barrier>` for a block-scope
+  `cuda::barrier`;
+- RRFS NSSL (2) aggregate-initialises a derived struct through its base
+  (`NsslColumn column{{}, arena}`) and slices it back to the base, which
+  the flattened struct cannot take;
+- Grell-Freitas (2) has two retry loops that cross and share a label.
+
+The hex units brought in these translator constructs:
+
+- crossing forward gotos nest;
+- a forward goto into a retry loop guards the loop's head on the first pass;
+- PTX bit operations are translated (`xor`/`and`/`mov`, `setp`/`selp` without
+  `.ftz`);
+- a string literal is `constant` data;
+- `static const` arrays are recognised as constant;
+- `__ldg`, `__maxnreg__`, `clock64` and `__reduce_*_sync` are provided;
+- a `cupy/complex.cuh` stand-in carries Thrust's division, `csqrtf`, and
+  binary64 `log` (FreeBSD's `clog`), `sqrt` and `abs`;
+- a type trait's explicit specializations keep their static members folded;
+- a struct field given a string literal anywhere is `constant` data, also
+  when a free function assigns it and passes it on (WSM6's `last_message`);
+- `static_cast<volatile T&>(x)` read as a value is `__woof_vload(x)`, which
+  finds x's address space by overload;
+- CUDA's `__expf`, `__logf` and `__fdividef` are Metal's `fast::`
+  functions.
+
+`tests/test_metal_hex_translation.py` checks on the device the gotos, the
+PTX bit operations, string literals in a struct, the Thrust complex
+functions and the WSM6 and RRFS shapes above. The `static const`
+arrays, `__ldg`, `__maxnreg__`, `clock64` and `__reduce_*_sync` are
+checked only by the census, which translates the MYNN, TEMPO and RRFS
+units that use them.
 
 ## Finding a difference
 
@@ -289,7 +433,8 @@ opt-in.
    gives a 3-D launch.
 3. `tools/metal_unit_errors.py UNIT`: show each Metal compile error beside its
    MSL line.
-4. `tools/metal_translation_census.py`: which units translate and compile. Cached
+4. `tools/metal_translation_census.py`: which units translate and compile
+   (`--hex`: the hex lane's units). Cached
    results are keyed on a fingerprint of the translator, the Metal headers
    and the kernel sources, so a stale result is never reported.
 5. `tools/cupy_surface_census.py --gate`: which CuPy paths the facade lacks.

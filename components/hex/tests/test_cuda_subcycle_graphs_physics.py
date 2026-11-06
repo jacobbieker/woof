@@ -69,6 +69,9 @@ def test_physics_subcycle_replays_bitwise_when_lagged_heating_appears(tmp_path):
         pytest.skip("no CUDA device")
     if count == 0:
         pytest.skip("no CUDA device")
+    from woof.backend import requested
+    if requested() != "cuda":
+        pytest.skip("CUDA graph replay: the facade captures no graph, so the Metal lane runs the subcycle eager")
 
     from woof.hex.config_v841 import V841DryDycoreConfig
     from woof.hex.cuda_backend import KernelCache

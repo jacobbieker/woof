@@ -4,6 +4,15 @@ import json
 import pytest
 
 pytestmark = pytest.mark.gpu
+
+
+@pytest.fixture(autouse=True)
+def _nvrtc_images():
+    from woof.backend import requested
+    if requested() != "cuda":
+        pytest.skip("the kernel pack holds NVRTC images; the Metal lane translates each unit instead")
+
+
 SOURCE = 'extern "C" __global__ void copy_words(const unsigned* a, unsigned* b) { b[threadIdx.x] = a[threadIdx.x]; }'
 
 

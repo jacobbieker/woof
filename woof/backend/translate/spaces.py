@@ -358,6 +358,14 @@ class SpaceAnalysis:
                             self.var_spaces.setdefault(usr, set()).add(space)
                             self.inst_var_spaces.setdefault(self._instance, {}).setdefault(
                                 usr, set()).add(space)
+                elif len(kids) == 2 and kids[0].kind == K.MEMBER_REF_EXPR and kids[0].referenced is not None \
+                        and kids[0].referenced.kind.name == "FIELD_DECL":
+                    # `s.text = "..."` outside the struct's own methods (WSM6's
+                    # S.last_message): a field given constant data is constant
+                    lhs_end = kids[0].extent.end.offset
+                    op = next((t.spelling for t in node.get_tokens() if t.extent.start.offset >= lhs_end), None)
+                    if op == "=" and self.space(kids[1], env) == CONSTANT:
+                        self.field_spaces.setdefault(field_key(kids[0].referenced), set()).add(CONSTANT)
             elif kind == K.RETURN_STMT and collect_returns:
                 children = list(node.get_children())
                 if children:
@@ -637,6 +645,8 @@ class SpaceAnalysis:
             return self.space(children[-1], env, lvalue=lvalue)
         if kind in ("CXX_NULL_PTR_LITERAL_EXPR", "GNU_NULL_EXPR", "INTEGER_LITERAL"):
             return NULL
+        if kind == "STRING_LITERAL":
+            return CONSTANT     # program-scope data, as Metal places a string literal
         if kind == "DECL_REF_EXPR":
             d = e.referenced
             if d is None:

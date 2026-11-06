@@ -192,6 +192,7 @@ WOOF_F32S_ASSIGN(threadgroup)
 // ---------------------------------------------------------------- math
 static inline f32s fabsf(f32s a) { return f32s::bits(as_type<uint>(a.v) & 0x7FFFFFFFu); }
 static inline f32s fabs(f32s a) { return fabsf(a); }
+static inline f32s abs(f32s a) { return fabsf(a); }
 static inline f32s copysignf(f32s a, f32s b) {
   return f32s::bits((as_type<uint>(a.v) & 0x7FFFFFFFu) | (as_type<uint>(b.v) & 0x80000000u));
 }
@@ -307,6 +308,13 @@ WOOF_F32S_VENDOR1(log10) WOOF_F32S_VENDOR1(sin) WOOF_F32S_VENDOR1(cos) WOOF_F32S
 WOOF_F32S_VENDOR1(asin) WOOF_F32S_VENDOR1(acos) WOOF_F32S_VENDOR1(atan) WOOF_F32S_VENDOR1(sinh)
 WOOF_F32S_VENDOR1(cosh) WOOF_F32S_VENDOR1(tanh)
 #undef WOOF_F32S_VENDOR1
+// a volatile load of an f32s reads its float's bits (prelude __woof_vload)
+#define WOOF_F32S_VLOAD(AS) \
+  static inline f32s __woof_vload(const AS f32s& x) { return f32s(*(const volatile AS float*)&x.v); }
+WOOF_F32S_VLOAD(thread) WOOF_F32S_VLOAD(device) WOOF_F32S_VLOAD(threadgroup)
+#undef WOOF_F32S_VLOAD
+static inline f32s __expf(f32s a) { return f32s(__expf(a.v)); }
+static inline f32s __logf(f32s a) { return f32s(__logf(a.v)); }
 static inline f32s powf(f32s a, f32s b) { return f32s(powf(a.v, b.v)); }
 static inline f32s atan2f(f32s a, f32s b) { return f32s(atan2f(a.v, b.v)); }
 static inline f32s fmodf(f32s a, f32s b) { return f32s(__woof_n(fmod(f64(a), f64(b)).b)); }
@@ -356,6 +364,20 @@ static inline f32s __woof_ieee_mul(f32s a, f32s b) { return a * b; }
 static inline f32s __woof_ieee_div(f32s a, f32s b) { return a / b; }
 static inline f32s __woof_ieee_min(f32s a, f32s b) { return fminf(a, b); }
 static inline f32s __woof_ieee_max(f32s a, f32s b) { return fmaxf(a, b); }
+// setp.<cmp>.f32 without .ftz: an ordered comparison that reads a subnormal
+// as itself (Metal's compare reads it as zero); ne is false for a NaN.
+static inline bool __woof_ieee_eq(f32s a, f32s b) { return a == b; }
+static inline bool __woof_ieee_lt(f32s a, f32s b) { return a < b; }
+static inline bool __woof_ieee_le(f32s a, f32s b) { return a <= b; }
+static inline bool __woof_ieee_gt(f32s a, f32s b) { return a > b; }
+static inline bool __woof_ieee_ge(f32s a, f32s b) { return a >= b; }
+static inline bool __woof_ieee_ne(f32s a, f32s b) { return a < b || a > b; }
+static inline bool __woof_ieee_eq(float a, float b) { return f32s(a) == f32s(b); }
+static inline bool __woof_ieee_lt(float a, float b) { return f32s(a) < f32s(b); }
+static inline bool __woof_ieee_le(float a, float b) { return f32s(a) <= f32s(b); }
+static inline bool __woof_ieee_gt(float a, float b) { return f32s(a) > f32s(b); }
+static inline bool __woof_ieee_ge(float a, float b) { return f32s(a) >= f32s(b); }
+static inline bool __woof_ieee_ne(float a, float b) { return __woof_ieee_lt(a, b) || __woof_ieee_gt(a, b); }
 static inline f32s __woof_selmax(f32s a, f32s b) {
   return a > b ? a : (a == b ? f32s(as_type<float>(as_type<uint>(a.v) & as_type<uint>(b.v))) : b);
 }
