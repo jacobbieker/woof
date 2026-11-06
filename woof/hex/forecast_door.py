@@ -526,9 +526,11 @@ def read_device_compute() -> tuple[int, int]:
                 "happens here and the door will not open a device to read its "
                 "architecture."
             )
-    import cupy
+    # Through the hex runtime's CuPy seam, which the Metal lane answers
+    # (woof/hex/metal_lane.py), so the door and require_cuda agree.
+    from .cuda_backend import runtime
 
-    properties = cupy.cuda.runtime.getDeviceProperties(0)
+    properties = runtime._cupy().cuda.runtime.getDeviceProperties(0)
     return (int(properties["major"]), int(properties["minor"]))
 
 

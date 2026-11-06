@@ -3655,12 +3655,15 @@ def execute_forecast(
         stack["gf_dynamics_tendencies"] = carrier
 
     from woof.hex.cuda_subcycle_graphs import graph_policy, graphs_enabled
+    from woof.hex.metal_lane import installed as metal_lane
     graph_requested = graphs_enabled(int(N_CELLS))
     graph_controller = None
     # The fork's LES and large-step-recovery attachments rebind the dynamics
-    # subcycle, which a captured graph would replay around.
+    # subcycle, which a captured graph would replay around.  On Metal the
+    # facade's stream capture records no graph, so a replay would launch
+    # nothing: the subcycle runs eager there.
     if (graph_requested and lts_attachment is None and fullstep_shadow is None
-            and les_attachment is None and recovery_attachment is None):
+            and les_attachment is None and recovery_attachment is None and not metal_lane()):
         from woof.hex.cuda_subcycle_graphs import attach_subcycle_graphs
 
         graph_controller = attach_subcycle_graphs(stack["driver"])
@@ -4513,7 +4516,8 @@ def execute_forecast(
             "fully_replayed_committed_steps": graph_full_steps,
             "partly_replayed_committed_steps": graph_partial_steps,
             "subcycles": None if graph_controller is None else graph_controller.receipt(),
-            "skip_reason": "local_timestep_controller" if lts_attachment is not None else None,
+            "skip_reason": ("local_timestep_controller" if lts_attachment is not None
+                            else "metal_facade_captures_no_graph" if metal_lane() else None),
         }} if graph_requested else {}),
         "cuda_graphs_policy": graph_policy(int(N_CELLS)),
         "architecture": architecture_status(capability.compute).as_dict(),

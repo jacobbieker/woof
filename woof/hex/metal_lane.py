@@ -10,14 +10,14 @@ themselves need nothing CUDA-specific: the facade translates each unit to
 Metal Shading Language exactly as it does for the WRF core
 (docs/dev/mlx-backend.md).
 
-This module answers those questions for the Metal translation, only on the
-``mlx`` backend and only when ``WOOF_HEX_METAL=1`` asks for it (otherwise
+This module answers those questions for the Metal translation on the
+``mlx`` backend on an Apple GPU, by default; ``WOOF_HEX_METAL=0`` opts out (then
 :func:`install` returns without touching anything, and the hex lane refuses
-on a Mac exactly as before).  It is opt-in because only the partial-depth
-band (Phase D5, its oracle and envelope tests) has been measured on Metal;
-the rest of the hex lane has not.  It changes no byte of the regional kernel set
-(``cuda_backend.regional_admission.REGIONAL_KERNEL_SOURCES``): it rebinds
-three module globals of the hex runtime instead of editing them.
+on a Mac).  The hex GPU gates and an end-to-end regional forecast are
+measured against CUDA on Metal, and every word they differ in is attributed
+(docs/dev/mlx-backend.md, "hex (MPAS) on Metal").  It changes no byte of the
+regional kernel set (``cuda_backend.regional_admission.REGIONAL_KERNEL_SOURCES``):
+it rebinds module globals of the hex runtime instead of editing them.
 
 * ``runtime._cupy``: the facade, seen through a view whose
   ``cuda.runtime`` reports the hex floor's runtime version and compute
@@ -28,17 +28,30 @@ three module globals of the hex runtime instead of editing them.
   source digest in ``nvrtc_library_sha256``, the MLX version and the Apple
   GPU architecture -- so a cache entry can never be mistaken for an NVRTC
   image.
-* ``cuda_regional_v841._direct_regional_module``: the regional unit's direct
-  NVRTC compile (a cubin load) becomes the facade's ``RawModule`` of the same
-  source and options.
+* (the regional unit's direct NVRTC compile needs nothing: the facade's
+  ``compile_using_nvrtc`` translates it and ``function.Module().load``
+  loads the translation).
 * the facade's ``nvrtc.getSupportedArchs`` (absent from the facade) reports
   the one architecture the translator stands in for.
+* the MPAS_to_physics preparation unit (``cuda_physics_prep_v841``) is
+  translated without contraction in fast numerics too: its validator
+  recomputes the producers' words, and Metal's ``fp contract(fast)`` may
+  fuse the producer and the checker differently.
+
+With the lane installed the forecast driver attaches no subcycle graph
+(``installed()``): the facade's stream capture records no CUDA graph, so a
+replay would launch nothing, and the dynamics subcycle runs eager.
+
+Each answer is the Metal one only while ``cupy`` is woof's facade; a
+process (or a test) that puts another ``cupy`` in ``sys.modules`` gets the
+hex runtime's own answers for it.
 """
 
 from __future__ import annotations
 
 import hashlib
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -126,49 +139,80 @@ def metal_fingerprint() -> dict[str, str]:
     }
 
 
+def apple_gpu() -> bool:
+    """Whether the Metal device is an Apple GPU (``applegpu_*``).  A virtual
+    Mac's "Apple Paravirtual device" computes wrong answers (NaN where an
+    M-series GPU matches), so the hex lane refuses there as it did before
+    it was the default."""
+    try:
+        import cupy
+        architecture = str(dict(cupy.cuda.runtime.getDeviceProperties(0)).get("architecture", ""))
+    except Exception:
+        return False
+    return architecture.startswith("applegpu")
+
+
 def install() -> bool:
-    """Admit the hex CUDA lane on the Metal translation (``mlx`` with
-    ``WOOF_HEX_METAL=1`` only).  Idempotent; returns whether the Metal
-    answers are in place."""
+    """Admit the hex CUDA lane on the Metal translation (``mlx``, unless
+    ``WOOF_HEX_METAL=0``).  Idempotent; returns whether the Metal answers
+    are in place."""
     global _INSTALLED
     if _INSTALLED:
         return True
-    if _backend() != "mlx" or os.environ.get("WOOF_HEX_METAL", "").strip() != "1":
+    if _backend() != "mlx" or os.environ.get("WOOF_HEX_METAL", "").strip() == "0":
         return False
     import cupy
+    if not apple_gpu():
+        return False
     from cupy.cuda import nvrtc
     if not hasattr(nvrtc, "getSupportedArchs"):
         architecture = METAL_STANDIN_COMPUTE[0] * 10 + METAL_STANDIN_COMPUTE[1]
         nvrtc.getSupportedArchs = lambda: (architecture,)
     from .cuda_backend import compile_contract, runtime
 
+    facade = cupy
+
+    def on_facade() -> bool:
+        return sys.modules.get("cupy") is facade
+
     view = _CupyView(cupy)
-    runtime._cupy = lambda: view
+    own_cupy = runtime._cupy
+    runtime._cupy = lambda: view if on_facade() else own_cupy()
     fingerprint = metal_fingerprint()
+    own_binding = runtime.compile_platform_binding
+    own_contract_binding = compile_contract.compile_platform_binding
 
     def binding() -> dict[str, Any]:
+        if not on_facade():
+            return own_binding()
         return {"fingerprint": dict(fingerprint),
                 "sha256": compile_contract.canonical_sha256(fingerprint)}
 
+    def contract_binding() -> dict[str, Any]:
+        return binding() if on_facade() else own_contract_binding()
+
     runtime.compile_platform_binding = binding
-    compile_contract.compile_platform_binding = binding
+    compile_contract.compile_platform_binding = contract_binding
 
-    from . import cuda_regional_v841 as regional
 
-    def direct_regional_module(device_id: int, platform_sha256: str):
-        from . import numerics
-        module = cupy.RawModule(
-            code=regional.CUDA_REGIONAL_SOURCE,
-            options=numerics.options(regional.REGIONAL_CUDA_OPTIONS))
-        evidence = {"route": "metal-translation",
-                    "source_sha256": hashlib.sha256(
-                        regional.CUDA_REGIONAL_SOURCE.encode()).hexdigest(),
-                    "translator_sha256": fingerprint["nvrtc_library_sha256"]}
-        return module, evidence
-
-    regional._direct_regional_module = direct_regional_module
+    # MPAS_to_physics preparation: validate_prep_v841_f32 recomputes the
+    # producers' fields and compares words, which holds on Metal only when
+    # neither side contracts (loader.uncontracted_source).
+    # (by name: this runs while woof.hex.cuda_backend is importing, which
+    # the preparation module imports first)
+    from woof.backend.metal import loader
+    loader.uncontracted_source(module="woof.hex.cuda_physics_prep_v841", attribute="_CUDA_SOURCE")
     _INSTALLED = True
     return True
 
 
-__all__ = ["METAL_STANDIN_COMPUTE", "install", "metal_fingerprint", "translator_sha256"]
+def installed() -> bool:
+    """Whether the hex lane runs on the Metal translation (installed, and
+    ``cupy`` is woof's facade)."""
+    if not _INSTALLED:
+        return False
+    import woof.backend.facade as facade
+    return sys.modules.get("cupy") is facade
+
+
+__all__ = ["METAL_STANDIN_COMPUTE", "apple_gpu", "install", "installed", "metal_fingerprint", "translator_sha256"]

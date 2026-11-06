@@ -56,6 +56,9 @@ def gpu_case():
         pytest.skip("no CUDA device")
     if not available:
         pytest.skip("no CUDA device")
+    from woof.backend import requested
+    if requested() != "cuda":
+        pytest.skip("CUDA graph replay: the facade captures no graph, so the Metal lane runs the subcycle eager")
 
     kernel = cp.RawKernel(
         r'''
