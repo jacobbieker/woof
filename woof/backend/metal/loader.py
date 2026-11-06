@@ -320,6 +320,13 @@ class MetalModule:
         """Build the library and the named kernels' pipelines."""
         from woof.backend.metal import ext
         kernels = [k for k in kernels if k not in self.max_threads]
+        if not self.max_threads and ext.library_root() is not None:
+            # the unit as a dynamic library and a thin kernel library, when it
+            # can be cut (woof.backend.metal.dylib); the extension keeps it
+            from woof.backend.metal.dylib import split
+            parts = split(self.unit.msl)
+            if parts is not None:
+                ext.load().set_library_split(self.library_key, *parts)
         try:
             limits = ext.load().compile(self.library_key, self.unit.msl, kernels, MATH_MODE_SAFE)
         except RuntimeError as exc:

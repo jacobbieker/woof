@@ -25,6 +25,7 @@
 #include <cctype>
 #include <chrono>
 #include <unistd.h>
+#include <sys/sysctl.h>
 #include <cstdio>
 #include <cstdlib>
 #include <mutex>
@@ -63,6 +64,101 @@ static void compile_log(const char* what, const std::string& name,
   std::fprintf(stderr, "[woof.metal] %s %s %.2f s\n", what, name.c_str(), seconds);
 }
 
+static MTL::CompileOptions* compile_options(int math_mode) {
+  auto* options = MTL::CompileOptions::alloc()->init();
+  if (__builtin_available(macOS 15, *)) {
+    options->setMathMode(math_mode == 2 ? MTL::MathModeFast : math_mode == 1 ? MTL::MathModeRelaxed
+                                                                            : MTL::MathModeSafe);
+    options->setLanguageVersion(MTL::LanguageVersion3_2);
+  } else {
+    options->setFastMathEnabled(math_mode == 2);
+    options->setLanguageVersion(MTL::LanguageVersion3_1);
+  }
+  return options;
+}
+
+// Compiled libraries persist across processes as serialized Metal dynamic
+// libraries, one per unit under the directory set_library_dir names
+// (woof.backend.metal.ext; empty: none).  woof.backend.metal.dylib cuts a
+// unit into a body (the whole unit, kernels as ordinary functions behind
+// exported wrappers) and a thin library of forwarding kernels.  The body is
+// compiled once as a dynamic library and written to disk; a later process
+// loads it in milliseconds and compiles only the thin library against it,
+// where it used to compile the whole unit whenever the OS shader cache had
+// lost it.  A unit with no split, or whose body does not build, is compiled
+// whole as before.
+static std::string g_library_dir;
+static std::mutex g_split_mutex;
+static std::unordered_map<std::string, std::pair<std::string, std::string>> g_splits;
+static std::unordered_map<std::string, NS::SharedPtr<MTL::DynamicLibrary>> g_dylibs;
+
+static std::string device_tag(MTL::Device* device) {
+  std::string tag = "gpu";
+  if (__builtin_available(macOS 14, *)) {
+    if (device->architecture() != nullptr) tag = device->architecture()->name()->utf8String();
+  }
+  char build[64] = {0};
+  size_t size = sizeof(build) - 1;
+  if (sysctlbyname("kern.osversion", build, &size, nullptr, 0) == 0) tag += std::string("-") + build;
+  for (auto& c : tag) {
+    if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-' || c == '.')) c = '_';
+  }
+  return tag;
+}
+
+static std::string library_path(MTL::Device* device, const std::string& library_key) {
+  std::string name = library_key;
+  for (auto& c : name) {
+    if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-' || c == '.')) c = '_';
+  }
+  return g_library_dir + "/" + name + "." + device_tag(device) + ".metallib";
+}
+
+// The unit's body as a dynamic library: loaded from disk, or built and
+// written there.  nullptr: its body did not build (the unit is compiled whole).
+static MTL::DynamicLibrary* dynamic_library_for(MTL::Device* device, const std::string& library_key,
+                                                const std::string& body, int math_mode) {
+  std::string path = library_path(device, library_key);
+  NS::Error* error = nullptr;
+  auto began = std::chrono::steady_clock::now();
+  if (access(path.c_str(), R_OK) == 0) {
+    auto* url = NS::URL::fileURLWithPath(NS::String::string(path.c_str(), NS::UTF8StringEncoding));
+    auto* stored = device->newDynamicLibrary(url, &error);
+    if (stored != nullptr) {
+      compile_log("dynamic library (disk)", library_key.substr(0, 40), began);
+      return stored;
+    }
+  }
+  auto* options = compile_options(math_mode);
+  options->setLibraryType(MTL::LibraryTypeDynamic);
+  // the install name is where the library lives: the thin library links by it
+  options->setInstallName(NS::String::string(path.c_str(), NS::UTF8StringEncoding));
+  error = nullptr;
+  auto* lib = device->newLibrary(NS::String::string(body.c_str(), NS::UTF8StringEncoding), options, &error);
+  options->release();
+  if (lib == nullptr) {
+    compile_log("dynamic library: the body did not compile", library_key.substr(0, 40), began);
+    return nullptr;
+  }
+  auto* dynamic = device->newDynamicLibrary(lib, &error);
+  lib->release();
+  if (dynamic == nullptr) {
+    compile_log("dynamic library: not made", library_key.substr(0, 40), began);
+    return nullptr;
+  }
+  std::string partial = path + ".partial";
+  auto* partial_url = NS::URL::fileURLWithPath(NS::String::string(partial.c_str(), NS::UTF8StringEncoding));
+  if (dynamic->serializeToURL(partial_url, &error)) std::rename(partial.c_str(), path.c_str());
+  compile_log("dynamic library (built)", library_key.substr(0, 40), began);
+  return dynamic;
+}
+
+static MTL::DynamicLibrary* dynamic_library_of(const std::string& library_key) {
+  std::lock_guard<std::mutex> lock(g_split_mutex);
+  auto it = g_dylibs.find(library_key);
+  return it == g_dylibs.end() ? nullptr : it->second.get();
+}
+
 // Libraries built here too, beside the pipelines: one cache, our options.
 // (LibraryOptimizationLevelSize was measured slower to compile: nssl2's
 // fused unit took 991 s against 772 s at the default level.)
@@ -73,18 +169,40 @@ static MTL::Library* library_for(const std::string& library_key, const std::stri
   auto it = cache.find(library_key);
   if (it != cache.end()) return it->second.get();
   auto pool = NS::AutoreleasePool::alloc()->init();
-  auto* options = MTL::CompileOptions::alloc()->init();
-  if (__builtin_available(macOS 15, *)) {
-    options->setMathMode(math_mode == 2 ? MTL::MathModeFast : math_mode == 1 ? MTL::MathModeRelaxed
-                                                                            : MTL::MathModeSafe);
-    options->setLanguageVersion(MTL::LanguageVersion3_2);
-  } else {
-    options->setFastMathEnabled(math_mode == 2);
-    options->setLanguageVersion(MTL::LanguageVersion3_1);
+  auto* device = mx::metal::device(mx::Device::gpu).mtl_device();
+  std::pair<std::string, std::string> split;
+  {
+    std::lock_guard<std::mutex> split_lock(g_split_mutex);
+    auto found = g_splits.find(library_key);
+    if (found != g_splits.end() && !g_library_dir.empty()) split = found->second;
   }
+  if (!split.first.empty()) {
+    auto* dynamic = dynamic_library_for(device, library_key, split.first, math_mode);
+    if (dynamic != nullptr) {
+      auto* options = compile_options(math_mode);
+      options->setLibraries(NS::Array::array(dynamic));
+      NS::Error* error = nullptr;
+      auto began = std::chrono::steady_clock::now();
+      auto* thin = device->newLibrary(NS::String::string(split.second.c_str(), NS::UTF8StringEncoding),
+                                      options, &error);
+      options->release();
+      compile_log("library (thin)", library_key.substr(0, 40), began);
+      if (thin != nullptr) {
+        {
+          std::lock_guard<std::mutex> split_lock(g_split_mutex);
+          g_dylibs.emplace(library_key, NS::TransferPtr(dynamic));
+        }
+        pool->release();
+        cache.emplace(library_key, NS::TransferPtr(thin));
+        return thin;
+      }
+      dynamic->release();
+    }
+  }
+  auto* options = compile_options(math_mode);
   NS::Error* error = nullptr;
   auto began = std::chrono::steady_clock::now();
-  auto* lib = mx::metal::device(mx::Device::gpu).mtl_device()->newLibrary(
+  auto* lib = device->newLibrary(
       NS::String::string(source.c_str(), NS::UTF8StringEncoding), options, &error);
   compile_log("library", library_key.substr(0, 40), began);
   options->release();
@@ -152,10 +270,14 @@ static MTL::ComputePipelineState* pipeline_for(MTL::Library* lib, const std::str
   auto* desc = MTL::ComputePipelineDescriptor::alloc()->init();
   desc->setComputeFunction(fn);
   desc->setMaxCallStackDepth(kCallStackDepth);
+  // a thin library's kernels call into the unit's dynamic library, whose
+  // code is compiled already: their pipelines take milliseconds, no archive
+  auto* dynamic = dynamic_library_of(library_key);
+  if (dynamic != nullptr) desc->setPreloadedLibraries(NS::Array::array(dynamic));
   NS::Error* error = nullptr;
   MTL::ComputePipelineState* state = nullptr;
   auto began = std::chrono::steady_clock::now();
-  if (!g_archive_dir.empty()) {
+  if (!g_archive_dir.empty() && dynamic == nullptr) {
     std::string path = archive_path(library_key, kernel);
     auto* stored = access(path.c_str(), R_OK) == 0 ? open_archive(device, path) : nullptr;
     if (stored == nullptr) stored = open_archive(device, std::string());   // none, or another OS's
@@ -485,6 +607,12 @@ NB_MODULE(_woof_metal_launch, m) {
   m.def("gpu_address", &gpu_address, nb::arg("array"));
   m.def("set_pipeline_archive_dir", [](const std::string& path) { g_archive_dir = path; },
         nb::arg("path"));
+  m.def("set_library_dir", [](const std::string& path) { g_library_dir = path; }, nb::arg("path"));
+  m.def("set_library_split", [](const std::string& library_key, const std::string& body,
+                                const std::string& thin) {
+          std::lock_guard<std::mutex> lock(g_split_mutex);
+          g_splits[library_key] = {body, thin};
+        }, nb::arg("library_key"), nb::arg("body"), nb::arg("thin"));
   m.def("compile", &compile, nb::arg("library_key"), nb::arg("source"),
         nb::arg("kernels"), nb::arg("math_mode") = 0);
 }

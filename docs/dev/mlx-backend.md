@@ -139,12 +139,43 @@ A unit's Metal library is built when it is loaded. Each kernel's pipeline
 is built at its first `get_function`, and pipelines are most of the cold
 cost (Morrison: library 4.7 s, `mo_process` 18 s).
 
-Built pipelines persist as Metal binary archives in
-`~/.cache/woof/metal-pipelines`. `WOOF_METAL_PIPELINE_DIR` moves the
-directory, and `off` disables the archives. The OS shader cache does not
-keep the largest pipelines: CLM lake's step kernel compiled again from
-scratch hours after its first build. `WOOF_METAL_COMPILE_LOG=1` prints each
-library and pipeline build's time, and whether it came from an archive.
+Three caches persist on disk, each under `~/.cache/woof` (an environment
+variable moves it, and `off` disables it):
+
+- **Translations** (`metal-translations`, `WOOF_METAL_TRANSLATION_DIR`).
+  Parsing and rewriting a unit with libclang costs seconds (WSM6: 3.1 s).
+  A translation is stored keyed by the unit's preprocessed text (an edited
+  header is a new key), its name, flags and integer macros, and a digest of
+  the translator's sources, the Metal headers and the libclang version.
+- **Compiled units** (`metal-libraries`, `WOOF_METAL_LIBRARY_DIR`).
+  `woof/backend/metal/dylib.py` cuts a translated unit in two. The body is
+  the whole unit, with each kernel turned into an ordinary function behind
+  an exported wrapper whose parameters are opaque. The thin library holds
+  one forwarding kernel per wrapper, with the original bindings. The body is
+  compiled once as a Metal dynamic library and serialized. The file is
+  specific to the GPU architecture and macOS build, which its name carries.
+  A later process loads it in milliseconds and compiles only the thin
+  library, whatever the OS shader cache has kept. A unit that declares
+  threadgroup memory, or whose kernel parameters are not the translator's
+  buffer, scalar-block and builtin forms, is compiled whole as before.
+- **Pipelines** of whole units (`metal-pipelines`,
+  `WOOF_METAL_PIPELINE_DIR`), as Metal binary archives. The OS shader cache
+  does not keep the largest pipelines: CLM lake's step kernel compiled again
+  from scratch hours after its first build.
+
+`WOOF_METAL_COMPILE_LOG=1` prints each library, dynamic-library and
+pipeline build's time, and where it came from.
+
+| WSM6 (`wsm6`, M3 Max) | translate | library | pipelines | total |
+|---|---|---|---|---|
+| first build | 3.1 s | 16 s (dynamic library, built) | 0.03 s | 19 s |
+| next process, OS cache lost | 0.2 s (cache) | 0.04 s (disk + thin) | 0.0 s | 0.2 s |
+| before: next process, OS cache lost | 3.1 s | 4.0 s | 0.0 s (archive) | 7 s |
+| before: first build | 3.1 s | 4.0 s | 7.0 s | 14 s |
+
+Nothing new ships in the wheel: the caches fill on first use. Prefilling
+them ahead of time (`tools/metal_translation_census.py` without
+`--translate-only` builds every unit) moves the first build off the run.
 
 ## Address spaces
 

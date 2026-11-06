@@ -226,6 +226,7 @@ tests/test_metal_memory_order.py  needs the mlx package (an Apple-silicon Metal 
 tests/test_metal_translation_gaps.py  needs the mlx package (an Apple-silicon Metal host, pixi environment mlx); the macOS mlx leg runs it, and no CUDA or Linux leg can (234f3525d).
 tests/test_metal_hex_translation.py  needs the mlx package (an Apple-silicon Metal host, pixi environment mlx); the macOS mlx leg runs it, and no CUDA or Linux leg can (c5bb90602).
 tests/test_metal_facade_hex.py  needs the mlx package (an Apple-silicon Metal host, pixi environment mlx); the macOS mlx leg runs it, and no CUDA or Linux leg can (16a201877).
+tests/test_metal_aot.py  needs the mlx package (an Apple-silicon Metal host, pixi environment mlx); the macOS mlx leg runs it, and no CUDA or Linux leg can.
 tests/test_posted_model_source.py  needs WOOF_POSTED_TEST_INPUTS naming real posted GRIB2 files and WOOF_POSTED_TEST_LIBRARY naming a built native GRIB2 reader, neither of which ships in this repository; a leg that stages both runs it (9c5ebdda9).
 tests/test_radtran_reference.py  needs a host C++ compiler (clang++, g++ or c++) on PATH to build the radiative-transfer reference; every hosted leg has one, so it runs there (cc980b540).
 tests/test_theta_m_whole_model.py  needs a CUDA device, and skips under GPUWM_WRF_EXACT=1 because the idealized base state is not the strict thb = 300 carrier; tests/test_bigstep_thetam_wrf471_parity.py grades the strict words (c783c9393).
