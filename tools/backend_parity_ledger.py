@@ -173,6 +173,9 @@ def build_receipt(backend: str, sweep: Path) -> dict:
              if environment.get(k) != v}
     if wrong:
         raise SystemExit(f"{sweep}: not the sweep's environment: {wrong}")
+    if environment.get("backend") != backend:
+        raise SystemExit(f"{sweep}: traced on backend {environment.get('backend')!r}, "
+                         f"not {backend!r}")
     return {"schema": RECEIPT_SCHEMA, "backend": backend,
             "environment": environment,
             "host_words": json.loads(host.read_text()) if host.exists() else {},

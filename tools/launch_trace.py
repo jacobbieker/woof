@@ -139,10 +139,16 @@ ENVIRONMENT_VARIABLES = ("GPUWM_WRF_EXACT", "GPUWM_NUMERICS", "WOOF_LAUNCH_TRACE
 
 def _record_environment(directory: str) -> None:
     """``environment.json`` in the trace directory: the traced process's
-    own values of :data:`ENVIRONMENT_VARIABLES`, so that a receipt states
-    the environment the sweep ran in, not the one it was meant to."""
+    own values of :data:`ENVIRONMENT_VARIABLES` and the backend it runs,
+    so that a receipt states the environment the sweep ran in, not the one
+    it was meant to."""
+    from woof import backend
+    record = {k: os.environ.get(k) for k in ENVIRONMENT_VARIABLES}
+    # the backend the process runs, which an unset WOOF_BACKEND leaves to
+    # woof.backend's default
+    record["backend"] = backend.active()
     with open(os.path.join(directory, "environment.json"), "w", encoding="utf-8") as f:
-        json.dump({k: os.environ.get(k) for k in ENVIRONMENT_VARIABLES}, f, sort_keys=True)
+        json.dump(record, f, sort_keys=True)
 
 
 def install(path: str | None = None) -> None:
