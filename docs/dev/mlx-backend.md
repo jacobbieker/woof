@@ -263,7 +263,10 @@ Each open gap names its cause. The causes so far are:
 - the vendored binary64 `tgamma`;
 - the urban kernel's device-address tables;
 - a CUDA-only test;
-- the projection's host libm (macOS against glibc).
+- the projection's host libm (macOS against glibc);
+- the independent powf: Metal's correctly rounded strict power against
+  CuPy's powf. The `mlx-cuda-powf` receipt, swept with
+  `WOOF_STRICT_POWF=cuda`, shows the opt-in closing it.
 
 The per-backend receipts are in `tests/data/backend_receipts`.
 `tools/backend_parity_ledger.py` documents the sweep and regenerates both.
