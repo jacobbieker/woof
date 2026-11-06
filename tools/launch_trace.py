@@ -120,6 +120,37 @@ def set_output(path: str) -> None:
     open(path, "w").close()
 
 
+def _zero_empty() -> None:
+    """WOOF_LAUNCH_TRACE_ZERO_EMPTY=1: ``cupy.empty``/``empty_like`` give
+    zeros.  An uninitialised buffer holds the pool's old words on CUDA and
+    other words on MLX; a launch that writes part of it, or writes a value
+    the old words already held, then digests differently on the two
+    backends although it computed the same words.  With zeros on both, the
+    traces compare what the kernels computed."""
+    import cupy
+    cupy.empty = cupy.zeros
+    cupy.empty_like = cupy.zeros_like
+
+
+#: The variables that decide a trace's words, written beside the traces.
+ENVIRONMENT_VARIABLES = ("GPUWM_WRF_EXACT", "GPUWM_NUMERICS", "WOOF_LAUNCH_TRACE_ZERO_EMPTY",
+                         "WOOF_BACKEND")
+
+
+def _record_environment(directory: str) -> None:
+    """``environment.json`` in the trace directory: the traced process's
+    own values of :data:`ENVIRONMENT_VARIABLES` and the backend it runs,
+    so that a receipt states the environment the sweep ran in, not the one
+    it was meant to."""
+    from woof import backend
+    record = {k: os.environ.get(k) for k in ENVIRONMENT_VARIABLES}
+    # the backend the process runs, which an unset WOOF_BACKEND leaves to
+    # woof.backend's default
+    record["backend"] = backend.active()
+    with open(os.path.join(directory, "environment.json"), "w", encoding="utf-8") as f:
+        json.dump(record, f, sort_keys=True)
+
+
 def install(path: str | None = None) -> None:
     if _STATE.get("installed"):
         if path:
@@ -127,6 +158,9 @@ def install(path: str | None = None) -> None:
         return
     _STATE["installed"] = True
     set_output(path or os.environ["WOOF_LAUNCH_TRACE"])
+    _record_environment(os.path.dirname(os.path.abspath(_STATE["path"])))
+    if os.environ.get("WOOF_LAUNCH_TRACE_ZERO_EMPTY") == "1":
+        _zero_empty()
     from woof import backend
     if backend.requested() == "host":
         from woof.backend.host import loader as host_loader

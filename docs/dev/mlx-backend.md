@@ -250,6 +250,26 @@ Traced on both machines, its word tests, D3's and the WRF oracle tests agree
 launch for launch (`tests/data/receipts/partial-nest-d4/backend-launch-words.txt`).
 The envelope receipts per backend are in the same directory.
 
+## The parity ledger
+
+`woof/verify/backend_parity_ledger.json` records each test of a strict sweep
+(the WRF 4.6.1 parity and column-exact tests, NSSL-2, the partial-nest
+kernel words and the projection tests). For each test it gives the outcome
+on both backends and whether the words of every kernel launch agree.
+Each open gap names its cause. The causes so far are:
+
+- NaN payloads (`0x7FC00000` on Metal, `0x7FFFFFFF` on CUDA);
+- the vendored binary64 `tgamma`;
+- the urban kernel's device-address tables;
+- a CUDA-only test;
+- the projection's host libm (macOS against glibc).
+
+The per-backend receipts are in `tests/data/backend_receipts`.
+`tools/backend_parity_ledger.py` documents the sweep and regenerates both.
+`tests/test_backend_parity_ledger.py` holds the ledger to the receipts.
+When a gap closes, regenerate the receipts and the ledger, then drop the
+gap's cause.
+
 ## hex (MPAS) on Metal
 
 The hex lane resolves kernels through `woof.hex.cuda_backend.KernelCache`. Its
