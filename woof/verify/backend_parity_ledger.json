@@ -2,7 +2,8 @@
  "schema": "woof.backend-parity-ledger/v1",
  "receipts": {
   "cuda": "tests/data/backend_receipts/cuda.json",
-  "mlx": "tests/data/backend_receipts/mlx.json"
+  "mlx": "tests/data/backend_receipts/mlx.json",
+  "mlx-cuda-powf": "tests/data/backend_receipts/mlx-cuda-powf.json"
  },
  "environment": {
   "GPUWM_WRF_EXACT": "1",
@@ -66,6 +67,16 @@
    "summary": "The Lambert projection (woof.static.lambert) runs on the host through the platform's C library (woof.core.host_libm), which is macOS's libm on the Mac and glibc on pb. Every field of every portable grid differs, and the projection's words feed the kernels' map factors, Coriolis and rotation.",
    "evidence": "The grids of tests/fixtures/portable_static_grids.json (nests applied, as in tests/test_static_projection_portability.py), in binary64: 253,227 of 437,808 words differ. The median difference is 2 ULP, 99 % are within 6 ULP, and the largest is 52,382 ULP (rotation_m near zero). The projection tests pass on both machines because each compares with its own libm.",
    "closes_when": "both hosts carry the opt-in glibc 2.39 transcription (`pixi run build-native-glibc239`; tests/test_host_libm.py), which is off by default because it is LGPL"
+  },
+  "independent-powf": {
+   "summary": "Under GPUWM_WRF_EXACT=1, Metal's strict float32 power is WOOF's correctly rounded powf (woof/backend/translate/strict_powf.cuh), and CUDA's is CuPy's powf, which is not correctly rounded. The NSSL-2 oracle ran WRF on the CUDA adapter's Exner function (in_exner), so the step on Metal starts from 273 different Exner words of 4800 and leaves WRF in about 200 output words. The test marks this as an expected failure.",
+   "evidence": "Against strict CuPy on an RTX A6000, CuPy's powf differs from the correctly rounded word at 343,898 of the 8,388,608 binary32 x in [0.5, 1) at y = 287/1004.5, at 404,644 of 8,388,608 random pairs, and at 0 of 234 special-value pairs. WOOF's powf on Metal differs from correct rounding at 0 of all of them (tools/strict_powf/reference.py).",
+   "closes_when": "the opt-in WOOF_STRICT_POWF=cuda is set (a source checkout only; NOTICE). The mlx-cuda-powf receipt measures it: each of these tests passes as on CUDA."
+  },
+  "mlx-only-test": {
+   "summary": "The test checks that exact binary32 midpoints of pow round to even. Only WOOF's correctly rounded powf promises that, so the test skips on CUDA and with the opt-in.",
+   "evidence": "junit: skipped on CUDA, passed on MLX.",
+   "closes_when": "never: the subject is the correctly rounded powf"
   }
  },
  "kernel_causes": {},
@@ -75,8 +86,8 @@
   "tests/test_noah_wrf461_parity.py::test_land_ice_columns_are_bitwise_against_wrf": "nan-payload",
   "tests/test_noah_wrf461_parity.py::test_noah_cuda_column_holds_its_measured_distance_from_wrf": "nan-payload",
   "tests/test_noah_wrf461_parity.py::test_sfcdiags_after_the_column_is_bitwise_against_wrf": "nan-payload",
-  "tests/test_nssl2_column_oracle.py::test_production_step_matches_wrf[first-step]": "vendor-tgamma",
-  "tests/test_nssl2_column_oracle.py::test_production_step_matches_wrf[itimestep2]": "vendor-tgamma",
+  "tests/test_nssl2_column_oracle.py::test_production_step_matches_wrf[first-step]": "independent-powf",
+  "tests/test_nssl2_column_oracle.py::test_production_step_matches_wrf[itimestep2]": "independent-powf",
   "tests/test_sfclay_classic_wrf461_parity.py::test_classic_atanf_is_the_mynn_units_atanf_everywhere": "nan-payload",
   "tests/test_shinhong_wrf461_parity.py::test_shinhong_cuda_column_holds_its_measured_distance_from_wrf": "nan-payload",
   "tests/test_shinhong_wrf461_parity.py::test_shinhong_cuda_determinism_pair_is_bit_identical": "nan-payload",
@@ -93,10 +104,15 @@
   "tests/test_urban_ucm_wrf461_parity.py::test_gpu_replays_original_v461_words[ucm-nlcd-gr]": "pointer-table",
   "tests/test_urban_ucm_wrf461_parity.py::test_gpu_replays_original_v461_words[ucm-nlcd-ts2]": "pointer-table",
   "tests/test_wsm6r_wrf461_column_exact.py::test_wsm6r_revised_term_one_bit_control": "nan-payload",
-  "tests/test_wsm6r_wrf461_column_exact.py::test_wsm6r_strict_full_field_hashes": "nan-payload"
+  "tests/test_wsm6r_wrf461_column_exact.py::test_wsm6r_strict_full_field_hashes": "nan-payload",
+  "tests/test_strict_float32_power.py::test_exact_midpoints_round_to_even": "mlx-only-test"
  },
  "host_causes": {
   "lambert": "projection-libm"
+ },
+ "residual_causes": {
+  "tests/test_nssl2_column_oracle.py::test_production_step_matches_wrf[first-step]": "vendor-tgamma",
+  "tests/test_nssl2_column_oracle.py::test_production_step_matches_wrf[itimestep2]": "vendor-tgamma"
  },
  "host_entries": {
   "lambert:1000:coriolis_m": {
@@ -1298,7 +1314,7 @@
   },
   "tests/test_nssl2_column_oracle.py::test_production_step_matches_wrf[first-step]": {
    "cuda": "passed",
-   "mlx": "passed",
+   "mlx": "skipped",
    "launches": "diverge",
    "first_divergence": {
     "cuda": [
@@ -1310,15 +1326,22 @@
      "nssl2_sediment_all_parallel_64"
     ],
     "unmatched": {
-     "cuda": 1,
-     "mlx": 1
+     "cuda": 8,
+     "mlx": 8
     }
    },
-   "cause": "vendor-tgamma"
+   "cause": "independent-powf",
+   "closed_by_opt_in": {
+    "receipt": "mlx-cuda-powf",
+    "outcome": "passed",
+    "launches": "diverge",
+    "residual_cause": "vendor-tgamma",
+    "closed": true
+   }
   },
   "tests/test_nssl2_column_oracle.py::test_production_step_matches_wrf[itimestep2]": {
    "cuda": "passed",
-   "mlx": "passed",
+   "mlx": "skipped",
    "launches": "diverge",
    "first_divergence": {
     "cuda": [
@@ -1330,11 +1353,18 @@
      "nssl2_fill_velocity_gamma"
     ],
     "unmatched": {
-     "cuda": 2,
-     "mlx": 2
+     "cuda": 9,
+     "mlx": 9
     }
    },
-   "cause": "vendor-tgamma"
+   "cause": "independent-powf",
+   "closed_by_opt_in": {
+    "receipt": "mlx-cuda-powf",
+    "outcome": "passed",
+    "launches": "diverge",
+    "residual_cause": "vendor-tgamma",
+    "closed": true
+   }
   },
   "tests/test_partial_nest_d4_kernel_words.py::test_extended_column_fill_words[0]": {
    "cuda": "skipped",
@@ -2053,14 +2083,21 @@
    "first_divergence": null,
    "cause": null
   },
-  "tests/test_strict_float32_power.py::test_exner_power_matches_cuda_words": {
+  "tests/test_strict_float32_power.py::test_exact_midpoints_round_to_even": {
+   "cuda": "skipped",
+   "mlx": "passed",
+   "launches": "none",
+   "first_divergence": null,
+   "cause": "mlx-only-test"
+  },
+  "tests/test_strict_float32_power.py::test_exner_power_words": {
    "cuda": "passed",
    "mlx": "passed",
    "launches": "none",
    "first_divergence": null,
    "cause": null
   },
-  "tests/test_strict_float32_power.py::test_power_matches_cuda_powf_words": {
+  "tests/test_strict_float32_power.py::test_power_rows": {
    "cuda": "passed",
    "mlx": "passed",
    "launches": "none",
@@ -2932,14 +2969,15 @@
   }
  },
  "summary": {
-  "tests": 350,
+  "tests": 351,
   "agree": 326,
-  "gaps": 24,
+  "gaps": 25,
   "gaps_by_cause": {
    "cuda-only-test": 1,
+   "independent-powf": 2,
+   "mlx-only-test": 1,
    "nan-payload": 12,
-   "pointer-table": 9,
-   "vendor-tgamma": 2
+   "pointer-table": 9
   },
   "host_words": 20,
   "host_words_differing": 20
