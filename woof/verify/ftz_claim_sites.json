@@ -11,10 +11,10 @@
   ],
   "attribution_note": "route/mechanism attribution is judgment across five measured routes and is not machine-derivable; unattributed records carry asserted_token: null and the gate requires only that a token, once written, agrees with the receipt",
   "anchoring_note": "a site is its file plus the exact text of its line (anchor, anchor_sha256), and identical lines in one file are counted; line is where the generator last found the site, a hint the check does not fail on, so lines added or removed above a claim leave the census valid",
-  "site_count": 4649,
+  "site_count": 4657,
   "site_count_by_kind": {
     "behavioural": 67,
-    "prose": 4582
+    "prose": 4590
   },
   "sites": [
     {
@@ -712,7 +712,7 @@
     },
     {
       "file": "docs/dev/mlx-backend.md",
-      "line": 402,
+      "line": 405,
       "kind": "prose",
       "anchor": "`.ftz`);",
       "anchor_sha256": "527adfd4b49e44eb59dad37456dfe6dc5874dc4b97390be37d7e0162a40973e3",
@@ -2861,6 +2861,94 @@
       "kind": "prose",
       "anchor": "\"tests/test_ysu_wrf461_parity.py::test_ysu_is_bitwise_wrf_outside_the_flushed_subnormal_lanes\": {\"outcome\":\"passed\",\"launches\":[[\"ysu_column\",\"d260481049e4\"],[\"ysu_column\",\"d260481049e4\"],[\"ysu_column\",\"bdd3668bdb19\"],[\"ysu_column\",\"bdd3668bdb19\"]]},",
       "anchor_sha256": "8381ad33448c61c4b99359788fb35da6464eae8fb8b25b1a44f7d546471aeb4a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/data/backend_receipts/mlx-cuda-powf.json",
+      "line": 105,
+      "kind": "prose",
+      "anchor": "\"tests/test_morrison_wrf461_parity.py::test_fixture_spans_phases_thresholds_signed_zero_and_subnormals\": {\"outcome\":\"passed\",\"launches\":[]},",
+      "anchor_sha256": "b7abb5be3f548d001b15d29edd478e5ed403af12a8eaf9ae4eaf997a28de1d10",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/data/backend_receipts/mlx-cuda-powf.json",
+      "line": 130,
+      "kind": "prose",
+      "anchor": "\"tests/test_noah_wrf461_parity.py::test_case_18_takes_wrfs_snow_branch_on_a_subnormal_snow\": {\"outcome\":\"passed\",\"launches\":[[\"noah_column\",\"41a36ba0d32a\"]]},",
+      "anchor_sha256": "9d09988542b4ca32b98b8ad0fab181fa750250730c5c2851ccddd365421c478a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/data/backend_receipts/mlx-cuda-powf.json",
+      "line": 237,
+      "kind": "prose",
+      "anchor": "\"tests/test_shinhong_wrf461_parity.py::test_shinhong_cuda_ftz_flushes_every_subnormal_tendency_wrf_wrote\": {\"outcome\":\"passed\",\"launches\":[]},",
+      "anchor_sha256": "8999c3e6457c420b1353d9323d05c8a2da9be19849822ee25d842ea0b6cbfc7b",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/data/backend_receipts/mlx-cuda-powf.json",
+      "line": 311,
+      "kind": "prose",
+      "anchor": "\"tests/test_wsm6_wrf461_column_exact.py::test_default_build_is_wrf461_outside_the_subnormal_columns\": {\"outcome\":\"passed\",\"launches\":[]},",
+      "anchor_sha256": "3a39b243d180da2ee8001667e7ffaf1a6148e958da4a118ac6c9e5ad7e6ad5b0",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/data/backend_receipts/mlx-cuda-powf.json",
+      "line": 332,
+      "kind": "prose",
+      "anchor": "\"tests/test_ysu_wrf461_parity.py::test_a_positive_subnormal_br_takes_wrfs_stable_arm\": {\"outcome\":\"passed\",\"launches\":[[\"ysu_column\",\"d260481049e4\"],[\"ysu_column\",\"bdd3668bdb19\"]]},",
+      "anchor_sha256": "8ef620f8d92876fcc409ca06942c1fa88a5f3e186a270369bb317c7364b67387",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/data/backend_receipts/mlx-cuda-powf.json",
+      "line": 336,
+      "kind": "prose",
+      "anchor": "\"tests/test_ysu_wrf461_parity.py::test_ftz_flushes_every_subnormal_tendency_wrf_wrote\": {\"outcome\":\"skipped\",\"launches\":[]},",
+      "anchor_sha256": "c7f69b5aa2ef7057b3817b0ec6fa663e227bb72c87940baa032a14b82fbc1632",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/data/backend_receipts/mlx-cuda-powf.json",
+      "line": 338,
+      "kind": "prose",
+      "anchor": "\"tests/test_ysu_wrf461_parity.py::test_strict_build_writes_every_subnormal_tendency_wrf_wrote\": {\"outcome\":\"passed\",\"launches\":[[\"ysu_column\",\"d260481049e4\"],[\"ysu_column\",\"bdd3668bdb19\"]]},",
+      "anchor_sha256": "0f1388d91782e49be17e5b21bd469f1b1f9254b04a28d4cffa47d394e4a15ec5",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/data/backend_receipts/mlx-cuda-powf.json",
+      "line": 341,
+      "kind": "prose",
+      "anchor": "\"tests/test_ysu_wrf461_parity.py::test_ysu_is_bitwise_wrf_outside_the_flushed_subnormal_lanes\": {\"outcome\":\"passed\",\"launches\":[[\"ysu_column\",\"d260481049e4\"],[\"ysu_column\",\"bdd3668bdb19\"]]},",
+      "anchor_sha256": "d5910f6762304fe4da87bdab449f73360d655e1dbbc667a43dee3949378d5420",
       "route": null,
       "mechanism": null,
       "asserted_token": null,
