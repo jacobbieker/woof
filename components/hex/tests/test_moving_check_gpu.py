@@ -21,9 +21,13 @@ cupy = pytest.importorskip("cupy")
 
 
 def test_balanced_moves_do_not_jolt_and_conserve_on_the_lts_executor(tmp_path):
+    from woof.backend import requested
     from woof.hex import engines
     from woof.hex.moving_jolt_check import run_check
 
+    if requested() != "cuda":
+        pytest.skip("the LTS reserve census adds binary64 and 64-bit counters atomically; "
+                    "Apple GPUs have 64-bit atomic min/max only")
     for spec in (engines.MESH, engines.GEOMETRY):
         path, where = engines.locate(spec)
         if path is None:
