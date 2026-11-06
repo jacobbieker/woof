@@ -17,7 +17,7 @@
     "call_sha256": "0127de043489f57c52d8ae26b584d5a9d9811555500e57d6cdae106fe39d1518",
     "constructor": "RawModule",
     "factory": "_observed_module",
-    "factory_sha256": "dabe5d612330492af01193e37e3327a3278a5a28f9150e6aa8a105615a10ff63",
+    "factory_sha256": "9463c85e194a7289d4117af5ad3418b85e31e085c1070035d18a894901348482",
     "file": "woof/verify/smallstep_bookkeeping_oracle.py",
     "status": "unresolved"
    },
@@ -129,7 +129,7 @@
     "call_sha256": "08b412438fea2e6dba53d679fc2ae725f2afef478998519b9395664a71b27959",
     "constructor": "RawModule",
     "factory": "horizontal_port_outputs",
-    "factory_sha256": "34e2b0b04b91fc4d3a2cd87613bd2244913abb422f3c45743b1a91e5e68857e0",
+    "factory_sha256": "d80af78d388ebfcd114d0cc32aa987df0ddfa84aed6f14612a18faa5a8b9fd52",
     "file": "woof/verify/smallstep_horizontal_oracle.py",
     "status": "unresolved"
    },
@@ -542,14 +542,6 @@
     "status": "unresolved"
    },
    {
-    "call_sha256": "520020c6925b957b22c1a60df15a4f664ff4dfafbb56c89d75db50cd4d489686",
-    "constructor": "ElementwiseKernel",
-    "factory": "_subnormal_arith",
-    "factory_sha256": "ea09c5e736c0cca0962b9f67d84b85c4d845993b52a5e1e710fd775d2f6e5310",
-    "file": "woof/backend/facade/_ops.py",
-    "status": "unresolved"
-   },
-   {
     "call_sha256": "529a111e9cb4230800289db2d8008a6c688c7e4a48d5b0aeaa73316db7ee3c7f",
     "constructor": "RawKernel",
     "factory": "_kernel",
@@ -721,6 +713,14 @@
     "call_sha256": "651db60f8182e91ed6265be92900084c8b35967783f3aa53f3c3f5fd4d3994f3",
     "constructor": "RawModule",
     "factory": "__init__",
+    "factory_sha256": "40c8f1a5df68275bae6a29b680b7598b8d40c0b299614cdcbba5129ebda8bd3f",
+    "file": "woof/backend/hostfacade/__init__.py",
+    "status": "unresolved"
+   },
+   {
+    "call_sha256": "651db60f8182e91ed6265be92900084c8b35967783f3aa53f3c3f5fd4d3994f3",
+    "constructor": "RawModule",
+    "factory": "__init__",
     "factory_sha256": "44819f5afe594da0cca391170edd6a3e72c51fdbc0afed8b2d4bfdab66f03387",
     "file": "woof/backend/facade/__init__.py",
     "status": "unresolved"
@@ -739,14 +739,6 @@
     "factory": "_kernel",
     "factory_sha256": "f4a5cbae6eba8ca6867907feb6b48a64e25c9fe50f85465c27986af1a877d2ca",
     "file": "woof/hex/moving_advection_cuda.py",
-    "status": "unresolved"
-   },
-   {
-    "call_sha256": "66ca35416f1d6cc1ece5d4cf488c39b5a39d07de32771d732b69e7bbd049a2cd",
-    "constructor": "RawModule",
-    "factory": "direct_regional_module",
-    "factory_sha256": "2d91568b5d8e00a44ccb23ef64aa812f5d2dbd1a51ce31213833ef44b886a0fe",
-    "file": "woof/hex/metal_lane.py",
     "status": "unresolved"
    },
    {
@@ -1326,6 +1318,14 @@
     "status": "resolved_literal"
    },
    {
+    "call_sha256": "b48fdbd7eb956be44e09b9bf49b2bcc050129607422040e5118ae28dfc3a7e6a",
+    "constructor": "ElementwiseKernel",
+    "factory": "_subnormal_arith",
+    "factory_sha256": "e1926b07eec64d695c126a816de40ebe0a6a3221ec13f7d9ef8c0b0c8212f417",
+    "file": "woof/backend/facade/_ops.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "b716c0ff8c7ba8441e590cc9f564b47e6f59bce66ea9c7690c131f8e0e6c79a0",
     "constructor": "compile_using_nvrtc",
     "factory": "_module",
@@ -1888,6 +1888,14 @@
   ],
   "cuda_files": [
    {
+    "file": "woof/backend/translate/cuda_powf.cuh",
+    "sha256": "9d3fff2bea90e23d4d74f12fe840cbb698d4652140fbe8da305937cf2a9397f2"
+   },
+   {
+    "file": "woof/backend/translate/include/cupy/complex.cuh",
+    "sha256": "bc156f6771efd56a16c60cf6cab01c24c182c6fd5c7ed58b0990a34ffeeb3bb6"
+   },
+   {
     "file": "woof/backend/translate/vendor_libm64.cuh",
     "sha256": "a60f95c676724e7ef13d4b105c19f2df09c98625e813fd3c9dc3626122665f67"
    },
@@ -2313,7 +2321,19 @@
    },
    {
     "file": "woof/core/kernels/morrison.cu",
-    "sha256": "3fd84d25ccae3b3616be2f99e5f4ddc594256c2ecbb457aa0381f724db481054"
+    "sha256": "010c56a68408bc648a30eec3e13888ff9cd638772ffa96968d1d8dcf7fb8f25a"
+   },
+   {
+    "file": "woof/core/kernels/morrison_aero.cu",
+    "sha256": "5fb9886ce8254454859bf31dcb5b5da605a230d57ed59e7c7f9bb5193e5441ed"
+   },
+   {
+    "file": "woof/core/kernels/morrison_aero_constants.cuh",
+    "sha256": "41218f02d92fe6d1de4a73d40e954ec80854c140721785ee6d9ed4c5fd966917"
+   },
+   {
+    "file": "woof/core/kernels/morrison_aero_support.cuh",
+    "sha256": "2e561bb61723399da409eef657e15c90f47edde9ba1fb76d4c02850b6f0c6287"
    },
    {
     "file": "woof/core/kernels/morrison_constants.cuh",
@@ -3247,19 +3267,31 @@
    },
    {
     "file": "woof/backend/facade/_elementwise.py",
-    "sha256": "0bc114de875b64005531b944ef5fe2ce37fdc348551da33429ceefe95f9024cb"
+    "sha256": "b30dc707cb06cb2ede9a61d61d991f28b4ae7ca1c1dca77ed9dfd95c4b9e6d5a"
    },
    {
     "file": "woof/backend/facade/_ops.py",
-    "sha256": "49b955a3a67f835f65cf61b8e510b093c554f81a2b553db87f94670a2822f1cc"
+    "sha256": "0508d5db2ac4c0e41408fdccff6d6d3b08cad63f7c9d660fec5a84c3ea8e6095"
    },
    {
     "file": "woof/backend/facade/cuda.py",
-    "sha256": "63f28d0c8b495bd5e2b352855379828465ee7ee255e9b9441a3d6d8d796180d0"
+    "sha256": "c7a13182fb72b751fa835d5162da9951fd27899f18c4494824dbe45b3522b231"
+   },
+   {
+    "file": "woof/backend/host/loader.py",
+    "sha256": "44224433f68f98939313f8d10aac5c702e94fff2d80d6c533193392a6619c531"
+   },
+   {
+    "file": "woof/backend/hostfacade/__init__.py",
+    "sha256": "b8921475fbb0a97f009dba15d5cf3cf08879eb5e05a5c384a377c41655520531"
+   },
+   {
+    "file": "woof/backend/hostfacade/_elementwise.py",
+    "sha256": "d4bef406409d6923be0c41b76497b1813d06cabf8f6c9694d9bc9cba1069a856"
    },
    {
     "file": "woof/backend/translate/__init__.py",
-    "sha256": "b1c04992df09c9b1613fc59b67c7067819351d7afc5094648242aa91c90b39fa"
+    "sha256": "3bfb26395ed4fa2cdd2a16e7e208cddfd18add98cc8bd86d261754b980bc20a5"
    },
    {
     "file": "woof/compiler_metadata.py",
@@ -3323,27 +3355,27 @@
    },
    {
     "file": "woof/core/kernel_frame_recordings.py",
-    "sha256": "7dacad1fe548e49b4d1613e3422694856bb79f7caee1a5192668e777485a1fca"
+    "sha256": "90515d25e5009e2894db1b63ce64dd0e65b5908bbd70426d654f2c01cffd0811"
    },
    {
     "file": "woof/core/kernels/__init__.py",
-    "sha256": "3bb046593576af8802f7267c169997254aadcea46ad951f95a969f3b1a3be902"
+    "sha256": "a0a3e1baf0c93375993be05f8c895ae3cbc162ca1881f6fbf192566f54209ab1"
    },
    {
     "file": "woof/core/kf.py",
-    "sha256": "148a22017a18cec3177bd0112b23ed291bbf8395a553e9e948ecb361faa72b50"
+    "sha256": "379c00d8c54e68440b80e7ae41eab83f4c74d454040a787cc258d99f2eabe3e7"
    },
    {
     "file": "woof/core/microphysics.py",
-    "sha256": "f92bca73ce7072a1ff5e6a3ffb37aa36d535c1c8ccb18743a4b29bb61d51f849"
+    "sha256": "a4d1e8d24714ec8e00aca2f4407c8b0f8a8b4c90ab6cc155fad97b5eb491abe6"
    },
    {
     "file": "woof/core/microphysics_transition.py",
-    "sha256": "ffd647fd9e1ace351f722965943056a282681a963086a2f3e64269673de84943"
+    "sha256": "02034f34534e884d2aef193875f8607aed95a11551edbc1cf667b3dfb8b0729d"
    },
    {
     "file": "woof/core/moist.py",
-    "sha256": "823ec60d8524473737d449db8ea9cfb7d3a95156d5864091f6ead117e302fb0a"
+    "sha256": "3bc29028065dcd7add7501b0130501615517a2aa9927b2138e795d13a1b655ef"
    },
    {
     "file": "woof/core/morrison.py",
@@ -3415,15 +3447,15 @@
    },
    {
     "file": "woof/core/physics.py",
-    "sha256": "9fc2ad5968e711a6867036b2057fd81aef41fb29e92cdca4e4a06794689793e1"
+    "sha256": "0123650f5762bc92ebe008c5088270a6b4ec6e3a6463ffb2fa57e8949849e0f6"
    },
    {
     "file": "woof/core/preflight.py",
-    "sha256": "dadaacf31e858c323d131c8fe1c994d88b72603de4b1cdabb290aa7a706ad9e9"
+    "sha256": "53b3b90f2fcf1985f6450ddb138d8680d16b24d972d57d7e1696fe40934a8176"
    },
    {
     "file": "woof/core/refl.py",
-    "sha256": "5b023e534fd2d9684195e8f02b409d810c483320c6f1cc7d1c16e9115f5384b1"
+    "sha256": "072a27dccdf4471a1cc78039066f7ed5fee42b537d97bda71253d9ccbc183669"
    },
    {
     "file": "woof/core/rrtm_lw.py",
@@ -3435,7 +3467,7 @@
    },
    {
     "file": "woof/core/rrtmg_legacy.py",
-    "sha256": "150235cc8bbb56f25e180896f2e15e2dea1a33a3f1e70e3c3b18b7eae30f2d96"
+    "sha256": "577a6863c0ee8f6e048f697c6bc80bdad262f978993b81725b2430b9f019c3b6"
    },
    {
     "file": "woof/core/rrtmg_legacy_device.py",
@@ -3832,10 +3864,6 @@
    {
     "file": "woof/hex/lagged_heating_v841.py",
     "sha256": "7442b10ab447b67672fe7f596f590c1c3017234e6841b7669c643917656dcbfe"
-   },
-   {
-    "file": "woof/hex/metal_lane.py",
-    "sha256": "090679bb0bb3b7383b9ad5736325f465fc3d5da5f5ecfa80db1da31a1e3b20b0"
    },
    {
     "file": "woof/hex/mixing_v842.py",
@@ -4247,7 +4275,7 @@
    },
    {
     "file": "woof/nvrtc_ptx_cache.py",
-    "sha256": "9c159c98ac13e92eb0423c7a61c998a4d221e4ec715befd6c926fdc46e087459"
+    "sha256": "473ef0ed3efcdc1b0d6c33e99e7889fed4b119829bdd6110088d0ffd27e57a55"
    },
    {
     "file": "woof/ocean/coupling.py",
@@ -4287,7 +4315,7 @@
    },
    {
     "file": "woof/verify/advect_oracle.py",
-    "sha256": "2e8e2aec73e5ceecd7430657b4cee5fea82894deaeec390edab7a9a4e6791a6d"
+    "sha256": "ccbfc38305e57c76014ffb8176bd76e1107076ba48bf4e4ac639c7cb4b30f709"
    },
    {
     "file": "woof/verify/gwdo_kim_oracle.py",
@@ -4299,15 +4327,15 @@
    },
    {
     "file": "woof/verify/smallstep_bookkeeping_oracle.py",
-    "sha256": "aa65f7af6e22588e81d134fb596a867267294c731c679892d5e4e87b80671db4"
+    "sha256": "ff4a0ca52b84e63a5faec4623235330172a60b60e49aa51a1761816612f05499"
    },
    {
     "file": "woof/verify/smallstep_horizontal_oracle.py",
-    "sha256": "ccadf0099ca5e4b191148cdee7022b28e09c4fffba523d2a05ee0f9f8dd20758"
+    "sha256": "c03fec104a0dbaff61ed61582944e80d2c201467f6da78649ca7589455b34dca"
    },
    {
     "file": "woof/verify/smallstep_vertical_oracle.py",
-    "sha256": "e4ceef690dd5c802230d9b2822a49510439197917411eef9879404dda997a2c7"
+    "sha256": "1eff93944485027a42aed2f786071901b5c8192389171617bb68075e025b824a"
    },
    {
     "file": "woof/verify/wsm6_process_budget.py",
@@ -4321,6 +4349,26 @@
    },
    {
     "file": "woof/backend/facade/_elementwise.py",
+    "sha256": "126819c122e8957029943dedc0e682d11ad0e7ab9f6a58326ef30aa67c002206"
+   },
+   {
+    "file": "woof/backend/host/loader.py",
+    "sha256": "87cf8eb09a6787526bdc8446a76383298fd5f57b6fd4f7b6abaf65d0e2074267"
+   },
+   {
+    "file": "woof/backend/host/loader.py",
+    "sha256": "94485b54350ca55089502cdf5951120a58b6def7f95d56090b89a9f76933e5c7"
+   },
+   {
+    "file": "woof/backend/host/loader.py",
+    "sha256": "c77cee97ba0ad9608c3c9d1762c2b61d55cdc2eb84394d812cf560d2025064ae"
+   },
+   {
+    "file": "woof/backend/hostfacade/_elementwise.py",
+    "sha256": "126819c122e8957029943dedc0e682d11ad0e7ab9f6a58326ef30aa67c002206"
+   },
+   {
+    "file": "woof/backend/hostfacade/_elementwise.py",
     "sha256": "126819c122e8957029943dedc0e682d11ad0e7ab9f6a58326ef30aa67c002206"
    },
    {

@@ -37,6 +37,16 @@ def _shipped():
     return paths
 
 
+#: The configuration each shipped band certifies, by name.  A band records
+#: only the config's digest; docs/public/VERIFICATION.md names this one by
+#: its contents (the four-domain 12-18Z Thompson / legacy-RRTMG reference
+#: config, whose SHA-256 is the band's ``config_sha256``).
+BAND_CONFIGS = {
+    "10d6e178d96648e35b826217cc001a1f598232bf6ceabd9ce07074a1f65e2031":
+        "configs/real74_thompson_1218z_rrtmg_legacy_4dom.toml",
+}
+
+
 # --------------------------------------------------------------------------
 # AC7 -- a plain JSON reader can check the band, and every column is covered
 # --------------------------------------------------------------------------
@@ -57,9 +67,16 @@ def test_the_band_validates_with_no_gpuwm_import(band_path, tmp_path):
         encoding="utf-8")
     import subprocess
 
+    import os
+
+    # Without WOOF_BACKEND: the pixi mlx and cpu environments' startup hook
+    # (woof/backend/startup/sitecustomize.py) imports woof into every process
+    # that carries it, and this verifier is no woof process.
+    environment = {key: value for key, value in os.environ.items()
+                   if key != "WOOF_BACKEND"}
     completed = subprocess.run(
         [sys.executable, str(script), str(band_path), str(BAND_SCHEMA_PATH)],
-        capture_output=True, text=True, check=False)
+        capture_output=True, text=True, check=False, env=environment)
     assert completed.returncode == 0, completed.stderr
     assert BAND_SCHEMA_ID in completed.stdout
 
@@ -127,6 +144,11 @@ def test_re_running_the_derivation_reproduces_the_committed_band(band_path,
     finally:
         sys.path.pop(0)
     committed = json.loads(band_path.read_text(encoding="utf-8"))
+    from _woof_snapshot import left_out_reason
+    reason = left_out_reason(BAND_CONFIGS.get(committed["config_sha256"], ""),
+                             "derives the band from")
+    if reason:
+        pytest.skip(reason)
     config_path = fixtures.config_path_for(committed["config_sha256"])
     rebuilt, receipt, band_text, receipt_text = derivation.derive(
         config_path, anchor_document=ANCHOR_DOCUMENT, band_dir=tmp_path)

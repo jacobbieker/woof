@@ -1687,6 +1687,15 @@ ROUTE_FORECAST_TOML_FIELDS: Mapping[str, str] = MappingProxyType({
     "nest_accumulation_archive": (
         "woof/core/nest_accumulation.py relocate, the moving nest's "
         "accumulation archive"),
+    # Upstream 1.1.4's wind farm keys with no WRF spelling: the turbine
+    # table (WRF names its turbines by the windturbines.txt beside the
+    # namelist, which the importer reads as wind_farms and RunConfig copies
+    # here) and the farm's grid-spacing ceiling, a woof refusal bound.  Both
+    # are preparation-inert (prepared_cache PREPARATION_INERT_RUN_FIELDS)
+    # and read when the forecast attaches the farm, from the bound TOML.
+    "wind_farm_table": "woof/core/wind_farm.py, the farm's turbine table",
+    "wind_farm_max_dx_m": (
+        "woof/core/wind_farm.py, the farm's grid-spacing ceiling"),
 })
 
 

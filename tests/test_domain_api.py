@@ -41,7 +41,12 @@ INVENTORY = json.loads(Path(__file__).with_name("domain_api_compat.json").read_t
 @pytest.mark.parametrize("entry", INVENTORY,
                          ids=[r["module"] + "." + r["name"] for r in INVENTORY])
 def test_earlier_downstream_import_and_signature(entry):
-    value = getattr(importlib.import_module(entry["module"]), entry["name"])
+    # The inventory spells the engine's package name; this tree ships the
+    # same modules under the WOOF rename (gpuwm -> woof) and no gpuwm alias.
+    module = entry["module"]
+    if module == "gpuwm" or module.startswith("gpuwm."):
+        module = "woof" + module[len("gpuwm"):]
+    value = getattr(importlib.import_module(module), entry["name"])
     if "fields" in entry:
         signature = inspect.signature(value)
         assert set(entry["fields"]) <= set(signature.parameters)
