@@ -847,6 +847,26 @@ operation.
 
 --------------------------------------------------------------------------
 
+CUDA powf transcription -- opt-in, source checkout only
+
+On the Apple-silicon (MLX) backend, cupy.power on binary32 under
+GPUWM_WRF_EXACT=1 runs woof/backend/translate/strict_powf.cuh by default:
+WOOF's own correctly rounded powf, written from textbook methods.  Its
+constants come from tools/strict_powf/constants.py, which uses Python's
+decimal module.  It derives from no third-party code.
+
+tools/cuda_powf/cuda_powf.cuh is a transcription of NVIDIA's code: the PTX
+that NVRTC (CUDA 13.4) emits for powf from NVIDIA's libdevice.  It
+reproduces CUDA's binary32 words on Metal.  THE TRANSCRIPTION IS OPT-IN.
+Only a source checkout with WOOF_STRICT_POWF=cuda set uses it
+(woof/backend/facade/_ops.py).  It is not package data, so the recast-woof
+and metal-woof wheels and every default build contain none of its code,
+and nothing in this section applies to them.  Its file header states its
+origin.  Whoever uses or distributes it is responsible for the terms of
+the NVIDIA CUDA Toolkit software from which it is derived.
+
+--------------------------------------------------------------------------
+
 Material removed during 2.6.6 development and included in 2.7.0
 
 Through engine release 2.6.5, woof/core/kernels/glibc_flt32.cuh carried

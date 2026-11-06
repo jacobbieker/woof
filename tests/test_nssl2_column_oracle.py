@@ -224,11 +224,24 @@ def test_production_step_matches_wrf(path):
            ("theta", "pressure", "w", "rainnc", "snownc", "grplnc", "hailnc",
             *_MOMENTS)}
     src.update(rho=data["col_rho"], dz=data["col_dz"])
-    out, _, _, _ = runner.production_step(
+    out, fin, _, _ = runner.production_step(
         src, float(data["dt_s"]), int(data["itimestep"]))
     mismatched = {}
     for name in runner.OUT3 + runner.OUT2:
         n = int(np.count_nonzero(_bits(out[name]) != _bits(data[f"out_{name}"])))
         if n:
             mismatched[name] = n
+    from woof import backend
+    if backend.active() == "mlx":
+        from woof.backend.facade._ops import strict_powf_choice
+        if strict_powf_choice() != "cuda":
+            # The oracle ran WRF on the CUDA adapter's pii, CuPy's powf
+            # (in_exner); WOOF's strict powf on Metal is correctly rounded.
+            # woof/verify/backend_parity_ledger.json, cause
+            # "independent-powf"; WOOF_STRICT_POWF=cuda closes it.
+            exner = int(np.count_nonzero(_bits(fin["exner"]) != _bits(data["in_exner"])))
+            assert exner, "the correctly rounded powf gave CUDA's Exner words: close the gap"
+            if mismatched:
+                pytest.xfail(f"independent-powf: {exner} of {data['in_exner'].size} Exner "
+                             f"words are not CuPy's powf; outputs off WRF: {mismatched}")
     assert not mismatched, mismatched

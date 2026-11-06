@@ -244,13 +244,44 @@ _SUBNORMAL_EXPR = {
 }
 _SUBNORMAL_COMPARE = {"less": "<", "less_equal": "<=", "greater": ">",
                       "greater_equal": ">=", "equal": "==", "not_equal": "!="}
-#: binary32 power: MLX's is Metal's pow, which is not CUDA's powf (on the
-#: NSSL column oracle's Exner function, (p/p0)**rcp, 1601 of 4800 words
-#: differed by 1 ULP, and every kernel fed theta*pii inherited them).  Under
-#: GPUWM_WRF_EXACT=1 it is the transcription of CUDA's powf in
-#: woof/backend/translate/cuda_powf.cuh.
-_STRICT_POWER = {"power": "z = woof_cuda_powf(x, y)"}
+#: binary32 power: MLX's is Metal's pow, which is neither correctly rounded
+#: nor CUDA's powf (on the NSSL column oracle's Exner function,
+#: (p/p0)**rcp, 1601 of 4800 words differed from CUDA's by 1 ULP).  Under
+#: GPUWM_WRF_EXACT=1 it is WOOF's correctly rounded powf
+#: (woof/backend/translate/strict_powf.cuh), or, with WOOF_STRICT_POWF=cuda
+#: in a source checkout, the opt-in transcription of CUDA's powf
+#: (tools/cuda_powf/cuda_powf.cuh; NOTICE), which gives CUDA's words.
+_STRICT_POWER = {"power"}
 _SUBNORMAL_KERNELS: dict = {}
+STRICT_POWF_VARIABLE = "WOOF_STRICT_POWF"
+
+
+def strict_powf_choice() -> str:
+    """``"correctly-rounded"`` (the default) or ``"cuda"`` (the opt-in)."""
+    import os
+    value = os.environ.get(STRICT_POWF_VARIABLE, "").strip().lower()
+    if value in ("", "cr", "correctly-rounded"):
+        return "correctly-rounded"
+    if value == "cuda":
+        return "cuda"
+    raise ValueError(f"{STRICT_POWF_VARIABLE}={value!r}; expected 'cuda' or unset")
+
+
+def _strict_powf_source() -> tuple[str, str]:
+    """(preamble, body) of the strict float32 power kernel."""
+    from pathlib import Path
+    if strict_powf_choice() == "cuda":
+        import os
+        path = Path(os.environ.get("WOOF_STRICT_POWF_CUDA_SOURCE") or
+                    Path(__file__).resolve().parents[3] / "tools" / "cuda_powf" / "cuda_powf.cuh")
+        if not path.is_file():
+            raise RuntimeError(
+                f"{STRICT_POWF_VARIABLE}=cuda needs the opt-in transcription of CUDA's powf, "
+                f"{path}, which only a source checkout carries (no wheel does; see NOTICE); "
+                "WOOF_STRICT_POWF_CUDA_SOURCE names another copy")
+        return path.read_text(encoding="utf-8"), "z = woof_cuda_powf(x, y)"
+    from woof.backend.translate import STRICT_POWF
+    return STRICT_POWF.read_text(encoding="utf-8"), "z = woof_strict_powf(x, y)"
 
 
 def _keeps_subnormals() -> bool:
@@ -272,15 +303,14 @@ def _subnormal_arith(np_name, a, b):
     elif np_name in _SUBNORMAL_EXPR:
         key, out, body = np_name, "float32 z", _SUBNORMAL_EXPR[np_name]
     elif np_name in _STRICT_POWER:
-        key, out, body = np_name, "float32 z", _STRICT_POWER[np_name]
+        preamble, body = _strict_powf_source()
+        key, out = f"{np_name}:{strict_powf_choice()}", "float32 z"
     else:
         key, out, body = np_name, "bool z", f"z = x {_SUBNORMAL_COMPARE[np_name]} y"
     k = _SUBNORMAL_KERNELS.get(key)
     if k is None:
-        preamble = ""
-        if np_name in _STRICT_POWER:
-            from woof.backend.translate import CUDA_POWF
-            preamble = CUDA_POWF.read_text(encoding="utf-8")
+        if np_name not in _STRICT_POWER:
+            preamble = ""
         k = _SUBNORMAL_KERNELS[key] = ElementwiseKernel(
             "float32 x, float32 y", out, body, f"woof_f32_{np_name}", preamble=preamble)
     scalars = not isinstance(a, (ndarray, np.ndarray)) and not isinstance(b, (ndarray, np.ndarray))

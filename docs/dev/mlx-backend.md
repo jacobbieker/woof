@@ -42,6 +42,7 @@ A Mac with MLX installed and no CuPy also selects mlx on its own.
 | `fminf` / `fmaxf`, and `a > b ? a : b` | −0 orders below +0, as `min.f32` / `max.f32` do. Metal returns the second operand for equal zeros. |
 | libdevice binary32 (`expf` …) | Metal's `precise::` functions. These are a recorded vendor-libm difference; units built on woof's glibc ports are exact. |
 | binary64 libm | `vendor_libm64.cuh`: correctly rounded exp, log, log10, sin, cos, atan and pow (f64cr); Rust-libm transcriptions for the rest (`tools/vendor_libm64_grade.py`). |
+| `cupy.power` on binary32, strict | `strict_powf.cuh`: woof's own correctly rounded powf (constants from `tools/strict_powf/constants.py`). CuPy's powf is not correctly rounded: it differs at 273 of the NSSL-2 oracle's 4800 Exner words, the parity ledger's `independent-powf` gap. `WOOF_STRICT_POWF=cuda`, in a source checkout only, selects the opt-in transcription of CUDA's powf (`tools/cuda_powf/`, NOTICE), which gives CUDA's words. |
 
 ## Launch ordering
 
