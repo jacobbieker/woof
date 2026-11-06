@@ -68,7 +68,9 @@ def test_receipts_come_from_the_sweep(receipts):
     for backend, receipt in receipts.items():
         assert receipt["schema"] == bpl.RECEIPT_SCHEMA
         assert receipt["backend"] == backend
-        assert receipt["environment"] == bpl.SWEEP_ENVIRONMENT
+        # as the traced process recorded it (tools/launch_trace.py)
+        recorded = {k: receipt["environment"].get(k) for k in bpl.SWEEP_ENVIRONMENT}
+        assert recorded == bpl.SWEEP_ENVIRONMENT, recorded
         files = {nodeid.split("::")[0] for nodeid in receipt["tests"]}
         assert files == set(bpl.SWEEP_TESTS), set(bpl.SWEEP_TESTS) ^ files
         assert receipt["host_words"], f"{backend}: no host words recorded"

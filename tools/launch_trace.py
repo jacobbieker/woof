@@ -132,6 +132,19 @@ def _zero_empty() -> None:
     cupy.empty_like = cupy.zeros_like
 
 
+#: The variables that decide a trace's words, written beside the traces.
+ENVIRONMENT_VARIABLES = ("GPUWM_WRF_EXACT", "GPUWM_NUMERICS", "WOOF_LAUNCH_TRACE_ZERO_EMPTY",
+                         "WOOF_BACKEND")
+
+
+def _record_environment(directory: str) -> None:
+    """``environment.json`` in the trace directory: the traced process's
+    own values of :data:`ENVIRONMENT_VARIABLES`, so that a receipt states
+    the environment the sweep ran in, not the one it was meant to."""
+    with open(os.path.join(directory, "environment.json"), "w", encoding="utf-8") as f:
+        json.dump({k: os.environ.get(k) for k in ENVIRONMENT_VARIABLES}, f, sort_keys=True)
+
+
 def install(path: str | None = None) -> None:
     if _STATE.get("installed"):
         if path:
@@ -139,6 +152,7 @@ def install(path: str | None = None) -> None:
         return
     _STATE["installed"] = True
     set_output(path or os.environ["WOOF_LAUNCH_TRACE"])
+    _record_environment(os.path.dirname(os.path.abspath(_STATE["path"])))
     if os.environ.get("WOOF_LAUNCH_TRACE_ZERO_EMPTY") == "1":
         _zero_empty()
     from woof import backend

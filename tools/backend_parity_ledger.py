@@ -135,6 +135,9 @@ def host_words() -> dict[str, str]:
     out = {}
     for key, row in json.loads(HOST_GRIDS.read_text()).items():
         grid = LambertGrid(**row["spec"])
+        if row.get("nest") is not None:
+            # the witness grid tests/test_static_projection_portability.py uses
+            grid = grid.nest(*row["nest"])
         for name in HOST_FIELDS:
             value = getattr(grid, name)
             value = value() if callable(value) else value
@@ -161,8 +164,17 @@ def build_receipt(backend: str, sweep: Path) -> dict:
                 record["launches"].append([row["kernel"], _launch_digest(row)])
         tests[nodeid] = record
     host = sweep / "host_words.json"
+    recorded = sweep / "traces" / "environment.json"
+    if not recorded.exists():
+        raise SystemExit(f"{recorded}: the sweep did not record its environment "
+                         "(tools/launch_trace.py writes it)")
+    environment = json.loads(recorded.read_text())
+    wrong = {k: environment.get(k) for k, v in SWEEP_ENVIRONMENT.items()
+             if environment.get(k) != v}
+    if wrong:
+        raise SystemExit(f"{sweep}: not the sweep's environment: {wrong}")
     return {"schema": RECEIPT_SCHEMA, "backend": backend,
-            "environment": SWEEP_ENVIRONMENT,
+            "environment": environment,
             "host_words": json.loads(host.read_text()) if host.exists() else {},
             "tests": tests}
 

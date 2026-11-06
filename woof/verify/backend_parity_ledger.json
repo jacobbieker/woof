@@ -64,7 +64,7 @@
   },
   "projection-libm": {
    "summary": "The Lambert projection (woof.static.lambert) runs on the host through the platform's C library (woof.core.host_libm), which is macOS's libm on the Mac and glibc on pb. Every field of every portable grid differs, and the projection's words feed the kernels' map factors, Coriolis and rotation.",
-   "evidence": "The grids of tests/fixtures/portable_static_grids.json, in binary64: 277,294 of 667,996 words differ, mostly by 1 to 5 ULP (rotation_m is larger near zero). The projection tests pass on both machines because each compares with its own libm.",
+   "evidence": "The grids of tests/fixtures/portable_static_grids.json (nests applied, as in tests/test_static_projection_portability.py), in binary64: 253,227 of 437,808 words differ. The median difference is 2 ULP, 99 % are within 6 ULP, and the largest is 52,382 ULP (rotation_m near zero). The projection tests pass on both machines because each compares with its own libm.",
    "closes_when": "both hosts carry the opt-in glibc 2.39 transcription (`pixi run build-native-glibc239`; tests/test_host_libm.py), which is off by default because it is LGPL"
   }
  },
