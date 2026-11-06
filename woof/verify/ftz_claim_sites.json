@@ -24395,10 +24395,10 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 755,
+      "line": 1171,
       "kind": "prose",
-      "anchor": "\"factory\": \"_subnormal_arith\",",
-      "anchor_sha256": "6d86c898bd7196485815fda472a7fed15879a82a033ac9352931e09354e4ddee",
+      "anchor": "\"factory\": \"compile_module_no_ftz\",",
+      "anchor_sha256": "6a8ed957bddbc0c29a2d10bd45489cec16a892803436b1c88d4788b642ded48e",
       "route": null,
       "mechanism": null,
       "asserted_token": null,
@@ -24406,10 +24406,10 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 1179,
+      "line": 1331,
       "kind": "prose",
-      "anchor": "\"factory\": \"compile_module_no_ftz\",",
-      "anchor_sha256": "6a8ed957bddbc0c29a2d10bd45489cec16a892803436b1c88d4788b642ded48e",
+      "anchor": "\"factory\": \"_subnormal_arith\",",
+      "anchor_sha256": "6d86c898bd7196485815fda472a7fed15879a82a033ac9352931e09354e4ddee",
       "route": null,
       "mechanism": null,
       "asserted_token": null,
@@ -24428,7 +24428,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 2131,
+      "line": 2135,
       "kind": "prose",
       "anchor": "\"file\": \"woof/core/kernels/ftz_probe.cu\",",
       "anchor_sha256": "b949f4a849f7d7408cfac7cbcad714fb8a968f1841ca595ae58a3c915b39e7a6",
@@ -24439,7 +24439,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 2851,
+      "line": 2855,
       "kind": "prose",
       "anchor": "\"file\": \"woof/core/kernels/surface_subnormal.cuh\",",
       "anchor_sha256": "8dea7634d7cda10cacb83659209902a93c321c829bdd1d9db20ed3a2be79c364",
@@ -24450,18 +24450,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 3761,
-      "kind": "prose",
-      "anchor": "\"file\": \"woof/hex/cuda_ftz.py\",",
-      "anchor_sha256": "b7a3fdc0e57d7b8b953eaace869080dea6ce7ee2529c3009fd32a16c3f2149df",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 4883,
+      "line": 3765,
       "kind": "prose",
       "anchor": "\"file\": \"woof/hex/cuda_ftz.py\",",
       "anchor_sha256": "b7a3fdc0e57d7b8b953eaace869080dea6ce7ee2529c3009fd32a16c3f2149df",
@@ -24494,7 +24483,18 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 6332,
+      "line": 4895,
+      "kind": "prose",
+      "anchor": "\"file\": \"woof/hex/cuda_ftz.py\",",
+      "anchor_sha256": "b7a3fdc0e57d7b8b953eaace869080dea6ce7ee2529c3009fd32a16c3f2149df",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 6336,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -24505,7 +24505,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 6342,
+      "line": 6346,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -24516,7 +24516,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 6385,
+      "line": 6389,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -24527,7 +24527,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 6393,
+      "line": 6397,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -24538,7 +24538,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 6434,
+      "line": 6438,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -24549,7 +24549,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 6442,
+      "line": 6446,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -24560,7 +24560,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 6483,
+      "line": 6487,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -24571,7 +24571,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 6491,
+      "line": 6495,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -24582,18 +24582,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 6532,
-      "kind": "prose",
-      "anchor": "\"--ftz=false\",",
-      "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 6540,
+      "line": 6536,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -24604,51 +24593,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 6579,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 6585,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 6625,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 6632,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 6673,
+      "line": 6544,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -24659,7 +24604,51 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 6681,
+      "line": 6583,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 6589,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 6629,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 6636,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 6677,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -24670,7 +24659,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 6721,
+      "line": 6685,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -24681,7 +24670,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 6728,
+      "line": 6725,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -24692,7 +24681,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 6768,
+      "line": 6732,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -24703,7 +24692,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 6775,
+      "line": 6772,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -24714,7 +24703,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 6816,
+      "line": 6779,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -24725,7 +24714,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 6824,
+      "line": 6820,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -24736,7 +24725,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 6865,
+      "line": 6828,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -24747,7 +24736,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 6873,
+      "line": 6869,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -24758,7 +24747,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 6914,
+      "line": 6877,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -24769,7 +24758,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 6922,
+      "line": 6918,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -24780,7 +24769,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 6958,
+      "line": 6926,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -24791,7 +24780,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 6965,
+      "line": 6962,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -24802,7 +24791,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 7005,
+      "line": 6969,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -24813,7 +24802,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 7012,
+      "line": 7009,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -24824,7 +24813,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 7052,
+      "line": 7016,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -24835,7 +24824,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 7059,
+      "line": 7056,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -24846,7 +24835,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 7100,
+      "line": 7063,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -24857,7 +24846,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 7108,
+      "line": 7104,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -24868,227 +24857,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 7148,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 7155,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 7195,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 7202,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 7242,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 7249,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 7289,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 7296,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 7336,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 7343,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 7383,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 7390,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 7430,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 7437,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 7477,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 7484,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 7520,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 7527,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 7567,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 7574,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 7615,
+      "line": 7112,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -25099,7 +24868,227 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 7623,
+      "line": 7152,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 7159,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 7199,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 7206,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 7246,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 7253,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 7293,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 7300,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 7340,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 7347,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 7387,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 7394,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 7434,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 7441,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 7481,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 7488,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 7524,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 7531,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 7571,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 7578,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 7619,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -25110,381 +25099,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 7663,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 7670,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 7710,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 7717,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 7757,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 7764,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 7804,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 7811,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 7851,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 7858,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 7898,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 7905,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 7945,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 7952,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 7992,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 7999,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 8039,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 8046,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 8086,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 8093,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 8133,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 8140,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 8180,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 8187,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 8227,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 8234,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 8274,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 8281,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 8321,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 8328,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 8368,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 8375,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 8415,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 8422,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 8463,
+      "line": 7627,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -25495,7 +25110,381 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 8471,
+      "line": 7667,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 7674,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 7714,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 7721,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 7761,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 7768,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 7808,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 7815,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 7855,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 7862,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 7902,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 7909,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 7949,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 7956,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 7996,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 8003,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 8043,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 8050,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 8090,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 8097,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 8137,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 8144,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 8184,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 8191,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 8231,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 8238,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 8278,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 8285,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 8325,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 8332,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 8372,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 8379,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 8419,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 8426,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 8467,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -25506,117 +25495,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 8511,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 8518,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 8558,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 8565,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 8605,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 8612,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 8652,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 8659,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 8699,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 8706,
-      "kind": "prose",
-      "anchor": "\"-ftz=true\",",
-      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tools/cuda_rounding_baseline.json",
-      "line": 8747,
+      "line": 8475,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -25627,7 +25506,117 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 8758,
+      "line": 8515,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 8522,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 8562,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 8569,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 8609,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 8616,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 8656,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 8663,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 8703,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 8710,
+      "kind": "prose",
+      "anchor": "\"-ftz=true\",",
+      "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 8751,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -25638,7 +25627,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 8802,
+      "line": 8762,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -25649,7 +25638,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 8813,
+      "line": 8806,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -25660,7 +25649,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 8857,
+      "line": 8817,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -25671,7 +25660,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 8868,
+      "line": 8861,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -25682,7 +25671,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 8912,
+      "line": 8872,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -25693,7 +25682,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 8923,
+      "line": 8916,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -25704,7 +25693,18 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 8966,
+      "line": 8927,
+      "kind": "prose",
+      "anchor": "\"--ftz=false\",",
+      "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 8970,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -25715,7 +25715,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 8973,
+      "line": 8977,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -25726,7 +25726,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9009,
+      "line": 9013,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -25737,7 +25737,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9016,
+      "line": 9020,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -25748,7 +25748,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9056,
+      "line": 9060,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -25759,7 +25759,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9063,
+      "line": 9067,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -25770,7 +25770,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9103,
+      "line": 9107,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -25781,7 +25781,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9110,
+      "line": 9114,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -25792,7 +25792,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9150,
+      "line": 9154,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -25803,7 +25803,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9157,
+      "line": 9161,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -25814,7 +25814,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9197,
+      "line": 9201,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -25825,7 +25825,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9204,
+      "line": 9208,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -25836,7 +25836,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9212,
+      "line": 9216,
       "kind": "prose",
       "anchor": "\"kernels:ftz_probe\": {",
       "anchor_sha256": "2cedefb83b559b44450a74b1f80167b82530424012098263daee0e63ccad798f",
@@ -25847,7 +25847,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9244,
+      "line": 9248,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -25858,7 +25858,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9251,
+      "line": 9255,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -25869,7 +25869,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9292,
+      "line": 9296,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -25880,7 +25880,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9300,
+      "line": 9304,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -25891,7 +25891,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9340,
+      "line": 9344,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -25902,7 +25902,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9347,
+      "line": 9351,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -25913,7 +25913,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9387,
+      "line": 9391,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -25924,7 +25924,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9394,
+      "line": 9398,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -25935,7 +25935,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9434,
+      "line": 9438,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -25946,7 +25946,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9441,
+      "line": 9445,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -25957,7 +25957,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9481,
+      "line": 9485,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -25968,7 +25968,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9488,
+      "line": 9492,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -25979,7 +25979,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9528,
+      "line": 9532,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -25990,7 +25990,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9535,
+      "line": 9539,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26001,7 +26001,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9575,
+      "line": 9579,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26012,7 +26012,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9582,
+      "line": 9586,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26023,7 +26023,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9622,
+      "line": 9626,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26034,7 +26034,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9629,
+      "line": 9633,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26045,7 +26045,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9665,
+      "line": 9669,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26056,7 +26056,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9672,
+      "line": 9676,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26067,7 +26067,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9712,
+      "line": 9716,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26078,7 +26078,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9719,
+      "line": 9723,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26089,7 +26089,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9760,
+      "line": 9764,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26100,7 +26100,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9768,
+      "line": 9772,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26111,7 +26111,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9809,
+      "line": 9813,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -26122,7 +26122,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9817,
+      "line": 9821,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -26133,7 +26133,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9857,
+      "line": 9861,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26144,7 +26144,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9864,
+      "line": 9868,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26155,7 +26155,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9905,
+      "line": 9909,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26166,7 +26166,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9913,
+      "line": 9917,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26177,7 +26177,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9953,
+      "line": 9957,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26188,7 +26188,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9960,
+      "line": 9964,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26199,7 +26199,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 9996,
+      "line": 10000,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26210,7 +26210,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 10003,
+      "line": 10007,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26221,7 +26221,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 10043,
+      "line": 10047,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26232,7 +26232,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 10050,
+      "line": 10054,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26243,7 +26243,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 10090,
+      "line": 10094,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -26254,7 +26254,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 10098,
+      "line": 10102,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -26265,7 +26265,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 10139,
+      "line": 10143,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26276,7 +26276,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 10146,
+      "line": 10150,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26287,7 +26287,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 10186,
+      "line": 10190,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26298,7 +26298,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 10193,
+      "line": 10197,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26309,7 +26309,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 10233,
+      "line": 10237,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26320,7 +26320,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 10240,
+      "line": 10244,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26331,7 +26331,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 10281,
+      "line": 10285,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26342,7 +26342,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 10289,
+      "line": 10293,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26353,7 +26353,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 10330,
+      "line": 10334,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26364,7 +26364,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 10338,
+      "line": 10342,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26375,7 +26375,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 10378,
+      "line": 10382,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26386,7 +26386,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 10385,
+      "line": 10389,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26397,7 +26397,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 10425,
+      "line": 10429,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26408,7 +26408,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 10432,
+      "line": 10436,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26419,7 +26419,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 10473,
+      "line": 10477,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26430,7 +26430,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 10481,
+      "line": 10485,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26441,7 +26441,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 10522,
+      "line": 10526,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -26452,7 +26452,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 10530,
+      "line": 10534,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -26463,7 +26463,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 10570,
+      "line": 10574,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26474,7 +26474,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 10577,
+      "line": 10581,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26485,7 +26485,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 10618,
+      "line": 10622,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26496,7 +26496,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 10626,
+      "line": 10630,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26507,7 +26507,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 10667,
+      "line": 10671,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -26518,7 +26518,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 10675,
+      "line": 10679,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -26529,7 +26529,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 10715,
+      "line": 10719,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26540,7 +26540,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 10722,
+      "line": 10726,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26551,7 +26551,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 10763,
+      "line": 10767,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -26562,7 +26562,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 10771,
+      "line": 10775,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -26573,7 +26573,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 10811,
+      "line": 10815,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26584,7 +26584,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 10818,
+      "line": 10822,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26595,7 +26595,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 10858,
+      "line": 10862,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26606,7 +26606,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 10865,
+      "line": 10869,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26617,7 +26617,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 10906,
+      "line": 10910,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26628,7 +26628,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 10914,
+      "line": 10918,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26639,7 +26639,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 10954,
+      "line": 10958,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26650,7 +26650,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 10961,
+      "line": 10965,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26661,7 +26661,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11001,
+      "line": 11005,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26672,7 +26672,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11008,
+      "line": 11012,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26683,7 +26683,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11048,
+      "line": 11052,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -26694,7 +26694,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11056,
+      "line": 11060,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -26705,7 +26705,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11097,
+      "line": 11101,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26716,7 +26716,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11104,
+      "line": 11108,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26727,7 +26727,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11144,
+      "line": 11148,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26738,7 +26738,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11151,
+      "line": 11155,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26749,7 +26749,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11191,
+      "line": 11195,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26760,7 +26760,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11198,
+      "line": 11202,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26771,7 +26771,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11238,
+      "line": 11242,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26782,7 +26782,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11245,
+      "line": 11249,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26793,7 +26793,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11285,
+      "line": 11289,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26804,7 +26804,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11292,
+      "line": 11296,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26815,7 +26815,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11332,
+      "line": 11336,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26826,7 +26826,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11339,
+      "line": 11343,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26837,7 +26837,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11379,
+      "line": 11383,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26848,7 +26848,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11386,
+      "line": 11390,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26859,7 +26859,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11427,
+      "line": 11431,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -26870,7 +26870,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11435,
+      "line": 11439,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -26881,7 +26881,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11475,
+      "line": 11479,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26892,7 +26892,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11482,
+      "line": 11486,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26903,7 +26903,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11522,
+      "line": 11526,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26914,7 +26914,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11529,
+      "line": 11533,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26925,7 +26925,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11569,
+      "line": 11573,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26936,7 +26936,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11576,
+      "line": 11580,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26947,7 +26947,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11616,
+      "line": 11620,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26958,7 +26958,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11623,
+      "line": 11627,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26969,7 +26969,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11663,
+      "line": 11667,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26980,7 +26980,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11670,
+      "line": 11674,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -26991,7 +26991,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11710,
+      "line": 11714,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27002,7 +27002,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11717,
+      "line": 11721,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27013,7 +27013,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11757,
+      "line": 11761,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27024,7 +27024,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11764,
+      "line": 11768,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27035,7 +27035,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11804,
+      "line": 11808,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27046,7 +27046,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11811,
+      "line": 11815,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27057,7 +27057,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11851,
+      "line": 11855,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27068,7 +27068,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11858,
+      "line": 11862,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27079,7 +27079,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11898,
+      "line": 11902,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27090,7 +27090,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11905,
+      "line": 11909,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27101,7 +27101,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11945,
+      "line": 11949,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27112,7 +27112,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11952,
+      "line": 11956,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27123,7 +27123,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11992,
+      "line": 11996,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27134,7 +27134,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 11999,
+      "line": 12003,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27145,7 +27145,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 12039,
+      "line": 12043,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -27156,7 +27156,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 12046,
+      "line": 12050,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -27167,7 +27167,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 12086,
+      "line": 12090,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27178,7 +27178,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 12093,
+      "line": 12097,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27189,7 +27189,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 12133,
+      "line": 12137,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27200,7 +27200,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 12140,
+      "line": 12144,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27211,7 +27211,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 12180,
+      "line": 12184,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27222,7 +27222,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 12187,
+      "line": 12191,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27233,7 +27233,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 12227,
+      "line": 12231,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27244,7 +27244,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 12234,
+      "line": 12238,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27255,7 +27255,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 12274,
+      "line": 12278,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27266,7 +27266,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 12281,
+      "line": 12285,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27277,7 +27277,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 12321,
+      "line": 12325,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27288,7 +27288,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 12328,
+      "line": 12332,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27299,7 +27299,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 12368,
+      "line": 12372,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27310,7 +27310,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 12375,
+      "line": 12379,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27321,7 +27321,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 12415,
+      "line": 12419,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27332,7 +27332,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 12422,
+      "line": 12426,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27343,7 +27343,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 12462,
+      "line": 12466,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27354,7 +27354,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 12469,
+      "line": 12473,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27365,7 +27365,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 12509,
+      "line": 12513,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27376,7 +27376,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 12516,
+      "line": 12520,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27387,7 +27387,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 12557,
+      "line": 12561,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -27398,7 +27398,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 12565,
+      "line": 12569,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -27409,7 +27409,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 12606,
+      "line": 12610,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -27420,7 +27420,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 12614,
+      "line": 12618,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -27431,7 +27431,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 12655,
+      "line": 12659,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -27442,7 +27442,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 12663,
+      "line": 12667,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -27453,7 +27453,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 12704,
+      "line": 12708,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -27464,7 +27464,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 12712,
+      "line": 12716,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -27475,7 +27475,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 12753,
+      "line": 12757,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -27486,7 +27486,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 12761,
+      "line": 12765,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -27497,7 +27497,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 12802,
+      "line": 12806,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -27508,7 +27508,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 12810,
+      "line": 12814,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -27519,7 +27519,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 12851,
+      "line": 12855,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -27530,7 +27530,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 12859,
+      "line": 12863,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -27541,7 +27541,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 12900,
+      "line": 12904,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -27552,7 +27552,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 12908,
+      "line": 12912,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -27563,7 +27563,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 12949,
+      "line": 12953,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -27574,7 +27574,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 12957,
+      "line": 12961,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -27585,7 +27585,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 12998,
+      "line": 13002,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -27596,7 +27596,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13006,
+      "line": 13010,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -27607,7 +27607,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13047,
+      "line": 13051,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27618,7 +27618,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13055,
+      "line": 13059,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27629,7 +27629,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13095,
+      "line": 13099,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27640,7 +27640,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13102,
+      "line": 13106,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27651,7 +27651,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13143,
+      "line": 13147,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -27662,7 +27662,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13154,
+      "line": 13158,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -27673,7 +27673,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13197,
+      "line": 13201,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27684,7 +27684,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13204,
+      "line": 13208,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27695,7 +27695,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13244,
+      "line": 13248,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27706,7 +27706,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13251,
+      "line": 13255,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27717,7 +27717,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13291,
+      "line": 13295,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27728,7 +27728,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13298,
+      "line": 13302,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27739,7 +27739,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13338,
+      "line": 13342,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -27750,7 +27750,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13345,
+      "line": 13349,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -27761,7 +27761,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13385,
+      "line": 13389,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27772,7 +27772,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13392,
+      "line": 13396,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27783,7 +27783,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13432,
+      "line": 13436,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27794,7 +27794,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13439,
+      "line": 13443,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27805,7 +27805,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13479,
+      "line": 13483,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27816,7 +27816,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13486,
+      "line": 13490,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27827,7 +27827,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13526,
+      "line": 13530,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27838,7 +27838,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13533,
+      "line": 13537,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27849,7 +27849,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13573,
+      "line": 13577,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27860,7 +27860,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13580,
+      "line": 13584,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27871,7 +27871,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13620,
+      "line": 13624,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27882,7 +27882,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13627,
+      "line": 13631,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27893,7 +27893,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13667,
+      "line": 13671,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27904,7 +27904,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13674,
+      "line": 13678,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27915,7 +27915,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13710,
+      "line": 13714,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27926,7 +27926,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13717,
+      "line": 13721,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27937,7 +27937,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13757,
+      "line": 13761,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27948,7 +27948,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13764,
+      "line": 13768,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27959,7 +27959,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13805,
+      "line": 13809,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -27970,7 +27970,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13813,
+      "line": 13817,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -27981,7 +27981,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13853,
+      "line": 13857,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -27992,7 +27992,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13860,
+      "line": 13864,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28003,7 +28003,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13896,
+      "line": 13900,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28014,7 +28014,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13903,
+      "line": 13907,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28025,7 +28025,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13943,
+      "line": 13947,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28036,7 +28036,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13950,
+      "line": 13954,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28047,7 +28047,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13990,
+      "line": 13994,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28058,7 +28058,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 13997,
+      "line": 14001,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28069,7 +28069,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 14037,
+      "line": 14041,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28080,7 +28080,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 14044,
+      "line": 14048,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28091,7 +28091,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 14084,
+      "line": 14088,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28102,7 +28102,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 14091,
+      "line": 14095,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28113,7 +28113,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 14131,
+      "line": 14135,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -28124,7 +28124,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 14138,
+      "line": 14142,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -28135,7 +28135,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 14178,
+      "line": 14182,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -28146,7 +28146,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 14185,
+      "line": 14189,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -28157,7 +28157,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 14225,
+      "line": 14229,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -28168,7 +28168,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 14232,
+      "line": 14236,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -28179,7 +28179,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 14273,
+      "line": 14277,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -28190,7 +28190,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 14281,
+      "line": 14285,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -28201,7 +28201,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 14321,
+      "line": 14325,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28212,7 +28212,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 14328,
+      "line": 14332,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28223,7 +28223,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 14368,
+      "line": 14372,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28234,7 +28234,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 14375,
+      "line": 14379,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28245,7 +28245,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 14416,
+      "line": 14420,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28256,7 +28256,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 14424,
+      "line": 14428,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28267,7 +28267,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 14465,
+      "line": 14469,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28278,7 +28278,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 14473,
+      "line": 14477,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28289,7 +28289,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 14513,
+      "line": 14517,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28300,7 +28300,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 14520,
+      "line": 14524,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28311,7 +28311,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 14561,
+      "line": 14565,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28322,7 +28322,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 14569,
+      "line": 14573,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28333,7 +28333,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 14609,
+      "line": 14613,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28344,7 +28344,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 14616,
+      "line": 14620,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28355,7 +28355,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 14657,
+      "line": 14661,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28366,7 +28366,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 14665,
+      "line": 14669,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28377,7 +28377,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 14706,
+      "line": 14710,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -28388,7 +28388,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 14714,
+      "line": 14718,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -28399,7 +28399,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 14754,
+      "line": 14758,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28410,7 +28410,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 14761,
+      "line": 14765,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28421,7 +28421,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 14802,
+      "line": 14806,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28432,7 +28432,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 14810,
+      "line": 14814,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28443,7 +28443,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 14851,
+      "line": 14855,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -28454,7 +28454,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 14859,
+      "line": 14863,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -28465,7 +28465,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 14899,
+      "line": 14903,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28476,7 +28476,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 14906,
+      "line": 14910,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28487,7 +28487,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 14945,
+      "line": 14949,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28498,7 +28498,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 14951,
+      "line": 14955,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28509,7 +28509,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 14990,
+      "line": 14994,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28520,7 +28520,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 14996,
+      "line": 15000,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28531,7 +28531,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 15035,
+      "line": 15039,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28542,7 +28542,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 15041,
+      "line": 15045,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28553,7 +28553,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 15080,
+      "line": 15084,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28564,7 +28564,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 15086,
+      "line": 15090,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28575,7 +28575,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 15126,
+      "line": 15130,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28586,7 +28586,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 15133,
+      "line": 15137,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28597,7 +28597,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 15173,
+      "line": 15177,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28608,7 +28608,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 15180,
+      "line": 15184,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28619,7 +28619,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 15220,
+      "line": 15224,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28630,7 +28630,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 15227,
+      "line": 15231,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28641,7 +28641,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 15267,
+      "line": 15271,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28652,7 +28652,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 15274,
+      "line": 15278,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28663,7 +28663,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 15314,
+      "line": 15318,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28674,7 +28674,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 15321,
+      "line": 15325,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28685,7 +28685,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 15361,
+      "line": 15365,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28696,7 +28696,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 15368,
+      "line": 15372,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28707,7 +28707,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 15408,
+      "line": 15412,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28718,7 +28718,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 15415,
+      "line": 15419,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28729,7 +28729,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 15455,
+      "line": 15459,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28740,7 +28740,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 15462,
+      "line": 15466,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28751,7 +28751,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 15502,
+      "line": 15506,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28762,7 +28762,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 15509,
+      "line": 15513,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28773,7 +28773,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 15549,
+      "line": 15553,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28784,7 +28784,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 15556,
+      "line": 15560,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -28795,7 +28795,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 15597,
+      "line": 15601,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -28806,7 +28806,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 15605,
+      "line": 15609,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -28817,7 +28817,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 15645,
+      "line": 15649,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -28828,7 +28828,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 15652,
+      "line": 15656,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -28839,7 +28839,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 15692,
+      "line": 15696,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -28850,7 +28850,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 15699,
+      "line": 15703,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -28861,7 +28861,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 15739,
+      "line": 15743,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -28872,7 +28872,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 15746,
+      "line": 15750,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -28883,7 +28883,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 15786,
+      "line": 15790,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -28894,7 +28894,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 15793,
+      "line": 15797,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -28905,7 +28905,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 15833,
+      "line": 15837,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -28916,7 +28916,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 15840,
+      "line": 15844,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -28927,7 +28927,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 15880,
+      "line": 15884,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -28938,7 +28938,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 15887,
+      "line": 15891,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -28949,7 +28949,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 15927,
+      "line": 15931,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -28960,7 +28960,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 15934,
+      "line": 15938,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -28971,7 +28971,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 15974,
+      "line": 15978,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -28982,7 +28982,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 15981,
+      "line": 15985,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -28993,7 +28993,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 16021,
+      "line": 16025,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -29004,7 +29004,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 16028,
+      "line": 16032,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -29015,7 +29015,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 16068,
+      "line": 16072,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -29026,7 +29026,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 16075,
+      "line": 16079,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -29037,7 +29037,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 16115,
+      "line": 16119,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -29048,7 +29048,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 16122,
+      "line": 16126,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -29059,7 +29059,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 16162,
+      "line": 16166,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -29070,7 +29070,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 16169,
+      "line": 16173,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -29081,7 +29081,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 16209,
+      "line": 16213,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -29092,7 +29092,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 16216,
+      "line": 16220,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -29103,7 +29103,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 16256,
+      "line": 16260,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -29114,7 +29114,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 16263,
+      "line": 16267,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -29125,7 +29125,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 16303,
+      "line": 16307,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -29136,7 +29136,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 16310,
+      "line": 16314,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -29147,7 +29147,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 16350,
+      "line": 16354,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29158,7 +29158,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 16357,
+      "line": 16361,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29169,7 +29169,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 16397,
+      "line": 16401,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29180,7 +29180,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 16404,
+      "line": 16408,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29191,7 +29191,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 16444,
+      "line": 16448,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29202,7 +29202,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 16451,
+      "line": 16455,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29213,7 +29213,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 16491,
+      "line": 16495,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29224,7 +29224,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 16498,
+      "line": 16502,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29235,7 +29235,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 16539,
+      "line": 16543,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29246,7 +29246,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 16547,
+      "line": 16551,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29257,7 +29257,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 16587,
+      "line": 16591,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29268,7 +29268,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 16594,
+      "line": 16598,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29279,7 +29279,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 16634,
+      "line": 16638,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29290,7 +29290,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 16641,
+      "line": 16645,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29301,7 +29301,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 16682,
+      "line": 16686,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29312,7 +29312,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 16690,
+      "line": 16694,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29323,7 +29323,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 16731,
+      "line": 16735,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29334,7 +29334,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 16739,
+      "line": 16743,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29345,7 +29345,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 16780,
+      "line": 16784,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29356,7 +29356,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 16788,
+      "line": 16792,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29367,7 +29367,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 16829,
+      "line": 16833,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29378,7 +29378,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 16837,
+      "line": 16841,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29389,7 +29389,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 16875,
+      "line": 16879,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29400,7 +29400,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 16882,
+      "line": 16886,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29411,7 +29411,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 16923,
+      "line": 16927,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29422,7 +29422,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 16931,
+      "line": 16935,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29433,7 +29433,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 16972,
+      "line": 16976,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29444,7 +29444,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 16980,
+      "line": 16984,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29455,7 +29455,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 17021,
+      "line": 17025,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29466,7 +29466,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 17029,
+      "line": 17033,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29477,7 +29477,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 17070,
+      "line": 17074,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29488,7 +29488,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 17078,
+      "line": 17082,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29499,7 +29499,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 17119,
+      "line": 17123,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29510,7 +29510,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 17127,
+      "line": 17131,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29521,7 +29521,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 17168,
+      "line": 17172,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29532,7 +29532,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 17176,
+      "line": 17180,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29543,7 +29543,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 17217,
+      "line": 17221,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29554,7 +29554,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 17225,
+      "line": 17229,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29565,7 +29565,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 17266,
+      "line": 17270,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29576,7 +29576,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 17274,
+      "line": 17278,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29587,7 +29587,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 17315,
+      "line": 17319,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29598,7 +29598,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 17323,
+      "line": 17327,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29609,7 +29609,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 17364,
+      "line": 17368,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29620,7 +29620,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 17372,
+      "line": 17376,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29631,7 +29631,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 17413,
+      "line": 17417,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29642,7 +29642,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 17421,
+      "line": 17425,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29653,7 +29653,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 17462,
+      "line": 17466,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29664,7 +29664,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 17470,
+      "line": 17474,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29675,7 +29675,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 17511,
+      "line": 17515,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29686,7 +29686,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 17519,
+      "line": 17523,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29697,7 +29697,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 17560,
+      "line": 17564,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29708,7 +29708,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 17568,
+      "line": 17572,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29719,7 +29719,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 17609,
+      "line": 17613,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29730,7 +29730,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 17617,
+      "line": 17621,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29741,7 +29741,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 17658,
+      "line": 17662,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29752,7 +29752,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 17666,
+      "line": 17670,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29763,7 +29763,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 17707,
+      "line": 17711,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29774,7 +29774,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 17715,
+      "line": 17719,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29785,7 +29785,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 17756,
+      "line": 17760,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29796,7 +29796,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 17764,
+      "line": 17768,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29807,7 +29807,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 17805,
+      "line": 17809,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -29818,7 +29818,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 17813,
+      "line": 17817,
       "kind": "prose",
       "anchor": "\"--ftz=false\",",
       "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
@@ -29829,7 +29829,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 17853,
+      "line": 17857,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29840,7 +29840,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 17860,
+      "line": 17864,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29851,7 +29851,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 17900,
+      "line": 17904,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29862,7 +29862,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 17907,
+      "line": 17911,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29873,7 +29873,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 17947,
+      "line": 17951,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29884,7 +29884,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 17954,
+      "line": 17958,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29895,7 +29895,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 17994,
+      "line": 17998,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29906,7 +29906,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 18001,
+      "line": 18005,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29917,7 +29917,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 18041,
+      "line": 18045,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29928,7 +29928,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 18048,
+      "line": 18052,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29939,7 +29939,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 18088,
+      "line": 18092,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
@@ -29950,7 +29950,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 18095,
+      "line": 18099,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",

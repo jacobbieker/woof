@@ -742,14 +742,6 @@
     "status": "unresolved"
    },
    {
-    "call_sha256": "66ca35416f1d6cc1ece5d4cf488c39b5a39d07de32771d732b69e7bbd049a2cd",
-    "constructor": "RawModule",
-    "factory": "direct_regional_module",
-    "factory_sha256": "2d91568b5d8e00a44ccb23ef64aa812f5d2dbd1a51ce31213833ef44b886a0fe",
-    "file": "woof/hex/metal_lane.py",
-    "status": "unresolved"
-   },
-   {
     "call_sha256": "689c2f7a67d52a1e4ca6f872f724f5018ea564c5bc61f4a10bd1358263107936",
     "constructor": "compile_using_nvrtc",
     "factory": "_adapter_module",
@@ -1898,6 +1890,10 @@
    {
     "file": "woof/backend/translate/cuda_powf.cuh",
     "sha256": "9d3fff2bea90e23d4d74f12fe840cbb698d4652140fbe8da305937cf2a9397f2"
+   },
+   {
+    "file": "woof/backend/translate/include/cupy/complex.cuh",
+    "sha256": "bc156f6771efd56a16c60cf6cab01c24c182c6fd5c7ed58b0990a34ffeeb3bb6"
    },
    {
     "file": "woof/backend/translate/vendor_libm64.cuh",
@@ -3279,7 +3275,7 @@
    },
    {
     "file": "woof/backend/facade/cuda.py",
-    "sha256": "63f28d0c8b495bd5e2b352855379828465ee7ee255e9b9441a3d6d8d796180d0"
+    "sha256": "c7a13182fb72b751fa835d5162da9951fd27899f18c4494824dbe45b3522b231"
    },
    {
     "file": "woof/backend/host/loader.py",
@@ -3295,7 +3291,7 @@
    },
    {
     "file": "woof/backend/translate/__init__.py",
-    "sha256": "6f3d10ca2a606ff2b7404a84f5fc142abd7789aac5ede57ce7ec37214682a133"
+    "sha256": "3bfb26395ed4fa2cdd2a16e7e208cddfd18add98cc8bd86d261754b980bc20a5"
    },
    {
     "file": "woof/compiler_metadata.py",
@@ -3868,10 +3864,6 @@
    {
     "file": "woof/hex/lagged_heating_v841.py",
     "sha256": "7442b10ab447b67672fe7f596f590c1c3017234e6841b7669c643917656dcbfe"
-   },
-   {
-    "file": "woof/hex/metal_lane.py",
-    "sha256": "090679bb0bb3b7383b9ad5736325f465fc3d5da5f5ecfa80db1da31a1e3b20b0"
    },
    {
     "file": "woof/hex/mixing_v842.py",
