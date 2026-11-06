@@ -267,10 +267,14 @@ def strict_powf_choice() -> str:
     raise ValueError(f"{STRICT_POWF_VARIABLE}={value!r}; expected 'cuda' or unset")
 
 
-def _strict_powf_source() -> tuple[str, str]:
-    """(preamble, body) of the strict float32 power kernel."""
+def _strict_powf_body(choice: str) -> str:
+    return "z = woof_cuda_powf(x, y)" if choice == "cuda" else "z = woof_strict_powf(x, y)"
+
+
+def _strict_powf_source(choice: str) -> str:
+    """The preamble of the strict float32 power kernel (read on a cache miss)."""
     from pathlib import Path
-    if strict_powf_choice() == "cuda":
+    if choice == "cuda":
         import os
         path = Path(os.environ.get("WOOF_STRICT_POWF_CUDA_SOURCE") or
                     Path(__file__).resolve().parents[3] / "tools" / "cuda_powf" / "cuda_powf.cuh")
@@ -279,9 +283,9 @@ def _strict_powf_source() -> tuple[str, str]:
                 f"{STRICT_POWF_VARIABLE}=cuda needs the opt-in transcription of CUDA's powf, "
                 f"{path}, which only a source checkout carries (no wheel does; see NOTICE); "
                 "WOOF_STRICT_POWF_CUDA_SOURCE names another copy")
-        return path.read_text(encoding="utf-8"), "z = woof_cuda_powf(x, y)"
+        return path.read_text(encoding="utf-8")
     from woof.backend.translate import STRICT_POWF
-    return STRICT_POWF.read_text(encoding="utf-8"), "z = woof_strict_powf(x, y)"
+    return STRICT_POWF.read_text(encoding="utf-8")
 
 
 def _keeps_subnormals() -> bool:
@@ -303,14 +307,13 @@ def _subnormal_arith(np_name, a, b):
     elif np_name in _SUBNORMAL_EXPR:
         key, out, body = np_name, "float32 z", _SUBNORMAL_EXPR[np_name]
     elif np_name in _STRICT_POWER:
-        preamble, body = _strict_powf_source()
-        key, out = f"{np_name}:{strict_powf_choice()}", "float32 z"
+        choice = strict_powf_choice()
+        key, out, body = f"{np_name}:{choice}", "float32 z", _strict_powf_body(choice)
     else:
         key, out, body = np_name, "bool z", f"z = x {_SUBNORMAL_COMPARE[np_name]} y"
     k = _SUBNORMAL_KERNELS.get(key)
     if k is None:
-        if np_name not in _STRICT_POWER:
-            preamble = ""
+        preamble = _strict_powf_source(choice) if np_name in _STRICT_POWER else ""
         k = _SUBNORMAL_KERNELS[key] = ElementwiseKernel(
             "float32 x, float32 y", out, body, f"woof_f32_{np_name}", preamble=preamble)
     scalars = not isinstance(a, (ndarray, np.ndarray)) and not isinstance(b, (ndarray, np.ndarray))

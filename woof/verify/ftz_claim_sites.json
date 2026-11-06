@@ -41698,7 +41698,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 287,
+      "line": 291,
       "kind": "prose",
       "anchor": "def _keeps_subnormals() -> bool:",
       "anchor_sha256": "79a90ae29e2d4def4dfe467674c3ae1adbfb619c944fc855578f9cba06191075",
@@ -41709,7 +41709,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 299,
+      "line": 303,
       "kind": "prose",
       "anchor": "def _subnormal_arith(np_name, a, b):",
       "anchor_sha256": "06202aafff6ab27a0bf6d4e9be09bea949eb921408fcc8bb3514cab3e2d461df",
@@ -41720,7 +41720,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 301,
+      "line": 305,
       "kind": "prose",
       "anchor": "if np_name in _SUBNORMAL_ARITH:",
       "anchor_sha256": "d483f4c64b67846cd183014f2bcdc753f17f36360728e58224f6a74dcfc88c33",
@@ -41731,7 +41731,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 302,
+      "line": 306,
       "kind": "prose",
       "anchor": "key, out, body = _SUBNORMAL_ARITH[np_name], \"float32 z\", f\"z = x {_SUBNORMAL_ARITH[np_name]} y\"",
       "anchor_sha256": "e68e347b3193a8a0c45e6ec7ae862840b425bb84c4434633d04b075cf203564a",
@@ -41742,7 +41742,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 303,
+      "line": 307,
       "kind": "prose",
       "anchor": "elif np_name in _SUBNORMAL_EXPR:",
       "anchor_sha256": "4bc5965e314234e1b1adfa0b29e30358a678b11919f1cb23beaa3df99127d2c8",
@@ -41753,7 +41753,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 304,
+      "line": 308,
       "kind": "prose",
       "anchor": "key, out, body = np_name, \"float32 z\", _SUBNORMAL_EXPR[np_name]",
       "anchor_sha256": "afa450915969ff30f2bb19502dda5e9f9ac8c8378661ac9aaf2e8c7c6c716b99",
@@ -41764,7 +41764,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 309,
+      "line": 313,
       "kind": "prose",
       "anchor": "key, out, body = np_name, \"bool z\", f\"z = x {_SUBNORMAL_COMPARE[np_name]} y\"",
       "anchor_sha256": "5764164d1fc06eea1874484d2f52e16485aa9addc85a8ccf721c9303c5aa36ea",
@@ -41775,7 +41775,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 310,
+      "line": 314,
       "kind": "prose",
       "anchor": "k = _SUBNORMAL_KERNELS.get(key)",
       "anchor_sha256": "e440ca680d7bcc6842819faee4a4dc15579216a7ec64a41ee0f32c563ec00a71",
@@ -41786,7 +41786,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 314,
+      "line": 317,
       "kind": "prose",
       "anchor": "k = _SUBNORMAL_KERNELS[key] = ElementwiseKernel(",
       "anchor_sha256": "89e663ae5cb590f96d92847a797fba1ce0570987645aa77d460aeb9be9aff5db",
@@ -41797,7 +41797,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 338,
+      "line": 341,
       "kind": "prose",
       "anchor": "if (not involves_f64 and _keeps_subnormals()",
       "anchor_sha256": "32bd6cd1e11c0767c0558428190e8d382b3ab2833fde4c522bba729033de1612",
@@ -41808,7 +41808,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 339,
+      "line": 342,
       "kind": "prose",
       "anchor": "and ((np_name in _SUBNORMAL_ARITH or np_name in _SUBNORMAL_EXPR",
       "anchor_sha256": "50dd5f1d69c9190dbb48d4ab7e4e1cc90d35851dba62df615df0513fee6b6413",
@@ -41819,7 +41819,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 342,
+      "line": 345,
       "kind": "prose",
       "anchor": "or np_name in _SUBNORMAL_COMPARE and _operands_f32(hints))):",
       "anchor_sha256": "fc24c687633e78dd061f9aaf32922e7fe7f8efe894e8e61553e9a7ad384a6e0e",
@@ -41830,7 +41830,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 343,
+      "line": 346,
       "kind": "prose",
       "anchor": "result = _subnormal_arith(np_name, args[0], args[1])",
       "anchor_sha256": "341ba2e9af3e5e2c17dc31a4d3d6c7a557027554e53ab8ef65655175fe0b7542",
