@@ -1,0 +1,138 @@
+# WRF-Hydro and WRF-NEMO coupling: what is ported, the licences, and the roadmap
+
+Status as of 2026-11-07.  WOOF holds WRF physics to compiled WRF 4.6.1
+reference builds.  This page records which parts of WRF's hydrology and ocean
+couplings are ported to that standard, which are not and why, and what each
+remaining step needs.
+
+## What is in the tree
+
+| Piece | Source | Where | Gate |
+| --- | --- | --- | --- |
+| Noah LSM built with `-DWRF_HYDRO`: ponded head `sfcheadrt` in; infiltration excess `infxsrt` and soil drainage `soldrain` out; the NDHMS edits to SMFLX, SRT and SSTEP | WRF 4.6.1 `phys/module_sf_noahdrv.F`, `phys/module_sf_noahlsm.F` (public domain) | `launch_noah(wrf_hydro=...)` -> `noah_column_hydro` (`woof/core/kernels/noah.cu`) | `tests/test_noah_wrf_hydro_parity.py`: 0 ULP in every field on CUDA (sm_86) and Metal (M3 Max), default and strict numerics |
+| WRF's side of the OASIS coupling with an ocean model: `cpl_snd2` (EVAP-PRECIP, SURF_NET_SOLAR, SURF_NET_NON-SOLAR, TAUX, TAUY, TAUMOD) and `cpl_rcv` (SST, UOCE, VOCE merged under CPLMASK) | WRF 4.6.1 `frame/module_cpl.F` (public domain) | `woof/ocean/wrf_cpl.py`, `woof/ocean/wrf_cpl.cu` | `tests/test_wrf_cpl_wrf461_parity.py` (separate PR) |
+
+Nothing of WRF-Hydro's routing or of NEMO is in the tree.
+
+## The 2026-11-06 drafts
+
+Untracked drafts found on the Mac checkout (`woof/hex/wrf_hydro*.py`,
+`woof/hex/wrf_hydro_noah.cu`, `woof/hex/wrf_nemo.py`, their "oracles" under
+`components/hex/tests/` and four tests) were read and none was kept:
+
+* `wrf_hydro_oracle/wrf_hydro_column.F90` and `wrf_nemo_oracle/wrf_nemo_column.F90`
+  describe themselves as "exact Fortran replica[s] of the CUDA kernel": the
+  oracle was written from the kernel, so it can only agree with it.  The
+  physics in both is invented (a bucket with a slope term; bulk fluxes with
+  fixed drag coefficients and a constant saturation humidity).  Neither is
+  WRF-Hydro or NEMO.
+* `wrf_hydro_noah_wrapper.F90` wraps a second copy of `module_sf_noahlsm.F`
+  with hand-set parameter tables, and states that WRF-Hydro is Apache 2.0,
+  which is false (below).  WOOF already ports Noah against the WRF driver
+  with WRF's own table reader; the WRF_HYDRO arm above extends that port
+  rather than adding a second one.
+
+## Licences (read 2026-11-07)
+
+**WRF 4.6.1** (`LICENSE.txt`): "NCAR and UCAR ... consider WRF to be in the
+public domain for use by any person or entity for any purpose without any fee
+or charge."  Everything ported above is WRF code.
+
+**WRF-Hydro**, NCAR/wrf_hydro_nwm_public, pinned candidate `v5.4.0` at
+`49b0fba3e859ef5288b06ec430621be03193f49e`, `LICENSE.txt` sha256
+`434cc6a8692405f600a3b7dd45d6c3d1af0848543d0ffd2e9cb886037b6be41b`.  A
+UCAR licence, not an OSI one.  Clause 1 grants use, derivative works and
+redistribution and then says: "You shall not sell, license or transfer for a
+fee the Software, or any work that in any manner contains the Software."
+Clause 9 requires the licence text and a UCAR notice with every copy.  The
+no-fee clause binds anything that contains WRF-Hydro-derived code, which an
+Apache-2.0 distribution cannot promise its recipients.  Two further facts:
+
+* WRF 4.6.1's own tarball carries a copy of WRF-Hydro under `hydro/` with no
+  separate licence file, under WRF's public-domain statement.  Whether that
+  statement reaches code UCAR also publishes under the restrictive licence
+  is not settled by either text.
+* Upstream WOOF withdrew a WRF-Hydro port: `RELEASE-EXCLUDE.txt` excludes the
+  "withdrawn WRF-Hydro product door", and `licenses/NOTICE-t-route-reservoirs.txt`,
+  `woof/core/kernels/NOTICE-CFE.txt` and `docs/nextgen-products.md` each state
+  that no WRF-Hydro source, port or fixture is used.  The NextGen hydrology
+  stack (t-route Muskingum-Cunge, CFE, Noah-OWP) is the upstream replacement.
+
+So a port of WRF-Hydro's routing is at best an opt-in in the sense the fork
+uses for the glibc 2.39 libm (#145): source in a separately licensed directory
+outside every package, built only by an explicit task, excluded from the
+wheels and the release export.  Unlike LGPL it would also bar anyone from
+selling a copy of the repository that contains it.  **This is a decision for
+the project owner**, not one a worker should take, so no WRF-Hydro code has
+been added.
+
+**NEMO**, `https://forge.nemo-ocean.eu/nemo/nemo.git`, tag `5.0.2` (commit
+`dcc7fb8c1779fa8409e41e4ce3ab7d45b9ceb796`), `LICENSE` sha256
+`2dcf0966f7eaae3af05f3e640215ac537c76d938d50ad02ad9d4260f1ca4bda5`: the CeCILL
+Free Software License Agreement, version 2.0 (2006-09-05); source headers say
+"Software governed by the CeCILL license".  CeCILL is a strong copyleft:
+a modification (a CUDA port of a NEMO routine is one) is distributed only
+under CeCILL (5.3.2), and an "Internal Module", code that runs in the same
+address space as the Software, counts as a Contribution.  WOOF loading
+NEMO-derived kernels into its own process is exactly that, so a distributed
+build containing them would have to be CeCILL (or GPL, through 5.3.4) as a
+whole.  Keeping such kernels in the repository is permissible as separately
+licensed files that no default build compiles; shipping them is not
+compatible with the Apache-2.0 wheels.  The opt-in shape would therefore be
+the #145 one, with the extra condition that an opt-in build is never
+redistributed except under CeCILL/GPL.  **Also a decision for the project
+owner**; the NEMO side stops at WRF's exchange contract until then.
+
+**OASIS3-MCT** (the coupler WRF and NEMO use) is LGPL-3.0.  Nothing of it is
+used: WOOF's coupling-interval averaging is its own and on-grid only.
+
+## Roadmap
+
+Each step is one PR under 300 files, held to a compiled oracle, CUDA and
+Metal, and refuses what it does not port by name.
+
+### WRF-Hydro (needs the licence decision for steps 2-5)
+
+1. **Done**: the LSM side of the exchange for Noah (`sf_surface_physics=2`).
+2. **Noah-MP under WRF_HYDRO** (WRF code, no licence question):
+   `module_sf_noahmpdrv.F`/`module_sf_noahmplsm.F` take `sfcheadrt`,
+   `INFXSRT`, `soldrain`, `qtiledrain` and `ZWATBLE2D` when built with
+   `-DWRF_HYDRO` (the `QINSUR` term at :6174 and `WATBLED` into `SOILWATER`
+   that `tests/data/oracles/noahmp/PROVENANCE-water.md` records as absent).
+   Extend the Noah-MP oracle harness with a hydro pass the way
+   `tools/noah_wrf461_oracle/build.sh` was extended.
+3. **The coupling driver** `hydro/CPL/WRF_cpl/module_wrf_HYDRO.F90` and
+   `HYDRO_drv/module_HYDRO_drv.F90`: `HYDRO_dt` cadence, `aggregate`/
+   `disaggregate` between the LSM grid and the routing grid (`AGGFACTRT`),
+   the soil-moisture and head hand-back.  WRF-Hydro code.
+4. **Routing**, in this order, each from the pinned WRF-Hydro source with its
+   own oracle: subsurface (`Routing/Noah_distr_routing_subsurface.F90`),
+   overland (`Routing/Overland/`), channel (`Routing/module_channel_routing.F90`:
+   Muskingum-Cunge first, then the diffusive wave), then the bucket baseflow.
+5. **Configuration**: `hydro.namelist` (`SUBRTSWCRT`, `OVRTSWCRT`,
+   `CHANRTSWCRT`, `channel_option`, `rt_option`, `GWBASESWCRT`, `DXRT`,
+   `AGGFACTRT`, `DTRT_TER`, `DTRT_CH`) mapped to a WOOF table, every unported
+   value refused by name.  Until step 4 lands there is nothing to route to:
+   `launch_noah(wrf_hydro=...)` is an API for the coupling, not a model run.
+
+### WRF-NEMO
+
+1. **Done (separate PR)**: WRF's exchange contract (`cpl_snd2`/`cpl_rcv`),
+   on a shared grid, with a conserving coupling-interval average and the
+   `ExternalOcean` protocol in `woof/ocean/interface.py`.
+2. **Wire the exchange into the physics driver**: call `send` once per WRF
+   step after the surface layer as `module_integrate.F:460` does, `receive`
+   in the surface driver before the LSM as `module_surface_driver.F:1510`
+   does, with `cpl_store_input`'s SST_INPUT capture at
+   `solve_em.F:374`.  Needs an `ExternalOcean` implementation to be useful.
+3. **An ocean**: either an external NEMO through a real coupler (out of
+   process; NEMO stays a separate program and its licence does not reach
+   WOOF), or, after the licence decision, NEMO kernels behind an opt-in with
+   an oracle built from the pinned NEMO tree (XIOS, NetCDF and MPI are the
+   toolchain cost).  The fields NEMO's `sbccpl.F90` can send that WRF 4.6.1
+   does not receive (sea-ice fraction, sea-surface height) stay refused by
+   name in `wrf_cpl.NOT_IN_WRF_461` until a WRF version that receives them is
+   the reference.
+4. **Remapping** between different atmosphere and ocean grids (OASIS's SCRIP
+   conservative remap) is refused by `wrf_cpl.require_shared_grid`; a port
+   would need its own licence read (OASIS3-MCT and SCRIP).

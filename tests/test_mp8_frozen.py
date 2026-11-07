@@ -1271,8 +1271,8 @@ FROZEN_MODULE_DIGESTS = {
         # noah_seaice_column differ only in __local_depot/callseq numbering.
         # tests/test_noah_wrf461_parity.py holds its table unchanged.
         # Previously 1a8b9c22/42d601c5.
-        '0937c15011e5ac439e8603c18fd37ac259a5b999e8b12d8090439fa54c766942',
-        'ea0381d172afd7c11e6197315acbf6c02a5f407bdeb75282867f3064c24127bb'),
+        'e3323234e336bf185a8f71948c8b4c515249ca78e1f0cabb2958460bc7faff34',
+        'd8019caa9327746453641c63319b596fcadc311263bad601d690a32330ed169c'),
     'noahmp_bareflux': (
         '54fb5065e95b24d4cf676e2deda29bae44b3e9305d3d98cbc1abf5ed55f444ce',
         'fbb19fc8b5668ea2edbcc1270f8ffe367475124ffa0ce99d3bc34639f3f31e9f'),

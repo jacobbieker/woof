@@ -672,17 +672,24 @@ __device__ static void noah_sstep(real* sh2oout, const real* sh2oin,
         if (wplus > 0.0f) {
             // Fortran K = NSOIL..2 is j = K-2 = NSOIL-2..0 here: SMC(K-1)
             // is smc[j], SH2OOUT(K) and SMC(K) are index j+1.  Unrolled for
-            // the port's four layers: the Metal compiler (fast numerics)
-            // dropped the column's SMC stores when this was a loop.
+            // the port's four layers, on scalar copies written back once:
+            // updating smc[] in place through the pointer (loop or unrolled)
+            // made the Metal compiler drop the column's SMOIS stores for
+            // layers 2-4 under default numerics (M3 Max, 2026-11-07), on
+            // columns that never entered this branch.
             static_assert(NSOIL == 4, "redistribution is unrolled for 4 layers");
-            noah_wplus_up(smc[2], wplus, smcmax, zsoil[1] - zsoil[2], 2,
+            real s0 = smc[0], s1 = smc[1], s2 = smc[2];
+            noah_wplus_up(s2, wplus, smcmax, zsoil[1] - zsoil[2], 2,
                           infxs1rt);
+            noah_wplus_up(s1, wplus, smcmax, zsoil[0] - zsoil[1], 1,
+                          infxs1rt);
+            noah_wplus_up(s0, wplus, smcmax, -zsoil[0], 0, infxs1rt);
+            smc[0] = s0;
+            smc[1] = s1;
+            smc[2] = s2;
             sh2oout[3] = fmaxf(smc[3] - sice[3], 0.0f);
-            noah_wplus_up(smc[1], wplus, smcmax, zsoil[0] - zsoil[1], 1,
-                          infxs1rt);
-            sh2oout[2] = fmaxf(smc[2] - sice[2], 0.0f);
-            noah_wplus_up(smc[0], wplus, smcmax, -zsoil[0], 0, infxs1rt);
-            sh2oout[1] = fmaxf(smc[1] - sice[1], 0.0f);
+            sh2oout[2] = fmaxf(s2 - sice[2], 0.0f);
+            sh2oout[1] = fmaxf(s1 - sice[1], 0.0f);
         }
     }
     runoff3 = wplus;
