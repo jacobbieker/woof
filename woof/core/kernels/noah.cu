@@ -608,6 +608,26 @@ __device__ static void noah_rosr12(real* p, const real* a,
     }
 }
 
+// One step of SSTEP's WRF_HYDRO redistribution (module_sf_noahlsm.F:4033-4058)
+// into the layer above, smcj = SMC(K-1) with depth dz; j == 0 is K-1 == 1.
+__device__ __forceinline__ static void noah_wplus_up(real& smcj, real& wplus,
+                                                     real smcmax, real dz,
+                                                     int j, real& infxs1rt)
+{
+    real avail = (smcmax - smcj) * dz;
+    if (wplus <= avail) {
+        smcj = smcj + wplus / dz;
+        wplus = 0.0f;
+    } else {
+        smcj = smcmax;
+        wplus = wplus - avail;
+        if (j == 0) {
+            infxs1rt = __fadd_rn(infxs1rt, __fmul_rn(wplus, 1000.0f));
+            wplus = 0.0f;
+        }
+    }
+}
+
 // ---------------------------------------------------------------- SSTEP
 // HYDRO adds module_sf_noahlsm.F:4029-4062: excess water left after the
 // bottom layer (WPLUS) is pushed back up the profile from layer NSOIL-1 and
@@ -651,25 +671,18 @@ __device__ static void noah_sstep(real* sh2oout, const real* sh2oin,
     if constexpr (HYDRO) {
         if (wplus > 0.0f) {
             // Fortran K = NSOIL..2 is j = K-2 = NSOIL-2..0 here: SMC(K-1)
-            // is smc[j], SH2OOUT(K) and SMC(K) are index j+1.
-            for (int j = NSOIL - 2; j >= 0; --j) {
-                real dz = -zsoil[0];
-                if (j != 0) dz = zsoil[j - 1] - zsoil[j];
-                real avail = (smcmax - smc[j]) * dz;
-                if (wplus <= avail) {
-                    smc[j] = smc[j] + wplus / dz;
-                    wplus = 0.0f;
-                } else {
-                    smc[j] = smcmax;
-                    wplus = wplus - avail;
-                    if (j == 0) {
-                        infxs1rt = __fadd_rn(infxs1rt,
-                                             __fmul_rn(wplus, 1000.0f));
-                        wplus = 0.0f;
-                    }
-                }
-                sh2oout[j + 1] = fmaxf(smc[j + 1] - sice[j + 1], 0.0f);
-            }
+            // is smc[j], SH2OOUT(K) and SMC(K) are index j+1.  Unrolled for
+            // the port's four layers: the Metal compiler (fast numerics)
+            // dropped the column's SMC stores when this was a loop.
+            static_assert(NSOIL == 4, "redistribution is unrolled for 4 layers");
+            noah_wplus_up(smc[2], wplus, smcmax, zsoil[1] - zsoil[2], 2,
+                          infxs1rt);
+            sh2oout[3] = fmaxf(smc[3] - sice[3], 0.0f);
+            noah_wplus_up(smc[1], wplus, smcmax, zsoil[0] - zsoil[1], 1,
+                          infxs1rt);
+            sh2oout[2] = fmaxf(smc[2] - sice[2], 0.0f);
+            noah_wplus_up(smc[0], wplus, smcmax, -zsoil[0], 0, infxs1rt);
+            sh2oout[1] = fmaxf(smc[1] - sice[1], 0.0f);
         }
     }
     runoff3 = wplus;
