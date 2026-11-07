@@ -148,7 +148,7 @@ woof = [
 "woof.hex" = ["*.json", "**/*NOTICE*.txt", "data/*", "data/**/*", "libexec/*", "native/*.rs", "native/*.c", "*.cu", "*.cuh", "**/*.cu", "**/*.cuh"]
 # The coupled component lanes' pinned options inventories (tools/mpas_coupled_options.py):
 "woof.hex.mpas_seaice" = ["data/*.json", "*.cu"]
-"woof.hex.mpas_ocean" = ["data/*.json"]
+"woof.hex.mpas_ocean" = ["data/*.json", "*.cu"]
 "woof.hex.mpas_ice" = ["data/*.json"]
 tools = ["prepare_hrrr_*.sh", "hydro_world/data/sources.v1.json", "hydro_world/data/recipes.v1.json",
          "hydro_world_params/data/params.v1.json"]
