@@ -3,7 +3,8 @@
 * :func:`split` cuts a translated unit into a body (kernels as ordinary
   functions behind opaque-typed wrappers) and a thin library of forwarding
   kernels with the original bindings; a unit that declares threadgroup
-  memory is left whole.
+  memory, or has more kernels than ``WOOF_METAL_DYLIB_MAX_KERNELS``, is
+  left whole, and so is one whose body once failed to build (``.refused``).
 * On the device, a unit is built once as a serialized dynamic library; a
   second process loads it from disk, compiles only the thin library, and
   computes the same words as the whole-unit build.
@@ -119,3 +120,27 @@ def test_a_translation_is_read_back_unchanged(tmp_path, monkeypatch):
     tr.translate(_UNIT, unit="affine2")
     tr.translate(_UNIT, unit="affine", defines=("KMAX=8",))
     assert len(list(tmp_path.glob("*.pickle"))) == 3
+
+
+def test_a_unit_with_many_kernels_or_a_refused_body_is_compiled_whole(tmp_path):
+    from woof import backend
+    if backend.active() != "mlx":
+        pytest.skip("runs under WOOF_BACKEND=mlx")
+    source = _UNIT + f"\n// {tmp_path.name}\n"
+    whole, _ = _run(tmp_path, "off", source)
+    # two kernels, at most one allowed: no dynamic library is attempted
+    os.environ["WOOF_METAL_DYLIB_MAX_KERNELS"] = "1"
+    try:
+        capped, log = _run(tmp_path, tmp_path / "capped", source)
+    finally:
+        del os.environ["WOOF_METAL_DYLIB_MAX_KERNELS"]
+    assert "dynamic library" not in log and capped == whole
+    assert not list((tmp_path / "capped").glob("*.metallib"))
+    # a body that once failed to build is not attempted again
+    built, _ = _run(tmp_path, tmp_path / "libraries", source)
+    (stored,) = (tmp_path / "libraries").glob("*.metallib")
+    stored.unlink()
+    stored.with_name(stored.name + ".refused").write_text("dynamic library: not made\n")
+    refused, log = _run(tmp_path, tmp_path / "libraries", source)
+    assert "dynamic library" not in log and refused == built == whole
+    assert not list((tmp_path / "libraries").glob("*.metallib"))

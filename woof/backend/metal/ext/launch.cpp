@@ -129,6 +129,10 @@ static MTL::DynamicLibrary* dynamic_library_for(MTL::Device* device, const std::
       return stored;
     }
   }
+  // a unit whose body did not make a dynamic library once is compiled whole
+  // from then on: the attempt can cost as much as the whole compile
+  std::string refused = path + ".refused";
+  if (access(refused.c_str(), R_OK) == 0) return nullptr;
   auto* options = compile_options(math_mode);
   options->setLibraryType(MTL::LibraryTypeDynamic);
   // the install name is where the library lives: the thin library links by it
@@ -136,14 +140,22 @@ static MTL::DynamicLibrary* dynamic_library_for(MTL::Device* device, const std::
   error = nullptr;
   auto* lib = device->newLibrary(NS::String::string(body.c_str(), NS::UTF8StringEncoding), options, &error);
   options->release();
+  auto refuse = [&](const char* what) {
+    std::string why = error ? error->localizedDescription()->utf8String() : "unknown error";
+    compile_log(what, library_key.substr(0, 40) + ": " + why.substr(0, 400), began);
+    if (FILE* f = std::fopen(refused.c_str(), "w")) {
+      std::fprintf(f, "%s: %s\n", what, why.c_str());
+      std::fclose(f);
+    }
+  };
   if (lib == nullptr) {
-    compile_log("dynamic library: the body did not compile", library_key.substr(0, 40), began);
+    refuse("dynamic library: the body did not compile");
     return nullptr;
   }
   auto* dynamic = device->newDynamicLibrary(lib, &error);
   lib->release();
   if (dynamic == nullptr) {
-    compile_log("dynamic library: not made", library_key.substr(0, 40), began);
+    refuse("dynamic library: not made");
     return nullptr;
   }
   std::string partial = path + ".partial";

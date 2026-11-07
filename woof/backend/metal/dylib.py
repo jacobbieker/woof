@@ -24,11 +24,31 @@ A unit :func:`split` cannot cut returns ``None`` and is built monolithically
 as before: one that declares ``threadgroup`` memory (a non-kernel function
 cannot declare it), or whose kernel parameters are not the translator's
 buffer, scalar-block and builtin forms.
+
+A dynamic library compiles every kernel of its unit at once, where pipelines
+compile only the kernels a run launches.  A unit with many kernels pays for
+kernels it never launches, so only a unit with at most :func:`max_kernels`
+kernels is cut.  The strict NSSL-2 unit (32 kernels, one of which had not
+compiled after an hour) took 37 to 49 minutes to fail as a dynamic library
+on an M3 Max, where the oracle's run of it compiles in minutes.
 """
 
 from __future__ import annotations
 
+import os
 import re
+
+#: Environment override for :func:`max_kernels`.
+MAX_KERNELS_ENV = "WOOF_METAL_DYLIB_MAX_KERNELS"
+
+
+def max_kernels() -> int:
+    """The most kernels a unit may have to be cut (``$WOOF_METAL_DYLIB_MAX_KERNELS``,
+    default 4; 0 cuts no unit)."""
+    try:
+        return int(os.environ.get(MAX_KERNELS_ENV, "4"))
+    except ValueError:
+        return 4
 
 #: Where the translator's prelude ends and the unit begins (translate()).
 UNIT_MARKER = "\n// ---- translated unit: "
@@ -114,4 +134,4 @@ def split(msl: str) -> tuple[str, str] | None:
     return body, thin_msl
 
 
-__all__ = ["UNIT_MARKER", "split"]
+__all__ = ["MAX_KERNELS_ENV", "UNIT_MARKER", "max_kernels", "split"]
