@@ -87,7 +87,11 @@ def check_matched(channel: FluxChannel, sent, received) -> None:
             reason=f"dtype {sender.dtype} does not match {receiver.dtype}",
             declaration="a matched exchange carries the same dtype both ways",
         )
-    diff = int(np.count_nonzero(sender.view(np.uint8) != receiver.view(np.uint8)))
+    # count differing words, not bytes: one word can differ in several bytes
+    width = max(sender.dtype.itemsize, 1)
+    diff = int(np.count_nonzero(np.any(
+        sender.view(np.uint8).reshape(sender.size, width) != receiver.view(np.uint8).reshape(receiver.size, width),
+        axis=1)))
     if diff:
         raise ConfigurationRefusal(
             knob="coupled.channel",

@@ -102,6 +102,10 @@ def test_check_matched_refuses_a_word_mismatch() -> None:
     with pytest.raises(ConfigurationRefusal) as exc:
         check_matched(_channel(), sent, received)
     assert "1 of 3 words differ" in str(exc.value)
+    # one word differing in several bytes is still one word (1.0 against 2.0)
+    with pytest.raises(ConfigurationRefusal) as exc:
+        check_matched(_channel(), np.array([1.0, 5.0], np.float32), np.array([2.0, 5.0], np.float32))
+    assert "1 of 2 words differ" in str(exc.value)
 
 
 def test_check_matched_refuses_shape_and_dtype_mismatch() -> None:
@@ -117,3 +121,15 @@ def test_check_matched_refuses_a_nan_payload_delta() -> None:
     b.view(np.uint64)[0] = 0x7FF8000000000001  # a different NaN payload
     with pytest.raises(ConfigurationRefusal):
         check_matched(_channel(), a, b)
+
+
+def test_the_coupled_door_refuses_an_unported_core_named_by_dt() -> None:
+    import argparse
+
+    from woof.hex.coupled import door
+
+    args = argparse.Namespace(component=[], plan=True, start=0.0, end=3600.0, cadence=900.0,
+                              dt=["seaice=300"])
+    with pytest.raises(ConfigurationRefusal) as exc:
+        door._coupled(args)
+    assert "seaice" in str(exc.value)

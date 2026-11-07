@@ -104,7 +104,7 @@ def _coupled(arguments: argparse.Namespace) -> int:
         for name in present:
             dts.setdefault(name, _DEFAULT_DT)
         for name in dts:
-            registry.component(name)
+            registry.require_ported(name)
         clock = CoupledClock(
             start=arguments.start,
             end=arguments.end,
