@@ -311,7 +311,8 @@ def _call_argument_lists(source: str, callee: str) -> list[list[str]]:
     the rest are the call sites.
     """
     out: list[list[str]] = []
-    for match in re.finditer(rf"\b{callee}\s*\(", source):
+    # ``noah_smflx<HYDRO>(`` is a call too: the WRF_HYDRO arm templates it.
+    for match in re.finditer(rf"\b{callee}\s*(?:<[^<>()]*>)?\s*\(", source):
         depth, j = 1, match.end()
         while depth:
             depth += {"(": 1, ")": -1}.get(source[j], 0)

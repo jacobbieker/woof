@@ -15,7 +15,11 @@ NOAHRES), and the land-ice column: ``ivgtyp == isice`` runs WRF's
 ``SFLX_GLACIAL`` (module_sf_noahlsm_glacial_only.F) through the driver's
 ICE == -1 arm in ``noah_glacial_column``, as WRF does (until 2.9.0 such a
 column was left untouched), graded bitwise against WRF by
-tests/test_noah_wrf461_parity.py.  NOT ported: UA_PHYS, FASDAS, WRF-Hydro,
+tests/test_noah_wrf461_parity.py.  WRF's -DWRF_HYDRO build (the LSM side of
+the WRF-Hydro exchange: ponded head in, infiltration excess and soil drainage
+out) runs through ``launch_noah(wrf_hydro=...)``, graded by
+tests/test_noah_wrf_hydro_parity.py; the WRF-Hydro routing itself is not
+ported (docs/coupling/WRF-HYDRO-NEMO.md).  NOT ported: UA_PHYS, FASDAS,
 the urban canopy models themselves (they run after the kernel,
 :mod:`woof.core.urban_driver`; the kernel carries their hand-over through
 ``launch_noah(urban=...)``, and the plain ``VEGTYP==ISURBAN`` parameter
@@ -418,6 +422,10 @@ _F2D = ("psfc", "sfcprs", "sfctmp", "qv1", "qgh", "dz8w1", "glw",
         "sfcrunoff", "udrunoff", "acsnow", "acsnom", "snopcx", "potevp",
         "noahres", "reslin", "chklowq")
 _F3D = ("smois", "tslb", "sh2o", "smcrel")
+#: The WRF_HYDRO exchange planes, in noah_column_hydro's argument order
+#: (module_sf_noahdrv.F:2607-2610): ponded head in, infiltration excess and
+#: soil drainage out, all in mm.
+WRF_HYDRO_FIELDS = ("sfcheadrt", "infxsrt", "soldrain")
 
 
 def _device_tables(params: NoahParams, dzs):
@@ -633,7 +641,8 @@ def launch_noah(dev: dict, params: NoahParams, dt: float, dzs,
                 xice_threshold: float = 0.5, frpcpn: bool = False,
                 usemonalb: bool = False, rdlai2d: bool = False,
                 opt_thcnd: int = 1, itimestep: int = 2,
-                urban: dict | None = None) -> None:
+                urban: dict | None = None,
+                wrf_hydro: dict | None = None) -> None:
     """Run the ``noah_column`` kernel on device arrays (in place).
 
     ``dev`` maps field names to CuPy arrays: every name in ``_F2D`` as
@@ -651,7 +660,22 @@ def launch_noah(dev: dict, params: NoahParams, dt: float, dzs,
     category from the rural skin temperature (module_sf_noahdrv.F:964-990),
     BEP/BEM's ``tsk_rural_bep`` is updated after SFLX (:1243-1247), and
     ``q1``/``q2k``/``zlvl`` are written for the blend.
+
+    ``wrf_hydro`` is WRF built with ``-DWRF_HYDRO``: a dict of the three
+    ``(ny, nx)`` float32 exchange planes ``module_sf_noahdrv.F:2607`` adds
+    to ``lsm`` -- ``sfcheadrt`` (ponded surface head from the routing, mm,
+    read), ``infxsrt`` (infiltration excess, mm, written) and ``soldrain``
+    (``RUNOFF2*DT*1000``, mm, written).  It launches ``noah_column_hydro``,
+    which also adds the ponded head to SMFLX's ``PCPDRP`` and redistributes
+    SSTEP's excess water up the profile, as the six NDHMS edits in
+    ``module_sf_noahlsm.F`` do.  Only ordinary land columns are written.
+    WRF also passes the planes to the urban hand-over; that combination is
+    not ported and is refused.
     """
+    if wrf_hydro is not None and urban is not None:
+        raise NotImplementedError(
+            "Noah with WRF_HYDRO and sf_urban_physics > 0 is not ported: "
+            "noah_column_hydro has no urban hand-over")
     import cupy as cp
 
     from woof.core.kernels import get_kernel
@@ -695,7 +719,14 @@ def launch_noah(dev: dict, params: NoahParams, dt: float, dzs,
     # before the urban hand-over: compiling the hand-over into the one
     # kernel behind a runtime flag changed NVRTC's FMA contraction and moved
     # default forecasts (kernels/noah.cu).
-    if urban is None:
+    if wrf_hydro is not None:
+        for name in WRF_HYDRO_FIELDS:
+            a = wrf_hydro[name]
+            if a.shape != (ny, nx) or a.dtype != cp.float32:
+                raise ValueError(f"{name}: expected ({ny},{nx}) float32")
+            args.append(a)
+        kern = get_kernel("noah", "noah_column_hydro")
+    elif urban is None:
         kern = get_kernel("noah", "noah_column")
     else:
         args += _urban_args(urban, ny, nx)

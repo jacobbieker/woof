@@ -305,7 +305,7 @@ def test_the_default_noah_launch_compiles_without_the_urban_handover():
     assert declaration is not None, "the default Noah kernel declaration is missing"
     default = text[declaration.start():]
     default = default[:default.index("\n}\n")]
-    assert "noah_column_body<false>(" in default and "urban_opt" not in default
+    assert "noah_column_body<false, false>(" in default and "urban_opt" not in default
     assert 'void noah_column_urban(' in text
     body = text[text.index("void noah_column_body("):]
     body = body[:body.index('\nextern "C"')]
