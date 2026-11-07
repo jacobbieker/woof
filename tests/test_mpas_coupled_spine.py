@@ -37,7 +37,7 @@ def test_require_ported_passes_the_atmosphere_and_refuses_a_stub() -> None:
     assert require_ported("atmosphere").status == "ported"
     with pytest.raises(ConfigurationRefusal) as exc:
         require_ported("seaice")
-    assert "feat/mpas-seaice" in str(exc.value)
+    assert "docs/mpas-coupled-roadmap.md" in str(exc.value)
 
 
 def test_clock_yields_intervals_and_substeps() -> None:

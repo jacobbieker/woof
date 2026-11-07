@@ -63,7 +63,8 @@ def require_ported(name: str) -> ComponentInfo:
             reason=f"the {name} core is not yet ported to the GPU (status: {info.status})",
             declaration=(
                 "woof hex coupled runs the ported cores only; the "
-                f"{name} port lands on feat/mpas-{info.branch}"
+                f"{name} port's progress and remaining work are in "
+                "docs/mpas-coupled-roadmap.md"
             ),
         )
     return info
