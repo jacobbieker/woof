@@ -57,6 +57,9 @@ def host(monkeypatch):
     monkeypatch.setattr(host_decode_window, "available_host_bytes",
                         lambda: HOST_BYTES)
     monkeypatch.setattr(preflight, "host_available_bytes", lambda: HOST_BYTES)
+#: The host beside that card, free RAM included: room for the ~6 GiB
+#: preparation these domains need, so only the card decides them.
+CARD_HOST_BYTES = int(64 * GIB)
 
 _TILES = """\
 [tiles]
@@ -198,6 +201,20 @@ def card(monkeypatch, host):
                 "name": "test card", "local_memory_bytes_per_thread": 0}
 
     monkeypatch.setattr(preflight, "device_memory_probe_subprocess", _probe)
+    # The host's RAM too.  Since 2.8.6 go also budgets the preparation
+    # against MemAvailable, so these card statements read the runner's
+    # live free RAM: 2.9.12 pass be38e676 R5 refused the 600^2 streamed
+    # control for "3.21 GiB available of 114.00 GiB" of host RAM (a development machine
+    # under twenty Stage-1 parts and outside lanes), not for the card.
+    # The host-RAM admission has its own tests (the A44 worker below).
+    from woof.core import streaming
+    from woof.ingest import host_decode_window
+    monkeypatch.setattr(streaming, "_host_total_bytes",
+                        lambda: CARD_HOST_BYTES)
+    monkeypatch.setattr(host_decode_window, "available_host_bytes",
+                        lambda: CARD_HOST_BYTES)
+    monkeypatch.setattr(preflight, "host_available_bytes",
+                        lambda: CARD_HOST_BYTES)
     return _probe
 
 
@@ -573,7 +590,7 @@ def test_check_on_a_config_that_does_not_stream_is_byte_identical(
     # tendency rows are strict-only (physics_inventory.history_tendency_rows).
     # The retention residual carries 3 % of that addition (4,348,048 B), and the
     # history frame grows by the chain rows written (1,447,476,780 B before).
-    # The WRF 4.6.1 Kain-Fritsch port (golden/parity, lane/verify-kain-fritsch)
+    # The WRF 4.6.1 Kain-Fritsch port (golden/parity, development branch)
     # keeps 66 column arrays in its workspace where the kernel it replaced
     # kept 52: 14 * 49 levels * (170 SMs * 256 columns) * 4 B = 119,418,880 B
     # more reserve on this configuration, which runs KF on its root.  The
@@ -606,16 +623,25 @@ def test_check_on_a_config_that_does_not_stream_is_byte_identical(
     # beside the five masses: 4 x 2 x (2 x 49 x 550 x 5 + 2 x 49 x 5 x 550)
     # FP32 = 17,248,000 B for the retained interval, 19,490,240 B with the
     # 1.13 pool margin (16,266,866,647 before).
-    # The fork's nwp_diagnostics wind running maxima (WSPD10MAX, U10MAX,
-    # V10MAX, W_UP_MAX, W_DN_MAX and the UPP gust; woof/core/wind_gust_diag)
-    # and its SWDDNI/SWDDIF/COSZEN surface-solar carriers add nine 550x550
-    # FP32 planes, 12,305,700 B with the 1.13 pool margin; paper/conus-suite-
-    # exact (2.9.11): the stored MF_VX_INV plane msfv_inv, 4 x 551 x 550 =
-    # 1,212,200 B, 1,369,786 B with the 1.13 pool margin (16,286,356,887 and
-    # 12,407,408,023 at upstream 1.1.1).
-    assert payload["peak_envelope_bytes"] == 16300032373
-    assert payload["observed_peak_envelope_bytes"] == 16300032373
-    assert payload["alloc_estimate_bytes"] == 12421083509
+    # paper/conus-suite-exact (2.9.11): the stored MF_VX_INV plane msfv_inv,
+    # 4 x 551 x 550 = 1,212,200 B, 1,369,786 B with the 1.13 pool margin
+    # (16,286,356,887 before).
+    # 9ebcd8d0ac6 (WRF 4.7.1 NWP interval diagnostics; this fixture sets
+    # nwp_diagnostics = 1), as made to fit in seal4: the time-t density
+    # nwp_rho, 4 x 49 x 550 x 550 = 59,290,000 B; the windows' 400 hPa bits,
+    # 2 x 550 x 550 words = 2,420,000 B; and twelve 550x550 planes, the seven
+    # native windows' plus UP_HELI_MAX, its two work planes, the two tracker
+    # windows and the zero stand-in, 14,520,000 B.  76,230,000 B is
+    # 86,139,900 B with the 1.13 pool margin (16,287,726,673 before; the port
+    # as first landed priced 289,867,600 B with its 3D pressure, base
+    # geopotential and zero copies).
+    assert payload["peak_envelope_bytes"] == 16373866573
+    assert payload["observed_peak_envelope_bytes"] == 16373866573
+    # HN1's four Morrison number tables (above) move the estimate by the
+    # same 19,490,240 B (12,387,917,783 before).
+    # paper/conus-suite-exact (2.9.11): msfv_inv moves it by the same 1,369,786 B.
+    # The NWP diagnostics (above) move it by the same 86,139,900 B.
+    assert payload["alloc_estimate_bytes"] == 12494917709
     # The reserve's 0.03 retention term follows the estimate: A163 moved
     # it by 0.03 x -212,355,128 = -6,370,653 B.
     # The density addition raises its retention reserve by 2,009,931 B, and
@@ -628,11 +654,13 @@ def test_check_on_a_config_that_does_not_stream_is_byte_identical(
     # The cap-solar + cap-hail allocations raise it by 0.03 x 295,336,800 =
     # 8,860,104 B and the hail frame's local memory by 593,264,640 B
     # (3,648,461,654 before).
-    # HN1's number tables raise it by 0.03 x 19,490,240 = 584,707 B, the
-    # fork's nine diagnostic planes by 0.03 x 12,305,700 = 369,171 B, and
-    # msfv_inv (paper/conus-suite-exact, 2.9.11) by 0.03 x 1,369,786 =
-    # 41,094 B (4,251,171,105 at upstream 1.1.1).
-    assert payload["reserve_bytes"] == 4251581370
+    # HN1's number tables raise it by 0.03 x 19,490,240 = 584,707 B
+    # (4,250,586,398 before).
+    # msfv_inv (paper/conus-suite-exact, 2.9.11) raises it by 0.03 x 1,369,786
+    # = 41,094 B (4,251,171,105 before).
+    # The NWP diagnostics raise it by 0.03 x 86,139,900 = 2,584,197 B
+    # (4,251,212,199 before).
+    assert payload["reserve_bytes"] == 4253796396
     assert payload["budget_bytes"] == _FITS_STREAMED_GIB * GIB
     assert payload["gates"]["alloc_estimate_le_wddm_budget"] is False
     assert rc == 1
@@ -690,10 +718,10 @@ def test_check_on_a_config_that_does_not_stream_is_byte_identical(
     # change nothing this configuration is charged. The density allocation
     # and its unchanged pool and retention margins remain present in both,
     # as does the priced CLDFRA buffer, and the strict-rim health table.
-    assert old_payload["peak_envelope_bytes"] == 16300032373
-    assert old_payload["observed_peak_envelope_bytes"] == 16300032373
-    assert old_payload["alloc_estimate_bytes"] == 12421083509
-    assert old_payload["reserve_bytes"] == 4251581370
+    assert old_payload["peak_envelope_bytes"] == 16373866573
+    assert old_payload["observed_peak_envelope_bytes"] == 16373866573
+    assert old_payload["alloc_estimate_bytes"] == 12494917709
+    assert old_payload["reserve_bytes"] == 4253796396
     assert old_rc == rc == 1
     assert old_estimate == estimate
     for key in ("peak_envelope_bytes", "observed_peak_envelope_bytes",
@@ -1060,6 +1088,13 @@ _A44_HOST_BYTES = int(30.06 * GIB)
 #: What the 32 GiB card measured free, as ``woof domain --card 32gb``
 #: declares it.
 _A44_FREE_BYTES = int(30.08 * GIB)
+#: The frame that straddles today. A44's own 1158x928 measured 14.20 GiB
+#: against 14.13; since the NWP diagnostics port priced its output windows
+#: (fix/seal4-fit) that frame's planner store alone is over the budget, so
+#: it is refused before the boundary series is counted. 1148x920 is the
+#: frame with the same straddle (measured: store and arena 14.11 GiB, with
+#: the boundary series 14.19 GiB; 1144x917 and 1152x923 fit outright).
+_A44_STRADDLE = (1148, 920)
 
 _A44_FRAME = """\
 [experiment]
@@ -1166,19 +1201,19 @@ def _a44_phases(path):
 
 def test_the_host_admission_counts_the_boundary_series_the_planner_leaves_out(
         tmp_path, a44_worker):
-    """The A44 frame, at its measured figures: 14.20 GiB against 14.13."""
-    _exp, phases = _a44_phases(_a44_config(tmp_path, 1158, 928))
+    """The A44 straddle, at today's priced figures: 14.19 GiB against 14.13."""
+    _exp, phases = _a44_phases(_a44_config(tmp_path, *_A44_STRADDLE))
     env = phases.streamed
     assert env is not None, "the A44 frame no longer streams"
     # The straddle: the planner's store and arena fit the budget, the
     # whole claim with the boundary series does not.
     assert env.pinned_bytes <= env.host_budget_bytes < env.host_bytes
-    assert f"{env.host_bytes / GIB:.2f}" == "14.20"
+    assert f"{env.host_bytes / GIB:.2f}" == "14.19"
     assert f"{env.host_budget_bytes / GIB:.2f}" == "14.13"
 
     refusal = phases.streamed_host_refusal()
     assert refusal is not None
-    assert "14.20 GiB of host RAM" in refusal
+    assert "14.19 GiB of host RAM" in refusal
     assert "14.13 GiB host budget" in refusal
     assert "lateral-boundary tables" in refusal
 
@@ -1189,7 +1224,7 @@ def test_go_check_and_domain_refuse_the_a44_frame_on_one_admission(
     from woof import domain_wizard as dw
     from woof.cli import main as cli_main
 
-    path = _a44_config(tmp_path, 1158, 928)
+    path = _a44_config(tmp_path, *_A44_STRADDLE)
     exp, phases = _a44_phases(path)
     refusal = phases.streamed_host_refusal()
 

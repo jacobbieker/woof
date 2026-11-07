@@ -20,16 +20,12 @@ def test_binary_cloud_fraction_namelist(tmp_path, pair, variant):
     text, _ = import_namelists(*_pair(tmp_path, inp=inp), name='binary_cloud', rrtmg_variant=variant)
     assert 'icloud = 2' in text
 
-@pytest.mark.parametrize('variant', ['rrtmg_legacy', 'rte-rrtmgp'])
-def test_wrf_solar_cloud_fraction_config(tmp_path, variant):
-    p = _write_toml(tmp_path, dynamics=f'ra_lw_physics=4\nra_sw_physics=4\nra_rrtmg_variant="{variant}"\nicloud=3\nmoist=true\nmp_physics=8')
-    assert load_config(p).icloud == 3
-
-
-def test_wrf_solar_cloud_fraction_refusals_name_the_breakage(tmp_path):
-    # Dudhia/RRTM carry no cal_cldfra3 wiring; Kessler has no qi (WRF stops).
-    p = _write_toml(tmp_path, dynamics='ra_lw_physics=1\nra_sw_physics=1\nicloud=3\nmoist=true\nmp_physics=8')
-    with pytest.raises(ValueError, match='cal_cldfra3'):
+def test_icloud3_without_cloud_species_names_breakage(tmp_path):
+    # cal_cldfra3 is ported (3.0); WRF's own check refuses it without QC/QI.
+    # Replaces test_unported_cloud_fraction_names_breakage, the pre-port
+    # refusal of every icloud=3 run.
+    p = _write_toml(tmp_path, dynamics='icloud=3')
+    with pytest.raises(ValueError, match='icloud = 3 option, missing QC or QI'):
         load_config(p)
     p = _write_toml(tmp_path, dynamics='ra_lw_physics=4\nra_sw_physics=4\nicloud=3\nmoist=true\nmp_physics=1')
     with pytest.raises(ValueError, match='missing QC or QI'):

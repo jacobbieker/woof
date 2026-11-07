@@ -49,9 +49,8 @@ def test_farms_configurations_wrf_admits_pass(overrides):
 
 
 @pytest.mark.parametrize(("overrides", "match"), [
+    # swint_opt = 2 (FARMS) runs since its port; 3 is no WRF value.
     (dict(swint_opt=3), "swint_opt=3"),
-    (dict(couple_farms=True), "couple_farms = true requires swint_opt = 2"),
-    (dict(couple_farms=1), "couple_farms must be a boolean"),
     (dict(swint_opt=True), "swint_opt=True"),
     (dict(aer_opt=4), "aer_opt=4"),
     (dict(aer_opt=1, nested=True, **_HRRR), "domain-1 aerod parent forcing"),
@@ -122,12 +121,12 @@ def test_the_checkpoint_echo_drops_both_at_their_default():
     names = [field.name for field in dataclasses.fields(RunConfig)]
     # Appended last after the campaign, keyword-only: sea ice's real.exe
     # threshold (4c82704f8f) and the HRRR v4 output controls
-    # (lane/hrrr-v4-output: e55b68accb, bd4a1c2090, f80ac46aeb).
+    # (development branch: e55b68accb, bd4a1c2090, f80ac46aeb).
     later = ["seaice_threshold", "prec_acc_dt", "prec_acc_dt1",
              "gsd_diagnostics", "reset_interval1", "history_interval2_s",
              "history_interval_change_s", "smoke_off_reason",
              # 2.9.7, keyword-only: the HRRR v4 climate statistics
-             # (lane/hrrr-v4-clwrf) and tc/nest's fixed-frame archive.
+             # (development branch) and tc/nest's fixed-frame archive.
              "output_diagnostics", "diag_int", "wind_int",
              "nest_accumulation_archive",
              # 2.9.10, keyword-only: WRF's ghg_input (fix/wrf461-2dom-exact,
@@ -138,41 +137,39 @@ def test_the_checkpoint_echo_drops_both_at_their_default():
              "wind_farm_scheme", "wind_farms", "wind_farm_table",
              "windfarm_tke_factor", "wind_farm_max_dx_m",
              # fix/hailcast, keyword-only: the HAILCAST generation.
-             "hailcast_version",
-             # RRTMG band output, then WRF-Solar's couple_farms.
-             "rrtmg_spectral_output", "couple_farms",
-             # the output-only woof.radtran diagnostic
-             "radtran_wavelengths", "radtran_interval_s", "radtran_umu", "radtran_phi",
-             "radtran_mol_abs_param", "radtran_solver", "radtran_streams",
-             "radtran_pseudospherical",
-             # WRF's shcu_physics (Deng) and cu_rad_feedback.
-             "shcu_physics", "cu_rad_feedback",
-
-             # the output-only WRF-Solar diagnostics
-             "solar_diagnostics",
-             # the radtran diagnostic's OPAC aerosol, appended after
-             "radtran_aerosol",
-             # WRF's use_theta_m and do_avgflx_em, appended after
-             "use_theta_m", "do_avgflx_em",
-             # WRF-Solar EPS (multi_perturb, pert_*, table) and MAD-WRF.
-             *__import__("woof.config", fromlist=["x"]).MULTI_PERTURB_RUN_DEFAULTS,
-             *__import__("woof.config", fromlist=["x"]).MADWRF_RUN_DEFAULTS]
-    assert names[-len(later):] == later
+             "hailcast_version"]
+    # Since 3.0 the port lanes append their own keyword-only fields after
+    # and among this block (observation nudging, DFI, AFWA, time series,
+    # wind-farm details, ...).  What the block protects is unchanged: every
+    # field from seaice_threshold on is keyword-only, so positional
+    # construction keeps its order, and the fields listed keep theirs.
+    tail = names[names.index(later[0]):]
+    keyword_only = {f.name: f.kw_only for f in dataclasses.fields(RunConfig)}
+    assert all(keyword_only[name] for name in tail)
+    assert [name for name in tail if name in later] == later
     for field in dataclasses.fields(RunConfig):
         if field.name in ("umove", "vmove"):
             assert field.kw_only and field.default == 0.0
-    names = names[:-len(later)]
+    names = names[:names.index(later[0])]
     # The 2.9.4 capabilities campaign's keyword-only keys follow the fire
-    # block: lane/cap-waves-couple, cap-hail, cap-seaice, cap-eclipse and
+    # block: development branch, cap-hail, cap-seaice, cap-eclipse and
     # cap-lake, in merge order.
-    campaign = ["ocean_config", "hailcast_opt", "haildt",
+    # The keyword-only ocean-wave pair rides beside ocean_config
+    # (6cd9d58b72, waves: run options and device exchange).
+    campaign = ["ocean_config", "waves", "waves_options", "hailcast_opt", "haildt",
                 "seaice_prognostic", "seaice_initial_thickness",
                 "seaice_new_ice_thickness", "seaice_ocean_heat_flux",
                 "ra_sw_eclipse", "lake_state_source", "lake_state_path",
                 "lake_state_accept_licence"]
     assert names[-len(campaign):] == campaign
     names = names[:-len(campaign)]
-    # The keyword-only fire block follows the chem block.
+    # The keyword-only fire block follows the chem block.  3.0 port lanes put
+    # their own keyword-only fields beside it (the TC surface, fog settling,
+    # the KF trigger); keyword-only, they move no positional argument.
+    interlopers = [name for name in names[names.index(CHEM_RUN_FIELDS[-1]) + 1:]
+                   if name not in FIRE_RUN_FIELDS]
+    assert all(keyword_only[name] for name in interlopers), interlopers
+    names = [name for name in names if name not in interlopers]
     names = names[:-len(FIRE_RUN_FIELDS)]
     assert names[-len(CHEM_RUN_FIELDS):] == list(CHEM_RUN_FIELDS)
     names = names[:-len(CHEM_RUN_FIELDS)]
@@ -207,14 +204,18 @@ def test_the_checkpoint_echo_drops_both_at_their_default():
         "hydrometeor_handover_numbers",
         # 2.9.1: WRF's ocean mixed layer, appended after the correct-mode keys.
         "sf_ocean_physics",
-        # lane/cap-slab-ocean: the keyword-only 3-D PWP controls.
+        # development branch: the keyword-only 3-D PWP controls.
         "ocean_levels", "ocean_analysis", "ocean_analysis_source",
         "ocean_mld_climatology", "omdt", "ocean_z", "ocean_t", "ocean_s",
         "oml_hml0", "oml_gamma", "oml_relaxation_time",
         # golden/ports-cu: Grell 3D and New SAS controls.
         "cugd_avedx", "maxiens", "maxens", "maxens2", "maxens3",
         "ensdim", "cu_diag", "convtrans_avglen_m",
-        "nsas_dx_factor", "sas_pgcon"]
+        "nsas_dx_factor", "sas_pgcon",
+        # fix(cu94) 5bcae8d34e: the CU_SAS shallow switch; 82024a1f6c8: the
+        # Thompson table-cache controls (MP38 native arithmetic).
+        "shalconv", "force_read_thompson", "write_thompson_tables",
+        "write_thompson_mp38table"]
     assert _cfg().cycling is False
     assert "cycling" not in restart.configuration_echo(_cfg())
     for name, default in {"thompson_version": "wrf_461",
