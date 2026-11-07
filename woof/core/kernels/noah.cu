@@ -650,24 +650,25 @@ __device__ static void noah_sstep(real* sh2oout, const real* sh2oin,
     }
     if constexpr (HYDRO) {
         if (wplus > 0.0f) {
-            for (int k = NSOIL - 1; k >= 1; --k) {
-                real dz;
-                if (k == 1) dz = -zsoil[0];
-                else dz = zsoil[k - 2] - zsoil[k - 1];
-                real avail = (smcmax - smc[k - 1]) * dz;
+            // Fortran K = NSOIL..2 is j = K-2 = NSOIL-2..0 here: SMC(K-1)
+            // is smc[j], SH2OOUT(K) and SMC(K) are index j+1.
+            for (int j = NSOIL - 2; j >= 0; --j) {
+                real dz = -zsoil[0];
+                if (j != 0) dz = zsoil[j - 1] - zsoil[j];
+                real avail = (smcmax - smc[j]) * dz;
                 if (wplus <= avail) {
-                    smc[k - 1] = smc[k - 1] + wplus / dz;
+                    smc[j] = smc[j] + wplus / dz;
                     wplus = 0.0f;
                 } else {
-                    smc[k - 1] = smcmax;
+                    smc[j] = smcmax;
                     wplus = wplus - avail;
-                    if (k - 1 == 0) {
+                    if (j == 0) {
                         infxs1rt = __fadd_rn(infxs1rt,
                                              __fmul_rn(wplus, 1000.0f));
                         wplus = 0.0f;
                     }
                 }
-                sh2oout[k] = fmaxf(smc[k] - sice[k], 0.0f);
+                sh2oout[j + 1] = fmaxf(smc[j + 1] - sice[j + 1], 0.0f);
             }
         }
     }
