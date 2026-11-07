@@ -53,6 +53,13 @@ cut_subroutine cpl_rcv > cpl_rcv.inc
 sha256sum cpl_snd2.inc cpl_rcv.inc > cut-sha256sums.txt
 # The cuts are pinned so a change to the awk or to the file cannot pass as
 # the same oracle.  module_cpl.F:298-382 and :408-455.
+for pin in "aa20302003dde633b097ad0fcf47cf094d1609593f6d75c6e740b122c454e46c  cpl_snd2.inc" \
+           "1d74da88c615c769ea0762acda9dde5ba862064fa5a1f187d442e01bf61a29bf  cpl_rcv.inc"; do
+    if ! grep -qxF "${pin}" cut-sha256sums.txt; then
+        echo "cut ${pin##* } does not match its pinned digest" >&2
+        exit 6
+    fi
+done
 expected_snd2="$(grep -c '' cpl_snd2.inc)"
 expected_rcv="$(grep -c '' cpl_rcv.inc)"
 if [[ "${expected_snd2}" -ne 85 || "${expected_rcv}" -ne 48 ]]; then

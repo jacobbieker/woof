@@ -79,9 +79,11 @@ program run_wrf_cpl_oracle
   grid%u_phy(1,1,1) = grid%uoce(1,1); grid%v_phy(1,1,1) = grid%voce(1,1)
   grid%u_phy(2,1,1) = 0.0; grid%v_phy(2,1,1) = 0.0
   grid%uoce(2,1) = 0.0; grid%voce(2,1) = 0.0
-  ! 3: relative wind below the floor.
-  grid%u_phy(3,1,1) = grid%uoce(3,1) + 3.0e-8
-  grid%v_phy(3,1,1) = grid%voce(3,1)
+  ! 3: relative wind below the floor, over a still ocean so float32 keeps
+  !    the 3.e-8 offset.
+  grid%uoce(3,1) = 0.0; grid%voce(3,1) = 0.0
+  grid%u_phy(3,1,1) = 3.0e-8
+  grid%v_phy(3,1,1) = 0.0
   ! 4: no friction velocity, so TAUMOD = 0.
   grid%ust(4,1) = 0.0
   ! 5: night, no precipitation, dewfall (negative QFX).

@@ -60,6 +60,9 @@ def test_fixture_reaches_the_edges_it_names():
     taux, tauy = _col(rows, "taux"), _col(rows, "tauy")
     # no relative wind and a relative wind under the 1.e-7 floor
     assert taux[0] == 0.0 and tauy[0] == 0.0 and taux[1] == 0.0
+    # 3.e-8 m/s of relative wind under the 1.e-7 WSPD floor still drives a
+    # (scaled-down) stress
+    assert taux[2] != 0.0 and tauy[2] == 0.0
     assert _col(rows, "taumod")[3] == 0.0
     assert _col(rows, "evap_precip")[5] < -1.0
     m1, m2 = _col(rows, "cplmask1"), _col(rows, "cplmask2")
