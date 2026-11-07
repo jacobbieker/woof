@@ -224,13 +224,17 @@ def test_production_step_matches_wrf(path):
            ("theta", "pressure", "w", "rainnc", "snownc", "grplnc", "hailnc",
             *_MOMENTS)}
     src.update(rho=data["col_rho"], dz=data["col_dz"])
+    def off_wrf(out):
+        mismatched = {}
+        for name in runner.OUT3 + runner.OUT2:
+            n = int(np.count_nonzero(_bits(out[name]) != _bits(data[f"out_{name}"])))
+            if n:
+                mismatched[name] = n
+        return mismatched
+
     out, fin, _, _ = runner.production_step(
         src, float(data["dt_s"]), int(data["itimestep"]))
-    mismatched = {}
-    for name in runner.OUT3 + runner.OUT2:
-        n = int(np.count_nonzero(_bits(out[name]) != _bits(data[f"out_{name}"])))
-        if n:
-            mismatched[name] = n
+    mismatched = off_wrf(out)
     from woof import backend
     if backend.active() == "mlx":
         from woof.backend.facade._ops import strict_powf_choice
@@ -242,6 +246,26 @@ def test_production_step_matches_wrf(path):
             exner = int(np.count_nonzero(_bits(fin["exner"]) != _bits(data["in_exner"])))
             assert exner, "the correctly rounded powf gave CUDA's Exner words: close the gap"
             if mismatched:
+                # The gap is the Exner words alone: the same step on the
+                # oracle's Exner words must be WRF's, word for word.
+                import cupy as cp
+                from woof.core import nssl2_runtime
+                oracle_exner = cp.asarray(np.ascontiguousarray(data["in_exner"].T[:, None, :]),
+                                          dtype=cp.float32)
+                prepare = nssl2_runtime._prepare_fields
+
+                def on_oracle_exner(state, shape):
+                    fields = prepare(state, shape)
+                    fields.pii[...] = oracle_exner
+                    return fields
+
+                nssl2_runtime._prepare_fields = on_oracle_exner
+                try:
+                    rest = off_wrf(runner.production_step(
+                        src, float(data["dt_s"]), int(data["itimestep"]))[0])
+                finally:
+                    nssl2_runtime._prepare_fields = prepare
+                assert not rest, f"off WRF beyond the Exner words: {rest}"
                 pytest.xfail(f"independent-powf: {exner} of {data['in_exner'].size} Exner "
                              f"words are not CuPy's powf; outputs off WRF: {mismatched}")
     assert not mismatched, mismatched

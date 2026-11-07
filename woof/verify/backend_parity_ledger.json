@@ -1326,8 +1326,8 @@
      "nssl2_sediment_all_parallel_64"
     ],
     "unmatched": {
-     "cuda": 8,
-     "mlx": 8
+     "cuda": 1,
+     "mlx": 9
     }
    },
    "cause": "independent-powf",
@@ -1353,8 +1353,8 @@
      "nssl2_fill_velocity_gamma"
     ],
     "unmatched": {
-     "cuda": 9,
-     "mlx": 9
+     "cuda": 2,
+     "mlx": 10
     }
    },
    "cause": "independent-powf",
