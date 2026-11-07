@@ -193,25 +193,25 @@ bytes are outside the numerical oracle.
   `cupy.cuda.compiler` line 585 (`options += ('-ftz=true',)`), after the
   caller's options, and NVRTC honours the last occurrence.
   The inventory records 14 distinct caller-supplied option tuples across the
-  255 compile sites in the shipped package, each listed here with a site
+  272 compile sites in the shipped package, each listed here with a site
   that supplies it:
-  - no caller options -- `woof/backend/__init__.py:28` (self.xp.RawModule),
-    and 192 other site(s)
+  - no caller options -- `woof/backend/__init__.py:231` (self.xp.RawModule),
+    and 207 other site(s)
   - `--std=c++17` -- `woof/ensemble/batch_perturbation.py:51`
     (xp.RawModule), and 18 other site(s)
   - `-std=c++17` -- `woof/core/acoustic_fusion.py:405` (cp.RawModule), and
-    15 other site(s)
+    17 other site(s)
   - `--std=c++11` -- `woof/hex/cuda_courant_fullstep_lts.py:52`
     (cp.RawKernel), and 5 other site(s)
   - `-std=c++17` `--ftz=false` -- `woof/core/chem_plumerise_cache.py:37`
     (compiler.compile_using_nvrtc), and 5 other site(s)
-  - `-fmad=false` -- `woof/core/dycore.py:308` (cp.ElementwiseKernel), and 2
+  - `-fmad=false` -- `woof/core/dycore.py:323` (cp.ElementwiseKernel), and 2
     other site(s)
   - `--fmad=false` -- `woof/hex/moving_vertical_cuda.py:21` (cp.RawKernel),
     and 1 other site(s)
   - `--std=c++17` `--use_fast_math` -- `woof/hex/waves.py:486`
     (cp.RawModule), and 1 other site(s)
-  - `-std=c++17` `--fmad=false` -- `woof/core/kernels/__init__.py:1230`
+  - `-std=c++17` `--fmad=false` -- `woof/core/kernels/__init__.py:1290`
     (cp.RawModule), and 1 other site(s)
   - `-std=c++17` `--fmad=false` `--ftz=false` --
     `woof/core/thompson_fork.py:109` (compiler.compile_using_nvrtc), and 1
@@ -221,7 +221,7 @@ bytes are outside the numerical oracle.
   - `--std=c++17` a target flag built from the device architecture at run
     time -- `woof/ocean/waves/model.py:73` (cp.RawModule)
   - `-std=c++17` `--maxrregcount=112` --
-    `woof/core/kernels/__init__.py:1202` (cp.RawModule)
+    `woof/core/kernels/__init__.py:1262` (cp.RawModule)
   - a target flag built from the device architecture at run time a target
     flag built from the device architecture at run time --
     `woof/hex/mpasphys/surface_update_v842.py:150`

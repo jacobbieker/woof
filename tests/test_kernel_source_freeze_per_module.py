@@ -1021,8 +1021,9 @@ BASELINE_PINNED: dict[str, str] = {
     # a runtime global workspace, MYJ_KMAX a 256-level refusal guard;
     # bit-identical to the previous pin at nz = 49/100/128
     # (tests/test_myj_workspace.py).  Previously ff8c000f.
+    # RE-PINNED at the 1.1.6 upstream merge: the fork's 256-level source on upstream 1.1.6's edits.
     "myjurb":
-        "ff8c000f5fdbe9f43f903a00ef9a20c760635c5321e2912257ebfe2d172a26e8",
+        "fb6e913711c15948317681cf72641f2ca4dbc3b747ed6f2203dff142ad43c24e",
     # development branch: sub-grid terrain drag from WRF v4.7.1, the
     # topo_wind static coefficients (start_em.F:1539-1626), gwd_opt = 1
     # (module_bl_gwdo.F -> bl_gwdo.F90) and gwd_opt = 3 (module_bl_gwdo_gsl.F),
@@ -1039,8 +1040,9 @@ BASELINE_PINNED: dict[str, str] = {
     # with SPP) is 0 ULP on every lane on sm_120, strict and default.
     # RE-PINNED at the 1.1.0 upstream merge: TD_KMAX 256 (the fork's level ceiling) on upstream's SPP-pattern source.
     # Previously 5da35b59.
+    # RE-PINNED at the 1.1.6 upstream merge: the fork's 256-level source on upstream 1.1.6's edits.
     "terrain_drag":
-        'f105fc2ba1310dec62d3c2fafd2f4fd3334370cc30bf8864e88986f6c106f3dd',
+        '575ed16c15529e6de4b6cf34a31c75917f6a2a27577e11da5721fb3a7afdb2da',
     # feat/windfarm-fitch-kernel: the Fitch et al. (2012) wind-farm drag
     # from WRF v4.7.1 phys/module_wind_fitch.F (windfarm_opt = 1), word for
     # word against WRF's own Fortran and the binary32 CPU mirror
@@ -1174,8 +1176,9 @@ BASELINE_PINNED: dict[str, str] = {
     # longwave fluxes, rrtmg_spectral_output); every existing entry point is
     # unchanged text.  Its words equal compiled WRF v4.6.1 rtrnmc's per-band
     # terms (tests/test_rrtmg_spectral_output.py), CUDA and Metal.
+    # RE-PINNED at the 1.1.6 upstream merge: the fork's 256-level source on upstream 1.1.6's edits.
     "rrtmg_lw_zbatched":
-        "5611794c5c9e44815ad00e28af7367428beda949afe205654ecb959665de7a8e",
+        "dfe3b824da5e8af04366dc873654368fb687a26075ddad898f48e3a6a2a367e6",
     # The clean-room spectral solver (woof/radtran, docs/dev/radtran.md);
     # its words are tests/data/radtran/kernel_words.npz on host, CUDA and
     # Metal, and its fluxes are held to uvspec 2.0.6.  Moved once on

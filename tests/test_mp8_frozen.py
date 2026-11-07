@@ -848,8 +848,8 @@ FROZEN_MODULE_DIGESTS = {
         # Previously 9eb33736/5e418a4f; then 78cf5577/0a8949d9 until one
         # word of the header comment changed for the banned-word census
         # (no statement moved).
-        'dbe31837ebbb2a48321a7624ef390bfff141db1069528bf701b7e7151d5f8a33',
-        '058d929340d894c36caf44bcc0f69aa86121b81911f136c594216a3dcbe1de3a'),
+        'd5d3e83ef1094a0202b68b297dd1aad357604327ce607a9aad87fc0772fb2db0',
+        '387f2e0d20c9820963853e606a88f71484c3096f3ae0a4a43f29828607ef1b76'),
     'lbc_flow': (
         # 4febd041f supplies resolved WDM6/NSSL inflow concentrations.
         # docs/dev/qnn-specified-inflow.md records 4 CPU + 10 GPU
@@ -2148,7 +2148,7 @@ FROZEN_MODULE_DIGESTS = {
         # undefined the preprocessed unit and NVRTC's image are the
         # c8e0db79/b31ff1ff ones (test_wb5_exact_mode_compiles_the_same_ptx_as_2_8_7).
         # Previously b31ff1ff.
-        'eee09e2eae899e2379f5a0622faf82a6052e349f3aa0049428dec5650d1ffcd1'),
+        'e6bc0057a45f9fdb9c481ff9c44464d073c3c5e858ac2a566047dd740340be40'),
     'ysu': (
         # Re-pinned by the cat6 fix, 2026-11-02: 51bb93111ee (export hygiene)
         # rewrote comments only in glibc_flt32.cuh, flt32_expf_fma.cuh, kf.cu,
@@ -2280,7 +2280,7 @@ FROZEN_MODULE_DIGESTS = {
         # RE-PINNED at the 1.1.0 upstream merge: YSU_KMAX 256 (the fork's ceiling). Previously f56e3ec7.
         '7192b5b10c683718a9395682bde12a7145c2ca20318047d5a7998b1e87b1fbf2',
         # ysu_default.cu names a test host instead of a lab host since 2.9.1 (comment only).
-        'cf74efe50f9613ad69fe41a052bd3867fb057a34c0a6adc3a8cd656cc1159686'),
+        '94e8cfc832beb3df6e52aa5455df1573960135c447aa6bd6984da6de11ad77a3'),
 }
 
 # -- R2 --------------------------------------------------------------------

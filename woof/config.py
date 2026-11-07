@@ -8037,20 +8037,21 @@ def multi_perturb_refusal(cfg) -> str | None:
                 "only writes the perturbation fields to history, which woof "
                 "does not; switch on pert_farms, pert_deng, pert_thom or "
                 "pert_cld3")
-    if cfg.pert_farms and int(cfg.swint_opt) != 2:
-        return ("pert_farms perturbs FARMS's inputs (module_radiation_driver.F"
-                f":3052-3082); it needs swint_opt = 2, got {cfg.swint_opt}")
-    if cfg.pert_deng and int(getattr(cfg, "shcu_physics", 0)) != 5:
-        return ("pert_deng perturbs Deng's inputs (module_shallowcu_driver.F"
-                ":632-672); it needs shcu_physics = 5")
+    # Since the 1.1.6 sync the WRF engine runs upstream's FARMS, Deng and
+    # cal_cldfra3, which carry no EPS hooks; the fork's hooked
+    # transcriptions run on the MPAS lane only (woof.hex.mpasphys
+    # wrfsolar_eps_v842).  Refused by name rather than run unperturbed.
+    unhooked = [key for key in ("pert_farms", "pert_deng", "pert_cld3")
+                if getattr(cfg, key)]
+    if unhooked:
+        return (f"{', '.join(unhooked)}: the WRF engine's FARMS, Deng and "
+                "cal_cldfra3 are upstream's and carry no WRF-Solar EPS hook "
+                "yet; pert_thom runs here, and every switch runs on the MPAS "
+                "lane (woof hex, &wrfsolar_eps)")
     if cfg.pert_thom and int(cfg.mp_physics) not in (8, 28):
         return ("pert_thom perturbs Thompson's inputs (module_microphysics_"
                 "driver.F:1120-1213, :1314-1381, mp_physics 28 and 8); got "
                 f"mp_physics = {cfg.mp_physics}")
-    if cfg.pert_cld3 and int(cfg.icloud) != 3:
-        return ("pert_cld3 perturbs cal_cldfra3's t and qv "
-                "(module_radiation_driver.F:1472-1474); it needs icloud = 3, "
-                f"got {cfg.icloud}")
     from woof.core.wrfsolar_eps import (StochpertTableError,
                                         load_stochpert_table)
     try:

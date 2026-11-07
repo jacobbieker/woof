@@ -26,9 +26,11 @@
     "nssl1_support.cuh": "aa531d60c33371850aa3c3594cf5567f1505d73d3b2a7d02537cedfd62ed3311",
     "ntu_parallel.cuh": "24778f06880ba750cc675208cc5e18ca20af83a2453b540196ef1109e0fd7c76",
     "p3_gnu239.cuh": "de99fb11c7f14f1b2dad93419c97e36bc0bc0e727a1c360e0572f7cfb658c9da",
+    "rrtmg_sw_spectral.cuh": "5ea756c7d433fa382657f484179adfcb6dfd4b83a4d774061a11d3e968d72340",
     "sas_fast.cuh": "f966b0fb610f42d835b173814c8001bad6bded634cbebc2166a9ae9e533c8f76"
   },
   "headers": {
+    "acoustic.cu": "14f8d637ecfa54b7b8c19d80fc2bbf5ad5566f6fdc57b9671d0cfa8566f4331b",
     "cam5_error_function.cuh": "84dc6bbd775ca002b91243849eca0912df66fcfed1a3a747f3c07e851c4d0e89",
     "cam5_support.cuh": "5e8e1dbf0719d8caff7870cba086cf9115ae28d1970ffdba8f6577b4fec75482",
     "cammgmp_aero.cuh": "de3188f43a8cb8c879c89bcc5521ea0e6bd85758016c324b0fa00e171293cf1f",
@@ -36,6 +38,7 @@
     "cammgmp_support.cuh": "187234739844a543deeb928e7745520055e38f03b24c43283fc25f521c97f943",
     "cammgmp_words.cuh": "a0b9bd06846bc556de8c239c3cbc47db257c01476e36ef4d8b5a68ac9ead559b",
     "column_r8.cuh": "cddbef58db0879c9175766f069cb70d3d14c275009f016e5f3509063abcd498c",
+    "corem_log10f.cuh": "bcede6f5758979b534bb73754310ad0e631db50b99a8fdcb7fd76f766241cdd5",
     "cu_osas_table_seeds.cuh": "848e0e566611e26b83b8d741232af42f717aa7221c681f224c4b4500b0dfb80f",
     "deng_column.cuh": "43e5eb4a49722916539d2d9d0b4deb8031deea5ab18687351e16f7d4c9e4a5bf",
     "deng_support.cuh": "c4a417c8377f8464ef8e7746992f380bb171b06e825c353d0bb2f96e8ae26133",
@@ -68,6 +71,7 @@
     "refl.cu": "1e2c45699a721b4b042769f9f868d85d8a6eb4960fc547ce9affb59b69f43f66",
     "rrtmg_aer3.cu": "0ab8dab99a9b49c93699c0e3ce6778d63a6e8e1eb39966a1db49d4847db10dd3",
     "scalar_atan.cuh": "47e93ec8e1f6aa039191962a2add455dec0508f45cf715ec33cc9b65ae97f804",
+    "sinhf_flt32.cuh": "cff7b61810ad14c46916c9dbd864f26565ccab1c932c1780c856e307aa831827",
     "smag2d.cu": "db91a5f9f8dd5def67cd7ae2fb1c8f8e887c20c1deb470cd8ab394ca4d01ede9",
     "swint.cu": "9a79b7e43cb92553ae454975a943acedc3d8510b5c7eae59ec2c5bb8c8b47c5b",
     "temf_log10_flt32.cuh": "61c2596ef9b7456c1328eb5b9064c84b72f15acad698b084b87a831c478bb69f",
@@ -94,6 +98,10 @@
     "bmj": [
       "glibc_flt32.cuh"
     ],
+    "cldfra3_wrf471": [
+      "glibc_flt32.cuh",
+      "corem_log10f.cuh"
+    ],
     "cu_osas": [
       "glibc_flt64.cuh",
       "column_r8.cuh",
@@ -106,6 +114,12 @@
     ],
     "dfi_reset": [
       "glibc_flt32.cuh"
+    ],
+    "farms_wrf471": [
+      "glibc_flt32.cuh",
+      "glibc_trig_flt32.cuh",
+      "log10_flt32.cuh",
+      "sinhf_flt32.cuh"
     ],
     "fer_hires": [
       "glibc_flt32.cuh"
@@ -243,6 +257,10 @@
       "glibc_flt32.cuh",
       "glibc_trig_flt32.cuh"
     ],
+    "nest_top": [
+      "glibc_trig_flt32.cuh",
+      "acoustic.cu"
+    ],
     "nsas": [
       "glibc_flt32.cuh",
       "nsas_constants.cuh"
@@ -292,6 +310,9 @@
       "glibc_trig_flt32.cuh",
       "scalar_atan.cuh"
     ],
+    "radtran_disort": [
+      "glibc_flt64.cuh"
+    ],
     "rcon": [
       "glibc_flt32.cuh",
       "glibc_flt64.cuh",
@@ -324,11 +345,22 @@
       "glibc_flt32.cuh",
       "smag2d.cu"
     ],
+    "shcu_deng": [
+      "glibc_flt32.cuh"
+    ],
     "shcu_nscv": [
       "glibc_flt32.cuh"
     ],
     "slab": [
       "glibc_flt32.cuh"
+    ],
+    "smag2d_theta_m": [
+      "glibc_flt32.cuh",
+      "smag2d.cu"
+    ],
+    "solar_diag": [
+      "glibc_flt32.cuh",
+      "glibc_trig_flt32.cuh"
     ],
     "solar_eclipse": [
       "glibc_flt32.cuh",
@@ -391,6 +423,10 @@
     "wrf_stock_aer3": [
       "glibc_flt32.cuh",
       "rrtmg_aer3.cu"
+    ],
+    "wrfsolar_eps": [
+      "glibc_flt32.cuh",
+      "glibc_trig_flt32.cuh"
     ]
   },
   "modules": {
@@ -409,6 +445,7 @@
     "chem_ledger": "b5d47493bc53b8ce243799b3513bbd6c8b42a22133a055587af36519e9a6528e",
     "chem_radiation": "171ca03a6063038e78547fabb6f780e98ee304066c6cf6c9ce797802c0f7c7d1",
     "cldfra3": "137f7a20037dcbf35a8aa399a5384a0bc74b7a6ee1fbfb8fc5f4a9ae5693f826",
+    "cldfra3_wrf471": "8ed60f16c949aaa68cf08f4b8735d1002493808466963f05c0b55479bef021d0",
     "clwrf": "e5c127d49c339adee26087e237113bb2093219fae34ef614c1393b990f66b303",
     "cu_osas": "0285766c77cd5f9533562dbbffb5584044499c147bdf626175449377bab8e00c",
     "cu_radiation": "265923179ced396c088c45fbffae174d08a64a37bbcc798c54ba7a6f02ee6430",
@@ -419,6 +456,7 @@
     "dfi_reset": "80ae020e9c2e63dfdc913bf402813f775d27532ba2db764e238a4237e1faa24d",
     "eeps": "b6b9ac547a9d44405d90d52041ce68f83e83176704ed332fb67df8514feabad3",
     "farms": "153023d0a11f2c128e058ce0e3d63be9ffb5e8fd12862bc2b7c35bafaf5bff11",
+    "farms_wrf471": "c7903a0e8b72bb6449995815e1ab911c7b76bdcb611b15b18f1416e6451d0ac3",
     "fer_hires": "9718a05a439a27263cb3acca56edd33225659addb8479e27b11d7f3f316af302",
     "flg": "c85eac62d80b1ead3c86ca3f615492509ff0e3f4f6d249f7974754e02cd1c83b",
     "flg_column": "e4a738a050fef8ddde44ec3e333fe260529b23f142e08c7d547bc9e3f5052825",
@@ -471,6 +509,7 @@
     "mskf": "2fbd2f3b39d709dfa5f931095f0b978b328999751b031bebc5cc4223aec2ff19",
     "mskf_aerosol_replay": "cbfeceb88fab96b4d8a4f0d6538b6e8143703316d5f129d00cb69ab1ee5e4777",
     "native_surface_diagnostics": "da5c1263f717f477ba139744f658043ce0460d8842ccf5a098b9cef5dfbe9aa7",
+    "nest_top": "de2140dd3ae04885ef499a0b73bb93ac329b62ac97776b3d5842f4500ea18773",
     "nextgen_cfe": "0c8ab0a815548f9aa15f9028d1f6d53e9a54dfc6126a0d156d1d565e9807dcf5",
     "nextgen_inundation": "c30539e05eb6aacda729654bf4999dfc0b3e876e06d1e4baeb8a6bb0d50e1662",
     "nextgen_reservoirs": "18ee3d675bcc67d626b8191f2950644fb82530cb68fe2dad1cdd3e37c3613f0b",
@@ -484,6 +523,8 @@
     "nwp_hail": "749cfa7a650b946e3b4683d523ad2b05f7c63f7c1c4ccfddec42382dea4891d7",
     "nwp_windows": "546d938c218d63951a4475a5539e48e1e7271b62d4cc96583af09b17983da499",
     "output_diagnostics": "daddb97aeda4ca3a1c89d5b8a9574ecf92f31e30ef98621133ec5feafdcf5c43",
+    "partial_nest": "0d1d0892139d67623e8cb055de55f83855fa7f02739c81a26d6577eb5f2bd33a",
+    "partial_nest_d4": "6afe495a2f6399cbf4c8f34955de495274a2285b3bfdf5ead828a9de1595c6e2",
     "pxlsm": "c74fb83a0215586f2ae7203056ed9e25fbd6a98b2a5dbd5ea342a636547ccd34",
     "pxlsm_driver": "f6cc4bd694150cbc89c0aab72b626fe9d2c96690ee69ec3b3f6a8ef68b1cf27f",
     "pxlsm_init": "b37f2a874af0e8de43e3dc68cff6a09b7ed027f9e307179085ca4ced161e154c",
@@ -495,9 +536,12 @@
     "sbu_ylin": "49d48208e991be18d526a6b5172b5d7720273028e983c125a8e7dbef5bf1bba4",
     "sbu_ylin_edge": "d8ab5d48a704a2fbb12417730383d5f397e179470bb81aebadfe2b11b9b444e4",
     "sf_gfs": "b063bfe3e9fb5a6cf136605dad660db61c90d3d9139fb51c8e795bc552e800cd",
+    "shcu_deng": "88339388912066a69ad27dace3785ed2a399a1d5026d93edda173c84b6720ce0",
     "shcu_nscv": "32520656523e8728f4456253c58a22ce3b624ba6e6bee51b2e09b6d0f018e6ab",
     "slab": "b8eec66caf0178220a5cf9e44b43c8b54be6e62b9c18b697a3b6320309e7ddda",
+    "smag2d_theta_m": "85e469baf5494063679403def8bc1256932ebe972cf4ebb53fd1b44bbe2b9f5a",
     "soil_points": "50ec337be67c7f2d15bd031608622ccb72c503523cc8eeeb0040243eb31b888b",
+    "solar_diag": "20ab14d004c6edb77d27426eee7a151a8634f442b1c40158f7979bda07ce6d5b",
     "solar_eclipse": "61705513ff6b75df038761c71206e8d36f2d692a271a729f56c695ca5d5be5f4",
     "ssib": "14cb39f7c224a927df397c52089db25116a83e7ed6c2a7d16f97b592adfbf8b3",
     "ssib_records": "c0f69470da4e33d8f4661451166c9d3aa6d3dd72e63badf0c27df23e00e76571",
@@ -509,6 +553,8 @@
     "tc_waves": "9fcfe463277bd7c61f4093203dc9144f8050856869ae4519f4cb22e5b0dbc472",
     "temf": "21cc394634471b62aab1e9de7bf19ce33aadb4b0a15cb09695fca9b3dc80c0a7",
     "temf_sfclay": "bfaa8d89cd73d8e1ed9b5180515e1948c363a39c404a72d1a07f59cc940d2b1c",
+    "theta_m": "f4ba37fc9e5b12fe0f71dd856210d105bf59d8ea8c68954cb573901e94a455f2",
+    "theta_m_cumulus": "580dfc42c040cb87474f33a32a15427681e92feac2c1bf7283ed9418d923f7d3",
     "thompson_collision": "ece293feeb829ed442cf9874ce53115747345ca4a666cec1be41f258e6646237",
     "tmn_update": "9d35432ae4d7ad964091bae18b8bf6f212fdd90d4812873f06b0f18a6d67bb00",
     "tracer_pblmix": "cdb14d0d02cddac606cb629de9ff493aca57f72e1aa13df7ad617d811902bf29",
@@ -519,9 +565,11 @@
     "wdm5": "fb1547b164a8192a88a48d668685885441d7eaa7b245cff2c9d4162125189d04",
     "wdm7": "97f97be71498cd0353e609a1d9f404f335e36b2b1a2eaaf48e608db5f82525fd",
     "wdm7_refl": "11408c5f9950e0ca13c5508eacac834a811d3fd84eeba2420b44c2adc423440f",
+    "wind_gust_diag": "922c431776984b6e9643d52012c21a5d662d93e93b58b753524a9cf5a9aefae9",
     "wind_legacy": "eb84aa81b09309f3854436c447e2196729d5c19ba5d0afb83845e8d99d3288b8",
     "wind_mav": "7b4a48ce249945de80b0bec0514ad463673154ecd0809d08a199b2306a5ab3fb",
     "wrf_stock_aer3": "b6b0f8a3ea265bf539b494cd0dfd905fce4cd8147e2b883063148335c3063a36",
+    "wrfsolar_eps": "c312b1fba916461bac63332e911d1e2d9968924adf5466c562649a790dfda58d",
     "wsm3": "df13c530aac2f4a2f44d3ddc42ed8e1a09d1424f0a920934b37c586286ead2b0",
     "wsm5": "2a096f417e2e57f28b2e170c7f56cfbcaa064069e8b8cbc7cb2f35e84a2e6704",
     "wsm6r": "0551464ba27713acf90df5ece69ef3c9ab9cedb191ef838ed63fe506d48d0c2c"

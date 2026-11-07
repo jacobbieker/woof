@@ -558,7 +558,7 @@ IMPLEMENTED: dict[str, dict] = {
     # = 1 word for word (woof.core.windfarm_coupling, kernel
     # woof.core.windfarm_fitch); both under MYNN.
     "wind_farm_scheme": {
-        "type": "string", "enum": ["off", "fitch", "fitch_wrf"],
+        "type": "string", "enum": ["off", "fitch", "mav", "fitch_legacy", "fitch_wrf"],
         "default": "off", "per_domain": True, "component_id": "pbl",
         "warnings": ["fitch runs upstream's GPU Fitch turbine forcing and "
                      "fitch_wrf WRF v4.7.1's Fitch scheme word for word, in "
@@ -566,12 +566,13 @@ IMPLEMENTED: dict[str, dict] = {
                      "wind_farms is an elevated momentum sink and a TKE "
                      "source in MYNN's QKE over the levels its rotor sweeps, "
                      "and POWER is written. Both require MYNN "
-                     "(bl_pbl_physics=5). WRF's windfarm_opt=2 (MAV) is not "
-                     "ported."]},
+                     "(bl_pbl_physics=5). mav (WRF's windfarm_opt=2) and "
+                     "fitch_legacy (the V3.5 windturbines_spec scheme) are "
+                     "upstream's, imported from a WRF namelist."]},
     "wind_farms": {
         "type": "string", "default": "",
         "per_domain": True, "component_id": "pbl",
-        "read_when": {"wind_farm_scheme": ["fitch", "fitch_wrf"]},
+        "read_when": {"wind_farm_scheme": ["fitch", "mav", "fitch_wrf"]},
         # Either scheme with no turbines is refused by validate_run_config
         # (upstream's woof.wind_table.validate_config for fitch,
         # woof.config.wrf_fitch_refusal for fitch_wrf).
@@ -4775,9 +4776,6 @@ _NO_RTE_RRTMGP_CLOUD_OPTICS_REASON: dict[int, str] = {
 #: refusal, so it stays -- one clause earlier.
 
 
-MORRISON_AERO_OPTION_ID = "morrison-aero-mp40"
-
-
 FERRIER_OPTION_ID = "ferrier-aligo-mp5"
 
 
@@ -5331,10 +5329,6 @@ _VERTICAL_BOUND_SOURCES: dict[str, dict[str, tuple[str, str]]] = {
                                   "THOMPSON_AEROSOL_VERTICAL_LEVEL_BOUNDS"),
         "morrison-mp10": ("Morrison microphysics",
                           "MORRISON_VERTICAL_LEVEL_BOUNDS"),
-        # The same three launches over the same WORK stack (MORR_AERO
-        # blocks of kernels/morrison.cu).
-        "morrison-aero-mp40": ("Morrison CESM-aerosol microphysics",
-                               "MORRISON_VERTICAL_LEVEL_BOUNDS"),
         "nssl2-mp18": ("NSSL-2 microphysics", "NSSL2_VERTICAL_LEVEL_BOUNDS"),
         "milbrandt2mom-mp9": ("Milbrandt-Yau microphysics",
                               "MILBRANDT2_VERTICAL_LEVEL_BOUNDS"),
@@ -5493,10 +5487,6 @@ _MOMENT_ROWS: dict[int, dict | None] = {
         "unpaired": [], "repair_authority": None, "q_threshold": 1.0e-14},
     4: {"name": "WSM5", "mass_only": ["qv", "qc", "qr", "qi", "qs"],
         "pairs": [], "unpaired": [], "repair_authority": None, "q_threshold": 1.0e-14},
-    # MAD-WRF's passive hydrometeors (madwrf_mp, Registry.EM_COMMON:3052):
-    # masses only, no process to repair anything.
-    96: {"name": "MADWRF", "mass_only": ["qv", "qc", "qr", "qi", "qs"],
-         "pairs": [], "unpaired": [], "repair_authority": None, "q_threshold": 1.0e-14},
     6: {"name": "WSM6", "mass_only": ["qv", "qc", "qr", "qi", "qs", "qg"],
         "pairs": [], "unpaired": [], "repair_authority": None,
         "q_threshold": 1.0e-14},
@@ -5534,18 +5524,6 @@ _MOMENT_ROWS: dict[int, dict | None] = {
                    {"species": "snow", "mass": "qs", "number": "ns"},
                    {"species": "graupel", "mass": "qg", "number": "ng"}],
          "unpaired": [], "repair_authority": _MORRISON_REPAIR_AUTHORITY,
-         "q_threshold": 1.0e-14},
-    # Morrison with CESM aerosol: Morrison's pairs, nc now advected.  No
-    # repair authority: Morrison's PSD limiter carries mp=10's ice lambda
-    # floor, and mp=40's (LAMMINI from DCS 350 um) differs.
-    40: {"name": "Morrison two-moment with CESM aerosol",
-         "mass_only": ["qv"],
-         "pairs": [{"species": "cloud", "mass": "qc", "number": "nc"},
-                   {"species": "rain", "mass": "qr", "number": "nr"},
-                   {"species": "ice", "mass": "qi", "number": "ni"},
-                   {"species": "snow", "mass": "qs", "number": "ns"},
-                   {"species": "graupel", "mass": "qg", "number": "ng"}],
-         "unpaired": [], "repair_authority": None,
          "q_threshold": 1.0e-14},
     # WDM6: double-moment warm rain (nc, nr) over WSM6's ice; the CCN
     # reservoir nn is prognostic and has no mass partner
@@ -5652,13 +5630,6 @@ _OFFLINE_CHILD_ROWS: dict[int, dict] = {
     # (F_RIMEF = 1) under rimed parent ice, changing fall speeds and
     # riming from the first step.  Admission is a wrfout map row, not a
     # code path.
-    # Morrison with CESM aerosol: the lane's morr_rimed_ice identity check
-    # (woof/offline_child.py) is spelled for mp_physics=10 only.
-    40: {"same_scheme": False,
-         "refusal": (
-             "the offline child lane checks the parent's morr_rimed_ice "
-             "identity for mp_physics=10 only; an mp_physics=40 child would "
-             "start without that check")},
     5: {"same_scheme": False,
         "refusal": (
             "the offline child lane has no wrfout map row for F_RIMEF_PHY, "
@@ -5669,7 +5640,6 @@ _OFFLINE_CHILD_ROWS: dict[int, dict] = {
     # transported set too.
     3: {"same_scheme": True, "refusal": None},
     4: {"same_scheme": True, "refusal": None},
-    96: {"same_scheme": True, "refusal": None},
     6: {"same_scheme": True, "refusal": None},
     # WSM6R transports WSM6's six masses and nothing else, which the lane's
     # transported-field helper builds for it beside WSM6.
@@ -5738,9 +5708,6 @@ _RING_STATE_ROWS: dict[int, list[str]] = {
     # 185-189).
     3: ["thp", "qv", "qc", "qr", "effc", "effi", "effs"],
     4: ["thp", "qv", "qc", "qr", "qi", "qs", "effc", "effi", "effs"],
-    # MAD-WRF: the passive masses (and the unread radii the named-scheme
-    # allocator carries); the empty arm writes none of them.
-    96: ["thp", "qv", "qc", "qr", "qi", "qs", "effc", "effi", "effs"],
     6: ["thp", "qv", "qc", "qr", "qi", "qs", "qg", "effc", "effi", "effs"],
     # WSM6R advances the six masses and woof writes WSM6's radii on its
     # state every call (woof/core/wsm6.py), so the radii are in the set.
@@ -5751,8 +5718,6 @@ _RING_STATE_ROWS: dict[int, list[str]] = {
     9: ["thp", "qv", "qc", "qr", "qi", "qs", "qg", "qh",
         "nc", "nr", "ni", "ns", "ng", "nh", "effc", "effi", "effs"],
     10: ["thp", "qv", "qc", "qr", "qi", "qs", "qg",
-         "nc", "nr", "ni", "ns", "ng", "effc", "effi", "effs", "effr"],
-    40: ["thp", "qv", "qc", "qr", "qi", "qs", "qg",
          "nc", "nr", "ni", "ns", "ng", "effc", "effi", "effs", "effr"],
     # WDM6's three transported moments; nn is in the set because the scheme
     # WRITES it (fully evaporated rain and cloud return their number to the
@@ -5803,9 +5768,6 @@ _RING_SURFACE_ROWS: dict[int, list[str]] = {
     # (module_mp_wsm3.F:597-625).
     3: ["mp_rainnc", "mp_rainncv", "mp_snownc", "mp_snowncv", "mp_sr"],
     4: ["mp_rainnc", "mp_rainncv", "mp_snownc", "mp_snowncv", "mp_sr"],
-    # CASE (MADWRF_MP) binds no precipitation argument; the surface
-    # contract's three slots stay zero.
-    96: ["mp_rainnc", "mp_rainncv", "mp_sr"],
     6: list(_RING_SURFACE_STANDARD),
     # WSM6R's driver arm binds RAINNC/RAINNCV only; SR is the contract's
     # zero (module_microphysics_driver.F:2362-2372).
@@ -10449,7 +10411,7 @@ def build(registry: dict) -> dict:
             "remedy_settings": {"gwd_opt": 0},
         })
         rules.append({
-            "settings": {"wind_farm_scheme": ["fitch", "fitch_wrf"]},
+            "settings": {"wind_farm_scheme": ["fitch", "mav", "fitch_legacy", "fitch_wrf"]},
             "components": {"pbl": non_mynn_pbl},
             "reason": (
                 "the Fitch wind farm adds the turbines' TKE source into "
