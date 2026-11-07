@@ -145,9 +145,10 @@ NEMO, from `frame/module_cpl.F` (public domain), as CUDA kernels in
 (`tests/test_wrf_cpl_wrf461_parity.py`, oracle `tools/wrf_cpl_wrf461_oracle`):
 
 * `send` is `cpl_snd2`: `EVAP-PRECIP = QFX - (RAINCV+RAINNCV)/DT`,
-  `SURF_NET_SOLAR = GSW`, `SURF_NET_NON-SOLAR = GLW - STBOLT*EMISS*SST**4 - LH
-  - HFX`, and `TAUX`/`TAUY`/`TAUMOD` from `RHO*UST**2` along the wind
-  relative to the surface current;
+  `SURF_NET_SOLAR = GSW`,
+  `SURF_NET_NON-SOLAR = GLW - STBOLT*EMISS*SST**4 - LH - HFX`, and
+  `TAUX`/`TAUY`/`TAUMOD` from `RHO*UST**2` along the wind relative to the
+  surface current;
 * `receive` is `cpl_rcv`: SST merged onto the input SST, UOCE and VOCE onto
   zero, each weighted by its external domain's `CPLMASK`.
 

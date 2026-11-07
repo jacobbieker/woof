@@ -227,11 +227,11 @@ class FluxAverager:
         if self.elapsed + dt > self.interval * (1 + 1e-9):
             raise ValueError("step crosses the coupling time; partition dt at "
                              "the coupling interval")
+        _check_grid(sent, self.shape)
         n = self.shape[0] * self.shape[1]
         kernel = _kernel("wrf_cpl_accumulate")
         for f in fields(sent):
             plane = getattr(sent, f.name)
-            validate_plane(plane, self.shape, f.name)
             kernel(_blocks(n), (_TPB,), (plane, self._total[f.name],
                                          self._carry[f.name], np.float32(dt),
                                          np.int32(n)))
@@ -246,11 +246,11 @@ class FluxAverager:
 
         if self.elapsed <= 0:
             raise ValueError("nothing accumulated")
+        _check_grid(out, self.shape)
         n = self.shape[0] * self.shape[1]
         kernel = _kernel("wrf_cpl_deliver")
         for f in fields(out):
             plane = getattr(out, f.name)
-            validate_plane(plane, self.shape, f.name)
             kernel(_blocks(n), (_TPB,), (self._total[f.name],
                                          self._carry[f.name], plane,
                                          np.float32(self.elapsed), np.int32(n)))

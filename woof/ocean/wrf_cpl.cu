@@ -123,9 +123,9 @@ void wrf_cpl_accumulate(const float* __restrict__ field,
 }
 
 // Deliver mean = (total + carry) / elapsed and keep what the float32 mean
-// could not carry: the remainder (total + carry) - mean*elapsed, formed with
-// one fused multiply-add so the product is not rounded first, starts the next
-// interval.
+// could not carry: the remainder (total - mean*elapsed) + carry, formed from
+// the two components (one fused multiply-add, so the product is not rounded
+// first) rather than from their rounded sum, starts the next interval.
 extern "C" __global__
 void wrf_cpl_deliver(float* __restrict__ total,
                      float* __restrict__ carry,
@@ -137,6 +137,6 @@ void wrf_cpl_deliver(float* __restrict__ total,
     float integral = __fadd_rn(total[i], carry[i]);
     float m = __fdiv_rn(integral, elapsed);
     mean[i] = m;
-    total[i] = fmaf(-m, elapsed, integral);
+    total[i] = __fadd_rn(fmaf(-m, elapsed, total[i]), carry[i]);
     carry[i] = 0.0f;
 }
