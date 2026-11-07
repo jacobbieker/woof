@@ -117,7 +117,7 @@ def test_frozen_source_hashes_and_adapter_contract_are_exact() -> None:
         "src/hexcore/history_writer.py": "570c9124745a8d8325a35c11da17e58036bfcf2e3117a5be502dec196a9905f0",
         "src/hexcore/cuda_arwen_helper_scope_v2.py": "641e8b77427a7c2f8eff374daa37e09a034fc45271d1dac67c3e39d03e3814e9",
         "src/hexcore/radiation_source_sets.json": "4fdb41a8102a0c4891771ed476d2eb7cf870e89a66c1a2dd4a92b8cd42dac802",
-        "src/hexcore/data/profiles/engine-helper-sets.v1.json": "2e7e727e78357bcd847100dea32450467e08359a01d374eb1a6619e851a61ca6",
+        "src/hexcore/data/profiles/engine-helper-sets.v1.json": "09a3ee1261458a75ca495a4caf7760214777a3c2f33a8030ec9a52a135844515",
         "src/hexcore/step_anchors.py": (
             "13f8bf3361b3fc5c25805d05d48e3c59841050e3d372c03c96f1498133399b72"
         ),
@@ -236,7 +236,7 @@ def test_frozen_source_hashes_and_adapter_contract_are_exact() -> None:
         # (SWDDNI/SWDDIF/COSZR selected from the export's diag/ keys); the
         # rationale lives beside the runner's pin.
         "src/hexcore/cuda_arwen_physics_v841.py": (
-            "23de7db623fba0fae2c9ad92d26b99b47475edd28f8b72bfa6e3e317503aa2c0"
+            "8550e4e3bdec9366744738f787feb28fb617c5ba4775a3e512f2887553d302f6"
         ),
         # New pin 2026-10-05 (New Tiedtke row); the rationale lives beside the
         # runner's pin.
@@ -257,7 +257,7 @@ def test_frozen_source_hashes_and_adapter_contract_are_exact() -> None:
         # 2026-10-10 for fine-mesh (sub-500 m) binary64 deformation
         # geometry; the rationale lives beside the runner's pin.
         "src/hexcore/mixing_v841.py": (
-            "e6bad617c0a1e8dc3672eab985ac80d0c9885dc5381e38497d070f7714d985b7"
+            "e90584ecf4ad4a8e847a247494f59da2b31afe01fb808358971de3324378b88a"
         ),
         # New pins (the v8.4.1 LES closure): config_v841 admits
         # config_les_model through les_v841.validate_les_selection, and the

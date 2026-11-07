@@ -131,14 +131,6 @@ class RunConfig:
         if not isinstance(self.chem_sets, str) or not isinstance(self.fire_smoke, bool):
             return
         selected = tuple(name.strip() for name in self.chem_sets.split(","))
-        if getattr(self, "madwrf_opt", 0) == 2 and "madwrf" not in selected:
-            # MAD-WRF's tracer package (Registry.EM_COMMON:3072, tracer:
-            # tr_qc,tr_qi,tr_qs): the advected TR_QC/TR_QI/TR_QS rows of
-            # woof/data/chem/species/madwrf.json (woof/core/madwrf.py).
-            from woof.chem_table import chem_names
-            object.__setattr__(self, "chem_sets", ",".join(
-                (*chem_names(self.chem_sets), "madwrf")))
-            selected = (*selected, "madwrf")
         profiles = ("sfire_smoke", "sfire_smoke_mixed")
         if self.fire_smoke or any(name in selected for name in profiles):
             from woof.chem_table import chem_names
@@ -4470,49 +4462,6 @@ MP28_AEROSOL_SOURCE_OPTIONS: dict[str, tuple[int, str, str]] = {
 }
 
 
-def _validate_farms(cfg: RunConfig) -> None:
-    """``swint_opt = 2`` (FARMS, woof.core.farms): the ported envelope.
-
-    WRF's own checks first -- module_physics_init.F:1039-1057 stops a
-    microphysics scheme that hands FARMS neither its radii nor all of cloud,
-    ice and snow -- then the parts of the radiation driver's Solar_step
-    (the per-step CLDFRA and its temporary hydrometeor additions) that are
-    ported: icloud 0, 1 (with MYNN's icloud_bl merge), 2 and 3 (WRF-Solar
-    cal_cldfra3, whose made-up qc/qi FARMS reads as WRF's does), and aer_opt
-    0, 1 and 2.  Everything else is refused by name rather than run with a
-    cloud fraction or aerosol WRF would not have used.
-    """
-    from woof.core.farms import farms_mp_admitted
-    lw, sw = radiation_scheme_ids(cfg)
-    if int(sw) == 0:
-        raise ConfigurationRefused(
-            "swint_opt=2 (FARMS) needs a shortwave scheme (ra_sw_physics != "
-            "0): WRF evaluates FARMS inside the radiation driver, beside the "
-            "shortwave call whose SWDOWN couple_farms replaces")
-    if not farms_mp_admitted(int(cfg.mp_physics), int(getattr(cfg, "use_mp_re", 1))):
-        raise ConfigurationRefused(
-            f"swint_opt=2 with mp_physics={int(cfg.mp_physics)}: WRF stops "
-            "with 'FARMS (swint_opt==2) requires a different MP scheme' "
-            "(module_physics_init.F:1039-1057): FARMS needs the scheme's "
-            "effective radii (Thompson, Thompson aerosol-aware, WSM3/5/6/7, "
-            "WDM5/6/7) or none of them with cloud, ice and snow all present")
-    if int(getattr(cfg, "icloud", 1)) not in (0, 1, 2, 3):
-        raise ConfigurationRefused(
-            f"swint_opt=2 with icloud={int(cfg.icloud)}: FARMS reads the "
-            "radiation driver's per-step CLDFRA, ported for icloud 0, 1, 2 "
-            "and 3")
-    if int(cfg.aer_opt) not in (0, 1, 2):
-        raise ConfigurationRefused(
-            f"swint_opt=2 with aer_opt={int(cfg.aer_opt)}: FARMS's 2-D "
-            "aerosol is wired for aer_opt 0, 1 and 2; under aer_opt = 3 WRF "
-            "hands it the radiation call's TAOD5502D and the taer_* optics")
-    # The Solar_step's convective cloud additions -- cu_rad_feedback's
-    # ICLOUD_CU (KF's CLDFRA_DP/SH, QC_CU/QI_CU) and shcu_physics = 5 --
-    # feed FARMS as they feed RRTMG (woof.core.cumulus_radiation, held to
-    # WRF's lines by tests/test_cu_rad_feedback_oracle.py); BMJ feedback and
-    # KF-CuP have no woof scheme to come from.
-
-
 def validate_radiation_driver_options(cfg: RunConfig) -> None:
     """Radiation-driver options: the implemented values, by name.
 
@@ -6525,95 +6474,6 @@ def km_opt_zero_producer(cfg: RunConfig) -> str | None:
 SMS3DTKE_SFCLAY_SCHEMES = (0, 1, 5, 91)
 
 
-def validate_sms3dtke(cfg: RunConfig) -> None:
-    """Admission for ``km_opt = 5`` (SMS-3DTKE), WRF v4.7.1's rules first.
-
-    WRF's check_a_mundo refuses km_opt = 5 with diff_opt != 2
-    (module_check_a_mundo.F:341-353), with bl_pbl_physics != 0 (:356-368:
-    the closure IS the column's vertical mixing at every grid spacing, so a
-    PBL scheme would double it), with a surface layer other than 0, 1, 5
-    or 91 (:384-402), and with cu_physics = 11, multi-scale Kain-Fritsch
-    (:1366-1382).  woof refuses four more, each for a stated reason.
-    """
-    if cfg.diff_opt != 2:
-        raise ConfigurationRefused(
-            f"km_opt=5 (SMS-3DTKE) works only with diff_opt=2, got "
-            f"diff_opt={cfg.diff_opt}: WRF v4.7.1 refuses the pair "
-            "(share/module_check_a_mundo.F:341-353, 'SMS-3DTKE scheme can "
-            "only work with diff_opt=2'). Set diff_opt=2.")
-    if cfg.bl_pbl_physics != 0:
-        raise ConfigurationRefused(
-            f"km_opt=5 (SMS-3DTKE) works only with bl_pbl_physics=0, got "
-            f"bl_pbl_physics={cfg.bl_pbl_physics}: WRF v4.7.1 refuses the "
-            "pair (share/module_check_a_mundo.F:356-368). The closure is "
-            "itself the column's vertical mixing at every grid spacing -- "
-            "its nonlocal heat flux, mesoscale length scale and implicit "
-            "vertical diffusion replace the PBL scheme -- so running a PBL "
-            "scheme too would mix the column twice. Set bl_pbl_physics=0.")
-    if cfg.sf_sfclay_physics not in SMS3DTKE_SFCLAY_SCHEMES:
-        raise ConfigurationRefused(
-            f"km_opt=5 (SMS-3DTKE) works with sf_sfclay_physics = 0, 1, 5 "
-            f"or 91, got {cfg.sf_sfclay_physics}: WRF v4.7.1 refuses any "
-            "other surface layer (share/module_check_a_mundo.F:384-402); "
-            "the closure reads the bulk Richardson number, u*, 1/L and the "
-            "10 m wind speed those four write. Select sf_sfclay_physics=1 "
-            "(revised MM5), 91 (classic MM5), 5 (MYNN) or 0.")
-    if cfg.cu_physics == 11:
-        raise ConfigurationRefused(
-            "cu_physics=11 (multi-scale Kain-Fritsch) cannot run with "
-            "km_opt=5 (SMS-3DTKE): WRF v4.7.1 refuses the pair "
-            "(share/module_check_a_mundo.F:1366-1382).")
-    if cfg.open_x or cfg.open_y:
-        raise ConfigurationRefused(
-            "km_opt=5 (SMS-3DTKE) is admitted with periodic, specified or "
-            "nested lateral boundaries, not radiative open ones: WRF "
-            "v4.7.1 gives km_opt=5's TKE no physical boundary condition "
-            "(solve_em.F:3332 applies set_physical_bc3d to tke for "
-            "km_opt=2 only), so at an open boundary its TKE halo keeps "
-            "whatever the previous step left there, which woof does not "
-            "carry. Use periodic or specified boundaries, or km_opt=2.")
-    if getattr(cfg, "tke_mix2_off", False):
-        raise ConfigurationRefused(
-            "tke_mix2_off is set with km_opt=5 (SMS-3DTKE), where it takes "
-            "no effect: WRF v4.7.1 diffuses km_opt=5's TKE horizontally "
-            "whatever tke_mix2_off says (module_diffusion_em.F:3020-3021). "
-            "Remove tke_mix2_off.")
-    if cfg.mix_isotropic != 0:
-        raise ConfigurationRefused(
-            f"mix_isotropic={cfg.mix_isotropic} is set with km_opt=5 "
-            "(SMS-3DTKE), where it takes no effect: WRF v4.7.1's km_opt=5 "
-            "branch of tke_km and its dissipation length read no "
-            "mix_isotropic (module_diffusion_em.F:2253-2333, :6512-6520); "
-            "the horizontal and vertical lengths are always separate. "
-            "Set mix_isotropic=0.")
-    if int(getattr(cfg, "use_theta_m", 0)):
-        raise ConfigurationRefused(
-            "km_opt=5 (SMS-3DTKE) with use_theta_m=1 is not ported: WRF's "
-            "km_opt=5 path then forms th_phy as the dry theta of the moist "
-            "carrier and adds the moist qfac and 1.61*theta*QFX terms to "
-            "its implicit heat solve (module_diffusion_em.F:8090-8116), and "
-            "woof's km_opt=5 operands and its WRF v4.7.1 oracle cover "
-            "use_theta_m=0 only. Set use_theta_m=0.")
-    if int(getattr(cfg, "tke_budget", 0)):
-        raise ConfigurationRefused(
-            "tke_budget is a km_opt=2 receipt: its terms are the km_opt=2 "
-            "tke_rhs pieces (shear, buoyancy, dissipation, limiter), and "
-            "km_opt=5 moves the dissipation into the implicit vertical "
-            "solve, where no separate term exists to export. Set "
-            "tke_budget=0 with km_opt=5.")
-    if (cfg.sf_sfclay_physics == 0 and cfg.isfflx in (0, 2)
-            and cfg.tke_heat_flux > 0.0):
-        raise ConfigurationRefused(
-            f"km_opt=5 (SMS-3DTKE) with sf_sfclay_physics=0 and a positive "
-            f"prescribed tke_heat_flux={cfg.tke_heat_flux} (isfflx="
-            f"{cfg.isfflx}) is refused: with no surface layer u* is WRF's "
-            "never-written zero, and nonlocal_flux's convective column then "
-            "forms its momentum gamma as 0/0 (module_diffusion_em.F:5150-"
-            "5153, brint = -sm*u*^2*w*^3/(zi*wscale^4) with wscale = 0), "
-            "which turns u and v into NaN. Select a surface layer "
-            "(sf_sfclay_physics=1, 5 or 91), or a zero tke_heat_flux.")
-
-
 def validate_km_opt(cfg: RunConfig) -> None:
     """Admission for ``km_opt``, shared by the loaders and the dycore.
 
@@ -7898,38 +7758,6 @@ def shcu_refusal(cfg) -> str | None:
     return None
 
 
-#: The cumulus schemes whose cloud woof hands radiation under
-#: ``cu_rad_feedback`` (ICLOUD_CU, module_physics_init.F:1103-1118).
-CU_RAD_FEEDBACK_SCHEMES = frozenset({1, 3, 5})
-
-
-def cu_rad_feedback_refusal(cfg) -> str | None:
-    """Why this configuration cannot run its ``cu_rad_feedback``, or None."""
-    value = getattr(cfg, "cu_rad_feedback", False)
-    if type(value) is not bool:
-        return "cu_rad_feedback must be boolean"
-    if not value:
-        return None
-    if int(cfg.cu_physics) not in CU_RAD_FEEDBACK_SCHEMES:
-        return (f"cu_rad_feedback with cu_physics={cfg.cu_physics}: WRF "
-                "derives ICLOUD_CU for Kain-Fritsch (1), Grell-Freitas (3) "
-                "and Grell 3D (5) among woof's schemes "
-                "(module_physics_init.F:1103-1118); woof hands radiation the "
-                f"cloud of cu_physics in {sorted(CU_RAD_FEEDBACK_SCHEMES)}")
-    lw, sw = radiation_scheme_ids(cfg)
-    if (int(lw), int(sw)) != (4, 4):
-        return ("cu_rad_feedback hands the cumulus cloud to radiation, which "
-                "woof wires for RRTMG (ra_lw_physics = ra_sw_physics = 4) "
-                f"only; got {lw}/{sw}")
-    if int(cfg.cu_physics) in (3, 5) and int(cfg.cu_diag) != 1:
-        return ("cu_rad_feedback beside Grell-Freitas or Grell 3D reads "
-                "convtrans_prep's time-averaged QC_CU/QI_CU, so it needs "
-                "cu_diag = 1, which WRF sets itself (module_check_a_mundo: "
-                "'Turning on cu_rad_feedback also requires setting "
-                "cu_diag== 1')")
-    return None
-
-
 #: The WRF-Solar EPS keys (RunConfig names = WRF &stoch names).
 MULTI_PERTURB_SWITCHES = ("pert_farms", "pert_deng", "pert_thom", "pert_cld3")
 MULTI_PERTURB_FACTORS = (
@@ -7947,59 +7775,6 @@ MULTI_PERTURB_RUN_DEFAULTS = {
     "pert_thom": False, **{k: 0.0 for k in MULTI_PERTURB_FACTORS if k.startswith("pert_thom_")},
     "pert_cld3": False, **{k: 0.0 for k in MULTI_PERTURB_FACTORS if k.startswith("pert_cld3_")},
     "spdt": -1.0, "num_pert_3d": 15, "nens": 1, "stochpert_tbl": ""}
-
-
-#: MAD-WRF's keys at their Registry defaults (the checkpoint echo drops them
-#: there).
-MADWRF_RUN_DEFAULTS = {"madwrf_opt": 0, "madwrf_dt_relax": 60.0,
-                       "madwrf_dt_nudge": 60.0, "madwrf_cldinit": 0}
-
-
-def madwrf_refusal(cfg) -> str | None:
-    """Why this configuration cannot run its MAD-WRF keys, or None."""
-    opt = getattr(cfg, "madwrf_opt", 0)
-    if isinstance(opt, bool) or opt not in (0, 1, 2):
-        return "madwrf_opt must be 0 (off), 1 or 2"
-    init = getattr(cfg, "madwrf_cldinit", 0)
-    if isinstance(init, bool) or init not in (0, 1):
-        return "madwrf_cldinit must be 0 or 1"
-    for key in ("madwrf_dt_relax", "madwrf_dt_nudge"):
-        value = getattr(cfg, key)
-        if isinstance(value, bool) or not isinstance(value, (int, float)) \
-                or not math.isfinite(value):
-            return f"{key} must be a finite real"
-    if opt == 1 and (int(cfg.mp_physics) != 96 or int(getattr(cfg, "use_mp_re", 1)) != 0):
-        return ("madwrf_opt = 1 requires mp_physics = 96 and use_mp_re = 0 "
-                "(WRF's '--- ERROR: madwrf_opt = 1 requires mp_physics=96 and "
-                "use_mp_re=0', module_check_a_mundo.F:375-381); got "
-                f"mp_physics = {cfg.mp_physics}, use_mp_re = "
-                f"{getattr(cfg, 'use_mp_re', 1)}")
-    if opt == 2:
-        from woof.core.rrtmg_legacy import legacy_cloud_fraction_flags
-        try:
-            f_qi, f_qs = legacy_cloud_fraction_flags(int(cfg.mp_physics))
-        except (NotImplementedError, ValueError, KeyError):
-            f_qi = f_qs = False
-        if not cfg.moist or int(cfg.mp_physics) == 0 or not (f_qi and f_qs):
-            return ("madwrf_opt = 2 nudges qc, qi and qs toward their tracers "
-                    "and needs a microphysics scheme carrying all three "
-                    "(WRF stops: 'madwrf_opt = 2 requires a mp_physics option "
-                    f"with qc, qi, and qs', module_physics_init.F:4693); got "
-                    f"mp_physics = {cfg.mp_physics}")
-        if not float(cfg.madwrf_dt_relax) > 0.0:
-            return "madwrf_dt_relax must be positive (the nudge divides by it)"
-    if init == 1:
-        from woof.core.rrtmg_legacy import legacy_cloud_fraction_flags
-        try:
-            f_qi, f_qs = legacy_cloud_fraction_flags(int(cfg.mp_physics))
-        except (NotImplementedError, ValueError, KeyError):
-            f_qi = f_qs = False
-        if not cfg.moist or int(cfg.mp_physics) == 0 or not (f_qi and f_qs):
-            return ("madwrf_cldinit = 1 rewrites moist(P_QV, P_QC, P_QI, "
-                    "P_QS) at the start (module_initialize_real.F:4861); woof "
-                    "runs it for schemes carrying qc, qi and qs; got "
-                    f"mp_physics = {cfg.mp_physics}")
-    return None
 
 
 def multi_perturb_refusal(cfg) -> str | None:

@@ -6298,8 +6298,7 @@ def _public_config_value(value):
             # to radiation, the solar diagnostics, use_theta_m and
             # do_avgflx_em, and WRF-Solar EPS and MAD-WRF.  Moved, each
             # stays and binds.
-            from woof.config import (MADWRF_RUN_DEFAULTS,
-                                     MULTI_PERTURB_RUN_DEFAULTS)
+            from woof.config import MULTI_PERTURB_RUN_DEFAULTS
             for name, default in (("rrtmg_spectral_output", "none"),
                                   ("radtran_wavelengths", ()),
                                   ("radtran_interval_s", 3600.0),
@@ -6314,7 +6313,8 @@ def _public_config_value(value):
                                   ("solar_diagnostics", 0),
                                   ("use_theta_m", 0), ("do_avgflx_em", 0),
                                   *MULTI_PERTURB_RUN_DEFAULTS.items(),
-                                  *MADWRF_RUN_DEFAULTS.items()):
+                                  ("madwrf_opt", 0), ("madwrf_dt_relax", 60.0),
+                                  ("madwrf_dt_nudge", 60.0), ("madwrf_cldinit", 0)):
                 value = run_document.get(name, default)
                 if isinstance(value, list):
                     value = tuple(value)

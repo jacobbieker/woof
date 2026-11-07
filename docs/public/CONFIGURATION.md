@@ -377,17 +377,20 @@ consumed `RunConfig` field -- the knob-parity battery
 consuming kernel/module rather than being decorative -- and every one
 is importable from a WRF namelist.
 
-**Which keys a `[[domain]]` table may override.** Exactly these 411,
+**Which keys a `[[domain]]` table may override.** Exactly these 448,
 and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
 
-    numbins  thbinsize  rbinsize  mindeepfreq  minshallowfreq  shallowcu_forced_ra
-    auxhist22_interval_s  auxhist22_begin_s  auxhist22_end_s  auxhist22_outname
-    frames_per_auxhist22  z_lev_interval_s  auxhist23_interval_s  auxhist23_begin_s
-    auxhist23_end_s  auxhist23_outname  frames_per_auxhist23  p_lev_interval_s
-    moist_adv_dfi_opt  obs_nudge_opt  max_obs  fdda_start  fdda_end  obs_nudge_wind
-    obs_coef_wind  obs_nudge_temp  obs_coef_temp  obs_nudge_mois  obs_coef_mois
-    obs_nudge_pstr  obs_coef_pstr  obs_no_pbl_nudge_uv  obs_no_pbl_nudge_t
-    obs_no_pbl_nudge_q  obs_sfc_scheme_horiz  obs_sfc_scheme_vert  obs_max_sndng_gap
+    madwrf_opt  madwrf_cldinit  madwrf_dt_relax  madwrf_dt_nudge  ra_call_offset
+    tc_flux_curve  tc_spray  tc_wave_roughness  tc_wave_source  tc_fetch_m
+    tc_horizontal_length_m  tc_spray_partition  numbins  thbinsize  rbinsize
+    mindeepfreq  minshallowfreq  shallowcu_forced_ra  auxhist22_interval_s
+    auxhist22_begin_s  auxhist22_end_s  auxhist22_outname  frames_per_auxhist22
+    z_lev_interval_s  auxhist23_interval_s  auxhist23_begin_s  auxhist23_end_s
+    auxhist23_outname  frames_per_auxhist23  p_lev_interval_s  moist_adv_dfi_opt
+    obs_nudge_opt  max_obs  fdda_start  fdda_end  obs_nudge_wind  obs_coef_wind
+    obs_nudge_temp  obs_coef_temp  obs_nudge_mois  obs_coef_mois  obs_nudge_pstr
+    obs_coef_pstr  obs_no_pbl_nudge_uv  obs_no_pbl_nudge_t  obs_no_pbl_nudge_q
+    obs_sfc_scheme_horiz  obs_sfc_scheme_vert  obs_max_sndng_gap
     obs_nudgezfullr1_uv  obs_nudgezrampr1_uv  obs_nudgezfullr2_uv
     obs_nudgezrampr2_uv  obs_nudgezfullr4_uv  obs_nudgezrampr4_uv
     obs_nudgezfullr1_t  obs_nudgezrampr1_t  obs_nudgezfullr2_t  obs_nudgezrampr2_t
@@ -401,34 +404,44 @@ and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
     hailcast_opt  haildt  hailcast_version  lightning_option  lightning_dt
     lightning_start_seconds  flashrate_factor  iccg_method  iccg_prescribed_num
     iccg_prescribed_den  cellcount_method  cldtop_adjustment  do_radar_ref
-    cu_physics  shcu_physics  cudt_minutes  bmj_rad_feedback  clos_choice  ishallow
-    cugd_avedx  kf_edrates  maxiens  maxens  maxens2  maxens3  ensdim  cu_diag
-    convtrans_avglen_m  sas_pgcon  nsas_dx_factor  shalconv  radt  radt_minutes
-    bldt  ra_physics  ra_lw_physics  ra_sw_physics  ra_rrtmg_variant
-    wrf_rrtmg_compatibility  o3input  use_mp_re  swrad_scat  diff_6th_factor  epssm
-    spec_exp  mp_physics  moist  moist_cq  nest_microphysics_transition  spp_conv
-    spp_pbl  km_opt  bl_pbl_physics  sf_sfclay_physics  c_s  c_k  tke_adv_opt
-    sfs_opt  m_opt  tke_mix2_off  tke_mix6_off  moist_mix6_off  diff_6th_factor2
-    diff_6th_opt  mix_isotropic  mix_upper_bound  isfflx  tke_heat_flux
-    tke_drag_coefficient  tke_upper_bound  diff_6th_slopeopt  diff_6th_thresh
-    dampcoef  zdamp  emdiv  smdiv  khdif  kvdif  diff_opt  mix_full_fields
-    h_sca_adv_order  moist_adv_opt  tracer_opt  tracer_adv_opt  tracer_mix2_off
-    tracer_mix6_off  tracer_pblmix  dm_has_traj  trajectory_input  v_sca_adv_order
-    v_mom_adv_order  h_mom_adv_order  tke_budget  sase_flux_diag  hmix_k_diag
-    surface_energy_diag  inflow_perturbation  inflow_perturbation_seed
-    inflow_perturbation_amplitude_scale  inflow_perturbation_faces  target_cfl
-    target_hcfl  max_step_increase_pct  starting_time_step  starting_time_step_den
-    max_time_step  max_time_step_den  min_time_step  min_time_step_den
-    min_time_step_sound  slope_rad  topo_shading  mosaic_urban_canopy
-    sf_lake_physics  use_lakedepth  lakedepth_default  lake_min_elev
-    lake_state_source  lake_state_path  lake_state_accept_licence  topo_wind
-    gwd_opt  wind_farm_scheme  wind_farm_table  wind_farm_max_dx_m  wind_farms
-    windfarm_tke_factor  windfarm_ij  windfarm_wake_model  windfarm_overlap_method
-    windfarm_deg  windfarm_induction  windturbines_spec  td_turbgridid  td_hubheight
-    td_diameter  td_stdthrcoef  td_cutinspeed  td_cutoutspeed  td_power
-    td_turbpercell  td_ewfx  td_ewfy  td_pwfx  td_pwfy  history_interval2_s
-    history_interval_change_s  prec_acc_dt  prec_acc_dt1  gsd_diagnostics
-    reset_interval1  do_avgflx_em  do_avgflx_cugd  acc_phy_tend  auxhist3_interval
+    cu_physics  shcu_physics  icloud_bl  cudt_minutes  bmj_rad_feedback  clos_choice
+    ishallow  cugd_avedx  kf_edrates  maxiens  maxens  maxens2  maxens3  ensdim
+    cu_diag  convtrans_avglen_m  sas_pgcon  nsas_dx_factor  shalconv  radt
+    radt_minutes  bldt  grav_settling  ra_physics  ra_lw_physics  ra_sw_physics
+    ra_rrtmg_variant  wrf_rrtmg_compatibility  o3input  use_mp_re  swrad_scat
+    diff_6th_factor  epssm  spec_exp  mp_physics  moist  moist_cq
+    nest_microphysics_transition  spp_conv  spp_pbl  km_opt  bl_pbl_physics
+    sf_sfclay_physics  c_s  c_k  tke_adv_opt  sfs_opt  m_opt  tke_mix2_off
+    tke_mix6_off  moist_mix6_off  diff_6th_factor2  diff_6th_opt  mix_isotropic
+    mix_upper_bound  isfflx  tke_heat_flux  tke_drag_coefficient  tke_upper_bound
+    diff_6th_slopeopt  diff_6th_thresh  dampcoef  zdamp  emdiv  smdiv  khdif  kvdif
+    diff_opt  mix_full_fields  h_sca_adv_order  moist_adv_opt  tracer_opt
+    tracer_adv_opt  tracer_mix2_off  tracer_mix6_off  tracer_pblmix  dm_has_traj
+    trajectory_input  v_sca_adv_order  v_mom_adv_order  h_mom_adv_order  rk_ord
+    momentum_adv_opt  tke_budget  sase_flux_diag  hmix_k_diag  surface_energy_diag
+    rrtmg_spectral_output  radtran_wavelengths  radtran_interval_s  radtran_umu
+    radtran_phi  radtran_mol_abs_param  radtran_solver  radtran_streams
+    radtran_pseudospherical  shcu_physics  cu_rad_feedback  radtran_aerosol
+    do_avgflx_em  multi_perturb  pert_farms  pert_farms_albedo  pert_farms_aod
+    pert_farms_angexp  pert_farms_aerasy  pert_farms_qv  pert_farms_qc
+    pert_farms_qs  pert_deng  pert_deng_qv  pert_deng_qc  pert_deng_t  pert_deng_w
+    pert_thom  pert_thom_qv  pert_thom_qc  pert_thom_qi  pert_thom_qs  pert_thom_ni
+    pert_cld3  pert_cld3_qv  pert_cld3_t  spdt  inflow_perturbation
+    inflow_perturbation_seed  inflow_perturbation_amplitude_scale
+    inflow_perturbation_faces  target_cfl  target_hcfl  max_step_increase_pct
+    starting_time_step  starting_time_step_den  max_time_step  max_time_step_den
+    min_time_step  min_time_step_den  min_time_step_sound  slope_rad  topo_shading
+    mosaic_urban_canopy  sf_lake_physics  use_lakedepth  lakedepth_default
+    lake_min_elev  lake_state_source  lake_state_path  lake_state_accept_licence
+    topo_wind  gwd_opt  wind_farm_scheme  wind_farm_table  wind_farm_max_dx_m
+    wind_farms  windfarm_tke_factor  windfarm_ij  windfarm_wake_model
+    windfarm_overlap_method  windfarm_deg  windfarm_induction  windturbines_spec
+    td_turbgridid  td_hubheight  td_diameter  td_stdthrcoef  td_cutinspeed
+    td_cutoutspeed  td_power  td_turbpercell  td_ewfx  td_ewfy  td_pwfx  td_pwfy
+    history_interval2_s  history_interval_change_s  prec_acc_dt  prec_acc_dt1
+    gsd_diagnostics  reset_interval1  do_avgflx_em  do_avgflx_cugd  acc_phy_tend
+    auxhist3_interval  sf_surf_irr_scheme  irr_daily_amount  irr_start_hour
+    irr_num_hours  irr_start_julianday  irr_end_julianday  irr_freq  irr_ph
     fmoist_run  fmoist_interp  fmoist_only  fmoist_freq  fmoist_dt  ifire
     fire_boundary_guard  fire_num_ignitions  fire_ignition_ros1
     fire_ignition_start_lon1  fire_ignition_start_lat1  fire_ignition_end_lon1
@@ -469,11 +482,6 @@ and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
     fire_lsm_band_ngp  fire_lsm_zcoupling  fire_lsm_zcoupling_ref  fire_tracer_smoke
     fire_viscosity_bg  fire_viscosity_band  fire_viscosity_ngp  fire_slope_factor
     fuel_crosswalk  sr_x  sr_y  fire_static  fire_fuel_namelist  fire_smoke
-    madwrf_opt  madwrf_cldinit  madwrf_dt_relax  madwrf_dt_nudge  ra_call_offset
-    tc_flux_curve  tc_spray  tc_wave_roughness  tc_wave_source  tc_fetch_m
-    tc_horizontal_length_m  tc_spray_partition  icloud_bl  grav_settling  rk_ord
-    momentum_adv_opt  sf_surf_irr_scheme  irr_daily_amount  irr_start_hour
-    irr_num_hours  irr_start_julianday  irr_end_julianday  irr_freq  irr_ph
 
 `woof go` accepts a stock WRF directory containing `namelist.input`,
 `wrfinput_d0N`, `wrfbdy_d01` and native turbine files. `windfarm_opt=1`

@@ -266,7 +266,7 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
     "src/hexcore/history_writer.py": "570c9124745a8d8325a35c11da17e58036bfcf2e3117a5be502dec196a9905f0",
     "src/hexcore/cuda_arwen_helper_scope_v2.py": "641e8b77427a7c2f8eff374daa37e09a034fc45271d1dac67c3e39d03e3814e9",
     "src/hexcore/radiation_source_sets.json": "4fdb41a8102a0c4891771ed476d2eb7cf870e89a66c1a2dd4a92b8cd42dac802",
-    "src/hexcore/data/profiles/engine-helper-sets.v1.json": "edb765806414d89e7c101e712eb62a971942c1361876becd10d03b9b9011b612",
+    "src/hexcore/data/profiles/engine-helper-sets.v1.json": "09a3ee1261458a75ca495a4caf7760214777a3c2f33a8030ec9a52a135844515",
     # Native upper damping: Rust and CUDA match compiled source blocks.
     "src/hexcore/native/upper_damping.rs": "5483b2c1e7da45317ffe4213c5879b583070d9e28d591ec52a9c697a052e81f1",
     "src/hexcore/upper_damping_v841.py": "947f477d5f56b41d95fb5a0b92adb21d68be95b5fac19ba524181cb373710860",
@@ -841,7 +841,7 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
     # parked asynchronous history-ready seam; digest of the merged file.
     # Re-derived for the merge of the fork onto WOOF 1.1.0: digest of the merged file.
     "src/hexcore/cuda_arwen_physics_v841.py": (
-        "ffdfb27c129789b3d3b6e3d026bc3dc2124dfbe518b5487bb5b8ea1c7f02fbd4"
+        "8550e4e3bdec9366744738f787feb28fb617c5ba4775a3e512f2887553d302f6"
     ),
     # New pin 2026-10-05: the New Tiedtke row's seam (the frozen column-batch
     # class subclassed, driver built at cu_physics=16, raw cumulus momentum
@@ -903,7 +903,7 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
     # weights are byte-unchanged.
     # Re-derived for the merge of the fork onto WOOF 1.1.0: digest of the merged file.
     "src/hexcore/mixing_v841.py": (
-        "e6bad617c0a1e8dc3672eab985ac80d0c9885dc5381e38497d070f7714d985b7"
+        "e90584ecf4ad4a8e847a247494f59da2b31afe01fb808358971de3324378b88a"
     ),
     # New pins (the v8.4.1 LES closure): config_v841 admits
     # config_les_model through les_v841.validate_les_selection, and the
