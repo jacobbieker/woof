@@ -1527,6 +1527,13 @@ tools/mpas_step_oracle/, and the native-reference wrappers, patches and
 test oracles under tests/ and tools/, transcribe or patch MPAS source. Those
 are MPAS-derived portions too.
 
+The same MPAS-Model v8.4.2 tree carries the ocean, sea-ice and land-ice
+cores, and the hex lanes for them (woof/hex/mpas_seaice/, woof/hex/mpas_ocean/,
+woof/hex/mpas_ice/) port routines of core_seaice, core_ocean and core_landice.
+Each kernel names the files and lines it transcribes. Their oracles
+(tools/mpas_seaice_oracle/ ...) compile MPAS source verbatim. These are
+MPAS-derived portions under the same terms and the same marking.
+
 MPAS-Atmosphere is developed by the Los Alamos National Laboratory and the
 University Corporation for Atmospheric Research / National Center for
 Atmospheric Research. It is distributed under the BSD-3-Clause terms

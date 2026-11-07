@@ -125,7 +125,7 @@ Ordered by how self-contained each piece is:
 
 | Core | Ported pieces | Status |
 |---|---|---|
-| seaice | none yet | stub |
+| seaice | EVP internal stress, variational: `seaice_init_evp`, strain tensor, EVP and revised-EVP constitutive relation, stress divergence, final divergence/shear and ridging parameters (`woof/hex/mpas_seaice/evp_v842.py`). Word-exact against the v8.4.2 oracle on CUDA and Metal (`tests/test_mpas_seaice_evp_parity.py`, `woof hex seaice verify`). | stub |
 | ocean | none yet | stub |
 | landice | none yet | stub |
 

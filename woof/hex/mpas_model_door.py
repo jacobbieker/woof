@@ -75,8 +75,16 @@ def _options(row: dict):
 
 def _verify(row: dict):
     def handler(_: argparse.Namespace) -> int:
-        registry.require_ported(row["name"])  # refuses a stub by name
-        return 0
+        target = row.get("verify")
+        if target is None:
+            registry.require_ported(row["name"])  # refuses a stub by name
+            return 0
+        # the ported pieces, each against its oracle; the core stays a stub
+        # until every piece is ported
+        module_name, _, attr = target.partition(":")
+        report = getattr(importlib.import_module(module_name), attr)()
+        print(json.dumps(report, indent=2))
+        return 0 if report["passed"] else 1
 
     return handler
 
@@ -99,5 +107,8 @@ def add_model_parser(
     options.add_argument("--json", action="store_true", help="emit the options as JSON")
     options.set_defaults(handler=_options(row))
 
-    verify = sub.add_parser("verify", help="the oracle gate (refused by name until the core is ported)")
+    verify = sub.add_parser(
+        "verify",
+        help="the oracle gate: grade each ported piece word for word (refused by name while none is ported)",
+    )
     verify.set_defaults(handler=_verify(row))
