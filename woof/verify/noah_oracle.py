@@ -263,7 +263,7 @@ def noah_port_outputs(fixture: NoahOracleFixture) -> dict[str, np.ndarray]:
         device[field] = cp.asarray(value.copy())
     wrf_hydro = None
     if fixture.name in NOAH_WRF_HYDRO_ORACLE_FILES:
-        wrf_hydro = {field: device[field] for field in WRF_HYDRO_COLUMNS}
+        wrf_hydro = {field: device.pop(field) for field in WRF_HYDRO_COLUMNS}
     shape = fixture.ivgtyp.shape
     for field in ("noahres", "reslin", "chklowq"):
         device[field] = cp.zeros(shape, dtype=cp.float32)
@@ -275,6 +275,8 @@ def noah_port_outputs(fixture: NoahOracleFixture) -> dict[str, np.ndarray]:
                 xice_threshold=FIXTURE_XICE_THRESHOLD,
                 itimestep=FIXTURE_ITIMESTEP, wrf_hydro=wrf_hydro,
                 **fixture.switches)
+    if wrf_hydro is not None:
+        device.update(wrf_hydro)
     return {name: cp.asnumpy(value) for name, value in device.items()
             if name not in ("ivgtyp", "isltyp", "ebal")}
 

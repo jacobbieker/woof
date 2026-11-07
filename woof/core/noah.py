@@ -720,6 +720,15 @@ def launch_noah(dev: dict, params: NoahParams, dt: float, dzs,
     # kernel behind a runtime flag changed NVRTC's FMA contraction and moved
     # default forecasts (kernels/noah.cu).
     if wrf_hydro is not None:
+        missing = [n for n in WRF_HYDRO_FIELDS if n not in wrf_hydro]
+        if missing:
+            raise ValueError(f"wrf_hydro is missing {missing}")
+        planes = [wrf_hydro[n] for n in WRF_HYDRO_FIELDS]
+        taken = {id(a) for a in dev.values()}
+        if len({id(a) for a in planes}) != len(planes) or taken & {id(a) for a in planes}:
+            raise ValueError("wrf_hydro planes must be three distinct arrays "
+                             "not also passed in dev: the kernel reads "
+                             "sfcheadrt and writes infxsrt and soldrain in place")
         for name in WRF_HYDRO_FIELDS:
             a = wrf_hydro[name]
             if a.shape != (ny, nx) or a.dtype != cp.float32:

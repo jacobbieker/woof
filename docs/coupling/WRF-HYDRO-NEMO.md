@@ -10,7 +10,7 @@ remaining step needs.
 | Piece | Source | Where | Gate |
 | --- | --- | --- | --- |
 | Noah LSM built with `-DWRF_HYDRO`: ponded head `sfcheadrt` in; infiltration excess `infxsrt` and soil drainage `soldrain` out; the NDHMS edits to SMFLX, SRT and SSTEP | WRF 4.6.1 `phys/module_sf_noahdrv.F`, `phys/module_sf_noahlsm.F` (public domain) | `launch_noah(wrf_hydro=...)` -> `noah_column_hydro` (`woof/core/kernels/noah.cu`) | `tests/test_noah_wrf_hydro_parity.py`: 0 ULP in every field on CUDA (sm_86) and Metal (M3 Max), default and strict numerics |
-| WRF's side of the OASIS coupling with an ocean model: `cpl_snd2` (EVAP-PRECIP, SURF_NET_SOLAR, SURF_NET_NON-SOLAR, TAUX, TAUY, TAUMOD) and `cpl_rcv` (SST, UOCE, VOCE merged under CPLMASK) | WRF 4.6.1 `frame/module_cpl.F` (public domain) | `woof/ocean/wrf_cpl.py`, `woof/ocean/wrf_cpl.cu` | `tests/test_wrf_cpl_wrf461_parity.py` (separate PR) |
+| WRF's side of the OASIS coupling with an ocean model: `cpl_snd2` (EVAP-PRECIP, SURF_NET_SOLAR, SURF_NET_NON-SOLAR, TAUX, TAUY, TAUMOD) and `cpl_rcv` (SST, UOCE, VOCE merged under CPLMASK) | WRF 4.6.1 `frame/module_cpl.F` (public domain) | `woof/ocean/wrf_cpl.py`, `woof/ocean/wrf_cpl.cu` | `tests/test_wrf_cpl_wrf461_parity.py` (pending: #159) |
 
 Nothing of WRF-Hydro's routing or of NEMO is in the tree.
 
@@ -55,7 +55,9 @@ Apache-2.0 distribution cannot promise its recipients.  Two further facts:
 * Upstream WOOF withdrew a WRF-Hydro port: `RELEASE-EXCLUDE.txt` excludes the
   "withdrawn WRF-Hydro product door", and `licenses/NOTICE-t-route-reservoirs.txt`,
   `woof/core/kernels/NOTICE-CFE.txt` and `docs/nextgen-products.md` each state
-  that no WRF-Hydro source, port or fixture is used.  The NextGen hydrology
+  that their own adaptation (t-route reservoirs, CFE, the NextGen products)
+  uses no source, port or fixture from that withdrawn port; they are notices
+  about those adaptations, not a provenance statement for the whole tree.  The NextGen hydrology
   stack (t-route Muskingum-Cunge, CFE, Noah-OWP) is the upstream replacement.
 
 So a port of WRF-Hydro's routing is at best an opt-in in the sense the fork
@@ -91,7 +93,7 @@ used: WOOF's coupling-interval averaging is its own and on-grid only.
 Each step is one PR under 300 files, held to a compiled oracle, CUDA and
 Metal, and refuses what it does not port by name.
 
-### WRF-Hydro (needs the licence decision for steps 2-5)
+### WRF-Hydro (steps 3-5 need the licence decision; step 2 is WRF code)
 
 1. **Done**: the LSM side of the exchange for Noah (`sf_surface_physics=2`).
 2. **Noah-MP under WRF_HYDRO** (WRF code, no licence question):
@@ -117,7 +119,7 @@ Metal, and refuses what it does not port by name.
 
 ### WRF-NEMO
 
-1. **Done (separate PR)**: WRF's exchange contract (`cpl_snd2`/`cpl_rcv`),
+1. **Pending in #159**: WRF's exchange contract (`cpl_snd2`/`cpl_rcv`),
    on a shared grid, with a conserving coupling-interval average and the
    `ExternalOcean` protocol in `woof/ocean/interface.py`.
 2. **Wire the exchange into the physics driver**: call `send` once per WRF
