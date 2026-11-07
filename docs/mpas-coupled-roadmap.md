@@ -104,7 +104,25 @@ Ordered by how self-contained each piece is:
 ## MALI (`core_landice`, about 22,000 lines)
 
 1. The SIA velocity solver (`mode_forward/mpas_li_sia.F`), the default
-   `config_velocity_solver`.
+   `config_velocity_solver`. `li_sia_solve` is the first target. Its edge loop
+   is short, but its extraction is wider than the sea-ice or ocean ones:
+   - It calls `li_calculate_flowParamA` (`mpas_li_thermal.F`), which needs
+     `exp`.
+   - It calls the barycentric vertex interpolation
+     (`mpas_cells_to_points_using_baryweights`, `framework/mpas_geometry_utils.F`)
+     or the kite-area one (`li_setup`).
+   - It reads the `li_mask` bit tests.
+   - It raises to real powers (`x**(n-1)`, `x**(n+1)` with a real
+     `config_flowLawExponent`), which gfortran compiles to `powf`/`pow`.
+
+   So the oracle compiles `li_constants`, `li_setup`, `li_mask`, `li_thermal`
+   and `mpas_geometry_utils` verbatim, and the stand-ins grow to
+   `mpas_timekeeping`, `mpas_log`, `mpas_abort` and
+   `mpas_vector_reconstruction`. The GPU side takes `powf` and `expf` from the
+   hex lane's qualified glibc transcriptions (`woof.hex.native_powf`,
+   `glibc_flt32`). An RKIND 8 build needs a correctly matched double
+   `pow`/`exp`; the LGPL glibc libm port stays behind its opt-in, so that
+   precision waits for an MIT/BSD double `pow` that matches the oracle host.
 2. Thickness and tracer advection (`mpas_li_advection.F`) and the
    forward-Euler time integration.
 3. The thermal solver (`mpas_li_thermal.F`): enthalpy/temperature column
