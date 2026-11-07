@@ -57,3 +57,34 @@ and five columns (76-80) were added for that hand-over: CHS2 different from
 CQS2 on entry, CQS2 just below and exactly at SFCDIAGS's 1.E-5 threshold, a
 70 kPa plateau at night, and open water with CHS2 different from CQS2.  Every
 earlier field of rows 1-75 is byte-identical to the 75-column build.
+
+## `noah-lsm-wrf-hydro.csv` (WRF built with `-DWRF_HYDRO`)
+
+Added 2026-11-07.  `build.sh`'s hydro pass compiles the same six pinned,
+byte-unmodified sources again with `-DWRF_HYDRO` added to WRF's defines, as
+`configure` does when `WRF_HYDRO=1`, in its own directory (the `.mod` files of
+the two builds differ).  That adds `sfcheadrt`, `infxsrt` and `soldrain` to
+`lsm` (`module_sf_noahdrv.F:2607-2610`) and switches on the NDHMS edits in
+`module_sf_noahlsm.F` (`:2775`, `:3719-3832`, `:4029-4062`).  `run_lsm.F90`
+carries the three arrays under `#ifdef WRF_HYDRO`; without the define it is
+the program the six fixtures above came from.
+
+The 80 columns and driver switches are `noah-lsm.csv`'s (`opt_thcnd=1`,
+`frpcpn=F`, `usemonalb=F`, `rdlai2d=F`).  Each column carries one ponded head
+from (0, 0.25, 3, 40, 400) mm, cycled by case number; `infxsrt` enters as
+-7.0 and `soldrain` as -3.0, values lsm cannot produce, so open-water,
+sea-ice and land-ice columns visibly keep them.  Six more fields close every
+row: the three planes before the call and after it.
+
+The build refuses to write the fixture unless a scratch copy of
+`module_sf_noahlsm.F`, with a print added at each of the three statements
+that write `INFXS1RT`, reaches all three over the same columns; that copy is
+never linked into the fixture, and the fixture it writes must be identical to
+the clean build's.  `wrf-hydro-coverage.txt` is the receipt: SRT's excess 83
+calls, SSTEP's WPLUS redistribution 4, its spill into `INFXS1RT` 4 (cases 39
+and 74 among them).  Every zero-head row is byte-identical to `noah-lsm.csv`.
+
+Toolchain: gfortran 13.3.0, glibc 2.39-0ubuntu8.9 (Ubuntu 24.04 container).
+Before the hydro pass was added, the unchanged harness rebuilt all six
+committed CSVs byte-identically on it, and they are byte-identical with it.
+`oracle-sha256sums.txt` now also hashes this fixture and the edited harness.
