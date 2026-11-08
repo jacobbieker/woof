@@ -180,8 +180,8 @@ woof = [
               "tc_climate/*.json", "tc_climate/LICENSE.*"]
 # The coupled component lanes' pinned options inventories (tools/mpas_coupled_options.py):
 "woof.hex.mpas_seaice" = ["data/*.json", "*.cu"]
-"woof.hex.mpas_ocean" = ["data/*.json"]
-"woof.hex.mpas_ice" = ["data/*.json"]
+"woof.hex.mpas_ocean" = ["data/*.json", "*.cu"]
+"woof.hex.mpas_ice" = ["data/*.json", "*.cu"]
 tools = ["prepare_hrrr_*.sh", "hydro_world/data/sources.v1.json", "hydro_world/data/recipes.v1.json",
          "hydro_world_params/data/params.v1.json"]
 tilestream = ["output-scaling.json"]

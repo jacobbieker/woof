@@ -5356,6 +5356,12 @@ def _post_step_diagnostics(state: DomainState, cfg: RunConfig,
     update_solar(state,cfg)
     from woof.core.noahmp_output import update as update_noahmp_output
     update_noahmp_output(state, cfg)
+    # WRF's cpl_snd once the step is complete (module_integrate.F:460):
+    # the external ocean's coupling-interval exchange (woof.ocean.external).
+    external_ocean = getattr(state.physics, "external_ocean", None)
+    if external_ocean is not None:
+        external_ocean.send(state.physics.fields, raincv=state.physics.cu_raincv,
+                            rainncv=state.physics.microphysics.rainncv, dt=float(cfg.dt))
 
 
 def _wrf_step_epilogue(state: DomainState, cfg: RunConfig,

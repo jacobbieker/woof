@@ -287,7 +287,8 @@ def test_uncarried_chemistry_package_is_refused_with_the_menu(tmp_path):
     assert "chem_opt = 300 (gocart_simple)" in message
     assert "chem_opt = 401 (dust)" in message
     assert "none of the requested species" in message
-    assert "RADM2SORG (the RADM2 gas phase with the MADE/SORGAM aerosol) is being ported" in message
+    assert "RADM2SORG (the RADM2 gas phase with the MADE/SORGAM aerosol;" in message
+    assert "RPMARES equilibrium, WRF's ISORROPIA being an opt-in) is being ported" in message
 
 
 def test_cbmz_mosaic_packages_are_refused_naming_their_terms(tmp_path):

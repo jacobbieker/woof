@@ -121,8 +121,9 @@ class SolverFactory(Protocol):
 
 # An ocean model across WRF's coupler (woof/ocean/wrf_cpl.py, WRF 4.6.1
 # frame/module_cpl.F).  It is handed the coupling-interval averages of
-# cpl_snd2's fields and returns the three planes cpl_rcv merges.  No solver
-# implements it in this tree: NEMO is not ported (docs/coupling/WRF-HYDRO-NEMO.md).
+# cpl_snd2's fields and returns the three planes cpl_rcv merges.  No solver in
+# the default build implements it; the NEMO opt-in's NemoColumnOcean does
+# (optional/nemo, docs/coupling/WRF-HYDRO-NEMO.md).
 @dataclass(frozen=True)
 class OceanSurface:
     sst: DeviceArray        # K
