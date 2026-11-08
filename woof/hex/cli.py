@@ -519,6 +519,10 @@ _DOORS: tuple[tuple[tuple[str, ...], Callable[[argparse._SubParsersAction], None
     (("chem-sources",), _door(".chem_emissions", "add_parser")),
     (("global-cycle",), _door(".global_cycle", "add_global_cycle_parser")),
     (("regional",), _door(".regional_door", "add_regional_parser")),
+    (("coupled",), _door(".coupled.door", "add_coupled_parser")),
+    (("seaice",), _door(".mpas_seaice.cli", "add_seaice_parser")),
+    (("ocean",), _door(".mpas_ocean.cli", "add_ocean_parser")),
+    (("ice",), _door(".mpas_ice.cli", "add_ice_parser")),
 )
 
 

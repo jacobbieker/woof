@@ -149,6 +149,17 @@ source built for Apple silicon. It never touches `publish.yml` or
 - **When:** a `metal-vX.Y.Z[.N]` tag, or a manual run given a version (it
   publishes only with `publish` ticked). Versions are upstream's release plus
   a fork build number, for example `1.1.3.1`.
+- **Every merge releases:** `.github/workflows/release-metal.yml` runs on each
+  push to `main`. It takes upstream's version from `pyproject.toml`, bumps
+  the fork build number past the highest `metal-v<version>.N` tag, tags the
+  pushed commit, creates the GitHub release (the merged pull requests since
+  the previous `metal-v` tag, as GitHub generates them) and dispatches this
+  workflow on the new tag with `publish` on. The dispatch is explicit because
+  a tag pushed with `GITHUB_TOKEN` starts no workflow. A head commit whose
+  message carries `[skip release]` releases nothing. If the dispatch fails
+  after the tag and release exist, a re-run sees the tagged head and stops;
+  run this workflow by hand with `version` set to that release and `publish`
+  ticked.
 - **Build (macos-15):** every `build-native` workspace for macOS 14+, then
   `tools/metal_woof_project.py` renames the distribution (name, version, the
   extras' self-references, and the `gpu-mlx` requirements folded into the
