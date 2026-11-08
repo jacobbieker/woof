@@ -15,14 +15,16 @@ history-publishing runner calls the reset.
 """
 from __future__ import annotations
 
-from woof.core.wind_gust_diag import WIND_MAXIMA_SLOTS, zero_domain_slot
+from woof.core.wind_gust_diag import zero_domain_slot
 
 #: owner module -> the scratch slots it folds every step and the history
 #: writer zeroes after every frame.  Every slot named here is
 #: restart-serialized (woof/io/restart.py:SERIALIZED_SCRATCH_SLOTS).
-HISTORY_INTERVAL_SLOTS: dict[str, tuple[str, ...]] = {
-    "woof.core.wind_gust_diag": WIND_MAXIMA_SLOTS,
-}
+#: Empty since the 1.1.6 sync: upstream's native NWP history windows
+#: (woof.core.nwp_diagnostics) own WSPD10MAX, U10MAX/V10MAX and
+#: W_UP_MAX/W_DN_MAX and reset them themselves, and the fork's
+#: woof.core.wind_gust_diag is no longer folded by the WRF step.
+HISTORY_INTERVAL_SLOTS: dict[str, tuple[str, ...]] = {}
 
 
 def history_interval_slots() -> tuple[str, ...]:

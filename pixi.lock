@@ -6,7 +6,7 @@ platforms:
   - __linux=4.18
   - __glibc=2.28
   - __archspec=0=x86_64
-- name: osx-arm64-macos-14-0
+- name: p1
   subdir: osx-arm64
   virtual-packages:
   - __osx=14.0
@@ -184,20 +184,23 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/a0/f4/c67b0b3f1b9245e8d266f0f112c500d50e5b4e83cb6f3b71b6528104182a/requests-2.34.2-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/a1/13/08188f0cafa3a800403e4ff62b9aad4e7a17f9c4c7e080dc8f18c64794cf/kiwisolver-1.5.1-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/a7/03/921a3d3c75785aca9ebfbfcabfbc3a1be12e2ab5265deb026d55a5a3f83e/tqdm-4.70.1-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/a7/a8/3f00f296d46b6babb0b1eddad4e41fdde19cf9253b38c85de2756c7f9854/gpuwm_kernels_startup-2.9.13-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/ab/84/02fc1827e8cdded4aa65baef11296a9bbe595c474f0d6d758af082d849fd/execnet-2.1.2-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/ab/b5/c0feca27d45ae74185a6bacc399f5d8920ab82df2d732a17213fb86a2c4c/ruff-0.13.3-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/ac/72/1f79dab76eb7651b5e3622a46b18a7f93f57c3a1317b712986c58810895e/pyshp-3.1.6-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/b5/70/5d8df3b09e25bce090399cf48e452d25c935ab72dad19406c77f4e828045/psutil-7.2.2-cp36-abi3-manylinux2010_x86_64.manylinux_2_12_x86_64.manylinux_2_28_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/b7/67/e9f2eb2aed41d4ed251a3c6f66e104685f0a03d8ded7ed87f1f0fc63898c/fonttools-4.68.0-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
+      - pypi: https://files.pythonhosted.org/packages/bb/1e/5dc472014b5c0eb69e337119f73962e31645e85f1ad8ae0f03fb60c88236/recast_woof_data-1.1.6-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/c6/46/c04406cd4f812ac9cd9d62fe6eb054de48bfcfbdb67025da7fca8d2538fc/gpuwm_kernels-2.9.13-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/ca/31/d4e37e9e550c2b92a9cbc2e4d0b7420a27224968580b5a447f420847c975/pytest_xdist-3.8.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/cf/8c/9677dad226e5aaac5b823d5b09d881ebc32ff1648af417597649841e516c/contourpy-1.4.0-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/d5/34/b1e57d5e2c4095c6e10db834c6fa48c17682d4395c01b5557d42f9b3c3fd/ecmwf_datastores_client-0.5.3-py3-none-any.whl
-      - pypi: https://files.pythonhosted.org/packages/d6/36/647ae01999d4acb80304c1e64e1869ab27b56182ada693212b71a3b61b9d/recast_woof_data-1.1.5-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/e7/05/c19819d5e3d95294a6f5947fb9b9629efb316b96de511b418c53d245aae6/cycler-0.12.1-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/e7/95/ebeb35356aa41a25d03b53a795dfe73ce25200f2ad98d835f52be3a19387/wrf_rust-0.2.39-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/ec/c1/0c1ff38ab7df1b2cf54cf0ad9f19a516c4e416c6c9b4c966cc2c9d587f77/pyarrow-26.0.0-cp314-cp314-manylinux_2_28_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/ef/55/6dc6d6bb953bdfc52519a0059592c52b6e3b8ad51cf8256dffceb55b0610/setuptools-84.2.1-py3-none-any.whl
-      osx-arm64-macos-14-0:
+      - pypi: https://files.pythonhosted.org/packages/ff/b9/72292529320f2200b14e3d05b6b8ea56908dcf96ffc8ead948cfe80d86bd/rapidgzip-0.16.1-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
+      p1:
       - conda: https://conda.anaconda.org/conda-forge/noarch/_python_abi3_support-1.0-hd8ed1ab_3.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/affine-3.0.1-pyhecae5ae_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/attrs-26.1.0-pyhcf101f3_0.conda
@@ -352,12 +355,15 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/92/9d/c4e665119135114480843e7ab388fa94d8480650450e6f8e26b70d323a4c/urllib3-2.8.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/a0/f4/c67b0b3f1b9245e8d266f0f112c500d50e5b4e83cb6f3b71b6528104182a/requests-2.34.2-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/a7/03/921a3d3c75785aca9ebfbfcabfbc3a1be12e2ab5265deb026d55a5a3f83e/tqdm-4.70.1-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/a7/a8/3f00f296d46b6babb0b1eddad4e41fdde19cf9253b38c85de2756c7f9854/gpuwm_kernels_startup-2.9.13-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/ab/84/02fc1827e8cdded4aa65baef11296a9bbe595c474f0d6d758af082d849fd/execnet-2.1.2-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/ac/72/1f79dab76eb7651b5e3622a46b18a7f93f57c3a1317b712986c58810895e/pyshp-3.1.6-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/b5/f4/0bf6f1ac9ba7ee2ffe9914aeb410a1035a0c1a3c42f122388d7fc950bc4b/pillow-13.0.0-cp314-cp314-macosx_11_0_arm64.whl
+      - pypi: https://files.pythonhosted.org/packages/bb/1e/5dc472014b5c0eb69e337119f73962e31645e85f1ad8ae0f03fb60c88236/recast_woof_data-1.1.6-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/c6/46/c04406cd4f812ac9cd9d62fe6eb054de48bfcfbdb67025da7fca8d2538fc/gpuwm_kernels-2.9.13-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/ca/31/d4e37e9e550c2b92a9cbc2e4d0b7420a27224968580b5a447f420847c975/pytest_xdist-3.8.0-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/cb/23/d52e9813180f5f47deba8ca434956569e067d7a4d6be22a08b643b6d70e5/rapidgzip-0.16.1-cp314-cp314-macosx_13_0_arm64.whl
       - pypi: https://files.pythonhosted.org/packages/d5/34/b1e57d5e2c4095c6e10db834c6fa48c17682d4395c01b5557d42f9b3c3fd/ecmwf_datastores_client-0.5.3-py3-none-any.whl
-      - pypi: https://files.pythonhosted.org/packages/d6/36/647ae01999d4acb80304c1e64e1869ab27b56182ada693212b71a3b61b9d/recast_woof_data-1.1.5-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/e1/f4/b3007a3ed5c9be73f81161140684cf7d9bdb9c4b632f5f484d2a1c713fb9/kiwisolver-1.5.1-cp314-cp314-macosx_11_0_arm64.whl
       - pypi: https://files.pythonhosted.org/packages/e7/05/c19819d5e3d95294a6f5947fb9b9629efb316b96de511b418c53d245aae6/cycler-0.12.1-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/e8/b9/b947d60aa5b1442d701cbdf94a0b50e83eb5406504a26850e1fd6665adf6/icechunk-2.3.1-cp312-abi3-macosx_11_0_arm64.whl
@@ -521,6 +527,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/a1/13/08188f0cafa3a800403e4ff62b9aad4e7a17f9c4c7e080dc8f18c64794cf/kiwisolver-1.5.1-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/a1/f5/84eb544579f55452df65a47bcc86147deaddf0e568725987bc69a1bc4cf6/cftime-1.6.6.1-cp311-abi3-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/a7/03/921a3d3c75785aca9ebfbfcabfbc3a1be12e2ab5265deb026d55a5a3f83e/tqdm-4.70.1-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/a7/a8/3f00f296d46b6babb0b1eddad4e41fdde19cf9253b38c85de2756c7f9854/gpuwm_kernels_startup-2.9.13-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/ab/84/02fc1827e8cdded4aa65baef11296a9bbe595c474f0d6d758af082d849fd/execnet-2.1.2-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/ab/b5/c0feca27d45ae74185a6bacc399f5d8920ab82df2d732a17213fb86a2c4c/ruff-0.13.3-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/ac/72/1f79dab76eb7651b5e3622a46b18a7f93f57c3a1317b712986c58810895e/pyshp-3.1.6-py3-none-any.whl
@@ -528,16 +535,18 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/b6/25/564f3fc5b70c1398d706c51f2b1470d0ea0b1b2f96fee67877b6f5bdf3b6/pytz-2026.6-py2.py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/b7/67/e9f2eb2aed41d4ed251a3c6f66e104685f0a03d8ded7ed87f1f0fc63898c/fonttools-4.68.0-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/b8/85/e4af82cc9202023862090bfca4ea827d533329e925c758f0cde964cb54b7/nvidia_cuda_nvrtc_cu12-12.9.86-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl
+      - pypi: https://files.pythonhosted.org/packages/bb/1e/5dc472014b5c0eb69e337119f73962e31645e85f1ad8ae0f03fb60c88236/recast_woof_data-1.1.6-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/bc/46/a92db19b8309581092a3add7e6fceb4c301a3fd233969856a8cbf042cd3c/nvidia_cuda_runtime_cu12-12.9.79-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
+      - pypi: https://files.pythonhosted.org/packages/c6/46/c04406cd4f812ac9cd9d62fe6eb054de48bfcfbdb67025da7fca8d2538fc/gpuwm_kernels-2.9.13-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/ca/31/d4e37e9e550c2b92a9cbc2e4d0b7420a27224968580b5a447f420847c975/pytest_xdist-3.8.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/cb/c0/0a517bfe63ccd3b92eb254d264e28fca3c7cab75d07daea315250fb1bf73/nvidia_cublas_cu12-12.9.2.10-py3-none-manylinux_2_27_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/cf/8c/9677dad226e5aaac5b823d5b09d881ebc32ff1648af417597649841e516c/contourpy-1.4.0-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/d5/34/b1e57d5e2c4095c6e10db834c6fa48c17682d4395c01b5557d42f9b3c3fd/ecmwf_datastores_client-0.5.3-py3-none-any.whl
-      - pypi: https://files.pythonhosted.org/packages/d6/36/647ae01999d4acb80304c1e64e1869ab27b56182ada693212b71a3b61b9d/recast_woof_data-1.1.5-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/e7/05/c19819d5e3d95294a6f5947fb9b9629efb316b96de511b418c53d245aae6/cycler-0.12.1-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/e7/95/ebeb35356aa41a25d03b53a795dfe73ce25200f2ad98d835f52be3a19387/wrf_rust-0.2.39-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/ec/c1/0c1ff38ab7df1b2cf54cf0ad9f19a516c4e416c6c9b4c966cc2c9d587f77/pyarrow-26.0.0-cp314-cp314-manylinux_2_28_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/ef/55/6dc6d6bb953bdfc52519a0059592c52b6e3b8ad51cf8256dffceb55b0610/setuptools-84.2.1-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/ff/b9/72292529320f2200b14e3d05b6b8ea56908dcf96ffc8ead948cfe80d86bd/rapidgzip-0.16.1-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
   default:
     channels:
     - url: https://conda.anaconda.org/conda-forge/
@@ -698,21 +707,24 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/a1/13/08188f0cafa3a800403e4ff62b9aad4e7a17f9c4c7e080dc8f18c64794cf/kiwisolver-1.5.1-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/a4/84/8dd51f4d5f702dad6fde8d49732d95b53a2744abbd2baa98399d4b792533/nvidia_cusolver-12.3.5.3-py3-none-manylinux_2_27_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/a7/03/921a3d3c75785aca9ebfbfcabfbc3a1be12e2ab5265deb026d55a5a3f83e/tqdm-4.70.1-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/a7/a8/3f00f296d46b6babb0b1eddad4e41fdde19cf9253b38c85de2756c7f9854/gpuwm_kernels_startup-2.9.13-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/ab/84/02fc1827e8cdded4aa65baef11296a9bbe595c474f0d6d758af082d849fd/execnet-2.1.2-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/ab/b5/c0feca27d45ae74185a6bacc399f5d8920ab82df2d732a17213fb86a2c4c/ruff-0.13.3-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/ac/72/1f79dab76eb7651b5e3622a46b18a7f93f57c3a1317b712986c58810895e/pyshp-3.1.6-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/b4/aa/e2e5c07f57233d171a0506153d2f50dc3d09e9f6273b2a578f76379d1526/cftime-1.6.6-cp311-abi3-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/b5/70/5d8df3b09e25bce090399cf48e452d25c935ab72dad19406c77f4e828045/psutil-7.2.2-cp36-abi3-manylinux2010_x86_64.manylinux_2_12_x86_64.manylinux_2_28_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/b9/fb/f8e1890428f9f590b4beebd63b068aac1ce32a3331510c847b9f9a78f261/cuda_pathfinder-1.8.3-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/bb/1e/5dc472014b5c0eb69e337119f73962e31645e85f1ad8ae0f03fb60c88236/recast_woof_data-1.1.6-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/c2/b8/4f4c4f34fc31ab8d136ed965a919505297974629d9852c50e15bfd616281/cupy_cuda13x-14.2.0-cp314-cp314-manylinux2014_x86_64.whl
+      - pypi: https://files.pythonhosted.org/packages/c6/46/c04406cd4f812ac9cd9d62fe6eb054de48bfcfbdb67025da7fca8d2538fc/gpuwm_kernels-2.9.13-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/ca/31/d4e37e9e550c2b92a9cbc2e4d0b7420a27224968580b5a447f420847c975/pytest_xdist-3.8.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/d1/9c/0d1fdc2e7aba23e290d603bc494e97bd205bae262ce33c6b32a69768ed5e/rpds_py-2026.6.3-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/d5/11/e3df59614bebe0ca50c905442603eda64ae7ac19811d4e4f74aa2d51ca85/pytz-2026.4-py2.py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/d5/34/b1e57d5e2c4095c6e10db834c6fa48c17682d4395c01b5557d42f9b3c3fd/ecmwf_datastores_client-0.5.3-py3-none-any.whl
-      - pypi: https://files.pythonhosted.org/packages/d6/36/647ae01999d4acb80304c1e64e1869ab27b56182ada693212b71a3b61b9d/recast_woof_data-1.1.5-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/e7/05/c19819d5e3d95294a6f5947fb9b9629efb316b96de511b418c53d245aae6/cycler-0.12.1-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/e7/95/ebeb35356aa41a25d03b53a795dfe73ce25200f2ad98d835f52be3a19387/wrf_rust-0.2.39-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/ef/55/6dc6d6bb953bdfc52519a0059592c52b6e3b8ad51cf8256dffceb55b0610/setuptools-84.2.1-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/ff/b9/72292529320f2200b14e3d05b6b8ea56908dcf96ffc8ead948cfe80d86bd/rapidgzip-0.16.1-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
   libradtran:
     channels:
     - url: https://conda.anaconda.org/conda-forge/
@@ -794,7 +806,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/python-gil-3.11.18-hd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/python_abi-3.11-9_cp311.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/tzdata-2026e-h5d301ff_0.conda
-      osx-arm64-macos-14-0:
+      p1:
       - conda: https://conda.anaconda.org/conda-forge/noarch/_python_abi3_support-1.0-hd8ed1ab_3.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/ca-certificates-2026.10.23-hbd8a1cb_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/certifi-2026.10.23-pyhd8ed1ab_0.conda
@@ -868,7 +880,7 @@ environments:
     indexes:
     - https://pypi.org/simple
     packages:
-      osx-arm64-macos-14-0:
+      p1:
       - conda: https://conda.anaconda.org/conda-forge/noarch/_python_abi3_support-1.0-hd8ed1ab_3.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/affine-3.0.1-pyhecae5ae_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/attrs-26.1.0-pyhcf101f3_0.conda
@@ -1027,12 +1039,15 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/99/2f/ed874a2de4ad30b47f27960373880aa24b53d8963ea81125e12e460340c2/mlx-0.32.4-cp314-cp314-macosx_14_0_arm64.whl
       - pypi: https://files.pythonhosted.org/packages/a0/f4/c67b0b3f1b9245e8d266f0f112c500d50e5b4e83cb6f3b71b6528104182a/requests-2.34.2-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/a7/03/921a3d3c75785aca9ebfbfcabfbc3a1be12e2ab5265deb026d55a5a3f83e/tqdm-4.70.1-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/a7/a8/3f00f296d46b6babb0b1eddad4e41fdde19cf9253b38c85de2756c7f9854/gpuwm_kernels_startup-2.9.13-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/ab/84/02fc1827e8cdded4aa65baef11296a9bbe595c474f0d6d758af082d849fd/execnet-2.1.2-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/ac/72/1f79dab76eb7651b5e3622a46b18a7f93f57c3a1317b712986c58810895e/pyshp-3.1.6-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/b5/f4/0bf6f1ac9ba7ee2ffe9914aeb410a1035a0c1a3c42f122388d7fc950bc4b/pillow-13.0.0-cp314-cp314-macosx_11_0_arm64.whl
+      - pypi: https://files.pythonhosted.org/packages/bb/1e/5dc472014b5c0eb69e337119f73962e31645e85f1ad8ae0f03fb60c88236/recast_woof_data-1.1.6-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/c6/46/c04406cd4f812ac9cd9d62fe6eb054de48bfcfbdb67025da7fca8d2538fc/gpuwm_kernels-2.9.13-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/ca/31/d4e37e9e550c2b92a9cbc2e4d0b7420a27224968580b5a447f420847c975/pytest_xdist-3.8.0-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/cb/23/d52e9813180f5f47deba8ca434956569e067d7a4d6be22a08b643b6d70e5/rapidgzip-0.16.1-cp314-cp314-macosx_13_0_arm64.whl
       - pypi: https://files.pythonhosted.org/packages/d5/34/b1e57d5e2c4095c6e10db834c6fa48c17682d4395c01b5557d42f9b3c3fd/ecmwf_datastores_client-0.5.3-py3-none-any.whl
-      - pypi: https://files.pythonhosted.org/packages/d6/36/647ae01999d4acb80304c1e64e1869ab27b56182ada693212b71a3b61b9d/recast_woof_data-1.1.5-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/e1/f4/b3007a3ed5c9be73f81161140684cf7d9bdb9c4b632f5f484d2a1c713fb9/kiwisolver-1.5.1-cp314-cp314-macosx_11_0_arm64.whl
       - pypi: https://files.pythonhosted.org/packages/e7/05/c19819d5e3d95294a6f5947fb9b9629efb316b96de511b418c53d245aae6/cycler-0.12.1-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/e8/b9/b947d60aa5b1442d701cbdf94a0b50e83eb5406504a26850e1fd6665adf6/icechunk-2.3.1-cp312-abi3-macosx_11_0_arm64.whl
@@ -6343,9 +6358,14 @@ packages:
   - pyshp>=2.3
   - cdsapi>=0.7.7
   - psutil>=5.9
-  - recast-woof-data==1.1.5
+  - recast-woof-data==1.1.6
+  - gpuwm-kernels==2.9.13
+  - gpuwm-kernels-startup==2.9.13
+  - rapidgzip>=0.16.0
   - cupy-cuda12x[ctk]>=14.0 ; extra == 'gpu-cu12'
   - cupy-cuda13x[ctk]>=14.0 ; extra == 'gpu-cu13'
+  - nvidia-cuda-nvrtc>=13.0,<13.5 ; extra == 'gpu-cu13'
+  - nvidia-nvjitlink>=13.0,<13.5 ; extra == 'gpu-cu13'
   - recast-woof[gpu-cu13] ; extra == 'gpu'
   - mlx>=0.29 ; platform_machine == 'arm64' and sys_platform == 'darwin' and extra == 'gpu-mlx'
   - libclang>=18.1 ; extra == 'gpu-mlx'
@@ -6375,6 +6395,7 @@ packages:
   - recast-woof[obs] ; extra == 'all-mlx'
   - recast-woof[geog] ; extra == 'all-mlx'
   - recast-woof[all-cu13] ; extra == 'all'
+  - cupy-rocm-7-0==14.2.0 ; platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'rocm'
   requires_python: '>=3.11'
 - pypi: https://files.pythonhosted.org/packages/04/37/b751de2b59b0197a1d92a5dd491de88e8a5e928c2e6562581974f1e85263/rpds_py-2026.9.1-cp314-cp314-macosx_11_0_arm64.whl
   name: rpds-py
@@ -7286,6 +7307,11 @@ packages:
   - envwrap ; extra == 'telegram'
   - ipywidgets>=6 ; extra == 'notebook'
   requires_python: '>=3.8'
+- pypi: https://files.pythonhosted.org/packages/a7/a8/3f00f296d46b6babb0b1eddad4e41fdde19cf9253b38c85de2756c7f9854/gpuwm_kernels_startup-2.9.13-py3-none-any.whl
+  name: gpuwm-kernels-startup
+  version: 2.9.13
+  sha256: c3bc355b84a743f6b2a8d7f046cd12873d7b9961fa68d6ccf09cd7e92c0c0e99
+  requires_python: '>=3.11'
 - pypi: https://files.pythonhosted.org/packages/ab/84/02fc1827e8cdded4aa65baef11296a9bbe595c474f0d6d758af082d849fd/execnet-2.1.2-py3-none-any.whl
   name: execnet
   version: 2.1.2
@@ -7439,6 +7465,11 @@ packages:
   version: 1.8.3
   sha256: e29e59829c297a7a5233bd9cc71094fc5bddbd076951482670178f9eade39b1f
   requires_python: '>=3.10'
+- pypi: https://files.pythonhosted.org/packages/bb/1e/5dc472014b5c0eb69e337119f73962e31645e85f1ad8ae0f03fb60c88236/recast_woof_data-1.1.6-py3-none-any.whl
+  name: recast-woof-data
+  version: 1.1.6
+  sha256: 055ed6189cbadd00071f0cbc2e7a8db7cccb0cfd1a71182cd6405a2949401b78
+  requires_python: '>=3.11'
 - pypi: https://files.pythonhosted.org/packages/bc/46/a92db19b8309581092a3add7e6fceb4c301a3fd233969856a8cbf042cd3c/nvidia_cuda_runtime_cu12-12.9.79-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
   name: nvidia-cuda-runtime-cu12
   version: 12.9.79
@@ -7460,6 +7491,11 @@ packages:
   - mpmath ; extra == 'test'
   - cuda-toolkit[cublas,cudart,cufft,curand,cusolver,cusparse,nvrtc]==13.* ; extra == 'ctk'
   requires_python: '>=3.10'
+- pypi: https://files.pythonhosted.org/packages/c6/46/c04406cd4f812ac9cd9d62fe6eb054de48bfcfbdb67025da7fca8d2538fc/gpuwm_kernels-2.9.13-py3-none-any.whl
+  name: gpuwm-kernels
+  version: 2.9.13
+  sha256: 350ecedc28b09039b9571e132407298bed4d35597da262042048c49ee1062879
+  requires_python: '>=3.11'
 - pypi: https://files.pythonhosted.org/packages/ca/31/d4e37e9e550c2b92a9cbc2e4d0b7420a27224968580b5a447f420847c975/pytest_xdist-3.8.0-py3-none-any.whl
   name: pytest-xdist
   version: 3.8.0
@@ -7470,6 +7506,11 @@ packages:
   - filelock ; extra == 'testing'
   - psutil>=3.0 ; extra == 'psutil'
   - setproctitle ; extra == 'setproctitle'
+  requires_python: '>=3.9'
+- pypi: https://files.pythonhosted.org/packages/cb/23/d52e9813180f5f47deba8ca434956569e067d7a4d6be22a08b643b6d70e5/rapidgzip-0.16.1-cp314-cp314-macosx_13_0_arm64.whl
+  name: rapidgzip
+  version: 0.16.1
+  sha256: 6d6277dd0fd0c40e038c3da3f6cebbfdd3f101a44b33325032da24761a873316
   requires_python: '>=3.9'
 - pypi: https://files.pythonhosted.org/packages/cb/c0/0a517bfe63ccd3b92eb254d264e28fca3c7cab75d07daea315250fb1bf73/nvidia_cublas_cu12-12.9.2.10-py3-none-manylinux_2_27_x86_64.whl
   name: nvidia-cublas-cu12
@@ -7525,11 +7566,6 @@ packages:
   - typing-extensions>=4.13.0
   - cdsapi>=0.7.6 ; extra == 'legacy'
   requires_python: '>=3.10'
-- pypi: https://files.pythonhosted.org/packages/d6/36/647ae01999d4acb80304c1e64e1869ab27b56182ada693212b71a3b61b9d/recast_woof_data-1.1.5-py3-none-any.whl
-  name: recast-woof-data
-  version: 1.1.5
-  sha256: a65b51f5077f0bae26c43e8dc006d4cc9fe8b23ba79c927c5dcce78872a29c98
-  requires_python: '>=3.11'
 - pypi: https://files.pythonhosted.org/packages/e1/f4/b3007a3ed5c9be73f81161140684cf7d9bdb9c4b632f5f484d2a1c713fb9/kiwisolver-1.5.1-cp314-cp314-macosx_11_0_arm64.whl
   name: kiwisolver
   version: 1.5.1
@@ -7623,3 +7659,8 @@ packages:
   - importlib-metadata>=7.0.2 ; python_full_version < '3.10' and extra == 'type'
   - jaraco-develop>=7.21 ; sys_platform != 'cygwin' and extra == 'type'
   requires_python: '>=3.10'
+- pypi: https://files.pythonhosted.org/packages/ff/b9/72292529320f2200b14e3d05b6b8ea56908dcf96ffc8ead948cfe80d86bd/rapidgzip-0.16.1-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
+  name: rapidgzip
+  version: 0.16.1
+  sha256: 720442961542090df8cee8572bb456a72dd49cf61f86041c9c124719a836684b
+  requires_python: '>=3.9'

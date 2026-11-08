@@ -9,7 +9,7 @@ from woof.core.physics_inventory import SURFACE_ENERGY_ACCUMULATORS
 
 def test_surface_energy_keeps_the_two_float32_rounds_and_atmospheric_dt():
     driver=object.__new__(PhysicsDriver)
-    cfg=SimpleNamespace(dt=15.,bldt=1.,sf_surface_physics=1)
+    cfg=SimpleNamespace(dt=15.,bldt=1.,sf_surface_physics=1,diag_print=0)
     flux=np.array([[1.003,500.123],[0.,-35.17]],np.float32)
     energy=np.full_like(flux,np.float32(16384.03))
     driver.fields={n:cp.asarray(flux) for n in SURFACE_ENERGY_ACCUMULATORS.values()}

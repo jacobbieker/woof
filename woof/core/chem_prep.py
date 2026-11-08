@@ -50,15 +50,16 @@ class ChemPrep:
         if getattr(state, "_moving_frame_velocity", None):
             from woof.moving_frame import ground_relative_winds
             u, v = ground_relative_winds(state)
-        # chem_prep reads grid%t_2 itself (module_chem_utilities.F:80): under
-        # use_theta_m = 1 that is theta_m', whichever window the caller is in
-        # (woof.core.theta_m.prognostic_theta); otherwise thp.
-        from woof.core.theta_m import prognostic_theta
-        args=(p,prognostic_theta(state),state.thb,state.alt,state.php,state.phb,u,v,
+        args=(p,state.thp,state.thb,state.alt,state.php,state.phb,u,v,
               p if qv is None else qv,state.fnm,state.fnp,
               np.int32(state.thb.ndim==3),np.int32(state.phb.ndim==3),
               np.int32(qv is not None),np.int32(nz),np.int32(ny),np.int32(nx))
-        get_kernel('chem_prep','chem_prep')(((ny*nx+127)//128,),(128,),
+        kernel = get_kernel('chem_prep', 'chem_prep')
+        if getattr(state, 'use_theta_m', 0):
+            from woof.core.kernels import get_kernel_int_defines
+            kernel = get_kernel_int_defines('chem_prep', 'chem_prep',
+                                             (('GPUWM_USE_THETA_M', 1),))
+        kernel(((ny*nx+127)//128,),(128,),
                    args+tuple(self._fields[name] for name in NAMES))
         for name in ('qv','qc','qr'):
             value=getattr(state,name,None)

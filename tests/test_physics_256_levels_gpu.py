@@ -354,11 +354,12 @@ def test_kf_is_bit_identical_to_the_128_level_kernel(nz, monkeypatch):
     real = kf._kf_function
     served = []
 
-    def routed(name):
-        if name == "kf_column":
+    def routed(name, trigger=1):
+        # The 128-level image is built at kfeta_trigger = 1, the default.
+        if name == "kf_column" and trigger == 1:
             served.append(name)
             return old_fn
-        return real(name)
+        return real(name, trigger)
 
     inputs = _kf_inputs(cp, nz, 96)
     triggered = 0

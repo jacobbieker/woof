@@ -211,7 +211,9 @@ def test_the_run_route_still_refuses_a_dormant_nest_with_no_parent():
     exp = SimpleNamespace(
         domains=(SimpleNamespace(grid_id=1, spawn=object()),),
         relocation=SimpleNamespace(enabled=False, follow=None, moves=()),
-        tiles=_STREAMING_OFF)
+        tiles=_STREAMING_OFF,
+        # read first, by the DFI startup road's pricing
+        root=SimpleNamespace(run=SimpleNamespace(dfi_opt=0)))
     # The refusal lives in the body: run_experiment opens the step log off
     # exp.start_time first (01d3e4ec2f), which this stub does not carry.
     with pytest.raises(ValueError, match="single-domain path runs no tree"):
