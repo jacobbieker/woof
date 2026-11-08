@@ -133,7 +133,9 @@ Metal, and refuses what it does not port by name.
    **done** in the opt-in), overland (`Routing/Overland/`,
    `Noah_distr_routing_overland.F90`: **done** in the opt-in for
    rt_option = 1, `tests/test_wrf_hydro_overland_parity.py`), channel (`Routing/module_channel_routing.F90`:
-   Muskingum-Cunge first, then the diffusive wave), then the bucket baseflow.
+   Muskingum and Muskingum-Cunge reach routing **done** in the opt-in,
+   `tests/test_wrf_hydro_channel_parity.py`; the diffusive wave and the
+   reservoirs remain), then the bucket baseflow.
 5. **Configuration**: `hydro.namelist` (`SUBRTSWCRT`, `OVRTSWCRT`,
    `CHANRTSWCRT`, `channel_option`, `rt_option`, `GWBASESWCRT`, `DXRT`,
    `AGGFACTRT`, `DTRT_TER`, `DTRT_CH`) mapped to a WOOF table, every unported
