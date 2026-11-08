@@ -936,8 +936,11 @@ constants come from tools/strict_powf/constants.py, which uses Python's
 decimal module.  It derives from no third-party code.
 
 tools/cuda_powf/cuda_powf.cuh is a transcription of NVIDIA's code: the PTX
-that NVRTC (CUDA 13.4) emits for powf from NVIDIA's libdevice.  It
-reproduces CUDA's binary32 words on Metal.  THE TRANSCRIPTION IS OPT-IN.
+that NVRTC (CUDA 13.4) emits for powf from NVIDIA's libdevice.  On Metal
+it gives CUDA's binary32 words on almost every input; because it uses the
+correctly rounded reciprocal in place of the GPU's approximate one, a few
+results differ by 1 ULP (its header gives the counts).  THE TRANSCRIPTION
+IS OPT-IN.
 Only a source checkout with WOOF_STRICT_POWF=cuda set uses it
 (woof/backend/facade/_ops.py).  It is not package data, so the recast-woof
 and metal-woof wheels and every default build contain none of its code,
