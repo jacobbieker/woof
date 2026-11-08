@@ -74,6 +74,15 @@ program run_noah_lsm_oracle
   ! SFCDIAGS (phys/module_sf_sfcdiags.F), called after lsm exactly as
   ! module_surface_driver.F:2994 calls it for sf_surface_physics=2.
   real, dimension(ncase, 1) :: psfc2d, t2, th2, q2
+#ifdef WRF_HYDRO
+  ! The three arrays module_sf_noahdrv.F:2607-2610 adds to lsm when WRF is
+  ! built with -DWRF_HYDRO, and their pre-call copies.  sfcheadrt is the ponded
+  ! surface head WRF-Hydro hands back (mm), infxsrt the infiltration excess and
+  ! soldrain the soil drainage lsm hands to it (mm per LSM step).
+  real, dimension(ncase, 1) :: sfcheadrt, infxsrt, soldrain
+  real, dimension(ncase, 1) :: sfcheadrt0, infxsrt0, soldrain0
+  real, dimension(5) :: ponded_mm
+#endif
 
   character(len=1024) :: out_path
   character(len=32) :: arg
@@ -117,6 +126,22 @@ program run_noah_lsm_oracle
     zlvl(icase, 1) = 0.5 * dz8w(icase, 1, 1)
   end do
 
+#ifdef WRF_HYDRO
+  ! Five ponded heads, from none through a film to a head well beyond any
+  ! column's one-step infiltration capacity, cycled over the 80 cases so each
+  ! fixture population sees all five.  infxsrt and soldrain start at negative
+  ! sentinels nothing physical can produce: lsm overwrites both on every
+  ! ordinary land column (SRT sets INFXS1RT = 0 before anything else) and
+  ! leaves them untouched on open water, sea ice and land ice, so a column
+  ! that still carries a sentinel afterwards is one lsm did not write.
+  ponded_mm = (/ 0.0, 0.25, 3.0, 40.0, 400.0 /)
+  do icase = 1, ncase
+    sfcheadrt(icase, 1) = ponded_mm(mod(icase - 1, 5) + 1)
+  end do
+  infxsrt = -7.0
+  soldrain = -3.0
+  sfcheadrt0 = sfcheadrt; infxsrt0 = infxsrt; soldrain0 = soldrain
+#endif
   call save_state()
 
   call lsm(dz8w, qv3d, p8w3d, t3d, tsk,                              &
@@ -150,6 +175,10 @@ program run_noah_lsm_oracle
            urban_map_gd = 1, urban_map_zd = 1, urban_map_zdf = 1,    &
            urban_map_bd = 1, urban_map_wd = 1, urban_map_gbd = 1,    &
            urban_map_fbd = 1, urban_map_zgrd = 1, num_urban_hi = 1,  &
+#ifdef WRF_HYDRO
+           sfcheadrt = sfcheadrt, infxsrt = infxsrt,                 &
+           soldrain = soldrain,                                      &
+#endif
            sda_hfx = sda_hfx, sda_qfx = sda_qfx,                     &
            hfx_both = hfx_both, qfx_both = qfx_both, qnorm = qnorm,  &
            fasdas = 0)
@@ -1035,7 +1064,12 @@ contains
       'acsnom,acsnow,snopcx,potevp,noahres,chklowq,rib_out,' //                &
       'smois1,smois2,smois3,smois4,tslb1,tslb2,tslb3,tslb4,' //                &
       'sh2o1,sh2o2,sh2o3,sh2o4,smcrel1,smcrel2,smcrel3,smcrel4,' //            &
+#ifdef WRF_HYDRO
+      'chs_out,chs2_out,cqs2_out,t2,th2,q2,' //                                &
+      'sfcheadrt_in,infxsrt_in,soldrain_in,sfcheadrt,infxsrt,soldrain'
+#else
       'chs_out,chs2_out,cqs2_out,t2,th2,q2'
+#endif
     do i = 1, ncase
       write(u, '(I0,",",I0,",",I0)', advance='no') i, ivgtyp(i, 1), isltyp(i, 1)
       write(u, '(25(",",ES24.16E3))', advance='no')                            &
@@ -1068,8 +1102,16 @@ contains
         tslb(i, 1, 1), tslb(i, 2, 1), tslb(i, 3, 1), tslb(i, 4, 1),            &
         sh2o(i, 1, 1), sh2o(i, 2, 1), sh2o(i, 3, 1), sh2o(i, 4, 1),            &
         smcrel(i, 1, 1), smcrel(i, 2, 1), smcrel(i, 3, 1), smcrel(i, 4, 1)
+#ifdef WRF_HYDRO
+      write(u, '(6(",",ES24.16E3))', advance='no')                             &
+        chs(i, 1), chs2(i, 1), cqs2(i, 1), t2(i, 1), th2(i, 1), q2(i, 1)
+      write(u, '(6(",",ES24.16E3))')                                           &
+        sfcheadrt0(i, 1), infxsrt0(i, 1), soldrain0(i, 1),                     &
+        sfcheadrt(i, 1), infxsrt(i, 1), soldrain(i, 1)
+#else
       write(u, '(6(",",ES24.16E3))')                                           &
         chs(i, 1), chs2(i, 1), cqs2(i, 1), t2(i, 1), th2(i, 1), q2(i, 1)
+#endif
     end do
     close(u)
   end subroutine write_csv
