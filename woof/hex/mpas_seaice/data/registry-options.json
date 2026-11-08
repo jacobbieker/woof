@@ -1,0 +1,1944 @@
+{
+  "schema": "gpuwm-hex.mpas-core-options/v1",
+  "core": "core_seaice",
+  "pin": "f34984b2c89353cf31c235b08d3b4acd96b37bb3",
+  "registry": {
+    "path": "src/core_seaice/Registry.xml",
+    "sha256": "f39d5e0b8da69c452df304c35e5f0971444a3314029a1ccb75650b3d3ab05efe"
+  },
+  "option_count": 276,
+  "options": [
+    {
+      "name": "config_dt",
+      "type": "real",
+      "default": "3600.0",
+      "units": "Seconds",
+      "description": "Length of model time-step."
+    },
+    {
+      "name": "config_calendar_type",
+      "type": "character",
+      "default": "gregorian_noleap",
+      "units": "unitless",
+      "description": "Selection of the type of calendar that should be used in the simulation."
+    },
+    {
+      "name": "config_start_time",
+      "type": "character",
+      "default": "2000-01-01_00:00:00",
+      "units": "unitless",
+      "description": "Timestamp describing the initial time of the simulation. If it is set to 'file', the initial time is read from restart_timestamp."
+    },
+    {
+      "name": "config_stop_time",
+      "type": "character",
+      "default": "none",
+      "units": "unitless",
+      "description": "Timestamp descriping the final time of the simulation. If it is set to 'none' the final time is determined from config_start_time and config_run_duration."
+    },
+    {
+      "name": "config_run_duration",
+      "type": "character",
+      "default": "00-00-01_00:00:00",
+      "units": "unitless",
+      "description": "Timestamp describing the length of the simulation. If it is set to 'none' the duration is determined from config_start_time and config_stop_time. config_run_duration overrides inconsistent values of config_stop_time."
+    },
+    {
+      "name": "config_num_halos",
+      "type": "integer",
+      "default": "2",
+      "units": "unitless",
+      "description": "Determines the number of halo cells extending from a blocks owned cells (Called the 0-Halo). The default of 3 is the minimum that can be used with monotonic advection."
+    },
+    {
+      "name": "config_pio_num_iotasks",
+      "type": "integer",
+      "default": "0",
+      "units": "unitless",
+      "description": "Integer specifying how many IO tasks should be used within the PIO library. A value of 0 causes all MPI tasks to also be IO tasks. IO tasks are requried to write contiguous blocks of data to a file."
+    },
+    {
+      "name": "config_pio_stride",
+      "type": "integer",
+      "default": "1",
+      "units": "unitless",
+      "description": "Integer specifying the stride of each IO task."
+    },
+    {
+      "name": "config_write_output_on_startup",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "If true write the output streams to disk after model initialization but before time stepping."
+    },
+    {
+      "name": "config_test_case_diag",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "If true output test case diagnostics."
+    },
+    {
+      "name": "config_test_case_diag_type",
+      "type": "character",
+      "default": "none",
+      "units": "unitless",
+      "description": "Test case diagnostic type."
+    },
+    {
+      "name": "config_full_abort_write",
+      "type": "logical",
+      "default": "true",
+      "units": "unitless",
+      "description": "If true write the abort stream to disk after a critical error for the entire domain, not just failing block."
+    },
+    {
+      "name": "config_block_decomp_file_prefix",
+      "type": "character",
+      "default": "graphs/graph.info.part.",
+      "units": "unitless",
+      "description": "Defines the prefix for the block decomposition file. Can include a path. The number of blocks is appended to the end of the prefix at run-time."
+    },
+    {
+      "name": "config_number_of_blocks",
+      "type": "integer",
+      "default": "0",
+      "units": "unitless",
+      "description": "Determines the number of blocks a simulation should be run with. If it is set to 0, the number of blocks is the same as the number of MPI tasks at run-time."
+    },
+    {
+      "name": "config_explicit_proc_decomp",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "Determines if an explicit processor decomposition should be used. This is only useful if multiple blocks per processor are used."
+    },
+    {
+      "name": "config_proc_decomp_file_prefix",
+      "type": "character",
+      "default": "graphs/graph.info.part.",
+      "units": "unitless",
+      "description": "Defines the prefix for the processor decomposition file. This file is only read if config_explicit_proc_decomp is true The number of processors is appended to the end of the prefix at run-time."
+    },
+    {
+      "name": "config_use_halo_exch",
+      "type": "logical",
+      "default": "true",
+      "units": "unitless",
+      "description": "Determines if time integration halo exchanges are performed."
+    },
+    {
+      "name": "config_aggregate_halo_exch",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "Determines if aggregated halo exchanges are used in some places."
+    },
+    {
+      "name": "config_reuse_halo_exch",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "Determines if halo exchange lists are reused."
+    },
+    {
+      "name": "config_load_balance_timers",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "Determines if mpi barriers are used and timed before halo exchanges."
+    },
+    {
+      "name": "config_do_restart",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "Determines if the initial conditions should be read from a restart file, or an input file."
+    },
+    {
+      "name": "config_restart_timestamp_name",
+      "type": "character",
+      "default": "restart_timestamp",
+      "units": "unitless",
+      "description": "Path to the filename for restart timestamps to be read and written from."
+    },
+    {
+      "name": "config_do_restart_hbrine",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "Restart the brine height tracer needed for vertical bgc"
+    },
+    {
+      "name": "config_do_restart_zsalinity",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "Restart the z-salinity tracer"
+    },
+    {
+      "name": "config_do_restart_bgc",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "Restart the ice biogeochemistry"
+    },
+    {
+      "name": "config_nCategories",
+      "type": "integer",
+      "default": "5",
+      "units": "unitless",
+      "description": "The number of ice thickness categories to use."
+    },
+    {
+      "name": "config_nIceLayers",
+      "type": "integer",
+      "default": "7",
+      "units": "unitless",
+      "description": "The number of ice layers in the vertical direction to use."
+    },
+    {
+      "name": "config_nSnowLayers",
+      "type": "integer",
+      "default": "1",
+      "units": "unitless",
+      "description": "The number of snow layers in the vertical direction to use."
+    },
+    {
+      "name": "config_initial_condition_type",
+      "type": "character",
+      "default": "cice_default",
+      "units": "unitless",
+      "description": "Initial condition type for sea ice state."
+    },
+    {
+      "name": "config_initial_ice_area",
+      "type": "real",
+      "default": "1.0",
+      "units": "unitless",
+      "description": "Sea ice concentration at initialization."
+    },
+    {
+      "name": "config_initial_ice_volume",
+      "type": "real",
+      "default": "1.0",
+      "units": "m",
+      "description": "Sea ice volume at initialization."
+    },
+    {
+      "name": "config_initial_snow_volume",
+      "type": "real",
+      "default": "0.0",
+      "units": "m",
+      "description": "Sea ice snow volume at initialization."
+    },
+    {
+      "name": "config_initial_latitude_north",
+      "type": "real",
+      "default": "70.0",
+      "units": "degrees latitude",
+      "description": "Minimum latitude limit for initial northern hemisphere sea ice extent."
+    },
+    {
+      "name": "config_initial_latitude_south",
+      "type": "real",
+      "default": "-60.0",
+      "units": "degrees latitude",
+      "description": "Maximum latitude limit for initial southern hemisphere sea ice extent."
+    },
+    {
+      "name": "config_initial_velocity_type",
+      "type": "character",
+      "default": "uniform",
+      "units": "unitless",
+      "description": "Initial condition type for sea ice velocity."
+    },
+    {
+      "name": "config_initial_uvelocity",
+      "type": "real",
+      "default": "0.0",
+      "units": "m s^{-2}",
+      "description": "Sea ice velocity in the U direction at initialization. ???Geo or native???"
+    },
+    {
+      "name": "config_initial_vvelocity",
+      "type": "real",
+      "default": "0.0",
+      "units": "m s^{-2}",
+      "description": "Sea ice velocity in the V direction at initialization. ???Geo or native???"
+    },
+    {
+      "name": "config_calculate_coriolis",
+      "type": "logical",
+      "default": "true",
+      "units": "unitless",
+      "description": "If True calculate the Coriolis parameter at initialization from the latitude."
+    },
+    {
+      "name": "config_use_velocity_solver",
+      "type": "logical",
+      "default": "true",
+      "units": "unitless",
+      "description": "If true calculate the sea ice velocity."
+    },
+    {
+      "name": "config_use_advection",
+      "type": "logical",
+      "default": "true",
+      "units": "unitless",
+      "description": "If true perform advection of the sea ice."
+    },
+    {
+      "name": "config_use_forcing",
+      "type": "logical",
+      "default": "true",
+      "units": "unitless",
+      "description": "If true calculate input forcing fields."
+    },
+    {
+      "name": "config_use_column_package",
+      "type": "logical",
+      "default": "true",
+      "units": "unitless",
+      "description": "If true perform calculations from the column physics package."
+    },
+    {
+      "name": "config_atmospheric_forcing_type",
+      "type": "character",
+      "default": "CORE",
+      "units": "unitless",
+      "description": "Atmospheric forcing type."
+    },
+    {
+      "name": "config_forcing_start_time",
+      "type": "character",
+      "default": "2000-01-01_00:00:00",
+      "units": "unitless",
+      "description": "Forcing time to use at the simulation start time"
+    },
+    {
+      "name": "config_forcing_cycle_start",
+      "type": "character",
+      "default": "2000-01-01_00:00:00",
+      "units": "unitless",
+      "description": "Start time for the forcing cycle."
+    },
+    {
+      "name": "config_forcing_cycle_duration",
+      "type": "character",
+      "default": "2-00-00_00:00:00",
+      "units": "unitless",
+      "description": "Duration of the forcing cycle."
+    },
+    {
+      "name": "config_forcing_precipitation_units",
+      "type": "character",
+      "default": "mm_per_sec",
+      "units": "unitless",
+      "description": "Forcing input precipitation units."
+    },
+    {
+      "name": "config_forcing_sst_type",
+      "type": "character",
+      "default": "ncar",
+      "units": "unitless",
+      "description": "Sea surface temperature ocean forcing type."
+    },
+    {
+      "name": "config_update_ocean_fluxes",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": ""
+    },
+    {
+      "name": "config_include_pond_freshwater_feedback",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "Reduce the ocean fresh water flux by the pond fresh water flux for coupling."
+    },
+    {
+      "name": "config_perform_unit_test",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "If true perform a unit test."
+    },
+    {
+      "name": "config_unit_test_type",
+      "type": "character",
+      "default": "",
+      "units": "unitless",
+      "description": "Unit test type."
+    },
+    {
+      "name": "config_unit_test_subtype",
+      "type": "character",
+      "default": "",
+      "units": "unitless",
+      "description": "Unit test subtype."
+    },
+    {
+      "name": "config_use_test_ice_shelf",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "If true test add a test ice shelf to the ice shelf mask."
+    },
+    {
+      "name": "config_testing_system_test",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "If true initialize variables that will fail the testing system tests."
+    },
+    {
+      "name": "config_dynamics_subcycle_number",
+      "type": "integer",
+      "default": "1",
+      "units": "unitless",
+      "description": "The number of dynamics subcycles to perform per thermodynamic time step (config_dt)"
+    },
+    {
+      "name": "config_rotate_cartesian_grid",
+      "type": "logical",
+      "default": "true",
+      "units": "unitless",
+      "description": "Rotate the velocity directions from geographic so their pole lies on the equator."
+    },
+    {
+      "name": "config_include_metric_terms",
+      "type": "logical",
+      "default": "true",
+      "units": "unitless",
+      "description": "Include metric terms due to Earth curvature in velocity solver horizontal operators."
+    },
+    {
+      "name": "config_elastic_subcycle_number",
+      "type": "integer",
+      "default": "120",
+      "units": "unitless",
+      "description": "The number of elastic EVP subcycles to perform per dynamics time step."
+    },
+    {
+      "name": "config_stress_divergence_scheme",
+      "type": "character",
+      "default": "variational",
+      "units": "unitless",
+      "description": "Choice of stress divergence scheme to use in the velocity solver."
+    },
+    {
+      "name": "config_variational_basis",
+      "type": "character",
+      "default": "wachspress",
+      "units": "unitless",
+      "description": "Type of basis functions to use with the variational stress divergence scheme."
+    },
+    {
+      "name": "config_wachspress_integration_type",
+      "type": "character",
+      "default": "dunavant",
+      "units": "unitless",
+      "description": "Type of integration to perform with the Wachspress variational stress divergence scheme."
+    },
+    {
+      "name": "config_wachspress_integration_order",
+      "type": "integer",
+      "default": "8",
+      "units": "unitless",
+      "description": "Order of integration for Wachspress basis integrations."
+    },
+    {
+      "name": "config_revised_evp",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "If true use the revised EVP rheology (Bouillon et al., Ocean Modelling)"
+    },
+    {
+      "name": "config_use_air_stress",
+      "type": "logical",
+      "default": "true",
+      "units": "unitless",
+      "description": "If true include the air stress term in the velocity solver calculations."
+    },
+    {
+      "name": "config_use_ocean_stress",
+      "type": "logical",
+      "default": "true",
+      "units": "unitless",
+      "description": "If true include the ocean stress term in the velocity solver calculations."
+    },
+    {
+      "name": "config_use_surface_tilt",
+      "type": "logical",
+      "default": "true",
+      "units": "unitless",
+      "description": "If true include the sea surface tilt stress term in the velocity solver calculations."
+    },
+    {
+      "name": "config_geostrophic_surface_tilt",
+      "type": "logical",
+      "default": "true",
+      "units": "unitless",
+      "description": "If true calculate the sea surface tilt stress assuming currents are geostrophic."
+    },
+    {
+      "name": "config_advection_type",
+      "type": "character",
+      "default": "incremental_remap",
+      "units": "unitless",
+      "description": "Type of advection scheme (upwind or incremental remapping)."
+    },
+    {
+      "name": "config_monotonic",
+      "type": "logical",
+      "default": "true",
+      "units": "unitless",
+      "description": "If true then fluxes are limited to produce a monotonic advection scheme."
+    },
+    {
+      "name": "config_conservation_check",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "If true test the advection results for tracer conservation (incremental remap only)."
+    },
+    {
+      "name": "config_monotonicity_check",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "If true test the advection results for monotonicity (incremental remap only)."
+    },
+    {
+      "name": "config_recover_tracer_means_check",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "If true compare mass*tracer products for incremental remapping with analytical values."
+    },
+    {
+      "name": "config_use_column_shortwave",
+      "type": "logical",
+      "default": "true",
+      "units": "unitless",
+      "description": "Run the shortwave radiation column physics calculation."
+    },
+    {
+      "name": "config_use_column_vertical_thermodynamics",
+      "type": "logical",
+      "default": "true",
+      "units": "unitless",
+      "description": "Run the vertical thermodynamics column physics calculation."
+    },
+    {
+      "name": "config_use_column_biogeochemistry",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "Use biological and chemical tracers in the ice"
+    },
+    {
+      "name": "config_use_column_itd_thermodynamics",
+      "type": "logical",
+      "default": "true",
+      "units": "unitless",
+      "description": "Run the ice thickness distribution thermodynamics column physics calculation."
+    },
+    {
+      "name": "config_use_column_ridging",
+      "type": "logical",
+      "default": "true",
+      "units": "unitless",
+      "description": "Run the ridging column physics calculation."
+    },
+    {
+      "name": "config_use_ice_age",
+      "type": "logical",
+      "default": "true",
+      "units": "unitless",
+      "description": "If true use the ice age tracer."
+    },
+    {
+      "name": "config_use_first_year_ice",
+      "type": "logical",
+      "default": "true",
+      "units": "unitless",
+      "description": "If true use the first year ice tracer."
+    },
+    {
+      "name": "config_use_level_ice",
+      "type": "logical",
+      "default": "true",
+      "units": "unitless",
+      "description": "If true use the level ice tracers."
+    },
+    {
+      "name": "config_use_cesm_meltponds",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "If true use the cesm meltponds tracers."
+    },
+    {
+      "name": "config_use_level_meltponds",
+      "type": "logical",
+      "default": "true",
+      "units": "unitless",
+      "description": "If true use the level ice meltponds tracers."
+    },
+    {
+      "name": "config_use_topo_meltponds",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "If true use the topo meltpond tracers."
+    },
+    {
+      "name": "config_use_aerosols",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "Carry aerosols in the ice (NCAR scheme)"
+    },
+    {
+      "name": "config_use_brine",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "Use the brine height tracer"
+    },
+    {
+      "name": "config_use_vertical_zsalinity",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "Use z-salinity (with Bitz and Lipscomb 1999 thermodynamics)"
+    },
+    {
+      "name": "config_use_vertical_biochemistry",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "Turn on the reaction terms for vertical biological tracers"
+    },
+    {
+      "name": "config_use_shortwave_bioabsorption",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "Permit radiative transfer calculations that include dynamic chlorophyll and aerosols if active"
+    },
+    {
+      "name": "config_use_vertical_tracers",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "Allow vertically resolved biological and chemical tracers"
+    },
+    {
+      "name": "config_use_skeletal_biochemistry",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "Use the bottom 1-layer biogeochemistry"
+    },
+    {
+      "name": "config_use_nitrate",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "Use the nitrate tracer"
+    },
+    {
+      "name": "config_use_carbon",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "Use dissolved organic and inorganic carbon tracers"
+    },
+    {
+      "name": "config_use_chlorophyll",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "Use the chlorophyll tracer (currently not implemented!)"
+    },
+    {
+      "name": "config_use_ammonium",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "Use the ammonium tracer"
+    },
+    {
+      "name": "config_use_silicate",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "Use the silicate tracer"
+    },
+    {
+      "name": "config_use_DMS",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "Use DMS/DMSPd/DMSPp species"
+    },
+    {
+      "name": "config_use_nonreactive",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "Use a non-reactive nitrate tracer"
+    },
+    {
+      "name": "config_use_humics",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "Use the humic matter tracer"
+    },
+    {
+      "name": "config_use_DON",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "Use dissolved organic nitrogen (proteins and amino acids)"
+    },
+    {
+      "name": "config_use_iron",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "Use particulate and dissolved iron tracers"
+    },
+    {
+      "name": "config_use_modal_aerosols",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "Aerosols are consistent with the CAM modal aerosol scheme"
+    },
+    {
+      "name": "config_use_zaerosols",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "Aerosols in the ice use the z-aerosol scheme"
+    },
+    {
+      "name": "config_skeletal_bgc_flux_type",
+      "type": "character",
+      "default": "Jin2006",
+      "units": "unitless",
+      "description": "Determines the ocean-ice fluxes of biogeochemistry for the bottom1-layer model: in Jin2006, the piston velocity is a function of ice growth/melt rate, in default, the piston velocity is constant"
+    },
+    {
+      "name": "config_scale_initial_vertical_bgc",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "initialize the vertical ice biogeochemistry profile to scale with the salinity restart/initial profile"
+    },
+    {
+      "name": "config_biogrid_bottom_molecular_sublayer",
+      "type": "real",
+      "default": "0.006",
+      "units": "m",
+      "description": "Sets the value of the ice/ocean molecular sublayer for the vertical biogeochemistry model"
+    },
+    {
+      "name": "config_biogrid_top_molecular_sublayer",
+      "type": "real",
+      "default": "0.006",
+      "units": "m",
+      "description": "Sets the value of the ice surface molecular sublayer for the vertical biogeochemistry model"
+    },
+    {
+      "name": "config_bio_gravity_drainage_length_scale",
+      "type": "real",
+      "default": "20.",
+      "units": "m",
+      "description": "positive real number less than 1"
+    },
+    {
+      "name": "config_zsalinity_molecular_sublayer",
+      "type": "real",
+      "default": "0.0",
+      "units": "m",
+      "description": "Sets the ice/ocean molecular sublayer for the z-salinity model"
+    },
+    {
+      "name": "config_zsalinity_gravity_drainage_scale",
+      "type": "real",
+      "default": "0.028",
+      "units": "m",
+      "description": "Sets the gravity drainage length scale in the z-salinity model"
+    },
+    {
+      "name": "config_snow_porosity_at_ice_surface",
+      "type": "real",
+      "default": "-0.3",
+      "units": "unitless",
+      "description": "Specifies the snow porosity (volume of air/total volume) at the ice surface"
+    },
+    {
+      "name": "config_new_ice_fraction_biotracer",
+      "type": "real",
+      "default": "1.0",
+      "units": "unitless",
+      "description": "Fraction of biological tracer retained as new sea ice is formed from ocean water"
+    },
+    {
+      "name": "config_fraction_biotracer_in_frazil",
+      "type": "real",
+      "default": "0.80",
+      "units": "unitless",
+      "description": "Factor multiplying the ocean concentration of a biological tracer in new frazil ice"
+    },
+    {
+      "name": "config_ratio_Si_to_N_diatoms",
+      "type": "real",
+      "default": "1.80",
+      "units": "mol silicate/mol nitrogen",
+      "description": "Sets the ratio of silicate to nitrogen in diatoms"
+    },
+    {
+      "name": "config_ratio_Si_to_N_small_plankton",
+      "type": "real",
+      "default": "0.00",
+      "units": "mol silicate/mol nitrogen",
+      "description": "Sets the ratio of silicate to nitrogen in small plankton"
+    },
+    {
+      "name": "config_ratio_Si_to_N_phaeocystis",
+      "type": "real",
+      "default": "0.00",
+      "units": "mol silicate/mol nitrogen",
+      "description": "Sets the ratio of silicate to nitrogen in phaeocystis"
+    },
+    {
+      "name": "config_ratio_S_to_N_diatoms",
+      "type": "real",
+      "default": "0.03",
+      "units": "mol Sulfur/mol nitrogen",
+      "description": "Sets the ratio of sulfur to nitrogen in diatoms"
+    },
+    {
+      "name": "config_ratio_S_to_N_small_plankton",
+      "type": "real",
+      "default": "0.03",
+      "units": "mol sulfur/mol nitrogen",
+      "description": "Sets the ratio of sulfur to nitrogen in small plankeon"
+    },
+    {
+      "name": "config_ratio_S_to_N_phaeocystis",
+      "type": "real",
+      "default": "0.03",
+      "units": "mol sulfur/mol nitrogen",
+      "description": "Sets the ratio of sulfur to nitrogen in phaeocystis"
+    },
+    {
+      "name": "config_ratio_Fe_to_C_diatoms",
+      "type": "real",
+      "default": "0.0033",
+      "units": "mmol iron/mol Carbon",
+      "description": "Sets the ratio of iron to carbon in diatoms"
+    },
+    {
+      "name": "config_ratio_Fe_to_C_small_plankton",
+      "type": "real",
+      "default": "0.0033",
+      "units": "mmol iron/mol carbon",
+      "description": "Sets the ratio of iron to carbon in small plankton"
+    },
+    {
+      "name": "config_ratio_Fe_to_C_phaeocystis",
+      "type": "real",
+      "default": "0.1",
+      "units": "mmol iron/mol carbon",
+      "description": "Sets the ratio of iron to carbon in phaeocystis"
+    },
+    {
+      "name": "config_ratio_Fe_to_N_diatoms",
+      "type": "real",
+      "default": "0.023",
+      "units": "mmol iron/mol nitrogen",
+      "description": "Sets the ratio of iron to nitrogen in diatoms"
+    },
+    {
+      "name": "config_ratio_Fe_to_N_small_plankton",
+      "type": "real",
+      "default": "0.023",
+      "units": "mmol iron/mol nitrogen",
+      "description": "Sets the ratio of iron to nitrogen in small plankton"
+    },
+    {
+      "name": "config_ratio_Fe_to_N_phaeocystis",
+      "type": "real",
+      "default": "0.7",
+      "units": "mmol iron/mol nitrogen",
+      "description": "Sets the ratio of iron to nitrogen in phaeocystis"
+    },
+    {
+      "name": "config_ratio_Fe_to_DON",
+      "type": "real",
+      "default": "0.023",
+      "units": "mmol iron/mol nitrogen",
+      "description": "Sets the ratio of iron to dissolved organic nitrogen"
+    },
+    {
+      "name": "config_ratio_Fe_to_DOC_saccharids",
+      "type": "real",
+      "default": "0.1",
+      "units": "mmol iron/mol carbon",
+      "description": "Sets the ratio of iron to poly/saccharid carbon"
+    },
+    {
+      "name": "config_ratio_Fe_to_DOC_lipids",
+      "type": "real",
+      "default": "0.033",
+      "units": "mmol iron/mol carbon",
+      "description": "Sets the ratio of iron to lipid carbon"
+    },
+    {
+      "name": "config_respiration_fraction_of_growth",
+      "type": "real",
+      "default": "0.05",
+      "units": "unitless",
+      "description": "Fraction of algal growth that is lost due to respiration"
+    },
+    {
+      "name": "config_rapid_mobile_to_stationary_time",
+      "type": "real",
+      "default": "3600.0",
+      "units": "seconds",
+      "description": "Rapid adsorption timescale"
+    },
+    {
+      "name": "config_long_mobile_to_stationary_time",
+      "type": "real",
+      "default": "7776000.0",
+      "units": "seconds",
+      "description": "Slow adsorption timescale"
+    },
+    {
+      "name": "config_algal_maximum_velocity",
+      "type": "real",
+      "default": "0.0000001",
+      "units": "m/s",
+      "description": "Maximum speed at which diatoms can move"
+    },
+    {
+      "name": "config_ratio_Fe_to_dust",
+      "type": "real",
+      "default": "0.035",
+      "units": "mg iron/g dust",
+      "description": "Mass ratio of iron in dust"
+    },
+    {
+      "name": "config_solubility_of_Fe_in_dust",
+      "type": "real",
+      "default": "0.005",
+      "units": "unitless",
+      "description": "Fraction of iron that is soluble"
+    },
+    {
+      "name": "config_chla_absorptivity_of_diatoms",
+      "type": "real",
+      "default": "0.03",
+      "units": "1/m/(mg chla/m^3)",
+      "description": "Absorptivity of chlorophyll in diatoms"
+    },
+    {
+      "name": "config_chla_absorptivity_of_small_plankton",
+      "type": "real",
+      "default": "0.01",
+      "units": "1/m/(mg chla/m^3)",
+      "description": "Absorptivity of chlorophyll in small plankton"
+    },
+    {
+      "name": "config_chla_absorptivity_of_phaeocystis",
+      "type": "real",
+      "default": "0.05",
+      "units": "1/m/(mg chla/m^3)",
+      "description": "Absorptivity of chlorophyll in phaeocystis"
+    },
+    {
+      "name": "config_light_attenuation_diatoms",
+      "type": "real",
+      "default": "0.3",
+      "units": "1/(W/m^2)",
+      "description": "Controls the ability of diatoms to utilize light"
+    },
+    {
+      "name": "config_light_attenuation_small_plankton",
+      "type": "real",
+      "default": "0.2",
+      "units": "1/(W/m^2)",
+      "description": "Controls the ability of small plankton to utilize light"
+    },
+    {
+      "name": "config_light_attenuation_phaeocystis",
+      "type": "real",
+      "default": "0.17",
+      "units": "1/(W/m^2)",
+      "description": "Controls the ability of phaeocystis to utilize light"
+    },
+    {
+      "name": "config_light_inhibition_diatoms",
+      "type": "real",
+      "default": "0.001",
+      "units": "1/(W/m^2)",
+      "description": "Controls the strength of light inhibition to growth for diatoms"
+    },
+    {
+      "name": "config_light_inhibition_small_plankton",
+      "type": "real",
+      "default": "0.001",
+      "units": "1/(W/m^2)",
+      "description": "Controls the strength of light inhibition to growth for small plankton"
+    },
+    {
+      "name": "config_light_inhibition_phaeocystis",
+      "type": "real",
+      "default": "0.04",
+      "units": "1/(W/m^2)",
+      "description": "Controls the strength of light inhibition to growth for phaeocystis"
+    },
+    {
+      "name": "config_maximum_growth_rate_diatoms",
+      "type": "real",
+      "default": "1.44",
+      "units": "1/day",
+      "description": "Maximum growth rate for diatoms"
+    },
+    {
+      "name": "config_maximum_growth_rate_small_plankton",
+      "type": "real",
+      "default": "0.41",
+      "units": "1/day",
+      "description": "Maximum growth rate for small plankton"
+    },
+    {
+      "name": "config_maximum_growth_rate_phaeocystis",
+      "type": "real",
+      "default": "0.63",
+      "units": "1/day",
+      "description": "Maximum growth rate for phaeocystis"
+    },
+    {
+      "name": "config_temperature_growth_diatoms",
+      "type": "real",
+      "default": "0.06",
+      "units": "1/C",
+      "description": "Controls the temperature dependence of growth for diatoms"
+    },
+    {
+      "name": "config_temperature_growth_small_plankton",
+      "type": "real",
+      "default": "0.06",
+      "units": "1/C",
+      "description": "Controls the temperature dependence of growth for small plankton"
+    },
+    {
+      "name": "config_temperature_growth_phaeocystis",
+      "type": "real",
+      "default": "0.06",
+      "units": "1/C",
+      "description": "Controls the temperature dependence of growth for phaeocystis"
+    },
+    {
+      "name": "config_grazed_fraction_diatoms",
+      "type": "real",
+      "default": "0.0",
+      "units": "unitless",
+      "description": "Fraction of diatom biomass grazed"
+    },
+    {
+      "name": "config_grazed_fraction_small_plankton",
+      "type": "real",
+      "default": "0.7",
+      "units": "unitless",
+      "description": "Fraction of small plankton biomass grazed"
+    },
+    {
+      "name": "config_grazed_fraction_phaeocystis",
+      "type": "real",
+      "default": "0.7",
+      "units": "unitless",
+      "description": "Fraction of phaeocystis biomass grazed"
+    },
+    {
+      "name": "config_mortality_diatoms",
+      "type": "real",
+      "default": "0.007",
+      "units": "1/day",
+      "description": "Mortality rate of diatoms"
+    },
+    {
+      "name": "config_mortality_small_plankton",
+      "type": "real",
+      "default": "0.007",
+      "units": "1/day",
+      "description": "Mortality rate of small plankton"
+    },
+    {
+      "name": "config_mortality_phaeocystis",
+      "type": "real",
+      "default": "0.007",
+      "units": "1/day",
+      "description": "Mortality rate of phaeocystis"
+    },
+    {
+      "name": "config_temperature_mortality_diatoms",
+      "type": "real",
+      "default": "0.03",
+      "units": "1/C",
+      "description": "Temperature dependence of diatom mortality rate"
+    },
+    {
+      "name": "config_temperature_mortality_small_plankton",
+      "type": "real",
+      "default": "0.03",
+      "units": "1/C",
+      "description": "Temperature dependence of small plankton mortality rate"
+    },
+    {
+      "name": "config_temperature_mortality_phaeocystis",
+      "type": "real",
+      "default": "0.03",
+      "units": "1/C",
+      "description": "Temperature dependence of phaeocystis mortality rate"
+    },
+    {
+      "name": "config_exudation_diatoms",
+      "type": "real",
+      "default": "0.0",
+      "units": "1/day",
+      "description": "Rate diatoms exude DOC"
+    },
+    {
+      "name": "config_exudation_small_plankton",
+      "type": "real",
+      "default": "0.0",
+      "units": "1/day",
+      "description": "Rate small plankton exude DOC"
+    },
+    {
+      "name": "config_exudation_phaeocystis",
+      "type": "real",
+      "default": "0.0",
+      "units": "1/day",
+      "description": "Rate phaeocystis exude DOC"
+    },
+    {
+      "name": "config_nitrate_saturation_diatoms",
+      "type": "real",
+      "default": "1.0",
+      "units": "mmol nitrogen/m^3",
+      "description": "Nitrate half saturation for diatom growth"
+    },
+    {
+      "name": "config_nitrate_saturation_small_plankton",
+      "type": "real",
+      "default": "1.0",
+      "units": "mmol nitrogen/m^3",
+      "description": "Nitrate half saturation for small plankton growth"
+    },
+    {
+      "name": "config_nitrate_saturation_phaeocystis",
+      "type": "real",
+      "default": "1.0",
+      "units": "mmol nitrogen/m^3",
+      "description": "Nitrate half saturation for phaeocystis growth"
+    },
+    {
+      "name": "config_ammonium_saturation_diatoms",
+      "type": "real",
+      "default": "0.3",
+      "units": "mmol nitrogen/m^3",
+      "description": "Ammonium half saturation for diatom growth"
+    },
+    {
+      "name": "config_ammonium_saturation_small_plankton",
+      "type": "real",
+      "default": "0.3",
+      "units": "mmol nitrogen/m^3",
+      "description": "Ammonium half saturation for small plankton growth"
+    },
+    {
+      "name": "config_ammonium_saturation_phaeocystis",
+      "type": "real",
+      "default": "0.3",
+      "units": "mmol nitrogen/m^3",
+      "description": "Ammonium half saturation for phaeocystis growth"
+    },
+    {
+      "name": "config_silicate_saturation_diatoms",
+      "type": "real",
+      "default": "4.0",
+      "units": "mmol Si/m^3",
+      "description": "Silicate half saturation for diatom growth"
+    },
+    {
+      "name": "config_silicate_saturation_small_plankton",
+      "type": "real",
+      "default": "0.0",
+      "units": "mmol Si/m^3",
+      "description": "Silicate half saturation for small plankton growth"
+    },
+    {
+      "name": "config_silicate_saturation_phaeocystis",
+      "type": "real",
+      "default": "0.0",
+      "units": "mmol Si/m^3",
+      "description": "Silicate half saturation for phaeocystis growth"
+    },
+    {
+      "name": "config_iron_saturation_diatoms",
+      "type": "real",
+      "default": "1.0",
+      "units": "umol iron/m^3",
+      "description": "Iron half saturation for diatom growth"
+    },
+    {
+      "name": "config_iron_saturation_small_plankton",
+      "type": "real",
+      "default": "0.2",
+      "units": "umol iron/m^3",
+      "description": "Iron half saturation for small plankton growth"
+    },
+    {
+      "name": "config_iron_saturation_phaeocystis",
+      "type": "real",
+      "default": "0.1",
+      "units": "umol iron/m^3",
+      "description": "Iron half saturation for phaeocystis growth"
+    },
+    {
+      "name": "config_fraction_spilled_to_DON",
+      "type": "real",
+      "default": "0.6",
+      "units": "unitless",
+      "description": "Fraction of spilled grazing to proteins"
+    },
+    {
+      "name": "config_degredation_of_DON",
+      "type": "real",
+      "default": "0.03",
+      "units": "1/day",
+      "description": "Bacterial degredation of DON"
+    },
+    {
+      "name": "config_fraction_DON_ammonium",
+      "type": "real",
+      "default": "0.25",
+      "units": "unitless",
+      "description": "Fraction of remineralized DON converted to ammonium"
+    },
+    {
+      "name": "config_fraction_loss_to_saccharids",
+      "type": "real",
+      "default": "0.4",
+      "units": "unitless",
+      "description": "Fraction of mortality to poly/saccharids"
+    },
+    {
+      "name": "config_fraction_loss_to_lipids",
+      "type": "real",
+      "default": "0.4",
+      "units": "unitless",
+      "description": "Fraction of mortality to lipids"
+    },
+    {
+      "name": "config_fraction_exudation_to_saccharids",
+      "type": "real",
+      "default": "1.0",
+      "units": "unitless",
+      "description": "Fracton of exudation to poly/saccharids"
+    },
+    {
+      "name": "config_fraction_exudation_to_lipids",
+      "type": "real",
+      "default": "1.0",
+      "units": "unitless",
+      "description": "Fraction of exudation to lipids"
+    },
+    {
+      "name": "config_remineralization_saccharids",
+      "type": "real",
+      "default": "0.03",
+      "units": "1/day",
+      "description": "Bacterial degredaton rate of poly/saccarids"
+    },
+    {
+      "name": "config_remineralization_lipids",
+      "type": "real",
+      "default": "0.03",
+      "units": "1/day",
+      "description": "Bacterial degredation rate of lipids"
+    },
+    {
+      "name": "config_maximum_brine_temperature",
+      "type": "real",
+      "default": "0.0",
+      "units": "C",
+      "description": "Maximum brine temperature"
+    },
+    {
+      "name": "config_salinity_dependence_of_growth",
+      "type": "real",
+      "default": "1.0",
+      "units": "ppt",
+      "description": "Salinity limitation factor"
+    },
+    {
+      "name": "config_minimum_optical_depth",
+      "type": "real",
+      "default": "0.1",
+      "units": "unitless",
+      "description": "Minimum optical depth above which light attenuates"
+    },
+    {
+      "name": "config_slopped_grazing_fraction",
+      "type": "real",
+      "default": "0.5",
+      "units": "unitless",
+      "description": "Fraction of grazing spilled or slopped"
+    },
+    {
+      "name": "config_excreted_fraction",
+      "type": "real",
+      "default": "0.5",
+      "units": "unitless",
+      "description": "Fraction of assimilation excreted"
+    },
+    {
+      "name": "config_fraction_mortality_to_ammonium",
+      "type": "real",
+      "default": "0.9",
+      "units": "unitless",
+      "description": "Fraction of mortality to ammonium"
+    },
+    {
+      "name": "config_fraction_iron_remineralized",
+      "type": "real",
+      "default": "1.0",
+      "units": "unitless",
+      "description": "Fraction of remineralized iron"
+    },
+    {
+      "name": "config_nitrification_rate",
+      "type": "real",
+      "default": "0.0",
+      "units": "1/day",
+      "description": "Nitrification rate"
+    },
+    {
+      "name": "config_desorption_loss_particulate_iron",
+      "type": "real",
+      "default": "3065.0",
+      "units": "day",
+      "description": "Desorption rate of particulate iron to dissolved iron"
+    },
+    {
+      "name": "config_maximum_loss_fraction",
+      "type": "real",
+      "default": "0.9",
+      "units": "unitless",
+      "description": "Maximum uptake fraction in a single timestep"
+    },
+    {
+      "name": "config_maximum_ratio_iron_to_saccharids",
+      "type": "real",
+      "default": "0.2",
+      "units": "unitless",
+      "description": "Optimal ratio of dissolved iron to poly/saccharids in the brine"
+    },
+    {
+      "name": "config_respiration_loss_to_DMSPd",
+      "type": "real",
+      "default": "0.9",
+      "units": "unitless",
+      "description": "Fraction of respiration loss as DMSPd"
+    },
+    {
+      "name": "config_DMSP_to_DMS_conversion_fraction",
+      "type": "real",
+      "default": "0.7",
+      "units": "unitless",
+      "description": "Fraction of conversion to DMS given high yield"
+    },
+    {
+      "name": "config_DMSP_to_DMS_conversion_time",
+      "type": "real",
+      "default": "5.0",
+      "units": "day",
+      "description": "Stefels conversion time"
+    },
+    {
+      "name": "config_DMS_oxidation_time",
+      "type": "real",
+      "default": "12.0",
+      "units": "day",
+      "description": "DMS oxidation time"
+    },
+    {
+      "name": "config_mobility_type_diatoms",
+      "type": "real",
+      "default": "0.0",
+      "units": "unitless",
+      "description": "Transport type of diatoms"
+    },
+    {
+      "name": "config_mobility_type_small_plankton",
+      "type": "real",
+      "default": "0.0",
+      "units": "unitless",
+      "description": "Transport type of small plankton"
+    },
+    {
+      "name": "config_mobility_type_phaeocystis",
+      "type": "real",
+      "default": "0.0",
+      "units": "unitless",
+      "description": "Transport type of phaeocystis"
+    },
+    {
+      "name": "config_mobility_type_nitrate",
+      "type": "real",
+      "default": "-1.0",
+      "units": "unitless",
+      "description": "Transport type of nitrate"
+    },
+    {
+      "name": "config_mobility_type_ammonium",
+      "type": "real",
+      "default": "0.0",
+      "units": "unitless",
+      "description": "Transport type of ammonium"
+    },
+    {
+      "name": "config_mobility_type_silicate",
+      "type": "real",
+      "default": "-1.0",
+      "units": "unitless",
+      "description": "Transport type of silicate"
+    },
+    {
+      "name": "config_mobility_type_DMSPp",
+      "type": "real",
+      "default": "0.5",
+      "units": "unitless",
+      "description": "Transport type of particulate DMSP"
+    },
+    {
+      "name": "config_mobility_type_DMSPd",
+      "type": "real",
+      "default": "0.0",
+      "units": "unitless",
+      "description": "Transport type of dissolved DMSP"
+    },
+    {
+      "name": "config_mobility_type_humics",
+      "type": "real",
+      "default": "0.0",
+      "units": "unitless",
+      "description": "Transport type of humics"
+    },
+    {
+      "name": "config_mobility_type_saccharids",
+      "type": "real",
+      "default": "0.0",
+      "units": "unitless",
+      "description": "Transport type of poly/saccharids"
+    },
+    {
+      "name": "config_mobility_type_lipids",
+      "type": "real",
+      "default": "0.0",
+      "units": "unitless",
+      "description": "Transport type of lipids"
+    },
+    {
+      "name": "config_mobility_type_proteins",
+      "type": "real",
+      "default": "0.0",
+      "units": "unitless",
+      "description": "Transport type of proteins"
+    },
+    {
+      "name": "config_mobility_type_dissolved_iron",
+      "type": "real",
+      "default": "0.0",
+      "units": "unitless",
+      "description": "Transport type of dissolved iron"
+    },
+    {
+      "name": "config_mobility_type_particulate_iron",
+      "type": "real",
+      "default": "0.5",
+      "units": "unitless",
+      "description": "Transport type of particulate iron"
+    },
+    {
+      "name": "config_mobility_type_black_carbon1",
+      "type": "real",
+      "default": "0.0",
+      "units": "unitless",
+      "description": "Transport type of black carbon 1 pool"
+    },
+    {
+      "name": "config_mobility_type_black_carbon2",
+      "type": "real",
+      "default": "0.0",
+      "units": "unitless",
+      "description": "Transport type of black carbon 1 pool"
+    },
+    {
+      "name": "config_mobility_type_dust1",
+      "type": "real",
+      "default": "0.0",
+      "units": "unitless",
+      "description": "Transport type of dust pool 1"
+    },
+    {
+      "name": "config_mobility_type_dust2",
+      "type": "real",
+      "default": "0.0",
+      "units": "unitless",
+      "description": "Transport type of dust pool 2"
+    },
+    {
+      "name": "config_mobility_type_dust3",
+      "type": "real",
+      "default": "0.0",
+      "units": "unitless",
+      "description": "Transport type of dust pool 3"
+    },
+    {
+      "name": "config_mobility_type_dust4",
+      "type": "real",
+      "default": "0.0",
+      "units": "unitless",
+      "description": "Transport type of dust pool 4"
+    },
+    {
+      "name": "config_ratio_C_to_N_diatoms",
+      "type": "real",
+      "default": "7.0",
+      "units": "mol carbon/mol nitrogen",
+      "description": "Algal carbon to nitrogen mole ratio for diatoms"
+    },
+    {
+      "name": "config_ratio_C_to_N_small_plankton",
+      "type": "real",
+      "default": "7.0",
+      "units": "mol carbon/mol nitrogen",
+      "description": "Algal carbon to nitrogen mole ratio for small plankton"
+    },
+    {
+      "name": "config_ratio_C_to_N_phaeocystis",
+      "type": "real",
+      "default": "7.0",
+      "units": "mol carbon/mol nitrogen",
+      "description": "Algal carbon to nitrogen mole ratio for phaeocystis"
+    },
+    {
+      "name": "config_ratio_chla_to_N_diatoms",
+      "type": "real",
+      "default": "2.1",
+      "units": "g chla/mol nitrogen",
+      "description": "Algal chlorophyll to nitrogen ratio for diatoms"
+    },
+    {
+      "name": "config_ratio_chla_to_N_small_plankton",
+      "type": "real",
+      "default": "1.1",
+      "units": "g chla/mol nitrogen",
+      "description": "Algal chlorophyll to nitrogen ratio for small plankton"
+    },
+    {
+      "name": "config_ratio_chla_to_N_phaeocystis",
+      "type": "real",
+      "default": "0.84",
+      "units": "g chla/mol nitrogen",
+      "description": "Algal chlorophyll to nitrogen ratio for phaeocystis"
+    },
+    {
+      "name": "config_scales_absorption_diatoms",
+      "type": "real",
+      "default": "2.0",
+      "units": "unitless",
+      "description": "Scales absorbed radiation for diatoms"
+    },
+    {
+      "name": "config_scales_absorption_small_plankton",
+      "type": "real",
+      "default": "4.0",
+      "units": "unitless",
+      "description": "Scales absorbed radiation for small plankton"
+    },
+    {
+      "name": "config_scales_absorption_phaeocystis",
+      "type": "real",
+      "default": "5.0",
+      "units": "unitless",
+      "description": "Scales absorbed radiation for phaeocystis"
+    },
+    {
+      "name": "config_ratio_C_to_N_proteins",
+      "type": "real",
+      "default": "7.0",
+      "units": "mol carbon/mol nitrogen",
+      "description": "Ratio of carbon to nitrogen in proteins"
+    },
+    {
+      "name": "config_shortwave_type",
+      "type": "character",
+      "default": "dEdd",
+      "units": "unitless",
+      "description": "Shortwave radiation method."
+    },
+    {
+      "name": "config_albedo_type",
+      "type": "character",
+      "default": "ccsm3",
+      "units": "unitless",
+      "description": "Albedo parameterization type."
+    },
+    {
+      "name": "config_visible_ice_albedo",
+      "type": "real",
+      "default": "0.78",
+      "units": "unitless",
+      "description": "Visible ice albedo for ice thickness greater than config_variable_albedo_thickness_limit."
+    },
+    {
+      "name": "config_infrared_ice_albedo",
+      "type": "real",
+      "default": "0.36",
+      "units": "unitless",
+      "description": "Near-IR ice albedo for ice thickness greater than config_variable_albedo_thickness_limit."
+    },
+    {
+      "name": "config_visible_snow_albedo",
+      "type": "real",
+      "default": "0.98",
+      "units": "unitless",
+      "description": "Visible cold snow albedo."
+    },
+    {
+      "name": "config_infrared_snow_albedo",
+      "type": "real",
+      "default": "0.70",
+      "units": "unitless",
+      "description": "Near-IR cold snow albedo."
+    },
+    {
+      "name": "config_variable_albedo_thickness_limit",
+      "type": "real",
+      "default": "0.3",
+      "units": "m",
+      "description": "Ice thickness above which the ice albedo is constant."
+    },
+    {
+      "name": "config_ice_shortwave_tuning_parameter",
+      "type": "real",
+      "default": "0.0",
+      "units": "",
+      "description": "Sea ice tuning parameter; +1 for 1sig increase in albedo."
+    },
+    {
+      "name": "config_pond_shortwave_tuning_parameter",
+      "type": "real",
+      "default": "0.0",
+      "units": "",
+      "description": "Ponded ice tuning parameter; +1 for 1sig increase in albedo."
+    },
+    {
+      "name": "config_snow_shortwave_tuning_parameter",
+      "type": "real",
+      "default": "1.5",
+      "units": "",
+      "description": "Snow tuning parameter; +1 for ~.01 change in broadband albedo."
+    },
+    {
+      "name": "config_temp_change_snow_grain_radius_change",
+      "type": "real",
+      "default": "1.5",
+      "units": "C",
+      "description": "Change in temperture for non-melt to melt snow grain radius change."
+    },
+    {
+      "name": "config_max_melting_snow_grain_radius",
+      "type": "real",
+      "default": "1500.0",
+      "units": "10e-6 m",
+      "description": "Maximum melting snow grain radius."
+    },
+    {
+      "name": "config_algae_absorption_coefficient",
+      "type": "real",
+      "default": "0.6",
+      "units": "",
+      "description": "Algae absorption coefficient for 0.5 m thick layer."
+    },
+    {
+      "name": "config_snow_to_ice_transition_depth",
+      "type": "real",
+      "default": "0.0",
+      "units": "m",
+      "description": "Snow depth for transition to bare sea ice."
+    },
+    {
+      "name": "config_pond_refreezing_type",
+      "type": "character",
+      "default": "hlid",
+      "units": "unitless",
+      "description": "Pond refreezing parameterization."
+    },
+    {
+      "name": "config_pond_flushing_timescale",
+      "type": "real",
+      "default": "1.0e-3",
+      "units": "",
+      "description": "Alter e-folding time scale for flushing.?????"
+    },
+    {
+      "name": "config_min_meltwater_retained_fraction",
+      "type": "real",
+      "default": "0.15",
+      "units": "unitless",
+      "description": "Minimum retained fraction of meltwater."
+    },
+    {
+      "name": "config_max_meltwater_retained_fraction",
+      "type": "real",
+      "default": "1.0",
+      "units": "unitless",
+      "description": "Maximum retained fraction of meltwater."
+    },
+    {
+      "name": "config_pond_depth_to_fraction_ratio",
+      "type": "real",
+      "default": "0.8",
+      "units": "unitless",
+      "description": "Ratio of pond depth to pond fraction."
+    },
+    {
+      "name": "config_snow_on_pond_ice_tapering_parameter",
+      "type": "real",
+      "default": "0.03",
+      "units": "",
+      "description": "Tapering parameter for snow on pond ice."
+    },
+    {
+      "name": "config_critical_pond_ice_thickness",
+      "type": "real",
+      "default": "0.01",
+      "units": "",
+      "description": "Critical parameter for pond ice thickness."
+    },
+    {
+      "name": "config_thermodynamics_type",
+      "type": "character",
+      "default": "mushy",
+      "units": "unitless",
+      "description": "Vertical themodynamics type."
+    },
+    {
+      "name": "config_heat_conductivity_type",
+      "type": "character",
+      "default": "bubbly",
+      "units": "unitless",
+      "description": "Thermal conductivity type for BL99 thermodynamics. Options are Maykut and Untersteiner 1971 form (with Wettlaufer 1991 constants), or Pringle et al JGR 2007 'bubbly brine'"
+    },
+    {
+      "name": "config_rapid_mode_channel_radius",
+      "type": "real",
+      "default": "0.5e-3",
+      "units": "m",
+      "description": "Channel radius for rapid gravity drainage mode."
+    },
+    {
+      "name": "config_rapid_model_critical_Ra",
+      "type": "real",
+      "default": "10.0",
+      "units": "unitless",
+      "description": "Critical Rayleigh number for rapid gravity drainage mode."
+    },
+    {
+      "name": "config_rapid_mode_aspect_ratio",
+      "type": "real",
+      "default": "1.0",
+      "units": "unitless",
+      "description": "Aspect ratio for rapid gravity drainage mode (larger=wider)."
+    },
+    {
+      "name": "config_slow_mode_drainage_strength",
+      "type": "real",
+      "default": "-5.0e-8",
+      "units": "m s^-1 K^-1",
+      "description": "Slow gravity drainage mode drainage strength."
+    },
+    {
+      "name": "config_slow_mode_critical_porosity",
+      "type": "real",
+      "default": "0.05",
+      "units": "unitless",
+      "description": "Liquid fraction porosity cutoff for slow gravity drainage mode."
+    },
+    {
+      "name": "config_congelation_ice_porosity",
+      "type": "real",
+      "default": "0.85",
+      "units": "unitless",
+      "description": "Liquid fraction of congelation ice."
+    },
+    {
+      "name": "config_itd_conversion_type",
+      "type": "character",
+      "default": "linear remap",
+      "units": "unitless",
+      "description": "Type of ice thickness distribution conversions."
+    },
+    {
+      "name": "config_category_bounds_type",
+      "type": "character",
+      "default": "original",
+      "units": "unitless",
+      "description": "Type of ice thickness category bounds."
+    },
+    {
+      "name": "config_ice_strength_formulation",
+      "type": "character",
+      "default": "Rothrock75",
+      "units": "unitless",
+      "description": "Type of ice strength formulation."
+    },
+    {
+      "name": "config_ridging_participation_function",
+      "type": "character",
+      "default": "exponential",
+      "units": "unitless",
+      "description": "Type of ridging participation function."
+    },
+    {
+      "name": "config_ridging_redistribution_function",
+      "type": "character",
+      "default": "exponential",
+      "units": "unitless",
+      "description": "Type of ridging redistribution function."
+    },
+    {
+      "name": "config_ridiging_efolding_scale",
+      "type": "real",
+      "default": "3.0",
+      "units": "m^0.5",
+      "description": "E-folding scale of ridged ice (krdg_redist = 1)"
+    },
+    {
+      "name": "config_ratio_ridging_work_to_PE",
+      "type": "real",
+      "default": "17.0",
+      "units": "unitless",
+      "description": "Ratio of ridging work to PE change in ridging (kstrength = 1)"
+    },
+    {
+      "name": "config_atmos_boundary_method",
+      "type": "character",
+      "default": "ccsm3",
+      "units": "unitless",
+      "description": "Atmosphere boundary method."
+    },
+    {
+      "name": "config_calc_surface_stresses",
+      "type": "logical",
+      "default": "true",
+      "units": "unitless",
+      "description": "If true calculate wind stress components."
+    },
+    {
+      "name": "config_calc_surface_temperature",
+      "type": "logical",
+      "default": "true",
+      "units": "unitless",
+      "description": "If true calculate surface temperature. If false surface temperature is computed elsewhere and atmos-ice fluxes are provided."
+    },
+    {
+      "name": "config_use_form_drag",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "If true calculate form drag."
+    },
+    {
+      "name": "config_use_high_frequency_coupling",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "If true use high frequency coupling."
+    },
+    {
+      "name": "config_boundary_layer_iteration_number",
+      "type": "integer",
+      "default": "5",
+      "units": "unitless",
+      "description": "Number of iterations for boundary layer calculations"
+    },
+    {
+      "name": "config_use_ocean_mixed_layer",
+      "type": "logical",
+      "default": "true",
+      "units": "unitless",
+      "description": "If true use an ocean mixed layer."
+    },
+    {
+      "name": "config_min_friction_velocity",
+      "type": "real",
+      "default": "0.0005",
+      "units": "",
+      "description": "Minimum friction velocity for ice-ocean heat flux."
+    },
+    {
+      "name": "config_ocean_heat_transfer_type",
+      "type": "character",
+      "default": "constant",
+      "units": "unitless",
+      "description": "Transfer coefficient type for ice-ocean heat flux."
+    },
+    {
+      "name": "config_sea_freezing_temperature_type",
+      "type": "character",
+      "default": "mushy",
+      "units": "unitless",
+      "description": "Form of ocean freezing temperature."
+    },
+    {
+      "name": "config_ocean_surface_type",
+      "type": "character",
+      "default": "free",
+      "units": "unitless",
+      "description": "Type of coupled ocean surface: (MPAS-O:'free'), (SOM:'non-free')"
+    },
+    {
+      "name": "config_couple_biogeochemistry_fields",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": ""
+    },
+    {
+      "name": "config_check_state",
+      "type": "logical",
+      "default": "false",
+      "units": "unitless",
+      "description": "If true perform a check at runtime of the model state."
+    }
+  ]
+}

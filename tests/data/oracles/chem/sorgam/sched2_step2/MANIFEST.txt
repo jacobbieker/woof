@@ -1,0 +1,15 @@
+chem f4 4 8 10 2 81
+h2oaj f4 3 8 10 2
+h2oai f4 3 8 10 2
+nu3 f4 3 8 10 2
+ac3 f4 3 8 10 2
+cor3 f4 3 8 10 2
+cvaro1 f4 3 8 10 2
+cvaro2 f4 3 8 10 2
+cvalk1 f4 3 8 10 2
+cvole1 f4 3 8 10 2
+cvapi1 f4 3 8 10 2
+cvapi2 f4 3 8 10 2
+cvlim1 f4 3 8 10 2
+cvlim2 f4 3 8 10 2
+vcsulf_next f4 3 8 10 2
