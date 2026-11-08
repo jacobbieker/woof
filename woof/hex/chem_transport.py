@@ -46,12 +46,18 @@ def load_config(path):
     raw = json.loads(path.read_text())
     if raw.get("schema") != SCHEMA:
         raise ValueError(f"chemistry config must use {SCHEMA}")
+    modes = [key for key in ("species", "wrf_chem", "micm") if key in raw]
+    if len(modes) > 1:
+        raise ValueError(f"chemistry config carries one of species, wrf_chem or micm, not {modes}")
     if "wrf_chem" in raw:
         # WRF-Chem rows and processes (woof.hex.chem_wrf); no bulk species rows.
         from . import chem_wrf
-        if "species" in raw:
-            raise ValueError("chemistry config carries either species or wrf_chem, not both")
         chem_wrf.load_table(raw)
+        return path, raw, ()
+    if "micm" in raw:
+        # A MechanismConfiguration mechanism through WOOF's MICM port (woof.hex.chem_micm_hex).
+        from . import chem_micm_hex
+        chem_micm_hex.load(path, raw)
         return path, raw, ()
     species = tuple(ChemistrySpecies(**row) for row in raw["species"])
     if not species or len({s.name for s in species}) != len(species):
@@ -77,6 +83,9 @@ def product_slugs(forecast_dir):
     if raw.get("mode") == "wrf_chem":
         from . import chem_wrf
         return chem_wrf.product_slugs(raw)
+    if raw.get("mode") == "micm":
+        from . import chem_micm_hex
+        return chem_micm_hex.product_slugs(raw)
     species = tuple(ChemistrySpecies(**row) for row in raw["species"])
     if not species or len({s.name for s in species}) != len(species):
         raise ValueError(f"{receipt} requires unique species rows")
@@ -95,9 +104,9 @@ def configure(path):
     path, raw, species = load_config(path)
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
     name = "chemistry_" + digest[:16]
-    if "wrf_chem" in raw:
-        from . import chem_wrf
-        rows = chem_wrf.declare(raw)
+    if "wrf_chem" in raw or "micm" in raw:
+        from . import chem_micm_hex, chem_wrf
+        rows = chem_wrf.declare(raw) if "wrf_chem" in raw else chem_micm_hex.declare(path, raw)
         names = tuple(r.name for r in rows)
         declared = tuple(SpeciesDeclaration(r.name, AEROSOL_MASS, True, r.name.upper(),
                                             f"WRF-Chem row in {r.units} ({r.phase})") for r in rows)
@@ -231,9 +240,9 @@ def build_column_backend(row, *, constructor, prep_geometry, kernel_cache,
     from .species_row import WSM6_SPECIES_ROW
     from .cuda_physics_prep_v841 import prepare_mpas_to_phys_cuda_v841
     path, raw, _species, species_row, digest = _CONFIGS[row.name]
-    if "wrf_chem" in raw:
-        from . import chem_wrf
-        return chem_wrf.build_column_backend(
+    if "wrf_chem" in raw or "micm" in raw:
+        from . import chem_micm_hex, chem_wrf
+        return (chem_wrf if "wrf_chem" in raw else chem_micm_hex).build_column_backend(
             row, (path, raw, digest, species_row), constructor=constructor,
             prep_geometry=prep_geometry, kernel_cache=kernel_cache, gwdo_static=gwdo_static,
             gwdo_kernel_cache=gwdo_kernel_cache, checkout=checkout, cell_area_m2=cell_area_m2,
@@ -357,6 +366,9 @@ def attach(backend, host, driver):
     if "wrf_chem" in runtime.raw:
         from . import chem_wrf
         return chem_wrf.attach(backend, host, driver)
+    if "micm" in runtime.raw:
+        from . import chem_micm_hex
+        return chem_micm_hex.attach(backend, host, driver)
     runtime.driver = driver
     if host.get("regional") is not None:
         raise ValueError("regional chemistry requires scalar LBC forcing over the specified and relaxation zones; sentinel-only input would leave the plume boundary undriven")
@@ -395,8 +407,8 @@ def attach(backend, host, driver):
 
 
 def history_units(name):
-    from . import chem_wrf
-    declared = chem_wrf.history_units(name)
+    from . import chem_micm_hex, chem_wrf
+    declared = chem_wrf.history_units(name) or chem_micm_hex.history_units(name)
     if declared is not None:
         return declared
     if name.endswith(("_column_mass", "_dry_deposition", "_settled_mass")):
@@ -416,6 +428,9 @@ def history_metadata(path, expected_sha256):
     if "wrf_chem" in raw:
         from . import chem_wrf
         return chem_wrf.history_metadata(raw, digest)
+    if "micm" in raw:
+        from . import chem_micm_hex
+        return chem_micm_hex.history_metadata(path, raw, digest)
     return json.dumps({"schema": SCHEMA, "config_sha256": digest, "basis": "dry_air",
                        "species": [s.__dict__ for s in species],
                        "aod550": "dry bulk mass-extinction proxy; no humidity-dependent growth",

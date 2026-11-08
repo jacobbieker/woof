@@ -1,0 +1,223 @@
+{
+ "version": "1.0.0",
+ "name": "woof-types",
+ "species": [
+  {
+   "name": "M",
+   "is third body": true
+  },
+  {
+   "name": "N2",
+   "constant mixing ratio [mol mol-1]": 0.78
+  },
+  {
+   "name": "H2O",
+   "constant concentration [mol m-3]": 0.4
+  },
+  {
+   "name": "A"
+  },
+  {
+   "name": "B"
+  },
+  {
+   "name": "C"
+  },
+  {
+   "name": "D"
+  },
+  {
+   "name": "E"
+  },
+  {
+   "name": "F"
+  }
+ ],
+ "phases": [
+  {
+   "name": "gas",
+   "species": [
+    {
+     "name": "M"
+    },
+    {
+     "name": "N2"
+    },
+    {
+     "name": "H2O"
+    },
+    {
+     "name": "A"
+    },
+    {
+     "name": "B"
+    },
+    {
+     "name": "C"
+    },
+    {
+     "name": "D"
+    },
+    {
+     "name": "E"
+    },
+    {
+     "name": "F"
+    }
+   ]
+  }
+ ],
+ "reactions": [
+  {
+   "type": "ARRHENIUS",
+   "name": "r1",
+   "A": 0.032,
+   "B": -1.3,
+   "C": 120.0,
+   "D": 298.0,
+   "E": 1e-06,
+   "reactants": [
+    {
+     "species name": "A"
+    },
+    {
+     "species name": "B"
+    }
+   ],
+   "products": [
+    {
+     "species name": "C",
+     "coefficient": 1.3
+    }
+   ],
+   "gas phase": "gas"
+  },
+  {
+   "type": "TROE",
+   "name": "t1",
+   "k0_A": 0.0024,
+   "k0_B": -2.6,
+   "k0_C": 35.0,
+   "kinf_A": 0.71,
+   "kinf_B": -0.4,
+   "kinf_C": -110.0,
+   "Fc": 0.6,
+   "N": 1.0,
+   "reactants": [
+    {
+     "species name": "C"
+    },
+    {
+     "species name": "D"
+    },
+    {
+     "species name": "M"
+    }
+   ],
+   "products": [
+    {
+     "species name": "E"
+    }
+   ],
+   "gas phase": "gas"
+  },
+  {
+   "type": "ARRHENIUS",
+   "name": "r2",
+   "A": 0.11,
+   "Ea": 2.2e-21,
+   "reactants": [
+    {
+     "species name": "D",
+     "coefficient": 2
+    }
+   ],
+   "products": [
+    {
+     "species name": "F"
+    }
+   ],
+   "gas phase": "gas"
+  },
+  {
+   "type": "ARRHENIUS",
+   "name": "r3",
+   "A": 0.004,
+   "reactants": [
+    {
+     "species name": "E"
+    },
+    {
+     "species name": "H2O"
+    },
+    {
+     "species name": "N2"
+    }
+   ],
+   "products": [
+    {
+     "species name": "A"
+    },
+    {
+     "species name": "B",
+     "coefficient": 0.5
+    }
+   ],
+   "gas phase": "gas"
+  },
+  {
+   "type": "PHOTOLYSIS",
+   "name": "jF",
+   "scaling factor": 2.5,
+   "reactants": [
+    {
+     "species name": "F"
+    }
+   ],
+   "products": [
+    {
+     "species name": "D",
+     "coefficient": 2.0
+    }
+   ],
+   "gas phase": "gas"
+  },
+  {
+   "type": "EMISSION",
+   "name": "eA",
+   "products": [
+    {
+     "species name": "A"
+    }
+   ],
+   "gas phase": "gas"
+  },
+  {
+   "type": "FIRST_ORDER_LOSS",
+   "name": "lC",
+   "scaling factor": 0.7,
+   "reactants": [
+    {
+     "species name": "C"
+    }
+   ],
+   "gas phase": "gas"
+  },
+  {
+   "type": "USER_DEFINED",
+   "name": "uB",
+   "reactants": [
+    {
+     "species name": "B",
+     "coefficient": 1.5
+    }
+   ],
+   "products": [
+    {
+     "species name": "E"
+    }
+   ],
+   "gas phase": "gas"
+  }
+ ]
+}
