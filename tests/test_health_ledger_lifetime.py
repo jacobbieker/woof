@@ -54,7 +54,10 @@ def test_no_record_after_successful_drain_needs_no_old_description(ledger):
                   lambda flags: pytest.fail(str(flags)))
     ledger.drain()
     ledger.drain()
-    assert ledger.drains == 1  # No new descriptions means no second read.
+    # The fork's ledger reads on every drain: a replayed CUDA graph ORs
+    # into the slots without calling record() (HealthLedger.drain), so only
+    # drain(if_recorded=True) may skip the read.
+    assert ledger.drains == 2
     assert not ledger.slots.any()
     assert ledger._describe == {}
 
