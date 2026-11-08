@@ -47,7 +47,8 @@ holds its WRF physics to.
 | `woof_wrf_hydro/subsurface.cu`, `subsurface.py` | `hydro/Routing/Noah_distr_routing_subsurface.F90` (subsurfaceRouting, FINDZWAT, ROUTE_SUBSURFACE1, SUBSFC_RTNG); `hydro/Routing/Noah_distr_routing.F90` (GETSUB8, GETSUB8DIR) |
 | `woof_wrf_hydro/grid_transform.cu`, `grid_transform.py` | `hydro/Routing/Noah_distr_routing.F90` (disaggregateDomain); `hydro/HYDRO_drv/module_HYDRO_drv.F90` (aggregateDomain) |
 | `woof_wrf_hydro/overland.cu`, `overland.py` | `hydro/Routing/Noah_distr_routing_overland.F90` (OverlandRouting, OV_RTNG, ROUTE_OVERLAND1); `hydro/Routing/Noah_distr_routing.F90` (GETMAX8DIR, GET8DIR) |
-| `oracle/` | build harnesses and drivers (`build.sh`, `build_grid_transform.sh`, `build_overland.sh`); they compile the pinned files at build time and copy none of them |
+| `woof_wrf_hydro/channel.cu`, `channel.py` | `hydro/Routing/module_channel_routing.F90` (MUSKING, SUBMUSKINGCUNGE, the reach branch of drive_CHANNEL) |
+| `oracle/` | build harnesses and drivers (`build.sh`, `build_grid_transform.sh`, `build_overland.sh`, `build_channel.sh`); they compile the pinned files at build time and copy none of them |
 
 `subsurface.cu` is preceded at load time by WOOF's
 `woof/core/kernels/glibc_flt32.cuh` (glibc's powf words, MIT-licensed Arm
