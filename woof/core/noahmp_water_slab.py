@@ -214,13 +214,18 @@ def _unpack_slab(fout, iout, cp) -> dict:
 _SELECTED_MODULES = {}
 
 
-def evaluate_water_slab(fields: dict, n: int, *, opt_inf=1, opt_run=3, opt_infdv=0, soil_update_steps=1, calculate_soil=True, opt_tdrn=0, opt_irr=0) -> dict:
+def evaluate_water_slab(fields: dict, n: int, *, opt_inf=1, opt_run=3, opt_infdv=0, soil_update_steps=1, calculate_soil=True, opt_tdrn=0, opt_irr=0, sfcheadrt=None) -> dict:
     """Evaluate ``n`` land columns of WATER in one launch, slab in slab out.
 
     Returns every name in :data:`OUTPUT_NAMES`: the column state WRF mutates
     in place (``isnow``, ``snowh``, ``sneqv``, ``snice``, ``snliq``, ``stc``,
     ``zsnso``, ``dzsnso``, ``sh2o``, ``sice``) and every ``WaterFluxes``
     member the device row carries.  Layer axis last, as on the way in.
+
+    ``sfcheadrt`` (``(n,)`` mm, or ``None``) is WRF built with -DWRF_HYDRO:
+    the ponded head WRF-Hydro returns joins QINSUR (module_sf_noahmplsm.F
+    :6173-6175).  It runs on the selected-options kernel, so the default
+    ``k_water`` is untouched.
     """
     import cupy as cp
 
@@ -285,11 +290,18 @@ def evaluate_water_slab(fields: dict, n: int, *, opt_inf=1, opt_run=3, opt_infdv
         copy_slab_slots(extended,[(0,par),(base,parameter_slab(fields,n))]);par=extended
         base=fin.shape[1];extended=cp.empty((n,base+5),dtype=cp.float32)
         copy_slab_slots(extended,[(0,fin),*[(base+k,_take(fields,name,1,n,cp))for k,name in enumerate(('croplu','mifac','fifac','iramtmi','iramtfi'))]]);fin=extended
+    hydro = sfcheadrt is not None
+    if hydro:
+        base = fin.shape[1]
+        extended = cp.empty((n, base + 1), dtype=cp.float32)
+        head = cp.ascontiguousarray(cp.asarray(sfcheadrt, dtype=cp.float32).reshape(n, 1))
+        copy_slab_slots(extended, [(0, fin), (base, head)])
+        fin = extended
     fout = cp.zeros((n, OUT_STRIDE+len(groundwater_fields)+(1 if opt_tdrn else 0)+(4 if opt_irr else 0)), dtype=cp.float32)
     iout = cp.zeros(n, dtype=cp.int32)
     if n:
         extra = ()
-        if opt_inf == 1 and opt_run == 3 and soil_update_steps==1 and calculate_soil and opt_tdrn==0 and opt_irr==0:
+        if opt_inf == 1 and opt_run == 3 and soil_update_steps==1 and calculate_soil and opt_tdrn==0 and opt_irr==0 and not hydro:
             kernel = get_kernel("noahmp_water", "k_water")
         else:
             from woof.core.noahmp_kernel_sources import compile_runtime_unit
@@ -299,7 +311,7 @@ def evaluate_water_slab(fields: dict, n: int, *, opt_inf=1, opt_run=3, opt_infdv
                     "noahmp_water", module_key="noahmp_water_selected",
                     selected_options=True)
             kernel = _SELECTED_MODULES[card].get_function("k_water_selected")
-            extra = (np.int32(opt_inf), np.int32(opt_run), np.int32(opt_infdv),np.int32(soil_update_steps),np.int32(calculate_soil),np.int32(opt_tdrn),np.int32(bool(opt_irr)))
+            extra = (np.int32(opt_inf), np.int32(opt_run), np.int32(opt_infdv),np.int32(soil_update_steps),np.int32(calculate_soil),np.int32(opt_tdrn),np.int32(bool(opt_irr)),np.int32(hydro))
         blocks = (n + THREADS - 1) // THREADS
         # Every *input* pointer is made contiguous first.  All three are
         # allocations here, so nothing is copied; the call is a guard that
