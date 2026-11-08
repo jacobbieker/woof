@@ -151,7 +151,12 @@ Metal, and refuses what it does not port by name.
    MPP_LAND, on one process, `tests/test_wrf_hydro_diffusive_parity.py`; the
    persistence and RFC-forecast reservoirs, lake_option 3, remain), then the bucket baseflow (`module_GW_baseflow.F90`
    simp_gw_buck, GWBASESWCRT 1 and 2: **done** in the opt-in,
-   `tests/test_wrf_hydro_baseflow_parity.py`; 3 and 4 remain).
+   `tests/test_wrf_hydro_baseflow_parity.py`; the 2-D groundwater model,
+   GWBASESWCRT 3 (`module_gw_gw2d.F90`: gw2d_ini, gwstep's ADI sweeps as
+   WRF-Hydro's one-process MPP_LAND build runs them, the soil coupling and
+   the LSM-grid aggregate), **done** in the opt-in,
+   `tests/test_wrf_hydro_gw2d_parity.py`; its exchange with the diffusive
+   channel and 4 remain).
 5. **Configuration** (**done** in the opt-in: `woof_wrf_hydro.namelist`,
    `tests/test_wrf_hydro_namelist.py`, held to WRF 4.7.1's template and
    read_rt_nlst): `hydro.namelist` (`SUBRTSWCRT`, `OVRTSWCRT`,
