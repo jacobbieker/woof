@@ -12,29 +12,37 @@ def verify() -> dict:
     from woof import backend
     from woof.hex.coupled import oracle, registry
     from woof.verify import mpas_seaice_evp_oracle as evp_oracle
+    from woof.verify import mpas_seaice_velocity_oracle as velocity_oracle
 
-    from . import evp_v842
+    from . import evp_v842, velocity_v842
 
-    if not (evp_oracle.FIXTURE_DIR / "oracle-r4.npz").is_file():
-        raise FileNotFoundError(
-            f"the MPAS-Seaice oracle fixture is not here ({evp_oracle.FIXTURE_DIR}); it ships with the "
-            "source tree (tests/data/oracles), not the wheel: run verify from a checkout")
-    report = evp_oracle.measure()
-    mismatched = sum(n for fields in report.values() for n in fields.values())
-    piece = {
-        "name": "evp_variational_internal_stress",
-        "source": list(evp_v842.SOURCE_FILES),
-        "fixture": str(evp_oracle.FIXTURE_DIR.relative_to(evp_oracle.FIXTURE_DIR.parents[3])),
-        "cases": sorted(report),
-        "mismatched_words": report,
-        "passed": mismatched == 0,
-    }
+    for fixture in (evp_oracle.FIXTURE_DIR / "oracle-r4.npz", velocity_oracle.FIXTURE_DIR / "oracle-r4.npz"):
+        if not fixture.is_file():
+            raise FileNotFoundError(
+                f"the MPAS-Seaice oracle fixture is not here ({fixture.parent}); it ships with the "
+                "source tree (tests/data/oracles), not the wheel: run verify from a checkout")
+
+    def piece(name, module, oracle_module, report):
+        mismatched = sum(n for fields in report.values() for n in fields.values())
+        return {
+            "name": name,
+            "source": list(module.SOURCE_FILES),
+            "fixture": str(oracle_module.FIXTURE_DIR.relative_to(oracle_module.FIXTURE_DIR.parents[3])),
+            "cases": sorted(report),
+            "mismatched_words": report,
+            "passed": mismatched == 0,
+        }
+
+    pieces = [piece("evp_variational_internal_stress", evp_v842, evp_oracle, evp_oracle.measure())]
+    for precision in velocity_oracle.PRECISIONS:
+        pieces.append(piece(f"evp_velocity_solve_{precision}", velocity_v842, velocity_oracle,
+                            velocity_oracle.measure(precision)))
     return {
         "model": "seaice",
         "status": registry.component("seaice").status,
         "backend": backend.active(),
         "oracle": {"repo": oracle.ORACLE_REPO, "tag": oracle.ORACLE_TAG, "pin": oracle.ORACLE_PIN},
-        "pieces": [piece],
+        "pieces": pieces,
         "remaining": "docs/mpas-coupled-roadmap.md",
-        "passed": piece["passed"],
+        "passed": all(p["passed"] for p in pieces),
     }

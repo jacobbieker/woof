@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
-# Build the MPAS-Seaice v8.4.2 variational EVP internal-stress oracle at the
-# strict recipe.
+# Build the MPAS-Seaice v8.4.2 oracles (variational EVP internal stress; the
+# EVP velocity solve) at the strict recipe, at RKIND 4 and RKIND 8.
 #
 #   bash tools/mpas_seaice_oracle/build.sh MPAS_SOURCE_ROOT BUILD_DIR
 #
-# MPAS_SOURCE_ROOT is an MPAS-Model v8.4.2 tree (f34984b2).  The two seaice
-# modules and the kind module are compiled verbatim (checked against
-# SOURCES.sha256) with gfortran at -O0 -ffp-contract=off and MPAS's default
-# single precision (-DSINGLE_PRECISION, RKIND = 4).  stubs.F90 supplies the
-# framework types the routines walk; run_oracle.F90 drives them.  The objects
+# MPAS_SOURCE_ROOT is an MPAS-Model v8.4.2 tree (f34984b2).  The seaice
+# modules, the column constants and the kind module are compiled verbatim
+# (checked against SOURCES.sha256) with gfortran at -O0 -ffp-contract=off,
+# once at MPAS's default single precision (-DSINGLE_PRECISION, RKIND = 4) and
+# once at RKIND = 8 (the column package is double, so production MPAS-Seaice
+# is built double).  mpas_seaice_velocity_solver.F is compiled with
+# -Dprivate=public, which changes only which routines the driver may call.
+# stubs.F90 supplies the framework types the routines walk; run_oracle.F90
+# drives the internal stress and run_subcycle.F90 the velocity solve.  The objects
 # must contain no FMA instruction (checked with objdump when it is present).
 # gfortran is the mpas-oracle pixi environment's unless GFORTRAN names one.
 set -euo pipefail
@@ -28,26 +32,38 @@ read -r -a fc <<< "${GFORTRAN:-gfortran}"
     exit 3
 }
 
-rm -rf "${build_dir}/r4" && mkdir -p "${build_dir}/r4" && cd "${build_dir}/r4"
-flags=(-c -cpp -O0 -ffp-contract=off -ffree-form -ffree-line-length-none -DSINGLE_PRECISION)
-"${fc[@]}" "${flags[@]}" "${source_root}/src/framework/mpas_kind_types.F"
-"${fc[@]}" "${flags[@]}" "${script_dir}/stubs.F90"
-"${fc[@]}" "${flags[@]}" "${source_root}/src/core_seaice/shared/mpas_seaice_velocity_solver_constitutive_relation.F"
-"${fc[@]}" "${flags[@]}" "${source_root}/src/core_seaice/shared/mpas_seaice_velocity_solver_variational.F"
-"${fc[@]}" "${flags[@]}" "${script_dir}/run_oracle.F90"
-objects=(run_oracle.o mpas_seaice_velocity_solver_variational.o \
-         mpas_seaice_velocity_solver_constitutive_relation.o stubs.o mpas_kind_types.o)
-if command -v objdump >/dev/null; then
-    if objdump -d mpas_seaice_velocity_solver_variational.o mpas_seaice_velocity_solver_constitutive_relation.o \
-        | grep -Eq '\bv?fn?m(add|sub)([0-9]|[[:space:]]|$)'; then
-        echo "an oracle object contains an FMA instruction; refusing" >&2
-        exit 4
+seaice="${source_root}/src/core_seaice"
+for precision in r4 r8; do
+    rm -rf "${build_dir}/${precision}" && mkdir -p "${build_dir}/${precision}" && cd "${build_dir}/${precision}"
+    flags=(-c -cpp -O0 -ffp-contract=off -ffree-form -ffree-line-length-none)
+    [[ ${precision} == r4 ]] && flags+=(-DSINGLE_PRECISION)
+    "${fc[@]}" "${flags[@]}" "${source_root}/src/framework/mpas_kind_types.F"
+    "${fc[@]}" "${flags[@]}" "${script_dir}/stubs.F90"
+    "${fc[@]}" "${flags[@]}" "${seaice}/shared/mpas_seaice_velocity_solver_constitutive_relation.F"
+    "${fc[@]}" "${flags[@]}" "${seaice}/shared/mpas_seaice_velocity_solver_variational.F"
+    # the stand-alone (non-ESM) build's column constants, as column/Makefile copies them
+    "${fc[@]}" "${flags[@]}" "${seaice}/column/ice_kinds_mod.F90"
+    "${fc[@]}" "${flags[@]}" "${seaice}/column/constants/cice/ice_constants_colpkg.F90"
+    "${fc[@]}" "${flags[@]}" "${seaice}/shared/mpas_seaice_constants.F"
+    # visibility only: the routines the driver calls are private to the module
+    "${fc[@]}" "${flags[@]}" -Dprivate=public "${seaice}/shared/mpas_seaice_velocity_solver.F"
+    "${fc[@]}" "${flags[@]}" "${script_dir}/run_oracle.F90"
+    "${fc[@]}" "${flags[@]}" "${script_dir}/run_subcycle.F90"
+    seaice_objects=(mpas_seaice_velocity_solver.o mpas_seaice_constants.o ice_constants_colpkg.o ice_kinds_mod.o \
+                    mpas_seaice_velocity_solver_variational.o mpas_seaice_velocity_solver_constitutive_relation.o)
+    if command -v objdump >/dev/null; then
+        if objdump -d "${seaice_objects[@]}" | grep -Eq '\bv?fn?m(add|sub)([0-9]|[[:space:]]|$)'; then
+            echo "an oracle object contains an FMA instruction; refusing" >&2
+            exit 4
+        fi
     fi
-fi
-"${fc[@]}" -o "${build_dir}/run_oracle_r4" "${objects[@]}"
+    "${fc[@]}" -o "${build_dir}/run_oracle_${precision}" run_oracle.o "${seaice_objects[@]}" stubs.o mpas_kind_types.o
+    "${fc[@]}" -o "${build_dir}/run_subcycle_${precision}" run_subcycle.o "${seaice_objects[@]}" stubs.o mpas_kind_types.o
+done
 {
     echo "gfortran: $("${fc[@]}" --version | head -1)"
-    echo "flags: -O0 -ffp-contract=off -cpp -ffree-form -ffree-line-length-none -DSINGLE_PRECISION (RKIND 4)"
+    echo "flags: -O0 -ffp-contract=off -cpp -ffree-form -ffree-line-length-none; r4 adds -DSINGLE_PRECISION;"
+    echo "       mpas_seaice_velocity_solver.F adds -Dprivate=public"
     echo "host: $(uname -srm)"
 } > "${build_dir}/TOOLCHAIN.txt"
-echo "built ${build_dir}/run_oracle_r4"
+echo "built ${build_dir}/run_oracle_r{4,8} ${build_dir}/run_subcycle_r{4,8}"
