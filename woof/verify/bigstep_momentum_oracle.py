@@ -7,6 +7,8 @@ launch stores total pressure and loses low bits during its total/base roundtrip.
 """
 from __future__ import annotations
 
+from woof.backend import compilation_target as _compilation_target
+
 from dataclasses import dataclass
 import hashlib
 import json
@@ -40,7 +42,7 @@ def load_momentum_measurement_pins():
     from woof.certify.compile_platform import nvrtc_build
     from woof.verify.platform_pins import backend_variant
 
-    platform = (str(cp.cuda.Device().compute_capability), nvrtc_build())
+    platform = (str(_compilation_target(xp=cp)), nvrtc_build())
     filename = ("momentum-measurements-metal.json" if platform[0] == "metal" else
                 "momentum-measurements-wrf-exact.json"
                 if backend_variant() == "wrf-exact" else

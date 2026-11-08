@@ -1,409 +1,164 @@
-"""WRF-Solar FARMS: ``swint_opt = 2`` surface irradiance on every step.
+"""GPU column interface to public WRF 4.7.1 Farms_driver.
 
-Authority: WRF v4.7.1 (commit f52c197ed) ``phys/module_ra_farms.F`` (sha256
-1b9e060d..., byte-identical in v4.6.1) and the radiation driver that calls
-it, ``phys/module_radiation_driver.F`` (sha256 77987565..., also identical in
-v4.6.1).  Graded word for word by tools/farms_wrf471_oracle and
-tests/test_farms_wrf471_parity.py.
-
-What WRF does under ``swint_opt = 2``
-------------------------------------
-FARMS is NOT a shortwave scheme (``ra_sw_physics`` keeps its own choice and
-the radiation call still produces SWDOWN, GSW and the heating rates).  It is a
-surface-irradiance model the driver evaluates on EVERY model step, radiation
-steps included, after ``ENDIF Radiation_step`` (:2983-3101):
-
-* ``coszen_loc``: ``radconst`` + ``calc_coszen`` at the step's own xtime
-  (:1158-1170, shared with ``swint_opt = 1``);
-* the "Solar_step" block (:1176-1609) runs on every step too, so the cloud
-  fraction CLDFRA (``icloud``), and the temporary hydrometeor additions that
-  go with it (MYNN's QC_BL/QI_BL under ``icloud_bl``), are those of the
-  CURRENT state, not the last radiation call's.  The heating rates and the
-  radiation call's fluxes are untouched;
-* ``Farms_driver`` (:3064-3068) reads, per column: the surface full-level
-  pressure ``p8w(i,kts,j)``, ``rho``, ``dz8w``, ``qv/qc/qi/qs``, the
-  microphysics' effective radii ``re_cloud/re_ice/re_snow`` in metres (with
-  ``has_reqc/i/s``; without them the 8/24/24 um climatology), CLDFRA, the
-  live ALBEDO, and four 2-D aerosol words: ``aer_opt = 0`` zeros them
-  (:2996-3011); ``aer_opt = 1`` takes the last radiation call's AODTOT and
-  the namelist ``aer_angexp_val``, ``aer_ssa_val``, ``aer_asy_val``
-  (:3013-3030).  It needs nothing else from RRTMG: FARMS computes its own
-  cloud optical depths from the paths and path-weighted radii (Matrosov
-  et al. 2002 for ice and snow) and its own clear sky (Bird 1981);
-* it writes SWDOWN2, SWDDIR2, SWDDNI2, SWDDIF2, SWDOWNC2 and SWDDNIC2 --
-  separate fields; SWDOWN/SWDDIR/SWDDNI/SWDDIF/GSW are NOT overwritten --
-  and, only under ``couple_farms = .true.`` (which module_check_a_mundo
-  admits only with ``swint_opt = 2``), copies SWDOWN2 into SWDOWN
-  (:3084-3099).  That copy is FARMS's only feedback: the land surface reads
-  SWDOWN (Noah: SOLDN = SWDOWN, SOLNET = SOLDN*(1-ALBEDO),
-  module_sf_noahdrv.F:830-834), not GSW, which keeps the radiation call's
-  value.
-
-Two side effects of ``swint_opt = 2`` that are not FARMS: the Solar_step
-block also rewrites the COSZEN state at ``xtime + radt/2`` and CLDFRA on
-every step (between radiation calls WRF leaves both at the last call's
-values otherwise).  :meth:`FarmsShortwave.between_calls` reproduces the
-COSZEN rewrite for a driver that carries COSZEN (Noah-MP, RUC, urban read
-it) and the CLDFRA rewrite for the UW PBL's ``uw_cldfra``, the one carried
-CLDFRA a scheme reads between radiation calls.
-
-The radii seam
---------------
-WRF hands FARMS the microphysics' metre words.  woof's state carries the
-radiation-facing MICRON words (``effc/effi/effs``, the metre value times
-1e6 rounded once, as WRF's RRTMG wrapper forms them); this module takes
-``micron / 1e6`` (rounded once), which returns the metre word exactly for
-95.6 % of the radii a scheme's clamps admit and is one ULP off for the
-rest (every binary32 radius in Thompson's [2.49, 50], [4.99, 125] and
-[9.99, 999] um ranges; ``* 1e-6`` would be one ULP off for 5.2 %).  The
-kernel itself is exact on metre inputs; the seam is the measured distance.
-
-Numerics: woof/core/kernels/farms.cu, explicit single-rounded arithmetic and
-woof's own binary32 libm (glibc's expf/powf/log10f/cosf/sinf/acosf and a
-correctly rounded sinhf), compiled without FMA contraction or FTZ.
+All arrays remain on the device. The last model level is excluded from
+the path integrals, exactly as Integrate_1var/Integrate_2var do in WRF.
 """
 from __future__ import annotations
-
 import numpy as np
 
-from woof.core.swint import ShortwaveInterpolation, calendar_scalars
-
-F = np.float32
-
-#: The six 2-D float32 fields FARMS writes, WRF's names (Registry.EM_COMMON
-#: :1710-1726, all restart-carried; SWDOWN2, SWDOWNC2, SWDDNIC2 also in
-#: history), in the driver's ``fields`` dict so the restart stream carries
-#: them in place.
-STATE_FIELDS = ("swdown2", "swddir2", "swddni2", "swddif2", "swdownc2",
-                "swddnic2")
-
-#: module_physics_init.F:1039-1057: FARMS needs both effective radii and the
-#: mass of cloud, ice and snow.  These schemes pass by name (THOMPSON,
-#: RCON_MP_SCHEME, THOMPSONAERO, WSM3/5/6/7, WDM5/6/7); any other passes
-#: only with has_reqc = has_reqi = has_reqs = 0 and F_QC, F_QI and F_QS.
-FARMS_NAMED_MP = frozenset({8, 28, 3, 4, 6, 24, 14, 16, 26})
-RCON_MP_SCHEME = 38
-
-_BLOCK = 128
+FARMS_FIELDS = ("swdown2", "swddir2", "swddni2", "swddif2", "swdownc2", "swddnic2")
 
 
-def farms_mp_admitted(mp_physics: int, use_mp_re: int = 1) -> bool:
-    """WRF's FARMS microphysics check (module_physics_init.F:1039-1057)."""
-    from woof.core.rrtmg_legacy import (legacy_cloud_fraction_flags,
-                                        legacy_scheme_has_req)
-    mp = int(mp_physics)
-    if mp in FARMS_NAMED_MP or mp == RCON_MP_SCHEME:
-        return True
-    try:
-        has_req = legacy_scheme_has_req(mp, use_mp_re)
-        f_qi, f_qs = legacy_cloud_fraction_flags(mp)
-    except NotImplementedError:
-        return False
-    return tuple(has_req) == (0, 0, 0) and mp != 0 and f_qi and f_qs
+def farms_surface_columns(p8w, rho, dz, albedo, ssa, asymmetry, aod550,
+                          angstrom, coszen, qv, qi, qs, qc,
+                          re_cloud, re_ice, re_snow, cldfra, *,
+                          julian, has_reqc=0, has_reqi=0, has_reqs=0, out=None):
+    """Six surface fluxes for (nlev,ncol) columns, radii in metres.
 
-
-def radius_metres(micron):
-    """The metre radius FARMS reads, from woof's micron state word:
-    ``micron / 1e6`` rounded once (see the module docstring)."""
-    import cupy as cp
-    return cp.divide(cp.asarray(micron, dtype=cp.float32), F(1.0e6))
-
-
-def farms_columns(*, p8w_sfc, albedo, coszen, aerssa, aerasy, aod550,
-                  angexp, rho, dz8w, qv, qc, qi, qs, re_cloud, re_ice,
-                  re_snow, cldfra, has_req, juday, out=None):
-    """``Farms_driver`` on device columns.
-
-    2-D inputs are float32 device arrays of ``ncol`` words (any shape);
-    3-D inputs are ``(nz, *columns)`` float32, C-contiguous, the radii in
-    METRES.  ``has_req`` is WRF's ``(has_reqc, has_reqi, has_reqs)`` and
-    ``juday`` WRF's ``INT(julian)``.  Returns a dict of the six outputs
-    (shape of ``albedo``), written into ``out`` when given.
+    Inputs must be contiguous float32 CuPy buffers. p8w can include the
+    final interface; its surface row is the only pressure row FARMS reads.
+    The output can be a persistent driver allocation of shape (6,ncol).
     """
     import cupy as cp
     from woof.core.kernels import get_kernel
 
-    shape2 = tuple(albedo.shape)
-    ncol = int(np.prod(shape2)) if shape2 else 1
-    nz = int(rho.shape[0])
-    if nz < 1:
-        raise ValueError("FARMS needs at least one model layer")
-
-    def flat2(a, name):
-        if not isinstance(a, cp.ndarray) or a.dtype != cp.float32 \
-                or a.size != ncol:
-            raise ValueError(f"FARMS 2-D input {name!r} must be float32 with "
-                             f"{ncol} words")
-        return cp.ascontiguousarray(a).reshape(-1)
-
-    def flat3(a, name):
-        if not isinstance(a, cp.ndarray) or a.dtype != cp.float32 \
-                or a.size != nz * ncol or int(a.shape[0]) != nz:
-            raise ValueError(f"FARMS 3-D input {name!r} must be float32 "
-                             f"({nz}, ...) with {ncol} columns")
-        return cp.ascontiguousarray(a).reshape(nz, ncol)
-
+    if len(qv.shape) != 2 or qv.shape[0] < 2:
+        raise ValueError("FARMS needs (nlev,ncol), at least two levels")
+    nz, nc = qv.shape
+    volume = (rho, dz, qv, qi, qs, qc, re_cloud, re_ice, re_snow, cldfra)
+    surface = (albedo, ssa, asymmetry, aod550, angstrom, coszen)
+    for value in (p8w, *volume, *surface):
+        if (not isinstance(value, cp.ndarray) or value.dtype != cp.float32
+                or not value.flags.c_contiguous):
+            raise TypeError("FARMS inputs must be contiguous float32 device arrays")
+    if any(value.shape != (nz, nc) for value in volume):
+        raise ValueError("FARMS volume buffers must match qv.shape")
+    if p8w.shape not in ((nz, nc), (nz + 1, nc)):
+        raise ValueError("FARMS interface pressure has the wrong shape")
+    if any(value.shape != (nc,) for value in surface):
+        raise ValueError("FARMS surface buffers must have shape (ncol,)")
+    flags = (has_reqc, has_reqi, has_reqs)
+    if any(value not in (0, 1) for value in flags):
+        raise ValueError("FARMS has_re* flags must be 0 or 1")
     if out is None:
-        out = {name: cp.empty(shape2, dtype=cp.float32)
-               for name in STATE_FIELDS}
-    for name in STATE_FIELDS:
-        a = out[name]
-        if a.dtype != cp.float32 or a.size != ncol or not a.flags.c_contiguous:
-            raise ValueError(f"FARMS output {name!r} must be contiguous "
-                             f"float32 with {ncol} words")
-    hc, hi, hs = (int(v) for v in has_req)
-    if ncol:
-        get_kernel("farms", "farms_columns")(
-            ((ncol + _BLOCK - 1) // _BLOCK,), (_BLOCK,),
-            (np.int32(ncol), np.int32(nz), np.int64(ncol), np.int32(hc),
-             np.int32(hi), np.int32(hs), np.int32(juday),
-             flat2(p8w_sfc, "p8w_sfc"), flat2(albedo, "albedo"),
-             flat2(coszen, "coszen"), flat2(aerssa, "aerssa"),
-             flat2(aerasy, "aerasy"), flat2(aod550, "aod550"),
-             flat2(angexp, "angexp"),
-             flat3(rho, "rho"), flat3(dz8w, "dz8w"), flat3(qv, "qv"),
-             flat3(qc, "qc"), flat3(qi, "qi"), flat3(qs, "qs"),
-             flat3(re_cloud, "re_cloud"), flat3(re_ice, "re_ice"),
-             flat3(re_snow, "re_snow"), flat3(cldfra, "cldfra"),
-             *(out[name].reshape(-1) for name in (
-                 "swdown2", "swddir2", "swddni2", "swddif2", "swdownc2",
-                 "swddnic2"))))
+        out = cp.empty((6, nc), dtype=cp.float32)
+    if (not isinstance(out, cp.ndarray) or out.shape != (6, nc)
+            or out.dtype != cp.float32 or not out.flags.c_contiguous):
+        raise TypeError("FARMS output must be contiguous float32 (6,ncol)")
+    from woof.wrf_exact import ENABLED
+    entry = "farms_column" if ENABLED else "farms_column_fast"
+    grid = ((nc + 63) // 64,) if ENABLED else ((nc + 31) // 32,)
+    block = (64,) if ENABLED else (32, 8)
+    get_kernel("farms", entry)(
+        grid, block,
+        (np.int32(nc), np.int32(nz - 1), *(np.int32(value) for value in flags),
+         np.float32(julian), p8w, rho, dz, albedo, ssa, asymmetry, aod550,
+         angstrom, coszen, qv, qi, qs, qc, re_cloud, re_ice, re_snow, cldfra, out))
     return out
 
 
-def wrf_juday(julian) -> int:
-    """Fortran ``INT(julian)`` of the float32 julian (truncation)."""
-    return int(np.trunc(F(julian)))
+from woof.core.swint import ShortwaveInterpolation
 
 
-class FarmsShortwave(ShortwaveInterpolation):
-    """The ``swint_opt = 2`` half of WRF's radiation driver on one domain.
+class FastSurfaceShortwave(ShortwaveInterpolation):
+    """FARMS on every Solar_step, with this domain's transported geography.
 
-    Inherits :class:`~woof.core.swint.ShortwaveInterpolation`'s per-step
-    zenith cosine (the same ``radconst`` + ``calc_coszen`` at the step's
-    xtime, read from ``latitude_deg``/``longitude_deg`` at each call so a
-    streamed tile's gathered geography is the one used) and holds no value a
-    step writes: the six outputs live in the driver's ``fields``.  Rebuilt,
-    never serialized (woof/io/restart.py).
+    Fluxes live in driver.fields for history, checkpoint, nest transport
+    and each ensemble member. Only cosine scratch is rebuilt on restart.
     """
-
-    def __init__(self, *, start_time, latitude_deg, longitude_deg, shape,
-                 generation="wrf_480", mp_physics, use_mp_re=1, icloud=1,
-                 aer_opt=0, aer_angexp_val=1.3, aer_ssa_val=0.85,
-                 aer_asy_val=0.9, couple_farms=False, bl_merge=False,
-                 icloud_cu=0, deng_cloud=False, gridkm=None):
-        super().__init__(start_time=start_time, latitude_deg=latitude_deg,
-                         longitude_deg=longitude_deg, shape=shape,
-                         generation=generation)
-        from woof.core.rrtmg_legacy import (legacy_cloud_fraction_flags,
-                                            legacy_scheme_has_req)
-        self.mp_physics = int(mp_physics)
-        if not farms_mp_admitted(self.mp_physics, use_mp_re):
-            raise ValueError(
-                f"swint_opt = 2 (FARMS) with mp_physics={self.mp_physics}: "
-                "WRF stops with 'FARMS (swint_opt==2) requires a different "
-                "MP scheme' (module_physics_init.F:1039-1057)")
-        self.has_req = tuple(int(v) for v in
-                             legacy_scheme_has_req(self.mp_physics, use_mp_re))
-        self.f_qi, self.f_qs = legacy_cloud_fraction_flags(self.mp_physics)
-        self.icloud = int(icloud)
-        if self.icloud not in (0, 1, 2, 3):
-            raise NotImplementedError(
-                f"swint_opt = 2 with icloud={self.icloud}: FARMS reads the "
-                "per-step CLDFRA, and only icloud 0, 1, 2 and 3 are ported")
-        if self.icloud == 3 and gridkm is None:
-            raise ValueError("swint_opt = 2 with icloud = 3 needs the "
-                             "driver's gridkm (woof.core.cldfra3.cldfra3_gridkm)")
-        # icloud = 3 (WRF-Solar cal_cldfra3, woof.core.cldfra3): the
-        # Solar_step runs it on every step and Farms_driver
-        # (module_radiation_driver.F:3064-3068) reads its CLDFRA and the qc/qi
-        # it rewrote -- the restore of qc/qi comes after (:3137-3155).
-        self.gridkm = None if gridkm is None else F(gridkm)
-        self.aer_opt = int(aer_opt)
-        if self.aer_opt not in (0, 1, 2):
-            raise NotImplementedError(
-                f"swint_opt = 2 with aer_opt={self.aer_opt}: FARMS's 2-D "
-                "aerosol (AOD5502D/ANGEXP2D/AERSSA2D/AERASY2D) is wired for "
-                "aer_opt 0, 1 and 2; under aer_opt = 3 WRF reads the "
-                "radiation call's TAOD5502D and the taer_* 2-D optics")
-        self.aer_values = (F(aer_angexp_val), F(aer_ssa_val), F(aer_asy_val))
-        self.couple_farms = bool(couple_farms)
-        self.bl_merge = bool(bl_merge)
-        # The Solar_step's convective cloud (woof.core.cumulus_radiation):
-        # cu_rad_feedback's ICLOUD_CU and Deng's shallow cloud, which WRF
-        # forms before farms_driver reads QC/QI/CLDFRA
-        # (module_radiation_driver.F:1264-1281, :1337-1348, :1566-1575,
-        # then :3064), on every step under swint_opt = 2 (:1176).
-        self.icloud_cu = int(icloud_cu)
-        self.deng_cloud = bool(deng_cloud)
-
-    # -- inputs ------------------------------------------------------------
-
-    def cloud_fraction(self, atmosphere, fields, *, itimestep, eps=None):
-        """The Solar_step's CLDFRA and hydrometeors for this step:
-        ``(cldfra, qc, qi)`` on the device, (nz, ny, nx)."""
+    def every_step(self, driver, atmosphere, state, cfg):
         import cupy as cp
-        qv = atmosphere["qv"]
-        qc = atmosphere["qc"]
-        qi = atmosphere["qi"]
-        qs = atmosphere["qs"]
-        nz = qv.shape[0]
-        cols = qv.size // nz
-        from woof.core import cumulus_radiation as curad
-        if self.icloud_cu == 1:
-            # :1264-1281, before the cloud fraction (F_QC is true here).
-            qc, qi = curad.add_convective_condensate(
-                qc, qi, fields["qc_cu"], fields["qi_cu"], f_qc=True,
-                f_qi=self.f_qi)
-        cldfra = cp.zeros(qv.shape, dtype=cp.float32)
-        if self.icloud == 1:
-            from woof.core.rrtmgp import cal_cldfra1
-            flat = lambda a: cp.ascontiguousarray(a).reshape(nz, cols)
-            cldfra = cal_cldfra1(
-                flat(qv), flat(qc), flat(qi), flat(qs),
-                flat(atmosphere["temperature"]), flat(atmosphere["pressure"]),
-                f_qc=True, f_qi=self.f_qi, f_qs=self.f_qs,
-                mp_physics=self.mp_physics).reshape(qv.shape)
-            if self.icloud_cu == 2:
-                # :1337-1348, right after cal_cldfra1, before the MYNN merge.
-                cldfra, qc, qi = curad.merge_kf_cloud(
-                    cldfra, qc, qi, cldfra_dp=fields["cldfra_dp"],
-                    cldfra_sh=fields["cldfra_sh"], qc_cu=fields["qc_cu"],
-                    qi_cu=fields["qi_cu"])
-            if self.bl_merge:
-                # module_radiation_driver.F:1406-1428 (icloud_bl > 0)
-                cf_bl = fields["cldfra_bl"]
-                if int(itimestep) != 1:
-                    cldfra = cp.ascontiguousarray(cf_bl, dtype=cp.float32).copy()
-                active = cf_bl > F(0.001)
-                qc = cp.where((qc < F(1.0e-6)) & active, qc + fields["qc_bl"], qc)
-                qi = cp.where((qi < F(1.0e-8)) & active, qi + fields["qi_bl"], qi)
-        elif self.icloud == 2:
+        from woof.core.rrtmg_legacy import legacy_scheme_has_req, legacy_cloud_fraction_flags
+        from woof.core.swint import calendar_scalars
+        nz, ny, nx = atmosphere['qv'].shape
+        nc = ny * nx
+        column = lambda value: cp.ascontiguousarray(value, dtype=cp.float32).reshape(-1, nc)
+        surface = lambda value: cp.ascontiguousarray(value, dtype=cp.float32).reshape(nc)
+        cf = cp.zeros((nz,ny,nx), cp.float32)
+        qc, qi = atmosphere['qc'], atmosphere['qi']
+        diagnosed = False
+        if int(cfg.icloud) == 3 or cfg.cu_rad_feedback:
+            from woof.core.cloud_fraction import prepare_radiation_clouds
+            view = prepare_radiation_clouds(atmosphere, driver.fields, state, cfg)
+            atmosphere = view.atmosphere
+            qc, qi = atmosphere['qc'], atmosphere['qi']
+            if view.fraction is not None:
+                cf, diagnosed = view.fraction, True
+        if not diagnosed and int(cfg.icloud) == 2:
             from woof.core.rrtmgp import cal_cldfra2
-            cldfra = cal_cldfra2(cp.ascontiguousarray(qc, dtype=cp.float32),
-                                 cp.ascontiguousarray(qi, dtype=cp.float32),
-                                 f_qc=True, f_qi=self.f_qi)
-        elif self.icloud == 3:
-            from woof.core.cldfra3 import cal_cldfra3
-            from woof.core.rrtm_lw import _stream_is_capturing
-            ncol = cols
-            tr = lambda a: cp.ascontiguousarray(
-                cp.ascontiguousarray(a, dtype=cp.float32).reshape(nz, ncol).T)
-            c3, q3c, q3i = cal_cldfra3(
-                tr(qv), tr(qc), tr(qi), tr(qs), tr(atmosphere["dz"]),
-                tr(atmosphere["pressure"]), tr(atmosphere["temperature"]),
-                fields["xland"].reshape(-1), self.gridkm,
-                perturbation=(None if eps is None else eps.cld3_columns(tr)),
-                check=not _stream_is_capturing(cp))
-            back = lambda a: cp.ascontiguousarray(a.T).reshape(qv.shape)
-            cldfra, qc, qi = back(c3), back(q3c), back(q3i)
-        if self.deng_cloud:
-            # :1566-1575, after every icloud branch.
-            cldfra, qc = curad.merge_deng_cloud(
-                cldfra, qc, cldfra_sh=fields["cldfra_sh"],
-                cw_rad=fields["cw_rad"])
-        return cldfra, qc, qi
-
-    def _radii(self, state, nz):
-        import cupy as cp
+            fqi, _ = legacy_cloud_fraction_flags(int(cfg.mp_physics))
+            cf = cal_cldfra2(column(qc), column(qi),
+                f_qc=int(cfg.mp_physics)!=0, f_qi=fqi).reshape(nz,ny,nx)
+        if int(cfg.icloud) == 1:
+            from woof.core.uwpbl import uwpbl_radiation_cloud_fraction
+            from woof.core.mynn_radiation import merge_mynn_bl_clouds, mynn_bl_cloud_active, wrf_itimestep
+            if not diagnosed:
+                if int(cfg.mp_physics) == 95:
+                    # Eta carries its saturation ice weight as F_ICE_PHY.
+                    uwpbl_radiation_cloud_fraction(atmosphere, cfg, cf, state=state)
+                else:
+                    from woof.core.kernels import get_kernel
+                    fqi, fqs = legacy_cloud_fraction_flags(int(cfg.mp_physics))
+                    values = tuple(cp.ascontiguousarray(atmosphere[key], dtype=cp.float32)
+                                   for key in ('qv','qc','qi','qs','temperature','pressure'))
+                    get_kernel('farms','farms_cloud_fraction')(
+                        ((cf.size+127)//128,), (128,),
+                        (*values, cf, np.int32(cf.size),
+                         np.int32(bool(cfg.moist) and int(cfg.mp_physics)!=0),
+                         np.int32(fqi), np.int32(fqs), np.int32(int(cfg.mp_physics) in (5,15))))
+            if mynn_bl_cloud_active(cfg.bl_pbl_physics, cfg.icloud_bl):
+                qc, qi, cf = merge_mynn_bl_clouds(qc.copy(), qi.copy(), cf,
+                    qc_bl=driver.fields.get('qc_bl'), qi_bl=driver.fields.get('qi_bl'),
+                    cldfra_bl=driver.fields.get('cldfra_bl'),
+                    bl_pbl_physics=cfg.bl_pbl_physics, icloud_bl=cfg.icloud_bl,
+                    itimestep=wrf_itimestep(state.elapsed_seconds,cfg.dt),
+                    bl_mynn_version=cfg.bl_mynn_version,
+                    temperature=atmosphere['temperature'])
+        if int(cfg.shcu_physics) == 5:
+            from woof.core.column_cumulus import merge_column_cumulus_clouds
+            qc, qi, cf = merge_column_cumulus_clouds(
+                qc, qi, cf, fields=driver.fields, cfg=cfg, columns=lambda value: value)
+        # WRF Solar_step updates CLDFRA on every FARMS step, including
+        # steps between full radiation calls. Publish that same fraction
+        # for history and consumers holding the radiation cloud field.
+        if driver.cldfra is not None:
+            driver.cldfra[...] = cf
+        if 'uw_cldfra' in driver.fields:
+            driver.fields['uw_cldfra'][...] = cf
+        flags = legacy_scheme_has_req(cfg.mp_physics, cfg.use_mp_re)
+        zero = cp.zeros((nz,nc), cp.float32)
         radii = []
-        for flag, name, clim in zip(self.has_req, ("effc", "effi", "effs"),
-                                    (8.0e-6, 24.0e-6, 24.0e-6)):
-            value = getattr(state, name, None) if flag else None
+        for name, flag in zip(('effc','effi','effs'), flags):
+            value = getattr(state, name, None)
             if flag and value is None:
-                raise ValueError(
-                    f"swint_opt = 2: mp_physics={self.mp_physics} declares "
-                    f"{name} (has_req) but the state carries none")
-            if value is None:
-                # never read: the kernel takes the climatology when has_req=0
-                radii.append(cp.full((nz, *self.shape), F(clim), cp.float32))
-            else:
-                radii.append(radius_metres(value).reshape(nz, *self.shape))
-        return radii
-
-    def _aerosol(self, aodtot, fields):
-        import cupy as cp
-        zeros = cp.zeros(self.shape, dtype=cp.float32)
-        if self.aer_opt == 0:
-            # :2996-3011, zeroed every step
-            return zeros, zeros, zeros, zeros
-        if self.aer_opt == 2:
-            # case (2): the 2-D fields calc_aerosol_rrtmg_sw left at the
-            # last radiation call (:2293-2297), read as they stand
-            return tuple(fields[name] for name in (
-                "AOD5502D", "ANGEXP2D", "AERSSA2D", "AERASY2D"))
-        if aodtot is None:
-            raise ValueError("swint_opt = 2 with aer_opt = 1 reads the last "
-                             "radiation call's AODTOT, and none is carried")
-        angexp, ssa, asy = self.aer_values
-        return (cp.ascontiguousarray(aodtot, dtype=cp.float32),
-                cp.full(self.shape, angexp, cp.float32),
-                cp.full(self.shape, ssa, cp.float32),
-                cp.full(self.shape, asy, cp.float32))
-
-    # -- the every-step call -------------------------------------------------
-
-    def step(self, fields, atmosphere, state, *, elapsed_seconds, itimestep,
-             aodtot=None, eps=None):
-        """FARMS for this step: the six outputs into ``fields``, then the
-        ``couple_farms`` copy into SWDOWN.  Returns the step's CLDFRA.
-
-        ``eps`` is the domain's WRF-Solar EPS provider
-        (woof.core.wrfsolar_eps.MultiPerturb) or None: pert_cld3 perturbs
-        cal_cldfra3's inputs; pert_farms wraps farms_driver in WRF's Add_/
-        Remove_ pair (module_radiation_driver.F:3052-3082) on the arrays
-        WRF's own would touch -- the albedo, qv and qs in place (what the
-        round trip leaves stays, as in WRF), the 2-D aerosol in place where
-        it is carried (aer_opt = 2) and on fresh copies where WRF rebuilds
-        it each call, and a copy of the radiation's qc, whose Remove_ the
-        driver's qc restore (:3137-3145) discards."""
-        import cupy as cp
-        julian, xtime, gmt = calendar_scalars(self.start_time, elapsed_seconds)
-        coszen_loc = self.coszen_loc_at(julian, xtime, gmt)
-        # eps rides only when multi_perturb's cld3 pair is live, so the
-        # unperturbed call keeps the seam's original keywords.
-        extra = {} if eps is None else {"eps": eps}
-        cldfra, qc, qi = self.cloud_fraction(atmosphere, fields,
-                                             itimestep=itimestep, **extra)
-        nz = atmosphere["qv"].shape[0]
-        re_cloud, re_ice, re_snow = self._radii(state, nz)
-        aod, angexp, ssa, asy = self._aerosol(aodtot, fields)
-        if "albsol" in fields:
-            albedo = fields["albsol"]
+                raise ValueError(f'FARMS microphysics radius state.{name} is missing')
+            radii.append(column(value) * np.float32(1.e-6) if flag else zero)
+        if cfg.aer_opt == 0:
+            aer = cp.zeros(nc, cp.float32)
+            ssa, asy, aod, ang = aer, aer, aer, aer
+        elif cfg.aer_opt == 1:
+            if driver.aodtot is None:
+                raise ValueError('FARMS aer_opt=1 needs the radiation AODTOT producer')
+            aod = surface(driver.aodtot)
+            ssa, asy, ang = (cp.full(nc,np.float32(x),cp.float32) for x in
+                             (cfg.aer_ssa_val,cfg.aer_asy_val,cfg.aer_angexp_val))
+        elif cfg.aer_opt == 2 or (cfg.aer_opt == 3 and cfg.rrtmg_aer3_source == "wrf_461"):
+            ssa, asy, aod, ang = (surface(driver.aerosol2d[name]) for name in
+                                  ('AERSSA2D','AERASY2D','AOD5502D','ANGEXP2D'))
         else:
-            albedo = fields["albedo"]
-        farms_fac = None if eps is None else eps.factors("pert_farms")
-        if farms_fac is not None:
-            from woof.core import wrfsolar_eps as _eps
-            if self.aer_opt != 2:
-                # rebuilt by the radiation driver on every call: perturb
-                # private copies (four distinct arrays, never the carried
-                # AODTOT)
-                aod, angexp, asy = (cp.array(a, dtype=cp.float32, copy=True)
-                                    for a in (aod, angexp, asy))
-            qc = cp.array(qc, dtype=cp.float32, copy=True)
-            pats = eps.patterns()
-            hooked = dict(albedo=albedo, aod=aod, angexp=angexp, aerasy=asy,
-                          qv=atmosphere["qv"], qc=qc, qs=atmosphere["qs"])
-            saved = _eps.farms_add(pats, farms_fac, **hooked)
-        farms_columns(
-            p8w_sfc=atmosphere["p_interface"][0], albedo=albedo,
-            coszen=coszen_loc, aerssa=ssa, aerasy=asy, aod550=aod,
-            angexp=angexp, rho=atmosphere["rho"], dz8w=atmosphere["dz"],
-            qv=atmosphere["qv"], qc=qc, qi=qi, qs=atmosphere["qs"],
-            re_cloud=re_cloud, re_ice=re_ice, re_snow=re_snow,
-            cldfra=cldfra, has_req=self.has_req, juday=wrf_juday(julian),
-            out={name: fields[name] for name in STATE_FIELDS})
-        if farms_fac is not None:
-            _eps.farms_remove(pats, farms_fac, saved, **hooked)
-        if self.couple_farms:
-            fields["swdown"][...] = fields["swdown2"]
-        return cldfra
-
-    def radiation_coszen_at(self, elapsed_seconds, radt_minutes):
-        """The Solar_step's COSZEN on this step: ``calc_coszen`` at the
-        CURRENT julian and the hour angle at ``xtime + radt*0.5``
-        (module_radiation_driver.F:1206-1208), (ny, nx)."""
-        julian, xtime, gmt = calendar_scalars(self.start_time, elapsed_seconds)
-        xt_mid = F(xtime) + F(radt_minutes) * F(0.5)
-        return self.coszen_loc_at(julian, xt_mid, gmt).reshape(self.shape)
+            raise ValueError('FARMS aer_opt=3 needs stock WRF gt_aod diagnostics')
+        julian, _, _ = calendar_scalars(self.start_time,state.elapsed_seconds)
+        fluxes = farms_surface_columns(
+            column(atmosphere['p_interface']), column(atmosphere['rho']),
+            column(atmosphere['dz']), surface(driver.fields['albedo']),
+            ssa, asy, aod, ang, self.coszen_loc(state.elapsed_seconds),
+            column(atmosphere['qv']), column(qi), column(atmosphere['qs']),
+            column(qc), *radii, column(cf), julian=julian,
+            has_reqc=int(flags[0]), has_reqi=int(flags[1]), has_reqs=int(flags[2]))
+        for name, value in zip(FARMS_FIELDS,fluxes):
+            driver.fields[name][...] = value.reshape(ny,nx)
+        if cfg.couple_farms:
+            driver.fields['swdown'][...] = driver.fields['swdown2']
+            from woof.core.radiation_carriers import CARRIER_SOURCE_RADIATION_SCHEME
+            driver.carriers.declare('swdown', source=CARRIER_SOURCE_RADIATION_SCHEME,
+                                    model_time=float(state.elapsed_seconds))

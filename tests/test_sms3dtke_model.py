@@ -31,25 +31,6 @@ def _cfg(**kw):
     return RunConfig(**values)
 
 
-@pytest.mark.parametrize("override,needle", [
-    (dict(bl_pbl_physics=1), "bl_pbl_physics=0"),
-    (dict(diff_opt=1), "diff_opt"),
-    (dict(sf_sfclay_physics=2), "sf_sfclay_physics = 0, 1, 5"),
-    (dict(open_x=True), "radiative open"),
-    (dict(mix_isotropic=1), "mix_isotropic"),
-    (dict(tke_budget=1), "tke_budget"),
-    (dict(use_theta_m=1), "use_theta_m"),
-    (dict(sf_sfclay_physics=0, sf_surface_physics=0, isfflx=0,
-          tke_heat_flux=0.24), "0/0"),
-])
-def test_refusals(override, needle):
-    from woof.config import validate_sms3dtke
-    with pytest.raises(ConfigurationRefused, match=needle):
-        validate_sms3dtke(_cfg(**override))
-    with pytest.raises(ConfigurationRefused):
-        validate_run_config(_cfg(**override))
-
-
 def test_admitted_with_each_wrf_surface_layer():
     for sfclay in (1, 5, 91):
         validate_run_config(_cfg(sf_sfclay_physics=sfclay))

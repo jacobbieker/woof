@@ -195,8 +195,16 @@ def _parser(*, prog: str = "woof-wrf-init", add_help: bool = True,
         ),
     )
     parser.add_argument("--source", metavar="MODEL", help="native source adapter id")
+    from woof.storm_merge import add_arguments
+    add_arguments(parser)
     from woof.earth2_licensing import add_licence_argument
     add_licence_argument(parser)
+    parser.add_argument("--vortex-init", choices=("off", "relocate", "vitals-da"), default="off",
+                        help="TC initial-state route; the private data-assimilation cycle owns vitals-da")
+    parser.add_argument("--vortex-inputs", type=Path,
+                        help="sealed canonical TC transform declaration for native GFS initialization")
+    from woof.tc.mapped_vortex import add_arguments as add_vortex_arguments
+    add_vortex_arguments(parser, with_mode=False)
     parser.add_argument(
         "--initial-inputs", type=Path, metavar="JSON",
         help="separate packaged analysis inventory for the initial state; "
@@ -599,12 +607,19 @@ def _active_action_arguments(
     args: argparse.Namespace,
     *,
     allowed: frozenset[str],
+    parser: argparse.ArgumentParser | None = None,
 ) -> list[str]:
-    """Return non-empty CLI destinations outside one inventory action."""
+    """Return non-empty CLI destinations outside one inventory action.
+
+    With ``parser``, an option left at its own non-empty default (the storm
+    merge widths, ``--vortex-init off``) is not active either.
+    """
 
     active = []
     for name, value in vars(args).items():
         if name in allowed or value is None or value is False:
+            continue
+        if parser is not None and value == parser.get_default(name):
             continue
         if isinstance(value, (list, tuple)) and not value:
             continue
@@ -2091,6 +2106,10 @@ def _gfs_command(args: argparse.Namespace) -> list[str]:
         "--output-root",
         str(args.output_root),
     ]
+    if getattr(args, "vortex_init", "off") != "off":
+        command.extend(("--vortex-init", args.vortex_init))
+    if getattr(args, "vortex_inputs", None) is not None:
+        command.extend(("--vortex-inputs", str(args.vortex_inputs)))
     if args.bridge is not None:
         command.extend(("--bridge", str(args.bridge)))
     if args.physics_profile is not None:
@@ -2197,6 +2216,10 @@ def _mapped_command(args: argparse.Namespace) -> list[str]:
         "--output-root",
         str(args.output_root),
     ]
+    from woof.storm_merge import command_arguments as merge_arguments
+    command.extend(merge_arguments(args))
+    from woof.tc.mapped_vortex import command_arguments as vortex_arguments
+    command.extend(vortex_arguments(args))
     export_mode = ("off" if args.no_stock_wrf_export
                    else getattr(args, "stock_wrf_export", None))
     if getattr(args, "initial_inputs", None) is not None:
@@ -3124,6 +3147,7 @@ def _dispatch(args: argparse.Namespace, *,
         unrelated = _active_action_arguments(
             args,
             allowed=frozenset({"validate_hrrr_domain"}),
+            parser=parser,
         )
         if unrelated:
             parser.error(
@@ -3222,6 +3246,9 @@ def _dispatch(args: argparse.Namespace, *,
     if not args.source:
         parser.error("--source is required unless an inventory option is used")
     try:
+        if getattr(args, "storm_merge", None):
+            from woof.storm_merge import preparation_source
+            args.source = preparation_source(args.source)
         adapter = get_source_adapter(args.source)
     except ValueError as exc:
         parser.error(str(exc))
@@ -3247,6 +3274,29 @@ def _dispatch(args: argparse.Namespace, *,
         )
         return EXIT_USAGE
 
+    if getattr(args, "storm_merge", None) and adapter.runner != "mapped_composition_v1":
+        parser.error("storm merge requires a canonical mapped preparation source")
+
+    vortex_requested = (getattr(args, "vortex_init", "off") != "off"
+                        or getattr(args, "vortex_inputs", None) is not None
+                        or getattr(args, "vortex_vitals", None) is not None)
+    if vortex_requested and adapter.source_id != "gfs":
+        # TC-VI1 (woof/tc/mapped_vortex.py): every mapped source (GEFS members included) relocates and corrects
+        # its own vortex from TC vitals. Breakage this replaces: the GFS-only refusal left the the storm GEFS
+        # ensemble without vortex initialization before its first analysis (box M, 2026-10-27).
+        if adapter.runner != "mapped_composition_v1":
+            print("TC vortex initialization needs the native GFS route or a mapped preparation source",
+                  file=sys.stderr)
+            return EXIT_USAGE
+        if (getattr(args, "vortex_init", "off") != "relocate" or getattr(args, "vortex_vitals", None) is None
+                or getattr(args, "vortex_inputs", None) is not None):
+            print("a mapped source takes --vortex-init relocate --vortex-vitals VITALS.json "
+                  "(--vortex-inputs is the native GFS sealed request)", file=sys.stderr)
+            return EXIT_USAGE
+    if adapter.source_id == "gfs" and getattr(args, "vortex_vitals", None) is not None:
+        print("the native GFS route takes --vortex-inputs (a sealed transform request), not --vortex-vitals",
+              file=sys.stderr)
+        return EXIT_USAGE
     if (getattr(args, "initial_inputs", None) is not None
             and adapter.packaged_profile is None and adapter.source_id != "mapped"):
         print("--initial-inputs requires the mapped preparation route so both "

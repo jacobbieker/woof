@@ -45,8 +45,17 @@ def test_generic_false_and_omitted_theta_bytes_match_original_parent(case, parse
     # sibling byte controls take out exactly those lines (wrf_clock_lines),
     # the engine-era comment header says gpuwm (woof_engine_spelling), and
     # the import capability lanes since added exactly three default-on lines.
+    expected = without_retired_line(expected)
+    if case == "omitted_theta":
+        # 1.1.6 ports use_theta_m = 1 (WRF's default), so the omitted key is
+        # no longer rewritten to the dry form: its report line goes, and the
+        # imported value is stated after km_opt.
+        theta = (b"#   use_theta_m 1 (moist potential temperature (theta_m) "
+                 b"prognostic) -> use_theta_m 0 (dry potential temperature)\n")
+        assert expected.count(theta) == 1 and expected.count(b"\nkm_opt = 4\n") == 1
+        expected = expected.replace(theta, b"").replace(
+            b"\nkm_opt = 4\n", b"\nkm_opt = 4\nuse_theta_m = 1\n")
     assert engine_spelling(without_import_capability_lines(
-        without_wrf_clock_lines(emitted))).encode("utf-8") \
-        == without_retired_line(expected)
+        without_wrf_clock_lines(emitted))).encode("utf-8") == expected
     exp = build_experiment(tomllib.loads(emitted), source="original generic bytes")
     assert [domain.run.mix_full_fields for domain in exp.domains] == [True, True]

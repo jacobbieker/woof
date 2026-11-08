@@ -86,14 +86,23 @@ own host thread, and one slab's drain must never read, clear or raise another
 slab's words.  :func:`active` answers the calling thread's resident ledger
 first and the process-wide :func:`deferring` ledger otherwise.
 
+The resident forecast executor (``execute_experiment``) installs one ledger
+per domain and POLLS it after each step (:meth:`HealthLedger.poll`, upstream
+1.1.6): a bounded pinned snapshot whose CUDA event is queried, never waited
+on.  History, checkpoint and final-return boundaries drain every ledger
+before publishing or accepting a run, so a failure can advance through
+internal nest work before it is reported; ``health_debug`` keeps immediate
+attribution.  Inside that executor the resident step's own ledger defers to
+the executor's (see :func:`resident_step`).
+
 DRAIN OR IT DID NOT HAPPEN
 --------------------------
 A ledger that is recorded into and never drained silently converts a fatal
-error into no error at all.  :meth:`HealthLedger.close` therefore drains, and
-:func:`deferring` closes on the way out, including on an exception path.  The
-one API that can lose a failure is calling :meth:`record` outside any drain,
-which is why ``record`` is not public API and the sites reach it through
-:func:`read_status`.
+error into no error at all. :meth:`HealthLedger.close` therefore drains.
+The owner of a :func:`deferring` scope must drain or close its ledger on
+all exit paths; that scope only routes records and restores the context.
+The forecast executor drains in its finalizer as well as before publication.
+Sites reach the ledger through :func:`read_status`.
 """
 
 from __future__ import annotations
@@ -194,6 +203,74 @@ class HealthLedger:
         #: Site-name prefixes this ledger defers; ``None`` defers every site.
         #: A site it does not admit keeps its immediate read.
         self.admit = None if admit is None else tuple(admit)
+        #: Upstream's executor polling: the device this ledger lives on, at
+        #: most one queued pinned snapshot (event, host words, descriptions)
+        #: and the stream it rides.
+        try:
+            self._device = int(cp.cuda.runtime.getDevice())
+        except Exception:                          # noqa: BLE001 - facades
+            self._device = 0
+        self._poll_pending = None
+        self._poll_stream = None
+        self.polls = 0
+
+    def poll(self) -> None:
+        """Queue one pinned status copy and inspect completed copies only.
+
+        The event is queried, never waited on. While a copy is pending,
+        subsequent records accumulate in the device slots. At most one
+        snapshot and its diagnostic closures are retained per ledger.
+        Output/checkpoint/final boundaries still call drain().
+        """
+        import cupy as cp
+        import numpy as np
+
+        with cp.cuda.Device(self._device):
+            self._poll_stream = cp.cuda.get_current_stream()
+            self.polls += 1
+            self._finish_pending(wait=False)
+            if self._poll_pending is not None or not self._describe:
+                return
+            words = self._slots[:self._capacity]
+            memory = cp.cuda.alloc_pinned_memory(words.nbytes)
+            host = np.frombuffer(memory, dtype=np.uint32, count=self._capacity)
+            words.get(out=host, blocking=False)
+            event = cp.cuda.Event(disable_timing=True)
+            event.record()
+            # Copy, clear and the next record use the same ordered stream.
+            words.fill(cp.uint32(0))
+            if self._ordered:
+                self._slots[self._capacity:].fill(cp.uint32(_NO_ORDER))
+            self._poll_pending = (event, host, self._describe.copy())
+            self._describe.clear()
+            self._pending = 0
+            self._sequence = 0
+
+    def _finish_pending(self, *, wait: bool) -> None:
+        if self._poll_pending is None:
+            return
+        event, host, descriptions = self._poll_pending
+        if wait:
+            event.synchronize()
+        elif not event.done:
+            return
+        self._poll_pending = None
+        self._raise_flags(host, descriptions)
+
+    def _raise_flags(self, host, descriptions) -> None:
+        flagged = [(site, self._index[site]) for site in descriptions
+                   if int(host[self._index[site]])]
+        if not flagged:
+            return
+        site, i = flagged[0]
+        try:
+            refuse(site, int(host[i]), descriptions.get(site))
+        except BaseException as exc:
+            try:
+                exc._woof_deferred_health = True
+            except AttributeError:                         # pragma: no cover
+                pass
+            raise
 
     @property
     def slots(self):
@@ -264,6 +341,9 @@ class HealthLedger:
         """
         import cupy as cp
 
+        # A polled snapshot still in flight is judged first: it holds the
+        # earlier steps' words.
+        self._finish_pending(wait=True)
         if not self._index:
             return
         if if_recorded and not self._pending:
