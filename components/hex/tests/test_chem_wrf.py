@@ -34,7 +34,6 @@ def test_chem_sets_by_name(tmp_path):
     ({"chem_sets": "sfire_smoke"}, "fire grid"),
     ({"chem_opt": 1}, "RADM2"),
     ({"chem_opt": 7}, "PNNL"),
-    ({"chem_opt": 401, "aer_ra_feedback": 1}, "hex radiation"),
     ({"chem_opt": 401, "biomass_burn_opt": 2}, "fire emission frames"),
     ({"chem_opt": 401, "chem_in_opt": 1}, "not carried on the hex route"),
     ({"chem_opt": 401, "dust_opt": 1.5}, "integer"),
@@ -165,8 +164,13 @@ def test_backend_runs_the_wrf_step_after_the_physics_and_settles_it(tmp_path, mo
         return endpoint
 
     class Runtime:
+        feedback = False
+
         def __init__(self, path, raw, digest, **kwargs):
             self.kwargs = kwargs
+
+        def bind_seam(self, seam):
+            pass
 
         def step(self, scalars, columns, **kwargs):
             calls.append(("chem", columns["rho_dry"], columns["u"], kwargs["physics_fields"] is fields,
@@ -194,3 +198,58 @@ def test_backend_runs_the_wrf_step_after_the_physics_and_settles_it(tmp_path, mo
     step = ("chem", "rho_dry", "u_p", True, "micro", 120.0)
     assert calls == ["base", ("prepare", True, True, True), step, "base-commit", "commit",
                      "base", ("prepare", True, True, True), step, "abort", "base-abort"]
+
+
+def test_feedback_prepares_the_radiation_before_phase_one(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from woof.hex import chem_transport as chem
+    from woof.hex import cuda_arwen_physics_v841 as base
+    from woof.hex import cuda_physics_prep_v841 as prep
+    calls = []
+
+    class Base:
+        def __init__(self, **kwargs):
+            self._prep_geometry = object()
+            self._kernel_cache = object()
+            self._seam = self._new_seam()
+
+        def _new_seam(self):
+            calls.append("new-seam")
+            return SimpleNamespace(_driver=SimpleNamespace(fields={}), _cfg="cfg", _start_time="t0",
+                                   _state=SimpleNamespace(fnm="fnm", fnp="fnp", ht="ht"))
+
+        def begin_step(self, **kwargs):
+            calls.append("base-begin")
+            return "raw"
+
+    endpoint = SimpleNamespace(**{n: n for n in ("pres_p", "pres_hyd_p", "th_p", "rho_dry", "z_p", "qv_p",
+                                                 "qc_p", "qr_p", "u_p", "v_p", "w_p")})
+
+    def prepare(atmosphere, **kwargs):
+        calls.append(("prepare", kwargs["post_rk_wsm6"]))
+        return endpoint
+
+    class Runtime:
+        feedback = True
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def bind_seam(self, seam):
+            calls.append("bind")
+
+        def prepare_radiation(self, scalars, columns, *, elapsed_seconds):
+            calls.append(("radiation", columns["pressure"], elapsed_seconds))
+
+    monkeypatch.setattr(base, "PersistentTwoPhaseCudaPhysicsBackendV841", Base)
+    monkeypatch.setattr(prep, "prepare_mpas_to_phys_cuda_v841", prepare)
+    monkeypatch.setattr(chem_wrf, "HexWrfChemistry", Runtime)
+    row = configure(config(tmp_path, {"chem_opt": 401, "dust_opt": 1, "aer_ra_feedback": 1}))
+    backend = chem.build_column_backend(row, constructor=SimpleNamespace(n_levels=3, n_columns=2),
+                                        prep_geometry=object(), kernel_cache=object(),
+                                        cell_area_m2=np.ones(2))
+    atmosphere = SimpleNamespace(state=SimpleNamespace(scalars="scalars", time_seconds=60.0))
+    assert backend.begin_step(atmosphere=atmosphere, scalar_names=(), dt=60.0) == "raw"
+    backend._seam = backend._new_seam()   # a rollback's fresh seam is bound again
+    assert calls == ["new-seam", "bind", ("prepare", False), ("radiation", "pres_hyd_p", 60.0),
+                     "base-begin", "new-seam", "bind"]
