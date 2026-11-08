@@ -49,7 +49,8 @@ same strict recipe:
 
 The Icepack-lineage column package (`core_seaice/column`, `ice_kinds_mod`'s
 `dbl_kind`) is double precision whatever `RKIND` is, so a column-physics port
-is double. On Metal that means woof's soft-f64.
+is double. On Metal that means woof's soft-f64. MPAS-Ocean is run in double
+precision in practice, so its pieces are held at both RKIND 4 and RKIND 8.
 
 Each piece is a *targeted extraction*. The routines are compiled verbatim and
 checked against a `SOURCES.sha256`. The only stand-ins are the framework types
@@ -87,9 +88,10 @@ Ordered by how self-contained each piece is:
 ## MPAS-Ocean (`core_ocean`, about 80,000 lines)
 
 1. Tracer advection, standard and monotone (`mpas_ocn_tracer_advection_{std,mono}.F`).
-2. The split-explicit time integrator's tendencies (`mpas_ocn_tendency.F`
-   with `vel_coriolis`, `vel_pressure_grad`, `vel_hmix_*`, `vel_vadv`,
-   `thick_hadv`/`vadv`), then the barotropic subcycle
+2. The split-explicit time integrator's tendencies. `vel_coriolis`,
+   `vel_vadv` and `thick_hadv`/`vadv` are ported. Still to port:
+   `vel_pressure_grad`, `vel_hmix_*`, the forcing terms and their composition
+   in `mpas_ocn_tendency.F`, then the barotropic subcycle
    (`mode_forward/mpas_ocn_time_integration_split.F`).
 3. Equation of state (`equation_of_state_jm`, `_linear`) and diagnostics.
 4. Vertical mixing: constant and Richardson (`vmix_coefs_*`). CVMix (KPP) is
@@ -144,7 +146,7 @@ Ordered by how self-contained each piece is:
 | Core | Ported pieces | Status |
 |---|---|---|
 | seaice | EVP internal stress, variational: `seaice_init_evp`, strain tensor, EVP and revised-EVP constitutive relation, stress divergence, final divergence/shear and ridging parameters (`woof/hex/mpas_seaice/evp_v842.py`). Word-exact against the v8.4.2 oracle on CUDA and Metal (`tests/test_mpas_seaice_evp_parity.py`, `woof hex seaice verify`). | stub |
-| ocean | none yet | stub |
+| ocean | Tendency terms: `ocn_vel_coriolis_tend`, `ocn_vel_vadv_tend`, `ocn_thick_hadv_tend`, `ocn_thick_vadv_tend` and their `_init` switches (`woof/hex/mpas_ocean/tend_v842.py`). Word-exact against the v8.4.2 oracle at RKIND 4 and 8 on CUDA and Metal (`tests/test_mpas_ocean_tend_parity.py`, `woof hex ocean verify`). | stub |
 | landice | none yet | stub |
 
 This table is updated as each piece lands with its parity tests.
