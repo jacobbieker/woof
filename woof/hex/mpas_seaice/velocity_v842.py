@@ -20,9 +20,7 @@ with gfortran ``-O0 -ffp-contract=off``, in both of MPAS's precisions:
 - ``r8``: RKIND = 8. The column package is double, so production MPAS-Seaice
   is built double.
 
-At ``r8`` the internal stress (evp_v842) is still single precision only, so
-:func:`subcycle` is ``r4``; the velocity-solve pieces run at either
-precision. See ``tools/mpas_seaice_oracle`` and
+See ``tools/mpas_seaice_oracle`` and
 ``tests/test_mpas_seaice_velocity_parity.py``.
 
 Not ported yet: the rest of the pre-subcycle work (``aggregate_mass_and_area``,
@@ -222,7 +220,8 @@ def principal_stresses(*, mesh: dict, variational: dict) -> None:
 def subcycle(*, mesh: dict, icestate: dict, solver: dict, variational: dict, ridging: dict | None,
              n_subcycles: int, use_ocean_stress: bool, revised_evp: bool, use_column_package: bool,
              dynamics_time_step: float, elastic_time_step: float, stress_divergence_scheme: str = "variational"):
-    """``seaice_run_velocity_solver`` from the internal stress on, ``r4``.
+    """``seaice_run_velocity_solver`` from the internal stress on, at the
+    precision of the arrays (``r4`` or ``r8``).
 
     ``seaice_init_evp``, the pre-subcycle routines ported here,
     ``n_subcycles`` elastic subcycles (internal stress, ocean stress
@@ -236,8 +235,6 @@ def subcycle(*, mesh: dict, icestate: dict, solver: dict, variational: dict, rid
     from . import evp_v842 as evp
 
     evp.require_scheme(stress_divergence_scheme)
-    if _precision_of(solver["uVelocity"]) != "r4":
-        raise ValueError("the internal stress is ported at RKIND 4 only, so subcycle() is r4")
     consts = evp.init_evp(mesh["dvEdge"], int(mesh["nEdgesSolve"]), dynamics_time_step, elastic_time_step)
     pre_subcycle(mesh=mesh, icestate=icestate, solver=solver, variational=variational,
                  use_ocean_stress=use_ocean_stress)

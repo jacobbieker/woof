@@ -3,7 +3,8 @@
 ``tools/mpas_seaice_oracle`` compiles MPAS-Model v8.4.2's
 ``mpas_seaice_velocity_solver_constitutive_relation.F`` and
 ``mpas_seaice_velocity_solver_variational.F`` verbatim (gfortran -O0
--ffp-contract=off, RKIND = 4) and drives them with ``run_oracle.F90``.  This
+-ffp-contract=off, at RKIND = 4 and RKIND = 8) and drives them with
+``run_oracle.F90``.  This
 module writes the driver's input stream, reads its output stream, and builds
 the cases.
 
@@ -16,7 +17,9 @@ is ``(nVertices, vertexDegree)``.  Connectivity stays 1-based, as MPAS has it.
 The cases come from numpy's legacy ``RandomState``, whose stream numpy keeps
 fixed.  They use only ``randint`` and ``random_sample``, which are integer
 arithmetic plus one exact float64 scaling, so the input bytes are the same on
-every platform.  ``input_digest`` is recorded beside the fixture, and the test
+every platform.  The values are drawn in float64; the r8 run takes them as
+drawn and the r4 run rounds them once to float32 (``make_case``'s ``dtype``).
+``input_digest`` is recorded beside the fixture, and the test
 refuses a regenerated case whose bytes differ.
 
 The meshes have random connectivity. Each gather index is valid, but the
@@ -33,6 +36,7 @@ import numpy as np
 
 FIXTURE_DIR = (Path(__file__).resolve().parents[2] / "tests" / "data"
                / "oracles" / "mpas_seaice_evp")
+PRECISIONS = {"r4": np.float32, "r8": np.float64}
 
 INT_FIELDS = ("nEdgesOnCell", "verticesOnCell", "cellsOnVertex", "cellVerticesAtVertex",
               "solveStress", "solveVelocity")
@@ -67,7 +71,7 @@ def _shape(name: str, d: dict) -> tuple[int, ...]:
 
 
 def make_case(name: str, seed: int, n_cells: int, max_edges: int, revised: bool,
-              use_column: bool, n_iter: int, dynamics_dt: float) -> dict:
+              use_column: bool, n_iter: int, dynamics_dt: float, dtype=np.float32) -> dict:
     """One deterministic case.
 
     The magnitudes are those of an MPAS-Seaice mesh of about 10 km:
@@ -83,6 +87,9 @@ def make_case(name: str, seed: int, n_cells: int, max_edges: int, revised: bool,
     - pentagons, hexagons and heptagons;
     - the padding past ``nEdgesOnCell``, filled with an out-of-range vertex
       index and sentinel words, which a correct port never reads.
+
+    ``dtype`` is the precision the real fields are rounded to: float32 for r4
+    (the bytes the r4 fixture was written from), float64 for r8.
     """
     rs = np.random.RandomState(seed)
     nc = n_cells
@@ -104,7 +111,7 @@ def make_case(name: str, seed: int, n_cells: int, max_edges: int, revised: bool,
     solve_velocity = (rs.random_sample(nv) < 0.85).astype(np.int32)
 
     def uniform(lo, hi, shape):
-        return (lo + (hi - lo) * rs.random_sample(shape)).astype(np.float32)
+        return (lo + (hi - lo) * rs.random_sample(shape)).astype(dtype)
 
     dv_edge = uniform(5.0e3, 2.0e4, ne)
     area_cell = uniform(1.0e8, 5.0e8, nc)
@@ -147,8 +154,8 @@ def make_case(name: str, seed: int, n_cells: int, max_edges: int, revised: bool,
     case = {
         "name": name, "nCells": nc, "nVertices": nv, "nEdges": ne, "maxEdges": me,
         "vertexDegree": vd, "revisedEVP": bool(revised), "useColumnPackage": bool(use_column),
-        "nIter": int(n_iter), "dynamicsTimeStep": np.float32(dynamics_dt),
-        "elasticTimeStep": np.float32(dynamics_dt / 120.0),
+        "nIter": int(n_iter), "dynamicsTimeStep": dtype(dynamics_dt),
+        "elasticTimeStep": dtype(dynamics_dt / 120.0),
         "nEdgesOnCell": n_edges_on_cell, "verticesOnCell": vertices_on_cell,
         "cellsOnVertex": cells_on_vertex, "cellVerticesAtVertex": cell_vertices_at_vertex,
         "solveStress": solve_stress, "solveVelocity": solve_velocity,
@@ -161,21 +168,22 @@ def make_case(name: str, seed: int, n_cells: int, max_edges: int, revised: bool,
     return case
 
 
-def cases() -> list[dict]:
-    return [make_case(*row) for row in CASES]
+def cases(precision: str = "r4") -> list[dict]:
+    return [make_case(*row, dtype=PRECISIONS[precision]) for row in CASES]
 
 
 def input_bytes(case: dict) -> bytes:
-    """run_oracle.F90's input stream for ``case``."""
+    """run_oracle.F90's input stream for ``case`` (at the case's precision)."""
+    real = np.dtype(case["dvEdge"].dtype).newbyteorder("<")
     head = np.array([case["nCells"], case["nVertices"], case["nEdges"], case["maxEdges"],
                      case["vertexDegree"], int(case["revisedEVP"]), int(case["useColumnPackage"]),
                      case["nIter"]], "<i4")
     parts = [head.tobytes(),
-             np.array([case["dynamicsTimeStep"], case["elasticTimeStep"]], "<f4").tobytes()]
+             np.array([case["dynamicsTimeStep"], case["elasticTimeStep"]], real).tobytes()]
     for name in INT_FIELDS:
         parts.append(np.ascontiguousarray(case[name], "<i4").tobytes())
     for name in MESH_REAL_FIELDS + BASIS_FIELDS + STATE_FIELDS:
-        parts.append(np.ascontiguousarray(case[name], "<f4").tobytes())
+        parts.append(np.ascontiguousarray(case[name], real).tobytes())
     return b"".join(parts)
 
 
@@ -184,22 +192,24 @@ def input_digest(case: dict) -> str:
 
 
 def read_outputs(raw: bytes, case: dict) -> dict[str, np.ndarray]:
-    """run_oracle.F90's output stream -> named float32 arrays."""
-    out = {"numericalInertiaCoefficient": np.frombuffer(raw, "<f4", 1, 0).copy()}
-    off = 4
+    """run_oracle.F90's output stream -> named arrays of the case's precision."""
+    dtype = case["dvEdge"].dtype
+    real = np.dtype(dtype).newbyteorder("<")
+    out = {"numericalInertiaCoefficient": np.frombuffer(raw, real, 1, 0).astype(dtype)}
+    off = real.itemsize
     for name in STATE_FIELDS:
         shape = _shape(name, case)
         n = int(np.prod(shape))
-        out[name] = np.frombuffer(raw, "<f4", n, off).reshape(shape).copy()
-        off += 4 * n
+        out[name] = np.frombuffer(raw, real, n, off).reshape(shape).astype(dtype)
+        off += real.itemsize * n
     if off != len(raw):
         raise ValueError(f"oracle output: {len(raw) - off} trailing bytes")
     return out
 
 
-def load_fixture() -> dict[str, dict[str, np.ndarray]]:
-    """The committed oracle outputs, keyed by case then field."""
-    with np.load(FIXTURE_DIR / "oracle-r4.npz") as data:
+def load_fixture(precision: str = "r4") -> dict[str, dict[str, np.ndarray]]:
+    """The committed oracle outputs at ``precision``, keyed by case then field."""
+    with np.load(FIXTURE_DIR / f"oracle-{precision}.npz") as data:
         out: dict[str, dict[str, np.ndarray]] = {}
         for key in data.files:
             case, field = key.split("/", 1)
@@ -209,8 +219,11 @@ def load_fixture() -> dict[str, dict[str, np.ndarray]]:
 
 def bit_mismatches(a: np.ndarray, b: np.ndarray) -> int:
     """Words that differ as bit patterns (so -0.0 != 0.0 and NaN payloads count)."""
-    return int(np.count_nonzero(np.asarray(a, np.float32).view(np.uint32)
-                                != np.asarray(b, np.float32).view(np.uint32)))
+    a, b = np.asarray(a), np.asarray(b)
+    if a.dtype != b.dtype:
+        return int(a.size)
+    view = np.uint64 if a.dtype == np.float64 else np.uint32
+    return int(np.count_nonzero(a.view(view) != b.view(view)))
 
 
 def run_gpu(case: dict) -> dict[str, np.ndarray]:
@@ -247,11 +260,12 @@ def run_gpu(case: dict) -> dict[str, np.ndarray]:
     return out
 
 
-def measure(reference: dict[str, dict[str, np.ndarray]] | None = None) -> dict[str, dict[str, int]]:
-    """Per case and field, the GPU words that differ from the oracle's."""
-    reference = load_fixture() if reference is None else reference
+def measure(reference: dict[str, dict[str, np.ndarray]] | None = None,
+            precision: str = "r4") -> dict[str, dict[str, int]]:
+    """Per case and field, the GPU words at ``precision`` that differ from the oracle's."""
+    reference = load_fixture(precision) if reference is None else reference
     report: dict[str, dict[str, int]] = {}
-    for case in cases():
+    for case in cases(precision):
         got = run_gpu(case)
         want = reference[case["name"]]
         report[case["name"]] = {name: bit_mismatches(got[name], want[name]) for name in want}
