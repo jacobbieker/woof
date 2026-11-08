@@ -185,8 +185,11 @@ Metal, and refuses what it does not port by name.
    ocean at rest on a z-coordinate, so it couples SST only (UOCE/VOCE are
    zero); NEMO 5.0 runs with a two-cell halo (`mppini.F90`: `nn_hls =
    MAX(2, nn_hls)`), which the column oracle uses and which does not reach
-   the interior columns.  Tracer advection (traadv_fct and the other
-   schemes), lateral diffusion and the dynamics remain.  The
+   the interior columns.  FCT tracer advection (`traadv_fct.F90`:
+   upstream step, 2nd/4th-order centred and 4th-order compact
+   anti-diffusive fluxes, Zalesak's limiter; `tests/test_nemo_traadv_parity.py`)
+   is ported given the transports; it does not enter the resting column.
+   The other advection schemes, lateral diffusion and the dynamics remain.  The
    alternative is an external NEMO through a real coupler (out of
    process; NEMO stays a separate program and its licence does not reach
    WOOF), or, after the licence decision, NEMO kernels behind an opt-in with

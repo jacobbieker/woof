@@ -1,0 +1,9 @@
+d3eec4adcb9e3f11a29776adec9fdf92515e226998cfaf7060742b61b49a8b44  <nemo-5.0.2-checkout>/src/OCE/par_kind.F90
+0250ea6f635164511957491f4fd263f88f6bf62604c512b2075efd1c18ce7d6b  <nemo-5.0.2-checkout>/src/OCE/TRA/traadv_fct.F90
+7dc2bdf98ed47a275d72dfdd66f807cb370db34f7a51c780867702001e278c25  <nemo-5.0.2-checkout>/src/OCE/do_loop_substitute.h90
+fb18c1cb2d0baa3807a7b2d5be30f363349676cb79e23871467c25da09a03ba3  <nemo-5.0.2-checkout>/src/OCE/DOM/domzgr_substitute.h90
+f6225faefd5031399dd2cd36fec815462e994aa27c9ee043bcabd11310dec657  <oracle-workspace>/optional/nemo/oracle/traadv_stubs.F90
+f19f90e6a68bb301a8aca99c325890858bba78add55597b6f0c60def70b964d9  <oracle-workspace>/optional/nemo/oracle/run_traadv.F90
+ff4ead4ae37c7c672758f7697e36fffe52d7f7996205066e9c37b3ea25646c7f  <oracle-workspace>/optional/nemo/oracle/build_traadv.sh
+13d425e6a2a18634467decabdc596119e157aa36381cbe07414c9de73ff75d2b  traadv-grid.csv
+5352e8f7ab596a1779e7bd2d74cdef456270af229f950c9b64c19abb7413d52a  traadv-calls.csv
