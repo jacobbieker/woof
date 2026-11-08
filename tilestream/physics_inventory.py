@@ -581,7 +581,7 @@ def carrier_scalars(state) -> dict[str, object]:
     if driver is not None:
         from woof.core.radiation_composition import radiation_adapters
         radiation={str(i):a.streaming_scalars() for i,a in enumerate(
-            radiation_adapters(driver.radiation_callable))
+            radiation_adapters(getattr(driver, "radiation_callable", None)))
             if callable(getattr(a,'streaming_scalars',None))}
         if radiation:out['radiation_owned']=radiation
         if wrf_exact and getattr(driver, "_wrf_rthraten", None) is not None:

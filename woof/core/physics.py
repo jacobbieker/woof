@@ -7868,7 +7868,8 @@ class PhysicsDriver:
         # Morrison can consume them.
         if cfg.cu_physics:
             self._advance_cumulus_clock(state, cfg)
-        if self.multi_perturb is not None:
+        # A driver assembled without __init__ (a test's stand-in) has none.
+        if getattr(self, "multi_perturb", None) is not None:
             # first_rk_step_part2.F:262-317: the multi_perturb fields move
             # after the first-RK physics, on domain 1, on the first step and
             # every stepsp steps -- the microphysics of this step reads them.

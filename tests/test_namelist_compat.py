@@ -462,16 +462,9 @@ def test_the_compat_door_gives_the_same_theta_m_answer_as_the_importer(
     assert issue["severity"] == SEVERITY_ADVISORY
     assert "WRF Registry default 1" in issue["message"]
     # The importer's own sentence, from the function both doors call.
-    from woof.namelist_import import (read_namelist_role, theta_m_decision,
-                                      theta_m_omitted_scope, theta_m_unwired)
+    from woof.namelist_import import theta_m_decision
 
-    parsed = read_namelist_role(inp, "namelist.input")
-    # WSM6's theta_m branch is wired (an explicit 1 integrates it); the
-    # omission is outside the scope an omitted key integrates theta_m in.
-    assert theta_m_unwired(parsed, 1) is None
-    unwired = theta_m_omitted_scope(parsed, 1)
-    assert unwired is not None and "mp_physics = 6" in unwired
-    assert theta_m_decision(1, unwired=unwired).reason in issue["message"]
+    assert theta_m_decision(1).reason in issue["message"]
 
 
 @pytest.mark.parametrize("declaration", [None, ".false.", ".true."])

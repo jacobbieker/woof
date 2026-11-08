@@ -827,6 +827,11 @@ SERIALIZED_SCRATCH_SLOTS = frozenset({
     # a checkpoint written before the slot existed restores it zeroed with
     # a note, never a refusal (woof/core/uh_diag.py owns the lifecycle).
     "up_heli_max",
+    # The fork's UPP gust running max (woof/core/wind_gust_diag.py), the
+    # same running-max class and tolerant restore.  Upstream 1.1.6's native
+    # NWP windows own the other wind maxima; GUST is not wired onto them
+    # yet, so nothing allocates this slot until it is.
+    "gust_max",
 })
 
 #: The WB1 settled-cloud pair (woof/core/thompson_cloud_booking.py), which
@@ -932,6 +937,12 @@ def _diagnostic_gated_note(name, change, header) -> str:
 CARRIED_SCRATCH_SLOTS = frozenset({
     "tendency_qv_before",
     "uh_follow_window", "uh_spawn_window",
+    # The fork's WRF 4.7.1 solar diagnostics' output stack
+    # (woof/core/solar_diagnostics_wrf471.py, the hex MPAS lane's):
+    # GHI_ACCUM sums across steps, so a sweep carries it; WRF gives these
+    # fields no restart I/O, so a checkpoint does not, and a resumed run
+    # starts GHI_ACCUM at zero as a WRF restart does.
+    "solar_out",
     # Strict mode only: WRF's grid%muts from the last acoustic loop, which
     # the next step's first pressure diagnosis reads (woof/core/dycore.py
     # WRF_MUTS_SLOT). Checkpoints retain it for exact continuation too.
@@ -1218,6 +1229,11 @@ REBUILT_SCRATCH_SLOTS |= _registered_column_rebuilt_slots()
 
 REBUILT_SCRATCH_PREFIXES = (
     "irrigation_",
+    # The fork's WRF 4.7.1 solar diagnostics: the step-start snapshots
+    # (phy_prep density and dz8w, the Solar_step cloud and COSZEN) rewritten
+    # at every physics step before the end-of-step call reads them, and that
+    # call's work planes.
+    "solar_step_",
     # BouLac rewrites every work plane each call; its prognostic TKE
     # is explicitly serialized outside this workspace prefix.
     "boulac_",

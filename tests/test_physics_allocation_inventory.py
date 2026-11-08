@@ -2173,3 +2173,21 @@ _PHYSICS_ALLOCATION_INVENTORY.update({
     'woof/core/solar_diagnostics.py': {}, 'woof/core/ssib_records.py': {},
     'woof/core/tracer_pblmix.py': {}, 'woof/core/trajectory.py': {},
 })
+# The 1.1.6 merge.  The fork's WRF 4.7.1 FARMS and solar diagnostics keep
+# their rows under their new module names (the WRF engine runs upstream's
+# farms.py and solar_diagnostics.py, entered above).  madwrf.py and
+# morrison_aero.py are upstream's modules now and allocate nothing.  The
+# fork's WDM6 column workspace keeps launch_wdm6's second site (its ws
+# block), and gf.py and physics.py carry the fork's held carriers on top
+# of upstream's counts: two GF fallbacks, three driver planes and two
+# initialization planes.
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/farms_wrf471.py'] = {
+    'farms_columns': 1, 'cloud_fraction': 1, '_radii': 1, '_aerosol': 4}
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/solar_diagnostics_wrf471.py'] = {
+    'radius_metres': 1}
+del _PHYSICS_ALLOCATION_INVENTORY['woof/core/madwrf.py']
+del _PHYSICS_ALLOCATION_INVENTORY['woof/core/morrison_aero.py']
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/wdm6.py']['launch_wdm6'] = 2
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/gf.py']['__call__'] = 25
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/physics.py'].update(
+    {'__init__': 29, 'initialize_physics': 77})
