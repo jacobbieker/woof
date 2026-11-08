@@ -78,6 +78,14 @@ done
     echo "# -O0 libm symbols the reference calls:"
     grep -E 'expf|powf|logf|log10f|_ZGV' undefined-O0.txt | sort -u || true
 } > libm-report.txt
-cat "${here}/SOURCES.sha256" > oracle-sha256sums.txt
-(cd "${here}" && sha256sum ./*.F90 ./build.sh | sed 's#  \./#  tools/chem_wrf461_oracle/radm2/#') >> oracle-sha256sums.txt
+# The build's inputs (WRF pins, harness sources) stay in the build directory;
+# the fixture directory gets the checksums of its own files, the list the
+# parity test verifies (tests/data/oracles/chem/radm2/oracle-sha256sums.txt).
+cat "${here}/SOURCES.sha256" > oracle-source-sha256sums.txt
+(cd "${here}" && sha256sum ./*.F90 ./build.sh | sed 's#  \./#  tools/chem_wrf461_oracle/radm2/#') >> oracle-source-sha256sums.txt
+for driver in "${here}"/run_*.F90; do
+    name=$(basename "${driver}" .F90)
+    (cd "${fixtures}/${name#run_}" && find . \( -name '*.bin' -o -name MANIFEST.txt \) \
+        | LC_ALL=C sort | xargs sha256sum > oracle-sha256sums.txt)
+done
 echo "radm2 oracle built in ${build}; fixtures in ${fixtures}"

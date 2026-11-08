@@ -25,8 +25,10 @@ docker run --rm -u $(id -u):$(id -g) -v WRF-4.6.1:/wrf:ro -v $PWD:/repo -v BUILD
     bash tools/chem_wrf461_oracle/radm2/build.sh /wrf /build/radm2 /build/radm2/fixtures
 ```
 
-then copy `/build/radm2/fixtures/radm2/*` here.  `oracle-sha256sums.txt`
-lists every fixture file's sha256 (checked by the parity test).
+then copy `/build/radm2/fixtures/radm2/*` here.  The build writes
+`oracle-sha256sums.txt` there: every fixture file's sha256, which the parity
+test checks.
 
 Driver: `tools/chem_wrf461_oracle/radm2/run_radm2.F90` (sha256
-9b430e4649c34c39b0077cef8dce9f96eb58dcd0e2ff1755cf3e92b3a1eceaa6).
+9b430e4649c34c39b0077cef8dce9f96eb58dcd0e2ff1755cf3e92b3a1eceaa6).  A rebuild from
+this tree (2026-11-08) reproduced every fixture byte for byte.
