@@ -355,11 +355,12 @@ def test_a_switch_among_dispatched_gotos_keeps_its_breaks_and_continues(cp):
 _FORWARDED = r'''
 __device__ void put(float* const* out, int c, float v) { out[1][c] = v; }
 __device__ void relay(float* const* out, int c) { put(out, c, (float)c * 2.0f); }
+__device__ void relay2(float* const* out, int c) { relay(out, c); }
 extern "C" __global__ void forwarded(float* a, float* b, int n) {
     int c = blockIdx.x * blockDim.x + threadIdx.x;
     if (c >= n) return;
     float* out[2] = {a, b};
-    relay(out, c);
+    relay2(out, c);
 }
 '''
 

@@ -2177,10 +2177,13 @@ class _Rewriter:
         while changed:
             changed = False
             for src, dst in forwards:
-                got = storage.get(src) or {"device"}
+                got = storage.get(src, set())
                 if not got <= storage[dst]:
                     storage[dst] |= got
                     changed = True
+        for key, where in storage.items():
+            if not where:
+                where.add("device")         # only ever passed on, from a parameter nothing resolves
         for node in self.tu.cursor.walk_preorder():
             if node.kind not in kinds or not self.main_file(node) or self.is_kernel(node):
                 continue
