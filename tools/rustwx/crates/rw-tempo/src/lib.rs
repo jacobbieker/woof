@@ -28,6 +28,7 @@
 pub mod capi;
 mod fields;
 mod glibc_tgamma;
+mod wrf_tables;
 
 use std::collections::HashMap;
 use std::fs;
