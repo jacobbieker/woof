@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Build the MPAS-Ocean v8.4.2 tendency oracle at the strict recipe, in both
-# precisions.
+# Build the MPAS-Ocean v8.4.2 tendency oracles (run_oracle: four tendency
+# terms; run_pgrad_hmix: pressure gradient and horizontal momentum mixing) at
+# the strict recipe, in both precisions.
 #
 #   bash tools/mpas_ocean_oracle/build.sh MPAS_SOURCE_ROOT BUILD_DIR
 #
@@ -37,21 +38,28 @@ for precision in r4 r8; do
     [[ ${precision} == r4 ]] && flags+=(-DSINGLE_PRECISION)
     "${fc[@]}" "${flags[@]}" "${source_root}/src/framework/mpas_kind_types.F"
     "${fc[@]}" "${flags[@]}" "${script_dir}/stubs.F90"
-    for unit in mpas_ocn_constants mpas_ocn_vel_coriolis mpas_ocn_vel_vadv mpas_ocn_thick_hadv mpas_ocn_thick_vadv; do
+    "${fc[@]}" "${flags[@]}" "${source_root}/src/framework/mpas_constants.F"
+    for unit in mpas_ocn_constants mpas_ocn_vel_coriolis mpas_ocn_vel_vadv mpas_ocn_thick_hadv mpas_ocn_thick_vadv \
+                mpas_ocn_vel_pressure_grad mpas_ocn_vel_hmix_del2 mpas_ocn_vel_hmix_leith mpas_ocn_vel_hmix_del4 \
+                mpas_ocn_vel_hmix; do
         "${fc[@]}" "${flags[@]}" "${ocean}/${unit}.F"
     done
     "${fc[@]}" "${flags[@]}" "${script_dir}/run_oracle.F90"
+    "${fc[@]}" "${flags[@]}" "${script_dir}/run_pgrad_hmix.F90"
     if command -v objdump >/dev/null; then
-        if objdump -d mpas_ocn_*.o | grep -Eq '\bv?fn?m(add|sub)([0-9]|[[:space:]]|$)'; then
+        if objdump -d mpas_ocn_*.o mpas_constants.o | grep -Eq '\bv?fn?m(add|sub)([0-9]|[[:space:]]|$)'; then
             echo "an oracle object contains an FMA instruction; refusing" >&2
             exit 4
         fi
     fi
-    "${fc[@]}" -o "${build_dir}/run_oracle_${precision}" run_oracle.o mpas_ocn_*.o stubs.o mpas_kind_types.o
+    "${fc[@]}" -o "${build_dir}/run_oracle_${precision}" run_oracle.o mpas_ocn_*.o mpas_constants.o stubs.o \
+        mpas_kind_types.o
+    "${fc[@]}" -o "${build_dir}/run_pgrad_hmix_${precision}" run_pgrad_hmix.o mpas_ocn_*.o mpas_constants.o \
+        stubs.o mpas_kind_types.o
 done
 {
     echo "gfortran: $("${fc[@]}" --version | head -1)"
     echo "flags: -O0 -ffp-contract=off -cpp -ffree-form -ffree-line-length-none; r4 adds -DSINGLE_PRECISION"
     echo "host: $(uname -srm)"
 } > "${build_dir}/TOOLCHAIN.txt"
-echo "built ${build_dir}/run_oracle_r4 ${build_dir}/run_oracle_r8"
+echo "built ${build_dir}/run_oracle_{r4,r8} ${build_dir}/run_pgrad_hmix_{r4,r8}"
