@@ -16,7 +16,11 @@ NOAHRES), and the land-ice column: ``ivgtyp == isice`` runs WRF's
 ICE == -1 arm in ``noah_glacial_column``, as WRF does (until 2.9.0 such a
 column was left untouched), graded bitwise against WRF by
 tests/test_noah_wrf461_parity.py.  FASDAS heat/moisture partition and soil heat adjustment run when
-``grid_sfdda=2``. UA snow and canopy physics use the same kernel family. NOT ported: WRF-Hydro,
+``grid_sfdda=2``. UA snow and canopy physics use the same kernel family.  WRF's
+-DWRF_HYDRO build (the LSM side of the WRF-Hydro exchange: ponded head in,
+infiltration excess and soil drainage out) runs through
+``launch_noah(wrf_hydro=...)``, graded by tests/test_noah_wrf_hydro_parity.py;
+the routing itself is the WRF-Hydro opt-in (docs/coupling/WRF-HYDRO-NEMO.md).  NOT ported:
 the urban canopy models themselves (they run after the kernel,
 :mod:`woof.core.urban_driver`; the kernel carries their hand-over through
 ``launch_noah(urban=...)``, and the plain ``VEGTYP==ISURBAN`` parameter
@@ -421,6 +425,10 @@ _F2D = ("psfc", "sfcprs", "sfctmp", "qv1", "qgh", "dz8w1", "glw",
         "sfcrunoff", "udrunoff", "acsnow", "acsnom", "snopcx", "potevp",
         "noahres", "reslin", "chklowq")
 _F3D = ("smois", "tslb", "sh2o", "smcrel")
+#: The WRF_HYDRO exchange planes, in noah_column_hydro's argument order
+#: (module_sf_noahdrv.F:2607-2610): ponded head in, infiltration excess and
+#: soil drainage out, all in mm.
+WRF_HYDRO_FIELDS = ("sfcheadrt", "infxsrt", "soldrain")
 
 
 def _device_tables(params: NoahParams, dzs):
@@ -657,7 +665,8 @@ def launch_noah(dev: dict, params: NoahParams, dt: float, dzs,
                 xice_threshold: float = 0.5, frpcpn: bool = False,
                 usemonalb: bool = False, rdlai2d: bool = False,
                 opt_thcnd: int = 1, itimestep: int = 2,
-                urban: dict | None = None, fasdas: dict | None = None, ua_phys: bool = False, irrigation_channel=None) -> None:
+                urban: dict | None = None,
+                wrf_hydro: dict | None = None, fasdas: dict | None = None, ua_phys: bool = False, irrigation_channel=None) -> None:
     """Run the ``noah_column`` kernel on device arrays (in place).
 
     ``dev`` maps field names to CuPy arrays: every name in ``_F2D`` as
@@ -675,7 +684,22 @@ def launch_noah(dev: dict, params: NoahParams, dt: float, dzs,
     category from the rural skin temperature (module_sf_noahdrv.F:964-990),
     BEP/BEM's ``tsk_rural_bep`` is updated after SFLX (:1243-1247), and
     ``q1``/``q2k``/``zlvl`` are written for the blend.
+
+    ``wrf_hydro`` is WRF built with ``-DWRF_HYDRO``: a dict of the three
+    ``(ny, nx)`` float32 exchange planes ``module_sf_noahdrv.F:2607`` adds
+    to ``lsm`` -- ``sfcheadrt`` (ponded surface head from the routing, mm,
+    read), ``infxsrt`` (infiltration excess, mm, written) and ``soldrain``
+    (``RUNOFF2*DT*1000``, mm, written).  It launches ``noah_column_hydro``,
+    which also adds the ponded head to SMFLX's ``PCPDRP`` and redistributes
+    SSTEP's excess water up the profile, as the six NDHMS edits in
+    ``module_sf_noahlsm.F`` do.  Only ordinary land columns are written.
+    WRF also passes the planes to the urban hand-over; that combination is
+    not ported and is refused.
     """
+    if wrf_hydro is not None and urban is not None:
+        raise NotImplementedError(
+            "Noah with WRF_HYDRO and sf_urban_physics > 0 is not ported: "
+            "noah_column_hydro has no urban hand-over")
     import cupy as cp
 
     from woof.core.kernels import get_kernel
@@ -723,6 +747,26 @@ def launch_noah(dev: dict, params: NoahParams, dt: float, dzs,
     # kernel behind a runtime flag changed NVRTC's FMA contraction and moved
     # default forecasts (kernels/noah.cu).
     name = "noah_column" if urban is None else "noah_column_urban"
+    if wrf_hydro is not None:
+        if fasdas is not None or irrigation_channel is not None or ua_phys:
+            raise NotImplementedError(
+                "Noah with WRF_HYDRO and FASDAS, channel irrigation or UA_PHYS is "
+                "not ported: only the plain WRF_HYDRO column is graded")
+        missing = [n for n in WRF_HYDRO_FIELDS if n not in wrf_hydro]
+        if missing:
+            raise ValueError(f"wrf_hydro is missing {missing}")
+        planes = [wrf_hydro[n] for n in WRF_HYDRO_FIELDS]
+        taken = {id(a) for a in dev.values()}
+        if len({id(a) for a in planes}) != len(planes) or taken & {id(a) for a in planes}:
+            raise ValueError("wrf_hydro planes must be three distinct arrays "
+                             "not also passed in dev: the kernel reads "
+                             "sfcheadrt and writes infxsrt and soldrain in place")
+        for name_ in WRF_HYDRO_FIELDS:
+            a = wrf_hydro[name_]
+            if a.shape != (ny, nx) or a.dtype != cp.float32:
+                raise ValueError(f"{name_}: expected ({ny},{nx}) float32")
+            args.append(a)
+        name = "noah_column_hydro"
     if urban is not None:
         args += _urban_args(urban, ny, nx)
     if fasdas is not None:

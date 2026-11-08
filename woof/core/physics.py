@@ -1991,6 +1991,15 @@ def _compose_three(out, pbl, radiation, cumulus):
     out += cumulus
 
 
+def _external_ocean_configured(cfg) -> bool:
+    """An ``ocean_config`` naming an ``[external_ocean]`` (woof.ocean.external),
+    whose cpl_snd2 sends GSW as SURF_NET_SOLAR."""
+    if not getattr(cfg, "ocean_config", ""):
+        return False
+    from woof.ocean.external import configured
+    return configured(cfg.ocean_config)
+
+
 def _prepare_atmosphere(state: DomainState) -> dict[str, cp.ndarray]:
     """CuPy transcription of WRF ``phy_prep`` fields used in Phase 3."""
     if getattr(state, "_moving_frame_velocity", None):
@@ -3328,9 +3337,9 @@ class PhysicsDriver:
         if "gsw" in self.fields:
             if result.gsw is None:
                 raise ValueError(
-                    "RUC, Grell 3D or a chem process reads "
-                    "radiation-time GSW, and the radiation callable "
-                    "returned none")
+                    "RUC, Grell 3D, a chem process or an external "
+                    "ocean's cpl_snd2 reads radiation-time GSW, and the "
+                    "radiation callable returned none")
             self.fields["gsw"][...] = _checked_array(
                 result.gsw, (ny, nx), "radiation GSW")
         if "coszen" in self.fields:
@@ -7528,6 +7537,12 @@ class PhysicsDriver:
                 atmosphere = _prepare_atmosphere(state)
             radtran.run(self, state, cfg, atmosphere)
 
+        # WRF's external-ocean receive: cpl_rcv's SST merge and
+        # sst_update's water lines, at the top of every surface_driver call
+        # (WRF 4.7.1 module_surface_driver.F:1507-1528, :1637-1791; woof.ocean.external).
+        external_ocean = getattr(self, "external_ocean", None)
+        if external_ocean is not None:
+            external_ocean.receive(self.fields)
         # WRF fixed-dt surface/PBL cadence: the mandatory ITIMESTEP=1 call
         # is followed by calls where MOD(ITIMESTEP, STEPBL) == 0.
         if (self.surface_enabled
@@ -7766,6 +7781,12 @@ class PhysicsDriver:
             else:
                 self.pbl_tendencies = PhysicsTendencies.zeros(state)
 
+        # The lowest level as phy_prep left it, which is what WRF's cpl_snd
+        # reads at the end of the step (woof.ocean.external).
+        if external_ocean is not None:
+            if atmosphere is None:
+                atmosphere = _prepare_atmosphere(state)
+            external_ocean.capture_lowest_level(atmosphere)
         # Ocean time follows each atmosphere step, independently of STEPBL.
         ocean = getattr(self, "ocean", None)
         if ocean is not None:
@@ -8657,7 +8678,8 @@ def initialize_physics(
     if (bool(cfg.tslist and cfg.max_ts_locs) or getattr(cfg, "sst_skin", 0) or int(cfg.sf_surface_physics) in (1, 3, 7) or cfg.sf_ocean_physics
             or int(cfg.cu_physics) in CU_GSW_READING_SCHEMES
             or "gsw" in chem_physics_reads(cfg)
-            or int(getattr(cfg, "aer_opt", 0) or 0) == 1):
+            or int(getattr(cfg, "aer_opt", 0) or 0) == 1
+            or _external_ocean_configured(cfg)):
         # GSW is updated only at radiation cadence and consumed unchanged
         # between those calls by RUC, by the slab scheme (SLAB1D's RNET is
         # GSW plus the net longwave) and by WRF-Chem's Wesely deposition,
@@ -9832,11 +9854,22 @@ def initialize_physics(
     driver.hydro_parent_geometry = hydro_parent_geometry
     from woof.hydro.runtime import attach_parent
     attach_parent(driver, state, cfg)
-    from woof.ocean.door import attach_atmosphere
-    attach_atmosphere(driver, cfg,
-        latitude=radiation_latitude if radiation_latitude is not None else noahmp_latitude,
-        longitude=radiation_longitude if radiation_longitude is not None else noahmp_longitude,
-        state=state,start_time=radiation_start_time if radiation_start_time is not None else noahmp_start_time)
+    # An [external_ocean] contract (woof.ocean.external) is WRF's coupler;
+    # any other ocean_config, or waves = "on", is the waves/surge door.
+    if _external_ocean_configured(cfg):
+        if getattr(cfg, "waves", "off") == "on":
+            raise NotImplementedError(
+                "waves = \"on\" with an [external_ocean]: the two ocean couplings "
+                "are not combined")
+        from woof.ocean.external import attach as attach_external_ocean
+        attach_external_ocean(driver, cfg, latitude=(
+            radiation_latitude if radiation_latitude is not None else noahmp_latitude))
+    else:
+        from woof.ocean.door import attach_atmosphere
+        attach_atmosphere(driver, cfg,
+            latitude=radiation_latitude if radiation_latitude is not None else noahmp_latitude,
+            longitude=radiation_longitude if radiation_longitude is not None else noahmp_longitude,
+            state=state,start_time=radiation_start_time if radiation_start_time is not None else noahmp_start_time)
     if driver.wind_farm is not None and driver.wind_farm.scheme != "fitch_wrf":
         # Initial-time power and hub wind are diagnostics of the initial state.
         # Sampling applies no momentum or TKE tendency before the first step.

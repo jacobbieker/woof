@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build and run the Noah LSM oracle against the byte-unmodified WRF v4.6.1
+# Build and run the Noah LSM oracle against the byte-unmodified WRF v4.7.1
 # phys/module_sf_noahlsm.F and phys/module_sf_noahdrv.F.
 #
 # WHAT IS AND IS NOT STUBBED.  module_sf_noahlsm.F USEs module_model_constants
@@ -45,7 +45,7 @@ fi
 source_root=$(realpath "$1")
 build_dir=$(realpath -m "$2")
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-pinned_commit="d66e442fccc04111067e29274c9f9eaccc3cef28"
+pinned_commit="f52c197ed39d12e087d02c50f412d90d418f6186"
 
 sources=(
     share/module_model_constants.F
@@ -206,6 +206,90 @@ for variant in thcnd2 frpcpn monalb; do
     fi
 done
 
+# --- WRF_HYDRO: the same driver, built as WRF builds it for WRF-Hydro --------
+# WRF compiled with WRF_HYDRO=1 passes -DWRF_HYDRO, which adds sfcheadrt,
+# infxsrt and soldrain to lsm (module_sf_noahdrv.F:2607) and switches on the
+# six NDHMS edits in module_sf_noahlsm.F (ponded head added to PCPDRP at
+# :2775, infiltration excess in SRT at :3719-3832, the WPLUS redistribution
+# in SSTEP at :4029-4062).  The same pinned, byte-unmodified sources are
+# compiled again in their own directory, because the .mod files of the two
+# builds differ.  run_lsm.F90 carries the three arrays under #ifdef
+# WRF_HYDRO, so without the define it is the program the fixtures above came
+# from.
+mkdir -p hydro
+rm -f wrf-hydro-coverage.txt
+(
+    cd hydro
+    hdefines="${defines} -DWRF_HYDRO"
+    gfortran -c -O0 -cpp ${free} -fallow-argument-mismatch \
+        "${script_dir}/stub_wrf.F90"
+    gfortran -c -O0 -cpp ${hdefines} ${free} \
+        "${source_root}/share/module_model_constants.F"
+    gfortran -c -O0 -cpp ${hdefines} ${free} -fallow-argument-mismatch \
+        "${source_root}/frame/module_wrf_error.F"
+    for src in module_sf_noahlsm module_sf_noahlsm_glacial_only module_sf_noahdrv; do
+        gfortran -c -O0 -cpp ${hdefines} ${free} -fallow-argument-mismatch \
+            -I "${build_dir}/hydro" "${source_root}/phys/${src}.F"
+    done
+    gfortran -c -O0 -cpp ${hdefines} ${free} -I "${build_dir}/hydro" \
+        "${source_root}/phys/module_sf_sfcdiags.F"
+    gfortran -c -O0 -cpp -DWRF_HYDRO ${free} -I "${build_dir}/hydro" \
+        "${script_dir}/run_lsm.F90"
+    gfortran -o run_lsm_hydro stub_wrf.o module_model_constants.o \
+        module_wrf_error.o module_sf_noahlsm.o \
+        module_sf_noahlsm_glacial_only.o module_sf_noahdrv.o \
+        module_sf_sfcdiags.o run_lsm.o
+    nm -u module_sf_noahlsm.o | sed 's/^ *//' | sort > undefined-O0-hydro.txt
+    if grep -q '_ZGV' undefined-O0-hydro.txt; then
+        echo "-O0 WRF_HYDRO module_sf_noahlsm.o pulled in a libmvec symbol" >&2
+        exit 4
+    fi
+
+    # Coverage evidence, never linked into the fixture: a scratch copy of
+    # module_sf_noahlsm.F with a print at the three WRF_HYDRO branches that
+    # write INFXS1RT, run over the same fixture.  A branch no column reaches
+    # is a branch the gate cannot check, so each must print at least once.
+    mkdir -p coverage
+    cd coverage
+    awk '
+        /INFXS1RT = RUNOFF1\*DT\*1000\./ { print; print "          print *, \"COVER SRT_INFXS\""; next }
+        /IF \(WPLUS > 0\.\) THEN/ { print; print "           print *, \"COVER SSTEP_WPLUS\""; next }
+        /INFXS1RT = INFXS1RT \+ WPLUS\*1000/ { print; print "                   print *, \"COVER SSTEP_SPILL\""; next }
+        { print }
+    ' "${source_root}/phys/module_sf_noahlsm.F" > module_sf_noahlsm.F
+    gfortran -c -O0 -cpp ${hdefines} ${free} -fallow-argument-mismatch \
+        -I "${build_dir}/hydro" -J . module_sf_noahlsm.F
+    gfortran -c -O0 -cpp ${hdefines} ${free} -fallow-argument-mismatch \
+        -I . -I .. -J . "${source_root}/phys/module_sf_noahlsm_glacial_only.F"
+    gfortran -c -O0 -cpp ${hdefines} ${free} -fallow-argument-mismatch \
+        -I . -I .. -J . "${source_root}/phys/module_sf_noahdrv.F"
+    gfortran -c -O0 -cpp ${hdefines} ${free} -I . -I .. -J . \
+        "${source_root}/phys/module_sf_sfcdiags.F"
+    gfortran -c -O0 -cpp -DWRF_HYDRO ${free} -I . -I .. -J . "${script_dir}/run_lsm.F90"
+    gfortran -o run_lsm_cover ../stub_wrf.o ../module_model_constants.o \
+        ../module_wrf_error.o module_sf_noahlsm.o \
+        module_sf_noahlsm_glacial_only.o module_sf_noahdrv.o \
+        module_sf_sfcdiags.o run_lsm.o
+    cp "${source_root}/run/VEGPARM.TBL" "${source_root}/run/SOILPARM.TBL" \
+       "${source_root}/run/GENPARM.TBL" .
+    ./run_lsm_cover cover.csv 1 F F F > cover-stdout.txt
+    for branch in SRT_INFXS SSTEP_WPLUS SSTEP_SPILL; do
+        n=$(grep -c "COVER ${branch}\$" cover-stdout.txt || true)
+        echo "${branch} ${n}" >> ../../wrf-hydro-coverage.txt
+        if [[ "${n}" -eq 0 ]]; then
+            echo "no fixture column reaches the WRF_HYDRO ${branch} branch" >&2
+            exit 7
+        fi
+    done
+)
+cp hydro/run_lsm_hydro .
+./run_lsm_hydro noah-lsm-wrf-hydro.csv 1 F F F > run-lsm-wrf-hydro-stdout.txt
+if cmp -s hydro/coverage/cover.csv noah-lsm-wrf-hydro.csv; then :; else
+    echo "the instrumented coverage build wrote a different fixture" >&2
+    exit 8
+fi
+cat wrf-hydro-coverage.txt
+
 sha256sum "${source_root}/share/module_model_constants.F" \
     "${source_root}/frame/module_wrf_error.F" \
     "${source_root}/phys/module_sf_noahlsm.F" \
@@ -219,6 +303,7 @@ sha256sum "${source_root}/share/module_model_constants.F" \
     VEGPARM.TBL SOILPARM.TBL GENPARM.TBL \
     noah-lsm.csv noah-lsm-thcnd2.csv noah-lsm-frpcpn.csv noah-lsm-monalb.csv \
     noah-lsm-glacial.csv noah-lsm-glacial-frpcpn.csv \
+    noah-lsm-wrf-hydro.csv \
     > oracle-sha256sums.txt
 gfortran --version | head -1 > compiler.txt
 echo "oracle built in ${build_dir}"

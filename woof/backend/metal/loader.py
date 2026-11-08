@@ -71,13 +71,20 @@ class MetalFunction:
                 "ptx_version": 0, "binary_version": 0}
 
     def __call__(self, grid, block, args, shared_mem=0, stream=None):
+        from woof.backend.facade import _capture
+        visible = [p for p in self.signature.params if p.global_name is None]
+        if len(args) != len(visible):
+            raise LaunchError(f"{self.name}: {len(args)} arguments for {len(visible)} parameters")
+        # inside a CUDA-graph capture: recorded, run by each Graph.launch
+        if _capture.record_launch(self, grid, block, tuple(args), shared_mem, stream):
+            return
+        self._launch(grid, block, args, shared_mem)
+
+    def _launch(self, grid, block, args, shared_mem=0):
         from woof.backend.facade._array import flush_pending, ndarray
         from woof.backend.metal import ext
         sig = self.signature
         params = sig.params
-        visible = [p for p in params if p.global_name is None]
-        if len(args) != len(visible):
-            raise LaunchError(f"{self.name}: {len(args)} arguments for {len(visible)} parameters")
         supplied = iter(args)
         buffers, offsets, writable, slots, targets = [], [], [], [], []
         null_slots, null_table = [], []

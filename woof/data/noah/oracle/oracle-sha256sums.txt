@@ -1,13 +1,13 @@
-5b80377fecdc18a5f0ad38d3b6c15cfc86ad5d76701adbbbb08a08698d0f7062  <wrf-4.6.1-checkout>/share/module_model_constants.F
-2ed7dc6e90e0fe442ffee84512b4998d31c8ec3400d3a7ab6078404065f784a6  <wrf-4.6.1-checkout>/frame/module_wrf_error.F
-034bf1d5f48b0b734702f200e3bcefe67db441b170cdcec8592992eb7d358e8c  <wrf-4.6.1-checkout>/phys/module_sf_noahlsm.F
-f43c6482c17c5dff132921c0909ed5d706d5c7b0921902744eea17ef82a1d99f  <wrf-4.6.1-checkout>/phys/module_sf_noahlsm_glacial_only.F
-bde4ecc9a63c9a57c1ca40408eec1703881749fefd8698a7a1a9260cfaba06b1  <wrf-4.6.1-checkout>/phys/module_sf_noahdrv.F
-c12f2ce27323e315142fadc311477befe18250e8988de11c7e3e41e1e28cdd1b  <wrf-4.6.1-checkout>/phys/module_sf_sfcdiags.F
+5b80377fecdc18a5f0ad38d3b6c15cfc86ad5d76701adbbbb08a08698d0f7062  <wrf-4.7.1-checkout>/share/module_model_constants.F
+2ed7dc6e90e0fe442ffee84512b4998d31c8ec3400d3a7ab6078404065f784a6  <wrf-4.7.1-checkout>/frame/module_wrf_error.F
+034bf1d5f48b0b734702f200e3bcefe67db441b170cdcec8592992eb7d358e8c  <wrf-4.7.1-checkout>/phys/module_sf_noahlsm.F
+f43c6482c17c5dff132921c0909ed5d706d5c7b0921902744eea17ef82a1d99f  <wrf-4.7.1-checkout>/phys/module_sf_noahlsm_glacial_only.F
+bde4ecc9a63c9a57c1ca40408eec1703881749fefd8698a7a1a9260cfaba06b1  <wrf-4.7.1-checkout>/phys/module_sf_noahdrv.F
+c12f2ce27323e315142fadc311477befe18250e8988de11c7e3e41e1e28cdd1b  <wrf-4.7.1-checkout>/phys/module_sf_sfcdiags.F
 1e04450ec44399144437c37b4230239e25d4379f0454c90a3fed3518ea407794  <oracle-workspace>/tools/noah_wrf461_oracle/stub_wrf.F90
-ac5038b68db53ebe9b70fbb59757f2de4beef07f3d904af0a8d87c7dccd83af6  <oracle-workspace>/tools/noah_wrf461_oracle/run_lsm.F90
+b002247690d5264f80ebbe237d0118a7f51c2b0aa23c2ee5c4e3237d3621e569  <oracle-workspace>/tools/noah_wrf461_oracle/run_lsm.F90
 a655fcd597a8241b3c5b941f71f85ec2035fa2f793666f005f551e27346f781b  <oracle-workspace>/tools/noah_wrf461_oracle/run_lsm_glacial.F90
-4b11e372ee04421b1ddb7c7abfbf7023f6602dda37cc9313ffbcf8e3aaa6d652  <oracle-workspace>/tools/noah_wrf461_oracle/build.sh
+988fde1fc7dafb98e427f5a2851f3f9e651be00a77bb3d65cdd38753ededa75f  <oracle-workspace>/tools/noah_wrf461_oracle/build.sh
 ed5478afbe49af51492256c1eb6cf88b3948590308525b32df1ddec28687b40e  VEGPARM.TBL
 1e2275a32d8cd3b48ca693d22c0816df0013f83b6594ac632716361db337d58f  SOILPARM.TBL
 9c02832a0e4a2ecaf47fcee485539aad95cd732c379c5c258161a88eb3d25ea2  GENPARM.TBL
@@ -17,3 +17,4 @@ f21494c37832c06b0e4941d1357ccf8e9410a6ab7c13bc8404947f4d841a0bd5  noah-lsm-frpcp
 6446e34cd441d05afc149bb3b2c338fb51e20cbbc6e273fb04c77cf9a58df9a1  noah-lsm-monalb.csv
 4fb4cdddd6a23d8f694a121b0ca3e3c150de4b298ef851ac99cbaaffe43f7aa2  noah-lsm-glacial.csv
 bea78c7ed4663a860252466a38dbf0e03dc5eb6c196a7d7ecab07a1ff35f79b5  noah-lsm-glacial-frpcpn.csv
+68bbdacffa20b404867d90b128d65daab9315c21a2fe67b547b7d03df6e60a37  noah-lsm-wrf-hydro.csv

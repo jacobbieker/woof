@@ -1,0 +1,6 @@
+# sha256  path  (WRF v4.6.1, commit d66e442fccc04111067e29274c9f9eaccc3cef28;
+# all four files are byte-identical in v4.7.1 f52c197e)
+5b80377fecdc18a5f0ad38d3b6c15cfc86ad5d76701adbbbb08a08698d0f7062  share/module_model_constants.F
+101beef4c417aa35e4526081aa016be60f2ef777cf5b0d574006ce2d041c723f  chem/module_data_radm2.F
+51ab49d24e570f5565fbc0cb137df566e6403205d885fc7c1fae8999ca010b9b  chem/module_data_sorgam.F
+20c5ac49779c7df414d46e8d8c44982f4bcac1341f24d11cf1c3f30b874bf13a  chem/module_aerosols_sorgam.F

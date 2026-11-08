@@ -1,0 +1,12 @@
+chem f4 4 8 10 2 81
+t_phy f4 3 8 10 2
+p_phy f4 3 8 10 2
+alt f4 3 8 10 2
+qv f4 3 8 10 2
+vcsulf_old f4 3 8 10 2
+vdrog3 f4 4 8 10 2 17
+cvaro1 f4 3 8 10 2
+cvaro2 f4 3 8 10 2
+cvalk1 f4 3 8 10 2
+cvole1 f4 3 8 10 2
+dtstep f4 0

@@ -1,0 +1,8 @@
+5b80377fecdc18a5f0ad38d3b6c15cfc86ad5d76701adbbbb08a08698d0f7062  <wrf-4.7.1-checkout>/share/module_model_constants.F
+7a34a1ed28c12cfe651ed10383824d813a03f259083924478052b003a4f7e788  <wrf-4.7.1-checkout>/frame/module_cpl.F
+aa20302003dde633b097ad0fcf47cf094d1609593f6d75c6e740b122c454e46c  cpl_snd2.inc
+1d74da88c615c769ea0762acda9dde5ba862064fa5a1f187d442e01bf61a29bf  cpl_rcv.inc
+199304b24908b26fd46c5b94a8e2020f260b1337c3015e376519ef540cf9e7c8  <oracle-workspace>/tools/wrf_cpl_wrf461_oracle/cpl_harness.F90
+3227170caa44e4ef6d04521e9989b99d98826b7034e547cc076ba4505f234cc4  <oracle-workspace>/tools/wrf_cpl_wrf461_oracle/run_cpl.F90
+9219f6d88e03f5eb96d4612780a9d2d88f907fd9f1dda33ad87ee5826dcab7d3  <oracle-workspace>/tools/wrf_cpl_wrf461_oracle/build.sh
+123637d898257f18ed4fed69d46c78411583caa13d6650cf2590044e928ce649  wrf-cpl.csv

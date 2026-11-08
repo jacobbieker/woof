@@ -508,6 +508,11 @@ def test_lake_compile_options_do_not_change_existing_modules(monkeypatch, strict
     expected["partial_nest"] = ("-std=c++17",)
     # Its D4 coupling: the same (tests/test_partial_nest_d4_kernel_words.py).
     expected["partial_nest_d4"] = ("-std=c++17",)
+    # RADM2 gas phase: graded word for word in both modes, so no FMA and
+    # no flushing (tests/test_chem_radm2_wrf461_parity.py).
+    expected["chem_radm2"] = ("-std=c++17", "--fmad=false", "--ftz=false")
+    # MADE/SORGAM, likewise (tests/test_chem_sorgam_wrf461_parity.py).
+    expected["chem_sorgam"] = ("-std=c++17", "--fmad=false", "--ftz=false")
     names = _module_names()
     assert set(expected) <= set(names), sorted(set(expected) - set(names))
     mismatches = {name: (kernel_loader.module_options(name),

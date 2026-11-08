@@ -1,9 +1,13 @@
 # Noah LSM oracle, WRF v4.6.1
 
 Four fixture files, produced by `tools/noah_wrf461_oracle/build.sh` from the
-byte-unmodified WRF v4.6.1 tree pinned at
-`d66e442fccc04111067e29274c9f9eaccc3cef28`.  `build.sh` refuses to run against
-any other commit, and refuses to run if `git diff` reports a change to any of
+byte-unmodified WRF v4.7.1 tree pinned at
+`f52c197ed39d12e087d02c50f412d90d418f6186` (re-pinned from v4.6.1,
+`d66e442fccc04111067e29274c9f9eaccc3cef28`, on 2026-11-08: the six sources
+and three tables it compiles are byte-identical between the two tags, every
+fixture below rebuilt byte-identical against v4.7.1, and only `build.sh`'s
+own digest moved in `oracle-sha256sums.txt`; the directory keeps its name).
+`build.sh` refuses to run against any other commit, and refuses to run if `git diff` reports a change to any of
 the six sources it compiles, so no number here can come from an edited tree.
 
 | file | driver switches |
@@ -57,3 +61,34 @@ and five columns (76-80) were added for that hand-over: CHS2 different from
 CQS2 on entry, CQS2 just below and exactly at SFCDIAGS's 1.E-5 threshold, a
 70 kPa plateau at night, and open water with CHS2 different from CQS2.  Every
 earlier field of rows 1-75 is byte-identical to the 75-column build.
+
+## `noah-lsm-wrf-hydro.csv` (WRF built with `-DWRF_HYDRO`)
+
+Added 2026-11-07.  `build.sh`'s hydro pass compiles the same six pinned,
+byte-unmodified sources again with `-DWRF_HYDRO` added to WRF's defines, as
+`configure` does when `WRF_HYDRO=1`, in its own directory (the `.mod` files of
+the two builds differ).  That adds `sfcheadrt`, `infxsrt` and `soldrain` to
+`lsm` (`module_sf_noahdrv.F:2607-2610`) and switches on the NDHMS edits in
+`module_sf_noahlsm.F` (`:2775`, `:3719-3832`, `:4029-4062`).  `run_lsm.F90`
+carries the three arrays under `#ifdef WRF_HYDRO`; without the define it is
+the program the six fixtures above came from.
+
+The 80 columns and driver switches are `noah-lsm.csv`'s (`opt_thcnd=1`,
+`frpcpn=F`, `usemonalb=F`, `rdlai2d=F`).  Each column carries one ponded head
+from (0, 0.25, 3, 40, 400) mm, cycled by case number; `infxsrt` enters as
+-7.0 and `soldrain` as -3.0, values lsm cannot produce, so open-water,
+sea-ice and land-ice columns visibly keep them.  Six more fields close every
+row: the three planes before the call and after it.
+
+The build refuses to write the fixture unless a scratch copy of
+`module_sf_noahlsm.F`, with a print added at each of the three statements
+that write `INFXS1RT`, reaches all three over the same columns; that copy is
+never linked into the fixture, and the fixture it writes must be identical to
+the clean build's.  `wrf-hydro-coverage.txt` is the receipt: SRT's excess 83
+calls, SSTEP's WPLUS redistribution 4, its spill into `INFXS1RT` 4 (cases 39
+and 74 among them).  Every zero-head row is byte-identical to `noah-lsm.csv`.
+
+Toolchain: gfortran 13.3.0, glibc 2.39-0ubuntu8.9 (Ubuntu 24.04 container).
+Before the hydro pass was added, the unchanged harness rebuilt all six
+committed CSVs byte-identically on it, and they are byte-identical with it.
+`oracle-sha256sums.txt` now also hashes this fixture and the edited harness.

@@ -14,7 +14,7 @@ with itself for months.
 bash tools/noah_wrf461_oracle/build.sh <WRF_SOURCE_ROOT> <BUILD_DIR>
 ```
 
-`WRF_SOURCE_ROOT` must be at `d66e442fccc04111067e29274c9f9eaccc3cef28` with
+`WRF_SOURCE_ROOT` must be at `f52c197ed39d12e087d02c50f412d90d418f6186` (v4.7.1; the Noah sources are byte-identical to v4.6.1's) with
 all five compiled sources clean; `build.sh` refuses otherwise.
 
 Four fixtures land in `woof/data/noah/oracle/` (see `PROVENANCE.md` there),
@@ -132,6 +132,16 @@ does (see `libmvec-report.txt`).
   different from CQS2 on entry (so lsm's `CHS2 = CQS2` moves a word), CQS2
   just below and exactly at SFCDIAGS's 1.E-5 threshold, a 70 kPa plateau at
   night, and open water with CHS2 different from CQS2.
+
+## The WRF_HYDRO pass
+
+WRF configured with `WRF_HYDRO=1` compiles `phys/` with `-DWRF_HYDRO`, which
+adds the three WRF-Hydro exchange planes to `lsm` and switches on six NDHMS
+edits in `module_sf_noahlsm.F`.  `build.sh` builds the same pinned sources
+that way in `BUILD_DIR/hydro/` and writes `noah-lsm-wrf-hydro.csv`; see
+`woof/data/noah/oracle/PROVENANCE.md`.  It refuses unless an instrumented
+scratch copy reaches all three statements that write `INFXS1RT`.  The gate is
+`tests/test_noah_wrf_hydro_parity.py`.
 
 ## Measuring the port
 

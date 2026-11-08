@@ -1,0 +1,7 @@
+chem f4 4 6 24 2 44
+t_phy f4 3 6 24 2
+p_phy f4 3 6 24 2
+qv f4 3 6 24 2
+ph f4 4 6 24 2 21
+dtstep f4 0
+gmt f4 0

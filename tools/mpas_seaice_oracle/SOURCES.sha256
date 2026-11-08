@@ -1,0 +1,10 @@
+# MPAS-Model v8.4.2 (f34984b2c89353cf31c235b08d3b4acd96b37bb3) files the
+# seaice oracles compile verbatim.  build.sh refuses to
+# build if any differs from its pin.
+13db2ffce7d70f0c725913eb8c58c2e0b3fbdffb7bfe0c2ac77798e554127c51  src/framework/mpas_kind_types.F
+2de0313a166a1124c46ea49e1993551cc6d04bbec9fc8e5c73b361596c7fde00  src/core_seaice/shared/mpas_seaice_velocity_solver_constitutive_relation.F
+ed7f647e90c22a126431991ebbfd44c4efbc9be16bf6f473a67512357f7401e6  src/core_seaice/shared/mpas_seaice_velocity_solver_variational.F
+5d4cbed440df4fe786ad1af1203776f3ca78d2228e29babfe7c3323a2d39442d  src/core_seaice/column/ice_kinds_mod.F90
+a25de356f0dbe2a43881c38ce7693e6887d6be602b018b896563311e42cb3c47  src/core_seaice/column/constants/cice/ice_constants_colpkg.F90
+b0605800bb3e5b0e3660ca635d61f184f076efd638214a1e129c1a79fe83e576  src/core_seaice/shared/mpas_seaice_constants.F
+21622b1c616031453d319d02ec739ebd9c371dcab93738c47597ae6268a0991c  src/core_seaice/shared/mpas_seaice_velocity_solver.F

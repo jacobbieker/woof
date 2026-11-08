@@ -85,6 +85,12 @@ def composed_units() -> list[str]:
         text = path.read_text(encoding="utf-8", errors="replace")
         if re.search(r"^def module_source\(", text, re.M) and re.search(r"^MODULE_OPTIONS\b", text, re.M):
             out.append(f"composed:{path.stem}")
+    # the MPAS ocean/sea-ice/land-ice lanes compose their units the same way;
+    # they are named by their path under woof (composed:hex.mpas_seaice.evp_v842)
+    for path in sorted((ROOT / "woof" / "hex").glob("mpas_*/*.py")):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if re.search(r"^def module_source\(", text, re.M) and re.search(r"^MODULE_OPTIONS\b", text, re.M):
+            out.append("composed:" + ".".join(path.relative_to(ROOT / "woof").with_suffix("").parts))
     return out
 
 
@@ -117,6 +123,7 @@ def fingerprint() -> str:
     roots = [ROOT / "woof" / "backend" / "translate", ROOT / "woof" / "backend" / "metal",
              ROOT / "woof" / "core" / "kernels", ROOT / "woof" / "numerics.py",
              ROOT / "woof" / "wrf_exact.py", Path(__file__).resolve()]
+    roots += sorted((ROOT / "woof" / "hex").glob("mpas_*"))
     files = []
     for root in roots:
         if root.is_file():
@@ -155,7 +162,8 @@ def census_one(name: str, retain: bool, translate_only: bool = False) -> dict:
             source, options = row["source"], tuple(row["options"])
         elif name.startswith("composed:"):
             import importlib
-            mod = importlib.import_module(f"woof.core.{name.split(':', 1)[1]}")
+            stem = name.split(":", 1)[1]
+            mod = importlib.import_module(f"woof.{stem}" if "." in stem else f"woof.core.{stem}")
             source, options = mod.module_source(), tuple(mod.MODULE_OPTIONS)
         else:
             source, options = kernels.module_source(name), kernels.module_options(name)
