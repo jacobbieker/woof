@@ -256,13 +256,28 @@ def evaluate_glacier_columns(inputs: dict, count: int,
                                             dtype=np.float32))
     device_out = cp.empty(count * N_OUTPUT, dtype=cp.float32)
     device_io = cp.empty(count * 2, dtype=cp.int32)
-    kernel = glacier_module(noahmp_snow_age=inputs.get("noahmp_snow_age", "wrf_470")).get_function("noahmp_glacier_column")
     blocks = (count + THREADS - 1) // THREADS
-    kernel(
-        (blocks,), (THREADS,),
-        (cp.asarray(packed.ravel()), cp.asarray(isnow), cp.asarray(zsoil),
-         np.float32(dt), device_out, device_io, np.int32(count)),
-    )
+    head = inputs.get("sfcheadrt")
+    if head is None:
+        kernel = glacier_module(noahmp_snow_age=inputs.get("noahmp_snow_age", "wrf_470")).get_function("noahmp_glacier_column")
+        kernel(
+            (blocks,), (THREADS,),
+            (cp.asarray(packed.ravel()), cp.asarray(isnow), cp.asarray(zsoil),
+             np.float32(dt), device_out, device_io, np.int32(count)),
+        )
+    else:
+        # WRF built with -DWRF_HYDRO: the selected glacier unit at the pinned
+        # option identity (opt_alb 2, opt_gla 1, opt_stc 1, opt_tbot 2) with
+        # the ponded head; the default kernel is untouched.
+        kernel = glacier_module(noahmp_snow_age=inputs.get("noahmp_snow_age", "wrf_470"),
+                                selected_options=True).get_function("noahmp_glacier_column_hydro")
+        kernel(
+            (blocks,), (THREADS,),
+            (cp.asarray(packed.ravel()), cp.asarray(isnow), cp.asarray(zsoil),
+             np.float32(dt), device_out, device_io, np.int32(count), np.int32(2),
+             np.int32(1), np.int32(1), np.int32(2),
+             cp.ascontiguousarray(cp.asarray(head, dtype=cp.float32).reshape(count))),
+        )
     host = cp.asnumpy(device_out).reshape(count, N_OUTPUT)
     host_io = cp.asnumpy(device_io).reshape(count, 2)
     _raise_on_errors(host_io[:, 1])
@@ -308,7 +323,9 @@ def evaluate_glacier_columns_on_host(inputs: dict, count: int,
             snliq=inputs["snliq"][i], tg=inputs["tg"][i],
             stc=inputs["stc"][i], sh2o=inputs["sh2o"][i],
             tauss=inputs["tauss"][i], qsfc=inputs["qsfc"][i],
-            noahmp_snow_age=inputs.get("noahmp_snow_age", "wrf_470"))
+            noahmp_snow_age=inputs.get("noahmp_snow_age", "wrf_470"),
+            sfcheadrt=(None if inputs.get("sfcheadrt") is None
+                       else np.float32(inputs["sfcheadrt"][i])))
         for name in GLACIER_OUTPUT_SCALARS:
             out[name][i] = getattr(result, name)
         for name, _w in GLACIER_OUTPUT_ARRAYS:
