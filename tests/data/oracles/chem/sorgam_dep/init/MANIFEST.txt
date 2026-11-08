@@ -1,0 +1,16 @@
+chem f4 4 8 4 2 81
+t_phy f4 3 8 4 2
+p_phy f4 3 8 4 2
+alt f4 3 8 4 2
+qv f4 3 8 4 2
+h2oaj f4 3 8 4 2
+h2oai f4 3 8 4 2
+cvaro1 f4 3 8 4 2
+cvaro2 f4 3 8 4 2
+cvalk1 f4 3 8 4 2
+cvole1 f4 3 8 4 2
+ust f4 2 8 2
+rmol f4 2 8 2
+znt f4 2 8 2
+pbl f4 2 8 2
+aer_res f4 2 8 2
