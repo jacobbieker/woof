@@ -106,6 +106,8 @@ woof = [
     # (`woof --help` stopped on the missing woof/ocean/rows.json in the r13 install check)
     "hydro/*.json",
     "ocean/*.json",
+    # WRF 4.6.1's ocean-coupler exchange (woof/ocean/wrf_cpl.py loads it)
+    "ocean/*.cu",
     "timeline/*.json",
     "hydro/*.cu",
     "hydro/*.cuh",
