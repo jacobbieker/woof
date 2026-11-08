@@ -12,6 +12,9 @@ opt-in          environment variable        licence
 ==============  ==========================  ==================================
 ``wrf_hydro``   ``WOOF_ENABLE_WRF_HYDRO=1`` UCAR WRF-Hydro licence (no sale
                                             or transfer for a fee)
+``nemo``        ``WOOF_ENABLE_NEMO=1``      CeCILL v2.0 (copyleft; a build
+                                            that loads it may be redistributed
+                                            only under CeCILL or the GNU GPL)
 ==============  ==========================  ==================================
 
 ``WOOF_OPTIONAL_ROOT`` points at another ``optional/`` directory (an install
@@ -33,6 +36,9 @@ OPT_INS = {
     "wrf_hydro": ("WOOF_ENABLE_WRF_HYDRO", "woof_wrf_hydro",
                   "UCAR's WRF-Hydro licence, which forbids selling or "
                   "transferring for a fee any work that contains it"),
+    "nemo": ("WOOF_ENABLE_NEMO", "woof_nemo",
+             "the CeCILL v2.0 copyleft licence, under which a build that loads "
+             "it may be redistributed only as CeCILL or GNU GPL as a whole"),
 }
 
 

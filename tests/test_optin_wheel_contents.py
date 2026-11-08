@@ -30,6 +30,7 @@ OPTIONAL = REPO_ROOT / "optional"
 #: A sentence of each opt-in's licence that no shipped file may carry.
 LICENCE_SENTENCES = {
     "wrf_hydro": "revise and copy the WRF-Hydro® software, in both object and source code",
+    "nemo": "The Licensee can include the Modified or unmodified Software in a code",
 }
 MARKER = "WOOF-OPTIN:"
 
@@ -107,7 +108,8 @@ def test_every_opt_in_is_marked_and_carries_its_licence():
     for name in OPT_INS:
         root = OPTIONAL / name
         assert (root / "LICENSE").is_file() and (root / "NOTICE.md").is_file(), name
-        assert LICENCE_SENTENCES[name] in (root / "LICENSE").read_text(encoding="utf-8")
+        licence = (root / "LICENSE").read_bytes().decode("utf-8", errors="replace")
+        assert LICENCE_SENTENCES[name] in " ".join(licence.split()), name
         for code in [*root.rglob("*.cu"), *root.rglob("*.py")]:
             if "oracle" in code.parts:
                 continue

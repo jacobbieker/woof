@@ -565,3 +565,5 @@ tools/rustwx/crates/rw-mpas/tests/rrfs_native/**
 # Opt-in ports under licences the release cannot carry (woof/optin.py):
 # WRF-Hydro routing, UCAR's WRF-Hydro licence (no sale or transfer for a fee).
 optional/wrf_hydro/**
+# NEMO kernels, CeCILL v2.0 (a build that loads them is CeCILL/GPL as a whole).
+optional/nemo/**

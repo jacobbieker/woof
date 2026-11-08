@@ -14,6 +14,8 @@ remaining step needs.
 
 | WRF-Hydro subsurface routing (`rt_option = 1`): FINDZWAT, ROUTE_SUBSURFACE1 with GETSUB8, SUBSFC_RTNG | WRF 4.6.1 `hydro/Routing/Noah_distr_routing_subsurface.F90`, `Noah_distr_routing.F90` (UCAR WRF-Hydro licence) | **opt-in**: `optional/wrf_hydro/` via `woof.optin.load("wrf_hydro")` with `WOOF_ENABLE_WRF_HYDRO=1` | `tests/test_wrf_hydro_subsurface_parity.py`: six routing calls bitwise on CUDA and Metal; skips by named rule when the opt-in is off |
 
+| NEMO 2-band penetrative solar radiation (`ln_qsr_2bd`, linear free surface, leapfrog): `qsr_ext_lev`, `qsr_2BD`, `tra_qsr` | NEMO 5.0.2 `src/OCE/TRA/traqsr.F90` (CeCILL v2.0) | **opt-in**: `optional/nemo/` via `woof.optin.load("nemo")` with `WOOF_ENABLE_NEMO=1` | `tests/test_nemo_traqsr_parity.py`: three steps bitwise in double on CUDA and Metal; skips by named rule when the opt-in is off |
+
 ## Decision (2026-11-07)
 
 The project owner approved both licence questions below: WRF-Hydro routing
@@ -24,7 +26,8 @@ The project owner approved both licence questions below: WRF-Hydro routing
 * the source lives under `optional/<name>/`, outside every Python package,
   with its licence text (`LICENSE`) and attribution (`NOTICE.md`) beside it;
 * it is off by default and loads only through `woof.optin.load(name)` when its
-  environment variable is set (`WOOF_ENABLE_WRF_HYDRO=1`) in a source checkout;
+  environment variable is set (`WOOF_ENABLE_WRF_HYDRO=1`,
+  `WOOF_ENABLE_NEMO=1`) in a source checkout;
 * it is in neither published wheel (`recast-woof`, `metal-woof`):
   `tests/test_optin_wheel_contents.py` asks setuptools what each wheel would
   contain and fails on any file under `optional/`, any `WOOF-OPTIN:` marked
@@ -144,7 +147,10 @@ Metal, and refuses what it does not port by name.
    in the surface driver before the LSM as `module_surface_driver.F:1510`
    does, with `cpl_store_input`'s SST_INPUT capture at
    `solve_em.F:374`.  Needs an `ExternalOcean` implementation to be useful.
-3. **An ocean**: either an external NEMO through a real coupler (out of
+3. **An ocean**: the NEMO opt-in has begun with `traqsr` (2-band penetrative
+   solar, the consumer of SURF_NET_SOLAR); the tracer advection/diffusion,
+   vertical mixing (TKE), equation of state and dynamics remain.  The
+   alternative is an external NEMO through a real coupler (out of
    process; NEMO stays a separate program and its licence does not reach
    WOOF), or, after the licence decision, NEMO kernels behind an opt-in with
    an oracle built from the pinned NEMO tree (XIOS, NetCDF and MPI are the
