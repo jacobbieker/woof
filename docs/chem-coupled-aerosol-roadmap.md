@@ -38,7 +38,7 @@ The choice is **WRF-Chem's RADM2 gas phase with the MADE/SORGAM modal aerosol
 
 | Source | Terms | Status |
 |---|---|---|
-| `module_radm.F`, `module_data_radm2.F`, `module_aerosols_sorgam.F`, `module_data_sorgam.F`, `module_sorgam_aqchem.F`, `module_prep_wetscav_sorgam.F`, `module_ftuv_*.F` | No notice; WRF `LICENSE.txt`: public domain, "for use by any person or entity for any purpose" | Portable: on the roadmap |
+| `module_radm.F`, `module_data_radm2.F`, `module_aerosols_sorgam.F`, `module_data_sorgam.F`, `module_sorgam_aqchem.F`, `module_prep_wetscav_sorgam.F`, `module_ftuv_*.F` | No notice; WRF `LICENSE.txt`: public domain, "for use by any person or entity for any purpose" | Portable: on the roadmap (`module_radm.F` done) |
 | `share/module_ctrans_aqchem.F` (CMAQ AQCHEM, HLCONST) | EPA Models-3: "permission to use, prepare derivative works, and distribute copies"; copies of derivatives requested | Portable: on the roadmap |
 | `share/module_ctrans_aqchem.F`, function `INDEX1` | I/O API, LGPL-2.1 | Not ported (a name search; the port indexes at compile time) |
 | `module_cbmz*.F`, `module_mosaic*.F` (all), `module_cmu_bulkaqchem.F`, `module_cmu_dvode_solver.F`, `cloudchem_driver.F`, `module_wetscav_driver.F`, `optical_driver.F`, `module_aer_drydep.F`, `module_mixactivate_wrappers.F`, `module_sorgam_cloudchem.F`, `module_peg_util.F`, `module_fastj_*.F` | Battelle/PNNL, DOE contract DE-AC05-76RL01830, with the terms below, given directly or by "see module_mosaic_driver.F for references and terms of use" | Opt-in only |
@@ -75,7 +75,7 @@ Metal (mac) with `GPUWM_WRF_EXACT=0` and `=1`.
 
 | Phase | Content | WRF source | Status |
 |---|---|---|---|
-| P1 | RADM2 gas phase: rate constants, QSSA solver, adaptive column step | `module_radm.F` (1.7k lines) | In progress |
+| P1 | RADM2 gas phase: rate constants, QSSA solver, adaptive column step | `module_radm.F` (1.7k lines) | **Done**: `woof/core/chem_radm2.py`, `chem_radm2.cu`, oracle `tools/chem_wrf461_oracle/radm2` |
 | P2 | MADE/SORGAM aerosol dynamics: nucleation, condensation, coagulation, mode parameters | `module_aerosols_sorgam.F` `rpmmod3`, `aeroproc`, `aerostep`, `nuclcond`, `coagrate`, `modpar` | Next |
 | P3 | Inorganic equilibrium (RPMARES) and SORGAM secondary organics | `rpmares_old`, `eql3`, `awater`, `sorgam`, `soa_part`, Newton solver | |
 | P4 | SORGAM dry deposition and settling, PM sums, initial conditions | `sorgam_depdriver`, `VDVG`, `sum_pm_sorgam`, `aerosols_sorgam_init` | |
