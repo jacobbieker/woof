@@ -1,13 +1,14 @@
 # WOOF-OPTIN: wrf-hydro
 """WRF-Hydro's groundwater bucket on device (``baseflow.cu``).
 
-``simp_gw_buck`` (hydro/Routing/module_GW_baseflow.F90 in WRF 4.6.1's hydro/):
+``simp_gw_buck`` (hydro/Routing/module_GW_baseflow.F90 in WRF 4.7.1's hydro/):
 each basin's bucket takes the mean LSM drainage (SOLDRAIN; plus INFXSRT when
 overland routing is off), discharges by the exponential bucket
 (GWBASESWCRT = 1, with overflow spill) or passes it through
 (GWBASESWCRT = 2), and the outflow is spread over the basin's stream pixels
-as QINFLOWBASE for the channel.  GWBASESWCRT = 3 (the 2-D groundwater model)
-and 4 (the area-normalised bucket, simp_gw_buck_nhd, UDMP) are refused by name.
+as QINFLOWBASE for the channel.  GWBASESWCRT = 3 is the 2-D groundwater
+model (:class:`woof_wrf_hydro.gw2d.Gw2d`); 4 (the area-normalised bucket,
+simp_gw_buck_nhd, UDMP) is refused by name.
 
 Basin masks are host data, read once: ``gwsubbasmsk`` (jx, ix) of basin ids,
 ``basnsind`` (the ids, in bucket order), ``gw_strm_msk_lind`` (jxrt, ixrt) of
@@ -39,7 +40,7 @@ def _k(name):
 
 
 def pixel_count(gw_strm_msk, nb) -> np.ndarray:
-    """module_RT.F90:1383-1394: REAL count of stream pixels per bucket."""
+    """module_RT.F90:1369-1380: REAL count of stream pixels per bucket."""
     counts = np.zeros(nb, np.float32)
     for b in np.asarray(gw_strm_msk).ravel():
         if b > 0:
@@ -53,8 +54,8 @@ class GroundwaterBucket:
         import cupy as cp
 
         if gwbaseswcrt == 3:
-            raise NotImplementedError("GWBASESWCRT = 3 (the 2-D groundwater model, gw2d) is "
-                                      "not ported")
+            raise ValueError("GWBASESWCRT = 3 is the 2-D groundwater model, not a bucket: "
+                             "use Gw2d")
         if gwbaseswcrt == 4:
             raise NotImplementedError("GWBASESWCRT = 4 (the area-normalised exponential "
                                       "bucket of simp_gw_buck_nhd, UDMP) is not ported")

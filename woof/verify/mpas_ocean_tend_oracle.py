@@ -141,8 +141,9 @@ def read_outputs(raw: bytes, case: dict, precision: str) -> dict[str, np.ndarray
     return out
 
 
-def load_fixture(precision: str) -> dict[str, dict[str, np.ndarray]]:
-    with np.load(FIXTURE_DIR / f"oracle-{precision}.npz") as data:
+def load_fixture(precision: str, fixture_dir: Path = FIXTURE_DIR) -> dict[str, dict[str, np.ndarray]]:
+    """``<case>/<field>`` of a fixture's ``oracle-<precision>.npz`` as nested dicts."""
+    with np.load(fixture_dir / f"oracle-{precision}.npz") as data:
         out: dict[str, dict[str, np.ndarray]] = {}
         for key in data.files:
             case, field = key.split("/", 1)

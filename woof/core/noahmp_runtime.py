@@ -471,10 +471,10 @@ def _glacier_lsm_step(fields, atmosphere, glacier_mask, *, params, coszen,
     fields["fvegxy"][at] = zero
     fields["runsfxy"][at] = runsf_mm
     fields["runsbxy"][at] = runsb_mm
-    if wrf_hydro is not None:                                # :1211-1218
+    if wrf_hydro is not None:                                # 4.7.1 drv :1210-1217
         wrf_hydro["soldrain"][at] = cp.where(runsb_mm > zero, runsb_mm, zero)
         wrf_hydro["infxsrt"][at] = runsf_mm
-        wrf_hydro["qtiledrain"][at] = zero                   # QTLDRN = 0 (:858)
+        wrf_hydro["qtiledrain"][at] = zero                   # QTLDRN = 0 (4.7.1 drv :857)
     if "soldrain" in fields:
         fields["soldrain"][at] = zero  # glacier has no soil bottom drainage
     fields["ecanxy"][at] = zero
@@ -1873,7 +1873,7 @@ def noahmp_lsm_step(
     """One ``noahmplsm`` call.  Mutates ``fields`` in place.
 
     ``wrf_hydro`` is WRF built with -DWRF_HYDRO (module_sf_noahmpdrv.F
-    :66-68, :173-175, :1201-1218): a mapping of ``(ny, nx)`` float32 device
+    :66-68, :173-175, :1200-1217 in WRF 4.7.1's Noah-MP e5c0859): a mapping of ``(ny, nx)`` float32 device
     planes.  ``sfcheadrt`` (the ponded head WRF-Hydro returns, mm) is read:
     WATER adds it to QINSUR, and on glacier columns it leaves as surface
     runoff; the water-budget stops are compiled out.  ``infxsrt`` (RUNSF,
@@ -2379,13 +2379,6 @@ def _lsm_step_slab(
         layout = params.surface_layout(fields, nsoil=nsoil,
                                        chunk_width=SLAB_COLUMN_CHUNK,
                                        sf_urban_physics=int(sf_urban_physics))
-    if device_surface and wrf_hydro is not None and layout["census"]["glacier"]:
-        # The resident glacier slab (run_glacier_slab) has no sfcheadrt
-        # input and no exchange-plane write-back; refuse before any field
-        # moves rather than leave glacier cells stale in the exchange.
-        raise NotImplementedError(
-            "wrf_hydro with glacier columns on the resident device-surface "
-            "path (selected options or noahmp_output=3) is not ported")
     if cadence_on:
         from woof.core.noahmp_soil_cadence import ACCUMULATORS,cadence
         steps,calculate,reset=cadence(soil_interval,dt,itimestep)
@@ -2495,7 +2488,7 @@ def _lsm_step_slab(
                          opt_alb=options["opt_alb"], opt_gla=options.get("opt_gla",1),
                          opt_stc=options["opt_stc"], opt_tbot=options.get("opt_tbot", 2),
                          snicar_options=options.get("snicar_options"),
-                         noahmp_snow_age=noahmp_snow_age)
+                         noahmp_snow_age=noahmp_snow_age, wrf_hydro=wrf_hydro)
         census["glacier_path"] = "noahmp-glacier/resident-cuda"
     elif n_glacier:
         if not params.glacier_path:
@@ -2665,7 +2658,7 @@ def _lsm_step_slab(
 
 
 def _write_back_wrf_hydro(wrf_hydro, j, i, r, *, active=None) -> None:
-    """module_sf_noahmpdrv.F :1211-1218 under WRF_HYDRO, land columns:
+    """module_sf_noahmpdrv.F (WRF 4.7.1, Noah-MP e5c0859) :1210-1217 under WRF_HYDRO, land columns:
     SOLDRAIN = MAX(RUNSB, 0.0), INFXSRT = RUNSF, QTILEDRAIN = QTLDRN (mm)."""
     if wrf_hydro is None:
         return

@@ -48,7 +48,7 @@ def test_unported_and_malformed_refused_by_name(tmp_path, block, match):
 
 def test_species_and_wrf_chem_are_exclusive(tmp_path):
     path = config(tmp_path, {"chem_opt": 401}, species=[])
-    with pytest.raises(ValueError, match="not both"):
+    with pytest.raises(ValueError, match=r"not \['species', 'wrf_chem'\]"):
         load_config(path)
 
 
@@ -181,6 +181,9 @@ def test_backend_runs_the_wrf_step_after_the_physics_and_settles_it(tmp_path, mo
 
     class Runtime:
         feedback = False
+        needs_phase_one = False
+        phase2_winds = True
+        columns = chem_wrf.HexWrfChemistry.columns
 
         def __init__(self, path, raw, digest, **kwargs):
             self.kwargs = kwargs
@@ -247,6 +250,9 @@ def test_feedback_prepares_the_radiation_before_phase_one(tmp_path, monkeypatch)
 
     class Runtime:
         feedback = True
+        needs_phase_one = True
+        phase2_winds = True
+        columns = chem_wrf.HexWrfChemistry.columns
 
         def __init__(self, *args, **kwargs):
             pass
@@ -254,7 +260,7 @@ def test_feedback_prepares_the_radiation_before_phase_one(tmp_path, monkeypatch)
         def bind_seam(self, seam):
             calls.append("bind")
 
-        def prepare_radiation(self, scalars, columns, *, elapsed_seconds):
+        def before_phase_one(self, scalars, columns, *, elapsed_seconds):
             calls.append(("radiation", columns["pressure"], elapsed_seconds))
 
     monkeypatch.setattr(base, "PersistentTwoPhaseCudaPhysicsBackendV841", Base)

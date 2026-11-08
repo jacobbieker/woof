@@ -1,11 +1,11 @@
 // WOOF-OPTIN: wrf-hydro
-// Derived from WRF-Hydro as distributed with WRF 4.6.1 (UCAR licence); see
+// Derived from WRF-Hydro as distributed with WRF 4.7.1 (UCAR licence); see
 // optional/wrf_hydro/LICENSE and NOTICE.md.  Not part of the default build or
 // of any wheel.
 //
 // WRF-Hydro's diffusive-wave channel routing on nodes, the channel_option = 3
 // branch of drive_CHANNEL (hydro/Routing/module_channel_routing.F90
-// :873-1281) with DIFFUSION (:73-147), HEAD (:1315-1368), AREAf and SGNf, and
+// :893-1301) with DIFFUSION (:53-127), HEAD (:1341-1394), AREAf and SGNf, and
 // its level-pool lakes (levelpool.cu, preceding this file), for WRF-Hydro's
 // MPP_LAND build on one process, without groundwater-channel exchange.
 // float32 as WRF-Hydro (REAL), the node and lake sums QSUM8, QLLAKE8 and
@@ -29,7 +29,7 @@ __device__ static float diff_sgnf(float val)
     return 0.0f;
 }
 
-// DIFFUSION (:73-147)
+// DIFFUSION (:53-127)
 __device__ static float diff_diffusion(float z1, float z20, float h1, float h2, float dx,
                                        float n, float Bw, float Cs, int* err)
 {
@@ -60,7 +60,7 @@ __device__ static float diff_areaf(float AREA, float Bw, float h, float z)
     return (Bw + z * h) * h - AREA;
 }
 
-// HEAD (:1315-1368): the depth holding wetted area AREA, by bisection
+// HEAD (:1341-1394): the depth holding wetted area AREA, by bisection
 __device__ static float diff_head(float AREA, float Bw, float z)
 {
     float error = 1.0f;
@@ -116,9 +116,13 @@ extern "C" __global__ void wrfhydro_diffusive(
     const int* __restrict__ pour, const float* __restrict__ lakeinflort,
     const int* __restrict__ lnstart, const int* __restrict__ lnlist,
     const int* __restrict__ listart, const int* __restrict__ lilist,
-    const float* __restrict__ lprops, float* __restrict__ resht, float* __restrict__ qlakei,
+    const float* __restrict__ lprops, const int* __restrict__ lopt, float* __restrict__ resht, float* __restrict__ qlakei,
     float* __restrict__ qlakeo, float* __restrict__ qlakeip, float* __restrict__ qllake,
-    int nlakes)
+    int nlakes,
+    // the groundwater-channel exchange (GWBASESWCRT = 3, :920-923, :949-990):
+    // gwhead is gw2d's ho, qgw_chanrt (jxrt*ixrt) gw2d's channel flux plane
+    int gw_on, int gw_sw, float cond_in, float cond_out,
+    const float* __restrict__ gwhead, float* __restrict__ qgw_chanrt, int ncell)
 {
     __shared__ float dtct;
     __shared__ int krt, dt_steps, flag;
@@ -130,13 +134,15 @@ extern "C" __global__ void wrfhydro_diffusive(
         dtct = dtrt_ch < d ? dtrt_ch : d;
         krt = 0;
     }
-    for (int i = tid; i < nlinks; i += nt) {             // drive_CHANNEL :688-703, :883-885
+    for (int i = tid; i < nlinks; i += nt) {             // drive_CHANNEL :689-704, :903-905
         hlinktmp[i] = hlink[i];
         cvoltmp[i] = cvol[i];
         cd[i] = 0.0f;
         qlateral[i] = 0.0f;
     }
     for (int l = tid; l < nlakes; l += nt) qlakeip[l] = qlakei[l];   // QLAKEIP = QLAKEI
+    if (gw_on)                                            // qgw_chanrt = 0. (:922)
+        for (int c = tid; c < ncell; c += nt) qgw_chanrt[c] = 0.0f;
     __syncthreads();
     for (;;) {                                            // crnt
         if (tid == 0) {
@@ -151,8 +157,19 @@ extern "C" __global__ void wrfhydro_diffusive(
             if (node_area[i] == 0.0f) atomicOr(err, DIFF_ERR_AREA);
             if (regular[i]) {
                 int c = cell[i];
-                qlateral[i] = 0.0f + ((qstrmvolrt[c] + qinflowbase[c])
-                                      / (float)steps * node_area[i] / 1000.0f / dtc);
+                float qgw = 0.0f;                         // Q_GW_CHAN_FLUX(i)
+                if (gw_on) {                              // gwOption (:949-990)
+                    float dz = gwhead[c] - (hlink[i] + zelev[i]);
+                    if (gw_sw == 1 && dz > 0.0f) {
+                        qgw = cond_in * dz * chanlen[i] * 2.0f;
+                    } else if (gw_sw == 1 && dz < 0.0f) {
+                        float q = cond_out * dz * chanlen[i] * 2.0f;
+                        qgw = -0.005f > q ? -0.005f : q;  // MAX(-0.005, ...) at -O0
+                    }
+                    qgw_chanrt[c] = qgw;
+                }
+                qlateral[i] = qgw + ((qstrmvolrt[c] + qinflowbase[c])
+                                     / (float)steps * node_area[i] / 1000.0f / dtc);
             } else if (pour[i] > 0) {
                 qlateral[i] = qlakeo[pour[i] - 1];       // previous timestep
             }
@@ -244,7 +261,7 @@ extern "C" __global__ void wrfhydro_diffusive(
             qlakei[l] = (float)s;
             const float* q = lprops + (size_t)l * 9;
             float H = resht[l], qo;
-            levelpool_physics(qlakeip[l], qlakei[l], qo, qllake[l], dtc, H, q[0], q[1], q[8],
+            levelpool_physics(lopt[l], qlakeip[l], qlakei[l], qo, qllake[l], dtc, H, q[0], q[1], q[8],
                               q[2], q[3], q[4], q[5], q[6], q[7]);
             resht[l] = H;
             qlakeo[l] = qo;

@@ -1,4 +1,4 @@
-"""Noah's side of the WRF-Hydro exchange, against WRF v4.6.1 built -DWRF_HYDRO.
+"""Noah's side of the WRF-Hydro exchange, against WRF v4.7.1 built -DWRF_HYDRO.
 
 WRF configured with ``WRF_HYDRO=1`` compiles ``phys/`` with ``-DWRF_HYDRO``.
 For ``sf_surface_physics=2`` that adds three planes to ``lsm``

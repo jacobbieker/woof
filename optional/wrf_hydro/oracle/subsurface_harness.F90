@@ -1,4 +1,4 @@
-! Service module for WRF-Hydro's subsurface routing as WRF 4.6.1 ships it
+! Service module for WRF-Hydro's subsurface routing as WRF 4.7.1 ships it
 ! (hydro/Routing/Noah_distr_routing_subsurface.F90, and GETSUB8/GETSUB8DIR
 ! from hydro/Routing/Noah_distr_routing.F90).
 !

@@ -1,9 +1,9 @@
 """Noah-MP glacier columns as WRF builds them with -DWRF_HYDRO.
 
-Under WRF_HYDRO, WATER_GLACIER (module_sf_noahmp_glacier.F :2143-2145) sends
+Under WRF_HYDRO, WATER_GLACIER (module_sf_noahmp_glacier.F, WRF 4.7.1's Noah-MP e5c0859, :2144-2146) sends
 the ponded head WRF-Hydro returns straight to surface runoff,
 RUNSRF = RUNSRF + sfcheadrt/DT, and ERROR_GLACIER's water-budget stop is
-compiled out (:3030-3046).  The glacier port is graded, as without
+compiled out (:3031-3047).  The glacier port is graded, as without
 WRF_HYDRO (tests/test_noahmp_glacier_gpu.py), by bitwise CUDA/CPython
 parity over chained steps of a multi-regime battery; here every column also
 carries a ponded head.

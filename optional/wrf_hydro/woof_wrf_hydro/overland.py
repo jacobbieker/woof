@@ -2,7 +2,7 @@
 """WRF-Hydro's overland routing on device (``overland.cu``), rt_option = 1.
 
 A port of ``OverlandRouting`` (hydro/Routing/Noah_distr_routing_overland.F90 in
-WRF 4.6.1's hydro/): when any cell's infiltration excess exceeds its retention
+WRF 4.7.1's hydro/): when any cell's infiltration excess exceeds its retention
 depth, OV_RTNG sets the head to it and takes INT(DT/DTRT_TER) substeps, each
 capping channel cells at 5 mm (water above goes to the channel) and lake cells
 at their retention (water above goes to the lake), then ROUTE_OVERLAND1 moves

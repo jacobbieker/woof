@@ -169,6 +169,10 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--emit-symbols", action="store_true")
     ap.add_argument("--require-symbol", action="append", default=[])
     ap.add_argument("--self-test", action="store_true")
+    # A caller pinned to another revision of the same file (the WRF 4.7.1
+    # Noah-MP submodule, e5c0859) names its own digest; the patch itself is
+    # text-generic and re-derived the same three ways below.
+    ap.add_argument("--accept-sha256", default=PRISTINE_SHA256)
     ap.add_argument("--mutate", choices=sorted(MUTATIONS),
                     help="negative control: also apply this source mutation")
     args = ap.parse_args(argv)
@@ -181,8 +185,8 @@ def main(argv: list[str]) -> int:
 
     raw = read_bytes(args.pristine)
     digest = hashlib.sha256(raw).hexdigest()
-    if digest != PRISTINE_SHA256:
-        print(f"FAIL: pristine sha256 {digest} != pinned {PRISTINE_SHA256}")
+    if digest != args.accept_sha256:
+        print(f"FAIL: pristine sha256 {digest} != pinned {args.accept_sha256}")
         return 2
 
     text = raw.decode("latin-1")

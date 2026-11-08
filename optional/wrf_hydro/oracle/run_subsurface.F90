@@ -1,7 +1,7 @@
 program run_wrf_hydro_subsurface_oracle
   ! Drive WRF-Hydro's subsurfaceRouting (FINDZWAT, ROUTE_SUBSURFACE1 and
   ! SUBSFC_RTNG) over a small routing grid for NSTEP calls, resetting QSUBRT
-  ! after each as HYDRO_exe does (module_HYDRO_drv.F90:767), and dump every
+  ! after each as HYDRO_exe does (module_HYDRO_drv.F90:747), and dump every
   ! input and every output word as CSV.  Inputs are spread by integer hashes,
   ! never libm.  The terrain slopes and steepest-neighbour indices are formed
   ! from an elevation field the way the routing initialisation forms them
@@ -43,7 +43,7 @@ program run_wrf_hydro_subsurface_oracle
   sub%properties%sldpth = (/ 0.1, 0.3, 0.6, 1.0 /)
   sub%properties%zsoil = 0.0
   sub%properties%zsoil(1:nsoil) = (/ -0.1, -0.4, -1.0, -2.0 /)
-  ! module_RT.F90:1652: SOLDEPRT = -ZSOIL(NSOIL)
+  ! module_RT.F90:1638: SOLDEPRT = -ZSOIL(NSOIL)
   sub%properties%soldeprt = -1.0 * sub%properties%zsoil(nsoil)
   sub%properties%zwattablrt = 0.0
   sub%state%qsubrt = 0.0
@@ -144,7 +144,7 @@ program run_wrf_hydro_subsurface_oracle
       end do
     end do
     write(w, '(I0,",",ES24.16E3)') n, sub%state%qsubbdrytrt
-    ! module_HYDRO_drv.F90:767, at the end of every HYDRO_exe
+    ! module_HYDRO_drv.F90:747, at the end of every HYDRO_exe
     sub%state%qsubrt = 0.0
   end do
   close(v); close(w)

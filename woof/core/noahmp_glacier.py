@@ -65,19 +65,21 @@ threshold, the ``SSI`` percolation capacity) that the main module has
 since moved off, so each is transcribed fresh below with its own
 anchors.
 
-Two documented departures from undefined WRF behaviour
-------------------------------------------------------
+Two documented departures from undefined WRF 4.6.1 behaviour
+------------------------------------------------------------
 Both follow the house rule: where WRF reads an undefined value, woof
 implements the defined behaviour and documents the divergence
 (``never bit-exact to a bug``).
 
 * ``HCPCT``: the driver's SNOWENERGY/SOILENERGY integrals
   (``module_sf_noahmpdrv.F:1381-1394``) read ``HCPCT`` for glacier
-  columns too, but the glacier arm never writes it -- WRF reads
-  whatever the previous NOAHMP_SFLX column left in the loop-carried
-  local.  woof returns the glacier column's own heat capacity from
-  THERMOPROP_GLACIER (:534-604), which is the quantity the integral
-  means.
+  columns too.  In 848f54ad (WRF 4.6.1) the glacier arm never writes it,
+  so WRF reads whatever the previous NOAHMP_SFLX column left in the
+  loop-carried local.  woof returns the glacier column's own heat
+  capacity from THERMOPROP_GLACIER (:534-604), and that is what WRF 4.7.1's
+  submodule e5c0859 does: NOAHMP_GLACIER returns HCPCT (glacier
+  :115, :194) and the driver passes it (:1058).  So this is a departure
+  only from 4.6.1.
 * ``EFLXB``: same story (``EFLXBXY`` is written from a local the
   glacier arm never sets).  woof returns TSNOSOI_GLACIER's ``BOTFLX``
   (:1459-1464), the glacier column's actual bottom energy influx.
@@ -1349,7 +1351,7 @@ def _water_glacier(col: SnowColumn, stc, *, dt, prcp, sfctmp, qvap, qdew,
     else:
         runsrf = runsrf + qsnbot
 
-    if sfcheadrt is not None:                                     # WRF_HYDRO :2143-2145
+    if sfcheadrt is not None:                                     # WRF_HYDRO, 4.7.1 e5c0859 :2144-2146
         runsrf = runsrf + _f(sfcheadrt) / dt
 
     # OPT_GLA == 1 :2147-2154
@@ -1395,7 +1397,7 @@ def _error_glacier(swdown, fsa, fsr, fira, fsh, fgev, ssoil, sag, prcp,
     end_wb = _f(sneqv)                                            # :3027-3028
     errwat = (end_wb - _f(beg_wb)
               - (_f(prcp) - _f(edir) - _f(runsrf) - _f(runsub)) * _f(dt))
-    if check_water and abs(errwat) > _f(0.1):                     # :3030-3046, not under WRF_HYDRO
+    if check_water and abs(errwat) > _f(0.1):                     # 4.7.1 e5c0859 :3031-3047, not under WRF_HYDRO
         raise GlacierBalanceError(
             f"NOAHMP_GLACIER water budget problem at (j={jloc}, "
             f"i={iloc}): ERRWAT={float(errwat)} mm per timestep")
