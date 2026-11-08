@@ -1,14 +1,18 @@
 #!/bin/sh
-# Build the WRF v4.6.1 Noah-MP WATER oracle as WRF builds it with -DWRF_HYDRO
+# Build the WRF v4.7.1 Noah-MP WATER oracle as WRF builds it with -DWRF_HYDRO
 # (WRF_HYDRO=1 at configure): module_sf_noahmplsm.F's WATER then adds the
 # ponded head WRF-Hydro returns to the LSM, QINSUR = QINSUR+sfcheadrt/DT*0.001
 # (:6173-6175), and carries sfcheadrt and WATBLED through its interface.
 #
 # Usage:  build_water_hydro.sh <wrf-tree> <workdir>
 #
-# <wrf-tree> holds phys/module_sf_noahmplsm.F (WRF 4.6.1's phys/noahmp
-# submodule at 848f54ad, src/module_sf_noahmplsm.F, the pinned sha256 below)
-# and phys/module_sf_gecros.F.  The build is build_water.sh's at -O0 with
+# <wrf-tree> holds phys/module_sf_noahmplsm.F (WRF 4.7.1's phys/noahmp
+# submodule at e5c0859874407859936739e8be8741f9aed369ee,
+# src/module_sf_noahmplsm.F, the pinned sha256 below) and
+# phys/module_sf_gecros.F.  WATER and everything it calls (:5954-6261 and the
+# routines after it) are byte-identical to WRF 4.6.1's 848f54ad; the
+# submodule's changes between the two are in ALBEDO, SFCDIF2's stability
+# functions and the irrigation table reader.  The build is build_water.sh's at -O0 with
 # -DWRF_HYDRO; the harness is run_water.F90 extended by
 # patch_run_water_hydro.py with the two WRF_HYDRO arguments, a ponded head
 # per case, and their rows in the fixture.  Same accessibility lift, same
@@ -17,7 +21,7 @@ set -eu
 WRF_TREE=$1
 WORK=$2
 HERE=$(cd "$(dirname "$0")" && pwd)
-PRISTINE_SHA=bd592a5b7db29000e715250e3a7c779ffb5e0dcc356f6b5a7d9e1c9f69c55282
+PRISTINE_SHA=74b475600ad1c999fe43299bcaf4d3e5eaf59b9f861c47fdbff4d69739e3a45b
 FCBASE="-w -ffree-form -ffree-line-length-none -fconvert=big-endian -frecord-marker=4"
 FCOPTIM="-O0"
 mkdir -p "$WORK"
@@ -29,7 +33,7 @@ if [ "$GOT" != "$PRISTINE_SHA" ]; then
 fi
 cp "$WRF_TREE/phys/module_sf_noahmplsm.F" ./pristine.F
 cp "$WRF_TREE/phys/module_sf_gecros.F"    ./module_sf_gecros.F
-python3 "$HERE/visibility_patch_leaves.py" ./pristine.F \
+python3 "$HERE/visibility_patch_leaves.py" ./pristine.F --accept-sha256 "$PRISTINE_SHA" \
         --out ./module_sf_noahmplsm_public.F --check \
         --require-symbol WATER --require-symbol CANWATER \
         --require-symbol SNOWWATER --require-symbol SOILWATER
@@ -67,5 +71,5 @@ fi
 ./run_water_hydro noahmp-water-hydro.csv noahmp-water-hydro-libm.csv
 sha256sum "$WRF_TREE/phys/module_sf_noahmplsm.F" "$HERE/run_water.F90" \
     "$HERE/patch_run_water_hydro.py" "$HERE/build_water_hydro.sh" noahmp-water-hydro.csv \
-    | sed "s#$WRF_TREE/#<wrf-4.6.1-tree>/#; s#$HERE/#tools/noahmp_wrf461_oracle/#" > noahmp-water-hydro-sha256sums.txt
+    | sed "s#$WRF_TREE/#<wrf-4.7.1-tree>/#; s#$HERE/#tools/noahmp_wrf461_oracle/#" > noahmp-water-hydro-sha256sums.txt
 echo "oracle built in $WORK"

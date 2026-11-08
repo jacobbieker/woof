@@ -1,4 +1,4 @@
-"""WRF's side of its NEMO coupling, against WRF v4.6.1's frame/module_cpl.F.
+"""WRF's side of its NEMO coupling, against WRF v4.7.1's frame/module_cpl.F.
 
 ``woof/ocean/wrf_cpl.cu`` runs ``cpl_snd2`` (the six fields WRF hands an
 OASIS-coupled ocean every step) and ``cpl_rcv`` (how WRF merges the SST and
