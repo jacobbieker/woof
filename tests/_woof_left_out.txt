@@ -126,3 +126,4 @@ tests/test_workflow_rehearsals.py
 # wrfinput/wrfbdy fixtures with that test's helpers.
 tools/n5s/**
 tests/test_n5s_toolchain.py
+docs/licence-audit-20261101.md

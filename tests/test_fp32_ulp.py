@@ -57,7 +57,7 @@ _TOTAL_ORDER_OWNERS = {
 #: MAX_PATH ceiling, where rglob lists a ``.py`` file that ``open()`` then
 #: cannot reach, and the scan died on FileNotFoundError before reading a
 #: single hash (measured 2026-08-31 at 114c920b5).
-#: ``.claude/worktrees/`` is the same class, machine-made: the agent
+#: Nested worktrees are the same class, machine-made: the agent
 #: harness checks out a full worktree per subagent lane, so each one
 #: carries the two OWNER files at a relative path the allow-list cannot
 #: name -- with any worktree present this gate could never be green, and

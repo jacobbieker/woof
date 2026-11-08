@@ -18,6 +18,16 @@ def nudging_owner(state):
     return getattr(state, "_spectral_nudging_owner", None)
 
 
+def surface_fdda_owner(state):
+    """The surface FDDA owner a prepared route bound to ``state``, or None."""
+    return getattr(state, "_surface_fdda_owner", None)
+
+
+def px_inputs_owner(state):
+    """The PX inputs owner a prepared route bound to ``state``, or None."""
+    return getattr(state, "_px_inputs_owner", None)
+
+
 def require_bound_nudging(model, experiment) -> None:
     """Refuse a [nudging] domain that no prepared route bound an owner to."""
     nudging = getattr(experiment, "nudging", None)
@@ -25,9 +35,11 @@ def require_bound_nudging(model, experiment) -> None:
         return
     for node in model.walk_parent_first():
         if (nudging.for_domain(node.cfg.grid_id) is not None
-                and nudging_owner(node.state) is None):
+                and nudging_owner(node.state) is None
+                and surface_fdda_owner(node.state) is None):
             raise ValueError("NUDGING_ANALYSES_UNBOUND: this domain has no prepared analysis forcing; use the prepared forecast route")
 
 
 __all__ = ["NudgingConfig", "NudgingOptions", "build_nudger",
-           "nudging_owner", "require_bound_nudging"]
+           "nudging_owner", "px_inputs_owner", "require_bound_nudging",
+           "surface_fdda_owner"]

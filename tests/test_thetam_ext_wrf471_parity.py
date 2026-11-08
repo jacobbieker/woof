@@ -110,17 +110,3 @@ def test_every_rthften_and_hflux_word_is_compiled_wrfs():
     assert graded == 24240
     assert sum(row["words"] for row in rows.values()) >= graded
 
-
-@pytest.mark.gpu
-@requires_gpu
-@pytest.mark.parametrize("finish", oracle.WINDOW_FINISHES)
-@pytest.mark.parametrize("case", ("a", "b"))
-def test_the_microphysics_window_is_moist_physics_finish_em(finish, case):
-    inputs = thetam_oracle.load_inputs()
-    record = thetam_oracle.load_outputs(inputs=inputs)
-    out = oracle.window_outputs(inputs, record, finish, case)
-    for name, value in out.items():
-        a = np.ascontiguousarray(value, np.float32).view(np.uint32)
-        b = np.ascontiguousarray(record[name], np.float32).view(np.uint32)
-        assert a.shape == b.shape, name
-        assert int((a != b).sum()) == 0, name

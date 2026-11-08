@@ -120,7 +120,13 @@
    "measured": "mean of 1044 state, 4 analysis-invariant and 2 terrain objects, 2026-09-26 00Z f00 to f06, two fetches"},
   {"source": "met-office-global", "mode": "full-file",
    "objects": {"state": 70750629, "terrain": 3226432},
-   "measured": "bucket listing sizes, read 2026-10-11: mean of the 468 state objects (13 variables, f000 to f003) of the 9 runs 2026-10-09 00Z to 2026-10-11 00Z, five pressure-level files of 120 to 229 MB and eight surface files of 1.7 to 8.1 MB a lead, and the 9 step-0 orography objects, all 3,226,432 B; its GDAS donor is priced by the gdas full-file row"}
+   "measured": "bucket listing sizes, read 2026-10-11: mean of the 468 state objects (13 variables, f000 to f003) of the 9 runs 2026-10-09 00Z to 2026-10-11 00Z, five pressure-level files of 120 to 229 MB and eight surface files of 1.7 to 8.1 MB a lead, and the 9 step-0 orography objects, all 3,226,432 B; its GDAS donor is priced by the gdas full-file row"},
+  {"source": "gem-hrdps", "mode": "full-file",
+   "objects": {"state": 1592749, "analysis-invariant": 1360524},
+   "measured": "Content-Length (HEAD) of every routed object of the 2026-10-28 12Z cycle: 151 state objects at PT000H (mean 1,744,149 B) and 151 at PT003H (mean 1,441,348 B), and the 2 analysis-invariant objects; read 2026-10-29"},
+  {"source": "gem-rdps", "mode": "full-file",
+   "objects": {"state": 423125, "analysis-invariant": 131817, "terrain": 301793},
+   "measured": "Content-Length (HEAD) of every routed object of the 2026-10-28 12Z PT000H lead: 174 state, 2 analysis-invariant and 1 terrain object; read 2026-10-29"}
  ],
  "preparation": {
   "prepared:hrrr": {
