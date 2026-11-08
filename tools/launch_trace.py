@@ -134,7 +134,7 @@ def _zero_empty() -> None:
 
 #: The variables that decide a trace's words, written beside the traces.
 ENVIRONMENT_VARIABLES = ("GPUWM_WRF_EXACT", "GPUWM_NUMERICS", "WOOF_LAUNCH_TRACE_ZERO_EMPTY",
-                         "WOOF_BACKEND")
+                         "WOOF_BACKEND", "WOOF_STRICT_POWF")
 
 
 def _record_environment(directory: str) -> None:

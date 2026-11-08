@@ -1,0 +1,96 @@
+name: release-metal
+
+# Every merge into main ships a metal-woof release.
+#
+# The version is upstream's release (pyproject.toml [project].version) plus a
+# fork build number: the first push to main after upstream X.Y.Z lands is
+# metal-vX.Y.Z.1, the next metal-vX.Y.Z.2, and so on.  This job tags the
+# pushed commit, writes the GitHub release (the merged pull requests since the
+# previous metal-v tag, as GitHub generates them), then starts
+# publish-metal.yml on the new tag, which builds, smoke-tests and publishes the
+# version to PyPI.  A tag pushed with GITHUB_TOKEN starts no workflow on its
+# own, so the publish run is dispatched explicitly.
+#
+# A head commit whose message carries "[skip release]" releases nothing; a
+# manual run releases the head of main if it is not already tagged.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # One release at a time, in push order, so build numbers never collide.
+  group: release-metal
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: tag, release notes, dispatch publish-metal
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    if: ${{ github.ref == 'refs/heads/main' && !contains(github.event.head_commit.message, '[skip release]') }}
+    permissions:
+      contents: write   # the tag and the GitHub release
+      actions: write    # dispatching publish-metal.yml
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+      - id: version
+        name: the next metal-woof version
+        run: |
+          set -euo pipefail
+          git fetch --force --tags origin
+          if tagged="$(git tag --points-at HEAD --list 'metal-v*' | head -n1)" && [ -n "$tagged" ]; then
+            echo "HEAD is already released as $tagged"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          base="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          if ! printf '%s' "$base" | grep -Eq '^[0-9]+(\.[0-9]+)*$'; then
+            echo "::error::pyproject version '$base' is not a release number"
+            exit 1
+          fi
+          last="$(git tag --list "metal-v${base}.*" | sed "s/^metal-v${base}\.//" | grep -E '^[0-9]+$' | sort -n | tail -n1 || true)"
+          version="${base}.$(( ${last:-0} + 1 ))"
+          previous="$(git tag --list 'metal-v*' --sort=-v:refname | head -n1 || true)"
+          echo "metal-woof $version (previous release: ${previous:-none})"
+          {
+            echo "skip=false"
+            echo "version=$version"
+            echo "previous=$previous"
+          } >> "$GITHUB_OUTPUT"
+      - name: tag and GitHub release
+        if: steps.version.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          PREVIOUS: ${{ steps.version.outputs.previous }}
+        run: |
+          set -euo pipefail
+          header="metal-woof ${VERSION}: Recast WOOF built for Apple silicon (MLX/Metal), from ${GITHUB_SHA::12} on main."
+          header+=$'\n\n'"Install: \`pip install metal-woof==${VERSION}\` (PyPI publishing runs in publish-metal.yml)."
+          args=(--target "$GITHUB_SHA" --title "metal-woof ${VERSION}" --generate-notes --notes "$header")
+          if [ -n "$PREVIOUS" ]; then
+            args+=(--notes-start-tag "$PREVIOUS")
+          fi
+          gh release create "metal-v${VERSION}" "${args[@]}"
+      - name: dispatch publish-metal on the new tag
+        if: steps.version.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh workflow run publish-metal.yml --ref "metal-v${VERSION}" \
+            -f version="${VERSION}" -f publish=true
+          {
+            echo "### metal-woof ${VERSION}"
+            echo "Tagged \`metal-v${VERSION}\`; publish-metal.yml dispatched on it."
+          } >> "$GITHUB_STEP_SUMMARY"
