@@ -1,4 +1,4 @@
-"""The ``woof hex seaice`` door: the MPAS-Seaice port (stub until its dycore lands)."""
+"""The ``woof hex seaice`` door: the MPAS-Seaice port (a stub until every piece is ported)."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ _ROW = {
     "name": "seaice",
     "module": "woof.hex.mpas_seaice",
     "attr": "registry-options.json",
+    "verify": "woof.hex.mpas_seaice.verify:verify",
 }
 
 

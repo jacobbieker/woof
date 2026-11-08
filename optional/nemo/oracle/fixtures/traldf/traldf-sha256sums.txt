@@ -1,0 +1,9 @@
+d3eec4adcb9e3f11a29776adec9fdf92515e226998cfaf7060742b61b49a8b44  <nemo-5.0.2-checkout>/src/OCE/par_kind.F90
+39b362ff04c66022b5c9a6d3ba065376a14aa6ea2d0deaafae669de7aff55324  <nemo-5.0.2-checkout>/src/OCE/TRA/traldf_lev.F90
+7dc2bdf98ed47a275d72dfdd66f807cb370db34f7a51c780867702001e278c25  <nemo-5.0.2-checkout>/src/OCE/do_loop_substitute.h90
+fb18c1cb2d0baa3807a7b2d5be30f363349676cb79e23871467c25da09a03ba3  <nemo-5.0.2-checkout>/src/OCE/DOM/domzgr_substitute.h90
+1db19b6bff3d7d6293aaa7fb060d0910c0c5bb0936fdab6d5895501ab0db9f04  <oracle-workspace>/optional/nemo/oracle/traldf_stubs.F90
+d20e073f1f8955ad56d15da612f0f2f92347de9e4d837baabde5356b7fe28593  <oracle-workspace>/optional/nemo/oracle/run_traldf.F90
+aca9bf9598f29fa8ab6701af551e83afd7cb2ce05c5d6b7f77ba0158d98f6727  <oracle-workspace>/optional/nemo/oracle/build_traldf.sh
+dceccbd0f4e395eac8e644686c484af6577322df32f0bc5b5ed8bf8cfabf00a1  traldf-grid.csv
+8901be945d2066bdb3fd2ad807f8a648edbfbbe48c0ec7d31ad6a0c96df94fba  traldf-calls.csv

@@ -1,0 +1,9 @@
+# MPAS-Model v8.4.2 (f34984b2c89353cf31c235b08d3b4acd96b37bb3) files the
+# ocean tendency oracle compiles verbatim.  build.sh refuses to build if any
+# differs from its pin.
+13db2ffce7d70f0c725913eb8c58c2e0b3fbdffb7bfe0c2ac77798e554127c51  src/framework/mpas_kind_types.F
+3fc1803087eadd55d0748953ebb059f871483fee5c6fa225da6e1da2e8de5849  src/core_ocean/shared/mpas_ocn_constants.F
+1a15be623cfac8f4a3c8299306ad3d5f49d658944108e7d90decff3fa27c07c2  src/core_ocean/shared/mpas_ocn_vel_coriolis.F
+98ae0627cbfc83f27d8bc8d76e88860389e2c99a3d24eb9b71162e7c74dbe8b6  src/core_ocean/shared/mpas_ocn_vel_vadv.F
+d784347995b6dbcd25afa6d30187d5aa2e3fe367c373293a0dd973de26af285d  src/core_ocean/shared/mpas_ocn_thick_hadv.F
+5bce0d998acae27666ffef1bbe2ec428cd17cc8aa2418fbc3809cb1316fda847  src/core_ocean/shared/mpas_ocn_thick_vadv.F

@@ -127,6 +127,8 @@ woof = [
     # (`woof --help` stopped on the missing woof/ocean/rows.json in the r13 install check)
     "hydro/*.json",
     "ocean/*.json",
+    # WRF 4.6.1's ocean-coupler exchange (woof/ocean/wrf_cpl.py loads it)
+    "ocean/*.cu",
     "timeline/*.json",
     "hydro/*.cu",
     "hydro/*.cuh",
@@ -177,9 +179,9 @@ woof = [
 "woof.hex" = ["*.json", "**/*NOTICE*.txt", "data/*", "data/**/*", "libexec/*", "native/*.rs", "native/*.c", "*.cu", "*.cuh", "**/*.cu", "**/*.cuh",
               "tc_climate/*.json", "tc_climate/LICENSE.*"]
 # The coupled component lanes' pinned options inventories (tools/mpas_coupled_options.py):
-"woof.hex.mpas_seaice" = ["data/*.json"]
-"woof.hex.mpas_ocean" = ["data/*.json"]
-"woof.hex.mpas_ice" = ["data/*.json"]
+"woof.hex.mpas_seaice" = ["data/*.json", "*.cu"]
+"woof.hex.mpas_ocean" = ["data/*.json", "*.cu"]
+"woof.hex.mpas_ice" = ["data/*.json", "*.cu"]
 tools = ["prepare_hrrr_*.sh", "hydro_world/data/sources.v1.json", "hydro_world/data/recipes.v1.json",
          "hydro_world_params/data/params.v1.json"]
 tilestream = ["output-scaling.json"]
