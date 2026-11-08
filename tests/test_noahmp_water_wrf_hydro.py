@@ -30,21 +30,6 @@ from woof.core.noahmp_water import water
 FIX = Path(__file__).resolve().parent / "data" / "oracles" / "noahmp" / "noahmp-water-hydro.csv"
 
 
-def _selected_water_on_metal():
-    from woof import backend
-    return backend.active() == "mlx"
-
-
-#: The selected-options water unit (noahmp_water_options.cuh), which carries
-#: the WRF_HYDRO head, does not translate to Metal on main: woof's translator
-#: refuses the goto into a block in its generated dynamic-VIC code ("goto
-#: 'label_1003' from outside the label's block"), as it does for every
-#: selected water option.  The default water unit is not used for WRF_HYDRO
-#: so that its PTX, digests and recorded frames stay as they are.
-METAL_SKIP = pytest.mark.skipif("_selected_water_on_metal()",
-                                reason="selected Noah-MP water unit does not translate to Metal")
-
-
 def _load():
     table = defaultdict(dict)
     for r in csv.DictReader(FIX.open(newline="")):
@@ -107,7 +92,6 @@ def test_the_head_changes_the_answer(hydro_table):
 
 @pytest.mark.gpu
 @requires_gpu
-@METAL_SKIP
 def test_the_device_slab_with_a_ponded_head_matches(hydro_table):
     import cupy as cp
 
