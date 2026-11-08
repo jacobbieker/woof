@@ -42,6 +42,18 @@ pixi run -e default python tools/mali_oracle/make_geometry_fixture.py "$BUILD_DI
 pixi run -e default python tools/mali_oracle/make_thermal_fixture.py "$BUILD_DIR"   # thermal init
 ```
 
+The fixtures were written on x86-64 Linux, where gfortran's `x**y` and
+`exp` call glibc 2.39's `powf` and `expf`. Another libm returns different
+words for some arguments: built on macOS against Apple's libm, the SIA
+oracle differs in 10 words of `bary_pb1982/normalVelocity` (the PB1982
+flow-law exponential and the real powers). So on a host without glibc,
+build.sh links `glibc_flt32_host.c` into the oracles. That file is the
+repository's MIT glibc-float32 transcription (`woof/core/kernels/glibc_flt32.cuh`)
+compiled for the host. It equals pb's glibc 2.44 `expf` on all 2^32 inputs
+and its `powf` on 4e8 random pairs, and with it the macOS rebuild writes the
+committed fixtures word for word (gfortran 16.2.0 from Homebrew, arm64).
+`TOOLCHAIN.txt` records which `powf`/`expf` the build used.
+
 ## Grade the GPU port
 
 ```bash
