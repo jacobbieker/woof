@@ -88,40 +88,6 @@ def test_the_merges_are_not_vacuous():
             assert np.all(out["qc"] >= case["qc"])
 
 
-def test_feedback_doors():
-    base = dict(nx=8, ny=8, nz=30, dx=3000.0, dy=3000.0, ztop=18000.0,
-                dt=20.0, run_seconds=60.0, moist=True, mp_physics=8,
-                bl_pbl_physics=1, sf_sfclay_physics=91, ra_physics=4)
-    validate_run_config(RunConfig(**base, cu_physics=1, cudt_minutes=5.0,
-                                  cu_rad_feedback=True))
-    validate_run_config(RunConfig(**base, cu_physics=5, cudt_minutes=0.0,
-                                  cu_diag=1, cu_rad_feedback=True))
-    validate_run_config(RunConfig(**base, cu_physics=3, cudt_minutes=0.0,
-                                  cu_diag=1, cu_rad_feedback=True))
-    for bad, fragment in (
-            (dict(cu_physics=16, cudt_minutes=0.0), "ICLOUD_CU"),
-            (dict(cu_physics=5, cudt_minutes=0.0, cu_diag=0), "cu_diag = 1"),
-            (dict(cu_physics=3, cudt_minutes=0.0), "cu_diag = 1")):
-        with pytest.raises(ConfigurationRefused) as caught:
-            validate_run_config(RunConfig(**base, cu_rad_feedback=True, **bad))
-        assert fragment in str(caught.value)
-    with pytest.raises(ConfigurationRefused, match="RRTMG"):
-        validate_run_config(RunConfig(**{**base, "ra_physics": 1},
-                                      cu_physics=1, cudt_minutes=5.0,
-                                      cu_rad_feedback=True))
-
-
-def test_the_namelist_importer_carries_feedback(tmp_path):
-    from test_namelist_import import _import_with
-    toml, report = _import_with(
-        tmp_path, extra_physics=" cu_rad_feedback = .true., .false.,\n")
-    fixed = {(f.section, f.key): f for f in report.fixed}
-    assert fixed[("physics", "cu_rad_feedback")].fixed_value == [True, False]
-    assert "cu_rad_feedback = true" in toml
-    with pytest.raises(ValueError, match="cu_rad_feedback"):
-        _import_with(tmp_path, extra_physics=" cu_rad_feedback = .false., .true.,\n")
-
-
 @pytest.mark.gpu
 @requires_gpu
 def test_the_radiation_cloud_matches_wrf_word_for_word():

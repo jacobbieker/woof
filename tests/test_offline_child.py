@@ -99,7 +99,7 @@ def test_offline_child_capabilities_are_warning_only_and_exact(capsys):
     # MAD-WRF's passive 96 is read same-scheme: its moist inventory is the
     # parent's QVAPOR/QCLOUD/QICE/QSNOW and nothing else.
     assert capability["same_scheme_mp_physics"] == [
-        0, 1, 2, 3, 4, 6, 8, 9, 10, 16, 18, 24, 28, 50, 96, 106]
+        0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 13, 14, 15, 16, 18, 24, 26, 28, 40, 50, 51, 53, 55, 56, 97, 106]
     assert capability["cross_scheme_transitions"]["mp_physics"] == list(_INTAKE_EDGES)
     assert capability["cross_scheme_transitions"]["order"] == (
         "diagnose-parent-then-spatially-interpolate")

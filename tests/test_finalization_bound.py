@@ -380,6 +380,11 @@ class _Domain:
         self.pending_work_bytes = 0
 
 
+class _NoAuxiliary:
+    def drain(self, grid_id=None):
+        pass
+
+
 def test_the_drain_declares_every_domains_remaining_bytes_before_each_wait():
     from woof.io.wrfout import PerDomainWrfoutWriters
 
@@ -387,6 +392,7 @@ def test_the_drain_declares_every_domains_remaining_bytes_before_each_wait():
     writers = object.__new__(PerDomainWrfoutWriters)
     writers._writers = {2: _Domain(3 * GIB, drained),
                         1: _Domain(5 * GIB, drained)}
+    writers._auxiliary = _NoAuxiliary()
     recorder = _Recorder()
 
     writers.drain(before_domain=runtime._drain_progress(recorder))
