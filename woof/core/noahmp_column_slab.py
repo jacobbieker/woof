@@ -677,6 +677,11 @@ def evaluate_sflx_slab(fields: dict, n: int, *, noahmp_snow_age="wrf_470",
     if opt_run != 3: water_options["opt_run"] = opt_run
     if opt_infdv: water_options["opt_infdv"] = opt_infdv
     if opt_tdrn: water_options["opt_tdrn"]=opt_tdrn
+    # WRF built with -DWRF_HYDRO: the ponded head WRF-Hydro hands back joins
+    # WATER's QINSUR, and ERROR's water-budget stop is compiled out.
+    wrf_hydro = "sfcheadrt" in fields
+    if wrf_hydro:
+        water_options["sfcheadrt"] = _shaped(cp, fields, "sfcheadrt", n, 1)
     if opt_irr: water_options["opt_irr"]=opt_irr
     water_parameters = {}
     if opt_irr:
@@ -746,6 +751,7 @@ def evaluate_sflx_slab(fields: dict, n: int, *, noahmp_snow_age="wrf_470",
         irrigation_post={"firr":pre["firr"],"irmirate":wat["irmirate"],"irfirate":wat["irfirate"]}
     p2 = sflx_post_seg2({
         **irrigation_post,
+        **({"wrf_hydro": True} if wrf_hydro else {}),
         "edir": p1["edir"],
         "fsa": rad["fsa"], "fsr": rad["fsr"], "fira": seg3["fira"],
         "fsh": post_fsh, "fcev": seg3["fcev"], "fgev": seg3["fgev"],
