@@ -594,12 +594,26 @@ def sample_dust_statics(geog_root, lat_deg, lon_deg, landmask):
     take the fill, the mask being the run's own land mask (geogrid masks with the run's land use).  This
     is a point sampler written for the mesh, not a transcription of geogrid.
     """
-    from woof.chem_table import catalog
-    from woof.core.chem_statics import STATIC_VARIABLES
     from woof.static.geog import GeogDataset
     lat = np.asarray(lat_deg, dtype=np.float64)
     lon = np.asarray(lon_deg, dtype=np.float64)
     land = np.asarray(landmask) > 0.5
+    out = {}
+    for variable, (dataset, selector) in _static_rows().items():
+        options = tuple(selector["interp_options"])
+        unknown = sorted(set(options) - set(_INTERPOLATORS))
+        if unknown:
+            raise ValueError(f"{variable}: the hex point sampler has no {unknown} interpolation")
+        out[variable] = _sample(GeogDataset(Path(geog_root) / dataset), lat, lon,
+                                float(selector["fill_missing"]), land, options)
+    out["EROD"] = out["EROD"].reshape(-1, lat.size)
+    return out
+
+
+def _static_rows():
+    """variable -> (WPS GEOG dataset, selector) for the dust statics, from the chem table's static rows."""
+    from woof.chem_table import catalog
+    from woof.core.chem_statics import STATIC_VARIABLES
     rows = {}
     for source in catalog().sources.values():
         if source.kind != "static" or source.format != "wps_geog":
@@ -610,15 +624,22 @@ def sample_dust_statics(geog_root, lat_deg, lon_deg, landmask):
     missing = [v for v in STATIC_VARIABLES if v not in rows]
     if missing:
         raise ValueError(f"no static chem source provides {missing}")
+    return rows
+
+
+def statics_receipt(geog_root):
+    """What the dust statics were sampled from: each variable's dataset, interpolation sequence and the
+    SHA-256 of the dataset's index and every file beside it, so a restart detects changed sources."""
+    import hashlib
+    from .file_digest import sha256_file
     out = {}
-    for variable, (dataset, selector) in rows.items():
-        options = tuple(selector["interp_options"])
-        unknown = sorted(set(options) - set(_INTERPOLATORS))
-        if unknown:
-            raise ValueError(f"{variable}: the hex point sampler has no {unknown} interpolation")
-        out[variable] = _sample(GeogDataset(Path(geog_root) / dataset), lat, lon,
-                                float(selector["fill_missing"]), land, options)
-    out["EROD"] = out["EROD"].reshape(-1, lat.size)
+    for variable, (dataset, selector) in sorted(_static_rows().items()):
+        directory = Path(geog_root) / dataset
+        digest = hashlib.sha256()
+        for path in sorted(p for p in directory.iterdir() if p.is_file()):
+            digest.update(f"{path.name}\0{sha256_file(path)}\n".encode())
+        out[variable] = {"dataset": dataset, "interp_options": list(selector["interp_options"]),
+                         "files_sha256": digest.hexdigest()}
     return out
 
 
@@ -678,10 +699,15 @@ def _sample(data, lat, lon, fill, land, options):
     for k in range(data.index.nz):
         values = np.full((wy1 - wy0 + 1, wx1 - wx0 + 1), np.nan)
         # float64, the missing value masked as NaN
-        values[:, rx0 - wx0:rx1 - wx0 + 1] = window.values(k)
+        covered = window.values(k)
+        if window.coverage is not None:
+            # Rows beyond the dataset and absent tiles are padding, not data (with no declared
+            # missing value read_window pads them with zeros).
+            covered = np.where(window.coverage, covered, np.nan)
+        values[:, rx0 - wx0:rx1 - wx0 + 1] = covered
         result = np.full(lat.size, np.nan)
         for option in options:
-            todo = ~np.isfinite(result)
+            todo = land & ~np.isfinite(result)  # water takes the fill whatever the source says
             if not todo.any():
                 break
             result[todo] = _INTERPOLATORS[option](values, fx[todo], fy[todo], i[todo], j[todo])
@@ -690,11 +716,12 @@ def _sample(data, lat, lon, fill, land, options):
 
 
 def attach_statics(runtime, *, lat_deg, lon_deg, landmask=None, fields=None, geog_root=None):
-    """Write the dust statics and the sulfur grid arrays the processes read at init."""
+    """Write the dust statics the dust process reads at init; returns the source receipt."""
     from woof.core.chem_statics import DUST_KEY, attach_dust_static_fields
     s = runtime.state
     if not runtime.table.rows_for(DUST_KEY):
         return None
+    receipt = {"dust_statics": "supplied fields"}
     if fields is None:
         if geog_root is None:
             from woof.geog_assets import default_geog_root
@@ -702,11 +729,12 @@ def attach_statics(runtime, *, lat_deg, lon_deg, landmask=None, fields=None, geo
         if landmask is None:
             raise ValueError("dust statics sampling needs the run's land mask")
         fields = sample_dust_statics(geog_root, lat_deg, lon_deg, landmask)
+        receipt = {"dust_statics": "sampled at the cell centres", "geog_root": str(geog_root),
+                   "sources": statics_receipt(geog_root)}
     shaped = {name: np.asarray(value).reshape(*np.shape(value)[:-1], 1, runtime.ncells)
               for name, value in fields.items()}
     attach_dust_static_fields(s, shaped)
-    return {"dust_statics": "EROD/CLAYFRAC/SANDFRAC at cell centres (average_4pt)",
-            "geog_root": None if geog_root is None else str(geog_root)}
+    return receipt
 
 
 def columns_from_prep(prepared, *, pressure="pres_p"):
