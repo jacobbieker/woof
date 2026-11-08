@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Build the MALI v8.4.2 oracles (SIA velocity solver; geometry diagnostics) at
-# the strict recipe.
+# Build the MALI v8.4.2 oracles (SIA velocity solver; geometry diagnostics;
+# thermal initialisation) at the strict recipe.
 #
 #   bash tools/mali_oracle/build.sh MPAS_SOURCE_ROOT BUILD_DIR
 #
@@ -10,7 +10,8 @@
 # MPAS's default single precision (-DSINGLE_PRECISION, RKIND = 4).  stubs.F90
 # supplies the framework types, logging and abort the modules USE;
 # run_oracle.F90 makes one li_sia_solve call; run_geometry.F90 makes the
-# mask, geometry, layer-thickness and layer-velocity calls.  The objects must contain no FMA
+# mask, geometry, layer-thickness and layer-velocity calls; run_thermal.F90
+# makes the thermal init and enthalpy-conversion calls.  The objects must contain no FMA
 # instruction (checked with objdump when it is present).  powf and expf are
 # the host libm's; TOOLCHAIN.txt records the glibc and whether the CPU has
 # FMA.  gfortran is the mpas-oracle pixi environment's unless GFORTRAN names
@@ -49,6 +50,7 @@ for unit in "${units[@]}"; do
 done
 "${fc[@]}" "${flags[@]}" "${script_dir}/run_oracle.F90"
 "${fc[@]}" "${flags[@]}" "${script_dir}/run_geometry.F90"
+"${fc[@]}" "${flags[@]}" "${script_dir}/run_thermal.F90"
 if command -v objdump >/dev/null; then
     if objdump -d "${objects[@]}" | grep -Eq '\bv?fn?m(add|sub)[0-9]'; then
         echo "an oracle object contains an FMA instruction; refusing" >&2
@@ -57,10 +59,11 @@ if command -v objdump >/dev/null; then
 fi
 "${fc[@]}" -o "${build_dir}/run_oracle_r4" run_oracle.o "${objects[@]}" stubs.o mpas_kind_types.o
 "${fc[@]}" -o "${build_dir}/run_geometry_r4" run_geometry.o "${objects[@]}" stubs.o mpas_kind_types.o
+"${fc[@]}" -o "${build_dir}/run_thermal_r4" run_thermal.o "${objects[@]}" stubs.o mpas_kind_types.o
 {
     echo "gfortran: $("${fc[@]}" --version | head -1)"
     echo "flags: -O0 -ffp-contract=off -cpp -ffree-form -ffree-line-length-none -DSINGLE_PRECISION (RKIND 4)"
     echo "host: $(uname -srm); libm: $(ldd --version 2>/dev/null | head -1)"
     echo "fma: $(grep -m1 -ow fma /proc/cpuinfo 2>/dev/null || echo absent)"
 } > "${build_dir}/TOOLCHAIN.txt"
-echo "built ${build_dir}/run_oracle_r4 ${build_dir}/run_geometry_r4"
+echo "built ${build_dir}/run_oracle_r4 ${build_dir}/run_geometry_r4 ${build_dir}/run_thermal_r4"

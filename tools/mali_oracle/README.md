@@ -29,17 +29,23 @@ advection, in this order: `li_calculate_mask`, `li_update_geometry`,
 `li_calculate_layerThickness` and `li_layer_normal_velocity`. They come from
 the same verbatim objects plus `mpas_li_advection.F`.
 
+`run_thermal.F90` calls `li_thermal_init` and then
+`li_compute_pressure_melting_point_fields`, `li_temperature_to_enthalpy` and
+`li_enthalpy_to_temperature`.
+
 ## Build and run (Linux, gfortran, CPU only)
 
 ```bash
 pixi run -e mpas-oracle bash tools/mali_oracle/build.sh "$MPAS_V842" "$BUILD_DIR"
 pixi run -e default python tools/mali_oracle/make_fixture.py "$BUILD_DIR"           # SIA
 pixi run -e default python tools/mali_oracle/make_geometry_fixture.py "$BUILD_DIR"  # geometry
+pixi run -e default python tools/mali_oracle/make_thermal_fixture.py "$BUILD_DIR"   # thermal init
 ```
 
 ## Grade the GPU port
 
 ```bash
-pixi run -e default python -m pytest tests/test_mali_sia_parity.py tests/test_mali_geometry_parity.py
+pixi run -e default python -m pytest tests/test_mali_sia_parity.py tests/test_mali_geometry_parity.py \
+    tests/test_mali_thermal_init_parity.py
 pixi run -e default woof hex ice verify
 ```
