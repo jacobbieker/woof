@@ -16,16 +16,45 @@
 ! config_use_mom_del4_tensor), which these oracles do not drive: their
 ! stand-ins stop by name if called.
 
-module mpas_pool_routines
-  use mpas_kind_types
+module mpas_log
+  ! ocn_vel_pressure_grad_init logs the pressure-gradient type: an
+  ! informational line is dropped. An error or critical message stops,
+  ! as MPAS_LOG_CRIT aborts the model.  As in MPAS, mpas_pool_routines (and
+  ! through it mpas_derived_types) re-exports these names.
   implicit none
   private
+  public :: mpas_log_write, MPAS_LOG_WARN, MPAS_LOG_ERR, MPAS_LOG_CRIT
+
+  integer, parameter :: MPAS_LOG_WARN = 2, MPAS_LOG_ERR = 3, MPAS_LOG_CRIT = 4
+
+contains
+
+  subroutine mpas_log_write(message, messageType)
+    character(len=*), intent(in) :: message
+    integer, optional, intent(in) :: messageType
+    if (present(messageType)) then
+      if (messageType == MPAS_LOG_ERR .or. messageType == MPAS_LOG_CRIT) then
+        print *, 'oracle stub: mpas_log_write: ', trim(message)
+        stop 7
+      end if
+    end if
+  end subroutine mpas_log_write
+
+end module mpas_log
+
+module mpas_pool_routines
+  use mpas_kind_types
+  use mpas_log
+  implicit none
+  private
+  public :: mpas_log_write, MPAS_LOG_WARN, MPAS_LOG_ERR, MPAS_LOG_CRIT
   public :: MPAS_pool_type, mpas_pool_get_subpool, mpas_pool_get_array, &
             mpas_pool_get_dimension, mpas_pool_get_config, &
             stub_pool_put_subpool, stub_pool_put_array, &
             stub_pool_put_dimension, stub_pool_put_config, &
             field2DReal, field3DReal, mpas_pool_get_field, stub_pool_put_field, &
-            mpas_allocate_scratch_field, mpas_deallocate_scratch_field
+            mpas_allocate_scratch_field, mpas_deallocate_scratch_field, &
+            mpas_pool_iterator_type, MPAS_POOL_FIELD, mpas_pool_begin_iteration, mpas_pool_get_next_member
 
   integer, parameter :: maxEntries = 64
 
@@ -40,6 +69,15 @@ module mpas_pool_routines
     real(kind=RKIND), dimension(:,:,:), pointer :: array => null()
     integer, dimension(3) :: dimSizes = 0
   end type field3DReal
+
+  ! ocn_tend_tracer walks the tracer groups with a pool iterator; the
+  ! oracles do not call it, and the iteration stops by name
+  integer, parameter :: MPAS_POOL_FIELD = 1004
+
+  type mpas_pool_iterator_type
+    character(len=StrKIND) :: memberName = ''
+    integer :: memberType = 0
+  end type mpas_pool_iterator_type
 
   type pool_entry
     character(len=64) :: name = ''
@@ -128,6 +166,18 @@ contains
     slot = pool % n
   end function slot
 
+  ! a pool holds one time level: a lookup of another stops by name
+  subroutine one_time_level(name, timeLevel)
+    character(len=*), intent(in) :: name
+    integer, intent(in), optional :: timeLevel
+    if (present(timeLevel)) then
+      if (timeLevel /= 1) then
+        print *, 'oracle stub: time level ', timeLevel, ' of ', trim(name)
+        stop 6
+      end if
+    end if
+  end subroutine one_time_level
+
   subroutine mpas_pool_get_subpool(pool, name, sub)
     type(MPAS_pool_type), intent(in) :: pool
     character(len=*), intent(in) :: name
@@ -177,24 +227,30 @@ contains
     a => pool % e(find(pool, name)) % r0
   end subroutine get_r0
 
-  subroutine get_r1(pool, name, a)
+  subroutine get_r1(pool, name, a, timeLevel)
     type(MPAS_pool_type), intent(in) :: pool
     character(len=*), intent(in) :: name
     real(kind=RKIND), dimension(:), pointer :: a
+    integer, intent(in), optional :: timeLevel
+    call one_time_level(name, timeLevel)
     a => pool % e(find(pool, name)) % r1
   end subroutine get_r1
 
-  subroutine get_r2(pool, name, a)
+  subroutine get_r2(pool, name, a, timeLevel)
     type(MPAS_pool_type), intent(in) :: pool
     character(len=*), intent(in) :: name
     real(kind=RKIND), dimension(:,:), pointer :: a
+    integer, intent(in), optional :: timeLevel
+    call one_time_level(name, timeLevel)
     a => pool % e(find(pool, name)) % r2
   end subroutine get_r2
 
-  subroutine get_r3(pool, name, a)
+  subroutine get_r3(pool, name, a, timeLevel)
     type(MPAS_pool_type), intent(in) :: pool
     character(len=*), intent(in) :: name
     real(kind=RKIND), dimension(:,:,:), pointer :: a
+    integer, intent(in), optional :: timeLevel
+    call one_time_level(name, timeLevel)
     a => pool % e(find(pool, name)) % r3
   end subroutine get_r3
 
@@ -295,6 +351,19 @@ contains
     integer, dimension(:,:), pointer :: a
     pool % e(slot(pool, name)) % i2 => a
   end subroutine put_i2
+
+  subroutine mpas_pool_begin_iteration(pool)
+    type(MPAS_pool_type), intent(in) :: pool
+    print *, 'oracle stub: mpas_pool_begin_iteration is not provided'
+    stop 8
+  end subroutine mpas_pool_begin_iteration
+
+  logical function mpas_pool_get_next_member(pool, iterator)
+    type(MPAS_pool_type), intent(in) :: pool
+    type(mpas_pool_iterator_type), intent(inout) :: iterator
+    print *, 'oracle stub: mpas_pool_get_next_member is not provided'
+    stop 8
+  end function mpas_pool_get_next_member
 
   subroutine get_field_2d(pool, name, f)
     type(MPAS_pool_type), intent(in) :: pool
@@ -428,30 +497,6 @@ contains
 
 end module mpas_threading
 
-module mpas_log
-  ! ocn_vel_pressure_grad_init logs the pressure-gradient type: an
-  ! informational line is dropped. An error or critical message stops,
-  ! as MPAS_LOG_CRIT aborts the model.
-  implicit none
-  private
-  public :: mpas_log_write, MPAS_LOG_ERR, MPAS_LOG_CRIT
-
-  integer, parameter :: MPAS_LOG_ERR = 3, MPAS_LOG_CRIT = 4
-
-contains
-
-  subroutine mpas_log_write(message, messageType)
-    character(len=*), intent(in) :: message
-    integer, optional, intent(in) :: messageType
-    if (present(messageType)) then
-      if (messageType == MPAS_LOG_ERR .or. messageType == MPAS_LOG_CRIT) then
-        print *, 'oracle stub: mpas_log_write: ', trim(message)
-        stop 7
-      end if
-    end if
-  end subroutine mpas_log_write
-
-end module mpas_log
 
 module mpas_vector_operations
   use mpas_kind_types
@@ -537,3 +582,9 @@ contains
   end subroutine mpas_divergence_of_tensor_R3Cell
 
 end module mpas_tensor_operations
+
+module mpas_timekeeping
+  ! ocn_forcing and ocn_surface_bulk_forcing USE it; the routines the oracles
+  ! call read no time manager routine
+  implicit none
+end module mpas_timekeeping

@@ -80,7 +80,8 @@ def test_the_ocean_door_verify_grades_the_ported_piece():
     report = verify()
     assert report["passed"] and report["status"] == "stub"
     assert [p["name"] for p in report["pieces"]] == ["tendency_terms_r4", "tendency_terms_r8",
-                                                     "pressure_gradient_hmix_r4", "pressure_gradient_hmix_r8"]
+                                                     "pressure_gradient_hmix_r4", "pressure_gradient_hmix_r8",
+                                                     "full_tendencies_r4", "full_tendencies_r8"]
 
 
 @requires_gpu
