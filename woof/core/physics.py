@@ -8194,10 +8194,17 @@ def initialize_physics(
     driver.hydro_parent_geometry = hydro_parent_geometry
     from woof.hydro.runtime import attach_parent
     attach_parent(driver, state, cfg)
-    from woof.ocean.door import attach_atmosphere
-    attach_atmosphere(driver, cfg,
-        latitude=radiation_latitude if radiation_latitude is not None else noahmp_latitude,
-        longitude=radiation_longitude if radiation_longitude is not None else noahmp_longitude)
+    # An [external_ocean] contract (woof.ocean.external) is WRF's coupler;
+    # any other ocean_config is the waves/surge door.
+    if _external_ocean_configured(cfg):
+        from woof.ocean.external import attach as attach_external_ocean
+        attach_external_ocean(driver, cfg, latitude=(
+            radiation_latitude if radiation_latitude is not None else noahmp_latitude))
+    else:
+        from woof.ocean.door import attach_atmosphere
+        attach_atmosphere(driver, cfg,
+            latitude=radiation_latitude if radiation_latitude is not None else noahmp_latitude,
+            longitude=radiation_longitude if radiation_longitude is not None else noahmp_longitude)
     if driver.wind_farm is not None and driver.wind_farm.scheme != "fitch_wrf":
         # Initial-time power and hub wind are diagnostics of the initial state.
         # Sampling applies no momentum or TKE tendency before the first step.
