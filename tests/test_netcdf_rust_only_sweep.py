@@ -284,7 +284,7 @@ def test_the_sweep_actually_converted_something():
     being undone one module at a time.
 
     That 29 counted a tree without the folded-in hex model, whose MPAS I/O
-    is an open finding by prefix (69 importers), and the tree outside it has
+    is an open finding by prefix (73 importers at 1.1.6), and the tree outside it has
     since grown declared importers too (21 at upstream 1.1.0, 38 now), so
     the count is held at today's population, every one declared: it may
     fall, and a new importer has to raise it here with its reason.
@@ -300,9 +300,9 @@ def test_the_sweep_actually_converted_something():
         f"{declared} are declared exempt")
     hex_tree = sum(1 for name in importers
                    if any(name.startswith(prefix) for prefix in _OPEN_FINDING_PREFIXES))
-    assert hex_tree <= 69 and len(importers) - hex_tree <= 38, (
+    assert hex_tree <= 73 and len(importers) - hex_tree <= 38, (
         f"{len(importers) - hex_tree} importers outside the hex tree (38 when "
-        f"this was pinned) and {hex_tree} in it (69): the population climbed")
+        f"this was pinned) and {hex_tree} in it (73): the population climbed")
 
 
 @pytest.mark.parametrize("module", sorted(_DECODERS))

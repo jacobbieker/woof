@@ -278,6 +278,10 @@ def compile_using_nvrtc(source, options=(), arch=None, filename="kern.cu",
             return host_image(source, tuple(options or ()), filename), ""
         from woof.backend.facade.cuda import translated_image
         return translated_image(source, tuple(options or ()), filename), ""
+    from woof.hip_backend import active, compile_source
+    if active():
+        return compile_source(source, options, arch, filename, name_expressions,
+                              log_stream, cache_in_memory, jitify, method)
     cupy, compiler = _compiler_runtime()
     # Include every final arithmetic control before lookup, including WRF
     # exact controls otherwise injected only at the NVRTC program boundary.

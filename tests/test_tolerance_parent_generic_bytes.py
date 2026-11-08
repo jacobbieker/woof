@@ -36,8 +36,17 @@ RECIPE_GENERATION_LINES = {
 }
 
 
+#: Lines every wizard recipe gained after the parent was pinned: 1.1.6's
+#: default-on 0-1/0-2/0-3 km updraft-helicity maxima (woof/core/uh_layers.py,
+#: woof.domain_wizard's ``uh_layers = 1``).  Each appears exactly once.
+RECIPE_CAPABILITY_LINES = ("uh_layers = 1\n",)
+
+
 def without_recipe_generation(source, emitted):
     """``emitted`` with the source row's declared generation taken back out."""
+    for line in RECIPE_CAPABILITY_LINES:
+        assert emitted.count(line) == 1, (line, emitted)
+        emitted = emitted.replace(line, "")
     if source not in RECIPE_GENERATION_LINES:
         return emitted
     parent, now = RECIPE_GENERATION_LINES[source]

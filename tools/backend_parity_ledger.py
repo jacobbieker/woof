@@ -32,6 +32,7 @@ tests/test_backend_parity_ledger.py holds the ledger to the receipts.
     python tools/backend_parity_ledger.py host-words /tmp/sweep-mlx    # on the Mac
     python tools/backend_parity_ledger.py receipt cuda /tmp/sweep-cuda
     python tools/backend_parity_ledger.py receipt mlx /tmp/sweep-mlx
+    python tools/backend_parity_ledger.py receipt mlx-cuda-powf /tmp/sweep-mlx-cuda-powf
     python tools/backend_parity_ledger.py ledger
 """
 
@@ -51,6 +52,14 @@ LEDGER = ROOT / "woof" / "verify" / "backend_parity_ledger.json"
 RECEIPT_SCHEMA = "woof.backend-receipt/v1"
 LEDGER_SCHEMA = "woof.backend-parity-ledger/v1"
 BACKENDS = ("cuda", "mlx")
+#: Sweeps with an opt-in, each run on a backend: the label, its backend and
+#: the variables it sets.  WOOF_STRICT_POWF=cuda puts the opt-in
+#: transcription of CUDA's powf in Metal's strict power (NOTICE).
+OPT_IN_RECEIPTS = {"mlx-cuda-powf": ("mlx", {"WOOF_STRICT_POWF": "cuda"})}
+#: The default receipts are made without any opt-in.
+DEFAULT_OFF = {"WOOF_STRICT_POWF": None}
+#: Gap causes an opt-in sweep must close: cause -> opt-in receipt.
+CLOSED_BY_OPT_IN = {"independent-powf": "mlx-cuda-powf"}
 SWEEP_ENVIRONMENT = {"GPUWM_WRF_EXACT": "1", "GPUWM_NUMERICS": "strict",
                      "WOOF_LAUNCH_TRACE_ZERO_EMPTY": "1"}
 #: The swept test files.
@@ -173,9 +182,13 @@ def build_receipt(backend: str, sweep: Path) -> dict:
              if environment.get(k) != v}
     if wrong:
         raise SystemExit(f"{sweep}: not the sweep's environment: {wrong}")
-    if environment.get("backend") != backend:
+    runs_on, opt_in = OPT_IN_RECEIPTS.get(backend, (backend, DEFAULT_OFF))
+    if environment.get("backend") != runs_on:
         raise SystemExit(f"{sweep}: traced on backend {environment.get('backend')!r}, "
-                         f"not {backend!r}")
+                         f"not {runs_on!r}")
+    wrong = {k: environment.get(k) for k, v in opt_in.items() if (environment.get(k) or None) != v}
+    if wrong:
+        raise SystemExit(f"{sweep}: not the {backend} sweep's opt-ins: {wrong}")
     return {"schema": RECEIPT_SCHEMA, "backend": backend,
             "environment": environment,
             "host_words": json.loads(host.read_text()) if host.exists() else {},
@@ -232,13 +245,15 @@ def build_ledger(receipts: dict, previous: dict | None) -> dict:
     previous = previous or {}
     ledger = {
         "schema": LEDGER_SCHEMA,
-        "receipts": {b: str((RECEIPTS / f"{b}.json").relative_to(ROOT)) for b in BACKENDS},
+        "receipts": {b: str((RECEIPTS / f"{b}.json").relative_to(ROOT))
+                     for b in (*BACKENDS, *OPT_IN_RECEIPTS) if b in receipts},
         "environment": SWEEP_ENVIRONMENT,
         "sweep_tests": list(SWEEP_TESTS),
         "causes": previous.get("causes", {}),
         "kernel_causes": previous.get("kernel_causes", {}),
         "test_causes": previous.get("test_causes", {}),
         "host_causes": previous.get("host_causes", {}),
+        "residual_causes": previous.get("residual_causes", {}),
         "host_entries": {},
         "entries": {},
     }
@@ -255,6 +270,19 @@ def build_ledger(receipts: dict, previous: dict | None) -> dict:
         m = mlx.get(nodeid, {"outcome": "absent", "launches": []})
         entry = {"cuda": c["outcome"], "mlx": m["outcome"], **compare(c, m, traced_on_cuda)}
         entry["cause"] = cause_of(nodeid, entry, ledger) if is_gap(entry) else None
+        label = CLOSED_BY_OPT_IN.get(entry["cause"])
+        if label is not None and label in receipts:
+            o = receipts[label]["tests"].get(nodeid, {"outcome": "absent", "launches": []})
+            # With the opt-in the test must do what it does on CUDA; launches
+            # that still part must part for the entry's residual cause (a
+            # second, smaller gap the opt-in does not touch).
+            with_opt_in = compare(c, o, traced_on_cuda)
+            residual = ledger["residual_causes"].get(nodeid)
+            entry["closed_by_opt_in"] = {
+                "receipt": label, "outcome": o["outcome"], "launches": with_opt_in["launches"],
+                "residual_cause": residual if with_opt_in["launches"] == "diverge" else None,
+                "closed": o["outcome"] == c["outcome"] and (
+                    with_opt_in["launches"] != "diverge" or residual in ledger["causes"])}
         ledger["entries"][nodeid] = entry
     gaps = [e for e in ledger["entries"].values() if is_gap(e)]
     ledger["summary"] = {
@@ -302,12 +330,13 @@ def main(argv=None) -> int:
         return 0
     if argv[0] == "receipt":
         backend, sweep = argv[1], Path(argv[2])
-        if backend not in BACKENDS:
-            raise SystemExit(f"backend must be one of {BACKENDS}")
+        if backend not in BACKENDS and backend not in OPT_IN_RECEIPTS:
+            raise SystemExit(f"backend must be one of {BACKENDS + tuple(OPT_IN_RECEIPTS)}")
         _dump_receipt(RECEIPTS / f"{backend}.json", build_receipt(backend, sweep))
         return 0
     if argv[0] == "ledger":
-        receipts = {b: json.loads((RECEIPTS / f"{b}.json").read_text()) for b in BACKENDS}
+        receipts = {b: json.loads((RECEIPTS / f"{b}.json").read_text())
+                    for b in (*BACKENDS, *OPT_IN_RECEIPTS) if (RECEIPTS / f"{b}.json").exists()}
         previous = json.loads(LEDGER.read_text()) if LEDGER.exists() else None
         ledger = build_ledger(receipts, previous)
         _dump(LEDGER, ledger)

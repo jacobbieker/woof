@@ -17,7 +17,7 @@ import pytest
 
 cp = pytest.importorskip("cupy")
 
-from woof.core.solar_diagnostics import NOUT, SOLAR_OUTPUTS, run_solar_diag
+from woof.core.solar_diagnostics_wrf471 import NOUT, SOLAR_OUTPUTS, run_solar_diag
 
 DATA = Path(__file__).parent / "data" / "oracles" / "solar_diag"
 
@@ -64,7 +64,7 @@ def columns():
 
 
 def _flags(f):
-    from woof.core.solar_diagnostics import species_flags
+    from woof.core.solar_diagnostics_wrf471 import species_flags
     return species_flags(qv=f[0], qc=f[1], qi=f[2], qs=f[3], has_reqc=f[4],
                          has_reqi=f[5], has_reqs=f[6])
 

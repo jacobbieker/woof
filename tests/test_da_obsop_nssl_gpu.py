@@ -24,6 +24,17 @@ from woof.core import constants as c        # noqa: E402
 from woof.da import obsop                    # noqa: E402
 
 
+def _mp18():
+    """An mp_physics = 18 stand-in carrying RunConfig's NSSL selector
+    defaults, which the radar operator resolves its NSSL mode from."""
+    from dataclasses import fields
+
+    from woof.config import RunConfig
+    return SimpleNamespace(mp_physics=18, **{
+        f.name: f.default for f in fields(RunConfig)
+        if f.name.startswith("nssl_")})
+
+
 class _DuckState:
     """The minimal state ``simulated_reflectivity`` reads for NSSL.
 
@@ -86,7 +97,7 @@ def test_mp18_dispatches_to_the_product_radardd02_bit_for_bit():
     from woof.core.nssl2_diagnostics import launch_radardd02
 
     state = _nssl_state()
-    cfg = SimpleNamespace(mp_physics=18)
+    cfg = _mp18()
 
     got = obsop.simulated_reflectivity(state, cfg)
     cp.cuda.Stream.null.synchronize()
@@ -119,7 +130,7 @@ def test_mp18_floors_at_zero_dbz_not_minus_thirty_five():
     import cupy as cp
 
     clear = _nssl_state(precipitating=False)
-    got = obsop.simulated_reflectivity(clear, SimpleNamespace(mp_physics=18))
+    got = obsop.simulated_reflectivity(clear, _mp18())
     cp.cuda.Stream.null.synchronize()
     assert float(got.min()) == 0.0
     assert float(got.max()) == 0.0
@@ -137,6 +148,6 @@ def test_mp18_refuses_the_t1d_p1d_pair_it_does_not_use():
     state = _nssl_state()
     with pytest.raises(ValueError, match="radardd02"):
         obsop.simulated_reflectivity(
-            state, SimpleNamespace(mp_physics=18),
+            state, _mp18(),
             temperature=state.p, pressure=state.p)
     cp.cuda.Stream.null.synchronize()

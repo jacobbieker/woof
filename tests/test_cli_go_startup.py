@@ -50,3 +50,22 @@ def test_go_dispatch_uses_focused_parser(monkeypatch, capsys):
     assert stopped.value.code == 0
     assert calls == [{'go_only': True}]
     assert '--prepared-root' in capsys.readouterr().out
+
+
+@pytest.mark.parametrize('selector', [['--wrfinput', '/case'], ['--wrfinput=/case']])
+def test_go_stock_wrf_inputs_reach_the_existing_run_parser(selector, monkeypatch, capsys):
+    original = cli.build_parser
+    calls = []
+    def build(**kwargs):
+        calls.append(kwargs)
+        return original(**kwargs)
+    monkeypatch.setattr(cli, 'build_parser', build)
+    with pytest.raises(SystemExit) as stopped:
+        cli.main(['go', *selector, '--help'])
+    assert stopped.value.code == 0
+    assert calls == [{'go_only': True}]
+    assert '--restart-from' in capsys.readouterr().out
+    with pytest.raises(SystemExit) as stopped:
+        cli.main(['go', *selector, '--unknown-option'])
+    assert stopped.value.code == 2
+    assert '--unknown-option' in capsys.readouterr().err
