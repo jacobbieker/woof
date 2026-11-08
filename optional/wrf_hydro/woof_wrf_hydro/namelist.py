@@ -175,8 +175,8 @@ def map_hydro_nlist(groups: dict[str, dict]) -> HydroConfig:
     if nl.get("teradj_solar", 0) != 0:
         refuse("TERADJ_SOLAR", nl["teradj_solar"], "terrain-adjusted solar radiation is not ported")
     rt_option = int(nl.get("rt_option", 1))
-    if rt_option != 1:
-        refuse("rt_option", rt_option, "only rt_option = 1 (steepest descent) is ported")
+    if rt_option not in (1, 2):
+        raise ValueError(f"rt_option = {rt_option}: must be 1 or 2 (config.F90 :387)")
     channel = int(nl.get("chanrtswcrt", 0)) == 1
     channel_option = int(nl.get("channel_option", 3))
     if channel and channel_option not in (1, 2, 3):

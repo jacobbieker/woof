@@ -44,6 +44,8 @@ from pathlib import Path
 
 import numpy as np
 
+from ._compile import raw_module
+
 from .eos import EquationOfState
 from .tke import TkeMixing
 from .traqsr import TraQsr2BD
@@ -63,13 +65,11 @@ RN_AVM0, RN_AVT0 = 1.2e-4, 1.2e-5
 def _module():
     global _MODULE
     if _MODULE is None:
-        import cupy as cp
-
         kernels = Path(__import__("woof.core.kernels", fromlist=["x"]).__file__).parent
         here = Path(__file__).resolve().parent
         source = ((kernels / "glibc_flt64.cuh").read_text(encoding="utf-8") + "\n"
                   + (here / "column.cu").read_text(encoding="utf-8"))
-        _MODULE = cp.RawModule(code=source, options=("--fmad=false",))
+        _MODULE = raw_module(source, ("--fmad=false",))
     return _MODULE
 
 
