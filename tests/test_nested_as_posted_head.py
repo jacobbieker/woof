@@ -87,7 +87,7 @@ def test_the_tree_head_reads_only_decoded_times_and_its_seal_the_rest(
     moved[2].latitude = np.asarray(plain[2].latitude) + 1.0
     moved = _PostingSeries(moved)
     moved.ready = 3
-    with pytest.raises(ValueError, match="source grid changes"):
+    with pytest.raises(ValueError, match="changes the source coverage"):
         seal(moved)
 
 
