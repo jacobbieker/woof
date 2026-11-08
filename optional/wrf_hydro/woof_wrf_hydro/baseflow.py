@@ -1,7 +1,7 @@
 # WOOF-OPTIN: wrf-hydro
 """WRF-Hydro's groundwater bucket on device (``baseflow.cu``).
 
-``simp_gw_buck`` (hydro/Routing/module_GW_baseflow.F90 in WRF 4.6.1's hydro/):
+``simp_gw_buck`` (hydro/Routing/module_GW_baseflow.F90 in WRF 4.7.1's hydro/):
 each basin's bucket takes the mean LSM drainage (SOLDRAIN; plus INFXSRT when
 overland routing is off), discharges by the exponential bucket
 (GWBASESWCRT = 1, with overflow spill) or passes it through
@@ -39,7 +39,7 @@ def _k(name):
 
 
 def pixel_count(gw_strm_msk, nb) -> np.ndarray:
-    """module_RT.F90:1383-1394: REAL count of stream pixels per bucket."""
+    """module_RT.F90:1369-1380: REAL count of stream pixels per bucket."""
     counts = np.zeros(nb, np.float32)
     for b in np.asarray(gw_strm_msk).ravel():
         if b > 0:

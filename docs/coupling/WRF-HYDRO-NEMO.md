@@ -1,7 +1,8 @@
 # WRF-Hydro and WRF-NEMO coupling: what is ported, the licences, and the roadmap
 
-Status as of 2026-11-07.  WOOF holds WRF physics to compiled WRF 4.6.1
-reference builds.  This page records which parts of WRF's hydrology and ocean
+Status as of 2026-11-08.  WOOF holds WRF physics to compiled WRF reference
+builds; the WRF-Hydro and Noah `-DWRF_HYDRO` lanes pin WRF 4.7.1 (upstream's
+baseline, `f52c197e`), NEMO pins 5.0.2 (the newest NEMO release).  This page records which parts of WRF's hydrology and ocean
 couplings are ported to that standard, which are not and why, and what each
 remaining step needs.
 
@@ -9,10 +10,10 @@ remaining step needs.
 
 | Piece | Source | Where | Gate |
 | --- | --- | --- | --- |
-| Noah LSM built with `-DWRF_HYDRO`: ponded head `sfcheadrt` in; infiltration excess `infxsrt` and soil drainage `soldrain` out; the NDHMS edits to SMFLX, SRT and SSTEP | WRF 4.6.1 `phys/module_sf_noahdrv.F`, `phys/module_sf_noahlsm.F` (public domain) | `launch_noah(wrf_hydro=...)` -> `noah_column_hydro` (`woof/core/kernels/noah.cu`) | `tests/test_noah_wrf_hydro_parity.py`: 0 ULP in every field on CUDA (sm_86) and Metal (M3 Max), default and strict numerics |
+| Noah LSM built with `-DWRF_HYDRO`: ponded head `sfcheadrt` in; infiltration excess `infxsrt` and soil drainage `soldrain` out; the NDHMS edits to SMFLX, SRT and SSTEP | WRF 4.7.1 `phys/module_sf_noahdrv.F`, `phys/module_sf_noahlsm.F` (public domain; byte-identical to 4.6.1's) | `launch_noah(wrf_hydro=...)` -> `noah_column_hydro` (`woof/core/kernels/noah.cu`) | `tests/test_noah_wrf_hydro_parity.py`: 0 ULP in every field on CUDA (sm_86) and Metal (M3 Max), default and strict numerics |
 | WRF's side of the OASIS coupling with an ocean model: `cpl_snd2` (EVAP-PRECIP, SURF_NET_SOLAR, SURF_NET_NON-SOLAR, TAUX, TAUY, TAUMOD) and `cpl_rcv` (SST, UOCE, VOCE merged under CPLMASK) | WRF 4.6.1 `frame/module_cpl.F` (public domain) | `woof/ocean/wrf_cpl.py`, `woof/ocean/wrf_cpl.cu` | `tests/test_wrf_cpl_wrf461_parity.py` (pending: #159) |
 
-| WRF-Hydro subsurface routing (`rt_option = 1`): FINDZWAT, ROUTE_SUBSURFACE1 with GETSUB8, SUBSFC_RTNG | WRF 4.6.1 `hydro/Routing/Noah_distr_routing_subsurface.F90`, `Noah_distr_routing.F90` (UCAR WRF-Hydro licence) | **opt-in**: `optional/wrf_hydro/` via `woof.optin.load("wrf_hydro")` with `WOOF_ENABLE_WRF_HYDRO=1` | `tests/test_wrf_hydro_subsurface_parity.py`: six routing calls bitwise on CUDA and Metal; skips by named rule when the opt-in is off |
+| WRF-Hydro subsurface routing (`rt_option = 1`): FINDZWAT, ROUTE_SUBSURFACE1 with GETSUB8, SUBSFC_RTNG | WRF 4.7.1 `hydro/Routing/Noah_distr_routing_subsurface.F90`, `Noah_distr_routing.F90` (UCAR WRF-Hydro licence) | **opt-in**: `optional/wrf_hydro/` via `woof.optin.load("wrf_hydro")` with `WOOF_ENABLE_WRF_HYDRO=1` | `tests/test_wrf_hydro_subsurface_parity.py`: six routing calls bitwise on CUDA and Metal; skips by named rule when the opt-in is off |
 
 | NEMO 2-band penetrative solar radiation (`ln_qsr_2bd`, linear free surface, leapfrog): `qsr_ext_lev`, `qsr_2BD`, `tra_qsr` | NEMO 5.0.2 `src/OCE/TRA/traqsr.F90` (CeCILL v2.0) | **opt-in**: `optional/nemo/` via `woof.optin.load("nemo")` with `WOOF_ENABLE_NEMO=1` | `tests/test_nemo_traqsr_parity.py`: three steps bitwise in double on CUDA and Metal; skips by named rule when the opt-in is off |
 
@@ -140,17 +141,20 @@ Metal, and refuses what it does not port by name.
    **done** in the opt-in), overland (`Routing/Overland/`,
    `Noah_distr_routing_overland.F90`: **done** in the opt-in for
    rt_option = 1, `tests/test_wrf_hydro_overland_parity.py`), channel (`Routing/module_channel_routing.F90`:
-   Muskingum and Muskingum-Cunge reach routing **done** in the opt-in,
-   `tests/test_wrf_hydro_channel_parity.py`; the diffusive wave on nodes,
-   channel_option 3, **done** in the opt-in with level-pool lakes
-   (`Reservoirs/Level_Pool/`), compiled as WRF-Hydro always is, with
+   Muskingum and Muskingum-Cunge reach routing **done** in the opt-in, with
+   4.7.0's reservoir reaches (TYPEL = 1 routes its lake through the
+   reservoir; TYPEL = 2 is not committed), `tests/test_wrf_hydro_channel_parity.py`;
+   the diffusive wave on nodes, channel_option 3, **done** in the opt-in with
+   level-pool lakes (`Reservoirs/Level_Pool/`, lake_option 1, and 4.7.0's
+   pass-through, lake_option 2), both compiled as WRF-Hydro always is, with
    MPP_LAND, on one process, `tests/test_wrf_hydro_diffusive_parity.py`; the
-   persistence and RFC-forecast reservoirs remain), then the bucket baseflow (`module_GW_baseflow.F90`
+   persistence and RFC-forecast reservoirs, lake_option 3, remain), then the bucket baseflow (`module_GW_baseflow.F90`
    simp_gw_buck, GWBASESWCRT 1 and 2: **done** in the opt-in,
    `tests/test_wrf_hydro_baseflow_parity.py`; 3 and 4 remain).
 5. **Configuration** (**done** in the opt-in: `woof_wrf_hydro.namelist`,
-   `tests/test_wrf_hydro_namelist.py`, held to WRF 4.6.1's template): `hydro.namelist` (`SUBRTSWCRT`, `OVRTSWCRT`,
-   `CHANRTSWCRT`, `channel_option`, `rt_option`, `GWBASESWCRT`, `DXRT`,
+   `tests/test_wrf_hydro_namelist.py`, held to WRF 4.7.1's template and
+   read_rt_nlst): `hydro.namelist` (`SUBRTSWCRT`, `OVRTSWCRT`,
+   `CHANRTSWCRT`, `channel_option`, `rt_option`, `GWBASESWCRT`, `lake_option`, `DXRT`,
    `AGGFACTRT`, `DTRT_TER`, `DTRT_CH`) mapped to a WOOF table, every unported
    value refused by name.  Until step 4 lands there is nothing to route to:
    `launch_noah(wrf_hydro=...)` is an API for the coupling, not a model run.

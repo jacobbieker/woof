@@ -1,4 +1,4 @@
-! Service module for WRF-Hydro's LSM <-> routing grid transforms as WRF 4.6.1
+! Service module for WRF-Hydro's LSM <-> routing grid transforms as WRF 4.7.1
 ! ships them: disaggregateDomain (hydro/Routing/Noah_distr_routing.F90) and
 ! aggregateDomain (hydro/HYDRO_drv/module_HYDRO_drv.F90).
 !

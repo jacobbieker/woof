@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build and run the WRF-Hydro subsurface-routing oracle from the WRF-Hydro
-# tree WRF 4.6.1 ships under hydro/ (WRF pinned at d66e442f...).
+# tree WRF 4.7.1 ships under hydro/ (WRF pinned at f52c197e...).
 #
 # Part of the WRF-Hydro opt-in (optional/wrf_hydro, see ../LICENSE): it reads
 # UCAR's WRF-Hydro source at build time and copies none of it into the tree.
@@ -20,7 +20,7 @@ fi
 source_root=$(realpath "$1")
 build_dir=$(realpath -m "$2")
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-pinned_commit="d66e442fccc04111067e29274c9f9eaccc3cef28"
+pinned_commit="f52c197ed39d12e087d02c50f412d90d418f6186"
 
 modules=(
     hydro/utils/module_hydro_stop.F90
@@ -60,8 +60,8 @@ awk '
     on { print }
     on && /^END SUBROUTINE GETSUB8(DIR)?$/ { on = 0 }
 ' "${source_root}/hydro/Routing/Noah_distr_routing.F90" > getsub8.inc
-if [[ "$(grep -c '' getsub8.inc)" -ne 75 ]]; then
-    echo "GETSUB8/GETSUB8DIR cut is $(grep -c '' getsub8.inc) lines, expected 75" >&2
+if [[ "$(grep -c '' getsub8.inc)" -ne 74 ]]; then
+    echo "GETSUB8/GETSUB8DIR cut is $(grep -c '' getsub8.inc) lines, expected 74" >&2
     exit 6
 fi
 
@@ -97,6 +97,6 @@ sha256sum "${sources[@]/#/${source_root}/}" getsub8.inc \
     "${script_dir}/subsurface_harness.F90" "${script_dir}/run_subsurface.F90" \
     "${script_dir}/build.sh" \
     subsurface-inputs.csv subsurface-steps.csv subsurface-totals.csv \
-    | sed "s#${source_root}/#<wrf-4.6.1-checkout>/#; s#${script_dir}/#<oracle-workspace>/optional/wrf_hydro/oracle/#" \
+    | sed "s#${source_root}/#<wrf-4.7.1-checkout>/#; s#${script_dir}/#<oracle-workspace>/optional/wrf_hydro/oracle/#" \
     > oracle-sha256sums.txt
 echo "oracle built in ${build_dir}"

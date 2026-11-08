@@ -1,5 +1,5 @@
 // WOOF-OPTIN: wrf-hydro
-// Derived from WRF-Hydro (UCAR) as shipped in WRF 4.6.1 hydro/; see
+// Derived from WRF-Hydro (UCAR) as shipped in WRF 4.7.1 hydro/; see
 // optional/wrf_hydro/LICENSE and NOTICE.md.  Not part of the default build or
 // of any wheel.
 //

@@ -1,4 +1,4 @@
-"""WRF-Hydro groundwater bucket (the opt-in), bitwise against WRF 4.6.1's hydro/.
+"""WRF-Hydro groundwater bucket (the opt-in), bitwise against WRF 4.7.1's hydro/.
 
 ``simp_gw_buck`` run by ``woof_wrf_hydro.baseflow``.  The fixture is
 ``optional/wrf_hydro/oracle/build_baseflow.sh``: the routine cut byte for byte
