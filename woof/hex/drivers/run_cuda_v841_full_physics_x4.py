@@ -4276,8 +4276,10 @@ def write_snapshot_netcdf(
                 "declared divergence. Zero only when the selection has no microphysics or the engine "
                 "cannot separate the scheme's reflectivity from its step",
             )
+        from woof.hex.chem_wrf import history_units as chem_row_units
         units = {
-            **{name: species.declaration(name).units for name in SCALAR_NAMES},
+            # A WRF-Chem row keeps its WRF units (ug kg-1, ppmv), not the aerosol class's kg kg-1.
+            **{name: chem_row_units(name) or species.declaration(name).units for name in SCALAR_NAMES},
             "tke": "m^2 s^{-2}",
             "u_zonal": "m s^{-1}",
             "v_meridional": "m s^{-1}",
