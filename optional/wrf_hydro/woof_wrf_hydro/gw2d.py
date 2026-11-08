@@ -15,8 +15,9 @@ Planes are device float32 (jxrt, ixrt) (Fortran's (ixrt, jxrt)); soil
 moisture is (nsoil, jxrt, ixrt).  ``ltype`` is 1 land, 2 ocean, other values
 inactive; ``ebot``/``eocn`` are gwstep's carried diagnostics, which WRF-Hydro
 rescales by the land area and dt every call.  The groundwater-channel
-exchange (the diffusive branch's gwOption block and the head correction
-after drive_CHANNEL) is not in this module.
+exchange is the diffusive wave's (``DiffusiveWaveRouting`` with
+``gwbaseswcrt=3``, which writes ``qgw_chanrt``) and
+:meth:`Gw2d.channel_exchange`, HYDRO_drv's head correction after it.
 """
 
 from __future__ import annotations
@@ -68,6 +69,7 @@ class Gw2d:
         self.h = self.ho.copy()
         z = lambda: cp.zeros((self.jx, self.ix), cp.float32)  # noqa: E731
         self.convgw, self.excess, self.qsgwrt, self.qdarcyrt = z(), z(), z(), z()
+        self.qgw_chanrt = z()
         self.dx, self.dt, self.agg = np.float32(dx), np.float32(dt), int(aggfactrt)
         if self.ix % self.agg or self.jx % self.agg:
             raise ValueError("the routing grid is AGGFACTRT times the LSM grid")
@@ -95,6 +97,7 @@ class Gw2d:
 
         self.qsgwrt.fill(0)
         self.qdarcyrt.fill(0)
+        self.qgw_chanrt.fill(0)
         self.excess.fill(0)
         self.istep = 0
         self.hycond[...] = cp.where(self.hycond == cp.float32(100), cp.float32(5e-4), self.hycond)
@@ -149,3 +152,12 @@ class Gw2d:
                                                   np.int32(self.agg), np.int32(self.ix),
                                                   self.qdarcyrt, self.qsgw))
         self.istep += 1
+
+    def channel_exchange(self, *, gw_chan_cond_sw) -> None:
+        """module_HYDRO_drv.F90:986-994: with gwChanCondSw = 1, the channel
+        flux ``qgw_chanrt`` the diffusive wave wrote leaves the aquifer head."""
+        if int(gw_chan_cond_sw) != 1:
+            return
+        n = self.ix * self.jx
+        _k("gw_chan_head")(_g(n), (_TPB,), (np.int32(n), self.dt, self.dx, self.qgw_chanrt,
+                                            self.poros, self.ho))

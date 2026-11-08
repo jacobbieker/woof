@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Build and run the WRF-Hydro 2-D groundwater oracle (GWBASESWCRT = 3:
-# gw2d_ini, gwstep, gwSoilFlux, aggregateQsgw and HYDRO_drv's call of them)
+# gw2d_ini, gwstep, gwSoilFlux, aggregateQsgw, HYDRO_drv's call of them and
+# its channel-aquifer head correction)
 # from the WRF-Hydro tree WRF 4.7.1 ships under hydro/.  Part of the
 # WRF-Hydro opt-in (see ../LICENSE): the pinned source is read at build time
 # and none of it is copied into the tree.  Pin check, byte-for-byte cuts with
@@ -44,12 +45,15 @@ cut sub_tri_solv  '^      subroutine sub_tri_solv\('              '^      end  s
 awk '/^                if \(nlst\(did\)%gwsoilcpl \.GT\. 0\) THEN$/{on=1} on{print}
      on && /^                gw2d\(did\)%istep =  gw2d\(did\)%istep \+ 1$/{exit}' \
     "${source_root}/hydro/HYDRO_drv/module_HYDRO_drv.F90" > drv_gw2d.inc
+awk '/^            if\(\(nlst\(did\)%gwBaseSwCRT == 3\) \.and\. \(nlst\(did\)%gwChanCondSw \.eq\. 1\)\) then$/{on=1} on{print}
+     on && /^            endif$/{exit}' \
+    "${source_root}/hydro/HYDRO_drv/module_HYDRO_drv.F90" > drv_gw2d_chan.inc
 lines=""
-for f in gw2d_ini gw2d_allocate gwstep scopy gwsoilflux darcygwsoil aggregateqsgw sub_tri_solv drv_gw2d; do
+for f in gw2d_ini gw2d_allocate gwstep scopy gwsoilflux darcygwsoil aggregateqsgw sub_tri_solv drv_gw2d drv_gw2d_chan; do
     lines="${lines} $(grep -c '' ${f}.inc)"
 done
-if [[ "${lines}" != " 58 64 760 16 102 67 39 83 26" ]]; then
-    echo "cut lengths${lines}, expected 58 64 760 16 102 67 39 83 26" >&2
+if [[ "${lines}" != " 58 64 760 16 102 67 39 83 26 9" ]]; then
+    echo "cut lengths${lines}, expected 58 64 760 16 102 67 39 83 26 9" >&2
     exit 6
 fi
 gfortran -c -O0 -cpp ${free} "${source_root}/hydro/Data_Rec/module_gw_gw2d_data.F90"
@@ -65,10 +69,10 @@ fi
 grep -E 'expf|powf|sqrtf|exp$|pow$' undefined-O0-gw2d.txt > gw2d-libm.txt || true
 ./run_gw2d . > run-gw2d-stdout.txt
 sha256sum "${sources[@]/#/${source_root}/}" gw2d_ini.inc gw2d_allocate.inc gwstep.inc scopy.inc \
-    gwsoilflux.inc darcygwsoil.inc aggregateqsgw.inc sub_tri_solv.inc drv_gw2d.inc \
+    gwsoilflux.inc darcygwsoil.inc aggregateqsgw.inc sub_tri_solv.inc drv_gw2d.inc drv_gw2d_chan.inc \
     "${script_dir}/gw2d_harness.F90" "${script_dir}/gw2d_mpp_stubs.f90" \
     "${script_dir}/run_gw2d.F90" "${script_dir}/build_gw2d.sh" \
-    gw2d-static.csv gw2d-steps.csv gw2d-totals.csv gw2d-qsgw.csv \
+    gw2d-static.csv gw2d-steps.csv gw2d-totals.csv gw2d-qsgw.csv gw2d-chan.csv \
     | sed "s#${source_root}/#<wrf-4.7.1-checkout>/#; s#${script_dir}/#<oracle-workspace>/optional/wrf_hydro/oracle/#" \
     > gw2d-sha256sums.txt
 echo "oracle built in ${build_dir}"

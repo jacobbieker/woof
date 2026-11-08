@@ -4,7 +4,8 @@
 ! build_gw2d.sh cuts gw2d_ini, gw2d_allocate, gwstep, SCOPY, gwSoilFlux,
 ! darcyGwSoil, aggregateQsgw and sub_tri_solv byte for byte from
 ! module_gw_gw2d.F90, and the GWBASESWCRT = 3 arm of module_HYDRO_drv.F90's
-! groundwater call (:849-874), and #includes them below; module_gw_gw2d_data
+! groundwater call (:849-874) and the channel-aquifer head correction after
+! drive_CHANNEL (:986-994), and #includes them below; module_gw_gw2d_data
 ! is compiled whole.  gwstep is compiled with MPP_LAND, as WRF-Hydro always
 ! is, against mpp_gw_single's one-process exchanges: there are no neighbours
 ! (left/right/up/down_id = -1, np_up_down = np_left_right = 1), so the
@@ -50,6 +51,7 @@ module config_single
   implicit none
   type nlst_field
     integer :: nsoil, aggfactRT, gwsoilcpl, GwPreCycles, GwPreDiagInterval, igrid, output_gw
+    integer :: gwBaseSwCRT = 3, gwChanCondSw = 0
     logical :: GwPreDiag = .false.
     real, allocatable, dimension(:) :: zsoil8
     real :: dt
@@ -139,4 +141,11 @@ contains
     integer, intent(in) :: did
 #include "drv_gw2d.inc"
   end subroutine gw_hydro_step
+
+  ! module_HYDRO_drv.F90 :986-994, after drive_CHANNEL has written
+  ! gw2d%qgw_chanrt (the diffusive wave's groundwater-channel flux, m3/s)
+  subroutine gw_chan_head(did)
+    integer, intent(in) :: did
+#include "drv_gw2d_chan.inc"
+  end subroutine gw_chan_head
 end module gw2d_harness

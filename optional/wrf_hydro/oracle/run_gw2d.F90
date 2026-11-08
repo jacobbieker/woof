@@ -103,6 +103,29 @@ program run_wrf_hydro_gw2d_oracle
   end do
   close(u); close(v); close(w)
 
+  ! HYDRO_drv's head correction after drive_CHANNEL, with a channel flux on
+  ! some cells (in and out of the channel), first with gwChanCondSw = 0
+  ! (no correction) and then 1
+  gw2d(1)%qgw_chanrt = 0.
+  do j = 1, jxrt
+    do i = 1, ixrt
+      if (mod(i + 2 * j, 5) == 0) gw2d(1)%qgw_chanrt(i, j) = 0.004 * (frac(i * 3 + j, 89) - 0.6)
+    end do
+  end do
+  open(newunit=u, file=trim(dir)//'/gw2d-chan.csv', status='replace')
+  write(u, '(A)') 'sw,i,j,qgw_chanrt,ho'
+  do n = 0, 1
+    nlst(1)%gwChanCondSw = n
+    call gw_chan_head(1)
+    do j = 1, jxrt
+      do i = 1, ixrt
+        write(u, '(3(I0,","),ES24.16E3,",",ES24.16E3)') n, i, j, gw2d(1)%qgw_chanrt(i, j), &
+            gw2d(1)%ho(i, j)
+      end do
+    end do
+  end do
+  close(u)
+
 contains
 
   subroutine dump(n)
