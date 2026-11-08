@@ -134,9 +134,15 @@ Metal, and refuses what it does not port by name.
    `Noah_distr_routing_overland.F90`: **done** in the opt-in for
    rt_option = 1, `tests/test_wrf_hydro_overland_parity.py`), channel (`Routing/module_channel_routing.F90`:
    Muskingum and Muskingum-Cunge reach routing **done** in the opt-in,
-   `tests/test_wrf_hydro_channel_parity.py`; the diffusive wave and the
-   reservoirs remain), then the bucket baseflow.
-5. **Configuration**: `hydro.namelist` (`SUBRTSWCRT`, `OVRTSWCRT`,
+   `tests/test_wrf_hydro_channel_parity.py`; the diffusive wave on nodes,
+   channel_option 3, **done** in the opt-in with level-pool lakes
+   (`Reservoirs/Level_Pool/`), compiled as WRF-Hydro always is, with
+   MPP_LAND, on one process, `tests/test_wrf_hydro_diffusive_parity.py`; the
+   persistence and RFC-forecast reservoirs remain), then the bucket baseflow (`module_GW_baseflow.F90`
+   simp_gw_buck, GWBASESWCRT 1 and 2: **done** in the opt-in,
+   `tests/test_wrf_hydro_baseflow_parity.py`; 3 and 4 remain).
+5. **Configuration** (**done** in the opt-in: `woof_wrf_hydro.namelist`,
+   `tests/test_wrf_hydro_namelist.py`, held to WRF 4.6.1's template): `hydro.namelist` (`SUBRTSWCRT`, `OVRTSWCRT`,
    `CHANRTSWCRT`, `channel_option`, `rt_option`, `GWBASESWCRT`, `DXRT`,
    `AGGFACTRT`, `DTRT_TER`, `DTRT_CH`) mapped to a WOOF table, every unported
    value refused by name.  Until step 4 lands there is nothing to route to:
@@ -147,14 +153,46 @@ Metal, and refuses what it does not port by name.
 1. **Pending in #159**: WRF's exchange contract (`cpl_snd2`/`cpl_rcv`),
    on a shared grid, with a conserving coupling-interval average and the
    `ExternalOcean` protocol in `woof/ocean/interface.py`.
-2. **Wire the exchange into the physics driver**: call `send` once per WRF
-   step after the surface layer as `module_integrate.F:460` does, `receive`
-   in the surface driver before the LSM as `module_surface_driver.F:1510`
-   does, with `cpl_store_input`'s SST_INPUT capture at
-   `solve_em.F:374`.  Needs an `ExternalOcean` implementation to be useful.
+2. **Done (SST only)**: the exchange wired into the driver
+   (`woof/ocean/external.py`, an `[external_ocean]` table in the
+   `ocean_config` TOML): `cpl_store_input`'s SST_INPUT capture at
+   itimestep 1 (`solve_em.F:374`); `cpl_rcv`'s SST merge at the top of every
+   surface-driver call (`module_surface_driver.F:1506`), followed by
+   `sst_update = 1`'s water lines (TSK and the top soil layer take SST in
+   250-350 K, :1720-1727), without which the merged SST never reaches TSK;
+   and `cpl_snd` once per completed step (`module_integrate.F:460`) with
+   U_PHY/V_PHY/RHO as `phy_prep` left them.  At each coupling time the
+   interval average goes to the ocean, which steps the interval (sequential
+   coupling).  Refused by name: an ocean that returns currents (WOOF's
+   surface layers do not read UOCE/VOCE), sea ice and the lake model under
+   the coupling (sst_update's ice and lake lines are not wired), a coupling
+   interval that is not a whole number of steps, and restart of a coupled
+   run.  `tests/test_external_ocean_coupling.py` runs the real driver
+   against a stub ocean, and the NEMO column through the same wiring.
 3. **An ocean**: the NEMO opt-in has begun with `traqsr` (2-band penetrative
-   solar, the consumer of SURF_NET_SOLAR); the tracer advection/diffusion,
-   vertical mixing (TKE), equation of state and dynamics remain.  The
+   solar, the consumer of SURF_NET_SOLAR) and the equation of state
+   (`eosbn2.F90`, TEOS-10/EOS-80/S-EOS, `tests/test_nemo_eos_parity.py`)
+   and TKE vertical mixing (`zdfsh2.F90`, `zdftke.F90`, no sea ice,
+   `tests/test_nemo_tke_parity.py`) and the implicit vertical diffusion of
+   T and S (`trazdf.F90`, `tests/test_nemo_trazdf_parity.py`), and those
+   pieces stepped together as a coupled tracer column,
+   `woof_nemo.column.NemoColumnOcean`, which implements `ExternalOcean`:
+   stpmlf.F90's order with sbc_ssm, sbccpl.F90's `sbc_cpl_rcv` ocean-only
+   mapping of WRF's six fields, the bottom drag of `zdfdrg.F90`, `tra_sbc`,
+   `tra_atf_qco`'s Asselin filter and `sbc_cpl_snd`'s SST, word for word
+   against those files compiled whole (`oracle/build_column.sh`,
+   `tests/test_nemo_column_parity.py`, CUDA and Metal).  The column is an
+   ocean at rest on a z-coordinate, so it couples SST only (UOCE/VOCE are
+   zero); NEMO 5.0 runs with a two-cell halo (`mppini.F90`: `nn_hls =
+   MAX(2, nn_hls)`), which the column oracle uses and which does not reach
+   the interior columns.  FCT tracer advection (`traadv_fct.F90`:
+   upstream step, 2nd/4th-order centred and 4th-order compact
+   anti-diffusive fluxes, Zalesak's limiter; `tests/test_nemo_traadv_parity.py`)
+   is ported given the transports; it does not enter the resting column.
+   So is iso-level lateral diffusion (`traldf_lev.F90`, laplacian and
+   bilaplacian, `tests/test_nemo_traldf_parity.py`) given ahtu/ahtv.  The
+   other advection schemes, the iso-neutral diffusion operators (traldf_iso,
+   traldf_triad), ldf_tra's diffusivity fields and the dynamics remain.  The
    alternative is an external NEMO through a real coupler (out of
    process; NEMO stays a separate program and its licence does not reach
    WOOF), or, after the licence decision, NEMO kernels behind an opt-in with

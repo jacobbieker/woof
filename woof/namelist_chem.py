@@ -54,9 +54,12 @@ FORK_CHEM_OPT_SETS = {18: "smoke"}
 #: the whole package runs.
 PLANNED_CHEM_OPT = {
     1: ("RADM2", "the RADM2 gas phase"),
-    2: ("RADM2SORG", "the RADM2 gas phase with the MADE/SORGAM aerosol"),
+    2: ("RADM2SORG", "the RADM2 gas phase with the MADE/SORGAM aerosol; the "
+                     "default build will run SORGAM's RPMARES equilibrium, "
+                     "WRF's ISORROPIA being an opt-in"),
     41: ("RADM2SORG_AQCHEM", "the RADM2 gas phase with the MADE/SORGAM "
-                             "aerosol and CMAQ aqueous chemistry")}
+                             "aerosol (RPMARES equilibrium) and CMAQ aqueous "
+                             "chemistry")}
 #: Packages built on CBM-Z (chem/module_cbmz*.F; CBMZ_BB_KPP shares its
 #: emissions and initial-condition modules) or MOSAIC (chem/module_mosaic*.F),
 #: whose Battelle/PNNL "Terms of Use" headers are not a licence grant; they

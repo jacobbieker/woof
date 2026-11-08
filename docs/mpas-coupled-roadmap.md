@@ -49,7 +49,8 @@ same strict recipe:
 
 The Icepack-lineage column package (`core_seaice/column`, `ice_kinds_mod`'s
 `dbl_kind`) is double precision whatever `RKIND` is, so a column-physics port
-is double. On Metal that means woof's soft-f64.
+is double. On Metal that means woof's soft-f64. MPAS-Ocean is run in double
+precision in practice, so its pieces are held at both RKIND 4 and RKIND 8.
 
 Each piece is a *targeted extraction*. The routines are compiled verbatim and
 checked against a `SOURCES.sha256`. The only stand-ins are the framework types
@@ -87,9 +88,10 @@ Ordered by how self-contained each piece is:
 ## MPAS-Ocean (`core_ocean`, about 80,000 lines)
 
 1. Tracer advection, standard and monotone (`mpas_ocn_tracer_advection_{std,mono}.F`).
-2. The split-explicit time integrator's tendencies (`mpas_ocn_tendency.F`
-   with `vel_coriolis`, `vel_pressure_grad`, `vel_hmix_*`, `vel_vadv`,
-   `thick_hadv`/`vadv`), then the barotropic subcycle
+2. The split-explicit time integrator's tendencies. `vel_coriolis`,
+   `vel_vadv` and `thick_hadv`/`vadv` are ported. Still to port:
+   `vel_pressure_grad`, `vel_hmix_*`, the forcing terms and their composition
+   in `mpas_ocn_tendency.F`, then the barotropic subcycle
    (`mode_forward/mpas_ocn_time_integration_split.F`).
 3. Equation of state (`equation_of_state_jm`, `_linear`) and diagnostics.
 4. Vertical mixing: constant and Richardson (`vmix_coefs_*`). CVMix (KPP) is
@@ -122,9 +124,17 @@ Ordered by how self-contained each piece is:
    `pow`/`exp`; the LGPL glibc libm port stays behind its opt-in, so that
    precision waits for an MIT/BSD double `pow` that matches the oracle host.
 2. Thickness and tracer advection (`mpas_li_advection.F`) and the
-   forward-Euler time integration.
+   forward-Euler time integration. The diagnostics advection reads (masks,
+   geometry, layer thickness, layer velocity and its CFL step) are ported.
+   Still to port: `li_advection_thickness_tracers` itself, which needs:
+   - working scratch fields in the oracle's stand-ins;
+   - `tracer_setup`/`tracer_finish` (the temperature-enthalpy conversion);
+   - `apply_mass_balance` and `vertical_remap`.
 3. The thermal solver (`mpas_li_thermal.F`): enthalpy/temperature column
-   solves.
+   solves. Initialisation and the conversions are ported. Still to port:
+   `li_thermal_solver` (heat dissipation, basal friction, the matrix elements,
+   `tridiag_solver`, grounded and floating basal melt) and the `dsigmaTerm`
+   coefficients it reads.
 4. Calving, subglacial hydrology, masks and diagnostics.
 5. **The Albany first-order (Blatter-Pattyn) Stokes solver**
    (`config_velocity_solver` = 'FO', also 'L1L2' and 'Stokes'). This is a C++
@@ -143,8 +153,8 @@ Ordered by how self-contained each piece is:
 
 | Core | Ported pieces | Status |
 |---|---|---|
-| seaice | none yet | stub |
-| ocean | none yet | stub |
-| landice | none yet | stub |
+| seaice | EVP internal stress, variational: `seaice_init_evp`, strain tensor, EVP and revised-EVP constitutive relation, stress divergence, final divergence/shear and ridging parameters (`woof/hex/mpas_seaice/evp_v842.py`). Word-exact against the v8.4.2 oracle on CUDA and Metal (`tests/test_mpas_seaice_evp_parity.py`, `woof hex seaice verify`). | stub |
+| ocean | Tendency terms: `ocn_vel_coriolis_tend`, `ocn_vel_vadv_tend`, `ocn_thick_hadv_tend`, `ocn_thick_vadv_tend` and their `_init` switches (`woof/hex/mpas_ocean/tend_v842.py`). Word-exact against the v8.4.2 oracle at RKIND 4 and 8 on CUDA and Metal (`tests/test_mpas_ocean_tend_parity.py`, `woof hex ocean verify`). | stub |
+| landice | The SIA velocity solver: one `li_sia_solve` call, including `li_calculate_flowParamA` (constant, PB1982, CP2010), all three tangent-slope methods and the velocity profile (`woof/hex/mpas_ice/sia_v842.py`). Word-exact against the v8.4.2 oracle at RKIND 4 on CUDA and Metal (`tests/test_mali_sia_parity.py`, `woof hex ice verify`). The geometry diagnostics before advection: `li_calculate_mask` (sia/none), `li_update_geometry`, `li_calculate_layerThickness`, `li_layer_normal_velocity` (`woof/hex/mpas_ice/geometry_v842.py`, `tests/test_mali_geometry_parity.py`), word-exact on CUDA and Metal. The thermal initialisation and conversions: `li_thermal_init` (sfc_air_temperature, linear, file), `li_compute_pressure_melting_point_fields`, `li_temperature_to_enthalpy`, `li_enthalpy_to_temperature` (`woof/hex/mpas_ice/thermal_init_v842.py`, `tests/test_mali_thermal_init_parity.py`), word-exact on CUDA and Metal. Albany FO/L1L2/Stokes refused by name. | stub |
 
 This table is updated as each piece lands with its parity tests.
