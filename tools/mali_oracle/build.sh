@@ -14,8 +14,11 @@
 # makes the thermal init and enthalpy-conversion calls.  The objects must contain no FMA
 # instruction (checked with objdump when it is present).  powf and expf are
 # the host libm's; TOOLCHAIN.txt records the glibc and whether the CPU has
-# FMA.  gfortran is the mpas-oracle pixi environment's unless GFORTRAN names
-# one.
+# FMA.  On a host whose libm is not glibc (macOS), the oracles link
+# glibc_flt32_host.c instead: the repository's MIT glibc-float32 powf/expf
+# transcription, compiled for the host by CC (default cc), so they write the
+# glibc host's words.  gfortran is the mpas-oracle pixi environment's unless
+# GFORTRAN names one.
 set -euo pipefail
 if [[ $# -ne 2 ]]; then
     echo "usage: build.sh MPAS_SOURCE_ROOT BUILD_DIR" >&2
@@ -51,19 +54,29 @@ done
 "${fc[@]}" "${flags[@]}" "${script_dir}/run_oracle.F90"
 "${fc[@]}" "${flags[@]}" "${script_dir}/run_geometry.F90"
 "${fc[@]}" "${flags[@]}" "${script_dir}/run_thermal.F90"
+libm_objects=()
+libm_note="host glibc ($(getconf GNU_LIBC_VERSION 2>/dev/null || true))"
+if ! getconf GNU_LIBC_VERSION >/dev/null 2>&1; then
+    read -r -a cc <<< "${CC:-cc}"
+    "${cc[@]}" -c -O0 -ffp-contract=off -I"${script_dir}/../../woof/core/kernels" \
+        "${script_dir}/glibc_flt32_host.c" -o glibc_flt32_host.o
+    libm_objects=(glibc_flt32_host.o)
+    libm_note="glibc_flt32_host.c (woof/core/kernels/glibc_flt32.cuh; host libm is not glibc)"
+fi
 if command -v objdump >/dev/null; then
-    if objdump -d "${objects[@]}" | grep -Eq '\bv?fn?m(add|sub)[0-9]'; then
+    if objdump -d "${objects[@]}" | grep -Eq '\bv?fn?m(add|sub)([0-9]|\b)'; then
         echo "an oracle object contains an FMA instruction; refusing" >&2
         exit 4
     fi
 fi
-"${fc[@]}" -o "${build_dir}/run_oracle_r4" run_oracle.o "${objects[@]}" stubs.o mpas_kind_types.o
-"${fc[@]}" -o "${build_dir}/run_geometry_r4" run_geometry.o "${objects[@]}" stubs.o mpas_kind_types.o
-"${fc[@]}" -o "${build_dir}/run_thermal_r4" run_thermal.o "${objects[@]}" stubs.o mpas_kind_types.o
+"${fc[@]}" -o "${build_dir}/run_oracle_r4" run_oracle.o "${objects[@]}" ${libm_objects[@]+"${libm_objects[@]}"} stubs.o mpas_kind_types.o
+"${fc[@]}" -o "${build_dir}/run_geometry_r4" run_geometry.o "${objects[@]}" ${libm_objects[@]+"${libm_objects[@]}"} stubs.o mpas_kind_types.o
+"${fc[@]}" -o "${build_dir}/run_thermal_r4" run_thermal.o "${objects[@]}" ${libm_objects[@]+"${libm_objects[@]}"} stubs.o mpas_kind_types.o
 {
     echo "gfortran: $("${fc[@]}" --version | head -1)"
     echo "flags: -O0 -ffp-contract=off -cpp -ffree-form -ffree-line-length-none -DSINGLE_PRECISION (RKIND 4)"
     echo "host: $(uname -srm); libm: $(ldd --version 2>/dev/null | head -1)"
+    echo "powf/expf: ${libm_note}"
     echo "fma: $(grep -m1 -ow fma /proc/cpuinfo 2>/dev/null || echo absent)"
 } > "${build_dir}/TOOLCHAIN.txt"
 echo "built ${build_dir}/run_oracle_r4 ${build_dir}/run_geometry_r4 ${build_dir}/run_thermal_r4"

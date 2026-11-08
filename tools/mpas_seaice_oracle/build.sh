@@ -39,7 +39,7 @@ objects=(run_oracle.o mpas_seaice_velocity_solver_variational.o \
          mpas_seaice_velocity_solver_constitutive_relation.o stubs.o mpas_kind_types.o)
 if command -v objdump >/dev/null; then
     if objdump -d mpas_seaice_velocity_solver_variational.o mpas_seaice_velocity_solver_constitutive_relation.o \
-        | grep -Eq '\bv?fn?m(add|sub)[0-9]'; then
+        | grep -Eq '\bv?fn?m(add|sub)([0-9]|\b)'; then
         echo "an oracle object contains an FMA instruction; refusing" >&2
         exit 4
     fi
