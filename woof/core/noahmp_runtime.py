@@ -471,10 +471,10 @@ def _glacier_lsm_step(fields, atmosphere, glacier_mask, *, params, coszen,
     fields["fvegxy"][at] = zero
     fields["runsfxy"][at] = runsf_mm
     fields["runsbxy"][at] = runsb_mm
-    if wrf_hydro is not None:                                # :1211-1218
+    if wrf_hydro is not None:                                # 4.7.1 drv :1210-1217
         wrf_hydro["soldrain"][at] = cp.where(runsb_mm > zero, runsb_mm, zero)
         wrf_hydro["infxsrt"][at] = runsf_mm
-        wrf_hydro["qtiledrain"][at] = zero                   # QTLDRN = 0 (:858)
+        wrf_hydro["qtiledrain"][at] = zero                   # QTLDRN = 0 (4.7.1 drv :857)
     if "soldrain" in fields:
         fields["soldrain"][at] = zero  # glacier has no soil bottom drainage
     fields["ecanxy"][at] = zero
@@ -1873,7 +1873,7 @@ def noahmp_lsm_step(
     """One ``noahmplsm`` call.  Mutates ``fields`` in place.
 
     ``wrf_hydro`` is WRF built with -DWRF_HYDRO (module_sf_noahmpdrv.F
-    :66-68, :173-175, :1201-1218): a mapping of ``(ny, nx)`` float32 device
+    :66-68, :173-175, :1200-1217 in WRF 4.7.1's Noah-MP e5c0859): a mapping of ``(ny, nx)`` float32 device
     planes.  ``sfcheadrt`` (the ponded head WRF-Hydro returns, mm) is read:
     WATER adds it to QINSUR, and on glacier columns it leaves as surface
     runoff; the water-budget stops are compiled out.  ``infxsrt`` (RUNSF,
@@ -2665,7 +2665,7 @@ def _lsm_step_slab(
 
 
 def _write_back_wrf_hydro(wrf_hydro, j, i, r, *, active=None) -> None:
-    """module_sf_noahmpdrv.F :1211-1218 under WRF_HYDRO, land columns:
+    """module_sf_noahmpdrv.F (WRF 4.7.1, Noah-MP e5c0859) :1210-1217 under WRF_HYDRO, land columns:
     SOLDRAIN = MAX(RUNSB, 0.0), INFXSRT = RUNSF, QTILEDRAIN = QTLDRN (mm)."""
     if wrf_hydro is None:
         return
