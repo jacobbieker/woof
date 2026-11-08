@@ -176,12 +176,22 @@ variable moves it, and `off` disables it):
 `WOOF_METAL_COMPILE_LOG=1` prints each library, dynamic-library and
 pipeline build's time, and where it came from.
 
-| WSM6 (`wsm6`, M3 Max) | translate | library | pipelines | total |
+One unit, WSM6 (`wsm6`, M3 Max), with the dynamic library opted in
+(`WOOF_METAL_DYLIB_MAX_KERNELS=2`):
+
+| WSM6 | translate | library | pipelines | total |
 |---|---|---|---|---|
 | first build | 3.1 s | 16 s (dynamic library, built) | 0.03 s | 19 s |
 | next process, OS cache lost | 0.2 s (cache) | 0.04 s (disk + thin) | 0.0 s | 0.2 s |
-| before: next process, OS cache lost | 3.1 s | 4.0 s | 0.0 s (archive) | 7 s |
-| before: first build | 3.1 s | 4.0 s | 7.0 s | 14 s |
+| without it: next process, OS cache lost | 3.1 s | 4.0 s | 0.0 s (archive) | 7 s |
+| without it: first build | 3.1 s | 4.0 s | 7.0 s | 14 s |
+
+At the defaults (translation cache on, dynamic library off), the gate
+suites on an M3 Max with every cache cold cost the same as before: the
+NSSL-2 oracle took 1256 s before and 1258 s after, with the same 16
+library and 27 pipeline builds summing to the same compile time. Warm,
+the WRF gate suite went from 177 s to 99 s and the NSSL-2 oracle from 67 s
+to 59 s, which is the translation cache.
 
 Nothing new ships in the wheel; the caches fill on first use. A compiled
 library or archive is specific to one GPU architecture and macOS build.
