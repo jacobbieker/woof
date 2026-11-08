@@ -127,6 +127,8 @@ woof = [
     # (`woof --help` stopped on the missing woof/ocean/rows.json in the r13 install check)
     "hydro/*.json",
     "ocean/*.json",
+    # WRF 4.6.1's ocean-coupler exchange (woof/ocean/wrf_cpl.py loads it)
+    "ocean/*.cu",
     "timeline/*.json",
     "hydro/*.cu",
     "hydro/*.cuh",
@@ -176,6 +178,10 @@ woof = [
 # itself and ships the tcpypi licence; hex's own wheel carries all three, this list had none of them
 "woof.hex" = ["*.json", "**/*NOTICE*.txt", "data/*", "data/**/*", "libexec/*", "native/*.rs", "native/*.c", "*.cu", "*.cuh", "**/*.cu", "**/*.cuh",
               "tc_climate/*.json", "tc_climate/LICENSE.*"]
+# The coupled component lanes' pinned options inventories (tools/mpas_coupled_options.py):
+"woof.hex.mpas_seaice" = ["data/*.json", "*.cu"]
+"woof.hex.mpas_ocean" = ["data/*.json", "*.cu"]
+"woof.hex.mpas_ice" = ["data/*.json", "*.cu"]
 tools = ["prepare_hrrr_*.sh", "hydro_world/data/sources.v1.json", "hydro_world/data/recipes.v1.json",
          "hydro_world_params/data/params.v1.json"]
 tilestream = ["output-scaling.json"]
@@ -298,12 +304,38 @@ rubin-libradtran = "2.0.6.*"
 numpy = "*"
 netcdf4 = "*"
 
+# The MPAS-Model oracle toolchain (the native reference the ocean/seaice/
+# land-ice dycore ports are held bit-exact against, MPAS-Dev/MPAS-Model
+# v8.4.2 = f34984b2).  A standalone environment beside the model ones, as
+# libradtran's is: it builds the Fortran reference, it is never imported.
+# The dycore verification is a targeted extraction (tools/*_oracle): the core's
+# routines compiled verbatim with gfortran at -O0 -ffp-contract=off, so this
+# environment needs only the compiler plus the NetCDF/HDF5 the harness reads.
+# The full parallel model (MPI + PnetCDF) is added when the coupled A-O-Si
+# reference is built.  Single precision is the strict recipe
+# (MPAS_DOUBLE_PRECISION=OFF / RKIND=4, no FP contraction, no reassociation).
+[tool.pixi.feature.mpas-oracle]
+platforms = ["linux-64"]
+
+[tool.pixi.feature.mpas-oracle.dependencies]
+python = "3.11.*"
+gfortran = "*"
+# netcdf-fortran pulls libnetcdf (conda-forge's name for the C library); together
+# they supply netcdf.h and netcdf.mod.  hdf5 is the I/O backend.
+netcdf-fortran = "*"
+hdf5 = "*"
+cmake = "*"
+ninja = "*"
+make = "*"
+git = "*"
+
 [tool.pixi.environments]
 default = { features = ["base", "cu13"], no-default-feature = true }
 cuda12 = { features = ["base", "cu12"], no-default-feature = true }
 mlx = { features = ["base", "mlx"], no-default-feature = true }
 cpu = { features = ["base", "cpu"], no-default-feature = true }
 libradtran = { features = ["libradtran"], no-default-feature = true }
+mpas-oracle = { features = ["mpas-oracle"], no-default-feature = true }
 
 [tool.pixi.feature.base.tasks]
 doctor = "woof doctor"

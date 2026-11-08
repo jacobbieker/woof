@@ -133,6 +133,16 @@ does (see `libmvec-report.txt`).
   just below and exactly at SFCDIAGS's 1.E-5 threshold, a 70 kPa plateau at
   night, and open water with CHS2 different from CQS2.
 
+## The WRF_HYDRO pass
+
+WRF configured with `WRF_HYDRO=1` compiles `phys/` with `-DWRF_HYDRO`, which
+adds the three WRF-Hydro exchange planes to `lsm` and switches on six NDHMS
+edits in `module_sf_noahlsm.F`.  `build.sh` builds the same pinned sources
+that way in `BUILD_DIR/hydro/` and writes `noah-lsm-wrf-hydro.csv`; see
+`woof/data/noah/oracle/PROVENANCE.md`.  It refuses unless an instrumented
+scratch copy reaches all three statements that write `INFXS1RT`.  The gate is
+`tests/test_noah_wrf_hydro_parity.py`.
+
 ## Measuring the port
 
 ```

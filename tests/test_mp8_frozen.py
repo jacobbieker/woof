@@ -1275,8 +1275,19 @@ FROZEN_MODULE_DIGESTS = {
         # on its 24 x 3 oracle columns; the release short case (ICON-EU, two
         # domains, Noah, no sea ice) is byte-identical to integrate/2.9.0
         # 0bf505764 in all 21,885,246 history words.
-        'b902d6628c998706a792cea101275387322ed24e3d8e3418f48ab6d9bd20d9ac',
-        'a8b1e6b2ff327f0898682c70861ab67433a08b551930a0f75fd97473eecf0315'),
+        #
+        # RE-PINNED for the WRF_HYDRO arm merged onto 1.1.6
+        # (wrf-hydro-noah-coupling): noah_column_hydro is appended, SMFLX
+        # takes `template <bool HYDRO, bool IRRIGATION>`, the column body
+        # `<URBAN, FASDAS, IRRIGATION, HYDRO>` with the hydro planes as
+        # trailing defaulted arguments, all hydro statements under
+        # `if constexpr (HYDRO)`.  Answers do not move: NVRTC 13 PTX for
+        # compute_86 of every 1.1.6 entry of the noah and noah_ua modules is
+        # identical to 1.1.6's but for __local_depot/callseq/label
+        # numbering; tests/test_noah_wrf461_parity.py and
+        # tests/test_noah_wrf_hydro_parity.py pass.  Previously b902d662/a8b1e6b2.
+        '96e0b62e529d90ecdc25f06b91bf5aaa918afd508513d66073bec7553b8cef03',
+        '908ffc160b5a9a4a807ceb282ab2fc017431bb5b8b7defb0d6e3bdf889395492'),
     'noahmp_bareflux': (
         '54fb5065e95b24d4cf676e2deda29bae44b3e9305d3d98cbc1abf5ed55f444ce',
         'fbb19fc8b5668ea2edbcc1270f8ffe367475124ffa0ce99d3bc34639f3f31e9f'),

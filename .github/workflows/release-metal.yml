@@ -1,0 +1,113 @@
+name: release-metal
+
+# Every merge into main ships a metal-woof release.
+#
+# The version is upstream's release (pyproject.toml [project].version) plus a
+# fork build number: the first push to main after upstream X.Y.Z lands is
+# metal-vX.Y.Z.1, the next metal-vX.Y.Z.2, and so on.  This job tags the
+# pushed commit, writes the GitHub release (the merged pull requests since the
+# previous metal-v tag, as GitHub generates them), then starts
+# publish-metal.yml on the new tag, which builds, smoke-tests and publishes the
+# version to PyPI.  A tag pushed with GITHUB_TOKEN starts no workflow on its
+# own, so the publish run is dispatched explicitly.
+#
+# Each run releases every first-parent commit on main after the newest
+# metal-v tag, oldest first, so merges that land while a release is running
+# (GitHub drops all but the newest pending run) are released by the next run
+# with consecutive build numbers.  A commit whose message carries
+# "[skip release]" is not released; a manual run catches main up.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # One release at a time, so build numbers never collide.  GitHub keeps only
+  # the newest pending run of a group; the version step releases every merge
+  # since the last metal-v tag, so a dropped pending run loses nothing.
+  group: release-metal
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: tag, release notes, dispatch publish-metal
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    if: ${{ github.ref == 'refs/heads/main' }}
+    permissions:
+      contents: write   # the tag and the GitHub release
+      actions: write    # dispatching publish-metal.yml
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+      - id: version
+        name: the merges to release, oldest first
+        run: |
+          set -euo pipefail
+          git fetch --force --tags origin
+          # Every first-parent commit on main after the newest metal-v tag it
+          # contains is a merge nobody has released yet: a run whose pending
+          # slot GitHub dropped (one pending run per concurrency group) is
+          # caught up here, in push order, with consecutive build numbers.
+          last_tag="$(git describe --tags --abbrev=0 --match 'metal-v*' HEAD 2>/dev/null || true)"
+          if [ -n "$last_tag" ]; then
+            range="${last_tag}..HEAD"
+          else
+            range="HEAD^!"
+          fi
+          plan="$RUNNER_TEMP/release-plan.txt"
+          : > "$plan"
+          previous="$(git tag --list 'metal-v*' --sort=-v:refname | head -n1 || true)"
+          for sha in $(git rev-list --first-parent --reverse "$range"); do
+            if git log -1 --format=%B "$sha" | grep -qF '[skip release]'; then
+              echo "skipping ${sha::12}: [skip release]"
+              continue
+            fi
+            base="$(git show "$sha:pyproject.toml" | python3 -c 'import sys, tomllib; print(tomllib.loads(sys.stdin.read())["project"]["version"])')"
+            if ! printf '%s' "$base" | grep -Eq '^[0-9]+(\.[0-9]+)*$'; then
+              echo "::error::pyproject version '$base' at ${sha::12} is not a release number"
+              exit 1
+            fi
+            last="$( { git tag --list "metal-v${base}.*"; cut -d' ' -f2 "$plan" | sed 's/^/metal-v/'; } \
+              | sed "s/^metal-v${base}\.//" | grep -E '^[0-9]+$' | sort -n | tail -n1 || true)"
+            version="${base}.$(( ${last:-0} + 1 ))"
+            echo "$sha $version $previous" >> "$plan"
+            echo "metal-woof $version <- ${sha::12} (previous release: ${previous:-none})"
+            previous="metal-v${version}"
+          done
+          if [ -s "$plan" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "nothing unreleased on main"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "plan=$plan" >> "$GITHUB_OUTPUT"
+      - name: tag, GitHub release and publish-metal for each
+        if: steps.version.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PLAN: ${{ steps.version.outputs.plan }}
+        run: |
+          set -euo pipefail
+          while read -r sha version previous; do
+            header="metal-woof ${version}: Recast WOOF built for Apple silicon (MLX/Metal), from ${sha::12} on main."
+            header+=$'\n\n'"Install: \`pip install metal-woof==${version}\` (PyPI publishing runs in publish-metal.yml)."
+            args=(--target "$sha" --title "metal-woof ${version}" --generate-notes --notes "$header")
+            if [ -n "$previous" ]; then
+              args+=(--notes-start-tag "$previous")
+            fi
+            gh release create "metal-v${version}" "${args[@]}"
+            gh workflow run publish-metal.yml --ref "metal-v${version}" \
+              -f version="${version}" -f publish=true
+            {
+              echo "### metal-woof ${version}"
+              echo "Tagged \`metal-v${version}\` on ${sha::12}; publish-metal.yml dispatched on it."
+            } >> "$GITHUB_STEP_SUMMARY"
+          done < "$PLAN"

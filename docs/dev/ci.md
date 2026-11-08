@@ -1,9 +1,27 @@
 # Continuous integration (`.github/workflows/tests.yml`)
 
-Every push and pull request runs the jobs below. Every environment is a pixi
-environment from the committed `pixi.lock`, installed with `locked: true`
-through `prefix-dev/setup-pixi`, with the pixi cache on. The helper scripts
-are in `.github/ci/`.
+Every push to `main` and every pull request runs the jobs below. A push to
+any other branch runs nothing: its pull request's run tests the branch merged
+into its base (GitHub's merge ref, not the bare branch head), and a branch with
+no pull request is run by hand (`workflow_dispatch`). Before this, each PR
+push queued two identical runs, and their macOS jobs held up
+`publish-metal.yml`'s macOS build.
+
+The macOS jobs (native, the ten mlx legs, the metal probe and the Metal
+gates) run on every push to `main` and every manual run. On a pull request
+they run only when it changes `woof/backend/`, `tools/metal_*`,
+`tools/f64_soft*`, `tests/test_metal_*`, `pixi.toml`/`pixi.lock` or
+`.github/ci/`, or carries the `macos-ci` label (adding the label starts a
+run). The `changes` job decides this and writes its reason to the run summary.
+A public repository gets only a few concurrent macOS jobs, and GitHub
+offers no per-workflow runner priority. Every PR run used to take 13 of them,
+for up to 4 h each, so `publish-metal.yml`'s macOS wheel build waited behind
+them. An mlx leg now times out at 150 min (the longest measured leg took
+81 min).
+
+Every environment is a pixi environment from the committed `pixi.lock`,
+installed with `locked: true` through `prefix-dev/setup-pixi`, with the pixi
+cache on. The helper scripts are in `.github/ci/`.
 
 The file is named `tests.yml` and not `ci.yml` on purpose. Several tools and
 tests in this tree describe the engine's own `ci.yml`
@@ -149,6 +167,21 @@ source built for Apple silicon. It never touches `publish.yml` or
 - **When:** a `metal-vX.Y.Z[.N]` tag, or a manual run given a version (it
   publishes only with `publish` ticked). Versions are upstream's release plus
   a fork build number, for example `1.1.3.1`.
+- **Every merge releases:** `.github/workflows/release-metal.yml` runs on each
+  push to `main`. It takes upstream's version from `pyproject.toml`, bumps
+  the fork build number past the highest `metal-v<version>.N` tag, tags the
+  pushed commit, creates the GitHub release (the merged pull requests since
+  the previous `metal-v` tag, as GitHub generates them) and dispatches this
+  workflow on the new tag with `publish` on. The dispatch is explicit because
+  a tag pushed with `GITHUB_TOKEN` starts no workflow. Each run releases
+  every first-parent commit on `main` after the newest `metal-v` tag, oldest
+  first: GitHub keeps only the newest pending run of the `release-metal`
+  concurrency group, so merges that land while a release runs are caught up
+  by the next run with consecutive build numbers. A commit whose message
+  carries `[skip release]` is not released. If the dispatch fails
+  after the tag and release exist, a re-run sees the tagged head and stops;
+  run this workflow by hand with `version` set to that release and `publish`
+  ticked.
 - **Build (macos-15):** every `build-native` workspace for macOS 14+, then
   `tools/metal_woof_project.py` renames the distribution (name, version, the
   extras' self-references, and the `gpu-mlx` requirements folded into the
