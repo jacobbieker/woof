@@ -2,7 +2,7 @@
 
 module_sf_noahmpdrv.F under -DWRF_HYDRO reads sfcheadrt (the ponded head
 WRF-Hydro returns, mm) and writes INFXSRT = RUNSF, SOLDRAIN = MAX(RUNSB, 0)
-and QTILEDRAIN = QTLDRN on every land column (:1211-1218).  The leaf
+and QTILEDRAIN = QTLDRN on every land column (WRF 4.7.1 Noah-MP e5c0859 :1210-1217).  The leaf
 arithmetic is graded against WRF elsewhere (WATER:
 tests/test_noahmp_water_wrf_hydro.py; glacier:
 tests/test_noahmp_glacier_wrf_hydro.py); here the driver wiring is checked

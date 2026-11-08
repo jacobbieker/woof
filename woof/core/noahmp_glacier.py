@@ -1349,7 +1349,7 @@ def _water_glacier(col: SnowColumn, stc, *, dt, prcp, sfctmp, qvap, qdew,
     else:
         runsrf = runsrf + qsnbot
 
-    if sfcheadrt is not None:                                     # WRF_HYDRO :2143-2145
+    if sfcheadrt is not None:                                     # WRF_HYDRO, 4.7.1 e5c0859 :2144-2146
         runsrf = runsrf + _f(sfcheadrt) / dt
 
     # OPT_GLA == 1 :2147-2154
@@ -1395,7 +1395,7 @@ def _error_glacier(swdown, fsa, fsr, fira, fsh, fgev, ssoil, sag, prcp,
     end_wb = _f(sneqv)                                            # :3027-3028
     errwat = (end_wb - _f(beg_wb)
               - (_f(prcp) - _f(edir) - _f(runsrf) - _f(runsub)) * _f(dt))
-    if check_water and abs(errwat) > _f(0.1):                     # :3030-3046, not under WRF_HYDRO
+    if check_water and abs(errwat) > _f(0.1):                     # 4.7.1 e5c0859 :3031-3047, not under WRF_HYDRO
         raise GlacierBalanceError(
             f"NOAHMP_GLACIER water budget problem at (j={jloc}, "
             f"i={iloc}): ERRWAT={float(errwat)} mm per timestep")

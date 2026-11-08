@@ -1240,7 +1240,7 @@ __device__ void ng_glacier_column(
         if (isnow == 0) runsrf = AD(runsrf, AD(qsnbot, qrain));    // :2137-2141
         else runsrf = AD(runsrf, qsnbot);
         // WRF built with -DWRF_HYDRO: the ponded head (mm) leaves as runoff
-        if (sfcheadrt) runsrf = AD(runsrf, DV(*sfcheadrt, dt));    // :2143-2145
+        if (sfcheadrt) runsrf = AD(runsrf, DV(*sfcheadrt, dt));    // WRF_HYDRO, 4.7.1 e5c0859 :2144-2146
 
         if (GLA == 1) {
         // OPT_GLA == 1 :2147-2154
@@ -1279,7 +1279,7 @@ __device__ void ng_glacier_column(
         float end_wb = sneqv;                                      // :3027-3028
         float errwat = SU(SU(end_wb, beg_wb),
                           MU(SU(SU(SU(prcp, edir), runsrf), runsub), dt));
-        // the water-budget stop is compiled out under WRF_HYDRO (:3030-3046)
+        // the water-budget stop is compiled out under WRF_HYDRO (4.7.1 e5c0859 :3031-3047)
         if (!sfcheadrt && fabsf(errwat) > 0.1f && err == 0) err = 4;
     }
 
