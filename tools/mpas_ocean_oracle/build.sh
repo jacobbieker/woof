@@ -42,7 +42,7 @@ for precision in r4 r8; do
     done
     "${fc[@]}" "${flags[@]}" "${script_dir}/run_oracle.F90"
     if command -v objdump >/dev/null; then
-        if objdump -d mpas_ocn_*.o | grep -Eq '\bv?fn?m(add|sub)[0-9]'; then
+        if objdump -d mpas_ocn_*.o | grep -Eq '\bv?fn?m(add|sub)([0-9]|\b)'; then
             echo "an oracle object contains an FMA instruction; refusing" >&2
             exit 4
         fi
