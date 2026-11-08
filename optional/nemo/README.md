@@ -15,6 +15,8 @@ TKE vertical mixing (`zdfsh2.F90`, `zdftke.F90`) without sea ice; implicit
 vertical diffusion of T and S (`trazdf.F90`); and `NemoColumnOcean`, those
 pieces stepped in `stpmlf.F90`'s order with `sbc_cpl_rcv`, the bottom drag,
 `tra_sbc` and the Asselin filter, as a `woof.ocean.interface.ExternalOcean`
-behind `woof.ocean.wrf_cpl` that couples SST only (an ocean at rest).  Not
-yet: advection, lateral diffusion and NEMO's dynamics
+behind `woof.ocean.wrf_cpl` that couples SST only (an ocean at rest).  Also
+flux-corrected transport advection (`traadv_fct.F90`, `TracerAdvectionFct`,
+2nd/4th order, Zalesak limiter) given the transports.  Not yet: lateral
+diffusion and NEMO's dynamics
 (docs/coupling/WRF-HYDRO-NEMO.md).

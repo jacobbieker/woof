@@ -39,7 +39,8 @@ by them is implied.
 | `woof_nemo/tke.cu`, `tke.py` | `src/OCE/ZDF/zdfsh2.F90` (zdf_sh2); `src/OCE/ZDF/zdftke.F90` (tke_tke, tke_avn, zdf_tke_init's constants and htau, tke_rst's start from rest); `cfgs/SHARED/namelist_ref` (&namzdf_tke defaults) |
 | `woof_nemo/trazdf.cu`, `trazdf.py` | `src/OCE/TRA/trazdf.F90` (tra_zdf, tra_zdf_imp) |
 | `woof_nemo/column.cu`, `column.py` | `src/OCE/stpmlf.F90` (the step order, time-level swap and Euler start); `src/OCE/SBC/sbcssm.F90` (nn_fsbc = 1 lines); `src/OCE/TRA/eosbn2.F90` (`eos_pt_from_ct_t`); `src/OCE/SBC/sbccpl.F90` (`sbc_cpl_rcv`'s ocean-only mapping, `sbc_cpl_snd`'s O_SSTSST); `src/OCE/ZDF/zdfdrg.F90` (`drg_init`, `zdf_drg_lin`, `zdf_drg_nonlin`); `src/OCE/ZDF/zdfphy.F90` (the avt/avm/avs copies, zdf_phy_init's background values); `src/OCE/TRA/trasbc.F90` (`tra_sbc`); `src/OCE/TRA/traatf_qco.F90` (`tra_atf_fix_lf`); `cfgs/SHARED/namelist_ref` (&namdrg_bot, &namzdf defaults) |
-| `oracle/` | build harnesses, service stubs and drivers (`build.sh`, `build_eos.sh`, `build_tke.sh`, `build_trazdf.sh`, `build_column.sh`); they compile the pinned files at build time and copy none of them (`build_column.sh` cuts `sbc_cpl_rcv` from sbccpl.F90 into the build directory at build time) |
+| `woof_nemo/traadv.cu`, `traadv.py` | `src/OCE/TRA/traadv_fct.F90` (`tra_adv_fct`, `fct_up1_1stp`, `nonosc`, `interp_4th_cpt`) |
+| `oracle/` | build harnesses, service stubs and drivers (`build.sh`, `build_eos.sh`, `build_tke.sh`, `build_trazdf.sh`, `build_column.sh`, `build_traadv.sh`); they compile the pinned files at build time and copy none of them (`build_column.sh` cuts `sbc_cpl_rcv` from sbccpl.F90 into the build directory at build time) |
 
 `traqsr.cu` is preceded at load time by WOOF's
 `woof/core/kernels/glibc_flt64.cuh` (glibc's binary64 exp/log words, MIT
@@ -62,3 +63,11 @@ traqsr, zdfsh2, zdfdrg, zdftke, trazdf, trasbc and traatf_qco whole against
 `column_harness.F90`, and runs `run_column.F90`'s six coupled steps for a
 TEOS-10 and an EOS-80 configuration.  The gate is
 `tests/test_nemo_column_parity.py`.
+
+`oracle/build_traadv.sh NEMO_SOURCE_ROOT BUILD_DIR` compiles traadv_fct.F90
+whole against `traadv_stubs.F90`, whose lbc_lnk fills the closed halo with
+zero as NEMO's single-process lbc_lnk_pt2pt does (jpfillcst), and runs
+`run_traadv.F90`.  The gate is `tests/test_nemo_traadv_parity.py`.  The
+signed zeros below the sea floor follow gfortran's x86 maxsd/minsd lowering
+of MAX/MIN (the second argument is returned when the two compare equal);
+`traadv.cu` keeps that rule.
