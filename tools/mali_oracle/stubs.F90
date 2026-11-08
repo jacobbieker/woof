@@ -52,7 +52,7 @@ module mpas_pool_routines
             stub_pool_put_subpool, stub_pool_put_array, &
             stub_pool_put_dimension, stub_pool_put_config, &
             mpas_pool_add_config, mpas_pool_print_summary, MPAS_POOL_CONFIG, &
-            field1DInteger, field1DReal, field2DReal, mpas_pool_get_field, &
+            field1DInteger, field1DReal, field2DReal, field3DReal, mpas_pool_get_field, &
             mpas_allocate_scratch_field, mpas_deallocate_scratch_field
 
   integer, parameter :: maxEntries = 96
@@ -75,6 +75,11 @@ module mpas_pool_routines
     type(field2DReal), pointer :: next => null()
   end type field2DReal
 
+  type field3DReal
+    real(kind=RKIND), dimension(:,:,:), pointer :: array => null()
+    type(field3DReal), pointer :: next => null()
+  end type field3DReal
+
   type pool_entry
     character(len=64) :: name = ''
     real(kind=RKIND), pointer :: r0 => null()
@@ -96,15 +101,15 @@ module mpas_pool_routines
   end type MPAS_pool_type
 
   interface mpas_pool_get_field
-    module procedure get_field_i1, get_field_r1, get_field_r2
+    module procedure get_field_i1, get_field_r1, get_field_r2, get_field_r3
   end interface mpas_pool_get_field
 
   interface mpas_allocate_scratch_field
-    module procedure scratch_i1, scratch_r1, scratch_r2
+    module procedure scratch_i1, scratch_r1, scratch_r2, scratch_r3
   end interface mpas_allocate_scratch_field
 
   interface mpas_deallocate_scratch_field
-    module procedure scratch_i1, scratch_r1, scratch_r2
+    module procedure scratch_i1, scratch_r1, scratch_r2, scratch_r3
   end interface mpas_deallocate_scratch_field
 
   interface mpas_pool_add_config
@@ -214,6 +219,22 @@ contains
     print *, 'oracle stub: scratch fields are not part of this oracle'
     stop 6
   end subroutine scratch_r2
+
+  subroutine get_field_r3(pool, name, field, timeLevel)
+    type(MPAS_pool_type), intent(in) :: pool
+    character(len=*), intent(in) :: name
+    type(field3DReal), pointer :: field
+    integer, intent(in), optional :: timeLevel
+    print *, 'oracle stub: mpas_pool_get_field is not part of this oracle: ', trim(name)
+    stop 6
+  end subroutine get_field_r3
+
+  subroutine scratch_r3(field, single_block_in)
+    type(field3DReal), pointer :: field
+    logical, intent(in), optional :: single_block_in
+    print *, 'oracle stub: scratch fields are not part of this oracle'
+    stop 6
+  end subroutine scratch_r3
 
   subroutine add_config_l(pool, name, value)
     type(MPAS_pool_type), intent(inout) :: pool
