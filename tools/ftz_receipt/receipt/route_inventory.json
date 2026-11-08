@@ -3192,7 +3192,7 @@
     },
     {
       "file": "tests/test_physics_256_levels_gpu.py",
-      "line": 449,
+      "line": 450,
       "column": 13,
       "surface": "tests",
       "constructor": "compiler.compile_using_nvrtc",
@@ -6316,7 +6316,7 @@
     },
     {
       "file": "woof/backend/__init__.py",
-      "line": 231,
+      "line": 237,
       "column": 17,
       "surface": "package",
       "constructor": "self.xp.RawModule",
@@ -6380,7 +6380,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 284,
+      "line": 317,
       "column": 38,
       "surface": "package",
       "constructor": "ElementwiseKernel",
