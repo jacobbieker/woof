@@ -223,14 +223,16 @@ jobs (2026-11-08), library plus pipelines, seconds:
 | `ensemble_stochastic` | 1.85 | 0.15 | 12x |
 | `wind_farm` | 1.13 | 0.10 | 11x |
 | `fast_sbm` | 402 | 253 | 1.6x |
-LAKE_ROW
-The gain is the binary64 libm: a unit calling CUDA's `exp`/`log`/`pow`/
-`sin` in binary64 inlined the soft-float correctly rounded libm at every
-call; df64's functions are small and out of line. Units built on woof's
-own glibc ports (CLM lake, the MPAS WSM6 unit of the water-budget gates,
-the WRF word-for-word units) keep those ports in fast numerics, so their
-cold compile is about what it was: df64 changes only their division and
-square root.
+| `lake` (CLM lake) | 1756 | 312 | 5.6x |
+
+Most of the gain is the binary64 libm: a unit calling CUDA's `exp`/`log`/
+`pow`/`sin` in binary64 inlined the soft-float correctly rounded libm at
+every call; df64's functions are small and out of line. Units built on
+woof's own glibc ports (CLM lake, the MPAS WSM6 unit of the water-budget
+gates, the WRF word-for-word units) keep those ports in fast numerics;
+for them df64 changes only division and square root, which replace the
+soft-float digit loops (CLM lake still compiles 5.6x sooner, and its
+words are unchanged). The WSM6 unit was not re-measured.
 
 Run time, `tools/df64_grade.py bench` (2^20 threads, 64 dependent
 operations each) and a translated kernel calling each function 16 times

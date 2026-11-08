@@ -290,7 +290,8 @@ on it:
   2^-46 relative instead of correctly rounded, 20-150x faster, and units
   that call it compile up to 100x sooner (`docs/dev/mlx-backend.md`,
   "Binary64: soft-float and df64"). Units built on woof's own glibc ports
-  keep them, and their cost, in both modes.
+  keep them, and their words, in both modes (CLM lake still compiles 5.6x
+  sooner, from the faster division and square root).
 - **The answers are not CUDA's bits everywhere.**
   - Metal never contracts a multiply-add, so where a CUDA result carries
     NVRTC's fused multiply-adds, Metal gives CUDA's `--fmad=false` words
