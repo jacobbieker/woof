@@ -49,6 +49,7 @@ holds its WRF physics to.
 | `woof_wrf_hydro/overland.cu`, `overland.py` | `hydro/Routing/Noah_distr_routing_overland.F90` (OverlandRouting, OV_RTNG, ROUTE_OVERLAND1); `hydro/Routing/Noah_distr_routing.F90` (GETMAX8DIR, GET8DIR) |
 | `woof_wrf_hydro/channel.cu`, `channel.py` | `hydro/Routing/module_channel_routing.F90` (MUSKING, SUBMUSKINGCUNGE, the reach branch of drive_CHANNEL) |
 | `woof_wrf_hydro/baseflow.cu`, `baseflow.py` | `hydro/Routing/module_GW_baseflow.F90` (simp_gw_buck); `hydro/Routing/module_RT.F90` (the non-MPP stream-pixel count) |
+| `woof_wrf_hydro/namelist.py` | `hydro/Data_Rec/module_namelist.F90` (the HYDRO_nlist keys and defaults); `oracle/fixtures/namelist/hydro.namelist.wrf461` is WRF 4.6.1's `hydro/template/HYDRO/hydro.namelist`, verbatim |
 | `oracle/` | build harnesses and drivers (`build.sh`, `build_grid_transform.sh`, `build_overland.sh`, `build_channel.sh`, `build_baseflow.sh`); they compile the pinned files at build time and copy none of them |
 
 `subsurface.cu`, `overland.cu` and `channel.cu` are preceded at load time by

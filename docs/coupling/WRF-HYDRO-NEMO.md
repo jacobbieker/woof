@@ -138,7 +138,8 @@ Metal, and refuses what it does not port by name.
    reservoirs remain), then the bucket baseflow (`module_GW_baseflow.F90`
    simp_gw_buck, GWBASESWCRT 1 and 2: **done** in the opt-in,
    `tests/test_wrf_hydro_baseflow_parity.py`; 3 and 4 remain).
-5. **Configuration**: `hydro.namelist` (`SUBRTSWCRT`, `OVRTSWCRT`,
+5. **Configuration** (**done** in the opt-in: `woof_wrf_hydro.namelist`,
+   `tests/test_wrf_hydro_namelist.py`, held to WRF 4.6.1's template): `hydro.namelist` (`SUBRTSWCRT`, `OVRTSWCRT`,
    `CHANRTSWCRT`, `channel_option`, `rt_option`, `GWBASESWCRT`, `DXRT`,
    `AGGFACTRT`, `DTRT_TER`, `DTRT_CH`) mapped to a WOOF table, every unported
    value refused by name.  Until step 4 lands there is nothing to route to:
