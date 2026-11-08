@@ -22,6 +22,8 @@ from pathlib import Path
 
 import numpy as np
 
+from ._compile import raw_module
+
 _TPB = 128
 _MODULE = None
 
@@ -29,13 +31,11 @@ _MODULE = None
 def _k(name):
     global _MODULE
     if _MODULE is None:
-        import cupy as cp
-
         kernels = Path(__import__("woof.core.kernels", fromlist=["x"]).__file__).parent
         here = Path(__file__).resolve().parent
         source = ((kernels / "glibc_flt64.cuh").read_text(encoding="utf-8") + "\n"
                   + (here / "baseflow.cu").read_text(encoding="utf-8"))
-        _MODULE = cp.RawModule(code=source, options=("--fmad=false", "--ftz=false"))
+        _MODULE = raw_module(source, ("--fmad=false", "--ftz=false"))
     return _MODULE.get_function(name)
 
 

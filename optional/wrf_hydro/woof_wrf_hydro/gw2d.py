@@ -26,6 +26,8 @@ from pathlib import Path
 
 import numpy as np
 
+from ._compile import raw_module
+
 _TPB = 128
 _MODULE = None
 
@@ -33,21 +35,11 @@ _MODULE = None
 def _k(name):
     global _MODULE
     if _MODULE is None:
-        import cupy as cp
-
         kernels = Path(__import__("woof.core.kernels", fromlist=["x"]).__file__).parent
         here = Path(__file__).resolve().parent
         source = ((kernels / "glibc_flt32.cuh").read_text(encoding="utf-8") + "\n"
                   + (here / "gw2d.cu").read_text(encoding="utf-8"))
-        from woof import backend
-        if backend.active() == "cuda":
-            # CuPy appends -ftz=true after RawModule options; gwstep's ebot
-            # goes subnormal (WRF-Hydro rescales it by the land area and dt
-            # every call), so this unit keeps IEEE subnormals.
-            from woof.cuda_subnormals import MARKER, install
-            install()
-            source = MARKER + source
-        _MODULE = cp.RawModule(code=source, options=("--fmad=false", "--ftz=false"))
+        _MODULE = raw_module(source, ("--fmad=false", "--ftz=false"))
     return _MODULE.get_function(name)
 
 
