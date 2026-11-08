@@ -155,8 +155,9 @@ Metal, and refuses what it does not port by name.
    GWBASESWCRT 3 (`module_gw_gw2d.F90`: gw2d_ini, gwstep's ADI sweeps as
    WRF-Hydro's one-process MPP_LAND build runs them, the soil coupling and
    the LSM-grid aggregate), **done** in the opt-in,
-   `tests/test_wrf_hydro_gw2d_parity.py`; its exchange with the diffusive
-   channel and 4 remain).
+   `tests/test_wrf_hydro_gw2d_parity.py`, with its exchange with the
+   diffusive channel (the gwOption block of drive_CHANNEL and HYDRO_drv's
+   head correction, `tests/test_wrf_hydro_diffusive_parity.py`); 4 remains).
 5. **Configuration** (**done** in the opt-in: `woof_wrf_hydro.namelist`,
    `tests/test_wrf_hydro_namelist.py`, held to WRF 4.7.1's template and
    read_rt_nlst): `hydro.namelist` (`SUBRTSWCRT`, `OVRTSWCRT`,

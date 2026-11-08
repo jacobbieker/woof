@@ -50,7 +50,8 @@ def _plane(rows, key, dtype=np.float32):
 def test_fixtures_are_the_ones_the_build_hashed():
     rows = (FIX / "gw2d-sha256sums.txt").read_text().splitlines()
     pinned = {line.split()[1]: line.split()[0] for line in rows}
-    for name in ("gw2d-static.csv", "gw2d-steps.csv", "gw2d-totals.csv", "gw2d-qsgw.csv"):
+    for name in ("gw2d-static.csv", "gw2d-steps.csv", "gw2d-totals.csv", "gw2d-qsgw.csv",
+                 "gw2d-chan.csv"):
         assert pinned[name] == hashlib.sha256((FIX / name).read_bytes()).hexdigest()
 
 
@@ -101,6 +102,16 @@ def test_gw2d_is_bitwise_against_wrf_hydro():
         for r in qsgw[n]:
             want[int(r["j"]) - 1, int(r["i"]) - 1] = np.float32(r["qsgw"])
         assert not (_bits(gw.qsgw.get()) != _bits(want)).any(), f"step {n} qsgw"
+
+    # HYDRO_drv's head correction after drive_CHANNEL (:986-994)
+    chan = {}
+    for r in _rows("gw2d-chan.csv"):
+        chan.setdefault(int(r["sw"]), []).append(r)
+    gw.qgw_chanrt[...] = cp.asarray(_plane(chan[0], "qgw_chanrt"))
+    for sw in (0, 1):
+        gw.channel_exchange(gw_chan_cond_sw=sw)
+        bad = _bits(gw.ho.get()) != _bits(_plane(chan[sw], "ho"))
+        assert not bad.any(), f"gwChanCondSw = {sw}: {int(bad.sum())} heads differ"
 
 
 def test_unported_gw2d_shapes_are_refused_by_name():

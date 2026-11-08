@@ -237,3 +237,15 @@ extern "C" __global__ void gw_aggregate(
             s = GW_A(s, qdarcy[(j * agg - m - 1) * ixrt + (i * agg - n - 1)]);
     qsgw[c] = GW_D(s, (float)(agg * agg));
 }
+
+// HYDRO_drv's channel-aquifer head correction after drive_CHANNEL
+// (module_HYDRO_drv.F90 :986-994, gwChanCondSw = 1): the diffusive wave's
+// groundwater-channel flux (m3/s) leaves or enters the aquifer.
+extern "C" __global__ void gw_chan_head(
+    int n, float dt, float dx, const float* __restrict__ qgw_chanrt,
+    const float* __restrict__ poros, float* __restrict__ ho)
+{
+    int c = blockIdx.x * blockDim.x + threadIdx.x;
+    if (c >= n) return;
+    ho[c] = GW_A(ho[c], GW_D(GW_D(GW_M(GW_M(qgw_chanrt[c], -1.0f), dt), GW_M(dx, dx)), poros[c]));
+}

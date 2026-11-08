@@ -133,10 +133,11 @@ def test_a_reservoir_key_in_hydro_nlist_is_unknown_and_lake_option_4_is_invalid(
         nl.map_hydro_nlist(nl.parse(_lakes(text, "lake_option = 4")))
 
 
-def test_the_2d_groundwater_model_maps_and_its_channel_exchange_is_refused():
+def test_the_2d_groundwater_model_and_its_channel_exchange_map():
     nl = _nl()
     text = _drop_nudging(_text()).replace("GWBASESWCRT = 1", "GWBASESWCRT = 3")
-    cfg = nl.map_hydro_nlist(nl.parse(text.replace("channel_option = 3", "channel_option = 2")))
-    assert cfg.gwbaseswcrt == 3
-    with pytest.raises(nl.UnportedOption, match="gwChanCondSw"):
-        nl.map_hydro_nlist(nl.parse(text.replace("UDMP_OPT = 0", "UDMP_OPT = 0\ngwChanCondSw = 1")))
+    cfg = nl.map_hydro_nlist(nl.parse(text.replace(
+        "UDMP_OPT = 0", "UDMP_OPT = 0\ngwChanCondSw = 1\ngwChanCondConstIn = 0.0001\n"
+        "gwChanCondConstOut = 0.0002\ngwsoilcpl = 1\nGwPreCycles = 3")))
+    assert (cfg.gwbaseswcrt, cfg.gw_chan_cond_sw, cfg.gwsoilcpl, cfg.gw_pre_cycles) == (3, 1, 1, 3)
+    assert (cfg.gw_chan_cond_const_in, cfg.gw_chan_cond_const_out) == (0.0001, 0.0002)

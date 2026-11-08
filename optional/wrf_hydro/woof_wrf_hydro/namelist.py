@@ -78,6 +78,9 @@ class HydroConfig:
     lake_option: int = 0      # 0 no lakes, 1 level pool, 2 pass-through (LevelPool lake_opt)
     gwsoilcpl: int = 0        # GWBASESWCRT = 3: gwSoilFlux each call when > 0 (Gw2d)
     gw_pre_cycles: int = 0    # GWBASESWCRT = 3: gw2d_ini's gwstep pre-cycles
+    gw_chan_cond_sw: int = 0  # GWBASESWCRT = 3, channel_option 3: groundwater-channel exchange
+    gw_chan_cond_const_in: float = 0.0
+    gw_chan_cond_const_out: float = 0.0
     io: dict = field(default_factory=dict)
 
 
@@ -179,9 +182,6 @@ def map_hydro_nlist(groups: dict[str, dict]) -> HydroConfig:
     if channel and channel_option not in (1, 2, 3):
         raise ValueError(f"channel_option = {channel_option} is not a WRF-Hydro option")
     gw = int(nl.get("gwbaseswcrt", 0))
-    if gw == 3 and channel and channel_option == 3 and int(nl.get("gwchancondsw", 0)) != 0:
-        refuse("gwChanCondSw", nl["gwchancondsw"], "the groundwater-channel exchange of the "
-               "diffusive wave with the 2-D groundwater model is not ported")
     if gw == 4:
         refuse("GWBASESWCRT", 4, "the area-normalised UDMP bucket is not ported")
     if gw not in (0, 1, 2, 3):
@@ -197,6 +197,9 @@ def map_hydro_nlist(groups: dict[str, dict]) -> HydroConfig:
         rt_option=rt_option, channel=channel, channel_option=channel_option, gwbaseswcrt=gw,
         compound_channel=bool(nl.get("compound_channel")), lake_option=lake_option,
         gwsoilcpl=int(nl.get("gwsoilcpl", 0)), gw_pre_cycles=int(nl.get("gwprecycles", 0)),
+        gw_chan_cond_sw=int(nl.get("gwchancondsw", 0)),
+        gw_chan_cond_const_in=float(nl.get("gwchancondconstin", 0.0)),
+        gw_chan_cond_const_out=float(nl.get("gwchancondconstout", 0.0)),
         io={k: v for k, v in groups["hydro_nlist"].items() if k in IO_KEYS
             and not (lake_option == 0 and k in ("route_lake_f", "outlake"))})
 
