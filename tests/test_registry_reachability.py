@@ -369,11 +369,6 @@ def test_every_implemented_option_is_selected_by_a_registered_suite() -> None:
             "observation score yet, so no preset recommends it; `woof "
             "domain --physics-choices` swaps it into any legacy-RRTMG suite "
             "and an imported WRF namelist carries it",
-        ("microphysics", "morrison-aero-mp40"):
-            "WRF's Morrison with CESM aerosol (mp_physics = 40) is graded "
-            "word for word against WRF v4.7.1's own column calls but has no "
-            "forecast or observation score yet, so no preset recommends it; "
-            "a config or an imported WRF namelist selects it directly",
     }
 
     missing = sorted(
