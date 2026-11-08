@@ -49,6 +49,7 @@ class MicrophysicsScheme:
     declares_radii: bool = True
     #: the scheme writes surface precipitation (RAINNC, SNOWNC, GRAUPELNC)
     precipitates: bool = True
+    diagnostic_species: tuple[str, ...] = ()
 
 
 TEMPO = MicrophysicsScheme(
@@ -67,32 +68,17 @@ TEMPO = MicrophysicsScheme(
     discriminator="volg",
 )
 
-#: MAD-WRF's passive hydrometeors, WRF's own selector mp_physics = 96
-#: (Registry.EM_COMMON:3052, package madwrf_mp, moist:qv,qc,qi,qs): the
-#: microphysics driver's CASE (MADWRF_MP) does nothing
-#: (module_microphysics_driver.F:2895), so qc, qi and qs are only advected
-#: and diffused.  WRF-numbered, so a WRF namelist's 96 means the same here;
-#: no use_mp_re radii (module_check_a_mundo.F:375-381 pairs MAD-WRF with
-#: use_mp_re = 0) and no precipitation.  Adapter: woof/core/madwrf.py.
-MADWRF = MicrophysicsScheme(
-    name="madwrf",
-    mp_id=96,
-    label="MAD-WRF passive hydrometeors (WRF v4.7.1 MADWRF_MP)",
-    ice_mass_species=("qi", "qs"),
-    moment_species=(),
-    aerosol_species=(),
-    surface_fields=(),
-    native_reflectivity=False,
-    sr_available=False,
-    cloud_optics_family="none",
-    aerosol_aware=False,
-    algorithm_identity="madwrf-mp-passive-wrf-v4.7.1-v1",
-    discriminator="",
-    declares_radii=False,
-    precipitates=False,
-)
+CAMMGMP = MicrophysicsScheme(
+    name="cammgmp", mp_id=11, label="CAM 5.1 Morrison-Gettelman (WRF CAMMGMP)",
+    ice_mass_species=("qi", "qs"), moment_species=("nc", "ni", "nr", "ns"),
+    aerosol_species=(), surface_fields=(), native_reflectivity=False,
+    sr_available=True, cloud_optics_family="cam-mg", aerosol_aware=True,
+    algorithm_identity="cammgmp-wrf471-stock-cody-v1", discriminator="cldfra_mp_all",
+    diagnostic_species=("qndrop", "cldfra_old_mp", "cldfra_mp", "cldfra_mp_all",
+        "lradius", "iradius", "cldfrai", "cldfral", "cldfra_conv", "wsedl3d",
+        "rh_old_mp", "lcd_old_mp"))
 
-NAMED_SCHEMES: dict[str, MicrophysicsScheme] = {TEMPO.name: TEMPO, MADWRF.name: MADWRF}
+NAMED_SCHEMES: dict[str, MicrophysicsScheme] = {s.name: s for s in (TEMPO, CAMMGMP)}
 SCHEMES_BY_ID: dict[int, MicrophysicsScheme] = {s.mp_id: s for s in NAMED_SCHEMES.values()}
 NAMED_MP_IDS: tuple[int, ...] = tuple(sorted(SCHEMES_BY_ID))
 
@@ -137,4 +123,4 @@ def mass_loading_species(mp) -> tuple[str, ...] | None:
     return None if s is None else s.ice_mass_species
 
 # WRF Registry.EM_COMMON package rows carrying a qs mass species.
-PORTED_WRF_SNOW_SELECTORS = ()
+PORTED_WRF_SNOW_SELECTORS = (7, 95)

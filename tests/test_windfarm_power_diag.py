@@ -638,6 +638,7 @@ def _writer_set(selection, state):
     lat, lon = _latlon(ny, nx)
     writers = PerDomainWrfoutWriters.__new__(PerDomainWrfoutWriters)
     writers.history_selection = selection
+    writers._auxiliary = SimpleNamespace(drain=lambda *gid: None)
     node = SimpleNamespace(
         state=state, grid=SimpleNamespace(latlon_mass=lambda: (lat, lon)),
         cfg=SimpleNamespace(grid_id=2, output=None,
