@@ -451,7 +451,78 @@ def _module(name, **attrs):
     return m
 
 
+class _HostSparse:
+    """``cupyx.scipy.sparse``'s compressed matrices, held by SciPy on the
+    host: built from facade or host arrays, and ``A @ x`` / ``A.dot(x)`` on
+    a facade array returns a facade array (the hex moving ocean and wave
+    remaps).  The product runs on the host, as the facade's other SciPy
+    calls do."""
+
+    _kind = "csr_matrix"
+
+    def __init__(self, arg, shape=None, dtype=None, copy=False):
+        import scipy.sparse as sp
+
+        def down(x):
+            if isinstance(x, ndarray):
+                return asnumpy(x)
+            if isinstance(x, (list, tuple)):
+                return type(x)(down(y) for y in x)
+            return x._m if isinstance(x, _HostSparse) else x
+        self._m = getattr(sp, self._kind)(down(arg), shape=shape, dtype=dtype, copy=copy)
+
+    shape = property(lambda self: self._m.shape)
+    dtype = property(lambda self: self._m.dtype)
+    nnz = property(lambda self: self._m.nnz)
+
+    def dot(self, other):
+        if isinstance(other, _HostSparse):
+            out = type(self).__new__(type(self))
+            out._m = self._m @ other._m
+            return out
+        host = asnumpy(other) if isinstance(other, ndarray) else np.asarray(other)
+        return asarray(np.asarray(self._m @ host))
+
+    __matmul__ = dot
+
+    def toarray(self):
+        return asarray(self._m.toarray())
+
+    def get(self):
+        return self._m
+
+    def transpose(self):
+        out = _HostSparse.__new__(_HostSparse)
+        out._m = self._m.transpose().tocsr()
+        return out
+
+    T = property(transpose)
+
+
+class _HostCsc(_HostSparse):
+    _kind = "csc_matrix"
+
+
+class _HostCoo(_HostSparse):
+    _kind = "coo_matrix"
+
+
+class _NoPlan:
+    """``cupyx.scipy.fft.get_fft_plan``: the facade's FFTs run through NumPy
+    on the host, so a plan is a context that changes nothing."""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
 cupyx.scipy = _module("cupyx.scipy",
+    sparse=_module("cupyx.scipy.sparse", csr_matrix=_HostSparse, csc_matrix=_HostCsc, coo_matrix=_HostCoo,
+                   issparse=lambda x: isinstance(x, _HostSparse)),
+    fft=_module("cupyx.scipy.fft", get_fft_plan=lambda *a, **k: _NoPlan(),
+                **{n: getattr(fft, n) for n in vars(fft) if not n.startswith("_")}),
     special=_module("cupyx.scipy.special", **{n: _scipy_on_host("special", n)
                                               for n in ("erf", "erfc", "gamma", "gammaln")}),
     ndimage=_module("cupyx.scipy.ndimage", **{n: _scipy_on_host("ndimage", n) for n in (
@@ -459,7 +530,8 @@ cupyx.scipy = _module("cupyx.scipy",
 cupyx.__path__ = []
 #: the facade's own submodules, for `import cupyx.scipy.special` (backend._FacadeFinder)
 SUBMODULES = {"cupyx.scipy": cupyx.scipy, "cupyx.scipy.special": cupyx.scipy.special,
-              "cupyx.scipy.ndimage": cupyx.scipy.ndimage}
+              "cupyx.scipy.ndimage": cupyx.scipy.ndimage, "cupyx.scipy.sparse": cupyx.scipy.sparse,
+              "cupyx.scipy.fft": cupyx.scipy.fft}
 
 
 def __getattr__(name):
