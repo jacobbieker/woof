@@ -207,7 +207,7 @@ def water(parameters, col: SnowColumn, smc, dt, ist, imelt, ficeold,
           fcev, fctr, elai, esai, fveg, bdfall, frozen_canopy, frozen_ground,
           sfctmp, qvap, qdew, zsoil, btrani, qsnow, qrain, snowhin, ponding,
           canliq, canice, tv, wslake, acc_qinsur, acc_qseva,
-          acc_etrani) -> WaterFluxes:
+          acc_etrani, sfcheadrt=None) -> WaterFluxes:
     """One WATER call under the pinned option identity.
 
     ``col`` is mutated in place -- ``isnow``, ``snowh``, ``sneqv``, ``snice``,
@@ -217,6 +217,10 @@ def water(parameters, col: SnowColumn, smc, dt, ist, imelt, ficeold,
 
     ``ist`` is 1 for soil and 2 for lake; both are live under this identity,
     because it is a land-use property and not an option.
+
+    ``sfcheadrt`` (mm) is WRF built with -DWRF_HYDRO: the ponded head
+    WRF-Hydro hands back joins QINSUR at :6173-6175.  ``None`` is the plain
+    build, where that line does not exist.
     """
     nsoil, nsnow = col.nsoil, col.nsnow
 
@@ -290,6 +294,9 @@ def water(parameters, col: SnowColumn, smc, dt, ist, imelt, ficeold,
 
     for iz in range(parameters.nroot):                              # :6169
         etrani[iz] = _f(_f(etran * btrani[iz]) * _MILLI)            # :6170
+
+    if sfcheadrt is not None:                                       # WRF_HYDRO :6173
+        qinsur = _f(qinsur + _f(_f(_f(sfcheadrt) / dt) * _MILLI))   # :6174
 
     # added soil timestep capability
     acc_qinsur = _f(acc_qinsur + qinsur)                            # :6178
