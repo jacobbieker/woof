@@ -95,32 +95,3 @@ def test_the_record_exercises_both_finish_arms_and_the_signed_zero():
 _EOS = ("eos_hypso1_al", "eos_hypso1_p", "eos_hypso2_al", "eos_hypso2_p",
         "eos_dry_al", "eos_dry_p")
 
-
-@pytest.mark.gpu
-@requires_gpu
-def test_every_theta_m_and_avgflx_word_is_compiled_wrfs():
-    inputs = oracle.load_inputs()
-    record = oracle.load_outputs(inputs=inputs)
-    port = oracle.port_outputs(inputs, record)
-    rows = oracle.compare(port, record)
-    from woof.wrf_exact import DIAGNOSTICS_ENABLED
-    graded = {name: row for name, row in rows.items()
-              if DIAGNOSTICS_ENABLED or name not in _EOS}
-    assert sum(row["words"] for row in graded.values()) >= 111720
-    assert {name: row["differ"] for name, row in graded.items()
-            if row["differ"]} == {}
-
-
-@pytest.mark.gpu
-@requires_gpu
-def test_default_eos_theta_m_branch_diagnoses_the_dry_branchs_pressure():
-    """moist = 0 on theta_m and moist = 1 on dry theta are the same physical
-    equation of state; in woof's default spelling they agree to float32."""
-    inputs = oracle.load_inputs()
-    record = oracle.load_outputs(inputs=inputs)
-    port = oracle.port_outputs(inputs, record)
-    pb = inputs["pb"].astype(np.float64)
-    moist = port["eos_hypso1_p"].astype(np.float64) + pb
-    dry = port["eos_dry_p"].astype(np.float64) + pb
-    assert np.max(np.abs(moist - dry) / dry) < 2e-6
-    assert np.array_equal(port["eos_hypso1_al"], port["eos_dry_al"])

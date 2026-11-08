@@ -184,6 +184,7 @@ energy_register_cli = _lazy_register("woof.energy.cli")
 fetch_register_cli = _lazy_register("woof.fetch")
 fire_static_register_cli = _lazy_register("woof.static.sfire")
 fire_ideal_register_cli = _lazy_register("woof.fire_ideal")
+ideal_plan_register_cli = _lazy_register("woof.ideal_plan")
 geog_register_cli = _lazy_register("woof.geog_assets")
 go_register_cli = _lazy_register("woof.go_cli")
 go_job_register_cli = _lazy_register("woof.go_job")
@@ -476,6 +477,8 @@ def _register_run_parser(sub):
                          description=_run_description())
     from woof.output_formats import add_arguments
     add_arguments(run)
+    from woof.ocean.settings import add_arguments as add_wave_arguments
+    add_wave_arguments(run)
     run.add_argument("config", type=Path, metavar="CONFIG", nargs="?",
                      help=_CONFIG_HELP)
     run.add_argument("--wrfinput", type=Path, metavar="DIR",
@@ -495,6 +498,8 @@ def _register_run_parser(sub):
                           "comma-separated WRF valid times (2022-06-13_22:00:00) or "
                           "`end`; each must be a restart_interval instant of the run. "
                           "Absent writes every scheduled checkpoint")
+    run.add_argument("--products", dest="render_products", default=None,
+                     help="WRF inputs: comma-separated map products, or none")
     run.add_argument("--benchmark", action="store_true",
                      help="WRF inputs: time the forecast as a benchmark. Draws no "
                           "products and runs no post-run verification, then prints "
@@ -581,6 +586,8 @@ def build_parser(*, render_only: bool = False, preset_only: bool = False,
         prog="woof", usage="%(prog)s COMMAND [OPTIONS]",
         description="GPU-native WRF-ARW-like weather model.",
         epilog="`woof --version` is an alias for `woof version`.")
+    parser.add_argument("--backend", choices=("cuda", "amd"),
+                        help="execution backend (default: CUDA; AMD is experimental)")
     parser.add_argument("--help-all", nargs=0, action=AllCommandsHelp,
                         help="show every command")
     sub = parser.add_subparsers(prog=parser.prog, dest="command", metavar="COMMAND", required=True)
@@ -596,6 +603,7 @@ def build_parser(*, render_only: bool = False, preset_only: bool = False,
         # identical on both parsers.
         add_explain_flag(sub.choices["go"])
         from woof.earth2_licensing import add_licence_argument
+        add_explain_flag(sub.choices["go"])
         add_licence_argument(sub.choices["go"])
         return parser
     if run_only:
@@ -634,6 +642,7 @@ def build_parser(*, render_only: bool = False, preset_only: bool = False,
     fire_static_register_cli(sub)
     _lazy_register("woof.fire_ignition")(sub)
     fire_ideal_register_cli(sub)
+    ideal_plan_register_cli(sub)
     cds_credentials_register_cli = _lazy_register("woof.cds_credentials")
     cds_credentials_register_cli(sub)
     companion_query_register_cli = _lazy_register("woof.companion_query")
@@ -655,6 +664,7 @@ def build_parser(*, render_only: bool = False, preset_only: bool = False,
     earth2_register_cli(sub)
     earth2_diagnostics_register_cli(sub)
     tc_tracks_register_cli(sub)
+    _lazy_register("woof.tc_verify")(sub)
     tc_strata_register_cli(sub)
     local_da_register_cli = _lazy_register("woof.local_da")
     local_da_register_cli(sub)
@@ -707,6 +717,7 @@ def build_parser(*, render_only: bool = False, preset_only: bool = False,
     _lazy_register("woof.compose_source")(sub)
     _lazy_register("woof.source_intermediate")(sub)
     _lazy_register("woof.storm_diagnostics")(sub)
+    _lazy_register("woof.tc.cli")(sub)
     go_register_cli(sub)
     # `go` as a batch job: one job document (config URL, companions,
     # Icechunk store) in, a result JSON and a scheduler's exit code out.
@@ -827,15 +838,15 @@ def build_parser(*, render_only: bool = False, preset_only: bool = False,
     supervisor_register_cli(sub, "branch")
     imp = sub.add_parser(
         "import-namelist",
-        help="translate WRF namelist.wps + namelist.input into a "
-             "resolved woof experiment TOML plus a substitution report")
+        help="import WPS + WRF namelists as experiment TOML, or one stock "
+             "global ideal namelist as a resolved JSON receipt")
     imp.add_argument("wps", type=Path, metavar="WPS",
-                     help="WPS namelist.wps (projection + nest layout)")
-    imp.add_argument("input", type=Path, metavar="INPUT",
+                     help="WPS namelist.wps, or one stock polar ideal namelist.input")
+    imp.add_argument("input", type=Path, metavar="INPUT", nargs="?",
                      help="WRF namelist.input (domains/physics/dynamics/"
                           "bdy_control)")
-    imp.add_argument("--output", type=Path, default=None, metavar="TOML",
-                     help="write the resolved experiment TOML here "
+    imp.add_argument("--output", type=Path, default=None, metavar="PATH",
+                     help="write experiment TOML (WPS + WRF) or JSON (global ideal) here "
                           "(omit to print the report only)")
     imp.add_argument("--geogrid-tbl", type=Path, default=None, metavar="PATH",
                      help="GEOGRID.TBL (file or directory) whose HGT_M "
@@ -872,8 +883,7 @@ def build_parser(*, render_only: bool = False, preset_only: bool = False,
                           "selects the Registry default an omitted "
                           "&dynamics/use_theta_m takes (3: 0, dry theta, the "
                           "line operational HRRR v4 runs; 4, the "
-                          "default: 1, moist theta, booked as a "
-                          "substitution).  A V4 release also pins the scheme "
+                          "default: 1, moist theta). A V4 release also pins the scheme "
                           "generations that release runs (4.6.1: WRF 4.6's "
                           "YSU, sun, Noah-MP snow aging and urban water "
                           "balance; a bare 4 keeps the newest). The report "
@@ -953,12 +963,18 @@ def main(argv: list[str] | None = None) -> int:
     from woof.earth2_licensing import check_argv, licence_scope, _values
     tokens = list(sys.argv[1:] if argv is None else argv)
     try:
+        from woof.backend import consume_backend_option
+        # `woof energy deploy --backend` names a deploy backend (k8s,
+        # slurm, ...), not a forecast backend.
+        tokens = consume_backend_option(
+            tokens, local_backend_commands=("tc-tracks", "spectral-op",
+                                            "energy"))
         check_argv(tokens)
     except ValueError as error:
         print(f"woof: {error}", file=sys.stderr)
         return 2
     with explain_scope(False), licence_scope(_values(tokens, "--accept-licence")):
-        return _dispatch_argv(argv)
+        return _dispatch_argv(tokens)
 
 
 def _dispatch_argv(argv: list[str] | None = None) -> int:
@@ -969,6 +985,48 @@ def _dispatch_argv(argv: list[str] | None = None) -> int:
     handled = dispatch_component(tokens)
     if handled is not None:
         return handled
+    native_go_invocation = None
+    if (len(tokens) > 1 and tokens[0] == "go"
+            and Path(tokens[1]).is_dir()
+            and (Path(tokens[1]) / "namelist.input").is_file()):
+        # A stock WRF run directory already owns its initial state, forcing,
+        # clock and physics. Use the complete WRF-input launch contract,
+        # including admission, nests, restart, output ownership and rendering.
+        # The TOML go route expects a source-preparation seal that these native
+        # inputs do not have. Keeping one reader avoids fabricating that seal
+        # or preparing a second copy merely to enter through `go`.
+        go_parser = build_parser(go_only=True)
+        go_args, run_controls = go_parser.parse_known_args(
+            _join_negative_coordinates(tokens))
+        if run_controls:
+            native_go_invocation = tokens.copy()
+            tokens = ["run", *tokens[1:]]
+        else:
+            from woof.go_cli import GoRefusal
+            from woof.wrfinput_go import validate_controls
+            try:
+                validate_controls(go_args)
+            except GoRefusal as error:
+                go_parser.error(str(error))
+    if (tokens[:1] == ["go"] and any(
+            value == "--wrfinput" or value.startswith("--wrfinput=")
+            for value in tokens[1:])):
+        # The go parser owns product and preparation controls. WRF-specific
+        # run controls such as --run-seconds and --checkpoint-at use run's
+        # complete parser and execution owner. Both parsers reject unknowns.
+        go_parser = build_parser(go_only=True)
+        go_args, run_controls = go_parser.parse_known_args(
+            _join_negative_coordinates(tokens))
+        if run_controls:
+            print("woof go: using the shared WRF-input forecast route")
+            tokens = ["run", *tokens[1:]]
+        else:
+            from woof.go_cli import GoRefusal
+            from woof.wrfinput_go import validate_controls
+            try:
+                validate_controls(go_args)
+            except GoRefusal as error:
+                go_parser.error(str(error))
     if tokens and tokens[0] == "suite":
         from woof.nwpsuite.cli import main as suite_main
         return suite_main(tokens[1:])
@@ -1017,6 +1075,10 @@ def _dispatch_argv(argv: list[str] | None = None) -> int:
         print("")
 
     args = parser.parse_args(_join_negative_coordinates(tokens))
+    if (args.command in ("go", "ensemble") and getattr(args, "config", None) is not None
+            and (Path(args.config) / "namelist.input").is_file()):
+        from woof.go_wrfinput import supplied_options
+        args._supplied_go_options = supplied_options(_join_negative_coordinates(tokens[1:]))
     apply_history_compression(args)
     if hasattr(args, "output_format"):
         from woof.output_formats import options as output_options, require_binary
@@ -1039,11 +1101,16 @@ def _dispatch_argv(argv: list[str] | None = None) -> int:
         if (args.restart_from is not None and args.wrfinput is None
                 and args.config is None and args.met_em is None):
             args.wrfinput = Path(args.restart_from).parent
+        if args.render_products is not None and args.wrfinput is None and args.met_em is None:
+            parser.error("the CONFIG run route does not consume --products; use woof go CONFIG --products for a TOML forecast")
         if args.restart_from is not None and args.wrfinput is None:
             parser.error("--restart-from continues a WRF run; it pairs with --wrfinput DIR "
                          "(or stands alone, reading the directory the file is in)")
         if sum(value is not None for value in (args.config, args.wrfinput, args.met_em)) != 1:
             parser.error("run requires exactly one of CONFIG, --wrfinput DIR or --met-em DIR")
+        if (args.render_products is not None and args.wrfinput is None
+                and args.met_em is None):
+            parser.error("--products requires --wrfinput or --met-em: the CONFIG run route does not consume this plot selection and would ignore the request")
         if args.soil_source is not None and args.wrfinput is None:
             parser.error("--soil-source supplies original soil layers for --wrfinput DIR")
         if args.run_seconds is not None and args.config is not None:
@@ -1094,7 +1161,7 @@ def _dispatch_argv(argv: list[str] | None = None) -> int:
     # recorded inside the scope `main` opened, so every refusal tail can
     # print the reader's own line with --explain appended instead of a
     # bare command name that is itself a usage error (UX finding N8).
-    set_invocation(tokens)
+    set_invocation(native_go_invocation or tokens)
     # The render stage hands a long forecast's frames over in a file it
     # removes when the stage ends.  Read before the provenance gate and
     # the capability preflight below, so their refusal lines name the
@@ -1178,7 +1245,9 @@ def _dispatch_argv(argv: list[str] | None = None) -> int:
         # there; set here once, it cannot be forgotten by one door.
         from woof.core.resident_admission import memory_gate_override
 
-        with memory_gate_override(getattr(args, "no_memory_gate", False)):
+        from woof.ocean.settings import launch_scope as waves_scope
+        with memory_gate_override(getattr(args, "no_memory_gate", False)), waves_scope(
+                getattr(args, "waves", None), getattr(args, "waves_options", None)):
             if args.command == "run" and getattr(args, "hydro", None) is not None:
                 from woof.hydro.runtime import run_scope
                 with run_scope(args.hydro, getattr(args, "config", None)):
@@ -1530,6 +1599,21 @@ def _dispatch_with_outputs(args) -> int:
 
     if args.command == "import-namelist":
         from woof.namelist_import import import_namelists
+        if args.input is None:
+            import json
+            from dataclasses import asdict
+            from woof.namelist_import import import_global_ideal_namelist
+            cfg,receipt=import_global_ideal_namelist(args.wps)
+            receipt["run_config"]=asdict(cfg)
+            receipt["command"]=f"woof go {args.wps.parent.resolve()}"
+            text=json.dumps(receipt,indent=2,default=str)+"\n"
+            if args.output is not None:
+                if args.output.resolve()==args.wps.resolve():raise ValueError('--output aliases the source namelist')
+                args.output.parent.mkdir(parents=True,exist_ok=True)
+                temporary=args.output.with_suffix(args.output.suffix+'.tmp')
+                temporary.write_text(text);os.replace(temporary,args.output)
+            else:print(text,end='')
+            return 0
         if args.output is not None and args.output.resolve() in (
                 args.wps.resolve(), args.input.resolve()):
             raise ValueError(
@@ -1720,6 +1804,7 @@ def _dispatch_with_outputs(args) -> int:
         analysis_request = request_from_args(args)
         return launch(directory, args.outdir,
                                run_seconds=args.run_seconds, restart=args.restart,
+                               render_products=args.render_products,
                                health_debug=args.health_debug, gpu_uuid=args.gpu_uuid,
                                exclusive_gpu=not args.no_supervise,
                                rrtmg_variant=args.rrtmg_variant,
