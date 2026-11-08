@@ -1,4 +1,4 @@
-"""WRF-Hydro overland routing (the opt-in), bitwise against WRF 4.6.1's hydro/.
+"""WRF-Hydro overland routing (the opt-in), bitwise against WRF 4.7.1's hydro/.
 
 ``OverlandRouting`` with rt_option = 1, run by ``woof_wrf_hydro.overland``.
 The fixture is ``optional/wrf_hydro/oracle/build_overland.sh``: the pinned

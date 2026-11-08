@@ -31,7 +31,8 @@ module module_state_description
                         p_ac0 = 80, p_corn = 81
   integer, parameter :: num_chem = 81
   ! not in radm2sorg
-  integer, parameter :: p_lim = 1
+  integer, parameter :: p_lim = 1, p_so4cwj = 1, p_p25cwi = 1, p_anthcw = 1, &
+                        p_soilcw = 1, p_seascw = 1
   integer, parameter :: p_qv = 2, p_qc = 3, num_moist = 3
   ! aer_ic_opt package values (Registry/registry.chem:4170-4171)
   integer, parameter :: aer_ic_default = 1, aer_ic_pnnl = 101
@@ -43,14 +44,10 @@ module module_configure
   type grid_config_rec_type
     integer :: chem_opt = 2
     logical :: restart = .false.
+    integer :: aer_drydep_opt = 1     ! Registry/registry.chem:3836 default
+    integer :: diagnostic_dep = 0     ! Registry/registry.chem:3866 default
   end type grid_config_rec_type
 end module module_configure
-
-! aerosols_sorgam_init calls this only past its chem_in_opt == 1 return,
-! which the oracle never passes.
-subroutine sorgam_init_aer_ic_pnnl()
-  error stop 'stub sorgam_init_aer_ic_pnnl reached'
-end subroutine sorgam_init_aer_ic_pnnl
 
 subroutine wrf_debug(level, str)
   integer, intent(in) :: level

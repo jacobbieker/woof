@@ -453,8 +453,27 @@ class Edits:
     def region(self, start: int, end: int, callback):
         self.regions.append((start, end, callback))
 
+    @staticmethod
+    def _drop_deleted(reps):
+        """Rewrites inside a range another rewrite deletes are moot: a
+        module global's declaration goes (its initialiser becomes the
+        buffer's bytes) while a literal in it is also respelled (f2c's
+        ``doublereal c_b2 = 10.;`` in gfdleta_co2_init and cam3_emissivity).
+        ``reps`` sorted; returned sorted."""
+        if not any(r[2] == "" for r in reps):
+            return reps
+        out, cut = [], None
+        for r in sorted(reps, key=lambda r: (r[0], -r[1])):
+            if cut is not None and r[1] <= cut[1] and (r[0], r[1]) != cut:
+                continue
+            out.append(r)
+            if r[2] == "" and (cut is None or r[1] > cut[1]):
+                cut = (r[0], r[1])
+        return sorted(out)
+
     def _render(self, start, end, reps, ins) -> str:
         reps = sorted(r for r in reps if start <= r[0] and r[1] <= end)
+        reps = self._drop_deleted(reps)
         ins = sorted((i for i in ins if start <= i[0] <= end), key=lambda t: (t[0], t[1]))
         for (s0, e0, _), (s1, e1, _) in zip(reps, reps[1:]):
             if s1 < e0:
@@ -1026,10 +1045,39 @@ class _Rewriter:
             self.edits.insert(at, f"{next(iter(spaces), default)} ", rank=-20_000)
 
     # -- goto
-    _LOOPS = ("FOR_STMT", "WHILE_STMT", "DO_STMT", "SWITCH_STMT")
+    _LOOPS = ("FOR_STMT", "WHILE_STMT", "DO_STMT", "CXX_FOR_RANGE_STMT", "SWITCH_STMT")
 
     def eliminate_gotos(self):
-        """Forward ``goto L;`` -> a structured exit (Metal has no goto).
+        """Gotos -> structured control flow (Metal has no goto).
+
+        Each label's jumps are made structured (:meth:`_structured_gotos`).
+        A label whose jumps that refuses -- crossing regions, a backward
+        jump from inside a loop, a break or continue among the wrapped
+        statements -- joins its block's dispatch group instead
+        (:meth:`_dispatch_block`), with every label of the block whose
+        region crosses the group's statements, and the structured pass runs
+        again for the rest.  Breakage it prevents: deng's and kf_old's
+        Fortran (``IF (..) GOTO 255`` / ``175 ...`` / ``GOTO 255`` /
+        ``255 ...`` / ``GOTO 175``) was refused as overlapping.
+        """
+        saved = (list(self.edits.replacements), list(self.edits.inserts), list(self.edits.regions))
+        #: block span -> [block, {label spans}]
+        dispatch = {}
+        while True:
+            self._goto_block = self._goto_label = None
+            try:
+                self._structured_gotos(dispatch)
+                return
+            except TranslationError:
+                block, label = self._goto_block, self._goto_label
+                if block is None or label is None or self.span(label) in dispatch.get(self.span(block), (None, ()))[1]:
+                    raise
+            self.edits.replacements, self.edits.inserts, self.edits.regions = (
+                list(saved[0]), list(saved[1]), list(saved[2]))
+            dispatch.setdefault(self.span(block), [block, set()])[1].add(self.span(label))
+
+    def _structured_gotos(self, dispatch=None):
+        """Forward ``goto L;`` -> a structured exit.
 
         The statements of L's block from the first one containing a jump
         to L up to L become ``do { ... } while (false)`` behind a flag;
@@ -1052,7 +1100,12 @@ class _Rewriter:
                 gotos.append(node)
             for child in node.get_children():
                 stack.append((child, node))
-        targeted = {(g.referenced.spelling, self.span(g.referenced)) for g in gotos if g.referenced is not None}
+        targeted = set()
+        for g in gotos:
+            node = g.referenced
+            while node is not None and node.kind == K.LABEL_STMT:
+                targeted.add((node.spelling, self.span(node)))      # and the labels it is stacked under
+                node = parents.get(self.span(node) + (node.kind.name,))
         for name, nodes in labels.items():
             for label in nodes:
                 if (name, self.span(label)) in targeted:
@@ -1075,11 +1128,48 @@ class _Rewriter:
             return out
 
         by_label = {}
+        dispatch = dispatch or {}
+        to_dispatch = {key: [] for key in dispatch}
+        #: goto span -> the label statement of its block it reaches
+        self._goto_target = {}
+        stacked = set()
         for g in gotos:
             target = g.referenced
             if target is None:
                 self.refuse(g, "goto whose label clang could not resolve")
+            label = next((l for l in labels.get(target.spelling, []) if self.span(l) == self.span(target)), None)
+            # stacked labels (`L400: L401: s;`, f2c's): a jump to the inner
+            # one is a jump to the outer, which is the block's statement
+            while label is not None and parent(label) is not None and parent(label).kind == K.LABEL_STMT:
+                if self.span(label) not in stacked:
+                    stacked.add(self.span(label))
+                    toks = list(label.get_tokens())
+                    if len(toks) >= 2 and toks[1].spelling == ":":
+                        self.edits.replace(toks[0].extent.start.offset, toks[1].extent.end.offset, "")
+                label = parent(label)
+            target = label if label is not None else target
+            self._goto_target[self.span(g)] = target
+            home = None if label is None else parent(label)
+            if home is not None and self.span(label) in dispatch.get(self.span(home), (None, ()))[1]:
+                to_dispatch[self.span(home)].append(g)
+                continue
             by_label.setdefault((target.spelling, self.span(target)), []).append(g)
+        # a label some jump reaches from outside its block (a goto from the
+        # then arm into the else arm: Noah-MP's dynamic-VIC label_1003) is
+        # entered through a re-entry loop instead (_reenter_label)
+        reenter = {}
+        for key, jumps in list(by_label.items()):
+            label = next((l for l in labels.get(key[0], []) if self.span(l) == key[1]), None)
+            home = None if label is None else parent(label)
+            if home is None or home.kind != K.COMPOUND_STMT:
+                continue
+            hs, he = self.span(home)
+            if any(not (hs <= self.span(g)[0] and self.span(g)[1] <= he) for g in jumps):
+                reenter[key] = (label, by_label.pop(key))
+        # each dispatch group's statements: [start, end) offsets
+        group_spans = {key: self._dispatch_range(block, to_dispatch[key], parent, chain)[2:]
+                       for key, (block, _) in dispatch.items()}
+        self._group_spans = group_spans
         starts, entries = self._nested_goto_starts(by_label, labels, parent, chain)
         regions, wrappers = [], []
         for (name, (ls, le)), jumps in by_label.items():
@@ -1087,6 +1177,7 @@ class _Rewriter:
             block = parent(label)
             if block is None or block.kind != K.COMPOUND_STMT:
                 self.refuse(label, f"label {name!r} is not a statement of a block")
+            self._goto_block, self._goto_label = block, label
             stmts = list(block.get_children())
             j = next(i for i, st in enumerate(stmts) if self.span(st) == (ls, le))
             if self._backward_goto(name, label, stmts, j, jumps, chain, parent, block, regions, wrappers):
@@ -1121,6 +1212,7 @@ class _Rewriter:
             for (a, b) in regions:
                 if a < re_ and rs < b and not (a <= rs and re_ <= b) and not (rs <= a and b <= re_):
                     self.refuse(label, f"goto regions overlap at label {name!r}")
+            self._outside_dispatch(label, name, block, rs, re_, group_spans)
             regions.append((rs, re_))
             # retargeted break/continue, and declarations used after the label
             after = stmts[end:]
@@ -1174,7 +1266,246 @@ class _Rewriter:
                 end = self._statement_end(loop)
                 # before the wrapper's close when the loop ends at the label
                 self.edits.insert(end, f" if ({flag}) break;", rank=_GOTO_CLOSE - 1)
+            wrappers[-1]["block"] = block
+        self._goto_block = self._goto_label = None
+        # innermost first: an outer dispatch loop's jumps cross the inner ones
+        for n, key in enumerate(sorted(dispatch, key=lambda k: k[1] - k[0])):
+            self._dispatch_block(dispatch[key][0], to_dispatch[key], n, parent, chain, wrappers)
+        # innermost re-entry statement first: an outer one's jumps cross it
+        ordered = sorted(reenter.values(), key=lambda v: self._reenter_extent(v[0], v[1], chain))
+        for n, (label, jumps) in enumerate(ordered):
+            self._reenter_label(label, jumps, n, parent, chain, wrappers)
         self._nested_wrapper_exits(wrappers)
+
+    def _reenter_extent(self, label, jumps, chain):
+        """Byte length of the statement a re-entry loop wraps (its order)."""
+        stmt = self._reenter_statement(label, jumps, chain)
+        if stmt is None:
+            return 0
+        s, e = self.span(stmt)
+        return e - s
+
+    def _reenter_statement(self, label, jumps, chain):
+        """(the path from the label up, its index of S) for _reenter_label;
+        S is the innermost statement of a block holding the label and every
+        jump to it.  None when there is none."""
+        K = self.ci.CursorKind
+        path = chain(label)
+        spans = [self.span(a) for a in path]
+        common = None
+        for g in jumps:
+            for a in chain(g):
+                if self.span(a) in spans:
+                    i = spans.index(self.span(a))
+                    common = i if common is None else max(common, i)
+                    break
+        i = common
+        while i is not None and i + 1 < len(path) and (path[i].kind == K.COMPOUND_STMT
+                                                       or path[i + 1].kind != K.COMPOUND_STMT):
+            i += 1
+        if i is None or i + 1 >= len(path) or path[i + 1].kind != K.COMPOUND_STMT:
+            return None
+        return path[i]
+
+    def _reenter_label(self, label, jumps, n, parent, chain, wrappers):
+        """A label entered from outside its block -> a re-entry loop around
+        the innermost statement S (of a block) holding the label and every
+        jump to it: ``while (true) { S break; }``.  A jump sets a flag and
+        continues the loop (out of every loop and wrapper between it and S);
+        with the flag set, each ``if`` on the way down to the label takes the
+        arm that holds it and each statement before it on the way is
+        skipped; the label clears the flag.  Refused by name: a loop or
+        switch between S and the label (re-entering it would rerun it), a
+        declaration among the skipped statements, a break or continue in S
+        meant for a loop around it."""
+        K = self.ci.CursorKind
+        name = label.spelling
+        path = chain(label)                 # label, its block, ..., the root
+        spans = [self.span(a) for a in path]
+        common = None
+        for g in jumps:
+            for a in chain(g):
+                if self.span(a) in spans:
+                    i = spans.index(self.span(a))
+                    common = i if common is None else max(common, i)
+                    break
+        # S: the outermost ancestor up to the common one that is a block's statement
+        i = common
+        while i is not None and i + 1 < len(path) and (path[i].kind == K.COMPOUND_STMT
+                                                       or path[i + 1].kind != K.COMPOUND_STMT):
+            i += 1
+        if i is None or i + 1 >= len(path) or path[i + 1].kind != K.COMPOUND_STMT:
+            self.refuse(label, f"goto {name!r} from outside the label's block")
+        stmt = path[i]
+        flag = f"__woof_in{n}"
+        for a in path[1:i + 1]:
+            if a.kind.name in self._LOOPS:
+                self.refuse(label, f"goto {name!r} into a loop or switch")
+        for j in range(1, i + 1):
+            a, below = path[j], path[j - 1]
+            if a.kind == K.COMPOUND_STMT:
+                skipped = []
+                for st in a.get_children():
+                    if self.span(st) == self.span(below):
+                        break
+                    skipped.append(st)
+                if skipped:
+                    if any(st.kind == K.DECL_STMT for st in skipped):
+                        self.refuse(label, f"a declaration before label {name!r} in a block the goto enters")
+                    self.edits.insert(self.span(skipped[0])[0], f"if (!{flag}) {{ ", rank=-60_000)
+                    # after any `if (flag) continue/break;` a crossed loop or
+                    # wrapper ending here carries (ranks _GOTO_CLOSE - 1, + 2)
+                    self.edits.insert(self._statement_end(skipped[-1]), " } ", rank=_GOTO_CLOSE + 3)
+            elif a.kind == K.IF_STMT:
+                kids = list(a.get_children())
+                if len(kids) < 2:
+                    self.refuse(a, f"cannot read the if statement around label {name!r}")
+                cond, arms = kids[0], kids[1:]
+                into_then = self.span(arms[0]) == self.span(below)
+                cs, ce = self.span(cond)
+                self.edits.insert(cs, f"({flag} || (" if into_then else f"(!{flag} && (", rank=-60_000)
+                self.edits.insert(ce, "))", rank=60_000)
+            elif a.kind != K.LABEL_STMT:
+                self.refuse(a, f"goto {name!r} enters a {a.kind.name.lower()}")
+        for j in self._unenclosed_jumps(stmt):
+            self.refuse(j, f"a {j.kind.name.split('_')[0].lower()} in the statement a goto re-enters "
+                           f"for label {name!r}")
+        rs, re_ = self.span(stmt)[0], self._statement_end(stmt)
+        inner = [w for w in wrappers if rs <= w["rs"] and w["close"] <= re_]
+        for g in jumps:
+            at = self.span(g)[0]
+            crossed = []
+            for a in chain(g)[1:]:
+                if self.span(a) == self.span(stmt) and a.kind == stmt.kind:
+                    if a.kind.name in self._LOOPS:
+                        crossed.append((self.span(a)[0], self._statement_end(a), _GOTO_CLOSE - 1))
+                    break
+                if a.kind.name in self._LOOPS:
+                    crossed.append((self.span(a)[0], self._statement_end(a), _GOTO_CLOSE - 1))
+            crossed += [(w["rs"], w["close"], _GOTO_CLOSE + 2) for w in inner if w["rs"] <= at < w["close"]]
+            crossed.sort()
+            for k, (_, end, rank) in enumerate(crossed):
+                self.edits.insert(end, f" if ({flag}) {'continue' if k == 0 else 'break'};", rank=rank)
+            gs, ge = self.span(g)
+            self.edits.replace(gs, ge, f"{{ {flag} = true; {'break' if crossed else 'continue'}; }}")
+        toks = list(label.get_tokens())
+        if len(toks) < 2 or toks[1].spelling != ":":
+            self.refuse(label, f"cannot find label {name!r}")
+        self.edits.replace(toks[0].extent.start.offset, toks[1].extent.end.offset, f"{flag} = false;")
+        self.edits.insert(rs, f"{{ bool {flag} = false; while (true) {{ ", rank=-50_000 - (re_ - rs))
+        self.edits.insert(re_, " break; } }", rank=_GOTO_CLOSE - 1)
+        wrappers.append({"kind": "reenter", "rs": rs, "close": re_, "flag": None, "name": name,
+                         "jumps": [], "node": label, "block": path[i + 1]})
+
+    def _outside_dispatch(self, label, name, block, rs, re_, group_spans):
+        """A structured region of a block with a dispatch group must hold
+        the group's statements whole or lie apart from them: a case inside
+        a wrapper, or a wrapper's flag declared among the cases (a case
+        would jump over it), cannot be built.  Refused with the label
+        named, so it joins the group."""
+        span = group_spans.get(self.span(block))
+        if span is None:
+            return
+        a, b = span
+        if a < re_ and rs < b and not (rs <= a and b <= re_):
+            self.refuse(label, f"goto region of label {name!r} crosses a dispatched goto block")
+
+    def _dispatch_range(self, block, jumps, parent, chain):
+        """A dispatch group's (first, last) statement indices of ``block``
+        and their [start, end) offsets: from the first jump or label of the
+        group to the last."""
+        K = self.ci.CursorKind
+        stmts = list(block.get_children())
+        index = {self.span(st): i for i, st in enumerate(stmts)}
+        marks = []
+        for g in jumps:
+            j = index.get(self.span(self._goto_target[self.span(g)]))
+            top = next((a for a in chain(g) if parent(a) is not None and self.span(parent(a)) == self.span(block)
+                        and parent(a).kind == K.COMPOUND_STMT), None)
+            if j is None or top is None:
+                self.refuse(g, f"goto {self._goto_target[self.span(g)].spelling!r} from outside the label's block")
+            marks += [j, index[self.span(top)]]
+        first, last = min(marks), max(marks)
+        return first, last, self.span(stmts[first])[0], self._statement_end(stmts[last])
+
+    def _dispatch_block(self, block, jumps, n, parent, chain, wrappers):
+        """The labels of one block, whatever the shape of their jumps ->
+        ``while (true) { switch (st) { case 0: ... case k: ... } break; }``.
+
+        The statements from the first jump or label to the last become the
+        switch body; each label is a ``case``; a jump sets ``st`` and
+        continues the loop, or, from inside a loop, switch or wrapper of its
+        own, sets a flag and breaks out of each (``if (jmp) break;`` after
+        every one).  A break or continue among them meant for a loop around
+        the block leaves the dispatch loop first.  Refused by name: a
+        declaration among the dispatched statements (a case would jump over
+        it), a jump from outside the block's statements.
+        """
+        K = self.ci.CursorKind
+        stmts = list(block.get_children())
+        first, last, rs, re_ = self._dispatch_range(block, jumps, parent, chain)
+        cases, tops = {}, []
+        for g in jumps:
+            target = self._goto_target[self.span(g)]
+            cases.setdefault(self.span(target), (None, target))
+            tops.append((g, next(a for a in chain(g) if parent(a) is not None
+                                 and self.span(parent(a)) == self.span(block) and parent(a).kind == K.COMPOUND_STMT)))
+        region = stmts[first:last + 1]
+        for st in region:
+            if st.kind == K.DECL_STMT:
+                self.refuse(st, "a declaration among the statements of a dispatched goto block")
+        st_, jmp, out = f"__woof_st{n}", f"__woof_jmp{n}", f"__woof_out{n}"
+        number = {}
+        for k, (span, (j, label)) in enumerate(sorted(cases.items()), start=1):
+            number[span] = k
+            toks = list(label.get_tokens())
+            if len(toks) >= 2 and toks[1].spelling == ":":
+                self.edits.replace(toks[0].extent.start.offset, toks[1].extent.end.offset, f"case {k}:")
+            else:
+                self.refuse(label, f"cannot find label {label.spelling!r}")
+        inner = [w for w in wrappers if rs <= w["rs"] and w["close"] <= re_]
+
+        def leave(node, action, exit=False):
+            """``node``'s jump out of every loop, switch and wrapper between
+            it and the dispatch loop; ``action`` is what it sets first."""
+            at = self.span(node)[0]
+            crossed = []
+            for a in chain(node)[1:]:
+                if self.span(a) == self.span(block) and a.kind == block.kind:
+                    break
+                if a.kind.name in self._LOOPS:
+                    crossed.append((self.span(a)[0], self._statement_end(a), _GOTO_CLOSE - 1))
+            crossed += [(w["rs"], w["close"], _GOTO_CLOSE + 2) for w in inner if w["rs"] <= at < w["close"]]
+            if not crossed:
+                return f"{{ {action} break; }}" if exit else f"{{ {action} continue; }}"
+            crossed.sort()
+            for k, (_, end, rank) in enumerate(crossed):
+                if k == 0:
+                    self.edits.insert(end, f" if ({jmp}) {{ if ({out}) break; {jmp} = false; continue; }}",
+                                      rank=rank)
+                else:
+                    self.edits.insert(end, f" if ({jmp}) break;", rank=rank)
+            return f"{{ {action} {jmp} = true; break; }}"
+
+        for g, top in tops:
+            gs, ge = self.span(g)
+            self.edits.replace(gs, ge, leave(g, f"{st_} = {number[self.span(self._goto_target[self.span(g)])]};"))
+        exits = set()
+        for st in region:
+            for j in self._unenclosed_jumps(st):
+                if any(w["rs"] <= self.span(j)[0] < w["close"] for w in inner):
+                    self.refuse(j, f"a {j.kind.name.split('_')[0].lower()} leaves a goto wrapper inside "
+                                   "a dispatched goto block")
+                code = 1 if j.kind == K.BREAK_STMT else 2
+                exits.add(code)
+                js, je = self.span(j)
+                self.edits.replace(js, je, leave(j, f"{out} = {code};", exit=True))
+        self.edits.insert(rs, f"{{ int {st_} = 0; bool {jmp} = false; int {out} = 0; (void){jmp}; (void){out}; "
+                              f"while (true) {{ switch ({st_}) {{ case 0: ", rank=-50_000 - (re_ - rs))
+        post = "".join(f" if ({out} == {c}) {'break' if c == 1 else 'continue'};" for c in sorted(exits))
+        self.edits.insert(re_, f" }} break; }}{post} }}", rank=_GOTO_CLOSE - 1)
+        wrappers.append({"kind": "dispatch", "rs": rs, "close": re_, "flag": None, "name": f"dispatch{n}",
+                         "jumps": [], "node": block, "block": parent(block)})
 
     def _nested_goto_starts(self, by_label, labels, parent, chain):
         """Where each forward region starts so that the regions of one block
@@ -1256,6 +1587,7 @@ class _Rewriter:
                     if not (outer["rs"] <= inner["rs"] and inner["close"] <= outer["close"]):
                         continue
                     if outer["kind"] == "backward":
+                        self._goto_block, self._goto_label = outer.get("block"), outer["node"]
                         self.refuse(outer["node"], f"backward goto {outer['name']!r} from inside the "
                                                    f"structured region of label {inner['name']!r}")
                     key = (id(inner), id(outer))
@@ -1285,10 +1617,12 @@ class _Rewriter:
         last = max(i for _, i, _ in tops)
         for g, _, top in tops:
             for a in chain(g)[1:]:
-                if self.span(a) == self.span(top) and a.kind == top.kind:
-                    break
+                # the block's own statement too: a jump from a loop that is
+                # one would `continue` that loop (ntu's retry inside its DO)
                 if a.kind.name in self._LOOPS:
                     self.refuse(g, f"backward goto {name!r} from inside a loop or switch")
+                if self.span(a) == self.span(top) and a.kind == top.kind:
+                    break
         region = stmts[j:last + 1]
         after = stmts[last + 1:]
         for st in region:
@@ -1308,11 +1642,12 @@ class _Rewriter:
         for (a, b) in regions:
             if a < re_ and rs < b and not (a <= rs and re_ <= b) and not (rs <= a and b <= re_):
                 self.refuse(label, f"goto regions overlap at label {name!r}")
+        self._outside_dispatch(label, name, block, rs, re_, getattr(self, "_group_spans", {}))
         regions.append((rs, re_))
         self.edits.insert(rs, "while (true) { ", rank=-50_000 - (re_ - rs))
         self.edits.insert(re_, " break; }", rank=_GOTO_CLOSE)
         wrappers.append({"kind": "backward", "rs": rs, "close": re_, "flag": None, "name": name,
-                         "jumps": [self.span(g)[0] for g, _, _ in tops], "node": label})
+                         "jumps": [self.span(g)[0] for g, _, _ in tops], "node": label, "block": block})
         label_tokens = list(label.get_tokens())
         if len(label_tokens) >= 2 and label_tokens[1].spelling == ":":
             self.edits.replace(label_tokens[0].extent.start.offset, label_tokens[1].extent.end.offset, "")
@@ -1322,23 +1657,26 @@ class _Rewriter:
         return True
 
     def _unenclosed_jumps(self, node):
-        """break/continue in ``node`` not enclosed by a loop/switch inside it."""
+        """break/continue in ``node`` that leave it: not enclosed by a loop
+        inside it, and for a break, not by a switch either (a switch, even
+        ``node`` itself, captures break but not continue)."""
         K = self.ci.CursorKind
         out = []
-        stack = [node]
+        stack = [(node, False)]             # (cursor, a switch captures its breaks)
         while stack:
-            n = stack.pop()
-            if n.kind in (K.BREAK_STMT, K.CONTINUE_STMT):
+            n, switched = stack.pop()
+            if n.kind == K.BREAK_STMT:
+                if not switched:
+                    out.append(n)
+                continue
+            if n.kind == K.CONTINUE_STMT:
                 out.append(n)
                 continue
-            if n.kind.name in self._LOOPS and n is not node:
-                # a continue inside a switch still targets the outer loop
-                if n.kind == K.SWITCH_STMT:
-                    stack.extend(c for c in n.walk_preorder() if c.kind == K.CONTINUE_STMT)
-                continue
-            if n.kind.name in self._LOOPS and n is node:
-                continue
-            stack.extend(n.get_children())
+            if n.kind.name in ("FOR_STMT", "WHILE_STMT", "DO_STMT", "CXX_FOR_RANGE_STMT"):
+                continue                    # its own break and continue
+            if n.kind == K.SWITCH_STMT:
+                switched = True
+            stack.extend((c, switched) for c in n.get_children())
         return out
 
     def _statement_end(self, node):
@@ -1934,16 +2272,60 @@ class _Rewriter:
     def table_parameters(self):
         """A device function's ``T**`` / ``T* const*`` parameter receives a
         kernel's address table (rewrite_kernel): it is declared as the same
-        ``__woof_addr_table<device T*>``, whose ``F[k]`` is the device pointer."""
-        from woof.backend.translate.spaces import _is_table
+        ``__woof_addr_table<device T*>``, whose ``F[k]`` is the device pointer.
+
+        A parameter every call gives a local array of device pointers
+        (nwp_windows' ``float* out[12]``) is a pointer into thread memory
+        instead: ``device T* const thread*``.  One given both is refused."""
+        from woof.backend.translate.spaces import _is_table, _local_pointer_array
         K = self.ci.CursorKind
         kinds = (K.FUNCTION_DECL, K.FUNCTION_TEMPLATE, K.CXX_METHOD)
         seen = set()
+        #: (function usr, parameter index) -> {"thread", "device"}: where the
+        #: tables its calls pass live
+        storage = {}
+        forwards = []                       # (caller parameter, callee parameter)
+        for call in self.tu.cursor.walk_preorder():
+            if call.kind != K.CALL_EXPR or not self.main_file(call):
+                continue
+            fn = call.referenced
+            if fn is None or fn.kind not in kinds:
+                continue
+            for i, arg in enumerate(call.get_arguments()):
+                if not _is_table(arg.type):
+                    continue
+                if _local_pointer_array(arg) is not None:
+                    storage.setdefault((fn.get_usr(), i), set()).add("thread")
+                    continue
+                # a table parameter passed on: its own storage (below)
+                ref = arg
+                while ref.kind.name in ("UNEXPOSED_EXPR", "PAREN_EXPR") and len(list(ref.get_children())) == 1:
+                    ref = list(ref.get_children())[0]
+                d = ref.referenced if ref.kind.name == "DECL_REF_EXPR" else None
+                owner = d.semantic_parent if d is not None and d.kind == K.PARM_DECL else None
+                if owner is not None and owner.kind in kinds and not self.is_kernel(owner):
+                    index = [p.get_usr() for p in owner.get_children() if p.kind == K.PARM_DECL].index(d.get_usr())
+                    forwards.append(((owner.get_usr(), index), (fn.get_usr(), i)))
+                    storage.setdefault((fn.get_usr(), i), set())
+                else:
+                    storage.setdefault((fn.get_usr(), i), set()).add("device")
+        changed = True
+        while changed:
+            changed = False
+            for src, dst in forwards:
+                got = storage.get(src, set())
+                if not got <= storage[dst]:
+                    storage[dst] |= got
+                    changed = True
+        for key, where in storage.items():
+            if not where:
+                where.add("device")         # only ever passed on, from a parameter nothing resolves
         for node in self.tu.cursor.walk_preorder():
             if node.kind not in kinds or not self.main_file(node) or self.is_kernel(node):
                 continue
-            for parm in node.get_children():
-                if parm.kind != K.PARM_DECL or not _is_table(parm.type):
+            parms = [p for p in node.get_children() if p.kind == K.PARM_DECL]
+            for index, parm in enumerate(parms):
+                if not _is_table(parm.type):
                     continue
                 key = self.span(parm)
                 if key in seen:
@@ -1960,6 +2342,15 @@ class _Rewriter:
                 name = next((t for t in toks if t.spelling == parm.spelling), None)
                 if name is None or not toks:
                     self.refuse(parm, f"cannot find the type of table parameter {parm.spelling!r}")
+                where = storage.get((node.get_usr(), index), set())
+                if where == {"thread"}:
+                    inner = " const" if parm.type.get_canonical().get_pointee().is_const_qualified() else ""
+                    self.edits.replace(toks[0].extent.start.offset, name.extent.start.offset,
+                                       f"{tspace} {elem}*{inner} thread* ")
+                    continue
+                if len(where) > 1:
+                    self.refuse(parm, f"table parameter {parm.spelling!r} is given both a local array "
+                                      f"of pointers and a device address table")
                 self.edits.replace(toks[0].extent.start.offset, name.extent.start.offset,
                                    f"__woof_addr_table<{tspace} {elem}*> ")
 
@@ -2175,7 +2566,24 @@ class _Rewriter:
                     self.refuse(c, f"cannot respell pointer field {c.spelling!r}")
                 self.edits.insert(ftoks[0].extent.start.offset, "__woof_sptr<", rank=-30_000)
                 self.edits.replace(star.extent.start.offset, star.extent.end.offset, ", __WS> ")
-            elif c.kind in (K.CXX_METHOD, K.FUNCTION_TEMPLATE):
+            if c.kind in (K.CONSTRUCTOR, K.CXX_METHOD, K.FUNCTION_TEMPLATE):
+                # its parameters: a pointer is into the struct's space
+                # (flg_column's `FLGPtr(T* v, int s = 1)`), a reference
+                # (the converting copy's `const FLGPtr<U>& a`) a local
+                for parm in (p for p in c.get_children() if p.kind == K.PARM_DECL):
+                    ptoks = list(parm.get_tokens())
+                    ind = _indirection(parm.type)
+                    if not ptoks or ind not in ("ptr", "ref"):
+                        continue
+                    if ind == "ref":
+                        self.edits.insert(ptoks[0].extent.start.offset, "thread ", rank=-30_000)
+                        continue
+                    star = next((t for t in ptoks if t.spelling == "*"), None)
+                    if star is None:
+                        self.refuse(parm, f"cannot respell pointer parameter {parm.spelling!r}")
+                    self.edits.insert(ptoks[0].extent.start.offset, "__woof_sptr<", rank=-30_000)
+                    self.edits.replace(star.extent.start.offset, star.extent.end.offset, ", __WS> ")
+            if c.kind in (K.CXX_METHOD, K.FUNCTION_TEMPLATE):
                 kind = _template_return(c) if c.kind == K.FUNCTION_TEMPLATE else _indirection(c.result_type)
                 if kind not in ("ref", "ptr"):
                     continue
@@ -2488,6 +2896,9 @@ class _Rewriter:
         spelled = re.sub(r"\b__restrict__\b|\brestrict\b|\bvolatile\b", "", spelled)
         spelled = re.sub(r"\bunsigned long long\b", "ulong", spelled)
         spelled = re.sub(r"\blong long\b", "long", spelled)
+        # CUDA's binary64 vector types, which MSL reserves (a double2*
+        # kernel parameter: global_polar's spectrum)
+        spelled = re.sub(r"\bdouble([234])\b", r"__woof_double\1", spelled)
         spelled = re.sub(r"\bdouble\b", "f64", spelled)
         if self.retain:
             spelled = re.sub(r"\bfloat\b", "f32s", spelled)
@@ -2535,6 +2946,7 @@ class _Rewriter:
                     self.edits.replace(s, e, f"__woof_f64_lit(0x{word:016X}UL)")
                     continue
             if kind == K.CALL_EXPR and self.retain:
+                self.qualify_namespace_call(node)
                 self.f32s_literal_arguments(node)
             if kind == K.FLOATING_LITERAL and _is_double(node.type):
                 s, e = self.span(node)
@@ -2911,6 +3323,30 @@ class _Rewriter:
         self.edits.replace(s, e, f"__woof_f64_lit(0x{word:016X}UL)")
         return True
 
+    def qualify_namespace_call(self, node):
+        """An unqualified call to a namespace's function, in an f32s unit:
+        ``N::f(...)``.  f32s is a class at global scope, so argument-dependent
+        lookup adds a global function of the same name and signature to the
+        candidates and the call is ambiguous, where CUDA's float arguments
+        bring no ADL (the selected Noah-MP water unit's d_canwater, global and
+        in namespace noahmp_water_options)."""
+        ref = node.referenced
+        if ref is None or ref.kind.name not in ("FUNCTION_DECL", "FUNCTION_TEMPLATE"):
+            return
+        scopes, owner = [], ref.semantic_parent
+        while owner is not None and owner.kind.name == "NAMESPACE":
+            scopes.append(owner.spelling)
+            owner = owner.semantic_parent
+        if not scopes or owner is None or owner.kind.name != "TRANSLATION_UNIT" or "" in scopes:
+            return
+        toks = list(node.get_tokens())
+        if not toks or toks[0].spelling != ref.spelling or not self.main_file(node):
+            return
+        start = toks[0].extent.start.offset
+        if self.data[max(0, start - 2):start] == b"::":
+            return
+        self.edits.insert(start, "::" + "::".join(reversed(scopes)) + "::", rank=-65_000)
+
     def fold_init_list(self, node):
         """Integer literals initialising binary64 elements or fields:
         ``{1.0, 0, -2.5}`` for a double table, as exact words (a constant
@@ -2926,6 +3362,23 @@ class _Rewriter:
         else:
             return
         for child, target in zip(kids, targets):
+            if _is_float(target) and t.kind.name == "RECORD" and t.get_declaration().kind.name == "UNION_DECL":
+                # a binary64 literal initialising a union's float member
+                # (gsfcgce4ice's `union{float f; unsigned u;} st[] =
+                # {{0x1.2a05f2p+33}, ...}`): its binary32 rounding, spelled
+                literal = child
+                while literal.kind.name in ("UNEXPOSED_EXPR", "PAREN_EXPR") and len(list(literal.get_children())) == 1:
+                    literal = list(literal.get_children())[0]
+                if literal.kind.name == "FLOATING_LITERAL" and _is_double(literal.type):
+                    word = _double_literal(self.src(literal))
+                    try:
+                        value = struct.unpack("<f", struct.pack("<f", struct.unpack("<d", struct.pack("<Q", word))[0]))[0]
+                    except OverflowError:
+                        continue
+                    s, e = self.span(literal)
+                    self.edits.replace(s, e, f"{value.hex()}f")
+                    self._folded.add((s, e))
+                continue
             if not _is_double(target):
                 continue
             if child.kind.name not in ("INIT_LIST_EXPR", "FLOATING_LITERAL") and self.fold_constant_double(child):

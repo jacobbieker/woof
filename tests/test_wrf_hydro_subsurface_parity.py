@@ -1,4 +1,4 @@
-"""WRF-Hydro subsurface routing (the opt-in), bitwise against WRF 4.6.1's hydro/.
+"""WRF-Hydro subsurface routing (the opt-in), bitwise against WRF 4.7.1's hydro/.
 
 The port lives in ``optional/wrf_hydro`` under UCAR's WRF-Hydro licence and
 loads only through :func:`woof.optin.load` with ``WOOF_ENABLE_WRF_HYDRO=1``;

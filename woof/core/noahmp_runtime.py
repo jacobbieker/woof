@@ -280,7 +280,8 @@ def _glacier_execution_provenance(evaluator) -> str:
 
 
 def _glacier_lsm_step(fields, atmosphere, glacier_mask, *, params, coszen,
-                      dt, dzs, evaluator, noahmp_snow_age="wrf_470") -> None:
+                      dt, dzs, evaluator, noahmp_snow_age="wrf_470",
+                      wrf_hydro=None) -> None:
     """Run NOAHMP_GLACIER over the masked columns and write the driver's
     glacier arm back into ``fields``.
 
@@ -383,6 +384,8 @@ def _glacier_lsm_step(fields, atmosphere, glacier_mask, *, params, coszen,
         "zsoil": zsoil_from_dzs(dzs),
     }
     inputs["noahmp_snow_age"] = noahmp_snow_age
+    if wrf_hydro is not None:
+        inputs["sfcheadrt"] = read2(wrf_hydro["sfcheadrt"]).astype(np.float32, copy=False)
     r = evaluator(inputs, count, float(dt32))
 
     # Host gathering is finished. Reuse these device indices throughout
@@ -468,6 +471,10 @@ def _glacier_lsm_step(fields, atmosphere, glacier_mask, *, params, coszen,
     fields["fvegxy"][at] = zero
     fields["runsfxy"][at] = runsf_mm
     fields["runsbxy"][at] = runsb_mm
+    if wrf_hydro is not None:                                # 4.7.1 drv :1210-1217
+        wrf_hydro["soldrain"][at] = cp.where(runsb_mm > zero, runsb_mm, zero)
+        wrf_hydro["infxsrt"][at] = runsf_mm
+        wrf_hydro["qtiledrain"][at] = zero                   # QTLDRN = 0 (4.7.1 drv :857)
     if "soldrain" in fields:
         fields["soldrain"][at] = zero  # glacier has no soil bottom drainage
     fields["ecanxy"][at] = zero
@@ -1861,8 +1868,17 @@ def noahmp_lsm_step(
     opt_soil: int,
     sf_urban_physics: int = 0,
     noahmp_snow_age: str = "wrf_470",
+    wrf_hydro: Mapping[str, object] | None = None,
 ) -> dict[str, int]:
     """One ``noahmplsm`` call.  Mutates ``fields`` in place.
+
+    ``wrf_hydro`` is WRF built with -DWRF_HYDRO (module_sf_noahmpdrv.F
+    :66-68, :173-175, :1200-1217 in WRF 4.7.1's Noah-MP e5c0859): a mapping of ``(ny, nx)`` float32 device
+    planes.  ``sfcheadrt`` (the ponded head WRF-Hydro returns, mm) is read:
+    WATER adds it to QINSUR, and on glacier columns it leaves as surface
+    runoff; the water-budget stops are compiled out.  ``infxsrt`` (RUNSF,
+    mm), ``soldrain`` (MAX(RUNSB, 0), mm) and ``qtiledrain`` (QTLDRN, mm)
+    are written on every land column, as the driver writes them.
 
     ``sf_urban_physics > 0`` is noahmpdrv.F:916-925's other arm: urban and
     LCZ columns run as ``NATURAL_TABLE`` with ``FVGMAX = 0.96`` so the urban
@@ -1907,6 +1923,12 @@ def noahmp_lsm_step(
     # digest gate in tests/test_noahmp_runtime.py is what says the two paths
     # are the same function.
     slab_path = _slab_path_selected()
+    if wrf_hydro is not None:
+        _check_wrf_hydro(fields, wrf_hydro, opt_tdrn=int(opt_tdrn))
+        if not slab_path:
+            raise NotImplementedError(
+                "Noah-MP with WRF_HYDRO runs on the resident slab only; the "
+                "staged column path does not carry sfcheadrt")
     if (not slab_path and dict(params.land_options)
             != dict(opt_alb=2, opt_stc=1, opt_rsf=1, opt_btr=1)):
         raise ValueError(
@@ -1920,7 +1942,8 @@ def noahmp_lsm_step(
             elapsed_seconds=elapsed_seconds,
             noahmp_snow_age=noahmp_snow_age,
             **({"sf_urban_physics": int(sf_urban_physics)}
-               if int(sf_urban_physics) else {}))
+               if int(sf_urban_physics) else {}),
+            **({"wrf_hydro": wrf_hydro} if wrf_hydro is not None else {}))
         _noahmp_post_lsm_diagnostics(fields, params=params)
         return census
 
@@ -2305,6 +2328,7 @@ def _lsm_step_slab(
     elapsed_seconds: float,
     sf_urban_physics: int = 0,
     noahmp_snow_age: str = "wrf_470",
+    wrf_hydro: Mapping[str, object] | None = None,
 ) -> dict[str, int]:
     """One ``noahmplsm`` call through the whole-slab orchestration.
 
@@ -2346,13 +2370,7 @@ def _lsm_step_slab(
     options.pop("wtddt",30.0)
     soil_interval=options.pop("soiltstep",0.0)
     cadence_on=soil_interval>0
-    if cadence_on:
-        from woof.core.noahmp_soil_cadence import ACCUMULATORS,cadence
-        steps,calculate,reset=cadence(soil_interval,dt,itimestep)
-        if reset:
-            for name in ACCUMULATORS.values():fields[name].fill(0)
-        options.update(soil_update_steps=steps,calculate_soil=calculate,carry_soil_accumulators=True)
-    device_surface = output_level==3 or dict(options) != dict(opt_alb=2, opt_stc=1, opt_rsf=1, opt_btr=1)
+    device_surface = output_level==3 or dict(options) != dict(opt_alb=2, opt_stc=1, opt_rsf=1, opt_btr=1) or cadence_on
     if device_surface:
         from woof.core.noahmp_surface_device import layout as device_layout
         layout = device_layout(params, fields, nsoil=nsoil,
@@ -2361,6 +2379,12 @@ def _lsm_step_slab(
         layout = params.surface_layout(fields, nsoil=nsoil,
                                        chunk_width=SLAB_COLUMN_CHUNK,
                                        sf_urban_physics=int(sf_urban_physics))
+    if cadence_on:
+        from woof.core.noahmp_soil_cadence import ACCUMULATORS,cadence
+        steps,calculate,reset=cadence(soil_interval,dt,itimestep)
+        if reset:
+            for name in ACCUMULATORS.values():fields[name].fill(0)
+        options.update(soil_update_steps=steps,calculate_soil=calculate,carry_soil_accumulators=True)
     one = np.float32(1.0)
     half = np.float32(0.5)
     zero32f = np.float32(0.0)
@@ -2464,7 +2488,7 @@ def _lsm_step_slab(
                          opt_alb=options["opt_alb"], opt_gla=options.get("opt_gla",1),
                          opt_stc=options["opt_stc"], opt_tbot=options.get("opt_tbot", 2),
                          snicar_options=options.get("snicar_options"),
-                         noahmp_snow_age=noahmp_snow_age)
+                         noahmp_snow_age=noahmp_snow_age, wrf_hydro=wrf_hydro)
         census["glacier_path"] = "noahmp-glacier/resident-cuda"
     elif n_glacier:
         if not params.glacier_path:
@@ -2479,7 +2503,7 @@ def _lsm_step_slab(
         _glacier_lsm_step(fields, atmosphere, glacier, params=params,
                           coszen=cosz, dt=float(dt32f), dzs=dzs,
                           evaluator=glacier_evaluator,
-                          noahmp_snow_age=noahmp_snow_age)
+                          noahmp_snow_age=noahmp_snow_age, wrf_hydro=wrf_hydro)
         census["glacier_path"] = _glacier_execution_provenance(
             glacier_evaluator)
 
@@ -2570,6 +2594,8 @@ def _lsm_step_slab(
         sources.update({"_snow_temperature": fields["tsnoxy"],
                         "_soil_temperature": fields["tslb"],
                         "isnow": fields["isnowxy"], "vegtyp": vegtyp})
+        if wrf_hydro is not None:
+            sources["sfcheadrt"] = wrf_hydro["sfcheadrt"]
         gj = layout["gather_j"][start:stop] if device_surface else jc
         gi = layout["gather_i"][start:stop] if device_surface else ic
         chunk = gather_slab_fields(gj, gi, sources, (ny, nx))
@@ -2615,6 +2641,7 @@ def _lsm_step_slab(
                     chunk, m, noahmp_snow_age=noahmp_snow_age, **options)
             _write_back_slab(fields, jc, ic, out, nsoil=nsoil, dt=dt32f,
                              active=mask)
+            _write_back_wrf_hydro(wrf_hydro, jc, ic, out, active=mask)
         else:
             if parameter_table is None:
                 chunk.update(parameter_chunks[start // SLAB_COLUMN_CHUNK])
@@ -2625,8 +2652,49 @@ def _lsm_step_slab(
             out = evaluate_sflx_slab(
                 chunk, m, noahmp_snow_age=noahmp_snow_age, **options)
             _write_back_slab(fields, jc, ic, out, nsoil=nsoil, dt=dt32f)
+            _write_back_wrf_hydro(wrf_hydro, jc, ic, out)
 
     return census
+
+
+def _write_back_wrf_hydro(wrf_hydro, j, i, r, *, active=None) -> None:
+    """module_sf_noahmpdrv.F (WRF 4.7.1, Noah-MP e5c0859) :1210-1217 under WRF_HYDRO, land columns:
+    SOLDRAIN = MAX(RUNSB, 0.0), INFXSRT = RUNSF, QTILEDRAIN = QTLDRN (mm)."""
+    if wrf_hydro is None:
+        return
+    import cupy as cp
+    from woof.core.noahmp_slab_libm import scatter_slab_fields
+
+    zero = cp.float32(0.0)
+    runsb = r["runsub"]
+    scatter_slab_fields(j, i, [
+        (wrf_hydro["soldrain"], cp.where(runsb > zero, runsb, zero)),
+        (wrf_hydro["infxsrt"], r["runsrf"]),
+        (wrf_hydro["qtiledrain"], r["qtldrn"] if "qtldrn" in r
+         else cp.zeros_like(r["runsrf"])),
+    ], active=active)
+
+
+def _check_wrf_hydro(fields, wrf_hydro, *, opt_tdrn) -> None:
+    """The WRF_HYDRO planes: four distinct (ny, nx) float32 device arrays."""
+    import cupy as cp
+
+    names = ("sfcheadrt", "infxsrt", "soldrain", "qtiledrain")
+    missing = [n for n in names if n not in wrf_hydro]
+    if missing or set(wrf_hydro) - set(names):
+        raise ValueError(f"wrf_hydro carries exactly {names}")
+    shape = tuple(fields["tsk"].shape)
+    for n in names:
+        a = wrf_hydro[n]
+        if not isinstance(a, cp.ndarray) or a.dtype != cp.float32 or tuple(a.shape) != shape:
+            raise ValueError(f"wrf_hydro {n}: expected float32 device {shape}")
+    if len({id(wrf_hydro[n]) for n in names}) != len(names):
+        raise ValueError("wrf_hydro planes must be distinct arrays")
+    if opt_tdrn == 2:
+        raise NotImplementedError(
+            "opt_tdrn = 2 (Hooghoudt tile drainage) with WRF_HYDRO reads the "
+            "water table WRF-Hydro returns (ZWATBLE2D -> WATBLED); that "
+            "exchange is not ported")
 
 
 def _write_back_slab(fields, j, i, r, *, nsoil, dt, active=None) -> None:

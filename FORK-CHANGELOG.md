@@ -31,6 +31,21 @@ fork already had, upstream's keys and flags are now the only ones:
 
 New:
 
+- Noah-MP is recorded as following WRF 4.7.1's Noah-MP submodule (e5c0859),
+  at the user's request. No forecast answer changes, because the default
+  already computes what e5c0859 computes. Of e5c0859's edits to the code
+  WOOF transcribes:
+  - SNOW_AGE moving out of the sunlit branch (ALBEDO and the glacier albedo)
+    is already the default, `noahmp_snow_age = "wrf_470"`;
+  - NOAHMP_GLACIER returning HCPCT for the driver's SOILENERGY/SNOWENERGY
+    integrals is what the glacier port already did; it was documented as a
+    departure from 4.6.1's stale local and now matches e5c0859;
+  - SFCDIF2's new PSLMS/PSLHS are dead, because `ILECH = 0`;
+  - `calculate_soil` and the irrigation table reader change no arithmetic.
+  `noahmp_snow_age = "wrf_461"` stays available for WRF 4.6.1's behaviour.
+  The WRF-Hydro, Noah `-DWRF_HYDRO`, Noah-MP `WRF_HYDRO` and ocean-coupler
+  lanes are pinned to WRF 4.7.1.
+
 - A live nest can carry its own eta ladder (WRF `vert_refine_method = 2`): a
   `[[domain]]` names `eta_levels` under the tree's shared `p_top`,
   `hybrid_opt` and `etac`. The parent forces it every parent step through

@@ -28,3 +28,10 @@ poly6
 soa_part
 sorgam
 aerosols_sorgam_init
+# P4: aerosol dry deposition and PM sums
+sorgam_depdriver
+vdvg
+vdvg_2
+sum_pm_sorgam
+# SORGAM initial conditions (aerosols_sorgam_init past chem_in_opt = 1)
+sorgam_init_aer_ic_pnnl

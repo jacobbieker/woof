@@ -69,9 +69,15 @@ Ordered by how self-contained each piece is:
    `..._constitutive_relation.F`): strain tensor, EVP and revised-EVP
    constitutive relation, stress divergence, and `seaice_init_evp`. These are
    the inner loop of the elastic subcycle.
-2. The rest of the elastic subcycle (`mpas_seaice_velocity_solver.F`): ocean
-   stress, the velocity update (`solve_velocity`), the coefficient and
-   rheology setup, and the final divergence/shear diagnostics.
+2. The rest of the elastic subcycle (`mpas_seaice_velocity_solver.F`). Ported:
+   the Coriolis coefficient, ocean stress, subcycle initialisation, ocean
+   stress coefficient, `solve_velocity` and `solve_velocity_revised`, and the
+   principal stresses, composed with item 1 into whole subcycles. Still to
+   port: the other pre-subcycle routines (mass and area aggregation, masks,
+   `new_ice_velocities`, `ice_strength`, `air_stress`, `surface_tilt`),
+   and `ocean_stress_final`. The column package is
+   double, so production MPAS-Seaice is built double: each seaice piece is
+   held at RKIND 4 and 8.
 3. The basis-function setup for the variational solver (Wachspress and PWL,
    `..._wachspress.F`, `..._pwl.F`). This is init-time work and can stay on the host.
    Its outputs (`basisGradientU/V`, `basisIntegrals*`) are the inputs the
@@ -88,10 +94,19 @@ Ordered by how self-contained each piece is:
 ## MPAS-Ocean (`core_ocean`, about 80,000 lines)
 
 1. Tracer advection, standard and monotone (`mpas_ocn_tracer_advection_{std,mono}.F`).
-2. The split-explicit time integrator's tendencies. `vel_coriolis`,
-   `vel_vadv` and `thick_hadv`/`vadv` are ported. Still to port:
-   `vel_pressure_grad`, `vel_hmix_*`, the forcing terms and their composition
-   in `mpas_ocn_tendency.F`, then the barotropic subcycle
+2. The split-explicit time integrator's tendencies. Ported: `vel_coriolis`,
+   `vel_vadv`, `thick_hadv`/`vadv`, `vel_pressure_grad` (all five
+   `config_pressure_gradient_type` values, with the common-level Jacobian) and
+   `vel_hmix` (del2, Leith, del4). The POM/SCRUM, diagonal and pseudo-flux
+   Jacobians in `mpas_ocn_vel_pressure_grad.F` are private and no config
+   reaches them in v8.4.2. The tensor hmix forms (`mpas_tensor_operations`)
+   are refused by name. The forcing terms (bulk forcing, surface stress,
+   explicit bottom drag, Rayleigh friction, thickness surface flux) and their
+   composition into `ocn_tend_vel` and `ocn_tend_thick` are ported. Refused
+   by name: land-ice fluxes, frazil, the RKIND 8 bulk wind stress (glibc's
+   double `cos`/`sin` have no permissive equal), and the bottom drag or
+   Rayleigh bottom friction on a mesh with a dry edge (v8.4.2 indexes level 0
+   there). Still to port: `ocn_tend_tracer`, then the barotropic subcycle
    (`mode_forward/mpas_ocn_time_integration_split.F`).
 3. Equation of state (`equation_of_state_jm`, `_linear`) and diagnostics.
 4. Vertical mixing: constant and Richardson (`vmix_coefs_*`). CVMix (KPP) is
@@ -153,8 +168,8 @@ Ordered by how self-contained each piece is:
 
 | Core | Ported pieces | Status |
 |---|---|---|
-| seaice | EVP internal stress, variational: `seaice_init_evp`, strain tensor, EVP and revised-EVP constitutive relation, stress divergence, final divergence/shear and ridging parameters (`woof/hex/mpas_seaice/evp_v842.py`). Word-exact against the v8.4.2 oracle on CUDA and Metal (`tests/test_mpas_seaice_evp_parity.py`, `woof hex seaice verify`). | stub |
-| ocean | Tendency terms: `ocn_vel_coriolis_tend`, `ocn_vel_vadv_tend`, `ocn_thick_hadv_tend`, `ocn_thick_vadv_tend` and their `_init` switches (`woof/hex/mpas_ocean/tend_v842.py`). Word-exact against the v8.4.2 oracle at RKIND 4 and 8 on CUDA and Metal (`tests/test_mpas_ocean_tend_parity.py`, `woof hex ocean verify`). | stub |
+| seaice | EVP internal stress, variational: `seaice_init_evp`, strain tensor, EVP and revised-EVP constitutive relation, stress divergence, final divergence/shear and ridging parameters (`woof/hex/mpas_seaice/evp_v842.py`). Word-exact against the v8.4.2 oracle at RKIND 4 and 8 on CUDA and Metal (`tests/test_mpas_seaice_evp_parity.py`, `woof hex seaice verify`). The EVP velocity solve: Coriolis coefficient, ocean stress, subcycle initialisation, ocean stress coefficient, `solve_velocity`/`_revised`, principal stresses, and whole elastic subcycles (`woof/hex/mpas_seaice/velocity_v842.py`). Word-exact at RKIND 4 and 8 on CUDA and Metal (`tests/test_mpas_seaice_velocity_parity.py`). | stub |
+| ocean | Tendency terms: `ocn_vel_coriolis_tend`, `ocn_vel_vadv_tend`, `ocn_thick_hadv_tend`, `ocn_thick_vadv_tend` and their `_init` switches (`woof/hex/mpas_ocean/tend_v842.py`). Word-exact against the v8.4.2 oracle at RKIND 4 and 8 on CUDA and Metal (`tests/test_mpas_ocean_tend_parity.py`, `woof hex ocean verify`). The pressure gradient (`ocn_vel_pressure_grad_tend`, every type) and horizontal momentum mixing (`ocn_vel_hmix_tend`: del2, Leith, del4) (`woof/hex/mpas_ocean/pgrad_hmix_v842.py`), word-exact at RKIND 4 and 8 on CUDA and Metal (`tests/test_mpas_ocean_pgrad_hmix_parity.py`). The full momentum and thickness tendencies (`ocn_tend_vel`, `ocn_tend_thick`) with the bulk forcing, velocity forcing and thickness surface flux (`woof/hex/mpas_ocean/forcing_v842.py`), word-exact at RKIND 4 and 8 on CUDA and Metal (`tests/test_mpas_ocean_tendency_parity.py`). | stub |
 | landice | The SIA velocity solver: one `li_sia_solve` call, including `li_calculate_flowParamA` (constant, PB1982, CP2010), all three tangent-slope methods and the velocity profile (`woof/hex/mpas_ice/sia_v842.py`). Word-exact against the v8.4.2 oracle at RKIND 4 on CUDA and Metal (`tests/test_mali_sia_parity.py`, `woof hex ice verify`). The geometry diagnostics before advection: `li_calculate_mask` (sia/none), `li_update_geometry`, `li_calculate_layerThickness`, `li_layer_normal_velocity` (`woof/hex/mpas_ice/geometry_v842.py`, `tests/test_mali_geometry_parity.py`), word-exact on CUDA and Metal. The thermal initialisation and conversions: `li_thermal_init` (sfc_air_temperature, linear, file), `li_compute_pressure_melting_point_fields`, `li_temperature_to_enthalpy`, `li_enthalpy_to_temperature` (`woof/hex/mpas_ice/thermal_init_v842.py`, `tests/test_mali_thermal_init_parity.py`), word-exact on CUDA and Metal. Albany FO/L1L2/Stokes refused by name. | stub |
 
 This table is updated as each piece lands with its parity tests.

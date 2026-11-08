@@ -1,11 +1,11 @@
 // WOOF-OPTIN: wrf-hydro
-// Derived from WRF-Hydro (UCAR) as shipped in WRF 4.6.1 hydro/; see
+// Derived from WRF-Hydro (UCAR) as shipped in WRF 4.7.1 hydro/; see
 // optional/wrf_hydro/LICENSE and NOTICE.md.  Not part of the default build or
 // of any wheel.
 //
 // WRF-Hydro's reach channel routing, hydro/Routing/module_channel_routing.F90:
-// MUSKING (:43-66), SUBMUSKINGCUNGE (:150-539) and the reach branch of
-// drive_CHANNEL (channel_option 1 and 2, :704-865), without MPP_LAND.  The
+// MUSKING (:23-46), SUBMUSKINGCUNGE (:130-519) and the reach branch of
+// drive_CHANNEL (channel_option 1 and 2, :705-885), without MPP_LAND.  The
 // lateral inflow is a REAL*8 sum per reach over its pixels in pixel order and
 // the upstream inflows are REAL sums over upstream reaches in reach order,
 // both through CSR lists built once on the host.  Every reach in a substep
@@ -24,7 +24,7 @@ __device__ float mc_musking(float qup, float quc, float qdp, float dt, float Km,
     return __fadd_rn(__fadd_rn(__fmul_rn(C1, quc), __fmul_rn(C2, qup)), __fmul_rn(C3, qdp));
 }
 
-// AREA, WP, WPk, AREAC, WPC, R at depth hx (:279-302 and :352-375).
+// AREA, WP, WPk, AREAC, WPC, R at depth hx (:259-282 and :332-355).
 __device__ static void mc_geometry(float hx, float Bw, float bfd, float z, float TwCC,
                                    float nCC, float modK, float& AREA, float& AREAC,
                                    float& WP, float& WPC, float& WPk, float& R)
@@ -48,7 +48,7 @@ __device__ static void mc_geometry(float hx, float Bw, float bfd, float z, float
     }
 }
 
-// Ck at depth hx (:304-315 and :377-388).
+// Ck at depth hx (:284-295 and :357-368).
 __device__ static float mc_celerity(float hx, float Bw, float bfd, float z, float TwCC,
                                     float nCC, float n, float So, float AREA, float AREAC, float R)
 {
@@ -249,7 +249,13 @@ void ch_lateral(const int* __restrict__ start, const int* __restrict__ pix,
     qlateral[k] = __double2float_rn(acc);
 }
 
-// One substep of drive_CHANNEL's reach loop (:778-851), one thread per reach.
+// One substep of drive_CHANNEL's reach loop (:803-871), one thread per reach.
+// Upstream flows are read from the substep's starting QLINK (gQLINK, gathered
+// before the loop under MPP_LAND).  A reservoir reach (TYPEL = 1) with a lake
+// (lake_lookup >= 0) routes it through run() with no lateral inflow -- here
+// the level pool or the pass-through, levelpool.cu -- recording QLAKEO and
+// QLAKEI; its own routed flow stays the zero tmpQLINK holds, which the commit
+// below then writes into QLINK (as WRF 4.7.1 does).
 extern "C" __global__
 void ch_reach(int option, const int* __restrict__ ustart, const int* __restrict__ ups,
               const float* __restrict__ qlink1, const float* __restrict__ qlink2,
@@ -261,7 +267,10 @@ void ch_reach(int option, const int* __restrict__ ustart, const int* __restrict_
               const float* __restrict__ tw_cc, const float* __restrict__ n_cc,
               const float* __restrict__ channk, float dtrt, float* __restrict__ tmp,
               float* __restrict__ velocity, float* __restrict__ qloss,
-              float* __restrict__ hlink, int* __restrict__ err, int nlinksl)
+              float* __restrict__ hlink, int* __restrict__ err,
+              const int* __restrict__ lake_of, const float* __restrict__ lprops,
+              const int* __restrict__ lopt, float* __restrict__ resht,
+              float* __restrict__ qlakei, float* __restrict__ qlakeo, int nlinksl)
 {
     int k = blockIdx.x * blockDim.x + threadIdx.x;
     if (k >= nlinksl) return;
@@ -272,7 +281,19 @@ void ch_reach(int option, const int* __restrict__ ustart, const int* __restrict_
         qup = __fadd_rn(qup, qlink1[m]);
     }
     tmp[k] = 0.0f;
-    if (typel[k] == 1) return;               // a reservoir: the reach branch leaves it
+    if (typel[k] == 1) {                     // a reservoir (:831-841)
+        int l = lake_of[k];
+        if (l >= 0) {
+            const float* p = lprops + (size_t)l * 9;
+            float H = resht[l], qo;
+            levelpool_physics(lopt[l], qup, quc, qo, 0.0f, dtrt, H, p[0], p[1], p[8], p[2],
+                              p[3], p[4], p[5], p[6], p[7]);
+            resht[l] = H;
+            qlakeo[l] = qo;
+            qlakei[l] = quc;
+        }
+        return;
+    }
     if (option == 1) {
         tmp[k] = mc_musking(qup, __fadd_rn(quc, qlateral[k]), qlink1[k], dtrt, musk[k], musx[k]);
     } else {
@@ -295,6 +316,6 @@ void ch_commit(const int* __restrict__ typel, const float* __restrict__ tmp,
 {
     int k = blockIdx.x * blockDim.x + threadIdx.x;
     if (k >= nlinksl) return;
-    if (typel[k] != 1) qlink2[k] = tmp[k];
+    if (typel[k] != 2) qlink2[k] = tmp[k];   // :877-882
     qlink1[k] = qlink2[k];
 }

@@ -1,4 +1,4 @@
-"""WRF-Hydro groundwater bucket (the opt-in), bitwise against WRF 4.6.1's hydro/.
+"""WRF-Hydro groundwater bucket (the opt-in), bitwise against WRF 4.7.1's hydro/.
 
 ``simp_gw_buck`` run by ``woof_wrf_hydro.baseflow``.  The fixture is
 ``optional/wrf_hydro/oracle/build_baseflow.sh``: the routine cut byte for byte
@@ -45,8 +45,8 @@ def test_fixtures_are_the_ones_the_build_hashed():
 
 def test_unported_bucket_options_are_refused_by_name():
     mod = optin.load("wrf_hydro")
-    for sw, word in ((3, "gw2d"), (4, "simp_gw_buck_nhd")):
-        with pytest.raises(NotImplementedError, match=word):
+    for sw, err, word in ((3, ValueError, "Gw2d"), (4, NotImplementedError, "simp_gw_buck_nhd")):
+        with pytest.raises(err, match=word):
             mod.GroundwaterBucket(gwbaseswcrt=sw, gwsubbasmsk=None, basnsind=None,
                                   gw_strm_msk_lind=None, basns_area=None, c=None, ex=None,
                                   z_mx=None, pixct=None, dist9=None)

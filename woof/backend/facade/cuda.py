@@ -22,7 +22,10 @@ def _mx():
 
 
 def _drain():
+    from woof.backend.facade import _capture
     from woof.backend.facade._array import PENDING
+    if _capture.recording() is not None:
+        _capture.refuse("a synchronize")
     mx = _mx()
     arrays = [s.arr for s in PENDING]
     PENDING.clear()
@@ -167,17 +170,22 @@ class Stream:
         return True
 
     def is_capturing(self):
-        # CUDA-graph capture: never on Metal (MLX records its own lazy graph)
-        return False
+        from woof.backend.facade import _capture
+        return _capture.recording() is not None
 
     def begin_capture(self, mode=None):
-        self._capturing = True
+        # the launches until end_capture are recorded, not run (_capture)
+        from woof.backend.facade import _capture
+        _capture.begin(self)
 
     def end_capture(self):
-        self._capturing = False
-        return _Graph()
+        from woof.backend.facade import _capture
+        return _Graph(_capture.end(self))
 
     def launch_host_func(self, callback, arg):
+        from woof.backend.facade import _capture
+        if _capture.record_host(callback, arg):
+            return
         _drain()
         callback(arg)
 
@@ -195,6 +203,9 @@ class Event:
         self.ptr = id(self)
 
     def record(self, stream=None):
+        from woof.backend.facade import _capture
+        if _capture.record_event(self):
+            return
         _drain()
         self.t = time.perf_counter()
 
@@ -581,11 +592,15 @@ class MemoryHook:
 
 
 class _Graph:
-    """CUDA-graph capture is a no-op: MLX already records a lazy graph and
-    encodes it in batches."""
+    """A captured CUDA graph: the recorded launches, run again in order by
+    each ``launch`` (woof.backend.facade._capture)."""
+
+    def __init__(self, steps=()):
+        self._steps = list(steps)
 
     def launch(self, stream=None):
-        return None
+        from woof.backend.facade import _capture
+        _capture.replay(self._steps)
 
     def upload(self, stream=None):
         return None

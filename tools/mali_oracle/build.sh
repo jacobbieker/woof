@@ -14,8 +14,11 @@
 # makes the thermal init and enthalpy-conversion calls.  The objects must contain no FMA
 # instruction (checked with objdump when it is present).  powf and expf are
 # the host libm's; TOOLCHAIN.txt records the glibc and whether the CPU has
-# FMA.  gfortran is the mpas-oracle pixi environment's unless GFORTRAN names
-# one.
+# FMA.  On a host whose libm is not glibc (macOS), the oracles link
+# tools/oracle_libm/glibc_host.cpp instead: the repository's MIT glibc
+# transcriptions, compiled for the host by CXX (default c++), so they write
+# the glibc host's words.  gfortran is the mpas-oracle pixi environment's unless
+# GFORTRAN names one.
 set -euo pipefail
 if [[ $# -ne 2 ]]; then
     echo "usage: build.sh MPAS_SOURCE_ROOT BUILD_DIR" >&2
@@ -51,19 +54,24 @@ done
 "${fc[@]}" "${flags[@]}" "${script_dir}/run_oracle.F90"
 "${fc[@]}" "${flags[@]}" "${script_dir}/run_geometry.F90"
 "${fc[@]}" "${flags[@]}" "${script_dir}/run_thermal.F90"
+libm_objects=()
+while read -r object; do libm_objects+=("${object}"); done \
+    < <(bash "${script_dir}/../oracle_libm/build_host_libm.sh" 2> libm.txt)
+libm_note=$(sed 's/^libm: //' libm.txt)
 if command -v objdump >/dev/null; then
-    if objdump -d "${objects[@]}" | grep -Eq '\bv?fn?m(add|sub)[0-9]'; then
+    if objdump -d "${objects[@]}" | grep -Eq '\bv?fn?m(add|sub)([0-9]|[[:space:]]|$)'; then
         echo "an oracle object contains an FMA instruction; refusing" >&2
         exit 4
     fi
 fi
-"${fc[@]}" -o "${build_dir}/run_oracle_r4" run_oracle.o "${objects[@]}" stubs.o mpas_kind_types.o
-"${fc[@]}" -o "${build_dir}/run_geometry_r4" run_geometry.o "${objects[@]}" stubs.o mpas_kind_types.o
-"${fc[@]}" -o "${build_dir}/run_thermal_r4" run_thermal.o "${objects[@]}" stubs.o mpas_kind_types.o
+"${fc[@]}" -o "${build_dir}/run_oracle_r4" run_oracle.o "${objects[@]}" ${libm_objects[@]+"${libm_objects[@]}"} stubs.o mpas_kind_types.o
+"${fc[@]}" -o "${build_dir}/run_geometry_r4" run_geometry.o "${objects[@]}" ${libm_objects[@]+"${libm_objects[@]}"} stubs.o mpas_kind_types.o
+"${fc[@]}" -o "${build_dir}/run_thermal_r4" run_thermal.o "${objects[@]}" ${libm_objects[@]+"${libm_objects[@]}"} stubs.o mpas_kind_types.o
 {
     echo "gfortran: $("${fc[@]}" --version | head -1)"
     echo "flags: -O0 -ffp-contract=off -cpp -ffree-form -ffree-line-length-none -DSINGLE_PRECISION (RKIND 4)"
     echo "host: $(uname -srm); libm: $(ldd --version 2>/dev/null | head -1)"
+    echo "powf/expf: ${libm_note}"
     echo "fma: $(grep -m1 -ow fma /proc/cpuinfo 2>/dev/null || echo absent)"
 } > "${build_dir}/TOOLCHAIN.txt"
 echo "built ${build_dir}/run_oracle_r4 ${build_dir}/run_geometry_r4 ${build_dir}/run_thermal_r4"
