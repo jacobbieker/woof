@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "recast-woof"
-version = "1.1.5"
+version = "1.1.6"
 description = "Recast WOOF: GPU-native regional weather forecasting with WRF-class physics, data assimilation and native preprocessing, plus the hex model (a GPU port of MPAS-Atmosphere v8.4.2) and its global configuration"
 readme = "README.md"
 license = "Apache-2.0"
@@ -20,9 +20,18 @@ requires-python = ">=3.11"
 # threadpoolctl: preparation workers size the numeric thread pools they load.
 # psutil: host memory and process accounting (the engine's own base set).
 # recast-woof-data: reference tables and map assets, pinned to this version.
+# (1.1.6) gpuwm-kernels, gpuwm-kernels-startup: engine 2.9.12 moved its compiled kernel packs and the
+# verification oracles out of the main wheel into these two data-only companions (PyPI's 100 MB per-file
+# limit); woof reads them by those names (woof.kernel_aot, woof.data_assets), so it takes the published
+# companions of the engine it folds, pinned exactly.
 dependencies = ["numpy>=2.0", "netCDF4>=1.6", "matplotlib>=3.8",
                 "jsonschema>=4.0", "threadpoolctl>=3.1",
-                "scipy>=1.11", "pyshp>=2.3", "cdsapi>=0.7.7", "psutil>=5.9", "recast-woof-data==1.1.5"]
+                "scipy>=1.11", "pyshp>=2.3", "cdsapi>=0.7.7", "psutil>=5.9", "recast-woof-data==1.1.6",
+                "gpuwm-kernels==2.9.13", "gpuwm-kernels-startup==2.9.13",
+                # (1.1.6) hex 0.4.12's global door decodes the MPAS mesh archives with the rapidgzip
+                # command (woof.hex.global_door); gpuwm-hex declares it, this list did not, so a fresh
+                # `woof hex global` refused at its mesh stage ("rapidgzip is missing")
+                "rapidgzip>=0.16.0"]
 keywords = ["WRF", "WPS", "GRIB", "NetCDF", "weather", "CUDA", "MPAS", "data-assimilation"]
 classifiers = [
     "Environment :: GPU :: NVIDIA CUDA",
@@ -42,7 +51,10 @@ Changelog = "https://github.com/recastsystems/woof/blob/main/CHANGELOG.md"
 [project.optional-dependencies]
 # One CuPy/CUDA major per environment.
 gpu-cu12 = ["cupy-cuda12x[ctk]>=14.0"]
-gpu-cu13 = ["cupy-cuda13x[ctk]>=14.0"]
+# (1.1.6) as engine 2.9.13: NVRTC and nvJitLink stay below 13.5, which has no prebuilt kernel pack or kernel
+# row yet; without the nvJitLink line a fresh install mixed nvJitLink 13.5 with NVRTC 13.4 and the batch
+# kernels refused ("no installed nvJitLink matches NVRTC")
+gpu-cu13 = ["cupy-cuda13x[ctk]>=14.0", "nvidia-cuda-nvrtc>=13.0,<13.5", "nvidia-nvjitlink>=13.0,<13.5"]
 gpu = ["recast-woof[gpu-cu13]"]
 # Apple-silicon GPU through MLX (Metal); the forecast's cupy calls run on a
 # facade over mlx.core (woof.backend), its kernels translated to Metal.
@@ -76,6 +88,8 @@ all-cu13 = ["recast-woof[gpu-cu13]", "recast-woof[render]", "recast-woof[obs]",
 all-mlx = ["recast-woof[gpu-mlx]", "recast-woof[render]", "recast-woof[obs]",
            "recast-woof[geog]"]
 all = ["recast-woof[all-cu13]"]
+# (1.1.6) engine 2.9.12's experimental AMD backend (opt-in, --backend amd)
+rocm = ['cupy-rocm-7-0==14.2.0; sys_platform == "linux" and platform_machine == "x86_64"']
 
 [project.scripts]
 woof = "woof.cli:main"
@@ -92,11 +106,18 @@ woof-member-prep = "woof.member_prep:main"
 include = ["woof", "woof.*", "tools", "tilestream*", "configs*", "docs", "mpas_cycle_bridge*"]
 # woof.hex.mod is a name reserved for a private extension row; extra rows
 # arrive through the woof.hex.rows entry-point group instead.
-exclude = ["tilestream.rescued-tools*", "tilestream.skeptic*", "recast-woof-data*",
+exclude = ["tilestream.rescued-tools*", "tilestream.skeptic*", "recast-woof-data*", "gpuwm-kernels*",
            "woof.hex.mod", "woof.hex.mod.*"]
 
 [tool.setuptools.package-data]
 woof = [
+    # (1.1.6) engine 2.9.12's own package data: the AMD backend's HIP sources and the WRF knob families
+    "hip_portable.h",
+    "hip_driver.cpp",
+    "knobs/families/*.toml",
+    "knobs/WRF-NOTICE.txt",
+    "knobs/native_wrf461.json",
+    "ocean/*.md",
     "*.json",
     "authorities/**/*",
     "data/**/*",
@@ -112,12 +133,19 @@ woof = [
     "hydro/PET-LICENSE",
     "hydro/PET-TERMS.md",
 ]
-"woof.core.kernels" = ["*.cu", "*.cuh", "**/*.cu", "**/*.cuh", "*.cpp", "**/NOTICE-*.txt", "LICENSE-third-party.txt"]
-"woof.ocean.waves" = ["*.cu", "*.json", "*.md", "native/*.rs", "native/*.sh", "native/NETCDF-COPYRIGHT", "examples/*.json"]
+"woof.core.kernels" = ["*.cu", "*.cuh", "**/*.cu", "**/*.cuh", "*.cpp", "**/*.cpp", "**/*.json", "**/NOTICE-*.txt", "LICENSE-third-party.txt"]
+# (1.1.6) engine 2.9.12's new package data: backend notes, core tables, FDDA obs nudging kernels, wave backends
+# and validation tables, nudging tables, the hurricane notes and the verifier's C++ source
+"woof.backend" = ["*.md", "*.pth"]
+"woof.core" = ["*.json"]
+"woof.fddaobs" = ["*.cu", "WRF-NOTICE.txt"]
+"woof.ocean.waves.validation" = ["*.json", "*.md"]
+"woof.tc" = ["*.md"]
+"woof.ocean.waves" = ["*.cu", "*.json", "*.md", "backends/*.cu", "backends/*.md", "native/*.rs", "native/*.sh", "native/NETCDF-COPYRIGHT", "examples/*.json"]
 # (1.1.4) engine 2.9.11's new package data: nudging's kernels (--nudging spectral stopped on a missing kernel
 # without them) and the wave preparation's public source table
 "woof.ocean.waves.data" = ["*.json", "*.md"]
-"woof.spectral_nudging" = ["*.cu", "WRF-NOTICE.txt"]
+"woof.spectral_nudging" = ["*.cu", "*.json", "WRF-NOTICE.txt"]
 "woof.ocean.surge" = ["kernels/*.cu", "examples/*.json", "examples/*.py", "*.md", "tests/*.c"]
 "woof.ocean.seaice" = ["*.cu", "README.md"]
 "woof.ocean.mixed_layer" = ["*.cu", "*.md", "WRF-NOTICE.txt"]
@@ -130,14 +158,13 @@ woof = [
 # libm and the host backend's runtime (rt.h, rt_pool.cpp, include/), and the
 # Metal extension the loader builds on first use.  The
 # startup hook is also copied to the site-packages root (setup.py
-# BACKEND_STARTUP_HOOK); inside the package it is inert.
-"woof.backend" = ["*.pth"]
+# BACKEND_STARTUP_HOOK); inside the package it is inert (its row is above).
 "woof.backend.host" = ["*.h", "*.cpp", "include/*"]
 "woof.backend.metal" = ["*.h", "*.json"]
 "woof.backend.metal.ext" = ["*.cpp", "*.txt"]
 "woof.backend.translate" = ["*.h", "*.cuh", "include/**/*"]
 "woof.obs" = ["data/**/*"]
-"woof.verify" = ["*.json"]
+"woof.verify" = ["*.json", "*.cpp"]
 "woof.certify" = ["*.json"]
 "woof.ingest" = ["*.md"]
 # (1.1.0) hex 0.4.0's own package-data list (its pyproject), so the wheel carries what hex reads at run time:
@@ -145,7 +172,10 @@ woof = [
 # init_gpu kernels (**/*.cu). libexec: the hex release's compiled helpers, present only in a platform wheel
 # (stage_hex_helpers.py in the assembly stages them before that build).
 # (1.1.2) native/*.c as gpuwm-hex ships it: the whole-step submission source woof.hex.native_step builds from
-"woof.hex" = ["*.json", "**/*NOTICE*.txt", "data/*", "data/**/*", "libexec/*", "native/*.rs", "native/*.c", "*.cu", "*.cuh", "**/*.cu", "**/*.cuh"]
+# (1.1.6) hex 0.4.12's TC climate door (woof.hex.tc_climate) reads recipes.json and pi-reference.json beside
+# itself and ships the tcpypi licence; hex's own wheel carries all three, this list had none of them
+"woof.hex" = ["*.json", "**/*NOTICE*.txt", "data/*", "data/**/*", "libexec/*", "native/*.rs", "native/*.c", "*.cu", "*.cuh", "**/*.cu", "**/*.cuh",
+              "tc_climate/*.json", "tc_climate/LICENSE.*"]
 # The coupled component lanes' pinned options inventories (tools/mpas_coupled_options.py):
 "woof.hex.mpas_seaice" = ["data/*.json", "*.cu"]
 "woof.hex.mpas_ocean" = ["data/*.json"]
@@ -157,7 +187,35 @@ configs = ["**/*"]
 docs = ["mpas-seam.md"]
 
 [tool.setuptools.exclude-package-data]
-woof = []
+# (1.1.6) as engine 2.9.12: the verification oracles (woof.data_assets.VERIFY_ORACLE_TREES) ship in the
+# gpuwm-kernels companion; the forecast reads none of them (ruc/oracle and urban/oracle stay here)
+woof = [
+    "data/fogdes/oracle/*",
+    "data/gbmpbl/oracle/*",
+    "data/gecros/oracle/*",
+    "data/gfs_pbl/oracle/*",
+    "data/keps/oracle/*",
+    "data/lake/oracle/*",
+    "data/mrf/oracle/*",
+    "data/mynn/oracle/*",
+    "data/noah/oracle/*",
+    "data/noah/seaice_oracle/*",
+    "data/noah/ua_oracle/*",
+    "data/nssl2/driver-oracle/*",
+    "data/nssl2/fused-gs-oracle/*",
+    "data/nssl2/oracle/*",
+    "data/pxlsm/oracle/*",
+    "data/pxsfclay/oracle/*",
+    "data/ruc/oracle_fork/*",
+    "data/ruc/spp_oracle/*",
+    "data/sbu_ylin/oracle/*",
+    "data/shinhong/oracle/*",
+    "data/terrain_drag/oracle/*",
+    "data/thompson/oracle/*",
+    "data/thompson/oracle-aero/*",
+    "data/thompson/oracle-hail/*",
+    "data/ysu/oracle/*",
+]
 
 [tool.pytest.ini_options]
 markers = ["gpu: requires a CUDA GPU + cupy",
@@ -280,7 +338,7 @@ mpas-oracle = { features = ["mpas-oracle"], no-default-feature = true }
 [tool.pixi.feature.base.tasks]
 doctor = "woof doctor"
 doctor-explain = "woof doctor --explain"
-build-native = "cd tools/grib1_bridge && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../rustwx && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../rw_wps && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../region_global_dealias && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../zarr_bridge && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../nextgen_hydrofabric && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../nextgen_forcing && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../nextgen_verify && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../hydro_world && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../hydro_world_params && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../nextgen_reservoir_prepare && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../hydro_world_init && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../ocean_prepare && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../rw-bathy && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../nextgen_output && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../wind-table && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../rw_icechunk && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline"
+build-native = "cd tools/grib1_bridge && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../rustwx && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../rw_wps && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../region_global_dealias && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../zarr_bridge && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../nextgen_hydrofabric && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../nextgen_forcing && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../nextgen_verify && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../hydro_world && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../hydro_world_params && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../nextgen_reservoir_prepare && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../hydro_world_init && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../ocean_prepare && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../rw-bathy && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../nextgen_output && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../wind-table && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../rw_icechunk && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../cam_tables && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../waves_data && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../dfi-runtime && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../tslist_bridge && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../aerosol_grid && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../storm_merge && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../tc_vitals && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../tc_frames_io && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../tc-verify && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline"
 setup = "pixi run build-native && (woof fetch-bridges || true)"
 # Opt-in: the default native build, then the CPU preprocessing bridge and
 # the rustwx workspace (static_fields, rw_mpas_*, rw_mlexport) again with

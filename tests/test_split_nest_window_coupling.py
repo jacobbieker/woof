@@ -4,7 +4,7 @@ A split ([devices]) grid used to be coupled through its whole host store:
 every parent step drained every carrier of every slab to the host and the
 next sweep copied the store back.  ``NestWindowSource`` now serves a split
 grid through :class:`woof.core.nest_operands.SlabField`, which moves only the
-coupler's rectangles (:meth:`tilestream.ranks.RankedRun.read_window` and
+coupler's rectangles (:meth:`tilestream.ranks.RankedRun.read_slab_window` and
 ``write_window``).  ``WOOF_SPLIT_NEST_DRAIN=1`` keeps the drain road for
 comparison.
 
@@ -50,7 +50,7 @@ class _FakeRun:
     def store_keys(self):
         return self.raw_store.keys()
 
-    def read_window(self, name, window):
+    def read_slab_window(self, name, window):
         self.reads.append((name, window))
         return self.raw_store[name][(Ellipsis,) + window].copy()
 
