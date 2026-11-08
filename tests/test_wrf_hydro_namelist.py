@@ -69,7 +69,6 @@ def test_template_with_muskingum_cunge_maps():
 
 
 @pytest.mark.parametrize("edit,word", [
-    (("rt_option = 1", "rt_option = 2"), "rt_option = 2"),
     (("GWBASESWCRT = 1", "GWBASESWCRT = 4"), "UDMP bucket"),
     (("UDMP_OPT = 0", "UDMP_OPT = 1"), "UDMAP|UDMP"),
     (("bucket_loss = 0", "bucket_loss = 1"), "bucket loss"),
@@ -141,3 +140,11 @@ def test_the_2d_groundwater_model_and_its_channel_exchange_map():
         "gwChanCondConstOut = 0.0002\ngwsoilcpl = 1\nGwPreCycles = 3")))
     assert (cfg.gwbaseswcrt, cfg.gw_chan_cond_sw, cfg.gwsoilcpl, cfg.gw_pre_cycles) == (3, 1, 1, 3)
     assert (cfg.gw_chan_cond_const_in, cfg.gw_chan_cond_const_out) == (0.0001, 0.0002)
+
+
+def test_rt_option_2_maps_and_3_is_invalid():
+    nl = _nl()
+    text = _drop_nudging(_text())
+    assert nl.map_hydro_nlist(nl.parse(text.replace("rt_option = 1", "rt_option = 2"))).rt_option == 2
+    with pytest.raises(ValueError, match="rt_option = 3"):
+        nl.map_hydro_nlist(nl.parse(text.replace("rt_option = 1", "rt_option = 3")))

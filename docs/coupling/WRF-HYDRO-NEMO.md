@@ -141,7 +141,9 @@ Metal, and refuses what it does not port by name.
    own oracle: subsurface (`Routing/Noah_distr_routing_subsurface.F90`,
    **done** in the opt-in), overland (`Routing/Overland/`,
    `Noah_distr_routing_overland.F90`: **done** in the opt-in for
-   rt_option = 1, `tests/test_wrf_hydro_overland_parity.py`), channel (`Routing/module_channel_routing.F90`:
+   rt_option = 1 and 2 (ROUTE_OVERLAND2; the subsurface routes with
+   ROUTE_SUBSURFACE1 for both, as WRF-Hydro hard-codes),
+   `tests/test_wrf_hydro_overland_parity.py`), channel (`Routing/module_channel_routing.F90`:
    Muskingum and Muskingum-Cunge reach routing **done** in the opt-in, with
    4.7.0's reservoir reaches (TYPEL = 1 routes its lake through the
    reservoir; TYPEL = 2 is not committed), `tests/test_wrf_hydro_channel_parity.py`;
@@ -161,7 +163,7 @@ Metal, and refuses what it does not port by name.
 5. **Configuration** (**done** in the opt-in: `woof_wrf_hydro.namelist`,
    `tests/test_wrf_hydro_namelist.py`, held to WRF 4.7.1's template and
    read_rt_nlst): `hydro.namelist` (`SUBRTSWCRT`, `OVRTSWCRT`,
-   `CHANRTSWCRT`, `channel_option`, `rt_option`, `GWBASESWCRT`, `lake_option`, `DXRT`,
+   `CHANRTSWCRT`, `channel_option`, `rt_option` (1 and 2), `GWBASESWCRT`, `lake_option`, `DXRT`,
    `AGGFACTRT`, `DTRT_TER`, `DTRT_CH`) mapped to a WOOF table, every unported
    value refused by name.  Until step 4 lands there is nothing to route to:
    `launch_noah(wrf_hydro=...)` is an API for the coupling, not a model run.
