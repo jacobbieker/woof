@@ -100,6 +100,9 @@ impl NcWriter {
             numrecs: records,
             record_written: vec![vec![true; layout.num_record_vars]; count],
             layout, finished: false,
+            // A resumed file's prefix was written by another writer, so no
+            // streamed digest can cover it (begin_digest refuses one here).
+            digest: None, digest_refusal: None,
         })
     }
 
