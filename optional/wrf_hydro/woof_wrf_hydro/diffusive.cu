@@ -5,10 +5,13 @@
 //
 // WRF-Hydro's diffusive-wave channel routing on nodes, the channel_option = 3
 // branch of drive_CHANNEL (hydro/Routing/module_channel_routing.F90
-// :873-1281) with DIFFUSION (:73-147), HEAD (:1315-1368), AREAf and SGNf, for
-// a network without lakes or groundwater-channel exchange.  float32 as WRF-Hydro
-// (REAL), the node mass sum QSUM8 in double as WRF-Hydro keeps it, the
-// Fortran expressions in Fortran order, powf as glibc's (gfk_pow).  One
+// :873-1281) with DIFFUSION (:73-147), HEAD (:1315-1368), AREAf and SGNf, and
+// its level-pool lakes (levelpool.cu, preceding this file), for WRF-Hydro's
+// MPP_LAND build on one process, without groundwater-channel exchange.
+// float32 as WRF-Hydro (REAL), the node and lake sums QSUM8, QLLAKE8 and
+// QLAKEI8 in double as WRF-Hydro keeps them (the lake sums rounded through
+// REAL by sum_real8), the Fortran expressions in Fortran order, powf as
+// glibc's (gfk_pow).  One
 // thread block runs the whole call: each sub-step's passes over the nodes are
 // separated by barriers, the scatters of drive_CHANNEL are ordered gathers
 // over precomputed link lists (so every sum runs in WRF-Hydro's link order),
@@ -106,7 +109,16 @@ extern "C" __global__ void wrfhydro_diffusive(
     float* __restrict__ hlink, float* __restrict__ cvol, float* __restrict__ qlink1,
     float* __restrict__ qlateral, float* __restrict__ hlinktmp, float* __restrict__ cvoltmp,
     float* __restrict__ cd, float* __restrict__ qsum, float* __restrict__ dtct_io,
-    int* __restrict__ err, float dt, float dtrt_ch, float retdep_chan, int nlinks)
+    int* __restrict__ err, float dt, float dtrt_ch, float retdep_chan, int nlinks,
+    // lakes: pour[i] is CH_NETRT of a node that takes a lake's outflow (else 0);
+    // per lake, lnstart/lnlist its lake nodes and listart/lilist the links
+    // into LAKENODE nodes, ascending; props as levelpool.cu's kernel
+    const int* __restrict__ pour, const float* __restrict__ lakeinflort,
+    const int* __restrict__ lnstart, const int* __restrict__ lnlist,
+    const int* __restrict__ listart, const int* __restrict__ lilist,
+    const float* __restrict__ lprops, float* __restrict__ resht, float* __restrict__ qlakei,
+    float* __restrict__ qlakeo, float* __restrict__ qlakeip, float* __restrict__ qllake,
+    int nlakes)
 {
     __shared__ float dtct;
     __shared__ int krt, dt_steps, flag;
@@ -118,12 +130,13 @@ extern "C" __global__ void wrfhydro_diffusive(
         dtct = dtrt_ch < d ? dtrt_ch : d;
         krt = 0;
     }
-    for (int i = tid; i < nlinks; i += nt) {             // drive_CHANNEL :688-703, :883-884
+    for (int i = tid; i < nlinks; i += nt) {             // drive_CHANNEL :688-703, :883-885
         hlinktmp[i] = hlink[i];
         cvoltmp[i] = cvol[i];
         cd[i] = 0.0f;
         qlateral[i] = 0.0f;
     }
+    for (int l = tid; l < nlakes; l += nt) qlakeip[l] = qlakei[l];   // QLAKEIP = QLAKEI
     __syncthreads();
     for (;;) {                                            // crnt
         if (tid == 0) {
@@ -140,7 +153,19 @@ extern "C" __global__ void wrfhydro_diffusive(
                 int c = cell[i];
                 qlateral[i] = 0.0f + ((qstrmvolrt[c] + qinflowbase[c])
                                       / (float)steps * node_area[i] / 1000.0f / dtc);
+            } else if (pour[i] > 0) {
+                qlateral[i] = qlakeo[pour[i] - 1];       // previous timestep
             }
+        }
+        for (int l = tid; l < nlakes; l += nt) {         // QLLAKE8, then sum_real8
+            double s = 0.0;
+            for (int p = lnstart[l]; p < lnstart[l + 1]; ++p) {
+                int i = lnlist[p], c = cell[i];
+                s = s + (double)((lakeinflort[c] + qinflowbase[c])
+                                 / (float)steps * node_area[i] / 1000.0f / dtc);
+            }
+            qllake[l] = (float)s;
+            qlakei[l] = 0.0f;
         }
         __syncthreads();
         for (int i = tid; i < nlinks; i += nt) {         // conveyances across node faces
@@ -199,7 +224,7 @@ extern "C" __global__ void wrfhydro_diffusive(
             if (typel[i] == 0) {
                 cvoltmp[i] = cvoltmp[i] + (qsum[i] + qlateral[i]) * dtc;
                 if (cvoltmp[i] < 0.0f) cvoltmp[i] = 0.0f;
-            } else if (typel[i] == 1) {
+            } else if (typel[i] == 1 || typel[i] == 2) {
                 if (!(qq < 0.0f)) cd[i] = hlinktmp[i];
                 cvoltmp[i] = cvoltmp[i] + (qsum[i] + qlateral[i]
                     - diff_diffusion(zelev[i], zelev[i] - (so[i] * chanlen[i]), hlinktmp[i],
@@ -211,6 +236,19 @@ extern "C" __global__ void wrfhydro_diffusive(
                 hlinktmp[i] = diff_head(cvoltmp[i] / chanlen[i], bw[i], 1.0f / chsslp[i]);
             else
                 hlinktmp[i] = cd[i];
+        }
+        __syncthreads();
+        for (int l = tid; l < nlakes; l += nt) {         // QLAKEI8, sum_real8, the reservoir
+            double s = 0.0;
+            for (int p = listart[l]; p < listart[l + 1]; ++p) s = s + (double)qlink1[lilist[p]];
+            qlakei[l] = (float)s;
+            const float* q = lprops + (size_t)l * 9;
+            float H = resht[l], qo;
+            levelpool_physics(qlakeip[l], qlakei[l], qo, qllake[l], dtc, H, q[0], q[1], q[8],
+                              q[2], q[3], q[4], q[5], q[6], q[7]);
+            resht[l] = H;
+            qlakeo[l] = qo;
+            qlakeip[l] = qlakei[l];
         }
         __syncthreads();
         for (int i = tid; i < nlinks; i += nt)            // the flows of the new depths

@@ -5,13 +5,17 @@ program run_wrf_hydro_diffusive_oracle
   ! stem of 12 nodes ending in a pour point (TYPEL = 1) and two tributaries
   ! of 4 nodes joining it, on a 14 x 10 routing grid.  An adverse reach
   ! exercises DIFFUSION's minimum-slope guard, dry nodes the retention depth,
-  ! and a storm pulse in step 3 the Courant halving of DTCT.  No lakes, no
-  ! groundwater-channel exchange.  Every input and every output word, and
-  ! DTCT after each step, are dumped.
+  ! and the first step the Courant halving of DTCT.  Tributary A runs through
+  ! a level-pool lake: node 14 flows into it (TYPEL = 2), node 15 is a lake
+  ! node fed by LAKEINFLORT, node 16 takes the lake's outflow (CH_NETRT = 1),
+  ! and LAKENODE marks 14 to 16, so the lake sees face inflow, lateral
+  ! inflow and its own level-pool outflow (orifice, weir and overtopping over
+  ! the run).  No groundwater-channel exchange.  Every input and every output
+  ! word, and DTCT and the lake state after each step, are dumped.
   use iso_fortran_env, only: int64
   use diffusive_harness
   implicit none
-  integer, parameter :: ixrt = 14, jxrt = 10, nl = 20, nstep = 8
+  integer, parameter :: ixrt = 14, jxrt = 10, nl = 20, nstep = 8, nlakes = 1
   real, dimension(ixrt, jxrt) :: qstrmvolrt, qinflowbase, lakeinflort, qsubrt
   integer, dimension(ixrt, jxrt) :: ch_netrt, lake_mskrt
   integer(kind=int64), dimension(ixrt, jxrt) :: ch_netlnk
@@ -19,7 +23,10 @@ program run_wrf_hydro_diffusive_oracle
   real, dimension(nl) :: node_area, zelev, chanlen, mannn, so, chsslp, bw, hlink, cvol, qlateral
   integer(kind=int64), dimension(nl) :: from_node, to_node
   real :: qlink(nl, 2), dt, dtct, dtrt_ch, retdep, z, h, pulse
-  integer :: i, k, u, un, uf, it
+  integer(kind=int64), dimension(nl) :: lakenode
+  real, dimension(nlakes) :: resht, qlakei, qlakeo, lake_area, weir_elev, weir_coef, weir_len
+  real, dimension(nlakes) :: dam_len, orifice_elev, orifice_coef, orifice_area, max_depth
+  integer :: i, k, u, un, uf, ul, it
   character(len=1024) :: dir
 
   call get_command_argument(1, dir)
@@ -55,6 +62,13 @@ program run_wrf_hydro_diffusive_oracle
     so(i) = 0.001 + 0.009 * frac(i * 13, 61)
   end do
   typel(12) = 1
+  ! the lake on tributary A
+  typel(14) = 2
+  lake_mskrt(chanxi(15), chanyj(15)) = 1
+  ch_netrt(chanxi(15), chanyj(15)) = -9999
+  ch_netrt(chanxi(16), chanyj(16)) = 1
+  lakenode = 0
+  lakenode(14) = 1; lakenode(15) = 1; lakenode(16) = 1
   ! bed elevations: falling downstream, with an adverse step at node 6
   do i = 1, 12
     zelev(i) = 120. - 1.1 * real(i)
@@ -66,11 +80,17 @@ program run_wrf_hydro_diffusive_oracle
   do i = 17, 20
     zelev(i) = zelev(8) + 1.2 * real(21 - i)
   end do
+  lake_area = 0.05; weir_elev = zelev(4) + 6.5; weir_coef = 0.4; weir_len = 10.
+  dam_len = 60.; orifice_elev = zelev(4) + 4.5; orifice_coef = 0.1; orifice_area = 1.
+  max_depth = zelev(4) + 7.0
+  resht = zelev(4) + 6.3; qlakei = 0.; qlakeo = 0.
+  call init_lakes(nlakes, resht, lake_area, weir_elev, weir_coef, weir_len, dam_len, &
+      orifice_elev, orifice_coef, orifice_area, max_depth)
   ! initial depths (some below the retention depth) and the volumes they hold
   retdep = 0.001
   do i = 1, nl
     h = 0.4 * frac(i * 17, 67)
-    if (mod(i, 5) == 0) h = 0.0005
+    if (mod(i, 5) == 0 .and. i /= 15) h = 0.0005
     hlink(i) = h
     z = 1.0 / chsslp(i)
     cvol(i) = (bw(i) + z * h) * h * chanlen(i)
@@ -79,34 +99,51 @@ program run_wrf_hydro_diffusive_oracle
   dt = 300.; dtrt_ch = 10.; dtct = 10.
 
   open(newunit=un, file=trim(dir)//'/diffusive-network.csv', status='replace')
-  write(un, '(A)') 'node,chanxi,chanyj,from_node,to_node,typel,node_area,zelev,chanlen,mannn,so,chsslp,bw,hlink0,cvol0'
+  write(un, '(A)') 'node,chanxi,chanyj,from_node,to_node,typel,ch_netrt,lake_mskrt,lakenode,node_area,' // &
+      'zelev,chanlen,mannn,so,chsslp,bw,hlink0,cvol0'
   do i = 1, nl
-    write(un, '(6(I0,","),ES16.8E2,8(",",ES16.8E2))') i, chanxi(i), chanyj(i), from_node(i), to_node(i), &
-        typel(i), node_area(i), zelev(i), chanlen(i), mannn(i), so(i), chsslp(i), bw(i), hlink(i), cvol(i)
+    write(un, '(9(I0,","),ES16.8E2,8(",",ES16.8E2))') i, chanxi(i), chanyj(i), from_node(i), to_node(i), &
+        typel(i), ch_netrt(chanxi(i), chanyj(i)), lake_mskrt(chanxi(i), chanyj(i)), lakenode(i), &
+        node_area(i), zelev(i), chanlen(i), mannn(i), so(i), chsslp(i), bw(i), hlink(i), cvol(i)
   end do
   close(un)
   open(newunit=uf, file=trim(dir)//'/diffusive-forcing.csv', status='replace')
-  write(uf, '(A)') 'step,node,qstrmvolrt,qinflowbase'
+  write(uf, '(A)') 'step,node,qstrmvolrt,qinflowbase,lakeinflort'
   open(newunit=u, file=trim(dir)//'/diffusive-steps.csv', status='replace')
   write(u, '(A)') 'step,node,dtct,hlink,cvol,qlink1,qlateral'
+  open(newunit=ul, file=trim(dir)//'/diffusive-lakes.csv', status='replace')
+  write(ul, '(A)') 'step,lake,lake_area,weir_elev,weir_coef,weir_len,dam_len,orifice_elev,' // &
+      'orifice_coef,orifice_area,max_depth,resht,qlakei,qlakeo'
+  do i = 1, nlakes
+    write(ul, '(2(I0,","),ES16.8E2,11(",",ES16.8E2))') 0, i, lake_area(i), weir_elev(i), weir_coef(i), &
+        weir_len(i), dam_len(i), orifice_elev(i), orifice_coef(i), orifice_area(i), max_depth(i), &
+        resht(i), qlakei(i), qlakeo(i)
+  end do
   qinflowbase = 0.; lakeinflort = 0.; qsubrt = 0.; qstrmvolrt = 0.
   do it = 1, nstep
     pulse = merge(60., 1., it == 3)
     do i = 1, nl
       qstrmvolrt(chanxi(i), chanyj(i)) = pulse * frac(i * 19 + it * 7, 71)
       qinflowbase(chanxi(i), chanyj(i)) = 0.05 * frac(i * 23 + it, 73)
-      write(uf, '(2(I0,","),ES16.8E2,",",ES16.8E2)') it, i, qstrmvolrt(chanxi(i), chanyj(i)), &
-          qinflowbase(chanxi(i), chanyj(i))
+      lakeinflort(chanxi(i), chanyj(i)) = merge(40. * frac(it * 29, 79), 0., i == 15)
+      write(uf, '(2(I0,","),ES16.8E2,2(",",ES16.8E2))') it, i, qstrmvolrt(chanxi(i), chanyj(i)), &
+          qinflowbase(chanxi(i), chanyj(i)), lakeinflort(chanxi(i), chanyj(i))
     end do
     call diffusive_route(ixrt, jxrt, nl, dt, dtct, dtrt_ch, retdep, qstrmvolrt, qinflowbase, &
         lakeinflort, qsubrt, ch_netrt, lake_mskrt, ch_netlnk, chanxi, chanyj, node_area, &
-        from_node, to_node, typel, zelev, chanlen, mannn, so, chsslp, bw, qlink, hlink, cvol, qlateral)
+        from_node, to_node, typel, zelev, chanlen, mannn, so, chsslp, bw, qlink, hlink, cvol, qlateral, &
+        nlakes, lakenode, resht, qlakei, qlakeo)
     do i = 1, nl
       write(u, '(2(I0,","),ES16.8E2,4(",",ES16.8E2))') it, i, dtct, hlink(i), cvol(i), qlink(i, 1), &
           qlateral(i)
     end do
+    do i = 1, nlakes
+      write(ul, '(2(I0,","),ES16.8E2,11(",",ES16.8E2))') it, i, lake_area(i), weir_elev(i), weir_coef(i), &
+          weir_len(i), dam_len(i), orifice_elev(i), orifice_coef(i), orifice_area(i), max_depth(i), &
+          resht(i), qlakei(i), qlakeo(i)
+    end do
   end do
-  close(u); close(uf)
+  close(u); close(uf); close(ul)
 
 contains
 
