@@ -147,6 +147,6 @@ Ordered by how self-contained each piece is:
 |---|---|---|
 | seaice | EVP internal stress, variational: `seaice_init_evp`, strain tensor, EVP and revised-EVP constitutive relation, stress divergence, final divergence/shear and ridging parameters (`woof/hex/mpas_seaice/evp_v842.py`). Word-exact against the v8.4.2 oracle on CUDA and Metal (`tests/test_mpas_seaice_evp_parity.py`, `woof hex seaice verify`). | stub |
 | ocean | Tendency terms: `ocn_vel_coriolis_tend`, `ocn_vel_vadv_tend`, `ocn_thick_hadv_tend`, `ocn_thick_vadv_tend` and their `_init` switches (`woof/hex/mpas_ocean/tend_v842.py`). Word-exact against the v8.4.2 oracle at RKIND 4 and 8 on CUDA and Metal (`tests/test_mpas_ocean_tend_parity.py`, `woof hex ocean verify`). | stub |
-| landice | none yet | stub |
+| landice | The SIA velocity solver: one `li_sia_solve` call, including `li_calculate_flowParamA` (constant, PB1982, CP2010), all three tangent-slope methods and the velocity profile (`woof/hex/mpas_ice/sia_v842.py`). Word-exact against the v8.4.2 oracle at RKIND 4 on CUDA and Metal (`tests/test_mali_sia_parity.py`, `woof hex ice verify`). Albany FO/L1L2/Stokes refused by name. | stub |
 
 This table is updated as each piece lands with its parity tests.
