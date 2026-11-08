@@ -1,4 +1,4 @@
-! Column oracle for WRF v4.6.1 Noah-MP through its own driver.
+! Column oracle for WRF v4.7.1 Noah-MP through its own driver.
 !
 ! Calls, from unmodified pinned sources:
 !   module_sf_noahmpdrv::NOAHMP_INIT  (cold start, which calls SNOW_INIT)

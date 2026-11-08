@@ -56,10 +56,16 @@ constants_source="${source_root}/share/module_model_constants.F"
 gecros_source="${source_root}/phys/module_sf_gecros.F"
 lsm_source="${source_root}/phys/module_sf_noahmplsm.F"
 drv_source="${source_root}/phys/module_sf_noahmpdrv.F"
+glacier_source="${source_root}/phys/module_sf_noahmp_glacier.F"
+groundwater_source="${source_root}/phys/module_sf_noahmp_groundwater.F"
 
-PRISTINE_SHA=bd592a5b7db29000e715250e3a7c779ffb5e0dcc356f6b5a7d9e1c9f69c55282
-PATCHED_SHA=3cd3690d6455cfb8549cb41979b7e101e7436464c478f7f7973ab226488ac206
-PATCH_SHA=164885a9ce956a51be2ab189165da8b60217b636a720c994e04dfb862a05aad5
+# Pristine and patched digests come from whichever of the two pinned trees
+# (noahmp_pins.sh) the source carries; the patch file is the same for both,
+# because its hunks (lines 27-87) are byte-identical in the two trees.
+source "${script_dir}/noahmp_pins.sh"
+noahmp_pins "${lsm_source}"
+PRISTINE_SHA=${PRISTINE_LSM_SHA}
+PATCH_SHA=b16db586bbed70735b148618c794206ed0ff2988dfc8c9ee822b80added34a95
 
 for f in "${constants_source}" "${gecros_source}" "${lsm_source}" \
          "${drv_source}" "${patch_file}"; do
@@ -169,6 +175,18 @@ echo "  3b operator mutation: detected"
 # --- stage 4: the patch must NOT be linkable with WRF's Noah-MP driver ------
 # Pinning this failure keeps the exposure confined to the oracle harness.
 echo "--- stage 4: patched module must break module_sf_noahmpdrv.F"
+# The driver also USEs the glacier and groundwater modules and the WRF
+# service stubs; build those against the patched module first, so the only
+# thing that can stop the driver compiling is the module it is given.
+if ! ( cd "${build_dir}/patched" \
+       && gfortran -c "${fflags[@]}" -I "${build_dir}/patched" -I "${build_dir}" \
+            "${script_dir}/stub_wrf.F90" "${glacier_source}" \
+            "${groundwater_source}" \
+     ) > "${build_dir}/drv-deps.log" 2>&1; then
+    echo "UNEXPECTED: the driver's other dependencies failed to compile;" >&2
+    echo "inspect ${build_dir}/drv-deps.log" >&2
+    exit 7
+fi
 if ( cd "${build_dir}/patched" \
      && gfortran -c "${fflags[@]}" -DEM_CORE=0 -fallow-argument-mismatch \
           -I "${build_dir}/patched" -I "${build_dir}" "${drv_source}" \
@@ -188,6 +206,7 @@ echo "  driver rejects the patched module on the ALBEDO ambiguity, as pinned"
 
 # --- evidence ---------------------------------------------------------------
 {
+    echo "tree                 ${NOAHMP_TREE} (phys/noahmp ${NOAHMP_COMMIT})"
     echo "pristine_module      ${PRISTINE_SHA}"
     echo "patched_module       ${PATCHED_SHA}"
     echo "visibility_patch     ${PATCH_SHA}"

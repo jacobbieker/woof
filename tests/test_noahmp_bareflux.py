@@ -56,8 +56,10 @@ def test_fixture_provenance():
     with open(vbo.FIXTURE, "r") as handle:
         header = "".join(ln for ln in handle if ln.startswith("#"))
     for needle in (
-        "d66e442fccc04111067e29274c9f9eaccc3cef28",
-        "bd592a5b7db29000e715250e3a7c779ffb5e0dcc356f6b5a7d9e1c9f69c55282",
+        # Re-pinned to WRF 4.7.1 (phys/noahmp e5c0859); the rows rebuild
+        # byte-identical from either tree.
+        "f52c197ed39d12e087d02c50f412d90d418f6186",
+        "74b475600ad1c999fe43299bcaf4d3e5eaf59b9f861c47fdbff4d69739e3a45b",
         "opt_sfc=1",
         "opt_stc=1",
         "NITERB   5",
