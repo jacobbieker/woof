@@ -337,6 +337,31 @@ def _unpriced(source: str | None, mode: str | None, why: str, **extra) -> dict[s
             "source": source, "mode": mode, "basis": why}
 
 
+def _objects_for_selectors(source: str, request: Mapping[str, Any],
+                           row: Mapping[str, Any]) -> Mapping[str, Any]:
+    """The row's per-object sizes for the selectors this request resolves to.
+
+    A route whose objects are chosen by a selector (HAFS's DOMAIN: the
+    parent grid or the storm-following one) publishes objects of different
+    sizes under each.  ``objects_when`` lists the measured sizes per
+    selector value; the first entry whose selectors all match the
+    request's resolved ones (defaults included) prices it, and ``objects``
+    otherwise.
+    """
+
+    overrides = row.get("objects_when") or ()
+    if overrides:
+        from woof import fetch_routes
+
+        resolved = fetch_routes.resolve_parameters(
+            fetch_routes.route_for(source), request.get("source_parameters"))
+        for entry in overrides:
+            if all(resolved.get(key) == value
+                   for key, value in entry["parameters"].items()):
+                return entry["objects"]
+    return row.get("objects") or {}
+
+
 def download_estimate(request: Mapping[str, Any] | None) -> dict[str, Any]:
     """What downloading ``request`` leaves on disk and moves over the network.
 
@@ -379,7 +404,7 @@ def download_estimate(request: Mapping[str, Any] | None) -> dict[str, Any]:
         return _unpriced(source, mode,
                          f"no measured size for {source} ({mode}) in woof/data/{TABLE_NAME}, "
                          "so the download is left out of this figure", leads=leads)
-    fixed = row.get("objects") or {}
+    fixed = _objects_for_selectors(source, request, row)
     per_point = row.get("objects_per_point") or {}
     transfer = row.get("transfer_per_object") or {}
     points = None

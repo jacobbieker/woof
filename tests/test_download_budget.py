@@ -507,3 +507,17 @@ def test_an_era5_arco_window_moves_the_blocks_of_its_rows_not_whole_chunks():
     assert whole["transfer_bytes"] == 2 * 551_000_000
     assert 174.1e6 <= regional["transfer_bytes"] <= 0.25 * whole["transfer_bytes"]
     assert "latitude rows" in regional["basis"]
+
+
+def test_a_selector_with_its_own_objects_prices_them():
+    """HAFS's storm-following grid is priced by its own objects, not the parent's."""
+    request = {"source": "hafs-a", "cycle": None, "hours": 6, "cadence": 3,
+               "forecast_start_hour": 0, "source_parameters": "STORM=12l"}
+    parent = download_budget.download_estimate(request)
+    storm = download_budget.download_estimate(
+        dict(request, source_parameters="STORM=12l,DOMAIN=storm"))
+    assert parent["objects"] == storm["objects"]
+    # Only the state objects change (a donor's objects, if any, do not):
+    # each one is 675 MB smaller on the storm-following grid.
+    saved = parent["bytes"] - storm["bytes"]
+    assert saved > 0 and saved % 675_000_000 == 0, saved
