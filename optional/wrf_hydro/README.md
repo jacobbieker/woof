@@ -12,6 +12,6 @@ hydro = optin.load("wrf_hydro")          # refuses by name unless enabled
 routing = hydro.SubsurfaceRouting(...)
 ```
 
-Ported: subsurface routing (`rt_option = 1`).  Not yet: the LSM/routing grid
-aggregation and disaggregation, overland flow, channel routing, baseflow
+Ported: subsurface routing (`rt_option = 1`); the LSM <-> routing grid
+disaggregation and aggregation.  Not yet: overland flow, channel routing, baseflow
 (docs/coupling/WRF-HYDRO-NEMO.md).

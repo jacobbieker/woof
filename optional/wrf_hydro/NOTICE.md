@@ -45,7 +45,8 @@ holds its WRF physics to.
 | WOOF file | WRF-Hydro source |
 | --- | --- |
 | `woof_wrf_hydro/subsurface.cu`, `subsurface.py` | `hydro/Routing/Noah_distr_routing_subsurface.F90` (subsurfaceRouting, FINDZWAT, ROUTE_SUBSURFACE1, SUBSFC_RTNG); `hydro/Routing/Noah_distr_routing.F90` (GETSUB8, GETSUB8DIR) |
-| `oracle/` | a build harness and driver; it compiles the pinned files at build time and copies none of them |
+| `woof_wrf_hydro/grid_transform.cu`, `grid_transform.py` | `hydro/Routing/Noah_distr_routing.F90` (disaggregateDomain); `hydro/HYDRO_drv/module_HYDRO_drv.F90` (aggregateDomain) |
+| `oracle/` | build harnesses and drivers (`build.sh`, `build_grid_transform.sh`); they compile the pinned files at build time and copy none of them |
 
 `subsurface.cu` is preceded at load time by WOOF's
 `woof/core/kernels/glibc_flt32.cuh` (glibc's powf words, MIT-licensed Arm
