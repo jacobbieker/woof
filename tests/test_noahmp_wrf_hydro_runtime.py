@@ -2,7 +2,7 @@
 
 module_sf_noahmpdrv.F under -DWRF_HYDRO reads sfcheadrt (the ponded head
 WRF-Hydro returns, mm) and writes INFXSRT = RUNSF, SOLDRAIN = MAX(RUNSB, 0)
-and QTILEDRAIN = QTLDRN on every land column (:1211-1218).  The leaf
+and QTILEDRAIN = QTLDRN on every land column (WRF 4.7.1 Noah-MP e5c0859 :1210-1217).  The leaf
 arithmetic is graded against WRF elsewhere (WATER:
 tests/test_noahmp_water_wrf_hydro.py; glacier:
 tests/test_noahmp_glacier_wrf_hydro.py); here the driver wiring is checked
@@ -55,7 +55,7 @@ def _planes(shape, head):
             "qtiledrain": cp.full(shape, sentinel, cp.float32)}
 
 
-def _run(monkeypatch, planes):
+def _run(monkeypatch, planes, **options):
     import woof.core.physics as physics
     from woof.core.dycore import step
 
@@ -67,7 +67,7 @@ def _run(monkeypatch, planes):
         return real(*args, **kwargs)
 
     monkeypatch.setattr(physics, "noahmp_lsm_step", hydro_step)
-    state, cfg, driver = _domain()
+    state, cfg, driver = _domain(**options)
     step(state, cfg)
     monkeypatch.setattr(physics, "noahmp_lsm_step", real)
     return driver
@@ -108,35 +108,40 @@ def test_a_ponded_head_moves_land_and_glacier_runoff(monkeypatch):
     assert planes["infxsrt"].get()[1, 2] == hydro.fields["runsfxy"].get()[1, 2]
 
 
+#: noahmp_output=3 routes the step through the resident device-surface
+#: layout, whose glacier columns run noahmp_glacier_driver_resident.
+RESIDENT = dict(noahmp_output=3, noahmp_acc_dt=0.4)
+
+
 @requires_gpu
-def test_glacier_columns_on_the_resident_path_are_refused_before_any_write(monkeypatch):
-    # The resident glacier slab has no sfcheadrt input or exchange
-    # write-back, so selected options (here noahmp_output=3) with a glacier
-    # column are refused by name, and before any carried field moves.
-    import woof.core.physics as physics
-    from woof.core.dycore import step
+@METAL_SKIP
+def test_the_resident_glacier_driver_carries_the_head_and_fills_the_exchange(monkeypatch):
+    plain = _run(monkeypatch, None, **RESIDENT)
+    zero = _planes(plain.fields["tsk"].shape, 0.0)
+    hydro = _run(monkeypatch, zero, **RESIDENT)
+    for name in ("smois", "sh2o", "tslb", "sfcrunoff", "udrunoff", "tsk", "hfx", "qfx",
+                 "snow", "runsfxy", "runsbxy"):
+        a, b = plain.fields[name].get(), hydro.fields[name].get()
+        assert (a.view(np.uint32) == b.view(np.uint32)).all(), name
+    runsf = hydro.fields["runsfxy"].get()[1, 2]
+    runsb = hydro.fields["runsbxy"].get()[1, 2]
+    assert zero["infxsrt"].get()[1, 2] == runsf
+    assert zero["soldrain"].get()[1, 2] == (runsb if runsb > 0 else 0)
+    assert zero["qtiledrain"].get()[1, 2] == 0
 
-    state, cfg, driver = _domain(noahmp_output=3, noahmp_acc_dt=0.4)
-    planes = _planes(driver.fields["tsk"].shape, 0.0)
-    before = {n: driver.fields[n].get() for n in ("smois", "sh2o", "tslb", "snow", "tsk")}
-    real = physics.noahmp_lsm_step
-    seen = []
-
-    def hydro_step(*args, **kwargs):
-        kwargs["wrf_hydro"] = planes
-        try:
-            return real(*args, **kwargs)
-        except NotImplementedError as error:
-            seen.append(error)
-            raise
-
-    monkeypatch.setattr(physics, "noahmp_lsm_step", hydro_step)
-    with pytest.raises(NotImplementedError):
-        step(state, cfg)
-    assert seen and "resident device-surface" in str(seen[0])
-    for name, value in before.items():
-        assert (driver.fields[name].get().view(np.uint32) == value.view(np.uint32)).all(), name
-    assert (planes["infxsrt"].get() == -7.0).all()
+    ponded = _planes(plain.fields["tsk"].shape, 6.0)
+    resident = _run(monkeypatch, ponded, **RESIDENT)
+    assert resident.fields["runsfxy"].get()[1, 2] > runsf
+    assert ponded["infxsrt"].get()[1, 2] == resident.fields["runsfxy"].get()[1, 2]
+    # the host-marshalled glacier path with the same head agrees word for word
+    host_planes = _planes(plain.fields["tsk"].shape, 6.0)
+    host = _run(monkeypatch, host_planes)
+    for name in ("runsfxy", "runsbxy", "snow", "tslb", "tsk"):
+        a = resident.fields[name].get()[..., 1, 2]
+        b = host.fields[name].get()[..., 1, 2]
+        assert (np.asarray(a).view(np.uint32) == np.asarray(b).view(np.uint32)).all(), name
+    for name in ("infxsrt", "soldrain", "qtiledrain"):
+        assert ponded[name].get()[1, 2].view(np.uint32) == host_planes[name].get()[1, 2].view(np.uint32), name
 
 
 def test_unported_wrf_hydro_pieces_are_refused_by_name():

@@ -1,9 +1,13 @@
 # Noah LSM oracle, WRF v4.6.1
 
 Four fixture files, produced by `tools/noah_wrf461_oracle/build.sh` from the
-byte-unmodified WRF v4.6.1 tree pinned at
-`d66e442fccc04111067e29274c9f9eaccc3cef28`.  `build.sh` refuses to run against
-any other commit, and refuses to run if `git diff` reports a change to any of
+byte-unmodified WRF v4.7.1 tree pinned at
+`f52c197ed39d12e087d02c50f412d90d418f6186` (re-pinned from v4.6.1,
+`d66e442fccc04111067e29274c9f9eaccc3cef28`, on 2026-11-08: the six sources
+and three tables it compiles are byte-identical between the two tags, every
+fixture below rebuilt byte-identical against v4.7.1, and only `build.sh`'s
+own digest moved in `oracle-sha256sums.txt`; the directory keeps its name).
+`build.sh` refuses to run against any other commit, and refuses to run if `git diff` reports a change to any of
 the six sources it compiles, so no number here can come from an edited tree.
 
 | file | driver switches |

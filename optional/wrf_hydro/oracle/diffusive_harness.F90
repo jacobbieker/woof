@@ -1,14 +1,14 @@
 ! Service module for WRF-Hydro's diffusive-wave channel routing on nodes
-! (channel_option = 3) as WRF 4.6.1 ships it,
+! (channel_option = 3) as WRF 4.7.1 ships it,
 ! hydro/Routing/module_channel_routing.F90.
 !
 ! build_diffusive.sh cuts DIFFUSION, AREAf, HEAD and SGNf byte for byte, and
 ! the diffusive branch of drive_CHANNEL (its "elseif(channel_option .eq. 3)"
-! block, :873-1281, through "CVOL = CVOLTMP") byte for byte, and #includes
+! block, :893-1301, through "CVOL = CVOLTMP") byte for byte, and #includes
 ! them here.  drive_CHANNEL itself cannot be compiled outside the full routing
 ! build, so diffusive_route below declares, with drive_CHANNEL's own names,
-! kinds and shapes (:571-686), the variables the cut block reads and writes,
-! runs drive_CHANNEL's entry initialisation (:688-703), opens the IF the cut
+! kinds and shapes (:543-679), the variables the cut block reads and writes,
+! runs drive_CHANNEL's entry initialisation (:689-704), opens the IF the cut
 ! block continues and closes it.  The block is compiled with MPP_LAND, as
 ! WRF-Hydro always is, against mpp_single's one-process exchanges, and drives
 ! the level-pool reservoirs of rt_data_single.  Nothing in this file computes
@@ -18,7 +18,7 @@ module mpp_single
   ! hydro/arc/macros.mpp.*).  On one process mpp_land.F90's channel and lake
   ! exchanges reduce to the paths below, transcribed: MPP_CHANNEL_COM_REAL(8),
   ! updateLake_grid and mpp_same_int1 leave their arguments as they are
-  ! (left_id = right_id = -1, numprocs = 1), and sum_real8 (:2395-2417)
+  ! (left_id = right_id = -1, numprocs = 1), and sum_real8 (:2303-2324)
   ! rounds its REAL*8 sums through REAL (v = vin; vin = v).
   use iso_fortran_env, only: int64
   implicit none
@@ -92,7 +92,7 @@ contains
       select type (r => rt_domain(1)%reservoirs(i)%ptr)
       type is (levelpool)
         call r%init(resht(i), lake_area(i), weir_elev(i), weir_coef(i), weir_len(i), &
-            dam_len(i), orifice_elev(i), orifice_coef(i), orifice_area(i), max_depth(i), ln)
+            dam_len(i), orifice_elev(i), orifice_coef(i), orifice_area(i), max_depth(i), ln, 1)
       end select
     end do
   end subroutine init_lakes
@@ -108,7 +108,8 @@ contains
   subroutine diffusive_route(ixrt, jxrt, nlinks, dt, dtct, dtrt_ch, retdep_chan, qstrmvolrt, &
       qinflowbase, lakeinflort, qsubrt, ch_netrt, lake_mskrt, ch_netlnk, chanxi, chanyj, &
       node_area, from_node, to_node, typel, zelev, chanlen, mannn, so, chsslp, bw, &
-      qlink, hlink, cvol, qlateral, nlakes, lakenode, resht, qlakei, qlakeo)
+      qlink, hlink, cvol, qlateral, nlakes, lakenode, resht, qlakei, qlakeo, &
+      gwBaseSwCRT, gwChanCondSw, gwChanCondConstIn, gwChanCondConstOut, gwHead, qgw_chanrt)
     integer, intent(in) :: ixrt, jxrt, nlinks
     real, intent(in) :: dt, dtrt_ch
     real, intent(inout) :: dtct
@@ -121,15 +122,17 @@ contains
     integer(kind=int64), intent(in), dimension(nlinks) :: from_node, to_node
     real, intent(inout), dimension(:,:) :: qlink
     real, intent(inout), dimension(nlinks) :: hlink, cvol, qlateral
-    ! drive_CHANNEL's declarations (:571-686) for the names the block uses
+    ! drive_CHANNEL's declarations (:543-679) for the names the block uses
     integer, intent(in) :: nlakes
     integer(kind=int64), intent(in), dimension(nlinks) :: lakenode
     real, intent(inout), dimension(nlakes) :: resht, qlakei, qlakeo
     integer, parameter :: did = 1, channel_option = 3
-    integer :: gwBaseSwCRT = 0, gwChanCondSw = 0
-    real :: gwChanCondConstIn = 0., gwChanCondConstOut = 0.
+    ! the groundwater-channel exchange (GWBASESWCRT = 3): drive_CHANNEL's
+    ! gwHead is gw2d's ho and qgw_chanrt gw2d's qgw_chanrt (HYDRO_drv :980)
+    integer, intent(in) :: gwBaseSwCRT, gwChanCondSw
+    real, intent(in) :: gwChanCondConstIn, gwChanCondConstOut
+    real, intent(inout), dimension(:,:), allocatable :: gwHead, qgw_chanrt
     real, dimension(ixrt, jxrt) :: latval, lonval
-    real, dimension(:,:), allocatable :: gwHead, qgw_chanrt
     real, dimension(nlinks) :: dzGwChanHead, Q_GW_CHAN_FLUX
     real, dimension(nlakes) :: qlakeip, qllake
     real*8, dimension(nlakes) :: qlakei8, qllake8
@@ -148,7 +151,7 @@ contains
     nlinks_index = (/ (i, i = 1, nlinks) /)
     yw_mpp_nlinks = nlinks; mpp_nlinks = nlinks
     lake_index = (/ (i, i = 1, nlakes) /)
-    ! drive_CHANNEL :688-703
+    ! drive_CHANNEL :689-704
     QLAKEIP = 0
     QLAKEI8 = 0
     HLINKTMP = 0
