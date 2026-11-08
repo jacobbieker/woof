@@ -20,11 +20,11 @@ the ocean receives over a run equals the flux the atmosphere emitted), and
 only a shared atmosphere/ocean grid is accepted -- OASIS's SCRIP remapping is
 not ported and a different grid is refused.
 
-Nothing of NEMO is in WOOF.  NEMO is distributed under the CeCILL v2.1
-licence; see docs/coupling/WRF-HYDRO-NEMO.md for why the ocean model itself
-stops at this interface and what an opt-in port would need.  Any solver that
-implements :class:`woof.ocean.interface.ExternalOcean` can sit on the other
-side of this exchange.
+Nothing of NEMO is in the default build.  NEMO is CeCILL-licensed; its
+port is an explicit opt-in (optional/nemo, docs/coupling/WRF-HYDRO-NEMO.md).
+Any solver that implements :class:`woof.ocean.interface.ExternalOcean` can
+sit on the other side of this exchange; :mod:`woof.ocean.external` wires
+the three WRF calls into the driver.
 """
 
 from __future__ import annotations

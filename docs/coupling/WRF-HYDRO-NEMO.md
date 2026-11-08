@@ -153,11 +153,22 @@ Metal, and refuses what it does not port by name.
 1. **Pending in #159**: WRF's exchange contract (`cpl_snd2`/`cpl_rcv`),
    on a shared grid, with a conserving coupling-interval average and the
    `ExternalOcean` protocol in `woof/ocean/interface.py`.
-2. **Wire the exchange into the physics driver**: call `send` once per WRF
-   step after the surface layer as `module_integrate.F:460` does, `receive`
-   in the surface driver before the LSM as `module_surface_driver.F:1510`
-   does, with `cpl_store_input`'s SST_INPUT capture at
-   `solve_em.F:374`.  Needs an `ExternalOcean` implementation to be useful.
+2. **Done (SST only)**: the exchange wired into the driver
+   (`woof/ocean/external.py`, an `[external_ocean]` table in the
+   `ocean_config` TOML): `cpl_store_input`'s SST_INPUT capture at
+   itimestep 1 (`solve_em.F:374`); `cpl_rcv`'s SST merge at the top of every
+   surface-driver call (`module_surface_driver.F:1506`), followed by
+   `sst_update = 1`'s water lines (TSK and the top soil layer take SST in
+   250-350 K, :1720-1727), without which the merged SST never reaches TSK;
+   and `cpl_snd` once per completed step (`module_integrate.F:460`) with
+   U_PHY/V_PHY/RHO as `phy_prep` left them.  At each coupling time the
+   interval average goes to the ocean, which steps the interval (sequential
+   coupling).  Refused by name: an ocean that returns currents (WOOF's
+   surface layers do not read UOCE/VOCE), sea ice and the lake model under
+   the coupling (sst_update's ice and lake lines are not wired), a coupling
+   interval that is not a whole number of steps, and restart of a coupled
+   run.  `tests/test_external_ocean_coupling.py` runs the real driver
+   against a stub ocean, and the NEMO column through the same wiring.
 3. **An ocean**: the NEMO opt-in has begun with `traqsr` (2-band penetrative
    solar, the consumer of SURF_NET_SOLAR) and the equation of state
    (`eosbn2.F90`, TEOS-10/EOS-80/S-EOS, `tests/test_nemo_eos_parity.py`)

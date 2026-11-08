@@ -4629,6 +4629,10 @@ def _radiation_owned_payloads(stored,driver):
 
 def _driver_manifest(driver, *, streaming=False, state_shape=None) -> dict[str, object]:
     """Serialized driver arrays; enforces driver attribute coverage."""
+    if getattr(driver, "external_ocean", None) is not None:
+        raise RestartManifestError(
+            "restart of a run coupled to an external ocean is not ported: the "
+            "ocean's state and the coupling-interval average are not checkpointed")
     for name in sorted(vars(driver)):
         if (name not in DRIVER_SERIALIZED_ATTRS
                 and name not in DRIVER_REBUILT_ATTRS

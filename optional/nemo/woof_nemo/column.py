@@ -96,6 +96,9 @@ class NemoColumnOcean:
     coupler's period, a whole number of steps.
     """
 
+    #: an ocean at rest: UOCE/VOCE are zero (woof.ocean.external)
+    couples_currents = False
+
     def __init__(self, *, mbkt, latitude, e3t, e3w, gdept, gdepw, temperature, salinity,
                  rn_Dt, coupling_interval, eos="teos10", traqsr=True, qsr_scheme="2bd",
                  drag="non_lin", drag_params=None, tke=None, rn_atfp=0.1,
