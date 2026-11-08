@@ -278,3 +278,94 @@ def test_a_module_global_with_a_binary64_literal_initialiser(cp):
     out = cp.zeros(N, dtype=cp.float32)
     _launch(cp, _GLOBAL, "scaled", out, np.int32(N))
     assert cp.asnumpy(out).tobytes() == (np.arange(N, dtype=np.float32) * 10).tobytes()
+
+
+_SWITCHED = r'''
+extern "C" __global__ void switched(const int* in, int* out, int n) {
+    int c = blockIdx.x * blockDim.x + threadIdx.x;
+    if (c >= n) return;
+    int x = in[c], acc = 0;
+    for (int it = 0; it < 5; ++it) {
+        if (x & 1) goto A;
+    B:
+        switch (x % 3) {
+        case 0: acc += 2; continue;
+        case 1:
+            for (int k = 0; k < 3; ++k) { if (k == x % 2) continue; acc += k; }
+            break;
+        default: acc += 7;
+        }
+        x += 3;
+        goto C;
+    A:
+        acc += 5;
+        x += 1;
+        if (x % 4 == 0) goto B;
+    C:
+        acc += it;
+        if (acc % 9 == 0) goto A;
+        x = x * 5 + 1;
+    }
+    out[c] = acc;
+}
+'''
+
+
+def _switched(x):
+    acc = 0
+    for it in range(5):
+        label = "A" if x & 1 else "B"
+        while label:
+            if label == "B":
+                r = x % 3
+                if r == 0:
+                    acc += 2
+                    label = None
+                    break
+                if r == 1:
+                    for k in range(3):
+                        if k == x % 2:
+                            continue
+                        acc += k
+                else:
+                    acc += 7
+                x += 3
+                label = "C"
+            elif label == "A":
+                acc += 5
+                x += 1
+                label = "B" if x % 4 == 0 else "C"
+            else:
+                acc += it
+                if acc % 9 == 0:
+                    label = "A"
+                    continue
+                x = x * 5 + 1
+                label = None
+    return acc
+
+
+def test_a_switch_among_dispatched_gotos_keeps_its_breaks_and_continues(cp):
+    x = (np.arange(N, dtype=np.int32) * 5) % 47
+    out = cp.zeros(N, dtype=cp.int32)
+    _launch(cp, _SWITCHED, "switched", cp.asarray(x), out, np.int32(N))
+    assert cp.asnumpy(out).tolist() == [_switched(int(v)) for v in x]
+
+
+_FORWARDED = r'''
+__device__ void put(float* const* out, int c, float v) { out[1][c] = v; }
+__device__ void relay(float* const* out, int c) { put(out, c, (float)c * 2.0f); }
+extern "C" __global__ void forwarded(float* a, float* b, int n) {
+    int c = blockIdx.x * blockDim.x + threadIdx.x;
+    if (c >= n) return;
+    float* out[2] = {a, b};
+    relay(out, c);
+}
+'''
+
+
+def test_a_local_pointer_array_passed_on_through_two_device_functions(cp):
+    a, b = cp.zeros(N, dtype=cp.float32), cp.zeros(N, dtype=cp.float32)
+    _launch(cp, _FORWARDED, "forwarded", a, b, np.int32(N))
+    assert cp.asnumpy(b).tobytes() == (np.arange(N, dtype=np.float32) * 2).tobytes()
+    assert not cp.asnumpy(a).any()

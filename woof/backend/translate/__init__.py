@@ -1521,23 +1521,26 @@ class _Rewriter:
         return True
 
     def _unenclosed_jumps(self, node):
-        """break/continue in ``node`` not enclosed by a loop/switch inside it."""
+        """break/continue in ``node`` that leave it: not enclosed by a loop
+        inside it, and for a break, not by a switch either (a switch, even
+        ``node`` itself, captures break but not continue)."""
         K = self.ci.CursorKind
         out = []
-        stack = [node]
+        stack = [(node, False)]             # (cursor, a switch captures its breaks)
         while stack:
-            n = stack.pop()
-            if n.kind in (K.BREAK_STMT, K.CONTINUE_STMT):
+            n, switched = stack.pop()
+            if n.kind == K.BREAK_STMT:
+                if not switched:
+                    out.append(n)
+                continue
+            if n.kind == K.CONTINUE_STMT:
                 out.append(n)
                 continue
-            if n.kind.name in self._LOOPS and n is not node:
-                # a continue inside a switch still targets the outer loop
-                if n.kind == K.SWITCH_STMT:
-                    stack.extend(c for c in n.walk_preorder() if c.kind == K.CONTINUE_STMT)
-                continue
-            if n.kind.name in self._LOOPS and n is node:
-                continue
-            stack.extend(n.get_children())
+            if n.kind.name in ("FOR_STMT", "WHILE_STMT", "DO_STMT"):
+                continue                    # its own break and continue
+            if n.kind == K.SWITCH_STMT:
+                switched = True
+            stack.extend((c, switched) for c in n.get_children())
         return out
 
     def _statement_end(self, node):
@@ -2145,6 +2148,7 @@ class _Rewriter:
         #: (function usr, parameter index) -> {"thread", "device"}: where the
         #: tables its calls pass live
         storage = {}
+        forwards = []                       # (caller parameter, callee parameter)
         for call in self.tu.cursor.walk_preorder():
             if call.kind != K.CALL_EXPR or not self.main_file(call):
                 continue
@@ -2152,9 +2156,31 @@ class _Rewriter:
             if fn is None or fn.kind not in kinds:
                 continue
             for i, arg in enumerate(call.get_arguments()):
-                if _is_table(arg.type):
-                    where = "thread" if _local_pointer_array(arg) is not None else "device"
-                    storage.setdefault((fn.get_usr(), i), set()).add(where)
+                if not _is_table(arg.type):
+                    continue
+                if _local_pointer_array(arg) is not None:
+                    storage.setdefault((fn.get_usr(), i), set()).add("thread")
+                    continue
+                # a table parameter passed on: its own storage (below)
+                ref = arg
+                while ref.kind.name in ("UNEXPOSED_EXPR", "PAREN_EXPR") and len(list(ref.get_children())) == 1:
+                    ref = list(ref.get_children())[0]
+                d = ref.referenced if ref.kind.name == "DECL_REF_EXPR" else None
+                owner = d.semantic_parent if d is not None and d.kind == K.PARM_DECL else None
+                if owner is not None and owner.kind in kinds and not self.is_kernel(owner):
+                    index = [p.get_usr() for p in owner.get_children() if p.kind == K.PARM_DECL].index(d.get_usr())
+                    forwards.append(((owner.get_usr(), index), (fn.get_usr(), i)))
+                    storage.setdefault((fn.get_usr(), i), set())
+                else:
+                    storage.setdefault((fn.get_usr(), i), set()).add("device")
+        changed = True
+        while changed:
+            changed = False
+            for src, dst in forwards:
+                got = storage.get(src) or {"device"}
+                if not got <= storage[dst]:
+                    storage[dst] |= got
+                    changed = True
         for node in self.tu.cursor.walk_preorder():
             if node.kind not in kinds or not self.main_file(node) or self.is_kernel(node):
                 continue

@@ -202,8 +202,8 @@ class SpaceAnalysis:
                                       if p.kind == self.ci.CursorKind.PARM_DECL]) == nparams]
             return candidates[0] if len(candidates) == 1 else None
 
-        found = by_arity([f for f in self.by_name.get(ref.spelling, []) if f.template])
-        if found is None and ref.kind.name in ("CXX_METHOD", "CONSTRUCTOR") and ref.semantic_parent is not None:
+        found = None
+        if ref.kind.name in ("CXX_METHOD", "CONSTRUCTOR") and ref.semantic_parent is not None:
             # a method or constructor of a class template's specialisation
             # (deng's `DengArray<float>::operator()`, flg_column's
             # `FLGPtr<float>(T*, int)`): the class template's own
@@ -213,6 +213,8 @@ class SpaceAnalysis:
                               if f.name.split("<", 1)[0] == name and f.cursor.semantic_parent is not None
                               and f.cursor.semantic_parent.kind.name == "CLASS_TEMPLATE"
                               and f.cursor.semantic_parent.spelling == owner])
+        if found is None:
+            found = by_arity([f for f in self.by_name.get(ref.spelling, []) if f.template])
         return found
 
     def resolve_call(self, call) -> FnInfo | None:
