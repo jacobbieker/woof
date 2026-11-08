@@ -162,7 +162,9 @@ Metal, and refuses what it does not port by name.
    solar, the consumer of SURF_NET_SOLAR) and the equation of state
    (`eosbn2.F90`, TEOS-10/EOS-80/S-EOS, `tests/test_nemo_eos_parity.py`)
    and TKE vertical mixing (`zdfsh2.F90`, `zdftke.F90`, no sea ice,
-   `tests/test_nemo_tke_parity.py`); tracer advection/diffusion and the
+   `tests/test_nemo_tke_parity.py`) and the implicit vertical diffusion of
+   T and S (`trazdf.F90`, `tests/test_nemo_trazdf_parity.py`); tracer
+   advection (traadv_fct and the other schemes), lateral diffusion and the
    dynamics remain.  The
    alternative is an external NEMO through a real coupler (out of
    process; NEMO stays a separate program and its licence does not reach
