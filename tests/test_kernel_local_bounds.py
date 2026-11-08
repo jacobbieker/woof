@@ -71,7 +71,8 @@ def test_thompson_selected_shallow_frames_bound_the_production_exports():
         # runs its own column unit (preflight's thompson_fork_unit row),
         # gated in tests/test_thompson_fork_column_gpu.py.
         shallow = [name for name in symbols
-                   if "_256" not in name and "_wrf39_" not in name]
+                   if "_256" not in name and "_wrf39_" not in name
+                   and "_hail_" not in name]
         assert shallow
         measured = {name: int(get_kernel(module, name).attributes["local_size_bytes"])
                     for name in shallow}
@@ -340,7 +341,7 @@ def test_the_production_launchers_compile_to_the_field_not_the_ceiling():
         morrmod.get_kernel = real_morrison_plain
 
     # Morrison's reflectivity is WRF's refl10cm_hm in the scheme's own
-    # unit since lane/parity-mp-libm (morrison.cu mo_refl10cm, a 0-byte
+    # unit since development branch (morrison.cu mo_refl10cm, a 0-byte
     # frame), so the refl.cu column kernel and its REFL_KMAX-sized frame
     # are not reached at all.
     assert ("plain", "morrison", "mo_refl10cm") in requested
@@ -502,3 +503,26 @@ def test_the_rrtmgp_rte_layer_frames_are_what_preflight_prices():
             int(_rte_kernel("rrtmgp_lw_noscat", nz + lw_upper)
                 .attributes["local_size_bytes"]))
         assert compiled <= pf.rrtmgp_rte_frame_bytes(nz, p_top), (nz, p_top)
+
+
+def test_hail_frames_bound_the_actual_production_image():
+    import cupy as cp
+    import re
+    from woof.core.kernels import module_source
+    from woof.core.thompson_aerosol_launch import aerosol_kernel, hail_aware_scope
+
+    with hail_aware_scope(True):
+        for module, (deep, shallow) in pf.THOMPSON_HAIL_KERNEL_FRAMES.items():
+            symbols = re.findall(
+                r'extern\s+"C"\s+__global__\s+void\s+(\w+)\s*\(',
+                module_source(module))
+            symbols = [name for name in symbols if "_wrf39_" not in name]
+            assert any("_hail_" in name for name in symbols)
+            measured = {
+                name: int(cp.cuda.driver.funcGetAttribute(
+                    cp.cuda.driver.CU_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES,
+                    aerosol_kernel(module, name).ptr))
+                for name in symbols}
+            assert max(measured.values()) <= deep, measured
+            assert max(v for n, v in measured.items()
+                       if "_256" not in n) <= shallow, measured

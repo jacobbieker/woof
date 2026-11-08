@@ -131,7 +131,9 @@ def adapter_outputs(inp):
         with patch.object(gf, "_gf_module", lambda *a, **kw: Module()):
             got = adapter(atmosphere=atmos, fields=fields, state=state,
                           cfg=NS(dt=dt, dx=9000, ishallow=ish, clos_choice=ich,
-                                 spp_conv=0, lightning_option=0))
+                                 spp_conv=0, lightning_option=0,
+                                 cu_rad_feedback=False, ra_lw_physics=4,
+                                 ra_sw_physics=4))
         for j, key in enumerate(("lev", "sca", "isc")):
             boundary[key][ids] = np.concatenate([run[j] for run in launches], axis=0)
         for f in result:
