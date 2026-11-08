@@ -173,8 +173,12 @@ source built for Apple silicon. It never touches `publish.yml` or
   pushed commit, creates the GitHub release (the merged pull requests since
   the previous `metal-v` tag, as GitHub generates them) and dispatches this
   workflow on the new tag with `publish` on. The dispatch is explicit because
-  a tag pushed with `GITHUB_TOKEN` starts no workflow. A head commit whose
-  message carries `[skip release]` releases nothing. If the dispatch fails
+  a tag pushed with `GITHUB_TOKEN` starts no workflow. Each run releases
+  every first-parent commit on `main` after the newest `metal-v` tag, oldest
+  first: GitHub keeps only the newest pending run of the `release-metal`
+  concurrency group, so merges that land while a release runs are caught up
+  by the next run with consecutive build numbers. A commit whose message
+  carries `[skip release]` is not released. If the dispatch fails
   after the tag and release exist, a re-run sees the tagged head and stops;
   run this workflow by hand with `version` set to that release and `publish`
   ticked.
