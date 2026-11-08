@@ -232,7 +232,8 @@ def _on_host(np_fn):
 for _name in ("eye", "identity", "broadcast_arrays", "bincount", "interp", "gradient", "cross",
               "diagonal", "isin", "lexsort", "unravel_index", "ravel_multi_index", "take_along_axis",
               "outer", "matmul", "nan_to_num", "packbits", "unpackbits", "fromfile", "load", "tril",
-              "triu", "histogram", "digitize", "einsum", "trapz" if hasattr(np, "trapz") else "trapezoid"):
+              "triu", "histogram", "digitize", "einsum", "trapz" if hasattr(np, "trapz") else "trapezoid",
+              "argwhere", "divmod", "angle"):
     globals()[_name] = _on_host(getattr(np, _name))
 broadcast_shapes = np.broadcast_shapes
 
@@ -302,6 +303,52 @@ fft.fftshift, fft.ifftshift = _on_host(np.fft.fftshift), _on_host(np.fft.ifftshi
 fft.config = types.SimpleNamespace(enable_nd_planning=False, get_plan_cache=lambda: None)
 
 # cupy.testing: NumPy's assertions on host copies
+class _RandomState:
+    """``cupy.random.RandomState`` with NumPy's generator on the host: the
+    draws are uploaded (CuPy's cuRAND streams differ anyway, so no CUDA
+    reproduction is lost; seeded draws repeat run to run)."""
+
+    def __init__(self, seed=None):
+        self._rs = np.random.RandomState(seed)
+
+    def seed(self, seed=None):
+        self._rs.seed(seed)
+
+    @staticmethod
+    def _up(values, dtype):
+        return asarray(np.asarray(values).astype(dtype if dtype is not None else np.float64, copy=False))
+
+    def random_sample(self, size=None, dtype=float):
+        return self._up(self._rs.random_sample(size), dtype)
+
+    random = random_sample
+
+    def rand(self, *size, dtype=float):
+        return self._up(self._rs.random_sample(size or None), dtype)
+
+    def randn(self, *size, dtype=float):
+        return self._up(self._rs.standard_normal(size or None), dtype)
+
+    def standard_normal(self, size=None, dtype=float):
+        return self._up(self._rs.standard_normal(size), dtype)
+
+    def uniform(self, low=0.0, high=1.0, size=None, dtype=float):
+        return self._up(self._rs.uniform(low, high, size), dtype)
+
+    def normal(self, loc=0.0, scale=1.0, size=None, dtype=float):
+        return self._up(self._rs.normal(loc, scale, size), dtype)
+
+    def randint(self, low, high=None, size=None, dtype=int):
+        return asarray(self._rs.randint(low, high, size).astype(dtype))
+
+
+_GLOBAL_RANDOM = _RandomState()
+random = types.SimpleNamespace(
+    RandomState=_RandomState, seed=_GLOBAL_RANDOM.seed,
+    **{n: getattr(_GLOBAL_RANDOM, n) for n in ("random_sample", "random", "rand", "randn",
+                                               "standard_normal", "uniform", "normal", "randint")})
+
+
 def _testing_on_host(fn):
     def check(*args, **kwargs):
         return fn(*[asnumpy(a) if isinstance(a, ndarray) else a for a in args], **kwargs)
