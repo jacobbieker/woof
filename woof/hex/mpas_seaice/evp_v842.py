@@ -21,8 +21,9 @@ Not covered here, and refused by name where a caller could reach them:
   whose outputs (``basisGradientU/V``, ``basisIntegralsU/V/Metric``,
   ``tanLatVertexRotatedOverRadius``, ``cellVerticesAtVertex``) these kernels
   take as inputs;
-- the velocity update, ocean stress and the rest of
-  ``mpas_seaice_velocity_solver.F``.
+- the rest of ``mpas_seaice_velocity_solver.F``: the velocity update and the
+  ocean stress are :mod:`woof.hex.mpas_seaice.velocity_v842`, which composes
+  them with these kernels into the elastic subcycle.
 
 Arrays are device float32 (int32 for connectivity and masks), with the Fortran
 layout: ``a(maxEdges, nCells)`` is C-order ``(nCells, maxEdges)``. See the

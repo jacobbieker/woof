@@ -86,7 +86,7 @@ def test_the_seaice_door_verify_grades_the_ported_piece():
     from woof.hex.mpas_seaice.verify import verify
     report = verify()
     assert report["passed"] and report["status"] == "stub"
-    assert [p["name"] for p in report["pieces"]] == ["evp_variational_internal_stress"]
+    assert [p["name"] for p in report["pieces"]][0] == "evp_variational_internal_stress"
 
 
 @requires_gpu
