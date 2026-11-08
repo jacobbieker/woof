@@ -3453,11 +3453,19 @@ class _Rewriter:
         return name + "_w" if name in METAL_RESERVED else name
 
 
-def prelude(*, contract: bool, retain_subnormals: bool = False, ieee_helpers: bool = False) -> str:
+def prelude(*, contract: bool, retain_subnormals: bool = False, ieee_helpers: bool = False,
+            f64: str = "soft") -> str:
     """``retain_subnormals``: the unit is --ftz=false (float is f32s);
     ``ieee_helpers``: it uses the subnormal-keeping ops of non-.ftz PTX,
-    which f32s.h also defines, in a unit that otherwise flushes."""
+    which f32s.h also defines, in a unit that otherwise flushes;
+    ``f64``: ``soft`` (strict: f64_soft.h alone) or ``df64`` (fast numerics,
+    :func:`_df64_prelude`)."""
     soft = (METAL_DIR / "f64_soft.h").read_text()
+    if f64 == "df64":
+        return _df64_prelude(soft, contract=contract, retain_subnormals=retain_subnormals,
+                             ieee_helpers=ieee_helpers)
+    if f64 != "soft":
+        raise ValueError(f"f64 must be soft or df64, not {f64!r}")
     text = (METAL_DIR / "prelude.h").read_text().replace("// F64_SOFT_H_TEXT", soft)
     if retain_subnormals:
         text = "#define WOOF_RETAIN_SUBNORMALS 1\n" + text
@@ -3470,6 +3478,23 @@ def prelude(*, contract: bool, retain_subnormals: bool = False, ieee_helpers: bo
     return "#pragma METAL fp contract(off)\n" + text + after
 
 
+def _df64_prelude(soft: str, *, contract: bool, retain_subnormals: bool, ieee_helpers: bool) -> str:
+    """The fast numerics' prelude: f64_soft.h, then f64_df64.h (division and
+    square root through its exact df64-seeded words, WOOF_DF64_ARITH), and
+    after the prelude the df64 libm's overloads on ``f64``
+    (f64_df64_bind.h).  The strict prelude is :func:`prelude`'s own text,
+    unchanged."""
+    df64 = "#define WOOF_DF64_ARITH 1\n" + (METAL_DIR / "f64_df64.h").read_text()
+    text = (METAL_DIR / "prelude.h").read_text().replace("// F64_SOFT_H_TEXT", soft + "\n" + df64)
+    if retain_subnormals:
+        text = "#define WOOF_RETAIN_SUBNORMALS 1\n" + text
+    if retain_subnormals or ieee_helpers:
+        text += "\n" + (METAL_DIR / "f32s.h").read_text()
+    text += "\n" + (METAL_DIR / "f64_df64_bind.h").read_text()
+    after = "\n#pragma METAL fp contract(fast)\n" if contract else ""
+    return "#pragma METAL fp contract(off)\n" + text + after
+
+
 VENDOR_LIBM64 = HERE / "vendor_libm64.cuh"
 #: WOOF's correctly rounded powf, the MLX facade's strict float32 power
 #: (facade/_ops.py; WOOF_STRICT_POWF=cuda selects the opt-in instead)
@@ -3477,12 +3502,24 @@ STRICT_POWF = HERE / "strict_powf.cuh"
 F64CR = HERE.parents[1] / "core" / "kernels" / "f64cr.cuh"
 _VENDOR_CALL = re.compile(r"\b(exp|log|log10|sin|cos|tan|atan|pow|atan2|hypot|log2|expm1|tanh|tgammaf?|lgamma|log1pf?|cbrtf?|erfc?)\s*\(")
 CR_CBRT = HERE.parents[1] / "core" / "kernels" / "cr_cbrt_flt64.cuh"
+#: binary64 functions the df64 prelude provides (f64_df64_bind.h): under
+#: f64="df64" the vendored libm keeps only its other entry points
+DF64_NATIVE = ("exp", "expm1", "log", "log2", "log10", "log1p", "pow", "sin", "cos", "tan",
+               "atan", "atan2", "tanh", "hypot")
+_VENDOR_CALL_DF64 = re.compile(r"\b(tgammaf?|lgamma|log1pf|cbrtf|erfc?)\s*\(")
 
 
-def compose(source: str, expanded: str | None = None) -> str:
+def compose(source: str, expanded: str | None = None, f64: str = "soft") -> str:
     """Prepend the binary64 libm (vendor_libm64.cuh, with f64cr.cuh) to a
     unit that calls one of CUDA's binary64 libm names, in its own text or
-    (``expanded``, the preprocessed unit) in a header it includes."""
+    (``expanded``, the preprocessed unit) in a header it includes.
+
+    ``f64="df64"``: the df64 prelude defines :data:`DF64_NATIVE` and cbrt
+    itself, so only a unit calling one of the rest (tgamma, lgamma, erf,
+    erfc and the binary32 log1pf, cbrtf, tgammaf) gets the vendored text,
+    without its wrappers for the native names."""
+    if f64 == "df64":
+        return _compose_df64(source, expanded)
     if not _VENDOR_CALL.search(source) and not (expanded and _VENDOR_CALL.search(expanded)):
         return source
     f64cr = F64CR.read_text(encoding="utf-8")
@@ -3497,6 +3534,27 @@ def compose(source: str, expanded: str | None = None) -> str:
                 + "\n__device__ __forceinline__ double cbrt(double x) { return g64_cbrt::cr_cbrt(x); }\n")
     return ("__device__ double wlm_sin_huge(double x);\n" + f64cr + "\n"
             + VENDOR_LIBM64.read_text(encoding="utf-8") + "\n" + cbrt + source)
+
+
+def _compose_df64(source: str, expanded: str | None) -> str:
+    if not _VENDOR_CALL_DF64.search(source) and not (expanded and _VENDOR_CALL_DF64.search(expanded)):
+        return source
+    f64cr = F64CR.read_text(encoding="utf-8")
+    hook = "#define WCR_PLATFORM_SIN(x) sin(x)"
+    if hook not in f64cr:
+        raise TranslationError("f64cr.cuh no longer defines its CUDA platform-sin hook as expected")
+    f64cr = f64cr.replace(hook, "#define WCR_PLATFORM_SIN(x) wlm_sin_huge(x)")
+    vendor, kept = [], 0
+    wrapper = re.compile(r"^__device__ __forceinline__ (?:double|float) (\w+)\(")
+    for line in VENDOR_LIBM64.read_text(encoding="utf-8").splitlines():
+        m = wrapper.match(line)
+        if m and m.group(1) in DF64_NATIVE:
+            continue
+        kept += bool(m and m.group(1) in ("tgamma", "lgamma", "erf", "erfc"))
+        vendor.append(line)
+    if kept != 4:
+        raise TranslationError("vendor_libm64.cuh no longer defines its tgamma/lgamma/erf/erfc wrappers as expected")
+    return ("__device__ double wlm_sin_huge(double x);\n" + f64cr + "\n" + "\n".join(vendor) + "\n" + source)
 
 
 def _integer_macros(source: str, defines=()) -> dict:
@@ -3767,16 +3825,21 @@ def flatten_inheritance(text: str, unit: str) -> str:
 
 
 def translate(source: str, *, unit: str = "<unit>", contract: bool = False,
-              retain_subnormals: bool = False, defines=(), include_dirs=()) -> TranslatedUnit:
+              retain_subnormals: bool = False, defines=(), include_dirs=(),
+              f64: str = "soft") -> TranslatedUnit:
     """CUDA unit text -> :class:`TranslatedUnit` (MSL plus kernel signatures).
 
     ``retain_subnormals``: the unit's ``float`` is ``f32s`` (gradual
     underflow in software where the GPU would flush; woof/backend/metal/
     f32s.h) -- CUDA's --ftz=false.
+    ``f64``: ``soft``, every ``double`` operation bit-exact (strict), or
+    ``df64``, the fast numerics' division, square root and libm through
+    double-float (woof/backend/metal/f64_df64.h).  The translated body is
+    the same text in both; the prelude and the vendored libm differ.
     """
     text = preprocess(source, defines, include_dirs)
-    if compose(source, text) is not source:
-        text = preprocess(compose(source, text), defines, include_dirs)
+    if compose(source, text, f64) is not source:
+        text = preprocess(compose(source, text, f64), defines, include_dirs)
     text = rewrite_ptx_asm(text, unit)
     if retain_subnormals:
         text = explicit_float_to_integral(text)
@@ -3785,7 +3848,7 @@ def translate(source: str, *, unit: str = "<unit>", contract: bool = False,
     result = _Rewriter(text, tu, unit=unit, retain_subnormals=retain_subnormals,
                        macros=_integer_macros(source, defines)).run()
     result.msl = (prelude(contract=contract, retain_subnormals=retain_subnormals,
-                          ieee_helpers="__woof_ieee_" in result.msl)
+                          ieee_helpers="__woof_ieee_" in result.msl, f64=f64)
                   + "\n// ---- translated unit: " + unit + "\n" + result.msl)
     result.key = hashlib.sha256(result.msl.encode()).hexdigest()
     return result
