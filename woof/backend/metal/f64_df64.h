@@ -1,7 +1,9 @@
 // Double-float ("df64") binary64 for the MLX backend's fast numerics.
 //
 // Apple GPUs have no binary64.  Strict numerics (GPUWM_WRF_EXACT=1) computes
-// every `double` with f64_soft.h, word for word.  Fast numerics (the default)
+// every `double` with f64_soft.h, word for word, except division and square
+// root, which are this header's exact df64-seeded words (the same words,
+// faster; the libm below is left out).  Fast numerics (the default)
 // keeps the same storage -- `double` is still the binary64 word `f64`, so
 // every buffer, struct, literal, union and bit cast is unchanged -- but takes
 // the expensive parts through df64, an unevaluated pair (hi, lo) of binary32
@@ -406,6 +408,9 @@ DF_OP f64_u64 f64_df_fma(f64_u64 a, f64_u64 b, f64_u64 c) {
   return df_pack(s, d >= 0 ? p.e : z.e);
 }
 
+// The libm below is the fast numerics' only; the strict prelude leaves it
+// out (WOOF_DF64_NO_LIBM) and takes only the exact division and square root.
+#if !defined(WOOF_DF64_NO_LIBM)
 // ------------------------------------------------------------------ libm
 //
 // Each takes and returns binary64 words.  Special operands follow C99
@@ -825,9 +830,13 @@ DF_OP f64_u64 df_cbrt_word(f64_u64 u) {
   return sg | df_pack(y, q);
 }
 
-// The arithmetic the prelude's f64 operators call: division and square
-// root become the exact df64-seeded words; WOOF_DF64_ARITH_FULL (diagnosis
-// and the bench only) also takes + - * fma through df64.
+#endif  // !WOOF_DF64_NO_LIBM
+
+// The arithmetic the prelude's f64 operators call, in both numerics:
+// division and square root become the exact df64-seeded words (the same
+// words as f64_soft.h's, tools/df64_grade.py's strict leg);
+// WOOF_DF64_ARITH_FULL (diagnosis and the bench only) also takes + - * fma
+// through df64.
 #if defined(__METAL_VERSION__) && defined(WOOF_DF64_ARITH)
 #define f64_div f64_df_div
 #define f64_sqrt f64_df_sqrt

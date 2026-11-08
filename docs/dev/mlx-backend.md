@@ -33,7 +33,7 @@ A Mac with MLX installed and no CuPy also selects mlx on its own.
 
 | CUDA | Metal translation |
 |---|---|
-| `double`, strict | `f64`, soft-float binary64. Every operation is IEEE round-to-nearest, word-exact (`tools/f64_soft_grade.py`). |
+| `double`, strict | `f64`, soft-float binary64. Every operation is IEEE round-to-nearest, word-exact (`tools/f64_soft_grade.py`); division and square root are the same words from `f64_df64.h`'s df64-seeded exact path (`tools/df64_grade.py strict`). |
 | `double`, fast | `f64` too, the same binary64 words in memory. `+ - *`, fma, conversions and comparisons are the soft-float words; `/` and `sqrt` are the correctly rounded words from a df64 estimate; CUDA's binary64 libm names are df64, about 2^-46 relative ("Binary64: soft-float and df64" below). |
 | binary32 `+ - * /`, `fma` | Metal's own: IEEE in safe math mode (`tools/metal_arith_receipt.py`). |
 | `--fmad=true` / `false` | `#pragma METAL fp contract(fast)` / `(off)`. In strict numerics nothing is contracted, because NVRTC's choices cannot be reproduced. |
@@ -52,10 +52,14 @@ Apple GPUs have no binary64. `double` is always `f64`, the binary64 word in
 a `ulong`, so buffers, structs, literals, unions and bit casts hold the
 same bytes in either mode; what differs is how its operations compute.
 
-* **Strict numerics** (`GPUWM_WRF_EXACT=1`): every operation is
-  `f64_soft.h`'s soft-float, word for word, and the binary64 libm is the
-  vendored correctly rounded one. The translation is byte for byte what it
-  was before df64 existed (`tests/test_metal_df64.py`).
+* **Strict numerics** (`GPUWM_WRF_EXACT=1`): every operation gives
+  `f64_soft.h`'s word, and the binary64 libm is the vendored correctly
+  rounded one. Division and square root take `f64_df64.h`'s exact
+  df64-seeded path (below), which gives the soft-float words: the strict
+  leg of `tools/df64_grade.py` compares the two on the GPU, NaN payloads
+  included, over every special-value pair, soft-float's grading mix and
+  quotients landing on gradual underflow and overflow (see "Compile time"
+  for the sample size). The df64 libm is left out (`WOOF_DF64_NO_LIBM`).
 * **Fast numerics** (the default): `woof/backend/metal/f64_df64.h`, through
   the same translated body with another prelude
   (`translate(..., f64="df64")`, chosen by
