@@ -8,6 +8,8 @@ branch; ISORROPIA has no licence grant).  `stub_sorgam.F90` holds the
 Registry-generated index modules for the radm2sorg package, a stub `eql3`
 (the excluded ISORROPIA branch, never reached) and the service hooks.
 `run_sorgam.F90` runs three carried schedules and writes one case per call
+(and `run_sorgam_dep.F90` the dry deposition and PM sums, fixtures
+`tests/data/oracles/chem/sorgam_dep/`)
 through `oracle_io.F90` (a byte copy of the gocart lane's).  `ORACLE_COVERAGE=1`
 builds with gcov.
 
