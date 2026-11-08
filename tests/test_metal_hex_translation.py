@@ -331,14 +331,41 @@ _ENTRY_FROM_INSIDE = _ENTRY.replace(
     "    r = r + 1.0f;\n    if ((r > 5.0f)) { goto label_100; }\n    visits = visits + 1;\n")
 
 
-def test_a_second_jump_from_inside_the_retry_loop_is_refused():
+def test_a_second_jump_from_inside_the_retry_loop_is_dispatched(cp):
     """The entry guard skips the loop's head only on the first pass: a jump
     to the same label from inside the guarded statements cannot be spelled
-    that way (its break would leave the retry loop), so it is refused."""
-    from woof.backend.translate import TranslationError, translate
+    that way (its break would leave the retry loop).  It was refused; the
+    labels are now a dispatch loop (a switch on the label), and the kernel
+    gives the words of the Fortran's control flow."""
+    from woof.backend.translate import translate
     assert "goto label_100; }\n    visits" in _ENTRY_FROM_INSIDE
-    with pytest.raises(TranslationError, match="goto"):
-        translate(_ENTRY_FROM_INSIDE, unit="entry_from_inside")
+    assert "switch (__woof_st" in translate(_ENTRY_FROM_INSIDE, unit="entry_from_inside").msl
+    # the same shape, bounded: the jump back stops once r reaches 30
+    src = _ENTRY_FROM_INSIDE.replace("if ((r > 5.0f))", "if ((r > 5.0f) && (r < 30.0f))")
+    assert src != _ENTRY_FROM_INSIDE
+    q = np.array([0.0, 2.0, 1.5, -3.0, 5.0, -9.0], dtype=np.float32)
+    qs = np.array([1.0, 1.0, 2.0, 0.0, 5.0, 9.0], dtype=np.float32)
+    want = []
+    for q1, qs1 in zip(q, qs):
+        r, visits = np.float32(0), 0
+        label = "100" if q1 < qs1 else "90"
+        while label != "200":
+            if label == "90":
+                r += np.float32(1)
+                if np.float32(5) < r < np.float32(30):
+                    label = "100"
+                    continue
+                visits += 1
+                label = "200"
+            else:
+                r += np.float32(10)
+                q1 = q1 + np.float32(1)
+                label = "90" if q1 > qs1 else "200"
+        want.append(r * np.float32(100) + np.float32(visits))
+    want = np.array(want, dtype=np.float32)
+    out = cp.zeros(q.size, dtype=cp.float32)
+    cp.RawKernel(src, "entry")((1,), (8,), (cp.asarray(q), cp.asarray(qs), out, np.int32(q.size)))
+    assert cp.asnumpy(out).tobytes() == want.tobytes()
 
 
 _CHECKED = r'''
