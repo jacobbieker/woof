@@ -132,6 +132,35 @@ class ExternalOceanCoupling:
             self.ocean.step(self.interval)
 
 
+def attach(driver, cfg, *, latitude=None) -> None:
+    """Attach the ``[external_ocean]`` of ``cfg.ocean_config`` to ``driver``
+    on the atmosphere's mass grid, and capture SST_INPUT (cpl_store_input at
+    itimestep 1)."""
+    import tomllib
+
+    doc = tomllib.loads(Path(cfg.ocean_config).resolve().read_text())
+    if set(doc) - {"external_ocean"}:
+        raise ValueError("an external_ocean TOML carries no other ocean tables "
+                         "(waves/surge couple through [ocean])")
+    if latitude is None:
+        raise ValueError("external ocean coupling needs the atmosphere latitude")
+    if getattr(driver, "lake", None) is not None:
+        raise NotImplementedError("the lake model (lakemodel = 1) under an external ocean: "
+                                  "sst_update's lake lines are not wired")
+    xice = driver.fields.get("xice")
+    if xice is not None and float(xice.max()) > 0.0:
+        raise NotImplementedError("sea ice under an SST-only external ocean: sst_update's "
+                                  "ice transitions are not wired")
+    for name in ("sst", "tsk", "xland", "qfx", "gsw", "glw", "emiss", "lh", "hfx", "ust"):
+        if name not in driver.fields:
+            raise NotImplementedError(f"external ocean coupling needs the surface field "
+                                      f"{name.upper()}, which this configuration does not carry")
+    config = read_config(doc, cfg.ocean_config)
+    shape = tuple(driver.fields["psfc"].shape)
+    driver.external_ocean = build(config, latitude=latitude, shape=shape, dt=float(cfg.dt))
+    driver.external_ocean.store_input(driver.fields["sst"])
+
+
 def configured(path) -> bool:
     """Whether the ocean TOML at ``path`` names an ``[external_ocean]``."""
     import tomllib
