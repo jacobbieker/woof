@@ -1,0 +1,14 @@
+d3eec4adcb9e3f11a29776adec9fdf92515e226998cfaf7060742b61b49a8b44  <nemo-5.0.2-checkout>/src/OCE/par_kind.F90
+689f8fdf5482e2bc6c7ecc59544ff7384fda6e4551e32be898e715501e55977d  <nemo-5.0.2-checkout>/src/OCE/TRA/eosbn2.F90
+7dc2bdf98ed47a275d72dfdd66f807cb370db34f7a51c780867702001e278c25  <nemo-5.0.2-checkout>/src/OCE/do_loop_substitute.h90
+fb18c1cb2d0baa3807a7b2d5be30f363349676cb79e23871467c25da09a03ba3  <nemo-5.0.2-checkout>/src/OCE/DOM/domzgr_substitute.h90
+59ff990486eff661f8896f5d96a1d1fe7fba201973570467f20c842f5c496dc0  <nemo-5.0.2-checkout>/src/OCE/read_nml_substitute.h90
+f828089661fbe708721b52501f603e9a0a87490f2dd76f09f5803b047b65a814  /repo/optional<nemo-5.0.2-checkout>/oracle/eos_stubs.F90
+815ed667d7e0eff080c084bd89cd0a6986a58199c047c8c6e60711c1817618fb  /repo/optional<nemo-5.0.2-checkout>/oracle/run_eos.F90
+a63f28d5b9743734a198701544ee762008f50d23b1977f93af963e778baee625  /repo/optional<nemo-5.0.2-checkout>/oracle/build_eos.sh
+c8dd058008529c7398f6be758ce77bc473a9a8d171ac6f303ed8847408ac4572  /repo/optional<nemo-5.0.2-checkout>/oracle/gen_eos_coeffs.py
+3420fac278f5a9a16beda8482664c11dd078f059609498028c3c9aff98bec84d  eos_coeffs.py
+0abc797d49173909c0fbe5c8b4501da597f7d3f0d5133d51177ac6718590e76f  eos-grid.csv
+1b991eecaaba90419cc8a690105b8b108fd67606d3ac28a18f15ba8de0ef657d  eos-teos10.csv
+6ffa886fc997e7550820126da019547f0c102cc9c591b5f9d6992d305d6d74fa  eos-eos80.csv
+50ada1dc26d929e75f54a6961527ec919be6907b2587d8601f6ee57768a808d2  eos-seos.csv
