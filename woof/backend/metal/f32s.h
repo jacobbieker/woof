@@ -392,3 +392,13 @@ static inline f32s __woof_selmax(f32s a, f32s b) {
 static inline f32s __woof_selmin(f32s a, f32s b) {
   return a < b ? a : (a == b ? f32s(as_type<float>(as_type<uint>(a.v) | as_type<uint>(b.v))) : b);
 }
+
+#ifdef WOOF_RETAIN_SUBNORMALS
+// In an --ftz=false unit float is f32s, so the bit casts return f32s too.
+// Returning float, `f(__uint_as_float(u))` with f(int) and f(f32s)
+// overloads took f(int): float -> int is a standard conversion and float ->
+// f32s a user-defined one (lake's lake_abs probe got the integer value of
+// the word: abs(+Inf) read 0x4f000000).  Defined last, for the unit's code.
+#define __uint_as_float(a) (f32s::bits((uint)(a)))
+#define __int_as_float(a) (f32s::bits((uint)(int)(a)))
+#endif
