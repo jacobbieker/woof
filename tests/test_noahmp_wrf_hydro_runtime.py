@@ -24,6 +24,21 @@ pytestmark = pytest.mark.gpu
 cp = pytest.importorskip("cupy")
 
 
+def _selected_water_on_metal():
+    from woof import backend
+    return backend.active() == "mlx"
+
+
+#: The selected-options water unit (noahmp_water_options.cuh), which carries
+#: the WRF_HYDRO head, does not translate to Metal on main: woof's translator
+#: refuses the goto into a block in its generated dynamic-VIC code ("goto
+#: 'label_1003' from outside the label's block"), as it does for every
+#: selected water option.  The default water unit is not used for WRF_HYDRO
+#: so that its PTX, digests and recorded frames stay as they are.
+METAL_SKIP = pytest.mark.skipif("_selected_water_on_metal()",
+                                reason="selected Noah-MP water unit does not translate to Metal")
+
+
 def _domain():
     from test_noahmp_runtime import _GRASSLAND, _ICE, _build
 
@@ -59,6 +74,7 @@ def _run(monkeypatch, planes):
 
 
 @requires_gpu
+@METAL_SKIP
 def test_a_zero_head_is_the_plain_forecast_and_fills_the_exchange(monkeypatch):
     plain = _run(monkeypatch, None)
     planes = _planes(plain.fields["tsk"].shape, 0.0)
@@ -77,6 +93,7 @@ def test_a_zero_head_is_the_plain_forecast_and_fills_the_exchange(monkeypatch):
 
 
 @requires_gpu
+@METAL_SKIP
 def test_a_ponded_head_moves_land_and_glacier_runoff(monkeypatch):
     plain = _run(monkeypatch, None)
     planes = _planes(plain.fields["tsk"].shape, 6.0)
