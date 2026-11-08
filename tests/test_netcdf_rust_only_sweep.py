@@ -284,10 +284,11 @@ def test_the_sweep_actually_converted_something():
     being undone one module at a time.
 
     That 29 counted a tree without the folded-in hex model, whose MPAS I/O
-    is an open finding by prefix (73 importers at 1.1.6), and the tree outside it has
-    since grown declared importers too (21 at upstream 1.1.0, 38 now), so
-    the count is held at today's population, every one declared: it may
-    fall, and a new importer has to raise it here with its reason.
+    is an open finding by prefix (73 importers at 1.1.6), and the tree
+    outside it has since grown declared importers too (21 at upstream
+    1.1.0, 38 now), so the count is held at today's population, every one
+    declared: it may fall, and a new importer has to raise it here with its
+    reason.
     """
 
     importers = _python_netcdf_importers()
