@@ -1,12 +1,8 @@
-# WRF ocean-coupler exchange oracle, WRF v4.7.1
+# WRF ocean-coupler exchange oracle, WRF v4.6.1
 
 `wrf-cpl.csv` is written by `tools/wrf_cpl_wrf461_oracle/build.sh` from the
-WRF v4.7.1 tree pinned at `f52c197ed39d12e087d02c50f412d90d418f6186`;
+WRF v4.6.1 tree pinned at `d66e442fccc04111067e29274c9f9eaccc3cef28`;
 `build.sh` refuses any other commit and any edit to the two sources it reads.
-(Re-pinned from v4.6.1, `d66e442f...`, on 2026-11-08: `frame/module_cpl.F`
-and `share/module_model_constants.F` are byte-identical between the two
-tags and `wrf-cpl.csv` rebuilt byte-identical; only the labels and
-`build.sh`'s own digest moved.)
 
 `frame/module_cpl.F` USEs WRF's Registry-generated `module_domain`, so it
 cannot be compiled whole outside WRF.  `build.sh` cuts `cpl_snd2`

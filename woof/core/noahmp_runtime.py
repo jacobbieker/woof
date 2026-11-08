@@ -2379,13 +2379,6 @@ def _lsm_step_slab(
         layout = params.surface_layout(fields, nsoil=nsoil,
                                        chunk_width=SLAB_COLUMN_CHUNK,
                                        sf_urban_physics=int(sf_urban_physics))
-    if device_surface and wrf_hydro is not None and layout["census"]["glacier"]:
-        # The resident glacier slab (run_glacier_slab) has no sfcheadrt
-        # input and no exchange-plane write-back; refuse before any field
-        # moves rather than leave glacier cells stale in the exchange.
-        raise NotImplementedError(
-            "wrf_hydro with glacier columns on the resident device-surface "
-            "path (selected options or noahmp_output=3) is not ported")
     if cadence_on:
         from woof.core.noahmp_soil_cadence import ACCUMULATORS,cadence
         steps,calculate,reset=cadence(soil_interval,dt,itimestep)
@@ -2495,7 +2488,7 @@ def _lsm_step_slab(
                          opt_alb=options["opt_alb"], opt_gla=options.get("opt_gla",1),
                          opt_stc=options["opt_stc"], opt_tbot=options.get("opt_tbot", 2),
                          snicar_options=options.get("snicar_options"),
-                         noahmp_snow_age=noahmp_snow_age)
+                         noahmp_snow_age=noahmp_snow_age, wrf_hydro=wrf_hydro)
         census["glacier_path"] = "noahmp-glacier/resident-cuda"
     elif n_glacier:
         if not params.glacier_path:

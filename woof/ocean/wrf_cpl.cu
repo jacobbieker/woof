@@ -1,4 +1,4 @@
-// WRF v4.7.1's external-ocean exchange (frame/module_cpl.F), one thread per
+// WRF v4.6.1's external-ocean exchange (frame/module_cpl.F), one thread per
 // column.  This is the atmosphere's half of WRF's OASIS coupling with NEMO:
 //
 //   cpl_snd2 (:298-382)  what WRF hands the ocean every step: EVAP-PRECIP,

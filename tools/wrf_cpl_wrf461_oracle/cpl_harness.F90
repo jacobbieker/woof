@@ -1,4 +1,4 @@
-! Service module for WRF v4.7.1 frame/module_cpl.F's cpl_snd2 and cpl_rcv.
+! Service module for WRF v4.6.1 frame/module_cpl.F's cpl_snd2 and cpl_rcv.
 !
 ! build.sh cuts the two subroutines, byte for byte, out of the pinned
 ! module_cpl.F (from their SUBROUTINE line to their END SUBROUTINE line) and

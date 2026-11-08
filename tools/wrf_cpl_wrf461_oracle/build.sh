@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build and run the WRF v4.7.1 ocean-coupler exchange oracle: cpl_snd2 and
+# Build and run the WRF v4.6.1 ocean-coupler exchange oracle: cpl_snd2 and
 # cpl_rcv of the byte-unmodified frame/module_cpl.F.
 #
 # module_cpl.F cannot be compiled whole outside WRF: it USEs module_domain,
@@ -21,7 +21,7 @@ fi
 source_root=$(realpath "$1")
 build_dir=$(realpath -m "$2")
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-pinned_commit="f52c197ed39d12e087d02c50f412d90d418f6186"
+pinned_commit="d66e442fccc04111067e29274c9f9eaccc3cef28"
 
 sources=(share/module_model_constants.F frame/module_cpl.F)
 for rel in "${sources[@]}"; do
@@ -97,6 +97,6 @@ sha256sum "${source_root}/share/module_model_constants.F" \
     cpl_snd2.inc cpl_rcv.inc \
     "${script_dir}/cpl_harness.F90" "${script_dir}/run_cpl.F90" \
     "${script_dir}/build.sh" wrf-cpl.csv \
-    | sed "s#${source_root}/#<wrf-4.7.1-checkout>/#; s#${script_dir}/#<oracle-workspace>/tools/wrf_cpl_wrf461_oracle/#" \
+    | sed "s#${source_root}/#<wrf-4.6.1-checkout>/#; s#${script_dir}/#<oracle-workspace>/tools/wrf_cpl_wrf461_oracle/#" \
     > oracle-sha256sums.txt
 echo "oracle built in ${build_dir}"

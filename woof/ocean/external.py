@@ -1,16 +1,16 @@
-"""WRF v4.7.1's three external-ocean calls, wired around an ``ExternalOcean``.
+"""WRF v4.6.1's three external-ocean calls, wired around an ``ExternalOcean``.
 
 WRF couples to an ocean model (NEMO, through OASIS3-MCT) with three calls,
 each at its own place in the step:
 
-* ``cpl_store_input`` (dyn_em/solve_em.F:379, module_cpl.F:458-499): at
+* ``cpl_store_input`` (dyn_em/solve_em.F:374, module_cpl.F:458-499): at
   ``itimestep == 1`` (and after an auxinput4 read, which WOOF does not do:
   ``sst_update`` cycling is refused at import) the analysed SST is kept as
   SST_INPUT, the field the coupled SST is merged onto.
   :meth:`ExternalOceanCoupling.store_input`.
-* ``cpl_rcv`` (phys/module_surface_driver.F:1507-1528), at the top of every
+* ``cpl_rcv`` (phys/module_surface_driver.F:1506-1527), at the top of every
   surface-driver call: SST merged under CPLMASK onto SST_INPUT, then
-  ``sst_update = 1``'s water lines (:1637-1791): TSK and the top soil layer
+  ``sst_update = 1``'s water lines (:1636-1790): TSK and the top soil layer
   take SST over water while 250 K < SST < 350 K.  WRF-NEMO runs set
   ``sst_update = 1``; without it the merged SST never reaches TSK.  UOCE and
   VOCE are merged onto zero by WRF; WOOF's surface layers do not read them,
@@ -43,7 +43,7 @@ from . import wrf_cpl
 #: External-ocean models: name -> (opt-in, class).  Each lives behind its
 #: opt-in; none is in the default build.
 MODELS = {"nemo_column": ("nemo", "NemoColumnOcean")}
-#: module_surface_driver.F :1725 (sst_update = 1)
+#: module_surface_driver.F :1724 (sst_update = 1)
 SST_LOW, SST_HIGH = 250.0, 350.0
 #: the arrays an ``external_ocean.state`` npz holds
 STATE_ARRAYS = ("mbkt", "e3t", "e3w", "gdept", "gdepw", "temperature", "salinity", "cplmask")
@@ -61,7 +61,7 @@ class ExternalOceanCoupling:
         if getattr(ocean, "couples_currents", True):
             raise NotImplementedError(
                 "an ocean that returns surface currents: WRF merges UOCE/VOCE "
-                "(module_surface_driver.F:1516-1526) but WOOF's surface layers "
+                "(module_surface_driver.F:1515-1525) but WOOF's surface layers "
                 "do not read them")
         interval, dt = float(interval), float(dt)
         n = interval / dt

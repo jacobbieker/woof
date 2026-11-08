@@ -1,4 +1,4 @@
-"""WRF v4.7.1's external-ocean exchange (``frame/module_cpl.F``) on device.
+"""WRF v4.6.1's external-ocean exchange (``frame/module_cpl.F``) on device.
 
 WRF couples to NEMO through OASIS3-MCT.  Its own side of that coupling is two
 routines of ``module_cpl.F``, which this module runs as CUDA kernels
@@ -40,18 +40,18 @@ from .interface import DeviceArray, validate_plane
 SEND_FIELDS = ("EVAP-PRECIP", "SURF_NET_SOLAR", "SURF_NET_NON-SOLAR",
                "TAUX", "TAUY", "TAUMOD")
 
-#: The fields WRF 4.7.1 receives (module_surface_driver.F:1511-1528).
+#: The fields WRF 4.6.1 receives (module_surface_driver.F:1510-1527).
 RECEIVE_FIELDS = ("SST", "UOCE", "VOCE")
 
-#: Exchange fields an ocean coupling might want that WRF 4.7.1's
+#: Exchange fields an ocean coupling might want that WRF 4.6.1's
 #: ``module_cpl.F`` does not carry.  Each is refused by name rather than
 #: invented: there is no WRF line to port for it.
 NOT_IN_WRF_461 = {
-    "SEAICE": "WRF 4.7.1 receives no sea-ice fraction from the coupler "
-              "(module_surface_driver.F:1511-1528 calls cpl_rcv for SST, "
+    "SEAICE": "WRF 4.6.1 receives no sea-ice fraction from the coupler "
+              "(module_surface_driver.F:1510-1527 calls cpl_rcv for SST, "
               "UOCE and VOCE only)",
-    "SSH": "WRF 4.7.1 receives no sea-surface height",
-    "RUNOFF": "WRF 4.7.1 sends no river runoff (cpl_snd2 sends EVAP-PRECIP "
+    "SSH": "WRF 4.6.1 receives no sea-surface height",
+    "RUNOFF": "WRF 4.6.1 sends no river runoff (cpl_snd2 sends EVAP-PRECIP "
               "only)",
 }
 
@@ -158,7 +158,7 @@ def receive(field: str, cplmask, received, out, *, obs=None) -> None:
     if field in NOT_IN_WRF_461:
         raise NotImplementedError(f"{field}: {NOT_IN_WRF_461[field]}")
     if field not in RECEIVE_FIELDS:
-        raise ValueError(f"{field!r} is not one of WRF 4.7.1's received "
+        raise ValueError(f"{field!r} is not one of WRF 4.6.1's received "
                          f"fields {RECEIVE_FIELDS}")
     if (field == "SST") != (obs is not None):
         raise ValueError("cpl_rcv merges SST onto SST_INPUT and UOCE/VOCE "

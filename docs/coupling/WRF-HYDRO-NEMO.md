@@ -1,9 +1,8 @@
 # WRF-Hydro and WRF-NEMO coupling: what is ported, the licences, and the roadmap
 
 Status as of 2026-11-08.  WOOF holds WRF physics to compiled WRF reference
-builds; the WRF-Hydro, Noah `-DWRF_HYDRO`, Noah-MP `WRF_HYDRO` (submodule
-`e5c0859`) and ocean-coupler lanes pin WRF 4.7.1 (upstream's baseline,
-`f52c197e`); NEMO pins 5.0.2, the newest NEMO release.  This page records which parts of WRF's hydrology and ocean
+builds; the WRF-Hydro and Noah `-DWRF_HYDRO` lanes pin WRF 4.7.1 (upstream's
+baseline, `f52c197e`), NEMO pins 5.0.2 (the newest NEMO release).  This page records which parts of WRF's hydrology and ocean
 couplings are ported to that standard, which are not and why, and what each
 remaining step needs.
 
@@ -12,7 +11,7 @@ remaining step needs.
 | Piece | Source | Where | Gate |
 | --- | --- | --- | --- |
 | Noah LSM built with `-DWRF_HYDRO`: ponded head `sfcheadrt` in; infiltration excess `infxsrt` and soil drainage `soldrain` out; the NDHMS edits to SMFLX, SRT and SSTEP | WRF 4.7.1 `phys/module_sf_noahdrv.F`, `phys/module_sf_noahlsm.F` (public domain; byte-identical to 4.6.1's) | `launch_noah(wrf_hydro=...)` -> `noah_column_hydro` (`woof/core/kernels/noah.cu`) | `tests/test_noah_wrf_hydro_parity.py`: 0 ULP in every field on CUDA (sm_86) and Metal (M3 Max), default and strict numerics |
-| WRF's side of the OASIS coupling with an ocean model: `cpl_snd2` (EVAP-PRECIP, SURF_NET_SOLAR, SURF_NET_NON-SOLAR, TAUX, TAUY, TAUMOD) and `cpl_rcv` (SST, UOCE, VOCE merged under CPLMASK) | WRF 4.7.1 `frame/module_cpl.F` (public domain; byte-identical to 4.6.1's) | `woof/ocean/wrf_cpl.py`, `woof/ocean/wrf_cpl.cu` | `tests/test_wrf_cpl_wrf461_parity.py` (pending: #159) |
+| WRF's side of the OASIS coupling with an ocean model: `cpl_snd2` (EVAP-PRECIP, SURF_NET_SOLAR, SURF_NET_NON-SOLAR, TAUX, TAUY, TAUMOD) and `cpl_rcv` (SST, UOCE, VOCE merged under CPLMASK) | WRF 4.6.1 `frame/module_cpl.F` (public domain) | `woof/ocean/wrf_cpl.py`, `woof/ocean/wrf_cpl.cu` | `tests/test_wrf_cpl_wrf461_parity.py` (pending: #159) |
 
 | WRF-Hydro subsurface routing (`rt_option = 1`): FINDZWAT, ROUTE_SUBSURFACE1 with GETSUB8, SUBSFC_RTNG | WRF 4.7.1 `hydro/Routing/Noah_distr_routing_subsurface.F90`, `Noah_distr_routing.F90` (UCAR WRF-Hydro licence) | **opt-in**: `optional/wrf_hydro/` via `woof.optin.load("wrf_hydro")` with `WOOF_ENABLE_WRF_HYDRO=1` | `tests/test_wrf_hydro_subsurface_parity.py`: six routing calls bitwise on CUDA and Metal; skips by named rule when the opt-in is off |
 
@@ -57,7 +56,7 @@ Untracked drafts found on the Mac checkout (`woof/hex/wrf_hydro*.py`,
 
 ## Licences (read 2026-11-07)
 
-**WRF 4.7.1** (as 4.6.1) (`LICENSE.txt`): "NCAR and UCAR ... consider WRF to be in the
+**WRF 4.6.1** (`LICENSE.txt`): "NCAR and UCAR ... consider WRF to be in the
 public domain for use by any person or entity for any purpose without any fee
 or charge."  Everything ported above is WRF code.
 
@@ -71,7 +70,7 @@ Clause 9 requires the licence text and a UCAR notice with every copy.  The
 no-fee clause binds anything that contains WRF-Hydro-derived code, which an
 Apache-2.0 distribution cannot promise its recipients.  Two further facts:
 
-* WRF 4.7.1's (as 4.6.1's) own tarball carries a copy of WRF-Hydro under `hydro/` with no
+* WRF 4.6.1's own tarball carries a copy of WRF-Hydro under `hydro/` with no
   separate licence file, under WRF's public-domain statement.  Whether that
   statement reaches code UCAR also publishes under the restrictive licence
   is not settled by either text.
@@ -168,10 +167,10 @@ Metal, and refuses what it does not port by name.
 2. **Done (SST only)**: the exchange wired into the driver
    (`woof/ocean/external.py`, an `[external_ocean]` table in the
    `ocean_config` TOML): `cpl_store_input`'s SST_INPUT capture at
-   itimestep 1 (WRF 4.7.1 `solve_em.F:379`); `cpl_rcv`'s SST merge at the top of every
-   surface-driver call (`module_surface_driver.F:1507`), followed by
+   itimestep 1 (`solve_em.F:374`); `cpl_rcv`'s SST merge at the top of every
+   surface-driver call (`module_surface_driver.F:1506`), followed by
    `sst_update = 1`'s water lines (TSK and the top soil layer take SST in
-   250-350 K, :1721-1728), without which the merged SST never reaches TSK;
+   250-350 K, :1720-1727), without which the merged SST never reaches TSK;
    and `cpl_snd` once per completed step (`module_integrate.F:460`) with
    U_PHY/V_PHY/RHO as `phy_prep` left them.  At each coupling time the
    interval average goes to the ocean, which steps the interval (sequential
@@ -209,7 +208,7 @@ Metal, and refuses what it does not port by name.
    process; NEMO stays a separate program and its licence does not reach
    WOOF), or, after the licence decision, NEMO kernels behind an opt-in with
    an oracle built from the pinned NEMO tree (XIOS, NetCDF and MPI are the
-   toolchain cost).  The fields NEMO's `sbccpl.F90` can send that WRF 4.7.1
+   toolchain cost).  The fields NEMO's `sbccpl.F90` can send that WRF 4.6.1
    does not receive (sea-ice fraction, sea-surface height) stay refused by
    name in `wrf_cpl.NOT_IN_WRF_461` until a WRF version that receives them is
    the reference.
