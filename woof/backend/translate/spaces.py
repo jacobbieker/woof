@@ -193,15 +193,27 @@ class SpaceAnalysis:
         if info is not None:
             return info
         # A template specialisation: its template, by name and arity.
-        candidates = [f for f in self.by_name.get(ref.spelling, []) if f.template]
-        if not candidates:
-            return None
         nparams = len([a for a in ref.get_arguments()]) if hasattr(ref, "get_arguments") else None
-        if len(candidates) > 1 and nparams is not None:
-            candidates = [f for f in candidates
-                          if len([p for p in f.cursor.get_children()
-                                  if p.kind == self.ci.CursorKind.PARM_DECL]) == nparams]
-        return candidates[0] if len(candidates) == 1 else None
+
+        def by_arity(candidates):
+            if len(candidates) > 1 and nparams is not None:
+                candidates = [f for f in candidates
+                              if len([p for p in f.cursor.get_children()
+                                      if p.kind == self.ci.CursorKind.PARM_DECL]) == nparams]
+            return candidates[0] if len(candidates) == 1 else None
+
+        found = by_arity([f for f in self.by_name.get(ref.spelling, []) if f.template])
+        if found is None and ref.kind.name in ("CXX_METHOD", "CONSTRUCTOR") and ref.semantic_parent is not None:
+            # a method or constructor of a class template's specialisation
+            # (deng's `DengArray<float>::operator()`, flg_column's
+            # `FLGPtr<float>(T*, int)`): the class template's own
+            owner = ref.semantic_parent.spelling.split("<", 1)[0]
+            name = ref.spelling.split("<", 1)[0]     # a constructor is spelled `FLGPtr<T>`
+            found = by_arity([f for f in self.functions.values()
+                              if f.name.split("<", 1)[0] == name and f.cursor.semantic_parent is not None
+                              and f.cursor.semantic_parent.kind.name == "CLASS_TEMPLATE"
+                              and f.cursor.semantic_parent.spelling == owner])
+        return found
 
     def resolve_call(self, call) -> FnInfo | None:
         """The function a CALL_EXPR calls.  A call that depends on template
@@ -289,6 +301,16 @@ class SpaceAnalysis:
     def walk(self, fn, env, collect_returns=False):
         K = self.ci.CursorKind
         returned = set()
+        if fn.kind == K.CONSTRUCTOR:
+            # `S(T* v) : p(v) {}`: a pointer field takes its initialiser's
+            # space (flg_column's FLGPtr wraps local arrays and buffers)
+            kids = list(fn.get_children())
+            for i, k in enumerate(kids[:-1]):
+                if k.kind == K.MEMBER_REF and k.referenced is not None \
+                        and k.referenced.kind == K.FIELD_DECL and _indirection(k.referenced.type) == "ptr":
+                    sp = self.space(kids[i + 1], env)
+                    if sp in (DEVICE, CONSTANT, THREADGROUP, THREAD):
+                        self.field_spaces.setdefault(field_key(k.referenced), set()).add(sp)
         stack = [fn]
         while stack:
             node = stack.pop()
@@ -313,6 +335,8 @@ class SpaceAnalysis:
             elif kind == K.VAR_DECL and self.generic_name(node.type):
                 init = [c for c in node.get_children() if c.kind not in (K.TYPE_REF, K.TEMPLATE_REF, K.NAMESPACE_REF)]
                 space = self.gspace(init[-1], env) if init else None
+                if space == NULL:
+                    space = DEVICE      # wraps no data (flg_column's `FLGPtr<float> tae(nullptr, 32)`)
                 if space not in (None, NULL):
                     env[node.get_usr()] = space
                     self.var_spaces.setdefault(node.get_usr(), set()).add(space)
@@ -358,6 +382,17 @@ class SpaceAnalysis:
                             self.var_spaces.setdefault(usr, set()).add(space)
                             self.inst_var_spaces.setdefault(self._instance, {}).setdefault(
                                 usr, set()).add(space)
+                elif len(kids) == 2 and kids[0].kind == K.ARRAY_SUBSCRIPT_EXPR:
+                    # `a[i] = p` on a local array of pointers declared without
+                    # an initialiser (nwp_windows' `float* out[12]` filled in a
+                    # loop): the elements' space, as an initialiser gives it
+                    arr = _local_pointer_array(kids[0])
+                    lhs_end = kids[0].extent.end.offset
+                    op = next((t.spelling for t in node.get_tokens() if t.extent.start.offset >= lhs_end), None)
+                    if arr is not None and op == "=":
+                        space = self.space(kids[1], env)
+                        if space not in (None, NULL):
+                            self.var_spaces.setdefault(arr.get_usr(), set()).add(space)
                 elif len(kids) == 2 and kids[0].kind == K.MEMBER_REF_EXPR and kids[0].referenced is not None \
                         and kids[0].referenced.kind.name == "FIELD_DECL":
                     # `s.text = "..."` outside the struct's own methods (WSM6's
@@ -490,7 +525,13 @@ class SpaceAnalysis:
             kids = [c for c in e.get_children() if c.kind.name not in ("TYPE_REF", "TEMPLATE_REF", "NAMESPACE_REF")]
             if kind == "DECL_REF_EXPR":
                 d = e.referenced
-                return env.get(d.get_usr()) if d is not None else None
+                if d is None:
+                    return None
+                if d.get_usr() not in env and _indirection(d.type) in ("ptr", "array"):
+                    # a pointer or array a constructor wraps (flg_column's
+                    # `FLGPtr<float> a(a_local, 1)`)
+                    return self.space(e, env)
+                return env.get(d.get_usr())
             if kind == "INIT_LIST_EXPR":
                 return self.space(kids[0], env) if kids else None
             if kind == "CALL_EXPR":
@@ -514,6 +555,12 @@ class SpaceAnalysis:
             if len(kids) == 1 and kind.startswith("UNEXPOSED"):
                 e = kids[0]
                 continue
+            if kind in ("CXX_NULL_PTR_LITERAL_EXPR", "GNU_NULL_EXPR"):
+                return NULL
+            if _indirection(e.type) == "ptr":
+                # a pointer converted by the struct's constructor
+                # (flg_column's `FLGPtr(T* v, int s = 1)`, given `albedo + col*6`)
+                return self.space(e, env)
             return None
 
     def _subscript_operator(self, base):
@@ -584,7 +631,9 @@ class SpaceAnalysis:
         for index, parm, ind in info.slots:
             if ind == "gstruct":
                 s = self.gspace(args[index], env) if index < len(args) else None
-                if s in (None, NULL):
+                if s == NULL:
+                    s = DEVICE      # a null pointer converted (flg_column's absent aerosol columns)
+                if s is None:
                     self.rw.refuse(args[index] if index < len(args) else node,
                                    f"cannot tell which address space the data of the argument for "
                                    f"{info.name}({parm.spelling}) lives in")
@@ -769,6 +818,26 @@ def _is_table(t) -> bool:
     """``T**`` / ``T* const*``: a pointer whose pointee is a pointer."""
     c = t.get_canonical()
     return c.kind.name == "POINTER" and c.get_pointee().get_canonical().kind.name == "POINTER"
+
+
+def _local_pointer_array(e):
+    """The local ``T* a[N]`` an expression names (``a`` or ``a[i]``'s base,
+    through parens and implicit casts), else None."""
+    while True:
+        kids = list(e.get_children())
+        if e.kind.name in ("UNEXPOSED_EXPR", "PAREN_EXPR") and len(kids) == 1:
+            e = kids[0]
+        elif e.kind.name == "ARRAY_SUBSCRIPT_EXPR" and kids:
+            e = kids[0]
+        else:
+            break
+    d = e.referenced if e.kind.name == "DECL_REF_EXPR" else None
+    if d is None or d.kind.name != "VAR_DECL":
+        return None
+    c = d.type.get_canonical()
+    if c.kind.name != "CONSTANTARRAY" or c.element_type.get_canonical().kind.name != "POINTER":
+        return None
+    return d
 
 
 def field_key(field):
