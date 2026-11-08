@@ -1,26 +1,26 @@
-// CUDA's powf as CuPy's float32 power runs it, for the MLX facade's
-// cupy.power under GPUWM_WRF_EXACT=1 (woof/backend/facade/_ops.py).
-// Never compiled for CUDA.
+// OPT-IN ONLY.  CUDA's powf as CuPy's float32 power runs it, for the MLX
+// facade's cupy.power under GPUWM_WRF_EXACT=1 when WOOF_STRICT_POWF=cuda
+// is set in a source checkout (woof/backend/facade/_ops.py).  The default
+// is woof/backend/translate/strict_powf.cuh, WOOF's own correctly rounded
+// powf.  This file is not package data: no wheel (recast-woof, metal-woof)
+// and no default build contains it.  See NOTICE, "CUDA powf transcription".
 //
-// A transcription of the PTX NVRTC (CUDA 13.4) emits for powf under the
-// strict options woof/wrf_exact.py gives CuPy's kernels (--ftz=false,
-// --fmad=false): log2|x| as a float-float pair, times y, then a degree-6
-// exp2 polynomial with an exponent split.  Every operation is the PTX's,
-// rounded to nearest, with subnormals kept (float is f32s in this process).
+// PROVENANCE.  This is a transcription of NVIDIA's code: the PTX that
+// NVRTC (CUDA 13.4) emits for powf from its libdevice, under the strict
+// options woof/wrf_exact.py gives CuPy's kernels (--ftz=false,
+// --fmad=false).  Its algorithm structure and its constants are NVIDIA's.
+// Every operation is the PTX's, rounded to nearest, with subnormals kept
+// (float is f32s in this process).  Never compiled for CUDA.
 //
-// One step is not transcribed: the PTX's rcp.approx.ftz.f32 (the MUFU
-// reciprocal, within 1 ULP of 1/x; 13 % of its words differ from the
-// correctly rounded one, and they are the GPU's, not a specification) is
-// the correctly rounded reciprocal here.  It enters only a compensated
-// quotient, so it rarely reaches the result.  Measured against strict
-// CuPy on an RTX A6000: with the A6000's own reciprocal words substituted,
-// this function gave CuPy's word for every binary32 x in [0.5, 1) at
-// y = 287/1004.5 (the Exner function's range), for 8388608 random (x, y)
-// pairs (subnormal, negative and integer-y cases among them) and for 234
-// special-value pairs; with the correctly rounded reciprocal, 131 of the
-// 8388608 Exner words and 915 of the random pairs differ, each by 1 ULP.
-// Metal's pow differed from CuPy's powf at 1601 of the NSSL column oracle's
-// 4800 Exner words.
+// One step is not transcribed: the PTX's rcp.approx.ftz.f32 (the GPU's
+// approximate reciprocal; 13 % of its words differ from the correctly
+// rounded one) is the correctly rounded reciprocal here.  Measured against
+// strict CuPy on an RTX A6000: with the A6000's own reciprocal words
+// substituted, this function gave CuPy's word on every input measured
+// (every binary32 x in [0.5, 1) at y = 287/1004.5, 8388608 random pairs,
+// 234 special-value pairs); with the correctly rounded reciprocal, 131 of
+// the 8388608 Exner-range words and 915 of the random pairs differ, each
+// by 1 ULP.
 #ifndef WOOF_CUDA_POWF
 #define WOOF_CUDA_POWF
 
