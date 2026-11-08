@@ -72,7 +72,7 @@ sha256sum "${sources[@]/#/${source_root}/}" diffusion.inc areaf.inc head.inc sgn
     "${script_dir}/diffusive_harness.F90" "${script_dir}/run_diffusive.F90" \
     "${script_dir}/run_levelpool.F90" "${script_dir}/build_diffusive.sh" \
     diffusive-network.csv diffusive-forcing.csv diffusive-steps.csv diffusive-lakes.csv \
-    levelpool-cases.csv \
+    levelpool-cases.csv diffusive-gw-forcing.csv diffusive-gw-steps.csv diffusive-gw-lakes.csv \
     | sed "s#${source_root}/#<wrf-4.7.1-checkout>/#; s#${script_dir}/#<oracle-workspace>/optional/wrf_hydro/oracle/#" \
     > diffusive-sha256sums.txt
 echo "oracle built in ${build_dir}"

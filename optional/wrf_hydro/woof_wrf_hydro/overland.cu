@@ -200,3 +200,97 @@ void ov_any_above(const float* __restrict__ infxs, const float* __restrict__ ret
     if (c >= n) return;
     if (infxs[c] > retent[c]) atomicOr(flag, 1);
 }
+
+// ROUTE_OVERLAND2 (rt_option = 2, Noah_distr_routing_overland.F90 :666-929):
+// an x sweep over each cell's east link, H = H + DH, then a y sweep over
+// each north link, H = H + DH.  Each link moves head along the terrain slope
+// SOX/SOY less the head gradient, Manning-type, from the upstream cell
+// above its retention; DH collects in WRF's loop order, which is sequential
+// along a row (x) or a column (y) and independent across them, so one
+// thread per row or column.  tb/fb hold each link's QBDRYT term for the
+// single-thread total (:ov2_total), in WRF's order.
+__device__ static bool ov2_link(float dt, float gsize, float so, float h0, float h1,
+                                float r0, float r1, float rough, float* qq, float* sf)
+{
+    if (h0 < r0 && h1 < r1) return false;
+    float dhd = __fdiv_rn(__fsub_rn(__fdiv_rn(h1, 1000.0f), __fdiv_rn(h0, 1000.0f)), gsize);
+    float s = __fadd_rn(__fsub_rn(so, dhd), 1E-30f);
+    if (fabsf(s) < 1E-20f) s = 1E-20f;
+    float alfa = __fdiv_rn(gfk_pow(fabsf(s), 0.5f), rough);
+    float hh = s < 0.0f ? __fdiv_rn(__fsub_rn(h1, r1), 1000.0f)
+                        : __fdiv_rn(__fsub_rn(h0, r0), 1000.0f);
+    if (r0 > 0.0f && hh <= 0.0f) return false;
+    if (hh < 0.0f) return false;
+    float hh53 = gfk_pow(hh, 5.0f / 3.0f);
+    *qq = __fdiv_rn(__fmul_rn(__fmul_rn(__fmul_rn(__fdiv_rn(s, fabsf(s)), alfa), hh53), dt), gsize);
+    *sf = s;
+    return true;
+}
+
+// dir 0: x sweep (thread per row, links (i,j)-(i+1,j), dist(:,:,3), SOX);
+// dir 1: y sweep (thread per column, links (i,j)-(i,j+1), dist(:,:,1), SOY).
+extern "C" __global__
+void ov2_sweep(int dir, float dt, const float* __restrict__ dist, const float* __restrict__ h,
+               const float* __restrict__ retent, const float* __restrict__ rough,
+               const float* __restrict__ so, float* __restrict__ qflx, float* __restrict__ dh,
+               float* __restrict__ qbdry, float* __restrict__ tb, int* __restrict__ fb,
+               int xx, int yy)
+{
+    int line = blockIdx.x * blockDim.x + threadIdx.x;
+    int nline = dir == 0 ? yy : xx, len = dir == 0 ? xx : yy;
+    if (line >= nline) return;
+    int n = xx * yy, step = dir == 0 ? 1 : xx;
+    int first = dir == 0 ? line * xx : line;
+    const float* gs = dist + (size_t)(dir == 0 ? 2 : 0) * n;
+    for (int p = 0; p < len; ++p) {
+        int c = first + p * step;
+        dh[c] = 0.0f;
+        fb[c] = 0;
+    }
+    for (int p = 0; p < len - 1; ++p) {
+        int c = first + p * step, d = c + step;
+        float qq, s;
+        if (!ov2_link(dt, gs[c], so[c], h[c], h[d], retent[c], retent[d], rough[c], &qq, &s))
+            continue;
+        qflx[c] = __fadd_rn(qflx[c], qq);
+        float adj = __fmul_rn(qq, 1000.0f);
+        if (adj <= 0.0f) continue;
+        if (__fsub_rn(h[c], adj) < 0.0f) adj = h[c];
+        if (__fadd_rn(h[d], adj) < 0.0f) adj = __fmul_rn(-1.0f, h[d]);
+        dh[c] = __fsub_rn(dh[c], adj);
+        dh[d] = __fadd_rn(dh[d], adj);
+        if (p == 0 && s < 0.0f) {
+            float b = __fmul_rn(qq, 1000.0f);
+            dh[c] = __fadd_rn(dh[c], b);
+            qbdry[c] = __fadd_rn(qbdry[c], b);
+            tb[c] = b; fb[c] = 1;
+        } else if (p == len - 2 && s > 0.0f) {
+            float b = __fmul_rn(qq, 1000.0f);
+            if (h[d] < b) b = h[d];
+            dh[d] = __fsub_rn(dh[d], b);
+            qbdry[d] = __fsub_rn(qbdry[d], b);
+            tb[c] = b; fb[c] = -1;
+        }
+    }
+}
+
+extern "C" __global__
+void ov2_apply(float* __restrict__ h, const float* __restrict__ dh, int n)
+{
+    int c = blockIdx.x * blockDim.x + threadIdx.x;
+    if (c < n) h[c] = __fadd_rn(h[c], dh[c]);
+}
+
+// QBDRYT's running sum, in WRF's j-outer, i-inner order for one sweep
+extern "C" __global__
+void ov2_total(const float* __restrict__ tb, const int* __restrict__ fb,
+               float* __restrict__ total, int n)
+{
+    if (blockIdx.x != 0 || threadIdx.x != 0) return;
+    float t = total[0];
+    for (int c = 0; c < n; ++c) {
+        if (fb[c] > 0) t = __fadd_rn(t, tb[c]);
+        else if (fb[c] < 0) t = __fsub_rn(t, tb[c]);
+    }
+    total[0] = t;
+}

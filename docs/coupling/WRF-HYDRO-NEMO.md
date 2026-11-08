@@ -141,7 +141,9 @@ Metal, and refuses what it does not port by name.
    own oracle: subsurface (`Routing/Noah_distr_routing_subsurface.F90`,
    **done** in the opt-in), overland (`Routing/Overland/`,
    `Noah_distr_routing_overland.F90`: **done** in the opt-in for
-   rt_option = 1, `tests/test_wrf_hydro_overland_parity.py`), channel (`Routing/module_channel_routing.F90`:
+   rt_option = 1 and 2 (ROUTE_OVERLAND2; the subsurface routes with
+   ROUTE_SUBSURFACE1 for both, as WRF-Hydro hard-codes),
+   `tests/test_wrf_hydro_overland_parity.py`), channel (`Routing/module_channel_routing.F90`:
    Muskingum and Muskingum-Cunge reach routing **done** in the opt-in, with
    4.7.0's reservoir reaches (TYPEL = 1 routes its lake through the
    reservoir; TYPEL = 2 is not committed), `tests/test_wrf_hydro_channel_parity.py`;
@@ -151,11 +153,17 @@ Metal, and refuses what it does not port by name.
    MPP_LAND, on one process, `tests/test_wrf_hydro_diffusive_parity.py`; the
    persistence and RFC-forecast reservoirs, lake_option 3, remain), then the bucket baseflow (`module_GW_baseflow.F90`
    simp_gw_buck, GWBASESWCRT 1 and 2: **done** in the opt-in,
-   `tests/test_wrf_hydro_baseflow_parity.py`; 3 and 4 remain).
+   `tests/test_wrf_hydro_baseflow_parity.py`; the 2-D groundwater model,
+   GWBASESWCRT 3 (`module_gw_gw2d.F90`: gw2d_ini, gwstep's ADI sweeps as
+   WRF-Hydro's one-process MPP_LAND build runs them, the soil coupling and
+   the LSM-grid aggregate), **done** in the opt-in,
+   `tests/test_wrf_hydro_gw2d_parity.py`, with its exchange with the
+   diffusive channel (the gwOption block of drive_CHANNEL and HYDRO_drv's
+   head correction, `tests/test_wrf_hydro_diffusive_parity.py`); 4 remains).
 5. **Configuration** (**done** in the opt-in: `woof_wrf_hydro.namelist`,
    `tests/test_wrf_hydro_namelist.py`, held to WRF 4.7.1's template and
    read_rt_nlst): `hydro.namelist` (`SUBRTSWCRT`, `OVRTSWCRT`,
-   `CHANRTSWCRT`, `channel_option`, `rt_option`, `GWBASESWCRT`, `lake_option`, `DXRT`,
+   `CHANRTSWCRT`, `channel_option`, `rt_option` (1 and 2), `GWBASESWCRT`, `lake_option`, `DXRT`,
    `AGGFACTRT`, `DTRT_TER`, `DTRT_CH`) mapped to a WOOF table, every unported
    value refused by name.  Until step 4 lands there is nothing to route to:
    `launch_noah(wrf_hydro=...)` is an API for the coupling, not a model run.

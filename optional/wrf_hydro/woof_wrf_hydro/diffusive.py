@@ -17,7 +17,8 @@ flows of links into LAKENODE nodes, and an orifice/weir/overtop outflow that
 the node draining each lake (CH_NETRT > 0) takes in the next step.  This is
 WRF-Hydro's MPP_LAND build (the only one it has) on one process.
 
-Refused by name: groundwater-channel exchange (GWBASESWCRT = 3), reservoir
+With GWBASESWCRT = 3 regular nodes exchange with the 2-D groundwater head
+(gwChanCondSw = 1; :class:`woof_wrf_hydro.gw2d.Gw2d`).  Refused by name: reservoir
 types other than the level pool (persistence, RFC forecasts), and networks
 whose CH_NETLNK numbering is not the node order.  The network is host data,
 read once; the state is device float32.
@@ -54,12 +55,19 @@ class DiffusiveWaveRouting:
     def __init__(self, *, ch_netrt, lake_mskrt, ch_netlnk, chanxi, chanyj, node_area,
                  from_node, to_node, typel, zelev, chanlen, mannn, so, chsslp, bw,
                  retdep_chan, dtrt_ch, dtct=None, gwbaseswcrt=0, lakenode=None, lakes=None,
-                 reservoir_type="level_pool"):
+                 reservoir_type="level_pool", gw_chan_cond_sw=0, gw_chan_cond_const_in=0.0,
+                 gw_chan_cond_const_out=0.0):
         import cupy as cp
 
-        if gwbaseswcrt == 3:
-            raise NotImplementedError("GWBASESWCRT = 3 (groundwater-channel exchange in the "
-                                      "diffusive wave) is not ported")
+        # GWBASESWCRT = 3: each regular node exchanges with the 2-D
+        # groundwater head under it (route's gw_head, Gw2d.ho) through the
+        # bed, gwChanCondSw = 1 with the namelist's in/out conductances;
+        # the flux joins the node's lateral inflow and is written to
+        # route's qgw_chanrt plane for Gw2d.channel_exchange.
+        self.gw = int(gwbaseswcrt) == 3
+        self.gw_sw = int(gw_chan_cond_sw)
+        self.gw_in = np.float32(gw_chan_cond_const_in)
+        self.gw_out = np.float32(gw_chan_cond_const_out)
         ch_netrt, lake_mskrt, ch_netlnk = (np.asarray(a) for a in (ch_netrt, lake_mskrt,
                                                                     ch_netlnk))
         chanxi, chanyj, typel = (np.asarray(a, np.int64) for a in (chanxi, chanyj, typel))
@@ -119,12 +127,14 @@ class DiffusiveWaveRouting:
         self._err = cp.zeros(1, cp.int32)
 
     def route(self, *, dt, qstrmvolrt, qinflowbase, hlink, cvol, qlink1, qlateral,
-              lakeinflort=None) -> None:
+              lakeinflort=None, gw_head=None, qgw_chanrt=None) -> None:
         """One drive_CHANNEL call over the model step ``dt``: updates hlink,
         cvol, qlink1 (QLINK(:,1)), qlateral, the routing step ``dtct`` and the
         lakes' state (``self.lakes``: resht, qlakei, qlakeo)."""
         import cupy as cp
 
+        if self.gw and (gw_head is None or qgw_chanrt is None):
+            raise ValueError("GWBASESWCRT = 3 routes with gw_head and qgw_chanrt planes")
         if lakeinflort is None:
             lakeinflort = cp.zeros_like(qstrmvolrt)
         for name, a in (("qstrmvolrt", qstrmvolrt), ("qinflowbase", qinflowbase),
@@ -135,6 +145,12 @@ class DiffusiveWaveRouting:
                         ("qlateral", qlateral)):
             if a.shape != (self.n,) or a.dtype != cp.float32:
                 raise ValueError(f"{name}: expected float32 ({self.n},)")
+        if self.gw:
+            for name, a in (("gw_head", gw_head), ("qgw_chanrt", qgw_chanrt)):
+                if a.shape != qstrmvolrt.shape or a.dtype != cp.float32 or not a.flags.c_contiguous:
+                    raise ValueError(f"{name}: expected contiguous float32 (jxrt, ixrt)")
+        else:
+            gw_head = qgw_chanrt = qstrmvolrt     # unread
         g, p, L = self._net, self._props, self.lakes
         self._err[...] = 0
         _k("wrfhydro_diffusive")((1,), (_TPB,), (
@@ -144,7 +160,8 @@ class DiffusiveWaveRouting:
             qlateral, *self._work, self.dtct, self._err, np.float32(dt), self.dtrt_ch,
             self.retdep_chan, np.int32(self.n), g["pour"], lakeinflort, g["lnstart"],
             g["lnlist"], g["listart"], g["lilist"], L.props, L.lake_opt, L.resht, L.qlakei, L.qlakeo,
-            *self._lakework, np.int32(L.n)))
+            *self._lakework, np.int32(L.n), np.int32(self.gw), np.int32(self.gw_sw), self.gw_in,
+            self.gw_out, gw_head, qgw_chanrt, np.int32(qstrmvolrt.size)))
         code = int(self._err.get()[0])
         if code:
             raise RuntimeError("; ".join(m for b, m in _ERRORS.items() if code & b))

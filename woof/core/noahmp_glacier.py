@@ -65,19 +65,21 @@ threshold, the ``SSI`` percolation capacity) that the main module has
 since moved off, so each is transcribed fresh below with its own
 anchors.
 
-Two documented departures from undefined WRF behaviour
-------------------------------------------------------
+Two documented departures from undefined WRF 4.6.1 behaviour
+------------------------------------------------------------
 Both follow the house rule: where WRF reads an undefined value, woof
 implements the defined behaviour and documents the divergence
 (``never bit-exact to a bug``).
 
 * ``HCPCT``: the driver's SNOWENERGY/SOILENERGY integrals
   (``module_sf_noahmpdrv.F:1381-1394``) read ``HCPCT`` for glacier
-  columns too, but the glacier arm never writes it -- WRF reads
-  whatever the previous NOAHMP_SFLX column left in the loop-carried
-  local.  woof returns the glacier column's own heat capacity from
-  THERMOPROP_GLACIER (:534-604), which is the quantity the integral
-  means.
+  columns too.  In 848f54ad (WRF 4.6.1) the glacier arm never writes it,
+  so WRF reads whatever the previous NOAHMP_SFLX column left in the
+  loop-carried local.  woof returns the glacier column's own heat
+  capacity from THERMOPROP_GLACIER (:534-604), and that is what WRF 4.7.1's
+  submodule e5c0859 does: NOAHMP_GLACIER returns HCPCT (glacier
+  :115, :194) and the driver passes it (:1058).  So this is a departure
+  only from 4.6.1.
 * ``EFLXB``: same story (``EFLXBXY`` is written from a local the
   glacier arm never sets).  woof returns TSNOSOI_GLACIER's ``BOTFLX``
   (:1459-1464), the glacier column's actual bottom energy influx.

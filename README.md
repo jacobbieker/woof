@@ -220,10 +220,16 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     land-model grid and the routing grid, subsurface and overland routing,
     Muskingum-Cunge and diffusive-wave channels, the groundwater bucket,
     level-pool reservoirs and `hydro.namelist`. Each piece is bitwise against
-    WRF 4.6.1's `hydro/`.
+    WRF 4.7.1's `hydro/`.
   - NEMO 5.0.2: the equation of state, TKE mixing, vertical and lateral
     tracer diffusion, FCT advection and solar penetration. A coupled column
     ocean is driven by WRF's ocean-coupler exchange (SST only for now).
+- **Noah-MP follows WRF 4.7.1's submodule (e5c0859), at the user's
+  request.** This is not a default change: the default
+  `noahmp_snow_age = "wrf_470"` already ages snow at night as e5c0859 does,
+  the glacier energy integrals already use the glacier column's own heat
+  capacity, and e5c0859's other edits are dead in WRF or arithmetic-neutral.
+  `noahmp_snow_age = "wrf_461"` keeps WRF 4.6.1's daytime-only aging.
 - **MPAS-Ocean, MPAS-Seaice and MALI land ice,** ported a piece at a time,
   each word-exact to MPAS v8.4.2 on CUDA and Metal, behind the MPAS coupling
   spine (`woof hex ice verify` and friends). So far:
