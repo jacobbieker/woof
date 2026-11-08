@@ -70,8 +70,10 @@ written from the published papers (below), never from these files.
 
 ## Phases
 
-Each phase is one PR, graded bitwise against its oracle on CUDA (pb) and
-Metal (mac) with `GPUWM_WRF_EXACT=0` and `=1`.
+Each phase is one PR, tested on CUDA (pb) and Metal (mac) with
+`GPUWM_WRF_EXACT=0` and `=1`.  Every port of a WRF source (all phases but
+P8 and P9) is graded bitwise against its oracle; the clean-room P8 and P9
+are graded against the P7 port within stated tolerances instead.
 
 | Phase | Content | WRF source | Status |
 |---|---|---|---|
@@ -101,6 +103,8 @@ tolerance, never bitwise.
 ## Refusals until then
 
 `woof/namelist_chem.py` refuses `chem_opt = 1, 2, 41` as "being ported",
-pointing here, and refuses every CBM-Z/MOSAIC package by name, citing the
+pointing here, and refuses every CBM-Z/MOSAIC package by name (including
+`chem_opt = 120`, CBMZ_BB_KPP, which shares CBM-Z's emission and
+initial-condition modules), citing the
 terms and the planned opt-in.  Every other uncarried package keeps the
 generic refusal.

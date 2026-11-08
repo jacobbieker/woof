@@ -52,16 +52,21 @@ FORK_CHEM_OPT_SETS = {18: "smoke"}
 #: Packages on the coupled gas-aerosol roadmap
 #: (docs/chem-coupled-aerosol-roadmap.md): ported in pieces, refused until
 #: the whole package runs.
-PLANNED_CHEM_OPT = {1: "RADM2", 2: "RADM2SORG", 41: "RADM2SORG_AQCHEM"}
-#: Packages built on CBM-Z (chem/module_cbmz*.F) or MOSAIC
-#: (chem/module_mosaic*.F), whose Battelle/PNNL "Terms of Use" headers
-#: are not a licence grant; they are planned only as an opt-in package.
+PLANNED_CHEM_OPT = {
+    1: ("RADM2", "the RADM2 gas phase"),
+    2: ("RADM2SORG", "the RADM2 gas phase with the MADE/SORGAM aerosol"),
+    41: ("RADM2SORG_AQCHEM", "the RADM2 gas phase with the MADE/SORGAM "
+                             "aerosol and CMAQ aqueous chemistry")}
+#: Packages built on CBM-Z (chem/module_cbmz*.F; CBMZ_BB_KPP shares its
+#: emissions and initial-condition modules) or MOSAIC (chem/module_mosaic*.F),
+#: whose Battelle/PNNL "Terms of Use" headers are not a licence grant; they
+#: are planned only as an opt-in package.
 PNNL_TERMS_CHEM_OPT = {
     5: "CBMZ", 6: "CBMZ_BB", 7: "CBMZ_MOSAIC_4BIN", 8: "CBMZ_MOSAIC_8BIN",
     9: "CBMZ_MOSAIC_4BIN_AQ", 10: "CBMZ_MOSAIC_8BIN_AQ", 30: "CBMZSORG",
     31: "CBMZ_MOSAIC_DMS_4BIN", 32: "CBMZ_MOSAIC_DMS_4BIN_AQ",
     33: "CBMZ_MOSAIC_DMS_8BIN", 34: "CBMZ_MOSAIC_DMS_8BIN_AQ",
-    35: "CBMZSORG_AQ", 170: "CBMZ_MOSAIC_KPP",
+    35: "CBMZSORG_AQ", 120: "CBMZ_BB_KPP", 170: "CBMZ_MOSAIC_KPP",
     198: "SAPRC99_MOSAIC_4BIN_VBS2_KPP", 201: "MOZART_MOSAIC_4BIN_KPP",
     202: "MOZART_MOSAIC_4BIN_AQ_KPP", 203: "SAPRC99_MOSAIC_8BIN_VBS2_AQ_KPP",
     204: "SAPRC99_MOSAIC_8BIN_VBS2_KPP", 501: "CBMZ_CAM_MAM3_NOAQ",
@@ -73,9 +78,9 @@ PNNL_TERMS_CHEM_OPT = {
 def package_status(chem_opt: int) -> str:
     """Why an uncarried chem_opt is uncarried, when WOOF knows more."""
     if chem_opt in PLANNED_CHEM_OPT:
-        return (f"  {PLANNED_CHEM_OPT[chem_opt]} is being ported (RADM2 gas "
-                "phase, MADE/SORGAM aerosol, CMAQ aqueous chemistry; "
-                "docs/chem-coupled-aerosol-roadmap.md) and is refused until "
+        name, content = PLANNED_CHEM_OPT[chem_opt]
+        return (f"  {name} ({content}) is being ported "
+                "(docs/chem-coupled-aerosol-roadmap.md) and is refused until "
                 "the whole package runs.")
     if chem_opt in PNNL_TERMS_CHEM_OPT:
         return (f"  {PNNL_TERMS_CHEM_OPT[chem_opt]} is built on CBM-Z/MOSAIC, "
