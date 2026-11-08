@@ -76,7 +76,7 @@ class MetalFunction:
         if len(args) != len(visible):
             raise LaunchError(f"{self.name}: {len(args)} arguments for {len(visible)} parameters")
         # inside a CUDA-graph capture: recorded, run by each Graph.launch
-        if _capture.record_launch(self, grid, block, tuple(args), shared_mem):
+        if _capture.record_launch(self, grid, block, tuple(args), shared_mem, stream):
             return
         self._launch(grid, block, args, shared_mem)
 

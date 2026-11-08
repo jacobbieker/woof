@@ -56,8 +56,11 @@ def recording():
 
 
 def begin(stream):
-    if recording() is not None:
+    rec = recording()
+    if rec is not None and rec.refused is None:
         raise GraphCaptureRefused("a graph capture is already active on this thread")
+    # a refused capture whose end_capture never ran (its body raised) is
+    # abandoned: nothing of it can be replayed
     _STATE.rec = _Recording(stream)
 
 
@@ -83,22 +86,36 @@ def refuse(what: str):
     if rec.refused is None:
         rec.refused = what
     if os.environ.get("WOOF_GRAPH_CAPTURE_STRICT") == "1":
+        _STATE.rec = None
         raise GraphCaptureRefused(f"{what} during a CUDA-graph capture")
 
 
-def record_launch(function, grid, block, args, shared_mem) -> bool:
+def record_launch(function, grid, block, args, shared_mem, stream=None) -> bool:
     """Record a kernel launch; True when recorded (the caller does not run it)."""
     rec = recording()
     if rec is None:
+        return False
+    if not _on_capturing_stream(rec, stream):
+        # work outside the capturing stream (a body that raised and left its
+        # `with stream:`, or another stream's launch): it runs now, and the
+        # capture cannot be a replay of the stream's work
+        refuse("a launch on another stream")
         return False
     kept = tuple(a.copy() if isinstance(a, np.ndarray) else a for a in args)
     rec.steps.append(("kernel", function, grid, block, kept, shared_mem))
     return True
 
 
+def _on_capturing_stream(rec, stream=None) -> bool:
+    """The work goes to the capturing stream: the one it names, else the
+    thread's current stream."""
+    from woof.backend.facade.cuda import get_current_stream
+    return (stream if stream is not None else get_current_stream()) is rec.stream
+
+
 def record_host(callback, arg) -> bool:
     rec = recording()
-    if rec is None:
+    if rec is None or not _on_capturing_stream(rec):
         return False
     rec.steps.append(("host", callback, arg))
     return True
@@ -106,7 +123,7 @@ def record_host(callback, arg) -> bool:
 
 def record_event(event) -> bool:
     rec = recording()
-    if rec is None:
+    if rec is None or not _on_capturing_stream(rec):
         return False
     rec.steps.append(("event", event))
     return True

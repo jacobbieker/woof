@@ -51,7 +51,14 @@ def _capture(cp, body):
     stream = cp.cuda.Stream(non_blocking=True)
     with stream:
         stream.begin_capture()
-        body()
+        try:
+            body()
+        except BaseException:
+            try:
+                stream.end_capture()
+            except Exception:       # the body's error is the one to report
+                pass
+            raise
         graph = stream.end_capture()
     return stream, graph
 
@@ -138,3 +145,23 @@ def test_an_operation_the_facade_cannot_replay_refuses_the_capture(cp, operation
     # the refusal ends the capture: the next launch runs
     _step(bump, copy_scaled, x, y, 1.0)
     assert cp.asnumpy(x)[0] != 0.0
+
+
+def test_a_capture_whose_body_raises_does_not_swallow_later_launches(cp):
+    _mlx(cp)
+    bump, copy_scaled = _functions(cp)
+    x, y = cp.zeros(N, dtype=cp.float32), cp.zeros(N, dtype=cp.float32)
+    stream = cp.cuda.Stream(non_blocking=True)
+    with pytest.raises(ZeroDivisionError):
+        with stream:
+            stream.begin_capture()
+            _step(bump, copy_scaled, x, y, 1.0)
+            1 / 0
+    # outside the capturing stream: the launch runs, and a new capture works
+    _step(bump, copy_scaled, x, y, 1.0)
+    assert cp.asnumpy(x)[0] == 1.0
+    stream2, graph = _capture(cp, lambda: _step(bump, copy_scaled, x, y, 1.0))
+    with stream2:
+        graph.launch(stream2)
+    stream2.synchronize()
+    assert cp.asnumpy(x)[0] == np.float32(np.float32(1.0) * np.float32(1.0009765625) + np.float32(1.0))
