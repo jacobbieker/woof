@@ -32,6 +32,8 @@ __all__ = [
     "NOAH_ORACLE_DIR",
     "NOAH_ORACLE_FILES",
     "NOAH_GLACIAL_ORACLE_FILES",
+    "NOAH_WRF_HYDRO_ORACLE_FILES",
+    "WRF_HYDRO_COLUMNS",
     "NoahOracleFixture",
     "load_noah_oracle",
     "noah_port_outputs",
@@ -69,6 +71,24 @@ NOAH_GLACIAL_ORACLE_FILES = {
                                  usemonalb=False, rdlai2d=False),
     "noah-lsm-glacial-frpcpn.csv": dict(opt_thcnd=1, frpcpn=True,
                                         usemonalb=False, rdlai2d=False),
+}
+
+#: The WRF_HYDRO fixture: the same 80 columns and driver switches as
+#: ``noah-lsm.csv``, with lsm and SFLX compiled with ``-DWRF_HYDRO`` and the
+#: three exchange planes ``module_sf_noahdrv.F:2607`` adds (``build.sh``'s
+#: hydro pass).  Each column carries one of five ponded heads.
+NOAH_WRF_HYDRO_ORACLE_FILES = {
+    "noah-lsm-wrf-hydro.csv": dict(opt_thcnd=1, frpcpn=False,
+                                   usemonalb=False, rdlai2d=False),
+}
+
+#: ``launch_noah(wrf_hydro=...)`` plane -> (fixture input column, fixture
+#: output column).  ``infxsrt`` and ``soldrain`` go in as negative sentinels,
+#: so a column lsm did not write still carries one afterwards.
+WRF_HYDRO_COLUMNS = {
+    "sfcheadrt": ("sfcheadrt_in", "sfcheadrt"),
+    "infxsrt": ("infxsrt_in", "infxsrt"),
+    "soldrain": ("soldrain_in", "soldrain"),
 }
 
 #: ``run_lsm.F90:42-44``.  The harness fixes these rather than sweeping them,
@@ -184,7 +204,8 @@ def _column(rows, key) -> np.ndarray:
 def load_noah_oracle(name: str = "noah-lsm.csv",
                      directory: Path | None = None) -> NoahOracleFixture:
     """Load one fixture CSV into ``launch_noah``'s ``(1, ncase)`` layout."""
-    known = {**NOAH_ORACLE_FILES, **NOAH_GLACIAL_ORACLE_FILES, **NOAH_UA_ORACLE_FILES}
+    known = {**NOAH_ORACLE_FILES, **NOAH_GLACIAL_ORACLE_FILES, **NOAH_UA_ORACLE_FILES,
+             **NOAH_WRF_HYDRO_ORACLE_FILES}
     if name not in known:
         raise ValueError(f"{name!r} is not a packaged Noah oracle fixture; "
                          f"expected one of {sorted(known)}")
@@ -217,6 +238,10 @@ def load_noah_oracle(name: str = "noah-lsm.csv",
     reference = {field: _column(rows, column)
                  for field, column in OUTPUT_COLUMNS.items()
                  if column in present}
+    if name in NOAH_WRF_HYDRO_ORACLE_FILES:
+        for field, (column_in, column_out) in WRF_HYDRO_COLUMNS.items():
+            inputs[field] = _column(rows, column_in)
+            reference[field] = _column(rows, column_out)
     for field in ("flx4", "fvb", "fbur", "fgsn", "t2", "th2", "q2"):
         if field in rows[0]: reference[field] = _column(rows, field)
     soil_reference = {}
@@ -254,6 +279,9 @@ def noah_port_outputs(fixture: NoahOracleFixture) -> dict[str, np.ndarray]:
     }
     for field, value in fixture.inputs.items():
         device[field] = cp.asarray(value.copy())
+    wrf_hydro = None
+    if fixture.name in NOAH_WRF_HYDRO_ORACLE_FILES:
+        wrf_hydro = {field: device.pop(field) for field in WRF_HYDRO_COLUMNS}
     shape = fixture.ivgtyp.shape
     for field in ("noahres", "reslin", "chklowq"):
         device[field] = cp.zeros(shape, dtype=cp.float32)
@@ -287,7 +315,9 @@ def noah_port_outputs(fixture: NoahOracleFixture) -> dict[str, np.ndarray]:
         launch_noah(device, params, FIXTURE_DT, FIXTURE_DZS,
                     isurban=FIXTURE_ISURBAN, isice=FIXTURE_ISICE,
                     xice_threshold=FIXTURE_XICE_THRESHOLD,
-                    itimestep=FIXTURE_ITIMESTEP, **switches)
+                    itimestep=FIXTURE_ITIMESTEP, wrf_hydro=wrf_hydro, **switches)
+        if wrf_hydro is not None:
+            device.update(wrf_hydro)
     if "t2" in fixture.reference:
         from woof.core.noah_sfcdiags import refresh,refresh_ua
         from woof.core import constants as c

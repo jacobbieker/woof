@@ -1,0 +1,12 @@
+d3eec4adcb9e3f11a29776adec9fdf92515e226998cfaf7060742b61b49a8b44  <nemo-5.0.2-checkout>/src/OCE/par_kind.F90
+60bf6b1d2eb9732ca1f1758f66fabc3363a60a522a6ec705fc9c0ed7eb7156e1  <nemo-5.0.2-checkout>/src/OCE/TRA/traqsr.F90
+7dc2bdf98ed47a275d72dfdd66f807cb370db34f7a51c780867702001e278c25  <nemo-5.0.2-checkout>/src/OCE/do_loop_substitute.h90
+fb18c1cb2d0baa3807a7b2d5be30f363349676cb79e23871467c25da09a03ba3  <nemo-5.0.2-checkout>/src/OCE/DOM/domzgr_substitute.h90
+a536033c62f7af3c898478f11e7e55729035836aa538f5a62a8a371573aab5f0  tra_qsr.inc
+776c1dd996bf0c3f2e04ac7c5457113823bbfa6994f6321808b3a737d7440abd  qsr_2bd.inc
+61f50b48372f001b338abf025a98e980ecc8450e3a726421526c626abff9dec7  qsr_ext_lev.inc
+c87a0c36b55d4c77cb9689130a302ea26cde8ea0b0ca776d9ae6a7f8585fb803  /repo/optional<nemo-5.0.2-checkout>/oracle/traqsr_harness.F90
+d2d6ab24651bfef9fa73307ef40f68ebd1d7ceb968c10468d8fe17451d4af881  /repo/optional<nemo-5.0.2-checkout>/oracle/run_traqsr.F90
+b9d10544e28e39a680e7c5f3a4e63bb1b43af631ca697dcaf67e177c8c695970  /repo/optional<nemo-5.0.2-checkout>/oracle/build.sh
+8751fce012396adbd29cd4d3de3b694def7e43b71f25e4cc227564239c86fefb  traqsr-grid.csv
+7bb0e3c80f14057ddc9532d2b23005a45ae6ebb60775fb213ada02e878b56604  traqsr-steps.csv
