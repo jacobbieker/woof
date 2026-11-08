@@ -1464,17 +1464,14 @@ def test_sase_moist_n2_is_not_exempt_from_the_restart_config_match(tmp_path):
          # (hailcast_opt, haildt; 97e9a3ca061, in the 1.1.0 export, and
          # 1.1.4's hailcast_version, its output-only port selector),
          # band-resolved RRTMG fluxes (rrtmg_spectral_output, ed30e1340;
-         # tests/test_rrtmg_spectral_output.py), the radtran spectral
+         # tests/test_rrtmg_spectral_output.py) and the radtran spectral
          # diagnostic's RT_* planes (radtran_*, f7ff5a72d and c0e5c1c14;
-         # tests/test_radtran_wrf_diagnostic.py), WRF-Solar diagnostics
-         # (solar_diagnostics, 1ea7cc084) and AVGFLX_* means (do_avgflx_em,
-         # c783c9393).
+         # tests/test_radtran_wrf_diagnostic.py).
          "hailcast_opt", "haildt", "hailcast_version", "rrtmg_spectral_output",
          "radtran_wavelengths", "radtran_interval_s", "radtran_umu",
          "radtran_phi", "radtran_mol_abs_param", "radtran_solver",
-         "radtran_streams", "radtran_pseudospherical", "radtran_aerosol",
-         "solar_diagnostics", "do_avgflx_em"}), (
-        # thompson_cloud_surface_booking (correct mode WB1, lane/290-A4)
+         "radtran_streams", "radtran_pseudospherical", "radtran_aerosol"}), (
+        # thompson_cloud_surface_booking (correct mode WB1, development branch)
         # joined with its own inertness proof
         # (tests/test_correct_mode_water_budget.py
         # test_wb1_thompson_books_settled_cloud_and_changes_nothing_else:

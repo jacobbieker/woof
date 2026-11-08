@@ -14,7 +14,7 @@ calm-wave period and direction use zero. A dry cell's stored eta may equal its
 bed elevation; water-level products include only ocean or inundated cells.
 """
 from __future__ import annotations
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, is_dataclass
 from typing import Any, Mapping, Protocol, runtime_checkable
 import math
 
@@ -91,10 +91,11 @@ def validate_plane(array: DeviceArray, shape: tuple[int,int], name: str) -> None
         raise ValueError(f"{name} needs a non-null writable device buffer")
 
 def validate_fields(value: Any, grid: OceanGrid) -> None:
-    for f in fields(value):
-        item=getattr(value,f.name)
-        if f.name not in ("datum", "source", "time_seconds"):
-            validate_plane(item,grid.shape,f.name)
+    items=({f.name:getattr(value,f.name) for f in fields(value)} if is_dataclass(value)
+           else value if isinstance(value,Mapping) else vars(value))
+    for name,item in items.items():
+        if name not in ("datum", "source", "time_seconds"):
+            validate_plane(item,grid.shape,name)
 
 @runtime_checkable
 class WaveSolver(Protocol):
@@ -117,3 +118,20 @@ class SurgeSolver(Protocol):
 class SolverFactory(Protocol):
     def __call__(self, grid: OceanGrid, bathymetry: Bathymetry, *,
                  config: Mapping[str, Any]) -> WaveSolver | SurgeSolver: ...
+
+# An ocean model across WRF's coupler (woof/ocean/wrf_cpl.py, WRF 4.6.1
+# frame/module_cpl.F).  It is handed the coupling-interval averages of
+# cpl_snd2's fields and returns the three planes cpl_rcv merges.  No solver
+# implements it in this tree: NEMO is not ported (docs/coupling/WRF-HYDRO-NEMO.md).
+@dataclass(frozen=True)
+class OceanSurface:
+    sst: DeviceArray        # K
+    uoce: DeviceArray       # surface current, grid x, m/s
+    voce: DeviceArray       # surface current, grid y, m/s
+
+@runtime_checkable
+class ExternalOcean(Protocol):
+    def set_fluxes(self, fluxes: Any) -> None: ...   # wrf_cpl.AtmosphereToOcean
+    def step(self, dt: float) -> None: ...
+    @property
+    def surface(self) -> OceanSurface: ...

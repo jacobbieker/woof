@@ -22,6 +22,7 @@ from __future__ import annotations
 import csv
 from dataclasses import dataclass
 from pathlib import Path
+from woof import data_assets
 
 import numpy as np
 
@@ -31,6 +32,8 @@ __all__ = [
     "NOAH_ORACLE_DIR",
     "NOAH_ORACLE_FILES",
     "NOAH_GLACIAL_ORACLE_FILES",
+    "NOAH_WRF_HYDRO_ORACLE_FILES",
+    "WRF_HYDRO_COLUMNS",
     "NoahOracleFixture",
     "load_noah_oracle",
     "noah_port_outputs",
@@ -40,7 +43,7 @@ __all__ = [
 ]
 
 #: Where the packaged fixture lives.
-NOAH_ORACLE_DIR = Path(__file__).resolve().parents[1] / "data" / "noah" / "oracle"
+NOAH_ORACLE_DIR = data_assets.verify_oracle_path("noah/oracle")
 
 #: fixture file -> the driver switches ``run_lsm.F90`` was invoked with.
 #: These are the four knobs :func:`woof.core.noah.launch_noah` also takes;
@@ -70,8 +73,38 @@ NOAH_GLACIAL_ORACLE_FILES = {
                                         usemonalb=False, rdlai2d=False),
 }
 
+#: The WRF_HYDRO fixture: the same 80 columns and driver switches as
+#: ``noah-lsm.csv``, with lsm and SFLX compiled with ``-DWRF_HYDRO`` and the
+#: three exchange planes ``module_sf_noahdrv.F:2607`` adds (``build.sh``'s
+#: hydro pass).  Each column carries one of five ponded heads.
+NOAH_WRF_HYDRO_ORACLE_FILES = {
+    "noah-lsm-wrf-hydro.csv": dict(opt_thcnd=1, frpcpn=False,
+                                   usemonalb=False, rdlai2d=False),
+}
+
+#: ``launch_noah(wrf_hydro=...)`` plane -> (fixture input column, fixture
+#: output column).  ``infxsrt`` and ``soldrain`` go in as negative sentinels,
+#: so a column lsm did not write still carries one afterwards.
+WRF_HYDRO_COLUMNS = {
+    "sfcheadrt": ("sfcheadrt_in", "sfcheadrt"),
+    "infxsrt": ("infxsrt_in", "infxsrt"),
+    "soldrain": ("soldrain_in", "soldrain"),
+}
+
 #: ``run_lsm.F90:42-44``.  The harness fixes these rather than sweeping them,
 #: so they are stated here with their source rather than read from the CSV.
+NOAH_UA_ORACLE_FILES={}
+for _name in ("noah-lsm-ua.csv","noah-lsm-ua-monalb.csv"):
+    NOAH_UA_ORACLE_FILES[_name]=dict(opt_thcnd=1,frpcpn=False,
+        usemonalb="monalb" in _name,rdlai2d="monalb" in _name,ua_phys=True)
+
+NOAH_UA_ORACLE_FILES["noah-lsm-extended.csv"]=dict(NOAH_ORACLE_FILES["noah-lsm.csv"])
+NOAH_UA_ORACLE_FILES["noah-mosaic-ua.csv"]=dict(NOAH_UA_ORACLE_FILES["noah-lsm-ua.csv"],mosaic=True)
+NOAH_UA_ORACLE_FILES["noah-mosaic-false.csv"]=dict(NOAH_ORACLE_FILES["noah-lsm.csv"],mosaic=True)
+for _name in ("noah-lsm-ua.csv","noah-lsm-ua-monalb.csv","noah-mosaic-ua.csv"):
+    NOAH_UA_ORACLE_FILES[_name.replace(".csv","-pc-control.csv")]=dict(NOAH_UA_ORACLE_FILES[_name])
+for _name in ("noah-mosaic-ua-two.csv","noah-mosaic-ua-two-pc-control.csv"):
+    NOAH_UA_ORACLE_FILES[_name]=dict(NOAH_UA_ORACLE_FILES["noah-mosaic-ua.csv"],mosaic_cat=2)
 FIXTURE_DT = 60.0
 FIXTURE_ITIMESTEP = 2
 #: ``init_soil_depth_2``'s dzs (``share/module_soil_pre.F:1138``), which is
@@ -171,11 +204,13 @@ def _column(rows, key) -> np.ndarray:
 def load_noah_oracle(name: str = "noah-lsm.csv",
                      directory: Path | None = None) -> NoahOracleFixture:
     """Load one fixture CSV into ``launch_noah``'s ``(1, ncase)`` layout."""
-    known = {**NOAH_ORACLE_FILES, **NOAH_GLACIAL_ORACLE_FILES}
+    known = {**NOAH_ORACLE_FILES, **NOAH_GLACIAL_ORACLE_FILES, **NOAH_UA_ORACLE_FILES,
+             **NOAH_WRF_HYDRO_ORACLE_FILES}
     if name not in known:
         raise ValueError(f"{name!r} is not a packaged Noah oracle fixture; "
                          f"expected one of {sorted(known)}")
     directory = Path(directory) if directory is not None else NOAH_ORACLE_DIR
+    data_assets.require_verify_oracle(directory)
     with (directory / name).open(newline="", encoding="ascii") as fh:
         rows = list(csv.DictReader(fh))
     if not rows:
@@ -191,6 +226,8 @@ def load_noah_oracle(name: str = "noah-lsm.csv",
 
     inputs = {field: _column(rows, column)
               for field, column in INPUT_COLUMNS.items()}
+    for key in ("tile2_category","tile2_tsk","tile2_snow","tile2_snowh","w1","w2"):
+        if key in rows[0]: inputs[key]=_column(rows,key)
     for field in ("smois", "tslb", "sh2o"):
         profile = np.empty((4, 1, len(rows)), dtype=np.float32)
         for layer in range(4):
@@ -201,6 +238,12 @@ def load_noah_oracle(name: str = "noah-lsm.csv",
     reference = {field: _column(rows, column)
                  for field, column in OUTPUT_COLUMNS.items()
                  if column in present}
+    if name in NOAH_WRF_HYDRO_ORACLE_FILES:
+        for field, (column_in, column_out) in WRF_HYDRO_COLUMNS.items():
+            inputs[field] = _column(rows, column_in)
+            reference[field] = _column(rows, column_out)
+    for field in ("flx4", "fvb", "fbur", "fgsn", "t2", "th2", "q2"):
+        if field in rows[0]: reference[field] = _column(rows, field)
     soil_reference = {}
     for field in SOIL_OUTPUT_COLUMNS:
         profile = np.empty((4, 1, len(rows)), dtype=np.float32)
@@ -236,16 +279,54 @@ def noah_port_outputs(fixture: NoahOracleFixture) -> dict[str, np.ndarray]:
     }
     for field, value in fixture.inputs.items():
         device[field] = cp.asarray(value.copy())
+    wrf_hydro = None
+    if fixture.name in NOAH_WRF_HYDRO_ORACLE_FILES:
+        wrf_hydro = {field: device.pop(field) for field in WRF_HYDRO_COLUMNS}
     shape = fixture.ivgtyp.shape
     for field in ("noahres", "reslin", "chklowq"):
         device[field] = cp.zeros(shape, dtype=cp.float32)
     device["smcrel"] = cp.zeros((4, *shape), dtype=cp.float32)
     device["ebal"] = cp.zeros(shape, dtype=cp.int32)
 
-    launch_noah(device, params, FIXTURE_DT, FIXTURE_DZS,
-                isurban=FIXTURE_ISURBAN, isice=FIXTURE_ISICE,
-                xice_threshold=FIXTURE_XICE_THRESHOLD,
-                itimestep=FIXTURE_ITIMESTEP, **fixture.switches)
+    if fixture.switches.get("ua_phys"):
+        for name in ("flx4","fvb","fbur","fgsn"):
+            device[name]=cp.zeros(shape,dtype=cp.float32)
+    switches=dict(fixture.switches)
+    mosaic=switches.pop("mosaic",False)
+    ntiles=switches.pop("mosaic_cat",1)
+    if mosaic:
+        from woof.core.noah_mosaic import launch_noah_mosaic,MOSAIC_TILE_FIELDS,MOSAIC_SOIL_FIELDS,load_mosaic_categories
+        for name in MOSAIC_TILE_FIELDS:
+            device[name]=cp.ascontiguousarray(cp.stack([device[name.removesuffix("_mosaic")]]*ntiles))
+        for name in MOSAIC_SOIL_FIELDS:
+            device[name]=cp.ascontiguousarray(cp.concatenate([device[name.removesuffix("_mosaic")]]*ntiles))
+        device["mosaic_cat_index"]=cp.ascontiguousarray(device["ivgtyp"][None,...])
+        device["landusef2"]=cp.ones((1,*shape),dtype=cp.float32)
+        if ntiles==2:
+            for name in ("tsk","snow","snowh"):
+                device[name+"_mosaic"][1]=device["tile2_"+name]
+            device["mosaic_cat_index"]=cp.ascontiguousarray(cp.stack([device["ivgtyp"],device["tile2_category"].astype(cp.int32)]))
+            device["landusef2"]=cp.ascontiguousarray(cp.stack([device["w1"],device["w2"]]))
+        categories=load_mosaic_categories("MODIFIED_IGBP_MODIS_NOAH",isurban=13,isice=15,iswater=17)
+        launch_noah_mosaic(device,params,FIXTURE_DT,FIXTURE_DZS,
+            mosaic_cat=ntiles,categories=categories,xice_threshold=FIXTURE_XICE_THRESHOLD,
+            itimestep=FIXTURE_ITIMESTEP,**switches)
+    else:
+        launch_noah(device, params, FIXTURE_DT, FIXTURE_DZS,
+                    isurban=FIXTURE_ISURBAN, isice=FIXTURE_ISICE,
+                    xice_threshold=FIXTURE_XICE_THRESHOLD,
+                    itimestep=FIXTURE_ITIMESTEP, wrf_hydro=wrf_hydro, **switches)
+        if wrf_hydro is not None:
+            device.update(wrf_hydro)
+    if "t2" in fixture.reference:
+        from woof.core.noah_sfcdiags import refresh,refresh_ua
+        from woof.core import constants as c
+        for name in ("t2","th2","q2"): device[name]=cp.zeros(shape,dtype=cp.float32)
+        if fixture.switches.get("ua_phys"):
+            refresh_ua(device,device["qv1"],device["sfctmp"],rcp=c.RCP)
+        else:
+            refresh(device,device["qv1"],rd=c.RD,cp_air=c.CP,p0=c.P0,rcp=c.RCP,active_floor=1.e-5)
+        for name in ("flx4","fvb","fbur","fgsn"): device.setdefault(name,cp.zeros(shape,dtype=cp.float32))
     return {name: cp.asnumpy(value) for name, value in device.items()
             if name not in ("ivgtyp", "isltyp", "ebal")}
 
@@ -339,9 +420,7 @@ def measure_noah_parity(fixture: NoahOracleFixture,
     if not include_glacial:
         keep &= ~fixture.glacial
     result: dict[str, FieldParity] = {}
-    for field in OUTPUT_COLUMNS:
-        if field not in fixture.reference:
-            continue
+    for field in fixture.reference:
         result[field] = _worst(fixture, field, port[field],
                                fixture.reference[field], keep)
     for field in SOIL_OUTPUT_COLUMNS:

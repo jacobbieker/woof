@@ -20,16 +20,14 @@ def _import(tmp_path, inp=INPUT_TEXT, wps=WPS_TEXT):
 
 # ---- mp_physics = 55 (Jensen-ISHMAEL) -------------------------------------
 
-def test_ishmael_is_refused_by_name_instead_of_running_morrison(tmp_path):
+# Gate successor: test_ishmael_is_refused_by_name_instead_of_running_morrison; the assertions cover the admitted behavior.
+def test_ishmael_imports_natively_without_morrison_substitution(tmp_path):
+    from woof.experiment import build_experiment
     inp = INPUT_TEXT.replace("mp_physics = 10, 10", "mp_physics = 55, 55")
-    with pytest.raises(NamelistRefusal) as caught:
-        _import(tmp_path, inp)
-    message = str(caught.value)
-    assert "mp_physics=55 (Jensen-ISHMAEL" in message
-    assert "is not ported" in message
-    # The breakage is named: what Morrison would do differently.
-    assert "spherical" in message and "aspect ratio" in message
-    assert caught.value.keys == (("physics", "mp_physics"),)
+    text, report = _import(tmp_path, inp)
+    experiment = build_experiment(tomllib.loads(text), source="native mp55")
+    assert all(domain.run.mp_physics == 55 for domain in experiment.domains)
+    assert not any(row.key == "mp_physics" for row in report.substitutions)
 
 
 def test_morrison_by_its_own_number_imports_with_no_substitution(tmp_path):
@@ -41,26 +39,28 @@ def test_morrison_by_its_own_number_imports_with_no_substitution(tmp_path):
     assert not any(s.key == "mp_physics" for s in report.substitutions)
 
 
-def test_ishmael_refusal_lists_beside_other_refusals(tmp_path):
-    # The refusal is keyed, so the all-refusals loop keeps checking the
-    # pair with a stand-in scheme and reports the next problem too.
+# Gate successor: test_ishmael_refusal_lists_beside_other_refusals; the assertions cover the admitted behavior.
+def test_ishmael_admission_keeps_unrelated_refusals(tmp_path):
+    # Retiring the scheme refusal does not admit invalid theta settings.
     inp = INPUT_TEXT.replace("mp_physics = 10, 10", "mp_physics = 55, 55") \
         .replace(" use_theta_m = 0,", " use_theta_m = 7,")
     with pytest.raises(NamelistRefusal) as caught:
         _import(tmp_path, inp)
     message = str(caught.value)
-    assert "Jensen-ISHMAEL" in message and "use_theta_m" in message
+    assert "use_theta_m" in message
+    assert "is not ported" not in message
 
 
-def test_config_loader_names_ishmael_too():
+# Gate successor: test_config_loader_names_ishmael_too; the assertions cover the admitted behavior.
+def test_config_loader_retires_only_the_ishmael_refusal():
     from woof.config import unported_mp_scheme_refusal
 
     refusal = unported_mp_scheme_refusal(55)
-    assert refusal is not None and "Jensen-ISHMAEL" in refusal
-    assert refusal.endswith("got 55.")
-    # The P3 and WDM siblings answer through the same lookup.
-    assert "P3" in unported_mp_scheme_refusal(52)
-    assert "WDM7" in unported_mp_scheme_refusal(26)
+    assert refusal is None
+    # These P3 and WDM ports are independently qualified and already merged.
+    assert unported_mp_scheme_refusal(52) is None
+    assert unported_mp_scheme_refusal(26) is None
+    assert unported_mp_scheme_refusal(11) is None
     assert unported_mp_scheme_refusal(10) is None
 
 
@@ -287,6 +287,18 @@ def test_uncarried_chemistry_package_is_refused_with_the_menu(tmp_path):
     assert "chem_opt = 300 (gocart_simple)" in message
     assert "chem_opt = 401 (dust)" in message
     assert "none of the requested species" in message
+    assert "RADM2SORG (the RADM2 gas phase with the MADE/SORGAM aerosol) is being ported" in message
+
+
+def test_cbmz_mosaic_packages_are_refused_naming_their_terms(tmp_path):
+    for value, name in ((9, "CBMZ_MOSAIC_4BIN_AQ"), (120, "CBMZ_BB_KPP"),
+                        (170, "CBMZ_MOSAIC_KPP")):
+        with pytest.raises(NamelistRefusal) as caught:
+            _import(tmp_path, _with_chem(f" chem_opt = {value}, {value},\n"))
+        message = str(caught.value)
+        assert f"chem_opt = {value} is not carried" in message
+        assert f"{name} is built on CBM-Z/MOSAIC" in message
+        assert "Battelle/PNNL terms of use" in message
 
 
 def test_per_domain_chemistry_switch_is_refused(tmp_path):
@@ -327,6 +339,13 @@ def test_chemistry_registry_table_is_wrfs_471_chem_vocabulary():
 
 # ---- hailcast_opt (GPU WRF diagnostic) -------------------------------------
 
+def test_omitted_hailcast_preserves_stock_option_off_history_contract(tmp_path):
+    text, _ = _import(tmp_path)
+    from woof.config import RunConfig
+    shared = tomllib.loads(text)["shared"]
+    assert shared.get("hailcast_opt", RunConfig.__dataclass_fields__["hailcast_opt"].default) == -1
+
+
 def test_hailcast_request_reaches_the_gpu_diagnostic(tmp_path):
     inp = INPUT_TEXT.replace(
         "&physics\n", "&physics\n hailcast_opt = 1, 1,\n haildt = 60, 60,\n")
@@ -345,19 +364,23 @@ def test_hailcast_off_preserves_explicit_opt_out(tmp_path):
     assert shared["hailcast_opt"] == 0
     assert shared["haildt"] == 0
 
-# ---- dfi_opt (refused; WOOF has no digital filter) ---------------------------
+# ---- DFI carries the native controls through the stock door -----------------
 
-def test_digital_filter_request_is_refused_by_name(tmp_path):
-    # Until 2026-10-12 this imported as "forecast from the unfiltered
-    # analysis" and said the later hours were the requested configuration.
-    # The filter changes the state every later hour integrates from.
-    inp = INPUT_TEXT + "&dfi_control\n dfi_opt = 3,\n dfi_nfilter = 7,\n/\n"
-    with pytest.raises(NamelistRefusal) as caught:
-        _import(tmp_path, inp)
-    message = str(caught.value)
-    assert "&dfi_control dfi_opt = " in message
-    assert "WOOF has no digital filter" in message
-    assert "Next: set dfi_opt = 0." in message
+@pytest.mark.parametrize('selector',(1,2,3))
+def test_digital_filter_request_is_carried(tmp_path,selector):
+    inp = INPUT_TEXT + f"&dfi_control\n dfi_opt = {selector},\n dfi_nfilter = 7,\n dfi_bckstop_year=1999, dfi_bckstop_month=5, dfi_bckstop_day=3, dfi_bckstop_hour=11, dfi_bckstop_minute=58,\n dfi_fwdstop_year=1999, dfi_fwdstop_month=5, dfi_fwdstop_day=3, dfi_fwdstop_hour=12, dfi_fwdstop_minute=2,\n/\n"
+    text,report = _import(tmp_path,inp)
+    shared = tomllib.loads(text)['shared']
+    assert shared['dfi_opt'] == selector
+    assert shared['dfi_nfilter'] == 7
+    assert shared['dfi_savehydmeteors'] == 0
+    assert not any(s.key == 'dfi_opt' for s in report.substitutions)
+
+
+def test_dfi_off_keeps_its_companions_out_of_forecast_identity(tmp_path):
+    a,_ = _import(tmp_path)
+    b,_ = _import(tmp_path,INPUT_TEXT+' &dfi_control\n dfi_opt=0, dfi_nfilter=4, /\n')
+    assert tomllib.loads(a) == tomllib.loads(b)
 
 # ---- &stoch selectors with no consumer --------------------------------------
 
@@ -387,3 +410,6 @@ def test_unconsumed_stochastic_selector_names_the_lost_operation(
     assert ("only the RAND_PERT history and restart field would be missing"
             if line.startswith("rand_perturb") else
             "would remain unperturbed") in message
+
+# Release census replacements (reviewed against the merged sources).
+# Census: test_digital_filter_request_is_refused_by_name is covered by test_digital_filter_request_is_carried.

@@ -103,15 +103,10 @@ def test_door_override_lands_in_the_group():
 
 def _resource(cp, degree=12, n=640):
     """Equal-area Fibonacci points (an independent quadrature, not a mesh)."""
-    from woof.hex.stochastic import _kernel
+    from woof.hex.stochastic import PointHarmonics
     lat = cp.arcsin(1 - 2 * (cp.arange(n, dtype=cp.float64) + 0.5) / n)
     lon = cp.arange(n, dtype=cp.float64) * (math.pi * (3 - math.sqrt(5)))
-    modes = (degree + 1) ** 2 - 1
-    b = cp.empty((n, modes), cp.float32)
-    _kernel("harmonics")((((n * (degree + 1)) + 127) // 128,), (128,),
-                         (lat, lon, b, np.int32(n), np.int32(degree)))
-    return SimpleNamespace(modes=modes, radius=6371220., basis=b,
-                           ell=cp.floor(cp.sqrt(cp.arange(1, modes + 1, dtype=cp.float64))))
+    return PointHarmonics(lat, lon, degree, radius=6371220.)
 
 
 def _options(**switches):
