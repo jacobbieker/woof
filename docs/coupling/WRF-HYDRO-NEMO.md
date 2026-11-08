@@ -159,8 +159,9 @@ Metal, and refuses what it does not port by name.
    does, with `cpl_store_input`'s SST_INPUT capture at
    `solve_em.F:374`.  Needs an `ExternalOcean` implementation to be useful.
 3. **An ocean**: the NEMO opt-in has begun with `traqsr` (2-band penetrative
-   solar, the consumer of SURF_NET_SOLAR); the tracer advection/diffusion,
-   vertical mixing (TKE), equation of state and dynamics remain.  The
+   solar, the consumer of SURF_NET_SOLAR) and the equation of state
+   (`eosbn2.F90`, TEOS-10/EOS-80/S-EOS, `tests/test_nemo_eos_parity.py`);
+   vertical mixing (TKE), tracer advection/diffusion and dynamics remain.  The
    alternative is an external NEMO through a real coupler (out of
    process; NEMO stays a separate program and its licence does not reach
    WOOF), or, after the licence decision, NEMO kernels behind an opt-in with
