@@ -9,7 +9,7 @@ condensate is radiation's only: the driver saves qc/qi on entry
 prognostic mixing ratios never see it.  CLDFRA itself is the driver's
 grid%cldfra, the one written to history.
 
-:func:`cal_cldfra3` runs the kernel (woof/core/kernels/cldfra3.cu) over
+:func:`cal_cldfra3` runs the kernel (woof/core/kernels/cldfra3_wrf471.cu) over
 column-major ``(ncol, nz)`` copies; tools/cldfra3_wrf471_oracle is the
 gfortran -O0 reference it is graded against word for word.
 
@@ -94,7 +94,7 @@ def cal_cldfra3(qv, qc, qi, qs, dz8w, p, t, xland, gridkm, *,
     work = cp.empty(4 * ncol * nz, dtype=cp.float32)
     status = cp.zeros(ncol, dtype=cp.int32)
     block = 64
-    get_kernel("cldfra3", "cldfra3_columns")(
+    get_kernel("cldfra3_wrf471", "cldfra3_columns")(
         ((ncol + block - 1) // block,), (block,),
         (np.int32(ncol), np.int32(nz), qv, qc_rad, qi_rad, arrays["qs"],
          arrays["dz8w"], arrays["p"], arrays["t"], xland,

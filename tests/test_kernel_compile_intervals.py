@@ -11,7 +11,7 @@ def fake_compiler(monkeypatch, fails=False):
     calls = []
     def compile(*args):
         calls.append(args)
-        assert numerics._mode == 'strict'
+        assert numerics._final_options.get() and numerics._mode == 'fast'
         if fails:
             raise RuntimeError('original compile failure')
         return b'image', None
