@@ -119,7 +119,9 @@ def test_resident_stability_check_is_deferred_and_preserves_transient_nan(monkey
     def step(state, cfg, **kwargs):
         calls.append(1)
         state.thp.fill(np.float32(np.nan if len(calls) == 1 else 0.))
-    with pytest.raises(RuntimeError, match='non-finite state by model step 1'):
+    # The fork's lagged monitor names the step it saw fail ("at model step 1
+    # (lagged health check: ...)"); upstream's says "by model step 1".
+    with pytest.raises(RuntimeError, match='non-finite state (by|at) model step 1'):
         execute_experiment(model, steppers={1: step})
     assert len(calls) == 2
 

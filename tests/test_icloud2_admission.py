@@ -32,7 +32,10 @@ def test_icloud3_without_cloud_species_names_breakage(tmp_path):
         load_config(p)
 
 
-@pytest.mark.parametrize('pair,ok', [((4, 4), True), ((1, 1), False), ((4, 1), False)])
+# Upstream 1.1.6's icloud = 3 runs in the WRF engine under every radiation
+# pair (the fork's RRTMG-only cal_cldfra3 wiring is retired), so the
+# RRTMG-only refusals are gone.
+@pytest.mark.parametrize('pair,ok', [((4, 4), True), ((1, 1), True), ((4, 1), True)])
 def test_wrf_solar_cloud_fraction_namelist(tmp_path, pair, ok):
     from test_namelist_import import _pair, INPUT_TEXT
     from woof.namelist_import import import_namelists
