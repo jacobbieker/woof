@@ -135,3 +135,30 @@ Process telemetry records about one CPU core issuing device work through the
 90-second replay. Per-process GPU utilization was not sampled, so idle GPU time
 cannot be inferred from that host scheduling observation. The delivery receipt
 retains stage timings, telemetry, source pins, validity counters and limitations.
+
+WRF's ocean-coupler exchange (WRF-NEMO)
+---------------------------------------
+
+`woof/ocean/wrf_cpl.py` runs WRF 4.6.1's own half of its OASIS coupling with
+NEMO, from `frame/module_cpl.F` (public domain), as CUDA kernels in
+`wrf_cpl.cu` held bitwise to the pinned source
+(`tests/test_wrf_cpl_wrf461_parity.py`, oracle `tools/wrf_cpl_wrf461_oracle`):
+
+* `send` is `cpl_snd2`: `EVAP-PRECIP = QFX - (RAINCV+RAINNCV)/DT`,
+  `SURF_NET_SOLAR = GSW`,
+  `SURF_NET_NON-SOLAR = GLW - STBOLT*EMISS*SST**4 - LH - HFX`, and
+  `TAUX`/`TAUY`/`TAUMOD` from `RHO*UST**2` along the wind relative to the
+  surface current;
+* `receive` is `cpl_rcv`: SST merged onto the input SST, UOCE and VOCE onto
+  zero, each weighted by its external domain's `CPLMASK`.
+
+`FluxAverager` is WOOF's own coupling-interval average between the two (an
+integral of field*dt with a carried remainder, so the integral the ocean
+receives equals the one the atmosphere emitted); it is not OASIS code.  Only a
+shared atmosphere/ocean grid is accepted (OASIS/SCRIP remapping is not
+ported), and fields WRF 4.6.1 does not exchange (sea-ice fraction, sea-surface
+height, runoff) are refused by name.  An ocean model plugs in through
+`woof.ocean.interface.ExternalOcean`; none is in the tree, and the exchange is
+not yet called from the physics driver.  NEMO itself is CeCILL-licensed and is
+not ported; docs/coupling/WRF-HYDRO-NEMO.md records the licence reading and
+the roadmap.
