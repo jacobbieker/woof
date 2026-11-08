@@ -48,11 +48,13 @@ holds its WRF physics to.
 | `woof_wrf_hydro/grid_transform.cu`, `grid_transform.py` | `hydro/Routing/Noah_distr_routing.F90` (disaggregateDomain); `hydro/HYDRO_drv/module_HYDRO_drv.F90` (aggregateDomain) |
 | `woof_wrf_hydro/overland.cu`, `overland.py` | `hydro/Routing/Noah_distr_routing_overland.F90` (OverlandRouting, OV_RTNG, ROUTE_OVERLAND1); `hydro/Routing/Noah_distr_routing.F90` (GETMAX8DIR, GET8DIR) |
 | `woof_wrf_hydro/channel.cu`, `channel.py` | `hydro/Routing/module_channel_routing.F90` (MUSKING, SUBMUSKINGCUNGE, the reach branch of drive_CHANNEL) |
-| `oracle/` | build harnesses and drivers (`build.sh`, `build_grid_transform.sh`, `build_overland.sh`, `build_channel.sh`); they compile the pinned files at build time and copy none of them |
+| `woof_wrf_hydro/baseflow.cu`, `baseflow.py` | `hydro/Routing/module_GW_baseflow.F90` (simp_gw_buck); `hydro/Routing/module_RT.F90` (the non-MPP stream-pixel count) |
+| `oracle/` | build harnesses and drivers (`build.sh`, `build_grid_transform.sh`, `build_overland.sh`, `build_channel.sh`, `build_baseflow.sh`); they compile the pinned files at build time and copy none of them |
 
-`subsurface.cu` is preceded at load time by WOOF's
-`woof/core/kernels/glibc_flt32.cuh` (glibc's powf words, MIT-licensed Arm
-code, see that file); nothing of it is copied here.
+`subsurface.cu`, `overland.cu` and `channel.cu` are preceded at load time by
+WOOF's `woof/core/kernels/glibc_flt32.cuh` (glibc's powf words) and
+`baseflow.cu` by `glibc_flt64.cuh` (glibc's binary64 exp), MIT-licensed Arm
+code, see those files; nothing of them is copied here.
 
 ## Oracle
 

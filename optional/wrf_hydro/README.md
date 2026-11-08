@@ -14,6 +14,7 @@ routing = hydro.SubsurfaceRouting(...)
 
 Ported: subsurface and overland routing (`rt_option = 1`); the LSM <-> routing
 grid disaggregation and aggregation; reach channel routing (Muskingum and
-Muskingum-Cunge, channel_option 1 and 2).  Not yet: the diffusive wave
-(channel_option 3), reservoirs, baseflow
+Muskingum-Cunge, channel_option 1 and 2); the groundwater bucket
+(GWBASESWCRT 1 and 2).  Not yet: the diffusive wave (channel_option 3),
+reservoirs, gw2d, the hydro.namelist mapping
 (docs/coupling/WRF-HYDRO-NEMO.md).
