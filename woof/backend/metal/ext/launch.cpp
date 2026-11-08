@@ -164,8 +164,11 @@ static MTL::ComputePipelineState* pipeline_for(MTL::Library* lib, const std::str
       if (state != nullptr) {
         compile_log("pipeline (archive)", kernel, began);
       } else if (stored->addComputePipelineFunctions(desc, &error)) {
-        // the one compile, into the archive; written atomically beside
-        std::string partial = path + ".partial";
+        // the one compile, into the archive; written atomically beside, under
+        // a per-process name: concurrent processes archive the same kernel,
+        // and one shared .partial lets their writes interleave (a cold xdist
+        // run crashed inside -[MTLBinaryArchive serializeToURL:])
+        std::string partial = path + "." + std::to_string(getpid()) + ".partial";
         auto* url = NS::URL::fileURLWithPath(NS::String::string(partial.c_str(), NS::UTF8StringEncoding));
         if (stored->serializeToURL(url, &error)) std::rename(partial.c_str(), path.c_str());
         state = pipeline_from(device, desc, stored);
