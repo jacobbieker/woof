@@ -570,7 +570,11 @@ def test_a_real_same_run_duplicate_still_refuses(tmp_path):
     writers._episode_by_grid_id = {2: 1}
     writers._published_paths = set()
     writers._writers = {2: SimpleNamespace(submit=lambda *_a, **_k: None)}
-    node = SimpleNamespace(cfg=SimpleNamespace(grid_id=2),
+    # The initial frame also offers the native CLWRF/RASM alarms, which
+    # are off here.
+    run = SimpleNamespace(mean_diag=0, diurnal_diag=0, output_diagnostics=0,
+                          auxhist3_interval=0)
+    node = SimpleNamespace(cfg=SimpleNamespace(grid_id=2, run=run),
                            clock=SimpleNamespace(tick_den=1),
                            state=SimpleNamespace())
 

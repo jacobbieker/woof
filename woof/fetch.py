@@ -452,6 +452,7 @@ GFS_RECORDS_MODE = "idx-subset"
 NCEP_IDX_NAMES = {
     (0, 0, 0): "TMP", (0, 1, 0): "SPFH", (0, 1, 1): "RH",
     (0, 1, 22): "CLMR", (0, 1, 23): "ICMR", (0, 1, 24): "RWMR",
+    (0, 1, 13): "WEASD", (0, 1, 11): "SNOD",
     (0, 1, 25): "SNMR", (0, 1, 32): "GRLE", (0, 2, 2): "UGRD",
     (0, 2, 3): "VGRD", (0, 3, 0): "PRES", (0, 3, 1): "PRMSL",
     (0, 3, 5): "HGT", (2, 0, 0): "LAND", (2, 0, 2): "TSOIL",
@@ -459,7 +460,7 @@ NCEP_IDX_NAMES = {
 }
 
 
-def mapped_record_levels(source: str) -> dict[str, set[str]] | None:
+def mapped_record_levels(source: str, *, profile: str | None = None) -> dict[str, set[str]] | None:
     """``{VAR: {LEVEL, ...}}`` a source's packaged mapping binds, by ``.idx`` name.
 
     Empty for a source with no packaged mapping (GFS decodes through
@@ -468,12 +469,12 @@ def mapped_record_levels(source: str) -> dict[str, set[str]] | None:
     """
 
     adapter = source_adapters.get_source_adapter(source)
-    if adapter.packaged_profile is None:
+    if adapter.packaged_profile is None and profile is None:
         return {}
     from woof.source_authorities import packaged_authorities
 
     mapping = json.loads(packaged_authorities(
-        adapter.packaged_profile)["mapping"].read_bytes())
+        profile or adapter.packaged_profile)["mapping"].read_bytes())
     vertical = (mapping.get("coordinates") or {}).get("vertical") or {}
     ladder = (vertical.get("levels") or ()
               if vertical.get("kind") == "pressure" and vertical.get("units") == "Pa"
@@ -1744,7 +1745,8 @@ def cycle_is_probeable(source: str) -> bool:
 
 def _route_probe_urls(source: str, cycle: datetime, last_hour: int,
                       transport: str | None, *, cadence: int | None = None,
-                      start_hour: int = 0, member: str | None = None) -> tuple[str, ...]:
+                      start_hour: int = 0, source_parameters: str | None = None,
+                         member: str | None = None) -> tuple[str, ...]:
     """The selected member's final objects on ONE endpoint.
 
     The caller walks endpoints. Flattening all mirror URLs here would require
@@ -1752,7 +1754,7 @@ def _route_probe_urls(source: str, cycle: datetime, last_hour: int,
     """
     plan = fetch_routes.resolve_request(
         source, cycle=cycle, hours=last_hour - start_hour, host=transport,
-        cadence=cadence, start_hour=start_hour, member=member)
+        cadence=cadence, start_hour=start_hour, member=member, source_parameters=source_parameters)
     final = plan.leads[-1]
     urls = tuple(obj.url for obj in plan.objects if obj.lead == final or obj.lead is None)
     if not urls:
@@ -1763,7 +1765,8 @@ def _route_probe_urls(source: str, cycle: datetime, last_hour: int,
 def cycle_probe_urls(source: str, cycle: datetime, last_hour: int,
                      transport: str | None = None, *,
                      cadence: int | None = None, start_hour: int = 0,
-                     member: str | None = None) -> tuple[str, ...]:
+                     source_parameters: str | None = None,
+                         member: str | None = None) -> tuple[str, ...]:
     """The objects whose existence proves one cycle covers ``last_hour``.
 
     ``transport`` names the endpoint to ask.  It defaults to the head of
@@ -1793,7 +1796,7 @@ def cycle_probe_urls(source: str, cycle: datetime, last_hour: int,
         return hrrr_lead_urls(cycle, last_hour, transport=transport)
     if cycle_is_probeable(source):
         return _route_probe_urls(source, cycle, last_hour, transport,
-                                 cadence=cadence, start_hour=start_hour, member=member)
+                                 cadence=cadence, start_hour=start_hour, member=member, source_parameters=source_parameters)
     raise ValueError(layered(
         f"{source!r} publishes no object a completeness probe can ask "
         "for, so this cycle's publication cannot be settled by probing.",
@@ -1808,7 +1811,8 @@ def cycle_probe_urls(source: str, cycle: datetime, last_hour: int,
 def probe_cycle_window(source: str, cycle: datetime, leads, *,
                        now: datetime | None = None, probe=None,
                        transport: str | None = None, cadence: int | None = None,
-                       member: str | None = None) -> dict:
+                       source_parameters: str | None = None,
+                         member: str | None = None) -> dict:
     """Check the exact requested lead set through the declared URL owners.
 
     One endpoint must contain the complete requested set. The final lead is
@@ -1837,7 +1841,8 @@ def probe_cycle_window(source: str, cycle: datetime, leads, *,
         for lead in (values[-1], *values[:-1]):
             try:
                 urls = cycle_probe_urls(source, cycle, lead, transport=endpoint.name,
-                                        cadence=cadence, start_hour=values[0], member=member)
+                                        cadence=cadence, start_hour=values[0], member=member,
+                                        source_parameters=source_parameters)
             except ValueError as refusal:
                 # A rung whose declared layout has no object for this lead (an
                 # archive that keeps only 3-hourly leads, asked for f001) does
@@ -1888,7 +1893,8 @@ def cycle_publication_check(source: str, cycle: datetime, last_hour: int, *,
                             probe=_head_answer,
                             transport: str | None = None,
                             cadence: int | None = None, start_hour: int = 0,
-                            member: str | None = None) -> PublicationCheck:
+                            source_parameters: str | None = None,
+                         member: str | None = None) -> PublicationCheck:
     """Whether a named cycle is published through ``last_hour``, as a :class:`PublicationCheck`.
 
     THE question a fetch asks before it moves a byte: does one endpoint
@@ -1909,7 +1915,7 @@ def cycle_publication_check(source: str, cycle: datetime, last_hour: int, *,
     """
     if not cycle_is_probeable(source):
         return PublicationCheck("unprobeable")  # A keyed job API has no public object to HEAD.
-    options = dict(cadence=cadence, start_hour=start_hour, member=member)
+    options = dict(cadence=cadence, start_hour=start_hour, member=member, source_parameters=source_parameters)
     ladder = fetch_endpoints.serving_ladder(source, cycle=cycle, now=now, pinned=transport)
     unheard: list[str] = []
     for endpoint in ladder:
@@ -2001,7 +2007,8 @@ def cycle_publication_refusal(source: str, cycle: datetime, last_hour: int, *,
                               probe=_head_answer,
                               transport: str | None = None,
                               cadence: int | None = None, start_hour: int = 0,
-                              member: str | None = None) -> str | None:
+                              source_parameters: str | None = None,
+                         member: str | None = None) -> str | None:
     """Why a named cycle cannot be fetched yet, or None when it can.
 
     :func:`cycle_publication_check`'s refusal: its sentence when the
@@ -2011,7 +2018,7 @@ def cycle_publication_refusal(source: str, cycle: datetime, last_hour: int, *,
     """
     check = cycle_publication_check(
         source, cycle, last_hour, now=now, probe=probe, transport=transport,
-        cadence=cadence, start_hour=start_hour, member=member)
+        cadence=cadence, start_hour=start_hour, member=member, source_parameters=source_parameters)
     return check.why if check.state == "not-published" else None
 
 
@@ -2057,7 +2064,8 @@ def require_published_cycle(source: str, cycle: datetime, last_hour: int, *,
                             probe=_head_answer, progress=print,
                             transport: str | None = None,
                             cadence: int | None = None, start_hour: int = 0,
-                            member: str | None = None) -> None:
+                            source_parameters: str | None = None,
+                         member: str | None = None) -> None:
     """Check a named cycle's requested member/end before moving payload bytes.
 
     One complete endpoint is sufficient. An explicitly pinned endpoint is the
@@ -2087,7 +2095,7 @@ def require_published_cycle(source: str, cycle: datetime, last_hour: int, *,
             return
     check = cycle_publication_check(
         source, cycle, last_hour, now=now, probe=probe, transport=transport,
-        cadence=cadence, start_hour=start_hour, member=member)
+        cadence=cadence, start_hour=start_hour, member=member, source_parameters=source_parameters)
     if check.state == "not-published":
         raise RuntimeError(check.why)
     if check.state == "unchecked":
@@ -2183,6 +2191,7 @@ def resolve_latest_cycle(source: str, last_hour: int, *,
                          now: datetime | None = None,
                          probe=_head_ok, transport: str | None = None,
                          cadence: int | None = None, start_hour: int = 0,
+                         source_parameters: str | None = None,
                          member: str | None = None,
                          provider: str | None = None,
                          as_posted: bool | None = None) -> datetime:
@@ -2244,7 +2253,7 @@ def resolve_latest_cycle(source: str, last_hour: int, *,
 
         return resolve_startable_cycle(
             source, start_hour=start_hour, hours=last_hour - start_hour,
-            cadence=cadence, member=member, transport=transport, now=now,
+            cadence=cadence, member=member, source_parameters=source_parameters, transport=transport, now=now,
             probe=probe)
     route = None
     if source in fetch_routes.route_ids():
@@ -2347,7 +2356,7 @@ def resolve_latest_cycle(source: str, last_hour: int, *,
         for cycle in candidates:
             urls = cycle_probe_urls(source, cycle, last_hour,
                                     transport=endpoint.name, cadence=cadence,
-                                    start_hour=start_hour, member=member)
+                                    start_hour=start_hour, member=member, source_parameters=source_parameters)
             if objects_published(urls, probe) and request_complete(cycle):
                 return cycle
     tried = " or ".join(endpoint.name for endpoint in ladder)
@@ -2363,7 +2372,8 @@ def resolve_latest_cycle(source: str, last_hour: int, *,
 def resolve_cycle_for_valid_start(source: str, valid_start: datetime, hours: int,
                                   cadence: int, *, now: datetime | None = None,
                                   probe=_head_ok, transport: str | None = None,
-                                  as_posted: bool = True) -> tuple[datetime, int]:
+                                  as_posted: bool = True,
+                                  source_parameters: str | None = None) -> tuple[datetime, int]:
     """Newest startable cycle preserving a fixed valid start and duration."""
 
     from woof import source_readiness
@@ -2391,7 +2401,7 @@ def resolve_cycle_for_valid_start(source: str, valid_start: datetime, hours: int
             try:
                 window = source_readiness.resolve_window(
                     source, cycle, hours, cadence=cadence, start_hour=start,
-                    transport=transport, now=now)
+                    source_parameters=source_parameters, transport=transport, now=now)
             except ValueError:
                 cycle = grid.snap(cycle - timedelta(hours=1))
                 continue
@@ -2515,6 +2525,7 @@ def readiness_for_fetch(args, *, no_probe: bool | None = None,
                  else pinned_host(getattr(args, "transport", None)))
     return readiness.readiness(
         source, args.cycle, args.hours, cadence=args.cadence,
+        source_parameters=getattr(args, "source_parameters", None),
         start_hour=args.forecast_start_hour,
         member=getattr(args, "member", None), transport=transport,
         provider=provider, as_posted=requested_as_posted(args),
@@ -4881,7 +4892,9 @@ def _fetch_gfs_fullfile_locked(*, cycle: datetime, hours: tuple[int, ...],
                             taken.update(download_records(
                                 endpoint.url(key), endpoint.url(key) + ".idx",
                                 path, declaration=selection,
-                                streams=max(1, int(streams or 1))))
+                                streams=max(1, int(streams or 1)),
+                                progress=lambda line: progress(
+                                    f"fetch {source} f{hour:03d}: {line}")))
                             return
                         except IndexAbsent as error:
                             progress(f"fetch {source} f{hour:03d}: "
@@ -7787,7 +7800,7 @@ def _route_fetch_main(args, source: str) -> int:
         raise ValueError(f"fetch --source {source} requires --cycle, --hours and --out")
     # Dry validation precedes publication probes, locks, directories and bytes.
     hints = {"source": source, "cycle": args.cycle, "hours": args.hours}
-    for key in ("cadence", "forecast_start_hour", "member", "area", "point", "radius_km"):
+    for key in ("cadence", "forecast_start_hour", "member", "area", "point", "radius_km", "source_parameters"):
         value = getattr(args, key, None)
         if value is not None:
             hints[key] = value
@@ -7802,7 +7815,8 @@ def _route_fetch_main(args, source: str) -> int:
     if args.transport is not None:
         route.host(args.transport)
     start = 0 if args.forecast_start_hour is None else args.forecast_start_hour
-    options = dict(cadence=args.cadence, start_hour=start, member=args.member, transport=args.transport)
+    options = dict(cadence=args.cadence, start_hour=start, member=args.member, transport=args.transport,
+                   source_parameters=getattr(args, "source_parameters", None))
     last = start + args.hours
     as_posted = requested_as_posted(args)
     if args.cycle == "latest":
@@ -7818,7 +7832,30 @@ def _route_fetch_main(args, source: str) -> int:
     else:
         cycle = parse_cycle(args.cycle, source)
     plan = fetch_routes.resolve_request(source, cycle=cycle, hours=args.hours,
-        cadence=args.cadence, start_hour=start, host=args.transport, member=args.member, out=args.out)
+        cadence=args.cadence, start_hour=start, host=args.transport, member=args.member, out=args.out,
+        source_parameters=getattr(args, "source_parameters", None))
+    if getattr(args, "record_profile", None):
+        import re
+        pairs = mapped_record_levels(source, profile=args.record_profile)
+        if not pairs:
+            raise ValueError("the requested --record-profile cannot be named by the NCEP index")
+        from dataclasses import replace
+        def selected_object(obj):
+            if not obj.record_index or obj.record_index.get("format") != "ncep-idx":
+                raise ValueError("--record-profile requires a table object's NCEP record index")
+            # The file row declares its vertical domain (pressure, surface,
+            # height or soil). Keep mapped selectors in that domain only:
+            # the pressure half of a pair cannot carry the surface clauses.
+            domains = [clause[1] for clause in obj.record_index["select"]]
+            selected = [[re.escape(var), "|".join(re.escape(v) for v in sorted(levels)
+                         if any(re.fullmatch(pattern, v) for pattern in domains))]
+                        for var, levels in sorted(pairs.items())]
+            selected = [clause for clause in selected if clause[1]]
+            selection = {"format": "ncep-idx", "select": selected,
+                         "why": f"packaged profile {args.record_profile}, file role {obj.role}"}
+            return replace(obj, record_index=selection)
+        plan = replace(plan, record_profile=args.record_profile, objects=tuple(
+            selected_object(obj) for obj in plan.objects))
     with _fetch_out(args.out):
         if not args.force_refetch:
             fetch_routes.check_prior_request(args.out, plan)
@@ -9074,6 +9111,8 @@ def _resolve_manifest_bridge(source: str) -> Path:
 #: types, and :func:`validate_fetch_hints` checks every value against its
 #: row.  The key set is read off the rows.
 FETCH_HINT_ROWS = key_rows(
+    KeyRow("source_parameters", "string", None,
+           "table-declared object selectors as comma-separated KEY=VALUE pairs"),
     KeyRow("fetch_max_connections", "integer", None,
            "box-wide connection cap for engine fetches; default 30, or WOOF_FETCH_MAX_CONNECTIONS"),
     KeyRow("source", "string", None,
@@ -9429,7 +9468,7 @@ def validate_fetch_hints(table: dict, *, source: str) -> None:
                       fetch_routes.planning_cycles(route))
             # A table that names no start opens at the route's first
             # published lead: the GEFSv12 reforecast (first_lead = 3,
-            # lane/cap-gefs-archive) publishes no f000, so checking f000
+            # development branch) publishes no f000, so checking f000
             # refused every bare [fetch] source of it.
             route_start = (start if "forecast_start_hour" in table
                            else max(start or 0, route.first_lead))
@@ -9518,6 +9557,8 @@ def register_cli(subparsers) -> None:
              "source with public bytes; native GDAS uses its mapped preparation "
              "profile; retrieve ERA5 from the public ARCO store without a key, "
              "or from Copernicus CDS with configured credentials")
+    parser.add_argument("--source-parameters", default=None, metavar="KEY=VALUE,...",
+        help="source table object selectors, such as STORM=14l,DOMAIN=storm")
     parser.add_argument("--reuse-fetch", default=None, metavar="DIR",
         help="reuse a verified completed generated fetch covering this request before loading its model")
     parser.add_argument("--model", default=None, metavar="MODEL",
@@ -9738,6 +9779,7 @@ def register_cli(subparsers) -> None:
              "governor, a disk cache); 'python' is the stdlib transport "
              "and always works; 'auto' (default) uses the backbone when "
              "it is built")
+    parser.add_argument("--record-profile", help="for a table route, fetch the records a packaged mapping binds by the NCEP index")
     parser.add_argument(
         "--mode", default=None, choices=FETCH_MODES,
         help="the byte transport.  hrrr: "
