@@ -6,7 +6,8 @@ template<int GLA, int ALB, bool LOCAL = false>
 __device__ void ng_glacier_column(
     const float *__restrict__ in, const int *__restrict__ ii,
     const float *__restrict__ zsoil_row, float dt,
-    float *__restrict__ out, int *__restrict__ io, int n, int opt_stc=1, int opt_tbot=2, const float *snow=nullptr, const float *solar=nullptr, float *grains=nullptr)
+    float *__restrict__ out, int *__restrict__ io, int n, int opt_stc=1, int opt_tbot=2, const float *snow=nullptr, const float *solar=nullptr, float *grains=nullptr,
+    const float *sfcheadrt=nullptr)
 {
     int tid = LOCAL ? 0 : blockIdx.x * blockDim.x + threadIdx.x;
     if (tid >= n) return;
@@ -1238,6 +1239,8 @@ __device__ void ng_glacier_column(
         runsrf = DV(AD(AD(ponding, ponding1), ponding2), dt);      // :2135
         if (isnow == 0) runsrf = AD(runsrf, AD(qsnbot, qrain));    // :2137-2141
         else runsrf = AD(runsrf, qsnbot);
+        // WRF built with -DWRF_HYDRO: the ponded head (mm) leaves as runoff
+        if (sfcheadrt) runsrf = AD(runsrf, DV(*sfcheadrt, dt));    // :2143-2145
 
         if (GLA == 1) {
         // OPT_GLA == 1 :2147-2154
@@ -1276,7 +1279,8 @@ __device__ void ng_glacier_column(
         float end_wb = sneqv;                                      // :3027-3028
         float errwat = SU(SU(end_wb, beg_wb),
                           MU(SU(SU(SU(prcp, edir), runsrf), runsub), dt));
-        if (fabsf(errwat) > 0.1f && err == 0) err = 4;             // :3031-3045
+        // the water-budget stop is compiled out under WRF_HYDRO (:3030-3046)
+        if (!sfcheadrt && fabsf(errwat) > 0.1f && err == 0) err = 4;
     }
 
     if (snowh <= 1.0e-6f || sneqv <= 1.0e-3f) {                    // :285-288
@@ -1728,5 +1732,21 @@ extern "C" __global__ void noahmp_glacier_column_options(
  }else{
   if(alb==1)ng_glacier_column<1,1,true>(in+(size_t)c*NG_NIN,ii+c,zsoil,dt,out+(size_t)c*NG_NOUT,io+2*c,1,stc,tbot);
   else ng_glacier_column<1,2,true>(in+(size_t)c*NG_NIN,ii+c,zsoil,dt,out+(size_t)c*NG_NOUT,io+2*c,1,stc,tbot);
+ }
+}
+
+// WRF built with -DWRF_HYDRO: the selected glacier column with the ponded head
+// WRF-Hydro returns (sfcheadrt, mm, one per column), same pack ABI.
+extern "C" __global__ void noahmp_glacier_column_hydro(
+ const float* in,const int* ii,const float* zsoil,float dt,float* out,int* io,
+ int n,int alb,int gla,int stc,int tbot,const float* sfcheadrt){
+ int c=blockIdx.x*blockDim.x+threadIdx.x;if(c>=n)return;
+ const float* h=sfcheadrt+c;
+ if(gla==2){
+  if(alb==1)ng_glacier_column<2,1,true>(in+(size_t)c*NG_NIN,ii+c,zsoil,dt,out+(size_t)c*NG_NOUT,io+2*c,1,stc,tbot,nullptr,nullptr,nullptr,h);
+  else ng_glacier_column<2,2,true>(in+(size_t)c*NG_NIN,ii+c,zsoil,dt,out+(size_t)c*NG_NOUT,io+2*c,1,stc,tbot,nullptr,nullptr,nullptr,h);
+ }else{
+  if(alb==1)ng_glacier_column<1,1,true>(in+(size_t)c*NG_NIN,ii+c,zsoil,dt,out+(size_t)c*NG_NOUT,io+2*c,1,stc,tbot,nullptr,nullptr,nullptr,h);
+  else ng_glacier_column<1,2,true>(in+(size_t)c*NG_NIN,ii+c,zsoil,dt,out+(size_t)c*NG_NOUT,io+2*c,1,stc,tbot,nullptr,nullptr,nullptr,h);
  }
 }
