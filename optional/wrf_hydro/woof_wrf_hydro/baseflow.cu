@@ -1,10 +1,10 @@
 // WOOF-OPTIN: wrf-hydro
-// Derived from WRF-Hydro (UCAR) as shipped in WRF 4.6.1 hydro/; see
+// Derived from WRF-Hydro (UCAR) as shipped in WRF 4.7.1 hydro/; see
 // optional/wrf_hydro/LICENSE and NOTICE.md.  Not part of the default build or
 // of any wheel.
 //
 // WRF-Hydro's groundwater bucket, simp_gw_buck in
-// hydro/Routing/module_GW_baseflow.F90 (:282-514), without MPP_LAND.  One
+// hydro/Routing/module_GW_baseflow.F90 (:261-492), without MPP_LAND.  One
 // thread per basin sums its LSM cells' drainage (and, without overland
 // routing, surface runoff) in REAL*8 in WRF's i-outer, j-inner order through
 // a CSR list built on the host; the bucket level is REAL*8 inside the call
@@ -66,7 +66,7 @@ void gw_bucket(const int* __restrict__ start, const int* __restrict__ cells,
     qout_out[b] = qout;
 }
 
-// qinflowbase on the routing grid (:500-509): each stream pixel of basin b
+// qinflowbase on the routing grid (:479-488): each stream pixel of basin b
 // gets that basin's outflow spread over its pixels, in mm per step.
 extern "C" __global__
 void gw_inflowbase(const int* __restrict__ lind, const float* __restrict__ qout,

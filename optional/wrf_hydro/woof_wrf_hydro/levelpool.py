@@ -1,11 +1,14 @@
 # WOOF-OPTIN: wrf-hydro
 """WRF-Hydro's level-pool reservoirs on device (``levelpool.cu``).
 
-``LEVELPOOL_PHYSICS`` with LAKE_OPT = 2 through ``run_levelpool_reservoir``
-(hydro/Routing/Reservoirs/Level_Pool/module_levelpool.F90 in WRF 4.6.1's
-hydro/): a third-order Runge-Kutta step of the pool elevation under the
-period's inflow ramp, with outflow through an orifice, over a weir and over
-the dam.  Each lake's properties are levelpool_init's (LAKEPARM: LkArea km2,
+``LEVELPOOL_PHYSICS`` through ``run_levelpool_reservoir``
+(hydro/Routing/Reservoirs/Level_Pool/module_levelpool.F90 in WRF 4.7.1's
+hydro/).  ``lake_opt`` is hydro.namelist's lake_option as levelpool_init
+receives it: 1 is a third-order Runge-Kutta step of the pool elevation under
+the period's inflow ramp, with outflow through an orifice, over a weir and
+over the dam; 2 is the pass-through (outflow = inflow).  lake_option 0
+removes the lakes (module_RT: NLAKES = 0) and 3 is resolved by read_rt_nlst
+before the lakes are built, so neither reaches a reservoir.  Each lake's properties are levelpool_init's (LAKEPARM: LkArea km2,
 WeirE, WeirC, WeirL, DamL, OrificeE, OrificeC, OrificeA, LkMxE); the state
 is the water elevation RESHT, the inflow QLAKEI and the outflow QLAKEO.
 The persistence and RFC-forecast reservoir types are refused by
@@ -23,7 +26,7 @@ _PROPS = ("lake_area", "weir_elevation", "weir_coefficient", "weir_length", "dam
 class LevelPool:
     """``n`` level-pool lakes: device float32 properties and state."""
 
-    def __init__(self, *, water_elevation, qlakei=None, qlakeo=None, **props):
+    def __init__(self, *, water_elevation, qlakei=None, qlakeo=None, lake_opt=1, **props):
         import cupy as cp
 
         missing = [k for k in _PROPS if k not in props]
@@ -40,6 +43,11 @@ class LevelPool:
         self.resht = cp.asarray(water_elevation if self.n else z)
         self.qlakei = cp.asarray(np.asarray(qlakei, np.float32) if qlakei is not None else z)
         self.qlakeo = cp.asarray(np.asarray(qlakeo, np.float32) if qlakeo is not None else z)
+        opt = np.broadcast_to(np.asarray(lake_opt, np.int32), (self.n,)).copy()
+        if not np.isin(opt, (1, 2)).all():
+            raise ValueError("lake_opt is 1 (level pool) or 2 (pass-through); LEVELPOOL_PHYSICS "
+                             "stops on anything else")
+        self.lake_opt = cp.asarray(opt if self.n else np.ones(1, np.int32))
 
     @classmethod
     def empty(cls):
@@ -54,4 +62,4 @@ class LevelPool:
         _k("wrfhydro_levelpool")((((self.n + 127) // 128),), (128,), (
             cp.asarray(previous_inflow, cp.float32), cp.asarray(inflow, cp.float32),
             cp.asarray(lateral_inflow, cp.float32), self.resht, self.qlakeo, self.props,
-            np.float32(routing_period), np.int32(self.n)))
+            self.lake_opt, np.float32(routing_period), np.int32(self.n)))
