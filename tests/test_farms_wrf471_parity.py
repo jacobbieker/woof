@@ -5,7 +5,7 @@ tools/farms_wrf471_oracle's: WRF v4.7.1 phys/module_ra_farms.F compiled
 unmodified (gfortran -O0 -ffp-contract=off), one Farms_driver call per
 scenario, its binary32 libm bound to woof's word-exact ports; the reference
 is byte-identical built on macOS arm64 and Linux x86-64 (provenance.json).
-Every output word of woof/core/kernels/farms.cu must equal it (max ULP 0).
+Every output word of woof/core/kernels/farms_wrf471.cu must equal it (max ULP 0).
 """
 from __future__ import annotations
 
@@ -74,7 +74,7 @@ def test_fixture_reaches_the_sky_classes(oracle):
                                   "req0_feb"])
 def test_kernel_matches_wrf471_word_for_word(oracle, scen):
     import cupy as cp
-    from woof.core.farms import farms_columns, wrf_juday
+    from woof.core.farms_wrf471 import farms_columns, wrf_juday
 
     data, _ = oracle
     g = lambda n: data[f"{scen}/{n}"]

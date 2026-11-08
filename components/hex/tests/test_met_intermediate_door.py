@@ -252,7 +252,8 @@ def test_unknown_and_refused_sources_say_why() -> None:
 
 
 def test_the_cli_refuses_an_unknown_source_with_exit_two(tmp_path: Path, capsys) -> None:
-    code = hex_main(["intermediate", "--source", "gefs", "--grib-dir", str(tmp_path),
+    # gefs is one of 1.1.6's global init sources now; nam is still refused.
+    code = hex_main(["intermediate", "--source", "nam", "--grib-dir", str(tmp_path),
                      "--cycle", "2026-09-24T12", "--out-dir", str(tmp_path / "o")])
     assert code == 2
     assert "refused by this door" in capsys.readouterr().err

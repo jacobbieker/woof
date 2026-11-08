@@ -57,6 +57,7 @@ from woof.core.microphysics_transition import (
     transition_parent_field_shape,
 )
 from woof.core.state import DomainState
+from woof.core.passive_tracer_contract import TRACER_NAMES
 from woof.experiment import DomainConfig, VerticalConfig
 from woof.ingest.horiz import (HorizontalSnapshot,
                                 interpolate_era5_to_lambert,
@@ -1004,12 +1005,11 @@ def _adjust_and_rederive(state: DomainState, cfg, coord: VerticalCoord,
     descendant d03, whose driver is rebuilt identically but whose
     placement does not change, moved 0.5%.
     """
-    # WRF's reference T is moist-theta perturbation from 300 K because
-    # use_theta_m=1.  A dry-theta state takes adjust_tempqv's use_theta_m=0
-    # branch, the algebraically equivalent dry frame; a theta_m state
-    # (woof.core.theta_m) takes WRF's own use_theta_m=1 branch.
-    theta_m_state = int(bool(getattr(state, "theta_m", False)))
-    theta_300 = state.total_theta() - np.float32(300.0)
+    # adjust_tempqv reads the selected prognostic thermal variable,
+    # including its original vapour factor before qv is adjusted.
+    use_theta_m = int(getattr(cfg, "use_theta_m", 0))
+    theta_300 = (state.prognostic_theta() if use_theta_m else
+                 state.total_theta()) - np.float32(300.0)
     if column_mass_correction:
         pb = state.pb if state.pb.ndim == 3 else state.pb[:, None, None]
         pressure_perturbation = state.p - pb
@@ -1021,12 +1021,12 @@ def _adjust_and_rederive(state: DomainState, cfg, coord: VerticalCoord,
                 state.mub2d, save_mub, c3h[k0:k1], c4h[k0:k1],
                 float(state.p_top), theta_300[k0:k1],
                 pressure_perturbation[k0:k1], state.qv[k0:k1],
-                use_theta_m=theta_m_state), cells=theta_300.size)
+                use_theta_m=use_theta_m), cells=theta_300.size)
         else:
             adjust_tempqv(
                 state.mub2d, save_mub, state.c3h, state.c4h,
                 float(state.p_top), theta_300, pressure_perturbation,
-                state.qv, use_theta_m=theta_m_state)
+                state.qv, use_theta_m=use_theta_m)
     adjusted_theta = theta_300 + np.float32(300.0)
     base = _base_from_blended(cfg, coord, _run_p_top(coord, state), blended)
     state.load_base(coord, base)
@@ -1795,7 +1795,7 @@ def _coord_from_parent(state: DomainState, parent_cfg) -> VerticalCoord:
         c4h=np.array(_host(state.c4h), copy=True))
 
 
-#: WRF ``start_domain``'s seeding pairs: the RK time-t copy each current
+#: WRF ``start_domain``'s start-up pairs: the RK time-t copy each current
 #: field is taken from.  Named rather than inlined because a child's state
 #: is seeded on TWO occasions -- when it is cold-started from its parent,
 #: and when a discrete relocation stamps an integrated state onto a child
@@ -1839,6 +1839,11 @@ RK_TIME_T_SEED_PAIRS = (
     # :func:`seed_rk_time_t_copies` skips both on every state that is not
     # P3, exactly as it does for the mp=28 row above.
     ("qir", "qir0"), ("qib", "qib0"),
+    ("qi2", "qi20"), ("ni2", "ni20"), ("qir2", "qir20"), ("qib2", "qib20"),
+    # mp=53's advected ice moment (its nc0 is the mp=28 row above); the
+    # None guard skips it on every state that is not P3 three-moment.
+    ("qzi", "qzi0"),
+    *((name, name + "0") for name in TRACER_NAMES),
 )
 
 
@@ -1855,7 +1860,7 @@ def require_parent_chem_fields(child, parent) -> None:
                 "before chemical cold fill or nest forcing")
 
 
-def seed_rk_time_t_copies(state) -> tuple[str, ...]:
+def seed_rk_time_t_copies(state, *, preserve_thermal=False) -> tuple[str, ...]:
     """Seed the RK time-t copies from the current fields (WRF start_domain).
 
     Returns the seeds actually written, so a caller can record which of the
@@ -1864,6 +1869,11 @@ def seed_rk_time_t_copies(state) -> tuple[str, ...]:
     """
     written: list[str] = []
     for current, initial in RK_TIME_T_SEED_PAIRS:
+        if (initial == "thp0" and preserve_thermal
+                and getattr(state, "use_theta_m", 0)):
+            # On a move, WRF retains t_1 over the transplanted overlap.
+            # Newly exposed cells retain the initializer's own t_1 seed.
+            continue
         value = getattr(state, current, None)
         seed = getattr(state, initial, None)
         if value is not None and seed is not None:
@@ -2079,7 +2089,7 @@ def parent_only_init(child_dc: DomainConfig,
             f"parent nz={parent_node.cfg.run.nz} and the child names no "
             "eta_levels of its own to be interpolated onto."
             + _OFFLINE_LADDER_DOOR)
-    for name in ("hybrid_opt", "etac"):
+    for name in ("hybrid_opt", "etac", "use_theta_m"):
         child_value = getattr(cfg, name, None)
         parent_value = getattr(parent_node.cfg.run, name, child_value)
         if child_value != parent_value:
@@ -2152,10 +2162,6 @@ def parent_only_init(child_dc: DomainConfig,
     if array_module is not None:
         state_kwargs["array_module"] = array_module
     child = DomainState(cfg, **state_kwargs)
-    # use_theta_m = 1: the child interpolates the parent's t_2, which is
-    # theta_m (WRF nests down t_2 itself), so it holds theta_m too.
-    from woof.core.theta_m import run_theta_m
-    child.theta_m = bool(getattr(parent, "theta_m", run_theta_m(cfg)))
     if (getattr(child, "chem", None) is not None
             and isinstance(child.thp, np.ndarray)):
         raise ValueError(
@@ -2247,6 +2253,10 @@ def parent_only_init(child_dc: DomainConfig,
                           # The None guard skips both on every state that
                           # is not P3.
                           ("qir", ""), ("qib", ""),
+                          ("qi2", ""), ("ni2", ""), ("qir2", ""), ("qib2", ""),
+                          # mp=53's advected ice moment, the same generic
+                          # SINT path (its nc is the row above).
+                          ("qzi", ""),
                           ("h_diabatic", ""),
                           # The dycore's exported advective forcing pair
                           # (WRF RTHFTEN/RQVFTEN).  Mass-stagger, the same
@@ -2259,11 +2269,16 @@ def parent_only_init(child_dc: DomainConfig,
                           # microphysics-scheme boundary, because they are
                           # a dynamics product and carry nothing the
                           # departing scheme owned.
-                          ("rthften", ""), ("rqvften", "")):
+                          ("rthften", ""), ("rqvften", ""),
+                          *((name, "") for name in TRACER_NAMES)):
         source = getattr(parent, name, None)
         target = getattr(child, name, None)
         if target is None:
             continue
+        if name in TRACER_NAMES and source is None:
+            raise ValueError(
+                f"child tracer {name} has no parent donor; tracer_opt=2 "
+                "must also be active on its parent")
         if transition_handles_field(transition, name):
             parent_shape = transition_parent_field_shape(transition_parent, name)
             count = int(np.prod(parent_shape))
