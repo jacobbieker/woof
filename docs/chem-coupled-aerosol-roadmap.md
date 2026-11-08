@@ -45,6 +45,7 @@ The choice is **WRF-Chem's RADM2 gas phase with the MADE/SORGAM modal aerosol
 | `phys/module_mixactivate.F` (Abdul-Razzak and Ghan activation behind every WRF-Chem aerosol-cloud coupling) | Same pointer to the MOSAIC terms | Opt-in only |
 | `module_optical_averaging.F`, `module_fastj_mie.F` | Same terms, given directly | Opt-in only |
 | `module_phot_mad.F` | A GNU GPL-2 TUV section | Opt-in only, if ever |
+| `module_aerosols_sorgam.F` routines `newt`, `lnsrch`, `fmin`, `ludcmp`, `lubksb` (SORGAM's SOA Newton solver) | Each headed "Adopted from Numerical Recipes in FORTRAN, Chapter 9.7 [2.3], 2nd ed."; Numerical Recipes' licence does not permit redistributing its source or derivatives without a licence from Numerical Recipes Software | Opt-in only; the default build needs a clean-room solver for the same partitioning equations |
 
 The PNNL terms, as `module_mosaic_driver.F` gives them (`module_cbmz.F` has
 the same text naming CBMZ):
