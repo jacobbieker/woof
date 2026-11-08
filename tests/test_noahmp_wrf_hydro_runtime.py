@@ -39,12 +39,12 @@ METAL_SKIP = pytest.mark.skipif("_selected_water_on_metal()",
                                 reason="selected Noah-MP water unit does not translate to Metal")
 
 
-def _domain():
+def _domain(**options):
     from test_noahmp_runtime import _GRASSLAND, _ICE, _build
 
     vegetation = np.full((4, 6), _GRASSLAND)
     vegetation[1, 2] = _ICE
-    return _build(nx=6, ny=4, vegtyp=vegetation)
+    return _build(nx=6, ny=4, vegtyp=vegetation, **options)
 
 
 def _planes(shape, head):
@@ -106,6 +106,37 @@ def test_a_ponded_head_moves_land_and_glacier_runoff(monkeypatch):
     # the glacier column: the head leaves as surface runoff within the step
     assert hydro.fields["runsfxy"].get()[1, 2] > plain.fields["runsfxy"].get()[1, 2]
     assert planes["infxsrt"].get()[1, 2] == hydro.fields["runsfxy"].get()[1, 2]
+
+
+@requires_gpu
+def test_glacier_columns_on_the_resident_path_are_refused_before_any_write(monkeypatch):
+    # The resident glacier slab has no sfcheadrt input or exchange
+    # write-back, so selected options (here noahmp_output=3) with a glacier
+    # column are refused by name, and before any carried field moves.
+    import woof.core.physics as physics
+    from woof.core.dycore import step
+
+    state, cfg, driver = _domain(noahmp_output=3, noahmp_acc_dt=0.4)
+    planes = _planes(driver.fields["tsk"].shape, 0.0)
+    before = {n: driver.fields[n].get() for n in ("smois", "sh2o", "tslb", "snow", "tsk")}
+    real = physics.noahmp_lsm_step
+    seen = []
+
+    def hydro_step(*args, **kwargs):
+        kwargs["wrf_hydro"] = planes
+        try:
+            return real(*args, **kwargs)
+        except NotImplementedError as error:
+            seen.append(error)
+            raise
+
+    monkeypatch.setattr(physics, "noahmp_lsm_step", hydro_step)
+    with pytest.raises(NotImplementedError):
+        step(state, cfg)
+    assert seen and "resident device-surface" in str(seen[0])
+    for name, value in before.items():
+        assert (driver.fields[name].get().view(np.uint32) == value.view(np.uint32)).all(), name
+    assert (planes["infxsrt"].get() == -7.0).all()
 
 
 def test_unported_wrf_hydro_pieces_are_refused_by_name():

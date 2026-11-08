@@ -2370,13 +2370,7 @@ def _lsm_step_slab(
     options.pop("wtddt",30.0)
     soil_interval=options.pop("soiltstep",0.0)
     cadence_on=soil_interval>0
-    if cadence_on:
-        from woof.core.noahmp_soil_cadence import ACCUMULATORS,cadence
-        steps,calculate,reset=cadence(soil_interval,dt,itimestep)
-        if reset:
-            for name in ACCUMULATORS.values():fields[name].fill(0)
-        options.update(soil_update_steps=steps,calculate_soil=calculate,carry_soil_accumulators=True)
-    device_surface = output_level==3 or dict(options) != dict(opt_alb=2, opt_stc=1, opt_rsf=1, opt_btr=1)
+    device_surface = output_level==3 or dict(options) != dict(opt_alb=2, opt_stc=1, opt_rsf=1, opt_btr=1) or cadence_on
     if device_surface:
         from woof.core.noahmp_surface_device import layout as device_layout
         layout = device_layout(params, fields, nsoil=nsoil,
@@ -2385,6 +2379,19 @@ def _lsm_step_slab(
         layout = params.surface_layout(fields, nsoil=nsoil,
                                        chunk_width=SLAB_COLUMN_CHUNK,
                                        sf_urban_physics=int(sf_urban_physics))
+    if device_surface and wrf_hydro is not None and layout["census"]["glacier"]:
+        # The resident glacier slab (run_glacier_slab) has no sfcheadrt
+        # input and no exchange-plane write-back; refuse before any field
+        # moves rather than leave glacier cells stale in the exchange.
+        raise NotImplementedError(
+            "wrf_hydro with glacier columns on the resident device-surface "
+            "path (selected options or noahmp_output=3) is not ported")
+    if cadence_on:
+        from woof.core.noahmp_soil_cadence import ACCUMULATORS,cadence
+        steps,calculate,reset=cadence(soil_interval,dt,itimestep)
+        if reset:
+            for name in ACCUMULATORS.values():fields[name].fill(0)
+        options.update(soil_update_steps=steps,calculate_soil=calculate,carry_soil_accumulators=True)
     one = np.float32(1.0)
     half = np.float32(0.5)
     zero32f = np.float32(0.0)
