@@ -1,7 +1,8 @@
 name: tests
 
-# Tests every push and pull request.  docs/dev/ci.md says what each job proves
-# and what none of them covers (the big-card tier, the byte-pinned assets).
+# Tests every push to main and every pull request.  docs/dev/ci.md says what
+# each job proves and what none of them covers (the big-card tier, the
+# byte-pinned assets).
 #
 # Every environment is a pixi environment from the committed pixi.lock
 # (locked: true): cpu on Linux and macOS, mlx on macOS, default (CUDA 12) on
@@ -14,7 +15,12 @@ name: tests
 # against a different workflow.
 
 on:
+  # A branch push runs nothing by itself: its pull request's run tests the
+  # same commit, and the two together doubled every PR's queue (13 macOS
+  # jobs each), which starved publish-metal's macOS build.  A branch with no
+  # pull request is run by hand (workflow_dispatch).
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
