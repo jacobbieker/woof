@@ -54,11 +54,10 @@ UNPORTED_PROCESSES = {
 }
 #: ``&chem`` keys carried with their WRF meaning, and their Python types.
 INT_KEYS = ("dust_opt", "seas_opt", "dmsemis_opt", "wetscav_onoff", "vertmix_onoff", "aer_op_opt",
-            "kemit", "chem_conv_tr", "aer_drydep_opt")
+            "kemit", "chem_conv_tr", "aer_drydep_opt", "aer_ra_feedback")
 FLOAT_KEYS = ("chemdt", "dust_alpha", "dust_gamma", "dust_smtune", "dust_ustune")
 #: Keys the hex route refuses at any value other than WRF's "off", with the reason.
 OFF_ONLY_KEYS = {
-    "aer_ra_feedback": "the hex radiation does not read the chemistry optics yet",
     "biomass_burn_opt": "fire emission frames are not yet remapped onto the hex mesh",
     "mynn_chem_vertmx": "MYNN's chem mixing is not wired on the hex column route",
 }
@@ -235,6 +234,34 @@ def _masses(fields, rows, layer):
                      for f, row in zip(fields, rows)])
 
 
+class _RadiationPrep:
+    """The chem_prep fields the step's radiation reads: already refreshed from the phase-one columns."""
+
+    def __init__(self, runtime):
+        self.runtime = runtime
+
+    def get(self, name):
+        return self.runtime.prep.get(name)
+
+    def refresh(self, state):
+        if self.runtime.radiation_time != float(state.elapsed_seconds):
+            raise RuntimeError("chemistry aerosol optics were not prepared from this step's phase-one columns")
+
+
+class _RadiationChem:
+    """``state.chem`` on the column seam's own state, for woof.core.chem_radiation.prepare."""
+
+    def __init__(self, runtime):
+        chem = runtime.state.chem
+        self.table, self.transported, self.prescribed = chem.table, chem.transported, chem.prescribed
+        self.processes = runtime.processes
+        self.start_time = runtime.state.start_time
+        self.prep = _RadiationPrep(runtime)
+
+    def fields(self, state):
+        return tuple(getattr(state, row.state_attr) for row in self.transported)
+
+
 class HexWrfChemistry:
     """The WRF chem step on hex columns (see module docstring)."""
 
@@ -304,6 +331,66 @@ class HexWrfChemistry:
         self.provider_receipt = None
         self.restart_provider_receipt = None
         self.initial_mass_kg = [0.0] * n
+        self.radiation_time = None
+        self.seam_state = None
+        if self.feedback:
+            from woof.physics_compat import RRTMG_VARIANT_LEGACY, rrtmg_variant
+            if rrtmg_variant(self.cfg) != RRTMG_VARIANT_LEGACY:
+                raise ValueError("wrf_chem aer_ra_feedback on the hex route feeds the legacy RRTMG the column "
+                                 "physics runs; this configuration selects another radiation")
+
+    @property
+    def feedback(self):
+        return bool(self.cfg.aer_ra_feedback)
+
+    #: chem_backend hooks: the post-RK preparation reconstructs the cell winds (u_phy, v_phy); with
+    #: feedback the phase-one radiation reads the chemistry.
+    phase2_winds = True
+
+    @property
+    def needs_phase_one(self):
+        return self.feedback
+
+    def columns(self, prepared, phase):
+        # Phase one hands the seam the hydrostatic pressure (the radiation reads it); after the RK step
+        # the physics reads the EOS pressure.
+        return columns_from_prep(prepared, pressure="pres_hyd_p" if phase == "phase_one" else "pres_p")
+
+    def before_phase_one(self, scalars, columns, *, elapsed_seconds):
+        self.prepare_radiation(scalars, columns, elapsed_seconds=elapsed_seconds)
+
+    # -- aerosol-radiation feedback ---------------------------------------------------------------
+    def bind_seam(self, seam):
+        """Hand the column seam's radiation the chemistry (WRF aer_ra_feedback): its RunConfig gains the
+        chem keys, its state the rows and optics arrays, exactly as a WRF domain's radiation sees them
+        through woof.core.chem_radiation.prepare.  A no-op without feedback."""
+        if not self.feedback:
+            return
+        from woof.core.chem_state import process_attr
+        seam._cfg = replace(seam._cfg, chem_sets=self.cfg.chem_sets, chem_sources="",
+                            aerosol_mp_coupling="none", aer_ra_feedback=self.cfg.aer_ra_feedback,
+                            aer_op_opt=self.cfg.aer_op_opt)
+        state = seam._state
+        state.chem = _RadiationChem(self)
+        for _key, module in self.processes:
+            for alloc in getattr(module, "ALLOCATES", ()):
+                attr = process_attr(alloc)
+                setattr(state, attr, getattr(self.state, attr))
+        self.seam_state = state
+
+    def prepare_radiation(self, scalars, columns, *, elapsed_seconds):
+        """Before phase one: the rows at the start of the step and chem_prep from the phase-one columns
+        (WRF's radiation reads chem at the start of its step)."""
+        if not self.feedback:
+            return
+        if self.seam_state is None:
+            raise RuntimeError("aer_ra_feedback needs the column seam bound (bind_seam)")
+        self.bind_rows(scalars)
+        for row in self.rows:
+            setattr(self.seam_state, row.state_attr, getattr(self.state, row.state_attr))
+        self.state.elapsed_seconds = float(elapsed_seconds)
+        self.refresh(columns)
+        self.radiation_time = float(elapsed_seconds)
 
     # -- column binding ---------------------------------------------------------------------------
     def bind_rows(self, scalars):
@@ -666,89 +753,32 @@ def attach_statics(runtime, *, lat_deg, lon_deg, landmask=None, fields=None, geo
     return receipt
 
 
-def columns_from_prep(prepared):
-    """The ``refresh`` column dict from a hex MPAS-to-physics preparation."""
-    return {"pressure": prepared.pres_p, "theta": prepared.th_p, "rho_dry": prepared.rho_dry,
+def columns_from_prep(prepared, *, pressure="pres_p"):
+    """The ``refresh`` column dict from a hex MPAS-to-physics preparation.  ``pressure`` names the carrier
+    the physics phase reads: the EOS pressure after the RK step (phase two), the hydrostatic pressure at
+    its start (phase one)."""
+    return {"pressure": getattr(prepared, pressure), "theta": prepared.th_p, "rho_dry": prepared.rho_dry,
             "z_interface": prepared.z_p, "qv": prepared.qv_p, "qc": prepared.qc_p, "qr": prepared.qr_p,
             "u": prepared.u_p, "v": prepared.v_p, "w": prepared.w_p}
 
 
 def build_column_backend(row, config, *, constructor, prep_geometry, kernel_cache, gwdo_static=None,
                          gwdo_kernel_cache=None, checkout=None, cell_area_m2=None, rollback_snapshot=True):
-    from .cuda_arwen_physics_v841 import PersistentTwoPhaseCudaPhysicsBackendV841
-    from .cuda_physics_prep_v841 import prepare_mpas_to_phys_cuda_v841
-    from .species_row import WSM6_SPECIES_ROW
+    from . import chem_backend
     path, raw, digest, species_row = config
 
-    class WrfChemistryBackend(PersistentTwoPhaseCudaPhysicsBackendV841):
-        def _species_row(self, scalar_names):
-            return WSM6_SPECIES_ROW
+    def runtime(seam):
+        made = HexWrfChemistry(
+            path, raw, digest, cfg=seam._cfg, area=cell_area_m2, nlev=constructor.n_levels,
+            ncells=constructor.n_columns, offset=len(species_row.species) - len(declare(raw)),
+            start_time=seam._start_time, fnm=seam._state.fnm, fnp=seam._state.fnp, terrain=seam._state.ht)
+        made.species_row = species_row
+        return made
 
-        def _columns(self, atmosphere, scalar_names, *, post_rk):
-            prepared = prepare_mpas_to_phys_cuda_v841(
-                atmosphere, scalar_names=scalar_names, geometry=self._prep_geometry,
-                kernel_cache=self._kernel_cache, post_rk_wsm6=post_rk, phase2_only=post_rk,
-                phase2_winds=post_rk)
-            return columns_from_prep(prepared)
-
-        def finish_step(self, *, atmosphere, scalar_names, dt, refl_10cm_due=False):
-            update = super().finish_step(atmosphere=atmosphere, scalar_names=scalar_names,
-                                        dt=dt, refl_10cm_due=refl_10cm_due)
-            driver = self._seam._driver
-            self.chemistry.step(atmosphere.state.scalars, self._columns(atmosphere, scalar_names, post_rk=True),
-                                dt=float(dt), elapsed_seconds=float(atmosphere.state.time_seconds),
-                                physics_fields=driver.fields,
-                                microphysics=getattr(driver, "microphysics", None))
-            return update
-
-        def commit_step(self, **kwargs):
-            result = super().commit_step(**kwargs)
-            self.chemistry.commit()
-            return result
-
-        def abort_step(self, **kwargs):
-            self.chemistry.abort()
-            return super().abort_step(**kwargs)
-
-        def diagnostic_snapshot(self, **kwargs):
-            snapshot = super().diagnostic_snapshot(**kwargs)
-            runtime = self.chemistry
-            if runtime.driver is None:
-                return snapshot
-            atmosphere = runtime.driver.atmosphere
-            extra = runtime.products(atmosphere.state.scalars,
-                                     self._columns(atmosphere, runtime.species_row.names(), post_rk=False))
-            return replace(snapshot, surface={**snapshot.surface, **extra},
-                           metadata={**snapshot.metadata, "chemistry": runtime.receipt()})
-
-        def restart_state(self):
-            state = dict(super().restart_state())
-            state["chemistry"] = self.chemistry.restart_payload()
-            return state
-
-        def restore_restart_state(self, payload):
-            chem = payload.get("chemistry")
-            self.chemistry.restore_payload(chem)
-            super().restore_restart_state({k: v for k, v in payload.items() if k != "chemistry"})
-
-        def write_ledger(self, output):
-            runtime = self.chemistry
-            Path(output, "chemistry-receipt.json").write_text(json.dumps(
-                {**runtime.receipt(), "ledger": runtime.ledger()}, indent=2) + "\n")
-
-    backend = WrfChemistryBackend(
-        constructor=constructor, prep_geometry=prep_geometry, kernel_cache=kernel_cache,
-        gwdo_static=gwdo_static, gwdo_kernel_cache=gwdo_kernel_cache,
-        arwen_checkout=checkout, rollback_snapshot=rollback_snapshot)
-    seam = backend._seam
-    offset = len(species_row.species) - len(declare(raw))
-    runtime = HexWrfChemistry(
-        path, raw, digest, cfg=seam._cfg, area=cell_area_m2, nlev=constructor.n_levels,
-        ncells=constructor.n_columns, offset=offset, start_time=seam._start_time,
-        fnm=seam._state.fnm, fnp=seam._state.fnp, terrain=seam._state.ht)
-    runtime.species_row = species_row
-    backend.chemistry = runtime
-    return backend
+    return chem_backend.build(runtime, constructor=constructor, prep_geometry=prep_geometry,
+                              kernel_cache=kernel_cache, gwdo_static=gwdo_static,
+                              gwdo_kernel_cache=gwdo_kernel_cache, checkout=checkout,
+                              rollback_snapshot=rollback_snapshot)
 
 
 def attach(backend, host, driver):

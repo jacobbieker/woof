@@ -1,4 +1,4 @@
-"""WRF-Hydro subsurface routing (the opt-in), bitwise against WRF 4.6.1's hydro/.
+"""WRF-Hydro subsurface routing (the opt-in), bitwise against WRF 4.7.1's hydro/.
 
 The port lives in ``optional/wrf_hydro`` under UCAR's WRF-Hydro licence and
 loads only through :func:`woof.optin.load` with ``WOOF_ENABLE_WRF_HYDRO=1``;
@@ -66,17 +66,18 @@ def test_fixture_reaches_outflow_drainage_and_the_spill():
     assert any(float(r["infxs"]) > infx0[(r["i"], r["j"])] for r in last)
 
 
-def test_rt_option_2_is_refused_by_name():
+def test_rt_option_outside_1_and_2_is_invalid():
     mod = optin.load("wrf_hydro")
-    with pytest.raises(NotImplementedError, match="ROUTE_SUBSURFACE2"):
+    with pytest.raises(ValueError, match="rt_option is 1 or 2"):
         mod.SubsurfaceRouting(dt=DT, sldpth=SLDPTH, zsoil=ZSOIL, lksat=None,
                               nexp=None, soldep=None, slope=None, sdir=None,
-                              dist=None, rt_option=2)
+                              dist=None, rt_option=3)
 
 
 @pytest.mark.gpu
 @requires_gpu
-def test_subsurface_routing_is_bitwise_against_wrf_hydro():
+@pytest.mark.parametrize("rt_option", [1, 2])   # WRF-Hydro routes the subsurface with 1 for both
+def test_subsurface_routing_is_bitwise_against_wrf_hydro(rt_option):
     import cupy as cp
 
     mod = optin.load("wrf_hydro")
@@ -88,7 +89,7 @@ def test_subsurface_routing_is_bitwise_against_wrf_hydro():
         soldep=dev(_plane(inp, "soldep")),
         slope=dev(_stack(inp, [f"slope{k}" for k in range(1, 9)])),
         sdir=dev(_stack(inp, ["sdir_i", "sdir_j", "sdir_k"], np.int32)),
-        dist=dev(_stack(inp, [f"dist{k}" for k in range(1, 10)])))
+        dist=dev(_stack(inp, [f"dist{k}" for k in range(1, 10)])), rt_option=rt_option)
     smc = dev(_stack(inp, [f"smc{k}" for k in range(1, 5)]))
     soil = {name: dev(_stack(inp, [f"{name}{k}" for k in range(1, 5)]))
             for name in ("smcmax", "smcref", "smcwlt")}

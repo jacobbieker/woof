@@ -1,6 +1,6 @@
-"""WRF-Hydro LSM <-> routing grid transforms (the opt-in), bitwise against WRF 4.6.1.
+"""WRF-Hydro LSM <-> routing grid transforms (the opt-in), bitwise against WRF 4.7.1.
 
-``disaggregateDomain`` and ``aggregateDomain`` as WRF 4.6.1's hydro/ ships
+``disaggregateDomain`` and ``aggregateDomain`` as WRF 4.7.1's hydro/ ships
 them, run by ``woof_wrf_hydro.grid_transform``.  The fixture is
 ``optional/wrf_hydro/oracle/build_grid_transform.sh``: both routines cut byte
 for byte from the pinned source, a 6 x 5 LSM grid with AGGFACTRT = 4, frozen

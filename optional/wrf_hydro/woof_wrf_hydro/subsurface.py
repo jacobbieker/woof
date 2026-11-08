@@ -2,17 +2,18 @@
 """WRF-Hydro's subsurface routing on device (``subsurface.cu``).
 
 A port of ``subsurfaceRouting`` (hydro/Routing/Noah_distr_routing_subsurface.F90
-in WRF 4.6.1's hydro/ tree): FINDZWAT finds each column's saturated layers,
+in WRF 4.7.1's hydro/ tree): FINDZWAT finds each column's saturated layers,
 water-table depth and routable water; ROUTE_SUBSURFACE1 sends each interior
 cell's saturated lateral flow to its steepest total-head neighbour (GETSUB8)
 and books flow leaving the domain; SUBSFC_RTNG adds or drains that flow layer
 by layer and spills what a full column cannot hold into the infiltration
-excess.  ``rt_option = 2`` (ROUTE_SUBSURFACE2) is hard-disabled in WRF-Hydro
-itself (SUBSFC_RTNG always calls ROUTE_SUBSURFACE1), so it is refused here.
+excess.  ``rt_option = 2`` selects ROUTE_OVERLAND2 for overland flow only:
+WRF-Hydro itself hard-codes ROUTE_SUBSURFACE1 here (subsurfaceRouting
+:235-256, ROUTE_SUBSURFACE2 commented out), so both values route the same.
 
 One :meth:`SubsurfaceRouting.route` is one ``subsurfaceRouting`` call; call
 :meth:`SubsurfaceState.end_hydro_step` after the rest of the HYDRO step, as
-HYDRO_exe zeroes QSUBRT (module_HYDRO_drv.F90:767).  WRF-Hydro stops the run
+HYDRO_exe zeroes QSUBRT (module_HYDRO_drv.F90:747).  WRF-Hydro stops the run
 on five conditions; :meth:`route` raises ``RuntimeError`` naming them, after
 one 4-byte read of the error word.
 """
@@ -80,10 +81,8 @@ class SubsurfaceRouting:
                  dist, rt_option: int = 1):
         import cupy as cp
 
-        if rt_option != 1:
-            raise NotImplementedError(
-                "rt_option = 2 subsurface routing (ROUTE_SUBSURFACE2) is "
-                "disabled in WRF-Hydro itself and is not ported")
+        if rt_option not in (1, 2):
+            raise ValueError("WRF-Hydro rt_option is 1 or 2")
         self.jxrt, self.ixrt = map(int, lksat.shape)
         self.nsoil = len(sldpth)
         if len(zsoil) != self.nsoil:

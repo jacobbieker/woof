@@ -41,6 +41,14 @@
 #define WCR_TABLE static __device__ const
 #define WCR_FMA(a, b, c) __fma_rn((a), (b), (c))
 #define WCR_DIV(a, b) __ddiv_rn((a), (b))
+// The error-free transformations' own sums and products: rounded once,
+// never fused with a neighbour.  NVRTC's default --fmad=true otherwise
+// contracts t = x - p (p = a*b) into fma(-a, b, x), which no longer pairs
+// with p's error term: wcr_exp then misses by up to 510 ulp on 92% of
+// [-60, 60] (the rounding test passes on the wrong value).
+#define WCR_ADD(a, b) __dadd_rn((a), (b))
+#define WCR_SUB(a, b) __dsub_rn((a), (b))
+#define WCR_MUL(a, b) __dmul_rn((a), (b))
 #define WCR_RINT(a) rint(a)
 #define WCR_BITS(x) __double_as_longlong(x)
 #define WCR_FROM_BITS(i) __longlong_as_double(i)
@@ -53,6 +61,9 @@
 #define WCR_TABLE static const
 #define WCR_FMA(a, b, c) std::fma((a), (b), (c))
 #define WCR_DIV(a, b) ((a) / (b))
+#define WCR_ADD(a, b) ((a) + (b))
+#define WCR_SUB(a, b) ((a) - (b))
+#define WCR_MUL(a, b) ((a) * (b))
 #define WCR_RINT(a) std::rint(a)
 inline long long wcr_bits(double x) {long long i; std::memcpy(&i, &x, 8); return i;}
 inline double wcr_from_bits(long long i) {double x; std::memcpy(&x, &i, 8); return x;}
@@ -447,16 +458,16 @@ WCR_HD double wcr_pow2(int e) {return WCR_FROM_BITS((long long)(e + 1023) << 52)
 
 // Exact transformations: a + b = s.h + s.l, a * b = p.h + p.l.
 WCR_HD wcr_dd wcr_2sum(double a, double b) {
-    double s = a + b;
-    double bb = s - a;
-    return wcr_dd{s, (a - (s - bb)) + (b - bb)};
+    double s = WCR_ADD(a, b);
+    double bb = WCR_SUB(s, a);
+    return wcr_dd{s, WCR_ADD(WCR_SUB(a, WCR_SUB(s, bb)), WCR_SUB(b, bb))};
 }
 WCR_HD wcr_dd wcr_fast2sum(double a, double b) {  // |a| >= |b| or a == 0
-    double s = a + b;
-    return wcr_dd{s, b - (s - a)};
+    double s = WCR_ADD(a, b);
+    return wcr_dd{s, WCR_SUB(b, WCR_SUB(s, a))};
 }
 WCR_HD wcr_dd wcr_2prod(double a, double b) {
-    double p = a * b;
+    double p = WCR_MUL(a, b);
     return wcr_dd{p, WCR_FMA(a, b, -p)};
 }
 WCR_HD wcr_dd wcr_neg(wcr_dd a) {return wcr_dd{-a.h, -a.l};}

@@ -11,7 +11,8 @@ WRITE_FIELDS = ('tsk', 'hfx', 'grdflx', 'snow', 'snowh', 'emiss', 'qsfc', 'tgxy'
 
 
 def run_glacier_slab(fields, atmosphere, active, *, coszen, zsoil, dt,
-                     opt_alb=2, opt_gla=1, opt_stc=1, opt_tbot=2, snicar_options=None, noahmp_snow_age="wrf_470"):
+                     opt_alb=2, opt_gla=1, opt_stc=1, opt_tbot=2, snicar_options=None, noahmp_snow_age="wrf_470",
+                     wrf_hydro=None):
     import cupy as cp
     from woof.core import health_ledger
     from woof.core.noahmp_glacier_gpu import glacier_module
@@ -71,7 +72,9 @@ def run_glacier_slab(fields, atmosphere, active, *, coszen, zsoil, dt,
          np.int32("acsagv" in fields),
          snow if snow is not None else np.uint64(0),
          heating if snow is not None else np.uint64(0),
-         carried if snow is not None else np.uint64(0), errors))
+         carried if snow is not None else np.uint64(0), errors,
+         *((wrf_hydro[name] for name in ("sfcheadrt", "infxsrt", "soldrain", "qtiledrain"))
+           if wrf_hydro is not None else (np.uint64(0),) * 4)))
     if opt_alb == 3:
         fields[STATE_FIELD][...] = cp.where(active[None,:,:],
             carried.T.reshape(STATE_WORDS,*shape), fields[STATE_FIELD])

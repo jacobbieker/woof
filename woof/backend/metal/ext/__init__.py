@@ -71,7 +71,31 @@ def _built_module(directory: Path) -> Path | None:
 
 
 def build(directory: Path) -> Path:
-    """Configure and build into ``directory``; returns the module path."""
+    """Configure and build into ``directory``; returns the module path.
+
+    Concurrent first uses (pytest-xdist workers and the subprocesses they
+    start) used to configure one shared build tree at once, and CMake's
+    compiler check failed.  The build now runs under an exclusive lock on
+    ``directory/.lock``, in a tree and staging directory of its own, and the
+    module is moved into ``directory`` in one rename: a process waiting on
+    the lock finds the finished module, and none loads a half-linked one."""
+    import fcntl
+    with open(directory / ".lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        built = _built_module(directory)
+        if built is not None:
+            return built
+        stage = directory / f"stage-{os.getpid()}"
+        try:
+            staged = _build_into(stage)
+            built = directory / staged.name
+            os.replace(staged, built)
+        finally:
+            shutil.rmtree(stage, ignore_errors=True)
+        return built
+
+
+def _build_into(directory: Path) -> Path:
     import mlx
     cmake = shutil.which("cmake")
     if cmake is None:

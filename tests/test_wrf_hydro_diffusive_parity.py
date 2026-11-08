@@ -1,4 +1,4 @@
-"""WRF-Hydro diffusive-wave channel routing and level-pool reservoirs (the opt-in), bitwise against WRF 4.6.1's hydro/.
+"""WRF-Hydro diffusive-wave channel routing and level-pool reservoirs (the opt-in), bitwise against WRF 4.7.1's hydro/.
 
 drive_CHANNEL's channel_option = 3 branch with DIFFUSION and HEAD and its
 level-pool lakes, run by ``woof_wrf_hydro.diffusive`` and
@@ -64,7 +64,8 @@ def test_fixtures_are_the_ones_the_build_hashed():
     rows = (FIX / "diffusive-sha256sums.txt").read_text().splitlines()
     pinned = {line.split()[1]: line.split()[0] for line in rows}
     for name in ("diffusive-network.csv", "diffusive-forcing.csv", "diffusive-steps.csv",
-                 "diffusive-lakes.csv", "levelpool-cases.csv"):
+                 "diffusive-lakes.csv", "levelpool-cases.csv", "diffusive-gw-forcing.csv",
+                 "diffusive-gw-steps.csv", "diffusive-gw-lakes.csv"):
         assert pinned[name] == hashlib.sha256((FIX / name).read_bytes()).hexdigest()
 
 
@@ -81,9 +82,15 @@ def _lakes(mod):
 
 def test_unported_options_are_refused_by_name():
     mod = optin.load("wrf_hydro")
+    with pytest.raises(ValueError, match="lake_opt"):
+        mod.LevelPool(water_elevation=np.zeros(1), lake_opt=3,
+                      **{k: np.zeros(1) for k in mod.levelpool._PROPS})
     net, _, _ = _network()
-    with pytest.raises(NotImplementedError, match="GWBASESWCRT = 3"):
-        mod.DiffusiveWaveRouting(**net, retdep_chan=RETDEP, dtrt_ch=DTRT, gwbaseswcrt=3)
+    gw = mod.DiffusiveWaveRouting(**net, retdep_chan=RETDEP, dtrt_ch=DTRT, gwbaseswcrt=3,
+                                  gw_chan_cond_sw=1, lakes=_lakes(mod))
+    with pytest.raises(ValueError, match="gw_head"):
+        gw.route(dt=DT, qstrmvolrt=None, qinflowbase=None, hlink=None, cvol=None, qlink1=None,
+                 qlateral=None)
     with pytest.raises(NotImplementedError, match="persistence"):
         mod.DiffusiveWaveRouting(**net, retdep_chan=RETDEP, dtrt_ch=DTRT,
                                  reservoir_type="persistence")
@@ -106,7 +113,9 @@ def test_level_pool_is_bitwise_against_wrf_hydro():
                          weir_length=f(first, "weir_len"), dam_length=f(first, "dam_len"),
                          orifice_elevation=f(first, "orifice_elev"),
                          orifice_coefficient=f(first, "orifice_coef"),
-                         orifice_area=f(first, "orifice_area"), max_depth=f(first, "max_depth"))
+                         orifice_area=f(first, "orifice_area"), max_depth=f(first, "max_depth"),
+                         lake_opt=np.array([int(r["lake_opt"]) for r in first]))
+    assert {int(r["lake_opt"]) for r in first} == {1, 2}       # level pool and pass-through
     for k in sorted(per):
         rs = per[k]
         pool.run(previous_inflow=f(rs, "qi0"), inflow=f(rs, "qi1"), lateral_inflow=f(rs, "ql"),
@@ -157,3 +166,47 @@ def test_diffusive_wave_is_bitwise_against_wrf_hydro():
             bad = _bits(got.get()) != _bits(w)
             assert not bad.any(), (f"step {it} {name}: {int(bad.sum())} differ, first node "
                                    f"{int(np.argmax(bad)) + 1}: {got.get()[bad][0]!r} != {w[bad][0]!r}")
+
+    # four more steps with the groundwater-channel exchange (GWBASESWCRT = 3),
+    # gwChanCondSw = 1 then, on the last step, 0; dtct, the lake and the
+    # channel state carry on from step 8
+    gforcing, gsteps = {}, {}
+    for r in _rows("diffusive-gw-forcing.csv"):
+        gforcing.setdefault(int(r["step"]), []).append(r)
+    for r in _rows("diffusive-gw-steps.csv"):
+        gsteps.setdefault(int(r["step"]), []).append(r)
+    glakes = {int(r["step"]): r for r in _rows("diffusive-gw-lakes.csv")}
+    head = cp.zeros((JXRT, IXRT), cp.float32)
+    qgw = cp.zeros((JXRT, IXRT), cp.float32)
+    for it in sorted(gforcing):
+        rows = gforcing[it]
+        sw = int(rows[0]["gwchancondsw"])
+        gwroute = mod.DiffusiveWaveRouting(
+            **net, retdep_chan=RETDEP, dtrt_ch=DTRT, lakes=route.lakes, gwbaseswcrt=3,
+            dtct=float(route.dtct.get()[0]), gw_chan_cond_sw=sw,
+            gw_chan_cond_const_in=float(np.float32(rows[0]["cond_in"])),
+            gw_chan_cond_const_out=float(np.float32(rows[0]["cond_out"])))
+        planes = {k: np.zeros((JXRT, IXRT), np.float32)
+                  for k in ("qstrmvolrt", "qinflowbase", "lakeinflort", "gwhead")}
+        for r in rows:
+            k = int(r["node"]) - 1
+            for name in planes:
+                planes[name][net["chanyj"][k] - 1, net["chanxi"][k] - 1] = np.float32(r[name])
+        head[...] = cp.asarray(planes["gwhead"])
+        gwroute.route(dt=DT, qstrmvolrt=cp.asarray(planes["qstrmvolrt"]),
+                      qinflowbase=cp.asarray(planes["qinflowbase"]), hlink=hlink, cvol=cvol,
+                      qlink1=qlink1, qlateral=qlat, lakeinflort=cp.asarray(planes["lakeinflort"]),
+                      gw_head=head, qgw_chanrt=qgw)
+        route.dtct[...] = gwroute.dtct
+        want = gsteps[it]
+        assert _bits(gwroute.dtct.get())[0] == _bits([np.float32(want[0]["dtct"])])[0], it
+        q = qgw.get()
+        got_qgw = np.array([q[net["chanyj"][k] - 1, net["chanxi"][k] - 1] for k in range(N)])
+        for name, got in (("hlink", hlink.get()), ("cvol", cvol.get()), ("qlink1", qlink1.get()),
+                          ("qlateral", qlat.get()), ("qgw_chanrt", got_qgw)):
+            w = np.array([np.float32(r[name]) for r in want])
+            bad = _bits(got) != _bits(w)
+            assert not bad.any(), f"gw step {it} {name}: {int(bad.sum())} differ"
+        for name, got in (("resht", route.lakes.resht), ("qlakei", route.lakes.qlakei),
+                          ("qlakeo", route.lakes.qlakeo)):
+            assert _bits(got.get()[:1])[0] == _bits([np.float32(glakes[it][name])])[0], (it, name)

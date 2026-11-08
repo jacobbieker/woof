@@ -3,7 +3,7 @@
 cpl_store_input at itimestep 1, cpl_rcv's SST merge plus sst_update's water
 lines at the top of every surface-driver call, and cpl_snd at the end of
 every step with the coupling-interval average handed to the ocean.  The
-exchange kernels themselves are graded against WRF 4.6.1 in
+exchange kernels themselves are graded against WRF 4.7.1 in
 tests/test_wrf_cpl_parity.py; here the wiring is checked against a stub
 ocean through the real driver, and the NEMO column (an opt-in) behind it.
 """

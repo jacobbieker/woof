@@ -1,11 +1,11 @@
 // WOOF-OPTIN: wrf-hydro
-// Derived from WRF-Hydro (UCAR) as shipped in WRF 4.6.1 hydro/; see
+// Derived from WRF-Hydro (UCAR) as shipped in WRF 4.7.1 hydro/; see
 // optional/wrf_hydro/LICENSE and NOTICE.md.  Not part of the default build or
 // of any wheel.
 //
 // WRF-Hydro's LSM <-> routing grid transforms: disaggregateDomain
-// (hydro/Routing/Noah_distr_routing.F90:925-1270) and aggregateDomain
-// (hydro/HYDRO_drv/module_HYDRO_drv.F90:1027-1303), without MPP_LAND.  One
+// (hydro/Routing/Noah_distr_routing.F90:896-1241) and aggregateDomain
+// (hydro/HYDRO_drv/module_HYDRO_drv.F90:1010-1286), without MPP_LAND.  One
 // thread per LSM cell walks its AGGFACTRT x AGGFACTRT routing cells in WRF's
 // order (AGGFACYRT, then AGGFACXRT, each from AGGFACTRT-1 down to 0), so each
 // running sum, and the one place disaggregation rewrites the LSM cell's SICE
@@ -39,7 +39,7 @@ void hyd_disaggregate(int ix, int jx, int nsoil, int agg, int iswater,
     if (c >= n) return;
     int I = c % ix + 1, J = c / ix + 1;
     int ixrt = ix * agg, jxrt = jx * agg, nrt = ixrt * jxrt;
-    // :1053 SICE = SMC - SH2OX (the whole array, before the loops)
+    // :1036 SICE = SMC - SH2OX (the whole array, before the loops)
     for (int k = 0; k < nsoil; ++k)
         sice[(size_t)k * n + c] = __fsub_rn(smc[(size_t)k * n + c], sh2ox[(size_t)k * n + c]);
     float lsmvol = __fmul_rn(infxsrt[c], area_lsm[c]);
@@ -123,7 +123,7 @@ void hyd_disaggregate(int ix, int jx, int nsoil, int agg, int iswater,
     }
 }
 
-// :1093-1096, after the loops: WHERE (ELRT < -9998) INFXSUBRT = 0
+// :1076-1079, after the loops: WHERE (ELRT < -9998) INFXSUBRT = 0
 extern "C" __global__
 void hyd_disaggregate_ocean(const float* __restrict__ elrt, float* __restrict__ infxsubrt,
                             int nrt)
@@ -177,7 +177,7 @@ void hyd_aggregate(int ix, int jx, int nsoil, int agg,
                 sh2owgt[o] = fmaxf(1.0E-05f, w);
             }
         }
-    // :1253 SMC = SH2OX + SICE
+    // :1236 SMC = SH2OX + SICE
     for (int k = 0; k < nsoil; ++k)
         smc[(size_t)k * n + c] = __fadd_rn(sh2ox[(size_t)k * n + c], sice[(size_t)k * n + c]);
 }

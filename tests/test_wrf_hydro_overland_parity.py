@@ -1,6 +1,7 @@
-"""WRF-Hydro overland routing (the opt-in), bitwise against WRF 4.6.1's hydro/.
+"""WRF-Hydro overland routing (the opt-in), bitwise against WRF 4.7.1's hydro/.
 
-``OverlandRouting`` with rt_option = 1, run by ``woof_wrf_hydro.overland``.
+``OverlandRouting`` with rt_option = 1 and then 2 (ROUTE_OVERLAND2), run by
+``woof_wrf_hydro.overland``.
 The fixture is ``optional/wrf_hydro/oracle/build_overland.sh``: the pinned
 routines compiled unchanged, three calls of six 20 s substeps over a 20 x 16
 grid with a channel line, a lake, a dry patch, a deep pit and a head mound
@@ -50,19 +51,18 @@ def _bits(a):
 def test_fixtures_are_the_ones_the_build_hashed():
     rows = (FIX / "overland-sha256sums.txt").read_text().splitlines()
     pinned = {line.split()[1]: line.split()[0] for line in rows}
-    for name in ("overland-inputs.csv", "overland-steps.csv", "overland-totals.csv"):
+    for name in ("overland-inputs.csv", "overland-steps.csv", "overland-totals.csv",
+                 "overland2-inputs.csv", "overland2-steps.csv", "overland2-totals.csv"):
         assert pinned[name] == hashlib.sha256((FIX / name).read_bytes()).hexdigest()
 
 
-def test_rt_option_2_is_refused_by_name():
+def test_rt_option_2_needs_its_slopes():
     mod = optin.load("wrf_hydro")
-    with pytest.raises(NotImplementedError, match="ROUTE_OVERLAND2"):
+    with pytest.raises(ValueError, match="sox and soy"):
         mod.OverlandRouting(dist=None, slope=None, sdir=None, roughness=None,
                             ch_netrt=None, lake_mask=None, rt_option=2)
 
 
-@pytest.mark.gpu
-@requires_gpu
 def test_overland_routing_is_bitwise_against_wrf_hydro():
     import cupy as cp
 
@@ -89,5 +89,27 @@ def test_overland_routing_is_bitwise_against_wrf_hydro():
                          ("boundary_flux", state.boundary_flux)):
             assert np.array_equal(_bits(cp.asnumpy(arr)), _bits(_plane(rows, key))), (n, key)
         t = totals[n - 1]
+        want = np.array([t["acc_channel"], t["acc_lake"], t["boundary_flux_total"]], np.float32)
+        assert np.array_equal(_bits(cp.asnumpy(state.totals)), _bits(want)), (n, "totals")
+
+
+    # rt_option = 2 (ROUTE_OVERLAND2) on the routing-initialisation slopes,
+    # carrying the state on from call 3
+    inp2 = _rows("overland2-inputs.csv")
+    ov2 = mod.OverlandRouting(
+        dist=ov.dist, slope=ov.slope, sdir=ov.sdir, roughness=ov.roughness,
+        ch_netrt=ov.ch_netrt, lake_mask=ov.lake_mask, rt_option=2,
+        sox=d(_plane(inp2, "sox")), soy=d(_plane(inp2, "soy")))
+    steps2 = _rows("overland2-steps.csv")
+    totals2 = {int(r["call"]): r for r in _rows("overland2-totals.csv")}
+    for n in (4, 5, 6):
+        rows = [r for r in steps2 if r["call"] == str(n)]
+        ov2.route(state, d(_plane(rows, "infxs")), qx, qy, dt=DT, dtrt_ter=DTRT)
+        for key, arr in (("head", state.head), ("retention", state.retention), ("qx", qx),
+                         ("qy", qy), ("to_channel", state.to_channel), ("to_lake", state.to_lake),
+                         ("boundary_flux", state.boundary_flux)):
+            got, want = _bits(cp.asnumpy(arr)), _bits(_plane(rows, key))
+            assert np.array_equal(got, want), (n, key, int((got != want).sum()))
+        t = totals2[n]
         want = np.array([t["acc_channel"], t["acc_lake"], t["boundary_flux_total"]], np.float32)
         assert np.array_equal(_bits(cp.asnumpy(state.totals)), _bits(want)), (n, "totals")

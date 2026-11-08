@@ -2,7 +2,7 @@
 # Build and run the WRF-Hydro diffusive-wave channel oracle (DIFFUSION, HEAD,
 # AREAf, SGNf and the channel_option = 3 branch of drive_CHANNEL, with its
 # level-pool lakes) and the level-pool reservoir oracle from the WRF-Hydro
-# tree WRF 4.6.1 ships under hydro/.  Part of the WRF-Hydro opt-in (see
+# tree WRF 4.7.1 ships under hydro/.  Part of the WRF-Hydro opt-in (see
 # ../LICENSE): the pinned source is read at build time and none of it is
 # copied into the tree.  Pin check, byte-for-byte cuts with pinned lengths,
 # the reservoir modules compiled whole, -O0, MPP_LAND (as WRF-Hydro is always
@@ -15,7 +15,7 @@ fi
 source_root=$(realpath "$1")
 build_dir=$(realpath -m "$2")
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-pinned_commit="d66e442fccc04111067e29274c9f9eaccc3cef28"
+pinned_commit="f52c197ed39d12e087d02c50f412d90d418f6186"
 sources=(hydro/utils/module_hydro_stop.F90 hydro/Routing/module_channel_routing.F90
          hydro/Routing/Reservoirs/module_reservoir.F90
          hydro/Routing/Reservoirs/Level_Pool/module_levelpool_properties.F90
@@ -72,7 +72,7 @@ sha256sum "${sources[@]/#/${source_root}/}" diffusion.inc areaf.inc head.inc sgn
     "${script_dir}/diffusive_harness.F90" "${script_dir}/run_diffusive.F90" \
     "${script_dir}/run_levelpool.F90" "${script_dir}/build_diffusive.sh" \
     diffusive-network.csv diffusive-forcing.csv diffusive-steps.csv diffusive-lakes.csv \
-    levelpool-cases.csv \
-    | sed "s#${source_root}/#<wrf-4.6.1-checkout>/#; s#${script_dir}/#<oracle-workspace>/optional/wrf_hydro/oracle/#" \
+    levelpool-cases.csv diffusive-gw-forcing.csv diffusive-gw-steps.csv diffusive-gw-lakes.csv \
+    | sed "s#${source_root}/#<wrf-4.7.1-checkout>/#; s#${script_dir}/#<oracle-workspace>/optional/wrf_hydro/oracle/#" \
     > diffusive-sha256sums.txt
 echo "oracle built in ${build_dir}"
