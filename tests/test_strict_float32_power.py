@@ -1,26 +1,31 @@
-"""cupy.power on binary32 under GPUWM_WRF_EXACT=1 gives CUDA's powf words.
+"""cupy.power on binary32 under GPUWM_WRF_EXACT=1: CUDA's words on CUDA,
+correctly rounded words on Metal by default, CUDA's words with the opt-in.
 
 Every WRF-exact microphysics adapter forms the Exner function as
 ``cupy.power(p / P0, RCP)``.  On the MLX backend that was Metal's pow, which
-is not CUDA's powf: on the NSSL column oracle's 4800 cells 1601 Exner words
-differed by 1 ULP, so ``nssl2_sediment_all_parallel_64`` was handed a
-different temperature and the production step left WRF.  The facade now
-runs a transcription of CUDA's powf (woof/backend/translate/cuda_powf.cuh).
+is neither correctly rounded nor CUDA's powf.  The facade's strict power is
+now WOOF's correctly rounded powf (woof/backend/translate/strict_powf.cuh),
+or, with ``WOOF_STRICT_POWF=cuda`` in a source checkout, the opt-in
+transcription of CUDA's powf (tools/cuda_powf/cuda_powf.cuh; NOTICE).
 
-The expected words are CUDA's: the oracle fixture's ``in_exner`` is the
-CUDA adapter's own ``pii`` (tools/nssl2_wrf461_column_oracle/
-run_gpu_columns.py), and the table below was measured with strict CuPy on
-an RTX A6000 (each row: x, y, CuPy's word; rows where Metal's pow differs,
-subnormal and negative bases, and IEEE special cases).
+CUDA's words: the oracle fixture's ``in_exner`` is the CUDA adapter's own
+``pii`` (tools/nssl2_wrf461_column_oracle/run_gpu_columns.py), and the
+table below was measured with strict CuPy on an RTX A6000 (each row: x, y,
+CuPy's word).  Correctly rounded words come from tools/strict_powf/
+reference.py.  Where the two differ is the parity ledger's
+"independent-powf" gap (woof/verify/backend_parity_ledger.json).
 """
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import numpy as np
 import pytest
 
 from wrf_exact_process import wrf_exact_process
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools" / "strict_powf"))
 
 _ROOT = Path(__file__).resolve().parents[1]
 _FIXTURE = _ROOT / "tests" / "data" / "oracles" / "nssl2_column" / "nssl2-column-oracle-v2.npz"
@@ -67,35 +72,82 @@ def _words(a):
     return np.asarray(a, dtype=np.float32).view(np.uint32)
 
 
+def _expects_cuda_words() -> bool:
+    """CUDA, or Metal with the opt-in: CuPy's powf words."""
+    from woof import backend
+    if backend.active() != "mlx":
+        return True
+    from woof.backend.facade._ops import strict_powf_choice
+    return strict_powf_choice() == "cuda"
+
+
+def _differing(got, want):
+    """Positions whose words differ (any NaN matches any NaN: payloads are
+    the ledger's nan-payload gap)."""
+    got, want = np.asarray(got, np.float32), np.asarray(want, np.float32)
+    return np.flatnonzero((_words(got) != _words(want)) & ~(np.isnan(got) & np.isnan(want)))
+
+
 @pytest.mark.gpu
 @wrf_exact_process
-def test_exner_power_matches_cuda_words():
-    """(p/P0)**RCP on the oracle's pressures gives the CUDA adapter's pii."""
+def test_exner_power_words():
+    """(p/P0)**RCP on the oracle's pressures: the CUDA adapter's pii, or
+    the correctly rounded words."""
     import woof  # noqa: F401  (the backend and strict options before CuPy)
     import cupy as cp
 
+    from reference import powf
     from woof.core import constants as c
 
     data = np.load(_FIXTURE, allow_pickle=False)
-    pressure = cp.asarray(data["in_pressure"], dtype=cp.float32)
-    pii = cp.power(pressure / np.float32(c.P0), np.float32(c.RCP))
-    differ = int(np.count_nonzero(_words(cp.asnumpy(pii)) != _words(data["in_exner"])))
-    assert differ == 0, f"{differ} of {pii.size} Exner words differ from CUDA's"
+    ratio = cp.asarray(data["in_pressure"], dtype=cp.float32) / np.float32(c.P0)
+    pii = cp.asnumpy(cp.power(ratio, np.float32(c.RCP)))
+    if _expects_cuda_words():
+        want = data["in_exner"]
+    else:
+        want, _ = powf(cp.asnumpy(ratio), np.full(pii.shape, c.RCP, np.float32))
+    differ = _differing(pii, want).size
+    assert differ == 0, f"{differ} of {pii.size} Exner words differ"
 
 
 @pytest.mark.gpu
 @wrf_exact_process
-def test_power_matches_cuda_powf_words():
-    """Rows of CuPy's powf words, subnormal and special cases among them."""
+def test_power_rows():
+    """CuPy's powf words, subnormal and special cases among them, or the
+    correctly rounded words of the same rows."""
     import woof  # noqa: F401  (the backend and strict options before CuPy)
     import cupy as cp
 
+    from reference import powf
+
     table = np.array(_CUDA_WORDS, dtype=np.uint32)
     x, y = table[:, 0].view(np.float32), table[:, 1].view(np.float32)
-    got = _words(cp.asnumpy(cp.power(cp.asarray(x), cp.asarray(y))))
-    bad = [(f"{a:08X}", f"{b:08X}", f"{w:08X}", f"{g:08X}")
-           for (a, b, w), g in zip(_CUDA_WORDS, got) if w != g]
+    got = cp.asnumpy(cp.power(cp.asarray(x), cp.asarray(y)))
+    want = table[:, 2].view(np.float32) if _expects_cuda_words() else powf(x, y)[0]
+    bad = [(f"{_words(x)[i]:08X}", f"{_words(y)[i]:08X}", f"{_words(want)[i]:08X}",
+            f"{_words(got)[i]:08X}") for i in _differing(got, want)]
     assert not bad, bad
     # two scalars give a 0-d array, as CuPy's ufunc does
     root = cp.power(np.float32(2.0), np.float32(0.5))
     assert root.shape == () and _words(cp.asnumpy(root)) == 0x3FB504F3
+
+
+@pytest.mark.gpu
+@wrf_exact_process
+def test_exact_midpoints_round_to_even():
+    """WOOF's powf on the binary32 midpoints x**y can land on exactly
+    (4097^2 = 2^24 + 2^13 + 1, 66049^1.5 = 257^3): ties to even."""
+    import woof  # noqa: F401  (the backend and strict options before CuPy)
+    import cupy as cp
+
+    if _expects_cuda_words():
+        pytest.skip("CUDA's powf is not correctly rounded")
+    from reference import powf
+
+    xs = [4097.0, 4099.0, 66049.0, 66049.0 / 2 ** 20, 8191.0 / 4096, 3.0, 5.0, 625.0]
+    ys = [2.0, 2.0, 1.5, 1.5, 2.0, 15.0, 11.0, 2.75]
+    x, y = np.array(xs, np.float32), np.array(ys, np.float32)
+    got = cp.asnumpy(cp.power(cp.asarray(x), cp.asarray(y)))
+    want, _ = powf(x, y)
+    assert _differing(got, want).size == 0, (got, want)
+    assert got[0] == np.float32(16785408.0)

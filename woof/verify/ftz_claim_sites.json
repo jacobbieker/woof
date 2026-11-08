@@ -11,10 +11,10 @@
   ],
   "attribution_note": "route/mechanism attribution is judgment across five measured routes and is not machine-derivable; unattributed records carry asserted_token: null and the gate requires only that a token, once written, agrees with the receipt",
   "anchoring_note": "a site is its file plus the exact text of its line (anchor, anchor_sha256), and identical lines in one file are counted; line is where the generator last found the site, a hint the check does not fail on, so lines added or removed above a claim leave the census valid",
-  "site_count": 5361,
+  "site_count": 5368,
   "site_count_by_kind": {
     "behavioural": 67,
-    "prose": 5294
+    "prose": 5301
   },
   "sites": [
     {
@@ -679,7 +679,7 @@
     },
     {
       "file": "docs/dev/mlx-backend.md",
-      "line": 116,
+      "line": 117,
       "kind": "prose",
       "anchor": "* **A `float` literal argument in an `--ftz=false` unit** becomes `f32s(...)`",
       "anchor_sha256": "ac5197aac04643a4c3e3efe66bdb1564e43d3e0473ad651b73c1ba7c97a22fb1",
@@ -690,7 +690,7 @@
     },
     {
       "file": "docs/dev/mlx-backend.md",
-      "line": 120,
+      "line": 121,
       "kind": "prose",
       "anchor": "* **Float vectors in an `--ftz=false` unit** keep `float` components (Metal",
       "anchor_sha256": "f27e60e967870ab4694078c584602f583c62478fa24d42189933e74328e37731",
@@ -701,7 +701,7 @@
     },
     {
       "file": "docs/dev/mlx-backend.md",
-      "line": 401,
+      "line": 405,
       "kind": "prose",
       "anchor": "`.ftz`);",
       "anchor_sha256": "527adfd4b49e44eb59dad37456dfe6dc5874dc4b97390be37d7e0162a40973e3",
@@ -1394,7 +1394,7 @@
     },
     {
       "file": "docs/public/CONFIGURATION.md",
-      "line": 678,
+      "line": 686,
       "kind": "prose",
       "anchor": "| `ysu_version` | no stock namelist spelling | `\"wrf_480\"` | `\"wrf_480\"`, `\"wrf_461\"` | Corrected YSU default. WRF 4.8 MMM `550b5b4` removes the old efficiency offset and caps `0.2*8*tmp1` at 0.4. `[shared]` selects the generation; namelist import uses the corrected default and preserves an explicit physics-selector comment (`! gpuwm-physics-selectors-v1: {...}`). `wrf_461` under default arithmetic reproduces 2.8.9's YSU kernel, under its restart identity. Under `GPUWM_WRF_EXACT=1` it matches WRF 4.6.1 `bl_ysu_run` word for word on the 1,188-column test set, with the same declared exceptions as `wrf_480` (YSU surface drag removed on mixed BEP urban columns; the bounded PBL-height search on four-level columns), under its own restart identity, so a strict-mode `wrf_461` checkpoint from 2.9.0 or earlier is refused rather than continued with different arithmetic. Four-level shallow columns use the declared bounded PBL-height search and zero final TKE word. A generation change is refused on restart; old headers without a selector mean `wrf_461`. The corrected path uses the shared no-FTZ loader and WOOF's own math routines |",
       "anchor_sha256": "fce15ee2f0dbd461c7726780e0bbe513e810bf65e03e7facb97c388cdb96fb51",
@@ -1834,7 +1834,7 @@
     },
     {
       "file": "docs/public/PHYSICS.md",
-      "line": 3567,
+      "line": 3569,
       "kind": "prose",
       "anchor": "Default execution uses CUDA hardware math. `GPUWM_WRF_EXACT=1` preserves subnormals and disables contraction for bitwise native replay. Real native replays also set `GPUWM_WRF_GLIBC` to the referee build's glibc version; the regenerated captures (test host A, RTX 4090) use `2.43`. The column grid runs in one launch with a bounded scratch pool. Independent CO2 profiles and ozone/table initialization run in parallel on the GPU. Cloud bounds from KF, Grell, Grell-Freitas and New SAS retain their native levels and sentinels.",
       "anchor_sha256": "1b6bc24d487dee8625fcd34b10969dc4a7b8dd6317a84707058437e7354df051",
@@ -3715,7 +3715,7 @@
     },
     {
       "file": "tests/data/backend_receipts/cuda.json",
-      "line": 310,
+      "line": 311,
       "kind": "prose",
       "anchor": "\"tests/test_wsm6_wrf461_column_exact.py::test_default_build_is_wrf461_outside_the_subnormal_columns\": {\"outcome\":\"passed\",\"launches\":[]},",
       "anchor_sha256": "3a39b243d180da2ee8001667e7ffaf1a6148e958da4a118ac6c9e5ad7e6ad5b0",
@@ -3726,7 +3726,7 @@
     },
     {
       "file": "tests/data/backend_receipts/cuda.json",
-      "line": 331,
+      "line": 332,
       "kind": "prose",
       "anchor": "\"tests/test_ysu_wrf461_parity.py::test_a_positive_subnormal_br_takes_wrfs_stable_arm\": {\"outcome\":\"passed\",\"launches\":[[\"ysu_column\",\"d260481049e4\"],[\"ysu_column\",\"d260481049e4\"],[\"ysu_column\",\"bdd3668bdb19\"],[\"ysu_column\",\"bdd3668bdb19\"]]},",
       "anchor_sha256": "f5b4eb986291598bde98dd8348c9562208c0413c7df5e45bc01f96065facdf44",
@@ -3737,7 +3737,7 @@
     },
     {
       "file": "tests/data/backend_receipts/cuda.json",
-      "line": 335,
+      "line": 336,
       "kind": "prose",
       "anchor": "\"tests/test_ysu_wrf461_parity.py::test_ftz_flushes_every_subnormal_tendency_wrf_wrote\": {\"outcome\":\"skipped\",\"launches\":[]},",
       "anchor_sha256": "c7f69b5aa2ef7057b3817b0ec6fa663e227bb72c87940baa032a14b82fbc1632",
@@ -3748,7 +3748,7 @@
     },
     {
       "file": "tests/data/backend_receipts/cuda.json",
-      "line": 337,
+      "line": 338,
       "kind": "prose",
       "anchor": "\"tests/test_ysu_wrf461_parity.py::test_strict_build_writes_every_subnormal_tendency_wrf_wrote\": {\"outcome\":\"passed\",\"launches\":[[\"ysu_column\",\"d260481049e4\"],[\"ysu_column\",\"d260481049e4\"],[\"ysu_column\",\"bdd3668bdb19\"],[\"ysu_column\",\"bdd3668bdb19\"]]},",
       "anchor_sha256": "7007d90597c58ec7f9ec834f107d2f60fe1a9d176d16d8c592d31e29a43728f9",
@@ -3759,10 +3759,98 @@
     },
     {
       "file": "tests/data/backend_receipts/cuda.json",
-      "line": 340,
+      "line": 341,
       "kind": "prose",
       "anchor": "\"tests/test_ysu_wrf461_parity.py::test_ysu_is_bitwise_wrf_outside_the_flushed_subnormal_lanes\": {\"outcome\":\"passed\",\"launches\":[[\"ysu_column\",\"d260481049e4\"],[\"ysu_column\",\"d260481049e4\"],[\"ysu_column\",\"bdd3668bdb19\"],[\"ysu_column\",\"bdd3668bdb19\"]]},",
       "anchor_sha256": "8381ad33448c61c4b99359788fb35da6464eae8fb8b25b1a44f7d546471aeb4a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/data/backend_receipts/mlx-cuda-powf.json",
+      "line": 105,
+      "kind": "prose",
+      "anchor": "\"tests/test_morrison_wrf461_parity.py::test_fixture_spans_phases_thresholds_signed_zero_and_subnormals\": {\"outcome\":\"passed\",\"launches\":[]},",
+      "anchor_sha256": "b7abb5be3f548d001b15d29edd478e5ed403af12a8eaf9ae4eaf997a28de1d10",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/data/backend_receipts/mlx-cuda-powf.json",
+      "line": 130,
+      "kind": "prose",
+      "anchor": "\"tests/test_noah_wrf461_parity.py::test_case_18_takes_wrfs_snow_branch_on_a_subnormal_snow\": {\"outcome\":\"passed\",\"launches\":[[\"noah_column\",\"41a36ba0d32a\"]]},",
+      "anchor_sha256": "9d09988542b4ca32b98b8ad0fab181fa750250730c5c2851ccddd365421c478a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/data/backend_receipts/mlx-cuda-powf.json",
+      "line": 237,
+      "kind": "prose",
+      "anchor": "\"tests/test_shinhong_wrf461_parity.py::test_shinhong_cuda_ftz_flushes_every_subnormal_tendency_wrf_wrote\": {\"outcome\":\"passed\",\"launches\":[]},",
+      "anchor_sha256": "8999c3e6457c420b1353d9323d05c8a2da9be19849822ee25d842ea0b6cbfc7b",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/data/backend_receipts/mlx-cuda-powf.json",
+      "line": 311,
+      "kind": "prose",
+      "anchor": "\"tests/test_wsm6_wrf461_column_exact.py::test_default_build_is_wrf461_outside_the_subnormal_columns\": {\"outcome\":\"passed\",\"launches\":[]},",
+      "anchor_sha256": "3a39b243d180da2ee8001667e7ffaf1a6148e958da4a118ac6c9e5ad7e6ad5b0",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/data/backend_receipts/mlx-cuda-powf.json",
+      "line": 332,
+      "kind": "prose",
+      "anchor": "\"tests/test_ysu_wrf461_parity.py::test_a_positive_subnormal_br_takes_wrfs_stable_arm\": {\"outcome\":\"passed\",\"launches\":[[\"ysu_column\",\"d260481049e4\"],[\"ysu_column\",\"bdd3668bdb19\"]]},",
+      "anchor_sha256": "8ef620f8d92876fcc409ca06942c1fa88a5f3e186a270369bb317c7364b67387",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/data/backend_receipts/mlx-cuda-powf.json",
+      "line": 336,
+      "kind": "prose",
+      "anchor": "\"tests/test_ysu_wrf461_parity.py::test_ftz_flushes_every_subnormal_tendency_wrf_wrote\": {\"outcome\":\"skipped\",\"launches\":[]},",
+      "anchor_sha256": "c7f69b5aa2ef7057b3817b0ec6fa663e227bb72c87940baa032a14b82fbc1632",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/data/backend_receipts/mlx-cuda-powf.json",
+      "line": 338,
+      "kind": "prose",
+      "anchor": "\"tests/test_ysu_wrf461_parity.py::test_strict_build_writes_every_subnormal_tendency_wrf_wrote\": {\"outcome\":\"passed\",\"launches\":[[\"ysu_column\",\"d260481049e4\"],[\"ysu_column\",\"bdd3668bdb19\"]]},",
+      "anchor_sha256": "0f1388d91782e49be17e5b21bd469f1b1f9254b04a28d4cffa47d394e4a15ec5",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/data/backend_receipts/mlx-cuda-powf.json",
+      "line": 341,
+      "kind": "prose",
+      "anchor": "\"tests/test_ysu_wrf461_parity.py::test_ysu_is_bitwise_wrf_outside_the_flushed_subnormal_lanes\": {\"outcome\":\"passed\",\"launches\":[[\"ysu_column\",\"d260481049e4\"],[\"ysu_column\",\"bdd3668bdb19\"]]},",
+      "anchor_sha256": "d5910f6762304fe4da87bdab449f73360d655e1dbbc667a43dee3949378d5420",
       "route": null,
       "mechanism": null,
       "asserted_token": null,
@@ -3803,7 +3891,7 @@
     },
     {
       "file": "tests/data/backend_receipts/mlx.json",
-      "line": 310,
+      "line": 311,
       "kind": "prose",
       "anchor": "\"tests/test_wsm6_wrf461_column_exact.py::test_default_build_is_wrf461_outside_the_subnormal_columns\": {\"outcome\":\"passed\",\"launches\":[]},",
       "anchor_sha256": "3a39b243d180da2ee8001667e7ffaf1a6148e958da4a118ac6c9e5ad7e6ad5b0",
@@ -3814,7 +3902,7 @@
     },
     {
       "file": "tests/data/backend_receipts/mlx.json",
-      "line": 331,
+      "line": 332,
       "kind": "prose",
       "anchor": "\"tests/test_ysu_wrf461_parity.py::test_a_positive_subnormal_br_takes_wrfs_stable_arm\": {\"outcome\":\"passed\",\"launches\":[[\"ysu_column\",\"d260481049e4\"],[\"ysu_column\",\"bdd3668bdb19\"]]},",
       "anchor_sha256": "8ef620f8d92876fcc409ca06942c1fa88a5f3e186a270369bb317c7364b67387",
@@ -3825,7 +3913,7 @@
     },
     {
       "file": "tests/data/backend_receipts/mlx.json",
-      "line": 335,
+      "line": 336,
       "kind": "prose",
       "anchor": "\"tests/test_ysu_wrf461_parity.py::test_ftz_flushes_every_subnormal_tendency_wrf_wrote\": {\"outcome\":\"skipped\",\"launches\":[]},",
       "anchor_sha256": "c7f69b5aa2ef7057b3817b0ec6fa663e227bb72c87940baa032a14b82fbc1632",
@@ -3836,7 +3924,7 @@
     },
     {
       "file": "tests/data/backend_receipts/mlx.json",
-      "line": 337,
+      "line": 338,
       "kind": "prose",
       "anchor": "\"tests/test_ysu_wrf461_parity.py::test_strict_build_writes_every_subnormal_tendency_wrf_wrote\": {\"outcome\":\"passed\",\"launches\":[[\"ysu_column\",\"d260481049e4\"],[\"ysu_column\",\"bdd3668bdb19\"]]},",
       "anchor_sha256": "0f1388d91782e49be17e5b21bd469f1b1f9254b04a28d4cffa47d394e4a15ec5",
@@ -3847,7 +3935,7 @@
     },
     {
       "file": "tests/data/backend_receipts/mlx.json",
-      "line": 340,
+      "line": 341,
       "kind": "prose",
       "anchor": "\"tests/test_ysu_wrf461_parity.py::test_ysu_is_bitwise_wrf_outside_the_flushed_subnormal_lanes\": {\"outcome\":\"passed\",\"launches\":[[\"ysu_column\",\"d260481049e4\"],[\"ysu_column\",\"bdd3668bdb19\"]]},",
       "anchor_sha256": "d5910f6762304fe4da87bdab449f73360d655e1dbbc667a43dee3949378d5420",
@@ -17091,7 +17179,7 @@
     },
     {
       "file": "tests/test_kernel_source_freeze_per_module.py",
-      "line": 1031,
+      "line": 1032,
       "kind": "prose",
       "anchor": "# NVRTC loader (woof/core/terrain_drag.py), -fmad=false --ftz=false.",
       "anchor_sha256": "e093e01f408f7a852f2f5bfc26ed2f57fe4ebe5d5032920e0f87d002484e083b",
@@ -17102,7 +17190,7 @@
     },
     {
       "file": "tests/test_kernel_source_freeze_per_module.py",
-      "line": 1056,
+      "line": 1058,
       "kind": "prose",
       "anchor": "# loader (woof/fire/_device.py), -fmad=false --ftz=false, with",
       "anchor_sha256": "256f4c889b78910d886d5711bc73e3d4345ec08490f8b807a1a14afc818f50dc",
@@ -17113,7 +17201,7 @@
     },
     {
       "file": "tests/test_kernel_source_freeze_per_module.py",
-      "line": 1108,
+      "line": 1110,
       "kind": "prose",
       "anchor": "# NaNs, subnormals, division extremes, broadcasts and alias fallbacks.",
       "anchor_sha256": "1b0d625ba8d6bc1e98db90ae7b14aec3b184597d8343edb3656aae8e265f4ddd",
@@ -17124,7 +17212,7 @@
     },
     {
       "file": "tests/test_kernel_source_freeze_per_module.py",
-      "line": 1226,
+      "line": 1229,
       "kind": "prose",
       "anchor": "# WRF column oracle at every non-FTZ word",
       "anchor_sha256": "3e0b346ebd3c9373d111fd292b13931a5c2794a4eb90d89d17d0da08eaddcd53",
@@ -17135,21 +17223,10 @@
     },
     {
       "file": "tests/test_kernel_source_freeze_per_module.py",
-      "line": 1523,
+      "line": 1526,
       "kind": "prose",
       "anchor": "# ABS sign clearing includes negative zero, subnormals and signed NaNs;",
       "anchor_sha256": "2316c8314eaf19a4219ba9b29a5d5fe8a4c63479e275c556b00b09c1d0319d02",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tests/test_kernel_source_freeze_per_module.py",
-      "line": 1649,
-      "kind": "prose",
-      "anchor": "# Selected Group A loader header from the delivered 58-sfclay-noftz-mynn-mm5-eta",
-      "anchor_sha256": "af71af75c23481d8516a7ad61f5d06630200538f9a10ee7d5b77655ca1f738eb",
       "route": null,
       "mechanism": null,
       "asserted_token": null,
@@ -17179,7 +17256,7 @@
     },
     {
       "file": "tests/test_kernel_source_freeze_per_module.py",
-      "line": 1660,
+      "line": 1658,
       "kind": "prose",
       "anchor": "# Selected Group A loader header from the delivered 58-sfclay-noftz-mynn-mm5-eta",
       "anchor_sha256": "af71af75c23481d8516a7ad61f5d06630200538f9a10ee7d5b77655ca1f738eb",
@@ -17190,7 +17267,18 @@
     },
     {
       "file": "tests/test_kernel_source_freeze_per_module.py",
-      "line": 1662,
+      "line": 1663,
+      "kind": "prose",
+      "anchor": "# Selected Group A loader header from the delivered 58-sfclay-noftz-mynn-mm5-eta",
+      "anchor_sha256": "af71af75c23481d8516a7ad61f5d06630200538f9a10ee7d5b77655ca1f738eb",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/test_kernel_source_freeze_per_module.py",
+      "line": 1665,
       "kind": "prose",
       "anchor": "'surface_subnormal.cuh': '99d0aaf80b1de9e243c11cbdcebbb16198b76bd40c8207847d9284718f8021d4',",
       "anchor_sha256": "55f7e59c312ffb7b640f7e4aad2ed72ddae5b6424cba333511568e37c2fe0b80",
@@ -17201,7 +17289,7 @@
     },
     {
       "file": "tests/test_kernel_source_freeze_per_module.py",
-      "line": 1923,
+      "line": 1926,
       "kind": "prose",
       "anchor": "# WRF 4.8 water balance and the inherited source-scoped no-FTZ loader.",
       "anchor_sha256": "da8870c403912a185f3cfcf9234acb9ee838c784530fb527bddf8bad7038caa7",
@@ -24362,21 +24450,10 @@
     },
     {
       "file": "tests/test_strict_float32_power.py",
-      "line": 14,
+      "line": 116,
       "kind": "prose",
-      "anchor": "subnormal and negative bases, and IEEE special cases).",
-      "anchor_sha256": "f7dd4fdb6c244990a290df79cdde51a016033ca07d334dca7bedb81a5043f092",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tests/test_strict_float32_power.py",
-      "line": 89,
-      "kind": "prose",
-      "anchor": "\"\"\"Rows of CuPy's powf words, subnormal and special cases among them.\"\"\"",
-      "anchor_sha256": "f43a8c27654f46705077a59c45ff50de5ebebb3b3c808ec6ce46f93a4d64dbcb",
+      "anchor": "\"\"\"CuPy's powf words, subnormal and special cases among them, or the",
+      "anchor_sha256": "a3a150100e5c9059e9e7693a680aba0eb1d6e6dc9f686baf9378484a2e9b1b9f",
       "route": null,
       "mechanism": null,
       "asserted_token": null,
@@ -28062,6 +28139,50 @@
       "kind": "prose",
       "anchor": "if row[\"status\"] != \"linked\" or \"-ftz=true\" not in row[\"options\"]:",
       "anchor_sha256": "8c1bed4aaa02d289470f5f756421037b6881630ec3b11a55f0f8624ba689b246",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_powf/cuda_powf.cuh",
+      "line": 10,
+      "kind": "prose",
+      "anchor": "// options woof/wrf_exact.py gives CuPy's kernels (--ftz=false,",
+      "anchor_sha256": "7beb3b73d3be7f94bbf23df7e5a653fd9ef34b19254c41354e2a2a92ff371941",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_powf/cuda_powf.cuh",
+      "line": 12,
+      "kind": "prose",
+      "anchor": "// Every operation is the PTX's, rounded to nearest, with subnormals kept",
+      "anchor_sha256": "51941d9987516b0ae7411898ec409a418f26d334caa0c7be462122629a45bbfa",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_powf/cuda_powf.cuh",
+      "line": 15,
+      "kind": "prose",
+      "anchor": "// One step is not transcribed: the PTX's rcp.approx.ftz.f32 (the GPU's",
+      "anchor_sha256": "8b53ca30b22510bcfb926f79c0c5f25df71b7841343f07ce8ea4915baaa33a75",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_powf/cuda_powf.cuh",
+      "line": 42,
+      "kind": "prose",
+      "anchor": "const float r = __frcp_rn(__fadd_rn(m, 1.0f));  // CUDA: rcp.approx.ftz.f32",
+      "anchor_sha256": "24b8dbcd22826486edbac71aa01d3a822890c5797cff8355856a0226d3af7196",
       "route": null,
       "mechanism": null,
       "asserted_token": null,
@@ -46560,7 +46681,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 253,
+      "line": 255,
       "kind": "prose",
       "anchor": "_SUBNORMAL_KERNELS: dict = {}",
       "anchor_sha256": "a52ccbed91691f80f17e3058a1fe98466f823e158ac784968051f214c40bf31e",
@@ -46571,7 +46692,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 256,
+      "line": 291,
       "kind": "prose",
       "anchor": "def _keeps_subnormals() -> bool:",
       "anchor_sha256": "79a90ae29e2d4def4dfe467674c3ae1adbfb619c944fc855578f9cba06191075",
@@ -46582,7 +46703,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 268,
+      "line": 303,
       "kind": "prose",
       "anchor": "def _subnormal_arith(np_name, a, b):",
       "anchor_sha256": "06202aafff6ab27a0bf6d4e9be09bea949eb921408fcc8bb3514cab3e2d461df",
@@ -46593,7 +46714,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 270,
+      "line": 305,
       "kind": "prose",
       "anchor": "if np_name in _SUBNORMAL_ARITH:",
       "anchor_sha256": "d483f4c64b67846cd183014f2bcdc753f17f36360728e58224f6a74dcfc88c33",
@@ -46604,7 +46725,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 271,
+      "line": 306,
       "kind": "prose",
       "anchor": "key, out, body = _SUBNORMAL_ARITH[np_name], \"float32 z\", f\"z = x {_SUBNORMAL_ARITH[np_name]} y\"",
       "anchor_sha256": "e68e347b3193a8a0c45e6ec7ae862840b425bb84c4434633d04b075cf203564a",
@@ -46615,7 +46736,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 272,
+      "line": 307,
       "kind": "prose",
       "anchor": "elif np_name in _SUBNORMAL_EXPR:",
       "anchor_sha256": "4bc5965e314234e1b1adfa0b29e30358a678b11919f1cb23beaa3df99127d2c8",
@@ -46626,7 +46747,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 273,
+      "line": 308,
       "kind": "prose",
       "anchor": "key, out, body = np_name, \"float32 z\", _SUBNORMAL_EXPR[np_name]",
       "anchor_sha256": "afa450915969ff30f2bb19502dda5e9f9ac8c8378661ac9aaf2e8c7c6c716b99",
@@ -46637,7 +46758,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 277,
+      "line": 313,
       "kind": "prose",
       "anchor": "key, out, body = np_name, \"bool z\", f\"z = x {_SUBNORMAL_COMPARE[np_name]} y\"",
       "anchor_sha256": "5764164d1fc06eea1874484d2f52e16485aa9addc85a8ccf721c9303c5aa36ea",
@@ -46648,7 +46769,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 278,
+      "line": 314,
       "kind": "prose",
       "anchor": "k = _SUBNORMAL_KERNELS.get(key)",
       "anchor_sha256": "e440ca680d7bcc6842819faee4a4dc15579216a7ec64a41ee0f32c563ec00a71",
@@ -46659,7 +46780,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 284,
+      "line": 317,
       "kind": "prose",
       "anchor": "k = _SUBNORMAL_KERNELS[key] = ElementwiseKernel(",
       "anchor_sha256": "89e663ae5cb590f96d92847a797fba1ce0570987645aa77d460aeb9be9aff5db",
@@ -46670,7 +46791,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 308,
+      "line": 341,
       "kind": "prose",
       "anchor": "if (not involves_f64 and _keeps_subnormals()",
       "anchor_sha256": "32bd6cd1e11c0767c0558428190e8d382b3ab2833fde4c522bba729033de1612",
@@ -46681,7 +46802,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 309,
+      "line": 342,
       "kind": "prose",
       "anchor": "and ((np_name in _SUBNORMAL_ARITH or np_name in _SUBNORMAL_EXPR",
       "anchor_sha256": "50dd5f1d69c9190dbb48d4ab7e4e1cc90d35851dba62df615df0513fee6b6413",
@@ -46692,7 +46813,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 312,
+      "line": 345,
       "kind": "prose",
       "anchor": "or np_name in _SUBNORMAL_COMPARE and _operands_f32(hints))):",
       "anchor_sha256": "fc24c687633e78dd061f9aaf32922e7fe7f8efe894e8e61553e9a7ad384a6e0e",
@@ -46703,7 +46824,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 313,
+      "line": 346,
       "kind": "prose",
       "anchor": "result = _subnormal_arith(np_name, args[0], args[1])",
       "anchor_sha256": "341ba2e9af3e5e2c17dc31a4d3d6c7a557027554e53ab8ef65655175fe0b7542",
@@ -48177,7 +48298,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 3249,
+      "line": 3250,
       "kind": "prose",
       "anchor": "\"\"\"``retain_subnormals`` with inheritance: ``f32s`` converts to the",
       "anchor_sha256": "12b6d2626363800c88805ed13cbec521d5d3b83fca81a41a14a441a1b9c5a075",
@@ -48188,7 +48309,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 3477,
+      "line": 3478,
       "kind": "prose",
       "anchor": "retain_subnormals: bool = False, defines=(), include_dirs=()) -> TranslatedUnit:",
       "anchor_sha256": "47fd7ebc528620cc2464226557940435e6b31ff69d0a6823a16e68815c3e9e9c",
@@ -48199,7 +48320,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 3480,
+      "line": 3481,
       "kind": "prose",
       "anchor": "``retain_subnormals``: the unit's ``float`` is ``f32s`` (gradual",
       "anchor_sha256": "462887cb8437e000a5a26f34dc6f0238ecf1081bee9e8728a5ed4a8f7bd4c853",
@@ -48210,7 +48331,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 3482,
+      "line": 3483,
       "kind": "prose",
       "anchor": "f32s.h) -- CUDA's --ftz=false.",
       "anchor_sha256": "9b45fddd4b1773c521d687ae9d3267b6cff3522013530e18c9d88932ca68cbff",
@@ -48221,7 +48342,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 3488,
+      "line": 3489,
       "kind": "prose",
       "anchor": "if retain_subnormals:",
       "anchor_sha256": "8747498c0775c864e7c0df98116ca012f99107565ff4d5a71c1c75fc64505c17",
@@ -48232,7 +48353,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 3492,
+      "line": 3493,
       "kind": "prose",
       "anchor": "result = _Rewriter(text, tu, unit=unit, retain_subnormals=retain_subnormals,",
       "anchor_sha256": "22ac765d2130695c1bc0cd1ff567ecfa927cca0ef9a3e1254530b4453c41e017",
@@ -48243,7 +48364,7 @@
     },
     {
       "file": "woof/backend/translate/__init__.py",
-      "line": 3494,
+      "line": 3495,
       "kind": "prose",
       "anchor": "result.msl = (prelude(contract=contract, retain_subnormals=retain_subnormals,",
       "anchor_sha256": "723e62201b59b0b79a02ae919fe3bdce0c3c3034cf88dcffde5e9b6d8854bdcb",
@@ -48264,66 +48385,22 @@
       "attribution": "unattributed"
     },
     {
-      "file": "woof/backend/translate/cuda_powf.cuh",
-      "line": 6,
-      "kind": "prose",
-      "anchor": "// strict options woof/wrf_exact.py gives CuPy's kernels (--ftz=false,",
-      "anchor_sha256": "6fa61bfe5cb4149640aa9102927e2661d3761d460fea46e190f59bf33e0db524",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "woof/backend/translate/cuda_powf.cuh",
-      "line": 9,
-      "kind": "prose",
-      "anchor": "// rounded to nearest, with subnormals kept (float is f32s in this process).",
-      "anchor_sha256": "87d270bec2a3a0c0c97987031b981e3ca55b20709ffed5cfb7ae45d1416e4b79",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "woof/backend/translate/cuda_powf.cuh",
-      "line": 11,
-      "kind": "prose",
-      "anchor": "// One step is not transcribed: the PTX's rcp.approx.ftz.f32 (the MUFU",
-      "anchor_sha256": "d269b4d7339126b04130dd8bd23bf12131dee7404469b61b36ef61df265f2df1",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "woof/backend/translate/cuda_powf.cuh",
-      "line": 19,
-      "kind": "prose",
-      "anchor": "// pairs (subnormal, negative and integer-y cases among them) and for 234",
-      "anchor_sha256": "f91de53e415a0d61f48ff30d16432ba1bf14f25cf7bb58a5a78ee03674a8c456",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "woof/backend/translate/cuda_powf.cuh",
-      "line": 42,
-      "kind": "prose",
-      "anchor": "const float r = __frcp_rn(__fadd_rn(m, 1.0f));  // CUDA: rcp.approx.ftz.f32",
-      "anchor_sha256": "24b8dbcd22826486edbac71aa01d3a822890c5797cff8355856a0226d3af7196",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
       "file": "woof/backend/translate/include/cupy/complex.cuh",
       "line": 129,
       "kind": "prose",
       "anchor": "// arithmetic.h's scalar product): in a unit that keeps subnormals float",
       "anchor_sha256": "f341e1f1d4546a63fa3dba7e3edc313b5e9815c9a2aaf0ad81380a79734b723b",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "woof/backend/translate/strict_powf.cuh",
+      "line": 29,
+      "kind": "prose",
+      "anchor": "// a non-integer exponent).  Subnormal operands and results are exact",
+      "anchor_sha256": "d67727de53c3c5938c98111c1c98655fbc4dc1e7f670850a34bbe9efba828b86",
       "route": null,
       "mechanism": null,
       "asserted_token": null,
@@ -49629,7 +49706,7 @@
     },
     {
       "file": "woof/core/kernel_frame_recordings.py",
-      "line": 2314,
+      "line": 2316,
       "kind": "prose",
       "anchor": "TERRAIN_DRAG_COMPOSED_OPTIONS = (\"-std=c++17\", \"-fmad=false\", \"--ftz=false\")",
       "anchor_sha256": "299d9dbc5730a2ebd290c006e60c308d70f7ce2e74750ef501fafe23462b56a9",
@@ -49640,7 +49717,7 @@
     },
     {
       "file": "woof/core/kernel_frame_recordings.py",
-      "line": 2429,
+      "line": 2431,
       "kind": "prose",
       "anchor": "# port compiles every unit with --ftz=false and adds the night-aging",
       "anchor_sha256": "5f75a3de63495832c68567c9e4744cfea3d3d4c9b8446a995bf30a55caca88b7",
@@ -49651,7 +49728,7 @@
     },
     {
       "file": "woof/core/kernel_frame_recordings.py",
-      "line": 2514,
+      "line": 2516,
       "kind": "prose",
       "anchor": "# port compiles every unit with --ftz=false and adds the night-aging",
       "anchor_sha256": "5f75a3de63495832c68567c9e4744cfea3d3d4c9b8446a995bf30a55caca88b7",
@@ -49662,7 +49739,7 @@
     },
     {
       "file": "woof/core/kernel_frame_recordings.py",
-      "line": 2615,
+      "line": 2617,
       "kind": "prose",
       "anchor": "# port compiles every unit with --ftz=false and adds the night-aging",
       "anchor_sha256": "5f75a3de63495832c68567c9e4744cfea3d3d4c9b8446a995bf30a55caca88b7",
@@ -49673,7 +49750,7 @@
     },
     {
       "file": "woof/core/kernel_frame_recordings.py",
-      "line": 2721,
+      "line": 2723,
       "kind": "prose",
       "anchor": "# describes these units (the --ftz=false / night-aging change moved",
       "anchor_sha256": "14eec97a34b1483225c785d71bc3eccee834d87a5e3b3120a54a488348b1fdfb",
@@ -49684,7 +49761,7 @@
     },
     {
       "file": "woof/core/kernel_frame_recordings.py",
-      "line": 2752,
+      "line": 2754,
       "kind": "prose",
       "anchor": "# port compiles every unit with --ftz=false and adds the night-aging",
       "anchor_sha256": "5f75a3de63495832c68567c9e4744cfea3d3d4c9b8446a995bf30a55caca88b7",
@@ -58165,7 +58242,7 @@
     },
     {
       "file": "woof/verify/backend_parity_ledger.json",
-      "line": 73,
+      "line": 84,
       "kind": "prose",
       "anchor": "\"tests/test_noah_wrf461_parity.py::test_case_18_takes_wrfs_snow_branch_on_a_subnormal_snow\": \"nan-payload\",",
       "anchor_sha256": "43834525038d5002937c5f6523f583a57fc6f1d68a5cec916ec8a0221dde6ce4",
@@ -58176,7 +58253,7 @@
     },
     {
       "file": "woof/verify/backend_parity_ledger.json",
-      "line": 905,
+      "line": 921,
       "kind": "prose",
       "anchor": "\"tests/test_morrison_wrf461_parity.py::test_fixture_spans_phases_thresholds_signed_zero_and_subnormals\": {",
       "anchor_sha256": "6b7deb8e07208ea0e61f87c0d2ef066ae4103f429f581eabebd7ae4750663e58",
@@ -58187,7 +58264,7 @@
     },
     {
       "file": "woof/verify/backend_parity_ledger.json",
-      "line": 1080,
+      "line": 1096,
       "kind": "prose",
       "anchor": "\"tests/test_noah_wrf461_parity.py::test_case_18_takes_wrfs_snow_branch_on_a_subnormal_snow\": {",
       "anchor_sha256": "6210368604643c0fb464cb11edc2bebd29ecea7a9f2404f0ca18349a75549c50",
@@ -58198,7 +58275,7 @@
     },
     {
       "file": "woof/verify/backend_parity_ledger.json",
-      "line": 1959,
+      "line": 1989,
       "kind": "prose",
       "anchor": "\"tests/test_shinhong_wrf461_parity.py::test_shinhong_cuda_ftz_flushes_every_subnormal_tendency_wrf_wrote\": {",
       "anchor_sha256": "cf4fd1c3e64893ff4d170712b4cc1ef2bade1218ff0b06dab5803143b24c34f3",
@@ -58209,7 +58286,7 @@
     },
     {
       "file": "woof/verify/backend_parity_ledger.json",
-      "line": 2613,
+      "line": 2650,
       "kind": "prose",
       "anchor": "\"tests/test_wsm6_wrf461_column_exact.py::test_default_build_is_wrf461_outside_the_subnormal_columns\": {",
       "anchor_sha256": "90bf14ecd2667f7991fc0fd05bfd9e4a1dc74829f59d70e7a91c5aace4eebc19",
@@ -58220,7 +58297,7 @@
     },
     {
       "file": "woof/verify/backend_parity_ledger.json",
-      "line": 2786,
+      "line": 2823,
       "kind": "prose",
       "anchor": "\"tests/test_ysu_wrf461_parity.py::test_a_positive_subnormal_br_takes_wrfs_stable_arm\": {",
       "anchor_sha256": "2b326513162b8bb7cf094ccee9fcdc8956dde46ae7b038251bc52c9a5855ef40",
@@ -58231,7 +58308,7 @@
     },
     {
       "file": "woof/verify/backend_parity_ledger.json",
-      "line": 2814,
+      "line": 2851,
       "kind": "prose",
       "anchor": "\"tests/test_ysu_wrf461_parity.py::test_ftz_flushes_every_subnormal_tendency_wrf_wrote\": {",
       "anchor_sha256": "1cc587dc3573d7714c7eb88be386c60c476455fc28113ea715670c2c2ca1c9ec",
@@ -58242,7 +58319,7 @@
     },
     {
       "file": "woof/verify/backend_parity_ledger.json",
-      "line": 2828,
+      "line": 2865,
       "kind": "prose",
       "anchor": "\"tests/test_ysu_wrf461_parity.py::test_strict_build_writes_every_subnormal_tendency_wrf_wrote\": {",
       "anchor_sha256": "3efd2748e3293bb591490401649af3ec7525336093370ce467ebc47105541a01",
@@ -58253,7 +58330,7 @@
     },
     {
       "file": "woof/verify/backend_parity_ledger.json",
-      "line": 2849,
+      "line": 2886,
       "kind": "prose",
       "anchor": "\"tests/test_ysu_wrf461_parity.py::test_ysu_is_bitwise_wrf_outside_the_flushed_subnormal_lanes\": {",
       "anchor_sha256": "4fe895e0dee5e9c54f0cda4bef8e3082081d27bfd49fd19279737784b2051a7e",
