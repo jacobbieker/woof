@@ -5,7 +5,9 @@
 BUILD_DIR holds the binaries from build.sh.  ``--piece tend`` (the default)
 runs ``run_oracle_{r4,r8}`` into ``tests/data/oracles/mpas_ocean_tend``;
 ``--piece pgrad_hmix`` runs ``run_pgrad_hmix_{r4,r8}`` into
-``tests/data/oracles/mpas_ocean_pgrad_hmix``.  Writes ``oracle-r4.npz`` and
+``tests/data/oracles/mpas_ocean_pgrad_hmix``; ``--piece tendency`` runs
+``run_tendency_{r4,r8}`` into ``tests/data/oracles/mpas_ocean_tendency`` (a
+case that lists its precisions is run at those only).  Writes ``oracle-r4.npz`` and
 ``oracle-r8.npz`` (``<case>/<field>``) and ``inputs.sha256`` (every case's
 input-stream digest at each precision).
 """
@@ -23,11 +25,13 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from woof.verify import mpas_ocean_pgrad_hmix_oracle, mpas_ocean_tend_oracle  # noqa: E402
+from woof.verify import (  # noqa: E402
+    mpas_ocean_pgrad_hmix_oracle, mpas_ocean_tend_oracle, mpas_ocean_tendency_oracle)
 
 #: piece -> (case module, binary stem)
 PIECES = {"tend": (mpas_ocean_tend_oracle, "run_oracle"),
-          "pgrad_hmix": (mpas_ocean_pgrad_hmix_oracle, "run_pgrad_hmix")}
+          "pgrad_hmix": (mpas_ocean_pgrad_hmix_oracle, "run_pgrad_hmix"),
+          "tendency": (mpas_ocean_tendency_oracle, "run_tendency")}
 
 
 def run_case(oo, binary: Path, case: dict, precision: str) -> dict[str, np.ndarray]:
@@ -51,6 +55,8 @@ def main() -> int:
     for precision in oo.PRECISIONS:
         arrays: dict[str, np.ndarray] = {}
         for case in oo.cases():
+            if precision not in case.get("precisions", oo.PRECISIONS):
+                continue
             for field, value in run_case(oo, args.build_dir / f"{stem}_{precision}", case, precision).items():
                 arrays[f"{case['name']}/{field}"] = value
             digests.append(f"{oo.input_digest(case, precision)}  {case['name']}/{precision}")

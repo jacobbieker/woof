@@ -47,8 +47,9 @@ The fixtures were written on x86-64 Linux, where gfortran's `x**y` and
 words for some arguments: built on macOS against Apple's libm, the SIA
 oracle differs in 10 words of `bary_pb1982/normalVelocity` (the PB1982
 flow-law exponential and the real powers). So on a host without glibc,
-build.sh links `glibc_flt32_host.c` into the oracles. That file is the
-repository's MIT glibc-float32 transcription (`woof/core/kernels/glibc_flt32.cuh`)
+build.sh links `tools/oracle_libm/glibc_host.cpp` into the oracles (the
+host libm shim every MPAS oracle shares). That file is the repository's MIT
+glibc transcriptions (`woof/core/kernels/glibc_flt32.cuh` for these oracles)
 compiled for the host. It equals pb's glibc 2.44 `expf` on all 2^32 inputs
 and its `powf` on 4e8 random pairs, and with it the macOS rebuild writes the
 committed fixtures word for word (gfortran 16.2.0 from Homebrew, arm64).
