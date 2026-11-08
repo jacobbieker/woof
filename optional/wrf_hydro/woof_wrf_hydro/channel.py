@@ -9,7 +9,7 @@ pixel's LAKEINFLORT + QINFLOWBASE, as m3/s), then takes INT((DT+0.5)/DTRT_CH)
 substeps in which every reach routes its upstream reaches' previous-substep
 flows.  Reservoir reaches (TYPEL = 1) are left alone, as the reach branch
 leaves them; level-pool routing is not ported.  channel_option 3 (the
-diffusive wave on nodes) is refused by name.
+diffusive wave on nodes) is :mod:`woof_wrf_hydro.diffusive`.
 
 The network is host data, read once to build the pixel and upstream lists:
 ``ch_lnkrt_sl`` and ``lake_mskrt`` (numpy (jxrt, ixrt)), ``chanxi``/``chanyj``
@@ -50,7 +50,7 @@ class ReachRouting:
 
         if channel_option == 3:
             raise NotImplementedError("channel_option = 3 (the diffusive wave on nodes) is "
-                                      "not ported")
+                                      "not reach routing: use DiffusiveWaveRouting")
         if channel_option not in (1, 2):
             raise ValueError("WRF-Hydro channel_option is 1, 2 or 3")
         self.option = int(channel_option)

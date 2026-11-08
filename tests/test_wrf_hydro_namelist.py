@@ -49,10 +49,10 @@ def test_nudging_group_is_refused_by_name():
         nl.map_hydro_nlist(nl.parse(_text()))
 
 
-def test_template_channel_option_3_is_refused_by_name():
+def test_template_with_the_diffusive_wave_maps():
     nl = _nl()
-    with pytest.raises(nl.UnportedOption, match="channel_option = 3"):
-        nl.map_hydro_nlist(nl.parse(_drop_nudging(_text())))
+    cfg = nl.map_hydro_nlist(nl.parse(_drop_nudging(_text())))
+    assert cfg.channel and cfg.channel_option == 3
 
 
 def test_template_with_muskingum_cunge_maps():
