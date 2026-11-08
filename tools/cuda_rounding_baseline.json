@@ -137,6 +137,14 @@
     "call_sha256": "08b412438fea2e6dba53d679fc2ae725f2afef478998519b9395664a71b27959",
     "constructor": "RawModule",
     "factory": "_module",
+    "factory_sha256": "cb95b731baa169a039b4f43afb7efdbbd043e36815b5b400612fa8dfc56fd811",
+    "file": "woof/ocean/wrf_cpl.py",
+    "status": "unresolved"
+   },
+   {
+    "call_sha256": "08b412438fea2e6dba53d679fc2ae725f2afef478998519b9395664a71b27959",
+    "constructor": "RawModule",
+    "factory": "_module",
     "factory_sha256": "eee4e92c69e366e3b6214cb99d8e73433c444d006434d1a09c77db562fa89bf3",
     "file": "woof/ocean/seaice/__init__.py",
     "status": "unresolved"
@@ -673,7 +681,7 @@
     "call_sha256": "5004d0454501a98395939411abbfe58e1e9b231abfff8fa83985186eeffc46d8",
     "constructor": "compile_using_nvrtc",
     "factory": "load_module",
-    "factory_sha256": "4036cc4e56f3d7b5a8381b8c60b994305e5e4c45b745be56b078a186c7826149",
+    "factory_sha256": "9b43de1d5a99164cf0746b8a9e10be2fa252f1d68a705589d5c88e1e1d8b0312",
     "file": "woof/core/kernels/__init__.py",
     "status": "unresolved"
    },
@@ -761,7 +769,7 @@
     "call_sha256": "599e4c79e242352babc83992c23e3fc52b6fb7fe3e6e82ed5fdbed1416b0c87f",
     "constructor": "RawModule",
     "factory": "load_module",
-    "factory_sha256": "4036cc4e56f3d7b5a8381b8c60b994305e5e4c45b745be56b078a186c7826149",
+    "factory_sha256": "9b43de1d5a99164cf0746b8a9e10be2fa252f1d68a705589d5c88e1e1d8b0312",
     "file": "woof/core/kernels/__init__.py",
     "status": "unresolved"
    },
@@ -779,6 +787,14 @@
     "factory": "compile_entry",
     "factory_sha256": "54847262dfe35da6536cbf1b5b47726ebb69c1fefdaae596ec4d3c152c62ecff",
     "file": "woof/hex/cuda_backend/aot_build.py",
+    "status": "unresolved"
+   },
+   {
+    "call_sha256": "5b326de27e21ea0f1edb40676deffcc11953abdeb203e28a1ab4b0c7d6469610",
+    "constructor": "compile_using_nvrtc",
+    "factory": "_module_on",
+    "factory_sha256": "fb5993cb30cd796b9c06e9f0073bbf8336006353edb2f4275883d921cbcf5119",
+    "file": "woof/hex/mpas_seaice/evp_v842.py",
     "status": "unresolved"
    },
    {
@@ -1601,7 +1617,7 @@
     "call_sha256": "b48fdbd7eb956be44e09b9bf49b2bcc050129607422040e5118ae28dfc3a7e6a",
     "constructor": "ElementwiseKernel",
     "factory": "_subnormal_arith",
-    "factory_sha256": "e1926b07eec64d695c126a816de40ebe0a6a3221ec13f7d9ef8c0b0c8212f417",
+    "factory_sha256": "c641025d493597e3b05799be3f22bff56bac824191e685e4b28a3eaff7bb959e",
     "file": "woof/backend/facade/_ops.py",
     "status": "unresolved"
    },
@@ -2256,12 +2272,12 @@
   ],
   "cuda_files": [
    {
-    "file": "woof/backend/translate/cuda_powf.cuh",
-    "sha256": "9d3fff2bea90e23d4d74f12fe840cbb698d4652140fbe8da305937cf2a9397f2"
-   },
-   {
     "file": "woof/backend/translate/include/cupy/complex.cuh",
     "sha256": "bc156f6771efd56a16c60cf6cab01c24c182c6fd5c7ed58b0990a34ffeeb3bb6"
+   },
+   {
+    "file": "woof/backend/translate/strict_powf.cuh",
+    "sha256": "d2d0eff38fc7aba3a1355ba2e7eda1f2f19f5da1ce1ad519a4f59db746e43bc8"
    },
    {
     "file": "woof/backend/translate/vendor_libm64.cuh",
@@ -2414,6 +2430,10 @@
    {
     "file": "woof/core/kernels/chem_radiation.cu",
     "sha256": "171ca03a6063038e78547fabb6f780e98ee304066c6cf6c9ce797802c0f7c7d1"
+   },
+   {
+    "file": "woof/core/kernels/chem_radm2.cu",
+    "sha256": "159fb2c22c9c0bbe82bd8994926e79b44a927576399ed69b85023b1ebfbb94f7"
    },
    {
     "file": "woof/core/kernels/chem_rrtmgp_aerosol.cu",
@@ -3041,23 +3061,15 @@
    },
    {
     "file": "woof/core/kernels/morrison.cu",
-    "sha256": "010c56a68408bc648a30eec3e13888ff9cd638772ffa96968d1d8dcf7fb8f25a"
+    "sha256": "3fd84d25ccae3b3616be2f99e5f4ddc594256c2ecbb457aa0381f724db481054"
    },
    {
     "file": "woof/core/kernels/morrison_aero.cu",
     "sha256": "bf7352c98693d5d693a1d7024f01f8e73d7f65b7022d4cd1b3d2c90de0e1343d"
    },
    {
-    "file": "woof/core/kernels/morrison_aero_constants.cuh",
-    "sha256": "41218f02d92fe6d1de4a73d40e954ec80854c140721785ee6d9ed4c5fd966917"
-   },
-   {
     "file": "woof/core/kernels/morrison_aero_refl.cu",
     "sha256": "1390a185d1153e73a6b815125d8b34e7364a0dc7a5419421537bc14449fd0c95"
-   },
-   {
-    "file": "woof/core/kernels/morrison_aero_support.cuh",
-    "sha256": "2e561bb61723399da409eef657e15c90f47edde9ba1fb76d4c02850b6f0c6287"
    },
    {
     "file": "woof/core/kernels/morrison_constants.cuh",
@@ -3157,7 +3169,7 @@
    },
    {
     "file": "woof/core/kernels/noah.cu",
-    "sha256": "b902d6628c998706a792cea101275387322ed24e3d8e3418f48ab6d9bd20d9ac"
+    "sha256": "96e0b62e529d90ecdc25f06b91bf5aaa918afd508513d66073bec7553b8cef03"
    },
    {
     "file": "woof/core/kernels/noah_fractional.cu",
@@ -4380,6 +4392,10 @@
     "sha256": "cb0fec838f6f127843e831fbf9057d182c65eb303e3e1de165f62564673d6b7f"
    },
    {
+    "file": "woof/hex/mpas_seaice/evp_variational_v842.cu",
+    "sha256": "7323e7271d3af1ed3e482d56591e85b64116060c4e312a3fb99d8f4c50f3b5f0"
+   },
+   {
     "file": "woof/hex/mpasphys/rrfs/nssl_sunpro.cuh",
     "sha256": "d38b8170869f84a478b834752eff171c40a79cc2b1a5522df4d9900eb04d59f1"
    },
@@ -4480,6 +4496,10 @@
     "sha256": "ea9d8becc42cb269e3d05abf158c699bc30f2831b937ef0d5750e96d55c69206"
    },
    {
+    "file": "woof/ocean/wrf_cpl.cu",
+    "sha256": "7d867f848e9b0707dce8efa1769cd43725179061381391fd7fdac77d23cc214f"
+   },
+   {
     "file": "woof/spectral_nudging/forecast.cu",
     "sha256": "f5d75d25e91b0c44efb334fd3d456ff83467885ff5a5d6404cb760e24aefc317"
    },
@@ -4503,7 +4523,7 @@
   "python_compiler_files": [
    {
     "file": "woof/backend/__init__.py",
-    "sha256": "f4cab2b845da235e86bcd6c92d262bba7e430880db900c1a75f1cfe0e577d25f"
+    "sha256": "5f2c40169dfb99f53e46a11f2ab3a7501a44646b875b3e02ef9a3ad1764dd28e"
    },
    {
     "file": "woof/backend/facade/__init__.py",
@@ -4515,7 +4535,7 @@
    },
    {
     "file": "woof/backend/facade/_ops.py",
-    "sha256": "0508d5db2ac4c0e41408fdccff6d6d3b08cad63f7c9d660fec5a84c3ea8e6095"
+    "sha256": "5909bd7cf8a4eba59f686bfbdbb930b19036db6e1ac583392dcf46048d513bea"
    },
    {
     "file": "woof/backend/facade/cuda.py",
@@ -4535,7 +4555,7 @@
    },
    {
     "file": "woof/backend/translate/__init__.py",
-    "sha256": "3bfb26395ed4fa2cdd2a16e7e208cddfd18add98cc8bd86d261754b980bc20a5"
+    "sha256": "402840269c8a7bcad27cf97141285560ac5708ba57ad718f3e6d14d280ebc7cc"
    },
    {
     "file": "woof/compiler_metadata.py",
@@ -4619,11 +4639,11 @@
    },
    {
     "file": "woof/core/kernel_frame_recordings.py",
-    "sha256": "900b154c94a64bf357a597ac4418cfe6775e5617f3f45588198d4afd9d92ed66"
+    "sha256": "d1ca51e6e30d97932de638fccc2c5a4c66de642a2e9054e0a8b392c46598393e"
    },
    {
     "file": "woof/core/kernels/__init__.py",
-    "sha256": "d62830d60fc1ec74e6ce8cbb1b5d002893b86a0e2849f9884f30dcb4ef93b76d"
+    "sha256": "8c62080760d33aac2a66f99331c9363966164805fcd593bbc9291fbd414af9d2"
    },
    {
     "file": "woof/core/kernels/no_ftz.py",
@@ -4739,11 +4759,11 @@
    },
    {
     "file": "woof/core/physics.py",
-    "sha256": "4247e6c813bd0bbda72fb8f4dc10194889f0ea8fa2937904d38b044488eb1587"
+    "sha256": "f76fb1d24b037ab96f7d710129d5ff1bea84e3874385edf63d451ea0aa76baa7"
    },
    {
     "file": "woof/core/preflight.py",
-    "sha256": "3a32dbaff011fc31febdd737343660a5c7bb177bb8c66716990d3a8f6ffd3f09"
+    "sha256": "d0fc1a66b779b6b291cdd07d484f11fdb83699c8c519b822789c0174eed46d9b"
    },
    {
     "file": "woof/core/refl.py",
@@ -5214,6 +5234,10 @@
     "sha256": "ab6ae66fc05e74771e1e8a5bea38f4df87d0cb42bd239a3a33fe17f1a29d8268"
    },
    {
+    "file": "woof/hex/mpas_seaice/evp_v842.py",
+    "sha256": "a2d09d1a7e5f1761983db8cceed053995c677f3ad42aaac42ec001ca07cc0c19"
+   },
+   {
     "file": "woof/hex/mpasdiag/_kernels.py",
     "sha256": "d08cd111ce931ffc6e9f1bd15502118702d7fb270aade6812f6b2a4ed78932c3"
    },
@@ -5672,6 +5696,10 @@
    {
     "file": "woof/ocean/waves/validation/make_swell_friction.py",
     "sha256": "71984436fb98884aae0fce35b5db477d18d9c70a343ca4836aee75b416911127"
+   },
+   {
+    "file": "woof/ocean/wrf_cpl.py",
+    "sha256": "e471f658fd60eb97f53271a9c670d1d96a79b75aedb626964a80ee6df19aaee8"
    },
    {
     "file": "woof/spectral_nudging/forecast.py",
