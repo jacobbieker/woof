@@ -202,7 +202,13 @@ class _FacadeFinder:
             import cupy.cuda  # noqa: F401
             return importlib.machinery.ModuleSpec(fullname, None, is_package=True)
         if fullname not in ("cupy", "cupyx", "cupyx.scipy", "cupyx.scipy.special", "cupyx.scipy.ndimage"):
-            return None
+            # other cupyx.scipy modules only where the facade serves them
+            # (the mlx facade's cupyx.scipy.sparse and cupyx.scipy.fft)
+            if not fullname.startswith("cupyx.scipy."):
+                return None
+            import importlib
+            if fullname not in getattr(importlib.import_module(package), "SUBMODULES", {}):
+                return None
         import importlib.machinery
         spec = importlib.machinery.ModuleSpec(fullname, _FacadeLoader(self.backend),
                                               is_package=fullname in ("cupy", "cupyx", "cupyx.scipy"))
