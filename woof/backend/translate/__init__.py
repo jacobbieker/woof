@@ -3172,6 +3172,23 @@ class _Rewriter:
         else:
             return
         for child, target in zip(kids, targets):
+            if _is_float(target) and t.kind.name == "RECORD" and t.get_declaration().kind.name == "UNION_DECL":
+                # a binary64 literal initialising a union's float member
+                # (gsfcgce4ice's `union{float f; unsigned u;} st[] =
+                # {{0x1.2a05f2p+33}, ...}`): its binary32 rounding, spelled
+                literal = child
+                while literal.kind.name in ("UNEXPOSED_EXPR", "PAREN_EXPR") and len(list(literal.get_children())) == 1:
+                    literal = list(literal.get_children())[0]
+                if literal.kind.name == "FLOATING_LITERAL" and _is_double(literal.type):
+                    word = _double_literal(self.src(literal))
+                    try:
+                        value = struct.unpack("<f", struct.pack("<f", struct.unpack("<d", struct.pack("<Q", word))[0]))[0]
+                    except OverflowError:
+                        continue
+                    s, e = self.span(literal)
+                    self.edits.replace(s, e, f"{value.hex()}f")
+                    self._folded.add((s, e))
+                continue
             if not _is_double(target):
                 continue
             if child.kind.name not in ("INIT_LIST_EXPR", "FLOATING_LITERAL") and self.fold_constant_double(child):
