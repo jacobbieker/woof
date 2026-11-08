@@ -10,8 +10,11 @@ if [[ $# -ne 2 ]]; then
     echo "usage: build_tke.sh NEMO_SOURCE_ROOT BUILD_DIR" >&2
     exit 2
 fi
-source_root=$(realpath "$1")
-build_dir=$(realpath -m "$2")
+# Portable to macOS (no GNU realpath -m, bash 3.2, shasum instead of sha256sum).
+source_root=$(cd "$1" && pwd -P)
+mkdir -p "$2"
+build_dir=$(cd "$2" && pwd -P)
+sha256() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$@"; else shasum -a 256 "$@"; fi; }
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 pinned_commit="dcc7fb8c1779fa8409e41e4ce3ab7d45b9ceb796"   # tag 5.0.2
 sources=(src/OCE/par_kind.F90 src/OCE/ZDF/zdfsh2.F90 src/OCE/ZDF/zdftke.F90
@@ -60,7 +63,7 @@ for name in ref mxl2 mxl0 mxl1; do
     outs+=("tke-${name}.csv")
 done
 cp ref/tke-grid.csv tke-grid.csv
-sha256sum "${sources[@]/#/${source_root}/}" "${script_dir}/tke_stubs.F90" \
+sha256 "${sources[@]/#/${source_root}/}" "${script_dir}/tke_stubs.F90" \
     "${script_dir}/run_tke.F90" "${script_dir}/build_tke.sh" tke-grid.csv "${outs[@]}" \
     | sed "s#${source_root}/#<nemo-5.0.2-checkout>/#; s#${script_dir}/#<oracle-workspace>/optional/nemo/oracle/#" \
     > tke-sha256sums.txt

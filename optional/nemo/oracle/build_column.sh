@@ -11,8 +11,11 @@ if [[ $# -ne 2 ]]; then
     echo "usage: build_column.sh NEMO_SOURCE_ROOT BUILD_DIR" >&2
     exit 2
 fi
-source_root=$(realpath "$1")
-build_dir=$(realpath -m "$2")
+# Portable to macOS (no GNU realpath -m, bash 3.2, shasum instead of sha256sum).
+source_root=$(cd "$1" && pwd -P)
+mkdir -p "$2"
+build_dir=$(cd "$2" && pwd -P)
+sha256() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$@"; else shasum -a 256 "$@"; fi; }
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 pinned_commit="dcc7fb8c1779fa8409e41e4ce3ab7d45b9ceb796"   # tag 5.0.2
 whole=(TRA/eosbn2 TRA/traqsr ZDF/zdfsh2 ZDF/zdfdrg ZDF/zdftke TRA/trazdf TRA/trasbc TRA/traatf_qco)
@@ -73,7 +76,7 @@ for name in teos10 eos80; do
         outs+=("column-${name}-${part}.csv")
     done
 done
-sha256sum "${sources[@]/#/${source_root}/}" "${script_dir}/column_stubs.F90" \
+sha256 "${sources[@]/#/${source_root}/}" "${script_dir}/column_stubs.F90" \
     "${script_dir}/column_harness.F90" "${script_dir}/run_column.F90" "${script_dir}/build_column.sh" \
     "${outs[@]}" \
     | sed "s#${source_root}/#<nemo-5.0.2-checkout>/#; s#${script_dir}/#<oracle-workspace>/optional/nemo/oracle/#" \
