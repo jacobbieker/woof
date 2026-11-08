@@ -130,7 +130,9 @@ Metal, and refuses what it does not port by name.
    the `HYDRO_dt` cadence and the WRF-side field hand-back remain.
 4. **Routing**, in this order, each from the pinned WRF-Hydro source with its
    own oracle: subsurface (`Routing/Noah_distr_routing_subsurface.F90`,
-   **done** in the opt-in), overland (`Routing/Overland/`), channel (`Routing/module_channel_routing.F90`:
+   **done** in the opt-in), overland (`Routing/Overland/`,
+   `Noah_distr_routing_overland.F90`: **done** in the opt-in for
+   rt_option = 1, `tests/test_wrf_hydro_overland_parity.py`), channel (`Routing/module_channel_routing.F90`:
    Muskingum-Cunge first, then the diffusive wave), then the bucket baseflow.
 5. **Configuration**: `hydro.namelist` (`SUBRTSWCRT`, `OVRTSWCRT`,
    `CHANRTSWCRT`, `channel_option`, `rt_option`, `GWBASESWCRT`, `DXRT`,
