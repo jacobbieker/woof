@@ -189,9 +189,12 @@ One unit, WSM6 (`wsm6`, M3 Max), with the dynamic library opted in
 At the defaults (translation cache on, dynamic library off), the gate
 suites on an M3 Max with every cache cold cost the same as before: the
 NSSL-2 oracle took 1256 s before and 1258 s after, with the same 16
-library and 27 pipeline builds summing to the same compile time. Warm,
-the WRF gate suite went from 177 s to 99 s and the NSSL-2 oracle from 67 s
-to 59 s, which is the translation cache.
+library and 27 pipeline builds summing to the same compile time. What the
+defaults save is translation in every later process: the NSSL-2 oracle's
+15 translations cost 11 s cold, and a cache hit costs a file read. Warm
+runs measured on a shared, loaded host were faster for the NSSL-2 oracle
+in both runs (12 s to 3 s; 67 s to 59 s), and mixed for the WRF gate
+suite (118 s to 139 s; 177 s to 99 s).
 
 Nothing new ships in the wheel; the caches fill on first use. A compiled
 library or archive is specific to one GPU architecture and macOS build.
