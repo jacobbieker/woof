@@ -3179,8 +3179,9 @@ def prelude(*, contract: bool, retain_subnormals: bool = False, ieee_helpers: bo
 
 
 VENDOR_LIBM64 = HERE / "vendor_libm64.cuh"
-#: CUDA's powf, for the MLX facade's strict float32 power (facade/_ops.py)
-CUDA_POWF = HERE / "cuda_powf.cuh"
+#: WOOF's correctly rounded powf, the MLX facade's strict float32 power
+#: (facade/_ops.py; WOOF_STRICT_POWF=cuda selects the opt-in instead)
+STRICT_POWF = HERE / "strict_powf.cuh"
 F64CR = HERE.parents[1] / "core" / "kernels" / "f64cr.cuh"
 _VENDOR_CALL = re.compile(r"\b(exp|log|log10|sin|cos|tan|atan|pow|atan2|hypot|log2|expm1|tanh|tgammaf?|lgamma|log1pf?|cbrtf?|erfc?)\s*\(")
 CR_CBRT = HERE.parents[1] / "core" / "kernels" / "cr_cbrt_flt64.cuh"
