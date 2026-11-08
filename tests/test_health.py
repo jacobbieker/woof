@@ -222,6 +222,9 @@ def _inventory_config():
         nx=3, ny=2, nz=8, dx=2000.0, dy=2000.0, ztop=8000.0,
         dt=10.0, run_seconds=0.0, time_step_sound=4, moist=True,
         mp_physics=10, ra_physics=4, cu_physics=1,
+        # This CPU inventory fixture has no ocean ice. Avoid entering the
+        # independent CuPy sea-ice initializer with NumPy-owned fields.
+        seaice_prognostic=False,
         sf_sfclay_physics=1, sf_surface_physics=2, bl_pbl_physics=1)
 
 
@@ -259,7 +262,7 @@ def test_real_domainstate_physics_inventory_names_and_dtypes_are_pinned(
     # absent from this default-off inventory and excluded like IVGTYP; the
     # urban inventories are classified by tests/
     # test_urban_default_off_identity.py.
-    # fa2e5efd8, lane/europe-noah-mosaic-urban: Noah mosaic added the
+    # fa2e5efd8, development branch: Noah mosaic added the
     # immutable int32 tile-category map. Mosaic is off in this constructor,
     # so the map is absent here but still belongs in the global exclusions.
     from woof.core.noah_mosaic import MOSAIC_CATEGORY_FIELDS
@@ -267,7 +270,10 @@ def test_real_domainstate_physics_inventory_names_and_dtypes_are_pinned(
     assert MOSAIC_CATEGORY_FIELDS["mosaic_cat_index"] == "int32"
     assert GPU_INTEGER_EXCLUSIONS == {
         "surface.isltyp", "surface.ivgtyp", "surface.utype_urb2d",
-        "surface.mosaic_cat_index"} | {
+        "surface.mosaic_cat_index",
+        # Native CAM/SSiB Registry integer workspace indices.
+        "surface.ideep2d", "surface.jt2d",
+        "surface.maxg2d", "surface.lengath2d"} | {
         f"nest.scratch.nest_sint_{name}_{stag}"
         for name in ("ci", "ip", "cj", "jp") for stag in ("m", "x", "y")}
     assert all(np.dtype(field.values.dtype) in {
