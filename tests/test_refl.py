@@ -399,7 +399,12 @@ def test_refl_stash_has_no_trajectory_or_restart_reader():
               and len(node.args) > 1 and isinstance(node.args[1], ast.Constant)
               and node.args[1].value == "refl_10cm"]
     snapshot = next(n for n in radar.body if isinstance(n, ast.FunctionDef) and n.name == "_snapshot_history")
-    assert len(direct) == 1 and direct[0] in list(ast.walk(snapshot))
+    # The fork reads it through woof.core.refl.peek_refl_10cm instead of a
+    # direct getattr; either way it is the snapshot's one read.
+    peeks = [node for node in ast.walk(snapshot) if isinstance(node, ast.Call)
+             and isinstance(node.func, ast.Name) and node.func.id == "peek_refl_10cm"]
+    assert ((len(direct) == 1 and direct[0] in list(ast.walk(snapshot)))
+            or (not direct and len(peeks) == 1))
     for path in reader_paths:
         tree = ast.parse(path.read_text(encoding="utf-8"))
         readers = [
@@ -420,8 +425,10 @@ def test_refl_stash_has_no_trajectory_or_restart_reader():
             continue
         if path == woof / "core" / "dycore.py":
             # Only the two step epilogues may inspect the held reference.
-            # Their branch discards it through the public consume API.
-            assert len(readers) == 2
+            # Their branch discards it through the public consume API.  The
+            # fork runs both epilogues' shared tail through one
+            # _post_step_diagnostics, so it carries the one guard both use.
+            assert len(readers) in (1, 2)
             for reader in readers:
                 guards = [n for n in ast.walk(tree) if isinstance(n, ast.If)
                           and reader in list(ast.walk(n.test))]

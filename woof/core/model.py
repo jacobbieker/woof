@@ -2517,7 +2517,7 @@ def execute_experiment(
                 # failures are drained before publication or successful return.
                 # Streamed reports come from the canonical sweep, not its
                 # unchanged resident initialization snapshot.
-                from woof.core.streaming import step_health, defer_step_health
+                from woof.core.streaming import step_health
 
                 if lagged_here:
                     # Queued behind the step and checked one op later
@@ -2530,18 +2530,13 @@ def execute_experiment(
                             cfg=node.cfg.run,
                             boundary_width=node.cfg.run.spec_bdy_width))
                 else:
-                    # Strict gate: upstream's deferred stability record,
-                    # polled with the domain's ledger below and drained at
-                    # every publication boundary.
-                    with health_ledger.deferring(step_ledger):
-                        deferred = defer_step_health(
-                            steppers.get(grid_id), node.state, node.cfg.run,
-                            boundary_width=node.cfg.run.spec_bdy_width,
-                            grid_id=grid_id, step_count=clock.step_count + 1)
-                    report = ({"nan": False, "cfl": None} if deferred else
-                              step_health(steppers.get(grid_id), node.state,
-                                          node.cfg.run,
-                                          boundary_width=node.cfg.run.spec_bdy_width))
+                    # Strict gate: the synchronous per-step check, so
+                    # --health-check strict stops on the exact step (the
+                    # fork's contract; upstream's deferred record would stop
+                    # one poll later).
+                    report = step_health(steppers.get(grid_id), node.state,
+                                         node.cfg.run,
+                                         boundary_width=node.cfg.run.spec_bdy_width)
                 # ``None``: queued (lagged); the monitor judges it later
                 # through the same verdict.
                 failure = (None if report is None else
