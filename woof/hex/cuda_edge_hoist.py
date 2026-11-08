@@ -28,8 +28,18 @@ and 36,870 edges) in 94.3, 69.1 and 63.9 ms against 57.8, 40.9 and 37.5 ms.
 Every block of a multi-card LTS run on the 60-3 km mesh (61 to 108 thousand
 columns) sat under the old size, on kernels that cost 2.7 microseconds per
 column-step where the fixed ranks beside them (over 400,000 edges) paid 1.6.
-Final-state hashes are identical either way.  Below 36,870 edges nothing was
-measured, so the element kernels stay below ``HOIST_MIN_EDGES`` = 30,000.
+Final-state hashes are identical either way.
+
+THE SMALL-MESH COST THE 30,000-EDGE SIZE LEFT, MEASURED (2026-11-08, pb, RTX
+A6000, a 5 km point cull of 5,069 columns and 15,394 edges, arwen Thompson
+column suite, 110 steps after warm-up): the element kernels left the FCT
+limiter on its one-thread-per-cell and one-thread-per-edge forms
+(``fct_minmax_source``, ``transport_edge_values_mono_v841``: 6.3 ms a call
+each), 175 ms of GPU time and 225-234 ms of wall a step; hoisted, 127 ms and
+180-191 ms.  The history file and final-state digest were byte-identical, and
+``WOOF_HEX_EDGE_HOIST_CHECK=3`` compared every hoisted kernel's first three
+calls word for word against its element form with no difference.  Below
+15,000 edges nothing was measured, so the element kernels stay there.
 
 ``WOOF_HEX_EDGE_HOIST_CHECK=N`` also runs the element kernel on the first N
 calls of each hoisted kernel on each device and compares the two outputs word
@@ -42,7 +52,7 @@ import json
 import os
 import threading
 
-HOIST_MIN_EDGES = 30_000
+HOIST_MIN_EDGES = 15_000
 _LOCK = threading.Lock()
 _CALLS: dict[tuple[str, int], int] = {}
 
