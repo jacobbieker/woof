@@ -20,18 +20,21 @@ expression with the same two engine functions, calling the second with the
 table the first returned earlier for identical inputs.  When the native
 route is available nothing here runs: the call is forwarded untouched.
 
+The table itself is now the engine's (``wrf_ozone.latitude_table``), which
+the regional legacy-RRTMG adapter reaches through the same Python route; this
+wrapper keeps the lane's cap and receipt counters.
+
 Cost: one float32 table of columns x 59 x 12 on the host per rank (0.86 GiB
 at 327,680 columns).  Above ``WOOF_HEX_OZONE_TABLE_MAX_GB`` (default 4) the
-call is forwarded untouched.  ``WOOF_HEX_OZONE_TABLE=off`` disables the memo.
+table is computed and not kept.  ``WOOF_HEX_OZONE_TABLE=off`` removes this
+wrapper; ``WOOF_OZONE_TABLE=off`` stops the engine keeping the table.
 """
 from __future__ import annotations
 
 import os
 from typing import Any
 
-import numpy as np
-
-_REQUIRED = ("_native_ozone_entries", "interp_ozone_to_latitudes", "ozn_time_int",
+_REQUIRED = ("_native_ozone_entries", "latitude_table", "ozn_time_int",
              "ozn_latitude_time_int", "load_ozone_climatology", "LEVSIZ")
 
 
@@ -53,9 +56,7 @@ class OzoneLatitudeTableMemo:
     def __init__(self, module: Any, max_bytes: int) -> None:
         self._module = module
         self._max_bytes = int(max_bytes)
-        self._latitudes: np.ndarray | None = None
-        self._climatology: Any = None
-        self._table: np.ndarray | None = None
+        self._table_bytes = 0
         self.stats = {"native_calls": 0, "table_builds": 0, "table_hits": 0, "over_cap_calls": 0}
 
     def __getattr__(self, name: str) -> Any:
@@ -70,30 +71,21 @@ class OzoneLatitudeTableMemo:
             # The engine's own fast route (and its own fallbacks inside it).
             self.stats["native_calls"] += 1
             return module.ozn_latitude_time_int(julday, julian, xlat, climo, out=out)
-        # The engine's Python route, statement for statement.
+        # The engine's Python route, statement for statement; the table is
+        # the engine's own kept one (wrf_ozone.latitude_table, which the
+        # regional adapter shares), under this lane's cap.
         del julday
         if climo is None:
             climo = module.load_ozone_climatology()
-        y = np.asarray(xlat, dtype=np.float32)
-        if y.size * int(module.LEVSIZ) * 12 * 4 > self._max_bytes:
-            self.stats["over_cap_calls"] += 1
-            return module.ozn_time_int(None, julian, module.interp_ozone_to_latitudes(y, climo))
-        if (self._table is None or self._climatology is not climo
-                or self._latitudes is None or self._latitudes.shape != y.shape
-                or not np.array_equal(self._latitudes, y)):
-            self._table = None
-            table = module.interp_ozone_to_latitudes(y, climo)
-            self._latitudes = np.array(y, copy=True)
-            self._climatology = climo
-            self._table = table
-            self.stats["table_builds"] += 1
-        else:
-            self.stats["table_hits"] += 1
-        return module.ozn_time_int(None, julian, self._table)
+        table, outcome = module.latitude_table(xlat, climo, max_bytes=self._max_bytes)
+        self.stats[{"build": "table_builds", "hit": "table_hits", "over_cap": "over_cap_calls"}[outcome]] += 1
+        if outcome != "over_cap":
+            self._table_bytes = int(table.nbytes)
+        return module.ozn_time_int(None, julian, table)
 
     def receipt(self) -> dict[str, Any]:
         return {"installed": True, **self.stats,
-                "table_bytes": 0 if self._table is None else int(self._table.nbytes),
+                "table_bytes": self._table_bytes,
                 "max_bytes": self._max_bytes}
 
 
