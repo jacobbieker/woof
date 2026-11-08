@@ -4208,7 +4208,8 @@ KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
 ),)
 
 # MADE/SORGAM (chem_sorgam), production loader on the RTX A6000 workstation,
-# sm_86 NVRTC 13.4.92, 2026-11-08, both GPUWM_WRF_EXACT modes: 672 B.
+# sm_86 NVRTC 13.4.92, 2026-11-08, both GPUWM_WRF_EXACT modes: 672 B (the
+# widest of chem_sorgam, chem_sorgam_drydep and chem_sorgam_sum_pm).
 KERNEL_LOCAL_FRAME_RECORDINGS = tuple(
     replace(row, complete=False) if "chem_sorgam" not in row.frames else row
     for row in KERNEL_LOCAL_FRAME_RECORDINGS)
