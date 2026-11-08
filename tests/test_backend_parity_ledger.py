@@ -31,7 +31,7 @@ import backend_parity_ledger as bpl  # noqa: E402
 @pytest.fixture(scope="module")
 def receipts():
     return {b: json.loads((bpl.RECEIPTS / f"{b}.json").read_text(encoding="utf-8"))
-            for b in bpl.BACKENDS}
+            for b in (*bpl.BACKENDS, *bpl.OPT_IN_RECEIPTS)}
 
 
 @pytest.fixture(scope="module")
@@ -56,6 +56,8 @@ def test_every_gap_has_a_defined_cause(ledger):
 def test_every_cause_is_used_and_explained(ledger):
     used = {e["cause"] for e in ledger["entries"].values() if e["cause"]}
     used |= {e["cause"] for e in ledger["host_entries"].values() if e["cause"]}
+    used |= {e["closed_by_opt_in"]["residual_cause"] for e in ledger["entries"].values()
+             if e.get("closed_by_opt_in", {}).get("residual_cause")}
     assert used == set(ledger["causes"]), set(ledger["causes"]) ^ used
     for name, cause in ledger["causes"].items():
         assert cause.get("summary") and cause.get("evidence"), name
@@ -71,7 +73,9 @@ def test_receipts_come_from_the_sweep(receipts):
         # as the traced process recorded it (tools/launch_trace.py)
         recorded = {k: receipt["environment"].get(k) for k in bpl.SWEEP_ENVIRONMENT}
         assert recorded == bpl.SWEEP_ENVIRONMENT, recorded
-        assert receipt["environment"]["backend"] == backend
+        runs_on, opt_in = bpl.OPT_IN_RECEIPTS.get(backend, (backend, bpl.DEFAULT_OFF))
+        assert receipt["environment"]["backend"] == runs_on
+        assert {k: receipt["environment"].get(k) or None for k in opt_in} == opt_in
         files = {nodeid.split("::")[0] for nodeid in receipt["tests"]}
         assert files == set(bpl.SWEEP_TESTS), set(bpl.SWEEP_TESTS) ^ files
         assert receipt["host_words"], f"{backend}: no host words recorded"
@@ -90,3 +94,11 @@ def test_comparison_matches_launches_as_sets():
     assert bpl.compare({"launches": [["k", "1"]]},
                        {"launches": [["k", "1"], ["cupy_like", "9"]]},
                        traced_on_cuda={"k"})["launches"] == "agree"
+
+
+def test_opt_in_closes_the_gaps_it_should(ledger):
+    """Each gap whose cause an opt-in removes (the independent powf) agrees
+    with CUDA in that opt-in's sweep."""
+    for nodeid, entry in ledger["entries"].items():
+        if entry["cause"] in bpl.CLOSED_BY_OPT_IN:
+            assert entry.get("closed_by_opt_in", {}).get("closed") is True, nodeid

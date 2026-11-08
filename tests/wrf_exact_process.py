@@ -50,6 +50,9 @@ try:
 except pytest.skip.Exception as exc:
     print(str(exc))
     sys.exit(77)
+except pytest.xfail.Exception as exc:
+    print(str(exc))
+    sys.exit(78)
 """
         from woof import backend
         # Metal compiles a strict unit's soft-float pipeline on first use and
@@ -62,5 +65,7 @@ except pytest.skip.Exception as exc:
             cwd=root, env=env, capture_output=True, text=True, timeout=timeout)
         if result.returncode == 77:
             pytest.skip(result.stdout.strip())
+        if result.returncode == 78:
+            pytest.xfail(result.stdout.strip())
         assert result.returncode == 0, result.stdout + result.stderr
     return run
