@@ -49,6 +49,42 @@ REGISTRY_TABLE = (Path(__file__).resolve().parent / "data" / "wrf_namelist"
 #: declares no chem_opt = 18 package.
 FORK_CHEM_OPT_SETS = {18: "smoke"}
 
+#: Packages on the coupled gas-aerosol roadmap
+#: (docs/chem-coupled-aerosol-roadmap.md): ported in pieces, refused until
+#: the whole package runs.
+PLANNED_CHEM_OPT = {1: "RADM2", 2: "RADM2SORG", 41: "RADM2SORG_AQCHEM"}
+#: Packages built on CBM-Z (chem/module_cbmz*.F) or MOSAIC
+#: (chem/module_mosaic*.F), whose Battelle/PNNL "Terms of Use" headers
+#: are not a licence grant; they are planned only as an opt-in package.
+PNNL_TERMS_CHEM_OPT = {
+    5: "CBMZ", 6: "CBMZ_BB", 7: "CBMZ_MOSAIC_4BIN", 8: "CBMZ_MOSAIC_8BIN",
+    9: "CBMZ_MOSAIC_4BIN_AQ", 10: "CBMZ_MOSAIC_8BIN_AQ", 30: "CBMZSORG",
+    31: "CBMZ_MOSAIC_DMS_4BIN", 32: "CBMZ_MOSAIC_DMS_4BIN_AQ",
+    33: "CBMZ_MOSAIC_DMS_8BIN", 34: "CBMZ_MOSAIC_DMS_8BIN_AQ",
+    35: "CBMZSORG_AQ", 170: "CBMZ_MOSAIC_KPP",
+    198: "SAPRC99_MOSAIC_4BIN_VBS2_KPP", 201: "MOZART_MOSAIC_4BIN_KPP",
+    202: "MOZART_MOSAIC_4BIN_AQ_KPP", 203: "SAPRC99_MOSAIC_8BIN_VBS2_AQ_KPP",
+    204: "SAPRC99_MOSAIC_8BIN_VBS2_KPP", 501: "CBMZ_CAM_MAM3_NOAQ",
+    502: "CBMZ_CAM_MAM7_NOAQ", 503: "CBMZ_CAM_MAM3_AQ",
+    504: "CBMZ_CAM_MAM7_AQ", 601: "CRI_MOSAIC_8BIN_AQ_KPP",
+    611: "CRI_MOSAIC_4BIN_AQ_KPP"}
+
+
+def package_status(chem_opt: int) -> str:
+    """Why an uncarried chem_opt is uncarried, when WOOF knows more."""
+    if chem_opt in PLANNED_CHEM_OPT:
+        return (f"  {PLANNED_CHEM_OPT[chem_opt]} is being ported (RADM2 gas "
+                "phase, MADE/SORGAM aerosol, CMAQ aqueous chemistry; "
+                "docs/chem-coupled-aerosol-roadmap.md) and is refused until "
+                "the whole package runs.")
+    if chem_opt in PNNL_TERMS_CHEM_OPT:
+        return (f"  {PNNL_TERMS_CHEM_OPT[chem_opt]} is built on CBM-Z/MOSAIC, "
+                "whose source carries Battelle/PNNL terms of use rather than "
+                "a licence grant, so the default build carries none of it; it "
+                "is planned as an opt-in package "
+                "(docs/chem-coupled-aerosol-roadmap.md).")
+    return ""
+
 #: ``&chem`` keys translated 1:1 onto RunConfig fields of the same name
 #: (woof/config.py, the chem block), with the Python type the field holds.
 CARRIED_KEYS: dict[str, type] = {
@@ -236,7 +272,7 @@ def import_chem_section(entries: dict, *, max_dom: int, fork: bool,
             "forecast would run with none of the requested species "
             "(emission, transport, deposition and any feedback all absent). "
             "Next: pick one of those packages, or set chem_opt = 0 to run "
-            "the meteorology without chemistry.")
+            "the meteorology without chemistry." + package_status(chem_opt))
     from woof.chem_table import catalog
 
     fix("chem", "chem_opt", values, chem_set,
