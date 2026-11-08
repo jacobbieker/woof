@@ -124,9 +124,10 @@ Metal, and refuses what it does not port by name.
    Extend the Noah-MP oracle harness with a hydro pass the way
    `tools/noah_wrf461_oracle/build.sh` was extended.
 3. **The coupling driver** `hydro/CPL/WRF_cpl/module_wrf_HYDRO.F90` and
-   `HYDRO_drv/module_HYDRO_drv.F90`: `HYDRO_dt` cadence, `aggregate`/
-   `disaggregate` between the LSM grid and the routing grid (`AGGFACTRT`),
-   the soil-moisture and head hand-back.  WRF-Hydro code.
+   `HYDRO_drv/module_HYDRO_drv.F90`: `aggregate`/`disaggregate` between the
+   LSM grid and the routing grid (`AGGFACTRT`) are **done** in the opt-in
+   (`woof_wrf_hydro.grid_transform`, `tests/test_wrf_hydro_grid_transform_parity.py`);
+   the `HYDRO_dt` cadence and the WRF-side field hand-back remain.
 4. **Routing**, in this order, each from the pinned WRF-Hydro source with its
    own oracle: subsurface (`Routing/Noah_distr_routing_subsurface.F90`,
    **done** in the opt-in), overland (`Routing/Overland/`), channel (`Routing/module_channel_routing.F90`:
