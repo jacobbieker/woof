@@ -2307,9 +2307,11 @@ CHAINED_UNITS_WITHOUT_A_PER_PLATFORM_ROW = MappingProxyType({
 # other rows were read on the 128-level source and are expected to grow by
 # the same +512 / +1,024 B; the chained-unit frame is the maximum over the
 # rows, which the sm_86 reading sets.  The SHA is the merged (256-level,
-# SPP) composition, re-taken at the 1.1.3 upstream merge.
+# SPP) composition, re-taken at the 1.1.3 upstream merge and again at the
+# 1.1.6 merge, where sm_86 (RTX A6000, NVRTC 13.4) read the same frames:
+# 0 / 0 / 1,152 / 2,208 B.
 TERRAIN_DRAG_COMPOSED_SOURCE_SHA256 = (
-    '22f1ea632f27b22d22ffbc9216a693e8c4e20fbf45a97e7ad74b2b5c8e98620e')
+    '74ceba8adee4b664ed957d69ad9094db6b3120dcd531121bed813e6768e1b3e9')
 
 TERRAIN_DRAG_COMPOSED_OPTIONS = ("-std=c++17", "-fmad=false", "--ftz=false")
 TERRAIN_DRAG_COMPOSED_FRAME_READINGS = MappingProxyType({

@@ -14,7 +14,8 @@ def sample_points(values, depths, targets):
     if not np.isfinite(z).all() or not np.isfinite(t).all() or np.any(z[1:]<=z[:-1]) or np.any((t<z[0])|(t>z[-1])):
         raise ValueError('soil source depths must be ordered and bracket every target depth')
     from woof.ingest.cpu_backend import _selected_cpu_bridge, shared_cpu_backend
-    cpu=(_selected_cpu_bridge.get() is not None or os.environ.get('GPUWM_NO_LOCAL_GPU')=='1'
+    from woof.local_gpu import no_local_gpu
+    cpu=(_selected_cpu_bridge.get() is not None or no_local_gpu()
          or os.environ.get('CUDA_VISIBLE_DEVICES')=='' or importlib.util.find_spec('cupy') is None)
     out=np.empty((len(t),)+a.shape[1:],dtype=np.float32)
     columns=int(np.prod(a.shape[1:]))

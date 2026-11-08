@@ -65,8 +65,10 @@ def test_no_run_config_field_can_carry_a_cloud_overlap_choice():
     """
     names = {field.name for field in fields(RunConfig)}
     assert names, "RunConfig must be a dataclass with fields"
+    # MAV's turbine-wake overlap method (1.1.6) is a wind-farm control,
+    # not a cloud-overlap selector.
     offenders = sorted(
-        name for name in names
+        name for name in names - {"windfarm_overlap_method"}
         if any(spelling in name for spelling in _OVERLAP_SPELLINGS))
     assert offenders == [], (
         "a cloud-overlap selector reached the config surface: "
