@@ -158,7 +158,8 @@ static MTL::DynamicLibrary* dynamic_library_for(MTL::Device* device, const std::
     refuse("dynamic library: not made");
     return nullptr;
   }
-  std::string partial = path + ".partial";
+  // per process: xdist workers and their subprocesses build the same unit at once
+  std::string partial = path + "." + std::to_string(getpid()) + ".partial";
   auto* partial_url = NS::URL::fileURLWithPath(NS::String::string(partial.c_str(), NS::UTF8StringEncoding));
   if (dynamic->serializeToURL(partial_url, &error)) std::rename(partial.c_str(), path.c_str());
   compile_log("dynamic library (built)", library_key.substr(0, 40), began);
@@ -298,8 +299,11 @@ static MTL::ComputePipelineState* pipeline_for(MTL::Library* lib, const std::str
       if (state != nullptr) {
         compile_log("pipeline (archive)", kernel, began);
       } else if (stored->addComputePipelineFunctions(desc, &error)) {
-        // the one compile, into the archive; written atomically beside
-        std::string partial = path + ".partial";
+        // the one compile, into the archive; written atomically beside, under
+        // a per-process name: concurrent processes archive the same kernel,
+        // and one shared .partial lets their writes interleave (a cold xdist
+        // run crashed inside -[MTLBinaryArchive serializeToURL:])
+        std::string partial = path + "." + std::to_string(getpid()) + ".partial";
         auto* url = NS::URL::fileURLWithPath(NS::String::string(partial.c_str(), NS::UTF8StringEncoding));
         if (stored->serializeToURL(url, &error)) std::rename(partial.c_str(), path.c_str());
         state = pipeline_from(device, desc, stored);
