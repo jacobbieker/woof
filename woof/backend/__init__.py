@@ -57,7 +57,13 @@ class BackendUnavailable(RuntimeError):
 
 
 def _default() -> str:
-    if importlib.util.find_spec("cupy") is not None:
+    try:
+        cupy_present = importlib.util.find_spec("cupy") is not None
+    except ValueError:
+        # A spec-less module already in sys.modules: a caller's CuPy
+        # stand-in, which asks for the CUDA route upstream's default takes.
+        cupy_present = True
+    if cupy_present:
         return "cuda"
     if (sys.platform == "darwin" and platform.machine() == "arm64"
             and importlib.util.find_spec("mlx") is not None):

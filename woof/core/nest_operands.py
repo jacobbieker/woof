@@ -30,7 +30,7 @@ def slab_run(owner):
     """
     run = getattr(owner, "_run", None)
     if (owner is None or not getattr(owner, "ranked", False)
-            or not hasattr(run, "read_window") or split_drain_requested()):
+            or not hasattr(run, "read_slab_window") or split_drain_requested()):
         return None
     return run
 
@@ -40,7 +40,7 @@ class SlabField:
 
     Stands where a host store array stood: it has the member's ``shape``,
     ``ndim`` and ``dtype``, and ``field[..., y, x]`` is a device copy of that
-    rectangle (:meth:`tilestream.ranks.RankedRun.read_window`).  It is not a
+    rectangle (:meth:`tilestream.ranks.RankedRun.read_slab_window`).  It is not a
     view: a write goes through :meth:`write`.
     """
 

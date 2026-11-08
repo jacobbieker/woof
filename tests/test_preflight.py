@@ -5420,7 +5420,8 @@ def test_the_wdm6_tier_ladder_is_retired():
     from woof.core import wdm6_constants
 
     assert not hasattr(pf, "WDM6_TIER_FRAME")
-    assert not hasattr(wdm6_constants, "WDM6_KERNEL_LEVEL_TIERS")
+    # The 64/80 ladder left in wdm6_constants is upstream's WDM7 unit's.
+    assert wdm6_constants.WDM6_KERNEL_LEVEL_TIERS[-1] == 80
     assert wdm6_constants.WDM6_VERTICAL_LEVEL_BOUNDS == (2, 256)
     from woof.physics_vertical_contract import WDM6_VERTICAL_LEVEL_BOUNDS
     assert WDM6_VERTICAL_LEVEL_BOUNDS is wdm6_constants.WDM6_VERTICAL_LEVEL_BOUNDS

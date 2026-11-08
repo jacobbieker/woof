@@ -228,7 +228,6 @@ tests/test_metal_hex_translation.py  needs the mlx package (an Apple-silicon Met
 tests/test_metal_facade_hex.py  needs the mlx package (an Apple-silicon Metal host, pixi environment mlx); the macOS mlx leg runs it, and no CUDA or Linux leg can (16a201877).
 tests/test_posted_model_source.py  needs WOOF_POSTED_TEST_INPUTS naming real posted GRIB2 files and WOOF_POSTED_TEST_LIBRARY naming a built native GRIB2 reader, neither of which ships in this repository; a leg that stages both runs it (9c5ebdda9).
 tests/test_radtran_reference.py  needs a host C++ compiler (clang++, g++ or c++) on PATH to build the radiative-transfer reference; every hosted leg has one, so it runs there (cc980b540).
-tests/test_theta_m_whole_model.py  needs a CUDA device, and skips under GPUWM_WRF_EXACT=1 because the idealized base state is not the strict thb = 300 carrier; tests/test_bigstep_thetam_wrf471_parity.py grades the strict words (c783c9393).
 tests/test_tui_worker.py  runs woof/tui_worker.py as a child process, and the Recast WOOF tree leaves that worker out (tests/_woof_left_out.txt: woof/tui_worker.py), so the module skips by that named rule; the engine's tree, which ships the worker, runs every case.
 tests/test_cumulus_rain_number.py  needs CuPy and a CUDA device (it seeds the fed rain number on the card); CPU legs skip the module, which a leased GPU leg runs (6aed31a31).
 tests/test_nudging_gpu.py  needs WOOF_DOWNSCALE_GPU_TEST=1 inside a GPU pool lease: it runs the captured nudging operator on a CUDA device, which no hosted leg has (6aed31a31).
