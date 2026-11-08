@@ -269,6 +269,10 @@ BASELINE_PINNED: dict[str, str] = {
     # existing unit keeps its bytes.
     "theta_m_cumulus": "580dfc42c040cb87474f33a32a15427681e92feac2c1bf7283ed9418d923f7d3",
     "smag2d_theta_m": "85e469baf5494063679403def8bc1256932ebe972cf4ebb53fd1b44bbe2b9f5a",
+    # wrf_smag_hd_w on stored tau13/tau23 faces (composes smag2d.cu, which
+    # keeps its bytes): the same tendency words (tests/test_smag2d_w_faces.py,
+    # CUDA and Metal, GPUWM_WRF_EXACT=0 and 1).
+    "smag2d_w_faces": "7a318dcdb9d8322e06469cdd30e56bac5f999b128a52fa50cdf33de3d0152a34",
     # e677dccb6: active table edits multiply binary64 values on the GPU,
     # round once to REAL, and reject non-positive crop roughness.
     "physics_params":
