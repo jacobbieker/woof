@@ -1,8 +1,13 @@
 """max_ulp-0 gate for the Noah-MP shortwave-radiation leaves.
 
 Every row of every fixture under ``tests/data/oracles/noahmp/`` was produced by
-the unmodified (visibility-patched only) WRF-4.6.1 module; see
-``tools/noahmp_wrf461_oracle/build_radiation.sh``.  Inputs and outputs are
+the unmodified (visibility-patched only) WRF module; see
+``tools/noahmp_wrf461_oracle/build_radiation.sh``.  All but ALBEDO rebuild
+byte-identical from WRF 4.6.1 (phys/noahmp 848f54ad) and WRF 4.7.1 (e5c0859).
+ALBEDO has two: ``noahmp-radiation-albedo.csv`` (848f54ad, graded against
+``noahmp_snow_age="wrf_461"``) and ``noahmp-radiation-albedo-e5c0859.csv``
+(e5c0859, which ages snow at night; graded against the default
+``"wrf_470"``).  Inputs and outputs are
 stored as IEEE-754 binary32 bit patterns, so nothing here parses a decimal.
 
 The gate is bitwise identity, asserted through
@@ -337,6 +342,39 @@ def test_albedo_bit_exact():
     assert max_ulp(np.array(got, F), np.array(want, F)) == 0
 
 
+def test_albedo_e5c0859_bit_exact():
+    """ALBEDO against WRF 4.7.1 (e5c0859): SNOW_AGE runs before the cosz test.
+
+    The fixture differs from the 848f54ad one only in FAGE on the two night
+    rows (SNEQV = 0, so 4.7.1's night SNOW_AGE writes FAGE = 0 where 4.6.1
+    left the entry value); the default generation must reproduce all of it.
+    """
+    from woof.core.noahmp_radiation import DEFAULT_OPTIONS
+    assert DEFAULT_OPTIONS.noahmp_snow_age == "wrf_470"
+    assert PINNED_OPTIONS.noahmp_snow_age == "wrf_461"
+    rows = _rows("albedo-e5c0859")
+    old = {r["case"]: r for r in _rows("albedo")}
+    assert [r["case"] for r in rows] == list(old)
+    moved = {(r["case"], k) for r in rows for k in r if r[k] != old[r["case"]][k]}
+    assert moved == {("ab_night_cosz_zero", "fage"),
+                     ("ab_night_cosz_neg", "fage")}
+    got, want = [], []
+    for r in rows:
+        out = _albedo_row(r, DEFAULT_OPTIONS)
+        for k in _ALB_SCALARS:
+            got.append(out[k])
+            want.append(_f(r[k]))
+        for k in _ALB_VECTORS:
+            got.extend(out[k])
+            want.extend(_vec(r, k))
+    assert_bit_exact(np.array(got, F), np.array(want, F), "albedo e5c0859")
+    # And the two generations really are told apart by these rows.
+    for r in rows:
+        if _f(r["cosz"]) <= 0:
+            assert (F(_albedo_row(r, PINNED_OPTIONS)["fage"]).view(np.uint32)
+                    != _f(r["fage"]).view(np.uint32))
+
+
 def test_albedo_binds_every_branch():
     rows = _rows("albedo")
     tfrz = F(273.16)
@@ -624,7 +662,7 @@ def test_no_fork_predicate_accepts_the_shipped_wrapper_shapes():
 
 @pytest.mark.parametrize(
     "leaf", ["snow_age", "snowalb_class", "groundalb", "surrad", "twostream",
-             "albedo"],
+             "albedo", "albedo-e5c0859"],
 )
 def test_fixture_case_names_unique(leaf):
     rows = _rows(leaf)

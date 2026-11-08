@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Lift ``private ::`` to ``public ::`` in the pinned WRF v4.6.1 Noah-MP module.
+"""Lift ``private ::`` to ``public ::`` in the pinned WRF v4.7.1 Noah-MP module.
 
 Every per-leaf oracle in this directory has to call a module procedure that
 ``phys/module_sf_noahmplsm.F`` declares ``private``.  Copying the routine out
@@ -12,7 +12,7 @@ One script, four lanes
 The BARE_FLUX, VEGE_FLUX and PHENOLOGY/PRECIP_HEAT lanes each wrote their own
 copy of this, because none of them could see the others.  Run against the
 pinned pristine source the three produced a **byte-identical** patched file
-(sha256 ``bfdc0f3632cd30b87208b26a309c533b12d9bc2a39d1a36e9165ecf90d0a12c3``),
+(sha256 ``072309bc12d64a3e15cf13252ca74411d321e44d3ff9a88bbb8cfcb261ec5ed4``),
 as does ``snow_visibility_patch.py``, so they are one script with three CLI
 surfaces.  This is that script; it carries the union of the three, and no
 lane's check was dropped:
@@ -48,17 +48,17 @@ Two spellings, both correct, and which one this is
 ``public  ::`` (this script, and the four lanes above) or lets the line shrink
 by one byte to ``public ::`` (``make_public_radiation.py`` and the tree's own
 ``patches/noahmp-lsm-leaf-visibility.patch``, which agree with each other byte
-for byte at sha256 ``3cd3690d...``).  Both are pure accessibility rewrites and
+for byte at sha256 ``5e31fa7f...``).  Both are pure accessibility rewrites and
 neither can change numerics.  This one pads, which is the stronger property of
 the two: no byte offset in the file moves, so a fixed-form continuation column
 cannot shift even in principle.  Do not "harmonise" the two without
 regenerating every fixture built from whichever file changes.
 
 Provenance of the input file (checked by this script before anything else):
-    tree   wrf-stock-v461-gate-20260721 (WSL; a pinned WRF v4.6.1
-           checkout -- the commit and sha256 below are the identity)
-    commit d66e442fccc04111067e29274c9f9eaccc3cef28
-    sha256 bd592a5b7db29000e715250e3a7c779ffb5e0dcc356f6b5a7d9e1c9f69c55282
+    tree   a pinned WRF v4.7.1 checkout, phys/noahmp submodule at
+           e5c0859 -- the commit and sha256 below are the identity
+    commit f52c197ed39d12e087d02c50f412d90d418f6186
+    sha256 74b475600ad1c999fe43299bcaf4d3e5eaf59b9f861c47fdbff4d69739e3a45b
 
 The object-code half of the safety argument lives in
 ``compare_object_code_bareflux.py`` / ``_vegeflux.py`` / ``_radiation.py``.
@@ -71,7 +71,11 @@ import hashlib
 import sys
 import re
 
-PRISTINE_SHA256 = "bd592a5b7db29000e715250e3a7c779ffb5e0dcc356f6b5a7d9e1c9f69c55282"
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent))
+from noahmp_pins import LSM_SHA256, tree_for_lsm_digest  # noqa: E402
+
+#: Either pinned tree's module (noahmp_pins.py); the default --accept-sha256.
+PRISTINE_SHA256 = LSM_SHA256
 
 # The only accessibility form WRF uses in this module: optional leading blanks,
 # the keyword, ``::``, one symbol, optional trailing blanks.
@@ -169,10 +173,10 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--emit-symbols", action="store_true")
     ap.add_argument("--require-symbol", action="append", default=[])
     ap.add_argument("--self-test", action="store_true")
-    # A caller pinned to another revision of the same file (the WRF 4.7.1
-    # Noah-MP submodule, e5c0859) names its own digest; the patch itself is
+    # With no --accept-sha256 either pinned tree (noahmp_pins.py) is
+    # accepted; a caller may still name one digest.  The patch itself is
     # text-generic and re-derived the same three ways below.
-    ap.add_argument("--accept-sha256", default=PRISTINE_SHA256)
+    ap.add_argument("--accept-sha256", action="append", default=None)
     ap.add_argument("--mutate", choices=sorted(MUTATIONS),
                     help="negative control: also apply this source mutation")
     args = ap.parse_args(argv)
@@ -185,9 +189,12 @@ def main(argv: list[str]) -> int:
 
     raw = read_bytes(args.pristine)
     digest = hashlib.sha256(raw).hexdigest()
-    if digest != args.accept_sha256:
-        print(f"FAIL: pristine sha256 {digest} != pinned {args.accept_sha256}")
+    accepted = tuple(args.accept_sha256 or PRISTINE_SHA256)
+    if digest not in accepted:
+        print(f"FAIL: pristine sha256 {digest} != pinned {' or '.join(accepted)}")
         return 2
+    if digest in PRISTINE_SHA256:
+        print(f"pinned tree: {tree_for_lsm_digest(digest)}")
 
     text = raw.decode("latin-1")
     patched, lifted = patch_text(text)

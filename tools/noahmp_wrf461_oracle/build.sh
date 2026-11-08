@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Standalone Noah-MP oracle harness against unmodified WRF v4.6.1 sources.
+# Standalone Noah-MP oracle harness against unmodified WRF v4.7.1 sources.
 #
 # The four pinned physics sources plus share/module_model_constants.F are
 # compiled byte-for-byte as they ship.  stub_wrf.F90 supplies only services
@@ -28,6 +28,15 @@ for f in "${constants_source}" "${gecros_source}" "${lsm_source}" \
          "${glacier_source}" "${groundwater_source}" "${drv_source}"; do
     test -f "${f}"
 done
+
+# Either pinned tree (noahmp_pins.sh): all three Noah-MP sources must come
+# from the same one.
+source "${script_dir}/noahmp_pins.sh"
+noahmp_pins "${lsm_source}"
+sha256sum -c --status <<EOF
+${PRISTINE_DRV_SHA}  ${drv_source}
+${PRISTINE_GLA_SHA}  ${glacier_source}
+EOF
 
 mkdir -p "${build_dir}"
 cd "${build_dir}"
@@ -84,5 +93,6 @@ sha256sum "${constants_source}" "${gecros_source}" "${lsm_source}" \
     MPTABLE.TBL SOILPARM.TBL GENPARM.TBL \
     noahmp-parameters.csv noahmp-sflx.csv \
     > oracle-sha256sums.txt
+noahmp_label_sums oracle-sha256sums.txt "${source_root}"
 gfortran --version | head -1 > compiler.txt
 cat oracle-sha256sums.txt compiler.txt

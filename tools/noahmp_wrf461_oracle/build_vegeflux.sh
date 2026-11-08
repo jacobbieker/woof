@@ -1,12 +1,13 @@
 #!/bin/sh
-# Build the WRF v4.6.1 Noah-MP VEGE_FLUX bitwise oracle and emit its fixture.
+# Build the WRF v4.7.1 Noah-MP VEGE_FLUX bitwise oracle and emit its fixture.
 #
 # Usage:  build_vegeflux.sh <wrf-tree> <workdir> [optlevel] [leaf]
 #
-#   <wrf-tree>  pinned WRF checkout, e.g. $HOME/wrf-stock-v461-gate-20260721
-#               commit d66e442fccc04111067e29274c9f9eaccc3cef28
+#   <wrf-tree>  pinned WRF checkout with the phys/noahmp submodule files in phys/
+#               commit f52c197e (v4.7.1, phys/noahmp e5c0859) or d66e442f
+#               (v4.6.1, phys/noahmp 848f54ad); see noahmp_pins.sh
 #               sha256(phys/module_sf_noahmplsm.F) =
-#                 bd592a5b7db29000e715250e3a7c779ffb5e0dcc356f6b5a7d9e1c9f69c55282
+#                 74b475600ad1c999fe43299bcaf4d3e5eaf59b9f861c47fdbff4d69739e3a45b
 #   <workdir>   scratch directory (created if absent)
 #   [optlevel]  "wrf"   (default) reproduces WRF's own gfortran FCOPTIM
 #               "noopt" builds at -O0.  Two roles: it is the level at which the

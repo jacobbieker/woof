@@ -1,6 +1,6 @@
 ! run_energy.F90 -- bitwise fixture generator for the Noah-MP ENERGY assembly.
 !
-! ENERGY is phys/module_sf_noahmplsm.F lines 1741-2396 of the pinned WRF v4.6.1
+! ENERGY is phys/module_sf_noahmplsm.F lines 1741-2396 of the pinned WRF v4.7.1
 ! tree.  It is not a leaf: it is the composition that owns the surface energy
 ! balance.  Everything it calls is already pinned by its own fixture --
 ! THERMOPROP (noahmp-leaves.csv), RADIATION (noahmp-radiation-*.csv), VEGE_FLUX

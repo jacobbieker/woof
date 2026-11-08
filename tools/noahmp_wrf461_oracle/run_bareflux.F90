@@ -1,5 +1,5 @@
 ! ==================================================================================================
-! run_bareflux -- bitwise oracle driver for WRF v4.6.1 Noah-MP BARE_FLUX.
+! run_bareflux -- bitwise oracle driver for WRF v4.7.1 Noah-MP BARE_FLUX.
 !
 ! Reads one case per line from stdin.  Every REAL is transported as an 8-digit
 ! hexadecimal IEEE-754 binary32 word so that no decimal rounding can sit between
@@ -101,7 +101,7 @@ program run_bareflux
      if (iopt_sfc_in /= 1) stop 'run_bareflux: opt_sfc must be 1 (pinned identity)'
      if (iopt_stc_in /= 1) stop 'run_bareflux: opt_stc must be 1 (pinned identity)'
 
-     ! WRF v4.6.1 Registry.EM_COMMON defaults, in declaration order:
+     ! WRF v4.7.1 Registry.EM_COMMON defaults, in declaration order:
      !   dveg opt_crs opt_btr opt_run opt_sfc opt_frz opt_inf opt_rad opt_alb
      !   opt_snf opt_tbot opt_stc opt_rsf opt_soil opt_pedo opt_crop opt_irr
      !   opt_irrm opt_infdv opt_tdrn

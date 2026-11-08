@@ -79,6 +79,9 @@ def _read_oracle_out(path: str) -> dict[str, list[str]]:
 
 
 def cmd_build(args) -> int:
+    from noahmp_pins import TREES, tree_for_lsm
+    tree = tree_for_lsm(args.lsm)          # refuses any other module
+    version = tree.split("-", 1)[1]
     cases = build_cases()
     deck = args.deck
     with open(deck, "w", newline="\n") as handle:
@@ -111,11 +114,11 @@ def cmd_build(args) -> int:
 
     with open(FIXTURE, "w", newline="\n") as handle:
         handle.write(
-            "# WRF v4.6.1 Noah-MP BARE_FLUX bitwise oracle\n"
-            "#   tree     <wrf-4.6.1-checkout> (WSL)\n"
-            "#   commit   d66e442fccc04111067e29274c9f9eaccc3cef28\n"
+            f"# WRF v{version} Noah-MP BARE_FLUX bitwise oracle\n"
+            f"#   tree     <wrf-{version}-checkout> (WSL)\n"
+            f"#   commit   {TREES[tree]['wrf_commit']}\n"
             "#   file     phys/module_sf_noahmplsm.F\n"
-            "#   sha256   bd592a5b7db29000e715250e3a7c779ffb5e0dcc356f6b5a7d9e1c9f69c55282\n"
+            f"#   sha256   {TREES[tree]['lsm']}\n"
             "#   patch    private:: -> public:: only, 50 lines, 300 bytes; see\n"
             "#            tools/noahmp_wrf461_oracle/visibility_patch_leaves.py --check\n"
             "#   pristine every row below is bit-identical to the row produced by a\n"
@@ -289,6 +292,9 @@ def main(argv):
                    help="output of a previous run of the oracle binary over "
                         "the same deck (for hosts that cannot exec it)")
     p.add_argument("--deck", required=True)
+    p.add_argument("--lsm", required=True,
+                   help="the pristine phys/module_sf_noahmplsm.F the binary "
+                        "was built from; picks the pinned tree the header names")
     p.set_defaults(func=cmd_build)
 
     p = sub.add_parser("check")
