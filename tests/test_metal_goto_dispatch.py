@@ -9,6 +9,10 @@ MLX) and is held to a Python transcription of the same control flow.
   statements (ssib) and stacked labels (``L400: L401:``, ssib and
   gfdleta_co2_init) were refused; they are a dispatch loop
   (``switch`` on the label) now.
+* A goto from loops in an if's then arm to a label in its else arm
+  (Noah-MP's generated dynamic-VIC infiltration, label_1003) entered a
+  block from outside; it is a re-entry loop that routes each if to the arm
+  holding the label.
 * A local array of pointers filled in a loop and handed to a device
   function (nwp_windows' ``float* out[12]``) was declared ``thread``.
 * A class template's ``operator()`` returning a reference into a buffer
@@ -370,3 +374,68 @@ def test_a_local_pointer_array_passed_on_through_two_device_functions(cp):
     _launch(cp, _FORWARDED, "forwarded", a, b, np.int32(N))
     assert cp.asnumpy(b).tobytes() == (np.arange(N, dtype=np.float32) * 2).tobytes()
     assert not cp.asnumpy(a).any()
+
+
+_ENTER = r'''
+extern "C" __global__ void enter(const int* in, int* out, int n) {
+    int c = blockIdx.x * blockDim.x + threadIdx.x;
+    if (c >= n) return;
+    int x = in[c], acc = 0, y = 0;
+    if (x > 40) {
+        acc = 1;
+        goto done;
+    } else {
+        if (x % 2 == 0) {
+            for (int k = 0; k < 6; ++k) {
+                y += k;
+                if (y > x) { goto label_1003; }
+            }
+        } else {
+            acc += 3;
+            for (int k = 0; k < 4; ++k) {
+                y += 2;
+                if (y >= x) goto label_1003;
+            }
+            y = -1;
+            label_1003: ;
+            acc += 100 + y;
+        }
+    }
+    acc += 7;
+done:
+    out[c] = acc * 1000 + y;
+}
+'''
+
+
+def _enter(x):
+    acc = y = 0
+    if x > 40:
+        return 1 * 1000 + y
+    entered = False
+    if x % 2 == 0:
+        for k in range(6):
+            y += k
+            if y > x:
+                entered = True
+                break
+        if not entered:
+            return (acc + 7) * 1000 + y
+    else:
+        acc += 3
+        for k in range(4):
+            y += 2
+            if y >= x:
+                entered = True
+                break
+        if not entered:
+            y = -1
+    acc += 100 + y
+    return (acc + 7) * 1000 + y
+
+
+def test_a_goto_into_the_else_arm_from_loops_in_the_then_arm(cp):
+    x = (np.arange(N, dtype=np.int32) * 3) % 53
+    out = cp.zeros(N, dtype=cp.int32)
+    _launch(cp, _ENTER, "enter", cp.asarray(x), out, np.int32(N))
+    assert cp.asnumpy(out).tolist() == [_enter(int(v)) for v in x]

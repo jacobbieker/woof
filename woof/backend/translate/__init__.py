@@ -1154,6 +1154,18 @@ class _Rewriter:
                 to_dispatch[self.span(home)].append(g)
                 continue
             by_label.setdefault((target.spelling, self.span(target)), []).append(g)
+        # a label some jump reaches from outside its block (a goto from the
+        # then arm into the else arm: Noah-MP's dynamic-VIC label_1003) is
+        # entered through a re-entry loop instead (_reenter_label)
+        reenter = {}
+        for key, jumps in list(by_label.items()):
+            label = next((l for l in labels.get(key[0], []) if self.span(l) == key[1]), None)
+            home = None if label is None else parent(label)
+            if home is None or home.kind != K.COMPOUND_STMT:
+                continue
+            hs, he = self.span(home)
+            if any(not (hs <= self.span(g)[0] and self.span(g)[1] <= he) for g in jumps):
+                reenter[key] = (label, by_label.pop(key))
         # each dispatch group's statements: [start, end) offsets
         group_spans = {key: self._dispatch_range(block, to_dispatch[key], parent, chain)[2:]
                        for key, (block, _) in dispatch.items()}
@@ -1259,7 +1271,97 @@ class _Rewriter:
         # innermost first: an outer dispatch loop's jumps cross the inner ones
         for n, key in enumerate(sorted(dispatch, key=lambda k: k[1] - k[0])):
             self._dispatch_block(dispatch[key][0], to_dispatch[key], n, parent, chain, wrappers)
+        for n, (label, jumps) in enumerate(sorted(reenter.values(), key=lambda v: -self.span(v[0])[0])):
+            self._reenter_label(label, jumps, n, parent, chain, wrappers)
         self._nested_wrapper_exits(wrappers)
+
+    def _reenter_label(self, label, jumps, n, parent, chain, wrappers):
+        """A label entered from outside its block -> a re-entry loop around
+        the innermost statement S (of a block) holding the label and every
+        jump to it: ``while (true) { S break; }``.  A jump sets a flag and
+        continues the loop (out of every loop and wrapper between it and S);
+        with the flag set, each ``if`` on the way down to the label takes the
+        arm that holds it and each statement before it on the way is
+        skipped; the label clears the flag.  Refused by name: a loop or
+        switch between S and the label (re-entering it would rerun it), a
+        declaration among the skipped statements, a break or continue in S
+        meant for a loop around it."""
+        K = self.ci.CursorKind
+        name = label.spelling
+        path = chain(label)                 # label, its block, ..., the root
+        spans = [self.span(a) for a in path]
+        common = None
+        for g in jumps:
+            for a in chain(g):
+                if self.span(a) in spans:
+                    i = spans.index(self.span(a))
+                    common = i if common is None else max(common, i)
+                    break
+        # S: the outermost ancestor up to the common one that is a block's statement
+        i = common
+        while i is not None and i + 1 < len(path) and (path[i].kind == K.COMPOUND_STMT
+                                                       or path[i + 1].kind != K.COMPOUND_STMT):
+            i += 1
+        if i is None or i + 1 >= len(path) or path[i + 1].kind != K.COMPOUND_STMT:
+            self.refuse(label, f"goto {name!r} from outside the label's block")
+        stmt = path[i]
+        flag = f"__woof_in{n}"
+        for a in path[1:i + 1]:
+            if a.kind.name in self._LOOPS:
+                self.refuse(label, f"goto {name!r} into a loop or switch")
+        for j in range(1, i + 1):
+            a, below = path[j], path[j - 1]
+            if a.kind == K.COMPOUND_STMT:
+                skipped = []
+                for st in a.get_children():
+                    if self.span(st) == self.span(below):
+                        break
+                    skipped.append(st)
+                if skipped:
+                    if any(st.kind == K.DECL_STMT for st in skipped):
+                        self.refuse(label, f"a declaration before label {name!r} in a block the goto enters")
+                    self.edits.insert(self.span(skipped[0])[0], f"if (!{flag}) {{ ", rank=-60_000)
+                    self.edits.insert(self._statement_end(skipped[-1]), " } ", rank=_GOTO_CLOSE - 3)
+            elif a.kind == K.IF_STMT:
+                kids = list(a.get_children())
+                if len(kids) < 2:
+                    self.refuse(a, f"cannot read the if statement around label {name!r}")
+                cond, arms = kids[0], kids[1:]
+                into_then = self.span(arms[0]) == self.span(below)
+                cs, ce = self.span(cond)
+                self.edits.insert(cs, f"({flag} || (" if into_then else f"(!{flag} && (", rank=-60_000)
+                self.edits.insert(ce, "))", rank=60_000)
+            elif a.kind != K.LABEL_STMT:
+                self.refuse(a, f"goto {name!r} enters a {a.kind.name.lower()}")
+        for j in self._unenclosed_jumps(stmt):
+            self.refuse(j, f"a {j.kind.name.split('_')[0].lower()} in the statement a goto re-enters "
+                           f"for label {name!r}")
+        rs, re_ = self.span(stmt)[0], self._statement_end(stmt)
+        inner = [w for w in wrappers if rs <= w["rs"] and w["close"] <= re_]
+        for g in jumps:
+            at = self.span(g)[0]
+            crossed = []
+            for a in chain(g)[1:]:
+                if self.span(a) == self.span(stmt) and a.kind == stmt.kind:
+                    if a.kind.name in self._LOOPS:
+                        crossed.append((self.span(a)[0], self._statement_end(a), _GOTO_CLOSE - 1))
+                    break
+                if a.kind.name in self._LOOPS:
+                    crossed.append((self.span(a)[0], self._statement_end(a), _GOTO_CLOSE - 1))
+            crossed += [(w["rs"], w["close"], _GOTO_CLOSE + 2) for w in inner if w["rs"] <= at < w["close"]]
+            crossed.sort()
+            for k, (_, end, rank) in enumerate(crossed):
+                self.edits.insert(end, f" if ({flag}) {'continue' if k == 0 else 'break'};", rank=rank)
+            gs, ge = self.span(g)
+            self.edits.replace(gs, ge, f"{{ {flag} = true; {'break' if crossed else 'continue'}; }}")
+        toks = list(label.get_tokens())
+        if len(toks) < 2 or toks[1].spelling != ":":
+            self.refuse(label, f"cannot find label {name!r}")
+        self.edits.replace(toks[0].extent.start.offset, toks[1].extent.end.offset, f"{flag} = false;")
+        self.edits.insert(rs, f"{{ bool {flag} = false; while (true) {{ ", rank=-50_000 - (re_ - rs))
+        self.edits.insert(re_, " break; } }", rank=_GOTO_CLOSE - 1)
+        wrappers.append({"kind": "reenter", "rs": rs, "close": re_, "flag": None, "name": name,
+                         "jumps": [], "node": label, "block": path[i + 1]})
 
     def _outside_dispatch(self, label, name, block, rs, re_, group_spans):
         """A structured region of a block with a dispatch group must hold
