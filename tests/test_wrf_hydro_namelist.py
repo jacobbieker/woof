@@ -70,7 +70,6 @@ def test_template_with_muskingum_cunge_maps():
 
 @pytest.mark.parametrize("edit,word", [
     (("rt_option = 1", "rt_option = 2"), "rt_option = 2"),
-    (("GWBASESWCRT = 1", "GWBASESWCRT = 3"), "gw2d"),
     (("GWBASESWCRT = 1", "GWBASESWCRT = 4"), "UDMP bucket"),
     (("UDMP_OPT = 0", "UDMP_OPT = 1"), "UDMAP|UDMP"),
     (("bucket_loss = 0", "bucket_loss = 1"), "bucket loss"),
@@ -132,3 +131,12 @@ def test_a_reservoir_key_in_hydro_nlist_is_unknown_and_lake_option_4_is_invalid(
         nl.map_hydro_nlist(nl.parse(text.replace("UDMP_OPT = 0", "UDMP_OPT = 0\nreservoir_type_specified = .TRUE.")))
     with pytest.raises(ValueError, match="lake_option = 4"):
         nl.map_hydro_nlist(nl.parse(_lakes(text, "lake_option = 4")))
+
+
+def test_the_2d_groundwater_model_maps_and_its_channel_exchange_is_refused():
+    nl = _nl()
+    text = _drop_nudging(_text()).replace("GWBASESWCRT = 1", "GWBASESWCRT = 3")
+    cfg = nl.map_hydro_nlist(nl.parse(text.replace("channel_option = 3", "channel_option = 2")))
+    assert cfg.gwbaseswcrt == 3
+    with pytest.raises(nl.UnportedOption, match="gwChanCondSw"):
+        nl.map_hydro_nlist(nl.parse(text.replace("UDMP_OPT = 0", "UDMP_OPT = 0\ngwChanCondSw = 1")))

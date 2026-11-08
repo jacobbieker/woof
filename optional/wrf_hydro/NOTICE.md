@@ -51,8 +51,9 @@ WRF baseline.
 | `woof_wrf_hydro/diffusive.cu`, `diffusive.py` | `hydro/Routing/module_channel_routing.F90` (DIFFUSION, HEAD, AREAf, SGNf, the channel_option = 3 branch of drive_CHANNEL); `hydro/OrchestratorLayer/config.F90` (DTCT's start at DTRT_CH) |
 | `woof_wrf_hydro/levelpool.cu`, `levelpool.py` | `hydro/Routing/Reservoirs/Level_Pool/module_levelpool.F90` (LEVELPOOL_PHYSICS with lake_opt 1 and 2, run_levelpool_reservoir); the reservoir arm of drive_CHANNEL's reach branch is in `channel.cu`, the lake arm of drive_CHANNEL's diffusive branch and `hydro/MPP/mpp_land.F90`'s one-process sum_real8 are in `diffusive.cu` |
 | `woof_wrf_hydro/baseflow.cu`, `baseflow.py` | `hydro/Routing/module_GW_baseflow.F90` (simp_gw_buck); `hydro/Routing/module_RT.F90` (the non-MPP stream-pixel count) |
+| `woof_wrf_hydro/gw2d.cu`, `gw2d.py` | `hydro/Routing/module_gw_gw2d.F90` (gw2d_ini, gwstep with sub_tri_solv, gwSoilFlux, darcyGwSoil, aggregateQsgw); `hydro/HYDRO_drv/module_HYDRO_drv.F90` (the GWBASESWCRT = 3 arm of the groundwater call) |
 | `woof_wrf_hydro/namelist.py` | `hydro/OrchestratorLayer/config.F90` (read_rt_nlst: the HYDRO_nlist and reservoir_nlist keys, their defaults, the lake_option resolution); `oracle/fixtures/namelist/hydro.namelist.wrf471` is WRF 4.7.1's `hydro/template/HYDRO/hydro.namelist`, verbatim |
-| `oracle/` | build harnesses and drivers (`build.sh`, `build_grid_transform.sh`, `build_overland.sh`, `build_channel.sh`, `build_diffusive.sh`, `build_baseflow.sh`); they compile the pinned files at build time and copy none of them |
+| `oracle/` | build harnesses and drivers (`build.sh`, `build_grid_transform.sh`, `build_overland.sh`, `build_channel.sh`, `build_diffusive.sh`, `build_baseflow.sh`, `build_gw2d.sh`); they compile the pinned files at build time and copy none of them |
 
 `subsurface.cu`, `overland.cu`, `channel.cu`, `levelpool.cu` and `diffusive.cu` are preceded at load time by
 WOOF's `woof/core/kernels/glibc_flt32.cuh` (glibc's powf words) and
