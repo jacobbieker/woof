@@ -33,7 +33,7 @@ program run_wrf_hydro_baseflow_oracle
     end do
   end do
   gw_strm_msk_lind = gw_strm_msk
-  ! module_RT.F90:1383-1394, without MPP_LAND
+  ! module_RT.F90:1369-1380, without MPP_LAND
   pixct = 0.
   do i = 1, ixrt
     do j = 1, jxrt

@@ -1,5 +1,5 @@
 // WOOF-OPTIN: wrf-hydro
-// Derived from WRF-Hydro (UCAR) as shipped in WRF 4.6.1 hydro/; see
+// Derived from WRF-Hydro (UCAR) as shipped in WRF 4.7.1 hydro/; see
 // optional/wrf_hydro/LICENSE and NOTICE.md.  Not part of the default build or
 // of any wheel.
 //
@@ -79,7 +79,7 @@ void hyd_route1_cell(const float* __restrict__ dist, const float* __restrict__ z
     boundary[c] = 0;
     if (!(i >= 2 && i <= xx - 1 && j >= 2 && j <= yy - 1)) return;
     int ixx0 = so8rt_d[c], jyy0 = so8rt_d[n + c], index = so8rt_d[2 * n + c];
-    // GETSUB8 (Noah_distr_routing.F90:176-211) and GETSUB8DIR (:213-251)
+    // GETSUB8 (Noah_distr_routing.F90:155-189) and GETSUB8DIR (:191-229)
     const int ni[8] = {i, i + 1, i + 1, i + 1, i, i - 1, i - 1, i - 1};
     const int nj[8] = {j + 1, j + 1, j, j - 1, j - 1, j - 1, j, j + 1};
     float beta = -1.0f;

@@ -1,4 +1,4 @@
-! Service module for WRF-Hydro's overland routing as WRF 4.6.1 ships it
+! Service module for WRF-Hydro's overland routing as WRF 4.7.1 ships it
 ! (hydro/Routing/Noah_distr_routing_overland.F90: OverlandRouting, OV_RTNG,
 ! ROUTE_OVERLAND1, ROUTE_OVERLAND2; GETMAX8DIR and GET8DIR from
 ! Noah_distr_routing.F90).  Without MPP_LAND, OverlandRouting has no USE of

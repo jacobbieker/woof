@@ -14,7 +14,7 @@ with itself for months.
 bash tools/noah_wrf461_oracle/build.sh <WRF_SOURCE_ROOT> <BUILD_DIR>
 ```
 
-`WRF_SOURCE_ROOT` must be at `d66e442fccc04111067e29274c9f9eaccc3cef28` with
+`WRF_SOURCE_ROOT` must be at `f52c197ed39d12e087d02c50f412d90d418f6186` (v4.7.1; the Noah sources are byte-identical to v4.6.1's) with
 all five compiled sources clean; `build.sh` refuses otherwise.
 
 Four fixtures land in `woof/data/noah/oracle/` (see `PROVENANCE.md` there),

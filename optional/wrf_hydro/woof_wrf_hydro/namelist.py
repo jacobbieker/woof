@@ -1,13 +1,15 @@
 # WOOF-OPTIN: wrf-hydro
 """``hydro.namelist`` mapped to the WRF-Hydro opt-in, refusing what is not ported.
 
-Reads the ``&HYDRO_nlist`` group WRF-Hydro reads (hydro/Data_Rec/module_namelist.F90
-in WRF 4.6.1's hydro/, :119-139) and maps it to :class:`HydroConfig`, the
-switches and constants the ported pieces take.  An option whose value selects
-something not ported is refused by name with the reason; a key WRF-Hydro does
-not read is refused as unknown.  File names and output switches are recorded
-for the caller and not acted on here.  A ``&NUDGING_nlist`` group (streamflow
-nudging) is refused: nudging is not ported.
+Reads the ``&HYDRO_nlist`` group WRF-Hydro reads (read_rt_nlst,
+hydro/OrchestratorLayer/config.F90 in WRF 4.7.1's hydro/, :621-638) and,
+when lake_option = 3, the ``&reservoir_nlist`` group (:640-644, read at
+:711-714), and maps them to :class:`HydroConfig`, the switches and constants
+the ported pieces take.  An option whose value selects something not ported
+is refused by name with the reason; a key WRF-Hydro does not read is refused
+as unknown.  File names and output switches are recorded for the caller and
+not acted on here.  A ``&NUDGING_nlist`` group (streamflow nudging) is
+refused: nudging is not ported.
 """
 
 from __future__ import annotations
@@ -15,29 +17,32 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-#: Every key of module_namelist.F90's HYDRO_nlist (:119-139), lower case.
+#: Every key of read_rt_nlst's HYDRO_nlist (config.F90 :621-638), lower case.
 HYDRO_NLIST_KEYS = frozenset(k.lower() for k in """
 NSOIL ZSOIL8 RESTART_FILE SPLIT_OUTPUT_COUNT IGRID geo_static_flnm land_spatial_meta_flnm
 out_dt rst_dt DEEPGWSPIN SOLVEG_INITSWC RT_OPTION CHANRTSWCRT channel_option SUBRTSWCRT
 OVRTSWCRT AGGFACTRT dtrt_ter dtrt_ch dxrt GwSpinCycles GwPreCycles GwSpinUp GwPreDiag
 GwPreDiagInterval gwIhShift GWBASESWCRT gwChanCondSw gwChanCondConstIn gwChanCondConstOut
-route_topo_f route_chan_f route_link_f compound_channel route_lake_f
+route_topo_f route_chan_f route_link_f compound_channel channel_loss_option lake_option
+route_lake_f route_direction_f route_order_f gwbasmskfil geo_finegrid_flnm gwstrmfil
+GW_RESTART RSTRT_SWC TERADJ_SOLAR sys_cpl order_to_write rst_typ rst_bi_in rst_bi_out
+gwsoilcpl CHRTOUT_DOMAIN CHANOBS_DOMAIN CHRTOUT_GRID LSMOUT_DOMAIN RTOUT_DOMAIN output_gw
+outlake frxst_pts_out udmap_file UDMP_OPT GWBUCKPARM_file bucket_loss io_config_outputs
+io_form_outputs hydrotbl_f t0OutputFlag output_channelBucket_influx imperv_adj""".split())
+
+#: reservoir_nlist (config.F90 :640-644), read only when lake_option = 3.
+RESERVOIR_NLIST_KEYS = frozenset(k.lower() for k in """
 reservoir_persistence_usgs reservoir_persistence_usace reservoir_parameter_file
 reservoir_usgs_timeslice_path reservoir_usace_timeslice_path
 reservoir_observation_lookback_hours reservoir_observation_update_time_interval_seconds
 reservoir_rfc_forecasts reservoir_rfc_forecasts_time_series_path
-reservoir_rfc_forecasts_lookback_hours reservoir_type_specified route_direction_f
-route_order_f gwbasmskfil geo_finegrid_flnm gwstrmfil GW_RESTART RSTRT_SWC TERADJ_SOLAR
-sys_cpl order_to_write rst_typ rst_bi_in rst_bi_out gwsoilcpl CHRTOUT_DOMAIN CHANOBS_DOMAIN
-CHRTOUT_GRID LSMOUT_DOMAIN RTOUT_DOMAIN output_gw outlake frxst_pts_out udmap_file UDMP_OPT
-GWBUCKPARM_file bucket_loss io_config_outputs io_form_outputs hydrotbl_f t0OutputFlag
-output_channelBucket_influx imperv_adj""".split())
+reservoir_rfc_forecasts_lookback_hours reservoir_type_specified""".split())
 
-#: module_namelist.F90's defaults (:154-174) for the keys mapped below.
-DEFAULTS = {"udmp_opt": 0, "compound_channel": False, "bucket_loss": 0,
+#: read_rt_nlst's defaults (config.F90 :659-682) for the keys mapped below.
+DEFAULTS = {"udmp_opt": 0, "compound_channel": False, "bucket_loss": 0, "lake_option": -99,
             "reservoir_persistence_usgs": False, "reservoir_persistence_usace": False,
             "reservoir_rfc_forecasts": False, "reservoir_type_specified": False,
-            "imperv_adj": 0, "teradj_solar": 0}
+            "imperv_adj": 0, "teradj_solar": 0, "channel_loss_option": 0}
 
 #: Keys that name files or set output and restart I/O: recorded, not acted on.
 IO_KEYS = frozenset(k for k in HYDRO_NLIST_KEYS if k.endswith(("_f", "_file", "_flnm", "fil",
@@ -46,9 +51,9 @@ IO_KEYS = frozenset(k for k in HYDRO_NLIST_KEYS if k.endswith(("_f", "_file", "_
     "rst_typ", "rst_bi_in", "rst_bi_out", "chrtout_domain", "chanobs_domain", "chrtout_grid",
     "lsmout_domain", "rtout_domain", "output_gw", "outlake", "frxst_pts_out",
     "io_config_outputs", "io_form_outputs", "t0outputflag", "output_channelbucket_influx",
-    "gw_restart", "rstrt_swc", "reservoir_observation_lookback_hours",
-    "reservoir_observation_update_time_interval_seconds",
-    "reservoir_rfc_forecasts_lookback_hours"})
+    "gw_restart", "rstrt_swc",
+    # channel_loss_option only selects NWM output variables (module_NWM_io.F90)
+    "channel_loss_option"})
 
 
 class UnportedOption(NotImplementedError):
@@ -70,6 +75,7 @@ class HydroConfig:
     channel_option: int
     gwbaseswcrt: int          # 0 none, 1/2 -> GroundwaterBucket
     compound_channel: bool
+    lake_option: int = 0      # 0 no lakes, 1 level pool, 2 pass-through (LevelPool lake_opt)
     io: dict = field(default_factory=dict)
 
 
@@ -131,6 +137,17 @@ def map_hydro_nlist(groups: dict[str, dict]) -> HydroConfig:
     unknown = sorted(set(groups["hydro_nlist"]) - HYDRO_NLIST_KEYS)
     if unknown:
         raise ValueError(f"keys WRF-Hydro's HYDRO_nlist does not read: {unknown}")
+    lake_option = int(nl["lake_option"])
+    if lake_option == 3:                              # :711-714, then :762-769
+        reservoir = groups.get("reservoir_nlist")
+        if reservoir is None:
+            raise ValueError("lake_option = 3 reads a &reservoir_nlist group; there is none")
+        unknown = sorted(set(reservoir) - RESERVOIR_NLIST_KEYS)
+        if unknown:
+            raise ValueError(f"keys WRF-Hydro's reservoir_nlist does not read: {unknown}")
+        nl.update(reservoir)
+    elif lake_option not in (-99, 0, 1, 2):
+        raise ValueError(f"lake_option = {lake_option}: must be 0, 1, 2 or 3 (config.F90 :478)")
 
     def refuse(key, value, why):
         raise UnportedOption(f"{key} = {value!r}: {why}")
@@ -142,7 +159,12 @@ def map_hydro_nlist(groups: dict[str, dict]) -> HydroConfig:
     for key in ("reservoir_persistence_usgs", "reservoir_persistence_usace",
                 "reservoir_rfc_forecasts", "reservoir_type_specified"):
         if nl.get(key):
-            refuse(key, nl[key], "reservoirs (level pool and its data assimilation) are not ported")
+            refuse(key, nl[key], "the persistence and RFC-forecast reservoir types are not "
+                                 "ported (only the level pool and the pass-through)")
+    if lake_option == 3:
+        lake_option = 1                               # :768 "set to 1 either way"
+    if lake_option == -99:                            # :771-778
+        lake_option = 1 if nl.get("route_lake_f", "") != "" else 0
     if nl.get("bucket_loss") == 1:
         refuse("bucket_loss", 1, "bucket loss (UDMP only) is not ported")
     if nl.get("teradj_solar", 0) != 0:
@@ -170,8 +192,9 @@ def map_hydro_nlist(groups: dict[str, dict]) -> HydroConfig:
         dtrt_ter=float(nl["dtrt_ter"]), dtrt_ch=float(nl["dtrt_ch"]),
         subsurface=int(nl.get("subrtswcrt", 0)) == 1, overland=int(nl.get("ovrtswcrt", 0)) == 1,
         rt_option=rt_option, channel=channel, channel_option=channel_option, gwbaseswcrt=gw,
-        compound_channel=bool(nl.get("compound_channel")),
-        io={k: v for k, v in groups["hydro_nlist"].items() if k in IO_KEYS})
+        compound_channel=bool(nl.get("compound_channel")), lake_option=lake_option,
+        io={k: v for k, v in groups["hydro_nlist"].items() if k in IO_KEYS
+            and not (lake_option == 0 and k in ("route_lake_f", "outlake"))})
 
 
 def read(path) -> HydroConfig:

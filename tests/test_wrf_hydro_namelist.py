@@ -1,7 +1,7 @@
 """hydro.namelist mapped to the WRF-Hydro opt-in, refusing unported options by name.
 
-The fixture is WRF 4.6.1's own hydro/template/HYDRO/hydro.namelist (copied
-under the opt-in, sha256 7c306e1b...).  Every test skips, naming the opt-in
+The fixture is WRF 4.7.1's own hydro/template/HYDRO/hydro.namelist (copied
+under the opt-in, sha256 72d1017f...).  Every test skips, naming the opt-in
 rule, unless ``WOOF_ENABLE_WRF_HYDRO=1``.
 """
 
@@ -16,7 +16,7 @@ from woof import optin
 REASON = optin.unavailable_reason("wrf_hydro")
 pytestmark = pytest.mark.skipif(REASON is not None, reason=f"opt-in rule: {REASON}")
 
-TEMPLATE = optin.optional_root() / "wrf_hydro" / "oracle" / "fixtures" / "namelist" / "hydro.namelist.wrf461"
+TEMPLATE = optin.optional_root() / "wrf_hydro" / "oracle" / "fixtures" / "namelist" / "hydro.namelist.wrf471"
 
 
 def _nl():
@@ -33,13 +33,14 @@ def _drop_nudging(text):
 
 def test_template_is_wrfs():
     digest = hashlib.sha256(TEMPLATE.read_bytes()).hexdigest()
-    assert digest == "7c306e1bfb20561f72ebecfd60a593dabf1a6bda7ab418876f94a82256efe977"
+    assert digest == "72d1017ff4fc486bfb6e3fa1f3d2205955662428cbd1eb0bfe0a2030bb8e19dd"
 
 
 def test_every_template_key_is_one_wrf_hydro_reads():
     nl = _nl()
     groups = nl.parse(_text())
     assert set(groups["hydro_nlist"]) <= nl.HYDRO_NLIST_KEYS
+    assert set(groups["reservoir_nlist"]) <= nl.RESERVOIR_NLIST_KEYS
     assert groups["hydro_nlist"]["zsoil8"] == [-0.10, -0.40, -1.00, -2.00]
 
 
@@ -53,6 +54,7 @@ def test_template_with_the_diffusive_wave_maps():
     nl = _nl()
     cfg = nl.map_hydro_nlist(nl.parse(_drop_nudging(_text())))
     assert cfg.channel and cfg.channel_option == 3
+    assert cfg.lake_option == 1
 
 
 def test_template_with_muskingum_cunge_maps():
@@ -71,7 +73,6 @@ def test_template_with_muskingum_cunge_maps():
     (("GWBASESWCRT = 1", "GWBASESWCRT = 3"), "gw2d"),
     (("GWBASESWCRT = 1", "GWBASESWCRT = 4"), "UDMP bucket"),
     (("UDMP_OPT = 0", "UDMP_OPT = 1"), "UDMAP|UDMP"),
-    (("reservoir_persistence_usgs = .FALSE.", "reservoir_persistence_usgs = .TRUE."), "reservoirs"),
     (("bucket_loss = 0", "bucket_loss = 1"), "bucket loss"),
     (("sys_cpl = 1", "sys_cpl = 2"), "sys_cpl"),
 ])
@@ -88,3 +89,46 @@ def test_unknown_key_is_refused():
     text = _drop_nudging(_text()).replace("channel_option = 3", "channel_option = 2")
     with pytest.raises(ValueError, match="does not read"):
         nl.map_hydro_nlist(nl.parse(text.replace("UDMP_OPT = 0", "UDMP_OPT = 0\nSPEED_HACK = 1")))
+
+
+def _lakes(text, option):
+    return text.replace("lake_option = 1", option)
+
+
+@pytest.mark.parametrize("option,route_lake,expected", [
+    ("lake_option = 1", True, 1), ("lake_option = 2", True, 2), ("lake_option = 0", True, 0),
+    ("", True, 1), ("", False, 0), ("lake_option = 3", True, 1)])
+def test_lake_option_resolves_as_read_rt_nlst_does(option, route_lake, expected):
+    # config.F90 :762-778: 3 without a DA type falls back to 1; unset is 1
+    # with a route_lake_f and 0 without one; 0 clears route_lake_f and outlake.
+    nl = _nl()
+    text = _lakes(_drop_nudging(_text()), option)
+    if not route_lake:
+        text = text.replace('route_lake_f = "./DOMAIN/LAKEPARM.nc"', "")
+    cfg = nl.map_hydro_nlist(nl.parse(text))
+    assert cfg.lake_option == expected
+    if expected == 0:
+        assert "route_lake_f" not in cfg.io and "outlake" not in cfg.io
+
+
+def test_the_persistence_and_rfc_reservoirs_are_refused_by_name():
+    nl = _nl()
+    text = _lakes(_drop_nudging(_text()), "lake_option = 3")
+    for key in ("reservoir_persistence_usgs", "reservoir_persistence_usace", "reservoir_rfc_forecasts"):
+        edited = text.replace(f"{key} = .FALSE.", f"{key} = .TRUE.")
+        assert edited != text
+        with pytest.raises(nl.UnportedOption, match=key):
+            nl.map_hydro_nlist(nl.parse(edited))
+    # without lake_option = 3, WRF never reads &reservoir_nlist
+    cfg = nl.map_hydro_nlist(nl.parse(text.replace("lake_option = 3", "lake_option = 1").replace(
+        "reservoir_persistence_usgs = .FALSE.", "reservoir_persistence_usgs = .TRUE.")))
+    assert cfg.lake_option == 1
+
+
+def test_a_reservoir_key_in_hydro_nlist_is_unknown_and_lake_option_4_is_invalid():
+    nl = _nl()
+    text = _drop_nudging(_text())
+    with pytest.raises(ValueError, match="does not read"):
+        nl.map_hydro_nlist(nl.parse(text.replace("UDMP_OPT = 0", "UDMP_OPT = 0\nreservoir_type_specified = .TRUE.")))
+    with pytest.raises(ValueError, match="lake_option = 4"):
+        nl.map_hydro_nlist(nl.parse(_lakes(text, "lake_option = 4")))
