@@ -4,9 +4,9 @@ c31f062e282b8710a0b565be7aecbc35b8e741b05a96a393402fcd5a737f28f8  <nemo-5.0.2-ch
 7dc2bdf98ed47a275d72dfdd66f807cb370db34f7a51c780867702001e278c25  <nemo-5.0.2-checkout>/src/OCE/do_loop_substitute.h90
 fb18c1cb2d0baa3807a7b2d5be30f363349676cb79e23871467c25da09a03ba3  <nemo-5.0.2-checkout>/src/OCE/DOM/domzgr_substitute.h90
 b04f2ce4d12aa247ae3b707483d25cf2d38d0b3cf8817d71d33e66918fd81cfd  <nemo-5.0.2-checkout>/cfgs/SHARED/namelist_ref
-ffd26c91097612d244caf598e285a85950da4d65603c3b5e81c4574b8d1cec05  /repo/optional<nemo-5.0.2-checkout>/oracle/tke_stubs.F90
-8ea81f585927bd4d9fb8310aaeb2d77a0da19fe896ff513e91d64e9dd1645b70  /repo/optional<nemo-5.0.2-checkout>/oracle/run_tke.F90
-746cce6023f1fbc11bd2e80385c953be8b3dc885fd57f0e55b1c8ce414a7d279  /repo/optional<nemo-5.0.2-checkout>/oracle/build_tke.sh
+ffd26c91097612d244caf598e285a85950da4d65603c3b5e81c4574b8d1cec05  <oracle-workspace>/optional/nemo/oracle/tke_stubs.F90
+8ea81f585927bd4d9fb8310aaeb2d77a0da19fe896ff513e91d64e9dd1645b70  <oracle-workspace>/optional/nemo/oracle/run_tke.F90
+c270b513c5435172ed9b4d2ee6ae34ff57cefd3a4e12122c0fe503a91ad31bf9  <oracle-workspace>/optional/nemo/oracle/build_tke.sh
 fe97be79b24220503520192f4ee6c62cc7a9c997d8807ddff49302af23838890  tke-grid.csv
 a5c2b32f6608e1dc0a72e2f60e35acf9d0811ea3e687ed5cbcdb94f973549e22  tke-ref.csv
 f4320c2a95f163ca80948eca2a72a7c18c383406342cd23234f03122b15ed627  tke-mxl2.csv

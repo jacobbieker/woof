@@ -43,16 +43,19 @@ if grep -q '_ZGV' undefined-O0-zdftke.txt; then
     exit 4
 fi
 awk '/^&namzdf_tke/,/^\//' "${source_root}/cfgs/SHARED/namelist_ref" > namzdf_tke_ref.txt
-declare -A cfgs=(
-    [ref]='&namzdf_tke /'
-    [mxl2]='&namzdf_tke nn_mxl=2, nn_pdl=0, ln_mxl0=.false., ln_lc=.false., nn_etau=0 /'
-    [mxl0]='&namzdf_tke nn_mxl=0, nn_htau=0 /'
-    [mxl1]='&namzdf_tke nn_mxl=1 /'
-)
+# a case, not an associative array: the script also runs under bash 3.2 (macOS)
+cfg_of() {
+    case "$1" in
+        ref)  echo '&namzdf_tke /' ;;
+        mxl2) echo '&namzdf_tke nn_mxl=2, nn_pdl=0, ln_mxl0=.false., ln_lc=.false., nn_etau=0 /' ;;
+        mxl0) echo '&namzdf_tke nn_mxl=0, nn_htau=0 /' ;;
+        mxl1) echo '&namzdf_tke nn_mxl=1 /' ;;
+    esac
+}
 outs=()
 for name in ref mxl2 mxl0 mxl1; do
     mkdir -p "${name}"
-    ./run_tke "${name}" namzdf_tke_ref.txt "${cfgs[$name]}" > "${name}/stdout.txt"
+    ./run_tke "${name}" namzdf_tke_ref.txt "$(cfg_of "${name}")" > "${name}/stdout.txt"
     mv "${name}/tke-steps.csv" "tke-${name}.csv"
     outs+=("tke-${name}.csv")
 done

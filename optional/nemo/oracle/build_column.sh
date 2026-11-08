@@ -56,15 +56,18 @@ fi
 for nml in nameos namtra_qsr namzdf_tke namdrg namdrg_bot; do
     awk "/^&${nml} /,/^\\//" "${source_root}/cfgs/SHARED/namelist_ref"
 done > column_namelist_ref.txt
-declare -A cfgs=(
-    [teos10]='&nameos ln_teos10=.true. / &namtra_qsr ln_qsr_rgb=.false., ln_qsr_2bd=.true. / &namzdf_tke / &namdrg ln_non_lin=.true. / &namdrg_bot /'
-    [eos80]='&nameos ln_eos80=.true. / &namtra_qsr / &namzdf_tke nn_mxl=2, nn_etau=0 / &namdrg ln_loglayer=.true. / &namdrg_bot /'
-)
-declare -A qsr=([teos10]=T [eos80]=F)
+# a case, not an associative array: the script also runs under bash 3.2 (macOS)
+cfg_of() {
+    case "$1" in
+        teos10) echo '&nameos ln_teos10=.true. / &namtra_qsr ln_qsr_rgb=.false., ln_qsr_2bd=.true. / &namzdf_tke / &namdrg ln_non_lin=.true. / &namdrg_bot /' ;;
+        eos80)  echo '&nameos ln_eos80=.true. / &namtra_qsr / &namzdf_tke nn_mxl=2, nn_etau=0 / &namdrg ln_loglayer=.true. / &namdrg_bot /' ;;
+    esac
+}
+qsr_of() { case "$1" in teos10) echo T ;; eos80) echo F ;; esac; }
 outs=()
 for name in teos10 eos80; do
     mkdir -p "${name}"
-    ./run_column "${name}" column_namelist_ref.txt "${cfgs[$name]}" "${qsr[$name]}" > "${name}/stdout.txt"
+    ./run_column "${name}" column_namelist_ref.txt "$(cfg_of "${name}")" "$(qsr_of "${name}")" > "${name}/stdout.txt"
     for part in grid forcing steps surface; do
         mv "${name}/column-${part}.csv" "column-${name}-${part}.csv"
         outs+=("column-${name}-${part}.csv")
