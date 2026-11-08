@@ -135,8 +135,10 @@ Metal, and refuses what it does not port by name.
    rt_option = 1, `tests/test_wrf_hydro_overland_parity.py`), channel (`Routing/module_channel_routing.F90`:
    Muskingum and Muskingum-Cunge reach routing **done** in the opt-in,
    `tests/test_wrf_hydro_channel_parity.py`; the diffusive wave on nodes,
-   channel_option 3, **done** in the opt-in without lakes,
-   `tests/test_wrf_hydro_diffusive_parity.py`; the reservoirs remain), then the bucket baseflow (`module_GW_baseflow.F90`
+   channel_option 3, **done** in the opt-in with level-pool lakes
+   (`Reservoirs/Level_Pool/`), compiled as WRF-Hydro always is, with
+   MPP_LAND, on one process, `tests/test_wrf_hydro_diffusive_parity.py`; the
+   persistence and RFC-forecast reservoirs remain), then the bucket baseflow (`module_GW_baseflow.F90`
    simp_gw_buck, GWBASESWCRT 1 and 2: **done** in the opt-in,
    `tests/test_wrf_hydro_baseflow_parity.py`; 3 and 4 remain).
 5. **Configuration** (**done** in the opt-in: `woof_wrf_hydro.namelist`,
