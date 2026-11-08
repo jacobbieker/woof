@@ -24,7 +24,12 @@
 # are byte-identical between the two trees.
 
 noahmp_pins() {
-  _np_got=$(sha256sum "$1" | cut -d' ' -f1)
+  # sha256sum (GNU coreutils) where present, else shasum -a 256 (macOS).
+  if command -v sha256sum >/dev/null 2>&1; then
+    _np_got=$(sha256sum "$1" | cut -d' ' -f1)
+  else
+    _np_got=$(shasum -a 256 "$1" | cut -d' ' -f1)
+  fi
   case "$_np_got" in
     bd592a5b7db29000e715250e3a7c779ffb5e0dcc356f6b5a7d9e1c9f69c55282)
       NOAHMP_TREE=wrf-4.6.1

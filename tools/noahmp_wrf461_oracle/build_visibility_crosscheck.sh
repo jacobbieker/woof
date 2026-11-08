@@ -85,6 +85,10 @@ check_sha() {
 }
 
 check_sha "${PRISTINE_SHA}" "${lsm_source}" "pinned pristine module"
+# Stage 4 reads the driver's verdict, so the driver and the glacier module it
+# USEs must be the same pinned tree's, not just any file of that name.
+check_sha "${PRISTINE_DRV_SHA}" "${drv_source}" "pinned driver"
+check_sha "${PRISTINE_GLA_SHA}" "${glacier_source}" "pinned glacier module"
 check_sha "${PATCH_SHA}" "${patch_file}" "visibility patch"
 
 rm -rf "${build_dir}"
