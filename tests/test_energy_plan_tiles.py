@@ -770,8 +770,11 @@ def test_grell_parent_les_leaf_validates(wales):
     _, _, outdir = wales
     plan = load_plan(outdir / "plan.json")
     exp = load_experiment(outdir / plan.domain("parent").config)
+    # Grell shallow convection beside MYNN mass flux is refused as WRF's
+    # module_check_a_mundo.F refuses it, so this parent runs YSU.
     parent = {**dataclasses.asdict(exp.root.run), "cu_physics": 3,
-              "cudt_minutes": 0.0, "clos_choice": 1, "ishallow": 1}
+              "cudt_minutes": 0.0, "clos_choice": 1, "ishallow": 1,
+              "bl_pbl_physics": 1, "sf_sfclay_physics": 1}
     overrides = tiles.tile_overrides(parent, child_dx_m=100.0, leaf=True)
     merged = tiles._Pricer(24.0).derive(
         parent, parent_dx=500.0, ratio=5, nx=100, ny=100,

@@ -186,7 +186,7 @@ def test_log10_is_glibc_243_on_the_device():
     want = _cr_log10(x)
     dx = cp.asarray(x)
     dy = cp.empty_like(dx)
-    get_kernel("cldfra3", "cldfra3_log10_probe")(
+    get_kernel("cldfra3_wrf471", "cldfra3_log10_probe")(
         ((x.size + 255) // 256,), (256,), (np.int32(x.size), dx, dy))
     got = cp.asnumpy(dy)
     bad = np.flatnonzero(got.view(np.uint32) != want.view(np.uint32))

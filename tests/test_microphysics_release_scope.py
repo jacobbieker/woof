@@ -10,11 +10,8 @@ from woof.microphysics_schemes import NAMED_SCHEMES, resolve_mp_physics, scheme
 
 
 def test_tempo_is_the_only_named_microphysics_admitted():
-    # MAD-WRF's passive mp 96 (WRF v4.7.1 MADWRF_MP) is admitted by its own
-    # intake: woof/core/madwrf.py, held to compiled WRF in
-    # tests/test_madwrf_wrf471_oracle.py.
-    assert set(NAMED_SCHEMES) == {"tempo", "madwrf"}
-    assert scheme(96).name == "madwrf"
+    # 3.0 admits a second named port, CAM MG (mp=11, WRF's CAM5 MG).
+    assert set(NAMED_SCHEMES) == {"tempo", "cammgmp"}
     assert scheme(900).name == "tempo"
     assert 900 in MP_PHYSICS_ACCEPTED
     assert resolve_mp_physics("tempo") == 900
