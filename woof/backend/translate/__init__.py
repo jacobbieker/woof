@@ -1045,7 +1045,7 @@ class _Rewriter:
             self.edits.insert(at, f"{next(iter(spaces), default)} ", rank=-20_000)
 
     # -- goto
-    _LOOPS = ("FOR_STMT", "WHILE_STMT", "DO_STMT", "SWITCH_STMT")
+    _LOOPS = ("FOR_STMT", "WHILE_STMT", "DO_STMT", "CXX_FOR_RANGE_STMT", "SWITCH_STMT")
 
     def eliminate_gotos(self):
         """Gotos -> structured control flow (Metal has no goto).
@@ -1536,7 +1536,7 @@ class _Rewriter:
             if n.kind == K.CONTINUE_STMT:
                 out.append(n)
                 continue
-            if n.kind.name in ("FOR_STMT", "WHILE_STMT", "DO_STMT"):
+            if n.kind.name in ("FOR_STMT", "WHILE_STMT", "DO_STMT", "CXX_FOR_RANGE_STMT"):
                 continue                    # its own break and continue
             if n.kind == K.SWITCH_STMT:
                 switched = True
