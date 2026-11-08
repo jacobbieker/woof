@@ -4162,6 +4162,10 @@ def _validate_pbl_diagnostics(stored, header, state, driver) -> None:
 
 def _driver_manifest(driver) -> dict[str, object]:
     """Serialized driver arrays; enforces driver attribute coverage."""
+    if getattr(driver, "external_ocean", None) is not None:
+        raise RestartManifestError(
+            "restart of a run coupled to an external ocean is not ported: the "
+            "ocean's state and the coupling-interval average are not checkpointed")
     for name in sorted(vars(driver)):
         if (name not in DRIVER_SERIALIZED_ATTRS
                 and name not in DRIVER_REBUILT_ATTRS

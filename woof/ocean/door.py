@@ -80,6 +80,11 @@ def prepare_coupler(cfg):
 
 def attach_atmosphere(driver,cfg,*,latitude=None,longitude=None):
     if not getattr(cfg,"ocean_config",""):return
+    import tomllib
+    doc=tomllib.loads(Path(cfg.ocean_config).resolve().read_text())
+    if 'external_ocean' in doc:
+        attach_external_ocean(driver,cfg,doc,latitude=latitude)
+        return
     config=read_config(cfg.ocean_config)
     driver.ocean=prepare_coupler(config)
     if driver.fields['psfc'].shape!=driver.ocean.grid.shape:raise ValueError("ocean and atmosphere must share the prepared mass grid")
@@ -90,6 +95,26 @@ def attach_atmosphere(driver,cfg,*,latitude=None,longitude=None):
         if not bool(cp.allclose(a,target,atol=1.e-5,rtol=0.)):raise ValueError(f"ocean {name} differs from atmosphere grid")
     # The existing driver currently accepts only common-grid coupling. A
     # remapped ocean grid requires a Rust conservative map, never reshaping.
+
+def attach_external_ocean(driver,cfg,doc,*,latitude=None):
+    """WRF's external-ocean coupling (woof/ocean/external.py) on the mass grid."""
+    from . import external
+    if set(doc)-{'external_ocean'}:
+        raise ValueError("an external_ocean TOML carries no other ocean tables (waves/surge couple through [ocean])")
+    if latitude is None:
+        raise ValueError("external ocean coupling needs the atmosphere latitude")
+    if getattr(driver,"lake",None) is not None:
+        raise NotImplementedError("the lake model (lakemodel = 1) under an external ocean: sst_update's lake lines are not wired")
+    xice=driver.fields.get("xice")
+    if xice is not None and float(xice.max())>0.0:
+        raise NotImplementedError("sea ice under an SST-only external ocean: sst_update's ice transitions are not wired")
+    for name in ("sst","tsk","xland","qfx","gsw","glw","emiss","lh","hfx","ust"):
+        if name not in driver.fields:
+            raise NotImplementedError(f"external ocean coupling needs the surface field {name.upper()}, which this configuration does not carry")
+    config=external.read_config(doc,cfg.ocean_config)
+    shape=tuple(driver.fields["psfc"].shape)
+    driver.external_ocean=external.build(config,latitude=latitude,shape=shape,dt=float(cfg.dt))
+    driver.external_ocean.store_input(driver.fields["sst"])   # cpl_store_input, itimestep 1
 
 def native_binary():
     from woof import bridges
