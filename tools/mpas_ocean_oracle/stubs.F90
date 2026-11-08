@@ -7,8 +7,14 @@
 ! lookup of a name the driver did not put is a stop that names it.
 !
 ! The same name-lookup pool as tools/mpas_seaice_oracle/stubs.F90, with the
-! entry kinds the ocean routines also read: character and real configs, and
-! the 1-D dimension arrays (nCellsArray, nEdgesArray).
+! entry kinds the ocean routines also read: character and real configs, the
+! 1-D dimension arrays (nCellsArray, nEdgesArray, nVerticesArray), and the
+! scratch fields hmix del4 allocates (field2DReal, field3DReal).
+!
+! The operator modules (mpas_vector/matrix/tensor_operations) are USEd by the
+! hmix modules only for the tensor forms (config_use_mom_del2_tensor,
+! config_use_mom_del4_tensor), which these oracles do not drive: their
+! stand-ins stop by name if called.
 
 module mpas_pool_routines
   use mpas_kind_types
@@ -17,9 +23,23 @@ module mpas_pool_routines
   public :: MPAS_pool_type, mpas_pool_get_subpool, mpas_pool_get_array, &
             mpas_pool_get_dimension, mpas_pool_get_config, &
             stub_pool_put_subpool, stub_pool_put_array, &
-            stub_pool_put_dimension, stub_pool_put_config
+            stub_pool_put_dimension, stub_pool_put_config, &
+            field2DReal, field3DReal, mpas_pool_get_field, stub_pool_put_field, &
+            mpas_allocate_scratch_field, mpas_deallocate_scratch_field
 
   integer, parameter :: maxEntries = 64
+
+  ! a scratch field: the driver sets dimSizes, mpas_allocate_scratch_field
+  ! allocates array to them
+  type field2DReal
+    real(kind=RKIND), dimension(:,:), pointer :: array => null()
+    integer, dimension(2) :: dimSizes = 0
+  end type field2DReal
+
+  type field3DReal
+    real(kind=RKIND), dimension(:,:,:), pointer :: array => null()
+    integer, dimension(3) :: dimSizes = 0
+  end type field3DReal
 
   type pool_entry
     character(len=64) :: name = ''
@@ -34,6 +54,8 @@ module mpas_pool_routines
     logical, pointer :: l0 => null()
     character(len=StrKIND), pointer :: c0 => null()
     type(MPAS_pool_type), pointer :: sub => null()
+    type(field2DReal), pointer :: f2 => null()
+    type(field3DReal), pointer :: f3 => null()
   end type pool_entry
 
   type MPAS_pool_type
@@ -60,6 +82,22 @@ module mpas_pool_routines
   interface mpas_pool_get_array
     module procedure get_r0, get_r1, get_r2, get_r3, get_i1, get_i2
   end interface mpas_pool_get_array
+
+  interface mpas_pool_get_field
+    module procedure get_field_2d, get_field_3d
+  end interface mpas_pool_get_field
+
+  interface stub_pool_put_field
+    module procedure put_field_2d, put_field_3d
+  end interface stub_pool_put_field
+
+  interface mpas_allocate_scratch_field
+    module procedure allocate_scratch_2d, allocate_scratch_3d
+  end interface mpas_allocate_scratch_field
+
+  interface mpas_deallocate_scratch_field
+    module procedure deallocate_scratch_2d, deallocate_scratch_3d
+  end interface mpas_deallocate_scratch_field
 
   interface stub_pool_put_array
     module procedure put_r0, put_r1, put_r2, put_r3, put_i1, put_i2
@@ -258,6 +296,62 @@ contains
     pool % e(slot(pool, name)) % i2 => a
   end subroutine put_i2
 
+  subroutine get_field_2d(pool, name, f)
+    type(MPAS_pool_type), intent(in) :: pool
+    character(len=*), intent(in) :: name
+    type(field2DReal), pointer :: f
+    f => pool % e(find(pool, name)) % f2
+  end subroutine get_field_2d
+
+  subroutine get_field_3d(pool, name, f)
+    type(MPAS_pool_type), intent(in) :: pool
+    character(len=*), intent(in) :: name
+    type(field3DReal), pointer :: f
+    f => pool % e(find(pool, name)) % f3
+  end subroutine get_field_3d
+
+  subroutine put_field_2d(pool, name, f)
+    type(MPAS_pool_type), intent(inout) :: pool
+    character(len=*), intent(in) :: name
+    type(field2DReal), pointer :: f
+    pool % e(slot(pool, name)) % f2 => f
+  end subroutine put_field_2d
+
+  subroutine put_field_3d(pool, name, f)
+    type(MPAS_pool_type), intent(inout) :: pool
+    character(len=*), intent(in) :: name
+    type(field3DReal), pointer :: f
+    pool % e(slot(pool, name)) % f3 => f
+  end subroutine put_field_3d
+
+  ! The array is filled with huge(): a word the routine reads before it
+  ! writes it would show in the output.
+  subroutine allocate_scratch_2d(f, single_block_in, init_array_in)
+    type(field2DReal), pointer :: f
+    logical, intent(in), optional :: single_block_in, init_array_in
+    allocate(f % array(f % dimSizes(1), f % dimSizes(2)))
+    f % array = huge(1.0_RKIND)
+  end subroutine allocate_scratch_2d
+
+  subroutine allocate_scratch_3d(f, single_block_in, init_array_in)
+    type(field3DReal), pointer :: f
+    logical, intent(in), optional :: single_block_in, init_array_in
+    allocate(f % array(f % dimSizes(1), f % dimSizes(2), f % dimSizes(3)))
+    f % array = huge(1.0_RKIND)
+  end subroutine allocate_scratch_3d
+
+  subroutine deallocate_scratch_2d(f, single_block_in)
+    type(field2DReal), pointer :: f
+    logical, intent(in), optional :: single_block_in
+    deallocate(f % array)
+  end subroutine deallocate_scratch_2d
+
+  subroutine deallocate_scratch_3d(f, single_block_in)
+    type(field3DReal), pointer :: f
+    logical, intent(in), optional :: single_block_in
+    deallocate(f % array)
+  end subroutine deallocate_scratch_3d
+
 end module mpas_pool_routines
 
 module mpas_derived_types
@@ -320,3 +414,126 @@ contains
 
 end module mpas_timer
 
+
+module mpas_threading
+  implicit none
+  private
+  public :: mpas_threading_barrier
+
+contains
+
+  subroutine mpas_threading_barrier()
+    ! one thread
+  end subroutine mpas_threading_barrier
+
+end module mpas_threading
+
+module mpas_log
+  ! ocn_vel_pressure_grad_init logs the pressure-gradient type: an
+  ! informational line is dropped. An error or critical message stops,
+  ! as MPAS_LOG_CRIT aborts the model.
+  implicit none
+  private
+  public :: mpas_log_write, MPAS_LOG_ERR, MPAS_LOG_CRIT
+
+  integer, parameter :: MPAS_LOG_ERR = 3, MPAS_LOG_CRIT = 4
+
+contains
+
+  subroutine mpas_log_write(message, messageType)
+    character(len=*), intent(in) :: message
+    integer, optional, intent(in) :: messageType
+    if (present(messageType)) then
+      if (messageType == MPAS_LOG_ERR .or. messageType == MPAS_LOG_CRIT) then
+        print *, 'oracle stub: mpas_log_write: ', trim(message)
+        stop 7
+      end if
+    end if
+  end subroutine mpas_log_write
+
+end module mpas_log
+
+module mpas_vector_operations
+  use mpas_kind_types
+  use mpas_pool_routines
+  implicit none
+  private
+  public :: mpas_vector_R3Cell_to_normalVectorEdge, mpas_vector_R3Cell_to_2DEdge
+
+contains
+
+  subroutine mpas_vector_R3Cell_to_normalVectorEdge(vectorR3Cell, meshPool, includeHalo, normalVectorEdge)
+    real(kind=RKIND), dimension(:,:,:), intent(in) :: vectorR3Cell
+    type(MPAS_pool_type), intent(in) :: meshPool
+    logical, intent(in) :: includeHalo
+    real(kind=RKIND), dimension(:,:), intent(out) :: normalVectorEdge
+    print *, 'oracle stub: mpas_vector_R3Cell_to_normalVectorEdge is not compiled here'
+    stop 8
+  end subroutine mpas_vector_R3Cell_to_normalVectorEdge
+
+  subroutine mpas_vector_R3Cell_to_2DEdge(vectorR3Cell, meshPool, edgeTangentVectors, includeHalo, &
+                                          normalVectorEdge, tangentialVectorEdge)
+    real(kind=RKIND), dimension(:,:,:), intent(in) :: vectorR3Cell
+    type(MPAS_pool_type), intent(in) :: meshPool
+    real(kind=RKIND), dimension(:,:), intent(in) :: edgeTangentVectors
+    logical, intent(in) :: includeHalo
+    real(kind=RKIND), dimension(:,:), intent(out) :: normalVectorEdge, tangentialVectorEdge
+    print *, 'oracle stub: mpas_vector_R3Cell_to_2DEdge is not compiled here'
+    stop 8
+  end subroutine mpas_vector_R3Cell_to_2DEdge
+
+end module mpas_vector_operations
+
+module mpas_matrix_operations
+  use mpas_kind_types
+  use mpas_pool_routines
+  implicit none
+  private
+  public :: mpas_matrix_cell_to_edge
+
+contains
+
+  subroutine mpas_matrix_cell_to_edge(matrixCell, meshPool, includeHalo, matrixEdge)
+    real(kind=RKIND), dimension(:,:,:), intent(in) :: matrixCell
+    type(MPAS_pool_type), intent(in) :: meshPool
+    logical, intent(in) :: includeHalo
+    real(kind=RKIND), dimension(:,:,:), intent(out) :: matrixEdge
+    print *, 'oracle stub: mpas_matrix_cell_to_edge is not compiled here'
+    stop 8
+  end subroutine mpas_matrix_cell_to_edge
+
+end module mpas_matrix_operations
+
+module mpas_tensor_operations
+  use mpas_kind_types
+  use mpas_pool_routines
+  implicit none
+  private
+  public :: mpas_strain_rate_R3Cell, mpas_divergence_of_tensor_R3Cell
+
+contains
+
+  subroutine mpas_strain_rate_R3Cell(normalVelocity, tangentialVelocity, meshPool, edgeSignOnCell, &
+                                     edgeTangentVectors, includeHalo, outerProductEdge, strainRateR3Cell)
+    real(kind=RKIND), dimension(:,:), intent(in) :: normalVelocity, tangentialVelocity
+    type(MPAS_pool_type), intent(in) :: meshPool
+    integer, dimension(:,:), intent(in) :: edgeSignOnCell
+    real(kind=RKIND), dimension(:,:), intent(in) :: edgeTangentVectors
+    logical, intent(in) :: includeHalo
+    real(kind=RKIND), dimension(:,:,:), intent(out) :: outerProductEdge, strainRateR3Cell
+    print *, 'oracle stub: mpas_strain_rate_R3Cell is not compiled here'
+    stop 8
+  end subroutine mpas_strain_rate_R3Cell
+
+  subroutine mpas_divergence_of_tensor_R3Cell(strainRateR3Edge, meshPool, edgeSignOnCell, includeHalo, &
+                                              divTensorR3Cell)
+    real(kind=RKIND), dimension(:,:,:), intent(in) :: strainRateR3Edge
+    type(MPAS_pool_type), intent(in) :: meshPool
+    integer, dimension(:,:), intent(in) :: edgeSignOnCell
+    logical, intent(in) :: includeHalo
+    real(kind=RKIND), dimension(:,:,:), intent(out) :: divTensorR3Cell
+    print *, 'oracle stub: mpas_divergence_of_tensor_R3Cell is not compiled here'
+    stop 8
+  end subroutine mpas_divergence_of_tensor_R3Cell
+
+end module mpas_tensor_operations

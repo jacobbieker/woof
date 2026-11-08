@@ -1,5 +1,5 @@
 # MPAS-Model v8.4.2 (f34984b2c89353cf31c235b08d3b4acd96b37bb3) files the
-# ocean tendency oracle compiles verbatim.  build.sh refuses to build if any
+# ocean oracles (run_oracle, run_pgrad_hmix) compile verbatim.  build.sh refuses to build if any
 # differs from its pin.
 13db2ffce7d70f0c725913eb8c58c2e0b3fbdffb7bfe0c2ac77798e554127c51  src/framework/mpas_kind_types.F
 3fc1803087eadd55d0748953ebb059f871483fee5c6fa225da6e1da2e8de5849  src/core_ocean/shared/mpas_ocn_constants.F
@@ -7,3 +7,9 @@
 98ae0627cbfc83f27d8bc8d76e88860389e2c99a3d24eb9b71162e7c74dbe8b6  src/core_ocean/shared/mpas_ocn_vel_vadv.F
 d784347995b6dbcd25afa6d30187d5aa2e3fe367c373293a0dd973de26af285d  src/core_ocean/shared/mpas_ocn_thick_hadv.F
 5bce0d998acae27666ffef1bbe2ec428cd17cc8aa2418fbc3809cb1316fda847  src/core_ocean/shared/mpas_ocn_thick_vadv.F
+fa77a86b6d3e9041677ef1cdaf76fbcc172a50607874c80ace5085829ae7be31  src/framework/mpas_constants.F
+86e33fde3192733beb299dfe965fa82f9dbc4034ef9e5240df22ca3b8bb1d726  src/core_ocean/shared/mpas_ocn_vel_pressure_grad.F
+7996e871041bfac2736ed59711685b3b7cac6d87b786f32fb862c8ccf34a410d  src/core_ocean/shared/mpas_ocn_vel_hmix_del2.F
+ba8ab8d04451ebe6499f7e5ae1e88dc037130eddd2e6de522ec162ad095edc36  src/core_ocean/shared/mpas_ocn_vel_hmix_leith.F
+90d0057a466b5786d23e337e1483942d8a563191237d5c18634232ae788102d3  src/core_ocean/shared/mpas_ocn_vel_hmix_del4.F
+89711bab1fdf0a576c21aeac920b1ba49d063d0a16966180e7e48ba6a921f84f  src/core_ocean/shared/mpas_ocn_vel_hmix.F
