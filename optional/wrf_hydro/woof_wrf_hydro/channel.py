@@ -2,14 +2,19 @@
 """WRF-Hydro's reach channel routing on device (``channel.cu``).
 
 The reach branch of ``drive_CHANNEL`` (hydro/Routing/module_channel_routing.F90
-in WRF 4.6.1's hydro/) for channel_option 1 (Muskingum, ``MUSKING``) and 2
+in WRF 4.7.1's hydro/) for channel_option 1 (Muskingum, ``MUSKING``) and 2
 (Muskingum-Cunge, ``SUBMUSKINGCUNGE``): each call gathers the lateral inflow
 of every reach from its channel pixels (QSTRMVOLRT + QINFLOWBASE, or a lake
 pixel's LAKEINFLORT + QINFLOWBASE, as m3/s), then takes INT((DT+0.5)/DTRT_CH)
 substeps in which every reach routes its upstream reaches' previous-substep
-flows.  Reservoir reaches (TYPEL = 1) are left alone, as the reach branch
-leaves them; level-pool routing is not ported.  channel_option 3 (the
-diffusive wave on nodes) is :mod:`woof_wrf_hydro.diffusive`.
+flows.  A reservoir reach (TYPEL = 1) whose ``lake_lookup`` names a lake
+routes it through the reservoir (``lakes``, a
+:class:`~woof_wrf_hydro.levelpool.LevelPool`: level pool or pass-through) with
+its upstream inflow and no lateral inflow, recording RESHT, QLAKEI and QLAKEO,
+and then, as in WRF 4.7.1, takes the zero routed flow every reservoir reach
+holds; a TYPEL = 2 reach keeps its flow (the commit skips it).
+channel_option 3 (the diffusive wave on nodes) is
+:mod:`woof_wrf_hydro.diffusive`.
 
 The network is host data, read once to build the pixel and upstream lists:
 ``ch_lnkrt_sl`` and ``lake_mskrt`` (numpy (jxrt, ixrt)), ``chanxi``/``chanyj``
@@ -37,6 +42,7 @@ def _k(name):
         kernels = Path(__import__("woof.core.kernels", fromlist=["x"]).__file__).parent
         here = Path(__file__).resolve().parent
         source = ((kernels / "glibc_flt32.cuh").read_text(encoding="utf-8") + "\n"
+                  + (here / "levelpool.cu").read_text(encoding="utf-8") + "\n"
                   + (here / "channel.cu").read_text(encoding="utf-8"))
         _MODULE = cp.RawModule(code=source, options=("--fmad=false", "--ftz=false"))
     return _MODULE.get_function(name)
@@ -45,8 +51,10 @@ def _k(name):
 class ReachRouting:
     def __init__(self, *, channel_option, ch_lnkrt_sl, lake_mskrt, chanxi, chanyj, node_area,
                  linkid, to_node, nlinksl, typel, musk, musx, so, chanlen, mannn, chsslp,
-                 bw, tw, tw_cc, n_cc, channk):
+                 bw, tw, tw_cc, n_cc, channk, lakes=None, lake_lookup=None):
         import cupy as cp
+
+        from .levelpool import LevelPool
 
         if channel_option == 3:
             raise NotImplementedError("channel_option = 3 (the diffusive wave on nodes) is "
@@ -77,6 +85,15 @@ class ReachRouting:
         self._cell = d(cell.astype(np.int32))
         self.node_area = node_area
         self.props = (typel, musk, musx, so, chanlen, mannn, chsslp, bw, tw, tw_cc, n_cc, channk)
+        self.lakes = lakes if lakes is not None else LevelPool.empty()
+        lake_of = (np.full(self.nlinks, -1, np.int64) if lake_lookup is None
+                   else np.asarray(lake_lookup, np.int64).reshape(-1))
+        if lake_of.shape != (self.nlinks,):
+            raise ValueError("lake_lookup has one entry per link (0-based lake, < 0 for none)")
+        named = lake_of[lake_of >= 0]
+        if (named >= self.lakes.n).any() or len(set(named.tolist())) != len(named):
+            raise ValueError("lake_lookup names each level-pool lake at most once")
+        self._lake_of = d(np.where(lake_of >= 0, lake_of, -1).astype(np.int32))
         self._tmp = cp.zeros(self.nlinks, cp.float32)
         self._err = cp.zeros((1,), cp.int32)
 
@@ -94,7 +111,8 @@ class ReachRouting:
             _k("ch_reach")(g(self.nlinksl), (_TPB,), (
                 np.int32(self.option), self._ustart, self._ups, qlink1, qlink2, qlateral,
                 *self.props, np.float32(dtrt_ch), self._tmp, velocity, qloss, hlink,
-                self._err, np.int32(self.nlinksl)))
+                self._err, self._lake_of, self.lakes.props, self.lakes.lake_opt,
+                self.lakes.resht, self.lakes.qlakei, self.lakes.qlakeo, np.int32(self.nlinksl)))
             _k("ch_commit")(g(self.nlinksl), (_TPB,), (
                 typel, self._tmp, qlink1, qlink2, np.int32(self.nlinksl)))
         code = int(self._err.get()[0])

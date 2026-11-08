@@ -1,4 +1,4 @@
-"""WRF-Hydro diffusive-wave channel routing and level-pool reservoirs (the opt-in), bitwise against WRF 4.6.1's hydro/.
+"""WRF-Hydro diffusive-wave channel routing and level-pool reservoirs (the opt-in), bitwise against WRF 4.7.1's hydro/.
 
 drive_CHANNEL's channel_option = 3 branch with DIFFUSION and HEAD and its
 level-pool lakes, run by ``woof_wrf_hydro.diffusive`` and
@@ -81,6 +81,9 @@ def _lakes(mod):
 
 def test_unported_options_are_refused_by_name():
     mod = optin.load("wrf_hydro")
+    with pytest.raises(ValueError, match="lake_opt"):
+        mod.LevelPool(water_elevation=np.zeros(1), lake_opt=3,
+                      **{k: np.zeros(1) for k in mod.levelpool._PROPS})
     net, _, _ = _network()
     with pytest.raises(NotImplementedError, match="GWBASESWCRT = 3"):
         mod.DiffusiveWaveRouting(**net, retdep_chan=RETDEP, dtrt_ch=DTRT, gwbaseswcrt=3)
@@ -106,7 +109,9 @@ def test_level_pool_is_bitwise_against_wrf_hydro():
                          weir_length=f(first, "weir_len"), dam_length=f(first, "dam_len"),
                          orifice_elevation=f(first, "orifice_elev"),
                          orifice_coefficient=f(first, "orifice_coef"),
-                         orifice_area=f(first, "orifice_area"), max_depth=f(first, "max_depth"))
+                         orifice_area=f(first, "orifice_area"), max_depth=f(first, "max_depth"),
+                         lake_opt=np.array([int(r["lake_opt"]) for r in first]))
+    assert {int(r["lake_opt"]) for r in first} == {1, 2}       # level pool and pass-through
     for k in sorted(per):
         rs = per[k]
         pool.run(previous_inflow=f(rs, "qi0"), inflow=f(rs, "qi1"), lateral_inflow=f(rs, "ql"),

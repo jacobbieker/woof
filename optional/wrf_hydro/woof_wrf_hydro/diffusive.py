@@ -2,7 +2,7 @@
 """WRF-Hydro's diffusive-wave channel routing on nodes (``diffusive.cu``).
 
 The channel_option = 3 branch of ``drive_CHANNEL``
-(hydro/Routing/module_channel_routing.F90 in WRF 4.6.1's hydro/): each call
+(hydro/Routing/module_channel_routing.F90 in WRF 4.7.1's hydro/): each call
 doubles the routing step DTCT (bounded by 0.01 s and DTRT_CH), then takes
 INT(DT/DTCT) sub-steps.  A sub-step forms every regular node's lateral inflow
 from its pixel (QSTRMVOLRT + QINFLOWBASE, mm over DT, as m3/s), the
@@ -113,7 +113,7 @@ class DiffusiveWaveRouting:
             node_area=node_area, zelev=zelev, chanlen=chanlen, mannn=mannn, so=so,
             chsslp=chsslp, bw=bw).items()}
         self.retdep_chan, self.dtrt_ch = np.float32(retdep_chan), np.float32(dtrt_ch)
-        # module_namelist.F90:403: DTCT starts at DTRT_CH
+        # config.F90:828 (read_rt_nlst): DTCT starts at DTRT_CH
         self.dtct = cp.asarray(np.array([dtrt_ch if dtct is None else dtct], np.float32))
         self._work = [cp.zeros(n, cp.float32) for _ in range(4)]
         self._err = cp.zeros(1, cp.int32)
@@ -143,7 +143,7 @@ class DiffusiveWaveRouting:
             g["regular"], g["tstart"], g["tlist"], g["fstart"], g["flist"], hlink, cvol, qlink1,
             qlateral, *self._work, self.dtct, self._err, np.float32(dt), self.dtrt_ch,
             self.retdep_chan, np.int32(self.n), g["pour"], lakeinflort, g["lnstart"],
-            g["lnlist"], g["listart"], g["lilist"], L.props, L.resht, L.qlakei, L.qlakeo,
+            g["lnlist"], g["listart"], g["lilist"], L.props, L.lake_opt, L.resht, L.qlakei, L.qlakeo,
             *self._lakework, np.int32(L.n)))
         code = int(self._err.get()[0])
         if code:

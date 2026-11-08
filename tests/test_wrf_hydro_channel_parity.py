@@ -1,12 +1,13 @@
-"""WRF-Hydro reach channel routing (the opt-in), bitwise against WRF 4.6.1's hydro/.
+"""WRF-Hydro reach channel routing (the opt-in), bitwise against WRF 4.7.1's hydro/.
 
 drive_CHANNEL's reach branch with MUSKING and SUBMUSKINGCUNGE, run by
 ``woof_wrf_hydro.channel``.  The fixture is
 ``optional/wrf_hydro/oracle/build_channel.sh``: both routines and the reach
 block cut byte for byte from the pinned source, a 12-reach network fed by 60
 pixels (one in a lake), four Muskingum-Cunge calls then two Muskingum calls,
-with a compound channel that floods, Bw = Tw, Bw > Tw, Cs = 0, channel loss
-and a reservoir reach.  Every test skips, naming the opt-in rule, unless
+with a compound channel that floods, Bw = Tw, Bw > Tw, Cs = 0, channel loss,
+two reservoir reaches routing a level pool and a pass-through lake, and a
+TYPEL = 2 reach the commit skips.  Every test skips, naming the opt-in rule, unless
 ``WOOF_ENABLE_WRF_HYDRO=1``.
 """
 
@@ -41,7 +42,7 @@ def test_fixtures_are_the_ones_the_build_hashed():
     rows = (FIX / "channel-sha256sums.txt").read_text().splitlines()
     pinned = {line.split()[1]: line.split()[0] for line in rows}
     for name in ("channel-network.csv", "channel-pixels.csv", "channel-forcing.csv",
-                 "channel-steps.csv"):
+                 "channel-steps.csv", "channel-lakes.csv"):
         assert pinned[name] == hashlib.sha256((FIX / name).read_bytes()).hexdigest()
 
 
@@ -83,6 +84,21 @@ def test_reach_routing_is_bitwise_against_wrf_hydro():
                    for k in range(1, NLINKSL + 1)] + [0.0] * (NLINKS - NLINKSL), np.float32)
     state["qlink1"][:] = d(q0)
     state["qlink2"][:] = d(q0)
+    lakes_rows = _rows("channel-lakes.csv")
+    first = [r for r in lakes_rows if r["call"] == "0"]
+    lf = lambda key: np.array([np.float32(r[key]) for r in first])  # noqa: E731
+    pool = mod.LevelPool(water_elevation=lf("resht"), lake_area=lf("lake_area"),
+                         weir_elevation=lf("weir_elev"), weir_coefficient=lf("weir_coef"),
+                         weir_length=lf("weir_len"), dam_length=lf("dam_len"),
+                         orifice_elevation=lf("orifice_elev"),
+                         orifice_coefficient=lf("orifice_coef"), orifice_area=lf("orifice_area"),
+                         max_depth=lf("max_depth"),
+                         lake_opt=np.array([int(r["lake_opt"]) for r in first]))
+    lake_lookup = np.full(NLINKS, -1, np.int64)
+    for r in first:
+        lake_lookup[int(r["k"]) - 1] = int(r["lake"]) - 1
+    assert sorted(int(r["lake_opt"]) for r in first) == [1, 2]
+    assert sorted(typel[:NLINKSL].tolist()).count(1) == 2 and 2 in typel
     routers = {}
     for n in range(1, 7):
         opt = 2 if n <= 4 else 1
@@ -91,6 +107,7 @@ def test_reach_routing_is_bitwise_against_wrf_hydro():
                 channel_option=opt, ch_lnkrt_sl=ch, lake_mskrt=lake, chanxi=chanxi,
                 chanyj=chanyj, node_area=d(np.array([np.float32(r["node_area"]) for r in pix])),
                 linkid=linkid, to_node=to_node, nlinksl=NLINKSL, typel=d(typel),
+                lakes=pool, lake_lookup=lake_lookup,
                 **{k: d(f32(k)) for k in ("musk", "musx", "so", "chanlen", "mannn", "chsslp",
                                           "bw", "tw", "tw_cc", "n_cc", "channk")})
         planes = {k: np.zeros((JXRT, IXRT), np.float32) for k in ("qstrmvol", "qinflowbase", "lakeinflo")}
@@ -106,3 +123,7 @@ def test_reach_routing_is_bitwise_against_wrf_hydro():
                          ("qlateral", "qlateral"), ("velocity", "velocity"), ("qloss", "qloss")):
             got = cp.asnumpy(state[key])[:NLINKSL]
             assert np.array_equal(_bits(got), _bits([np.float32(r[col]) for r in want])), (n, key)
+        lk = [r for r in lakes_rows if r["call"] == str(n)]
+        for key, col in (("resht", "resht"), ("qlakei", "qlakei"), ("qlakeo", "qlakeo")):
+            got = cp.asnumpy(getattr(pool, key))
+            assert np.array_equal(_bits(got), _bits([np.float32(r[col]) for r in lk])), (n, key)

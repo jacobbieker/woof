@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build and run the Noah LSM oracle against the byte-unmodified WRF v4.6.1
+# Build and run the Noah LSM oracle against the byte-unmodified WRF v4.7.1
 # phys/module_sf_noahlsm.F and phys/module_sf_noahdrv.F.
 #
 # WHAT IS AND IS NOT STUBBED.  module_sf_noahlsm.F USEs module_model_constants
@@ -45,7 +45,7 @@ fi
 source_root=$(realpath "$1")
 build_dir=$(realpath -m "$2")
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-pinned_commit="d66e442fccc04111067e29274c9f9eaccc3cef28"
+pinned_commit="f52c197ed39d12e087d02c50f412d90d418f6186"
 
 sources=(
     share/module_model_constants.F
