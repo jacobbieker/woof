@@ -22,6 +22,8 @@ from pathlib import Path
 
 import numpy as np
 
+from ._compile import raw_module
+
 _TPB = 64
 _MODULE = None
 H = 2   # nn_hls (mppini.F90: nn_hls = MAX(2, nn_hls))
@@ -30,10 +32,8 @@ H = 2   # nn_hls (mppini.F90: nn_hls = MAX(2, nn_hls))
 def _module():
     global _MODULE
     if _MODULE is None:
-        import cupy as cp
-
         source = (Path(__file__).resolve().parent / "traadv.cu").read_text(encoding="utf-8")
-        _MODULE = cp.RawModule(code=source, options=("--fmad=false",))
+        _MODULE = raw_module(source, ("--fmad=false",))
     return _MODULE
 
 

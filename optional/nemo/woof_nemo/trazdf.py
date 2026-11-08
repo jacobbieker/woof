@@ -15,6 +15,8 @@ from pathlib import Path
 
 import numpy as np
 
+from ._compile import raw_module
+
 _TPB = 64
 _MODULE = None
 
@@ -22,10 +24,8 @@ _MODULE = None
 def _module():
     global _MODULE
     if _MODULE is None:
-        import cupy as cp
-
         source = (Path(__file__).resolve().parent / "trazdf.cu").read_text(encoding="utf-8")
-        _MODULE = cp.RawModule(code=source, options=("--fmad=false",))
+        _MODULE = raw_module(source, ("--fmad=false",))
     return _MODULE
 
 

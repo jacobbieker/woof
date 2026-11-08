@@ -1,4 +1,4 @@
-! Per-leaf oracle for the WRF v4.6.1 Noah-MP *thermal* group:
+! Per-leaf oracle for the WRF v4.7.1 Noah-MP *thermal* group:
 ! TSNOSOI, HRT, HSTEP, PHASECHANGE and FRH2O.
 !
 ! This is run_leaves.F90's method applied to a second, independently owned leaf
@@ -6,7 +6,7 @@
 ! *visibility-patched* module (patches/noahmp-lsm-leaf-visibility.patch,
 ! audited by check_visibility_patch.py before this file is compiled).  Apart
 ! from the 50 `private ::` -> `public ::` accessibility statements, the physics
-! source is the pinned WRF v4.6.1 file byte for byte.
+! source is the pinned WRF v4.7.1 file byte for byte.
 !
 ! Every leaf is driven as a pure function of a flat FP32 input vector `x` plus
 ! a small integer topology vector `ix`, producing a flat FP32 output vector

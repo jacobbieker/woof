@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build the Noah-MP *thermal* leaf oracle (TSNOSOI / HRT / HSTEP / PHASECHANGE
-# / FRH2O) against a visibility-patched SCRATCH COPY of the pinned WRF v4.6.1
+# / FRH2O) against a visibility-patched SCRATCH COPY of the pinned WRF v4.7.1
 # tree.
 #
 # This is build_leaves.sh's procedure applied to a second, independently owned
@@ -41,9 +41,13 @@ constants_source="${source_root}/share/module_model_constants.F"
 gecros_source="${source_root}/phys/module_sf_gecros.F"
 lsm_source="${source_root}/phys/module_sf_noahmplsm.F"
 
-PRISTINE_SHA=bd592a5b7db29000e715250e3a7c779ffb5e0dcc356f6b5a7d9e1c9f69c55282
-PATCHED_SHA=3cd3690d6455cfb8549cb41979b7e101e7436464c478f7f7973ab226488ac206
-PATCH_SHA=164885a9ce956a51be2ab189165da8b60217b636a720c994e04dfb862a05aad5
+# Pristine and patched digests come from whichever of the two pinned trees
+# (noahmp_pins.sh) the source carries; the patch file is the same for both,
+# because its hunks (lines 27-87) are byte-identical in the two trees.
+source "${script_dir}/noahmp_pins.sh"
+noahmp_pins "${lsm_source}"
+PRISTINE_SHA=${PRISTINE_LSM_SHA}
+PATCH_SHA=b16db586bbed70735b148618c794206ed0ff2988dfc8c9ee822b80added34a95
 
 for f in "${constants_source}" "${gecros_source}" "${lsm_source}" \
          "${patch_file}"; do
@@ -100,5 +104,6 @@ sha256sum "${constants_source}" "${gecros_source}" "${lsm_source}" \
     "${script_dir}/stub_wrf.F90" "${script_dir}/run_thermal.F90" \
     noahmp-thermal.csv noahmp-thermal-discrimination.csv \
     > thermal-oracle-sha256sums.txt
+noahmp_label_sums thermal-oracle-sha256sums.txt "${source_root}"
 gfortran --version | head -1 > compiler.txt
 cat thermal-oracle-sha256sums.txt compiler.txt
