@@ -37,7 +37,8 @@ by them is implied.
 | `woof_nemo/traqsr.cu`, `traqsr.py` | `src/OCE/TRA/traqsr.F90`: `tra_qsr` (MLF path), `qsr_2BD`, `qsr_ext_lev`, and the np_2BD lines of `tra_qsr_init`; constants from `src/OCE/DOM/phycst.F90` |
 | `woof_nemo/eos.cu`, `eos.py`, `eos_coeffs.py` | `src/OCE/TRA/eosbn2.F90`: `eos_insitu_pot_New_t` (non-stochastic), `rab_3d_t`, `bn2_t`, and `eos_init`'s TEOS-10 and EOS-80 coefficient tables (`eos_coeffs.py` is generated from the pinned file by `oracle/gen_eos_coeffs.py`, and `oracle/build_eos.sh` refuses a committed copy that differs) |
 | `woof_nemo/tke.cu`, `tke.py` | `src/OCE/ZDF/zdfsh2.F90` (zdf_sh2); `src/OCE/ZDF/zdftke.F90` (tke_tke, tke_avn, zdf_tke_init's constants and htau, tke_rst's start from rest); `cfgs/SHARED/namelist_ref` (&namzdf_tke defaults) |
-| `oracle/` | build harnesses, service stubs and drivers (`build.sh`, `build_eos.sh`, `build_tke.sh`); they compile the pinned files at build time and copy none of them |
+| `woof_nemo/trazdf.cu`, `trazdf.py` | `src/OCE/TRA/trazdf.F90` (tra_zdf, tra_zdf_imp) |
+| `oracle/` | build harnesses, service stubs and drivers (`build.sh`, `build_eos.sh`, `build_tke.sh`, `build_trazdf.sh`); they compile the pinned files at build time and copy none of them |
 
 `traqsr.cu` is preceded at load time by WOOF's
 `woof/core/kernels/glibc_flt64.cuh` (glibc's binary64 exp/log words, MIT

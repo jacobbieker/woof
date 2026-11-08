@@ -1,0 +1,9 @@
+d3eec4adcb9e3f11a29776adec9fdf92515e226998cfaf7060742b61b49a8b44  <nemo-5.0.2-checkout>/src/OCE/par_kind.F90
+cd7c446164d2813bb278130ba29cfaa103b736815d743b39c5748d4ccc7917ec  <nemo-5.0.2-checkout>/src/OCE/TRA/trazdf.F90
+7dc2bdf98ed47a275d72dfdd66f807cb370db34f7a51c780867702001e278c25  <nemo-5.0.2-checkout>/src/OCE/do_loop_substitute.h90
+fb18c1cb2d0baa3807a7b2d5be30f363349676cb79e23871467c25da09a03ba3  <nemo-5.0.2-checkout>/src/OCE/DOM/domzgr_substitute.h90
+cbf591286918e079e75ddbeb46945206eb61462f7b06b8e74a4d630343b1c157  /repo/optional<nemo-5.0.2-checkout>/oracle/trazdf_stubs.F90
+d8d05c0570234dd81f7d05292ee7ba1b3c3cf2a0913f039777fa4a7393983772  /repo/optional<nemo-5.0.2-checkout>/oracle/run_trazdf.F90
+607d59e0287b9d0ba2afe1733a21d08ee4aea0f9d82b5785f5ce299e9131d6d2  /repo/optional<nemo-5.0.2-checkout>/oracle/build_trazdf.sh
+cfa38c10f67317ce8e22ffe5e4df08e491752de9a7e5783f2d139061d2f775f3  trazdf-grid.csv
+8dca52f5751a81266f6b13b98ccd0d5686a9c2aec1252f990d7348676e37e2e6  trazdf-steps.csv
