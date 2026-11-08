@@ -152,9 +152,19 @@ Metal, and refuses what it does not port by name.
    (`eosbn2.F90`, TEOS-10/EOS-80/S-EOS, `tests/test_nemo_eos_parity.py`)
    and TKE vertical mixing (`zdfsh2.F90`, `zdftke.F90`, no sea ice,
    `tests/test_nemo_tke_parity.py`) and the implicit vertical diffusion of
-   T and S (`trazdf.F90`, `tests/test_nemo_trazdf_parity.py`); tracer
-   advection (traadv_fct and the other schemes), lateral diffusion and the
-   dynamics remain.  The
+   T and S (`trazdf.F90`, `tests/test_nemo_trazdf_parity.py`), and those
+   pieces stepped together as a coupled tracer column,
+   `woof_nemo.column.NemoColumnOcean`, which implements `ExternalOcean`:
+   stpmlf.F90's order with sbc_ssm, sbccpl.F90's `sbc_cpl_rcv` ocean-only
+   mapping of WRF's six fields, the bottom drag of `zdfdrg.F90`, `tra_sbc`,
+   `tra_atf_qco`'s Asselin filter and `sbc_cpl_snd`'s SST, word for word
+   against those files compiled whole (`oracle/build_column.sh`,
+   `tests/test_nemo_column_parity.py`, CUDA and Metal).  The column is an
+   ocean at rest on a z-coordinate, so it couples SST only (UOCE/VOCE are
+   zero); NEMO 5.0 runs with a two-cell halo (`mppini.F90`: `nn_hls =
+   MAX(2, nn_hls)`), which the column oracle uses and which does not reach
+   the interior columns.  Tracer advection (traadv_fct and the other
+   schemes), lateral diffusion and the dynamics remain.  The
    alternative is an external NEMO through a real coupler (out of
    process; NEMO stays a separate program and its licence does not reach
    WOOF), or, after the licence decision, NEMO kernels behind an opt-in with
