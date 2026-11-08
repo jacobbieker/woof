@@ -561,3 +561,7 @@ tests/data/assembled_legacy_proofs/loader-fold-source-replay.json
 # link the system netCDF C library at build time. Development evidence for the module replays, not product
 # (2.9.10 pass 1 R3 and R4). The crate's own tests ship.
 tools/rustwx/crates/rw-mpas/tests/rrfs_native/**
+
+# Opt-in ports under licences the release cannot carry (woof/optin.py):
+# WRF-Hydro routing, UCAR's WRF-Hydro licence (no sale or transfer for a fee).
+optional/wrf_hydro/**

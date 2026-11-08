@@ -12,7 +12,25 @@ remaining step needs.
 | Noah LSM built with `-DWRF_HYDRO`: ponded head `sfcheadrt` in; infiltration excess `infxsrt` and soil drainage `soldrain` out; the NDHMS edits to SMFLX, SRT and SSTEP | WRF 4.6.1 `phys/module_sf_noahdrv.F`, `phys/module_sf_noahlsm.F` (public domain) | `launch_noah(wrf_hydro=...)` -> `noah_column_hydro` (`woof/core/kernels/noah.cu`) | `tests/test_noah_wrf_hydro_parity.py`: 0 ULP in every field on CUDA (sm_86) and Metal (M3 Max), default and strict numerics |
 | WRF's side of the OASIS coupling with an ocean model: `cpl_snd2` (EVAP-PRECIP, SURF_NET_SOLAR, SURF_NET_NON-SOLAR, TAUX, TAUY, TAUMOD) and `cpl_rcv` (SST, UOCE, VOCE merged under CPLMASK) | WRF 4.6.1 `frame/module_cpl.F` (public domain) | `woof/ocean/wrf_cpl.py`, `woof/ocean/wrf_cpl.cu` | `tests/test_wrf_cpl_wrf461_parity.py` (pending: #159) |
 
-Nothing of WRF-Hydro's routing or of NEMO is in the tree.
+| WRF-Hydro subsurface routing (`rt_option = 1`): FINDZWAT, ROUTE_SUBSURFACE1 with GETSUB8, SUBSFC_RTNG | WRF 4.6.1 `hydro/Routing/Noah_distr_routing_subsurface.F90`, `Noah_distr_routing.F90` (UCAR WRF-Hydro licence) | **opt-in**: `optional/wrf_hydro/` via `woof.optin.load("wrf_hydro")` with `WOOF_ENABLE_WRF_HYDRO=1` | `tests/test_wrf_hydro_subsurface_parity.py`: six routing calls bitwise on CUDA and Metal; skips by named rule when the opt-in is off |
+
+## Decision (2026-11-07)
+
+The project owner approved both licence questions below: WRF-Hydro routing
+(UCAR licence, no sale) and NEMO kernels (CeCILL v2.0) may enter the tree
+**only as explicit opt-ins**, treated like the LGPL glibc 2.39 libm port and
+`cuda_powf.cuh`.  For each opt-in:
+
+* the source lives under `optional/<name>/`, outside every Python package,
+  with its licence text (`LICENSE`) and attribution (`NOTICE.md`) beside it;
+* it is off by default and loads only through `woof.optin.load(name)` when its
+  environment variable is set (`WOOF_ENABLE_WRF_HYDRO=1`) in a source checkout;
+* it is in neither published wheel (`recast-woof`, `metal-woof`):
+  `tests/test_optin_wheel_contents.py` asks setuptools what each wheel would
+  contain and fails on any file under `optional/`, any `WOOF-OPTIN:` marked
+  file, or the opt-in's licence text; it is also excluded from the release
+  snapshot (`RELEASE-EXCLUDE.txt`);
+* its tests skip, naming the opt-in rule, when it is off.
 
 ## The 2026-11-06 drafts
 
@@ -60,13 +78,12 @@ Apache-2.0 distribution cannot promise its recipients.  Two further facts:
   about those adaptations, not a provenance statement for the whole tree.  The NextGen hydrology
   stack (t-route Muskingum-Cunge, CFE, Noah-OWP) is the upstream replacement.
 
-So a port of WRF-Hydro's routing is at best an opt-in in the sense the fork
+So a port of WRF-Hydro's routing could only be an opt-in in the sense the fork
 uses for the glibc 2.39 libm (#145): source in a separately licensed directory
 outside every package, built only by an explicit task, excluded from the
 wheels and the release export.  Unlike LGPL it would also bar anyone from
-selling a copy of the repository that contains it.  **This is a decision for
-the project owner**, not one a worker should take, so no WRF-Hydro code has
-been added.
+selling a copy of the repository that contains it.  The project owner
+decided for the opt-in (above).
 
 **NEMO**, `https://forge.nemo-ocean.eu/nemo/nemo.git`, tag `5.0.2` (commit
 `dcc7fb8c1779fa8409e41e4ce3ab7d45b9ceb796`), `LICENSE` sha256
@@ -82,8 +99,8 @@ whole.  Keeping such kernels in the repository is permissible as separately
 licensed files that no default build compiles; shipping them is not
 compatible with the Apache-2.0 wheels.  The opt-in shape would therefore be
 the #145 one, with the extra condition that an opt-in build is never
-redistributed except under CeCILL/GPL.  **Also a decision for the project
-owner**; the NEMO side stops at WRF's exchange contract until then.
+redistributed except under CeCILL/GPL.  The project owner decided for the
+opt-in (above), with that condition.
 
 **OASIS3-MCT** (the coupler WRF and NEMO use) is LGPL-3.0.  Nothing of it is
 used: WOOF's coupling-interval averaging is its own and on-grid only.
@@ -93,7 +110,7 @@ used: WOOF's coupling-interval averaging is its own and on-grid only.
 Each step is one PR under 300 files, held to a compiled oracle, CUDA and
 Metal, and refuses what it does not port by name.
 
-### WRF-Hydro (steps 3-5 need the licence decision; step 2 is WRF code)
+### WRF-Hydro (steps 3-5 go in the opt-in; step 2 is WRF code)
 
 1. **Done**: the LSM side of the exchange for Noah (`sf_surface_physics=2`).
 2. **Noah-MP under WRF_HYDRO** (WRF code, no licence question):
@@ -108,8 +125,8 @@ Metal, and refuses what it does not port by name.
    `disaggregate` between the LSM grid and the routing grid (`AGGFACTRT`),
    the soil-moisture and head hand-back.  WRF-Hydro code.
 4. **Routing**, in this order, each from the pinned WRF-Hydro source with its
-   own oracle: subsurface (`Routing/Noah_distr_routing_subsurface.F90`),
-   overland (`Routing/Overland/`), channel (`Routing/module_channel_routing.F90`:
+   own oracle: subsurface (`Routing/Noah_distr_routing_subsurface.F90`,
+   **done** in the opt-in), overland (`Routing/Overland/`), channel (`Routing/module_channel_routing.F90`:
    Muskingum-Cunge first, then the diffusive wave), then the bucket baseflow.
 5. **Configuration**: `hydro.namelist` (`SUBRTSWCRT`, `OVRTSWCRT`,
    `CHANRTSWCRT`, `channel_option`, `rt_option`, `GWBASESWCRT`, `DXRT`,
