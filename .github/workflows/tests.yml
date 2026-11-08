@@ -1,7 +1,8 @@
 name: tests
 
-# Tests every push and pull request.  docs/dev/ci.md says what each job proves
-# and what none of them covers (the big-card tier, the byte-pinned assets).
+# Tests every push to main and every pull request.  docs/dev/ci.md says what
+# each job proves and what none of them covers (the big-card tier, the
+# byte-pinned assets).
 #
 # Every environment is a pixi environment from the committed pixi.lock
 # (locked: true): cpu on Linux and macOS, mlx on macOS, default (CUDA 12) on
@@ -14,8 +15,15 @@ name: tests
 # against a different workflow.
 
 on:
+  # A branch push runs nothing by itself: its pull request's run tests the
+  # branch merged into its base, and the two runs together doubled every
+  # PR's queue (13 macOS jobs each), which starved publish-metal's macOS
+  # build.  A branch with no pull request is run by hand (workflow_dispatch).
   push:
+    branches: [main]
   pull_request:
+    # labeled: adding the macos-ci label runs the macOS jobs (see changes).
+    types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
 
 permissions:
@@ -37,6 +45,46 @@ env:
   # and help text the CLI tests compare as plain words.
 
 jobs:
+  # Whether this run takes the macOS jobs (native-macos, the ten mlx legs,
+  # the metal probe and gates).  The account's concurrent macOS jobs are
+  # few, every one of them also builds publish-metal's wheel, and a pull
+  # request's 13 macOS jobs queued every release behind them.  Pushes to
+  # main and manual runs take them all; a pull request takes them when it
+  # changes the Metal backend, the translator, the pixi environments or the
+  # CI helpers (.github/ci), or carries the macos-ci label.
+  changes:
+    name: changes (does this run take the macOS jobs?)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      macos: ${{ steps.decide.outputs.macos }}
+    steps:
+      - id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          PR: ${{ github.event.pull_request.number }}
+          LABELLED: ${{ contains(github.event.pull_request.labels.*.name, 'macos-ci') }}
+        run: |
+          if [ "$EVENT" != pull_request ]; then
+            macos=true; why="a $EVENT run takes every job"
+          elif [ "$LABELLED" = true ]; then
+            macos=true; why="the pull request carries the macos-ci label"
+          else
+            hits=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" -q '.[].filename' \
+              | grep -E '^(woof/backend/|tools/metal_|tools/f64_soft|tests/test_metal_|pixi\.(toml|lock)$|\.github/ci/)' || true)
+            if [ -n "$hits" ]; then
+              macos=true; why="it changes $(echo "$hits" | wc -l) Metal, translator, environment or CI-helper file(s): $(echo "$hits" | head -5 | tr '\n' ' ')"
+            else
+              macos=false; why="it changes no Metal, translator, environment or CI-helper file and has no macos-ci label"
+            fi
+          fi
+          echo "macos=$macos" >> "$GITHUB_OUTPUT"
+          echo "macOS jobs: $macos ($why)" | tee -a "$GITHUB_STEP_SUMMARY"
+
   lint:
     name: lint
     runs-on: ubuntu-24.04
@@ -177,6 +225,8 @@ jobs:
   # ---------------------------------------------------------------- macOS
   native-macos:
     name: native (macos-15)
+    needs: changes
+    if: needs.changes.outputs.macos == 'true'
     runs-on: macos-15
     timeout-minutes: 150
     steps:
@@ -218,7 +268,10 @@ jobs:
     name: macos (macos-15, mlx env, ${{ matrix.leg }})
     needs: native-macos
     runs-on: macos-15
-    timeout-minutes: 240
+    # The longest leg ran 81 min (leg 4, 2026-11-06); a leg that reaches
+    # 150 is hung, and holding one of the few macOS slots for 240 starved
+    # the rest of the queue.
+    timeout-minutes: 150
     strategy:
       fail-fast: false
       matrix:
@@ -282,6 +335,8 @@ jobs:
 
   metal-probe:
     name: metal probe + device-free translator checks (macos-15)
+    needs: changes
+    if: needs.changes.outputs.macos == 'true'
     runs-on: macos-15
     timeout-minutes: 60
     outputs:

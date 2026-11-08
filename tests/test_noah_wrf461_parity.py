@@ -313,6 +313,7 @@ def _call_argument_lists(source: str, callee: str) -> list[list[str]]:
     the rest are the call sites.
     """
     out: list[list[str]] = []
+    # ``noah_smflx<HYDRO, IRRIGATION>(`` is a call too: the arms template it.
     for match in re.finditer(rf"\b{re.escape(callee)}\s*(?:<[^<>]+>\s*)?\(", source):
         depth, j = 1, match.end()
         while depth:

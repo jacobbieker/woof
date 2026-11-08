@@ -2382,6 +2382,10 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     "chem_seasalt": 0,
     "chem_settling": 0,
     "chem_sulfur": 32,
+    # RADM2 gas phase: 1,040 B on sm_86 at NVRTC 13.4.92 (2026-11-08).
+    "chem_radm2": 1040,
+    # MADE/SORGAM: 672 B on sm_86 at NVRTC 13.4.92 (2026-11-08).
+    "chem_sorgam": 672,
     # WRF-Chem's Wesely gas dry deposition (development branch): 0 B on sm_120 and
     # sm_89 at NVRTC 13.4.92 (read 2026-09-30, RTX 5090 and RTX 4090).
     "chem_drydep_wesely": 0,
