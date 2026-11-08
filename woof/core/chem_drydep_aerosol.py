@@ -172,8 +172,12 @@ def step(ctx, dt, ktau):
         pbl=ctx.met("pblh"), dt=float(dt), chem_opt=cache["arm"],
         # WRF's global mass-point indices: the loop excludes the domain's
         # first row and column (i = max(ids+1,its) .. min(ide-1,ite) with
-        # ide the staggered end, chem/module_gocart_drydep.F:88-89).
-        domain_extent=(1, nx + 1, 1, ny + 1), tile_origin=(1, 1),
+        # ide the staggered end, chem/module_gocart_drydep.F:88-89).  A
+        # column state with no domain edge (the hex mesh's ny = 1 columns,
+        # woof.hex.chem_wrf) has every column interior.
+        domain_extent=((0, nx + 1, 0, ny + 1)
+                       if getattr(chem, "no_domain_edge", False)
+                       else (1, nx + 1, 1, ny + 1)), tile_origin=(1, 1),
         accumulators=[drydep[i] if f else None
                       for i, f in enumerate(cache["is_dust"])],
         ddvel=ctx.diag["drydepvel"], aer_res=ctx.diag["drydep_aer_res"],
