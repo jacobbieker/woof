@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Build and run the WRF-Hydro overland routing oracle (OverlandRouting,
-# OV_RTNG, ROUTE_OVERLAND1 with GETMAX8DIR/GET8DIR) from the WRF-Hydro tree
+# OV_RTNG, ROUTE_OVERLAND1 with GETMAX8DIR/GET8DIR, and ROUTE_OVERLAND2)
+# from the WRF-Hydro tree
 # WRF 4.7.1 ships under hydro/.  Part of the WRF-Hydro opt-in (see
 # ../LICENSE): the pinned source is read at build time and none of it is
 # copied into the tree.  Pin check, byte-for-byte cuts with pinned lengths,
@@ -63,6 +64,7 @@ sha256sum "${sources[@]/#/${source_root}/}" getmax8dir.inc \
     "${script_dir}/overland_harness.F90" "${script_dir}/run_overland.F90" \
     "${script_dir}/build_overland.sh" \
     overland-inputs.csv overland-steps.csv overland-totals.csv \
+    overland2-inputs.csv overland2-steps.csv overland2-totals.csv \
     | sed "s#${source_root}/#<wrf-4.7.1-checkout>/#; s#${script_dir}/#<oracle-workspace>/optional/wrf_hydro/oracle/#" \
     > overland-sha256sums.txt
 echo "oracle built in ${build_dir}"
