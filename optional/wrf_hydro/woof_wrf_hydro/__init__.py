@@ -8,6 +8,7 @@ from .subsurface import SubsurfaceRouting, SubsurfaceState  # noqa: F401
 from . import grid_transform  # noqa: F401
 from .overland import OverlandRouting, OverlandState  # noqa: F401
 from .channel import ReachRouting  # noqa: F401
+from .diffusive import DiffusiveWaveRouting  # noqa: F401
 from .baseflow import GroundwaterBucket  # noqa: F401
 from . import namelist  # noqa: F401
 

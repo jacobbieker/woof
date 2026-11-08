@@ -152,9 +152,7 @@ def map_hydro_nlist(groups: dict[str, dict]) -> HydroConfig:
         refuse("rt_option", rt_option, "only rt_option = 1 (steepest descent) is ported")
     channel = int(nl.get("chanrtswcrt", 0)) == 1
     channel_option = int(nl.get("channel_option", 3))
-    if channel and channel_option == 3:
-        refuse("channel_option", 3, "the diffusive wave on nodes is not ported (1 and 2 are)")
-    if channel and channel_option not in (1, 2):
+    if channel and channel_option not in (1, 2, 3):
         raise ValueError(f"channel_option = {channel_option} is not a WRF-Hydro option")
     gw = int(nl.get("gwbaseswcrt", 0))
     if gw == 3:
