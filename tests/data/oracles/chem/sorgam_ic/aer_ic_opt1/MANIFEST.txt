@@ -1,0 +1,4 @@
+sulf0 f4 3 4 31 2
+convfac f4 3 4 31 2
+z_at_w f4 3 4 31 2
+chem f4 4 4 31 2 81

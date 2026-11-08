@@ -115,6 +115,18 @@
 #define SG_VSULF 44
 #define SG_NP 8
 #define SG_CONMIN 1.00000002e-16f
+#define SG_SO4FAC 1.06103288e-12f
+#define SG_NH4FAC 1.06103288e-12f
+#define SG_NO3FAC 1.06103288e-12f
+#define SG_NAFAC 8.68117806e-13f
+#define SG_CLFAC 8.68117806e-13f
+#define SG_ORGFAC 1.90985921e-12f
+#define SG_ANTHFAC 8.68117806e-13f
+#define SG_SOILFAC 7.34561229e-13f
+#define SG_SEASFAC 8.68117806e-13f
+#define SG_DGININ3 1.00000002e-24f
+#define SG_DGINIA3 3.42999978e-22f
+#define SG_DGINIC3 9.99999942e-19f
 struct SorgamModule {
     float ccofm;
     float ccofm_org;
@@ -2342,5 +2354,85 @@ extern "C" __global__ void chem_sorgam_sum_pm(
     pm25_water[idx] = FDIV(water, alt[src]);
     pm10[idx] = FADD(dry, FDIV(FADD(FADD(((const float*)aer[32])[src], ((const float*)aer[34])[src]),
                                    ((const float*)aer[33])[src]), alt[src]));
+}
+
+// aerosols_sorgam_init past its chem_in_opt = 1 return
+// (module_aerosols_sorgam.F:7525-7600) for one cell: the aerosol rows'
+// initial values and the three modal numbers.  aer_ic_opt 1 (AER_IC_DEFAULT)
+// splits the gas sulfate into the two modes; 101 (AER_IC_PNNL) is
+// sorgam_init_aer_ic_pnnl's height profile (:7618-7765) at the layer's mid
+// height.  sulf is the gas row (ppmv, updated in place); convfac is the
+// caller's p/(R T) the routine receives; z_at_w has nz + 1 w levels.
+__device__ void sg_ic_pnnl(float *c, float &sulf, float z) {
+    const float conmin = SG_CONMIN;
+    float mult;
+    if (z <= 500.f) mult = 1.0f;
+    else if (z > 500.f && z <= 1000.f) mult = FSUB(1.0f, FMUL(0.001074f, FSUB(z, 500.f)));
+    else if (z > 1000.f && z <= 5000.f) mult = FSUB(0.463f, FMUL(0.000111f, FSUB(z, 1000.f)));
+    else mult = 0.019f;
+    sulf = FMUL(mult, conmin);
+    c[0] = FMUL(FMUL(mult, 0.300f), 0.97f); c[1] = FMUL(FMUL(mult, 0.300f), 0.03f);
+    c[2] = FMUL(FMUL(mult, 0.094f), 0.97f); c[3] = FMUL(FMUL(mult, 0.094f), 0.03f);
+    c[4] = FMUL(FMUL(mult, 0.001f), 0.97f); c[5] = FMUL(FMUL(mult, 0.001f), 0.03f);
+    c[6] = 10.E-05f; c[7] = 10.E-05f; c[8] = 10.E-05f; c[9] = 10.E-05f;
+    c[28] = FMUL(FMUL(mult, 0.013f), 0.97f); c[29] = FMUL(FMUL(mult, 0.013f), 0.03f);
+    c[30] = FMUL(FMUL(mult, 4.500f), 0.97f); c[31] = FMUL(FMUL(mult, 4.500f), 0.03f);
+    c[32] = FDIV(FMUL(mult, 4.500f), 2.0f);
+    c[26] = FMUL(FMUL(mult, 0.088f), 0.97f); c[27] = FMUL(FMUL(mult, 0.088f), 0.03f);
+    for (int l = 10; l < 26; ++l) c[l] = conmin;
+    c[33] = FMUL(mult, 1.75f);
+}
+
+extern "C" __global__ void chem_sorgam_ic(
+    const unsigned long long* aer, float* sulf, const float* convfac, const float* z_at_w,
+    int nz, int nc, int aer_ic_opt, int* fatal) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= nz * nc) return;
+    const int k = idx / nc, col = idx % nc;
+    SorgamModule mod;
+    sg_sorgam_module_constants(mod);
+    float c[38];
+    for (int l = 0; l < 38; ++l) c[l] = 1.E-16f;            // :7526-7528
+    c[35] = 1.e8f; c[36] = 1.e8f;                            // :7529-7530
+    float s = sulf[idx];
+    if (aer_ic_opt == 1) {                                   // AER_IC_DEFAULT
+        const float mwso4 = 96.03f, splitfac = .98f, so4vaptoaer = .999f;
+        const float base = FMUL(FMUL(s, convfac[idx]), mwso4);
+        c[0] = FMUL(FMUL(base, splitfac), so4vaptoaer);
+        c[1] = FMUL(FMUL(base, FSUB(1.f, splitfac)), so4vaptoaer);
+        s = FMUL(s, FSUB(1.f, so4vaptoaer));
+        for (int l = 2; l < 10; ++l) c[l] = 10.E-05f;
+    } else if (aer_ic_opt == 101) {                          // AER_IC_PNNL
+        const float zz = FMUL(FADD(z_at_w[k * nc + col], z_at_w[(k + 1) * nc + col]), 0.5f);
+        sg_ic_pnnl(c, s, zz);
+    } else {
+        *fatal = 7550;                                       // wrf_error_fatal
+        return;
+    }
+    // :7555-7590.  Aitken rows are the odd indices 1..31, accumulation the even.
+    float m3nuc = FMUL(SG_SO4FAC, c[1]);
+    m3nuc = FADD(m3nuc, FMUL(SG_NH4FAC, c[3]));
+    m3nuc = FADD(m3nuc, FMUL(SG_NO3FAC, c[5]));
+    m3nuc = FADD(m3nuc, FMUL(SG_NAFAC, c[7]));
+    m3nuc = FADD(m3nuc, FMUL(SG_CLFAC, c[9]));
+    for (int l = 11; l <= 27; l += 2) m3nuc = FADD(m3nuc, FMUL(SG_ORGFAC, c[l]));
+    m3nuc = FADD(m3nuc, FMUL(SG_ANTHFAC, c[31]));
+    m3nuc = FADD(m3nuc, FMUL(SG_ANTHFAC, c[29]));
+    float m3acc = FMUL(SG_SO4FAC, c[0]);
+    m3acc = FADD(m3acc, FMUL(SG_NH4FAC, c[2]));
+    m3acc = FADD(m3acc, FMUL(SG_NO3FAC, c[4]));
+    m3acc = FADD(m3acc, FMUL(SG_NAFAC, c[6]));
+    m3acc = FADD(m3acc, FMUL(SG_CLFAC, c[8]));
+    for (int l = 10; l <= 26; l += 2) m3acc = FADD(m3acc, FMUL(SG_ORGFAC, c[l]));
+    m3acc = FADD(m3acc, FMUL(SG_ANTHFAC, c[30]));
+    m3acc = FADD(m3acc, FMUL(SG_ANTHFAC, c[28]));
+    float m3cor = FMUL(SG_SOILFAC, c[34]);
+    m3cor = FADD(m3cor, FMUL(SG_SEASFAC, c[33]));
+    m3cor = FADD(m3cor, FMUL(SG_ANTHFAC, c[32]));
+    c[35] = FDIV(m3nuc, FMUL(SG_DGININ3, mod.esn36));
+    c[36] = FDIV(m3acc, FMUL(SG_DGINIA3, mod.esa36));
+    c[37] = FDIV(m3cor, FMUL(SG_DGINIC3, mod.esc36));
+    for (int l = 0; l < 38; ++l) ((float*)aer[l])[idx] = c[l];
+    sulf[idx] = s;
 }
 
