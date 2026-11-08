@@ -287,6 +287,18 @@ def test_uncarried_chemistry_package_is_refused_with_the_menu(tmp_path):
     assert "chem_opt = 300 (gocart_simple)" in message
     assert "chem_opt = 401 (dust)" in message
     assert "none of the requested species" in message
+    assert "RADM2SORG (the RADM2 gas phase with the MADE/SORGAM aerosol) is being ported" in message
+
+
+def test_cbmz_mosaic_packages_are_refused_naming_their_terms(tmp_path):
+    for value, name in ((9, "CBMZ_MOSAIC_4BIN_AQ"), (120, "CBMZ_BB_KPP"),
+                        (170, "CBMZ_MOSAIC_KPP")):
+        with pytest.raises(NamelistRefusal) as caught:
+            _import(tmp_path, _with_chem(f" chem_opt = {value}, {value},\n"))
+        message = str(caught.value)
+        assert f"chem_opt = {value} is not carried" in message
+        assert f"{name} is built on CBM-Z/MOSAIC" in message
+        assert "Battelle/PNNL terms of use" in message
 
 
 def test_per_domain_chemistry_switch_is_refused(tmp_path):

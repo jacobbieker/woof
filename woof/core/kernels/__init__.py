@@ -157,6 +157,10 @@ _EXTRA_HEADERS: dict[str, tuple[str, ...]] = {
     "chem_settling": ("glibc_flt32.cuh",),
     "chem_drydep_gocart": ("glibc_flt32.cuh",),
     "chem_optics": ("glibc_flt32.cuh",),
+    # RADM2 gas phase (chem_opt = 1/2), graded word for word against the
+    # WRF v4.6.1 column oracle (tests/test_chem_radm2_wrf461_parity.py):
+    # WOOF's glibc 2.39 float32 expf/powf and log10f.
+    "chem_radm2": ("glibc_flt32.cuh", "glibc_flt32_extra.cuh"),
     # The mp=28 units evaluate WRF's EXP/LOG/LOG10/** through WOOF's own
     # float32 and binary64 libm words (thompson_aerosol_libm.cuh),
     # measured equal to the gfortran oracle host's words; CUDA's
@@ -984,7 +988,8 @@ def module_options(name: str) -> tuple[str, ...]:
         from woof.numerics import is_strict
         return (("-std=c++17", "--fmad=false", "--ftz=false") if is_strict()
                 else ("-std=c++17", "--fmad=true", "--ftz=false"))
-    if name in ("noah_ua", "noah_mosaic_ua", "noah_ua_sfcdiags", "noah_seaice_options", "noah_fractional", "sfclay_dx2d"):
+    if name in ("noah_ua", "noah_mosaic_ua", "noah_ua_sfcdiags", "noah_seaice_options", "noah_fractional", "sfclay_dx2d",
+                "chem_radm2"):
         return ("-std=c++17", "--fmad=false", "--ftz=false")
     if name == "eeps":
         from woof.wrf_exact import ENABLED
@@ -1493,7 +1498,8 @@ def load_module(name: str):
     if name in _NO_FTZ_MODULES or name in {"mskf", "mskf_aerosol_replay"}:
         return compile_noftz_module(name, src, f"{MODULE_KEY_ROOT}:{name}")
     options = module_options(name)
-    if name in ("noah_ua", "noah_mosaic_ua", "noah_ua_sfcdiags", "noah_seaice_options", "noah_fractional", "sfclay_dx2d"):
+    if name in ("noah_ua", "noah_mosaic_ua", "noah_ua_sfcdiags", "noah_seaice_options", "noah_fractional", "sfclay_dx2d",
+                "chem_radm2"):
         return _load_module_preserving_subnormals(name, src, options)
 
     if name in ("camzm", "cammgmp", "uwshcu"):
