@@ -1,9 +1,27 @@
 # Continuous integration (`.github/workflows/tests.yml`)
 
-Every push and pull request runs the jobs below. Every environment is a pixi
-environment from the committed `pixi.lock`, installed with `locked: true`
-through `prefix-dev/setup-pixi`, with the pixi cache on. The helper scripts
-are in `.github/ci/`.
+Every push to `main` and every pull request runs the jobs below. A push to
+any other branch runs nothing: its pull request's run tests the branch merged
+into its base (GitHub's merge ref, not the bare branch head), and a branch with
+no pull request is run by hand (`workflow_dispatch`). Before this, each PR
+push queued two identical runs, and their macOS jobs held up
+`publish-metal.yml`'s macOS build.
+
+The macOS jobs (native, the ten mlx legs, the metal probe and the Metal
+gates) run on every push to `main` and every manual run. On a pull request
+they run only when it changes `woof/backend/`, `tools/metal_*`,
+`tools/f64_soft*`, `tests/test_metal_*`, `pixi.toml`/`pixi.lock` or
+`.github/ci/`, or carries the `macos-ci` label (adding the label starts a
+run). The `changes` job decides this and writes its reason to the run summary.
+A public repository gets only a few concurrent macOS jobs, and GitHub
+offers no per-workflow runner priority. Every PR run used to take 13 of them,
+for up to 4 h each, so `publish-metal.yml`'s macOS wheel build waited behind
+them. An mlx leg now times out at 150 min (the longest measured leg took
+81 min).
+
+Every environment is a pixi environment from the committed `pixi.lock`,
+installed with `locked: true` through `prefix-dev/setup-pixi`, with the pixi
+cache on. The helper scripts are in `.github/ci/`.
 
 The file is named `tests.yml` and not `ci.yml` on purpose. Several tools and
 tests in this tree describe the engine's own `ci.yml`
