@@ -60,7 +60,8 @@ TABLE_SCHEMA = "gpuwm-download-bytes-v1"
 REQUEST_KEYS = ("source", "cycle", "hours", "area", "point", "radius_km",
                 "cadence", "forecast_start_hour", "source_root",
                 "era5_provider", "era5_product", "member", "mode",
-                "transport", "p_top_pa", "all_levels", "out")
+                "transport", "p_top_pa", "all_levels", "out",
+                "source_parameters")
 
 
 def table_path() -> Path:
@@ -270,9 +271,13 @@ def _planned_objects(source: str, request: Mapping[str, Any], row: Mapping[str, 
         refusal: Exception | None = None
         for when in stand_ins:
             try:
+                # A route whose object names carry a selector (HAFS's
+                # storm ID) is resolved with the request's own, as the
+                # fetch is; without it every such request was refused.
                 plan = fetch_routes.resolve_request(
                     source, cycle=when, hours=hours, cadence=cadence,
-                    start_hour=start, member=request.get("member"))
+                    start_hour=start, member=request.get("member"),
+                    source_parameters=request.get("source_parameters"))
             except ValueError as error:
                 refusal = error
                 continue
