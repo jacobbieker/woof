@@ -124,14 +124,25 @@ Metal, and refuses what it does not port by name.
    Extend the Noah-MP oracle harness with a hydro pass the way
    `tools/noah_wrf461_oracle/build.sh` was extended.
 3. **The coupling driver** `hydro/CPL/WRF_cpl/module_wrf_HYDRO.F90` and
-   `HYDRO_drv/module_HYDRO_drv.F90`: `HYDRO_dt` cadence, `aggregate`/
-   `disaggregate` between the LSM grid and the routing grid (`AGGFACTRT`),
-   the soil-moisture and head hand-back.  WRF-Hydro code.
+   `HYDRO_drv/module_HYDRO_drv.F90`: `aggregate`/`disaggregate` between the
+   LSM grid and the routing grid (`AGGFACTRT`) are **done** in the opt-in
+   (`woof_wrf_hydro.grid_transform`, `tests/test_wrf_hydro_grid_transform_parity.py`);
+   the `HYDRO_dt` cadence and the WRF-side field hand-back remain.
 4. **Routing**, in this order, each from the pinned WRF-Hydro source with its
    own oracle: subsurface (`Routing/Noah_distr_routing_subsurface.F90`,
-   **done** in the opt-in), overland (`Routing/Overland/`), channel (`Routing/module_channel_routing.F90`:
-   Muskingum-Cunge first, then the diffusive wave), then the bucket baseflow.
-5. **Configuration**: `hydro.namelist` (`SUBRTSWCRT`, `OVRTSWCRT`,
+   **done** in the opt-in), overland (`Routing/Overland/`,
+   `Noah_distr_routing_overland.F90`: **done** in the opt-in for
+   rt_option = 1, `tests/test_wrf_hydro_overland_parity.py`), channel (`Routing/module_channel_routing.F90`:
+   Muskingum and Muskingum-Cunge reach routing **done** in the opt-in,
+   `tests/test_wrf_hydro_channel_parity.py`; the diffusive wave on nodes,
+   channel_option 3, **done** in the opt-in with level-pool lakes
+   (`Reservoirs/Level_Pool/`), compiled as WRF-Hydro always is, with
+   MPP_LAND, on one process, `tests/test_wrf_hydro_diffusive_parity.py`; the
+   persistence and RFC-forecast reservoirs remain), then the bucket baseflow (`module_GW_baseflow.F90`
+   simp_gw_buck, GWBASESWCRT 1 and 2: **done** in the opt-in,
+   `tests/test_wrf_hydro_baseflow_parity.py`; 3 and 4 remain).
+5. **Configuration** (**done** in the opt-in: `woof_wrf_hydro.namelist`,
+   `tests/test_wrf_hydro_namelist.py`, held to WRF 4.6.1's template): `hydro.namelist` (`SUBRTSWCRT`, `OVRTSWCRT`,
    `CHANRTSWCRT`, `channel_option`, `rt_option`, `GWBASESWCRT`, `DXRT`,
    `AGGFACTRT`, `DTRT_TER`, `DTRT_CH`) mapped to a WOOF table, every unported
    value refused by name.  Until step 4 lands there is nothing to route to:
