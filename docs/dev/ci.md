@@ -156,7 +156,10 @@ source built for Apple silicon. It never touches `publish.yml` or
   the previous `metal-v` tag, as GitHub generates them) and dispatches this
   workflow on the new tag with `publish` on. The dispatch is explicit because
   a tag pushed with `GITHUB_TOKEN` starts no workflow. A head commit whose
-  message carries `[skip release]` releases nothing.
+  message carries `[skip release]` releases nothing. If the dispatch fails
+  after the tag and release exist, a re-run sees the tagged head and stops;
+  run this workflow by hand with `version` set to that release and `publish`
+  ticked.
 - **Build (macos-15):** every `build-native` workspace for macOS 14+, then
   `tools/metal_woof_project.py` renames the distribution (name, version, the
   extras' self-references, and the `gpu-mlx` requirements folded into the

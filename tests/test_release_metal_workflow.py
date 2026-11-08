@@ -99,6 +99,9 @@ def test_runs_on_main_and_dispatches_publish_metal_with_publish_on():
     assert wf["concurrency"]["cancel-in-progress"] is False
     job = wf["jobs"]["release"]
     assert job["permissions"] == {"contents": "write", "actions": "write"}
+    assert "refs/heads/main" in job["if"] and "[skip release]" in job["if"]
+    checkout = next(s for s in _steps() if s.get("uses", "").startswith("actions/checkout"))
+    assert checkout["with"]["persist-credentials"] is False
     dispatch = next(s["run"] for s in _steps() if "gh workflow run" in s.get("run", ""))
     assert "publish-metal.yml" in dispatch and "publish=true" in dispatch
     assert '--ref "metal-v${VERSION}"' in dispatch
