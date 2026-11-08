@@ -306,8 +306,16 @@ static inline int __float2int_ru(f32s a) { return (int)ceilf(a).v; }
 WOOF_F32S_VENDOR1(exp) WOOF_F32S_VENDOR1(exp2) WOOF_F32S_VENDOR1(log) WOOF_F32S_VENDOR1(log2)
 WOOF_F32S_VENDOR1(log10) WOOF_F32S_VENDOR1(sin) WOOF_F32S_VENDOR1(cos) WOOF_F32S_VENDOR1(tan)
 WOOF_F32S_VENDOR1(asin) WOOF_F32S_VENDOR1(acos) WOOF_F32S_VENDOR1(atan) WOOF_F32S_VENDOR1(sinh)
-WOOF_F32S_VENDOR1(cosh) WOOF_F32S_VENDOR1(tanh)
+WOOF_F32S_VENDOR1(cosh) WOOF_F32S_VENDOR1(tanh) WOOF_F32S_VENDOR1(expm1) WOOF_F32S_VENDOR1(erf)
+WOOF_F32S_VENDOR1(erfc)
 #undef WOOF_F32S_VENDOR1
+static inline f32s rsqrtf(f32s a) { return f32s(rsqrtf(a.v)); }
+// a warp shuffle moves the float's bits (subnormal words included); the
+// generic __woof_shfl has no simd_shuffle of a struct
+static inline f32s __woof_shfl(f32s v, uint src) {
+  return f32s(as_type<float>(metal::simd_shuffle(as_type<uint>(v.v), ushort(src))));
+}
+static inline f32s __powf(f32s a, f32s b) { return f32s(__powf(a.v, b.v)); }
 // a volatile load of an f32s reads its float's bits (prelude __woof_vload)
 #define WOOF_F32S_VLOAD(AS) \
   static inline f32s __woof_vload(const AS f32s& x) { return f32s(*(const volatile AS float*)&x.v); }
