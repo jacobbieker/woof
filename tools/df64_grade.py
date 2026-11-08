@@ -71,14 +71,15 @@ OPS = [
 
 # Max error, binary64 ulps of the reference, that the host leg accepts.
 # The df64 core carries ~48 bits (2^-48 relative = 16 binary64 ulps); the
-# bounds leave a factor of about two over the measured maxima.  pow's error
+# libm's bound, 512 ulps (2^-44 relative), leaves a factor of two or more
+# over its measured maxima (4M samples: 52 for exp, 242 for tanh).  pow's error
 # grows with |y log x| (its argument to exp carries the df64 error times
 # that magnitude): its row is the error divided by 1 + |y log x|.
 BOUNDS = {
     "add_df": 64, "sub_df": 64, "mul_df": 256, "fma_df": 256,
-    "exp": 256, "expm1": 256, "log": 256, "log2": 256, "log10": 256, "log1p": 256,
-    "pow": 256, "sin": 256, "cos": 256, "tan": 256, "atan": 256, "atan2": 256,
-    "tanh": 256, "hypot": 256, "cbrt": 256,
+    "exp": 512, "expm1": 512, "log": 512, "log2": 512, "log10": 512, "log1p": 512,
+    "pow": 512, "sin": 512, "cos": 512, "tan": 512, "atan": 512, "atan2": 512,
+    "tanh": 512, "hypot": 512, "cbrt": 512,
     # pure df64 core (df64 operands, the df64 result against the exact one)
     "df_add": 64, "df_sub": 64, "df_mul": 128, "df_div": 128, "df_sqrt": 128, "df_fma": 128,
     "df_from_i64": 16, "df_to_f32": 0, "df_from_f32": 0, "df_to_i64": 0, "df_to_i32": 0,
