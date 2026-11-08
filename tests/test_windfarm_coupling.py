@@ -111,25 +111,19 @@ def test_upstreams_keys_carry_the_wrf_scheme():
     onto upstream's keys: fitch_wrf is a wind_farm_scheme value, its
     turbines come from wind_farms, and an i/j list is WRF's own file name."""
     names = [f.name for f in dataclasses.fields(RunConfig)]
-    # appended after them: the output-only rrtmg_spectral_output, WRF's
-    # couple_farms, the output-only woof.radtran diagnostic's eight keys,
-    # then the shallow-cumulus selector and cumulus-radiation feedback,
-    # and after them WRF-Solar EPS's and MAD-WRF's keys
-    from woof.config import MADWRF_RUN_DEFAULTS, MULTI_PERTURB_RUN_DEFAULTS
-    later = [*MULTI_PERTURB_RUN_DEFAULTS, *MADWRF_RUN_DEFAULTS]
+    # appended after them: the fork-only output-only rrtmg_spectral_output
+    # and woof.radtran keys, then WRF-Solar EPS's keys
+    from woof.config import MULTI_PERTURB_RUN_DEFAULTS
+    later = [*MULTI_PERTURB_RUN_DEFAULTS]
     assert names[-len(later):] == later
     names = names[:-len(later)]
-    # the output-only solar_diagnostics and radtran_aerosol, WRF's
-    # use_theta_m and the output-only do_avgflx_em
-    assert names[-16:] == ["rrtmg_spectral_output", "couple_farms",
+    assert names[-10:] == ["rrtmg_spectral_output",
                            "radtran_wavelengths", "radtran_interval_s", "radtran_umu",
                            "radtran_phi", "radtran_mol_abs_param", "radtran_solver",
                            "radtran_streams", "radtran_pseudospherical",
-                           "shcu_physics", "cu_rad_feedback",
-                           "solar_diagnostics", "radtran_aerosol",
-                           "use_theta_m", "do_avgflx_em"]
-    assert not {"windfarm_opt", "windfarm_ij", "windfarm_turbine_file"} & \
-        set(names)
+                           "radtran_aerosol"]
+    # (upstream 1.1.6 carries its own windfarm_ij for MAV and Fitch.)
+    assert not {"windfarm_opt", "windfarm_turbine_file"} & set(names)
     for name, default in WIND_FARM_RUN_DEFAULTS.items():
         assert RunConfig.__dataclass_fields__[name].default == default
     # Registry.EM_COMMON:3005.
@@ -589,11 +583,12 @@ def test_the_registry_lists_the_keys_and_the_mynn_rule():
     registry = json.loads((REPO / "woof" / "physics_registry_v2.json")
                           .read_text(encoding="utf-8"))
     rows = registry["parameters"]
-    assert rows["wind_farm_scheme"]["enum"] == ["off", "fitch", "fitch_wrf"]
+    assert rows["wind_farm_scheme"]["enum"] == ["off", "fitch", "mav",
+                                                "fitch_legacy", "fitch_wrf"]
     assert rows["wind_farms"]["default"] == ""
     assert rows["windfarm_tke_factor"]["default"] == 0.25
-    for gone in ("windfarm_opt", "windfarm_ij", "windfarm_turbine_file"):
-        assert gone not in rows
+    # upstream 1.1.6 registers its namelist windfarm_opt and windfarm_ij.
+    assert "windfarm_turbine_file" not in rows
     text = json.dumps(registry)
     assert "Set wind_farm_scheme=off." in text
 
@@ -630,55 +625,3 @@ def _import(tmp_path, physics=""):
     return import_namelists(tmp_path / "namelist.wps",
                             tmp_path / "namelist.input")
 
-
-def test_windfarm_keys_translate(tmp_path):
-    text, _ = _import(tmp_path, " windfarm_opt = 1, 0,\n windfarm_ij = 1,\n"
-                                " windfarm_tke_factor = 1.0,\n")
-    raw = tomllib.loads(text)
-    shared = raw["shared"]
-    assert "wind_farm_scheme" not in shared and "wind_farms" not in shared
-    assert shared["windfarm_tke_factor"] == 1.0
-    first, second = raw["domain"][0], raw["domain"][1]
-    # WRF's windfarm_ij = 1 opens windturbines-ij.txt; the name carries it.
-    assert first["wind_farm_scheme"] == "fitch_wrf"
-    assert first["wind_farms"] == str(
-        (tmp_path / "windturbines-ij.txt").resolve())
-    assert "wind_farm_scheme" not in second and "wind_farms" not in second
-
-
-def test_lat_lon_list_is_the_default_and_omitted_keys_change_nothing(
-        tmp_path):
-    plain, _ = _import(tmp_path)
-    zero, _ = _import(tmp_path, " windfarm_opt = 0, 0,\n")
-    assert zero == plain and "windfarm" not in plain
-    text, _ = _import(tmp_path, " windfarm_opt = 1, 1,\n")
-    raw = tomllib.loads(text)
-    for domain in raw["domain"]:
-        assert domain["wind_farm_scheme"] == "fitch_wrf"
-        assert domain["wind_farms"].endswith("/windturbines.txt")
-    assert raw["shared"]["windfarm_tke_factor"] == 0.25
-
-
-@pytest.mark.parametrize("physics, needle", [
-    (" windfarm_opt = 2, 0,\n", "MAV"),
-    (" windfarm_opt = 1, 0,\n windfarm_ij = 3,\n", "windfarm_ij"),
-    (" windfarm_opt = 1, 0,\n windfarm_tke_factor = -1.0,\n", ">= 0"),
-    (" windfarm_opt = 1, 0,\n windfarm_wake_model = 2,\n",
-     "windfarm_wake_model"),
-])
-def test_unported_windfarm_values_and_keys_are_refused(tmp_path, physics,
-                                                       needle):
-    with pytest.raises(ValueError, match=needle):
-        _import(tmp_path, physics)
-
-
-def test_the_farm_under_another_pbl_is_refused_at_import(tmp_path):
-    from woof.namelist_import import import_namelists
-
-    wps, inp = _fixture_texts()
-    inp = inp.replace("&physics\n", "&physics\n windfarm_opt = 1, 0,\n")
-    (tmp_path / "namelist.wps").write_text(wps)
-    (tmp_path / "namelist.input").write_text(inp)
-    with pytest.raises(ValueError, match="bl_pbl_physics = 5"):
-        import_namelists(tmp_path / "namelist.wps",
-                         tmp_path / "namelist.input")

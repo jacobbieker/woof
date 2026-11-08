@@ -63,13 +63,10 @@ def test_config_accepts_wdm6_and_validates_its_two_knobs(tmp_path):
         validate_run_config(replace(cfg, wdm6_ccn_conc=1.0e11))
 
 
-@pytest.mark.parametrize(("value", "name"), [(14, "WDM5"), (26, "WDM7")])
-def test_the_out_of_scope_wdm_siblings_are_refused_by_name(value, name):
-    """Not swept into the generic tail: 14 and 26 are what a WDM6 user
-    types next, and WDM6 cannot stand in for either hydrometeor set."""
-    with pytest.raises(ValueError, match=name):
-        validate_run_config(RunConfig(**_TINY, moist=True, moist_cq=True,
-                                      mp_physics=value))
+@pytest.mark.parametrize("value", [14, 26])
+def test_wdm_siblings_have_their_own_admitted_selector(value):
+    validate_run_config(RunConfig(**_TINY, moist=True, moist_cq=True,
+                                  mp_physics=value))
 
 
 def test_wdm6_requires_moisture_like_every_other_scheme():
@@ -353,7 +350,8 @@ def test_wdm6_workspace_follows_nz_up_to_256_levels():
         WDM6WS_SLOTS, WDM6_BLOCK, wdm6_workspace_extent, wdm6_workspace_floats)
 
     assert wdm6.VERTICAL_LEVEL_BOUNDS == (2, 256)
-    assert not hasattr(wdm6, "_kernel_capacity")
+    # The 64/80 ladder left in wdm6 is upstream's WDM7 unit's alone.
+    assert wdm6._kernel_capacity is wdm6.wdm6_level_tier
     for nz in (2, 49, 64, 65, 80, 81, 128, 256):
         assert wdm6_workspace_extent(nz) == nz + 1
     # whole lane-interleaved blocks of WDM6WS_SLOTS slots
@@ -549,9 +547,14 @@ def test_a_refused_selector_cannot_join_without_its_own_sentence():
     from woof.core import microphysics_transition as mt
 
     source = Path(mt.__file__).read_text(encoding="utf-8")
-    patched = source.replace(
-        "UNVALIDATED_MIXED_EDGE_SELECTORS: tuple[int, ...] = (3, 5, 30, 40)",
-        "UNVALIDATED_MIXED_EDGE_SELECTORS: tuple[int, ...] = (3, 5, 30, 40, 99)")
+    import ast
+    node = next(n for n in ast.parse(source).body
+                if isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name)
+                and n.target.id == "UNVALIDATED_MIXED_EDGE_SELECTORS")
+    before = ast.get_source_segment(source, node.value)
+    values = ast.literal_eval(node.value)
+    assert 99 not in values
+    patched = source.replace(before, repr((*values, 99)), 1)
     assert patched != source, "the selector tuple moved; re-point this test"
     namespace = {"__name__": "mt_probe", "__file__": mt.__file__}
     with pytest.raises(RuntimeError, match=r"\[99\]"):
