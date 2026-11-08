@@ -10,8 +10,12 @@ program run_wrf_hydro_diffusive_oracle
   ! node fed by LAKEINFLORT, node 16 takes the lake's outflow (CH_NETRT = 1),
   ! and LAKENODE marks 14 to 16, so the lake sees face inflow, lateral
   ! inflow and its own level-pool outflow (orifice, weir and overtopping over
-  ! the run).  No groundwater-channel exchange.  Every input and every output
-  ! word, and DTCT and the lake state after each step, are dumped.
+  ! the run).  Then four more steps with the groundwater-channel exchange
+  ! (GWBASESWCRT = 3): a groundwater head under every node, above the water
+  ! surface at some nodes (flux in) and below it at others (flux out, some
+  ! clipped at -0.005 m3/s), with gwChanCondSw = 1 and, on the last step,
+  ! 0.  Every input and every output word, and DTCT and the lake state after
+  ! each step, are dumped.
   use iso_fortran_env, only: int64
   use diffusive_harness
   implicit none
@@ -26,7 +30,9 @@ program run_wrf_hydro_diffusive_oracle
   integer(kind=int64), dimension(nl) :: lakenode
   real, dimension(nlakes) :: resht, qlakei, qlakeo, lake_area, weir_elev, weir_coef, weir_len
   real, dimension(nlakes) :: dam_len, orifice_elev, orifice_coef, orifice_area, max_depth
-  integer :: i, k, u, un, uf, ul, it
+  integer :: i, k, u, un, uf, ul, it, ug, ugl, ugf, gwsw
+  real, dimension(:,:), allocatable :: gwhead, qgw_chanrt
+  real, parameter :: cond_in = 2.0e-5, cond_out = 4.0e-5
   character(len=1024) :: dir
 
   call get_command_argument(1, dir)
@@ -120,6 +126,8 @@ program run_wrf_hydro_diffusive_oracle
         resht(i), qlakei(i), qlakeo(i)
   end do
   qinflowbase = 0.; lakeinflort = 0.; qsubrt = 0.; qstrmvolrt = 0.
+  allocate(gwhead(ixrt, jxrt), qgw_chanrt(ixrt, jxrt))
+  gwhead = 0.; qgw_chanrt = 0.
   do it = 1, nstep
     pulse = merge(60., 1., it == 3)
     do i = 1, nl
@@ -132,7 +140,7 @@ program run_wrf_hydro_diffusive_oracle
     call diffusive_route(ixrt, jxrt, nl, dt, dtct, dtrt_ch, retdep, qstrmvolrt, qinflowbase, &
         lakeinflort, qsubrt, ch_netrt, lake_mskrt, ch_netlnk, chanxi, chanyj, node_area, &
         from_node, to_node, typel, zelev, chanlen, mannn, so, chsslp, bw, qlink, hlink, cvol, qlateral, &
-        nlakes, lakenode, resht, qlakei, qlakeo)
+        nlakes, lakenode, resht, qlakei, qlakeo, 0, 0, 0., 0., gwhead, qgw_chanrt)
     do i = 1, nl
       write(u, '(2(I0,","),ES16.8E2,4(",",ES16.8E2))') it, i, dtct, hlink(i), cvol(i), qlink(i, 1), &
           qlateral(i)
@@ -144,6 +152,40 @@ program run_wrf_hydro_diffusive_oracle
     end do
   end do
   close(u); close(uf); close(ul)
+
+  ! the groundwater-channel exchange, continuing from step 8
+  do i = 1, nl
+    gwhead(chanxi(i), chanyj(i)) = zelev(i) + hlink(i) - 0.35 + 0.7 * frac(i * 31, 83)
+  end do
+  open(newunit=ugf, file=trim(dir)//'/diffusive-gw-forcing.csv', status='replace')
+  write(ugf, '(A)') 'step,node,qstrmvolrt,qinflowbase,lakeinflort,gwhead,gwchancondsw,cond_in,cond_out'
+  open(newunit=ug, file=trim(dir)//'/diffusive-gw-steps.csv', status='replace')
+  write(ug, '(A)') 'step,node,dtct,hlink,cvol,qlink1,qlateral,qgw_chanrt'
+  open(newunit=ugl, file=trim(dir)//'/diffusive-gw-lakes.csv', status='replace')
+  write(ugl, '(A)') 'step,lake,resht,qlakei,qlakeo'
+  do it = nstep + 1, nstep + 4
+    gwsw = merge(0, 1, it == nstep + 4)
+    do i = 1, nl
+      qstrmvolrt(chanxi(i), chanyj(i)) = frac(i * 19 + it * 7, 71)
+      qinflowbase(chanxi(i), chanyj(i)) = 0.05 * frac(i * 23 + it, 73)
+      lakeinflort(chanxi(i), chanyj(i)) = merge(40. * frac(it * 29, 79), 0., i == 15)
+      write(ugf, '(2(I0,","),ES16.8E2,3(",",ES16.8E2),",",I0,2(",",ES16.8E2))') it, i, &
+          qstrmvolrt(chanxi(i), chanyj(i)), qinflowbase(chanxi(i), chanyj(i)), &
+          lakeinflort(chanxi(i), chanyj(i)), gwhead(chanxi(i), chanyj(i)), gwsw, cond_in, cond_out
+    end do
+    call diffusive_route(ixrt, jxrt, nl, dt, dtct, dtrt_ch, retdep, qstrmvolrt, qinflowbase, &
+        lakeinflort, qsubrt, ch_netrt, lake_mskrt, ch_netlnk, chanxi, chanyj, node_area, &
+        from_node, to_node, typel, zelev, chanlen, mannn, so, chsslp, bw, qlink, hlink, cvol, qlateral, &
+        nlakes, lakenode, resht, qlakei, qlakeo, 3, gwsw, cond_in, cond_out, gwhead, qgw_chanrt)
+    do i = 1, nl
+      write(ug, '(2(I0,","),ES16.8E2,5(",",ES16.8E2))') it, i, dtct, hlink(i), cvol(i), qlink(i, 1), &
+          qlateral(i), qgw_chanrt(chanxi(i), chanyj(i))
+    end do
+    do i = 1, nlakes
+      write(ugl, '(2(I0,","),ES16.8E2,2(",",ES16.8E2))') it, i, resht(i), qlakei(i), qlakeo(i)
+    end do
+  end do
+  close(ug); close(ugl); close(ugf)
 
 contains
 

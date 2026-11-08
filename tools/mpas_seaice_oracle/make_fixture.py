@@ -2,10 +2,11 @@
 
     pixi run -e default python tools/mpas_seaice_oracle/make_fixture.py BUILD_DIR [--out DIR]
 
-BUILD_DIR holds ``run_oracle_r4`` from build.sh.  Writes ``oracle-r4.npz``
-(every case's outputs, ``<case>/<field>``) and ``inputs.sha256`` (the digest
-of every case's input stream) into ``tests/data/oracles/mpas_seaice_evp`` by
-default.
+BUILD_DIR holds ``run_oracle_r4`` and ``run_oracle_r8`` from build.sh.
+Writes ``oracle-r4.npz`` and ``oracle-r8.npz`` (every case's outputs at that
+precision, ``<case>/<field>``) and ``inputs.sha256`` (the digest of every
+case's input stream, ``<case>/<precision>``) into
+``tests/data/oracles/mpas_seaice_evp`` by default.
 """
 from __future__ import annotations
 
@@ -37,17 +38,18 @@ def main() -> int:
     parser.add_argument("build_dir", type=Path)
     parser.add_argument("--out", type=Path, default=so.FIXTURE_DIR)
     args = parser.parse_args()
-    binary = args.build_dir / "run_oracle_r4"
-    arrays: dict[str, np.ndarray] = {}
-    digests = []
-    for case in so.cases():
-        for field, value in run_case(binary, case).items():
-            arrays[f"{case['name']}/{field}"] = value
-        digests.append(f"{so.input_digest(case)}  {case['name']}")
     args.out.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(args.out / "oracle-r4.npz", **arrays)
+    digests = []
+    for precision in so.PRECISIONS:
+        binary = args.build_dir / f"run_oracle_{precision}"
+        arrays: dict[str, np.ndarray] = {}
+        for case in so.cases(precision):
+            for field, value in run_case(binary, case).items():
+                arrays[f"{case['name']}/{field}"] = value
+            digests.append(f"{so.input_digest(case)}  {case['name']}/{precision}")
+        np.savez_compressed(args.out / f"oracle-{precision}.npz", **arrays)
+        print(f"wrote {args.out / f'oracle-{precision}.npz'} ({len(arrays)} arrays)")
     (args.out / "inputs.sha256").write_text("\n".join(digests) + "\n", encoding="utf-8")
-    print(f"wrote {args.out / 'oracle-r4.npz'} ({len(arrays)} arrays)")
     return 0
 
 

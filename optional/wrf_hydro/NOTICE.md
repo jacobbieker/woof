@@ -38,9 +38,9 @@ work: a CUDA transcription with a Python launcher, not the original source.
 
 ## Source
 
-The WRF-Hydro tree WRF 4.6.1 ships under `hydro/` (WRF pinned at
-`d66e442fccc04111067e29274c9f9eaccc3cef28`), the reference WOOF already
-holds its WRF physics to.
+The WRF-Hydro tree WRF 4.7.1 ships under `hydro/` (WRF pinned at
+`f52c197ed39d12e087d02c50f412d90d418f6186`, tag v4.7.1), upstream WOOF's
+WRF baseline.
 
 | WOOF file | WRF-Hydro source |
 | --- | --- |
@@ -48,11 +48,12 @@ holds its WRF physics to.
 | `woof_wrf_hydro/grid_transform.cu`, `grid_transform.py` | `hydro/Routing/Noah_distr_routing.F90` (disaggregateDomain); `hydro/HYDRO_drv/module_HYDRO_drv.F90` (aggregateDomain) |
 | `woof_wrf_hydro/overland.cu`, `overland.py` | `hydro/Routing/Noah_distr_routing_overland.F90` (OverlandRouting, OV_RTNG, ROUTE_OVERLAND1); `hydro/Routing/Noah_distr_routing.F90` (GETMAX8DIR, GET8DIR) |
 | `woof_wrf_hydro/channel.cu`, `channel.py` | `hydro/Routing/module_channel_routing.F90` (MUSKING, SUBMUSKINGCUNGE, the reach branch of drive_CHANNEL) |
-| `woof_wrf_hydro/diffusive.cu`, `diffusive.py` | `hydro/Routing/module_channel_routing.F90` (DIFFUSION, HEAD, AREAf, SGNf, the channel_option = 3 branch of drive_CHANNEL); `hydro/Data_Rec/module_namelist.F90` (DTCT's start at DTRT_CH) |
-| `woof_wrf_hydro/levelpool.cu`, `levelpool.py` | `hydro/Routing/Reservoirs/Level_Pool/module_levelpool.F90` (LEVELPOOL_PHYSICS, run_levelpool_reservoir); the lake arm of drive_CHANNEL's diffusive branch and `hydro/MPP/mpp_land.F90`'s one-process sum_real8 are in `diffusive.cu` |
+| `woof_wrf_hydro/diffusive.cu`, `diffusive.py` | `hydro/Routing/module_channel_routing.F90` (DIFFUSION, HEAD, AREAf, SGNf, the channel_option = 3 branch of drive_CHANNEL); `hydro/OrchestratorLayer/config.F90` (DTCT's start at DTRT_CH) |
+| `woof_wrf_hydro/levelpool.cu`, `levelpool.py` | `hydro/Routing/Reservoirs/Level_Pool/module_levelpool.F90` (LEVELPOOL_PHYSICS with lake_opt 1 and 2, run_levelpool_reservoir); the reservoir arm of drive_CHANNEL's reach branch is in `channel.cu`, the lake arm of drive_CHANNEL's diffusive branch and `hydro/MPP/mpp_land.F90`'s one-process sum_real8 are in `diffusive.cu` |
 | `woof_wrf_hydro/baseflow.cu`, `baseflow.py` | `hydro/Routing/module_GW_baseflow.F90` (simp_gw_buck); `hydro/Routing/module_RT.F90` (the non-MPP stream-pixel count) |
-| `woof_wrf_hydro/namelist.py` | `hydro/Data_Rec/module_namelist.F90` (the HYDRO_nlist keys and defaults); `oracle/fixtures/namelist/hydro.namelist.wrf461` is WRF 4.6.1's `hydro/template/HYDRO/hydro.namelist`, verbatim |
-| `oracle/` | build harnesses and drivers (`build.sh`, `build_grid_transform.sh`, `build_overland.sh`, `build_channel.sh`, `build_diffusive.sh`, `build_baseflow.sh`); they compile the pinned files at build time and copy none of them |
+| `woof_wrf_hydro/gw2d.cu`, `gw2d.py` | `hydro/Routing/module_gw_gw2d.F90` (gw2d_ini, gwstep with sub_tri_solv, gwSoilFlux, darcyGwSoil, aggregateQsgw); `hydro/HYDRO_drv/module_HYDRO_drv.F90` (the GWBASESWCRT = 3 arm of the groundwater call, the channel-aquifer head correction after drive_CHANNEL); the groundwater-channel exchange of drive_CHANNEL's diffusive branch is in `diffusive.cu` |
+| `woof_wrf_hydro/namelist.py` | `hydro/OrchestratorLayer/config.F90` (read_rt_nlst: the HYDRO_nlist and reservoir_nlist keys, their defaults, the lake_option resolution); `oracle/fixtures/namelist/hydro.namelist.wrf471` is WRF 4.7.1's `hydro/template/HYDRO/hydro.namelist`, verbatim |
+| `oracle/` | build harnesses and drivers (`build.sh`, `build_grid_transform.sh`, `build_overland.sh`, `build_channel.sh`, `build_diffusive.sh`, `build_baseflow.sh`, `build_gw2d.sh`); they compile the pinned files at build time and copy none of them |
 
 `subsurface.cu`, `overland.cu`, `channel.cu`, `levelpool.cu` and `diffusive.cu` are preceded at load time by
 WOOF's `woof/core/kernels/glibc_flt32.cuh` (glibc's powf words) and

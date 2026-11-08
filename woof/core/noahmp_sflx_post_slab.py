@@ -467,6 +467,11 @@ def _error_slab(cp, s, n, where, *, prcp, fsh) -> dict:
             (cp.ascontiguousarray(sc), smc, dzsnso, ist, calc, out, status,
              np.int32(n)))
 
+    if s.get("wrf_hydro"):
+        # WRF built with -DWRF_HYDRO compiles the water-budget stop out
+        # (module_sf_noahmplsm.F :1712-1728); the energy and shortwave stops
+        # return before it in the kernel, so clearing code 3 is that build.
+        status = cp.where(status == 3, cp.int32(0), status)
     _raise_for_status(cp, status, out, outs)
     return split_slab_slots(out, {name: (slot, 1) for name, slot in outs.items()})
 

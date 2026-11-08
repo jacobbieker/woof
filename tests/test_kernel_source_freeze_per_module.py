@@ -1678,7 +1678,10 @@ PINNED_HEADERS = {
     'gf_wrf_normalization.cuh': '2f258d559bda0b6c97a7220f2eb4c27473817ad25daf69769e858d63a1731942',
     'rrtmgp_libm.cuh': '71c883fed0cffeed7ae49cd422a8519de6d1815f1c9abf1ddedd9e5039204c96',
     # r290 exact-chain intake: source identity, numerical gates separate.
-    'f64cr.cuh': '3adb76fc5f559a21a457572848772debd000f77ab6557428edfa2765f2a458bb',
+    # Its error-free transformations use __dadd_rn/__dmul_rn on the device:
+    # under --fmad=true wcr_exp missed by up to 510 ulp (0 of 1.2M inputs
+    # differ from the host build after; --fmad=false words unchanged).
+    'f64cr.cuh': '1a05d7f3d99fc77d9a475dcce6559429b473cd952f9c4829a405fff614d69459',
     # r290 exact-chain intake: source identity, numerical gates separate.
     'nssl2_wrf_math.cuh': '15578ff62956b321b6145d1eff2bfff88a22576ff24dc4b9d4200f9ca1b7fcb0',
     # Slimming promotes the retained YSU header to the loader closure.
@@ -1781,7 +1784,7 @@ COMPOSED_HEADERS = {
     "fast_sbm_init.cuh": "5f3e2136b6afba94edd2fc36145880eb3dc6ebd902a16b3ddc938d715991fa30",
     "fast_sbm_nucl.cuh": "8cd18b15d7deb2087320e935ef767470dabd801f4e61faeeeaa3bea3c67a05ac",
     # Retained base headers composed by their dedicated runtime loaders.
-    'f64cr.cuh': '3adb76fc5f559a21a457572848772debd000f77ab6557428edfa2765f2a458bb',
+    'f64cr.cuh': '1a05d7f3d99fc77d9a475dcce6559429b473cd952f9c4829a405fff614d69459',
     'nssl2_wrf_math.cuh': '15578ff62956b321b6145d1eff2bfff88a22576ff24dc4b9d4200f9ca1b7fcb0',
     'rrtmgp_libm.cuh': '71c883fed0cffeed7ae49cd422a8519de6d1815f1c9abf1ddedd9e5039204c96',
     # Retained intake source assets. These pins assert bytes, not active use.

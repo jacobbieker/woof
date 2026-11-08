@@ -7539,7 +7539,7 @@ class PhysicsDriver:
 
         # WRF's external-ocean receive: cpl_rcv's SST merge and
         # sst_update's water lines, at the top of every surface_driver call
-        # (module_surface_driver.F:1506-1527, :1636-1790; woof.ocean.external).
+        # (WRF 4.7.1 module_surface_driver.F:1507-1528, :1637-1791; woof.ocean.external).
         external_ocean = getattr(self, "external_ocean", None)
         if external_ocean is not None:
             external_ocean.receive(self.fields)

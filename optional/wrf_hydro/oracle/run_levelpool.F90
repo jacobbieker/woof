@@ -4,16 +4,17 @@ program run_wrf_hydro_levelpool_oracle
   ! module_levelpool.F90, compiled whole with module_reservoir.F90 and the
   ! level-pool property and state modules), for 240 reservoirs whose pools
   ! sit in the dead pool, on the orifice, over the weir and over the dam, each
-  ! routed for six periods with changing inflows.  Every input and output
-  ! word is dumped.
+  ! routed for six periods with changing inflows, with lake_opt = 1 (the
+  ! level pool), and 40 more with lake_opt = 2 (the pass-through).  Every
+  ! input and output word is dumped.
   use iso_fortran_env, only: int64
   use module_reservoir, only: reservoir_container
   use module_levelpool, only: levelpool
   implicit none
-  integer, parameter :: nres = 240, nper = 6
+  integer, parameter :: nres = 280, nper = 6
   type(reservoir_container) :: res(nres)
   real :: h, area, we, wc, wl, dl, oe, oc, oa, maxh, qi0, qi1, ql, qo, dt, aval
-  integer :: i, k, u, rtype
+  integer :: i, k, u, rtype, lopt(nres)
   integer(kind=int64) :: ln
   character(len=256) :: src
   character(len=1024) :: dir
@@ -22,7 +23,7 @@ program run_wrf_hydro_levelpool_oracle
 
   call get_command_argument(1, dir)
   open(newunit=u, file=trim(dir)//'/levelpool-cases.csv', status='replace')
-  write(u, '(A)') 'res,period,lake_area,weir_elev,weir_coef,weir_len,dam_len,orifice_elev,' // &
+  write(u, '(A)') 'res,period,lake_opt,lake_area,weir_elev,weir_coef,weir_len,dam_len,orifice_elev,' // &
       'orifice_coef,orifice_area,max_depth,dt,qi0,qi1,ql,h_in,h_out,qo'
   do i = 1, nres
     oev(i) = 100. + 2. * frac(i, 41)
@@ -42,11 +43,12 @@ program run_wrf_hydro_levelpool_oracle
     dlv(i) = 20. + 200. * frac(i * 19, 71)
     ocv(i) = 0.05 + 0.15 * frac(i * 23, 73)
     oav(i) = 0.5 + 5. * frac(i * 29, 79)
+    lopt(i) = merge(2, 1, i > 240)
     allocate(levelpool :: res(i)%ptr)
     ln = i
     select type (r => res(i)%ptr)
     type is (levelpool)
-      call r%init(h0(i), ar(i), wev(i), wcv(i), wlv(i), dlv(i), oev(i), ocv(i), oav(i), mhv(i), ln)
+      call r%init(h0(i), ar(i), wev(i), wcv(i), wlv(i), dlv(i), oev(i), ocv(i), oav(i), mhv(i), ln, lopt(i))
     end select
     qip(i) = 50. * frac(i * 31, 83)
   end do
@@ -58,7 +60,7 @@ program run_wrf_hydro_levelpool_oracle
       ql = 10. * frac(i * 41 + k, 97)
       h = h0(i)
       call res(i)%ptr%run(qi0, qi1, ql, h, qo, dt, rtype, aval, src)
-      write(u, '(2(I0,","),ES16.8E2,15(",",ES16.8E2))') i, k, ar(i), wev(i), wcv(i), wlv(i), dlv(i), &
+      write(u, '(3(I0,","),ES16.8E2,15(",",ES16.8E2))') i, k, lopt(i), ar(i), wev(i), wcv(i), wlv(i), dlv(i), &
           oev(i), ocv(i), oav(i), mhv(i), dt, qi0, qi1, ql, h0(i), h, qo
       h0(i) = h
       qip(i) = qi1

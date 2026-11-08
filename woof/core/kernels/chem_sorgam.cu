@@ -25,6 +25,8 @@
 #define SG_LCVA 4
 #define SG_LDROG 17
 #define SG_LSPCV 8
+#define SG_NASPCSDEP 7
+#define SG_NASPCSSED 6
 #define SG_PAPI1 12
 #define SG_PAPI2 13
 #define SG_PAPI3 14
@@ -65,6 +67,12 @@
 #define SG_VCVLIM1 54
 #define SG_VCVLIM2 55
 #define SG_VCVOLE1 51
+#define SG_VDMACC 5
+#define SG_VDMCOR 7
+#define SG_VDMNUC 4
+#define SG_VDNACC 2
+#define SG_VDNCOR 3
+#define SG_VDNNUC 1
 #define SG_VECI 30
 #define SG_VECJ 29
 #define SG_VH2OAI 40
@@ -107,6 +115,18 @@
 #define SG_VSULF 44
 #define SG_NP 8
 #define SG_CONMIN 1.00000002e-16f
+#define SG_SO4FAC 1.06103288e-12f
+#define SG_NH4FAC 1.06103288e-12f
+#define SG_NO3FAC 1.06103288e-12f
+#define SG_NAFAC 8.68117806e-13f
+#define SG_CLFAC 8.68117806e-13f
+#define SG_ORGFAC 1.90985921e-12f
+#define SG_ANTHFAC 8.68117806e-13f
+#define SG_SOILFAC 7.34561229e-13f
+#define SG_SEASFAC 8.68117806e-13f
+#define SG_DGININ3 1.00000002e-24f
+#define SG_DGINIA3 3.42999978e-22f
+#define SG_DGINIC3 9.99999942e-19f
 struct SorgamModule {
     float ccofm;
     float ccofm_org;
@@ -170,10 +190,12 @@ struct SorgamModule {
     double nummin_c;
     double nummin_i;
     double nummin_j;
+    float wgaus[7];
     float xxlsga;
     float xxlsgc;
     float xxlsgn;
     float xxm3;
+    float y_gq[7];
     int f2cu_fatal;  // first source line of a wrf_error_fatal, or 0
 };
 // Fortran MAX/MIN as gfortran -O0 evaluates them (first argument if it
@@ -232,6 +254,8 @@ __device__ void sg_nuclcond(SorgamModule &mod, int blksize, int nspcsda, int num
 __device__ void sg_aerostep(SorgamModule &mod, int layer, int blksize, int nspcsda, int numcells, float *cblk, float dt, const float *so4rat, const float *orgaro1rat, const float *orgaro2rat, const float *orgalk1rat, const float *orgole1rat, const float *orgbio1rat, const float *orgbio2rat, const float *orgbio3rat, const float *orgbio4rat, const float *epm25i, const float *epm25j, const float *eorgi, const float *eorgj, const float *eeci, const float *eecj, const float *esoil, const float *eseas, const float *epmcoarse, const float *dgnuc, const float *dgacc, const float *fconcn, const float *fconca, const float *fconcn_org, const float *fconca_org, const float *pmassn, const float *pmassa, const float *pmassc, const float *dmdt, const float *dndt, const float *deltaso4a, const float *urn00, const float *ura00, const float *brna01, const float *c30, float *cgrn3, float *cgra3, int igrid, int jgrid, int kgrid);
 __device__ void sg_aeroproc(SorgamModule &mod, int blksize, int nspcsda, int numcells, int layer, float *cblk, float dt, const float *blkta, const float *blkprs, const float *blkdens, const float *blkrh, const float *so4rat, float *orgaro1rat, float *orgaro2rat, float *orgalk1rat, float *orgole1rat, float *orgbio1rat, float *orgbio2rat, float *orgbio3rat, float *orgbio4rat, float *drog, int ldrog, int ncv, int nacv, const float *epm25i, const float *epm25j, const float *eorgi, const float *eorgj, const float *eeci, const float *eecj, const float *epmcoarse, const float *esoil, const float *eseas, float *xlm, float *amu, float *dgnuc, float *dgacc, float *dgcor, float *pmassn, float *pmassa, float *pmassc, float *pdensn, float *pdensa, float *pdensc, float *knnuc, float *knacc, float *kncor, float *fconcn, float *fconca, float *fconcn_org, float *fconca_org, float *dmdt, float *dndt, float *cgrn3, float *cgra3, float *urn00, float *ura00, float *brna01, float *c30, float *deltaso4a, int igrid, int jgrid, int kgrid);
 __device__ void sg_rpmmod3(SorgamModule &mod, int nspcsda, int blksize, int layer, float dtsec, float pres, float temp, float relhum, float nitrate_in, float nh3_in, float vsulf_in, float so4rat_in, const float *drog_in, int ldrog, const float *condvap_in, int ncv, int nacv, float eeci_in, float eecj_in, float eorgi_in, float eorgj_in, const float *epm25i, const float *epm25j, const float *epmcoarse, float soilrat_in, float *cblk, int igrid, int jgrid, int kgrid);
+__device__ void sg_vdvg(SorgamModule &mod, int blksize, int nspcsda, int numcells, int layer, const float *cblk, const float *blkta, const float *blkdens, const float *ra, const float *ustar, const float *wstar, const float *amu, const float *dgnuc, const float *dgacc, const float *dgcor, const float *knnuc, const float *knacc, const float *kncor, const float *pdensn, const float *pdensa, const float *pdensc, float *vsed, float *vdep);
+__device__ void sg_vdvg_2(SorgamModule &mod, int blksize, int nspcsda, int numcells, int layer, const float *cblk, const float *blkta, const float *blkdens, const float *ra, const float *ustar, const float *pblh, const float *zntt, const float *rmolm, const float *amu, const float *dgnuc, const float *dgacc, const float *dgcor, const float *xlm, const float *knnuc, const float *knacc, const float *kncor, const float *pdensn, const float *pdensa, const float *pdensc, float *vsed, float *vdep);
 __device__ void sg_newt(SorgamModule &mod, int layer, float *x, int n, bool &check, const float *ctot, const float *csat, const float *imwcv, float minitw, int &its);  // clean-room, below
 __device__ void sg_sorgam_module_constants(SorgamModule &mod) {
     mod.xxlsgn = 0.530628264f; // 7390
@@ -299,6 +323,20 @@ __device__ void sg_sorgam_module_constants(SorgamModule &mod) {
     mod.factnumc = 7.59419711e+16f; // 7486
     mod.ccofm = ((float)(11.539908175063289)); // 7487
     mod.ccofm_org = ((float)(8.638916233483814)); // 7488
+    mod.y_gq[0] = -2.65196133f; // 7506
+    mod.wgaus[0] = 0.000971781265f; // 7507
+    mod.y_gq[1] = -1.67355168f; // 7508
+    mod.wgaus[1] = 0.0545155816f; // 7509
+    mod.y_gq[2] = -0.816287875f; // 7510
+    mod.wgaus[2] = 0.425607264f; // 7511
+    mod.y_gq[3] = 0.0f; // 7512
+    mod.wgaus[3] = 0.810264647f; // 7513
+    mod.y_gq[4] = 0.816287875f; // 7514
+    mod.wgaus[4] = mod.wgaus[2]; // 7515
+    mod.y_gq[5] = 1.67355168f; // 7516
+    mod.wgaus[5] = mod.wgaus[1]; // 7517
+    mod.y_gq[6] = 2.65196133f; // 7518
+    mod.wgaus[6] = mod.wgaus[0]; // 7519
 }
 __device__ float sg_poly4(SorgamModule &mod, const float *a, float x) {
     float f2cu_result;
@@ -1770,6 +1808,268 @@ __device__ void sg_rpmmod3(SorgamModule &mod, int nspcsda, int blksize, int laye
     sg_aeroproc(mod, blksize, nspcsda, 1, layer, cblk, step, blkta, blkprs, blkdens, blkrh, so4rat, orgaro1rat, orgaro2rat, orgalk1rat, orgole1rat, orgbio1rat, orgbio2rat, orgbio3rat, orgbio4rat, drog, ldrog, ncv, nacv, epm25i, epm25j, eorgi, eorgj, eeci, eecj, epmcoarse, esoil, eseas, xlm, amu, dgnuc, dgacc, dgcor, pmassn, pmassa, pmassc, pdensn, pdensa, pdensc, knnuc, knacc, kncor, fconcn, fconca, fconcn_org, fconca_org, dmdt, dndt, cgrn3, cgra3, urn00, ura00, brna01, brna31, deltaso4a, igrid, jgrid, kgrid); // 5946
     return; // 5970
 }
+__device__ void sg_vdvg(SorgamModule &mod, int blksize, int nspcsda, int numcells, int layer, const float *cblk, const float *blkta, const float *blkdens, const float *ra, const float *ustar, const float *wstar, const float *amu, const float *dgnuc, const float *dgacc, const float *dgcor, const float *knnuc, const float *knacc, const float *kncor, const float *pdensn, const float *pdensa, const float *pdensc, float *vsed, float *vdep) {
+    float dchat0n[1];
+    float dchat0a[1];
+    float dchat0c[1];
+    float dchat3n[1];
+    float dchat3a[1];
+    float dchat3c[1];
+    float vghat0n[1];
+    float vghat0a[1];
+    float vghat0c[1];
+    float vghat3n[1];
+    float vghat3a[1];
+    float vghat3c[1];
+    int lcell;
+    float dconst1;
+    float dconst1n;
+    float dconst1a;
+    float dconst1c;
+    float dconst2;
+    float dconst3n;
+    float dconst3a;
+    float dconst3c;
+    float sc0n;
+    float sc0a;
+    float sc0c;
+    float sc3n;
+    float sc3a;
+    float sc3c;
+    float st0n;
+    float st0a;
+    float st0c;
+    float st3n;
+    float st3a;
+    float st3c;
+    float rd0n;
+    float rd0a;
+    float rd0c;
+    float rd3n;
+    float rd3a;
+    float rd3c;
+    float utscale;
+    float nu;
+    float ustfac;
+    if ((layer == 1)) { // 6821
+        { int f2cu_e2 = numcells; for (lcell = 1; lcell <= f2cu_e2; lcell += 1) { // 6824
+            dconst1 = FDIV(FMUL(1.38065789e-23f,blkta[(lcell-1)]),FMUL(9.42477798f,amu[(lcell-1)])); // 6826
+            dconst1n = FDIV(dconst1,dgnuc[(lcell-1)]); // 6828
+            dconst1a = FDIV(dconst1,dgacc[(lcell-1)]); // 6829
+            dconst1c = FDIV(dconst1,dgcor[(lcell-1)]); // 6830
+            dconst2 = FDIV(9.80622005f,FMUL(18.0f,amu[(lcell-1)])); // 6831
+            dconst3n = FMUL(FMUL(dconst2,pdensn[(lcell-1)]),FMUL(dgnuc[(lcell-1)],dgnuc[(lcell-1)])); // 6832
+            dconst3a = FMUL(FMUL(dconst2,pdensa[(lcell-1)]),FMUL(dgacc[(lcell-1)],dgacc[(lcell-1)])); // 6833
+            dconst3c = FMUL(FMUL(dconst2,pdensc[(lcell-1)]),FMUL(dgcor[(lcell-1)],dgcor[(lcell-1)])); // 6834
+            dchat0n[(lcell-1)] = FMUL(dconst1n,FADD(mod.esn04,FMUL(FMUL(1.24600005f,knnuc[(lcell-1)]),mod.esn16))); // 6838
+            dchat3n[(lcell-1)] = FMUL(dconst1n,FADD(mod.esnm20,FMUL(FMUL(1.24600005f,knnuc[(lcell-1)]),mod.esnm32))); // 6841
+            vghat0n[(lcell-1)] = FMUL(dconst3n,FADD(mod.esn16,FMUL(FMUL(1.24600005f,knnuc[(lcell-1)]),mod.esn04))); // 6844
+            vghat3n[(lcell-1)] = FMUL(dconst3n,FADD(mod.esn64,FMUL(FMUL(1.24600005f,knnuc[(lcell-1)]),mod.esn28))); // 6847
+            dchat0a[(lcell-1)] = FMUL(dconst1a,FADD(mod.esa04,FMUL(FMUL(1.24600005f,knacc[(lcell-1)]),mod.esa16))); // 6852
+            dchat3a[(lcell-1)] = FMUL(dconst1a,FADD(mod.esam20,FMUL(FMUL(1.24600005f,knacc[(lcell-1)]),mod.esam32))); // 6855
+            vghat0a[(lcell-1)] = FMUL(dconst3a,FADD(mod.esa16,FMUL(FMUL(1.24600005f,knacc[(lcell-1)]),mod.esa04))); // 6858
+            vghat3a[(lcell-1)] = FMUL(dconst3a,FADD(mod.esa64,FMUL(FMUL(1.24600005f,knacc[(lcell-1)]),mod.esa28))); // 6861
+            dchat0c[(lcell-1)] = FMUL(dconst1c,FADD(mod.esc04,FMUL(FMUL(1.24600005f,kncor[(lcell-1)]),mod.esc16))); // 6867
+            dchat3c[(lcell-1)] = FMUL(dconst1c,FADD(mod.escm20,FMUL(FMUL(1.24600005f,kncor[(lcell-1)]),mod.escm32))); // 6870
+            vghat0c[(lcell-1)] = FMUL(dconst3c,FADD(mod.esc16,FMUL(FMUL(1.24600005f,kncor[(lcell-1)]),mod.esc04))); // 6873
+            vghat3c[(lcell-1)] = FMUL(dconst3c,FADD(mod.esc64,FMUL(FMUL(1.24600005f,kncor[(lcell-1)]),mod.esc28))); // 6876
+        } }
+        { int f2cu_e2 = numcells; for (lcell = 1; lcell <= f2cu_e2; lcell += 1) { // 6890
+            nu = FDIV(amu[(lcell-1)],blkdens[(lcell-1)]); // 6892
+            ustfac = FDIV(FMUL(ustar[(lcell-1)],ustar[(lcell-1)]),FMUL(9.80622005f,nu)); // 6893
+            utscale = FADD(ustar[(lcell-1)],FDIV(FMUL(FMUL(0.239999995f,wstar[(lcell-1)]),wstar[(lcell-1)]),ustar[(lcell-1)])); // 6894
+            sc0n = FDIV(nu,dchat0n[(lcell-1)]); // 6901
+            st0n = f2cu_maxf(FMUL(vghat0n[(lcell-1)],ustfac),0.00999999978f); // 6902
+            rd0n = FDIV(1.0f,FMUL(utscale,FADD(gfk_pow(sc0n,-0.666666687f),gfk_pow(10.0f,(-FDIV(3.0f,st0n)))))); // 6903
+            vdep[(lcell-1)+(0)*(((blksize-1)+1))] = FADD(vghat0n[(lcell-1)],FDIV(1.0f,FADD(FADD(ra[(lcell-1)],rd0n),FMUL(FMUL(rd0n,ra[(lcell-1)]),vghat0n[(lcell-1)])))); // 6906
+            vsed[(lcell-1)+(0)*(((blksize-1)+1))] = vghat0n[(lcell-1)]; // 6910
+            sc0a = FDIV(nu,dchat0a[(lcell-1)]); // 6914
+            st0a = f2cu_maxf(FMUL(vghat0a[(lcell-1)],ustfac),0.00999999978f); // 6915
+            rd0a = FDIV(1.0f,FMUL(utscale,FADD(gfk_pow(sc0a,-0.666666687f),gfk_pow(10.0f,(-FDIV(3.0f,st0a)))))); // 6916
+            vdep[(lcell-1)+(1)*(((blksize-1)+1))] = FADD(vghat0a[(lcell-1)],FDIV(1.0f,FADD(FADD(ra[(lcell-1)],rd0a),FMUL(FMUL(rd0a,ra[(lcell-1)]),vghat0a[(lcell-1)])))); // 6919
+            vsed[(lcell-1)+(1)*(((blksize-1)+1))] = vghat0a[(lcell-1)]; // 6923
+            sc0c = FDIV(nu,dchat0c[(lcell-1)]); // 6927
+            rd0c = FDIV(1.0f,FMUL(utscale,gfk_pow(sc0c,-0.666666687f))); // 6932
+            vdep[(lcell-1)+(2)*(((blksize-1)+1))] = FADD(vghat0c[(lcell-1)],FDIV(1.0f,FADD(FADD(ra[(lcell-1)],rd0c),FMUL(FMUL(rd0c,ra[(lcell-1)]),vghat0c[(lcell-1)])))); // 6935
+            vsed[(lcell-1)+(2)*(((blksize-1)+1))] = vghat0c[(lcell-1)]; // 6939
+            sc3n = FDIV(nu,dchat3n[(lcell-1)]); // 6945
+            st3n = f2cu_maxf(FMUL(vghat3n[(lcell-1)],ustfac),0.00999999978f); // 6946
+            rd3n = FDIV(1.0f,FMUL(utscale,FADD(gfk_pow(sc3n,-0.666666687f),gfk_pow(10.0f,(-FDIV(3.0f,st3n)))))); // 6947
+            vdep[(lcell-1)+(3)*(((blksize-1)+1))] = FADD(vghat3n[(lcell-1)],FDIV(1.0f,FADD(FADD(ra[(lcell-1)],rd3n),FMUL(FMUL(rd3n,ra[(lcell-1)]),vghat3n[(lcell-1)])))); // 6950
+            vsed[(lcell-1)+(3)*(((blksize-1)+1))] = vghat3n[(lcell-1)]; // 6954
+            sc3a = FDIV(nu,dchat3a[(lcell-1)]); // 6958
+            st3a = f2cu_maxf(FMUL(vghat3a[(lcell-1)],ustfac),0.00999999978f); // 6959
+            rd3a = FDIV(1.0f,FMUL(utscale,FADD(gfk_pow(sc3a,-0.666666687f),gfk_pow(10.0f,(-FDIV(3.0f,st3a)))))); // 6960
+            vdep[(lcell-1)+(4)*(((blksize-1)+1))] = FADD(vghat3a[(lcell-1)],FDIV(1.0f,FADD(FADD(ra[(lcell-1)],rd3a),FMUL(FMUL(rd3a,ra[(lcell-1)]),vghat3a[(lcell-1)])))); // 6963
+            vsed[(lcell-1)+(4)*(((blksize-1)+1))] = vghat3a[(lcell-1)]; // 6986
+            sc3c = FDIV(nu,dchat3c[(lcell-1)]); // 6990
+            rd3c = FDIV(1.0f,FMUL(utscale,gfk_pow(sc3c,-0.666666687f))); // 6995
+            vdep[(lcell-1)+(6)*(((blksize-1)+1))] = FADD(vghat3c[(lcell-1)],FDIV(1.0f,FADD(FADD(ra[(lcell-1)],rd3c),FMUL(FMUL(rd3c,ra[(lcell-1)]),vghat3c[(lcell-1)])))); // 6997
+            vsed[(lcell-1)+(5)*(((blksize-1)+1))] = vghat3c[(lcell-1)]; // 7003
+        } }
+    } else {
+        { int f2cu_e2 = numcells; for (lcell = 1; lcell <= f2cu_e2; lcell += 1) { // 7013
+            dconst2 = FDIV(9.80622005f,FMUL(18.0f,amu[(lcell-1)])); // 7015
+            dconst3n = FMUL(FMUL(dconst2,pdensn[(lcell-1)]),FMUL(dgnuc[(lcell-1)],dgnuc[(lcell-1)])); // 7017
+            dconst3a = FMUL(FMUL(dconst2,pdensa[(lcell-1)]),FMUL(dgacc[(lcell-1)],dgacc[(lcell-1)])); // 7018
+            dconst3c = FMUL(FMUL(dconst2,pdensc[(lcell-1)]),FMUL(dgcor[(lcell-1)],dgcor[(lcell-1)])); // 7019
+            vghat0n[(lcell-1)] = FMUL(dconst3n,FADD(mod.esn16,FMUL(FMUL(1.24600005f,knnuc[(lcell-1)]),mod.esn04))); // 7021
+            vsed[(lcell-1)+(0)*(((blksize-1)+1))] = vghat0n[(lcell-1)]; // 7026
+            vghat3n[(lcell-1)] = FMUL(dconst3n,FADD(mod.esn64,FMUL(FMUL(1.24600005f,knnuc[(lcell-1)]),mod.esn28))); // 7028
+            vsed[(lcell-1)+(3)*(((blksize-1)+1))] = vghat3n[(lcell-1)]; // 7033
+            vghat0a[(lcell-1)] = FMUL(dconst3a,FADD(mod.esa16,FMUL(FMUL(1.24600005f,knacc[(lcell-1)]),mod.esa04))); // 7035
+            vsed[(lcell-1)+(1)*(((blksize-1)+1))] = vghat0a[(lcell-1)]; // 7040
+            vghat3a[(lcell-1)] = FMUL(dconst3a,FADD(mod.esa64,FMUL(FMUL(1.24600005f,knacc[(lcell-1)]),mod.esa28))); // 7042
+            vsed[(lcell-1)+(4)*(((blksize-1)+1))] = vghat3a[(lcell-1)]; // 7052
+            vghat0c[(lcell-1)] = FMUL(dconst3c,FADD(mod.esc16,FMUL(FMUL(1.24600005f,kncor[(lcell-1)]),mod.esc04))); // 7054
+            vsed[(lcell-1)+(2)*(((blksize-1)+1))] = vghat0c[(lcell-1)]; // 7059
+            vghat3c[(lcell-1)] = FMUL(dconst3c,FADD(mod.esc64,FMUL(FMUL(1.24600005f,kncor[(lcell-1)]),mod.esc28))); // 7062
+            vsed[(lcell-1)+(5)*(((blksize-1)+1))] = vghat3c[(lcell-1)]; // 7067
+        } }
+    }
+}
+__device__ void sg_vdvg_2(SorgamModule &mod, int blksize, int nspcsda, int numcells, int layer, const float *cblk, const float *blkta, const float *blkdens, const float *ra, const float *ustar, const float *pblh, const float *zntt, const float *rmolm, const float *amu, const float *dgnuc, const float *dgacc, const float *dgcor, const float *xlm, const float *knnuc, const float *knacc, const float *kncor, const float *pdensn, const float *pdensa, const float *pdensc, float *vsed, float *vdep) {
+    int lcell;
+    int n;
+    float dconst1;
+    float dconst2;
+    float dconst3;
+    float dconst3n;
+    float dconst3a;
+    float dconst3c;
+    float utscale;
+    float czh;
+    float nu;
+    float sum0;
+    float sum3;
+    float dq;
+    float knq;
+    float cunq;
+    float vsedq;
+    float scq;
+    float stq;
+    float rsurfq;
+    float vdplim;
+    float eff_dif;
+    float eff_imp;
+    float eff_int;
+    float rbcor;
+    if ((0 == 1)) { // 7161
+        return; // 7162
+    }
+    if ((0 == 1)) {
+        // 7166: print omitted
+    }
+    if ((layer == 1)) { // 7167
+        { int f2cu_e2 = numcells; for (lcell = 1; lcell <= f2cu_e2; lcell += 1) { // 7170
+            dconst1 = FDIV(FMUL(1.38065789e-23f,blkta[(lcell-1)]),FMUL(9.42477798f,amu[(lcell-1)])); // 7172
+            dconst2 = FDIV(9.80622005f,FMUL(18.0f,amu[(lcell-1)])); // 7174
+            dconst3 = FDIV(ustar[(lcell-1)],FMUL(FMUL(9.0f,amu[(lcell-1)]),0.00200000009f)); // 7175
+            nu = FDIV(amu[(lcell-1)],blkdens[(lcell-1)]); // 7179
+            utscale = 1.0f; // 7181
+            if ((0 == 1)) { // 7182
+                if ((rmolm[(lcell-1)] < 0.0f)) { // 7184
+                    czh = (-FMUL(FMUL(1.0f,pblh[(lcell-1)]),rmolm[(lcell-1)])); // 7185
+                    if ((czh > 30.0f)) { // 7186
+                        utscale = FMUL(0.449999988f,gfk_pow(czh,0.666700006f)); // 7187
+                    } else {
+                        utscale = FADD(1.0f,gfk_pow((-FMUL(300.0f,rmolm[(lcell-1)])),0.666700006f)); // 7189
+                    }
+                }
+            }
+            utscale = FMUL(ustar[(lcell-1)],utscale); // 7193
+            if ((0 == 1)) { // 7194
+                // 7195: print omitted
+                // 7196: print omitted
+                // 7197: print omitted
+                // 7198: print omitted
+            }
+            sum0 = 0.0f; // 7203
+            sum3 = 0.0f; // 7204
+            { int f2cu_e3 = 7; for (n = 1; n <= f2cu_e3; n += 1) { // 7205
+                dq = FMUL(dgnuc[(lcell-1)],gfk_exp(FMUL(FMUL(mod.y_gq[(n-1)],1.41421354f),mod.xxlsgn))); // 7206
+                knq = FDIV(FMUL(2.0f,xlm[(lcell-1)]),dq); // 7207
+                cunq = FADD(1.0f,FMUL(knq,FADD(1.25699997f,FMUL(0.400000006f,gfk_exp((-FDIV(1.10000002f,knq))))))); // 7208
+                vsedq = FMUL(FMUL(FMUL(FMUL(pdensn[(lcell-1)],dconst2),cunq),dq),dq); // 7209
+                scq = FDIV(FDIV(FMUL(nu,dq),dconst1),cunq); // 7210
+                eff_dif = gfk_pow(scq,-0.666666687f); // 7211
+                stq = FMUL(FMUL(dconst3,pdensn[(lcell-1)]),FMUL(dq,dq)); // 7212
+                eff_imp = FMUL(FDIV(stq,FADD(0.800000012f,stq)),FDIV(stq,FADD(0.800000012f,stq))); // 7213
+                eff_int = FDIV(FMUL(FADD(0.00115999999f,FMUL(0.00609999988f,zntt[(lcell-1)])),dq),1.41399994e-07f); // 7215
+                rbcor = 1.0f; // 7216
+                vdplim = FMUL(FMUL(utscale,FADD(FADD(eff_dif,eff_imp),eff_int)),rbcor); // 7217
+                vdplim = f2cu_minf(vdplim,0.0199999996f); // 7219
+                rsurfq = FADD(ra[(lcell-1)],FDIV(1.0f,vdplim)); // 7220
+                sum0 = FADD(sum0,FMUL(mod.wgaus[(n-1)],FADD(vsedq,FDIV(1.0f,rsurfq)))); // 7226
+                sum3 = FADD(sum3,FMUL(FMUL(mod.wgaus[(n-1)],FADD(vsedq,FDIV(1.0f,rsurfq))),FMUL(dq,FMUL(dq,dq)))); // 7227
+            } }
+            vdep[(lcell-1)+(0)*(((blksize-1)+1))] = FDIV(sum0,1.7724539f); // 7229
+            vdep[(lcell-1)+(3)*(((blksize-1)+1))] = FDIV(sum3,FMUL(FMUL(1.7724539f,gfk_exp(FMUL(FMUL(2.12132025f,mod.xxlsgn),FMUL(2.12132025f,mod.xxlsgn)))),FMUL(dgnuc[(lcell-1)],FMUL(dgnuc[(lcell-1)],dgnuc[(lcell-1)])))); // 7230
+            sum0 = 0.0f; // 7234
+            sum3 = 0.0f; // 7235
+            { int f2cu_e3 = 7; for (n = 1; n <= f2cu_e3; n += 1) { // 7236
+                dq = FMUL(dgacc[(lcell-1)],gfk_exp(FMUL(FMUL(mod.y_gq[(n-1)],1.41421354f),mod.xxlsga))); // 7237
+                knq = FDIV(FMUL(2.0f,xlm[(lcell-1)]),dq); // 7238
+                cunq = FADD(1.0f,FMUL(knq,FADD(1.25699997f,FMUL(0.400000006f,gfk_exp((-FDIV(1.10000002f,knq))))))); // 7239
+                vsedq = FMUL(FMUL(FMUL(FMUL(pdensa[(lcell-1)],dconst2),cunq),dq),dq); // 7240
+                scq = FDIV(FDIV(FMUL(nu,dq),dconst1),cunq); // 7241
+                eff_dif = gfk_pow(scq,-0.666666687f); // 7242
+                stq = FMUL(FMUL(dconst3,pdensa[(lcell-1)]),FMUL(dq,dq)); // 7243
+                eff_imp = FMUL(FDIV(stq,FADD(0.800000012f,stq)),FDIV(stq,FADD(0.800000012f,stq))); // 7244
+                eff_int = FDIV(FMUL(FADD(0.00115999999f,FMUL(0.00609999988f,zntt[(lcell-1)])),dq),1.41399994e-07f); // 7246
+                rbcor = 1.0f; // 7247
+                vdplim = FMUL(FMUL(utscale,FADD(FADD(eff_dif,eff_imp),eff_int)),rbcor); // 7248
+                vdplim = f2cu_minf(vdplim,0.0199999996f); // 7249
+                rsurfq = FADD(ra[(lcell-1)],FDIV(1.0f,vdplim)); // 7250
+                sum0 = FADD(sum0,FMUL(mod.wgaus[(n-1)],FADD(vsedq,FDIV(1.0f,rsurfq)))); // 7256
+                sum3 = FADD(sum3,FMUL(FMUL(mod.wgaus[(n-1)],FADD(vsedq,FDIV(1.0f,rsurfq))),FMUL(dq,FMUL(dq,dq)))); // 7257
+                if ((0 == 1)) { // 7258
+                    // 7259: print omitted
+                    // 7260: print omitted
+                    // 7261: print omitted
+                    // 7262: print omitted
+                }
+            } }
+            vdep[(lcell-1)+(1)*(((blksize-1)+1))] = FDIV(sum0,1.7724539f); // 7265
+            vdep[(lcell-1)+(4)*(((blksize-1)+1))] = FDIV(sum3,FMUL(FMUL(1.7724539f,gfk_exp(FMUL(FMUL(2.12132025f,mod.xxlsga),FMUL(2.12132025f,mod.xxlsga)))),FMUL(dgacc[(lcell-1)],FMUL(dgacc[(lcell-1)],dgacc[(lcell-1)])))); // 7266
+            sum0 = 0.0f; // 7270
+            sum3 = 0.0f; // 7271
+            { int f2cu_e3 = 7; for (n = 1; n <= f2cu_e3; n += 1) { // 7272
+                dq = FMUL(dgcor[(lcell-1)],gfk_exp(FMUL(FMUL(mod.y_gq[(n-1)],1.41421354f),mod.xxlsgc))); // 7273
+                knq = FDIV(FMUL(2.0f,xlm[(lcell-1)]),dq); // 7274
+                cunq = FADD(1.0f,FMUL(knq,FADD(1.25699997f,FMUL(0.400000006f,gfk_exp((-FDIV(1.10000002f,knq))))))); // 7275
+                vsedq = FMUL(FMUL(FMUL(FMUL(pdensc[(lcell-1)],dconst2),cunq),dq),dq); // 7276
+                scq = FDIV(FDIV(FMUL(nu,dq),dconst1),cunq); // 7277
+                eff_dif = gfk_pow(scq,-0.666666687f); // 7278
+                stq = FMUL(FMUL(dconst3,pdensc[(lcell-1)]),FMUL(dq,dq)); // 7279
+                eff_imp = FMUL(FDIV(stq,FADD(0.800000012f,stq)),FDIV(stq,FADD(0.800000012f,stq))); // 7280
+                eff_int = FDIV(FMUL(FADD(0.00115999999f,FMUL(0.00609999988f,zntt[(lcell-1)])),dq),1.41399994e-07f); // 7282
+                eff_int = f2cu_minf(1.0f,eff_int); // 7283
+                rbcor = gfk_exp((-FMUL(2.0f,gfk_pow(stq,0.5f)))); // 7284
+                vdplim = FMUL(FMUL(utscale,FADD(FADD(eff_dif,eff_imp),eff_int)),rbcor); // 7285
+                vdplim = f2cu_minf(vdplim,0.0199999996f); // 7286
+                vdplim = f2cu_maxf(vdplim,1.00000002e-35f); // 7287
+                rsurfq = FADD(ra[(lcell-1)],FDIV(1.0f,vdplim)); // 7288
+                sum0 = FADD(sum0,FMUL(mod.wgaus[(n-1)],FADD(vsedq,FDIV(1.0f,rsurfq)))); // 7294
+                sum3 = FADD(sum3,FMUL(FMUL(mod.wgaus[(n-1)],FADD(vsedq,FDIV(1.0f,rsurfq))),FMUL(dq,FMUL(dq,dq)))); // 7295
+            } }
+            vdep[(lcell-1)+(2)*(((blksize-1)+1))] = FDIV(sum0,1.7724539f); // 7297
+            vdep[(lcell-1)+(6)*(((blksize-1)+1))] = FDIV(sum3,FMUL(FMUL(1.7724539f,gfk_exp(FMUL(FMUL(2.12132025f,mod.xxlsgc),FMUL(2.12132025f,mod.xxlsgc)))),FMUL(dgcor[(lcell-1)],FMUL(dgcor[(lcell-1)],dgcor[(lcell-1)])))); // 7298
+        } }
+    }
+    { int f2cu_e1 = numcells; for (lcell = 1; lcell <= f2cu_e1; lcell += 1) { // 7306
+        dconst2 = FDIV(9.80622005f,FMUL(18.0f,amu[(lcell-1)])); // 7308
+        dconst3n = FMUL(FMUL(dconst2,pdensn[(lcell-1)]),FMUL(dgnuc[(lcell-1)],dgnuc[(lcell-1)])); // 7309
+        dconst3a = FMUL(FMUL(dconst2,pdensa[(lcell-1)]),FMUL(dgacc[(lcell-1)],dgacc[(lcell-1)])); // 7310
+        dconst3c = FMUL(FMUL(dconst2,pdensc[(lcell-1)]),FMUL(dgcor[(lcell-1)],dgcor[(lcell-1)])); // 7311
+        vsed[(lcell-1)+(0)*(((blksize-1)+1))] = FMUL(dconst3n,FADD(mod.esn16,FMUL(FMUL(1.24600005f,knnuc[(lcell-1)]),mod.esn04))); // 7314
+        vsed[(lcell-1)+(3)*(((blksize-1)+1))] = FMUL(dconst3n,FADD(mod.esn64,FMUL(FMUL(1.24600005f,knnuc[(lcell-1)]),mod.esn28))); // 7316
+        vsed[(lcell-1)+(1)*(((blksize-1)+1))] = FMUL(dconst3a,FADD(mod.esa16,FMUL(FMUL(1.24600005f,knacc[(lcell-1)]),mod.esa04))); // 7320
+        vsed[(lcell-1)+(4)*(((blksize-1)+1))] = FMUL(dconst3a,FADD(mod.esa64,FMUL(FMUL(1.24600005f,knacc[(lcell-1)]),mod.esa28))); // 7322
+        vsed[(lcell-1)+(2)*(((blksize-1)+1))] = FMUL(dconst3c,FADD(mod.esc16,FMUL(FMUL(1.24600005f,kncor[(lcell-1)]),mod.esc04))); // 7326
+        vsed[(lcell-1)+(5)*(((blksize-1)+1))] = FMUL(dconst3c,FADD(mod.esc64,FMUL(FMUL(1.24600005f,kncor[(lcell-1)]),mod.esc28))); // 7328
+    } }
+}
 // END GENERATED
 
 // BEGIN CLEAN-ROOM SOLVER
@@ -1974,3 +2274,165 @@ extern "C" __global__ void chem_sorgam(
         ((float*)aer[l])[idx] = f2cu_maxf(epsilc, FMUL(c[l], alt[idx]));
     if (mod.f2cu_fatal) *fatal = mod.f2cu_fatal;
 }
+
+// sorgam_depdriver (module_aerosols_sorgam.F:588-1036) for one column's
+// lowest level: the modal deposition velocities (m/s) of the 38 aerosol rows,
+// written in AEROSOLS order.  vdvg_2 = 0 selects VDVG (aer_drydep_opt = 11),
+// else VDVG_2.  diagnostic_dep's ddflx accumulation is not carried.
+extern "C" __global__ void chem_sorgam_drydep(
+    const unsigned long long* aer, const unsigned long long* gas,
+    const unsigned long long* aux, const float* t_phy, const float* p_phy,
+    const float* alt, const float* ust, const float* rmol, const float* znt,
+    const float* pbl, const float* aer_res, const unsigned long long* vgsa,
+    int ncol, int use_vdvg_2, int cw_phase) {
+    const int col = blockIdx.x * blockDim.x + threadIdx.x;
+    if (col >= ncol) return;
+    const float epsilc = 1.E-16f;
+    const float rgas = 8.314510f, mwso4 = 96.0576f, mwhno3 = 63.01287f,
+                mwnh3 = 17.03061f, mwhcl = 36.46100f;
+    SorgamModule mod;
+    sg_sorgam_module_constants(mod);
+    mod.cw_phase = cw_phase;
+    mod.f2cu_fatal = 0;
+    const float t = t_phy[col];
+    const float p = FMUL(0.001f, p_phy[col]);
+    const float convfac = FMUL(FDIV(FDIV(p, rgas), t), 1000.f);
+    float cblk[SG_L1AE];
+    cblk[SG_VSULF - 1] = f2cu_maxf(epsilc, FMUL(FMUL(((const float*)gas[0])[col], convfac), mwso4));
+    cblk[SG_VHNO3 - 1] = f2cu_maxf(epsilc, FMUL(FMUL(((const float*)gas[1])[col], convfac), mwhno3));
+    cblk[SG_VNH3 - 1] = f2cu_maxf(epsilc, FMUL(FMUL(((const float*)gas[2])[col], convfac), mwnh3));
+    cblk[SG_VHCL - 1] = f2cu_maxf(epsilc, FMUL(FMUL(((const float*)gas[3])[col], convfac), mwhcl));
+    float blkprs[1] = {FMUL(1.e3f, p)}, blkta[1] = {t};
+    float ustar[1] = {f2cu_maxf(1.e-1f, ust[col])}, wstar[1] = {0.f};
+    float pblh[1] = {pbl[col]}, zntt[1] = {znt[col]}, rmolm[1] = {rmol[col]};
+    const float convfac2 = FDIV(1.f, alt[col]);
+    float blkdens[1] = {convfac2}, ra[1] = {aer_res[col]};
+    for (int l = 0; l < 38; ++l)
+        cblk[SG_AER_V[l] - 1] = f2cu_maxf(epsilc, FMUL(((const float*)aer[l])[col], convfac2));
+    for (int l = 0; l < 13; ++l) cblk[SG_AUX_V[l] - 1] = ((const float*)aux[l])[col];
+    float pmassn[1], pmassa[1], pmassc[1], pdensn[1], pdensa[1], pdensc[1], xlm[1], amu[1];
+    float dgnuc[1], dgacc[1], dgcor[1], knnuc[1], knacc[1], kncor[1];
+    float vsed[SG_NASPCSSED], vdep[SG_NASPCSDEP];
+    int blksize = 1, nspcsda = SG_L1AE, numcells = 1, k = 1;
+    sg_modpar(mod, blksize, nspcsda, numcells, cblk, blkta, blkprs, pmassn, pmassa, pmassc,
+              pdensn, pdensa, pdensc, xlm, amu, dgnuc, dgacc, dgcor, knnuc, knacc, kncor);
+    if (!use_vdvg_2)
+        sg_vdvg(mod, blksize, nspcsda, numcells, k, cblk, blkta, blkdens, ra, ustar, wstar,
+                amu, dgnuc, dgacc, dgcor, knnuc, knacc, kncor, pdensn, pdensa, pdensc, vsed, vdep);
+    else
+        sg_vdvg_2(mod, blksize, nspcsda, numcells, k, cblk, blkta, blkdens, ra, ustar, pblh,
+                  zntt, rmolm, amu, dgnuc, dgacc, dgcor, xlm, knnuc, knacc, kncor, pdensn,
+                  pdensa, pdensc, vsed, vdep);
+    // :315-352: accumulation-mode masses take VDMACC, Aitken VDMNUC, coarse
+    // VDMCOR, the three numbers their own.  Rows 0..31 alternate j, i.
+    for (int l = 0; l < 38; ++l) {
+        float v;
+        if (l < 32) v = vdep[(l % 2 == 0 ? SG_VDMACC : SG_VDMNUC) - 1];
+        else if (l < 35) v = vdep[SG_VDMCOR - 1];
+        else v = vdep[(l == 35 ? SG_VDNNUC : l == 36 ? SG_VDNACC : SG_VDNCOR) - 1];
+        ((float*)vgsa[l])[col] = v;
+    }
+}
+
+// sum_pm_sorgam (module_aerosols_sorgam.F:498-586): PM2.5 dry mass, its
+// elemental carbon and water, and PM10, ug/m3.  WRF's ii = min(ide-1, i) is i
+// on the mass grid (ide is the staggered end), so every cell reads itself.
+extern "C" __global__ void chem_sorgam_sum_pm(
+    const unsigned long long* aer, const float* h2oaj, const float* h2oai,
+    const float* alt, float* pm25, float* pm25_water, float* pm25_ec, float* pm10,
+    int ncell) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= ncell) return;
+    const int src = idx;
+    float dry = 0.f;
+    for (int l = 0; l < 32; ++l) dry = FADD(dry, ((const float*)aer[l])[src]);
+    float ec = FADD(FADD(0.f, ((const float*)aer[28])[src]), ((const float*)aer[29])[src]);
+    float water = FADD(FADD(0.f, h2oaj[idx]), h2oai[idx]);
+    dry = FDIV(dry, alt[src]);
+    pm25[idx] = dry;
+    pm25_ec[idx] = FDIV(ec, alt[src]);
+    pm25_water[idx] = FDIV(water, alt[src]);
+    pm10[idx] = FADD(dry, FDIV(FADD(FADD(((const float*)aer[32])[src], ((const float*)aer[34])[src]),
+                                   ((const float*)aer[33])[src]), alt[src]));
+}
+
+// aerosols_sorgam_init past its chem_in_opt = 1 return
+// (module_aerosols_sorgam.F:7525-7600) for one cell: the aerosol rows'
+// initial values and the three modal numbers.  aer_ic_opt 1 (AER_IC_DEFAULT)
+// splits the gas sulfate into the two modes; 101 (AER_IC_PNNL) is
+// sorgam_init_aer_ic_pnnl's height profile (:7618-7765) at the layer's mid
+// height.  sulf is the gas row (ppmv, updated in place); convfac is the
+// caller's p/(R T) the routine receives; z_at_w has nz + 1 w levels.
+__device__ void sg_ic_pnnl(float *c, float &sulf, float z) {
+    const float conmin = SG_CONMIN;
+    float mult;
+    if (z <= 500.f) mult = 1.0f;
+    else if (z > 500.f && z <= 1000.f) mult = FSUB(1.0f, FMUL(0.001074f, FSUB(z, 500.f)));
+    else if (z > 1000.f && z <= 5000.f) mult = FSUB(0.463f, FMUL(0.000111f, FSUB(z, 1000.f)));
+    else mult = 0.019f;
+    sulf = FMUL(mult, conmin);
+    c[0] = FMUL(FMUL(mult, 0.300f), 0.97f); c[1] = FMUL(FMUL(mult, 0.300f), 0.03f);
+    c[2] = FMUL(FMUL(mult, 0.094f), 0.97f); c[3] = FMUL(FMUL(mult, 0.094f), 0.03f);
+    c[4] = FMUL(FMUL(mult, 0.001f), 0.97f); c[5] = FMUL(FMUL(mult, 0.001f), 0.03f);
+    c[6] = 10.E-05f; c[7] = 10.E-05f; c[8] = 10.E-05f; c[9] = 10.E-05f;
+    c[28] = FMUL(FMUL(mult, 0.013f), 0.97f); c[29] = FMUL(FMUL(mult, 0.013f), 0.03f);
+    c[30] = FMUL(FMUL(mult, 4.500f), 0.97f); c[31] = FMUL(FMUL(mult, 4.500f), 0.03f);
+    c[32] = FDIV(FMUL(mult, 4.500f), 2.0f);
+    c[26] = FMUL(FMUL(mult, 0.088f), 0.97f); c[27] = FMUL(FMUL(mult, 0.088f), 0.03f);
+    for (int l = 10; l < 26; ++l) c[l] = conmin;
+    c[33] = FMUL(mult, 1.75f);
+}
+
+extern "C" __global__ void chem_sorgam_ic(
+    const unsigned long long* aer, float* sulf, const float* convfac, const float* z_at_w,
+    int nz, int nc, int aer_ic_opt, int* fatal) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= nz * nc) return;
+    const int k = idx / nc, col = idx % nc;
+    SorgamModule mod;
+    sg_sorgam_module_constants(mod);
+    float c[38];
+    for (int l = 0; l < 38; ++l) c[l] = 1.E-16f;            // :7526-7528
+    c[35] = 1.e8f; c[36] = 1.e8f;                            // :7529-7530
+    float s = sulf[idx];
+    if (aer_ic_opt == 1) {                                   // AER_IC_DEFAULT
+        const float mwso4 = 96.03f, splitfac = .98f, so4vaptoaer = .999f;
+        const float base = FMUL(FMUL(s, convfac[idx]), mwso4);
+        c[0] = FMUL(FMUL(base, splitfac), so4vaptoaer);
+        c[1] = FMUL(FMUL(base, FSUB(1.f, splitfac)), so4vaptoaer);
+        s = FMUL(s, FSUB(1.f, so4vaptoaer));
+        for (int l = 2; l < 10; ++l) c[l] = 10.E-05f;
+    } else if (aer_ic_opt == 101) {                          // AER_IC_PNNL
+        const float zz = FMUL(FADD(z_at_w[k * nc + col], z_at_w[(k + 1) * nc + col]), 0.5f);
+        sg_ic_pnnl(c, s, zz);
+    } else {
+        *fatal = 7550;                                       // wrf_error_fatal
+        return;
+    }
+    // :7555-7590.  Aitken rows are the odd indices 1..31, accumulation the even.
+    float m3nuc = FMUL(SG_SO4FAC, c[1]);
+    m3nuc = FADD(m3nuc, FMUL(SG_NH4FAC, c[3]));
+    m3nuc = FADD(m3nuc, FMUL(SG_NO3FAC, c[5]));
+    m3nuc = FADD(m3nuc, FMUL(SG_NAFAC, c[7]));
+    m3nuc = FADD(m3nuc, FMUL(SG_CLFAC, c[9]));
+    for (int l = 11; l <= 27; l += 2) m3nuc = FADD(m3nuc, FMUL(SG_ORGFAC, c[l]));
+    m3nuc = FADD(m3nuc, FMUL(SG_ANTHFAC, c[31]));
+    m3nuc = FADD(m3nuc, FMUL(SG_ANTHFAC, c[29]));
+    float m3acc = FMUL(SG_SO4FAC, c[0]);
+    m3acc = FADD(m3acc, FMUL(SG_NH4FAC, c[2]));
+    m3acc = FADD(m3acc, FMUL(SG_NO3FAC, c[4]));
+    m3acc = FADD(m3acc, FMUL(SG_NAFAC, c[6]));
+    m3acc = FADD(m3acc, FMUL(SG_CLFAC, c[8]));
+    for (int l = 10; l <= 26; l += 2) m3acc = FADD(m3acc, FMUL(SG_ORGFAC, c[l]));
+    m3acc = FADD(m3acc, FMUL(SG_ANTHFAC, c[30]));
+    m3acc = FADD(m3acc, FMUL(SG_ANTHFAC, c[28]));
+    float m3cor = FMUL(SG_SOILFAC, c[34]);
+    m3cor = FADD(m3cor, FMUL(SG_SEASFAC, c[33]));
+    m3cor = FADD(m3cor, FMUL(SG_ANTHFAC, c[32]));
+    c[35] = FDIV(m3nuc, FMUL(SG_DGININ3, mod.esn36));
+    c[36] = FDIV(m3acc, FMUL(SG_DGINIA3, mod.esa36));
+    c[37] = FDIV(m3cor, FMUL(SG_DGINIC3, mod.esc36));
+    for (int l = 0; l < 38; ++l) ((float*)aer[l])[idx] = c[l];
+    sulf[idx] = s;
+}
+

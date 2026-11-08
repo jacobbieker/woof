@@ -169,35 +169,84 @@ working beside the new `WOOF_*` spelling.
 ## This fork
 
 Everything above describes Recast WOOF, and is kept as upstream wrote it.
-This section is the fork's own. Its additions sit on top of the latest
-upstream release and do not change upstream's defaults: each new option is
-off until selected, and a configuration that selects none of them runs as
-upstream's does. The fork's own changes are recorded in
-[FORK-CHANGELOG.md](FORK-CHANGELOG.md).
+This section is the fork's own. The fork carries upstream WOOF 1.1.6 and adds
+the work below on top of it. It does not change upstream's defaults: each new
+option is off until selected, and a configuration that selects none of them
+runs as upstream's does. Every merge into the fork's `main` is released as a
+new `metal-woof` build (`metal-vX.Y.Z.N`). The fork's own changes are recorded
+in [FORK-CHANGELOG.md](FORK-CHANGELOG.md).
+
+Upstream now covers several things this section once listed as the fork's:
+storm-following nests and storm-following hex regions (with HAFS starts and
+storm merge), coupled ocean waves and storm surge, a GPU mixed-layer ocean
+and sea ice, coupled hydrology over a NextGen hydrofabric, HRRR-Smoke and
+aerosol transport, and its own wiring of `use_theta_m`, FARMS, MAD-WRF and
+Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
 
 ### What it adds
 
 - **An Apple-silicon backend (MLX/Metal).** `WOOF_BACKEND=mlx` runs the GPU
   code on a Mac. The CUDA kernels are not rewritten by hand: each `.cu` unit
   is translated to Metal when it first loads, and `import cupy` resolves to a
-  CuPy-compatible layer over MLX. CUDA runs exactly as before. Design and
-  details: [docs/dev/mlx-backend.md](docs/dev/mlx-backend.md).
+  CuPy-compatible layer over MLX. CUDA runs exactly as before. Under strict
+  numerics, binary32 `pow` on Metal is WOOF's own correctly rounded `powf`,
+  so it carries no vendor code. Design and details:
+  [docs/dev/mlx-backend.md](docs/dev/mlx-backend.md).
 - **A host (CPU) backend.** `WOOF_BACKEND=host` runs the same GPU code on
   any CPU. Each `.cu` unit is compiled by the host C++ compiler, and
   `import cupy` resolves to a CuPy-compatible layer over NumPy. It is never
   selected by default. Design and measurements:
   [docs/dev/host-backend.md](docs/dev/host-backend.md).
-- **Further WRF physics,** each held word for word to compiled WRF v4.7.1
-  Fortran where the port says so:
+- **WRF-Chem gas and aerosol chemistry,** each piece held word for word to
+  WRF v4.6.1's chem code: RADM2 gas phase, MADE/SORGAM aerosol dynamics,
+  equilibrium and dry deposition. These form the `chem_opt = 2` package,
+  which is still refused while photolysis and emissions are ported. Where a
+  WRF routine is not freely licensed, the default build uses a version
+  written from the published method instead. The exact routine is either an
+  explicit opt-in, or is generated from your own WRF tree
+  (`WOOF_WRF_SOURCE`). Plan and licence table:
+  [docs/chem-coupled-aerosol-roadmap.md](docs/chem-coupled-aerosol-roadmap.md).
+- **Chemistry on the hex mesh.** Hex runs select a WRF-Chem species set with
+  `chem_opt` and the `&chem` options under their WRF names. The WRF column
+  processes run unchanged on hex columns, bitwise per column against the
+  regional model: dust, sea salt, dry deposition, vertical mixing, settling,
+  ageing, wet deposition and optics. Aerosol feedback on radiation and an
+  MICM gas-phase option (NCAR MUSICA) are in progress.
+- **WRF-Hydro and NEMO coupling, as explicit opt-ins.** Both are under
+  `optional/` and are never in the wheels, because their licences (UCAR
+  WRF-Hydro, CeCILL NEMO) are not ones the default build carries.
+  `WOOF_ENABLE_WRF_HYDRO=1` and `WOOF_ENABLE_NEMO=1` turn them on.
+  - WRF-Hydro: Noah and Noah-MP under `WRF_HYDRO`, the transfer between the
+    land-model grid and the routing grid, subsurface and overland routing,
+    Muskingum-Cunge and diffusive-wave channels, the groundwater bucket,
+    level-pool reservoirs and `hydro.namelist`. Each piece is bitwise against
+    WRF 4.7.1's `hydro/`.
+  - NEMO 5.0.2: the equation of state, TKE mixing, vertical and lateral
+    tracer diffusion, FCT advection and solar penetration. A coupled column
+    ocean is driven by WRF's ocean-coupler exchange (SST only for now).
+- **Noah-MP follows WRF 4.7.1's submodule (e5c0859), at the user's
+  request.** This is not a default change: the default
+  `noahmp_snow_age = "wrf_470"` already ages snow at night as e5c0859 does,
+  the glacier energy integrals already use the glacier column's own heat
+  capacity, and e5c0859's other edits are dead in WRF or arithmetic-neutral.
+  `noahmp_snow_age = "wrf_461"` keeps WRF 4.6.1's daytime-only aging.
+- **MPAS-Ocean, MPAS-Seaice and MALI land ice,** ported a piece at a time,
+  each word-exact to MPAS v8.4.2 on CUDA and Metal, behind the MPAS coupling
+  spine (`woof hex ice verify` and friends). So far:
+  - ocean tendency terms;
+  - sea-ice EVP internal stress;
+  - the MALI shallow-ice velocity solver, geometry diagnostics and thermal
+    initialisation.
+
+  Albany's higher-order solvers are refused by name. Plan:
+  [docs/mpas-coupled-roadmap.md](docs/mpas-coupled-roadmap.md).
+- **Further WRF physics,** each held word for word to compiled WRF Fortran
+  where the port says so:
   - SMS-3DTKE (`km_opt = 5`);
-  - `use_theta_m = 1` for every ported microphysics and cumulus scheme and
-    for WRF's own input files, plus `do_avgflx_em`;
-  - WRF-Solar: FARMS, the EPS perturbations, MAD-WRF, Deng shallow cumulus
-    and cumulus cloud fed to radiation;
-  - WRF v4.7.1's Fitch wind-farm scheme word for word as
-    `wind_farm_scheme = "fitch_wrf"` beside upstream's `fitch`, reading
-    WRF's turbine files and layout (or a turbine-library table) from
-    `wind_farms`, also on hex's unequal-area cells;
+  - `do_avgflx_em`;
+  - WRF v4.7.1's Fitch wind-farm scheme word for word, as
+    `wind_farm_scheme = "fitch_wrf"` beside upstream's `fitch`, also on hex's
+    unequal-area cells;
   - coupled fire spread and smoke;
   - Morrison with CESM aerosol (`mp_physics = 40`, `aercu_opt = 0`).
 - **Height-dependent resolution:** a partial-depth two-way nest, fine near
@@ -206,11 +255,13 @@ upstream's does. The fork's own changes are recorded in
 - **More data sources:** the Met Office global and UKV models, DWD ICON
   (global and the machine-learning variant) and additional mapped routes.
 - **Applied tooling:** wind-energy siting, hindcasts and power products,
-  storm-track planning with moving nests, and delete-after-commit
-  backpressure and domain selection for upstream's Icechunk store export
+  storm-track planning, and delete-after-commit backpressure and domain
+  selection for upstream's Icechunk store export
   (`[output] icechunk_delete_after_commit`, `icechunk_domains`).
-- **Continuous integration:** GitHub Actions on Linux and macOS, with a
-  self-hosted CUDA job ([docs/dev/ci.md](docs/dev/ci.md)).
+- **Continuous integration and releases:** GitHub Actions on Linux and
+  macOS, with a self-hosted CUDA job. Every merge to `main` tags, writes
+  release notes and publishes `metal-woof` to PyPI
+  ([docs/dev/ci.md](docs/dev/ci.md)).
 
 ### Install on a Mac
 
