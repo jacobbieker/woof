@@ -40,7 +40,8 @@ by them is implied.
 | `woof_nemo/trazdf.cu`, `trazdf.py` | `src/OCE/TRA/trazdf.F90` (tra_zdf, tra_zdf_imp) |
 | `woof_nemo/column.cu`, `column.py` | `src/OCE/stpmlf.F90` (the step order, time-level swap and Euler start); `src/OCE/SBC/sbcssm.F90` (nn_fsbc = 1 lines); `src/OCE/TRA/eosbn2.F90` (`eos_pt_from_ct_t`); `src/OCE/SBC/sbccpl.F90` (`sbc_cpl_rcv`'s ocean-only mapping, `sbc_cpl_snd`'s O_SSTSST); `src/OCE/ZDF/zdfdrg.F90` (`drg_init`, `zdf_drg_lin`, `zdf_drg_nonlin`); `src/OCE/ZDF/zdfphy.F90` (the avt/avm/avs copies, zdf_phy_init's background values); `src/OCE/TRA/trasbc.F90` (`tra_sbc`); `src/OCE/TRA/traatf_qco.F90` (`tra_atf_fix_lf`); `cfgs/SHARED/namelist_ref` (&namdrg_bot, &namzdf defaults) |
 | `woof_nemo/traadv.cu`, `traadv.py` | `src/OCE/TRA/traadv_fct.F90` (`tra_adv_fct`, `fct_up1_1stp`, `nonosc`, `interp_4th_cpt`) |
-| `oracle/` | build harnesses, service stubs and drivers (`build.sh`, `build_eos.sh`, `build_tke.sh`, `build_trazdf.sh`, `build_column.sh`, `build_traadv.sh`); they compile the pinned files at build time and copy none of them (`build_column.sh` cuts `sbc_cpl_rcv` from sbccpl.F90 into the build directory at build time) |
+| `woof_nemo/traldf.cu`, `traldf.py` | `src/OCE/TRA/traldf_lev.F90` (`traldf_lev_lap`, `traldf_lev_blp`) |
+| `oracle/` | build harnesses, service stubs and drivers (`build.sh`, `build_eos.sh`, `build_tke.sh`, `build_trazdf.sh`, `build_column.sh`, `build_traadv.sh`, `build_traldf.sh`); they compile the pinned files at build time and copy none of them (`build_column.sh` cuts `sbc_cpl_rcv` from sbccpl.F90 into the build directory at build time) |
 
 `traqsr.cu` is preceded at load time by WOOF's
 `woof/core/kernels/glibc_flt64.cuh` (glibc's binary64 exp/log words, MIT
@@ -71,3 +72,7 @@ zero as NEMO's single-process lbc_lnk_pt2pt does (jpfillcst), and runs
 signed zeros below the sea floor follow gfortran's x86 maxsd/minsd lowering
 of MAX/MIN (the second argument is returned when the two compare equal);
 `traadv.cu` keeps that rule.
+
+`oracle/build_traldf.sh NEMO_SOURCE_ROOT BUILD_DIR` compiles traldf_lev.F90
+whole against `traldf_stubs.F90` and runs `run_traldf.F90`, three calls of
+each iso-level operator.  The gate is `tests/test_nemo_traldf_parity.py`.

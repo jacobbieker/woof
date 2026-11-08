@@ -178,7 +178,10 @@ Metal, and refuses what it does not port by name.
    upstream step, 2nd/4th-order centred and 4th-order compact
    anti-diffusive fluxes, Zalesak's limiter; `tests/test_nemo_traadv_parity.py`)
    is ported given the transports; it does not enter the resting column.
-   The other advection schemes, lateral diffusion and the dynamics remain.  The
+   So is iso-level lateral diffusion (`traldf_lev.F90`, laplacian and
+   bilaplacian, `tests/test_nemo_traldf_parity.py`) given ahtu/ahtv.  The
+   other advection schemes, the iso-neutral diffusion operators (traldf_iso,
+   traldf_triad), ldf_tra's diffusivity fields and the dynamics remain.  The
    alternative is an external NEMO through a real coupler (out of
    process; NEMO stays a separate program and its licence does not reach
    WOOF), or, after the licence decision, NEMO kernels behind an opt-in with
