@@ -104,6 +104,9 @@ class Storage:
         return an input unchanged from a no-op (reshape, astype to the same
         dtype, contiguous), and two storages sharing one buffer would see
         each other's in-place writes."""
+        from woof.backend.facade import _capture
+        if _capture.recording() is not None:
+            _capture.refuse("a facade array allocation or operation")
         mx = _mx()
         flat = _materialize(arr)
         self.arr = flat if fresh else mx.array(flat)
@@ -128,6 +131,9 @@ class Storage:
 
     def rebind(self, arr):
         """A new value for a storage nobody can address yet (creation)."""
+        from woof.backend.facade import _capture
+        if _capture.recording() is not None:
+            _capture.refuse("a facade array allocation or operation")
         self.arr = _materialize(arr)
         PENDING.append(self)
 
@@ -137,6 +143,9 @@ class Storage:
         stream (writes through pointer tables are invisible to MLX's
         dependency graph)."""
         import mlx.core as mx
+        from woof.backend.facade import _capture
+        if _capture.recording() is not None:
+            _capture.refuse("an in-place write into a facade array (a[...] = v, fill, copy)")
         self.arr = out
         mx.async_eval(out)
 
@@ -373,6 +382,9 @@ class ndarray:
 
     def get(self, stream=None, order="C", out=None, blocking=True):
         """Copy to a NumPy array (CuPy's ``ndarray.get``)."""
+        from woof.backend.facade import _capture
+        if _capture.recording() is not None:
+            _capture.refuse("a read back to the host")
         mx = _mx()
         values = self._values()
         mx.eval(values)

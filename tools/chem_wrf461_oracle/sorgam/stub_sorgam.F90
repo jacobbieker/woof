@@ -49,12 +49,6 @@ module module_configure
   end type grid_config_rec_type
 end module module_configure
 
-! aerosols_sorgam_init calls this only past its chem_in_opt == 1 return,
-! which the oracle never passes.
-subroutine sorgam_init_aer_ic_pnnl()
-  error stop 'stub sorgam_init_aer_ic_pnnl reached'
-end subroutine sorgam_init_aer_ic_pnnl
-
 subroutine wrf_debug(level, str)
   integer, intent(in) :: level
   character(len=*), intent(in) :: str

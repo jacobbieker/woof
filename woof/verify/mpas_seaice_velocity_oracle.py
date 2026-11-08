@@ -10,8 +10,7 @@ its output stream, and builds the cases.
 Two modes (run_subcycle.F90's header has the call lists):
 
 - ``full``: the whole elastic subcycle, with the variational internal stress
-  between the velocity solves. RKIND 4 only for now: the internal stress is
-  ported at RKIND 4.
+  between the velocity solves.
 - pieces: the pre-subcycle routines, then ``nSub`` velocity solves against a
   fixed stress-divergence forcing, then the principal stresses. Both
   precisions.
@@ -20,7 +19,8 @@ The meshes and the EVP state are those of
 :mod:`woof.verify.mpas_seaice_evp_oracle` (random connectivity; the routines
 are gathers and pointwise arithmetic, so word equality over random gathers is
 the same proof). The velocity-solve fields are drawn in float64 from numpy's
-legacy ``RandomState`` with ``random_sample`` only. The r8 run takes them as
+legacy ``RandomState`` with ``random_sample`` only (the EVP fields too,
+through ``make_case(dtype=float64)``). The r8 run takes them as
 drawn and the r4 run rounds them to float32, so the bytes do not depend on
 the platform. ``input_digest`` is pinned beside the fixture.
 """
@@ -55,8 +55,8 @@ STATE_FIELDS = ("uVelocity", "vVelocity", "totalMassVertexfVertex", "oceanStress
 #: (name, seed, nCells, maxEdges, revisedEVP, useColumnPackage, useOceanStress, full, nSub,
 #:  dynamicsTimeStep, precisions)
 CASES = (
-    ("subcycle", 20261111, 160, 7, False, True, True, True, 120, 3600.0, ("r4",)),
-    ("subcycle_revised", 20261112, 160, 7, True, True, True, True, 120, 1800.0, ("r4",)),
+    ("subcycle", 20261111, 160, 7, False, True, True, True, 120, 3600.0, ("r4", "r8")),
+    ("subcycle_revised", 20261112, 160, 7, True, True, True, True, 120, 1800.0, ("r4", "r8")),
     ("solve", 20261113, 160, 7, False, True, True, False, 8, 3600.0, ("r4", "r8")),
     ("solve_revised", 20261114, 160, 7, True, False, True, False, 8, 1800.0, ("r4", "r8")),
     ("solve_no_ocean_stress", 20261115, 96, 6, False, True, False, False, 4, 900.0, ("r4", "r8")),
@@ -97,7 +97,8 @@ def make_case(name: str, seed: int, n_cells: int, max_edges: int, revised: bool,
     nVerticesSolve and nCellsSolve stop short of nVertices and nCells, so the
     halo entries must keep their words.
     """
-    case = evp_oracle.make_case(name, seed, n_cells, max_edges, revised, use_column, 1, dynamics_dt)
+    case = evp_oracle.make_case(name, seed, n_cells, max_edges, revised, use_column, 1, dynamics_dt,
+                                dtype=np.float64)
     rs = np.random.RandomState(seed + 7919)
     nv, nc = case["nVertices"], case["nCells"]
 
@@ -131,8 +132,6 @@ def make_case(name: str, seed: int, n_cells: int, max_edges: int, revised: bool,
         "principalStress1": uniform(-1.0, 1.0, (nc, max_edges)),
         "principalStress2": uniform(-1.0, 1.0, (nc, max_edges)),
     }
-    for key in ("uVelocity", "vVelocity"):
-        fields[key] = case[key].astype(np.float64)
     case.update(fields)
     case.update({
         "useOceanStress": bool(use_ocean_stress), "full": bool(full), "nSub": int(n_sub),

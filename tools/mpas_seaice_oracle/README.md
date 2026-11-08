@@ -37,11 +37,13 @@ pixi run -e default python tools/mpas_seaice_oracle/make_fixture.py "$BUILD_DIR"
 pixi run -e default python tools/mpas_seaice_oracle/make_velocity_fixture.py "$BUILD_DIR"  # velocity solve
 ```
 
-- build.sh checks `SOURCES.sha256` and compiles at `-O0 -ffp-contract=off
-  -DSINGLE_PRECISION`, MPAS's default precision. It fails if an object
-  contains an FMA instruction.
-- make_fixture.py writes `tests/data/oracles/mpas_seaice_evp/oracle-r4.npz`
+- build.sh checks `SOURCES.sha256` and compiles at `-O0 -ffp-contract=off`,
+  once with `-DSINGLE_PRECISION` (RKIND 4) and once without (RKIND 8). It
+  fails if an object contains an FMA instruction.
+- make_fixture.py writes `tests/data/oracles/mpas_seaice_evp/oracle-r{4,8}.npz`
   and `inputs.sha256` from the cases in `woof.verify.mpas_seaice_evp_oracle`.
+- make_velocity_fixture.py does the same for
+  `tests/data/oracles/mpas_seaice_velocity` (`woof.verify.mpas_seaice_velocity_oracle`).
 
 ## Grade the GPU port
 

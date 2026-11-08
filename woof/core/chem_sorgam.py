@@ -141,3 +141,28 @@ def launch_sorgam_sum_pm(aerosol, h2oaj, h2oai, alt, *, out=None):
         ((ncell + 127) // 128,), (128,),
         (_table(aerosol), h2oaj, h2oai, alt, pm25, water, ec, pm10, np.int32(ncell)))
     return out
+
+
+AER_IC_DEFAULT, AER_IC_PNNL = 1, 101
+
+
+def launch_sorgam_ic(aerosol, sulf, convfac, z_at_w, *, aer_ic_opt=AER_IC_DEFAULT):
+    """aerosols_sorgam_init's cold start: the 38 aerosol rows (ug/kg, #/kg)
+    and, for AER_IC_DEFAULT, the gas sulfate that moves into them (sulf,
+    ppmv, updated in place).  convfac is the p/(R T) WRF hands the routine;
+    z_at_w has nz + 1 w levels (m).  Every mass level is set."""
+    import cupy as cp
+    from woof.core.kernels import get_kernel
+    if aer_ic_opt not in (AER_IC_DEFAULT, AER_IC_PNNL):
+        raise ValueError("aer_ic_opt must be 1 (AER_IC_DEFAULT) or 101 (AER_IC_PNNL)")
+    shape, _ = columns(list(aerosol) + [sulf])
+    field(convfac, shape, "convfac")
+    field(z_at_w, (shape[0] + 1,) + shape[1:], "z_at_w")
+    nz, nc = shape[0], shape[1] * shape[2]
+    fatal = cp.zeros(1, dtype=cp.int32)
+    get_kernel("chem_sorgam", "chem_sorgam_ic")(
+        ((nz * nc + 127) // 128,), (128,),
+        (_table(aerosol), sulf, convfac, z_at_w, np.int32(nz), np.int32(nc),
+         np.int32(aer_ic_opt), fatal))
+    if int(fatal.get()[0]):
+        raise SorgamFatal("aerosols_sorgam_init: unable to parse aer_ic_opt")
