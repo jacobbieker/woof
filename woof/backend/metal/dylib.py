@@ -27,10 +27,14 @@ buffer, scalar-block and builtin forms.
 
 A dynamic library compiles every kernel of its unit at once, where pipelines
 compile only the kernels a run launches.  A unit with many kernels pays for
-kernels it never launches, so only a unit with at most :func:`max_kernels`
-kernels is cut.  The strict NSSL-2 unit (32 kernels, one of which had not
-compiled after an hour) took 37 to 49 minutes to fail as a dynamic library
-on an M3 Max, where the oracle's run of it compiles in minutes.
+kernels it never launches, and its backend compile is slower than the
+pipelines'.  So the route is opt-in: only a unit with at most
+:func:`max_kernels` kernels is cut, and the default is 0 (none).  Measured
+on an M3 Max with every cache cold, a cap of 4 took the WRF gate suite from
+440 s to 2306 s and the NSSL-2 oracle from 1400 s to 6124 s; warm, the
+oracle went from 127 s to 22 s.  The strict NSSL-2 unit itself (32 kernels,
+one of which had not compiled after an hour) took 37 to 49 minutes to fail
+as a dynamic library.
 """
 
 from __future__ import annotations
@@ -43,12 +47,12 @@ MAX_KERNELS_ENV = "WOOF_METAL_DYLIB_MAX_KERNELS"
 
 
 def max_kernels() -> int:
-    """The most kernels a unit may have to be cut (``$WOOF_METAL_DYLIB_MAX_KERNELS``,
-    default 4; 0 cuts no unit)."""
+    """The most kernels a unit may have to be cut (``$WOOF_METAL_DYLIB_MAX_KERNELS``;
+    the default, 0, cuts no unit)."""
     try:
-        return int(os.environ.get(MAX_KERNELS_ENV, "4"))
+        return int(os.environ.get(MAX_KERNELS_ENV, "0"))
     except ValueError:
-        return 4
+        return 0
 
 #: Where the translator's prelude ends and the unit begins (translate()).
 UNIT_MARKER = "\n// ---- translated unit: "

@@ -3,8 +3,8 @@
 * :func:`split` cuts a translated unit into a body (kernels as ordinary
   functions behind opaque-typed wrappers) and a thin library of forwarding
   kernels with the original bindings; a unit that declares threadgroup
-  memory, or has more kernels than ``WOOF_METAL_DYLIB_MAX_KERNELS``, is
-  left whole, and so is one whose body once failed to build (``.refused``).
+  memory, or has more kernels than ``WOOF_METAL_DYLIB_MAX_KERNELS`` (default
+  0: the route is opt-in), is left whole, and so is one whose body once failed to build (``.refused``).
 * On the device, a unit is built once as a serialized dynamic library; a
   second process loads it from disk, compiles only the thin library, and
   computes the same words as the whole-unit build.
@@ -80,10 +80,15 @@ print(json.dumps(cp.asnumpy(y).view(np.uint32).tolist()))
 '''
 
 
-def _run(tmp_path, libraries, source):
+def _run(tmp_path, libraries, source, max_kernels="4"):
+    """The two kernels in a fresh process; the dynamic-library route is
+    opt-in, so it is enabled here unless ``max_kernels`` is None."""
     env = dict(os.environ, WOOF_METAL_LIBRARY_DIR=str(libraries), WOOF_METAL_COMPILE_LOG="1",
                WOOF_METAL_TRANSLATION_DIR=str(tmp_path / "translations"),
                WOOF_METAL_PIPELINE_DIR=str(tmp_path / "pipelines"))
+    env.pop("WOOF_METAL_DYLIB_MAX_KERNELS", None)
+    if max_kernels is not None:
+        env["WOOF_METAL_DYLIB_MAX_KERNELS"] = max_kernels
     done = subprocess.run([sys.executable, "-c", _RUN, source], env=env, capture_output=True,
                           text=True, check=True)
     return json.loads(done.stdout.strip().splitlines()[-1]), done.stderr
@@ -122,20 +127,17 @@ def test_a_translation_is_read_back_unchanged(tmp_path, monkeypatch):
     assert len(list(tmp_path.glob("*.pickle"))) == 3
 
 
-def test_a_unit_with_many_kernels_or_a_refused_body_is_compiled_whole(tmp_path):
+def test_by_default_or_with_many_kernels_or_a_refused_body_a_unit_is_compiled_whole(tmp_path):
     from woof import backend
     if backend.active() != "mlx":
         pytest.skip("runs under WOOF_BACKEND=mlx")
     source = _UNIT + f"\n// {tmp_path.name}\n"
     whole, _ = _run(tmp_path, "off", source)
-    # two kernels, at most one allowed: no dynamic library is attempted
-    os.environ["WOOF_METAL_DYLIB_MAX_KERNELS"] = "1"
-    try:
-        capped, log = _run(tmp_path, tmp_path / "capped", source)
-    finally:
-        del os.environ["WOOF_METAL_DYLIB_MAX_KERNELS"]
-    assert "dynamic library" not in log and capped == whole
-    assert not list((tmp_path / "capped").glob("*.metallib"))
+    # by default no unit is cut; with at most one kernel allowed, neither is this one
+    for label, cap in (("default", None), ("capped", "1")):
+        out, log = _run(tmp_path, tmp_path / label, source, max_kernels=cap)
+        assert "dynamic library" not in log and out == whole
+        assert not list((tmp_path / label).glob("*.metallib"))
     # a body that once failed to build is not attempted again
     built, _ = _run(tmp_path, tmp_path / "libraries", source)
     (stored,) = (tmp_path / "libraries").glob("*.metallib")

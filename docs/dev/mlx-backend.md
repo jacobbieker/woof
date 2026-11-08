@@ -158,6 +158,15 @@ variable moves it, and `off` disables it):
   library, whatever the OS shader cache has kept. A unit that declares
   threadgroup memory, or whose kernel parameters are not the translator's
   buffer, scalar-block and builtin forms, is compiled whole as before.
+  This route is opt-in. A dynamic library compiles every kernel of its
+  unit at once, whereas pipelines compile only the kernels a run launches,
+  and its backend compile is slower. Only a unit with at most
+  `WOOF_METAL_DYLIB_MAX_KERNELS` kernels is cut, and the default, 0, cuts
+  none. The strict NSSL-2 unit has 32 kernels, one of which had not compiled
+  after an hour. As a dynamic library it ran 37 to 49 minutes on an M3 Max
+  and then failed (`XPC_ERROR_CONNECTION_INTERRUPTED`). A body that fails
+  once is marked `.refused` beside its library path and compiled whole from
+  then on.
 - **Pipelines** of whole units (`metal-pipelines`,
   `WOOF_METAL_PIPELINE_DIR`), as Metal binary archives. The OS shader cache
   does not keep the largest pipelines: CLM lake's step kernel compiled again
@@ -173,9 +182,15 @@ pipeline build's time, and where it came from.
 | before: next process, OS cache lost | 3.1 s | 4.0 s | 0.0 s (archive) | 7 s |
 | before: first build | 3.1 s | 4.0 s | 7.0 s | 14 s |
 
-Nothing new ships in the wheel: the caches fill on first use. Prefilling
-them ahead of time (`tools/metal_translation_census.py` without
-`--translate-only` builds every unit) moves the first build off the run.
+Nothing new ships in the wheel; the caches fill on first use. A compiled
+library or archive is specific to one GPU architecture and macOS build.
+The Command Line Tools have no offline Metal compiler (`xcrun metal`), so
+they cannot build portable metallibs. And the wheel (98.06 MB with this
+change, about 5 KB more than before) has about 2 MB of room left under
+PyPI's 100 MB limit, while WSM6's dynamic library alone is 7.6 MB.
+Prefilling the caches ahead of time (`tools/metal_translation_census.py`
+without `--translate-only` builds every unit) moves the first build off the
+run.
 
 ## Address spaces
 
