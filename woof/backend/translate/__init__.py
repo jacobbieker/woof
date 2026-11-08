@@ -1155,6 +1155,18 @@ class _Rewriter:
                 to_dispatch[self.span(home)].append(g)
                 continue
             by_label.setdefault((target.spelling, self.span(target)), []).append(g)
+        # a label some jump reaches from outside its block (a goto from the
+        # then arm into the else arm: Noah-MP's dynamic-VIC label_1003) is
+        # entered through a re-entry loop instead (_reenter_label)
+        reenter = {}
+        for key, jumps in list(by_label.items()):
+            label = next((l for l in labels.get(key[0], []) if self.span(l) == key[1]), None)
+            home = None if label is None else parent(label)
+            if home is None or home.kind != K.COMPOUND_STMT:
+                continue
+            hs, he = self.span(home)
+            if any(not (hs <= self.span(g)[0] and self.span(g)[1] <= he) for g in jumps):
+                reenter[key] = (label, by_label.pop(key))
         # each dispatch group's statements: [start, end) offsets
         group_spans = {key: self._dispatch_range(block, to_dispatch[key], parent, chain)[2:]
                        for key, (block, _) in dispatch.items()}
@@ -1260,7 +1272,131 @@ class _Rewriter:
         # innermost first: an outer dispatch loop's jumps cross the inner ones
         for n, key in enumerate(sorted(dispatch, key=lambda k: k[1] - k[0])):
             self._dispatch_block(dispatch[key][0], to_dispatch[key], n, parent, chain, wrappers)
+        # innermost re-entry statement first: an outer one's jumps cross it
+        ordered = sorted(reenter.values(), key=lambda v: self._reenter_extent(v[0], v[1], chain))
+        for n, (label, jumps) in enumerate(ordered):
+            self._reenter_label(label, jumps, n, parent, chain, wrappers)
         self._nested_wrapper_exits(wrappers)
+
+    def _reenter_extent(self, label, jumps, chain):
+        """Byte length of the statement a re-entry loop wraps (its order)."""
+        stmt = self._reenter_statement(label, jumps, chain)
+        if stmt is None:
+            return 0
+        s, e = self.span(stmt)
+        return e - s
+
+    def _reenter_statement(self, label, jumps, chain):
+        """(the path from the label up, its index of S) for _reenter_label;
+        S is the innermost statement of a block holding the label and every
+        jump to it.  None when there is none."""
+        K = self.ci.CursorKind
+        path = chain(label)
+        spans = [self.span(a) for a in path]
+        common = None
+        for g in jumps:
+            for a in chain(g):
+                if self.span(a) in spans:
+                    i = spans.index(self.span(a))
+                    common = i if common is None else max(common, i)
+                    break
+        i = common
+        while i is not None and i + 1 < len(path) and (path[i].kind == K.COMPOUND_STMT
+                                                       or path[i + 1].kind != K.COMPOUND_STMT):
+            i += 1
+        if i is None or i + 1 >= len(path) or path[i + 1].kind != K.COMPOUND_STMT:
+            return None
+        return path[i]
+
+    def _reenter_label(self, label, jumps, n, parent, chain, wrappers):
+        """A label entered from outside its block -> a re-entry loop around
+        the innermost statement S (of a block) holding the label and every
+        jump to it: ``while (true) { S break; }``.  A jump sets a flag and
+        continues the loop (out of every loop and wrapper between it and S);
+        with the flag set, each ``if`` on the way down to the label takes the
+        arm that holds it and each statement before it on the way is
+        skipped; the label clears the flag.  Refused by name: a loop or
+        switch between S and the label (re-entering it would rerun it), a
+        declaration among the skipped statements, a break or continue in S
+        meant for a loop around it."""
+        K = self.ci.CursorKind
+        name = label.spelling
+        path = chain(label)                 # label, its block, ..., the root
+        spans = [self.span(a) for a in path]
+        common = None
+        for g in jumps:
+            for a in chain(g):
+                if self.span(a) in spans:
+                    i = spans.index(self.span(a))
+                    common = i if common is None else max(common, i)
+                    break
+        # S: the outermost ancestor up to the common one that is a block's statement
+        i = common
+        while i is not None and i + 1 < len(path) and (path[i].kind == K.COMPOUND_STMT
+                                                       or path[i + 1].kind != K.COMPOUND_STMT):
+            i += 1
+        if i is None or i + 1 >= len(path) or path[i + 1].kind != K.COMPOUND_STMT:
+            self.refuse(label, f"goto {name!r} from outside the label's block")
+        stmt = path[i]
+        flag = f"__woof_in{n}"
+        for a in path[1:i + 1]:
+            if a.kind.name in self._LOOPS:
+                self.refuse(label, f"goto {name!r} into a loop or switch")
+        for j in range(1, i + 1):
+            a, below = path[j], path[j - 1]
+            if a.kind == K.COMPOUND_STMT:
+                skipped = []
+                for st in a.get_children():
+                    if self.span(st) == self.span(below):
+                        break
+                    skipped.append(st)
+                if skipped:
+                    if any(st.kind == K.DECL_STMT for st in skipped):
+                        self.refuse(label, f"a declaration before label {name!r} in a block the goto enters")
+                    self.edits.insert(self.span(skipped[0])[0], f"if (!{flag}) {{ ", rank=-60_000)
+                    # after any `if (flag) continue/break;` a crossed loop or
+                    # wrapper ending here carries (ranks _GOTO_CLOSE - 1, + 2)
+                    self.edits.insert(self._statement_end(skipped[-1]), " } ", rank=_GOTO_CLOSE + 3)
+            elif a.kind == K.IF_STMT:
+                kids = list(a.get_children())
+                if len(kids) < 2:
+                    self.refuse(a, f"cannot read the if statement around label {name!r}")
+                cond, arms = kids[0], kids[1:]
+                into_then = self.span(arms[0]) == self.span(below)
+                cs, ce = self.span(cond)
+                self.edits.insert(cs, f"({flag} || (" if into_then else f"(!{flag} && (", rank=-60_000)
+                self.edits.insert(ce, "))", rank=60_000)
+            elif a.kind != K.LABEL_STMT:
+                self.refuse(a, f"goto {name!r} enters a {a.kind.name.lower()}")
+        for j in self._unenclosed_jumps(stmt):
+            self.refuse(j, f"a {j.kind.name.split('_')[0].lower()} in the statement a goto re-enters "
+                           f"for label {name!r}")
+        rs, re_ = self.span(stmt)[0], self._statement_end(stmt)
+        inner = [w for w in wrappers if rs <= w["rs"] and w["close"] <= re_]
+        for g in jumps:
+            at = self.span(g)[0]
+            crossed = []
+            for a in chain(g)[1:]:
+                if self.span(a) == self.span(stmt) and a.kind == stmt.kind:
+                    if a.kind.name in self._LOOPS:
+                        crossed.append((self.span(a)[0], self._statement_end(a), _GOTO_CLOSE - 1))
+                    break
+                if a.kind.name in self._LOOPS:
+                    crossed.append((self.span(a)[0], self._statement_end(a), _GOTO_CLOSE - 1))
+            crossed += [(w["rs"], w["close"], _GOTO_CLOSE + 2) for w in inner if w["rs"] <= at < w["close"]]
+            crossed.sort()
+            for k, (_, end, rank) in enumerate(crossed):
+                self.edits.insert(end, f" if ({flag}) {'continue' if k == 0 else 'break'};", rank=rank)
+            gs, ge = self.span(g)
+            self.edits.replace(gs, ge, f"{{ {flag} = true; {'break' if crossed else 'continue'}; }}")
+        toks = list(label.get_tokens())
+        if len(toks) < 2 or toks[1].spelling != ":":
+            self.refuse(label, f"cannot find label {name!r}")
+        self.edits.replace(toks[0].extent.start.offset, toks[1].extent.end.offset, f"{flag} = false;")
+        self.edits.insert(rs, f"{{ bool {flag} = false; while (true) {{ ", rank=-50_000 - (re_ - rs))
+        self.edits.insert(re_, " break; } }", rank=_GOTO_CLOSE - 1)
+        wrappers.append({"kind": "reenter", "rs": rs, "close": re_, "flag": None, "name": name,
+                         "jumps": [], "node": label, "block": path[i + 1]})
 
     def _outside_dispatch(self, label, name, block, rs, re_, group_spans):
         """A structured region of a block with a dispatch group must hold
@@ -2811,6 +2947,7 @@ class _Rewriter:
                     self.edits.replace(s, e, f"__woof_f64_lit(0x{word:016X}UL)")
                     continue
             if kind == K.CALL_EXPR and self.retain:
+                self.qualify_namespace_call(node)
                 self.f32s_literal_arguments(node)
             if kind == K.FLOATING_LITERAL and _is_double(node.type):
                 s, e = self.span(node)
@@ -3187,6 +3324,30 @@ class _Rewriter:
         self.edits.replace(s, e, f"__woof_f64_lit(0x{word:016X}UL)")
         return True
 
+    def qualify_namespace_call(self, node):
+        """An unqualified call to a namespace's function, in an f32s unit:
+        ``N::f(...)``.  f32s is a class at global scope, so argument-dependent
+        lookup adds a global function of the same name and signature to the
+        candidates and the call is ambiguous, where CUDA's float arguments
+        bring no ADL (the selected Noah-MP water unit's d_canwater, global and
+        in namespace noahmp_water_options)."""
+        ref = node.referenced
+        if ref is None or ref.kind.name not in ("FUNCTION_DECL", "FUNCTION_TEMPLATE"):
+            return
+        scopes, owner = [], ref.semantic_parent
+        while owner is not None and owner.kind.name == "NAMESPACE":
+            scopes.append(owner.spelling)
+            owner = owner.semantic_parent
+        if not scopes or owner is None or owner.kind.name != "TRANSLATION_UNIT" or "" in scopes:
+            return
+        toks = list(node.get_tokens())
+        if not toks or toks[0].spelling != ref.spelling or not self.main_file(node):
+            return
+        start = toks[0].extent.start.offset
+        if self.data[max(0, start - 2):start] == b"::":
+            return
+        self.edits.insert(start, "::" + "::".join(reversed(scopes)) + "::", rank=-65_000)
+
     def fold_init_list(self, node):
         """Integer literals initialising binary64 elements or fields:
         ``{1.0, 0, -2.5}`` for a double table, as exact words (a constant
@@ -3454,11 +3615,19 @@ class _Rewriter:
         return name + "_w" if name in METAL_RESERVED else name
 
 
-def prelude(*, contract: bool, retain_subnormals: bool = False, ieee_helpers: bool = False) -> str:
+def prelude(*, contract: bool, retain_subnormals: bool = False, ieee_helpers: bool = False,
+            f64: str = "soft") -> str:
     """``retain_subnormals``: the unit is --ftz=false (float is f32s);
     ``ieee_helpers``: it uses the subnormal-keeping ops of non-.ftz PTX,
-    which f32s.h also defines, in a unit that otherwise flushes."""
+    which f32s.h also defines, in a unit that otherwise flushes;
+    ``f64``: ``soft`` (strict: f64_soft.h alone) or ``df64`` (fast numerics,
+    :func:`_df64_prelude`)."""
     soft = (METAL_DIR / "f64_soft.h").read_text()
+    if f64 == "df64":
+        return _df64_prelude(soft, contract=contract, retain_subnormals=retain_subnormals,
+                             ieee_helpers=ieee_helpers)
+    if f64 != "soft":
+        raise ValueError(f"f64 must be soft or df64, not {f64!r}")
     text = (METAL_DIR / "prelude.h").read_text().replace("// F64_SOFT_H_TEXT", soft)
     if retain_subnormals:
         text = "#define WOOF_RETAIN_SUBNORMALS 1\n" + text
@@ -3471,6 +3640,23 @@ def prelude(*, contract: bool, retain_subnormals: bool = False, ieee_helpers: bo
     return "#pragma METAL fp contract(off)\n" + text + after
 
 
+def _df64_prelude(soft: str, *, contract: bool, retain_subnormals: bool, ieee_helpers: bool) -> str:
+    """The fast numerics' prelude: f64_soft.h, then f64_df64.h (division and
+    square root through its exact df64-seeded words, WOOF_DF64_ARITH), and
+    after the prelude the df64 libm's overloads on ``f64``
+    (f64_df64_bind.h).  The strict prelude is :func:`prelude`'s own text,
+    unchanged."""
+    df64 = "#define WOOF_DF64_ARITH 1\n" + (METAL_DIR / "f64_df64.h").read_text()
+    text = (METAL_DIR / "prelude.h").read_text().replace("// F64_SOFT_H_TEXT", soft + "\n" + df64)
+    if retain_subnormals:
+        text = "#define WOOF_RETAIN_SUBNORMALS 1\n" + text
+    if retain_subnormals or ieee_helpers:
+        text += "\n" + (METAL_DIR / "f32s.h").read_text()
+    text += "\n" + (METAL_DIR / "f64_df64_bind.h").read_text()
+    after = "\n#pragma METAL fp contract(fast)\n" if contract else ""
+    return "#pragma METAL fp contract(off)\n" + text + after
+
+
 VENDOR_LIBM64 = HERE / "vendor_libm64.cuh"
 #: WOOF's correctly rounded powf, the MLX facade's strict float32 power
 #: (facade/_ops.py; WOOF_STRICT_POWF=cuda selects the opt-in instead)
@@ -3478,12 +3664,24 @@ STRICT_POWF = HERE / "strict_powf.cuh"
 F64CR = HERE.parents[1] / "core" / "kernels" / "f64cr.cuh"
 _VENDOR_CALL = re.compile(r"\b(exp|log|log10|sin|cos|tan|atan|pow|atan2|hypot|log2|expm1|tanh|tgammaf?|lgamma|log1pf?|cbrtf?|erfc?)\s*\(")
 CR_CBRT = HERE.parents[1] / "core" / "kernels" / "cr_cbrt_flt64.cuh"
+#: binary64 functions the df64 prelude provides (f64_df64_bind.h): under
+#: f64="df64" the vendored libm keeps only its other entry points
+DF64_NATIVE = ("exp", "expm1", "log", "log2", "log10", "log1p", "pow", "sin", "cos", "tan",
+               "atan", "atan2", "tanh", "hypot")
+_VENDOR_CALL_DF64 = re.compile(r"\b(tgammaf?|lgamma|log1pf|cbrtf|erfc?)\s*\(")
 
 
-def compose(source: str, expanded: str | None = None) -> str:
+def compose(source: str, expanded: str | None = None, f64: str = "soft") -> str:
     """Prepend the binary64 libm (vendor_libm64.cuh, with f64cr.cuh) to a
     unit that calls one of CUDA's binary64 libm names, in its own text or
-    (``expanded``, the preprocessed unit) in a header it includes."""
+    (``expanded``, the preprocessed unit) in a header it includes.
+
+    ``f64="df64"``: the df64 prelude defines :data:`DF64_NATIVE` and cbrt
+    itself, so only a unit calling one of the rest (tgamma, lgamma, erf,
+    erfc and the binary32 log1pf, cbrtf, tgammaf) gets the vendored text,
+    without its wrappers for the native names."""
+    if f64 == "df64":
+        return _compose_df64(source, expanded)
     if not _VENDOR_CALL.search(source) and not (expanded and _VENDOR_CALL.search(expanded)):
         return source
     f64cr = F64CR.read_text(encoding="utf-8")
@@ -3498,6 +3696,27 @@ def compose(source: str, expanded: str | None = None) -> str:
                 + "\n__device__ __forceinline__ double cbrt(double x) { return g64_cbrt::cr_cbrt(x); }\n")
     return ("__device__ double wlm_sin_huge(double x);\n" + f64cr + "\n"
             + VENDOR_LIBM64.read_text(encoding="utf-8") + "\n" + cbrt + source)
+
+
+def _compose_df64(source: str, expanded: str | None) -> str:
+    if not _VENDOR_CALL_DF64.search(source) and not (expanded and _VENDOR_CALL_DF64.search(expanded)):
+        return source
+    f64cr = F64CR.read_text(encoding="utf-8")
+    hook = "#define WCR_PLATFORM_SIN(x) sin(x)"
+    if hook not in f64cr:
+        raise TranslationError("f64cr.cuh no longer defines its CUDA platform-sin hook as expected")
+    f64cr = f64cr.replace(hook, "#define WCR_PLATFORM_SIN(x) wlm_sin_huge(x)")
+    vendor, kept = [], 0
+    wrapper = re.compile(r"^__device__ __forceinline__ (?:double|float) (\w+)\(")
+    for line in VENDOR_LIBM64.read_text(encoding="utf-8").splitlines():
+        m = wrapper.match(line)
+        if m and m.group(1) in DF64_NATIVE:
+            continue
+        kept += bool(m and m.group(1) in ("tgamma", "lgamma", "erf", "erfc"))
+        vendor.append(line)
+    if kept != 4:
+        raise TranslationError("vendor_libm64.cuh no longer defines its tgamma/lgamma/erf/erfc wrappers as expected")
+    return ("__device__ double wlm_sin_huge(double x);\n" + f64cr + "\n" + "\n".join(vendor) + "\n" + source)
 
 
 def _integer_macros(source: str, defines=()) -> dict:
@@ -3800,17 +4019,17 @@ def _translation_dir() -> Path | None:
     return (base / "woof" / "metal-translations").expanduser()
 
 
-def _translation_cache(text, unit, contract, retain_subnormals, source, defines):
+def _translation_cache(text, unit, contract, retain_subnormals, source, defines, f64):
     """``(cached unit or None, store)``: translations persist across processes
     under :func:`_translation_dir`, keyed by the PREPROCESSED text (so an
-    edited header is a new key), the unit's name and flags, the integer
+    edited header is a new key), the unit's name and flags (``f64`` among them), the integer
     macros the source and options define, and :func:`translator_digest`.
     Parsing and rewriting a large unit costs seconds; a hit costs a read."""
     directory = _translation_dir()
     if directory is None:
         return None, lambda result: None
     key = hashlib.sha256("\0".join((
-        translator_digest(), unit, str(bool(contract)), str(bool(retain_subnormals)),
+        translator_digest(), unit, str(bool(contract)), str(bool(retain_subnormals)), f64,
         repr(sorted(_integer_macros(source, defines).items())), text)).encode()).hexdigest()
     path = directory / f"{key}.pickle"
     try:
@@ -3832,27 +4051,32 @@ def _translation_cache(text, unit, contract, retain_subnormals, source, defines)
 
 
 def translate(source: str, *, unit: str = "<unit>", contract: bool = False,
-              retain_subnormals: bool = False, defines=(), include_dirs=()) -> TranslatedUnit:
+              retain_subnormals: bool = False, defines=(), include_dirs=(),
+              f64: str = "soft") -> TranslatedUnit:
     """CUDA unit text -> :class:`TranslatedUnit` (MSL plus kernel signatures).
 
     ``retain_subnormals``: the unit's ``float`` is ``f32s`` (gradual
     underflow in software where the GPU would flush; woof/backend/metal/
     f32s.h) -- CUDA's --ftz=false.
+    ``f64``: ``soft``, every ``double`` operation bit-exact (strict), or
+    ``df64``, the fast numerics' division, square root and libm through
+    double-float (woof/backend/metal/f64_df64.h).  The translated body is
+    the same text in both; the prelude and the vendored libm differ.
     """
     text = preprocess(source, defines, include_dirs)
-    if compose(source, text) is not source:
-        text = preprocess(compose(source, text), defines, include_dirs)
-    cached, store = _translation_cache(text, unit, contract, retain_subnormals, source, defines)
+    if compose(source, text, f64) is not source:
+        text = preprocess(compose(source, text, f64), defines, include_dirs)
+    cached, store = _translation_cache(text, unit, contract, retain_subnormals, source, defines, f64)
     if cached is not None:
         return cached
     result = _translate_preprocessed(text, source, unit=unit, contract=contract,
-                                     retain_subnormals=retain_subnormals, defines=defines)
+                                     retain_subnormals=retain_subnormals, defines=defines, f64=f64)
     store(result)
     return result
 
 
 def _translate_preprocessed(text: str, source: str, *, unit: str, contract: bool,
-                            retain_subnormals: bool, defines) -> TranslatedUnit:
+                            retain_subnormals: bool, defines, f64: str) -> TranslatedUnit:
     text = rewrite_ptx_asm(text, unit)
     if retain_subnormals:
         text = explicit_float_to_integral(text)
@@ -3861,7 +4085,7 @@ def _translate_preprocessed(text: str, source: str, *, unit: str, contract: bool
     result = _Rewriter(text, tu, unit=unit, retain_subnormals=retain_subnormals,
                        macros=_integer_macros(source, defines)).run()
     result.msl = (prelude(contract=contract, retain_subnormals=retain_subnormals,
-                          ieee_helpers="__woof_ieee_" in result.msl)
+                          ieee_helpers="__woof_ieee_" in result.msl, f64=f64)
                   + "\n// ---- translated unit: " + unit + "\n" + result.msl)
     result.key = hashlib.sha256(result.msl.encode()).hexdigest()
     return result

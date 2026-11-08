@@ -8,8 +8,12 @@ capping channel cells at 5 mm (water above goes to the channel) and lake cells
 at their retention (water above goes to the lake), then ROUTE_OVERLAND1 moves
 water down the steepest head-adjusted slope (GETMAX8DIR when the terrain
 neighbour's head reverses it) by a Manning-type law and drains the domain
-edges.  ``rt_option = 2`` (ROUTE_OVERLAND2) is not ported and is refused.  The
-mass-balance diagnostics are not computed.
+edges.  ``rt_option = 2`` runs ROUTE_OVERLAND2 instead: an x sweep then a
+y sweep over each cell's east and north links on the routing
+initialisation's slopes ``sox``/``soy`` (module_RT :1095-1098), with no
+GETMAX8DIR and no edge drain.  The retention depth is the caller's, already
+reduced by slope as module_RT does for its rt_option (:1099-1112 for 2,
+:1186-1194 for 1).  The mass-balance diagnostics are not computed.
 
 Planes are ``(jxrt, ixrt)``: float32, int32 for ch_netrt, lake_mask, sdir
 (3, jxrt, ixrt); slope (8, ...), dist (9, ...) as in ``subsurface``.
@@ -22,6 +26,8 @@ from pathlib import Path
 
 import numpy as np
 
+from ._compile import raw_module
+
 _TPB = 128
 _MODULE = None
 
@@ -29,13 +35,11 @@ _MODULE = None
 def _k(name):
     global _MODULE
     if _MODULE is None:
-        import cupy as cp
-
         kernels = Path(__import__("woof.core.kernels", fromlist=["x"]).__file__).parent
         here = Path(__file__).resolve().parent
         source = ((kernels / "glibc_flt32.cuh").read_text(encoding="utf-8") + "\n"
                   + (here / "overland.cu").read_text(encoding="utf-8"))
-        _MODULE = cp.RawModule(code=source, options=("--fmad=false", "--ftz=false"))
+        _MODULE = raw_module(source, ("--fmad=false", "--ftz=false"))
     return _MODULE.get_function(name)
 
 
@@ -52,12 +56,15 @@ class OverlandState:
 
 
 class OverlandRouting:
-    def __init__(self, *, dist, slope, sdir, roughness, ch_netrt, lake_mask, rt_option=1):
+    def __init__(self, *, dist, slope, sdir, roughness, ch_netrt, lake_mask, rt_option=1,
+                 sox=None, soy=None):
         import cupy as cp
 
-        if rt_option != 1:
-            raise NotImplementedError(
-                "rt_option = 2 overland routing (ROUTE_OVERLAND2) is not ported")
+        if rt_option not in (1, 2):
+            raise ValueError("WRF-Hydro rt_option is 1 or 2")
+        if rt_option == 2 and (sox is None or soy is None):
+            raise ValueError("rt_option = 2 routes on the terrain slopes sox and soy")
+        self.rt_option, self.sox, self.soy = int(rt_option), sox, soy
         self.jxrt, self.ixrt = map(int, roughness.shape)
         n = self.ixrt * self.jxrt
         self.dist, self.slope, self.sdir = dist, slope, sdir
@@ -90,6 +97,9 @@ class OverlandRouting:
                                       np.int32(n)))
             _k("ov_retention_total")((1,), (1,), (self.ch_netrt, self.lake_mask, self._dch,
                                                   self._dlk, acc, np.int32(n)))
+            if self.rt_option == 2:
+                self._overland2(state, qx, qy, np.float32(dtrt_ter), xx, yy, n)
+                continue
             _k("ov_route_cell")(g, t, (np.float32(dtrt_ter), self.dist, state.head, state.retention,
                                        self.roughness, self.slope, self.sdir, qx, qy, self._adj,
                                        self._qq, self._target, self._bnd, xx, yy))
@@ -97,3 +107,18 @@ class OverlandRouting:
                                    state.boundary_flux, xx, yy))
             _k("ov_total")((1,), (1,), (self._qq, self._target, self._bnd, state.totals[2:3], xx, yy))
             _k("ov_edge")(g, t, (state.head, state.boundary_flux, state.retention, xx, yy))
+
+    def _overland2(self, state, qx, qy, dt, xx, yy, n):
+        """ROUTE_OVERLAND2 (:666-929): the x sweep, H = H + DH, the y sweep, H = H + DH."""
+        import cupy as cp
+
+        if not hasattr(self, "_dh"):
+            self._dh = cp.zeros((self.jxrt, self.ixrt), cp.float32)
+            self._tb = cp.zeros((self.jxrt, self.ixrt), cp.float32)
+            self._fb = cp.zeros((self.jxrt, self.ixrt), cp.int32)
+        for d, so, q, lines in ((0, self.sox, qx, self.jxrt), (1, self.soy, qy, self.ixrt)):
+            _k("ov2_sweep")(((lines + _TPB - 1) // _TPB,), (_TPB,), (
+                np.int32(d), dt, self.dist, state.head, state.retention, self.roughness, so, q,
+                self._dh, state.boundary_flux, self._tb, self._fb, xx, yy))
+            _k("ov2_apply")(self._grid, (_TPB,), (state.head, self._dh, np.int32(n)))
+            _k("ov2_total")((1,), (1,), (self._tb, self._fb, state.totals[2:3], np.int32(n)))

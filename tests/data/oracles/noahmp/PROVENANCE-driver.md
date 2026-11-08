@@ -1,6 +1,18 @@
 # noahmp-driver.csv: provenance
 
-Bitwise fixture for the Noah-MP **driver-side cold start** of WRF v4.6.1:
+> **Re-pinned to WRF 4.7.1 (2026-11-08).** `noahmp-driver.csv` was first built from
+> WRF v4.6.1 (`d66e442f`, phys/noahmp `848f54ad`). Rebuilt with
+> `build_driver.sh` from WRF v4.7.1 (`f52c197e`, phys/noahmp `e5c0859`), the
+> output is byte-identical, so the pins below name e5c0859. The rebuild
+> from the 4.6.1 tree is byte-identical too: the build scripts accept
+> either tree (`tools/noahmp_wrf461_oracle/noahmp_pins.sh`) and name the one
+> they were given in their sums files. Rebuilt with GNU Fortran 13.3.0 and
+> glibc 2.39 (Ubuntu 24.04 container).
+> Line numbers of `module_sf_noahmpdrv.F` in this file are 4.6.1's:
+> e5c0859 deleted line 648 (`calculate_soil = .false.`), so every 4.7.1
+> line above 648 is one lower.
+
+Bitwise fixture for the Noah-MP **driver-side cold start** of WRF v4.7.1:
 
 | routine | source | lines |
 |---|---|---|
@@ -10,12 +22,12 @@ Bitwise fixture for the Noah-MP **driver-side cold start** of WRF v4.6.1:
 ## Source identity
 
 ```
-tree      <wrf-4.6.1-checkout>
-commit    d66e442fccc04111067e29274c9f9eaccc3cef28
+tree      <wrf-4.7.1-checkout>
+commit    f52c197ed39d12e087d02c50f412d90d418f6186
 sha256(phys/module_sf_noahmpdrv.F)
-          9010a757da994ed8796c63ca97da354eaf60c5c732df4ea9acad5bc62a973890
+          29f16622740d7388a17ff9ba6c2f4640487e44f3f26b8c4bdd47aad42e0a4572
 sha256(phys/module_sf_noahmplsm.F)
-          bd592a5b7db29000e715250e3a7c779ffb5e0dcc356f6b5a7d9e1c9f69c55282
+          74b475600ad1c999fe43299bcaf4d3e5eaf59b9f861c47fdbff4d69739e3a45b
 sha256(gpuwm/data/noahmp/MPTABLE.TBL)
           7fae6a77660c90ad80845565ecfb057093c100de41f35f25a7ffa63f41c19e5d
 sha256(gpuwm/data/noahmp/SOILPARM.TBL)

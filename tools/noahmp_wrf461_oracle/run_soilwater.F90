@@ -1,4 +1,4 @@
-! Per-leaf oracle for the Noah-MP soil-water group of WRF v4.6.1
+! Per-leaf oracle for the Noah-MP soil-water group of WRF v4.7.1
 ! MODULE_SF_NOAHMPLSM: CANWATER, INFIL, SRT, SSTEP and their driver SOILWATER.
 !
 ! The module source is compiled exactly as it ships apart from the

@@ -1,6 +1,6 @@
 """Bitwise comparison of the two column-oracle outputs.
 
-Reads ``run_column`` (WRF v4.6.1) and ``run_woof_column.py`` (WOOF) outputs
+Reads ``run_column`` (WRF v4.7.1) and ``run_woof_column.py`` (WOOF) outputs
 and reports, for every field at every snapshot, how many column values
 differ in their bits, the largest ULP distance and the largest absolute
 difference.  Integer fields compare exactly.  NaN equals NaN only when
@@ -16,9 +16,13 @@ Documented exclusions are listed by name, never silently dropped:
   undefined variable, i.e. a WRF bug.  WOOF writes a defined replacement
   (the glacier column's own EFLXB and HCPCT).  These three fields on
   glacier columns are reported separately and never counted as a match or
-  a miss.
+  a miss.  That is the 848f54ad (WRF 4.6.1) driver.  From e5c0859
+  (WRF 4.7.1) the glacier arm returns HCPCT, so SOILENERGY and SNOWENERGY
+  are defined there and graded (``GLACIER_UNDEFINED_E5C0859``); EFLXB is
+  still never set on the glacier arm, so EFLXBXY stays excluded.
 
 Usage:  python compare_column.py WRF.bin WOOF.bin INPUT.bin [--json OUT]
+                                 [--e5c0859]
 """
 
 from __future__ import annotations
@@ -34,6 +38,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from tools.noahmp_wrf461_oracle.column.gen_columns import read_records  # noqa: E402
 
 GLACIER_UNDEFINED = ("eflxbxy", "soilenergy", "snowenergy")
+#: Against an e5c0859 (WRF 4.7.1) run: NOAHMP_GLACIER returns HCPCT there.
+GLACIER_UNDEFINED_E5C0859 = ("eflxbxy",)
 ISICE = 15
 
 
@@ -66,7 +72,8 @@ def ulp_distance(a, b):
     return np.abs(ia - ib)
 
 
-def compare(wrf_path, woof_path, input_path):
+def compare(wrf_path, woof_path, input_path,
+            glacier_undefined=GLACIER_UNDEFINED):
     wrf = snapshots(wrf_path)
     woof = snapshots(woof_path)
     inp = read_records(input_path)
@@ -106,7 +113,7 @@ def compare(wrf_path, woof_path, input_path):
             a2 = a.reshape(layers, n)
             b2 = b.reshape(layers, n)
             keep = np.ones((layers, n), dtype=bool)
-            if name in GLACIER_UNDEFINED and glacier_cols.size:
+            if name in glacier_undefined and glacier_cols.size:
                 keep[:, glacier_cols] = False
                 ga = a2[:, glacier_cols]
                 gb = b2[:, glacier_cols]
@@ -163,8 +170,12 @@ def main():
     ap.add_argument("woof")
     ap.add_argument("input")
     ap.add_argument("--json")
+    ap.add_argument("--e5c0859", action="store_true",
+                    help="WRF.bin is an e5c0859 (WRF 4.7.1) run: grade the "
+                         "glacier columns' SOILENERGY/SNOWENERGY")
     args = ap.parse_args()
-    r = compare(args.wrf, args.woof, args.input)
+    r = compare(args.wrf, args.woof, args.input,
+                GLACIER_UNDEFINED_E5C0859 if args.e5c0859 else GLACIER_UNDEFINED)
     print(f"columns {r['columns']}  snapshots {r['snapshots']}  "
           f"fields {r['fields']}  values {r['compared_values']}")
     print(f"differing values {r['differing_values']}  max ULP {r['max_ulp']}"

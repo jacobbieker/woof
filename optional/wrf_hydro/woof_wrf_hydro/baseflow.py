@@ -6,8 +6,9 @@ each basin's bucket takes the mean LSM drainage (SOLDRAIN; plus INFXSRT when
 overland routing is off), discharges by the exponential bucket
 (GWBASESWCRT = 1, with overflow spill) or passes it through
 (GWBASESWCRT = 2), and the outflow is spread over the basin's stream pixels
-as QINFLOWBASE for the channel.  GWBASESWCRT = 3 (the 2-D groundwater model)
-and 4 (the area-normalised bucket, simp_gw_buck_nhd, UDMP) are refused by name.
+as QINFLOWBASE for the channel.  GWBASESWCRT = 3 is the 2-D groundwater
+model (:class:`woof_wrf_hydro.gw2d.Gw2d`); 4 (the area-normalised bucket,
+simp_gw_buck_nhd, UDMP) is refused by name.
 
 Basin masks are host data, read once: ``gwsubbasmsk`` (jx, ix) of basin ids,
 ``basnsind`` (the ids, in bucket order), ``gw_strm_msk_lind`` (jxrt, ixrt) of
@@ -21,6 +22,8 @@ from pathlib import Path
 
 import numpy as np
 
+from ._compile import raw_module
+
 _TPB = 128
 _MODULE = None
 
@@ -28,13 +31,11 @@ _MODULE = None
 def _k(name):
     global _MODULE
     if _MODULE is None:
-        import cupy as cp
-
         kernels = Path(__import__("woof.core.kernels", fromlist=["x"]).__file__).parent
         here = Path(__file__).resolve().parent
         source = ((kernels / "glibc_flt64.cuh").read_text(encoding="utf-8") + "\n"
                   + (here / "baseflow.cu").read_text(encoding="utf-8"))
-        _MODULE = cp.RawModule(code=source, options=("--fmad=false", "--ftz=false"))
+        _MODULE = raw_module(source, ("--fmad=false", "--ftz=false"))
     return _MODULE.get_function(name)
 
 
@@ -53,8 +54,8 @@ class GroundwaterBucket:
         import cupy as cp
 
         if gwbaseswcrt == 3:
-            raise NotImplementedError("GWBASESWCRT = 3 (the 2-D groundwater model, gw2d) is "
-                                      "not ported")
+            raise ValueError("GWBASESWCRT = 3 is the 2-D groundwater model, not a bucket: "
+                             "use Gw2d")
         if gwbaseswcrt == 4:
             raise NotImplementedError("GWBASESWCRT = 4 (the area-normalised exponential "
                                       "bucket of simp_gw_buck_nhd, UDMP) is not ported")

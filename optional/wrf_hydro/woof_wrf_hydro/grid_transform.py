@@ -18,6 +18,8 @@ from pathlib import Path
 
 import numpy as np
 
+from ._compile import raw_module
+
 _TPB = 64
 _MODULE = None
 _ERRORS = {1: "SMCMAX exceeded upon disaggregation", 2: "SMCRT depleted upon disaggregation",
@@ -27,10 +29,8 @@ _ERRORS = {1: "SMCMAX exceeded upon disaggregation", 2: "SMCRT depleted upon dis
 def _k(name):
     global _MODULE
     if _MODULE is None:
-        import cupy as cp
-
         source = (Path(__file__).resolve().parent / "grid_transform.cu").read_text(encoding="utf-8")
-        _MODULE = cp.RawModule(code=source, options=("--fmad=false", "--ftz=false"))
+        _MODULE = raw_module(source, ("--fmad=false", "--ftz=false"))
     return _MODULE.get_function(name)
 
 

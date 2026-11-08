@@ -108,7 +108,8 @@ contains
   subroutine diffusive_route(ixrt, jxrt, nlinks, dt, dtct, dtrt_ch, retdep_chan, qstrmvolrt, &
       qinflowbase, lakeinflort, qsubrt, ch_netrt, lake_mskrt, ch_netlnk, chanxi, chanyj, &
       node_area, from_node, to_node, typel, zelev, chanlen, mannn, so, chsslp, bw, &
-      qlink, hlink, cvol, qlateral, nlakes, lakenode, resht, qlakei, qlakeo)
+      qlink, hlink, cvol, qlateral, nlakes, lakenode, resht, qlakei, qlakeo, &
+      gwBaseSwCRT, gwChanCondSw, gwChanCondConstIn, gwChanCondConstOut, gwHead, qgw_chanrt)
     integer, intent(in) :: ixrt, jxrt, nlinks
     real, intent(in) :: dt, dtrt_ch
     real, intent(inout) :: dtct
@@ -126,10 +127,12 @@ contains
     integer(kind=int64), intent(in), dimension(nlinks) :: lakenode
     real, intent(inout), dimension(nlakes) :: resht, qlakei, qlakeo
     integer, parameter :: did = 1, channel_option = 3
-    integer :: gwBaseSwCRT = 0, gwChanCondSw = 0
-    real :: gwChanCondConstIn = 0., gwChanCondConstOut = 0.
+    ! the groundwater-channel exchange (GWBASESWCRT = 3): drive_CHANNEL's
+    ! gwHead is gw2d's ho and qgw_chanrt gw2d's qgw_chanrt (HYDRO_drv :980)
+    integer, intent(in) :: gwBaseSwCRT, gwChanCondSw
+    real, intent(in) :: gwChanCondConstIn, gwChanCondConstOut
+    real, intent(inout), dimension(:,:), allocatable :: gwHead, qgw_chanrt
     real, dimension(ixrt, jxrt) :: latval, lonval
-    real, dimension(:,:), allocatable :: gwHead, qgw_chanrt
     real, dimension(nlinks) :: dzGwChanHead, Q_GW_CHAN_FLUX
     real, dimension(nlakes) :: qlakeip, qllake
     real*8, dimension(nlakes) :: qlakei8, qllake8

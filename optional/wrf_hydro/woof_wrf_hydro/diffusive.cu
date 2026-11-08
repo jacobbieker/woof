@@ -118,7 +118,11 @@ extern "C" __global__ void wrfhydro_diffusive(
     const int* __restrict__ listart, const int* __restrict__ lilist,
     const float* __restrict__ lprops, const int* __restrict__ lopt, float* __restrict__ resht, float* __restrict__ qlakei,
     float* __restrict__ qlakeo, float* __restrict__ qlakeip, float* __restrict__ qllake,
-    int nlakes)
+    int nlakes,
+    // the groundwater-channel exchange (GWBASESWCRT = 3, :920-923, :949-990):
+    // gwhead is gw2d's ho, qgw_chanrt (jxrt*ixrt) gw2d's channel flux plane
+    int gw_on, int gw_sw, float cond_in, float cond_out,
+    const float* __restrict__ gwhead, float* __restrict__ qgw_chanrt, int ncell)
 {
     __shared__ float dtct;
     __shared__ int krt, dt_steps, flag;
@@ -137,6 +141,8 @@ extern "C" __global__ void wrfhydro_diffusive(
         qlateral[i] = 0.0f;
     }
     for (int l = tid; l < nlakes; l += nt) qlakeip[l] = qlakei[l];   // QLAKEIP = QLAKEI
+    if (gw_on)                                            // qgw_chanrt = 0. (:922)
+        for (int c = tid; c < ncell; c += nt) qgw_chanrt[c] = 0.0f;
     __syncthreads();
     for (;;) {                                            // crnt
         if (tid == 0) {
@@ -151,8 +157,19 @@ extern "C" __global__ void wrfhydro_diffusive(
             if (node_area[i] == 0.0f) atomicOr(err, DIFF_ERR_AREA);
             if (regular[i]) {
                 int c = cell[i];
-                qlateral[i] = 0.0f + ((qstrmvolrt[c] + qinflowbase[c])
-                                      / (float)steps * node_area[i] / 1000.0f / dtc);
+                float qgw = 0.0f;                         // Q_GW_CHAN_FLUX(i)
+                if (gw_on) {                              // gwOption (:949-990)
+                    float dz = gwhead[c] - (hlink[i] + zelev[i]);
+                    if (gw_sw == 1 && dz > 0.0f) {
+                        qgw = cond_in * dz * chanlen[i] * 2.0f;
+                    } else if (gw_sw == 1 && dz < 0.0f) {
+                        float q = cond_out * dz * chanlen[i] * 2.0f;
+                        qgw = -0.005f > q ? -0.005f : q;  // MAX(-0.005, ...) at -O0
+                    }
+                    qgw_chanrt[c] = qgw;
+                }
+                qlateral[i] = qgw + ((qstrmvolrt[c] + qinflowbase[c])
+                                     / (float)steps * node_area[i] / 1000.0f / dtc);
             } else if (pour[i] > 0) {
                 qlateral[i] = qlakeo[pour[i] - 1];       // previous timestep
             }

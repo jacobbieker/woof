@@ -1,6 +1,20 @@
 # noahmp-energy.csv -- provenance
 
-`ENERGY` is `phys/module_sf_noahmplsm.F` lines **1741-2396** of WRF v4.6.1. It
+> **Re-pinned to WRF 4.7.1 (2026-11-08).** `noahmp-energy.csv` was first built from
+> WRF v4.6.1 (`d66e442f`, phys/noahmp `848f54ad`). Rebuilt with
+> `build_energy.sh` from WRF v4.7.1 (`f52c197e`, phys/noahmp `e5c0859`), the
+> output is byte-identical, so the pins below name e5c0859. The rebuild
+> from the 4.6.1 tree is byte-identical too: the build scripts accept
+> either tree (`tools/noahmp_wrf461_oracle/noahmp_pins.sh`) and name the one
+> they were given in their sums files. Rebuilt with GNU Fortran 13.3.0 and
+> glibc 2.39 (Ubuntu 24.04 container).
+> The generated `noahmp_drv_helpers.F90` now names its tree in its header,
+> so its digest below is the 4.7.1 build's.
+> Line numbers of `module_sf_noahmpdrv.F` in this file are 4.6.1's:
+> e5c0859 deleted line 648 (`calculate_soil = .false.`), so every 4.7.1
+> line above 648 is one lower.
+
+`ENERGY` is `phys/module_sf_noahmplsm.F` lines **1741-2396** of WRF v4.7.1. It
 is not a leaf: it is the composition that owns the surface energy balance. Its
 callees are each pinned by their own fixture already, so what this one exists
 to pin is the branching, the tile-average bookkeeping and the state ENERGY
@@ -9,22 +23,22 @@ derives around those calls.
 ## Build
 
 ```
-tree      <wrf-4.6.1-checkout> (WSL)
-commit    d66e442fccc04111067e29274c9f9eaccc3cef28
+tree      <wrf-4.7.1-checkout> (WSL)
+commit    f52c197ed39d12e087d02c50f412d90d418f6186
 compiler  GNU Fortran (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
 FCOPTIM   -O0
 FCBASE    -w -ffree-form -ffree-line-length-none -fconvert=big-endian -frecord-marker=4
 command   bash tools/noahmp_wrf461_oracle/build_energy.sh \
-               <wrf-4.6.1-checkout> <work>/nmp-energy
+               <wrf-4.7.1-checkout> <work>/nmp-energy
 ```
 
 | file | sha256 |
 |---|---|
-| `phys/module_sf_noahmplsm.F` (pristine) | `bd592a5b7db29000e715250e3a7c779ffb5e0dcc356f6b5a7d9e1c9f69c55282` |
-| `phys/module_sf_noahmpdrv.F` (pristine) | `9010a757da994ed8796c63ca97da354eaf60c5c732df4ea9acad5bc62a973890` |
+| `phys/module_sf_noahmplsm.F` (pristine) | `74b475600ad1c999fe43299bcaf4d3e5eaf59b9f861c47fdbff4d69739e3a45b` |
+| `phys/module_sf_noahmpdrv.F` (pristine) | `29f16622740d7388a17ff9ba6c2f4640487e44f3f26b8c4bdd47aad42e0a4572` |
 | `phys/module_sf_gecros.F` (pristine) | `ad2864562e95678a25276df82ef96395cca61c3a1bd0ab48ddfb8402902cf2f6` |
-| `module_sf_noahmplsm_public.F` (visibility lift only) | `bfdc0f3632cd30b87208b26a309c533b12d9bc2a39d1a36e9165ecf90d0a12c3` |
-| `noahmp_drv_helpers.F90` (generated) | `44f18a9cbbe27c3e734acc0c665493f6abfdbfcf5ca22c570cd540d5e7f9d35d` |
+| `module_sf_noahmplsm_public.F` (visibility lift only) | `072309bc12d64a3e15cf13252ca74411d321e44d3ff9a88bbb8cfcb261ec5ed4` |
+| `noahmp_drv_helpers.F90` (generated) | `686db1397fff213dfe985a68c28943b4fd71b09e52230b28cbab0ab97ba7f8f9` |
 | `MPTABLE.TBL` | `7fae6a77660c90ad80845565ecfb057093c100de41f35f25a7ffa63f41c19e5d` |
 | `SOILPARM.TBL` | `1e2275a32d8cd3b48ca693d22c0816df0013f83b6594ac632716361db337d58f` |
 | `GENPARM.TBL` | `9c02832a0e4a2ecaf47fcee485539aad95cd732c379c5c258161a88eb3d25ea2` |

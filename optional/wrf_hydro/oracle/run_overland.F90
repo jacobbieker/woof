@@ -5,7 +5,9 @@ program run_wrf_hydro_overland_oracle
   ! rain, and dump every input and output word as CSV.  Terrain slopes and
   ! steepest-neighbour indices come from an elevation field as in the routing
   ! initialisation (inputs here); a channel line, a lake and a dry patch
-  ! exercise the retention, channel, lake and GETMAX8DIR arms.
+  ! exercise the retention, channel, lake and GETMAX8DIR arms.  Then three
+  ! more calls with rt_option = 2 (ROUTE_OVERLAND2, the x-then-y sweep on
+  ! the routing-initialisation slopes SOX/SOY), carrying the state on.
   use overland_harness
   implicit none
 
@@ -108,6 +110,51 @@ program run_wrf_hydro_overland_oracle
     end if
     qx = 0.0; qy = 0.0
     call OverlandRouting(ov, dt, dtrt, 1, xx, yy, qx, qy)
+    do j = 1, yy
+      do i = 1, xx
+        write(v, '(3(I0,","),ES24.16E3,7(",",ES24.16E3))') n, i, j, &
+            ov%control%infiltration_excess(i, j), ov%control%surface_water_head_routing(i, j), &
+            ov%properties%retention_depth(i, j), qx(i, j), qy(i, j), &
+            ov%streams_and_lakes%surface_water_to_channel(i, j), &
+            ov%streams_and_lakes%surface_water_to_lake(i, j), ov%control%boundary_flux(i, j)
+      end do
+    end do
+    write(w, '(I0,3(",",ES24.16E3))') n, ov%streams_and_lakes%accumulated_surface_water_to_channel, &
+        ov%streams_and_lakes%accumulated_surface_water_to_lake, ov%control%boundary_flux_total
+  end do
+  close(v); close(w)
+
+  ! rt_option = 2: module_RT's interior SOX/SOY (:1095-1098)
+  do j = 2, yy - 1
+    do i = 2, xx - 1
+      ov%properties%surface_slope_x(i, j) = (elev(i, j) - elev(i + 1, j)) &
+          / ov%properties%distance_to_neighbor(i, j, 3)
+      ov%properties%surface_slope_y(i, j) = (elev(i, j) - elev(i, j + 1)) &
+          / ov%properties%distance_to_neighbor(i, j, 1)
+    end do
+  end do
+  open(newunit=u, file=trim(dir)//'/overland2-inputs.csv', status='replace')
+  write(u, '(A)') 'i,j,sox,soy'
+  do j = 1, yy
+    do i = 1, xx
+      write(u, '(2(I0,","),ES24.16E3,",",ES24.16E3)') i, j, ov%properties%surface_slope_x(i, j), &
+          ov%properties%surface_slope_y(i, j)
+    end do
+  end do
+  close(u)
+  open(newunit=v, file=trim(dir)//'/overland2-steps.csv', status='replace')
+  write(v, '(A)') 'call,i,j,infxs,head,retention,qx,qy,to_channel,to_lake,boundary_flux'
+  open(newunit=w, file=trim(dir)//'/overland2-totals.csv', status='replace')
+  write(w, '(A)') 'call,acc_channel,acc_lake,boundary_flux_total'
+  do n = ncall + 1, 2 * ncall
+    do j = 1, yy
+      do i = 1, xx
+        ov%control%infiltration_excess(i, j) = ov%control%surface_water_head_routing(i, j) &
+            + 6.0 * frac(i * 3 + j * 29 + n * 7, 31)
+      end do
+    end do
+    qx = 0.0; qy = 0.0
+    call OverlandRouting(ov, dt, dtrt, 2, xx, yy, qx, qy)
     do j = 1, yy
       do i = 1, xx
         write(v, '(3(I0,","),ES24.16E3,7(",",ES24.16E3))') n, i, j, &

@@ -69,8 +69,6 @@ def test_template_with_muskingum_cunge_maps():
 
 
 @pytest.mark.parametrize("edit,word", [
-    (("rt_option = 1", "rt_option = 2"), "rt_option = 2"),
-    (("GWBASESWCRT = 1", "GWBASESWCRT = 3"), "gw2d"),
     (("GWBASESWCRT = 1", "GWBASESWCRT = 4"), "UDMP bucket"),
     (("UDMP_OPT = 0", "UDMP_OPT = 1"), "UDMAP|UDMP"),
     (("bucket_loss = 0", "bucket_loss = 1"), "bucket loss"),
@@ -132,3 +130,21 @@ def test_a_reservoir_key_in_hydro_nlist_is_unknown_and_lake_option_4_is_invalid(
         nl.map_hydro_nlist(nl.parse(text.replace("UDMP_OPT = 0", "UDMP_OPT = 0\nreservoir_type_specified = .TRUE.")))
     with pytest.raises(ValueError, match="lake_option = 4"):
         nl.map_hydro_nlist(nl.parse(_lakes(text, "lake_option = 4")))
+
+
+def test_the_2d_groundwater_model_and_its_channel_exchange_map():
+    nl = _nl()
+    text = _drop_nudging(_text()).replace("GWBASESWCRT = 1", "GWBASESWCRT = 3")
+    cfg = nl.map_hydro_nlist(nl.parse(text.replace(
+        "UDMP_OPT = 0", "UDMP_OPT = 0\ngwChanCondSw = 1\ngwChanCondConstIn = 0.0001\n"
+        "gwChanCondConstOut = 0.0002\ngwsoilcpl = 1\nGwPreCycles = 3")))
+    assert (cfg.gwbaseswcrt, cfg.gw_chan_cond_sw, cfg.gwsoilcpl, cfg.gw_pre_cycles) == (3, 1, 1, 3)
+    assert (cfg.gw_chan_cond_const_in, cfg.gw_chan_cond_const_out) == (0.0001, 0.0002)
+
+
+def test_rt_option_2_maps_and_3_is_invalid():
+    nl = _nl()
+    text = _drop_nudging(_text())
+    assert nl.map_hydro_nlist(nl.parse(text.replace("rt_option = 1", "rt_option = 2"))).rt_option == 2
+    with pytest.raises(ValueError, match="rt_option = 3"):
+        nl.map_hydro_nlist(nl.parse(text.replace("rt_option = 1", "rt_option = 3")))
