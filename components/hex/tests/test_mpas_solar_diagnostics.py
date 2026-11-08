@@ -120,7 +120,7 @@ def _oracle_mpas_columns():
 
 def test_step_writes_wrfs_words_on_mpas_fields(monkeypatch):
     cp = pytest.importorskip("cupy")
-    from woof.core.solar_diagnostics import NOUT, species_flags
+    from woof.core.solar_diagnostics_wrf471 import NOUT, species_flags
     from woof.hex import cuda_physics_prep_v841 as prep
     cols = _oracle_mpas_columns()
     # one group the adapter can run as one mesh: same nz, all species, radii, one dt

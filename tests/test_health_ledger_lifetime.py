@@ -1,5 +1,6 @@
 """A completed status read must not retain a scheme's atmospheric inputs."""
 import sys
+from contextlib import nullcontext
 from types import SimpleNamespace
 import weakref
 
@@ -14,7 +15,9 @@ def ledger(monkeypatch):
     # Exercise the real OR/read/clear protocol without opening a CUDA context.
     monkeypatch.setitem(sys.modules, "cupy", SimpleNamespace(
         zeros=np.zeros, uint32=np.uint32, bitwise_or=np.bitwise_or,
-        asnumpy=lambda value: value.copy()))
+        asnumpy=lambda value: value.copy(),
+        cuda=SimpleNamespace(runtime=SimpleNamespace(getDevice=lambda: 0),
+            Device=lambda _: nullcontext(), get_current_stream=nullcontext)))
     return HealthLedger()
 
 
@@ -51,6 +54,9 @@ def test_no_record_after_successful_drain_needs_no_old_description(ledger):
                   lambda flags: pytest.fail(str(flags)))
     ledger.drain()
     ledger.drain()
+    # The fork's ledger reads on every drain: a replayed CUDA graph ORs
+    # into the slots without calling record() (HealthLedger.drain), so only
+    # drain(if_recorded=True) may skip the read.
     assert ledger.drains == 2
     assert not ledger.slots.any()
     assert ledger._describe == {}

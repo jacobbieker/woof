@@ -7,7 +7,12 @@ from woof.ocean.seaice import validate
 
 def config(**kw):
     d=dict(seaice_prognostic=True, seaice_initial_thickness=1.,
-           seaice_new_ice_thickness=.5, seaice_ocean_heat_flux=2., sf_surface_physics=2)
+           seaice_new_ice_thickness=.5, seaice_ocean_heat_flux=2., sf_surface_physics=2,
+           # WRF 4.7.1's prescribed-ice settings (1.1.6), at their defaults.
+           fractional_seaice=0, seaice_albedo_opt=0, seaice_thickness_opt=0,
+           seaice_snowdepth_opt=0, seaice_albedo_default=.65,
+           seaice_thickness_default=3., seaice_snowdepth_min=.001,
+           seaice_snowdepth_max=1.e10)
     return SimpleNamespace(**(d|kw))
 
 @pytest.fixture
@@ -172,7 +177,7 @@ def test_pwp_owner_freezes_its_mixed_layer_without_an_oml_slab(cp):
     # Open water the ice model owns, but with no ice on it: the atmosphere's
     # own fluxes act there, so the PWP step must keep applying them.
     for key in ('xice','ice_volume','ice_thickness'): f[key][:,56:]=0.
-    for key,val in dict(gsw=0.,uair=5.,vair=0.,ust=.1,f=.00014).items():
+    for key,val in dict(gsw=0.,uair=5.,vair=0.,ust=.1,f=.00014,rhoair=1.2).items():
         f[key]=cp.full_like(f['tsk'],val)
     cfg=RunConfig(nx=64,ny=64,nz=16,dx=25000.,dy=25000.,ztop=12000.,
                   dt=60.,run_seconds=302400.,sf_ocean_physics=2,ocean_levels=10,
@@ -257,7 +262,7 @@ def test_pwp_under_full_ice_gives_up_the_ocean_to_ice_heat_flux(cp):
     from woof.config import RunConfig
     d,a=fields(cp,area=1.)
     f=d.fields
-    for key,val in dict(gsw=0.,uair=0.,vair=0.,ust=0.,f=.00014).items():
+    for key,val in dict(gsw=0.,uair=0.,vair=0.,ust=0.,f=.00014,rhoair=1.2).items():
         f[key]=cp.full_like(f['tsk'],val)
     cfg=RunConfig(nx=64,ny=64,nz=16,dx=25000.,dy=25000.,ztop=12000.,
                   dt=60.,run_seconds=302400.,sf_ocean_physics=2,ocean_levels=10,

@@ -1,7 +1,7 @@
 """WRF-Solar FARMS on the MPAS-A v8.4.2 physics path (WOOF-only service).
 
 MPAS v8.4.2 has no FARMS.  This is WRF's ``swint_opt = 2``
-(woof.core.farms; WRF v4.7.1 phys/module_ra_farms.F) carried to MPAS as a
+(woof.core.farms_wrf471; WRF v4.7.1 phys/module_ra_farms.F) carried to MPAS as a
 glue service in the physics-suite profile
 (``mpasphys_v842.services.farms_sw``, backend selector
 ``config_farms_sw_backend`` in ``&hex_mpasphys``, default ``off``).  With it
@@ -40,7 +40,7 @@ Inputs, per step, MPAS's own words:
 * the sun at the step's own time by MPAS's radiation geometry
   (``farms_mpas_coszen``), and ``juday = INT(curr_julday)``.
 
-The column kernel is woof/core/kernels/farms.cu's ``farms_columns``, held to
+The column kernel is woof/core/kernels/farms_wrf471.cu's ``farms_columns``, held to
 compiled WRF v4.7.1 word for word (tests/test_farms_wrf471_parity.py) and,
 in MPAS's [level, cell] layout through :func:`farms_mpas`, by
 components/hex/tests/test_mpas_farms_v842.py.
@@ -49,7 +49,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from woof.core.farms import farms_columns
+from woof.core.farms_wrf471 import farms_columns
 
 F = np.float32
 SERVICE = "farms_sw"
@@ -67,7 +67,7 @@ def mpas_coszen(cp, *, lat_cell, lon_cell, julian, xtime_min, gmt, degrad, dpd):
     nc = int(lat.size)
     out = cp.empty(nc, dtype=cp.float32)
     if nc:
-        get_kernel("farms", "farms_mpas_coszen")(
+        get_kernel("farms_wrf471", "farms_mpas_coszen")(
             ((nc + 127) // 128,), (128,),
             (np.int32(nc), lat, lon, F(julian), F(xtime_min), F(gmt),
              F(degrad), F(dpd), out))
