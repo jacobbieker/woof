@@ -1,8 +1,9 @@
 # Continuous integration (`.github/workflows/tests.yml`)
 
 Every push to `main` and every pull request runs the jobs below. A push to
-any other branch runs nothing: its pull request's run tests the same commit,
-and a branch with no pull request is run by hand (`workflow_dispatch`). Before
+any other branch runs nothing: its pull request's run tests the branch merged
+into its base (GitHub's merge ref, not the bare branch head), and a branch with
+no pull request is run by hand (`workflow_dispatch`). Before
 this, each PR push queued two identical runs, and their macOS jobs held up
 `publish-metal.yml`'s macOS build. Every environment is a pixi
 environment from the committed `pixi.lock`, installed with `locked: true`

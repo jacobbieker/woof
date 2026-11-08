@@ -16,9 +16,9 @@ name: tests
 
 on:
   # A branch push runs nothing by itself: its pull request's run tests the
-  # same commit, and the two together doubled every PR's queue (13 macOS
-  # jobs each), which starved publish-metal's macOS build.  A branch with no
-  # pull request is run by hand (workflow_dispatch).
+  # branch merged into its base, and the two runs together doubled every
+  # PR's queue (13 macOS jobs each), which starved publish-metal's macOS
+  # build.  A branch with no pull request is run by hand (workflow_dispatch).
   push:
     branches: [main]
   pull_request:
