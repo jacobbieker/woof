@@ -40,7 +40,6 @@ static inline float df_fma32(float a, float b, float c) { return metal::fma(a, b
 static inline float df_sqrt32(float a) { return metal::precise::sqrt(a); }
 static inline float df_floor32(float a) { return metal::floor(a); }
 static inline float df_rint32(float a) { return metal::rint(a); }
-static inline float df_cbrt32(float a) { return metal::precise::exp2(metal::precise::log2(a) / 3.0f); }
 #else
 #include <cmath>
 #define DF_FN static inline
@@ -50,7 +49,6 @@ static inline float df_fma32(float a, float b, float c) { return std::fma(a, b, 
 static inline float df_sqrt32(float a) { return std::sqrt(a); }
 static inline float df_floor32(float a) { return std::floor(a); }
 static inline float df_rint32(float a) { return std::rint(a); }
-static inline float df_cbrt32(float a) { return std::cbrt(a); }
 #endif
 
 #define DF_FRAC_MASK 0x000FFFFFFFFFFFFFUL
@@ -58,6 +56,14 @@ static inline float df_cbrt32(float a) { return std::cbrt(a); }
 #define DF_ONE_WORD 0x3FF0000000000000UL
 #define DF_INF_WORD 0x7FF0000000000000UL
 #define DF_QUIET 0x0008000000000000UL
+
+// A cube root seed for a in [1, 8) from IEEE operations only (the same word
+// on the GPU and the host): Kahan's bit estimate, three Newton steps.
+static inline float df_cbrt32(float a) {
+  float y = f64_bits_to_f32(f64_f32_to_bits(a) / 3u + 0x2A5137A0u);
+  for (int i = 0; i < 3; ++i) y = y - (y * y * y - a) / (3.0f * y * y);
+  return y;
+}
 
 // ---------------------------------------------------------------- df64 core
 
