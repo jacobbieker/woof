@@ -3,7 +3,7 @@
 A WOOF-only output; MPAS-A v8.4.2 has none.  The WOOF namelist group
 ``&diagnostics`` option ``config_solar_diagnostics`` (logical, default
 false; :func:`resolve`) adds WRF v4.7.1 module_diag_solar.F's 26 diagnostics
-(woof.core.solar_diagnostics.SOLAR_OUTPUTS) as ``diag_physics`` fields
+(woof.core.solar_diagnostics_wrf471.SOLAR_OUTPUTS) as ``diag_physics`` fields
 [nCells] named as WRF's Registry/registry.solar_fields state variables
 (lower case, MPAS style: clrnidx, sza, ghi_accum, cldfrac2d, wvp, lwp, ...),
 package-gated so a run without it allocates nothing new, and members of the
@@ -39,7 +39,7 @@ from typing import Any, Mapping
 
 import numpy as np
 
-from woof.core.solar_diagnostics import NOUT, SOLAR_OUTPUTS
+from woof.core.solar_diagnostics_wrf471 import NOUT, SOLAR_OUTPUTS
 
 #: The WOOF-only namelist group and its one option.
 GROUP = "diagnostics"
@@ -149,7 +149,7 @@ class MpasSolarDiagnostics:
 
     def step(self, *, dt):
         from ..cuda_physics_prep_v841 import prepare_mpas_to_phys_cuda_v841
-        from woof.core.solar_diagnostics import run_solar_diag, species_flags
+        from woof.core.solar_diagnostics_wrf471 import run_solar_diag, species_flags
         cp, s, c = self.cp, self.session, self.coupling
         atmosphere = self.dycore.atmosphere
         chemistry = getattr(c, "chemistry", None)
