@@ -99,11 +99,11 @@ def test_dust_statics_follow_each_rows_interpolation_sequence(tmp_path):
     _geog(tmp_path, "erod", erod, missing=255)
     _geog(tmp_path, rows["CLAYFRAC"][0], [clay], missing=255)
     _geog(tmp_path, rows["SANDFRAC"][0], [y * 7])
-    lat = np.array([2.0, 4.0, 4.6, 6.25, 6.0])
-    lon = np.array([3.0, 5.0, 5.3, 7.75, 7.0])
-    land = np.array([1, 1, 1, 0, 1])
+    lat = np.array([2.0, 4.0, 4.6, 6.25, 6.0, 9.8])
+    lon = np.array([3.0, 5.0, 5.3, 7.75, 7.0, 3.0])
+    land = np.array([1, 1, 1, 0, 1, 1])
     out = chem_wrf.sample_dust_statics(tmp_path, lat, lon, land)
-    assert out["EROD"].shape == (3, 5)
+    assert out["EROD"].shape == (3, 6)
 
     def corners(la, lo):
         xx, yy = lo - 0.5, la - 0.5   # 0-based fractional source indices
@@ -129,6 +129,22 @@ def test_dust_statics_follow_each_rows_interpolation_sequence(tmp_path):
     assert out["CLAYFRAC"][4] == pytest.approx(mean4(clay, lat[4], lon[4], skip=(5, 6)))
     assert out["EROD"][:, 3].tolist() == [0.0, 0.0, 0.0]   # water takes the fill
     assert out["CLAYFRAC"][3] == 0.0
+    # (9.8N) straddles the dataset's top row; the rows beyond it are padding, not zeros (SANDFRAC declares
+    # no missing value): four_pt fails and average_4pt takes the two real points.
+    assert out["SANDFRAC"][5] == pytest.approx(9 * 7 * 0.01)
+    receipt = chem_wrf.statics_receipt(tmp_path)
+    assert receipt["EROD"]["interp_options"] == ["average_4pt"]
+    assert receipt["CLAYFRAC"]["interp_options"][:2] == ["four_pt", "average_4pt"]
+    before = receipt["SANDFRAC"]["files_sha256"]
+    (tmp_path / rows["SANDFRAC"][0] / "00001-00010.00001-00010").write_bytes(b"\0" * 100)
+    assert chem_wrf.statics_receipt(tmp_path)["SANDFRAC"]["files_sha256"] != before
+
+
+def test_suite_route_refuses_wrf_chem(tmp_path):
+    from woof.hex.mpasphys.chemistry_v842 import SuiteChemistry
+    with pytest.raises(ValueError, match="hex WOOF column route"):
+        SuiteChemistry(config(tmp_path, {"chem_opt": 401}), registry_names=("qv",), mesh=None, nlev=3,
+                       grid_path=None, start_text="2021-06-01_18:00:00")
 
 
 def test_backend_runs_the_wrf_step_after_the_physics_and_settles_it(tmp_path, monkeypatch):
