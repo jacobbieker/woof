@@ -11,8 +11,11 @@ if [[ $# -ne 2 ]]; then
     echo "usage: build_column.sh NEMO_SOURCE_ROOT BUILD_DIR" >&2
     exit 2
 fi
-source_root=$(realpath "$1")
-build_dir=$(realpath -m "$2")
+# Portable to macOS (no GNU realpath -m, bash 3.2, shasum instead of sha256sum).
+source_root=$(cd "$1" && pwd -P)
+mkdir -p "$2"
+build_dir=$(cd "$2" && pwd -P)
+sha256() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$@"; else shasum -a 256 "$@"; fi; }
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 pinned_commit="dcc7fb8c1779fa8409e41e4ce3ab7d45b9ceb796"   # tag 5.0.2
 whole=(TRA/eosbn2 TRA/traqsr ZDF/zdfsh2 ZDF/zdfdrg ZDF/zdftke TRA/trazdf TRA/trasbc TRA/traatf_qco)
@@ -56,21 +59,24 @@ fi
 for nml in nameos namtra_qsr namzdf_tke namdrg namdrg_bot; do
     awk "/^&${nml} /,/^\\//" "${source_root}/cfgs/SHARED/namelist_ref"
 done > column_namelist_ref.txt
-declare -A cfgs=(
-    [teos10]='&nameos ln_teos10=.true. / &namtra_qsr ln_qsr_rgb=.false., ln_qsr_2bd=.true. / &namzdf_tke / &namdrg ln_non_lin=.true. / &namdrg_bot /'
-    [eos80]='&nameos ln_eos80=.true. / &namtra_qsr / &namzdf_tke nn_mxl=2, nn_etau=0 / &namdrg ln_loglayer=.true. / &namdrg_bot /'
-)
-declare -A qsr=([teos10]=T [eos80]=F)
+# a case, not an associative array: the script also runs under bash 3.2 (macOS)
+cfg_of() {
+    case "$1" in
+        teos10) echo '&nameos ln_teos10=.true. / &namtra_qsr ln_qsr_rgb=.false., ln_qsr_2bd=.true. / &namzdf_tke / &namdrg ln_non_lin=.true. / &namdrg_bot /' ;;
+        eos80)  echo '&nameos ln_eos80=.true. / &namtra_qsr / &namzdf_tke nn_mxl=2, nn_etau=0 / &namdrg ln_loglayer=.true. / &namdrg_bot /' ;;
+    esac
+}
+qsr_of() { case "$1" in teos10) echo T ;; eos80) echo F ;; esac; }
 outs=()
 for name in teos10 eos80; do
     mkdir -p "${name}"
-    ./run_column "${name}" column_namelist_ref.txt "${cfgs[$name]}" "${qsr[$name]}" > "${name}/stdout.txt"
+    ./run_column "${name}" column_namelist_ref.txt "$(cfg_of "${name}")" "$(qsr_of "${name}")" > "${name}/stdout.txt"
     for part in grid forcing steps surface; do
         mv "${name}/column-${part}.csv" "column-${name}-${part}.csv"
         outs+=("column-${name}-${part}.csv")
     done
 done
-sha256sum "${sources[@]/#/${source_root}/}" "${script_dir}/column_stubs.F90" \
+sha256 "${sources[@]/#/${source_root}/}" "${script_dir}/column_stubs.F90" \
     "${script_dir}/column_harness.F90" "${script_dir}/run_column.F90" "${script_dir}/build_column.sh" \
     "${outs[@]}" \
     | sed "s#${source_root}/#<nemo-5.0.2-checkout>/#; s#${script_dir}/#<oracle-workspace>/optional/nemo/oracle/#" \

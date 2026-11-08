@@ -116,13 +116,20 @@ Metal, and refuses what it does not port by name.
 ### WRF-Hydro (steps 3-5 go in the opt-in; step 2 is WRF code)
 
 1. **Done**: the LSM side of the exchange for Noah (`sf_surface_physics=2`).
-2. **Noah-MP under WRF_HYDRO** (WRF code, no licence question):
-   `module_sf_noahmpdrv.F`/`module_sf_noahmplsm.F` take `sfcheadrt`,
-   `INFXSRT`, `soldrain`, `qtiledrain` and `ZWATBLE2D` when built with
-   `-DWRF_HYDRO` (the `QINSUR` term at :6174 and `WATBLED` into `SOILWATER`
-   that `tests/data/oracles/noahmp/PROVENANCE-water.md` records as absent).
-   Extend the Noah-MP oracle harness with a hydro pass the way
-   `tools/noah_wrf461_oracle/build.sh` was extended.
+2. **Done: Noah-MP under WRF_HYDRO** (WRF code, no licence question;
+   default build): `noahmp_lsm_step(wrf_hydro=...)` reads `sfcheadrt` and
+   writes `INFXSRT = RUNSF`, `SOLDRAIN = MAX(RUNSB, 0)` and
+   `QTILEDRAIN = QTLDRN` on land columns (module_sf_noahmpdrv.F
+   :1211-1218).  WATER adds the head to QINSUR (:6173-6175), graded word for
+   word against the module built with `-DWRF_HYDRO`
+   (`tools/noahmp_wrf461_oracle/build_water_hydro.sh`,
+   `tests/test_noahmp_water_wrf_hydro.py`, CPU and device); glacier columns
+   send it to surface runoff (module_sf_noahmp_glacier.F :2143-2145), graded
+   by CUDA/CPython parity as the glacier port is; the water-budget stops are
+   compiled out as under WRF_HYDRO.  It runs on the selected-options water
+   and glacier kernels, so the default kernels are untouched.  Refused by
+   name: Hooghoudt tile drainage with WRF-Hydro's water table
+   (`opt_tdrn = 2`, ZWATBLE2D -> WATBLED) and the staged column path.
 3. **The coupling driver** `hydro/CPL/WRF_cpl/module_wrf_HYDRO.F90` and
    `HYDRO_drv/module_HYDRO_drv.F90`: `aggregate`/`disaggregate` between the
    LSM grid and the routing grid (`AGGFACTRT`) are **done** in the opt-in
