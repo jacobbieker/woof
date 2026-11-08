@@ -2912,6 +2912,7 @@ class _Rewriter:
                     self.edits.replace(s, e, f"__woof_f64_lit(0x{word:016X}UL)")
                     continue
             if kind == K.CALL_EXPR and self.retain:
+                self.qualify_namespace_call(node)
                 self.f32s_literal_arguments(node)
             if kind == K.FLOATING_LITERAL and _is_double(node.type):
                 s, e = self.span(node)
@@ -3287,6 +3288,30 @@ class _Rewriter:
         s, e = self.span(node)
         self.edits.replace(s, e, f"__woof_f64_lit(0x{word:016X}UL)")
         return True
+
+    def qualify_namespace_call(self, node):
+        """An unqualified call to a namespace's function, in an f32s unit:
+        ``N::f(...)``.  f32s is a class at global scope, so argument-dependent
+        lookup adds a global function of the same name and signature to the
+        candidates and the call is ambiguous, where CUDA's float arguments
+        bring no ADL (the selected Noah-MP water unit's d_canwater, global and
+        in namespace noahmp_water_options)."""
+        ref = node.referenced
+        if ref is None or ref.kind.name not in ("FUNCTION_DECL", "FUNCTION_TEMPLATE"):
+            return
+        scopes, owner = [], ref.semantic_parent
+        while owner is not None and owner.kind.name == "NAMESPACE":
+            scopes.append(owner.spelling)
+            owner = owner.semantic_parent
+        if not scopes or owner is None or owner.kind.name != "TRANSLATION_UNIT" or "" in scopes:
+            return
+        toks = list(node.get_tokens())
+        if not toks or toks[0].spelling != ref.spelling or not self.main_file(node):
+            return
+        start = toks[0].extent.start.offset
+        if self.data[max(0, start - 2):start] == b"::":
+            return
+        self.edits.insert(start, "::" + "::".join(reversed(scopes)) + "::", rank=-65_000)
 
     def fold_init_list(self, node):
         """Integer literals initialising binary64 elements or fields:
