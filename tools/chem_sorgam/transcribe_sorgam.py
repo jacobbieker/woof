@@ -114,9 +114,15 @@ def generate(src: Path, exact: bool = False) -> str:
                 (name.startswith("v") and name[1:] in GLUE_V) or
                 (name.startswith("p") and name[1:] in GLUE_P)):
             out.append(f"#define SG_{name.upper()} {v.param[0]}")
-    for name in ("np", "conmin"):
+    for name in ("np", "conmin", "so4fac", "nh4fac", "no3fac", "nafac", "clfac",
+                 "orgfac", "anthfac", "soilfac", "seasfac"):
         v = tr.module.vars[name]
         out.append(f"#define SG_{name.upper()} {f2cu.literal(*v.param)}")
+    # aerosols_sorgam_init's number seeds divide by dgini?**3, folded by
+    # gfortran (PARAMETER operands) exactly as here.
+    for name in ("dginin", "dginia", "dginic"):
+        val, kind = tr.const(f2cu.parse_expr(f"{name}**3"), tr.module)
+        out.append(f"#define SG_{name.upper()}3 {f2cu.literal(val, kind)}")
     routines = ["sorgam_module_constants"] + [
         r for r in ROUTINES if exact or r not in NUMERICAL_RECIPES]
     bodies = [tr.emit_routine(tr.routines[n]) for n in routines]
