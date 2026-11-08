@@ -1,7 +1,9 @@
 # MPAS-Seaice v8.4.2 EVP velocity-solve oracle
 
 Written by `tools/mpas_seaice_oracle/build.sh` and `make_velocity_fixture.py`
-on pb (Linux 6.12 x86_64, glibc 2.44), 2026-11-08.
+on pb (Linux 6.12 x86_64, glibc 2.44), 2026-11-08. The same day,
+`oracle-r8.npz` was rewritten to add the full-subcycle cases at RKIND 8, and
+its pieces cases now take float64 EVP state. `oracle-r4.npz` kept the same words.
 
 - MPAS source: github.com/MPAS-Dev/MPAS-Model tag v8.4.2, commit
   `f34984b2c89353cf31c235b08d3b4acd96b37bb3`, byte-unmodified. build.sh checks
@@ -51,14 +53,14 @@ regenerates them, and the test refuses a regenerated case whose digest differs.
 
 | case | mode | revised EVP | ocean stress | column package | nSub | dynamics dt | precisions |
 |---|---|---|---|---|---|---|---|
-| `subcycle` | full | no | yes | yes | 120 | 3600 s | r4 |
-| `subcycle_revised` | full | yes | yes | yes | 120 | 1800 s | r4 |
+| `subcycle` | full | no | yes | yes | 120 | 3600 s | r4, r8 |
+| `subcycle_revised` | full | yes | yes | yes | 120 | 1800 s | r4, r8 |
 | `solve` | pieces | no | yes | yes | 8 | 3600 s | r4, r8 |
 | `solve_revised` | pieces | yes | yes | no | 8 | 1800 s | r4, r8 |
 | `solve_no_ocean_stress` | pieces | no | no | yes | 4 | 900 s | r4, r8 |
 
-The full subcycle is RKIND 4 only because the internal stress is ported at
-RKIND 4 for now. The meshes and EVP state are the internal-stress oracle's.
+The meshes and EVP state are the internal-stress oracle's, drawn in float64
+(rounded once to float32 for r4).
 Each case also covers:
 
 - halo vertices and cells (nVerticesSolve and nCellsSolve short of the

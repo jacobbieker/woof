@@ -6,8 +6,8 @@ stand-alone column constants, compiled verbatim with gfortran -O0
 -ffp-contract=off at RKIND 4 and RKIND 8. ``tools/mpas_seaice_oracle/run_subcycle.F90``
 drives it: the pre-subcycle Coriolis coefficient, ocean stress and subcycle
 initialisation, then either whole elastic subcycles (internal stress, ocean
-stress coefficient, velocity solve; RKIND 4) or velocity solves against a
-fixed stress divergence (both precisions), then the final divergence/shear
+stress coefficient, velocity solve) or velocity solves against a fixed
+stress divergence, then the final divergence/shear
 and the principal stresses. The oracle's outputs are committed
 (tests/data/oracles/mpas_seaice_velocity, PROVENANCE.md), so the GPU
 comparison runs without gfortran. When the oracle can be built here
@@ -22,8 +22,6 @@ THE BREAKAGES THESE PREVENT
 2. A case generator whose bytes drift. The input digests are pinned.
 3. A gate that cannot fail. Mutating one evaluation order in the kernel must
    produce mismatches at each precision.
-4. The subcycle run at RKIND 8 through single-precision internal-stress
-   kernels. It is refused.
 """
 from __future__ import annotations
 
@@ -79,19 +77,6 @@ def test_gpu_matches_the_v842_oracle_word_for_word(precision):
     report = vo.measure(precision)
     bad = {case: {k: v for k, v in fields.items() if v} for case, fields in report.items()}
     assert not any(bad.values()), bad
-
-
-@requires_gpu
-def test_the_subcycle_refuses_rkind8():
-    import cupy as cp
-    from woof.hex.mpas_seaice import velocity_v842
-    case = next(c for c in vo.cases() if c["full"])
-    solver = {"uVelocity": cp.zeros(case["nVertices"], cp.float64)}
-    with pytest.raises(ValueError, match="RKIND 4 only"):
-        velocity_v842.subcycle(mesh={}, icestate={}, solver=solver, variational={}, ridging=None,
-                               n_subcycles=1, use_ocean_stress=True, revised_evp=False,
-                               use_column_package=True, dynamics_time_step=3600.0,
-                               elastic_time_step=30.0)
 
 
 @requires_gpu
