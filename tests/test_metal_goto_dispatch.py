@@ -439,3 +439,47 @@ def test_a_goto_into_the_else_arm_from_loops_in_the_then_arm(cp):
     out = cp.zeros(N, dtype=cp.int32)
     _launch(cp, _ENTER, "enter", cp.asarray(x), out, np.int32(N))
     assert cp.asnumpy(out).tolist() == [_enter(int(v)) for v in x]
+
+
+_ENTER_LAST = r'''
+extern "C" __global__ void enter_last(const int* in, int* out, int n) {
+    int c = blockIdx.x * blockDim.x + threadIdx.x;
+    if (c >= n) return;
+    int x = in[c], acc = 0, y = 0;
+    if (x % 3 == 0) {
+        for (int k = 0; k < 5; ++k) { y += k + 1; if (y > x) goto L; }
+        acc = 50;
+    } else {
+        for (int k = 0; k < 4; ++k) { y += 3; if (y >= x) goto L; }
+    L:
+        acc += 10 + y;
+    }
+    out[c] = acc * 1000 + y;
+}
+'''
+
+
+def _enter_last(x):
+    acc = y = 0
+    if x % 3 == 0:
+        for k in range(5):
+            y += k + 1
+            if y > x:
+                return (acc + 10 + y) * 1000 + y
+        acc = 50
+        return acc * 1000 + y
+    for k in range(4):
+        y += 3
+        if y >= x:
+            break
+    return (acc + 10 + y) * 1000 + y
+
+
+def test_a_goto_into_a_label_right_after_the_loop_that_jumps(cp):
+    """The loop holding a jump is the last statement before the label: its
+    `if (flag) continue;` must stay inside the skip guard (else the
+    re-entry loop never ends)."""
+    x = (np.arange(N, dtype=np.int32) * 7) % 31
+    out = cp.zeros(N, dtype=cp.int32)
+    _launch(cp, _ENTER_LAST, "enter_last", cp.asarray(x), out, np.int32(N))
+    assert cp.asnumpy(out).tolist() == [_enter_last(int(v)) for v in x]

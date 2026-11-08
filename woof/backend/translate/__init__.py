@@ -1271,9 +1271,41 @@ class _Rewriter:
         # innermost first: an outer dispatch loop's jumps cross the inner ones
         for n, key in enumerate(sorted(dispatch, key=lambda k: k[1] - k[0])):
             self._dispatch_block(dispatch[key][0], to_dispatch[key], n, parent, chain, wrappers)
-        for n, (label, jumps) in enumerate(sorted(reenter.values(), key=lambda v: -self.span(v[0])[0])):
+        # innermost re-entry statement first: an outer one's jumps cross it
+        ordered = sorted(reenter.values(), key=lambda v: self._reenter_extent(v[0], v[1], chain))
+        for n, (label, jumps) in enumerate(ordered):
             self._reenter_label(label, jumps, n, parent, chain, wrappers)
         self._nested_wrapper_exits(wrappers)
+
+    def _reenter_extent(self, label, jumps, chain):
+        """Byte length of the statement a re-entry loop wraps (its order)."""
+        stmt = self._reenter_statement(label, jumps, chain)
+        if stmt is None:
+            return 0
+        s, e = self.span(stmt)
+        return e - s
+
+    def _reenter_statement(self, label, jumps, chain):
+        """(the path from the label up, its index of S) for _reenter_label;
+        S is the innermost statement of a block holding the label and every
+        jump to it.  None when there is none."""
+        K = self.ci.CursorKind
+        path = chain(label)
+        spans = [self.span(a) for a in path]
+        common = None
+        for g in jumps:
+            for a in chain(g):
+                if self.span(a) in spans:
+                    i = spans.index(self.span(a))
+                    common = i if common is None else max(common, i)
+                    break
+        i = common
+        while i is not None and i + 1 < len(path) and (path[i].kind == K.COMPOUND_STMT
+                                                       or path[i + 1].kind != K.COMPOUND_STMT):
+            i += 1
+        if i is None or i + 1 >= len(path) or path[i + 1].kind != K.COMPOUND_STMT:
+            return None
+        return path[i]
 
     def _reenter_label(self, label, jumps, n, parent, chain, wrappers):
         """A label entered from outside its block -> a re-entry loop around
@@ -1321,7 +1353,9 @@ class _Rewriter:
                     if any(st.kind == K.DECL_STMT for st in skipped):
                         self.refuse(label, f"a declaration before label {name!r} in a block the goto enters")
                     self.edits.insert(self.span(skipped[0])[0], f"if (!{flag}) {{ ", rank=-60_000)
-                    self.edits.insert(self._statement_end(skipped[-1]), " } ", rank=_GOTO_CLOSE - 3)
+                    # after any `if (flag) continue/break;` a crossed loop or
+                    # wrapper ending here carries (ranks _GOTO_CLOSE - 1, + 2)
+                    self.edits.insert(self._statement_end(skipped[-1]), " } ", rank=_GOTO_CLOSE + 3)
             elif a.kind == K.IF_STMT:
                 kids = list(a.get_children())
                 if len(kids) < 2:
