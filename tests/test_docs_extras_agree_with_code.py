@@ -514,7 +514,7 @@ def test_every_command_the_docs_print_names_a_real_door():
 
 #: The commands woof/cli.py passes as local_backend_commands to
 #: consume_backend_option: their own parsers own --backend.
-_LOCAL_BACKEND_COMMANDS = ("tc-tracks", "spectral-op")
+_LOCAL_BACKEND_COMMANDS = ("tc-tracks", "spectral-op", "energy")
 
 
 def test_every_flag_the_docs_pass_is_defined_by_that_door():

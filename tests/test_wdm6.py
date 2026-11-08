@@ -350,7 +350,8 @@ def test_wdm6_workspace_follows_nz_up_to_256_levels():
         WDM6WS_SLOTS, WDM6_BLOCK, wdm6_workspace_extent, wdm6_workspace_floats)
 
     assert wdm6.VERTICAL_LEVEL_BOUNDS == (2, 256)
-    assert not hasattr(wdm6, "_kernel_capacity")
+    # The 64/80 ladder left in wdm6 is upstream's WDM7 unit's alone.
+    assert wdm6._kernel_capacity is wdm6.wdm6_level_tier
     for nz in (2, 49, 64, 65, 80, 81, 128, 256):
         assert wdm6_workspace_extent(nz) == nz + 1
     # whole lane-interleaved blocks of WDM6WS_SLOTS slots

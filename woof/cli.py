@@ -964,8 +964,11 @@ def main(argv: list[str] | None = None) -> int:
     tokens = list(sys.argv[1:] if argv is None else argv)
     try:
         from woof.backend import consume_backend_option
+        # `woof energy deploy --backend` names a deploy backend (k8s,
+        # slurm, ...), not a forecast backend.
         tokens = consume_backend_option(
-            tokens, local_backend_commands=("tc-tracks", "spectral-op"))
+            tokens, local_backend_commands=("tc-tracks", "spectral-op",
+                                            "energy"))
         check_argv(tokens)
     except ValueError as error:
         print(f"woof: {error}", file=sys.stderr)

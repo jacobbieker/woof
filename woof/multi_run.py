@@ -1536,8 +1536,6 @@ def child_environment(run: PlannedRun,
     run.kernel_cache.apply(environment, run.spec.cache)
     environment.update({
         **__import__("woof.gpu_smi",fromlist=["visibility_environment"]).visibility_environment(run.gpu.uuid),
-        "CUDA_CACHE_PATH": str(run.spec.cache / "cuda"),
-        "CUPY_CACHE_DIR": str(run.spec.cache / "cupy"),
         GPU_LOCK_ROOT_ENV: str(lock_root),
         "TEMP": scratch,
         "TMP": scratch,

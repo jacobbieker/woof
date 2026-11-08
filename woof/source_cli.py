@@ -607,12 +607,19 @@ def _active_action_arguments(
     args: argparse.Namespace,
     *,
     allowed: frozenset[str],
+    parser: argparse.ArgumentParser | None = None,
 ) -> list[str]:
-    """Return non-empty CLI destinations outside one inventory action."""
+    """Return non-empty CLI destinations outside one inventory action.
+
+    With ``parser``, an option left at its own non-empty default (the storm
+    merge widths, ``--vortex-init off``) is not active either.
+    """
 
     active = []
     for name, value in vars(args).items():
         if name in allowed or value is None or value is False:
+            continue
+        if parser is not None and value == parser.get_default(name):
             continue
         if isinstance(value, (list, tuple)) and not value:
             continue
@@ -3140,6 +3147,7 @@ def _dispatch(args: argparse.Namespace, *,
         unrelated = _active_action_arguments(
             args,
             allowed=frozenset({"validate_hrrr_domain"}),
+            parser=parser,
         )
         if unrelated:
             parser.error(

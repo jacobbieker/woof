@@ -775,8 +775,7 @@ def test_fast_moist_restart_normalizes_native_signed_species(fake_bridge, monkey
     dataset.variables["QCLOUD"] = _Variable(
         "QCLOUD", ("bottom_top", "south_north", "west_east"), qc)
     fake_bridge["ds"] = dataset
-    cfg = _cfg()
-    cfg.use_theta_m = 1
+    cfg = _cfg(use_theta_m=1)
     restored = wrfrst.read_wrfrst("wrfrst", expected_dimensions=_expected(), cfg=cfg)
     assert restored.raw["QCLOUD"].min() == 0
     assert "normalize" in restored.warm_start.checks["native_signed_moisture_action"]
