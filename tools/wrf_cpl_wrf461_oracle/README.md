@@ -1,4 +1,4 @@
-# WRF ocean-coupler exchange oracle, WRF v4.6.1
+# WRF ocean-coupler exchange oracle, WRF v4.7.1
 
 ```
 bash tools/wrf_cpl_wrf461_oracle/build.sh <WRF_SOURCE_ROOT> <BUILD_DIR>

@@ -1376,7 +1376,8 @@ __device__ void d_water(const float *par, int urban, int nroot, int ist,
                         float snowhin, float ponding,
                         float canliq, float canice, float tv, float wslake,
                         float acc_qinsur, float acc_qseva, float *acc_etrani,
-                        float *o, float *zwt, float *wa, float *wt, int infdv, int soil_steps, int calculate_soil, int tdrn, const float *tile, float tdfrac, float dx, const float*irrpar, const float*irrin, float*irrout,float*smcwtd,float*deeprech,float*rech,const float*smceq)
+                        float *o, float *zwt, float *wa, float *wt, int infdv, int soil_steps, int calculate_soil, int tdrn, const float *tile, float tdfrac, float dx, const float*irrpar, const float*irrin, float*irrout,float*smcwtd,float*deeprech,float*rech,const float*smceq,
+                        const float *sfcheadrt = nullptr)
 {
     float etrani[NSOIL];
     for (int k = 0; k < NSOIL; ++k) etrani[k] = K_ZERO;               // :6107
@@ -1447,6 +1448,10 @@ __device__ void d_water(const float *par, int urban, int nroot, int ist,
 
     for (int iz = 0; iz < nroot; ++iz)                               // :6169
         etrani[iz] = FMUL(FMUL(etran, btrani[iz]), W_K_MILLI);       // :6170
+
+    // WRF built with -DWRF_HYDRO: the ponded head WRF-Hydro returns (mm)
+    if (sfcheadrt)                                                   // :6173-6175
+        qinsur = FADD(qinsur, FMUL(FDIV(*sfcheadrt, dt), W_K_MILLI));
 
     // added soil timestep capability
     acc_qinsur = FADD(acc_qinsur, qinsur);                           // :6178
@@ -1536,7 +1541,8 @@ __device__ void d_water(const float *par, int urban, int nroot, int ist,
 template<int INF, int RUN>
 __device__ void column(const float *par, const float *fin,
                                    const int *iin, float *fout, int *iout,
-                                   int n, int infdv, int soil_steps, int calculate_soil, int tdrn, int irrigation)
+                                   int n, int infdv, int soil_steps, int calculate_soil, int tdrn, int irrigation,
+                                   int hydro)
 {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid >= n) return;
@@ -1544,7 +1550,7 @@ __device__ void column(const float *par, const float *fin,
     int base_tail=RUN==5?5:RUN==8?3:RUN>=6?8:RUN<=2?6:0;
     int in_gw=RUN==5?9:RUN<=2?3:0,out_gw=RUN==5?5:RUN<=2?3:0;
     const float *p = par + (size_t) tid * (W_P_STRIDE+base_tail+(tdrn?15:0)+(irrigation?35:0));
-    const float *x = fin + (size_t) tid * (W_IN_STRIDE+in_gw+(tdrn?3:0)+(irrigation?5:0));
+    const float *x = fin + (size_t) tid * (W_IN_STRIDE+in_gw+(tdrn?3:0)+(irrigation?5:0)+(hydro?1:0));
     const int   *ip = iin + (size_t) tid * W_INT_STRIDE;
     float *q = fout + (size_t) tid * (W_OUT_STRIDE+out_gw+(tdrn?1:0)+(irrigation?4:0));
 
@@ -1571,7 +1577,8 @@ __device__ void column(const float *par, const float *fin,
             x[W_ACC_QINSUR], x[W_ACC_QSEVA], acc_etrani, q, &zwt, &wa, &wt, infdv, soil_steps, calculate_soil, tdrn, tdrn?p+W_P_STRIDE+base_tail:nullptr, tdrn?tx[0]:0.0f, tdrn?tx[1]:0.0f,
             irrigation?p+W_P_STRIDE+base_tail+(tdrn?15:0):nullptr,
             irrigation?x+W_IN_STRIDE+in_gw+(tdrn?3:0):nullptr,
-            irrigation?q+W_OUT_STRIDE+out_gw+(tdrn?1:0):nullptr,&smcwtd,&deeprech,&rech,RUN==5?x+W_IN_STRIDE+5:nullptr);
+            irrigation?q+W_OUT_STRIDE+out_gw+(tdrn?1:0):nullptr,&smcwtd,&deeprech,&rech,RUN==5?x+W_IN_STRIDE+5:nullptr,
+            hydro?x+W_IN_STRIDE+in_gw+(tdrn?3:0)+(irrigation?5:0):nullptr);
     if(RUN==5){q[W_OUT_STRIDE]=zwt;q[W_OUT_STRIDE+1]=wa;q[W_OUT_STRIDE+2]=smcwtd;q[W_OUT_STRIDE+3]=deeprech;q[W_OUT_STRIDE+4]=rech;}
     if(RUN<=2) {q[W_OUT_STRIDE]=zwt;q[W_OUT_STRIDE+1]=wa;q[W_OUT_STRIDE+2]=wt;}
 
@@ -1581,25 +1588,26 @@ __device__ void column(const float *par, const float *fin,
 }
 
 extern "C" __global__ void k_water_selected(const float *par,const float *fin,
-    const int *iin,float *fout,int *iout,int n,int inf,int run,int infdv,int soil_steps,int calculate_soil,int tdrn,int irrigation) {
+    const int *iin,float *fout,int *iout,int n,int inf,int run,int infdv,int soil_steps,int calculate_soil,int tdrn,int irrigation,
+    int hydro) {
     if(inf==1) {
-        if(run==1)noahmp_water_options::column<1,1>(par,fin,iin,fout,iout,n,infdv,soil_steps,calculate_soil,tdrn,irrigation);
-        else if(run==2)noahmp_water_options::column<1,2>(par,fin,iin,fout,iout,n,infdv,soil_steps,calculate_soil,tdrn,irrigation);
-        else if(run==3)noahmp_water_options::column<1,3>(par,fin,iin,fout,iout,n,infdv,soil_steps,calculate_soil,tdrn,irrigation);
-        else if(run==5)noahmp_water_options::column<1,5>(par,fin,iin,fout,iout,n,infdv,soil_steps,calculate_soil,tdrn,irrigation);
-        else if(run==6)noahmp_water_options::column<1,6>(par,fin,iin,fout,iout,n,infdv,soil_steps,calculate_soil,tdrn,irrigation);
-        else if(run==7)noahmp_water_options::column<1,7>(par,fin,iin,fout,iout,n,infdv,soil_steps,calculate_soil,tdrn,irrigation);
-        else if(run==8)noahmp_water_options::column<1,8>(par,fin,iin,fout,iout,n,infdv,soil_steps,calculate_soil,tdrn,irrigation);
-        else noahmp_water_options::column<1,4>(par,fin,iin,fout,iout,n,infdv,soil_steps,calculate_soil,tdrn,irrigation);
+        if(run==1)noahmp_water_options::column<1,1>(par,fin,iin,fout,iout,n,infdv,soil_steps,calculate_soil,tdrn,irrigation,hydro);
+        else if(run==2)noahmp_water_options::column<1,2>(par,fin,iin,fout,iout,n,infdv,soil_steps,calculate_soil,tdrn,irrigation,hydro);
+        else if(run==3)noahmp_water_options::column<1,3>(par,fin,iin,fout,iout,n,infdv,soil_steps,calculate_soil,tdrn,irrigation,hydro);
+        else if(run==5)noahmp_water_options::column<1,5>(par,fin,iin,fout,iout,n,infdv,soil_steps,calculate_soil,tdrn,irrigation,hydro);
+        else if(run==6)noahmp_water_options::column<1,6>(par,fin,iin,fout,iout,n,infdv,soil_steps,calculate_soil,tdrn,irrigation,hydro);
+        else if(run==7)noahmp_water_options::column<1,7>(par,fin,iin,fout,iout,n,infdv,soil_steps,calculate_soil,tdrn,irrigation,hydro);
+        else if(run==8)noahmp_water_options::column<1,8>(par,fin,iin,fout,iout,n,infdv,soil_steps,calculate_soil,tdrn,irrigation,hydro);
+        else noahmp_water_options::column<1,4>(par,fin,iin,fout,iout,n,infdv,soil_steps,calculate_soil,tdrn,irrigation,hydro);
     } else {
-        if(run==1)noahmp_water_options::column<2,1>(par,fin,iin,fout,iout,n,infdv,soil_steps,calculate_soil,tdrn,irrigation);
-        else if(run==2)noahmp_water_options::column<2,2>(par,fin,iin,fout,iout,n,infdv,soil_steps,calculate_soil,tdrn,irrigation);
-        else if(run==3)noahmp_water_options::column<2,3>(par,fin,iin,fout,iout,n,infdv,soil_steps,calculate_soil,tdrn,irrigation);
-        else if(run==5)noahmp_water_options::column<2,5>(par,fin,iin,fout,iout,n,infdv,soil_steps,calculate_soil,tdrn,irrigation);
-        else if(run==6)noahmp_water_options::column<2,6>(par,fin,iin,fout,iout,n,infdv,soil_steps,calculate_soil,tdrn,irrigation);
-        else if(run==7)noahmp_water_options::column<2,7>(par,fin,iin,fout,iout,n,infdv,soil_steps,calculate_soil,tdrn,irrigation);
-        else if(run==8)noahmp_water_options::column<2,8>(par,fin,iin,fout,iout,n,infdv,soil_steps,calculate_soil,tdrn,irrigation);
-        else noahmp_water_options::column<2,4>(par,fin,iin,fout,iout,n,infdv,soil_steps,calculate_soil,tdrn,irrigation);
+        if(run==1)noahmp_water_options::column<2,1>(par,fin,iin,fout,iout,n,infdv,soil_steps,calculate_soil,tdrn,irrigation,hydro);
+        else if(run==2)noahmp_water_options::column<2,2>(par,fin,iin,fout,iout,n,infdv,soil_steps,calculate_soil,tdrn,irrigation,hydro);
+        else if(run==3)noahmp_water_options::column<2,3>(par,fin,iin,fout,iout,n,infdv,soil_steps,calculate_soil,tdrn,irrigation,hydro);
+        else if(run==5)noahmp_water_options::column<2,5>(par,fin,iin,fout,iout,n,infdv,soil_steps,calculate_soil,tdrn,irrigation,hydro);
+        else if(run==6)noahmp_water_options::column<2,6>(par,fin,iin,fout,iout,n,infdv,soil_steps,calculate_soil,tdrn,irrigation,hydro);
+        else if(run==7)noahmp_water_options::column<2,7>(par,fin,iin,fout,iout,n,infdv,soil_steps,calculate_soil,tdrn,irrigation,hydro);
+        else if(run==8)noahmp_water_options::column<2,8>(par,fin,iin,fout,iout,n,infdv,soil_steps,calculate_soil,tdrn,irrigation,hydro);
+        else noahmp_water_options::column<2,4>(par,fin,iin,fout,iout,n,infdv,soil_steps,calculate_soil,tdrn,irrigation,hydro);
     }
 }
 

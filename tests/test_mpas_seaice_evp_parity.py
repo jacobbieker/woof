@@ -1,9 +1,9 @@
 """The MPAS-Seaice variational EVP internal stress, word for word against v8.4.2.
 
-The reference is MPAS-Model v8.4.2's own
+At RKIND 4 and RKIND 8. The reference is MPAS-Model v8.4.2's own
 ``mpas_seaice_velocity_solver_constitutive_relation.F`` and
 ``mpas_seaice_velocity_solver_variational.F``, compiled verbatim with gfortran
--O0 -ffp-contract=off at MPAS's default single precision and driven by
+-O0 -ffp-contract=off at both of MPAS's precisions and driven by
 ``tools/mpas_seaice_oracle/run_oracle.F90``. That driver runs
 ``seaice_init_evp``, then nIter calls of ``seaice_internal_stress_variational``,
 then ``seaice_final_divergence_shear_variational``. The oracle's outputs are
@@ -47,13 +47,15 @@ def test_case_inputs_are_the_recorded_bytes():
     for line in (so.FIXTURE_DIR / "inputs.sha256").read_text(encoding="utf-8").splitlines():
         digest, name = line.split()
         recorded[name] = digest
-    assert recorded == {case["name"]: so.input_digest(case) for case in so.cases()}
+    assert recorded == {f"{case['name']}/{p}": so.input_digest(case)
+                        for p in so.PRECISIONS for case in so.cases(p)}
 
 
-def test_fixture_covers_the_branches():
-    fixture = so.load_fixture()
+@pytest.mark.parametrize("precision", sorted(so.PRECISIONS))
+def test_fixture_covers_the_branches(precision):
+    fixture = so.load_fixture(precision)
     assert set(fixture) == {row[0] for row in so.CASES}
-    for case in so.cases():
+    for case in so.cases(precision):
         # unsolved cells and vertices exist, and so do cells at rest (Delta below puny)
         assert (case["solveStress"] == 0).any() and (case["solveVelocity"] == 0).any()
         n = case["nEdgesOnCell"]
@@ -75,8 +77,9 @@ def test_weak_stress_divergence_is_refused_by_name():
 
 
 @requires_gpu
-def test_gpu_matches_the_v842_oracle_word_for_word():
-    report = so.measure()
+@pytest.mark.parametrize("precision", sorted(so.PRECISIONS))
+def test_gpu_matches_the_v842_oracle_word_for_word(precision):
+    report = so.measure(precision=precision)
     bad = {case: {k: v for k, v in fields.items() if v} for case, fields in report.items()}
     assert not any(bad.values()), bad
 
@@ -86,28 +89,29 @@ def test_the_seaice_door_verify_grades_the_ported_piece():
     from woof.hex.mpas_seaice.verify import verify
     report = verify()
     assert report["passed"] and report["status"] == "stub"
-    assert [p["name"] for p in report["pieces"]] == ["evp_variational_internal_stress"]
+    assert [p["name"] for p in report["pieces"]][0] == "evp_variational_internal_stress"
 
 
 @requires_gpu
+@pytest.mark.parametrize("precision", sorted(so.PRECISIONS))
 @pytest.mark.parametrize("original, mutated, field", [
     # (d*100)*86400 folded to d*8640000
-    ("divergence[iCell] = M(M(div, 100.0f), 86400.0f);",
-     "divergence[iCell] = M(div, 8640000.0f);", "divergence"),
+    ("divergence[iCell] = M(M(div, RL(100.0)), RL(86400.0));",
+     "divergence[iCell] = M(div, RL(8640000.0));", "divergence"),
     # the stress-divergence normal terms summed in the other order
     ("cellU = S(S(cellU, M(s11, bU)), M(s12, bV));",
      "cellU = S(cellU, A(M(s11, bU), M(s12, bV)));", "stressDivergenceU"),
 ])
-def test_a_mutated_evaluation_order_is_caught(monkeypatch, original, mutated, field):
+def test_a_mutated_evaluation_order_is_caught(monkeypatch, precision, original, mutated, field):
     from woof.hex.mpas_seaice import evp_v842
-    source = evp_v842.module_source()
+    source = evp_v842.module_source(precision)
     assert source.count(original) == 1
-    monkeypatch.setattr(evp_v842, "module_source", lambda: source.replace(original, mutated))
+    monkeypatch.setattr(evp_v842, "module_source", lambda p="r4": source.replace(original, mutated))
     evp_v842._module_on.cache_clear()
     try:
-        case = so.cases()[0]
+        case = so.cases(precision)[0]
         got = so.run_gpu(case)
-        assert so.bit_mismatches(got[field], so.load_fixture()[case["name"]][field]) > 0
+        assert so.bit_mismatches(got[field], so.load_fixture(precision)[case["name"]][field]) > 0
     finally:
         evp_v842._module_on.cache_clear()
 
@@ -129,8 +133,9 @@ def test_the_oracle_rebuilt_here_writes_the_fixture(tmp_path):
                     str(tmp_path / "build")], check=True, env={**os.environ, "GFORTRAN": gfortran})
     subprocess.run([sys.executable, str(ROOT / "tools" / "mpas_seaice_oracle" / "make_fixture.py"),
                     str(tmp_path / "build"), "--out", str(tmp_path / "fixture")], check=True)
-    fresh = np.load(tmp_path / "fixture" / "oracle-r4.npz")
-    pinned = np.load(so.FIXTURE_DIR / "oracle-r4.npz")
-    assert sorted(fresh.files) == sorted(pinned.files)
-    for key in pinned.files:
-        assert so.bit_mismatches(fresh[key], pinned[key]) == 0, key
+    for precision in so.PRECISIONS:
+        fresh = np.load(tmp_path / "fixture" / f"oracle-{precision}.npz")
+        pinned = np.load(so.FIXTURE_DIR / f"oracle-{precision}.npz")
+        assert sorted(fresh.files) == sorted(pinned.files)
+        for key in pinned.files:
+            assert so.bit_mismatches(fresh[key], pinned[key]) == 0, f"{precision}:{key}"

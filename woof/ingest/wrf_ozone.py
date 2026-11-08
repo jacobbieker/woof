@@ -60,6 +60,7 @@ from __future__ import annotations
 from functools import lru_cache
 import ctypes
 from pathlib import Path
+import threading
 from typing import NamedTuple
 
 import numpy as np
@@ -386,7 +387,65 @@ def ozn_latitude_time_int(julday, julian, xlat,
                                 portable_math._workers(None), out.ctypes.data)
             if _native_ozone_status(status):
                 return out
-    return ozn_time_int(None, julian, interp_ozone_to_latitudes(y, climo))
+    return ozn_time_int(None, julian, latitude_table(y, climo)[0])
+
+
+#: The latitude tables :func:`latitude_table` keeps, oldest first.
+_LATITUDE_TABLES: list = []
+_LATITUDE_TABLES_LOCK = threading.Lock()
+#: Tables kept at once: a root and its offline children each keep theirs.
+_LATITUDE_TABLES_KEPT = 4
+
+
+def _latitude_table_cap() -> int:
+    """``WOOF_OZONE_TABLE_MAX_GB`` (default 4) in bytes; 0 for ``WOOF_OZONE_TABLE=off``."""
+    import os
+    setting = os.environ.get("WOOF_OZONE_TABLE", "auto").strip().lower()
+    if setting not in ("auto", "off"):
+        raise ValueError("WOOF_OZONE_TABLE must be auto or off")
+    if setting == "off":
+        return 0
+    text = os.environ.get("WOOF_OZONE_TABLE_MAX_GB", "4")
+    try:
+        value = float(text)
+    except ValueError:
+        value = -1.0
+    if value <= 0:
+        raise ValueError("WOOF_OZONE_TABLE_MAX_GB must be a positive number; "
+                         "prevents an unbounded host table")
+    return int(value * 2**30)
+
+
+def latitude_table(xlat, climo: OzoneClimatology, *, max_bytes: int | None = None):
+    """``interp_ozone_to_latitudes(xlat, climo)``, kept between calls.
+
+    Return ``(table, outcome)``, outcome ``"build"``, ``"hit"`` or
+    ``"over_cap"``.  The table depends only on the columns' latitudes and
+    the climatology, neither of which changes during a run, and the Python
+    route of :func:`ozn_latitude_time_int` used to rebuild all twelve
+    months of it at every radiation call (0.33 s a call at 40,000 columns
+    on an RTX A6000 host; 1.7 s at 327,680).  A kept table is the array the
+    same call returned before for equal latitude words and the same
+    climatology object, so the time interpolation reads the same words.
+    ``max_bytes`` (default :func:`_latitude_table_cap`) bounds one table;
+    a larger one, or a cap of 0, is computed and not kept.  The caller must
+    not write into the returned table.
+    """
+    y = np.ascontiguousarray(xlat, dtype=np.float32)
+    cap = _latitude_table_cap() if max_bytes is None else int(max_bytes)
+    if y.size * LEVSIZ * 12 * 4 > cap:
+        return interp_ozone_to_latitudes(y, climo), "over_cap"
+    with _LATITUDE_TABLES_LOCK:
+        for entry in _LATITUDE_TABLES:
+            latitudes, kept_climo, table = entry
+            if (kept_climo is climo and latitudes.shape == y.shape
+                    and np.array_equal(latitudes.view(np.uint32), y.view(np.uint32))):
+                return table, "hit"
+    table = interp_ozone_to_latitudes(y, climo)
+    with _LATITUDE_TABLES_LOCK:
+        _LATITUDE_TABLES.append((np.array(y, copy=True), climo, table))
+        del _LATITUDE_TABLES[:-_LATITUDE_TABLES_KEPT]
+    return table, "build"
 
 
 def ozn_p_int(p, pin, ozmixt) -> np.ndarray:

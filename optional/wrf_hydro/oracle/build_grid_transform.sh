@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build and run the WRF-Hydro LSM <-> routing grid transform oracle
-# (disaggregateDomain, aggregateDomain) from the WRF-Hydro tree WRF 4.6.1
+# (disaggregateDomain, aggregateDomain) from the WRF-Hydro tree WRF 4.7.1
 # ships under hydro/.  Part of the WRF-Hydro opt-in (see ../LICENSE): the
 # pinned source is read at build time and none of it is copied into the tree.
 # Same discipline as build.sh: pin check, byte-for-byte cuts with pinned
@@ -14,7 +14,7 @@ fi
 source_root=$(realpath "$1")
 build_dir=$(realpath -m "$2")
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-pinned_commit="d66e442fccc04111067e29274c9f9eaccc3cef28"
+pinned_commit="f52c197ed39d12e087d02c50f412d90d418f6186"
 sources=(hydro/utils/module_hydro_stop.F90 hydro/Routing/Noah_distr_routing.F90
          hydro/HYDRO_drv/module_HYDRO_drv.F90)
 for rel in "${sources[@]}"; do test -f "${source_root}/${rel}"; done
@@ -32,7 +32,7 @@ free="-ffree-form -ffree-line-length-none"
 
 awk '/^subroutine disaggregateDomain\(/{on=1} on{print} on && /^end subroutine disaggregateDomain$/{exit}' \
     "${source_root}/hydro/Routing/Noah_distr_routing.F90" > disaggregate.inc
-awk '/^      subroutine aggregateDomain\(did\)/{on=1} on{print} on && /^      end subroutine aggregateDomain/{exit}' \
+awk '/^    subroutine aggregateDomain\(did\)/{on=1} on{print} on && /^    end subroutine aggregateDomain/{exit}' \
     "${source_root}/hydro/HYDRO_drv/module_HYDRO_drv.F90" > aggregate.inc
 lines="$(grep -c '' disaggregate.inc) $(grep -c '' aggregate.inc)"
 if [[ "${lines}" != "346 277" ]]; then
@@ -60,6 +60,6 @@ sha256sum "${sources[@]/#/${source_root}/}" disaggregate.inc aggregate.inc \
     "${script_dir}/grid_transform_harness.F90" "${script_dir}/run_grid_transform.F90" \
     "${script_dir}/build_grid_transform.sh" \
     disagg-lsm.csv disagg-rt.csv agg-rt.csv agg-lsm.csv \
-    | sed "s#${source_root}/#<wrf-4.6.1-checkout>/#; s#${script_dir}/#<oracle-workspace>/optional/wrf_hydro/oracle/#" \
+    | sed "s#${source_root}/#<wrf-4.7.1-checkout>/#; s#${script_dir}/#<oracle-workspace>/optional/wrf_hydro/oracle/#" \
     > grid-transform-sha256sums.txt
 echo "oracle built in ${build_dir}"

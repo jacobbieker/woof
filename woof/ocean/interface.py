@@ -119,7 +119,7 @@ class SolverFactory(Protocol):
     def __call__(self, grid: OceanGrid, bathymetry: Bathymetry, *,
                  config: Mapping[str, Any]) -> WaveSolver | SurgeSolver: ...
 
-# An ocean model across WRF's coupler (woof/ocean/wrf_cpl.py, WRF 4.6.1
+# An ocean model across WRF's coupler (woof/ocean/wrf_cpl.py, WRF 4.7.1
 # frame/module_cpl.F).  It is handed the coupling-interval averages of
 # cpl_snd2's fields and returns the three planes cpl_rcv merges.  No solver in
 # the default build implements it; the NEMO opt-in's NemoColumnOcean does

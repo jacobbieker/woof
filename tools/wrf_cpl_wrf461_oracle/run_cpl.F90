@@ -1,5 +1,5 @@
 program run_wrf_cpl_oracle
-  ! Drive WRF v4.6.1's cpl_snd2 (what WRF hands an OASIS-coupled ocean every
+  ! Drive WRF v4.7.1's cpl_snd2 (what WRF hands an OASIS-coupled ocean every
   ! step: EVAP-PRECIP, SURF_NET_SOLAR, SURF_NET_NON-SOLAR, TAUX, TAUY,
   ! TAUMOD) and cpl_rcv (how WRF merges what the ocean hands back -- SST with
   ! the input SST under the coupling mask, UOCE and VOCE onto zero) over a row

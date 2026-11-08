@@ -2,7 +2,7 @@
 """WRF-Hydro's subsurface routing on device (``subsurface.cu``).
 
 A port of ``subsurfaceRouting`` (hydro/Routing/Noah_distr_routing_subsurface.F90
-in WRF 4.6.1's hydro/ tree): FINDZWAT finds each column's saturated layers,
+in WRF 4.7.1's hydro/ tree): FINDZWAT finds each column's saturated layers,
 water-table depth and routable water; ROUTE_SUBSURFACE1 sends each interior
 cell's saturated lateral flow to its steepest total-head neighbour (GETSUB8)
 and books flow leaving the domain; SUBSFC_RTNG adds or drains that flow layer
@@ -12,7 +12,7 @@ itself (SUBSFC_RTNG always calls ROUTE_SUBSURFACE1), so it is refused here.
 
 One :meth:`SubsurfaceRouting.route` is one ``subsurfaceRouting`` call; call
 :meth:`SubsurfaceState.end_hydro_step` after the rest of the HYDRO step, as
-HYDRO_exe zeroes QSUBRT (module_HYDRO_drv.F90:767).  WRF-Hydro stops the run
+HYDRO_exe zeroes QSUBRT (module_HYDRO_drv.F90:747).  WRF-Hydro stops the run
 on five conditions; :meth:`route` raises ``RuntimeError`` naming them, after
 one 4-byte read of the error word.
 """
