@@ -125,7 +125,6 @@ class RunConfig:
         # WRF resets its default shallow mass-flux switch outside QNSE.
         if self.bl_pbl_physics != 4 and self.mfshconv == 1:
             object.__setattr__(self, "mfshconv", 0)
-            object.__setattr__(self, "_mfshconv_reset", True)
         # Resolve this public shortcut before arena, cache and restart
         # identities inspect chem_sets. It is inert for existing configs.
         if not isinstance(self.chem_sets, str) or not isinstance(self.fire_smoke, bool):
@@ -6381,13 +6380,6 @@ def wrf_mixing_package_active(cfg) -> bool:
             or constant_k_mixing_active(cfg))
 
 
-#: WRF v4.7.1 windfarm_opt values ported: 0 off, 1 Fitch (the namelist
-#: importer writes ``wind_farm_scheme = "fitch_wrf"``).  WRF's 2
-#: (module_wind_mav.F) is not ported.
-WINDFARM_OPT_VALUES = (0, 1)
-#: WRF windfarm_ij: 0 lat/lon turbine rows (windturbines.txt), 1 i/j rows
-#: (windturbines-ij.txt).
-WINDFARM_IJ_VALUES = (0, 1)
 #: The suffixes of a woof turbine table (woof.windfarm.layout.read_turbines);
 #: any other ``fitch_wrf`` turbine file is read as WRF's own turbine list.
 WINDFARM_TABLE_SUFFIXES = (".csv", ".geojson", ".json")

@@ -500,10 +500,7 @@ def test_full_native_emission_and_prepared_guard_keep_configured_physics(tmp_pat
     ({"mp_physics": 16, "wdm6_ccn_conc": 1.e7}, "outside the WDM family"),
     ({"mp_physics": 16, "wdm6_hail_opt": 2}, "wdm6_hail_opt"),
     ({"sf_surface_physics": 3, "num_soil_layers": 5}, "soil"),
-    # 15 and 51 are ported now; 95 (old Eta Ferrier) and 27 (WRF v4.7
-    # UDM) are WRF selectors with no woof package.
-    ({"mp_physics": 95}, "not ported"),
-    ({"mp_physics": 27}, "not ported"),
+    # 15, 51, 27 (WRF v4.7 UDM) and 95 (old Eta Ferrier) are ported now.
     # THERE IS NO mp=28 ROW HERE, and the absence is the measurement.
     # This route used to subtract 28 on its own feet, naming aerosol
     # boundary species absent from the native analyzed stream; that

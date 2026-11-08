@@ -377,7 +377,7 @@ consumed `RunConfig` field -- the knob-parity battery
 consuming kernel/module rather than being decorative -- and every one
 is importable from a WRF namelist.
 
-**Which keys a `[[domain]]` table may override.** Exactly these 448,
+**Which keys a `[[domain]]` table may override.** Exactly these 446,
 and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
 
     madwrf_opt  madwrf_cldinit  madwrf_dt_relax  madwrf_dt_nudge  ra_call_offset
@@ -421,64 +421,64 @@ and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
     momentum_adv_opt  tke_budget  sase_flux_diag  hmix_k_diag  surface_energy_diag
     rrtmg_spectral_output  radtran_wavelengths  radtran_interval_s  radtran_umu
     radtran_phi  radtran_mol_abs_param  radtran_solver  radtran_streams
-    radtran_pseudospherical  shcu_physics  cu_rad_feedback  radtran_aerosol
-    do_avgflx_em  multi_perturb  pert_farms  pert_farms_albedo  pert_farms_aod
-    pert_farms_angexp  pert_farms_aerasy  pert_farms_qv  pert_farms_qc
-    pert_farms_qs  pert_deng  pert_deng_qv  pert_deng_qc  pert_deng_t  pert_deng_w
-    pert_thom  pert_thom_qv  pert_thom_qc  pert_thom_qi  pert_thom_qs  pert_thom_ni
-    pert_cld3  pert_cld3_qv  pert_cld3_t  spdt  inflow_perturbation
-    inflow_perturbation_seed  inflow_perturbation_amplitude_scale
-    inflow_perturbation_faces  target_cfl  target_hcfl  max_step_increase_pct
-    starting_time_step  starting_time_step_den  max_time_step  max_time_step_den
-    min_time_step  min_time_step_den  min_time_step_sound  slope_rad  topo_shading
-    mosaic_urban_canopy  sf_lake_physics  use_lakedepth  lakedepth_default
-    lake_min_elev  lake_state_source  lake_state_path  lake_state_accept_licence
-    topo_wind  gwd_opt  wind_farm_scheme  wind_farm_table  wind_farm_max_dx_m
-    wind_farms  windfarm_tke_factor  windfarm_ij  windfarm_wake_model
-    windfarm_overlap_method  windfarm_deg  windfarm_induction  windturbines_spec
-    td_turbgridid  td_hubheight  td_diameter  td_stdthrcoef  td_cutinspeed
-    td_cutoutspeed  td_power  td_turbpercell  td_ewfx  td_ewfy  td_pwfx  td_pwfy
-    history_interval2_s  history_interval_change_s  prec_acc_dt  prec_acc_dt1
-    gsd_diagnostics  reset_interval1  do_avgflx_em  do_avgflx_cugd  acc_phy_tend
-    auxhist3_interval  sf_surf_irr_scheme  irr_daily_amount  irr_start_hour
-    irr_num_hours  irr_start_julianday  irr_end_julianday  irr_freq  irr_ph
-    fmoist_run  fmoist_interp  fmoist_only  fmoist_freq  fmoist_dt  ifire
-    fire_boundary_guard  fire_num_ignitions  fire_ignition_ros1
-    fire_ignition_start_lon1  fire_ignition_start_lat1  fire_ignition_end_lon1
-    fire_ignition_end_lat1  fire_ignition_radius1  fire_ignition_start_time1
-    fire_ignition_end_time1  fire_ignition_ros2  fire_ignition_start_lon2
-    fire_ignition_start_lat2  fire_ignition_end_lon2  fire_ignition_end_lat2
-    fire_ignition_radius2  fire_ignition_start_time2  fire_ignition_end_time2
-    fire_ignition_ros3  fire_ignition_start_lon3  fire_ignition_start_lat3
-    fire_ignition_end_lon3  fire_ignition_end_lat3  fire_ignition_radius3
-    fire_ignition_start_time3  fire_ignition_end_time3  fire_ignition_ros4
-    fire_ignition_start_lon4  fire_ignition_start_lat4  fire_ignition_end_lon4
-    fire_ignition_end_lat4  fire_ignition_radius4  fire_ignition_start_time4
-    fire_ignition_end_time4  fire_ignition_ros5  fire_ignition_start_lon5
-    fire_ignition_start_lat5  fire_ignition_end_lon5  fire_ignition_end_lat5
-    fire_ignition_radius5  fire_ignition_start_time5  fire_ignition_end_time5
-    fire_ignition_start_x1  fire_ignition_start_y1  fire_ignition_end_x1
-    fire_ignition_end_y1  fire_ignition_start_x2  fire_ignition_start_y2
-    fire_ignition_end_x2  fire_ignition_end_y2  fire_ignition_start_x3
-    fire_ignition_start_y3  fire_ignition_end_x3  fire_ignition_end_y3
-    fire_ignition_start_x4  fire_ignition_start_y4  fire_ignition_end_x4
-    fire_ignition_end_y4  fire_ignition_start_x5  fire_ignition_start_y5
-    fire_ignition_end_x5  fire_ignition_end_y5  fire_lat_init  fire_lon_init
-    fire_ign_time  fire_shape  fire_sprd_mdl  fire_crwn_hgt  fire_ext_grnd
-    fire_ext_crwn  fire_sfc_flx  fire_heat_peak  fire_tg_ub  fire_smk_scheme
-    fire_smk_peak  fire_smk_ext  fire_wind_height  fire_fuel_read  fire_fuel_cat
-    fire_fmc_read  fire_print_msg  fire_print_file  fire_fuel_left_method
-    fire_fuel_left_irl  fire_fuel_left_jrl  fire_grows_only  fire_upwinding
-    fire_upwind_split  fire_viscosity  fire_lfn_ext_up  fire_topo_from_atm
-    fire_advection  fire_test_steps  fire_const_time  fire_const_grnhfx
-    fire_const_grnqfx  fire_atm_feedback  fire_mountain_type  fire_mountain_height
-    fire_mountain_start_x  fire_mountain_start_y  fire_mountain_end_x
-    fire_mountain_end_y  delt_perturbation  xrad_perturbation  yrad_perturbation
-    zrad_perturbation  hght_perturbation  stretch_grd  stretch_hyp  z_grd_scale
-    sfc_full_init  sfc_lu_index  sfc_tsk  sfc_tmn  fire_read_lu  fire_read_tsk
-    fire_read_tmn  fire_read_atm_ht  fire_read_fire_ht  fire_read_atm_grad
-    fire_read_fire_grad  sfc_vegfra  sfc_canwat  sfc_ivgtyp  sfc_isltyp
-    fire_lsm_reinit  fire_lsm_reinit_iter  fire_upwinding_reinit  fire_is_real_perim
+    radtran_pseudospherical  cu_rad_feedback  radtran_aerosol  multi_perturb
+    pert_farms  pert_farms_albedo  pert_farms_aod  pert_farms_angexp
+    pert_farms_aerasy  pert_farms_qv  pert_farms_qc  pert_farms_qs  pert_deng
+    pert_deng_qv  pert_deng_qc  pert_deng_t  pert_deng_w  pert_thom  pert_thom_qv
+    pert_thom_qc  pert_thom_qi  pert_thom_qs  pert_thom_ni  pert_cld3  pert_cld3_qv
+    pert_cld3_t  spdt  inflow_perturbation  inflow_perturbation_seed
+    inflow_perturbation_amplitude_scale  inflow_perturbation_faces  target_cfl
+    target_hcfl  max_step_increase_pct  starting_time_step  starting_time_step_den
+    max_time_step  max_time_step_den  min_time_step  min_time_step_den
+    min_time_step_sound  slope_rad  topo_shading  mosaic_urban_canopy
+    sf_lake_physics  use_lakedepth  lakedepth_default  lake_min_elev
+    lake_state_source  lake_state_path  lake_state_accept_licence  topo_wind
+    gwd_opt  wind_farm_scheme  wind_farm_table  wind_farm_max_dx_m  wind_farms
+    windfarm_tke_factor  windfarm_ij  windfarm_wake_model  windfarm_overlap_method
+    windfarm_deg  windfarm_induction  windturbines_spec  td_turbgridid  td_hubheight
+    td_diameter  td_stdthrcoef  td_cutinspeed  td_cutoutspeed  td_power
+    td_turbpercell  td_ewfx  td_ewfy  td_pwfx  td_pwfy  history_interval2_s
+    history_interval_change_s  prec_acc_dt  prec_acc_dt1  gsd_diagnostics
+    reset_interval1  do_avgflx_em  do_avgflx_cugd  acc_phy_tend  auxhist3_interval
+    sf_surf_irr_scheme  irr_daily_amount  irr_start_hour  irr_num_hours
+    irr_start_julianday  irr_end_julianday  irr_freq  irr_ph  fmoist_run
+    fmoist_interp  fmoist_only  fmoist_freq  fmoist_dt  ifire  fire_boundary_guard
+    fire_num_ignitions  fire_ignition_ros1  fire_ignition_start_lon1
+    fire_ignition_start_lat1  fire_ignition_end_lon1  fire_ignition_end_lat1
+    fire_ignition_radius1  fire_ignition_start_time1  fire_ignition_end_time1
+    fire_ignition_ros2  fire_ignition_start_lon2  fire_ignition_start_lat2
+    fire_ignition_end_lon2  fire_ignition_end_lat2  fire_ignition_radius2
+    fire_ignition_start_time2  fire_ignition_end_time2  fire_ignition_ros3
+    fire_ignition_start_lon3  fire_ignition_start_lat3  fire_ignition_end_lon3
+    fire_ignition_end_lat3  fire_ignition_radius3  fire_ignition_start_time3
+    fire_ignition_end_time3  fire_ignition_ros4  fire_ignition_start_lon4
+    fire_ignition_start_lat4  fire_ignition_end_lon4  fire_ignition_end_lat4
+    fire_ignition_radius4  fire_ignition_start_time4  fire_ignition_end_time4
+    fire_ignition_ros5  fire_ignition_start_lon5  fire_ignition_start_lat5
+    fire_ignition_end_lon5  fire_ignition_end_lat5  fire_ignition_radius5
+    fire_ignition_start_time5  fire_ignition_end_time5  fire_ignition_start_x1
+    fire_ignition_start_y1  fire_ignition_end_x1  fire_ignition_end_y1
+    fire_ignition_start_x2  fire_ignition_start_y2  fire_ignition_end_x2
+    fire_ignition_end_y2  fire_ignition_start_x3  fire_ignition_start_y3
+    fire_ignition_end_x3  fire_ignition_end_y3  fire_ignition_start_x4
+    fire_ignition_start_y4  fire_ignition_end_x4  fire_ignition_end_y4
+    fire_ignition_start_x5  fire_ignition_start_y5  fire_ignition_end_x5
+    fire_ignition_end_y5  fire_lat_init  fire_lon_init  fire_ign_time  fire_shape
+    fire_sprd_mdl  fire_crwn_hgt  fire_ext_grnd  fire_ext_crwn  fire_sfc_flx
+    fire_heat_peak  fire_tg_ub  fire_smk_scheme  fire_smk_peak  fire_smk_ext
+    fire_wind_height  fire_fuel_read  fire_fuel_cat  fire_fmc_read  fire_print_msg
+    fire_print_file  fire_fuel_left_method  fire_fuel_left_irl  fire_fuel_left_jrl
+    fire_grows_only  fire_upwinding  fire_upwind_split  fire_viscosity
+    fire_lfn_ext_up  fire_topo_from_atm  fire_advection  fire_test_steps
+    fire_const_time  fire_const_grnhfx  fire_const_grnqfx  fire_atm_feedback
+    fire_mountain_type  fire_mountain_height  fire_mountain_start_x
+    fire_mountain_start_y  fire_mountain_end_x  fire_mountain_end_y
+    delt_perturbation  xrad_perturbation  yrad_perturbation  zrad_perturbation
+    hght_perturbation  stretch_grd  stretch_hyp  z_grd_scale  sfc_full_init
+    sfc_lu_index  sfc_tsk  sfc_tmn  fire_read_lu  fire_read_tsk  fire_read_tmn
+    fire_read_atm_ht  fire_read_fire_ht  fire_read_atm_grad  fire_read_fire_grad
+    sfc_vegfra  sfc_canwat  sfc_ivgtyp  sfc_isltyp  fire_lsm_reinit
+    fire_lsm_reinit_iter  fire_upwinding_reinit  fire_is_real_perim
     fire_lsm_band_ngp  fire_lsm_zcoupling  fire_lsm_zcoupling_ref  fire_tracer_smoke
     fire_viscosity_bg  fire_viscosity_band  fire_viscosity_ngp  fire_slope_factor
     fuel_crosswalk  sr_x  sr_y  fire_static  fire_fuel_namelist  fire_smoke

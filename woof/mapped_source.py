@@ -5493,7 +5493,7 @@ def _assemble_grib(
 ) -> _DecodedCollection:
     if not records:
         raise ValueError("no mapped GRIB records were decoded")
-    if mapping["coordinates"]["horizontal"].get("normalization") == "largest_common_finite_rectangle":
+    if mapping["coordinates"].get("horizontal", {}).get("normalization") == "largest_common_finite_rectangle":
         raise ValueError("finite-rectangle normalization requires the native mapped engine")
     source_format = str(mapping["format"])
     matched: dict[tuple[datetime, str | None, str], list[_GribRecord]] = {}

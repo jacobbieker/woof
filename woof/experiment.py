@@ -410,15 +410,10 @@ _DOMAIN_RUN_OVERRIDES = (
     "radtran_solver",
     "radtran_streams",
     "radtran_pseudospherical",
-    # WRF's shallow-cumulus selector and cumulus-radiation feedback are
-    # max_domains columns (Registry.EM_COMMON:2492, :2594): a tree may run
-    # Deng on its convection-permitting nest and not on the parent.
-    "shcu_physics", "cu_rad_feedback",
+    # WRF's cumulus-radiation feedback is a max_domains column
+    # (Registry.EM_COMMON:2594).
+    "cu_rad_feedback",
     "radtran_aerosol",
-    # WRF's do_avgflx_em is a max_domains column (Registry/registry.avgflx);
-    # output-only.  use_theta_m is one value for the run in WRF
-    # (Registry.EM_COMMON:2864) and stays [shared].
-    "do_avgflx_em",
     # WRF-Solar EPS: multi_perturb, the pert_<scheme> switches, their
     # factors and spdt are max_domains in registry.stoch:98-130, :188.
     "multi_perturb", "pert_farms", "pert_farms_albedo", "pert_farms_aod",

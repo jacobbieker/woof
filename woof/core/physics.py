@@ -4786,7 +4786,9 @@ class PhysicsDriver:
         # values need no second volume stack. Positive cadence still owns its
         # separate held component, as does relocation into another state.
         previous = getattr(self, "pbl_tendencies", None)
-        if (getattr(cp.cuda.runtime, "is_hip", False)
+        # A host stand-in for cupy (numpy) has no cuda attribute at all.
+        runtime = getattr(getattr(cp, "cuda", None), "runtime", None)
+        if (getattr(runtime, "is_hip", False)
                 and previous is not None and active_state is self.state
                 and physics_reuses_pbl_composition(cfg)):
             return couple_ysu_tendencies(active_state, cfg, active_rates,
