@@ -113,9 +113,27 @@ def _read(path):
     path = Path(path)
     text = path.read_text()
     if path.suffix.lower() in (".yaml", ".yml"):
-        import yaml
-        return yaml.safe_load(text)
+        return yaml_load(text)
     return json.loads(text)
+
+
+def yaml_load(text):
+    """YAML with yaml-cpp's reading of a name: ``NO`` (nitric oxide) stays a string.
+
+    PyYAML follows YAML 1.1, where yes/no/on/off are booleans; MechanismConfiguration reads names as
+    strings through yaml-cpp.  Only true/false resolve to booleans here."""
+    import re
+    import yaml
+
+    class Loader(yaml.SafeLoader):
+        pass
+
+    Loader.yaml_implicit_resolvers = {
+        key: [(tag, regexp) for tag, regexp in resolvers if tag != "tag:yaml.org,2002:bool"]
+        for key, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()}
+    Loader.add_implicit_resolver("tag:yaml.org,2002:bool", re.compile(r"^(?:true|True|TRUE|false|False|FALSE)$"),
+                                 list("tTfF"))
+    return yaml.load(text, Loader=Loader)
 
 
 def _components(entries, what):
@@ -159,7 +177,7 @@ def load_mechanism(path_or_document):
     gas = [phase for phase in raw.get("phases", ()) if phase["name"] == "gas"]
     if len(gas) != 1:
         raise MechanismError("the mechanism needs exactly one phase named 'gas'")
-    phase_names = [entry["name"] for entry in gas[0]["species"]]
+    phase_names = [entry if isinstance(entry, str) else entry["name"] for entry in gas[0]["species"]]
     for name in phase_names:
         if name not in species_rows:
             raise MechanismError(f"gas phase names undeclared species {name!r}")
@@ -171,7 +189,7 @@ def load_mechanism(path_or_document):
         if kind not in CARRIED:
             raise MechanismError(f"reaction type {kind} is not carried by WOOF's MICM port; carried: "
                                  f"{sorted(CARRIED)}")
-        if reaction.get("gas phase", "gas") != "gas":
+        if reaction.get("gas phase") != "gas":
             raise MechanismError(f"reaction {reaction.get('name')!r} is not in the gas phase")
         by_type.setdefault(kind, []).append(reaction)
     processes = []
@@ -317,22 +335,22 @@ def _rate_constant(p, k):
     if p.kind == "ARRHENIUS":
         q = p.params
         # A * exp(C / T) * pow(T / D, B) * (1.0 + E * P), left to right.
-        return (f"rc[{k}] = MUL(MUL(MUL({_hexlit(q['A'])}, wcr_exp(DIV({_hexlit(q['C'])}, T))), "
-                f"wcr_pow(DIV(T, {_hexlit(q['D'])}), {_hexlit(q['B'])})), "
+        return (f"rc[{k}] = MUL(MUL(MUL({_hexlit(q['A'])}, glibc_exp(DIV({_hexlit(q['C'])}, T))), "
+                f"glibc_pow(DIV(T, {_hexlit(q['D'])}), {_hexlit(q['B'])})), "
                 f"ADD(1.0, MUL({_hexlit(q['E'])}, P)));")
     if p.kind == "TROE":
         q = {key: _hexlit(v) for key, v in p.params.items()}
-        return ("{ double k0 = MUL(MUL(%(k0_A)s, wcr_exp(DIV(%(k0_C)s, T))), wcr_pow(DIV(T, 300.0), %(k0_B)s));"
-                " double kinf = MUL(MUL(%(kinf_A)s, wcr_exp(DIV(%(kinf_C)s, T))),"
-                " wcr_pow(DIV(T, 300.0), %(kinf_B)s));"
+        return ("{ double k0 = MUL(MUL(%(k0_A)s, glibc_exp(DIV(%(k0_C)s, T))), glibc_pow(DIV(T, 300.0), %(k0_B)s));"
+                " double kinf = MUL(MUL(%(kinf_A)s, glibc_exp(DIV(%(kinf_C)s, T))),"
+                " glibc_pow(DIV(T, 300.0), %(kinf_B)s));"
                 " double ratio = DIV(MUL(k0, RHO), kinf);"
                 " rc[%(k)d] = MUL(DIV(MUL(k0, RHO), ADD(1.0, ratio)),"
-                " wcr_pow(%(Fc)s, DIV(%(N)s, ADD(%(N)s, wcr_pow(wcr_log10(ratio), 2.0))))); }"
+                " glibc_pow(%(Fc)s, DIV(%(N)s, ADD(%(N)s, glibc_pow(fdlibm_log10(ratio), 2.0))))); }"
                 % dict(q, k=k))
     return f"rc[{k}] = MUL(prm[{p.param_index}], {_hexlit(p.params['scaling'])});"
 
 
-def kernel_source(mech, *, name="micm_ros3"):
+def kernel_source(mech, *, kernel_name="micm_ros3"):
     """The CUDA translation unit solving ``mech`` (see module docstring)."""
     n = mech.size
     index = {s: i for i, s in enumerate(mech.species)}
@@ -465,7 +483,7 @@ def kernel_source(mech, *, name="micm_ros3"):
     body = "\n".join(lines)
     return _TEMPLATE.format(n=n, nnz=len(mech.jacobian), nl=len(mech.lower), nu=len(mech.upper),
                             nr=len(mech.processes), np=max(len(mech.parameters), 1),
-                            nparam=len(mech.parameters), body=body, name=name,
+                            nparam=len(mech.parameters), body=body, name=kernel_name,
                             f64cr=_f64cr(), **{k: _hexlit(v) if isinstance(v, float) else v
                                                 for k, v in _ros3_literals().items()})
 
@@ -482,7 +500,8 @@ def _ros3_literals():
 
 
 def _f64cr():
-    return (Path(__file__).resolve().parent / "core" / "kernels" / "f64cr.cuh").read_text()
+    kernels = Path(__file__).resolve().parent / "core" / "kernels"
+    return (kernels / "glibc_flt64.cuh").read_text() + "\n" + (kernels / "f64cr.cuh").read_text()
 
 
 _TEMPLATE = r"""// SPDX-License-Identifier: Apache-2.0
@@ -490,6 +509,38 @@ _TEMPLATE = r"""// SPDX-License-Identifier: Apache-2.0
 // Rosenbrock solver (Apache-2.0, licenses/NOTICE-NCAR-MICM.txt) for one grid point per thread.
 {f64cr}
 #define MUL(a, b) __dmul_rn((a), (b))
+/*
+ * fdlibm e_log10.c, transcribed for the device over glibc_log:
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ * Developed at SunSoft, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ */
+__device__ inline double fdlibm_log10(double x) {{
+  const double two54 = 1.80143985094819840000e+16, ivln10 = 4.34294481903251816668e-01,
+               log10_2hi = 3.01029995663611771306e-01, log10_2lo = 3.69423907715893078616e-13;
+  long long w = __double_as_longlong(x);
+  int hx = (int)(w >> 32);
+  unsigned lx = (unsigned)(w & 0xffffffffLL);
+  int k = 0;
+  if (hx < 0x00100000) {{
+    if (((hx & 0x7fffffff) | lx) == 0) return -two54 / 0.0;
+    if (hx < 0) return (x - x) / 0.0;
+    k -= 54;
+    x = __dmul_rn(x, two54);
+    w = __double_as_longlong(x);
+    hx = (int)(w >> 32);
+  }}
+  if (hx >= 0x7ff00000) return __dadd_rn(x, x);
+  k += (hx >> 20) - 1023;
+  int i = (int)(((unsigned)k & 0x80000000u) >> 31);
+  hx = (hx & 0x000fffff) | ((0x3ff - i) << 20);
+  double y = (double)(k + i);
+  x = __longlong_as_double(((long long)(unsigned)hx << 32) | (__double_as_longlong(x) & 0xffffffffLL));
+  double z = __dadd_rn(__dmul_rn(y, log10_2lo), __dmul_rn(ivln10, glibc_log(x)));
+  return __dadd_rn(z, __dmul_rn(y, log10_2hi));
+}}
 #define ADD(a, b) __dadd_rn((a), (b))
 #define SUB(a, b) __dsub_rn((a), (b))
 #define DIV(a, b) __ddiv_rn((a), (b))
@@ -564,7 +615,7 @@ extern "C" __global__ void {name}(
         error = ADD(error, MUL(s, s));
       }}
       error = dmax(__dsqrt_rn(DIV(error, (double)NS)), 1.0e-10);
-      const double fac = dmin({fmax}, dmax({fmin}, DIV({safety}, wcr_pow(error, DIV(1.0, {order})))));
+      const double fac = dmin({fmax}, dmax({fmin}, DIV({safety}, glibc_pow(error, DIV(1.0, {order})))));
       double Hnew = MUL(H, fac);
       nsteps += 1;
       if (isnan(error)) {{ state = 6; break; }}
@@ -588,7 +639,8 @@ extern "C" __global__ void {name}(
     }}
   }}
   if (state == 0) state = 2;
-  for (int i = 0; i < NS; ++i) conc[cell * NS + i] = Y[i];
+  // solver.hpp PostSolveClamp: std::max(y, 0.0) on every variable.
+  for (int i = 0; i < NS; ++i) conc[cell * NS + i] = Y[i] < 0.0 ? 0.0 : Y[i];
   status[cell] = state;
   steps[cell] = nsteps;
 }}
