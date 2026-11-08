@@ -64,7 +64,7 @@ if ! getconf GNU_LIBC_VERSION >/dev/null 2>&1; then
     libm_note="glibc_flt32_host.c (woof/core/kernels/glibc_flt32.cuh; host libm is not glibc)"
 fi
 if command -v objdump >/dev/null; then
-    if objdump -d "${objects[@]}" | grep -Eq '\bv?fn?m(add|sub)([0-9]|\b)'; then
+    if objdump -d "${objects[@]}" | grep -Eq '\bv?fn?m(add|sub)([0-9]|[[:space:]]|$)'; then
         echo "an oracle object contains an FMA instruction; refusing" >&2
         exit 4
     fi
