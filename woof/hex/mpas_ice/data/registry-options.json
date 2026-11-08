@@ -1,0 +1,516 @@
+{
+  "schema": "gpuwm-hex.mpas-core-options/v1",
+  "core": "core_landice",
+  "pin": "f34984b2c89353cf31c235b08d3b4acd96b37bb3",
+  "registry": {
+    "path": "src/core_landice/Registry.xml",
+    "sha256": "bf68f08913414d4d2130c315492a6404dae47454f116fc1aca4853b597473b75"
+  },
+  "option_count": 72,
+  "options": [
+    {
+      "name": "config_velocity_solver",
+      "type": "character",
+      "default": "sia",
+      "units": "unitless",
+      "description": "Selection of the method for solving ice velocity. 'L1L2', 'FO', and 'Stokes' require compiling with external dycores. 'none' skips the calculation of velocity so the velocity field will be 0 or set to a field read from an input file.  'simple' gives a simple prescribed velocity field computed at initialization."
+    },
+    {
+      "name": "config_sia_tangent_slope_calculation",
+      "type": "character",
+      "default": "from_vertex_barycentric",
+      "units": "unitless",
+      "description": "Selection of the method for calculating the tangent component of surface slope at edges needed by the SIA velocity solver. 'from_vertex_barycentric' interpolates upperSurface values from cell centers to vertices using the barycentric interpolation routine in operators (mpas_cells_to_points_using_baryweights) and then calculates the slope between vertices.  It works for obtuse triangles, but will not work correctly across the edges of periodic meshes. 'from_vertex_barycentric_kiteareas' interpolates upperSurface values from cell centers to vertices using barycentric interpolation based on kiterea values and then calculates the slope between vertices.  It will work across the edges of periodic meshes, but will not work correctly for obtuse triangles. 'from_normal_slope' uses the vector operator mpas_tangential_vector_1d to calculate the tangent slopes from the normal slopes on the edges of the adjacent cells.  It will work for any mesh configuration, but is the least accurate method."
+    },
+    {
+      "name": "config_flowParamA_calculation",
+      "type": "character",
+      "default": "constant",
+      "units": "unitless",
+      "description": "Selection of the method for calculating the flow law parameter A.  If 'constant' is selected, the value is set to config_default_flowParamA.  The other options are calculated from the temperature field.  This calculation only applies if config_velocity_solver is set to 'sia'.  For the 'FO' velocity solver, this is set in the albany_input.xml file."
+    },
+    {
+      "name": "config_do_velocity_reconstruction_for_external_dycore",
+      "type": "logical",
+      "default": ".false.",
+      "units": "unitless",
+      "description": "By default, external, higher-order dycores return the uReconstructX and uReconstructY fields (which are the native locations of their FEM solution).  If this option is set to .true., uReconstructX and uReconstructY will be calculated by MPAS using framework's vector reconstruction routines based on the values of normalVelocity supplied by the external dycore.  This provides a way to test the calculation of normalVelocity in the interface."
+    },
+    {
+      "name": "config_simple_velocity_type",
+      "type": "character",
+      "default": "uniform",
+      "units": "unitless",
+      "description": "Selection of the type of simple velocity field computed at initialization when config_velocity_solver = 'simple'.  See mode_forward/mpas_li_velocity_simple.F for details of what the options do."
+    },
+    {
+      "name": "config_use_glp",
+      "type": "logical",
+      "default": ".true.",
+      "units": "unitless",
+      "description": "If true, then apply Albany's grounding line parameterization"
+    },
+    {
+      "name": "config_beta_use_effective_pressure",
+      "type": "logical",
+      "default": ".false.",
+      "units": "unitless",
+      "description": "If true, then multiply beta by effective pressure before passing to Albany.  This allows, e.g., a Weertman basal friction law with an effective pressure term.  Note that basal friction still needs to be selected in Albany xml file."
+    },
+    {
+      "name": "config_thickness_advection",
+      "type": "character",
+      "default": "fo",
+      "units": "unitless",
+      "description": "Selection of the method for advecting thickness ('fo' = first-order upwinding)."
+    },
+    {
+      "name": "config_tracer_advection",
+      "type": "character",
+      "default": "none",
+      "units": "unitless",
+      "description": "Selection of the method for advecting tracers."
+    },
+    {
+      "name": "config_calving",
+      "type": "character",
+      "default": "none",
+      "units": "unitless",
+      "description": "Selection of the method for calving ice (as defined further below)."
+    },
+    {
+      "name": "config_calving_topography",
+      "type": "real",
+      "default": "-500.0",
+      "units": "m",
+      "description": "Defines the topographic height below which ice calves (for topographic_threshold option)."
+    },
+    {
+      "name": "config_calving_thickness",
+      "type": "real",
+      "default": "100.0",
+      "units": "m of ice",
+      "description": "Defines the ice thickness below which ice calves (for thickness_threshold option)."
+    },
+    {
+      "name": "config_calving_eigencalving_parameter_source",
+      "type": "character",
+      "default": "scalar",
+      "units": "none",
+      "description": "Source of the eigencalving parameter value"
+    },
+    {
+      "name": "config_calving_eigencalving_parameter_scalar_value",
+      "type": "real",
+      "default": "3.14e16",
+      "units": "m s",
+      "description": "Value of eigencalving parameter if taken as a scalar by option config_calving_eigencalving_parameter_source. (Default value is 1.0e9 m a converted to units used here.)"
+    },
+    {
+      "name": "config_data_calving",
+      "type": "logical",
+      "default": ".false.",
+      "units": "unitless",
+      "description": "Select whether or not to configure calving in a 'data' model mode (calc. calving flux but do not update ice geometry)"
+    },
+    {
+      "name": "config_calving_timescale",
+      "type": "real",
+      "default": "0.0",
+      "units": "s",
+      "description": "Defines the timescale for calving. The fraction of eligible ice that calves is min(dt/calving_timescale, 1.0). A value of 0 means that all eligible ice calves."
+    },
+    {
+      "name": "config_restore_calving_front",
+      "type": "logical",
+      "default": ".false.",
+      "units": "unitless",
+      "description": "If true, then restore the calving front to its initial position.  If ice grows beyond the initial extent, it is removed.  If ice shrinks to an extent behind the initial extent, those locations are filled with thin ice (defined as 1/10th the value of config_dynamic_thickness).  Note that this violates conservation of mass and energy."
+    },
+    {
+      "name": "config_thermal_solver",
+      "type": "character",
+      "default": "none",
+      "units": "unitless",
+      "description": "Selection of the method for the vertical thermal solver (possible values are described further below)."
+    },
+    {
+      "name": "config_thermal_calculate_bmb",
+      "type": "logical",
+      "default": ".true.",
+      "units": "unitless",
+      "description": "Determines if basal and internal melting calculated by the thermal solver should contribute to basal mass balance or be ignored."
+    },
+    {
+      "name": "config_temperature_init",
+      "type": "character",
+      "default": "file",
+      "units": "unitless",
+      "description": "Selection of the method for initializing the ice temperature (as described further below)."
+    },
+    {
+      "name": "config_thermal_thickness",
+      "type": "real",
+      "default": "1.0",
+      "units": "m of ice",
+      "description": "Defines the minimum ice thickness for conducting thermal calculations. Ice thinner than this value is ignored by the thermal solver."
+    },
+    {
+      "name": "config_surface_air_temperature_source",
+      "type": "character",
+      "default": "file",
+      "units": "unitless",
+      "description": "Selection of the method for setting the surface air temperature. 'constant' uses the value set by config_surface_air_temperature_value.  'file' reads the field from an input or forcing file or ESM coupler. 'lapse' uses the value of config_surface_air_temperature_value at elevation 0 with a lapse rate applied from config_surface_air_temperature_lapse_rate."
+    },
+    {
+      "name": "config_surface_air_temperature_value",
+      "type": "real",
+      "default": "273.15",
+      "units": "Kelvin",
+      "description": "Constant value of the surface air temperature."
+    },
+    {
+      "name": "config_surface_air_temperature_lapse_rate",
+      "type": "real",
+      "default": "0.01",
+      "units": "K m^{-1}",
+      "description": "Lapse rate to apply to surface air temperature when config_surface_air_temperature_source='lapse'. Positive values lead to colder temperatures at higher elevations."
+    },
+    {
+      "name": "config_basal_heat_flux_source",
+      "type": "character",
+      "default": "file",
+      "units": "unitless",
+      "description": "Selection of the method for setting the basal heat flux."
+    },
+    {
+      "name": "config_basal_heat_flux_value",
+      "type": "real",
+      "default": "0.0",
+      "units": "W m^{-2}",
+      "description": "Constant value of the basal heat flux (positive upward)."
+    },
+    {
+      "name": "config_basal_mass_bal_float",
+      "type": "character",
+      "default": "none",
+      "units": "unitless",
+      "description": "Selection of the method for computing the basal mass balance of floating ice.  'none' sets the basalMassBal field to 0 everywhere.  'file' uses without modification whatever value was read in through an input or forcing file or the value set by an ESM coupler.  'constant', 'mismip', 'seroussi' use hardcoded fields defined in the code."
+    },
+    {
+      "name": "config_basal_mass_bal_seroussi_amplitude",
+      "type": "real",
+      "default": "0.0",
+      "units": "m",
+      "description": "amplitude on the depth adjustment applied to the Seroussi subglacial melt parameterization"
+    },
+    {
+      "name": "config_basal_mass_bal_seroussi_period",
+      "type": "real",
+      "default": "1.0",
+      "units": "a",
+      "description": "period of the periodic depth adjustment applied to the Seroussi subglacial melt parameterization"
+    },
+    {
+      "name": "config_basal_mass_bal_seroussi_phase",
+      "type": "real",
+      "default": "0.0",
+      "units": "cycles",
+      "description": "phase of the periodic depth adjustment applied to the Seroussi subglacial melt parameterization. Units are cycles, i.e., 0-1"
+    },
+    {
+      "name": "config_bmlt_float_flux",
+      "type": "real",
+      "default": "0.0",
+      "units": "W m^{-2}",
+      "description": "Value of the constant heat flux applied to the base of floating ice (positive upward)."
+    },
+    {
+      "name": "config_bmlt_float_xlimit",
+      "type": "real",
+      "default": "0.0",
+      "units": "m",
+      "description": "x value defining region where bmlt_float_flux is applied; melt only where abs(x) is greater than xlimit."
+    },
+    {
+      "name": "config_ice_density",
+      "type": "real",
+      "default": "910.0",
+      "units": "kg m^{-3}",
+      "description": "ice density to use (assumed constant and uniform)"
+    },
+    {
+      "name": "config_ocean_density",
+      "type": "real",
+      "default": "1028.0",
+      "units": "kg m^{-3}",
+      "description": "ocean density to use for calculating floatation (assumed constant and uniform)"
+    },
+    {
+      "name": "config_sea_level",
+      "type": "real",
+      "default": "0.0",
+      "units": "m above datum",
+      "description": "sea level to use for calculating floatation (assumed constant and uniform)"
+    },
+    {
+      "name": "config_default_flowParamA",
+      "type": "real",
+      "default": "3.1709792e-24",
+      "units": "s^{-1} Pa^{-n}",
+      "description": "Defines the default value of the flow law parameter A to be used if it is not being calculated from ice temperature.  This value will be used by either the sia or FO velocity solver if they are respectively configured to use a scalar A value.  Defaults to the SI representation of 1.0e-16 yr$^{-1}$ Pa$^{-3}$."
+    },
+    {
+      "name": "config_enhancementFactor",
+      "type": "real",
+      "default": "1.0",
+      "units": "none",
+      "description": "multiplier on the flow parameter A"
+    },
+    {
+      "name": "config_flowLawExponent",
+      "type": "real",
+      "default": "3.0",
+      "units": "none",
+      "description": "Defines the value of the Glen flow law exponent, n. This value will be used by either the sia or FO velocity solver.  A value other than 3.0 is untested."
+    },
+    {
+      "name": "config_dynamic_thickness",
+      "type": "real",
+      "default": "10.0",
+      "units": "m of ice",
+      "description": "Defines the ice thickness below which dynamics are not calculated (and hence ice velocity is set to 0)."
+    },
+    {
+      "name": "config_dt",
+      "type": "character",
+      "default": "0001-00-00_00:00:00",
+      "units": "unitless",
+      "description": "Length of model time step defined as a time interval."
+    },
+    {
+      "name": "config_time_integration",
+      "type": "character",
+      "default": "forward_euler",
+      "units": "unitless",
+      "description": "Time integration method (currently, only forward Euler is supported)."
+    },
+    {
+      "name": "config_adaptive_timestep",
+      "type": "logical",
+      "default": ".false.",
+      "units": "unitless",
+      "description": "Determines if the time step should be adjusted based on the CFL condition or should be steady in time. If true, the config_dt_* options are ignored."
+    },
+    {
+      "name": "config_min_adaptive_timestep",
+      "type": "real",
+      "default": "0.0",
+      "units": "s",
+      "description": "The minimum allowable time step in seconds.  If the CFL condition dictates the time step should be shorter than this, then the model aborts."
+    },
+    {
+      "name": "config_max_adaptive_timestep",
+      "type": "real",
+      "default": "3.15e9",
+      "units": "s",
+      "description": "The maximum allowable time step in seconds. If the allowable time step determined by the adaptive CFL calculation is longer than this, then the model will specify config_max_adaptive_timestep as the time step instead. Defaults to 100 years (in seconds)."
+    },
+    {
+      "name": "config_adaptive_timestep_CFL_fraction",
+      "type": "real",
+      "default": "0.25",
+      "units": "none",
+      "description": "A multiplier on the minimum allowable time step calculated from the CFL condition. (Setting to 1.0 may be unstable, so smaller values are recommended.)"
+    },
+    {
+      "name": "config_adaptive_timestep_include_DCFL",
+      "type": "logical",
+      "default": ".false.",
+      "units": "none",
+      "description": "Option of whether to include the diffusive CFL condition in the determination of the maximum allowable timestep. The diffusive CFL condition at any location is estimated based on the local ice flux and surface slope."
+    },
+    {
+      "name": "config_adaptive_timestep_force_interval",
+      "type": "character",
+      "default": "1000-00-00_00:00:00",
+      "units": "unitless",
+      "description": "If adaptive timestep is enabled, the model will ensure a timestep ends at multiples of this interval.  This is useful for ensuring that model output is written at a specific desired interval (rather than the closest time after) or when running coupled to an earth system model that expects a certain interval."
+    },
+    {
+      "name": "config_do_restart",
+      "type": "logical",
+      "default": ".false.",
+      "units": "unitless",
+      "description": "Determines if the initial conditions should be read from a restart file, or an input file.  To perform a restart, set this to true in the namelist.input file.  The restart time will be read from config_start_time (which can be set to 'file' to have the restart time read automatically from the file defined by config_restart_timestamp_name). A restart will read everything from the restart file - no information is read from the 'input' stream.  It will perform a run normally, except velocity will not be solved on a restart."
+    },
+    {
+      "name": "config_restart_timestamp_name",
+      "type": "character",
+      "default": "restart_timestamp",
+      "units": "unitless",
+      "description": "Path to the filename for restart timestamps to be read and written from."
+    },
+    {
+      "name": "config_start_time",
+      "type": "character",
+      "default": "0000-01-01_00:00:00",
+      "units": "unitless",
+      "description": "Timestamp describing the initial time of the simulation.  If it is set to 'file', the initial time is read from the filename specified by config_restart_timestamp_name (defaults to 'restart_timestamp')."
+    },
+    {
+      "name": "config_stop_time",
+      "type": "character",
+      "default": "0000-01-01_00:00:00",
+      "units": "unitless",
+      "description": "Timestamp describing the final time of the simulation. If it is set to 'none' the final time is determined from config_start_time and config_run_duration.  If config_run_duration is also specified, it takes precedence over config_stop_time.  Set config_stop_time to be equal to config_start_time (and config_run_duration to 'none') to perform a diagnostic solve only."
+    },
+    {
+      "name": "config_run_duration",
+      "type": "character",
+      "default": "none",
+      "units": "unitless",
+      "description": "Timestamp describing the length of the simulation. If it is set to 'none' the duration is determined from config_start_time and config_stop_time. config_run_duration overrides inconsistent values of config_stop_time. If a time value is specified for config_run_duration, it must be greater than 0."
+    },
+    {
+      "name": "config_calendar_type",
+      "type": "character",
+      "default": "gregorian_noleap",
+      "units": "unitless",
+      "description": "Selection of the type of calendar that should be used in the simulation."
+    },
+    {
+      "name": "config_stats_interval",
+      "type": "integer",
+      "default": "0",
+      "units": "unitless",
+      "description": "Integer specifying interval (number of timesteps) for writing global/local statistics. If set to 0, then statistics are not written (except perhaps at startup, as determined by 'config_write_stats_on_startup'). Applies to statistics written to log file and not analysis member output written to netCDF files."
+    },
+    {
+      "name": "config_write_stats_on_startup",
+      "type": "logical",
+      "default": ".false.",
+      "units": "unitless",
+      "description": "Logical flag determining if statistics should be written prior to the first time step. Applies to statistics written to log file and not analysis member output written to netCDF files."
+    },
+    {
+      "name": "config_stats_cell_ID",
+      "type": "integer",
+      "default": "1",
+      "units": "unitless",
+      "description": "global ID for the cell selected for local statistics/diagnostics. Applies to statistics written to log file and not analysis member output written to netCDF files."
+    },
+    {
+      "name": "config_write_output_on_startup",
+      "type": "logical",
+      "default": ".true.",
+      "units": "unitless",
+      "description": "Logical flag determining if an output file should be written prior to the first time step."
+    },
+    {
+      "name": "config_pio_num_iotasks",
+      "type": "integer",
+      "default": "0",
+      "units": "unitless",
+      "description": "Integer specifying how many IO tasks should be used within the PIO library. A value of 0 causes all MPI tasks to also be IO tasks. IO tasks are required to write contiguous blocks of data to a file.  Optimal performance is typically found by having 1-2 tasks per node performing I/O.  To do so, config_pio_num_iotasks must be manually set in conjunction with config_pio_stride as appropriate for the processor layout used. For example, running on 240 processors on a machine with 24 processors per node, setting config_pio_num_iotasks=20 and config_pio_stride=12 would configure two I/O tasks per node."
+    },
+    {
+      "name": "config_pio_stride",
+      "type": "integer",
+      "default": "1",
+      "units": "unitless",
+      "description": "Integer specifying the stride of each IO task. See config_pio_num_iotasks for details."
+    },
+    {
+      "name": "config_year_digits",
+      "type": "integer",
+      "default": "4",
+      "units": "unitless",
+      "description": "Integer specifying the number of digits used to represent the year in time strings."
+    },
+    {
+      "name": "config_output_external_velocity_solver_data",
+      "type": "logical",
+      "default": ".false.",
+      "units": "unitless",
+      "description": "If .true., external velocity solvers (if enabled) will write their own output data in addition to any MPAS output that is configured."
+    },
+    {
+      "name": "config_write_albany_ascii_mesh",
+      "type": "logical",
+      "default": ".false.",
+      "units": "unitless",
+      "description": "Logical flag determining if ascii mesh files will be created.  These files are written in a format that can be used by the standalone Albany velocity solver for optimization.  If .true., the model initializes, writes the mesh files, and then terminates."
+    },
+    {
+      "name": "config_num_halos",
+      "type": "integer",
+      "default": "2",
+      "units": "unitless",
+      "description": "Determines the number of halo cells extending from a blocks owned cells (Called the 0-Halo). The default first-order upwinding advection requires a minimum of 2.  Note that a minimum of 3 is required for incremental remapping advection on a quad mesh or for FCT advection (neither of which is currently supported for land ice)."
+    },
+    {
+      "name": "config_block_decomp_file_prefix",
+      "type": "character",
+      "default": "graph.info.part.",
+      "units": "unitless",
+      "description": "Defines the prefix for the block decomposition file. Can include a path. The number of blocks is appended to the end of the prefix at run-time."
+    },
+    {
+      "name": "config_number_of_blocks",
+      "type": "integer",
+      "default": "0",
+      "units": "unitless",
+      "description": "Determines the number of blocks a simulation should be run with. If it is set to 0, the number of blocks is the same as the number of MPI tasks at run-time."
+    },
+    {
+      "name": "config_explicit_proc_decomp",
+      "type": "logical",
+      "default": ".false.",
+      "units": "unitless",
+      "description": "Determines if an explicit processor decomposition should be used. This is only useful if multiple blocks per processor are used."
+    },
+    {
+      "name": "config_proc_decomp_file_prefix",
+      "type": "character",
+      "default": "graph.info.part.",
+      "units": "unitless",
+      "description": "Defines the prefix for the processor decomposition file. This file is only read if config_explicit_proc_decomp is .true. The number of processors is appended to the end of the prefix at run-time."
+    },
+    {
+      "name": "config_print_thickness_advection_info",
+      "type": "logical",
+      "default": ".false.",
+      "units": "unitless",
+      "description": "Prints additional information about thickness advection."
+    },
+    {
+      "name": "config_print_calving_info",
+      "type": "logical",
+      "default": ".false.",
+      "units": "unitless",
+      "description": "Prints additional information about calving physics (if enabled)."
+    },
+    {
+      "name": "config_print_thermal_info",
+      "type": "logical",
+      "default": ".false.",
+      "units": "unitless",
+      "description": "Prints additional information about thermal calculations (if enabled)."
+    },
+    {
+      "name": "config_always_compute_fem_grid",
+      "type": "logical",
+      "default": ".false.",
+      "units": "unitless",
+      "description": "Always compute finite-element grid information for external dycores rather than only doing so when the ice extent changes."
+    },
+    {
+      "name": "config_print_velocity_cleanup_details",
+      "type": "logical",
+      "default": ".false.",
+      "units": "unitless",
+      "description": "After velocity is calculated there are a few checks for appropriate values in certain geometric configurations.  Setting this option to .true. will cause detailed information about those adjustments to be printed."
+    }
+  ]
+}
