@@ -105,8 +105,8 @@ auditable local deltas required by the native GFS bridge:
 - `src/grib2/mod.rs` re-exports that identification value object and
   `DECODE_TEMPLATES`, `StatisticalTimeRange`, and `MissingValueMode` / `missing_value_mode`
   beside the unpackers, (A135, 2026-09-30) `StoredRect` and
-  `unpack_message_stored_rect`, and (1.1.4) `unpack_message_wps32`, the
-  WPS/g2lib binary32 unpack arithmetic in `src/grib2/unpack.rs`.
+  `unpack_message_stored_rect`, and (f6f27a185, 2026-10-28)
+  `unpack_message_wps32`.
   Patched-file SHA-256:
   `7ffe9ee7c71a7c1f3158c02651d849c31f0d00f366e6b52e312c3e75cab8cda3`.
 - `src/grib2/search.rs` initializes the new identity in its pre-existing
@@ -156,8 +156,11 @@ auditable local deltas required by the native GFS bridge:
   to the final octet), decodes as all-missing; data bytes, a malformed
   bitmap or a nonempty group table are still decode errors
   (`tests/all_missing_complex.rs`).
-  1.1.4 adds `unpack_message_wps32`: integer-packed fields through the same
-  validated unpacker, then WPS/g2lib's binary32 scaling arithmetic.
+  f6f27a185 (2026-10-28) adds `unpack_message_wps32` for integer-packed
+  WPS intermediate output: it shares the integer reconstruction and
+  validation of `unpack_message`, then applies g2lib's binary32 scaling;
+  the binary64 entry points keep their arithmetic and missing-value
+  behaviour (tools/grib1_bridge/VENDOR.md, "Native WPS GRIB2 arithmetic").
   Patched-file SHA-256 values are respectively
   `22254047da83fafcc06816170b7687127cb9f64bc7e82e4de2d239861c149547`
   and `d3f9f4481e47e507066e844e6138e5528c8f3512ad46c125149e09cf2838689e`.
