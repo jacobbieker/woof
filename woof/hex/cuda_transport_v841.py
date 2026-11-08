@@ -1199,8 +1199,12 @@ def _regional_target_density_check(cp: Any, target: Any, nlev: int, ncells: int,
     if garbage_cell is not None and 0 <= int(garbage_cell) < ncells:
         keep = keep.copy()
         keep[int(garbage_cell)] = False
-    values = target.reshape(nlev, ncells)[:, keep]
-    bad = cp.any(~(cp.isfinite(values) & (values > 0))).astype(cp.int32)
+    # A broadcast mask, not boolean indexing: ``values[:, keep]`` sized its
+    # result on the host and so waited for the whole queued step (~80 ms of
+    # every regional step at 5,069 cells).  The flag is the same OR over the
+    # same kept words.
+    values = target.reshape(nlev, ncells)
+    bad = cp.any(~(cp.isfinite(values) & (values > 0)) & keep[None, :]).astype(cp.int32)
     flag = _v823._i32(validation_flag)
     cp.maximum(flag, bad, out=flag)
 
