@@ -1,0 +1,35 @@
+# Routines copied byte for byte from chem/module_aerosols_sorgam.F into the
+# wrapper module sorgam_extract (after prelude.inc), in this order.  Together
+# they are sorgam_driver's whole call tree on the isorop = 0 branch, plus
+# aerosols_sorgam_init for the module constants it computes.
+sorgam_driver
+rpmmod3
+aeroproc
+aerostep
+awater
+actcof
+coagrate
+cubic
+eql4
+rpmares_old
+fdjac
+fmin
+funcv
+getaf
+klpnuc
+lnsrch
+lubksb
+ludcmp
+modpar
+newt
+nuclcond
+poly4
+poly6
+soa_part
+sorgam
+aerosols_sorgam_init
+# P4: aerosol dry deposition and PM sums
+sorgam_depdriver
+vdvg
+vdvg_2
+sum_pm_sorgam

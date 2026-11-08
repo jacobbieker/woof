@@ -84,7 +84,8 @@ def test_the_ice_door_verify_grades_the_ported_piece():
     from woof.hex.mpas_ice.verify import verify
     report = verify()
     assert report["passed"] and report["status"] == "stub"
-    assert [p["name"] for p in report["pieces"]] == ["sia_velocity_solver"]
+    assert [p["name"] for p in report["pieces"]] == ["sia_velocity_solver", "geometry_diagnostics",
+                                                     "thermal_init_and_conversions"]
 
 
 @requires_gpu

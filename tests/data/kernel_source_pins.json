@@ -102,6 +102,11 @@
       "glibc_flt32.cuh",
       "glibc_flt32_extra.cuh"
     ],
+    "chem_sorgam": [
+      "glibc_flt32.cuh",
+      "glibc_flt64.cuh",
+      "f64cr.cuh"
+    ],
     "cldfra3_wrf471": [
       "glibc_flt32.cuh",
       "corem_log10f.cuh"
@@ -449,6 +454,7 @@
     "chem_ledger": "b5d47493bc53b8ce243799b3513bbd6c8b42a22133a055587af36519e9a6528e",
     "chem_radiation": "171ca03a6063038e78547fabb6f780e98ee304066c6cf6c9ce797802c0f7c7d1",
     "chem_radm2": "159fb2c22c9c0bbe82bd8994926e79b44a927576399ed69b85023b1ebfbb94f7",
+    "chem_sorgam": "a283751d2a4f5e0dd7b1ec92660e06be11bd896e36a725f6ecf3cc28efce5c06",
     "cldfra3": "137f7a20037dcbf35a8aa399a5384a0bc74b7a6ee1fbfb8fc5f4a9ae5693f826",
     "cldfra3_wrf471": "8ed60f16c949aaa68cf08f4b8735d1002493808466963f05c0b55479bef021d0",
     "clwrf": "e5c127d49c339adee26087e237113bb2093219fae34ef614c1393b990f66b303",

@@ -53,6 +53,10 @@ class SuiteChemistry:
     def __init__(self, path, *, registry_names, mesh, nlev, grid_path, start_text):
         from ..chem_transport import RESERVED_FIELDS, load_config
         path, raw, species = load_config(path)
+        if "wrf_chem" in raw:
+            raise ValueError("a wrf_chem chemistry config runs the WRF-Chem processes on the hex WOOF column "
+                             "route (woof.hex.chem_wrf); the MPAS v8.4.2 suite route carries the bulk species "
+                             "operator only")
         names = tuple(s.name for s in species)
         overlap = set(names) & (set(registry_names) | RESERVED_FIELDS)
         if overlap:

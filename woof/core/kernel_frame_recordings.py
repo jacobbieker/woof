@@ -4206,3 +4206,16 @@ KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
     measured="2026-11-08", complete=False,
     frames=MappingProxyType({"chem_radm2": 1040}),
 ),)
+
+# MADE/SORGAM (chem_sorgam), production loader on the RTX A6000 workstation,
+# sm_86 NVRTC 13.4.92, 2026-11-08, both GPUWM_WRF_EXACT modes: 672 B (the
+# widest of chem_sorgam, chem_sorgam_drydep and chem_sorgam_sum_pm).
+KERNEL_LOCAL_FRAME_RECORDINGS = tuple(
+    replace(row, complete=False) if "chem_sorgam" not in row.frames else row
+    for row in KERNEL_LOCAL_FRAME_RECORDINGS)
+KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
+    box="rtx-a6000-workstation", device="NVIDIA RTX A6000",
+    compute_capability="86", nvrtc_build="13.4.92", platform_family="linux",
+    measured="2026-11-08", complete=False,
+    frames=MappingProxyType({"chem_sorgam": 672}),
+),)

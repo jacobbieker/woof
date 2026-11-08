@@ -138,6 +138,8 @@ WOOF_MIXED_ASSIGN_ALL(threadgroup)
 // ---------------------------------------------------------------- binary64 math
 static inline f64 sqrt(f64 a) { return f64::bits(f64_sqrt(a.b)); }
 static inline f64 fabs(f64 a) { return f64::bits(a.b & 0x7FFFFFFFFFFFFFFFUL); }
+// CUDA's rsqrt(double) (sf_gfs, 1.1.6): 1/sqrt, two correctly rounded steps.
+static inline f64 rsqrt(f64 a) { return f64::bits(0x3FF0000000000000UL) / sqrt(a); }
 static inline f64 fma(f64 a, f64 b, f64 c) { return f64::bits(f64_fma(a.b, b.b, c.b)); }
 static inline f64 copysign(f64 a, f64 b) {
   return f64::bits((a.b & 0x7FFFFFFFFFFFFFFFUL) | (b.b & 0x8000000000000000UL));
@@ -412,6 +414,161 @@ static inline float fmodf(float a, float b) { return metal::precise::fmod(a, b);
 static inline float __expf(float a) { return metal::fast::exp2(a * 1.4426950408889634f); }
 static inline float __logf(float a) { return metal::fast::log2(a) * 0.6931471805599453f; }
 static inline float __fdividef(float a, float b) { return metal::fast::divide(a, b); }
+// rsqrtf / __powf (1.1.6's keps, qnsesfc): MSL's rsqrt, and __powf as CUDA
+// documents it, exp2f(y * __log2f(x)), on fast:: approximations.  Known
+// deltas, as __expf above.
+static inline float rsqrtf(float a) { return metal::precise::rsqrt(a); }
+static inline float __powf(float a, float b) { return metal::fast::exp2(b * metal::fast::log2(a)); }
+// expm1f, erff and erfcf have no MSL builtin; 1.1.6's tc_spray and wind_mav
+// call them.  Transcribed from fdlibm's s_expm1f.c and s_erff.c (Copyright
+// (C) 1993 by Sun Microsystems, Inc.: "Permission to use, copy, modify, and
+// distribute this software is freely granted, provided that this notice is
+// preserved.").  Not CUDA's libdevice words: known deltas (expm1f within
+// 1 ulp, erff 1, erfcf 4 of the true value).
+static inline float __woof_f32_bits(uint w) { return as_type<float>(w); }
+static inline float expm1f(float x) {
+  const float ln2_hi = __woof_f32_bits(0x3f317180u), ln2_lo = __woof_f32_bits(0x3717f7d1u);
+  const float invln2 = __woof_f32_bits(0x3fb8aa3bu);
+  const float Q1 = __woof_f32_bits(0xbd088889u), Q2 = __woof_f32_bits(0x3ad00d01u),
+              Q3 = __woof_f32_bits(0xb8a670cdu), Q4 = __woof_f32_bits(0x36867e54u),
+              Q5 = __woof_f32_bits(0xb457edbbu);
+  uint hx = as_type<uint>(x), xsb = hx & 0x80000000u;
+  hx &= 0x7fffffffu;
+  if (hx >= 0x4195b844u) {                       // |x| >= 27 ln2
+    if (hx >= 0x42b17218u) {                     // |x| >= 88.72
+      if (hx > 0x7f800000u) return x + x;        // NaN
+      if (hx == 0x7f800000u) return xsb == 0u ? x : -1.0f;
+      if (x > 8.8721679688e+01f) return __woof_f32_bits(0x7f800000u);
+    }
+    if (xsb != 0u) return -1.0f;
+  }
+  float hi, lo, c = 0.0f;
+  int k;
+  if (hx > 0x3eb17218u) {                        // |x| > 0.5 ln2
+    if (hx < 0x3f851592u) {                      // and < 1.5 ln2
+      if (xsb == 0u) { hi = x - ln2_hi; lo = ln2_lo; k = 1; }
+      else { hi = x + ln2_hi; lo = -ln2_lo; k = -1; }
+    } else {
+      k = (int)(invln2 * x + (xsb == 0u ? 0.5f : -0.5f));
+      float t = (float)k;
+      hi = x - t * ln2_hi;
+      lo = t * ln2_lo;
+    }
+    x = hi - lo;
+    c = (hi - x) - lo;
+  } else if (hx < 0x33000000u) {                 // |x| < 2^-25
+    return x;
+  } else {
+    k = 0;
+  }
+  float hfx = 0.5f * x, hxs = x * hfx;
+  float r1 = 1.0f + hxs * (Q1 + hxs * (Q2 + hxs * (Q3 + hxs * (Q4 + hxs * Q5))));
+  float t = 3.0f - r1 * hfx;
+  float e = hxs * ((r1 - t) / (6.0f - x * t));
+  if (k == 0) return x - (x * e - hxs);
+  e = x * (e - c) - c;
+  e -= hxs;
+  if (k == -1) return 0.5f * (x - e) - 0.5f;
+  if (k == 1) return x < -0.25f ? -2.0f * (e - (x + 0.5f)) : 1.0f + 2.0f * (x - e);
+  float twopk = __woof_f32_bits((uint)(0x7f + k) << 23), y;
+  if (k <= -2 || k > 56) {
+    y = 1.0f - (e - x);
+    y = k == 128 ? y * 2.0f * 0x1p127f : y * twopk;
+    return y - 1.0f;
+  }
+  if (k < 23) {
+    y = __woof_f32_bits(0x3f800000u - (0x1000000u >> k)) - (e - x);
+  } else {
+    y = x - (e + __woof_f32_bits((uint)(0x7f - k) << 23));
+    y += 1.0f;
+  }
+  return y * twopk;
+}
+// erff/erfcf on |x| < 0.84375: x*(1 + y) (erf) from the rational p(z)/q(z), z = x*x.
+static inline float __woof_erf_small(float x) {
+  const float pp0 = __woof_f32_bits(0x3e0375d4u), pp1 = __woof_f32_bits(0xbea66bebu),
+              pp2 = __woof_f32_bits(0xbce9528fu), pp3 = __woof_f32_bits(0xbbbd1489u),
+              pp4 = __woof_f32_bits(0xb7c756b1u);
+  const float qq1 = __woof_f32_bits(0x3ecbbbceu), qq2 = __woof_f32_bits(0x3d852a63u),
+              qq3 = __woof_f32_bits(0x3ba68116u), qq4 = __woof_f32_bits(0x390aee49u),
+              qq5 = __woof_f32_bits(0xb684e21au);
+  float z = x * x;
+  float r = pp0 + z * (pp1 + z * (pp2 + z * (pp3 + z * pp4)));
+  float s = 1.0f + z * (qq1 + z * (qq2 + z * (qq3 + z * (qq4 + z * qq5))));
+  return r / s;
+}
+// erf(1 + s) - erx on 0.84375 <= |x| < 1.25, s = |x| - 1.
+static inline float __woof_erf_mid(float s) {
+  const float pa0 = __woof_f32_bits(0xbb1acdc6u), pa1 = __woof_f32_bits(0x3ed46805u),
+              pa2 = __woof_f32_bits(0xbebe9208u), pa3 = __woof_f32_bits(0x3ea2fe54u),
+              pa4 = __woof_f32_bits(0xbde31cc2u), pa5 = __woof_f32_bits(0x3d1151b3u),
+              pa6 = __woof_f32_bits(0xbb0df9c0u);
+  const float qa1 = __woof_f32_bits(0x3dd9f331u), qa2 = __woof_f32_bits(0x3f0a5785u),
+              qa3 = __woof_f32_bits(0x3d931ae7u), qa4 = __woof_f32_bits(0x3e013307u),
+              qa5 = __woof_f32_bits(0x3c5f6e13u), qa6 = __woof_f32_bits(0x3c445aa3u);
+  float P = pa0 + s * (pa1 + s * (pa2 + s * (pa3 + s * (pa4 + s * (pa5 + s * pa6)))));
+  float Q = 1.0f + s * (qa1 + s * (qa2 + s * (qa3 + s * (qa4 + s * (qa5 + s * qa6)))));
+  return P / Q;
+}
+// erfc(ax) for 1.25 <= ax < 28: exp(-z*z - 0.5625) * exp((z-ax)(z+ax) + R/S) / ax.
+static inline float __woof_erfc_tail(float ax) {
+  float s = 1.0f / (ax * ax), R, S;
+  if (ax < 1.0f / 0.35f) {
+    const float ra0 = __woof_f32_bits(0xbc21a093u), ra1 = __woof_f32_bits(0xbf31a0b7u),
+                ra2 = __woof_f32_bits(0xc128f022u), ra3 = __woof_f32_bits(0xc2798057u),
+                ra4 = __woof_f32_bits(0xc322658cu), ra5 = __woof_f32_bits(0xc3389ae7u),
+                ra6 = __woof_f32_bits(0xc2a2932bu), ra7 = __woof_f32_bits(0xc11d077eu);
+    const float sa1 = __woof_f32_bits(0x419d35ceu), sa2 = __woof_f32_bits(0x4309a863u),
+                sa3 = __woof_f32_bits(0x43d9486fu), sa4 = __woof_f32_bits(0x442158c9u),
+                sa5 = __woof_f32_bits(0x43d6810bu), sa6 = __woof_f32_bits(0x42d9451fu),
+                sa7 = __woof_f32_bits(0x40d23f7cu), sa8 = __woof_f32_bits(0xbd777f97u);
+    R = ra0 + s * (ra1 + s * (ra2 + s * (ra3 + s * (ra4 + s * (ra5 + s * (ra6 + s * ra7))))));
+    S = 1.0f + s * (sa1 + s * (sa2 + s * (sa3 + s * (sa4 + s * (sa5 + s * (sa6 + s * (sa7 + s * sa8)))))));
+  } else {
+    const float rb0 = __woof_f32_bits(0xbc21a092u), rb1 = __woof_f32_bits(0xbf4c9dd4u),
+                rb2 = __woof_f32_bits(0xc18e104bu), rb3 = __woof_f32_bits(0xc320a2eau),
+                rb4 = __woof_f32_bits(0xc41f6441u), rb5 = __woof_f32_bits(0xc480230bu),
+                rb6 = __woof_f32_bits(0xc3f1c275u);
+    const float sb1 = __woof_f32_bits(0x41f2b459u), sb2 = __woof_f32_bits(0x43a2e571u),
+                sb3 = __woof_f32_bits(0x44c01759u), sb4 = __woof_f32_bits(0x4547fdbbu),
+                sb5 = __woof_f32_bits(0x451f90ceu), sb6 = __woof_f32_bits(0x43ed43a7u),
+                sb7 = __woof_f32_bits(0xc1b38712u);
+    R = rb0 + s * (rb1 + s * (rb2 + s * (rb3 + s * (rb4 + s * (rb5 + s * rb6)))));
+    S = 1.0f + s * (sb1 + s * (sb2 + s * (sb3 + s * (sb4 + s * (sb5 + s * (sb6 + s * sb7))))));
+  }
+  float z = __woof_f32_bits(as_type<uint>(ax) & 0xffffe000u);
+  return metal::precise::exp(-z * z - 0.5625f) * metal::precise::exp((z - ax) * (z + ax) + R / S) / ax;
+}
+static inline float erff(float x) {
+  const float erx = __woof_f32_bits(0x3f58560bu);
+  float ax = metal::fabs(x);
+  if (metal::isnan(x)) return x + x;
+  if (ax < 0.84375f) return x + x * __woof_erf_small(x);
+  if (ax < 1.25f) return x >= 0.0f ? erx + __woof_erf_mid(ax - 1.0f) : -erx - __woof_erf_mid(ax - 1.0f);
+  if (ax >= 4.0f) return x >= 0.0f ? 1.0f : -1.0f;
+  float r = __woof_erfc_tail(ax);
+  return x >= 0.0f ? 1.0f - r : r - 1.0f;
+}
+static inline float erfcf(float x) {
+  const float erx = __woof_f32_bits(0x3f58560bu);
+  float ax = metal::fabs(x);
+  if (metal::isnan(x)) return x + x;
+  if (ax < 0.84375f) {
+    float y = __woof_erf_small(x);
+    if (x < 0.25f) return 1.0f - (x + x * y);
+    return 0.5f - ((x - 0.5f) + x * y);
+  }
+  if (ax < 1.25f) {
+    float m = __woof_erf_mid(ax - 1.0f);
+    return x >= 0.0f ? (1.0f - erx) - m : 1.0f + (erx + m);
+  }
+  if (ax < 28.0f) {
+    if (x < -6.0f) return 2.0f;
+    float r = __woof_erfc_tail(ax);
+    return x > 0.0f ? r : 2.0f - r;
+  }
+  return x > 0.0f ? 0.0f : 2.0f;
+}
 // hypotf and remainderf have no MSL builtin; upstream's wind_farm.cu (1.1.5)
 // calls both.  hypotf scales by the larger magnitude so neither the square
 // nor the sum overflows or flushes (CUDA's is within 2 ulp, as this is).
