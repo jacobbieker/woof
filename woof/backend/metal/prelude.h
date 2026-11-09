@@ -744,12 +744,22 @@ template <typename T> static inline T __shfl_xor_sync(uint mask, T v, int lane_m
 // passes real GPU addresses), read one entry at a time.
 template <typename T> struct __woof_addr_table {
   const device ulong* w;
+  __woof_addr_table() : w(nullptr) {}   // a struct field set later
   __woof_addr_table(const device ulong* p) : w(p) {}
   // a table reached through a device pointer to its entries (`(T**)address`):
   // in device memory, an array of pointers is an array of 64-bit words
   template <typename P> __woof_addr_table(const device P* p) : w(reinterpret_cast<const device ulong*>(p)) {}
   T operator[](long i) const { return reinterpret_cast<T>(w[i]); }
   T operator*() const { return reinterpret_cast<T>(w[0]); }
+  // `table + k`: the table from its k-th entry (cam3_emissivity's
+  // per-column descriptor rows)
+  __woof_addr_table operator+(long i) const { return __woof_addr_table(w + i); }
+  __woof_addr_table operator-(long i) const { return __woof_addr_table(w - i); }
+  // the same for a table held by a struct in device memory
+  T operator[](long i) const device { return reinterpret_cast<T>(w[i]); }
+  T operator*() const device { return reinterpret_cast<T>(w[0]); }
+  __woof_addr_table operator+(long i) const device { return __woof_addr_table(w + i); }
+  __woof_addr_table operator-(long i) const device { return __woof_addr_table(w - i); }
 };
 
 // A mutable pointer global (`__device__ T* p;`): Metal binds no buffer of
