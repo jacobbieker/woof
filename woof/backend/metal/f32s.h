@@ -105,20 +105,38 @@ struct f32s {
 // needs the slow path.  Fields of zeros (an absent hydrometeor) otherwise
 // took soft binary64 for every 0 + 0: a stencil over zeros ran 12x slower
 // than plain float, 4x slower than over nonzero data.
+// One test on the hardware result first, where it settles the operation.
+// + and -: |r| >= 2^-101 and finite (exponent field 26..254).  A flushed
+// operand (|x| < 2^-126) is then below half the gap from r to either
+// neighbour (that gap is at least ulp(r) / 2 >= 2^-125), so r is the correctly
+// rounded result whether or not one was flushed -- the slow path's word too.
+// * and /: r finite and normal (exponent field 1..254).  A flushed operand
+// makes the hardware product or quotient zero, infinite or NaN, so no flush
+// happened and the full test below would take the hardware result anyway.
+// Inf, NaN and small results take the full test, as before.
+static inline bool __woof_f32_sum_settled(float r) {
+  return (as_type<uint>(r) & 0x7F800000u) - 0x0D000000u <= 0x72000000u;
+}
+static inline bool __woof_f32_normal(float r) {
+  return (as_type<uint>(r) & 0x7F800000u) - 0x00800000u <= 0x7E800000u;
+}
 static inline f32s operator+(f32s a, f32s b) {
   float r = a.v + b.v;
+  if (__woof_f32_sum_settled(r)) return f32s(r);
   if ((__woof_f32_tiny(r) && a.v != -b.v) || __woof_f32_sub(a.v) || __woof_f32_sub(b.v))
     return f32s(__woof_slow_add(a.v, b.v));
   return f32s(r);
 }
 static inline f32s operator-(f32s a, f32s b) {
   float r = a.v - b.v;
+  if (__woof_f32_sum_settled(r)) return f32s(r);
   if ((__woof_f32_tiny(r) && a.v != b.v) || __woof_f32_sub(a.v) || __woof_f32_sub(b.v))
     return f32s(__woof_slow_sub(a.v, b.v));
   return f32s(r);
 }
 static inline f32s operator*(f32s a, f32s b) {
   float r = a.v * b.v;
+  if (__woof_f32_normal(r)) return f32s(r);
   if ((__woof_f32_tiny(r) && !__woof_f32_zero(a.v) && !__woof_f32_zero(b.v))
       || __woof_f32_sub(a.v) || __woof_f32_sub(b.v))
     return f32s(__woof_slow_mul(a.v, b.v));
@@ -126,6 +144,7 @@ static inline f32s operator*(f32s a, f32s b) {
 }
 static inline f32s operator/(f32s a, f32s b) {
   float r = a.v / b.v;
+  if (__woof_f32_normal(r)) return f32s(r);
   if ((__woof_f32_tiny(r) && !__woof_f32_zero(a.v)) || __woof_f32_sub(a.v) || __woof_f32_sub(b.v))
     return f32s(__woof_slow_div(a.v, b.v));
   return f32s(r);
