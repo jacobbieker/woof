@@ -20,14 +20,16 @@
 !                                          internal stress (variational),
 !                                          ocean_stress_coefficient,
 !                                          solve_velocity or solve_velocity_revised
-!     final_divergence_shear               (velocity_solver_post_subcycle)
-!     principal_stresses_driver
+!     velocity_solver_post_subcycle        final_divergence_shear,
+!                                          principal_stresses_driver,
+!                                          ocean_stress_final
 !
 !   full = 0, the velocity solve without the internal stress:
 !     the same pre-subcycle calls, then nSub times: stressDivergenceU/V set
 !     to the case's forcing (standing in for the internal stress, which the
 !     full mode covers), ocean_stress_coefficient, solve_velocity or
-!     solve_velocity_revised; then principal_stresses_driver.
+!     solve_velocity_revised; then principal_stresses_driver and
+!     ocean_stress_final.
 !     numericalInertiaCoefficient (seaice_init_evp's, read by the revised
 !     solve) is the case's word.
 !
@@ -35,7 +37,9 @@
 ! calculation_masks, new_ice_velocities, ice_strength, air_stress,
 ! surface_tilt) produce fields the case supplies instead: totalMassVertex,
 ! iceAreaVertex, solveStress/solveVelocity, icePressure, airStressVertexU/V,
-! surfaceTiltForceU/V.
+! surfaceTiltForceU/V (run_presubcycle.F90 drives them).  ocean_stress_final
+! interpolates with seaice_mesh's seaice_interpolate_vertex_to_cell, which
+! build.sh compiles verbatim out of mpas_seaice_mesh.F.
 
 program run_subcycle
   use mpas_kind_types
@@ -48,7 +52,7 @@ program run_subcycle
   type(domain_type) :: domain
   type(block_type), pointer :: block
   type(MPAS_clock_type) :: clock
-  type(MPAS_pool_type), pointer :: structs, configs, mesh, solver, variational, ridging, icestate
+  type(MPAS_pool_type), pointer :: structs, configs, mesh, solver, variational, ridging, icestate, boundary
 
   integer, pointer :: nCells, nVertices, nEdges, maxEdges, vertexDegree, nEdgesSolve, &
        nVerticesSolve, nCellsSolve, nSub
@@ -58,13 +62,14 @@ program run_subcycle
   real(kind=RKIND) :: inertia
   real(kind=RKIND), pointer :: dynamicsTimeStep, elasticTimeStep
 
-  integer, dimension(:), pointer :: nEdgesOnCell, solveStress, solveVelocity
+  integer, dimension(:), pointer :: nEdgesOnCell, solveStress, solveVelocity, interiorVertex
   integer, dimension(:,:), pointer :: verticesOnCell, cellsOnVertex, cellVerticesAtVertex
   real(kind=RKIND), dimension(:), pointer :: dvEdge, areaCell, areaTriangle, tanLat, fVertex, &
        icePressure, totalMassVertex, iceAreaVertex, uOcean, vOcean, uInitial, vInitial, &
        airU, airV, tiltU, tiltV, forcingU, forcingV, &
        uVelocity, vVelocity, massF, oceanStressU, oceanStressV, oceanStressCoeff, &
-       stressDivergenceU, stressDivergenceV, divergence, shear, ridgeConvergence, ridgeShear
+       stressDivergenceU, stressDivergenceV, divergence, shear, ridgeConvergence, ridgeShear, &
+       oceanStressCellU, oceanStressCellV
   real(kind=RKIND), dimension(:,:), pointer :: strain11, strain22, strain12, &
        stress11, stress22, stress12, replacementPressure, principalStress1, principalStress2
   real(kind=RKIND), dimension(:,:,:), pointer :: basisGradientU, basisGradientV, &
@@ -90,8 +95,9 @@ program run_subcycle
 
   allocate(nEdgesOnCell(nCells), verticesOnCell(maxEdges,nCells), &
        cellsOnVertex(vertexDegree,nVertices), cellVerticesAtVertex(vertexDegree,nVertices), &
-       solveStress(nCells), solveVelocity(nVertices))
-  read(u) nEdgesOnCell, verticesOnCell, cellsOnVertex, cellVerticesAtVertex, solveStress, solveVelocity
+       solveStress(nCells), solveVelocity(nVertices), interiorVertex(nVertices))
+  read(u) nEdgesOnCell, verticesOnCell, cellsOnVertex, cellVerticesAtVertex, solveStress, solveVelocity, &
+       interiorVertex
 
   allocate(dvEdge(nEdges), areaCell(nCells), areaTriangle(nVertices), tanLat(nVertices), &
        fVertex(nVertices), icePressure(nCells), totalMassVertex(nVertices), iceAreaVertex(nVertices), &
@@ -115,14 +121,15 @@ program run_subcycle
        replacementPressure(maxEdges,nCells), stressDivergenceU(nVertices), &
        stressDivergenceV(nVertices), divergence(nCells), shear(nCells), &
        ridgeConvergence(nCells), ridgeShear(nCells), &
-       principalStress1(maxEdges,nCells), principalStress2(maxEdges,nCells))
+       principalStress1(maxEdges,nCells), principalStress2(maxEdges,nCells), &
+       oceanStressCellU(nCells), oceanStressCellV(nCells))
   read(u) uVelocity, vVelocity, massF, oceanStressU, oceanStressV, oceanStressCoeff, &
        strain11, strain22, strain12, stress11, stress22, stress12, replacementPressure, &
        stressDivergenceU, stressDivergenceV, divergence, shear, ridgeConvergence, ridgeShear, &
-       principalStress1, principalStress2
+       principalStress1, principalStress2, oceanStressCellU, oceanStressCellV
   close(u)
 
-  allocate(structs, configs, mesh, solver, variational, ridging, icestate)
+  allocate(structs, configs, mesh, solver, variational, ridging, icestate, boundary)
   call stub_pool_put_config(configs, "config_revised_evp", revisedEVP)
   call stub_pool_put_config(configs, "config_use_column_package", useColumn)
   call stub_pool_put_config(configs, "config_use_ocean_stress", useOceanStress)
@@ -145,6 +152,8 @@ program run_subcycle
   call stub_pool_put_array(mesh, "areaCell", areaCell)
   call stub_pool_put_array(mesh, "areaTriangle", areaTriangle)
   call stub_pool_put_array(mesh, "fVertex", fVertex)
+
+  call stub_pool_put_array(boundary, "interiorVertex", interiorVertex)
 
   call stub_pool_put_array(icestate, "totalMassVertex", totalMassVertex)
   call stub_pool_put_array(icestate, "iceAreaVertex", iceAreaVertex)
@@ -170,6 +179,8 @@ program run_subcycle
   call stub_pool_put_array(solver, "surfaceTiltForceV", tiltV)
   call stub_pool_put_array(solver, "stressDivergenceU", stressDivergenceU)
   call stub_pool_put_array(solver, "stressDivergenceV", stressDivergenceV)
+  call stub_pool_put_array(solver, "oceanStressCellU", oceanStressCellU)
+  call stub_pool_put_array(solver, "oceanStressCellV", oceanStressCellV)
   call stub_pool_put_array(solver, "divergence", divergence)
   call stub_pool_put_array(solver, "shear", shear)
 
@@ -194,6 +205,7 @@ program run_subcycle
   call stub_pool_put_array(ridging, "ridgeShear", ridgeShear)
 
   call stub_pool_put_subpool(structs, "mesh", mesh)
+  call stub_pool_put_subpool(structs, "boundary", boundary)
   call stub_pool_put_subpool(structs, "icestate", icestate)
   call stub_pool_put_subpool(structs, "velocity_solver", solver)
   call stub_pool_put_subpool(structs, "velocity_variational", variational)
@@ -217,7 +229,7 @@ program run_subcycle
   call init_subcycle_variables(domain)
   if (full /= 0) then
      call subcycle_velocity_solver(domain, clock)
-     call final_divergence_shear(domain)
+     call velocity_solver_post_subcycle(domain)
   else
      do iter = 1, nSub
         stressDivergenceU = forcingU
@@ -229,15 +241,16 @@ program run_subcycle
            call solve_velocity(domain)
         end if
      end do
+     call principal_stresses_driver(domain)
+     call ocean_stress_final(domain)
   end if
-  call principal_stresses_driver(domain)
 
   open(newunit=u, file=trim(outPath), access='stream', form='unformatted', status='replace')
   write(u) numericalInertiaCoefficient
   write(u) uVelocity, vVelocity, massF, oceanStressU, oceanStressV, oceanStressCoeff, &
        strain11, strain22, strain12, stress11, stress22, stress12, replacementPressure, &
        stressDivergenceU, stressDivergenceV, divergence, shear, ridgeConvergence, ridgeShear, &
-       principalStress1, principalStress2
+       principalStress1, principalStress2, oceanStressCellU, oceanStressCellV
   close(u)
 
 end program run_subcycle

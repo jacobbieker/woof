@@ -85,7 +85,7 @@ def test_the_ice_door_verify_grades_the_ported_piece():
     report = verify()
     assert report["passed"] and report["status"] == "stub"
     assert [p["name"] for p in report["pieces"]] == ["sia_velocity_solver", "geometry_diagnostics",
-                                                     "thermal_init_and_conversions"]
+                                                     "thermal_init_and_conversions", "thickness_tracer_advection"]
 
 
 @requires_gpu
