@@ -137,6 +137,8 @@ _EXPECTED_HEADERS = {
     "smag2d": ("glibc_flt32.cuh",),
     # use_theta_m = 1's diff_opt = 2 hflux composes smag2d.cu (a new unit).
     "smag2d_theta_m": ("glibc_flt32.cuh", "smag2d.cu"),
+    # wrf_smag_hd_w on stored face stresses composes smag2d.cu (a new unit).
+    "smag2d_w_faces": ("glibc_flt32.cuh", "smag2d.cu"),
     "lin":("glibc_flt32.cuh", "lin_support.cuh", "lin_wrf.cuh"),
     "lin_refl": ("refl.cu",),
     # Goddard 2017 radiation (ra_lw/ra_sw_physics = 5): a new unit.
@@ -348,7 +350,7 @@ def test_lake_compile_options_do_not_change_existing_modules(monkeypatch, strict
     no_ftz = {"kf_old", "camzm", "cammgmp", "uwshcu", "gsfcsw", "sbu_ylin", "sbu_ylin_edge", "kfcup", "gsfcgce", "gsfcgce_refl", "g3", "sfclay", "myjsfc", "mynn_surface", "mynn_pbl", "thompson_column",
               "ysu_480", "wsm6r", "aer_opt2"}
     diffusion = {"smag2d", "km5", "km5_geometry", "diffusion", "diff_opt1", "diff6", "diff6_seam", "sfs_output",
-                 "smag2d_theta_m"}
+                 "smag2d_theta_m", "smag2d_w_faces"}
     expected = {name: ("-std=c++17", "--fmad=false") for name in no_fmad}
     expected.update({name: ("-std=c++17", "--fmad=false", "--ftz=false")
                      for name in no_ftz})
@@ -647,7 +649,8 @@ def test_allow_listed_headers_exist_and_translation_units_are_explicit():
                 ("noah_seaice_options", "noah.cu"),
                 ("sfclay_dx2d", "sfclay.cu"),
                 ("nest_top", "acoustic.cu"),
-                ("smag2d_theta_m", "smag2d.cu")), (
+                ("smag2d_theta_m", "smag2d.cu"),
+                ("smag2d_w_faces", "smag2d.cu")), (
                 "only the explicitly reused initialization and scalar units may supply a .cu header")
 
 
