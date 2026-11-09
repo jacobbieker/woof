@@ -153,6 +153,74 @@ domain's first step sits inside those fill-ins (so never on the tropical
 spacing lies within the terrain clock's measured 500 m to 12 km;
 `--clock adaptive` outside the fill-ins is refused naming the domain.
 
+**The tropical opt-in: `--clock tropical-adaptive`.**  Inside the tropics
+(|lat| < 25) the wizard's clock is a fixed 2.5 s per km, and `auto` keeps
+it fixed: that step starts under the adaptive clock's 3 s per km floor,
+so `--clock adaptive` is refused there.  The default is unchanged, byte
+for byte.  `--clock tropical-adaptive` is the opt-in.  It writes the
+following:
+
+| key | where | value | why |
+|---|---|---|---|
+| `use_adaptive_time_step` | `[shared]` | `true` | |
+| `target_cfl` | `[shared]` | 1.0 | WRF's vertical Courant target, below its 1.2 default |
+| `w_damping` | `[shared]` | 1 | WRF's w brake on any column that still crosses it |
+| `max_step_increase_pct` | `[shared]` | 5 | every domain grows at most 5% per step (WRF's nest default is 51%); decreases are immediate |
+| `min_time_step` (+`_den`) | each `[[domain]]` | its fixed tropical step, 2.5 s per km | the floor; per domain because a floor in seconds written to `[shared]` would reach every nest (below) |
+
+Each grid starts at the fixed tropical step.  `max_time_step` stays at
+WRF's 8 s per km fill-in.  A hand-written config gets the same behaviour
+from the same keys.
+
+Risks, and the reason this is an opt-in:
+
+- **Reaction lag.**  The step reacts one step after convection starts: a
+  step is chosen from the CFL of the step before.
+- **Backend divergence.**  The step choice rides a device max-reduction.
+  CUDA and Metal trajectories therefore part sooner than on a fixed
+  clock: one ulp in the maximum picks a different `dt`.
+- **Different output.**  The run is not byte-identical with the fixed
+  clock.
+- **Cumulus.**  MEASURED below, a parameterized-cumulus grid's
+  convective rain moves a long way.  The wizard prints this in the
+  header of any opt-in file that carries a cumulus scheme.
+
+Measured on public GFS 0.25° (cycle 2026-11-07 00Z), 24 h, single domain,
+150×120, 49 levels, Mercator, the wizard's default suite
+(`morrison-mp10-ysu-mm5-noah-kf-rte-rrtmgp-v1`).  RTX A6000, one forecast
+at a time, against the fixed 2.5 s per km clock:
+
+| case | clock | steps | wall | max w-CFL | cells at w-CFL ≥ 0.5 | ≥ 1.0 | `w_damp` |
+|---|---|---|---|---|---|---|---|
+| Manila 14.6 N, 12 km (KF on) | fixed 30 s | 2880 | 144 s | 0.194 | 0 | 0 | idle |
+| | opt-in | 1165 | 86 s (**−41%**) | 0.700 | 2.1e-5 | 0 | idle |
+| Maui 20.8 N, 3 km (no cumulus) | fixed 7.5 s | 11520 | 358 s | 0.162 | 0 | 0 | idle |
+| | opt-in | 3611 | 169 s (**−53%**) | 0.905 | 3.0e-4 | 0 | idle |
+
+The w-CFL is WRF's co-located vertical Courant number per cell per step
+(`GPUWM_WRF_CFL_PROBE`'s histogram).  The table gives the fraction of all
+cell-steps in each band.  The CFL target never bound, there was no NaN,
+and no column was damped.  Maui held the 8 s per km ceiling (24 s) on
+3585 of its 3611 steps.  Manila took 54-96 s, at the 96 s ceiling on 421
+steps: the rest were shortened to land on the 5-minute cumulus and
+12-minute radiation deadlines.  This
+November cycle is benign: the July Manila case behind the fixed clock
+(`domain_wizard.TROPICAL_ROOT_TIME_STEP_S`) peaked at 0.976 at 30 s, so a
+convective day is where `target_cfl` would hold the step down.
+
+What the step does to the forecast (opt-in minus fixed at 24 h, max /
+RMS):
+
+| case | T2 K | U10 m/s | PSFC Pa | domain-mean rain |
+|---|---|---|---|---|
+| Manila 12 km | 2.5 / 0.29 | 3.6 / 0.49 | 48 / 17 | 2.05 vs 4.99 mm (−59%, almost all KF `RAINC`) |
+| Maui 3 km | 4.6 / 0.22 | 13.4 / 0.77 | 100 / 10 | 0.97 vs 0.61 mm (+60%) |
+
+A fixed 60 s Manila control *raised* the rain 14% (5.68 mm), with T2
+1.5 / 0.18 and PSFC 51 / 12.  Kain-Fritsch therefore does not answer a
+varying step the way it answers a longer fixed one.  Until that is
+understood, prefer the fixed clock on a parameterized-cumulus grid.
+
 **Tolerance covers absence, not divergence.**  A cache prepared *before*
 these fields existed loads fine.  A cache prepared *with* adaptive on is
 still refused against a config with it off, because both values are
