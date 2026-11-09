@@ -15,7 +15,9 @@ step ran once and never again: the forecast stood still with no error.  Now:
   CUDA graph binds the same addresses), by-value arguments as their values
   at capture (a CUDA kernel node copies its parameters);
 * a host function (``Stream.launch_host_func``) and an event record are
-  recorded in their place in the sequence;
+  recorded in their place in the sequence; so are the facade's FFTs (a cuFFT
+  plan's ``fft``, ``cupy.fft.*``), which run on the host: a captured FFT's
+  result array is allocated once at capture and rewritten by each replay;
 * ``Graph.launch()`` runs the recorded sequence in order.
 
 Anything else the facade would do during capture -- a facade array operation
@@ -88,6 +90,21 @@ def refuse(what: str):
     if os.environ.get("WOOF_GRAPH_CAPTURE_STRICT") == "1":
         _STATE.rec = None
         raise GraphCaptureRefused(f"{what} during a CUDA-graph capture")
+
+
+class suspended:
+    """Facade work that is part of a recorded step's setup, not of the
+    replayed sequence: the output buffer a recorded host step writes (a
+    captured FFT's result, which CUDA's graph allocates once and keeps)."""
+
+    def __enter__(self):
+        self._rec = recording()
+        _STATE.rec = None
+        return self
+
+    def __exit__(self, *exc):
+        _STATE.rec = self._rec
+        return False
 
 
 def record_launch(function, grid, block, args, shared_mem, stream=None) -> bool:
