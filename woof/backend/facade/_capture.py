@@ -16,11 +16,18 @@ step ran once and never again: the forecast stood still with no error.  Now:
   at capture (a CUDA kernel node copies its parameters);
 * a host function (``Stream.launch_host_func``) and an event record are
   recorded in their place in the sequence;
+* a facade operation that only writes arrays that already exist -- an
+  ``out=`` ufunc (``cp.add(a, b, out=c)``), ``fill``, ``a[...] = b``,
+  ``copyto``, ``a += b`` -- is recorded as itself (:func:`defer`) and run
+  again by each replay, on the values its operands hold at that point, as
+  CuPy's ElementwiseKernel node is; so are the facade's FFTs (a cuFFT plan's
+  ``fft``, ``cupy.fft.*``), whose result array is allocated once at capture
+  and rewritten by each replay;
 * ``Graph.launch()`` runs the recorded sequence in order.
 
-Anything else the facade would do during capture -- a facade array operation
-or allocation, an in-place write (``a[...] = v``, ``fill``, a memcpy), a
-synchronize or a read back to the host -- has no recorded form: the MLX
+Anything else the facade would do during capture -- an operation that
+returns a new array, an allocation, a memcpy, a synchronize or a read back
+to the host -- has no recorded form: the MLX
 value it computes is fixed at capture.  The capture is then refused, loudly
 (:class:`GraphCaptureRefused` from ``end_capture``, naming the first such
 operation), rather than replayed wrong.  The refusal is also raised at the
@@ -90,6 +97,21 @@ def refuse(what: str):
         raise GraphCaptureRefused(f"{what} during a CUDA-graph capture")
 
 
+class suspended:
+    """Facade work that is part of a recorded step's setup, not of the
+    replayed sequence: the output buffer a recorded host step writes (a
+    captured FFT's result, which CUDA's graph allocates once and keeps)."""
+
+    def __enter__(self):
+        self._rec = recording()
+        _STATE.rec = None
+        return self
+
+    def __exit__(self, *exc):
+        _STATE.rec = self._rec
+        return False
+
+
 def record_launch(function, grid, block, args, shared_mem, stream=None) -> bool:
     """Record a kernel launch; True when recorded (the caller does not run it)."""
     rec = recording()
@@ -111,6 +133,21 @@ def _on_capturing_stream(rec, stream=None) -> bool:
     thread's current stream."""
     from woof.backend.facade.cuda import get_current_stream
     return (stream if stream is not None else get_current_stream()) is rec.stream
+
+
+def defer(fn, *args, **kwargs) -> bool:
+    """Record the facade operation ``fn(*args, **kwargs)`` in place of
+    running it; True when recorded.  Host arrays among the arguments are
+    copied (a captured node holds its parameters' values)."""
+    rec = recording()
+    if rec is None:
+        return False
+    if not _on_capturing_stream(rec):
+        refuse("an operation on another stream")
+        return False
+    kept = tuple(a.copy() if isinstance(a, np.ndarray) else a for a in args)
+    rec.steps.append(("op", fn, kept, kwargs))
+    return True
 
 
 def record_host(callback, arg) -> bool:
@@ -139,6 +176,8 @@ def replay(steps):
         if kind == "kernel":
             _, function, grid, block, args, shared_mem = step
             function._launch(grid, block, args, shared_mem)
+        elif kind == "op":
+            step[1](*step[2], **step[3])
         elif kind == "host":
             _drain()
             step[1](step[2])
