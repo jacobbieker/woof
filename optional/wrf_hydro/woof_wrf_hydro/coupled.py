@@ -23,7 +23,10 @@ on device, for one domain (WRF calls it only when ``num_nests < 1``):
   QSUBRT zeroed.
 
 The static state is :mod:`woof_wrf_hydro.routing_domain`.  Ported for the
-coupled run: SUBRTSWCRT and OVRTSWCRT (rt_option 1 and 2), channel_option 3
+coupled run: SUBRTSWCRT and OVRTSWCRT (rt_option 1 and 2), channel_option 1
+and 2 (Route_Link reaches, Muskingum and Muskingum-Cunge, woof_wrf_hydro.channel:
+the reach branch of drive_CHANNEL with UDMP_OPT = 0, lake outlet reaches
+routing level-pool or pass-through lakes), channel_option 3
 with level-pool or pass-through lakes or lake_option 3's persistence/level-pool
 hybrid and RFC-forecast reservoirs (woof_wrf_hydro.reservoir_da), GWBASESWCRT
 0, 1, 2 and 3.  GWBASESWCRT = 3 is the 2-D aquifer (woof_wrf_hydro.gw2d):
@@ -36,8 +39,9 @@ get_basn_area runs for every GWBASESWCRT > 0 and writes the bucket's
 basns_area, which only GWBASESWCRT 1/2 allocate, and stops with a
 segmentation fault.  This driver computes what follows (the oracle stands in
 zero-length bucket arrays; none of it is read by the aquifer).  Refused by
-name here or in the namelist mapper: Route_Link reaches (channel_option 1
-and 2), UDMP_OPT = 1, GWBASESWCRT = 3 with AGGFACTRT > 1 or gwsoilcpl > 0
+name here or in the namelist mapper: UDMP_OPT = 1 (the NWM user-defined
+mapping, drive_CHANNEL_RSL), lake_option 3 with Route_Link reaches,
+GWBASESWCRT = 3 with AGGFACTRT > 1 or gwsoilcpl > 0
 without SUBRTSWCRT/OVRTSWCRT, IMPERV_ADJ, restarts (RESTART_FILE,
 rst_typ = 1), sys_cpl other than 2, rtFlag = 0 (no SUBRTSWCRT, OVRTSWCRT
 or GWBASESWCRT), channel-only modes.
@@ -100,10 +104,11 @@ def refusals(cfg, groups):
     if str(nl.get("restart_file", "") or "") or int(nl.get("rst_typ", 0)) == 1:
         raise namelist.UnportedOption("RESTART_FILE / rst_typ = 1: restarting WRF-Hydro's "
                                       "routing state is not ported")
-    if cfg.channel and cfg.channel_option != 3:
+    if cfg.channel and cfg.channel_option != 3 and cfg.reservoir:
         raise namelist.UnportedOption(
-            f"channel_option = {cfg.channel_option}: Route_Link reach routing is not wired "
-            "into the coupled driver (the gridded network, channel_option = 3, is)")
+            f"lake_option = 3 with channel_option = {cfg.channel_option}: the persistence and "
+            "RFC reservoirs are wired into the diffusive wave's lake loop only; the reach "
+            "routing runs level-pool and pass-through lakes")
     if cfg.gwbaseswcrt == 3 and cfg.gwsoilcpl > 0 and not (cfg.subsurface or cfg.overland):
         raise namelist.UnportedOption(
             "gwsoilcpl > 0 without SUBRTSWCRT or OVRTSWCRT: gwSoilFlux reads the routing "
@@ -226,6 +231,7 @@ class WrfHydroCoupled:
             self.gw_active = d(G["ltype"] == 1, cp.float32)
         self.channel = None
         self.reservoir_da = None
+        self.reaches = cfg.channel and cfg.channel_option != 3
         if cfg.channel:
             net = dom.network
             lakes = levelpool.LevelPool.empty()
@@ -243,6 +249,9 @@ class WrfHydroCoupled:
                 self.reservoir_da = ReservoirDA(
                     lake_ids=L["lake_id"], props={k: L[k] for k in levelpool._PROPS},
                     ifd=L["ifd"], nl=cfg.reservoir, start=start, base=path.parent)
+        if self.reaches:
+            self._init_reaches(dom, lake_mask, lakes)
+        elif cfg.channel:
             self.channel = diffusive.DiffusiveWaveRouting(
                 ch_netrt=dom.ch_netrt, lake_mskrt=lake_mask, ch_netlnk=net["ch_netlnk"],
                 chanxi=net["chanxi"], chanyj=net["chanyj"], node_area=net["node_area"],
@@ -270,6 +279,40 @@ class WrfHydroCoupled:
             if self.t0_output:
                 self._write_outputs()
             self.out_counts = 1
+
+    def _init_reaches(self, dom, lake_mask, lakes):
+        """channel_option 1/2: ReachRouting over Route_Link's reaches, every
+        link array max(NLINKS, NLINKSL) long (rt_allocate's nlinksize)."""
+        import cupy as cp
+
+        from . import channel
+
+        R, net = dom.reaches, dom.network
+        nl = R["nlinksl"]
+        ns = max(len(net["chanxi"]), nl)
+
+        def pad(a, t=np.float32, fill=0):
+            out = np.full(ns, fill, t)
+            out[:len(a)] = np.asarray(a, t)
+            return cp.asarray(out)
+
+        lake_of = np.full(ns, -1, np.int64)
+        lake_of[:nl] = np.where(R["lake_lookup"] > 0, R["lake_lookup"] - 1, -1)
+        props = {k: pad(R[k]) for k in ("musk", "musx", "so", "chanlen", "mannn", "chsslp",
+                                         "bw", "tw", "tw_cc", "n_cc", "channk")}
+        # node pixels to reaches through LLINKIDINDX (routing_domain._reaches),
+        # on the lake mask disaggregateDomain leaves
+        lake_reach = np.where(lake_mask > 0, R["lake_reach"], -9999)
+        self.channel = channel.ReachRouting(
+            channel_option=self.cfg.channel_option, ch_lnkrt_sl=R["reach_sl"],
+            lake_mskrt=lake_reach, chanxi=net["chanxi"], chanyj=net["chanyj"],
+            node_area=pad(net["node_area"]), linkid=R["linkid"], to_node=R["to_node"],
+            nlinksl=nl, typel=pad(R["typel"], np.int32), lakes=lakes, lake_lookup=lake_of,
+            **props)
+        self.qlink1, self.qlink2 = pad(R["qlink1"]), pad(R["qlink2"])
+        self.hlink = pad(R["hlink"], fill=-999.0)        # rt_allocate's HLINK = -999
+        self.cvol = cp.zeros(ns, cp.float32)
+        self.qlateral, self.velocity, self.qloss = (cp.zeros(ns, cp.float32) for _ in range(3))
 
     # -- the coupling call ---------------------------------------------------
     def exchange(self, *, smois, sh2o, infxsrt, soldrain, sfcheadrt) -> None:
@@ -337,7 +380,14 @@ class WrfHydroCoupled:
             gw.hydro_step(surface_head=o.head, gwsoilcpl=cfg.gwsoilcpl, elrt=s["elrt"],
                           soiltyp=g["soiltyprt"], smcrt=g["smcrt"], smcmaxrt=g["smcmaxrt"],
                           sldpth=self.dom.sldpth, zsoil=self.dom.zsoil)
-        if self.channel is not None:
+        if self.reaches:
+            self.channel.route(qlink1=self.qlink1, qlink2=self.qlink2, hlink=self.hlink,
+                               qlateral=self.qlateral, velocity=self.velocity, qloss=self.qloss,
+                               qstrmvolrt=self.qstrm_ts, qinflowbase=self.qinflowbase,
+                               lakeinflort=self.lake_ts, dt=self.dt, dtrt_ch=self.dtrt_ch)
+            if gw is not None:          # driveChannelRouting :986-994 (qgw_chanrt stays 0)
+                gw.channel_exchange(gw_chan_cond_sw=cfg.gw_chan_cond_sw)
+        elif self.channel is not None:
             self.channel.route(dt=self.dt, qstrmvolrt=self.qstrm_ts,
                                qinflowbase=self.qinflowbase, hlink=self.hlink, cvol=self.cvol,
                                qlink1=self.qlink1, qlateral=self.qlateral,
@@ -378,8 +428,13 @@ class WrfHydroCoupled:
                          qgw_chanrt=g.qgw_chanrt, smcrt=self.gt_out["smcrt"])
         if self.channel is not None:
             named.update(hlink=self.hlink, cvol=self.cvol, qlink1=self.qlink1,
-                         qlateral=self.qlateral, dtct=self.channel.dtct,
-                         resht=self.channel.lakes.resht, qlakeo=self.channel.lakes.qlakeo)
+                         qlateral=self.qlateral, resht=self.channel.lakes.resht,
+                         qlakeo=self.channel.lakes.qlakeo)
+            if self.reaches:
+                named.update(qlink2=self.qlink2, velocity=self.velocity, qloss=self.qloss,
+                             qlakei=self.channel.lakes.qlakei)
+            else:
+                named.update(dtct=self.channel.dtct)
             if self.reservoir_da is not None:
                 named.update(reservoir_ri=self.reservoir_da.ri, reservoir_rf=self.reservoir_da.rf)
         out.update({f"wrf_hydro/{k}": v for k, v in named.items()})
@@ -455,6 +510,11 @@ class WrfHydroCoupled:
             return []
         net = self.dom.network
         q, h = self.qlink1.get(), self.hlink.get()
+        if self.reaches:
+            # output_chrt's channel_option 1/2 points: reaches with a gage
+            R = self.dom.reaches
+            return [(R["gages"][k], float(R["chlon"][k]), float(R["chlat"][k]), float(q[k]),
+                     float(h[k])) for k in range(R["nlinksl"]) if R["gages"][k].strip()]
         return [(int(net["frxst"][k]), float(net["chlon"][k]), float(net["chlat"][k]),
                  float(q[k]), float(h[k])) for k in range(len(q)) if net["frxst"][k] != -9999]
 
@@ -465,9 +525,10 @@ class WrfHydroCoupled:
             hydro_time = when.strftime("%Y-%m-%d_%H:%M:%S")
             with (self.output_dir / "frxst_pts_out.txt").open("a") as fh:
                 for pid, lon, lat, q, h in self.streamflow():
-                    # output_chrt's FORMAT 117
+                    # output_chrt's FORMAT 117, or 118 (a gage name) for reaches
+                    who = f" {pid:15s}" if self.reaches else f"{pid:7d}"
                     fh.write(f"{self.elapsed:8d},{hydro_time[:10]} {hydro_time[11:19]},"
-                             f"{pid:7d},{lon:10.5f},{lat:8.5f},{q:9.3f},"
+                             f"{who},{lon:10.5f},{lat:8.5f},{q:9.3f},"
                              f"{q * 35.314666711511576:12.3f},{h:6.3f}\n")
         if self.channel is not None and self.flags["chrtout_domain"] == 1:
             self._write_chrtout(self.output_dir / f"{stamp}.CHRTOUT_DOMAIN{self.igrid}", when)
@@ -478,21 +539,34 @@ class WrfHydroCoupled:
         import netCDF4
 
         net = self.dom.network
-        with netCDF4.Dataset(str(path), "w") as ds:
-            ds.createDimension("station", len(net["chanxi"]))
-            ds.createDimension("time", 1)
-            ds.model_output_valid_time = when.strftime("%Y-%m-%d_%H:%M:%S")
-            ds.title = "CHRTOUT-like channel output (WOOF's WRF-Hydro opt-in, channel_option 3)"
-            t = ds.createVariable("time", "i4", ("time",))
-            t.units = f"seconds since {self.start:%Y-%m-%d %H:%M:%S}"
-            t[:] = self.elapsed
-            for name, data, dt, units in (
-                    ("streamflow", self.qlink1.get(), "f4", "m3 s-1"),
+        if self.reaches:                 # one station per Route_Link reach
+            R = self.dom.reaches
+            n = R["nlinksl"]
+            rows = (("streamflow", self.qlink1.get()[:n], "f4", "m3 s-1"),
+                    ("head", self.hlink.get()[:n], "f4", "m"),
+                    ("velocity", self.velocity.get()[:n], "f4", "m s-1"),
+                    ("feature_id", R["linkid"], "i8", "1"),
+                    ("order", R["order"], "i4", "1"),
+                    ("latitude", R["chlat"], "f4", "degrees_north"),
+                    ("longitude", R["chlon"], "f4", "degrees_east"))
+        else:
+            n = len(net["chanxi"])
+            rows = (("streamflow", self.qlink1.get(), "f4", "m3 s-1"),
                     ("head", self.hlink.get(), "f4", "m"),
                     ("order", net["order"], "i4", "1"),
                     ("latitude", net["chlat"], "f4", "degrees_north"),
                     ("longitude", net["chlon"], "f4", "degrees_east"),
-                    ("frxst_pts", net["frxst"], "i4", "1")):
+                    ("frxst_pts", net["frxst"], "i4", "1"))
+        with netCDF4.Dataset(str(path), "w") as ds:
+            ds.createDimension("station", n)
+            ds.createDimension("time", 1)
+            ds.model_output_valid_time = when.strftime("%Y-%m-%d_%H:%M:%S")
+            ds.title = ("CHRTOUT-like channel output (WOOF's WRF-Hydro opt-in, channel_option "
+                        f"{self.cfg.channel_option})")
+            t = ds.createVariable("time", "i4", ("time",))
+            t.units = f"seconds since {self.start:%Y-%m-%d %H:%M:%S}"
+            t[:] = self.elapsed
+            for name, data, dt, units in rows:
                 v = ds.createVariable(name, dt, ("station",))
                 v.units = units
                 v[:] = data

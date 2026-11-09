@@ -18,8 +18,9 @@ channel_option 3 (the diffusive wave on nodes) is
 
 The network is host data, read once to build the pixel and upstream lists:
 ``ch_lnkrt_sl`` and ``lake_mskrt`` (numpy (jxrt, ixrt)), ``chanxi``/``chanyj``
-(1-based pixel positions), ``linkid``, ``to_node``.  Per-reach properties and
-the state are device arrays of length NLINKS (the first NLINKSL are reaches).
+(1-based pixel positions of the NLINKS nodes), ``linkid``, ``to_node``.
+Per-reach properties and the state are device arrays of length
+max(NLINKS, NLINKSL), rt_allocate's nlinksize (the first NLINKSL are reaches).
 """
 
 from __future__ import annotations
@@ -62,15 +63,20 @@ class ReachRouting:
         if channel_option not in (1, 2):
             raise ValueError("WRF-Hydro channel_option is 1, 2 or 3")
         self.option = int(channel_option)
-        self.nlinks, self.nlinksl = len(chanxi), int(nlinksl)
+        nnodes, self.nlinksl = len(chanxi), int(nlinksl)
+        self.nlinks = max(nnodes, self.nlinksl)
         jxrt, ixrt = ch_lnkrt_sl.shape
         cell = (np.asarray(chanyj) - 1) * ixrt + (np.asarray(chanxi) - 1)
         lists = [[] for _ in range(self.nlinks)]
-        for jj in range(self.nlinks):
+        for jj in range(nnodes):
             j, i = int(chanyj[jj]) - 1, int(chanxi[jj]) - 1
             if ch_lnkrt_sl[j, i] > 0:
                 lists[int(ch_lnkrt_sl[j, i]) - 1].append((jj, 0))
             elif lake_mskrt[j, i] > 0:
+                # a lake pixel's inflow lands on the reach numbered as its lake
+                if lake_mskrt[j, i] > self.nlinks:
+                    raise ValueError("a LAKEGRID lake number exceeds the link arrays "
+                                     "(drive_CHANNEL indexes QLateral with it)")
                 lists[int(lake_mskrt[j, i]) - 1].append((jj, 1))
         start = np.cumsum([0] + [len(x) for x in lists]).astype(np.int32)
         flat = [p for x in lists for p in x]

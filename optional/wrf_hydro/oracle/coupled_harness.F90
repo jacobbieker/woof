@@ -114,14 +114,26 @@ program coupled_oracle
            end do
         end do
      end if
-     do i = 1, rt_domain(1)%nlinks
-        call put(cyc, "qlink1", i - 1, rt_domain(1)%qlink(i, 1))
-        call put(cyc, "hlink", i - 1, rt_domain(1)%hlink(i))
-        call put(cyc, "cvol", i - 1, rt_domain(1)%cvol(i))
-     end do
+     if (nlst(1)%channel_option == 3) then
+        do i = 1, rt_domain(1)%nlinks
+           call put(cyc, "qlink1", i - 1, rt_domain(1)%qlink(i, 1))
+           call put(cyc, "hlink", i - 1, rt_domain(1)%hlink(i))
+           call put(cyc, "cvol", i - 1, rt_domain(1)%cvol(i))
+        end do
+     else                               ! Route_Link reaches (channel_option 1/2)
+        do i = 1, rt_domain(1)%nlinksl
+           call put(cyc, "qlink1", i - 1, rt_domain(1)%qlink(i, 1))
+           call put(cyc, "qlink2", i - 1, rt_domain(1)%qlink(i, 2))
+           call put(cyc, "hlink", i - 1, rt_domain(1)%hlink(i))
+           call put(cyc, "qlateral", i - 1, rt_domain(1)%qlateral(i))
+           call put(cyc, "velocity", i - 1, rt_domain(1)%velocity(i))
+           if (allocated(rt_domain(1)%qloss)) call put(cyc, "qloss", i - 1, rt_domain(1)%qloss(i))
+        end do
+     end if
      do i = 1, rt_domain(1)%nlakes
         call put(cyc, "resht", i - 1, rt_domain(1)%resht(i))
         call put(cyc, "qlakeo", i - 1, rt_domain(1)%qlakeo(i))
+        if (nlst(1)%channel_option /= 3) call put(cyc, "qlakei", i - 1, rt_domain(1)%qlakei(i))
      end do
      do i = 1, rt_domain(1)%numbasns
         call put(cyc, "z_gwsubbas", i - 1, rt_domain(1)%z_gwsubbas(i))
@@ -134,6 +146,8 @@ program coupled_oracle
   ! the static network and terrain HYDRO_ini built, once
   open(newunit=n, file="coupled-static.csv", status="replace")
   write(n, '(A)') "field,index,value"
+  if (nlst(1)%channel_option /= 3) call reach_static()
+  if (nlst(1)%channel_option == 3) then
   do i = 1, rt_domain(1)%nlinks
      write(n, '(A,",",I0,",",I0)') "chanxi", i - 1, rt_domain(1)%chanxi(i)
      write(n, '(A,",",I0,",",I0)') "chanyj", i - 1, rt_domain(1)%chanyj(i)
@@ -146,6 +160,7 @@ program coupled_oracle
      write(n, '(A,",",I0,",",I0)') "bw", i - 1, transfer(rt_domain(1)%bw(i), 1)
      write(n, '(A,",",I0,",",I0)') "zelev", i - 1, transfer(rt_domain(1)%zelev(i), 1)
   end do
+  end if
   do j = 1, rt_domain(1)%jxrt
      do i = 1, rt_domain(1)%ixrt
         nl = (j - 1) * rt_domain(1)%ixrt + i - 1
@@ -166,6 +181,36 @@ program coupled_oracle
   close(n)
   call MPI_Finalize(ierr)
 contains
+  subroutine reach_static()
+    ! channel_option 1/2: the nodes, then the reaches readLinkSL and
+    ! nhdLakeMap left, then the routing-pixel -> reach map
+    do i = 1, rt_domain(1)%nlinks
+       write(n, '(A,",",I0,",",I0)') "chanxi", i - 1, rt_domain(1)%chanxi(i)
+       write(n, '(A,",",I0,",",I0)') "chanyj", i - 1, rt_domain(1)%chanyj(i)
+       write(n, '(A,",",I0,",",I0)') "node_area", i - 1, transfer(rt_domain(1)%node_area(i), 1)
+    end do
+    do i = 1, rt_domain(1)%nlinksl
+       write(n, '(A,",",I0,",",I0)') "linkid", i - 1, rt_domain(1)%linkid(i)
+       write(n, '(A,",",I0,",",I0)') "to_node", i - 1, rt_domain(1)%to_node(i)
+       write(n, '(A,",",I0,",",I0)') "typel", i - 1, rt_domain(1)%typel(i)
+       write(n, '(A,",",I0,",",I0)') "lakeidx", i - 1, rt_domain(1)%lakeidx(i)
+       write(n, '(A,",",I0,",",I0)') "order", i - 1, rt_domain(1)%order(i)
+       write(n, '(A,",",I0,",",I0)') "chanlen", i - 1, transfer(rt_domain(1)%chanlen(i), 1)
+       write(n, '(A,",",I0,",",I0)') "musk", i - 1, transfer(rt_domain(1)%musk(i), 1)
+       write(n, '(A,",",I0,",",I0)') "musx", i - 1, transfer(rt_domain(1)%musx(i), 1)
+       write(n, '(A,",",I0,",",I0)') "so", i - 1, transfer(rt_domain(1)%so(i), 1)
+       write(n, '(A,",",I0,",",I0)') "mannn", i - 1, transfer(rt_domain(1)%mannn(i), 1)
+       write(n, '(A,",",I0,",",I0)') "chsslp", i - 1, transfer(rt_domain(1)%chsslp(i), 1)
+       write(n, '(A,",",I0,",",I0)') "bw", i - 1, transfer(rt_domain(1)%bw(i), 1)
+       write(n, '(A,",",I0,",",I0)') "channk", i - 1, transfer(rt_domain(1)%channk(i), 1)
+    end do
+    do j = 1, rt_domain(1)%jxrt
+       do i = 1, rt_domain(1)%ixrt
+          write(n, '(A,",",I0,",",I0)') "ch_lnkrt_sl", (j - 1) * rt_domain(1)%ixrt + i - 1, &
+               rt_domain(1)%ch_lnkrt_sl(i, j)
+       end do
+    end do
+  end subroutine
   subroutine put(cyc, name, idx, value)
     integer, intent(in) :: cyc, idx
     character(len=*), intent(in) :: name
