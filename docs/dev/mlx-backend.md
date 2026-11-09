@@ -248,9 +248,10 @@ Strict run time, the kernel below: division 1.7x, square root 5.6x
 faster; the libm calls unchanged.
 
 The MPAS WSM6 unit of the water-budget gates (hex, 55 levels, fast
-numerics, df64 division and square root, its glibc ports unchanged):
-cold compile 224 s, `wsm6_columns` 223 s of it (it had not finished after
-1 h 45 min with soft-float division and square root).
+numerics, its glibc ports unchanged), cold, on the same machine state:
+363 s with soft-float division and square root, 224 s with the exact
+df64-seeded ones (1.6x; `wsm6_columns` is all of it). The 1 h 45 min
+recorded below predates later translator changes.
 
 Run time, `tools/df64_grade.py bench` (2^20 threads, 64 dependent
 operations each) and a translated kernel calling each function 16 times
@@ -467,9 +468,10 @@ The MPAS WSM6 water-budget gates (`mpas_wb3_v842`, `mpas_wb5_v842`) run
 apart: their WSM6 unit carries binary64 (soft-float on Metal) and Thrust's
 `complex<double>`. The Kessler and Thompson writebacks and the referee pass
 (5 of 10). The WSM6 unit had not finished its cold Metal compile after
-1 h 45 min of compiler time on an M3 Max with soft-float division and
-square root; with the exact df64-seeded ones it compiles in 224 s ("Compile
-time"), and its 5 tests have not been re-run.
+1 h 45 min of compiler time on an M3 Max at the time. Re-measured
+2026-11-09 it compiles cold in 363 s with soft-float division and square
+root and 224 s with the exact df64-seeded ones ("Compile time"); its 5
+tests have not been re-run.
 
 The partial-depth band (Phase D5) keeps its own measurements:
 
