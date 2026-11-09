@@ -38,6 +38,10 @@ RUST_FNS = ("atan2", "hypot", "log2", "expm1", "tanh", "tgamma", "lgamma", "log1
 CR_FNS = ("exp", "log", "log10", "sin", "atan", "pow")
 BINARY = {"atan2", "hypot", "pow"}
 CR_EXTRA = ("cbrt", "cos", "tan")   # cr_cbrt, wlm_cos, wlm_tan: graded against exact decimal values
+#: |x| >= 2^20: f64cr.cuh's sin defers to the platform sin, which on the
+#: facade backends is the vendored Payne-Hanek path (wlm_sin_huge); sin, cos
+#: and tan there are graded against exact decimal values too
+HUGE = 2.0 ** 20
 F32_FNS = ("cbrtf", "tgammaf", "log1pf")   # binary32: Rust (cbrtf, tgammaf), glibc (log1pf)
 ALL = RUST_FNS + CR_FNS + CR_EXTRA
 
@@ -106,6 +110,12 @@ def operands(n: int, seed: int):
                                1e300, -1e300, np.inf, -np.inf, np.nan, 5e-324, -5e-324, 171.0, 172.0,
                                -2.5, -1.5, 23.0, 24.0, 0.25, 1e-20, -1e-20, 709.0, -745.0, 20.0, -20.0]
         x[2 * k + 32:3 * k] = np.floor(rng.uniform(-30, 30, k - 32))  # integers
+        # huge operands, every binade from 2^20 to the largest double
+        x[3 * k:3 * k + 512] = rng.choice([-1.0, 1.0], 512) * rng.uniform(1, 2, 512) \
+            * np.exp2(rng.integers(20, 1024, 512).astype(float))
+        # the binary64 closest to a multiple of pi/2 (Kahan-McDonald), and its neighbours
+        x[3 * k + 512:3 * k + 515] = [6381956970095103.0 * 2.0 ** 797, np.nextafter(6381956970095103.0 * 2.0 ** 797, 0),
+                                      -np.finfo(np.float64).max]
         parts.append(x)
     return parts
 
@@ -173,26 +183,74 @@ def exact_cbrt(a) -> np.ndarray:
     return out
 
 
-def exact_cos(a) -> np.ndarray:
-    """Correctly rounded binary64 cosines below 2^20, from an 80-digit
-    reduction and series; NaN (ungraded: the known gap) above."""
+def _pi(digits: int):
+    """pi to ``digits`` decimal digits (Machin's formula in integers)."""
     import decimal
-    ctx = decimal.Context(prec=80)
+    one = 10 ** (digits + 10)
+
+    def arctan_inv(x):
+        total, term, n, sign = 0, one // x, 1, 1
+        while term:
+            total += sign * (term // n)
+            term //= x * x
+            n += 2
+            sign = -sign
+        return total
+    return decimal.Decimal(16 * arctan_inv(5) - 4 * arctan_inv(239)).scaleb(
+        -(digits + 10), decimal.Context(prec=digits + 20))
+
+
+def _context(v):
+    """80 digits left after reducing ``v``: a huge operand spends its
+    integer digits on the multiple of 2 pi."""
+    import decimal
+    return decimal.Context(prec=80 + max(0, int(np.log10(abs(v)) + 2)) if v else 80)
+
+
+_PI = _pi(420)
+
+
+def exact_sin(a) -> np.ndarray:
+    """Correctly rounded binary64 sines at |x| >= 2^20 (an exact
+    reduction against 420-digit pi, then an 80-digit series); NaN below,
+    where f64cr.cuh's own host build is the reference."""
+    import decimal
     D = decimal.Decimal
-    pi = D("3.14159265358979323846264338327950288419716939937510582097494459230781640628620899862803482534211706798214808651")
+    out = np.full(len(a), np.nan)
+    for i, v in enumerate(a):
+        if not np.isfinite(v) or abs(v) < HUGE:
+            continue
+        ctx = _context(v)
+        x = ctx.remainder_near(D(float(v)), ctx.multiply(2, _PI))
+        ctx = decimal.Context(prec=80)
+        x2, term, total, n = ctx.multiply(x, x), x, x, 1
+        while True:
+            n += 2
+            term = ctx.divide(ctx.multiply(ctx.minus(term), x2), (n - 1) * n)
+            if abs(term) < D(10) ** -78:
+                break
+            total = ctx.add(total, term)
+        out[i] = float(total)
+    return out
+
+
+def exact_cos(a) -> np.ndarray:
+    """Correctly rounded binary64 cosines, from an exact reduction and an
+    80-digit series."""
+    import decimal
+    D = decimal.Decimal
     out = np.empty(len(a))
     for i, v in enumerate(a):
         if not np.isfinite(v):
             out[i] = np.nan
             continue
-        if abs(v) >= 2.0 ** 20:
-            out[i] = np.nan
-            continue
-        x = ctx.remainder_near(D(float(v)), ctx.multiply(2, pi))
+        ctx = _context(v)
+        x = ctx.remainder_near(D(float(v)), ctx.multiply(2, _PI))
+        ctx = decimal.Context(prec=80)
         x2, term, total, n = ctx.multiply(x, x), D(1), D(1), 0
         while True:
             n += 2
-            term = ctx.divide(ctx.multiply(-term, x2), (n - 1) * n)
+            term = ctx.divide(ctx.multiply(ctx.minus(term), x2), (n - 1) * n)
             if abs(term) < D(10) ** -78:
                 break
             total = ctx.add(total, term)
@@ -201,24 +259,24 @@ def exact_cos(a) -> np.ndarray:
 
 
 def exact_tan(a) -> np.ndarray:
-    """Correctly rounded binary64 tangents below 2^20 (80-digit reduction
-    and series, sin/cos); NaN (ungraded: the known gap) above."""
+    """Correctly rounded binary64 tangents (an exact reduction, then
+    80-digit series, sin/cos)."""
     import decimal
-    ctx = decimal.Context(prec=80)
     D = decimal.Decimal
-    pi = D("3.14159265358979323846264338327950288419716939937510582097494459230781640628620899862803482534211706798214808651")
     out = np.empty(len(a))
     for i, v in enumerate(a):
-        if not np.isfinite(v) or abs(v) >= 2.0 ** 20:
+        if not np.isfinite(v):
             out[i] = np.nan
             continue
-        x = ctx.remainder_near(D(float(v)), pi)
+        ctx = _context(v)
+        x = ctx.remainder_near(D(float(v)), _PI)
+        ctx = decimal.Context(prec=80)
         x2 = ctx.multiply(x, x)
         s, c, ts, tc, n = x, D(1), x, D(1), 0
         while True:
             n += 2
-            tc = ctx.divide(ctx.multiply(-tc, x2), (n - 1) * n)
-            ts = ctx.divide(ctx.multiply(-ts, x2), n * (n + 1))
+            tc = ctx.divide(ctx.multiply(ctx.minus(tc), x2), (n - 1) * n)
+            ts = ctx.divide(ctx.multiply(ctx.minus(ts), x2), n * (n + 1))
             if abs(tc) < D(10) ** -78 and abs(ts) < D(10) ** -78:
                 break
             c, s = ctx.add(c, tc), ctx.add(s, ts)
@@ -239,7 +297,10 @@ def main(argv=None):
     a, b = operands(args.samples, args.seed)
     got, gotf = gpu(a, b)
     rust = rust_reference(a, b)
-    want = np.concatenate([rust[:, :len(RUST_FNS)], cr_reference(a, b),
+    cr = cr_reference(a, b).copy()
+    huge = np.isfinite(a) & (np.abs(a) >= HUGE)
+    cr[huge, CR_FNS.index("sin")] = exact_sin(a[huge])
+    want = np.concatenate([rust[:, :len(RUST_FNS)], cr,
                            exact_cbrt(a)[:, None], exact_cos(a)[:, None],
                            exact_tan(a)[:, None]], axis=1)
     af = a.astype(np.float32)
@@ -257,8 +318,6 @@ def main(argv=None):
     for k, fn in enumerate(ALL):
         g, w = got[:, k], want[:, k]
         ok = (g.view(np.uint64) == w.view(np.uint64)) | (np.isnan(g) & np.isnan(w))
-        if fn in ("cos", "tan"):    # NaN reference: inf/nan operands and the |x| >= 2^20 known gap
-            ok |= np.isnan(w) & (np.isnan(g) | (np.abs(a) >= 2.0 ** 20))
         bad = np.flatnonzero(~ok)
         summary[fn] = {"samples": len(g), "mismatches": int(bad.size)}
         if bad.size:
