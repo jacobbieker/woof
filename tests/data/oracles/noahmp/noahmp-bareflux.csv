@@ -1,8 +1,8 @@
-# WRF v4.6.1 Noah-MP BARE_FLUX bitwise oracle
-#   tree     <wrf-4.6.1-checkout> (WSL)
-#   commit   d66e442fccc04111067e29274c9f9eaccc3cef28
+# WRF v4.7.1 Noah-MP BARE_FLUX bitwise oracle
+#   tree     <wrf-4.7.1-checkout> (WSL)
+#   commit   f52c197ed39d12e087d02c50f412d90d418f6186
 #   file     phys/module_sf_noahmplsm.F
-#   sha256   bd592a5b7db29000e715250e3a7c779ffb5e0dcc356f6b5a7d9e1c9f69c55282
+#   sha256   74b475600ad1c999fe43299bcaf4d3e5eaf59b9f861c47fdbff4d69739e3a45b
 #   patch    private:: -> public:: only, 50 lines, 300 bytes; see
 #            tools/noahmp_wrf461_oracle/visibility_patch_bareflux.py --check
 #   pristine every row below is bit-identical to the row produced by a

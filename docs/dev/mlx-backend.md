@@ -33,7 +33,8 @@ A Mac with MLX installed and no CuPy also selects mlx on its own.
 
 | CUDA | Metal translation |
 |---|---|
-| `double` | `f64`, soft-float binary64. Every operation is IEEE round-to-nearest, word-exact (`tools/f64_soft_grade.py`). |
+| `double`, strict | `f64`, soft-float binary64. Every operation is IEEE round-to-nearest, word-exact (`tools/f64_soft_grade.py`). |
+| `double`, fast | `f64` too, the same binary64 words in memory. `+ - *`, fma, conversions and comparisons are the soft-float words; `/` and `sqrt` are the correctly rounded words from a df64 estimate; CUDA's binary64 libm names are df64, about 2^-46 relative ("Binary64: soft-float and df64" below). |
 | binary32 `+ - * /`, `fma` | Metal's own: IEEE in safe math mode (`tools/metal_arith_receipt.py`). |
 | `--fmad=true` / `false` | `#pragma METAL fp contract(fast)` / `(off)`. In strict numerics nothing is contracted, because NVRTC's choices cannot be reproduced. |
 | `-ftz=true` (CuPy's default) | Metal flushes on arithmetic. CUDA also flushes in places where Metal keeps the value, and the prelude adds those flushes: the result of binary64→binary32 conversion, and the operands of `fabsf`, negation, `copysignf`, `fminf` and `fmaxf`. |
@@ -41,8 +42,69 @@ A Mac with MLX installed and no CuPy also selects mlx on its own.
 | inline PTX without `.ftz` (`add.rn.f32` …) | `__woof_ieee_*`, which keeps subnormals in any unit, as CUDA does. |
 | `fminf` / `fmaxf`, and `a > b ? a : b` | −0 orders below +0, as `min.f32` / `max.f32` do. Metal returns the second operand for equal zeros. |
 | libdevice binary32 (`expf` …) | Metal's `precise::` functions. These are a recorded vendor-libm difference; units built on woof's glibc ports are exact. |
-| binary64 libm | `vendor_libm64.cuh`: correctly rounded exp, log, log10, sin, cos, atan and pow (f64cr); Rust-libm transcriptions for the rest (`tools/vendor_libm64_grade.py`). |
+| binary64 libm, strict | `vendor_libm64.cuh`: correctly rounded exp, log, log10, sin, cos, atan and pow (f64cr); Rust-libm transcriptions for the rest (`tools/vendor_libm64_grade.py`). |
+| binary64 libm, fast | `f64_df64.h` for exp, expm1, log, log2, log10, log1p, pow, sin, cos, tan, atan, atan2, tanh, hypot and cbrt; `vendor_libm64.cuh` for tgamma, lgamma, erf, erfc (and the binary32 log1pf, cbrtf, tgammaf). woof's own glibc ports (`g64_exp::exp` and kin) are unchanged in both modes. |
 | `cupy.power` on binary32, strict | `strict_powf.cuh`: woof's own correctly rounded powf (constants from `tools/strict_powf/constants.py`). CuPy's powf is not correctly rounded: it differs at 273 of the NSSL-2 oracle's 4800 Exner words, the parity ledger's `independent-powf` gap. `WOOF_STRICT_POWF=cuda`, in a source checkout only, selects the opt-in transcription of CUDA's powf (`tools/cuda_powf/`, NOTICE), which gives CUDA's words. |
+
+## Binary64: soft-float and df64
+
+Apple GPUs have no binary64. `double` is always `f64`, the binary64 word in
+a `ulong`, so buffers, structs, literals, unions and bit casts hold the
+same bytes in either mode; what differs is how its operations compute.
+
+* **Strict numerics** (`GPUWM_WRF_EXACT=1`): every operation is
+  `f64_soft.h`'s soft-float, word for word, and the binary64 libm is the
+  vendored correctly rounded one. The translation is byte for byte what it
+  was before df64 existed (`tests/test_metal_df64.py`).
+* **Fast numerics** (the default): `woof/backend/metal/f64_df64.h`, through
+  the same translated body with another prelude
+  (`translate(..., f64="df64")`, chosen by
+  `woof.backend.metal.loader.f64_mode`, so the unit's MSL and every cache
+  key built from it differ between the modes):
+  - `+ - *`, fma, conversions and comparisons stay the soft-float words. A
+    df64 round trip through the binary64 word costs about as much, and it
+    would lose the operands' low five bits (df64 carries 48), which breaks
+    exact subtraction and the exact-scaling tricks binary64 code relies on
+    (`rint`'s 2^52 shift, `ldexp`, Dekker splits);
+  - `/` and `sqrt` are the **correctly rounded words**, from a df64
+    estimate fixed by the exact integer remainder (`f64_df_div`,
+    `f64_df_sqrt`), in place of the soft-float digit loops (63 iterations);
+  - exp, expm1, log, log2, log10, log1p, pow, sin, cos, tan, atan, atan2,
+    tanh, hypot and cbrt are df64 (`df_*_word`), each with its exponent
+    carried apart in an integer, so the whole binary64 range is covered:
+    nothing overflows or flushes in binary32, and subnormal arguments and
+    results are kept. Arguments are reduced exactly (exp: the word split
+    into three binary32 values; sin/cos/tan: Payne-Hanek on the significand
+    with 1280 bits of 2/pi). tgamma, lgamma, erf and erfc stay the vendored
+    transcriptions (on the exact arithmetic above);
+  - woof's own glibc ports (`g64_exp::exp`, `wcr_*` and kin, which the
+    WRF word-for-word units call) are unchanged: they run on the exact
+    arithmetic, so those units keep their words in fast numerics too
+    (CLM lake, MPAS-Seaice EVP at RKIND 8 and NSSL-2's oracle tests pass
+    unchanged).
+
+  A unit keeps soft-float in fast numerics when its options carry
+  `-DGPUWM_PREPARATION_IDENTITY=1` or it is listed in
+  `loader.SOFT_F64_UNITS` (empty); `WOOF_METAL_F64=soft` keeps soft-float
+  everywhere, for diagnosis.
+
+**Accuracy.** `tools/df64_grade.py host` (x86-64, x87 `long double`
+references, 4 million operands per function over random words, each
+function's domain and the special values) gives the largest error in
+binary64 ulps of the reference: division and square root 0 (every word
+correctly rounded); exp 52, log 81, log2 103, log10 112, log1p 77,
+expm1 182, sin 103, cos 108, tan 135, atan 61, atan2 77, tanh 242,
+hypot 68, cbrt 54; pow 102 ulps per unit of 1 + |y log x| (its argument to
+exp carries df64's relative error, so the error grows with that
+magnitude). The leg fails above 512 ulps (2^-44 relative). The df64 core
+itself (df64 operands): add 40, mul 79, div 39, sqrt 53 ulps. Special
+operands follow C99 Annex F. A result within df64's error of the overflow
+threshold saturates to DBL_MAX rather than becoming an infinity df64 alone
+could have made. `tools/df64_grade.py gpu` checks that Metal computes the
+host build's words for every operation (it does, for all 21).
+
+**Cost.** Cold compile and run times, soft-float against df64, are in
+"Compile time" below.
 
 ## Launch ordering
 
@@ -146,6 +208,38 @@ directory, and `off` disables the archives. The OS shader cache does not
 keep the largest pipelines: CLM lake's step kernel compiled again from
 scratch hours after its first build. `WOOF_METAL_COMPILE_LOG=1` prints each
 library and pipeline build's time, and whether it came from an archive.
+
+**Soft-float against df64.** `tools/df64_compile_bench.py` builds a unit's
+library and every pipeline cold (archives off, a nonce in the MSL so no
+cache serves it), in each binary64 mode. On an M3 Max shared with other
+jobs (2026-11-08), library plus pipelines, seconds:
+
+| unit | soft-float | df64 | |
+|---|---|---|---|
+| `sf_gfs` | 114.4 | 0.95 | 120x |
+| `gfs_sas` | 55.3 | 1.88 | 29x |
+| `nssl2_qvexcess` | 5.18 | 0.10 | 52x |
+| `ice_accretion` | 1.95 | 0.15 | 13x |
+| `ensemble_stochastic` | 1.85 | 0.15 | 12x |
+| `wind_farm` | 1.13 | 0.10 | 11x |
+| `fast_sbm` | 402 | 253 | 1.6x |
+| `lake` (CLM lake) | 1756 | 312 | 5.6x |
+
+Most of the gain is the binary64 libm: a unit calling CUDA's `exp`/`log`/
+`pow`/`sin` in binary64 inlined the soft-float correctly rounded libm at
+every call; df64's functions are small and out of line. Units built on
+woof's own glibc ports (CLM lake, the MPAS WSM6 unit of the water-budget
+gates, the WRF word-for-word units) keep those ports in fast numerics;
+for them df64 changes only division and square root, which replace the
+soft-float digit loops (CLM lake still compiles 5.6x sooner, and its
+words are unchanged). The WSM6 unit was not re-measured.
+
+Run time, `tools/df64_grade.py bench` (2^20 threads, 64 dependent
+operations each) and a translated kernel calling each function 16 times
+per thread over 2^20 threads: division 3.6x faster, square root 11x;
+exp 19x, log 21x, pow 35x, sin 156x. Addition and multiplication through
+df64 would gain nothing (1.0x), and fma 1.7x, which is why those stay the
+exact soft-float words.
 
 ## Address spaces
 

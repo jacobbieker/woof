@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Lift the ``private ::`` accessibility statements of MODULE_SF_NOAHMPLSM.
 
-WRF v4.6.1 declares every Noah-MP leaf routine ``private`` at
+WRF v4.7.1 declares every Noah-MP leaf routine ``private`` at
 ``phys/module_sf_noahmplsm.F`` lines 26-84, so a program that compiles the
 pinned source unmodified cannot call SNOWFALL, COMPACT, COMBINE, DIVIDE,
 COMBO, SNOWH2O or SNOWWATER.  This module produces a patched copy whose text
@@ -50,7 +50,7 @@ and a numeric edit must be rejected by ``objects``.
 Relationship to ``visibility_patch_leaves.py``
 ----------------------------------------------
 ``apply`` here emits sha256
-``bfdc0f3632cd30b87208b26a309c533b12d9bc2a39d1a36e9165ecf90d0a12c3`` from the
+``072309bc12d64a3e15cf13252ca74411d321e44d3ff9a88bbb8cfcb261ec5ed4`` from the
 pinned pristine source -- byte for byte what ``visibility_patch_leaves.py``
 emits, which is where the BARE_FLUX, VEGE_FLUX and PHENOLOGY/PRECIP_HEAT
 lanes' three identical copies were merged.  This one is deliberately not
@@ -79,9 +79,11 @@ import sys
 import tempfile
 from pathlib import Path
 
-# SHA-256 of phys/module_sf_noahmplsm.F at WRF commit
-# d66e442fccc04111067e29274c9f9eaccc3cef28 (release-v4.6.1).
-PRISTINE_SHA256 = "bd592a5b7db29000e715250e3a7c779ffb5e0dcc356f6b5a7d9e1c9f69c55282"
+# SHA-256 of phys/module_sf_noahmplsm.F in either pinned tree
+# (noahmp_pins.py: WRF v4.6.1 / 848f54ad, WRF v4.7.1 / e5c0859).
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent))
+from noahmp_pins import LSM_SHA256, TREES, tree_for_lsm_digest  # noqa: E402,F401
+PRISTINE_SHA256 = LSM_SHA256
 
 # Exactly the 50 accessibility statements the module declares.  Hard-pinned so
 # a source that grew or lost one is rejected rather than silently patched.
@@ -436,9 +438,9 @@ def main(argv: list[str]) -> int:
     pristine_path = Path(argv[1])
     pristine = read_bytes(pristine_path)
     got = sha256(pristine)
-    if got != PRISTINE_SHA256:
+    if got not in PRISTINE_SHA256:
         raise SystemExit(
-            f"pristine source is not the pinned WRF v4.6.1 file\n"
+            f"pristine source is neither pinned WRF file\n"
             f"  expected sha256 {PRISTINE_SHA256}\n  got      sha256 {got}"
         )
 

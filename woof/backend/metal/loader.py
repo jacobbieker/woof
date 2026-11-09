@@ -434,11 +434,46 @@ def retains_subnormals(name: str, source: str, options) -> bool:
     return any(base in s for s in sets)
 
 
+#: units whose fast-numerics translation keeps soft-float binary64 (by the
+#: unit's base name, as retains_subnormals reads it).  Empty: no unit has
+#: needed it (docs/dev/mlx-backend.md, "Binary64: soft-float and df64").
+SOFT_F64_UNITS: frozenset = frozenset()
+
+
+def f64_mode(name: str, source: str, options) -> str:
+    """How a unit's Metal translation computes ``double``: ``soft`` or
+    ``df64`` (woof/backend/metal/f64_df64.h).
+
+    ``strict`` numerics: always ``soft``, every word CUDA's.  ``fast``:
+    ``df64`` -- binary64 storage and exact + - * fma, conversions and
+    comparisons as before; division and square root still the correctly
+    rounded words, from a df64 estimate; CUDA's binary64 libm names in
+    df64 (about 2^-46 relative).  Kept ``soft`` in fast numerics: a unit
+    marked ``-DGPUWM_PREPARATION_IDENTITY=1`` (one arithmetic contract
+    across backends), a unit in :data:`SOFT_F64_UNITS`, and every unit
+    under ``WOOF_METAL_F64=soft`` (diagnosis: the fast numerics with the
+    strict binary64).
+    """
+    from woof import numerics
+    if numerics.is_strict():
+        return "soft"
+    choice = os.environ.get("WOOF_METAL_F64", "df64").strip().lower()
+    if choice not in ("df64", "soft"):
+        raise ValueError(f"WOOF_METAL_F64 must be df64 or soft, not {choice!r}")
+    if choice == "soft":
+        return "soft"
+    if "-DGPUWM_PREPARATION_IDENTITY=1" in tuple(options or ()):
+        return "soft"
+    if name.split("[", 1)[0] in SOFT_F64_UNITS:
+        return "soft"
+    return "df64"
+
+
 @lru_cache(maxsize=None)
 def _translated(source: str, unit: str, contract: bool, retain: bool, defines=(),
-                include_dirs=()) -> TranslatedUnit:
+                include_dirs=(), f64: str = "soft") -> TranslatedUnit:
     return translate(source, unit=unit, contract=contract, retain_subnormals=retain, defines=defines,
-                     include_dirs=include_dirs)
+                     include_dirs=include_dirs, f64=f64)
 
 
 def translate_unit(name: str, source: str, *, options=()) -> TranslatedUnit:
@@ -447,7 +482,7 @@ def translate_unit(name: str, source: str, *, options=()) -> TranslatedUnit:
     from woof.backend.translate import option_defines, option_include_dirs
     effective = numerics.effective_options(tuple(options or ()))
     return _translated(source, name, contracts(options, source), retains_subnormals(name, source, options),
-                       option_defines(effective), option_include_dirs(effective))
+                       option_defines(effective), option_include_dirs(effective), f64_mode(name, source, options))
 
 
 def load_unit(name: str, source: str, *, options=()) -> MetalModule:

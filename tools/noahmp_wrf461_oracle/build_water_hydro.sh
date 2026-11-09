@@ -21,7 +21,9 @@ set -eu
 WRF_TREE=$1
 WORK=$2
 HERE=$(cd "$(dirname "$0")" && pwd)
-PRISTINE_SHA=74b475600ad1c999fe43299bcaf4d3e5eaf59b9f861c47fdbff4d69739e3a45b
+. "$HERE/noahmp_pins.sh"
+noahmp_pins "$WRF_TREE/phys/module_sf_noahmplsm.F"
+PRISTINE_SHA=$PRISTINE_LSM_SHA
 FCBASE="-w -ffree-form -ffree-line-length-none -fconvert=big-endian -frecord-marker=4"
 FCOPTIM="-O0"
 mkdir -p "$WORK"
@@ -71,5 +73,5 @@ fi
 ./run_water_hydro noahmp-water-hydro.csv noahmp-water-hydro-libm.csv
 sha256sum "$WRF_TREE/phys/module_sf_noahmplsm.F" "$HERE/run_water.F90" \
     "$HERE/patch_run_water_hydro.py" "$HERE/build_water_hydro.sh" noahmp-water-hydro.csv \
-    | sed "s#$WRF_TREE/#<wrf-4.7.1-tree>/#; s#$HERE/#tools/noahmp_wrf461_oracle/#" > noahmp-water-hydro-sha256sums.txt
+    | sed "s#$WRF_TREE/#<$NOAHMP_TREE-tree>/#; s#$HERE/#tools/noahmp_wrf461_oracle/#" > noahmp-water-hydro-sha256sums.txt
 echo "oracle built in $WORK"

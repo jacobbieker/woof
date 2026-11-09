@@ -1,6 +1,6 @@
-# Noah-MP column oracle: WOOF's device path against WRF v4.6.1's driver
+# Noah-MP column oracle: WOOF's device path against WRF v4.7.1's driver
 
-This harness runs the unmodified WRF v4.6.1 Noah-MP driver (`NOAHMP_INIT`,
+This harness runs the unmodified WRF v4.7.1 Noah-MP driver (`NOAHMP_INIT`,
 then `noahmplsm` once per step) and WOOF's shipped forecast path
 (`noahmp_cold_start`, then `noahmp_lsm_step` once per step) on the same
 inputs, and compares every value WOOF writes, bit for bit.
@@ -42,7 +42,7 @@ glacier column's own values. The comparator counts these values separately.
 ```
 T=/work/pverify/<lane>/src; source /work/pverify/base/env.sh
 C=$T/tools/noahmp_wrf461_oracle/column
-W=/work/pverify/wrf-build/src/WRF-4.6.1
+W=/work/pverify/wrf-build/src/WRF-4.7.1
 sh $C/build_column.sh $W build-noopt noopt
 sh $C/build_column.sh $W build-wrf wrf          # optional control
 for cfg in summer60 winter300; do

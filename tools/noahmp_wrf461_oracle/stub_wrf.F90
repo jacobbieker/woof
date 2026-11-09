@@ -1,4 +1,4 @@
-! Service-only stubs for the standalone Noah-MP WRF v4.6.1 oracle harness.
+! Service-only stubs for the standalone Noah-MP WRF v4.7.1 oracle harness.
 !
 ! Everything here supplies infrastructure that WRF's build normally provides:
 ! logging, fatal-error termination, an opaque domain handle, and link targets

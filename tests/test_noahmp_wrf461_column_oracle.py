@@ -23,6 +23,17 @@ six glacier columns, which WRF fills from locals the glacier arm never
 assigns (``compare_column.py`` docstring; WRF publishes the preceding land
 column's EFLXB, which the receipt shows).  They are counted, not hidden.
 
+The same inputs through WRF 4.7.1 (phys/noahmp e5c0859, same build) are
+``wrf471-O0-*.bin.gz``.  They differ from the 848f54ad runs in exactly two
+ways: TAUSSXY on the night snow columns (4.7.1 ages snow before the cosz
+test), and SOILENERGY/SNOWENERGY on the six glacier columns (4.7.1's
+NOAHMP_GLACIER returns HCPCT, so the driver no longer reads an undefined
+local there).  WOOF's default ``noahmp_snow_age = "wrf_470"`` is graded
+against those, with the glacier SOILENERGY/SNOWENERGY compared rather than
+excluded; only EFLXBXY stays excluded, because EFLXB is still never set on
+the glacier arm.  The 848f54ad files stay the references for
+``"wrf_461"``.
+
 Two defects this oracle found are pinned here: ACSNOM was summed as
 ``ACSNOM + (QMELT*DT + PONDINGXY)`` instead of WRF's left-to-right order
 (1 ULP on 8 winter values), and the cold start did not seed T2MVXY/T2MBXY,
@@ -64,13 +75,18 @@ def _unzip(tmp_path, name):
     return target
 
 
-def _woof_run(tmp_path, config):
+#: Which WRF run grades which generation.
+ORACLES = {"wrf_461": "wrf461", "wrf_470": "wrf471"}
+
+
+def _woof_run(tmp_path, config, generation="wrf_461"):
     inp = _unzip(tmp_path, f"in-{config}.bin.gz")
-    wrf = _unzip(tmp_path, f"wrf461-O0-{config}.bin.gz")
-    out = tmp_path / f"woof-{config}.bin"
-    # This oracle predates the default's corrected night snow aging.
+    wrf = _unzip(tmp_path, f"{ORACLES[generation]}-O0-{config}.bin.gz")
+    out = tmp_path / f"woof-{generation}-{config}.bin"
+    # 848f54ad (WRF 4.6.1) ages snow only in daylight: "wrf_461".
+    # e5c0859 (WRF 4.7.1) ages it at night as well: "wrf_470", the default.
     receipt = _load("run_woof_column").run(
-        str(inp), str(out), noahmp_snow_age="wrf_461")
+        str(inp), str(out), noahmp_snow_age=generation)
     return inp, wrf, out, receipt
 
 
@@ -107,6 +123,40 @@ def test_woof_matches_the_wrf461_column_oracle_bit_for_bit(tmp_path, config):
     assert result["glacier_columns"] == [43, 44, 45, 46, 47, 48]
     excluded = result["excluded"]["glacier_undefined"]
     assert excluded["values"] == 3 * 6 * result["snapshots"]
+
+
+@requires_gpu
+@pytest.mark.parametrize("config", CONFIGS)
+def test_woof_default_matches_the_e5c0859_column_oracle_bit_for_bit(
+        tmp_path, config):
+    """The default generation against WRF 4.7.1's driver, glacier energy graded."""
+    inp, wrf, out, receipt = _woof_run(tmp_path, config, "wrf_470")
+    assert "cuda" in receipt["census_first"]["glacier_path"]
+    compare = _load("compare_column")
+    result = compare.compare(str(wrf), str(out), str(inp),
+                             compare.GLACIER_UNDEFINED_E5C0859)
+    assert result["columns"] == 128
+    assert result["fields"] == 73
+    misses = {name: rec for name, rec in result["per_field"].items()
+              if rec["differing"]}
+    assert result["differing_values"] == 0, misses
+    assert result["glacier_columns"] == [43, 44, 45, 46, 47, 48]
+    # Only EFLXBXY is left out now: one field, six columns, every snapshot.
+    excluded = result["excluded"]["glacier_undefined"]
+    assert excluded["values"] == 1 * 6 * result["snapshots"]
+
+
+@requires_gpu
+def test_the_two_column_oracles_differ_only_where_4_7_1_changed(tmp_path):
+    """848f54ad vs e5c0859: night TAUSSXY and glacier SOILENERGY/SNOWENERGY."""
+    compare = _load("compare_column")
+    for config in CONFIGS:
+        inp = _unzip(tmp_path, f"in-{config}.bin.gz")
+        old = _unzip(tmp_path, f"wrf461-O0-{config}.bin.gz")
+        new = _unzip(tmp_path, f"wrf471-O0-{config}.bin.gz")
+        result = compare.compare(str(old), str(new), str(inp), ())
+        moved = {n for n, rec in result["per_field"].items() if rec["differing"]}
+        assert moved == {"taussxy", "soilenergy", "snowenergy"}, config
 
 
 @requires_gpu

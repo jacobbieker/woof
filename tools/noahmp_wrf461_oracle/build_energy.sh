@@ -1,10 +1,11 @@
 #!/bin/sh
-# Build the WRF v4.6.1 Noah-MP ENERGY bitwise oracle and emit its fixture.
+# Build the WRF v4.7.1 Noah-MP ENERGY bitwise oracle and emit its fixture.
 #
 # Usage:  build_energy.sh <wrf-tree> <workdir> [optlevel]
 #
-#   <wrf-tree>  pinned WRF checkout, e.g. $HOME/wrf-stock-v461-gate-20260721
-#               commit d66e442fccc04111067e29274c9f9eaccc3cef28
+#   <wrf-tree>  pinned WRF checkout with the phys/noahmp submodule files in phys/
+#               commit f52c197e (v4.7.1, phys/noahmp e5c0859) or d66e442f
+#               (v4.6.1, phys/noahmp 848f54ad); see noahmp_pins.sh
 #   <workdir>   scratch directory (created if absent)
 #   [optlevel]  "noopt" (default) builds everything at -O0.  This is the level
 #               the ENERGY fixture is pinned at, for the reason recorded in
@@ -32,8 +33,9 @@ REPO=$(cd "$HERE/../.." && pwd)
 
 # Pinned sources.  PRISTINE_LSM_SHA is the same constant the visibility patch
 # and every other fixture in this directory check.
-PRISTINE_LSM_SHA=bd592a5b7db29000e715250e3a7c779ffb5e0dcc356f6b5a7d9e1c9f69c55282
-PRISTINE_DRV_SHA=9010a757da994ed8796c63ca97da354eaf60c5c732df4ea9acad5bc62a973890
+# Either pinned tree (noahmp_pins.sh); the driver must come from the same one.
+. "$HERE/noahmp_pins.sh"
+noahmp_pins "$WRF_TREE/phys/module_sf_noahmplsm.F"
 PRISTINE_GEC_SHA=ad2864562e95678a25276df82ef96395cca61c3a1bd0ab48ddfb8402902cf2f6
 
 case "$OPTLEVEL" in
@@ -167,6 +169,7 @@ sha256sum "$WRF_TREE/phys/module_sf_noahmplsm.F" \
           "$HERE/run_energy.F90" \
           MPTABLE.TBL SOILPARM.TBL GENPARM.TBL \
           noahmp-energy.csv > energy-sha256sums.txt
+noahmp_label_sums energy-sha256sums.txt "$WRF_TREE"
 {
   echo "optlevel   = $OPTLEVEL"
   echo "FCOPTIM    = $FCOPTIM"

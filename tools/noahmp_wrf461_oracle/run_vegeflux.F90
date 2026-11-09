@@ -1,6 +1,6 @@
 ! run_vegeflux.F90 -- bitwise fixture generator for the Noah-MP VEGE_FLUX subtree.
 !
-! Calls the *unmodified* WRF v4.6.1 phys/module_sf_noahmplsm.F (visibility patch
+! Calls the *unmodified* WRF v4.7.1 phys/module_sf_noahmplsm.F (visibility patch
 ! only) and writes one CSV row per scalar crossing the interface, as the exact
 ! IEEE-754 binary32 bit pattern.  Nothing here recomputes any physics; the CSV is
 ! whatever gfortran + glibc produced.
@@ -85,7 +85,7 @@ contains
   end subroutine emit_options
 
 ! ---------------------------------------------------------------------------
-! Parameter block.  MPTABLE.TBL (WRF v4.6.1 run/MPTABLE.TBL), MODIS-IGBP
+! Parameter block.  MPTABLE.TBL (WRF v4.7.1 run/MPTABLE.TBL), MODIS-IGBP
 ! "Evergreen Needleleaf Forest"-class values for the photosynthesis group; every
 ! MPTABLE row shares C3PSN/KC25/AKC/KO25/AKO/AVCMX/FOLNMX, and DLEAF/CBIOM are
 ! uniform across all rows.  HVT and VCMX25/BP/MP/QE25 are per-row and are set by

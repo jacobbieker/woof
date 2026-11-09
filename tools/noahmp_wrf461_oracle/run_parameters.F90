@@ -1,4 +1,4 @@
-! Pin WRF v4.6.1 NOAHMP_TABLES + TRANSFER_MP_PARAMETERS against byte-pinned tables.
+! Pin WRF v4.7.1 NOAHMP_TABLES + TRANSFER_MP_PARAMETERS against byte-pinned tables.
 !
 ! Routines exercised, all from unmodified pinned sources:
 !   NOAHMP_TABLES::read_mp_veg_parameters      (phys/module_sf_noahmplsm.F)
