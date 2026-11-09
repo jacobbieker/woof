@@ -2497,7 +2497,7 @@
    },
    {
     "file": "woof/core/kernels/chem_radm2.cu",
-    "sha256": "159fb2c22c9c0bbe82bd8994926e79b44a927576399ed69b85023b1ebfbb94f7"
+    "sha256": "1a2e3482687d2378d3cfbe204801f7985755e6c8cf5f6d62c61d84d3bf56bb02"
    },
    {
     "file": "woof/core/kernels/chem_rrtmgp_aerosol.cu",
@@ -2517,7 +2517,7 @@
    },
    {
     "file": "woof/core/kernels/chem_sorgam.cu",
-    "sha256": "aeb719f0e7dfd6bb8584dfd44c9e8672d2deeaf1f632e412f075af9a8a6b3d6c"
+    "sha256": "206aace977a6ab2d3f0c676d380d14635457cb237db4a38bc2cdab260cf896e9"
    },
    {
     "file": "woof/core/kernels/chem_sulfur.cu",

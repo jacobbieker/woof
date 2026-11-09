@@ -1,4 +1,4 @@
-# MADE/SORGAM column oracle, WRF v4.6.1
+# MADE/SORGAM column oracle, WRF v4.7.1
 
 `build.sh WRF_SRC BUILD_DIR [FIXTURE_ROOT]` compiles SORGAM's data modules
 whole and copies sorgam_driver's call tree byte for byte from
