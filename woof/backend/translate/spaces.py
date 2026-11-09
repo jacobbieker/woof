@@ -642,7 +642,22 @@ class SpaceAnalysis:
         else:                                      # an operator call: object first
             space = self.space(obj, env, lvalue=True)
         if space in (DEVICE, CONSTANT, THREADGROUP):
-            self.this_spaces.setdefault(ref.get_usr(), set()).add(space)
+            self.this_spaces.setdefault(self._pattern_usr(ref), set()).add(space)
+
+    def _pattern_usr(self, ref) -> str:
+        """A member of a class template specialization (``FArray<float>::
+        operator()``, RRFS smoke's descriptors) is the template's member, the
+        one the translator qualifies."""
+        usr = ref.get_usr()
+        if usr in self.functions:
+            return usr
+        try:
+            pattern = self.ci.conf.lib.clang_getSpecializedCursorTemplate(ref)
+        except Exception:  # noqa: BLE001 -- an older binding: the usr as given
+            return usr
+        if pattern is not None and pattern.kind is not None and pattern.get_usr() in self.functions:
+            return pattern.get_usr()
+        return usr
 
     def call(self, node, env):
         self._record_this_space(node, env)
