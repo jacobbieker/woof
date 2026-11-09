@@ -369,6 +369,10 @@ DF_OP f64_u64 f64_df_sqrt(f64_u64 a) {
   return ((f64_u64)ez << 52) | (Rt & DF_FRAC_MASK);
 }
 
+// Below: the fast numerics' only.  The strict prelude leaves it out
+// (WOOF_DF64_NO_LIBM) and takes only the exact division and square root.
+#if !defined(WOOF_DF64_NO_LIBM)
+
 // The df64 primitive operations on words (graded, and selectable for the
 // arithmetic with WOOF_DF64_ARITH_FULL; not the default, see above).
 DF_OP f64_u64 f64_df_mul(f64_u64 a, f64_u64 b) {
@@ -408,9 +412,6 @@ DF_OP f64_u64 f64_df_fma(f64_u64 a, f64_u64 b, f64_u64 c) {
   return df_pack(s, d >= 0 ? p.e : z.e);
 }
 
-// The libm below is the fast numerics' only; the strict prelude leaves it
-// out (WOOF_DF64_NO_LIBM) and takes only the exact division and square root.
-#if !defined(WOOF_DF64_NO_LIBM)
 // ------------------------------------------------------------------ libm
 //
 // Each takes and returns binary64 words.  Special operands follow C99
