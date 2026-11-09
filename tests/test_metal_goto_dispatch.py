@@ -483,3 +483,41 @@ def test_a_goto_into_a_label_right_after_the_loop_that_jumps(cp):
     out = cp.zeros(N, dtype=cp.int32)
     _launch(cp, _ENTER_LAST, "enter_last", cp.asarray(x), out, np.int32(N))
     assert cp.asnumpy(out).tolist() == [_enter_last(int(v)) for v in x]
+
+
+_DIRECT = r'''
+extern "C" __global__ void direct(const int* in, int* out, int n) {
+    int c = blockIdx.x * blockDim.x + threadIdx.x;
+    if (c >= n) return;
+    int x = in[c], acc = 0;
+    for (int k = 0; k < 6; ++k) {
+        if ((x + k) % 3 == 0) goto L;
+        acc += 2;
+        if (k % 2) {
+            acc += 5;
+        }
+        goto L;
+        acc += 1000;
+    L:
+        acc += k * x;
+    }
+    out[c] = acc;
+}
+'''
+
+
+def test_an_unconditional_goto_that_is_its_blocks_statement_inside_a_loop(cp):
+    """The wrapper's flag is the loop body's: no check after the loop (it
+    named the flag out of its scope; gfdleta_co2_init, ssib)."""
+    x = np.arange(N, dtype=np.int32) % 29
+    want = []
+    for v in x:
+        acc = 0
+        for k in range(6):
+            if (int(v) + k) % 3:
+                acc += 2 + (5 if k % 2 else 0)
+            acc += k * int(v)
+        want.append(acc)
+    out = cp.zeros(N, dtype=cp.int32)
+    _launch(cp, _DIRECT, "direct", cp.asarray(x), out, np.int32(N))
+    assert cp.asnumpy(out).tolist() == want
