@@ -6793,7 +6793,27 @@ def _resolve_cache_identity_compatibility(
     raise ValueError(
         "prepared cache identity differs from the requested source, static "
         "data, configuration, namelist, or allowed legacy default: "
-        + _describe_identity_difference(observed_cmp, compatible))
+        + _describe_identity_difference(observed_cmp, compatible)
+        + _strict_preparation_hint())
+
+
+def _strict_preparation_hint() -> str:
+    """What to do when a strict run meets a bundle prepared in default mode.
+
+    Strict arithmetic (GPUWM_WRF_EXACT=1) changes fields of the prepared
+    identity (hydrometeor_handover_numbers, for one), so a bundle prepared
+    without it is refused -- correctly, but the refusal named only the
+    fields (2026-11-08 benchmark, I-3)."""
+    try:
+        from woof import numerics
+        strict = numerics.is_strict()
+    except Exception:
+        return ""
+    if not strict:
+        return ""
+    return (".  This run is strict (GPUWM_WRF_EXACT=1), which prepares a "
+            "different bundle: if this one was prepared without it, "
+            "re-prepare it with GPUWM_WRF_EXACT=1 set")
 
 
 def _describe_identity_difference(observed, expected, limit: int = 8) -> str:
