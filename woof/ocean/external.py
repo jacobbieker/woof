@@ -84,6 +84,35 @@ class ExternalOceanCoupling:
         self.u_phy, self.v_phy, self.rho = zeros(), zeros(), zeros()
         self.uoce, self.voce = zeros(), zeros()   # WRF's UOCE/VOCE: merged onto zero
 
+    def digest_arrays(self) -> dict:
+        """The coupled state a later coupling step reads, for a state digest
+        (woof.state_digest) only -- a checkpoint still refuses the coupling:
+        this coupling's own arrays and averages, the ocean's surface (the
+        ExternalOcean interface), and its own arrays, array tables and
+        counters, each under ``external_ocean/``."""
+        import numpy as np
+
+        out = {}
+
+        def take(prefix, obj):
+            for name, value in sorted(vars(obj).items()):
+                if isinstance(value, (bool, int, float, np.integer, np.floating)):
+                    out[prefix + name] = np.asarray(value)
+                elif hasattr(value, "__array__") and hasattr(value, "dtype"):
+                    out[prefix + name] = value
+                elif isinstance(value, dict):
+                    for key, item in sorted(value.items()):
+                        if hasattr(item, "__array__") and hasattr(item, "dtype"):
+                            out[f"{prefix}{name}/{key}"] = item
+
+        take("external_ocean/coupling/", self)
+        take("external_ocean/averager/", self.averager)
+        take("external_ocean/sent/", self.sent)
+        take("external_ocean/delivered/", self.delivered)
+        take("external_ocean/ocean/", self.ocean)
+        take("external_ocean/ocean/surface/", self.ocean.surface)   # the interface's own
+        return out
+
     def store_input(self, sst) -> None:
         """cpl_store_input at itimestep 1: SST_INPUT = SST."""
         import cupy as cp

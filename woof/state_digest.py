@@ -345,6 +345,12 @@ def canonical_state_digest(state, clock, *,
     driver = getattr(state, "physics", None)
     if driver is not None:
         manifest.update(restart_io._driver_manifest(driver, digest=True))
+        coupling = getattr(driver, "external_ocean", None)
+        if coupling is not None:
+            # Left out of the driver manifest (a checkpoint cannot carry
+            # it), so the digest takes the coupled state from its own
+            # inventory: two runs that differ only in the ocean differ here.
+            manifest.update(coupling.digest_arrays())
         # Match the actual streaming producer's distinction: standalone
         # legacy-RRTMG host ozone is recomputed, while an explicit CAM
         # owner supplies a retained field to later radiation/nest calls.

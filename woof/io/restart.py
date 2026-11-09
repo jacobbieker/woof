@@ -4633,7 +4633,8 @@ def _driver_manifest(driver, *, streaming=False, state_shape=None,
 
     ``digest``: the manifest feeds a state digest (woof.state_digest), not a
     checkpoint, so an attached external ocean is left out of it rather than
-    refused; its coupling is what a checkpoint cannot carry."""
+    refused (the digest adds it from ``ExternalOceanCoupling.digest_arrays``);
+    its coupling is what a checkpoint cannot carry."""
     coupled = getattr(driver, "external_ocean", None) is not None
     if coupled and not digest:
         raise RestartManifestError(

@@ -195,6 +195,19 @@ def test_the_driver_runs_the_three_calls_at_wrf_places(tmp_path, monkeypatch):
     assert _driver_manifest(driver, digest=True)
     with pytest.raises(RestartManifestError, match="external ocean"):
         _driver_manifest(driver)
+    # ... and takes the coupled state from the coupling's own inventory, so
+    # two runs that differ only in the ocean have different digests.
+    from types import SimpleNamespace
+
+    from woof.state_digest import canonical_state_digest
+    inventory = coupling.digest_arrays()
+    assert "external_ocean/coupling/sst_input" in inventory
+    assert "external_ocean/averager/elapsed" in inventory
+    assert "external_ocean/ocean/surface/sst" in inventory
+    clock = SimpleNamespace(dtbc_fp32=float(cfg.dt))
+    before = canonical_state_digest(state, clock)
+    ocean.surface.sst[...] += cp.float32(0.5)
+    assert canonical_state_digest(state, clock) != before
 
 
 @pytest.mark.gpu
