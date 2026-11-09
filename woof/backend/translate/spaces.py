@@ -692,6 +692,17 @@ class SpaceAnalysis:
             return usr
         if pattern is not None and pattern.kind is not None and pattern.get_usr() in self.functions:
             return pattern.get_usr()
+        # a member template of a class template's specialization (FArray<float>::
+        # section<Slice, int>): the class template's one member of that name
+        parent = ref.semantic_parent
+        if parent is not None:
+            owner, name = parent.spelling.split("<", 1)[0], ref.spelling.split("<", 1)[0]
+            found = [u for u, f in self.functions.items()
+                     if f.name.split("<", 1)[0] == name and f.cursor.semantic_parent is not None
+                     and f.cursor.semantic_parent.spelling.split("<", 1)[0] == owner
+                     and f.cursor.semantic_parent.kind.name == "CLASS_TEMPLATE" and f.template]
+            if len(found) == 1:
+                return found[0]
         return usr
 
     def call(self, node, env):
