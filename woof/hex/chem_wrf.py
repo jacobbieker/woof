@@ -32,8 +32,14 @@ the same specified- and relaxation-zone law every driven MPAS scalar takes (``at
 ``atm_bdy_adjust_scalars``) -- the mesh-native boundary, as the transport is the mesh-native FCT -- rather than
 WRF-Chem's flow-dependent inflow on a rectangular spec zone.
 
-Processes that need a source the hex mesh cannot yet sample (GOCART sulfur's oxidant fields, fire emission
-frames, SFIRE) and options whose coupling hex does not yet carry (aerosol-microphysics coupling, subgrid
+Fire smoke (``biomass_burn_opt``, emission.fire with plumerise.freitas) reads the WRF path's hourly emission
+frames (woof.chem_emission_frames.EmissionFrames) built on the cell centres: the cell-sum remap gives each
+source point to its nearest model point, which on a Voronoi mesh is the cell that contains it, and the
+per-cell mass becomes a flux through WRF's cell area ``dx dy / msft^2`` with an area-equivalent map factor
+``msft = sqrt(dx dy / areaCell)``, so each cell's own area divides its own mass.
+
+Processes that need a source the hex mesh cannot yet sample (GOCART sulfur's oxidant fields, SFIRE) and
+options whose coupling hex does not yet carry (aerosol-microphysics coupling, subgrid
 convective transport) are refused by name rather than run without their input.
 """
 from __future__ import annotations
@@ -52,22 +58,22 @@ MODE = "wrf_chem"
 PORTED_PROCESSES = frozenset((
     "emission.dust", "emission.seasalt", "emission.inventory", "drydep.wesely", "drydep.gocart",
     "mixing.vertmx", "settling.gocart", "aging.gocart", "wetdep.ls", "optics.gocart",
-    "coupling.thompson"))
+    "coupling.thompson", "emission.fire", "plumerise.freitas"))
 #: Process keys the hex mesh cannot run yet, and why.
 UNPORTED_PROCESSES = {
     "chem.sulfur": "GOCART sulfur reads background oxidant source fields that are not yet remapped onto "
                    "the hex mesh",
-    "emission.fire": "fire emission frames are not yet remapped onto the hex mesh",
-    "plumerise.freitas": "fire plume rise needs the fire emission frames, not yet remapped onto the hex mesh",
     "emission.sfire": "SFIRE needs the WRF fire grid, which a Voronoi mesh does not have",
 }
 #: ``&chem`` keys carried with their WRF meaning, and their Python types.
 INT_KEYS = ("dust_opt", "seas_opt", "dmsemis_opt", "wetscav_onoff", "vertmix_onoff", "aer_op_opt",
-            "kemit", "chem_conv_tr", "aer_drydep_opt", "aer_ra_feedback")
+            "kemit", "chem_conv_tr", "aer_drydep_opt", "aer_ra_feedback", "biomass_burn_opt",
+            "plumerisefire_frq")
 FLOAT_KEYS = ("chemdt", "dust_alpha", "dust_gamma", "dust_smtune", "dust_ustune")
+#: WOOF's fire keys (woof.config.RunConfig), strings.
+STR_KEYS = ("fire_emission_mode", "plume_fire_properties")
 #: Keys the hex route refuses at any value other than WRF's "off", with the reason.
 OFF_ONLY_KEYS = {
-    "biomass_burn_opt": "fire emission frames are not yet remapped onto the hex mesh",
     "mynn_chem_vertmx": "MYNN's chem mixing is not wired on the hex column route",
 }
 #: Hex keys that are not WRF ``&chem`` keys.
@@ -75,8 +81,8 @@ HEX_KEYS = ("chem_opt", "chem_sets", "geog_root")
 #: WRF switches that ask for input chemistry from the rows' declared sources (woof.namelist_chem.SOURCE_KEYS).
 SOURCE_SWITCHES = ("chem_in_opt", "have_bcs_chem")
 #: Every key a wrf_chem block may carry.
-KNOWN_KEYS = (frozenset(INT_KEYS) | frozenset(FLOAT_KEYS) | frozenset(OFF_ONLY_KEYS) | frozenset(HEX_KEYS)
-              | frozenset(SOURCE_SWITCHES))
+KNOWN_KEYS = (frozenset(INT_KEYS) | frozenset(FLOAT_KEYS) | frozenset(STR_KEYS) | frozenset(OFF_ONLY_KEYS)
+              | frozenset(HEX_KEYS) | frozenset(SOURCE_SWITCHES))
 #: Product suffixes of every transported row.
 ROW_SUFFIXES = ("_column_mass", "_surface_concentration")
 #: units of every product configure() declared, by name (history_units)
@@ -127,6 +133,11 @@ def knobs(block):
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
                 raise ValueError(f"wrf_chem {key} must be a finite number, got {value!r}")
             out[key] = float(value)
+    for key in STR_KEYS:
+        if key in block:
+            if not isinstance(block[key], str):
+                raise ValueError(f"wrf_chem {key} must be a string, got {block[key]!r}")
+            out[key] = block[key]
     for key, reason in OFF_ONLY_KEYS.items():
         if key in block and block[key] not in (0, False):
             raise ValueError(f"wrf_chem {key}={block[key]!r}: {reason}; only WRF's off value is accepted")
@@ -151,9 +162,12 @@ def chem_sources(name, block):
     can be filled from (woof.config.validate_chem_config refuses the rest)."""
     from woof.namelist_chem import _sources_for
     on = switches(block)
-    if not any(on.values()):
+    burn = {"biomass_burn_opt": _int(block, "biomass_burn_opt", 0)}
+    if not any(on.values()) and not burn["biomass_burn_opt"]:
         return ()
-    sources = _sources_for(name, on)
+    sources = _sources_for(name, {**on, **burn})
+    if not any(on.values()):
+        return sources
     if not sources:
         raise ValueError(f"wrf_chem {[k for k, v in on.items() if v]} asks for input chemistry, and set "
                          f"{name!r} declares no boundary source for its rows")
@@ -169,8 +183,11 @@ def load_table(raw):
     if raw.get("inputs"):
         raise ValueError("wrf_chem takes its emissions from the WRF processes; an inputs block (initial "
                          "composition and emission frames) is not remapped onto WRF-Chem rows yet")
+    from woof.config import apply_chem_set_defaults
     name = chem_set(block)
-    values = knobs(block)
+    # A set's reference-scheme defaults fill the keys the block leaves unset (the WRF loaders' rule).
+    values = {key: value for key, value in apply_chem_set_defaults({"chem_sets": name, **knobs(block)}).items()
+              if key != "chem_sets"}
     table = load_sets([name], chem_sources(name, block))
     for key in table.processes:
         if key in UNPORTED_PROCESSES:
@@ -340,12 +357,18 @@ class HexWrfChemistry:
         s.u, s.v = z(self.nlev, 1, nx + 1), z(self.nlev, 2, nx)
         s.fnm, s.fnp = cp.asarray(fnm, dtype=cp.float32), cp.asarray(fnp, dtype=cp.float32)
         s.use_theta_m = 0
-        s.msft = cp.ones((1, nx), dtype=cp.float32)
+        # A per-cell quantity (the fire source's mass per cell and hour) becomes a flux through WRF's cell
+        # area dx dy / msft^2; this area-equivalent map factor makes that the Voronoi cell's own area.
+        s.msft = cp.asarray(np.sqrt(float(cfg.dx) * float(cfg.dy) / np.asarray(area, dtype=np.float64)),
+                            dtype=cp.float32).reshape(1, nx)
         s.has_msf = False
         s.ht = z(1, nx) if terrain is None else cp.asarray(terrain, dtype=cp.float32).reshape(1, nx)
         s.nwfa = s.nifa = None
         s.physics = SimpleNamespace(fields={}, microphysics=None)
         self.winds = (z(*shape3), z(*shape3))
+        #: the cell centres as the WRF physics driver's chem export names them (``xlat``, ``xlong``,
+        #: degrees, ``(1, ncells)``), for the processes that read the geography (fire timing)
+        self.geography = {}
         n = len(self.rows)
         for name in (*LEDGER_TOTALS, *LEDGER_BUCKETS):
             setattr(s, ledger_attr(name), cp.zeros(n, dtype=cp.float64))
@@ -476,7 +499,7 @@ class HexWrfChemistry:
             getattr(s, name)[...] = columns[name].reshape(nz, 1, nc)
         self.winds[0][...] = columns["u"].reshape(nz, 1, nc)
         self.winds[1][...] = columns["v"].reshape(nz, 1, nc)
-        s.physics.fields = {} if physics_fields is None else physics_fields
+        s.physics.fields = {**({} if physics_fields is None else physics_fields), **self.geography}
         s.physics.microphysics = microphysics
         if self.prep is None:
             self.prep = ChemPrep(s)
@@ -550,6 +573,11 @@ class HexWrfChemistry:
     def commit(self):
         self.pending = None
         self.steps += 1
+
+    def set_geography(self, latitude_deg, longitude_deg):
+        import cupy as cp
+        self.geography = {name: cp.asarray(np.asarray(value, dtype=np.float32).reshape(1, self.ncells))
+                          for name, value in (("xlat", latitude_deg), ("xlong", longitude_deg))}
 
     # -- input chemistry ----------------------------------------------------------------------------
     def fill_initial(self, scalars, *, latitude, longitude, pressure, valid_time, cache_root=None,
@@ -989,6 +1017,7 @@ def attach(backend, host, driver):
     if lat.size != runtime.ncells:
         raise ValueError(f"the mesh carries {lat.size} cell centres for {runtime.ncells} chemistry columns")
     landmask = cp.asnumpy(backend._seam._driver.fields["xland"]).reshape(-1) < 1.5
+    runtime.set_geography(lat, lon)
     block = runtime.raw["wrf_chem"]
     runtime.provider_receipt = attach_statics(runtime, lat_deg=lat, lon_deg=lon, landmask=landmask,
                                               geog_root=block.get("geog_root"))
