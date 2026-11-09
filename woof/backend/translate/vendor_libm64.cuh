@@ -768,25 +768,116 @@ __device__ __forceinline__ double wlm_erfc(double x) {
     double tiny = wlm_bits(0x0010000000000000ULL);
     return sign ? __dsub_rn(2.0, tiny) : __dmul_rn(tiny, tiny);
 }
+// Payne-Hanek reduction for |x| >= 2^20 (sin, cos, tan): x = (q + f) pi/2
+// with |f| <= 1/2, from the bits of 2/pi (computed from Machin's formula to
+// 1800 bits; the table holds bits 1..1344).  |x| = m 2^k (m < 2^53, k >= -32):
+// a bit 2^-i of 2/pi adds m 2^(k-i) to x 2/pi, a multiple of 4 when i < k-1,
+// so the 256-bit window from bit k-1 on decides q mod 4 and f.  m times the
+// window, mod 2^256, holds q in its top two bits and f in the 254 below; the
+// bits past the window add less than 2^53 2^-254 to f.  No double-precision
+// arithmetic touches the reduction (integer words only), so f is good to
+// 2^-200 absolute -- relative 2^-138 even at the closest binary64 approach to
+// a multiple of pi/2 (|f| > 2^-63).  r = f pi/2 is returned as a double-double
+// with its relative bound (the 128 leading bits of f, times pi/2 to 107 bits).
+WCR_TABLE unsigned long long wlm_two_over_pi[21] = {
+    0xa2f9836e4e441529ULL, 0xfc2757d1f534ddc0ULL, 0xdb6295993c439041ULL,
+    0xfe5163abdebbc561ULL, 0xb7246e3a424dd2e0ULL, 0x06492eea09d1921cULL,
+    0xfe1deb1cb129a73eULL, 0xe88235f52ebb4484ULL, 0xe99c7026b45f7e41ULL,
+    0x3991d639835339f4ULL, 0x9c845f8bbdf9283bULL, 0x1ff897ffde05980fULL,
+    0xef2f118b5a0a6d1fULL, 0x6d367ecf27cb09b7ULL, 0x4f463f669e5fea2dULL,
+    0x7527bac7ebe5f17bULL, 0x3d0739f78a5292eaULL, 0x6bfb5fb11f8d5d08ULL,
+    0x56033046fc7b6babULL, 0xf0cfbc209af4361dULL, 0xa9e391615ee61b08ULL};
+// bits i .. i+63 of 2/pi (bit 1 is 2^-1; bits at i <= 0 are zero)
+__device__ __forceinline__ unsigned long long wlm_2pi_bits(int i) {
+    if (i <= -63) return 0ULL;
+    if (i <= 0) return wlm_two_over_pi[0] >> (1 - i);
+    int j = (i - 1) >> 6, sh = (i - 1) & 63;
+    unsigned long long w = wlm_two_over_pi[j] << sh;
+    if (sh) w |= wlm_two_over_pi[j + 1] >> (64 - sh);
+    return w;
+}
+__device__ __forceinline__ wcr_dd wlm_rem_pio2_huge(double x, int* quadrant, double* rel) {
+    unsigned long long b = wlm_word(x);
+    int k = (int)((b >> 52) & 0x7ff) - 1075;
+    unsigned long long m = (b & 0x000fffffffffffffULL) | 0x0010000000000000ULL;
+    unsigned long long w0 = wlm_2pi_bits(k - 1), w1 = wlm_2pi_bits(k + 63);
+    unsigned long long w2 = wlm_2pi_bits(k + 127), w3 = wlm_2pi_bits(k + 191);
+    // p = m (w0 w1 w2 w3) mod 2^256, p3 the most significant word
+    unsigned long long p0 = m * w3, c = __umul64hi(m, w3);
+    unsigned long long t = m * w2, p1 = t + c;
+    c = __umul64hi(m, w2) + (p1 < t ? 1ULL : 0ULL);
+    t = m * w1;
+    unsigned long long p2 = t + c;
+    c = __umul64hi(m, w1) + (p2 < t ? 1ULL : 0ULL);
+    unsigned long long p3 = m * w0 + c;
+    int q = (int)(p3 >> 62);
+    p3 &= 0x3fffffffffffffffULL;
+    bool neg = (p3 >> 61) != 0;
+    if (neg) {          // f >= 1/2: f - 1, magnitude 2^254 - f, one quadrant on
+        q += 1;
+        p0 = ~p0; p1 = ~p1; p2 = ~p2; p3 = (~p3) & 0x3fffffffffffffffULL;
+        p0 += 1ULL;
+        if (p0 == 0ULL) { p1 += 1ULL; if (p1 == 0ULL) { p2 += 1ULL; if (p2 == 0ULL) p3 += 1ULL; } }
+    }
+    // |f| = (p3 p2 p1 p0) / 2^254: normalise its leading one to bit 63 of hi
+    int z = -2;         // f's value is (hi, lo) 2^-128 2^-z
+    while (p3 == 0ULL && z < 190) { p3 = p2; p2 = p1; p1 = p0; p0 = 0ULL; z += 64; }
+    if (p3 == 0ULL) { *quadrant = q & 3; *rel = 0x1p-90; return wcr_dd{0.0, 0.0}; }
+    int lz = __clzll((long long)p3);
+    unsigned long long hi = lz ? (p3 << lz) | (p2 >> (64 - lz)) : p3;
+    unsigned long long lo = lz ? (p2 << lz) | (p1 >> (64 - lz)) : p2;
+    z += lz;
+    // hi 2^-64 + lo 2^-128 as exact 53-, 53- and 22-bit pieces
+    double scale = wlm_bits((unsigned long long)(1023 - z) << 52);
+    double a0 = (double)(hi >> 11) * 0x1p-53;
+    double a1 = (double)(((hi & 0x7ffULL) << 42) | (lo >> 22)) * 0x1p-106;
+    double a2 = (double)(lo & 0x3fffffULL) * 0x1p-128;
+    wcr_dd f = wcr_add(wcr_2sum(a0, a1), wcr_dd{a2, 0.0});
+    f = wcr_dd{f.h * scale, f.l * scale};
+    wcr_dd r = wcr_mul(f, wcr_dd{WCR_PIO2_1, WCR_PIO2_2});
+    if (neg) r = wcr_neg(r);
+    if (x < 0.0) { r = wcr_neg(r); q = -q; }
+    *quadrant = q & 3;
+    *rel = 0x1p-90 + 0x1p-100;
+    return r;
+}
 // f64cr.cuh's sin hands |x| >= 2^20 to the platform sin, which on these
-// backends wlm_IS this sin.  wlm_KNOWN wlm_GAP: that range reduces by fmod against the
-// binary64 2*pi (exact fmod, inexact modulus: relative error ~|x| * 2^-53),
-// not correctly rounded.  woof's physics passes latitudes and hour angles.
+// backends wlm_IS this sin: the Payne-Hanek reduction above, then f64cr.cuh's
+// sin and cos series, rounded once under the same test.
 __device__ __forceinline__ double wlm_sin_huge(double x) {
-    return wcr_sin(fmod(x, wlm_bits(0x401921fb54442d18)));
+    if (x != x) return x + x;
+    if (wcr_fabs(x) == WCR_INF) return x - x;
+    int q;
+    double rel;
+    wcr_dd r = wlm_rem_pio2_huge(x, &q, &rel);
+    wcr_dd r2 = wcr_mul(r, r);
+    wcr_dd v;
+    if (q & 1) {
+        v = wcr_sgn(wcr_inv_fact[28], 14);
+        for (int n = 13; n >= 0; --n) v = wcr_add(wcr_mul(v, r2), wcr_sgn(wcr_inv_fact[2 * n], n));
+    } else {
+        v = wcr_sgn(wcr_inv_fact[29], 14);
+        for (int n = 13; n >= 0; --n) v = wcr_add(wcr_mul(v, r2), wcr_sgn(wcr_inv_fact[2 * n + 1], n));
+        v = wcr_mul(v, r);
+    }
+    if (q & 2) v = wcr_neg(v);
+    return wcr_round(v, rel);
 }
 // cos x = sin(x + pi/2): f64cr.cuh's sin, one quadrant on, so correctly
 // rounded like it below 2^20 (the series and its error bound are the
 // same; the reduction's bound covers cos(r) too, as |r tan r| < 1 there).
-// The same wlm_KNOWN wlm_GAP above 2^20 as wlm_sin_huge.
+// Above 2^20, the Payne-Hanek reduction (wlm_rem_pio2_huge).
 __device__ __forceinline__ double wlm_cos(double x) {
     if (x != x) return x + x;
     if (wcr_fabs(x) == WCR_INF) return x - x;
-    if (wcr_fabs(x) >= 0x1p+20) x = fmod(x, wlm_bits(0x401921fb54442d18));
     double nd = WCR_RINT(x * WCR_INV_PIO2);
     wcr_dd r = wcr_dd{x, 0.0};
     double rel = 0x1p-90;
-    if (nd != 0.0) {
+    if (wcr_fabs(x) >= 0x1p+20) {
+        int qh;
+        r = wlm_rem_pio2_huge(x, &qh, &rel);
+        nd = (double)qh;
+    } else if (nd != 0.0) {
         wcr_dd p = wcr_2prod(nd, WCR_PIO2_1);
         r = wcr_add(wcr_2sum(x, -p.h), wcr_dd{-p.l, 0.0});
         r = wcr_add(r, wcr_neg(wcr_2prod(nd, WCR_PIO2_2)));
@@ -810,17 +901,20 @@ __device__ __forceinline__ double wlm_cos(double x) {
 // tan x: the same reduction and the same two series (sin r, cos r) in
 // double-double, then sin/cos (even quadrant) or -cos/sin (odd), rounded
 // once.  Each series and the reduction are bounded as in wlm_cos; the
-// quotient doubles the relative bound and adds the division's.  The same
-// wlm_KNOWN wlm_GAP above 2^20.  (wlm_CUDA's libdevice tan is not correctly rounded:
+// quotient doubles the relative bound and adds the division's.  Above
+// 2^20, the Payne-Hanek reduction.  (wlm_CUDA's libdevice tan is not correctly rounded:
 // a known vendor delta, as for sin and cos.)
 __device__ __forceinline__ double wlm_tan(double x) {
     if (x != x) return x + x;
     if (wcr_fabs(x) == WCR_INF) return x - x;
-    if (wcr_fabs(x) >= 0x1p+20) x = fmod(x, wlm_bits(0x401921fb54442d18));
     double nd = WCR_RINT(x * WCR_INV_PIO2);
     wcr_dd r = wcr_dd{x, 0.0};
     double rel = 0x1p-90;
-    if (nd != 0.0) {
+    if (wcr_fabs(x) >= 0x1p+20) {
+        int qh;
+        r = wlm_rem_pio2_huge(x, &qh, &rel);
+        nd = (double)qh;
+    } else if (nd != 0.0) {
         wcr_dd p = wcr_2prod(nd, WCR_PIO2_1);
         r = wcr_add(wcr_2sum(x, -p.h), wcr_dd{-p.l, 0.0});
         r = wcr_add(r, wcr_neg(wcr_2prod(nd, WCR_PIO2_2)));
