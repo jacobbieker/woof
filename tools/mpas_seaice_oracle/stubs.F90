@@ -14,10 +14,13 @@
 ! verbatim; build.sh exposes its private routines with -Dprivate=public, a
 ! visibility change only), which walks block % dimensions and domain %
 ! configs, reads character/integer/real configs and names the halo-exchange,
-! logging, mesh-interpolation, weak-form and column-package routines.  Those
+! logging, weak-form and column-package routines.  Those
 ! stand-ins stop with their name if reached (the driver sets
 ! config_use_halo_exch false and the variational scheme), except the timers
 ! and seaice_load_balance_timers, which time nothing and compute nothing.
+!
+! seaice_mesh is not stood in for: build.sh compiles its two interpolation
+! routines verbatim out of mpas_seaice_mesh.F.
 !
 ! The two basis modules (wachspress, pwl) are USEd only by
 ! seaice_init_velocity_solver_variational, which the oracle does not call:
@@ -461,33 +464,6 @@ contains
 
 end module seaice_diagnostics
 
-module seaice_mesh
-  use mpas_derived_types
-  use mpas_dmpar, only: mpas_dmpar_field_halo_exch
-  implicit none
-  private
-  public :: seaice_interpolate_cell_to_vertex, seaice_interpolate_vertex_to_cell
-
-contains
-
-  subroutine seaice_interpolate_cell_to_vertex(mesh, variableVertex, variableCell)
-    type(MPAS_pool_type), pointer, intent(in) :: mesh
-    real(kind=RKIND), dimension(:), intent(out) :: variableVertex
-    real(kind=RKIND), dimension(:), intent(in) :: variableCell
-    print *, 'oracle stub: seaice_interpolate_cell_to_vertex is not part of this oracle'
-    stop 6
-  end subroutine seaice_interpolate_cell_to_vertex
-
-  subroutine seaice_interpolate_vertex_to_cell(mesh, boundary, variableCell, variableVertex)
-    type(MPAS_pool_type), pointer, intent(in) :: mesh, boundary
-    real(kind=RKIND), dimension(:), intent(out) :: variableCell
-    real(kind=RKIND), dimension(:), intent(in) :: variableVertex
-    print *, 'oracle stub: seaice_interpolate_vertex_to_cell is not part of this oracle'
-    stop 6
-  end subroutine seaice_interpolate_vertex_to_cell
-
-end module seaice_mesh
-
 module seaice_velocity_solver_weak
   use mpas_derived_types
   implicit none
@@ -527,8 +503,10 @@ contains
 
   subroutine colpkg_ice_strength(ncat, aice, vice, aice0, aicen, vicen, strength)
     ! The real colpkg routine takes dbl_kind arguments, so an RKIND 4 build
-    ! of the velocity solver links only against a stand-in.  ice_strength is
-    ! pre-subcycle work this oracle does not call.
+    ! of the velocity solver links only against a stand-in.  ice_strength
+    ! calls it only under the column package's vertical thermodynamics, which
+    ! run_presubcycle.F90 drives without ice_strength (the GPU port refuses
+    ! that configuration's ice strength by name).
     integer, intent(in) :: ncat
     real(kind=RKIND), intent(in) :: aice, vice, aice0
     real(kind=RKIND), dimension(:), intent(in) :: aicen, vicen

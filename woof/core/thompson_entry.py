@@ -561,6 +561,11 @@ def make_ice_number(q_ice_m3, temperature_k) -> np.ndarray:
     # :9085-9086  idx_rei = int(temp-179.); min(max(idx_rei,1),94).
     # INT truncates toward zero; the difference is REAL.
     idx = np.trunc(np.asarray(temp - np.float32(179.0), dtype=np.float32))
+    # A NaN or a value past the integer range converts to x86's "integer
+    # indefinite", the most negative integer, so row 1; NumPy on AArch64
+    # saturates instead.  Row 1 on every host, as the native closure
+    # (tools/grib1_bridge/src/cold_start.rs) takes it.
+    idx = np.where(np.abs(idx) < np.float32(2.0 ** 63), idx, np.float32(-1.0))
     idx = np.clip(idx.astype(np.int64), 1, 94)
     # :9087  corr = temp - int(temp): the INTEGER back to REAL, exactly.
     corr = np.asarray(temp - np.trunc(temp), dtype=np.float32)

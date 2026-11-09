@@ -461,7 +461,7 @@ def test_a_cycle_nomads_has_not_created_is_waited_on_not_failed(
 
     from test_fetch_as_posted import (
         CYCLE as REPLAY_CYCLE, SOURCE as REPLAY_SOURCE, Clock, Replay,
-        fetch_args, on_schedule,
+        _whole_object_plans, fetch_args, on_schedule,
     )
     from http.server import BaseHTTPRequestHandler
 
@@ -476,6 +476,12 @@ def test_a_cycle_nomads_has_not_created_is_waited_on_not_failed(
     # as tests/test_fetch_as_posted.py does for the same replay.
     monkeypatch.setattr(fetch, "_route_stream_downloader",
                         lambda plan, args: None)
+    # Since fix/gefs-record-subset (upstream 1.1.4) the GEFS rows take their
+    # mapped records by the NCEP .idx beside each object; the replay serves
+    # stand-in objects with no NCEP inventory, so its plans move each object
+    # whole, as tests/test_fetch_as_posted.py's replay does.
+    monkeypatch.setattr(fetch_routes, "resolve_request",
+                        _whole_object_plans(fetch_routes.resolve_request))
 
     start = rows.expected_at(REPLAY_SOURCE, REPLAY_CYCLE, 0) \
         - timedelta(minutes=10)

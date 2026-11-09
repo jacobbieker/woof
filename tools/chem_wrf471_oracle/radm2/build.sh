@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Build and run the RADM2 gas-phase (chem_opt = 1/2) column oracle against the
-# byte-unmodified WRF v4.6.1 sources.
+# byte-unmodified WRF v4.7.1 sources.
 #
-#   bash tools/chem_wrf461_oracle/radm2/build.sh WRF_SRC BUILD_DIR [FIXTURE_ROOT]
+#   bash tools/chem_wrf471_oracle/radm2/build.sh WRF_SRC BUILD_DIR [FIXTURE_ROOT]
 #
-# WRF_SRC is a WRF v4.6.1 tree (or any folder holding the files in
+# WRF_SRC is a WRF v4.7.1 tree (or any folder holding the files in
 # SOURCES.sha256 at their WRF paths).  Every compiled WRF file is checked
 # against its sha256 first; a mismatch stops the build.  The four files are
 # compiled WHOLE and unchanged; stub_radm2.F90 supplies only the
@@ -82,7 +82,7 @@ done
 # the fixture directory gets the checksums of its own files, the list the
 # parity test verifies (tests/data/oracles/chem/radm2/oracle-sha256sums.txt).
 cat "${here}/SOURCES.sha256" > oracle-source-sha256sums.txt
-(cd "${here}" && sha256sum ./*.F90 ./build.sh | sed 's#  \./#  tools/chem_wrf461_oracle/radm2/#') >> oracle-source-sha256sums.txt
+(cd "${here}" && sha256sum ./*.F90 ./build.sh | sed 's#  \./#  tools/chem_wrf471_oracle/radm2/#') >> oracle-source-sha256sums.txt
 for driver in "${here}"/run_*.F90; do
     name=$(basename "${driver}" .F90)
     (cd "${fixtures}/${name#run_}" && find . \( -name '*.bin' -o -name MANIFEST.txt \) \

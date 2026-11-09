@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import sys
 import threading
 
 import numpy as np
@@ -90,11 +91,20 @@ def test_portable_words_are_pinned(dtype):
     assert _digest(*outputs) == PORTABLE_WORD_PINS[dtype]
 
 
+#: Where the host's C library is further from the true value than the libm
+#: crate is.  Apple's libm tan is up to 2.2 float64 ulp from the true tan on
+#: the ``unit`` arguments, where the crate's stays within 0.75 (both against
+#: 200-bit mpmath on arm64 macOS, 2026-11-04), so there the two differ by up
+#: to two ulp.
+_HOST_LIBM_BOUNDS = {"darwin": {"tan": 2.0}}
+
+
 def test_portable_words_are_within_an_ulp_of_the_c_library():
     """A sanity bound, not the contract: the libm crate is not the host's
     libm.  Measured against glibc 2.39 on these arguments it differs on 65
     (log1p) to 4,206 (log10) of 40,001, by one float64 ulp, and by two for
-    FDLIBM's log10."""
+    FDLIBM's log10.  A host libm less accurate than the crate widens the
+    bound only where :data:`_HOST_LIBM_BOUNDS` names it."""
     _library_or_skip()
     values = _inputs(np.float64)
     for name, argument in _UNARY_CASES:
@@ -105,6 +115,7 @@ def test_portable_words_are_within_an_ulp_of_the_c_library():
         finite = np.isfinite(want)
         gap = np.abs(got[finite] - want[finite])
         bound = 2.0 if name == "log10" else 1.0
+        bound = max(bound, _HOST_LIBM_BOUNDS.get(sys.platform, {}).get(name, 0.0))
         assert np.all(gap <= bound * np.spacing(np.abs(want[finite]))), name
 
 

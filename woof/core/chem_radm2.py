@@ -1,6 +1,6 @@
 """Pure launcher for WRF-Chem's RADM2 gas-phase chemistry (chem_opt = 1, 2).
 
-``launch_radm2`` is radm_driver (chem/module_radm.F, WRF v4.6.1) for one
+``launch_radm2`` is radm_driver (chem/module_radm.F, WRF v4.7.1) for one
 chemistry call: WRF's hand-coded QSSA solver, adaptive substeps chosen per
 column, species in ppmv, photolysis rates in 1/min as WRF's ph_* fields
 carry them.  It updates the species rows in place and, when ``vdrog`` is

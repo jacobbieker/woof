@@ -21,7 +21,11 @@ from test_native_physics_oracle import transport, _build_command
 
 
 def test_oracle_registry_metadata_matches_audited_native_build(tmp_path):
-    from prepare_build import bind_reference_build_metadata
+    # By path: rrfs/ has a prepare_build.py too, and whichever a worker
+    # imported first answered ``import prepare_build`` for both.
+    spec=importlib.util.spec_from_file_location('oracle_prepare_build',ORACLE/'prepare_build.py')
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+    bind_reference_build_metadata=module.bind_reference_build_metadata
     build=tmp_path/'build';build.mkdir()
     reference=tmp_path/'reference';reference.mkdir()
     makefile=build/'Makefile'
