@@ -367,6 +367,10 @@
       "glibc_flt32.cuh",
       "smag2d.cu"
     ],
+    "smag2d_w_faces": [
+      "glibc_flt32.cuh",
+      "smag2d.cu"
+    ],
     "solar_diag": [
       "glibc_flt32.cuh",
       "glibc_trig_flt32.cuh"
@@ -551,6 +555,7 @@
     "shcu_nscv": "32520656523e8728f4456253c58a22ce3b624ba6e6bee51b2e09b6d0f018e6ab",
     "slab": "b8eec66caf0178220a5cf9e44b43c8b54be6e62b9c18b697a3b6320309e7ddda",
     "smag2d_theta_m": "85e469baf5494063679403def8bc1256932ebe972cf4ebb53fd1b44bbe2b9f5a",
+    "smag2d_w_faces": "7a318dcdb9d8322e06469cdd30e56bac5f999b128a52fa50cdf33de3d0152a34",
     "soil_points": "50ec337be67c7f2d15bd031608622ccb72c503523cc8eeeb0040243eb31b888b",
     "solar_diag": "20ab14d004c6edb77d27426eee7a151a8634f442b1c40158f7979bda07ce6d5b",
     "solar_eclipse": "61705513ff6b75df038761c71206e8d36f2d692a271a729f56c695ca5d5be5f4",
