@@ -193,7 +193,13 @@ class SpaceAnalysis:
         info = self.functions.get(ref.get_usr())
         if info is not None:
             return info
-        # A template specialisation: its template, by name and arity.
+        # A template specialisation: clang names its template (exactly,
+        # among same-arity overloads: RRFS smoke's sd_sequence for
+        # FPlumeVector and for FVector)...
+        info = self.functions.get(self._pattern_usr(ref))
+        if info is not None:
+            return info
+        # ... else its template by name and arity.
         nparams = len([a for a in ref.get_arguments()]) if hasattr(ref, "get_arguments") else None
 
         def by_arity(candidates):
