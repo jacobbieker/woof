@@ -224,6 +224,9 @@ def _on_host(np_fn):
         def up(r):
             if isinstance(r, np.ndarray):
                 return asarray(r)
+            if isinstance(r, tuple) and hasattr(r, "_fields"):
+                # NumPy 2's named results (linalg.eigh's EighResult, ...)
+                return type(r)(*(up(y) for y in r))
             if isinstance(r, (list, tuple)):
                 return type(r)(up(y) for y in r)
             return r

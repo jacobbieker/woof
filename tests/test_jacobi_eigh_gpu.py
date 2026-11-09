@@ -463,11 +463,17 @@ def test_sizes_above_64_take_the_global_tier(k):
 
 
 def test_the_shared_tiers_compile_from_the_define_tuple_they_always_had():
-    """No shared tier gains the global define, so none of them changes."""
-    from woof.core.jacobi_eigh import SHARED_MAX_K, plan
+    """No shared tier gains the global define, so none of them changes.
+    (On Metal, a k whose two working copies pass its 32 KiB threadgroup
+    memory is a global-tier matrix instead, by design.)"""
+    from woof.core.jacobi_eigh import SHARED_MAX_K, _shared_limit, _shared_per_matrix, plan
 
+    limit = _shared_limit()
     for k in range(2, SHARED_MAX_K + 1):
         tier = plan(k, np.dtype(np.float64).str)
+        if limit is not None and _shared_per_matrix(tier.m, 8) > limit:
+            assert tier.global_work
+            continue
         assert not tier.global_work
         assert [name for name, _ in tier.defines] == [
             "JACOBI_K", "JACOBI_TPB", "JACOBI_MPB", "JACOBI_SWEEPS",
