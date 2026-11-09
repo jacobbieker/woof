@@ -543,6 +543,15 @@ def _component_option_ids(registry: dict) -> dict[str, list[str]]:
     }
 
 
+#: The most plans the exhaustive walk takes on.  It was written against a
+#: registry of 4,032 combinations and walked tens of thousands within the
+#: suite's 1,200 s per-test timeout.  Upstream 1.1.6's registry multiplies to
+#: 185,982,720 (37 microphysics x 17 PBL x 16 cumulus x 11 radiation x 10
+#: surface layer x 7 land x 6 turbulence x 4 urban): hosted leg 4 hit its
+#: 150 min job timeout inside this walk (2026-11-08), and no runner finishes it.
+_EXHAUSTIVE_COMBINATION_LIMIT = 200_000
+
+
 def test_exhaustive_component_cross_product_agrees_on_every_combination(
         monkeypatch):
     """Every combination of every registered option, both authorities."""
@@ -579,6 +588,12 @@ def test_exhaustive_component_cross_product_agrees_on_every_combination(
     expected = 1
     for option_list in option_lists:
         expected *= len(option_list)
+    if expected > _EXHAUSTIVE_COMBINATION_LIMIT:
+        pytest.skip(
+            f"too many combinations to walk: the registry's component options "
+            f"multiply to {expected:,} plans (limit "
+            f"{_EXHAUSTIVE_COMBINATION_LIMIT:,}); at a few ms each that is days "
+            f"of CPU, past any runner's timeout ({dict(zip(component_ids, map(len, option_lists)))})")
 
     def walk(start: int, stop: int) -> tuple[int, list[str]]:
         found: list[str] = []
