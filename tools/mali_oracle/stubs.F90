@@ -59,7 +59,9 @@ module mpas_pool_routines
   integer, parameter :: MPAS_POOL_CONFIG = 1004
 
   ! the field types the land-ice modules declare; only scratch-field and
-  ! halo routines reach them, and those are not part of this oracle
+  ! halo routines reach them.  The 2-D and 3-D real scratch fields resolve to
+  ! arrays the driver allocates and puts in the pool under the field's name
+  ! (run_advection.F90); the rest are not part of these oracles
   type field1DInteger
     integer, dimension(:), pointer :: array => null()
     type(field1DInteger), pointer :: next => null()
@@ -209,15 +211,19 @@ contains
     character(len=*), intent(in) :: name
     type(field2DReal), pointer :: field
     integer, intent(in), optional :: timeLevel
-    print *, 'oracle stub: mpas_pool_get_field is not part of this oracle: ', trim(name)
-    stop 6
+    ! a field wrapping the array the driver put under this name
+    allocate(field)
+    field % array => pool % e(find(pool, name)) % r2
   end subroutine get_field_r2
 
   subroutine scratch_r2(field, single_block_in)
+    ! allocating and freeing a scratch field: the driver owns its array
     type(field2DReal), pointer :: field
     logical, intent(in), optional :: single_block_in
-    print *, 'oracle stub: scratch fields are not part of this oracle'
-    stop 6
+    if (.not. associated(field % array)) then
+      print *, 'oracle stub: a scratch field without a driver array'
+      stop 6
+    end if
   end subroutine scratch_r2
 
   subroutine get_field_r3(pool, name, field, timeLevel)
@@ -225,15 +231,17 @@ contains
     character(len=*), intent(in) :: name
     type(field3DReal), pointer :: field
     integer, intent(in), optional :: timeLevel
-    print *, 'oracle stub: mpas_pool_get_field is not part of this oracle: ', trim(name)
-    stop 6
+    allocate(field)
+    field % array => pool % e(find(pool, name)) % r3
   end subroutine get_field_r3
 
   subroutine scratch_r3(field, single_block_in)
     type(field3DReal), pointer :: field
     logical, intent(in), optional :: single_block_in
-    print *, 'oracle stub: scratch fields are not part of this oracle'
-    stop 6
+    if (.not. associated(field % array)) then
+      print *, 'oracle stub: a scratch field without a driver array'
+      stop 6
+    end if
   end subroutine scratch_r3
 
   subroutine add_config_l(pool, name, value)
