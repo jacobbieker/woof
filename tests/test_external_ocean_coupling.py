@@ -256,4 +256,8 @@ def test_the_nemo_column_couples_through_the_driver_wiring(tmp_path):
     inventory = cpl.digest_arrays()
     assert "external_ocean/coupling/ocean/qsr_solver/qsr_hc" in inventory
     assert "external_ocean/coupling/ocean/ts" in inventory
+    from woof.state_digest import _canonical_digest_document
+    before = _canonical_digest_document(inventory, {}, "trajectory")
+    cpl.ocean.qsr_solver.qsr_hc[...] += 1.0
+    assert _canonical_digest_document(cpl.digest_arrays(), {}, "trajectory") != before
     assert AtmosphereSurface is not None
