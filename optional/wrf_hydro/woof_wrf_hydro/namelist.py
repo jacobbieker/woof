@@ -81,6 +81,7 @@ class HydroConfig:
     gw_chan_cond_sw: int = 0  # GWBASESWCRT = 3, channel_option 3: groundwater-channel exchange
     gw_chan_cond_const_in: float = 0.0
     gw_chan_cond_const_out: float = 0.0
+    gw_ih_shift: float = 0.0  # GWBASESWCRT = 3: readGW2d's shift of the initial head (m)
     io: dict = field(default_factory=dict)
     reservoir: dict = field(default_factory=dict)   # lake_option 3's reservoir_nlist, when on
 
@@ -206,6 +207,7 @@ def map_hydro_nlist(groups: dict[str, dict]) -> HydroConfig:
         gw_chan_cond_sw=int(nl.get("gwchancondsw", 0)),
         gw_chan_cond_const_in=float(nl.get("gwchancondconstin", 0.0)),
         gw_chan_cond_const_out=float(nl.get("gwchancondconstout", 0.0)),
+        gw_ih_shift=float(nl.get("gwihshift", 0.0)),
         io={k: v for k, v in groups["hydro_nlist"].items() if k in IO_KEYS
             and not (lake_option == 0 and k in ("route_lake_f", "outlake"))},
         reservoir=reservoir)

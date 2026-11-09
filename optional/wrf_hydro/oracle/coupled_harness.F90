@@ -10,21 +10,37 @@
 ! coupled_wrf_stubs.F90 with just the members it reads: module_domain's grid
 ! (dimensions, ZS, IVGTYP, ISLTYP, TSLB, SMOIS, SH2O, INFXSRT, SOLDRAIN,
 ! SFCHEADRT, sf_surface_physics, num_nests) and domain_clock_get's current
-! time, and module_configure's two type names.
+! time, and module_configure's two type names.  With GWBASESWCRT = 3 the 2-D
+! aquifer's head, surface excess, soil flux, channel flux and the routing
+! grid's soil moisture after the soil coupling are written too.
 
 program coupled_oracle
   use mpi
   use module_domain
   use module_WRF_HYDRO, only: wrf_cpl_HYDRO
   use module_rt_data, only: rt_domain
+  use module_gw_gw2d_data, only: gw2d
   use config_base, only: nlst
   implicit none
   type(domain) :: grid
   integer :: ix, jx, nsoil, ncycles, cyc, i, j, k, n, u, nl
   real :: hydro_dt
   integer :: bits, ierr
+  logical :: gw2d_run
 
   call MPI_Init(ierr)               ! WRF has initialised MPI before wrf_cpl_HYDRO
+  ! GWBASESWCRT = 3 (the run reads gwhires.nc): HYDRO_ini calls get_basn_area
+  ! whenever GWBASESWCRT > 0 (module_HYDRO_drv.F90 :1569-1575), but only the
+  ! bucket's branches of LandRT_ini allocate basns_area and basnsInd
+  ! (module_RT.F90 :1267, :1348; module_HYDRO_io.F90 :1472), so WRF 4.7.1
+  ! stops there with a segmentation fault (gw_decompose_real writing the
+  ! unallocated basns_area).  The bucket arrays are given zero length here,
+  ! which is what get_basn_area then computes over (numbasns = 0); nothing
+  ! the 2-D groundwater model or anything else reads.
+  inquire(file="gwhires.nc", exist=gw2d_run)
+  if (gw2d_run) then
+     allocate(rt_domain(1)%basns_area(0), rt_domain(1)%basnsInd(0))
+  end if
   open(newunit=u, file="coupled-inputs.txt", status="old")
   read(u, *) ix, jx, nsoil, ncycles, hydro_dt
   grid%s_we = 1; grid%e_we = ix + 1; grid%s_sn = 1; grid%e_sn = jx + 1
@@ -83,6 +99,21 @@ program coupled_oracle
            call put(cyc, "to_lake", nl, rt_domain(1)%overland%streams_and_lakes%surface_water_to_lake(i, j))
         end do
      end do
+     if (allocated(gw2d(1)%ho)) then  ! GWBASESWCRT = 3
+        do j = 1, rt_domain(1)%jxrt
+           do i = 1, rt_domain(1)%ixrt
+              nl = (j - 1) * rt_domain(1)%ixrt + i - 1
+              call put(cyc, "gw_head", nl, gw2d(1)%ho(i, j))
+              call put(cyc, "gw_excess", nl, gw2d(1)%excess(i, j))
+              call put(cyc, "qsgwrt", nl, gw2d(1)%qsgwrt(i, j))
+              call put(cyc, "qgw_chanrt", nl, gw2d(1)%qgw_chanrt(i, j))
+              do k = 1, nsoil
+                 call put(cyc, "smcrt", (k - 1) * rt_domain(1)%ixrt * rt_domain(1)%jxrt + nl, &
+                      rt_domain(1)%subsurface%grid_transform%smcrt(i, j, k))
+              end do
+           end do
+        end do
+     end if
      do i = 1, rt_domain(1)%nlinks
         call put(cyc, "qlink1", i - 1, rt_domain(1)%qlink(i, 1))
         call put(cyc, "hlink", i - 1, rt_domain(1)%hlink(i))

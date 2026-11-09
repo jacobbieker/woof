@@ -160,9 +160,15 @@ Metal, and refuses what it does not port by name.
    SH2O, INFXSRT, SOLDRAIN and returns SMOIS, SH2O, SFCHEADRT, which the
    next Noah or Noah-MP call reads through its WRF_HYDRO hooks.  Output:
    `frxst_pts_out.txt`, CHRTOUT- and RTOUT-like NetCDF files, and SFCHEADRT,
-   INFXSRT, SOLDRAIN in history.  Refused by name: Route_Link reaches
-   (channel_option 1/2), UDMP_OPT = 1, GWBASESWCRT = 3 in the coupled run,
-   IMPERV_ADJ, routing restarts and checkpoints, more than one domain, Noah
+   INFXSRT, SOLDRAIN in history.  GWBASESWCRT = 3 (the 2-D aquifer, read
+   from `gwhires.nc`, coupled to the soil and the channel) runs in the
+   coupled driver with AGGFACTRT = 1 and is graded by the coupled oracle's
+   gw2d variant; WRF 4.7.1 itself faults in HYDRO_ini's get_basn_area for
+   any GWBASESWCRT > 0 that is not the bucket (it writes the unallocated
+   basns_area), so the oracle harness stands in zero-length bucket arrays
+   first, and readGW2d reads only an IX x JX corner of each field under
+   MPP_LAND when AGGFACTRT > 1, which is refused.  Refused by name: Route_Link
+   reaches (channel_option 1/2), UDMP_OPT = 1, IMPERV_ADJ, routing restarts and checkpoints, more than one domain, Noah
    with urban physics, NextGen (`--hydro`) at the same time.  Two WRF 4.7.1
    facts the coupled run follows: ZSOIL8 is WRF's ZS (the layer centres,
    module_wrf_HYDRO.F90 :94-99), not the namelist's; read_rt_nlst opens

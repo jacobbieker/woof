@@ -7,13 +7,17 @@ hydro2dtbl.nc, LAKEPARM.nc, GWBASINS.nc, GWBUCKPARM.nc and CHANPARM.TBL
 (tests/wrf_hydro_synthetic.py), then HYDRO_exe -- compiled whole with
 MPP_LAND on one process and driven over four coupling cycles with the LSM
 fields of ``gen_coupled_inputs.cycles``, once with the lake a level pool
-and once (variant "da") as lake_option 3's USGS persistence/level-pool
-hybrid reading its timeslices.  Graded: the network, slopes,
+once (variant "da") as lake_option 3's USGS persistence/level-pool
+hybrid reading its timeslices, and once (variant "gw2d") with GWBASESWCRT = 3's
+2-D aquifer from gwhires.nc in place of the bucket, coupled to the soil and
+the channel (AGGFACTRT = 1; the harness stands in the zero-length bucket
+arrays WRF 4.7.1's HYDRO_ini otherwise faults on).  Graded: the network, slopes,
 steepest-descent indices, retention depths and lake mask HYDRO_ini built;
 after every cycle the SMOIS, SH2O and SFCHEADRT handed back to WRF and the
 routing state (routing-grid head, water table, QSTRMVOLRT, QINFLOWBASE,
 lake inflow, channel flow, head and volume, lake elevation and outflow,
-bucket level and outflow, DTCT).  Every test skips, naming the opt-in rule,
+bucket level and outflow, DTCT; for gw2d the aquifer head, surface excess,
+soil and channel fluxes and the routing grid's soil moisture).  Every test skips, naming the opt-in rule,
 unless ``WOOF_ENABLE_WRF_HYDRO=1``.
 """
 
@@ -46,10 +50,13 @@ def _gen():
     return gen_coupled_inputs
 
 
-#: the run as built (level-pool lake) and lake_option 3's variant (the lake a
-#: USGS persistence/level-pool hybrid): steps fixture, sums file
-VARIANTS = {"": ("coupled-steps.csv", "coupled-sha256sums.txt"),
-            "da": ("coupled-da-steps.csv", "coupled-da-sha256sums.txt")}
+#: the run as built (level-pool lake), lake_option 3's variant (the lake a
+#: USGS persistence/level-pool hybrid) and GWBASESWCRT = 3's (the 2-D
+#: aquifer): steps fixture, sums file, static fixture
+VARIANTS = {"": ("coupled-steps.csv", "coupled-sha256sums.txt", "coupled-static.csv"),
+            "da": ("coupled-da-steps.csv", "coupled-da-sha256sums.txt", "coupled-static.csv"),
+            "gw2d": ("coupled-gw2d-steps.csv", "coupled-gw2d-sha256sums.txt",
+                     "coupled-gw2d-static.csv")}
 
 
 def _sums(variant=""):
@@ -63,7 +70,7 @@ def test_fixtures_are_the_ones_the_build_hashed(tmp_path, variant):
     assert sums["coupled-steps.csv"] == hashlib.sha256(
         (FIX / VARIANTS[variant][0]).read_bytes()).hexdigest()
     assert sums["coupled-static.csv"] == hashlib.sha256(
-        (FIX / "coupled-static.csv").read_bytes()).hexdigest()
+        (FIX / VARIANTS[variant][2]).read_bytes()).hexdigest()
     for name in ("coupled_harness.F90", "coupled_wrf_stubs.F90", "build_coupled.sh",
                  "gen_coupled_inputs.py"):
         assert sums[name] == hashlib.sha256((ORACLE / name).read_bytes()).hexdigest(), name
@@ -81,21 +88,17 @@ def _coupled(tmp_path_factory, variant):
     g = _gen()
     d = tmp_path_factory.mktemp("coupled")
     g.write(d, variant)
-    veg, sol = g.vegsoil()
+    veg, sol = g.vegsoil(variant)
+    nx, ny, _ = g.GRIDS[variant]
     mod = import_module(optin.load("wrf_hydro").__name__ + ".coupled")
-    return g, mod.WrfHydroCoupled(d / "hydro.namelist", ix=g.NX, jx=g.NY,
+    return g, mod.WrfHydroCoupled(d / "hydro.namelist", ix=nx, jx=ny,
                                   zs=soil_centres(g.DZS), vegtyp=veg, soltyp=sol,
                                   hydro_dt=g.HYDRO_DT, start=datetime.datetime(2020, 1, 1))
 
 
-@pytest.fixture(scope="module")
-def coupled(tmp_path_factory):
-    return _coupled(tmp_path_factory, "")
-
-
-def _static():
+def _static(variant):
     out = defaultdict(dict)
-    with (FIX / "coupled-static.csv").open(newline="") as fh:
+    with (FIX / VARIANTS[variant][2]).open(newline="") as fh:
         for r in csv.DictReader(fh):
             out[r["field"]][int(r["index"])] = int(r["value"])
     return {k: np.array([v[i] for i in range(len(v))], np.int64) for k, v in out.items()}
@@ -103,9 +106,10 @@ def _static():
 
 @pytest.mark.gpu
 @requires_gpu
-def test_hydro_ini_is_bitwise_against_wrf_hydro(coupled):
-    _, c = coupled
-    want = _static()
+@pytest.mark.parametrize("variant", sorted(VARIANTS))
+def test_hydro_ini_is_bitwise_against_wrf_hydro(tmp_path_factory, variant):
+    _, c = _coupled(tmp_path_factory, variant)
+    want = _static(variant)
     net = c.dom.network
     for name in ("chanxi", "chanyj", "to_node", "typel", "lakenode", "order"):
         assert np.array_equal(net[name], want[name]), name
@@ -127,15 +131,16 @@ def test_coupling_cycles_are_bitwise_against_wrf_hydro(tmp_path_factory, variant
 
     g, c = _coupled(tmp_path_factory, variant)
     assert (c.reservoir_da is not None) == (variant == "da")
+    assert (c.gw2d is not None) == (variant == "gw2d")
     want = defaultdict(dict)
     with (FIX / VARIANTS[variant][0]).open(newline="") as fh:
         for r in csv.DictReader(fh):
             want[(int(r["cycle"]), r["field"])][int(r["index"])] = int(r["bits"])
-    ny, nx = g.NY, g.NX
+    nx, ny, _ = g.GRIDS[variant]
     smois = cp.zeros((g.NSOIL, ny, nx), cp.float32)
     sh2o = cp.zeros_like(smois)
     head = cp.zeros((ny, nx), cp.float32)
-    for n, (sm, sh, infx, sold) in enumerate(g.cycles(), start=1):
+    for n, (sm, sh, infx, sold) in enumerate(g.cycles(variant), start=1):
         smois[...] = cp.asarray(sm)
         sh2o[...] = cp.asarray(sh)
         c.exchange(smois=smois, sh2o=sh2o, infxsrt=cp.asarray(infx), soldrain=cp.asarray(sold),
@@ -145,7 +150,13 @@ def test_coupling_cycles_are_bitwise_against_wrf_hydro(tmp_path_factory, variant
                    qstrmvolrt_acc=c.qstrm_acc, qinflowbase=c.qinflowbase,
                    to_lake=c.ostate.to_lake, qlink1=c.qlink1, hlink=c.hlink, cvol=c.cvol,
                    resht=c.channel.lakes.resht, qlakeo=c.channel.lakes.qlakeo,
-                   z_gwsubbas=c.z_gw, qout_gwsubbas=c.qout_gw, dtct=c.channel.dtct)
+                   dtct=c.channel.dtct)
+        if c.bucket is not None:
+            got.update(z_gwsubbas=c.z_gw, qout_gwsubbas=c.qout_gw)
+        if c.gw2d is not None:
+            got.update(gw_head=c.gw2d.ho, gw_excess=c.gw2d.excess, qsgwrt=c.gw2d.qsgwrt,
+                       qgw_chanrt=c.gw2d.qgw_chanrt, smcrt=c.gt_out["smcrt"])
+        assert {k for (m, k) in want if m == n} == set(got), n
         for name, arr in got.items():
             w = want[(n, name)]
             expect = np.array([w[i] for i in range(len(w))], np.int64).astype(np.int32)

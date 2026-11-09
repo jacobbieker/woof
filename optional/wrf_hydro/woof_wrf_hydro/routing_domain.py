@@ -33,7 +33,9 @@ process, UDMP_OPT = 0, gridded channels):
   CHANPARM.TBL's widths, side slopes, Manning's n and initial heads by
   stream order; the initial channel volume and lake elevation;
   ``READ_SIMP_GW``, ``SIMP_GW_IND``, ``get_gw_strm_msk_lind`` and
-  ``read_GWBUCKPARM`` (module_HYDRO_io.F90 :1344-1588) for the bucket.
+  ``read_GWBUCKPARM`` (module_HYDRO_io.F90 :1344-1588) for the bucket;
+  ``readGW2d`` (:1593-1737) for GWBASESWCRT = 3's aquifer, with READ_CHROUTING1
+  taking ZELEV from TOPOGRAPHY - CHAN_DEPTH (:7510-7518).
 * ``get_basn_area`` and ``get_node_area`` (module_HYDRO_utils.F90 :329-418).
 
 Every array is float32/int on the host, in WRF's (j, i) as numpy (row, col)
@@ -143,6 +145,7 @@ class RoutingDomain:
     network: dict | None = None
     lakes: dict | None = None
     buckets: dict | None = None
+    gw2d: dict | None = None
     notes: list = field(default_factory=list)
 
     @property
@@ -269,6 +272,7 @@ def build(cfg, groups, *, base: Path, ix, jx, zs, vegtyp, soltyp):
         frxst = _var(ds, "frxst_pts", shape, dtype=np.int32, flip=True, fill=-9999, what=what)
         latval = _var(ds, "LATITUDE", shape, flip=True, fill=F(-9999.9), what=what)
         lonval = _var(ds, "LONGITUDE", shape, flip=True, fill=F(-9999.9), what=what)
+        chan_depth = _var(ds, "CHAN_DEPTH", shape, flip=True, fill=F(-9999.9), what=what)
     # READ_ROUTING_seq :5662-5690
     lksatfac = np.where(lksatfac == F(-9999.9), F(1000.0), lksatfac).astype(F)
     retdeprtfac = np.where(retdeprtfac < F(0.0), F(1.0), retdeprtfac).astype(F)
@@ -294,8 +298,11 @@ def build(cfg, groups, *, base: Path, ix, jx, zs, vegtyp, soltyp):
                 f"channel_option = {cfg.channel_option} reads its reaches from Route_Link "
                 "(read_routelink); the coupled driver routes the gridded network "
                 "(channel_option = 3) only")
+        # READ_CHROUTING1 :7510-7518: the channel bed is CHAN_DEPTH below the
+        # terrain for GWBASESWCRT = 3 (ZELEV only; LandRT_ini's ELRT stays)
+        zelev = (elrt - chan_depth).astype(F) if cfg.gwbaseswcrt == 3 else elrt
         dom.network, dom.lake_mask = _network(ch_netrt, direction, lakegrid, gorder, frxst,
-                                              elrt, dist, latval, lonval)
+                                              zelev, dist, latval, lonval)
         nlakes = int(max(0, lakegrid.max()))
         if cfg.lake_option == 0 and nlakes > 0:
             raise NotImplementedError(
@@ -311,9 +318,7 @@ def build(cfg, groups, *, base: Path, ix, jx, zs, vegtyp, soltyp):
     if cfg.gwbaseswcrt in (1, 2):
         dom.buckets = _buckets(dom, path("gwbasmskfil"), path("gwbuckparm_file"))
     elif cfg.gwbaseswcrt == 3:
-        raise NotImplementedError(
-            "GWBASESWCRT = 3 (the 2-D groundwater model) in a coupled forecast: gw2d is "
-            "ported but its readGW2d input and soil coupling are not wired into the driver")
+        dom.gw2d = _gw2d(dom, cfg, path("gwbasmskfil"), base)
     return dom
 
 
@@ -455,6 +460,42 @@ def _channel_params(dom, route_chan_f, base):
     net["node_area"] = (dom.dist[8, jj, ii] / F(1)).astype(F)
     if route_chan_f is not None:
         dom.notes.append("route_chan_f is not read for channel_option = 3")
+
+
+def _gw2d(dom, cfg, basins, base):
+    """readGW2d (module_HYDRO_io.F90 :1593-1737) as LandRT_ini calls it
+    (module_RT.F90 :1389-1396) for GWBASESWCRT = 3: gwhires.nc in the run
+    directory, read as stored (no north-up flip, unlike Fulldom), LTYPE 2
+    around the edge, IHEAD + gwIhShift, no conductivity and a huge porosity
+    where LTYPE = 0; the aquifer's surface is LandRT_ini's ELRT."""
+    if basins is None or not Path(basins).is_file():
+        # read_rt_nlst's check (config.F90 :437-442) for any GWBASESWCRT > 0
+        raise MissingInput("gwbasmskfil is empty or missing (hydro.namelist ERROR: Please "
+                           "specify a gwbasmskfil file; read for every GWBASESWCRT > 0)")
+    if dom.aggfactrt != 1:
+        raise NotImplementedError(
+            f"GWBASESWCRT = 3 with AGGFACTRT = {dom.aggfactrt}: under MPP_LAND readGW2d "
+            "reads each gwhires.nc field into a routing-grid array through get2d_real / "
+            "get2d_int with the LSM grid's size (global_nx x global_ny), so only the first "
+            "IX*JX values are read (out of place) and the rest are left unset; the file "
+            "reads whole only with AGGFACTRT = 1")
+    gwhires = base / "gwhires.nc"
+    shape = (dom.jxrt, dom.ixrt)
+    with _open(gwhires, "gwhires.nc (readGW2d reads ./gwhires.nc for GWBASESWCRT = 3)") as ds:
+        what = "gwhires.nc"
+        # get2d_real leaves the array unset when a variable is missing
+        fields = {k: _var(ds, k, shape, what=what) for k in ("HC", "IHEAD", "BOTELV", "POR")}
+        if "LTYPE" not in ds.variables:          # get2d_int has no _M fallback
+            raise MissingInput(f"{what} has no variable LTYPE")
+        ltype = _var(ds, "LTYPE", shape, dtype=np.int32, what=what)
+    ltype = ltype.copy()
+    ltype[0, :] = ltype[-1, :] = 2
+    ltype[:, 0] = ltype[:, -1] = 2
+    ihead = (fields["IHEAD"] + F(cfg.gw_ih_shift)).astype(F)
+    hc = np.where(ltype == 0, F(0.0), fields["HC"]).astype(F)
+    por = np.where(ltype == 0, F(10e21), fields["POR"]).astype(F)
+    return dict(ltype=ltype, hycond=hc, ho=ihead, bot=fields["BOTELV"].astype(F), poros=por,
+                elev=dom.elrt.copy())
 
 
 def _buckets(dom, basins, parm):
