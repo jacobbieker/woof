@@ -157,8 +157,10 @@ def map_hydro_nlist(groups: dict[str, dict]) -> HydroConfig:
     def refuse(key, value, why):
         raise UnportedOption(f"{key} = {value!r}: {why}")
 
-    if nl.get("sys_cpl", 1) != 1:
-        refuse("sys_cpl", nl["sys_cpl"], "only sys_cpl = 1 (coupled to WRF) is ported")
+    if nl.get("sys_cpl", 1) not in (1, 2):
+        refuse("sys_cpl", nl["sys_cpl"], "only sys_cpl = 1 (HRLDAS's offline Noah, the "
+                                         "template's value) and 2 (WRF, which the coupled "
+                                         "driver requires) map; 3 (LIS) and 4 (CLM) do not")
     if nl.get("udmp_opt") == 1:
         refuse("UDMP_OPT", 1, "the NWM user-defined mapping (UDMP) is not ported")
     for key in ("reservoir_persistence_usgs", "reservoir_persistence_usace",

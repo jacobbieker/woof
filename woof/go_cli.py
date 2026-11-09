@@ -7870,6 +7870,8 @@ def _add_go_arguments(parser) -> None:
                         metavar="on|off|SETTINGS.toml", help="hydro is opt-in: --hydro on couples NextGen hydro "
                         "wherever a hydrofabric covers the domain; a TOML file selects settings; without it the "
                         "forecast has no hydro")
+    from woof.wrf_hydro_route import add_arguments as add_wrf_hydro_arguments
+    add_wrf_hydro_arguments(parser)
     from woof.source_adapters import ensemble_source_ids
     from woof.ensemble.wofs_recipe import source_spec_argument
     parser.add_argument("--source", type=source_spec_argument, default=None, metavar="SOURCE[:N],...",

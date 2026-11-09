@@ -351,6 +351,9 @@ def canonical_state_digest(state, clock, *,
             # it), so the digest takes the coupled state from its own
             # inventory: two runs that differ only in the ocean differ here.
             manifest.update(coupling.digest_arrays())
+        wrf_hydro = getattr(driver, "wrf_hydro", None)
+        if wrf_hydro is not None:
+            manifest.update(wrf_hydro.digest_arrays())
         # Match the actual streaming producer's distinction: standalone
         # legacy-RRTMG host ozone is recomputed, while an explicit CAM
         # owner supplies a retained field to later radiation/nest calls.
