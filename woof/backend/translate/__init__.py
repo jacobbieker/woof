@@ -2501,11 +2501,15 @@ class _Rewriter:
     #: the census's 30 minutes and flg_streams crashed the compiler service;
     #: out of line they build in 2-5 minutes, and their Metal tests (lake's
     #: column history and f64cr grades, mskf_kernel, the flg replays) give
-    #: the words they give on main.  NOT nssl2: out of line its rain
-    #: sedimentation wrote zeros on Metal (the out-of-line hazard above),
-    #: and cammgmp and rcon have no Metal test to hold them to.
+    #: the words they give on main.  nssl2: its out-of-line rain
+    #: sedimentation zeros were Apple's private-array constant-index bug
+    #: (__woof_opaque_index), not the policy; out of line it builds in
+    #: seconds rather than a minute and its Metal tests (test_nssl2_gpu and
+    #: the cccn, variants, shapes and alias suites, both arithmetic arms)
+    #: give the words the fully inlined build gives.  cammgmp and rcon have
+    #: no Metal test to hold them to.
     INLINE_POLICY_BY_UNIT = {"goddard": "size", "lake": "size", "mskf": "size",
-                             "mskf_aerosol_replay": "size", "flg_streams": "size"}
+                             "mskf_aerosol_replay": "size", "flg_streams": "size", "nssl2": "size"}
 
     #: The same, for units known by a kernel they define (a RawModule's unit
     #: name is a hash of its text).  TEMPO's column kernel did not finish
