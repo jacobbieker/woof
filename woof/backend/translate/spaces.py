@@ -303,16 +303,24 @@ class SpaceAnalysis:
                     head = kids[0] if kids else None
                     while head is not None and head.kind.name == "UNEXPOSED_EXPR" and len(list(head.get_children())) == 1:
                         head = next(head.get_children())
-                    if head is None or head.kind.name not in ("MEMBER_REF_EXPR", "OVERLOADED_DECL_REF") \
-                            or (head.kind.name == "MEMBER_REF_EXPR" and list(head.get_children())):
-                        continue        # a call on another object, recorded where it is made
+                    name = node.spelling
+                    if head is not None and head.kind.name == "MEMBER_REF_EXPR":
+                        inner = list(head.get_children())
+                        if len(inner) == 1 and inner[0].kind.name == "OVERLOADED_DECL_REF":
+                            name = inner[0].spelling        # a dependent `f(...)` on this
+                        elif inner:
+                            continue    # a call on another object, recorded where it is made
+                    elif head is None or head.kind.name != "OVERLOADED_DECL_REF":
+                        continue
+                    else:
+                        name = head.spelling
                     if ref is not None and ref.kind.name in ("CXX_METHOD", "CONVERSION_FUNCTION"):
                         callees = [self._pattern_usr(ref)]
-                    elif ref is None and owner is not None:
+                    elif ref is None and owner is not None and name:
                         # a dependent call in a member template (FArray::section's
                         # add_section): every overload of that name in the class
                         callees = [u for u, f in self.functions.items()
-                                   if f.name == node.spelling and f.cursor.semantic_parent is not None
+                                   if f.name == name and f.cursor.semantic_parent is not None
                                    and f.cursor.semantic_parent == owner]
                     else:
                         continue
