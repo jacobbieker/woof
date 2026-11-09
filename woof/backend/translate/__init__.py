@@ -2362,7 +2362,15 @@ class _Rewriter:
     #: service crashes (XPC_ERROR_CONNECTION_INTERRUPTED) on goddard's
     #: radiation column, which compiles in a second with the large
     #: functions out of line.  Its device oracle holds it to WRF's words.
-    INLINE_POLICY_BY_UNIT = {"goddard": "size"}
+    #: Fully inlined, lake, mskf and mskf_aerosol_replay did not compile in
+    #: the census's 30 minutes and flg_streams crashed the compiler service;
+    #: out of line they build in 2-5 minutes, and their Metal tests (lake's
+    #: column history and f64cr grades, mskf_kernel, the flg replays) give
+    #: the words they give on main.  NOT nssl2: out of line its rain
+    #: sedimentation wrote zeros on Metal (the out-of-line hazard above),
+    #: and cammgmp and rcon have no Metal test to hold them to.
+    INLINE_POLICY_BY_UNIT = {"goddard": "size", "lake": "size", "mskf": "size",
+                             "mskf_aerosol_replay": "size", "flg_streams": "size"}
 
     #: The same, for units known by a kernel they define (a RawModule's unit
     #: name is a hash of its text).  TEMPO's column kernel did not finish
@@ -3620,15 +3628,20 @@ def prelude(*, contract: bool, retain_subnormals: bool = False, ieee_helpers: bo
     """``retain_subnormals``: the unit is --ftz=false (float is f32s);
     ``ieee_helpers``: it uses the subnormal-keeping ops of non-.ftz PTX,
     which f32s.h also defines, in a unit that otherwise flushes;
-    ``f64``: ``soft`` (strict: f64_soft.h alone) or ``df64`` (fast numerics,
-    :func:`_df64_prelude`)."""
+    ``f64``: ``soft`` (strict: f64_soft.h, with f64_df64.h's exact division
+    and square root) or ``df64`` (fast numerics, :func:`_df64_prelude`)."""
     soft = (METAL_DIR / "f64_soft.h").read_text()
     if f64 == "df64":
         return _df64_prelude(soft, contract=contract, retain_subnormals=retain_subnormals,
                              ieee_helpers=ieee_helpers)
     if f64 != "soft":
         raise ValueError(f"f64 must be soft or df64, not {f64!r}")
-    text = (METAL_DIR / "prelude.h").read_text().replace("// F64_SOFT_H_TEXT", soft)
+    # strict: soft-float, but division and square root from f64_df64.h's
+    # exact df64-seeded words (the soft-float words, tools/df64_grade.py
+    # strict), without its libm
+    exact = ("#define WOOF_DF64_ARITH 1\n#define WOOF_DF64_NO_LIBM 1\n"
+             + (METAL_DIR / "f64_df64.h").read_text())
+    text = (METAL_DIR / "prelude.h").read_text().replace("// F64_SOFT_H_TEXT", soft + "\n" + exact)
     if retain_subnormals:
         text = "#define WOOF_RETAIN_SUBNORMALS 1\n" + text
     if retain_subnormals or ieee_helpers:
@@ -3644,8 +3657,7 @@ def _df64_prelude(soft: str, *, contract: bool, retain_subnormals: bool, ieee_he
     """The fast numerics' prelude: f64_soft.h, then f64_df64.h (division and
     square root through its exact df64-seeded words, WOOF_DF64_ARITH), and
     after the prelude the df64 libm's overloads on ``f64``
-    (f64_df64_bind.h).  The strict prelude is :func:`prelude`'s own text,
-    unchanged."""
+    (f64_df64_bind.h)."""
     df64 = "#define WOOF_DF64_ARITH 1\n" + (METAL_DIR / "f64_df64.h").read_text()
     text = (METAL_DIR / "prelude.h").read_text().replace("// F64_SOFT_H_TEXT", soft + "\n" + df64)
     if retain_subnormals:
@@ -4058,7 +4070,7 @@ def translate(source: str, *, unit: str = "<unit>", contract: bool = False,
     ``retain_subnormals``: the unit's ``float`` is ``f32s`` (gradual
     underflow in software where the GPU would flush; woof/backend/metal/
     f32s.h) -- CUDA's --ftz=false.
-    ``f64``: ``soft``, every ``double`` operation bit-exact (strict), or
+    ``f64``: ``soft``, every ``double`` operation's word exact (strict), or
     ``df64``, the fast numerics' division, square root and libm through
     double-float (woof/backend/metal/f64_df64.h).  The translated body is
     the same text in both; the prelude and the vendored libm differ.

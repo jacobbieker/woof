@@ -3000,6 +3000,24 @@ def test_20crv3_cache_identity_allows_only_the_legacy_same_scheme_default(
             source="20crv3", observed=observed, expected=expected)
 
 
+def test_a_strict_run_refused_a_default_bundle_is_told_to_re_prepare(monkeypatch):
+    """GPUWM_WRF_EXACT=1 against a default-prepared bundle: the refusal
+    names the differing fields and says to re-prepare under strict."""
+    from woof import numerics
+    observed = {"domain_config": {"run": {"hydrometeor_handover_numbers": True}}}
+    expected = {"domain_config": {"run": {"hydrometeor_handover_numbers": False}}}
+    monkeypatch.setattr(numerics, "is_strict", lambda: True)
+    with pytest.raises(ValueError, match="hydrometeor_handover_numbers.*"
+                       "re-prepare it with GPUWM_WRF_EXACT=1"):
+        runner._resolve_cache_identity_compatibility(
+            source="gfs", observed=observed, expected=expected)
+    monkeypatch.setattr(numerics, "is_strict", lambda: False)
+    with pytest.raises(ValueError) as refused:
+        runner._resolve_cache_identity_compatibility(
+            source="gfs", observed=observed, expected=expected)
+    assert "GPUWM_WRF_EXACT" not in str(refused.value)
+
+
 def test_preflight_accepts_exact_member_20crv3_mapped_hierarchy_d01(
         tmp_path, monkeypatch):
     fixture = _prepared_fixture(tmp_path, "20crv3", hierarchy=True)

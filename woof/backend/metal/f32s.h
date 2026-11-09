@@ -98,15 +98,22 @@ struct f32s {
 #undef WOOF_F32S_CONV
 };
 
+// A zero result from operands that are not subnormal is exact when the
+// operands cancel (a == -b for +, a == b for -; both zeros included): no
+// flush happened, and the hardware's IEEE zero, signed as round-to-nearest
+// signs it, is the result.  Only a nonzero exact sum below the normal range
+// needs the slow path.  Fields of zeros (an absent hydrometeor) otherwise
+// took soft binary64 for every 0 + 0: a stencil over zeros ran 12x slower
+// than plain float, 4x slower than over nonzero data.
 static inline f32s operator+(f32s a, f32s b) {
   float r = a.v + b.v;
-  if (__woof_f32_tiny(r) || __woof_f32_sub(a.v) || __woof_f32_sub(b.v))
+  if ((__woof_f32_tiny(r) && a.v != -b.v) || __woof_f32_sub(a.v) || __woof_f32_sub(b.v))
     return f32s(__woof_slow_add(a.v, b.v));
   return f32s(r);
 }
 static inline f32s operator-(f32s a, f32s b) {
   float r = a.v - b.v;
-  if (__woof_f32_tiny(r) || __woof_f32_sub(a.v) || __woof_f32_sub(b.v))
+  if ((__woof_f32_tiny(r) && a.v != b.v) || __woof_f32_sub(a.v) || __woof_f32_sub(b.v))
     return f32s(__woof_slow_sub(a.v, b.v));
   return f32s(r);
 }
@@ -208,7 +215,9 @@ static inline f32s sqrtf(f32s a) {
 static inline f32s sqrt(f32s a) { return sqrtf(a); }
 static inline f32s fmaf(f32s a, f32s b, f32s c) {
   float r = metal::fma(a.v, b.v, c.v);
-  if (!(__woof_f32_tiny(r) || __woof_f32_sub(a.v) || __woof_f32_sub(b.v) || __woof_f32_sub(c.v)))
+  // a zero product plus a zero is an exact (signed) zero, as for + above
+  if (!((__woof_f32_tiny(r) && !((a.v == 0.0f || b.v == 0.0f) && c.v == 0.0f))
+        || __woof_f32_sub(a.v) || __woof_f32_sub(b.v) || __woof_f32_sub(c.v)))
     return f32s(r);
   // The product is exact in binary64; TwoSum gives the rounded sum s and
   // its exact error e.  Rounding s to odd (truncate toward zero when
@@ -392,3 +401,13 @@ static inline f32s __woof_selmax(f32s a, f32s b) {
 static inline f32s __woof_selmin(f32s a, f32s b) {
   return a < b ? a : (a == b ? f32s(as_type<float>(as_type<uint>(a.v) | as_type<uint>(b.v))) : b);
 }
+
+#ifdef WOOF_RETAIN_SUBNORMALS
+// In an --ftz=false unit float is f32s, so the bit casts return f32s too.
+// Returning float, `f(__uint_as_float(u))` with f(int) and f(f32s)
+// overloads took f(int): float -> int is a standard conversion and float ->
+// f32s a user-defined one (lake's lake_abs probe got the integer value of
+// the word: abs(+Inf) read 0x4f000000).  Defined last, for the unit's code.
+#define __uint_as_float(a) (f32s::bits((uint)(a)))
+#define __int_as_float(a) (f32s::bits((uint)(int)(a)))
+#endif
