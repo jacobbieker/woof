@@ -1009,6 +1009,13 @@ def attach(backend, host, driver):
     arrays = host["prepared"].mesh.arrays
     lat = np.degrees(np.asarray(arrays["latCell"], dtype=np.float64))[:runtime.ncells]
     lon = np.degrees(np.asarray(arrays["lonCell"], dtype=np.float64))[:runtime.ncells]
+    if regional and lat.size == runtime.ncells - 1:
+        # The regional physics runs one garbage column past the mesh cells, a copy of the donor column.
+        from .cuda_regional_forecast_v841 import pad_regional_physics_column
+        donor = getattr(host["prepared"].mesh, "attrs", {}).get("regional_garbage_donor_cell")
+        lat, lon = (pad_regional_physics_column(a, donor_cell=donor) for a in (lat, lon))
+    if lat.size != runtime.ncells:
+        raise ValueError(f"the mesh carries {lat.size} cell centres for {runtime.ncells} chemistry columns")
     landmask = cp.asnumpy(backend._seam._driver.fields["xland"]).reshape(-1) < 1.5
     runtime.set_geography(lat, lon)
     block = runtime.raw["wrf_chem"]
