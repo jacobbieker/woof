@@ -6665,6 +6665,23 @@ def _archive_dry_readiness(args, payload: dict, cycle) -> int | None:
     return code or None
 
 
+def _refuse_partial_nests(config: Path, payload: dict) -> None:
+    """A forecast launch refuses a ``partial_nest`` band before any fetch or
+    preparation: every forecast route of ``woof go`` builds its children
+    full depth (the tree preflight refuses it too, for a direct runner
+    call).  A --prepare-only launch is decided before this and keeps it."""
+    domains = payload.get("domain")
+    if not isinstance(domains, list) or not any(
+            isinstance(table, dict) and "partial_nest" in table for table in domains):
+        return
+    from woof.core.model import refuse_real_partial_nests
+    from woof.experiment import load_experiment
+    try:
+        refuse_real_partial_nests(load_experiment(config), "woof go")
+    except ValueError as error:
+        raise GoRefusal(str(error)) from None
+
+
 def _go_launch(args, *, observer=None) -> int:
     """:func:`go_main`'s body, run with each advisory shown once."""
     import tomllib
@@ -6749,6 +6766,7 @@ def _go_launch(args, *, observer=None) -> int:
         # or --prepared-root, because that branch sat above this one.
         return _prepare_only_launch(args, config=config, payload=payload,
                                     observer=observer)
+    _refuse_partial_nests(config, payload)
     resumed_config = (_checkpoint_run_bindings(args, config)
                       or _prepared_run_bindings(args, config))
     if ("case_data" in payload or getattr(args, "prepared_root", None) is not None

@@ -146,6 +146,26 @@ def test_the_prepared_tree_preflight_refuses_partial_bands():
     assert "refuse_real_partial_nests" in called
 
 
+def test_woof_go_refuses_partial_bands_before_it_fetches(tmp_path):
+    """The forecast launch refuses the band from the config alone, before
+    any download or preparation; a config without one passes."""
+    import ast
+    import inspect
+    import tomllib
+    from test_experiment import _write
+    from woof import go_cli
+    path = _write(tmp_path, d02="partial_nest = { k_top = 21 }")
+    with pytest.raises(go_cli.GoRefusal, match="d02 declares partial_nest"):
+        go_cli._refuse_partial_nests(path, tomllib.loads(path.read_text()))
+    (tmp_path / "plain").mkdir()
+    plain = _write(tmp_path / "plain")
+    go_cli._refuse_partial_nests(plain, tomllib.loads(plain.read_text()))
+    body = ast.parse(textwrap.dedent(inspect.getsource(go_cli._go_launch)))
+    called = {node.func.id for node in ast.walk(body)
+              if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)}
+    assert "_refuse_partial_nests" in called
+
+
 # ---------------------------------------------------------------------------
 # device gates
 # ---------------------------------------------------------------------------
