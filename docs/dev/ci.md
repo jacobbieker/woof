@@ -182,6 +182,15 @@ source built for Apple silicon. It never touches `publish.yml` or
   after the tag and release exist, a re-run sees the tagged head and stops;
   run this workflow by hand with `version` set to that release and `publish`
   ticked.
+- **Publishing runs supersede waiting ones:** every publishing run (a tag
+  push, or a dispatch with `publish` on) is in the `publish-metal-release`
+  concurrency group. The run already building finishes, and a newer one
+  replaces any that is still waiting, because GitHub keeps one pending run
+  per group. A burst of merges therefore publishes the newest build, while the
+  versions in between keep their tag and GitHub release but get no PyPI upload.
+  Each publish holds a macOS runner, and one per merge used to queue dozens of
+  them behind the test legs. A manual build without `publish` keeps its own
+  group.
 - **Build (macos-15):** every `build-native` workspace for macOS 14+, then
   `tools/metal_woof_project.py` renames the distribution (name, version, the
   extras' self-references, and the `gpu-mlx` requirements folded into the

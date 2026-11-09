@@ -29,8 +29,17 @@ on:
 permissions:
   contents: read
 
+# Every merge into main dispatches a publishing run (release-metal.yml), and
+# each one holds a macOS runner for its build and smoke legs.  Publishing
+# runs share one group: the one already running finishes, and a newer one
+# replaces any that is still waiting (GitHub keeps one pending run per
+# group), so a burst of merges publishes the newest build rather than
+# queuing one wheel per merge behind the test legs.  A manual build that
+# does not publish keeps its own group.
 concurrency:
-  group: publish-metal-${{ github.ref_name }}-${{ inputs.version }}
+  group: >-
+    ${{ (github.event_name == 'push' || inputs.publish) && 'publish-metal-release'
+    || format('publish-metal-{0}-{1}', github.ref_name, inputs.version) }}
   cancel-in-progress: false
 
 env:

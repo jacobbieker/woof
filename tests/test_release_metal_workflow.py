@@ -145,3 +145,13 @@ def test_runs_on_main_and_dispatches_publish_metal_for_every_planned_version():
     assert '--target "$sha"' in loop and "--generate-notes" in loop
     assert "publish-metal.yml" in loop and "publish=true" in loop
     assert '--ref "metal-v${version}"' in loop
+
+
+def test_publishing_runs_share_one_group_so_a_newer_one_replaces_a_waiting_one():
+    """A burst of merges queues one publish, not one macOS build per merge."""
+    publish = yaml.safe_load((ROOT / ".github/workflows/publish-metal.yml").read_text(encoding="utf-8"))
+    group = publish["concurrency"]["group"]
+    assert publish["concurrency"]["cancel-in-progress"] is False
+    assert "inputs.publish" in group and "'publish-metal-release'" in group
+    # a manual build that does not publish keeps a group of its own
+    assert "format('publish-metal-{0}-{1}', github.ref_name, inputs.version)" in group
