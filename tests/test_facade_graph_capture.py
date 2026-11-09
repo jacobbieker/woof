@@ -134,6 +134,7 @@ def test_in_place_array_operations_replay_on_every_launch(cp):
     w = cp.asarray(host)
 
     def body():
+        nonlocal x
         _step(bump, copy_scaled, x, y, 1.0)
         cp.add(x, y, out=z)
         y.fill(0)
