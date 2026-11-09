@@ -189,6 +189,10 @@ static MTL::Library* library_for(const std::string& library_key, const std::stri
   std::lock_guard<std::mutex> lock(mutex);
   auto it = cache.find(library_key);
   if (it != cache.end()) return it->second.get();
+  if (source.empty()) {
+    // a launch names a library its module built; it carries no source
+    throw std::runtime_error("[woof.backend.metal] no library built for " + library_key);
+  }
   auto pool = NS::AutoreleasePool::alloc()->init();
   auto* device = mx::metal::device(mx::Device::gpu).mtl_device();
   std::pair<std::string, std::string> split;
