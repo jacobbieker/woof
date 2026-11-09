@@ -1886,6 +1886,16 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "cf95139ed472a9981eb97a8b0505cee11b0bda478dfabfe704570847c67682b0",
+    "constructor": "compile_using_nvrtc",
+    "factory": "_module_on",
+    "factory_sha256": "0b53c61250499826e438eee56ab9deff6a166487d117d9c71c32d911c4634ddb",
+    "file": "woof/hex/mpas_ice/thermal_solver_v842.py",
+    "line": 73,
+    "source_expression": "module_source()",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "d3c3f0905fb91ea39352d9005c0cbedf9ed45b4dd060dbe54c085bffadf89a26",
     "constructor": "compile_using_nvrtc",
     "factory": "compile_mrf_module",
@@ -2331,6 +2341,16 @@
     "factory": "_module",
     "factory_sha256": "656fbab1b5a9c1df75c9647d10ba91fb5df7ef553e502b4a1b602bb569c03aee",
     "file": "woof/core/sfire_ideal_atmos.py",
+    "status": "unresolved"
+   },
+   {
+    "call_sha256": "ff4548e666638834605bc57c5c44a3f08dd8e93d32db271446ce36c5ed10ee18",
+    "constructor": "compile_using_nvrtc",
+    "factory": "_module_on",
+    "factory_sha256": "f34fb287d1054cc3412a9399016fa8fb2a54ded6148d8d0c4df94294e0b9da86",
+    "file": "woof/hex/mpas_ice/advection_v842.py",
+    "line": 57,
+    "source_expression": "module_source()",
     "status": "unresolved"
    }
   ],
@@ -4464,6 +4484,12 @@
     "sha256": "cb0fec838f6f127843e831fbf9057d182c65eb303e3e1de165f62564673d6b7f"
    },
    {
+    "file": "woof/hex/mpas_ice/advection_v842.cu",
+    "lines": 252,
+    "pinned_intrinsics": 8,
+    "sha256": "5f98f8cfe1a6906d51767c52ecf14af278aac305dd9f4576dd735e4025a6a06c"
+   },
+   {
     "file": "woof/hex/mpas_ice/geometry_v842.cu",
     "sha256": "589860c7acf4de9e60bbd7da48a0bba639968f9ff0b6db3a100cd73abf8005a8"
    },
@@ -4474,6 +4500,12 @@
    {
     "file": "woof/hex/mpas_ice/thermal_init_v842.cu",
     "sha256": "f54edf35f622c0a936242c38fdb9e264597a072fbd477638fb1b9191196563e5"
+   },
+   {
+    "file": "woof/hex/mpas_ice/thermal_solver_v842.cu",
+    "lines": 423,
+    "pinned_intrinsics": 8,
+    "sha256": "b481ed62f857b19307b729679c2dfc63c6e10674d48e6194234233baa1786b78"
    },
    {
     "file": "woof/hex/mpas_ocean/forcing_v842.cu",
@@ -5342,6 +5374,10 @@
     "sha256": "ab6ae66fc05e74771e1e8a5bea38f4df87d0cb42bd239a3a33fe17f1a29d8268"
    },
    {
+    "file": "woof/hex/mpas_ice/advection_v842.py",
+    "sha256": "c07bc809753d9d17ada9ef7e787deb2e2a0ea2eaac98372fa7bf3d4af984f2b4"
+   },
+   {
     "file": "woof/hex/mpas_ice/geometry_v842.py",
     "sha256": "da494637bfd049b18b7c5ee870a9459804859b88a40ec6cab1e30b1a831f9f44"
    },
@@ -5352,6 +5388,10 @@
    {
     "file": "woof/hex/mpas_ice/thermal_init_v842.py",
     "sha256": "af59baf03c24aabfee7ba8b7f33e76f895f7468b868d686abfefe1dbf82ae896"
+   },
+   {
+    "file": "woof/hex/mpas_ice/thermal_solver_v842.py",
+    "sha256": "08d7682569b6e0a5c61f38ea3ffd8f6a197d5727a4a5abd8679583e45bc99d11"
    },
    {
     "file": "woof/hex/mpas_ocean/forcing_v842.py",
