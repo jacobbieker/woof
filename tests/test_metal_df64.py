@@ -2,8 +2,8 @@
 
 THE BREAKAGES THESE PREVENT
 ---------------------------
-1. Strict numerics changing: its translation must be the soft-float text,
-   byte for byte, whatever the df64 code path does.
+1. Strict numerics taking the df64 libm: it keeps soft-float, with only
+   the exact df64-seeded division and square root (the same words).
 2. A fast unit silently keeping soft-float (the slow cold compile df64
    exists to remove), or a strict unit silently taking df64.
 3. The header's generated constants drifting from tools/df64_constants.py.
@@ -41,13 +41,15 @@ def test_header_carries_the_generated_constants():
     assert text[start:end] == df64_constants.block()
 
 
-def test_strict_prelude_is_the_soft_float_text():
+def test_strict_prelude_is_soft_float_with_exact_division():
     from woof.backend.translate import prelude
     for contract in (False, True):
         for retain in (False, True):
             soft = prelude(contract=contract, retain_subnormals=retain)
             assert prelude(contract=contract, retain_subnormals=retain, f64="soft") == soft
-            assert "f64_df_div" not in soft and "df_exp_word" not in soft
+            # strict: the exact df64-seeded division and square root, no df64 libm
+            assert "#define WOOF_DF64_NO_LIBM 1" in soft and "#define f64_div f64_df_div" in soft
+            assert "df_exp_word(a.b)" not in soft
             fast = prelude(contract=contract, retain_subnormals=retain, f64="df64")
             assert "#define WOOF_DF64_ARITH 1" in fast and "df_exp_word(a.b)" in fast
             # the df64 text sits beside the soft-float text, which it falls back on
@@ -100,6 +102,13 @@ def test_host_grade_within_bounds():
 
 
 _mlx = pytest.mark.skipif(importlib.util.find_spec("mlx") is None, reason="needs mlx (Apple silicon)")
+
+
+@_mlx
+def test_strict_division_and_sqrt_are_the_soft_float_words():
+    out = subprocess.run([sys.executable, str(ROOT / "tools" / "df64_grade.py"), "strict", "--samples", "4194304"],
+                         capture_output=True, text=True, cwd=ROOT)
+    assert out.returncode == 0, out.stdout[-4000:] + out.stderr[-2000:]
 
 
 @_mlx

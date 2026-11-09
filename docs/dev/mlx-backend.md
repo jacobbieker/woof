@@ -33,7 +33,7 @@ A Mac with MLX installed and no CuPy also selects mlx on its own.
 
 | CUDA | Metal translation |
 |---|---|
-| `double`, strict | `f64`, soft-float binary64. Every operation is IEEE round-to-nearest, word-exact (`tools/f64_soft_grade.py`). |
+| `double`, strict | `f64`, soft-float binary64. Every operation is IEEE round-to-nearest, word-exact (`tools/f64_soft_grade.py`); division and square root are the same words from `f64_df64.h`'s df64-seeded exact path (`tools/df64_grade.py strict`). |
 | `double`, fast | `f64` too, the same binary64 words in memory. `+ - *`, fma, conversions and comparisons are the soft-float words; `/` and `sqrt` are the correctly rounded words from a df64 estimate; CUDA's binary64 libm names are df64, about 2^-46 relative ("Binary64: soft-float and df64" below). |
 | binary32 `+ - * /`, `fma` | Metal's own: IEEE in safe math mode (`tools/metal_arith_receipt.py`). |
 | `--fmad=true` / `false` | `#pragma METAL fp contract(fast)` / `(off)`. In strict numerics nothing is contracted, because NVRTC's choices cannot be reproduced. |
@@ -52,10 +52,14 @@ Apple GPUs have no binary64. `double` is always `f64`, the binary64 word in
 a `ulong`, so buffers, structs, literals, unions and bit casts hold the
 same bytes in either mode; what differs is how its operations compute.
 
-* **Strict numerics** (`GPUWM_WRF_EXACT=1`): every operation is
-  `f64_soft.h`'s soft-float, word for word, and the binary64 libm is the
-  vendored correctly rounded one. The translation is byte for byte what it
-  was before df64 existed (`tests/test_metal_df64.py`).
+* **Strict numerics** (`GPUWM_WRF_EXACT=1`): every operation gives
+  `f64_soft.h`'s word, and the binary64 libm is the vendored correctly
+  rounded one. Division and square root take `f64_df64.h`'s exact
+  df64-seeded path (below), which gives the soft-float words: the strict
+  leg of `tools/df64_grade.py` compares the two on the GPU, NaN payloads
+  included, over every special-value pair, soft-float's grading mix and
+  quotients landing on gradual underflow and overflow (see "Compile time"
+  for the sample size). The df64 libm is left out (`WOOF_DF64_NO_LIBM`).
 * **Fast numerics** (the default): `woof/backend/metal/f64_df64.h`, through
   the same translated body with another prelude
   (`translate(..., f64="df64")`, chosen by
@@ -293,6 +297,21 @@ for them df64 changes only division and square root, which replace the
 soft-float digit loops (CLM lake still compiles 5.6x sooner, and its
 words are unchanged). The WSM6 unit was not re-measured.
 
+Strict numerics takes only the exact division and square root (the
+soft-float words). Its cold compile, main's strict prelude against this
+one, seconds: CLM lake 3087 -> 716 (4.3x); units whose cost is the
+vendored libm (`gfs_sas`, `sf_gfs`, `ice_accretion`, `wind_farm`) are
+unchanged within noise. The strict leg of `tools/df64_grade.py` compared
+the two paths over 2^30 GPU operands: 0 mismatches in either operation.
+Strict run time, the kernel below: division 1.7x, square root 5.6x
+faster; the libm calls unchanged.
+
+The MPAS WSM6 unit of the water-budget gates (hex, 55 levels, fast
+numerics, its glibc ports unchanged), cold, on the same machine state:
+363 s with soft-float division and square root, 224 s with the exact
+df64-seeded ones (1.6x; `wsm6_columns` is all of it). The 1 h 45 min
+recorded below predates later translator changes.
+
 Run time, `tools/df64_grade.py bench` (2^20 threads, 64 dependent
 operations each) and a translated kernel calling each function 16 times
 per thread over 2^20 threads: division 3.6x faster, square root 11x;
@@ -508,7 +527,10 @@ The MPAS WSM6 water-budget gates (`mpas_wb3_v842`, `mpas_wb5_v842`) run
 apart: their WSM6 unit carries binary64 (soft-float on Metal) and Thrust's
 `complex<double>`. The Kessler and Thompson writebacks and the referee pass
 (5 of 10). The WSM6 unit had not finished its cold Metal compile after
-1 h 45 min of compiler time on an M3 Max, so its 5 tests are not measured.
+1 h 45 min of compiler time on an M3 Max at the time. Re-measured
+2026-11-09 it compiles cold in 363 s with soft-float division and square
+root and 224 s with the exact df64-seeded ones ("Compile time"); its 5
+tests have not been re-run.
 
 The partial-depth band (Phase D5) keeps its own measurements:
 
