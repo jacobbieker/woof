@@ -86,7 +86,13 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: ${{ steps.workspaces.outputs.list }}
-          shared-key: publish-metal
+          # Restores the macOS bridges' build cache that tests.yml's
+          # native-macos job saves on main (a run on a tag can read the
+          # default branch's caches but saves only for its own tag, so it
+          # saves nothing).  Under its own key it never had a cache, and
+          # every publish built cold: about 60 of its 65 build minutes.
+          prefix-key: v1-rust
+          shared-key: native-macos
           save-if: false
       - name: cargo build --release --locked --offline (every build-native workspace)
         run: python .github/ci/build_native.py build
