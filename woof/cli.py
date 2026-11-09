@@ -1258,7 +1258,8 @@ def _dispatch_argv(argv: list[str] | None = None) -> int:
                                 getattr(args, "wrf_hydro_output", None),
                                 _config if (args.command in ("run", "go") and _config
                                             and Path(str(_config)).suffix == ".toml"
-                                            and Path(str(_config)).is_file()) else None):
+                                            and Path(str(_config)).is_file()) else None,
+                                members=getattr(args, "members", None)):
             if args.command == "run" and getattr(args, "hydro", None) is not None:
                 from woof.hydro.runtime import run_scope
                 with run_scope(args.hydro, getattr(args, "config", None)):

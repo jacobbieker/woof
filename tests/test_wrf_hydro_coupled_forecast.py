@@ -80,6 +80,17 @@ def test_the_table_is_checked(tmp_path, body, match):
         read_table(p)
 
 
+def test_an_ensemble_launch_is_refused(no_hydro_env, tmp_path):
+    from woof import wrf_hydro_route as route
+
+    with pytest.raises(NotImplementedError, match="ensemble members"):
+        with route.launch_scope(namelist=tmp_path / "hydro.namelist", members=3):
+            pass
+    assert route.configured() is None
+    with route.launch_scope(namelist=tmp_path / "hydro.namelist", members=1):
+        assert route.configured()
+
+
 def test_a_loader_without_the_launch_refuses_the_table(no_hydro_env):
     from woof.wrf_hydro_route import consume_table
 
@@ -112,6 +123,8 @@ def test_more_than_one_domain_is_refused(monkeypatch):
     (dict(sf_surface_physics=2, grid_id=2), "nest"),
     (dict(sf_surface_physics=2, restart_interval_s=3600.0), "restart_interval_s = 0"),
     (dict(sf_surface_physics=2, sf_urban_physics=1), "urban"),
+    (dict(sf_surface_physics=2, sf_surface_mosaic=1), "mosaic"),
+    (dict(sf_surface_physics=4, use_adaptive_time_step=True), "adaptive"),
 ])
 def test_attach_refuses_by_name(monkeypatch, cfg, match):
     from woof import wrf_hydro_route as route
