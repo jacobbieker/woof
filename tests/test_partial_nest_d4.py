@@ -132,6 +132,20 @@ def test_the_real_data_route_refuses_partial_bands(tmp_path):
     refuse_real_partial_nests(_loads_or_skip(tmp_path), "woof run (experiment-tree)")
 
 
+def test_the_prepared_tree_preflight_refuses_partial_bands():
+    """`woof go`'s domain-tree route builds every child full depth, so its
+    preflight must refuse a band rather than run it as a full-depth nest
+    (it did: a GFS 9 km -> 3 km tree with partial_nest = { k_top = 20 } on
+    d02 wrote history bit-identical to the same tree without the key)."""
+    import ast
+    import inspect
+    from woof import prepared_domain_tree_forecast as tree
+    body = ast.parse(textwrap.dedent(inspect.getsource(tree.preflight_prepared_tree)))
+    called = {node.func.id for node in ast.walk(body)
+              if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)}
+    assert "refuse_real_partial_nests" in called
+
+
 # ---------------------------------------------------------------------------
 # device gates
 # ---------------------------------------------------------------------------
