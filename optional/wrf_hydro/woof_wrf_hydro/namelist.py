@@ -164,7 +164,10 @@ def map_hydro_nlist(groups: dict[str, dict]) -> HydroConfig:
                                          "template's value) and 2 (WRF, which the coupled "
                                          "driver requires) map; 3 (LIS) and 4 (CLM) do not")
     if nl.get("udmp_opt") == 1:
-        refuse("UDMP_OPT", 1, "the NWM user-defined mapping (UDMP) is not ported")
+        refuse("UDMP_OPT", 1, "the NWM user-defined mapping (UDMP) is not ported: it is "
+               "its own network and code path (udmap_file's spatial weights, UDMP_ini, "
+               "RunOffDisag, drive_CHANNEL_RSL, the NHDPlus bucket simp_gw_buck_nhd), not "
+               "the gridded LINKID -> Route_Link mapping the reach routing runs with")
     # lake_option 3 (reservoir DA): read_rt_nlst sets reservoir_type_specified
     # when a DA flag is on and lake_option to 1 either way (:762-769); the
     # hybrid and RFC reservoirs are woof_wrf_hydro.reservoir_da

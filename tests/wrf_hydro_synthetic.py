@@ -291,3 +291,67 @@ gwChanCondConstIn = {chan_cond[0]}
 gwChanCondConstOut = {chan_cond[1]}
 """)
     nl.write_text(text)
+
+
+def write_route_link(directory, *, channel_option=2):
+    """Turn a written domain's channel into Route_Link reaches
+    (channel_option 1 or 2): Route_Link.nc and a LINKID grid in
+    Fulldom_hires.nc.  The valley's channel is two reaches above the lake
+    (the second flows into it), the lake holds an internal reach (fed by the
+    last pixels above it) and its outlet reach (NHDWaterbodyComID = the
+    lake's id), and below it one
+    reach takes the outlet's water and two pixel-less tributaries' into the
+    last reach, which leaves the domain.  Link ids stay at or below the node
+    count (LandRT_ini indexes a node-sized buffer with them); some Qi are
+    zero (readLinkSL's order-based start) and one So is below the floor.
+    Every reach Muskingum-Cunge routes always has water: with none,
+    SUBMUSKINGCUNGE computes QLOSS from WPk, D and C4 it never set (whatever
+    the previous call left on the stack)."""
+    import netCDF4
+
+    d = Path(directory)
+    with netCDF4.Dataset(d / "Fulldom_hires.nc", "a") as ds:
+        chan = np.asarray(ds.variables["CHANNELGRID"][:])[::-1]
+        jxrt, ixrt = chan.shape
+        valley = jxrt // 2
+        lake_start = ixrt // 2 - 1
+        link = np.full((jxrt, ixrt), -9999, np.int32)
+        cols = np.arange(ixrt)
+        on = chan[valley] >= 0
+        quarter = ixrt // 4
+        row = np.where(cols < quarter, 1, np.where(cols < lake_start - 3, 2,
+                       np.where(cols < lake_start, 3, np.where(cols < ixrt - quarter, 5, 6))))
+        link[valley, on] = row[on]
+        ds.createVariable("LINKID", "i4", ("y", "x"))[:] = link[::-1]
+    f = np.float32
+    rows = dict(
+        link=[1, 2, 3, 4, 5, 6, 7, 8], to=[2, 3, 4, 5, 6, 0, 6, 6],
+        NHDWaterbodyComID=[-9999, -9999, 1, 1, -9999, -9999, -9999, -9999],
+        order=[1, 1, 2, 2, 2, 3, 1, 1],
+        Qi=[0.0, 0.5, 0.1, 0.0, 0.2, 0.0, 0.3, 0.05],
+        MusK=[900.0, 1200.0, 600.0, 600.0, 1500.0, 1800.0, 900.0, 900.0],
+        MusX=[0.2, 0.25, 0.2, 0.2, 0.3, 0.2, 0.1, 0.2],
+        Length=[1750.0, 1500.0, 500.0, 600.0, 1750.0, 1750.0, 2000.0, 1200.0],
+        n=[0.06, 0.055, 0.05, 0.05, 0.05, 0.045, 0.07, 0.06],
+        So=[0.006, 0.004, 0.001, 0.001, 0.0000005, 0.002, 0.01, 0.008],
+        ChSlp=[0.8, 0.7, 0.5, 0.5, 0.6, 0.4, 0.9, 0.8],
+        BtmWdth=[2.0, 3.0, 5.0, 5.0, 4.0, 6.0, 1.5, 1.0],
+        Kchan=[0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+        alt=[300.0, 290.0, 280.0, 280.0, 270.0, 260.0, 295.0, 285.0],
+        lat=[40.02 + 0.001 * k for k in range(8)], lon=[-99.95 + 0.01 * k for k in range(8)])
+    with netCDF4.Dataset(d / "Route_Link.nc", "w") as ds:
+        ds.createDimension("feature_id", 8)
+        ds.createDimension("IDLength", 15)
+        for name, values in rows.items():
+            t = "i8" if name in ("link", "to", "NHDWaterbodyComID") else (
+                "i4" if name == "order" else "f4")
+            ds.createVariable(name, t, ("feature_id",))[:] = np.asarray(
+                values, np.int64 if t != "f4" else f)
+        gages = ["", "07654321", "", "", "", "01234567", "", ""]
+        ds.createVariable("gages", "S1", ("feature_id", "IDLength"))[:] = np.array(
+            [[c.encode() for c in g.rjust(15)] for g in gages], "S1")
+    nl = d / "hydro.namelist"
+    text = nl.read_text().replace("channel_option = 3\n",
+                                  f"channel_option = {channel_option}\n")
+    nl.write_text(text.replace('route_lake_f = "LAKEPARM.nc"\n',
+                               'route_lake_f = "LAKEPARM.nc"\nroute_link_f = "Route_Link.nc"\n'))

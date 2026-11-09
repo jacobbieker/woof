@@ -37,6 +37,14 @@ process, UDMP_OPT = 0, gridded channels):
   ``readGW2d`` (:1593-1737) for GWBASESWCRT = 3's aquifer, with READ_CHROUTING1
   taking ZELEV from TOPOGRAPHY - CHAN_DEPTH (:7510-7518).
 * ``get_basn_area`` and ``get_node_area`` (module_HYDRO_utils.F90 :329-418).
+* channel_option 1 and 2 (Route_Link reaches): the same nodes, Fulldom's
+  LINKID (fatal-required, READ_ROUTEDIM :733-737), ``get_NLINKSL``,
+  ``read_NSIMLAKES``, ``readLinkSL`` / ``read_route_link_netcdf``
+  (:8372-8630, :8919-9014), ``nhdLakeMap_scan`` / ``nhdLakeMap_mpp``
+  (:10405-10916: the lake outlet, inflow and internal reaches, the inflow
+  reaches' TO_NODE moved to the outlet, LAKEIDX) and LandRT_ini's
+  CH_LNKRT_SL (module_RT.F90 :990-1060), as the one-process MPP_LAND build
+  computes them.
 
 Every array is float32/int on the host, in WRF's (j, i) as numpy (row, col)
 with row 0 the south edge.  Files are read with netCDF4; each one a
@@ -143,6 +151,7 @@ class RoutingDomain:
     latval: np.ndarray
     lonval: np.ndarray
     network: dict | None = None
+    reaches: dict | None = None
     lakes: dict | None = None
     buckets: dict | None = None
     gw2d: dict | None = None
@@ -273,6 +282,10 @@ def build(cfg, groups, *, base: Path, ix, jx, zs, vegtyp, soltyp):
         latval = _var(ds, "LATITUDE", shape, flip=True, fill=F(-9999.9), what=what)
         lonval = _var(ds, "LONGITUDE", shape, flip=True, fill=F(-9999.9), what=what)
         chan_depth = _var(ds, "CHAN_DEPTH", shape, flip=True, fill=F(-9999.9), what=what)
+        ch_lnkrt = None
+        if cfg.channel and cfg.channel_option != 3:
+            # READ_ROUTING_seq's nreadRT2d_int8, fatal for channel_option 1/2
+            ch_lnkrt = _var(ds, "LINKID", shape, dtype=np.int64, flip=True, what=what)
     # READ_ROUTING_seq :5662-5690
     lksatfac = np.where(lksatfac == F(-9999.9), F(1000.0), lksatfac).astype(F)
     retdeprtfac = np.where(retdeprtfac < F(0.0), F(1.0), retdeprtfac).astype(F)
@@ -292,12 +305,15 @@ def build(cfg, groups, *, base: Path, ix, jx, zs, vegtyp, soltyp):
         smcwlt1=smcwlt1, lksat=tbl["LKSAT"], nexp=nexp, elrt=elrt, ch_netrt=ch_netrt,
         lksatfac=lksatfac, roughness=roughness, retention=retention, slope=slope, sdir=sdir,
         sox=sox, soy=soy, lake_mask=lake_mask, latval=latval, lonval=lonval)
-    if cfg.channel:
-        if cfg.channel_option != 3:
-            raise NotImplementedError(
-                f"channel_option = {cfg.channel_option} reads its reaches from Route_Link "
-                "(read_routelink); the coupled driver routes the gridded network "
-                "(channel_option = 3) only")
+    if cfg.channel and cfg.channel_option != 3:
+        # the node network READ_ROUTEDIM and READ_CHROUTING1 still build, then
+        # the reaches from Route_Link
+        dom.network, dom.lake_mask = _network(ch_netrt, direction, lakegrid, gorder, frxst,
+                                              elrt, dist, latval, lonval)
+        jj, ii = dom.network["chanyj"] - 1, dom.network["chanxi"] - 1
+        dom.network["node_area"] = (dom.dist[8, jj, ii] / F(1)).astype(F)
+        _reaches(dom, cfg, ch_lnkrt, path("route_link_f"), path("route_lake_f"))
+    elif cfg.channel:
         # READ_CHROUTING1 :7510-7518: the channel bed is CHAN_DEPTH below the
         # terrain for GWBASESWCRT = 3 (ZELEV only; LandRT_ini's ELRT stays)
         zelev = (elrt - chan_depth).astype(F) if cfg.gwbaseswcrt == 3 else elrt
@@ -320,6 +336,210 @@ def build(cfg, groups, *, base: Path, ix, jx, zs, vegtyp, soltyp):
     elif cfg.gwbaseswcrt == 3:
         dom.gw2d = _gw2d(dom, cfg, path("gwbasmskfil"), base)
     return dom
+
+
+def _reaches(dom, cfg, ch_lnkrt, route_link_f, route_lake_f):
+    """channel_option 1/2 (UDMP_OPT = 0, one MPP_LAND process): Route_Link's
+    reaches, their lakes and the routing-pixel -> reach map."""
+    if route_link_f is None:
+        raise MissingInput("route_link_f is empty (channel_option 1/2 reads Route_Link)")
+    if not str(route_link_f).endswith(".nc"):
+        raise MissingInput(f"route_link_f {route_link_f.name}: the text form of Route_Link "
+                           "is not ported (only a name ending .nc is read as NetCDF)")
+    with _open(route_link_f, "route_link_f (Route_Link.nc)") as ds:
+        what = f"route_link_f {route_link_f.name}"
+        dim = "feature_id" if "feature_id" in ds.dimensions else "linkDim"
+        if dim not in ds.dimensions:
+            raise ValueError(f"{what}: Could not find either feature_id or linkDim")
+        nl_ = len(ds.dimensions[dim])
+        r = {}
+        for key, var, t in (("linkid", "link", np.int64), ("to", "to", np.int64),
+                            ("chlon", "lon", F), ("chlat", "lat", F), ("zelev", "alt", F),
+                            ("order", "order", np.int64), ("qi", "Qi", F), ("musk", "MusK", F),
+                            ("musx", "MusX", F), ("chanlen", "Length", F), ("mannn", "n", F),
+                            ("so", "So", F), ("chsslp", "ChSlp", F), ("bw", "BtmWdth", F),
+                            ("channk", "Kchan", F)):
+            # get_1d_netcdf_*: no _M fallback, every one fatal-required
+            if var not in ds.variables:
+                raise MissingInput(f"{what} has no variable {var}")
+            v = ds.variables[var]
+            v.set_auto_maskandscale(False)
+            r[key] = np.asarray(v[...]).reshape(-1).astype(t)
+        lakeida = None
+        if "NHDWaterbodyComID" in ds.variables:
+            v = ds.variables["NHDWaterbodyComID"]
+            v.set_auto_maskandscale(False)
+            lakeida = np.asarray(v[...]).reshape(-1).astype(np.int64)
+        gages = [""] * nl_
+        if "gages" in ds.variables:
+            v = ds.variables["gages"]
+            v.set_auto_maskandscale(False)
+            raw = np.asarray(v[...])
+            gages = [b"".join(row).decode("ascii", "replace") for row in raw.reshape(nl_, -1)]
+    gages = [g.replace("\0", " ")[:15].ljust(15) for g in gages]
+    n = len(r["linkid"])
+    if len(set(r["linkid"].tolist())) != n:
+        raise ValueError(f"{what}: duplicate link ids (the link -> index hash keeps one)")
+    # NLAKES: read_NSIMLAKES (a .nc route_lake_f, else 0); lake_option 0
+    # cannot zero it for reaches (getChanDim reads it after zeroing)
+    nlakes = 0
+    if route_lake_f is not None and str(route_lake_f).endswith(".nc"):
+        with _open(route_lake_f, "route_lake_f (LAKEPARM.nc)") as ds:
+            d = "feature_id" if "feature_id" in ds.dimensions else "nlakes"
+            if d not in ds.dimensions:
+                raise ValueError("Could not find either feature_id or nlakes in LAKEPARM")
+            nlakes = len(ds.dimensions[d])
+    if nlakes and cfg.lake_option == 0:
+        raise NotImplementedError("lake_option = 0 with a LAKEPARM.nc for channel_option 1/2: "
+                                  "read_NSIMLAKES restores NLAKES after getChanDim zeroes it, "
+                                  "and the reservoirs run with lake_option 0")
+    if nlakes and lakeida is None:
+        raise MissingInput(f"{what} has no NHDWaterbodyComID: readLinkSL leaves LAKEIDA "
+                           "unset and nhdLakeMap reads it for every lake")
+    if lakeida is None:
+        lakeida = np.full(n, -9999, np.int64)
+    dom.lakes = _lakes(route_lake_f, nlakes, cfg.lake_option) if nlakes else None
+    if dom.lakes is not None:
+        L = dom.lakes
+        L["resht"] = (L["orifice_elevation"] + ((L["max_depth"] - L["orifice_elevation"])
+                                                * L["ifd"])).astype(F)
+    # read_route_link_netcdf's So floor, then readLinkSL's
+    so = np.where(r["so"] < F(0.00001), F(0.00001), r["so"]).astype(F)
+    so = np.maximum(so, F(0.00001)).astype(F)
+    # readLinkSL (MPP_LAND, NetCDF): MAXORDER is still READ_CHROUTING1's
+    # -9999 (only the text reader updates it); a missing Qi starts at
+    # 20 (1 / (MAXORDER + 1 - ORDER))**3 in both QLINK slots, a given one in
+    # QLINK(:,1) only
+    q1 = r["qi"].copy()
+    q2 = np.zeros(n, F)
+    low = q1 <= F(1e-3)
+    x = (F(1.0) / (F(-9998.0) - r["order"].astype(F))).astype(F)
+    x3 = (x * x * x).astype(F)
+    q1 = np.where(low, (F(20.0) * x3).astype(F), q1).astype(F)
+    q2 = np.where(low, q1, q2).astype(F)
+    typel, to_node, lakeidx = _nhd_lake_map(r["linkid"], r["to"].copy(), lakeida,
+                                            None if dom.lakes is None
+                                            else dom.lakes["lake_id"].copy())
+    # LandRT_ini :990-1050 (MPP_LAND, one process): the link ids on the grid,
+    # ascending (LLINKID; they index buf(GNLINKS), GNLINKS the node count),
+    # and CH_LNKRT_SL the local position of each pixel's id; getLocalIndx's
+    # LLINKIDINDX takes a local position to its Route_Link index, which is
+    # where updateLinkV puts drive_CHANNEL's lateral inflow
+    nnodes = len(dom.network["chanxi"])
+    llinkid = sorted({int(v) for v in ch_lnkrt[ch_lnkrt > 0].tolist()})
+    if llinkid and llinkid[-1] > nnodes:
+        raise NotImplementedError(
+            f"a Fulldom LINKID above the node count {nnodes}: LandRT_ini indexes buf(GNLINKS) "
+            "with it (out of bounds); only link ids up to the node count index that buffer")
+    index = {int(k): i + 1 for i, k in enumerate(r["linkid"])}
+    missing = [v for v in llinkid if v not in index]
+    if missing:
+        raise ValueError(f"Fulldom LINKID {missing[0]} is not a Route_Link link: "
+                         "LLINKIDINDX is 0 for it and updateLinkV writes out of bounds")
+    llinkidindx = np.asarray([0] + [index[v] for v in llinkid], np.int64)
+    sl = np.full(ch_lnkrt.shape, -99, np.int64)
+    for local, v in enumerate(llinkid, start=1):
+        sl[ch_lnkrt == v] = local
+    # what ReachRouting reads: each node pixel's Route_Link reach, through
+    # LLINKIDINDX for both drive_CHANNEL's branches -- a channel pixel's
+    # CH_LNKRT_SL, and a lake pixel's LAKE_MSKRT (its lake number taken as a
+    # local position)
+    jj, ii = dom.network["chanyj"] - 1, dom.network["chanxi"] - 1
+    reach_sl = np.where(sl > 0, llinkidindx[np.maximum(sl, 0)], -99)
+    lake_nodes = (sl[jj, ii] <= 0) & (dom.lake_mask[jj, ii] > 0)
+    if (dom.lake_mask[jj, ii][lake_nodes] > len(llinkid)).any():
+        raise NotImplementedError("a node on a lake pixel whose lake number exceeds the grid's "
+                                  "link count: drive_CHANNEL indexes LQLateral(LNLINKSL) with it")
+    lake_reach = np.where(dom.lake_mask > 0,
+                          llinkidindx[np.clip(dom.lake_mask, 0, len(llinkid))], -9999)
+    dom.reaches = dict(
+        nlinksl=n, linkid=r["linkid"], to_node=to_node, typel=typel, lake_lookup=lakeidx,
+        order=r["order"], chlon=r["chlon"], chlat=r["chlat"], zelev=r["zelev"],
+        musk=r["musk"], musx=r["musx"], chanlen=r["chanlen"], mannn=r["mannn"], so=so,
+        chsslp=r["chsslp"], bw=r["bw"], tw=np.zeros(n, F), tw_cc=np.zeros(n, F),
+        n_cc=np.zeros(n, F), channk=r["channk"], qlink1=q1, qlink2=q2,
+        hlink=np.full(n, F(-999.0), F), ch_lnkrt_sl=sl, llinkidindx=llinkidindx,
+        reach_sl=reach_sl, lake_reach=lake_reach, gages=gages, lakeida=lakeida)
+
+
+def _nhd_lake_map(linkid, to_node, lakeida, lakeidm):
+    """nhdLakeMap_scan then nhdLakeMap_mpp on one process (module_HYDRO_io.F90
+    :10405-10916): TYPEL (1 a lake's outlet reach, 2 inside a lake, 3 flowing
+    into one, -999 otherwise), TO_NODE with each inflow reach moved to its
+    lake's outlet, and LAKEIDX (the 1-based lake an outlet reach routes,
+    else -999)."""
+    n = len(linkid)
+    nlakes = 0 if lakeidm is None else len(lakeidm)
+    index = {int(k): i for i, k in enumerate(linkid)}
+    # links that drain into a link of the network, in link order (ind), and
+    # each link's upstream positions in that list (gToNodeOut)
+    ind = [it for it in range(n) if int(to_node[it]) in index]
+    ups = [[] for _ in range(n)]
+    for kk, it in enumerate(ind):
+        ups[index[int(to_node[it])]].append(kk)
+    up_lake = [lakeida[it] for it in ind]
+    up_to = [int(to_node[it]) for it in ind]
+    # nhdLakeMap_scan: one outlet per lake, else the lake is dropped
+    lakelinkid = np.zeros(nlakes, np.int64)
+    for i in range(nlakes):
+        for k in range(n):
+            for j in ups[k]:
+                if up_to[j] == linkid[k] and lakeida[k] < 0 and up_lake[j] == lakeidm[i]:
+                    if lakelinkid[i] > 0:
+                        lakelinkid[i] = -999
+                    if lakelinkid[i] == 0:
+                        lakelinkid[i] = ind[j] + 1
+    down_lake = np.full(n, -999, np.int64)
+    for it in range(n):
+        if int(to_node[it]) in index:
+            down_lake[it] = lakeida[index[int(to_node[it])]]
+    lakemask = np.zeros(nlakes, np.int64)
+    for k in range(n):
+        if lakeida[k] > 0:
+            if any(down_lake[k] == lakeidm[i] for i in range(nlakes)):
+                continue
+            for i in range(nlakes):
+                if lakeida[k] == lakeidm[i]:
+                    lakemask[i] += 1
+                    break
+    for i in range(nlakes):
+        if lakemask[i] != 1:
+            lakelinkid[i] = -999
+    for i in range(nlakes):
+        if lakelinkid[i] == -999:
+            lakeidm[i] = -999
+    # nhdLakeMap_mpp
+    tmp_typel = [-999] * len(ind)
+    tmp_out = list(up_to)
+    for i in range(nlakes):
+        for k in range(n):
+            for j in ups[k]:
+                if up_to[j] == linkid[k] and lakeida[k] < 0 and up_lake[j] == lakeidm[i]:
+                    tmp_typel[j] = 1
+                    tmp_out[j] = up_lake[j]
+                    lakelinkid[i] = ind[j] + 1
+                elif (up_to[j] == linkid[k] and up_lake[j] < 0 and lakeida[k] > 0
+                      and lakeida[k] == lakeidm[i]):
+                    tmp_typel[j] = 3
+                    tmp_out[j] = lakeidm[i]
+                elif up_lake[j] == lakeidm[i] and tmp_typel[j] != 1:
+                    tmp_typel[j] = 2
+    lakeidx = np.full(n, -999, np.int64)
+    for i in range(nlakes):
+        if lakelinkid[i] > 0:
+            lakeidx[lakelinkid[i] - 1] = i + 1
+    typel = np.full(n, -999, np.int64)
+    outlake = np.asarray(to_node, np.int64).copy()
+    for kk, it in enumerate(ind):          # TONODE2RSL / TONODE2RSL8, flag -999
+        if tmp_typel[kk] != -999:
+            typel[it] = tmp_typel[kk]
+        if tmp_out[kk] != -999:
+            outlake[it] = tmp_out[kk]
+    for i in range(n):
+        for j in range(n):
+            if typel[i] == 3 and typel[j] == 1 and outlake[j] == outlake[i]:
+                to_node[i] = linkid[j]
+    return typel, to_node, lakeidx
 
 
 def _terrain(elrt, dist, rt_option):

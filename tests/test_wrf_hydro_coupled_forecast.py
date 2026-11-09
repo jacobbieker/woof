@@ -192,7 +192,7 @@ def _coupled(tmp_path, nx=8, ny=6, **nl):
 
 @needs_optin
 @pytest.mark.parametrize("edit,match", [
-    (dict(channel_option=2), "channel_option"),
+    (dict(channel_option=2, extra="compound_channel = .TRUE.\n"), "compound_channel"),
     (dict(sub=0, ov=0, gw=0), "rtFlag"),
     (dict(extra="imperv_adj = 1\n"), "IMPERV_ADJ"),
     (dict(extra="GWBASESWCRT = 3\n"), "AGGFACTRT"),

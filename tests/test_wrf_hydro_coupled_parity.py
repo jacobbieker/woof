@@ -11,13 +11,18 @@ once (variant "da") as lake_option 3's USGS persistence/level-pool
 hybrid reading its timeslices, and once (variant "gw2d") with GWBASESWCRT = 3's
 2-D aquifer from gwhires.nc in place of the bucket, coupled to the soil and
 the channel (AGGFACTRT = 1; the harness stands in the zero-length bucket
-arrays WRF 4.7.1's HYDRO_ini otherwise faults on).  Graded: the network, slopes,
+arrays WRF 4.7.1's HYDRO_ini otherwise faults on), and twice (variants
+"reach" and "musk") with Route_Link reaches in place of the gridded network,
+routed by Muskingum-Cunge (channel_option 2) and Muskingum (1), the lake an
+outlet reach's level pool.  Graded: the network, slopes,
 steepest-descent indices, retention depths and lake mask HYDRO_ini built;
 after every cycle the SMOIS, SH2O and SFCHEADRT handed back to WRF and the
 routing state (routing-grid head, water table, QSTRMVOLRT, QINFLOWBASE,
 lake inflow, channel flow, head and volume, lake elevation and outflow,
 bucket level and outflow, DTCT; for gw2d the aquifer head, surface excess,
-soil and channel fluxes and the routing grid's soil moisture).  Every test skips, naming the opt-in rule,
+soil and channel fluxes and the routing grid's soil moisture; for the
+reaches the Route_Link network nhdLakeMap left, the pixel -> reach map and
+each reach's flows, depth, lateral inflow, velocity and channel loss).  Every test skips, naming the opt-in rule,
 unless ``WOOF_ENABLE_WRF_HYDRO=1``.
 """
 
@@ -56,7 +61,12 @@ def _gen():
 VARIANTS = {"": ("coupled-steps.csv", "coupled-sha256sums.txt", "coupled-static.csv"),
             "da": ("coupled-da-steps.csv", "coupled-da-sha256sums.txt", "coupled-static.csv"),
             "gw2d": ("coupled-gw2d-steps.csv", "coupled-gw2d-sha256sums.txt",
-                     "coupled-gw2d-static.csv")}
+                     "coupled-gw2d-static.csv"),
+            "reach": ("coupled-reach-steps.csv", "coupled-reach-sha256sums.txt",
+                      "coupled-reach-static.csv"),
+            "musk": ("coupled-musk-steps.csv", "coupled-musk-sha256sums.txt",
+                     "coupled-reach-static.csv")}
+REACHES = ("reach", "musk")
 
 
 def _sums(variant=""):
@@ -111,12 +121,25 @@ def test_hydro_ini_is_bitwise_against_wrf_hydro(tmp_path_factory, variant):
     _, c = _coupled(tmp_path_factory, variant)
     want = _static(variant)
     net = c.dom.network
-    for name in ("chanxi", "chanyj", "to_node", "typel", "lakenode", "order"):
+    bits = lambda a: np.ascontiguousarray(a, np.float32).ravel().view(np.int32)  # noqa: E731
+    if variant in REACHES:
+        R = c.dom.reaches
+        for name in ("chanxi", "chanyj"):
+            assert np.array_equal(net[name], want[name]), name
+        assert np.array_equal(bits(net["node_area"]), want["node_area"].astype(np.int32))
+        got = dict(linkid=R["linkid"], to_node=R["to_node"], typel=R["typel"],
+                   lakeidx=R["lake_lookup"], order=R["order"])
+        for name, arr in got.items():
+            assert np.array_equal(arr, want[name]), name
+        for name in ("chanlen", "musk", "musx", "so", "mannn", "chsslp", "bw", "channk"):
+            assert np.array_equal(bits(R[name]), want[name].astype(np.int32)), name
+        assert np.array_equal(R["ch_lnkrt_sl"].ravel(), want["ch_lnkrt_sl"])
+    for name in (() if variant in REACHES else
+                 ("chanxi", "chanyj", "to_node", "typel", "lakenode", "order")):
         assert np.array_equal(net[name], want[name]), name
-    for name in ("chanlen", "node_area", "bw", "zelev"):
+    for name in (() if variant in REACHES else ("chanlen", "node_area", "bw", "zelev")):
         assert np.array_equal(np.asarray(net[name], np.float32).view(np.int32),
                               want[name].astype(np.int32)), name
-    bits = lambda a: np.ascontiguousarray(a, np.float32).ravel().view(np.int32)  # noqa: E731
     assert np.array_equal(bits(c.dom.retention), want["retention"].astype(np.int32))
     assert np.array_equal(bits(c.dom.slope), want["slope"].astype(np.int32))
     assert np.array_equal(c.dom.sdir.ravel(), want["sdir"])
@@ -148,9 +171,17 @@ def test_coupling_cycles_are_bitwise_against_wrf_hydro(tmp_path_factory, variant
         got = dict(smois=smois, sh2o=sh2o, sfcheadrt=head, infxsrt_rt=c.infxsrt,
                    head_rt=c.ostate.head, zwattablrt=c.sstate.zwattablrt,
                    qstrmvolrt_acc=c.qstrm_acc, qinflowbase=c.qinflowbase,
-                   to_lake=c.ostate.to_lake, qlink1=c.qlink1, hlink=c.hlink, cvol=c.cvol,
-                   resht=c.channel.lakes.resht, qlakeo=c.channel.lakes.qlakeo,
-                   dtct=c.channel.dtct)
+                   to_lake=c.ostate.to_lake, qlink1=c.qlink1, hlink=c.hlink,
+                   resht=c.channel.lakes.resht, qlakeo=c.channel.lakes.qlakeo)
+        if variant in REACHES:
+            # nlst%dtct stays the namelist's DTRT_CH (config.F90 :828)
+            got.update(qlink2=c.qlink2, qlateral=c.qlateral, velocity=c.velocity,
+                       qlakei=c.channel.lakes.qlakei,
+                       dtct=cp.asarray([np.float32(c.cfg.dtrt_ch)]))
+            if c.cfg.channel_option == 2:
+                got.update(qloss=c.qloss)
+        else:
+            got.update(cvol=c.cvol, dtct=c.channel.dtct)
         if c.bucket is not None:
             got.update(z_gwsubbas=c.z_gw, qout_gwsubbas=c.qout_gw)
         if c.gw2d is not None:
