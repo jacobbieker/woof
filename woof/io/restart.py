@@ -4351,6 +4351,12 @@ def _stock_cumulus_rebuild_arrays(scheme) -> frozenset:
 # Cloud accumulators remain serialized driver fields; they are not in this object.
 _CALLABLE_REBUILD_CONTAINERS_BY_CLASS = {
     "woof.core.gfdleta.GFDLEtaRadiation": frozenset({"tables"}),
+    # A partial-depth child's radiation: the wrapped stock adapter (its
+    # classified arrays are read through the wrapper's attribute
+    # delegation) and the extended column, refilled from the child and its
+    # parent at every call.
+    "woof.core.partial_nest_physics.ExtendedColumnRadiation": frozenset(
+        {"inner", "column"}),
 }
 
 

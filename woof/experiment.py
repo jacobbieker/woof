@@ -507,7 +507,8 @@ _DOMAIN_KEY_ROWS = key_rows(
            "covers its footprint from the surface to the root's full level "
            "k_top only (k_top, spec_levels, relax_levels, feedback, "
            "feedback_fields, smooth_option, mass_correction); absent, the "
-           "child is full depth"),
+           "child is full depth.  Runs on the idealized tree and on woof "
+           "go's prepared domain tree (fixed clock; no checkpoints)"),
     KeyRow("quicklook", "table", None,
            "a quick-look history stream between full frames (every_s, "
            "which divides history_interval_s, and history_vars), written "

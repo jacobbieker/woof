@@ -251,7 +251,17 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   - Morrison with CESM aerosol (`mp_physics = 40`, `aercu_opt = 0`).
 - **Height-dependent resolution:** a partial-depth two-way nest, fine near
   the ground and coarser aloft, on WRF and (dry dynamics only) on MPAS; and
-  WRF's live vertical nesting (`vert_refine_method = 2`).
+  WRF's live vertical nesting (`vert_refine_method = 2`).  On WRF the band
+  (`partial_nest = { k_top = ... }` on a child `[[domain]]`) runs on the
+  idealized tree and on `woof go`'s real-data domain tree: map factors, the
+  child's land surface rebuilt on its truncated column, radiation on an
+  extended column to the model top, and two-way feedback below the
+  interface plus WRF's surface feedback.  The interface must be a
+  pure-pressure level (at or above `etac`), above 12 km under a parent with
+  deep cumulus, and below a `damp_opt = 3` layer.  The real-data band needs
+  a fixed clock (`woof domain ... --clock fixed`); its child takes
+  `diff_opt = 1` with `km_opt = 4` and `emdiv = 0`; it writes no
+  checkpoints and cannot resume.
 - **More data sources:** the Met Office global and UKV models, DWD ICON
   (global and the machine-learning variant) and additional mapped routes.
 - **Applied tooling:** wind-energy siting, hindcasts and power products,

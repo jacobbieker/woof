@@ -132,7 +132,9 @@ def _gross_pp(state, cfg, k, d_pp):
     dnw = cp.asnumpy(state.dnw).astype(np.float64)[:k]
     c1h = cp.asnumpy(state.c1h).astype(np.float64)[:k]
     div = (u[:, :, 1:] - u[:, :, :-1]) / cfg.dx + (v[:, 1:, :] - v[:, :-1, :]) / cfg.dy
-    return (np.abs(dnw[:, None, None] * div).sum(axis=0)
+    m2 = (cp.asnumpy(state.msft).astype(np.float64) ** 2 if state.has_msf
+          else 1.0)
+    return (m2 * np.abs(dnw[:, None, None] * div).sum(axis=0)
             + np.abs(dnw * c1h).sum() * np.abs(d_pp.astype(np.float64)))
 
 
@@ -154,6 +156,7 @@ def _drive(parent, cfg, n_sub, *, exact, theta_upwind=False):
     from woof.core.partial_nest_dyn import (Interface, TopForcing, column_sums,
                                             prepare_top_substep, truncate_state)
     k = K_TOP
+    msft = cp.asnumpy(parent.msft).astype(np.float32) if parent.has_msf else None
     coef_p = prepare_acoustic_coefficients(parent, cfg, DTAU)
     child, ccfg = truncate_state(parent, cfg, k)
     coef_c = prepare_acoustic_coefficients(child, ccfg, DTAU)
@@ -180,19 +183,26 @@ def _drive(parent, cfg, n_sub, *, exact, theta_upwind=False):
         sums = cp.asnumpy(column_sums(parent, cfg, k))
         s_pp, s_rf, d_pp, d_rf = sums[0], sums[1], sums[2], sums[3]
         # The reference flux through the interface: the full column's
-        # reference divergence above it, D_rf - S_rf.
+        # reference divergence above it, D_rf - S_rf (with map factors the
+        # column sum carries it as msft*ww_rf).
         ww_rf = (d_rf - s_rf).astype(np.float32)
+        if msft is not None:
+            ww_rf = (ww_rf / msft).astype(np.float32)
         top.ww_rf[...] = cp.asarray(ww_rf)
         if exact:
             ww_pp = cp.asnumpy(top.ww_pp)
-            adj_pp = _adjustment(s_pp, ww_pp, d_pp)
-            adj_rf = _adjustment(s_rf, ww_rf, d_rf)
+            # The terms the kernel adds to the column sum: ww_top itself,
+            # or fl(msft*ww_top) with map factors.
+            in_pp = ww_pp if msft is None else (msft * ww_pp).astype(np.float32)
+            in_rf = ww_rf if msft is None else (msft * ww_rf).astype(np.float32)
+            adj_pp = _adjustment(s_pp, in_pp, d_pp)
+            adj_rf = _adjustment(s_rf, in_rf, d_rf)
             top.adj_pp[...] = cp.asarray(adj_pp)
             top.adj_rf[...] = cp.asarray(adj_rf)
             eps = float(np.finfo(np.float32).eps)
             ulps.append(max(
                 (np.abs(adj_pp) / (eps * _gross_pp(parent, cfg, k, d_pp))).max(),
-                _ulps(adj_rf, s_rf, ww_rf, d_rf).max()))
+                _ulps(adj_rf, s_rf, in_rf, d_rf).max()))
         launch(first=first)
         if exact:
             _same(mudf_c, mudf_p, f"mudf (substep {n})")
@@ -231,6 +241,91 @@ def test_child_reproduces_a_terrain_and_moist_column():
         getattr(parent, name)[...] = cp.asarray(
             amp * rng.random(parent.qv.shape), dtype=cp.float32)
     _drive(parent, cfg, 8, exact=True)
+
+
+def _metal() -> bool:
+    from woof import backend
+    return backend.active() == "mlx"
+
+
+def _metal_departs_by_rounding(parent, cfg, n_sub):
+    """The map-factor oracle on Metal: bounded, not word for word.  The
+    exact form hands the child the column-sum adjustment computed from the
+    oracle's own column_sums kernel, which only works where every compiler
+    rounds those sums as the kernels under test do.  MEASURED on Metal
+    (Apple M-series, MLX): with the adjustment, 82-116 of 840 theta'' words
+    differ after one substep (the msf-free oracle stays word for word);
+    without it, every field departs by rounding only (asserted here, and
+    word for word on CUDA)."""
+    _, _, departures = _drive(parent, cfg, n_sub, exact=False)
+    for name in ("u_pp", "v_pp", "w_pp", "ph_pp", "th_pp", "mu_pp", "p_pp"):
+        worst = max(d[name] for d in departures)
+        assert worst < 1e-4, (name, worst)
+
+
+def _generic_msf_w_solve(monkeypatch):
+    """The full column's advance_mu_th_msf and advance_w_phi_msf from
+    acoustic.cu's generic text.  A run launches both shape-specialized
+    (woof.core.kernel_shape: nz, ny, nx as compile-time constants), and that
+    specialization alone moves FMA contraction words: MEASURED, the
+    specialized and the generic image of advance_w_phi_msf differ in 52 of
+    the 900 w'' words of a random 16-level column after one substep (seed 5,
+    RTX A6000), and on Metal (Apple M-series, MLX) advance_mu_th_msf's in
+    116 of 840 theta'' words.  So a word-for-word oracle compares generic to
+    generic (the child's *_msf entry points are compiled generic)."""
+    import woof.core.acoustic as acoustic
+    from woof.core.kernels import get_kernel
+    shaped = ("advance_mu_th_msf", "advance_w_phi_msf")
+    monkeypatch.setattr(acoustic, "_w_phi_kernel",
+                        lambda name, nz, ny=0, nx=0: get_kernel("acoustic", name))
+    monkeypatch.setattr(acoustic, "get_kernel",
+                        lambda name, func, shape=(): get_kernel(
+                            name, func, () if func in shaped else shape))
+
+
+@requires_gpu
+@pytest.mark.parametrize("seed", [5, 23])
+def test_child_reproduces_a_map_factor_column_word_for_word(seed, monkeypatch):
+    """Map factors (a real projection's msft/msfu/msfv, here random
+    1 + 0.15*U): the *_msf top entry points against acoustic.cu's msf
+    kernels, word for word below the interface."""
+    _skip_strict()
+    _generic_msf_w_solve(monkeypatch)
+    parent, cfg = _parent(seed, msf_amp=0.15)
+    assert parent.has_msf
+    if _metal():
+        _metal_departs_by_rounding(parent, cfg, 12)
+        return
+    _, ulps, _ = _drive(parent, cfg, 12, exact=True)
+    assert max(ulps) <= K_TOP, ulps
+
+
+@requires_gpu
+def test_child_reproduces_a_map_factor_terrain_and_moist_column(monkeypatch):
+    _skip_strict()
+    _generic_msf_w_solve(monkeypatch)
+    import cupy as cp
+    parent, cfg = _parent(31, hill_height=400.0, moist=True, mp_physics=1,
+                          msf_amp=0.15)
+    assert parent.has_msf
+    rng = np.random.default_rng(31)
+    for name, amp in (("qv", 0.012), ("qc", 0.001), ("qr", 0.0005)):
+        getattr(parent, name)[...] = cp.asarray(
+            amp * rng.random(parent.qv.shape), dtype=cp.float32)
+    if _metal():
+        _metal_departs_by_rounding(parent, cfg, 8)
+        return
+    _drive(parent, cfg, 8, exact=True)
+
+
+@requires_gpu
+def test_map_factor_child_without_the_adjustment_departs_by_rounding_only():
+    _skip_strict()
+    parent, cfg = _parent(37, msf_amp=0.15)
+    _, _, departures = _drive(parent, cfg, 12, exact=False)
+    for name in ("u_pp", "v_pp", "w_pp", "ph_pp", "th_pp", "mu_pp", "p_pp"):
+        worst = max(d[name] for d in departures)
+        assert worst < 1e-4, (name, worst)
 
 
 def _warm_bubble():
@@ -365,6 +460,7 @@ def test_a_wrong_sign_interface_flux_is_seen():
                                             prepare_top_substep, truncate_state)
     parent, cfg = _parent(3)
     k = K_TOP
+    msft = cp.asnumpy(parent.msft).astype(np.float32) if parent.has_msf else None
     coef_p = prepare_acoustic_coefficients(parent, cfg, DTAU)
     child, ccfg = truncate_state(parent, cfg, k)
     coef_c = prepare_acoustic_coefficients(child, ccfg, DTAU)
@@ -439,16 +535,17 @@ def test_zero_flux_and_a_lid_reduce_to_the_existing_kernels_word_for_word():
         _same(mudf_b, mudf_a, "mudf")
 
 
-def _omega_parent(seed):
+def _omega_parent(seed, **kw):
     import cupy as cp
     from woof.core.dycore import stage_fluxes
-    parent, cfg = _parent(seed)
+    parent, cfg = _parent(seed, **kw)
     ru, rv, ww = stage_fluxes(parent, cfg)
     return parent, cfg, ru.copy(), rv.copy(), ww.copy()
 
 
 @requires_gpu
-def test_calc_ww_with_a_top_flux_reproduces_the_full_column():
+@pytest.mark.parametrize("msf_amp", [0.0, 0.15])
+def test_calc_ww_with_a_top_flux_reproduces_the_full_column(msf_amp):
     """Big step: WRF calc_ww_cp on the child with the full column's interface
     Omega (and the column-sum adjustment) is the full column's Omega below
     the interface, word for word; without the adjustment it departs by
@@ -457,12 +554,13 @@ def test_calc_ww_with_a_top_flux_reproduces_the_full_column():
     import cupy as cp
     from woof.core.partial_nest_dyn import calc_ww_top, column_sums, truncate_state
     k = K_TOP
-    parent, cfg, ru, rv, ww = _omega_parent(11)
+    parent, cfg, ru, rv, ww = _omega_parent(11, msf_amp=msf_amp)
+    assert bool(parent.has_msf) == (msf_amp > 0.0)
     child, ccfg = truncate_state(parent, cfg, k)
     sums = cp.asnumpy(column_sums(parent, cfg, k, ru, rv))
     ww_k = cp.asnumpy(ww[k])
     adj = _adjustment(sums[4], ww_k, sums[5])
-    assert _ulps(adj, sums[4], ww_k, sums[5]).max() <= 4.0
+    assert _ulps(adj, sums[4], ww_k, sums[5]).max() <= (4.0 if msf_amp == 0.0 else 8.0)
     got = calc_ww_top(child, ccfg, ru[:k].copy(), rv[:k].copy(), ww[k].copy(),
                       cp.asarray(adj))
     _same(got, ww[:k + 1], "ww")

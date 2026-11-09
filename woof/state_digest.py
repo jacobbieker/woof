@@ -141,6 +141,11 @@ _CANONICAL_EXCLUDED_FRAME_SCRATCH = frozenset({
     # 'refl_10cm_1km' is inside an audited lazy prefix but is not a concrete
     # registered member" (a rented box, 2026-10-21 19:23Z).
     "refl_10cm_1km", "refl_10cm_4km",
+    # A partial-depth child's interface phi'' predictor
+    # (woof/core/partial_nest_dyn.py prepare_top_substep), written by the
+    # predictor launch of every acoustic substep before the w''-phi''
+    # solve reads it: substep work, not trajectory.
+    "nest_top_rhs",
 })
 CHILD_DUTY_SCRATCH_MEMBERS = (
     "scratch/nest_parent_field",

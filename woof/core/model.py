@@ -3048,7 +3048,48 @@ def refuse_real_partial_nests(exp, route: str) -> None:
             "no truncated-depth rebuild")
 
 
-def realize_partial_nests(model, exp, coord, *, physics=None):
+def refuse_prepared_tree_partial_nests(exp, route: str) -> None:
+    """What ``woof go``'s prepared domain-tree route does not carry with a
+    partial-depth band, refused by name before anything is fetched or
+    built.  That route realizes its bands on the restored real-data tree
+    (``woof.prepared_domain_tree_forecast``: the child truncated at its
+    interface, its land-surface physics rebuilt on the truncated column and
+    its radiation on the extended one), as the idealized tree does."""
+    named = [int(dc.grid_id) for dc in exp.domains if dc.partial_nest is not None]
+    if not named:
+        return
+    gid = named[0]
+    if bool(getattr(exp.root.run, "use_adaptive_time_step", False)):
+        raise ValueError(
+            f"{route}: d{gid:02d} declares partial_nest on an adaptive clock; a "
+            "partial-depth band's interface interpolation and top-zone weights "
+            "are bound to fixed parent and child steps.  Re-emit the domain "
+            "with `woof domain ... --clock fixed` (or set "
+            "use_adaptive_time_step = false)")
+    devices = getattr(exp, "devices", None)
+    if devices is not None and int(getattr(devices, "count", 1) or 1) > 1:
+        raise ValueError(
+            f"{route}: d{gid:02d} declares partial_nest on a multi-device tree; "
+            "partial-depth bands run on one device")
+    tiles = getattr(exp, "tiles", None)
+    if tiles is not None and str(getattr(tiles, "mode", "off")) == "on":
+        raise ValueError(
+            f"{route}: d{gid:02d} declares partial_nest with [tiles] streaming; "
+            "partial-depth bands and their parents run resident")
+    if int(getattr(exp.root.run, "dfi_opt", 0) or 0):
+        raise ValueError(
+            f"{route}: d{gid:02d} declares partial_nest with digital filter "
+            "initialization (dfi_opt); a partial-depth band starts from its "
+            "prepared analysis")
+    relocation = getattr(exp, "relocation", None)
+    if relocation is not None and bool(getattr(relocation, "enabled", False)):
+        raise ValueError(
+            f"{route}: d{gid:02d} declares partial_nest beside [relocation]; a "
+            "partial-depth band and its ancestors do not move")
+
+
+def realize_partial_nests(model, exp, coord, *, physics=None,
+                          surface_feedback: bool = False):
     """Make every node whose :class:`~woof.experiment.DomainConfig` carries a
     ``partial_nest`` band a running partial child, parent first.
 
@@ -3062,9 +3103,12 @@ def realize_partial_nests(model, exp, coord, *, physics=None):
     (:func:`woof.core.partial_nest_physics.attach_child_physics`, the
     idealized neutral-surface defaults; ``physics(nest, node)`` replaces
     that).  :func:`execute_experiment` then steps the bands through
-    :func:`partial_nest_steppers`.  Returns ``{grid_id: PartialNest}``."""
+    :func:`partial_nest_steppers`.  ``surface_feedback`` (a real tree) keeps
+    each node's full-depth NestCoupler for the band's surface, soil and
+    carried-physics feedback (:class:`~woof.core.partial_nest_run
+    .PartialNestCoupler`).  Returns ``{grid_id: PartialNest}``."""
     import dataclasses as _dc
-    from woof.core.partial_nest import (truncated_vertical_coord,
+    from woof.core.partial_nest import (child_damp_opt, truncated_vertical_coord,
                                         validate_band_chain)
     from woof.core.partial_nest_dyn import truncate_state
     from woof.core.partial_nest_run import PartialNest, PartialNestCoupler
@@ -3080,14 +3124,25 @@ def realize_partial_nests(model, exp, coord, *, physics=None):
         while walk.cfg.partial_nest is not None:
             chain.append(walk.cfg.partial_nest)
             walk = walk.parent
-        validate_band_chain(tuple(reversed(chain)), walk.cfg.run, coord)
+        bands = tuple(reversed(chain))
+        root_heights = [_band_heights(walk.state, walk.cfg.run, int(b.k_top))
+                        for b in bands]
+        validate_band_chain(
+            bands, walk.cfg.run, coord,
+            interface_heights_m=[h["interface_height_m"] for h in root_heights],
+            interface_tops_m=[h["interface_top_m"] for h in root_heights],
+            damping_floor_m=root_heights[-1].get("damping_floor_m"))
         parent_nest = nests.get(int(parent.cfg.grid_id))
         pcoord = (coord if parent_nest is None
                   else truncated_vertical_coord(coord, parent_nest.k))
         child, ccfg = truncate_state(node.state, node.cfg.run, int(band.k_top),
                                      coord=coord)
+        # The child holds none of a damp_opt=3 parent's layer (validated
+        # above the interface); the parent's own levels keep it.
+        ccfg = _dc.replace(ccfg, damp_opt=child_damp_opt(ccfg))
         nest = PartialNest(parent.state, parent.cfg.run, pcoord, child, ccfg, band,
-                           parent_nest=parent_nest)
+                           parent_nest=parent_nest,
+                           heights=root_heights[-1])
         if physics is not None:
             physics(nest, node)
         elif physics_driver_required(ccfg):
@@ -3097,10 +3152,33 @@ def realize_partial_nests(model, exp, coord, *, physics=None):
                                  longitude=lon)
         node.state = child
         node.cfg = _dc.replace(node.cfg, run=ccfg)
-        node.coupler = PartialNestCoupler(nest)
+        # A real tree's node arrives with its full-depth NestCoupler, whose
+        # surface feedback the band keeps (PartialNestCoupler.surface).
+        surface = node.coupler if surface_feedback else None
+        node.coupler = PartialNestCoupler(nest, surface=surface)
         nests[int(node.cfg.grid_id)] = nest
     model._partial_nests = nests
     return nests
+
+
+def _band_heights(root_state, root_cfg, k_top: int) -> dict:
+    """The interface's lowest and highest height above sea level (full level
+    ``k_top`` of a band's chain root, geopotential over g) and, under
+    damp_opt=3, the lowest bottom of the root's damping layer (its top
+    geopotential over g, less zdamp), for
+    :func:`woof.core.partial_nest.validate_partial_nest`."""
+    from woof.core.constants import G
+    phb, php = root_state.phb, root_state.php
+
+    def level(k):
+        return (phb[k] if phb.ndim == 3 else phb[k:k + 1, None, None][0]) + php[k]
+    phi = level(k_top)
+    out = {"interface_height_m": float(phi.min()) / float(G),
+           "interface_top_m": float(phi.max()) / float(G)}
+    if int(getattr(root_cfg, "damp_opt", 0)) == 3:
+        top = level(int(root_cfg.nz))
+        out["damping_floor_m"] = float(top.min()) / float(G) - float(root_cfg.zdamp)
+    return out
 
 
 def partial_nest_steppers(model, steppers=None) -> dict:
