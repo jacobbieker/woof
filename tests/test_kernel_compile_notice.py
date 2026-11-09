@@ -26,6 +26,7 @@ from woof.kernel_compile_notice import (
     COMPILING_STATUS,
     CUPY_CACHE_ENV,
     cupy_kernel_cache_dir,
+    kernel_cache_dir,
     kernel_cache_is_cold,
     kernel_cache_state,
     kernel_compile_notice,
@@ -149,11 +150,34 @@ def test_cache_dir_resolution_honours_cupy_env(monkeypatch, tmp_path):
 def test_default_resolution_feeds_the_no_argument_call(monkeypatch,
                                                        tmp_path):
     cache = tmp_path / "cupy-cache"
+    monkeypatch.setenv("WOOF_BACKEND", "cuda")
     monkeypatch.setenv(CUPY_CACHE_ENV, str(cache))
     assert kernel_compile_notice() is not None
     cache.mkdir()
     (cache / "kernel.cubin").write_bytes(b"\x00")
     assert kernel_compile_notice() is None
+
+
+def test_metal_censuses_its_pipeline_archives_not_cupys_cache(monkeypatch,
+                                                              tmp_path):
+    """The mlx backend's built kernels are Metal binary archives; CuPy's
+    cache stays empty on Metal, so every warm run said "first run"."""
+    archives = tmp_path / "metal-pipelines"
+    monkeypatch.setenv("WOOF_BACKEND", "mlx")
+    monkeypatch.setenv("WOOF_METAL_PIPELINE_DIR", str(archives))
+    monkeypatch.setenv(CUPY_CACHE_ENV, str(tmp_path / "cupy-empty"))
+    assert kernel_cache_dir() == archives
+    assert kernel_compile_notice() is not None          # nothing built yet
+    archives.mkdir()
+    (archives / "mo_process-0123abcd.metalarchive").write_bytes(b"\x00" * 96)
+    state = kernel_cache_state(compute_capability="metal")
+    assert state.entries == 1 and state.undecodable == 1
+    assert state.reason is None and state.notice is None
+    # archives off: nothing persists, so every run compiles
+    monkeypatch.setenv("WOOF_METAL_PIPELINE_DIR", "off")
+    assert kernel_cache_state().reason == COLD_CACHE
+    monkeypatch.setenv("WOOF_BACKEND", "cuda")
+    assert kernel_cache_dir() == tmp_path / "cupy-empty"
 
 
 def test_the_status_token_is_a_single_progress_word():
