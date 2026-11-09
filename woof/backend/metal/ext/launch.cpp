@@ -114,12 +114,27 @@ static std::string device_tag(MTL::Device* device) {
   return tag;
 }
 
-static std::string library_path(MTL::Device* device, const std::string& library_key) {
-  std::string name = library_key;
+// A cache file's name for a key: the key's safe characters, and past 120 of
+// them the first 96 plus a 64-bit FNV-1a digest of the whole key.  A unit
+// with many integer defines has a key of hundreds of characters (SSiB with
+// its eight table digests: 290), and a name past the file system's 255-byte
+// limit made -[MTLBinaryArchive serializeToURL:] crash the process (SIGSEGV
+// in objc_retain inside airntSerializeToURL) instead of failing.
+static std::string file_stem(const std::string& key) {
+  std::string name = key;
   for (auto& c : name) {
     if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-' || c == '.')) c = '_';
   }
-  return g_library_dir + "/" + name + "." + device_tag(device) + ".metallib";
+  if (name.size() <= 120) return name;
+  uint64_t h = 1469598103934665603ull;
+  for (unsigned char c : key) { h ^= c; h *= 1099511628211ull; }
+  char digest[17];
+  std::snprintf(digest, sizeof(digest), "%016llx", static_cast<unsigned long long>(h));
+  return name.substr(0, 96) + "-" + digest;
+}
+
+static std::string library_path(MTL::Device* device, const std::string& library_key) {
+  return g_library_dir + "/" + file_stem(library_key) + "." + device_tag(device) + ".metallib";
 }
 
 // The unit's body as a dynamic library: loaded from disk, or built and
@@ -251,12 +266,13 @@ static MTL::Library* library_for(const std::string& library_key, const std::stri
 static std::string g_archive_dir;
 
 static std::string archive_path(const std::string& library_key, const std::string& kernel) {
-  std::string name = library_key + "__" + kernel;
-  for (auto& c : name) {
-    if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-' || c == '.')) c = '_';
-  }
-  return g_archive_dir + "/" + name + ".metalarchive";
+  return g_archive_dir + "/" + file_stem(library_key + "__" + kernel) + ".metalarchive";
 }
+
+// One archive written at a time per process: the compile prefetch builds
+// pipelines on several threads, and Metal's archive serializer is not
+// documented as reentrant.
+static std::mutex g_serialize_mutex;
 
 static MTL::BinaryArchive* open_archive(MTL::Device* device, const std::string& path) {
   auto* desc = MTL::BinaryArchiveDescriptor::alloc()->init();
@@ -317,7 +333,11 @@ static MTL::ComputePipelineState* pipeline_for(MTL::Library* lib, const std::str
         // run crashed inside -[MTLBinaryArchive serializeToURL:])
         std::string partial = path + "." + std::to_string(getpid()) + ".partial";
         auto* url = NS::URL::fileURLWithPath(NS::String::string(partial.c_str(), NS::UTF8StringEncoding));
-        if (stored->serializeToURL(url, &error)) std::rename(partial.c_str(), path.c_str());
+        {
+          std::lock_guard<std::mutex> serialize(g_serialize_mutex);
+          error = nullptr;
+          if (stored->serializeToURL(url, &error)) std::rename(partial.c_str(), path.c_str());
+        }
         state = pipeline_from(device, desc, stored);
         compile_log("pipeline (archived)", kernel, began);
       }
