@@ -273,3 +273,43 @@ def test_the_pool_admits_the_readers_rows_beside_the_stream():
     pool = LbcPool(inventory, scalar_names=("lbc_qv", "lbc_zz_pool_row"), reader=reader)
     admitted = pool.start(when)
     assert admitted.fields["lbc_zz_pool_row"] is row
+
+
+def test_a_regional_attach_pads_the_garbage_column_and_fills_the_start(monkeypatch):
+    """The regional physics runs one garbage column past the mesh cells: the geography and the initial fill
+    take the donor column's copy (woof.hex.cuda_regional_forecast_v841.pad_regional_physics_column)."""
+    cp = pytest.importorskip("cupy")
+    ncells = 5
+    seen = {}
+
+    class Runtime:
+        raw = _raw(chem_in_opt=1, have_bcs_chem=1)
+        switches = {"chem_in_opt": 1, "have_bcs_chem": 1}
+        restart_provider_receipt = None
+        steps, offset, rows = 0, 0, (1, 2)
+        species_row = SimpleNamespace(names=lambda: ("qv",))
+
+        def __init__(self):
+            self.ncells = ncells + 1
+
+        def set_geography(self, lat, lon):
+            seen["geography"] = (np.asarray(lat), np.asarray(lon))
+
+        def fill_initial(self, scalars, **kwargs):
+            seen["fill"] = kwargs
+
+    runtime = Runtime()
+    monkeypatch.setattr(chem_wrf, "attach_statics", lambda *a, **k: None)
+    monkeypatch.setattr(chem_wrf, "install_boundary_reader",
+                        lambda rt, driver, latitude, longitude: seen.setdefault("reader", latitude.size))
+    lat = np.radians(np.linspace(30.0, 31.0, ncells))
+    mesh = SimpleNamespace(arrays={"latCell": lat, "lonCell": -lat}, attrs={"regional_garbage_donor_cell": 1})
+    backend = SimpleNamespace(
+        chemistry=runtime, _seam=SimpleNamespace(_driver=SimpleNamespace(fields={"xland": cp.ones(ncells + 1)})),
+        _prepare=lambda atmosphere, names, post_rk: SimpleNamespace(pres_hyd_p="p"))
+    driver = SimpleNamespace(atmosphere=SimpleNamespace(state=SimpleNamespace(scalars=cp.zeros((2, 3, ncells + 1)))))
+    host = {"regional": {}, "prepared": SimpleNamespace(mesh=mesh), "start_time_text": "2025-07-30_01:00:00"}
+    chem_wrf.attach(backend, host, driver)
+    filled = seen["fill"]["latitude"]
+    assert filled.size == ncells + 1 and filled[-1] == filled[1] and seen["fill"]["pressure"] == "p"
+    assert seen["reader"] == ncells
