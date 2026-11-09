@@ -24,6 +24,17 @@ in `seaice_run_velocity_solver`'s order:
    solve alone against a fixed stress-divergence forcing;
 3. then the final divergence/shear and the principal stresses.
 
+`run_presubcycle.F90` drives the same module's `velocity_solver_pre_subcycle`
+(aggregates, masks, new-ice velocities, Hibler ice strength, air stress,
+Coriolis coefficient, ocean stress, surface tilt, subcycle initialisation).
+Under the column package's vertical thermodynamics `ice_strength` calls
+`colpkg_ice_strength`, which is not built; the driver then calls the same
+routines without it (the GPU port refuses that ice strength by name).
+`seaice_mesh`'s two interpolation routines are cut verbatim out of
+`mpas_seaice_mesh.F` by build.sh into a module of that name; the rest of that
+file needs the stream manager. `ice_strength` calls `exp`: the host glibc's
+`expf`/`exp`, or `tools/oracle_libm`'s transcriptions of them elsewhere.
+
 It reads `seaice_constants`, so the stand-alone column constants
 (`column/constants/cice`) and `ice_kinds_mod` are compiled too. Both oracles
 are built at RKIND 4 and at RKIND 8. The column package is double, so
@@ -35,6 +46,7 @@ production MPAS-Seaice is built double.
 pixi run -e mpas-oracle bash tools/mpas_seaice_oracle/build.sh "$MPAS_V842" "$BUILD_DIR"
 pixi run -e default python tools/mpas_seaice_oracle/make_fixture.py "$BUILD_DIR"           # internal stress
 pixi run -e default python tools/mpas_seaice_oracle/make_velocity_fixture.py "$BUILD_DIR"  # velocity solve
+pixi run -e default python tools/mpas_seaice_oracle/make_presubcycle_fixture.py "$BUILD_DIR"  # pre-subcycle
 ```
 
 - build.sh checks `SOURCES.sha256` and compiles at `-O0 -ffp-contract=off`,
@@ -44,11 +56,14 @@ pixi run -e default python tools/mpas_seaice_oracle/make_velocity_fixture.py "$B
   and `inputs.sha256` from the cases in `woof.verify.mpas_seaice_evp_oracle`.
 - make_velocity_fixture.py does the same for
   `tests/data/oracles/mpas_seaice_velocity` (`woof.verify.mpas_seaice_velocity_oracle`).
+- make_presubcycle_fixture.py does the same for
+  `tests/data/oracles/mpas_seaice_presubcycle` (`woof.verify.mpas_seaice_presubcycle_oracle`).
 
 ## Grade the GPU port
 
 ```bash
-pixi run -e default python -m pytest tests/test_mpas_seaice_evp_parity.py tests/test_mpas_seaice_velocity_parity.py
+pixi run -e default python -m pytest tests/test_mpas_seaice_evp_parity.py tests/test_mpas_seaice_velocity_parity.py \
+    tests/test_mpas_seaice_presubcycle_parity.py
 pixi run -e default woof hex seaice verify
 ```
 

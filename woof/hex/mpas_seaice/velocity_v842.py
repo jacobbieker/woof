@@ -23,12 +23,13 @@ with gfortran ``-O0 -ffp-contract=off``, in both of MPAS's precisions:
 See ``tools/mpas_seaice_oracle`` and
 ``tests/test_mpas_seaice_velocity_parity.py``.
 
-Not ported yet: the rest of the pre-subcycle work (``aggregate_mass_and_area``,
+The rest of the pre-subcycle work (``aggregate_mass_and_area``,
 ``calculation_masks``, ``new_ice_velocities``, ``ice_strength``, ``air_stress``,
-``surface_tilt``), whose outputs these kernels take as inputs
-(``totalMassVertex``, ``iceAreaVertex``, ``solveStress``/``solveVelocity``,
-``icePressure``, ``airStressVertexU/V``, ``surfaceTiltForceU/V``), and
-``ocean_stress_final``. Halo exchanges are a one-rank no-op.
+``surface_tilt``) is :mod:`woof.hex.mpas_seaice.presubcycle_v842`; its outputs
+are these kernels' inputs (``totalMassVertex``, ``iceAreaVertex``,
+``solveStress``/``solveVelocity``, ``icePressure``, ``airStressVertexU/V``,
+``surfaceTiltForceU/V``). Not ported yet: ``ocean_stress_final``. Halo
+exchanges are a one-rank no-op.
 
 Arrays are device float32 (``r4``) or float64 (``r8``), with int32 masks and
 connectivity, in the Fortran layout: ``a(maxEdges, nCells)`` is C-order
@@ -112,17 +113,40 @@ def _solve_bounds(n_vertices_solve: int, n_vertices: int) -> None:
         raise ValueError("nVerticesSolve must lie within nVertices")
 
 
-def pre_subcycle(*, mesh: dict, icestate: dict, solver: dict, variational: dict,
-                 use_ocean_stress: bool) -> None:
-    """``coriolis_force_coefficient``, ``ocean_stress`` and
-    ``init_subcycle_variables`` (variational), in place, in the model's order.
+def coriolis_and_ocean_stress(*, mesh: dict, icestate: dict, solver: dict, use_ocean_stress: bool) -> None:
+    """``coriolis_force_coefficient`` then ``ocean_stress``, in place.
 
     ``mesh``: ``fVertex``, ``nVerticesSolve``. ``icestate``:
-    ``totalMassVertex``. ``solver``: ``solveStress``, ``solveVelocity``,
-    ``uVelocity``, ``vVelocity``, ``totalMassVertexfVertex``,
-    ``oceanStressU/V``, ``oceanStressCoeff``, ``uOceanVelocityVertex``,
-    ``vOceanVelocityVertex``, ``stressDivergenceU/V``. ``variational``:
-    ``strain11/22/12``, ``stress11/22/12``.
+    ``totalMassVertex``. ``solver``: ``solveVelocity``,
+    ``totalMassVertexfVertex``, ``oceanStressU/V``, ``uOceanVelocityVertex``,
+    ``vOceanVelocityVertex``.
+    """
+    import cupy as cp
+    precision = _precision_of(solver["uOceanVelocityVertex"])
+    dtype = PRECISIONS[precision]
+    n_vertices = solver["uOceanVelocityVertex"].shape[0]
+    nvs = int(mesh["nVerticesSolve"])
+    _solve_bounds(nvs, n_vertices)
+    _vertex_fields(solver, ("totalMassVertexfVertex", "oceanStressU", "oceanStressV", "uOceanVelocityVertex",
+                            "vOceanVelocityVertex"), n_vertices, dtype)
+    _check("fVertex", mesh["fVertex"], dtype, (n_vertices,))
+    _check("totalMassVertex", icestate["totalMassVertex"], dtype, (n_vertices,))
+    _check("solveVelocity", solver["solveVelocity"], cp.int32, (n_vertices,))
+    _function(precision, "seaice_coriolis_force_coefficient_v842")(_grid(nvs), (_BLOCK,), (
+        solver["totalMassVertexfVertex"], icestate["totalMassVertex"], mesh["fVertex"], np.int32(nvs)))
+    _function(precision, "seaice_ocean_stress_v842")(_grid(n_vertices), (_BLOCK,), (
+        solver["oceanStressU"], solver["oceanStressV"], solver["uOceanVelocityVertex"],
+        solver["vOceanVelocityVertex"], mesh["fVertex"], solver["solveVelocity"],
+        np.int32(bool(use_ocean_stress)), np.int32(nvs), np.int32(n_vertices)))
+
+
+def init_subcycle_variables(*, mesh: dict, solver: dict, variational: dict) -> None:
+    """``init_subcycle_variables`` (variational), in place.
+
+    ``mesh``: ``nVerticesSolve``. ``solver``: ``solveStress``,
+    ``solveVelocity``, ``uVelocity``, ``vVelocity``, ``oceanStressCoeff``,
+    ``stressDivergenceU/V``. ``variational``: ``strain11/22/12``,
+    ``stress11/22/12``.
     """
     import cupy as cp
     precision = _precision_of(solver["uVelocity"])
@@ -131,21 +155,12 @@ def pre_subcycle(*, mesh: dict, icestate: dict, solver: dict, variational: dict,
     n_cells, max_edges = variational["strain11"].shape
     nvs = int(mesh["nVerticesSolve"])
     _solve_bounds(nvs, n_vertices)
-    _vertex_fields(solver, ("uVelocity", "vVelocity", "totalMassVertexfVertex", "oceanStressU", "oceanStressV",
-                            "oceanStressCoeff", "uOceanVelocityVertex", "vOceanVelocityVertex",
-                            "stressDivergenceU", "stressDivergenceV"), n_vertices, dtype)
-    _check("fVertex", mesh["fVertex"], dtype, (n_vertices,))
-    _check("totalMassVertex", icestate["totalMassVertex"], dtype, (n_vertices,))
+    _vertex_fields(solver, ("uVelocity", "vVelocity", "oceanStressCoeff", "stressDivergenceU",
+                            "stressDivergenceV"), n_vertices, dtype)
     _check("solveVelocity", solver["solveVelocity"], cp.int32, (n_vertices,))
     _check("solveStress", solver["solveStress"], cp.int32, (n_cells,))
     for name in ("strain11", "strain22", "strain12", "stress11", "stress22", "stress12"):
         _check(name, variational[name], dtype, (n_cells, max_edges))
-    _function(precision, "seaice_coriolis_force_coefficient_v842")(_grid(nvs), (_BLOCK,), (
-        solver["totalMassVertexfVertex"], icestate["totalMassVertex"], mesh["fVertex"], np.int32(nvs)))
-    _function(precision, "seaice_ocean_stress_v842")(_grid(n_vertices), (_BLOCK,), (
-        solver["oceanStressU"], solver["oceanStressV"], solver["uOceanVelocityVertex"],
-        solver["vOceanVelocityVertex"], mesh["fVertex"], solver["solveVelocity"],
-        np.int32(bool(use_ocean_stress)), np.int32(nvs), np.int32(n_vertices)))
     _function(precision, "seaice_init_subcycle_vertices_v842")(_grid(n_vertices), (_BLOCK,), (
         solver["stressDivergenceU"], solver["stressDivergenceV"], solver["uVelocity"], solver["vVelocity"],
         solver["oceanStressCoeff"], solver["solveVelocity"], np.int32(nvs), np.int32(n_vertices)))
@@ -153,6 +168,17 @@ def pre_subcycle(*, mesh: dict, icestate: dict, solver: dict, variational: dict,
     _function(precision, "seaice_init_subcycle_cells_variational_v842")(_grid(n_cells), (_BLOCK,), (
         v["strain11"], v["strain22"], v["strain12"], v["stress11"], v["stress22"], v["stress12"],
         solver["solveStress"], np.int32(n_cells), np.int32(max_edges)))
+
+
+def pre_subcycle(*, mesh: dict, icestate: dict, solver: dict, variational: dict,
+                 use_ocean_stress: bool) -> None:
+    """``coriolis_force_coefficient``, ``ocean_stress`` and
+    ``init_subcycle_variables`` (variational), in place, in the model's order
+    (:func:`coriolis_and_ocean_stress`, then :func:`init_subcycle_variables`;
+    ``presubcycle_v842.pre_subcycle`` puts the surface tilt between them).
+    """
+    coriolis_and_ocean_stress(mesh=mesh, icestate=icestate, solver=solver, use_ocean_stress=use_ocean_stress)
+    init_subcycle_variables(mesh=mesh, solver=solver, variational=variational)
 
 
 def velocity_update(*, mesh: dict, icestate: dict, solver: dict, inertia, use_ocean_stress: bool,
