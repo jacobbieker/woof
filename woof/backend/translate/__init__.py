@@ -1698,6 +1698,8 @@ class _Rewriter:
         last = max(i for _, i, _ in tops)
         for g, _, top in tops:
             for a in chain(g)[1:]:
+                if self.span(a) == self.span(block):
+                    break               # the jump is itself the block's statement
                 # the block's own statement too: a jump from a loop that is
                 # one would `continue` that loop (ntu's retry inside its DO)
                 if a.kind.name in self._LOOPS:

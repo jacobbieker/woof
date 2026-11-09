@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 import hashlib
+import re
 import json
 import os
 from pathlib import Path
@@ -85,6 +86,22 @@ FAST_MATH = r'''
 '''
 
 
+_PHASE_REFERENCE=re.compile(r'=M471_PHASE<0 \? (local_\w+) : (\*m471_array<\w+>\([^;]*\));')
+
+
+def metal_text(text,exact):
+    """The source as the Metal translation takes it.  Each phase-carried
+    scalar is a reference to a local in the single-kernel strict step and to
+    its workspace slot in the phased fast kernels (``M471_PHASE<0 ? local :
+    *slot``); Metal has no reference that may name either a thread or a
+    device object, so each build spells the one its own kernels use: the
+    strict step (mynn471_step) the local, the phased kernels the slot."""
+    out,count=_PHASE_REFERENCE.subn(lambda m:'='+(m.group(1) if exact else m.group(2))+';',text)
+    if not count:
+        raise RuntimeError('MYNN 4.7.1 source no longer spells its phase-carried references as expected')
+    return out
+
+
 @lru_cache(maxsize=32)
 def image(nz,device,exact):
     import cupy as cp
@@ -109,7 +126,7 @@ def image(nz,device,exact):
         # the same arithmetic controls (a RawModule, as the HIP route builds).
         options=('-std=c++17','--ftz=false','--fmad='+('false' if exact else 'true'),
                  '--prec-div=true','--prec-sqrt=true')+(('-DGPUWM_WRF_EXACT=1',) if exact else ())
-        module=cp.RawModule(code=text,options=options)
+        module=cp.RawModule(code=metal_text(text,exact),options=options)
         names=['mynn471_step'] if exact else ['mynn471_phase'+str(i) for i in PHASES]
         return module,tuple(module.get_function(name) for name in names)
     arch='sm_'+''.join(map(str,cp.cuda.Device(device).compute_capability))
