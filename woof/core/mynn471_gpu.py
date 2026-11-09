@@ -103,6 +103,15 @@ def image(nz,device,exact):
             module.load(raw if isinstance(raw,bytes) else raw.encode())
         names=['mynn471_step'] if exact else ['mynn471_phase'+str(i) for i in PHASES]
         return module,tuple(module.get_function(name) for name in names)
+    from woof import backend
+    if backend.active()=='mlx':
+        # Metal: no nvcc image; the facade translates the same source under
+        # the same arithmetic controls (a RawModule, as the HIP route builds).
+        options=('-std=c++17','--ftz=false','--fmad='+('false' if exact else 'true'),
+                 '--prec-div=true','--prec-sqrt=true')+(('-DGPUWM_WRF_EXACT=1',) if exact else ())
+        module=cp.RawModule(code=text,options=options)
+        names=['mynn471_step'] if exact else ['mynn471_phase'+str(i) for i in PHASES]
+        return module,tuple(module.get_function(name) for name in names)
     arch='sm_'+''.join(map(str,cp.cuda.Device(device).compute_capability))
     mode='strict' if exact else 'fast'
     digest=hashlib.sha256(text.encode()).hexdigest()
