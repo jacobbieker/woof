@@ -3801,6 +3801,10 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
     known_tables = ("experiment", "shared", "projection", "domain",
                     "relocation", "perturbation", "tiles", "devices", "output", "simulated_radar",
                     "spectral_numerics", "nudging", "spectral_nudging", "physics_params", "radar_heating")
+    # [wrf_hydro] is read by the launch (woof.wrf_hydro_route) and dropped here.
+    if isinstance(raw, dict) and "wrf_hydro" in raw:
+        from woof.wrf_hydro_route import consume_table
+        raw = consume_table(raw, source)
     # Setup lineage is provenance, with no atmosphere or follower controls.
     if isinstance(raw, dict) and "lineage" in raw:
         from woof.cyclone_tracks import validate_lineage
@@ -5373,6 +5377,8 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
     _refuse_inflow_seeding_under_a_pbl_off_parent(experiment, source)
     _advise_anisotropic_w_mixing(experiment, source)
     _assert_derived_copies(experiment, source)
+    from woof.wrf_hydro_route import refuse_multiple_domains
+    refuse_multiple_domains(len(experiment.domains))
     return _bind_physics_params(experiment, source)
 
 

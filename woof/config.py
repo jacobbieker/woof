@@ -5104,7 +5104,8 @@ _RUN_CONFIG_TABLES = ("grid", "dynamics", "run", "fire")
 #: restart identity -- a run that trimmed its history must resume from a
 #: checkpoint written by one that did not, and the checkpoint stream is
 #: a different file written from model state.
-_KNOWN_TABLES = (*_RUN_CONFIG_TABLES, "tiles", "devices", "output", "simulated_radar")
+_KNOWN_TABLES = (*_RUN_CONFIG_TABLES, "tiles", "devices", "output", "simulated_radar",
+                 "wrf_hydro")
 
 #: ``[static]`` is known to ONE RunConfig-TOML route, the one that builds
 #: static geography from a RunConfig: a downscaled child's own terrain,
@@ -5266,6 +5267,9 @@ def load_config(path: str | Path, *, accept_epssm_auto: bool = False,
         raise ValueError(
             overlay_table_refusal(markers) if markers else table_not_honoured(
                 f"config file {path}", "a [grid]/[dynamics]/[run] config"))
+    # [wrf_hydro] is the launch's (woof.wrf_hydro_route), not a RunConfig table.
+    from woof.wrf_hydro_route import consume_table
+    raw = consume_table(raw, path)
     unknown_tables = [name for name in raw if name not in known_tables]
     if unknown_tables:
         hint = ""

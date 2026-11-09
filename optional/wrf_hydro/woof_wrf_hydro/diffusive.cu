@@ -122,7 +122,12 @@ extern "C" __global__ void wrfhydro_diffusive(
     // the groundwater-channel exchange (GWBASESWCRT = 3, :920-923, :949-990):
     // gwhead is gw2d's ho, qgw_chanrt (jxrt*ixrt) gw2d's channel flux plane
     int gw_on, int gw_sw, float cond_in, float cond_out,
-    const float* __restrict__ gwhead, float* __restrict__ qgw_chanrt, int ncell)
+    const float* __restrict__ gwhead, float* __restrict__ qgw_chanrt, int ncell,
+    // lake_option 3 (reservoir_da.cu): per-lake state and the host's
+    // parameter, forecast and timeslice tables; every lake kind 0 (the level
+    // pool) without it
+    int* res_ri, float* res_rf, const float* __restrict__ res_tab,
+    const float* __restrict__ res_obs_q, const int* __restrict__ res_obs_lb, int res_nev)
 {
     __shared__ float dtct;
     __shared__ int krt, dt_steps, flag;
@@ -261,8 +266,12 @@ extern "C" __global__ void wrfhydro_diffusive(
             qlakei[l] = (float)s;
             const float* q = lprops + (size_t)l * 9;
             float H = resht[l], qo;
-            levelpool_physics(lopt[l], qlakeip[l], qlakei[l], qo, qllake[l], dtc, H, q[0], q[1], q[8],
-                              q[2], q[3], q[4], q[5], q[6], q[7]);
+            if (res_ri[(size_t)l * RES_NI + RI_KIND] == 0)
+                levelpool_physics(lopt[l], qlakeip[l], qlakei[l], qo, qllake[l], dtc, H, q[0], q[1], q[8],
+                                  q[2], q[3], q[4], q[5], q[6], q[7]);
+            else                                         // the reservoir's run (:1244)
+                reservoir_run(l, nlakes, lopt[l], res_ri, res_rf, res_tab, res_obs_q, res_obs_lb,
+                              res_nev, lprops, qlakeip[l], qlakei[l], qllake[l], H, qo, dtc, err);
             resht[l] = H;
             qlakeo[l] = qo;
             qlakeip[l] = qlakei[l];

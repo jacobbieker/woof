@@ -4,7 +4,7 @@
 Reads the ``&HYDRO_nlist`` group WRF-Hydro reads (read_rt_nlst,
 hydro/OrchestratorLayer/config.F90 in WRF 4.7.1's hydro/, :621-638) and,
 when lake_option = 3, the ``&reservoir_nlist`` group (:640-644, read at
-:711-714), and maps them to :class:`HydroConfig`, the switches and constants
+:711-714; its DA flags select woof_wrf_hydro.reservoir_da), and maps them to :class:`HydroConfig`, the switches and constants
 the ported pieces take.  An option whose value selects something not ported
 is refused by name with the reason; a key WRF-Hydro does not read is refused
 as unknown.  File names and output switches are recorded for the caller and
@@ -82,6 +82,7 @@ class HydroConfig:
     gw_chan_cond_const_in: float = 0.0
     gw_chan_cond_const_out: float = 0.0
     io: dict = field(default_factory=dict)
+    reservoir: dict = field(default_factory=dict)   # lake_option 3's reservoir_nlist, when on
 
 
 def _value(text: str):
@@ -157,15 +158,20 @@ def map_hydro_nlist(groups: dict[str, dict]) -> HydroConfig:
     def refuse(key, value, why):
         raise UnportedOption(f"{key} = {value!r}: {why}")
 
-    if nl.get("sys_cpl", 1) != 1:
-        refuse("sys_cpl", nl["sys_cpl"], "only sys_cpl = 1 (coupled to WRF) is ported")
+    if nl.get("sys_cpl", 1) not in (1, 2):
+        refuse("sys_cpl", nl["sys_cpl"], "only sys_cpl = 1 (HRLDAS's offline Noah, the "
+                                         "template's value) and 2 (WRF, which the coupled "
+                                         "driver requires) map; 3 (LIS) and 4 (CLM) do not")
     if nl.get("udmp_opt") == 1:
         refuse("UDMP_OPT", 1, "the NWM user-defined mapping (UDMP) is not ported")
-    for key in ("reservoir_persistence_usgs", "reservoir_persistence_usace",
-                "reservoir_rfc_forecasts", "reservoir_type_specified"):
-        if nl.get(key):
-            refuse(key, nl[key], "the persistence and RFC-forecast reservoir types are not "
-                                 "ported (only the level pool and the pass-through)")
+    # lake_option 3 (reservoir DA): read_rt_nlst sets reservoir_type_specified
+    # when a DA flag is on and lake_option to 1 either way (:762-769); the
+    # hybrid and RFC reservoirs are woof_wrf_hydro.reservoir_da
+    reservoir = {}
+    if lake_option == 3 and any(nl.get(k) for k in ("reservoir_persistence_usgs",
+                                                       "reservoir_persistence_usace",
+                                                       "reservoir_rfc_forecasts")):
+        reservoir = {k: nl[k] for k in RESERVOIR_NLIST_KEYS if k in nl}
     if lake_option == 3:
         lake_option = 1                               # :768 "set to 1 either way"
     if lake_option == -99:                            # :771-778
@@ -201,7 +207,8 @@ def map_hydro_nlist(groups: dict[str, dict]) -> HydroConfig:
         gw_chan_cond_const_in=float(nl.get("gwchancondconstin", 0.0)),
         gw_chan_cond_const_out=float(nl.get("gwchancondconstout", 0.0)),
         io={k: v for k, v in groups["hydro_nlist"].items() if k in IO_KEYS
-            and not (lake_option == 0 and k in ("route_lake_f", "outlake"))})
+            and not (lake_option == 0 and k in ("route_lake_f", "outlake"))},
+        reservoir=reservoir)
 
 
 def read(path) -> HydroConfig:
