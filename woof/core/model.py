@@ -3137,9 +3137,12 @@ def realize_partial_nests(model, exp, coord, *, physics=None,
                   else truncated_vertical_coord(coord, parent_nest.k))
         child, ccfg = truncate_state(node.state, node.cfg.run, int(band.k_top),
                                      coord=coord)
-        # The child holds none of a damp_opt=3 parent's layer (validated
-        # above the interface); the parent's own levels keep it.
-        ccfg = _dc.replace(ccfg, damp_opt=child_damp_opt(ccfg))
+        # The child holds none of a damp_opt=3 chain root's layer (validated
+        # above the interface); the root's own levels keep it.  A child
+        # configured with damp_opt=3 under a root without it keeps its
+        # value, which refuse_child then refuses.
+        if int(getattr(walk.cfg.run, "damp_opt", 0)) == 3:
+            ccfg = _dc.replace(ccfg, damp_opt=child_damp_opt(walk.cfg.run))
         nest = PartialNest(parent.state, parent.cfg.run, pcoord, child, ccfg, band,
                            parent_nest=parent_nest,
                            heights=root_heights[-1])
