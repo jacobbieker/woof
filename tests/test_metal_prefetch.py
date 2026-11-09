@@ -56,7 +56,7 @@ def test_a_second_run_builds_the_first_runs_units_ahead_with_the_same_words(tmp_
     plans = list((tmp_path / "plans").glob("*.json"))
     assert len(plans) == 1
     rows = json.loads(plans[0].read_text())
-    assert len(rows) >= 2 and all(r["kernels"] for r in rows if "unit" in r["name"] or True)
+    assert sum(1 for r in rows if set(r["kernels"]) == {"scale", "shift"}) == 2
     second = _run(env)
     assert second["status"]["queued"] >= 2
     assert second["status"]["built"] >= 2 and second["status"]["failed"] == 0
