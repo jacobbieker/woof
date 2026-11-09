@@ -87,6 +87,20 @@ def test_restart_of_an_externally_coupled_run_is_refused():
         _driver_manifest(SimpleNamespace(external_ocean=object()))
 
 
+def test_checkpoint_intervals_are_refused_before_the_first_step(tmp_path):
+    """A coupled run with restart_interval_s > 0 is refused when the ocean is
+    attached, not an interval in at its first checkpoint write."""
+    from types import SimpleNamespace
+
+    from woof.ocean import external
+
+    toml = _toml(tmp_path, '[external_ocean]\nmodel="nemo_column"\n'
+                           'coupling_interval_seconds=60.0\nstate="s.npz"\n')
+    cfg = SimpleNamespace(ocean_config=str(toml), restart_interval_s=3600.0, dt=60.0)
+    with pytest.raises(NotImplementedError, match="restart_interval_s = 0"):
+        external.attach(SimpleNamespace(fields={}), cfg, latitude=np.zeros((2, 3)))
+
+
 @pytest.mark.gpu
 @requires_gpu
 def test_coupling_refuses_an_ocean_with_currents_and_a_ragged_interval():
@@ -175,6 +189,12 @@ def test_the_driver_runs_the_three_calls_at_wrf_places(tmp_path, monkeypatch):
         assert (f["taumod"] >= 0).all()
         assert (f["surf_net_solar"] > 0).all()        # GSW from the declared shortwave
     assert float(cp.abs(coupling.u_phy).max()) > 0     # phy_prep's lowest level, captured
+    # The run's final state digest reads the driver without the ocean; a
+    # checkpoint of it is still refused.
+    from woof.io.restart import RestartManifestError, _driver_manifest
+    assert _driver_manifest(driver, digest=True)
+    with pytest.raises(RestartManifestError, match="external ocean"):
+        _driver_manifest(driver)
 
 
 @pytest.mark.gpu

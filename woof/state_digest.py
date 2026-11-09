@@ -344,7 +344,7 @@ def canonical_state_digest(state, clock, *,
     manifest.update(restart_io._scratch_manifest(state))
     driver = getattr(state, "physics", None)
     if driver is not None:
-        manifest.update(restart_io._driver_manifest(driver))
+        manifest.update(restart_io._driver_manifest(driver, digest=True))
         # Match the actual streaming producer's distinction: standalone
         # legacy-RRTMG host ozone is recomputed, while an explicit CAM
         # owner supplies a retained field to later radiation/nest calls.

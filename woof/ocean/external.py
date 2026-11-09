@@ -144,6 +144,13 @@ def attach(driver, cfg, *, latitude=None) -> None:
                          "(waves/surge couple through [ocean])")
     if latitude is None:
         raise ValueError("external ocean coupling needs the atmosphere latitude")
+    if float(getattr(cfg, "restart_interval_s", 0.0) or 0.0) > 0.0:
+        # Refused here, before the first step, rather than at the first
+        # checkpoint write (woof.io.restart._driver_manifest), an interval in.
+        raise NotImplementedError(
+            "restart checkpoints of a run coupled to an external ocean are not ported "
+            "(the ocean's state and the coupling-interval average are not "
+            "checkpointed): set restart_interval_s = 0 in [experiment]")
     if getattr(driver, "lake", None) is not None:
         raise NotImplementedError("the lake model (lakemodel = 1) under an external ocean: "
                                   "sst_update's lake lines are not wired")
