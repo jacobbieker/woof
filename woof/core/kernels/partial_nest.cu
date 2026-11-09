@@ -134,6 +134,41 @@ void nest_top_budget_residual(const real* __restrict__ parent,
     residual[0] = (real)((sp - sc) / (double)(nyc * nxc));
 }
 
+// nest_top_budget_residual with map factors.  A cell's column mass changes
+// at ww*dx*dy/msft through its top (the msf Omega carries 1/msfty and the
+// cell's area is dx*dy/msft^2), so both sums weigh each flux by 1/msft and
+// the uniform residual that equalizes them is
+//   residual = (nri*nrj * sum_parent(ww/msft) - sum_child(ww/msft))
+//              / sum_child(1/msft)                            (binary64)
+// in units of the child's dx*dy.  With every msft = 1 this is the
+// msf-free entry point's residual.
+extern "C" __global__
+void nest_top_budget_residual_msf(const real* __restrict__ parent,
+                                  const real* __restrict__ child,
+                                  const real* __restrict__ msft_parent,
+                                  const real* __restrict__ msft_child,
+                                  real* __restrict__ residual,
+                                  int ipos, int jpos, int nri, int nrj,
+                                  int nyp, int nxp, int nyc, int nxc)
+{
+    if (blockIdx.x * blockDim.x + threadIdx.x != 0) return;
+    double sp = 0.0, sc = 0.0, wc = 0.0;
+    for (int pj = 0; pj < nyc / nrj; ++pj)
+        for (int pi = 0; pi < nxc / nri; ++pi) {
+            size_t at = (size_t)(jpos - 1 + pj) * nxp + (ipos - 1 + pi);
+            double v = (double)parent[at] / (double)msft_parent[at];
+            for (int c = 0; c < nri * nrj; ++c) sp += v;
+        }
+    for (int j = 0; j < nyc; ++j)
+        for (int i = 0; i < nxc; ++i) {
+            size_t at = (size_t)j * nxc + i;
+            double m = (double)msft_child[at];
+            sc += (double)child[at] / m;
+            wc += 1.0 / m;
+        }
+    residual[0] = (real)((sp - sc) / wc);
+}
+
 // The top strip's VALUE and TENDENCY tables at FORCE, in bdy_interp1's own
 // arithmetic (kernels/nest.cu nest_bdy_interp1, interp_fcn.F:2583-2584):
 //   value    = the child's current coupled strip

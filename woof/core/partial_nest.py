@@ -207,20 +207,26 @@ def partial_nest_from_mapping(table) -> "tuple[PartialNestBand, ...] | None":
 
 
 def validate_band_chain(bands, root_cfg, root_coord: VerticalCoord, *,
-                        interface_heights_m=None, has_msf: bool = False):
+                        interface_heights_m=None, has_msf: bool = False,
+                        interface_tops_m=None, damping_floor_m=None):
     """Validate a chain coarse to fine: :func:`validate_partial_nest` for
     each band, its footprint inside its parent's extent, and each finer
     interface below its parent band's top zone.  Returns the bands as a
     tuple.  ``interface_heights_m``: one per band (or ``None``), for the
-    deep-cumulus rule."""
+    deep-cumulus rule; ``interface_tops_m`` (one per band) and
+    ``damping_floor_m``, for damp_opt=3 on the root (validate_partial_nest)."""
     bands = tuple(bands)
     heights = (tuple(interface_heights_m) if interface_heights_m is not None
                else (None,) * len(bands))
+    tops = (tuple(interface_tops_m) if interface_tops_m is not None
+            else (None,) * len(bands))
     parent_nx, parent_ny = int(root_cfg.nx), int(root_cfg.ny)
     parent = None
     for n, band in enumerate(bands):
         validate_partial_nest(band, root_cfg, root_coord,
-                              interface_height_m=heights[n], has_msf=has_msf)
+                              interface_height_m=heights[n], has_msf=has_msf,
+                              interface_top_m=tops[n],
+                              damping_floor_m=damping_floor_m)
         r = int(band.parent_grid_ratio)
         i0, j0 = int(band.i_parent_start), int(band.j_parent_start)
         if i0 < 1 or j0 < 1 or i0 - 1 + band.nx // r > parent_nx \
@@ -249,14 +255,21 @@ def validate_band_chain(bands, root_cfg, root_coord: VerticalCoord, *,
 
 def validate_partial_nest(band, parent_cfg, parent_coord: VerticalCoord, *,
                           interface_height_m: float | None = None,
-                          has_msf: bool = False):
+                          has_msf: bool = False,
+                          interface_top_m: float | None = None,
+                          damping_floor_m: float | None = None):
     """Refuse, by name, every configuration one band does not carry.
 
     ``band`` may be a :class:`PartialNestBand`, a one-band sequence or
     ``None`` (no partial nest: returns ``None`` and touches nothing); a
     chain goes through :func:`validate_band_chain`.  ``interface_height_m``
     is the interface's lowest height above sea level (the deep-cumulus rule
-    needs it whenever cumulus is on).
+    needs it whenever cumulus is on).  ``interface_top_m`` (its highest) and
+    ``damping_floor_m`` (the lowest bottom of the parent's damp_opt=3 layer,
+    ``z_top - zdamp`` over its columns) admit damp_opt=3 on the parent when
+    the layer lies wholly above the interface; the child then runs without
+    it (:func:`child_damp_opt`).  ``has_msf`` is accepted for its callers:
+    map factors are carried (``partial_nest_run``, "Map factors").
     """
     from woof import wrf_exact
     if band is None:
@@ -286,9 +299,17 @@ def validate_partial_nest(band, parent_cfg, parent_coord: VerticalCoord, *,
             f"the top zone ({band.spec_levels} specified + {band.relax_levels} "
             f"relaxation levels) does not fit below interface level {k}")
     if int(parent_cfg.damp_opt) == 3:
-        raise PartialNestRefused(
-            "damp_opt=3 measures its layer from the model top, which a partial-depth "
-            "child does not have; its top zone is the relaxation zone")
+        if interface_top_m is None or damping_floor_m is None:
+            raise PartialNestRefused(
+                "damp_opt=3 measures its layer from the model top, which a partial-depth "
+                "child does not have; its top zone is the relaxation zone (the "
+                "parent keeps the layer only when it is known to lie above the "
+                "interface)")
+        if interface_top_m >= damping_floor_m:
+            raise PartialNestRefused(
+                f"damp_opt=3: the parent's damping layer reaches down to "
+                f"{damping_floor_m:.0f} m and the interface rises to "
+                f"{interface_top_m:.0f} m; lower the interface or zdamp")
     if int(getattr(parent_cfg, "cu_physics", 0)) != 0:
         if interface_height_m is None:
             raise PartialNestRefused(
@@ -299,9 +320,6 @@ def validate_partial_nest(band, parent_cfg, parent_coord: VerticalCoord, *,
                 f"deep cumulus (cu_physics={parent_cfg.cu_physics}) with the "
                 f"interface at {interface_height_m:.0f} m, below "
                 f"{DEEP_CUMULUS_MIN_INTERFACE_M:.0f} m")
-    if has_msf:
-        raise PartialNestRefused("map factors other than 1 are not carried by the "
-                                 "partial-depth nest's top entry points")
     r = int(band.parent_grid_ratio)
     if r < 2 or int(band.parent_time_step_ratio) < 1:
         raise PartialNestRefused("parent_grid_ratio must be >= 2 and "
@@ -328,3 +346,12 @@ def validate_partial_nest(band, parent_cfg, parent_coord: VerticalCoord, *,
     if parent_cfg.open_x or parent_cfg.open_y:
         raise PartialNestRefused("radiative-open parent boundaries are not carried")
     return band
+
+
+def child_damp_opt(parent_cfg) -> int:
+    """The damp_opt a band's child runs: 0 under a damp_opt=3 parent (whose
+    layer :func:`validate_partial_nest` placed above the interface, so the
+    child's column holds none of it; the parent's own levels there keep
+    it), else the parent's own."""
+    damp = int(getattr(parent_cfg, "damp_opt", 0))
+    return 0 if damp == 3 else damp
