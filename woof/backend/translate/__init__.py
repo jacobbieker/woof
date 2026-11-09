@@ -678,6 +678,8 @@ class _Rewriter:
         self.thread_builtins(top)
         self.inline_pointer_functions()
         self.table_parameters()
+        self.table_field_stores(top)
+        self.generic_constructions(top)
         self.rewrite_tokens()
         msl = self.edits.apply()
         msl = msl.replace(f'__attribute__((annotate("{_GLOBAL}")))', "")
@@ -2188,12 +2190,28 @@ class _Rewriter:
                 self.edits.insert(at, text, rank=-25_000)
         K = self.ci.CursorKind
         from woof.backend.translate.spaces import _CASTS, _INTEGER_KINDS, _indirection
+        generic = [self.span(c) for c in self.tu.cursor.walk_preorder()
+                   if c.kind == K.CLASS_TEMPLATE and c.spelling in getattr(self, "generic_structs", ())
+                   and self.main_file(c)]
         for node in self.tu.cursor.walk_preorder():
             if node.kind.name not in _CASTS or not self.main_file(node) or _indirection(node.type) != "ptr":
                 continue
             key = (node.extent.start.offset, node.extent.end.offset)
             if key in reached:
                 continue
+            if node.kind.name in ("CXX_STATIC_CAST_EXPR", "CXX_REINTERPRET_CAST_EXPR", "CXX_CONST_CAST_EXPR") \
+                    and any(gs <= key[0] and key[1] <= ge for gs, ge in generic):
+                # inside a space-generic struct (gsfc_ptr's
+                # `const_cast<T *>(value)`): the struct's own space
+                toks = list(node.get_tokens())
+                if len(toks) > 2 and toks[1].spelling == "<":
+                    close = self._closing_angle(toks, 1)
+                    star = next((t for t in reversed(toks[2:close]) if t.spelling == "*"), None) \
+                        if close is not None else None
+                    if star is not None:
+                        self.edits.insert(toks[2].extent.start.offset, "__woof_sptr<", rank=-25_000)
+                        self.edits.replace(star.extent.start.offset, star.extent.end.offset, ", __WS>")
+                        continue
             operand = [c for c in node.get_children() if c.kind not in (K.TYPE_REF, K.TEMPLATE_REF)]
             space = "device"
             if operand and operand[-1].type.get_canonical().kind.name not in _INTEGER_KINDS:
@@ -2347,6 +2365,45 @@ class _Rewriter:
             if start is not None:
                 plan.append((start, f"{ret} "))
         return plan
+
+    def table_field_stores(self, top):
+        """``s->table[k] = p`` into a ``T**`` struct field (cam3's
+        ``state->abs_args[0] = pbr``, filling the per-column descriptor
+        row the kernel reads back): the field is a ``__woof_addr_table``
+        (struct_fields), whose ``[k]`` is a value, so the store is spelled
+        ``s->table.__woof_set(k, p)``, which writes the entry's word."""
+        K = self.ci.CursorKind
+        from woof.backend.translate.spaces import _is_table
+
+        def bare(e):
+            while e.kind in (K.UNEXPOSED_EXPR, K.PAREN_EXPR) and len(list(e.get_children())) == 1:
+                e = next(e.get_children())
+            return e
+        for c in top:
+            for node in c.walk_preorder():
+                if node.kind != K.BINARY_OPERATOR or not self.main_file(node):
+                    continue
+                kids = list(node.get_children())
+                if len(kids) != 2:
+                    continue
+                lhs = bare(kids[0])
+                if lhs.kind != K.ARRAY_SUBSCRIPT_EXPR:
+                    continue
+                parts = list(lhs.get_children())
+                if len(parts) != 2:
+                    continue
+                base = bare(parts[0])
+                field = base.referenced if base.kind == K.MEMBER_REF_EXPR else None
+                if field is None or field.kind != K.FIELD_DECL or not _is_table(field.type):
+                    continue
+                op = next((t for t in node.get_tokens()
+                           if t.extent.start.offset >= lhs.extent.end.offset and t.spelling in ("=",)), None)
+                if op is None or op.extent.start.offset >= kids[1].extent.start.offset:
+                    continue
+                be, (is_, ie) = base.extent.end.offset, self.span(parts[1])
+                self.edits.replace(be, is_, ".__woof_set(")
+                self.edits.replace(ie, op.extent.end.offset, ", ")
+                self.edits.insert(kids[1].extent.end.offset, ")", rank=50_000)
 
     def table_parameters(self):
         """A device function's ``T**`` / ``T* const*`` parameter receives a
@@ -2681,6 +2738,12 @@ class _Rewriter:
                 if start is None or name is None or mtoks[name - 1].spelling not in ("&", "*"):
                     self.refuse(c, f"cannot respell the return type of {c.spelling!r}")
                 mark = mtoks[name - 1]
+                if mark.spelling == "&" and c.kind == K.CXX_METHOD \
+                        and c.result_type.get_pointee().get_declaration().spelling == cursor.spelling:
+                    # `S& operator+=(...) { ...; return *this; }`: the object
+                    # is a local (a thread value), whatever space it points into
+                    self.edits.insert(start, "thread ", rank=-30_000)
+                    continue
                 alias = "__woof_sref" if mark.spelling == "&" else "__woof_sptr"
                 self.edits.insert(start, f"{alias}<", rank=-30_000)
                 self.edits.replace(mark.extent.start.offset, mark.extent.end.offset, ", __WS> ")
@@ -2690,6 +2753,46 @@ class _Rewriter:
                 j = self._closing_angle(toks, i + 1)
                 if j is not None:
                     self.edits.insert(toks[j].extent.start.offset, ", __WS", rank=-30_000)
+
+    def generic_constructions(self, top):
+        """``S<T>(p, ...)`` naming a space-generic struct outside it
+        (gsfcsw's ``gsfc_ptr<real>((real *)(workspace + 0), 32)``): the
+        temporary takes its pointer argument's space as ``S<T, space>``."""
+        K = self.ci.CursorKind
+        names = set(getattr(self, "generic_structs", ()))
+        if not names:
+            return
+        from woof.backend.translate.spaces import _indirection
+        done = set()
+        for c in top:
+            if c.kind == K.CLASS_TEMPLATE and c.spelling in names:
+                continue
+            for node in c.walk_preorder():
+                if node.kind not in (K.CXX_FUNCTIONAL_CAST_EXPR, K.CALL_EXPR, K.UNEXPOSED_EXPR,
+                                     K.CSTYLE_CAST_EXPR) or not self.main_file(node):
+                    continue
+                toks = list(node.get_tokens())
+                # `(S<T>)p` as well as `S<T>(p, ...)`
+                lead = 1 if node.kind == K.CSTYLE_CAST_EXPR and toks and toks[0].spelling == "(" else 0
+                if len(toks) < 4 + lead or toks[lead].spelling not in names or toks[lead + 1].spelling != "<":
+                    continue
+                close = self._closing_angle(toks, lead + 1)
+                after = ")" if lead else "("
+                if close is None or close + 1 >= len(toks) or toks[close + 1].spelling != after:
+                    continue
+                at = toks[close].extent.start.offset
+                if at in done or any(t.spelling == "," for t in toks[lead + 2:close]):
+                    continue
+                args = [a for a in node.walk_preorder() if a is not node
+                        and a.extent.start.offset > toks[close + 1].extent.start.offset
+                        and _indirection(a.type) == "ptr"]
+                if not args:
+                    continue
+                space = self.spaces.space(args[0], {}) or "device"
+                if space == "null":
+                    space = "device"
+                done.add(at)
+                self.edits.insert(at, f", {self.SPACE_INDEX[space]}", rank=-30_000)
 
     def generic_type_close(self, tokens, name):
         """Where a ``name<...>`` among ``tokens`` takes its space argument."""
@@ -3987,6 +4090,51 @@ def explicit_float_to_integral(text: str) -> str:
     return edits.apply()
 
 
+def hoist_block_prototypes(text: str) -> str:
+    """f2c declares the functions a body calls inside it (``extern int
+    f_(integer *, ...);``).  The translator gives a function's declarations
+    its address spaces and implicit parameters, but a declaration inside a
+    body that is itself rendered once per address-space instance would be
+    a region inside that region.  So each such declaration statement moves
+    to file scope, just before the function that holds it (the same
+    namespace, so it names the same function)."""
+    import clang.cindex as ci
+    if not re.search(r"[;{]\s*extern\s[^;{}()]*\w\s*\(", text):
+        return text
+    tu = parse(text)
+    K = ci.CursorKind
+    data = text.encode()
+    edits = Edits(data)
+    for fn in tu.cursor.walk_preorder():
+        if fn.kind not in (K.FUNCTION_DECL, K.FUNCTION_TEMPLATE) or not fn.is_definition() \
+                or fn.location.file is None or fn.location.file.name != "unit.cpp" \
+                or fn.semantic_parent is None \
+                or fn.semantic_parent.kind not in (K.TRANSLATION_UNIT, K.NAMESPACE):
+            continue
+        moved = []
+        for stmt in fn.walk_preorder():
+            if stmt.kind != K.DECL_STMT:
+                continue
+            kids = list(stmt.get_children())
+            if kids and all(k.kind == K.FUNCTION_DECL for k in kids):
+                s, e = stmt.extent.start.offset, stmt.extent.end.offset
+                # `extern int f(...), g(...);`: one declaration each (each
+                # is rendered per instance on its own)
+                prefix = data[s:kids[0].location.offset]
+                ends = [kids[0].extent.end.offset] + [k.extent.end.offset for k in kids[1:]]
+                if any(b"*" in data[ends[i - 1]:k.location.offset] or b"&" in data[ends[i - 1]:k.location.offset]
+                       for i, k in enumerate(kids) if i):
+                    moved.append(data[s:e].decode())
+                else:
+                    moved.extend((prefix + data[k.location.offset:k.extent.end.offset]).decode() + ";"
+                                 for k in kids)
+                edits.replace(s, e, "")
+        if moved:
+            at = data.rfind(b"\n", 0, fn.extent.start.offset) + 1
+            edits.insert(at, "\n".join(moved) + "\n", 0)
+    return edits.apply()
+
+
 def flatten_inheritance(text: str, unit: str) -> str:
     """Metal has no derived classes.  ``struct D : B<A...> {...}`` becomes
     D with B's members copied in (B's template parameters replaced by the
@@ -4281,6 +4429,7 @@ def _translate_preprocessed(text: str, source: str, *, unit: str, contract: bool
     if retain_subnormals:
         text = explicit_float_to_integral(text)
     text = flatten_inheritance(text, unit)
+    text = hoist_block_prototypes(text)
     tu = parse(text)
     result = _Rewriter(text, tu, unit=unit, retain_subnormals=retain_subnormals,
                        macros=_integer_macros(source, defines)).run()

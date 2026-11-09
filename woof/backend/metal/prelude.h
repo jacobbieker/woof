@@ -766,6 +766,9 @@ template <typename T> struct __woof_addr_table {
   T operator*() const device { return reinterpret_cast<T>(w[0]); }
   __woof_addr_table operator+(long i) const device { return __woof_addr_table(w + i); }
   __woof_addr_table operator-(long i) const device { return __woof_addr_table(w - i); }
+  // `table[i] = p` (translator table_field_stores): the entry's word
+  template <typename Q> void __woof_set(long i, Q q) const { const_cast<device ulong*>(w)[i] = reinterpret_cast<ulong>(q); }
+  template <typename Q> void __woof_set(long i, Q q) const device { const_cast<device ulong*>(w)[i] = reinterpret_cast<ulong>(q); }
 };
 
 // A mutable pointer global (`__device__ T* p;`): Metal binds no buffer of
