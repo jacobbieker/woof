@@ -33,6 +33,13 @@ the same verbatim objects plus `mpas_li_advection.F`.
 `li_compute_pressure_melting_point_fields`, `li_temperature_to_enthalpy` and
 `li_enthalpy_to_temperature`.
 
+`run_advection.F90` calls `li_thermal_init` as on a restart, where it only
+copies the densities into the module, and then
+`li_advection_thickness_tracers` as `li_time_integration_fe` does (tracers on
+or off). The 2-D and 3-D scratch fields it allocates resolve, in the
+stand-ins, to arrays the driver fills with random words: the model leaves
+them uninitialised, so no output may depend on them.
+
 ## Build and run (Linux, gfortran, CPU only)
 
 ```bash
@@ -40,6 +47,7 @@ pixi run -e mpas-oracle bash tools/mali_oracle/build.sh "$MPAS_V842" "$BUILD_DIR
 pixi run -e default python tools/mali_oracle/make_fixture.py "$BUILD_DIR"           # SIA
 pixi run -e default python tools/mali_oracle/make_geometry_fixture.py "$BUILD_DIR"  # geometry
 pixi run -e default python tools/mali_oracle/make_thermal_fixture.py "$BUILD_DIR"   # thermal init
+pixi run -e default python tools/mali_oracle/make_advection_fixture.py "$BUILD_DIR" # advection
 ```
 
 The fixtures were written on x86-64 Linux, where gfortran's `x**y` and
@@ -59,6 +67,6 @@ committed fixtures word for word (gfortran 16.2.0 from Homebrew, arm64).
 
 ```bash
 pixi run -e default python -m pytest tests/test_mali_sia_parity.py tests/test_mali_geometry_parity.py \
-    tests/test_mali_thermal_init_parity.py
+    tests/test_mali_thermal_init_parity.py tests/test_mali_advection_parity.py
 pixi run -e default woof hex ice verify
 ```
