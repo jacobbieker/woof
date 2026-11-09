@@ -254,3 +254,22 @@ def test_the_initial_fill_refuses_without_a_covering_file(tmp_path):
         runtime.fill_initial(scalars, latitude=LAT, longitude=LON, pressure=_pressure(),
                              valid_time=start.replace(tzinfo=timezone.utc), cache_root=tmp_path / "empty",
                              backend=_backend())
+
+
+def test_the_pool_admits_the_readers_rows_beside_the_stream():
+    """The pool's own admission hands the reader's rows on under their pool names (the device driving state
+    stacks ``admitted.fields[name]`` for every pool scalar)."""
+    from woof.hex.lbc import LbcFile, LbcPool, declare_supplied_scalars
+    declare_supplied_scalars(("lbc_zz_pool_row",))
+    when = datetime(2025, 7, 30, 0)
+    met = {name: np.full((4, 3), 1.0, np.float32) for name in ("lbc_qv", "lbc_rho", "lbc_theta")}
+    row = np.arange(12, dtype=np.float32).reshape(4, 3)
+
+    def reader(path, *, extra_scalars=()):
+        assert "lbc_zz_pool_row" in extra_scalars
+        return LbcFile(Path(path), when, {**met, "lbc_zz_pool_row": row})
+
+    inventory = SimpleNamespace(latest_before=lambda moment: Path("lbc.nc"))
+    pool = LbcPool(inventory, scalar_names=("lbc_qv", "lbc_zz_pool_row"), reader=reader)
+    admitted = pool.start(when)
+    assert admitted.fields["lbc_zz_pool_row"] is row
