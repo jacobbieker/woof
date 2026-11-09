@@ -4856,13 +4856,12 @@ def render_config(*, name: str, start_time: datetime, hours: int,
             header += (
                 "# CUMULUS UNDER THE OPT-IN: MEASURED on a 12 km Manila domain "
                 "with Kain-Fritsch\n"
-                "# (GFS 2026-11-07 00Z, 24 h), this clock cut the domain-mean "
-                "convective rain by\n"
-                "# 59% while a fixed 60 s step raised it 14%: the cumulus "
-                "scheme does not follow\n"
-                "# a step that varies the way it follows a longer fixed one.  "
-                "Prefer --clock fixed\n"
-                "# with a parameterized-cumulus grid until that is resolved.\n")
+                "# (GFS 2026-11-07 00Z, 24 h), this clock raised the "
+                "domain-mean rain 18% over\n"
+                "# the fixed tropical clock, as a fixed 60 s step raised it "
+                "14%: the scheme answers\n"
+                "# the longer mean step.  docs/ADAPTIVE-TIMESTEP.md, 'The "
+                "tropical opt-in'.\n")
     elif adaptive:
         # The one key.  The bounds stay WRF's per-spacing fill-ins (-1),
         # because a clamp written once into [shared] reaches every nest

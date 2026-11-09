@@ -878,6 +878,36 @@ Changed:
 
 Fixed:
 
+- **Adaptive-step runs with a cumulus scheme change answers.** On an
+  adaptive clock, convective rain and the Kain-Fritsch hold stopped
+  following WRF. WRF's `advance_ppt` (`RAINC += PRATEC*DT`, the KF `NCA`
+  expiry, `NCA -= DT`) runs on every model step. woof ran it only when the
+  step ended on a multiple of `clock_dt`, a test meant for the
+  compatibility integrator's internal substeps. Without substeps that is
+  the live `dt`, which an adaptive clock's elapsed time almost never
+  divides. So `RAINC` missed nearly every step, and a triggered KF column
+  held its heating far past its convective time scale and never
+  retriggered. The previous-KF Rust planner (`cu_physics = 99`) had the
+  same test.
+  - Every scheme on the held-`PRATEC` path was affected: KF, the previous
+    KF, MSKF, KF-CuP, BMJ, Grell-Freitas, Grell-Devenyi, the SAS family
+    and CAM ZM.
+  - This includes the wizard's default `--clock auto` emissions outside
+    the tropics that carry Kain-Fritsch, and `--clock tropical-adaptive`.
+    Fixed-step runs are unchanged, byte for byte (Manila 12 km fixed
+    clock: all 25 history files identical).
+  - Measured on Manila 12 km (Kain-Fritsch, GFS 2026-11-07 00Z, 24 h),
+    the tropical opt-in's domain-mean rain went from 2.05 mm (−59%
+    against the fixed clock's 4.99 mm) to 5.89 mm (+18%). A fixed 60 s
+    step gives 5.68 mm (+14%).
+  - `tests/test_kf_adaptive_wrf471_oracle.py` grades the driver against
+    WRF v4.7.1 KF over 110 varying steps (`tools/kf_adaptive_wrf471_oracle`).
+    The strict build matches NCA, RAINC, PRATEC and RAINCV word for word
+    on CUDA and Metal.
+  - WRF sets `cudt = 0` for BMJ under an adaptive step, as it does for
+    KSAS. A BMJ config with an adaptive step and `cudt_minutes > 0` is now
+    refused, and `woof import-namelist` rewrites it to 0.
+
 - A fine nest over steep ground could go non-finite within seconds. A
   100 m nest whose 30 m Copernicus terrain read a 1.56 slope (57 degrees)
   on a canyon wall went non-finite at its fourth step, two model seconds

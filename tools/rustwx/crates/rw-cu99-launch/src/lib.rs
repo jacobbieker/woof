@@ -63,7 +63,9 @@ pub unsafe extern "C" fn gpuwm_cu99_plan_step(elapsed: f64, epoch: f64,
         timestep == 1. || cudt == 0. || stepcu == 1 || timestep as i64 % stepcu == 0
     };
     let remainder = ((elapsed + dt) % clock_dt).abs();
-    let advance = remainder.min(clock_dt - remainder) <= 1.0e-6 * clock_dt;
+    // Only internal substeps (clock_dt > dt) wait for the clock step's end:
+    // an adaptive clock's elapsed time is rarely a multiple of the live dt.
+    let advance = clock_dt <= dt || remainder.min(clock_dt - remainder) <= 1.0e-6 * clock_dt;
     unsafe { *output = StepPlan { clock_dt, stepcu,
         column_stepcu: column_stepcu as i64, due: due as i32, advance: advance as i32 }; }
     0
@@ -150,6 +152,9 @@ mod tests {
         assert_eq!(plan(21., 0., 11., 0., 5., 1).due, 1);
         assert_eq!(plan(0., 0., 12., 0., 5., 0).due, 0);
         assert_eq!(plan(0., 0., 45., 0., 5., -1).stepcu, 7);
+        // An adaptive clock: elapsed is a sum of unequal steps, never a
+        // multiple of the live dt, and every step still advances.
+        assert_eq!(plan(61.5, 0., 33.075, 0., 5., -1).advance, 1);
     }
     // Each callback receives its test-owned recorder as the fake stream.
     struct Calls { rows: Vec<(u32, i32)>, fail_at: usize }
