@@ -59,3 +59,28 @@ def test_metal_text_builds_the_single_step_kernel():
     assert "ktop=M471Ptr<integer>(&m471_local_top);" not in out
     assert "return *this=(T)(*p*x);" in out
     assert out.count("\n") < text.count("\n")
+
+
+@pytest.mark.parametrize("nz", [12, 16, 24, 30, 48, 49, 50, 60, 100])
+def test_the_private_array_arena_holds_every_array_at_any_depth(nz):
+    """The arena offsets fitted through the 49- and 50-level lowerings went
+    negative below 24 levels and overlapped away from 49/50 (each array
+    rounds to 8 bytes, so the fit's slopes are 0 or 8 where arrays grow by
+    4): the 16-level non-finite dqv and the 30-level fast-mode RAINNC.
+    arena_layout keeps every array at least its 49-level size, growing by
+    at least 8 bytes a level above 49, and the 49-level text unchanged."""
+    from woof.core.mynn471_gpu import _ARENA_OFFSET, _arena_rows, arena_layout, schema, source
+    rows, total49, _ = _arena_rows()
+    offsets, total = arena_layout(nz)
+    starts = [offsets[(slope, base)] for base, slope in rows]
+    ends = starts[1:] + [total]
+    sizes49 = [b - a for (a, _), b in zip(rows, [b for b, _ in rows[1:]] + [total49])]
+    assert starts[0] == 0
+    for start, end, size49 in zip(starts, ends, sizes49):
+        assert end - start >= size49 + 8 * max(nz - 49, 0)
+    assert schema(nz)["scratch_bytes"] == total
+    if nz == 49:
+        assert all(offsets[(slope, base)] == base for base, slope in rows)
+        assert _ARENA_OFFSET.search(source(49))
+    else:
+        assert not _ARENA_OFFSET.search(source(nz))

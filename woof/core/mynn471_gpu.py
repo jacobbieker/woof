@@ -37,8 +37,52 @@ def schema(nz):
             field[key]=affine(field[key],second['arguments'][name][key])
     for key in first['slab_fields']:
         first['slab_fields'][key]=affine(first['slab_fields'][key],second['slab_fields'][key])
-    first['scratch_bytes']=affine(first['scratch_bytes'],second['scratch_bytes'])
+    first['scratch_bytes']=arena_layout(int(nz))[1]
     return first
+
+
+#: A private array's place in the arena: ``m471_array<T>(m471_work, OFFSET, n)``
+#: with OFFSET affine in MYNN471_NZ, as generalize.py recovered it.
+_ARENA_OFFSET=re.compile(r'm471_array<\w+>\(m471_work,\((-?\d+)\*\(MYNN471_NZ-49\)\+(\d+)(?:\+(\d+))?\),m471_n\)')
+
+
+@lru_cache(maxsize=1)
+def _arena_rows():
+    """(affine offsets in arena order, nz=49 total, total per level): the
+    arena as lowered at 49 levels."""
+    text=(DATA/'model.cu').read_text()
+    rows=sorted({(int(b)+int(c or 0),int(a)) for a,b,c in _ARENA_OFFSET.findall(text)}|{(0,0)})
+    first=json.loads((DATA/'schema49.json').read_text())['scratch_bytes']
+    second=json.loads((DATA/'schema50.json').read_text())['scratch_bytes']
+    return tuple(rows),first,second-first
+
+
+@lru_cache(maxsize=64)
+def arena_layout(nz):
+    """({(slope, base): offset}, scratch bytes) of the private-array arena
+    for ``nz`` levels.
+
+    generalize.py fits each arena offset through the 49- and 50-level
+    lowerings, but lower_cuda.py rounds every array up to 8 bytes, so a
+    (kts:kte+1) float array grows 200 -> 208 bytes there and a (kts:kte)
+    one 196 -> 200 -> 200: the fit's slopes are 8 and 0 bytes per level
+    where the arrays grow by 4.  Away from 49/50 levels arrays overlapped
+    (below 49) or overran their slots (above 50); below 24 levels some
+    offsets went negative, before the arena (the 16-level non-finite dqv).
+    Here every array keeps at least its 49-level size and above 49 levels
+    grows by at least 8 bytes a level -- never less than a row of 4-byte
+    elements, rounded, needs -- so at 49 levels the layout is the lowered
+    one, and at any other size each array's slot holds all it can reach."""
+    rows,total49,_slope=_arena_rows()
+    sizes=[]
+    for (base,slope),(nxt,nslope) in zip(rows,rows[1:]+((total49,_slope),)):
+        size,growth=nxt-base,max(nslope-slope,8)
+        sizes.append(size+growth*max(nz-49,0))
+    offsets,at={},0
+    for (base,slope),size in zip(rows,sizes):
+        offsets[(slope,base)]=at
+        at+=size
+    return offsets,at
 
 
 def scratch_shapes(ncol,nz):
@@ -67,8 +111,20 @@ def source(nz):
     prefix=old[:old.index('extern "C" __global__')]
     start=old.index('__device__ __forceinline__ real mynn_scale_exponent(')
     end=old.index('// Fortran real**real,',start)
+    model=(DATA/'model.cu').read_text()
+    if int(nz)!=49:
+        # every arena offset at its place for nz levels (arena_layout); 49
+        # levels keeps the qualified text, and its prebuilt images
+        offsets,_=arena_layout(int(nz))
+        def place(m):
+            a,b,c=m.groups()
+            at=offsets[(int(a),int(b)+int(c or 0))] if (int(a),int(b)+int(c or 0)) in offsets else None
+            if at is None:
+                raise RuntimeError('MYNN 4.7.1 arena offset outside the layout: '+m.group(0))
+            return m.group(0).replace(m.group(0)[m.group(0).index(',')+1:m.group(0).rindex(',')],str(at))
+        model=_ARENA_OFFSET.sub(place,model)
     return (prefix+old[start:end]+FAST_MATH+'\n#define MYNN471_NZ '+str(int(nz))+'\n'
-            +(DATA/'model.cu').read_text()+POST_SOURCE)
+            +model+POST_SOURCE)
 
 
 # Strict mode retains the referee's libm operation order. The regular
