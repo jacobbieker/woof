@@ -147,9 +147,33 @@ mapping and the node coupler protocol (:class:`PartialNestCoupler`,
 
 Scope (refused by name in :func:`woof.core.partial_nest.validate_partial_nest`
 and :func:`refuse_child`): the default arithmetic build; no km_opt mixing on
-the child (the sixth-order horizontal filter is carried); no damp_opt=3; no
-map factors; no emdiv; no IEVA; no TKE or chemistry scalars on the child; a
-periodic or specified parent.
+the child (the sixth-order horizontal filter is carried, and so is km_opt = 4
+with diff_opt = 1, WRF's real-data horizontal Smagorinsky: its fluxes run
+along coordinate surfaces, none through the top; only its deformation's
+terrain-slope term at the top half level, inside the top zone, takes the
+lid's one-sided w-corner wind); no damp_opt=3 on
+the child (the parent keeps it when its layer lies above the interface,
+:func:`woof.core.partial_nest.child_damp_opt`); no emdiv; no IEVA; no TKE or
+chemistry scalars on the child; a periodic or specified parent.
+
+Map factors
+-----------
+A real projection's msft/msfu/msfv (one isotropic factor per staggering, as
+every woof kernel carries them).  The child's acoustic substep launches
+``nest_top.cu``'s ``*_msf`` entry points (acoustic.cu's msf arithmetic with
+the same top; the interface flux enters the column mass tendency as
+``msft*ww_top``); calc_ww_top already carried them.  The interface w'' the
+implicit solve takes is the coupled ``c_top*(w - w*)/msft``, while the
+specified predictor keeps the product (its phi'' update multiplies msft
+back).  The top zone's held theta and phi increments are divided by msft, as
+the lateral relaxation's are (rth_t and rph_t carry 1/msft), and a moist
+scalar's interface flux is multiplied by msft before it is applied, as
+rk_update_scalar's tendency is.  The interface budget weighs each cell's
+flux by 1/msft (``nest_top_budget_residual_msf``: a cell's column mass
+changes at ``ww*dx*dy/msft`` through its top).  Omega is SINT-ed unchanged:
+the parent's and the child's msft differ by the factor's variation across a
+parent cell (1e-4 or less at mesoscale spacing), which the budget closes in
+total.
 """
 
 from __future__ import annotations
@@ -218,13 +242,15 @@ def refuse_child(cfg: RunConfig, state: DomainState) -> None:
         raise PartialNestRefused("emdiv is not carried on the partial child")
     if cfg.damp_opt == 3:
         raise PartialNestRefused("damp_opt=3 on the partial child")
-    if state.has_msf:
-        raise PartialNestRefused("map factors other than 1 on the partial child")
-    if wrf_mixing_package_active(cfg) or constant_k_mixing_active(cfg):
+    horizontal_only = int(cfg.km_opt) == 4 and int(getattr(cfg, "diff_opt", 2)) == 1
+    if ((wrf_mixing_package_active(cfg) or constant_k_mixing_active(cfg))
+            and not horizontal_only):
         raise PartialNestRefused(
             "km_opt mixing on the partial child is not carried through its top "
             "(its vertical fluxes close on a lid); the horizontal sixth-order "
-            "filter (diff_6th_opt) is")
+            "filter (diff_6th_opt) is, and so is km_opt = 4 with diff_opt = 1 "
+            "(2-D Smagorinsky diffusing along coordinate surfaces, no flux "
+            "through the top)")
     if int(getattr(cfg, "zadvect_implicit", 0) or 0):
         raise PartialNestRefused("IEVA (zadvect_implicit) on the partial child")
     for name in ("tke", "qke_adv", "chem"):
@@ -262,13 +288,18 @@ class PartialNest:
     ``child``/``ccfg``: the child's state on D1's truncated coordinate
     (``partial_nest_dyn.truncate_state``) and its nested config; ``band``:
     the band entry; ``parent_nest``: the :class:`PartialNest` whose child is
-    this one's parent (a chain), else ``None``."""
+    this one's parent (a chain), else ``None``; ``heights``: the interface
+    and damping-layer heights :func:`woof.core.partial_nest.validate_partial_nest`
+    takes (``interface_height_m``, ``interface_top_m``, ``damping_floor_m``),
+    measured on a real parent (:func:`woof.core.model.realize_partial_nests`)."""
 
     def __init__(self, parent: DomainState, pcfg: RunConfig, coord,
                  child: DomainState, ccfg: RunConfig, band: PartialNestBand, *,
-                 parent_nest: "PartialNest | None" = None):
+                 parent_nest: "PartialNest | None" = None,
+                 heights: dict | None = None):
         cp = _xp()
-        validate_partial_nest(band, pcfg, coord, has_msf=parent.has_msf)
+        validate_partial_nest(band, pcfg, coord, has_msf=parent.has_msf,
+                              **(heights or {}))
         refuse_child(ccfg, child)
         k = int(band.k_top)
         if k >= pcfg.nz:
@@ -349,6 +380,10 @@ class PartialNest:
         self.face_scheme = "centered"
         self.feedback_kinds = tuple(band.feedback_fields)
         self._max_adj = z(1)
+        #: The interface w'' the implicit solve takes with map factors: the
+        #: substep forcing's c_top*(w - w*) over msft (coupled w'' is
+        #: C_f(mu)*w/msft); the specified predictor keeps the product.
+        self.w_top_coupled = z(ny, nx) if child.has_msf else None
         #: The radiation call's extended column (partial_nest_physics).
         self.extended = None
         self.stats = {"forces": 0, "child_steps": 0, "feedbacks": 0,
@@ -449,9 +484,17 @@ class PartialNest:
             return
         reg = self.regs[""]
         res = p.scratch((1,), "partial_nest_budget")
-        _kernel("nest_top_budget_residual")(
+        if self.child.has_msf:
+            if self.mass_route != "face":
+                raise PartialNestRefused(
+                    "mass_route 'adj' carries the residual in dmdt units, which "
+                    "map factors scale per column; use the default 'face'")
+            name, maps = "nest_top_budget_residual_msf", (p.msft, self.child.msft)
+        else:
+            name, maps = "nest_top_budget_residual", ()
+        _kernel(name)(
             (1,), (1,),
-            (cp.ascontiguousarray(ww[k]), dst.mass[0], res,
+            (cp.ascontiguousarray(ww[k]), dst.mass[0]) + maps + (res,
              np.int32(reg.i_parent_start), np.int32(reg.j_parent_start),
              np.int32(reg.nri), np.int32(reg.nrj),
              np.int32(self.pcfg.ny), np.int32(self.pcfg.nx),
@@ -545,6 +588,10 @@ class PartialNest:
                      np.int32(band.relax_zone), np.int32(frame),
                      np.int32(kind not in _FULL),
                      np.int32(shp[0]), np.int32(shp[1]), np.int32(shp[2])))
+                if c.has_msf and kind in ("t", "ph"):
+                    # rth_t and rph_t carry 1/msft (their updates multiply
+                    # it back): the lateral relaxation's divide_msf rows.
+                    _xp().divide(held, c.msft[None], out=held)
         # nest_top_apply_held for the five fields, one launch.
         cfg, h = self.ccfg, self.held
         ny, nx = cfg.ny, cfg.nx
@@ -746,7 +793,8 @@ class ChildTop:
         top_launch = prepare_top_substep(
             c, cfg, dtau, coefficients, n.iface, top,
             theta_upwind=(n.face_scheme == "upwind"), nested_frame=True,
-            predictor=n._predictor(dtau))
+            predictor=n._predictor(dtau), w_top=n.w_top_coupled)
+        coupled = n.w_top_coupled
         frame = n._frame_launch(dtau, coefficients[0])
         forcing = _kernel("nest_top_substep_forcing")
         a, b = n.a, n.b
@@ -767,6 +815,8 @@ class ChildTop:
             f_new = DTYPE(self._fraction((sub + 1) * dtau))
             f_old = DTYPE(self._fraction(sub * dtau))
             forcing(grid, (_THREADS,), head + (f_new, f_old, fstar) + tail)
+            if coupled is not None:
+                _xp().divide(top.w_top, c.msft, out=coupled)
             top_launch(first=first)
             frame()
             counter[0] = sub + 1
@@ -793,6 +843,9 @@ class ChildTop:
         n2 = cfg.ny * cfg.nx
         kernel = _kernel_d4("nest_top_scalar_apply")
         for i, name in enumerate(n.species):
+            if c.has_msf:
+                # rk_update_scalar's tend *= msft, ahead of the apply.
+                _xp().multiply(n.q_flux[i], c.msft, out=n.q_flux[i])
             kernel(_blocks(n2), (_THREADS,),
                    (getattr(c, name), n.q_flux[i], c.mub2d, c.mup, c.c1h, c.c2h,
                     c.rdnw, DTYPE(dt_stage), np.int32(cfg.nz), np.int32(n2)))
@@ -907,20 +960,106 @@ class PartialNestCoupler:
     (``force``, the three-phase feedback, ``valid``) over one
     :class:`PartialNest` (:func:`woof.core.model.partial_nest_steppers`)."""
 
-    def __init__(self, nest: PartialNest):
+    def __init__(self, nest: PartialNest, surface=None):
         self.nest = nest
+        #: The node's full-depth :class:`woof.core.nest.NestCoupler` on a real
+        #: tree, whose surface, soil and carried-physics feedback (WRF
+        #: Registry ``u`` rows: masked or averaged 2-D and soil carriers,
+        #: no atmospheric level) the band runs after its own feedback below
+        #: the interface, as a full-depth two-way nest does; ``None`` on the
+        #: idealized tree (no land surface).
+        self.surface = surface
         self.valid = False
+        self.child_node = None
+        self.force_count = 0
+        self.first_parent_ticks = self.last_parent_ticks = None
+        self.first_parent_step = self.last_parent_step = None
 
     def force(self, node) -> None:
         self.nest.force(node.clock, node.parent.clock)
         node.clock.mark_force()
+        self.child_node = node
+        ticks, step = int(node.parent.clock.ticks), int(node.parent.clock.step_count)
+        if self.first_parent_ticks is None:
+            self.first_parent_ticks, self.first_parent_step = ticks, step
+        self.last_parent_ticks, self.last_parent_step = ticks, step
+        self.force_count += 1
         self.valid = True
+
+    def transition_receipt(self):
+        """The edge's forcing coverage in :class:`woof.core.nest.NestCoupler`'s
+        receipt words (woof.runtime._write_microphysics_transition_receipt
+        checks one force per parent step).  The band carries every moist
+        species its child holds, through its lateral frame and its
+        interface: the parent's and the child's microphysics are one
+        scheme (a band is its parent's column)."""
+        from types import MappingProxyType
+        node = self.child_node
+        if node is None:
+            raise RuntimeError("a partial band's receipt before its first FORCE")
+        parent = node.parent
+        parent_ticks = int(parent.clock.ticks)
+        interval = int(parent.clock.step_ticks)
+        start = (parent_ticks if self.first_parent_ticks is None
+                 else int(self.first_parent_ticks) - interval)
+        return MappingProxyType({
+            "source_domain": int(parent.cfg.grid_id),
+            "target_domain": int(node.cfg.grid_id),
+            "requested_policy": str(getattr(node.cfg.run,
+                                            "nest_microphysics_transition", "")),
+            "effective_policy": "partial-nest-band:every-moist-species",
+            "species": list(self.nest.species),
+            "observation_scope": "current_process_since_build_or_restore",
+            "process_start_parent_ticks": start,
+            "process_force_count": int(self.force_count),
+            "parent_interval_ticks": interval,
+            "final_parent_ticks": parent_ticks,
+            "domain_start_ticks": int(node.clock.spec.start_ticks),
+            "current_process_coverage_complete": (
+                self.force_count == (parent_ticks - start) // interval),
+            "first_parent_ticks": self.first_parent_ticks,
+            "last_parent_ticks": self.last_parent_ticks,
+            "first_parent_step": self.first_parent_step,
+            "last_parent_step": self.last_parent_step,
+            "parent_step_count": int(parent.clock.step_count),
+            "force_count_matches_parent_steps": bool(
+                (self.force_count == 0 and self.first_parent_step is None)
+                or (self.force_count > 0
+                    and self.force_count
+                    == self.last_parent_step - self.first_parent_step + 1)),
+        })
 
     def feedback_prepare(self, node, out) -> None:
         return None
 
     def feedback_commit(self, node) -> None:
         self.nest.feedback()
+        if self.surface is not None and self.nest.band.feedback:
+            self._surface_feedback(node)
+
+    def _surface_feedback(self, node) -> None:
+        """The full-depth coupler's non-atmospheric feedback (its
+        feedback_commit's surface block, start=False): Registry masked and
+        integer carriers, the live surface/soil/physics inventory, then the
+        surface-nest commit, each skipping what an earlier one restricted."""
+        from woof.core.nest_physics_feedback import _carriers, feedback_physics
+        from woof.core.surface_nests import commit_surface_feedback
+        full, run = self.surface, node.cfg.run
+        full._feedback_surface(full._surface_feedback_plan())
+        done = set(full.surface_feedback_fields)
+        # A carried physics field on the atmosphere's levels (h_diabatic and
+        # the like) has the band's depth on the child and the column's on
+        # the parent: not restricted (the band feeds back its feedback_fields
+        # below the interface; module docstring, "Feedback").
+        coarse, fine = _carriers(node.parent.state), _carriers(node.state)
+        done.update(name for name, c in coarse.items()
+                    if name in fine and getattr(c, "ndim", 0) == 3
+                    and getattr(fine[name], "ndim", 0) == 3
+                    and c.shape[0] != fine[name].shape[0])
+        done.update(feedback_physics(full, node, skip_names=done))
+        commit_surface_feedback(node.parent.state, node.state, run,
+                                full.registrations["m"], spec_zone=run.spec_zone,
+                                skip_names=done)
 
     def feedback_finalize(self, node) -> None:
         return None

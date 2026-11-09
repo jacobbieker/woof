@@ -32,9 +32,10 @@ parent and child -- and the parent's coupled ``ww`` at ``k_top`` needs no
 column-mass rescaling: ``sint`` it as it is.
 
 Scope (D2): the default arithmetic build (strict ``GPUWM_WRF_EXACT*``
-builds are refused by name), periodic lateral boundaries, no map factors, no
+builds are refused by name), periodic lateral boundaries, no
 ``damp_opt=3`` implicit damper (its layer is measured from the parent's
-top).  The child's lateral frame (D3), the top relaxation zone (D3) and
+top).  Map factors launch the ``*_msf`` entry points
+(:func:`prepare_top_substep`; :func:`calc_ww_top` already carries them).  The child's lateral frame (D3), the top relaxation zone (D3) and
 feedback (D3) build on these entry points.
 """
 
@@ -87,8 +88,6 @@ def refuse_unsupported(cfg: RunConfig, state: DomainState | None = None, *,
         raise PartialNestRefused(
             "damp_opt=3 measures its layer from the model top, which a partial-"
             "depth child does not have; the child's top zone is D3's")
-    if state is not None and state.has_msf:
-        raise PartialNestRefused("the D2 top entry points carry no map factors")
     if cfg.nz + 1 > 129:
         raise PartialNestRefused("the child's w''-phi'' column is limited to 128 levels")
 
@@ -179,8 +178,20 @@ def truncate_state(parent: DomainState, cfg: RunConfig, k_top: int, *,
     # elapsed_seconds rides along: the child is the parent's column at the
     # parent's instant (woof/core/model.py no longer assigns it, so the
     # clock-module audit in tests/test_clock.py stays a tripwire).
+    # The base geopotential's host snapshot (height_half, the column's
+    # minimum spacing), truncated with the device copy above.
+    phb_host = getattr(parent, "_phb_host", None)
+    if phb_host is not None:
+        child._phb_host = np.array(phb_host[:k_top + 1], dtype=np.float64, copy=True)
+        from woof.core.state import _height_half_from_phb
+        z_half = _height_half_from_phb(child._phb_host)
+        child._dz_min = (float(np.diff(z_half, axis=0).min())
+                         if z_half.shape[0] > 1 else None)
+    # rotational with has_msf: the flags set_map_coriolis derives from the
+    # copied map factors and Coriolis words (the dycore keys its msf paths
+    # and the Coriolis + curvature kernel on them).
     for name in ("cf1", "cf2", "cf3", "cfn", "cfn1", "p_top", "mub", "has_msf",
-                 "elapsed_seconds"):
+                 "rotational", "elapsed_seconds"):
         if hasattr(parent, name):
             setattr(child, name, getattr(parent, name))
     if coord is not None:
@@ -188,6 +199,12 @@ def truncate_state(parent: DomainState, cfg: RunConfig, k_top: int, *,
         ccoord = truncated_vertical_coord(coord, k_top)
         for name in ("c1h", "c2h", "c1f", "c2f", "c3h", "c4h", "c3f", "c4f"):
             getattr(child, name)[...] = cp.asarray(getattr(ccoord, name), dtype=DTYPE)
+        # The full-level drops hypsometric_opt = 2 reads (State.load_base:
+        # differenced once in float64 from the coordinate's own values);
+        # c4' = c4 + c3*(p_i - p_top) + p_top - p_i moves dc4f.
+        for name in ("c3f", "c4f"):
+            full = np.asarray(getattr(ccoord, name), dtype=np.float64)
+            getattr(child, "d" + name)[...] = cp.asarray(full[:-1] - full[1:], dtype=DTYPE)
         shift = interface_pressure(coord, k_top) - float(coord.p_top)
         child.mub2d[...] = parent.mub2d - DTYPE(shift)
         child.p_top = DTYPE(ccoord.p_top)
@@ -204,12 +221,14 @@ def column_sums(state: DomainState, cfg: RunConfig, klev: int, ru=None, rv=None)
     nz, ny, nx = cfg.nz, cfg.ny, cfg.nx
     sums = cp.zeros((6, ny, nx), dtype=DTYPE)
     want = ru is not None
-    get_kernel(_MODULE, "nest_top_column_sums")(
+    msf = bool(state.has_msf)
+    get_kernel(_MODULE, "nest_top_column_sums_msf" if msf else "nest_top_column_sums")(
         _blocks(ny * nx), (_THREADS,),
         (state.u_pp, state.v_pp, state.u, state.v, state.mup, state.mub2d,
          state.dnw, state.c1h, state.c2h,
-         ru if want else state.u, rv if want else state.v, np.int32(want),
-         DTYPE(1.0 / cfg.dx), DTYPE(1.0 / cfg.dy), np.int32(klev),
+         ru if want else state.u, rv if want else state.v, np.int32(want))
+        + ((state.msft, state.msfu, state.msfv) if msf else ())
+        + (DTYPE(1.0 / cfg.dx), DTYPE(1.0 / cfg.dy), np.int32(klev),
          np.int32(nz), np.int32(ny), np.int32(nx), np.int32(cfg.open_x),
          np.int32(cfg.open_y), sums))
     return sums
@@ -219,7 +238,7 @@ def prepare_top_substep(state: DomainState, cfg: RunConfig, dtau: float,
                         coefficients: tuple, iface: Interface, top: TopForcing,
                         *, mudf=None, theta_upwind: bool = False,
                         rigid_predictor: bool = False, nested_frame: bool = False,
-                        predictor=None):
+                        predictor=None, w_top=None):
     """One child acoustic substep, bound once per RK stage (the counterpart
     of :func:`woof.core.acoustic.prepare_acoustic_substep_launch`).
 
@@ -230,7 +249,14 @@ def prepare_top_substep(state: DomainState, cfg: RunConfig, dtau: float,
     ``nested_frame``: see :func:`refuse_unsupported`.  ``predictor``, a
     callable ``predictor(rhs_top)`` launched after ``advance_mu_th_top``,
     replaces :func:`nest_top_ph_predictor` (D3's specified-interface
-    predictor, :mod:`woof.core.partial_nest_run`).
+    predictor, :mod:`woof.core.partial_nest_run`).  ``w_top`` replaces
+    ``top.w_top`` as the specified interface w'' of the implicit solve.
+
+    Map factors (``state.has_msf``) launch the ``*_msf`` entry points
+    (``kernels/nest_top.cu``, the map-factor block): acoustic.cu's msf
+    arithmetic with the same top, the interface flux entering the column
+    mass tendency as ``msft*ww_top``.  ``advance_uv_top`` is msf-free, as
+    acoustic.cu's ``advance_uv`` is with one isotropic factor per staggering.
     """
     from woof.core.acoustic import (_base3d, _boundary_x, _boundary_y,
                                     _mass_w_boundary_zone, _spec_zone)
@@ -266,27 +292,31 @@ def prepare_top_substep(state: DomainState, cfg: RunConfig, dtau: float,
     uv_first = uv_prefix + (DTYPE(0.0),) + uv_suffix
     uv_later = uv_prefix + (DTYPE(cfg.smdiv),) + uv_suffix
 
-    mu = get_kernel(_MODULE, "advance_mu_th_top")
+    msf = bool(state.has_msf)
+    msf_args = (state.msft, state.msfu, state.msfv) if msf else ()
+    mu = get_kernel(_MODULE, "advance_mu_th_top_msf" if msf else "advance_mu_th_top")
     mu_args = (
         state.u_pp, state.v_pp, state.u, state.v, state.mup, state.mu_pp,
         mu_old, state.rmu_t, mudf_arg, write_mudf, state.thp, state.thb,
         state.th_pp, th_old, state.rth_t, state.ww_pp, state.p_pp,
         state.p_pp_old, state.dnw, state.rdnw, state.fnm, state.fnp,
-        state.c1h, state.c2h, state.mub2d, rdx, rdy, dtau_arg, base3d,
+        state.c1h, state.c2h, state.mub2d) + msf_args + (rdx, rdy, dtau_arg, base3d,
         nz_a, ny_a, nx_a, np.int32(_boundary_x(cfg)), np.int32(_boundary_y(cfg)),
         np.int32(_mass_w_boundary_zone(cfg)),
         top.ww_pp, top.ww_rf, top.adj_pp, top.adj_rf, top.t_above,
         iface.fnm, iface.fnp, np.int32(bool(theta_upwind)))
 
-    pred = get_kernel(_MODULE, "nest_top_ph_predictor")
+    pred = get_kernel(_MODULE, "nest_top_ph_predictor_msf" if msf
+                      else "nest_top_ph_predictor")
     pred_args = (
         rhs_top, state.w_pp, state.ph_pp, state.rph_t, state.ww_pp,
         state.php, state.phb, state.mup, state.mub2d, state.rdnw,
-        state.c1f, state.c2f, top.ww_above, top.pht_above,
+        state.c1f, state.c2f) + ((state.msft,) if msf else ()) + (
+        top.ww_above, top.pht_above,
         iface.fnm, iface.fnp, iface.rdnw, dtau_arg, DTYPE(cfg.epssm),
         base3d, nz_a, ny_a, nx_a)
 
-    w = get_kernel(_MODULE, "advance_w_phi_top")
+    w = get_kernel(_MODULE, "advance_w_phi_top_msf" if msf else "advance_w_phi_top")
     w_args = (
         state.w_pp, state.ph_pp, state.rw_t, state.rph_t, state.ww_pp,
         state.mu_pp, mu_old, state.th_pp, th_old,
@@ -294,11 +324,12 @@ def prepare_top_substep(state: DomainState, cfg: RunConfig, dtau: float,
         a, alpha, gam, state.mup, state.u_pp, state.v_pp, state.ht,
         state.rdn, state.rdnw, state.fnm, state.fnp,
         state.c1h, state.c2h, state.c1f, state.c2f, state.mub2d,
-        cqw, np.int32(use_cq), state.p_pp, state.al_pp,
+        cqw, np.int32(use_cq)) + ((state.msft,) if msf else ()) + (
+        state.p_pp, state.al_pp,
         state.cf1, state.cf2, state.cf3, rdx, rdy, dtau_arg, DTYPE(cfg.epssm),
         np.int32(_boundary_x(cfg)), np.int32(_boundary_y(cfg)),
         np.int32(_mass_w_boundary_zone(cfg)), base3d, nz_a, ny_a, nx_a,
-        rhs_top, top.w_top, top.ph_top)
+        rhs_top, top.w_top if w_top is None else w_top, top.ph_top)
 
     def launch(*, first: bool) -> None:
         uv(uv_grid, block, uv_first if first else uv_later)

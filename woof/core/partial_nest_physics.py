@@ -88,8 +88,16 @@ class ExtendedColumn:
         for name in ("cf1", "cf2", "cf3", "cfn", "cfn1", "p_top", "mub", "has_msf"):
             if hasattr(root, name):
                 setattr(ext, name, getattr(root, name))
-        if ext.has_msf:
-            raise PartialNestRefused("map factors on the extended radiation column")
+        # The column's horizontal geometry is the child's own (its map
+        # factors, Coriolis and rotation words), not the root's.
+        for name in ("msft", "msfu", "msfv", "msfv_inv", "f", "e", "sina", "cosa"):
+            dev, src = getattr(ext, name, None), getattr(c, name, None)
+            if isinstance(dev, cp.ndarray) and isinstance(src, cp.ndarray) \
+                    and dev.shape == src.shape:
+                dev[...] = src
+        for name in ("has_msf", "rotational"):
+            if hasattr(c, name):
+                setattr(ext, name, getattr(c, name))
         self.mass_above = DTYPE(nest.p_i - float(root.p_top))
         ext.mub2d[...] = c.mub2d + self.mass_above
         if ext.mub is not None and c.mub is not None:
@@ -180,6 +188,22 @@ class ExtendedColumnRadiation:
 
     def __getattr__(self, name):
         return getattr(self.inner, name)
+
+    def restart_identity(self) -> dict:
+        """The checkpoint's name for this adapter (woof.io.restart's custom
+        callable rule): the wrapped stock adapter's class and the column it
+        runs on."""
+        col = self.column
+        inner = type(self.inner)
+        name = f"{inner.__module__}.{inner.__qualname__}"
+        return {"algorithm": f"partial-nest-extended-column:{name}",
+                "above_atmosphere_policy":
+                    "child levels below the interface, the parent's SINT above "
+                    "it to the model top",
+                "inner_class": name,
+                "k_top": int(col.k), "column_nz": int(col.cfg.nz),
+                "p_top_pa": float(col.root.p_top),
+                "interface_pa": float(col.nest.p_i)}
 
     def __call__(self, *, atmosphere, fields, state, cfg):
         from woof.core.physics import _prepare_atmosphere

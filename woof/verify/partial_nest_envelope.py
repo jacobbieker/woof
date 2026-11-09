@@ -229,10 +229,23 @@ def _band_specs(case: Case, coord):
     return out
 
 
-def build_chain(case_name: str, *, band_overrides=None):
+def _set_map_factors(state, cfg, map_factor, x0: float, y0: float) -> None:
+    """``state``'s msft/msfu/msfv from ``map_factor(x, y)`` (absolute
+    metres, the root's origin) at its mass, u and v points."""
+    xm = x0 + (np.arange(cfg.nx) + 0.5) * cfg.dx
+    ym = y0 + (np.arange(cfg.ny) + 0.5) * cfg.dy
+    xu = x0 + np.arange(cfg.nx + 1) * cfg.dx
+    yv = y0 + np.arange(cfg.ny + 1) * cfg.dy
+    state.set_map_coriolis(msft=map_factor(xm[None, :], ym[:, None]),
+                           msfu=map_factor(xu[None, :], ym[:, None]),
+                           msfv=map_factor(xm[None, :], yv[:, None]))
+
+
+def build_chain(case_name: str, *, band_overrides=None, map_factor=None):
     """``(nests, root_only, allfine)``: the coupled chain (coarse to fine),
     and factories for the two references.  ``band_overrides`` (a dict, or
-    one dict per band) replaces band fields."""
+    one dict per band) replaces band fields.  ``map_factor(x, y)`` (absolute
+    metres) gives every grid map factors (the references keep none)."""
     from woof.core.grid import make_base_state, make_vertical_coord
     from woof.core.partial_nest import truncated_vertical_coord, validate_band_chain
     from woof.core.partial_nest_dyn import truncate_state
@@ -251,6 +264,8 @@ def build_chain(case_name: str, *, band_overrides=None):
     ratios = [b.parent_grid_ratio for b in bands]
     total = int(np.prod(ratios))
     root = _init(rcfg, coord, base, case, 0.0, 0.0, cells=total)
+    if map_factor is not None:
+        _set_map_factors(root, rcfg, map_factor, 0.0, 0.0)
     _attach_physics(root, rcfg)
     nests = []
     parent, pcfg, pcoord = root, rcfg, coord
@@ -262,6 +277,8 @@ def build_chain(case_name: str, *, band_overrides=None):
         x0 += (band.i_parent_start - 1) * pcfg.dx
         y0 += (band.j_parent_start - 1) * pcfg.dy
         cfull = _init(cfull_cfg, coord, base, case, x0, y0, cells=cells)
+        if map_factor is not None:
+            _set_map_factors(cfull, cfull_cfg, map_factor, x0, y0)
         child, ccfg = truncate_state(cfull, cfull_cfg, band.k_top, coord=coord)
         del cfull
         nest = PartialNest(parent, pcfg, pcoord, child, ccfg, band,
@@ -287,9 +304,10 @@ def build_chain(case_name: str, *, band_overrides=None):
     return nests, root_only, allfine
 
 
-def build(case_name: str, *, band_overrides=None):
+def build(case_name: str, *, band_overrides=None, map_factor=None):
     """``(nest, parent_only, allfine)`` for a one-band case (D3's entry)."""
-    nests, root_only, allfine = build_chain(case_name, band_overrides=band_overrides)
+    nests, root_only, allfine = build_chain(case_name, band_overrides=band_overrides,
+                                            map_factor=map_factor)
     if len(nests) != 1:
         raise ValueError(f"{case_name} is a chain case: use build_chain")
     return nests[0], root_only, allfine

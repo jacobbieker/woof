@@ -6666,18 +6666,26 @@ def _archive_dry_readiness(args, payload: dict, cycle) -> int | None:
 
 
 def _refuse_partial_nests(config: Path, payload: dict) -> None:
-    """A forecast launch refuses a ``partial_nest`` band before any fetch or
-    preparation: every forecast route of ``woof go`` builds its children
-    full depth (the tree preflight refuses it too, for a direct runner
-    call).  A --prepare-only launch skips it and still prepares the band."""
+    """A forecast launch refuses, before any fetch or preparation, a
+    ``partial_nest`` band its route does not carry.  The prepared
+    domain-tree route realizes the band on the restored tree
+    (:func:`woof.core.model.refuse_prepared_tree_partial_nests` names what
+    it does not carry beside one; the tree preflight asks it again, for a
+    direct runner call); a ``[case_data]`` launch builds its children on
+    the experiment-tree route, which builds them full depth and refuses the
+    band.  A --prepare-only launch skips it and still prepares the band."""
     domains = payload.get("domain")
     if not isinstance(domains, list) or not any(
             isinstance(table, dict) and "partial_nest" in table for table in domains):
         return
-    from woof.core.model import refuse_real_partial_nests
+    from woof.core.model import (refuse_prepared_tree_partial_nests,
+                                 refuse_real_partial_nests)
     from woof.experiment import load_experiment
     try:
-        refuse_real_partial_nests(load_experiment(config), "woof go")
+        if "case_data" in payload:
+            refuse_real_partial_nests(load_experiment(config), "woof go ([case_data])")
+        else:
+            refuse_prepared_tree_partial_nests(load_experiment(config), "woof go")
     except ValueError as error:
         raise GoRefusal(str(error)) from None
 
