@@ -2768,17 +2768,20 @@ class _Rewriter:
             if c.kind == K.CLASS_TEMPLATE and c.spelling in names:
                 continue
             for node in c.walk_preorder():
-                if node.kind not in (K.CXX_FUNCTIONAL_CAST_EXPR, K.CALL_EXPR, K.UNEXPOSED_EXPR) \
-                        or not self.main_file(node):
+                if node.kind not in (K.CXX_FUNCTIONAL_CAST_EXPR, K.CALL_EXPR, K.UNEXPOSED_EXPR,
+                                     K.CSTYLE_CAST_EXPR) or not self.main_file(node):
                     continue
                 toks = list(node.get_tokens())
-                if len(toks) < 4 or toks[0].spelling not in names or toks[1].spelling != "<":
+                # `(S<T>)p` as well as `S<T>(p, ...)`
+                lead = 1 if node.kind == K.CSTYLE_CAST_EXPR and toks and toks[0].spelling == "(" else 0
+                if len(toks) < 4 + lead or toks[lead].spelling not in names or toks[lead + 1].spelling != "<":
                     continue
-                close = self._closing_angle(toks, 1)
-                if close is None or close + 1 >= len(toks) or toks[close + 1].spelling != "(":
+                close = self._closing_angle(toks, lead + 1)
+                after = ")" if lead else "("
+                if close is None or close + 1 >= len(toks) or toks[close + 1].spelling != after:
                     continue
                 at = toks[close].extent.start.offset
-                if at in done or any(t.spelling == "," for t in toks[2:close]):
+                if at in done or any(t.spelling == "," for t in toks[lead + 2:close]):
                     continue
                 args = [a for a in node.walk_preorder() if a is not node
                         and a.extent.start.offset > toks[close + 1].extent.start.offset
