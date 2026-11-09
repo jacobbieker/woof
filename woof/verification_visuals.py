@@ -1175,6 +1175,22 @@ def _process_identity(pid):
             return None
         except OSError:
             return {"pid": pid, "birth": None}
+    if sys.platform == "darwin":
+        # sysctl(CTL_KERN, KERN_PROC, KERN_PROC_PID): struct kinfo_proc, whose
+        # first field is p_starttime (a timeval) and whose p_stat is byte 36
+        # (5 is SZOMB).  No such process returns no bytes.
+        import ctypes
+        import struct
+
+        mib = (ctypes.c_int * 4)(1, 14, 1, int(pid))
+        info = ctypes.create_string_buffer(648)
+        size = ctypes.c_size_t(len(info))
+        if ctypes.CDLL(None).sysctl(mib, 4, info, ctypes.byref(size), None, 0) != 0:
+            return {"pid": pid, "birth": None}
+        if size.value == 0:
+            return None
+        seconds, microseconds = struct.unpack_from("=qi", info.raw, 0)
+        return None if info.raw[36] == 5 else {"pid": pid, "birth": seconds * 1_000_000 + microseconds}
     try:
         os.kill(int(pid), 0)
         return {"pid": pid, "birth": None}

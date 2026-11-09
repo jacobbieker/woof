@@ -2517,6 +2517,8 @@ def prepare_forecast_host(
                 f"the leading block of the model species {scalar_names}"
             )
         driven = select_lbc_scalar_names(lbc_paths or (), driven_block)
+        from woof.hex.chem_transport import drive_chemistry_rows
+        driven = drive_chemistry_rows(backend_row, driven, driven_block, scalar_names)
         undriven: list[str] = []
         if drives_block_only and lbc_paths:
             undriven = supplied_undriven_scalars(lbc_paths[0], scalar_names, driven)

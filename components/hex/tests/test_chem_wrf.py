@@ -30,18 +30,19 @@ def test_chem_sets_by_name(tmp_path):
 
 @pytest.mark.parametrize("block,match", [
     ({"chem_opt": 300}, "chem.sulfur"),
-    ({"chem_sets": "smoke"}, "fire emission frames"),
+    ({"chem_sets": "smoke", "fire_emission_mode": 3}, "must be a string"),
     ({"chem_sets": "sfire_smoke"}, "fire grid"),
     ({"chem_opt": 1}, "RADM2"),
     ({"chem_opt": 7}, "PNNL"),
-    ({"chem_opt": 401, "biomass_burn_opt": 2}, "fire emission frames"),
-    ({"chem_opt": 401, "chem_in_opt": 1}, "not carried on the hex route"),
+    ({"chem_opt": 401, "biomass_burn_opt": True}, "integer"),
+    ({"chem_opt": 401, "emiss_opt": 1}, "not carried on the hex route"),
     ({"chem_opt": 401, "dust_opt": 1.5}, "integer"),
     ({"chem_opt": 401, "chem_sets": "dust"}, "exactly one"),
     ({}, "exactly one"),
     ({"chem_sets": "dust,smoke"}, "one set"),
 ])
 def test_unported_and_malformed_refused_by_name(tmp_path, block, match):
+    # (fire smoke with plume rise is carried: tests/test_hex_chem_wrf_gpu.py, the smoke case)
     with pytest.raises(ValueError, match=match):
         load_config(config(tmp_path, block))
 
@@ -275,3 +276,15 @@ def test_feedback_prepares_the_radiation_before_phase_one(tmp_path, monkeypatch)
     backend._seam = backend._new_seam()   # a rollback's fresh seam is bound again
     assert calls == ["new-seam", "bind", ("prepare", False), ("radiation", "pres_hyd_p", 60.0),
                      "base-begin", "new-seam", "bind"]
+
+
+def test_fire_smoke_takes_its_sources_and_the_sets_defaults(tmp_path):
+    from woof.hex.chem_wrf import chem_sources, load_table
+    raw = {"wrf_chem": {"chem_sets": "smoke", "biomass_burn_opt": 1}}
+    assert chem_sources("smoke", raw["wrf_chem"]) == ("rave-3km",)
+    name, table, values = load_table(raw)
+    # The smoke set's reference defaults (RRFS-SD: washout, an hourly plume) fill what the block leaves unset.
+    assert values["plumerisefire_frq"] == 60 and values["wetscav_onoff"] == -1
+    assert {"emission.fire", "plumerise.freitas"} <= set(table.processes)
+    stated = load_table({"wrf_chem": {"chem_sets": "smoke", "biomass_burn_opt": 1, "wetscav_onoff": 0}})[2]
+    assert stated["wetscav_onoff"] == 0

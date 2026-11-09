@@ -1,6 +1,6 @@
-"""MADE/SORGAM dry deposition and PM sums against WRF v4.6.1, word for word.
+"""MADE/SORGAM dry deposition and PM sums against WRF v4.7.1, word for word.
 
-tools/chem_wrf461_oracle/sorgam/run_sorgam_dep.F90 runs the byte-copied
+tools/chem_wrf471_oracle/sorgam/run_sorgam_dep.F90 runs the byte-copied
 sorgam_depdriver (VDVG_2, aer_drydep_opt = 1, and VDVG, = 11) on 16 columns
 covering the friction-velocity floor, stable/neutral/unstable surface
 layers, smooth and rough surfaces, shallow and deep boundary layers and a

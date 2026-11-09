@@ -158,11 +158,11 @@ _EXTRA_HEADERS: dict[str, tuple[str, ...]] = {
     "chem_drydep_gocart": ("glibc_flt32.cuh",),
     "chem_optics": ("glibc_flt32.cuh",),
     # RADM2 gas phase (chem_opt = 1/2), graded word for word against the
-    # WRF v4.6.1 column oracle (tests/test_chem_radm2_wrf461_parity.py):
+    # WRF v4.7.1 column oracle (tests/test_chem_radm2_wrf471_parity.py):
     # WOOF's glibc 2.39 float32 expf/powf and log10f.
     "chem_radm2": ("glibc_flt32.cuh", "glibc_flt32_extra.cuh"),
     # MADE/SORGAM (chem_opt = 2, RPMARES branch), graded word for word against
-    # the WRF v4.6.1 oracle (tests/test_chem_sorgam_wrf461_parity.py): WOOF's
+    # the WRF v4.7.1 oracle (tests/test_chem_sorgam_wrf471_parity.py): WOOF's
     # glibc 2.39 float32 and binary64 exp/log/pow, correctly rounded binary64
     # acos/cos (CORE-MATH) and sin (f64cr).
     "chem_sorgam": ("glibc_flt32.cuh", "glibc_flt64.cuh", "f64cr.cuh"),

@@ -97,9 +97,9 @@ def product_slugs(forecast_dir):
 
 def configure(path):
     """Register configuration as data; hash identity survives subprocesses."""
-    from .species_row import (AEROSOL_MASS, SpeciesDeclaration, WSM6_SPECIES_ROW,
-                              register_extended_row)
-    from .physics_backend_admission import (FROZEN_WSM6_COLUMN_ROW,
+    from .species_row import (AEROSOL_MASS, SpeciesDeclaration, THOMPSON_AEROSOL_SPECIES_ROW,
+                              WSM6_SPECIES_ROW, register_extended_row)
+    from .physics_backend_admission import (FROZEN_WSM6_COLUMN_ROW, THOMPSON_AERO_COLUMN_ROW,
                                             register_synthesized_row)
     path, raw, species = load_config(path)
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
@@ -115,17 +115,57 @@ def configure(path):
         declared = tuple(SpeciesDeclaration(s.name, AEROSOL_MASS, True, s.name.upper(),
                                             "Aerosol mass mixing ratio per dry-air mass")
                          for s in species)
-    overlap = set(names) & set(WSM6_SPECIES_ROW.names())
+    # A wrf_chem block that couples to aerosol-aware Thompson runs beside its column row (chem_wrf.physics_row);
+    # every other chemistry runs beside the default WSM6 row.
+    from . import chem_wrf
+    thompson = "wrf_chem" in raw and chem_wrf.physics_row(raw) == THOMPSON_AERO_COLUMN_ROW.name
+    base, base_row = ((THOMPSON_AEROSOL_SPECIES_ROW, THOMPSON_AERO_COLUMN_ROW) if thompson
+                      else (WSM6_SPECIES_ROW, FROZEN_WSM6_COLUMN_ROW))
+    overlap = set(names) & set(base.names())
     if overlap:
         raise ValueError(f"chemistry names overlap atmospheric scalars: {sorted(overlap)}")
-    row = WSM6_SPECIES_ROW.with_extras(declared)
+    row = base.with_extras(declared)
     register_extended_row(row, scheme_alias=name)
-    backend = replace(FROZEN_WSM6_COLUMN_ROW, name=name,
-                      adapter_module=__name__, appended_scalar_names=names,
+    backend = replace(base_row, name=name,
+                      adapter_module=__name__,
+                      appended_scalar_names=(*base_row.appended_scalar_names, *names),
                       anchor_configuration_class=name, anchored=False,
                       unanchored_remedy="Whole forecast and observed plume qualification")
     _CONFIGS[name] = (path, raw, species, row, digest)
     return register_synthesized_row(backend)
+
+
+def lbc_scalar_names(backend):
+    """The boundary-pool names a chemistry row set adds after the driven moisture block: each row's
+    ``lbc_<row>`` under ``wrf_chem`` ``have_bcs_chem = 1`` (woof.hex.chem_wrf.BoundaryReader supplies them),
+    else none."""
+    config = _CONFIGS.get(getattr(backend, "name", backend))
+    if config is None or "wrf_chem" not in config[1]:
+        return ()
+    from . import chem_wrf
+    from .lbc import declare_supplied_scalars
+    from .lbc import LBC_OPTIONAL_SCALAR_VARIABLES
+    names = chem_wrf.lbc_scalar_names(config[1])
+    # The Thompson numbers (under coupling) are stream variables already; only the rows are new to the pool.
+    declare_supplied_scalars(tuple(n for n in names if n not in LBC_OPTIONAL_SCALAR_VARIABLES))
+    return names
+
+
+def drive_chemistry_rows(backend, driven, driven_block, scalar_names):
+    """The pool's boundary scalars with the chemistry rows a run drives at the rings appended.
+
+    The rows follow the whole driven block in the pool as they follow it in the model's species, so pool
+    index and species index agree (the pool drives a leading run of the scalar array)."""
+    names = lbc_scalar_names(backend)
+    if not names:
+        return tuple(driven)
+    following = tuple(scalar_names[len(driven):len(driven) + len(names)])
+    if tuple(driven) != tuple(f"lbc_{name}" for name in driven_block) or following != tuple(
+            name[4:] for name in names):
+        raise ValueError(f"chemistry boundary rows {names} must follow the whole driven block "
+                         f"{tuple(driven_block)} in the model species {tuple(scalar_names)}; the boundary "
+                         f"stream drives {tuple(driven)}")
+    return (*driven, *names)
 
 
 def scheme_alias_for(backend):
@@ -444,5 +484,14 @@ def admit_arguments(args):
     from .physics_default import arwen_suite
     # --physics-suite arwen_mpas_column alone is the ArWen default column (the road a bare run took before 0.4.6).
     suite = getattr(args, "physics_suite", None)
-    if (backend not in (None, "wsm6_column") and not str(backend).startswith("chemistry_")) or (suite and suite != arwen_suite()) or getattr(args, "physics", None):
+    # A wrf_chem block that couples to aerosol-aware Thompson names its own column row (chem_wrf.physics_row).
+    row = "wsm6_column"
+    if backend in ("wsm6_column", "thompson_aero_column"):
+        _path, raw, _species = load_config(args.chemistry_config)
+        from . import chem_wrf
+        row = chem_wrf.physics_row(raw) if "wrf_chem" in raw else "wsm6_column"
+    if row != "wsm6_column" and backend not in (None, row) and not str(backend).startswith("chemistry_"):
+        raise ValueError(f"the chemistry config couples to aerosol-aware Thompson and runs beside {row}; "
+                         f"--physics-backend {backend} would replace it")
+    if (backend not in (None, "wsm6_column", row) and not str(backend).startswith("chemistry_")) or (suite and suite != arwen_suite()) or getattr(args, "physics", None):
         raise ValueError("chemistry currently couples to the active default WSM6/YSU column backend; another physics selection needs its own coefficient and scalar-update contract and cannot be silently replaced")

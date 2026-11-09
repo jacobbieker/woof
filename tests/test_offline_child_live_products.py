@@ -325,6 +325,10 @@ def test_a_stopped_child_draws_nothing_more(tmp_path, monkeypatch, width):
     # available (a hosted runner; a workstation with 10 GiB free), so the
     # slots this stop must end were never all in flight.
     monkeypatch.setenv(live_products.LIVE_RENDER_ADAPTIVE_ENV, "0")
+    # Nor does the one-shot budget under it hold them: a frame drawn beside
+    # its baselines is priced above LIVE_FRAME_PEAK_BYTES, so half of a
+    # hosted runner's 2.9 GiB free (macos-15) admitted one of the three.
+    monkeypatch.setattr(live_products, "_live_memory_budget", lambda: None)
     held = {(_START + timedelta(hours=hour)).strftime("wrfout_d02_%Y-%m-%d_%H_%M_%S")
             for hour in range(1, width + 1)}
     renderer = _Renderer(hold=held)

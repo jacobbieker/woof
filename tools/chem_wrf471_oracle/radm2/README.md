@@ -1,4 +1,4 @@
-# RADM2 column oracle, WRF v4.6.1
+# RADM2 column oracle, WRF v4.7.1
 
 `build.sh WRF_SRC BUILD_DIR [FIXTURE_ROOT]` compiles chem/module_radm.F and
 the modules it USEs whole and unchanged at `-O0`, against `stub_radm2.F90`

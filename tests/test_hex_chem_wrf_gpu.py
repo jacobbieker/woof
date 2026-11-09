@@ -79,7 +79,33 @@ CASES = {
     "dust": ({"chem_opt": 401, "dust_opt": 1, "wetscav_onoff": -1}, False),
     "gocart_primary": ({"chem_sets": "gocart_primary", "dust_opt": 1, "seas_opt": 1,
                         "wetscav_onoff": -1}, True),
+    # Fire smoke with plume rise (RAVE frames, synthetic) on cells of unequal area.
+    "smoke": ({"chem_sets": "smoke", "biomass_burn_opt": 1}, False),
 }
+#: Voronoi cell areas of the smoke case (m2): unequal, so the fire's per-cell mass becomes a flux through
+#: each cell's own area (the area-equivalent map factor).
+SMOKE_AREA = np.array([2.25e8, 1.9e8, 2.6e8, 2.1e8, 2.4e8, 1.75e8, 2.3e8, 2.0e8])
+#: hex columns that burn, the fire's PM2.5 (kg per cell per hour) and FRP (MW)
+FIRE_PM25 = np.array([0.0, 4.0e3, 0.0, 9.0e2, 0.0, 0.0, 2.2e4, 0.0])
+FIRE_FRP = np.array([0.0, 60.0, 0.0, 15.0, 0.0, 0.0, 420.0, 0.0])
+
+
+class _Frames:
+    """A SourceFrames (woof.core.chem_fire): the trailing 24 posted hours of one fire, on a grid."""
+
+    def __init__(self, to_grid):
+        self.reference_time = START.replace(tzinfo=datetime.timezone.utc)
+        self.hours = frozenset(self.reference_time - datetime.timedelta(hours=h) for h in range(1, 25))
+        self.to_grid = to_grid
+
+    def available_hours(self, source, field):
+        return self.hours
+
+    def at(self, source, field, when):
+        assert when in self.hours, when
+        scale = 0.5 + 0.5 * ((when.hour % 6) / 5.0)
+        values = {"PM25": FIRE_PM25, "FRP_MEAN": FIRE_FRP}[field] * scale
+        return self.to_grid(values)
 
 
 def _seam(water=False):
@@ -109,6 +135,7 @@ def _hex_runtime(seam, raw, area):
                               ncells=NCOL, offset=0, start_time=START, fnm=seam._state.fnm,
                               fnp=seam._state.fnp, terrain=seam._state.ht)
     attach_statics(runtime, lat_deg=None, lon_deg=None, fields=_statics())
+    runtime.set_geography(np.linspace(20.0, 34.0, NCOL), np.linspace(-10.0, 5.0, NCOL))
     return runtime
 
 
@@ -188,11 +215,16 @@ def run(request):
     inputs = _profile()
     state2 = {name: inputs[name].copy() for name in
               ("theta", "qv", "qc", "qr", "qi", "qs", "qg", "pressure", "rho_dry", "z_interface")}
-    area = np.full(NCOL, 2.25e8)
+    area = SMOKE_AREA if case == "smoke" else np.full(NCOL, 2.25e8)
     runtime = _hex_runtime(seam, _raw(case), area)
     scalars = cp.zeros((len(runtime.rows), NZ, NCOL), dtype=cp.float32)
     wcfg = replace(runtime.cfg, ny=NY, nx=NX)
     wrf = _wrf_state(seam, wcfg)
+    if case == "smoke":
+        runtime.state.chem.emission_frames = _Frames(lambda v: np.asarray(v, np.float64).reshape(1, NCOL))
+        wrf.chem.emission_frames = _Frames(lambda v: np.asarray(v, np.float64)[SOURCE].reshape(NY, NX))
+        # The WRF grid's map factor carries each column's cell area, as the hex column's does.
+        wrf.msft = _to_wrf(runtime.state.msft)
     history = []
     for step in range(1, STEPS + 1):
         seam.run_phase1(dt=DT, **inputs)
@@ -203,7 +235,7 @@ def run(request):
         runtime.step(scalars, columns, dt=DT, elapsed_seconds=step * DT, physics_fields=driver.fields,
                      microphysics=micro)
         runtime.commit()
-        _wrf_load(wrf, columns, driver.fields, micro)
+        _wrf_load(wrf, columns, {**driver.fields, **runtime.geography}, micro)
         wrf.elapsed_seconds = (step - 1) * DT
         chem_step(wrf, wcfg, DT)
         arrays = {}
@@ -237,7 +269,15 @@ def test_process_arrays_are_bitwise_the_wrf_path_per_column(run):
 
 def test_the_comparison_is_not_vacuous(run):
     last = run.history[-1]
-    assert sum(float(h.sum()) for h, _ in last["rows"]) > 0.0, "no dust was emitted"
+    assert sum(float(h.sum()) for h, _ in last["rows"]) > 0.0, "nothing was emitted"
+    if run.case == "smoke":
+        smoke = last["rows"][0][0]
+        burning = FIRE_PM25 > 0
+        # (unburnt columns hold only the 1e-16 floor the fire kernel keeps)
+        assert (smoke[:, burning].sum(axis=0) > 1e-3).all() and smoke[:, ~burning].max() < 1e-15
+        kmax = [v for k, v in last["arrays"].items() if k.endswith("plume_k_max")][0][0]
+        assert (kmax.reshape(-1)[burning] > 2).any(), "no plume rose above the lowest levels"
+        return
     edust = [v for k, v in last["arrays"].items() if k.endswith("edust")][0][0]
     assert (edust > 0).any()
     lifted = np.stack([h for h, _ in last["rows"]])
@@ -250,7 +290,8 @@ def test_the_comparison_is_not_vacuous(run):
 def test_hex_ledger_closes(run):
     ledger = run.runtime.ledger()
     assert ledger["max_relative_closure"] < 1e-12
-    for bucket in ("emitted", "deposited", "settled", "scavenged"):
+    buckets = ("emitted", "scavenged") if run.case == "smoke" else ("emitted", "deposited", "settled", "scavenged")
+    for bucket in buckets:
         total = sum(abs(r[bucket + "_kg"]) for r in ledger["rows"].values())
         assert total > 0.0, f"no mass was {bucket}: that process went untested"
 
@@ -264,7 +305,8 @@ def test_products_are_finite_and_named(run):
     for name in names:
         value = cp.asnumpy(products[name])
         assert value.shape == (NCOL,) and np.isfinite(value).all(), name
-    assert float(cp.asnumpy(products["dust_1_column_mass"]).sum()) > 0.0
+    first = "smoke_column_mass" if run.case == "smoke" else "dust_1_column_mass"
+    assert float(cp.asnumpy(products[first]).sum()) > 0.0
 
 
 def test_abort_restores_the_process_arrays_and_ledger(run):

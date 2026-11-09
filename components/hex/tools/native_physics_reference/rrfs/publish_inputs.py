@@ -30,7 +30,18 @@ def publish_inputs(source, destination, ready, staging_ready):
     for row in rows:
         if copied['files'][row['name']] != row['sha256'] or (stage / row['name']).stat().st_size != row['bytes']:
             raise ValueError('copied public input differs from verified S3 bytes: ' + row['name'])
-    stage.rename(destination)
+    # publish() sealed the stage read-only, and macOS 15 refuses to rename a
+    # directory its owner may not write (EACCES on the hosted runner; Linux
+    # does not ask), so the stage is writable for the rename alone and is
+    # sealed again under whichever name it then holds, the rename failed or not.
+    stage.chmod(stage.stat().st_mode | 0o200)
+    renamed = False
+    try:
+        stage.rename(destination)
+        renamed = True
+    finally:
+        sealed = destination if renamed else stage
+        sealed.chmod(sealed.stat().st_mode & ~0o222)
     with ready.open('a') as stream:
         fcntl.flock(stream, fcntl.LOCK_EX)
         stream.write(f'{description}: `{destination}`; PUBLICATION.json sha256 `{result["publication_sha256"]}`.\n')

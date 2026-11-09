@@ -903,6 +903,11 @@ mod tests {
         }
         hash
     }
+    // The digest is glibc's words: the plan's unit-sphere points and the
+    // field above take the platform's sin/cos, and Apple's libm rounds some
+    // of them differently, so another C library has no pin to meet.
+    #[cfg_attr(not(all(target_os = "linux", target_env = "gnu")),
+               ignore = "the digest was measured with glibc's sin/cos")]
     #[test] fn regional_plan_and_wire_bytes_are_unchanged_by_the_global_mode() {
         assert_eq!(regional_wire_digest(), 0x5e4a_51a0_93b4_228d);
     }

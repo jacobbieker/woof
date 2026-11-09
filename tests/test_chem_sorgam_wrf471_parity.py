@@ -1,6 +1,6 @@
-"""MADE/SORGAM against WRF v4.6.1's sorgam_driver (RPMARES branch), word for word.
+"""MADE/SORGAM against WRF v4.7.1's sorgam_driver (RPMARES branch), word for word.
 
-The oracle (tools/chem_wrf461_oracle/sorgam) copies sorgam_driver's call tree
+The oracle (tools/chem_wrf471_oracle/sorgam) copies sorgam_driver's call tree
 byte for byte from chem/module_aerosols_sorgam.F, changing only
 aeroproc's isorop=1 to isorop=0 (line 1580): ISORROPIA, the isorop = 1
 branch, carries a university copyright and no licence grant, so the default
@@ -137,9 +137,9 @@ def test_default_sorgam_within_tolerance_of_wrf(sched):
 
 
 def test_generated_block_is_fresh_against_the_pinned_source():
-    tree = Path(os.environ.get("WOOF_WRF461_STOCK_TREE", "wrf-stock-v461-gate-20260721"))
+    tree = Path(os.environ.get("WOOF_WRF471_STOCK_TREE", str(Path.home() / "Development/wrf-src/WRF-4.7.1")))
     if not (tree / "chem" / "module_aerosols_sorgam.F").is_file():  # pragma: no cover
-        pytest.skip(f"stock WRF v4.6.1 tree not present at {tree}")
+        pytest.skip(f"stock WRF v4.7.1 tree not present at {tree}")
     root = Path(__file__).resolve().parents[1]
     subprocess.run([sys.executable, str(root / "tools/chem_sorgam/transcribe_sorgam.py"),
                     str(tree), "--check"], check=True)

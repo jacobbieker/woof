@@ -1,6 +1,6 @@
-"""MADE/SORGAM initial conditions against WRF v4.6.1, word for word.
+"""MADE/SORGAM initial conditions against WRF v4.7.1, word for word.
 
-tools/chem_wrf461_oracle/sorgam/run_sorgam_ic.F90 runs the byte-copied
+tools/chem_wrf471_oracle/sorgam/run_sorgam_ic.F90 runs the byte-copied
 aerosols_sorgam_init past its chem_in_opt = 1 return, for aer_ic_opt = 1
 (AER_IC_DEFAULT) and 101 (AER_IC_PNNL, sorgam_init_aer_ic_pnnl, whose four
 height bands the 30 mass levels cross), on 8 columns.  Every aerosol row
