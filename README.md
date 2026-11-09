@@ -281,9 +281,17 @@ on it:
 
 - **Apple silicon only,** macOS 14 or newer, one GPU. Domain size is bounded
   by the Mac's unified memory. There is no multi-GPU or peer transport.
-- **Double precision is emulated.** Apple GPUs have no fp64, so `double`
-  becomes a bit-exact software binary64. It is correct to the last bit and
-  much slower than native fp64; units that lean on it are slow on a Mac.
+- **Double precision is emulated.** Apple GPUs have no fp64. Under strict
+  numerics (`GPUWM_WRF_EXACT=1`) `double` is a bit-exact software binary64:
+  correct to the last bit, much slower than native fp64, and slow to
+  compile. Fast numerics (the default) keeps the same binary64 words and
+  exact `+ - *`, division and square root, but computes CUDA's binary64
+  libm (exp, log, pow, sin, ...) in df64, a pair of binary32 values: about
+  2^-46 relative instead of correctly rounded, 20-150x faster, and units
+  that call it compile up to 100x sooner (`docs/dev/mlx-backend.md`,
+  "Binary64: soft-float and df64"). Units built on woof's own glibc ports
+  keep them, and their words, in both modes (CLM lake still compiles 5.6x
+  sooner, from the faster division and square root).
 - **The answers are not CUDA's bits everywhere.**
   - Metal never contracts a multiply-add, so where a CUDA result carries
     NVRTC's fused multiply-adds, Metal gives CUDA's `--fmad=false` words

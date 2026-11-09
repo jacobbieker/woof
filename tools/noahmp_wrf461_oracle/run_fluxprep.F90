@@ -1,11 +1,11 @@
 ! Per-leaf oracle for the VEGE_FLUX / BARE_FLUX *flux-preparation* leaves of
-! WRF v4.6.1 MODULE_SF_NOAHMPLSM: SFCDIF1, RAGRB and STOMATA.
+! WRF v4.7.1 MODULE_SF_NOAHMPLSM: SFCDIF1, RAGRB and STOMATA.
 !
 ! This program links the *visibility-patched* module (see
 ! patches/noahmp-lsm-leaf-visibility.patch, audited by
 ! check_visibility_patch.py before this file is compiled).  Apart from the 50
 ! `private ::` -> `public ::` accessibility statements, the physics source is
-! the pinned WRF v4.6.1 file byte for byte.
+! the pinned WRF v4.7.1 file byte for byte.
 !
 ! It is a sibling of run_leaves.F90 and shares its CSV schema and its generic
 ! `run_leaf` driver verbatim; the two are separate files only so that parallel

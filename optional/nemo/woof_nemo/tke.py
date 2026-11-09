@@ -21,6 +21,8 @@ from pathlib import Path
 
 import numpy as np
 
+from ._compile import raw_module
+
 _TPB = 64
 _MODULE = None
 #: cfgs/SHARED/namelist_ref, &namzdf_tke (NEMO 5.0.2)
@@ -39,14 +41,12 @@ PHYCST = dict(rho0=1026.0, grav=9.80665, vkarmn=0.4, rpi=3.141592653589793,
 def _module():
     global _MODULE
     if _MODULE is None:
-        import cupy as cp
-
         kernels = Path(__import__("woof.core.kernels", fromlist=["x"]).__file__).parent
         here = Path(__file__).resolve().parent
         source = ((kernels / "glibc_flt64.cuh").read_text(encoding="utf-8") + "\n"
                   + (kernels / "f64cr.cuh").read_text(encoding="utf-8") + "\n"
                   + (here / "tke.cu").read_text(encoding="utf-8"))
-        _MODULE = cp.RawModule(code=source, options=("--fmad=false",))
+        _MODULE = raw_module(source, ("--fmad=false",))
     return _MODULE
 
 

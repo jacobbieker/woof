@@ -31,6 +31,9 @@ BUILD_DIR_ENV = "WOOF_METAL_EXT_DIR"
 #: Environment override for the pipeline archive directory ("off": none).
 PIPELINE_DIR_ENV = "WOOF_METAL_PIPELINE_DIR"
 
+#: Environment override for the compiled-library directory ("off": none).
+LIBRARY_DIR_ENV = "WOOF_METAL_LIBRARY_DIR"
+
 
 def cache_root() -> Path:
     env = os.environ.get(BUILD_DIR_ENV)
@@ -49,6 +52,18 @@ def pipeline_root() -> Path | None:
     if env in ("off", "0"):
         return None
     return Path(env).expanduser() if env else cache_root().parent / "metal-pipelines"
+
+
+def library_root() -> Path | None:
+    """Where compiled units persist as serialized Metal dynamic libraries
+    (woof.backend.metal.dylib; launch.cpp ``dynamic_library_for``):
+    ``$WOOF_METAL_LIBRARY_DIR``, else ``metal-libraries`` beside the
+    extension cache.  A unit loaded from here compiles only its thin kernel
+    library, whatever the OS shader cache has kept."""
+    env = os.environ.get(LIBRARY_DIR_ENV)
+    if env in ("off", "0"):
+        return None
+    return Path(env).expanduser() if env else cache_root().parent / "metal-libraries"
 
 
 def build_key() -> str:
@@ -144,4 +159,8 @@ def load():
     if archives is not None:
         archives.mkdir(parents=True, exist_ok=True)
         module.set_pipeline_archive_dir(str(archives))
+    libraries = library_root()
+    if libraries is not None:
+        libraries.mkdir(parents=True, exist_ok=True)
+        module.set_library_dir(str(libraries))
     return module

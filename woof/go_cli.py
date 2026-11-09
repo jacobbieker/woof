@@ -6665,6 +6665,23 @@ def _archive_dry_readiness(args, payload: dict, cycle) -> int | None:
     return code or None
 
 
+def _refuse_partial_nests(config: Path, payload: dict) -> None:
+    """A forecast launch refuses a ``partial_nest`` band before any fetch or
+    preparation: every forecast route of ``woof go`` builds its children
+    full depth (the tree preflight refuses it too, for a direct runner
+    call).  A --prepare-only launch skips it and still prepares the band."""
+    domains = payload.get("domain")
+    if not isinstance(domains, list) or not any(
+            isinstance(table, dict) and "partial_nest" in table for table in domains):
+        return
+    from woof.core.model import refuse_real_partial_nests
+    from woof.experiment import load_experiment
+    try:
+        refuse_real_partial_nests(load_experiment(config), "woof go")
+    except ValueError as error:
+        raise GoRefusal(str(error)) from None
+
+
 def _go_launch(args, *, observer=None) -> int:
     """:func:`go_main`'s body, run with each advisory shown once."""
     import tomllib
@@ -6735,6 +6752,8 @@ def _go_launch(args, *, observer=None) -> int:
     config, payload = smoke_radiation_at_flag(args, config, payload)
     config, payload = smoke_at_launch(args, config, payload)
     _extend_outdir(args, config, payload)
+    if not getattr(args, "prepare_only", False):
+        _refuse_partial_nests(config, payload)
     from woof.spectral_nudging.cli import source_preparation as nudging_source_preparation
     prepared_nudging = nudging_source_preparation(args, config, payload)
     if prepared_nudging is not None:

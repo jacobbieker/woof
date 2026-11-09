@@ -62,10 +62,10 @@ leaf that calls `EXP`/`LOG`/`**` inside a soil- or snow-layer loop, check
 ## 1. Prerequisites
 
 ```
-WSL, gfortran 13.3.0, a pinned WRF v4.6.1 checkout ($WRF_TREE below)
-  (commit d66e442fccc04111067e29274c9f9eaccc3cef28)
+WSL, gfortran 13.3.0, a pinned WRF v4.7.1 checkout ($WRF_TREE below)
+  (commit f52c197ed39d12e087d02c50f412d90d418f6186)
 sha256(phys/module_sf_noahmplsm.F)
-  = bd592a5b7db29000e715250e3a7c779ffb5e0dcc356f6b5a7d9e1c9f69c55282
+  = 74b475600ad1c999fe43299bcaf4d3e5eaf59b9f861c47fdbff4d69739e3a45b
 ```
 
 Everything here is CPU-only. Shell scripts must stay **LF**, `.gitattributes`
