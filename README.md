@@ -313,8 +313,10 @@ on it:
   - the LTS executor's reserve census needs 64-bit atomic adds, which Apple
     GPUs lack;
   - the dynamics subcycle runs eager, because the facade has no CUDA graphs;
-  - the MPAS WSM6 unit of the water-budget gates (binary64, soft-float on
-    Metal) had not finished its cold compile after 1 h 45 min.
+  - the MPAS WSM6 unit of the water-budget gates (binary64) had not
+    finished its cold compile after 1 h 45 min with soft-float division and
+    square root; with the exact df64-seeded ones it compiles in about 4
+    minutes (fast numerics), and its gates have not been re-run on Metal.
 - **Virtual Macs are not supported.** GitHub's hosted macOS runners expose an
   "Apple Paravirtual device" that computes wrong answers (NaN) where an
   M-series GPU matches WRF, so CI runs the Metal parity gates only on real

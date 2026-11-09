@@ -4,8 +4,8 @@ Each (unit, mode) builds in its own interpreter with the pipeline archives
 off (``WOOF_METAL_PIPELINE_DIR=off``) and ``WOOF_METAL_F64`` set to the
 mode, so neither the archive nor the first build of the other mode serves
 it.  The macOS shader cache may still hold a library built earlier from the
-same MSL, so each build's MSL carries a fresh nonce comment (a new library
-for every cache), unless ``--no-nonce``.
+same MSL, so each build's MSL carries a fresh nonce declaration (a new
+library for every cache), unless ``--no-nonce``.
 
     pixi run -e mlx python tools/df64_compile_bench.py noahmp_water nssl2_qvexcess
 """
@@ -32,7 +32,8 @@ def one(name: str, nonce: bool) -> dict:
     t0 = time.perf_counter()
     unit = translate_unit(name, source, options=options)
     if nonce:
-        msl = f"// nonce {time.time_ns()}\n" + unit.msl
+        # a declaration, not a comment: the compiler's cache sees through comments
+        msl = f"constant int __woof_bench_nonce_{time.time_ns()} = 0;\n" + unit.msl
         unit = dataclasses.replace(unit, msl=msl, key=hashlib.sha256(msl.encode()).hexdigest())
     module = MetalModule(unit, name)
     t1 = time.perf_counter()

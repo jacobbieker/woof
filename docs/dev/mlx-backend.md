@@ -238,6 +238,20 @@ for them df64 changes only division and square root, which replace the
 soft-float digit loops (CLM lake still compiles 5.6x sooner, and its
 words are unchanged). The WSM6 unit was not re-measured.
 
+Strict numerics takes only the exact division and square root (the
+soft-float words). Its cold compile, main's strict prelude against this
+one, seconds: CLM lake 3087 -> 716 (4.3x); units whose cost is the
+vendored libm (`gfs_sas`, `sf_gfs`, `ice_accretion`, `wind_farm`) are
+unchanged within noise. The strict leg of `tools/df64_grade.py` compared
+the two paths over 2^30 GPU operands: 0 mismatches in either operation.
+Strict run time, the kernel below: division 1.7x, square root 5.6x
+faster; the libm calls unchanged.
+
+The MPAS WSM6 unit of the water-budget gates (hex, 55 levels, fast
+numerics, df64 division and square root, its glibc ports unchanged):
+cold compile 224 s, `wsm6_columns` 223 s of it (it had not finished after
+1 h 45 min with soft-float division and square root).
+
 Run time, `tools/df64_grade.py bench` (2^20 threads, 64 dependent
 operations each) and a translated kernel calling each function 16 times
 per thread over 2^20 threads: division 3.6x faster, square root 11x;
@@ -453,7 +467,9 @@ The MPAS WSM6 water-budget gates (`mpas_wb3_v842`, `mpas_wb5_v842`) run
 apart: their WSM6 unit carries binary64 (soft-float on Metal) and Thrust's
 `complex<double>`. The Kessler and Thompson writebacks and the referee pass
 (5 of 10). The WSM6 unit had not finished its cold Metal compile after
-1 h 45 min of compiler time on an M3 Max, so its 5 tests are not measured.
+1 h 45 min of compiler time on an M3 Max with soft-float division and
+square root; with the exact df64-seeded ones it compiles in 224 s ("Compile
+time"), and its 5 tests have not been re-run.
 
 The partial-depth band (Phase D5) keeps its own measurements:
 
