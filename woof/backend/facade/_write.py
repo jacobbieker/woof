@@ -27,11 +27,20 @@ struct WoofCopy { long n; long offset; long ndim; long shape[8]; long stride[8];
                      uint3 bd [[threads_per_threadgroup]]) {                            \\
   long i = (long)bid.x * (long)bd.x + (long)tid.x;                                     \\
   if (i >= c.n) return;                                                                 \\
-  long rem = i, off = c.offset;                                                         \\
-  for (long d = c.ndim - 1; d > 0; --d) {                                               \\
-    long k = rem % c.shape[d]; rem /= c.shape[d]; off += k * c.stride[d];               \\
+  long off = c.offset;                                                                  \\
+  if (c.n <= 0xFFFFFFFFl) {   /* 32-bit division where the index fits */                \\
+    uint rem = uint(i);                                                                 \\
+    for (long d = c.ndim - 1; d > 0; --d) {                                             \\
+      uint s = uint(c.shape[d]), k = rem % s; rem /= s; off += long(k) * c.stride[d];   \\
+    }                                                                                   \\
+    off += long(rem) * c.stride[0];                                                     \\
+  } else {                                                                              \\
+    long rem = i;                                                                       \\
+    for (long d = c.ndim - 1; d > 0; --d) {                                             \\
+      long k = rem % c.shape[d]; rem /= c.shape[d]; off += k * c.stride[d];             \\
+    }                                                                                   \\
+    off += rem * c.stride[0];                                                           \\
   }                                                                                     \\
-  off += rem * c.stride[0];                                                             \\
   dst[off] = src[SRC_INDEX];                                                            \\
 }
 #define SRC_INDEX i
