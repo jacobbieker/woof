@@ -2517,7 +2517,7 @@
    },
    {
     "file": "woof/core/kernels/chem_sorgam.cu",
-    "sha256": "206aace977a6ab2d3f0c676d380d14635457cb237db4a38bc2cdab260cf896e9"
+    "sha256": "a1889e818c576a7e865b129d6d3b27a54e3c522063f7891d81e3e67124efd435"
    },
    {
     "file": "woof/core/kernels/chem_sulfur.cu",

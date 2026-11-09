@@ -1,6 +1,6 @@
 // WRF-Chem MADE/SORGAM modal aerosol (chem_opt = 2 RADM2SORG): sorgam_driver
 // and its whole call tree from chem/module_aerosols_sorgam.F, WRF v4.7.1
-// (byte-identical in v4.7.1), one thread per grid cell.
+// (byte-identical in v4.6.1), one thread per grid cell.
 //
 // The default build runs SORGAM's own RPMARES inorganic equilibrium: aeroproc's
 // isorop = 1 branch calls ISORROPIA (chem/isocom.F), which carries a university
