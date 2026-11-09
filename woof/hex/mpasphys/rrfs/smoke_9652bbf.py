@@ -6284,13 +6284,27 @@ NO_CUPY_COLUMN_INCLUDES = ('-I@SITE@/cupy/_core/include/cupy/_cccl/cub', '-I@SIT
                            '-I@SITE@/nvidia/cuda_runtime/include')
 
 
+def _single_lane_plumes():
+    """The column routine without the plume's level workers: on AMD (one
+    wave64 holds the master and its workers, so a partial-wave barrier can
+    deadlock) and on Metal.  The CUDA route parks its master lane and 32
+    level workers on a counted ``cuda::barrier``, with the block's other 31
+    lanes gone; Metal has no counted barrier, and its threadgroup barrier
+    needs every thread of the group.  A spinning one between the master's
+    and the workers' SIMD groups relies on scheduling Metal does not
+    promise.  The single-lane routine keeps native arithmetic and loop
+    order (smoke_columns.source)."""
+    from woof.hip_backend import requested
+    from woof import backend
+    return requested() == 'hip' or backend.requested() == 'mlx'
+
+
 def cuda_options(*, columns=False):
     """Resolve standard CUDA headers from the installed CuPy environment."""
     if not columns:
         return CUDA_OPTIONS
-    from woof.hip_backend import requested
-    if requested() == 'hip':
-        # The AMD column routine does not use CUDA's counted-barrier header.
+    if _single_lane_plumes():
+        # The AMD and Metal column routine does not use CUDA's counted-barrier header.
         return CUDA_OPTIONS
     import importlib.util
     from woof import backend
@@ -6322,9 +6336,8 @@ def cuda_source(math_source, storage_transport_source=None, *, columns=False):
     graph = CUDA_SOURCE
     if columns:
         from .smoke_columns import source
-        from woof.hip_backend import requested
         graph = source(graph, ROUTINES, _NATIVE_BOUNDARIES, automatic=COLUMN_AUTOMATIC_ARRAYS,
-                       hip=requested() == 'hip')
+                       hip=_single_lane_plumes())
     return math_source + '\n' + prefix + graph + '\n' + storage
 
 
