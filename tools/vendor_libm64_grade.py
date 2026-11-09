@@ -115,7 +115,7 @@ def operands(n: int, seed: int):
             * np.exp2(rng.integers(20, 1024, 512).astype(float))
         # the binary64 closest to a multiple of pi/2 (Kahan-McDonald), and its neighbours
         x[3 * k + 512:3 * k + 515] = [6381956970095103.0 * 2.0 ** 797, np.nextafter(6381956970095103.0 * 2.0 ** 797, 0),
-                                      5.319372648326541e+255]
+                                      -np.finfo(np.float64).max]
         parts.append(x)
     return parts
 
@@ -226,7 +226,7 @@ def exact_sin(a) -> np.ndarray:
         x2, term, total, n = ctx.multiply(x, x), x, x, 1
         while True:
             n += 2
-            term = ctx.divide(ctx.multiply(-term, x2), (n - 1) * n)
+            term = ctx.divide(ctx.multiply(ctx.minus(term), x2), (n - 1) * n)
             if abs(term) < D(10) ** -78:
                 break
             total = ctx.add(total, term)
@@ -250,7 +250,7 @@ def exact_cos(a) -> np.ndarray:
         x2, term, total, n = ctx.multiply(x, x), D(1), D(1), 0
         while True:
             n += 2
-            term = ctx.divide(ctx.multiply(-term, x2), (n - 1) * n)
+            term = ctx.divide(ctx.multiply(ctx.minus(term), x2), (n - 1) * n)
             if abs(term) < D(10) ** -78:
                 break
             total = ctx.add(total, term)
@@ -275,8 +275,8 @@ def exact_tan(a) -> np.ndarray:
         s, c, ts, tc, n = x, D(1), x, D(1), 0
         while True:
             n += 2
-            tc = ctx.divide(ctx.multiply(-tc, x2), (n - 1) * n)
-            ts = ctx.divide(ctx.multiply(-ts, x2), n * (n + 1))
+            tc = ctx.divide(ctx.multiply(ctx.minus(tc), x2), (n - 1) * n)
+            ts = ctx.divide(ctx.multiply(ctx.minus(ts), x2), n * (n + 1))
             if abs(tc) < D(10) ** -78 and abs(ts) < D(10) ** -78:
                 break
             c, s = ctx.add(c, tc), ctx.add(s, ts)
