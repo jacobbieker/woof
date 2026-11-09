@@ -43,3 +43,19 @@ def test_vertical_schema_has_aligned_nonoverlapping_argument_slabs():
             assert ranges[0][0]==0
             assert ranges[-1][1]==count
             assert all(a[1]<=b[0] for a,b in zip(ranges,ranges[1:]))
+
+
+def test_metal_text_builds_the_single_step_kernel():
+    """The Metal build of MYNN 4.7.1 (mynn471_gpu.metal_text): the step
+    kernel only, its phase-carried scalars locals, phase 8's re-pointed
+    ktop dropped, and M471Ref's narrowing stores spelled.  On the A6000's
+    strict words and Metal's, a 3-step full-physics run agrees in all 91
+    state fields bit for bit."""
+    from woof.core.mynn471_gpu import metal_text, source
+    text = source(49)
+    out = metal_text(text)
+    assert "mynn471_step" in out and "mynn471_phase0(" not in out
+    assert "=M471_PHASE<0 ? local_" not in out
+    assert "ktop=M471Ptr<integer>(&m471_local_top);" not in out
+    assert "return *this=(T)(*p*x);" in out
+    assert out.count("\n") < text.count("\n")
