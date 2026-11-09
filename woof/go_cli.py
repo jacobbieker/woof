@@ -6669,7 +6669,7 @@ def _refuse_partial_nests(config: Path, payload: dict) -> None:
     """A forecast launch refuses a ``partial_nest`` band before any fetch or
     preparation: every forecast route of ``woof go`` builds its children
     full depth (the tree preflight refuses it too, for a direct runner
-    call).  A --prepare-only launch is decided before this and keeps it."""
+    call).  A --prepare-only launch skips it and still prepares the band."""
     domains = payload.get("domain")
     if not isinstance(domains, list) or not any(
             isinstance(table, dict) and "partial_nest" in table for table in domains):
@@ -6752,6 +6752,8 @@ def _go_launch(args, *, observer=None) -> int:
     config, payload = smoke_radiation_at_flag(args, config, payload)
     config, payload = smoke_at_launch(args, config, payload)
     _extend_outdir(args, config, payload)
+    if not getattr(args, "prepare_only", False):
+        _refuse_partial_nests(config, payload)
     from woof.spectral_nudging.cli import source_preparation as nudging_source_preparation
     prepared_nudging = nudging_source_preparation(args, config, payload)
     if prepared_nudging is not None:
@@ -6766,7 +6768,6 @@ def _go_launch(args, *, observer=None) -> int:
         # or --prepared-root, because that branch sat above this one.
         return _prepare_only_launch(args, config=config, payload=payload,
                                     observer=observer)
-    _refuse_partial_nests(config, payload)
     resumed_config = (_checkpoint_run_bindings(args, config)
                       or _prepared_run_bindings(args, config))
     if ("case_data" in payload or getattr(args, "prepared_root", None) is not None
