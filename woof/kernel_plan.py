@@ -601,6 +601,28 @@ def _warm_images():
         return images
 
 
+#: Peak resident memory of one spawn compile worker, measured: 0.96-1.02 GB
+#: for each of four workers compiling a cold 9 km WOOF Regional kernel set
+#: on an RTX A6000 host (2026-11-09).
+COMPILE_WORKER_BYTES = 1 << 30
+#: The share of the host's available memory the compile pool may plan on;
+#: the forecast beside it is still growing while the pool compiles.
+COMPILE_MEMORY_SHARE = 0.5
+
+
+def _memory_workers() -> int | None:
+    """Compile workers the host's available memory holds, or None (unknown)."""
+    from woof.ingest.preparation_workers import host_available_bytes
+
+    try:
+        available = host_available_bytes()
+    except Exception:
+        return None
+    if not available:
+        return None
+    return max(1, int(available * COMPILE_MEMORY_SHARE) // COMPILE_WORKER_BYTES)
+
+
 def _workers() -> int:
     """Compiler threads and processes: CPU affinity capped by the cgroup CPU quota.
 
@@ -608,6 +630,12 @@ def _workers() -> int:
     nproc 256 and a 61.44-core CFS quota (a rented box) opened 256 compiler
     threads and 256 spawn compiler processes for a cold kernel cache, and
     the first native parent step of a WOOF Regional case took 426.9 s.
+
+    The default is also capped by available memory (:data:`COMPILE_WORKER_BYTES`
+    per worker within :data:`COMPILE_MEMORY_SHARE` of it): 32 spawn workers on
+    a 32-core host peaked at 13-15 GB host RSS for one cold compile
+    (2026-11-08 benchmark).  ``WOOF_KERNEL_PLAN_WORKERS`` overrides the memory
+    cap; the CPU budget still bounds it.
     """
     from woof.ingest.preparation_workers import cpu_budget
 
@@ -615,6 +643,10 @@ def _workers() -> int:
     limit = os.environ.get(WORKERS_ENVIRONMENT, "").strip()
     if limit.isdigit() and int(limit) > 0:
         cores = min(cores, int(limit))
+    else:
+        memory = _memory_workers()
+        if memory is not None:
+            cores = min(cores, memory)
     return max(1, cores)
 
 
