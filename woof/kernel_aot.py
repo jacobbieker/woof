@@ -169,6 +169,15 @@ def _distribution(names):
     return None
 
 
+def _facade_backend():
+    """Whether ``import cupy`` is a facade (mlx, host): no NVRTC behind it."""
+    try:
+        from woof import backend
+        return backend.requested() in backend.FACADE_BACKENDS
+    except Exception:
+        return False
+
+
 def compiler_identity():
     from woof.hip_backend import active,compiler_binding
     if active():return compiler_binding()
@@ -288,6 +297,12 @@ class Pack:
         self._by_key = {}
         self._architectures = set()
         self._header_snapshots = {}
+        if identity is None and _facade_backend():
+            # Metal and the host tier compile no CUDA: no NVRTC to measure, no
+            # pack to use, and nothing to warn about (every Metal run printed
+            # "compiler identity could not be measured (AttributeError)")
+            self.reason = "facade_backend"
+            return
         if os.environ.get("WOOF_AOT", "").lower() in ("off", "0", "false", "no"):
             self.reason = "aot_disabled"
             return

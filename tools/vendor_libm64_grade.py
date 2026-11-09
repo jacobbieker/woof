@@ -142,6 +142,9 @@ def cr_reference(a, b) -> np.ndarray:
 
 def gpu(a, b) -> np.ndarray:
     os.environ.setdefault("WOOF_BACKEND", "mlx")
+    # the vendored libm is strict numerics' binary64 libm; fast numerics
+    # takes f64_df64.h's instead (tools/df64_grade.py grades that one)
+    os.environ["WOOF_METAL_F64"] = "soft"
     import woof  # noqa: F401
     import cupy as cp
     n = len(a)

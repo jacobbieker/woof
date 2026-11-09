@@ -619,6 +619,12 @@ def _workers() -> int:
     limit = os.environ.get(WORKERS_ENVIRONMENT, "").strip()
     if limit.isdigit() and int(limit) > 0:
         cores = min(cores, int(limit))
+    else:
+        # capped by available memory, as woof.kernel_plan._workers is
+        from woof.kernel_plan import _memory_workers
+        memory = _memory_workers()
+        if memory is not None:
+            cores = min(cores, memory)
     return max(1, cores)
 
 
