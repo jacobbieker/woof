@@ -682,6 +682,9 @@ class _Rewriter:
         self.generic_constructions(top)
         self.rewrite_tokens()
         msl = self.edits.apply()
+        # a wrapper opened on a source line that holds a directive (`do {`
+        # before `#pragma unroll 1`): a directive starts its own line
+        msl = re.sub(r"([;{}])[ \t]*(#pragma\b)", "\\1\n\\2", msl)
         msl = msl.replace(f'__attribute__((annotate("{_GLOBAL}")))', "")
         msl = msl.replace(f'__attribute__((annotate("{_SHARED}")))', "threadgroup")
         msl = msl.replace(f'__attribute__((annotate("{_CONSTANT}")))', "constant")
@@ -715,7 +718,43 @@ class _Rewriter:
             self.spaces = None
         self._constant_fields = {key: set(spaces) for key, spaces in probe.field_spaces.items()
                                  if spaces == {"constant"}}
-        return {owner for (owner, _field), spaces in probe.field_spaces.items() if len(spaces) > 1}
+        generic = {owner for (owner, _field), spaces in probe.field_spaces.items() if len(spaces) > 1}
+        return self._generic_companions(top, generic)
+
+    def _generic_companions(self, top, generic: set) -> set:
+        """Pointer-holding class templates that a generic struct's methods
+        return, or whose methods return one, are generic too: their data is
+        the generic struct's (MYNN 4.7.1's M471Ptr::operator[] makes an
+        M471Ref, whose operator& makes an M471Ptr back)."""
+        K = self.ci.CursorKind
+        from woof.backend.translate.spaces import _indirection
+        templates = {}
+        for c in top:
+            for n in c.walk_preorder():
+                if n.kind == K.CLASS_TEMPLATE and n.is_definition() and self.main_file(n) \
+                        and any(f.kind == K.FIELD_DECL and _indirection(f.type) == "ptr"
+                                for f in n.get_children()):
+                    templates[n.spelling] = n
+
+        def returned(method):
+            t = method.result_type.get_canonical()
+            d = t.get_declaration()
+            return d.spelling.split("<", 1)[0] if d is not None else ""
+        changed = bool(generic)
+        while changed:
+            changed = False
+            for name, cls in templates.items():
+                if name in generic:
+                    continue
+                methods = [m for m in cls.get_children() if m.kind in (K.CXX_METHOD, K.FUNCTION_TEMPLATE)]
+                partners = {returned(m) for m in methods}
+                partners |= {g for g in generic for m in templates.get(g, cls).get_children()
+                             if m.kind in (K.CXX_METHOD, K.FUNCTION_TEMPLATE) and returned(m) == name}
+                if partners & generic:
+                    generic.add(name)
+                    changed = True
+        # out-of-class member definitions (M471Ref<T>::operator&) return too
+        return generic
 
     def visit_top(self, cursor):
         K = self.ci.CursorKind
@@ -2713,7 +2752,14 @@ class _Rewriter:
         close = self._closing_angle(toks, 1)
         if close is None:
             self.refuse(cursor, f"cannot find the template header of {cursor.spelling!r}")
-        self.edits.insert(toks[close].extent.start.offset, ", int __WS = 0", rank=-30_000)
+        # the default goes on the first declaration only (MYNN 4.7.1 declares
+        # M471Ptr ahead of M471Ref, which returns one)
+        defaulted = self.__dict__.setdefault("_ws_defaulted", set())
+        default = "" if cursor.spelling in defaulted else " = 0"
+        defaulted.add(cursor.spelling)
+        self.edits.insert(toks[close].extent.start.offset, ", int __WS" + default, rank=-30_000)
+        if not cursor.is_definition():
+            return
         for c in cursor.get_children():
             if c.kind == K.FIELD_DECL and _indirection(c.type) == "ptr":
                 ftoks = list(c.get_tokens())
@@ -2759,9 +2805,11 @@ class _Rewriter:
                 alias = "__woof_sref" if mark.spelling == "&" else "__woof_sptr"
                 self.edits.insert(start, f"{alias}<", rank=-30_000)
                 self.edits.replace(mark.extent.start.offset, mark.extent.end.offset, ", __WS> ")
-        # S<...> inside the class: the same space
+        # S<...> inside the class: the same space (and a companion generic
+        # struct named there: its data is this one's)
+        names = set(getattr(self, "generic_structs", ())) | {cursor.spelling}
         for i in range(close + 1, len(toks) - 1):
-            if toks[i].spelling == cursor.spelling and toks[i + 1].spelling == "<":
+            if toks[i].spelling in names and toks[i + 1].spelling == "<":
                 j = self._closing_angle(toks, i + 1)
                 if j is not None:
                     self.edits.insert(toks[j].extent.start.offset, ", __WS", rank=-30_000)
@@ -2776,6 +2824,13 @@ class _Rewriter:
             return
         from woof.backend.translate.spaces import _indirection
         done = set()
+        for c in top:
+            if c.kind in (K.FUNCTION_DECL, K.FUNCTION_TEMPLATE, K.CXX_METHOD) and c.is_definition():
+                if c.semantic_parent is not None and c.semantic_parent.spelling.split("<", 1)[0] in names \
+                        and c.lexical_parent is not None and c.lexical_parent.kind != c.semantic_parent.kind:
+                    self._generic_out_of_class_member(c, names)
+                    continue
+                self._generic_factory_return(c, names)
         for c in top:
             if c.kind == K.CLASS_TEMPLATE and c.spelling in names:
                 continue
@@ -2805,6 +2860,64 @@ class _Rewriter:
                     space = "device"
                 done.add(at)
                 self.edits.insert(at, f", {self.SPACE_INDEX[space]}", rank=-30_000)
+
+    def _generic_out_of_class_member(self, fn, names):
+        """``template<class T> S2<T> S<T>::f() const {...}`` defined outside a
+        space-generic struct S: its template header takes ``int __WS`` and
+        every generic name before the body carries ``__WS``."""
+        K = self.ci.CursorKind
+        toks = list(fn.get_tokens())
+        body = next((c for c in fn.get_children() if c.kind == K.COMPOUND_STMT), None)
+        end = body.extent.start.offset if body is not None else fn.extent.end.offset
+        if not toks or toks[0].spelling != "template" or len(toks) < 2 or toks[1].spelling != "<":
+            self.refuse(fn, f"cannot find the template header of {fn.spelling!r}")
+        close = self._closing_angle(toks, 1)
+        self.edits.insert(toks[close].extent.start.offset, ", int __WS", rank=-30_000)
+        for i in range(close + 1, len(toks) - 1):
+            if toks[i].extent.start.offset >= end:
+                break
+            if toks[i].spelling in names and toks[i + 1].spelling == "<":
+                j = self._closing_angle(toks, i + 1)
+                if j is not None:
+                    self.edits.insert(toks[j].extent.start.offset, ", __WS", rank=-30_000)
+
+    def _generic_factory_return(self, fn, names):
+        """A free function returning a space-generic struct by value
+        (MYNN 4.7.1's ``M471Ptr<T> m471_array(work, offset, n)``): its return
+        type names the space of the data it returns."""
+        K = self.ci.CursorKind
+        toks = list(fn.get_tokens())
+        name = next((i for i, t in enumerate(toks) if t.spelling == fn.spelling), None)
+        if name is None:
+            return
+        head = next((i for i in range(name) if toks[i].spelling in names
+                     and i + 1 < name and toks[i + 1].spelling == "<"), None)
+        if head is None:
+            return
+        close = self._closing_angle(toks, head + 1)
+        if close is None or close >= name or any(t.spelling == "," for t in toks[head + 2:close]):
+            return
+        info = self.spaces.functions.get(fn.get_usr())
+        instances = sorted(self.spaces.instances.get(fn.get_usr()) or ()) if info is not None else []
+        if len(instances) > 1:
+            return              # a factory per space: not this rule's
+        env = {}
+        if info is not None and instances:
+            env = {parm.get_usr(): space for (_, parm, _), space in zip(info.slots, instances[0])}
+        spaces = set()
+        for r in fn.walk_preorder():
+            kids = list(r.get_children())
+            if r.kind == K.RETURN_STMT and kids:
+                sp = self.spaces.gspace(kids[0], env)
+                if sp is None:
+                    return
+                spaces.add(sp)
+        if len(spaces) != 1:
+            return
+        space = next(iter(spaces))
+        if space not in self.SPACE_INDEX:
+            return
+        self.edits.insert(toks[close].extent.start.offset, f", {self.SPACE_INDEX[space]}", rank=-30_000)
 
     def generic_type_close(self, tokens, name):
         """Where a ``name<...>`` among ``tokens`` takes its space argument."""
@@ -3249,6 +3362,18 @@ class _Rewriter:
                         if s < e:
                             spelled = self._spell_type(node.type, drop_const=True)
                             self.edits.wrap(s, e, f"(({spelled})(", "))", d)
+                elif len(children) == 1 and _is_double(node.type) and (
+                        children[0].type.get_canonical().kind.name == "RECORD"
+                        or (not _is_double(children[0].type) and self._user_conversion_below(children[0]))):
+                    # a class's conversion to float, then float -> double: on
+                    # Metal double is the f64 class, and an implicit chain of
+                    # two user conversions is not one C++ takes (MYNN 4.7.1's
+                    # `d__1 = qke1[k]`, an M471Ref<real>); the explicit cast is
+                    s, e = self.span(children[0])
+                    if s < e:
+                        via = "" if children[0].type.get_canonical().kind.name == "RECORD" else \
+                            f"({self._spell_type(children[0].type, drop_const=True)})"
+                        self.edits.wrap(s, e, f"(({self._spell_type(node.type, drop_const=True)}){via}(", "))", d)
             if self.retain and self.f32s_vector_component(node, d):
                 pass
             elif kind == K.COMPOUND_ASSIGNMENT_OPERATOR:
@@ -3262,6 +3387,19 @@ class _Rewriter:
                     self.static_local(node)
             for child in reversed(list(node.get_children())):
                 stack.append((child, d + 1))
+
+    @staticmethod
+    def _user_conversion_below(e, depth=3) -> bool:
+        """``e`` is (a few implicit nodes over) a class's conversion operator call."""
+        for _ in range(depth):
+            ref = e.referenced
+            if e.kind.name == "CALL_EXPR" and ref is not None and ref.kind.name == "CONVERSION_FUNCTION":
+                return True
+            kids = list(e.get_children())
+            if len(kids) != 1 or e.kind.name not in ("UNEXPOSED_EXPR", "CALL_EXPR", "MEMBER_REF_EXPR"):
+                return False
+            e = kids[0]
+        return False
 
     _FUNCTION_KINDS = ("FUNCTION_DECL", "CXX_METHOD", "CONSTRUCTOR", "DESTRUCTOR",
                        "FUNCTION_TEMPLATE", "LAMBDA_EXPR")

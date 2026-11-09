@@ -89,16 +89,35 @@ FAST_MATH = r'''
 _PHASE_REFERENCE=re.compile(r'=M471_PHASE<0 \? (local_\w+) : (\*m471_array<\w+>\([^;]*\));')
 
 
-def metal_text(text,exact):
-    """The source as the Metal translation takes it.  Each phase-carried
-    scalar is a reference to a local in the single-kernel strict step and to
-    its workspace slot in the phased fast kernels (``M471_PHASE<0 ? local :
-    *slot``); Metal has no reference that may name either a thread or a
-    device object, so each build spells the one its own kernels use: the
-    strict step (mynn471_step) the local, the phased kernels the slot."""
-    out,count=_PHASE_REFERENCE.subn(lambda m:'='+(m.group(1) if exact else m.group(2))+';',text)
+def metal_text(text):
+    """The source as the Metal translation takes it: the single-kernel step
+    (mynn471_step) in both arithmetic modes, without the phased kernels.
+
+    The phased kernels hand phase-carried scalars between launches through
+    the workspace, and phase 8 re-points a pointer argument at a local
+    (``ktop=M471Ptr<integer>(&m471_local_top)``); CUDA's generic pointers
+    allow both, Metal's address spaces neither.  The step kernel keeps every
+    phase-carried scalar a local (``M471_PHASE<0 ? local : *slot`` takes the
+    local), so Metal builds that kernel alone and the dropped rebinding is
+    unreachable from it."""
+    out,count=_PHASE_REFERENCE.subn(lambda m:'='+m.group(1)+';',text)
     if not count:
         raise RuntimeError('MYNN 4.7.1 source no longer spells its phase-carried references as expected')
+    rebind='ktop=M471Ptr<integer>(&m471_local_top);'
+    if out.count(rebind)!=1:
+        raise RuntimeError('MYNN 4.7.1 source no longer re-points ktop as expected')
+    out=out.replace(rebind,'')
+    out,count=re.subn(r'(?m)^extern "C" __global__ M471_LAUNCH void mynn471_phase\d+\(.*\n','',out)
+    if not count:
+        raise RuntimeError('MYNN 4.7.1 source no longer defines its phased kernels as expected')
+    # M471Ref's compound assignments store a mixed-precision result through
+    # operator=(T): CUDA narrows double to float implicitly, Metal's binary64
+    # class only explicitly, so the store names the narrowing (the same word)
+    for op in '+-*/':
+        old=f'return *this=*p{op}x;'
+        if old not in out:
+            raise RuntimeError('MYNN 4.7.1 source no longer spells M471Ref compound assignment as expected')
+        out=out.replace(old,f'return *this=(T)(*p{op}x);')
     return out
 
 
@@ -123,12 +142,12 @@ def image(nz,device,exact):
     from woof import backend
     if backend.active()=='mlx':
         # Metal: no nvcc image; the facade translates the same source under
-        # the same arithmetic controls (a RawModule, as the HIP route builds).
+        # the same arithmetic controls (a RawModule, as the HIP route builds),
+        # as the single step kernel in both modes (metal_text).
         options=('-std=c++17','--ftz=false','--fmad='+('false' if exact else 'true'),
                  '--prec-div=true','--prec-sqrt=true')+(('-DGPUWM_WRF_EXACT=1',) if exact else ())
-        module=cp.RawModule(code=metal_text(text,exact),options=options)
-        names=['mynn471_step'] if exact else ['mynn471_phase'+str(i) for i in PHASES]
-        return module,tuple(module.get_function(name) for name in names)
+        module=cp.RawModule(code=metal_text(text),options=options)
+        return module,(module.get_function('mynn471_step'),)
     arch='sm_'+''.join(map(str,cp.cuda.Device(device).compute_capability))
     mode='strict' if exact else 'fast'
     digest=hashlib.sha256(text.encode()).hexdigest()
