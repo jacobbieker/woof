@@ -75,9 +75,11 @@ Ordered by how self-contained each piece is:
    principal stresses, composed with item 1 into whole subcycles; and the
    other pre-subcycle routines (mass and area aggregation, masks,
    `new_ice_velocities`, the Hibler `ice_strength`, `air_stress`,
-   `surface_tilt`, with `seaice_mesh`'s cell-to-vertex interpolation). Still
-   to port: `ocean_stress_final`, and the column package's ice strength
-   (`colpkg_ice_strength`, refused by name). The column package is
+   `surface_tilt`, with `seaice_mesh`'s cell-to-vertex interpolation) and
+   `ocean_stress_final` (with its vertex-to-cell interpolation), so the whole
+   of `seaice_run_velocity_solver` for the variational scheme. Still to port:
+   the column package's ice strength (`colpkg_ice_strength`, refused by
+   name). The column package is
    double, so production MPAS-Seaice is built double: each seaice piece is
    held at RKIND 4 and 8.
 3. The basis-function setup for the variational solver (Wachspress and PWL,
@@ -142,11 +144,11 @@ Ordered by how self-contained each piece is:
    precision waits for an MIT/BSD double `pow` that matches the oracle host.
 2. Thickness and tracer advection (`mpas_li_advection.F`) and the
    forward-Euler time integration. The diagnostics advection reads (masks,
-   geometry, layer thickness, layer velocity and its CFL step) are ported.
-   Still to port: `li_advection_thickness_tracers` itself, which needs:
-   - working scratch fields in the oracle's stand-ins;
-   - `tracer_setup`/`tracer_finish` (the temperature-enthalpy conversion);
-   - `apply_mass_balance` and `vertical_remap`.
+   geometry, layer thickness, layer velocity and its CFL step) are ported,
+   and so is `li_advection_thickness_tracers` ('fo' and 'none', with and
+   without tracers): `tracer_setup`/`tracer_finish`, the upwind advection,
+   `apply_mass_balance` and `vertical_remap`. Still to port: the rest of the
+   forward-Euler time integration.
 3. The thermal solver (`mpas_li_thermal.F`): enthalpy/temperature column
    solves. Initialisation and the conversions are ported. Still to port:
    `li_thermal_solver` (heat dissipation, basal friction, the matrix elements,
@@ -170,8 +172,8 @@ Ordered by how self-contained each piece is:
 
 | Core | Ported pieces | Status |
 |---|---|---|
-| seaice | EVP internal stress, variational: `seaice_init_evp`, strain tensor, EVP and revised-EVP constitutive relation, stress divergence, final divergence/shear and ridging parameters (`woof/hex/mpas_seaice/evp_v842.py`). Word-exact against the v8.4.2 oracle at RKIND 4 and 8 on CUDA and Metal (`tests/test_mpas_seaice_evp_parity.py`, `woof hex seaice verify`). The EVP velocity solve: Coriolis coefficient, ocean stress, subcycle initialisation, ocean stress coefficient, `solve_velocity`/`_revised`, principal stresses, and whole elastic subcycles (`woof/hex/mpas_seaice/velocity_v842.py`). Word-exact at RKIND 4 and 8 on CUDA and Metal (`tests/test_mpas_seaice_velocity_parity.py`). The rest of `velocity_solver_pre_subcycle`: aggregates, stress and velocity masks, new-ice velocities, Hibler ice strength, air stress, surface tilt (`woof/hex/mpas_seaice/presubcycle_v842.py`). Word-exact at RKIND 4 and 8 on CUDA and Metal (`tests/test_mpas_seaice_presubcycle_parity.py`); the column package's ice strength is refused by name. | stub |
+| seaice | EVP internal stress, variational: `seaice_init_evp`, strain tensor, EVP and revised-EVP constitutive relation, stress divergence, final divergence/shear and ridging parameters (`woof/hex/mpas_seaice/evp_v842.py`). Word-exact against the v8.4.2 oracle at RKIND 4 and 8 on CUDA and Metal (`tests/test_mpas_seaice_evp_parity.py`, `woof hex seaice verify`). The EVP velocity solve: Coriolis coefficient, ocean stress, subcycle initialisation, ocean stress coefficient, `solve_velocity`/`_revised`, principal stresses, whole elastic subcycles and `ocean_stress_final` (`woof/hex/mpas_seaice/velocity_v842.py`). Word-exact at RKIND 4 and 8 on CUDA and Metal (`tests/test_mpas_seaice_velocity_parity.py`). The rest of `velocity_solver_pre_subcycle`: aggregates, stress and velocity masks, new-ice velocities, Hibler ice strength, air stress, surface tilt (`woof/hex/mpas_seaice/presubcycle_v842.py`). Word-exact at RKIND 4 and 8 on CUDA and Metal (`tests/test_mpas_seaice_presubcycle_parity.py`); the column package's ice strength is refused by name. | stub |
 | ocean | Tendency terms: `ocn_vel_coriolis_tend`, `ocn_vel_vadv_tend`, `ocn_thick_hadv_tend`, `ocn_thick_vadv_tend` and their `_init` switches (`woof/hex/mpas_ocean/tend_v842.py`). Word-exact against the v8.4.2 oracle at RKIND 4 and 8 on CUDA and Metal (`tests/test_mpas_ocean_tend_parity.py`, `woof hex ocean verify`). The pressure gradient (`ocn_vel_pressure_grad_tend`, every type) and horizontal momentum mixing (`ocn_vel_hmix_tend`: del2, Leith, del4) (`woof/hex/mpas_ocean/pgrad_hmix_v842.py`), word-exact at RKIND 4 and 8 on CUDA and Metal (`tests/test_mpas_ocean_pgrad_hmix_parity.py`). The full momentum and thickness tendencies (`ocn_tend_vel`, `ocn_tend_thick`) with the bulk forcing, velocity forcing and thickness surface flux (`woof/hex/mpas_ocean/forcing_v842.py`), word-exact at RKIND 4 and 8 on CUDA and Metal (`tests/test_mpas_ocean_tendency_parity.py`). | stub |
-| landice | The SIA velocity solver: one `li_sia_solve` call, including `li_calculate_flowParamA` (constant, PB1982, CP2010), all three tangent-slope methods and the velocity profile (`woof/hex/mpas_ice/sia_v842.py`). Word-exact against the v8.4.2 oracle at RKIND 4 on CUDA and Metal (`tests/test_mali_sia_parity.py`, `woof hex ice verify`). The geometry diagnostics before advection: `li_calculate_mask` (sia/none), `li_update_geometry`, `li_calculate_layerThickness`, `li_layer_normal_velocity` (`woof/hex/mpas_ice/geometry_v842.py`, `tests/test_mali_geometry_parity.py`), word-exact on CUDA and Metal. The thermal initialisation and conversions: `li_thermal_init` (sfc_air_temperature, linear, file), `li_compute_pressure_melting_point_fields`, `li_temperature_to_enthalpy`, `li_enthalpy_to_temperature` (`woof/hex/mpas_ice/thermal_init_v842.py`, `tests/test_mali_thermal_init_parity.py`), word-exact on CUDA and Metal. Albany FO/L1L2/Stokes refused by name. | stub |
+| landice | The SIA velocity solver: one `li_sia_solve` call, including `li_calculate_flowParamA` (constant, PB1982, CP2010), all three tangent-slope methods and the velocity profile (`woof/hex/mpas_ice/sia_v842.py`). Word-exact against the v8.4.2 oracle at RKIND 4 on CUDA and Metal (`tests/test_mali_sia_parity.py`, `woof hex ice verify`). The geometry diagnostics before advection: `li_calculate_mask` (sia/none), `li_update_geometry`, `li_calculate_layerThickness`, `li_layer_normal_velocity` (`woof/hex/mpas_ice/geometry_v842.py`, `tests/test_mali_geometry_parity.py`), word-exact on CUDA and Metal. The thermal initialisation and conversions: `li_thermal_init` (sfc_air_temperature, linear, file), `li_compute_pressure_melting_point_fields`, `li_temperature_to_enthalpy`, `li_enthalpy_to_temperature` (`woof/hex/mpas_ice/thermal_init_v842.py`, `tests/test_mali_thermal_init_parity.py`), word-exact on CUDA and Metal. Thickness and tracer advection: `li_advection_thickness_tracers` ('fo'/'none', temperature/enthalpy/no tracers), with the mass balance and vertical remap (`woof/hex/mpas_ice/advection_v842.py`, `tests/test_mali_advection_parity.py`), word-exact on CUDA and Metal. Albany FO/L1L2/Stokes refused by name. | stub |
 
 This table is updated as each piece lands with its parity tests.

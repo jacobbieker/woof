@@ -4,6 +4,12 @@ Written by `tools/mpas_seaice_oracle/build.sh` and `make_velocity_fixture.py`
 on pb (Linux 6.12 x86_64, glibc 2.44), 2026-11-08. The same day,
 `oracle-r8.npz` was rewritten to add the full-subcycle cases at RKIND 8, and
 its pieces cases now take float64 EVP state. `oracle-r4.npz` kept the same words.
+On 2026-11-09 both files were rewritten when the driver gained
+`ocean_stress_final` (below): `oceanStressU/V` and `oceanStressCoeff` are now
+the words after it, `oceanStressCellU/V` are new, and every other word is
+unchanged. The input streams gained `interiorVertex` and the prior
+`oceanStressCellU/V`, so every input digest changed; the other fields' values
+are the same draws as before.
 
 - MPAS source: github.com/MPAS-Dev/MPAS-Model tag v8.4.2, commit
   `f34984b2c89353cf31c235b08d3b4acd96b37bb3`, byte-unmodified. build.sh checks
@@ -35,17 +41,20 @@ its pieces cases now take float64 EVP state. `oracle-r4.npz` kept the same words
 - Driver: `run_subcycle.F90`. Its header lists the calls of the two modes:
   `full` (whole elastic subcycles) and pieces (velocity solves against a
   fixed stress-divergence forcing). The framework stand-ins (`stubs.F90`)
-  look fields up by name and do no arithmetic. The halo exchanges, mesh
-  interpolation, weak-form solver and column-package routines stop by name if
-  reached. (Since 2026-11-09 build.sh compiles `seaice_mesh`'s interpolation
-  routines verbatim instead of a stand-in, for the pre-subcycle oracle; the
-  rebuilt fixture is word-identical.)
+  look fields up by name and do no arithmetic. The halo exchanges, weak-form
+  solver and column-package routines stop by name if reached. `seaice_mesh`'s
+  interpolation routines are compiled verbatim: build.sh cuts them out of the
+  pinned `mpas_seaice_mesh.F`.
+- Both modes end with `ocean_stress_final`: `full` calls
+  `velocity_solver_post_subcycle` (final divergence/shear, principal stresses,
+  `ocean_stress_final`), and the pieces mode calls the principal stresses then
+  `ocean_stress_final`.
 
 ## Files
 
 | file | content |
 |---|---|
-| `oracle-r4.npz`, `oracle-r8.npz` | every output word of every case at that precision, `<case>/<field>`: `numericalInertiaCoefficient`, `uVelocity`, `vVelocity`, `totalMassVertexfVertex`, `oceanStressU/V`, `oceanStressCoeff`, `strain11/22/12`, `stress11/22/12`, `replacementPressure`, `stressDivergenceU/V`, `divergence`, `shear`, `ridgeConvergence`, `ridgeShear`, `principalStress1/2` |
+| `oracle-r4.npz`, `oracle-r8.npz` | every output word of every case at that precision, `<case>/<field>`: `numericalInertiaCoefficient`, `uVelocity`, `vVelocity`, `totalMassVertexfVertex`, `oceanStressU/V`, `oceanStressCoeff`, `strain11/22/12`, `stress11/22/12`, `replacementPressure`, `stressDivergenceU/V`, `divergence`, `shear`, `ridgeConvergence`, `ridgeShear`, `principalStress1/2`, `oceanStressCellU/V` |
 | `inputs.sha256` | the sha256 of each case's input stream at each precision, as `woof.verify.mpas_seaice_velocity_oracle.input_bytes` writes it |
 
 The inputs are not committed; `woof.verify.mpas_seaice_velocity_oracle.cases()`
@@ -69,7 +78,9 @@ Each case also covers:
   totals), which keep their prior words;
 - unsolved vertices, some with zero mass;
 - fVertex of +0.0 and -0.0, so `sign(1, f)` takes both values;
-- principal stresses on both sides of the `puny` test.
+- principal stresses on both sides of the `puny` test;
+- boundary vertices (interiorVertex 0) in the vertex-to-cell interpolation,
+  and cells with no interior vertex, which keep the undivided sum.
 
 ## Grading
 

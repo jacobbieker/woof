@@ -7,8 +7,9 @@ stand-alone column constants, compiled verbatim with gfortran -O0
 drives it: the pre-subcycle Coriolis coefficient, ocean stress and subcycle
 initialisation, then either whole elastic subcycles (internal stress, ocean
 stress coefficient, velocity solve) or velocity solves against a fixed
-stress divergence, then the final divergence/shear
-and the principal stresses. The oracle's outputs are committed
+stress divergence, then the final divergence/shear,
+the principal stresses and the final ocean stress (``ocean_stress_final``,
+with ``seaice_mesh``'s vertex-to-cell interpolation). The oracle's outputs are committed
 (tests/data/oracles/mpas_seaice_velocity, PROVENANCE.md), so the GPU
 comparison runs without gfortran. When the oracle can be built here
 (``GFORTRAN`` or gfortran on PATH, and ``WOOF_MPAS_V842_SOURCE`` naming the
@@ -65,6 +66,14 @@ def test_fixture_covers_the_branches():
         assert (np.signbit(f) & (f == 0)).any() and (~np.signbit(f) & (f == 0)).any()
         assert (case["solveVelocity"][: case["nVerticesSolve"]] == 0).any()
         assert case["nVerticesSolve"] < case["nVertices"] and case["nCellsSolve"] < case["nCells"]
+    # the vertex-to-cell interpolation meets cells with no interior vertex
+    for case in cases.values():
+        lonely = [c for c in range(case["nCellsSolve"])
+                  if not case["interiorVertex"][case["verticesOnCell"][c, : case["nEdgesOnCell"][c]] - 1].any()]
+        assert lonely and (case["interiorVertex"] == 0).mean() > 0.05
+    # the final ocean stress is zeroed whole without config_use_ocean_stress
+    off = vo.load_fixture("r8")["solve_no_ocean_stress"]
+    assert not off["oceanStressCellU"].any() and not off["oceanStressU"].any()
     # the principal stresses take both branches
     out = vo.load_fixture("r4")["subcycle"]
     assert (out["principalStress1"] == np.float32(1.0e30)).any()
@@ -103,6 +112,14 @@ def test_the_seaice_door_verify_grades_every_piece():
     # the principal-stress discriminant summed in the other order
     ("A(S(M(t, t), M(M((rk)4.0, s11), s22)), M((rk)4.0, M(s12, s12)));",
      "S(A(M(t, t), M((rk)4.0, M(s12, s12))), M(M((rk)4.0, s11), s22));", "principalStress1"),
+    # the final stress per unit ice area taken through a reciprocal
+    ("oceanStressU[iVertex] = D(su, iceAreaVertex[iVertex]);",
+     "oceanStressU[iVertex] = M(su, D((rk)1.0, iceAreaVertex[iVertex]));", "oceanStressCellU"),
+    # a cell with no interior vertex divided anyway
+    ("if (totalArea > (rk)0.0) value = D(value, totalArea);", "value = D(value, totalArea);",
+     "oceanStressCellV"),
+    # the vertex stress not scaled back to per unit grid area
+    ("oceanStressU[iVertex] = M(oceanStressU[iVertex], iceAreaVertex[iVertex]);", "", "oceanStressU"),
 ])
 def test_a_mutated_evaluation_order_is_caught(monkeypatch, precision, original, mutated, field):
     from woof.hex.mpas_seaice import velocity_v842
