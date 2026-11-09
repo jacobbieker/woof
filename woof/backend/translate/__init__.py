@@ -3085,6 +3085,8 @@ class _Rewriter:
                 continue
             if kind == K.INIT_LIST_EXPR:
                 self.fold_init_list(node)
+            if kind == K.ARRAY_SUBSCRIPT_EXPR:
+                self.opaque_constant_index(node)
             if kind == K.UNARY_OPERATOR and not self.retain and _is_float(node.type):
                 self.flushing_negation(node)
             if kind == K.CONDITIONAL_OPERATOR and _is_float(node.type):
@@ -3477,6 +3479,46 @@ class _Rewriter:
         s, e = self.span(node)
         self.edits.replace(s, e, f"__woof_f64_lit(0x{word:016X}UL)")
         return True
+
+    #: Private arrays longer than this many elements take constant indices
+    #: through __woof_opaque_index (opaque_constant_index).
+    PRIVATE_ARRAY_CONSTANT_INDEX_LIMIT = 32
+
+    def opaque_constant_index(self, node):
+        """``a[0]`` on a function-local array of more than 32 elements ->
+        ``a[__woof_opaque_index(0)]``.  Apple's shader compiler (macOS 26.5,
+        M3 Max) reads such an element as 0 when the array was filled and
+        read by loops of runtime trip count before it (``float r[64]; for (k
+        < nz) r[k] = ...; for (k < nz) t += r[k]; out = r[0];`` gives 0, in
+        a plain mx.fast.metal_kernel too; 32 elements or a runtime index read
+        it right).  NSSL-2's rain sedimentation exported rho[0] * flux as 0
+        through it.  The index's value is unchanged."""
+        kids = list(node.get_children())
+        if len(kids) != 2:
+            return
+        base, index = kids
+        while base.kind.name in ("UNEXPOSED_EXPR", "PAREN_EXPR") and len(list(base.get_children())) == 1:
+            base = list(base.get_children())[0]
+        d = base.referenced if base.kind.name == "DECL_REF_EXPR" else None
+        if d is None or d.kind.name != "VAR_DECL" or d.semantic_parent is None \
+                or d.semantic_parent.kind.name not in self._FUNCTION_KINDS:
+            return
+        if any(c.kind.name == "ANNOTATE_ATTR" for c in d.get_children()):
+            return          # __shared__ (threadgroup) or another marked array
+        t = d.type.get_canonical()
+        if t.kind.name == "CONSTANTARRAY":
+            if t.element_count <= self.PRIVATE_ARRAY_CONSTANT_INDEX_LIMIT:
+                return
+        elif t.kind.name not in ("DEPENDENTSIZEDARRAY",):
+            return
+        literal = index
+        while literal.kind.name in ("UNEXPOSED_EXPR", "PAREN_EXPR") and len(list(literal.get_children())) == 1:
+            literal = list(literal.get_children())[0]
+        if literal.kind.name != "INTEGER_LITERAL":
+            return
+        s, e = self.span(index)
+        if s < e:
+            self.edits.wrap(s, e, "__woof_opaque_index(", ")", 0)
 
     def qualify_namespace_call(self, node):
         """An unqualified call to a namespace's function, in an f32s unit:
