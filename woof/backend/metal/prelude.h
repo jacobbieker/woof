@@ -740,6 +740,12 @@ template <typename T> static inline T __shfl_xor_sync(uint mask, T v, int lane_m
   return __woof_shfl(v, ((other & ~uint(width - 1)) == (lane & ~uint(width - 1))) ? other : lane);
 }
 
+// A constant index into a private array of more than 32 elements, hidden
+// from Apple's shader compiler, which otherwise reads the element as 0 after
+// loops of runtime trip count over the array (translator
+// opaque_constant_index).  The value is the index.
+static inline int __woof_opaque_index(int i) { volatile int z = 0; return i + z; }
+
 // A CUDA T** kernel parameter: a buffer of device addresses (the facade
 // passes real GPU addresses), read one entry at a time.
 template <typename T> struct __woof_addr_table {
