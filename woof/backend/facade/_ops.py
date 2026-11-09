@@ -223,6 +223,9 @@ def astype(a: ndarray, dtype) -> ndarray:
 
 
 def copyto(dst, src, casting="same_kind", where=None):
+    from woof.backend.facade import _capture
+    if _capture.defer(copyto, dst, src, casting=casting, where=where):
+        return
     if where is not None:
         src = where_(where, src, dst)
     dst._write(operand_values(src, dst.dtype))
@@ -331,6 +334,11 @@ def _subnormal_arith(np_name, a, b):
 
 
 def _apply(np_name, mx_name, *args, out=None, dtype=None, result_dtype=None):
+    if out is not None:
+        from woof.backend.facade import _capture
+        if _capture.defer(_apply, np_name, mx_name, *args, out=out, dtype=dtype,
+                          result_dtype=result_dtype):
+            return out
     hints = [_dtype_hint(x) for x in args]
     if result_dtype is None:
         try:
@@ -623,6 +631,9 @@ def _inplace(name):
     fn = UFUNCS[name]
 
     def method(self, other):
+        from woof.backend.facade import _capture
+        if _capture.defer(method, self, other):
+            return self
         self._write(operand_values(fn(self, other), self.dtype))
         return self
     return method

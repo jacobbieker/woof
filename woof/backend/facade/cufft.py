@@ -18,7 +18,7 @@ Semantics follow cuFFT's, not NumPy's:
 The transform is not cuFFT's algorithm, so values agree with CUDA's to
 rounding, not bitwise (``tests/test_facade_cufft.py`` states the bound).
 
-During a CUDA-graph capture a plan's ``fft`` is recorded as a host step
+During a CUDA-graph capture a plan's ``fft`` is recorded (``_capture.defer``)
 (:mod:`woof.backend.facade._capture`): the replay runs the transform on the
 arrays' values at that point in the stream, as the captured cuFFT node does.
 """
@@ -113,7 +113,7 @@ class _Plan:
         """Execute the plan from ``a`` into ``out`` (both packed device arrays)."""
         from woof.backend.facade import _capture
         self._check(a, out)
-        if _capture.record_host(lambda _: self._execute(a, out, direction), None):
+        if _capture.defer(self._execute, a, out, direction):
             return
         self._execute(a, out, direction)
 

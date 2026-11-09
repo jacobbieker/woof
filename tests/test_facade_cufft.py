@@ -75,7 +75,7 @@ def test_plan1d_d2z_and_z2d_are_cufft_transforms(nx):
     spectrum.set(want)
     back = cp.empty_like(work)
     backward.fft(spectrum, back, cufft.CUFFT_INVERSE)
-    _close(back.get(), np.fft.irfft(want, n=nx, axis=-1) * nx)
+    _close(back.get(), np.fft.irfft(want, n=nx, axis=-1, norm="forward"))
 
 
 def test_single_precision_and_c2c_plans():

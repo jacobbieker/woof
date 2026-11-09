@@ -99,7 +99,10 @@ def getitem(a: ndarray, key):
 
 
 def setitem(a: ndarray, key, value):
+    from woof.backend.facade import _capture
     from woof.backend.facade._ops import operand_values
+    if _capture.defer(setitem, a, key, value):
+        return
     if _is_basic(key):
         view = basic_view(a, key)
         view._write(operand_values(value, a.dtype))

@@ -311,13 +311,13 @@ def _fft_on_host(np_fn):
         from woof.backend.facade import _capture
         if _capture.recording() is None or not isinstance(a, ndarray):
             return eager(a, *args, **kwargs)
-        if any(isinstance(x, ndarray) for x in (*args, *kwargs.values())):
+        if builtins.any(isinstance(x, ndarray) for x in (*args, *kwargs.values())):
             _capture.refuse(f"cupy.fft.{np_fn.__name__} with array arguments past the input")
             return eager(a, *args, **kwargs)
         like = np_fn(np.zeros(a.shape, a.dtype), *args, **kwargs)
         with _capture.suspended():
             out = empty(like.shape, like.dtype)
-        _capture.record_host(lambda _: out.set(np.asarray(np_fn(a.get(), *args, **kwargs))), None)
+        _capture.defer(lambda: out.set(np.asarray(np_fn(a.get(), *args, **kwargs))))
         return out
     fn.__name__ = np_fn.__name__
     fn.__doc__ = eager.__doc__

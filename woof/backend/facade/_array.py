@@ -539,7 +539,10 @@ class ndarray:
         return mx.broadcast_to(idx, self.shape)
 
     def fill(self, value):
+        from woof.backend.facade import _capture
         from woof.backend.facade._ops import scalar_values
+        if _capture.defer(ndarray.fill, self, value):
+            return
         self._write(scalar_values(value, self.dtype))
 
     def set(self, host, stream=None):
