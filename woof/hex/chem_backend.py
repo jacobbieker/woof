@@ -24,15 +24,19 @@ from pathlib import Path
 
 
 def build(runtime_factory, *, constructor, prep_geometry, kernel_cache, gwdo_static=None,
-          gwdo_kernel_cache=None, checkout=None, rollback_snapshot=True):
-    """The backend, with ``runtime_factory(seam)`` bound as ``backend.chemistry``."""
+          gwdo_kernel_cache=None, checkout=None, rollback_snapshot=True, species_row=None):
+    """The backend, with ``runtime_factory(seam)`` bound as ``backend.chemistry``.  ``species_row`` is the
+    run's row (the microphysics scheme's species and the chemistry extras); the physics runs under its
+    scheme's own row (WSM6 by default)."""
     from .cuda_arwen_physics_v841 import PersistentTwoPhaseCudaPhysicsBackendV841
     from .cuda_physics_prep_v841 import prepare_mpas_to_phys_cuda_v841
-    from .species_row import WSM6_SPECIES_ROW
+    from .species_row import WSM6_SPECIES_ROW, registered_species_rows
+    scheme_row = (WSM6_SPECIES_ROW if species_row is None
+                  else registered_species_rows()[species_row.scheme_name])
 
     class ChemistryColumnBackend(PersistentTwoPhaseCudaPhysicsBackendV841):
         def _species_row(self, scalar_names):
-            return WSM6_SPECIES_ROW
+            return scheme_row
 
         def _prepare(self, atmosphere, scalar_names, *, post_rk):
             winds = bool(getattr(self.chemistry, "phase2_winds", False))
