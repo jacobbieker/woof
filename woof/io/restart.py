@@ -4645,8 +4645,9 @@ def _driver_manifest(driver, *, streaming=False, state_shape=None,
     hydro_coupled = getattr(driver, "wrf_hydro", None) is not None
     if hydro_coupled and not digest:
         raise RestartManifestError(
-            "restart of a run coupled to WRF-Hydro is not ported: the routing state "
-            "(routing-grid soil and heads, channel, lakes, buckets) is not checkpointed")
+            "restart, a checkpoint or a streamed ([tiles]) inventory of a run coupled to "
+            "WRF-Hydro (--wrf-hydro) is not ported: the routing state (routing-grid soil and "
+            "heads, channel, lakes, buckets) is not carried")
     for name in sorted(vars(driver)):
         if (coupled and name == "external_ocean") or (hydro_coupled and name == "wrf_hydro"):
             continue

@@ -28,7 +28,8 @@ the launch and every process it starts.  Without them nothing here runs: no
 plane is allocated, no driver attribute is set, the LSM calls are the
 default ones, so the forecast is byte-identical to a run without this module.
 
-Refused by name: an LSM other than Noah (2) or Noah-MP (4); a run with more
+Refused by name: an LSM other than Noah (2) or Noah-MP (4); Noah's mosaic;
+an adaptive time step; an ensemble of more than one member; a run with more
 than one domain (WRF couples only a domain without nests, and WRF-Hydro
 holds one routing domain); checkpoints (``restart_interval_s > 0``: the
 routing state is not checkpointed), refused before the first step as #235
@@ -112,15 +113,21 @@ def consume_table(raw: dict, source) -> dict:
 
 
 @contextmanager
-def launch_scope(namelist=None, output=None, config=None):
+def launch_scope(namelist=None, output=None, config=None, members=None):
     """Set the environment a coupled launch reads, for its duration.  The
-    command line wins over a ``[wrf_hydro]`` table in ``config``."""
+    command line wins over a ``[wrf_hydro]`` table in ``config``.  An ensemble
+    (``members`` > 1) is refused: every member would write the one output
+    directory."""
     table = read_table(config) if config else None
     if namelist is None and table is not None:
         namelist, output = table["namelist"], output or table.get("output_dir")
     if namelist is None:
         yield
         return
+    if members is not None and int(members) > 1:
+        raise NotImplementedError(
+            f"--wrf-hydro with {int(members)} ensemble members: the members would share one "
+            "WRF-Hydro output directory; run the coupled forecast as a single member")
     saved = {k: os.environ.get(k) for k in (ENV_NAMELIST, ENV_OUTPUT)}
     os.environ[ENV_NAMELIST] = str(Path(namelist).resolve())
     if output is not None:
@@ -216,6 +223,13 @@ def attach(driver, state, cfg, *, start_time=None, dzs=None) -> WrfHydroSeam | N
             "restart checkpoints of a run coupled to WRF-Hydro are not ported (the routing "
             "state -- soil and surface heads on the routing grid, channel, lakes and "
             "buckets -- is not checkpointed): set restart_interval_s = 0 in [experiment]")
+    if lsm == 2 and int(getattr(cfg, "sf_surface_mosaic", 0) or 0) == 1:
+        raise NotImplementedError("--wrf-hydro with Noah and sf_surface_mosaic = 1: the mosaic "
+                                  "path (_run_noah_mosaic) has no WRF_HYDRO exchange")
+    if bool(getattr(cfg, "use_adaptive_time_step", False)):
+        raise NotImplementedError("--wrf-hydro with use_adaptive_time_step: HYDRO_dt and the "
+                                  "snapped DTRT_TER/DTRT_CH are fixed at attachment, and the "
+                                  "routing does not follow a changing LSM step")
     if lsm == 2 and int(getattr(cfg, "sf_urban_physics", 0) or 0) > 0:
         raise NotImplementedError("--wrf-hydro with Noah and sf_urban_physics > 0: "
                                   "noah_column_hydro has no urban hand-over")

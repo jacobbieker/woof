@@ -21,8 +21,7 @@ source_root=$(realpath "$1")
 build_dir=$(realpath -m "$2")
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 pinned_commit="f52c197ed39d12e087d02c50f412d90d418f6186"
-if [[ "$(git -C "${source_root}" rev-parse HEAD 2>/dev/null || cat "${source_root}/.pinned-commit")" \
-        != "${pinned_commit}" ]]; then
+if [[ "$(git -C "${source_root}" rev-parse HEAD)" != "${pinned_commit}" ]]; then
     echo "WRF tree is not at the pinned ${pinned_commit}" >&2
     exit 3
 fi
@@ -37,7 +36,7 @@ for d in "${dirs[@]}"; do
         grep -v '^ *#' "${hydro}/${d}/CMakeLists.txt" | grep -o '[A-Za-z0-9_]*\.F90')
 done
 sources+=(CPL/WRF_cpl/module_wrf_HYDRO.F90)
-if [[ -d "${source_root}/.git" ]] && ! git -C "${source_root}" diff --quiet HEAD -- \
+if ! git -C "${source_root}" diff --quiet HEAD -- \
         "${sources[@]/#/hydro/}"; then
     echo "a WRF-Hydro source differs from the pinned commit" >&2
     exit 3
