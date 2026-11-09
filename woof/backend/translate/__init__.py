@@ -3362,17 +3362,16 @@ class _Rewriter:
                         if s < e:
                             spelled = self._spell_type(node.type, drop_const=True)
                             self.edits.wrap(s, e, f"(({spelled})(", "))", d)
-                elif len(children) == 1 and _is_double(node.type) and (
-                        children[0].type.get_canonical().kind.name == "RECORD"
-                        or (not _is_double(children[0].type) and self._user_conversion_below(children[0]))):
+                elif len(children) == 1 and _is_double(node.type) and not _is_double(children[0].type) \
+                        and children[0].type.get_canonical().kind.name != "RECORD" \
+                        and self._user_conversion_below(children[0]):
                     # a class's conversion to float, then float -> double: on
                     # Metal double is the f64 class, and an implicit chain of
                     # two user conversions is not one C++ takes (MYNN 4.7.1's
                     # `d__1 = qke1[k]`, an M471Ref<real>); the explicit cast is
                     s, e = self.span(children[0])
                     if s < e:
-                        via = "" if children[0].type.get_canonical().kind.name == "RECORD" else \
-                            f"({self._spell_type(children[0].type, drop_const=True)})"
+                        via = f"({self._spell_type(children[0].type, drop_const=True)})"
                         self.edits.wrap(s, e, f"(({self._spell_type(node.type, drop_const=True)}){via}(", "))", d)
             if self.retain and self.f32s_vector_component(node, d):
                 pass
