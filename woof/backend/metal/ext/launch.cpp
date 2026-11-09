@@ -22,6 +22,8 @@
 #include <nanobind/stl/tuple.h>
 
 #include <array>
+#include <atomic>
+#include <memory>
 #include <cctype>
 #include <chrono>
 #include <unistd.h>
@@ -195,15 +197,36 @@ static MTL::DynamicLibrary* dynamic_library_of(const std::string& library_key) {
   return it == g_dylibs.end() ? nullptr : it->second.get();
 }
 
+// A cache whose entries are each built once, and different entries in
+// parallel: a unit's library or pipeline compiles under its own lock, not one
+// lock for all, so the compile prefetch (woof.backend.metal.prefetch) builds
+// many units at once while the forecast waits only for the one it needs.
+template <typename T>
+struct BuildCache {
+  struct Slot {
+    std::mutex building;
+    std::atomic<T*> ready{nullptr};
+    NS::SharedPtr<T> held;
+  };
+  std::mutex mutex;
+  std::unordered_map<std::string, std::shared_ptr<Slot>> slots;
+  std::shared_ptr<Slot> slot(const std::string& key) {
+    std::lock_guard<std::mutex> lock(mutex);
+    auto& found = slots[key];
+    if (!found) found = std::make_shared<Slot>();
+    return found;
+  }
+};
+
 // Libraries built here too, beside the pipelines: one cache, our options.
 // (LibraryOptimizationLevelSize was measured slower to compile: nssl2's
 // fused unit took 991 s against 772 s at the default level.)
 static MTL::Library* library_for(const std::string& library_key, const std::string& source, int math_mode) {
-  static std::mutex mutex;
-  static std::unordered_map<std::string, NS::SharedPtr<MTL::Library>> cache;
-  std::lock_guard<std::mutex> lock(mutex);
-  auto it = cache.find(library_key);
-  if (it != cache.end()) return it->second.get();
+  static BuildCache<MTL::Library> cache;
+  auto slot = cache.slot(library_key);
+  if (auto* ready = slot->ready.load()) return ready;
+  std::lock_guard<std::mutex> lock(slot->building);
+  if (auto* ready = slot->ready.load()) return ready;
   if (source.empty()) {
     // a launch names a library its module built; it carries no source
     throw std::runtime_error("[woof.backend.metal] no library built for " + library_key);
@@ -233,7 +256,8 @@ static MTL::Library* library_for(const std::string& library_key, const std::stri
           g_dylibs.emplace(library_key, NS::TransferPtr(dynamic));
         }
         pool->release();
-        cache.emplace(library_key, NS::TransferPtr(thin));
+        slot->held = NS::TransferPtr(thin);
+        slot->ready.store(thin);
         return thin;
       }
       dynamic->release();
@@ -252,7 +276,8 @@ static MTL::Library* library_for(const std::string& library_key, const std::stri
     throw std::runtime_error("[metal::Device] Unable to build metal library from source\n" + what);
   }
   pool->release();
-  cache.emplace(library_key, NS::TransferPtr(lib));
+  slot->held = NS::TransferPtr(lib);
+  slot->ready.store(lib);
   return lib;
 }
 
@@ -295,12 +320,11 @@ static MTL::ComputePipelineState* pipeline_from(MTL::Device* device, MTL::Comput
 
 static MTL::ComputePipelineState* pipeline_for(MTL::Library* lib, const std::string& library_key,
                                                const std::string& kernel) {
-  static std::mutex mutex;
-  static std::unordered_map<std::string, NS::SharedPtr<MTL::ComputePipelineState>> cache;
-  std::lock_guard<std::mutex> lock(mutex);
-  std::string key = library_key + "\x1f" + kernel;
-  auto it = cache.find(key);
-  if (it != cache.end()) return it->second.get();
+  static BuildCache<MTL::ComputePipelineState> cache;
+  auto slot = cache.slot(library_key + "\x1f" + kernel);
+  if (auto* ready = slot->ready.load()) return ready;
+  std::lock_guard<std::mutex> lock(slot->building);
+  if (auto* ready = slot->ready.load()) return ready;
   auto pool = NS::AutoreleasePool::alloc()->init();
   auto* device = mx::metal::device(mx::Device::gpu).mtl_device();
   auto* fn = lib->newFunction(NS::String::string(kernel.c_str(), NS::UTF8StringEncoding));
@@ -357,7 +381,8 @@ static MTL::ComputePipelineState* pipeline_for(MTL::Library* lib, const std::str
     throw std::runtime_error("[woof.backend.metal] cannot build the pipeline of " + kernel + ": " + what);
   }
   pool->release();
-  cache.emplace(key, NS::TransferPtr(state));
+  slot->held = NS::TransferPtr(state);
+  slot->ready.store(state);
   return state;
 }
 
@@ -671,8 +696,9 @@ NB_MODULE(_woof_metal_launch, m) {
           std::lock_guard<std::mutex> lock(g_split_mutex);
           g_splits[library_key] = {body, thin};
         }, nb::arg("library_key"), nb::arg("body"), nb::arg("thin"));
+  // without the GIL: prefetch threads compile units while Python runs on
   m.def("compile", &compile, nb::arg("library_key"), nb::arg("source"),
-        nb::arg("kernels"), nb::arg("math_mode") = 0);
+        nb::arg("kernels"), nb::arg("math_mode") = 0, nb::call_guard<nb::gil_scoped_release>());
   m.def("gpu_times", []() {
           std::lock_guard<std::mutex> lock(g_gpu_times_mutex);
           std::vector<std::tuple<std::string, uint64_t, double>> rows;
