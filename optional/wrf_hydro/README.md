@@ -19,7 +19,8 @@ Muskingum-Cunge, channel_option 1 and 2); the diffusive wave on nodes
 (GWBASESWCRT 1 and 2).  The coupled driver (`woof_wrf_hydro.coupled`:
 HYDRO_ini from the domain files and wrf_cpl_HYDRO/HYDRO_exe, reached from a
 forecast with `--wrf-hydro HYDRO.NAMELIST`, see `woof/wrf_hydro_route.py`).
-Not yet: the persistence and RFC-forecast reservoirs; gw2d in the coupled
-driver.  `woof_wrf_hydro.namelist.read("hydro.namelist")` maps
+lake_option 3's persistence/level-pool hybrid and RFC-forecast reservoirs
+(`woof_wrf_hydro.reservoir_da`).  Not yet: gw2d in the coupled driver;
+Route_Link reaches in the coupled driver.  `woof_wrf_hydro.namelist.read("hydro.namelist")` maps
 WRF-Hydro's namelist to these pieces and refuses unported options by name
 (docs/coupling/WRF-HYDRO-NEMO.md).

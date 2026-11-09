@@ -6,7 +6,9 @@ whole hydro/ tree -- HYDRO_ini reading the synthetic Fulldom_hires.nc,
 hydro2dtbl.nc, LAKEPARM.nc, GWBASINS.nc, GWBUCKPARM.nc and CHANPARM.TBL
 (tests/wrf_hydro_synthetic.py), then HYDRO_exe -- compiled whole with
 MPP_LAND on one process and driven over four coupling cycles with the LSM
-fields of ``gen_coupled_inputs.cycles``.  Graded: the network, slopes,
+fields of ``gen_coupled_inputs.cycles``, once with the lake a level pool
+and once (variant "da") as lake_option 3's USGS persistence/level-pool
+hybrid reading its timeslices.  Graded: the network, slopes,
 steepest-descent indices, retention depths and lake mask HYDRO_ini built;
 after every cycle the SMOIS, SH2O and SFCHEADRT handed back to WRF and the
 routing state (routing-grid head, water table, QSTRMVOLRT, QINFLOWBASE,
@@ -44,38 +46,51 @@ def _gen():
     return gen_coupled_inputs
 
 
-def _sums():
-    rows = (FIX / "coupled-sha256sums.txt").read_text().splitlines()
+#: the run as built (level-pool lake) and lake_option 3's variant (the lake a
+#: USGS persistence/level-pool hybrid): steps fixture, sums file
+VARIANTS = {"": ("coupled-steps.csv", "coupled-sha256sums.txt"),
+            "da": ("coupled-da-steps.csv", "coupled-da-sha256sums.txt")}
+
+
+def _sums(variant=""):
+    rows = (FIX / VARIANTS[variant][1]).read_text().splitlines()
     return {line.split()[1].rsplit("/", 1)[-1]: line.split()[0] for line in rows}
 
 
-def test_fixtures_are_the_ones_the_build_hashed(tmp_path):
-    sums = _sums()
-    for name in ("coupled-steps.csv", "coupled-static.csv"):
-        assert sums[name] == hashlib.sha256((FIX / name).read_bytes()).hexdigest()
+@pytest.mark.parametrize("variant", sorted(VARIANTS))
+def test_fixtures_are_the_ones_the_build_hashed(tmp_path, variant):
+    sums = _sums(variant)
+    assert sums["coupled-steps.csv"] == hashlib.sha256(
+        (FIX / VARIANTS[variant][0]).read_bytes()).hexdigest()
+    assert sums["coupled-static.csv"] == hashlib.sha256(
+        (FIX / "coupled-static.csv").read_bytes()).hexdigest()
     for name in ("coupled_harness.F90", "coupled_wrf_stubs.F90", "build_coupled.sh",
                  "gen_coupled_inputs.py"):
         assert sums[name] == hashlib.sha256((ORACLE / name).read_bytes()).hexdigest(), name
     # the inputs regenerate byte for byte
-    _gen().write(tmp_path)
+    _gen().write(tmp_path, variant)
     for name in ("coupled-inputs.txt", "hydro.namelist"):
         assert sums[name] == hashlib.sha256((tmp_path / name).read_bytes()).hexdigest(), name
 
 
-@pytest.fixture(scope="module")
-def coupled(tmp_path_factory):
+def _coupled(tmp_path_factory, variant):
     from importlib import import_module
 
     from woof.wrf_hydro_route import soil_centres
 
     g = _gen()
     d = tmp_path_factory.mktemp("coupled")
-    g.write(d)
+    g.write(d, variant)
     veg, sol = g.vegsoil()
     mod = import_module(optin.load("wrf_hydro").__name__ + ".coupled")
     return g, mod.WrfHydroCoupled(d / "hydro.namelist", ix=g.NX, jx=g.NY,
                                   zs=soil_centres(g.DZS), vegtyp=veg, soltyp=sol,
                                   hydro_dt=g.HYDRO_DT, start=datetime.datetime(2020, 1, 1))
+
+
+@pytest.fixture(scope="module")
+def coupled(tmp_path_factory):
+    return _coupled(tmp_path_factory, "")
 
 
 def _static():
@@ -106,12 +121,14 @@ def test_hydro_ini_is_bitwise_against_wrf_hydro(coupled):
 
 @pytest.mark.gpu
 @requires_gpu
-def test_coupling_cycles_are_bitwise_against_wrf_hydro(coupled):
+@pytest.mark.parametrize("variant", sorted(VARIANTS))
+def test_coupling_cycles_are_bitwise_against_wrf_hydro(tmp_path_factory, variant):
     import cupy as cp
 
-    g, c = coupled
+    g, c = _coupled(tmp_path_factory, variant)
+    assert (c.reservoir_da is not None) == (variant == "da")
     want = defaultdict(dict)
-    with (FIX / "coupled-steps.csv").open(newline="") as fh:
+    with (FIX / VARIANTS[variant][0]).open(newline="") as fh:
         for r in csv.DictReader(fh):
             want[(int(r["cycle"]), r["field"])][int(r["index"])] = int(r["bits"])
     ny, nx = g.NY, g.NX

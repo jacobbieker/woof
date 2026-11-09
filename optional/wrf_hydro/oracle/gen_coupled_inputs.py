@@ -52,7 +52,9 @@ def cycles():
     return out
 
 
-def write(out_dir):
+def write(out_dir, variant=""):
+    """``variant = "da"``: the lake is lake_option 3's USGS hybrid
+    (wrf_hydro_synthetic.write_reservoir_da)."""
     sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "tests"))
     import wrf_hydro_synthetic as synthetic
 
@@ -60,6 +62,10 @@ def write(out_dir):
 
     out = Path(out_dir)
     synthetic.write(out, nx=NX, ny=NY, dxrt=250.0)
+    if variant == "da":
+        from datetime import datetime
+
+        synthetic.write_reservoir_da(out, start=datetime(2020, 1, 1))
     veg, sol = vegsoil()
     bits = lambda a: np.asarray(a, np.float32).view(np.int32)  # noqa: E731
     lines = [f"{NX} {NY} {NSOIL} {NCYCLES} {HYDRO_DT}"]
@@ -79,4 +85,4 @@ def write(out_dir):
 
 
 if __name__ == "__main__":
-    write(sys.argv[1])
+    write(sys.argv[1], *sys.argv[2:3])
