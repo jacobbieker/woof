@@ -16,12 +16,17 @@ Three legs, one header text:
           same operands (any host: the comparison is word for word, so an
           Apple-silicon host without long double serves).
 ``bench`` times soft-float against df64 per operation on the GPU.
+``strict`` compares df64's division and square root with f64_soft.h's word
+          for word, NaN payloads included, on the GPU (strict numerics takes
+          them): every special-value pair, soft-float's grading mix, and
+          quotients landing on gradual underflow and overflow.
 
 Usage::
 
     pixi run -e default python tools/df64_grade.py host --samples 2000000
     pixi run -e mlx python tools/df64_grade.py gpu --samples 1048576
     pixi run -e mlx python tools/df64_grade.py bench
+    pixi run -e mlx python tools/df64_grade.py strict --samples 1073741824
 """
 
 from __future__ import annotations
@@ -189,6 +194,9 @@ int main(int argc, char** argv) {
       if (exact[op]) {
         uint64_t w = op == 0 ? bits(dbl(a) / dbl(b)) : bits(std::sqrt(dbl(a)));
         err = (g == w || (std::isnan(dbl(g)) && std::isnan(dbl(w)))) ? 0 : 1e300;
+        // and f64_soft.h's word, NaN payloads included (strict numerics)
+        uint64_t sw = op == 0 ? f64_div(a, b) : f64_sqrt(a);
+        if (g != sw) err = 1e300;
       } else {
         LD r = ref(op, (LD)dbl(a), (LD)dbl(b), (LD)dbl(c));
         err = ulp_err(g, r);
@@ -487,9 +495,98 @@ def bench(n: int, reps: int) -> int:
     return 0
 
 
+# The strict leg: f64_df_div / f64_df_sqrt against f64_soft.h's f64_div /
+# f64_sqrt, word for word (NaN payloads included), on the GPU.  Operands:
+# soft-float's own grading mix (random words, the subnormal band, every
+# special-value pair, near-ties, tiny and huge exponents) plus quotient
+# bands that land on gradual underflow and on overflow.
+STRICT_KERNEL = r'''
+using namespace metal;
+constant ulong SPECIAL[] = {
+  0x0000000000000000UL, 0x8000000000000000UL, 0x7FF0000000000000UL, 0xFFF0000000000000UL,
+  0x7FF8000000000000UL, 0x7FF0000000000001UL, 0xFFF8000000000123UL, 0x7FF4000000000abcUL,
+  0x3FF0000000000000UL, 0xBFF0000000000000UL, 0x0000000000000001UL, 0x8000000000000001UL,
+  0x000FFFFFFFFFFFFFUL, 0x0010000000000000UL, 0x7FEFFFFFFFFFFFFFUL, 0x3FEFFFFFFFFFFFFFUL,
+  0x3FF0000000000001UL, 0x4340000000000000UL, 0x433FFFFFFFFFFFFFUL, 0xC1E0000000000000UL,
+  0x3CA0000000000000UL, 0x0008000000000000UL, 0x4000000000000000UL, 0x3FE0000000000000UL};
+constant uint NSPECIAL = 24;
+static inline ulong mix(ulong x) {           // splitmix64
+  x += 0x9E3779B97F4A7C15UL; x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9UL;
+  x = (x ^ (x >> 27)) * 0x94D049BB133111EBUL; return x ^ (x >> 31);
+}
+static inline ulong operand(ulong r, ulong s) {
+  switch (r & 7) {
+    case 0: return s;                                                   // any word
+    case 1: return s & 0x800FFFFFFFFFFFFFUL;                            // subnormal
+    case 2: return SPECIAL[(r >> 3) % NSPECIAL];
+    case 3: return (0x3FF0000000000000UL | (s & 0x000FFFFFFFFFFFFFUL)) ^ ((r >> 8) & 1 ? 0x8000000000000000UL : 0);
+    case 4: return ((1 + (r >> 3) % 60) << 52) | (s & 0x800FFFFFFFFFFFFFUL);       // tiny exponents
+    case 5: return ((0x7FE - (r >> 3) % 60) << 52) | (s & 0x800FFFFFFFFFFFFFUL);   // huge exponents
+    default: return ((0x3FF - 40 + (r >> 3) % 80) << 52) | (s & 0x800FFFFFFFFFFFFFUL);
+  }
+}
+[[kernel]] void strict(device atomic_uint* bad [[buffer(0)]], device ulong* first [[buffer(1)]],
+    constant uint& n [[buffer(2)]], constant ulong& seed [[buffer(3)]],
+    uint3 tid [[thread_position_in_threadgroup]], uint3 bid [[threadgroup_position_in_grid]],
+    uint3 bdim [[threads_per_threadgroup]]) {
+  uint i = bid.x * bdim.x + tid.x;
+  if (i >= n) return;
+  ulong r = mix(seed + 3 * (ulong)i), a, b;
+  if (i < NSPECIAL * NSPECIAL) {
+    a = SPECIAL[i % NSPECIAL]; b = SPECIAL[i / NSPECIAL];
+  } else if ((r & 0xF) == 0xF) {
+    // a quotient at the ends of the range: |a| tiny over |b| huge (gradual
+    // underflow) or the reverse (overflow), around the thresholds
+    ulong s1 = mix(r), s2 = mix(r ^ 0x1234);
+    ulong ea = (r >> 8) & 1 ? 1 + (s1 >> 60) * 8 : 0x7FE - (s1 >> 60) * 8;
+    ulong eb = (r >> 8) & 1 ? 0x3FF + 40 + (s2 >> 58) % 40 : 0x3FF - 40 - (s2 >> 58) % 40;
+    a = (ea << 52) | (s1 & 0x800FFFFFFFFFFFFFUL);
+    b = (eb << 52) | (s2 & 0x800FFFFFFFFFFFFFUL);
+  } else {
+    a = operand(r, mix(r + 1)); b = operand(r >> 16, mix(r + 2));
+  }
+  ulong dg = f64_df_div(a, b), dw = f64_div(a, b);
+  ulong sg = f64_df_sqrt(a), sw = f64_sqrt(a);
+  if (dg != dw) {
+    if (atomic_fetch_add_explicit(&bad[0], 1u, memory_order_relaxed) == 0u) {
+      first[0] = a; first[1] = b; first[2] = dg; first[3] = dw; }
+  }
+  if (sg != sw) {
+    if (atomic_fetch_add_explicit(&bad[1], 1u, memory_order_relaxed) == 0u) {
+      first[4] = a; first[5] = sg; first[6] = sw; }
+  }
+}
+'''
+
+
+def strict(samples: int, seed: int, chunk: int = 1 << 24) -> int:
+    import mlx.core as mx
+    from woof.backend.metal import ext
+    launch = ext.load().launch
+    source = _metal_text(STRICT_KERNEL)
+    total_div = total_sqrt = 0
+    first = None
+    done = 0
+    while done < samples:
+        n = min(chunk, samples - done)
+        bad = mx.zeros((2,), dtype=mx.uint32)
+        out = mx.zeros((8,), dtype=mx.uint64)
+        res = launch("woof-df64-strict", source, "strict", ((n + 255) // 256, 1, 1), (256, 1, 1), [bad, out],
+                     [0, 0], [True, True], [0, 1], -1,
+                     [struct.pack("I", n), struct.pack("Q", (seed * 0x9E3779B97F4A7C15 + done) % 2**64)], [2, 3], 0, 0)
+        b, f = (np.array(x) for x in res)
+        total_div += int(b[0]); total_sqrt += int(b[1])
+        if (b[0] or b[1]) and first is None:
+            first = [f"{x:016x}" for x in f]
+        done += n
+    print(json.dumps({"strict": {"samples": samples, "div_mismatch": total_div, "sqrt_mismatch": total_sqrt,
+                                 "first": first}}))
+    return int(bool(total_div or total_sqrt))
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("leg", choices=("host", "gpu", "bench"))
+    parser.add_argument("leg", choices=("host", "gpu", "bench", "strict"))
     parser.add_argument("--samples", type=int, default=1_000_000)
     parser.add_argument("--seed", type=int, default=20261108)
     parser.add_argument("--reps", type=int, default=5)
@@ -500,6 +597,8 @@ def main(argv=None):
         return host(args.samples, args.seed)
     if args.leg == "gpu":
         return gpu(args.samples, args.seed)
+    if args.leg == "strict":
+        return strict(args.samples, args.seed)
     return bench(args.samples, args.reps)
 
 
