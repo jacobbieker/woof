@@ -2264,6 +2264,11 @@ def preflight_prepared_tree(
     # statics from its sealed corridor (runtime.build_prepared_tree_spawn_runner,
     # which refuses by name a dormant slot the bundle sealed no corridor for).
     _refuse_dormant_without_corridor(exp, preparation)
+    # A partial-depth band is realized only on the idealized tree
+    # (woof.core.model.realize_partial_nests); this route builds every
+    # child full depth, so a declared band would run as a full-depth nest.
+    from woof.core.model import refuse_real_partial_nests
+    refuse_real_partial_nests(exp, "woof go (prepared domain tree)")
     _validate_delayed_prepared_geometry(exp)
     # NO streaming refusal for [tiles]: this route wires a streamed-domain
     # builder (streaming.builders_for_tree, below), so mode = 'on' is
