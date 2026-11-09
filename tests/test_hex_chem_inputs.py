@@ -159,6 +159,8 @@ def _wrf_fill(table, sources, pressure, valid, cache, frame):
 
 
 class _BoundaryRuntime:
+    coupling = "none"
+
     def __init__(self, raw):
         self.raw = raw
         self.set_name, self.table, _ = chem_wrf.load_table(raw)
@@ -273,3 +275,124 @@ def test_the_pool_admits_the_readers_rows_beside_the_stream():
     pool = LbcPool(inventory, scalar_names=("lbc_qv", "lbc_zz_pool_row"), reader=reader)
     admitted = pool.start(when)
     assert admitted.fields["lbc_zz_pool_row"] is row
+
+
+# -- aerosol-aware Thompson coupling (aerosol_mp_coupling = "diagnose") ---------------------------------
+
+def test_a_coupling_block_runs_beside_the_thompson_aerosol_row(tmp_path):
+    from woof.hex import chem_transport
+    from woof.hex.species_row import THOMPSON_AEROSOL_SPECIES_ROW
+    raw = {"schema": "gpuwm-hex.chemistry/v1",
+           "wrf_chem": {"chem_opt": 401, "chem_in_opt": 1, "aerosol_mp_coupling": "diagnose"}}
+    assert chem_wrf.physics_row(raw) == "thompson_aero_column"
+    assert chem_wrf.physics_row(_raw()) == "wsm6_column"
+    path = tmp_path / "chemistry.json"
+    path.write_text(json.dumps(raw))
+    row = chem_transport.configure(path)
+    rows = tuple(r.name for r in chem_wrf.declare(raw))
+    assert row.appended_scalar_names == ("nwfa", "nifa", *rows)
+    assert row.driven_scalar_names == ("qv", "qc", "qr", "qi", "qs", "qg", "ni", "nr", "nc")
+    species = chem_transport._CONFIGS[row.name][3]
+    assert species.names() == (*THOMPSON_AEROSOL_SPECIES_ROW.names(), *rows)
+    args = SimpleNamespace(chemistry_config=path, physics_backend="wsm6_column", physics_suite=None,
+                           physics=None)
+    with pytest.raises(ValueError, match="would replace it"):
+        chem_transport.admit_arguments(args)
+    args.physics_backend = "thompson_aero_column"
+    chem_transport.admit_arguments(args)
+    # Under have_bcs_chem the numbers ride the pool before the rows, as they sit in the species.
+    bcs = {**raw, "wrf_chem": {**raw["wrf_chem"], "have_bcs_chem": 1}}
+    assert chem_wrf.lbc_scalar_names(bcs)[:3] == ("lbc_nwfa", "lbc_nifa", "lbc_" + rows[0])
+    with pytest.raises(ValueError, match="aerosol_mp_coupling"):
+        chem_wrf.load_table({"wrf_chem": {"chem_opt": 401, "aerosol_mp_coupling": "auto"}})
+
+
+def _synthetic_source(monkeypatch):
+    """The data-store fill with a synthetic remap (the CAMS fixture carries no aerosol): every row the
+    source fills gets a smooth positive profile; everything else in fill_boundary_sources runs."""
+    import woof.chem_source_init as init
+
+    def fields(table, source_row, frames, target, valid, **kwargs):
+        from woof.chem_boundary_remap import boundary_rows
+        rows = boundary_rows(table, source_row.name, available=kwargs.get("available"),
+                             frame=kwargs.get("frame"))
+        nz = target.pressure.shape[0]
+        shape = target.pressure.shape
+        out = {}
+        for n, row in enumerate(rows):
+            profile = (1.0 + n) * np.exp(-np.arange(nz) / 6.0)[:, None, None]
+            out[row.name] = (profile * (1.0 + 0.1 * np.cos(target.longitude))[None]).astype(np.float32
+                                                                                          ).reshape(shape)
+        return out, {"source": source_row.name, "rows": [row.name for row in rows]}
+
+    monkeypatch.setattr(init, "covering_files", lambda *a, **k: {"model_level": Path("synthetic.grib2")})
+    monkeypatch.setattr(init, "_frames", lambda *a, **k: None)
+    monkeypatch.setattr(init, "files_cycle", lambda *a, **k: None)
+    monkeypatch.setattr(init, "boundary_fields_for_grid", fields)
+
+
+def test_the_coupled_start_diagnoses_the_numbers_from_the_source_composition(monkeypatch):
+    cp = pytest.importorskip("cupy")
+    from woof.core import mpas_column_batch as mcb
+    from woof.core.chem_mp_coupling import launch_niwfa, pack_terms, rows as coupled_rows
+    from woof.hex.chem_wrf import HexWrfChemistry
+    from woof.hex.species_row import AEROSOL_MASS, SpeciesDeclaration, THOMPSON_AEROSOL_SPECIES_ROW
+    _synthetic_source(monkeypatch)
+    start = datetime(2025, 7, 30, 1, 0)
+    seam = mcb.run_mpas_column_batch(
+        n_levels=NZ, n_columns=NCOL, dt=60.0, radiation_seconds=600.0, surface_pbl_seconds=60.0,
+        start_time=start, latitude_deg=LAT, longitude_deg=LON, terrain_height_m=np.zeros(NCOL),
+        z_interface_nominal_m=np.linspace(0.0, 16000.0, NZ + 1), p_top_pa=float(101325.0 * np.exp(-2.0)),
+        dx_m=15000.0, soil_moisture=0.2, vegfra=50.0, isltyp=4, ivgtyp=10, microphysics_scheme="thompson_aero")
+    raw = {"schema": "gpuwm-hex.chemistry/v1",
+           "wrf_chem": {"chem_opt": 401, "chem_in_opt": 1, "aerosol_mp_coupling": "diagnose"}}
+    runtime = HexWrfChemistry("chemistry.json", raw, "0" * 64, cfg=seam._cfg, area=np.full(NCOL, 2.25e8),
+                              nlev=NZ, ncells=NCOL, offset=11, start_time=start, fnm=seam._state.fnm,
+                              fnp=seam._state.fnp, terrain=seam._state.ht)
+    runtime.species_row = THOMPSON_AEROSOL_SPECIES_ROW.with_extras(tuple(
+        SpeciesDeclaration(r.name, AEROSOL_MASS, True, r.name.upper(), "row") for r in runtime.rows))
+    scalars = cp.zeros((11 + len(runtime.rows), NZ, NCOL), cp.float32)
+    receipts = runtime.fill_initial(scalars, latitude=LAT, longitude=LON, pressure=_pressure(),
+                                    valid_time=start.replace(tzinfo=timezone.utc))
+    assert receipts[0]["thompson_initialization"]["initialized_fields"] == ["nifa"]
+    index = THOMPSON_AEROSOL_SPECIES_ROW.index_of
+    nifa = cp.asnumpy(scalars[index("nifa")])
+    assert (nifa > 0).all(), "dust feeds the ice-friendly number"
+    assert not cp.asnumpy(scalars[index("nwfa")]).any(), "no dust row feeds the water-friendly number"
+    for i, row in enumerate(runtime.rows):
+        assert (cp.asnumpy(scalars[11 + i]) > 0).all(), row.name
+    # The GSL operator itself on the rows the fill wrote: the numbers are its words.
+    terms = pack_terms(coupled_rows(runtime.table))
+    expect_nifa, expect_nwfa = cp.zeros((NZ, 1, NCOL), cp.float32), cp.zeros((NZ, 1, NCOL), cp.float32)
+    launch_niwfa({t.name: cp.ascontiguousarray(scalars[11 + [r.name for r in runtime.rows].index(t.name)]
+                                               ).reshape(NZ, 1, NCOL) for t in terms}, terms,
+                 expect_nifa, expect_nwfa)
+    assert np.array_equal(cp.asnumpy(expect_nifa).reshape(NZ, NCOL), nifa)
+
+
+def test_the_coupled_boundary_drives_numbers_diagnosed_from_its_composition(monkeypatch):
+    from woof.hex.lbc import LbcFile
+    _synthetic_source(monkeypatch)
+    _backend()
+    raw = {"schema": "gpuwm-hex.chemistry/v1",
+           "wrf_chem": {"chem_opt": 401, "have_bcs_chem": 1, "aerosol_mp_coupling": "diagnose"}}
+
+    class Runtime(_BoundaryRuntime):
+        coupling = "diagnose"
+
+    runtime = Runtime(raw)
+    runtime.cfg = SimpleNamespace(chem_sources=runtime.cfg.chem_sources, aerosol_mp_coupling="diagnose",
+                                  mp_physics=28, chem_sets="dust")
+    met = {"lbc_rho": np.full((NCOL, NZ), 1.0, np.float32), "lbc_theta": np.full((NCOL, NZ), 300.0, np.float32),
+           "lbc_qv": np.full((NCOL, NZ), 0.01, np.float32), "lbc_nwfa": np.full((NCOL, NZ), 5.0, np.float32)}
+    valid = datetime(2025, 7, 30, 3)
+    reader = chem_wrf.BoundaryReader(runtime, latitude=LAT, longitude=LON,
+                                     base=lambda path, extra_scalars=(): LbcFile(Path(path), valid, dict(met)))
+    admitted = reader("lbc.nc", extra_scalars=reader.names)
+    assert reader.names[:2] == ("lbc_nwfa", "lbc_nifa")
+    assert (admitted.fields["lbc_nifa"] > 0).all()
+    # No dust row feeds nwfa, so the operator leaves it to the scheme and the stream's own field drives it.
+    assert np.array_equal(admitted.fields["lbc_nwfa"], met["lbc_nwfa"])
+    del met["lbc_nwfa"]
+    with pytest.raises(ValueError, match="carries no lbc_nwfa"):
+        reader("lbc.nc", extra_scalars=reader.names)
