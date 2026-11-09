@@ -430,3 +430,29 @@ def test_an_uncoupled_forecast_calls_the_lsm_as_before(no_hydro_env, monkeypatch
         step(state, cfg)
     assert calls and all("wrf_hydro" not in k for k in calls)
     assert not {"SFCHEADRT", "INFXSRT", "SOLDRAIN"} & set(driver.output_fields())
+
+
+@needs_optin
+@pytest.mark.gpu
+@requires_gpu
+def test_a_lake_option_3_forecast_runs_its_hybrid_reservoir(tmp_path, monkeypatch):
+    """lake_option 3 through the driver: the lake is a USGS persistence /
+    level-pool hybrid reading its timeslices (graded word for word in
+    tests/test_wrf_hydro_coupled_parity.py)."""
+    from test_physics_driver import _full_state
+    from woof import wrf_hydro_route as route
+    from woof.core.dycore import step
+
+    start = datetime.datetime(2020, 6, 1, 12)
+    path = synthetic.write(tmp_path / "dom", nx=8, ny=6, dxrt=500.0)
+    synthetic.write_reservoir_da(tmp_path / "dom", start=start, update_seconds=20)
+    monkeypatch.setenv(route.ENV_NAMELIST, str(path))
+    monkeypatch.setenv(route.ENV_OUTPUT, str(tmp_path / "out"))
+    state, cfg, driver = _full_state(nx=8, ny=6, radiation_start_time=start)
+    routing = driver.wrf_hydro.routing
+    assert routing.reservoir_da is not None
+    for _ in range(4):
+        step(state, cfg)
+    ri = routing.reservoir_da.ri.get().reshape(1, -1)
+    assert ri[0, 0] == 1 and ri[0, 6] >= 2          # a hybrid, with timeslice reads made
+    assert np.isfinite(routing.channel.lakes.qlakeo.get()).all()

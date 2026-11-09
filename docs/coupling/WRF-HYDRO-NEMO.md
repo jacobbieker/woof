@@ -175,8 +175,14 @@ Metal, and refuses what it does not port by name.
    the diffusive wave on nodes, channel_option 3, **done** in the opt-in with
    level-pool lakes (`Reservoirs/Level_Pool/`, lake_option 1, and 4.7.0's
    pass-through, lake_option 2), both compiled as WRF-Hydro always is, with
-   MPP_LAND, on one process, `tests/test_wrf_hydro_diffusive_parity.py`; the
-   persistence and RFC-forecast reservoirs, lake_option 3, remain), then the bucket baseflow (`module_GW_baseflow.F90`
+   MPP_LAND, on one process, `tests/test_wrf_hydro_diffusive_parity.py`; lake_option 3's
+   persistence/level-pool hybrid (USGS type 2, USACE type 3) and RFC-forecast
+   reservoirs (types 4 and 5), with their timeslice and RFC time-series
+   readers on the host, are **done** in the opt-in (`woof_wrf_hydro.reservoir_da`,
+   run inside the diffusive channel's lake loop): `tests/test_wrf_hydro_reservoir_da_parity.py`
+   grades 900 calls of five lakes against Reservoirs/ compiled whole
+   (`oracle/build_reservoir_da.sh`), and the coupled oracle's lake_option 3
+   variant grades the hybrid inside HYDRO_exe), then the bucket baseflow (`module_GW_baseflow.F90`
    simp_gw_buck, GWBASESWCRT 1 and 2: **done** in the opt-in,
    `tests/test_wrf_hydro_baseflow_parity.py`; the 2-D groundwater model,
    GWBASESWCRT 3 (`module_gw_gw2d.F90`: gw2d_ini, gwstep's ADI sweeps as

@@ -109,18 +109,20 @@ def test_lake_option_resolves_as_read_rt_nlst_does(option, route_lake, expected)
         assert "route_lake_f" not in cfg.io and "outlake" not in cfg.io
 
 
-def test_the_persistence_and_rfc_reservoirs_are_refused_by_name():
+def test_lake_option_3_carries_the_reservoir_da_settings():
     nl = _nl()
     text = _lakes(_drop_nudging(_text()), "lake_option = 3")
     for key in ("reservoir_persistence_usgs", "reservoir_persistence_usace", "reservoir_rfc_forecasts"):
         edited = text.replace(f"{key} = .FALSE.", f"{key} = .TRUE.")
         assert edited != text
-        with pytest.raises(nl.UnportedOption, match=key):
-            nl.map_hydro_nlist(nl.parse(edited))
+        cfg = nl.map_hydro_nlist(nl.parse(edited))
+        assert cfg.lake_option == 1 and cfg.reservoir[key] is True    # config.F90 :762-769
+        assert cfg.reservoir["reservoir_parameter_file"] == "./DOMAIN/persistence_parm.nc"
+    assert nl.map_hydro_nlist(nl.parse(text)).reservoir == {}           # no flag: the level pool
     # without lake_option = 3, WRF never reads &reservoir_nlist
     cfg = nl.map_hydro_nlist(nl.parse(text.replace("lake_option = 3", "lake_option = 1").replace(
         "reservoir_persistence_usgs = .FALSE.", "reservoir_persistence_usgs = .TRUE.")))
-    assert cfg.lake_option == 1
+    assert cfg.lake_option == 1 and cfg.reservoir == {}
 
 
 def test_a_reservoir_key_in_hydro_nlist_is_unknown_and_lake_option_4_is_invalid():

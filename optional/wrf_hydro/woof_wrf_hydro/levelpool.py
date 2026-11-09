@@ -11,8 +11,8 @@ removes the lakes (module_RT: NLAKES = 0) and 3 is resolved by read_rt_nlst
 before the lakes are built, so neither reaches a reservoir.  Each lake's properties are levelpool_init's (LAKEPARM: LkArea km2,
 WeirE, WeirC, WeirL, DamL, OrificeE, OrificeC, OrificeA, LkMxE); the state
 is the water elevation RESHT, the inflow QLAKEI and the outflow QLAKEO.
-The persistence and RFC-forecast reservoir types are refused by
-:class:`woof_wrf_hydro.diffusive.DiffusiveWaveRouting`.
+lake_option 3's persistence and RFC-forecast reservoirs are
+:mod:`woof_wrf_hydro.reservoir_da`.
 """
 
 from __future__ import annotations

@@ -24,7 +24,9 @@ on device, for one domain (WRF calls it only when ``num_nests < 1``):
 
 The static state is :mod:`woof_wrf_hydro.routing_domain`.  Ported for the
 coupled run: SUBRTSWCRT and OVRTSWCRT (rt_option 1 and 2), channel_option 3
-with level-pool or pass-through lakes, GWBASESWCRT 0, 1 and 2.  Refused by
+with level-pool or pass-through lakes or lake_option 3's persistence/level-pool
+hybrid and RFC-forecast reservoirs (woof_wrf_hydro.reservoir_da), GWBASESWCRT
+0, 1 and 2.  Refused by
 name here or in the namelist mapper: Route_Link reaches (channel_option 1
 and 2), UDMP_OPT = 1, GWBASESWCRT = 3, IMPERV_ADJ, restarts (RESTART_FILE,
 rst_typ = 1), sys_cpl other than 2, rtFlag = 0 (no SUBRTSWCRT, OVRTSWCRT
@@ -197,6 +199,7 @@ class WrfHydroCoupled:
             self.z_gw = d(b["z_init"])
             self.qin_gw, self.qout_gw = cp.zeros(nb, cp.float32), cp.zeros(nb, cp.float32)
         self.channel = None
+        self.reservoir_da = None
         if cfg.channel:
             net = dom.network
             lakes = levelpool.LevelPool.empty()
@@ -205,6 +208,15 @@ class WrfHydroCoupled:
                 lakes = levelpool.LevelPool(
                     water_elevation=L["resht"], lake_opt=L["lake_opt"],
                     **{k: L[k] for k in levelpool._PROPS})
+            self.reservoir_da = None
+            if cfg.reservoir and dom.lakes is not None:
+                # lake_option 3: LandRT_ini's per-lake reservoir types (module_RT :1184-1263)
+                from .reservoir_da import ReservoirDA
+
+                L = dom.lakes
+                self.reservoir_da = ReservoirDA(
+                    lake_ids=L["lake_id"], props={k: L[k] for k in levelpool._PROPS},
+                    ifd=L["ifd"], nl=cfg.reservoir, start=start, base=path.parent)
             self.channel = diffusive.DiffusiveWaveRouting(
                 ch_netrt=dom.ch_netrt, lake_mskrt=lake_mask, ch_netlnk=net["ch_netlnk"],
                 chanxi=net["chanxi"], chanyj=net["chanyj"], node_area=net["node_area"],
@@ -215,7 +227,9 @@ class WrfHydroCoupled:
                 zelev=net["zelev"], chanlen=net["chanlen"], mannn=net["mannn"], so=net["so"],
                 chsslp=net["chsslp"], bw=net["bw"], retdep_chan=F(0.001),
                 dtrt_ch=self.dtrt_ch, dtct=F(cfg.dtrt_ch), gwbaseswcrt=0,
-                lakenode=net["lakenode"], lakes=lakes)
+                lakenode=net["lakenode"], lakes=lakes,
+                reservoir_type="lake_option_3" if self.reservoir_da is not None else "level_pool",
+                reservoir_da=self.reservoir_da)
             n = len(net["chanxi"])
             self.hlink, self.cvol = d(net["hlink"]), d(net["cvol"])
             self.qlink1, self.qlateral = cp.zeros(n, cp.float32), cp.zeros(n, cp.float32)
@@ -321,6 +335,8 @@ class WrfHydroCoupled:
             named.update(hlink=self.hlink, cvol=self.cvol, qlink1=self.qlink1,
                          qlateral=self.qlateral, dtct=self.channel.dtct,
                          resht=self.channel.lakes.resht, qlakeo=self.channel.lakes.qlakeo)
+            if self.reservoir_da is not None:
+                named.update(reservoir_ri=self.reservoir_da.ri, reservoir_rf=self.reservoir_da.rf)
         out.update({f"wrf_hydro/{k}": v for k, v in named.items()})
         return out
 

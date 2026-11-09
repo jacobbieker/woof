@@ -179,3 +179,61 @@ def write(directory, *, nx, ny, agg=4, water_columns=1, lake=True, **nl):
             ds.createVariable(name, t, ("BasinDim",))[:] = value
     (d / "hydro.namelist").write_text(namelist(agg=agg, **nl))
     return d / "hydro.namelist"
+
+
+def write_reservoir_da(directory, *, start, update_seconds=120, lookback_hours=2):
+    """Turn a written domain's lake into lake_option 3's USGS persistence /
+    level-pool hybrid (type 2): the reservoir parameter file, 15-minute USGS
+    timeslices around ``start`` (one missing, one of low quality) and a
+    &reservoir_nlist group."""
+    from datetime import timedelta
+
+    import netCDF4
+
+    d = Path(directory)
+    (d / "usgs").mkdir(exist_ok=True)
+
+    def chars(values, width, pad):
+        return np.array([[c.encode() for c in v.ljust(width, pad)] for v in values], "S1")
+
+    with netCDF4.Dataset(d / "reservoir_parm.nc", "w") as ds:
+        ds.createDimension("lake", 1)
+        ds.createDimension("nchar15", 15)
+        ds.createDimension("nweights", 2)
+        ds.createVariable("lake_id", "i8", ("lake",))[:] = [1]
+        ds.createVariable("reservoir_type", "i4", ("lake",))[:] = [2]
+        ds.createVariable("usgs_lake_id", "i4", ("lake",))[:] = [1]
+        ds.createVariable("usgs_gage_id", "S1", ("lake", "nchar15"))[:] = chars(["01234567"], 15,
+                                                                                 "\0")
+        ds.createVariable("usgs_persistence_coefficients", "f4",
+                          ("lake", "nweights"))[:] = [[0.75, 0.5]]
+    t = start - timedelta(hours=lookback_hours)
+    k = 0
+    while t <= start + timedelta(hours=1):
+        k += 1
+        if k != 4:                                         # one file missing
+            name = f"{t.strftime('%Y-%m-%d_%H:%M:%S')}.15min.usgsTimeSlice.ncdf"
+            with netCDF4.Dataset(d / "usgs" / name, "w") as ds:
+                ds.createDimension("stationIdInd", 2)
+                ds.createDimension("stationIdStrLen", 15)
+                ds.createVariable("stationId", "S1", ("stationIdInd", "stationIdStrLen"))[:] = \
+                    chars(["01234567", "07654321"], 15, " ")
+                ds.createVariable("discharge", "f4", ("stationIdInd",))[:] = [0.5 + 0.01 * k, 9.0]
+                ds.createVariable("discharge_quality", "f4", ("stationIdInd",))[:] = \
+                    [50.0 if k % 3 == 0 else 100.0, 100.0]
+        t += timedelta(minutes=15)
+    nl = d / "hydro.namelist"
+    text = nl.read_text().replace("lake_option = 1", "lake_option = 3")
+    nl.write_text(text + f"""&reservoir_nlist
+reservoir_persistence_usgs = .TRUE.
+reservoir_persistence_usace = .FALSE.
+reservoir_parameter_file = "reservoir_parm.nc"
+reservoir_usgs_timeslice_path = "usgs"
+reservoir_usace_timeslice_path = "usace"
+reservoir_observation_lookback_hours = {lookback_hours}
+reservoir_observation_update_time_interval_seconds = {update_seconds}
+reservoir_rfc_forecasts = .FALSE.
+reservoir_rfc_forecasts_time_series_path = "rfc"
+reservoir_rfc_forecasts_lookback_hours = 28
+/
+""")
