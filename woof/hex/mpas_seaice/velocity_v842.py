@@ -8,7 +8,9 @@ velocity:
   ``init_subcycle_variables`` (variational);
 - each elastic subcycle: ``ocean_stress_coefficient`` and ``solve_velocity``
   or ``solve_velocity_revised``;
-- after it: ``principal_stresses_driver`` (variational).
+- after it: ``principal_stresses_driver`` (variational) and
+  ``ocean_stress_final`` (with ``seaice_mesh``'s
+  ``seaice_interpolate_vertex_to_cell``).
 
 :func:`subcycle` composes them with the internal stress of
 :mod:`woof.hex.mpas_seaice.evp_v842` the way ``seaice_run_velocity_solver``
@@ -28,8 +30,7 @@ The rest of the pre-subcycle work (``aggregate_mass_and_area``,
 ``surface_tilt``) is :mod:`woof.hex.mpas_seaice.presubcycle_v842`; its outputs
 are these kernels' inputs (``totalMassVertex``, ``iceAreaVertex``,
 ``solveStress``/``solveVelocity``, ``icePressure``, ``airStressVertexU/V``,
-``surfaceTiltForceU/V``). Not ported yet: ``ocean_stress_final``. Halo
-exchanges are a one-rank no-op.
+``surfaceTiltForceU/V``). Halo exchanges are a one-rank no-op.
 
 Arrays are device float32 (``r4``) or float64 (``r8``), with int32 masks and
 connectivity, in the Fortran layout: ``a(maxEdges, nCells)`` is C-order
@@ -46,7 +47,8 @@ from woof.hex import numerics as _hex_numerics
 
 SOURCE_FILES = (
     "src/core_seaice/shared/mpas_seaice_velocity_solver.F:31-36,1664-1805,2149-2308,2326-2485,"
-    "2499-2841,2859-3109",
+    "2499-2841,2859-3347",
+    "src/core_seaice/shared/mpas_seaice_mesh.F:2888-2958",
 )
 #: Strict options. The arithmetic is explicit round-to-nearest intrinsics, so
 #: the fast tuple computes the same words; subnormals are kept (``keep_ftz``).
@@ -243,18 +245,86 @@ def principal_stresses(*, mesh: dict, variational: dict) -> None:
         v["replacementPressure"], mesh["nEdgesOnCell"], np.int32(ncs), np.int32(max_edges)))
 
 
-def subcycle(*, mesh: dict, icestate: dict, solver: dict, variational: dict, ridging: dict | None,
-             n_subcycles: int, use_ocean_stress: bool, revised_evp: bool, use_column_package: bool,
-             dynamics_time_step: float, elastic_time_step: float, stress_divergence_scheme: str = "variational"):
+def interpolate_vertex_to_cell(*, mesh: dict, boundary: dict, cell, vertex) -> None:
+    """``seaice_interpolate_vertex_to_cell``: ``cell[:nCellsSolve]`` is the
+    ``areaTriangle``-weighted mean of ``vertex`` over the cell's interior
+    vertices (the plain sum where it has none); the halo cells keep their
+    words."""
+    import cupy as cp
+    precision = _precision_of(cell)
+    dtype = PRECISIONS[precision]
+    n_cells, n_vertices = cell.shape[0], vertex.shape[0]
+    max_edges = mesh["verticesOnCell"].shape[1]
+    ncs = int(mesh["nCellsSolve"])
+    if not 0 <= ncs <= n_cells:
+        raise ValueError("nCellsSolve must lie within nCells")
+    _check("variableVertex", vertex, dtype, (n_vertices,))
+    _check("areaTriangle", mesh["areaTriangle"], dtype, (n_vertices,))
+    _check("interiorVertex", boundary["interiorVertex"], cp.int32, (n_vertices,))
+    _check("nEdgesOnCell", mesh["nEdgesOnCell"], cp.int32, (n_cells,))
+    _check("verticesOnCell", mesh["verticesOnCell"], cp.int32, (n_cells, max_edges))
+    _function(precision, "seaice_interpolate_vertex_to_cell_v842")(_grid(ncs), (_BLOCK,), (
+        cell, vertex, mesh["areaTriangle"], boundary["interiorVertex"], mesh["nEdgesOnCell"],
+        mesh["verticesOnCell"], np.int32(ncs), np.int32(max_edges)))
+
+
+def ocean_stress_final(*, mesh: dict, boundary: dict, icestate: dict, solver: dict, use_ocean_stress: bool) -> None:
+    """``ocean_stress_final``, in place: ``ocean_stress_coefficient`` at the
+    final velocity, the ocean stress on the ice per unit ice area,
+    interpolated to the cells (``solver["oceanStressCellU/V"]``), then the
+    vertex stress back to per unit grid area. Without
+    ``config_use_ocean_stress`` both are zeroed whole.
+
+    ``mesh`` additionally needs ``nEdgesOnCell``, ``verticesOnCell``,
+    ``areaTriangle`` and ``nCellsSolve``; ``boundary``: ``interiorVertex``.
+    """
+    import cupy as cp
+    s = solver
+    precision = _precision_of(s["uVelocity"])
+    dtype = PRECISIONS[precision]
+    n_vertices = s["uVelocity"].shape[0]
+    n_cells = s["oceanStressCellU"].shape[0]
+    nvs = int(mesh["nVerticesSolve"])
+    _solve_bounds(nvs, n_vertices)
+    _vertex_fields(s, ("uVelocity", "vVelocity", "oceanStressU", "oceanStressV", "oceanStressCoeff",
+                       "uOceanVelocityVertex", "vOceanVelocityVertex"), n_vertices, dtype)
+    for name in ("oceanStressCellU", "oceanStressCellV"):
+        _check(name, s[name], dtype, (n_cells,))
+    _check("iceAreaVertex", icestate["iceAreaVertex"], dtype, (n_vertices,))
+    _check("fVertex", mesh["fVertex"], dtype, (n_vertices,))
+    _check("solveVelocity", s["solveVelocity"], cp.int32, (n_vertices,))
+    use = np.int32(bool(use_ocean_stress))
+    _function(precision, "seaice_ocean_stress_coefficient_v842")(_grid(n_vertices), (_BLOCK,), (
+        s["oceanStressCoeff"], s["uOceanVelocityVertex"], s["vOceanVelocityVertex"], s["uVelocity"],
+        s["vVelocity"], icestate["iceAreaVertex"], s["solveVelocity"], use, np.int32(nvs), np.int32(n_vertices)))
+    _function(precision, "seaice_ocean_stress_final_v842")(_grid(n_vertices), (_BLOCK,), (
+        s["oceanStressU"], s["oceanStressV"], s["oceanStressCoeff"], s["uOceanVelocityVertex"],
+        s["vOceanVelocityVertex"], s["uVelocity"], s["vVelocity"], icestate["iceAreaVertex"], mesh["fVertex"],
+        s["solveVelocity"], use, np.int32(nvs), np.int32(n_vertices)))
+    if not use_ocean_stress:
+        _function(precision, "seaice_zero_cell_stress_v842")(_grid(n_cells), (_BLOCK,), (
+            s["oceanStressCellU"], s["oceanStressCellV"], np.int32(n_cells)))
+        return
+    interpolate_vertex_to_cell(mesh=mesh, boundary=boundary, cell=s["oceanStressCellU"], vertex=s["oceanStressU"])
+    interpolate_vertex_to_cell(mesh=mesh, boundary=boundary, cell=s["oceanStressCellV"], vertex=s["oceanStressV"])
+    _function(precision, "seaice_ocean_stress_final_rescale_v842")(_grid(nvs), (_BLOCK,), (
+        s["oceanStressU"], s["oceanStressV"], icestate["iceAreaVertex"], s["solveVelocity"], np.int32(nvs)))
+
+
+def subcycle(*, mesh: dict, boundary: dict, icestate: dict, solver: dict, variational: dict,
+             ridging: dict | None, n_subcycles: int, use_ocean_stress: bool, revised_evp: bool,
+             use_column_package: bool, dynamics_time_step: float, elastic_time_step: float,
+             stress_divergence_scheme: str = "variational"):
     """``seaice_run_velocity_solver`` from the internal stress on, at the
     precision of the arrays (``r4`` or ``r8``).
 
     ``seaice_init_evp``, the pre-subcycle routines ported here,
     ``n_subcycles`` elastic subcycles (internal stress, ocean stress
-    coefficient, velocity solve), then ``final_divergence_shear`` and
-    ``principal_stresses_driver``. The dicts carry the arrays the pieces
-    name: :func:`pre_subcycle`, :func:`velocity_update`,
-    :func:`principal_stresses` and ``evp_v842.internal_stress_variational``.
+    coefficient, velocity solve), then ``velocity_solver_post_subcycle``:
+    ``final_divergence_shear``, ``principal_stresses_driver`` and
+    ``ocean_stress_final``. The dicts carry the arrays the pieces name:
+    :func:`pre_subcycle`, :func:`velocity_update`, :func:`principal_stresses`,
+    :func:`ocean_stress_final` and ``evp_v842.internal_stress_variational``.
     Returns the device ``consts`` of ``evp_v842.init_evp``.
     """
     import cupy as cp
@@ -274,4 +344,6 @@ def subcycle(*, mesh: dict, icestate: dict, solver: dict, variational: dict, rid
     evp.final_divergence_shear_variational(mesh=mesh, solver=solver, variational=variational, ridging=ridging,
                                            use_column_package=use_column_package)
     principal_stresses(mesh=mesh, variational=variational)
+    ocean_stress_final(mesh=mesh, boundary=boundary, icestate=icestate, solver=solver,
+                       use_ocean_stress=use_ocean_stress)
     return consts

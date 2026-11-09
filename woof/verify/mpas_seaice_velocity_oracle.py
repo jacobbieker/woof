@@ -12,8 +12,11 @@ Two modes (run_subcycle.F90's header has the call lists):
 - ``full``: the whole elastic subcycle, with the variational internal stress
   between the velocity solves.
 - pieces: the pre-subcycle routines, then ``nSub`` velocity solves against a
-  fixed stress-divergence forcing, then the principal stresses. Both
-  precisions.
+  fixed stress-divergence forcing, then the principal stresses and the final
+  ocean stress. Both precisions.
+
+Both modes end with ``ocean_stress_final`` (``full`` through
+``velocity_solver_post_subcycle`` itself).
 
 The meshes and the EVP state are those of
 :mod:`woof.verify.mpas_seaice_evp_oracle` (random connectivity; the routines
@@ -38,7 +41,7 @@ FIXTURE_DIR = (Path(__file__).resolve().parents[2] / "tests" / "data"
 PRECISIONS = {"r4": np.float32, "r8": np.float64}
 
 INT_FIELDS = ("nEdgesOnCell", "verticesOnCell", "cellsOnVertex", "cellVerticesAtVertex",
-              "solveStress", "solveVelocity")
+              "solveStress", "solveVelocity", "interiorVertex")
 INPUT_REAL_FIELDS = ("dvEdge", "areaCell", "areaTriangle", "tanLatVertexRotatedOverRadius", "fVertex",
                      "icePressure", "totalMassVertex", "iceAreaVertex", "uOceanVelocityVertex",
                      "vOceanVelocityVertex", "uVelocityInitial", "vVelocityInitial", "airStressVertexU",
@@ -50,7 +53,8 @@ BASIS_FIELDS = evp_oracle.BASIS_FIELDS
 STATE_FIELDS = ("uVelocity", "vVelocity", "totalMassVertexfVertex", "oceanStressU", "oceanStressV",
                 "oceanStressCoeff", "strain11", "strain22", "strain12", "stress11", "stress22", "stress12",
                 "replacementPressure", "stressDivergenceU", "stressDivergenceV", "divergence", "shear",
-                "ridgeConvergence", "ridgeShear", "principalStress1", "principalStress2")
+                "ridgeConvergence", "ridgeShear", "principalStress1", "principalStress2",
+                "oceanStressCellU", "oceanStressCellV")
 
 #: (name, seed, nCells, maxEdges, revisedEVP, useColumnPackage, useOceanStress, full, nSub,
 #:  dynamicsTimeStep, precisions)
@@ -75,7 +79,7 @@ def _shape(name: str, d: dict) -> tuple[int, ...]:
     if name == "dvEdge":
         return (ne,)
     if name in ("nEdgesOnCell", "solveStress", "areaCell", "icePressure", "divergence", "shear",
-                "ridgeConvergence", "ridgeShear"):
+                "ridgeConvergence", "ridgeShear", "oceanStressCellU", "oceanStressCellV"):
         return (nc,)
     return (nv,)
 
@@ -95,7 +99,12 @@ def make_case(name: str, seed: int, n_cells: int, max_edges: int, revised: bool,
     - ice area from 0.01 to 1.
 
     nVerticesSolve and nCellsSolve stop short of nVertices and nCells, so the
-    halo entries must keep their words.
+    halo entries must keep their words. For ``ocean_stress_final``'s
+    vertex-to-cell interpolation, a tenth of the vertices are boundary
+    vertices (interiorVertex 0), and every vertex of a few cells is, so those
+    cells keep the plain sum (no interior area to divide by). These draws
+    come after all the others, so the other fields are those of the cases
+    before ``ocean_stress_final`` was added.
     """
     case = evp_oracle.make_case(name, seed, n_cells, max_edges, revised, use_column, 1, dynamics_dt,
                                 dtype=np.float64)
@@ -140,6 +149,13 @@ def make_case(name: str, seed: int, n_cells: int, max_edges: int, revised: bool,
         "precisions": tuple(precisions),
         "dynamicsTimeStep": float(dynamics_dt), "elasticTimeStep": float(dynamics_dt) / 120.0,
     })
+    interior = (rs.random_sample(nv) >= 0.1).astype(np.int32)
+    n_edges = case["nEdgesOnCell"]
+    for cell in (3, 11, 29):
+        interior[case["verticesOnCell"][cell, : n_edges[cell]] - 1] = 0
+    case["interiorVertex"] = interior
+    case["oceanStressCellU"] = uniform(-1.0, 1.0, nc)
+    case["oceanStressCellV"] = uniform(-1.0, 1.0, nc)
     return case
 
 
@@ -215,6 +231,7 @@ def run_gpu(case: dict, precision: str) -> dict[str, np.ndarray]:
     dev = {name: cp.asarray(np.ascontiguousarray(case[name], np.int32)) for name in INT_FIELDS}
     for name in INPUT_REAL_FIELDS + BASIS_FIELDS + STATE_FIELDS:
         dev[name] = cp.asarray(np.ascontiguousarray(case[name], dtype))
+    boundary = {"interiorVertex": dev["interiorVertex"]}
     mesh = {"nEdgesOnCell": dev["nEdgesOnCell"], "verticesOnCell": dev["verticesOnCell"],
             "cellsOnVertex": dev["cellsOnVertex"], "areaTriangle": dev["areaTriangle"],
             "dvEdge": dev["dvEdge"], "fVertex": dev["fVertex"], "vertexDegree": case["vertexDegree"],
@@ -226,7 +243,7 @@ def run_gpu(case: dict, precision: str) -> dict[str, np.ndarray]:
         "icePressure", "totalMassVertexfVertex", "oceanStressU", "oceanStressV", "oceanStressCoeff",
         "uOceanVelocityVertex", "vOceanVelocityVertex", "airStressVertexU", "airStressVertexV",
         "surfaceTiltForceU", "surfaceTiltForceV", "stressDivergenceU", "stressDivergenceV",
-        "divergence", "shear")}
+        "divergence", "shear", "oceanStressCellU", "oceanStressCellV")}
     variational = {name: dev[name] for name in (
         "strain11", "strain22", "strain12", "stress11", "stress22", "stress12", "replacementPressure",
         "principalStress1", "principalStress2", "cellVerticesAtVertex",
@@ -234,7 +251,7 @@ def run_gpu(case: dict, precision: str) -> dict[str, np.ndarray]:
     ridging = {"ridgeConvergence": dev["ridgeConvergence"], "ridgeShear": dev["ridgeShear"]}
     flags = {"use_ocean_stress": case["useOceanStress"]}
     if case["full"]:
-        consts = vel.subcycle(mesh=mesh, icestate=icestate, solver=solver, variational=variational,
+        consts = vel.subcycle(mesh=mesh, boundary=boundary, icestate=icestate, solver=solver, variational=variational,
                               ridging=ridging, n_subcycles=case["nSub"], revised_evp=case["revisedEVP"],
                               use_column_package=case["useColumnPackage"], dynamics_time_step=dt[0],
                               elastic_time_step=dt[1], **flags)
@@ -249,6 +266,7 @@ def run_gpu(case: dict, precision: str) -> dict[str, np.ndarray]:
                                 revised_evp=case["revisedEVP"], elastic_time_step=dt[1],
                                 dynamics_time_step=dt[0], **flags)
         vel.principal_stresses(mesh=mesh, variational=variational)
+        vel.ocean_stress_final(mesh=mesh, boundary=boundary, icestate=icestate, solver=solver, **flags)
     out = {"numericalInertiaCoefficient": cp.asnumpy(inertia).astype(dtype)}
     for name in STATE_FIELDS:
         out[name] = cp.asnumpy(dev[name])

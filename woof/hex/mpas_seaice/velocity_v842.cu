@@ -1,5 +1,5 @@
 // MPAS-Seaice v8.4.2: the EVP velocity solve (ocean stress, Coriolis, the
-// velocity update and the principal stresses).
+// velocity update, the principal stresses and the final ocean stress).
 //
 // A modified derivative of MPAS-Model v8.4.2 (MPAS-Dev/MPAS-Model,
 // f34984b2c89353cf31c235b08d3b4acd96b37bb3), transcribed from
@@ -11,6 +11,9 @@
 //     2593-2707 solve_velocity
 //     2721-2841 solve_velocity_revised
 //     2942-3109 principal_stresses_driver (variational), principal_stresses
+//     3123-3347 ocean_stress_final
+//   src/core_seaice/shared/mpas_seaice_mesh.F:
+//     2888-2958 seaice_interpolate_vertex_to_cell
 //   with the module constants at 31-36 and seaice_constants' density and
 //   drag (mpas_seaice_constants.F, column/constants/cice/ice_constants_colpkg.F90).
 // (Adrian K. Turner, LANL, 2013-2015). Copyright (c) 2013-2019, Los Alamos
@@ -226,4 +229,80 @@ extern "C" __global__ void seaice_principal_stresses_variational_v842(
             principalStress2[p] = SI_BIG;
         }
     }
+}
+
+// ocean_stress_final, the vertex loop (after ocean_stress_coefficient): one
+// thread per vertex. With config_use_ocean_stress, the stress on the ice per
+// unit ice area over nVerticesSolve (0 where not solved); without it, the
+// whole array (nVertices) is zeroed.
+extern "C" __global__ void seaice_ocean_stress_final_v842(
+    rk *oceanStressU, rk *oceanStressV, const rk *oceanStressCoeff, const rk *uOceanVelocityVertex,
+    const rk *vOceanVelocityVertex, const rk *uVelocity, const rk *vVelocity, const rk *iceAreaVertex,
+    const rk *fVertex, const int *solveVelocity, int useOceanStress, int nVerticesSolve, int nVertices)
+{
+    int iVertex = blockIdx.x * blockDim.x + threadIdx.x;
+    if (!useOceanStress) {
+        if (iVertex < nVertices) {
+            oceanStressU[iVertex] = (rk)0.0;
+            oceanStressV[iVertex] = (rk)0.0;
+        }
+        return;
+    }
+    if (iVertex >= nVerticesSolve) return;
+    if (solveVelocity[iVertex] == 1) {
+        const rk sgn = SI_SIGN1(fVertex[iVertex]);
+        const rk coeff = oceanStressCoeff[iVertex];
+        const rk du = S(uOceanVelocityVertex[iVertex], uVelocity[iVertex]);
+        const rk dv = S(vOceanVelocityVertex[iVertex], vVelocity[iVertex]);
+        const rk su = M(coeff, S(M(du, SI_COS_TURN), M(M(dv, SI_SIN_TURN), sgn)));
+        const rk sv = M(coeff, A(M(dv, SI_COS_TURN), M(M(du, SI_SIN_TURN), sgn)));
+        oceanStressU[iVertex] = D(su, iceAreaVertex[iVertex]);
+        oceanStressV[iVertex] = D(sv, iceAreaVertex[iVertex]);
+    } else {
+        oceanStressU[iVertex] = (rk)0.0;
+        oceanStressV[iVertex] = (rk)0.0;
+    }
+}
+
+// seaice_interpolate_vertex_to_cell: one thread per cell, over nCellsSolve.
+// The areaTriangle-weighted mean over the cell's nEdgesOnCell vertices,
+// counting interior vertices only: real(interiorVertex) is a default
+// (single) real, exactly 0 or 1 at either precision. The accumulators start
+// from 0; a cell with no interior vertex keeps the accumulated sum.
+extern "C" __global__ void seaice_interpolate_vertex_to_cell_v842(
+    rk *variableCell, const rk *variableVertex, const rk *areaTriangle, const int *interiorVertex,
+    const int *nEdgesOnCell, const int *verticesOnCell, int nCellsSolve, int maxEdges)
+{
+    int iCell = blockIdx.x * blockDim.x + threadIdx.x;
+    if (iCell >= nCellsSolve) return;
+    rk value = (rk)0.0, totalArea = (rk)0.0;
+    for (int k = 0; k < nEdgesOnCell[iCell]; ++k) {
+        const int iVertex = verticesOnCell[iCell * maxEdges + k] - 1;
+        const rk interior = (rk)(float)interiorVertex[iVertex];
+        value = A(value, M(M(areaTriangle[iVertex], variableVertex[iVertex]), interior));
+        totalArea = A(totalArea, M(areaTriangle[iVertex], interior));
+    }
+    if (totalArea > (rk)0.0) value = D(value, totalArea);
+    variableCell[iCell] = value;
+}
+
+// ocean_stress_final, after the cell interpolation: the vertex stress back
+// to per unit grid area on solved vertices (nVerticesSolve).
+extern "C" __global__ void seaice_ocean_stress_final_rescale_v842(
+    rk *oceanStressU, rk *oceanStressV, const rk *iceAreaVertex, const int *solveVelocity, int nVerticesSolve)
+{
+    int iVertex = blockIdx.x * blockDim.x + threadIdx.x;
+    if (iVertex >= nVerticesSolve || solveVelocity[iVertex] != 1) return;
+    oceanStressU[iVertex] = M(oceanStressU[iVertex], iceAreaVertex[iVertex]);
+    oceanStressV[iVertex] = M(oceanStressV[iVertex], iceAreaVertex[iVertex]);
+}
+
+// ocean_stress_final without config_use_ocean_stress: the cell stress zeroed
+// whole (nCells).
+extern "C" __global__ void seaice_zero_cell_stress_v842(rk *oceanStressCellU, rk *oceanStressCellV, int nCells)
+{
+    int iCell = blockIdx.x * blockDim.x + threadIdx.x;
+    if (iCell >= nCells) return;
+    oceanStressCellU[iCell] = (rk)0.0;
+    oceanStressCellV[iCell] = (rk)0.0;
 }

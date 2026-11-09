@@ -22,7 +22,9 @@ in `seaice_run_velocity_solver`'s order:
 2. then either whole elastic subcycles (internal stress, ocean stress
    coefficient, `solve_velocity` or `solve_velocity_revised`), or the velocity
    solve alone against a fixed stress-divergence forcing;
-3. then the final divergence/shear and the principal stresses.
+3. then `velocity_solver_post_subcycle` (the final divergence/shear, the
+   principal stresses and `ocean_stress_final`), or in the velocity-solve
+   mode the principal stresses and `ocean_stress_final`.
 
 `run_presubcycle.F90` drives the same module's `velocity_solver_pre_subcycle`
 (aggregates, masks, new-ice velocities, Hibler ice strength, air stress,
