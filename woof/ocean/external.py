@@ -84,6 +84,37 @@ class ExternalOceanCoupling:
         self.u_phy, self.v_phy, self.rho = zeros(), zeros(), zeros()
         self.uoce, self.voce = zeros(), zeros()   # WRF's UOCE/VOCE: merged onto zero
 
+    def digest_arrays(self) -> dict:
+        """The coupled state a later coupling step reads, for a state digest
+        (woof.state_digest) only -- a checkpoint still refuses the coupling:
+        this coupling's own arrays and averages, the ocean's surface (the
+        ExternalOcean interface), and the ocean's arrays, array tables and
+        counters, with those of the solver objects it holds (NEMO's traqsr
+        keeps its heat content there), each under ``external_ocean/``."""
+        import numpy as np
+
+        out = {}
+        seen = set()
+
+        def take(prefix, obj, depth=0):
+            seen.add(id(obj))
+            for name, value in sorted(vars(obj).items()):
+                if isinstance(value, (bool, int, float, np.integer, np.floating)):
+                    out[prefix + name] = np.asarray(value)
+                elif hasattr(value, "__array__") and hasattr(value, "dtype"):
+                    out[prefix + name] = value
+                elif isinstance(value, dict):
+                    for key, item in sorted(value.items()):
+                        if hasattr(item, "__array__") and hasattr(item, "dtype"):
+                            out[f"{prefix}{name}/{key}"] = item
+                elif (depth < 3 and hasattr(value, "__dict__") and id(value) not in seen
+                      and not isinstance(value, type) and not callable(value)):
+                    take(f"{prefix}{name}/", value, depth + 1)
+
+        take("external_ocean/coupling/", self)
+        take("external_ocean/ocean/surface/", self.ocean.surface)   # the interface's own
+        return out
+
     def store_input(self, sst) -> None:
         """cpl_store_input at itimestep 1: SST_INPUT = SST."""
         import cupy as cp
@@ -144,6 +175,13 @@ def attach(driver, cfg, *, latitude=None) -> None:
                          "(waves/surge couple through [ocean])")
     if latitude is None:
         raise ValueError("external ocean coupling needs the atmosphere latitude")
+    if float(getattr(cfg, "restart_interval_s", 0.0) or 0.0) > 0.0:
+        # Refused here, before the first step, rather than at the first
+        # checkpoint write (woof.io.restart._driver_manifest), an interval in.
+        raise NotImplementedError(
+            "restart checkpoints of a run coupled to an external ocean are not ported "
+            "(the ocean's state and the coupling-interval average are not "
+            "checkpointed): set restart_interval_s = 0 in [experiment]")
     if getattr(driver, "lake", None) is not None:
         raise NotImplementedError("the lake model (lakemodel = 1) under an external ocean: "
                                   "sst_update's lake lines are not wired")

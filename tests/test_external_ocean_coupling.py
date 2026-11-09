@@ -87,6 +87,20 @@ def test_restart_of_an_externally_coupled_run_is_refused():
         _driver_manifest(SimpleNamespace(external_ocean=object()))
 
 
+def test_checkpoint_intervals_are_refused_before_the_first_step(tmp_path):
+    """A coupled run with restart_interval_s > 0 is refused when the ocean is
+    attached, not an interval in at its first checkpoint write."""
+    from types import SimpleNamespace
+
+    from woof.ocean import external
+
+    toml = _toml(tmp_path, '[external_ocean]\nmodel="nemo_column"\n'
+                           'coupling_interval_seconds=60.0\nstate="s.npz"\n')
+    cfg = SimpleNamespace(ocean_config=str(toml), restart_interval_s=3600.0, dt=60.0)
+    with pytest.raises(NotImplementedError, match="restart_interval_s = 0"):
+        external.attach(SimpleNamespace(fields={}), cfg, latitude=np.zeros((2, 3)))
+
+
 @pytest.mark.gpu
 @requires_gpu
 def test_coupling_refuses_an_ocean_with_currents_and_a_ragged_interval():
@@ -175,6 +189,25 @@ def test_the_driver_runs_the_three_calls_at_wrf_places(tmp_path, monkeypatch):
         assert (f["taumod"] >= 0).all()
         assert (f["surf_net_solar"] > 0).all()        # GSW from the declared shortwave
     assert float(cp.abs(coupling.u_phy).max()) > 0     # phy_prep's lowest level, captured
+    # The run's final state digest reads the driver without the ocean; a
+    # checkpoint of it is still refused.
+    from woof.io.restart import RestartManifestError, _driver_manifest
+    assert _driver_manifest(driver, digest=True)
+    with pytest.raises(RestartManifestError, match="external ocean"):
+        _driver_manifest(driver)
+    # ... and takes the coupled state from the coupling's own inventory, so
+    # two runs that differ only in the ocean have different digests.
+    from types import SimpleNamespace
+
+    from woof.state_digest import canonical_state_digest
+    inventory = coupling.digest_arrays()
+    assert "external_ocean/coupling/sst_input" in inventory
+    assert "external_ocean/coupling/averager/elapsed" in inventory
+    assert "external_ocean/ocean/surface/sst" in inventory
+    clock = SimpleNamespace(dtbc_fp32=float(cfg.dt))
+    before = canonical_state_digest(state, clock)
+    ocean.surface.sst[...] += cp.float32(0.5)
+    assert canonical_state_digest(state, clock) != before
 
 
 @pytest.mark.gpu
@@ -218,4 +251,13 @@ def test_the_nemo_column_couples_through_the_driver_wiring(tmp_path):
         cpl.send(surf, raincv=None, rainncv=z(0.0), dt=60.0)
     cpl.receive(fields)
     assert (fields["sst"].get() < first).all()            # a cooling flux cooled the column
+    # The digest inventory reaches the state the column keeps in its solvers:
+    # traqsr's heat content feeds the next solar trend.
+    inventory = cpl.digest_arrays()
+    assert "external_ocean/coupling/ocean/qsr_solver/qsr_hc" in inventory
+    assert "external_ocean/coupling/ocean/ts" in inventory
+    from woof.state_digest import _canonical_digest_document
+    before = _canonical_digest_document(inventory, {}, "trajectory")
+    cpl.ocean.qsr_solver.qsr_hc[...] += 1.0
+    assert _canonical_digest_document(cpl.digest_arrays(), {}, "trajectory") != before
     assert AtmosphereSurface is not None
