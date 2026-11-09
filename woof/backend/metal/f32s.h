@@ -39,10 +39,97 @@ static inline float __woof_n(ulong d) { return f64_to_f32(d); }
 // operation of a large unit makes Metal's compile time explode, and these
 // run only when an operand or result is tiny.
 #define WOOF_SLOW __attribute__((noinline))
-WOOF_SLOW static float __woof_slow_add(float a, float b) { return __woof_n(f64_add(__woof_w(a), __woof_w(b))); }
-WOOF_SLOW static float __woof_slow_sub(float a, float b) { return __woof_n(f64_sub(__woof_w(a), __woof_w(b))); }
-WOOF_SLOW static float __woof_slow_mul(float a, float b) { return __woof_n(f64_mul(__woof_w(a), __woof_w(b))); }
-WOOF_SLOW static float __woof_slow_div(float a, float b) { return __woof_n(f64_div(__woof_w(a), __woof_w(b))); }
+WOOF_SLOW static float __woof_soft_add(float a, float b) { return __woof_n(f64_add(__woof_w(a), __woof_w(b))); }
+WOOF_SLOW static float __woof_soft_sub(float a, float b) { return __woof_n(f64_sub(__woof_w(a), __woof_w(b))); }
+WOOF_SLOW static float __woof_soft_mul(float a, float b) { return __woof_n(f64_mul(__woof_w(a), __woof_w(b))); }
+WOOF_SLOW static float __woof_soft_div(float a, float b) { return __woof_n(f64_div(__woof_w(a), __woof_w(b))); }
+
+// The slow paths without soft binary64 where the operands allow; each result
+// is the correctly rounded binary32 with gradual underflow, the soft path's
+// word.  Infinities, NaNs and zeros keep the soft path (and its NaN words).
+//
+// + and -: when the exact sum is below the normal range, or an operand is
+// subnormal, both operands are below 2^-100 (a nonzero sum smaller than 2^-126
+// needs both operands' ulps <= 2^-126).  Below 2^-100 an operand is an exact
+// integer count of 2^-149 under 2^50, so the sum is exact in 64-bit integers;
+// under 2^23 counts it is the subnormal itself, otherwise its conversion to
+// float rounds to nearest even once and the scaling by 2^-149 is exact.
+static inline bool __woof_f32_small(float x) {   // finite and |x| < 2^-100
+  return (as_type<uint>(x) & 0x7FFFFFFFu) < 0x0D800000u;
+}
+static inline long __woof_f32_units(float x) {   // x / 2^-149, |x| < 2^-100
+  uint u = as_type<uint>(x), e = (u >> 23) & 0xFFu, m = u & 0x7FFFFFu;
+  long v = e == 0u ? long(m) : (long(m | 0x800000u) << (e - 1u));
+  return (u >> 31) != 0u ? -v : v;
+}
+static inline float __woof_f32_from_units(long v) {
+  ulong a = v < 0 ? ulong(-v) : ulong(v);
+  uint sign = v < 0 ? 0x80000000u : 0u;
+  if (a < 0x800000ul) return as_type<float>(sign | uint(a));
+  float f = float(a) * 0x1p-100f * 0x1p-49f;
+  return as_type<float>(sign | as_type<uint>(f));
+}
+WOOF_SLOW static float __woof_slow_add(float a, float b) {
+  if (!__woof_f32_small(a) || !__woof_f32_small(b)) return __woof_soft_add(a, b);
+  long v = __woof_f32_units(a) + __woof_f32_units(b);
+  if (v == 0) return __woof_soft_add(a, b);   // a signed zero: the soft path's sign rules
+  return __woof_f32_from_units(v);
+}
+WOOF_SLOW static float __woof_slow_sub(float a, float b) {
+  if (!__woof_f32_small(a) || !__woof_f32_small(b)) return __woof_soft_sub(a, b);
+  long v = __woof_f32_units(a) - __woof_f32_units(b);
+  if (v == 0) return __woof_soft_sub(a, b);   // a signed zero: the soft path's sign rules
+  return __woof_f32_from_units(v);
+}
+
+// * and /: on the significands in [1, 2) the hardware rounds once with no
+// underflow, and fma gives the exact error (product) or remainder (quotient),
+// whose sign says where the exact value lies.  A normal result is the rounded
+// significand scaled by a power of two; a subnormal one shifts the significand
+// right, rounding to nearest even with the error as the sticky bit.
+static inline uint __woof_f32_significand(uint u, thread int& e) {   // u = |x| bits, x != 0
+  uint ex = u >> 23, m = u & 0x7FFFFFu;
+  if (ex != 0u) { e = int(ex) - 127; return m | 0x800000u; }
+  int lz = int(metal::clz(m)) - 8;
+  e = -126 - lz;
+  return m << uint(lz);
+}
+static inline float __woof_f32_place(uint sign, float p, float err, int e) {
+  uint up = as_type<uint>(p);
+  int E = e + int(up >> 23) - 127;
+  uint M = (up & 0x7FFFFFu) | 0x800000u;
+  if (E > 127) return as_type<float>(sign | 0x7F800000u);
+  if (E >= -126) return as_type<float>(sign | (uint(E + 127) << 23) | (M & 0x7FFFFFu));
+  int s = -(E + 126);
+  if (s > 25) return as_type<float>(sign);
+  uint R = M >> uint(s), rem = M & ((1u << uint(s)) - 1u), halfway = 1u << uint(s - 1);
+  if (rem > halfway || (rem == halfway && (err > 0.0f || (err == 0.0f && (R & 1u) != 0u)))) R += 1u;
+  return as_type<float>(sign | R);
+}
+static inline bool __woof_f32_ordinary(float x) {   // finite and nonzero
+  uint u = as_type<uint>(x) & 0x7FFFFFFFu;
+  return u != 0u && u < 0x7F800000u;
+}
+WOOF_SLOW static float __woof_slow_mul(float a, float b) {
+  if (!__woof_f32_ordinary(a) || !__woof_f32_ordinary(b)) return __woof_soft_mul(a, b);
+  uint ua = as_type<uint>(a), ub = as_type<uint>(b);
+  int ea, eb;
+  uint ma = __woof_f32_significand(ua & 0x7FFFFFFFu, ea), mb = __woof_f32_significand(ub & 0x7FFFFFFFu, eb);
+  float fa = as_type<float>(0x3F800000u | (ma & 0x7FFFFFu)), fb = as_type<float>(0x3F800000u | (mb & 0x7FFFFFu));
+  float p = fa * fb;
+  float err = metal::fma(fa, fb, -p);
+  return __woof_f32_place((ua ^ ub) & 0x80000000u, p, err, ea + eb);
+}
+WOOF_SLOW static float __woof_slow_div(float a, float b) {
+  if (!__woof_f32_ordinary(a) || !__woof_f32_ordinary(b)) return __woof_soft_div(a, b);
+  uint ua = as_type<uint>(a), ub = as_type<uint>(b);
+  int ea, eb;
+  uint ma = __woof_f32_significand(ua & 0x7FFFFFFFu, ea), mb = __woof_f32_significand(ub & 0x7FFFFFFFu, eb);
+  float fa = as_type<float>(0x3F800000u | (ma & 0x7FFFFFu)), fb = as_type<float>(0x3F800000u | (mb & 0x7FFFFFu));
+  float q = fa / fb;
+  float rem = metal::fma(-q, fb, fa);
+  return __woof_f32_place((ua ^ ub) & 0x80000000u, q, rem, ea - eb);
+}
 WOOF_SLOW static float __woof_slow_sqrt(float a) { return __woof_n(f64_sqrt(__woof_w(a))); }
 WOOF_SLOW static int __woof_slow_cmp(float a, float b) {  // -1, 0, 1, or 2 unordered
   ulong x = __woof_w(a), y = __woof_w(b);
