@@ -483,3 +483,97 @@ def test_a_goto_into_a_label_right_after_the_loop_that_jumps(cp):
     out = cp.zeros(N, dtype=cp.int32)
     _launch(cp, _ENTER_LAST, "enter_last", cp.asarray(x), out, np.int32(N))
     assert cp.asnumpy(out).tolist() == [_enter_last(int(v)) for v in x]
+
+
+_DIRECT = r'''
+extern "C" __global__ void direct(const int* in, int* out, int n) {
+    int c = blockIdx.x * blockDim.x + threadIdx.x;
+    if (c >= n) return;
+    int x = in[c], acc = 0;
+    for (int k = 0; k < 6; ++k) {
+        if ((x + k) % 3 == 0) goto L;
+        acc += 2;
+        if (k % 2) {
+            acc += 5;
+        }
+        goto L;
+        acc += 1000;
+    L:
+        acc += k * x;
+    }
+    out[c] = acc;
+}
+'''
+
+
+def test_an_unconditional_goto_that_is_its_blocks_statement_inside_a_loop(cp):
+    """The wrapper's flag is the loop body's: no check after the loop (it
+    named the flag out of its scope; gfdleta_co2_init, ssib)."""
+    x = np.arange(N, dtype=np.int32) % 29
+    want = []
+    for v in x:
+        acc = 0
+        for k in range(6):
+            if (int(v) + k) % 3:
+                acc += 2 + (5 if k % 2 else 0)
+            acc += k * int(v)
+        want.append(acc)
+    out = cp.zeros(N, dtype=cp.int32)
+    _launch(cp, _DIRECT, "direct", cp.asarray(x), out, np.int32(N))
+    assert cp.asnumpy(out).tolist() == want
+
+
+_RETRY_IN_IF = r'''
+extern "C" __global__ void retry_in_if(const int* in, int* out, int n) {
+    int c = blockIdx.x * blockDim.x + threadIdx.x;
+    if (c >= n) return;
+    int x = in[c], acc = 0;
+    for (int iz = 0; iz < 5; ++iz) {
+        if (iz > 0) {
+            int found = 0, izz = iz + x % 4;
+        L9009:
+            if (! (found == 0)) {
+                goto L9010;
+            }
+            if (izz > 0) {
+                acc += izz * 3 + iz;
+                if (acc % 5 == 0) found = 1;
+                --izz;
+            } else {
+                found = 1;
+            }
+            goto L9009;
+        L9010:
+            ;
+        }
+        acc += x;
+    }
+    out[c] = acc;
+}
+'''
+
+
+def test_a_backward_goto_that_is_its_blocks_statement_inside_an_if_in_a_loop(cp):
+    """f2c's DO WHILE inside an IF inside a DO (MYNN 4.7.1's mixing-length
+    search): the retry loop is the IF body's, not the DO's."""
+    x = np.arange(N, dtype=np.int32) % 23
+    want = []
+    for v in x:
+        v = int(v)
+        acc = 0
+        for iz in range(5):
+            if iz > 0:
+                found, izz = 0, iz + v % 4
+                while found == 0:
+                    if izz > 0:
+                        acc += izz * 3 + iz
+                        if acc % 5 == 0:
+                            found = 1
+                        izz -= 1
+                    else:
+                        found = 1
+            acc += v
+        want.append(acc)
+    out = cp.zeros(N, dtype=cp.int32)
+    _launch(cp, _RETRY_IN_IF, "retry_in_if", cp.asarray(x), out, np.int32(N))
+    assert cp.asnumpy(out).tolist() == want

@@ -4351,6 +4351,12 @@ def _stock_cumulus_rebuild_arrays(scheme) -> frozenset:
 # Cloud accumulators remain serialized driver fields; they are not in this object.
 _CALLABLE_REBUILD_CONTAINERS_BY_CLASS = {
     "woof.core.gfdleta.GFDLEtaRadiation": frozenset({"tables"}),
+    # A partial-depth child's radiation: the wrapped stock adapter (its
+    # classified arrays are read through the wrapper's attribute
+    # delegation) and the extended column, refilled from the child and its
+    # parent at every call.
+    "woof.core.partial_nest_physics.ExtendedColumnRadiation": frozenset(
+        {"inner", "column"}),
 }
 
 
@@ -4627,13 +4633,30 @@ def _radiation_owned_payloads(stored,driver):
     if extra:raise RestartMismatchError('checkpoint contains state for an absent radiation component: '+str(sorted(extra)))
     return result
 
-def _driver_manifest(driver, *, streaming=False, state_shape=None) -> dict[str, object]:
-    """Serialized driver arrays; enforces driver attribute coverage."""
-    if getattr(driver, "external_ocean", None) is not None:
+def _driver_manifest(driver, *, streaming=False, state_shape=None,
+                     digest=False) -> dict[str, object]:
+    """Serialized driver arrays; enforces driver attribute coverage.
+
+    ``digest``: the manifest feeds a state digest (woof.state_digest), not a
+    checkpoint, so an attached external ocean is left out of it rather than
+    refused (the digest adds it from ``ExternalOceanCoupling.digest_arrays``);
+    its coupling is what a checkpoint cannot carry."""
+    coupled = getattr(driver, "external_ocean", None) is not None
+    if coupled and not digest:
         raise RestartManifestError(
             "restart of a run coupled to an external ocean is not ported: the "
             "ocean's state and the coupling-interval average are not checkpointed")
+    # --wrf-hydro (woof.wrf_hydro_route): likewise left to the digest's own
+    # inventory and refused for a checkpoint.
+    hydro_coupled = getattr(driver, "wrf_hydro", None) is not None
+    if hydro_coupled and not digest:
+        raise RestartManifestError(
+            "restart, a checkpoint or a streamed ([tiles]) inventory of a run coupled to "
+            "WRF-Hydro (--wrf-hydro) is not ported: the routing state (routing-grid soil and "
+            "heads, channel, lakes, buckets) is not carried")
     for name in sorted(vars(driver)):
+        if (coupled and name == "external_ocean") or (hydro_coupled and name == "wrf_hydro"):
+            continue
         if (name not in DRIVER_SERIALIZED_ATTRS
                 and name not in DRIVER_REBUILT_ATTRS
                 and name not in DRIVER_CHECKPOINT_ONLY_ATTRS):

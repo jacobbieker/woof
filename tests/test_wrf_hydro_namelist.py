@@ -69,11 +69,10 @@ def test_template_with_muskingum_cunge_maps():
 
 
 @pytest.mark.parametrize("edit,word", [
-    (("rt_option = 1", "rt_option = 2"), "rt_option = 2"),
     (("GWBASESWCRT = 1", "GWBASESWCRT = 4"), "UDMP bucket"),
     (("UDMP_OPT = 0", "UDMP_OPT = 1"), "UDMAP|UDMP"),
     (("bucket_loss = 0", "bucket_loss = 1"), "bucket loss"),
-    (("sys_cpl = 1", "sys_cpl = 2"), "sys_cpl"),
+    (("sys_cpl = 1", "sys_cpl = 3"), "sys_cpl"),
 ])
 def test_unported_options_are_refused_by_name(edit, word):
     nl = _nl()
@@ -110,18 +109,20 @@ def test_lake_option_resolves_as_read_rt_nlst_does(option, route_lake, expected)
         assert "route_lake_f" not in cfg.io and "outlake" not in cfg.io
 
 
-def test_the_persistence_and_rfc_reservoirs_are_refused_by_name():
+def test_lake_option_3_carries_the_reservoir_da_settings():
     nl = _nl()
     text = _lakes(_drop_nudging(_text()), "lake_option = 3")
     for key in ("reservoir_persistence_usgs", "reservoir_persistence_usace", "reservoir_rfc_forecasts"):
         edited = text.replace(f"{key} = .FALSE.", f"{key} = .TRUE.")
         assert edited != text
-        with pytest.raises(nl.UnportedOption, match=key):
-            nl.map_hydro_nlist(nl.parse(edited))
+        cfg = nl.map_hydro_nlist(nl.parse(edited))
+        assert cfg.lake_option == 1 and cfg.reservoir[key] is True    # config.F90 :762-769
+        assert cfg.reservoir["reservoir_parameter_file"] == "./DOMAIN/persistence_parm.nc"
+    assert nl.map_hydro_nlist(nl.parse(text)).reservoir == {}           # no flag: the level pool
     # without lake_option = 3, WRF never reads &reservoir_nlist
     cfg = nl.map_hydro_nlist(nl.parse(text.replace("lake_option = 3", "lake_option = 1").replace(
         "reservoir_persistence_usgs = .FALSE.", "reservoir_persistence_usgs = .TRUE.")))
-    assert cfg.lake_option == 1
+    assert cfg.lake_option == 1 and cfg.reservoir == {}
 
 
 def test_a_reservoir_key_in_hydro_nlist_is_unknown_and_lake_option_4_is_invalid():
@@ -141,3 +142,11 @@ def test_the_2d_groundwater_model_and_its_channel_exchange_map():
         "gwChanCondConstOut = 0.0002\ngwsoilcpl = 1\nGwPreCycles = 3")))
     assert (cfg.gwbaseswcrt, cfg.gw_chan_cond_sw, cfg.gwsoilcpl, cfg.gw_pre_cycles) == (3, 1, 1, 3)
     assert (cfg.gw_chan_cond_const_in, cfg.gw_chan_cond_const_out) == (0.0001, 0.0002)
+
+
+def test_rt_option_2_maps_and_3_is_invalid():
+    nl = _nl()
+    text = _drop_nudging(_text())
+    assert nl.map_hydro_nlist(nl.parse(text.replace("rt_option = 1", "rt_option = 2"))).rt_option == 2
+    with pytest.raises(ValueError, match="rt_option = 3"):
+        nl.map_hydro_nlist(nl.parse(text.replace("rt_option = 1", "rt_option = 3")))

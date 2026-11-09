@@ -9,6 +9,15 @@ remaining step needs.
 
 ## What is in the tree
 
+Numerics: the opt-in units follow the rest of WOOF (`woof/numerics.py`).
+In the default `fast` mode the compile boundary drops their `--fmad=false`, so
+NVRTC fuses multiply-adds and results can sit a few ULP from WRF-Hydro (the
+diffusive channel's DIFFUSION does).  `strict` (`GPUWM_NUMERICS=strict` or
+`GPUWM_WRF_EXACT=1`, which the test battery's conftest sets) keeps the
+no-contraction request, and every WRF-Hydro and NEMO parity test's bitwise
+claim holds there.
+
+
 | Piece | Source | Where | Gate |
 | --- | --- | --- | --- |
 | Noah LSM built with `-DWRF_HYDRO`: ponded head `sfcheadrt` in; infiltration excess `infxsrt` and soil drainage `soldrain` out; the NDHMS edits to SMFLX, SRT and SSTEP | WRF 4.7.1 `phys/module_sf_noahdrv.F`, `phys/module_sf_noahlsm.F` (public domain; byte-identical to 4.6.1's) | `launch_noah(wrf_hydro=...)` -> `noah_column_hydro` (`woof/core/kernels/noah.cu`) | `tests/test_noah_wrf_hydro_parity.py`: 0 ULP in every field on CUDA (sm_86) and Metal (M3 Max), default and strict numerics |
@@ -133,23 +142,73 @@ Metal, and refuses what it does not port by name.
    name: Hooghoudt tile drainage with WRF-Hydro's water table
    (`opt_tdrn = 2`, ZWATBLE2D -> WATBLED) and the staged column path.
 3. **The coupling driver** `hydro/CPL/WRF_cpl/module_wrf_HYDRO.F90` and
-   `HYDRO_drv/module_HYDRO_drv.F90`: `aggregate`/`disaggregate` between the
-   LSM grid and the routing grid (`AGGFACTRT`) are **done** in the opt-in
+   `HYDRO_drv/module_HYDRO_drv.F90`: **done**.  `aggregate`/`disaggregate`
+   between the LSM grid and the routing grid (`AGGFACTRT`) are in the opt-in
    (`woof_wrf_hydro.grid_transform`, `tests/test_wrf_hydro_grid_transform_parity.py`);
-   the `HYDRO_dt` cadence and the WRF-side field hand-back remain.
+   HYDRO_ini (Fulldom_hires.nc, hydro2dtbl.nc, CHANPARM.TBL, LAKEPARM.nc,
+   GWBASINS.nc, GWBUCKPARM.nc read with netCDF4; the gridded network,
+   slopes, retention, lakes and buckets derived as WRF-Hydro does) and
+   `wrf_cpl_HYDRO`/`HYDRO_exe` are `woof_wrf_hydro.routing_domain` and
+   `woof_wrf_hydro.coupled`, graded against WRF 4.7.1's own `wrf_cpl_HYDRO`
+   over the whole hydro/ tree compiled with MPP_LAND
+   (`oracle/build_coupled.sh`, `tests/test_wrf_hydro_coupled_parity.py`:
+   HYDRO_ini's network and terrain and four coupling cycles bitwise, strict
+   numerics).  The forecast route reaches it through `woof.wrf_hydro_route`
+   (default build, imports nothing from the opt-in unless asked):
+   `--wrf-hydro HYDRO.NAMELIST` on `woof run`/`woof go` or a `[wrf_hydro]`
+   table; after every LSM call (`HYDRO_dt = DTBL`) the routing reads SMOIS,
+   SH2O, INFXSRT, SOLDRAIN and returns SMOIS, SH2O, SFCHEADRT, which the
+   next Noah or Noah-MP call reads through its WRF_HYDRO hooks.  Output:
+   `frxst_pts_out.txt`, CHRTOUT- and RTOUT-like NetCDF files, and SFCHEADRT,
+   INFXSRT, SOLDRAIN in history.  GWBASESWCRT = 3 (the 2-D aquifer, read
+   from `gwhires.nc`, coupled to the soil and the channel) runs in the
+   coupled driver with AGGFACTRT = 1 and is graded by the coupled oracle's
+   gw2d variant; WRF 4.7.1 itself faults in HYDRO_ini's get_basn_area for
+   any GWBASESWCRT > 0 that is not the bucket (it writes the unallocated
+   basns_area), so the oracle harness stands in zero-length bucket arrays
+   first, and readGW2d reads only an IX x JX corner of each field under
+   MPP_LAND when AGGFACTRT > 1, which is refused.  Route_Link reaches
+   (channel_option 1 Muskingum and 2 Muskingum-Cunge, UDMP_OPT = 0) run in
+   the coupled driver: Route_Link.nc and Fulldom's LINKID as the one-process
+   MPP_LAND build reads them (link ids index a node-sized buffer, so they
+   must not exceed the node count; lateral inflow reaches its reach through
+   LLINKIDINDX), nhdLakeMap's lake outlet, internal and inflow reaches, and
+   level-pool or pass-through lakes on the outlet reaches; the coupled
+   oracle's reach and musk variants grade them.  WRF 4.7.1's
+   SUBMUSKINGCUNGE computes a dry reach's QLOSS from values it never set
+   (the previous call's stack), so a dry reach's QLOSS is not graded.
+   Refused by name: UDMP_OPT = 1 (the NWM user-defined mapping and
+   drive_CHANNEL_RSL), lake_option 3 with Route_Link reaches, compound
+   channels, IMPERV_ADJ, routing restarts and checkpoints, more than one domain, Noah
+   with urban physics, NextGen (`--hydro`) at the same time.  Two WRF 4.7.1
+   facts the coupled run follows: ZSOIL8 is WRF's ZS (the layer centres,
+   module_wrf_HYDRO.F90 :94-99), not the namelist's; read_rt_nlst opens
+   `namelist.hrldas` even when coupled to WRF (config.F90 :724), so a
+   WRF+WRF-Hydro run directory needs one (WOOF does not read it).
+   `tests/test_wrf_hydro_coupled_forecast.py` runs short Noah and Noah-MP
+   forecasts through the driver with a per-cycle water-budget check, and
+   checks that a run without the table calls the LSM exactly as before.
 4. **Routing**, in this order, each from the pinned WRF-Hydro source with its
    own oracle: subsurface (`Routing/Noah_distr_routing_subsurface.F90`,
    **done** in the opt-in), overland (`Routing/Overland/`,
    `Noah_distr_routing_overland.F90`: **done** in the opt-in for
-   rt_option = 1, `tests/test_wrf_hydro_overland_parity.py`), channel (`Routing/module_channel_routing.F90`:
+   rt_option = 1 and 2 (ROUTE_OVERLAND2; the subsurface routes with
+   ROUTE_SUBSURFACE1 for both, as WRF-Hydro hard-codes),
+   `tests/test_wrf_hydro_overland_parity.py`), channel (`Routing/module_channel_routing.F90`:
    Muskingum and Muskingum-Cunge reach routing **done** in the opt-in, with
    4.7.0's reservoir reaches (TYPEL = 1 routes its lake through the
    reservoir; TYPEL = 2 is not committed), `tests/test_wrf_hydro_channel_parity.py`;
    the diffusive wave on nodes, channel_option 3, **done** in the opt-in with
    level-pool lakes (`Reservoirs/Level_Pool/`, lake_option 1, and 4.7.0's
    pass-through, lake_option 2), both compiled as WRF-Hydro always is, with
-   MPP_LAND, on one process, `tests/test_wrf_hydro_diffusive_parity.py`; the
-   persistence and RFC-forecast reservoirs, lake_option 3, remain), then the bucket baseflow (`module_GW_baseflow.F90`
+   MPP_LAND, on one process, `tests/test_wrf_hydro_diffusive_parity.py`; lake_option 3's
+   persistence/level-pool hybrid (USGS type 2, USACE type 3) and RFC-forecast
+   reservoirs (types 4 and 5), with their timeslice and RFC time-series
+   readers on the host, are **done** in the opt-in (`woof_wrf_hydro.reservoir_da`,
+   run inside the diffusive channel's lake loop): `tests/test_wrf_hydro_reservoir_da_parity.py`
+   grades 900 calls of five lakes against Reservoirs/ compiled whole
+   (`oracle/build_reservoir_da.sh`), and the coupled oracle's lake_option 3
+   variant grades the hybrid inside HYDRO_exe), then the bucket baseflow (`module_GW_baseflow.F90`
    simp_gw_buck, GWBASESWCRT 1 and 2: **done** in the opt-in,
    `tests/test_wrf_hydro_baseflow_parity.py`; the 2-D groundwater model,
    GWBASESWCRT 3 (`module_gw_gw2d.F90`: gw2d_ini, gwstep's ADI sweeps as
@@ -161,7 +220,7 @@ Metal, and refuses what it does not port by name.
 5. **Configuration** (**done** in the opt-in: `woof_wrf_hydro.namelist`,
    `tests/test_wrf_hydro_namelist.py`, held to WRF 4.7.1's template and
    read_rt_nlst): `hydro.namelist` (`SUBRTSWCRT`, `OVRTSWCRT`,
-   `CHANRTSWCRT`, `channel_option`, `rt_option`, `GWBASESWCRT`, `lake_option`, `DXRT`,
+   `CHANRTSWCRT`, `channel_option`, `rt_option` (1 and 2), `GWBASESWCRT`, `lake_option`, `DXRT`,
    `AGGFACTRT`, `DTRT_TER`, `DTRT_CH`) mapped to a WOOF table, every unported
    value refused by name.  Until step 4 lands there is nothing to route to:
    `launch_noah(wrf_hydro=...)` is an API for the coupling, not a model run.

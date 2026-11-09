@@ -1,5 +1,5 @@
 ! ==================================================================================================
-! run_vegprecip -- bitwise oracle driver for WRF v4.6.1 Noah-MP PHENOLOGY and PRECIP_HEAT.
+! run_vegprecip -- bitwise oracle driver for WRF v4.7.1 Noah-MP PHENOLOGY and PRECIP_HEAT.
 !
 ! Reads one case per line from stdin.  Every REAL is transported as an 8-digit
 ! hexadecimal IEEE-754 binary32 word so that no decimal rounding can sit between

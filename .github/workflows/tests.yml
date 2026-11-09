@@ -137,8 +137,13 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: ${{ steps.workspaces.outputs.list }}
+          # v1: the v0 entries for this Cargo.lock were saved empty by the
+          # failed 1.1.6 builds (cache-on-failure), and an existing key is
+          # never re-saved, so every native build and publish ran cold
+          # (about 60 min on macOS).  A failed build no longer saves.
+          prefix-key: v1-rust
           shared-key: native-linux
-          cache-on-failure: true
+          cache-on-failure: false
           save-if: ${{ github.event_name == 'push' }}
       - name: cargo build --release --locked --offline (every build-native workspace)
         run: python .github/ci/build_native.py build
@@ -250,8 +255,13 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: ${{ steps.workspaces.outputs.list }}
+          # v1: the v0 entries for this Cargo.lock were saved empty by the
+          # failed 1.1.6 builds (cache-on-failure), and an existing key is
+          # never re-saved, so every native build and publish ran cold
+          # (about 60 min on macOS).  A failed build no longer saves.
+          prefix-key: v1-rust
           shared-key: native-macos
-          cache-on-failure: true
+          cache-on-failure: false
           save-if: ${{ github.event_name == 'push' }}
       - name: cargo build --release --locked --offline (every build-native workspace)
         run: python .github/ci/build_native.py build

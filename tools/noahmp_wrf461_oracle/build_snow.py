@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build and run the Noah-MP snow-leaf oracle against pinned WRF v4.6.1.
+"""Build and run the Noah-MP snow-leaf oracle against pinned WRF v4.7.1.
 
 Written in Python rather than shell on purpose: this repository has
 ``core.autocrlf=true`` and no ``*.sh text eol=lf`` attribute, so a checked-out
@@ -143,12 +143,13 @@ def main(argv: list[str]) -> int:
 
     # 1. pinned identity
     digest = sha256_file(pristine)
-    if digest != vis.PRISTINE_SHA256:
+    if digest not in vis.PRISTINE_SHA256:
         raise SystemExit(
             f"module_sf_noahmplsm.F is not the pinned file\n"
             f"  expected {vis.PRISTINE_SHA256}\n  got      {digest}"
         )
-    print(f"[1] pristine module_sf_noahmplsm.F sha256 {digest}")
+    tree = vis.tree_for_lsm_digest(digest)
+    print(f"[1] pristine module_sf_noahmplsm.F sha256 {digest} ({tree})")
 
     # 2. accessibility lift, textual proof
     patched_path = build_dir / "module_sf_noahmplsm.patched.F"
@@ -195,8 +196,8 @@ def main(argv: list[str]) -> int:
     sums = build_dir / "snow-oracle-sha256sums.txt"
     lines = []
     for label, path in [
-        ("phys/module_sf_noahmplsm.F", pristine),
-        ("phys/module_sf_gecros.F", gecros),
+        (f"<{tree}-tree>/phys/module_sf_noahmplsm.F", pristine),
+        (f"<{tree}-tree>/phys/module_sf_gecros.F", gecros),
         ("tools/noahmp_wrf461_oracle/snow_visibility_patch.py", HERE / "snow_visibility_patch.py"),
         ("tools/noahmp_wrf461_oracle/stub_wrf_snow.F90", HERE / "stub_wrf_snow.F90"),
         ("tools/noahmp_wrf461_oracle/run_snow.F90", HERE / "run_snow.F90"),
@@ -207,6 +208,7 @@ def main(argv: list[str]) -> int:
     ]:
         lines.append(f"{sha256_file(path)}  {label}")
     lines.append(f"{obj_digest}  module_sf_noahmplsm.o (pristine == patched)")
+    lines.append(f"{vis.TREES[tree]['noahmp_commit']}  <{tree}-tree>/phys/noahmp (submodule commit)")
     cc = subprocess.run(["gfortran", "--version"], capture_output=True, text=True)
     lines.append(cc.stdout.splitlines()[0])
     sums.write_text("\n".join(lines) + "\n")

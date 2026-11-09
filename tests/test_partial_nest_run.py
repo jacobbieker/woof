@@ -105,10 +105,20 @@ def test_unsupported_configurations_are_refused_by_name(monkeypatch):
         validate_partial_nest(_band(), dataclasses.replace(cfg, cu_physics=1), coord)
     assert validate_partial_nest(_band(), dataclasses.replace(cfg, cu_physics=1), coord,
                                  interface_height_m=12500.0) == _band()
+    damp3 = dataclasses.replace(cfg, damp_opt=3)
     with pytest.raises(PartialNestRefused, match="damp_opt=3"):
-        validate_partial_nest(_band(), dataclasses.replace(cfg, damp_opt=3), coord)
-    with pytest.raises(PartialNestRefused, match="map factors"):
-        validate_partial_nest(_band(), cfg, coord, has_msf=True)
+        validate_partial_nest(_band(), damp3, coord)
+    # A damp_opt=3 parent whose layer lies above the interface is carried
+    # (its child runs without the layer); one reaching the interface is not.
+    assert validate_partial_nest(_band(), damp3, coord, interface_top_m=6000.0,
+                                 damping_floor_m=15000.0) == _band()
+    with pytest.raises(PartialNestRefused, match="damping layer reaches"):
+        validate_partial_nest(_band(), damp3, coord, interface_top_m=6000.0,
+                              damping_floor_m=5000.0)
+    from woof.core.partial_nest import child_damp_opt
+    assert child_damp_opt(damp3) == 0 and child_damp_opt(cfg) == int(cfg.damp_opt)
+    # Map factors are carried (partial_nest_run, "Map factors").
+    assert validate_partial_nest(_band(), cfg, coord, has_msf=True) == _band()
     with pytest.raises(PartialNestRefused, match="validate_band_chain"):
         validate_partial_nest([_band(), _band()], cfg, coord)
     with pytest.raises(PartialNestRefused, match="phi is not fed back"):

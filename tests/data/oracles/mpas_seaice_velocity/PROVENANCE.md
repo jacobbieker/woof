@@ -37,7 +37,9 @@ its pieces cases now take float64 EVP state. `oracle-r4.npz` kept the same words
   fixed stress-divergence forcing). The framework stand-ins (`stubs.F90`)
   look fields up by name and do no arithmetic. The halo exchanges, mesh
   interpolation, weak-form solver and column-package routines stop by name if
-  reached.
+  reached. (Since 2026-11-09 build.sh compiles `seaice_mesh`'s interpolation
+  routines verbatim instead of a stand-in, for the pre-subcycle oracle; the
+  rebuilt fixture is word-identical.)
 
 ## Files
 

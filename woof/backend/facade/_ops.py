@@ -16,7 +16,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from woof.backend.facade._array import ndarray, storage_mx_dtype, to_storage_values
+from woof.backend.facade._array import (ndarray, on_host, storage_mx_dtype, to_storage_values,
+                                        values_shape)
 
 
 def _mx():
@@ -46,7 +47,7 @@ def scalar_values(value, dtype):
             raise ValueError(f"a fill value must be a scalar; got shape {value.shape}")
         value = value.get().reshape(())
     host = np.asarray(value, dtype=dtype)
-    return to_storage_values(host).reshape(())
+    return to_storage_values(host).reshape(values_shape((), dtype))
 
 
 def operand_values(value, dtype):
@@ -60,7 +61,7 @@ def operand_values(value, dtype):
     host = np.asarray(value)
     if host.dtype != dtype:
         host = host.astype(dtype)
-    return to_storage_values(host).reshape(host.shape)
+    return to_storage_values(host).reshape(values_shape(host.shape, dtype))
 
 
 def _wrap(values, dtype, *, fresh: bool = False) -> ndarray:
@@ -68,6 +69,8 @@ def _wrap(values, dtype, *, fresh: bool = False) -> ndarray:
     storage; ``fresh`` when ``values`` was just computed (no copy needed)."""
     from woof.backend.facade._array import Storage
     shape = tuple(values.shape)
+    if np.dtype(dtype) == np.complex128:
+        shape = shape[:-1]          # (the word pairs' trailing axis)
     return ndarray(shape, dtype, _storage=Storage(values.astype(storage_mx_dtype(dtype)), dtype,
                                                   fresh=fresh))
 
@@ -76,7 +79,8 @@ def from_host(host: np.ndarray) -> ndarray:
     # (np.ascontiguousarray promotes a 0-d array to 1-d: keep the scalar shape)
     host = np.require(np.asarray(host), requirements="C")
     if host.dtype == np.float64 or host.dtype.kind in "biufc?":
-        return _wrap(to_storage_values(host).reshape(host.shape), host.dtype, fresh=True)
+        return _wrap(to_storage_values(host).reshape(values_shape(host.shape, host.dtype)), host.dtype,
+                     fresh=True)
     raise TypeError(f"the mlx backend cannot hold dtype {host.dtype}")
 
 
@@ -107,7 +111,8 @@ def full(shape, fill_value, dtype=None, order="C"):
     shape = (int(shape),) if isinstance(shape, (int, np.integer)) else tuple(int(n) for n in shape)
     if order == "F" and len(shape) > 1:
         return full(tuple(reversed(shape)), fill_value, dtype).transpose()
-    return _wrap(mx.broadcast_to(scalar_values(fill_value, dtype), shape), np.dtype(dtype), fresh=True)
+    return _wrap(mx.broadcast_to(scalar_values(fill_value, dtype), values_shape(shape, dtype)),
+                 np.dtype(dtype), fresh=True)
 
 
 def _like(a, dtype, shape, order="K"):
@@ -212,12 +217,15 @@ def astype(a: ndarray, dtype) -> ndarray:
         return astype(a.transpose(), dtype).transpose()
     mx = _mx()
     dtype = np.dtype(dtype)
-    if a.dtype == np.float64 or dtype == np.float64:
+    if on_host(a.dtype) or on_host(dtype):
         return from_host(a.get().astype(dtype))
     return _wrap(a._values().astype(storage_mx_dtype(dtype)), dtype)
 
 
 def copyto(dst, src, casting="same_kind", where=None):
+    from woof.backend.facade import _capture
+    if _capture.defer(copyto, dst, src, casting=casting, where=where):
+        return
     if where is not None:
         src = where_(where, src, dst)
     dst._write(operand_values(src, dst.dtype))
@@ -326,6 +334,11 @@ def _subnormal_arith(np_name, a, b):
 
 
 def _apply(np_name, mx_name, *args, out=None, dtype=None, result_dtype=None):
+    if out is not None:
+        from woof.backend.facade import _capture
+        if _capture.defer(_apply, np_name, mx_name, *args, out=out, dtype=dtype,
+                          result_dtype=result_dtype):
+            return out
     hints = [_dtype_hint(x) for x in args]
     if result_dtype is None:
         try:
@@ -335,8 +348,8 @@ def _apply(np_name, mx_name, *args, out=None, dtype=None, result_dtype=None):
                                             for h in hints])
     if dtype is not None:
         result_dtype = np.dtype(dtype)
-    involves_f64 = (np.dtype(result_dtype) == np.float64
-                    or any(isinstance(h, np.dtype) and h == np.float64 for h in hints))
+    involves_f64 = (on_host(np.dtype(result_dtype))
+                    or any(on_host(h) for h in hints))
     mx = _mx()
     if (not involves_f64 and _keeps_subnormals()
             and ((np_name in _SUBNORMAL_ARITH or np_name in _SUBNORMAL_EXPR
@@ -488,7 +501,7 @@ def where_(cond, x=None, y=None):
         return tuple(from_host(i) for i in np.nonzero(_host(cond)))
     result_dtype = np.result_type(_dtype_hint(x), _dtype_hint(y))
     mx = _mx()
-    if result_dtype == np.float64:
+    if on_host(result_dtype):
         return from_host(np.where(_host(cond), _host(x), _host(y)))
     c = operand_values(cond, np.bool_)
     xv = operand_values(x, result_dtype)
@@ -513,7 +526,7 @@ def clip(a, a_min, a_max, out=None):
 def _reduce(np_name, mx_name, a, axis=None, dtype=None, out=None, keepdims=False, **_):
     a = asarray(a)
     mx = _mx()
-    if a.dtype == np.float64 or (dtype is not None and np.dtype(dtype) == np.float64) or mx_name is None:
+    if on_host(a.dtype) or (dtype is not None and on_host(np.dtype(dtype))) or mx_name is None:
         host = getattr(np, np_name)(a.get(), axis=axis, keepdims=keepdims,
                                     **({"dtype": dtype} if dtype is not None else {}))
         r = from_host(np.asarray(host))
@@ -570,7 +583,7 @@ def argmin(a, axis=None):
 def concatenate(arrays, axis=0, out=None, dtype=None):
     arrays = [asarray(x) for x in arrays]
     rdt = np.result_type(*[x.dtype for x in arrays]) if dtype is None else np.dtype(dtype)
-    if rdt == np.float64:
+    if on_host(rdt):
         r = from_host(np.concatenate([x.get() for x in arrays], axis=axis).astype(rdt))
     else:
         mx = _mx()
@@ -584,7 +597,7 @@ def concatenate(arrays, axis=0, out=None, dtype=None):
 def stack(arrays, axis=0, out=None):
     arrays = [asarray(x) for x in arrays]
     rdt = np.result_type(*[x.dtype for x in arrays])
-    if rdt == np.float64:
+    if on_host(rdt):
         r = from_host(np.stack([x.get() for x in arrays], axis=axis))
     else:
         mx = _mx()
@@ -618,6 +631,9 @@ def _inplace(name):
     fn = UFUNCS[name]
 
     def method(self, other):
+        from woof.backend.facade import _capture
+        if _capture.defer(method, self, other):
+            return self
         self._write(operand_values(fn(self, other), self.dtype))
         return self
     return method

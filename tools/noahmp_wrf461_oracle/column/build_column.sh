@@ -1,12 +1,13 @@
 #!/bin/sh
-# Build the WRF v4.6.1 Noah-MP column oracle (run_column) against the
+# Build the WRF v4.7.1 Noah-MP column oracle (run_column) against the
 # pristine pinned sources, CPU only.
 #
 # Usage:  build_column.sh <wrf-tree> <workdir> [optlevel]
 #
-#   <wrf-tree>  pristine WRF v4.6.1 checkout
-#               (commit d66e442fccc04111067e29274c9f9eaccc3cef28, submodule
-#               phys/noahmp at 848f54a)
+#   <wrf-tree>  pristine WRF v4.7.1 checkout
+#               (commit f52c197ed39d12e087d02c50f412d90d418f6186, submodule
+#               phys/noahmp at e5c0859), or the v4.6.1 tree (d66e442f,
+#               phys/noahmp at 848f54ad); see ../noahmp_pins.sh
 #   <workdir>   build directory (created if absent)
 #   [optlevel]  "noopt" (default): -O0, the fixture.  Scalar libm only, no
 #                      vector math library, no FP contraction on x86-64.
@@ -24,9 +25,9 @@ OPTLEVEL=${3:-noopt}
 HERE=$(cd "$(dirname "$0")" && pwd)
 ORACLE=$(cd "$HERE/.." && pwd)
 
-PRISTINE_LSM_SHA=bd592a5b7db29000e715250e3a7c779ffb5e0dcc356f6b5a7d9e1c9f69c55282
-PRISTINE_DRV_SHA=9010a757da994ed8796c63ca97da354eaf60c5c732df4ea9acad5bc62a973890
-PRISTINE_GLA_SHA=bf94f3522c3b9c2c9cfbb34fa7e485ff58519106db434520968793409a520579
+# Either pinned tree (../noahmp_pins.sh); driver and glacier module must
+# come from the same one.
+. "$ORACLE/noahmp_pins.sh"
 
 case "$OPTLEVEL" in
   noopt) FCOPTIM="-O0" ;;
@@ -49,6 +50,7 @@ check() {
   fi
   echo "[1] pristine $(basename "$1") sha256 $got"
 }
+noahmp_pins "$LSM"
 check "$LSM" "$PRISTINE_LSM_SHA"
 check "$DRV" "$PRISTINE_DRV_SHA"
 check "$GLA" "$PRISTINE_GLA_SHA"
@@ -76,7 +78,7 @@ gfortran -o run_column run_column.o module_sf_noahmpdrv.o \
          stub_wrf.o -lm
 echo "[2] built $WORK/run_column (optlevel=$OPTLEVEL, FCOPTIM='$FCOPTIM')"
 
-# WRF 4.6.1's own tables (phys/noahmp/parameters/MPTABLE.TBL, run/SOILPARM.TBL,
+# WRF 4.7.1's own tables (phys/noahmp/parameters/MPTABLE.TBL, run/SOILPARM.TBL,
 # run/GENPARM.TBL), which are byte-identical to WOOF's packaged copies.
 cp "$NMP/parameters/MPTABLE.TBL" "$WRF_TREE/run/SOILPARM.TBL" \
    "$WRF_TREE/run/GENPARM.TBL" .

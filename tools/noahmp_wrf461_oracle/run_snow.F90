@@ -1,4 +1,4 @@
-! Per-leaf oracle for the Noah-MP snowpack layer routines of WRF v4.6.1
+! Per-leaf oracle for the Noah-MP snowpack layer routines of WRF v4.7.1
 ! MODULE_SF_NOAHMPLSM: SNOWFALL, COMPACT, COMBINE, DIVIDE, COMBO, SNOWH2O and
 ! their driver SNOWWATER.
 !

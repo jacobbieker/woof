@@ -15,6 +15,7 @@ Arrays are :class:`woof.backend.facade._array.ndarray`; raw kernels
 from __future__ import annotations
 
 import builtins
+import sys
 import types
 
 import numpy as np
@@ -30,6 +31,9 @@ from woof.backend.facade._ops import (  # noqa: F401  -- the public surface
 
 __woof_facade__ = True
 __version__ = "14.0.0+woof.facade"
+#: Bytes in the largest one-dimensional uint8 allocation (woof sizes
+#: scratch pools with it; MLX sizes an array with int32).
+MAX_ALLOCATION_BYTES = 2**31 - 1
 
 _kind: str | None = None
 
@@ -220,6 +224,9 @@ def _on_host(np_fn):
         def up(r):
             if isinstance(r, np.ndarray):
                 return asarray(r)
+            if isinstance(r, tuple) and hasattr(r, "_fields"):
+                # NumPy 2's named results (linalg.eigh's EighResult, ...)
+                return type(r)(*(up(y) for y in r))
             if isinstance(r, (list, tuple)):
                 return type(r)(up(y) for y in r)
             return r
@@ -232,7 +239,8 @@ def _on_host(np_fn):
 for _name in ("eye", "identity", "broadcast_arrays", "bincount", "interp", "gradient", "cross",
               "diagonal", "isin", "lexsort", "unravel_index", "ravel_multi_index", "take_along_axis",
               "outer", "matmul", "nan_to_num", "packbits", "unpackbits", "fromfile", "load", "tril",
-              "triu", "histogram", "digitize", "einsum", "trapz" if hasattr(np, "trapz") else "trapezoid"):
+              "triu", "histogram", "digitize", "einsum", "trapz" if hasattr(np, "trapz") else "trapezoid",
+              "argwhere", "divmod", "angle"):
     globals()[_name] = _on_host(getattr(np, _name))
 broadcast_shapes = np.broadcast_shapes
 
@@ -294,14 +302,95 @@ def clear_memo():
 
 # FFTs: NumPy's pocketfft on the host -- a recorded delta against cuFFT
 # (DA perturbations, stochastic patterns), never a parity claim.
-fft = types.SimpleNamespace(**{n: _on_host(getattr(np.fft, n)) for n in (
+def _fft_on_host(np_fn):
+    """A ``cupy.fft`` transform on the host.  Inside a CUDA-graph capture
+    (spectral nudging's captured operator) it is recorded as a host step:
+    its result array is allocated once, now, and each replay rewrites it
+    from the input's values at that point, as CUDA's graph reruns the
+    cuFFT node into its graph-owned output."""
+    eager = _on_host(np_fn)
+
+    def fn(a, *args, **kwargs):
+        from woof.backend.facade import _capture
+        if _capture.recording() is None or not isinstance(a, ndarray):
+            return eager(a, *args, **kwargs)
+        if builtins.any(isinstance(x, ndarray) for x in (*args, *kwargs.values())):
+            _capture.refuse(f"cupy.fft.{np_fn.__name__} with array arguments past the input")
+            return eager(a, *args, **kwargs)
+        like = np_fn(np.zeros(a.shape, a.dtype), *args, **kwargs)
+        with _capture.suspended():
+            out = empty(like.shape, like.dtype)
+        _capture.defer(lambda: out.set(np.asarray(np_fn(a.get(), *args, **kwargs))))
+        return out
+    fn.__name__ = np_fn.__name__
+    fn.__doc__ = eager.__doc__
+    return fn
+
+
+fft = types.ModuleType("cupy.fft")
+fft.__dict__.update({n: _fft_on_host(getattr(np.fft, n)) for n in (
     "fft", "ifft", "rfft", "irfft", "fft2", "ifft2", "rfft2", "irfft2", "fftn", "ifftn", "rfftn",
     "irfftn", "hfft", "ihfft")})
+fft.__path__ = []
 fft.fftfreq, fft.rfftfreq = _on_host(np.fft.fftfreq), _on_host(np.fft.rfftfreq)
 fft.fftshift, fft.ifftshift = _on_host(np.fft.fftshift), _on_host(np.fft.ifftshift)
 fft.config = types.SimpleNamespace(enable_nd_planning=False, get_plan_cache=lambda: None)
+# cuFFT plans (stochastic patterns' workspace probe, DA perturbations)
+fft._fft = types.ModuleType("cupy.fft._fft")
+fft._fft._get_cufft_plan_nd = lambda *a, **k: _cufft().get_cufft_plan_nd(*a, **k)
+
+
+def _cufft():
+    from woof.backend.facade import cufft
+    return cufft
 
 # cupy.testing: NumPy's assertions on host copies
+class _RandomState:
+    """``cupy.random.RandomState`` with NumPy's generator on the host: the
+    draws are uploaded (CuPy's cuRAND streams differ anyway, so no CUDA
+    reproduction is lost; seeded draws repeat run to run)."""
+
+    def __init__(self, seed=None):
+        self._rs = np.random.RandomState(seed)
+
+    def seed(self, seed=None):
+        self._rs.seed(seed)
+
+    @staticmethod
+    def _up(values, dtype):
+        return asarray(np.asarray(values).astype(dtype if dtype is not None else np.float64, copy=False))
+
+    def random_sample(self, size=None, dtype=float):
+        return self._up(self._rs.random_sample(size), dtype)
+
+    random = random_sample
+
+    def rand(self, *size, dtype=float):
+        return self._up(self._rs.random_sample(size or None), dtype)
+
+    def randn(self, *size, dtype=float):
+        return self._up(self._rs.standard_normal(size or None), dtype)
+
+    def standard_normal(self, size=None, dtype=float):
+        return self._up(self._rs.standard_normal(size), dtype)
+
+    def uniform(self, low=0.0, high=1.0, size=None, dtype=float):
+        return self._up(self._rs.uniform(low, high, size), dtype)
+
+    def normal(self, loc=0.0, scale=1.0, size=None, dtype=float):
+        return self._up(self._rs.normal(loc, scale, size), dtype)
+
+    def randint(self, low, high=None, size=None, dtype=int):
+        return asarray(self._rs.randint(low, high, size).astype(dtype))
+
+
+_GLOBAL_RANDOM = _RandomState()
+random = types.SimpleNamespace(
+    RandomState=_RandomState, seed=_GLOBAL_RANDOM.seed,
+    **{n: getattr(_GLOBAL_RANDOM, n) for n in ("random_sample", "random", "rand", "randn",
+                                               "standard_normal", "uniform", "normal", "randint")})
+
+
 def _testing_on_host(fn):
     def check(*args, **kwargs):
         return fn(*[asnumpy(a) if isinstance(a, ndarray) else a for a in args], **kwargs)
@@ -404,7 +493,78 @@ def _module(name, **attrs):
     return m
 
 
+class _HostSparse:
+    """``cupyx.scipy.sparse``'s compressed matrices, held by SciPy on the
+    host: built from facade or host arrays, and ``A @ x`` / ``A.dot(x)`` on
+    a facade array returns a facade array (the hex moving ocean and wave
+    remaps).  The product runs on the host, as the facade's other SciPy
+    calls do."""
+
+    _kind = "csr_matrix"
+
+    def __init__(self, arg, shape=None, dtype=None, copy=False):
+        import scipy.sparse as sp
+
+        def down(x):
+            if isinstance(x, ndarray):
+                return asnumpy(x)
+            if isinstance(x, (list, tuple)):
+                return type(x)(down(y) for y in x)
+            return x._m if isinstance(x, _HostSparse) else x
+        self._m = getattr(sp, self._kind)(down(arg), shape=shape, dtype=dtype, copy=copy)
+
+    shape = property(lambda self: self._m.shape)
+    dtype = property(lambda self: self._m.dtype)
+    nnz = property(lambda self: self._m.nnz)
+
+    def dot(self, other):
+        if isinstance(other, _HostSparse):
+            out = type(self).__new__(type(self))
+            out._m = self._m @ other._m
+            return out
+        host = asnumpy(other) if isinstance(other, ndarray) else np.asarray(other)
+        return asarray(np.asarray(self._m @ host))
+
+    __matmul__ = dot
+
+    def toarray(self):
+        return asarray(self._m.toarray())
+
+    def get(self):
+        return self._m
+
+    def transpose(self):
+        out = _HostSparse.__new__(_HostSparse)
+        out._m = self._m.transpose().tocsr()
+        return out
+
+    T = property(transpose)
+
+
+class _HostCsc(_HostSparse):
+    _kind = "csc_matrix"
+
+
+class _HostCoo(_HostSparse):
+    _kind = "coo_matrix"
+
+
+class _NoPlan:
+    """``cupyx.scipy.fft.get_fft_plan``: the facade's FFTs run through NumPy
+    on the host, so a plan is a context that changes nothing."""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
 cupyx.scipy = _module("cupyx.scipy",
+    sparse=_module("cupyx.scipy.sparse", csr_matrix=_HostSparse, csc_matrix=_HostCsc, coo_matrix=_HostCoo,
+                   issparse=lambda x: isinstance(x, _HostSparse)),
+    fft=_module("cupyx.scipy.fft", get_fft_plan=lambda *a, **k: _NoPlan(),
+                **{n: getattr(fft, n) for n in vars(fft) if not n.startswith("_")}),
     special=_module("cupyx.scipy.special", **{n: _scipy_on_host("special", n)
                                               for n in ("erf", "erfc", "gamma", "gammaln")}),
     ndimage=_module("cupyx.scipy.ndimage", **{n: _scipy_on_host("ndimage", n) for n in (
@@ -412,7 +572,10 @@ cupyx.scipy = _module("cupyx.scipy",
 cupyx.__path__ = []
 #: the facade's own submodules, for `import cupyx.scipy.special` (backend._FacadeFinder)
 SUBMODULES = {"cupyx.scipy": cupyx.scipy, "cupyx.scipy.special": cupyx.scipy.special,
-              "cupyx.scipy.ndimage": cupyx.scipy.ndimage}
+              "cupyx.scipy.ndimage": cupyx.scipy.ndimage, "cupyx.scipy.sparse": cupyx.scipy.sparse,
+              "cupyx.scipy.fft": cupyx.scipy.fft, "cupy.fft": fft, "cupy.fft._fft": fft._fft}
+# `from cupy.fft._fft import ...`: found in sys.modules, as cupy.cuda's are
+sys.modules.setdefault("cupy.fft._fft", fft._fft)
 
 
 def __getattr__(name):

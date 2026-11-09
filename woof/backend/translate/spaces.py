@@ -107,7 +107,8 @@ class SpaceAnalysis:
                     continue        # its methods are templated on the space instead
                 self.collect(list(c.get_children()))
                 continue
-            if c.kind not in (K.FUNCTION_DECL, K.FUNCTION_TEMPLATE, K.CXX_METHOD, K.CONSTRUCTOR) \
+            if c.kind not in (K.FUNCTION_DECL, K.FUNCTION_TEMPLATE, K.CXX_METHOD, K.CONSTRUCTOR,
+                              K.CONVERSION_FUNCTION) \
                     or self.rw.is_kernel(c):
                 continue
             params = [p for p in c.get_children() if p.kind == K.PARM_DECL]
@@ -121,7 +122,7 @@ class SpaceAnalysis:
             slots.sort(key=lambda slot: slot[0])
             if c.kind == K.CONSTRUCTOR:
                 returns = None
-            elif c.kind in (K.FUNCTION_DECL, K.CXX_METHOD):
+            elif c.kind in (K.FUNCTION_DECL, K.CXX_METHOD, K.CONVERSION_FUNCTION):
                 returns = _indirection(c.result_type)
             else:
                 returns = _template_return(c)
@@ -192,7 +193,13 @@ class SpaceAnalysis:
         info = self.functions.get(ref.get_usr())
         if info is not None:
             return info
-        # A template specialisation: its template, by name and arity.
+        # A template specialisation: clang names its template (exactly,
+        # among same-arity overloads: RRFS smoke's sd_sequence for
+        # FPlumeVector and for FVector)...
+        info = self.functions.get(self._pattern_usr(ref))
+        if info is not None:
+            return info
+        # ... else its template by name and arity.
         nparams = len([a for a in ref.get_arguments()]) if hasattr(ref, "get_arguments") else None
 
         def by_arity(candidates):
@@ -273,6 +280,55 @@ class SpaceAnalysis:
                 self.request(info, tuple(THREAD if ind in ("ref", "gstruct") else DEVICE
                                          for _, _, ind in info.slots), None)
         self.drain()
+        self._implicit_this_spaces()
+
+    def _implicit_this_spaces(self):
+        """A method qualified for an object in device memory calls its
+        sibling methods on that same object (implicit ``this``): they need
+        the same qualified variant (RRFS smoke's FPlumeVector conversion
+        calls vector(), which hands out the member array)."""
+        changed = True
+        while changed:
+            changed = False
+            for usr, spaces in list(self.this_spaces.items()):
+                info = self.functions.get(usr)
+                if info is None:
+                    continue
+                owner = info.cursor.semantic_parent
+                for node in info.cursor.walk_preorder():
+                    if node.kind.name != "CALL_EXPR":
+                        continue
+                    ref = node.referenced
+                    kids = list(node.get_children())
+                    head = kids[0] if kids else None
+                    while head is not None and head.kind.name == "UNEXPOSED_EXPR" and len(list(head.get_children())) == 1:
+                        head = next(head.get_children())
+                    name = node.spelling
+                    if head is not None and head.kind.name == "MEMBER_REF_EXPR":
+                        inner = list(head.get_children())
+                        if len(inner) == 1 and inner[0].kind.name == "OVERLOADED_DECL_REF":
+                            name = inner[0].spelling        # a dependent `f(...)` on this
+                        elif inner:
+                            continue    # a call on another object, recorded where it is made
+                    elif head is None or head.kind.name != "OVERLOADED_DECL_REF":
+                        continue
+                    else:
+                        name = head.spelling
+                    if ref is not None and ref.kind.name in ("CXX_METHOD", "CONVERSION_FUNCTION"):
+                        callees = [self._pattern_usr(ref)]
+                    elif ref is None and owner is not None and name:
+                        # a dependent call in a member template (FArray::section's
+                        # add_section): every overload of that name in the class
+                        callees = [u for u, f in self.functions.items()
+                                   if f.name == name and f.cursor.semantic_parent is not None
+                                   and f.cursor.semantic_parent == owner]
+                    else:
+                        continue
+                    for callee in callees:
+                        have = self.this_spaces.setdefault(callee, set())
+                        if not spaces <= have:
+                            have |= spaces
+                            changed = True
 
     def drain(self):
         while self._work:
@@ -401,8 +457,13 @@ class SpaceAnalysis:
                     # S.last_message): a field given constant data is constant
                     lhs_end = kids[0].extent.end.offset
                     op = next((t.spelling for t in node.get_tokens() if t.extent.start.offset >= lhs_end), None)
-                    if op == "=" and self.space(kids[1], env) == CONSTANT:
-                        self.field_spaces.setdefault(field_key(kids[0].referenced), set()).add(CONSTANT)
+                    if op == "=":
+                        # a pointer field takes the space of what is stored in
+                        # it: constant data (WSM6's S.last_message), or a local
+                        # array (ssib's SsibTem p; p.www = www;)
+                        sp = self.space(kids[1], env)
+                        if sp in (CONSTANT, THREAD, THREADGROUP, DEVICE):
+                            self.field_spaces.setdefault(field_key(kids[0].referenced), set()).add(sp)
             elif kind == K.RETURN_STMT and collect_returns:
                 children = list(node.get_children())
                 if children:
@@ -516,6 +577,15 @@ class SpaceAnalysis:
         if first.kind.name == "MEMBER_REF_EXPR":
             inner = list(first.get_children())
             return inner[0] if inner else first
+        # an overloaded operator call (`a[i]`, `&r`) lists the operator
+        # first, then the object it is called on
+        callee = first
+        while callee.kind.name == "UNEXPOSED_EXPR" and len(list(callee.get_children())) == 1:
+            callee = next(callee.get_children())
+        if callee.kind.name == "DECL_REF_EXPR" and call.referenced is not None \
+                and callee.referenced is not None \
+                and callee.referenced.get_usr() == call.referenced.get_usr() and len(kids) > 1:
+            return kids[1]
         return first
 
     def gspace(self, e, env):
@@ -544,9 +614,19 @@ class SpaceAnalysis:
                         return None
                     e = args[0]
                     continue
-                if ref is not None and self._generic_method(ref):
+                if ref is not None and (self._generic_method(ref) or ref.kind.name in (
+                        "CXX_METHOD", "CONVERSION_FUNCTION")):
+                    # (also a method of a struct that is not itself generic:
+                    # MYNN 4.7.1's M471Ref::operator& hands back the M471Ptr
+                    # its M471Ptr::operator[] made)
                     e = self._call_object(e)
                     continue
+                # a factory returning the struct by value (MYNN 4.7.1's
+                # m471_array(work, offset, n)): its data is the memory of
+                # the pointer it is handed
+                for a in e.get_arguments():
+                    if _indirection(a.type) in ("ptr", "array"):
+                        return self.space(a, env)
                 return None
             if kind == "MEMBER_REF_EXPR" and kids:
                 e = kids[0]
@@ -598,7 +678,7 @@ class SpaceAnalysis:
         """A member call on an object in device/constant/threadgroup memory
         needs a method overload qualified for that space."""
         ref = node.referenced
-        if ref is None or ref.kind.name not in ("CXX_METHOD",):
+        if ref is None or ref.kind.name not in ("CXX_METHOD", "CONVERSION_FUNCTION"):
             return
         if self._generic_method(ref):
             return
@@ -618,7 +698,33 @@ class SpaceAnalysis:
         else:                                      # an operator call: object first
             space = self.space(obj, env, lvalue=True)
         if space in (DEVICE, CONSTANT, THREADGROUP):
-            self.this_spaces.setdefault(ref.get_usr(), set()).add(space)
+            self.this_spaces.setdefault(self._pattern_usr(ref), set()).add(space)
+
+    def _pattern_usr(self, ref) -> str:
+        """A member of a class template specialization (``FArray<float>::
+        operator()``, RRFS smoke's descriptors) is the template's member, the
+        one the translator qualifies."""
+        usr = ref.get_usr()
+        if usr in self.functions:
+            return usr
+        try:
+            pattern = self.ci.conf.lib.clang_getSpecializedCursorTemplate(ref)
+        except Exception:  # noqa: BLE001 -- an older binding: the usr as given
+            return usr
+        if pattern is not None and pattern.kind is not None and pattern.get_usr() in self.functions:
+            return pattern.get_usr()
+        # a member template of a class template's specialization (FArray<float>::
+        # section<Slice, int>): the class template's one member of that name
+        parent = ref.semantic_parent
+        if parent is not None:
+            owner, name = parent.spelling.split("<", 1)[0], ref.spelling.split("<", 1)[0]
+            found = [u for u, f in self.functions.items()
+                     if f.name.split("<", 1)[0] == name and f.cursor.semantic_parent is not None
+                     and f.cursor.semantic_parent.spelling.split("<", 1)[0] == owner
+                     and f.cursor.semantic_parent.kind.name == "CLASS_TEMPLATE" and f.template]
+            if len(found) == 1:
+                return found[0]
+        return usr
 
     def call(self, node, env):
         self._record_this_space(node, env)

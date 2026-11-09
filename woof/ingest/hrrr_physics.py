@@ -191,7 +191,7 @@ def initialize_prepared_physics(
         center_lat=None, constant_glw_wm2=None, fractional_seaice=True,
         isoilwater=14, p_top=None, column_chunk=None,
         trace_gas_overrides=None, ozone_parent=None, cam_ozone=None,
-        simulation_start_time=None):
+        simulation_start_time=None, radiation_factory=None):
     """Attach physics to one restored source-neutral prepared initial state.
 
     ``surface`` is the canonical Noah inventory persisted with direct GFS and
@@ -212,6 +212,10 @@ def initialize_prepared_physics(
     answer -- lets the attached longwave scheme own the field, and makes
     :func:`~woof.core.physics.initialize_physics` refuse an undeclared
     suite that has no longwave scheme at all.
+
+    ``radiation_factory`` replaces :func:`woof.core.radiation_composition
+    .make_radiation` (same arguments): a partial-depth child's radiation on
+    its extended column (``woof.prepared_domain_tree_forecast``).
     """
 
     import cupy as cp
@@ -266,7 +270,7 @@ def initialize_prepared_physics(
     from woof.core.radiation_composition import make_radiation
     radiation_origin = (valid_time if simulation_start_time is None
                         else simulation_start_time)
-    radiation = make_radiation(
+    radiation = (make_radiation if radiation_factory is None else radiation_factory)(
         cfg, radiation_origin, lat, lon, p_top=p_top, column_chunk=column_chunk,
         trace_gas_overrides=trace_gas_overrides, ozone_parent=ozone_parent)
     driver = initialize_physics(

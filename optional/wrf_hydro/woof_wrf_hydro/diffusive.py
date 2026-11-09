@@ -18,9 +18,10 @@ the node draining each lake (CH_NETRT > 0) takes in the next step.  This is
 WRF-Hydro's MPP_LAND build (the only one it has) on one process.
 
 With GWBASESWCRT = 3 regular nodes exchange with the 2-D groundwater head
-(gwChanCondSw = 1; :class:`woof_wrf_hydro.gw2d.Gw2d`).  Refused by name: reservoir
-types other than the level pool (persistence, RFC forecasts), and networks
-whose CH_NETLNK numbering is not the node order.  The network is host data,
+(gwChanCondSw = 1; :class:`woof_wrf_hydro.gw2d.Gw2d`).  Refused by name: networks
+whose CH_NETLNK numbering is not the node order.  lake_option 3's hybrid and
+RFC reservoirs run in the lake loop when a ``reservoir_da`` is given
+(:mod:`woof_wrf_hydro.reservoir_da`).  The network is host data,
 read once; the state is device float32.
 """
 
@@ -30,24 +31,26 @@ from pathlib import Path
 
 import numpy as np
 
+from ._compile import raw_module
+
 _MODULE = None
 _TPB = 256
 _ERRORS = {1: "FATAL ERROR: node_area(i) is zero (drive_CHANNEL)",
            2: "Error in Diffusion function ->channel coefficients",
-           4: "FATAL ERROR: This node does not have a type (TYPEL)"}
+           4: "FATAL ERROR: This node does not have a type (TYPEL)",
+           64: "lake_option 3: the device ran past the tabulated timeslice reads"}
 
 
 def _k(name):
     global _MODULE
     if _MODULE is None:
-        import cupy as cp
-
         kernels = Path(__import__("woof.core.kernels", fromlist=["x"]).__file__).parent
         here = Path(__file__).resolve().parent
         source = ((kernels / "glibc_flt32.cuh").read_text(encoding="utf-8") + "\n"
                   + (here / "levelpool.cu").read_text(encoding="utf-8") + "\n"
+                  + (here / "reservoir_da.cu").read_text(encoding="utf-8") + "\n"
                   + (here / "diffusive.cu").read_text(encoding="utf-8"))
-        _MODULE = cp.RawModule(code=source, options=("--fmad=false", "--ftz=false"))
+        _MODULE = raw_module(source, ("--fmad=false", "--ftz=false"))
     return _MODULE.get_function(name)
 
 
@@ -56,7 +59,7 @@ class DiffusiveWaveRouting:
                  from_node, to_node, typel, zelev, chanlen, mannn, so, chsslp, bw,
                  retdep_chan, dtrt_ch, dtct=None, gwbaseswcrt=0, lakenode=None, lakes=None,
                  reservoir_type="level_pool", gw_chan_cond_sw=0, gw_chan_cond_const_in=0.0,
-                 gw_chan_cond_const_out=0.0):
+                 gw_chan_cond_const_out=0.0, reservoir_da=None):
         import cupy as cp
 
         # GWBASESWCRT = 3: each regular node exchanges with the 2-D
@@ -75,13 +78,23 @@ class DiffusiveWaveRouting:
         n = len(chanxi)
         jxrt, ixrt = ch_netrt.shape
         j, i = chanyj - 1, chanxi - 1
-        if reservoir_type != "level_pool":
-            raise NotImplementedError(f"reservoir type {reservoir_type!r} (persistence, RFC "
-                                      "forecasts) is not ported; the level pool is")
+        if reservoir_type not in ("level_pool", "lake_option_3"):
+            raise NotImplementedError(f"reservoir type {reservoir_type!r}: the level pool and "
+                                      "lake_option 3's hybrid/RFC reservoirs (reservoir_da) "
+                                      "are ported")
         from .levelpool import LevelPool
 
         self.lakes = lakes if lakes is not None else LevelPool.empty()
         nlakes = self.lakes.n
+        # lake_option 3: woof_wrf_hydro.reservoir_da.ReservoirDA, else every
+        # lake is a level pool (kind 0)
+        self.da = reservoir_da
+        if reservoir_da is not None and reservoir_da.n != nlakes:
+            raise ValueError("reservoir_da holds one entry per lake")
+        if reservoir_da is None:
+            self._res_none = (cp.zeros(max(nlakes, 1) * 16, cp.int32),
+                              cp.zeros(16, cp.float32), cp.zeros(1, cp.float32),
+                              cp.zeros(1, cp.float32), cp.zeros(1, cp.int32))
         lakenode = np.zeros(n, np.int64) if lakenode is None else np.asarray(lakenode, np.int64)
         lake_at = lake_mskrt[j, i]
         lake_node = (lake_at > 0) & (ch_netrt[j, i] <= 0)
@@ -153,6 +166,7 @@ class DiffusiveWaveRouting:
             gw_head = qgw_chanrt = qstrmvolrt     # unread
         g, p, L = self._net, self._props, self.lakes
         self._err[...] = 0
+        self._dt_pending = float(dt)
         _k("wrfhydro_diffusive")((1,), (_TPB,), (
             g["cell"], qstrmvolrt, qinflowbase, p["node_area"], g["from_node"], g["to_node"],
             g["typel"], p["zelev"], p["chanlen"], p["mannn"], p["so"], p["chsslp"], p["bw"],
@@ -161,7 +175,19 @@ class DiffusiveWaveRouting:
             self.retdep_chan, np.int32(self.n), g["pour"], lakeinflort, g["lnstart"],
             g["lnlist"], g["listart"], g["lilist"], L.props, L.lake_opt, L.resht, L.qlakei, L.qlakeo,
             *self._lakework, np.int32(L.n), np.int32(self.gw), np.int32(self.gw_sw), self.gw_in,
-            self.gw_out, gw_head, qgw_chanrt, np.int32(qstrmvolrt.size)))
+            self.gw_out, gw_head, qgw_chanrt, np.int32(qstrmvolrt.size), *self._res_args()))
         code = int(self._err.get()[0])
         if code:
             raise RuntimeError("; ".join(m for b, m in _ERRORS.items() if code & b))
+        if self.da is not None:
+            self.da.time += float(dt)
+
+    def _res_args(self):
+        if self.da is None:
+            ri, rf, tab, oq, ol = self._res_none
+            return ri, rf, tab, oq, ol, np.int32(0)
+        # a reservoir runs once per routing sub-step, so its clock reaches at
+        # most this step's end
+        self.da.ensure_reads(self.da.time + float(self._dt_pending))
+        d = self.da
+        return d.ri, d.rf, d.rtab, d.obs_q, d.obs_lb, np.int32(d.nev)

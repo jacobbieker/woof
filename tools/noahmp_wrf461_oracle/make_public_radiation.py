@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Produce a visibility-only ``public ::`` copy of the pinned Noah-MP module.
 
-The pinned WRF-4.6.1 module declares every internal routine ``private ::``,
+The pinned WRF-4.7.1 module declares every internal routine ``private ::``,
 so an external oracle driver cannot call the radiation leaves directly.  The
 only edit this script performs is turning ``private ::`` declaration lines
 into ``public ::`` declaration lines.  Nothing else in the file is touched.
@@ -21,7 +21,7 @@ object code for both, so the patch cannot have changed any arithmetic.
 Redundancy, measured
 --------------------
 Run against the pinned pristine source this script emits sha256
-``3cd3690d6455cfb8549cb41979b7e101e7436464c478f7f7973ab226488ac206`` -- which
+``5e31fa7fbd6aadfdc2e63581b9dc400cf2ec74305859c29a35d9c578a8c7ad06`` -- which
 is byte for byte the ``PATCHED_SHA256`` that ``check_visibility_patch.py``
 already pins and that ``patches/noahmp-lsm-leaf-visibility.patch`` already
 produces.  This lane rewrote from scratch what the tree already had, and
@@ -35,7 +35,7 @@ it removes.
 
 Note that this is *not* the same output as ``visibility_patch_leaves.py``,
 which pads to ``public  ::`` to hold every byte offset fixed and emits sha256
-``bfdc0f36...``.  Both are pure accessibility rewrites; they are two spellings,
+``072309bc...``.  Both are pure accessibility rewrites; they are two spellings,
 and the fixtures built from each were built from the file that script emits.
 
 This script is owned by the *radiation* lane.  It writes to a caller-supplied
@@ -50,10 +50,11 @@ import re
 import sys
 from pathlib import Path
 
-PINNED_TREE_COMMIT = "d66e442fccc04111067e29274c9f9eaccc3cef28"
-PINNED_SOURCE_SHA256 = (
-    "bd592a5b7db29000e715250e3a7c779ffb5e0dcc356f6b5a7d9e1c9f69c55282"
-)
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent))
+from noahmp_pins import LSM_SHA256, TREES, tree_for_lsm_digest  # noqa: E402
+
+#: Either pinned tree (noahmp_pins.py), by its module digest.
+PINNED_SOURCE_SHA256 = LSM_SHA256
 
 _PRIVATE_DECL = re.compile(r"^(\s*)private(\s*)::(.*)$", re.IGNORECASE)
 
@@ -109,8 +110,8 @@ def main(argv: list[str] | None = None) -> int:
 
     raw = ns.source.read_bytes()
     got = hashlib.sha256(raw).hexdigest()
-    if got != PINNED_SOURCE_SHA256:
-        msg = f"source sha256 {got} != pinned {PINNED_SOURCE_SHA256}"
+    if got not in PINNED_SOURCE_SHA256:
+        msg = f"source sha256 {got} is neither pinned tree {PINNED_SOURCE_SHA256}"
         if not ns.allow_unpinned:
             raise SystemExit(msg)
         print(f"WARNING: {msg}", file=sys.stderr)
@@ -124,7 +125,11 @@ def main(argv: list[str] | None = None) -> int:
     ns.dest.parent.mkdir(parents=True, exist_ok=True)
     ns.dest.write_bytes(dst.encode("utf-8", errors="surrogateescape"))
     print(f"pinned-source-sha256 {got}")
-    print(f"pinned-tree-commit   {PINNED_TREE_COMMIT}")
+    if got in PINNED_SOURCE_SHA256:
+        tree = tree_for_lsm_digest(got)
+        print(f"pinned-tree          {tree}")
+        print(f"pinned-tree-commit   {TREES[tree]['wrf_commit']}")
+        print(f"pinned-noahmp-commit {TREES[tree]['noahmp_commit']}")
     print(f"private->public      {n_sub}")
     print(f"patched-sha256       {hashlib.sha256(ns.dest.read_bytes()).hexdigest()}")
     return 0

@@ -1132,9 +1132,14 @@ def _launch(
 
 def _launch_checked(new: str, new_count: int, old: str, old_count: int,
                     inputs: tuple[Any, ...], outputs: tuple[Any, ...],
-                    kernel_cache: Any | None, *, in_place: bool = False) -> None:
+                    kernel_cache: Any | None, *, in_place: bool = False,
+                    settle: Any | None = None) -> None:
     """Launch the element form; under WOOF_HEX_EDGE_HOIST_CHECK also run the
-    original on copies (in-place outputs) or fresh outputs and compare words."""
+    original on copies (in-place outputs) or fresh outputs and compare words.
+
+    ``settle(array)``, when given, runs on both forms before the comparison:
+    it writes the words the caller overwrites before anything reads them
+    (the garbage column the pool fill rewrites)."""
     from . import cuda_edge_hoist
     cp = _cupy()
     check = cuda_edge_hoist.check_wanted(new, cp)
@@ -1146,6 +1151,9 @@ def _launch_checked(new: str, new_count: int, old: str, old_count: int,
     if check:
         _launch(old, old_count, (*inputs, *reference), kernel_cache)
         for value, expected in zip(outputs, reference):
+            if settle is not None:
+                settle(value)
+                settle(expected)
             cuda_edge_hoist.compare(new, value, expected, cp)
 
 
@@ -1569,9 +1577,16 @@ def advance_scalars_monotonic_cuda_v841(
         vertical_velocity, rdnw, rho0, rho1,
     )
     if element_fct:
+        # On a regional mesh the garbage column of ``target`` is bound to the
+        # density pool (bind_density_pool above) and the checker's fresh
+        # reference is not, so the launch discipline restores 1 in one and 0
+        # in the other; the pool fill below writes 1 there before anything
+        # reads it.  The check compares after writing that same 1 into both.
         _launch_checked("transport_target_density_elem_v841", nlev * ncells,
                         "transport_target_density_v841", ncells,
-                        target_inputs, (target,), kernel_cache)
+                        target_inputs, (target,), kernel_cache,
+                        settle=None if garbage_cell is None else lambda value: value.reshape(
+                            nlev, ncells).__setitem__((slice(None), int(garbage_cell)), np.float32(1.0)))
     else:
         _launch("transport_target_density_v841", ncells, (*target_inputs, target), kernel_cache)
     if garbage_cell is not None:

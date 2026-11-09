@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import pickle
 import re
 import shutil
 import struct
@@ -626,6 +627,7 @@ class _Rewriter:
         self._keep_float_ranges: list = []
         #: declaration statement start -> (stmt, var usrs, function usr, default space)
         self._qualified_sites: dict = {}
+        self._split_decls: set = set()
         self._emitted_sites: set = set()
         self._decl_stmt_index = None
         self._kernel_cursors: list = []
@@ -676,8 +678,13 @@ class _Rewriter:
         self.thread_builtins(top)
         self.inline_pointer_functions()
         self.table_parameters()
+        self.table_field_stores(top)
+        self.generic_constructions(top)
         self.rewrite_tokens()
         msl = self.edits.apply()
+        # a wrapper opened on a source line that holds a directive (`do {`
+        # before `#pragma unroll 1`): a directive starts its own line
+        msl = re.sub(r"([;{}])[ \t]*(#pragma\b)", "\\1\n\\2", msl)
         msl = msl.replace(f'__attribute__((annotate("{_GLOBAL}")))', "")
         msl = msl.replace(f'__attribute__((annotate("{_SHARED}")))', "threadgroup")
         msl = msl.replace(f'__attribute__((annotate("{_CONSTANT}")))', "constant")
@@ -711,7 +718,43 @@ class _Rewriter:
             self.spaces = None
         self._constant_fields = {key: set(spaces) for key, spaces in probe.field_spaces.items()
                                  if spaces == {"constant"}}
-        return {owner for (owner, _field), spaces in probe.field_spaces.items() if len(spaces) > 1}
+        generic = {owner for (owner, _field), spaces in probe.field_spaces.items() if len(spaces) > 1}
+        return self._generic_companions(top, generic)
+
+    def _generic_companions(self, top, generic: set) -> set:
+        """Pointer-holding class templates that a generic struct's methods
+        return, or whose methods return one, are generic too: their data is
+        the generic struct's (MYNN 4.7.1's M471Ptr::operator[] makes an
+        M471Ref, whose operator& makes an M471Ptr back)."""
+        K = self.ci.CursorKind
+        from woof.backend.translate.spaces import _indirection
+        templates = {}
+        for c in top:
+            for n in c.walk_preorder():
+                if n.kind == K.CLASS_TEMPLATE and n.is_definition() and self.main_file(n) \
+                        and any(f.kind == K.FIELD_DECL and _indirection(f.type) == "ptr"
+                                for f in n.get_children()):
+                    templates[n.spelling] = n
+
+        def returned(method):
+            t = method.result_type.get_canonical()
+            d = t.get_declaration()
+            return d.spelling.split("<", 1)[0] if d is not None else ""
+        changed = bool(generic)
+        while changed:
+            changed = False
+            for name, cls in templates.items():
+                if name in generic:
+                    continue
+                methods = [m for m in cls.get_children() if m.kind in (K.CXX_METHOD, K.FUNCTION_TEMPLATE)]
+                partners = {returned(m) for m in methods}
+                partners |= {g for g in generic for m in templates.get(g, cls).get_children()
+                             if m.kind in (K.CXX_METHOD, K.FUNCTION_TEMPLATE) and returned(m) == name}
+                if partners & generic:
+                    generic.add(name)
+                    changed = True
+        # out-of-class member definitions (M471Ref<T>::operator&) return too
+        return generic
 
     def visit_top(self, cursor):
         K = self.ci.CursorKind
@@ -937,13 +980,88 @@ class _Rewriter:
             self.edits.replace(tokens[0].extent.start.offset, tokens[name_index].extent.start.offset, "auto ")
             return
         key = self.span(stmt)[0]
-        if key in self._qualified_sites:
+        if key in self._qualified_sites or key in self._split_decls:
+            return
+        if self._split_mixed_declaration(stmt, declared):
+            self._split_decls.add(key)
             return
         fn = node.semantic_parent
         default = "thread" if canon == "LVALUEREFERENCE" else "device"
         self._qualified_sites[key] = (stmt, [d.get_usr() for d in declared
                                              if d.type.get_canonical().kind.name in ("POINTER", "LVALUEREFERENCE")],
                                       fn.get_usr() if fn is not None else None, default)
+
+    def _split_mixed_declaration(self, stmt, declared):
+        """``T *a = p, b, *c = q;``: pointers and non-pointers in one
+        declaration, where a space qualifier on the statement would qualify
+        ``b`` too (cam3_emissivity: automatic variable qualified with an
+        address space).  When every pointer declarator has an initialiser the
+        statement becomes one declaration each, the pointers ``auto`` (their
+        space deduced, right in every instance).  False otherwise."""
+        K = self.ci.CursorKind
+        if len(declared) < 2:
+            return False
+        kinds = [d.type.get_canonical().kind.name for d in declared]
+        if "POINTER" not in kinds or all(k == "POINTER" for k in kinds) or "LVALUEREFERENCE" in kinds:
+            return False
+        for d, k in zip(declared, kinds):
+            init = [c for c in d.get_children() if c.kind not in (K.TYPE_REF, K.NAMESPACE_REF, K.TEMPLATE_REF)]
+            if k == "POINTER" and (not init or self._is_null(init[-1])):
+                return False
+        toks = list(stmt.get_tokens())
+        names = []
+        for d in declared:
+            at = next((i for i, t in enumerate(toks) if t.kind.name == "IDENTIFIER" and t.spelling == d.spelling
+                       and t.extent.start.offset >= d.extent.start.offset
+                       and (not names or i > names[-1])), None)
+            if at is None:
+                return False
+            names.append(at)
+        start = names[0]
+        while start > 0 and toks[start - 1].spelling in ("*", "const", "__restrict__"):
+            start -= 1
+        if start == 0:
+            return False
+        if any(t.spelling in ("const", "static", "volatile") for t in toks[:start]):
+            return False
+        # the non-pointer declarators' type, spelled as the translator spells
+        # types (f32s, f64), since inserted text is not rewritten
+        scalars = [d for d, k in zip(declared, kinds) if k not in ("POINTER", "CONSTANTARRAY", "INCOMPLETEARRAY")]
+        if scalars:
+            base = self._spell_type(scalars[0].type, drop_const=True)
+        else:
+            array = next(d for d, k in zip(declared, kinds) if k != "POINTER")
+            base = self._spell_type(array.type.get_canonical().element_type, drop_const=True)
+        depth, commas = 0, []
+        for i in range(names[0], len(toks)):
+            sp = toks[i].spelling
+            if sp in ("(", "[", "{", "<"):
+                depth += 1
+            elif sp in (")", "]", "}", ">"):
+                depth -= 1
+            elif sp == "," and depth == 0:
+                commas.append(i)
+        if len(commas) != len(declared) - 1 or any(not (commas[j] < names[j + 1]) for j in range(len(commas))):
+            return False
+        starts = [start] + [c + 1 for c in commas]
+        for j, (d, k) in enumerate(zip(declared, kinds)):
+            seg = starts[j]
+            if j == 0:
+                if k == "POINTER":
+                    # the written type stays (its tokens are respelled
+                    # elsewhere) and declares an unused placeholder
+                    dummy = f" __woof_decl{len(self._split_decls)}; auto "
+                    if names[0] > start:
+                        self.edits.replace(toks[start].extent.start.offset, toks[names[0]].extent.start.offset,
+                                           dummy)
+                    else:
+                        self.edits.insert(toks[names[0]].extent.start.offset, dummy, rank=-20_001)
+                continue
+            self.edits.replace(toks[commas[j - 1]].extent.start.offset, toks[commas[j - 1]].extent.end.offset,
+                               "; " + ("auto " if k == "POINTER" else base + " "))
+            if k == "POINTER" and names[j] > seg:
+                self.edits.replace(toks[seg].extent.start.offset, toks[names[j]].extent.start.offset, "")
+        return True
 
     def _decl_stmts(self):
         if self._decl_stmt_index is None:
@@ -1195,6 +1313,8 @@ class _Rewriter:
                     self.refuse(g, f"backward goto {name!r}")
                 first = min(first, i)
                 for a in anc[1:]:
+                    if self.span(a) == self.span(block) and a.kind == block.kind:
+                        break       # the jump is itself the block's statement (top is g)
                     if self.span(a) == self.span(top) and a.kind == top.kind:
                         if a.kind.name in self._LOOPS:
                             inner_loops.append(a)
@@ -1617,6 +1737,8 @@ class _Rewriter:
         last = max(i for _, i, _ in tops)
         for g, _, top in tops:
             for a in chain(g)[1:]:
+                if self.span(a) == self.span(block):
+                    break               # the jump is itself the block's statement
                 # the block's own statement too: a jump from a loop that is
                 # one would `continue` that loop (ntu's retry inside its DO)
                 if a.kind.name in self._LOOPS:
@@ -2109,12 +2231,28 @@ class _Rewriter:
                 self.edits.insert(at, text, rank=-25_000)
         K = self.ci.CursorKind
         from woof.backend.translate.spaces import _CASTS, _INTEGER_KINDS, _indirection
+        generic = [self.span(c) for c in self.tu.cursor.walk_preorder()
+                   if c.kind == K.CLASS_TEMPLATE and c.spelling in getattr(self, "generic_structs", ())
+                   and self.main_file(c)]
         for node in self.tu.cursor.walk_preorder():
             if node.kind.name not in _CASTS or not self.main_file(node) or _indirection(node.type) != "ptr":
                 continue
             key = (node.extent.start.offset, node.extent.end.offset)
             if key in reached:
                 continue
+            if node.kind.name in ("CXX_STATIC_CAST_EXPR", "CXX_REINTERPRET_CAST_EXPR", "CXX_CONST_CAST_EXPR") \
+                    and any(gs <= key[0] and key[1] <= ge for gs, ge in generic):
+                # inside a space-generic struct (gsfc_ptr's
+                # `const_cast<T *>(value)`): the struct's own space
+                toks = list(node.get_tokens())
+                if len(toks) > 2 and toks[1].spelling == "<":
+                    close = self._closing_angle(toks, 1)
+                    star = next((t for t in reversed(toks[2:close]) if t.spelling == "*"), None) \
+                        if close is not None else None
+                    if star is not None:
+                        self.edits.insert(toks[2].extent.start.offset, "__woof_sptr<", rank=-25_000)
+                        self.edits.replace(star.extent.start.offset, star.extent.end.offset, ", __WS>")
+                        continue
             operand = [c for c in node.get_children() if c.kind not in (K.TYPE_REF, K.TEMPLATE_REF)]
             space = "device"
             if operand and operand[-1].type.get_canonical().kind.name not in _INTEGER_KINDS:
@@ -2180,7 +2318,16 @@ class _Rewriter:
                     at = self._method_qualifier_at(cursor)
                     if at is None:
                         self.refuse(cursor, f"cannot place an address-space qualifier on {cursor.spelling!r}")
-                    plans = plans + [plan + [(at, f" {space}")] for plan in plans for space in this_spaces]
+                    # a member reference or pointer the method hands back is
+                    # in the object's space (FPlumeVector's `T &operator()`):
+                    # the variant for an object in device memory returns a
+                    # device reference where the thread one returns a thread
+                    ret_at = self._return_type_start(cursor) if info.returns in ("ref", "ptr") else None
+
+                    def variant(plan, space):
+                        moved = [(a, f"{space} " if a == ret_at and t == "thread " else t) for a, t in plan]
+                        return moved + [(at, f" {space}")]
+                    plans = plans + [variant(plan, space) for plan in plans for space in this_spaces]
                 if len(plans) == 1:
                     for at, text in plans[0]:
                         self.edits.insert(at, text, rank=-20_000)
@@ -2268,6 +2415,45 @@ class _Rewriter:
             if start is not None:
                 plan.append((start, f"{ret} "))
         return plan
+
+    def table_field_stores(self, top):
+        """``s->table[k] = p`` into a ``T**`` struct field (cam3's
+        ``state->abs_args[0] = pbr``, filling the per-column descriptor
+        row the kernel reads back): the field is a ``__woof_addr_table``
+        (struct_fields), whose ``[k]`` is a value, so the store is spelled
+        ``s->table.__woof_set(k, p)``, which writes the entry's word."""
+        K = self.ci.CursorKind
+        from woof.backend.translate.spaces import _is_table
+
+        def bare(e):
+            while e.kind in (K.UNEXPOSED_EXPR, K.PAREN_EXPR) and len(list(e.get_children())) == 1:
+                e = next(e.get_children())
+            return e
+        for c in top:
+            for node in c.walk_preorder():
+                if node.kind != K.BINARY_OPERATOR or not self.main_file(node):
+                    continue
+                kids = list(node.get_children())
+                if len(kids) != 2:
+                    continue
+                lhs = bare(kids[0])
+                if lhs.kind != K.ARRAY_SUBSCRIPT_EXPR:
+                    continue
+                parts = list(lhs.get_children())
+                if len(parts) != 2:
+                    continue
+                base = bare(parts[0])
+                field = base.referenced if base.kind == K.MEMBER_REF_EXPR else None
+                if field is None or field.kind != K.FIELD_DECL or not _is_table(field.type):
+                    continue
+                op = next((t for t in node.get_tokens()
+                           if t.extent.start.offset >= lhs.extent.end.offset and t.spelling in ("=",)), None)
+                if op is None or op.extent.start.offset >= kids[1].extent.start.offset:
+                    continue
+                be, (is_, ie) = base.extent.end.offset, self.span(parts[1])
+                self.edits.replace(be, is_, ".__woof_set(")
+                self.edits.replace(ie, op.extent.end.offset, ", ")
+                self.edits.insert(kids[1].extent.end.offset, ")", rank=50_000)
 
     def table_parameters(self):
         """A device function's ``T**`` / ``T* const*`` parameter receives a
@@ -2361,7 +2547,25 @@ class _Rewriter:
     #: service crashes (XPC_ERROR_CONNECTION_INTERRUPTED) on goddard's
     #: radiation column, which compiles in a second with the large
     #: functions out of line.  Its device oracle holds it to WRF's words.
-    INLINE_POLICY_BY_UNIT = {"goddard": "size"}
+    #: Fully inlined, lake, mskf and mskf_aerosol_replay did not compile in
+    #: the census's 30 minutes and flg_streams crashed the compiler service;
+    #: out of line they build in 2-5 minutes, and their Metal tests (lake's
+    #: column history and f64cr grades, mskf_kernel, the flg replays) give
+    #: the words they give on main.  nssl2: its out-of-line rain
+    #: sedimentation zeros were Apple's private-array constant-index bug
+    #: (__woof_opaque_index), not the policy; out of line it builds in
+    #: seconds rather than a minute and its Metal tests (test_nssl2_gpu and
+    #: the cccn, variants, shapes and alias suites, both arithmetic arms)
+    #: give the words the fully inlined build gives.  cam3_emissivity: fully
+    #: inlined its cam_driver crashed the compiler service after ~33 minutes;
+    #: out of line it builds in about a minute and its camrad driver grade
+    #: against the gfortran WRF 4.7.1 oracle (tools/cam_wrf461_oracle/
+    #: check_camrad_gpu.py) is 0 ULP on all 96960 words under strict
+    #: numerics, as on CUDA, and passes the default grade.  cammgmp and rcon
+    #: have no Metal test to hold them to.
+    INLINE_POLICY_BY_UNIT = {"goddard": "size", "lake": "size", "mskf": "size",
+                             "mskf_aerosol_replay": "size", "flg_streams": "size", "nssl2": "size",
+                             "cam3_emissivity": "size"}
 
     #: The same, for units known by a kernel they define (a RawModule's unit
     #: name is a hash of its text).  TEMPO's column kernel did not finish
@@ -2557,7 +2761,14 @@ class _Rewriter:
         close = self._closing_angle(toks, 1)
         if close is None:
             self.refuse(cursor, f"cannot find the template header of {cursor.spelling!r}")
-        self.edits.insert(toks[close].extent.start.offset, ", int __WS = 0", rank=-30_000)
+        # the default goes on the first declaration only (MYNN 4.7.1 declares
+        # M471Ptr ahead of M471Ref, which returns one)
+        defaulted = self.__dict__.setdefault("_ws_defaulted", set())
+        default = "" if cursor.spelling in defaulted else " = 0"
+        defaulted.add(cursor.spelling)
+        self.edits.insert(toks[close].extent.start.offset, ", int __WS" + default, rank=-30_000)
+        if not cursor.is_definition():
+            return
         for c in cursor.get_children():
             if c.kind == K.FIELD_DECL and _indirection(c.type) == "ptr":
                 ftoks = list(c.get_tokens())
@@ -2594,15 +2805,128 @@ class _Rewriter:
                 if start is None or name is None or mtoks[name - 1].spelling not in ("&", "*"):
                     self.refuse(c, f"cannot respell the return type of {c.spelling!r}")
                 mark = mtoks[name - 1]
+                if mark.spelling == "&" and c.kind == K.CXX_METHOD \
+                        and c.result_type.get_pointee().get_declaration().spelling == cursor.spelling:
+                    # `S& operator+=(...) { ...; return *this; }`: the object
+                    # is a local (a thread value), whatever space it points into
+                    self.edits.insert(start, "thread ", rank=-30_000)
+                    continue
                 alias = "__woof_sref" if mark.spelling == "&" else "__woof_sptr"
                 self.edits.insert(start, f"{alias}<", rank=-30_000)
                 self.edits.replace(mark.extent.start.offset, mark.extent.end.offset, ", __WS> ")
-        # S<...> inside the class: the same space
+        # S<...> inside the class: the same space (and a companion generic
+        # struct named there: its data is this one's)
+        names = set(getattr(self, "generic_structs", ())) | {cursor.spelling}
         for i in range(close + 1, len(toks) - 1):
-            if toks[i].spelling == cursor.spelling and toks[i + 1].spelling == "<":
+            if toks[i].spelling in names and toks[i + 1].spelling == "<":
                 j = self._closing_angle(toks, i + 1)
                 if j is not None:
                     self.edits.insert(toks[j].extent.start.offset, ", __WS", rank=-30_000)
+
+    def generic_constructions(self, top):
+        """``S<T>(p, ...)`` naming a space-generic struct outside it
+        (gsfcsw's ``gsfc_ptr<real>((real *)(workspace + 0), 32)``): the
+        temporary takes its pointer argument's space as ``S<T, space>``."""
+        K = self.ci.CursorKind
+        names = set(getattr(self, "generic_structs", ()))
+        if not names:
+            return
+        from woof.backend.translate.spaces import _indirection
+        done = set()
+        for c in top:
+            if c.kind in (K.FUNCTION_DECL, K.FUNCTION_TEMPLATE, K.CXX_METHOD) and c.is_definition():
+                if c.semantic_parent is not None and c.semantic_parent.spelling.split("<", 1)[0] in names \
+                        and c.lexical_parent is not None and c.lexical_parent.kind != c.semantic_parent.kind:
+                    self._generic_out_of_class_member(c, names)
+                    continue
+                self._generic_factory_return(c, names)
+        for c in top:
+            if c.kind == K.CLASS_TEMPLATE and c.spelling in names:
+                continue
+            for node in c.walk_preorder():
+                if node.kind not in (K.CXX_FUNCTIONAL_CAST_EXPR, K.CALL_EXPR, K.UNEXPOSED_EXPR,
+                                     K.CSTYLE_CAST_EXPR) or not self.main_file(node):
+                    continue
+                toks = list(node.get_tokens())
+                # `(S<T>)p` as well as `S<T>(p, ...)`
+                lead = 1 if node.kind == K.CSTYLE_CAST_EXPR and toks and toks[0].spelling == "(" else 0
+                if len(toks) < 4 + lead or toks[lead].spelling not in names or toks[lead + 1].spelling != "<":
+                    continue
+                close = self._closing_angle(toks, lead + 1)
+                after = ")" if lead else "("
+                if close is None or close + 1 >= len(toks) or toks[close + 1].spelling != after:
+                    continue
+                at = toks[close].extent.start.offset
+                if at in done or any(t.spelling == "," for t in toks[lead + 2:close]):
+                    continue
+                args = [a for a in node.walk_preorder() if a is not node
+                        and a.extent.start.offset > toks[close + 1].extent.start.offset
+                        and _indirection(a.type) == "ptr"]
+                if not args:
+                    continue
+                space = self.spaces.space(args[0], {}) or "device"
+                if space == "null":
+                    space = "device"
+                done.add(at)
+                self.edits.insert(at, f", {self.SPACE_INDEX[space]}", rank=-30_000)
+
+    def _generic_out_of_class_member(self, fn, names):
+        """``template<class T> S2<T> S<T>::f() const {...}`` defined outside a
+        space-generic struct S: its template header takes ``int __WS`` and
+        every generic name before the body carries ``__WS``."""
+        K = self.ci.CursorKind
+        toks = list(fn.get_tokens())
+        body = next((c for c in fn.get_children() if c.kind == K.COMPOUND_STMT), None)
+        end = body.extent.start.offset if body is not None else fn.extent.end.offset
+        if not toks or toks[0].spelling != "template" or len(toks) < 2 or toks[1].spelling != "<":
+            self.refuse(fn, f"cannot find the template header of {fn.spelling!r}")
+        close = self._closing_angle(toks, 1)
+        self.edits.insert(toks[close].extent.start.offset, ", int __WS", rank=-30_000)
+        for i in range(close + 1, len(toks) - 1):
+            if toks[i].extent.start.offset >= end:
+                break
+            if toks[i].spelling in names and toks[i + 1].spelling == "<":
+                j = self._closing_angle(toks, i + 1)
+                if j is not None:
+                    self.edits.insert(toks[j].extent.start.offset, ", __WS", rank=-30_000)
+
+    def _generic_factory_return(self, fn, names):
+        """A free function returning a space-generic struct by value
+        (MYNN 4.7.1's ``M471Ptr<T> m471_array(work, offset, n)``): its return
+        type names the space of the data it returns."""
+        K = self.ci.CursorKind
+        toks = list(fn.get_tokens())
+        name = next((i for i, t in enumerate(toks) if t.spelling == fn.spelling), None)
+        if name is None:
+            return
+        head = next((i for i in range(name) if toks[i].spelling in names
+                     and i + 1 < name and toks[i + 1].spelling == "<"), None)
+        if head is None:
+            return
+        close = self._closing_angle(toks, head + 1)
+        if close is None or close >= name or any(t.spelling == "," for t in toks[head + 2:close]):
+            return
+        info = self.spaces.functions.get(fn.get_usr())
+        instances = sorted(self.spaces.instances.get(fn.get_usr()) or ()) if info is not None else []
+        if len(instances) > 1:
+            return              # a factory per space: not this rule's
+        env = {}
+        if info is not None and instances:
+            env = {parm.get_usr(): space for (_, parm, _), space in zip(info.slots, instances[0])}
+        spaces = set()
+        for r in fn.walk_preorder():
+            kids = list(r.get_children())
+            if r.kind == K.RETURN_STMT and kids:
+                sp = self.spaces.gspace(kids[0], env)
+                if sp is None:
+                    return
+                spaces.add(sp)
+        if len(spaces) != 1:
+            return
+        space = next(iter(spaces))
+        if space not in self.SPACE_INDEX:
+            return
+        self.edits.insert(toks[close].extent.start.offset, f", {self.SPACE_INDEX[space]}", rank=-30_000)
 
     def generic_type_close(self, tokens, name):
         """Where a ``name<...>`` among ``tokens`` takes its space argument."""
@@ -2621,8 +2945,42 @@ class _Rewriter:
         if cursor.spelling in getattr(self, "generic_structs", ()):
             self.generic_struct(cursor)
             return
+        if cursor.kind in (K.STRUCT_DECL, K.CLASS_DECL) and cursor.is_definition() \
+                and not any(c.kind in (K.FIELD_DECL, K.CXX_BASE_SPECIFIER) for c in cursor.get_children()):
+            # An empty struct is one byte in C++ and in MSL, but a buffer's
+            # struct holding several empty members (RRFS smoke's State, one
+            # per Fortran module without variables) is "not valid for
+            # attribute 'buffer'": the byte is spelled, the layout the same
+            toks = list(cursor.get_tokens())
+            brace = next((t for t in toks if t.spelling == "{"), None)
+            if brace is not None:
+                self.edits.insert(brace.extent.end.offset, " char __woof_empty;", rank=-20_000)
         seen = set()
+        groups = {}
         for c in cursor.get_children():
+            if c.kind == K.FIELD_DECL:
+                groups.setdefault(c.extent.start.offset, []).append(c)
+        for fields in groups.values():
+            kinds = {(_indirection(f.type), self._field_space(f) if _indirection(f.type) == "ptr" else None)
+                     for f in fields}
+            if (len(fields) > 1 and len(kinds) > 1 and any(k[0] == "ptr" for k in kinds)
+                    and self._split_field_group(fields)):
+                seen.add(fields[0].extent.start.offset)
+        from woof.backend.translate.spaces import _is_table
+        for c in cursor.get_children():
+            if c.kind == K.FIELD_DECL and _is_table(c.type) and len(groups.get(c.extent.start.offset, ())) == 1:
+                # a T** field holds a kernel's address table (cam3's
+                # CamState::abs_args = descriptors + worker*41): the table type
+                target = c.type.get_canonical().get_pointee().get_pointee()
+                tspace = "const device" if target.is_const_qualified() else "device"
+                elem = self._spell_type(target, drop_const=True)
+                toks = list(c.get_tokens())
+                name = next((t for t in toks if t.spelling == c.spelling), None)
+                if name is not None and toks:
+                    self.edits.replace(toks[0].extent.start.offset, name.extent.start.offset,
+                                       f"__woof_addr_table<{tspace} {elem}*> ")
+                    seen.add(c.extent.start.offset)
+                    continue
             if c.kind == K.FIELD_DECL and _indirection(c.type) == "ptr":
                 # `T *a, *b;` declares two fields from one decl-specifier
                 if c.extent.start.offset not in seen:
@@ -2646,6 +3004,50 @@ class _Rewriter:
             elif c.kind in (K.STRUCT_DECL, K.CLASS_DECL, K.CLASS_TEMPLATE,
                             K.CLASS_TEMPLATE_PARTIAL_SPECIALIZATION):
                 self.struct_fields(c)
+
+    def _split_field_group(self, fields):
+        """``T *a, b, *c;`` with pointer and non-pointer fields (or pointers in
+        different spaces) under one decl-specifier: one declaration per field,
+        each pointer qualified with its own space, since a space in the shared
+        decl-specifier would qualify the non-pointer fields too (cam3's
+        CamState: field may not be qualified with an address space).  False
+        when the declarators cannot be found."""
+        from woof.backend.translate.spaces import _indirection
+        toks = [t for t in self.tu.get_tokens(extent=self.ci.SourceRange.from_locations(
+            fields[0].extent.start, fields[-1].extent.end))]
+        first_name = next((i for i, t in enumerate(toks) if t.spelling == fields[0].spelling), None)
+        if first_name is None:
+            return False
+        base_end = first_name
+        while base_end > 0 and toks[base_end - 1].spelling in ("*", "&", "const", "__restrict__"):
+            base_end -= 1
+        if base_end == 0:
+            return False
+        base = " ".join(t.spelling for t in toks[:base_end])
+        depth, commas = 0, []
+        for t in toks[first_name:]:
+            if t.spelling in ("(", "[", "{"):
+                depth += 1
+            elif t.spelling in (")", "]", "}"):
+                depth -= 1
+            elif t.spelling == "," and depth == 0:
+                commas.append(t)
+        if len(commas) != len(fields) - 1:
+            return False
+        def prefix(f):
+            return f"{self._field_space(f)} " if _indirection(f.type) == "ptr" else ""
+
+        def spelled(f):
+            # inserted text is not respelled: the element type as the
+            # translator spells types (f64, f32s)
+            t = f.type.get_canonical()
+            while t.kind.name in ("POINTER", "CONSTANTARRAY", "INCOMPLETEARRAY"):
+                t = t.get_pointee() if t.kind.name == "POINTER" else t.element_type
+            return self._spell_type(t, drop_const=False)
+        self.edits.insert(fields[0].extent.start.offset, prefix(fields[0]), rank=-20_000)
+        for comma, f in zip(commas, fields[1:]):
+            self.edits.replace(comma.extent.start.offset, comma.extent.end.offset, f"; {prefix(f)}{spelled(f)} ")
+        return True
 
     def local_pointer_array(self, node):
         """``T* a[N] = {&x, p, ...}``: the elements' address space, from the
@@ -2930,6 +3332,8 @@ class _Rewriter:
                 continue
             if kind == K.INIT_LIST_EXPR:
                 self.fold_init_list(node)
+            if kind == K.ARRAY_SUBSCRIPT_EXPR:
+                self.opaque_constant_index(node)
             if kind == K.UNARY_OPERATOR and not self.retain and _is_float(node.type):
                 self.flushing_negation(node)
             if kind == K.CONDITIONAL_OPERATOR and _is_float(node.type):
@@ -2977,6 +3381,17 @@ class _Rewriter:
                         if s < e:
                             spelled = self._spell_type(node.type, drop_const=True)
                             self.edits.wrap(s, e, f"(({spelled})(", "))", d)
+                elif len(children) == 1 and _is_double(node.type) and not _is_double(children[0].type) \
+                        and children[0].type.get_canonical().kind.name != "RECORD" \
+                        and self._user_conversion_below(children[0]):
+                    # a class's conversion to float, then float -> double: on
+                    # Metal double is the f64 class, and an implicit chain of
+                    # two user conversions is not one C++ takes (MYNN 4.7.1's
+                    # `d__1 = qke1[k]`, an M471Ref<real>); the explicit cast is
+                    s, e = self.span(children[0])
+                    if s < e:
+                        via = f"({self._spell_type(children[0].type, drop_const=True)})"
+                        self.edits.wrap(s, e, f"(({self._spell_type(node.type, drop_const=True)}){via}(", "))", d)
             if self.retain and self.f32s_vector_component(node, d):
                 pass
             elif kind == K.COMPOUND_ASSIGNMENT_OPERATOR:
@@ -2991,6 +3406,19 @@ class _Rewriter:
             for child in reversed(list(node.get_children())):
                 stack.append((child, d + 1))
 
+    @staticmethod
+    def _user_conversion_below(e, depth=3) -> bool:
+        """``e`` is (a few implicit nodes over) a class's conversion operator call."""
+        for _ in range(depth):
+            ref = e.referenced
+            if e.kind.name == "CALL_EXPR" and ref is not None and ref.kind.name == "CONVERSION_FUNCTION":
+                return True
+            kids = list(e.get_children())
+            if len(kids) != 1 or e.kind.name not in ("UNEXPOSED_EXPR", "CALL_EXPR", "MEMBER_REF_EXPR"):
+                return False
+            e = kids[0]
+        return False
+
     _FUNCTION_KINDS = ("FUNCTION_DECL", "CXX_METHOD", "CONSTRUCTOR", "DESTRUCTOR",
                        "FUNCTION_TEMPLATE", "LAMBDA_EXPR")
 
@@ -2999,6 +3427,13 @@ class _Rewriter:
         arguments have: it becomes ``auto`` (a generic lambda).  Overload
         resolution is unchanged -- a lambda has one call operator."""
         for parm in node.get_children():
+            if parm.kind.name == "PARM_DECL" and _indirection_kind(parm.type) == "ref":
+                # `[&](int j, float& out)`: the caller's locals (EEPS's row
+                # and interface lambdas write their results through them)
+                toks = list(parm.get_tokens())
+                if toks:
+                    self.edits.insert(toks[0].extent.start.offset, "thread ", rank=-20_000)
+                continue
             if parm.kind.name != "PARM_DECL" or _indirection_kind(parm.type) != "ptr":
                 continue
             toks = list(parm.get_tokens())
@@ -3323,6 +3758,46 @@ class _Rewriter:
         self.edits.replace(s, e, f"__woof_f64_lit(0x{word:016X}UL)")
         return True
 
+    #: Private arrays longer than this many elements take constant indices
+    #: through __woof_opaque_index (opaque_constant_index).
+    PRIVATE_ARRAY_CONSTANT_INDEX_LIMIT = 32
+
+    def opaque_constant_index(self, node):
+        """``a[0]`` on a function-local array of more than 32 elements ->
+        ``a[__woof_opaque_index(0)]``.  Apple's shader compiler (macOS 26.5,
+        M3 Max) reads such an element as 0 when the array was filled and
+        read by loops of runtime trip count before it (``float r[64]; for (k
+        < nz) r[k] = ...; for (k < nz) t += r[k]; out = r[0];`` gives 0, in
+        a plain mx.fast.metal_kernel too; 32 elements or a runtime index read
+        it right).  NSSL-2's rain sedimentation exported rho[0] * flux as 0
+        through it.  The index's value is unchanged."""
+        kids = list(node.get_children())
+        if len(kids) != 2:
+            return
+        base, index = kids
+        while base.kind.name in ("UNEXPOSED_EXPR", "PAREN_EXPR") and len(list(base.get_children())) == 1:
+            base = list(base.get_children())[0]
+        d = base.referenced if base.kind.name == "DECL_REF_EXPR" else None
+        if d is None or d.kind.name != "VAR_DECL" or d.semantic_parent is None \
+                or d.semantic_parent.kind.name not in self._FUNCTION_KINDS:
+            return
+        if any(c.kind.name == "ANNOTATE_ATTR" for c in d.get_children()):
+            return          # __shared__ (threadgroup) or another marked array
+        t = d.type.get_canonical()
+        if t.kind.name == "CONSTANTARRAY":
+            if t.element_count <= self.PRIVATE_ARRAY_CONSTANT_INDEX_LIMIT:
+                return
+        elif t.kind.name not in ("DEPENDENTSIZEDARRAY",):
+            return
+        literal = index
+        while literal.kind.name in ("UNEXPOSED_EXPR", "PAREN_EXPR") and len(list(literal.get_children())) == 1:
+            literal = list(literal.get_children())[0]
+        if literal.kind.name != "INTEGER_LITERAL":
+            return
+        s, e = self.span(index)
+        if s < e:
+            self.edits.wrap(s, e, "__woof_opaque_index(", ")", 0)
+
     def qualify_namespace_call(self, node):
         """An unqualified call to a namespace's function, in an f32s unit:
         ``N::f(...)``.  f32s is a class at global scope, so argument-dependent
@@ -3614,12 +4089,25 @@ class _Rewriter:
         return name + "_w" if name in METAL_RESERVED else name
 
 
-def prelude(*, contract: bool, retain_subnormals: bool = False, ieee_helpers: bool = False) -> str:
+def prelude(*, contract: bool, retain_subnormals: bool = False, ieee_helpers: bool = False,
+            f64: str = "soft") -> str:
     """``retain_subnormals``: the unit is --ftz=false (float is f32s);
     ``ieee_helpers``: it uses the subnormal-keeping ops of non-.ftz PTX,
-    which f32s.h also defines, in a unit that otherwise flushes."""
+    which f32s.h also defines, in a unit that otherwise flushes;
+    ``f64``: ``soft`` (strict: f64_soft.h, with f64_df64.h's exact division
+    and square root) or ``df64`` (fast numerics, :func:`_df64_prelude`)."""
     soft = (METAL_DIR / "f64_soft.h").read_text()
-    text = (METAL_DIR / "prelude.h").read_text().replace("// F64_SOFT_H_TEXT", soft)
+    if f64 == "df64":
+        return _df64_prelude(soft, contract=contract, retain_subnormals=retain_subnormals,
+                             ieee_helpers=ieee_helpers)
+    if f64 != "soft":
+        raise ValueError(f"f64 must be soft or df64, not {f64!r}")
+    # strict: soft-float, but division and square root from f64_df64.h's
+    # exact df64-seeded words (the soft-float words, tools/df64_grade.py
+    # strict), without its libm
+    exact = ("#define WOOF_DF64_ARITH 1\n#define WOOF_DF64_NO_LIBM 1\n"
+             + (METAL_DIR / "f64_df64.h").read_text())
+    text = (METAL_DIR / "prelude.h").read_text().replace("// F64_SOFT_H_TEXT", soft + "\n" + exact)
     if retain_subnormals:
         text = "#define WOOF_RETAIN_SUBNORMALS 1\n" + text
     if retain_subnormals or ieee_helpers:
@@ -3631,6 +4119,22 @@ def prelude(*, contract: bool, retain_subnormals: bool = False, ieee_helpers: bo
     return "#pragma METAL fp contract(off)\n" + text + after
 
 
+def _df64_prelude(soft: str, *, contract: bool, retain_subnormals: bool, ieee_helpers: bool) -> str:
+    """The fast numerics' prelude: f64_soft.h, then f64_df64.h (division and
+    square root through its exact df64-seeded words, WOOF_DF64_ARITH), and
+    after the prelude the df64 libm's overloads on ``f64``
+    (f64_df64_bind.h)."""
+    df64 = "#define WOOF_DF64_ARITH 1\n" + (METAL_DIR / "f64_df64.h").read_text()
+    text = (METAL_DIR / "prelude.h").read_text().replace("// F64_SOFT_H_TEXT", soft + "\n" + df64)
+    if retain_subnormals:
+        text = "#define WOOF_RETAIN_SUBNORMALS 1\n" + text
+    if retain_subnormals or ieee_helpers:
+        text += "\n" + (METAL_DIR / "f32s.h").read_text()
+    text += "\n" + (METAL_DIR / "f64_df64_bind.h").read_text()
+    after = "\n#pragma METAL fp contract(fast)\n" if contract else ""
+    return "#pragma METAL fp contract(off)\n" + text + after
+
+
 VENDOR_LIBM64 = HERE / "vendor_libm64.cuh"
 #: WOOF's correctly rounded powf, the MLX facade's strict float32 power
 #: (facade/_ops.py; WOOF_STRICT_POWF=cuda selects the opt-in instead)
@@ -3638,12 +4142,24 @@ STRICT_POWF = HERE / "strict_powf.cuh"
 F64CR = HERE.parents[1] / "core" / "kernels" / "f64cr.cuh"
 _VENDOR_CALL = re.compile(r"\b(exp|log|log10|sin|cos|tan|atan|pow|atan2|hypot|log2|expm1|tanh|tgammaf?|lgamma|log1pf?|cbrtf?|erfc?)\s*\(")
 CR_CBRT = HERE.parents[1] / "core" / "kernels" / "cr_cbrt_flt64.cuh"
+#: binary64 functions the df64 prelude provides (f64_df64_bind.h): under
+#: f64="df64" the vendored libm keeps only its other entry points
+DF64_NATIVE = ("exp", "expm1", "log", "log2", "log10", "log1p", "pow", "sin", "cos", "tan",
+               "atan", "atan2", "tanh", "hypot")
+_VENDOR_CALL_DF64 = re.compile(r"\b(tgammaf?|lgamma|log1pf|cbrtf|erfc?)\s*\(")
 
 
-def compose(source: str, expanded: str | None = None) -> str:
+def compose(source: str, expanded: str | None = None, f64: str = "soft") -> str:
     """Prepend the binary64 libm (vendor_libm64.cuh, with f64cr.cuh) to a
     unit that calls one of CUDA's binary64 libm names, in its own text or
-    (``expanded``, the preprocessed unit) in a header it includes."""
+    (``expanded``, the preprocessed unit) in a header it includes.
+
+    ``f64="df64"``: the df64 prelude defines :data:`DF64_NATIVE` and cbrt
+    itself, so only a unit calling one of the rest (tgamma, lgamma, erf,
+    erfc and the binary32 log1pf, cbrtf, tgammaf) gets the vendored text,
+    without its wrappers for the native names."""
+    if f64 == "df64":
+        return _compose_df64(source, expanded)
     if not _VENDOR_CALL.search(source) and not (expanded and _VENDOR_CALL.search(expanded)):
         return source
     f64cr = F64CR.read_text(encoding="utf-8")
@@ -3658,6 +4174,27 @@ def compose(source: str, expanded: str | None = None) -> str:
                 + "\n__device__ __forceinline__ double cbrt(double x) { return g64_cbrt::cr_cbrt(x); }\n")
     return ("__device__ double wlm_sin_huge(double x);\n" + f64cr + "\n"
             + VENDOR_LIBM64.read_text(encoding="utf-8") + "\n" + cbrt + source)
+
+
+def _compose_df64(source: str, expanded: str | None) -> str:
+    if not _VENDOR_CALL_DF64.search(source) and not (expanded and _VENDOR_CALL_DF64.search(expanded)):
+        return source
+    f64cr = F64CR.read_text(encoding="utf-8")
+    hook = "#define WCR_PLATFORM_SIN(x) sin(x)"
+    if hook not in f64cr:
+        raise TranslationError("f64cr.cuh no longer defines its CUDA platform-sin hook as expected")
+    f64cr = f64cr.replace(hook, "#define WCR_PLATFORM_SIN(x) wlm_sin_huge(x)")
+    vendor, kept = [], 0
+    wrapper = re.compile(r"^__device__ __forceinline__ (?:double|float) (\w+)\(")
+    for line in VENDOR_LIBM64.read_text(encoding="utf-8").splitlines():
+        m = wrapper.match(line)
+        if m and m.group(1) in DF64_NATIVE:
+            continue
+        kept += bool(m and m.group(1) in ("tgamma", "lgamma", "erf", "erfc"))
+        vendor.append(line)
+    if kept != 4:
+        raise TranslationError("vendor_libm64.cuh no longer defines its tgamma/lgamma/erf/erfc wrappers as expected")
+    return ("__device__ double wlm_sin_huge(double x);\n" + f64cr + "\n" + "\n".join(vendor) + "\n" + source)
 
 
 def _integer_macros(source: str, defines=()) -> dict:
@@ -3725,6 +4262,51 @@ def explicit_float_to_integral(text: str) -> str:
         if s < e:
             spelled = n.type.get_canonical().spelling.replace("const ", "").strip()
             edits.wrap(s, e, f"(({spelled})(", "))", 0)
+    return edits.apply()
+
+
+def hoist_block_prototypes(text: str) -> str:
+    """f2c declares the functions a body calls inside it (``extern int
+    f_(integer *, ...);``).  The translator gives a function's declarations
+    its address spaces and implicit parameters, but a declaration inside a
+    body that is itself rendered once per address-space instance would be
+    a region inside that region.  So each such declaration statement moves
+    to file scope, just before the function that holds it (the same
+    namespace, so it names the same function)."""
+    import clang.cindex as ci
+    if not re.search(r"[;{]\s*extern\s[^;{}()]*\w\s*\(", text):
+        return text
+    tu = parse(text)
+    K = ci.CursorKind
+    data = text.encode()
+    edits = Edits(data)
+    for fn in tu.cursor.walk_preorder():
+        if fn.kind not in (K.FUNCTION_DECL, K.FUNCTION_TEMPLATE) or not fn.is_definition() \
+                or fn.location.file is None or fn.location.file.name != "unit.cpp" \
+                or fn.semantic_parent is None \
+                or fn.semantic_parent.kind not in (K.TRANSLATION_UNIT, K.NAMESPACE):
+            continue
+        moved = []
+        for stmt in fn.walk_preorder():
+            if stmt.kind != K.DECL_STMT:
+                continue
+            kids = list(stmt.get_children())
+            if kids and all(k.kind == K.FUNCTION_DECL for k in kids):
+                s, e = stmt.extent.start.offset, stmt.extent.end.offset
+                # `extern int f(...), g(...);`: one declaration each (each
+                # is rendered per instance on its own)
+                prefix = data[s:kids[0].location.offset]
+                ends = [kids[0].extent.end.offset] + [k.extent.end.offset for k in kids[1:]]
+                if any(b"*" in data[ends[i - 1]:k.location.offset] or b"&" in data[ends[i - 1]:k.location.offset]
+                       for i, k in enumerate(kids) if i):
+                    moved.append(data[s:e].decode())
+                else:
+                    moved.extend((prefix + data[k.location.offset:k.extent.end.offset]).decode() + ";"
+                                 for k in kids)
+                edits.replace(s, e, "")
+        if moved:
+            at = data.rfind(b"\n", 0, fn.extent.start.offset) + 1
+            edits.insert(at, "\n".join(moved) + "\n", 0)
     return edits.apply()
 
 
@@ -3927,26 +4509,107 @@ def flatten_inheritance(text: str, unit: str) -> str:
     return edits.apply()
 
 
+#: Environment override for the translation cache directory ("off": none).
+TRANSLATION_DIR_ENV = "WOOF_METAL_TRANSLATION_DIR"
+
+
+@lru_cache(maxsize=1)
+def translator_digest() -> str:
+    """Everything a translation depends on besides its preprocessed text:
+    the translator's own sources, the Metal headers its prelude carries and
+    the libclang it parses with."""
+    root = Path(__file__).resolve().parent
+    digest = hashlib.sha256()
+    files = sorted(root.glob("*.py")) + sorted(root.glob("*.h")) + sorted(root.glob("*.cuh")) \
+        + sorted((root.parent / "metal").glob("*.h"))
+    for path in files:
+        digest.update(path.name.encode() + b"\0" + path.read_bytes() + b"\0")
+    try:
+        from importlib.metadata import version
+        digest.update(version("libclang").encode())
+    except Exception:  # noqa: BLE001 -- the bindings' version is best effort
+        pass
+    return digest.hexdigest()
+
+
+def _translation_dir() -> Path | None:
+    env = os.environ.get(TRANSLATION_DIR_ENV)
+    if env in ("off", "0"):
+        return None
+    if env:
+        return Path(env).expanduser()
+    base = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
+    return (base / "woof" / "metal-translations").expanduser()
+
+
+def _translation_cache(text, unit, contract, retain_subnormals, source, defines, f64):
+    """``(cached unit or None, store)``: translations persist across processes
+    under :func:`_translation_dir`, keyed by the PREPROCESSED text (so an
+    edited header is a new key), the unit's name and flags (``f64`` among them), the integer
+    macros the source and options define, and :func:`translator_digest`.
+    Parsing and rewriting a large unit costs seconds; a hit costs a read."""
+    directory = _translation_dir()
+    if directory is None:
+        return None, lambda result: None
+    key = hashlib.sha256("\0".join((
+        translator_digest(), unit, str(bool(contract)), str(bool(retain_subnormals)), f64,
+        repr(sorted(_integer_macros(source, defines).items())), text)).encode()).hexdigest()
+    path = directory / f"{key}.pickle"
+    try:
+        with open(path, "rb") as f:
+            return pickle.load(f), lambda result: None
+    except (OSError, EOFError, pickle.UnpicklingError, AttributeError, ImportError):
+        pass
+
+    def store(result: TranslatedUnit) -> None:
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+            partial = path.with_name(f"{path.name}.{os.getpid()}.partial")
+            with open(partial, "wb") as f:
+                pickle.dump(result, f, protocol=pickle.HIGHEST_PROTOCOL)
+            os.replace(partial, path)
+        except OSError:
+            pass
+    return None, store
+
+
 def translate(source: str, *, unit: str = "<unit>", contract: bool = False,
-              retain_subnormals: bool = False, defines=(), include_dirs=()) -> TranslatedUnit:
+              retain_subnormals: bool = False, defines=(), include_dirs=(),
+              f64: str = "soft") -> TranslatedUnit:
     """CUDA unit text -> :class:`TranslatedUnit` (MSL plus kernel signatures).
 
     ``retain_subnormals``: the unit's ``float`` is ``f32s`` (gradual
     underflow in software where the GPU would flush; woof/backend/metal/
     f32s.h) -- CUDA's --ftz=false.
+    ``f64``: ``soft``, every ``double`` operation's word exact (strict), or
+    ``df64``, the fast numerics' division, square root and libm through
+    double-float (woof/backend/metal/f64_df64.h).  The translated body is
+    the same text in both; the prelude and the vendored libm differ.
     """
     text = preprocess(source, defines, include_dirs)
-    if compose(source, text) is not source:
-        text = preprocess(compose(source, text), defines, include_dirs)
+    if compose(source, text, f64) is not source:
+        text = preprocess(compose(source, text, f64), defines, include_dirs)
+    cached, store = _translation_cache(text, unit, contract, retain_subnormals, source, defines, f64)
+    if cached is not None:
+        return cached
+    result = _translate_preprocessed(text, source, unit=unit, contract=contract,
+                                     retain_subnormals=retain_subnormals, defines=defines, f64=f64)
+    store(result)
+    return result
+
+
+def _translate_preprocessed(text: str, source: str, *, unit: str, contract: bool,
+                            retain_subnormals: bool, defines, f64: str) -> TranslatedUnit:
     text = rewrite_ptx_asm(text, unit)
     if retain_subnormals:
         text = explicit_float_to_integral(text)
     text = flatten_inheritance(text, unit)
+    text = hoist_block_prototypes(text)
     tu = parse(text)
     result = _Rewriter(text, tu, unit=unit, retain_subnormals=retain_subnormals,
                        macros=_integer_macros(source, defines)).run()
     result.msl = (prelude(contract=contract, retain_subnormals=retain_subnormals,
-                          ieee_helpers="__woof_ieee_" in result.msl)
+                          ieee_helpers="__woof_ieee_" in result.msl, f64=f64)
                   + "\n// ---- translated unit: " + unit + "\n" + result.msl)
     result.key = hashlib.sha256(result.msl.encode()).hexdigest()
     return result

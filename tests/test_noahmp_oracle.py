@@ -326,8 +326,11 @@ PINNED_LEAF_ASSETS = {
         "cb985a6c05ae261e1d8d74c797719cd230be2128a190163b36061e46365903ec",
     DISC_CSV:
         "a82343047b724225cc66ca5398323a491822f6fc2f03c67b821e184b2bf7a218",
+    # The original patch file (164885a9...) was never committed; this is the
+    # committed equivalent, which reproduces the pinned patched module on
+    # both pinned trees (tools/noahmp_wrf461_oracle/check_visibility_patch.py).
     VISIBILITY_PATCH:
-        "164885a9ce956a51be2ab189165da8b60217b636a720c994e04dfb862a05aad5",
+        "b16db586bbed70735b148618c794206ed0ff2988dfc8c9ee822b80added34a95",
 }
 
 

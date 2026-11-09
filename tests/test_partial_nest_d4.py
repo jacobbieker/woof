@@ -132,6 +132,76 @@ def test_the_real_data_route_refuses_partial_bands(tmp_path):
     refuse_real_partial_nests(_loads_or_skip(tmp_path), "woof run (experiment-tree)")
 
 
+def test_the_prepared_tree_preflight_asks_what_its_bands_do_not_carry():
+    """`woof go`'s domain-tree route realizes its bands on the restored tree
+    (run_prepared_tree's _realize_prepared_partial_nests ->
+    realize_partial_nests); its preflight refuses, by name, only what that
+    route does not carry beside a band.  (It used to refuse every band,
+    after a GFS 9 km -> 3 km tree with partial_nest = { k_top = 20 } on d02
+    wrote history bit-identical to the same tree without the key: the
+    route built every child full depth.)"""
+    import ast
+    import inspect
+    from woof import prepared_domain_tree_forecast as tree
+    body = ast.parse(textwrap.dedent(inspect.getsource(tree.preflight_prepared_tree)))
+    called = {node.func.id for node in ast.walk(body)
+              if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)}
+    assert "refuse_prepared_tree_partial_nests" in called
+    assert "refuse_real_partial_nests" not in called
+    run = ast.parse(textwrap.dedent(inspect.getsource(tree.run_prepared_tree)))
+    called = {node.func.id for node in ast.walk(run)
+              if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)}
+    assert {"_realize_prepared_partial_nests", "realize_partial_nests"} <= called
+
+
+def test_the_prepared_tree_refuses_what_a_band_does_not_carry(tmp_path):
+    from woof.core.model import refuse_prepared_tree_partial_nests
+    band = "partial_nest = { k_top = 21 }"
+    exp = _load(tmp_path, d02=band)
+    refuse_prepared_tree_partial_nests(exp, "woof go")          # carried
+    refuse_prepared_tree_partial_nests(_loads_or_skip(tmp_path), "woof go")
+    adaptive = dataclasses.replace(
+        exp, domains=tuple(dataclasses.replace(
+            dc, run=dataclasses.replace(dc.run, use_adaptive_time_step=True))
+            for dc in exp.domains))
+    with pytest.raises(ValueError, match="adaptive clock.*--clock fixed"):
+        refuse_prepared_tree_partial_nests(adaptive, "woof go")
+
+
+def test_woof_go_launches_partial_bands_on_the_tree_route(tmp_path):
+    """The forecast launch passes a band the tree route carries, refuses one
+    it does not (before any download or preparation), and keeps refusing a
+    band on a [case_data] launch (the experiment-tree route builds its
+    children full depth)."""
+    import ast
+    import inspect
+    import tomllib
+    from test_experiment import _write
+    from woof import go_cli
+    path = _write(tmp_path, d02="partial_nest = { k_top = 21 }")
+    go_cli._refuse_partial_nests(path, tomllib.loads(path.read_text()))
+    payload = tomllib.loads(path.read_text())
+    with pytest.raises(go_cli.GoRefusal, match="d02 declares partial_nest"):
+        go_cli._refuse_partial_nests(path, {**payload, "case_data": {}})
+    (tmp_path / "adaptive").mkdir()
+    adaptive = _write(tmp_path / "adaptive", shared="use_adaptive_time_step = true",
+                      d02="partial_nest = { k_top = 21 }")
+    try:
+        loaded = tomllib.loads(adaptive.read_text())
+        go_cli._refuse_partial_nests(adaptive, loaded)
+    except go_cli.GoRefusal as error:
+        assert "adaptive clock" in str(error)
+    else:
+        pytest.fail("an adaptive-clock band launched")
+    (tmp_path / "plain").mkdir()
+    plain = _write(tmp_path / "plain")
+    go_cli._refuse_partial_nests(plain, tomllib.loads(plain.read_text()))
+    body = ast.parse(textwrap.dedent(inspect.getsource(go_cli._go_launch)))
+    called = {node.func.id for node in ast.walk(body)
+              if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)}
+    assert "_refuse_partial_nests" in called
+
+
 # ---------------------------------------------------------------------------
 # device gates
 # ---------------------------------------------------------------------------

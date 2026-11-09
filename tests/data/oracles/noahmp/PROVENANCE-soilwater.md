@@ -1,5 +1,14 @@
 # Noah-MP soil-water oracle -- provenance
 
+> **Re-pinned to WRF 4.7.1 (2026-11-08).** `noahmp-soilwater.csv` and `noahmp-soilwater-libm.csv` were first built from
+> WRF v4.6.1 (`d66e442f`, phys/noahmp `848f54ad`). Rebuilt with
+> `build_soilwater.sh` from WRF v4.7.1 (`f52c197e`, phys/noahmp `e5c0859`), the
+> output is byte-identical, so the pins below name e5c0859. The rebuild
+> from the 4.6.1 tree is byte-identical too: the build scripts accept
+> either tree (`tools/noahmp_wrf461_oracle/noahmp_pins.sh`) and name the one
+> they were given in their sums files. Rebuilt with GNU Fortran 13.3.0 and
+> glibc 2.39 (Ubuntu 24.04 container).
+
 Leaves: `CANWATER`, `INFIL`, `SRT`, `SSTEP` and their driver `SOILWATER`.
 Plan steps 13 and 15 of `docs/mynn_noahmp_ruc_completion_plan.md`.
 
@@ -7,9 +16,9 @@ Plan steps 13 and 15 of `docs/mynn_noahmp_ruc_completion_plan.md`.
 
 | Item | Value |
 |---|---|
-| WRF tree | `<wrf-4.6.1-checkout>` (WSL) |
-| commit | `d66e442fccc04111067e29274c9f9eaccc3cef28` |
-| `phys/module_sf_noahmplsm.F` sha256 | `bd592a5b7db29000e715250e3a7c779ffb5e0dcc356f6b5a7d9e1c9f69c55282` |
+| WRF tree | `<wrf-4.7.1-checkout>` (WSL) |
+| commit | `f52c197ed39d12e087d02c50f412d90d418f6186` |
+| `phys/module_sf_noahmplsm.F` sha256 | `74b475600ad1c999fe43299bcaf4d3e5eaf59b9f861c47fdbff4d69739e3a45b` |
 | compiler | GNU Fortran (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
 | accessibility lift | `tools/noahmp_wrf461_oracle/visibility_patch_leaves.py` (50 symbols, padded `public  ::` spelling) |
 | object-code proof | 85 of 85 module procedures byte-identical, `.data`/`.data.rel.local`/`.rodata` identical |

@@ -134,6 +134,18 @@ _MAX_MATRICES_PER_BLOCK = 8
 
 _DEFAULT_SHARED_LIMIT = 48 * 1024
 
+#: Metal's threadgroup memory, all a block may have on the mlx backend (no
+#: opt-in above it): 32 KiB.  A k = 64 matrix's two working copies take
+#: 64 KiB, so there the global tier carries them instead.
+_METAL_SHARED_LIMIT = 32 * 1024
+
+
+def _shared_limit() -> int | None:
+    """The most shared memory one block can be given: None when CUDA's
+    per-function opt-in above the 48 KiB default is available."""
+    from woof import backend
+    return _METAL_SHARED_LIMIT if backend.active() == "mlx" else None
+
 
 @dataclass(frozen=True)
 class Tier:
@@ -215,12 +227,15 @@ def plan(k: int, dtype_str: str) -> Tier:
             " problems."
         )
     m = k + (k & 1)
-    global_work = k > SHARED_MAX_K
+    limit = _shared_limit()
+    global_work = k > SHARED_MAX_K or (
+        limit is not None and _shared_per_matrix(m, dtype.itemsize) > limit)
     threads = next(t for bound, t in _THREAD_TIERS if m <= bound)
     per_matrix = _shared_per_matrix(m, dtype.itemsize, global_work)
     if threads == 32:
         per_block = max(
-            1, min(_MAX_MATRICES_PER_BLOCK, _DEFAULT_SHARED_LIMIT // per_matrix))
+            1, min(_MAX_MATRICES_PER_BLOCK, min(_DEFAULT_SHARED_LIMIT, limit or _DEFAULT_SHARED_LIMIT)
+                   // per_matrix))
     else:
         per_block = 1
     return Tier(

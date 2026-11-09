@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import os
 import struct
+import threading
 from functools import lru_cache
 
 import numpy as np
@@ -146,8 +147,11 @@ class MetalFunction:
             # to MLX's hazard tracking: let everything before finish first
             import mlx.core as mx
             mx.synchronize()
+        # The library was built with the module (MetalModule._build), so the
+        # launch names it by key and does not carry the unit's MSL: copying a
+        # 560 KB source into every launch cost 28 us of host time per launch.
         outputs = ext.load().launch(
-            self.library_key, self.unit.msl, self.name, _dim3(grid), _dim3(block),
+            self.library_key, "", self.name, _dim3(grid), _dim3(block),
             buffers, offsets, writable, slots, sig.table_slot, blobs, blob_slots,
             int(shared_mem or 0), MATH_MODE_SAFE, null_slots, null_table)
         written = iter(outputs)
@@ -327,6 +331,14 @@ class MetalModule:
         """Build the library and the named kernels' pipelines."""
         from woof.backend.metal import ext
         kernels = [k for k in kernels if k not in self.max_threads]
+        if not self.max_threads and ext.library_root() is not None:
+            # the unit as a dynamic library and a thin kernel library, when it
+            # can be cut and has few kernels (woof.backend.metal.dylib); the
+            # extension keeps it
+            from woof.backend.metal.dylib import max_kernels, split
+            parts = split(self.unit.msl) if len(self.unit.kernels) <= max_kernels() else None
+            if parts is not None:
+                ext.load().set_library_split(self.library_key, *parts)
         try:
             limits = ext.load().compile(self.library_key, self.unit.msl, kernels, MATH_MODE_SAFE)
         except RuntimeError as exc:
@@ -340,6 +352,8 @@ class MetalModule:
             raise CompileError(f"Metal did not compile the translation of {self.name!r} "
                                f"(MSL saved to {path}):\n" + "\n".join(errors)) from None
         self.max_threads.update(zip(kernels, limits))
+        from woof.backend.metal import prefetch
+        prefetch.note_kernels(self.library_key, kernels)
 
     def build_all(self) -> None:
         """Every kernel's pipeline now (tools/metal_translation_census.py)."""
@@ -434,11 +448,50 @@ def retains_subnormals(name: str, source: str, options) -> bool:
     return any(base in s for s in sets)
 
 
+#: units whose fast-numerics translation keeps soft-float binary64 (by the
+#: unit's base name, as retains_subnormals reads it).  Empty: no unit has
+#: needed it (docs/dev/mlx-backend.md, "Binary64: soft-float and df64").
+SOFT_F64_UNITS: frozenset = frozenset()
+
+
+def f64_mode(name: str, source: str, options) -> str:
+    """How a unit's Metal translation computes ``double``: ``soft`` or
+    ``df64`` (woof/backend/metal/f64_df64.h).
+
+    ``strict`` numerics: always ``soft``, every word CUDA's.  ``fast``:
+    ``df64`` -- binary64 storage and exact + - * fma, conversions and
+    comparisons as before; division and square root still the correctly
+    rounded words, from a df64 estimate; CUDA's binary64 libm names in
+    df64 (about 2^-46 relative).  Kept ``soft`` in fast numerics: a unit
+    marked ``-DGPUWM_PREPARATION_IDENTITY=1`` (one arithmetic contract
+    across backends), a unit in :data:`SOFT_F64_UNITS`, and every unit
+    under ``WOOF_METAL_F64=soft`` (diagnosis: the fast numerics with the
+    strict binary64).
+    """
+    from woof import numerics
+    if numerics.is_strict():
+        return "soft"
+    choice = os.environ.get("WOOF_METAL_F64", "df64").strip().lower()
+    if choice not in ("df64", "soft"):
+        raise ValueError(f"WOOF_METAL_F64 must be df64 or soft, not {choice!r}")
+    if choice == "soft":
+        return "soft"
+    if "-DGPUWM_PREPARATION_IDENTITY=1" in tuple(options or ()):
+        return "soft"
+    if name.split("[", 1)[0] in SOFT_F64_UNITS:
+        return "soft"
+    return "df64"
+
+
 @lru_cache(maxsize=None)
 def _translated(source: str, unit: str, contract: bool, retain: bool, defines=(),
-                include_dirs=()) -> TranslatedUnit:
+                include_dirs=(), f64: str = "soft") -> TranslatedUnit:
     return translate(source, unit=unit, contract=contract, retain_subnormals=retain, defines=defines,
-                     include_dirs=include_dirs)
+                     include_dirs=include_dirs, f64=f64)
+
+
+#: translations run one at a time: the compile prefetch translates on its own thread
+_TRANSLATE_LOCK = threading.RLock()
 
 
 def translate_unit(name: str, source: str, *, options=()) -> TranslatedUnit:
@@ -446,9 +499,34 @@ def translate_unit(name: str, source: str, *, options=()) -> TranslatedUnit:
     from woof import numerics
     from woof.backend.translate import option_defines, option_include_dirs
     effective = numerics.effective_options(tuple(options or ()))
-    return _translated(source, name, contracts(options, source), retains_subnormals(name, source, options),
-                       option_defines(effective), option_include_dirs(effective))
+    with _TRANSLATE_LOCK:
+        return _translated(source, name, contracts(options, source), retains_subnormals(name, source, options),
+                           option_defines(effective), option_include_dirs(effective), f64_mode(name, source, options))
 
 
 def load_unit(name: str, source: str, *, options=()) -> MetalModule:
-    return MetalModule(translate_unit(name, source, options=options), name)
+    from woof.backend.metal import prefetch
+    prefetch.start()          # last run's units, built in parallel (once per process)
+    module = MetalModule(_with_nonce(translate_unit(name, source, options=options)), name)
+    prefetch.note_unit(module.library_key, name, source, options)
+    return module
+
+
+#: WOOF_METAL_COMPILE_NONCE=<text>[:source] -- benchmarks only: a comment in
+#: every unit's MSL, so Metal finds none of it cached.  ``<text>`` alone
+#: also changes the library key (a cold build: no pipeline archive matches);
+#: ``<text>:source`` keeps the key, as when macOS has evicted only the
+#: compiled libraries.  The compiled code is the same.
+NONCE_ENV = "WOOF_METAL_COMPILE_NONCE"
+
+
+def _with_nonce(unit: TranslatedUnit) -> TranslatedUnit:
+    nonce = os.environ.get(NONCE_ENV, "")
+    if not nonce:
+        return unit
+    import dataclasses
+    import hashlib
+    text, _, scope = nonce.partition(":")
+    msl = unit.msl + f"\n// woof compile nonce {text}\n"
+    key = unit.key if scope == "source" else hashlib.sha256(msl.encode("utf-8")).hexdigest()
+    return dataclasses.replace(unit, msl=msl, key=key)

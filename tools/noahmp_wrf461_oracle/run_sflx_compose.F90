@@ -1,4 +1,4 @@
-! Pin WRF v4.6.1 MODULE_SF_NOAHMPLSM::ERROR (module_sf_noahmplsm.F:1560-1737),
+! Pin WRF v4.7.1 MODULE_SF_NOAHMPLSM::ERROR (module_sf_noahmplsm.F:1560-1737),
 ! the balance check NOAHMP_SFLX runs at 1049-1058, as raw FP32 bit patterns.
 !
 ! Why this exists when noahmp-sflx.csv already exists

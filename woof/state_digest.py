@@ -141,6 +141,11 @@ _CANONICAL_EXCLUDED_FRAME_SCRATCH = frozenset({
     # 'refl_10cm_1km' is inside an audited lazy prefix but is not a concrete
     # registered member" (a rented box, 2026-10-21 19:23Z).
     "refl_10cm_1km", "refl_10cm_4km",
+    # A partial-depth child's interface phi'' predictor
+    # (woof/core/partial_nest_dyn.py prepare_top_substep), written by the
+    # predictor launch of every acoustic substep before the w''-phi''
+    # solve reads it: substep work, not trajectory.
+    "nest_top_rhs",
 })
 CHILD_DUTY_SCRATCH_MEMBERS = (
     "scratch/nest_parent_field",
@@ -344,7 +349,16 @@ def canonical_state_digest(state, clock, *,
     manifest.update(restart_io._scratch_manifest(state))
     driver = getattr(state, "physics", None)
     if driver is not None:
-        manifest.update(restart_io._driver_manifest(driver))
+        manifest.update(restart_io._driver_manifest(driver, digest=True))
+        coupling = getattr(driver, "external_ocean", None)
+        if coupling is not None:
+            # Left out of the driver manifest (a checkpoint cannot carry
+            # it), so the digest takes the coupled state from its own
+            # inventory: two runs that differ only in the ocean differ here.
+            manifest.update(coupling.digest_arrays())
+        wrf_hydro = getattr(driver, "wrf_hydro", None)
+        if wrf_hydro is not None:
+            manifest.update(wrf_hydro.digest_arrays())
         # Match the actual streaming producer's distinction: standalone
         # legacy-RRTMG host ozone is recomputed, while an explicit CAM
         # owner supplies a retained field to later radiation/nest calls.

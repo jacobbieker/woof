@@ -1991,6 +1991,13 @@ def _compose_three(out, pbl, radiation, cumulus):
     out += cumulus
 
 
+def _wrf_hydro_lsm_kwargs(driver) -> dict:
+    """The LSM call's ``wrf_hydro`` planes when a WRF-Hydro coupling is
+    attached (woof.wrf_hydro_route), else nothing: the default call."""
+    seam = getattr(driver, "wrf_hydro", None)
+    return {} if seam is None else seam.lsm_kwargs()
+
+
 def _external_ocean_configured(cfg) -> bool:
     """An ``ocean_config`` naming an ``[external_ocean]`` (woof.ocean.external),
     whose cpl_snd2 sends GSW as SURF_NET_SOLAR."""
@@ -3765,9 +3772,16 @@ class PhysicsDriver:
             clock_dt = plan.clock_dt
         else:
             clock_dt = _model_clock_dt(cfg)
+            # Only internal substeps (clock_dt > dt) wait for the clock
+            # step's end.  Without substeps every step IS a clock step:
+            # under an adaptive clock the elapsed time is a sum of unequal
+            # steps and is almost never a multiple of the current dt, so
+            # the phase test skipped WRF's every-step advance_ppt (RAINC,
+            # NCA countdown, KF expiry) on nearly every step.
             end = float(state.elapsed_seconds) + float(cfg.dt)
             remainder = abs(math.fmod(end, clock_dt))
-            if min(remainder, clock_dt - remainder) > 1.0e-6 * clock_dt:
+            if (clock_dt > float(cfg.dt) and min(
+                    remainder, clock_dt - remainder) > 1.0e-6 * clock_dt):
                 return
         dt = DTYPE(clock_dt)
         from woof.core.kf import kf_nca_contract
@@ -5296,7 +5310,8 @@ class PhysicsDriver:
                     irrigation_channel=(f["irrigation_channel"]
                                         if cfg.sf_surf_irr_scheme == 1 else None),
                     urban=(None if coupler is None
-                           else coupler.noah_kernel_args()))
+                           else coupler.noah_kernel_args()),
+                    **_wrf_hydro_lsm_kwargs(self))
         if self.noah_myj:
             noah_chklowq_myj(f)
         # Sea ice after lsm, as the surface driver orders them, and before
@@ -5438,7 +5453,8 @@ class PhysicsDriver:
             opt_irr=cfg.opt_irr, opt_tdrn=cfg.opt_tdrn,
             opt_soil=cfg.opt_soil,
             noahmp_snow_age=cfg.noahmp_snow_age,
-            sf_urban_physics=int(getattr(cfg, "sf_urban_physics", 0)))
+            sf_urban_physics=int(getattr(cfg, "sf_urban_physics", 0)),
+            **_wrf_hydro_lsm_kwargs(self))
         if self.urban_coupler is not None:
             # noahmp_urban runs after noahmplsm (module_surface_driver.F:
             # 3184) and before RAINBL is consumed.
@@ -7729,6 +7745,11 @@ class PhysicsDriver:
                     self.lake.step(self.fields, atmosphere,
                                    dt=self.bldt_seconds,
                                    precipitation=lake_precipitation)
+                # WRF_HYDRO: wrf_drv_HYDRO right after the surface driver
+                # (module_first_rk_step_part1.F :1093-1097; woof.wrf_hydro_route).
+                wrf_hydro = getattr(self, "wrf_hydro", None)
+                if wrf_hydro is not None:
+                    wrf_hydro.exchange(self.fields)
                 self.call_counts["noah"] += 1
                 if topo_save is not None:
                     self.topo_shortwave.after_land(topo_save)
@@ -9854,6 +9875,12 @@ def initialize_physics(
     driver.hydro_parent_geometry = hydro_parent_geometry
     from woof.hydro.runtime import attach_parent
     attach_parent(driver, state, cfg)
+    # --wrf-hydro (woof.wrf_hydro_route): returns at once unless asked for.
+    from woof.wrf_hydro_route import attach as attach_wrf_hydro
+    attach_wrf_hydro(driver, state, cfg, start_time=(
+        radiation_start_time if radiation_start_time is not None else noahmp_start_time),
+        dzs=(driver.noahmp_soil_thickness_m if int(cfg.sf_surface_physics) == 4
+             else NOAH_LAYER_THICKNESS_M))
     # An [external_ocean] contract (woof.ocean.external) is WRF's coupler;
     # any other ocean_config, or waves = "on", is the waves/surge door.
     if _external_ocean_configured(cfg):

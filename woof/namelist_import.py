@@ -8433,7 +8433,13 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
             lines.append(f"nsas_dx_factor = {nsas_dx_factor}")
             lines.append(f"sas_pgcon = {_fmt(sas_pgcon[n])}")
         elif cu[n] == 2:
-            lines.append(f"cudt_minutes = {_fmt(cudt[n])}")
+            if use_adaptive_time_step and cudt[n]:
+                fix("physics", f"cudt[{n + 1}]", [cudt[n]], 0.0,
+                    "WRF resets BMJ cudt under adaptive stepping "
+                    "(share/module_check_a_mundo.F:2141-2160)")
+                lines.append("cudt_minutes = 0.0")
+            else:
+                lines.append(f"cudt_minutes = {_fmt(cudt[n])}")
             lines.append(f"bmj_rad_feedback = {str(bmj_feedback[n]).lower()}")
         elif cudt[n]:
             drop("physics", f"cudt[{n + 1}]", [cudt[n]],

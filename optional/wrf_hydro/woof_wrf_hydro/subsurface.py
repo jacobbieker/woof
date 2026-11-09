@@ -7,8 +7,9 @@ water-table depth and routable water; ROUTE_SUBSURFACE1 sends each interior
 cell's saturated lateral flow to its steepest total-head neighbour (GETSUB8)
 and books flow leaving the domain; SUBSFC_RTNG adds or drains that flow layer
 by layer and spills what a full column cannot hold into the infiltration
-excess.  ``rt_option = 2`` (ROUTE_SUBSURFACE2) is hard-disabled in WRF-Hydro
-itself (SUBSFC_RTNG always calls ROUTE_SUBSURFACE1), so it is refused here.
+excess.  ``rt_option = 2`` selects ROUTE_OVERLAND2 for overland flow only:
+WRF-Hydro itself hard-codes ROUTE_SUBSURFACE1 here (subsurfaceRouting
+:235-256, ROUTE_SUBSURFACE2 commented out), so both values route the same.
 
 One :meth:`SubsurfaceRouting.route` is one ``subsurfaceRouting`` call; call
 :meth:`SubsurfaceState.end_hydro_step` after the rest of the HYDRO step, as
@@ -24,6 +25,8 @@ from pathlib import Path
 
 import numpy as np
 
+from ._compile import raw_module
+
 _TPB = 128
 _ERRORS = {1: "dist(i,j,index) <= 0", 2: "soldep == 0", 4: "hsub < 0",
            8: "qqsub > 0", 16: "SMCMAX exceeded in SUBSFC_RTNG"}
@@ -33,13 +36,11 @@ _MODULE = None
 def _module():
     global _MODULE
     if _MODULE is None:
-        import cupy as cp
-
         here = Path(__file__).resolve().parent
         kernels = Path(__import__("woof.core.kernels", fromlist=["x"]).__file__).parent
         source = ((kernels / "glibc_flt32.cuh").read_text(encoding="utf-8")
                   + "\n" + (here / "subsurface.cu").read_text(encoding="utf-8"))
-        _MODULE = cp.RawModule(code=source, options=("--fmad=false", "--ftz=false"))
+        _MODULE = raw_module(source, ("--fmad=false", "--ftz=false"))
     return _MODULE
 
 
@@ -80,10 +81,8 @@ class SubsurfaceRouting:
                  dist, rt_option: int = 1):
         import cupy as cp
 
-        if rt_option != 1:
-            raise NotImplementedError(
-                "rt_option = 2 subsurface routing (ROUTE_SUBSURFACE2) is "
-                "disabled in WRF-Hydro itself and is not ported")
+        if rt_option not in (1, 2):
+            raise ValueError("WRF-Hydro rt_option is 1 or 2")
         self.jxrt, self.ixrt = map(int, lksat.shape)
         self.nsoil = len(sldpth)
         if len(zsoil) != self.nsoil:

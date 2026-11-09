@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 import hashlib
+import re
 import json
 import os
 from pathlib import Path
@@ -36,8 +37,52 @@ def schema(nz):
             field[key]=affine(field[key],second['arguments'][name][key])
     for key in first['slab_fields']:
         first['slab_fields'][key]=affine(first['slab_fields'][key],second['slab_fields'][key])
-    first['scratch_bytes']=affine(first['scratch_bytes'],second['scratch_bytes'])
+    first['scratch_bytes']=arena_layout(int(nz))[1]
     return first
+
+
+#: A private array's place in the arena: ``m471_array<T>(m471_work, OFFSET, n)``
+#: with OFFSET affine in MYNN471_NZ, as generalize.py recovered it.
+_ARENA_OFFSET=re.compile(r'm471_array<\w+>\(m471_work,\((-?\d+)\*\(MYNN471_NZ-49\)\+(\d+)(?:\+(\d+))?\),m471_n\)')
+
+
+@lru_cache(maxsize=1)
+def _arena_rows():
+    """(affine offsets in arena order, nz=49 total, total per level): the
+    arena as lowered at 49 levels."""
+    text=(DATA/'model.cu').read_text()
+    rows=sorted({(int(b)+int(c or 0),int(a)) for a,b,c in _ARENA_OFFSET.findall(text)}|{(0,0)})
+    first=json.loads((DATA/'schema49.json').read_text())['scratch_bytes']
+    second=json.loads((DATA/'schema50.json').read_text())['scratch_bytes']
+    return tuple(rows),first,second-first
+
+
+@lru_cache(maxsize=64)
+def arena_layout(nz):
+    """({(slope, base): offset}, scratch bytes) of the private-array arena
+    for ``nz`` levels.
+
+    generalize.py fits each arena offset through the 49- and 50-level
+    lowerings, but lower_cuda.py rounds every array up to 8 bytes, so a
+    (kts:kte+1) float array grows 200 -> 208 bytes there and a (kts:kte)
+    one 196 -> 200 -> 200: the fit's slopes are 8 and 0 bytes per level
+    where the arrays grow by 4.  Away from 49/50 levels arrays overlapped
+    (below 49) or overran their slots (above 50); below 24 levels some
+    offsets went negative, before the arena (the 16-level non-finite dqv).
+    Here every array keeps at least its 49-level size and above 49 levels
+    grows by at least 8 bytes a level -- never less than a row of 4-byte
+    elements, rounded, needs -- so at 49 levels the layout is the lowered
+    one, and at any other size each array's slot holds all it can reach."""
+    rows,total49,_slope=_arena_rows()
+    sizes=[]
+    for (base,slope),(nxt,nslope) in zip(rows,rows[1:]+((total49,_slope),)):
+        size,growth=nxt-base,max(nslope-slope,8)
+        sizes.append(size+growth*max(nz-49,0))
+    offsets,at={},0
+    for (base,slope),size in zip(rows,sizes):
+        offsets[(slope,base)]=at
+        at+=size
+    return offsets,at
 
 
 def scratch_shapes(ncol,nz):
@@ -66,8 +111,20 @@ def source(nz):
     prefix=old[:old.index('extern "C" __global__')]
     start=old.index('__device__ __forceinline__ real mynn_scale_exponent(')
     end=old.index('// Fortran real**real,',start)
+    model=(DATA/'model.cu').read_text()
+    if int(nz)!=49:
+        # every arena offset at its place for nz levels (arena_layout); 49
+        # levels keeps the qualified text, and its prebuilt images
+        offsets,_=arena_layout(int(nz))
+        def place(m):
+            a,b,c=m.groups()
+            at=offsets[(int(a),int(b)+int(c or 0))] if (int(a),int(b)+int(c or 0)) in offsets else None
+            if at is None:
+                raise RuntimeError('MYNN 4.7.1 arena offset outside the layout: '+m.group(0))
+            return m.group(0).replace(m.group(0)[m.group(0).index(',')+1:m.group(0).rindex(',')],str(at))
+        model=_ARENA_OFFSET.sub(place,model)
     return (prefix+old[start:end]+FAST_MATH+'\n#define MYNN471_NZ '+str(int(nz))+'\n'
-            +(DATA/'model.cu').read_text()+POST_SOURCE)
+            +model+POST_SOURCE)
 
 
 # Strict mode retains the referee's libm operation order. The regular
@@ -83,6 +140,41 @@ FAST_MATH = r'''
 #define mynn_tanhf tanhf
 #endif
 '''
+
+
+_PHASE_REFERENCE=re.compile(r'=M471_PHASE<0 \? (local_\w+) : (\*m471_array<\w+>\([^;]*\));')
+
+
+def metal_text(text):
+    """The source as the Metal translation takes it: the single-kernel step
+    (mynn471_step) in both arithmetic modes, without the phased kernels.
+
+    The phased kernels hand phase-carried scalars between launches through
+    the workspace, and phase 8 re-points a pointer argument at a local
+    (``ktop=M471Ptr<integer>(&m471_local_top)``); CUDA's generic pointers
+    allow both, Metal's address spaces neither.  The step kernel keeps every
+    phase-carried scalar a local (``M471_PHASE<0 ? local : *slot`` takes the
+    local), so Metal builds that kernel alone and the dropped rebinding is
+    unreachable from it."""
+    out,count=_PHASE_REFERENCE.subn(lambda m:'='+m.group(1)+';',text)
+    if not count:
+        raise RuntimeError('MYNN 4.7.1 source no longer spells its phase-carried references as expected')
+    rebind='ktop=M471Ptr<integer>(&m471_local_top);'
+    if out.count(rebind)!=1:
+        raise RuntimeError('MYNN 4.7.1 source no longer re-points ktop as expected')
+    out=out.replace(rebind,'')
+    out,count=re.subn(r'(?m)^extern "C" __global__ M471_LAUNCH void mynn471_phase\d+\(.*\n','',out)
+    if not count:
+        raise RuntimeError('MYNN 4.7.1 source no longer defines its phased kernels as expected')
+    # M471Ref's compound assignments store a mixed-precision result through
+    # operator=(T): CUDA narrows double to float implicitly, Metal's binary64
+    # class only explicitly, so the store names the narrowing (the same word)
+    for op in '+-*/':
+        old=f'return *this=*p{op}x;'
+        if old not in out:
+            raise RuntimeError('MYNN 4.7.1 source no longer spells M471Ref compound assignment as expected')
+        out=out.replace(old,f'return *this=(T)(*p{op}x);')
+    return out
 
 
 @lru_cache(maxsize=32)
@@ -103,6 +195,15 @@ def image(nz,device,exact):
             module.load(raw if isinstance(raw,bytes) else raw.encode())
         names=['mynn471_step'] if exact else ['mynn471_phase'+str(i) for i in PHASES]
         return module,tuple(module.get_function(name) for name in names)
+    from woof import backend
+    if backend.active()=='mlx':
+        # Metal: no nvcc image; the facade translates the same source under
+        # the same arithmetic controls (a RawModule, as the HIP route builds),
+        # as the single step kernel in both modes (metal_text).
+        options=('-std=c++17','--ftz=false','--fmad='+('false' if exact else 'true'),
+                 '--prec-div=true','--prec-sqrt=true')+(('-DGPUWM_WRF_EXACT=1',) if exact else ())
+        module=cp.RawModule(code=metal_text(text),options=options)
+        return module,(module.get_function('mynn471_step'),)
     arch='sm_'+''.join(map(str,cp.cuda.Device(device).compute_capability))
     mode='strict' if exact else 'fast'
     digest=hashlib.sha256(text.encode()).hexdigest()

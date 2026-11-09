@@ -2264,6 +2264,11 @@ def preflight_prepared_tree(
     # statics from its sealed corridor (runtime.build_prepared_tree_spawn_runner,
     # which refuses by name a dormant slot the bundle sealed no corridor for).
     _refuse_dormant_without_corridor(exp, preparation)
+    # A partial-depth band is realized on the restored tree
+    # (run_prepared_tree, woof.core.model.realize_partial_nests); what this
+    # route does not carry beside one is refused here, before any build.
+    from woof.core.model import refuse_prepared_tree_partial_nests
+    refuse_prepared_tree_partial_nests(exp, "woof go (prepared domain tree)")
     _validate_delayed_prepared_geometry(exp)
     # NO streaming refusal for [tiles]: this route wires a streamed-domain
     # builder (streaming.builders_for_tree, below), so mode = 'on' is
@@ -3905,6 +3910,9 @@ def run_prepared_tree(
     nodes = {}
     prepared = {}
     drivers = {}
+    #: A partial-depth band's restored meteorology and surface, kept for the
+    #: rebuild of its physics on the truncated column (_realize_partial_nests).
+    partial_sources = {}
     early_steppers = {}
     initial_reservations = {}
     initial_perturbation_receipts: list[dict[str, object]] = []
@@ -3925,7 +3933,8 @@ def run_prepared_tree(
             cached_entries=_compile_state.entries,
             cached_entries_for_this_card=_compile_state.entries_for_capability)
 
-    def initialize_cache_physics(restored, domain, grid, bundle):
+    def initialize_cache_physics(restored, domain, grid, bundle,
+                                 radiation_factory=None):
         from woof.core.cam_ozone import (
             cam_ozone_setup, configure_cam_ozone, ozone_parent_for)
         from woof.core.radiation_composition import attach_modern_workspace
@@ -3940,6 +3949,7 @@ def run_prepared_tree(
             constant_glw_wm2=declared_constant_glw(exp),
             p_top=exp.vertical.p_top, column_chunk=exp.column_chunk,
             trace_gas_overrides=trace_gas_overrides,
+            radiation_factory=radiation_factory,
             **({"cam_ozone": cam, "ozone_parent": ozone_parent_for(cam)}
                if cam is not None else {}))
         driver = configure_cam_ozone(restored.initial_result.state, domain.run,
@@ -3949,6 +3959,58 @@ def run_prepared_tree(
         return driver
 
     bundles_by_id = {int(bundle.grid_id): bundle for bundle in inputs.domains}
+
+    def _realize_prepared_partial_nests(model):
+        import dataclasses as _dc
+
+        from woof.core.model import realize_partial_nests
+        from woof.core.partial_nest_physics import (ExtendedColumn,
+                                                    ExtendedColumnRadiation)
+        from woof.core.radiation_composition import make_radiation
+        if restart is not None or getattr(initialization, "warm_start_clocks", None):
+            raise ValueError(
+                "a partial_nest tree starts from its prepared analysis; resuming "
+                "one from a checkpoint or a WRF restart is not carried")
+        for gid in partial_sources:
+            parent_id = int(nodes[gid].cfg.parent_id)
+            if parent_id in early_steppers:
+                raise ValueError(
+                    f"d{gid:02d}'s parent d{parent_id:02d} is streamed; a "
+                    "partial-depth band's parent runs resident")
+        root_coord = prepared[exp.root.grid_id].initial_result.coord
+
+        def physics(nest, node):
+            gid = int(node.cfg.grid_id)
+            met, surface = partial_sources.pop(gid)
+            column = ExtendedColumn(nest)
+            nest.extended = column
+
+            def radiation_factory(cfg, origin, lat, lon, **kwargs):
+                # The adapter is built for the column to the model top
+                # (the root's levels above the interface) and hands the
+                # driver the child's levels only.
+                from woof.core.radiation_composition import attach_modern_workspace
+                inner = make_radiation(column.cfg, origin, lat, lon, **kwargs)
+                attach_modern_workspace(inner, radiation_workspace)
+                return ExtendedColumnRadiation(inner, column)
+
+            child = nest.child
+            _rebind_rebuilt_state(child, rebuilt)
+            child._scratch_arena = arena
+            for name in ("_nest_restart_classification", "_dfi_remember_physics"):
+                if hasattr(node.state, name):
+                    setattr(child, name, getattr(node.state, name))
+            initial = _dc.replace(prepared[gid].initial_result, state=child)
+            drivers.pop(gid, None)
+            drivers[gid] = initialize_cache_physics(
+                SimpleNamespace(initial_result=initial, met=met, surface=surface),
+                _dc.replace(node.cfg, run=nest.ccfg), node.grid, bundles_by_id[gid],
+                radiation_factory=radiation_factory)
+            prepared[gid] = SimpleNamespace(**{**vars(prepared[gid]),
+                                               "initial_result": initial})
+
+        realize_partial_nests(model, exp, root_coord, physics=physics,
+                              surface_feedback=int(exp.feedback) == 1)
 
     # A TREE BOUND AT ITS HEAD.  The root restores its start state from the
     # streamed cache and its boundary intervals arrive through the stream,
@@ -4422,6 +4484,15 @@ def run_prepared_tree(
             if finish_nest_start is not None:
                 finish_nest_start(node, bundle)
         nodes[domain.grid_id] = node
+        if domain.partial_nest is not None:
+            if store_bundle is not None or initialized is not None:
+                raise ValueError(
+                    f"d{domain.grid_id:02d} declares partial_nest and restores "
+                    + ("streamed" if store_bundle is not None else
+                       "through an input adapter")
+                    + "; a partial-depth band is rebuilt from a resident "
+                    "prepared cache")
+            partial_sources[domain.grid_id] = (restored.met, restored.surface)
         prepared[domain.grid_id] = SimpleNamespace(
             static_fields=bundle.static_fields,
             geog_selection=getattr(bundle, "geog_selection", None),
@@ -4516,6 +4587,23 @@ def run_prepared_tree(
     # runners never got -- the nest that moved would be exactly the one
     # nothing recorded.
     progress_log.publish_step_log(model, step_log)
+
+    if partial_sources:
+        # PARTIAL-DEPTH BANDS on the restored real-data tree, the idealized
+        # tree's mechanics (woof.core.model.realize_partial_nests): each
+        # band's child is truncated at its interface on the root's prepared
+        # float64 coordinate, couples through a PartialNestCoupler and
+        # steps through the band's interface hooks; its physics is rebuilt
+        # here from its own prepared surface on the truncated column, the
+        # radiation on the extended column to the model top.  The initial
+        # two-way feedback above ran full depth on the restored child, as
+        # WRF's med_nest_initial does; below the interface the band's own
+        # feedback then carries it.
+        _realize_prepared_partial_nests(model)
+        if model.root.clock.spec.restart_ticks:
+            print("prepared tree: partial_nest -- no checkpoints are written "
+                  "(restart_interval_s is set): a partial-depth tree starts from "
+                  "its prepared analysis and does not resume", flush=True)
 
     # The corridor lift: with a verified statics corridor on hand this
     # route wires the SAME RelocationRunner the case-data route does --
@@ -4840,6 +4928,10 @@ def run_prepared_tree(
                                 tick_den=model.schedule.clock.tick_den))
 
     def restart_handler(tree, ticks):
+        if getattr(model, "_partial_nests", None):
+            # A partial-depth tree does not resume (_realize_prepared_partial_nests
+            # refuses it), so it writes no checkpoint to resume from.
+            return
         if (checkpoint_selection is not None
                 and not checkpoint_selection.keeps(ticks)
                 and not checkpoint_schedule.restart_requested()):

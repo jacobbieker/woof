@@ -5,8 +5,10 @@
 #
 #   ./build_radiation.sh [WRF_TREE] [OUTDIR]
 #
-# WRF_TREE must be the pinned WRF v4.6.1 gate checkout (commit
-# d66e442fccc04111067e29274c9f9eaccc3cef28); pass it as $1 or export
+# WRF_TREE must be the pinned WRF v4.7.1 gate checkout (commit
+# f52c197ed39d12e087d02c50f412d90d418f6186, phys/noahmp e5c0859) or the
+# v4.6.1 one (d66e442f, phys/noahmp 848f54ad; make_public_radiation.py
+# accepts either, see noahmp_pins.py); pass it as $1 or export
 # WRF_TREE.  OUTDIR defaults to
 # tests/data/oracles/noahmp relative to the repository root.
 #
@@ -17,7 +19,7 @@ set -eu
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$HERE/../.." && pwd)
-WRF=${1:-${WRF_TREE:?pass the pinned WRF v4.6.1 checkout as $1, or export WRF_TREE}}
+WRF=${1:-${WRF_TREE:?pass the pinned WRF v4.7.1 checkout as $1, or export WRF_TREE}}
 OUT=${2:-$REPO/tests/data/oracles/noahmp}
 WORK=${NOAHMP_RAD_WORK:-/tmp/noahmp-radiation-oracle}
 

@@ -153,6 +153,90 @@ domain's first step sits inside those fill-ins (so never on the tropical
 spacing lies within the terrain clock's measured 500 m to 12 km;
 `--clock adaptive` outside the fill-ins is refused naming the domain.
 
+**The tropical opt-in: `--clock tropical-adaptive`.**  Inside the tropics
+(|lat| < 25) the wizard's clock is a fixed 2.5 s per km, and `auto` keeps
+it fixed: that step starts under the adaptive clock's 3 s per km floor,
+so `--clock adaptive` is refused there.  The default is unchanged, byte
+for byte.  `--clock tropical-adaptive` is the opt-in.  It writes the
+following:
+
+| key | where | value | why |
+|---|---|---|---|
+| `use_adaptive_time_step` | `[shared]` | `true` | |
+| `target_cfl` | `[shared]` | 1.0 | WRF's vertical Courant target, below its 1.2 default |
+| `w_damping` | `[shared]` | 1 | WRF's w brake on any column that still crosses it |
+| `max_step_increase_pct` | `[shared]` | 5 | every domain grows at most 5% per step (WRF's nest default is 51%); decreases are immediate |
+| `min_time_step` (+`_den`) | each `[[domain]]` | its fixed tropical step, 2.5 s per km | the floor; per domain because a floor in seconds written to `[shared]` would reach every nest (below) |
+
+Each grid starts at the fixed tropical step.  `max_time_step` stays at
+WRF's 8 s per km fill-in.  A hand-written config gets the same behaviour
+from the same keys.
+
+Risks, and the reason this is an opt-in:
+
+- **Reaction lag.**  The step reacts one step after convection starts: a
+  step is chosen from the CFL of the step before.
+- **Backend divergence.**  The step choice rides a device max-reduction.
+  CUDA and Metal trajectories therefore part sooner than on a fixed
+  clock: one ulp in the maximum picks a different `dt`.
+- **Different output.**  The run is not byte-identical with the fixed
+  clock.
+- **Cumulus.**  MEASURED below, a parameterized-cumulus grid's
+  convective rain answers the longer mean step, as it answers a longer
+  fixed step.  The wizard prints this in the header of any opt-in file
+  that carries a cumulus scheme.
+
+Measured on public GFS 0.25° (cycle 2026-11-07 00Z), 24 h, single domain,
+150×120, 49 levels, Mercator, the wizard's default suite
+(`morrison-mp10-ysu-mm5-noah-kf-rte-rrtmgp-v1`).  RTX A6000, one forecast
+at a time, against the fixed 2.5 s per km clock:
+
+| case | clock | steps | wall | max w-CFL | cells at w-CFL ≥ 0.5 | ≥ 1.0 | `w_damp` |
+|---|---|---|---|---|---|---|---|
+| Manila 14.6 N, 12 km (KF on) | fixed 30 s | 2880 | 144 s | 0.194 | 0 | 0 | idle |
+| | opt-in | 1165 | 86 s (**−41%**) | 0.700 | 2.1e-5 | 0 | idle |
+| Maui 20.8 N, 3 km (no cumulus) | fixed 7.5 s | 11520 | 358 s | 0.162 | 0 | 0 | idle |
+| | opt-in | 3611 | 169 s (**−53%**) | 0.905 | 3.0e-4 | 0 | idle |
+
+The w-CFL is WRF's co-located vertical Courant number per cell per step
+(`GPUWM_WRF_CFL_PROBE`'s histogram).  The table gives the fraction of all
+cell-steps in each band.  The CFL target never bound, there was no NaN,
+and no column was damped.  Maui held the 8 s per km ceiling (24 s) on
+3585 of its 3611 steps.  Manila took 54-96 s, at the 96 s ceiling on 421
+steps: the rest were shortened to land on the 5-minute cumulus and
+12-minute radiation deadlines.  This
+November cycle is benign: the July Manila case behind the fixed clock
+(`domain_wizard.TROPICAL_ROOT_TIME_STEP_S`) peaked at 0.976 at 30 s, so a
+convective day is where `target_cfl` would hold the step down.
+
+What the step does to the forecast (opt-in minus fixed at 24 h, max /
+RMS):
+
+| case | T2 K | U10 m/s | PSFC Pa | domain-mean rain |
+|---|---|---|---|---|
+| Manila 12 km | 1.8 / 0.21 | 2.7 / 0.38 | 53 / 15 | 5.89 vs 4.99 mm (+18%) |
+| Maui 3 km | 4.6 / 0.22 | 13.4 / 0.77 | 100 / 10 | 0.97 vs 0.61 mm (+60%) |
+
+A fixed 60 s Manila control raised the rain 14% (5.68 mm), with T2
+1.5 / 0.18 and PSFC 51 / 12, so Kain-Fritsch answers the varying step
+the way it answers a longer fixed one.
+
+The first measurement of this table read 2.05 mm (−59%, almost all KF
+`RAINC`).  That was a bug in the cumulus clock, not the scheme.  WRF's
+`advance_ppt` (`RAINC += PRATEC*DT`, the KF `NCA` expiry, `NCA -= DT`)
+runs on every model step.  woof ran it only when the step ended on a
+multiple of `clock_dt`, a test meant for the compatibility integrator's
+internal substeps.  Without substeps `clock_dt` is the live `dt`, and an
+adaptive clock's elapsed time is almost never a multiple of it.  So
+convective rain stopped accumulating on nearly every step, and a
+triggered KF column held its tendencies far past its convective time
+scale.  Every scheme on the held-`PRATEC` path was affected (KF, the
+previous KF, MSKF, KF-CuP, BMJ, Grell-Freitas, Grell-Devenyi, the SAS
+family, CAM ZM).  Fixed-step runs are unchanged, byte for byte.
+`tests/test_kf_adaptive_wrf471_oracle.py` grades the driver against WRF
+v4.7.1 KF over 110 varying steps (`tools/kf_adaptive_wrf471_oracle`).
+The Manila row above is the rerun.
+
 **Tolerance covers absence, not divergence.**  A cache prepared *before*
 these fields existed loads fine.  A cache prepared *with* adaptive on is
 still refused against a config with it off, because both values are
@@ -382,6 +466,24 @@ the distribution.
   Both of WRF's predicates are `itimestep % stepN`, and under a varying
   dt neither number counts what it says.  See "What the port required
   beyond `calc_dt`".
+- **Cumulus fires on the calendar, not on `cudtacttime`.**  Under an
+  adaptive step WRF's cumulus driver runs the scheme when `curr_secs >=
+  cudtacttime` and re-arms it at `curr_secs + cudt*60`
+  (`module_cumulus_driver.F:803-857`), so each interval runs late by up
+  to one step and the lateness carries forward.  woof shortens a step to
+  land on each `cudt` deadline and fires there, so the interval is
+  `cudt` exactly.  The calls between deadlines, the NCA hold and the
+  per-step rain clock are WRF's (`tests/test_kf_adaptive_wrf471_oracle.py`
+  grades them on WRF's own call steps).
+- **`stepcu` follows the step.**  WRF fixes STEPCU at initialization
+  from the first `dt`; woof re-derives it from the baseline step.  It
+  cannot reach a scheme that closes over `DT*STEPCU`.  Under an adaptive
+  step WRF sets `cudt = 0` for BMJ, every SAS and Tiedtke
+  (`share/module_check_a_mundo.F:2155-2172`), and woof refuses those
+  schemes with a positive `cudt` (`woof import-namelist` rewrites it to
+  0).  KF, the previous KF and MSKF read STEPCU only in the fixed-step
+  W0AVG weight, which an adaptive run does not use.  KF-CuP's
+  `MOD(KTAU, NTST)` gate is not graded under an adaptive step.
 
 ---
 

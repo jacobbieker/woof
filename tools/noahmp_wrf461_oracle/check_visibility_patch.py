@@ -33,9 +33,17 @@ import sys
 from pathlib import Path
 
 
-PATCH_SHA256 = "164885a9ce956a51be2ab189165da8b60217b636a720c994e04dfb862a05aad5"
-PRISTINE_SHA256 = "bd592a5b7db29000e715250e3a7c779ffb5e0dcc356f6b5a7d9e1c9f69c55282"
-PATCHED_SHA256 = "3cd3690d6455cfb8549cb41979b7e101e7436464c478f7f7973ab226488ac206"
+# patches/noahmp-lsm-leaf-visibility.patch.  One patch serves both pinned
+# trees: its hunks (lines 27-87) are byte-identical in the two.
+PATCH_SHA256 = "b16db586bbed70735b148618c794206ed0ff2988dfc8c9ee822b80added34a95"
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent))
+from noahmp_pins import TREES  # noqa: E402
+# The (pristine, patched) pair of each pinned tree.  PRISTINE_SHA256 and
+# PATCHED_SHA256 name one pair (tests re-pin them to synthetic sources);
+# ALTERNATE_PAIRS are the pinned trees, each accepted as a whole pair.
+PRISTINE_SHA256 = TREES["wrf-4.7.1"]["lsm"]
+PATCHED_SHA256 = TREES["wrf-4.7.1"]["patched"]
+ALTERNATE_PAIRS = tuple((t["lsm"], t["patched"]) for t in TREES.values())
 
 # module_sf_noahmplsm.F lines 30-84, in source order.
 LIFTED_SYMBOLS = (
@@ -65,15 +73,16 @@ def _sha256(path: Path) -> str:
 
 
 def audit(pristine: Path, patched: Path, patch: Path) -> tuple[str, ...]:
-    for label, path, expected in (
-        ("patch file", patch, PATCH_SHA256),
-        ("pristine source", pristine, PRISTINE_SHA256),
-        ("patched source", patched, PATCHED_SHA256),
-    ):
-        digest = _sha256(path)
-        if digest != expected:
-            raise VisibilityPatchError(
-                f"{label} {path} has sha256 {digest}, expected {expected}")
+    digest = _sha256(patch)
+    if digest != PATCH_SHA256:
+        raise VisibilityPatchError(
+            f"patch file {patch} has sha256 {digest}, expected {PATCH_SHA256}")
+    pair = (_sha256(pristine), _sha256(patched))
+    accepted = ((PRISTINE_SHA256, PATCHED_SHA256),) + ALTERNATE_PAIRS
+    if pair not in accepted:
+        raise VisibilityPatchError(
+            f"pristine {pristine} / patched {patched} have sha256 "
+            f"{pair[0]} / {pair[1]}, expected one of {accepted}")
 
     before = pristine.read_bytes().decode("utf-8", errors="strict").split("\n")
     after = patched.read_bytes().decode("utf-8", errors="strict").split("\n")

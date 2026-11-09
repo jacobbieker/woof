@@ -282,3 +282,41 @@ def test_crosscheck_script_is_present_and_lf_only():
     assert "CROSSCHECK IS VACUOUS" in text
     # The driver-linkage constraint that confines the patch to the harness.
     assert "ambiguous reference to .albedo." in text
+
+
+def test_the_two_pin_tables_agree_and_the_patch_is_committed():
+    """noahmp_pins.sh (shell build scripts) and noahmp_pins.py (Python tools)
+    name the same two trees with the same digests, and the committed visibility
+    patch is the one the checker pins.  The original patch file was never
+    committed; this one reproduces both pinned patched digests."""
+    import re
+    import sys
+
+    sys.path.insert(0, str(ORACLE_TOOLS))
+    try:
+        import noahmp_pins
+    finally:
+        sys.path.remove(str(ORACLE_TOOLS))
+    shell = (ORACLE_TOOLS / "noahmp_pins.sh").read_text(encoding="ascii")
+    keys = {"NOAHMP_WRF_COMMIT": "wrf_commit", "NOAHMP_COMMIT": "noahmp_commit",
+            "PRISTINE_LSM_SHA": "lsm", "PRISTINE_DRV_SHA": "drv",
+            "PRISTINE_GLA_SHA": "glacier", "PATCHED_SHA": "patched",
+            "PADDED_SHA": "padded"}
+    seen = {}
+    for block in re.findall(r"NOAHMP_TREE=(\S+)\n(.*?);;", shell, re.S):
+        name, body = block
+        seen[name] = {keys[k]: v for k, v in
+                      re.findall(r"(\w+)=([0-9a-f]{40,64})", body)}
+    assert seen == noahmp_pins.TREES
+    assert set(seen) == {"wrf-4.6.1", "wrf-4.7.1"}
+
+    checker = _load_checker()
+    patch = REPO_ROOT / "patches" / "noahmp-lsm-leaf-visibility.patch"
+    assert hashlib.sha256(patch.read_bytes()).hexdigest() == checker.PATCH_SHA256
+    assert set(checker.ALTERNATE_PAIRS) == {
+        (t["lsm"], t["patched"]) for t in noahmp_pins.TREES.values()}
+    for script in ("build_leaves.sh", "build_fluxprep.sh", "build_thermal.sh",
+                   "build_visibility_crosscheck.sh"):
+        text = (ORACLE_TOOLS / script).read_text(encoding="ascii")
+        assert f"PATCH_SHA={checker.PATCH_SHA256}" in text, script
+        assert "noahmp_pins.sh" in text, script

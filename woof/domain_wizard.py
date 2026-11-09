@@ -3021,8 +3021,44 @@ def _clock_keys(dt: Fraction) -> dict[str, int]:
 #: ``fixed`` writes nothing and the run keeps one step; ``auto`` (the
 #: door's default) is adaptive where :func:`clock_decision` finds the
 #: grid inside what the adaptive clock and the terrain clock both cover.
-CLOCK_CHOICES = ("auto", "adaptive", "fixed")
+#: ``tropical-adaptive`` is the tropics' opt-in (|lat| <
+#: MERCATOR_MAX_LAT, where ``auto`` keeps the fixed 2.5 s per km clock):
+#: the adaptive clock capped on the vertical Courant number, with the
+#: settings :data:`TROPICAL_ADAPTIVE_SETTINGS` names.
+CLOCK_CHOICES = ("auto", "adaptive", "fixed", "tropical-adaptive")
 DEFAULT_CLOCK = "auto"
+
+#: ``--clock tropical-adaptive``'s ``[shared]`` keys.  ``target_cfl`` is
+#: WRF's VERTICAL Courant target (its default 1.2): 1.0 holds the w-CFL at
+#: the limit the fixed tropical clock was measured to keep (0.976 peak,
+#: :data:`TROPICAL_ROOT_TIME_STEP_S`); ``w_damping`` keeps WRF's
+#: w-Rayleigh brake on any column that still crosses it; steps grow at
+#: most 5% per step (WRF's d01 default, written for every domain: WRF's
+#: nest default is 51%) and shrink at once.  Each domain's
+#: ``min_time_step`` is the fixed tropical clock itself, 2.5 s per km of
+#: its spacing (written per domain, :func:`tropical_adaptive_floors`):
+#: the adaptive clock's own floor, WRF's 3 s per km fill-in, sits above
+#: the step the tropics were measured to need.
+TROPICAL_ADAPTIVE_SETTINGS = {"use_adaptive_time_step": True,
+                              "target_cfl": 1.0, "w_damping": 1,
+                              "max_step_increase_pct": 5}
+
+
+def tropical_adaptive_floors(time_step: Fraction, ratios: tuple[int, ...]
+                             ) -> list[dict[str, int]]:
+    """Each domain's ``min_time_step`` keys under ``--clock
+    tropical-adaptive``: its fixed tropical step (the root's ``time_step``
+    divided down the ladder), WRF's numerator/denominator pair
+    (``min_time_step_den`` only when the step is not whole seconds)."""
+    out, dt = [], Fraction(time_step)
+    for index in range(len(ratios) + 1):
+        if index:
+            dt /= int(ratios[index - 1])
+        keys = {"min_time_step": dt.numerator}
+        if dt.denominator != 1:
+            keys["min_time_step_den"] = dt.denominator
+        out.append(keys)
+    return out
 
 
 def _clock_band_misses(time_step: Fraction, root_dx_m: float,
@@ -3058,7 +3094,8 @@ def _clock_band_misses(time_step: Fraction, root_dx_m: float,
 
 
 def clock_decision(choice: str, *, time_step: Fraction, root_dx_m: float,
-                   ratios: tuple[int, ...]) -> tuple[bool, str]:
+                   ratios: tuple[int, ...],
+                   ref_lat: float | None = None) -> tuple[bool, str]:
     """``(adaptive, why)`` for a ``--clock`` choice on this grid.
 
     ``auto`` is adaptive when two tables agree the grid is covered: every
@@ -3071,6 +3108,12 @@ def clock_decision(choice: str, *, time_step: Fraction, root_dx_m: float,
     keeps it fixed.  ``adaptive`` on a grid outside those bounds is
     REFUSED, naming the domain: the controller would clamp the step
     above the one the grid was given for the whole run.
+
+    ``tropical-adaptive`` (``ref_lat`` required) is adaptive inside the
+    tropics with each domain's floor at its fixed tropical step
+    (:data:`TROPICAL_ADAPTIVE_SETTINGS`); it is refused outside them,
+    where ``adaptive`` and ``auto`` already apply, and on a grid whose
+    first step lies above WRF's 8 s per km ceiling.
     """
 
     if choice not in CLOCK_CHOICES:
@@ -3078,6 +3121,30 @@ def clock_decision(choice: str, *, time_step: Fraction, root_dx_m: float,
                          f"got {choice!r}")
     if choice == "fixed":
         return False, "--clock fixed"
+    if choice == "tropical-adaptive":
+        if ref_lat is None or abs(float(ref_lat)) >= MERCATOR_MAX_LAT:
+            raise ValueError(
+                "--clock tropical-adaptive is the tropics' opt-in (|lat| < "
+                f"{MERCATOR_MAX_LAT:g}, where the fixed clock is 2.5 s per km)"
+                + ("" if ref_lat is None else
+                   f"; this domain is centred at {float(ref_lat):g}")
+                + ".  Use --clock adaptive or auto")
+        from woof.core.adaptive_clock import wrf_default_clamps
+        dt, dx, over = Fraction(time_step), float(root_dx_m), []
+        for index in range(len(ratios) + 1):
+            if index:
+                dt /= int(ratios[index - 1])
+                dx /= int(ratios[index - 1])
+            _, top, _ = wrf_default_clamps(dx, dx)
+            if not 0 < dt <= top:
+                over.append(f"d{index + 1:02d} at {dx:g} m starts at "
+                            f"{float(dt):g} s, above its {top} s ceiling")
+        if over:
+            raise ValueError("--clock tropical-adaptive cannot run this grid: "
+                             + "; ".join(over) + ".  Use --clock fixed.")
+        return True, ("--clock tropical-adaptive: the vertical Courant number "
+                      "capped at 1.0, each grid's floor at its fixed tropical "
+                      "step")
     misses = _clock_band_misses(time_step, root_dx_m, ratios)
     if choice == "adaptive":
         if misses:
@@ -4763,8 +4830,39 @@ def render_config(*, name: str, start_time: datetime, hours: int,
     for line in cumulus_gray_zone_advisory(chain_km, cu_by_domain):
         header += f"# {line}\n"
     adaptive, _ = clock_decision(clock, time_step=time_step,
-                                 root_dx_m=root_dx_m, ratios=ratios)
-    if adaptive:
+                                 root_dx_m=root_dx_m, ratios=ratios,
+                                 ref_lat=projection["ref_lat"])
+    tropical_adaptive = adaptive and clock == "tropical-adaptive"
+    if tropical_adaptive:
+        shared.update(TROPICAL_ADAPTIVE_SETTINGS)
+        header += (
+            "# CLOCK: tropical-adaptive (opt-in).  Each grid starts at the "
+            "fixed tropical\n"
+            "# time_step below, which is also its floor (min_time_step), and "
+            "grows at most 5%\n"
+            "# per step while its vertical Courant number stays under "
+            "target_cfl = 1.0\n"
+            "# (w_damping on); it shrinks at once when a column crosses it.  "
+            "The step reacts\n"
+            "# one step after convection starts, its choice rides a "
+            "device max-reduction (CUDA\n"
+            "# and Metal trajectories part sooner), and the run is not "
+            "byte-identical with the\n"
+            "# fixed clock.  docs/ADAPTIVE-TIMESTEP.md, 'The tropical "
+            "opt-in'.  Re-emit with\n"
+            "# `--clock fixed` (or omit --clock) for the fixed tropical "
+            "clock.\n")
+        if any(cu_by_domain):
+            header += (
+                "# CUMULUS UNDER THE OPT-IN: MEASURED on a 12 km Manila domain "
+                "with Kain-Fritsch\n"
+                "# (GFS 2026-11-07 00Z, 24 h), this clock raised the "
+                "domain-mean rain 18% over\n"
+                "# the fixed tropical clock, as a fixed 60 s step raised it "
+                "14%: the scheme answers\n"
+                "# the longer mean step.  docs/ADAPTIVE-TIMESTEP.md, 'The "
+                "tropical opt-in'.\n")
+    elif adaptive:
         # The one key.  The bounds stay WRF's per-spacing fill-ins (-1),
         # because a clamp written once into [shared] reaches every nest
         # in seconds (docs/ADAPTIVE-TIMESTEP.md, "A shared clamp is a
@@ -4832,6 +4930,13 @@ def render_config(*, name: str, start_time: datetime, hours: int,
             nest_physics=nest_physics)
     with_recipe_root_defaults(
         shared, domain_tables, recipe_root_defaults((fetch_hints or {}).get("source")))
+    if tropical_adaptive:
+        # Per domain, never in [shared]: a floor in seconds written once
+        # would reach every nest at the root's step (docs/ADAPTIVE-TIMESTEP.md,
+        # "A shared clamp is a per-domain trap").
+        for table, floor in zip(domain_tables,
+                                tropical_adaptive_floors(time_step, ratios)):
+            table.update(floor)
     for table in domain_tables:
         parts.append(_render_table("domain", table, array_of_tables=True))
     if fetch_hints:
@@ -8413,7 +8518,8 @@ def domain_main(args, *, sizing_budget: SizingBudget | None = None,
     # default screen names an adaptive clock on the header line above.
     if explain:
         _, clock_why = clock_decision(clock, time_step=selected_clock,
-                                      root_dx_m=root_dx_m, ratios=ratios)
+                                      root_dx_m=root_dx_m, ratios=ratios,
+                                      ref_lat=projection["ref_lat"])
         stepping = ("adaptive time step" if root.run.use_adaptive_time_step
                     else "fixed time step")
         print(f"domain: {stepping} ({clock_why}); --clock "
@@ -9096,7 +9202,11 @@ def register_cli(subparsers) -> None:
              "500 m to 12 km spacings the terrain clock measured, fixed "
              "otherwise (the tropical clock's 2.5 s per km is always "
              "fixed).  adaptive on a grid outside the bounds is refused, "
-             "naming the grid")
+             "naming the grid.  tropical-adaptive (opt-in, |lat| < 25 "
+             "only): adaptive from the fixed tropical step, which stays "
+             "each grid's floor, with the vertical Courant number capped "
+             "at 1.0 (target_cfl), w_damping on and steps growing at most "
+             "5%% per step; not byte-identical with the fixed clock")
     parser.add_argument("--hours", type=int, default=6, metavar="N",
                         help="forecast length (run_seconds = N*3600)")
     parser.add_argument(

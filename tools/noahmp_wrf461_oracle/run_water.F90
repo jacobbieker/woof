@@ -1,4 +1,4 @@
-! Oracle for the Noah-MP WATER assembly of WRF v4.6.1
+! Oracle for the Noah-MP WATER assembly of WRF v4.7.1
 ! MODULE_SF_NOAHMPLSM: WATER (5954-6261), the driver that sequences CANWATER,
 ! SNOWWATER and SOILWATER and owns the unit conversions between them.
 !

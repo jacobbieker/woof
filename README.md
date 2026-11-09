@@ -251,7 +251,17 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   - Morrison with CESM aerosol (`mp_physics = 40`, `aercu_opt = 0`).
 - **Height-dependent resolution:** a partial-depth two-way nest, fine near
   the ground and coarser aloft, on WRF and (dry dynamics only) on MPAS; and
-  WRF's live vertical nesting (`vert_refine_method = 2`).
+  WRF's live vertical nesting (`vert_refine_method = 2`).  On WRF the band
+  (`partial_nest = { k_top = ... }` on a child `[[domain]]`) runs on the
+  idealized tree and on `woof go`'s real-data domain tree: map factors, the
+  child's land surface rebuilt on its truncated column, radiation on an
+  extended column to the model top, and two-way feedback below the
+  interface plus WRF's surface feedback.  The interface must be a
+  pure-pressure level (at or above `etac`), above 12 km under a parent with
+  deep cumulus, and below a `damp_opt = 3` layer.  The real-data band needs
+  a fixed clock (`woof domain ... --clock fixed`); its child takes
+  `diff_opt = 1` with `km_opt = 4` and `emdiv = 0`; it writes no
+  checkpoints and cannot resume.
 - **More data sources:** the Met Office global and UKV models, DWD ICON
   (global and the machine-learning variant) and additional mapped routes.
 - **Applied tooling:** wind-energy siting, hindcasts and power products,
@@ -281,9 +291,17 @@ on it:
 
 - **Apple silicon only,** macOS 14 or newer, one GPU. Domain size is bounded
   by the Mac's unified memory. There is no multi-GPU or peer transport.
-- **Double precision is emulated.** Apple GPUs have no fp64, so `double`
-  becomes a bit-exact software binary64. It is correct to the last bit and
-  much slower than native fp64; units that lean on it are slow on a Mac.
+- **Double precision is emulated.** Apple GPUs have no fp64. Under strict
+  numerics (`GPUWM_WRF_EXACT=1`) `double` is a bit-exact software binary64:
+  correct to the last bit, much slower than native fp64, and slow to
+  compile. Fast numerics (the default) keeps the same binary64 words and
+  exact `+ - *`, division and square root, but computes CUDA's binary64
+  libm (exp, log, pow, sin, ...) in df64, a pair of binary32 values: about
+  2^-46 relative instead of correctly rounded, 20-150x faster, and units
+  that call it compile up to 100x sooner (`docs/dev/mlx-backend.md`,
+  "Binary64: soft-float and df64"). Units built on woof's own glibc ports
+  keep them, and their words, in both modes (CLM lake still compiles 5.6x
+  sooner, from the faster division and square root).
 - **The answers are not CUDA's bits everywhere.**
   - Metal never contracts a multiply-add, so where a CUDA result carries
     NVRTC's fused multiply-adds, Metal gives CUDA's `--fmad=false` words
@@ -305,8 +323,9 @@ on it:
   - the LTS executor's reserve census needs 64-bit atomic adds, which Apple
     GPUs lack;
   - the dynamics subcycle runs eager, because the facade has no CUDA graphs;
-  - the MPAS WSM6 unit of the water-budget gates (binary64, soft-float on
-    Metal) had not finished its cold compile after 1 h 45 min.
+  - the MPAS WSM6 unit of the water-budget gates (binary64) once had not
+    finished its cold compile after 1 h 45 min; it now compiles cold in
+    about 4 minutes, but its gates have not been re-run on Metal.
 - **Virtual Macs are not supported.** GitHub's hosted macOS runners expose an
   "Apple Paravirtual device" that computes wrong answers (NaN) where an
   M-series GPU matches WRF, so CI runs the Metal parity gates only on real

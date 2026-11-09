@@ -209,6 +209,11 @@ def test_the_projection_counts_what_the_ef4_run_wrote_before_its_first_step(monk
     assert p["total_bytes"] - p["download_bytes"] - p["preparation_bytes"] < 16.5e9
 
 
+#: One valid value per route selector that has no default: storm 12L, whose
+#: HAFS objects priced the hafs-a and hafs-b rows.
+_SELECTOR_EXAMPLES = {"STORM": "12l"}
+
+
 def test_every_route_and_transport_a_fetch_defaults_to_is_priced():
     """A source whose download is left out of every projection is the defect; adding one is a table row."""
     from route_cycle_fit import first_window
@@ -220,6 +225,14 @@ def test_every_route_and_transport_a_fetch_defaults_to_is_priced():
         start, hours = first_window(route, route.default_cadence)
         request = {"source": source, "cycle": None, "hours": hours,
                    "cadence": route.default_cadence, "forecast_start_hour": start}
+        # A selector with no default (HAFS's storm ID) is one the fetch
+        # refuses to guess; the request names one, as a real fetch must.
+        required = sorted(key for key, rule in (route.parameters or {}).items()
+                          if "default" not in rule)
+        if required:
+            assert set(required) <= set(_SELECTOR_EXAMPLES), (source, required)
+            request["source_parameters"] = ",".join(
+                f"{key}={_SELECTOR_EXAMPLES[key]}" for key in required)
         estimate = download_budget.download_estimate(request)
         assert estimate["bytes"] is not None, (source, estimate["basis"])
     for source, legacy in download_budget.table()["legacy_sources"].items():
@@ -502,3 +515,17 @@ def test_an_era5_arco_window_moves_the_blocks_of_its_rows_not_whole_chunks():
     assert whole["transfer_bytes"] == 2 * 551_000_000
     assert 174.1e6 <= regional["transfer_bytes"] <= 0.25 * whole["transfer_bytes"]
     assert "latitude rows" in regional["basis"]
+
+
+def test_a_selector_with_its_own_objects_prices_them():
+    """HAFS's storm-following grid is priced by its own objects, not the parent's."""
+    request = {"source": "hafs-a", "cycle": None, "hours": 6, "cadence": 3,
+               "forecast_start_hour": 0, "source_parameters": "STORM=12l"}
+    parent = download_budget.download_estimate(request)
+    storm = download_budget.download_estimate(
+        dict(request, source_parameters="STORM=12l,DOMAIN=storm"))
+    assert parent["objects"] == storm["objects"]
+    # Only the state objects change (a donor's objects, if any, do not):
+    # each one is 675 MB smaller on the storm-following grid.
+    saved = parent["bytes"] - storm["bytes"]
+    assert saved > 0 and saved % 675_000_000 == 0, saved

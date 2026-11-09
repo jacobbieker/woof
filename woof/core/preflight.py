@@ -2895,6 +2895,9 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # hflux (smag2d_theta_m composes smag2d.cu, whose own frame is 0 B), RTX
     # A6000 sm_86, NVRTC 12.9, 2026-10-31, both loaders: every entry point 0 B.
     "theta_m_cumulus": 0, "smag2d_theta_m": 0,
+    # wrf_smag_hd_w on stored face stresses (composes smag2d.cu), RTX A6000,
+    # default and strict numerics, 2026-11-08: 0 B.
+    "smag2d_w_faces": 0,
     # The partial-depth nest's coupling (Phase D3, kernels/partial_nest.cu),
     # RTX A6000 sm_86, NVRTC 12.9, 2026-10-30: all eight entry points 0 B.
     "partial_nest": 0,

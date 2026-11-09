@@ -31,6 +31,9 @@ BUILD_DIR_ENV = "WOOF_METAL_EXT_DIR"
 #: Environment override for the pipeline archive directory ("off": none).
 PIPELINE_DIR_ENV = "WOOF_METAL_PIPELINE_DIR"
 
+#: Environment override for the compiled-library directory ("off": none).
+LIBRARY_DIR_ENV = "WOOF_METAL_LIBRARY_DIR"
+
 
 def cache_root() -> Path:
     env = os.environ.get(BUILD_DIR_ENV)
@@ -49,6 +52,18 @@ def pipeline_root() -> Path | None:
     if env in ("off", "0"):
         return None
     return Path(env).expanduser() if env else cache_root().parent / "metal-pipelines"
+
+
+def library_root() -> Path | None:
+    """Where compiled units persist as serialized Metal dynamic libraries
+    (woof.backend.metal.dylib; launch.cpp ``dynamic_library_for``):
+    ``$WOOF_METAL_LIBRARY_DIR``, else ``metal-libraries`` beside the
+    extension cache.  A unit loaded from here compiles only its thin kernel
+    library, whatever the OS shader cache has kept."""
+    env = os.environ.get(LIBRARY_DIR_ENV)
+    if env in ("off", "0"):
+        return None
+    return Path(env).expanduser() if env else cache_root().parent / "metal-libraries"
 
 
 def build_key() -> str:
@@ -144,4 +159,27 @@ def load():
     if archives is not None:
         archives.mkdir(parents=True, exist_ok=True)
         module.set_pipeline_archive_dir(str(archives))
+    libraries = library_root()
+    if libraries is not None:
+        libraries.mkdir(parents=True, exist_ok=True)
+        module.set_library_dir(str(libraries))
+    times = os.environ.get(GPU_TIMES_ENV, "").strip()
+    if times and times not in ("0", "1"):
+        import atexit
+        atexit.register(write_gpu_times, module, times)
     return module
+
+
+#: WOOF_METAL_GPU_TIMES: measure each launch's GPU time per kernel (launch.cpp);
+#: a path (not 0 or 1) also writes them there as JSON when the process exits.
+GPU_TIMES_ENV = "WOOF_METAL_GPU_TIMES"
+
+
+def write_gpu_times(module, path) -> None:
+    """``{kernel: {"launches": n, "gpu_seconds": s}}``, slowest first, to ``path``
+    (``{pid}`` in it is this process's id)."""
+    import json
+    rows = sorted(module.gpu_times(), key=lambda row: -row[2])
+    target = Path(str(path).replace("{pid}", str(os.getpid())))
+    target.write_text(json.dumps({k: {"launches": n, "gpu_seconds": round(s, 6)} for k, n, s in rows},
+                                 indent=1), encoding="utf-8")

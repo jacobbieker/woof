@@ -1,7 +1,7 @@
-# WRF v4.6.1 Noah-MP ESAT bitwise oracle (module_sf_noahmplsm.F:4952-5001)
-#   tree     <wrf-4.6.1-checkout> (WSL)
-#   commit   d66e442fccc04111067e29274c9f9eaccc3cef28
-#   sha256   bd592a5b7db29000e715250e3a7c779ffb5e0dcc356f6b5a7d9e1c9f69c55282
+# WRF v4.7.1 Noah-MP ESAT bitwise oracle (module_sf_noahmplsm.F:4952-5001)
+#   tree     <wrf-4.7.1-checkout> (WSL)
+#   commit   f52c197ed39d12e087d02c50f412d90d418f6186
+#   sha256   74b475600ad1c999fe43299bcaf4d3e5eaf59b9f861c47fdbff4d69739e3a45b
 #   compiler gfortran 13.3.0, WRF FCOPTIM -O2 -ftree-vectorize -funroll-loops
 #   produced by tools/noahmp_wrf461_oracle/run_bareflux.F90 in 'esat' mode,
 #   which calls the module procedure directly through the visibility patch.

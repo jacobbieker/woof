@@ -79,6 +79,53 @@ def test_adaptive_is_refused_on_the_tropical_clock_naming_the_grid():
     assert "9..24 s" in message and "--clock fixed" in message
 
 
+def test_tropical_adaptive_writes_the_opt_in_settings_and_per_domain_floors():
+    """--clock tropical-adaptive: the vertical Courant target at 1.0,
+    w_damping on, 5% growth on every domain, and each domain's floor at
+    its own fixed tropical step -- per domain, never in [shared]."""
+    fixed = experiment_from_text(render(lat=14.6, ratios=(3,)), source="<fixed>")
+    text = render(lat=14.6, ratios=(3,), clock="tropical-adaptive")
+    exp = experiment_from_text(text, source="<tropical>")
+    assert "# CLOCK: tropical-adaptive (opt-in)." in text
+    shared = text.split("[shared]", 1)[1].split("[[domain]]", 1)[0]
+    assert "min_time_step" not in shared
+    for dc, ref in zip(exp.domains, fixed.domains):
+        run = dc.run
+        assert run.use_adaptive_time_step and run.w_damping == 1
+        assert run.target_cfl == 1.0 and run.max_step_increase_pct == 5
+        floor = Fraction(run.min_time_step, run.min_time_step_den or 1)
+        assert floor == first_step(dc) if dc.grid_id == 1 else floor == Fraction(ref.run.dt)
+        assert run.max_time_step == -1 and run.starting_time_step == -1
+    # The first steps are the fixed tropical clock's: 2.5 s per km.
+    assert first_step(exp.root) == first_step(fixed.root) == Fraction(15, 2)
+    assert [dc.run.dt for dc in exp.domains] == [dc.run.dt for dc in fixed.domains]
+
+
+def test_the_tropical_default_stays_the_fixed_clock_byte_for_byte():
+    for clock in (None, "fixed", "auto"):
+        text = render(lat=14.6, ratios=(3,), clock=clock)
+        assert text == render(lat=14.6, ratios=(3,), clock="fixed")
+        assert "use_adaptive_time_step" not in text and "target_cfl" not in text
+
+
+def test_tropical_adaptive_is_refused_outside_the_tropics():
+    with pytest.raises(ValueError, match=r"tropics' opt-in .*centred at 35\.3.*"
+                                         r"--clock adaptive or auto"):
+        render(lat=35.3, clock="tropical-adaptive")
+    with pytest.raises(ValueError, match="ref_lat|tropics"):
+        wizard.clock_decision("tropical-adaptive", time_step=Fraction(15, 2),
+                              root_dx_m=3000., ratios=())
+    chosen, why = wizard.clock_decision("tropical-adaptive", time_step=Fraction(15, 2),
+                                        root_dx_m=3000., ratios=(), ref_lat=-20.8)
+    assert chosen and why.startswith("--clock tropical-adaptive")
+
+
+def test_tropical_adaptive_floors_divide_down_the_ladder():
+    assert wizard.tropical_adaptive_floors(Fraction(30), (3, 4)) == [
+        {"min_time_step": 30}, {"min_time_step": 10},
+        {"min_time_step": 5, "min_time_step_den": 2}]
+
+
 def test_adaptive_is_refused_where_the_floor_rounds_to_zero():
     with pytest.raises(ValueError, match=r"d01 at 100 m .* outside the 0\.\.1 s"):
         render(dx=100., clock="adaptive")
