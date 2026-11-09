@@ -613,6 +613,8 @@ def is_available():
 profiler = types.SimpleNamespace(start=lambda: None, stop=lambda: None)
 nvtx = types.SimpleNamespace(RangePush=lambda *a, **k: None, RangePop=lambda: None,
                              Mark=lambda *a, **k: None)
+#: ``from cupy.cuda import memory_hook`` (tilestream.vram's DeviceLedger)
+memory_hook = types.SimpleNamespace(MemoryHook=MemoryHook)
 memory = types.SimpleNamespace(MemoryPool=_MemoryPool, OutOfMemoryError=MemoryError,
                                set_allocator=set_allocator)
 MemoryPool = _MemoryPool
@@ -849,7 +851,7 @@ def __getattr__(name):
 # package path.
 import sys as _sys  # noqa: E402
 
-for _name in ("compiler", "runtime", "driver", "nvrtc", "function"):
+for _name in ("compiler", "runtime", "driver", "nvrtc", "function", "memory_hook"):
     _sys.modules.setdefault(f"cupy.cuda.{_name}", globals()[_name])
 # CuPy's low-level bindings package, by the names woof imports them
 for _name, _value in (("cupy_backends.cuda.api.runtime", runtime), ("cupy_backends.cuda.api.driver", driver),

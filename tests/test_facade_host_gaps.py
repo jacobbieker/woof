@@ -67,3 +67,22 @@ def test_fft_plans_are_contexts_over_the_host_fft(cp):
     with get_fft_plan(work, axes=(-2, -1), value_type="C2C"):
         back = cp.fft.ifft2(cp.fft.fft2(work, axes=(-2, -1)), axes=(-2, -1))
     assert np.allclose(cp.asnumpy(back), a, atol=1e-5)
+
+
+def test_a_memory_hook_subclass_sees_each_device_allocation(cp):
+    """``from cupy.cuda import memory_hook`` (tilestream.vram's ledger)."""
+    from cupy.cuda import memory_hook
+
+    class Count(memory_hook.MemoryHook):
+        name = "Count"
+
+        def __init__(self):
+            self.sizes = []
+
+        def malloc_postprocess(self, device_id, size, mem_size, mem_ptr, pmem_id):
+            self.sizes.append(size)
+
+    hook = Count()
+    with hook:
+        cp.zeros(1000, dtype=cp.float32)
+    assert hook.sizes and hook.sizes[-1] >= 4000
