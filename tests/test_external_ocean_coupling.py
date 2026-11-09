@@ -202,7 +202,7 @@ def test_the_driver_runs_the_three_calls_at_wrf_places(tmp_path, monkeypatch):
     from woof.state_digest import canonical_state_digest
     inventory = coupling.digest_arrays()
     assert "external_ocean/coupling/sst_input" in inventory
-    assert "external_ocean/averager/elapsed" in inventory
+    assert "external_ocean/coupling/averager/elapsed" in inventory
     assert "external_ocean/ocean/surface/sst" in inventory
     clock = SimpleNamespace(dtbc_fp32=float(cfg.dt))
     before = canonical_state_digest(state, clock)
@@ -251,4 +251,9 @@ def test_the_nemo_column_couples_through_the_driver_wiring(tmp_path):
         cpl.send(surf, raincv=None, rainncv=z(0.0), dt=60.0)
     cpl.receive(fields)
     assert (fields["sst"].get() < first).all()            # a cooling flux cooled the column
+    # The digest inventory reaches the state the column keeps in its solvers:
+    # traqsr's heat content feeds the next solar trend.
+    inventory = cpl.digest_arrays()
+    assert "external_ocean/coupling/ocean/qsr_solver/qsr_hc" in inventory
+    assert "external_ocean/coupling/ocean/ts" in inventory
     assert AtmosphereSurface is not None

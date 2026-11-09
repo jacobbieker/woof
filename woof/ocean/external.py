@@ -88,13 +88,16 @@ class ExternalOceanCoupling:
         """The coupled state a later coupling step reads, for a state digest
         (woof.state_digest) only -- a checkpoint still refuses the coupling:
         this coupling's own arrays and averages, the ocean's surface (the
-        ExternalOcean interface), and its own arrays, array tables and
-        counters, each under ``external_ocean/``."""
+        ExternalOcean interface), and the ocean's arrays, array tables and
+        counters, with those of the solver objects it holds (NEMO's traqsr
+        keeps its heat content there), each under ``external_ocean/``."""
         import numpy as np
 
         out = {}
+        seen = set()
 
-        def take(prefix, obj):
+        def take(prefix, obj, depth=0):
+            seen.add(id(obj))
             for name, value in sorted(vars(obj).items()):
                 if isinstance(value, (bool, int, float, np.integer, np.floating)):
                     out[prefix + name] = np.asarray(value)
@@ -104,12 +107,11 @@ class ExternalOceanCoupling:
                     for key, item in sorted(value.items()):
                         if hasattr(item, "__array__") and hasattr(item, "dtype"):
                             out[f"{prefix}{name}/{key}"] = item
+                elif (depth < 3 and hasattr(value, "__dict__") and id(value) not in seen
+                      and not isinstance(value, type) and not callable(value)):
+                    take(f"{prefix}{name}/", value, depth + 1)
 
         take("external_ocean/coupling/", self)
-        take("external_ocean/averager/", self.averager)
-        take("external_ocean/sent/", self.sent)
-        take("external_ocean/delivered/", self.delivered)
-        take("external_ocean/ocean/", self.ocean)
         take("external_ocean/ocean/surface/", self.ocean.surface)   # the interface's own
         return out
 
