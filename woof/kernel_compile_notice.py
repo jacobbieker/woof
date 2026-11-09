@@ -124,6 +124,33 @@ def cupy_kernel_cache_dir() -> Path:
     return Path.home() / ".cupy" / "kernel_cache"
 
 
+def kernel_cache_dir() -> Path:
+    """The directory whose entries say whether this run's kernels are built.
+
+    CUDA: CuPy's kernel cache (:func:`cupy_kernel_cache_dir`).  The mlx
+    backend never writes there: its built kernels persist as Metal binary
+    archives, one per kernel (``woof.backend.metal.ext.pipeline_root``).
+    Censusing CuPy's directory on Metal announced "first run on this
+    machine" on every run, warm or not (2026-11-08 benchmark: 17 GB of
+    archives present).  An archive is not a CUDA ELF, so its entries census
+    as undecodable -- "possibly this card's" -- and never as a card swap.
+    """
+
+    try:
+        from woof import backend
+
+        name = backend.requested()
+    except Exception:  # noqa: BLE001 - telemetry never fails a run
+        name = None
+    if name == "mlx":
+        from woof.backend.metal.ext import pipeline_root
+
+        root = pipeline_root()
+        # archives off: nothing persists, every run compiles
+        return root if root is not None else Path(os.devnull) / "metal-pipelines"
+    return cupy_kernel_cache_dir()
+
+
 def current_compute_capability() -> str | None:
     """This process's card as CuPy spells it (``"86"``, ``"120"``), or None.
 
@@ -234,7 +261,7 @@ def scan_kernel_cache(cache_dir: Path | None = None
     source either way.
     """
 
-    directory = cupy_kernel_cache_dir() if cache_dir is None else cache_dir
+    directory = kernel_cache_dir() if cache_dir is None else cache_dir
     try:
         with os.scandir(directory) as scan:
             paths = [entry.path for entry in scan if entry.is_file()]
@@ -337,7 +364,7 @@ def kernel_cache_is_cold(cache_dir: Path | None = None) -> bool:
     plugged in.
     """
 
-    directory = cupy_kernel_cache_dir() if cache_dir is None else cache_dir
+    directory = kernel_cache_dir() if cache_dir is None else cache_dir
     try:
         with os.scandir(directory) as entries:
             for entry in entries:

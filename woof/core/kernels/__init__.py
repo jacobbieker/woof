@@ -441,6 +441,9 @@ _EXTRA_HEADERS: dict[str, tuple[str, ...]] = {
     # helpers ahead of its two entry points; a new module, so the smag2d
     # unit and its launches keep their bytes.
     "smag2d_theta_m": ("glibc_flt32.cuh", "smag2d.cu"),
+    # wrf_smag_hd_w with each face stress stored once (smag2d_w_faces.cu);
+    # composes smag2d.cu the same way, so smag2d.cu keeps every byte.
+    "smag2d_w_faces": ("glibc_flt32.cuh", "smag2d.cu"),
     "myjsfc": ("glibc_flt32.cuh", "flt32_expf_fma.cuh"),
     "mynn_surface": ("mynn_libm.cuh", "surface_subnormal.cuh"),
     "sfclay": ("glibc_flt32.cuh", "sfclay_classic.cuh"),
@@ -1111,7 +1114,7 @@ def module_options(name: str) -> tuple[str, ...]:
 
 
 _DIFFUSION_MODULES = frozenset(("smag2d", "sfs_output", "km5", "km5_geometry", "diffusion", "diff_opt1", "diff6", "diff6_seam",
-                                "smag2d_theta_m"))
+                                "smag2d_theta_m", "smag2d_w_faces"))
 
 DIFFUSION_OPTIONS = ("-std=c++17", "--fmad=false", "--ftz=false",
                      "--prec-div=true", "--prec-sqrt=true",

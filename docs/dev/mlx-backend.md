@@ -206,12 +206,71 @@ A unit's Metal library is built when it is loaded. Each kernel's pipeline
 is built at its first `get_function`, and pipelines are most of the cold
 cost (Morrison: library 4.7 s, `mo_process` 18 s).
 
-Built pipelines persist as Metal binary archives in
-`~/.cache/woof/metal-pipelines`. `WOOF_METAL_PIPELINE_DIR` moves the
-directory, and `off` disables the archives. The OS shader cache does not
-keep the largest pipelines: CLM lake's step kernel compiled again from
-scratch hours after its first build. `WOOF_METAL_COMPILE_LOG=1` prints each
-library and pipeline build's time, and whether it came from an archive.
+Three caches persist on disk, each under `~/.cache/woof` (an environment
+variable moves it, and `off` disables it):
+
+- **Translations** (`metal-translations`, `WOOF_METAL_TRANSLATION_DIR`).
+  Parsing and rewriting a unit with libclang costs seconds (WSM6: 3.1 s).
+  A translation is stored keyed by the unit's preprocessed text (an edited
+  header is a new key), its name, flags and integer macros, and a digest of
+  the translator's sources, the Metal headers and the libclang version.
+- **Compiled units** (`metal-libraries`, `WOOF_METAL_LIBRARY_DIR`).
+  `woof/backend/metal/dylib.py` cuts a translated unit in two. The body is
+  the whole unit, with each kernel turned into an ordinary function behind
+  an exported wrapper whose parameters are opaque. The thin library holds
+  one forwarding kernel per wrapper, with the original bindings. The body is
+  compiled once as a Metal dynamic library and serialized. The file is
+  specific to the GPU architecture and macOS build, which its name carries.
+  A later process loads it in milliseconds and compiles only the thin
+  library, whatever the OS shader cache has kept. A unit that declares
+  threadgroup memory, or whose kernel parameters are not the translator's
+  buffer, scalar-block and builtin forms, is compiled whole as before.
+  This route is opt-in. A dynamic library compiles every kernel of its
+  unit at once, whereas pipelines compile only the kernels a run launches,
+  and its backend compile is slower. Only a unit with at most
+  `WOOF_METAL_DYLIB_MAX_KERNELS` kernels is cut, and the default, 0, cuts
+  none. The strict NSSL-2 unit has 32 kernels, one of which had not compiled
+  after an hour. As a dynamic library it ran 37 to 49 minutes on an M3 Max
+  and then failed (`XPC_ERROR_CONNECTION_INTERRUPTED`). A body that fails
+  once is marked `.refused` beside its library path and compiled whole from
+  then on.
+- **Pipelines** of whole units (`metal-pipelines`,
+  `WOOF_METAL_PIPELINE_DIR`), as Metal binary archives. The OS shader cache
+  does not keep the largest pipelines: CLM lake's step kernel compiled again
+  from scratch hours after its first build.
+
+`WOOF_METAL_COMPILE_LOG=1` prints each library, dynamic-library and
+pipeline build's time, and where it came from.
+
+One unit, WSM6 (`wsm6`, M3 Max), with the dynamic library opted in
+(`WOOF_METAL_DYLIB_MAX_KERNELS=2`):
+
+| WSM6 | translate | library | pipelines | total |
+|---|---|---|---|---|
+| first build | 3.1 s | 16 s (dynamic library, built) | 0.03 s | 19 s |
+| next process, OS cache lost | 0.2 s (cache) | 0.04 s (disk + thin) | 0.0 s | 0.2 s |
+| without it: next process, OS cache lost | 3.1 s | 4.0 s | 0.0 s (archive) | 7 s |
+| without it: first build | 3.1 s | 4.0 s | 7.0 s | 14 s |
+
+At the defaults (translation cache on, dynamic library off), the gate
+suites on an M3 Max with every cache cold cost the same as before: the
+NSSL-2 oracle took 1256 s before and 1258 s after, with the same 16
+library and 27 pipeline builds summing to the same compile time. What the
+defaults save is translation in every later process: the NSSL-2 oracle's
+15 translations cost 11 s cold, and a cache hit costs a file read. Warm
+runs measured on a shared, loaded host were faster for the NSSL-2 oracle
+in both runs (12 s to 3 s; 67 s to 59 s), and mixed for the WRF gate
+suite (118 s to 139 s; 177 s to 99 s).
+
+Nothing new ships in the wheel; the caches fill on first use. A compiled
+library or archive is specific to one GPU architecture and macOS build.
+The Command Line Tools have no offline Metal compiler (`xcrun metal`), so
+they cannot build portable metallibs. And the wheel (98.06 MB with this
+change, about 5 KB more than before) has about 2 MB of room left under
+PyPI's 100 MB limit, while WSM6's dynamic library alone is 7.6 MB.
+Prefilling the caches ahead of time (`tools/metal_translation_census.py`
+without `--translate-only` builds every unit) moves the first build off the
+run.
 
 **Soft-float against df64.** `tools/df64_compile_bench.py` builds a unit's
 library and every pipeline cold (archives off, a nonce in the MSL so no

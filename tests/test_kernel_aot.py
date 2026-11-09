@@ -416,3 +416,19 @@ def test_shipped_images_apply_beside_unnamed_cuda_library_headers(tmp_path, monk
     # A changed compiler header or an added header no library owns still misses.
     (root / 'new.h').write_text('#define ADDED 1\n')
     assert select() == 'header_tree_mismatch'
+
+
+def test_a_facade_backend_skips_the_pack_without_a_compiler_warning(monkeypatch, recwarn, capsys):
+    """Metal compiles no CUDA: no NVRTC identity to measure, so no warning
+    that it "could not be measured (AttributeError)" on every run."""
+    import woof.kernel_aot as aot
+    monkeypatch.delenv("WOOF_AOT", raising=False)
+    monkeypatch.setenv("WOOF_BACKEND", "mlx")
+    monkeypatch.setattr(aot, "compiler_identity", lambda: (_ for _ in ()).throw(AttributeError("x")))
+    pack = Pack()
+    assert pack.reason == "facade_backend"
+    assert not pack.rows
+    assert "could not be measured" not in capsys.readouterr().err
+    assert not [w for w in recwarn if "could not be measured" in str(w.message)]
+    monkeypatch.setenv("WOOF_BACKEND", "cuda")
+    assert Pack().reason == "compiler_identity_unavailable"

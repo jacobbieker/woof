@@ -4627,13 +4627,22 @@ def _radiation_owned_payloads(stored,driver):
     if extra:raise RestartMismatchError('checkpoint contains state for an absent radiation component: '+str(sorted(extra)))
     return result
 
-def _driver_manifest(driver, *, streaming=False, state_shape=None) -> dict[str, object]:
-    """Serialized driver arrays; enforces driver attribute coverage."""
-    if getattr(driver, "external_ocean", None) is not None:
+def _driver_manifest(driver, *, streaming=False, state_shape=None,
+                     digest=False) -> dict[str, object]:
+    """Serialized driver arrays; enforces driver attribute coverage.
+
+    ``digest``: the manifest feeds a state digest (woof.state_digest), not a
+    checkpoint, so an attached external ocean is left out of it rather than
+    refused (the digest adds it from ``ExternalOceanCoupling.digest_arrays``);
+    its coupling is what a checkpoint cannot carry."""
+    coupled = getattr(driver, "external_ocean", None) is not None
+    if coupled and not digest:
         raise RestartManifestError(
             "restart of a run coupled to an external ocean is not ported: the "
             "ocean's state and the coupling-interval average are not checkpointed")
     for name in sorted(vars(driver)):
+        if coupled and name == "external_ocean":
+            continue
         if (name not in DRIVER_SERIALIZED_ATTRS
                 and name not in DRIVER_REBUILT_ATTRS
                 and name not in DRIVER_CHECKPOINT_ONLY_ATTRS):
