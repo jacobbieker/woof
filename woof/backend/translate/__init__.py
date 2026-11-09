@@ -2945,6 +2945,16 @@ class _Rewriter:
         if cursor.spelling in getattr(self, "generic_structs", ()):
             self.generic_struct(cursor)
             return
+        if cursor.kind in (K.STRUCT_DECL, K.CLASS_DECL) and cursor.is_definition() \
+                and not any(c.kind in (K.FIELD_DECL, K.CXX_BASE_SPECIFIER) for c in cursor.get_children()):
+            # An empty struct is one byte in C++ and in MSL, but a buffer's
+            # struct holding several empty members (RRFS smoke's State, one
+            # per Fortran module without variables) is "not valid for
+            # attribute 'buffer'": the byte is spelled, the layout the same
+            toks = list(cursor.get_tokens())
+            brace = next((t for t in toks if t.spelling == "{"), None)
+            if brace is not None:
+                self.edits.insert(brace.extent.end.offset, " char __woof_empty;", rank=-20_000)
         seen = set()
         groups = {}
         for c in cursor.get_children():
