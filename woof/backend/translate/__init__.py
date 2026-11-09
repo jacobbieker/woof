@@ -3269,6 +3269,13 @@ class _Rewriter:
         arguments have: it becomes ``auto`` (a generic lambda).  Overload
         resolution is unchanged -- a lambda has one call operator."""
         for parm in node.get_children():
+            if parm.kind.name == "PARM_DECL" and _indirection_kind(parm.type) == "ref":
+                # `[&](int j, float& out)`: the caller's locals (EEPS's row
+                # and interface lambdas write their results through them)
+                toks = list(parm.get_tokens())
+                if toks:
+                    self.edits.insert(toks[0].extent.start.offset, "thread ", rank=-20_000)
+                continue
             if parm.kind.name != "PARM_DECL" or _indirection_kind(parm.type) != "ptr":
                 continue
             toks = list(parm.get_tokens())
