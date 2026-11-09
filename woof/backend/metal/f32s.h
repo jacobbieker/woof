@@ -90,7 +90,7 @@ WOOF_SLOW static float __woof_slow_sub(float a, float b) {
 static inline uint __woof_f32_significand(uint u, thread int& e) {   // u = |x| bits, x != 0
   uint ex = u >> 23, m = u & 0x7FFFFFu;
   if (ex != 0u) { e = int(ex) - 127; return m | 0x800000u; }
-  int lz = int(clz(m)) - 8;
+  int lz = int(metal::clz(m)) - 8;
   e = -126 - lz;
   return m << uint(lz);
 }
@@ -102,8 +102,8 @@ static inline float __woof_f32_place(uint sign, float p, float err, int e) {
   if (E >= -126) return as_type<float>(sign | (uint(E + 127) << 23) | (M & 0x7FFFFFu));
   int s = -(E + 126);
   if (s > 25) return as_type<float>(sign);
-  uint R = M >> uint(s), rem = M & ((1u << uint(s)) - 1u), half = 1u << uint(s - 1);
-  if (rem > half || (rem == half && (err > 0.0f || (err == 0.0f && (R & 1u) != 0u)))) R += 1u;
+  uint R = M >> uint(s), rem = M & ((1u << uint(s)) - 1u), halfway = 1u << uint(s - 1);
+  if (rem > halfway || (rem == halfway && (err > 0.0f || (err == 0.0f && (R & 1u) != 0u)))) R += 1u;
   return as_type<float>(sign | R);
 }
 static inline bool __woof_f32_ordinary(float x) {   // finite and nonzero
