@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import os
 import struct
+import threading
 from functools import lru_cache
 
 import numpy as np
@@ -146,8 +147,11 @@ class MetalFunction:
             # to MLX's hazard tracking: let everything before finish first
             import mlx.core as mx
             mx.synchronize()
+        # The library was built with the module (MetalModule._build), so the
+        # launch names it by key and does not carry the unit's MSL: copying a
+        # 560 KB source into every launch cost 28 us of host time per launch.
         outputs = ext.load().launch(
-            self.library_key, self.unit.msl, self.name, _dim3(grid), _dim3(block),
+            self.library_key, "", self.name, _dim3(grid), _dim3(block),
             buffers, offsets, writable, slots, sig.table_slot, blobs, blob_slots,
             int(shared_mem or 0), MATH_MODE_SAFE, null_slots, null_table)
         written = iter(outputs)
@@ -348,6 +352,8 @@ class MetalModule:
             raise CompileError(f"Metal did not compile the translation of {self.name!r} "
                                f"(MSL saved to {path}):\n" + "\n".join(errors)) from None
         self.max_threads.update(zip(kernels, limits))
+        from woof.backend.metal import prefetch
+        prefetch.note_kernels(self.library_key, kernels)
 
     def build_all(self) -> None:
         """Every kernel's pipeline now (tools/metal_translation_census.py)."""
@@ -484,14 +490,43 @@ def _translated(source: str, unit: str, contract: bool, retain: bool, defines=()
                      include_dirs=include_dirs, f64=f64)
 
 
+#: translations run one at a time: the compile prefetch translates on its own thread
+_TRANSLATE_LOCK = threading.RLock()
+
+
 def translate_unit(name: str, source: str, *, options=()) -> TranslatedUnit:
     """The MSL ``load_unit`` would compile, without touching a Metal device."""
     from woof import numerics
     from woof.backend.translate import option_defines, option_include_dirs
     effective = numerics.effective_options(tuple(options or ()))
-    return _translated(source, name, contracts(options, source), retains_subnormals(name, source, options),
-                       option_defines(effective), option_include_dirs(effective), f64_mode(name, source, options))
+    with _TRANSLATE_LOCK:
+        return _translated(source, name, contracts(options, source), retains_subnormals(name, source, options),
+                           option_defines(effective), option_include_dirs(effective), f64_mode(name, source, options))
 
 
 def load_unit(name: str, source: str, *, options=()) -> MetalModule:
-    return MetalModule(translate_unit(name, source, options=options), name)
+    from woof.backend.metal import prefetch
+    prefetch.start()          # last run's units, built in parallel (once per process)
+    module = MetalModule(_with_nonce(translate_unit(name, source, options=options)), name)
+    prefetch.note_unit(module.library_key, name, source, options)
+    return module
+
+
+#: WOOF_METAL_COMPILE_NONCE=<text>[:source] -- benchmarks only: a comment in
+#: every unit's MSL, so Metal finds none of it cached.  ``<text>`` alone
+#: also changes the library key (a cold build: no pipeline archive matches);
+#: ``<text>:source`` keeps the key, as when macOS has evicted only the
+#: compiled libraries.  The compiled code is the same.
+NONCE_ENV = "WOOF_METAL_COMPILE_NONCE"
+
+
+def _with_nonce(unit: TranslatedUnit) -> TranslatedUnit:
+    nonce = os.environ.get(NONCE_ENV, "")
+    if not nonce:
+        return unit
+    import dataclasses
+    import hashlib
+    text, _, scope = nonce.partition(":")
+    msl = unit.msl + f"\n// woof compile nonce {text}\n"
+    key = unit.key if scope == "source" else hashlib.sha256(msl.encode("utf-8")).hexdigest()
+    return dataclasses.replace(unit, msl=msl, key=key)

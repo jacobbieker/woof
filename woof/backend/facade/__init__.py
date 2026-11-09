@@ -15,6 +15,7 @@ Arrays are :class:`woof.backend.facade._array.ndarray`; raw kernels
 from __future__ import annotations
 
 import builtins
+import sys
 import types
 
 import numpy as np
@@ -298,12 +299,47 @@ def clear_memo():
 
 # FFTs: NumPy's pocketfft on the host -- a recorded delta against cuFFT
 # (DA perturbations, stochastic patterns), never a parity claim.
-fft = types.SimpleNamespace(**{n: _on_host(getattr(np.fft, n)) for n in (
+def _fft_on_host(np_fn):
+    """A ``cupy.fft`` transform on the host.  Inside a CUDA-graph capture
+    (spectral nudging's captured operator) it is recorded as a host step:
+    its result array is allocated once, now, and each replay rewrites it
+    from the input's values at that point, as CUDA's graph reruns the
+    cuFFT node into its graph-owned output."""
+    eager = _on_host(np_fn)
+
+    def fn(a, *args, **kwargs):
+        from woof.backend.facade import _capture
+        if _capture.recording() is None or not isinstance(a, ndarray):
+            return eager(a, *args, **kwargs)
+        if builtins.any(isinstance(x, ndarray) for x in (*args, *kwargs.values())):
+            _capture.refuse(f"cupy.fft.{np_fn.__name__} with array arguments past the input")
+            return eager(a, *args, **kwargs)
+        like = np_fn(np.zeros(a.shape, a.dtype), *args, **kwargs)
+        with _capture.suspended():
+            out = empty(like.shape, like.dtype)
+        _capture.defer(lambda: out.set(np.asarray(np_fn(a.get(), *args, **kwargs))))
+        return out
+    fn.__name__ = np_fn.__name__
+    fn.__doc__ = eager.__doc__
+    return fn
+
+
+fft = types.ModuleType("cupy.fft")
+fft.__dict__.update({n: _fft_on_host(getattr(np.fft, n)) for n in (
     "fft", "ifft", "rfft", "irfft", "fft2", "ifft2", "rfft2", "irfft2", "fftn", "ifftn", "rfftn",
     "irfftn", "hfft", "ihfft")})
+fft.__path__ = []
 fft.fftfreq, fft.rfftfreq = _on_host(np.fft.fftfreq), _on_host(np.fft.rfftfreq)
 fft.fftshift, fft.ifftshift = _on_host(np.fft.fftshift), _on_host(np.fft.ifftshift)
 fft.config = types.SimpleNamespace(enable_nd_planning=False, get_plan_cache=lambda: None)
+# cuFFT plans (stochastic patterns' workspace probe, DA perturbations)
+fft._fft = types.ModuleType("cupy.fft._fft")
+fft._fft._get_cufft_plan_nd = lambda *a, **k: _cufft().get_cufft_plan_nd(*a, **k)
+
+
+def _cufft():
+    from woof.backend.facade import cufft
+    return cufft
 
 # cupy.testing: NumPy's assertions on host copies
 class _RandomState:
@@ -534,7 +570,9 @@ cupyx.__path__ = []
 #: the facade's own submodules, for `import cupyx.scipy.special` (backend._FacadeFinder)
 SUBMODULES = {"cupyx.scipy": cupyx.scipy, "cupyx.scipy.special": cupyx.scipy.special,
               "cupyx.scipy.ndimage": cupyx.scipy.ndimage, "cupyx.scipy.sparse": cupyx.scipy.sparse,
-              "cupyx.scipy.fft": cupyx.scipy.fft}
+              "cupyx.scipy.fft": cupyx.scipy.fft, "cupy.fft": fft, "cupy.fft._fft": fft._fft}
+# `from cupy.fft._fft import ...`: found in sys.modules, as cupy.cuda's are
+sys.modules.setdefault("cupy.fft._fft", fft._fft)
 
 
 def __getattr__(name):

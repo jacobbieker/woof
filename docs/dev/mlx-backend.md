@@ -242,6 +242,26 @@ variable moves it, and `off` disables it):
 `WOOF_METAL_COMPILE_LOG=1` prints each library, dynamic-library and
 pipeline build's time, and where it came from.
 
+**Compile prefetch** (`woof/backend/metal/prefetch.py`, plans in
+`metal-plan`, `WOOF_METAL_PLAN_DIR`). Each run records the units it loaded
+(name, CUDA source, options, the kernels whose pipelines it built) under a
+plan named by its configuration. The next run translates them on one thread
+and builds libraries and pipelines on a pool (`WOOF_METAL_PREFETCH_WORKERS`,
+default 8) from its first module on; each library and pipeline builds under
+its own lock without the GIL, so the forecast waits only for the unit it
+needs. The MSL, options and descriptors are the run's own, so the code is the
+same. edi 3 km on an M3 Max, `WOOF_METAL_COMPILE_NONCE` making Metal find
+nothing cached (all wrfout byte-identical):
+
+| launch | serial | prefetch |
+|---|---|---|
+| cold (libraries and pipelines) | 308 s | 199 s |
+| libraries evicted, archives present | 185 s | 140 s |
+
+Cache file names are the key's safe characters, cut past 120 to 96 plus a
+digest: SSiB's 290-character key (its table digests) made a name past 255
+bytes, and `-[MTLBinaryArchive serializeToURL:]` crashed the process on it.
+
 One unit, WSM6 (`wsm6`, M3 Max), with the dynamic library opted in
 (`WOOF_METAL_DYLIB_MAX_KERNELS=2`):
 

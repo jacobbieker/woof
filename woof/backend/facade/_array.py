@@ -21,6 +21,12 @@ binary64.  MLX's GPU has no float64; a float64 facade array is stored as its
 binary64 words (``mx.uint64``).  Kernels see ordinary ``double*`` memory
 (translated to soft-float ``f64``); array arithmetic on float64 runs through
 NumPy on the host (:mod:`woof.backend.facade._ops`).
+
+binary64 complex.  MLX has no 16-byte element, so a complex128 array lives
+in a ``uint64`` storage, two words per element (real, imaginary): CUDA's
+``double2`` / ``cuDoubleComplex`` memory.  Its values (``_values``) are those
+words with a trailing axis of 2, and its arithmetic runs on the host, as
+float64's does.
 """
 
 from __future__ import annotations
@@ -55,6 +61,7 @@ def storage_mx_dtype(dtype: np.dtype):
         np.dtype(np.int32): mx.int32, np.dtype(np.uint32): mx.uint32,
         np.dtype(np.int64): mx.int64, np.dtype(np.uint64): mx.uint64,
         np.dtype(np.bool_): mx.bool_, np.dtype(np.complex64): mx.complex64,
+        np.dtype(np.complex128): mx.uint64,  # (real, imaginary) word pairs
     }
     try:
         return table[dtype]
@@ -62,12 +69,37 @@ def storage_mx_dtype(dtype: np.dtype):
         raise TypeError(f"the mlx backend has no storage for dtype {dtype}") from None
 
 
+#: dtypes whose arithmetic runs on the host (MLX's GPU has no binary64)
+HOST_DTYPES = (np.dtype(np.float64), np.dtype(np.complex128))
+
+
+def on_host(dtype) -> bool:
+    """True for a dtype the facade computes with on the host."""
+    return isinstance(dtype, np.dtype) and dtype in HOST_DTYPES
+
+
+def storage_dtype(dtype) -> np.dtype:
+    """The element dtype of the Storage that holds ``dtype`` arrays."""
+    dtype = np.dtype(dtype)
+    return np.dtype(np.uint64) if dtype == np.complex128 else dtype
+
+
+def values_shape(shape, dtype) -> tuple:
+    """The shape of an array's values (``_values``): complex128's carry a
+    trailing (real, imaginary) axis."""
+    shape = tuple(shape)
+    return shape + (2,) if np.dtype(dtype) == np.complex128 else shape
+
+
 def to_storage_values(host: np.ndarray):
-    """A host array -> an mx.array in its storage dtype (float64 as words)."""
+    """A host array -> an mx.array in its storage dtype (float64 as words,
+    complex128 as word pairs on a trailing axis)."""
     mx = _mx()
     host = np.require(np.asarray(host), requirements="C")   # (keeps 0-d)
     if host.dtype == np.float64:
         return mx.array(host.view(np.uint64))
+    if host.dtype == np.complex128:
+        return mx.array(host.reshape(-1).view(np.uint64).reshape(host.shape + (2,)))
     return mx.array(host)
 
 
@@ -99,7 +131,7 @@ class Storage:
     filled array can be one scalar with stride 0), and a kernel bound to
     such a buffer would read and write past the one element it holds."""
 
-    __slots__ = ("arr", "dtype", "_aliases", "_memory", "__weakref__")
+    __slots__ = ("arr", "dtype", "_aliases", "_memory", "_address", "__weakref__")
 
     def __init__(self, arr, dtype: np.dtype, *, fresh: bool = False):
         """``fresh``: ``arr`` is a newly computed value no other array holds
@@ -113,9 +145,10 @@ class Storage:
         mx = _mx()
         flat = _materialize(arr)
         self.arr = flat if fresh else mx.array(flat)
-        self.dtype = np.dtype(dtype)
+        self.dtype = storage_dtype(dtype)
         self._aliases = None
         self._memory = None
+        self._address = None
         _count_allocation(self)
         if MEMORY_HOOKS:
             # cupy.cuda.MemoryHook: a new storage is a device allocation
@@ -138,6 +171,7 @@ class Storage:
         if _capture.recording() is not None:
             _capture.refuse("a facade array allocation or operation")
         self.arr = _materialize(arr)
+        self._address = None          # a new buffer
         PENDING.append(self)
 
     def rebind_written(self, out):
@@ -158,7 +192,7 @@ class Storage:
         untyped (``hostAlloc``).  Both see every in-place write."""
         import mlx.core as mx
         from woof.backend.metal import ext
-        dtype = np.dtype(dtype)
+        dtype = storage_dtype(dtype)
         if dtype == self.dtype:
             return self
         if self._aliases is None:
@@ -179,8 +213,15 @@ class Storage:
         ``a.data.ptr`` for pointers) resolves to this storage."""
         import mlx.core as mx
         from woof.backend.metal import ext
-        mx.eval(self.arr)
-        base = int(ext.load().gpu_address(self.arr))
+        base = self._address
+        if base is None:
+            mx.eval(self.arr)
+            base = self._address = int(ext.load().gpu_address(self.arr))
+        # Known: an in-place launch's output is the same buffer (rebind_written),
+        # so the address stands until rebind() gives the storage a new one.
+        # Evaluating for it again waited on every launch still writing the
+        # buffer: the microphysics ring copy's table key asked for 390
+        # addresses per model step, each a host sync on Metal.
         _ADDRESSES[base] = weakref.ref(self)
         return base
 
@@ -265,7 +306,8 @@ class ndarray:
                     f"a {dtype} array of {n} elements ({n * dtype.itemsize} bytes) is past the mlx "
                     f"backend's {MAX_ELEMENTS}-element limit per allocation (MLX sizes an array with "
                     "int32): allocate it in pieces")
-            _storage = Storage(mx.zeros((n,), dtype=storage_mx_dtype(dtype)), dtype, fresh=True)
+            words = n * dtype.itemsize // storage_dtype(dtype).itemsize
+            _storage = Storage(mx.zeros((words,), dtype=storage_mx_dtype(dtype)), dtype, fresh=True)
         self._st = _storage
         self.dtype = dtype
         self.shape = shape
@@ -349,11 +391,20 @@ class ndarray:
     def _same_item(self) -> bool:
         return self._st.dtype.itemsize == self.itemsize
 
+    def _words(self) -> "ndarray":
+        """A complex128 view as the uint64 view of its (real, imaginary)
+        words: the same bytes, with a trailing axis of 2."""
+        return ndarray(self.shape + (2,), np.uint64, _storage=self._st, _offset=self._offset,
+                       _strides=self.strides + (8,))
+
     # ---------------------------------------------------------- read
     def _values(self):
         """This view's elements as an mx.array of shape ``self.shape``
-        (storage dtype; float64 as words)."""
+        (storage dtype; float64 as words; complex128 as word pairs, shape
+        ``self.shape + (2,)``)."""
         mx = _mx()
+        if self.dtype == np.complex128:
+            return self._words()._values()
         if not self._same_item():
             return self._reinterpreted_values()
         arr = self._st.arr
@@ -399,6 +450,8 @@ class ndarray:
         host = np.array(values, copy=True)
         if self.dtype == np.float64:
             host = host.view(np.float64)
+        elif self.dtype == np.complex128:
+            host = np.ascontiguousarray(host).reshape(-1).view(np.complex128)
         elif host.dtype != self.dtype:
             host = host.astype(self.dtype, copy=False)
         host = host.reshape(self.shape)
@@ -470,6 +523,9 @@ class ndarray:
         The copy kernel addresses the buffer in this view's element width,
         so a reinterpreted-dtype view writes like any other."""
         from woof.backend.facade._write import write
+        if self.dtype == np.complex128:
+            write(self._words(), values)
+            return
         write(self, values)
 
     def _flat_indices(self):
@@ -483,14 +539,17 @@ class ndarray:
         return mx.broadcast_to(idx, self.shape)
 
     def fill(self, value):
+        from woof.backend.facade import _capture
         from woof.backend.facade._ops import scalar_values
+        if _capture.defer(ndarray.fill, self, value):
+            return
         self._write(scalar_values(value, self.dtype))
 
     def set(self, host, stream=None):
         host = np.asarray(host, dtype=self.dtype)
         if host.shape != self.shape:
             raise ValueError(f"shape mismatch: {host.shape} vs {self.shape}")
-        self._write(to_storage_values(host).reshape(self.shape))
+        self._write(to_storage_values(host).reshape(values_shape(self.shape, self.dtype)))
 
     # ---------------------------------------------------------- views
     def __getitem__(self, key):
@@ -584,6 +643,8 @@ class ndarray:
         if self.ndim > 1 and self._memory_order(order) == "F":
             return self.transpose().copy().transpose()
         mx = _mx()
+        if self.dtype == np.complex128:
+            return ndarray(self.shape, self.dtype, _storage=Storage(mx.contiguous(self._values()), self.dtype))
         return ndarray(self.shape, self.dtype,
                        _storage=Storage(mx.contiguous(self._values()), self._st.dtype)) \
             if self._same_item() else ndarray(self.shape, self.dtype, _storage=Storage(
