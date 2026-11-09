@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import pickle
 import re
 import shutil
 import struct
@@ -3985,6 +3986,70 @@ def flatten_inheritance(text: str, unit: str) -> str:
     return edits.apply()
 
 
+#: Environment override for the translation cache directory ("off": none).
+TRANSLATION_DIR_ENV = "WOOF_METAL_TRANSLATION_DIR"
+
+
+@lru_cache(maxsize=1)
+def translator_digest() -> str:
+    """Everything a translation depends on besides its preprocessed text:
+    the translator's own sources, the Metal headers its prelude carries and
+    the libclang it parses with."""
+    root = Path(__file__).resolve().parent
+    digest = hashlib.sha256()
+    files = sorted(root.glob("*.py")) + sorted(root.glob("*.h")) + sorted(root.glob("*.cuh")) \
+        + sorted((root.parent / "metal").glob("*.h"))
+    for path in files:
+        digest.update(path.name.encode() + b"\0" + path.read_bytes() + b"\0")
+    try:
+        from importlib.metadata import version
+        digest.update(version("libclang").encode())
+    except Exception:  # noqa: BLE001 -- the bindings' version is best effort
+        pass
+    return digest.hexdigest()
+
+
+def _translation_dir() -> Path | None:
+    env = os.environ.get(TRANSLATION_DIR_ENV)
+    if env in ("off", "0"):
+        return None
+    if env:
+        return Path(env).expanduser()
+    base = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
+    return (base / "woof" / "metal-translations").expanduser()
+
+
+def _translation_cache(text, unit, contract, retain_subnormals, source, defines, f64):
+    """``(cached unit or None, store)``: translations persist across processes
+    under :func:`_translation_dir`, keyed by the PREPROCESSED text (so an
+    edited header is a new key), the unit's name and flags (``f64`` among them), the integer
+    macros the source and options define, and :func:`translator_digest`.
+    Parsing and rewriting a large unit costs seconds; a hit costs a read."""
+    directory = _translation_dir()
+    if directory is None:
+        return None, lambda result: None
+    key = hashlib.sha256("\0".join((
+        translator_digest(), unit, str(bool(contract)), str(bool(retain_subnormals)), f64,
+        repr(sorted(_integer_macros(source, defines).items())), text)).encode()).hexdigest()
+    path = directory / f"{key}.pickle"
+    try:
+        with open(path, "rb") as f:
+            return pickle.load(f), lambda result: None
+    except (OSError, EOFError, pickle.UnpicklingError, AttributeError, ImportError):
+        pass
+
+    def store(result: TranslatedUnit) -> None:
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+            partial = path.with_name(f"{path.name}.{os.getpid()}.partial")
+            with open(partial, "wb") as f:
+                pickle.dump(result, f, protocol=pickle.HIGHEST_PROTOCOL)
+            os.replace(partial, path)
+        except OSError:
+            pass
+    return None, store
+
+
 def translate(source: str, *, unit: str = "<unit>", contract: bool = False,
               retain_subnormals: bool = False, defines=(), include_dirs=(),
               f64: str = "soft") -> TranslatedUnit:
@@ -4001,6 +4066,17 @@ def translate(source: str, *, unit: str = "<unit>", contract: bool = False,
     text = preprocess(source, defines, include_dirs)
     if compose(source, text, f64) is not source:
         text = preprocess(compose(source, text, f64), defines, include_dirs)
+    cached, store = _translation_cache(text, unit, contract, retain_subnormals, source, defines, f64)
+    if cached is not None:
+        return cached
+    result = _translate_preprocessed(text, source, unit=unit, contract=contract,
+                                     retain_subnormals=retain_subnormals, defines=defines, f64=f64)
+    store(result)
+    return result
+
+
+def _translate_preprocessed(text: str, source: str, *, unit: str, contract: bool,
+                            retain_subnormals: bool, defines, f64: str) -> TranslatedUnit:
     text = rewrite_ptx_asm(text, unit)
     if retain_subnormals:
         text = explicit_float_to_integral(text)
