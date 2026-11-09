@@ -64,6 +64,14 @@ static void compile_log(const char* what, const std::string& name,
   std::fprintf(stderr, "[woof.metal] %s %s %.2f s\n", what, name.c_str(), seconds);
 }
 
+// WOOF_METAL_GPU_TIMES (set): each launch's GPU seconds, summed per kernel
+// (gpu_times()).  A launch is evaluated in a command buffer of its own
+// (woof.backend.facade: rebind_written), so the buffer's GPU interval is
+// the kernel's; two launches sharing a buffer would each count it whole.
+static const bool g_gpu_times = std::getenv("WOOF_METAL_GPU_TIMES") != nullptr;
+static std::mutex g_gpu_times_mutex;
+static std::unordered_map<std::string, std::pair<uint64_t, double>> g_gpu_time_totals;
+
 static MTL::CompileOptions* compile_options(int math_mode) {
   auto* options = MTL::CompileOptions::alloc()->init();
   if (__builtin_available(macOS 15, *)) {
@@ -484,6 +492,16 @@ class LaunchTranslated : public mx::Primitive {
     auto [tx, ty, tz] = threads_;
     enc.dispatch_threadgroups(MTL::Size(gx, gy, gz), MTL::Size(tx, ty, tz));
     enc.end_encoding(/* wait_in_flight = */ true);
+    if (g_gpu_times) {
+      std::string kernel = kernel_;
+      enc.get_command_buffer()->addCompletedHandler([kernel](MTL::CommandBuffer* buffer) {
+        double seconds = buffer->GPUEndTime() - buffer->GPUStartTime();
+        std::lock_guard<std::mutex> lock(g_gpu_times_mutex);
+        auto& total = g_gpu_time_totals[kernel];
+        total.first += 1;
+        total.second += seconds;
+      });
+    }
   }
 
   const char* name() const override {
@@ -635,4 +653,10 @@ NB_MODULE(_woof_metal_launch, m) {
         }, nb::arg("library_key"), nb::arg("body"), nb::arg("thin"));
   m.def("compile", &compile, nb::arg("library_key"), nb::arg("source"),
         nb::arg("kernels"), nb::arg("math_mode") = 0);
+  m.def("gpu_times", []() {
+          std::lock_guard<std::mutex> lock(g_gpu_times_mutex);
+          std::vector<std::tuple<std::string, uint64_t, double>> rows;
+          for (const auto& [kernel, total] : g_gpu_time_totals) rows.emplace_back(kernel, total.first, total.second);
+          return rows;
+        });
 }
