@@ -627,6 +627,7 @@ class _Rewriter:
         self._keep_float_ranges: list = []
         #: declaration statement start -> (stmt, var usrs, function usr, default space)
         self._qualified_sites: dict = {}
+        self._split_decls: set = set()
         self._emitted_sites: set = set()
         self._decl_stmt_index = None
         self._kernel_cursors: list = []
@@ -938,13 +939,88 @@ class _Rewriter:
             self.edits.replace(tokens[0].extent.start.offset, tokens[name_index].extent.start.offset, "auto ")
             return
         key = self.span(stmt)[0]
-        if key in self._qualified_sites:
+        if key in self._qualified_sites or key in self._split_decls:
+            return
+        if self._split_mixed_declaration(stmt, declared):
+            self._split_decls.add(key)
             return
         fn = node.semantic_parent
         default = "thread" if canon == "LVALUEREFERENCE" else "device"
         self._qualified_sites[key] = (stmt, [d.get_usr() for d in declared
                                              if d.type.get_canonical().kind.name in ("POINTER", "LVALUEREFERENCE")],
                                       fn.get_usr() if fn is not None else None, default)
+
+    def _split_mixed_declaration(self, stmt, declared):
+        """``T *a = p, b, *c = q;``: pointers and non-pointers in one
+        declaration, where a space qualifier on the statement would qualify
+        ``b`` too (cam3_emissivity: automatic variable qualified with an
+        address space).  When every pointer declarator has an initialiser the
+        statement becomes one declaration each, the pointers ``auto`` (their
+        space deduced, right in every instance).  False otherwise."""
+        K = self.ci.CursorKind
+        if len(declared) < 2:
+            return False
+        kinds = [d.type.get_canonical().kind.name for d in declared]
+        if "POINTER" not in kinds or all(k == "POINTER" for k in kinds) or "LVALUEREFERENCE" in kinds:
+            return False
+        for d, k in zip(declared, kinds):
+            init = [c for c in d.get_children() if c.kind not in (K.TYPE_REF, K.NAMESPACE_REF, K.TEMPLATE_REF)]
+            if k == "POINTER" and (not init or self._is_null(init[-1])):
+                return False
+        toks = list(stmt.get_tokens())
+        names = []
+        for d in declared:
+            at = next((i for i, t in enumerate(toks) if t.kind.name == "IDENTIFIER" and t.spelling == d.spelling
+                       and t.extent.start.offset >= d.extent.start.offset
+                       and (not names or i > names[-1])), None)
+            if at is None:
+                return False
+            names.append(at)
+        start = names[0]
+        while start > 0 and toks[start - 1].spelling in ("*", "const", "__restrict__"):
+            start -= 1
+        if start == 0:
+            return False
+        if any(t.spelling in ("const", "static", "volatile") for t in toks[:start]):
+            return False
+        # the non-pointer declarators' type, spelled as the translator spells
+        # types (f32s, f64), since inserted text is not rewritten
+        scalars = [d for d, k in zip(declared, kinds) if k not in ("POINTER", "CONSTANTARRAY", "INCOMPLETEARRAY")]
+        if scalars:
+            base = self._spell_type(scalars[0].type, drop_const=True)
+        else:
+            array = next(d for d, k in zip(declared, kinds) if k != "POINTER")
+            base = self._spell_type(array.type.get_canonical().element_type, drop_const=True)
+        depth, commas = 0, []
+        for i in range(names[0], len(toks)):
+            sp = toks[i].spelling
+            if sp in ("(", "[", "{", "<"):
+                depth += 1
+            elif sp in (")", "]", "}", ">"):
+                depth -= 1
+            elif sp == "," and depth == 0:
+                commas.append(i)
+        if len(commas) != len(declared) - 1 or any(not (commas[j] < names[j + 1]) for j in range(len(commas))):
+            return False
+        starts = [start] + [c + 1 for c in commas]
+        for j, (d, k) in enumerate(zip(declared, kinds)):
+            seg = starts[j]
+            if j == 0:
+                if k == "POINTER":
+                    # the written type stays (its tokens are respelled
+                    # elsewhere) and declares an unused placeholder
+                    dummy = f" __woof_decl{len(self._split_decls)}; auto "
+                    if names[0] > start:
+                        self.edits.replace(toks[start].extent.start.offset, toks[names[0]].extent.start.offset,
+                                           dummy)
+                    else:
+                        self.edits.insert(toks[names[0]].extent.start.offset, dummy, rank=-20_001)
+                continue
+            self.edits.replace(toks[commas[j - 1]].extent.start.offset, toks[commas[j - 1]].extent.end.offset,
+                               "; " + ("auto " if k == "POINTER" else base + " "))
+            if k == "POINTER" and names[j] > seg:
+                self.edits.replace(toks[seg].extent.start.offset, toks[names[j]].extent.start.offset, "")
+        return True
 
     def _decl_stmts(self):
         if self._decl_stmt_index is None:
@@ -1196,6 +1272,8 @@ class _Rewriter:
                     self.refuse(g, f"backward goto {name!r}")
                 first = min(first, i)
                 for a in anc[1:]:
+                    if self.span(a) == self.span(block) and a.kind == block.kind:
+                        break       # the jump is itself the block's statement (top is g)
                     if self.span(a) == self.span(top) and a.kind == top.kind:
                         if a.kind.name in self._LOOPS:
                             inner_loops.append(a)
@@ -2631,7 +2709,31 @@ class _Rewriter:
             self.generic_struct(cursor)
             return
         seen = set()
+        groups = {}
         for c in cursor.get_children():
+            if c.kind == K.FIELD_DECL:
+                groups.setdefault(c.extent.start.offset, []).append(c)
+        for fields in groups.values():
+            kinds = {(_indirection(f.type), self._field_space(f) if _indirection(f.type) == "ptr" else None)
+                     for f in fields}
+            if (len(fields) > 1 and len(kinds) > 1 and any(k[0] == "ptr" for k in kinds)
+                    and self._split_field_group(fields)):
+                seen.add(fields[0].extent.start.offset)
+        from woof.backend.translate.spaces import _is_table
+        for c in cursor.get_children():
+            if c.kind == K.FIELD_DECL and _is_table(c.type) and len(groups.get(c.extent.start.offset, ())) == 1:
+                # a T** field holds a kernel's address table (cam3's
+                # CamState::abs_args = descriptors + worker*41): the table type
+                target = c.type.get_canonical().get_pointee().get_pointee()
+                tspace = "const device" if target.is_const_qualified() else "device"
+                elem = self._spell_type(target, drop_const=True)
+                toks = list(c.get_tokens())
+                name = next((t for t in toks if t.spelling == c.spelling), None)
+                if name is not None and toks:
+                    self.edits.replace(toks[0].extent.start.offset, name.extent.start.offset,
+                                       f"__woof_addr_table<{tspace} {elem}*> ")
+                    seen.add(c.extent.start.offset)
+                    continue
             if c.kind == K.FIELD_DECL and _indirection(c.type) == "ptr":
                 # `T *a, *b;` declares two fields from one decl-specifier
                 if c.extent.start.offset not in seen:
@@ -2655,6 +2757,50 @@ class _Rewriter:
             elif c.kind in (K.STRUCT_DECL, K.CLASS_DECL, K.CLASS_TEMPLATE,
                             K.CLASS_TEMPLATE_PARTIAL_SPECIALIZATION):
                 self.struct_fields(c)
+
+    def _split_field_group(self, fields):
+        """``T *a, b, *c;`` with pointer and non-pointer fields (or pointers in
+        different spaces) under one decl-specifier: one declaration per field,
+        each pointer qualified with its own space, since a space in the shared
+        decl-specifier would qualify the non-pointer fields too (cam3's
+        CamState: field may not be qualified with an address space).  False
+        when the declarators cannot be found."""
+        from woof.backend.translate.spaces import _indirection
+        toks = [t for t in self.tu.get_tokens(extent=self.ci.SourceRange.from_locations(
+            fields[0].extent.start, fields[-1].extent.end))]
+        first_name = next((i for i, t in enumerate(toks) if t.spelling == fields[0].spelling), None)
+        if first_name is None:
+            return False
+        base_end = first_name
+        while base_end > 0 and toks[base_end - 1].spelling in ("*", "&", "const", "__restrict__"):
+            base_end -= 1
+        if base_end == 0:
+            return False
+        base = " ".join(t.spelling for t in toks[:base_end])
+        depth, commas = 0, []
+        for t in toks[first_name:]:
+            if t.spelling in ("(", "[", "{"):
+                depth += 1
+            elif t.spelling in (")", "]", "}"):
+                depth -= 1
+            elif t.spelling == "," and depth == 0:
+                commas.append(t)
+        if len(commas) != len(fields) - 1:
+            return False
+        def prefix(f):
+            return f"{self._field_space(f)} " if _indirection(f.type) == "ptr" else ""
+
+        def spelled(f):
+            # inserted text is not respelled: the element type as the
+            # translator spells types (f64, f32s)
+            t = f.type.get_canonical()
+            while t.kind.name in ("POINTER", "CONSTANTARRAY", "INCOMPLETEARRAY"):
+                t = t.get_pointee() if t.kind.name == "POINTER" else t.element_type
+            return self._spell_type(t, drop_const=False)
+        self.edits.insert(fields[0].extent.start.offset, prefix(fields[0]), rank=-20_000)
+        for comma, f in zip(commas, fields[1:]):
+            self.edits.replace(comma.extent.start.offset, comma.extent.end.offset, f"; {prefix(f)}{spelled(f)} ")
+        return True
 
     def local_pointer_array(self, node):
         """``T* a[N] = {&x, p, ...}``: the elements' address space, from the
