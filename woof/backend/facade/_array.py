@@ -99,7 +99,7 @@ class Storage:
     filled array can be one scalar with stride 0), and a kernel bound to
     such a buffer would read and write past the one element it holds."""
 
-    __slots__ = ("arr", "dtype", "_aliases", "_memory", "__weakref__")
+    __slots__ = ("arr", "dtype", "_aliases", "_memory", "_address", "__weakref__")
 
     def __init__(self, arr, dtype: np.dtype, *, fresh: bool = False):
         """``fresh``: ``arr`` is a newly computed value no other array holds
@@ -116,6 +116,7 @@ class Storage:
         self.dtype = np.dtype(dtype)
         self._aliases = None
         self._memory = None
+        self._address = None
         _count_allocation(self)
         if MEMORY_HOOKS:
             # cupy.cuda.MemoryHook: a new storage is a device allocation
@@ -138,6 +139,7 @@ class Storage:
         if _capture.recording() is not None:
             _capture.refuse("a facade array allocation or operation")
         self.arr = _materialize(arr)
+        self._address = None          # a new buffer
         PENDING.append(self)
 
     def rebind_written(self, out):
@@ -179,8 +181,15 @@ class Storage:
         ``a.data.ptr`` for pointers) resolves to this storage."""
         import mlx.core as mx
         from woof.backend.metal import ext
-        mx.eval(self.arr)
-        base = int(ext.load().gpu_address(self.arr))
+        base = self._address
+        if base is None:
+            mx.eval(self.arr)
+            base = self._address = int(ext.load().gpu_address(self.arr))
+        # Known: an in-place launch's output is the same buffer (rebind_written),
+        # so the address stands until rebind() gives the storage a new one.
+        # Evaluating for it again waited on every launch still writing the
+        # buffer: the microphysics ring copy's table key asked for 390
+        # addresses per model step, each a host sync on Metal.
         _ADDRESSES[base] = weakref.ref(self)
         return base
 
