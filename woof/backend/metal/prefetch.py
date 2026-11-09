@@ -118,16 +118,34 @@ def start() -> None:
     rows = list(entries.values())
     _state["queued"] = len(rows)
     builds: queue.Queue = queue.Queue()
-    threading.Thread(target=_translate, args=(rows, path.parent, builds, _workers()),
-                     name="metal-prefetch-translate", daemon=True).start()
-    for n in range(min(_workers(), len(rows))):
-        threading.Thread(target=_build, args=(builds,), name=f"metal-prefetch-{n}", daemon=True).start()
+    threads = [threading.Thread(target=_translate, args=(rows, path.parent, builds, _workers()),
+                                name="metal-prefetch-translate", daemon=True)]
+    threads += [threading.Thread(target=_build, args=(builds,), name=f"metal-prefetch-{n}", daemon=True)
+                for n in range(min(_workers(), len(rows)))]
+    for thread in threads:
+        thread.start()
+    # A compile still running when the interpreter ends would outlive the
+    # extension's and MLX's static objects (a test's short process died with
+    # SIGSEGV): at exit, nothing new starts and the running compiles finish.
+    import atexit
+    atexit.register(_stop, threads)
+
+
+_STOP = threading.Event()
+
+
+def _stop(threads) -> None:
+    _STOP.set()
+    for thread in threads:
+        thread.join()
 
 
 def _translate(rows, root: Path, builds: queue.Queue, workers: int) -> None:
     from woof.backend.metal.loader import _with_nonce, translate_unit
     try:
         for row in rows:
+            if _STOP.is_set():
+                break
             try:
                 source = (root / "src" / f"{row['source']}.cu").read_text(encoding="utf-8")
                 if _digest(source) != row["source"]:
@@ -149,6 +167,8 @@ def _build(builds: queue.Queue) -> None:
         job = builds.get()
         if job is None:
             return
+        if _STOP.is_set():
+            continue
         library_key, msl, kernels = job
         try:
             module.compile(library_key, msl, kernels, MATH_MODE_SAFE)
