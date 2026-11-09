@@ -18,6 +18,8 @@ from pathlib import Path
 
 import numpy as np
 
+from ._compile import raw_module
+
 from . import eos_coeffs
 
 _TPB = 64
@@ -32,12 +34,10 @@ NEOS = {"teos10": -1, "eos80": 0, "seos": 1}
 
 def _module():
     if "m" not in _MODULES:
-        import cupy as cp
-
         names = list(eos_coeffs.TEOS10)
         defines = "\n".join(f"#define {k} c[{i}]" for i, k in enumerate(names))
         source = defines + "\n" + (Path(__file__).resolve().parent / "eos.cu").read_text(encoding="utf-8")
-        _MODULES["m"] = cp.RawModule(code=source, options=("--fmad=false",))
+        _MODULES["m"] = raw_module(source, ("--fmad=false",))
         _MODULES["names"] = names
     return _MODULES["m"]
 

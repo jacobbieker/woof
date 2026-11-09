@@ -2061,6 +2061,11 @@ class RRTMGLegacyRadiation:
             prepared[float(elapsed)] = record
         self._graph_times = prepared
 
+    # The forecast call itself reads its guards once at its end too: the
+    # scope above had come to wrap prepare_graph_times alone, so every
+    # radiation call read each chunk's guard flags at once (56 host waits a
+    # call at 40,000 columns on an RTX A6000).
+    @_with_deferred_device_checks
     def __call__(self, *, atmosphere, fields, state, cfg):
         import cupy as cp
 

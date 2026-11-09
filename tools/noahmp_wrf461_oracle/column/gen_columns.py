@@ -1,4 +1,4 @@
-"""Column-oracle inputs for the WRF v4.6.1 ``noahmplsm`` driver.
+"""Column-oracle inputs for the WRF v4.7.1 ``noahmplsm`` driver.
 
 Writes one tagged binary file that ``run_column.F90`` reads and that
 ``compare_column.py`` reads back, so WRF's Fortran and WOOF's device path

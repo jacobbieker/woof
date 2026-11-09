@@ -1,10 +1,10 @@
-! Per-leaf oracle for WRF v4.6.1 MODULE_SF_NOAHMPLSM.
+! Per-leaf oracle for WRF v4.7.1 MODULE_SF_NOAHMPLSM.
 !
 ! This program links the *visibility-patched* module (see
 ! patches/noahmp-lsm-leaf-visibility.patch, audited by
 ! check_visibility_patch.py before this file is compiled).  Apart from the 50
 ! `private ::` -> `public ::` accessibility statements, the physics source is
-! the pinned WRF v4.6.1 file byte for byte.  The pristine whole-column oracle
+! the pinned WRF v4.7.1 file byte for byte.  The pristine whole-column oracle
 ! (build.sh / run_sflx.F90) keeps compiling the UNPATCHED module.
 !
 ! Every leaf is driven as a pure function of a flat FP32 input vector `x` plus

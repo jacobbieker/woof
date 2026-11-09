@@ -1,5 +1,13 @@
 # Noah-MP WATER under WRF_HYDRO oracle -- provenance
 
+> **2026-11-08.** `build_water_hydro.sh` now also accepts the WRF 4.6.1
+> tree (phys/noahmp `848f54ad`) and labels the sums file by the tree it was
+> given. Built from either tree, `noahmp-water-hydro.csv` and
+> `noahmp-water-hydro-libm.csv` are byte-identical to the committed files.
+> `noahmp-water-hydro-sha256sums.txt` is the e5c0859 build's, regenerated
+> because `run_water.F90` and `build_water_hydro.sh` changed (pin text and
+> the two-tree check); its source and fixture digests are unchanged.
+
 `noahmp-water-hydro.csv` is `tools/noahmp_wrf461_oracle/build_water_hydro.sh`:
 WRF 4.7.1's `module_sf_noahmplsm.F` (phys/noahmp submodule
 e5c0859874407859936739e8be8741f9aed369ee, sha256 `74b47560...`) compiled at `-O0`

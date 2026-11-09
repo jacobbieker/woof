@@ -1,4 +1,4 @@
-! Pin WRF v4.6.1 NOAHMP_SFLX under the first admitted Noah-MP option identity.
+! Pin WRF v4.7.1 NOAHMP_SFLX under the first admitted Noah-MP option identity.
 !
 ! Routines exercised, all from unmodified pinned sources:
 !   MODULE_SF_NOAHMPLSM::NOAHMP_SFLX   (phys/module_sf_noahmplsm.F line 450)

@@ -3,9 +3,9 @@
 ! Bitwise fixture generator for the Noah-MP shortwave-radiation leaves:
 !   SNOW_AGE, SNOWALB_CLASS, GROUNDALB, SURRAD, TWOSTREAM, ALBEDO
 !
-! Linked against the *visibility-patched only* pinned WRF-4.6.1 module
-! (phys/module_sf_noahmplsm.F, tree d66e442fccc04111067e29274c9f9eaccc3cef28,
-! sha256 bd592a5b7db29000e715250e3a7c779ffb5e0dcc356f6b5a7d9e1c9f69c55282).
+! Linked against the *visibility-patched only* pinned WRF-4.7.1 module
+! (phys/module_sf_noahmplsm.F, tree f52c197ed39d12e087d02c50f412d90d418f6186,
+! sha256 74b475600ad1c999fe43299bcaf4d3e5eaf59b9f861c47fdbff4d69739e3a45b).
 ! make_public_radiation.py performs the patch; compare_object_code_radiation.py
 ! proves the patch changes no generated code.
 !

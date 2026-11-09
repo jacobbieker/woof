@@ -25,6 +25,8 @@ from pathlib import Path
 
 import numpy as np
 
+from ._compile import raw_module
+
 _TPB = 128
 _ERRORS = {1: "dist(i,j,index) <= 0", 2: "soldep == 0", 4: "hsub < 0",
            8: "qqsub > 0", 16: "SMCMAX exceeded in SUBSFC_RTNG"}
@@ -34,13 +36,11 @@ _MODULE = None
 def _module():
     global _MODULE
     if _MODULE is None:
-        import cupy as cp
-
         here = Path(__file__).resolve().parent
         kernels = Path(__import__("woof.core.kernels", fromlist=["x"]).__file__).parent
         source = ((kernels / "glibc_flt32.cuh").read_text(encoding="utf-8")
                   + "\n" + (here / "subsurface.cu").read_text(encoding="utf-8"))
-        _MODULE = cp.RawModule(code=source, options=("--fmad=false", "--ftz=false"))
+        _MODULE = raw_module(source, ("--fmad=false", "--ftz=false"))
     return _MODULE
 
 

@@ -1,4 +1,4 @@
-! Oracle for the Noah-MP driver-side cold start of WRF v4.6.1.
+! Oracle for the Noah-MP driver-side cold start of WRF v4.7.1.
 !
 !   module_sf_noahmpdrv::SNOW_INIT    (phys/module_sf_noahmpdrv.F 2340-2440)
 !   module_sf_noahmpdrv::NOAHMP_INIT  (phys/module_sf_noahmpdrv.F 1828-2335)

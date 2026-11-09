@@ -1,11 +1,12 @@
 #!/bin/sh
-# Build the WRF v4.6.1 Noah-MP driver-side cold-start bitwise oracle:
+# Build the WRF v4.7.1 Noah-MP driver-side cold-start bitwise oracle:
 # module_sf_noahmpdrv::SNOW_INIT and module_sf_noahmpdrv::NOAHMP_INIT.
 #
 # Usage:  build_driver.sh <wrf-tree> <workdir> [optlevel]
 #
-#   <wrf-tree>  pinned WRF checkout, e.g. $HOME/wrf-stock-v461-gate-20260721
-#               commit d66e442fccc04111067e29274c9f9eaccc3cef28
+#   <wrf-tree>  pinned WRF checkout with the phys/noahmp submodule files in phys/
+#               commit f52c197e (v4.7.1, phys/noahmp e5c0859) or d66e442f
+#               (v4.6.1, phys/noahmp 848f54ad); see noahmp_pins.sh
 #   <workdir>   scratch directory (created if absent)
 #   [optlevel]  "noopt" (default) builds at -O0 and is the fixture
 #               "nocontract" -O0 with -ffp-contract=off
@@ -48,8 +49,9 @@ OPTLEVEL=${3:-noopt}
 HERE=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$HERE/../.." && pwd)
 
-PRISTINE_LSM_SHA=bd592a5b7db29000e715250e3a7c779ffb5e0dcc356f6b5a7d9e1c9f69c55282
-PRISTINE_DRV_SHA=9010a757da994ed8796c63ca97da354eaf60c5c732df4ea9acad5bc62a973890
+# Either pinned tree (noahmp_pins.sh); the driver must come from the same one.
+. "$HERE/noahmp_pins.sh"
+noahmp_pins "$WRF_TREE/phys/module_sf_noahmplsm.F"
 
 EXTRA=""
 case "$OPTLEVEL" in

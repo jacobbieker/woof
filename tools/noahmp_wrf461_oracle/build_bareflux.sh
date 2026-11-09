@@ -1,10 +1,11 @@
 #!/bin/sh
-# Build the WRF v4.6.1 Noah-MP BARE_FLUX bitwise oracle.
+# Build the WRF v4.7.1 Noah-MP BARE_FLUX bitwise oracle.
 #
 # Usage:  build_bareflux.sh <wrf-tree> <workdir> [optlevel]
 #
-#   <wrf-tree>  pinned WRF checkout, e.g. $HOME/wrf-stock-v461-gate-20260721
-#               commit d66e442fccc04111067e29274c9f9eaccc3cef28
+#   <wrf-tree>  pinned WRF checkout with the phys/noahmp submodule files in phys/
+#               commit f52c197e (v4.7.1, phys/noahmp e5c0859) or d66e442f
+#               (v4.6.1, phys/noahmp 848f54ad); see noahmp_pins.sh
 #   <workdir>   scratch directory (created if absent)
 #   [optlevel]  "wrf" (default) reproduces WRF's own gfortran FCOPTIM
 #               "noopt" builds at -O0; used as a negative control that the

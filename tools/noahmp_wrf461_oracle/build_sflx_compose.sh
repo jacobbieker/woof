@@ -1,11 +1,12 @@
 #!/bin/sh
-# Build the WRF v4.6.1 Noah-MP ERROR bitwise oracle -- the balance check
+# Build the WRF v4.7.1 Noah-MP ERROR bitwise oracle -- the balance check
 # NOAHMP_SFLX runs at module_sf_noahmplsm.F:1049-1058.
 #
 # Usage:  build_sflx_compose.sh <wrf-tree> <workdir> [optlevel]
 #
-#   <wrf-tree>  pinned WRF checkout, e.g. $HOME/wrf-stock-v461-gate-20260721
-#               commit d66e442fccc04111067e29274c9f9eaccc3cef28
+#   <wrf-tree>  pinned WRF checkout with the phys/noahmp submodule files in phys/
+#               commit f52c197e (v4.7.1, phys/noahmp e5c0859) or d66e442f
+#               (v4.6.1, phys/noahmp 848f54ad); see noahmp_pins.sh
 #   <workdir>   scratch directory (created if absent)
 #   [optlevel]  "noopt" (default) builds at -O0 and is the fixture
 #               "nocontract" -O0 with -ffp-contract=off
@@ -37,7 +38,11 @@ OPTLEVEL=${3:-noopt}
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 
-PRISTINE_SHA=bd592a5b7db29000e715250e3a7c779ffb5e0dcc356f6b5a7d9e1c9f69c55282
+# The pinned tree is whichever of the two in noahmp_pins.sh the source
+# carries; any other module_sf_noahmplsm.F is refused there.
+. "$HERE/noahmp_pins.sh"
+noahmp_pins "$WRF_TREE/phys/module_sf_noahmplsm.F"
+PRISTINE_SHA=$PRISTINE_LSM_SHA
 
 EXTRA=""
 case "$OPTLEVEL" in
