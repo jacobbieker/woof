@@ -3563,6 +3563,7 @@ class CudaSW:
             chunk = self.batch_column_chunk(nlayers)
         if chunk < 1:
             raise ValueError("column_chunk must be >= 1")
+        chunk = min(chunk, sw_allocation_column_bound(nlayers, getattr(cp, "MAX_ALLOCATION_BYTES", None)))
         i32, f32 = np.int32, np.float32
         scratch = self._scratch
 
@@ -4019,6 +4020,19 @@ def sw_vram_column_bound(nlay, free_bytes, upper, *, quantum=None):
     while nc > quantum and sw_batched_vram_bytes(nc, nlay) > free_bytes:
         nc -= quantum
     return nc
+
+
+def sw_allocation_column_bound(nlay, max_bytes):
+    """Most columns per chunk whose largest workspace array, spcvmc's
+    ``wk`` (NGPTSW threads per column, SPCVMC_WK_ARRAYS x (nlay + 1)
+    float32 each), fits one allocation of ``max_bytes`` (the MLX facade's
+    int32-sized arrays: a hex chunk of every column asked for 2.2 GB in one
+    buffer and overflowed).  No bound when ``max_bytes`` is None.  Width is
+    workspace shape only: results are bitwise identical at any width."""
+    if not max_bytes:
+        return 2**62
+    per_column = NGPTSW * SPCVMC_WK_ARRAYS * (int(nlay) + 1) * 4
+    return max(1, int(max_bytes) // per_column)
 
 
 def sw_batch_column_chunk(nlay=None, *, resident_threads=None,

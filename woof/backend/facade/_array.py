@@ -34,6 +34,9 @@ import numpy as np
 #: Storages rebound since the last launch (strong refs; cleared by flush()).
 PENDING: list = []
 
+#: Elements one facade allocation may hold: MLX sizes an array with int32.
+MAX_ELEMENTS = 2**31 - 1
+
 
 def _mx():
     import mlx.core as mx
@@ -257,6 +260,11 @@ class ndarray:
         if _storage is None:
             mx = _mx()
             n = reduce(operator.mul, shape, 1)
+            if n > MAX_ELEMENTS:
+                raise MemoryError(
+                    f"a {dtype} array of {n} elements ({n * dtype.itemsize} bytes) is past the mlx "
+                    f"backend's {MAX_ELEMENTS}-element limit per allocation (MLX sizes an array with "
+                    "int32): allocate it in pieces")
             _storage = Storage(mx.zeros((n,), dtype=storage_mx_dtype(dtype)), dtype, fresh=True)
         self._st = _storage
         self.dtype = dtype
