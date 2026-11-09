@@ -3772,9 +3772,16 @@ class PhysicsDriver:
             clock_dt = plan.clock_dt
         else:
             clock_dt = _model_clock_dt(cfg)
+            # Only internal substeps (clock_dt > dt) wait for the clock
+            # step's end.  Without substeps every step IS a clock step:
+            # under an adaptive clock the elapsed time is a sum of unequal
+            # steps and is almost never a multiple of the current dt, so
+            # the phase test skipped WRF's every-step advance_ppt (RAINC,
+            # NCA countdown, KF expiry) on nearly every step.
             end = float(state.elapsed_seconds) + float(cfg.dt)
             remainder = abs(math.fmod(end, clock_dt))
-            if min(remainder, clock_dt - remainder) > 1.0e-6 * clock_dt:
+            if (clock_dt > float(cfg.dt) and min(
+                    remainder, clock_dt - remainder) > 1.0e-6 * clock_dt):
                 return
         dt = DTYPE(clock_dt)
         from woof.core.kf import kf_nca_contract

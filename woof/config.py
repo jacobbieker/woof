@@ -3325,8 +3325,16 @@ CU_SCHEMES = (0, 1, 2, 3, 5, 6, 7, 10, 11, 14, 16, 93, 94, 95, 96, 99)
 
 SAS_CU_PHYSICS = 94
 def cumulus_adaptive_cudt_zero_site(cu_physics: int) -> str | None:
-    """The WRF adaptive-step authority for the KSAS admission rule."""
-    if int(cu_physics) == 14:
+    """The WRF adaptive-step authority for the KSAS and BMJ admission rule.
+
+    WRF 4.7.1 resets cudt to 0 under an adaptive step for BMJ, every SAS
+    and Tiedtke (v4.7.1 share/module_check_a_mundo.F:2155-2172; the site
+    string keeps the v4.6.1 lines).  The other SAS
+    schemes and Tiedtke carry their own rules here; BMJ forms its
+    adjustment over DTCNVC = DT*STEPCU (module_cu_bmj.F:171) and so joins
+    KSAS.
+    """
+    if int(cu_physics) in (2, 14):
         return "share/module_check_a_mundo.F:2141-2160"
     return None
 
@@ -8469,8 +8477,8 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
     if (cumulus_adaptive_cudt_zero_site(cfg.cu_physics) is not None
             and cfg.use_adaptive_time_step and cfg.cudt_minutes != 0.0):
         raise ConfigurationRefused(
-            "cu_physics=14 with use_adaptive_time_step requires cudt_minutes=0: "
-            "WRF resets cudt for KSAS: its closure is formed over dt*stepcu and cannot be held "
+            f"cu_physics={cfg.cu_physics} with use_adaptive_time_step requires cudt_minutes=0: "
+            "WRF resets cudt for KSAS and BMJ: its closure is formed over dt*stepcu and cannot be held "
             "across variable steps (share/module_check_a_mundo.F:2141-2160).")
     if cfg.cu_physics == 6 and cfg.cudt_minutes != 0.0:
         raise ValueError(
