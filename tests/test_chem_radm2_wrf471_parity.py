@@ -1,6 +1,6 @@
-"""RADM2 gas-phase chemistry against WRF v4.6.1's radm_driver, word for word.
+"""RADM2 gas-phase chemistry against WRF v4.7.1's radm_driver, word for word.
 
-The oracle (tools/chem_wrf461_oracle/radm2) compiles chem/module_radm.F and
+The oracle (tools/chem_wrf471_oracle/radm2) compiles chem/module_radm.F and
 its data modules whole and unchanged at -O0 and runs radm_driver on 12
 columns x 24 levels: night and sunlit columns, clean and polluted air, the
 NO/epsilc input floors, the RH clamp and the heterogeneous N2O5 switch, cold
@@ -115,9 +115,9 @@ def test_generated_block_is_fresh_against_the_pinned_source():
     import os
     import subprocess
     import sys
-    tree = Path(os.environ.get("WOOF_WRF461_STOCK_TREE", "wrf-stock-v461-gate-20260721"))
+    tree = Path(os.environ.get("WOOF_WRF471_STOCK_TREE", str(Path.home() / "Development/wrf-src/WRF-4.7.1")))
     if not (tree / "chem" / "module_radm.F").is_file():  # pragma: no cover
-        pytest.skip(f"stock WRF v4.6.1 tree not present at {tree}")
+        pytest.skip(f"stock WRF v4.7.1 tree not present at {tree}")
     root = Path(__file__).resolve().parents[1]
     subprocess.run([sys.executable, str(root / "tools/chem_radm2/transcribe_radm2.py"),
                     str(tree), "--check"], check=True)

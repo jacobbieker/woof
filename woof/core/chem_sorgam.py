@@ -1,13 +1,13 @@
 """Pure launcher for WRF-Chem's MADE/SORGAM modal aerosol (chem_opt = 2).
 
 ``launch_sorgam`` is one sorgam_driver call (chem/module_aerosols_sorgam.F,
-WRF v4.6.1) on every cell: new-particle formation, condensation,
+WRF v4.7.1) on every cell: new-particle formation, condensation,
 coagulation, inorganic equilibrium and SORGAM secondary organics, with
 WRF's own unit conversions on the way in and out.  It updates the aerosol,
 gas and non-advected rows in place.
 
 The default build runs SORGAM's RPMARES equilibrium (aeroproc's isorop = 0
-branch; WRF v4.6.1 hard-codes isorop = 1, which calls ISORROPIA, copyright
+branch; WRF v4.7.1 hard-codes isorop = 1, which calls ISORROPIA, copyright
 with no grant) and WOOF's clean-room solver for SORGAM's SOA partitioning
 (WRF's is derived from Numerical Recipes, which forbids redistribution).
 ``exact=True`` runs WRF's own solver instead, built locally from the user's

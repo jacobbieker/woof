@@ -1,7 +1,7 @@
 """tools/chem_f2cu: the translator's exactness rules, without a GPU.
 
 The kernels it builds are graded against Fortran oracles
-(test_chem_sorgam_wrf461_parity.py); these pin the rules those grades rest
+(test_chem_sorgam_wrf471_parity.py); these pin the rules those grades rest
 on: constant folding is IEEE per operation with correctly rounded
 elementary functions (gfortran's MPFR folding), integer powers follow
 gfortran's powi_table chains, and the subset it does not understand is

@@ -11,7 +11,7 @@ from them, opt-in or not:
   UNIVERSITY OF MIAMI, CARNEGIE MELLON UNIVERSITY, GEORGIA INSTITUTE OF
   TECHNOLOGY", with no grant.
 
-The exact path is built on the user's machine from the user's own WRF v4.6.1
+The exact path is built on the user's machine from the user's own WRF v4.7.1
 checkout: set ``WOOF_WRF_SOURCE=/path/to/WRF`` in a WOOF source checkout and
 the translator (tools/chem_f2cu, tools/chem_sorgam) turns the pinned files
 into a kernel in a local cache (``$XDG_CACHE_HOME/woof/byo`` or
@@ -30,7 +30,8 @@ from pathlib import Path
 ENV = "WOOF_WRF_SOURCE"
 ROOT = Path(__file__).resolve().parents[2]
 _TOOLS = ROOT / "tools"
-#: WRF v4.6.1 (d66e442f) files the exact SORGAM build reads.
+#: WRF v4.7.1 (f52c197e) files the exact SORGAM build reads (each byte-identical
+#: in v4.6.1, so either tree builds).
 SORGAM_PINS = {
     "chem/module_aerosols_sorgam.F": "20c5ac49779c7df414d46e8d8c44982f4bcac1341f24d11cf1c3f30b874bf13a",
     "chem/module_data_sorgam.F": "51ab49d24e570f5565fbc0cb137df566e6403205d885fc7c1fae8999ca010b9b",
@@ -51,7 +52,7 @@ def unavailable_reason(pins: dict[str, str] = SORGAM_PINS) -> str | None:
     """Why the exact build would refuse, or None when it would build."""
     src = wrf_source()
     if src is None:
-        return (f"the exact path builds from your own WRF v4.6.1 checkout: set "
+        return (f"the exact path builds from your own WRF v4.7.1 checkout: set "
                 f"{ENV}=/path/to/WRF (code under terms that forbid "
                 "redistribution is never shipped with WOOF)")
     if not (_TOOLS / "chem_f2cu" / "f2cu.py").is_file():
@@ -63,7 +64,7 @@ def unavailable_reason(pins: dict[str, str] = SORGAM_PINS) -> str | None:
             return f"{ENV}={src} has no {rel}"
         got = hashlib.sha256(path.read_bytes()).hexdigest()
         if got != digest:
-            return (f"{ENV}={src}: {rel} is not WRF v4.6.1's (sha256 {got}, "
+            return (f"{ENV}={src}: {rel} is not WRF v4.7.1's (sha256 {got}, "
                     f"expected {digest})")
     return None
 
