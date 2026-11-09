@@ -30,6 +30,9 @@ from woof.backend.facade._ops import (  # noqa: F401  -- the public surface
 
 __woof_facade__ = True
 __version__ = "14.0.0+woof.facade"
+#: Bytes in the largest one-dimensional uint8 allocation (woof sizes
+#: scratch pools with it; MLX sizes an array with int32).
+MAX_ALLOCATION_BYTES = 2**31 - 1
 
 _kind: str | None = None
 
