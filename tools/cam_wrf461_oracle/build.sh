@@ -5,7 +5,7 @@ wrf=$(realpath "$1")
 out=$(realpath -m "$2")
 here=$(cd "$(dirname "$0")" && pwd)
 echo 'b0484d38338d9c7925d8011889f5a57280870febe451cfdce843b1e9ae669e32  phys/module_ra_cam.F
-a7f12628b075ed4c2d45e6f3a933149007a5d1a8a0d628111e48b3b7ff394aa5  phys/module_ra_cam_support.F' | (cd "$wrf"; sha256sum -c -)
+005291e1c1da8d58045fbdedbfe0eb7309a7c6f8b5e5670816a95ea6028df6aa  phys/module_ra_cam_support.F' | (cd "$wrf"; sha256sum -c -)
 mkdir -p "$out"
 cd "$out"
 gfortran --version | head -1 > compiler.txt

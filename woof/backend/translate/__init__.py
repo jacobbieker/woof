@@ -2506,10 +2506,16 @@ class _Rewriter:
     #: (__woof_opaque_index), not the policy; out of line it builds in
     #: seconds rather than a minute and its Metal tests (test_nssl2_gpu and
     #: the cccn, variants, shapes and alias suites, both arithmetic arms)
-    #: give the words the fully inlined build gives.  cammgmp and rcon have
-    #: no Metal test to hold them to.
+    #: give the words the fully inlined build gives.  cam3_emissivity: fully
+    #: inlined its cam_driver crashed the compiler service after ~33 minutes;
+    #: out of line it builds in about a minute and its camrad driver grade
+    #: against the gfortran WRF 4.7.1 oracle (tools/cam_wrf461_oracle/
+    #: check_camrad_gpu.py) is 0 ULP on all 96960 words under strict
+    #: numerics, as on CUDA, and passes the default grade.  cammgmp and rcon
+    #: have no Metal test to hold them to.
     INLINE_POLICY_BY_UNIT = {"goddard": "size", "lake": "size", "mskf": "size",
-                             "mskf_aerosol_replay": "size", "flg_streams": "size", "nssl2": "size"}
+                             "mskf_aerosol_replay": "size", "flg_streams": "size", "nssl2": "size",
+                             "cam3_emissivity": "size"}
 
     #: The same, for units known by a kernel they define (a RawModule's unit
     #: name is a hash of its text).  TEMPO's column kernel did not finish
