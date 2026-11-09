@@ -2362,7 +2362,15 @@ class _Rewriter:
     #: service crashes (XPC_ERROR_CONNECTION_INTERRUPTED) on goddard's
     #: radiation column, which compiles in a second with the large
     #: functions out of line.  Its device oracle holds it to WRF's words.
-    INLINE_POLICY_BY_UNIT = {"goddard": "size"}
+    #: Fully inlined, lake, mskf and mskf_aerosol_replay did not compile in
+    #: the census's 30 minutes and flg_streams crashed the compiler service;
+    #: out of line they build in 2-5 minutes, and their Metal tests (lake's
+    #: column history and f64cr grades, mskf_kernel, the flg replays) give
+    #: the words they give on main.  NOT nssl2: out of line its rain
+    #: sedimentation wrote zeros on Metal (the out-of-line hazard above),
+    #: and cammgmp and rcon have no Metal test to hold them to.
+    INLINE_POLICY_BY_UNIT = {"goddard": "size", "lake": "size", "mskf": "size",
+                             "mskf_aerosol_replay": "size", "flg_streams": "size"}
 
     #: The same, for units known by a kernel they define (a RawModule's unit
     #: name is a hash of its text).  TEMPO's column kernel did not finish
