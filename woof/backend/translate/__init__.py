@@ -2318,7 +2318,16 @@ class _Rewriter:
                     at = self._method_qualifier_at(cursor)
                     if at is None:
                         self.refuse(cursor, f"cannot place an address-space qualifier on {cursor.spelling!r}")
-                    plans = plans + [plan + [(at, f" {space}")] for plan in plans for space in this_spaces]
+                    # a member reference or pointer the method hands back is
+                    # in the object's space (FPlumeVector's `T &operator()`):
+                    # the variant for an object in device memory returns a
+                    # device reference where the thread one returns a thread
+                    ret_at = self._return_type_start(cursor) if info.returns in ("ref", "ptr") else None
+
+                    def variant(plan, space):
+                        moved = [(a, f"{space} " if a == ret_at and t == "thread " else t) for a, t in plan]
+                        return moved + [(at, f" {space}")]
+                    plans = plans + [variant(plan, space) for plan in plans for space in this_spaces]
                 if len(plans) == 1:
                     for at, text in plans[0]:
                         self.edits.insert(at, text, rank=-20_000)

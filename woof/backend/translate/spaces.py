@@ -107,7 +107,8 @@ class SpaceAnalysis:
                     continue        # its methods are templated on the space instead
                 self.collect(list(c.get_children()))
                 continue
-            if c.kind not in (K.FUNCTION_DECL, K.FUNCTION_TEMPLATE, K.CXX_METHOD, K.CONSTRUCTOR) \
+            if c.kind not in (K.FUNCTION_DECL, K.FUNCTION_TEMPLATE, K.CXX_METHOD, K.CONSTRUCTOR,
+                              K.CONVERSION_FUNCTION) \
                     or self.rw.is_kernel(c):
                 continue
             params = [p for p in c.get_children() if p.kind == K.PARM_DECL]
@@ -121,7 +122,7 @@ class SpaceAnalysis:
             slots.sort(key=lambda slot: slot[0])
             if c.kind == K.CONSTRUCTOR:
                 returns = None
-            elif c.kind in (K.FUNCTION_DECL, K.CXX_METHOD):
+            elif c.kind in (K.FUNCTION_DECL, K.CXX_METHOD, K.CONVERSION_FUNCTION):
                 returns = _indirection(c.result_type)
             else:
                 returns = _template_return(c)
@@ -273,6 +274,34 @@ class SpaceAnalysis:
                 self.request(info, tuple(THREAD if ind in ("ref", "gstruct") else DEVICE
                                          for _, _, ind in info.slots), None)
         self.drain()
+        self._implicit_this_spaces()
+
+    def _implicit_this_spaces(self):
+        """A method qualified for an object in device memory calls its
+        sibling methods on that same object (implicit ``this``): they need
+        the same qualified variant (RRFS smoke's FPlumeVector conversion
+        calls vector(), which hands out the member array)."""
+        changed = True
+        while changed:
+            changed = False
+            for usr, spaces in list(self.this_spaces.items()):
+                info = self.functions.get(usr)
+                if info is None:
+                    continue
+                for node in info.cursor.walk_preorder():
+                    ref = node.referenced
+                    if node.kind.name != "CALL_EXPR" or ref is None \
+                            or ref.kind.name not in ("CXX_METHOD", "CONVERSION_FUNCTION"):
+                        continue
+                    kids = list(node.get_children())
+                    head = kids[0] if kids else None
+                    if head is None or head.kind.name != "MEMBER_REF_EXPR" or list(head.get_children()):
+                        continue        # a call on another object, recorded where it is made
+                    callee = self._pattern_usr(ref)
+                    have = self.this_spaces.setdefault(callee, set())
+                    if not spaces <= have:
+                        have |= spaces
+                        changed = True
 
     def drain(self):
         while self._work:
@@ -622,7 +651,7 @@ class SpaceAnalysis:
         """A member call on an object in device/constant/threadgroup memory
         needs a method overload qualified for that space."""
         ref = node.referenced
-        if ref is None or ref.kind.name not in ("CXX_METHOD",):
+        if ref is None or ref.kind.name not in ("CXX_METHOD", "CONVERSION_FUNCTION"):
             return
         if self._generic_method(ref):
             return
