@@ -22,10 +22,19 @@
 The mass ledger is the WRF driver's (every process's change filed under its declared bucket, the rest
 under ``transport``), with hex layer mass ``dryrho * dz8w * areaCell`` in place of ARW's ``mu * dnw``.
 
-Processes that need a source the hex mesh cannot yet sample (GOCART sulfur's oxidant fields, inventory and
-fire emission frames, SFIRE) and options whose coupling hex does not yet carry (aerosol-radiation feedback,
-aerosol-microphysics coupling, subgrid convective transport, regional chemistry boundaries) are refused by
-name rather than run without their input.
+Input chemistry follows the WRF namelist door (woof.namelist_chem): ``chem_in_opt`` and ``have_bcs_chem``
+enable the rows' declared boundary sources (``chem_sources``), and a data-store source (CAMS) then fills the
+rows through the WRF path's own remap, :func:`woof.chem_source_init.fill_boundary_sources`, on the cells as a
+``(1, ncells)`` target grid: the initial state from the start's hydrostatic pressure (``chem_in_opt = 1``)
+and, on a regional mesh (``have_bcs_chem = 1``), every lateral-boundary time from that boundary file's own
+state.  Those boundary fields join the MPAS scalar driving pool beside the moisture species, so the rows take
+the same specified- and relaxation-zone law every driven MPAS scalar takes (``atm_bdy_set_scalars``,
+``atm_bdy_adjust_scalars``) -- the mesh-native boundary, as the transport is the mesh-native FCT -- rather than
+WRF-Chem's flow-dependent inflow on a rectangular spec zone.
+
+Processes that need a source the hex mesh cannot yet sample (GOCART sulfur's oxidant fields, fire emission
+frames, SFIRE) and options whose coupling hex does not yet carry (aerosol-microphysics coupling, subgrid
+convective transport) are refused by name rather than run without their input.
 """
 from __future__ import annotations
 
@@ -63,8 +72,11 @@ OFF_ONLY_KEYS = {
 }
 #: Hex keys that are not WRF ``&chem`` keys.
 HEX_KEYS = ("chem_opt", "chem_sets", "geog_root")
+#: WRF switches that ask for input chemistry from the rows' declared sources (woof.namelist_chem.SOURCE_KEYS).
+SOURCE_SWITCHES = ("chem_in_opt", "have_bcs_chem")
 #: Every key a wrf_chem block may carry.
-KNOWN_KEYS = frozenset(INT_KEYS) | frozenset(FLOAT_KEYS) | frozenset(OFF_ONLY_KEYS) | frozenset(HEX_KEYS)
+KNOWN_KEYS = (frozenset(INT_KEYS) | frozenset(FLOAT_KEYS) | frozenset(OFF_ONLY_KEYS) | frozenset(HEX_KEYS)
+              | frozenset(SOURCE_SWITCHES))
 #: Product suffixes of every transported row.
 ROW_SUFFIXES = ("_column_mass", "_surface_concentration")
 #: units of every product configure() declared, by name (history_units)
@@ -121,6 +133,33 @@ def knobs(block):
     return out
 
 
+def switches(block):
+    """``{chem_in_opt, have_bcs_chem}`` as 0/1, WRF's integer and logical keys."""
+    out = {}
+    for key in SOURCE_SWITCHES:
+        value = block.get(key, 0)
+        if value not in (0, 1) or (key == "chem_in_opt" and isinstance(value, bool)):
+            raise ValueError(f"wrf_chem {key} must be 0 or 1 (off, or from the rows' declared sources), "
+                             f"got {value!r}")
+        out[key] = int(value)
+    return out
+
+
+def chem_sources(name, block):
+    """The run's ``chem_sources``: the rows' boundary sources when an input switch is on, as the WRF
+    namelist door enables them (woof.namelist_chem); a source a data store serves is the only kind a frame
+    can be filled from (woof.config.validate_chem_config refuses the rest)."""
+    from woof.namelist_chem import _sources_for
+    on = switches(block)
+    if not any(on.values()):
+        return ()
+    sources = _sources_for(name, on)
+    if not sources:
+        raise ValueError(f"wrf_chem {[k for k, v in on.items() if v]} asks for input chemistry, and set "
+                         f"{name!r} declares no boundary source for its rows")
+    return sources
+
+
 def load_table(raw):
     """(set name, ChemTable, knobs) for a wrf_chem config, refusing what hex cannot run."""
     from woof.chem_table import load_sets
@@ -132,7 +171,7 @@ def load_table(raw):
                          "composition and emission frames) is not remapped onto WRF-Chem rows yet")
     name = chem_set(block)
     values = knobs(block)
-    table = load_sets([name])
+    table = load_sets([name], chem_sources(name, block))
     for key in table.processes:
         if key in UNPORTED_PROCESSES:
             raise ValueError(f"wrf_chem set {name!r} runs {key}: {UNPORTED_PROCESSES[key]}")
@@ -185,8 +224,10 @@ def history_units(name):
 
 def history_metadata(raw, digest):
     name, table, values = load_table(raw)
+    block = raw["wrf_chem"]
     return json.dumps({"schema": "gpuwm-hex.chemistry/v1", "mode": MODE, "config_sha256": digest,
-                       "chem_set": name, "knobs": values,
+                       "chem_set": name, "knobs": values, "input_chemistry": switches(block),
+                       "chem_sources": list(chem_sources(name, block)),
                        "rows": [{"name": r.name, "units": r.units} for r in table.transported],
                        "transport": "hex monotonic scalar FCT (mesh-native)",
                        "processes": list(table.processes)}, sort_keys=True)
@@ -273,10 +314,12 @@ class HexWrfChemistry:
         from woof.core.chem_state import LEDGER_TOTALS, ledger_attr, process_attr
         self.path, self.raw, self.digest = Path(path), raw, digest
         self.set_name, self.table, self.values = load_table(raw)
+        self.switches = switches(raw["wrf_chem"])
+        self.sources = chem_sources(self.set_name, raw["wrf_chem"])
         self.nlev, self.ncells, self.offset = int(nlev), int(ncells), int(offset)
         nx = self.ncells
-        self.cfg = replace(cfg, chem_sets=self.set_name, chem_sources="", aerosol_mp_coupling="none",
-                           **self.values)
+        self.cfg = replace(cfg, chem_sets=self.set_name, chem_sources=",".join(self.sources),
+                           aerosol_mp_coupling="none", **self.values)
         validate_chem_config(self.cfg)
         if self.cfg.nz != self.nlev or self.cfg.ny != 1 or self.cfg.nx != nx:
             raise ValueError("chemistry column config and hex column shape differ")
@@ -331,6 +374,10 @@ class HexWrfChemistry:
         self.provider_receipt = None
         self.restart_provider_receipt = None
         self.initial_mass_kg = [0.0] * n
+        #: fill_boundary_sources receipts of the initial composition (chem_in_opt = 1)
+        self.initial_receipts = None
+        #: the regional boundary reader (have_bcs_chem = 1)
+        self.boundary_reader = None
         self.radiation_time = None
         self.seam_state = None
         if self.feedback:
@@ -504,6 +551,34 @@ class HexWrfChemistry:
         self.pending = None
         self.steps += 1
 
+    # -- input chemistry ----------------------------------------------------------------------------
+    def fill_initial(self, scalars, *, latitude, longitude, pressure, valid_time, cache_root=None,
+                     backend=None):
+        """``chem_in_opt = 1``: the rows' initial composition from their data-store sources, written into
+        the hex scalar rows by the WRF path's own remap onto a ``(1, ncells)`` target grid.  ``pressure``
+        is the start's total hydrostatic half-level pressure ``[level, cell]`` (WRF's ``p + pb``)."""
+        import cupy as cp
+        from woof.chem_source_init import fill_boundary_sources
+        if not self.switches["chem_in_opt"]:
+            raise RuntimeError("fill_initial runs only with chem_in_opt = 1")
+        self.bind_rows(scalars)
+        lat, lon = (np.asarray(a, dtype=np.float64).reshape(1, self.ncells) for a in (latitude, longitude))
+        values = cp.asnumpy(pressure) if hasattr(pressure, "device") else np.asarray(pressure)
+        receipts = fill_boundary_sources(
+            self.state, self.cfg, valid_time=valid_time, latlon=(lat, lon),
+            pressure=np.asarray(values, dtype=np.float32).reshape(self.nlev, 1, self.ncells),
+            cache_root=cache_root, backend=backend, frame="initial")
+        if not receipts:
+            raise ValueError(f"wrf_chem chem_in_opt = 1: none of {list(self.sources)} fills a row of set "
+                             f"{self.set_name!r}")
+        for row in self.rows:
+            field = getattr(self.state, row.state_attr)
+            if not bool(cp.all(cp.isfinite(field) & (field >= 0))):
+                raise ValueError(f"initial {row.name} from {list(self.sources)} is not a finite non-negative "
+                                 "mixing ratio")
+        self.initial_receipts = receipts
+        return receipts
+
     def abort(self):
         if self.pending is not None:
             for attr, value in self.pending.items():
@@ -566,7 +641,11 @@ class HexWrfChemistry:
                 "processes": [key for key, _ in self.processes],
                 "transport": "hex monotonic scalar FCT (mesh-native)",
                 "column_processes": "WRF-Chem process modules on ny=1 columns (woof.core.chem_*)",
-                "committed_steps": self.steps, "provider": self.provider_receipt}
+                "committed_steps": self.steps, "provider": self.provider_receipt,
+                "input_chemistry": self.switches, "chem_sources": list(self.sources),
+                "initial_composition": self.initial_receipts,
+                "lateral_boundaries": (None if self.boundary_reader is None
+                                       else self.boundary_reader.receipt())}
 
     def restart_payload(self):
         import cupy as cp
@@ -753,6 +832,112 @@ def attach_statics(runtime, *, lat_deg, lon_deg, landmask=None, fields=None, geo
     return receipt
 
 
+def lbc_scalar_names(raw):
+    """The boundary-pool names the rows add (``lbc_<row>``), in row order; empty without ``have_bcs_chem``."""
+    if not switches(raw["wrf_chem"])["have_bcs_chem"]:
+        return ()
+    return tuple("lbc_" + row.name for row in load_table(raw)[1].transported)
+
+
+#: MPAS-A v8.4.2 mpas_constants.F: rgas, rv, cp = 7 rgas / 2, cv = cp - rgas, p0
+_RGAS, _RV, _P0 = 287.0, 461.6, 1.0e5
+_CP = 7.0 * _RGAS / 2.0
+_CV = _CP - _RGAS
+
+
+def lbc_pressure(fields):
+    """``[level, cell]`` float64 pressure of one boundary time from its own state, MPAS's equation of state
+    (``p = p0 (rgas rho_d theta (1 + rv/rgas qv) / p0)^(cp/cv)``, mpas_atm_core diagnostics) on the file's
+    dry density, potential temperature and vapour.  It places the source columns in the vertical only."""
+    rho = np.asarray(fields["lbc_rho"], dtype=np.float64).T
+    theta = np.asarray(fields["lbc_theta"], dtype=np.float64).T
+    qv = np.asarray(fields["lbc_qv"], dtype=np.float64).T
+    return _P0 * (_RGAS * rho * theta * (1.0 + _RV / _RGAS * qv) / _P0) ** (_CP / _CV)
+
+
+class BoundaryReader:
+    """``have_bcs_chem = 1`` on a regional mesh: a boundary-pool reader that adds each row's ``lbc_<row>``.
+
+    It wraps the pool's own reader (woof.hex.lbc.LbcPool.reader), so the met fields are the file's words;
+    each row's field is the WRF path's remap (:func:`woof.chem_source_init.fill_boundary_sources`, the
+    ``boundary`` frame role) at the file's valid time onto the mesh cells, its vertical target the file's own
+    pressure (:func:`lbc_pressure`).  The pool then drives the rows with every other driven scalar.
+    """
+
+    def __init__(self, runtime, *, latitude, longitude, base=None, cache_root=None, backend=None):
+        self.runtime = runtime
+        self.latitude = np.asarray(latitude, dtype=np.float64)
+        self.longitude = np.asarray(longitude, dtype=np.float64)
+        self.base = base
+        self.cache_root = cache_root
+        self.backend = backend
+        self.names = lbc_scalar_names(runtime.raw)
+        self.frames = {}
+
+    def _base(self, path, extra_scalars):
+        from .lbc import read_lbc_file_shared
+        extra = tuple(name for name in extra_scalars if name not in self.names)
+        if self.base is None:
+            return read_lbc_file_shared(path, extra_scalars=extra)
+        return self.base(path, extra_scalars=extra)
+
+    def __call__(self, path, *, extra_scalars=()):
+        from types import SimpleNamespace as NS
+        from woof.chem_source_init import fill_boundary_sources
+        from .lbc import LbcFile
+        admitted = self._base(path, extra_scalars)
+        ncells = admitted.n_cells
+        if self.latitude.size < ncells:
+            raise ValueError(f"boundary file {path} carries {ncells} cells and the mesh {self.latitude.size}")
+        rt = self.runtime
+        pressure = lbc_pressure(admitted.fields)
+        nz = pressure.shape[0]
+        state = NS(chem=NS(table=rt.table))
+        for row in rt.rows:
+            setattr(state, row.state_attr, np.zeros((nz, 1, ncells), np.float32))
+        receipts = fill_boundary_sources(
+            state, rt.cfg, valid_time=admitted.valid_time,
+            latlon=(self.latitude[:ncells].reshape(1, ncells), self.longitude[:ncells].reshape(1, ncells)),
+            pressure=pressure.astype(np.float32).reshape(nz, 1, ncells), cache_root=self.cache_root,
+            backend=self.backend, frame="boundary")
+        filled = {name for receipt in receipts for name in receipt.get("rows", ())}
+        fields = dict(admitted.fields)
+        for name, row in zip(self.names, rt.rows):
+            field = getattr(state, row.state_attr).reshape(nz, ncells)
+            if not np.all(np.isfinite(field) & (field >= 0)):
+                raise ValueError(f"boundary {row.name} at {admitted.valid_time} is not a finite non-negative "
+                                 "mixing ratio")
+            fields[name] = np.ascontiguousarray(field.T, dtype=np.float32)
+        self.frames[str(admitted.valid_time)] = {
+            "file": str(path), "sources": [r.get("source") for r in receipts],
+            "files": [r.get("files") for r in receipts], "rows_filled": sorted(filled)}
+        return LbcFile(admitted.path, admitted.valid_time, fields)
+
+    def receipt(self):
+        return {"law": "MPAS scalar driving pool (atm_bdy_set_scalars, atm_bdy_adjust_scalars)",
+                "vertical_target": "each boundary file's equation-of-state pressure",
+                "rows": list(self.names), "frames": dict(self.frames)}
+
+
+def install_boundary_reader(runtime, driver, *, latitude, longitude, cache_root=None, backend=None):
+    """Hand the regional driving pool the rows' boundary fields (``have_bcs_chem = 1``)."""
+    from .lbc import LbcPool
+    regional = getattr(driver, "regional_v841", None)
+    pool = None if regional is None else getattr(regional.driving, "_pool", None)
+    if not isinstance(pool, LbcPool):
+        raise ValueError("wrf_chem have_bcs_chem needs the single-card regional driving pool; a partitioned "
+                         "pool reads each rank's rows through its own shared reader")
+    missing = [name for name in lbc_scalar_names(runtime.raw) if name not in pool.scalar_names]
+    if missing:
+        raise ValueError(f"the regional driving pool does not carry {missing}: the run's boundary scalars were "
+                         "selected without the chemistry rows (woof.hex.chem_transport.lbc_scalar_names)")
+    reader = BoundaryReader(runtime, latitude=latitude, longitude=longitude, base=pool.reader,
+                            cache_root=cache_root, backend=backend)
+    pool.reader = reader
+    runtime.boundary_reader = reader
+    return reader
+
+
 def columns_from_prep(prepared, *, pressure="pres_p"):
     """The ``refresh`` column dict from a hex MPAS-to-physics preparation.  ``pressure`` names the carrier
     the physics phase reads: the EOS pressure after the RK step (phase two), the hydrostatic pressure at
@@ -786,9 +971,13 @@ def attach(backend, host, driver):
     import cupy as cp
     runtime = backend.chemistry
     runtime.driver = driver
-    if host.get("regional") is not None:
+    regional = host.get("regional") is not None
+    if regional and not runtime.switches["have_bcs_chem"]:
         raise ValueError("wrf_chem on a regional mesh needs chemistry lateral boundaries over the specified "
-                         "and relaxation zones, which the hex route does not drive yet")
+                         "and relaxation zones: set have_bcs_chem = 1 with a set whose rows declare a "
+                         "data-store boundary source")
+    if not regional and runtime.switches["have_bcs_chem"]:
+        raise ValueError("wrf_chem have_bcs_chem = 1 on a global mesh: a global mesh has no lateral boundary")
     arrays = host["prepared"].mesh.arrays
     lat = np.degrees(np.asarray(arrays["latCell"], dtype=np.float64))[:runtime.ncells]
     lon = np.degrees(np.asarray(arrays["lonCell"], dtype=np.float64))[:runtime.ncells]
@@ -799,8 +988,18 @@ def attach(backend, host, driver):
     if (runtime.restart_provider_receipt is not None
             and runtime.restart_provider_receipt != runtime.provider_receipt):
         raise ValueError("chemistry restart source-file identity differs")
+    if regional:
+        # The boundary files carry every cell of the regional mesh.
+        install_boundary_reader(runtime, driver, latitude=np.degrees(np.asarray(arrays["latCell"], np.float64)),
+                                longitude=np.degrees(np.asarray(arrays["lonCell"], np.float64)))
     if runtime.steps == 0:
         rows = driver.atmosphere.state.scalars[runtime.offset:runtime.offset + len(runtime.rows)]
         if bool(cp.any(rows != 0)):
-            raise ValueError("wrf_chem starts from zero composition (WRF chem_in_opt = 0); the rows carry "
+            raise ValueError("wrf_chem starts from zero composition or from its sources; the rows carry "
                              "mass before the first step")
+        if runtime.switches["chem_in_opt"]:
+            from datetime import datetime, timezone
+            prepared = backend._prepare(driver.atmosphere, runtime.species_row.names(), post_rk=False)
+            start = datetime.strptime(host["start_time_text"], "%Y-%m-%d_%H:%M:%S").replace(tzinfo=timezone.utc)
+            runtime.fill_initial(driver.atmosphere.state.scalars, latitude=lat, longitude=lon,
+                                 pressure=prepared.pres_hyd_p, valid_time=start)

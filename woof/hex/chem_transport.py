@@ -128,6 +128,37 @@ def configure(path):
     return register_synthesized_row(backend)
 
 
+def lbc_scalar_names(backend):
+    """The boundary-pool names a chemistry row set adds after the driven moisture block: each row's
+    ``lbc_<row>`` under ``wrf_chem`` ``have_bcs_chem = 1`` (woof.hex.chem_wrf.BoundaryReader supplies them),
+    else none."""
+    config = _CONFIGS.get(getattr(backend, "name", backend))
+    if config is None or "wrf_chem" not in config[1]:
+        return ()
+    from . import chem_wrf
+    from .lbc import declare_supplied_scalars
+    names = chem_wrf.lbc_scalar_names(config[1])
+    declare_supplied_scalars(names)
+    return names
+
+
+def drive_chemistry_rows(backend, driven, driven_block, scalar_names):
+    """The pool's boundary scalars with the chemistry rows a run drives at the rings appended.
+
+    The rows follow the whole driven block in the pool as they follow it in the model's species, so pool
+    index and species index agree (the pool drives a leading run of the scalar array)."""
+    names = lbc_scalar_names(backend)
+    if not names:
+        return tuple(driven)
+    following = tuple(scalar_names[len(driven):len(driven) + len(names)])
+    if tuple(driven) != tuple(f"lbc_{name}" for name in driven_block) or following != tuple(
+            name[4:] for name in names):
+        raise ValueError(f"chemistry boundary rows {names} must follow the whole driven block "
+                         f"{tuple(driven_block)} in the model species {tuple(scalar_names)}; the boundary "
+                         f"stream drives {tuple(driven)}")
+    return (*driven, *names)
+
+
 def scheme_alias_for(backend):
     return backend
 

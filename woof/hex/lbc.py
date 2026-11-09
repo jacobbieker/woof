@@ -51,6 +51,7 @@ __all__ = [
     "LbcFileError",
     "LbcInventory",
     "LbcPool",
+    "declare_supplied_scalars",
     "read_lbc_file",
     "read_lbc_file_shared",
     "read_lbc_valid_time",
@@ -97,6 +98,19 @@ LBC_FORK_SCALAR_VARIABLES: Dict[str, Tuple[str, ...]] = {
                  # prevents: every limited-area RRFS run with smoke on refused "undeclared boundary scalars".
                  "lbc_smoke_fine", "lbc_dust_fine", "lbc_dust_coarse", "lbc_unspc_fine")
 }
+
+#: Boundary scalars no lbc file carries and a pool reader supplies (woof.hex.chem_wrf.BoundaryReader adds
+#: each chemistry row's ``lbc_<row>`` at every boundary time), declared by the run that configures them.
+_SUPPLIED_SCALARS: set = set()
+
+
+def declare_supplied_scalars(names: Sequence[str]) -> None:
+    """Admit ``names`` to a pool's scalar inventory; their fields come from the pool's reader."""
+    clash = set(names) & ({'lbc_qv'} | set(LBC_OPTIONAL_SCALAR_VARIABLES) | set(LBC_FORK_SCALAR_VARIABLES))
+    if clash:
+        raise LbcFileError(f"supplied boundary scalars {sorted(clash)} are lbc stream variables")
+    _SUPPLIED_SCALARS.update(names)
+
 
 _XTIME_FORMAT = "%Y-%m-%d_%H:%M:%S"
 
@@ -526,7 +540,8 @@ class LbcPool:
         self._scalar_names = tuple(scalar_names)
         # The RRFS fork's Registry declares more (LBC_FORK_SCALAR_VARIABLES); a run names them only when its own
         # scalar inventory (the fork Registry's) carries those species.
-        declared = {'lbc_qv'} | set(LBC_OPTIONAL_SCALAR_VARIABLES) | set(LBC_FORK_SCALAR_VARIABLES)
+        declared = ({'lbc_qv'} | set(LBC_OPTIONAL_SCALAR_VARIABLES) | set(LBC_FORK_SCALAR_VARIABLES)
+                    | _SUPPLIED_SCALARS)
         unknown = set(self._scalar_names) - declared
         if unknown:
             raise LbcFileError(f"undeclared boundary scalars: {sorted(unknown)}")

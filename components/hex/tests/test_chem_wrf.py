@@ -35,7 +35,7 @@ def test_chem_sets_by_name(tmp_path):
     ({"chem_opt": 1}, "RADM2"),
     ({"chem_opt": 7}, "PNNL"),
     ({"chem_opt": 401, "biomass_burn_opt": 2}, "fire emission frames"),
-    ({"chem_opt": 401, "chem_in_opt": 1}, "not carried on the hex route"),
+    ({"chem_opt": 401, "emiss_opt": 1}, "not carried on the hex route"),
     ({"chem_opt": 401, "dust_opt": 1.5}, "integer"),
     ({"chem_opt": 401, "chem_sets": "dust"}, "exactly one"),
     ({}, "exactly one"),
