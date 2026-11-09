@@ -146,8 +146,11 @@ class MetalFunction:
             # to MLX's hazard tracking: let everything before finish first
             import mlx.core as mx
             mx.synchronize()
+        # The library was built with the module (MetalModule._build), so the
+        # launch names it by key and does not carry the unit's MSL: copying a
+        # 560 KB source into every launch cost 28 us of host time per launch.
         outputs = ext.load().launch(
-            self.library_key, self.unit.msl, self.name, _dim3(grid), _dim3(block),
+            self.library_key, "", self.name, _dim3(grid), _dim3(block),
             buffers, offsets, writable, slots, sig.table_slot, blobs, blob_slots,
             int(shared_mem or 0), MATH_MODE_SAFE, null_slots, null_table)
         written = iter(outputs)

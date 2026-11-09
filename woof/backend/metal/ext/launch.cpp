@@ -64,6 +64,14 @@ static void compile_log(const char* what, const std::string& name,
   std::fprintf(stderr, "[woof.metal] %s %s %.2f s\n", what, name.c_str(), seconds);
 }
 
+// WOOF_METAL_GPU_TIMES (set): each launch's GPU seconds, summed per kernel
+// (gpu_times()).  A launch is evaluated in a command buffer of its own
+// (woof.backend.facade: rebind_written), so the buffer's GPU interval is
+// the kernel's; two launches sharing a buffer would each count it whole.
+static const bool g_gpu_times = std::getenv("WOOF_METAL_GPU_TIMES") != nullptr;
+static std::mutex g_gpu_times_mutex;
+static std::unordered_map<std::string, std::pair<uint64_t, double>> g_gpu_time_totals;
+
 static MTL::CompileOptions* compile_options(int math_mode) {
   auto* options = MTL::CompileOptions::alloc()->init();
   if (__builtin_available(macOS 15, *)) {
@@ -106,12 +114,27 @@ static std::string device_tag(MTL::Device* device) {
   return tag;
 }
 
-static std::string library_path(MTL::Device* device, const std::string& library_key) {
-  std::string name = library_key;
+// A cache file's name for a key: the key's safe characters, and past 120 of
+// them the first 96 plus a 64-bit FNV-1a digest of the whole key.  A unit
+// with many integer defines has a key of hundreds of characters (SSiB with
+// its eight table digests: 290), and a name past the file system's 255-byte
+// limit made -[MTLBinaryArchive serializeToURL:] crash the process (SIGSEGV
+// in objc_retain inside airntSerializeToURL) instead of failing.
+static std::string file_stem(const std::string& key) {
+  std::string name = key;
   for (auto& c : name) {
     if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-' || c == '.')) c = '_';
   }
-  return g_library_dir + "/" + name + "." + device_tag(device) + ".metallib";
+  if (name.size() <= 120) return name;
+  uint64_t h = 1469598103934665603ull;
+  for (unsigned char c : key) { h ^= c; h *= 1099511628211ull; }
+  char digest[17];
+  std::snprintf(digest, sizeof(digest), "%016llx", static_cast<unsigned long long>(h));
+  return name.substr(0, 96) + "-" + digest;
+}
+
+static std::string library_path(MTL::Device* device, const std::string& library_key) {
+  return g_library_dir + "/" + file_stem(library_key) + "." + device_tag(device) + ".metallib";
 }
 
 // The unit's body as a dynamic library: loaded from disk, or built and
@@ -181,6 +204,10 @@ static MTL::Library* library_for(const std::string& library_key, const std::stri
   std::lock_guard<std::mutex> lock(mutex);
   auto it = cache.find(library_key);
   if (it != cache.end()) return it->second.get();
+  if (source.empty()) {
+    // a launch names a library its module built; it carries no source
+    throw std::runtime_error("[woof.backend.metal] no library built for " + library_key);
+  }
   auto pool = NS::AutoreleasePool::alloc()->init();
   auto* device = mx::metal::device(mx::Device::gpu).mtl_device();
   std::pair<std::string, std::string> split;
@@ -239,12 +266,13 @@ static MTL::Library* library_for(const std::string& library_key, const std::stri
 static std::string g_archive_dir;
 
 static std::string archive_path(const std::string& library_key, const std::string& kernel) {
-  std::string name = library_key + "__" + kernel;
-  for (auto& c : name) {
-    if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-' || c == '.')) c = '_';
-  }
-  return g_archive_dir + "/" + name + ".metalarchive";
+  return g_archive_dir + "/" + file_stem(library_key + "__" + kernel) + ".metalarchive";
 }
+
+// One archive written at a time per process: the compile prefetch builds
+// pipelines on several threads, and Metal's archive serializer is not
+// documented as reentrant.
+static std::mutex g_serialize_mutex;
 
 static MTL::BinaryArchive* open_archive(MTL::Device* device, const std::string& path) {
   auto* desc = MTL::BinaryArchiveDescriptor::alloc()->init();
@@ -305,7 +333,11 @@ static MTL::ComputePipelineState* pipeline_for(MTL::Library* lib, const std::str
         // run crashed inside -[MTLBinaryArchive serializeToURL:])
         std::string partial = path + "." + std::to_string(getpid()) + ".partial";
         auto* url = NS::URL::fileURLWithPath(NS::String::string(partial.c_str(), NS::UTF8StringEncoding));
-        if (stored->serializeToURL(url, &error)) std::rename(partial.c_str(), path.c_str());
+        {
+          std::lock_guard<std::mutex> serialize(g_serialize_mutex);
+          error = nullptr;
+          if (stored->serializeToURL(url, &error)) std::rename(partial.c_str(), path.c_str());
+        }
         state = pipeline_from(device, desc, stored);
         compile_log("pipeline (archived)", kernel, began);
       }
@@ -480,6 +512,16 @@ class LaunchTranslated : public mx::Primitive {
     auto [tx, ty, tz] = threads_;
     enc.dispatch_threadgroups(MTL::Size(gx, gy, gz), MTL::Size(tx, ty, tz));
     enc.end_encoding(/* wait_in_flight = */ true);
+    if (g_gpu_times) {
+      std::string kernel = kernel_;
+      enc.get_command_buffer()->addCompletedHandler([kernel](MTL::CommandBuffer* buffer) {
+        double seconds = buffer->GPUEndTime() - buffer->GPUStartTime();
+        std::lock_guard<std::mutex> lock(g_gpu_times_mutex);
+        auto& total = g_gpu_time_totals[kernel];
+        total.first += 1;
+        total.second += seconds;
+      });
+    }
   }
 
   const char* name() const override {
@@ -631,4 +673,10 @@ NB_MODULE(_woof_metal_launch, m) {
         }, nb::arg("library_key"), nb::arg("body"), nb::arg("thin"));
   m.def("compile", &compile, nb::arg("library_key"), nb::arg("source"),
         nb::arg("kernels"), nb::arg("math_mode") = 0);
+  m.def("gpu_times", []() {
+          std::lock_guard<std::mutex> lock(g_gpu_times_mutex);
+          std::vector<std::tuple<std::string, uint64_t, double>> rows;
+          for (const auto& [kernel, total] : g_gpu_time_totals) rows.emplace_back(kernel, total.first, total.second);
+          return rows;
+        });
 }

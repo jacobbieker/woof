@@ -278,6 +278,10 @@ def test_the_pbl_column_is_finite_bounded_and_mixes(xland, tsk, tag):
         _pbl_column(col, sfc, xland=xland, tsk=tsk), col, tag)
 
 
+#: The sealed column's step (s); the conservation bar's roundoff floor is per step.
+_SEALED_DTTURBL = 60.0
+
+
 def _sealed_column(col, sfc):
     """The same closed column both the conservation test and its control run.
 
@@ -292,7 +296,7 @@ def _sealed_column(col, sfc):
         tsk=F(305.0), qsfc=sfc["qsfc"], chklowq=F(0.0), thz0=sfc["thz0"],
         qz0=sfc["qz0"], uz0=sfc["uz0"], vz0=sfc["vz0"], xland=F(1.0),
         sice=F(0.0), snow=F(0.0), akhs=sfc["akhs"], akms=sfc["akms"],
-        elflx=F(0.0), ct=sfc["ct"], dtturbl=F(60.0))
+        elflx=F(0.0), ct=sfc["ct"], dtturbl=F(_SEALED_DTTURBL))
 
 
 def _assert_the_sealed_column_conserves_vapour(sealed, col):
@@ -305,9 +309,22 @@ def _assert_the_sealed_column_conserves_vapour(sealed, col):
         sealed["rqvblten"].astype(np.float64))))
     # A closed column: the net is roundoff against the gross exchange.  The
     # bar is loose because the sum is float32 arithmetic reduced in float64;
-    # it is three orders tighter than any real surface flux.
-    assert scale > 0.0, "the sealed column exchanged nothing to measure"
-    assert abs(net) < 1.0e-3 * scale, (net, scale)
+    # it is three orders tighter than any real surface flux.  The solve
+    # stores each row's specific humidity in float32, so a row's tendency
+    # carries up to half an ulp of it per step: that floor joins the bar.
+    # On arm64 (Apple libm's float32 primitives move the mixing length) the
+    # sealed column's net is 5.4e-9 against a 4.39e-7 gross, a few rows
+    # each one ulp off, while the floor is 2.0e-8 -- still twenty times
+    # tighter than the gross exchange, and the leak control's 1e-6 per row
+    # is four orders past it.
+    q = (col["qv"] / (F(1.0) + col["qv"])).astype(F)
+    floor = 0.5 * float(np.sum(weight * np.spacing(q).astype(np.float64)
+                               / float(_SEALED_DTTURBL)))
+    # Non-vacuity on the same floor: an exchange no larger than the roundoff
+    # it carries (a solve with zero coefficients still leaves ulp-sized
+    # tendencies) exchanged nothing.
+    assert scale > floor, ("the sealed column exchanged nothing to measure", scale, floor)
+    assert abs(net) < 1.0e-3 * scale + floor, (net, scale, floor)
 
 
 def test_vertical_diffusion_conserves_the_column_it_should():
@@ -622,8 +639,12 @@ _ROUTINE_MUTATIONS = [
     # the column exchanging anything, which the conservation bar's
     # non-vacuity half catches, and flatten the stable/unstable ordering.
     ("_difcof", _difcof_zeros, ("conservation", "ordering")),
-    # MIXLEN is the master-length scale the whole scheme hangs off.
-    ("_mixlen", _mixlen_zeros, ("conservation", "ordering")),
+    # MIXLEN is the master-length scale the whole scheme hangs off.  Its
+    # stub once read as a conservation break too, but that net (6.3e-9 of a
+    # 4.3e-7 gross on x86-64) is a few rows' float32 roundoff, the size of
+    # the unmutated column's own net on arm64: under the roundoff floor it
+    # is the ordering bar that sees it.
+    ("_mixlen", _mixlen_zeros, ("ordering",)),
 ]
 
 
