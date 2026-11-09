@@ -787,6 +787,10 @@ def physics_history_fields(physics) -> dict[str, object]:
     ocean = getattr(physics, "ocean", None)
     if ocean is not None:
         output.update(ocean.history_fields())
+    # --wrf-hydro: SFCHEADRT, INFXSRT, SOLDRAIN (woof.wrf_hydro_route)
+    wrf_hydro = getattr(physics, "wrf_hydro", None)
+    if wrf_hydro is not None:
+        output.update(wrf_hydro.history_fields())
     # The turbines' history (woof.core.wind_farm): POWER, and upstream's
     # per-turbine and per-farm rows; fitch_wrf writes WRF's POWER
     # (Registry.EM_COMMON:413, package fitchscheme) alone.

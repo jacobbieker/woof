@@ -72,7 +72,7 @@ def test_template_with_muskingum_cunge_maps():
     (("GWBASESWCRT = 1", "GWBASESWCRT = 4"), "UDMP bucket"),
     (("UDMP_OPT = 0", "UDMP_OPT = 1"), "UDMAP|UDMP"),
     (("bucket_loss = 0", "bucket_loss = 1"), "bucket loss"),
-    (("sys_cpl = 1", "sys_cpl = 2"), "sys_cpl"),
+    (("sys_cpl = 1", "sys_cpl = 3"), "sys_cpl"),
 ])
 def test_unported_options_are_refused_by_name(edit, word):
     nl = _nl()

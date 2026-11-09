@@ -4640,8 +4640,16 @@ def _driver_manifest(driver, *, streaming=False, state_shape=None,
         raise RestartManifestError(
             "restart of a run coupled to an external ocean is not ported: the "
             "ocean's state and the coupling-interval average are not checkpointed")
+    # --wrf-hydro (woof.wrf_hydro_route): likewise left to the digest's own
+    # inventory and refused for a checkpoint.
+    hydro_coupled = getattr(driver, "wrf_hydro", None) is not None
+    if hydro_coupled and not digest:
+        raise RestartManifestError(
+            "restart, a checkpoint or a streamed ([tiles]) inventory of a run coupled to "
+            "WRF-Hydro (--wrf-hydro) is not ported: the routing state (routing-grid soil and "
+            "heads, channel, lakes, buckets) is not carried")
     for name in sorted(vars(driver)):
-        if coupled and name == "external_ocean":
+        if (coupled and name == "external_ocean") or (hydro_coupled and name == "wrf_hydro"):
             continue
         if (name not in DRIVER_SERIALIZED_ATTRS
                 and name not in DRIVER_REBUILT_ATTRS

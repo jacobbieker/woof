@@ -133,10 +133,35 @@ Metal, and refuses what it does not port by name.
    name: Hooghoudt tile drainage with WRF-Hydro's water table
    (`opt_tdrn = 2`, ZWATBLE2D -> WATBLED) and the staged column path.
 3. **The coupling driver** `hydro/CPL/WRF_cpl/module_wrf_HYDRO.F90` and
-   `HYDRO_drv/module_HYDRO_drv.F90`: `aggregate`/`disaggregate` between the
-   LSM grid and the routing grid (`AGGFACTRT`) are **done** in the opt-in
+   `HYDRO_drv/module_HYDRO_drv.F90`: **done**.  `aggregate`/`disaggregate`
+   between the LSM grid and the routing grid (`AGGFACTRT`) are in the opt-in
    (`woof_wrf_hydro.grid_transform`, `tests/test_wrf_hydro_grid_transform_parity.py`);
-   the `HYDRO_dt` cadence and the WRF-side field hand-back remain.
+   HYDRO_ini (Fulldom_hires.nc, hydro2dtbl.nc, CHANPARM.TBL, LAKEPARM.nc,
+   GWBASINS.nc, GWBUCKPARM.nc read with netCDF4; the gridded network,
+   slopes, retention, lakes and buckets derived as WRF-Hydro does) and
+   `wrf_cpl_HYDRO`/`HYDRO_exe` are `woof_wrf_hydro.routing_domain` and
+   `woof_wrf_hydro.coupled`, graded against WRF 4.7.1's own `wrf_cpl_HYDRO`
+   over the whole hydro/ tree compiled with MPP_LAND
+   (`oracle/build_coupled.sh`, `tests/test_wrf_hydro_coupled_parity.py`:
+   HYDRO_ini's network and terrain and four coupling cycles bitwise, strict
+   numerics).  The forecast route reaches it through `woof.wrf_hydro_route`
+   (default build, imports nothing from the opt-in unless asked):
+   `--wrf-hydro HYDRO.NAMELIST` on `woof run`/`woof go` or a `[wrf_hydro]`
+   table; after every LSM call (`HYDRO_dt = DTBL`) the routing reads SMOIS,
+   SH2O, INFXSRT, SOLDRAIN and returns SMOIS, SH2O, SFCHEADRT, which the
+   next Noah or Noah-MP call reads through its WRF_HYDRO hooks.  Output:
+   `frxst_pts_out.txt`, CHRTOUT- and RTOUT-like NetCDF files, and SFCHEADRT,
+   INFXSRT, SOLDRAIN in history.  Refused by name: Route_Link reaches
+   (channel_option 1/2), UDMP_OPT = 1, GWBASESWCRT = 3 in the coupled run,
+   IMPERV_ADJ, routing restarts and checkpoints, more than one domain, Noah
+   with urban physics, NextGen (`--hydro`) at the same time.  Two WRF 4.7.1
+   facts the coupled run follows: ZSOIL8 is WRF's ZS (the layer centres,
+   module_wrf_HYDRO.F90 :94-99), not the namelist's; read_rt_nlst opens
+   `namelist.hrldas` even when coupled to WRF (config.F90 :724), so a
+   WRF+WRF-Hydro run directory needs one (WOOF does not read it).
+   `tests/test_wrf_hydro_coupled_forecast.py` runs short Noah and Noah-MP
+   forecasts through the driver with a per-cycle water-budget check, and
+   checks that a run without the table calls the LSM exactly as before.
 4. **Routing**, in this order, each from the pinned WRF-Hydro source with its
    own oracle: subsurface (`Routing/Noah_distr_routing_subsurface.F90`,
    **done** in the opt-in), overland (`Routing/Overland/`,
