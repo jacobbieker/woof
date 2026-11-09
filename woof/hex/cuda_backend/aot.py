@@ -577,6 +577,11 @@ def raw_nvrtc(source, options, arch, filename):
 
 def raw_image(source, options, arch, *, filename):
     """Serve raw NVRTC units without adding CuPy's implicit compiler flags."""
+    from woof import backend
+    if backend.requested() == "mlx":
+        # The facade's NVRTC translates and builds the unit for Metal; the
+        # CUDA kernel packs, plan pool and warm store hold CUDA images only.
+        return raw_nvrtc(source, options, arch, filename)
     from .. import kernel_plan, kernel_warm
     arch = str(arch).removeprefix("sm_")
     key = "nvrtc.raw." + source_hash(source)
