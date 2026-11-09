@@ -26,6 +26,7 @@ def _container(monkeypatch, tmp_path, *, nproc=256, quota="6144000 100000"):
     monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.delenv(kernel_plan.WORKERS_ENVIRONMENT, raising=False)
     monkeypatch.delenv(warm_kernels.WORKERS_ENVIRONMENT, raising=False)
+    monkeypatch.setattr(preparation_workers, "host_available_bytes", lambda *a, **k: None)
 
 
 def test_plan_pool_follows_the_cgroup_quota_not_nproc(monkeypatch, tmp_path):
@@ -42,6 +43,28 @@ def test_plan_pool_explicit_limit_still_applies_under_the_quota(monkeypatch, tmp
     _container(monkeypatch, tmp_path)
     monkeypatch.setenv(kernel_plan.WORKERS_ENVIRONMENT, "8")
     assert kernel_plan._workers() == 8
+    monkeypatch.setenv(kernel_plan.WORKERS_ENVIRONMENT, "200")
+    assert kernel_plan._workers() == 61
+
+
+def test_plan_pool_default_is_capped_by_available_memory(monkeypatch, tmp_path):
+    """32 spawn compile workers peaked at 13-15 GB host RSS for one cold
+    compile: the default holds COMPILE_WORKER_BYTES per worker within
+    COMPILE_MEMORY_SHARE of the available memory."""
+    from woof.hex import kernel_plan as hex_plan
+    _container(monkeypatch, tmp_path)
+    monkeypatch.setattr(preparation_workers, "host_available_bytes", lambda *a, **k: 16 << 30)
+    assert kernel_plan._workers() == 8              # 16 GiB * 0.5 / 1 GiB
+    assert hex_plan._workers() == 8
+    monkeypatch.setattr(preparation_workers, "host_available_bytes", lambda *a, **k: 1 << 29)
+    assert kernel_plan._workers() == 1              # never below one
+    monkeypatch.setattr(preparation_workers, "host_available_bytes", lambda *a, **k: 1 << 40)
+    assert kernel_plan._workers() == 61             # the CPU quota binds first
+    # the variable overrides the memory cap; the CPU budget still bounds it
+    monkeypatch.setattr(preparation_workers, "host_available_bytes", lambda *a, **k: 4 << 30)
+    monkeypatch.setenv(kernel_plan.WORKERS_ENVIRONMENT, "12")
+    assert kernel_plan._workers() == 12
+    assert hex_plan._workers() == 12
     monkeypatch.setenv(kernel_plan.WORKERS_ENVIRONMENT, "200")
     assert kernel_plan._workers() == 61
 
