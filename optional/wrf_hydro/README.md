@@ -12,6 +12,14 @@ hydro = optin.load("wrf_hydro")          # refuses by name unless enabled
 routing = hydro.SubsurfaceRouting(...)
 ```
 
+Numerics: the opt-in units follow the rest of WOOF (`woof/numerics.py`).
+In the default `fast` mode the compile boundary drops their `--fmad=false`, so
+NVRTC fuses multiply-adds and results can sit a few ULP from WRF-Hydro (the
+diffusive channel's DIFFUSION does).  `strict` (`GPUWM_NUMERICS=strict` or
+`GPUWM_WRF_EXACT=1`, which the test battery's conftest sets) keeps the
+no-contraction request, and every WRF-Hydro and NEMO parity test's bitwise
+claim holds there.
+
 Ported: subsurface and overland routing (`rt_option = 1`); the LSM <-> routing
 grid disaggregation and aggregation; reach channel routing (Muskingum and
 Muskingum-Cunge, channel_option 1 and 2); the diffusive wave on nodes
