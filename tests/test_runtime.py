@@ -848,6 +848,13 @@ def test_run_experiment_threads_experiment_timing_authority(
         trajectory_digest: object = None
         frame_records: tuple | None = None
         moisture_floor_receipts: object = None
+        # The hydro coupling's per-run receipt, which run_experiment reads
+        # off every summary (None: no hydro coupling), and the capsule
+        # fragment it hands back.
+        hydro_receipt: object = None
+        hydro_receipts: object = None
+        # Read by the run report run_experiment writes on success.
+        completed_seconds: float = 0.0
 
     summary = _StubSummary()
 
@@ -861,7 +868,9 @@ def test_run_experiment_threads_experiment_timing_authority(
     # vapour; the stand-in case records that it cannot say.
     floors = result.moisture_floor_receipts["moisture_floors_by_domain"]
     assert set(floors) == {"d01"} and floors["d01"]["recorded"] is False
-    assert (replace(result, moisture_floor_receipts=None)
+    # And whether hydro ran: no coupling, so the activation and nothing more.
+    assert set(result.hydro_receipts) == {"hydro_activation"}
+    assert (replace(result, moisture_floor_receipts=None, hydro_receipts=None)
             == replace(summary, frame_records=()))
     assert captured["run_seconds"] == authoritative.run_seconds
     assert (captured["history_interval_s"]

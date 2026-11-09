@@ -62,7 +62,11 @@ tests/test_gf_shallow_parity.py
 # gate's Stage 1, whose environment has cupy. The three source-pin tests
 # in the file still may not skip.
 tests/test_mynn_dmp_sibling.py  skips<=1
-tests/test_mynn_surface.py
+# The three widened-oracle stages and the measured-build claim skip on macOS
+# only, where NumPy's float32 primitives are Apple libm's, a profile its ULP
+# tables were never measured on (skip_where_apple_libm_is_unmeasured); on
+# every other host an unmeasured profile fails, and nothing may skip.
+tests/test_mynn_surface.py  skips<=4
 # WRF scalar_pblmix against its committed WRF Fortran column fixtures (CPU
 # only): a missing fixture must fail, not silently remove the comparison.
 tests/test_scalar_pblmix.py

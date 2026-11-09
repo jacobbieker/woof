@@ -42,6 +42,7 @@ import pytest
 from conftest import requires_gpu
 from _toolchain_rows import toolchain_row
 from test_mynn_surface import WIDE_ULP as _CPU_WIDE_ULP
+from test_mynn_surface import skip_where_apple_libm_is_unmeasured
 from test_mynn_surface_gpu import WIDE_ULP as _GPU_WIDE_ULP
 
 from woof.core.fp32_ulp import fp32_ulp_distance
@@ -923,6 +924,7 @@ def test_the_isfflx0_stage_zeroes_thirteen_outputs_at_every_spacing(dx):
 @pytest.mark.parametrize("dx", DX_SWEEP)
 @pytest.mark.parametrize(("itimestep", "isfflx"), STAGES)
 def test_cpu_reference_matches_the_coarse_wrf_oracle(dx, itimestep, isfflx):
+    skip_where_apple_libm_is_unmeasured()
     fields = _stage(dx, itimestep, isfflx)
     actual = mynn_surface_layer_default(
         _inputs(fields), dx=dx, itimestep=itimestep, isfflx=isfflx,

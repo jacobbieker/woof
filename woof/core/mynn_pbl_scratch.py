@@ -745,7 +745,16 @@ def probe_mynn_card(device: int | None = None) -> dict | None:
     compile.  A CPU-only box (where ``woof domain`` prices this scheme)
     takes the ``None`` road and runs the shipped default; only the
     derivation's own ``None`` road answers with the floor.
+
+    ``GPUWM_NO_LOCAL_GPU`` takes the same ``None`` road: the card is not
+    read (woof.local_gpu).  Under WOOF_BACKEND=mlx ``cupy`` is woof's
+    facade, so this read used to size the width off the Mac's Metal device
+    even while a declared card (``woof check --free-gib``) was priced.
     """
+    from woof.local_gpu import no_local_gpu
+
+    if no_local_gpu():
+        return None
     try:
         import cupy as cp
 

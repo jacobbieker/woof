@@ -193,8 +193,8 @@ def publish_new(source: str | os.PathLike[str],
     function" on exFAT, Linux EPERM on both), so every create-only
     publication on such a drive failed. There ``source`` is renamed
     instead, by a rename that refuses an existing destination just as the
-    link does: Windows' own rename, and ``renameat2`` with RENAME_NOREPLACE
-    on Linux. ``source`` is then gone, so callers treat it as spent either
+    link does: Windows' own rename, ``renameat2`` with RENAME_NOREPLACE on
+    Linux and ``renamex_np`` with RENAME_EXCL on macOS. ``source`` is then gone, so callers treat it as spent either
     way and remove it with ``missing_ok``. ``FileExistsError`` means
     ``destination`` already existed and nothing was published.
     """
@@ -402,10 +402,27 @@ def _rename_no_replace(source, destination) -> bool:
         # FileExistsError for an existing destination, on every volume.
         os.rename(source, destination)
         return True
-    if not sys.platform.startswith("linux"):
-        return False
     import ctypes
 
+    if sys.platform == "darwin":
+        # renamex_np with RENAME_EXCL (macOS 10.12): EEXIST for an existing
+        # destination, ENOTSUP on a volume that cannot refuse one.
+        try:
+            rename = ctypes.CDLL(None, use_errno=True).renamex_np
+        except (AttributeError, OSError):
+            return False
+        rename.argtypes = (ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint)
+        rename.restype = ctypes.c_int
+        rename_excl = 0x4
+        if rename(os.fsencode(source), os.fsencode(destination), rename_excl) == 0:
+            return True
+        code = ctypes.get_errno()
+        if code in (errno.EINVAL, errno.ENOTSUP):
+            return False
+        raise OSError(code, os.strerror(code), os.fspath(source), None,
+                      os.fspath(destination))
+    if not sys.platform.startswith("linux"):
+        return False
     try:
         rename = ctypes.CDLL(None, use_errno=True).renameat2
     except (AttributeError, OSError):
