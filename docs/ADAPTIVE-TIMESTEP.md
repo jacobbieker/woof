@@ -182,8 +182,9 @@ Risks, and the reason this is an opt-in:
 - **Different output.**  The run is not byte-identical with the fixed
   clock.
 - **Cumulus.**  MEASURED below, a parameterized-cumulus grid's
-  convective rain moves a long way.  The wizard prints this in the
-  header of any opt-in file that carries a cumulus scheme.
+  convective rain answers the longer mean step, as it answers a longer
+  fixed step.  The wizard prints this in the header of any opt-in file
+  that carries a cumulus scheme.
 
 Measured on public GFS 0.25° (cycle 2026-11-07 00Z), 24 h, single domain,
 150×120, 49 levels, Mercator, the wizard's default suite
@@ -213,13 +214,28 @@ RMS):
 
 | case | T2 K | U10 m/s | PSFC Pa | domain-mean rain |
 |---|---|---|---|---|
-| Manila 12 km | 2.5 / 0.29 | 3.6 / 0.49 | 48 / 17 | 2.05 vs 4.99 mm (−59%, almost all KF `RAINC`) |
+| Manila 12 km | 1.8 / 0.21 | 2.7 / 0.38 | 53 / 15 | 5.89 vs 4.99 mm (+18%) |
 | Maui 3 km | 4.6 / 0.22 | 13.4 / 0.77 | 100 / 10 | 0.97 vs 0.61 mm (+60%) |
 
-A fixed 60 s Manila control *raised* the rain 14% (5.68 mm), with T2
-1.5 / 0.18 and PSFC 51 / 12.  Kain-Fritsch therefore does not answer a
-varying step the way it answers a longer fixed one.  Until that is
-understood, prefer the fixed clock on a parameterized-cumulus grid.
+A fixed 60 s Manila control raised the rain 14% (5.68 mm), with T2
+1.5 / 0.18 and PSFC 51 / 12, so Kain-Fritsch answers the varying step
+the way it answers a longer fixed one.
+
+The first measurement of this table read 2.05 mm (−59%, almost all KF
+`RAINC`).  That was a bug in the cumulus clock, not the scheme.  WRF's
+`advance_ppt` (`RAINC += PRATEC*DT`, the KF `NCA` expiry, `NCA -= DT`)
+runs on every model step.  woof ran it only when the step ended on a
+multiple of `clock_dt`, a test meant for the compatibility integrator's
+internal substeps.  Without substeps `clock_dt` is the live `dt`, and an
+adaptive clock's elapsed time is almost never a multiple of it.  So
+convective rain stopped accumulating on nearly every step, and a
+triggered KF column held its tendencies far past its convective time
+scale.  Every scheme on the held-`PRATEC` path was affected (KF, the
+previous KF, MSKF, KF-CuP, BMJ, Grell-Freitas, Grell-Devenyi, the SAS
+family, CAM ZM).  Fixed-step runs are unchanged, byte for byte.
+`tests/test_kf_adaptive_wrf471_oracle.py` grades the driver against WRF
+v4.7.1 KF over 110 varying steps (`tools/kf_adaptive_wrf471_oracle`).
+The Manila row above is the rerun.
 
 **Tolerance covers absence, not divergence.**  A cache prepared *before*
 these fields existed loads fine.  A cache prepared *with* adaptive on is
@@ -450,6 +466,24 @@ the distribution.
   Both of WRF's predicates are `itimestep % stepN`, and under a varying
   dt neither number counts what it says.  See "What the port required
   beyond `calc_dt`".
+- **Cumulus fires on the calendar, not on `cudtacttime`.**  Under an
+  adaptive step WRF's cumulus driver runs the scheme when `curr_secs >=
+  cudtacttime` and re-arms it at `curr_secs + cudt*60`
+  (`module_cumulus_driver.F:803-857`), so each interval runs late by up
+  to one step and the lateness carries forward.  woof shortens a step to
+  land on each `cudt` deadline and fires there, so the interval is
+  `cudt` exactly.  The calls between deadlines, the NCA hold and the
+  per-step rain clock are WRF's (`tests/test_kf_adaptive_wrf471_oracle.py`
+  grades them on WRF's own call steps).
+- **`stepcu` follows the step.**  WRF fixes STEPCU at initialization
+  from the first `dt`; woof re-derives it from the baseline step.  It
+  cannot reach a scheme that closes over `DT*STEPCU`.  Under an adaptive
+  step WRF sets `cudt = 0` for BMJ, every SAS and Tiedtke
+  (`share/module_check_a_mundo.F:2155-2172`), and woof refuses those
+  schemes with a positive `cudt` (`woof import-namelist` rewrites it to
+  0).  KF, the previous KF and MSKF read STEPCU only in the fixed-step
+  W0AVG weight, which an adaptive run does not use.  KF-CuP's
+  `MOD(KTAU, NTST)` gate is not graded under an adaptive step.
 
 ---
 
