@@ -20,7 +20,8 @@ NX, NY, NSOIL, NCYCLES, HYDRO_DT = 8, 6, 4, 4, 60.0
 DZS = (0.1, 0.3, 0.6, 1.0)
 #: the mass grid and AGGFACTRT per variant; GWBASESWCRT = 3 runs on
 #: AGGFACTRT = 1 with JXRT >= IXRT (woof_wrf_hydro.routing_domain, gw2d)
-GRIDS = {"": (NX, NY, 4), "da": (NX, NY, 4), "gw2d": (8, 10, 1)}
+GRIDS = {"": (NX, NY, 4), "da": (NX, NY, 4), "gw2d": (8, 10, 1), "reach": (NX, NY, 4),
+         "musk": (NX, NY, 4)}
 
 
 def vegsoil(variant=""):
@@ -60,7 +61,9 @@ def cycles(variant=""):
 def write(out_dir, variant=""):
     """``variant = "da"``: the lake is lake_option 3's USGS hybrid
     (wrf_hydro_synthetic.write_reservoir_da); ``"gw2d"``: the groundwater is
-    GWBASESWCRT = 3's 2-D aquifer (wrf_hydro_synthetic.write_gw2d)."""
+    GWBASESWCRT = 3's 2-D aquifer (wrf_hydro_synthetic.write_gw2d); ``"reach"``
+    and ``"musk"``: Route_Link reaches routed by Muskingum-Cunge
+    (channel_option 2) and Muskingum (1) (wrf_hydro_synthetic.write_route_link)."""
     sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "tests"))
     import wrf_hydro_synthetic as synthetic
 
@@ -75,6 +78,8 @@ def write(out_dir, variant=""):
         synthetic.write_reservoir_da(out, start=datetime(2020, 1, 1))
     if variant == "gw2d":
         synthetic.write_gw2d(out)
+    if variant in ("reach", "musk"):
+        synthetic.write_route_link(out, channel_option=2 if variant == "reach" else 1)
     veg, sol = vegsoil(variant)
     bits = lambda a: np.asarray(a, np.float32).view(np.int32)  # noqa: E731
     lines = [f"{NX} {NY} {NSOIL} {NCYCLES} {HYDRO_DT}"]

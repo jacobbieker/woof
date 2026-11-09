@@ -167,8 +167,19 @@ Metal, and refuses what it does not port by name.
    any GWBASESWCRT > 0 that is not the bucket (it writes the unallocated
    basns_area), so the oracle harness stands in zero-length bucket arrays
    first, and readGW2d reads only an IX x JX corner of each field under
-   MPP_LAND when AGGFACTRT > 1, which is refused.  Refused by name: Route_Link
-   reaches (channel_option 1/2), UDMP_OPT = 1, IMPERV_ADJ, routing restarts and checkpoints, more than one domain, Noah
+   MPP_LAND when AGGFACTRT > 1, which is refused.  Route_Link reaches
+   (channel_option 1 Muskingum and 2 Muskingum-Cunge, UDMP_OPT = 0) run in
+   the coupled driver: Route_Link.nc and Fulldom's LINKID as the one-process
+   MPP_LAND build reads them (link ids index a node-sized buffer, so they
+   must not exceed the node count; lateral inflow reaches its reach through
+   LLINKIDINDX), nhdLakeMap's lake outlet, internal and inflow reaches, and
+   level-pool or pass-through lakes on the outlet reaches; the coupled
+   oracle's reach and musk variants grade them.  WRF 4.7.1's
+   SUBMUSKINGCUNGE computes a dry reach's QLOSS from values it never set
+   (the previous call's stack), so a dry reach's QLOSS is not graded.
+   Refused by name: UDMP_OPT = 1 (the NWM user-defined mapping and
+   drive_CHANNEL_RSL), lake_option 3 with Route_Link reaches, compound
+   channels, IMPERV_ADJ, routing restarts and checkpoints, more than one domain, Noah
    with urban physics, NextGen (`--hydro`) at the same time.  Two WRF 4.7.1
    facts the coupled run follows: ZSOIL8 is WRF's ZS (the layer centres,
    module_wrf_HYDRO.F90 :94-99), not the namelist's; read_rt_nlst opens
