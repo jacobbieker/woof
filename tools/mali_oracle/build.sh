@@ -11,7 +11,8 @@
 # supplies the framework types, logging and abort the modules USE;
 # run_oracle.F90 makes one li_sia_solve call; run_geometry.F90 makes the
 # mask, geometry, layer-thickness and layer-velocity calls; run_thermal.F90
-# makes the thermal init and enthalpy-conversion calls.  The objects must contain no FMA
+# makes the thermal init and enthalpy-conversion calls; run_advection.F90 makes
+# li_advection_thickness_tracers' call after a restart's thermal init.  The objects must contain no FMA
 # instruction (checked with objdump when it is present).  powf and expf are
 # the host libm's; TOOLCHAIN.txt records the glibc and whether the CPU has
 # FMA.  On a host whose libm is not glibc (macOS), the oracles link
@@ -54,6 +55,7 @@ done
 "${fc[@]}" "${flags[@]}" "${script_dir}/run_oracle.F90"
 "${fc[@]}" "${flags[@]}" "${script_dir}/run_geometry.F90"
 "${fc[@]}" "${flags[@]}" "${script_dir}/run_thermal.F90"
+"${fc[@]}" "${flags[@]}" "${script_dir}/run_advection.F90"
 libm_objects=()
 while read -r object; do libm_objects+=("${object}"); done \
     < <(bash "${script_dir}/../oracle_libm/build_host_libm.sh" 2> libm.txt)
@@ -67,6 +69,7 @@ fi
 "${fc[@]}" -o "${build_dir}/run_oracle_r4" run_oracle.o "${objects[@]}" ${libm_objects[@]+"${libm_objects[@]}"} stubs.o mpas_kind_types.o
 "${fc[@]}" -o "${build_dir}/run_geometry_r4" run_geometry.o "${objects[@]}" ${libm_objects[@]+"${libm_objects[@]}"} stubs.o mpas_kind_types.o
 "${fc[@]}" -o "${build_dir}/run_thermal_r4" run_thermal.o "${objects[@]}" ${libm_objects[@]+"${libm_objects[@]}"} stubs.o mpas_kind_types.o
+"${fc[@]}" -o "${build_dir}/run_advection_r4" run_advection.o "${objects[@]}" ${libm_objects[@]+"${libm_objects[@]}"} stubs.o mpas_kind_types.o
 {
     echo "gfortran: $("${fc[@]}" --version | head -1)"
     echo "flags: -O0 -ffp-contract=off -cpp -ffree-form -ffree-line-length-none -DSINGLE_PRECISION (RKIND 4)"
@@ -74,4 +77,4 @@ fi
     echo "powf/expf: ${libm_note}"
     echo "fma: $(grep -m1 -ow fma /proc/cpuinfo 2>/dev/null || echo absent)"
 } > "${build_dir}/TOOLCHAIN.txt"
-echo "built ${build_dir}/run_oracle_r4 ${build_dir}/run_geometry_r4 ${build_dir}/run_thermal_r4"
+echo "built ${build_dir}/run_oracle_r4 ${build_dir}/run_geometry_r4 ${build_dir}/run_thermal_r4 ${build_dir}/run_advection_r4"
