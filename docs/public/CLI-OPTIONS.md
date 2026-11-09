@@ -522,7 +522,7 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 | `--cadence HOURS` | boundary spacing in whole hours, validated against the selected product; required for a source that declares no cadence of its own (hex-global, mapped), where it is the spacing of the history files handed to woof prep |
 | `--card` | GPU to size for: a tier (12gb/16gb/24gb/32gb), a size ('10gb'), a model with a recorded size ('RTX 3080', '5070 Ti') or a cloud part ('h100-80gb', 'a100-40gb', 'l40s', 'a10g'); sets the VRAM budget with no local probe. With no --card, --vram-gib or --hardware-json the wizard MEASURES the local card's capacity (short-lived probe, suppressed by GPUWM_NO_LOCAL_GPU) and refuses, naming both flags, when there is nothing to measure |
 | `--chain R1,R2,...` | custom nest refinement ratios, integers in [2, 8] (e.g. --root-dx 3 --chain 4 for 3 km -> 750 m); omit for a single domain at --root-dx. Sized by the same estimator fit loop as the presets |
-| `--clock {auto,adaptive,fixed}` | how the run steps. adaptive: each grid starts at the emitted time_step and then follows its own Courant number between 3 and 8 s per km of its spacing (WRF's use_adaptive_time_step, written into [shared]); the terrain clock still caps it over steep ground at launch. fixed: one step throughout. auto (default): adaptive when every grid starts inside those bounds and lies within the 500 m to 12 km spacings the terrain clock measured, fixed otherwise (the tropical clock's 2.5 s per km is always fixed). adaptive on a grid outside the bounds is refused, naming the grid |
+| `--clock {auto,adaptive,fixed,tropical-adaptive}` | how the run steps. adaptive: each grid starts at the emitted time_step and then follows its own Courant number between 3 and 8 s per km of its spacing (WRF's use_adaptive_time_step, written into [shared]); the terrain clock still caps it over steep ground at launch. fixed: one step throughout. auto (default): adaptive when every grid starts inside those bounds and lies within the 500 m to 12 km spacings the terrain clock measured, fixed otherwise (the tropical clock's 2.5 s per km is always fixed). adaptive on a grid outside the bounds is refused, naming the grid. tropical-adaptive (opt-in, \|lat\| < 25 only): adaptive from the fixed tropical step, which stays each grid's floor, with the vertical Courant number capped at 1.0 (target_cfl), w_damping on and steps growing at most 5% per step; not byte-identical with the fixed clock |
 | `--cumulus {suite,grid}` | who decides the root's cumulus scheme. suite: the suite's own scheme at any spacing (what naming --physics-profile means when this is left out). grid: the suite's scheme is turned off on a root finer than the 4 km convection-permitting bound, where the dynamics resolve deep convection (what an unnamed suite gets) |
 | `--cycle YYYY-MM-DDTHH\|latest` | the forcing CYCLE (UTC), which is the run's start time unless --forecast-start-hour moves it; 'latest' probes the public mirrors for the newest complete gfs/hrrr cycle covering the whole window and prints what it picked; sources without a probe use their declared publication delay) |
 | `--data-dir DIR` | explicit forcing directory; automatic go launches otherwise manage request-specific downloads. Manual acquisition and ERA5 paths default to data/<name> |
@@ -1486,6 +1486,8 @@ Takes no options of its own.
 | `--wind-amplitude` | fill uniform U/V amplitude in m/s; 0 disables it |
 | `--wind-farms uswtdb\|TABLE\|off` | opt-in Fitch turbine drag and TKE from USWTDB or a WRF/JSON turbine table |
 | `--wps-namelist PATH` | with --prepared-root: the exact WPS authority required by a single-domain portable bundle |
+| `--wrf-hydro HYDRO.NAMELIST` | couple WRF-Hydro's routing (the opt-in under optional/wrf_hydro, WOOF_ENABLE_WRF_HYDRO=1) to the LSM as WRF built with WRF_HYDRO does, from this hydro.namelist; distinct from --hydro (NextGen) |
+| `--wrf-hydro-output DIR` | where --wrf-hydro writes frxst_pts_out.txt and its CHRTOUT/RTOUT files (default: wrf_hydro_output in the working directory) |
 | `--wrfinput DIR` | run a stock real.exe directory containing namelist.input, wrfinput_d0N and wrfbdy_d01 through the shared WRF forecast route |
 
 ## `woof ensemble-products`
@@ -1865,6 +1867,8 @@ Takes no options of its own.
 | `--wind-amplitude` | fill uniform U/V amplitude in m/s; 0 disables it |
 | `--wind-farms uswtdb\|TABLE\|off` | opt-in Fitch turbine drag and TKE from USWTDB or a WRF/JSON turbine table |
 | `--wps-namelist PATH` | with --prepared-root: the exact WPS authority required by a single-domain portable bundle |
+| `--wrf-hydro HYDRO.NAMELIST` | couple WRF-Hydro's routing (the opt-in under optional/wrf_hydro, WOOF_ENABLE_WRF_HYDRO=1) to the LSM as WRF built with WRF_HYDRO does, from this hydro.namelist; distinct from --hydro (NextGen) |
+| `--wrf-hydro-output DIR` | where --wrf-hydro writes frxst_pts_out.txt and its CHRTOUT/RTOUT files (default: wrf_hydro_output in the working directory) |
 | `--wrfinput DIR` | run a stock real.exe directory containing namelist.input, wrfinput_d0N and wrfbdy_d01 through the shared WRF forecast route |
 
 ## `woof go-job`
@@ -3519,6 +3523,8 @@ Takes no options of its own.
 | `--vertical-levels` | met_em: requested level count for the selected vertical grid |
 | `--waves {on,off}` | couple spectral ocean waves on the parent grid (default off) |
 | `--waves-options JSON` | wave source_pack, nf, nd, coarsening, interval_seconds, render_interval_seconds, roughness_feedback and stations |
+| `--wrf-hydro HYDRO.NAMELIST` | couple WRF-Hydro's routing (the opt-in under optional/wrf_hydro, WOOF_ENABLE_WRF_HYDRO=1) to the LSM as WRF built with WRF_HYDRO does, from this hydro.namelist; distinct from --hydro (NextGen) |
+| `--wrf-hydro-output DIR` | where --wrf-hydro writes frxst_pts_out.txt and its CHRTOUT/RTOUT files (default: wrf_hydro_output in the working directory) |
 | `--wrfinput DIR` | WRF real.exe directory containing wrfinput_d0*, wrfbdy_d01 and producing namelist.input (instead of CONFIG) |
 
 ## `woof run-plan`
