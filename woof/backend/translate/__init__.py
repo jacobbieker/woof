@@ -1196,6 +1196,8 @@ class _Rewriter:
                     self.refuse(g, f"backward goto {name!r}")
                 first = min(first, i)
                 for a in anc[1:]:
+                    if self.span(a) == self.span(block) and a.kind == block.kind:
+                        break       # the jump is itself the block's statement (top is g)
                     if self.span(a) == self.span(top) and a.kind == top.kind:
                         if a.kind.name in self._LOOPS:
                             inner_loops.append(a)
