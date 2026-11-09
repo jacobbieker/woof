@@ -77,9 +77,21 @@ def _advanced_key(key):
     return tuple(out) if isinstance(key, tuple) or len(out) != 1 else out[0]
 
 
+def _host_key(key):
+    """A key with its facade arrays copied to the host."""
+    if isinstance(key, tuple):
+        return tuple(k.get() if isinstance(k, ndarray) else k for k in key)
+    return key.get() if isinstance(key, ndarray) else key
+
+
 def getitem(a: ndarray, key):
     if _is_basic(key):
         return basic_view(a, key)
+    if a.dtype == np.complex128:
+        # word pairs carry a trailing axis an advanced key would see: gather
+        # on the host, as complex128 arithmetic runs
+        from woof.backend.facade._ops import from_host
+        return from_host(a.get()[_host_key(key)])
     values = a._values()[_advanced_key(key)]
     out = ndarray(tuple(values.shape), a.dtype)
     out._write(values)
@@ -87,10 +99,18 @@ def getitem(a: ndarray, key):
 
 
 def setitem(a: ndarray, key, value):
+    from woof.backend.facade import _capture
     from woof.backend.facade._ops import operand_values
+    if _capture.defer(setitem, a, key, value):
+        return
     if _is_basic(key):
         view = basic_view(a, key)
         view._write(operand_values(value, a.dtype))
+        return
+    if a.dtype == np.complex128:
+        host = a.get()
+        host[_host_key(key)] = value.get() if isinstance(value, ndarray) else value
+        a.set(host)
         return
     # Advanced: scatter into the full view, then write the view back.
     whole = a._values()

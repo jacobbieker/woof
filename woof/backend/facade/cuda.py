@@ -838,6 +838,9 @@ def _memory_pointer(mem, offset=0):
 def __getattr__(name):
     if name == "MemoryPointer":
         return _memory_pointer
+    if name == "cufft":
+        from woof.backend.facade import cufft
+        return cufft
     raise AttributeError(f"cupy.cuda.{name} is not implemented by woof's mlx backend")
 
 
