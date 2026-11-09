@@ -9,6 +9,15 @@ remaining step needs.
 
 ## What is in the tree
 
+Numerics: the opt-in units follow the rest of WOOF (`woof/numerics.py`).
+In the default `fast` mode the compile boundary drops their `--fmad=false`, so
+NVRTC fuses multiply-adds and results can sit a few ULP from WRF-Hydro (the
+diffusive channel's DIFFUSION does).  `strict` (`GPUWM_NUMERICS=strict` or
+`GPUWM_WRF_EXACT=1`, which the test battery's conftest sets) keeps the
+no-contraction request, and every WRF-Hydro and NEMO parity test's bitwise
+claim holds there.
+
+
 | Piece | Source | Where | Gate |
 | --- | --- | --- | --- |
 | Noah LSM built with `-DWRF_HYDRO`: ponded head `sfcheadrt` in; infiltration excess `infxsrt` and soil drainage `soldrain` out; the NDHMS edits to SMFLX, SRT and SSTEP | WRF 4.7.1 `phys/module_sf_noahdrv.F`, `phys/module_sf_noahlsm.F` (public domain; byte-identical to 4.6.1's) | `launch_noah(wrf_hydro=...)` -> `noah_column_hydro` (`woof/core/kernels/noah.cu`) | `tests/test_noah_wrf_hydro_parity.py`: 0 ULP in every field on CUDA (sm_86) and Metal (M3 Max), default and strict numerics |
