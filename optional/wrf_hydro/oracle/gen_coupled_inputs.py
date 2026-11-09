@@ -18,9 +18,13 @@ import numpy as np
 
 NX, NY, NSOIL, NCYCLES, HYDRO_DT = 8, 6, 4, 4, 60.0
 DZS = (0.1, 0.3, 0.6, 1.0)
+#: the mass grid and AGGFACTRT per variant; GWBASESWCRT = 3 runs on
+#: AGGFACTRT = 1 with JXRT >= IXRT (woof_wrf_hydro.routing_domain, gw2d)
+GRIDS = {"": (NX, NY, 4), "da": (NX, NY, 4), "gw2d": (8, 10, 1)}
 
 
-def vegsoil():
+def vegsoil(variant=""):
+    NX, NY, _ = GRIDS[variant]
     veg = np.full((NY, NX), 10, np.int32)
     veg[:, -1] = 17
     sol = np.full((NY, NX), 6, np.int32)
@@ -28,10 +32,11 @@ def vegsoil():
     return veg, sol
 
 
-def cycles():
+def cycles(variant=""):
     """Per cycle: smois, sh2o (nsoil, ny, nx), infxsrt, soldrain (ny, nx),
     binary32.  Saturated deep layers (lateral subsurface flow), frozen water
     in the top layer of one column, ponding that varies cell to cell."""
+    NX, NY, _ = GRIDS[variant]
     f = np.float32
     out = []
     jj, ii = np.meshgrid(np.arange(NY), np.arange(NX), indexing="ij")
@@ -54,24 +59,28 @@ def cycles():
 
 def write(out_dir, variant=""):
     """``variant = "da"``: the lake is lake_option 3's USGS hybrid
-    (wrf_hydro_synthetic.write_reservoir_da)."""
+    (wrf_hydro_synthetic.write_reservoir_da); ``"gw2d"``: the groundwater is
+    GWBASESWCRT = 3's 2-D aquifer (wrf_hydro_synthetic.write_gw2d)."""
     sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "tests"))
     import wrf_hydro_synthetic as synthetic
 
     from woof.wrf_hydro_route import soil_centres
 
+    NX, NY, agg = GRIDS[variant]
     out = Path(out_dir)
-    synthetic.write(out, nx=NX, ny=NY, dxrt=250.0)
+    synthetic.write(out, nx=NX, ny=NY, agg=agg, dxrt=250.0)
     if variant == "da":
         from datetime import datetime
 
         synthetic.write_reservoir_da(out, start=datetime(2020, 1, 1))
-    veg, sol = vegsoil()
+    if variant == "gw2d":
+        synthetic.write_gw2d(out)
+    veg, sol = vegsoil(variant)
     bits = lambda a: np.asarray(a, np.float32).view(np.int32)  # noqa: E731
     lines = [f"{NX} {NY} {NSOIL} {NCYCLES} {HYDRO_DT}"]
     lines += [str(int(b)) for b in bits(soil_centres(DZS))]
     lines += [f"{int(veg[j, i])} {int(sol[j, i])}" for j in range(NY) for i in range(NX)]
-    for smois, sh2o, infx, sold in cycles():
+    for smois, sh2o, infx, sold in cycles(variant):
         for j in range(NY):
             for i in range(NX):
                 for k in range(NSOIL):

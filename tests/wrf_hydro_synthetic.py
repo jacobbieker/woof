@@ -237,3 +237,57 @@ reservoir_rfc_forecasts_time_series_path = "rfc"
 reservoir_rfc_forecasts_lookback_hours = 28
 /
 """)
+
+
+def write_gw2d(directory, *, ih_shift=0.25, pre_cycles=2, soil_cpl=1, chan_cond=(1.0e-4, 5.0e-5)):
+    """Turn a written domain's groundwater into GWBASESWCRT = 3, the 2-D
+    aquifer: ``gwhires.nc`` (HC, IHEAD, BOTELV, POR, LTYPE on the routing
+    grid; readGW2d reads it without the north-up flip Fulldom gets, so it is
+    written south-up), CHAN_DEPTH in Fulldom_hires.nc (READ_CHROUTING1 takes
+    ZELEV from TOPOGRAPHY - CHAN_DEPTH) and the namelist's gw keys.  The
+    head sits in the soil column in some cells and below it in others, above
+    the ground around the lake (surface excess), one conductivity is the
+    100 m/s sentinel and one cell is inactive (LTYPE 0)."""
+    import netCDF4
+
+    d = Path(directory)
+    with netCDF4.Dataset(d / "Fulldom_hires.nc", "a") as ds:
+        topo = np.asarray(ds.variables["TOPOGRAPHY"][:], np.float32)[::-1]
+        chan = np.asarray(ds.variables["CHANNELGRID"][:])[::-1]
+        depth = np.where(chan >= 0, 1.0, 0.0).astype(np.float32)
+        ds.createVariable("CHAN_DEPTH", "f4", ("y", "x"))[:] = depth[::-1]
+    jxrt, ixrt = topo.shape
+    jj, ii = np.meshgrid(np.arange(jxrt), np.arange(ixrt), indexing="ij")
+    f = np.float32
+    hc = (f(2.0e-4) * (f(1.0) + (jj % 3).astype(f))).astype(f)
+    hc[jxrt // 2 + 2, 2] = f(100.0)
+    ihead = (topo - f(3.0) + f(0.5) * ((ii + 2 * jj) % 5).astype(f)).astype(f)
+    ihead[jxrt - 2, 1] = topo[jxrt - 2, 1] + f(0.3)
+    ring = (slice(jxrt // 2 - 2, jxrt // 2 + 3), slice(ixrt // 2 - 2, ixrt // 2 + 3))
+    ihead[ring] = topo[ring] + f(0.5)                # seeps into the lake hollow
+    bot = (topo - f(20.0)).astype(f)
+    por = (f(0.25) + f(0.01) * (ii % 3).astype(f)).astype(f)
+    ltype = np.ones((jxrt, ixrt), np.int32)
+    ltype[1, 2] = 0
+    with netCDF4.Dataset(d / "gwhires.nc", "w") as ds:
+        ds.createDimension("y", jxrt)
+        ds.createDimension("x", ixrt)
+        for name, arr, t in (("HC", hc, "f4"), ("IHEAD", ihead, "f4"), ("BOTELV", bot, "f4"),
+                             ("POR", por, "f4"), ("LTYPE", ltype, "i4")):
+            ds.createVariable(name, t, ("y", "x"))[:] = arr
+    nl = d / "hydro.namelist"
+    text = nl.read_text()
+    text = text.replace("GWBASESWCRT = 1\n", "GWBASESWCRT = 3\n").replace("GWBASESWCRT = 2\n",
+                                                                       "GWBASESWCRT = 3\n")
+    text = text.replace("UDMP_OPT = 0\n", "UDMP_OPT = 0\n" + f"""gwsoilcpl = {soil_cpl}
+GwPreCycles = {pre_cycles}
+GwSpinCycles = 0
+GwPreDiag = .FALSE.
+GwPreDiagInterval = 1
+GwSpinUp = .FALSE.
+gwIhShift = {ih_shift}
+gwChanCondSw = 1
+gwChanCondConstIn = {chan_cond[0]}
+gwChanCondConstOut = {chan_cond[1]}
+""")
+    nl.write_text(text)

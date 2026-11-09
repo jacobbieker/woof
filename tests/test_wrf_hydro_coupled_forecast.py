@@ -195,7 +195,8 @@ def _coupled(tmp_path, nx=8, ny=6, **nl):
     (dict(channel_option=2), "channel_option"),
     (dict(sub=0, ov=0, gw=0), "rtFlag"),
     (dict(extra="imperv_adj = 1\n"), "IMPERV_ADJ"),
-    (dict(extra="GWBASESWCRT = 3\n"), "GWBASESWCRT"),
+    (dict(extra="GWBASESWCRT = 3\n"), "AGGFACTRT"),
+    (dict(sub=0, ov=0, extra="GWBASESWCRT = 3\ngwsoilcpl = 1\n"), "gwsoilcpl"),
 ])
 def test_coupled_refusals_name_the_option(tmp_path, edit, match):
     from importlib import import_module
@@ -236,6 +237,38 @@ def test_a_missing_input_is_refused_by_name(tmp_path):
                                     zs=soil_centres([0.1, 0.3, 0.6, 1.0]),
                                     vegtyp=np.full((6, 8), 10), soltyp=np.full((6, 8), 6),
                                     hydro_dt=60.0, start=datetime.datetime(2020, 1, 1))
+
+
+@needs_optin
+def test_gw2d_reads_gwhires_and_the_channel_depth(tmp_path):
+    from importlib import import_module
+
+    rd = import_module(optin.load("wrf_hydro").__name__ + ".routing_domain")
+    nm = import_module(optin.load("wrf_hydro").__name__ + ".namelist")
+    d = tmp_path / "dom"
+    synthetic.write(d, nx=8, ny=10, agg=1)
+    synthetic.write_gw2d(d)
+    groups = nm.parse((d / "hydro.namelist").read_text())
+    cfg = nm.map_hydro_nlist(groups)
+    veg = np.full((10, 8), 10)
+    sol = np.full((10, 8), 6)
+    veg[:, -1], sol[:, -1] = 17, 14
+    kw = dict(base=d, ix=8, jx=10, zs=[0.05, 0.25, 0.7, 1.5], vegtyp=veg, soltyp=sol)
+    dom = rd.build(cfg, groups, **kw)
+    g = dom.gw2d
+    # readGW2d: LTYPE 2 on the edge, no conductivity under LTYPE 0, IHEAD + gwIhShift
+    assert (g["ltype"][0] == 2).all() and (g["ltype"][:, -1] == 2).all()
+    assert g["ltype"][1, 2] == 0 and g["hycond"][1, 2] == 0
+    assert g["ho"][2, 3] == np.float32(np.float32(dom.elrt[2, 3] - np.float32(3.0)
+                                                   + np.float32(0.5) * np.float32(2))
+                                        + np.float32(0.25))
+    # ZELEV is the channel bed, CHAN_DEPTH below the terrain
+    net = dom.network
+    jj, ii = net["chanyj"] - 1, net["chanxi"] - 1
+    assert np.array_equal(net["zelev"], dom.elrt[jj, ii] - np.float32(1.0))
+    (d / "gwhires.nc").unlink()
+    with pytest.raises(rd.MissingInput, match="gwhires"):
+        rd.build(cfg, groups, **kw)
 
 
 @needs_optin

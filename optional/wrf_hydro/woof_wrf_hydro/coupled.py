@@ -26,9 +26,19 @@ The static state is :mod:`woof_wrf_hydro.routing_domain`.  Ported for the
 coupled run: SUBRTSWCRT and OVRTSWCRT (rt_option 1 and 2), channel_option 3
 with level-pool or pass-through lakes or lake_option 3's persistence/level-pool
 hybrid and RFC-forecast reservoirs (woof_wrf_hydro.reservoir_da), GWBASESWCRT
-0, 1 and 2.  Refused by
+0, 1, 2 and 3.  GWBASESWCRT = 3 is the 2-D aquifer (woof_wrf_hydro.gw2d):
+gw2d_ini after LandRT_ini, then in driveGwBaseflow gwSoilFlux (gwsoilcpl > 0),
+gwstep and the surface excess onto the routing grid's ponded head, and the
+channel-aquifer exchange after drive_CHANNEL (gwChanCondSw = 1); nothing
+goes back to WRF but SMOIS/SH2O/SFCHEADRT (wrf_cpl_HYDRO's GWBASESWCRT = 3
+block is empty).  As shipped, WRF 4.7.1 does not get that far: HYDRO_ini's
+get_basn_area runs for every GWBASESWCRT > 0 and writes the bucket's
+basns_area, which only GWBASESWCRT 1/2 allocate, and stops with a
+segmentation fault.  This driver computes what follows (the oracle stands in
+zero-length bucket arrays; none of it is read by the aquifer).  Refused by
 name here or in the namelist mapper: Route_Link reaches (channel_option 1
-and 2), UDMP_OPT = 1, GWBASESWCRT = 3, IMPERV_ADJ, restarts (RESTART_FILE,
+and 2), UDMP_OPT = 1, GWBASESWCRT = 3 with AGGFACTRT > 1 or gwsoilcpl > 0
+without SUBRTSWCRT/OVRTSWCRT, IMPERV_ADJ, restarts (RESTART_FILE,
 rst_typ = 1), sys_cpl other than 2, rtFlag = 0 (no SUBRTSWCRT, OVRTSWCRT
 or GWBASESWCRT), channel-only modes.
 
@@ -94,6 +104,10 @@ def refusals(cfg, groups):
         raise namelist.UnportedOption(
             f"channel_option = {cfg.channel_option}: Route_Link reach routing is not wired "
             "into the coupled driver (the gridded network, channel_option = 3, is)")
+    if cfg.gwbaseswcrt == 3 and cfg.gwsoilcpl > 0 and not (cfg.subsurface or cfg.overland):
+        raise namelist.UnportedOption(
+            "gwsoilcpl > 0 without SUBRTSWCRT or OVRTSWCRT: gwSoilFlux reads the routing "
+            "grid's soil moisture, which only disaggregateDomain fills")
     if cfg.compound_channel:
         raise namelist.UnportedOption("compound_channel: Muskingum-Cunge's compound channel "
                                       "is a Route_Link option")
@@ -198,6 +212,18 @@ class WrfHydroCoupled:
                                    for k in b["basnsind"]])
             self.z_gw = d(b["z_init"])
             self.qin_gw, self.qout_gw = cp.zeros(nb, cp.float32), cp.zeros(nb, cp.float32)
+        self.gw2d = None
+        if cfg.gwbaseswcrt == 3:
+            # gw2d_allocate, readGW2d (routing_domain) and gw2d_ini with
+            # nlst%dt = HYDRO_dt and nlst%dxrt0 (module_HYDRO_drv.F90 :1531-1536)
+            from .gw2d import Gw2d
+
+            G = dom.gw2d
+            self.gw2d = Gw2d(ltype=G["ltype"], elev=G["elev"], bot=G["bot"], hycond=G["hycond"],
+                             poros=G["poros"], ho=G["ho"], dx=F(cfg.dxrt), dt=hydro_dt,
+                             aggfactrt=dom.aggfactrt)
+            self.gw2d.init(gw_pre_cycles=cfg.gw_pre_cycles)
+            self.gw_active = d(G["ltype"] == 1, cp.float32)
         self.channel = None
         self.reservoir_da = None
         if cfg.channel:
@@ -226,7 +252,11 @@ class WrfHydroCoupled:
                 to_node=np.where(net["to_node"] < 0, 0, net["to_node"]), typel=net["typel"],
                 zelev=net["zelev"], chanlen=net["chanlen"], mannn=net["mannn"], so=net["so"],
                 chsslp=net["chsslp"], bw=net["bw"], retdep_chan=F(0.001),
-                dtrt_ch=self.dtrt_ch, dtct=F(cfg.dtrt_ch), gwbaseswcrt=0,
+                dtrt_ch=self.dtrt_ch, dtct=F(cfg.dtrt_ch),
+                gwbaseswcrt=3 if self.gw2d is not None else 0,
+                gw_chan_cond_sw=cfg.gw_chan_cond_sw,
+                gw_chan_cond_const_in=cfg.gw_chan_cond_const_in,
+                gw_chan_cond_const_out=cfg.gw_chan_cond_const_out,
                 lakenode=net["lakenode"], lakes=lakes,
                 reservoir_type="lake_option_3" if self.reservoir_da is not None else "level_pool",
                 reservoir_da=self.reservoir_da)
@@ -300,11 +330,22 @@ class WrfHydroCoupled:
                              qinflowbase=self.qinflowbase, infxsrt=self.infxsrt,
                              soldrain=self.soldrain, dt=self.dt,
                              ovrtswcrt=int(bool(cfg.overland)))
+        gw = self.gw2d
+        if gw is not None:
+            # driveGwBaseflow's GWBASESWCRT = 3 arm (module_HYDRO_drv.F90 :837-874)
+            g = self.gt_out
+            gw.hydro_step(surface_head=o.head, gwsoilcpl=cfg.gwsoilcpl, elrt=s["elrt"],
+                          soiltyp=g["soiltyprt"], smcrt=g["smcrt"], smcmaxrt=g["smcmaxrt"],
+                          sldpth=self.dom.sldpth, zsoil=self.dom.zsoil)
         if self.channel is not None:
             self.channel.route(dt=self.dt, qstrmvolrt=self.qstrm_ts,
                                qinflowbase=self.qinflowbase, hlink=self.hlink, cvol=self.cvol,
                                qlink1=self.qlink1, qlateral=self.qlateral,
-                               lakeinflort=self.lake_ts)
+                               lakeinflort=self.lake_ts,
+                               gw_head=gw.ho if gw is not None else None,
+                               qgw_chanrt=gw.qgw_chanrt if gw is not None else None)
+            if gw is not None:          # driveChannelRouting :986-994
+                gw.channel_exchange(gw_chan_cond_sw=cfg.gw_chan_cond_sw)
         if self.routing:
             g = self.gt_out
             grid_transform.aggregate(
@@ -331,6 +372,10 @@ class WrfHydroCoupled:
                      qstrm_acc=self.qstrm_acc, qinflowbase=self.qinflowbase)
         if self.bucket is not None:
             named.update(z_gw=self.z_gw, qin_gw=self.qin_gw, qout_gw=self.qout_gw)
+        if self.gw2d is not None:
+            g = self.gw2d
+            named.update(gw_head=g.ho, gw_excess=g.excess, qsgwrt=g.qsgwrt, qdarcyrt=g.qdarcyrt,
+                         qgw_chanrt=g.qgw_chanrt, smcrt=self.gt_out["smcrt"])
         if self.channel is not None:
             named.update(hlink=self.hlink, cvol=self.cvol, qlink1=self.qlink1,
                          qlateral=self.qlateral, dtct=self.channel.dtct,
@@ -363,6 +408,11 @@ class WrfHydroCoupled:
         if self.bucket is not None:
             # a bucket holds z (mm) over its basin's cells, ct * the mean cell area
             st["bucket"] = self._sum(self.z_gw * self.bucket_cells, self.bucket.area) / 1000.0
+        if self.gw2d is not None:
+            # the active aquifer's drainable water above its bottom (LTYPE = 1)
+            g = self.gw2d
+            st["gw2d"] = self._sum((g.ho.astype(cp.float64) - g.bot) * g.poros * self.gw_active,
+                                   self.static["dist9"])
         if self.channel is not None:
             st["channel"] = self._sum(self.cvol)
         return st
@@ -386,6 +436,9 @@ class WrfHydroCoupled:
             terms["bucket_out"] = self._sum(self.qout_gw) * float(self.dt)
             terms["bucket_change"] = after["bucket"] - before["bucket"]
             terms["qinflowbase"] = self._sum(self.qinflowbase, self.static["dist9"]) / 1000.0
+        if self.gw2d is not None:
+            terms["gw2d_change"] = after["gw2d"] - before["gw2d"]
+            terms["gw2d_excess"] = self._sum(self.gw2d.excess, self.static["dist9"])
         if self.channel is not None:
             terms["channel_change"] = after["channel"] - before["channel"]
         return terms
