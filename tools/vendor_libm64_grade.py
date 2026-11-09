@@ -297,7 +297,7 @@ def main(argv=None):
     a, b = operands(args.samples, args.seed)
     got, gotf = gpu(a, b)
     rust = rust_reference(a, b)
-    cr = cr_reference(a, b)
+    cr = cr_reference(a, b).copy()
     huge = np.isfinite(a) & (np.abs(a) >= HUGE)
     cr[huge, CR_FNS.index("sin")] = exact_sin(a[huge])
     want = np.concatenate([rust[:, :len(RUST_FNS)], cr,
