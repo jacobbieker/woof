@@ -187,7 +187,7 @@
         "woof/core/rrtmg_lw.py": "0d553e50906a7ae9878db7118e2ff4b2ad4de859257083b9ad1c4e14aa047b8b",
         "woof/core/rrtmg_mcica.py": "d4b74af4a8b05e2807a806c78ef1c3270c43aa58c1afd0e7b2247f232b2bd54e",
         "woof/core/rrtmg_sw.py": "a7dcf98a0a0aab8a9c94ecfa148fc17ad67c35bcbbe86edbb2288202794ecf2b",
-        "woof/ingest/wrf_ozone.py": "6eebfaa389801460885a66844cd020ad8847c69a9af42d4c1b07f3e294fc8b2c"
+        "woof/ingest/wrf_ozone.py": "f3cb710640562cfffdd8e544547ab898309800b0d7aa2dff6209600b4b6c0c5d"
       },
       "description": "Recast WOOF 1.1.6 merged with the fork's engine changes (the per-run RRTMG LW layer tier, the surface-solar carriers, the 256-level radiation ceilings and the per-band / per-g-point RRTMG flux outputs, whose spectral-output part comes from the SW scratch): the radiation helpers as this tree carries them. Admission establishes source identity only."
     }
