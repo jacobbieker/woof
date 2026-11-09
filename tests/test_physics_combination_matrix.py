@@ -58,6 +58,7 @@ from __future__ import annotations
 import dataclasses
 import itertools
 import json
+import os
 import random
 import re
 import sys
@@ -486,6 +487,14 @@ def test_a_mutated_plan_is_still_refused():
 # The matrix.
 # ---------------------------------------------------------------------------
 
+@pytest.mark.slow
+@pytest.mark.skipif(
+    os.environ.get("GITHUB_ACTIONS") == "true",
+    reason="too slow for a hosted runner: each route cell walks every sampled "
+           "tuple through both doors, about 3 min of one core per cell since "
+           "upstream 1.1.6, and --dist loadfile puts all of this file's cells "
+           "on one worker; hosted leg 6 hit its 150 min job timeout here "
+           "(2026-11-08). Run it on a workstation.")
 @pytest.mark.parametrize("runner_id, source_id", route_cells())
 def test_every_tuple_is_launchable_or_refused_by_name(runner_id, source_id):
     cell = walk_cell(runner_id, source_id)
