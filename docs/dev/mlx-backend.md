@@ -253,7 +253,7 @@ needs. The MSL, options and descriptors are the run's own, so the code is the
 same. edi 3 km on an M3 Max, `WOOF_METAL_COMPILE_NONCE` making Metal find
 nothing cached (all wrfout byte-identical):
 
-| launch | serial | prefetch | 
+| launch | serial | prefetch |
 |---|---|---|
 | cold (libraries and pipelines) | 308 s | 199 s |
 | libraries evicted, archives present | 185 s | 140 s |
