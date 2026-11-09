@@ -521,6 +521,15 @@ class SpaceAnalysis:
         if first.kind.name == "MEMBER_REF_EXPR":
             inner = list(first.get_children())
             return inner[0] if inner else first
+        # an overloaded operator call (`a[i]`, `&r`) lists the operator
+        # first, then the object it is called on
+        callee = first
+        while callee.kind.name == "UNEXPOSED_EXPR" and len(list(callee.get_children())) == 1:
+            callee = next(callee.get_children())
+        if callee.kind.name == "DECL_REF_EXPR" and call.referenced is not None \
+                and callee.referenced is not None \
+                and callee.referenced.get_usr() == call.referenced.get_usr() and len(kids) > 1:
+            return kids[1]
         return first
 
     def gspace(self, e, env):
@@ -549,9 +558,19 @@ class SpaceAnalysis:
                         return None
                     e = args[0]
                     continue
-                if ref is not None and self._generic_method(ref):
+                if ref is not None and (self._generic_method(ref) or ref.kind.name in (
+                        "CXX_METHOD", "CONVERSION_FUNCTION")):
+                    # (also a method of a struct that is not itself generic:
+                    # MYNN 4.7.1's M471Ref::operator& hands back the M471Ptr
+                    # its M471Ptr::operator[] made)
                     e = self._call_object(e)
                     continue
+                # a factory returning the struct by value (MYNN 4.7.1's
+                # m471_array(work, offset, n)): its data is the memory of
+                # the pointer it is handed
+                for a in e.get_arguments():
+                    if _indirection(a.type) in ("ptr", "array"):
+                        return self.space(a, env)
                 return None
             if kind == "MEMBER_REF_EXPR" and kids:
                 e = kids[0]
