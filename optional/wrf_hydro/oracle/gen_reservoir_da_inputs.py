@@ -49,9 +49,12 @@ def calls():
     prev = np.zeros(len(LAKE_IDS), F)
     for k in range(NCALLS):
         period = F(300.0) if k < 600 else F(450.0)
-        t = F(k) / F(96.0)
+        # a triangle wave of period 96 calls, phase-shifted per lake: binary32
+        # arithmetic only (no libm), so every platform writes the same inputs
+        phase = ((k + 19 * np.arange(5)) % 96).astype(F) / F(48.0)
+        tri = np.where(phase <= F(1.0), phase, F(2.0) - phase).astype(F) - F(0.5)
         inflow = (np.array([3.0, 40.0, 80.0, 6.0, 2.0], F)
-                  * (F(1.0) + F(0.6) * np.sin(t * F(6.2831855) + np.arange(5, dtype=F))).astype(F))
+                  * (F(1.0) + F(1.2) * tri).astype(F))
         inflow = inflow.astype(F)
         if 300 <= k < 320:
             inflow[0] = F(-0.5)                     # a negative inflow: warned, not changed
@@ -134,7 +137,8 @@ def write(out_dir):
     # lake 4's three hours back (found by looking back)
     for gage, when, total, observed, bad in (("RFCA1", START + timedelta(hours=6), 72, 12, None),
                                               ("RFCB2", START - timedelta(hours=3), 48, 6, None)):
-        q = (np.linspace(5.0, 25.0, total) + 3.0 * np.sin(np.arange(total) / 3.0)).astype(F)
+        q = (F(5.0) + F(0.3) * np.arange(total, dtype=F)
+             + F(2.0) * (np.arange(total) % 5).astype(F)).astype(F)
         if bad is not None:
             q[bad] = F(-1.0)
         name = f"{when.strftime('%Y-%m-%d_%H')}.60min.{gage}.RFCTimeSeries.ncdf"
