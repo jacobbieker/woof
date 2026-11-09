@@ -294,20 +294,33 @@ class SpaceAnalysis:
                 info = self.functions.get(usr)
                 if info is None:
                     continue
+                owner = info.cursor.semantic_parent
                 for node in info.cursor.walk_preorder():
-                    ref = node.referenced
-                    if node.kind.name != "CALL_EXPR" or ref is None \
-                            or ref.kind.name not in ("CXX_METHOD", "CONVERSION_FUNCTION"):
+                    if node.kind.name != "CALL_EXPR":
                         continue
+                    ref = node.referenced
                     kids = list(node.get_children())
                     head = kids[0] if kids else None
-                    if head is None or head.kind.name != "MEMBER_REF_EXPR" or list(head.get_children()):
+                    while head is not None and head.kind.name == "UNEXPOSED_EXPR" and len(list(head.get_children())) == 1:
+                        head = next(head.get_children())
+                    if head is None or head.kind.name not in ("MEMBER_REF_EXPR", "OVERLOADED_DECL_REF") \
+                            or (head.kind.name == "MEMBER_REF_EXPR" and list(head.get_children())):
                         continue        # a call on another object, recorded where it is made
-                    callee = self._pattern_usr(ref)
-                    have = self.this_spaces.setdefault(callee, set())
-                    if not spaces <= have:
-                        have |= spaces
-                        changed = True
+                    if ref is not None and ref.kind.name in ("CXX_METHOD", "CONVERSION_FUNCTION"):
+                        callees = [self._pattern_usr(ref)]
+                    elif ref is None and owner is not None:
+                        # a dependent call in a member template (FArray::section's
+                        # add_section): every overload of that name in the class
+                        callees = [u for u, f in self.functions.items()
+                                   if f.name == node.spelling and f.cursor.semantic_parent is not None
+                                   and f.cursor.semantic_parent == owner]
+                    else:
+                        continue
+                    for callee in callees:
+                        have = self.this_spaces.setdefault(callee, set())
+                        if not spaces <= have:
+                            have |= spaces
+                            changed = True
 
     def drain(self):
         while self._work:
