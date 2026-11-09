@@ -401,8 +401,13 @@ class SpaceAnalysis:
                     # S.last_message): a field given constant data is constant
                     lhs_end = kids[0].extent.end.offset
                     op = next((t.spelling for t in node.get_tokens() if t.extent.start.offset >= lhs_end), None)
-                    if op == "=" and self.space(kids[1], env) == CONSTANT:
-                        self.field_spaces.setdefault(field_key(kids[0].referenced), set()).add(CONSTANT)
+                    if op == "=":
+                        # a pointer field takes the space of what is stored in
+                        # it: constant data (WSM6's S.last_message), or a local
+                        # array (ssib's SsibTem p; p.www = www;)
+                        sp = self.space(kids[1], env)
+                        if sp in (CONSTANT, THREAD, THREADGROUP, DEVICE):
+                            self.field_spaces.setdefault(field_key(kids[0].referenced), set()).add(sp)
             elif kind == K.RETURN_STMT and collect_returns:
                 children = list(node.get_children())
                 if children:
