@@ -166,6 +166,11 @@ _EXTRA_HEADERS: dict[str, tuple[str, ...]] = {
     # glibc 2.39 float32 and binary64 exp/log/pow, correctly rounded binary64
     # acos/cos (CORE-MATH) and sin (f64cr).
     "chem_sorgam": ("glibc_flt32.cuh", "glibc_flt64.cuh", "f64cr.cuh"),
+    # Fast-TUV photolysis (phot_opt = 3), graded word for word against the
+    # WRF v4.7.1 oracle (tests/test_chem_ftuv_wrf471_parity.py): WOOF's glibc
+    # 2.39 binary64 exp/log/pow, correctly rounded binary64 cos/acos
+    # (CORE-MATH) and sin/atan/log10 (f64cr), FADD/DADD (glibc_flt32.cuh).
+    "chem_ftuv": ("glibc_flt32.cuh", "glibc_flt64.cuh", "f64cr.cuh"),
     # The mp=28 units evaluate WRF's EXP/LOG/LOG10/** through WOOF's own
     # float32 and binary64 libm words (thompson_aerosol_libm.cuh),
     # measured equal to the gfortran oracle host's words; CUDA's
@@ -997,7 +1002,7 @@ def module_options(name: str) -> tuple[str, ...]:
         return (("-std=c++17", "--fmad=false", "--ftz=false") if is_strict()
                 else ("-std=c++17", "--fmad=true", "--ftz=false"))
     if name in ("noah_ua", "noah_mosaic_ua", "noah_ua_sfcdiags", "noah_seaice_options", "noah_fractional", "sfclay_dx2d",
-                "chem_radm2", "chem_sorgam"):
+                "chem_radm2", "chem_sorgam", "chem_ftuv"):
         return ("-std=c++17", "--fmad=false", "--ftz=false")
     if name == "eeps":
         from woof.wrf_exact import ENABLED
@@ -1507,7 +1512,7 @@ def load_module(name: str):
         return compile_noftz_module(name, src, f"{MODULE_KEY_ROOT}:{name}")
     options = module_options(name)
     if name in ("noah_ua", "noah_mosaic_ua", "noah_ua_sfcdiags", "noah_seaice_options", "noah_fractional", "sfclay_dx2d",
-                "chem_radm2", "chem_sorgam"):
+                "chem_radm2", "chem_sorgam", "chem_ftuv"):
         return _load_module_preserving_subnormals(name, src, options)
 
     if name in ("camzm", "cammgmp", "uwshcu"):

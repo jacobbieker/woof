@@ -1,0 +1,20 @@
+chem_opt i4 0
+aer_ra_feedback i4 0
+julday i4 0
+gmt f4 0
+curr_secs f4 0
+dtstep f4 0
+xlat f4 2 6 2
+xlong f4 2 6 2
+p_phy f4 3 6 31 2
+t_phy f4 3 6 31 2
+rho_phy f4 3 6 31 2
+p8w f4 3 6 31 2
+t8w f4 3 6 31 2
+z_at_w f4 3 6 31 2
+moist f4 4 6 31 2 3
+chem f4 4 6 31 2 81
+tauaer f4 4 6 31 2 4
+waer f4 4 6 31 2 4
+gaer f4 4 6 31 2 4
+ph f4 4 6 31 2 47

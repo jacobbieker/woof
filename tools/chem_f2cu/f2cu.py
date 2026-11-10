@@ -120,7 +120,7 @@ TOKEN = re.compile(r"""\s*(?:
     (?P<num>(?:\d+\.\d*|\.\d+|\d+)(?:[EeDd][+-]?\d+)?(?:_8|_4)?(?![A-Za-z]))
   | (?P<dotop>\.(?:and|or|not|eqv|neqv|true|false|gt|ge|lt|le|eq|ne)\.)
   | (?P<name>[A-Za-z_]\w*)
-  | (?P<op>\*\*|>=|<=|==|/=|//|[-+*/(),<>:=])
+  | (?P<op>\(/|/\)|\*\*|>=|<=|==|/=|//|[-+*/(),<>:=])
   | (?P<str>'[^']*'|"[^"]*")
 )""", re.X | re.I)
 
@@ -249,14 +249,39 @@ class Parser:
                 self.take("(")
                 args = []
                 if self.peek()[1] != ")":
-                    args.append(self.logical())
+                    args.append(self.subscript())
                     while self.peek()[1] == ",":
                         self.take(",")
-                        args.append(self.logical())
+                        args.append(self.subscript())
                 self.take(")")
                 return ("ref", value, args)
             return ("ref", value, None)
+        if value == "(/":
+            items = [self.logical()]
+            while self.peek()[1] == ",":
+                self.take(",")
+                items.append(self.logical())
+            self.take("/)")
+            return ("ctor", items)
         raise SyntaxError(f"unexpected {value!r} in {self.t}")
+
+    def subscript(self):
+        """An actual argument or subscript: an expression, a section
+        triplet lo:hi:stride (each part optional), or keyword=expression."""
+        if self.peek()[0] == "name" and self.peek(1)[1] == "=":
+            name = self.take()[1]
+            self.take("=")
+            return ("kw", name, self.logical())
+        lo = None if self.peek()[1] == ":" else self.logical()
+        if self.peek()[1] != ":":
+            return lo
+        self.take(":")
+        hi = None if self.peek()[1] in (":", ",", ")") else self.logical()
+        st = None
+        if self.peek()[1] == ":":
+            self.take(":")
+            st = self.logical()
+        return ("range", lo, hi, st)
 
 
 def parse_expr(text):
@@ -306,12 +331,33 @@ def logical_lines(lines):
         start = None
         m = re.match(r"(\d+)\s+(.*)$", stmt)
         label, stmt = (int(m.group(1)), m.group(2)) if m else (None, stmt)
-        yield s, label, stmt
+        pieces = split_top(stmt, ";") if ";" in stmt else [stmt]
+        for k, piece in enumerate(p for p in pieces if p.strip()):
+            yield s, label if k == 0 else None, piece.strip()
 
 
 _HEADER = re.compile(
-    r"^(?:(real(?:\*8|\s*\(\s*kind\s*=\s*8\s*\))?|integer|double\s+precision|logical)\s+)?"
+    r"^(?:(real(?:\*8|\s*\(\s*(?:kind\s*=\s*)?8\s*\))?|integer|double\s+precision|logical)\s+)?"
     r"(subroutine|function)\s+(\w+)\s*(?:\((.*)\))?\s*$", re.I)
+
+
+_CONSTRUCT = re.compile(r"^(\w+)\s*:\s*(?=(do|if|select|where)\b)", re.I)
+_END_NAMED = re.compile(r"^(end\s*do|end\s*if|end\s*select|end\s*where|else|elsewhere)\s+(\w+)$", re.I)
+
+
+def _strip_construct_name(stmt):
+    """Drop Fortran construct names (``level_loop : do``, ``end do level_loop``,
+    ``else is_mozart``); a named EXIT or CYCLE is refused (none is translated)."""
+    stmt = _CONSTRUCT.sub("", stmt.strip())
+    m = _END_NAMED.match(stmt)
+    if m and not re.match(r"^else\s+if\b", stmt, re.I):
+        return m.group(1)
+    m = re.match(r"^(else\s*if\s*\(.*\)\s*then)\s+\w+$", stmt, re.I)
+    if m:
+        return m.group(1)
+    if re.match(r"^(exit|cycle)\s+\w+$", stmt, re.I):
+        raise NotImplementedError(f"named {stmt!r}")
+    return stmt
 
 
 def find_routines(text):
@@ -321,7 +367,7 @@ def find_routines(text):
     for n, raw in lines:
         low = strip_comment(raw.replace("\r", "")).strip().lower()
         if cur is None:
-            m = re.match(r"^(?:(?:real(?:\*8)?|integer|double\s+precision|logical)\s+)?"
+            m = re.match(r"^(?:(?:real(?:\*8|\s*\(\s*8\s*\))?|integer|double\s+precision|logical)\s+)?"
                          r"(subroutine|function)\s+(\w+)", low)
             if m:
                 cur, buf = m.group(2), [(n, raw)]
@@ -347,7 +393,8 @@ class Var:
 
 _TYPE = re.compile(
     r"^(real\s*\*\s*8|real\s*\(\s*kind\s*=\s*8\s*\)|real\s*\(\s*8\s*\)|double\s+precision|"
-    r"real(?:\s*\*\s*4)?|integer|logical|character(?:\s*\*\s*\(?[\w*]+\)?)?)\b(.*)$", re.I)
+    r"real\s*\(\s*(?:kind\s*=\s*)?4\s*\)|"
+    r"real(?:\s*\*\s*4)?|integer|logical|character(?:\s*\*\s*\(?[\w*]+\)?)?)(?:\b|(?<=\)))(.*)$", re.I)
 
 
 def _kind_of(word):
@@ -400,7 +447,9 @@ def split_top(text, sep=","):
 def parse_dims(text):
     dims = []
     for d in split_top(text):
-        if d.strip() == "*":
+        if d.strip() == ":":
+            dims.append(None)  # deferred shape: fixed bounds come from Translator.fixed_dims
+        elif d.strip() == "*":
             dims.append((("num", "1"), None))
         elif ":" in d:
             lo, hi = d.split(":", 1)
@@ -413,7 +462,8 @@ def parse_dims(text):
 class Scope:
     """Declarations of one routine (or one module) plus the module scope."""
 
-    def __init__(self, parent=None, implicit=True):
+    def __init__(self, parent=None, implicit=True, owner=""):
+        self.owner = owner
         self.vars: dict[str, Var] = {}
         self.parent = parent
         self.implicit = implicit
@@ -459,6 +509,7 @@ class Scope:
                 if len(targets) == 1 and "(" not in targets[0]:
                     self.set_data(targets[0].strip().lower(), vals, evaluator)
                     continue
+                targets = [t for item in targets for t in self._implied_do(item, evaluator)]
                 assert len(targets) == len(vals), stmt
                 for t, val in zip(targets, vals):
                     node = parse_expr(t)
@@ -495,6 +546,12 @@ class Scope:
                 raise SyntaxError(f"declaration {item!r} in {stmt!r}")
             name = m2.group(1).lower()
             dims = parse_dims(m2.group(2)) if m2.group(2) else dim_attr
+            if dims is not None and None in dims:
+                fixed = getattr(evaluator, "fixed_dims", {})
+                key = f"{self.owner}.{name}" if f"{self.owner}.{name}" in fixed else name
+                if key not in fixed:
+                    raise NotImplementedError(f"allocatable {key} needs fixed bounds")
+                dims = parse_dims(fixed[key])
             v = self.vars.get(name)
             if v is None:
                 v = Var(name, kind)
@@ -518,6 +575,24 @@ class Scope:
                 else:
                     self.set_data(name, [init], evaluator)
         return True
+
+    def _implied_do(self, item, evaluator):
+        """DATA objects of one item, implied DO loops unrolled in order."""
+        item = item.strip()
+        if not (item.startswith("(") and item.endswith(")")):
+            return [item]
+        parts = split_top(item[1:-1])
+        k = next(i for i, p in enumerate(parts) if re.match(r"^\s*\w+\s*=", p))
+        var, lo = parts[k].split("=", 1)
+        bounds = [lo] + parts[k + 1:]
+        lo_v, hi_v = (evaluator.const(parse_expr(b), self)[0] for b in bounds[:2])
+        st_v = evaluator.const(parse_expr(bounds[2]), self)[0] if len(bounds) > 2 else 1
+        out = []
+        for value in range(lo_v, hi_v + (1 if st_v > 0 else -1), st_v):
+            for obj in parts[:k]:
+                text = re.sub(r"\b%s\b" % var.strip(), str(value), obj, flags=re.I)
+                out += self._implied_do(text, evaluator)
+        return out
 
     def ensure(self, name):
         v = self.lookup(name)
@@ -546,7 +621,9 @@ class Scope:
             offset += (evaluator.const(sub, self)[0] - lo_v) * stride
             stride *= hi_v - lo_v + 1
         if v.data is None:
-            v.data = [None] * stride
+            # elements no DATA statement names stay zero: the array lives in
+            # static storage, which gfortran zero-fills
+            v.data = [Fraction(0) if v.kind != "int" else 0] * stride
         val, kind = evaluator.const(parse_expr(text), self)
         v.data[offset] = evaluator.convert(val, kind, v.kind)
 
@@ -572,9 +649,138 @@ POWI_TABLE = [0, 1, 1, 2, 2, 3, 3, 4, 4, 6, 5, 6, 6, 10, 7, 9,
 _OPS = {"+": "ADD", "-": "SUB", "*": "MUL", "/": "DIV"}
 
 
+#: C, C++ and Metal Shading Language words a Fortran name may collide with.
+_RESERVED = {"auto", "bool", "break", "case", "char", "class", "const", "continue", "default",
+             "delete", "do", "double", "else", "enum", "extern", "float", "for", "goto", "if",
+             "inline", "int", "long", "new", "operator", "private", "public", "register",
+             "return", "short", "signed", "sizeof", "static", "struct", "switch", "template",
+             "this", "typedef", "union", "unsigned", "void", "volatile", "while", "half",
+             "kernel", "device", "constant", "thread", "threadgroup", "vertex", "fragment",
+             "uint", "uchar", "ushort", "ulong", "mod", "namespace", "using", "friend",
+             "virtual", "explicit", "export", "mutable", "typename", "true", "false"}
+
+
+def _cid(name):
+    """A Fortran name as a C identifier (reserved words take a trailing _)."""
+    return name + "_" if name in _RESERVED else name
+
+
+def _is_range(node):
+    return isinstance(node, tuple) and node[0] == "range"
+
+
 class Emitter:
     def __init__(self, translator, scope, routine):
         self.tr, self.scope, self.routine = translator, scope, routine
+        #: loop indices (C names, 0-based, one per section dimension, first
+        #: dimension first) while an array expression is scalarised, else None
+        self.elem = None
+        #: statements a reduction (SUM, DOT_PRODUCT, ...) needs before the
+        #: statement that uses it
+        self.pre = []
+
+    # ---- array sections ---------------------------------------------------
+    def _section_args(self, v, args):
+        return args if args is not None else [("range", None, None, None)] * len(v.dims)
+
+    def extents(self, v, args):
+        """C extents of the section dimensions of v(args) (all of v's for None)."""
+        out = []
+        for (lo, hi), a in zip(v.dims, self._section_args(v, args)):
+            if not _is_range(a):
+                continue
+            alo = a[1] if a[1] is not None else lo
+            ahi = a[2] if a[2] is not None else hi
+            if ahi is None:
+                raise NotImplementedError(f"{v.name}: section of an assumed-size dimension")
+            span = ("bin", "-", ahi, alo)
+            if a[3] is None:
+                out.append(self.emit(("bin", "+", span, ("num", "1")))[0])
+            else:
+                out.append(self.emit(("bin", "/", ("bin", "+", span, a[3]), a[3]))[0])
+        return out
+
+    def _array_ref(self, node):
+        """(Var, args) if node is an array-valued reference, else None."""
+        if node[0] != "ref":
+            return None
+        name, args = node[1], node[2]
+        v = self.scope.lookup(name)
+        if v is None or v.dims is None or v.param is not None:
+            return None
+        if args is None or any(_is_range(a) for a in args):
+            return v, args
+        return None
+
+    def shape_of(self, node):
+        """Extents of the first array-valued operand of an expression."""
+        if not isinstance(node, tuple):
+            return None
+        found = self._array_ref(node)
+        if found:
+            return self.extents(*found)
+        if node[0] == "ref" and node[2] is not None:
+            if node[1] in ("sum", "dot_product", "maxval", "count", "size"):
+                return None
+            for a in node[2]:
+                s = self.shape_of(a)
+                if s is not None:
+                    return s
+            return None
+        for x in node[1:]:
+            if isinstance(x, tuple):
+                s = self.shape_of(x)
+                if s is not None:
+                    return s
+        return None
+
+    def section_element(self, v, cname, args):
+        args = self._section_args(v, args)
+        nr = sum(1 for a in args if _is_range(a))
+        if self.elem is None or len(self.elem) != nr:
+            raise SyntaxError(f"{v.name}: rank-{nr} section outside a conforming "
+                              f"array expression ({self.elem})")
+        subs, k = [], 0
+        for (lo, hi), a in zip(v.dims, args):
+            if _is_range(a):
+                alo = a[1] if a[1] is not None else lo
+                q = ("cexpr", self.elem[k], "int")
+                subs.append(("bin", "+", alo, q if a[3] is None else ("bin", "*", q, a[3])))
+                k += 1
+            else:
+                subs.append(a)
+        return f"{cname}[{self.index(v, subs)}]"
+
+    def reduction(self, name, args):
+        if self.elem is not None:
+            raise NotImplementedError(f"{name} inside an array expression")
+        shape = self.shape_of(args[0])
+        if shape is None or len(shape) != 1:
+            raise NotImplementedError(f"{name} of a rank-{0 if shape is None else len(shape)} operand")
+        q, r = self.tr.fresh("f2cu_q"), self.tr.fresh("f2cu_r")
+        self.elem = [q]
+        try:
+            a = self.emit(args[0])
+            b = self.emit(args[1]) if name == "dot_product" else None
+        finally:
+            self.elem = None
+        loop = f"for (int {q} = 0; {q} < {shape[0]}; ++{q})"
+        if name == "count":
+            self.pre += [f"int {r} = 0;", f"{loop} if ({a[0]}) {r} += 1;"]
+            return r, "int"
+        if name == "maxval":
+            if a[1] != "int":
+                raise NotImplementedError("maxval of a real array")
+            self.pre += [f"int {r} = -2147483647 - 1;", f"{loop} if ({a[0]} > {r}) {r} = {a[0]};"]
+            return r, "int"
+        # gfortran -O0 inlines SUM and DOT_PRODUCT as a running sum from zero,
+        # one element at a time, left to right (res = res + a, res = res + a*b).
+        term = a if name == "sum" else self.arith("*", a, b)
+        kind = term[1]
+        zero = {"int": "0", "float": "0.0f", "double": "0.0"}[kind]
+        step = self.arith("+", (r, kind), term)[0]
+        self.pre += [f"{_CTYPE[kind]} {r} = {zero};", f"{loop} {r} = {step};"]
+        return r, kind
 
     # ---- constant folding -------------------------------------------------
     def convert(self, val, src, dst):
@@ -592,6 +798,10 @@ class Emitter:
         except NotConstant:
             pass
         tag = node[0]
+        if tag == "cexpr":
+            return node[1], node[2]
+        if tag in ("ctor", "kw", "range"):
+            raise SyntaxError(f"{tag} outside an assignment or argument list: {node}")
         if tag == "neg":
             code, kind = self.emit(node[1])
             return f"(-{code})", kind
@@ -693,6 +903,9 @@ class Emitter:
         if v.param is not None:
             return literal(*v.param), v.param[1]
         cname = tr.cname(v, self.routine)
+        if v.dims is not None and ((args is None and self.elem is not None) or
+                                   (args is not None and any(_is_range(a) for a in args))):
+            return self.section_element(v, cname, args), v.kind
         if args is None:
             if v.dims is not None:
                 return cname, v.kind  # whole array (actual argument)
@@ -713,8 +926,33 @@ class Emitter:
         return "+".join(terms)
 
     def intrinsic(self, name, args):
+        if name in ("sum", "dot_product", "maxval", "count"):
+            return self.reduction(name, args)
+        if name == "allocated":
+            # Every allocatable has fixed bounds here and is "allocated" by
+            # the one-time initialisation that tests it.
+            return "false", "bool"
+        if name in ("tiny", "huge", "epsilon"):
+            kind = self.emit(args[0])[1]
+            return literal(_KIND_CONST[name][kind], kind), kind
+        if name == "size":
+            v = self.scope.lookup(args[0][1])
+            exts = self.extents(v, args[0][2])
+            if len(args) > 1:
+                return exts[self.const(args[1])[0] - 1], "int"
+            return "*".join(f"({e})" for e in exts), "int"
+        if name == "real" and len(args) == 2:
+            kw = args[1]
+            kval = self.const(kw[2] if kw[0] == "kw" else kw)[0]
+            return self.cast(self.emit(args[0]), {4: "float", 8: "double"}[kval]), \
+                {4: "float", 8: "double"}[kval]
         vals = [self.emit(a) for a in args]
         kinds = [k for _, k in vals]
+        if name in ("tan", "atan", "log10") and kinds[0] == "double":
+            # Correctly rounded binary64 (WOOF's f64cr.cuh wcr_atan/wcr_log10;
+            # tan is the kernel's own, built on f64cr's double-double).
+            return {"tan": "f2cu_tan", "atan": "wcr_atan", "log10": "wcr_log10"}[name] + \
+                f"({vals[0][0]})", "double"
         if name in ("exp", "log", "alog", "sqrt", "log10", "alog10", "dexp", "dlog", "dsqrt"):
             (code, kind), = vals
             base = name.lstrip("ad") if name not in ("alog10",) else "log10"
@@ -782,7 +1020,15 @@ class Emitter:
 INTRINSICS = {"acos", "cos", "sin", "exp", "log", "alog", "sqrt", "log10", "alog10", "dexp", "dlog", "dsqrt",
               "max", "min", "amax1", "amin1", "max0", "min0", "dmax1", "dmin1",
               "abs", "dabs", "iabs", "sign", "float", "real", "sngl", "dble", "int",
-              "nint", "mod"}
+              "nint", "mod", "tan", "atan", "sum", "dot_product", "maxval", "count",
+              "size", "tiny", "huge", "epsilon", "allocated", "selected_real_kind"}
+#: TINY, HUGE and EPSILON of each real kind, exactly.
+_KIND_CONST = {
+    "tiny": {"float": Fraction(1, 2 ** 126), "double": Fraction(1, 2 ** 1022)},
+    "huge": {"float": (2 - Fraction(1, 2 ** 23)) * 2 ** 127,
+             "double": (2 - Fraction(1, 2 ** 52)) * 2 ** 1023},
+    "epsilon": {"float": Fraction(1, 2 ** 23), "double": Fraction(1, 2 ** 52)},
+}
 _CTYPE = {"float": "float", "double": "double", "int": "int", "bool": "bool"}
 
 
@@ -823,7 +1069,8 @@ class Routine:
 
 
 class Translator:
-    def __init__(self, module_texts, struct_name="F2cuModule", implicit=True, prefix=""):
+    def __init__(self, module_texts, struct_name="F2cuModule", implicit=True, prefix="",
+                 fixed_dims=None, kind_names=None):
         self.implicit = implicit
         #: prepended to every generated routine's C name (no clash with CUDA's fmin etc.)
         self.prefix = prefix
@@ -839,12 +1086,51 @@ class Translator:
         #: routines whose CALL must never execute (a branch the build excludes);
         #: reaching one records a fatal like wrf_error_fatal
         self.unreachable_calls: set = set()
+        #: fixed bounds for ALLOCATABLE (deferred-shape) arrays, by name or
+        #: "routine.name": {name: "lo:hi, ..."}, set before add_source
+        self.fixed_dims: dict = dict(fixed_dims or {})
+        #: integer kind parameters spelled by name (real(dp), 1._dp): {"dp": 8}
+        self.kind_names = dict(kind_names or {})
+        self._fresh = 0
+        #: None, or {"threshold": n}: automatic local arrays and those over n
+        #: elements live in the caller's ws_d/ws_i buffers (module struct
+        #: fields ws_d, ws_i, ws_d_end, ws_i_end), not in the thread's frame
+        self.workspace = None
+        self.workspace_arrays: list = []
+        #: DATA-initialised module variables as constants (tables/literals)
+        self.module_data_constants = False
+        self.module_tables: dict = {}
+        self._restore = ""
         for text in module_texts:
-            for _, _, stmt in logical_lines(enumerate(text.splitlines(), 1)):
+            in_type = False
+            for _, _, stmt in logical_lines(enumerate(self.normalise(text).splitlines(), 1)):
                 low = stmt.lower()
                 if low.startswith(("module ", "end module", "contains")):
                     continue
+                # derived types (MOZART's column densities) carry no state
+                # these routines use
+                if re.match(r"^type\s+\w+\s*$", low) or re.match(r"^type\s*,", low):
+                    in_type = True
+                    continue
+                if in_type:
+                    in_type = not re.match(r"^end\s*type\b", low)
+                    continue
+                if re.match(r"^type\s*\(", low):
+                    continue
                 self.module.declare_line(stmt, self)
+
+    def normalise(self, text):
+        """Spell named real kinds as their numbers (line numbers unchanged)."""
+        for name, k in self.kind_names.items():
+            text = re.sub(r"(\d|\.)_%s\b" % name, r"\1_%d" % k, text, flags=re.I)
+            text = re.sub(r"\breal\s*\(\s*(?:kind\s*=\s*)?%s\s*\)" % name, "real(%d)" % k,
+                          text, flags=re.I)
+            text = re.sub(r"\bkind\s*=\s*%s\b" % name, "kind=%d" % k, text, flags=re.I)
+        return text
+
+    def fresh(self, stem):
+        self._fresh += 1
+        return f"{stem}{self._fresh}"
 
     # ---- constants --------------------------------------------------------
     def convert(self, val, src, dst):
@@ -932,6 +1218,15 @@ class Translator:
 
     def _fold_intrinsic(self, name, vals):
         kinds = [k for _, k in vals]
+        if name in _KIND_CONST:
+            return _KIND_CONST[name][kinds[0]], kinds[0]
+        if name == "selected_real_kind":
+            p = vals[0][0]
+            r = vals[1][0] if len(vals) > 1 else 0
+            return (4 if p <= 6 and r <= 37 else 8 if p <= 15 and r <= 307 else -1), "int"
+        if name == "real" and len(vals) == 2:
+            kind = {4: "float", 8: "double"}[vals[1][0]]
+            return self.convert(vals[0][0], kinds[0], kind), kind
         if name in ("exp", "log", "alog", "sqrt", "log10", "alog10", "dexp", "dlog", "dsqrt"):
             (v, k), = vals
             base = {"alog": "log", "alog10": "log10", "dexp": "exp", "dlog": "log",
@@ -959,7 +1254,7 @@ class Translator:
 
     # ---- routines ---------------------------------------------------------
     def add_source(self, text, names, *, patches=None, ext_alias=None):
-        found = find_routines(text)
+        found = find_routines(self.normalise(text))
         for name in names:
             if name not in found:
                 raise KeyError(f"routine {name} not in source")
@@ -988,14 +1283,14 @@ class Translator:
                 continue
             v = r.scope.vars[a]
             if v.kind == "char":
-                raise NotImplementedError(f"character dummy {a} of {r.name}")
+                continue  # labels only: CHARACTER dummies carry no arithmetic
             ctype = _CTYPE[v.kind]
             if v.dims is not None:
-                params.append(f"{'' if a in r.assigned else 'const '}{ctype} *{a}")
+                params.append(f"{'' if a in r.assigned else 'const '}{ctype} *{_cid(a)}")
             elif self.by_value(r, a):
-                params.append(f"{ctype} {a}")
+                params.append(f"{ctype} {_cid(a)}")
             else:
-                params.append(f"{ctype} &{a}")
+                params.append(f"{ctype} &{_cid(a)}")
         ret = _CTYPE[r.kind] if r.kind else "void"
         return f"__device__ {ret} {self.prefix}{r.name}({', '.join(params)})"
 
@@ -1007,7 +1302,7 @@ class Translator:
         if not m:
             raise SyntaxError(f"header {header!r}")
         r.args = [a.strip().lower() for a in split_top(m.group(4) or "") if a.strip()]
-        scope = Scope(self.module, implicit=self.implicit)
+        scope = Scope(self.module, implicit=self.implicit, owner=r.name)
         r.scope = scope
         for a in r.args:
             if a not in r.ext_alias:
@@ -1020,6 +1315,7 @@ class Translator:
         body = []
         exec_started = False
         for n, label, stmt in stmts[1:-1]:
+            stmt = _strip_construct_name(stmt)
             if not exec_started and label is None and scope.declare_line(stmt, self):
                 continue
             sf = re.match(r"^(\w+)\s*\(([\w\s,]+)\)\s*=(.*)$", stmt.strip())
@@ -1070,7 +1366,7 @@ class Translator:
                 m = re.match(r"^do\s+(?:\d+\s*,?\s*)?(\w+)\s*=", low)
                 if m:
                     r.assigned.add(m.group(1))
-                if low.startswith("if") and re.match(r"^if\s*\(", low):
+                if re.match(r"^(if|where)\s*\(", low):
                     k = self._close_paren(low, low.index("("))
                     low = low[k + 1:].strip()
                 parts = self._split_assign(low)
@@ -1100,13 +1396,25 @@ class Translator:
 
     def cname(self, v, routine):
         if v.name in self.module.vars and routine.scope.vars.get(v.name) is None:
+            if self.module_data_constants and v.data is not None:
+                # DATA-initialised module variables are never assigned (that
+                # is refused): arrays become file-scope __constant__ tables,
+                # scalars their literal
+                if v.dims is None:
+                    return literal(v.data[0], v.kind)
+                if v.name not in self.module_tables:
+                    size = self._size(v, Routine("m", [], scope=self.module))
+                    vals = ", ".join(literal(x, v.kind) for x in v.data)
+                    self.module_tables[v.name] = (
+                        f"__constant__ {_CTYPE[v.kind]} {self.prefix}m_{v.name}[{size}] = {{{vals}}};")
+                return f"{self.prefix}m_{v.name}"
             self.module_vars_used.add(v.name)
             return f"mod.{v.name}"
         if routine.kind is not None and v.name == routine.name:
             return "f2cu_result"
         if v.dims is not None and v.data is not None and not v.is_arg:
             return f"{self.prefix}{routine.name}_{v.name}"
-        return v.name
+        return _cid(v.name)
 
     def call_function(self, em, name, args):
         callee = self.routines[name]
@@ -1118,6 +1426,8 @@ class Translator:
         actual_args = [a for d, a in zip(callee.args, args) if d not in callee.ext_alias]
         for d, a in zip(dummies, actual_args):
             dv = callee.scope.vars[d]
+            if dv.kind == "char":
+                continue
             if dv.dims is not None:
                 out.append(self._array_actual(em, a))
             elif self.by_value(callee, d):
@@ -1145,13 +1455,27 @@ class Translator:
         name = self.cname(v, em.routine)
         if a[2] is None:
             return name
-        return f"&{name}[{em.index(v, a[2])}]"
+        args = list(a[2])
+        if any(_is_range(x) for x in args):
+            # a contiguous section is passed by its first element (sequence
+            # association); anything else would need a copy-in temporary
+            seen_partial = False
+            for k, x in enumerate(args):
+                if _is_range(x):
+                    if seen_partial or x[3] is not None or k > 0 and not _is_range(args[k - 1]):
+                        raise NotImplementedError(f"non-contiguous section actual {a}")
+                    full = x[1] is None and x[2] is None
+                    seen_partial = not full
+                    args[k] = x[1] if x[1] is not None else v.dims[k][0]
+        return f"&{name}[{em.index(v, args)}]"
 
     # ---- statements -------------------------------------------------------
     def emit_routine(self, r: Routine):
         em = Emitter(self, r.scope, r)
         ret = _CTYPE[r.kind] if r.kind else "void"
         out = [self.prototype(r) + " {"]
+        ws_lines = []
+        self._restore = ""
         for v in r.scope.vars.values():
             if v.is_arg or v.param is not None or v.kind in ("char", "external"):
                 continue
@@ -1159,6 +1483,11 @@ class Translator:
                 out.append(f"    {ret} f2cu_result;")
                 continue
             ctype = _CTYPE[v.kind]
+            if v.dims is not None and v.data is None and self.workspace is not None:
+                code = self._workspace_array(em, r, v)
+                if code is not None:
+                    ws_lines.append(code)
+                    continue
             if v.dims is not None:
                 size = self._local_size(v, r)
                 if v.data is not None:
@@ -1169,16 +1498,47 @@ class Translator:
                     self.constant_tables.append(
                         f"__constant__ {ctype} {self.prefix}{r.name}_{v.name}[{size}] = {{{vals}}};")
                 else:
-                    out.append(f"    {ctype} {v.name}[{size}];")
+                    out.append(f"    {ctype} {_cid(v.name)}[{size}];")
             elif v.data is not None:
-                out.append(f"    const {ctype} {v.name} = {literal(v.data[0], v.kind)};")
+                out.append(f"    const {ctype} {_cid(v.name)} = {literal(v.data[0], v.kind)};")
             else:
-                out.append(f"    {ctype} {v.name};")
+                out.append(f"    {ctype} {_cid(v.name)};")
+        if ws_lines:
+            # workspace arrays: a stack in the caller-provided buffers, popped
+            # at every return
+            out += ["    double *f2cu_wsd0 = mod.ws_d;", "    int *f2cu_wsi0 = mod.ws_i;"] + ws_lines
+            out.append("    if ((mod.ws_d > mod.ws_d_end || mod.ws_i > mod.ws_i_end) && "
+                       f"mod.f2cu_fatal == 0) mod.f2cu_fatal = -{r.lines[0][0]};  // workspace overrun")
+            self.fatal_used = True
+            self._restore = "mod.ws_d = f2cu_wsd0; mod.ws_i = f2cu_wsi0; "
         out += self._block(em, r, r.body, 1)
+        if self._restore:
+            out.append(f"    {self._restore.strip()}")
         if r.kind is not None:
             out.append("    return f2cu_result;")
         out.append("}")
+        self._restore = ""
         return out
+
+    def _workspace_array(self, em, r, v):
+        """Declare a local array in the workspace stack when it is automatic
+        (extent from a dummy or a module variable) or larger than the
+        threshold; None keeps it in the thread's frame."""
+        try:
+            size = self._local_size(v, r)
+        except NotImplementedError:
+            size = None
+        if size is not None and size <= self.workspace["threshold"]:
+            return None
+        exts = []
+        for lo, hi in v.dims:
+            exts.append(em.emit(("bin", "+", ("bin", "-", hi, lo), ("num", "1")))[0])
+        code = "*".join(f"({e})" for e in exts)
+        buf = {"double": "ws_d", "int": "ws_i"}.get(v.kind)
+        if buf is None:
+            raise NotImplementedError(f"{r.name}: workspace for a {v.kind} array {v.name}")
+        self.workspace_arrays.append((r.name, v.name, v.kind, v.dims))
+        return f"    {_CTYPE[v.kind]} *{_cid(v.name)} = mod.{buf}; mod.{buf} += {code};"
 
     def _block(self, em, r, stmts, depth):
         out = []
@@ -1213,9 +1573,63 @@ class Translator:
         return None
 
     def _statement(self, em, r, stmts, i, depth):
+        """One statement (or construct); a reduction's set-up statements go
+        in a block in front of it."""
+        saved, em.pre = em.pre, []
+        try:
+            consumed, code = self._statement_inner(em, r, stmts, i, depth)
+            if em.pre:
+                ind = "    " * depth
+                code = [f"{ind}{{"] + [f"{ind}    {p}" for p in em.pre] + \
+                       ["    " + c for c in code] + [f"{ind}}}"]
+            return consumed, code
+        finally:
+            em.pre = saved
+
+    def _end_of(self, stmts, i, opener, closer):
+        """Index of the statement closing the construct opened at i."""
+        d = 0
+        for j in range(i + 1, len(stmts)):
+            lowj = stmts[j][2].lower().strip()
+            if re.match(opener, lowj):
+                d += 1
+            elif re.fullmatch(closer, lowj):
+                if d == 0:
+                    return j
+                d -= 1
+        raise SyntaxError(f"unterminated construct at {stmts[i][0]}")
+
+    def _statement_inner(self, em, r, stmts, i, depth):
         n, label, stmt = stmts[i]
         ind = "    " * depth
         low = stmt.lower().strip()
+        if low == "do" or re.match(r"^do\s+while\s*\(", low):
+            j = self._end_of(stmts, i, r"^do(\s+while\s*\(|\s+(?!\d)\w+\s*=|$)", r"end\s*do")
+            if low == "do":
+                head = f"{ind}for (;;) {{ // {n}"
+            else:
+                k = self._close_paren(low, low.index("("))
+                head = f"{ind}while ({em.emit(parse_expr(stmt[low.index('(') + 1:k]))[0]}) {{ // {n}"
+            return j - i + 1, [head] + self._block(em, r, stmts[i + 1:j], depth + 1) + [f"{ind}}}"]
+        if low in ("exit", "cycle"):
+            return 1, [f"{ind}{'break' if low == 'exit' else 'continue'}; // {n}"]
+        m = re.match(r"^select\s*case\s*\((.*)\)$", low)
+        if m:
+            return self._select_case(em, r, stmts, i, depth)
+        if re.match(r"^where\s*\(", low):
+            return self._where(em, r, stmts, i, depth)
+        m = re.match(r"^(allocate|deallocate)\s*\((.*)\)$", low)
+        if m:
+            # fixed bounds (Translator.fixed_dims): allocation always succeeds
+            out = [f"{ind}// {n}: {m.group(1)} (fixed bounds)"]
+            for a in split_top(m.group(2)):
+                km = re.match(r"^stat\s*=\s*(\w+)$", a.strip())
+                if km:
+                    out.append(f"{ind}{self.cname(em.scope.ensure(km.group(1)), r)} = 0;")
+            return 1, out
+        if low == "stop" or re.match(r"^stop\b", low):
+            self.fatal_used = True
+            return 1, [f"{ind}if (mod.f2cu_fatal == 0) mod.f2cu_fatal = {n}; // {n}: stop"]
         m = re.match(r"^do\s+(\d+)\s*,?\s*(\w+)\s*=\s*(.+)$", low) or \
             re.match(r"^do\s+()(\w+)\s*=\s*(.+)$", low)
         if m:
@@ -1229,7 +1643,7 @@ class Translator:
                 nj, lj, sj = stmts[j]
                 lowj = sj.lower().strip()
                 if end_label is None:
-                    if re.match(r"^do\s+(?!\d)\w+\s*=", lowj):
+                    if re.match(r"^do(\s+(?!\d)\w+\s*=|\s+while\s*\(|$)", lowj):
                         d += 1
                     elif re.fullmatch(r"end\s*do", lowj):
                         if d == 0:
@@ -1281,7 +1695,7 @@ class Translator:
         if low in ("continue",):
             return 1, []
         if low == "return":
-            return 1, [f"{ind}return{' f2cu_result' if r.kind else ''}; // {n}"]
+            return 1, [f"{ind}{self._restore}return{' f2cu_result' if r.kind else ''}; // {n}"]
         if re.match(r"^(print|write)\b", low) or re.match(r"^format\s*\(", low):
             return 1, [f"{ind}// {n}: {low.split()[0]} omitted"]
         m = re.match(r"^go\s*to\s+(\d+)$", low)
@@ -1292,7 +1706,7 @@ class Translator:
             name = m.group(1).lower()
             if name in ("wrf_debug", "wrf_message"):
                 return 1, [f"{ind}// {n}: {name} omitted"]
-            if name == "wrf_error_fatal" or name in self.unreachable_calls:
+            if name in ("wrf_error_fatal", "wrf_abort") or name in self.unreachable_calls:
                 # A kernel cannot abort: record the first fatal line; the
                 # launcher raises on it.
                 self.fatal_used = True
@@ -1321,7 +1735,12 @@ class Translator:
             if v.data is not None:
                 raise NotImplementedError(f"{name} is DATA-initialised (implicitly SAVEd) "
                                           f"and assigned at {n}")
-            code, kind = em.emit(parse_expr(rhs))
+            rnode = parse_expr(rhs)
+            if v.dims is not None and (
+                    (lnode[2] is not None and any(_is_range(a) for a in lnode[2])) or
+                    rnode[0] == "ctor" or (lnode[2] is None and em.shape_of(rnode) is not None)):
+                return 1, self._array_assign(em, r, lnode, rnode, v, n, ind)
+            code, kind = em.emit(rnode)
             if v.dims is not None and lnode[2] is None:
                 size = self._size(v, r)
                 return 1, [f"{ind}for (int f2cu_q = 0; f2cu_q < {size}; ++f2cu_q) "
@@ -1331,6 +1750,201 @@ class Translator:
                 target = target[2:-1]
             return 1, [f"{ind}{target} = {self._assign_cast(code, kind, tkind)}; // {n}"]
         raise NotImplementedError(f"statement at {n}: {stmt!r}")
+
+    def _elem_assign(self, em, lnode, rnode):
+        code, kind = em.emit(rnode)
+        target, tkind = em.emit(lnode)
+        return f"{target} = {self._assign_cast(code, kind, tkind)};"
+
+    def _disjoint(self, em, a, b):
+        """Two references to one array touch no common element: some
+        dimension has scalar subscripts a constant nonzero distance apart."""
+        if a is None or b is None:
+            return False
+        # Same section dimensions, scalar subscripts anywhere else: element q
+        # of the left side reads only element q (equal scalars) or an element
+        # outside the left section (different ones), so no temporary is needed.
+        if all((_is_range(x) and x == y) or (not _is_range(x) and not _is_range(y))
+               for x, y in zip(a, b)):
+            return True
+        for x, y in zip(a, b):
+            if _is_range(x) or _is_range(y):
+                continue
+            try:
+                if em.const(("bin", "-", x, y))[0] != 0:
+                    return True
+            except NotConstant:
+                # i - (i-1): fold the difference of two affine subscripts
+                if self._affine_gap(x, y):
+                    return True
+        return False
+
+    @staticmethod
+    def _affine_gap(x, y):
+        def split(node):
+            if node[0] == "bin" and node[1] in "+-" and node[3][0] == "num" and \
+                    re.fullmatch(r"\d+", node[3][1]):
+                return node[2], int(node[3][1]) * (1 if node[1] == "+" else -1)
+            return node, 0
+        (bx, cx), (by, cy) = split(x), split(y)
+        return bx == by and cx != cy
+
+    @staticmethod
+    def _refs_to(node, name):
+        if not isinstance(node, tuple):
+            return []
+        out = [node] if node[0] == "ref" and node[1] == name else []
+        for x in node[1:]:
+            if isinstance(x, tuple):
+                out += Translator._refs_to(x, name)
+            elif isinstance(x, list):
+                for y in x:
+                    out += Translator._refs_to(y, name)
+        return out
+
+    def _array_assign(self, em, r, lnode, rnode, v, n, ind):
+        """A whole-array or section assignment, scalarised over the LEFT
+        side's extents (gfortran's loop bounds, also when a nonconforming
+        right side is longer), first dimension innermost."""
+        exts = em.extents(v, lnode[2])
+        if rnode[0] == "ctor":
+            if len(exts) != 1:
+                raise NotImplementedError(f"array constructor into a rank-{len(exts)} section at {n}")
+            out = []
+            for k, item in enumerate(rnode[1]):
+                em.elem = [str(k)]
+                try:
+                    out.append(f"{ind}{self._elem_assign(em, lnode, item)} // {n}")
+                finally:
+                    em.elem = None
+            return out
+        # gfortran makes a temporary when the right side reads the left
+        # array through a different section; only identical ones are taken.
+        for ref in self._refs_to(rnode, lnode[1]):
+            if ref[2] != lnode[2] and not self._disjoint(em, ref[2], lnode[2]):
+                raise NotImplementedError(f"overlapping array assignment at {n}")
+        rnode = self._hoist_reductions(em, rnode)
+        qs = [self.fresh("f2cu_i") for _ in exts]
+        loops = "".join(f"for (int {qs[d]} = 0; {qs[d]} < {exts[d]}; ++{qs[d]}) "
+                        for d in reversed(range(len(exts))))
+        em.elem = qs
+        try:
+            body = self._elem_assign(em, lnode, rnode)
+        finally:
+            em.elem = None
+        return [f"{ind}{loops}{body} // {n}"]
+
+    def _hoist_reductions(self, em, node):
+        """Evaluate the scalar reductions of an array expression first."""
+        if not isinstance(node, tuple):
+            return node
+        if node[0] == "ref" and node[2] is not None and node[1] in (
+                "sum", "dot_product", "maxval", "count") and em.scope.lookup(node[1]) is None:
+            code, kind = em.reduction(node[1], node[2])
+            return ("cexpr", code, kind)
+        if node[0] == "ref":
+            return ("ref", node[1], None if node[2] is None else
+                    [self._hoist_reductions(em, a) for a in node[2]])
+        return tuple(self._hoist_reductions(em, x) if isinstance(x, tuple) else x for x in node)
+
+    def _select_case(self, em, r, stmts, i, depth):
+        n, _, stmt = stmts[i]
+        ind = "    " * depth
+        low = stmt.lower().strip()
+        sel = em.emit(parse_expr(re.match(r"^select\s*case\s*\((.*)\)$", low).group(1)))
+        j = self._end_of(stmts, i, r"^select\s*case\b", r"end\s*select")
+        cases, d = [], 0
+        for k in range(i + 1, j):
+            lowk = stmts[k][2].lower().strip()
+            if re.match(r"^select\s*case\b", lowk):
+                d += 1
+            elif re.fullmatch(r"end\s*select", lowk):
+                d -= 1
+            if d == 0 and re.match(r"^case\b", lowk):
+                cases.append((k, lowk))
+        if not cases or cases[0][0] != i + 1:
+            raise SyntaxError(f"SELECT CASE at {n}: statements before the first CASE")
+        out = []
+        for c, (k, lowk) in enumerate(cases):
+            end = cases[c + 1][0] if c + 1 < len(cases) else j
+            if re.fullmatch(r"case\s+default", lowk):
+                head = "if (true)" if c == 0 else "} else"
+            else:
+                vals = split_top(re.match(r"^case\s*\((.*)\)$", lowk).group(1))
+                if any(":" in v for v in vals):
+                    raise NotImplementedError(f"CASE range at {stmts[k][0]}")
+                cond = " || ".join(f"({sel[0]} == {em.emit(parse_expr(v))[0]})" for v in vals)
+                head = f"{'if' if c == 0 else '} else if'} ({cond})"
+            out.append(f"{ind}{head} {{ // {stmts[k][0]}")
+            out += self._block(em, r, stmts[k + 1:end], depth + 1)
+        out.append(f"{ind}}}")
+        return j - i + 1, out
+
+    def _where(self, em, r, stmts, i, depth):
+        """WHERE (mask) [assignment] / ELSEWHERE / END WHERE, one fused
+        elemental loop over the mask's extents (the bodies assign
+        element-wise, and none writes an array the mask reads)."""
+        n, _, stmt = stmts[i]
+        ind = "    " * depth
+        low = stmt.lower().strip()
+        k = self._close_paren(low, low.index("("))
+        mask = parse_expr(stmt[low.index("(") + 1:k])
+        rest = stmt[k + 1:].strip()
+        if rest:
+            blocks, j = [[(n, rest)], []], i
+        else:
+            j = self._end_of(stmts, i, r"^where\s*\((?!.*\)\s*\w)", r"end\s*where")
+            blocks, cur = [[], []], 0
+            for kk in range(i + 1, j):
+                lowk = stmts[kk][2].lower().strip()
+                if lowk == "elsewhere":
+                    cur = 1
+                    continue
+                if lowk.startswith("elsewhere"):
+                    raise NotImplementedError(f"masked ELSEWHERE at {stmts[kk][0]}")
+                blocks[cur].append((stmts[kk][0], stmts[kk][2]))
+        exts = em.shape_of(mask)
+        if exts is None:
+            raise SyntaxError(f"WHERE at {n}: scalar mask")
+        mask_names = {x[1] for x in self._walk_refs(mask)}
+        qs = [self.fresh("f2cu_i") for _ in exts]
+        loops = "".join(f"for (int {qs[d]} = 0; {qs[d]} < {exts[d]}; ++{qs[d]}) "
+                        for d in reversed(range(len(exts))))
+        em.elem = qs
+        try:
+            cond = em.emit(mask)[0]
+            bodies = []
+            for blk in blocks:
+                lines = []
+                for nn, text in blk:
+                    lhs, rhs = self._split_assign(text)
+                    lnode = parse_expr(lhs)
+                    if lnode[1] in mask_names and len(blocks[0]) + len(blocks[1]) > 1:
+                        # one assignment alone reads its mask element before
+                        # writing it; with more, a later one could see the change
+                        raise NotImplementedError(f"WHERE at {n} assigns its mask's array {lnode[1]}")
+                    lines.append(f"{ind}        {self._elem_assign(em, lnode, parse_expr(rhs))} // {nn}")
+                bodies.append(lines)
+        finally:
+            em.elem = None
+        out = [f"{ind}{loops}{{ // {n}: where", f"{ind}    if ({cond}) {{"] + bodies[0]
+        if bodies[1]:
+            out += [f"{ind}    }} else {{"] + bodies[1]
+        out += [f"{ind}    }}", f"{ind}}}"]
+        return j - i + 1, out
+
+    @staticmethod
+    def _walk_refs(node):
+        if not isinstance(node, tuple):
+            return []
+        out = [node] if node[0] == "ref" else []
+        for x in node[1:]:
+            if isinstance(x, tuple):
+                out += Translator._walk_refs(x)
+            elif isinstance(x, list):
+                for y in x:
+                    out += Translator._walk_refs(y)
+        return out
 
     def _local_size(self, v, r):
         """A local array's element count; an automatic array (extent from a
