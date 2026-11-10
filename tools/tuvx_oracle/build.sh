@@ -22,8 +22,11 @@ git -C tuv-x checkout --quiet ebec1cb47084fd102e338fb896c6d2b80fbcd292
 test "$(git -C tuv-x rev-parse HEAD)" = ebec1cb47084fd102e338fb896c6d2b80fbcd292
 # The GPL file never takes part: the clean-room module takes its path in the source list.
 cp "$here/musica_assert.F90" tuv-x/src/util/assert.F90
-if grep -rl "General Public License" tuv-x/src tuv-x/include >/dev/null; then
-  echo "a GPL source remains in the TUV-x tree" >&2; exit 1
+# grep exits 0 on a match, 1 on none and 2 on an error; only "none" lets the build go on.
+status=0
+grep -rliE "General Public License|GPL-[0-9]" tuv-x/src tuv-x/include || status=$?
+if [ "$status" -ne 1 ]; then
+  echo "a GPL source remains in the TUV-x tree (listed above), or the scan failed ($status)" >&2; exit 1
 fi
 cp "$here/photolysis.json" tuv-x/woof_photolysis.json
 export PKG_CONFIG_PATH="${CONDA_PREFIX:?run inside the mpas-oracle pixi environment}/lib/pkgconfig"
@@ -37,7 +40,11 @@ gcc_lib=$(dirname "$(/usr/bin/g++ -print-file-name=libstdc++.so)")
 gfortran --sysroot=/ -O2 -ffp-contract=off -I build/include "$here/harness.F90" -o harness \
   build/lib/libtuvx.a build/_deps/yaml-cpp-build/libyaml-cpp.a -L"$CONDA_PREFIX/lib" -lnetcdff -lnetcdf \
   -L"$gcc_lib" -lstdc++ -Wl,-rpath,"$CONDA_PREFIX/lib"
-if objdump -d harness | grep -qE 'vfn?m(add|sub)'; then
-  echo "the oracle contracts multiply-adds; the fixtures assume none" >&2; exit 1
+# The disassembly is written out first: grep -q in a pipeline would leave objdump to a SIGPIPE.
+objdump -d harness > harness.dis
+status=0
+grep -qE 'vfn?m(add|sub)' harness.dis || status=$?
+if [ "$status" -ne 1 ]; then
+  echo "the oracle contracts multiply-adds, or the scan failed ($status); the fixtures assume none" >&2; exit 1
 fi
 echo "$work/harness"

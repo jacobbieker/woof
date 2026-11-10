@@ -60,8 +60,11 @@ def run(harness, work, cases):
                   "air " + text(np.r_[c["air"], c["air_layer"]]),
                   "O2 " + text(np.r_[c["O2"], c["O2_layer"]]),
                   "O3 " + text(np.r_[c["O3"], c["O3_layer"]]), "end"]
-    out = subprocess.run([str(harness)], input="\n".join(lines) + "\n", capture_output=True, text=True,
-                         check=True, cwd=work / "tuv-x").stdout
+    proc = subprocess.run([str(harness)], input="\n".join(lines) + "\n", capture_output=True, text=True,
+                          cwd=work / "tuv-x")
+    if proc.returncode:
+        sys.exit(f"harness failed with status {proc.returncode}:\n{proc.stderr}")
+    out = proc.stdout
     labels, results = {}, []
     for line in out.splitlines():
         w = line.split()

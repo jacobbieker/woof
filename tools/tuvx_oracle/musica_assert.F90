@@ -1,7 +1,7 @@
 ! Copyright (C) 2026 WOOF contributors. Apache-2.0.
 !
-! A clean-room stand-in for TUV-x v0.17.0's src/util/assert.F90, which carries GPL-2.0-or-later
-! portions and is never fetched into a WOOF build (tools/tuvx_oracle/build.sh deletes it).  It is
+! A clean-room stand-in for TUV-x v0.17.0's src/util/assert.F90, which carries copyleft-licensed
+! portions and is never compiled into a WOOF build (tools/tuvx_oracle/build.sh overwrites it).  It is
 ! written from the call sites alone: TUV-x calls assert(code, condition), assert_msg(code, condition,
 ! message), die(code), die_msg(code, message) with character or string_t messages, and
 ! almost_equal(a, b) on reals.  A failed check prints its code and message and stops with status 3.
