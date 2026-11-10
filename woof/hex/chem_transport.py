@@ -154,18 +154,33 @@ def lbc_scalar_names(backend):
 def drive_chemistry_rows(backend, driven, driven_block, scalar_names):
     """The pool's boundary scalars with the chemistry rows a run drives at the rings appended.
 
-    The rows follow the whole driven block in the pool as they follow it in the model's species, so pool
-    index and species index agree (the pool drives a leading run of the scalar array)."""
+    The rows follow the whole driven block in the model's species and follow the stream's species in the pool.
+    The stream may carry only a leading part of the block (rw_mpas_lbc writes qv, qc and qr): the regional
+    runtime then drives the rows as a second run of the boundary kernels on their own sub-array
+    (woof.hex.cuda_regional_forecast_v841.driven_scalar_segments, its indices from
+    :func:`driven_scalar_species`), and the block's undriven species stay with the scheme as they do without
+    chemistry."""
     names = lbc_scalar_names(backend)
     if not names:
         return tuple(driven)
-    following = tuple(scalar_names[len(driven):len(driven) + len(names)])
-    if tuple(driven) != tuple(f"lbc_{name}" for name in driven_block) or following != tuple(
-            name[4:] for name in names):
+    following = tuple(scalar_names[len(driven_block):len(driven_block) + len(names)])
+    stream = tuple(f"lbc_{name}" for name in driven_block)
+    if tuple(driven) != stream[:len(driven)] or following != tuple(name[4:] for name in names):
         raise ValueError(f"chemistry boundary rows {names} must follow the whole driven block "
-                         f"{tuple(driven_block)} in the model species {tuple(scalar_names)}; the boundary "
-                         f"stream drives {tuple(driven)}")
+                         f"{tuple(driven_block)} in the model species {tuple(scalar_names)}, and the boundary "
+                         f"stream must drive a leading part of that block; it drives {tuple(driven)}")
     return (*driven, *names)
+
+
+def driven_scalar_species(driven, scalar_names):
+    """Each pool scalar's index in the model's scalar array, or None when the pool drives the leading run
+    (every run without chemistry boundary rows, whose launches stay as they were)."""
+    index = {name: i for i, name in enumerate(scalar_names)}
+    missing = [name for name in driven if name[4:] not in index]
+    if missing:
+        raise ValueError(f"boundary scalars {missing} name no model species in {tuple(scalar_names)}")
+    species = tuple(index[name[4:]] for name in driven)
+    return None if species == tuple(range(len(species))) else species
 
 
 def scheme_alias_for(backend):
