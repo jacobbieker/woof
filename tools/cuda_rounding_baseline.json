@@ -713,7 +713,7 @@
     "call_sha256": "5004d0454501a98395939411abbfe58e1e9b231abfff8fa83985186eeffc46d8",
     "constructor": "compile_using_nvrtc",
     "factory": "load_module",
-    "factory_sha256": "bbd756f2bd83f9711ba670bdfe296ef129d64941f8082c90e45b5563756ff622",
+    "factory_sha256": "293684e013f28fb82e11174bf09cc4e13883a6cca783d7f088bfc06ab9af2e68",
     "file": "woof/core/kernels/__init__.py",
     "status": "unresolved"
    },
@@ -801,7 +801,7 @@
     "call_sha256": "599e4c79e242352babc83992c23e3fc52b6fb7fe3e6e82ed5fdbed1416b0c87f",
     "constructor": "RawModule",
     "factory": "load_module",
-    "factory_sha256": "bbd756f2bd83f9711ba670bdfe296ef129d64941f8082c90e45b5563756ff622",
+    "factory_sha256": "293684e013f28fb82e11174bf09cc4e13883a6cca783d7f088bfc06ab9af2e68",
     "file": "woof/core/kernels/__init__.py",
     "status": "unresolved"
    },
@@ -2478,6 +2478,10 @@
    {
     "file": "woof/core/kernels/chem_fire.cu",
     "sha256": "fed467fff8deff3590bd2323b9d1eadd4246ec4b5486f97b407cb90053ebb55d"
+   },
+   {
+    "file": "woof/core/kernels/chem_ftuv.cu",
+    "sha256": "c5ce548ac34c9570d7b57a43abd47e8f679910506cfabbb876c610f563867270"
    },
    {
     "file": "woof/core/kernels/chem_inventory.cu",
@@ -4775,7 +4779,7 @@
    },
    {
     "file": "woof/core/kernels/__init__.py",
-    "sha256": "3f3fe11005105bf6b1c43f8f3f8ea7a71ff4cfe8387b45222465cbc9234c991e"
+    "sha256": "96a8645037658fb7e28a08a01203a8409641ef77d0cc376e6b0fb84fbf228e90"
    },
    {
     "file": "woof/core/kernels/no_ftz.py",
@@ -10452,6 +10456,55 @@
     ]
    },
    "source_sha256": "c819210c6794e8cdcfa0306cf60f3df1d8bc42294821f7428a974259ea3d60fe"
+  },
+  "kernels:chem_ftuv": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "b31146b7a20362401a81ef8c58ebdd1c925fc1ae5c0db75e911568f16b45b350",
+    "sites": {
+     "100": 905
+    }
+   },
+   "native_differences": {
+    "sha256": "1272dd1f4b1e43023dc8cffa4804fe8f7c6d04f20bf4ca9e6f5dad820cfc1289",
+    "sites": {
+     "100": 2333
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "--fmad=false",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "--fmad=false",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "d166d48bb75c8b8eb0674c5c0d849c9f9ed4a87f2a6722ec884905861bfc1f24"
   },
   "kernels:chem_inventory": {
    "assessment": "static_diagnostic_only",
