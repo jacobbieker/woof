@@ -9,13 +9,13 @@
     "cupy.ReductionKernel",
     "cupy.cuda.compiler.compile_using_nvrtc"
   ],
-  "site_count": 615,
+  "site_count": 640,
   "site_count_by_kind": {
-    "cupy.ElementwiseKernel": 41,
-    "cupy.RawKernel": 103,
-    "cupy.RawModule": 288,
-    "cupy.ReductionKernel": 14,
-    "cupy.cuda.compiler.compile_using_nvrtc": 169
+    "cupy.ElementwiseKernel": 42,
+    "cupy.RawKernel": 110,
+    "cupy.RawModule": 293,
+    "cupy.ReductionKernel": 16,
+    "cupy.cuda.compiler.compile_using_nvrtc": 179
   },
   "site_count_by_surface": {
     "other": {
@@ -26,16 +26,16 @@
     },
     "package": {
       "cupy.ElementwiseKernel": 30,
-      "cupy.RawKernel": 38,
-      "cupy.RawModule": 97,
+      "cupy.RawKernel": 39,
+      "cupy.RawModule": 99,
       "cupy.ReductionKernel": 9,
-      "cupy.cuda.compiler.compile_using_nvrtc": 98
+      "cupy.cuda.compiler.compile_using_nvrtc": 108
     },
     "tests": {
-      "cupy.ElementwiseKernel": 6,
-      "cupy.RawKernel": 33,
-      "cupy.RawModule": 103,
-      "cupy.ReductionKernel": 2,
+      "cupy.ElementwiseKernel": 7,
+      "cupy.RawKernel": 39,
+      "cupy.RawModule": 106,
+      "cupy.ReductionKernel": 4,
       "cupy.cuda.compiler.compile_using_nvrtc": 35
     },
     "tools": {
@@ -1535,6 +1535,54 @@
       "text": "ptx, _ = compiler.compile_using_nvrtc("
     },
     {
+      "file": "tests/test_elementwise_source_shared.py",
+      "line": 36,
+      "column": 13,
+      "surface": "tests",
+      "constructor": "module.ElementwiseKernel",
+      "constructor_kind": "cupy.ElementwiseKernel",
+      "enclosing": "test_elementwise_text",
+      "takes_caller_options": true,
+      "options_argument_present": false,
+      "options_expression": null,
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "kernel = module.ElementwiseKernel(\"T x, T y\", \"T z\", \"z = x > y ? x : y\", name=\"k gen\","
+    },
+    {
+      "file": "tests/test_elementwise_source_shared.py",
+      "line": 45,
+      "column": 13,
+      "surface": "tests",
+      "constructor": "module.ReductionKernel",
+      "constructor_kind": "cupy.ReductionKernel",
+      "enclosing": "test_reduction_text",
+      "takes_caller_options": true,
+      "options_argument_present": false,
+      "options_expression": null,
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "kernel = module.ReductionKernel(\"T x\", \"T y\", \"x\", \"a + b\", \"y = a\", \"0\", name=\"sum\")"
+    },
+    {
+      "file": "tests/test_elementwise_source_shared.py",
+      "line": 49,
+      "column": 8,
+      "surface": "tests",
+      "constructor": "module.ReductionKernel",
+      "constructor_kind": "cupy.ReductionKernel",
+      "enclosing": "test_reduction_text",
+      "takes_caller_options": true,
+      "options_argument_present": false,
+      "options_expression": null,
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "module.ReductionKernel(\"raw T x\", \"T y\", \"x\", \"a + b\", \"y = a\", \"0\")"
+    },
+    {
       "file": "tests/test_ensemble_batch_kernel.py",
       "line": 1241,
       "column": 20,
@@ -1565,6 +1613,38 @@
       "options_element_expressions": null,
       "options_are_literal": false,
       "text": "add = cp.ElementwiseKernel(\"float32 delta\", \"float32 u\","
+    },
+    {
+      "file": "tests/test_facade_cufft.py",
+      "line": 105,
+      "column": 11,
+      "surface": "tests",
+      "constructor": "cp.RawKernel",
+      "constructor_kind": "cupy.RawKernel",
+      "enclosing": "_kernel",
+      "takes_caller_options": true,
+      "options_argument_present": false,
+      "options_expression": null,
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "return cp.RawKernel(f\"\"\"extern \"C\" __global__ void woof_test_step({ctype}* x, int n) {{"
+    },
+    {
+      "file": "tests/test_facade_graph_capture.py",
+      "line": 40,
+      "column": 13,
+      "surface": "tests",
+      "constructor": "cp.RawModule",
+      "constructor_kind": "cupy.RawModule",
+      "enclosing": "_functions",
+      "takes_caller_options": true,
+      "options_argument_present": false,
+      "options_expression": null,
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "module = cp.RawModule(code=_SOURCE)"
     },
     {
       "file": "tests/test_ferrier_hires_oracle.py",
@@ -1963,6 +2043,78 @@
       "text": "assert nvrtc_ptx_cache.compile_using_nvrtc(\"k2\", (\"--ftz=false\",)) == (\"image\", None)"
     },
     {
+      "file": "tests/test_metal_df64.py",
+      "line": 155,
+      "column": 9,
+      "surface": "tests",
+      "constructor": "cp.RawKernel",
+      "constructor_kind": "cupy.RawKernel",
+      "enclosing": "test_a_translated_unit_in_fast_numerics",
+      "takes_caller_options": true,
+      "options_argument_present": false,
+      "options_expression": null,
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "fn = cp.RawKernel(_KERNEL, \"dbl\")"
+    },
+    {
+      "file": "tests/test_metal_f32s_arithmetic.py",
+      "line": 72,
+      "column": 9,
+      "surface": "tests",
+      "constructor": "cp.RawModule",
+      "constructor_kind": "cupy.RawModule",
+      "enclosing": "test_f32s_arithmetic_is_ieee_binary32_with_signed_zeros",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "(\"--ftz=false\",)",
+      "options": [
+        "--ftz=false"
+      ],
+      "options_element_expressions": [
+        "\"--ftz=false\""
+      ],
+      "options_are_literal": true,
+      "text": "fn = cp.RawModule(code=_OPS, options=(\"--ftz=false\",)).get_function(\"ops\")"
+    },
+    {
+      "file": "tests/test_metal_f32s_arithmetic.py",
+      "line": 99,
+      "column": 9,
+      "surface": "tests",
+      "constructor": "cp.RawModule",
+      "constructor_kind": "cupy.RawModule",
+      "enclosing": "test_exact_zero_sums_keep_ieee_signs",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "(\"--ftz=false\",)",
+      "options": [
+        "--ftz=false"
+      ],
+      "options_element_expressions": [
+        "\"--ftz=false\""
+      ],
+      "options_are_literal": true,
+      "text": "fn = cp.RawModule(code=_OPS, options=(\"--ftz=false\",)).get_function(\"ops\")"
+    },
+    {
+      "file": "tests/test_metal_goto_dispatch.py",
+      "line": 44,
+      "column": 13,
+      "surface": "tests",
+      "constructor": "cp.RawKernel",
+      "constructor_kind": "cupy.RawKernel",
+      "enclosing": "_launch",
+      "takes_caller_options": true,
+      "options_argument_present": false,
+      "options_expression": null,
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "kernel = cp.RawKernel(src, name)"
+    },
+    {
       "file": "tests/test_metal_hex_translation.py",
       "line": 65,
       "column": 4,
@@ -2076,7 +2228,23 @@
     },
     {
       "file": "tests/test_metal_hex_translation.py",
-      "line": 426,
+      "line": 367,
+      "column": 4,
+      "surface": "tests",
+      "constructor": "cp.RawKernel",
+      "constructor_kind": "cupy.RawKernel",
+      "enclosing": "test_a_second_jump_from_inside_the_retry_loop_is_dispatched",
+      "takes_caller_options": true,
+      "options_argument_present": false,
+      "options_expression": null,
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "cp.RawKernel(src, \"entry\")((1,), (8,), (cp.asarray(q), cp.asarray(qs), out, np.int32(q.size)))"
+    },
+    {
+      "file": "tests/test_metal_hex_translation.py",
+      "line": 453,
       "column": 4,
       "surface": "tests",
       "constructor": "cp.RawKernel",
@@ -2092,7 +2260,7 @@
     },
     {
       "file": "tests/test_metal_hex_translation.py",
-      "line": 446,
+      "line": 473,
       "column": 4,
       "surface": "tests",
       "constructor": "cp.RawKernel",
@@ -2169,6 +2337,38 @@
       "options_element_expressions": null,
       "options_are_literal": false,
       "text": "kernel = cp.RawModule(code=_COLUMN_MAJOR_INDEX).get_function(\"column_major_index\")"
+    },
+    {
+      "file": "tests/test_metal_private_array_constant_index.py",
+      "line": 37,
+      "column": 4,
+      "surface": "tests",
+      "constructor": "cp.RawKernel",
+      "constructor_kind": "cupy.RawKernel",
+      "enclosing": "test_a_constant_index_after_runtime_loops_reads_the_element",
+      "takes_caller_options": true,
+      "options_argument_present": false,
+      "options_expression": null,
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "cp.RawKernel(_SOURCE, \"after_loops\")((1,), (64,), (cp.asarray(rho), q, out, np.int32(nz), np.int32(n)))"
+    },
+    {
+      "file": "tests/test_metal_storage_address.py",
+      "line": 36,
+      "column": 13,
+      "surface": "tests",
+      "constructor": "cp.RawKernel",
+      "constructor_kind": "cupy.RawKernel",
+      "enclosing": "test_the_address_survives_in_place_launches_without_evaluating",
+      "takes_caller_options": true,
+      "options_argument_present": false,
+      "options_expression": null,
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "kernel = cp.RawKernel(_ADD, \"add_one\")"
     },
     {
       "file": "tests/test_metal_translation_gaps.py",
@@ -2336,7 +2536,7 @@
     },
     {
       "file": "tests/test_mp8_frozen.py",
-      "line": 3189,
+      "line": 3200,
       "column": 8,
       "surface": "tests",
       "constructor": "cp.RawModule",
@@ -2736,7 +2936,7 @@
     },
     {
       "file": "tests/test_noahmp_oracle.py",
-      "line": 511,
+      "line": 514,
       "column": 17,
       "surface": "tests",
       "constructor": "cp.RawModule",
@@ -2752,7 +2952,7 @@
     },
     {
       "file": "tests/test_noahmp_oracle.py",
-      "line": 622,
+      "line": 625,
       "column": 13,
       "surface": "tests",
       "constructor": "cp.RawModule",
@@ -6050,7 +6250,7 @@
     },
     {
       "file": "tools/vendor_libm64_grade.py",
-      "line": 153,
+      "line": 166,
       "column": 11,
       "surface": "tools",
       "constructor": "cp.RawModule",
@@ -6316,7 +6516,7 @@
     },
     {
       "file": "woof/backend/__init__.py",
-      "line": 237,
+      "line": 243,
       "column": 17,
       "surface": "package",
       "constructor": "self.xp.RawModule",
@@ -6332,7 +6532,7 @@
     },
     {
       "file": "woof/backend/facade/__init__.py",
-      "line": 356,
+      "line": 445,
       "column": 25,
       "surface": "package",
       "constructor": "RawModule",
@@ -6348,7 +6548,7 @@
     },
     {
       "file": "woof/backend/facade/_elementwise.py",
-      "line": 155,
+      "line": 105,
       "column": 38,
       "surface": "package",
       "constructor": "RawModule",
@@ -6364,7 +6564,7 @@
     },
     {
       "file": "woof/backend/facade/_elementwise.py",
-      "line": 269,
+      "line": 164,
       "column": 38,
       "surface": "package",
       "constructor": "RawModule",
@@ -6380,7 +6580,7 @@
     },
     {
       "file": "woof/backend/facade/_ops.py",
-      "line": 317,
+      "line": 325,
       "column": 38,
       "surface": "package",
       "constructor": "ElementwiseKernel",
@@ -6409,6 +6609,26 @@
       "options_element_expressions": null,
       "options_are_literal": false,
       "text": "self._function = RawModule(code=code, options=options).get_function(name)"
+    },
+    {
+      "file": "woof/chem_micm.py",
+      "line": 684,
+      "column": 36,
+      "surface": "package",
+      "constructor": "cp.RawKernel",
+      "constructor_kind": "cupy.RawKernel",
+      "enclosing": "_kernel",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "(\"--fmad=false\",)",
+      "options": [
+        "--fmad=false"
+      ],
+      "options_element_expressions": [
+        "\"--fmad=false\""
+      ],
+      "options_are_literal": true,
+      "text": "kernel = _KERNELS[source] = cp.RawKernel(source, \"micm_ros3\", options=(\"--fmad=false\",))"
     },
     {
       "file": "woof/core/acoustic_fusion.py",
@@ -6774,7 +6994,7 @@
     },
     {
       "file": "woof/core/kernels/__init__.py",
-      "line": 1149,
+      "line": 1167,
       "column": 20,
       "surface": "package",
       "constructor": "compiler.compile_using_nvrtc",
@@ -6790,7 +7010,7 @@
     },
     {
       "file": "woof/core/kernels/__init__.py",
-      "line": 1234,
+      "line": 1252,
       "column": 19,
       "surface": "package",
       "constructor": "compiler.compile_using_nvrtc",
@@ -6806,7 +7026,7 @@
     },
     {
       "file": "woof/core/kernels/__init__.py",
-      "line": 1248,
+      "line": 1266,
       "column": 10,
       "surface": "package",
       "constructor": "cp.RawModule",
@@ -6822,7 +7042,7 @@
     },
     {
       "file": "woof/core/kernels/__init__.py",
-      "line": 1262,
+      "line": 1280,
       "column": 10,
       "surface": "package",
       "constructor": "cp.RawModule",
@@ -6844,7 +7064,7 @@
     },
     {
       "file": "woof/core/kernels/__init__.py",
-      "line": 1290,
+      "line": 1308,
       "column": 10,
       "surface": "package",
       "constructor": "cp.RawModule",
@@ -6866,7 +7086,7 @@
     },
     {
       "file": "woof/core/kernels/__init__.py",
-      "line": 1319,
+      "line": 1337,
       "column": 26,
       "surface": "package",
       "constructor": "nvrtc_ptx_cache.compile_using_nvrtc",
@@ -6882,7 +7102,7 @@
     },
     {
       "file": "woof/core/kernels/__init__.py",
-      "line": 1343,
+      "line": 1361,
       "column": 26,
       "surface": "package",
       "constructor": "nvrtc_ptx_cache.compile_using_nvrtc",
@@ -6898,7 +7118,7 @@
     },
     {
       "file": "woof/core/kernels/__init__.py",
-      "line": 1366,
+      "line": 1384,
       "column": 20,
       "surface": "package",
       "constructor": "compiler.compile_using_nvrtc",
@@ -6914,7 +7134,7 @@
     },
     {
       "file": "woof/core/kernels/__init__.py",
-      "line": 1426,
+      "line": 1444,
       "column": 19,
       "surface": "package",
       "constructor": "compiler.compile_using_nvrtc",
@@ -6930,7 +7150,7 @@
     },
     {
       "file": "woof/core/kernels/__init__.py",
-      "line": 1508,
+      "line": 1527,
       "column": 23,
       "surface": "package",
       "constructor": "compiler.compile_using_nvrtc",
@@ -6946,7 +7166,7 @@
     },
     {
       "file": "woof/core/kernels/__init__.py",
-      "line": 1524,
+      "line": 1543,
       "column": 10,
       "surface": "package",
       "constructor": "cp.RawModule",
@@ -6966,7 +7186,7 @@
     },
     {
       "file": "woof/core/kernels/__init__.py",
-      "line": 1575,
+      "line": 1594,
       "column": 10,
       "surface": "package",
       "constructor": "cp.RawModule",
@@ -6982,7 +7202,7 @@
     },
     {
       "file": "woof/core/kernels/__init__.py",
-      "line": 1597,
+      "line": 1616,
       "column": 10,
       "surface": "package",
       "constructor": "cp.RawModule",
@@ -7004,7 +7224,7 @@
     },
     {
       "file": "woof/core/kernels/__init__.py",
-      "line": 1659,
+      "line": 1678,
       "column": 26,
       "surface": "package",
       "constructor": "nvrtc_ptx_cache.compile_using_nvrtc",
@@ -7020,7 +7240,7 @@
     },
     {
       "file": "woof/core/kernels/__init__.py",
-      "line": 1829,
+      "line": 1848,
       "column": 20,
       "surface": "package",
       "constructor": "compiler.compile_using_nvrtc",
@@ -7200,7 +7420,7 @@
     },
     {
       "file": "woof/core/mynn471_gpu.py",
-      "line": 101,
+      "line": 193,
       "column": 18,
       "surface": "package",
       "constructor": "compile_using_nvrtc",
@@ -7216,7 +7436,23 @@
     },
     {
       "file": "woof/core/mynn471_gpu.py",
-      "line": 178,
+      "line": 205,
+      "column": 15,
+      "surface": "package",
+      "constructor": "cp.RawModule",
+      "constructor_kind": "cupy.RawModule",
+      "enclosing": "image",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "options",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "module=cp.RawModule(code=metal_text(text),options=options)"
+    },
+    {
+      "file": "woof/core/mynn471_gpu.py",
+      "line": 279,
       "column": 11,
       "surface": "package",
       "constructor": "cp.RawKernel",
@@ -7400,7 +7636,7 @@
     },
     {
       "file": "woof/core/noahmp_runtime.py",
-      "line": 842,
+      "line": 849,
       "column": 42,
       "surface": "package",
       "constructor": "cp.ReductionKernel",
@@ -7420,7 +7656,7 @@
     },
     {
       "file": "woof/core/noahmp_runtime.py",
-      "line": 850,
+      "line": 857,
       "column": 35,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
@@ -9096,7 +9332,7 @@
     },
     {
       "file": "woof/hex/cuda_transport_v841.py",
-      "line": 1747,
+      "line": 1766,
       "column": 27,
       "surface": "package",
       "constructor": "cp.ReductionKernel",
@@ -9112,7 +9348,7 @@
     },
     {
       "file": "woof/hex/cuda_transport_v841.py",
-      "line": 1753,
+      "line": 1772,
       "column": 30,
       "surface": "package",
       "constructor": "cp.ReductionKernel",
@@ -9449,6 +9685,166 @@
       "options_element_expressions": null,
       "options_are_literal": false,
       "text": "module = cp.RawModule(code=source, options=PROFILE_OPTIONS)"
+    },
+    {
+      "file": "woof/hex/mpas_ice/advection_v842.py",
+      "line": 57,
+      "column": 15,
+      "surface": "package",
+      "constructor": "compile_using_nvrtc",
+      "constructor_kind": "cupy.cuda.compiler.compile_using_nvrtc",
+      "enclosing": "_module_on",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "options",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "image, _ = compile_using_nvrtc(module_source(), options, None, \"li_advection_v842.cu\")"
+    },
+    {
+      "file": "woof/hex/mpas_ice/geometry_v842.py",
+      "line": 49,
+      "column": 15,
+      "surface": "package",
+      "constructor": "compile_using_nvrtc",
+      "constructor_kind": "cupy.cuda.compiler.compile_using_nvrtc",
+      "enclosing": "_module_on",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "options",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "image, _ = compile_using_nvrtc(module_source(), options, None, \"li_geometry_v842.cu\")"
+    },
+    {
+      "file": "woof/hex/mpas_ice/sia_v842.py",
+      "line": 91,
+      "column": 15,
+      "surface": "package",
+      "constructor": "compile_using_nvrtc",
+      "constructor_kind": "cupy.cuda.compiler.compile_using_nvrtc",
+      "enclosing": "_module_on",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "options",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "image, _ = compile_using_nvrtc(module_source(), options, None, \"li_sia_v842.cu\")"
+    },
+    {
+      "file": "woof/hex/mpas_ice/thermal_init_v842.py",
+      "line": 59,
+      "column": 15,
+      "surface": "package",
+      "constructor": "compile_using_nvrtc",
+      "constructor_kind": "cupy.cuda.compiler.compile_using_nvrtc",
+      "enclosing": "_module_on",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "options",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "image, _ = compile_using_nvrtc(module_source(), options, None, \"li_thermal_init_v842.cu\")"
+    },
+    {
+      "file": "woof/hex/mpas_ocean/forcing_v842.py",
+      "line": 103,
+      "column": 15,
+      "surface": "package",
+      "constructor": "compile_using_nvrtc",
+      "constructor_kind": "cupy.cuda.compiler.compile_using_nvrtc",
+      "enclosing": "_module_on",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "options",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "image, _ = compile_using_nvrtc(module_source(precision), options, None, f\"ocn_forcing_v842_{precision}.cu\")"
+    },
+    {
+      "file": "woof/hex/mpas_ocean/pgrad_hmix_v842.py",
+      "line": 109,
+      "column": 15,
+      "surface": "package",
+      "constructor": "compile_using_nvrtc",
+      "constructor_kind": "cupy.cuda.compiler.compile_using_nvrtc",
+      "enclosing": "_module_on",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "options",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "image, _ = compile_using_nvrtc(module_source(precision), options, None,"
+    },
+    {
+      "file": "woof/hex/mpas_ocean/tend_v842.py",
+      "line": 83,
+      "column": 15,
+      "surface": "package",
+      "constructor": "compile_using_nvrtc",
+      "constructor_kind": "cupy.cuda.compiler.compile_using_nvrtc",
+      "enclosing": "_module_on",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "options",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "image, _ = compile_using_nvrtc(module_source(precision), options, None, f\"ocn_tend_v842_{precision}.cu\")"
+    },
+    {
+      "file": "woof/hex/mpas_seaice/evp_v842.py",
+      "line": 89,
+      "column": 15,
+      "surface": "package",
+      "constructor": "compile_using_nvrtc",
+      "constructor_kind": "cupy.cuda.compiler.compile_using_nvrtc",
+      "enclosing": "_module_on",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "options",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "image, _ = compile_using_nvrtc(module_source(precision), options, None,"
+    },
+    {
+      "file": "woof/hex/mpas_seaice/presubcycle_v842.py",
+      "line": 78,
+      "column": 15,
+      "surface": "package",
+      "constructor": "compile_using_nvrtc",
+      "constructor_kind": "cupy.cuda.compiler.compile_using_nvrtc",
+      "enclosing": "_module_on",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "options",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "image, _ = compile_using_nvrtc(module_source(precision), options, None,"
+    },
+    {
+      "file": "woof/hex/mpas_seaice/velocity_v842.py",
+      "line": 76,
+      "column": 15,
+      "surface": "package",
+      "constructor": "compile_using_nvrtc",
+      "constructor_kind": "cupy.cuda.compiler.compile_using_nvrtc",
+      "enclosing": "_module_on",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "options",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "image, _ = compile_using_nvrtc(module_source(precision), options, None,"
     },
     {
       "file": "woof/hex/mpasdiag/cloud_v842.py",
@@ -10645,6 +11041,22 @@
       ],
       "options_are_literal": false,
       "text": "self.module = cp.RawModule(code=source, options=(\"--std=c++17\", f\"-DWAVES_DIRECTIONS={self.nd}\"))"
+    },
+    {
+      "file": "woof/ocean/wrf_cpl.py",
+      "line": 71,
+      "column": 13,
+      "surface": "package",
+      "constructor": "cp.RawModule",
+      "constructor_kind": "cupy.RawModule",
+      "enclosing": "_module",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "options",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "module = cp.RawModule(code=source, options=options)"
     },
     {
       "file": "woof/spectral_nudging/forecast.py",
