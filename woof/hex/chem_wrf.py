@@ -1004,11 +1004,21 @@ class BoundaryReader:
 def install_boundary_reader(runtime, driver, *, latitude, longitude, cache_root=None, backend=None):
     """Hand the regional driving pool the rows' boundary fields (``have_bcs_chem = 1``)."""
     from .lbc import LbcPool
+    from .partition_regional_v841 import PartitionLbcPoolV841
     regional = getattr(driver, "regional_v841", None)
     pool = None if regional is None else getattr(regional.driving, "_pool", None)
+    if isinstance(pool, PartitionLbcPoolV841) and isinstance(pool.pool, LbcPool):
+        # A partitioned rank: its pool reads the rank's own rows (cell_l2g order) through the shared reader,
+        # and the rank's local mesh holds its cell centres in that same order (partition_local_mesh_v841),
+        # so the rows remap onto the rank's cells exactly as the single-card pool's do onto the mesh's.
+        cells = int(np.asarray(pool.layout.cell_l2g).size)
+        if np.asarray(latitude).size < cells:
+            raise ValueError(f"the partition rank reads {cells} boundary cells and its mesh carries "
+                             f"{np.asarray(latitude).size} cell centres")
+        pool = pool.pool
     if not isinstance(pool, LbcPool):
-        raise ValueError("wrf_chem have_bcs_chem needs the single-card regional driving pool; a partitioned "
-                         "pool reads each rank's rows through its own shared reader")
+        raise ValueError("wrf_chem have_bcs_chem needs the regional driving pool's reader (a single-card pool, or "
+                         "a partitioned pool over one); this pool cuts its rows after another reader")
     missing = [name for name in lbc_scalar_names(runtime.raw) if name not in pool.scalar_names]
     if missing:
         raise ValueError(f"the regional driving pool does not carry {missing}: the run's boundary scalars were "
