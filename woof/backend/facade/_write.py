@@ -93,7 +93,7 @@ def write(view, values) -> None:
     """Store ``values`` (an mx.array in the view's storage representation,
     broadcastable to its shape) into ``view`` in place."""
     import mlx.core as mx
-    from woof.backend.facade._array import flush_pending, order_launch
+    from woof.backend.facade._array import flush_launched, flush_pending, order_launch
     from woof.backend.metal import ext
     item = view.itemsize
     if item not in (1, 2, 4, 8):
@@ -126,3 +126,7 @@ def write(view, values) -> None:
                                (_TPB, 1, 1), [st.arr, src], [0, 0], [True, False], [0, 1], -1,
                                [blob], [2], 0, 0)
     st.rebind_written(out)
+    # ``values`` is an MLX expression that may read other storages, which a
+    # later in-place launch could overwrite before a batched copy ran: the
+    # copy encodes now.
+    flush_launched()
