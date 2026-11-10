@@ -44,7 +44,8 @@ def test_case_inputs_are_the_recorded_bytes():
     for line in (ao.FIXTURE_DIR / "inputs.sha256").read_text(encoding="utf-8").splitlines():
         digest, name = line.split()
         recorded[name] = digest
-    assert recorded == {case["name"]: ao.input_digest(case) for case in ao.cases()}
+    assert recorded == {**{case["name"]: ao.input_digest(case) for case in ao.cases()},
+                        **{case["name"] + "/r8": ao.input_digest(case) for case in ao.cases("r8")}}
 
 
 def test_fixture_covers_the_branches():
@@ -74,13 +75,15 @@ def test_fixture_covers_the_branches():
 
 
 @requires_gpu
-def test_gpu_matches_the_v842_oracle_word_for_word():
-    report = ao.measure()
+@pytest.mark.parametrize("precision", ["r4", "r8"])
+def test_gpu_matches_the_v842_oracle_word_for_word(precision):
+    report = ao.measure(precision=precision)
     bad = {case: {k: v for k, v in fields.items() if v} for case, fields in report.items()}
     assert not any(bad.values()), bad
 
 
 @requires_gpu
+@pytest.mark.parametrize("precision", ["r4", "r8"])
 @pytest.mark.parametrize("original, mutated, field, case", [
     # the edge flux's velocity, length and thickness multiplied in another order
     ("const rk flux = M(M(vel, dvEdge[iEdge]), layerThicknessEdge[iEdge * nLevels + k]);",
@@ -93,24 +96,26 @@ def test_gpu_matches_the_v842_oracle_word_for_word():
     ("const rk accum = D(M(sfc, dt), rhoi);", "const rk accum = M(sfc, D(dt, rhoi));", "layerThickness",
      "fo_enthalpy"),
     # the basal accumulation's likewise
-    ("const rk accum = D(M(basal, dt), rhoi);", "const rk accum = M(basal, D(dt, rhoi));", "layerThickness",
-     "fo_temperature"),
+    # (at RKIND 8 the difference reaches the remapped temperature, not the layer thicknesses)
+    ("const rk accum = D(M(basal, dt), rhoi);", "const rk accum = M(basal, D(dt, rhoi));",
+     ("layerThickness", "temperature"), "fo_temperature"),
     # the remapped tracer taken through a reciprocal
     ("t[k] = D(hTsum[k], h[k]);", "t[k] = M(hTsum[k], D((rk)1.0, h[k]));", "temperature", "fo_temperature"),
     # the new ice's enthalpy as T * (rhoi * cp)
     ("surfaceTracers[iCell] = M(M(surface, rhoi), LI_CP_ICE);",
      "surfaceTracers[iCell] = M(surface, M(rhoi, LI_CP_ICE));", "enthalpy", "fo_enthalpy"),
 ])
-def test_a_mutated_evaluation_order_is_caught(monkeypatch, original, mutated, field, case):
+def test_a_mutated_evaluation_order_is_caught(monkeypatch, precision, original, mutated, field, case):
     from woof.hex.mpas_ice import advection_v842
-    source = advection_v842.module_source()
-    assert source.count(original) == 1
-    monkeypatch.setattr(advection_v842, "module_source", lambda: source.replace(original, mutated))
+    sources = {p: advection_v842.module_source(p) for p in ("r4", "r8")}
+    assert sources[precision].count(original) == 1
+    monkeypatch.setattr(advection_v842, "module_source", lambda p="r4": sources[p].replace(original, mutated))
     advection_v842._module_on.cache_clear()
     try:
-        row = next(c for c in ao.cases() if c["name"] == case)
+        row = next(c for c in ao.cases(precision) if c["name"] == case)
         got = ao.run_gpu(row)
-        assert ao.word_mismatches(got[field], ao.load_fixture()[case][field]) > 0
+        want = ao.load_fixture(precision)[case]
+        assert sum(ao.word_mismatches(got[f], want[f]) for f in ((field,) if isinstance(field, str) else field)) > 0
     finally:
         advection_v842._module_on.cache_clear()
 
@@ -141,8 +146,9 @@ def test_the_oracle_rebuilt_here_writes_the_fixture(tmp_path):
                    check=True, env={**os.environ, "GFORTRAN": gfortran})
     subprocess.run([sys.executable, str(ROOT / "tools" / "mali_oracle" / "make_advection_fixture.py"),
                     str(tmp_path / "build"), "--out", str(tmp_path / "fixture")], check=True)
-    fresh = np.load(tmp_path / "fixture" / "oracle-r4.npz")
-    pinned = np.load(ao.FIXTURE_DIR / "oracle-r4.npz")
-    assert sorted(fresh.files) == sorted(pinned.files)
-    for key in pinned.files:
-        assert ao.word_mismatches(fresh[key], pinned[key]) == 0, key
+    for precision in ("r4", "r8"):
+        fresh = np.load(tmp_path / "fixture" / f"oracle-{precision}.npz")
+        pinned = np.load(ao.FIXTURE_DIR / f"oracle-{precision}.npz")
+        assert sorted(fresh.files) == sorted(pinned.files)
+        for key in pinned.files:
+            assert ao.word_mismatches(fresh[key], pinned[key]) == 0, key

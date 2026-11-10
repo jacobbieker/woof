@@ -9,13 +9,13 @@
     "cupy.ReductionKernel",
     "cupy.cuda.compiler.compile_using_nvrtc"
   ],
-  "site_count": 640,
+  "site_count": 641,
   "site_count_by_kind": {
     "cupy.ElementwiseKernel": 42,
     "cupy.RawKernel": 110,
     "cupy.RawModule": 293,
     "cupy.ReductionKernel": 16,
-    "cupy.cuda.compiler.compile_using_nvrtc": 179
+    "cupy.cuda.compiler.compile_using_nvrtc": 180
   },
   "site_count_by_surface": {
     "other": {
@@ -29,7 +29,7 @@
       "cupy.RawKernel": 39,
       "cupy.RawModule": 99,
       "cupy.ReductionKernel": 9,
-      "cupy.cuda.compiler.compile_using_nvrtc": 108
+      "cupy.cuda.compiler.compile_using_nvrtc": 109
     },
     "tests": {
       "cupy.ElementwiseKernel": 7,
@@ -9688,7 +9688,7 @@
     },
     {
       "file": "woof/hex/mpas_ice/advection_v842.py",
-      "line": 57,
+      "line": 60,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",
@@ -9700,11 +9700,11 @@
       "options": null,
       "options_element_expressions": null,
       "options_are_literal": false,
-      "text": "image, _ = compile_using_nvrtc(module_source(), options, None, \"li_advection_v842.cu\")"
+      "text": "image, _ = compile_using_nvrtc(module_source(precision), options, None, f\"li_advection_v842_{precision}.cu\")"
     },
     {
       "file": "woof/hex/mpas_ice/geometry_v842.py",
-      "line": 49,
+      "line": 54,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",
@@ -9716,11 +9716,11 @@
       "options": null,
       "options_element_expressions": null,
       "options_are_literal": false,
-      "text": "image, _ = compile_using_nvrtc(module_source(), options, None, \"li_geometry_v842.cu\")"
+      "text": "image, _ = compile_using_nvrtc(module_source(precision), options, None, f\"li_geometry_v842_{precision}.cu\")"
     },
     {
       "file": "woof/hex/mpas_ice/sia_v842.py",
-      "line": 91,
+      "line": 97,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",
@@ -9732,11 +9732,11 @@
       "options": null,
       "options_element_expressions": null,
       "options_are_literal": false,
-      "text": "image, _ = compile_using_nvrtc(module_source(), options, None, \"li_sia_v842.cu\")"
+      "text": "image, _ = compile_using_nvrtc(module_source(precision), options, None, f\"li_sia_v842_{precision}.cu\")"
     },
     {
       "file": "woof/hex/mpas_ice/thermal_init_v842.py",
-      "line": 59,
+      "line": 64,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",
@@ -9748,7 +9748,23 @@
       "options": null,
       "options_element_expressions": null,
       "options_are_literal": false,
-      "text": "image, _ = compile_using_nvrtc(module_source(), options, None, \"li_thermal_init_v842.cu\")"
+      "text": "image, _ = compile_using_nvrtc(module_source(precision), options, None, f\"li_thermal_init_v842_{precision}.cu\")"
+    },
+    {
+      "file": "woof/hex/mpas_ice/thermal_solver_v842.py",
+      "line": 86,
+      "column": 15,
+      "surface": "package",
+      "constructor": "compile_using_nvrtc",
+      "constructor_kind": "cupy.cuda.compiler.compile_using_nvrtc",
+      "enclosing": "_module_on",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "options",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "image, _ = compile_using_nvrtc(module_source(precision), options, None, f\"li_thermal_solver_v842_{precision}.cu\")"
     },
     {
       "file": "woof/hex/mpas_ocean/forcing_v842.py",
