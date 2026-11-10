@@ -1,0 +1,11 @@
+tools/tuvx_oracle/photolysis.json is examples/tuv_5_4.json of NCAR TUV-x v0.17.0
+(https://github.com/NCAR/tuv-x, commit ebec1cb47084fd102e338fb896c6d2b80fbcd292), cut to four
+photolysis reactions with the host-supplied height grid and profiles removed:
+Copyright (C) 2020-2026 University Corporation for Atmospheric Research.
+Licensed under the Apache License, Version 2.0 (the same licence as this repository, LICENSE).
+
+tests/data/tuvx_oracle/fixtures.json holds output words of that TUV-x build (tools/tuvx_oracle/build.sh).
+
+TUV-x's src/util/assert.F90 carries portions under the GNU General Public License version 2 or later.
+WOOF neither copies nor builds it: tools/tuvx_oracle/musica_assert.F90 is a clean-room module written
+from TUV-x's call sites, and build.sh puts it in that file's place before compiling.
