@@ -8,7 +8,12 @@ push queued two identical runs, and their macOS jobs held up
 `publish-metal.yml`'s macOS build.
 
 The macOS jobs (native, the ten mlx legs, the metal probe and the Metal
-gates) run on every push to `main` and every manual run. On a pull request
+gates) run nightly on `main` (06:17 UTC) and on every manual run unless its
+`macos` input is off. A push to `main` runs the Linux jobs only: main takes
+many merges a day, each merge's release builds on macOS, and a push run's mlx
+legs queued for a day or more, holding main's concurrency group so that no
+later push run started. The event name is part of the concurrency group, so
+the nightly run never blocks push runs. On a pull request
 they run only when it changes `woof/backend/`, `tools/metal_*`,
 `tools/f64_soft*`, `tests/test_metal_*`, `pixi.toml`/`pixi.lock` or
 `.github/ci/`, or carries the `macos-ci` label (adding the label starts a
