@@ -12,12 +12,13 @@ remap and ``tracer_finish``. The masks are
 conversions :mod:`woof.hex.mpas_ice.thermal_init_v842`'s.
 
 Every word is held to those routines compiled verbatim with gfortran
-``-O0 -ffp-contract=off`` at MALI's default RKIND 4
+``-O0 -ffp-contract=off`` at RKIND 4 (MALI's default) and RKIND 8
 (``tools/mali_oracle/run_advection.F90``, ``tests/test_mali_advection_parity.py``).
 
 The model's scratch arrays (the old layer thicknesses and tracers and the new
 ice's tracers) are private here: nothing the routine returns depends on
-them. Arrays are device float32 with int32 masks and 1-based connectivity, in
+them. Arrays are device float32 (RKIND 4) or float64 (RKIND 8) with int32
+masks and 1-based connectivity, in
 the Fortran layout: ``a(nVertLevels, nCells)`` is C-order ``(nCells,
 nVertLevels)``.
 """
@@ -30,7 +31,7 @@ import numpy as np
 
 from woof.hex import numerics as _hex_numerics
 
-from . import geometry_v842, thermal_init_v842
+from . import geometry_v842, rkind, thermal_init_v842
 
 SOURCE_FILES = (
     "src/core_landice/mode_forward/mpas_li_advection.F:74-517,612-1378,1522-1671",
@@ -45,25 +46,28 @@ MAX_LEVELS = 128
 _BLOCK = 128
 
 
-def module_source() -> str:
-    return files("woof.hex.mpas_ice").joinpath("advection_v842.cu").read_text(encoding="utf-8")
+def module_source(precision: str = "r4") -> str:
+    rkind.require(precision)
+    body = files("woof.hex.mpas_ice").joinpath("advection_v842.cu").read_text(encoding="utf-8")
+    return (rkind.r8_prelude() if precision == "r8" else "") + body
 
 
 @lru_cache(maxsize=None)
-def _module_on(device: int, options: tuple[str, ...]):
+def _module_on(device: int, precision: str, options: tuple[str, ...]):
     import cupy as cp
     from woof.nvrtc_ptx_cache import compile_using_nvrtc
 
-    image, _ = compile_using_nvrtc(module_source(), options, None, "li_advection_v842.cu")
+    image, _ = compile_using_nvrtc(module_source(precision), options, None, f"li_advection_v842_{precision}.cu")
     with cp.cuda.Device(device):
         module = cp.cuda.function.Module()
         module.load(image.encode() if isinstance(image, str) else image)
     return module
 
 
-def _function(name: str):
+def _function(precision: str, name: str):
     import cupy as cp
-    return _module_on(cp.cuda.Device().id, _hex_numerics.options(COMPILE_OPTIONS, keep_ftz=True)).get_function(name)
+    return _module_on(cp.cuda.Device().id, precision,
+                      _hex_numerics.options(COMPILE_OPTIONS, keep_ftz=True)).get_function(name)
 
 
 def _check(name: str, array, dtype, shape) -> None:
@@ -110,7 +114,9 @@ def advect_thickness_tracers(*, mesh: dict, geometry: dict, velocity: dict, ther
     ncs = int(m["nCellsSolve"])
     if not 0 <= ncs <= n_cells:
         raise ValueError("nCellsSolve must lie within nCells")
-    f32, i32 = cp.float32, cp.int32
+    precision = rkind.precision_of(g["layerThickness"])
+    real = rkind.PRECISIONS[precision]
+    f32, i32 = real, cp.int32
     for name in ("thickness", "bedTopography", "sfcMassBal", "basalMassBal", "groundedBasalMassBal",
                  "floatingBasalMassBal", "dynamicThickening"):
         _check(name, g[name], f32, (n_cells,))
@@ -129,12 +135,12 @@ def advect_thickness_tracers(*, mesh: dict, geometry: dict, velocity: dict, ther
     block = (_BLOCK,)
     cells = _grid(n_cells)
     nc, nl = np.int32(n_cells), np.int32(n_levels)
-    _function("li_calculate_layer_thickness_v842")(cells, block, (
+    _function(precision, "li_calculate_layer_thickness_v842")(cells, block, (
         g["layerThickness"], g["thickness"], m["layerThicknessFractions"], nc, nl))
     if config_thickness_advection == "none":
         return
 
-    rhoi, dt32 = np.float32(config_ice_density), np.float32(dt)
+    rhoi, dtr = real(config_ice_density), real(dt)
     mode = THERMAL_SOLVERS[config_thermal_solver] if advect_tracers else 0
     if mode == 2:
         # li_temperature_to_enthalpy over the owned cells, into the thermal pool
@@ -144,43 +150,43 @@ def advect_thickness_tracers(*, mesh: dict, geometry: dict, velocity: dict, ther
     tracers = cp.empty((n_cells, n_levels), f32)
     surface_tracers = cp.zeros(n_cells, f32)
     basal_tracers = cp.zeros(n_cells, f32)
-    _function("li_tracer_setup_v842")(cells, block, (
+    _function(precision, "li_tracer_setup_v842")(cells, block, (
         tracers, surface_tracers, basal_tracers, t["temperature"], t["enthalpy"], t["surfaceAirTemperature"],
         t["basalTemperature"], rhoi, np.int32(mode), nc, nl))
     thickness_old = cp.empty_like(g["layerThickness"])
     tracers_old = cp.empty_like(tracers)
     words = np.int32(n_cells * n_levels)
-    _function("li_copy_v842")(_grid(int(words)), block, (thickness_old, g["layerThickness"], words))
-    _function("li_copy_v842")(_grid(int(words)), block, (tracers_old, tracers, words))
-    _function("li_advect_upwind_v842")(_grid(ncs), block, (
+    _function(precision, "li_copy_v842")(_grid(int(words)), block, (thickness_old, g["layerThickness"], words))
+    _function(precision, "li_copy_v842")(_grid(int(words)), block, (tracers_old, tracers, words))
+    _function(precision, "li_advect_upwind_v842")(_grid(ncs), block, (
         g["layerThickness"], tracers, thickness_old, tracers_old, velocity["layerNormalVelocity"],
         g["layerThicknessEdge"], m["dvEdge"], m["areaCell"], m["nEdgesOnCell"], m["edgesOnCell"],
-        m["edgeSignOnCell"], m["cellsOnEdge"], dt32, np.int32(ncs), nl, np.int32(max_edges)))
-    _function("li_column_thickness_v842")(cells, block, (
-        g["thickness"], g["dynamicThickening"], g["layerThickness"], dt32, np.int32(1), nc, nl))
+        m["edgeSignOnCell"], m["cellsOnEdge"], dtr, np.int32(ncs), nl, np.int32(max_edges)))
+    _function(precision, "li_column_thickness_v842")(cells, block, (
+        g["thickness"], g["dynamicThickening"], g["layerThickness"], dtr, np.int32(1), nc, nl))
     masks = {"config_ice_density": config_ice_density, "config_ocean_density": config_ocean_density,
              "config_sea_level": config_sea_level, "config_dynamic_thickness": config_dynamic_thickness,
              "config_velocity_solver": config_velocity_solver}
     geometry_v842.calculate_mask(mesh=m, geometry=g, **masks)
-    _function("li_mass_balance_masks_v842")(cells, block, (
+    _function(precision, "li_mass_balance_masks_v842")(cells, block, (
         g["sfcMassBal"], g["basalMassBal"], g["bedTopography"], g["groundedBasalMassBal"],
-        g["floatingBasalMassBal"], g["cellMask"], np.float32(config_sea_level), nc))
-    _function("li_apply_mass_balance_v842")(cells, block, (
+        g["floatingBasalMassBal"], g["cellMask"], real(config_sea_level), nc))
+    _function(precision, "li_apply_mass_balance_v842")(cells, block, (
         g["layerThickness"], tracers, g["sfcMassBal"], g["basalMassBal"], surface_tracers, basal_tracers,
-        dt32, rhoi, nc, nl))
-    _function("li_column_thickness_v842")(cells, block, (
-        g["thickness"], g["dynamicThickening"], g["layerThickness"], dt32, np.int32(0), nc, nl))
+        dtr, rhoi, nc, nl))
+    _function(precision, "li_column_thickness_v842")(cells, block, (
+        g["thickness"], g["dynamicThickening"], g["layerThickness"], dtr, np.int32(0), nc, nl))
     geometry_v842.calculate_mask(mesh=m, geometry=g, **masks)
-    _function("li_vertical_remap_v842")(cells, block, (
+    _function(precision, "li_vertical_remap_v842")(cells, block, (
         g["layerThickness"], tracers, g["thickness"], m["layerThicknessFractions"], m["layerInterfaceSigma"],
         nc, nl))
     if not advect_tracers:
         return
     # tracer_finish
     if config_thermal_solver == "temperature":
-        _function("li_copy_v842")(_grid(int(words)), block, (t["temperature"], tracers, words))
+        _function(precision, "li_copy_v842")(_grid(int(words)), block, (t["temperature"], tracers, words))
     elif config_thermal_solver == "enthalpy":
-        _function("li_copy_v842")(_grid(int(words)), block, (t["enthalpy"], tracers, words))
+        _function(precision, "li_copy_v842")(_grid(int(words)), block, (t["enthalpy"], tracers, words))
         # li_enthalpy_to_temperature without the surface and basal arguments:
         # the column part does not read them, so they are scratch here
         scratch = [cp.zeros(ncs, f32) for _ in range(4)]

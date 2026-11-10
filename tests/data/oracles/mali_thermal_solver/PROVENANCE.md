@@ -56,12 +56,26 @@ solve with the input's dissipation. The dissipation's zero row for an edge
 without two cells is not reached: `li_calculate_mask` reads both cells of
 every edge, so the meshes keep them inside.
 
+## RKIND 8
+
+`oracle-r8.npz` holds the same routines compiled without `-DSINGLE_PRECISION`
+(RKIND = 8, the same flags otherwise, no FMA instruction), on pb, 2026-11-10.
+Each case is drawn from the same seed in float64 instead of rounded to
+float32. Its input digests are the `<case>/r8` lines of `inputs.sha256`.
+The double `pow` is glibc 2.44's; the port's is `glibc_pow`
+(`woof/core/kernels/glibc_flt64.cuh`, MIT). The port refuses 'mismip'
+(binary64 `tanh`) and 'seroussi' (binary64 `sin`) at RKIND 8, so
+`enthalpy_sia_mismip` runs 'constant' as `enthalpy_sia_constant` and
+`temperature_none_seroussi` runs 'none' as `temperature_none_none`.
+The GPU port runs the `MPAS_RKIND8` unit and must match every word.
+
 ## Files
 
 | file | content |
 |---|---|
 | `oracle-r4.npz` | per case, `<case>/<field>`: `errInit`, `errFloat`, `errSolver`, `logErrors` (all 0), `cellMask`, `vertexMask`, `edgeMask`, `temperature`, `waterfrac`, `enthalpy`, `surfaceTemperature`, `basalTemperature`, `surfaceAirTemperature`, `surfaceConductiveFlux`, `basalConductiveFlux`, `heatDissipation`, `basalFrictionFlux`, `groundedBasalMassBal`, `floatingBasalMassBal` |
-| `inputs.sha256` | the sha256 of each case's input stream (`woof.verify.mali_thermal_solver_oracle.input_bytes`) |
+| `oracle-r8.npz` | the same fields at RKIND 8 |
+| `inputs.sha256` | the sha256 of each case's input stream, at each precision (`woof.verify.mali_thermal_solver_oracle.input_bytes`) |
 
 ## Grading
 

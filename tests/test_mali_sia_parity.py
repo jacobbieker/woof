@@ -39,7 +39,8 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_case_inputs_are_the_recorded_bytes():
     recorded = dict(reversed(line.split()) for line in
                     (mo.FIXTURE_DIR / "inputs.sha256").read_text(encoding="utf-8").splitlines())
-    assert recorded == {case["name"]: mo.input_digest(case) for case in mo.cases()}
+    assert recorded == {**{case["name"]: mo.input_digest(case) for case in mo.cases()},
+                        **{case["name"] + "/r8": mo.input_digest(case) for case in mo.cases("r8")}}
 
 
 def test_fixture_covers_the_branches():
@@ -73,8 +74,9 @@ def test_albany_and_unported_velocity_solvers_are_refused_by_name():
 
 
 @requires_gpu
-def test_gpu_matches_the_v842_oracle_word_for_word():
-    report = mo.measure()
+@pytest.mark.parametrize("precision", ["r4", "r8"])
+def test_gpu_matches_the_v842_oracle_word_for_word(precision):
+    report = mo.measure(precision=precision)
     bad = {case: {k: v for k, v in fields.items() if v} for case, fields in report.items()}
     assert not any(bad.values()), bad
 
@@ -90,27 +92,28 @@ def test_the_ice_door_verify_grades_the_ported_piece():
 
 
 @requires_gpu
+@pytest.mark.parametrize("precision", ["r4", "r8"])
 @pytest.mark.parametrize("original, mutated, field, case_index", [
     # the level-independent factor associated the other way
-    ("const float levelIndependentFactor = M(M(gfk_pow(slopeEdge[iEdge], nMinus1), normalSlopeEdge[iEdge]),\n"
-     "                                           gfk_pow(thicknessEdge, nPlus1));",
-     "const float levelIndependentFactor = M(gfk_pow(slopeEdge[iEdge], nMinus1),\n"
-     "                                           M(normalSlopeEdge[iEdge], gfk_pow(thicknessEdge, nPlus1)));",
+    ("const rk levelIndependentFactor = M(M(LI_POW(slopeEdge[iEdge], nMinus1), normalSlopeEdge[iEdge]),\n"
+     "                                           LI_POW(thicknessEdge, nPlus1));",
+     "const rk levelIndependentFactor = M(LI_POW(slopeEdge[iEdge], nMinus1),\n"
+     "                                           M(normalSlopeEdge[iEdge], LI_POW(thicknessEdge, nPlus1)));",
      "normalVelocity", 0),
-    # CUDA's expf in place of glibc's
-    ("flowParamA[base + k] = M(A0, gfk_exp(D(M(-1.0f, Q),",
-     "flowParamA[base + k] = M(A0, expf(D(M(-1.0f, Q),", "flowParamA", 0),
+    # CUDA's exp in place of glibc's
+    ("flowParamA[base + k] = M(A0, LI_EXP(D(M(-LI_C(1.0), Q),",
+     "flowParamA[base + k] = M(A0, exp(D(M(-LI_C(1.0), Q),", "flowParamA", 0),
 ])
-def test_a_mutated_operation_is_caught(monkeypatch, original, mutated, field, case_index):
+def test_a_mutated_operation_is_caught(monkeypatch, precision, original, mutated, field, case_index):
     from woof.hex.mpas_ice import sia_v842
-    source = sia_v842.module_source()
-    assert source.count(original) == 1
-    monkeypatch.setattr(sia_v842, "module_source", lambda: source.replace(original, mutated))
+    sources = {p: sia_v842.module_source(p) for p in ("r4", "r8")}
+    assert sources[precision].count(original) == 1
+    monkeypatch.setattr(sia_v842, "module_source", lambda p="r4": sources[p].replace(original, mutated))
     sia_v842._module_on.cache_clear()
     try:
-        case = mo.cases()[case_index]
+        case = mo.cases(precision)[case_index]
         got = mo.run_gpu(case)
-        assert mo.bit_mismatches(got[field], mo.load_fixture()[case["name"]][field]) > 0
+        assert mo.bit_mismatches(got[field], mo.load_fixture(precision)[case["name"]][field]) > 0
     finally:
         sia_v842._module_on.cache_clear()
 
@@ -132,11 +135,12 @@ def test_the_oracle_rebuilt_here_writes_the_fixture(tmp_path):
                     str(tmp_path / "build")], check=True, env={**os.environ, "GFORTRAN": gfortran})
     subprocess.run([sys.executable, str(ROOT / "tools" / "mali_oracle" / "make_fixture.py"),
                     str(tmp_path / "build"), "--out", str(tmp_path / "fixture")], check=True)
-    fresh = np.load(tmp_path / "fixture" / "oracle-r4.npz")
-    pinned = np.load(mo.FIXTURE_DIR / "oracle-r4.npz")
-    assert sorted(fresh.files) == sorted(pinned.files)
-    for key in pinned.files:
-        if key.endswith("/err"):
-            assert (fresh[key] == pinned[key]).all(), key
-        else:
-            assert mo.bit_mismatches(fresh[key], pinned[key]) == 0, key
+    for precision in ("r4", "r8"):
+        fresh = np.load(tmp_path / "fixture" / f"oracle-{precision}.npz")
+        pinned = np.load(mo.FIXTURE_DIR / f"oracle-{precision}.npz")
+        assert sorted(fresh.files) == sorted(pinned.files)
+        for key in pinned.files:
+            if key.endswith("/err"):
+                assert (fresh[key] == pinned[key]).all(), key
+            else:
+                assert mo.bit_mismatches(fresh[key], pinned[key]) == 0, key

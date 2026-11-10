@@ -1,7 +1,8 @@
 """``woof hex ice verify``: grade every ported MALI piece against its oracle.
 
 Each piece runs on the active backend (CUDA, or Metal through the facade) over
-the committed oracle fixture, and every output word must be bit-identical.
+the committed oracle fixtures, at RKIND 4 and RKIND 8, and every output word
+must be bit-identical.
 The core's registry status stays ``stub`` until every piece is ported;
 docs/mpas-coupled-roadmap.md lists what remains.
 """
@@ -30,13 +31,13 @@ def verify() -> dict:
             raise FileNotFoundError(
                 f"the MALI oracle fixture is not here ({oracle_module.FIXTURE_DIR}); it ships with the source "
                 "tree (tests/data/oracles), not the wheel: run verify from a checkout")
-        report = oracle_module.measure()
-        mismatched = sum(n for fields in report.values() for n in fields.values())
+        report = {precision: oracle_module.measure(precision=precision) for precision in ("r4", "r8")}
+        mismatched = sum(n for by_case in report.values() for fields in by_case.values() for n in fields.values())
         pieces.append({
             "name": name,
             "source": list(module.SOURCE_FILES),
             "fixture": str(oracle_module.FIXTURE_DIR.relative_to(oracle_module.FIXTURE_DIR.parents[3])),
-            "cases": sorted(report),
+            "cases": {precision: sorted(by_case) for precision, by_case in report.items()},
             "mismatched_words": report,
             "passed": mismatched == 0,
         })
@@ -46,7 +47,8 @@ def verify() -> dict:
         "backend": backend.active(),
         "oracle": {"repo": oracle.ORACLE_REPO, "tag": oracle.ORACLE_TAG, "pin": oracle.ORACLE_PIN},
         "pieces": pieces,
-        "refused": {"config_velocity_solver": list(sia_v842.EXTERNAL_DYCORES) + ["simple", "none"]},
+        "refused": {"config_velocity_solver": list(sia_v842.EXTERNAL_DYCORES) + ["simple", "none"],
+                    "config_basal_mass_bal_float at RKIND 8": sorted(thermal_solver_v842.R8_REFUSED_FLOAT_MELT)},
         "remaining": "docs/mpas-coupled-roadmap.md",
         "passed": all(p["passed"] for p in pieces),
     }

@@ -48,7 +48,8 @@ def test_case_inputs_are_the_recorded_bytes():
     for line in (to.FIXTURE_DIR / "inputs.sha256").read_text(encoding="utf-8").splitlines():
         digest, name = line.split()
         recorded[name] = digest
-    assert recorded == {case["name"]: to.input_digest(case) for case in to.cases()}
+    assert recorded == {**{case["name"]: to.input_digest(case) for case in to.cases()},
+                        **{case["name"] + "/r8": to.input_digest(case) for case in to.cases("r8")}}
 
 
 def test_fixture_covers_the_branches():
@@ -106,13 +107,15 @@ def test_fixture_covers_the_branches():
 
 
 @requires_gpu
-def test_gpu_matches_the_v842_oracle_word_for_word():
-    report = to.measure()
+@pytest.mark.parametrize("precision", ["r4", "r8"])
+def test_gpu_matches_the_v842_oracle_word_for_word(precision):
+    report = to.measure(precision=precision)
     bad = {case: {k: v for k, v in fields.items() if v} for case, fields in report.items()}
     assert not any(bad.values()), bad
 
 
 @requires_gpu
+@pytest.mark.parametrize("precision", ["r4", "r8"])
 @pytest.mark.parametrize("original, mutated, field, case", [
     # the dissipation's base multiplied in another order
     ("M(M(M(M(layerCenterSigma[k], rhoi), LI_GRAVITY), thicknessEdge), slope)",
@@ -124,8 +127,8 @@ def test_gpu_matches_the_v842_oracle_word_for_word():
      "enthalpy_sia_mismip"),
     # the temperature matrix factor's divisions merged
     ("D(D(M(deltat, LI_ICE_CONDUCTIVITY), M(rhoi, LI_CP_ICE)), M(h, h))",
-     "D(M(deltat, LI_ICE_CONDUCTIVITY), M(M(rhoi, LI_CP_ICE), M(h, h)))", "temperature",
-     "temperature_sia_constant"),
+     "D(M(deltat, LI_ICE_CONDUCTIVITY), M(M(rhoi, LI_CP_ICE), M(h, h)))", ("temperature", "basalConductiveFlux"),
+     None),   # every case: at RKIND 8 the change shows in the temperature_none case only
     # the tridiagonal back substitution's product reassociated
     ("bb[i] = D(S(y[i], M(a[i], bb[i - 1])), S(b[i], M(a[i], aa[i - 1])));",
      "bb[i] = M(S(y[i], M(a[i], bb[i - 1])), D((rk)1.0, S(b[i], M(a[i], aa[i - 1]))));", "temperature",
@@ -142,16 +145,22 @@ def test_gpu_matches_the_v842_oracle_word_for_word():
      "M(M(M(betaSolve[iCell], basalSpeed[iCell]), basalSpeed[iCell]), LI_SCYR)", "basalFrictionFlux",
      "enthalpy_none_file"),
 ])
-def test_a_mutated_evaluation_order_is_caught(monkeypatch, original, mutated, field, case):
+def test_a_mutated_evaluation_order_is_caught(monkeypatch, precision, original, mutated, field, case):
     from woof.hex.mpas_ice import thermal_solver_v842
-    source = thermal_solver_v842.module_source()
-    assert source.count(original) == 1
-    monkeypatch.setattr(thermal_solver_v842, "module_source", lambda: source.replace(original, mutated))
+    sources = {p: thermal_solver_v842.module_source(p) for p in ("r4", "r8")}
+    assert sources[precision].count(original) == 1
+    monkeypatch.setattr(thermal_solver_v842, "module_source", lambda p="r4": sources[p].replace(original, mutated))
     thermal_solver_v842._module_on.cache_clear()
     try:
-        row = next(c for c in to.cases() if c["name"] == case)
-        got = to.run_gpu(row)
-        assert to.word_mismatches(got[field], to.load_fixture()[case][field]) > 0
+        # the case by its row: at RKIND 8 the refused floating melts run under other names
+        rows = to.cases(precision)
+        if case is not None:
+            rows = [rows[[r[0] for r in to.CASES].index(case)]]
+        fields = (field,) if isinstance(field, str) else field
+        fixture = to.load_fixture(precision)
+        total = sum(to.word_mismatches(got[f], fixture[row["name"]][f])
+                    for row in rows for got in (to.run_gpu(row),) for f in fields)
+        assert total > 0
     finally:
         thermal_solver_v842._module_on.cache_clear()
 
@@ -177,6 +186,15 @@ def test_unknown_options_are_refused():
                           config_thermal_solver="temperature", config_thermal_thickness=1.0,
                           config_ice_density=910.0, config_ocean_density=1028.0, config_sea_level=0.0,
                           config_dynamic_thickness=10.0)
+
+
+@requires_gpu
+@pytest.mark.parametrize("option", ["mismip", "seroussi"])
+def test_rkind8_refuses_the_floating_melts_without_a_matched_libm(option):
+    from woof.hex.errors import ConfigurationRefusal
+    row = next(c for c in to.cases("r8") if c["name"] == "enthalpy_sia_constant")
+    with pytest.raises(ConfigurationRefusal, match="RKIND 8"):
+        to.run_gpu(dict(row, floatMelt=option))
 
 
 @requires_gpu
@@ -206,8 +224,9 @@ def test_the_oracle_rebuilt_here_writes_the_fixture(tmp_path):
                    check=True, env={**os.environ, "GFORTRAN": gfortran})
     subprocess.run([sys.executable, str(ROOT / "tools" / "mali_oracle" / "make_thermal_solver_fixture.py"),
                     str(tmp_path / "build"), "--out", str(tmp_path / "fixture")], check=True)
-    fresh = np.load(tmp_path / "fixture" / "oracle-r4.npz")
-    pinned = np.load(to.FIXTURE_DIR / "oracle-r4.npz")
-    assert sorted(fresh.files) == sorted(pinned.files)
-    for key in pinned.files:
-        assert to.word_mismatches(fresh[key], pinned[key]) == 0, key
+    for precision in ("r4", "r8"):
+        fresh = np.load(tmp_path / "fixture" / f"oracle-{precision}.npz")
+        pinned = np.load(to.FIXTURE_DIR / f"oracle-{precision}.npz")
+        assert sorted(fresh.files) == sorted(pinned.files)
+        for key in pinned.files:
+            assert to.word_mismatches(fresh[key], pinned[key]) == 0, key

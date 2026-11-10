@@ -36,7 +36,8 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_case_inputs_are_the_recorded_bytes():
     recorded = dict(reversed(line.split()) for line in
                     (go.FIXTURE_DIR / "inputs.sha256").read_text(encoding="utf-8").splitlines())
-    assert recorded == {case["name"]: go.input_digest(case) for case in go.cases()}
+    assert recorded == {**{case["name"]: go.input_digest(case) for case in go.cases()},
+                        **{case["name"] + "/r8": go.input_digest(case) for case in go.cases("r8")}}
 
 
 def test_fixture_covers_the_branches():
@@ -63,13 +64,15 @@ def test_higher_order_mask_paths_are_refused_by_name():
 
 
 @requires_gpu
-def test_gpu_matches_the_v842_oracle_word_for_word():
-    report = go.measure()
+@pytest.mark.parametrize("precision", ["r4", "r8"])
+def test_gpu_matches_the_v842_oracle_word_for_word(precision):
+    report = go.measure(precision=precision)
     bad = {case: {k: v for k, v in fields.items() if v} for case, fields in report.items()}
     assert not any(bad.values()), bad
 
 
 @requires_gpu
+@pytest.mark.parametrize("precision", ["r4", "r8"])
 @pytest.mark.parametrize("original, mutated, field", [
     # the floating lower surface without its parenthesised density ratio
     ("S(seaLevel, M(h, D(iceDensity, oceanDensity)))", "S(seaLevel, D(M(h, iceDensity), oceanDensity))",
@@ -77,15 +80,16 @@ def test_gpu_matches_the_v842_oracle_word_for_word():
     # the calving-front rule not applied
     ("mask &= ~LI_DYNAMIC_ICE;", "mask &= ~0;", "cellMask"),
 ])
-def test_a_mutated_operation_is_caught(monkeypatch, original, mutated, field):
+def test_a_mutated_operation_is_caught(monkeypatch, precision, original, mutated, field):
     from woof.hex.mpas_ice import geometry_v842
-    source = geometry_v842.module_source()
-    assert source.count(original) == 1
-    monkeypatch.setattr(geometry_v842, "module_source", lambda: source.replace(original, mutated))
+    sources = {p: geometry_v842.module_source(p) for p in ("r4", "r8")}
+    assert sources[precision].count(original) == 1
+    monkeypatch.setattr(geometry_v842, "module_source", lambda p="r4": sources[p].replace(original, mutated))
     geometry_v842._module_on.cache_clear()
     try:
-        fixture = go.load_fixture()
-        total = sum(go.word_mismatches(go.run_gpu(c)[field], fixture[c["name"]][field]) for c in go.cases())
+        fixture = go.load_fixture(precision)
+        total = sum(go.word_mismatches(go.run_gpu(c)[field], fixture[c["name"]][field])
+                    for c in go.cases(precision))
         assert total > 0
     finally:
         geometry_v842._module_on.cache_clear()
@@ -108,8 +112,9 @@ def test_the_oracle_rebuilt_here_writes_the_fixture(tmp_path):
                     str(tmp_path / "build")], check=True, env={**os.environ, "GFORTRAN": gfortran})
     subprocess.run([sys.executable, str(ROOT / "tools" / "mali_oracle" / "make_geometry_fixture.py"),
                     str(tmp_path / "build"), "--out", str(tmp_path / "fixture")], check=True)
-    fresh = np.load(tmp_path / "fixture" / "oracle-r4.npz")
-    pinned = np.load(go.FIXTURE_DIR / "oracle-r4.npz")
-    assert sorted(fresh.files) == sorted(pinned.files)
-    for key in pinned.files:
-        assert go.word_mismatches(fresh[key], pinned[key]) == 0, key
+    for precision in ("r4", "r8"):
+        fresh = np.load(tmp_path / "fixture" / f"oracle-{precision}.npz")
+        pinned = np.load(go.FIXTURE_DIR / f"oracle-{precision}.npz")
+        assert sorted(fresh.files) == sorted(pinned.files)
+        for key in pinned.files:
+            assert go.word_mismatches(fresh[key], pinned[key]) == 0, key

@@ -1,12 +1,14 @@
 """Cases and the stream layout for the MALI geometry-diagnostics oracle.
 
 ``tools/mali_oracle/run_geometry.F90`` makes, from MPAS-Model v8.4.2 compiled
-verbatim (gfortran -O0 -ffp-contract=off, RKIND 4), the calls the model makes
+verbatim (gfortran -O0 -ffp-contract=off, RKIND 4 and 8), the calls the model makes
 before thickness advection: ``li_calculate_mask``, ``li_update_geometry``,
 ``li_calculate_layerThickness`` and ``li_layer_normal_velocity``. This module
 writes the driver's input stream, reads its output, builds the cases and runs
 the GPU port the same way. The RandomState discipline is that of
-:mod:`woof.verify.mpas_seaice_evp_oracle`.
+:mod:`woof.verify.mpas_seaice_evp_oracle`. A case is built at one precision:
+the RKIND 4 case rounds the draws to float32 and the RKIND 8 case keeps them
+in float64, and the stream, the fixture and the GPU run follow it.
 """
 from __future__ import annotations
 
@@ -16,6 +18,7 @@ from pathlib import Path
 import numpy as np
 
 FIXTURE_DIR = (Path(__file__).resolve().parents[2] / "tests" / "data" / "oracles" / "mali_geometry")
+PRECISIONS = {"r4": np.float32, "r8": np.float64}
 
 INT_FIELDS = ("nEdgesOnCell", "cellsOnCell", "cellsOnVertex", "cellsOnEdge", "cellMask", "vertexMask", "edgeMask")
 REAL_FIELDS = ("thickness", "bedTopography", "layerThicknessFractions", "dcEdge", "normalVelocity")
@@ -30,7 +33,7 @@ CASES = (
 
 
 def make_case(name: str, seed: int, n_cells: int, n_levels: int, solver: str, sea_level: float,
-              dynamic_thickness: float) -> dict:
+              dynamic_thickness: float, precision: str = "r4") -> dict:
     """One deterministic case: an ice sheet with grounded and floating ice and
     open ocean on a random-connectivity mesh.
 
@@ -41,11 +44,12 @@ def make_case(name: str, seed: int, n_cells: int, n_levels: int, solver: str, se
     and stale bits that li_calculate_mask clears.
     """
     rs = np.random.RandomState(seed)
+    real = PRECISIONS[precision]
     nc, nl = n_cells, n_levels
     ne, nv, me = 3 * nc, 2 * nc, 7
 
     def uniform(lo, hi, shape):
-        return (lo + (hi - lo) * rs.random_sample(shape)).astype(np.float32)
+        return (lo + (hi - lo) * rs.random_sample(shape)).astype(real)
 
     n_edges_on_cell = np.array([5, 6, 6, 6, 7], np.int32)[rs.randint(0, 5, nc)]
     cells_on_cell = np.full((nc, me), nc + 3, np.int32)
@@ -56,15 +60,16 @@ def make_case(name: str, seed: int, n_cells: int, n_levels: int, solver: str, se
     thin = rs.random_sample(nc) < 0.1
     thickness[thin] = uniform(0.5, 1.5 * dynamic_thickness, int(thin.sum()))
     fractions = uniform(0.5, 1.5, nl)
-    fractions = (fractions / fractions.astype(np.float64).sum()).astype(np.float32)
+    fractions = (fractions / fractions.astype(np.float64).sum()).astype(real)
     velocity = uniform(-1.0e-5, 1.0e-5, (ne, nl + 1))
     zero = rs.random_sample(ne) < 0.1
     velocity[zero, :2] = 0.0
     return {
-        "name": name, "nCells": nc, "nEdges": ne, "nVertices": nv, "nVertLevels": nl, "maxEdges": me,
+        "name": name, "precision": precision, "nCells": nc, "nEdges": ne, "nVertices": nv, "nVertLevels": nl,
+        "maxEdges": me,
         "velocitySolver": solver, "nEdgesSolve": ne - 5,
-        "iceDensity": np.float32(910.0), "oceanDensity": np.float32(1028.0),
-        "seaLevel": np.float32(sea_level), "dynamicThickness": np.float32(dynamic_thickness),
+        "iceDensity": real(910.0), "oceanDensity": real(1028.0),
+        "seaLevel": real(sea_level), "dynamicThickness": real(dynamic_thickness),
         "nEdgesOnCell": n_edges_on_cell, "cellsOnCell": cells_on_cell,
         "cellsOnVertex": rs.randint(1, nc + 1, (nv, 3)).astype(np.int32),
         "cellsOnEdge": rs.randint(1, nc + 1, (ne, 2)).astype(np.int32),
@@ -80,8 +85,12 @@ def make_case(name: str, seed: int, n_cells: int, n_levels: int, solver: str, se
     }
 
 
-def cases() -> list[dict]:
-    return [make_case(*row) for row in CASES]
+def cases(precision: str = "r4") -> list[dict]:
+    return [make_case(*row, precision=precision) for row in CASES]
+
+
+def _real(case: dict) -> np.dtype:
+    return np.dtype(PRECISIONS[case["precision"]]).newbyteorder("<")
 
 
 def _shape(name: str, case: dict) -> tuple[int, ...]:
@@ -94,12 +103,13 @@ def _shape(name: str, case: dict) -> tuple[int, ...]:
 def input_bytes(case: dict) -> bytes:
     head = np.array([case["nCells"], case["nEdges"], case["nVertices"], case["nVertLevels"], case["maxEdges"],
                      1 if case["velocitySolver"] == "sia" else 2, case["nEdgesSolve"]], "<i4")
-    reals = np.array([case["iceDensity"], case["oceanDensity"], case["seaLevel"], case["dynamicThickness"]], "<f4")
+    reals = np.array([case["iceDensity"], case["oceanDensity"], case["seaLevel"], case["dynamicThickness"]],
+                     _real(case))
     parts = [head.tobytes(), reals.tobytes()]
     for name in INT_FIELDS:
         parts.append(np.ascontiguousarray(case[name], "<i4").tobytes())
     for name in REAL_FIELDS + REAL_OUTPUTS:
-        parts.append(np.ascontiguousarray(case[name], "<f4").tobytes())
+        parts.append(np.ascontiguousarray(case[name], _real(case)).tobytes())
     return b"".join(parts)
 
 
@@ -108,24 +118,25 @@ def input_digest(case: dict) -> str:
 
 
 def read_outputs(raw: bytes, case: dict) -> dict[str, np.ndarray]:
+    real, native = _real(case), PRECISIONS[case["precision"]]
     out = {"err": np.frombuffer(raw, "<i4", 3, 0).copy(),
-           "minOfMaxAllowableDt": np.frombuffer(raw, "<f4", 1, 12).copy()}
-    off = 16
+           "minOfMaxAllowableDt": np.frombuffer(raw, real, 1, 12).astype(native)}
+    off = 12 + real.itemsize
     for name in INT_OUTPUTS:
         count = int(np.prod(_shape(name, case)))
         out[name] = np.frombuffer(raw, "<i4", count, off).reshape(_shape(name, case)).copy()
         off += 4 * count
     for name in REAL_OUTPUTS:
         count = int(np.prod(_shape(name, case)))
-        out[name] = np.frombuffer(raw, "<f4", count, off).reshape(_shape(name, case)).copy()
-        off += 4 * count
+        out[name] = np.frombuffer(raw, real, count, off).reshape(_shape(name, case)).astype(native)
+        off += real.itemsize * count
     if off != len(raw):
         raise ValueError(f"oracle output: {len(raw) - off} trailing bytes")
     return out
 
 
-def load_fixture() -> dict[str, dict[str, np.ndarray]]:
-    with np.load(FIXTURE_DIR / "oracle-r4.npz") as data:
+def load_fixture(precision: str = "r4") -> dict[str, dict[str, np.ndarray]]:
+    with np.load(FIXTURE_DIR / f"oracle-{precision}.npz") as data:
         out: dict[str, dict[str, np.ndarray]] = {}
         for key in data.files:
             case, field = key.split("/", 1)
@@ -135,7 +146,10 @@ def load_fixture() -> dict[str, dict[str, np.ndarray]]:
 
 def word_mismatches(a: np.ndarray, b: np.ndarray) -> int:
     a, b = np.ascontiguousarray(a), np.ascontiguousarray(b)
-    return int(np.count_nonzero(a.view(np.uint32) != b.view(np.uint32)))
+    if a.shape != b.shape or a.dtype.itemsize != b.dtype.itemsize:
+        return int(max(a.size, b.size))
+    word = np.dtype(f"u{a.dtype.itemsize}")
+    return int(np.count_nonzero(a.view(word) != b.view(word)))
 
 
 def run_gpu(case: dict) -> dict[str, np.ndarray]:
@@ -158,10 +172,10 @@ def run_gpu(case: dict) -> dict[str, np.ndarray]:
     return out
 
 
-def measure(reference: dict | None = None) -> dict[str, dict[str, int]]:
-    reference = load_fixture() if reference is None else reference
+def measure(reference: dict | None = None, precision: str = "r4") -> dict[str, dict[str, int]]:
+    reference = load_fixture(precision) if reference is None else reference
     report: dict[str, dict[str, int]] = {}
-    for case in cases():
+    for case in cases(precision):
         got = run_gpu(case)
         want = reference[case["name"]]
         report[case["name"]] = {name: word_mismatches(got[name], want[name])
