@@ -12,8 +12,9 @@
 // terms in licenses/LICENSE-MPAS-BSD-3-Clause.txt. This is not the version
 // available from LANS and UCAR.
 //
-// RKIND = 4. Every operation is an explicit round-to-nearest intrinsic in the
-// Fortran's evaluation order (gfortran -O0 -ffp-contract=off).
+// RKIND = 4 unless MPAS_RKIND8 is defined. Every operation is an explicit
+// round-to-nearest intrinsic in the Fortran's evaluation order (gfortran -O0
+// -ffp-contract=off).
 //
 // li_calculate_mask runs its cell passes in sequence. Each pass reads the
 // neighbours' bits that earlier passes settled and sets bits that no later
@@ -26,10 +27,29 @@
 // cellsOnCell(maxEdges, nCells) is c[iCell*maxEdges + j]. Connectivity is
 // MPAS's 1-based indices.
 
+#ifdef MPAS_RKIND8
+typedef double rk;
+#define A(a,b) __dadd_rn((a),(b))
+#define S(a,b) __dsub_rn((a),(b))
+#define M(a,b) __dmul_rn((a),(b))
+#define D(a,b) __ddiv_rn((a),(b))
+#define LI_SQRT(x) __dsqrt_rn(x)
+#define LI_ABS(x) fabs(x)
+#define LI_POW(x,y) glibc_pow((x),(y))
+#define LI_EXP(x) glibc_exp(x)
+#define LI_C(x) x
+#else
+typedef float rk;
 #define A(a,b) __fadd_rn((a),(b))
 #define S(a,b) __fsub_rn((a),(b))
 #define M(a,b) __fmul_rn((a),(b))
 #define D(a,b) __fdiv_rn((a),(b))
+#define LI_SQRT(x) __fsqrt_rn(x)
+#define LI_ABS(x) fabsf(x)
+#define LI_POW(x,y) gfk_pow((x),(y))
+#define LI_EXP(x) gfk_exp(x)
+#define LI_C(x) x##f
+#endif
 
 #define LI_ICE 32
 #define LI_DYNAMIC_ICE 2
@@ -48,14 +68,14 @@ __device__ __forceinline__ bool li_is_grounded(int mask) {
 // the first passes: keep the initial-extent bit; ice where thickness > 0;
 // floating where ice and (rhoi/rhoo*H) <= (sea level - bed)
 extern "C" __global__ void li_mask_cell_state_v842(
-    int *cellMask, const float *thickness, const float *bedTopography,
-    float iceDensity, float oceanDensity, float seaLevel, int nCells)
+    int *cellMask, const rk *thickness, const rk *bedTopography,
+    rk iceDensity, rk oceanDensity, rk seaLevel, int nCells)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= nCells) return;
     int mask = cellMask[i] & LI_INITIAL_ICE_EXTENT;
-    const float h = thickness[i];
-    if (h > 0.0f) mask |= LI_ICE;
+    const rk h = thickness[i];
+    if (h > LI_C(0.0)) mask |= LI_ICE;
     if (li_is(mask, LI_ICE) && M(D(iceDensity, oceanDensity), h) <= S(seaLevel, bedTopography[i]))
         mask |= LI_FLOATING;
     cellMask[i] = mask;
@@ -64,8 +84,8 @@ extern "C" __global__ void li_mask_cell_state_v842(
 // ice cells with a non-ice neighbour are margin; then the dynamic bit where
 // thickness > config_dynamic_thickness
 extern "C" __global__ void li_mask_margin_v842(
-    int *maskOut, const int *maskIn, const float *thickness, const int *nEdgesOnCell,
-    const int *cellsOnCell, float dynamicThickness, int nCells, int maxEdges)
+    int *maskOut, const int *maskIn, const rk *thickness, const int *nEdgesOnCell,
+    const int *cellsOnCell, rk dynamicThickness, int nCells, int maxEdges)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= nCells) return;
@@ -83,22 +103,22 @@ extern "C" __global__ void li_mask_margin_v842(
 // floating margin cells next to open ocean and thinner than 0.95 of their
 // thinnest non-margin ice neighbour lose the dynamic bit
 extern "C" __global__ void li_mask_calving_front_v842(
-    int *maskOut, const int *maskIn, const float *thickness, const float *bedTopography,
-    const int *nEdgesOnCell, const int *cellsOnCell, float seaLevel, int nCells, int maxEdges)
+    int *maskOut, const int *maskIn, const rk *thickness, const rk *bedTopography,
+    const int *nEdgesOnCell, const int *cellsOnCell, rk seaLevel, int nCells, int maxEdges)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= nCells) return;
     int mask = maskIn[i];
     if (li_is(mask, LI_MARGIN) && li_is(mask, LI_FLOATING)) {
         bool openOceanNeighbor = false;
-        float thinnestNeighborHeight = 1.0e36f;
+        rk thinnestNeighborHeight = LI_C(1.0e36);
         for (int j = 0; j < nEdgesOnCell[i]; ++j) {
             const int n = cellsOnCell[i * maxEdges + j] - 1;
-            if (thickness[n] > 0.0f && !li_is(maskIn[n], LI_MARGIN))
+            if (thickness[n] > LI_C(0.0) && !li_is(maskIn[n], LI_MARGIN))
                 thinnestNeighborHeight = thinnestNeighborHeight < thickness[n] ? thinnestNeighborHeight : thickness[n];
             if (bedTopography[n] < seaLevel && !li_is(maskIn[n], LI_ICE)) openOceanNeighbor = true;
         }
-        if (openOceanNeighbor && thickness[i] < M(0.95f, thinnestNeighborHeight))
+        if (openOceanNeighbor && thickness[i] < M(LI_C(0.95), thinnestNeighborHeight))
             mask &= ~LI_DYNAMIC_ICE;
     }
     maskOut[i] = mask;
@@ -107,8 +127,8 @@ extern "C" __global__ void li_mask_calving_front_v842(
 // dynamic cells with a non-dynamic neighbour are dynamic margin; grounded
 // cells with a floating or open-ocean neighbour are grounding line
 extern "C" __global__ void li_mask_dynamic_margin_grounding_line_v842(
-    int *maskOut, const int *maskIn, const float *bedTopography, const int *nEdgesOnCell,
-    const int *cellsOnCell, float seaLevel, int nCells, int maxEdges)
+    int *maskOut, const int *maskIn, const rk *bedTopography, const int *nEdgesOnCell,
+    const int *cellsOnCell, rk seaLevel, int nCells, int maxEdges)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= nCells) return;
@@ -187,14 +207,14 @@ extern "C" __global__ void li_mask_edge_v842(
 
 // li_update_geometry and li_calculate_layerThickness, one thread per cell
 extern "C" __global__ void li_update_geometry_layer_thickness_v842(
-    float *upperSurface, float *lowerSurface, float *layerThickness, const float *thickness,
-    const float *bedTopography, const int *cellMask, const float *layerThicknessFractions,
-    float iceDensity, float oceanDensity, float seaLevel, int nCells, int nVertLevels)
+    rk *upperSurface, rk *lowerSurface, rk *layerThickness, const rk *thickness,
+    const rk *bedTopography, const int *cellMask, const rk *layerThicknessFractions,
+    rk iceDensity, rk oceanDensity, rk seaLevel, int nCells, int nVertLevels)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= nCells) return;
-    const float h = thickness[i];
-    const float lower = li_is(cellMask[i], LI_FLOATING) ? S(seaLevel, M(h, D(iceDensity, oceanDensity)))
+    const rk h = thickness[i];
+    const rk lower = li_is(cellMask[i], LI_FLOATING) ? S(seaLevel, M(h, D(iceDensity, oceanDensity)))
                                                         : bedTopography[i];
     lowerSurface[i] = lower;
     upperSurface[i] = A(lower, h);
@@ -206,28 +226,28 @@ extern "C" __global__ void li_update_geometry_layer_thickness_v842(
 // and each edge's smallest advective CFL time step (the driver takes the
 // minimum over edges)
 extern "C" __global__ void li_layer_normal_velocity_v842(
-    float *layerNormalVelocity, float *edgeMinDt, const float *normalVelocity, const float *dcEdge,
+    rk *layerNormalVelocity, rk *edgeMinDt, const rk *normalVelocity, const rk *dcEdge,
     int nEdgesSolve, int nVertLevels)
 {
     int iEdge = blockIdx.x * blockDim.x + threadIdx.x;
     if (iEdge >= nEdgesSolve) return;
-    const float bigNumber = 1.0e16f;
-    float minDt = bigNumber;
+    const rk bigNumber = LI_C(1.0e16);
+    rk minDt = bigNumber;
     for (int k = 0; k < nVertLevels; ++k) {
-        const float v = M(0.5f, A(normalVelocity[iEdge * (nVertLevels + 1) + k],
+        const rk v = M(LI_C(0.5), A(normalVelocity[iEdge * (nVertLevels + 1) + k],
                                   normalVelocity[iEdge * (nVertLevels + 1) + k + 1]));
         layerNormalVelocity[iEdge * nVertLevels + k] = v;
-        const float maxAllowableDt = fabsf(v) > 0.0f ? D(M(0.5f, dcEdge[iEdge]), fabsf(v)) : bigNumber;
+        const rk maxAllowableDt = LI_ABS(v) > LI_C(0.0) ? D(M(LI_C(0.5), dcEdge[iEdge]), LI_ABS(v)) : bigNumber;
         minDt = minDt < maxAllowableDt ? minDt : maxAllowableDt;
     }
     edgeMinDt[iEdge] = minDt;
 }
 
 // the minimum over edges, in the Fortran's edge order (one thread)
-extern "C" __global__ void li_min_dt_v842(float *minOfMaxAllowableDt, const float *edgeMinDt, int nEdgesSolve)
+extern "C" __global__ void li_min_dt_v842(rk *minOfMaxAllowableDt, const rk *edgeMinDt, int nEdgesSolve)
 {
     if (blockIdx.x != 0 || threadIdx.x != 0) return;
-    float m = 1.0e16f;
+    rk m = LI_C(1.0e16);
     for (int i = 0; i < nEdgesSolve; ++i) m = m < edgeMinDt[i] ? m : edgeMinDt[i];
     *minOfMaxAllowableDt = m;
 }

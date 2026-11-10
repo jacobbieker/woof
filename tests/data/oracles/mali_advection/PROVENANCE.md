@@ -41,12 +41,22 @@ The time step is 30 days. Each case covers:
 - upwind layer thicknesses that empty layers;
 - air temperatures on both sides of 273.15 K.
 
+## RKIND 8
+
+`oracle-r8.npz` holds the same routines compiled without `-DSINGLE_PRECISION`
+(RKIND = 8, the same flags otherwise, no FMA instruction), on pb, 2026-11-10.
+Each case is drawn from the same seed in float64 instead of rounded to
+float32. Its input digests are the `<case>/r8` lines of `inputs.sha256`.
+The routines make no libm call.
+The GPU port runs the `MPAS_RKIND8` unit and must match every word.
+
 ## Files
 
 | file | content |
 |---|---|
 | `oracle-r4.npz` | per case, `<case>/<field>`: `errInit`, `errAdvect`, `logErrors` (all 0), `cellMask`, `vertexMask`, `edgeMask`, `thickness`, `sfcMassBal`, `basalMassBal`, `dynamicThickening`, `layerThickness`, `temperature`, `waterfrac`, `enthalpy` |
-| `inputs.sha256` | the sha256 of each case's input stream (`woof.verify.mali_advection_oracle.input_bytes`) |
+| `oracle-r8.npz` | the same fields at RKIND 8 |
+| `inputs.sha256` | the sha256 of each case's input stream at each precision (`woof.verify.mali_advection_oracle.input_bytes`) |
 
 ## Grading
 

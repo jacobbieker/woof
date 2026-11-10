@@ -35,6 +35,15 @@ The basal heat flux is constant. Each case contains:
 - enthalpies either side of each layer's, the surface's and the bed's
   pressure-melting enthalpy.
 
+## RKIND 8
+
+`oracle-r8.npz` holds the same routines compiled without `-DSINGLE_PRECISION`
+(RKIND = 8, the same flags otherwise, no FMA instruction), on pb, 2026-11-10.
+Each case is drawn from the same seed in float64 instead of rounded to
+float32. Its input digests are the `<case>/r8` lines of `inputs.sha256`.
+The routines make no libm call.
+The GPU port runs the `MPAS_RKIND8` unit and must match every word.
+
 ## Grading
 
 `tests/test_mali_thermal_init_parity.py` and `woof hex ice verify` require
