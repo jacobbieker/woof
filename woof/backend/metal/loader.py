@@ -146,6 +146,8 @@ class MetalFunction:
             # buffers reached through host-built address tables are invisible
             # to MLX's hazard tracking: let everything before finish first
             import mlx.core as mx
+            from woof.backend.facade._array import flush_launched
+            flush_launched()
             mx.synchronize()
         # The library was built with the module (MetalModule._build), so the
         # launch names it by key and does not carry the unit's MSL: copying a

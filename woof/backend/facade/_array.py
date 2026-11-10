@@ -40,6 +40,24 @@ import numpy as np
 #: Storages rebound since the last launch (strong refs; cleared by flush()).
 PENDING: list = []
 
+#: In-place launch outputs not yet encoded.  Each is an MLX value whose
+#: inputs are the buffers' previous values, so MLX orders a chain of launches
+#: through the same buffers by itself; encoding them a batch at a time costs
+#: one command-buffer commit per batch instead of one per launch.
+LAUNCHED: list = []
+
+def _launch_batch() -> int:
+    """Launches per encode: ``WOOF_METAL_LAUNCH_BATCH`` (default 16).  One
+    under the GPU timer and the serial diagnostics, which read each launch
+    as a command buffer of its own."""
+    import os
+    if os.environ.get("WOOF_METAL_GPU_TIMES") or os.environ.get("WOOF_METAL_SERIAL"):
+        return 1
+    return max(1, int(os.environ.get("WOOF_METAL_LAUNCH_BATCH", "16")))
+
+
+LAUNCH_BATCH = _launch_batch()
+
 #: Elements one facade allocation may hold: MLX sizes an array with int32.
 MAX_ELEMENTS = 2**31 - 1
 
@@ -184,7 +202,9 @@ class Storage:
         if _capture.recording() is not None:
             _capture.refuse("an in-place write into a facade array (a[...] = v, fill, copy)")
         self.arr = out
-        mx.async_eval(out)
+        LAUNCHED.append(out)
+        if len(LAUNCHED) >= LAUNCH_BATCH:
+            flush_launched()
 
     def alias(self, dtype) -> "Storage":
         """This buffer as ``dtype`` elements: a second storage over the same
@@ -256,8 +276,21 @@ def flush_pending():
     if not PENDING:
         return
     mx = _mx()
-    arrays = [s.arr for s in PENDING]
+    arrays = [s.arr for s in PENDING] + LAUNCHED
     PENDING.clear()
+    LAUNCHED.clear()
+    mx.async_eval(*arrays)
+
+
+def flush_launched():
+    """Encode every in-place launch not yet encoded (before anything that
+    reaches buffers outside MLX's graph: an address table, a host block, a
+    synchronize)."""
+    if not LAUNCHED:
+        return
+    mx = _mx()
+    arrays = list(LAUNCHED)
+    LAUNCHED.clear()
     mx.async_eval(*arrays)
 
 
