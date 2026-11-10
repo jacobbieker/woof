@@ -212,8 +212,8 @@ def thermal_solver(*, mesh: dict, geometry: dict, velocity: dict, thermal: dict,
     n_cells, n_levels = t["temperature"].shape
     precision = rkind.precision_of(t["temperature"])
     real = rkind.PRECISIONS[precision]
-    if n_levels > MAX_LEVELS:
-        raise ValueError(f"the column solve holds at most {MAX_LEVELS} layers")
+    if not 1 <= n_levels <= MAX_LEVELS:
+        raise ValueError(f"the column solve needs 1 to {MAX_LEVELS} layers, not {n_levels}")
     n_edges = g["slopeEdge"].shape[0]
     max_edges = m["edgesOnCell"].shape[1]
     ncs = int(m["nCellsSolve"])
