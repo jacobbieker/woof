@@ -2,10 +2,11 @@
 
     pixi run -e default python tools/mali_oracle/make_thermal_fixture.py BUILD_DIR [--out DIR]
 
-BUILD_DIR holds ``run_thermal_r4`` from build.sh.  Writes ``oracle-r4.npz``
-(every case's outputs, ``<case>/<field>``) and ``inputs.sha256`` (the digest
-of every case's input stream) into ``tests/data/oracles/mali_thermal_init`` by
-default.
+BUILD_DIR holds ``run_thermal_r4`` and ``run_thermal_r8`` from build.sh.  Writes
+``oracle-r4.npz`` and ``oracle-r8.npz`` (every case's outputs at each
+precision, ``<case>/<field>``) and ``inputs.sha256`` (the digest of every
+case's input stream, named ``<case>`` at RKIND 4 and ``<case>/r8`` at
+RKIND 8) into ``tests/data/oracles/mali_thermal_init`` by default.
 """
 from __future__ import annotations
 
@@ -37,17 +38,20 @@ def main() -> int:
     parser.add_argument("build_dir", type=Path)
     parser.add_argument("--out", type=Path, default=so.FIXTURE_DIR)
     args = parser.parse_args()
-    binary = args.build_dir / "run_thermal_r4"
-    arrays: dict[str, np.ndarray] = {}
+    arrays: dict[str, dict[str, np.ndarray]] = {"r4": {}, "r8": {}}
     digests = []
-    for case in so.cases():
-        for field, value in run_case(binary, case).items():
-            arrays[f"{case['name']}/{field}"] = value
-        digests.append(f"{so.input_digest(case)}  {case['name']}")
+    for precision in ("r4", "r8"):
+        binary = args.build_dir / f"run_thermal_{precision}"
+        for case in so.cases(precision):
+            for field, value in run_case(binary, case).items():
+                arrays[precision][f"{case['name']}/{field}"] = value
+            # the RKIND 4 digests keep their bare case names
+            digests.append(f"{so.input_digest(case)}  {case['name']}" + ("/r8" if precision == "r8" else ""))
     args.out.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(args.out / "oracle-r4.npz", **arrays)
+    for precision, named in arrays.items():
+        np.savez_compressed(args.out / f"oracle-{precision}.npz", **named)
     (args.out / "inputs.sha256").write_text("\n".join(digests) + "\n", encoding="utf-8")
-    print(f"wrote {args.out / 'oracle-r4.npz'} ({len(arrays)} arrays)")
+    print(f"wrote {args.out} (oracle-r4.npz, oracle-r8.npz: {sum(map(len, arrays.values()))} arrays)")
     return 0
 
 

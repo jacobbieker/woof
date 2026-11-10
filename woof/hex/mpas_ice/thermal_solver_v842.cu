@@ -30,9 +30,11 @@
 // of config_ice_density and config_ocean_density that li_thermal_init makes.
 // RKIND = 4 (MALI's default build) unless MPAS_RKIND8 is defined. The libm
 // calls are the shared transcriptions the unit is prepended with: real powers
-// are glibc's powf (gfk_pow, glibc_flt32.cuh); sin is glibc's sinf
-// (glibc_sinf, glibc_trig_flt32.cuh) and tanh glibc's tanhf, CORE-MATH's
-// correctly rounded one (sfire_tanhf, sfire_libm.cuh).
+// are glibc's powf (gfk_pow, glibc_flt32.cuh) or pow (glibc_pow,
+// glibc_flt64.cuh); sin is glibc's sinf (glibc_sinf, glibc_trig_flt32.cuh)
+// and tanh glibc's tanhf, CORE-MATH's correctly rounded one (sfire_tanhf,
+// sfire_libm.cuh). The RKIND 8 unit carries no sin or tanh: 'mismip' and
+// 'seroussi' are refused there.
 //
 // Layout: a Fortran array a(nVertLevels, nCells) is a[iCell*nVertLevels + k];
 // a(maxEdges, nCells) is a[iCell*maxEdges + i]; cellsOnEdge(2, nEdges) is

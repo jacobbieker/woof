@@ -18,12 +18,15 @@
 
 The masks are :func:`woof.hex.mpas_ice.geometry_v842.calculate_mask`. Every
 word is held to those routines compiled verbatim with gfortran ``-O0
--ffp-contract=off`` at MALI's default RKIND 4
+-ffp-contract=off`` at RKIND 4 (MALI's default) and RKIND 8
 (``tools/mali_oracle/run_thermal_solver.F90``,
-``tests/test_mali_thermal_solver_parity.py``).
+``tests/test_mali_thermal_solver_parity.py``). At RKIND 8, 'mismip' and
+'seroussi' are refused by name: no binary64 ``tanh`` or ``sin`` here is
+matched to the oracle host's glibc (``R8_REFUSED_FLOAT_MELT``).
 
 The model's scratch fields (the thermal cell mask, the edge dissipation) are
-private here. Arrays are device float32 with int32 masks and 1-based
+private here. Arrays are device float32 (RKIND 4) or float64 (RKIND 8) with
+int32 masks and 1-based
 connectivity, in the Fortran layout: ``a(nVertLevels, nCells)`` is C-order
 ``(nCells, nVertLevels)``. ``config_ice_density`` and
 ``config_ocean_density`` are also li_thermal's ``rhoi`` and ``rhoo``
@@ -40,7 +43,7 @@ import numpy as np
 from woof.hex import numerics as _hex_numerics
 from woof.hex.errors import ConfigurationRefusal
 
-from . import geometry_v842
+from . import geometry_v842, rkind
 
 SOURCE_FILES = (
     "src/core_landice/mode_forward/mpas_li_thermal.F:276-296,642-2170,2190-3190,3265-3307",
@@ -49,8 +52,15 @@ SOURCE_FILES = (
 COMPILE_OPTIONS = ("--std=c++17", "--fmad=false", "--ftz=false",
                    "--prec-div=true", "--prec-sqrt=true")
 MODULE_OPTIONS = COMPILE_OPTIONS
-#: The shared libm transcriptions the unit prepends
+#: The shared libm transcriptions the r4 unit prepends (the r8 unit's are rkind.r8_prelude's)
 MATH_HEADERS = ("glibc_flt32.cuh", "glibc_trig_flt32.cuh", "sfire_libm.cuh")
+#: Floating melt options whose libm call has no binary64 transcription matched to the oracle host
+R8_REFUSED_FLOAT_MELT = {
+    "mismip": "glibc's binary64 tanh (fdlibm, through expm1) has no transcription here matched to the oracle "
+              "host's words",
+    "seroussi": "glibc's binary64 sin is not correctly rounded and is LGPL, so its words cannot be reproduced "
+                "under the default licence",
+}
 THERMAL_SOLVERS = {"none": 0, "temperature": 1, "enthalpy": 2}
 BASAL_MASS_BAL_FLOAT = {"none": 0, "file": 1, "constant": 2, "mismip": 3, "seroussi": 4}
 AIR_TEMPERATURE_SOURCES = ("constant", "lapse", "file")
@@ -58,28 +68,32 @@ MAX_LEVELS = 128
 _BLOCK = 128
 
 
-def module_source() -> str:
+def module_source(precision: str = "r4") -> str:
+    rkind.require(precision)
+    body = files("woof.hex.mpas_ice").joinpath("thermal_solver_v842.cu").read_text(encoding="utf-8")
+    if precision == "r8":
+        return rkind.r8_prelude() + body
     import woof.core.kernels as kernels
     root = Path(kernels.__file__).parent
-    math = "\n".join((root / name).read_text(encoding="utf-8") for name in MATH_HEADERS)
-    return math + "\n" + files("woof.hex.mpas_ice").joinpath("thermal_solver_v842.cu").read_text(encoding="utf-8")
+    return "\n".join((root / name).read_text(encoding="utf-8") for name in MATH_HEADERS) + "\n" + body
 
 
 @lru_cache(maxsize=None)
-def _module_on(device: int, options: tuple[str, ...]):
+def _module_on(device: int, precision: str, options: tuple[str, ...]):
     import cupy as cp
     from woof.nvrtc_ptx_cache import compile_using_nvrtc
 
-    image, _ = compile_using_nvrtc(module_source(), options, None, "li_thermal_solver_v842.cu")
+    image, _ = compile_using_nvrtc(module_source(precision), options, None, f"li_thermal_solver_v842_{precision}.cu")
     with cp.cuda.Device(device):
         module = cp.cuda.function.Module()
         module.load(image.encode() if isinstance(image, str) else image)
     return module
 
 
-def _function(name: str):
+def _function(precision: str, name: str):
     import cupy as cp
-    return _module_on(cp.cuda.Device().id, _hex_numerics.options(COMPILE_OPTIONS, keep_ftz=True)).get_function(name)
+    return _module_on(cp.cuda.Device().id, precision,
+                      _hex_numerics.options(COMPILE_OPTIONS, keep_ftz=True)).get_function(name)
 
 
 def _check(name: str, array, dtype, shape) -> None:
@@ -116,7 +130,6 @@ def basal_melt_floating_ice(*, mesh: dict, geometry: dict, config_basal_mass_bal
     ``bedTopography``, ``lowerSurface``, ``cellMask``, ``vertexMask``,
     ``edgeMask``, ``floatingBasalMassBal``.
     """
-    import cupy as cp
     try:
         option = BASAL_MASS_BAL_FLOAT[config_basal_mass_bal_float]
     except KeyError:
@@ -130,18 +143,25 @@ def basal_melt_floating_ice(*, mesh: dict, geometry: dict, config_basal_mass_bal
         raise ValueError("config_basal_mass_bal_seroussi_period has to be a positive real value")
     g = geometry
     n_cells = g["thickness"].shape[0]
+    precision = rkind.precision_of(g["thickness"])
+    real = rkind.PRECISIONS[precision]
+    if precision == "r8" and config_basal_mass_bal_float in R8_REFUSED_FLOAT_MELT:
+        raise ConfigurationRefusal(
+            knob="config_basal_mass_bal_float", value=config_basal_mass_bal_float,
+            reason=f"at RKIND 8, {R8_REFUSED_FLOAT_MELT[config_basal_mass_bal_float]}",
+            declaration="config_basal_mass_bal_float = 'none' | 'file' | 'constant' at RKIND 8")
     ncs = int(mesh["nCellsSolve"])
     if not 0 <= ncs <= n_cells:
         raise ValueError("nCellsSolve must lie within nCells")
-    f32 = cp.float32
+    f32 = real
     for name in ("thickness", "bedTopography", "lowerSurface", "floatingBasalMassBal"):
         _check(name, g[name], f32, (n_cells,))
     _check("xCell", mesh["xCell"], f32, (n_cells,))
     geometry_v842.calculate_mask(mesh=mesh, geometry=g, **_mask_configs(
         config_ice_density, config_ocean_density, config_sea_level, config_dynamic_thickness,
         config_velocity_solver))
-    r = np.float32
-    _function("li_basal_melt_floating_v842")(_grid(n_cells), (_BLOCK,), (
+    r = real
+    _function(precision, "li_basal_melt_floating_v842")(_grid(n_cells), (_BLOCK,), (
         g["floatingBasalMassBal"], g["thickness"], g["cellMask"], mesh["xCell"], g["lowerSurface"],
         g["bedTopography"], np.int32(option), r(config_thermal_thickness), r(config_sea_level),
         r(config_bmlt_float_flux), r(config_bmlt_float_xlimit), r(config_basal_mass_bal_seroussi_amplitude),
@@ -190,6 +210,8 @@ def thermal_solver(*, mesh: dict, geometry: dict, velocity: dict, thermal: dict,
         raise ValueError(f"li_thermal_solver was called with invalid deltat = {deltat}")
     g, m, v, t = geometry, mesh, velocity, thermal
     n_cells, n_levels = t["temperature"].shape
+    precision = rkind.precision_of(t["temperature"])
+    real = rkind.PRECISIONS[precision]
     if not 1 <= n_levels <= MAX_LEVELS:
         raise ValueError(f"the column solve needs 1 to {MAX_LEVELS} layers, not {n_levels}")
     n_edges = g["slopeEdge"].shape[0]
@@ -197,7 +219,7 @@ def thermal_solver(*, mesh: dict, geometry: dict, velocity: dict, thermal: dict,
     ncs = int(m["nCellsSolve"])
     if not 0 <= ncs <= n_cells:
         raise ValueError("nCellsSolve must lie within nCells")
-    f32, i32 = cp.float32, cp.int32
+    f32, i32 = real, cp.int32
     for name in ("temperature", "waterfrac", "enthalpy", "heatDissipation"):
         _check(name, t[name], f32, (n_cells, n_levels))
     for name in ("surfaceTemperature", "basalTemperature", "surfaceAirTemperature", "basalHeatFlux",
@@ -215,7 +237,7 @@ def thermal_solver(*, mesh: dict, geometry: dict, velocity: dict, thermal: dict,
     for name, shape in (("edgesOnCell", (n_cells, max_edges)), ("nEdgesOnCell", (n_cells,)),
                         ("cellsOnEdge", (n_edges, 2))):
         _check(name, m[name], i32, shape)
-    r = np.float32
+    r = real
     rhoi = r(config_ice_density)
     block = (_BLOCK,)
     cells = _grid(n_cells)
@@ -225,15 +247,16 @@ def thermal_solver(*, mesh: dict, geometry: dict, velocity: dict, thermal: dict,
         config_velocity_solver))
     if config_velocity_solver == "sia":
         edge = cp.empty((n_edges, n_levels), f32)
-        _function("li_heat_dissipation_edge_v842")(_grid(n_edges), block, (
+        _function(precision, "li_heat_dissipation_edge_v842")(_grid(n_edges), block, (
             edge, g["thickness"], v["flowParamA"], g["slopeEdge"], m["layerCenterSigma"], m["cellsOnEdge"], rhoi,
             r(config_flowLawExponent), np.int32(n_edges), nc, nl))
-        _function("li_heat_dissipation_cell_v842")(cells, block, (
+        _function(precision, "li_heat_dissipation_cell_v842")(cells, block, (
             t["heatDissipation"], edge, m["dcEdge"], m["dvEdge"], m["areaCell"], m["nEdgesOnCell"],
             m["edgesOnCell"], rhoi, nc, nl, np.int32(max_edges)))
-    _function("li_basal_friction_v842")(cells, block, (t["basalFrictionFlux"], v["betaSolve"], v["basalSpeed"], nc))
+    _function(precision, "li_basal_friction_v842")(cells, block, (
+        t["basalFrictionFlux"], v["betaSolve"], v["basalSpeed"], nc))
     error = cp.zeros(1, i32)
-    _function("li_thermal_column_v842")(cells, block, (
+    _function(precision, "li_thermal_column_v842")(cells, block, (
         t["temperature"], t["waterfrac"], t["enthalpy"], t["surfaceTemperature"], t["basalTemperature"],
         t["surfaceAirTemperature"], t["surfaceConductiveFlux"], t["basalConductiveFlux"], g["groundedBasalMassBal"],
         g["floatingBasalMassBal"], error, t["heatDissipation"], t["basalHeatFlux"], t["basalFrictionFlux"],

@@ -49,6 +49,10 @@ words.
 
 ## Build and run (Linux, gfortran, CPU only)
 
+build.sh compiles everything twice: at RKIND 4 (`-DSINGLE_PRECISION`,
+`BUILD_DIR/*_r4`) and at RKIND 8 (`BUILD_DIR/*_r8`). Each `make_*` script
+runs both and writes `oracle-r4.npz` and `oracle-r8.npz`.
+
 ```bash
 pixi run -e mpas-oracle bash tools/mali_oracle/build.sh "$MPAS_V842" "$BUILD_DIR"
 pixi run -e default python tools/mali_oracle/make_fixture.py "$BUILD_DIR"           # SIA
@@ -59,14 +63,15 @@ pixi run -e default python tools/mali_oracle/make_thermal_solver_fixture.py "$BU
 ```
 
 The fixtures were written on x86-64 Linux, where gfortran's `x**y`, `exp`,
-`sin` and `tanh` call glibc's `powf`, `expf`, `sinf` and `tanhf`. Another libm returns different
+`sin` and `tanh` call glibc's `powf`, `expf`, `sinf` and `tanhf` at RKIND 4,
+and `x**y` and `exp` call `pow` and `exp` at RKIND 8. Another libm returns different
 words for some arguments: built on macOS against Apple's libm, the SIA
 oracle differs in 10 words of `bary_pb1982/normalVelocity` (the PB1982
 flow-law exponential and the real powers). So on a host without glibc,
 build.sh links `tools/oracle_libm/glibc_host.cpp` into the oracles (the
 host libm shim every MPAS oracle shares). That file is the repository's MIT
-glibc transcriptions (`glibc_flt32.cuh`, `glibc_trig_flt32.cuh` and
-`sfire_libm.cuh` in `woof/core/kernels` for these oracles)
+glibc transcriptions (`glibc_flt32.cuh`, `glibc_trig_flt32.cuh`,
+`sfire_libm.cuh` and, at RKIND 8, `glibc_flt64.cuh` in `woof/core/kernels`)
 compiled for the host. It equals pb's glibc 2.44 `expf` and `tanhf` on all
 2^32 inputs and its `powf` on 4e8 random pairs, and with it the macOS rebuild writes the
 committed fixtures word for word (gfortran 16.2.0 from Homebrew, arm64).

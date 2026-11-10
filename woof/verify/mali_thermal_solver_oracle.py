@@ -1,16 +1,18 @@
 """Cases and the stream layout for the MALI thermal solver oracle.
 
 ``tools/mali_oracle`` compiles MALI v8.4.2's land-ice modules verbatim with
-gfortran -O0 -ffp-contract=off at RKIND 4, and ``run_thermal_solver.F90``
+gfortran -O0 -ffp-contract=off at RKIND 4 and 8, and ``run_thermal_solver.F90``
 makes a restart's ``li_thermal_init``, then ``li_basal_melt_floating_ice``
 and ``li_thermal_solver``, as ``li_time_integration_fe`` does. This module
 writes that driver's input stream, reads its output, and builds the cases.
 
 The meshes are random connectivity (1-based, every index the routines read
 inside the arrays). Fields are drawn in float64 from numpy's legacy
-``RandomState`` with ``random_sample`` only and rounded once to float32, so
+``RandomState`` with ``random_sample`` only and rounded once to the case's precision, so
 the bytes do not depend on the platform. ``input_digest`` is pinned beside
-the fixture.
+the fixture. A case is built at one precision: the RKIND 4 case rounds the
+draws to float32 and the RKIND 8 case keeps them in float64, and the stream,
+the fixture (``oracle-r4.npz``, ``oracle-r8.npz``) and the GPU run follow it.
 """
 from __future__ import annotations
 
@@ -20,6 +22,7 @@ from pathlib import Path
 import numpy as np
 
 FIXTURE_DIR = Path(__file__).resolve().parents[2] / "tests" / "data" / "oracles" / "mali_thermal_solver"
+PRECISIONS = {"r4": np.float32, "r8": np.float64}
 THERMAL = {"none": 0, "temperature": 1, "enthalpy": 2}
 FLOAT_MELT = {"none": 0, "file": 1, "constant": 2, "mismip": 3, "seroussi": 4}
 
@@ -49,13 +52,13 @@ CASES = (
 
 
 def _pmp_column(rhoi, thickness, sigma):
-    """pressure_melting_point_column in float32, the Fortran's order (deg C)."""
-    f = np.float32
+    """pressure_melting_point_column at the arguments' precision, the Fortran's order (deg C)."""
+    f = np.result_type(rhoi, thickness, sigma).type
     return -(((f(9.7456e-8) * rhoi) * f(9.80616)) * thickness) * sigma
 
 
 def make_case(name: str, seed: int, n_cells: int, n_levels: int, solver: str, thermal: str, air: str,
-              float_melt: str, calculate_bmb: bool) -> dict:
+              float_melt: str, calculate_bmb: bool, precision: str = "r4") -> dict:
     """One deterministic case: grounded and floating ice, thin ice and open
     ocean on a random mesh, a month's step.
 
@@ -76,12 +79,13 @@ def make_case(name: str, seed: int, n_cells: int, n_levels: int, solver: str, th
     them uninitialised.
     """
     rs = np.random.RandomState(seed)
+    real = PRECISIONS[precision]
     nc, nl = n_cells, n_levels
     ne, nv, me = 3 * nc, 2 * nc, 7
-    f = np.float32
+    f = real
 
     def uniform(lo, hi, shape):
-        return (lo + (hi - lo) * rs.random_sample(shape)).astype(np.float32)
+        return (lo + (hi - lo) * rs.random_sample(shape)).astype(real)
 
     def ints(lo, hi, shape):
         return (lo + np.floor((hi - lo) * rs.random_sample(shape))).astype(np.int32)
@@ -93,9 +97,9 @@ def make_case(name: str, seed: int, n_cells: int, n_levels: int, solver: str, th
     thickness[thin] = uniform(0.05, 1.0, int(thin.sum()))
     fractions = uniform(0.5, 1.5, nl).astype(np.float64)
     fractions = fractions / fractions.sum()
-    interfaces = np.concatenate([[0.0], np.cumsum(fractions)]).astype(np.float32)
+    interfaces = np.concatenate([[0.0], np.cumsum(fractions)]).astype(real)
     interfaces[-1] = 1.0
-    centres = (0.5 * (interfaces[:-1].astype(np.float64) + interfaces[1:])).astype(np.float32)
+    centres = (0.5 * (interfaces[:-1].astype(np.float64) + interfaces[1:])).astype(real)
     temperature = uniform(240.0, 273.0, (nc, nl))
     basal_temperature = uniform(250.0, 273.0, nc)
     at_pmp = rs.random_sample(nc) < 1.0 / 6.0
@@ -106,7 +110,8 @@ def make_case(name: str, seed: int, n_cells: int, n_levels: int, solver: str, th
     water[rs.random_sample(nc) < 0.5] = 0.0
     year = 365.0 * 86400.0
     case = {
-        "name": name, "nCells": nc, "nEdges": ne, "nVertices": nv, "nVertLevels": nl, "maxEdges": me,
+        "name": name, "precision": precision, "nCells": nc, "nEdges": ne, "nVertices": nv, "nVertLevels": nl,
+        "maxEdges": me,
         "nCellsSolve": nc - 4, "velocitySolver": solver, "thermalSolver": thermal, "airSource": air,
         "floatMelt": float_melt, "calculateBmb": bool(calculate_bmb),
         "deltat": f(30.0 * 86400.0), "daysSinceStart": f(400.5), "iceDensity": rhoi, "oceanDensity": f(1028.0),
@@ -136,8 +141,21 @@ def make_case(name: str, seed: int, n_cells: int, n_levels: int, solver: str, th
     return case
 
 
-def cases() -> list[dict]:
-    return [make_case(*row) for row in CASES]
+#: At RKIND 8 the port refuses 'mismip' and 'seroussi' (their binary64 tanh and
+#: sin have no matched transcription), so those cases run 'constant' and 'none'
+R8_FLOAT_MELT = {"mismip": "constant", "seroussi": "none"}
+
+
+def cases(precision: str = "r4") -> list[dict]:
+    rows = CASES
+    if precision == "r8":
+        rows = [(row[0].replace(row[7], R8_FLOAT_MELT[row[7]]),) + row[1:7] + (R8_FLOAT_MELT[row[7]],) + row[8:]
+                if row[7] in R8_FLOAT_MELT else row for row in CASES]
+    return [make_case(*row, precision=precision) for row in rows]
+
+
+def _real(case: dict) -> np.dtype:
+    return np.dtype(PRECISIONS[case["precision"]]).newbyteorder("<")
 
 
 def input_bytes(case: dict) -> bytes:
@@ -146,11 +164,11 @@ def input_bytes(case: dict) -> bytes:
                      case["nCellsSolve"], int(case["velocitySolver"] == "sia"), THERMAL[case["thermalSolver"]],
                      int(case["airSource"] == "lapse"), FLOAT_MELT[case["floatMelt"]], int(case["calculateBmb"])],
                     "<i4")
-    scalars = np.array([case[name] for name in SCALARS], "<f4")
+    scalars = np.array([case[name] for name in SCALARS], _real(case))
     parts = [head.tobytes(), scalars.tobytes()]
     parts += [np.ascontiguousarray(case[name], "<i4").tobytes() for name in INT_FIELDS]
-    parts += [np.ascontiguousarray(case[name], "<f4").tobytes() for name in REAL_FIELDS + REAL_STATE]
-    parts += [np.ascontiguousarray(case["workLevelEdge"], "<f4").tobytes(),
+    parts += [np.ascontiguousarray(case[name], _real(case)).tobytes() for name in REAL_FIELDS + REAL_STATE]
+    parts += [np.ascontiguousarray(case["workLevelEdge"], _real(case)).tobytes(),
               np.ascontiguousarray(case["iceCellMask"], "<i4").tobytes()]
     return b"".join(parts)
 
@@ -175,19 +193,19 @@ def read_outputs(raw: bytes, case: dict) -> dict[str, np.ndarray]:
     out = {"errInit": head[0:1].astype(np.int32), "errFloat": head[1:2].astype(np.int32),
            "errSolver": head[2:3].astype(np.int32), "logErrors": head[3:4].astype(np.int32)}
     off = 16
-    for name, dtype in [(n, "<i4") for n in INT_OUTPUTS] + [(n, "<f4") for n in REAL_STATE]:
+    for name, dtype in [(n, np.dtype("<i4")) for n in INT_OUTPUTS] + [(n, _real(case)) for n in REAL_STATE]:
         shape = _shape(name, case)
         n = int(np.prod(shape))
-        out[name] = np.frombuffer(raw, dtype, n, off).reshape(shape).astype(np.dtype(dtype).newbyteorder("="))
-        off += 4 * n
+        out[name] = np.frombuffer(raw, dtype, n, off).reshape(shape).astype(dtype.newbyteorder("="))
+        off += dtype.itemsize * n
     if off != len(raw):
         raise ValueError(f"oracle output: {len(raw) - off} trailing bytes")
     return out
 
 
-def load_fixture() -> dict[str, dict[str, np.ndarray]]:
-    """The committed oracle outputs, keyed by case then field."""
-    with np.load(FIXTURE_DIR / "oracle-r4.npz") as data:
+def load_fixture(precision: str = "r4") -> dict[str, dict[str, np.ndarray]]:
+    """The committed oracle outputs at ``precision``, keyed by case then field."""
+    with np.load(FIXTURE_DIR / f"oracle-{precision}.npz") as data:
         out: dict[str, dict[str, np.ndarray]] = {}
         for key in data.files:
             case, field = key.split("/", 1)
@@ -200,7 +218,8 @@ def word_mismatches(a: np.ndarray, b: np.ndarray) -> int:
     a, b = np.ascontiguousarray(a), np.ascontiguousarray(b)
     if a.shape != b.shape or a.dtype.itemsize != b.dtype.itemsize:
         return int(max(a.size, b.size))
-    return int(np.count_nonzero(a.view(np.uint32) != b.view(np.uint32)))
+    word = np.dtype(f"u{a.dtype.itemsize}")
+    return int(np.count_nonzero(a.view(word) != b.view(word)))
 
 
 def run_gpu(case: dict) -> dict[str, np.ndarray]:
@@ -240,11 +259,11 @@ def run_gpu(case: dict) -> dict[str, np.ndarray]:
     return {name: cp.asnumpy(dev[name]) for name in INT_OUTPUTS + REAL_STATE}
 
 
-def measure(reference: dict | None = None) -> dict[str, dict[str, int]]:
-    """Per case and field, the GPU words that differ from the oracle's."""
-    reference = load_fixture() if reference is None else reference
+def measure(reference: dict | None = None, precision: str = "r4") -> dict[str, dict[str, int]]:
+    """Per case and field, the GPU words at ``precision`` that differ from the oracle's."""
+    reference = load_fixture(precision) if reference is None else reference
     report: dict[str, dict[str, int]] = {}
-    for case in cases():
+    for case in cases(precision):
         got = run_gpu(case)
         want = reference[case["name"]]
         report[case["name"]] = {name: word_mismatches(got[name], want[name]) for name in got}

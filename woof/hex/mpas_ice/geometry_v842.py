@@ -10,8 +10,9 @@ thickness advection:
 - ``li_layer_normal_velocity``: the layer-midpoint velocity and the advective
   CFL time step.
 
-They are held word for word to those routines, compiled verbatim
-(``tools/mali_oracle``, ``tests/test_mali_geometry_parity.py``). The
+They are held word for word to those routines, compiled verbatim at RKIND 4
+and RKIND 8 (``tools/mali_oracle``, ``tests/test_mali_geometry_parity.py``);
+arrays are float32 or float64. The
 higher-order solvers' mask paths (the Albany-active and Dirichlet bits) are
 refused by name with the solvers themselves.
 """
@@ -25,6 +26,8 @@ import numpy as np
 from woof.hex import numerics as _hex_numerics
 from woof.hex.errors import ConfigurationRefusal
 
+from . import rkind
+
 SOURCE_FILES = (
     "src/core_landice/shared/mpas_li_mask.F:30-40,239-626,700-935",
     "src/core_landice/mode_forward/mpas_li_advection.F:533-591,1397-1503",
@@ -37,25 +40,28 @@ MASK_VELOCITY_SOLVERS = ("sia", "none")
 _BLOCK = 128
 
 
-def module_source() -> str:
-    return files("woof.hex.mpas_ice").joinpath("geometry_v842.cu").read_text(encoding="utf-8")
+def module_source(precision: str = "r4") -> str:
+    rkind.require(precision)
+    body = files("woof.hex.mpas_ice").joinpath("geometry_v842.cu").read_text(encoding="utf-8")
+    return (rkind.r8_prelude() if precision == "r8" else "") + body
 
 
 @lru_cache(maxsize=None)
-def _module_on(device: int, options: tuple[str, ...]):
+def _module_on(device: int, precision: str, options: tuple[str, ...]):
     import cupy as cp
     from woof.nvrtc_ptx_cache import compile_using_nvrtc
 
-    image, _ = compile_using_nvrtc(module_source(), options, None, "li_geometry_v842.cu")
+    image, _ = compile_using_nvrtc(module_source(precision), options, None, f"li_geometry_v842_{precision}.cu")
     with cp.cuda.Device(device):
         module = cp.cuda.function.Module()
         module.load(image.encode() if isinstance(image, str) else image)
     return module
 
 
-def _function(name: str):
+def _function(precision: str, name: str):
     import cupy as cp
-    return _module_on(cp.cuda.Device().id, _hex_numerics.options(COMPILE_OPTIONS, keep_ftz=True)).get_function(name)
+    return _module_on(cp.cuda.Device().id, precision,
+                      _hex_numerics.options(COMPILE_OPTIONS, keep_ftz=True)).get_function(name)
 
 
 def _check(name: str, array, dtype, shape) -> None:
@@ -85,7 +91,9 @@ def calculate_mask(*, mesh: dict, geometry: dict, config_ice_density: float, con
     n_cells, max_edges = mesh["cellsOnCell"].shape
     n_vertices, vertex_degree = mesh["cellsOnVertex"].shape
     n_edges = mesh["cellsOnEdge"].shape[0]
-    i32, f32 = cp.int32, cp.float32
+    precision = rkind.precision_of(geometry["thickness"])
+    real = rkind.PRECISIONS[precision]
+    i32, f32 = cp.int32, real
     for name, dtype, shape in (("nEdgesOnCell", i32, (n_cells,)), ("cellsOnCell", i32, (n_cells, max_edges)),
                                ("cellsOnVertex", i32, (n_vertices, vertex_degree)),
                                ("cellsOnEdge", i32, (n_edges, 2))):
@@ -97,23 +105,24 @@ def calculate_mask(*, mesh: dict, geometry: dict, config_ice_density: float, con
     g = geometry
     cell = g["cellMask"]
     work = cp.empty_like(cell)
-    rhoi, rhoo, sl = np.float32(config_ice_density), np.float32(config_ocean_density), np.float32(config_sea_level)
+    rhoi, rhoo, sl = real(config_ice_density), real(config_ocean_density), real(config_sea_level)
     grid, block = _grid(n_cells), (_BLOCK,)
-    _function("li_mask_cell_state_v842")(grid, block, (cell, g["thickness"], g["bedTopography"], rhoi, rhoo, sl,
+    _function(precision, "li_mask_cell_state_v842")(grid, block, (cell, g["thickness"], g["bedTopography"], rhoi,
+                                                                   rhoo, sl,
                                                         np.int32(n_cells)))
-    _function("li_mask_margin_v842")(grid, block, (work, cell, g["thickness"], mesh["nEdgesOnCell"],
-                                                    mesh["cellsOnCell"], np.float32(config_dynamic_thickness),
+    _function(precision, "li_mask_margin_v842")(grid, block, (work, cell, g["thickness"], mesh["nEdgesOnCell"],
+                                                    mesh["cellsOnCell"], real(config_dynamic_thickness),
                                                     np.int32(n_cells), np.int32(max_edges)))
-    _function("li_mask_calving_front_v842")(grid, block, (cell, work, g["thickness"], g["bedTopography"],
+    _function(precision, "li_mask_calving_front_v842")(grid, block, (cell, work, g["thickness"], g["bedTopography"],
                                                            mesh["nEdgesOnCell"], mesh["cellsOnCell"], sl,
                                                            np.int32(n_cells), np.int32(max_edges)))
-    _function("li_mask_dynamic_margin_grounding_line_v842")(grid, block, (
+    _function(precision, "li_mask_dynamic_margin_grounding_line_v842")(grid, block, (
         work, cell, g["bedTopography"], mesh["nEdgesOnCell"], mesh["cellsOnCell"], sl, np.int32(n_cells),
         np.int32(max_edges)))
     cell[...] = work
-    _function("li_mask_vertex_v842")(_grid(n_vertices), block, (g["vertexMask"], cell, mesh["cellsOnVertex"],
+    _function(precision, "li_mask_vertex_v842")(_grid(n_vertices), block, (g["vertexMask"], cell, mesh["cellsOnVertex"],
                                                                  np.int32(n_vertices), np.int32(vertex_degree)))
-    _function("li_mask_edge_v842")(_grid(n_edges), block, (g["edgeMask"], cell, mesh["cellsOnEdge"],
+    _function(precision, "li_mask_edge_v842")(_grid(n_edges), block, (g["edgeMask"], cell, mesh["cellsOnEdge"],
                                                             np.int32(n_edges)))
 
 
@@ -124,33 +133,36 @@ def update_geometry_and_layer_thickness(*, mesh: dict, geometry: dict, config_ic
     (nCells, nVertLevels). ``mesh`` holds ``layerThicknessFractions``."""
     import cupy as cp
     n_cells, n_levels = geometry["layerThickness"].shape
-    f32 = cp.float32
+    precision = rkind.precision_of(geometry["layerThickness"])
+    real = f32 = rkind.PRECISIONS[precision]
     _check("layerThicknessFractions", mesh["layerThicknessFractions"], f32, (n_levels,))
     for name in ("thickness", "bedTopography", "upperSurface", "lowerSurface"):
         _check(name, geometry[name], f32, (n_cells,))
     _check("cellMask", geometry["cellMask"], cp.int32, (n_cells,))
     _check("layerThickness", geometry["layerThickness"], f32, (n_cells, n_levels))
     g = geometry
-    _function("li_update_geometry_layer_thickness_v842")(_grid(n_cells), (_BLOCK,), (
+    _function(precision, "li_update_geometry_layer_thickness_v842")(_grid(n_cells), (_BLOCK,), (
         g["upperSurface"], g["lowerSurface"], g["layerThickness"], g["thickness"], g["bedTopography"],
-        g["cellMask"], mesh["layerThicknessFractions"], np.float32(config_ice_density),
-        np.float32(config_ocean_density), np.float32(config_sea_level), np.int32(n_cells), np.int32(n_levels)))
+        g["cellMask"], mesh["layerThicknessFractions"], real(config_ice_density),
+        real(config_ocean_density), real(config_sea_level), np.int32(n_cells), np.int32(n_levels)))
 
 
 def layer_normal_velocity(*, normal_velocity, layer_normal_velocity, dc_edge, n_edges_solve: int):
     """``li_layer_normal_velocity``: write ``layer_normal_velocity`` (nEdges,
     nVertLevels) on the solved edges. Returns ``minOfMaxAllowableDt`` as a
-    device float32 array of one word."""
+    device array of one word, of the arrays' precision."""
     import cupy as cp
     n_edges, n_levels = layer_normal_velocity.shape
     if not 0 <= int(n_edges_solve) <= n_edges:
         raise ValueError("n_edges_solve must lie within nEdges")
-    _check("normalVelocity", normal_velocity, cp.float32, (n_edges, n_levels + 1))
-    _check("layerNormalVelocity", layer_normal_velocity, cp.float32, (n_edges, n_levels))
-    _check("dcEdge", dc_edge, cp.float32, (n_edges,))
-    edge_min = cp.empty(max(1, int(n_edges_solve)), dtype=cp.float32)
-    out = cp.empty(1, dtype=cp.float32)
-    _function("li_layer_normal_velocity_v842")(_grid(n_edges_solve), (_BLOCK,), (
+    precision = rkind.precision_of(layer_normal_velocity)
+    real = rkind.PRECISIONS[precision]
+    _check("normalVelocity", normal_velocity, real, (n_edges, n_levels + 1))
+    _check("layerNormalVelocity", layer_normal_velocity, real, (n_edges, n_levels))
+    _check("dcEdge", dc_edge, real, (n_edges,))
+    edge_min = cp.empty(max(1, int(n_edges_solve)), dtype=real)
+    out = cp.empty(1, dtype=real)
+    _function(precision, "li_layer_normal_velocity_v842")(_grid(n_edges_solve), (_BLOCK,), (
         layer_normal_velocity, edge_min, normal_velocity, dc_edge, np.int32(n_edges_solve), np.int32(n_levels)))
-    _function("li_min_dt_v842")((1,), (1,), (out, edge_min, np.int32(n_edges_solve)))
+    _function(precision, "li_min_dt_v842")((1,), (1,), (out, edge_min, np.int32(n_edges_solve)))
     return out
