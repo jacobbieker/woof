@@ -101,6 +101,8 @@ def launch_radm2_emiss(gas, gas_emis, rho_phy, alt, dz8w, dtstep, *, kemit,
     frames = []
     for i, e in enumerate(list(gas_emis) + list(aerosol_emis or ())):
         if e.ndim == 2:
+            if e.shape != (ny, nx):
+                raise ValueError(f"emission frame {i} must be ({ny}, {nx}), got {e.shape}")
             e = e.reshape(1, ny, nx)
         if e.dtype != cp.float32 or e.ndim != 3 or e.shape[1:] != (ny, nx) \
                 or not e.flags.c_contiguous:

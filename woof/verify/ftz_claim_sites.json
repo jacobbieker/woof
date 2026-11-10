@@ -11,10 +11,10 @@
   ],
   "attribution_note": "route/mechanism attribution is judgment across five measured routes and is not machine-derivable; unattributed records carry asserted_token: null and the gate requires only that a token, once written, agrees with the receipt",
   "anchoring_note": "a site is its file plus the exact text of its line (anchor, anchor_sha256), and identical lines in one file are counted; line is where the generator last found the site, a hint the check does not fail on, so lines added or removed above a claim leave the census valid",
-  "site_count": 5417,
+  "site_count": 5419,
   "site_count_by_kind": {
     "behavioural": 67,
-    "prose": 5350
+    "prose": 5352
   },
   "sites": [
     {
@@ -29862,10 +29862,32 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
+      "line": 10939,
+      "kind": "prose",
+      "anchor": "\"--ftz=false\",",
+      "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
       "line": 10946,
       "kind": "prose",
       "anchor": "\"-ftz=true\",",
       "anchor_sha256": "24369f4c68b8df825fef64292790b5275594e43b3b8418b9e14f54824a18c77a",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tools/cuda_rounding_baseline.json",
+      "line": 10947,
+      "kind": "prose",
+      "anchor": "\"--ftz=false\",",
+      "anchor_sha256": "c449c6e29424c93c674fa3d2fd48d035d5b73f02fd3c6b8453b52c942c0acd97",
       "route": null,
       "mechanism": null,
       "asserted_token": null,

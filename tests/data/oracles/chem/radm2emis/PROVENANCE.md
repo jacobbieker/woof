@@ -21,16 +21,16 @@ Flags: `-O0 -cpp -DEM_CORE=1 -DNMM_CORE=0 -DRWORDSIZE=4 -DIWORDSIZE=4
 and `__powisf2`, all inside `aerosols_sorgam_init` (the emission adds
 themselves are products, quotients and sums); no libmvec `_ZGV*` symbol in
 any -O0 object (the positive control produced one).
-Driver: `tools/chem_wrf471_oracle/radm2emis/run_radm2emis.F90` (sha256 a562d931e66e7795ed6a76e309050f4410231ecefb09f532400d5e011a9aca6a).
+Driver: `tools/chem_wrf471_oracle/radm2emis/run_radm2emis.F90` (sha256 901d2e11170a3f5f10f65752092b46dc52f2d2c79ef674f7b7640cfdce41bfb1).
 
 Rebuild:
 
 ```sh
-docker run --rm -u $(id -u):$(id -g) -v WRF-4.7.1:/wrf:ro -v $PWD:/repo -v BUILD:/build \
+docker run --rm -u $(id -u):$(id -g) -v /path/to/WRF-4.7.1:/wrf:ro -v "$PWD":/repo -v /path/to/build:/build \
     -w /repo noah-oracle:u2404 \
     bash tools/chem_wrf471_oracle/radm2emis/build.sh /wrf /build/radm2emis /build/radm2emis/fixtures
 ```
 
-then copy `/build/radm2emis/fixtures/radm2emis/*` here.  What is committed
+then copy `/path/to/build/radm2emis/fixtures/radm2emis/*` here (both mounts are absolute host paths, not named volumes).  What is committed
 here is the oracle's numeric output only.  `oracle-sha256sums.txt` is
 written by the build and checked by the test.

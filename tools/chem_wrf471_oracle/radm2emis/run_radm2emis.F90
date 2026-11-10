@@ -82,7 +82,9 @@ program run_radm2emis
           do i = 1, nx
             ! gases in mol km-2 hr-1, aerosols in ug m-2 s-1; a tenth of the
             ! rates are exactly zero
-            emis_ant(i, k, j, n) = 10. ** (4. * draw() - 2.) * merge(0., 1., draw() < .1)
+            ! (two statements: draw() advances seed, so each call is its own)
+            emis_ant(i, k, j, n) = 10. ** (4. * draw() - 2.)
+            if (draw() < .1) emis_ant(i, k, j, n) = 0.
           end do
         end do
       end do
