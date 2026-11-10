@@ -1,0 +1,11 @@
+chem f4 4 8 6 2 81
+rho_phy f4 3 8 6 2
+alt f4 3 8 6 2
+dz8w f4 3 8 6 2
+factnumn f4 0
+factnuma f4 0
+factnumc f4 0
+anthfac f4 0
+orgfac f4 0
+so4fac f4 0
+no3fac f4 0

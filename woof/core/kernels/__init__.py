@@ -1002,7 +1002,7 @@ def module_options(name: str) -> tuple[str, ...]:
         return (("-std=c++17", "--fmad=false", "--ftz=false") if is_strict()
                 else ("-std=c++17", "--fmad=true", "--ftz=false"))
     if name in ("noah_ua", "noah_mosaic_ua", "noah_ua_sfcdiags", "noah_seaice_options", "noah_fractional", "sfclay_dx2d",
-                "chem_radm2", "chem_sorgam", "chem_ftuv"):
+                "chem_radm2", "chem_sorgam", "chem_ftuv", "chem_radm2_emiss"):
         return ("-std=c++17", "--fmad=false", "--ftz=false")
     if name == "eeps":
         from woof.wrf_exact import ENABLED
@@ -1512,7 +1512,7 @@ def load_module(name: str):
         return compile_noftz_module(name, src, f"{MODULE_KEY_ROOT}:{name}")
     options = module_options(name)
     if name in ("noah_ua", "noah_mosaic_ua", "noah_ua_sfcdiags", "noah_seaice_options", "noah_fractional", "sfclay_dx2d",
-                "chem_radm2", "chem_sorgam", "chem_ftuv"):
+                "chem_radm2", "chem_sorgam", "chem_ftuv", "chem_radm2_emiss"):
         return _load_module_preserving_subnormals(name, src, options)
 
     if name in ("camzm", "cammgmp", "uwshcu"):

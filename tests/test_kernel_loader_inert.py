@@ -517,6 +517,9 @@ def test_lake_compile_options_do_not_change_existing_modules(monkeypatch, strict
     expected["chem_sorgam"] = ("-std=c++17", "--fmad=false", "--ftz=false")
     # Fast-TUV photolysis, likewise (tests/test_chem_ftuv_wrf471_parity.py).
     expected["chem_ftuv"] = ("-std=c++17", "--fmad=false", "--ftz=false")
+    # RADM2/SORGAM anthropogenic emissions, likewise
+    # (tests/test_chem_radm2_emiss_wrf471_parity.py).
+    expected["chem_radm2_emiss"] = ("-std=c++17", "--fmad=false", "--ftz=false")
     names = _module_names()
     assert set(expected) <= set(names), sorted(set(expected) - set(names))
     mismatches = {name: (kernel_loader.module_options(name),
