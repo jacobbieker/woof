@@ -5,12 +5,16 @@
 ``li_diagnostic_vars``, ``li_sia``) and the framework operators they call
 (``mpas_constants``, ``mpas_vector_operations``, ``mpas_matrix_operations``,
 ``mpas_geometry_utils``), all verbatim, with gfortran -O0 -ffp-contract=off
-at RKIND 4. ``run_oracle.F90`` makes one ``li_sia_solve`` call. This module
+at RKIND 4 and RKIND 8. ``run_oracle.F90`` makes one ``li_sia_solve`` call. This module
 writes the driver's input stream, reads its output, builds the cases and runs
 the GPU port the same way.
 
 The array convention, the RandomState discipline and the random-connectivity
-meshes are those of :mod:`woof.verify.mpas_seaice_evp_oracle`.
+meshes are those of :mod:`woof.verify.mpas_seaice_evp_oracle`. A case is
+built at one precision (``make_case(..., precision)``): the RKIND 4 case
+rounds the draws to float32 and the RKIND 8 case keeps them in float64, and
+the stream, the fixture (``oracle-r4.npz``, ``oracle-r8.npz``) and the GPU
+run follow the case's precision.
 """
 from __future__ import annotations
 
@@ -20,6 +24,7 @@ from pathlib import Path
 import numpy as np
 
 FIXTURE_DIR = (Path(__file__).resolve().parents[2] / "tests" / "data" / "oracles" / "mali_sia")
+PRECISIONS = {"r4": np.float32, "r8": np.float64}
 
 INT_FIELDS = ("cellsOnEdge", "verticesOnEdge", "baryCellsOnVertex", "cellsOnVertex", "nEdgesOnEdge",
               "edgesOnEdge", "edgeMask", "cellMask")
@@ -39,7 +44,7 @@ CASES = (
 
 
 def make_case(name: str, seed: int, n_cells: int, n_levels: int, tangent: str, flow: str,
-              n: float, enhancement: float) -> dict:
+              n: float, enhancement: float, precision: str = "r4") -> dict:
     """One deterministic case with the magnitudes of an ice sheet on a 2-20 km mesh.
 
     The case covers:
@@ -57,14 +62,15 @@ def make_case(name: str, seed: int, n_cells: int, n_levels: int, tangent: str, f
     guarantees; otherwise flwaLevelEdge would divide by zero.
     """
     rs = np.random.RandomState(seed)
+    real = PRECISIONS[precision]
     nc, nl = n_cells, n_levels
     ne, nv, me2 = 3 * nc, 2 * nc, 10
 
     def uniform(lo, hi, shape):
-        return (lo + (hi - lo) * rs.random_sample(shape)).astype(np.float32)
+        return (lo + (hi - lo) * rs.random_sample(shape)).astype(real)
 
     ice = rs.random_sample(nc) < 0.85
-    thickness = np.where(ice, uniform(10.0, 3200.0, nc), np.float32(0.0)).astype(np.float32)
+    thickness = np.where(ice, uniform(10.0, 3200.0, nc), real(0.0)).astype(real)
     dynamic_cell = ice & (rs.random_sample(nc) < 0.9)
     other_bits = (rs.randint(0, 16, nc) * 4 + rs.randint(0, 2, nc)).astype(np.int32)  # bits other than 2
     cell_mask = (other_bits | np.where(dynamic_cell, 2, 0)).astype(np.int32)
@@ -73,18 +79,19 @@ def make_case(name: str, seed: int, n_cells: int, n_levels: int, tangent: str, f
     dynamic_edge = any_dynamic & (rs.random_sample(ne) < 0.92)
     edge_mask = ((rs.randint(0, 16, ne) * 4 + rs.randint(0, 2, ne)) | np.where(dynamic_edge, 2, 0)).astype(np.int32)
     interfaces = np.sort(rs.random_sample(nl - 1))
-    sigma_i = np.concatenate(([0.0], interfaces, [1.0])).astype(np.float32)
-    sigma_c = ((sigma_i[:-1].astype(np.float64) + sigma_i[1:].astype(np.float64)) * 0.5).astype(np.float32)
+    sigma_i = np.concatenate(([0.0], interfaces, [1.0])).astype(real)
+    sigma_c = ((sigma_i[:-1].astype(np.float64) + sigma_i[1:].astype(np.float64)) * 0.5).astype(real)
     n_edges_on_edge = rs.randint(6, me2 + 1, ne).astype(np.int32)
     edges_on_edge = np.full((ne, me2), ne + 5, np.int32)
     for e in range(ne):
         edges_on_edge[e, :n_edges_on_edge[e]] = rs.randint(1, ne + 1, n_edges_on_edge[e])
     case = {
-        "name": name, "nCells": nc, "nEdges": ne, "nVertices": nv, "nVertLevels": nl, "maxEdges2": me2,
+        "name": name, "precision": precision, "nCells": nc, "nEdges": ne, "nVertices": nv, "nVertLevels": nl,
+        "maxEdges2": me2,
         "nEdgesSolve": ne - 7, "tangentSlopeCalculation": tangent, "flowParamACalculation": flow,
-        "iceDensity": np.float32(910.0), "flowLawExponent": np.float32(n),
-        "enhancementFactor": np.float32(enhancement), "defaultFlowParamA": np.float32(3.1709792e-24),
-        "dynamicThickness": np.float32(10.0),
+        "iceDensity": real(910.0), "flowLawExponent": real(n),
+        "enhancementFactor": real(enhancement), "defaultFlowParamA": real(3.1709792e-24),
+        "dynamicThickness": real(10.0),
         "cellsOnEdge": cells_on_edge,
         "verticesOnEdge": rs.randint(1, nv + 1, (ne, 2)).astype(np.int32),
         "baryCellsOnVertex": rs.randint(1, nc + 1, (nv, 3)).astype(np.int32),
@@ -110,8 +117,12 @@ def make_case(name: str, seed: int, n_cells: int, n_levels: int, tangent: str, f
     return case
 
 
-def cases() -> list[dict]:
-    return [make_case(*row) for row in CASES]
+def cases(precision: str = "r4") -> list[dict]:
+    return [make_case(*row, precision=precision) for row in CASES]
+
+
+def _real(case: dict) -> np.dtype:
+    return np.dtype(PRECISIONS[case["precision"]]).newbyteorder("<")
 
 
 def _shape(name: str, case: dict) -> tuple[int, ...]:
@@ -125,12 +136,12 @@ def input_bytes(case: dict) -> bytes:
     head = np.array([case["nCells"], case["nEdges"], case["nVertices"], case["nVertLevels"], case["maxEdges2"],
                      case["nEdgesSolve"], TANGENT[case["tangentSlopeCalculation"]], FLOW_A[case["flowParamACalculation"]]], "<i4")
     reals = np.array([case["iceDensity"], case["flowLawExponent"], case["enhancementFactor"],
-                      case["defaultFlowParamA"], case["dynamicThickness"]], "<f4")
+                      case["defaultFlowParamA"], case["dynamicThickness"]], _real(case))
     parts = [head.tobytes(), reals.tobytes()]
     for name in INT_FIELDS:
         parts.append(np.ascontiguousarray(case[name], "<i4").tobytes())
     for name in REAL_FIELDS + OUTPUT_FIELDS:
-        parts.append(np.ascontiguousarray(case[name], "<f4").tobytes())
+        parts.append(np.ascontiguousarray(case[name], _real(case)).tobytes())
     return b"".join(parts)
 
 
@@ -145,15 +156,15 @@ def read_outputs(raw: bytes, case: dict) -> dict[str, np.ndarray]:
     for name in OUTPUT_FIELDS:
         shape = _shape(name, case)
         count = int(np.prod(shape))
-        out[name] = np.frombuffer(raw, "<f4", count, off).reshape(shape).copy()
-        off += 4 * count
+        out[name] = np.frombuffer(raw, _real(case), count, off).reshape(shape).astype(PRECISIONS[case["precision"]])
+        off += _real(case).itemsize * count
     if off != len(raw):
         raise ValueError(f"oracle output: {len(raw) - off} trailing bytes")
     return out
 
 
-def load_fixture() -> dict[str, dict[str, np.ndarray]]:
-    with np.load(FIXTURE_DIR / "oracle-r4.npz") as data:
+def load_fixture(precision: str = "r4") -> dict[str, dict[str, np.ndarray]]:
+    with np.load(FIXTURE_DIR / f"oracle-{precision}.npz") as data:
         out: dict[str, dict[str, np.ndarray]] = {}
         for key in data.files:
             case, field = key.split("/", 1)
@@ -162,8 +173,12 @@ def load_fixture() -> dict[str, dict[str, np.ndarray]]:
 
 
 def bit_mismatches(a: np.ndarray, b: np.ndarray) -> int:
-    return int(np.count_nonzero(np.asarray(a, np.float32).view(np.uint32)
-                                != np.asarray(b, np.float32).view(np.uint32)))
+    """Words that differ as bit patterns (so -0.0 != 0.0)."""
+    a, b = np.ascontiguousarray(a), np.ascontiguousarray(b)
+    if a.shape != b.shape or a.dtype.itemsize != b.dtype.itemsize:
+        return int(max(a.size, b.size))
+    word = np.dtype(f"u{a.dtype.itemsize}")
+    return int(np.count_nonzero(a.view(word) != b.view(word)))
 
 
 def run_gpu(case: dict) -> dict[str, np.ndarray]:
@@ -183,10 +198,10 @@ def run_gpu(case: dict) -> dict[str, np.ndarray]:
     return {name: cp.asnumpy(dev[name]) for name in OUTPUT_FIELDS}
 
 
-def measure(reference: dict | None = None) -> dict[str, dict[str, int]]:
-    reference = load_fixture() if reference is None else reference
+def measure(reference: dict | None = None, precision: str = "r4") -> dict[str, dict[str, int]]:
+    reference = load_fixture(precision) if reference is None else reference
     report: dict[str, dict[str, int]] = {}
-    for case in cases():
+    for case in cases(precision):
         got = run_gpu(case)
         want = reference[case["name"]]
         report[case["name"]] = {name: bit_mismatches(got[name], want[name]) for name in OUTPUT_FIELDS}

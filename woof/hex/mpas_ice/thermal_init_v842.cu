@@ -15,33 +15,53 @@
 // terms in licenses/LICENSE-MPAS-BSD-3-Clause.txt. This is not the version
 // available from LANS and UCAR.
 //
-// RKIND = 4. Every operation is an explicit round-to-nearest intrinsic in the
-// Fortran's evaluation order (gfortran -O0 -ffp-contract=off). rhoi is the
-// module's copy of config_ice_density that li_thermal_init makes.
+// RKIND = 4 unless MPAS_RKIND8 is defined. Every operation is an explicit
+// round-to-nearest intrinsic in the Fortran's evaluation order (gfortran -O0
+// -ffp-contract=off). rhoi is the module's copy of config_ice_density that
+// li_thermal_init makes.
 //
 // Layout: a Fortran array a(nVertLevels, nCells) is a[iCell*nVertLevels + k].
 
+#ifdef MPAS_RKIND8
+typedef double rk;
+#define A(a,b) __dadd_rn((a),(b))
+#define S(a,b) __dsub_rn((a),(b))
+#define M(a,b) __dmul_rn((a),(b))
+#define D(a,b) __ddiv_rn((a),(b))
+#define LI_SQRT(x) __dsqrt_rn(x)
+#define LI_ABS(x) fabs(x)
+#define LI_POW(x,y) glibc_pow((x),(y))
+#define LI_EXP(x) glibc_exp(x)
+#define LI_C(x) x
+#else
+typedef float rk;
 #define A(a,b) __fadd_rn((a),(b))
 #define S(a,b) __fsub_rn((a),(b))
 #define M(a,b) __fmul_rn((a),(b))
 #define D(a,b) __fdiv_rn((a),(b))
+#define LI_SQRT(x) __fsqrt_rn(x)
+#define LI_ABS(x) fabsf(x)
+#define LI_POW(x,y) gfk_pow((x),(y))
+#define LI_EXP(x) gfk_exp(x)
+#define LI_C(x) x##f
+#endif
 
-#define LI_CP_ICE 2009.0f
-#define LI_LATENT_HEAT_ICE 335.0e3f
-#define LI_RHO_WATER 1000.0f
-#define LI_GRAVITY 9.80616f
-#define LI_ICE_MELTING_POINT_PRESSURE_DEPENDENCE 9.7456e-8f
-#define LI_KELVIN_TO_CELSIUS 273.15f
-#define LI_PMPT_OFFSET 2.0f   // li_init_linear_temperature_in_column pmpt_offset
+#define LI_CP_ICE LI_C(2009.0)
+#define LI_LATENT_HEAT_ICE LI_C(335.0e3)
+#define LI_RHO_WATER LI_C(1000.0)
+#define LI_GRAVITY LI_C(9.80616)
+#define LI_ICE_MELTING_POINT_PRESSURE_DEPENDENCE LI_C(9.7456e-8)
+#define LI_KELVIN_TO_CELSIUS LI_C(273.15)
+#define LI_PMPT_OFFSET LI_C(2.0)   // li_init_linear_temperature_in_column pmpt_offset
 
-__device__ __forceinline__ float li_min(float a, float b) { return a < b ? a : b; }
+__device__ __forceinline__ rk li_min(rk a, rk b) { return a < b ? a : b; }
 
 // pressure_melting_point(depth): - c * rhoi * gravity * depth (deg C)
-__device__ __forceinline__ float li_pmp(float rhoi, float depth) {
+__device__ __forceinline__ rk li_pmp(rk rhoi, rk depth) {
     return -M(M(M(LI_ICE_MELTING_POINT_PRESSURE_DEPENDENCE, rhoi), LI_GRAVITY), depth);
 }
 // pressure_melting_point_column: - c * rhoi * gravity * thickness * sigma(k)
-__device__ __forceinline__ float li_pmp_column(float rhoi, float thickness, float sigma) {
+__device__ __forceinline__ rk li_pmp_column(rk rhoi, rk thickness, rk sigma) {
     return -M(M(M(M(LI_ICE_MELTING_POINT_PRESSURE_DEPENDENCE, rhoi), LI_GRAVITY), thickness), sigma);
 }
 
@@ -50,10 +70,10 @@ __device__ __forceinline__ float li_pmp_column(float rhoi, float thickness, floa
 // heatFluxOption: 1 'constant', 0 'file'.
 // initOption: 1 'sfc_air_temperature', 2 'linear', 3 'file', 0 restart.
 extern "C" __global__ void li_thermal_init_v842(
-    float *temperature, float *waterfrac, float *surfaceAirTemperature, float *surfaceTemperature,
-    float *basalTemperature, float *basalHeatFlux, const float *thickness, const float *upperSurface,
-    const float *layerCenterSigma, float rhoi, int airOption, float airValue, float lapseRate,
-    int heatFluxOption, float heatFluxValue, int initOption, int nCells, int nCellsSolve, int nVertLevels)
+    rk *temperature, rk *waterfrac, rk *surfaceAirTemperature, rk *surfaceTemperature,
+    rk *basalTemperature, rk *basalHeatFlux, const rk *thickness, const rk *upperSurface,
+    const rk *layerCenterSigma, rk rhoi, int airOption, rk airValue, rk lapseRate,
+    int heatFluxOption, rk heatFluxValue, int initOption, int nCells, int nCellsSolve, int nVertLevels)
 {
     int iCell = blockIdx.x * blockDim.x + threadIdx.x;
     if (iCell >= nCells) return;
@@ -61,10 +81,10 @@ extern "C" __global__ void li_thermal_init_v842(
     if (airOption == 1) surfaceAirTemperature[iCell] = airValue;
     else if (airOption == 2) surfaceAirTemperature[iCell] = S(airValue, M(lapseRate, upperSurface[iCell]));
     if (heatFluxOption == 1) basalHeatFlux[iCell] = heatFluxValue;
-    const float sat = surfaceAirTemperature[iCell];
-    const float h = thickness[iCell];
+    const rk sat = surfaceAirTemperature[iCell];
+    const rk h = thickness[iCell];
     if (initOption == 3) {
-        for (int k = 0; k < nVertLevels; ++k) waterfrac[base + k] = 0.0f;
+        for (int k = 0; k < nVertLevels; ++k) waterfrac[base + k] = LI_C(0.0);
     } else if (initOption == 1) {
         if (iCell < nCellsSolve) {
             surfaceTemperature[iCell] = li_min(sat, LI_KELVIN_TO_CELSIUS);
@@ -73,21 +93,21 @@ extern "C" __global__ void li_thermal_init_v842(
                                                       LI_KELVIN_TO_CELSIUS));
             basalTemperature[iCell] = li_min(sat, A(li_pmp(rhoi, h), LI_KELVIN_TO_CELSIUS));
         }
-        for (int k = 0; k < nVertLevels; ++k) waterfrac[base + k] = 0.0f;
+        for (int k = 0; k < nVertLevels; ++k) waterfrac[base + k] = LI_C(0.0);
     } else if (initOption == 2) {
         for (int k = 0; k < nVertLevels; ++k) temperature[base + k] = LI_KELVIN_TO_CELSIUS;
         if (iCell < nCellsSolve) {
             // li_init_linear_temperature_in_column
-            const float sT = li_min(sat, LI_KELVIN_TO_CELSIUS);
-            const float pmptempBed = A(li_pmp(rhoi, h), LI_KELVIN_TO_CELSIUS);
-            const float bT = S(pmptempBed, LI_PMPT_OFFSET);
+            const rk sT = li_min(sat, LI_KELVIN_TO_CELSIUS);
+            const rk pmptempBed = A(li_pmp(rhoi, h), LI_KELVIN_TO_CELSIUS);
+            const rk bT = S(pmptempBed, LI_PMPT_OFFSET);
             surfaceTemperature[iCell] = sT;
             basalTemperature[iCell] = bT;
             for (int k = 0; k < nVertLevels; ++k) {
-                const float pmptemp = A(li_pmp_column(rhoi, h, layerCenterSigma[k]), LI_KELVIN_TO_CELSIUS);
-                const float t = A(sT, M(S(bT, sT), layerCenterSigma[k]));
+                const rk pmptemp = A(li_pmp_column(rhoi, h, layerCenterSigma[k]), LI_KELVIN_TO_CELSIUS);
+                const rk t = A(sT, M(S(bT, sT), layerCenterSigma[k]));
                 temperature[base + k] = li_min(t, S(pmptemp, LI_PMPT_OFFSET));
-                waterfrac[base + k] = 0.0f;
+                waterfrac[base + k] = LI_C(0.0);
             }
         }
     }
@@ -95,12 +115,12 @@ extern "C" __global__ void li_thermal_init_v842(
 
 // li_compute_pressure_melting_point_fields, one thread per cell (K)
 extern "C" __global__ void li_pressure_melting_point_fields_v842(
-    float *pmpTemperature, float *basalPmpTemperature, const float *thickness, const float *layerCenterSigma,
-    float rhoi, int nCells, int nVertLevels)
+    rk *pmpTemperature, rk *basalPmpTemperature, const rk *thickness, const rk *layerCenterSigma,
+    rk rhoi, int nCells, int nVertLevels)
 {
     int iCell = blockIdx.x * blockDim.x + threadIdx.x;
     if (iCell >= nCells) return;
-    const float h = thickness[iCell];
+    const rk h = thickness[iCell];
     for (int k = 0; k < nVertLevels; ++k)
         pmpTemperature[iCell * nVertLevels + k] = A(li_pmp_column(rhoi, h, layerCenterSigma[k]), LI_KELVIN_TO_CELSIUS);
     basalPmpTemperature[iCell] = A(li_pmp(rhoi, h), LI_KELVIN_TO_CELSIUS);
@@ -108,35 +128,35 @@ extern "C" __global__ void li_pressure_melting_point_fields_v842(
 
 // li_temperature_to_enthalpy, one thread per cell
 extern "C" __global__ void li_temperature_to_enthalpy_v842(
-    float *enthalpy, const float *temperature, const float *waterfrac, const float *thickness,
-    const float *layerCenterSigma, float rhoi, int nCells, int nVertLevels)
+    rk *enthalpy, const rk *temperature, const rk *waterfrac, const rk *thickness,
+    const rk *layerCenterSigma, rk rhoi, int nCells, int nVertLevels)
 {
     int iCell = blockIdx.x * blockDim.x + threadIdx.x;
     if (iCell >= nCells) return;
-    const float h = thickness[iCell];
+    const rk h = thickness[iCell];
     for (int k = 0; k < nVertLevels; ++k) {
         const int p = iCell * nVertLevels + k;
-        const float pmp = li_pmp_column(rhoi, h, layerCenterSigma[k]);
-        enthalpy[p] = A(M(M(M(S(1.0f, waterfrac[p]), rhoi), LI_CP_ICE), temperature[p]),
+        const rk pmp = li_pmp_column(rhoi, h, layerCenterSigma[k]);
+        enthalpy[p] = A(M(M(M(S(LI_C(1.0), waterfrac[p]), rhoi), LI_CP_ICE), temperature[p]),
                         M(M(waterfrac[p], LI_RHO_WATER), A(M(LI_CP_ICE, pmp), LI_LATENT_HEAT_ICE)));
     }
 }
 
 // li_enthalpy_to_temperature with the surface and basal enthalpies, one thread per cell
 extern "C" __global__ void li_enthalpy_to_temperature_v842(
-    float *enthalpy, float *temperature, float *waterfrac, float *surfaceEnthalpy, float *surfaceTemperature,
-    float *basalEnthalpy, float *basalTemperature, const float *thickness, const float *layerCenterSigma,
-    float rhoi, int nCells, int nVertLevels)
+    rk *enthalpy, rk *temperature, rk *waterfrac, rk *surfaceEnthalpy, rk *surfaceTemperature,
+    rk *basalEnthalpy, rk *basalTemperature, const rk *thickness, const rk *layerCenterSigma,
+    rk rhoi, int nCells, int nVertLevels)
 {
     int iCell = blockIdx.x * blockDim.x + threadIdx.x;
     if (iCell >= nCells) return;
-    const float h = thickness[iCell];
-    const float pmpTemperatureBed = li_pmp(rhoi, h);
-    const float pmpEnthalpyBed = M(M(pmpTemperatureBed, rhoi), LI_CP_ICE);
+    const rk h = thickness[iCell];
+    const rk pmpTemperatureBed = li_pmp(rhoi, h);
+    const rk pmpEnthalpyBed = M(M(pmpTemperatureBed, rhoi), LI_CP_ICE);
     for (int k = 0; k < nVertLevels; ++k) {
         const int p = iCell * nVertLevels + k;
-        const float pmpTemperature = li_pmp_column(rhoi, h, layerCenterSigma[k]);
-        const float pmpEnthalpy = M(M(pmpTemperature, rhoi), LI_CP_ICE);
+        const rk pmpTemperature = li_pmp_column(rhoi, h, layerCenterSigma[k]);
+        const rk pmpEnthalpy = M(M(pmpTemperature, rhoi), LI_CP_ICE);
         if (enthalpy[p] >= pmpEnthalpy) {   // temperate ice
             temperature[p] = pmpTemperature;
             waterfrac[p] = D(S(enthalpy[p], pmpEnthalpy),
@@ -144,12 +164,12 @@ extern "C" __global__ void li_enthalpy_to_temperature_v842(
                                M(LI_RHO_WATER, LI_LATENT_HEAT_ICE)));
         } else {                            // cold ice
             temperature[p] = D(enthalpy[p], M(rhoi, LI_CP_ICE));
-            waterfrac[p] = 0.0f;
+            waterfrac[p] = LI_C(0.0);
         }
     }
-    if (surfaceEnthalpy[iCell] >= 0.0f) {
-        surfaceTemperature[iCell] = 0.0f;
-        surfaceEnthalpy[iCell] = 0.0f;
+    if (surfaceEnthalpy[iCell] >= LI_C(0.0)) {
+        surfaceTemperature[iCell] = LI_C(0.0);
+        surfaceEnthalpy[iCell] = LI_C(0.0);
     } else {
         surfaceTemperature[iCell] = D(surfaceEnthalpy[iCell], M(rhoi, LI_CP_ICE));
     }

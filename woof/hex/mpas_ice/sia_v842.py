@@ -10,20 +10,20 @@ The kernels (``sia_v842.cu``) transcribe one call of ``li_sia_solve``:
 - the SIA velocity profile on every solved edge.
 
 They are held word for word to those routines, compiled verbatim with gfortran
-``-O0 -ffp-contract=off`` at MPAS's default single precision
-(``tools/mali_oracle``, ``tests/test_mali_sia_parity.py``). ``powf`` and ``expf``
-come from the hex lane's glibc float32 transcription (Arm
-optimized-routines, MIT), which matches the oracle host's libm (glibc 2.44).
+``-O0 -ffp-contract=off`` at RKIND 4 (MPAS's default single precision) and
+RKIND 8 (``tools/mali_oracle``, ``tests/test_mali_sia_parity.py``). ``powf``
+and ``expf`` come from the hex lane's glibc float32 transcription, and ``pow``
+and ``exp`` from the binary64 one (``glibc_flt64.cuh``), both Arm
+optimized-routines under MIT, which match the oracle host's libm (glibc 2.44).
 
 Refused by name:
 
 - ``config_velocity_solver`` other than 'sia'. 'FO', 'L1L2' and 'Stokes' are
   the external Albany/Trilinos dycores (``Interface_velocity_solver.cpp``),
   which have no pinned reference; 'simple' and 'none' are not ported.
-- RKIND 8. Its ``pow``/``exp`` need a double libm matched to the oracle host,
-  and the LGPL glibc port stays behind its opt-in.
 
-Arrays are device float32 (int32 for connectivity and masks) in the Fortran
+Arrays are device float32 (RKIND 4) or float64 (RKIND 8), int32 for
+connectivity and masks, in the Fortran
 layout: ``a(nVertLevels, nCells)`` is C-order ``(nCells, nVertLevels)``.
 """
 from __future__ import annotations
@@ -35,6 +35,8 @@ import numpy as np
 
 from woof.hex import numerics as _hex_numerics
 from woof.hex.errors import ConfigurationRefusal
+
+from . import rkind
 
 SOURCE_FILES = (
     "src/core_landice/mode_forward/mpas_li_sia.F:228-442",
@@ -57,9 +59,13 @@ FLOW_PARAM_A_CALCULATIONS = {"constant": 1, "PB1982": 2, "CP2010": 3}
 _BLOCK = 128
 
 
-def module_source() -> str:
+def module_source(precision: str = "r4") -> str:
+    rkind.require(precision)
+    body = files("woof.hex.mpas_ice").joinpath("sia_v842.cu").read_text(encoding="utf-8")
+    if precision == "r8":
+        return rkind.r8_prelude() + body
     from woof.hex.mpasphys.kessler_v842 import shared_math_header
-    return shared_math_header() + files("woof.hex.mpas_ice").joinpath("sia_v842.cu").read_text(encoding="utf-8")
+    return shared_math_header() + body
 
 
 def require_velocity_solver(config_velocity_solver: str) -> None:
@@ -84,20 +90,21 @@ def _option(table: dict, knob: str, value: str) -> int:
 
 
 @lru_cache(maxsize=None)
-def _module_on(device: int, options: tuple[str, ...]):
+def _module_on(device: int, precision: str, options: tuple[str, ...]):
     import cupy as cp
     from woof.nvrtc_ptx_cache import compile_using_nvrtc
 
-    image, _ = compile_using_nvrtc(module_source(), options, None, "li_sia_v842.cu")
+    image, _ = compile_using_nvrtc(module_source(precision), options, None, f"li_sia_v842_{precision}.cu")
     with cp.cuda.Device(device):
         module = cp.cuda.function.Module()
         module.load(image.encode() if isinstance(image, str) else image)
     return module
 
 
-def _function(name: str):
+def _function(precision: str, name: str):
     import cupy as cp
-    return _module_on(cp.cuda.Device().id, _hex_numerics.options(COMPILE_OPTIONS, keep_ftz=True)).get_function(name)
+    return _module_on(cp.cuda.Device().id, precision,
+                      _hex_numerics.options(COMPILE_OPTIONS, keep_ftz=True)).get_function(name)
 
 
 def _check(name: str, array, dtype, shape) -> None:
@@ -132,7 +139,9 @@ def sia_solve(*, mesh: dict, geometry: dict, temperature, velocity: dict, n_edge
     tangent = _option(TANGENT_SLOPE_CALCULATIONS, "config_sia_tangent_slope_calculation",
                       config_sia_tangent_slope_calculation)
     flow = _option(FLOW_PARAM_A_CALCULATIONS, "config_flowParamA_calculation", config_flowParamA_calculation)
-    f32, i32 = cp.float32, cp.int32
+    precision = rkind.precision_of(temperature)
+    real = rkind.PRECISIONS[precision]
+    f32, i32 = real, cp.int32
     n_cells, n_levels = temperature.shape
     n_edges = mesh["dvEdge"].shape[0]
     n_vertices = mesh["baryCellsOnVertex"].shape[0]
@@ -156,20 +165,20 @@ def sia_solve(*, mesh: dict, geometry: dict, temperature, velocity: dict, n_edge
     _check("normalVelocity", velocity["normalVelocity"], f32, (n_edges, n_levels + 1))
     _check("flowParamA", velocity["flowParamA"], f32, (n_cells, n_levels))
     g = geometry
-    _function("li_calculate_flowParamA_v842")(_grid(n_cells), (_BLOCK,), (
+    _function(precision, "li_calculate_flowParamA_v842")(_grid(n_cells), (_BLOCK,), (
         velocity["flowParamA"], temperature, g["thickness"], mesh["layerCenterSigma"], np.int32(flow),
-        np.float32(config_default_flowParamA), np.float32(config_enhancementFactor),
-        np.float32(config_ice_density), np.int32(n_cells), np.int32(n_levels)))
+        real(config_default_flowParamA), real(config_enhancementFactor),
+        real(config_ice_density), np.int32(n_cells), np.int32(n_levels)))
     if tangent in (1, 2):
-        _function("li_upper_surface_vertex_v842")(_grid(n_vertices), (_BLOCK,), (
+        _function(precision, "li_upper_surface_vertex_v842")(_grid(n_vertices), (_BLOCK,), (
             g["upperSurfaceVertex"], g["upperSurface"], mesh["baryCellsOnVertex"], mesh["baryWeightsOnVertex"],
             mesh["cellsOnVertex"], mesh["kiteAreasOnVertex"], np.int32(tangent), np.int32(n_vertices)))
-    _function("li_slope_edge_v842")(_grid(n_edges), (_BLOCK,), (
+    _function(precision, "li_slope_edge_v842")(_grid(n_edges), (_BLOCK,), (
         g["tangentSlopeEdge"], g["slopeEdge"], g["normalSlopeEdge"], g["upperSurfaceVertex"],
         mesh["verticesOnEdge"], mesh["dvEdge"], g["edgeMask"], mesh["nEdgesOnEdge"], mesh["edgesOnEdge"],
         mesh["weightsOnEdge"], np.int32(tangent), np.int32(n_edges), np.int32(max_edges2)))
-    _function("li_sia_velocity_v842")(_grid(n_edges_solve), (_BLOCK,), (
+    _function(precision, "li_sia_velocity_v842")(_grid(n_edges_solve), (_BLOCK,), (
         velocity["normalVelocity"], velocity["flowParamA"], g["thickness"], g["slopeEdge"], g["normalSlopeEdge"],
         mesh["layerInterfaceSigma"], mesh["cellsOnEdge"], g["edgeMask"], g["cellMask"],
-        np.float32(config_ice_density), np.float32(config_flowLawExponent), np.int32(n_edges_solve),
+        real(config_ice_density), real(config_flowLawExponent), np.int32(n_edges_solve),
         np.int32(n_levels)))
