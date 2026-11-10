@@ -21,16 +21,27 @@ on:
   # build.  A branch with no pull request is run by hand (workflow_dispatch).
   push:
     branches: [main]
+  # The macOS jobs on main: nightly, not per push (see changes).
+  schedule:
+    - cron: "17 6 * * *"
   pull_request:
     # labeled: adding the macos-ci label runs the macOS jobs (see changes).
     types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
+    inputs:
+      macos:
+        description: Also run the macOS jobs
+        type: boolean
+        default: true
 
 permissions:
   contents: read
 
+# The event is in the group so a nightly run, whose macOS jobs can queue for
+# many hours, never holds main's push runs pending behind it (each new pending
+# run replaces the last, so while one run is stuck no push run completes).
 concurrency:
-  group: tests-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: tests-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -48,10 +59,14 @@ jobs:
   # Whether this run takes the macOS jobs (native-macos, the ten mlx legs,
   # the metal probe and gates).  The account's concurrent macOS jobs are
   # few, every one of them also builds publish-metal's wheel, and a pull
-  # request's 13 macOS jobs queued every release behind them.  Pushes to
-  # main and manual runs take them all; a pull request takes them when it
-  # changes the Metal backend, the translator, the pixi environments or the
-  # CI helpers (.github/ci), or carries the macos-ci label.
+  # request's 13 macOS jobs queued every release behind them.  The nightly
+  # run and manual runs take them all (a manual run unless its macos input is
+  # off); a push to main does not, because main takes many merges a day,
+  # every merge's release takes macOS slots, and a push run's mlx legs queued
+  # for days (2026-11-08: one run held main's group 26 h with nine legs still
+  # queued).  A pull request takes them when it changes the Metal backend,
+  # the translator, the pixi environments or the CI helpers (.github/ci), or
+  # carries the macos-ci label.
   changes:
     name: changes (does this run take the macOS jobs?)
     runs-on: ubuntu-24.04
@@ -68,8 +83,13 @@ jobs:
           EVENT: ${{ github.event_name }}
           PR: ${{ github.event.pull_request.number }}
           LABELLED: ${{ contains(github.event.pull_request.labels.*.name, 'macos-ci') }}
+          DISPATCH_MACOS: ${{ inputs.macos }}
         run: |
-          if [ "$EVENT" != pull_request ]; then
+          if [ "$EVENT" = push ]; then
+            macos=false; why="a push to main leaves the macOS jobs to the nightly run"
+          elif [ "$EVENT" = workflow_dispatch ] && [ "$DISPATCH_MACOS" = false ]; then
+            macos=false; why="the manual run turned its macos input off"
+          elif [ "$EVENT" != pull_request ]; then
             macos=true; why="a $EVENT run takes every job"
           elif [ "$LABELLED" = true ]; then
             macos=true; why="the pull request carries the macos-ci label"
@@ -243,7 +263,7 @@ jobs:
           activate-environment: mlx
           locked: true
           cache: true
-          cache-write: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          cache-write: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
       - id: workspaces
         name: workspaces (the build-native pixi task)
         run: |
@@ -262,7 +282,7 @@ jobs:
           prefix-key: v1-rust
           shared-key: native-macos
           cache-on-failure: false
-          save-if: ${{ github.event_name == 'push' }}
+          save-if: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
       - name: cargo build --release --locked --offline (every build-native workspace)
         run: python .github/ci/build_native.py build
       - name: pack the bridges
