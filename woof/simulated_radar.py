@@ -453,7 +453,12 @@ class LiveSimulatedRadar:
             if not hasattr(self, "_scratch_dir"):
                 parent = self.outdir / ".radar-scratch"
                 parent.mkdir(parents=True, exist_ok=True)
-                self._scratch_dir = Path(tempfile.mkdtemp(prefix="frames-", dir=parent))
+                # Resolved, as output_committed resolves each landing: the
+                # snapshots are owned by path, and on macOS (/var is
+                # /private/var) an unresolved one never matched its landing,
+                # so none was released, the scratch slots ran out and the
+                # next capture waited for ever.
+                self._scratch_dir = Path(tempfile.mkdtemp(prefix="frames-", dir=parent)).resolve()
             gid = int(node.cfg.grid_id)
             path = self._scratch_dir / wrfout_filename(valid_time, gid)
             if path in self._owned_snapshots:
@@ -606,7 +611,7 @@ class LiveSimulatedRadar:
         size = path.stat().st_size if path.exists() else 0
         path.unlink(missing_ok=True)
         (path.parent / "ready" / (path.name + ".json")).unlink(missing_ok=True)
-        self._scratch_deleted.append({"path": str(path.relative_to(self.outdir)), "bytes": size})
+        self._scratch_deleted.append({"path": str(path.relative_to(self.outdir.resolve())), "bytes": size})
         del self._owned_snapshots[path]
         self._scratch_slots.release()
 

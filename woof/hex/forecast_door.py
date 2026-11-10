@@ -1146,8 +1146,9 @@ def _vertical_interfaces(path: Path) -> int | None:
     """``nVertLevelsP1`` of an MPAS file, ``None`` when it declares no levels."""
 
     from netCDF4 import Dataset
+    from woof.io.netcdf_serialization import netcdf4_session
 
-    with Dataset(path, mode="r") as dataset:
+    with netcdf4_session(), Dataset(path, mode="r") as dataset:
         dimensions = dataset.dimensions
         if "nVertLevelsP1" in dimensions:
             return len(dimensions["nVertLevelsP1"])
@@ -2914,15 +2915,20 @@ def microphysics_init_problem(backend_row, init) -> str | None:
         return None
     from netCDF4 import Dataset
     import numpy as np
+    from woof.io.netcdf_serialization import netcdf4_session
 
-    try:
-        dataset = Dataset(str(init))
-    except OSError:
-        return None  # not readable here; the init reader refuses it by name later
-    with dataset:
-        missing = [name for name in ("nwfa", "nifa")
-                   if name not in dataset.variables
-                   or not np.any(np.asarray(dataset.variables[name][:]))]
+    # Under the process's one netCDF4 lock, as every session must be: an
+    # open beside another thread's HDF5 call can fail (or crash;
+    # woof.io.netcdf_serialization), and an OSError here passes the init.
+    with netcdf4_session():
+        try:
+            dataset = Dataset(str(init))
+        except OSError:
+            return None  # not readable here; the init reader refuses it by name later
+        with dataset:
+            missing = [name for name in ("nwfa", "nifa")
+                       if name not in dataset.variables
+                       or not np.any(np.asarray(dataset.variables[name][:]))]
     if not missing:
         return None
     return (f"--physics-backend {backend_row.name} runs TEMPO, which needs water-friendly and "

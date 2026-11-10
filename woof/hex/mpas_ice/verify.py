@@ -11,16 +11,18 @@ from __future__ import annotations
 def verify() -> dict:
     from woof import backend
     from woof.hex.coupled import oracle, registry
+    from woof.verify import mali_advection_oracle as advection_oracle
     from woof.verify import mali_geometry_oracle as geometry_oracle
     from woof.verify import mali_sia_oracle as sia_oracle
     from woof.verify import mali_thermal_oracle as thermal_oracle
 
-    from . import geometry_v842, sia_v842, thermal_init_v842
+    from . import advection_v842, geometry_v842, sia_v842, thermal_init_v842
 
     pieces = []
     for name, module, oracle_module in (("sia_velocity_solver", sia_v842, sia_oracle),
                                         ("geometry_diagnostics", geometry_v842, geometry_oracle),
-                                        ("thermal_init_and_conversions", thermal_init_v842, thermal_oracle)):
+                                        ("thermal_init_and_conversions", thermal_init_v842, thermal_oracle),
+                                        ("thickness_tracer_advection", advection_v842, advection_oracle)):
         if not (oracle_module.FIXTURE_DIR / "oracle-r4.npz").is_file():
             raise FileNotFoundError(
                 f"the MALI oracle fixture is not here ({oracle_module.FIXTURE_DIR}); it ships with the source "

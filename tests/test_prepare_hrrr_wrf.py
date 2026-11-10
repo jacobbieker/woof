@@ -2157,6 +2157,13 @@ def test_cpu_native_preparation_checks_every_slot_against_the_controller(
     bare default, auto, on a machine with no usable card.
     """
 
+    from woof.ingest.preparation_workers import effective_workers
+    if effective_workers(4) < 4:
+        # The subject is four requested workers split over two slots; a
+        # host that affords fewer clamps the request, as it should (the
+        # hosted macos-15 runner has three processors).
+        pytest.skip(f"this host affords {effective_workers(4)} of the 4 "
+                    "preprocessing workers the slot split is measured on")
     target, static_cache, static_receipt, domain, namelist = (
         _real_wrapper_inputs(tmp_path))
     vertical = explicit_vertical_from_wrf_namelist(

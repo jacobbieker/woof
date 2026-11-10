@@ -157,7 +157,13 @@ class TransportTests(unittest.TestCase):
     def test_no_runtime_imports(self):
         program = ("import runpy,sys; runpy.run_path(sys.argv[1]); "
                    "assert not {'woof','arwen_global','cupy'} & set(sys.modules)")
-        subprocess.run([sys.executable, "-c", program, str(SOURCE)], check=True)
+        # The pixi mlx environment's interpreter-startup hook
+        # (woof/backend/startup/sitecustomize.py) imports woof in every
+        # process under WOOF_BACKEND=mlx|cpu|host; the question is the tool's
+        # own imports, so the child runs without that selection.
+        env = {key: value for key, value in os.environ.items()
+               if key not in ("WOOF_BACKEND", "GPUWM_BACKEND")}
+        subprocess.run([sys.executable, "-c", program, str(SOURCE)], check=True, env=env)
 
 
 class GitTests(unittest.TestCase):

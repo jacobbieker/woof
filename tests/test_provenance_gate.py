@@ -258,6 +258,10 @@ def test_a_stranger_gpuwm_on_the_path_refuses_only_where_nothing_owns_the_code(
     environment = dict(os.environ)
     environment["PYTHONPATH"] = os.pathsep.join(
         (str(tmp_path / "user-site"), str(checkout)))
+    # The throwaway checkout carries the gate's modules, not woof.backend,
+    # which ``import woof`` installs for WOOF_BACKEND=mlx|cpu|host and, with
+    # none set, on macOS.  CUDA's backend is the one it installs nothing for.
+    environment["WOOF_BACKEND"] = "cuda"
     program = (
         "import json, woof;"
         "from woof import provenance_gate as g;"

@@ -663,6 +663,10 @@ def test_a_forecast_failure_before_a_later_lead_keeps_its_failure(
 
     monkeypatch.setattr(boundary_stream, "_stop_for_failed_forecast", hold)
     monkeypatch.setattr(stage_cli, "resolve_head_bundle", resolve_head)
+    # The ordering is the subject, so the chain must be admitted: on a host
+    # with about 2 GiB free (the hosted macos-15 runner) the forecast was
+    # held until preparation finished and never ran beside it.
+    monkeypatch.setattr(boundary_stream, "_host_available", lambda: 64 * 2**30)
     code, _staged, events, _plan = _run(
         tmp_path, monkeypatch, fetch=fetch, prep=prep, forecast=forecast)
     assert seen["first_failure"] <= seen["held"] < seen["later_fetch"]
