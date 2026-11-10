@@ -177,8 +177,16 @@ def install_numpy_cupy() -> None:
         def __init__(self, *args): pass
         def __enter__(self): return self
         def __exit__(self, *args): return False
+    class CensusEvent:
+        # PX's table upload (woof.core.device_cache, ready=True) records one.
+        def __init__(self, *args, **kwargs): pass
+        def record(self, *args): pass
+        def synchronize(self): pass
     shim.cuda = types.SimpleNamespace(
-        Device=CensusDevice, runtime=types.SimpleNamespace(getDevice=lambda: 0))
+        Device=CensusDevice, runtime=types.SimpleNamespace(getDevice=lambda: 0),
+        Event=CensusEvent,
+        get_current_stream=lambda: types.SimpleNamespace(
+            ptr=0, wait_event=lambda event: None))
     shim.RawModule = _RawModule
     shim.RawKernel = lambda *args, **kwargs: _Launch()
     sys.modules["cupy"] = shim
@@ -295,6 +303,24 @@ def census() -> dict[str, dict]:
 
     ieee_module.compile_module = compile_module
 
+    # SSiB (lsm 8) loads its integer-define tier through the no-FTZ direct
+    # NVRTC path (woof.core.kernels.compile_noftz_module); a no-op likewise.
+    from woof.core import kernels
+
+    def compile_noftz_module(name, src, key):
+        module = _RawModule()
+        module.code = src
+        return module
+
+    kernels.compile_noftz_module = compile_noftz_module
+
+    # Its table lives in that module's __constant__ storage, not in a
+    # driver buffer, so its upload is a no-op here.
+    from woof.core import ssib
+
+    ssib._table_view = lambda module: types.SimpleNamespace(
+        set=lambda table: None)
+
     # The load-time table admission (woof.tables) asks whether coefficient
     # files are on disk, not what the driver allocates.  On a fresh host it
     # would generate SATMEDMF's fpvs table (pbl 901) with a compiled unit,
@@ -309,6 +335,13 @@ def census() -> dict[str, dict]:
     for cell in admitted_cells():
         cfg = cell_config(cell)
         latitude = np.full((cfg.ny, cfg.nx), 40.0)
+        # PX land (lsm 7) refuses to start without WRF's category fractions
+        # (61 MODIS land categories, the count the inventory prices, and the
+        # 16 STATSGO soil categories).
+        px = {}
+        if cfg.sf_surface_physics == 7:
+            px = {"landusef": np.full((61, cfg.ny, cfg.nx), 1.0 / 61),
+                  "soilcbot": np.full((16, cfg.ny, cfg.nx), 1.0 / 16)}
         try:
             state = DomainState(cfg)
             driver = initialize_physics(
@@ -318,7 +351,7 @@ def census() -> dict[str, dict]:
                 radiation_latitude=latitude, radiation_longitude=latitude - 135.0,
                 noahmp_start_time=datetime.datetime(2020, 6, 1, 12),
                 noahmp_latitude=latitude,
-                noahmp_longitude=latitude - 135.0)
+                noahmp_longitude=latitude - 135.0, **px)
         except Exception as exc:  # reported, and failed, by the test
             report[cell_id(cell)] = {
                 "error": f"{type(exc).__name__}: {exc}"}
