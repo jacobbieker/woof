@@ -58,6 +58,25 @@ def _launch_batch() -> int:
 
 LAUNCH_BATCH = _launch_batch()
 
+#: Storages a not-yet-encoded launch reads (id -> storage).  MLX orders a
+#: launch after the writers of its inputs, but not before a later in-place
+#: writer of them (write-after-read); such a launch encodes the batch first.
+LAZY_READS: dict = {}
+
+
+def order_launch(reads, writes):
+    """Before an in-place launch: if it writes a storage that a launch still
+    waiting in the batch reads, encode the batch now, in program order."""
+    if LAZY_READS and any(id(st) in LAZY_READS for st in writes):
+        flush_launched()
+
+
+def launched(reads):
+    """After an in-place launch: what it reads, while it waits in the batch."""
+    if LAUNCHED:
+        for st in reads:
+            LAZY_READS[id(st)] = st
+
 #: Elements one facade allocation may hold: MLX sizes an array with int32.
 MAX_ELEMENTS = 2**31 - 1
 
@@ -279,6 +298,7 @@ def flush_pending():
     arrays = [s.arr for s in PENDING] + LAUNCHED
     PENDING.clear()
     LAUNCHED.clear()
+    LAZY_READS.clear()
     mx.async_eval(*arrays)
 
 
@@ -291,6 +311,7 @@ def flush_launched():
     mx = _mx()
     arrays = list(LAUNCHED)
     LAUNCHED.clear()
+    LAZY_READS.clear()
     mx.async_eval(*arrays)
 
 

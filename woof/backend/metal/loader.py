@@ -88,6 +88,7 @@ class MetalFunction:
         params = sig.params
         supplied = iter(args)
         buffers, offsets, writable, slots, targets = [], [], [], [], []
+        stores = []                       # each bound buffer's storage
         null_slots, null_table = [], []
         ordinal = -1                      # the pointer's position: slot, or table entry
         blob = bytearray(sig.scalar_size)
@@ -118,6 +119,7 @@ class MetalFunction:
                 offsets.append(a._offset)
                 writable.append(not p.const)
                 targets.append(a._st if not p.const else None)
+                stores.append(a._st)
             else:
                 blob[p.offset:p.offset + p.size] = self._pack(p, a)
         if not any(writable):
@@ -137,6 +139,9 @@ class MetalFunction:
         if sig.pointer_mode == "table" or sig.indirect:
             _guard_residency(self.name)
         blobs, blob_slots = ([bytes(blob)], [sig.scalar_slot]) if sig.scalar_size else ([], [])
+        from woof.backend.facade._array import launched, order_launch
+        reads = [st for st, w in zip(stores, writable) if not w]
+        order_launch(reads, [st for st in targets if st is not None])
         flush_pending()
         if _TRACE:
             with open(_TRACE, "a") as f:
@@ -160,6 +165,7 @@ class MetalFunction:
         for st in targets:
             if st is not None:
                 st.rebind_written(next(written))
+        launched(reads)
         if sig.indirect or mode in ("1", "after"):
             import mlx.core as mx
             mx.eval(*outputs)       # ... and finish before anything after it

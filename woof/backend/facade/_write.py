@@ -93,7 +93,7 @@ def write(view, values) -> None:
     """Store ``values`` (an mx.array in the view's storage representation,
     broadcastable to its shape) into ``view`` in place."""
     import mlx.core as mx
-    from woof.backend.facade._array import flush_pending
+    from woof.backend.facade._array import flush_pending, order_launch
     from woof.backend.metal import ext
     item = view.itemsize
     if item not in (1, 2, 4, 8):
@@ -118,8 +118,9 @@ def write(view, values) -> None:
     blob += struct.pack(f"<{MAX_DIMS}q", *(list(shape) + [1] * (MAX_DIMS - len(shape))))
     blob += struct.pack(f"<{MAX_DIMS}q", *(strides + [0] * (MAX_DIMS - len(strides))))
     _compiled()
-    flush_pending()
     st = view._st
+    order_launch((), (st,))
+    flush_pending()
     kernel = f"woof_{'fill' if fill else 'copy'}_{item}"
     (out,) = ext.load().launch(_KEY, _SOURCE, kernel, ((n + _TPB - 1) // _TPB, 1, 1),
                                (_TPB, 1, 1), [st.arr, src], [0, 0], [True, False], [0, 1], -1,
