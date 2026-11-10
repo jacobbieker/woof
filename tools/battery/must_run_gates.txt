@@ -260,3 +260,32 @@ tests/test_pxlsm_wrf461_parity.py  needs a CUDA device and CuPy for the Pleim-Xi
 tests/test_qnse_fast_numerics.py  needs a CUDA device, and is skipped under GPUWM_WRF_EXACT=1 because it bounds the production (fast numerics) QNSE error against the native strict fixture; the default GPU leg runs it (c24f1adba49).
 tests/test_surface_fdda_gpu.py  needs a CUDA device and an explicit GPU test opt-in (WOOF_DOWNSCALE_GPU_TEST=1); a leased GPU leg runs the surface FDDA kernels (2e0e878fea4).
 tests/test_version_byte_proof.py  needs the built Rust history writer (woof.io.nc_writer_bridge, from tools/rustwx); a leg that builds or stages the bridges runs it (e68ccd91e73).
+
+# Module-level skips added on the fork's 1.1.x line (Metal facade, the WRF-Hydro
+# and NEMO opt-ins, the metal-woof release) without an entry here.
+tests/test_facade_host_gaps.py  needs the mlx package (an Apple-silicon Metal host, pixi environment mlx); the macOS mlx leg runs it, and no CUDA or Linux leg can (ddf346412).
+tests/test_metal_archive_names.py  needs the mlx package (an Apple-silicon Metal host, pixi environment mlx); the macOS mlx leg runs it, and no CUDA or Linux leg can (947c5a471).
+tests/test_metal_f32s_arithmetic.py  needs the mlx package (an Apple-silicon Metal host, pixi environment mlx); the macOS mlx leg runs it, and no CUDA or Linux leg can (53fdde48b).
+tests/test_metal_facade_writes.py  needs the mlx package (an Apple-silicon Metal host, pixi environment mlx); the macOS mlx leg runs it, and no CUDA or Linux leg can (6b29323cc).
+tests/test_metal_gpu_times.py  needs the mlx package (an Apple-silicon Metal host, pixi environment mlx); the macOS mlx leg runs it, and no CUDA or Linux leg can (095d2e43d).
+tests/test_metal_prefetch.py  needs the mlx package (an Apple-silicon Metal host, pixi environment mlx); the macOS mlx leg runs it, and no CUDA or Linux leg can (6e6b91387).
+tests/test_metal_storage_address.py  needs the mlx package (an Apple-silicon Metal host, pixi environment mlx); the macOS mlx leg runs it, and no CUDA or Linux leg can (8e556b37f).
+tests/test_nemo_column_parity.py  needs the NEMO opt-in (WOOF_ENABLE_NEMO=1 and the CeCILL source under optional/nemo, which no default build or wheel carries); a leg that opts in runs it against the opt-in's committed oracle fixtures (e184d54a4).
+tests/test_nemo_eos_parity.py  needs the NEMO opt-in (WOOF_ENABLE_NEMO=1 and the CeCILL source under optional/nemo, which no default build or wheel carries); a leg that opts in runs it against the opt-in's committed oracle fixtures (3db8bbdc7).
+tests/test_nemo_tke_parity.py  needs the NEMO opt-in (WOOF_ENABLE_NEMO=1 and the CeCILL source under optional/nemo, which no default build or wheel carries); a leg that opts in runs it against the opt-in's committed oracle fixtures (4a702e88a).
+tests/test_nemo_traadv_parity.py  needs the NEMO opt-in (WOOF_ENABLE_NEMO=1 and the CeCILL source under optional/nemo, which no default build or wheel carries); a leg that opts in runs it against the opt-in's committed oracle fixtures (8067a5243).
+tests/test_nemo_traldf_parity.py  needs the NEMO opt-in (WOOF_ENABLE_NEMO=1 and the CeCILL source under optional/nemo, which no default build or wheel carries); a leg that opts in runs it against the opt-in's committed oracle fixtures (5e2f37915).
+tests/test_nemo_traqsr_parity.py  needs the NEMO opt-in (WOOF_ENABLE_NEMO=1 and the CeCILL source under optional/nemo, which no default build or wheel carries); a leg that opts in runs it against the opt-in's committed oracle fixtures (b9172a396).
+tests/test_nemo_trazdf_parity.py  needs the NEMO opt-in (WOOF_ENABLE_NEMO=1 and the CeCILL source under optional/nemo, which no default build or wheel carries); a leg that opts in runs it against the opt-in's committed oracle fixtures (96f9c6507).
+tests/test_publish_dist_shape_agreement.py  skips its whole module on purpose: it pins the engine's four-wheel publication contract, and Recast WOOF publishes through its own release workflows, so the contract does not apply to this tree (0878721c5).
+tests/test_release_metal_workflow.py  needs the mlx package (an Apple-silicon Metal host, pixi environment mlx); the macOS mlx leg runs it, and no CUDA or Linux leg can (f510e900d).
+tests/test_wrf_hydro_baseflow_parity.py  needs the WRF-Hydro opt-in (WOOF_ENABLE_WRF_HYDRO=1 and the UCAR-licensed source under optional/wrf_hydro, which no default build or wheel carries); a leg that opts in runs it (b3f15c645).
+tests/test_wrf_hydro_channel_parity.py  needs the WRF-Hydro opt-in (WOOF_ENABLE_WRF_HYDRO=1 and the UCAR-licensed source under optional/wrf_hydro, which no default build or wheel carries); a leg that opts in runs it (e4cdb815b).
+tests/test_wrf_hydro_coupled_parity.py  needs the WRF-Hydro opt-in (WOOF_ENABLE_WRF_HYDRO=1 and the UCAR-licensed source under optional/wrf_hydro, which no default build or wheel carries); a leg that opts in runs it (41fe32baf).
+tests/test_wrf_hydro_diffusive_parity.py  needs the WRF-Hydro opt-in (WOOF_ENABLE_WRF_HYDRO=1 and the UCAR-licensed source under optional/wrf_hydro, which no default build or wheel carries); a leg that opts in runs it (4c4645853).
+tests/test_wrf_hydro_grid_transform_parity.py  needs the WRF-Hydro opt-in (WOOF_ENABLE_WRF_HYDRO=1 and the UCAR-licensed source under optional/wrf_hydro, which no default build or wheel carries); a leg that opts in runs it (4cf932ea9).
+tests/test_wrf_hydro_gw2d_parity.py  needs the WRF-Hydro opt-in (WOOF_ENABLE_WRF_HYDRO=1 and the UCAR-licensed source under optional/wrf_hydro, which no default build or wheel carries); a leg that opts in runs it (0b79d2e37).
+tests/test_wrf_hydro_namelist.py  needs the WRF-Hydro opt-in (WOOF_ENABLE_WRF_HYDRO=1 and the UCAR-licensed source under optional/wrf_hydro, which no default build or wheel carries); a leg that opts in runs it (84a1aa221).
+tests/test_wrf_hydro_overland_parity.py  needs the WRF-Hydro opt-in (WOOF_ENABLE_WRF_HYDRO=1 and the UCAR-licensed source under optional/wrf_hydro, which no default build or wheel carries); a leg that opts in runs it (a4bef7971).
+tests/test_wrf_hydro_reservoir_da_parity.py  needs the WRF-Hydro opt-in (WOOF_ENABLE_WRF_HYDRO=1 and the UCAR-licensed source under optional/wrf_hydro, which no default build or wheel carries); a leg that opts in runs it (e13e752ac).
+tests/test_wrf_hydro_subsurface_parity.py  needs the WRF-Hydro opt-in (WOOF_ENABLE_WRF_HYDRO=1 and the UCAR-licensed source under optional/wrf_hydro, which no default build or wheel carries); a leg that opts in runs it (edd7ade39).
