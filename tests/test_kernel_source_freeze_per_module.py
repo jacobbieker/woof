@@ -1776,6 +1776,11 @@ COMPOSED_HEADERS = {
     # by the kernel loader); proven equal to upstream on 2^28 arguments by
     # tools/uwpbl_wrf471_oracle/libm64/sweep_cbrt.py.
     "cr_cbrt_flt64.cuh": "543414e82e9042820f6fb386a29bea072b9995ab8046e2c8d1d32e7aff7c2691",
+    # CORE-MATH's correctly rounded binary64 tanh (glibc 2.44's tanh),
+    # prepended to MALI's RKIND 8 units by woof.hex.mpas_ice.rkind.r8_prelude
+    # (not by the kernel loader); proven equal to the oracle host's glibc tanh
+    # by tools/oracle_libm/grade_tanh.py.
+    "cr_tanh_flt64.cuh": "769c8b6d0f0aef936bb6d2d933f4ba804990b6f47405310b53030bc0da68cbcb",
 
     # FAST_SBM's direct NVRTC composition (woof/core/fast_sbm_cuda.py
     # compiles fast_sbm.cu with this directory on its include path).
