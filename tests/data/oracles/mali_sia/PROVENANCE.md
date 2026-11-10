@@ -26,12 +26,23 @@ Written by `tools/mali_oracle/build.sh` and `make_fixture.py` on pb
   arithmetic. The routines the call never reaches (scratch fields,
   reconstruction, unit tests) stop with their name if reached.
 
+## RKIND 8
+
+`oracle-r8.npz` holds the same routines compiled without `-DSINGLE_PRECISION`
+(RKIND = 8, the same flags otherwise, no FMA instruction), on pb, 2026-11-10.
+Each case is drawn from the same seed in float64 instead of rounded to
+float32. Its input digests are the `<case>/r8` lines of `inputs.sha256`.
+The double `pow` and `exp` are glibc 2.44's; the port's are
+`glibc_pow`/`glibc_exp` (`woof/core/kernels/glibc_flt64.cuh`, MIT).
+The GPU port runs the `MPAS_RKIND8` unit and must match every word.
+
 ## Files
 
 | file | content |
 |---|---|
 | `oracle-r4.npz` | `<case>/<field>`: `normalVelocity`, `flowParamA`, `slopeEdge`, `tangentSlopeEdge`, `upperSurfaceVertex`, and `err` (`err`, log errors; both 0) |
-| `inputs.sha256` | the input-stream digest of each case (`woof.verify.mali_sia_oracle.input_bytes`) |
+| `oracle-r8.npz` | the same fields at RKIND 8 |
+| `inputs.sha256` | the input-stream digest of each case, at each precision (`woof.verify.mali_sia_oracle.input_bytes`) |
 
 The inputs are regenerated, not committed, with the sea-ice fixture's
 RandomState method.

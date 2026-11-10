@@ -59,7 +59,7 @@ def test_the_boundary_names_follow_the_rows_and_only_with_have_bcs_chem():
     assert chem_wrf.lbc_scalar_names(_raw(have_bcs_chem=1)) == ("lbc_o3", "lbc_no2", "lbc_co", "lbc_so2")
 
 
-def test_the_rows_must_follow_the_whole_driven_block(monkeypatch):
+def test_the_rows_follow_the_whole_driven_block(monkeypatch):
     from woof.hex import chem_transport
     monkeypatch.setitem(chem_transport._CONFIGS, "chemistry_x", (None, _raw(have_bcs_chem=1), None, None, None))
     wsm6 = ("qv", "qc", "qr", "qi", "qs", "qg")
@@ -67,10 +67,19 @@ def test_the_rows_must_follow_the_whole_driven_block(monkeypatch):
     full = tuple("lbc_" + n for n in wsm6)
     assert chem_transport.drive_chemistry_rows("chemistry_x", full, wsm6, species) == (
         *full, "lbc_o3", "lbc_no2", "lbc_co", "lbc_so2")
-    # A stream carrying only qv, qc and qr would leave the rows behind undriven species.
+    assert chem_transport.driven_scalar_species(full + ("lbc_o3", "lbc_no2", "lbc_co", "lbc_so2"),
+                                                species) is None
+    # A stream carrying only qv, qc and qr: the rows still follow the whole block in the model, and the
+    # regional runtime drives them as a second boundary run (tests/test_hex_chem_lbc_runs.py).
+    driven = chem_transport.drive_chemistry_rows("chemistry_x", full[:3], wsm6, species)
+    assert driven == (*full[:3], "lbc_o3", "lbc_no2", "lbc_co", "lbc_so2")
+    assert chem_transport.driven_scalar_species(driven, species) == (0, 1, 2, 6, 7, 8, 9)
+    with pytest.raises(ValueError, match="leading part"):
+        chem_transport.drive_chemistry_rows("chemistry_x", ("lbc_qv", "lbc_qr"), wsm6, species)
     with pytest.raises(ValueError, match="whole driven block"):
-        chem_transport.drive_chemistry_rows("chemistry_x", full[:3], wsm6, species)
+        chem_transport.drive_chemistry_rows("chemistry_x", full, wsm6, (*wsm6, "no2", "o3", "co", "so2"))
     assert chem_transport.drive_chemistry_rows("wsm6_column", full[:3], wsm6, wsm6) == full[:3]
+    assert chem_transport.driven_scalar_species(full[:3], wsm6) is None
 
 
 def test_the_pool_admits_supplied_rows_once_declared():
@@ -435,3 +444,24 @@ def test_a_regional_attach_pads_the_garbage_column_and_fills_the_start(monkeypat
     filled = seen["fill"]["latitude"]
     assert filled.size == ncells + 1 and filled[-1] == filled[1] and seen["fill"]["pressure"] == "p"
     assert seen["reader"] == ncells
+
+
+def test_a_partitioned_rank_pool_takes_the_boundary_reader():
+    from woof.hex.lbc import LbcInventory, LbcPool, declare_supplied_scalars
+    from woof.hex.partition_regional_v841 import PartitionLbcPoolV841
+    raw = _raw(have_bcs_chem=1)
+    names = chem_wrf.lbc_scalar_names(raw)
+    declare_supplied_scalars(names)
+    inner = LbcPool(LbcInventory.__new__(LbcInventory), scalar_names=("lbc_qv", "lbc_qc", "lbc_qr", *names))
+    rank_reader = inner.reader = object()
+    pool = PartitionLbcPoolV841.__new__(PartitionLbcPoolV841)
+    pool.pool, pool.layout, pool._cut_after = inner, SimpleNamespace(cell_l2g=np.array([4, 2, 7])), False
+    driver = SimpleNamespace(regional_v841=SimpleNamespace(driving=SimpleNamespace(_pool=pool)))
+    runtime = SimpleNamespace(raw=raw)
+    with pytest.raises(ValueError, match="3 boundary cells"):
+        chem_wrf.install_boundary_reader(runtime, driver, latitude=np.zeros(2), longitude=np.zeros(2))
+    reader = chem_wrf.install_boundary_reader(runtime, driver, latitude=np.zeros(3), longitude=np.zeros(3))
+    assert inner.reader is reader and reader.base is rank_reader and runtime.boundary_reader is reader
+    pool._cut_after, pool.pool = True, SimpleNamespace(scalar_names=inner.scalar_names)
+    with pytest.raises(ValueError, match="cuts its rows"):
+        chem_wrf.install_boundary_reader(runtime, driver, latitude=np.zeros(3), longitude=np.zeros(3))

@@ -4648,6 +4648,8 @@ def _construct_device_stack(
             # the microphysics, which is what native does with a stream that
             # declares fewer scalars than the scheme integrates.
             scalar_names=regional["driven_scalars"],
+            **({"scalar_species": regional["driven_scalar_species"]}
+               if "driven_scalar_species" in regional else {}),
         )
         physics_mesh = driver.regional_v841.padded
     # The MPAS-A v8.4.1 LES closure: attached here, where the driver is

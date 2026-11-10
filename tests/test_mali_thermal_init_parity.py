@@ -36,7 +36,8 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_case_inputs_are_the_recorded_bytes():
     recorded = dict(reversed(line.split()) for line in
                     (to.FIXTURE_DIR / "inputs.sha256").read_text(encoding="utf-8").splitlines())
-    assert recorded == {case["name"]: to.input_digest(case) for case in to.cases()}
+    assert recorded == {**{case["name"]: to.input_digest(case) for case in to.cases()},
+                        **{case["name"] + "/r8": to.input_digest(case) for case in to.cases("r8")}}
 
 
 def test_fixture_covers_the_branches():
@@ -59,31 +60,35 @@ def test_unknown_init_options_are_refused_by_name():
 
 
 @requires_gpu
-def test_gpu_matches_the_v842_oracle_word_for_word():
-    report = to.measure()
+@pytest.mark.parametrize("precision", ["r4", "r8"])
+def test_gpu_matches_the_v842_oracle_word_for_word(precision):
+    report = to.measure(precision=precision)
     bad = {case: {k: v for k, v in fields.items() if v} for case, fields in report.items()}
     assert not any(bad.values()), bad
 
 
 @requires_gpu
+@pytest.mark.parametrize("precision", ["r4", "r8"])
 @pytest.mark.parametrize("original, mutated, field", [
     # the pressure-melting column product associated differently
     ("return -M(M(M(M(LI_ICE_MELTING_POINT_PRESSURE_DEPENDENCE, rhoi), LI_GRAVITY), thickness), sigma);",
      "return -M(M(M(LI_ICE_MELTING_POINT_PRESSURE_DEPENDENCE, rhoi), LI_GRAVITY), M(thickness, sigma));",
-     "pmpTemperature"),
+     ("pmpTemperature", "convTemperature")),   # at RKIND 8, + 273.15 absorbs it in pmpTemperature
     # the cold-ice temperature divided in two steps
     ("temperature[p] = D(enthalpy[p], M(rhoi, LI_CP_ICE));",
      "temperature[p] = D(D(enthalpy[p], rhoi), LI_CP_ICE);", "convTemperature"),
 ])
-def test_a_mutated_operation_is_caught(monkeypatch, original, mutated, field):
+def test_a_mutated_operation_is_caught(monkeypatch, precision, original, mutated, field):
     from woof.hex.mpas_ice import thermal_init_v842 as th
-    source = th.module_source()
-    assert source.count(original) == 1
-    monkeypatch.setattr(th, "module_source", lambda: source.replace(original, mutated))
+    sources = {p: th.module_source(p) for p in ("r4", "r8")}
+    assert sources[precision].count(original) == 1
+    monkeypatch.setattr(th, "module_source", lambda p="r4": sources[p].replace(original, mutated))
     th._module_on.cache_clear()
     try:
-        fixture = to.load_fixture()
-        total = sum(to.bit_mismatches(to.run_gpu(c)[field], fixture[c["name"]][field]) for c in to.cases())
+        fixture = to.load_fixture(precision)
+        fields = (field,) if isinstance(field, str) else field
+        total = sum(to.bit_mismatches(got[f], fixture[c["name"]][f])
+                    for c in to.cases(precision) for got in (to.run_gpu(c),) for f in fields)
         assert total > 0
     finally:
         th._module_on.cache_clear()
@@ -106,8 +111,9 @@ def test_the_oracle_rebuilt_here_writes_the_fixture(tmp_path):
                     str(tmp_path / "build")], check=True, env={**os.environ, "GFORTRAN": gfortran})
     subprocess.run([sys.executable, str(ROOT / "tools" / "mali_oracle" / "make_thermal_fixture.py"),
                     str(tmp_path / "build"), "--out", str(tmp_path / "fixture")], check=True)
-    fresh = np.load(tmp_path / "fixture" / "oracle-r4.npz")
-    pinned = np.load(to.FIXTURE_DIR / "oracle-r4.npz")
-    assert sorted(fresh.files) == sorted(pinned.files)
-    for key in pinned.files:
-        assert np.array_equal(fresh[key].view(np.uint32), pinned[key].view(np.uint32)), key
+    for precision in ("r4", "r8"):
+        fresh = np.load(tmp_path / "fixture" / f"oracle-{precision}.npz")
+        pinned = np.load(to.FIXTURE_DIR / f"oracle-{precision}.npz")
+        assert sorted(fresh.files) == sorted(pinned.files)
+        for key in pinned.files:
+            assert np.array_equal(fresh[key].view(np.uint32), pinned[key].view(np.uint32)), key

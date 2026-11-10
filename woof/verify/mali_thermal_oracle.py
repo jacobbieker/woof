@@ -3,10 +3,12 @@
 ``tools/mali_oracle/run_thermal.F90`` calls ``li_thermal_init`` and then
 ``li_compute_pressure_melting_point_fields``, ``li_temperature_to_enthalpy``
 and ``li_enthalpy_to_temperature``, all from MPAS-Model v8.4.2 compiled
-verbatim (gfortran -O0 -ffp-contract=off, RKIND 4). This module writes the
+verbatim (gfortran -O0 -ffp-contract=off, RKIND 4 and 8). This module writes the
 driver's input stream, reads its output, builds the cases and runs the GPU
 port the same way. The RandomState discipline is that of
-:mod:`woof.verify.mpas_seaice_evp_oracle`.
+:mod:`woof.verify.mpas_seaice_evp_oracle`. A case is built at one precision:
+the RKIND 4 case rounds the draws to float32 and the RKIND 8 case keeps them
+in float64, and the stream, the fixture and the GPU run follow it.
 """
 from __future__ import annotations
 
@@ -16,6 +18,7 @@ from pathlib import Path
 import numpy as np
 
 FIXTURE_DIR = (Path(__file__).resolve().parents[2] / "tests" / "data" / "oracles" / "mali_thermal_init")
+PRECISIONS = {"r4": np.float32, "r8": np.float64}
 
 GRID_FIELDS = ("layerCenterSigma", "layerInterfaceSigma", "thickness", "upperSurface")
 INIT_FIELDS = ("temperature", "waterfrac", "enthalpy", "surfaceAirTemperature", "surfaceTemperature",
@@ -37,7 +40,7 @@ _LEVEL = {"temperature", "waterfrac", "enthalpy", "pmpTemperature", "outEnthalpy
           "convTemperature", "convWaterfrac", "inTemperature", "inWaterfrac"}
 
 
-def make_case(name, seed, n_cells, n_levels, init, air) -> dict:
+def make_case(name, seed, n_cells, n_levels, init, air, precision: str = "r4") -> dict:
     """One deterministic case: an ice sheet up to 3.5 km thick.
 
     The case covers air temperatures above and below freezing and above the
@@ -46,22 +49,23 @@ def make_case(name, seed, n_cells, n_levels, init, air) -> dict:
     pressure-melting enthalpy.
     """
     rs = np.random.RandomState(seed)
+    real = PRECISIONS[precision]
     nc, nl = n_cells, n_levels
 
     def uniform(lo, hi, shape):
-        return (lo + (hi - lo) * rs.random_sample(shape)).astype(np.float32)
+        return (lo + (hi - lo) * rs.random_sample(shape)).astype(real)
 
     interfaces = np.sort(rs.random_sample(nl - 1))
-    sigma_i = np.concatenate(([0.0], interfaces, [1.0])).astype(np.float32)
-    sigma_c = ((sigma_i[:-1].astype(np.float64) + sigma_i[1:].astype(np.float64)) * 0.5).astype(np.float32)
+    sigma_i = np.concatenate(([0.0], interfaces, [1.0])).astype(real)
+    sigma_c = ((sigma_i[:-1].astype(np.float64) + sigma_i[1:].astype(np.float64)) * 0.5).astype(real)
     thickness = uniform(0.0, 3500.0, nc)
     thickness[rs.random_sample(nc) < 0.1] = 0.0
     return {
-        "name": name, "nCells": nc, "nCellsSolve": nc - 4, "nVertLevels": nl,
+        "name": name, "precision": precision, "nCells": nc, "nCellsSolve": nc - 4, "nVertLevels": nl,
         "temperatureInit": init, "airSource": air,
-        "iceDensity": np.float32(910.0), "oceanDensity": np.float32(1028.0),
-        "airValue": np.float32(268.0 if air == "constant" else 276.0),
-        "lapseRate": np.float32(0.0065), "heatFluxValue": np.float32(0.0585),
+        "iceDensity": real(910.0), "oceanDensity": real(1028.0),
+        "airValue": real(268.0 if air == "constant" else 276.0),
+        "lapseRate": real(0.0065), "heatFluxValue": real(0.0585),
         "layerCenterSigma": sigma_c, "layerInterfaceSigma": sigma_i, "thickness": thickness,
         "upperSurface": uniform(0.0, 3800.0, nc),
         "temperature": uniform(230.0, 270.0, (nc, nl)), "waterfrac": uniform(0.0, 0.02, (nc, nl)),
@@ -75,8 +79,12 @@ def make_case(name, seed, n_cells, n_levels, init, air) -> dict:
     }
 
 
-def cases() -> list[dict]:
-    return [make_case(*row) for row in CASES]
+def cases(precision: str = "r4") -> list[dict]:
+    return [make_case(*row, precision=precision) for row in CASES]
+
+
+def _real(case: dict) -> np.dtype:
+    return np.dtype(PRECISIONS[case["precision"]]).newbyteorder("<")
 
 
 def _shape(name: str, case: dict) -> tuple[int, ...]:
@@ -87,10 +95,10 @@ def input_bytes(case: dict) -> bytes:
     head = np.array([case["nCells"], case["nCellsSolve"], case["nVertLevels"], INIT[case["temperatureInit"]],
                      AIR[case["airSource"]]], "<i4")
     reals = np.array([case["iceDensity"], case["oceanDensity"], case["airValue"], case["lapseRate"],
-                      case["heatFluxValue"]], "<f4")
+                      case["heatFluxValue"]], _real(case))
     parts = [head.tobytes(), reals.tobytes()]
     for name in GRID_FIELDS + INIT_FIELDS + CONV_INPUTS:
-        parts.append(np.ascontiguousarray(case[name], "<f4").tobytes())
+        parts.append(np.ascontiguousarray(case[name], _real(case)).tobytes())
     return b"".join(parts)
 
 
@@ -104,15 +112,15 @@ def read_outputs(raw: bytes, case: dict) -> dict[str, np.ndarray]:
     for name in OUTPUTS:
         shape = _shape(name, case)
         count = int(np.prod(shape))
-        out[name] = np.frombuffer(raw, "<f4", count, off).reshape(shape).copy()
-        off += 4 * count
+        out[name] = np.frombuffer(raw, _real(case), count, off).reshape(shape).astype(PRECISIONS[case["precision"]])
+        off += _real(case).itemsize * count
     if off != len(raw):
         raise ValueError(f"oracle output: {len(raw) - off} trailing bytes")
     return out
 
 
-def load_fixture() -> dict[str, dict[str, np.ndarray]]:
-    with np.load(FIXTURE_DIR / "oracle-r4.npz") as data:
+def load_fixture(precision: str = "r4") -> dict[str, dict[str, np.ndarray]]:
+    with np.load(FIXTURE_DIR / f"oracle-{precision}.npz") as data:
         out: dict[str, dict[str, np.ndarray]] = {}
         for key in data.files:
             case, field = key.split("/", 1)
@@ -121,8 +129,12 @@ def load_fixture() -> dict[str, dict[str, np.ndarray]]:
 
 
 def bit_mismatches(a: np.ndarray, b: np.ndarray) -> int:
-    return int(np.count_nonzero(np.asarray(a, np.float32).view(np.uint32)
-                                != np.asarray(b, np.float32).view(np.uint32)))
+    """Words that differ as bit patterns (so -0.0 != 0.0)."""
+    a, b = np.ascontiguousarray(a), np.ascontiguousarray(b)
+    if a.shape != b.shape or a.dtype.itemsize != b.dtype.itemsize:
+        return int(max(a.size, b.size))
+    word = np.dtype(f"u{a.dtype.itemsize}")
+    return int(np.count_nonzero(a.view(word) != b.view(word)))
 
 
 def run_gpu(case: dict) -> dict[str, np.ndarray]:
@@ -138,19 +150,20 @@ def run_gpu(case: dict) -> dict[str, np.ndarray]:
                     config_surface_air_temperature_lapse_rate=case["lapseRate"],
                     config_basal_heat_flux_source="constant", config_basal_heat_flux_value=case["heatFluxValue"])
     nc, nl = case["nCells"], case["nVertLevels"]
-    d["pmpTemperature"] = cp.empty((nc, nl), cp.float32)
-    d["basalPmpTemperature"] = cp.empty(nc, cp.float32)
+    real = PRECISIONS[case["precision"]]
+    d["pmpTemperature"] = cp.empty((nc, nl), real)
+    d["basalPmpTemperature"] = cp.empty(nc, real)
     th.pressure_melting_point_fields(thickness=d["thickness"], layer_center_sigma=d["layerCenterSigma"],
                                      pmp_temperature=d["pmpTemperature"],
                                      basal_pmp_temperature=d["basalPmpTemperature"], rhoi=case["iceDensity"])
-    d["outEnthalpy"] = cp.empty((nc, nl), cp.float32)
+    d["outEnthalpy"] = cp.empty((nc, nl), real)
     th.temperature_to_enthalpy(temperature=d["inTemperature"], waterfrac=d["inWaterfrac"], enthalpy=d["outEnthalpy"],
                                thickness=d["thickness"], layer_center_sigma=d["layerCenterSigma"],
                                rhoi=case["iceDensity"])
     for name in ("convTemperature", "convWaterfrac"):
-        d[name] = cp.empty((nc, nl), cp.float32)
+        d[name] = cp.empty((nc, nl), real)
     for name in ("convSurfaceTemperature", "convBasalTemperature"):
-        d[name] = cp.empty(nc, cp.float32)
+        d[name] = cp.empty(nc, real)
     th.enthalpy_to_temperature(enthalpy=d["convEnthalpy"], temperature=d["convTemperature"],
                                waterfrac=d["convWaterfrac"], surface_enthalpy=d["convSurfaceEnthalpy"],
                                surface_temperature=d["convSurfaceTemperature"],
@@ -160,10 +173,10 @@ def run_gpu(case: dict) -> dict[str, np.ndarray]:
     return {name: cp.asnumpy(d[name]) for name in OUTPUTS}
 
 
-def measure(reference: dict | None = None) -> dict[str, dict[str, int]]:
-    reference = load_fixture() if reference is None else reference
+def measure(reference: dict | None = None, precision: str = "r4") -> dict[str, dict[str, int]]:
+    reference = load_fixture(precision) if reference is None else reference
     report: dict[str, dict[str, int]] = {}
-    for case in cases():
+    for case in cases(precision):
         got = run_gpu(case)
         want = reference[case["name"]]
         report[case["name"]] = {name: bit_mismatches(got[name], want[name]) for name in OUTPUTS}

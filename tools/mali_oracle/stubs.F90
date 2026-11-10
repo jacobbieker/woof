@@ -59,9 +59,10 @@ module mpas_pool_routines
   integer, parameter :: MPAS_POOL_CONFIG = 1004
 
   ! the field types the land-ice modules declare; only scratch-field and
-  ! halo routines reach them.  The 2-D and 3-D real scratch fields resolve to
-  ! arrays the driver allocates and puts in the pool under the field's name
-  ! (run_advection.F90); the rest are not part of these oracles
+  ! halo routines reach them.  The 1-D integer and the 2-D and 3-D real
+  ! scratch fields resolve to arrays the driver allocates and puts in the pool
+  ! under the field's name (run_advection.F90, run_thermal_solver.F90); the
+  ! 1-D real ones are not part of these oracles
   type field1DInteger
     integer, dimension(:), pointer :: array => null()
     type(field1DInteger), pointer :: next => null()
@@ -179,15 +180,17 @@ contains
     character(len=*), intent(in) :: name
     type(field1DInteger), pointer :: field
     integer, intent(in), optional :: timeLevel
-    print *, 'oracle stub: mpas_pool_get_field is not part of this oracle: ', trim(name)
-    stop 6
+    allocate(field)
+    field % array => pool % e(find(pool, name)) % i1
   end subroutine get_field_i1
 
   subroutine scratch_i1(field, single_block_in)
     type(field1DInteger), pointer :: field
     logical, intent(in), optional :: single_block_in
-    print *, 'oracle stub: scratch fields are not part of this oracle'
-    stop 6
+    if (.not. associated(field % array)) then
+      print *, 'oracle stub: a scratch field without a driver array'
+      stop 6
+    end if
   end subroutine scratch_i1
 
   subroutine get_field_r1(pool, name, field, timeLevel)
