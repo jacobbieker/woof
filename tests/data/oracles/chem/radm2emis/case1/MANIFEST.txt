@@ -1,0 +1,4 @@
+dtstep f4 0
+kemit i4 0
+emis_ant f4 4 8 4 2 46
+chem f4 4 8 6 2 81

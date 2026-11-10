@@ -101,8 +101,19 @@ def test_every_driver_array_is_in_the_vram_inventory(census, cell):
     later = ("last_ysu/" if config.bl_pbl_physics == 1
              and config.bldt > 0.0 else None)
     assert physics_retains_ysu_output(config) == (later is not None)
+    # The eclipse planes are priced whenever ra_sw_eclipse is on (the
+    # default) but bound only when an eclipse falls inside a run with SW
+    # radiation (woof.eclipse_windows.EclipseRadiation.for_run), which no
+    # one-minute census run has: priced worst case, never built here.
+    eclipse = (frozenset(f"fields/{name}" for name in (
+        "ecobsc", "ecmask", "elat_track", "elon_track",
+        "eclipse_initialized")) if int(config.ra_sw_eclipse) else frozenset())
+    # A column land surface (SSiB) builds its record descriptors on its
+    # first call (PhysicsDriver._run_column_land_surface), not at build.
+    records = "column_surface_params/records/"
     phantom = sorted(key for key in inventory if key not in allocated
-                     and not (later and key.startswith(later)))
+                     and not (later and key.startswith(later))
+                     and key not in eclipse and not key.startswith(records))
     assert not phantom, (
         f"{cell_id(cell)}: priced but never allocated: {phantom}")
 

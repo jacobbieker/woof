@@ -6353,8 +6353,10 @@ def physics_array_shapes(cfg: RunConfig, *, cam_ozone: bool = False,
     if cfg.diag_print == 2:
         shapes["fields/sfcevp"] = s2
     from woof.core.physics_inventory import scm_forcing_fields
-    for name in scm_forcing_fields():
+    for name in scm_forcing_fields(cfg):
         shapes[f"fields/{name}"] = ()
+    if cfg.sf_sfclay_physics == 89:
+        shapes["fields/exch_temf"] = s2
     if cfg.bl_pbl_physics:
         from woof.core.physics_inventory import pbl_history_rates
         for name in pbl_history_rates(cfg):

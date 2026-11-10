@@ -1762,6 +1762,40 @@ def _regional_scalar_chunk(ntracers: int, nlev: int, nedges: int, scalar_stage: 
 # ---------------------------------------------------------------------------
 
 
+def driven_scalar_segments(
+    driven: int, scalar_species: Sequence[int] | None = None,
+) -> tuple[tuple[int, int, int], ...]:
+    """The runs ``(model_first, pool_first, count)`` the boundary scalar kernels drive.
+
+    The driving pool's scalars are the stream's leading model species and, after them, rows the
+    run supplies itself (the wrf_chem boundary rows, woof.hex.chem_transport.drive_chemistry_rows).
+    ``scalar_species`` names each pool scalar's index in the model's scalar array; consecutive
+    indices form one run, and every run is a separate launch of the same kernels on the scalar
+    sub-array and the driving rows it owns.  None (every run without supplied rows) is the one
+    leading run ``(0, 0, driven)``, the launches as they always were.
+    """
+
+    driven = int(driven)
+    if scalar_species is None:
+        return ((0, 0, driven),)
+    species = [int(index) for index in scalar_species]
+    if len(species) != driven:
+        raise RegionalAdmissionError(
+            f"the boundary pool drives {driven} scalars and names model indices for {len(species)}")
+    if species and (species[0] != 0 or min(species) < 0
+                    or any(b <= a for a, b in zip(species, species[1:]))):
+        raise RegionalAdmissionError(
+            f"the boundary pool's model indices {tuple(species)} must start at the model's first species "
+            "and ascend; a pool row driving an earlier species would overwrite a driven tracer")
+    runs: list[list[int]] = []
+    for pool, model in enumerate(species):
+        if runs and model == runs[-1][0] + runs[-1][2]:
+            runs[-1][2] += 1
+        else:
+            runs.append([model, pool, 1])
+    return tuple(tuple(run) for run in runs) or ((0, 0, 0),)
+
+
 @dataclass(slots=True)
 class _StageOffsets:
     dynamics_substep: int = 1
@@ -1795,8 +1829,10 @@ class CudaRegionalRuntimeV841:
         config_relax_zone_divdamp_coef: float = 6.0,
         scalar_names: Sequence[str] = ("lbc_qv",),
         measure_garbage: bool = False,
+        scalar_species: Sequence[int] | None = None,
     ) -> None:
         self.driven_scalars = int(len(tuple(scalar_names)))
+        self.scalar_segments = driven_scalar_segments(self.driven_scalars, scalar_species)
         import cupy as cp
 
         self.cp = cp
@@ -2255,9 +2291,28 @@ class CudaRegionalRuntimeV841:
                 return
             del driving, support
         driving = self.driving.state_at("scalars", self.clock, dt_rk)
+        self._driven_tracer_count(scalars)
+        for model_first, pool_first, count in self.scalar_segments:
+            self._bdy_adjust_scalars_full(
+                self._scalar_run(scalars, model_first, count),
+                driving if pool_first == 0 else self.cp.ascontiguousarray(driving[pool_first:pool_first + count]),
+                count, dt_rk)
+
+    def _scalar_run(self, scalars: Any, model_first: int, count: int) -> Any:
+        """The model scalar sub-array one boundary run writes in place (the whole array for the leading run)."""
+
+        if model_first == 0:
+            return scalars
+        view = scalars[model_first:model_first + count]
+        if not view.flags.c_contiguous:
+            raise RuntimeError("the boundary scalar run needs C-contiguous model scalars")
+        return view
+
+    def _bdy_adjust_scalars_full(self, scalars: Any, driving: Any, ntracers: int, dt_rk: Any) -> None:
+        """``atm_bdy_adjust_scalars_work`` over the full extent for ``ntracers`` leading species."""
+
         masks = self.masks
         mesh = self.atmosphere.mesh
-        ntracers = self._driven_tracer_count(scalars)
         ncells = int(scalars.shape[-1])
         nedges = int(mesh.n_edges)
         ten_dt = np.float32(np.float32(10.0) * np.float32(self.outer_dt))
@@ -2387,8 +2442,23 @@ class CudaRegionalRuntimeV841:
             raise RuntimeError(
                 f"compact driving scalars {tuple(driving.shape)} do not match {ntracers} tracers on {nsup} cells"
             )
+        for model_first, pool_first, count in self.scalar_segments:
+            self._bdy_adjust_scalars_ring_run(
+                scalars, driving if pool_first == 0 else cp.ascontiguousarray(
+                    driving[pool_first:pool_first + count]),
+                model_first, count, plan, dt_rk)
+
+    def _bdy_adjust_scalars_ring_run(self, scalars: Any, driving: Any, model_first: int, ntracers: int,
+                                     plan: dict[str, Any], dt_rk: Any) -> None:
+        """One boundary run of the ring path: model species ``model_first`` on, ``ntracers`` of them."""
+
+        cp = self.cp
+        masks = self.masks
+        mesh = self.atmosphere.mesh
+        nsup = plan["nsupport"]
+        last = model_first + ntracers
         ten_dt = np.float32(np.float32(10.0) * np.float32(self.outer_dt))
-        local = cp.ascontiguousarray(scalars[:ntracers, :, plan["support"]])
+        local = cp.ascontiguousarray(scalars[model_first:last, :, plan["support"]])
         updates = cp.zeros_like(local)
         self.kernels.launch(
             "regional_bdy_adjust_scalars_compute_v841",
@@ -2408,7 +2478,7 @@ class CudaRegionalRuntimeV841:
         )
         del local
         if masks.n_nudged_cells:
-            scalars[:ntracers, :, plan["nudged_global"]] = updates[:, :, plan["nudged_local64"]]
+            scalars[model_first:last, :, plan["nudged_global"]] = updates[:, :, plan["nudged_local64"]]
 
     def clamp_negative_scalars(self, scalars: Any) -> None:
         """``atm_srk3:2798-2800``."""
@@ -2450,23 +2520,30 @@ class CudaRegionalRuntimeV841:
         if self._ring_scalars_on() and hasattr(self.driving, "state_at_support"):
             driving, support = self.driving.state_at_support("scalars", self.clock, dt_f32)
             if support is not None:
-                ntracers = self._driven_tracer_count(scalars)
+                self._driven_tracer_count(scalars)
                 plan = self._ring_plan(int(scalars.shape[-1]))
                 if masks.n_spec_cells:
-                    scalars[:ntracers, :, plan["spec_global"]] = driving[:ntracers, :, plan["spec_local64"]]
+                    for model_first, pool_first, ntracers in self.scalar_segments:
+                        scalars[model_first:model_first + ntracers, :, plan["spec_global"]] = driving[
+                            pool_first:pool_first + ntracers, :, plan["spec_local64"]]
                 return
             del driving, support
         driving = self.driving.state_at("scalars", self.clock, dt_f32)
-        self.kernels.launch(
-            "regional_bdy_set_scalars_v841",
-            max(self._driven_tracer_count(scalars) * self.nlev
-                * masks.n_spec_cells, 1),
-            (
-                np.int32(self._driven_tracer_count(scalars)), np.int32(self.nlev),
-                np.int32(int(scalars.shape[-1])), np.int32(masks.n_spec_cells),
-                masks.spec_cells, driving, scalars,
-            ),
-        )
+        self._driven_tracer_count(scalars)
+        for model_first, pool_first, ntracers in self.scalar_segments:
+            self.kernels.launch(
+                "regional_bdy_set_scalars_v841",
+                max(ntracers * self.nlev
+                    * masks.n_spec_cells, 1),
+                (
+                    np.int32(ntracers), np.int32(self.nlev),
+                    np.int32(int(scalars.shape[-1])), np.int32(masks.n_spec_cells),
+                    masks.spec_cells,
+                    driving if pool_first == 0 else self.cp.ascontiguousarray(
+                        driving[pool_first:pool_first + ntracers]),
+                    self._scalar_run(scalars, model_first, ntracers),
+                ),
+            )
 
     def _driven_tracer_count(self, scalars: Any) -> int:
         """Bound the configured native boundary scalar inventory.
@@ -2479,12 +2556,18 @@ class CudaRegionalRuntimeV841:
         """
 
         model = int(scalars.shape[0])
+        reach = max((first + count for first, _, count in self.scalar_segments), default=0)
         if self.driven_scalars > model:
             raise RegionalAdmissionError(
                 f"the lateral-boundary stream drives {self.driven_scalars} "
                 f"scalar species and this run integrates {model}; the extra "
                 "driving fields belong to species no scheme in this "
                 "configuration carries"
+            )
+        if reach > model:
+            raise RegionalAdmissionError(
+                f"the boundary pool's supplied rows reach model species {reach} and this run integrates "
+                f"{model}; a row would drive past the scalar array"
             )
         return self.driven_scalars
 
@@ -2677,6 +2760,7 @@ def open_regional_forecast_v841(
     scalar_names: Sequence[str] = ("lbc_qv",),
     les_dissipation: Any = None,
     driver_type: Any = None,
+    scalar_species: Sequence[int] | None = None,
 ) -> Any:
     """Open one regional configuration on the card, recording its anchor.
 
@@ -2735,6 +2819,7 @@ def open_regional_forecast_v841(
         scalar_names=tuple(scalar_names),
         les_dissipation=les_dissipation,
         driver_type=driver_type,
+        scalar_species=scalar_species,
     )
     driver.regional_v841.anchor = anchor
     return driver
@@ -2757,6 +2842,7 @@ def assemble_regional_driver_v841(
     scalar_names: Sequence[str] = ("lbc_qv",),
     les_dissipation: Any = None,
     driver_type: Any = None,
+    scalar_species: Sequence[int] | None = None,
 ) -> Any:
     """Build the regional device driver.  Carries NO admission decision."""
 
@@ -2852,6 +2938,7 @@ def assemble_regional_driver_v841(
         v841_context=context,
         measure_garbage=measure_garbage,
         scalar_names=tuple(scalar_names),
+        scalar_species=scalar_species,
     )
     driver.regional_v841 = runtime
     return driver

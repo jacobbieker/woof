@@ -1,0 +1,6 @@
+# Routines copied byte for byte from chem/module_aerosols_sorgam.F into the
+# wrapper module module_aerosols_sorgam (after prelude.inc), in this order:
+# the module constants (factnumn, factnuma, factnumc) and the RADM2SORG
+# aerosol emission add emissions_driver calls (chem/emissions_driver.F:1646).
+aerosols_sorgam_init
+sorgam_addemiss
