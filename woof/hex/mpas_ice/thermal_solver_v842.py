@@ -190,8 +190,8 @@ def thermal_solver(*, mesh: dict, geometry: dict, velocity: dict, thermal: dict,
         raise ValueError(f"li_thermal_solver was called with invalid deltat = {deltat}")
     g, m, v, t = geometry, mesh, velocity, thermal
     n_cells, n_levels = t["temperature"].shape
-    if n_levels > MAX_LEVELS:
-        raise ValueError(f"the column solve holds at most {MAX_LEVELS} layers")
+    if not 1 <= n_levels <= MAX_LEVELS:
+        raise ValueError(f"the column solve needs 1 to {MAX_LEVELS} layers, not {n_levels}")
     n_edges = g["slopeEdge"].shape[0]
     max_edges = m["edgesOnCell"].shape[1]
     ncs = int(m["nCellsSolve"])
