@@ -106,7 +106,7 @@ __global__ void wind_maxima_fold(
     real* __restrict__ v10max,
     real* __restrict__ w_up_max, real* __restrict__ w_dn_max,
     real* __restrict__ gust_max,
-    const int nz, const int ny, const int nx) {
+    const int nz, const int ny, const int nx, const int mass_winds) {
   const int col = blockIdx.x * blockDim.x + threadIdx.x;
   if (col >= nx * ny) return;
   const int jy = col / nx;
@@ -151,9 +151,11 @@ __global__ void wind_maxima_fold(
   const int ktop = (kpbl + 1 < nz - 1) ? kpbl + 1 : nz - 1;
   real gust = sfc;
   for (int k = 1; k <= ktop; ++k) {
-    const real um = __fmul_rn(0.5f, __fadd_rn(
+    // mass_winds: u/v already at the mass point, (nz, ny, nx) like w (an
+    // unstructured mesh's cell-centre winds); else WRF's staggered faces.
+    const real um = mass_winds ? u[I3(k, jy, ix, ny, nx)] : __fmul_rn(0.5f, __fadd_rn(
         u[I3S(k, jy, ix, ny, nx + 1)], u[I3S(k, jy, ix + 1, ny, nx + 1)]));
-    const real vm = __fmul_rn(0.5f, __fadd_rn(
+    const real vm = mass_winds ? v[I3(k, jy, ix, ny, nx)] : __fmul_rn(0.5f, __fadd_rn(
         v[I3(k, jy, ix, ny + 1, nx)], v[I3(k, jy + 1, ix, ny + 1, nx)]));
     const real wind = wg_speed(um, vm);
     const real dz = __fsub_rn(
