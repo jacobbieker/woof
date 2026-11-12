@@ -22,12 +22,17 @@ List the whole registry with `woof prep --list-sources`, or one row with
 | `hrrr-prs` | `hrrr-pressure`, `hrrr-wrfprs` | 1 h | f048 | 1799x1059 Lambert at 3 km (CONUS) |
 | `hrrr-native` | `hrrr-mapped-native` | 1 h | f048 | 1799x1059 Lambert at 3 km, native hybrid levels; same-cycle pressure product supplies analysis soil |
 | `gem-gdps` | `gem`, `gdps`, `gem-global` | 3 h | f240 | global |
+| `gem-hrdps` | `hrdps`, `gem-hrdps-continental`, `hrdps-continental` | 1 h | f048 | 2540x1290 rotated lat-lon at 0.0225 deg (2.5 km, Canadian continental) |
+| `gem-rdps` | `rdps`, `gem-regional` | 1 h | f084 | 1140x1045 rotated lat-lon at 0.090298 deg (10 km, Canadian regional) |
 | `icon-global` | `icon`, `icon-13km`, `dwd-icon`, `dwd-icon-global` | 3 h | f180 (00/12Z), f120 (06/18Z) | global, 2,949,120-cell icosahedral mesh at nominally 13 km |
 | `met-office-global` | `metoffice-global`, `ukmo-global`, `um-global` | 3 h | f144 | global, regular 2560x1920 at 0.140625 x 0.09375 deg (~10 km); soil, land mask and sea ice from the same-cycle GDAS analysis |
 | `icon-global-ml` | `icon-ml`, `icon-global-model-level`, `dwd-icon-global-ml` | 3 h | f180 (00/12Z), f120 (06/18Z); at most 61 leads per window | global, the same mesh on its 120 native model levels |
 | `icon-eu` | `dwd-icon-eu`, `icon-eu-regular` | 1 h | f120 | lat 29.5..70.5, lon -23.5..62.5 |
 | `icon-d2` | `icon-2km`, `dwd-icon-d2` | 1 h | f048 | lat 44.0..57.3, lon 0.0..17.3, 542,040-cell icosahedral mesh at nominally 2.2 km |
 | `gfs` | `gfs-0p25`, `gfs-0.25` | 3 h | f384 | global |
+| `gfs-pressure` | -- | 3 h | f120 | global, the whole 0.25 degree pressure product (all five hydrometeor species) |
+| `hafs-a` | `hfsa` | 3 h | f126 | HAFS-A parent or moving storm nest; its fetch needs `--source-parameters STORM=<ATCF id>` |
+| `hafs-b` | `hfsb` | 3 h | f126 | HAFS-B parent or moving storm nest; its fetch needs `--source-parameters STORM=<ATCF id>` |
 | `gdas` | `gdas-0p25`, `gdas-0.25` | 1 h | f009 | global |
 | `gefs` | `gefs-ensemble` | 3 h | f384 | global |
 | `aigfs` | `ai-gfs` | 6 h | f384 | global |

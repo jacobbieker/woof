@@ -60,6 +60,11 @@ def _kg_per_unit(row) -> float:
     if row.units == "kg kg-1":
         # mixing ratios carried as WRF tracers (MAD-WRF's TR_Q*)
         return 1.0
+    if row.units == "kg-1":
+        # A number row (SORGAM's nu0, ac0, corn: particles per kg of dry
+        # air) has no mass; its ledger counts particles, the same budget
+        # with no kg conversion (ledger_report marks it).
+        return 1.0
     raise ValueError(f"chem row {row.name!r}: no ledger conversion for "
                      f"units {row.units!r}")
 
@@ -168,17 +173,60 @@ def _initialize_processes(ctx, processes):
         chem.initialized = True
 
 
+def _cold_start(state, cfg, processes) -> None:
+    """Each process's ``cold_start(ctx)`` once, on a fresh run only.
+
+    WRF builds a package's initial chemistry before the first step
+    (real.exe's input_chem_profile, chemics_init's aerosol initialisation).
+    Here it happens at the first chem entry of the run, before the tracer RK
+    loop of step 1 and before the ledger takes its initial masses, so the
+    initial state is what the ledger opens on and what step 1 transports:
+    the hooks write the current fields, then every transported row's time-t
+    copy is refreshed from them.  A restored checkpoint carries the
+    ledger's ``started`` flag and is never initialised again.
+    """
+    chem = state.chem
+    if getattr(chem, "cold_start_done", False):
+        return
+    hooks = [(key, module) for key, module in processes
+             if getattr(module, "cold_start", None) is not None]
+    chem.cold_start_done = True
+    if not hooks:
+        return
+    if getattr(chem, "externally_managed_ledger", False):
+        # A rank-owned ledger has no started flag a restart carries, so a
+        # fresh start cannot be told from a restored one; running the hooks
+        # could overwrite restored chemistry, skipping them would start from
+        # nothing.  Neither is silent: refuse.
+        raise RuntimeError(
+            "chem processes " + ", ".join(key for key, _m in hooks)
+            + " build their initial state at a fresh start, and this domain's "
+            "chem ledger is managed externally (ranked or streamed), where a "
+            "fresh start cannot be told from a restart")
+    if bool(cp.asnumpy(getattr(state, ledger_attr("started")))[0]):
+        return
+    ktau = int(round(state.elapsed_seconds / float(cfg.dt))) + 1
+    ctx = _context(state, cfg, ktau)
+    ctx.prep.refresh(state)
+    for _key, module in hooks:
+        module.cold_start(ctx)
+    for row in chem.transported:
+        getattr(state, row.time_attr)[...] = getattr(state, row.state_attr)
+
+
 def chem_pre_transport(state, cfg, dt: float) -> None:
     """Run declared native physics sources before the tracer RK loop.
 
     Existing chemistry processes remain post-step. Source mass is booked
     here by the same driver, so the later transport bucket cannot count it
     again. Only source-affected rows refresh their saved time-t field.
+    A fresh run's process cold starts (:func:`_cold_start`) come first.
     """
     chem = state.chem
     processes = getattr(chem, "processes", None)
     if processes is None:
         processes = chem.processes = chem_processes(chem.table)
+    _cold_start(state, cfg, processes)
     early = [(key, module) for key, module in processes
              if (getattr(module, "TIMING", "post_step") == "pre_transport"
                  and getattr(module, "pre_transport_active", lambda _s, _c: True)(state, cfg))]
@@ -349,5 +397,8 @@ def ledger_report(state, *, store=None) -> dict:
         total = entry["initial_kg"] + sum(float(host[name][i])
                                           for name in LEDGER_BUCKETS)
         entry["closure_kg"] = total - entry["current_kg"]
+        if row.units == "kg-1":
+            # _kg_per_unit: a number row's "_kg" entries count particles.
+            entry["counts"] = "particles"
         out[row.name] = entry
     return {"started": bool(np.asarray(cp.asnumpy(vector('started')))[0]), "rows": out}

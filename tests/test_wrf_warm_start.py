@@ -331,10 +331,10 @@ def _cfg(**overrides):
     base = dict(nx=4, ny=3, nz=2, moist=True, mp_physics=8, cu_physics=16,
                 bl_pbl_physics=2, sf_sfclay_physics=2, sf_surface_physics=2,
                 sf_urban_physics=0, num_soil_layers=4, ifire=0, cycling=False,
-                moist_adv_opt=2, scalar_adv_opt=2)
+                moist_adv_opt=2, scalar_adv_opt=2, dt=60.)
     base.update(overrides)
     from woof.config import RunConfig
-    return RunConfig(dx=1000., dy=1000., ztop=10000., dt=60.,
+    return RunConfig(dx=1000., dy=1000., ztop=10000.,
                      run_seconds=0., **base)
 
 
@@ -876,8 +876,8 @@ def test_native_standard_advection_signed_species_are_valid(fake_bridge, monkeyp
                                   cfg=_cfg(moist_adv_opt=1))
     want = qc if strict else np.maximum(qc, np.float32(0))
     assert restored.raw['QCLOUD'].tobytes() == want.tobytes()
-    key = ('native_standard_advection_signed_words_retained' if strict
-           else 'negative_moisture_set_to_zero')
+    key = ('strict_native_signed_moisture_retained' if strict
+           else 'roundoff_negative_moisture_set_to_zero')
     assert restored.warm_start.checks[key]['QCLOUD']['cells'] == 1
 
 
@@ -887,7 +887,7 @@ def _counters(cu_physics, cudt_minutes, written_stepcu, *, bl_pbl_physics=2,
                              fields={}, carriers=None, microphysics_updates=0)
     cfg = SimpleNamespace(dt=15.0, cu_physics=cu_physics, cudt_minutes=cudt_minutes,
                           bldt=0.0, bl_pbl_physics=bl_pbl_physics,
-                          sf_surface_physics=2)
+                          sf_surface_physics=2, ra_call_offset=0)
     raw = {"STEPRA": np.array([40]), "STEPCU": np.array([written_stepcu]),
            "STEPBL": np.array([1])}
     restored = SimpleNamespace(

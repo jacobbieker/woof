@@ -33,6 +33,18 @@ class _FakeOzone:
         levels = np.arange(self.LEVSIZ, dtype=np.float32)
         return (y[:, None, None] * climo.scale + levels[None, :, None] + months[None, None, :]).astype(np.float32)
 
+    def latitude_table(self, xlat, climo, *, max_bytes):
+        """The engine's kept table: one entry, keyed by latitude words and climatology."""
+        y = np.ascontiguousarray(xlat, dtype=np.float32)
+        if y.size * self.LEVSIZ * 12 * 4 > max_bytes:
+            return self.interp_ozone_to_latitudes(y, climo), "over_cap"
+        kept = getattr(self, "_kept", None)
+        if kept is not None and kept[1] is climo and kept[0].tobytes() == y.tobytes():
+            return kept[2], "hit"
+        table = self.interp_ozone_to_latitudes(y, climo)
+        self._kept = (y.copy(), climo, table)
+        return table, "build"
+
     def ozn_time_int(self, julday, julian, ozmixm):
         month = int(julian) % 11
         return ozmixm[..., month] * np.float32(0.25) + ozmixm[..., month + 1] * np.float32(0.75)
@@ -90,7 +102,7 @@ def test_table_over_the_cap_runs_the_engine_route_every_call():
     first = memo.ozn_latitude_time_int(1, 10.0, lat, wrapped.default_climo)
     second = memo.ozn_latitude_time_int(1, 10.0, lat, wrapped.default_climo)
     assert first.tobytes() == second.tobytes()
-    assert wrapped.table_calls == 2 and memo.stats["over_cap_calls"] == 2 and memo._table is None
+    assert wrapped.table_calls == 2 and memo.stats["over_cap_calls"] == 2 and memo._table_bytes == 0
 
 
 def test_other_attributes_forward_to_the_engine_module():
