@@ -98,6 +98,8 @@ DOMAIN_ROOT = {"grid_id": 1, "parent_id": 0, "i_parent_start": 1, "j_parent_star
 #: [fetch] keys hex reads (source, cycle, forecast_start_hour) or that are WRF go's
 #: advisory download hints: hex's own source door decides what to fetch.
 FETCH_KEYS = ("source", "cycle", "forecast_start_hour", "hours", "area", "out", "cadence")
+#: [projection] keys the region outline reads (the WRF root grid :mod:`woof.source_coverage` places).
+PROJECTION_KEYS = ("map_proj", "ref_lat", "ref_lon", "truelat1", "truelat2", "stand_lon")
 #: [output] keys the hex forecast door reads (``woof.output_formats``).
 OUTPUT_KEYS = ("formats", "icechunk_store", "icechunk_delete_after_commit")
 
@@ -323,6 +325,14 @@ def read_request(document: Mapping[str, Any], *, source: str = "CONFIG") -> dict
     projection = document.get("projection")
     if not isinstance(projection, dict):
         refusals.append("[projection]: the hex route draws its region from the [[domain]] on this projection")
+    else:
+        for key in projection:
+            if key not in PROJECTION_KEYS:
+                refusals.append(f"[projection] {key}: the hex region outline reads only "
+                                f"{', '.join(PROJECTION_KEYS)}")
+        for key in PROJECTION_KEYS:
+            if key not in projection:
+                refusals.append(f"[projection] {key}: the hex route needs it to place the region")
     for key in ("nx", "ny", "dx", "history_interval_s"):
         if key not in domain:
             refusals.append(f"[[domain]] {key}: the hex route needs it (region size, fine spacing, "
@@ -335,6 +345,10 @@ def read_request(document: Mapping[str, Any], *, source: str = "CONFIG") -> dict
     if refusals:
         raise HexGoRefusal(f"{source} asks the hex engine for what it cannot run yet:\n  - "
                            + "\n  - ".join(refusals))
+    start = experiment["start_time"]
+    if not isinstance(start, datetime) or start.tzinfo is not None:
+        raise HexGoRefusal(f"[experiment] start_time = {start!r}: write an offset-free TOML datetime "
+                           "(UTC, e.g. 2025-05-30T12:00:00), as the WRF experiment loader requires")
     run_seconds = float(experiment["run_seconds"])
     if run_seconds <= 0 or run_seconds % 3600:
         raise HexGoRefusal(f"[experiment] run_seconds = {run_seconds:g}: a hex regional run lasts whole hours "
@@ -347,7 +361,7 @@ def read_request(document: Mapping[str, Any], *, source: str = "CONFIG") -> dict
             "history_every_minutes": int(history // 60), "projection": dict(projection),
             "nx": int(domain["nx"]), "ny": int(domain["ny"]), "dx_m": float(domain["dx"]),
             "fetch": dict(fetch), "physics": physics,
-            "output_table": bool(output)}
+            "output_table": bool(output), "output": dict(output)}
 
 
 def region_polygon(projection: Mapping[str, Any], nx: int, ny: int, dx_m: float, *,
@@ -397,6 +411,10 @@ def _cycle_and_lead(request: Mapping[str, Any], args) -> tuple[datetime, int]:
     from woof.go_cli import GoRefusal, checked_config_fetch_cycle
 
     fetch = dict(request["fetch"])
+    lead = fetch.get("forecast_start_hour", 0)
+    if isinstance(lead, bool) or not isinstance(lead, int) or lead < 0:
+        # Checked here for every run: with --cycle the shared check below skips its own lead check.
+        raise HexGoRefusal(f"[fetch] forecast_start_hour = {lead!r} must be a nonnegative integer")
     flag = getattr(args, "cycle", None)
     if flag is not None:
         fetch["cycle"] = flag
@@ -407,7 +425,7 @@ def _cycle_and_lead(request: Mapping[str, Any], args) -> tuple[datetime, int]:
         cycle = checked_config_fetch_cycle(fetch, start_time=start)
     except GoRefusal as error:
         raise HexGoRefusal(str(error)) from None
-    return cycle, int(fetch.get("forecast_start_hour", 0) or 0)
+    return cycle, lead
 
 
 def work_dir(args, config: Path) -> Path:
@@ -443,6 +461,14 @@ def regional_argv(request: Mapping[str, Any], args, config: Path, *, shape: Path
         argv += ["--skip", "forecast", "--skip", "products"]
     elif products is not None and str(products).strip().lower() == "none":
         argv += ["--no-products"]
+    else:
+        deletes = (getattr(args, "icechunk_delete_after_commit", None)
+                   or (request.get("output") or {}).get("icechunk_delete_after_commit") is True)
+        if deletes:
+            # The products stage reads the history frames after the forecast; deleting each frame
+            # once the store commits it would leave the products nothing to draw.
+            raise HexGoRefusal("icechunk_delete_after_commit deletes the history frames the hex products "
+                               "stage reads after the forecast; add --products none, or keep the frames")
     return argv
 
 

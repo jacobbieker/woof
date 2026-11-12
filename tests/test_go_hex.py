@@ -274,3 +274,38 @@ def test_run_shape_refusals(tmp_path, edit, words):
     text = HEX_TOML.format(domain_extra="", shared="", tail="").replace(*edit)
     with pytest.raises(go_hex.HexGoRefusal, match=words):
         go_hex.plan(_args(str(_write(tmp_path, text=text))))
+
+
+# ---------------------------------------------------------------------------
+# review fixes (#316)
+# ---------------------------------------------------------------------------
+def test_an_unknown_projection_key_is_refused(tmp_path):
+    text = HEX_TOML.format(domain_extra="", shared="", tail="").replace(
+        'stand_lon = -98.5', 'stand_lon = -98.5\npole_lat = 90.0')
+    with pytest.raises(go_hex.HexGoRefusal, match=r"\[projection\] pole_lat"):
+        go_hex.plan(_args(str(_write(tmp_path, text=text))))
+
+
+@pytest.mark.parametrize("start", ['"2025-05-30T12:00:00"', "2025-05-30T12:00:00Z", "2025-05-30"])
+def test_start_time_must_be_an_offset_free_datetime(tmp_path, start):
+    text = HEX_TOML.format(domain_extra="", shared="", tail="").replace(
+        "start_time = 2025-05-30T12:00:00", f"start_time = {start}")
+    with pytest.raises(go_hex.HexGoRefusal, match="offset-free"):
+        go_hex.plan(_args(str(_write(tmp_path, text=text))))
+
+
+@pytest.mark.parametrize("lead", ["true", "-1", "1.5"])
+def test_forecast_start_hour_is_checked_under_cycle_too(tmp_path, lead):
+    config = _write(tmp_path, tail=f"forecast_start_hour = {lead}\n")
+    with pytest.raises(go_hex.HexGoRefusal, match="nonnegative integer"):
+        go_hex.plan(_args(str(config), "--cycle", "2025-05-31T00"))
+
+
+def test_frame_deletion_is_refused_while_products_run(tmp_path):
+    config = _write(tmp_path, tail='\n[output]\nformats = "netcdf,icechunk"\nicechunk_delete_after_commit = true\n')
+    with pytest.raises(go_hex.HexGoRefusal, match="--products none"):
+        go_hex.plan(_args(str(config)))
+    assert "--no-products" in go_hex.plan(_args(str(config), "--products", "none"))["regional_argv"]
+    plain = _write(tmp_path)
+    with pytest.raises(go_hex.HexGoRefusal, match="--products none"):
+        go_hex.plan(_args(str(plain), "--icechunk-delete-after-commit"))
