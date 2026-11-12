@@ -1526,8 +1526,12 @@ def run_selected(bundle, selected, workers, ledger):
     finally:
         _emit("prep.references", "end", {})
     # No CUDA API has run in the parent. Linux fork shares the prepared bundle;
-    # spawn transports the same bundle on platforms without fork.
-    method = "fork" if "fork" in multiprocessing.get_all_start_methods() else "spawn"
+    # spawn transports the same bundle on platforms without fork, and on macOS,
+    # where a forked child of a process that has loaded the Metal and
+    # Objective-C runtimes is terminated (every deck worker died, so the
+    # contract stage refused every new regional geometry on a Mac).
+    method = ("fork" if "fork" in multiprocessing.get_all_start_methods() and sys.platform != "darwin"
+              else "spawn")
     if workers == 1:
         _initialize_worker(bundle, ledger)
         results = [_worker(deck.name) for deck in selected]
