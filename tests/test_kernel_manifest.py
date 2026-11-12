@@ -214,6 +214,11 @@ RAWMODULE_CONSTRUCTORS_OUTSIDE_THE_MANIFEST = {
         "urban canopy, --fmad=false); each records through record_module in "
         "the same function under its own key, as the BEP+BEM composed unit above "
         "does"),
+    "woof/chem_micm.py": (
+        "the MICM three-stage Rosenbrock gas-phase chemistry unit's own compile "
+        "site (--fmad=false), one RawKernel per mechanism compiled on first "
+        "use; it records nothing in the manifest and is graded word for word "
+        "against the pinned MICM oracle by tests/test_chem_micm_gpu.py"),
     # The compiled WRF v4.7.1 oracle harnesses (2.8.2, development branch-*).
     "woof/verify/advect_oracle.py": (
         "the compiled WRF advection oracle's harness: it compiles control "

@@ -2501,7 +2501,7 @@
    },
    {
     "file": "woof/core/kernels/chem_drydep_wesely.cu",
-    "sha256": "33761f22276d75382a03dc2eb67ba1d866e24540eabaedc20daa5ebe31cda63d"
+    "sha256": "a625591ac2e535942fb6244e188f924d0ffa00d4f389685c0a4b038bbb064b8f"
    },
    {
     "file": "woof/core/kernels/chem_dust.cu",
@@ -4357,7 +4357,7 @@
    },
    {
     "file": "woof/core/kernels/wind_gust_diag.cu",
-    "sha256": "922c431776984b6e9643d52012c21a5d662d93e93b58b753524a9cf5a9aefae9"
+    "sha256": "da9beaa15e0bc7d7fa7530042cc77440e345f91499eeb53a7d85d563f3e47b06"
    },
    {
     "file": "woof/core/kernels/wind_legacy.cu",
@@ -5587,7 +5587,7 @@
    },
    {
     "file": "woof/hex/mpasphys/rrfs/driver_rrfs.py",
-    "sha256": "7b4d21ba4a7df0e3ea6e4e06ed4b5c13ec32adc02a92b08f74c01ef038cabb1b"
+    "sha256": "2f310b37634a4d7d33d286abf528639a711bf51583c747397e9cc2678603106b"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/framework_init_rrfs.py",
@@ -10401,15 +10401,15 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "11d501bbbbfb197a63547fa6cf939fecb73f949839863c65ca035f8197ad92c0",
+    "sha256": "56046ca5415b67cb515cb2cce09b3ba5aeefbdee1be013533f0710d50ab7c109",
     "sites": {
-     "100": 62
+     "100": 65
     }
    },
    "native_differences": {
-    "sha256": "c4c6acf603b2b6b53c6dc60ff3a91b33f5c8e693387b27b7bd4aacc2c7cdba07",
+    "sha256": "b37e635b5d8adbd4249d67a5e391eb716270180169537d1a5a4fb73881ff04d1",
     "sites": {
-     "100": 12
+     "100": 13
     }
    },
    "native_errors": {},
@@ -10429,7 +10429,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "426c3560f59fcb332c2e5c3dbcd22d55d86cc58aa91780374ecc4d783f8f73aa"
+   "source_sha256": "bd5c8a9a08b701c8b842de8a4a4e682f00c43574151acc2090942440032208d1"
   },
   "kernels:chem_dust": {
    "assessment": "static_diagnostic_only",

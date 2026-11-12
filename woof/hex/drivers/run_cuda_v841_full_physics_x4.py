@@ -266,7 +266,7 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
     "src/hexcore/history_writer.py": "570c9124745a8d8325a35c11da17e58036bfcf2e3117a5be502dec196a9905f0",
     "src/hexcore/cuda_arwen_helper_scope_v2.py": "641e8b77427a7c2f8eff374daa37e09a034fc45271d1dac67c3e39d03e3814e9",
     "src/hexcore/radiation_source_sets.json": "4fdb41a8102a0c4891771ed476d2eb7cf870e89a66c1a2dd4a92b8cd42dac802",
-    "src/hexcore/data/profiles/engine-helper-sets.v1.json": "09a3ee1261458a75ca495a4caf7760214777a3c2f33a8030ec9a52a135844515",
+    "src/hexcore/data/profiles/engine-helper-sets.v1.json": "5207221df126f3f5c7d3d310d6b7fc07884834ff251f6afd9ed57f8f595ec1b8",
     # Native upper damping: Rust and CUDA match compiled source blocks.
     "src/hexcore/native/upper_damping.rs": "5483b2c1e7da45317ffe4213c5879b583070d9e28d591ec52a9c697a052e81f1",
     "src/hexcore/upper_damping_v841.py": "947f477d5f56b41d95fb5a0b92adb21d68be95b5fac19ba524181cb373710860",
@@ -950,7 +950,7 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
     # This is the current execution identity, not a re-mint of archived x4
     # or regional forecast evidence. Device requalification remains pending.
     "src/hexcore/cuda_transport_v841.py": (
-        "5bf88077aeb7f63f66c83d997ec9a1e4af8f1d9e64ce19741efa63cfd1addb87"
+        "344aa93c1ebe74f9ffaef10a7e7eeea4b050ed231059d4e587f63f4d5fa05094"
     ),
     # THE BREAKAGE THESE TWO PREVENT, found by the NVRTC reciprocal-rewrite
     # lane (the NVRTC reciprocal-rewrite defect): a pinned translation unit does not compile its own file.
