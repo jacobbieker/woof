@@ -110,3 +110,58 @@ def test_the_chemistry_acted(run):
     if name == "radm2sorg":
         assert any(not np.array_equal(first[i][0], last[i][0]) for row, i in index.items()
                    if row.endswith(("aj", "ai"))), "no aerosol mass changed"
+
+
+def test_emiss_opt_enables_what_the_wrf_door_enables():
+    from woof.hex import chem_wrf
+    from woof.namelist_chem import _sources_for
+    for name in ("radm2", "radm2sorg"):
+        assert chem_wrf.chem_sources(name, {"emiss_opt": 3}) == _sources_for(name, {"emiss_opt": 3})
+        assert "edgar-v81" in chem_wrf.chem_sources(name, {"emiss_opt": 3})
+        assert chem_wrf.chem_sources(name, {}) == ()
+        assert chem_wrf.chem_sources(name, {"chem_sources": "synthetic-anthro"}) == ("synthetic-anthro",)
+        with pytest.raises(ValueError, match="emiss_opt = 1"):
+            chem_wrf.chem_sources(name, {"emiss_opt": 1})
+
+
+def test_inventory_emissions_are_the_wrf_paths():
+    """radm2 emitting from the synthetic-anthro inventory (InventoryFrames on the cell centres, each cell's
+    own area through the area-equivalent map factor): rows byte-identical to the WRF path every step."""
+    from woof.core.chem_context import chem_processes
+    from woof.core.chem_driver import _cold_start, chem_step
+    raw = {"schema": "gpuwm-hex.chemistry/v1",
+           "wrf_chem": {"chem_sets": "radm2", "emiss_opt": 3, "chem_sources": "synthetic-anthro"}}
+    seam = base._seam()
+    inputs = base._profile()
+    state2 = {n: inputs[n].copy() for n in
+              ("theta", "qv", "qc", "qr", "qi", "qs", "qg", "pressure", "rho_dry", "z_interface")}
+    runtime = base._hex_runtime(seam, raw, base.SMOKE_AREA)
+    runtime.bind_seam(seam)
+    assert runtime.cfg.chem_sources == "synthetic-anthro"
+    scalars = cp.zeros((len(runtime.rows), NZ, NCOL), dtype=cp.float32)
+    wcfg = replace(runtime.cfg, ny=base.NY, nx=base.NX)
+    wrf = base._wrf_state(seam, wcfg)
+    wrf.physics.noahmp_params = seam._driver.noahmp_params
+    wrf.msft = base._to_wrf(runtime.state.msft)
+    start = base._columns(inputs, inputs)
+    runtime.cold_start(scalars, start)
+    base._wrf_load(wrf, start, {**seam._driver.fields, **runtime.geography}, None)
+    wrf.elapsed_seconds = 0.0
+    _cold_start(wrf, wcfg, chem_processes(wrf.chem.table))
+    for step in range(1, 4):
+        seam.run_phase1(dt=DT, **inputs)
+        seam.run_phase2(**state2)
+        driver = seam._driver
+        columns = base._columns(inputs, state2)
+        runtime.step(scalars, columns, dt=DT, elapsed_seconds=step * DT, physics_fields=driver.fields,
+                     microphysics=driver.microphysics)
+        runtime.commit()
+        base._wrf_load(wrf, columns, {**driver.fields, **runtime.geography}, driver.microphysics)
+        wrf.elapsed_seconds = (step - 1) * DT
+        chem_step(wrf, wcfg, DT)
+        for i, row in enumerate(runtime.rows):
+            want = cp.asnumpy(base._to_hex(getattr(wrf, row.state_attr)))
+            assert cp.asnumpy(scalars[i]).tobytes() == want.reshape(NZ, NCOL).tobytes(), (step, row.name)
+    assert runtime.state.chem.radm2_frames_receipt is not None
+    assert float(cp.asnumpy(runtime.state.chem.radm2_frames["e_co"]).max()) > 0.0, "the inventory gave no CO"
+    assert runtime.ledger()["rows"]["co"]["emitted_kg"] > 0.0, "no CO was emitted"
