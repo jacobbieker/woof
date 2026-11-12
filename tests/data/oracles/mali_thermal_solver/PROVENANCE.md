@@ -74,6 +74,13 @@ cases' bytes are unchanged. `no_thermal_mismip` (both precisions) was added then
 grades MISMIP's `tanh` on about a thousand floating cells. The port refuses 'seroussi' (binary64 `sin`,
 glibc's is LGPL and not correctly rounded) at RKIND 8, so
 `temperature_none_seroussi` runs 'none' as `temperature_none_none`.
+Under the opt-in glibc 2.39 transcription (`WOOF_GLIBC239_LIBM64=1`,
+`tools/glibc239_libm_gpu`, LGPL, source checkout only) the port runs
+'seroussi' at RKIND 8: `oracle-r8-glibc239.npz` holds `temperature_none_seroussi`
+as written, at RKIND 8 (input digest `temperature_none_seroussi/r8-glibc239`),
+written on pb 2026-11-12 with the other files' bytes unchanged. The case
+evaluates `sin` at one argument, so the words of the transcription itself are
+graded by `tools/glibc239_libm_gpu/grade_trig.py` (`verification.log`).
 The GPU port runs the `MPAS_RKIND8` unit and must match every word.
 
 ## Files
@@ -82,6 +89,7 @@ The GPU port runs the `MPAS_RKIND8` unit and must match every word.
 |---|---|
 | `oracle-r4.npz` | per case, `<case>/<field>`: `errInit`, `errFloat`, `errSolver`, `logErrors` (all 0), `cellMask`, `vertexMask`, `edgeMask`, `temperature`, `waterfrac`, `enthalpy`, `surfaceTemperature`, `basalTemperature`, `surfaceAirTemperature`, `surfaceConductiveFlux`, `basalConductiveFlux`, `heatDissipation`, `basalFrictionFlux`, `groundedBasalMassBal`, `floatingBasalMassBal` |
 | `oracle-r8.npz` | the same fields at RKIND 8 |
+| `oracle-r8-glibc239.npz` | the same fields at RKIND 8 for the 'seroussi' case, run under the opt-in glibc 2.39 `sin` |
 | `inputs.sha256` | the sha256 of each case's input stream, at each precision (`woof.verify.mali_thermal_solver_oracle.input_bytes`) |
 
 ## Grading

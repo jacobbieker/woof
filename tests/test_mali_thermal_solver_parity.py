@@ -49,7 +49,9 @@ def test_case_inputs_are_the_recorded_bytes():
         digest, name = line.split()
         recorded[name] = digest
     assert recorded == {**{case["name"]: to.input_digest(case) for case in to.cases()},
-                        **{case["name"] + "/r8": to.input_digest(case) for case in to.cases("r8")}}
+                        **{case["name"] + "/r8": to.input_digest(case) for case in to.cases("r8")},
+                        **{case["name"] + "/" + to.R8_GLIBC239: to.input_digest(case)
+                           for case in to.cases(to.R8_GLIBC239)}}
 
 
 def test_fixture_covers_the_branches():
@@ -211,11 +213,57 @@ def test_unknown_options_are_refused():
 
 
 @requires_gpu
-def test_rkind8_refuses_the_floating_melt_without_a_matched_libm():
+def test_rkind8_refuses_the_floating_melt_without_a_matched_libm(monkeypatch):
     from woof.hex.errors import ConfigurationRefusal
+    monkeypatch.delenv("WOOF_GLIBC239_LIBM64", raising=False)
     row = next(c for c in to.cases("r8") if c["name"] == "enthalpy_sia_mismip")
-    with pytest.raises(ConfigurationRefusal, match="RKIND 8"):
+    with pytest.raises(ConfigurationRefusal, match="RKIND 8.*WOOF_GLIBC239_LIBM64=1"):
         to.run_gpu(dict(row, floatMelt="seroussi"))
+
+
+@pytest.fixture
+def glibc239(monkeypatch):
+    """The opt-in glibc 2.39 binary64 sin/cos/atan transcription (LGPL, source checkout only)."""
+    from woof.hex.mpas_ice import thermal_solver_v842
+    monkeypatch.setenv("WOOF_GLIBC239_LIBM64", "1")
+    thermal_solver_v842._module_on.cache_clear()
+    yield
+    thermal_solver_v842._module_on.cache_clear()
+
+
+def test_the_glibc239_fixture_runs_seroussi_at_rkind8():
+    fixture = to.load_fixture(to.R8_GLIBC239)
+    cases = to.cases(to.R8_GLIBC239)
+    assert {c["name"] for c in cases} == set(fixture) == {"temperature_none_seroussi"}
+    assert all(c["precision"] == "r8" and c["floatMelt"] == "seroussi" for c in cases)
+    melt = fixture["temperature_none_seroussi"]["floatingBasalMassBal"]
+    assert melt.dtype == np.float64 and np.count_nonzero(melt) > 0
+
+
+@requires_gpu
+def test_rkind8_seroussi_matches_the_oracle_under_the_glibc239_opt_in(glibc239):
+    report = to.measure(precision=to.R8_GLIBC239)
+    bad = {case: {k: v for k, v in fields.items() if v} for case, fields in report.items()}
+    assert not any(bad.values()), bad
+
+
+@requires_gpu
+@pytest.mark.parametrize("original, mutated", [
+    # glibc's cos in place of its sin: the r8 seroussi path runs, and is held
+    ("#define LI_SIN(x) g239::g239_sin(x)", "#define LI_SIN(x) g239::g239_cos(x)"),
+    # the phase left out of the sine's argument
+    ("D(daysSinceStart, LI_C(365.0))), M(twoPi, serPhase)", "D(daysSinceStart, LI_C(365.0))), (rk)0.0"),
+])
+def test_a_mutated_rkind8_seroussi_is_caught(monkeypatch, glibc239, original, mutated):
+    from woof.hex.mpas_ice import thermal_solver_v842
+    source = thermal_solver_v842.module_source("r8")
+    assert source.count(original) == 1
+    monkeypatch.setattr(thermal_solver_v842, "module_source", lambda p="r4": source.replace(original, mutated))
+    thermal_solver_v842._module_on.cache_clear()
+    row = to.cases(to.R8_GLIBC239)[0]
+    got = to.run_gpu(row)
+    want = to.load_fixture(to.R8_GLIBC239)[row["name"]]["floatingBasalMassBal"]
+    assert to.word_mismatches(got["floatingBasalMassBal"], want) > 0
 
 
 def test_rkind8_runs_mismip_with_the_correctly_rounded_tanh():
@@ -255,7 +303,7 @@ def test_the_oracle_rebuilt_here_writes_the_fixture(tmp_path):
                    check=True, env={**os.environ, "GFORTRAN": gfortran})
     subprocess.run([sys.executable, str(ROOT / "tools" / "mali_oracle" / "make_thermal_solver_fixture.py"),
                     str(tmp_path / "build"), "--out", str(tmp_path / "fixture")], check=True)
-    for precision in ("r4", "r8"):
+    for precision in ("r4", "r8", to.R8_GLIBC239):
         fresh = np.load(tmp_path / "fixture" / f"oracle-{precision}.npz")
         pinned = np.load(to.FIXTURE_DIR / f"oracle-{precision}.npz")
         assert sorted(fresh.files) == sorted(pinned.files)
