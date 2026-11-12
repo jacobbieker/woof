@@ -882,3 +882,89 @@ class LaSrBands:
             for k in range(NSRB):
                 out[self.isrb + k] = xs[:, :, k]
         return out
+
+
+# ------------------------------------------------------------------------------------------------------------
+# Radiators (src/radiative_transfer/radiator.F90 update_state and accumulate, radiative_transfer.F90
+# calculate): each radiator's layer optical depth, single-scattering albedo and asymmetry factor from its layer
+# columns and its cross section at the layer mid-point temperatures, the O2 band optical depths in place, and
+# the sum over radiators the solver takes.  Arrays are (column, layer surface first, wavelength bin).
+
+KFLOOR = 1.0 / LARGEST
+
+
+class RayleighCrossSection:
+    """cross_sections/rayliegh.F90 (type "air"): one cross section per bin from the bin's mid-point."""
+
+    def __init__(self, config, grid, root):
+        wrk = 1.0e-3 * grid.mid
+        pwr = np.where(wrk <= 0.55, 3.6772 + 0.389 * wrk + 0.09426 / wrk, 4.04)
+        self.values = 4.02e-28 / np.power(wrk, pwr)
+
+    def calculate(self, temperatures):
+        return np.repeat(self.values[None, :], np.asarray(temperatures).size, axis=0)
+
+
+RADIATOR_CROSS_SECTIONS = {**CROSS_SECTIONS, "air": RayleighCrossSection}
+
+
+class RadiatorState:
+    """radiator_state_t: ``od``, ``ssa``, ``g`` (ncol, nlayer, nbin)."""
+
+    def __init__(self, od, ssa, g):
+        self.od, self.ssa, self.g = od, ssa, g
+
+
+class Radiators:
+    """The configuration's "radiative transfer" radiators (base type, from host profiles), in warehouse order."""
+
+    def __init__(self, config, grid, *, root):
+        rt = config["radiative transfer"]
+        sections = {}
+        for entry in rt["cross sections"]:
+            if entry["type"] not in RADIATOR_CROSS_SECTIONS:
+                raise TuvxPortError(f"radiator cross section {entry['type']!r} is not ported")
+            sections[entry["name"]] = RADIATOR_CROSS_SECTIONS[entry["type"]](entry, grid, root)
+        self.radiators = []
+        for entry in rt["radiators"]:
+            if entry.get("type", "base") != "base":
+                raise TuvxPortError(f"radiator type {entry['type']!r} is not ported")
+            if entry.get("vertical profile units") != "molecule cm-3":
+                raise TuvxPortError(f"radiator {entry['name']!r}: profile units {entry.get('vertical profile units')!r}")
+            self.radiators.append((entry["name"], entry["vertical profile"], sections[entry["cross section"]],
+                                   bool(entry.get("treat as air", False))))
+        self.nbins = grid.ncells
+
+    def states(self, layer_columns, temperature_edges, band_optical_depth=None):
+        """``{name: RadiatorState}`` after update_state, with la_srb's band optical depths (``{bin: (ncol,
+        nlayer)}``) written into the O2 radiator, as radiative_transfer calculate does.  ``layer_columns`` maps
+        each vertical profile's name to its layer columns (ncol, nlayer), molecule cm-2; the cross sections take
+        the layer mid-point temperatures ((lower + upper) * 0.5)."""
+        tedge = _columns(temperature_edges)
+        tmid = (tedge[:, :-1] + tedge[:, 1:]) * 0.5
+        out = {}
+        for name, profile, section, is_air in self.radiators:
+            dens = _columns(layer_columns[profile])
+            xs = np.stack([section.calculate(t) for t in tmid])          # (ncol, nlayer, nbin)
+            od = dens[:, :, None] * xs
+            if name == "O2" and band_optical_depth:
+                for b, values in band_optical_depth.items():
+                    od[:, :, b] = values
+            ssa = np.full_like(od, 1.0 if is_air else 0.0)
+            out[name] = RadiatorState(od, ssa, np.zeros_like(od))
+        return out
+
+    def accumulate(self, states):
+        """radiator_state_t accumulate with one stream: the radiators' sum, floored at 1 / LARGEST."""
+        dscat_accum = dabs_accum = asym_accum = 0.0
+        for name, _profile, _section, is_air in self.radiators:
+            s = states[name]
+            dscat = s.od * s.ssa
+            dscat_accum = dscat_accum + dscat
+            dabs_accum = dabs_accum + s.od * (1.0 - s.ssa)
+            asym_accum = asym_accum + s.g * dscat           # G**1 for the others; air takes G * dscat with one stream
+        dscat_accum = np.maximum(dscat_accum, KFLOOR)
+        dabs_accum = np.maximum(dabs_accum, KFLOOR)
+        od = dscat_accum + dabs_accum
+        ssa = np.where(dscat_accum == KFLOOR, KFLOOR, dscat_accum / od)
+        return RadiatorState(od, ssa, asym_accum / dscat_accum)
