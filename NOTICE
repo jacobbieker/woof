@@ -796,6 +796,13 @@ scoped by routine: they cover exp, log, pow, cos and acos in
 glibc_flt64.cuh and nothing else in the UW kernel, whose remaining code is
 a transcription of WRF.
 
+MALI's RKIND 8 units also prepend woof/core/kernels/cr_tanh_flt64.cuh,
+CORE-MATH's correctly rounded binary64 tanh, "Copyright (c) 2023-2026
+Alexei Sibidanov, Cyprien Peignier, Paul Zimmermann" under MIT (the same
+permission text, licenses/LICENSE-CORE-MATH-binary64-MIT.txt). glibc 2.44
+carries this function as its own tanh. The header opens with its notice;
+the upstream file is kept verbatim at tools/oracle_libm/upstream/tanh.c.
+
 --------------------------------------------------------------------------
 
 Portable libm in Rust -- Arm optimized-routines and CORE-MATH

@@ -120,11 +120,66 @@ INFLOW = ("default_inflow = epsilc: the row's value at an inflow face with no "
           "table names it)")
 
 
+WESELY = json.loads((root / "woof/data/chem/wesely/gas_parameters.v1.json")
+                    .read_text(encoding="utf-8"))
+#: chem row -> its eradmsorg emission row (woof.core.chem_radm2_emiss
+#: GAS_TERMS and the aerosol pairs of sorgam_addemiss).
+EMIS_OF = {"so2": "e_so2", "co": "e_co", "no": "e_no", "no2": "e_no2",
+           "nh3": "e_nh3", "hcl": "e_hcl", "csl": "e_csl", "iso": "e_iso",
+           "ald": "e_ald", "hcho": "e_hcho", "ora2": "e_ora2", "hc3": "e_hc3",
+           "hc5": "e_hc5", "hc8": "e_hc8", "eth": "e_eth", "olt": "e_olt",
+           "oli": "e_oli", "tol": "e_tol", "xyl": "e_xyl", "ket": "e_ket",
+           "ol2": "e_ol2", "hono": "e_hono", "p25i": "e_pm25i", "p25j": "e_pm25j",
+           "antha": "e_pm_10", "eci": "e_eci", "ecj": "e_ecj", "orgpai": "e_orgi",
+           "orgpaj": "e_orgj", "so4ai": "e_so4i", "so4aj": "e_so4j",
+           "no3ai": "e_no3i", "no3aj": "e_no3j", "naaj": "e_naaj", "naai": "e_naai"}
+#: The inventories emission.radm2 can read, the namelist's choice first
+#: (woof.namelist_chem FIRST_SOURCE_ONLY): EDGAR v8.1, then WOOF's synthetic
+#: fallback, which a run names in chem_sources by hand.
+INVENTORIES = (("edgar-v81", "EDGAR v8.1 AP 2022 annual totals"),
+               ("synthetic-anthro", "WOOF's synthetic urban-plume fallback"))
+
+
+def emissions(name):
+    e = EMIS_OF.get(name)
+    if e is None:
+        return []
+    return [{"source": source, "field": e, "weight": 1.0, "vertical": "kemit",
+             "provenance": f"{e} (WRF emis_ant units) from {text} through "
+                           "woof/data/chem/speciation/radm2.v1.json "
+                           "(woof.chem_inventory_frames); added on levels "
+                           "kts..kemit by emission.radm2 "
+                           "(module_emissions_anthropogenics.F)"}
+            for source, text in INVENTORIES]
+
+
+def f32(x):
+    """The shortest decimal that reads back as the same float32 word (the
+    form the existing rows carry their dep_init numbers in)."""
+    import struct
+    word = struct.pack("<f", x)
+    for digits in range(1, 18):
+        text = f"{x:.{digits}g}"
+        if struct.pack("<f", float(text)) == word:
+            return float(text)
+    return x
+
+
+def wesely_block(name):
+    spec = {k: (f32(v) if k in ("hstar", "dhr", "f0", "dratio", "scpr23") else v)
+            for k, v in WESELY[name].items()}
+    origin = "; ".join(f"{key} {where}" for key, where in spec["from"].items())
+    return {"hstar": spec["hstar"], "dhr": spec["dhr"], "f0": spec["f0"],
+            "dratio": spec["dratio"], "scpr23": spec["scpr23"], "arm": spec["arm"],
+            "from": origin + " (woof/data/chem/wesely/gas_parameters.v1.json, "
+                             "the RADM2 Wesely oracle)"}
+
+
 def gas_processes(name):
     out = [EMIS]
     if name == "o3":
         out.append(PHOT)
-    out += [VERTMX, GAS]
+    out += [WES, VERTMX, GAS]
     if name in SORGAM_GASES:
         out.append(AER)
     return out
@@ -139,7 +194,9 @@ def gas_row(name):
         "phase": "gas", "family": GAS_FAMILY.get(name, "voc"), "sets": BOTH,
         "transported": True, "floor": EPSILC, "default_inflow": EPSILC,
         "molar_mass_g_mol": mass, "processes": gas_processes(name),
-        "emissions": [], "boundary": [], "drydep": None, "settling": None,
+        "emissions": emissions(name), "boundary": [],
+        "drydep": {"scheme": "wesely", "wesely": wesely_block(name)},
+        "settling": None,
         "wetdep_ls_alpha": 0.0, "aging": None, "optics": None,
         "mp_coupling": None, "exclusive_group": None,
         "process_sets": {AER: [RS]} if name in SORGAM_GASES else None,
@@ -158,7 +215,7 @@ def aer_row(name):
         "units": "kg-1" if number else "ug kg-1", "phase": "aerosol",
         "family": aer_family(name), "sets": [RS], "transported": True,
         "floor": EPSILC, "default_inflow": EPSILC, "molar_mass_g_mol": None,
-        "processes": [EMIS, AERDEP, VERTMX, AER], "emissions": [],
+        "processes": [EMIS, AERDEP, VERTMX, AER], "emissions": emissions(name),
         "boundary": [], "drydep": None, "settling": None,
         "wetdep_ls_alpha": 0.0, "aging": None, "optics": None,
         "mp_coupling": None, "exclusive_group": None, "process_sets": None,
@@ -176,7 +233,11 @@ def join_shared(row):
     name = row["name"]
     old_sets = [s for s in row["sets"] if s not in BOTH]
     gates = dict(row.get("process_sets") or {})
-    old = [p for p in row["processes"] if p not in (EMIS, PHOT, GAS, AER)]
+    # Keys an earlier run of this script added are gated to the RADM2 sets
+    # only; drop them so a rerun rebuilds the same list.
+    old = [p for p in row["processes"]
+           if p not in (EMIS, PHOT, GAS, AER)
+           and not set(gates.get(p) or ()) <= set(BOTH) | {RS} or not gates.get(p)]
     new = [p for p in gas_processes(name) if p not in old]
     for key in old:
         if key in (VERTMX, WES):
@@ -187,6 +248,17 @@ def join_shared(row):
     row["sets"] = old_sets + BOTH
     row["processes"] = old + new
     row["process_sets"] = gates
+    if WES in new:
+        # sulf: the GOCART sets deposit it as an aerosol; the RADM2 sets
+        # through wesely_driver's particle velocity (landusevg's p_sulf).
+        row["drydep"] = dict(row["drydep"] or {"scheme": "none"},
+                             wesely=wesely_block(name))
+    elif row.get("drydep") and "wesely" in row["drydep"]:
+        assert all(row["drydep"]["wesely"][k] == wesely_block(name)[k]
+                   for k in ("hstar", "dhr", "f0", "dratio", "scpr23", "arm")), name
+    have = {(e["source"], e["field"]) for e in row.get("emissions", [])}
+    row["emissions"] = list(row.get("emissions", [])) + [
+        e for e in emissions(name) if (e["source"], e["field"]) not in have]
     note = ("; RADM2/RADM2SORG (registry.chem:3929-3930) share this row: "
             "emission.radm2, chem.radm2"
             + (", photolysis.ftuv (the ozone column Fast-TUV reads)" if name == "o3" else "")
@@ -197,6 +269,12 @@ def join_shared(row):
                  "row's phase and the GOCART sulfate molar mass 96.0576, which "
                  "only the mass ledger and vertmx's deposited-mass diagnostic "
                  "read)")
+    if row["phase"] != "gas":
+        # sulf: GOCART's particulate sulfate takes CAMS's sulphate aerosol;
+        # RADM2's gas-phase H2SO4 must not (it starts from WRF's profile).
+        for ref in row["boundary"]:
+            ref["sets"] = list(old_sets)
+        note += "; its CAMS sulphate boundary entries fill it only in the GOCART sets"
     if note not in row["provenance"]:
         row["provenance"] += note
     return row

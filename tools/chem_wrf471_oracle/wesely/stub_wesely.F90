@@ -1,7 +1,9 @@
 ! Service metadata for chem/module_dep_simple.F:88-91,1626-1628,4198-4201.
 module module_state_description
  implicit none
- integer, parameter :: num_chem=9,num_moist=4,param_first_scalar=2
+ integer, parameter :: num_moist=4,param_first_scalar=2
+ ! A variable, not a parameter: run_wesely_radm2.F90 sets the RADM2 count.
+ integer :: num_chem=9
  integer :: p_aacd=1
  integer :: p_acbzo2=1
  integer :: p_acet=1

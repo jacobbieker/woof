@@ -36,6 +36,20 @@
           "weight": 56192051946.430244,
           "vertical": "surface",
           "provenance": "EDGAR v8.1 SO2 total flux, kg m-2 s-1 to WRF emis_ant mol km-2 hr-1 (emissions_driver.F:1601-1603)"
+        },
+        {
+          "source": "edgar-v81",
+          "field": "e_so2",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_so2 (WRF emis_ant units) from EDGAR v8.1 AP 2022 annual totals through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        },
+        {
+          "source": "synthetic-anthro",
+          "field": "e_so2",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_so2 (WRF emis_ant units) from WOOF's synthetic urban-plume fallback through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
         }
       ],
       "boundary": [
@@ -138,6 +152,7 @@
         "optics.gocart",
         "coupling.thompson",
         "emission.radm2",
+        "drydep.wesely",
         "chem.radm2",
         "aerosol.sorgam"
       ],
@@ -152,7 +167,11 @@
             1.0
           ],
           "conversion": "kg_kg_moist_to_ppmv_dry",
-          "provenance": "CAMS sulphate aerosol mass mixing ratio (as SO4) to GOCART's sulf in ppmv with the row's molar mass (SO4, 96.0576 g/mol, chem/module_gocart_aerosols.F:85) and mwdry 28.966."
+          "provenance": "CAMS sulphate aerosol mass mixing ratio (as SO4) to GOCART's sulf in ppmv with the row's molar mass (SO4, 96.0576 g/mol, chem/module_gocart_aerosols.F:85) and mwdry 28.966.",
+          "sets": [
+            "gocart_simple",
+            "gocart_lite"
+          ]
         },
         {
           "source": "cams-reanalysis",
@@ -163,7 +182,11 @@
             1.0
           ],
           "conversion": "kg_kg_moist_to_ppmv_dry",
-          "provenance": "CAMS EAC4 uses the same mass bins and units as the forecast source; CAMS sulphate aerosol mass mixing ratio (as SO4) to GOCART's sulf in ppmv with the row's molar mass (SO4, 96.0576 g/mol, chem/module_gocart_aerosols.F:85) and mwdry 28.966."
+          "provenance": "CAMS EAC4 uses the same mass bins and units as the forecast source; CAMS sulphate aerosol mass mixing ratio (as SO4) to GOCART's sulf in ppmv with the row's molar mass (SO4, 96.0576 g/mol, chem/module_gocart_aerosols.F:85) and mwdry 28.966.",
+          "sets": [
+            "gocart_simple",
+            "gocart_lite"
+          ]
         },
         {
           "source": "merra2",
@@ -174,7 +197,11 @@
             1.0
           ],
           "conversion": "kg_kg_moist_to_ppmv_dry",
-          "provenance": "NASA MERRA-2 M2I3NVAER GOCART mass bins map directly to GOCART species; SS001+SS002 preserve mass in the first transported sea-salt bin. kg/kg moist air becomes dry air with the matched M2I3NVASM QV before the row unit conversion."
+          "provenance": "NASA MERRA-2 M2I3NVAER GOCART mass bins map directly to GOCART species; SS001+SS002 preserve mass in the first transported sea-salt bin. kg/kg moist air becomes dry air with the matched M2I3NVASM QV before the row unit conversion.",
+          "sets": [
+            "gocart_simple",
+            "gocart_lite"
+          ]
         },
         {
           "source": "geos-fp",
@@ -185,11 +212,24 @@
             1.0
           ],
           "conversion": "kg_kg_moist_to_ppmv_dry",
-          "provenance": "GEOS-FP inst3_3d_aer_Nv primary aerosol, GMAO Office Note 22 v1.1 sections 2.1,2.2,2.5.1. NASA MERRA-2 M2I3NVAER GOCART mass bins map directly to GOCART species; SS001+SS002 preserve mass in the first transported sea-salt bin. kg/kg moist air becomes dry air with the matched M2I3NVASM QV before the row unit conversion."
+          "provenance": "GEOS-FP inst3_3d_aer_Nv primary aerosol, GMAO Office Note 22 v1.1 sections 2.1,2.2,2.5.1. NASA MERRA-2 M2I3NVAER GOCART mass bins map directly to GOCART species; SS001+SS002 preserve mass in the first transported sea-salt bin. kg/kg moist air becomes dry air with the matched M2I3NVASM QV before the row unit conversion.",
+          "sets": [
+            "gocart_simple",
+            "gocart_lite"
+          ]
         }
       ],
       "drydep": {
-        "scheme": "gocart_aerosol"
+        "scheme": "gocart_aerosol",
+        "wesely": {
+          "hstar": 0.0,
+          "dhr": 0.0,
+          "f0": 0.0,
+          "dratio": 0.0025178725,
+          "scpr23": 0.016748838,
+          "arm": "particle",
+          "from": "hstar chem/module_dep_simple.F:1952; dhr chem/module_dep_simple.F:1954; f0 chem/module_dep_simple.F:1955; dvj chem/module_dep_simple.F:1956; dratio chem/module_dep_simple.F:3482-3484; arm chem/module_dep_simple.F:1437-1447,1613; scpr23 chem/module_dep_simple.F:3482-3488 (woof/data/chem/wesely/gas_parameters.v1.json, the RADM2 Wesely oracle)"
+        }
       },
       "settling": null,
       "wetdep_ls_alpha": 1.0,
@@ -220,7 +260,7 @@
         "from": "ccpp-physics 3e6660c6 physics/MP/Thompson/mp_thompson.F90:1062-1066 (get_niwfa, Apache-2.0)"
       },
       "exclusive_group": null,
-      "provenance": "registry.chem:3610 row sulf; default_inflow: bdy_chem_value_gocart, chem/module_input_chem_data.F:1267-1298; wetdep_ls_alpha: chem/module_wetdep_ls.F:39-46 (chem_opt >= 300) (1.0); molar mass 96.0576 (sum_pm_gocart mwso4, chem/module_gocart_aerosols.F:85); gocart_drydep_driver hands sulf the aerosol velocity (chem/module_gocart_drydep.F:116); RADM2/RADM2SORG (registry.chem:3929-3930) share this row: emission.radm2, chem.radm2, aerosol.sorgam (radm2sorg) act on it only in the RADM2 sets (process_sets); in RADM2 sulf is WRF's gas-phase H2SO4 (it keeps this row's phase and the GOCART sulfate molar mass 96.0576, which only the mass ledger and vertmx's deposited-mass diagnostic read)",
+      "provenance": "registry.chem:3610 row sulf; default_inflow: bdy_chem_value_gocart, chem/module_input_chem_data.F:1267-1298; wetdep_ls_alpha: chem/module_wetdep_ls.F:39-46 (chem_opt >= 300) (1.0); molar mass 96.0576 (sum_pm_gocart mwso4, chem/module_gocart_aerosols.F:85); gocart_drydep_driver hands sulf the aerosol velocity (chem/module_gocart_drydep.F:116); RADM2/RADM2SORG (registry.chem:3929-3930) share this row: emission.radm2, chem.radm2, aerosol.sorgam (radm2sorg) act on it only in the RADM2 sets (process_sets); in RADM2 sulf is WRF's gas-phase H2SO4 (it keeps this row's phase and the GOCART sulfate molar mass 96.0576, which only the mass ledger and vertmx's deposited-mass diagnostic read); RADM2/RADM2SORG (registry.chem:3929-3930) share this row: emission.radm2, chem.radm2, aerosol.sorgam (radm2sorg) act on it only in the RADM2 sets (process_sets); in RADM2 sulf is WRF's gas-phase H2SO4 (it keeps this row's phase and the GOCART sulfate molar mass 96.0576, which only the mass ledger and vertmx's deposited-mass diagnostic read); its CAMS sulphate boundary entries fill it only in the GOCART sets",
       "sulfur_role": "so4",
       "process_sets": {
         "chem.sulfur": [
@@ -252,6 +292,10 @@
           "radm2sorg"
         ],
         "aerosol.sorgam": [
+          "radm2sorg"
+        ],
+        "drydep.wesely": [
+          "radm2",
           "radm2sorg"
         ]
       }
