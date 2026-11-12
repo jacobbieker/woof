@@ -149,6 +149,16 @@ cell, not only the boundary.  The door refuses it for a selection without
 `aerosol.sorgam`, since nothing else runs `so2so4`.  It needs no boundary
 source.
 
+On the same case with `so2so4_qc_threshold = 1e-6`, CUDA and Metal agree to
+the digits shown:
+
+- Ring-0 cells with `nu0 > 1e13 /kg` in the lowest 20 levels fall from 360-530
+  per hourly frame to 0-1.
+- At 06Z, the edge band's surface `nu0` falls from 1.56e12 /kg to 8.9e10 /kg,
+  below the interior's 1.8e11-2.2e11.
+- The threshold also skips round-off cloud in the interior. Surface PM2.5 at
+  06Z falls from 1.9 to 1.7 ug/m3 there.
+
 ## Refusals until then
 
 `woof/namelist_chem.py` maps `chem_opt = 1, 2` onto the `radm2` and
