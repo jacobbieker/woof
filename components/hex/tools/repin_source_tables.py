@@ -73,6 +73,30 @@ from pathlib import Path
 from typing import Callable, Iterable, Iterator, NamedTuple
 
 TREE = Path(__file__).resolve().parents[1]
+#: The monorepo layout: this tool lives in components/hex/tools, the package in
+#: <root>/woof/hex.  The tables still NAME sources as ``src/hexcore/<x>`` (the
+#: framed name of the digests, woof.hex.shipped_sources.DECLARED_PREFIX), so a
+#: name is resolved to its file here and never rewritten.
+ROOT = TREE.parents[1]
+PKG = ROOT / "woof" / "hex"
+DECLARED_PREFIX = "src/hexcore/"
+
+
+def _fs(name: str) -> Path:
+    """The file a declared source name (or a tree-relative path) denotes."""
+
+    if name.startswith(DECLARED_PREFIX):
+        return PKG.joinpath(*name[len(DECLARED_PREFIX):].split("/"))
+    return TREE / name
+
+
+def _rel(path: Path) -> str:
+    for base in (TREE, ROOT):
+        try:
+            return path.relative_to(base).as_posix()
+        except ValueError:
+            continue
+    return str(path)
 
 MAX_PASSES = 8
 
@@ -110,7 +134,7 @@ def framed_set_digest(names: Iterable[str]) -> str:
 
     digest = hashlib.sha256()
     for name in names:
-        payload = (TREE / name).read_bytes()
+        payload = (_fs(name)).read_bytes()
         digest.update(name.encode("utf-8"))
         digest.update(b"\x00")
         digest.update(hashlib.sha256(payload).digest())
@@ -179,7 +203,7 @@ def _pins_by_declared_path(
         constant = joined_constant(value)
         if constant is None:  # a None pin is a deliberate hard pre-CUDA refusal
             continue
-        expected = sha256_file(TREE / relative)
+        expected = sha256_file(_fs(relative))
         if constant.value != expected:
             out.append(
                 Drift(table, path, constant.lineno, relative, constant.value, expected)
@@ -195,7 +219,7 @@ def table_execution_source_pins() -> list[Drift]:
     mismatch, before a device is touched.
     """
 
-    path = TREE / "src" / "hexcore" / "drivers" / "run_cuda_v841_full_physics_x4.py"
+    path = PKG / "drivers" / "run_cuda_v841_full_physics_x4.py"
     node = module_assignment(parse(path), "EXECUTION_SOURCE_PINS")
     return _pins_by_declared_path("EXECUTION_SOURCE_PINS", path, node, _string_key)
 
@@ -270,7 +294,7 @@ def table_source_drift_current() -> list[Drift]:
                 continue
             constant = joined_constant(inner_value)
             assert constant is not None
-            expected = sha256_file(TREE / relative)
+            expected = sha256_file(_fs(relative))
             if constant.value != expected:
                 out.append(
                     Drift(
@@ -296,7 +320,7 @@ def table_minted_kernel_set() -> list[Drift]:
     the shipped package rather than failing a test.
     """
 
-    path = TREE / "src" / "hexcore" / "cuda_backend" / "regional_admission.py"
+    path = PKG / "cuda_backend" / "regional_admission.py"
     tree = parse(path)
     names = ast.literal_eval(module_assignment(tree, "REGIONAL_KERNEL_SOURCES"))
     expected = framed_set_digest(names)
@@ -321,7 +345,7 @@ def _named_file_pin(
 ) -> list[Drift]:
     constant = joined_constant(module_assignment(parse(path), constant_name))
     assert constant is not None, f"{constant_name} is not a plain string constant"
-    expected = sha256_file(TREE / relative)
+    expected = sha256_file(_fs(relative))
     if constant.value == expected:
         return []
     return [Drift(table, path, constant.lineno, relative, constant.value, expected)]
@@ -387,7 +411,7 @@ def table_authority_pins_json() -> list[Drift]:
 
     document = json.loads(AUTHORITY_PINS_JSON.read_text(encoding="utf-8"))
     relative = document["frozen_tool"]["path"]
-    target = TREE / relative
+    target = _fs(relative)
     expected_sha = sha256_file(target)
     expected_bytes = target.stat().st_size
     row = document["frozen_tool"]
@@ -411,14 +435,14 @@ def table_authority_pins_json() -> list[Drift]:
 #: siblings -- so the 0.2.0 package rename moved all four with no arithmetic
 #: having changed, exactly as it moved ``MINTED_KERNEL_SET_SHA256``.
 CONTRACT_AUTHORITIES: tuple[tuple[str, str], ...] = (
-    ("hexcore.cuda_gwdo_v841", "CUDA_GWDO_V841_CONTRACT_SHA256"),
-    ("hexcore.cuda_gwdo_v841", "CUDA_GWDO_V841_KERNEL_SHA256"),
-    ("hexcore.cuda_physics_v841", "CUDA_PHYSICS_V841_CONTRACT_SHA256"),
-    ("hexcore.cuda_physics_v841", "CUDA_PHYSICS_V841_KERNEL_SHA256"),
-    ("hexcore.cuda_physics_prep_v841", "CUDA_PHYSICS_PREP_V841_CONTRACT_SHA256"),
-    ("hexcore.cuda_physics_prep_v841", "CUDA_PHYSICS_PREP_V841_KERNEL_SHA256"),
+    ("woof.hex.cuda_gwdo_v841", "CUDA_GWDO_V841_CONTRACT_SHA256"),
+    ("woof.hex.cuda_gwdo_v841", "CUDA_GWDO_V841_KERNEL_SHA256"),
+    ("woof.hex.cuda_physics_v841", "CUDA_PHYSICS_V841_CONTRACT_SHA256"),
+    ("woof.hex.cuda_physics_v841", "CUDA_PHYSICS_V841_KERNEL_SHA256"),
+    ("woof.hex.cuda_physics_prep_v841", "CUDA_PHYSICS_PREP_V841_CONTRACT_SHA256"),
+    ("woof.hex.cuda_physics_prep_v841", "CUDA_PHYSICS_PREP_V841_KERNEL_SHA256"),
     (
-        "hexcore.cuda_arwen_physics_v841",
+        "woof.hex.cuda_arwen_physics_v841",
         "CUDA_ARWEN_PHYSICS_V841_CONTRACT_SHA256",
     ),
 )
@@ -502,7 +526,7 @@ def contract_authority_values() -> dict[str, str]:
 
     import importlib
 
-    source = str(TREE / "src")
+    source = str(ROOT)
     if source not in sys.path:
         sys.path.insert(0, source)
     values: dict[str, str] = {}
@@ -540,7 +564,7 @@ def table_restated_contract_digests() -> list[Drift]:
     authorities = contract_authority_values()
     out: list[Drift] = []
     for relative, container, key, attribute in RESTATED_CONTRACT_DIGESTS:
-        path = TREE / relative
+        path = _fs(relative)
         tree = parse(path)
         if container is None:
             node = module_assignment(tree, key)
@@ -585,10 +609,10 @@ def gated_file_list() -> list[str]:
     -- the check prints ``MISSING FROM ASSEMBLY`` per line and reports no hit.
     """
 
-    runner = parse(TREE / "src" / "hexcore" / "drivers" / "run_cuda_v841_full_physics_x4.py")
+    runner = parse(PKG / "drivers" / "run_cuda_v841_full_physics_x4.py")
     pins = ast.literal_eval(module_assignment(runner, "EXECUTION_SOURCE_PINS"))
     admission = parse(
-        TREE / "src" / "hexcore" / "cuda_backend" / "regional_admission.py"
+        PKG / "cuda_backend" / "regional_admission.py"
     )
     kernels = ast.literal_eval(module_assignment(admission, "REGIONAL_KERNEL_SOURCES"))
     return sorted(set(pins) | set(kernels))
@@ -663,7 +687,7 @@ def apply(drifts: list[Drift]) -> None:
     for drift in drifts:
         if drift.file == AUTHORITY_PINS_JSON:
             document = json.loads(AUTHORITY_PINS_JSON.read_text(encoding="utf-8"))
-            target = TREE / document["frozen_tool"]["path"]
+            target = _fs(document["frozen_tool"]["path"])
             document["frozen_tool"]["sha256"] = sha256_file(target)
             document["frozen_tool"]["bytes"] = target.stat().st_size
             AUTHORITY_PINS_JSON.write_text(
@@ -739,7 +763,7 @@ def measure_engine_repin(arguments) -> dict:
     import datetime
     import measure_engine_verdicts as measurement
 
-    adapter = TREE / "src/hexcore/cuda_arwen_physics_v841.py"
+    adapter = PKG / "cuda_arwen_physics_v841.py"
     paths = sorted(measurement.shipped_manifest(adapter))
     manifest = verify_engine_tree(arguments.engine_tree, arguments.engine_commit,
                                   arguments.engine_version, paths)
@@ -777,7 +801,7 @@ def measure_engine_repin(arguments) -> dict:
 
 #: The ArWen radiation helper sources the forecast door binds by digest
 #: (``woof.hex.cuda_arwen_helper_scope_v2``), read from the same table it reads.
-HELPER_SETS = TREE / "src/hexcore/data/profiles/engine-helper-sets.v1.json"
+HELPER_SETS = PKG / "data/profiles/engine-helper-sets.v1.json"
 
 
 def helper_set_row(engine_tree: Path, commit: str, version: str) -> dict:
@@ -790,7 +814,7 @@ def helper_set_row(engine_tree: Path, commit: str, version: str) -> dict:
     the repin now, measured from the same clean commit as the manifest.
     """
 
-    sets = json.loads((TREE / "src/hexcore/radiation_source_sets.json").read_text(encoding="utf-8"))
+    sets = json.loads((PKG / "radiation_source_sets.json").read_text(encoding="utf-8"))
     names = sorted(sets["baseline"])
     sources = verify_engine_tree(engine_tree, commit, version, names)
     return {"id": f"engine-{version}-source", "engine_commit": commit,
@@ -851,12 +875,12 @@ def write_engine_repin(document: dict) -> None:
         raise SystemExit("pyproject.toml must declare exactly one bounded woof requirement")
     match = matches[0]
     new_declaration = text[:match.start()] + json.dumps(document["requirement"]) + text[match.end():]
-    measurement.write_manifest(TREE / "src/hexcore/cuda_arwen_physics_v841.py",
+    measurement.write_manifest(PKG / "cuda_arwen_physics_v841.py",
                                document["manifest"], document["pin"]["build_commit"],
                                document["pin"]["glacier_composed_tu_sha256"])
-    _rewrite_contract_surface(TREE / "src/hexcore/cuda_arwen_physics_v841.py",
+    _rewrite_contract_surface(PKG / "cuda_arwen_physics_v841.py",
                               document["pin"]["contract_surface_sha256"])
-    measurement.splice(TREE / "src/hexcore/engine_pin.py", document["tags"])
+    measurement.splice(PKG / "engine_pin.py", document["tags"])
     write_helper_set(document["helper_set"])
     declaration.write_text(new_declaration, encoding="utf-8", newline="")
 
@@ -873,12 +897,12 @@ def _rewrite_contract_surface(adapter: Path, surface: str) -> None:
 def engine_repin_matches(document: dict) -> bool:
     import measure_engine_verdicts as measurement
 
-    adapter = TREE / "src/hexcore/cuda_arwen_physics_v841.py"
+    adapter = PKG / "cuda_arwen_physics_v841.py"
     module = parse(adapter)
     commit = ast.literal_eval(module_assignment(module, "ARWEN_BUILD_COMMIT"))
     glacier = ast.literal_eval(module_assignment(module, "ARWEN_GLACIER_COMPOSED_TU_SHA256"))
     surface = ast.literal_eval(module_assignment(module, "MPAS_SEAM_CONTRACT_SURFACE_SHA256"))
-    pin_text = (TREE / "src/hexcore/engine_pin.py").read_text(encoding="utf-8")
+    pin_text = (PKG / "engine_pin.py").read_text(encoding="utf-8")
     declaration = (TREE / "pyproject.toml").read_text(encoding="utf-8")
     return (measurement.shipped_manifest(adapter) == document["manifest"]
             and commit == document["pin"]["build_commit"]
@@ -923,7 +947,7 @@ def main(argv=None) -> int:
     if not arguments.write:
         drifts = collect()
         for drift in drifts:
-            where = f"{drift.file.relative_to(TREE).as_posix()}:{drift.line}"
+            where = f"{_rel(drift.file)}:{drift.line}"
             print(
                 f"DRIFT {drift.table} {where} {drift.label}\n"
                 f"      found    {drift.found}\n"
@@ -944,7 +968,7 @@ def main(argv=None) -> int:
         for drift in drifts:
             print(
                 f"pass {attempt}: {drift.table} "
-                f"{drift.file.relative_to(TREE).as_posix()} {drift.label} "
+                f"{_rel(drift.file)} {drift.label} "
                 f"{drift.found[:16]}... -> {drift.expected[:16]}..."
             )
         apply(drifts)

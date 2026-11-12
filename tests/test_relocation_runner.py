@@ -340,6 +340,7 @@ def _model(parent, child):
             period_ticks=60, clock=SimpleNamespace(tick_den=1)),
         experiment_fingerprint="f" * 64)
     model.node = lambda gid: nodes[gid]
+    model.walk_parent_first = lambda: iter((parent, child))
     return model
 
 
@@ -741,6 +742,7 @@ def test_run_experiment_front_door_lift_and_residual_refusals(
     # defaults it to OFF); a double without it raises AttributeError from
     # inside the front door and never reaches the refusal under test.
     single = SimpleNamespace(relocation=manual, domains=(object(),),
+                             root=SimpleNamespace(run=SimpleNamespace(dfi_opt=0)),
                              feedback=0, tiles=_STREAMING_OFF, simulated_radar=RADAR_OFF)
     # The gate lives in run_experiment's body: the wrapper opens the step
     # log off exp.start_time first (01d3e4ec2f), which this double omits.
@@ -761,6 +763,7 @@ def test_run_experiment_front_door_lift_and_residual_refusals(
     monkeypatch.setattr(
         wrfout_module, "quarantine_orphan_wrfouts", _sentinel)
     tree = SimpleNamespace(relocation=manual,
+                           root=SimpleNamespace(run=SimpleNamespace(dfi_opt=0)),
                            domains=(object(), object()), feedback=0,
                            tiles=_STREAMING_OFF, simulated_radar=RADAR_OFF)
     with pytest.raises(_ReachedPreparation):
