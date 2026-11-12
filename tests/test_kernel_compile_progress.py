@@ -52,6 +52,35 @@ def test_a_compile_is_published_and_a_cache_load_is_not(tmp_path,
     assert second["compile_seconds"] >= first["compile_seconds"]
 
 
+def test_the_cache_is_scanned_again_only_after_its_directory_changed(
+        tmp_path, monkeypatch):
+    """A warm cache holds tens of thousands of entries and every module load
+    counts it twice: the count is kept until the directory's mtime moves."""
+    import os
+    import time
+    (tmp_path / "a").write_bytes(b"x")
+    old = time.time_ns() - 60_000_000_000
+    os.utime(tmp_path, ns=(old, old))
+    scans = []
+    real = os.scandir
+    monkeypatch.setattr(notice.os, "scandir",
+                        lambda path: scans.append(path) or real(path))
+    assert notice._cache_file_count(tmp_path) == 1
+    assert notice._cache_file_count(tmp_path) == 1
+    assert len(scans) == 1
+    (tmp_path / "b").write_bytes(b"x")
+    os.utime(tmp_path, ns=(old + 10_000_000_000,) * 2)   # whole seconds: any clock moves
+    assert notice._cache_file_count(tmp_path) == 2
+    assert len(scans) == 2
+    # a directory written in the last two seconds is counted every time
+    (tmp_path / "c").write_bytes(b"x")
+    os.utime(tmp_path)
+    assert notice._cache_file_count(tmp_path) == 3
+    assert notice._cache_file_count(tmp_path) == 3
+    assert len(scans) == 4
+    assert notice._cache_file_count(tmp_path / "missing") == 0
+
+
 def test_run_plan_relays_the_compile_as_a_declared_warning(tmp_path,
                                                           monkeypatch):
     from woof import runplan
