@@ -9,6 +9,7 @@ from datetime import timedelta
 from ..mpasdiag.isobaric import FIELDS as ISOBARIC, IsobaricDiagnostics
 from ..mpasdiag.convective_v842 import FIELDS as CONVECTIVE, MAXIMA, ConvectiveDiagnosticsModule
 from ..mpasdiag.utils import DiagnosticsUtils, Direction, StreamView
+from ..mpasdiag import nwp_diag_v842 as _nwp
 
 
 PRIMARY = frozenset(('vorticity', 'divergence', 'ke'))
@@ -102,11 +103,16 @@ class ResidentOutputDiagnostics:
         self._fields, self._fields_state = {}, None
         # A checkpoint continuation's running accumulators (resume_accumulators), installed at step 0.
         self._resume = None
+        # WRF's nwp_diagnostics maxima (mpasdiag.nwp_diag_v842), only with config_nwp_diagnostics.
+        self.nwp = None
 
     def accumulator_state(self):
         """The convective running accumulators' words, for a checkpoint that a continuation resumes."""
-        return {name: self.cp.asnumpy(self.buffers['diag', name])
-                for name in self.convective_maxima if ('diag', name) in self.buffers}
+        state = {name: self.cp.asnumpy(self.buffers['diag', name])
+                 for name in self.convective_maxima if ('diag', name) in self.buffers}
+        if self.nwp is not None:
+            state.update(self.nwp.state())
+        return state
 
     def resume_accumulators(self, state):
         """Continue a checkpoint's running accumulators instead of native's start-of-run update.
@@ -120,6 +126,9 @@ class ResidentOutputDiagnostics:
         """
         self._resume = {name: value for name, value in state.items()
                         if name in self.convective_maxima and ('diag', name) in self.buffers}
+        if self.nwp is not None:
+            self._resume.update((name, value) for name, value in state.items()
+                                if name.startswith(_nwp.STATE_PREFIX))
 
     def buffer(self, pool, name):
         key = pool, name
@@ -187,6 +196,11 @@ class ResidentOutputDiagnostics:
             self.convective.driver.vertex_order = self.halo.vertex_order()
         self.accumulates = any(self.utils.stream_inclusion_count(name, Direction.OUTPUT)
                                for name in self.convective_maxima)
+        if _nwp.PACKAGE in self.session.layout.packages:
+            self.nwp = _nwp.NwpDiagnosticsModule(self)
+            self.produced = PRODUCED | frozenset(_nwp.NAMES)
+            self.nwp.setup(self.utils)
+            self.accumulates = self.accumulates or self.nwp.accumulates
 
     def _new_convective(self):
         """The route's convective diagnostics module (MPAS v8.4.2's here)."""
@@ -199,6 +213,8 @@ class ResidentOutputDiagnostics:
     def _update_convective(self):
         """mpas_atm_core.F:675-701 mpas_atm_diag_update, with the arguments the route's module takes."""
         self.convective.update()
+        if self.nwp is not None:
+            self.nwp.update()
 
     def views(self):
         """The writer's streams as MPAS stream views at ``self.when`` (a tuple).
@@ -300,16 +316,23 @@ class ResidentOutputDiagnostics:
         resume, self._resume = (self._resume, None) if step == 0 else (None, self._resume)
         if resume is not None:
             for name, value in resume.items():
-                target = self.buffers['diag', name]
-                target[...] = self.cp.asarray(value).reshape(target.shape)
+                if not name.startswith(_nwp.STATE_PREFIX):
+                    target = self.buffers['diag', name]
+                    target[...] = self.cp.asarray(value).reshape(target.shape)
+            if self.nwp is not None:
+                self.nwp.resume(resume)
         elif step == 0:
             self.convective.reset()
+            if self.nwp is not None:
+                self.nwp.reset()
         if self.accumulates or any(view.output_alarm for view in self.views()):
             self._solve_primary()
         if resume is None:
             self._update_convective()
         self.isobaric.compute()
         self.convective.compute()
+        if self.nwp is not None:
+            self.nwp.compute()
         self.updates += 1
         self.last_step = step
 
@@ -336,6 +359,8 @@ class ResidentOutputDiagnostics:
     def after_snapshot(self):
         try:
             self.convective.reset()
+            if self.nwp is not None:
+                self.nwp.reset()
         finally:
             self._end_event()
         self.acoustic.clear()

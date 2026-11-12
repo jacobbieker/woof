@@ -4337,7 +4337,7 @@
    },
    {
     "file": "woof/core/kernels/wind_gust_diag.cu",
-    "sha256": "922c431776984b6e9643d52012c21a5d662d93e93b58b753524a9cf5a9aefae9"
+    "sha256": "da9beaa15e0bc7d7fa7530042cc77440e345f91499eeb53a7d85d563f3e47b06"
    },
    {
     "file": "woof/core/kernels/wind_legacy.cu",
@@ -5551,7 +5551,7 @@
    },
    {
     "file": "woof/hex/mpasphys/rrfs/driver_rrfs.py",
-    "sha256": "7b4d21ba4a7df0e3ea6e4e06ed4b5c13ec32adc02a92b08f74c01ef038cabb1b"
+    "sha256": "2f310b37634a4d7d33d286abf528639a711bf51583c747397e9cc2678603106b"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/framework_init_rrfs.py",
