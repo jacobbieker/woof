@@ -9,11 +9,15 @@ push queued two identical runs, and their macOS jobs held up
 
 The macOS jobs (native, the ten mlx legs, the metal probe and the Metal
 gates) run nightly on `main` (06:17 UTC) and on every manual run unless its
-`macos` input is off. A push to `main` runs the Linux jobs only: main takes
-many merges a day, each merge's release builds on macOS, and a push run's mlx
-legs queued for a day or more, holding main's concurrency group so that no
-later push run started. The event name is part of the concurrency group, so
-the nightly run never blocks push runs. On a pull request
+`macos` input is off. A push to `main` runs the lint job only. Main takes
+many merges an hour, and each merge's full run (ten Linux legs) queued behind
+the pull-request runs for the account's runners: the run that got a runner was
+replaced as the group's pending run by the next merge's, or held the group for
+hours while its legs queued, so no run on main completed for days. The full
+Linux suite runs on the schedule instead: 06:17 UTC (with the macOS jobs) and
+00:17, 12:17 and 18:17 UTC (Linux only), each on the head of main when it
+starts, each cron entry in a concurrency group of its own, so four full runs a
+day replace one per merge and a pull request still tests its merge result. On a pull request
 they run only when it changes `woof/backend/`, `tools/metal_*`,
 `tools/f64_soft*`, `tests/test_metal_*`, `pixi.toml`/`pixi.lock` or
 `.github/ci/`, or carries the `macos-ci` label (adding the label starts a
