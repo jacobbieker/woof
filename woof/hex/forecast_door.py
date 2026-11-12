@@ -4965,6 +4965,11 @@ def _run_forecast(arguments: argparse.Namespace) -> int:
         raise _refuse(moving_refusal)
     from .speculative_contract import validate_output
     validate_output(request.out)
+    if getattr(arguments, "_door_argv", None) and not getattr(arguments, "preflight", False):
+        # The run's own command line, for `woof resume` / `woof branch`: the forecast writers record it
+        # beside the start record, once they have made the output directory (woof.hex.forecast_start).
+        from .continuation import REQUEST_ENV, request_text
+        os.environ[REQUEST_ENV] = request_text(arguments._door_argv)
     registry = load_registry(request.repo)
     samehost_options = None
     samehost = None

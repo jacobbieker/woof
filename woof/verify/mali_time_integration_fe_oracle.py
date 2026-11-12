@@ -24,7 +24,21 @@ import numpy as np
 FIXTURE_DIR = Path(__file__).resolve().parents[2] / "tests" / "data" / "oracles" / "mali_time_integration_fe"
 PRECISIONS = {"r4": np.float32, "r8": np.float64}
 STRKIND = 512
-POOLS = ("mesh", "geometry", "thermal", "velocity", "scratch")
+POOLS = ("mesh", "geometry", "thermal", "velocity", "hydro", "scratch")
+
+HYDRO_CELL = ("basalMeltInput", "externalWaterInput", "waterThickness", "waterThicknessOld", "waterThicknessTendency",
+              "tillWaterThickness", "tillWaterThicknessOld", "waterVelocityCellX", "waterVelocityCellY",
+              "hydropotentialBase", "hydropotential", "waterPressure", "waterPressureOld", "waterPressureTendency",
+              "effectivePressure", "divergence", "divergenceChannel", "channelAreaChangeCell", "openingRate",
+              "closingRate", "zeroOrderSum")
+HYDRO_EDGE = ("waterFlux", "waterFluxAdvec", "waterFluxDiffu", "waterVelocity", "waterThicknessEdge",
+              "waterThicknessEdgeUpwind", "hydropotentialBaseSlopeNormal", "hydropotentialBaseSlopeTangent",
+              "waterPressureSlopeNormal", "gradMagPhiEdge", "effectiveConducEdge", "diffusivity", "channelArea",
+              "channelDischarge", "channelVelocity", "channelDiffusivity", "channelMelt", "channelPressureFreeze",
+              "channelOpeningRate", "channelClosingRate", "channelChangeRate", "flowParamAChannel",
+              "channelEffectivePressure")
+HYDRO_SCALAR = ("deltatSGH", "deltatSGHadvec", "deltatSGHdiffu", "deltatSGHpressure", "deltatSGHadvecChannel",
+                "deltatSGHdiffuChannel")
 
 # (pool, name, type, shape in dimension names): type 'r' real, 'i' int32,
 # 'd' a dimension. Shapes are C-order (the Fortran's reversed).
@@ -67,6 +81,12 @@ FIELDS = (
     *(("thermal", n, "r", (_C,)) for n in ("surfaceTemperature", "basalTemperature", "surfaceAirTemperature",
                                            "basalHeatFlux", "basalFrictionFlux", "surfaceConductiveFlux",
                                            "basalConductiveFlux", "basalPmpTemperature")),
+    # the subglacial hydrology's pool
+    *(("hydro", n, "r", (_C,)) for n in HYDRO_CELL),
+    ("hydro", "hydropotentialBaseVertex", "r", (_V,)),
+    *(("hydro", n, "r", (_E,)) for n in HYDRO_EDGE),
+    ("hydro", "waterFluxMask", "i", (_E,)),
+    *(("hydro", n, "r", ()) for n in HYDRO_SCALAR),
     # the model's scratch fields: uninitialised in the model, random words here
     *(("scratch", n, "r", (_C,)) for n in ("workCell", "workCell2", "workCell3", "slopeCellX", "slopeCellY")),
     ("scratch", "workLevelCell", "r", (_C, _L)), ("scratch", "workTracerCell", "r", (_C, 1)),
@@ -77,7 +97,7 @@ FIELDS = (
 )
 #: the fields a step may change, compared word for word (the mesh's own words and the scratch are not)
 OUTPUTS = tuple((pool, name) for pool, name, kind, _ in FIELDS
-                if pool in ("geometry", "thermal", "velocity") and kind != "d") + (
+                if pool in ("geometry", "thermal", "velocity", "hydro") and kind != "d") + (
     ("mesh", "deltat"), ("mesh", "allowableDtACFL"), ("mesh", "allowableDtDCFL"))
 #: refused at RKIND 8 (glibc's binary64 atan): not in the r8 fixture
 R8_REFUSED = (("velocity", "eTheta"),)
@@ -118,7 +138,27 @@ CASES = (
       "config_calving_thickness": 40.0, "_bed": (-2500.0, 0.0), "_speed": 0.01}),
     ("calving_restore_front", 20261176, 96, 6,
      {"config_restore_calving_front": True, "config_calving": "floating", "config_thermal_solver": "enthalpy"}),
+    ("sgh_sheet_cavity", 20261181, 96, 6,
+     {"config_SGH": True, "config_thermal_solver": "none", "config_SGH_max_adaptive_timestep": 1500.0, "_speed": 0.01, "_bed": (-200.0, 1500.0), "_deltat": 3600.0,
+      "config_SGH_englacial_porosity": 1.0, "config_SGH_conduc_coeff": 1.0e-4}),
+    ("sgh_channels_thermal", 20261182, 96, 6,
+     {"config_SGH": True, "config_SGH_chnl_active": True, "config_SGH_basal_melt": "thermal",
+      "config_SGH_tangent_slope_calculation": "from_vertex_barycentric", "config_thermal_solver": "temperature",
+      "config_thermal_calculate_bmb": False, "_speed": 0.01, "_bed": (-200.0, 1500.0), "_deltat": 3600.0,
+      "config_SGH_englacial_porosity": 1.0, "config_SGH_conduc_coeff": 1.0e-4}),
+    ("sgh_overburden_shmip", 20261183, 80, 5,
+     {"config_SGH": True, "config_SGH_pressure_calc": "overburden", "config_SGH_basal_melt": "basal_heat",
+      "config_SGH_tangent_slope_calculation": "from_vertex_barycentric_kiteareas",
+      "config_SGH_shmip_forcing": "C2", "config_SGH_chnl_active": True, "config_SGH_include_pressure_melt": False,
+      "config_thermal_solver": "none", "_speed": 0.01, "_bed": (-200.0, 1500.0), "_deltat": 3600.0,
+      "config_SGH_englacial_porosity": 1.0, "config_SGH_conduc_coeff": 1.0e-4}),
+    ("sgh_shmip_d", 20261184, 80, 5,
+     {"config_SGH": True, "config_SGH_shmip_forcing": "D3", "config_thermal_solver": "none",
+      "config_SGH_max_adaptive_timestep": 900.0, "_speed": 0.01, "_bed": (-200.0, 1500.0), "_deltat": 3600.0,
+      "config_SGH_englacial_porosity": 1.0, "config_SGH_conduc_coeff": 1.0e-4}),
 )
+#: at RKIND 8 the SHMIP forcings (glibc's binary64 sin, cos) are refused: those cases run 'none'
+R8_SHMIP = "none"
 #: at RKIND 8 the cases run planar and without the floating melt whose sin is refused
 R8_OVERRIDES = {"on_a_sphere": False}
 R8_FLOAT_MELT = {"seroussi": "none"}
@@ -142,7 +182,16 @@ BASE_CONFIG = {
     "config_calving_thickness": 100.0, "config_calving_topography": -500.0,
     "config_calving_eigencalving_parameter_source": "scalar",
     "config_calving_eigencalving_parameter_scalar_value": 1.0e9,
-    "config_data_calving": False, "config_SGH": False, "config_do_velocity_reconstruction_for_external_dycore": False,
+    "config_data_calving": False, "config_do_velocity_reconstruction_for_external_dycore": False,
+    "config_SGH": False, "config_SGH_adaptive_timestep_fraction": 1.0, "config_SGH_max_adaptive_timestep": 3.15e9,
+    "config_SGH_tangent_slope_calculation": "from_normal_slope", "config_SGH_pressure_calc": "cavity",
+    "config_SGH_alpha": 1.25, "config_SGH_beta": 1.5, "config_SGH_conduc_coeff": 0.001,
+    "config_SGH_till_drainage": 3.1709792e-11, "config_SGH_bed_roughness": 0.5, "config_SGH_bed_roughness_max": 0.1,
+    "config_SGH_creep_coefficient": 0.04, "config_SGH_englacial_porosity": 0.01, "config_SGH_till_max": 2.0,
+    "config_SGH_chnl_active": False, "config_SGH_chnl_alpha": 1.25, "config_SGH_chnl_beta": 1.5,
+    "config_SGH_chnl_conduc_coeff": 0.1, "config_SGH_chnl_creep_coefficient": 0.04,
+    "config_SGH_incipient_channel_width": 2.0, "config_SGH_include_pressure_melt": True,
+    "config_SGH_shmip_forcing": "none", "config_SGH_basal_melt": "file",
     "config_print_thickness_advection_info": False, "config_print_thermal_info": False,
     "config_print_calving_info": False, "config_print_velocity_cleanup_details": False, "config_stats_cell_ID": 0,
     "on_a_sphere": False,
@@ -182,6 +231,7 @@ def make_case(name: str, seed: int, n_cells: int, n_levels: int, overrides: dict
         config.update(R8_OVERRIDES)
         config["config_basal_mass_bal_float"] = R8_FLOAT_MELT.get(config["config_basal_mass_bal_float"],
                                                                    config["config_basal_mass_bal_float"])
+        config["config_SGH_shmip_forcing"] = R8_SHMIP
     dims = {"nCells": nc, "nEdges": ne, "nVertices": nv, "nVertLevels": nl, "nVertInterfaces": nl + 1,
             "nCellsSolve": nc, "nEdgesSolve": ne - 5, "vertexDegree": 3, "maxEdges": me, "maxEdges2": me2}
 
@@ -223,7 +273,7 @@ def make_case(name: str, seed: int, n_cells: int, n_levels: int, overrides: dict
             "baryWeightsOnVertex": uniform(-0.1, 0.8, (nv, 3)), "kiteAreasOnVertex": uniform(1.0e6, 5.0e7, (nv, 3)),
             "weightsOnEdge": uniform(-0.5, 0.5, (ne, me2)), "edgeNormalVectors": uniform(-1.0, 1.0, (ne, 3)),
             "coeffs_reconstruct": uniform(-0.6, 0.6, (nc, me, 3)),
-            "deltat": np.array(30.0 * 86400.0, real), "daysSinceStart": np.array(400.5, real),
+            "deltat": np.array(overrides.get("_deltat", 30.0 * 86400.0), real), "daysSinceStart": np.array(400.5, real),
             "allowableDtACFL": uniform(-1.0, 1.0, ()), "allowableDtDCFL": uniform(-1.0, 1.0, ()),
         },
         "geometry": {
@@ -273,6 +323,21 @@ def make_case(name: str, seed: int, n_cells: int, n_levels: int, overrides: dict
             s = field_shape(case, shape)
             scratch[field] = ints(-5, 6, s) if kind == "i" else uniform(-1.0e3, 1.0e3, s)
     pools["scratch"] = scratch
+    # the hydro pool, drawn last so the other fields' words do not depend on it
+    hydro = {name: uniform(-1.0, 1.0, nc) for name in HYDRO_CELL}
+    hydro.update({
+        "basalMeltInput": uniform(0.0, 2.0e-5, nc), "externalWaterInput": uniform(0.0, 1.0e-5, nc),
+        "waterThickness": uniform(0.0, 0.3, nc), "tillWaterThickness": uniform(0.0, 2.0, nc),
+        "tillWaterThicknessOld": uniform(0.0, 2.0, nc), "waterPressure": uniform(0.0, 1.5e7, nc),
+        "hydropotentialBase": uniform(-5.0e6, 3.0e7, nc), "effectivePressure": uniform(0.0, 3.0e6, nc)})
+    hydro["hydropotentialBaseVertex"] = uniform(-5.0e6, 3.0e7, nv)
+    hydro.update({name: uniform(-1.0, 1.0, ne) for name in HYDRO_EDGE})
+    hydro.update({"channelArea": uniform(0.0, 20.0, ne), "flowParamAChannel": uniform(1.0e-25, 1.0e-23, ne),
+                  "channelEffectivePressure": uniform(0.0, 3.0e6, ne)})
+    hydro["waterFluxMask"] = np.where(rs.random_sample(ne) < 0.05, 2, 0).astype(np.int32)
+    hydro.update({name: uniform(1.0e3, 1.0e5, ()) for name in HYDRO_SCALAR})
+    hydro["deltatSGH"] = np.array(overrides.get("_sgh_dt", 3600.0), real)
+    pools["hydro"] = hydro
     return case
 
 
@@ -390,7 +455,7 @@ def run_gpu(case: dict) -> dict[str, np.ndarray]:
         config_basal_heat_flux_source=c["config_basal_heat_flux_source"],
         config_basal_heat_flux_value=c["config_basal_heat_flux_value"], config_do_restart=True)
     now, ring = case["clock"]
-    fe.forward_euler_step(mesh=mesh, geometry=g, thermal=t, velocity=dev["velocity"], config=c,
+    fe.forward_euler_step(mesh=mesh, geometry=g, thermal=t, velocity=dev["velocity"], hydro=dev["hydro"], config=c,
                           seconds_to_next_force_time=ring - now)
     out = {}
     for pool, name in OUTPUTS:

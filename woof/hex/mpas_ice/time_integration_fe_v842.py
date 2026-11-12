@@ -10,8 +10,8 @@
 3. ``advection_solver``: ``calculate_layerThicknessEdge``,
    ``li_advection_thickness_tracers``, negative thickness set to zero, the
    masks and ``li_update_geometry``;
-4. subglacial hydrology, which this port carries only when off
-   (``config_SGH`` false; on, it is refused by name), then
+4. subglacial hydrology (``li_SGH_solve``,
+   :mod:`~woof.hex.mpas_ice.subglacial_hydro_v842`, with ``config_SGH``), then
    ``li_calve_ice`` or ``li_restore_calving_front``
    (:mod:`~woof.hex.mpas_ice.calving_v842`);
 5. ``li_velocity_solve`` for 'sia' and 'none': the masks and geometry, the
@@ -58,8 +58,8 @@ import numpy as np
 from woof.hex import numerics as _hex_numerics
 from woof.hex.errors import ConfigurationRefusal
 
-from . import (advection_v842, calving_v842, geometry_v842, rkind, sia_v842, thermal_init_v842,
-               thermal_solver_v842)
+from . import (advection_v842, calving_v842, geometry_v842, rkind, sia_v842, subglacial_hydro_v842,
+               thermal_init_v842, thermal_solver_v842)
 
 SOURCE_FILES = (
     "src/core_landice/mode_forward/mpas_li_time_integration_fe.F:75-952",
@@ -124,8 +124,7 @@ def _check_config(config: dict, precision: str, velocity: dict) -> None:
         if config[knob] not in ADVECTION:
             raise ValueError(f"{knob} must be one of {ADVECTION}")
     if config.get("config_SGH", False):
-        _refuse("config_SGH", True, "subglacial hydrology (li_SGH_solve) is not ported yet",
-                "config_SGH = .false.")
+        subglacial_hydro_v842.check_config(config, precision)
     if not config.get("config_restore_calving_front", False):
         calving_v842.check_config(config)
     if precision == "r8" and config.get("on_a_sphere", False):
@@ -184,6 +183,7 @@ def _set_timestep(precision: str, advec_dt, diff_dt, config: dict, seconds_to_ne
 
 
 def forward_euler_step(*, mesh: dict, geometry: dict, thermal: dict, velocity: dict, config: dict,
+                       hydro: dict | None = None,
                        seconds_to_next_force_time: int | None = None) -> None:
     """``li_time_integrator_forwardeuler`` for one block, in place.
 
@@ -277,6 +277,12 @@ def forward_euler_step(*, mesh: dict, geometry: dict, thermal: dict, velocity: d
     _function(precision, "li_clamp_thickness_v842")(_grid(n_cells), block, (g["thickness"], np.int32(n_cells)))
     geometry_v842.calculate_mask(mesh=m, geometry=g, **masks)
     _update_geometry(m, g, c)
+
+    # === subglacial hydrology
+    if c.get("config_SGH", False):
+        if hydro is None:
+            raise ValueError("config_SGH needs the hydro pool")
+        subglacial_hydro_v842.sgh_solve(mesh=m, geometry=g, thermal=t, velocity=v, hydro=hydro, config=c)
 
     # === calving
     if c.get("config_restore_calving_front", False):

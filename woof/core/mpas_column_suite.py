@@ -1067,16 +1067,14 @@ def _selection_assignments(physics) -> dict:
 
 def _selection_config(chosen, *, nz, ncol, ny, dx, ztop, cadences):
     """The RunConfig of one selection, judged by the engine itself."""
-    from woof.config import (CCPP_TKE_EDMF_PBL_SCHEME, RunConfig,
-                              validate_run_config)
+    from woof.config import RunConfig, validate_run_config
     from woof.physics_compat import validate_physics_capabilities
+    # Always the minutes spelling, even for a call every step: a positive
+    # bldt is what makes the driver keep the raw PBL momentum rates phase 1
+    # returns (physics_inventory.pbl_raw_rate_names).  CCPP TKE-EDMF holds
+    # its TKE and scalar rate bank on the restart manifest under it
+    # (woof.core.satmedmf.held_rate_names).
     bldt = cadences["bldt_minutes"]
-    if (chosen.get("bl_pbl_physics") == CCPP_TKE_EDMF_PBL_SCHEME
-            and cadences["stepbl"] == 1):
-        # A PBL call every step is WRF's bldt = 0, the only cadence
-        # CCPP TKE-EDMF admits (woof.config); the seam's minutes spelling
-        # of the same step is refused there.
-        bldt = 0.0
     cfg = RunConfig(
         nx=ncol, ny=ny, nz=nz, dx=dx, dy=dx, ztop=ztop,
         dt=float(cadences["dt"]), run_seconds=0.0, moist=True,
@@ -1714,6 +1712,14 @@ class MpasColumnPhysics(MpasColumnBatchPhysics):
                         cp.zeros(shape3, dtype=cp.float32))
         self._gf_rthdynten = self._driver.gf_rthdynten
         self._gf_rqvdynten = self._driver.gf_rqvdynten
+        if cfg.bl_pbl_physics and not (
+                {"du", "dv"} <= set(self._driver.pbl_raw_rates)):
+            # Phase 1 reads its momentum from these; without them it would
+            # hand back zero du/dv for a PBL that mixes momentum.
+            raise RuntimeError(
+                "the driver holds no raw PBL momentum rates "
+                f"({sorted(self._driver.pbl_raw_rates)}); the seam runs a "
+                "positive bldt precisely so it does")
         if dx_column is not None:
             self._driver.gf_dx_column = cp.asarray(
                 dx_column.reshape(1, ncol))
@@ -1951,6 +1957,11 @@ class MpasColumnPhysics(MpasColumnBatchPhysics):
         # the raw rates.
         extra = getattr(driver.pbl_tendencies, "extra_scalars", None) or {}
         fixed = {"qv", "qc", "qr", "qi", "qs", "qg"}
+        # A scheme that holds its scalar rates between PBL calls (CCPP
+        # TKE-EDMF at a positive cadence) returns the held rate on the
+        # steps between, exactly as the held du/dv/dtheta above.
+        from woof.core.satmedmf import held_rate_names
+        held = set(held_rate_names(state, cfg))
         rates = {}
         for name, value in extra.items():
             if name in fixed:
@@ -1960,7 +1971,7 @@ class MpasColumnPhysics(MpasColumnBatchPhysics):
                     f"a phase-one scheme returned a rate for {name!r}, "
                     f"which this selection does not transport "
                     f"({self._species})")
-            if not ran["ysu"]:
+            if not ran["ysu"] and name not in held:
                 raise RuntimeError(
                     f"a held rate for {name!r} arrived on a step with no "
                     "PBL call; it would be the previous step's")

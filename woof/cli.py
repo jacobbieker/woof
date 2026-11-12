@@ -987,6 +987,13 @@ def _dispatch_argv(argv: list[str] | None = None) -> int:
     handled = dispatch_component(tokens)
     if handled is not None:
         return handled
+    if tokens[:1] in (["resume"], ["branch"]) and "--help" not in tokens and "-h" not in tokens:
+        # A hex run's directory answers first (woof.hex.continuation): its checkpoints are
+        # `woof hex forecast --restart-from` files, not the WRF path's gpuwmrst_*.npz.
+        from woof.hex.continuation import intercept
+        handled = intercept(tokens)
+        if handled is not None:
+            return handled
     native_go_invocation = None
     if (len(tokens) > 1 and tokens[0] == "go"
             and Path(tokens[1]).is_dir()

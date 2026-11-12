@@ -208,6 +208,9 @@ _PBL_CONTRACT_ROWS = {
     "mynn": ("MYNN", "MYNN_VERTICAL_LEVEL_BOUNDS"),
     "bl_mynn": ("MYNN", "MYNN_VERTICAL_LEVEL_BOUNDS"),
     "bl_mynnedmf": ("MYNN", "MYNN_VERTICAL_LEVEL_BOUNDS"),
+    # CCPP sa-TKE-EDMF (bl_pbl_physics = 901, hex parity 1.9): a floor of 8
+    # levels for its mass-flux searches and no ceiling.
+    "ccpp-tke-edmf": ("CCPP TKE-EDMF", "SATMEDMF_VERTICAL_LEVEL_BOUNDS"),
     "off": None,
 }
 
