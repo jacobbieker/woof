@@ -17,8 +17,14 @@
 // -ffp-contract=off). Real powers are glibc's powf/pow (the shared
 // transcriptions the driver prepends), x**3 is (x*x)*x as gfortran expands
 // it, and sin/cos (the SHMIP forcings, RKIND 4 only) are glibc's sinf/cosf.
-// Fortran MIN/MAX keep the first argument unless the second compares
-// less/greater (x86-64 minss/maxss), chosen on the words.
+// Fortran MIN/MAX return the first argument only if it compares less/greater
+// and the second otherwise, so a tie of signed zeros returns the second: the
+// operand order the x86-64 oracle's gfortran -O0 gives this module's minss/
+// maxss (measured on its fixture at max(0, waterThickness)). The upwind sheet
+// thickness's MAX keeps the first argument instead (li_max_first), as
+// calculate_layerThicknessEdge's identical expression does. The choice is
+// made on the words, as an integer select, so no compiler turns it into an
+// IEEE min/max.
 //
 // Layout: a (nVertLevels, nCells) field is a[iCell*nVertLevels + k];
 // edgesOnCell(maxEdges, nCells) is e[iCell*maxEdges + j]. Connectivity is
@@ -38,9 +44,12 @@ typedef double rk;
 #define LI_COS(x) (x)
 #define LI_C(x) x
 __device__ __forceinline__ rk li_min(rk a, rk b) {
-    return __longlong_as_double(b < a ? __double_as_longlong(b) : __double_as_longlong(a));
+    return __longlong_as_double(a < b ? __double_as_longlong(a) : __double_as_longlong(b));
 }
 __device__ __forceinline__ rk li_max(rk a, rk b) {
+    return __longlong_as_double(a > b ? __double_as_longlong(a) : __double_as_longlong(b));
+}
+__device__ __forceinline__ rk li_max_first(rk a, rk b) {
     return __longlong_as_double(b > a ? __double_as_longlong(b) : __double_as_longlong(a));
 }
 #else
@@ -57,9 +66,12 @@ typedef float rk;
 #define LI_COS(x) glibc_cosf(x)
 #define LI_C(x) x##f
 __device__ __forceinline__ rk li_min(rk a, rk b) {
-    return __int_as_float(b < a ? __float_as_int(b) : __float_as_int(a));
+    return __int_as_float(a < b ? __float_as_int(a) : __float_as_int(b));
 }
 __device__ __forceinline__ rk li_max(rk a, rk b) {
+    return __int_as_float(a > b ? __float_as_int(a) : __float_as_int(b));
+}
+__device__ __forceinline__ rk li_max_first(rk a, rk b) {
     return __int_as_float(b > a ? __float_as_int(b) : __float_as_int(a));
 }
 #endif
@@ -187,7 +199,7 @@ extern "C" __global__ void li_sgh_edge_fluxes_v842(
     const int c1 = cellsOnEdge[2 * e] - 1, c2 = cellsOnEdge[2 * e + 1] - 1;
     rk v = M(M(LI_C(-1.0), k), n);
     const rk velSign = LI_SIGN1(v);
-    const rk up = li_max(M(velSign, waterThickness[c1]), M(M(velSign, LI_C(-1.0)), waterThickness[c2]));
+    const rk up = li_max_first(M(velSign, waterThickness[c1]), M(M(velSign, LI_C(-1.0)), waterThickness[c2]));
     waterThicknessEdgeUpwind[e] = up;
     rk advec = M(v, up);
     rk diffu = LI_C(0.0);
