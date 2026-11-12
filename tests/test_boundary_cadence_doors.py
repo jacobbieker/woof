@@ -354,7 +354,10 @@ ROUTES_AFTER_280 = ("ecmwf-ens", "hrrr-native", "rap-native", "rrfs-ens",
                     # each added to the route table after 2.8.0
                     "ecmwf-open-data-0p1", "gefs-reforecast",
                     "gefs-reforecast-weekly", "gefs-reforecast-land",
-                    "gefs-v11", "gefs-v11-flat", "ncep-r1-seaice")
+                    "gefs-v11", "gefs-v11-flat", "ncep-r1-seaice",
+                    # the two Canadian GEM regional rows, the GFS full
+                    # pressure product and the two HAFS rows, added after 2.8.0
+                    "gem-hrdps", "gem-rdps", "gfs-pressure", "hafs-a", "hafs-b")
 
 #: The per-route cadences lists 2.8.0 shipped, kept only to show that a
 #: window which names no cadence resolves exactly as it did then.

@@ -53,10 +53,6 @@ FORK_CHEM_OPT_SETS = {18: "smoke"}
 #: (docs/chem-coupled-aerosol-roadmap.md): ported in pieces, refused until
 #: the whole package runs.
 PLANNED_CHEM_OPT = {
-    1: ("RADM2", "the RADM2 gas phase"),
-    2: ("RADM2SORG", "the RADM2 gas phase with the MADE/SORGAM aerosol; the "
-                     "default build will run SORGAM's RPMARES equilibrium, "
-                     "WRF's ISORROPIA being an opt-in"),
     41: ("RADM2SORG_AQCHEM", "the RADM2 gas phase with the MADE/SORGAM "
                              "aerosol (RPMARES equilibrium) and CMAQ aqueous "
                              "chemistry")}
@@ -101,7 +97,7 @@ CARRIED_KEYS: dict[str, type] = {
     "dmsemis_opt": int, "wetscav_onoff": int, "chem_conv_tr": int,
     "vertmix_onoff": int, "aer_ra_feedback": int, "aer_op_opt": int,
     "dust_alpha": float, "dust_gamma": float, "dust_smtune": float,
-    "dust_ustune": float, "mynn_chem_vertmx": bool,
+    "dust_ustune": float, "mynn_chem_vertmx": bool, "photdt": float,
 }
 
 #: ``&dynamics`` switches of the chem array, carried under the same names.
@@ -231,7 +227,8 @@ def carried_menu() -> str:
 
     rows = [f"chem_opt = {row.wrf_chem_opt} ({row.name})"
             for row in catalog().sets.values()
-            if row.wrf_chem_opt is not None and not row.test_only]
+            if row.wrf_chem_opt is not None and not row.test_only
+            and row.wrf_chem_opt not in PLANNED_CHEM_OPT]
     rows += [f"the operational fork's chem_opt = {value} ({name})"
              for value, name in FORK_CHEM_OPT_SETS.items()]
     return ", ".join(sorted(rows))
@@ -240,6 +237,10 @@ def carried_menu() -> str:
 def chem_set_for(chem_opt: int, *, fork: bool) -> str | None:
     from woof.chem_table import catalog
 
+    if chem_opt in PLANNED_CHEM_OPT:
+        # The set exists (chem_sets can name it) while the package's namelist
+        # mapping is still refused as a whole (package_status).
+        return None
     for row in catalog().sets.values():
         if row.wrf_chem_opt == chem_opt and not row.test_only:
             return row.name
@@ -356,17 +357,25 @@ def import_chem_section(entries: dict, *, max_dom: int, fork: bool,
             # Decided on the switch, never on the Registry default: several
             # defaults are 1 (process ON), so "at the default" is a request.
             what = UNCARRIED_PROCESS_SWITCHES[key]
-            process = PROCESS_SWITCH_CARRIERS.get(key)
-            runs = process is not None and any(
-                process in row.processes for row in _set_rows(chem_set))
+            carriers = {process: value for process, value
+                        in PROCESS_SWITCH_CARRIERS.get(key, {}).items()
+                        if _runs(chem_set, process)}
+            process, carried = next(iter(carriers.items()), (None, None))
+            runs = process is not None
             off = all(value == 0 for value in active)
             if off and not runs:
                 drop("chem", key, values,
                      f"{what} is off (0): exact, '{chem_set}' runs no such "
                      "process")
                 continue
-            if runs and all(value == 1 for value in active):
-                fix("chem", key, values, 1,
+            if off and process in SOURCE_GATED_PROCESSES:
+                drop("chem", key, values,
+                     f"{what} is off (0): exact, '{chem_set}' enables no "
+                     f"inventory source for {process}, which then emits "
+                     "nothing")
+                continue
+            if runs and all(value == carried for value in active):
+                fix("chem", key, values, carried,
                     f"{what}: '{chem_set}' runs it ({process}, "
                     f"woof/{CHEM_PROCESS_PATH.get(process, 'core')})")
                 continue
@@ -374,13 +383,13 @@ def import_chem_section(entries: dict, *, max_dom: int, fork: bool,
                 "chem", key, values,
                 (f"{what} is always on in '{chem_set}' ({process}); WOOF "
                  "cannot turn it off, so the chemistry would deposit what "
-                 "the request keeps.  Next: set it to 1."
+                 f"the request keeps.  Next: set it to {carried}."
                  if off else
                  f"asks for {what}, which '{chem_set}' does not run"
-                 + (f" in this variant (only 1, {process}, is carried)"
-                    if runs else "")
+                 + (f" in this variant (only {carried}, {process}, is "
+                    "carried)" if runs else "")
                  + ": the value would not be honoured.  Next: set it to "
-                 + ("1." if runs else "0 to run without it.")
+                 + (f"{carried}." if runs else "0 to run without it.")
                  + CHEM_OFF_WAY_OUT))
         carried_fork = FORK_CARRIED_KEYS.get(key)
         # At the off value (0 / .false.) the fork key keeps its exact drop
@@ -435,12 +444,40 @@ def import_chem_section(entries: dict, *, max_dom: int, fork: bool,
     return ChemImport(chem_set, shared, _sources_for(chem_set, switches))
 
 
-#: Process switches WOOF does carry for some sets: the WOOF process that
-#: answers the switch's standard value (1), when the mapped set's rows run it.
-PROCESS_SWITCH_CARRIERS = {"gas_drydep_opt": "drydep.wesely",
-                           "aer_drydep_opt": "drydep.gocart"}
+#: Process switches WOOF does carry for some sets: switch -> {the WOOF
+#: process that answers it: the switch value it answers}, when the mapped
+#: set's rows run that process.  gas_drydep_opt = 1 is WESELY;
+#: aer_drydep_opt = 1 is GOCART's driver for gocart sets and sorgam_depdriver
+#: (VDVG_2) for RADM2SORG (dry_dep_driver.F:494-534); phot_opt = 3 is
+#: Fast-TUV (PHOTOLYSIS_FTUV); emiss_opt = 3 is the eradmsorg package
+#: (registry.chem:4055).
+PROCESS_SWITCH_CARRIERS = {"gas_drydep_opt": {"drydep.wesely": 1},
+                           "aer_drydep_opt": {"drydep.gocart": 1,
+                                              "drydep.sorgam": 1},
+                           "phot_opt": {"photolysis.ftuv": 3},
+                           "emiss_opt": {"emission.radm2": 3},
+                           "gas_ic_opt": {"chem.radm2": 1},
+                           "aer_ic_opt": {"aerosol.sorgam": 1}}
 CHEM_PROCESS_PATH = {"drydep.wesely": "core/chem_drydep_gas.py",
-                     "drydep.gocart": "core/chem_drydep_aerosol.py"}
+                     "drydep.gocart": "core/chem_drydep_aerosol.py",
+                     "drydep.sorgam": "core/chem_sorgam_drydep.py",
+                     "photolysis.ftuv": "core/chem_ftuv.py",
+                     "emission.radm2": "core/chem_radm2_emiss.py",
+                     "chem.radm2": "core/chem_radm2.py (cold_start: "
+                                   "make_chem_profile)",
+                     "aerosol.sorgam": "core/chem_sorgam.py (cold_start: "
+                                       "aerosols_sorgam_init)"}
+#: Carried emission processes that emit only from the inventory sources the
+#: switch enables (_sources_for): with the switch at 0 nothing is enabled and
+#: nothing is emitted, WRF's own emiss_opt = 0.
+SOURCE_GATED_PROCESSES = frozenset({"emission.radm2"})
+
+
+def _runs(chem_set: str, process: str) -> bool:
+    """True when ``process`` acts on some row of ``chem_set`` (its
+    ``process_sets`` gate applied: a shared row runs a package's process
+    only in that package's sets)."""
+    return any(row.acts_in(process, (chem_set,)) for row in _set_rows(chem_set))
 
 
 def _set_rows(chem_set: str):
@@ -473,7 +510,26 @@ def _set_rows_with_sources(chem_set: str) -> list[str]:
 #: switch is on; with it off WRF emits nothing, and the chem law refuses a
 #: row that would then have no source.
 EMISSION_SWITCHES = {"emission.fire": "biomass_burn_opt",
-                     "emission.inventory": "emiss_opt"}
+                     "emission.inventory": "emiss_opt",
+                     "emission.radm2": "emiss_opt"}
+#: Emission processes whose rows list alternative inventories (the first
+#: entry is the namelist's choice; the others are named in chem_sources by
+#: hand): the door enables only each row's first source, so two inventories
+#: of one species are never both on.
+FIRST_SOURCE_ONLY = frozenset({"emission.radm2"})
+
+
+def _process_entries(process, row):
+    """The row's emission entries ``process`` reads: emission.radm2 reads
+    the entries whose field is a WRF emis_ant name (e_co, ...; the
+    eradmsorg package, woof.core.chem_radm2_emiss.EMISSIONS), every other
+    emission process the rest; FIRST_SOURCE_ONLY keeps the first."""
+    from woof.core.chem_radm2_emiss import EMISSIONS
+
+    radm2 = process == "emission.radm2"
+    entries = [entry for entry in row.emissions
+               if (entry["field"] in EMISSIONS) == radm2]
+    return entries[:1] if process in FIRST_SOURCE_ONLY else entries
 
 
 def _sources_for(chem_set: str, switches: dict) -> tuple[str, ...]:
@@ -494,15 +550,15 @@ def _sources_for(chem_set: str, switches: dict) -> tuple[str, ...]:
 
     for row in rows:
         for process, switch in EMISSION_SWITCHES.items():
-            if process in row.processes and switches.get(switch) not in (
+            if row.acts_in(process, (chem_set,)) and switches.get(switch) not in (
                     None, 0):
-                for entry in row.emissions:
+                for entry in _process_entries(process, row):
                     add(entry["source"])
     if any(switches.get(key) not in (None, 0, False) for key in SOURCE_KEYS):
         for row in rows:
             for entry in row.boundary:
                 add(entry["source"])
-    if any("chem.sulfur" in row.processes for row in rows):
+    if any(row.acts_in("chem.sulfur", (chem_set,)) for row in rows):
         for name, source in sorted(table.sources.items()):
             if source.kind == "oxidant":
                 add(name)

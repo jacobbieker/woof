@@ -210,6 +210,10 @@ def attach(driver, state, cfg, *, start_time=None, dzs=None) -> WrfHydroSeam | N
     namelist = configured()
     if namelist is None:
         return None
+    if getattr(state, "hex_columns", False):
+        # Hex columns (woof.core.mpas_column_batch) are not the routing domain's mass grid: the hex host
+        # couples them through the conservative cell <-> grid exchange (woof.hex.wrf_hydro_hex.attach_host).
+        return None
     lsm = int(getattr(cfg, "sf_surface_physics", 0))
     if lsm not in LSM_PLANES:
         raise NotImplementedError(

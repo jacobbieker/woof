@@ -177,6 +177,10 @@ def test_retired_domain_and_member_paths_keep_all_completed_records(tmp_path):
     group = object.__new__(PerDomainWrfoutWriters)
     group._writers = {index + 1: writer for index, writer in enumerate(writers)}
     group._archived_paths = []
+    # The CLWRF/RASM auxiliary writers, which a group built bare never made.
+    noop = lambda *args, **kwargs: None
+    group._auxiliary = type("_NoAuxiliary", (), {
+        "drain": noop, "remove_domain": noop})()
     group._metadata_by_grid_id = {1: {}, 2: {}}
     group._episode_by_grid_id = {1: 1, 2: 2}
     group.last_durable_wrfout = None

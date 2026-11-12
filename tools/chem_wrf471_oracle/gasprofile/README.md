@@ -9,10 +9,13 @@ chem/module_input_chem_data.F's own lines 1 to `CONTAINS` (FSL notice,
 `stub_gasprofile.F90` holds the Registry-generated `module_state_description`
 (chem_opt / gas_ic_opt package values, the radm2 and radm2sorg species indices as
 module variables), a `module_domain` with only the fields `input_chem_profile`
+reads, a `grid_config_rec_type` with the two fields `bdy_chem_value_sorgam`
 reads, and the names the remaining USE lines import.  `run_gasprofile.F90` calls
 `input_chem_profile` (real.exe's chem_in_opt = 0 entry), `make_chem_profile` and
-`bdy_chem_value` for chem_opt 1 and 2, then the gas_ic_opt = 101 path, and writes
-one case per call through `oracle_io.F90` (a byte copy of the radm2emis lane's).
+`bdy_chem_value` for chem_opt 1 and 2, `bdy_chem_value_sorgam` (chem_opt 2,
+aer_bc_opt = 1) for the 38 aerosol rows, then the gas_ic_opt = 101 path, and
+writes one case per call through `oracle_io.F90` (a byte copy of the radm2emis
+lane's).
 
 * `SOURCES.sha256` pins every compiled WRF file; a mismatch stops the build.
   module_input_chem_data.F differs from v4.6.1 only in a comment at :3846-3847,

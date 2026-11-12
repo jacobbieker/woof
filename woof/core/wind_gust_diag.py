@@ -335,8 +335,13 @@ def update_wind_maxima(state, cfg=None) -> None:
 
 
 def device_wind_maxima_step(u, v, w, p, ph, phb, fnm, fnp, surface,
-                            maxima: dict) -> None:
-    """One step of every member on device arrays (``wind_maxima_fold``)."""
+                            maxima: dict, *, mass_winds: bool = False) -> None:
+    """One step of every member on device arrays (``wind_maxima_fold``).
+
+    ``mass_winds``: ``u``/``v`` are mass-point ``(nz, ny, nx)`` arrays (an
+    unstructured mesh's cell-centre winds, ``ny = 1``) instead of WRF's
+    staggered faces; the gust then reads them directly.
+    """
     from woof.core.kernels import get_kernel
 
     nzf, ny, nx = w.shape
@@ -375,7 +380,7 @@ def device_wind_maxima_step(u, v, w, p, ph, phb, fnm, fnp, surface,
          _G,
          maxima["wspd10max"], maxima["u10max"], maxima["v10max"],
          maxima["w_up_max"], maxima["w_dn_max"], gust_max,
-         np.int32(nz), np.int32(ny), np.int32(nx)))
+         np.int32(nz), np.int32(ny), np.int32(nx), np.int32(bool(mass_winds))))
 
 
 def zero_domain_slot(state, slot: str) -> None:

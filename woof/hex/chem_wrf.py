@@ -63,7 +63,10 @@ MODE = "wrf_chem"
 PORTED_PROCESSES = frozenset((
     "emission.dust", "emission.seasalt", "emission.inventory", "drydep.wesely", "drydep.gocart",
     "mixing.vertmx", "settling.gocart", "aging.gocart", "wetdep.ls", "optics.gocart",
-    "coupling.thompson", "emission.fire", "plumerise.freitas"))
+    "coupling.thompson", "emission.fire", "plumerise.freitas",
+    # RADM2 / RADM2SORG (chem_opt 1/2): WRF-Chem's gas phase, Fast-TUV photolysis, anthropogenic emissions
+    # (emiss_opt 3) and the MADE/SORGAM aerosol with its deposition, the WRF path's own modules.
+    "emission.radm2", "photolysis.ftuv", "chem.radm2", "drydep.sorgam", "aerosol.sorgam"))
 #: Process keys the hex mesh cannot run yet, and why.
 UNPORTED_PROCESSES = {
     "chem.sulfur": "GOCART sulfur reads background oxidant source fields that are not yet remapped onto "
@@ -462,7 +465,22 @@ class HexWrfChemistry:
     def bind_seam(self, seam):
         """Hand the column seam's radiation the chemistry (WRF aer_ra_feedback): its RunConfig gains the
         chem keys, its state the rows and optics arrays, exactly as a WRF domain's radiation sees them
-        through woof.core.chem_radiation.prepare.  A no-op without feedback."""
+        through woof.core.chem_radiation.prepare.
+
+        Every run also takes from the seam what the WRF driver hands its chem processes beside the fields:
+        the land-surface parameter tables (Wesely deposition reads the run's land-use dataset, WRF's MMINLU,
+        from them) and, when a process reads it, the radiation-time GSW plane, which the WRF driver allocates
+        only for a chem run (woof.core.physics: ``"gsw" in chem_physics_reads(cfg)``) and the column seam's
+        own config names no chemistry."""
+        driver = getattr(seam, "_driver", None)
+        if driver is not None:
+            self.state.physics.noah_params = getattr(driver, "noah_params", None)
+            self.state.physics.noahmp_params = getattr(driver, "noahmp_params", None)
+            self.state.physics.ruc_params = getattr(driver, "ruc_params", None)
+            from woof.core.chem_context import chem_physics_reads
+            if "gsw" in chem_physics_reads(self.cfg) and "gsw" not in driver.fields:
+                import cupy as cp
+                driver.fields["gsw"] = cp.zeros((1, self.ncells), dtype=cp.float32)
         if not self.feedback:
             return
         from woof.core.chem_state import process_attr
@@ -639,6 +657,21 @@ class HexWrfChemistry:
                                  "mixing ratio")
         self.initial_receipts = receipts
         return receipts
+
+    def cold_start(self, scalars, columns):
+        """Each process's ``cold_start(ctx)`` once at a fresh run's start (woof.core.chem_driver._cold_start:
+        real.exe's input_chem_profile and chemics_init's aerosol initialisation, e.g. the RADM2 background gas
+        profile under chem_in_opt = 0 and the SORGAM initial aerosol), on the start's columns.  A row a
+        data-store source filled keeps that fill (the hooks skip enabled sources' rows)."""
+        hooks = [(key, module) for key, module in self.processes if getattr(module, "cold_start", None) is not None]
+        if not hooks or self.steps:
+            return
+        self.bind_rows(scalars)
+        self.state.elapsed_seconds = 0.0
+        self.refresh(columns)
+        ctx = self.context(1, float(self.cfg.dt))
+        for _key, module in hooks:
+            module.cold_start(ctx)
 
     def abort(self):
         if self.pending is not None:
@@ -1097,9 +1130,15 @@ def attach(backend, host, driver):
         if bool(cp.any(rows != 0)):
             raise ValueError("wrf_chem starts from zero composition or from its sources; the rows carry "
                              "mass before the first step")
+        prepared = None
         if runtime.switches["chem_in_opt"]:
             from datetime import datetime, timezone
             prepared = backend._prepare(driver.atmosphere, runtime.species_row.names(), post_rk=False)
             start = datetime.strptime(host["start_time_text"], "%Y-%m-%d_%H:%M:%S").replace(tzinfo=timezone.utc)
             runtime.fill_initial(driver.atmosphere.state.scalars, latitude=lat, longitude=lon,
                                  pressure=prepared.pres_hyd_p, valid_time=start)
+        hooks = getattr(runtime, "processes", ())
+        if any(getattr(module, "cold_start", None) is not None for _key, module in hooks):
+            if prepared is None:
+                prepared = backend._prepare(driver.atmosphere, runtime.species_row.names(), post_rk=False)
+            runtime.cold_start(driver.atmosphere.state.scalars, columns_from_prep(prepared))

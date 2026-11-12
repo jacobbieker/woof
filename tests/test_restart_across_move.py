@@ -253,6 +253,11 @@ def test_the_normalised_comparison_is_only_ever_a_widening():
     assert check(ident(adaptive), ident(live_run)), "policy must normalise out"
     assert not check(ident({**adaptive, "nz": 61}), ident(live_run)), (
         "a field that DOES describe the tree must still refuse")
+    chem = {"chem_sets": "radm2sorg", "nz": 49}
+    assert check(ident(chem), ident({**chem, "photdt": 0.0})), (
+        "a pre-photdt chem checkpoint is the photdt = 0 run")
+    assert not check(ident(chem), ident({**chem, "photdt": 30.0})), (
+        "a photdt that changes the run must still refuse")
 
 # ---------------------------------------------------------------------------
 # 3. the posture is a fixed string, quoted the same way everywhere

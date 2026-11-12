@@ -73,20 +73,22 @@ MONO_IMPLICIT_SLOT = "chem_mono_wwi"
 
 #: WRF-Chem's per-step order, as process keys (``chem/chem_driver.F``):
 #: emissions with plume rise (:818), optics on radiation steps (:926),
-#: deposition velocities then vertical mixing with deposition as its lower
-#: boundary (:1049), settling, the GOCART sulfur mechanism (:1242), aging
-#: (:1577), large-scale wet removal (:1620/:1689), then the Thompson
-#: coupling (an ArWen addition, DESIGN 6.7).
+#: photolysis (:964), deposition velocities then vertical mixing with
+#: deposition as its lower boundary (:1049), settling, the gas mechanism
+#: (GOCART sulfur or RADM2, :1242), the aerosol driver (GOCART aging or
+#: MADE/SORGAM, :1577), large-scale wet removal (:1620/:1689), then the
+#: Thompson coupling (an ArWen addition, DESIGN 6.7).
 CHEM_STEP_ORDER = (
     "emission.sfire",
     "plumerise.freitas", "emission.fire", "emission.dust",
-    "emission.seasalt", "emission.inventory",
+    "emission.seasalt", "emission.inventory", "emission.radm2",
     "optics.gocart",
-    "drydep.wesely", "drydep.gocart",
+    "photolysis.ftuv",
+    "drydep.wesely", "drydep.gocart", "drydep.sorgam",
     "mixing.vertmx",
     "settling.gocart",
-    "chem.sulfur",
-    "aging.gocart",
+    "chem.sulfur", "chem.radm2",
+    "aging.gocart", "aerosol.sorgam",
     "wetdep.ls",
     "coupling.thompson",
 )
