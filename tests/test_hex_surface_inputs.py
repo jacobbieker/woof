@@ -51,7 +51,7 @@ def test_every_scheme_that_reads_an_unstaged_input_is_refused_by_name():
             (_cfg(sf_surface_physics=1), "thermal_inertia"),
             (_cfg(sf_surface_physics=7), "landusef"),
             (_cfg(sf_urban_physics=1, use_wudapt_lcz=1), "LCZ"),
-            (_cfg(sf_surf_irr_scheme=1), "irrigation"),
+            (_cfg(sf_surf_irr_scheme=2, irr_ph=1), "irr_ph_field"),
             (_cfg(lightning_option=1), "lightning_inputs"),
             (_cfg(sf_surface_physics=3, mosaic_lu=1), "landusef")):
         problems = si.unstaged_problems(cfg)
@@ -259,7 +259,8 @@ def test_the_contract_table_lists_every_scheme():
     staged = {(row["scheme"], row["keyword"]) for row in rows if row["staged"]}
     assert staged == {("clm_lake", "lakemask"), ("clm_lake", "lake_mask_flag"),
                       ("clm_lake", "lake_depth"), ("clm_lake", "lake_depth_flag"),
-                      ("urban", "frc_urb2d"), ("noah_mosaic", "landusef")}
+                      ("urban", "frc_urb2d"), ("noah_mosaic", "landusef"),
+                      ("irrigation", "irrigation"), ("irrigation", "irr_ph_field")}
 
 
 def test_topo_wind_2_reads_var_from_the_static_by_the_superset_match():
@@ -429,3 +430,58 @@ def test_landusef_is_geogrids_pixel_share_per_cell():
     assert planes.shape == (21, 2) and planes.dtype == np.float32
     assert planes[9, 0] == np.float32(0.75) and planes[12, 0] == np.float32(0.25)
     assert not planes[:, 1].any() and receipt["cells_without_pixels"] == 1
+
+
+def test_irrigation_reads_the_percentage_and_a_phase_it_never_reads_at_irr_ph_0():
+    needs = si.required_inputs(_cfg(sf_surf_irr_scheme=2, irr_ph=0))
+    assert [(n.input.keyword, n.input.kind) for n in needs] == [
+        ("irrigation", "cell"), ("irr_ph_field", "derived")]
+    cfg = _cfg(sf_surf_irr_scheme=3)
+    sealed = si.seal(cfg, {"irrigation": np.float32([0, 37.5, 100]),
+                           "irr_ph_field": np.zeros(3, np.int32)}, n_columns=3)
+    assert sealed["irr_ph_field"].dtype == np.int32
+    with pytest.raises(ValueError, match="outside \\[0, 100\\]"):
+        si.seal(cfg, {"irrigation": np.float32([0, 120, 0]),
+                      "irr_ph_field": np.zeros(3, np.int32)}, n_columns=3)
+    with pytest.raises(ValueError, match="admits only \\[0\\]"):
+        si.seal(cfg, {"irrigation": np.float32([0, 1, 0]),
+                      "irr_ph_field": np.ones(3, np.int32)}, n_columns=3)
+
+
+def test_irrigation_is_geogrids_gcell_then_4pt_with_water_masked():
+    from woof.hex import surface_statics as ss
+
+    values = np.full((20, 20), 10.0)
+    values[0:5, 0:5] = 40.0
+    lat = np.array([40.02, 40.10, 40.18])
+    lon = np.array([-99.98, -99.85, -99.82])
+    centres = _xyz(lat, lon)
+    geometry = SimpleNamespace(n_cells=3, xyz=centres, vertex_xyz=centres)
+    assigner = _NearestAssigner(centres)
+    # cell 1 holds no pixel (all go elsewhere): it averages its 4 neighbours.
+    assigner.assign = lambda xyz: np.where(
+        np.argmax(np.asarray(xyz) @ centres.T, axis=1) == 1, 2,
+        np.argmax(np.asarray(xyz) @ centres.T, axis=1))
+    land = np.array([True, True, False])
+    out, receipt = ss.irrigation_cells(geometry, assigner, land, _Source(values))
+    assert out[0] > np.float32(10.0) and out[1] == np.float32(10.0)
+    assert out[2] == np.float32(0.0)  # water: masked, filled 0
+    assert receipt["cells_average_4pt"] == 1
+
+
+def test_the_four_point_fallback_averages_the_valid_points():
+    from woof.hex import surface_statics as ss
+
+    values = np.full((20, 20), 10.0)
+    values[10, 15] = np.nan          # one missing point in cell 0's patch
+    values[10, 16] = 30.0
+    lat = np.array([40.105, 40.0])
+    lon = np.array([-99.845, -99.99])
+    centres = _xyz(lat, lon)
+    geometry = SimpleNamespace(n_cells=2, xyz=centres, vertex_xyz=centres)
+    assigner = _NearestAssigner(centres)
+    assigner.assign = lambda xyz: np.ones(len(np.asarray(xyz).reshape(-1, 3)), int)
+    out, receipt = ss.irrigation_cells(geometry, assigner, np.array([True, False]),
+                                       _Source(values))
+    assert out[0] == np.float32((30.0 + 10.0 + 10.0) / 3)
+    assert receipt["cells_average_4pt"] == 1
