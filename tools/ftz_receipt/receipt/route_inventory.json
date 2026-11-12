@@ -9,13 +9,13 @@
     "cupy.ReductionKernel",
     "cupy.cuda.compiler.compile_using_nvrtc"
   ],
-  "site_count": 641,
+  "site_count": 642,
   "site_count_by_kind": {
     "cupy.ElementwiseKernel": 42,
     "cupy.RawKernel": 110,
     "cupy.RawModule": 293,
     "cupy.ReductionKernel": 16,
-    "cupy.cuda.compiler.compile_using_nvrtc": 180
+    "cupy.cuda.compiler.compile_using_nvrtc": 181
   },
   "site_count_by_surface": {
     "other": {
@@ -43,7 +43,7 @@
       "cupy.RawKernel": 23,
       "cupy.RawModule": 69,
       "cupy.ReductionKernel": 2,
-      "cupy.cuda.compiler.compile_using_nvrtc": 14
+      "cupy.cuda.compiler.compile_using_nvrtc": 15
     }
   },
   "distinct_literal_option_tuples": [
@@ -84,6 +84,10 @@
     [
       "--std=c++17",
       "--fmad=false"
+    ],
+    [
+      "--std=c++17",
+      "--fmad=true"
     ],
     [
       "--std=c++17",
@@ -5953,6 +5957,28 @@
       "text": "image, _ = compile_using_nvrtc(source, options, filename='ntu-native471.cu')"
     },
     {
+      "file": "tools/oracle_libm/grade_tanh.py",
+      "line": 152,
+      "column": 15,
+      "surface": "tools",
+      "constructor": "compile_using_nvrtc",
+      "constructor_kind": "cupy.cuda.compiler.compile_using_nvrtc",
+      "enclosing": "gpu",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "(\"--std=c++17\", \"--fmad=true\")",
+      "options": [
+        "--std=c++17",
+        "--fmad=true"
+      ],
+      "options_element_expressions": [
+        "\"--std=c++17\"",
+        "\"--fmad=true\""
+      ],
+      "options_are_literal": true,
+      "text": "image, _ = compile_using_nvrtc(source, (\"--std=c++17\", \"--fmad=true\"), None, \"cr_tanh_grade.cu\")"
+    },
+    {
       "file": "tools/relaxation_wrf461_oracle/validate.py",
       "line": 48,
       "column": 17,
@@ -9752,7 +9778,7 @@
     },
     {
       "file": "woof/hex/mpas_ice/thermal_solver_v842.py",
-      "line": 86,
+      "line": 85,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",
