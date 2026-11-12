@@ -149,7 +149,7 @@ def _owner(cp, col, mp="mp_thompson", scalars=("qv", "qr", "qg", "nr")):
     put("diag", "pressure_p", np.full_like(col["p"], 37.0))
     layout_fields = [dict(pool=p, pool_name=n) for p, n in
                      (("diag_physics", "u10"), ("diag_physics", "v10"), ("diag_physics", "t2m"),
-                      ("diag_physics", "hpbl"), ("diag", "refl10cm"))]
+                      ("diag_physics", "hpbl"), ("diag_physics", "refl10cm"))]
     names = list(scalars)
     stack = cp.asarray(np.stack([col[n] for n in names]))
     fields["state", "scalars"] = stack
@@ -176,7 +176,7 @@ def _feed(owner, inputs):
     owner.put("diag", "uReconstructMeridional", pad(inputs["v"]))
     for name in ("u10", "v10", "t2m", "hpbl"):
         owner.put("diag_physics", name, pad(inputs[name]))
-    owner.put("diag", "refl10cm", pad(inputs["refl"]))
+    owner.put("diag_physics", "refl10cm", pad(inputs["refl"]))
 
 
 @pytest.fixture
@@ -379,3 +379,30 @@ def test_resident_provider_folds_resets_and_carries_the_module(cp):
     provider.after_snapshot()
     assert calls == ["convective", "reset"] and not cp.asnumpy(module.acc["wspd10max"]).any()
     assert cp.asnumpy(module.acc["gust"]).any()               # not carried by the due stream
+
+
+def test_absent_scalars_are_not_read_as_the_last_row(cp):
+    """RegistryLayout's index_qg is -1 without graupel; slicing it would read the last scalar row."""
+    module, owner, utils, col = _module(cp)
+    owner.session.layout.indices["state", "index_qg"] = -1
+    assert module._scalar("qg") is None
+    _feed(owner, _step_inputs(np.random.default_rng(2)))
+    module.update()
+    assert not cp.asnumpy(module.acc["grpl_max"]).any()
+    assert cp.asnumpy(module.acc["wspd10max"]).any()
+
+
+def test_refl10cm_is_read_from_diag_physics_only(cp):
+    module, owner, utils, col = _module(cp)
+    inputs = _step_inputs(np.random.default_rng(4))
+    _feed(owner, inputs)
+    module.update()
+    got = cp.asnumpy(module.acc["refd_max"])
+    np.testing.assert_array_equal(got, np.maximum(inputs["refl"][0], np.float32(0)))   # maxima start at 0
+    assert got.any()
+    # a layout whose only refl10cm is in the diag pool (not where the Registry puts it) reads as absent
+    other, o_owner, _, _ = _module(cp)
+    o_owner.session.layout.fields[:] = [r for r in o_owner.session.layout.fields if r["pool_name"] != "refl10cm"]
+    _feed(o_owner, inputs)
+    other.update()
+    assert not cp.asnumpy(other.acc["refd_max"]).any()

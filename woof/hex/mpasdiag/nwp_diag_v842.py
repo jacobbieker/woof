@@ -50,7 +50,7 @@ Definitional differences from the WRF route:
   ``cal_helicity`` needs the structured grid's staggered metrics; the optional 0-1/0-2/0-3 km layers are
   woof.hex.uh_layers.
 * W_MEAN is not published: WRF averages w over eta 0.5-0.8 and MPAS has no eta coordinate.
-* REFD_MAX reads ``refl10cm`` (Thompson/WSM6 packages); without it the field stays 0, as WRF's does without
+* REFD_MAX reads ``refl10cm`` (``diag_physics``; Thompson/WSM6 packages); without it the field stays 0, as WRF's does without
   reflectivity.  HAIL_* run for Thompson (mp 8), Thompson-aerosol (28) and WSM6 (6) and stay 0 for the other
   schemes, WRF's no-PSD branch.
 * The 400 hPa mask uses the end-of-step state (WRF: the pressure built from the start-of-step state), as
@@ -201,7 +201,8 @@ class NwpDiagnosticsModule:
     def _scalar(self, name):
         key = ("state", "index_" + name)
         indices = self.owner.session.layout.indices
-        if key not in indices:
+        # RegistryLayout keeps index_<name> = -1 for a scalar the scheme does not carry.
+        if key not in indices or int(indices[key]) < 1:
             return None
         row = int(indices[key]) - 1
         return self.cp.ascontiguousarray(self._get("state", "scalars")[row, :self.nl, :self.nc],
@@ -232,8 +233,8 @@ class NwpDiagnosticsModule:
             (p, alt, alt if qv is None else qv, i32(qv is not None), self.ph, phb, i32(1),
              self.fnm, self.fnp, self.rho, self.below, self.rho, i32(0), i32(nl), i32(n)))
         refl = self.zero2d
-        if self._has("diag", "refl10cm"):
-            refl = self._levels("diag", "refl10cm", 1)[0]
+        if self._has("diag_physics", "refl10cm"):
+            refl = self._levels("diag_physics", "refl10cm", 1)[0]
         acc, scratch = self.acc, self.scratch
         # U10MAX/V10MAX/GUST first: they follow the 10 m peak of their own running WSPD copy, so the
         # published WSPD10MAX stays the nwp window's word.
