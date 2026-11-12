@@ -77,6 +77,8 @@ class ResidentOutputDiagnostics:
     authoritative resident pool allocations keep their existing owned extent.
     """
     produced = PRODUCED
+    #: WRF's nwp_diagnostics maxima (mpasdiag.nwp_diag_v842); built by bind() only with config_nwp_diagnostics.
+    nwp = None
     #: The running maxima/accumulators of the convective module (``accumulates``).
     convective_maxima = MAXIMA
     #: Pools the diagnostic modules read.
@@ -103,8 +105,6 @@ class ResidentOutputDiagnostics:
         self._fields, self._fields_state = {}, None
         # A checkpoint continuation's running accumulators (resume_accumulators), installed at step 0.
         self._resume = None
-        # WRF's nwp_diagnostics maxima (mpasdiag.nwp_diag_v842), only with config_nwp_diagnostics.
-        self.nwp = None
 
     def accumulator_state(self):
         """The convective running accumulators' words, for a checkpoint that a continuation resumes."""
