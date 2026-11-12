@@ -541,6 +541,7 @@
       },
       "windfarm_opt": {
         "inactive_values": ["0"],
+        "engine_field": false,
         "reason": "windfarm_opt is WRF's &physics switch for the legacy turbine list; WOOF's config has no such field and hex places turbines through wind_farm_scheme",
         "follow_up": "wind_farm_scheme=fitch_wrf with wind_farms=FILE"
       },

@@ -57,7 +57,7 @@ def test_each_silent_no_op_is_refused_by_name(overrides, knob, reason, alternati
 def test_off_values_are_not_refused():
     for overrides in ({"ifire": 0}, {"slope_rad": 0, "topo_shading": 0}, {"lightning_option": 0},
                       {"sf_surf_irr_scheme": 0}, {"windturbines_spec": "none"},
-                      {"wind_farm_scheme": "off"},
+                      {"windfarm_opt": 0}, {"wind_farm_scheme": "off"},
                       {"wind_farm_scheme": "fitch_wrf", "wind_farms": "off"}):
         try:
             ps.resolve_physics(None, overrides)
@@ -117,3 +117,11 @@ def test_the_cli_refuses_a_named_setting(capsys):
     assert report["resolved"] is False
     assert [(item["option"], item["follow_up"]) for item in report["refusals"]] == [
         ("slope_rad", "slope_rad=0")]
+
+
+def test_an_explicit_off_windfarm_opt_resolves():
+    # CodeRabbit: windfarm_opt has no RunConfig field, so its off value must not
+    # reach the engine path, which rejects unknown names.
+    resolved = ps.resolve_physics(None, {"windfarm_opt": 0})
+    assert resolved.seam in ("engine", "frozen")
+    assert "windfarm_opt" not in resolved.settings

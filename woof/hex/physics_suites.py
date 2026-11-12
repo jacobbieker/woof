@@ -584,6 +584,13 @@ def resolve_physics(
                 table["refused_settings"]["settings"][key], value):
             row_ = table["refused_settings"]["settings"][key]
             refusals.append(OptionRefusal(key, value, str(row_["reason"]), str(row_["follow_up"])))
+        elif key in table["refused_settings"]["settings"] and not table[
+                "refused_settings"]["settings"][key].get("engine_field", True):
+            # An explicit off value of a key WOOF's config has no field for
+            # (windfarm_opt=0) asks for nothing; the engine path would reject
+            # the unknown name, so it is recorded and not handed on.  Off
+            # values of real RunConfig fields go on to the engine as before.
+            recorded[key] = value
         else:
             # An engine setting: typed and bounded by the registry's own
             # parameter row when it has one; otherwise handed to the engine,
