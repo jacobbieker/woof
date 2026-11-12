@@ -1,0 +1,8 @@
+{
+  "schema": "gpuwm.chem.set.v1",
+  "name": "radm2",
+  "description": "WRF-Chem's RADM2 gas-phase package, all 42 gases (registry.chem:3929): anthropogenic emissions (emiss_opt = 3), Fast-TUV photolysis (phot_opt = 3), the RADM2 QSSA mechanism, vertical mixing and dry deposition.",
+  "wrf_chem_opt": 1,
+  "wrf_tracer_opt": null,
+  "provenance": "registry.chem:3929 package radm2 chem_opt==1"
+}

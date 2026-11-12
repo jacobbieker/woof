@@ -142,3 +142,85 @@ def launch_ftuv(fields, *, chem_opt, julday, gmt, curr_secs, aer_ra_feedback=0,
             what = "workspace overrun in the routine at" if line < 0 else "fatal at"
             raise RuntimeError(f"Fast-TUV {what} module_ftuv_*.F line {abs(line)}")
     return {name: out[k] for k, name in enumerate(PHOTOLYSIS)}
+
+
+# ---------------------------------------------------------------------------
+# The process (``photolysis.ftuv``): the chem driver's view.
+# ---------------------------------------------------------------------------
+#
+# Column-based: launch_ftuv batches columns over ny*nx and reads latitude and
+# longitude per column, so the hex route can hand (nz, 1, ncells) views.
+
+from woof.core.chem_context import ChemAllocation  # noqa: E402
+
+KEY = "photolysis.ftuv"
+#: Photolysis moves no mass; the bucket is never touched.
+LEDGER = "chemistry"
+KERNEL_MODULES = ("chem_ftuv",)
+REQUIRES = ("t_phy", "p_phy", "rho", "qv", "p8w", "t8w", "z_at_w", "xlat",
+            "xlong")
+#: The aerosol process whose rows make the package RADM2SORG (chem_opt = 2).
+SORGAM_KEY = "aerosol.sorgam"
+#: WRF's ph_<name> state (Registry state, restart 'r'): rewritten on
+#: photolysis steps and read by the mechanism on every chem step between,
+#: so a restart carries it.
+ALLOCATES = tuple(
+    ChemAllocation(f"ph_{name}", "3d", units="min-1",
+                   description=f"photolysis rate ph_{name} "
+                               "(photolysis_driver.F, Fast-TUV)")
+    for name in PHOTOLYSIS)
+
+
+def rows(table):
+    return table.rows_for(KEY)
+
+
+def chem_opt_for(table) -> int:
+    """WRF's chem_opt for the active RADM2 package: 2 (RADM2SORG) when the
+    SORGAM rows are active, else 1 (RADM2)."""
+    return 2 if table.rows_for(SORGAM_KEY) else 1
+
+
+def refusal(cfg):
+    if int(getattr(cfg, "aer_ra_feedback", 0)) != 0:
+        return ("aer_ra_feedback = 1 hands Fast-TUV the SORGAM aerosol optical "
+                "depths (ftuv_driver), which no ported optics process computes "
+                "for these rows yet")
+    from woof.chem_table import load
+
+    table = load(cfg)
+    if table is not None and len(rows(table)) != 1:
+        return ("photolysis.ftuv reads one ozone row (the column the TUV "
+                f"radiative transfer sees); {[r.name for r in rows(table)]} "
+                "name it")
+    return None
+
+
+def init(ctx):
+    reason = refusal(ctx.cfg)
+    if reason:
+        raise ValueError(reason)
+
+
+def step(ctx, dt, ktau):
+    from woof.core.chem_radm2 import _wrf_due
+    import cupy as cp
+
+    if not _wrf_due(ktau, ctx.clock.curr_secs, dt,
+                    getattr(ctx.cfg, "photdt", 0.0)):
+        return
+    (o3,) = rows(ctx.table)
+    t = ctx.met("t_phy")
+    qc = ctx.met("qc") if ctx.has("qc") else cp.zeros_like(t)
+    fields = {"t_phy": t, "p_phy": ctx.met("p_phy"), "rho_phy": ctx.met("rho"),
+              "qv": ctx.met("qv"), "qc": qc, "o3": ctx.field(o3),
+              "p8w": ctx.met("p8w"), "t8w": ctx.met("t8w"),
+              "z_at_w": ctx.met("z_at_w"),
+              "xlat": cp.ascontiguousarray(ctx.met("xlat"), dtype=cp.float32),
+              "xlong": cp.ascontiguousarray(ctx.met("xlong"), dtype=cp.float32)}
+    clock = ctx.clock
+    out = launch_ftuv(fields, chem_opt=chem_opt_for(ctx.table),
+                      julday=int(clock.julday), gmt=float(clock.gmt),
+                      curr_secs=float(clock.curr_secs))
+    for name in PHOTOLYSIS:
+        ctx.diag[f"ph_{name}"][...] = out[name]

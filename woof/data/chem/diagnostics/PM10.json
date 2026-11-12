@@ -4,6 +4,13 @@
   "units": "ug m-3",
   "description": "PM10 table diagnostic",
   "kind": "term_sum_3d",
+  "sets": [
+    "dust",
+    "gocart_lite",
+    "gocart_primary",
+    "gocart_simple",
+    "smoke"
+  ],
   "terms": [
     {
       "species": [
@@ -148,5 +155,5 @@
   ],
   "divide_by_alt": true,
   "column_scale": 1,
-  "provenance": "WRF v4.7.1 sum_pm_gocart and DESIGN section 8; the smoke term is WOOF's (declared in its term)"
+  "provenance": "WRF v4.7.1 sum_pm_gocart and DESIGN section 8; the smoke term is WOOF's (declared in its term); sets: the packages whose PM is this term sum (the RADM2SORG package's PM2_5_DRY and PM10 are sum_pm_sorgam's, written by aerosol.sorgam, and RADM2 alone writes none)"
 }
