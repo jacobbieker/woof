@@ -109,6 +109,16 @@ def step(ctx, dt, ktau):
         return
     f=ctx.physics_fields
     inputs={name:f.get(name) for name in ('anth_co_kts','fire_co_k1','anth_pm25_pair','anth_pm25')}
+    # An emission process that owns WRF's emis_ant publishes its level-1
+    # planes in ctx.diag under the same names (emission.radm2:
+    # dry_dep_driver.F:672-690 reads e_co, e_pm25i and e_pm25j).
+    for name in ('anth_co_kts','anth_pm25'):
+        if inputs[name] is None and getattr(ctx,'diag',None):
+            inputs[name]=ctx.diag.get(name)
+    if inputs['anth_pm25_pair'] is None and getattr(ctx,'diag',None):
+        pair=(ctx.diag.get('anth_pm25i_kts'),ctx.diag.get('anth_pm25j_kts'))
+        if pair[0] is not None and pair[1] is not None:
+            inputs['anth_pm25_pair']=pair
     inputs['sf_urban_physics']=getattr(ctx.cfg,'sf_urban_physics',0)
     met={name:ctx.met(name) for name in REQUIRES}
     if getattr(ctx.cfg,'enh_vermix',False):
@@ -120,7 +130,11 @@ def step(ctx, dt, ktau):
                                            ctx.met('t_phy'),ctx.met('p_phy'))
     for index,row in enumerate(rows(ctx.table)):
         chem=ctx.field(row);vel=ctx.ddvel[ctx.row_index(row)]
-        if smoke_vd is not None and row.phase=='aerosol' and row.drydep is None:
+        # The fork's smoke velocity serves aerosol rows no deposition
+        # process owns (a drydep.sorgam row has its own velocity in ddvel).
+        if (smoke_vd is not None and row.phase=='aerosol' and row.drydep is None
+                and not any(key.startswith('drydep.') and row.acts_in(key,ctx.table.sets)
+                            for key in row.processes)):
             vel=smoke_vd
         accum=ctx.diag['vertmx_deposited'][index]
         launch_vertmx(chem,met['alt'],met['z_at_w'],met['z'],met['dz8w'],met['exch_h'],vel,dt,accum,
