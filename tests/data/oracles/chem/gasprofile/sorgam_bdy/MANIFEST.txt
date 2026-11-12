@@ -1,0 +1,12 @@
+z f4 1 668
+t f4 1 668
+p f4 1 668
+pb f4 1 668
+alt f4 1 668
+convfac f4 1 668
+chem f4 2 668 38
+p_so4aj i4 0
+p_corn i4 0
+p_sulf i4 0
+aer_bc_default i4 0
+aer_bc_pnnl i4 0
