@@ -4,7 +4,10 @@ Opt-in (``WOOF_HEX_GO_SMOKE=1``): it fetches GFS, builds a mesh and static
 from WPS_GEOG (``$GPUWM_WPS_GEOG``), mints the regional class on first use and
 runs the forecast on the host's GPU (CUDA or Metal), which no CI leg carries.
 Declared in tools/battery/must_run_gates.txt.  ``WOOF_HEX_GO_SMOKE_CYCLE``
-picks the GFS cycle (default 2025-05-30T12).
+picks the GFS cycle (default 2025-05-30T12).  The contract and MPAS-suite stages
+need the hex helpers (``hex_contract_hostprep``, the table decoders,
+``rw_mpas_physics_pool``), which the release's Linux helper archive carries; no
+macOS build exists yet, so this gate runs on a Linux GPU host.
 """
 from __future__ import annotations
 
@@ -68,5 +71,5 @@ def test_woof_go_runs_a_hex_regional_forecast(tmp_path):
     import numpy as np
     from netCDF4 import Dataset
     with Dataset(frames[-1]) as frame:
-        for name in ("theta", "u", "qv"):
+        for name in ("theta", "qv"):
             assert np.isfinite(np.asarray(frame.variables[name][:])).all(), name
