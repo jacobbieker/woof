@@ -27,5 +27,6 @@ def test_accumulate_scaled_leaves_unsupported_operands_to_the_caller():
     a = cp.ones((4, 6), dtype=cp.float32)
     assert not accumulate_scaled(a, cp.ones((4, 6), dtype=cp.float64), np.float32(2))
     assert not accumulate_scaled(a[:, ::2], cp.ones((4, 3), dtype=cp.float32), np.float32(2))
-    assert not accumulate_scaled(a[:, 1:], a[:, :-1], np.float32(2))
+    flat = a.reshape(-1)
+    assert not accumulate_scaled(flat[1:], flat[:-1], np.float32(2))   # contiguous, overlapping
     assert bool((a == 1).all())
