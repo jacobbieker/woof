@@ -65,9 +65,10 @@ def field_definition(name: str) -> dict[str, Any]:
 def resolve(groups: Mapping[str, Mapping[str, Any]]) -> bool:
     """The option from the namelist's &diagnostics group (false when absent)."""
     supplied = {str(k).casefold(): v for k, v in groups.get(GROUP, {}).items()}
-    unknown = sorted(set(supplied) - {OPTION})
+    from woof.hex.mpasdiag.nwp_diag_v842 import OPTION as NWP_OPTION
+    unknown = sorted(set(supplied) - {OPTION, NWP_OPTION})
     if unknown:
-        raise ValueError(f"&{GROUP} has no option {unknown[0]!r}; its one (WOOF) option is {OPTION}")
+        raise ValueError(f"&{GROUP} has no option {unknown[0]!r}; its (WOOF) options are {OPTION} and {NWP_OPTION}")
     value = supplied.get(OPTION, False)
     if isinstance(value, str) and value.strip().strip(".").casefold() in ("true", "t", "false", "f"):
         value = value.strip().strip(".").casefold() in ("true", "t")

@@ -108,5 +108,654 @@
     "dvj": 0.126,
     "dratio": 1.9783283472061157,
     "scpr23": 1.42613685131073
+  },
+  "sulf": {
+    "arm": "particle",
+    "from": {
+      "hstar": "chem/module_dep_simple.F:1952",
+      "dhr": "chem/module_dep_simple.F:1954",
+      "f0": "chem/module_dep_simple.F:1955",
+      "dvj": "chem/module_dep_simple.F:1956",
+      "dratio": "chem/module_dep_simple.F:3482-3484",
+      "arm": "chem/module_dep_simple.F:1437-1447,1613",
+      "scpr23": "chem/module_dep_simple.F:3482-3488"
+    },
+    "hstar": 0.0,
+    "dhr": 0.0,
+    "f0": 0.0,
+    "dvj": 99.0,
+    "dratio": 0.002517872489988804,
+    "scpr23": 0.016748838126659393
+  },
+  "no": {
+    "arm": "general",
+    "from": {
+      "hstar": "chem/module_dep_simple.F:2185",
+      "dhr": "chem/module_dep_simple.F:2461",
+      "f0": "chem/module_dep_simple.F:2669",
+      "dvj": "chem/module_dep_simple.F:2887",
+      "dratio": "chem/module_dep_simple.F:3482-3484",
+      "arm": "chem/module_dep_simple.F:965-1038",
+      "scpr23": "chem/module_dep_simple.F:3482-3488"
+    },
+    "hstar": 0.0019,
+    "dhr": 1480.0,
+    "f0": 0.0,
+    "dvj": 0.183,
+    "dratio": 1.3621277809143066,
+    "scpr23": 1.1120069026947021
+  },
+  "h2o2": {
+    "arm": "general",
+    "from": {
+      "hstar": "chem/module_dep_simple.F:2178",
+      "dhr": "chem/module_dep_simple.F:2454",
+      "f0": "chem/module_dep_simple.F:2677",
+      "dvj": "chem/module_dep_simple.F:2881",
+      "dratio": "chem/module_dep_simple.F:3482-3484",
+      "arm": "chem/module_dep_simple.F:965-1038",
+      "scpr23": "chem/module_dep_simple.F:3482-3488"
+    },
+    "hstar": 74500.0,
+    "dhr": 6615.0,
+    "f0": 1.0,
+    "dvj": 0.171,
+    "dratio": 1.4577157497406006,
+    "scpr23": 1.1634403467178345
+  },
+  "ald": {
+    "arm": "general",
+    "from": {
+      "hstar": "chem/module_dep_simple.F:2191",
+      "dhr": "chem/module_dep_simple.F:2468",
+      "f0": "chem/module_dep_simple.F:2679",
+      "dvj": "chem/module_dep_simple.F:2895",
+      "dratio": "chem/module_dep_simple.F:3482-3484",
+      "arm": "chem/module_dep_simple.F:965-1038",
+      "scpr23": "chem/module_dep_simple.F:3482-3488"
+    },
+    "hstar": 11.4,
+    "dhr": 6266.0,
+    "f0": 0.0,
+    "dvj": 0.151,
+    "dratio": 1.6507906913757324,
+    "scpr23": 1.264028787612915
+  },
+  "hcho": {
+    "arm": "general",
+    "from": {
+      "hstar": "chem/module_dep_simple.F:2179",
+      "dhr": "chem/module_dep_simple.F:2455",
+      "f0": "chem/module_dep_simple.F:2665",
+      "dvj": "chem/module_dep_simple.F:2882",
+      "dratio": "chem/module_dep_simple.F:3482-3484",
+      "arm": "chem/module_dep_simple.F:965-1038",
+      "scpr23": "chem/module_dep_simple.F:3482-3488"
+    },
+    "hstar": 2970.0,
+    "dhr": 7190.0,
+    "f0": 0.0,
+    "dvj": 0.183,
+    "dratio": 1.3621277809143066,
+    "scpr23": 1.1120069026947021
+  },
+  "op1": {
+    "arm": "general",
+    "from": {
+      "hstar": "chem/module_dep_simple.F:2192",
+      "dhr": "chem/module_dep_simple.F:2469",
+      "f0": "chem/module_dep_simple.F:2680",
+      "dvj": "chem/module_dep_simple.F:2896",
+      "dratio": "chem/module_dep_simple.F:3482-3484",
+      "arm": "chem/module_dep_simple.F:965-1038",
+      "scpr23": "chem/module_dep_simple.F:3482-3488"
+    },
+    "hstar": 221.0,
+    "dhr": 5607.0,
+    "f0": 0.1,
+    "dvj": 0.144,
+    "dratio": 1.7310374975204468,
+    "scpr23": 1.3046677112579346
+  },
+  "op2": {
+    "arm": "general",
+    "from": {
+      "hstar": "chem/module_dep_simple.F:2193",
+      "dhr": "chem/module_dep_simple.F:2470",
+      "f0": "chem/module_dep_simple.F:2681",
+      "dvj": "chem/module_dep_simple.F:2897",
+      "dratio": "chem/module_dep_simple.F:3482-3484",
+      "arm": "chem/module_dep_simple.F:965-1038",
+      "scpr23": "chem/module_dep_simple.F:3482-3488"
+    },
+    "hstar": 1680000.0,
+    "dhr": 10240.0,
+    "f0": 0.1,
+    "dvj": 0.127,
+    "dratio": 1.9627509117126465,
+    "scpr23": 1.4186406135559082
+  },
+  "paa": {
+    "arm": "general",
+    "from": {
+      "hstar": "chem/module_dep_simple.F:2181",
+      "dhr": "chem/module_dep_simple.F:2458",
+      "f0": "chem/module_dep_simple.F:2682",
+      "dvj": "chem/module_dep_simple.F:2883",
+      "dratio": "chem/module_dep_simple.F:3482-3484",
+      "arm": "chem/module_dep_simple.F:965-1038",
+      "scpr23": "chem/module_dep_simple.F:3482-3488"
+    },
+    "hstar": 473.0,
+    "dhr": 6170.0,
+    "f0": 0.1,
+    "dvj": 0.115,
+    "dratio": 2.167559862136841,
+    "scpr23": 1.5156874656677246
+  },
+  "ora1": {
+    "arm": "general",
+    "from": {
+      "hstar": "chem/module_dep_simple.F:2210",
+      "dhr": "chem/module_dep_simple.F:2487",
+      "f0": "chem/module_dep_simple.F:2699",
+      "dvj": "chem/module_dep_simple.F:2914",
+      "dratio": "chem/module_dep_simple.F:3482-3484",
+      "arm": "chem/module_dep_simple.F:965-1038",
+      "scpr23": "chem/module_dep_simple.F:3482-3488"
+    },
+    "hstar": 9850000.0,
+    "dhr": 5716.0,
+    "f0": 0.0,
+    "dvj": 0.153,
+    "dratio": 1.629211664199829,
+    "scpr23": 1.2529890537261963
+  },
+  "ora2": {
+    "arm": "general",
+    "from": {
+      "hstar": "chem/module_dep_simple.F:2211",
+      "dhr": "chem/module_dep_simple.F:2488",
+      "f0": "chem/module_dep_simple.F:2700",
+      "dvj": "chem/module_dep_simple.F:2915",
+      "dratio": "chem/module_dep_simple.F:3482-3484",
+      "arm": "chem/module_dep_simple.F:965-1038",
+      "scpr23": "chem/module_dep_simple.F:3482-3488"
+    },
+    "hstar": 963000.0,
+    "dhr": 8374.0,
+    "f0": 0.0,
+    "dvj": 0.124,
+    "dratio": 2.010236978530884,
+    "scpr23": 1.441430687904358
+  },
+  "n2o5": {
+    "arm": "general",
+    "from": {
+      "hstar": "chem/module_dep_simple.F:2213",
+      "dhr": "chem/module_dep_simple.F:2490",
+      "f0": "chem/module_dep_simple.F:2702",
+      "dvj": "chem/module_dep_simple.F:2917",
+      "dratio": "chem/module_dep_simple.F:3482-3484",
+      "arm": "chem/module_dep_simple.F:965-1038",
+      "scpr23": "chem/module_dep_simple.F:3482-3488"
+    },
+    "hstar": 10000000000.0,
+    "dhr": 0.0,
+    "f0": 1.0,
+    "dvj": 0.11,
+    "dratio": 2.266085386276245,
+    "scpr23": 1.5612764358520508
+  },
+  "no3": {
+    "arm": "general",
+    "from": {
+      "hstar": "chem/module_dep_simple.F:2189",
+      "dhr": "chem/module_dep_simple.F:2465",
+      "f0": "chem/module_dep_simple.F:2675",
+      "dvj": "chem/module_dep_simple.F:2892",
+      "dratio": "chem/module_dep_simple.F:3482-3484",
+      "arm": "chem/module_dep_simple.F:965-1038",
+      "scpr23": "chem/module_dep_simple.F:3482-3488"
+    },
+    "hstar": 15.0,
+    "dhr": 0.0,
+    "f0": 1.0,
+    "dvj": 0.127,
+    "dratio": 1.9627509117126465,
+    "scpr23": 1.4186406135559082
+  },
+  "pan": {
+    "arm": "general",
+    "from": {
+      "hstar": "chem/module_dep_simple.F:2180",
+      "dhr": "chem/module_dep_simple.F:2456",
+      "f0": "chem/module_dep_simple.F:2670",
+      "dvj": "chem/module_dep_simple.F:2888",
+      "dratio": "chem/module_dep_simple.F:3482-3484",
+      "arm": "chem/module_dep_simple.F:965-1038",
+      "scpr23": "chem/module_dep_simple.F:3482-3488"
+    },
+    "hstar": 2.97,
+    "dhr": 5760.0,
+    "f0": 0.1,
+    "dvj": 0.091,
+    "dratio": 2.7392241954803467,
+    "scpr23": 1.7716611623764038
+  },
+  "hc3": {
+    "arm": "general",
+    "from": {
+      "hstar": "chem/module_dep_simple.F:2200",
+      "dhr": "chem/module_dep_simple.F:2477",
+      "f0": "chem/module_dep_simple.F:2689",
+      "dvj": "chem/module_dep_simple.F:2904",
+      "dratio": "chem/module_dep_simple.F:3482-3484",
+      "arm": "chem/module_dep_simple.F:965-1038",
+      "scpr23": "chem/module_dep_simple.F:3482-3488"
+    },
+    "hstar": 0.00142,
+    "dhr": 0.0,
+    "f0": 0.0,
+    "dvj": 0.151,
+    "dratio": 1.6507906913757324,
+    "scpr23": 1.264028787612915
+  },
+  "hc5": {
+    "arm": "general",
+    "from": {
+      "hstar": "chem/module_dep_simple.F:2201",
+      "dhr": "chem/module_dep_simple.F:2478",
+      "f0": "chem/module_dep_simple.F:2690",
+      "dvj": "chem/module_dep_simple.F:2905",
+      "dratio": "chem/module_dep_simple.F:3482-3484",
+      "arm": "chem/module_dep_simple.F:965-1038",
+      "scpr23": "chem/module_dep_simple.F:3482-3488"
+    },
+    "hstar": 0.00113,
+    "dhr": 0.0,
+    "f0": 0.0,
+    "dvj": 0.118,
+    "dratio": 2.112452507019043,
+    "scpr23": 1.4898877143859863
+  },
+  "hc8": {
+    "arm": "general",
+    "from": {
+      "hstar": "chem/module_dep_simple.F:2202",
+      "dhr": "chem/module_dep_simple.F:2479",
+      "f0": "chem/module_dep_simple.F:2691",
+      "dvj": "chem/module_dep_simple.F:2906",
+      "dratio": "chem/module_dep_simple.F:3482-3484",
+      "arm": "chem/module_dep_simple.F:965-1038",
+      "scpr23": "chem/module_dep_simple.F:3482-3488"
+    },
+    "hstar": 0.00142,
+    "dhr": 0.0,
+    "f0": 0.0,
+    "dvj": 0.094,
+    "dratio": 2.6518020629882812,
+    "scpr23": 1.7337627410888672
+  },
+  "eth": {
+    "arm": "general",
+    "from": {
+      "hstar": "chem/module_dep_simple.F:2199",
+      "dhr": "chem/module_dep_simple.F:2476",
+      "f0": "chem/module_dep_simple.F:2688",
+      "dvj": "chem/module_dep_simple.F:2903",
+      "dratio": "chem/module_dep_simple.F:3482-3484",
+      "arm": "chem/module_dep_simple.F:965-1038",
+      "scpr23": "chem/module_dep_simple.F:3482-3488"
+    },
+    "hstar": 0.002,
+    "dhr": 0.0,
+    "f0": 0.0,
+    "dvj": 0.183,
+    "dratio": 1.3621277809143066,
+    "scpr23": 1.1120069026947021
+  },
+  "ol2": {
+    "arm": "general",
+    "from": {
+      "hstar": "chem/module_dep_simple.F:2214",
+      "dhr": "chem/module_dep_simple.F:2491",
+      "f0": "chem/module_dep_simple.F:2703",
+      "dvj": "chem/module_dep_simple.F:2920",
+      "dratio": "chem/module_dep_simple.F:3482-3484",
+      "arm": "chem/module_dep_simple.F:965-1038",
+      "scpr23": "chem/module_dep_simple.F:3482-3488"
+    },
+    "hstar": 0.00467,
+    "dhr": 0.0,
+    "f0": 0.0,
+    "dvj": 0.189,
+    "dratio": 1.3188856840133667,
+    "scpr23": 1.088346004486084
+  },
+  "olt": {
+    "arm": "general",
+    "from": {
+      "hstar": "chem/module_dep_simple.F:2203",
+      "dhr": "chem/module_dep_simple.F:2480",
+      "f0": "chem/module_dep_simple.F:2692",
+      "dvj": "chem/module_dep_simple.F:2907",
+      "dratio": "chem/module_dep_simple.F:3482-3484",
+      "arm": "chem/module_dep_simple.F:965-1038",
+      "scpr23": "chem/module_dep_simple.F:3482-3488"
+    },
+    "hstar": 0.00476,
+    "dhr": 0.0,
+    "f0": 0.0,
+    "dvj": 0.154,
+    "dratio": 1.6186323165893555,
+    "scpr23": 1.2475589513778687
+  },
+  "oli": {
+    "arm": "general",
+    "from": {
+      "hstar": "chem/module_dep_simple.F:2204",
+      "dhr": "chem/module_dep_simple.F:2481",
+      "f0": "chem/module_dep_simple.F:2693",
+      "dvj": "chem/module_dep_simple.F:2908",
+      "dratio": "chem/module_dep_simple.F:3482-3484",
+      "arm": "chem/module_dep_simple.F:965-1038",
+      "scpr23": "chem/module_dep_simple.F:3482-3488"
+    },
+    "hstar": 0.00135,
+    "dhr": 0.0,
+    "f0": 0.0,
+    "dvj": 0.121,
+    "dratio": 2.060077428817749,
+    "scpr23": 1.4651585817337036
+  },
+  "tol": {
+    "arm": "general",
+    "from": {
+      "hstar": "chem/module_dep_simple.F:2205",
+      "dhr": "chem/module_dep_simple.F:2482",
+      "f0": "chem/module_dep_simple.F:2694",
+      "dvj": "chem/module_dep_simple.F:2909",
+      "dratio": "chem/module_dep_simple.F:3482-3484",
+      "arm": "chem/module_dep_simple.F:965-1038",
+      "scpr23": "chem/module_dep_simple.F:3482-3488"
+    },
+    "hstar": 0.151,
+    "dhr": 0.0,
+    "f0": 0.0,
+    "dvj": 0.104,
+    "dratio": 2.3968210220336914,
+    "scpr23": 1.6207623481750488
+  },
+  "xyl": {
+    "arm": "general",
+    "from": {
+      "hstar": "chem/module_dep_simple.F:2207",
+      "dhr": "chem/module_dep_simple.F:2484",
+      "f0": "chem/module_dep_simple.F:2696",
+      "dvj": "chem/module_dep_simple.F:2911",
+      "dratio": "chem/module_dep_simple.F:3482-3484",
+      "arm": "chem/module_dep_simple.F:965-1038",
+      "scpr23": "chem/module_dep_simple.F:3482-3488"
+    },
+    "hstar": 0.145,
+    "dhr": 0.0,
+    "f0": 0.0,
+    "dvj": 0.097,
+    "dratio": 2.5697875022888184,
+    "scpr23": 1.6978281736373901
+  },
+  "aco3": {
+    "arm": "general",
+    "from": {
+      "hstar": "chem/module_dep_simple.F:2186",
+      "dhr": "chem/module_dep_simple.F:2462",
+      "f0": "chem/module_dep_simple.F:2672",
+      "dvj": "chem/module_dep_simple.F:2889",
+      "dratio": "chem/module_dep_simple.F:3482-3484",
+      "arm": "chem/module_dep_simple.F:965-1038",
+      "scpr23": "chem/module_dep_simple.F:3482-3488"
+    },
+    "hstar": 11.4,
+    "dhr": 6266.0,
+    "f0": 1.0,
+    "dvj": 0.115,
+    "dratio": 2.167559862136841,
+    "scpr23": 1.5156874656677246
+  },
+  "tpan": {
+    "arm": "general",
+    "from": {
+      "hstar": "chem/module_dep_simple.F:2187",
+      "dhr": "chem/module_dep_simple.F:2463",
+      "f0": "chem/module_dep_simple.F:2673",
+      "dvj": "chem/module_dep_simple.F:2890",
+      "dratio": "chem/module_dep_simple.F:3482-3484",
+      "arm": "chem/module_dep_simple.F:965-1038",
+      "scpr23": "chem/module_dep_simple.F:3482-3488"
+    },
+    "hstar": 2.97,
+    "dhr": 5760.0,
+    "f0": 0.1,
+    "dvj": 0.082,
+    "dratio": 3.039870500564575,
+    "scpr23": 1.8990322351455688
+  },
+  "hono": {
+    "arm": "general",
+    "from": {
+      "hstar": "chem/module_dep_simple.F:2188",
+      "dhr": "chem/module_dep_simple.F:2464",
+      "f0": "chem/module_dep_simple.F:2674",
+      "dvj": "chem/module_dep_simple.F:2891",
+      "dratio": "chem/module_dep_simple.F:3482-3484",
+      "arm": "chem/module_dep_simple.F:965-1038",
+      "scpr23": "chem/module_dep_simple.F:3482-3488"
+    },
+    "hstar": 347000.0,
+    "dhr": 3775.0,
+    "f0": 0.1,
+    "dvj": 0.153,
+    "dratio": 1.629211664199829,
+    "scpr23": 1.2529890537261963
+  },
+  "hno4": {
+    "arm": "general",
+    "from": {
+      "hstar": "chem/module_dep_simple.F:2190",
+      "dhr": "chem/module_dep_simple.F:2466",
+      "f0": "chem/module_dep_simple.F:2676",
+      "dvj": "chem/module_dep_simple.F:2893",
+      "dratio": "chem/module_dep_simple.F:3482-3484",
+      "arm": "chem/module_dep_simple.F:965-1038",
+      "scpr23": "chem/module_dep_simple.F:3482-3488"
+    },
+    "hstar": 20000000000000.0,
+    "dhr": 0.0,
+    "f0": 0.1,
+    "dvj": 0.113,
+    "dratio": 2.2059237957000732,
+    "scpr23": 1.5335193872451782
+  },
+  "ket": {
+    "arm": "general",
+    "from": {
+      "hstar": "chem/module_dep_simple.F:2194",
+      "dhr": "chem/module_dep_simple.F:2471",
+      "f0": "chem/module_dep_simple.F:2683",
+      "dvj": "chem/module_dep_simple.F:2898",
+      "dratio": "chem/module_dep_simple.F:3482-3484",
+      "arm": "chem/module_dep_simple.F:965-1038",
+      "scpr23": "chem/module_dep_simple.F:3482-3488"
+    },
+    "hstar": 33.0,
+    "dhr": 5773.0,
+    "f0": 0.0,
+    "dvj": 0.118,
+    "dratio": 2.112452507019043,
+    "scpr23": 1.4898877143859863
+  },
+  "gly": {
+    "arm": "general",
+    "from": {
+      "hstar": "chem/module_dep_simple.F:2195",
+      "dhr": "chem/module_dep_simple.F:2472",
+      "f0": "chem/module_dep_simple.F:2684",
+      "dvj": "chem/module_dep_simple.F:2899",
+      "dratio": "chem/module_dep_simple.F:3482-3484",
+      "arm": "chem/module_dep_simple.F:965-1038",
+      "scpr23": "chem/module_dep_simple.F:3482-3488"
+    },
+    "hstar": 1400000.0,
+    "dhr": 0.0,
+    "f0": 0.0,
+    "dvj": 0.131,
+    "dratio": 1.9028196334838867,
+    "scpr23": 1.3896135091781616
+  },
+  "mgly": {
+    "arm": "general",
+    "from": {
+      "hstar": "chem/module_dep_simple.F:2196",
+      "dhr": "chem/module_dep_simple.F:2473",
+      "f0": "chem/module_dep_simple.F:2685",
+      "dvj": "chem/module_dep_simple.F:2900",
+      "dratio": "chem/module_dep_simple.F:3482-3484",
+      "arm": "chem/module_dep_simple.F:965-1038",
+      "scpr23": "chem/module_dep_simple.F:3482-3488"
+    },
+    "hstar": 3710.0,
+    "dhr": 7541.0,
+    "f0": 0.0,
+    "dvj": 0.118,
+    "dratio": 2.112452507019043,
+    "scpr23": 1.4898877143859863
+  },
+  "dcb": {
+    "arm": "general",
+    "from": {
+      "hstar": "chem/module_dep_simple.F:2197",
+      "dhr": "chem/module_dep_simple.F:2474",
+      "f0": "chem/module_dep_simple.F:2686",
+      "dvj": "chem/module_dep_simple.F:2901",
+      "dratio": "chem/module_dep_simple.F:3482-3484",
+      "arm": "chem/module_dep_simple.F:965-1038",
+      "scpr23": "chem/module_dep_simple.F:3482-3488"
+    },
+    "hstar": 1400000.0,
+    "dhr": 0.0,
+    "f0": 0.0,
+    "dvj": 0.107,
+    "dratio": 2.329620361328125,
+    "scpr23": 1.5903244018554688
+  },
+  "onit": {
+    "arm": "general",
+    "from": {
+      "hstar": "chem/module_dep_simple.F:2182",
+      "dhr": "chem/module_dep_simple.F:2457",
+      "f0": "chem/module_dep_simple.F:2666",
+      "dvj": "chem/module_dep_simple.F:2884",
+      "dratio": "chem/module_dep_simple.F:3482-3484",
+      "arm": "chem/module_dep_simple.F:965-1038",
+      "scpr23": "chem/module_dep_simple.F:3482-3488"
+    },
+    "hstar": 1.13,
+    "dhr": 5487.0,
+    "f0": 0.0,
+    "dvj": 0.092,
+    "dratio": 2.7094497680664062,
+    "scpr23": 1.75879967212677
+  },
+  "csl": {
+    "arm": "general",
+    "from": {
+      "hstar": "chem/module_dep_simple.F:2206",
+      "dhr": "chem/module_dep_simple.F:2483",
+      "f0": "chem/module_dep_simple.F:2695",
+      "dvj": "chem/module_dep_simple.F:2910",
+      "dratio": "chem/module_dep_simple.F:3482-3484",
+      "arm": "chem/module_dep_simple.F:965-1038",
+      "scpr23": "chem/module_dep_simple.F:3482-3488"
+    },
+    "hstar": 400000.0,
+    "dhr": 0.0,
+    "f0": 0.0,
+    "dvj": 0.096,
+    "dratio": 2.5965559482574463,
+    "scpr23": 1.709598183631897
+  },
+  "iso": {
+    "arm": "general",
+    "from": {
+      "hstar": "chem/module_dep_simple.F:2208",
+      "dhr": "chem/module_dep_simple.F:2485",
+      "f0": "chem/module_dep_simple.F:2697",
+      "dvj": "chem/module_dep_simple.F:2912",
+      "dratio": "chem/module_dep_simple.F:3482-3484",
+      "arm": "chem/module_dep_simple.F:965-1038",
+      "scpr23": "chem/module_dep_simple.F:3482-3488"
+    },
+    "hstar": 0.00476,
+    "dhr": 0.0,
+    "f0": 0.0,
+    "dvj": 0.121,
+    "dratio": 2.060077428817749,
+    "scpr23": 1.4651585817337036
+  },
+  "hcl": {
+    "arm": "general",
+    "from": {
+      "hstar": "chem/module_dep_simple.F:2209 (hno3's)",
+      "dhr": "chem/module_dep_simple.F:2486 (hno3's)",
+      "f0": "chem/module_dep_simple.F:2698 (hno3's)",
+      "dvj": "chem/module_dep_simple.F:2913 (hno3's)",
+      "dratio": "chem/module_dep_simple.F:3482-3484 (hno3's)",
+      "arm": "chem/module_dep_simple.F:965-1038",
+      "scpr23": "chem/module_dep_simple.F:3482-3488 (hno3's)",
+      "copy": "chem/module_dep_simple.F:259-264: RADM2/RADM2SORG copy ddvel(p_hcl) = ddvel(p_hno3); the row carries hno3's numbers on the general arm, which yields the same bits"
+    },
+    "hstar": 26900000000000.0,
+    "dhr": 8684.0,
+    "f0": 0.0,
+    "dvj": 0.126,
+    "dratio": 1.9783283472061157,
+    "scpr23": 1.42613685131073
+  },
+  "ho": {
+    "arm": "zero_surface",
+    "from": {
+      "hstar": "chem/module_dep_simple.F:1952",
+      "dhr": "chem/module_dep_simple.F:1954",
+      "f0": "chem/module_dep_simple.F:1955",
+      "dvj": "chem/module_dep_simple.F:2918",
+      "dratio": "chem/module_dep_simple.F:3482-3484",
+      "arm": "chem/module_dep_simple.F:243-244",
+      "scpr23": "chem/module_dep_simple.F:3482-3488"
+    },
+    "hstar": 0.0,
+    "dhr": 0.0,
+    "f0": 0.0,
+    "dvj": 0.243,
+    "dratio": 1.0257998704910278,
+    "scpr23": 0.9204581379890442
+  },
+  "ho2": {
+    "arm": "zero_surface",
+    "from": {
+      "hstar": "chem/module_dep_simple.F:1952",
+      "dhr": "chem/module_dep_simple.F:1954",
+      "f0": "chem/module_dep_simple.F:1955",
+      "dvj": "chem/module_dep_simple.F:2919",
+      "dratio": "chem/module_dep_simple.F:3482-3484",
+      "arm": "chem/module_dep_simple.F:243-244",
+      "scpr23": "chem/module_dep_simple.F:3482-3488"
+    },
+    "hstar": 0.0,
+    "dhr": 0.0,
+    "f0": 0.0,
+    "dvj": 0.174,
+    "dratio": 1.4325827360153198,
+    "scpr23": 1.1500288248062134
   }
 }

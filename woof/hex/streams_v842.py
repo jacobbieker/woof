@@ -50,6 +50,9 @@ def field_definition(name: str, *, physics: bool = True) -> dict:
     from .mpasphys import solar_diagnostics_v842 as solar
     if physics and name in solar.FIELDS:
         return solar.field_definition(name)
+    from .mpasdiag import nwp_diag_v842 as nwp
+    if physics and name in nwp.FIELDS:
+        return nwp.field_definition(name)
     raise ValueError(f'{name}: unknown v8.4.2 Registry field')
 
 
@@ -409,7 +412,8 @@ def _all_packages() -> frozenset[str]:
     from .mpasphys.radiation_spectral_v842 import PACKAGES
     from .mpasphys.radtran_v842 import PACKAGE as RADTRAN_PACKAGE
     from .mpasphys.solar_diagnostics_v842 import PACKAGE as SOLAR_PACKAGE
-    return frozenset(PACKAGES.values()) | {RADTRAN_PACKAGE, SOLAR_PACKAGE} | frozenset(p for f in _REGISTRY['fields'].values() for gate in f['gates']
+    from .mpasdiag.nwp_diag_v842 import PACKAGE as NWP_PACKAGE
+    return frozenset(PACKAGES.values()) | {RADTRAN_PACKAGE, SOLAR_PACKAGE, NWP_PACKAGE} | frozenset(p for f in _REGISTRY['fields'].values() for gate in f['gates']
                      for p in gate.split(';')) | frozenset(
                      p for s in _REGISTRY['streams'].values()
                      for p in s['options'].get('packages','').split(';')) | {'no_invariant_stream'}

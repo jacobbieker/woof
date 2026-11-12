@@ -18,8 +18,8 @@ $fc $flags -c "$script_dir/stub_wesely.F90"
 $fc $flags -c share/module_model_constants.F
 $fc $flags -c frame/module_wrf_error.F
 $fc $flags -c chem/module_dep_simple.F
-$fc $flags -c "$script_dir/oracle_io.F90" "$script_dir/run_wesely.F90"
-for obj in stub_wesely module_model_constants module_wrf_error module_dep_simple oracle_io run_wesely; do
+$fc $flags -c "$script_dir/oracle_io.F90" "$script_dir/run_wesely.F90" "$script_dir/run_wesely_radm2.F90"
+for obj in stub_wesely module_model_constants module_wrf_error module_dep_simple oracle_io run_wesely run_wesely_radm2; do
  nm -u "$obj.o" > "undefined-$obj.txt"
  if grep -q '_ZGV' "undefined-$obj.txt"; then echo "libmvec forbidden in $obj" >&2; exit 4; fi
 done
@@ -27,7 +27,9 @@ $fc -Ofast -ftree-vectorize -c "$script_dir/libmvec_positive_control.F90"
 nm -u libmvec_positive_control.o > undefined-control.txt
 grep -q '_ZGV' undefined-control.txt || { echo 'positive control did not emit _ZGV' >&2; exit 5; }
 $fc -o run_wesely stub_wesely.o module_model_constants.o module_wrf_error.o module_dep_simple.o oracle_io.o run_wesely.o
+$fc -o run_wesely_radm2 stub_wesely.o module_model_constants.o module_wrf_error.o module_dep_simple.o oracle_io.o run_wesely_radm2.o
 ./run_wesely > run-wesely.log
+./run_wesely_radm2 > run-wesely-radm2.log
 {
  echo '# WRF v4.7.1 Wesely column oracle'
  $fc --version
@@ -39,5 +41,5 @@ $fc -o run_wesely stub_wesely.o module_model_constants.o module_wrf_error.o modu
  echo 'Scalar objects have no _ZGV symbol. Positive control:'
  cat undefined-control.txt
 } > fixtures/PROVENANCE.md
-for directory in fixtures/*/; do cp fixtures/PROVENANCE.md "$directory/PROVENANCE.md"; done
+for directory in fixtures/case_*/ fixtures/radm2/ fixtures/radm2/case_*/; do cp fixtures/PROVENANCE.md "$directory/PROVENANCE.md"; done
 find fixtures -type f -printf '%P %s bytes\n' > fixture-sizes.txt

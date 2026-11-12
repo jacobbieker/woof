@@ -7617,28 +7617,39 @@ def validate_chem_config(cfg) -> None:
             "approximation (aer_op_opt = 1, module_optical_averaging.F) is "
             "ported; the Maxwell-Garnett and exact-Mie mixing rules are not, "
             "so the optics would silently use the volume rule.")
-    # Emission frames.  The one frame provider in this build
-    # (woof.chem_emission_frames, through woof.chem_source_netcdf.ingest)
+    # Emission frames.  Two frame providers are in this build.
+    # woof.chem_emission_frames (through woof.chem_source_netcdf.ingest)
     # serves extensive NetCDF sources on a cell-sum remap, the RAVE fire
-    # rows.  An enabled emission source it cannot serve (EDGAR's annual
-    # flux densities: no fetch route carries its archives and no
-    # intensive-field remap feeds the frames) passed the door and stopped
+    # rows.  woof.chem_inventory_frames serves annual inventories (pinned
+    # regular lat/lon flux densities on a bilinear remap, such as
+    # edgar-v81, or the download-free synthetic-anthro) to the rows of an
+    # inventory process (emission.radm2) whose emission field is one of
+    # that process's speciation outputs (e_co, e_no, ...).  Any other
+    # enabled emission reference (EDGAR named by a GOCART row: no process
+    # of that row reads the inventory provider) passed the door and stopped
     # the run at its first chem step, after a whole preparation, with "no
     # source frames to read them from".
+    from woof.chem_inventory_frames import serves_emission
+
     unserved = sorted({ref["source"] for row in table.rows
                        for ref in row.emissions
                        if ref["source"] in sources
                        and catalog_sources[ref["source"]].kind == "emission"
                        and catalog_sources[ref["source"]].remap
-                       not in ("cell_sum", "cell_sum_split")})
+                       not in ("cell_sum", "cell_sum_split")
+                       and not serves_emission(
+                           row, ref, catalog_sources[ref["source"]])})
     if unserved:
         raise ConfigurationRefused(
             f"chem_sources enables emission source(s) {unserved}, but no "
-            "emission frame provider in this build can supply them (frames "
-            "come from extensive NetCDF sources on a cell-sum remap, such as "
-            "the RAVE fire rows), so the run would stop at its first chem "
-            "step; leave them out of chem_sources and the rows naming them "
-            "take no emission from them.")
+            "emission frame provider in this build can supply them to the "
+            "rows naming them (frames come from extensive NetCDF sources on "
+            "a cell-sum remap, such as the RAVE fire rows, or from an "
+            "inventory such as edgar-v81 or synthetic-anthro read by an "
+            "emission.radm2 row through its e_* speciation fields), so the "
+            "run would stop at its first chem step; leave them out of "
+            "chem_sources and the rows naming them take no emission from "
+            "them.")
     # A data-store source (a row with an acquisition block, CAMS through the
     # ADS) fills its rows on every forcing frame (woof.chem_source_init),
     # and the root's sealed forcing carries them as WRF-Chem's
