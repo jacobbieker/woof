@@ -1,6 +1,8 @@
 """Bandwidth-oriented launches for unchanged FP32 elementwise operations."""
 from __future__ import annotations
 
+from functools import lru_cache
+
 import cupy as cp
 import numpy as np
 
@@ -30,6 +32,28 @@ def add_array(src, dst):
         kernel(((dst.size + _TPB * _WORDS_PER_THREAD - 1)
                 // (_TPB * _WORDS_PER_THREAD),), (_TPB,),
                (src, dst, np.uint64(dst.size)))
+    return True
+
+
+@lru_cache(maxsize=None)
+def _accumulate_scaled_kernel():
+    # The _rn intrinsics keep the product and the sum two rounded FP32
+    # operations, as CuPy's multiply and add ufuncs were: no contraction.
+    return cp.ElementwiseKernel("float32 src, float32 scale", "float32 dst",
+                                "dst = __fadd_rn(dst, __fmul_rn(src, scale));",
+                                "gpuwm_accumulate_scaled")
+
+
+def accumulate_scaled(dst, src, scale) -> bool:
+    """``dst += src * scale`` (``scale`` an FP32 scalar) in one launch, word
+    for word: was a multiply into a temporary, then an add.  False, with
+    nothing done, unless both are dense FP32 of one shape and ``src`` is
+    ``dst`` or does not overlap it."""
+    if (not _supported((src, dst)) or src.shape != dst.shape
+            or (_overlap(src, dst) and src.data.ptr != dst.data.ptr)):
+        return False
+    if dst.size:
+        _accumulate_scaled_kernel()(src, np.float32(scale), dst)
     return True
 
 
