@@ -197,6 +197,12 @@ def join_shared(row):
                  "row's phase and the GOCART sulfate molar mass 96.0576, which "
                  "only the mass ledger and vertmx's deposited-mass diagnostic "
                  "read)")
+    if row["phase"] != "gas":
+        # sulf: GOCART's particulate sulfate takes CAMS's sulphate aerosol;
+        # RADM2's gas-phase H2SO4 must not (it starts from WRF's profile).
+        for ref in row["boundary"]:
+            ref["sets"] = list(old_sets)
+        note += "; its CAMS sulphate boundary entries fill it only in the GOCART sets"
     if note not in row["provenance"]:
         row["provenance"] += note
     return row

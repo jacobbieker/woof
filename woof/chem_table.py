@@ -599,6 +599,19 @@ class ChemTable:
         return tuple(key for key in CHEM_PROCESS_MODULES if key in named)
 
 
+def _for_sets(row: SpeciesRow, sets) -> SpeciesRow:
+    """``row`` with the boundary entries this selection reads: an entry
+    gated by ``sets`` (schema) fills the row only when one of them is
+    selected."""
+    kept = tuple(ref for ref in row.boundary
+                 if not ref.get("sets") or any(name in ref["sets"] for name in sets))
+    if len(kept) == len(row.boundary):
+        return row
+    from dataclasses import replace
+
+    return replace(row, boundary=kept)
+
+
 def load_sets(sets: Sequence[str], sources: Iterable[str] = (), *,
               root: str | Path | None = None) -> ChemTable:
     """The table for an explicit set selection (see :func:`load`)."""
@@ -620,7 +633,7 @@ def load_sets(sets: Sequence[str], sources: Iterable[str] = (), *,
             if name not in seen:
                 seen.add(name)
                 chosen.append(name)
-    rows = tuple(cat.species[n] for n in chosen)
+    rows = tuple(_for_sets(cat.species[n], sets) for n in chosen)
     for row in rows:
         if row.aging is not None and row.aging["to"] not in seen:
             raise ChemTableError(

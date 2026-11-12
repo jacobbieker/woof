@@ -64,6 +64,21 @@ def test_radm2_cannot_share_a_run_with_gocart_sulfur():
     assert "one mechanism" in reason
 
 
+def test_sorgam_refuses_a_second_pm_writer():
+    from woof.core import chem_sorgam
+    assert "PM2_5_DRY" in chem_sorgam._table_refusal(
+        chem_table.load_sets(["radm2sorg", "dust"]))
+    assert chem_sorgam._table_refusal(chem_table.load_sets(["radm2sorg"])) is None
+
+
+def test_cams_sulphate_never_fills_the_radm2_gas_sulf():
+    radm2 = chem_table.load_sets(["radm2"], ["cams-global"])
+    assert radm2.row("sulf").boundary == ()
+    assert [r["source"] for r in radm2.row("o3").boundary] == ["cams-global", "cams-reanalysis"]
+    gocart = chem_table.load_sets(["gocart_simple"], ["cams-global"])
+    assert gocart.row("sulf").boundary
+
+
 def test_chem_clock_is_wrfs():
     """chem_driver.F:366-417 with last_chem_time = start - dt
     (chemics_init.F:2070-2073): ktau 1 runs over dt, ktau 2 over 2 dt (the

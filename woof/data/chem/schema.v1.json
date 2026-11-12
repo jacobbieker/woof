@@ -30,6 +30,9 @@
         "weights": {"type": "array", "minItems": 1, "items": {"type": "number"}},
         "conversion": {"enum": ["identity", "kg_m3_to_ug_kg_dry", "kg_kg_moist_to_ug_kg_dry", "kg_kg_moist_to_ppmv_dry"]},
         "frames": {"enum": ["all", "initial", "boundary"]},
+        "sets": {"type": "array", "minItems": 1, "uniqueItems": true,
+                 "items": {"$ref": "#/definitions/name"},
+                 "description": "Optional: the entry fills the row only in a run selecting one of these sets (a row shared by two packages whose source quantity differs, e.g. GOCART's particulate sulfate and RADM2's gas-phase H2SO4 in one sulf row)."},
         "provenance": {"$ref": "#/definitions/provenance"}
       }
     },

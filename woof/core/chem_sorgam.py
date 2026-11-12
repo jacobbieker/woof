@@ -218,6 +218,13 @@ def _table_refusal(table):
     if missing:
         return (f"sorgam_driver updates all {len(AEROSOLS)} SORGAM aerosol "
                 f"rows, and {missing} do not name aerosol.sorgam")
+    outputs = {output for _name, output, _text in PM_OUTPUTS}
+    clash = sorted(d.output_name for d in table.diagnostics if d.output_name in outputs)
+    if clash:
+        return (f"SORGAM writes {clash} (sum_pm_sorgam) and this selection's "
+                "other sets add a table diagnostic of the same name, so one "
+                "history field would carry two different sums; select the "
+                "RADM2SORG set without another PM-writing set")
     gas = {row.name for row in table.rows_for(RADM2_KEY)}
     if not set(GASES) <= gas:
         return (f"SORGAM exchanges {list(GASES)} with the RADM2 gas phase "

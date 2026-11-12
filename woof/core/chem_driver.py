@@ -191,8 +191,18 @@ def _cold_start(state, cfg, processes) -> None:
     hooks = [(key, module) for key, module in processes
              if getattr(module, "cold_start", None) is not None]
     chem.cold_start_done = True
-    if not hooks or getattr(chem, "externally_managed_ledger", False):
+    if not hooks:
         return
+    if getattr(chem, "externally_managed_ledger", False):
+        # A rank-owned ledger has no started flag a restart carries, so a
+        # fresh start cannot be told from a restored one; running the hooks
+        # could overwrite restored chemistry, skipping them would start from
+        # nothing.  Neither is silent: refuse.
+        raise RuntimeError(
+            "chem processes " + ", ".join(key for key, _m in hooks)
+            + " build their initial state at a fresh start, and this domain's "
+            "chem ledger is managed externally (ranked or streamed), where a "
+            "fresh start cannot be told from a restart")
     if bool(cp.asnumpy(getattr(state, ledger_attr("started")))[0]):
         return
     ktau = int(round(state.elapsed_seconds / float(cfg.dt))) + 1
