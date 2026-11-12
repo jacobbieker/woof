@@ -1133,3 +1133,90 @@ def delta_eddington(state: RadiatorState, geometry: Geometry, albedo) -> Radiati
     flip = lambda v: v[:, ::-1].copy()  # noqa: E731
     return RadiationField(fdr=flip(fdr), fup=flip(fup), fdn=flip(fdn), edr=flip(edr), eup=flip(eup),
                           edn=flip(edn))
+
+
+# ------------------------------------------------------------------------------------------------------------
+# Photolysis rate constants (src/core.F90 run, src/photolysis_rates.F90 get): the whole column calculation.
+
+class Tuvx:
+    """A TUV-x core over host columns (the oracle harness's from-host height grid and temperature, air, O2 and O3
+    profiles), built once from a configuration and its data root.  ``run`` takes a batch of columns that share a
+    level count and returns each reaction's rate constants on the height edges."""
+
+    def __init__(self, config, *, root):
+        self.config = config
+        self.grid, self.etf = configuration(config, root=root)
+        self.photolysis = Photolysis(config, self.grid, root=root)
+        self.bands = LaSrBands(config["O2 absorption"], self.grid, root=root)
+        self.radiators = Radiators(config, self.grid, root=root)
+        self.albedo = surface_albedo(config, self.grid)
+        self.scaling = [float(r.get("scaling factor", 1.0)) for r in config["photolysis"]["reactions"]]
+
+    @property
+    def reactions(self):
+        return [name for name, *_ in self.photolysis.reactions]
+
+    def radiation_field(self, edges_km, temperature, air_layer, o2_layer, o3_layer, sza_deg):
+        """radiative_transfer calculate: (geometry, field for unit flux, air columns) for the batch."""
+        geometry = spherical_geometry(edges_km, sza_deg)
+        avc, asc = air_mass(geometry, exo_layer_columns(air_layer))
+        _ovc, osc = air_mass(geometry, exo_layer_columns(o2_layer))
+        temps = _columns(temperature)
+        band_od = self.bands.optical_depth(avc, asc, osc, temps)
+        states = self.radiators.states({"air": air_layer, "O2": o2_layer, "O3": o3_layer}, temps, band_od)
+        field = delta_eddington(self.radiators.accumulate(states), geometry, self.albedo)
+        return geometry, field, (avc, asc, osc)
+
+    def run(self, edges_km, temperature, air_layer, o2_layer, o3_layer, sza_deg, earth_sun_distance):
+        """core run: ``{reaction: rate constants (ncol, nedge), s-1}``.  Every column array is (ncol, n) or
+        (n,); ``sza_deg`` and ``earth_sun_distance`` (the factor TUV-x scales the field by) per column."""
+        temps = _columns(temperature)
+        _geometry, field, (avc, asc, osc) = self.radiation_field(edges_km, temps, _columns(air_layer),
+                                                                 _columns(o2_layer), _columns(o3_layer), sza_deg)
+        field = field.scaled(np.broadcast_to(np.asarray(earth_sun_distance, dtype=np.float64), (temps.shape[0],)))
+        actinic = (field.fdr + field.fup + field.fdn) * self.etf
+        actinic = np.where(actinic < 0.0, 0.0, actinic)
+        bands_xs = None
+        out = {}
+        for r, (name, xs_calc, qy_calc, apply_bands) in enumerate(self.photolysis.reactions):
+            xs = np.stack([xs_calc.calculate(t) for t in temps])          # (ncol, nedge, nbin)
+            qy = np.stack([qy_calc.calculate(t) for t in temps])
+            if apply_bands:
+                if bands_xs is None:
+                    bands_xs = self.bands.cross_section(avc, asc, osc, temps)
+                xs = xs.copy()
+                for b, values in bands_xs.items():
+                    xs[:, :, b] = values
+            xsqy = xs * qy
+            total = np.zeros(actinic.shape[:2])
+            for k in range(actinic.shape[2]):                            # dot_product, in order
+                total = total + actinic[:, :, k] * xsqy[:, :, k]
+            out[name] = total * self.scaling[r]
+        return out
+
+
+def earth_sun_distance(year, month, day, hour_utc):
+    """src/profiles/profile_utils.F90 earth_sun_distance (AU) at ``hour_utc`` of the date: the factor TUV-x's
+    "Earth-Sun distance" profile hands core%run, which scales the radiation field by it (TUV-x's own form)."""
+    import math
+    year, month, day = int(year), int(month), int(day)
+    if not 1950 <= year <= 2050:
+        raise TuvxPortError("1950 <= Year <= 2050")
+    days = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    if (year % 4 == 0 and year % 100 != 0) or year % 400 == 0:
+        days[1] = 29
+    if not 1 <= month <= 12 or day > days[month - 1]:
+        raise TuvxPortError(f"bad date {year}-{month}-{day}")
+    jday = sum(days[:month - 1]) + day
+    delta = year - 1949
+    leap = delta // 4
+    jd = 32916.5 + float(delta * 365 + leap + jday) + float(hour_utc) / 24.0
+    if year % 100 == 0 and year % 400 != 0:
+        jd = jd - 1.0
+    time = jd - 51545.0
+    anomaly = 357.528 + 0.9856003 * time
+    anomaly = math.fmod(anomaly, 360.0)
+    if anomaly < 0.0:
+        anomaly = anomaly + 360.0
+    anomaly = anomaly * (math.pi / 180.0)
+    return 1.00014 - 0.01671 * math.cos(anomaly) - 0.00014 * math.cos(2.0 * anomaly)

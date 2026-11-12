@@ -69,7 +69,7 @@ def run(harness, work, cases):
     if proc.returncode:
         sys.exit(f"harness failed with status {proc.returncode}:\n{proc.stderr}")
     out = proc.stdout
-    labels, results, config = {}, [], {"wedge": {}, "etf": {}}
+    labels, results, config = {}, [], {"wedge": {}, "etf": {}, "esd": {}}
     tables = []
     word = lambda h: float(np.frombuffer(bytes.fromhex(h), dtype=">f8")[0]).hex()  # noqa: E731
     for line in out.splitlines():
@@ -89,7 +89,8 @@ def run(harness, work, cases):
             value = np.frombuffer(bytes.fromhex(w[3]), dtype=">f8")[0]
             results[-1].setdefault(labels[j], {})[i] = float(value).hex()
     configuration = {"wavelength_edges_nm": [config["wedge"][i] for i in sorted(config["wedge"])],
-                     "extraterrestrial_flux_photon_cm-2_s-1": [config["etf"][i] for i in sorted(config["etf"])]}
+                     "extraterrestrial_flux_photon_cm-2_s-1": [config["etf"][i] for i in sorted(config["etf"])],
+                     "earth_sun_distance_au": [config["esd"][i] for i in sorted(config["esd"])]}
     names = [labels[k] for k in sorted(labels)]
     return names, [
         {name: [r[name][i] for i in sorted(r[name])] for name in r} for r in results], configuration, [
@@ -173,7 +174,9 @@ def main(work):
            "units": {"temperature": "K", "air, O2, O3": "molecule cm-3 at the edges",
                      "*_layer": "molecule cm-2 per layer", "photolysis_rate_constants_s-1": "s-1 at the edges",
                      "configuration": "the wavelength grid's edges (nm) and the extraterrestrial flux on its bins "
-                                      "(photon cm-2 s-1), as the built core holds them",
+                                      "(photon cm-2 s-1), as the built core holds them; the Earth-Sun "
+                                      "distance profile (AU) on the time grid's edges (2002-03-21, 12 and "
+                                      "14 UT, photolysis.json)",
                      "intermediates": "first two cases of each layout, five height edges (0-based): cross "
                                       "sections cm2, quantum yields, actinic flux parts per bin; "
                                       "radiative_transfer: spherical geometry (nid per edge and dsdh rows "

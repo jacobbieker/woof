@@ -5,7 +5,8 @@
 ! Each case on standard input updates them and runs the core; the photolysis rate constants come
 ! back as binary64 words in hex, edge by reaction.  Once the core is built, the configuration-time pieces
 ! the port is graded on piece by piece follow: the wavelength grid's edges ('wedge') and the
-! extraterrestrial flux on it ('etf', photon cm-2 s-1 per bin).  After every case: each reaction's cross
+! extraterrestrial flux on it ('etf', photon cm-2 s-1 per bin) and the Earth-Sun distance profile on the
+! configuration's time grid ('esd', AU).  After every case: each reaction's cross
 ! section ('xs') and quantum yield ('qy') and the actinic flux's direct, diffuse-up and diffuse-down parts
 ! ('fdr', 'fup', 'fdn'), each (height edge, wavelength bin).  Then the radiative-transfer intermediates,
 ! from a spherical geometry and Lyman-alpha / Schumann-Runge calculator the harness builds over the core's own
@@ -123,6 +124,11 @@ program tuvx_harness
         write(*,'(a,i0,1x,z16.16)') 'etf ', i, transfer( etf%mid_val_(i), 0_8 )
       end do
       deallocate( wavelength )
+      column_profile => core%get_profile( "Earth-Sun distance", "AU" )
+      do i = 1, size( column_profile%edge_val_ )
+        write(*,'(a,i0,1x,z16.16)') 'esd ', i, transfer( column_profile%edge_val_(i), 0_8 )
+      end do
+      deallocate( column_profile )
       u_height = core%get_updater( height )
       u_temperature = core%get_updater( temperature )
       u_air = core%get_updater( air )
