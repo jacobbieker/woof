@@ -1689,7 +1689,8 @@ def _run_native_dynamics(arguments, config, layout, payload, streams, library,
         chemistry=SuiteChemistry(arguments.chemistry_config,registry_names=names,mesh=mesh,
                                  nlev=grid.vertical_grid.n_vert_levels,
                                  grid_path=getattr(arguments,'grid',None) or arguments.init,
-                                 start_text=layout.configs['config_start_time'])
+                                 start_text=layout.configs['config_start_time'],
+                                 vertical=grid.vertical_grid,configs=layout.configs,dt=dt)
         if resumed:
             chemistry.restart=moving.carrier.get('chemistry')
             if chemistry.restart is None:
@@ -2375,8 +2376,9 @@ def _run_native_dynamics(arguments, config, layout, payload, streams, library,
                 receipt['tc_flux'] = tc_receipt(tc, steps=step)
             if chemistry is not None:
                 ledger=chemistry.write_ledger(out)
+                # A micm run's receipt carries no mass ledger (its reactions move mass between species).
                 receipt['chemistry']={k:ledger[k] for k in ('schema','config_sha256','committed_steps',
-                                      'mass_closure_kg','final_mass_kg','emitted_kg','route')}
+                                      'mass_closure_kg','final_mass_kg','emitted_kg','route') if k in ledger}
             session.driver.finalize(session)
     if coupling.iau is not None:
         receipt['iau']=coupling.iau.receipt()
