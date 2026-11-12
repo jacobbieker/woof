@@ -883,7 +883,7 @@ def test_experiment_path_runs_runconfig_invariant_battery(tmp_path):
     probe cases that previously loaded cleanly all fail loudly."""
     with pytest.raises(ValueError, match="mp_physics"):
         load_experiment(_write(tmp_path,
-                               shared="moist = true\nmp_physics = 95"))
+                               shared="moist = true\nmp_physics = 12"))
     with pytest.raises(ValueError, match="time_step_sound must be even"):
         load_experiment(_write(tmp_path, shared="time_step_sound = 3"))
     # Constant K on these boundaries was refused while km_opt=1 was a

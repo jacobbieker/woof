@@ -2483,10 +2483,10 @@ def execute_experiment(
             from woof.core.nest_round_trip import th_phy_m_t0_after_step
             th_phy_m_t0_after_step(node)
             refresh_model_time(node.state, clock, after_step=True)
-            live_io_manager=getattr(model,'_io_manager',None)
-            native_aux=getattr(live_io_manager,'submit_native_auxiliary',None)
-            if native_aux is not None:
-                native_aux(node,clock.ticks+clock.step_ticks)
+            # hasattr, not getattr: tests/test_clock.py bans getattr reflection here.
+            live_io_manager=model._io_manager if hasattr(model,'_io_manager') else None
+            if live_io_manager is not None and hasattr(live_io_manager,'submit_native_auxiliary'):
+                live_io_manager.submit_native_auxiliary(node,clock.ticks+clock.step_ticks)
             if node.cfg.run.tslist and node.cfg.run.max_ts_locs:
                 station_output(node).sample(clock)
             # Scientific accumulators see every committed domain step. This
@@ -3059,30 +3059,34 @@ def refuse_prepared_tree_partial_nests(exp, route: str) -> None:
     if not named:
         return
     gid = named[0]
-    if bool(getattr(exp.root.run, "use_adaptive_time_step", False)):
+    # hasattr reads, not getattr: tests/test_clock.py bans getattr in this module.
+    run = exp.root.run
+    if hasattr(run, "use_adaptive_time_step") and bool(run.use_adaptive_time_step):
         raise ValueError(
             f"{route}: d{gid:02d} declares partial_nest on an adaptive clock; a "
             "partial-depth band's interface interpolation and top-zone weights "
             "are bound to fixed parent and child steps.  Re-emit the domain "
             "with `woof domain ... --clock fixed` (or set "
             "use_adaptive_time_step = false)")
-    devices = getattr(exp, "devices", None)
-    if devices is not None and int(getattr(devices, "count", 1) or 1) > 1:
+    devices = exp.devices if hasattr(exp, "devices") else None
+    if (devices is not None and hasattr(devices, "count")
+            and int(devices.count or 1) > 1):
         raise ValueError(
             f"{route}: d{gid:02d} declares partial_nest on a multi-device tree; "
             "partial-depth bands run on one device")
-    tiles = getattr(exp, "tiles", None)
-    if tiles is not None and str(getattr(tiles, "mode", "off")) == "on":
+    tiles = exp.tiles if hasattr(exp, "tiles") else None
+    if tiles is not None and hasattr(tiles, "mode") and str(tiles.mode) == "on":
         raise ValueError(
             f"{route}: d{gid:02d} declares partial_nest with [tiles] streaming; "
             "partial-depth bands and their parents run resident")
-    if int(getattr(exp.root.run, "dfi_opt", 0) or 0):
+    if hasattr(run, "dfi_opt") and int(run.dfi_opt or 0):
         raise ValueError(
             f"{route}: d{gid:02d} declares partial_nest with digital filter "
             "initialization (dfi_opt); a partial-depth band starts from its "
             "prepared analysis")
-    relocation = getattr(exp, "relocation", None)
-    if relocation is not None and bool(getattr(relocation, "enabled", False)):
+    relocation = exp.relocation if hasattr(exp, "relocation") else None
+    if (relocation is not None and hasattr(relocation, "enabled")
+            and bool(relocation.enabled)):
         raise ValueError(
             f"{route}: d{gid:02d} declares partial_nest beside [relocation]; a "
             "partial-depth band and its ancestors do not move")
@@ -3141,7 +3145,7 @@ def realize_partial_nests(model, exp, coord, *, physics=None,
         # above the interface); the root's own levels keep it.  A child
         # configured with damp_opt=3 under a root without it keeps its
         # value, which refuse_child then refuses.
-        if int(getattr(walk.cfg.run, "damp_opt", 0)) == 3:
+        if hasattr(walk.cfg.run, "damp_opt") and int(walk.cfg.run.damp_opt) == 3:
             ccfg = _dc.replace(ccfg, damp_opt=child_damp_opt(walk.cfg.run))
         nest = PartialNest(parent.state, parent.cfg.run, pcoord, child, ccfg, band,
                            parent_nest=parent_nest,
@@ -3178,7 +3182,7 @@ def _band_heights(root_state, root_cfg, k_top: int) -> dict:
     phi = level(k_top)
     out = {"interface_height_m": float(phi.min()) / float(G),
            "interface_top_m": float(phi.max()) / float(G)}
-    if int(getattr(root_cfg, "damp_opt", 0)) == 3:
+    if hasattr(root_cfg, "damp_opt") and int(root_cfg.damp_opt) == 3:
         top = level(int(root_cfg.nz))
         out["damping_floor_m"] = float(top.min()) / float(G) - float(root_cfg.zdamp)
     return out

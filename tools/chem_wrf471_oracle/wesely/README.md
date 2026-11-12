@@ -7,6 +7,26 @@ cd ~/work/aq-cams-wesely
 nice -n 15 bash harness/build.sh source build
 ```
 
+The committed fixtures were built with GNU Fortran (Ubuntu 15.2.0-16ubuntu1)
+and Ubuntu GLIBC 2.43-2ubuntu2.4.  On a host without that compiler, an
+`ubuntu:26.04` image with `gfortran curl ca-certificates binutils` installed
+(`apt-get install --no-install-recommends`) is that toolchain; mount every
+path explicitly:
+
+```sh
+docker run --rm -u $(id -u):$(id -g) -v /path/to/wrf-src:/wrf:ro \
+    -v "$PWD":/repo:ro -v /path/to/build:/build -w /build wesely-oracle:u2604 \
+    bash /repo/tools/chem_wrf471_oracle/wesely/build.sh /wrf /build/out
+```
+
+`SOURCES.sha256` pins the CRLF form of `chem/module_dep_simple.F` (the
+pinned reference tree is a CRLF checkout; the v4.7.1 tag's LF file,
+sha256 `063b72f5...`, is the same text).  For an LF tree, write
+`sed 's/$/\r/'` of the file into `/wrf/chem/` first.  Then copy
+`/path/to/build/out/fixtures/case_*` to `tests/data/oracles/chem/cams/wesely`
+and `fixtures/radm2/*` to `tests/data/oracles/chem/wesely_radm2`; the
+2026-11-11 rebuild reproduced every existing `case_*` file byte for byte.
+
 The public entry point is `build.sh WRF_SOURCE_ROOT BUILD_DIR`. The source root
 needs `chem/module_dep_simple.F`. The script fetches the two public v4.7.1
 support modules into the build directory and checks all three compiled WRF
@@ -61,19 +81,47 @@ ust below the aerodynamic-resistance floor, low/high znt, and tc
 reference proves no memory and is compared to independent A and B fixtures.
 There are 4752 fixture columns, with two additional calls in case 11.
 
+## RADM2/RADM2SORG layout (`run_wesely_radm2.F90`)
+
+A second executable, linked against the same objects, runs `dep_init` and
+`wesely_driver` with the 42 gases of Registry/registry.chem:3929-3930 at
+chem indices 2:43 (`numgas = p_ho2 = 43`, share/module_chem_share.F
+`get_last_gas`) and every other `p_*` index absent (1).  `num_chem` is a
+stub variable, not a parameter, so this driver can size the chem array 43.
+It dumps `hstar`, `dhr`, `f0`, `dratio` and `scpr23` for all 42, and `dvj`:
+dep_init keeps `dvj` local, so the driver carries the source values
+(:1956, :2880-2920) and stops unless `0.242/(dvj*(293.15/298.15)**1.75)`
+equals dep_init's `dratio` word for word.  `ddvel` covers all 42 gases,
+including WRF's own `srfres(numgas-1:numgas) = 0` for ho and ho2 (:244),
+`vgs(p_sulf) = vgp` (:1437-1447) and the RADM2 copy
+`ddvel(p_hcl) = ddvel(p_hno3)` (:259-264).  NH3 alternates around twice SO2
+column by column, so both `highnh3` states occur.  Output:
+`tests/data/oracles/chem/wesely_radm2`.
+
+| fixture | map | julday | chem_opt |
+| --- | --- | ---: | ---: |
+| case_01 | USGS | 180 | 1 |
+| case_02 | USGS | 89 | 2 |
+| case_03 | MODIFIED_IGBP_MODIS_NOAH | 180 | 2 |
+| case_04 | MODIFIED_IGBP_MODIS_NOAH | 271 | 1 |
+
 ## Port contract and transcription differences
 
 - `woof/core/chem_drydep_gas.py:84` packs four float32 row numbers and an
   integer arm. No process branch tests a species name or species index.
   Names are used only for error labels, generic state lookup and diagnostics.
-- Arm 0 general, 1 ozone, 2 sulfur_dioxide, 3 ammonia. Source arms are
-  chem/module_dep_simple.F:965-1038,1044-1057,1081-1150,1154-1287.
+- Arm 0 general, 1 ozone, 2 sulfur_dioxide, 3 ammonia, 4 zero_surface,
+  5 particle. Source arms are
+  chem/module_dep_simple.F:965-1038,1044-1057,1081-1150,1154-1287,244,
+  1437-1447. zero_surface sets rc = 0 and keeps the literal
+  `1/(1/v + rc)`; particle replaces the velocity by
+  `vgp = 1/((1/vgpart) + (1/dvpart))` before cellvg.  hcl's row carries
+  hno3's numbers on the general arm, which is WRF's copy bit for bit.
   The tables and both land maps come from JSON, with source citations.
 - The CUDA kernel fuses the gas subtree into one column thread. Packed table
   offsets and Fortran-to-C array transposes are storage changes only.
-  `deppart` is transcribed, but its particle and fog results cannot affect a
-  gas row. The p_sulf overwrite and particle vgp are excluded from gas output.
-  MOZART, chemical-package aliases and seasons 3/4/5 are excluded because
+  `deppart` is transcribed; its particle velocity feeds the particle arm
+  and its fog velocity is unused.  MOZART, chemical-package aliases and seasons 3/4/5 are excluded because
   they are outside the requested non-MOZART gas path.
 - WRF mutates very small rmol to zero. The port uses the snapped value locally
   for the same calculations and leaves the caller's met array unchanged.
@@ -102,7 +150,9 @@ There are 4752 fixture columns, with two additional calls in case 11.
   refusals).
 * GPU: `python -m pytest tests/test_chem_wesely_wrf471_parity.py -m gpu`:
   0 ULP for every row's ddvel and both aerodynamic resistances on all 11 cases,
-  measured on an RTX 5090 (sm_120) and an RTX 4090 (sm_89).
+  measured on an RTX 5090 (sm_120) and an RTX 4090 (sm_89); and on the 4
+  RADM2 cases, all 42 gases, on an RTX A6000 (CUDA) and an Apple M3 Max
+  (Metal).
 * Mutation: changing one constant of rc in the kernel (rluo1's 3000 to 3001)
   fails all 11 GPU cases; changing one JSON table entry (ri(2,1) 60 to 120)
   fails all 11 table cases. Both were reverted.

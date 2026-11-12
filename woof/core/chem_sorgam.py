@@ -166,3 +166,147 @@ def launch_sorgam_ic(aerosol, sulf, convfac, z_at_w, *, aer_ic_opt=AER_IC_DEFAUL
          np.int32(aer_ic_opt), fatal))
     if int(fatal.get()[0]):
         raise SorgamFatal("aerosols_sorgam_init: unable to parse aer_ic_opt")
+
+
+# ---------------------------------------------------------------------------
+# The process (``aerosol.sorgam``): the chem driver's view.
+# ---------------------------------------------------------------------------
+#
+# Column-based: every launch above treats the (nz, ny, nx) fields as
+# independent cells or columns, so the hex route can hand (nz, 1, ncells)
+# views of the same rows and allocations.
+
+from woof.core.chem_context import ChemAllocation  # noqa: E402
+
+KEY = "aerosol.sorgam"
+LEDGER = "chemistry"
+KERNEL_MODULES = ("chem_sorgam",)
+REQUIRES = ("t_phy", "p_phy", "qv", "alt", "z_at_w")
+#: aerosol_driver's floor on the Aitken number before sorgam_driver
+#: (aerosol_driver.F:229-237; also chem_driver.F:705-715).
+NU0_FLOOR = np.float32(1.e7)
+#: module_data_sorgam epsilc and rgasuniv (J mol-1 K-1, the convfac start_em
+#: hands aerosols_sorgam_init: dyn_em/start_em.F:1812-1813).
+EPSILC = np.float32(1.e-16)
+RGASUNIV = np.float32(8.314)
+RADM2_KEY = "chem.radm2"
+#: WRF's PM output names (Registry state pm2_5_dry ... pm10, sum_pm_driver).
+PM_OUTPUTS = (("pm2_5_dry", "PM2_5_DRY", "dry PM2.5"),
+              ("pm2_5_water", "PM2_5_WATER", "PM2.5 aerosol water"),
+              ("pm2_5_dry_ec", "PM2_5_DRY_EC", "dry PM2.5 elemental carbon"),
+              ("pm10", "PM10", "PM10"))
+ALLOCATES = (
+    *(ChemAllocation(f"sorgam_{name}", "3d",
+                     description=f"SORGAM's non-advected {name} (Registry "
+                                 "state, chem/aerosol_driver.F), carried "
+                                 "between chem steps and by a restart")
+      for name in AUX),
+    *(ChemAllocation(f"sorgam_{name}", "3d", restart="rebuild", units="ug m-3",
+                     output_name=output, description=f"{text} (sum_pm_sorgam, "
+                     "chem/module_aerosols_sorgam.F), every history frame")
+      for name, output, text in PM_OUTPUTS),
+)
+
+
+def rows(table):
+    return table.rows_for(KEY)
+
+
+def _table_refusal(table):
+    names = {row.name for row in rows(table)}
+    missing = [name for name in AEROSOLS if name not in names]
+    if missing:
+        return (f"sorgam_driver updates all {len(AEROSOLS)} SORGAM aerosol "
+                f"rows, and {missing} do not name aerosol.sorgam")
+    outputs = {output for _name, output, _text in PM_OUTPUTS}
+    clash = sorted(d.output_name for d in table.diagnostics if d.output_name in outputs)
+    if clash:
+        return (f"SORGAM writes {clash} (sum_pm_sorgam) and this selection's "
+                "other sets add a table diagnostic of the same name, so one "
+                "history field would carry two different sums; select the "
+                "RADM2SORG set without another PM-writing set")
+    gas = {row.name for row in table.rows_for(RADM2_KEY)}
+    if not set(GASES) <= gas:
+        return (f"SORGAM exchanges {list(GASES)} with the RADM2 gas phase "
+                "and reads its precursor increments, so it runs only beside "
+                "chem.radm2 with those rows")
+    return None
+
+
+def refusal(cfg):
+    from woof.chem_table import load
+
+    table = load(cfg)
+    return None if table is None else _table_refusal(table)
+
+
+def init(ctx):
+    reason = _table_refusal(ctx.table)
+    if reason:
+        raise ValueError(reason)
+
+
+def cold_start(ctx):
+    """chemics_init's RADM2SORG start for chem_in_opt = 0
+    (chem/chemics_init.F:1796-1828): aerosols_sorgam_init's cold start
+    (AER_IC_DEFAULT: the gas sulfate moves into the two modes), the
+    conversion of its ug m-3 to mixing ratios (``chem*alt``), then every
+    package row floored at epsilc.  Runs after chem.radm2's gas profile, as
+    chemics_init runs after real.exe."""
+    import cupy as cp
+
+    table = ctx.table
+    aerosol = [ctx.field(table.row(name)) for name in AEROSOLS]
+    t_phy = ctx.met("t_phy")
+    p_phy = ctx.met("p_phy")
+    convfac = cp.ascontiguousarray(
+        (p_phy / RGASUNIV / t_phy).astype(cp.float32))
+    launch_sorgam_ic(aerosol, ctx.field(table.row("sulf")), convfac,
+                     ctx.met("z_at_w"))
+    alt = ctx.met("alt")
+    for a in aerosol:
+        cp.multiply(a, alt, out=a)
+    from woof.core.chem_radm2 import _package_rows
+
+    for row in _package_rows(table):
+        a = ctx.field(row)
+        cp.maximum(a, EPSILC, out=a)
+
+
+def step(ctx, dt, ktau):
+    from woof.core.chem_radm2 import chem_step_clock
+    import cupy as cp
+
+    run, dtstepc = chem_step_clock(ctx, dt, ktau)
+    if not run:
+        return
+    table = ctx.table
+    aerosol = [ctx.field(table.row(name)) for name in AEROSOLS]
+    nu0 = aerosol[AEROSOLS.index("nu0")]
+    cp.maximum(nu0, NU0_FLOOR, out=nu0)
+    gas = [ctx.field(table.row(name)) for name in GASES]
+    aux = [ctx.diag[f"sorgam_{name}"] for name in AUX]
+    vdrog = [ctx.diag[f"radm2_vdrog{n + 1:02d}"] for n in range(LDROG)]
+    launch_sorgam(aerosol, gas, aux, vdrog, ctx.met("t_phy"), ctx.met("p_phy"),
+                  ctx.met("qv"), ctx.met("alt"), ctx.diag["radm2_vcsulf_old"],
+                  dtstepc)
+
+
+def refresh_output(state):
+    """sum_pm_driver every step (chem_driver.F:1696-1700), into the
+    PM2_5_DRY ... PM10 outputs."""
+    from woof.core.chem_state import process_attr
+
+    chem = state.chem
+    table = chem.table
+    prep = getattr(chem, "prep", None)
+    if prep is None or prep.get("alt") is None:
+        return
+    by_name = {a.name: a for a in ALLOCATES}
+    aerosol = [getattr(state, table.row(name).state_attr) for name in AEROSOLS]
+    out = tuple(getattr(state, process_attr(by_name[f"sorgam_{name}"]))
+                for name, _o, _t in PM_OUTPUTS)
+    launch_sorgam_sum_pm(aerosol,
+                         getattr(state, process_attr(by_name["sorgam_h2oaj"])),
+                         getattr(state, process_attr(by_name["sorgam_h2oai"])),
+                         prep.get("alt"), out=out)

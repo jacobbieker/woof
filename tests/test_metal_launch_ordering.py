@@ -120,3 +120,54 @@ def test_launches_sharing_a_pass_keep_stream_order():
             assert np.array_equal(got.get().view(np.uint32), ref.view(np.uint32))
         for got, ref in zip(d, h):
             assert np.array_equal(got.get().view(np.uint32), ref.view(np.uint32))
+
+
+def test_a_by_value_address_table_launch_is_ordered_without_a_synchronize():
+    """rk_copy_words reaches its buffers only through addresses in a by-value
+    table.  The Metal loader resolves those words to the storages holding
+    them and binds them for MLX to track (loader ``resolved``), instead of
+    synchronizing before and after.  An MLX reader taken before the copy
+    keeps the old words; one taken after sees the copied ones; the source
+    read by a later in-place launch is not overwritten under the copy."""
+    from woof import backend
+    if backend.active() != "mlx":
+        pytest.skip("runs under WOOF_BACKEND=mlx")
+    import cupy as cp
+    from woof.core.kernels import get_kernel
+
+    copy = get_kernel("rk_bookkeeping", "rk_copy_words")
+    bump = cp.RawKernel(r'''extern "C" __global__ void bump(float* x, float s, int n) {
+        int i = blockIdx.x * blockDim.x + threadIdx.x;
+        if (i < n) { float v = x[i]; for (int k = 0; k < 32; ++k) v = v * 0.5f + s; x[i] = v; } }''', "bump")
+    n = 1 << 18
+    grid, block = ((n + 255) // 256,), (256,)
+    rng = np.random.default_rng(11)
+    src_h = rng.standard_normal(n).astype(np.float32)
+    dst_h = rng.standard_normal(n).astype(np.float32)
+    src, dst = cp.asarray(src_h), cp.asarray(dst_h)
+    rows = np.zeros((64, 3), dtype=np.uint64)
+    rows[0] = (src.data.ptr, dst.data.ptr, n)
+    table = rows.reshape(-1).view(np.dtype(("V", rows.nbytes)))
+
+    def host_bump(v, s):
+        for _ in range(32):
+            v = (v * np.float32(0.5) + np.float32(s)).astype(np.float32)
+        return v
+
+    taken, want = [], []
+    for step in range(10):
+        bump(grid, block, (src, np.float32(step), np.int32(n)))      # writes what the copy reads
+        src_h = host_bump(src_h, step)
+        before = dst * cp.float32(1.0)
+        taken.append(before)
+        want.append(dst_h.copy())
+        copy(((n + 1023) // 1024, 1), (256,), (table,))
+        dst_h = src_h.copy()
+        after = dst + cp.float32(0.0)
+        taken.append(after)
+        want.append(dst_h.copy())
+        bump(grid, block, (src, np.float32(-step), np.int32(n)))     # overwrites the copy's source
+        src_h = host_bump(src_h, -step)
+    for got, ref in zip(taken, want):
+        assert np.array_equal(got.get().view(np.uint32), ref.view(np.uint32))
+    assert np.array_equal(dst.get().view(np.uint32), dst_h.view(np.uint32))

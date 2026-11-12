@@ -630,7 +630,7 @@ def test_the_suite_writes_exactly_the_expected_filenames(ensemble_root,
     produced = sorted(p.name for p in render_layout.iter_rendered(out))
     assert produced == sorted(
         f"refl-{token}_d02-3km_{_STAMPS[0]}.png"
-        for token in ("ens-mean", "ens-spread", "ens-p40dbz",
+        for token in ("ens-mean", "ens-spread", "ens-max", "ens-p40dbz",
                       "ens-p40dbz-r5km", "ens-paintball40dbz", "ens-pmm"))
     for png in render_layout.iter_rendered(out):
         assert png.stat().st_size > 5_000, png.name
