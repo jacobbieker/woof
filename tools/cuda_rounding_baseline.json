@@ -78,6 +78,14 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "07e451c2a180a26a97cbf4b023eeeacfd00ea77778f59fdc901650cdfc44176e",
+    "constructor": "compile_using_nvrtc",
+    "factory": "_module_on",
+    "factory_sha256": "03a2ed112f2df7bcbaf7677cf54e1316c7f3c388f5adf5e2f201dbaa8366c9cb",
+    "file": "woof/hex/mpas_ice/subglacial_hydro_v842.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "08b412438fea2e6dba53d679fc2ae725f2afef478998519b9395664a71b27959",
     "constructor": "RawModule",
     "factory": "__init__",
@@ -4540,6 +4548,10 @@
     "sha256": "072b77b290a7cbb32710c07f34c42a1bb49da73f297f8dc0afaa96b55085316f"
    },
    {
+    "file": "woof/hex/mpas_ice/subglacial_hydro_v842.cu",
+    "sha256": "c3271b85fe76bb30e3181843eaf7dba08ab2e27ba59a030cbfacb2cf951dff23"
+   },
+   {
     "file": "woof/hex/mpas_ice/thermal_init_v842.cu",
     "sha256": "cf2be41d70819dca7c35c1218e7be9b4c4d06ee536204b062dee48d1ef71d086"
    },
@@ -5438,6 +5450,10 @@
     "sha256": "77cd765245f4bff99186b4d6977155b7094e044e8f32eac5f487473daa2154b9"
    },
    {
+    "file": "woof/hex/mpas_ice/subglacial_hydro_v842.py",
+    "sha256": "156a4c18dc1de685c26d91a9076a6d7cfb12359d7b44de32b068037ee64b3a48"
+   },
+   {
     "file": "woof/hex/mpas_ice/thermal_init_v842.py",
     "sha256": "01ee313ff0f1499eac040b707565d5a67fa29feb8d6f3961bd63b016cbea7eb0"
    },
@@ -5447,7 +5463,7 @@
    },
    {
     "file": "woof/hex/mpas_ice/time_integration_fe_v842.py",
-    "sha256": "fc5e32bcad73decb0f3ceb439a2355dda8cd44d46681d5552a371ddf357ba4b5"
+    "sha256": "d6e13888fa24ce1d7504a2cf4309bfbf0802cba8a70069f5352ec24da4851526"
    },
    {
     "file": "woof/hex/mpas_ocean/forcing_v842.py",

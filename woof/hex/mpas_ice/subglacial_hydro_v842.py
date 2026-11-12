@@ -238,10 +238,6 @@ def sgh_solve(*, mesh: dict, geometry: dict, thermal: dict, velocity: dict, hydr
         proposed = fmin(proposed, r(c["config_SGH_max_adaptive_timestep"]))
         proposed = fmin(proposed, time_left)
         time_left = time_left - proposed
-        if __import__("os").environ.get("SGH_DEBUG") and subcycles <= 5:
-            print("   sub", subcycles, "advec", advec, "diffu", diffu, "pressure", pressure, "proposed", proposed, flush=True)
-        if __import__("os").environ.get("SGH_DEBUG") and subcycles > 400:
-            raise RuntimeError("too many subcycles")
         h["deltatSGH"][...] = proposed
         dt_word = proposed
         # the sheet divergence, then the channels
