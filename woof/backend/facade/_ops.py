@@ -338,9 +338,9 @@ def _strict_in_place(np_name, target, other) -> bool:
     writing ``target``, where it was the kernel into a new array and a copy
     into ``target``: the same kernel and words, one launch fewer.  Only for
     binary32 arithmetic into a dense ``target`` whose shape the operands
-    broadcast to, and an ``other`` that is either another buffer or
-    ``target`` itself (an overlapping view would read words the kernel has
-    already written)."""
+    broadcast to, and an ``other`` that is either another Metal buffer or
+    ``target`` itself (an overlapping view, or a reinterpreting alias of the
+    same buffer, would read words the kernel has already written)."""
     if np_name not in _SUBNORMAL_ARITH or not _keeps_subnormals():
         return False
     if target.dtype != np.float32 or not target.is_c_contiguous():
@@ -357,9 +357,9 @@ def _strict_in_place(np_name, target, other) -> bool:
                 return False
         except ValueError:
             return False
-    if isinstance(other, ndarray) and other._st is target._st and not (
-            other._offset == target._offset and other.shape == target.shape
-            and other.strides == target.strides):
+    if isinstance(other, ndarray) and other._st.buffer_root() is target._st.buffer_root() and not (
+            other._st is target._st and other._offset == target._offset
+            and other.shape == target.shape and other.strides == target.strides):
         return False
     return True
 

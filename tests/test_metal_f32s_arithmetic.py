@@ -156,3 +156,24 @@ def test_strict_in_place_arithmetic_is_one_launch(cp, monkeypatch):
     a[1:] += a[:-1]
     assert writes and set(writes) == {(7, 32)}
     assert np.array_equal(a.get()[0], np.full(32, 4.5, np.float32))
+
+
+@pytest.mark.skipif(__import__("os").environ.get("GPUWM_WRF_EXACT", "0") != "1",
+                    reason="the strict facade arithmetic runs under GPUWM_WRF_EXACT=1")
+def test_strict_in_place_with_a_reinterpreting_alias_keeps_the_copy(cp, monkeypatch):
+    """An operand that reinterprets the target's buffer through another
+    storage (Storage.alias, as untyped hostAlloc memory is typed) shares its
+    memory though its storage object differs: the two-step path, and the
+    right words."""
+    from woof.backend.facade import _write
+    from woof.backend.facade._array import ndarray
+    a_h = np.linspace(-3, 3, 64, dtype=np.float32)
+    a = cp.asarray(a_h)
+    b = ndarray(a.shape, np.float32, _storage=a._st.alias(np.uint32))
+    assert b._st is not a._st and b._st.buffer_root() is a._st.buffer_root()
+    writes = []
+    real = _write.write
+    monkeypatch.setattr(_write, "write", lambda view, values: writes.append(view.shape) or real(view, values))
+    a += b
+    assert writes
+    assert np.array_equal(a.get().view(np.uint32), (a_h + a_h).view(np.uint32))
