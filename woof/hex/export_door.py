@@ -45,6 +45,13 @@ history unchanged) instead of converting them again.  The doors start that
 follower themselves when ``WOOF_HEX_EXPORT_LIVE`` names the export
 (:func:`live_export_command`).
 
+``--grib2`` and ``--earth2 PROFILE`` file the same frames in the WRF path's other
+export formats.  The frames just delivered are WRF-named, so the door hands them
+to the WRF path's own writers unchanged (``woof.grib2_export``, the ``rw_grib2export``
+binary behind ``woof export-grib2``; ``woof.earth2_export``, the ``rw_mlexport``
+binary behind ``woof export --earth2``) and the field names, level types and
+channel names are the ones those writers give a WRF run.  Nothing is encoded here.
+
 No numerics are done here: Python schedules, Rust converts.
 """
 from __future__ import annotations
@@ -575,11 +582,52 @@ def _before(path: Path, start: _dt.datetime | None) -> bool:
     return valid < start
 
 
+def _format_run(label: str, register, command: str, frames: list[Path], options: list[str], out: Path) -> dict[str, Any]:
+    """Run one of the WRF path's export fronts (``export-grib2``, ``export --earth2``) over the exported frames.
+
+    The front's own parser builds the namespace, so every default is the WRF path's default."""
+
+    parser = argparse.ArgumentParser(prog=label)
+    register(parser.add_subparsers())
+    namespace = parser.parse_args([command, *[str(f) for f in frames], "--out", str(out), *options])
+    started = time.monotonic()
+    code = namespace.func(namespace)
+    if code:
+        raise ExportDoorError(f"{label} exited {code}; the lat-lon frames are filed, the {label} output is not complete")
+    return {"out": str(out), "frames": len(frames), "options": options, "exit": 0,
+            "seconds": round(time.monotonic() - started, 3)}
+
+
+def export_formats(args: argparse.Namespace, frames: list[Path], out: Path) -> dict[str, Any]:
+    """The ``--grib2`` / ``--earth2`` outputs of the frames just exported, as receipt rows."""
+
+    from woof import earth2_export, grib2_export
+
+    rows: dict[str, Any] = {}
+    if getattr(args, "grib2", False):
+        options = ["--fields", args.grib2_fields, "--packing", args.grib2_packing]
+        if args.grib2_levels:
+            options += ["--levels", args.grib2_levels]
+        rows["grib2"] = _format_run("export-grib2", grib2_export.register_cli, "export-grib2", frames, options,
+                                    Path(args.grib2_out) if args.grib2_out else out / "grib2")
+    if getattr(args, "earth2", None):
+        options = ["--earth2", args.earth2]
+        if args.earth2_for:
+            options += ["--for", args.earth2_for]
+        if args.earth2_channels:
+            options += ["--channels", args.earth2_channels]
+        rows["earth2"] = _format_run("earth2 export", earth2_export.register_cli, "export", frames, options,
+                                     Path(args.earth2_out) if args.earth2_out else out / "earth2")
+    return rows
+
+
 def run_export(args: argparse.Namespace) -> int:
     from .products_door import (FORECAST_RECEIPT, discover_histories, forecast_receipt,
                                 receipt_text, simulation_start)
 
     if getattr(args, "follow", False):
+        if getattr(args, "grib2", False) or getattr(args, "earth2", None):
+            raise ExportDoorError("--grib2 and --earth2 file a finished export; drop --follow, or run the export again after it")
         return run_follow(args)
     started = time.monotonic()
     forecast_dir = Path(args.forecast_dir) if args.forecast_dir else None
@@ -685,6 +733,9 @@ def run_export(args: argparse.Namespace) -> int:
     # The export is finished: each grid's point-forecast series from the store just written.
     value["columns"]["series"] = write_series(out / "columns")
     out.mkdir(parents=True, exist_ok=True)
+    formats = export_formats(args, [Path(row["frame"]) for row in delivered], out)
+    if formats:
+        value["formats"] = formats
     (out / RECEIPT_NAME).write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     if not args.keep_scratch:
         shutil.rmtree(scratch, ignore_errors=True)
@@ -808,6 +859,18 @@ def add_export_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--keep-scratch", action="store_true")
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--convert-exe", default=None, metavar="FILE")
+    parser.add_argument("--grib2", action="store_true",
+                        help="also write the frames as GRIB2 (the WRF path's export-grib2 writer, WRF names and levels), to --grib2-out")
+    parser.add_argument("--grib2-out", default=None, metavar="DIR", help="default: <out>/grib2")
+    parser.add_argument("--grib2-fields", default="standard", choices=("standard", "surface", "pressure", "all"))
+    parser.add_argument("--grib2-packing", default="complex", choices=("complex", "simple"))
+    parser.add_argument("--grib2-levels", default=None, metavar="HPA,HPA", help="default: 100 through 1000 by 25")
+    parser.add_argument("--earth2", default=None, metavar="PROFILE",
+                        help="also write the frames for an Earth2Studio consumer (the WRF path's export --earth2 writer; "
+                             "`woof export --list` names the profiles), to --earth2-out")
+    parser.add_argument("--earth2-out", default=None, metavar="DIR", help="default: <out>/earth2")
+    parser.add_argument("--earth2-for", default=None, metavar="CONSUMER[,CONSUMER]")
+    parser.add_argument("--earth2-channels", default=None, help="additional lexicon channels, comma separated")
     parser.add_argument("--follow", action="store_true",
                         help="export each frame as the running forecast closes it (history-ready.jsonl), "
                              "listing it in <out>/export-ready.jsonl; needs --mesh, --init, "
