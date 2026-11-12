@@ -313,8 +313,9 @@ def test_radm2_packages_map_with_their_switches(tmp_path, chem_opt, chem_set):
     shared = tomllib.loads(text)["shared"]
     assert shared["chem_sets"] == chem_set
     assert shared["photdt"] == 30.0 and shared["chemdt"] == 2.0 and shared["kemit"] == 19
-    # No inventory row yet: emiss_opt = 3 enables none, so nothing is double-counted.
-    assert "chem_sources" not in shared or "edgar" not in shared["chem_sources"]
+    # emiss_opt = 3 enables the rows' first inventory only (EDGAR, not the
+    # synthetic fallback), so nothing is emitted twice.
+    assert shared["chem_sources"] == "edgar-v81"
     fixed = {row.key for row in report.fixed}
     assert {"chem_opt", "emiss_opt", "phot_opt", "gas_drydep_opt"} <= fixed
     experiment = build_experiment(tomllib.loads(text), source="radm2 namelist")
