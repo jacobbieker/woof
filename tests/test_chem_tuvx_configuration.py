@@ -24,9 +24,10 @@ CONFIG = json.loads((ROOT / "tools" / "tuvx_oracle" / "photolysis.json").read_te
 def _data_root():
     """The verified data root when the data are here; None rather than a download from a test."""
     import os
-    if not (os.environ.get(data.ENV_ROOT) or all((data.cache_root() / f).is_file() for f in data.FILES)):
+    root = os.environ.get(data.ENV_ROOT) or data.cache_root()
+    if not all((Path(root) / f).is_file() for f in data.FILES):
         return None
-    return data.ensure()
+    return data.ensure(root=root)       # an explicit root is only verified, never fetched into
 
 
 def test_the_grid_and_flux_are_the_oracles_words():
@@ -61,6 +62,12 @@ def test_add_point_keeps_order_and_refuses_duplicates():
     assert (x, y) == ([1.0, 2.0, 3.0], [10.0, 20.0, 30.0])
     with pytest.raises(tuvx.TuvxPortError):
         tuvx.add_point(x, y, 2.0, 0.0)
+
+
+def test_a_short_interpolator_list_is_refused():
+    grid = tuvx.WavelengthGrid([100.0, 200.0])
+    with pytest.raises(tuvx.TuvxPortError, match="interpolators"):
+        tuvx.extraterrestrial_flux(["a", "b"], [""], grid)
 
 
 def test_the_unit_conversion_takes_the_single_precision_literal():

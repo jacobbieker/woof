@@ -187,6 +187,8 @@ def extraterrestrial_flux(files, interpolators, grid: WavelengthGrid, *, root=".
     mid = np.zeros(nbins, dtype=np.float64)
     if len(files) > len(ETF_BAND_EDGES) - 1:
         raise TuvxPortError("more solar files than TUV-x's flux bands")
+    if len(interpolators) != len(files):
+        raise TuvxPortError(f"{len(interpolators)} interpolators for {len(files)} solar files")
     for index, (name, kind) in enumerate(zip(files, interpolators), start=1):
         kind = kind or "conserving"
         if kind not in INTERPOLATORS:
