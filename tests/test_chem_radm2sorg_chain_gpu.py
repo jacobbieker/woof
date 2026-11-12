@@ -232,3 +232,10 @@ def test_radm2sorg_chain_runs_and_repeats():
     # The same bytes on CUDA and Metal (the column is host-independent).
     print("radm2sorg chain sha256", digest.hexdigest())
     assert digest.hexdigest() == CHAIN_SHA256
+
+
+def test_number_rows_take_the_number_moment_health_ceiling():
+    from woof.core.health import rule_for_field
+    assert rule_for_field("chem_ac0").upper == 1.0e15
+    assert rule_for_field("chem_so4aj").upper == 1.0e9
+    assert rule_for_field("chem_o3").upper == 1.0e9
