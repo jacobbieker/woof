@@ -17,6 +17,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1].parent
 OUT = ROOT / "tests" / "data" / "tuvx_oracle" / "fixtures.json"
 NCASE = 8
+NTWILIGHT = 4
 #: US Standard Atmosphere 1976 temperature break points [km, K], extended to 120 km
 _TZ = [0, 11, 20, 32, 47, 51, 71, 86, 100, 120]
 _TK = [288.15, 216.65, 216.65, 228.65, 270.65, 270.65, 214.65, 186.87, 195.08, 360.0]
@@ -31,6 +32,9 @@ def layouts(rng):
         model = z0 + (30.0 - z0) * (np.linspace(0.0, 1.0, 41) ** 1.6)
         grids.append(np.concatenate([model, np.arange(32.0, 60.0, 2.0), np.arange(60.0, 120.1, 5.0)]))
     yield "model_stretched", grids
+    # Appended after the layouts above (their draws, and so their words, are unchanged): the sun at and below
+    # the horizon, where the direct beam grazes or misses layers (spherical geometry nid < 0, screening height).
+    yield "twilight", [uniform] * NTWILIGHT
 
 
 def column(rng, z):
@@ -92,20 +96,45 @@ def run(harness, work, cases):
         intermediates(t, names) for t in tables]
 
 
-#: per-case intermediate tables the harness writes: cross section, quantum yield, actinic flux parts
-INTERMEDIATES = ("xs", "qy", "fdr", "fup", "fdn")
+#: per-case intermediate tables the harness writes: cross section, quantum yield, actinic flux parts, then the
+#: radiative-transfer intermediates (see harness.F90)
+INTERMEDIATES = ("xs", "qy", "fdr", "fup", "fdn", "nid", "dsdh", "avc", "asc", "ovc", "osc", "lsx", "rod", "aod",
+                 "ass", "ag")
+
 #: cases per layout whose intermediates are kept, and their height edges (five, both ends included)
 INTERMEDIATE_CASES = 2
 
 
+def _keep(nrow):
+    return sorted({1, nrow // 4, nrow // 2, (3 * nrow) // 4, nrow})
+
+
 def intermediates(table, names):
-    """{"height_edges": [...], "cross_section": {reaction: [[word per bin] per kept edge]}, ...}, 0-based edges."""
-    any_table = next(iter(table.values()))
+    """{"height_edges": [...], "cross_section": {reaction: [[word per bin] per kept edge]}, ...}, 0-based edges.
+
+    Layer tables keep their own five rows ("layers", 0-based from the surface); the geometry keeps every nid and
+    the dsdh rows of the kept edge indices (counted from the top, as TUV-x does); columns are kept whole."""
+    any_table = table["xs", 1]
     nedge = max(i for i, _ in any_table)
     nbin = max(k for _, k in any_table)
-    keep = sorted({1, nedge // 4, nedge // 2, (3 * nedge) // 4, nedge})
-    rows = lambda t: [[t[i, k] for k in range(1, nbin + 1)] for i in keep]  # noqa: E731
-    return {"height_edges": [i - 1 for i in keep],
+    keep = _keep(nedge)
+    rows = lambda t, kept=keep: [[t[i, k] for k in range(1, nbin + 1)] for i in kept]  # noqa: E731
+    nlayer = nedge - 1
+    layers = _keep(nlayer)
+    column = lambda t: [t[i, 1] for i in range(1, max(i for i, _ in t) + 1)]  # noqa: E731
+    o2 = names.index("O2+hv->O+O") + 1
+    rt = {"layers": [i - 1 for i in layers],
+          "nid": [int(float.fromhex(w)) for w in column(table["nid", 0])],
+          "dsdh": [[table["dsdh", 0][i, k] for k in range(1, nlayer + 1)] for i in keep],
+          "air_vertical_column": column(table["avc", 0]), "air_slant_column": column(table["asc", 0]),
+          "o2_vertical_column": column(table["ovc", 0]), "o2_slant_column": column(table["osc", 0]),
+          "o2_band_cross_section_cm2": rows(table["lsx", o2]),
+          "radiator_optical_depth": {name: rows(table["rod", r], layers)
+                                     for r, name in enumerate(("air", "O2", "O3"), start=1)},
+          "accumulated_optical_depth": rows(table["aod", 0], layers),
+          "accumulated_single_scattering_albedo": rows(table["ass", 0], layers),
+          "accumulated_asymmetry_factor": rows(table["ag", 0], layers)}
+    return {"height_edges": [i - 1 for i in keep], "radiative_transfer": rt,
             "cross_section_cm2": {names[j - 1]: rows(table["xs", j]) for j in range(1, len(names) + 1)},
             "quantum_yield": {names[j - 1]: rows(table["qy", j]) for j in range(1, len(names) + 1)},
             "actinic_flux_direct": rows(table["fdr", 0]), "actinic_flux_diffuse_up": rows(table["fup", 0]),
@@ -120,7 +149,8 @@ def main(work):
         cases = []
         for z in grids:
             c = column(rng, z)
-            c.update(edges=z, sza=float(rng.uniform(0.0, 89.0)), esd=float(rng.uniform(0.983, 1.017)))
+            low, high = (89.0, 96.0) if name == "twilight" else (0.0, 89.0)
+            c.update(edges=z, sza=float(rng.uniform(low, high)), esd=float(rng.uniform(0.983, 1.017)))
             cases.append(c)
         # One harness per layout: every case shares the layout's level count.
         labels, results, layout_configuration, tables = run(work / "harness", work, cases)
@@ -145,7 +175,14 @@ def main(work):
                      "configuration": "the wavelength grid's edges (nm) and the extraterrestrial flux on its bins "
                                       "(photon cm-2 s-1), as the built core holds them",
                      "intermediates": "first two cases of each layout, five height edges (0-based): cross "
-                                      "sections cm2, quantum yields, actinic flux parts per bin"},
+                                      "sections cm2, quantum yields, actinic flux parts per bin; "
+                                      "radiative_transfer: spherical geometry (nid per edge and dsdh rows "
+                                      "of the kept edges, both counted from the top), air and O2 vertical "
+                                      "(per layer) and slant (per edge) columns molecule cm-2, the O2 "
+                                      "reaction's cross section with the Lyman-alpha / Schumann-Runge bands "
+                                      "applied, and per kept layer (0-based from the surface) each "
+                                      "radiator's optical depth and the accumulated optical depth, "
+                                      "single-scattering albedo and asymmetry factor"},
            "configuration": configuration, "fixtures": fixtures}
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(out, indent=0) + "\n")

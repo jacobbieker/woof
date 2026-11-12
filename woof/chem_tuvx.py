@@ -564,3 +564,111 @@ class Photolysis:
         """``{reaction: (cross section cm2, quantum yield)}``, each (height edge, wavelength bin)."""
         return {name: (xs.calculate(temperature_edges), qy.calculate(temperature_edges))
                 for name, xs, qy, _bands in self.reactions}
+
+
+# ------------------------------------------------------------------------------------------------------------
+# Spherical geometry (src/spherical_geometry.F90): the direct beam's path through each layer, per column.
+# Columns are batched on a leading axis; every column's arithmetic is its own, in TUV-x's order, so a batch
+# gives each column's words.  Indices follow TUV-x: an edge ``i`` counts from the top of the atmosphere
+# (0 = top), a layer ``j`` (1-based in TUV-x, 0-based here) from the top as well.
+
+#: src/constants.F90
+PI = 3.1415926535898
+RADIUS_KM = 6.371e3
+LARGEST = 1.0e36
+D2R = PI / 180.0
+
+
+class Geometry:
+    """spherical_geometry_t after set_parameters: ``nid`` (ncol, nlayer + 1), the number of layers the direct
+    beam crosses to reach each edge (-1 when it never does), and ``dsdh`` (ncol, nlayer + 1, nlayer), its
+    slant path over vertical depth in each layer crossed; ``sza`` (ncol,) in degrees."""
+
+    def __init__(self, nid, dsdh, sza):
+        self.nid, self.dsdh, self.sza = nid, dsdh, sza
+
+    @property
+    def nlayer(self):
+        return self.dsdh.shape[2]
+
+
+def _columns(values):
+    a = np.asarray(values, dtype=np.float64)
+    return a[None, :] if a.ndim == 1 else a
+
+
+def spherical_geometry(edges_km, sza_deg) -> Geometry:
+    """set_parameters (Dahlback and Stamnes 1991, appendix B) for each column's height edges (km, ascending,
+    (ncol, nz) or (nz,)) and solar zenith angle (degrees)."""
+    z = _columns(edges_km)
+    zen = np.atleast_1d(np.asarray(sza_deg, dtype=np.float64))
+    ncol, nz = z.shape
+    if zen.shape != (ncol,):
+        raise TuvxPortError(f"{zen.size} solar zenith angles for {ncol} columns")
+    nlayer = nz - 1
+    zenrad = zen * D2R
+    re = RADIUS_KM + z[:, 0]
+    zd = (z - z[:, :1])[:, ::-1]                 # zd(0:nlayer): heights above the surface, top first
+    sinrad = np.sin(zenrad)
+    twilight = zen > 90.0
+    nid = np.zeros((ncol, nlayer + 1), dtype=np.int64)
+    dsdh = np.zeros((ncol, nlayer + 1, nlayer), dtype=np.float64)
+    for i in range(nlayer + 1):
+        rpsinz = (re + zd[:, i]) * sinrad
+        dark = twilight & (rpsinz < re)
+        ident = np.where(twilight, -1, i)
+        for j in range(1, nlayer + 1):           # the layer holding the screening height
+            inside = (rpsinz < (zd[:, j - 1] + re)) & (rpsinz >= (zd[:, j] + re))
+            ident = np.where(twilight & inside, j, ident)
+        ident = np.where(dark, -1, ident)
+        for j in range(1, nlayer + 1):
+            active = j <= ident
+            if not active.any():
+                continue
+            sm = np.where((j == ident) & (ident == i) & twilight, -1.0, 1.0)
+            rj = re + zd[:, j - 1]
+            rjp1 = re + zd[:, j]
+            dhj = zd[:, j - 1] - zd[:, j]
+            ga = np.maximum(0.0, rj * rj - rpsinz * rpsinz)
+            gb = np.maximum(0.0, rjp1 * rjp1 - rpsinz * rpsinz)
+            dsj = np.where((ident > i) & (j == ident), np.sqrt(ga), np.sqrt(ga) - sm * np.sqrt(gb))
+            dsdh[:, i, j - 1] = np.where(active, dsj / dhj, 0.0)
+        nid[:, i] = ident
+    return Geometry(nid, dsdh, zen)
+
+
+def air_mass(geometry: Geometry, column):
+    """spherical_geometry_t%air_mass: ``(vertical, slant)`` columns of a species from its layer columns
+    (ncol, nlayer + 1; the exo layer last, molecule cm-2).  ``vertical`` (ncol, nlayer) is the column above
+    each layer's base, surface first; ``slant`` (ncol, nlayer + 1) the column along the direct beam above
+    each edge, surface first (LARGEST where the beam does not reach)."""
+    aircol = _columns(column)
+    ncol, nz = aircol.shape
+    nlayer = nz - 1
+    if geometry.nlayer != nlayer:
+        raise TuvxPortError(f"a {nz}-element column for a {geometry.nlayer}-layer geometry")
+    vcol = np.empty((ncol, nlayer), dtype=np.float64)
+    accum = aircol[:, nz - 1].copy()
+    for ident in range(nlayer, 0, -1):
+        accum = accum + aircol[:, ident - 1]
+        vcol[:, ident - 1] = accum
+    scol = np.empty((ncol, nz), dtype=np.float64)
+    scol[:, nz - 1] = geometry.dsdh[:, 1, 0] * aircol[:, nz - 1]
+    for ident in range(1, nlayer + 1):
+        nid = geometry.nid[:, ident]
+        single = np.minimum(nid, ident)
+        accum = scol[:, nz - 1].copy()
+        for j in range(1, nlayer + 1):
+            d = geometry.dsdh[:, ident, j - 1]
+            a = aircol[:, nz - 1 - j]
+            term = np.where(j <= single, a * d, 2.0 * a * d)
+            accum = np.where(j <= nid, accum + term, accum)
+        scol[:, nz - 1 - ident] = np.where(nid < 0, LARGEST, accum)
+    return vcol, scol
+
+
+def exo_layer_columns(layer_columns):
+    """A from-host profile's exo_layer_dens_ without a scale height or exo density: the host's layer columns
+    and a zero exo layer (src/profiles/from_host.F90 update)."""
+    lay = _columns(layer_columns)
+    return np.concatenate([lay, np.zeros((lay.shape[0], 1))], axis=1)
