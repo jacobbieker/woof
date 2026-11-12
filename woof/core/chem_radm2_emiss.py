@@ -182,9 +182,61 @@ def emission_frames(ctx):
                for name in getattr(ctx.table, "enabled_sources", ())
                if name in sources):
         return None
-    from woof.chem_inventory_frames import radm2_frames_for_context
-
     return radm2_frames_for_context(ctx, _valid_time(ctx))
+
+
+def inventory_source(table):
+    """The one enabled inventory this run's emission.radm2 rows read, or None.
+
+    Rows list their inventories as emission entries whose field is a WRF
+    emis_ant name; enabling two of them would emit every species twice."""
+    enabled = set(getattr(table, "enabled_sources", ()))
+    named = []
+    for row in rows(table):
+        for entry in row.emissions:
+            if entry["field"] in EMISSIONS and entry["source"] in enabled \
+                    and entry["source"] not in named:
+                named.append(entry["source"])
+    if len(named) > 1:
+        raise ValueError(f"chem_sources enables two RADM2 inventories {named}; "
+                         "every emitted species would be added twice")
+    return named[0] if named else None
+
+
+def radm2_frames_for_context(ctx, valid_time):
+    """``{e_name: (ny, nx) float32 device frame}`` from the run's inventory
+    (woof.chem_inventory_frames), built once per domain: the inventories are
+    annual means, so the frames never change during a run."""
+    chem = ctx.state.chem
+    cached = getattr(chem, "radm2_frames", None)
+    if cached is not None:
+        return cached
+    source = inventory_source(ctx.table)
+    if source is None:
+        return None
+    import cupy as cp
+    from woof.chem_inventory_frames import (InventoryFrames, radm2_emission_frames,
+                                            radm2_emission_receipt)
+
+    lat = cp.asnumpy(cp.asarray(ctx.met("xlat")))
+    lon = cp.asnumpy(cp.asarray(ctx.met("xlong")))
+    area = None
+    msft = getattr(ctx.state, "msft", None)
+    dx, dy = getattr(ctx.cfg, "dx", None), getattr(ctx.cfg, "dy", None)
+    if msft is not None and dx and dy:
+        area = float(dx) * float(dy) / np.asarray(cp.asnumpy(msft), np.float64) ** 2
+    provider = InventoryFrames(lat, lon, cell_area_m2=area)
+    host = radm2_emission_frames(provider, source, valid_time)
+    chem.radm2_frames_receipt = radm2_emission_receipt(provider, source, host,
+                                                       valid_time)
+    chem.radm2_frames = {name: cp.asarray(np.ascontiguousarray(a, np.float32))
+                         for name, a in host.items()}
+    return chem.radm2_frames
+
+
+def source_receipt(state):
+    """What the run emitted from (chem_driver puts it in the receipt)."""
+    return getattr(state.chem, "radm2_frames_receipt", None)
 
 
 def init(ctx):

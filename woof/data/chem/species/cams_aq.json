@@ -107,7 +107,22 @@
         "emission.radm2",
         "chem.radm2"
       ],
-      "emissions": [],
+      "emissions": [
+        {
+          "source": "edgar-v81",
+          "field": "e_no2",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_no2 (WRF emis_ant units) from EDGAR v8.1 AP 2022 annual totals through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        },
+        {
+          "source": "synthetic-anthro",
+          "field": "e_no2",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_no2 (WRF emis_ant units) from WOOF's synthetic urban-plume fallback through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        }
+      ],
       "boundary": [
         {
           "source": "cams-global",
@@ -184,7 +199,22 @@
         "emission.radm2",
         "chem.radm2"
       ],
-      "emissions": [],
+      "emissions": [
+        {
+          "source": "edgar-v81",
+          "field": "e_co",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_co (WRF emis_ant units) from EDGAR v8.1 AP 2022 annual totals through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        },
+        {
+          "source": "synthetic-anthro",
+          "field": "e_co",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_co (WRF emis_ant units) from WOOF's synthetic urban-plume fallback through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        }
+      ],
       "boundary": [
         {
           "source": "cams-global",

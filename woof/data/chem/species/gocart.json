@@ -36,6 +36,20 @@
           "weight": 56192051946.430244,
           "vertical": "surface",
           "provenance": "EDGAR v8.1 SO2 total flux, kg m-2 s-1 to WRF emis_ant mol km-2 hr-1 (emissions_driver.F:1601-1603)"
+        },
+        {
+          "source": "edgar-v81",
+          "field": "e_so2",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_so2 (WRF emis_ant units) from EDGAR v8.1 AP 2022 annual totals through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        },
+        {
+          "source": "synthetic-anthro",
+          "field": "e_so2",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_so2 (WRF emis_ant units) from WOOF's synthetic urban-plume fallback through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
         }
       ],
       "boundary": [
@@ -138,6 +152,7 @@
         "optics.gocart",
         "coupling.thompson",
         "emission.radm2",
+        "drydep.wesely",
         "chem.radm2",
         "aerosol.sorgam"
       ],
@@ -205,7 +220,16 @@
         }
       ],
       "drydep": {
-        "scheme": "gocart_aerosol"
+        "scheme": "gocart_aerosol",
+        "wesely": {
+          "hstar": 0.0,
+          "dhr": 0.0,
+          "f0": 0.0,
+          "dratio": 0.0025178725,
+          "scpr23": 0.016748838,
+          "arm": "particle",
+          "from": "hstar chem/module_dep_simple.F:1952; dhr chem/module_dep_simple.F:1954; f0 chem/module_dep_simple.F:1955; dvj chem/module_dep_simple.F:1956; dratio chem/module_dep_simple.F:3482-3484; arm chem/module_dep_simple.F:1437-1447,1613; scpr23 chem/module_dep_simple.F:3482-3488 (woof/data/chem/wesely/gas_parameters.v1.json, the RADM2 Wesely oracle)"
+        }
       },
       "settling": null,
       "wetdep_ls_alpha": 1.0,
@@ -268,6 +292,10 @@
           "radm2sorg"
         ],
         "aerosol.sorgam": [
+          "radm2sorg"
+        ],
+        "drydep.wesely": [
+          "radm2",
           "radm2sorg"
         ]
       }
