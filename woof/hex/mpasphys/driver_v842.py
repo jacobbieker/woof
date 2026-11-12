@@ -22,6 +22,7 @@ from ..physics_suites import load_table
 from . import radiation_spectral_v842 as _spectral
 from . import radtran_v842 as _radtran
 from . import solar_diagnostics_v842 as _solar
+from ..mpasdiag import nwp_diag_v842 as _nwp
 from . import wrfsolar_eps_v842 as _eps
 
 SCHEMA = "mpas-port.physics-driver-v842/v1"
@@ -311,6 +312,9 @@ class DriverConfig:
     #: WOOF's &diagnostics config_solar_diagnostics (solar_diagnostics_v842): WRF-Solar's 26
     #: diagnostics after every step.  Not a Registry option.
     solar_diagnostics: bool = False
+    #: WOOF's &diagnostics config_nwp_diagnostics (mpasdiag.nwp_diag_v842): WRF's nwp_diagnostics history
+    #: maxima (T2MAX/T2MIN, WSPD10MAX, U10MAX/V10MAX, GUST, W_UP/DN_MAX, GRPL_MAX, REFD_MAX, hail).  Not a Registry option.
+    nwp_diagnostics: bool = False
     #: WOOF's &wrfsolar_eps group (wrfsolar_eps_v842): WRF-Solar EPS's multi_perturb hooks at the
     #: FARMS, Deng, Thompson and cloudiness seats, or None.  Not a Registry option.
     wrfsolar_eps: Any = None
@@ -430,6 +434,8 @@ class DriverConfig:
                 result["radtran"]["aerosol"] = d.aerosol
         if self.solar_diagnostics:
             result["solar_diagnostics"] = True
+        if self.nwp_diagnostics:
+            result["nwp_diagnostics"] = True
         if self.wrfsolar_eps is not None:
             o = self.wrfsolar_eps
             result["wrfsolar_eps"] = dict(switches=list(o.switches), degree=o.degree,
@@ -732,6 +738,7 @@ def resolve_namelist(text: str, *, backends: Mapping[str, str] | None = None,
     spectral = _spectral.resolve(groups)
     radtran = _radtran.resolve(groups)
     solar = _solar.resolve(groups)
+    nwp = _nwp.parse_flag(groups)
     multi_perturb = _eps.resolve(groups)
 
     def record(config: DriverConfig) -> DriverConfig:
@@ -744,6 +751,8 @@ def resolve_namelist(text: str, *, backends: Mapping[str, str] | None = None,
         if solar:
             config = _replace(config, solar_diagnostics=True)
             _solar.check(config)
+        if nwp:
+            config = _replace(config, nwp_diagnostics=True)
         if multi_perturb is not None:
             config = _replace(config, wrfsolar_eps=multi_perturb)
             _eps.check(config)

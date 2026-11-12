@@ -511,6 +511,10 @@ class _ColumnBatchState:
     mass-coupled tendencies bit-identical to the raw physical rates.
     """
 
+    #: Hex columns are not a WRF mass grid: woof.wrf_hydro_route.attach leaves them to the hex host, which
+    #: couples WRF-Hydro through the conservative cell <-> grid exchange (woof.hex.wrf_hydro_hex).
+    hex_columns = True
+
     def __init__(self, cfg, fnm: np.ndarray, fnp: np.ndarray,
                  p_top: float, terrain_height, xp, species=_SPECIES):
         nz, ny, nx = cfg.nz, cfg.ny, cfg.nx

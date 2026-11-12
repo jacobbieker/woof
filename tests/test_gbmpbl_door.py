@@ -186,7 +186,7 @@ def test_gbm_owned_loader_retains_the_same_source_and_options():
     from woof.core import gbmpbl
     import hashlib
     assert hashlib.sha256(gbmpbl.module_source().encode()).hexdigest() == (
-        "b9cd4cfaf4d7f29e7531f05c5aa48b440163ec6698e3877619006b3b35ae9ecc")
+        "8e3237593699c8cf4e7903f6229654c43cdb3d645cf8987d657547518b42fda3")
     assert gbmpbl.MODULE_OPTIONS == ("-std=c++17", "-fmad=false", "--ftz=false")
 
 

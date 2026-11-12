@@ -289,9 +289,12 @@ def test_a_chem_domain_prices_its_process_and_prep_arrays():
 
 
 def test_an_emission_source_no_frame_provider_serves_is_refused_at_the_door():
-    """EDGAR's annual flux densities have no fetch route and no remap into
-    emission frames in this build; enabling them passed the door and stopped
-    the run at its first chem step after a whole preparation."""
+    """The GOCART rows name EDGAR through emission.inventory, which reads
+    frames no provider in this build serves (woof.chem_inventory_frames
+    serves only an inventory process's speciation fields); enabling EDGAR
+    for them passed the door and stopped the run at its first chem step
+    after a whole preparation.  This refusal is unchanged by the inventory
+    provider: what it now accepts is tested by the next test."""
     base = dict(chem_sets="gocart_primary", bl_pbl_physics=1,
                 sf_sfclay_physics=1, sf_surface_physics=2)
     validate_chem_config(_cfg(**base))
@@ -300,3 +303,58 @@ def test_an_emission_source_no_frame_provider_serves_is_refused_at_the_door():
     validate_chem_config(_cfg(chem_sets="smoke", chem_sources="rave-3km",
                               bl_pbl_physics=1, sf_sfclay_physics=1,
                               sf_surface_physics=2))
+
+
+def _radm2_door_table(tmp_path, monkeypatch, field):
+    """A copy of the chem table with one emission.radm2 row naming both
+    inventories through ``field``, and emission.radm2 in the build."""
+    import json
+    import shutil
+    from types import MappingProxyType
+
+    import woof.chem_table as chem_table
+
+    root = tmp_path / "chem"
+    shutil.copytree(chem_table.CHEM_DATA_ROOT, root)
+    (root / "sets" / "radm2_door_test.json").write_text(json.dumps({
+        "schema": "gpuwm.chem.set.v1", "name": "radm2_door_test",
+        "description": "door test", "wrf_chem_opt": None,
+        "wrf_tracer_opt": None, "test_only": True, "provenance": "test"}))
+    emissions = [{"source": source, "field": field, "weight": 1.0,
+                  "vertical": "kemit", "provenance": "test"}
+                 for source in ("edgar-v81", "synthetic-anthro")]
+    (root / "species" / "radm2_door_test.json").write_text(json.dumps({
+        "schema": "gpuwm.chem.species.v1", "owner": "test", "rows": [{
+            "name": "door_co", "output_name": None, "long_name": "door test",
+            "units": "ppmv", "phase": "gas", "family": "co",
+            "sets": ["radm2_door_test"], "default_inflow": 0.0,
+            "molar_mass_g_mol": 28.01, "processes": ["emission.radm2"],
+            "emissions": emissions, "provenance": "test"}]}))
+    monkeypatch.setattr(chem_table, "CHEM_DATA_ROOT", root)
+    monkeypatch.setattr(chem_table, "CHEM_PROCESS_MODULES", MappingProxyType({
+        **chem_table.CHEM_PROCESS_MODULES,
+        "emission.radm2": "woof.core.chem_radm2_emiss"}))
+
+
+@pytest.mark.parametrize("source", ["edgar-v81", "synthetic-anthro",
+                                    "edgar-v81,synthetic-anthro"])
+def test_inventory_sources_pass_the_door_for_radm2_speciation_fields(
+        tmp_path, monkeypatch, source):
+    """woof.chem_inventory_frames serves edgar-v81 and synthetic-anthro to an
+    emission.radm2 row whose emission field is a radm2 speciation output
+    (e_co); the same row naming the raw inventory field ("co") stays
+    refused, since no provider hands that row a raw field."""
+    _radm2_door_table(tmp_path, monkeypatch, "e_co")
+    base = dict(chem_sets="radm2_door_test", bl_pbl_physics=1,
+                sf_sfclay_physics=1, sf_surface_physics=2)
+    validate_chem_config(_cfg(**base))
+    validate_chem_config(_cfg(**base, chem_sources=source))
+
+
+def test_an_inventory_field_outside_the_speciation_is_refused(tmp_path,
+                                                              monkeypatch):
+    _radm2_door_table(tmp_path, monkeypatch, "co")
+    with pytest.raises(ValueError, match="no emission frame provider"):
+        validate_chem_config(_cfg(chem_sets="radm2_door_test",
+                                  chem_sources="edgar-v81", bl_pbl_physics=1,
+                                  sf_sfclay_physics=1, sf_surface_physics=2))
