@@ -1907,11 +1907,15 @@ def build_forecast_constructor_values(
     # identity digest are byte-identical.
     from woof.hex import pbl_admission
 
+    from woof.hex.engine_registry import implemented_options as _engine_options
     from woof.hex.physics_suites import load_table as _physics_table
 
     if (suite_row
             and config.config_pbl_scheme not in pbl_admission.CONFIG_SCHEMES.values()
-            and config.config_pbl_scheme in _physics_table()["options"]["config_pbl_scheme"]):
+            and (config.config_pbl_scheme in _physics_table()["options"]["config_pbl_scheme"]
+                 # A generic-seam row records the engine registry id
+                 # (ccpp-tke-edmf), which the resolver already judged.
+                 or config.config_pbl_scheme in _engine_options("pbl"))):
         # A column-suite or generic-seam row: suite_config recorded the
         # selection's own boundary layer (MYNN), which that seam builds from
         # its selection, not from this frozen-lane key.  THE BREAKAGE: every
