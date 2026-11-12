@@ -116,11 +116,10 @@ def test_gpu_matches_the_v842_oracle_word_for_word(precision):
     # the density's reciprocal replaced by a division
     ("const rk rho = M(M(A(unt0, RHO_S), BULK_MOD), DENOMK);",
      "const rk rho = D(M(A(unt0, RHO_S), BULK_MOD), S(BULK_MOD, p));", "jm_ocean", "density"),
-    # the reference pressure's three terms summed in another order
-    ("A(A(M(C(0.059808), S(EXP(-M(C(0.025), depth)), C(1.0))), M(C(0.100766), depth)),\n"
-     "                   M(C(2.28405e-7), M(depth, depth)));",
-     "A(M(C(0.059808), S(EXP(-M(C(0.025), depth)), C(1.0))), A(M(C(0.100766), depth),\n"
-     "                   M(C(2.28405e-7), M(depth, depth))));", "jm_deep_short_columns", "density"),
+    # a level's mid-depth as the upper bottom plus half the layer
+    ("M(C(0.5), A(refBottomDepth[k], refBottomDepth[k - 1]))",
+     "A(refBottomDepth[k - 1], M(C(0.5), S(refBottomDepth[k], refBottomDepth[k - 1])))",
+     "jm_deep_short_columns", "density"),
     # the thermal expansion's correction regrouped
     ("M(M(M(p, A(unt0, RHO_S)), DKDT), DENOMK)", "M(M(p, A(unt0, RHO_S)), M(DKDT, DENOMK))", "jm_ocean",
      "thermalExpansionCoeff"),

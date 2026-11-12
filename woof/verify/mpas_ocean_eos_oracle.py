@@ -123,7 +123,7 @@ def make_case(name, seed, n_cells, n_levels, eos_type, tracer_index, t_range, s_
     freeze_s[rs.random_sample((nc, nl)) < 0.05] = 0.0
     freeze_p = uniform(0.0, 6.0e7, (nc, nl))
     pick = rs.random_sample((nc, nl))
-    for lo, hi, where in ((0.0, 0.1, "open_ocean"), (0.1, 0.2, "land_ice_cavity")):
+    for lo, hi, where in ((0.0, 0.1, "open_ocean"), (0.2, 0.3, "land_ice_cavity")):
         # a tenth below each reference pressure, and some exactly at it
         reference = configs[f"config_{where}_freezing_temperature_reference_pressure"]
         below = (pick >= lo) & (pick < hi)
