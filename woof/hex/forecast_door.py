@@ -4240,7 +4240,10 @@ def mpas_suite_lts_refusal(arguments: argparse.Namespace, environ=None) -> str |
 def run_forecast(arguments: argparse.Namespace) -> int:
     from woof.output_formats import command_scope
     from .wave_options import environment as wave_environment
-    with wave_environment(arguments), command_scope(arguments, engine="woof hex") as scope:
+    from woof.wrf_hydro_route import launch_scope as wrf_hydro_scope
+    with wave_environment(arguments), wrf_hydro_scope(getattr(arguments, "wrf_hydro", None),
+                                                      getattr(arguments, "wrf_hydro_output", None)), \
+            command_scope(arguments, engine="woof hex") as scope:
         result = _run_forecast_with_outputs(arguments)
         return scope.finish(result) if scope else result
 
@@ -4262,6 +4265,10 @@ def _run_forecast_with_outputs(arguments: argparse.Namespace) -> int:
 
 def _run_forecast_with_ocean(arguments: argparse.Namespace) -> int:
     if getattr(arguments, "members", None) is not None:
+        # Every member would route into the one WRF-Hydro output directory (woof.wrf_hydro_route.launch_scope
+        # refuses an ensemble for the same reason).
+        from .wrf_hydro_hex import refuse_unwired
+        refuse_unwired("a --members roster (the members would share one routing output directory)")
         from .multi_member import run_members
         return run_members(arguments, sys.modules[__name__])
     triggers = getattr(arguments, "nest_triggers", None)
@@ -5436,6 +5443,10 @@ def add_forecast_arguments(parser: argparse.ArgumentParser) -> None:
                         help="N aerosol species and GPU mixing/deposition/settling inputs (chemistry/v1 JSON)")
     parser.add_argument("--wind-farms", default=None, metavar="uswtdb|TABLE|off",
                         help="opt-in Fitch turbine drag and TKE from the shared turbine tables")
+    # --wrf-hydro / --wrf-hydro-output: WRF-Hydro's routing on its own LSM grid, coupled to the hex land surface
+    # through the conservative cell <-> grid exchange (woof.hex.wrf_hydro_hex; WOOF route only).
+    from woof.wrf_hydro_route import add_arguments as add_wrf_hydro_arguments
+    add_wrf_hydro_arguments(parser)
     parser.add_argument(
         "--source-table", type=Path, default=None, metavar="FILE",
         help="a point-source table the selected row's seam releases from "
