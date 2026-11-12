@@ -9,9 +9,9 @@
     "cupy.ReductionKernel",
     "cupy.cuda.compiler.compile_using_nvrtc"
   ],
-  "site_count": 646,
+  "site_count": 649,
   "site_count_by_kind": {
-    "cupy.ElementwiseKernel": 43,
+    "cupy.ElementwiseKernel": 45,
     "cupy.RawKernel": 111,
     "cupy.RawModule": 293,
     "cupy.ReductionKernel": 16,
@@ -25,7 +25,7 @@
       "cupy.cuda.compiler.compile_using_nvrtc": 22
     },
     "package": {
-      "cupy.ElementwiseKernel": 31,
+      "cupy.ElementwiseKernel": 33,
       "cupy.RawKernel": 39,
       "cupy.RawModule": 99,
       "cupy.ReductionKernel": 9,
@@ -6709,6 +6709,22 @@
       "text": "_FLOAT32_TO_FLOAT64 = xp.ElementwiseKernel("
     },
     {
+      "file": "woof/core/bandwidth_glue.py",
+      "line": 42,
+      "column": 11,
+      "surface": "package",
+      "constructor": "cp.ElementwiseKernel",
+      "constructor_kind": "cupy.ElementwiseKernel",
+      "enclosing": "_accumulate_scaled_kernel",
+      "takes_caller_options": true,
+      "options_argument_present": false,
+      "options_expression": null,
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "return cp.ElementwiseKernel(\"float32 src, float32 scale\", \"float32 dst\","
+    },
+    {
       "file": "woof/core/chem_plumerise_cache.py",
       "line": 37,
       "column": 24,
@@ -6732,7 +6748,7 @@
     },
     {
       "file": "woof/core/chem_radm2.py",
-      "line": 283,
+      "line": 301,
       "column": 18,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
@@ -7426,7 +7442,7 @@
     },
     {
       "file": "woof/core/moist.py",
-      "line": 680,
+      "line": 684,
       "column": 11,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
@@ -7882,7 +7898,7 @@
     },
     {
       "file": "woof/core/physics.py",
-      "line": 1944,
+      "line": 1945,
       "column": 17,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
@@ -7898,7 +7914,7 @@
     },
     {
       "file": "woof/core/physics.py",
-      "line": 1959,
+      "line": 1960,
       "column": 17,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
@@ -7914,7 +7930,7 @@
     },
     {
       "file": "woof/core/physics.py",
-      "line": 1982,
+      "line": 1983,
       "column": 21,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
@@ -7936,6 +7952,22 @@
       "constructor": "cp.ElementwiseKernel",
       "constructor_kind": "cupy.ElementwiseKernel",
       "enclosing": "_thompson_dry_kernel",
+      "takes_caller_options": true,
+      "options_argument_present": false,
+      "options_expression": null,
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "return cp.ElementwiseKernel("
+    },
+    {
+      "file": "woof/core/ring_frame.py",
+      "line": 27,
+      "column": 11,
+      "surface": "package",
+      "constructor": "cp.ElementwiseKernel",
+      "constructor_kind": "cupy.ElementwiseKernel",
+      "enclosing": "_frame_kernel",
       "takes_caller_options": true,
       "options_argument_present": false,
       "options_expression": null,
