@@ -130,7 +130,11 @@ def step(ctx, dt, ktau):
                                            ctx.met('t_phy'),ctx.met('p_phy'))
     for index,row in enumerate(rows(ctx.table)):
         chem=ctx.field(row);vel=ctx.ddvel[ctx.row_index(row)]
-        if smoke_vd is not None and row.phase=='aerosol' and row.drydep is None:
+        # The fork's smoke velocity serves aerosol rows no deposition
+        # process owns (a drydep.sorgam row has its own velocity in ddvel).
+        if (smoke_vd is not None and row.phase=='aerosol' and row.drydep is None
+                and not any(key.startswith('drydep.') and row.acts_in(key,ctx.table.sets)
+                            for key in row.processes)):
             vel=smoke_vd
         accum=ctx.diag['vertmx_deposited'][index]
         launch_vertmx(chem,met['alt'],met['z_at_w'],met['z'],met['dz8w'],met['exch_h'],vel,dt,accum,

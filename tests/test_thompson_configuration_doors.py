@@ -99,6 +99,19 @@ def test_non_fork_import_is_byte_identical_to_the_previous_importer(tmp_path):
                     if line.startswith("  &physics ra_sw_eclipse = 1, 1 [fixed: ")]
     assert len(eclipse_rows) == 1
     new_lines.remove(eclipse_rows[0])
+    # Report lines the importer gained after d191b05b3: the thermal-prognostic
+    # scheme-generation notice (use_theta_m is stated, so it names it), and
+    # the wording of the scalar_adv_opt validation row.
+    notice = "Scheme-generation notices:"
+    thermal = ("  Thermal prognostic: use_theta_m=0 (explicit namelist value); "
+               "dry potential temperature.")
+    assert new_lines.count(notice) == 1 and new_lines.count(thermal) == 1
+    new_lines.remove(notice)
+    new_lines.remove(thermal)
+    new_lines = [line.replace(
+        "validated equal to the supported positive-definite path",
+        "validated equal to the supported moist_adv_opt=1 path")
+        for line in new_lines]
     assert new_lines == old_lines
 
 

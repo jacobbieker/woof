@@ -119,6 +119,8 @@ EPSILC = np.float32(1.e-16)
 #: The aerosol process whose rows make the package RADM2SORG (chem_opt = 2).
 SORGAM_KEY = "aerosol.sorgam"
 PHOTOLYSIS_KEY = "photolysis.ftuv"
+#: The sets of the two RADM2 packages (woof/data/chem/sets).
+RADM2_SETS = ("radm2", "radm2sorg")
 ALLOCATES = (
     ChemAllocation("radm2_last_chem_secs", "2d", dtype="float64",
                    description="WRF's last_chem_time as seconds since the "
@@ -163,6 +165,13 @@ def _table_refusal(table, cfg):
         return ("RADM2 reads its photolysis rates from photolysis.ftuv, which "
                 "no active row names, so every photolytic reaction would run "
                 "at zero")
+    others = [name for name in table.sets if name not in RADM2_SETS]
+    if others:
+        return (f"chem_sets {list(table.sets)} combine a RADM2 package with "
+                f"{others}; WRF runs one chem_opt package, and a second set's "
+                "processes and table diagnostics would read RADM2's species "
+                "with another package's meaning (sulf is RADM2's gas-phase "
+                "H2SO4, GOCART's particulate sulfate)")
     if table.rows_for("chem.sulfur"):
         return ("RADM2 and GOCART's sulfur mechanism both act on so2 and "
                 "sulf in this selection; one WRF chem_opt carries one "

@@ -36,13 +36,36 @@ INIT = dt.datetime(2025, 10, 24, 12)
 class _Grid:
     # e_we/e_sn are WRF's STAGGERED counts; a position-only row reads
     # them to find the middle of the domain (grid_center_latlon).
-    def __init__(self, lat0=14.0, lon0=-74.0, step=0.02, e_we=7, e_sn=7):
+    def __init__(self, lat0=14.0, lon0=-74.0, step=0.02, e_we=41, e_sn=41):
         self.lat0, self.lon0, self.step = lat0, lon0, step
         self.e_we, self.e_sn = e_we, e_sn
 
     def ij_to_latlon(self, x, y):
         return (self.lat0 + (y - 1.0) * self.step,
                 self.lon0 + (x - 1.0) * self.step)
+
+    def latlon_to_ij(self, lat, lon):
+        return ((lon - self.lon0) / self.step + 1.0,
+                (lat - self.lat0) / self.step + 1.0)
+
+
+@pytest.fixture(autouse=True)
+def _surface_block_without_the_native_reducer(monkeypatch):
+    """The default track row carries the surface block (central pressure,
+    peak 10 m wind, wind radii), which the writer asks
+    woof.tc.field_products.diagnose for -- a Rust reduction over real
+    surface fields.  This file is about the runner's boundaries, not the
+    reduction (test_tc_field_products and test_storm_track_writer own
+    that), so the reduction answers a fixed fix here."""
+    def diagnose(state, grid, centre, *, swath=None, radii_centre=None):
+        quadrants = lambda value: {k: [value] * 4 for k in ("34", "50", "64")}
+        return {"latitude_deg": float(centre[0]),
+                "longitude_deg": float(centre[1]),
+                "mslp_hpa": 968.0, "vmax10_m_s": 50.0,
+                "radii_nm": quadrants(0.0),
+                "radii_reach_grid_edge": quadrants(False)}
+
+    monkeypatch.setattr("woof.tc.field_products.diagnose", diagnose)
 
 
 def _dress(parent, child):
@@ -379,7 +402,10 @@ def test_an_hour_long_run_records_its_initial_position(tmp_path):
         encoding="utf-8").splitlines()[1:]
     assert _seconds(rows)[0] == 0.0, (
         "a run's track must start at its own initial time")
-    assert _seconds(rows) == [float(t) for t in range(0, 3600, 360)]
+    # close_receipt closes the deck with a final fix at the last boundary the
+    # run reached (3540), so a completed forecast's track does not end one
+    # cadence early; 3540 is not a cadence multiple, hence the extra row.
+    assert _seconds(rows) == [float(t) for t in range(0, 3600, 360)] + [3540.0]
 
 
 def test_a_run_without_a_track_is_still_untouched_at_t_zero(tmp_path):

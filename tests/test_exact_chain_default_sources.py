@@ -5,10 +5,10 @@ import pytest
 from woof.core import kernels
 
 BASE_SOURCES = {
-    'nssl2_nucond_default.cu': 'b4819a1e912924fe2e30c33897585e3a46c32e89dcb3ab43eb1ee32b212b6db1',
+    'nssl2_nucond_default.cu': '45a31a20d2e957a70607189a63ebbad1500dcf6f10399dccba969da59383f38a',
     'nssl2_default.cu': '37173f1bcc9ec0fd6c6f4afe060c0d984bcd14abc5d4841d05aa62e6ac85d3ea',
     'nssl2_fused_gs_default.cu': '07dff4bf34509e89b75683a83d356c4691b6eab1aa96140af3e6fa5b00fe429b',
-    'nssl2_driver_support_default.cu': '12f193c6918056b995577930304867cd8369a46ab1facfcde589d244cbd6eca8',
+    'nssl2_driver_support_default.cu': '5f0c1fa888b7d350fa6c8274d932f3f5721c08e59f9ee06d93312d62dbdcf4bb',
     'nssl2_diagnostics_default.cu': 'a95ae9e0bc3dd20a13865cfa6d1148d2a78ee5d7c17c9c1bca9a0c8dbdf19868',
     # ysu_default.cu since b00a0b9ecb1: ae709149b5a reworded a measured-on
     # comment (an export hit) and the calm-column early exit was removed

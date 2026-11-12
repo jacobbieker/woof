@@ -19,7 +19,7 @@ def test_every_ssib_native_carrier_is_read_and_mapped():
 
 
 def test_ssib_restart_rules_do_not_change_noah():
-    cfg = SimpleNamespace(sf_surface_physics=2)
+    cfg = SimpleNamespace(sf_surface_physics=2, cu_physics=0, mp_physics=0)
     assert _disposition('SIBECT', cfg) is None
     assert _disposition('SWVISDIR', cfg).kind == 'inactive'
     assert fields_restore_plan('ssib_ect', {'SIBECT'}, cfg) is None

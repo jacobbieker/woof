@@ -248,10 +248,11 @@ def test_explicit_package_is_not_replaced_by_announced_substitution(tmp_path):
     # mp_physics = 55 used to import as an announced Morrison substitution
     # that this gate then refused; the importer now refuses it by name
     # itself (woof.config._MP_UNPORTED_SCHEMES), before any door.
-    # ISHMAEL (55) is ported now; the old Eta Ferrier scheme (95) is the
-    # WRF package the importer still refuses by name.
-    unported=INPUT_TEXT.replace('mp_physics = 10, 10','mp_physics = 95, 95')
-    with pytest.raises(ValueError,match='mp_physics=95.*is not ported'):
+    # ISHMAEL (55) and the old Eta Ferrier scheme (95) are ported now;
+    # Milbrandt-Yau three-moment (12) is a WRF package the importer still
+    # refuses by name.
+    unported=INPUT_TEXT.replace('mp_physics = 10, 10','mp_physics = 12, 12')
+    with pytest.raises(ValueError,match='mp_physics=12.*is not ported'):
         import_namelists(*_pair(tmp_path,inp=unported),rrtmg_variant=None)
     # The gate still refuses a package replacement however it arises.
     from dataclasses import replace
