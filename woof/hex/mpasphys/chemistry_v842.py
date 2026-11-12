@@ -312,6 +312,14 @@ class SuiteChemistry:
                                                      start_time=start, dt=self.dt)
             module = chem_micm_hex
         runtime.species_row = self.row
+        if self.mode == "wrf_chem":
+            # Wesely deposition reads the run's land-use dataset (WRF MMINLU) from the surface scheme's tables,
+            # as on the WOOF route (HexWrfChemistry.bind_seam); here it is MPAS's own sfc_input.mminlu, the
+            # classification MPAS's Noah reads its tables under (mpas_atmphys_landuse.F:143-188).
+            native = getattr(coupling.session, 'native', None)
+            mminlu = None if native is None else native.get_text_field('sfc_input', 'mminlu').strip()
+            if mminlu:
+                runtime.state.physics.noah_params = SimpleNamespace(lutype=mminlu)
         self.runtime = runtime
         if self.restart is not None:
             runtime.restore_payload(self.restart)

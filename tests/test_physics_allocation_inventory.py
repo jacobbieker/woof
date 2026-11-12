@@ -1818,6 +1818,25 @@ _PHYSICS_ALLOCATION_INVENTORY['woof/core/temf_sfclay.py'] = {}
 # WDM5/6/7 validation each adds one uint32 status word per call.
 _PHYSICS_ALLOCATION_INVENTORY['woof/core/wdm6.py'] = {'launch_wdm6': 1, '_launch': 1, 'launch_wdm5': 1}
 
+# The chemistry program's launchers (chem_opt = 1/2 Fast-TUV, RADM2 and SORGAM).
+# RADM2 and the RADM2 emissions kernel allocate nothing the scanner counts: their
+# pointer tables are cp.asarray uploads of a few dozen 8-byte addresses per call.
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/chem_radm2.py'] = {}
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/chem_radm2_emiss.py'] = {}
+# Fast-TUV: _state is photo_inti's shared tables and scratch, built once per
+# (levels, chem_opt) and kept in _STATE (6 sites, bounded by the module-level
+# size expressions in chem_ftuv.cu).  launch_ftuv's 5 are the (23, nz + 1, ny, nx)
+# input pack, the per-batch workspaces (BATCH = 2048 columns, about 0.6 MB a
+# column at 45 levels), the (photolysis, nz, ny, nx) output and the per-batch
+# fatal words, per call.
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/chem_ftuv.py'] = {'_state': 6, 'launch_ftuv': 5}
+# SORGAM: the one-word fatal flag of the column and the cold-start launches,
+# and the callers-may-supply outputs (38 (ny, nx) deposition planes; the four
+# (nz, ny, nx) PM planes) that are built only when the caller hands none.
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/chem_sorgam.py'] = {
+    'launch_sorgam': 1, 'launch_sorgam_drydep': 1,
+    'launch_sorgam_sum_pm': 1, 'launch_sorgam_ic': 1}
+
 def test_no_physics_gpu_module_allocates_outside_its_workspace():
     """The property, not the instance: scan every physics GPU module.
 
@@ -2142,6 +2161,9 @@ _PHYSICS_ALLOCATION_INVENTORY['woof/core/kf.py']['trigger2_perturbations'] = 2
 # the structural batch-bound test still checks site by site.
 _PHYSICS_ALLOCATION_INVENTORY['woof/core/noahmp_thermal_slab.py']['evaluate_radiation_slab'] = 5
 _PHYSICS_ALLOCATION_INVENTORY['woof/core/noahmp_water_slab.py']['evaluate_water_slab'] = 12
+# Noah-MP under WRF_HYDRO adds a thirteenth: the ponded head as one more
+# (n, stride + 1) input extension, bounded by the batch width n like the rest.
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/noahmp_water_slab.py']['evaluate_water_slab'] = 13
 # Startup driver carriers added by the 3.0 ports: TEMF's sfcevp and
 # exch_temf surface planes in __init__; fractional sea-ice *_sea planes,
 # soil smoiseq, crop type, the paper-written snow state, the Deng
