@@ -75,6 +75,9 @@ class SurfaceInput:
     #: geogrid flag the builder stages is 1 (0 would select a WRF fallback
     #: branch the sidecar did not build for).  ``None``: any finite value.
     allowed: tuple[int, ...] | None = None
+    #: The closed range a ``cell`` input's values must lie in (a fraction is
+    #: in [0, 1]); ``None``: any finite value.
+    bounds: tuple[float, float] | None = None
 
 
 @dataclass(frozen=True)
@@ -153,7 +156,7 @@ _FRC_URB2D = SurfaceInput(
     "SLUCM's urban fraction as WOOF's WRF preparation estimates it: the cell's "
     "MODIS land-use category fractions (pixel shares per Voronoi cell) times "
     "URBPARM.TBL FRC_URB, on dominant-urban land cells (woof hex "
-    "surface-statics --fields urban)")
+    "surface-statics --fields urban)", bounds=(0.0, 1.0))
 _LCZ = _unstaged(
     "ivgtyp", "LU_INDEX (LCZ 51-61)", "int32",
     "the Local Climate Zone classes 51-61 kept distinct per cell (CGLC-MODIS-"
@@ -330,7 +333,34 @@ def _array_identity(values: np.ndarray) -> dict[str, Any]:
             "sha256": sha256(contiguous.tobytes()).hexdigest()}
 
 
+def urban_table_sha256(cfg) -> str:
+    """SHA-256 of the URBPARM.TBL a run's urban model reads, chosen exactly as
+    woof.core.physics._attach_urban chooses it (urban_table_dir, else the
+    urban_ucm_generation's vendored table)."""
+
+    from woof.core.urban_tables import URBAN_TABLE_DIR, urban_table_path
+    from woof.tables import table_path
+
+    generation = str(_value(cfg, "urban_ucm_generation", "wrf_471"))
+    custom = str(_value(cfg, "urban_table_dir", "") or "")
+    if custom:
+        path = urban_table_path(0, Path(custom))
+    else:
+        directory = URBAN_TABLE_DIR / "wrf480" if generation == "wrf_480" else None
+        path = table_path("urban-480" if generation == "wrf_480" else "urban",
+                          urban_table_path(0, directory))
+    return sha256(Path(path).read_bytes()).hexdigest()
+
+
 def _check_allowed(item: SurfaceInput, values, where: str) -> None:
+    if item.bounds is not None:
+        low, high = item.bounds
+        array = np.asarray(values, dtype=np.float64)
+        if np.any(array < low) or np.any(array > high):
+            raise ValueError(
+                f"{where}: {item.variable} holds values outside [{low:g}, {high:g}] "
+                f"(min {float(array.min()):g}, max {float(array.max()):g}), "
+                f"which {item.keyword} cannot be")
     if item.allowed is None:
         return
     bad = np.setdiff1d(np.unique(np.asarray(values)), np.asarray(item.allowed))
@@ -423,6 +453,20 @@ def bind(physics: Mapping[str, Any] | None, path: str | Path | None, *,
                     f"sha256 {provenance.get('parent_static_sha256')}, against "
                     f"{run_static}), so its per-cell values describe another "
                     "land use", "the surface statics file built from this run's --static")
+        if any(need.input.keyword == "frc_urb2d" for need in required):
+            # The fraction weighs each urban category by URBPARM.TBL's FRC_URB;
+            # the run's urban model must read the same table bytes.
+            built = (provenance.get("urban") or {}).get("urbparm_sha256")
+            run_table = urban_table_sha256(cfg)
+            if built != run_table:
+                raise ConfigurationRefusal(
+                    "surface_statics", str(source),
+                    f"FRC_URB2D was estimated with the URBPARM.TBL of sha256 "
+                    f"{built}, and this run's urban model reads {run_table} "
+                    "(urban_table_dir / urban_ucm_generation), so the staged "
+                    "fractions would weigh the categories by another table",
+                    "the default urban table, or a surface statics file built "
+                    "with the run's table")
         for need in required:
             item = need.input
             if item.kind == "flag":

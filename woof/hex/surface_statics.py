@@ -297,7 +297,14 @@ def urban_fraction_cells(counts: np.ndarray, cmin: int, ivgtyp, landmask
          "LANDMASK": np.asarray(landmask, np.float64)[None, :]},
         option=1, use_wudapt_lcz=0)
     frc = np.asarray(frc, dtype=np.float64).reshape(-1)
+    from types import SimpleNamespace
+
+    from .surface_inputs import urban_table_sha256
+
     return frc.astype(np.float32), {
+        # The table estimate_urban_fraction read (load_urban_params' default);
+        # the forecast refuses a run whose urban model reads another.
+        "urbparm_sha256": urban_table_sha256(SimpleNamespace()),
         "method": "LANDUSEF (pixel shares per Voronoi cell) x URBPARM.TBL "
                   "FRC_URB on dominant-urban land cells (woof.static."
                   "urban_fraction, the WRF path's SLUCM estimate)",
@@ -324,6 +331,8 @@ def build(static: Path, out: Path, *, geog_root: Path | None,
         ivgtyp = np.asarray(dataset.variables["ivgtyp"][:]).reshape(-1)
         tc_lakemask = (np.asarray(dataset.variables["tc_lakemask"][:]).reshape(-1)
                        if "tc_lakemask" in dataset.variables else None)
+        replaced_landuse = (dataset.getncattr("highres_landuse_source")
+                            if "highres_landuse_source" in dataset.ncattrs() else None)
     n = geometry.n_cells
     water = landmask == 0
     selected = np.isfinite(cell_spacing_m(geometry))
@@ -401,6 +410,13 @@ def build(static: Path, out: Path, *, geog_root: Path | None,
             provenance["lake_depth"] = depth_receipt
             written["LAKE_DEPTH"] = depth
             attrs["LAKE_DEPTH_FLAG"] = np.int32(1)
+    if "urban" in groups and replaced_landuse is not None:
+        raise SurfaceStaticsRefusal(
+            f"the static's land use was replaced by `woof hex static-highres` "
+            f"({replaced_landuse}); the urban shares here count the 30-arc-second "
+            "MODIS pixels, which would disagree with that static's urban cells. "
+            "Build the urban fraction from a static carrying the 30-arc-second "
+            "land use (the high-resolution source is not wired here yet)")
     if "urban" in groups:
         dataset = geog(LAKE_LANDUSE_DATASET)
         counts, cmin, window = category_counts(

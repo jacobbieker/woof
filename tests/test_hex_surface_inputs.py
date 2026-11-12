@@ -364,3 +364,39 @@ def test_the_urban_fraction_is_the_wrf_preparations_estimate_on_the_cells():
     table = float(load_urban_params(1, 0).FRC_URB_TBL[1])  # ISURBAN -> UTYPE 2
     np.testing.assert_allclose(frc, np.float32([0.6 * table, table, 0.0]), rtol=1e-6)
     assert receipt["urban_cells"] == 2
+
+
+def test_the_urban_fraction_must_be_a_fraction():
+    cfg = _cfg(sf_urban_physics=1)
+    with pytest.raises(ValueError, match="outside \\[0, 1\\]"):
+        si.seal(cfg, {"frc_urb2d": np.float32([0.5, 1.2, 0.0])}, n_columns=3)
+    si.seal(cfg, {"frc_urb2d": np.float32([0.5, 1.0, 0.0])}, n_columns=3)
+
+
+def test_the_urban_fraction_is_held_to_the_runs_urban_table(tmp_path):
+    import json
+    from types import SimpleNamespace
+
+    default = si.urban_table_sha256(SimpleNamespace())
+    custom = tmp_path / "tables"
+    custom.mkdir()
+    (custom / "URBPARM.TBL").write_text("# another table\n")
+    assert si.urban_table_sha256(SimpleNamespace(urban_table_dir=str(custom))) != default
+    lat = np.radians([40.0, 41.0, 42.0])
+    lon = np.radians([-80.0, -81.0, -82.0])
+    import netCDF4
+
+    path = tmp_path / "u.nc"
+    with netCDF4.Dataset(path, "w") as dataset:
+        dataset.createDimension("nCells", 3)
+        dataset.createVariable("FRC_URB2D", "f4", ("nCells",))[:] = [0.5, 0, 0]
+        dataset.createVariable("latCell", "f8", ("nCells",))[:] = lat
+        dataset.createVariable("lonCell", "f8", ("nCells",))[:] = lon
+        dataset.setncattr("schema", si.SCHEMA)
+        dataset.setncattr("provenance_json", json.dumps({"urban": {"urbparm_sha256": default}}))
+    physics = dict(_lake_physics(), sf_lake_physics=0, sf_urban_physics=1)
+    inputs, _ = si.bind(physics, path, latitude_rad=lat, longitude_rad=lon)
+    assert list(inputs) == ["frc_urb2d"]
+    with pytest.raises(ConfigurationRefusal, match="another table"):
+        si.bind(dict(physics, urban_table_dir=str(custom)), path,
+                latitude_rad=lat, longitude_rad=lon)
