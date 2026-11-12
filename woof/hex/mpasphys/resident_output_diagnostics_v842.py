@@ -10,6 +10,8 @@ from ..mpasdiag.isobaric import FIELDS as ISOBARIC, IsobaricDiagnostics
 from ..mpasdiag.convective_v842 import FIELDS as CONVECTIVE, MAXIMA, ConvectiveDiagnosticsModule
 from ..mpasdiag.utils import DiagnosticsUtils, Direction, StreamView
 from ..mpasdiag import nwp_diag_v842 as _nwp
+from ..mpasdiag import tslist_v842 as _tslist
+from ..mpasdiag import plevel_diag_v842 as _plevel
 
 
 PRIMARY = frozenset(('vorticity', 'divergence', 'ke'))
@@ -79,6 +81,10 @@ class ResidentOutputDiagnostics:
     produced = PRODUCED
     #: WRF's nwp_diagnostics maxima (mpasdiag.nwp_diag_v842); built by bind() only with config_nwp_diagnostics.
     nwp = None
+    #: WRF's per-step station time series (mpasdiag.tslist_v842); built by bind() only with config_tslist.
+    tslist = None
+    #: WRF's p_lev / z_lev diagnostics (mpasdiag.plevel_diag_v842); built by bind() only with config_p_lev_diags / config_z_lev_diags.
+    plevel = None
     #: The running maxima/accumulators of the convective module (``accumulates``).
     convective_maxima = MAXIMA
     #: Pools the diagnostic modules read.
@@ -124,6 +130,10 @@ class ResidentOutputDiagnostics:
         run summed five (hrrrv5 x1.2562, 14Z diag: u10m_mean, prec_acc_nc and every updraft-helicity maximum,
         28,342 words).  The straight run already folded the checkpoint instant before it sealed.
         """
+        if self.tslist is not None:
+            raise ValueError("a checkpoint continuation of a run with &diagnostics config_tslist output is not carried: "
+                             "the Rust station writer's resume receipt is not in hex's checkpoint, so the station "
+                             "files would restart from empty")
         self._resume = {name: value for name, value in state.items()
                         if name in self.convective_maxima and ('diag', name) in self.buffers}
         if self.nwp is not None:
@@ -201,6 +211,15 @@ class ResidentOutputDiagnostics:
             self.produced = PRODUCED | frozenset(_nwp.NAMES)
             self.nwp.setup(self.utils)
             self.accumulates = self.accumulates or self.nwp.accumulates
+        stations = getattr(self.session.config, 'tslist', None)
+        if stations is not None:
+            self.tslist = _tslist.TslistModule(self, stations)
+            self.tslist.setup()
+            self.accumulates = True
+        if {_plevel.P_PACKAGE, _plevel.Z_PACKAGE} & set(self.session.layout.packages):
+            self.plevel = _plevel.LevelDiagnosticsModule(self, self.session.config.plevel_diagnostics)
+            self.produced = self.produced | frozenset(_plevel.NAMES)
+            self.plevel.setup(self.utils)
 
     def _new_convective(self):
         """The route's convective diagnostics module (MPAS v8.4.2's here)."""
@@ -215,6 +234,8 @@ class ResidentOutputDiagnostics:
         self.convective.update()
         if self.nwp is not None:
             self.nwp.update()
+        if self.tslist is not None:
+            self.tslist.update()
 
     def views(self):
         """The writer's streams as MPAS stream views at ``self.when`` (a tuple).
@@ -278,6 +299,8 @@ class ResidentOutputDiagnostics:
         step, when = self.pending
         self.pending = None
         self.when = when
+        if self.tslist is not None:
+            self.tslist.begin(step, when)
         # No stream is due on a deferred step, so only the maxima read the
         # primary diagnostics: vorticity alone (divergence/KE are formed
         # again by before_write whenever a stream needs them).
@@ -312,6 +335,8 @@ class ResidentOutputDiagnostics:
             # A deferred update must be folded on its own state before this one.
             raise RuntimeError(f'maxima of step {self.pending[0]} were not folded before step {step}')
         self.when = when
+        if self.tslist is not None:
+            self.tslist.begin(step, when)
         self._begin_event()
         resume, self._resume = (self._resume, None) if step == 0 else (None, self._resume)
         if resume is not None:
@@ -333,6 +358,8 @@ class ResidentOutputDiagnostics:
         self.convective.compute()
         if self.nwp is not None:
             self.nwp.compute()
+        if self.plevel is not None:
+            self.plevel.compute()
         self.updates += 1
         self.last_step = step
 
@@ -395,6 +422,8 @@ class ResidentOutputDiagnostics:
         return None
 
     def close(self):
+        if self.tslist is not None:
+            self.tslist.close()
         self.acoustic.clear()
         self.buffers.clear()
 

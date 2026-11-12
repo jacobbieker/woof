@@ -3805,6 +3805,18 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
     if isinstance(raw, dict) and "wrf_hydro" in raw:
         from woof.wrf_hydro_route import consume_table
         raw = consume_table(raw, source)
+    # [model] names the engine.  This builder is the WRF engine's, so it
+    # drops the table only when it names WRF; a hex configuration runs
+    # through `woof go` (woof.go_hex), never through a WRF loader.
+    if isinstance(raw, dict) and "model" in raw:
+        from woof.config import model_engine
+        raw = dict(raw)
+        engine = model_engine(raw.pop("model"), where=f"[model] of {source}")
+        if engine != "wrf":
+            raise ValueError(
+                f"experiment config {source} names [model] engine = {engine!r}; "
+                "this loader builds the WRF engine's experiment.  A hex "
+                "configuration runs through `woof go CONFIG` (woof.go_hex).")
     # Setup lineage is provenance, with no atmosphere or follower controls.
     if isinstance(raw, dict) and "lineage" in raw:
         from woof.cyclone_tracks import validate_lineage

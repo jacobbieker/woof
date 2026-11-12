@@ -1,0 +1,8 @@
+{
+  "schema": "gpuwm.chem.set.v1",
+  "name": "radm2sorg",
+  "description": "WRF-Chem's RADM2SORG package, the RADM2 gases and the MADE/SORGAM modal aerosol, 80 species (registry.chem:3930): RADM2 plus aerosol emissions, SORGAM dynamics with RPMARES inorganic equilibrium (ISORROPIA is bring-your-own-source), clean-room SOA partitioning, SORGAM dry deposition and the PM2.5/PM10 sums.",
+  "wrf_chem_opt": 2,
+  "wrf_tracer_opt": null,
+  "provenance": "registry.chem:3930 package radm2sorg chem_opt==2"
+}

@@ -24,6 +24,12 @@ def staged_table(tmp_path):
         if json.loads(p.read_text())['name'] not in kept:
             p.unlink()
     (root / 'diagnostics').mkdir(exist_ok=True)
+    # A packaged diagnostic gated to its packages' sets serves the staged
+    # tracer_test rows here: the gate is the package's, not the program's.
+    for p in (root / 'diagnostics').glob('*.json'):
+        document = json.loads(p.read_text())
+        if document.pop('sets', None) is not None:
+            p.write_text(json.dumps(document, indent=2) + '\n')
     # Keep the staged catalog closed as packaged diagnostics acquire rows.
     # These fixture species have no physical processes or source inputs.
     known = {r['name'] for r in json.loads((root / 'species/tracer_test.json').read_text())['rows']}

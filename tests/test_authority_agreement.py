@@ -62,6 +62,7 @@ from __future__ import annotations
 
 import dataclasses
 import itertools
+import os
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
@@ -1556,6 +1557,14 @@ def test_every_implemented_option_carries_every_consumer_row():
                 f"{sorted(set(contract) - set(rows))}")
 
 
+@pytest.mark.skipif(
+    os.environ.get("GITHUB_ACTIONS") == "true",
+    reason="walks the full cross product of every component's options "
+           "(about 186 million tuples on the fork's registry, one "
+           "consumer_row_gaps call per implemented tuple); on a hosted runner "
+           "it holds its whole leg until the 150 min job timeout (leg 4, "
+           "2026-11-10 and 2026-11-11). The per-option row check above runs "
+           "on every leg; run this one on a workstation.")
 def test_the_consumer_row_gate_is_silent_for_every_implemented_tuple():
     """After the registry carries every row the gate has nothing to say."""
 

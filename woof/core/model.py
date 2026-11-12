@@ -442,13 +442,19 @@ RESTART_TOLERATED_EXPERIMENT_FIELDS = (
 #: value because they leave the payload unconditionally.
 RESTART_TOLERATED_DOMAIN_FIELDS = (
     "history_interval_s", "history_begin_s", "history_end_s")
+from woof.dfi_control import DFI_KEYS as _DFI_RESTART_FIELDS
+
 RESTART_TOLERATED_RUN_FIELDS = (
     "run_seconds", "output_interval_s", "history_interval2_s", "history_interval_change_s", "restart_interval_s",
     "surface_energy_diag",
     # Correct mode WB1 (woof/correct_mode.py OUTPUT_ONLY_KEYS): books the
     # settled-cloud total CLOUDNC and changes no prognostic word
     # (tests/test_correct_mode_water_budget.py, every word bit-identical).
-    "thompson_cloud_surface_booking")
+    "thompson_cloud_surface_booking",
+    # Digital-filter initialization is a start-of-run control: a resume has no
+    # filter window left to run, so the controls may differ, exactly as
+    # woof.io.restart.CONFIG_RUN_LENGTH_FIELDS (which carries them) says.
+    *sorted(_DFI_RESTART_FIELDS))
 
 #: ``mp_physics`` -> the RunConfig fields ONLY that scheme reads.  A domain
 #: running some other scheme drops them from its identity entirely rather

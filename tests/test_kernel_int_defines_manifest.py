@@ -3,9 +3,20 @@ import sys
 import importlib
 from types import SimpleNamespace
 
+import pytest
+
 from woof.core import kernels
 from woof import physics_params
 kernel_manifest = importlib.import_module("woof.certify.kernel_manifest")
+
+
+@pytest.fixture(autouse=True)
+def _the_cuda_route(monkeypatch):
+    """These tests stand a fake cupy in for the CUDA compile route; on a
+    CPU leg (GPUWM_NO_LOCAL_GPU) the loader would pick the cpu backend and
+    refuse before reaching it, so they take the route they are about."""
+    from woof import backend
+    monkeypatch.setattr(backend, "active", lambda: "cuda")
 
 
 def test_integer_tier_records_the_compiled_options(monkeypatch):

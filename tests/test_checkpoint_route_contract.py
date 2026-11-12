@@ -592,8 +592,13 @@ def test_the_permitted_keys_are_the_ones_the_help_text_publishes():
     # from a domain's restart identity -- so preparation binds none of
     # them either (WOOF run-controls feasibility, defect 7).
     quicklook = ("output", "full_history_interval_s", "quicklook_output")
+    # The digital-filter controls are tolerated across a RESTART (the filter
+    # window is over), but preparation reads some of them (dfi_constant_bc
+    # shapes the lateral boundary), so the prepared-cache identity keeps them
+    # bound: a changed DFI control re-prepares, which is the conservative side.
+    from woof.dfi_control import DFI_KEYS
     assert NON_TRAJECTORY_IDENTITY_FIELDS == frozenset(
-        f"run.{name}" for name in CONFIG_RUN_LENGTH_FIELDS
+        f"run.{name}" for name in CONFIG_RUN_LENGTH_FIELDS - DFI_KEYS
     ) | {"history_interval_s", "tiles", *window, *quicklook}
 
     # THE TEXT ITSELF: every tolerated domain field is named by both
