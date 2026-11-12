@@ -592,6 +592,9 @@ class FrameworkInitializationRRFS(FrameworkInitialization):
     def compute_tempo_tables(self):
         """The large tables tempo_init computes, from the parameters and bins already held (Rust, all cores)."""
         import subprocess
+        refusal = tempo_compute_refusal()
+        if refusal is not None:
+            raise ValueError(refusal)
         from ..resources_build import default_cache, locate_decoders
         n = self.native
         get = lambda name: n.get_table('module_mp_tempo_params.' + name)[0]
@@ -859,3 +862,17 @@ class FrameworkInitializationRRFS(FrameworkInitialization):
 
 # The name the RRFS row's framework entry binds (route_table: ...framework_init_rrfs:FrameworkInitialization).
 FrameworkInitialization = FrameworkInitializationRRFS
+
+
+def tempo_compute_refusal(platform: str | None = None) -> str | None:
+    """Why this host's tempo_table_compute cannot be trusted for the TEMPO tables, or None.
+
+    On macOS the program built from rust/physics-tables writes different words than the native reference host
+    (components/hex/tests/test_tempo_table_programs.py: stdout sha256 4855f9d0... against db16d024...): its
+    binary64 maths goes through Apple's libm.  A run would carry those tables silently, so it is refused by name.
+    """
+    import sys
+    if (platform or sys.platform) == "darwin":
+        return ("tempo_table_compute on macOS writes TEMPO tables that differ from the native reference words "
+                "(Apple libm under its binary64 maths); the TEMPO microphysics tables cannot be built on this host")
+    return None
