@@ -55,7 +55,7 @@ module mpas_pool_routines
             field1DInteger, field1DReal, field2DReal, field3DReal, mpas_pool_get_field, &
             mpas_allocate_scratch_field, mpas_deallocate_scratch_field
 
-  integer, parameter :: maxEntries = 96
+  integer, parameter :: maxEntries = 192
   integer, parameter :: MPAS_POOL_CONFIG = 1004
 
   ! the field types the land-ice modules declare; only scratch-field and
