@@ -405,14 +405,35 @@ _compile_tally = {"modules": 0, "seconds": 0.0}
 DIRECT_NVRTC_SUBDIR = "gpuwm-direct-nvrtc"
 
 
+#: directory -> (its mtime_ns, its file count) when last counted.
+_cache_counts: dict[str, tuple[int, int]] = {}
+
+
 def _cache_file_count(directory: Path) -> int:
-    """Files in the kernel cache, without opening any of them."""
+    """Files in the kernel cache, without opening any of them.
+
+    A directory's mtime changes whenever an entry is added, removed or
+    renamed, so a count is kept per directory and the scan runs again only
+    after the mtime moved.  A warm cache holds tens of thousands of entries
+    (38,145 on pb: 18 ms to scan both levels), and every module load
+    counts it twice.
+    """
 
     try:
-        with os.scandir(directory) as scan:
-            return sum(1 for entry in scan if entry.is_file())
+        stamp = os.stat(directory).st_mtime_ns
     except OSError:
         return 0
+    key = os.fspath(directory)
+    known = _cache_counts.get(key)
+    if known is not None and known[0] == stamp:
+        return known[1]
+    try:
+        with os.scandir(directory) as scan:
+            count = sum(1 for entry in scan if entry.is_file())
+    except OSError:
+        return 0
+    _cache_counts[key] = (stamp, count)
+    return count
 
 
 @contextlib.contextmanager

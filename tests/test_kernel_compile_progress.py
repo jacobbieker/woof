@@ -52,6 +52,27 @@ def test_a_compile_is_published_and_a_cache_load_is_not(tmp_path,
     assert second["compile_seconds"] >= first["compile_seconds"]
 
 
+def test_the_cache_is_scanned_again_only_after_its_directory_changed(
+        tmp_path, monkeypatch):
+    """A warm cache holds tens of thousands of entries and every module load
+    counts it twice: the count is kept until the directory's mtime moves."""
+    import os
+    (tmp_path / "a").write_bytes(b"x")
+    scans = []
+    real = os.scandir
+    monkeypatch.setattr(notice.os, "scandir",
+                        lambda path: scans.append(path) or real(path))
+    assert notice._cache_file_count(tmp_path) == 1
+    assert notice._cache_file_count(tmp_path) == 1
+    assert len(scans) == 1
+    (tmp_path / "b").write_bytes(b"x")
+    stamp = os.stat(tmp_path).st_mtime_ns
+    os.utime(tmp_path, ns=(stamp + 1, stamp + 1))   # coarse clocks: still moves
+    assert notice._cache_file_count(tmp_path) == 2
+    assert len(scans) == 2
+    assert notice._cache_file_count(tmp_path / "missing") == 0
+
+
 def test_run_plan_relays_the_compile_as_a_declared_warning(tmp_path,
                                                           monkeypatch):
     from woof import runplan
