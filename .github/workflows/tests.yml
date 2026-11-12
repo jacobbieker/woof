@@ -21,9 +21,12 @@ on:
   # build.  A branch with no pull request is run by hand (workflow_dispatch).
   push:
     branches: [main]
-  # The macOS jobs on main: nightly, not per push (see changes).
+  # Main's full run is periodic, not per push: nightly with the macOS jobs, and
+  # three more Linux-only runs a day (see changes and the comment on the
+  # concurrency group).  A push to main runs lint alone.
   schedule:
     - cron: "17 6 * * *"
+    - cron: "17 0,12,18 * * *"
   pull_request:
     # labeled: adding the macos-ci label runs the macOS jobs (see changes).
     types: [opened, synchronize, reopened, labeled]
@@ -40,8 +43,17 @@ permissions:
 # The event is in the group so a nightly run, whose macOS jobs can queue for
 # many hours, never holds main's push runs pending behind it (each new pending
 # run replaces the last, so while one run is stuck no push run completes).
+#
+# Why a push to main runs lint only (2026-11-12): main takes many merges an
+# hour, and every merge's full run (10 Linux legs) queued behind the PR runs for
+# the account's runners; the one that got a runner was replaced as the group's
+# pending run by the next merge's, or held the group for hours while its legs
+# queued, so no run on main completed for days.  The full Linux suite runs on
+# the schedule instead (a fixed SHA, the head of main when the run starts, in
+# a group of its own per cron entry), which is 4 full runs a day instead of
+# one per merge; a pull request already runs the suite on its merge result.
 concurrency:
-  group: tests-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  group: tests-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.schedule }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -81,6 +93,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           EVENT: ${{ github.event_name }}
+          SCHEDULE: ${{ github.event.schedule }}
           PR: ${{ github.event.pull_request.number }}
           LABELLED: ${{ contains(github.event.pull_request.labels.*.name, 'macos-ci') }}
           DISPATCH_MACOS: ${{ inputs.macos }}
@@ -89,6 +102,8 @@ jobs:
             macos=false; why="a push to main leaves the macOS jobs to the nightly run"
           elif [ "$EVENT" = workflow_dispatch ] && [ "$DISPATCH_MACOS" = false ]; then
             macos=false; why="the manual run turned its macos input off"
+          elif [ "$EVENT" = schedule ] && [ "$SCHEDULE" != "17 6 * * *" ]; then
+            macos=false; why="the Linux-only scheduled run leaves the macOS jobs to the nightly one"
           elif [ "$EVENT" != pull_request ]; then
             macos=true; why="a $EVENT run takes every job"
           elif [ "$LABELLED" = true ]; then
@@ -134,6 +149,8 @@ jobs:
   # ---------------------------------------------------------------- Linux CPU
   native-linux:
     name: native (ubuntu-24.04)
+    # Everything Linux below hangs off this job: a push to main stops here.
+    if: github.event_name != 'push'
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
