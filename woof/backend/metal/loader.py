@@ -127,7 +127,8 @@ class MetalFunction:
         # after it, and it needs no synchronize.
         mode = _SERIAL_MODE if (not _SERIAL_ONLY or any(k in self.name for k in _SERIAL_ONLY)) else ""
         resolved = False
-        if (sig.indirect and _RESOLVE_TABLES and sig.pointer_mode == "direct" and blob
+        if (sig.indirect and _RESOLVE_TABLES and self.name in FLAT_ADDRESS_TABLES
+                and sig.pointer_mode == "direct" and blob
                 and not any(p.pointer for p in params) and mode == ""):
             from woof.backend.facade._array import storages_holding
             words = np.frombuffer(bytes(blob[:len(blob) // 8 * 8]), dtype=np.uint64)
@@ -287,6 +288,15 @@ def share_one_stream():
 #: WOOF_METAL_RESOLVE_TABLES=0: a kernel handed a by-value table of addresses
 #: synchronizes before and after, as every indirect kernel did.
 _RESOLVE_TABLES = os.environ.get("WOOF_METAL_RESOLVE_TABLES", "1") != "0"
+
+#: Kernels whose by-value address table is FLAT: every buffer they touch is
+#: named by a word of their scalar block, none through an address read from
+#: memory (a device-resident table of addresses).  Only for these may the
+#: words stand in for a synchronize.  Add a kernel only after reading it.
+FLAT_ADDRESS_TABLES = frozenset({
+    "rk_copy_words", "rk_zero_words",        # woof/core/kernels/rk_bookkeeping.cu
+    "glue_add_arrays",                       # woof/core/kernels/bandwidth_glue.cu
+})
 
 #: C type of a module global's element -> the storage dtype it is held in
 #: WOOF_METAL_SERIAL=1: every launch waits for all earlier GPU work and

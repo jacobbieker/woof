@@ -222,14 +222,17 @@ class Storage:
         # Evaluating for it again waited on every launch still writing the
         # buffer: the microphysics ring copy's table key asked for 390
         # addresses per model step, each a host sync on Metal.
-        _ADDRESSES[base] = weakref.ref(self)
+        if _ADDRESSES.get(base) is None or _ADDRESSES[base]() is not self:
+            _ADDRESSES[base] = weakref.ref(self)
+            _ADDRESS_INDEX[0] = None          # the index is stale
         return base
 
 
 #: GPU base address -> the storage that handed it out (Storage.address)
 _ADDRESSES: dict = {}
 
-#: _ADDRESSES as sorted bases and their references, rebuilt on demand
+#: _ADDRESSES as [built, sorted bases, their references]; every change to
+#: _ADDRESSES clears ``built`` (a dead entry dropped, a base registered)
 _ADDRESS_INDEX: list = [None, [], []]
 
 
@@ -241,9 +244,10 @@ def storages_holding(words) -> list:
     import bisect
     found = {}
     for attempt in (0, 1):
-        if attempt or _ADDRESS_INDEX[0] != len(_ADDRESSES):
-            live = sorted((base, ref) for base, ref in _ADDRESSES.items() if ref() is not None)
-            _ADDRESS_INDEX[:] = [len(_ADDRESSES), [b for b, _ in live], [r for _, r in live]]
+        if attempt or _ADDRESS_INDEX[0] is None:
+            live = sorted(((base, ref) for base, ref in _ADDRESSES.items() if ref() is not None),
+                          key=lambda row: row[0])
+            _ADDRESS_INDEX[:] = [True, [b for b, _ in live], [r for _, r in live]]
         bases, refs = _ADDRESS_INDEX[1], _ADDRESS_INDEX[2]
         found.clear()
         stale = False
@@ -269,10 +273,12 @@ def storage_at(address: int):
         st = ref()
         if st is None:
             del _ADDRESSES[base]
+            _ADDRESS_INDEX[0] = None
             continue
         if base <= address < base + max(st.nbytes, 1):
             if int(ext.load().gpu_address(st.arr)) != base:   # rebound since
                 del _ADDRESSES[base]
+                _ADDRESS_INDEX[0] = None
                 continue
             return st, address - base
     return None
