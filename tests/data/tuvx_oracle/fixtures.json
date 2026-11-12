@@ -5,7 +5,7 @@
 "air, O2, O3": "molecule cm-3 at the edges",
 "*_layer": "molecule cm-2 per layer",
 "photolysis_rate_constants_s-1": "s-1 at the edges",
-"configuration": "the wavelength grid's edges (nm) and the extraterrestrial flux on its bins (photon cm-2 s-1), as the built core holds them",
+"configuration": "the wavelength grid's edges (nm) and the extraterrestrial flux on its bins (photon cm-2 s-1), as the built core holds them; the Earth-Sun distance profile (AU) on the time grid's edges (2002-03-21, 12 and 14 UT, photolysis.json)",
 "intermediates": "first two cases of each layout, five height edges (0-based): cross sections cm2, quantum yields, actinic flux parts per bin; radiative_transfer: spherical geometry (nid per edge and dsdh rows of the kept edges, both counted from the top), air and O2 vertical (per layer) and slant (per edge) columns molecule cm-2, the O2 reaction's cross section with the Lyman-alpha / Schumann-Runge bands applied, and per kept layer (0-based from the surface) each radiator's optical depth and the accumulated optical depth, single-scattering albedo and asymmetry factor"
 },
 "configuration": {
@@ -325,6 +325,10 @@
 "0x1.20b795da09bcap+52",
 "0x1.1ab87039d271bp+52",
 "0x1.178d20eb14d76p+52"
+],
+"earth_sun_distance_au": [
+"0x1.fe0b9dea8fa61p-1",
+"0x1.fe0eafd5d1fcdp-1"
 ]
 },
 "fixtures": [
