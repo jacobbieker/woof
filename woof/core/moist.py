@@ -615,6 +615,10 @@ def _exclude_specified_ring_advection(tend, spec_zone: int) -> None:
     sz = int(spec_zone)
     if sz <= 0:
         return
+    if tend.ndim == 3:
+        from woof.core.ring_frame import zero_frame
+        if zero_frame(tend, sz, sz, sz, sz):    # the same elements, one launch
+            return
     tend[:, :sz, :] = 0
     tend[:, -sz:, :] = 0
     tend[:, sz:-sz, :sz] = 0
@@ -1141,11 +1145,14 @@ def advance_scalars_stage(state: DomainState, cfg: RunConfig,
                 # the capture wrote the pure boundary tendency there).
                 sz = cfg.spec_zone
                 tend += held
-                tend[:, :sz, :] = held[:, :sz, :]
-                tend[:, ny - sz:, :] = held[:, ny - sz:, :]
-                tend[:, sz:ny - sz, :sz] = held[:, sz:ny - sz, :sz]
-                tend[:, sz:ny - sz, nx - sz:] = (
-                    held[:, sz:ny - sz, nx - sz:])
+                from woof.core.ring_frame import copy_frame
+                if not (0 < sz and 2 * sz <= min(ny, nx) and tend.ndim == 3
+                        and copy_frame(tend, held, sz, sz, sz, sz)):
+                    tend[:, :sz, :] = held[:, :sz, :]
+                    tend[:, ny - sz:, :] = held[:, ny - sz:, :]
+                    tend[:, sz:ny - sz, :sz] = held[:, sz:ny - sz, :sz]
+                    tend[:, sz:ny - sz, nx - sz:] = (
+                        held[:, sz:ny - sz, nx - sz:])
             _update_scalar_in_place(
                 q, q0, tend, state.c1h, state.c2h, mu0_row, mu_row, dt_eff,
                 msft=(msft_row if state.has_msf and not lbc_after_msf
@@ -1250,11 +1257,14 @@ def advance_scalars_stage(state: DomainState, cfg: RunConfig,
                 if held is not None:
                     sz = cfg.spec_zone
                     tend += held
-                    tend[:, :sz, :] = held[:, :sz, :]
-                    tend[:, ny - sz:, :] = held[:, ny - sz:, :]
-                    tend[:, sz:ny - sz, :sz] = held[:, sz:ny - sz, :sz]
-                    tend[:, sz:ny - sz, nx - sz:] = (
-                        held[:, sz:ny - sz, nx - sz:])
+                    from woof.core.ring_frame import copy_frame
+                    if not (0 < sz and 2 * sz <= min(ny, nx) and tend.ndim == 3
+                            and copy_frame(tend, held, sz, sz, sz, sz)):
+                        tend[:, :sz, :] = held[:, :sz, :]
+                        tend[:, ny - sz:, :] = held[:, ny - sz:, :]
+                        tend[:, sz:ny - sz, :sz] = held[:, sz:ny - sz, :sz]
+                        tend[:, sz:ny - sz, nx - sz:] = (
+                            held[:, sz:ny - sz, nx - sz:])
                 _update_scalar_in_place(
                     q, q0, tend, state.c1h, state.c2h, mu0_row, mu_row,
                     dt_eff,

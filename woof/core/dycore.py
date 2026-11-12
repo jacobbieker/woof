@@ -3789,10 +3789,16 @@ def _zero_open_strips(buf: cp.ndarray, cfg: RunConfig, width: int,
     (tests/test_diff6_boundary_face.py's 4d2ce99 capture)."""
     x_hi = width + (stag_high_extra if buf.shape[-1] == cfg.nx + 1 else 0)
     y_hi = width + (stag_high_extra if buf.shape[-2] == cfg.ny + 1 else 0)
-    if _boundary_x(cfg):
+    open_x, open_y = _boundary_x(cfg), _boundary_y(cfg)
+    if (open_x or open_y) and width > 0 and x_hi > 0 and y_hi > 0:
+        from woof.core.ring_frame import zero_frame
+        if zero_frame(buf, width if open_x else 0, x_hi if open_x else 0,
+                      width if open_y else 0, y_hi if open_y else 0):
+            return
+    if open_x:
         buf[..., :width] = 0
         buf[..., -x_hi:] = 0
-    if _boundary_y(cfg):
+    if open_y:
         # Ellipsis keeps this valid for 2-D (ny, nx) buffers too -- the
         # emdiv mudf strip is the live 2-D caller.
         buf[..., :width, :] = 0

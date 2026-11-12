@@ -65,6 +65,7 @@ from woof.io.history_layout import _OUTPUT_FIELDS, _SASE_FLUX_DIAG_OUTPUT
 # other caller that must stay importable without cupy) can ask them
 # without paying for this module's body.  Re-exported here so every
 # existing `from woof.core.physics import ...` keeps resolving.
+from woof.core.bandwidth_glue import accumulate_scaled
 from woof.core.physics_inventory import (
     UnroutedPhysicsSelectorError, resolve_physics_slot,
     LAND_SURFACE_SFCDIAGS_SCHEMES, sase_switch_value,
@@ -3968,7 +3969,8 @@ class PhysicsDriver:
             # A driver assembled without __init__ (the carrier-contract
             # partial test drivers) allocates no boundary fluxes.
             if name in self.fields and "ac"+name in self.fields:
-                self.fields["ac"+name] += self.fields[name] * DTYPE(cfg.dt)
+                if not accumulate_scaled(self.fields["ac"+name], self.fields[name], DTYPE(cfg.dt)):
+                    self.fields["ac"+name] += self.fields[name] * DTYPE(cfg.dt)
 
     def accumulate_surface_energy(self, cfg):
         # Stock's RUC surface-driver arm (module_surface_driver.F:
@@ -3986,7 +3988,8 @@ class PhysicsDriver:
         # The separate product and in-place sum preserve both FP32 rounds.
         for name, source in SURFACE_ENERGY_ACCUMULATORS.items():
             if name in self.fields:  # partial test drivers allocate none
-                self.fields[name] += self.fields[source] * DTYPE(cfg.dt)
+                if not accumulate_scaled(self.fields[name], self.fields[source], DTYPE(cfg.dt)):
+                    self.fields[name] += self.fields[source] * DTYPE(cfg.dt)
 
     def finish_history_mass(self, state: DomainState, cfg: RunConfig, *, muts=None) -> None:
         """Uncouple history records and held KF rates at completed acoustic mass.

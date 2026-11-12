@@ -292,6 +292,22 @@ def step(ctx, dt, ktau):
                   dtstepc)
 
 
+def boundary_inflow(table, z, alt, convfac):
+    """WRF's lateral inflow for the 38 SORGAM rows without an enabled
+    boundary source (flow_dep_bdy_chem's i_bdy_method 2,
+    bdy_chem_value_sorgam(z, alt, convfac) at the inflow cell): ug/kg and
+    #/kg of dry air, consistent masses and modal numbers."""
+    from woof.core.chem_gas_profile import sorgam_boundary_value
+
+    enabled = set(getattr(table, "enabled_sources", ()))
+    names = [row.name for row in rows(table) if row.name in AEROSOLS
+             and not any(ref["source"] in enabled for ref in row.boundary)]
+    if not names:
+        return {}
+    values = sorgam_boundary_value(z, alt, convfac)
+    return {name: values[name] for name in names}
+
+
 def refresh_output(state):
     """sum_pm_driver every step (chem_driver.F:1696-1700), into the
     PM2_5_DRY ... PM10 outputs."""

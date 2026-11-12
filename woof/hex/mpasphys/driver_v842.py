@@ -23,6 +23,7 @@ from . import radiation_spectral_v842 as _spectral
 from . import radtran_v842 as _radtran
 from . import solar_diagnostics_v842 as _solar
 from ..mpasdiag import nwp_diag_v842 as _nwp
+from ..mpasdiag import tslist_v842 as _tslist
 from ..mpasdiag import plevel_diag_v842 as _plevel
 from . import wrfsolar_eps_v842 as _eps
 
@@ -316,6 +317,9 @@ class DriverConfig:
     #: WOOF's &diagnostics config_nwp_diagnostics (mpasdiag.nwp_diag_v842): WRF's nwp_diagnostics history
     #: maxima (T2MAX/T2MIN, WSPD10MAX, U10MAX/V10MAX, GUST, W_UP/DN_MAX, GRPL_MAX, REFD_MAX, hail).  Not a Registry option.
     nwp_diagnostics: bool = False
+    #: WOOF's &diagnostics config_tslist (mpasdiag.tslist_v842): WRF's per-step station time series (a
+    #: tslist_v842.TslistConfig), or None.  Not a Registry option.
+    tslist: Any = None
     #: WOOF's &diagnostics config_p_lev_diags / config_z_lev_diags (mpasdiag.plevel_diag_v842): WRF's p_lev and z_lev
     #: column interpolation at the namelist's levels (a plevel_diag_v842.LevelConfig), or None.  Not Registry options.
     plevel_diagnostics: Any = None
@@ -440,6 +444,9 @@ class DriverConfig:
             result["solar_diagnostics"] = True
         if self.nwp_diagnostics:
             result["nwp_diagnostics"] = True
+        if self.tslist is not None:
+            o = self.tslist
+            result["tslist"] = dict(path=o.path, max_locs=o.max_locs, max_level=o.max_level, buf_size=o.buf_size)
         if self.plevel_diagnostics is not None:
             o = self.plevel_diagnostics
             result["plevel_diagnostics"] = dict(
@@ -748,6 +755,7 @@ def resolve_namelist(text: str, *, backends: Mapping[str, str] | None = None,
     radtran = _radtran.resolve(groups)
     solar = _solar.resolve(groups)
     nwp = _nwp.parse_flag(groups)
+    tslist = _tslist.resolve(groups)
     plevels = _plevel.resolve(groups)
     multi_perturb = _eps.resolve(groups)
 
@@ -763,6 +771,8 @@ def resolve_namelist(text: str, *, backends: Mapping[str, str] | None = None,
             _solar.check(config)
         if nwp:
             config = _replace(config, nwp_diagnostics=True)
+        if tslist is not None:
+            config = _replace(config, tslist=tslist)
         if plevels is not None:
             config = _replace(config, plevel_diagnostics=plevels)
         if multi_perturb is not None:

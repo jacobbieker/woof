@@ -248,3 +248,37 @@ def test_number_rows_take_the_number_moment_health_ceiling():
     assert rule_for_field("chem_ac0").upper == 1.0e15
     assert rule_for_field("chem_so4aj").upper == 1.0e9
     assert rule_for_field("chem_o3").upper == 1.0e9
+
+
+@pytest.mark.gpu
+@requires_gpu
+def test_profile_inflow_is_wrfs_boundary_value_on_each_side():
+    """have_bcs_chem false: every RADM2SORG row's inflow is WRF's own
+    bdy_chem_value / bdy_chem_value_sorgam on the outermost row's heights
+    (rows with an enabled boundary source keep the source)."""
+    import cupy as cp
+    from woof.core.chem_gas_profile import radm2_boundary_value, sorgam_boundary_value
+    from woof.core.chem_transport import RGASUNIV, _profile_inflow
+
+    table = chem_table.load_sets(["radm2sorg"])
+    col = _column()
+    met = {k: cp.asarray(v) for k, v in col.items()}
+    chem = SimpleNamespace(table=table, prep=SimpleNamespace(get=met.get))
+    state = SimpleNamespace(chem=chem)
+    rows = table.transported
+    profile = _profile_inflow(state, SimpleNamespace(specified=True), rows)
+    assert sorted(profile) == list(range(len(rows)))
+    z = col["z"][:, :, 0]
+    gases = radm2_boundary_value(z, chem_opt=2)
+    west = {rows[i].name: cp.asnumpy(sides[0]) for i, sides in profile.items()}
+    assert np.array_equal(west["o3"], gases["o3"]) and np.array_equal(west["hcl"], gases["hcl"])
+    conv = (col["p_phy"][:, :, 0] / RGASUNIV / col["t_phy"][:, :, 0]).astype(np.float32)
+    aer = sorgam_boundary_value(z, col["alt"][:, :, 0], conv)
+    assert np.array_equal(west["nu0"], aer["nu0"]) and np.array_equal(west["so4aj"], aer["so4aj"])
+    assert (west["nu0"] > 1e7).all()
+    # A CAMS-enabled run keeps CAMS's inflow for the CAMS rows.
+    cams = chem_table.load_sets(["radm2sorg"], ["cams-global"])
+    chem2 = SimpleNamespace(table=cams, prep=chem.prep)
+    got = _profile_inflow(SimpleNamespace(chem=chem2), SimpleNamespace(specified=True), cams.transported)
+    names = {cams.transported[i].name for i in got}
+    assert "o3" not in names and "co" not in names and "ho2" in names and "nu0" in names

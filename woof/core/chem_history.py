@@ -126,6 +126,12 @@ def _history_fields(state, compute: bool = True) -> dict:
     diagnostic takes its previously streamed buffer (one that has none yet is
     evaluated, so the first call still allocates and fills it)."""
     chem = state.chem
+    if compute:
+        # A fresh run's initial chemistry (the processes' cold starts) is
+        # the state the first frame shows, as WRF's wrfout at the start
+        # shows real.exe's profile; a no-op after it ran or on a restart.
+        from woof.core.chem_driver import ensure_cold_start
+        ensure_cold_start(state)
     out: dict = {}
     for row in (*chem.transported, *chem.prescribed):
         if row.output_name is not None:

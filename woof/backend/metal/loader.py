@@ -120,6 +120,25 @@ class MetalFunction:
                 targets.append(a._st if not p.const else None)
             else:
                 blob[p.offset:p.offset + p.size] = self._pack(p, a)
+        # A kernel whose only addresses arrive by value (a table of them in
+        # its scalar block: rk_copy_words, glue_add_arrays) reaches the
+        # storages those words name, and no others: bound as hazard entries
+        # (no slot), MLX orders it after their writers and their later readers
+        # after it, and it needs no synchronize.
+        mode = _SERIAL_MODE if (not _SERIAL_ONLY or any(k in self.name for k in _SERIAL_ONLY)) else ""
+        resolved = False
+        if (sig.indirect and _RESOLVE_TABLES and self.name in FLAT_ADDRESS_TABLES
+                and sig.pointer_mode == "direct" and blob
+                and not any(p.pointer for p in params) and mode == ""):
+            from woof.backend.facade._array import storages_holding
+            words = np.frombuffer(bytes(blob[:len(blob) // 8 * 8]), dtype=np.uint64)
+            for st in storages_holding(set(words[words != 0].tolist())):
+                slots.append(-1)
+                buffers.append(st.arr)
+                offsets.append(0)
+                writable.append(True)
+                targets.append(st)
+            resolved = True
         if not any(writable):
             # It writes only through device addresses it was handed (a pointer
             # table).  MLX schedules a primitive through its outputs, so a
@@ -141,8 +160,7 @@ class MetalFunction:
         if _TRACE:
             with open(_TRACE, "a") as f:
                 f.write(self.name + "\n")
-        mode = _SERIAL_MODE if (not _SERIAL_ONLY or any(k in self.name for k in _SERIAL_ONLY)) else ""
-        if sig.indirect or mode in ("1", "before"):
+        if (sig.indirect and not resolved) or mode in ("1", "before"):
             # buffers reached through host-built address tables are invisible
             # to MLX's hazard tracking: let everything before finish first
             import mlx.core as mx
@@ -158,7 +176,7 @@ class MetalFunction:
         for st in targets:
             if st is not None:
                 st.rebind_written(next(written))
-        if sig.indirect or mode in ("1", "after"):
+        if (sig.indirect and not resolved) or mode in ("1", "after"):
             import mlx.core as mx
             mx.eval(*outputs)       # ... and finish before anything after it
             if mode == "1":
@@ -266,6 +284,19 @@ def share_one_stream():
     threading.Thread._bootstrap_inner = _bootstrap_inner
     return _SHARED_STREAM
 
+
+#: WOOF_METAL_RESOLVE_TABLES=0: a kernel handed a by-value table of addresses
+#: synchronizes before and after, as every indirect kernel did.
+_RESOLVE_TABLES = os.environ.get("WOOF_METAL_RESOLVE_TABLES", "1") != "0"
+
+#: Kernels whose by-value address table is FLAT: every buffer they touch is
+#: named by a word of their scalar block, none through an address read from
+#: memory (a device-resident table of addresses).  Only for these may the
+#: words stand in for a synchronize.  Add a kernel only after reading it.
+FLAT_ADDRESS_TABLES = frozenset({
+    "rk_copy_words", "rk_zero_words",        # woof/core/kernels/rk_bookkeeping.cu
+    "glue_add_arrays",                       # woof/core/kernels/bandwidth_glue.cu
+})
 
 #: C type of a module global's element -> the storage dtype it is held in
 #: WOOF_METAL_SERIAL=1: every launch waits for all earlier GPU work and
