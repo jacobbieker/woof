@@ -29,11 +29,13 @@ the staged inputs:
      "base_physics": {"config_gwdo_scheme": "off"},
      "env": {"WOOF_HEX_MESH_ROWS": "..."},
      "hours": 1,
+     "row_args": {"drag.gsl": ["--geog", "<WPS_GEOG>"]},
      "label": "a description without paths, for the results"}
 
 ``base_physics`` are ``--physics`` assignments every row carries (a row's own
 assignment of the same engine key wins; a drag row drops a base
-``config_gwdo_scheme``).
+``config_gwdo_scheme``); :data:`HEX_PARTNERS` adds what the hex door needs
+beside a selection; ``row_args`` adds door flags for one row.
 
 BUDGETS.  On a limited-area case neither budget closes by itself: the lateral
 boundaries carry mass and water in and out.  The tool therefore reports the
@@ -50,8 +52,15 @@ dycore, the boundaries and the initial state:
   the accumulated precipitation ``sum(areaCell * (rainc + rainnc))`` (kg; MPAS
   ``rainnc`` already holds every frozen category), minus the surface
   evaporation estimated from the end-point ``qfx`` (trapezoid); graded on the
-  residual relative to ``W0`` minus the baseline's, at ``WATER_TOL``.  Both are
-  also reported over interior cells only (``bdyMaskCell == 0``).
+  residual relative to ``W0`` minus the baseline's, at ``WATER_TOL``.
+
+Both are also computed over interior cells only (``bdyMaskCell == 0``), and
+when the static has a boundary zone the GRADE uses those: the zone's state is
+relaxed toward the boundary stream, so what a scheme does to water there is
+not its own budget.  The evaporation estimate is crude (two end-point
+``qfx`` frames), so a scheme that changes the surface flux a lot (no land
+surface model) moves the water residual without breaking conservation; the
+grade is a screen, and a flagged row is read, not condemned.
 
 Usage (pixi; mac Metal ``-e mlx``, pb CUDA ``-e default``)::
 
@@ -95,6 +104,31 @@ WATER_TOL = 5.0e-2
 
 WATER_SPECIES = ("qv", "qc", "qr", "qi", "qs", "qg", "qh")
 
+#: Hex-side partners: what the hex door needs beside a selection's own
+#: assignment, each the remedy the door's or WOOF's refusal names (``None``
+#: drops a key).  The column sweep runs with convection off; a hex run at the
+#: case's spacing decides ``auto`` convection to Grell-Freitas, which WOOF
+#: refuses without a PBL that writes KPBL, so those rows run convection off.
+HEX_PARTNERS = {
+    # MYNN always hands its subgrid cloud to radiation (icloud_bl=1).
+    "pbl.mynn": {"config_radt_cld_scheme": "cld_fraction_mynn"},
+    "surface_layer.mynn": {"config_radt_cld_scheme": "cld_fraction_mynn"},
+    # GF reads KPBL: no PBL (or one that never writes it) runs without it.
+    "pbl.keps": {"cu_physics": "0"},
+    "pbl.off": {"cu_physics": "0"},
+    "surface_layer.ideal-scm": {"cu_physics": "0"},
+    "surface_layer.off": {"cu_physics": "0"},
+    # The door decides GF as a convection request and validates the engine
+    # mapping without cu_physics, so an explicit ishallow=1 (WRF's GF
+    # partner) is refused there; hex's GF route seals ishallow=1 itself.
+    "cumulus.grell-freitas": {"ishallow": None},
+}
+
+#: Exceptions the driver raises to refuse a combination by name (the run
+#: never started integrating); anything else that stops it is an error.
+_REFUSING = ("ConfigurationRefused", "ConfigurationRefusal",
+             "PhysicsVerticalPreflightError", "MissingStaticInput")
+
 
 def _cases():
     """tests/mpas_column_physics_cases, the selection menu's one home."""
@@ -135,7 +169,8 @@ def plan(components=None) -> list[dict]:
         if name.split(".")[0] in SKIPPED_COMPONENTS:
             continue
         rows.append({"option": name, "physics": physics,
-                     "overrides": overrides(physics, base)})
+                     "overrides": overrides(physics, base),
+                     "hex_partners": dict(HEX_PARTNERS.get(name, {}))})
     return rows
 
 
@@ -144,6 +179,11 @@ def physics_args(row: dict, base_physics: dict) -> list[str]:
     if "gwd_opt" in row["overrides"]:
         assigned.pop("config_gwdo_scheme", None)
     assigned.update(row["overrides"])
+    for key, value in row.get("hex_partners", {}).items():
+        if value is None:
+            assigned.pop(key, None)
+        else:
+            assigned[key] = value
     out = []
     for key, value in assigned.items():
         out += ["--physics", f"{key}={value}"]
@@ -179,17 +219,22 @@ def classify_log(text: str, returncode: int) -> dict:
              and "the hex model (preview)" not in line]
     stopped = [line for line in lines
                if "the forecast driver stopped with" in line]
-    nonfinite = [line for line in lines if re.search(
-        r"non-finite|nonfinite|NaN|not finite", line)]
-    refusal = [line for line in lines if re.search(
-        r"refus|not admitted|admits only|cannot run|is not supported|"
-        r"unsupported", line, re.I)]
-    if nonfinite:
-        return {"outcome": "non-finite", "reason": nonfinite[-1][:1500]}
     if stopped:
-        return {"outcome": "error", "reason": stopped[-1][:1500]}
-    if refusal:
-        return {"outcome": "refused", "reason": refusal[0][:1500]}
+        reason = stopped[-1][:1500]
+        kind = reason.split("stopped with", 1)[1].split(":", 1)[0].strip()
+        if kind in _REFUSING:
+            return {"outcome": "refused", "reason": reason}
+        if kind == "FloatingPointError" or re.search(
+                r"non-finite|nonfinite|NaN|not finite", reason):
+            return {"outcome": "non-finite", "reason": reason}
+        return {"outcome": "error", "reason": reason}
+    if any(line.startswith("Traceback") for line in lines):
+        # The door itself crashed (no driver, no named refusal).
+        return {"outcome": "error", "reason": "\n".join(lines[-3:])[-1500:]}
+    door = [line for line in lines if line.startswith("woof hex: ")]
+    if door and returncode:
+        # The door named its refusal and stopped before the driver.
+        return {"outcome": "refused", "reason": door[-1][:1500]}
     tail = "\n".join(lines[-6:])
     return {"outcome": "error", "reason": tail[-1500:]}
 
@@ -248,7 +293,8 @@ def history_budgets(frames: list[Path], static: Path, hours: float) -> dict:
                 dry_interior=_sum_column(area, rho, dz, interior),
                 water_atm_interior=_sum_column(area, rho * q, dz, interior),
                 precip_interior=float(np.sum(area[interior]
-                                             * precip[interior])))
+                                             * precip[interior])),
+                qfx_interior=float(np.sum(area[interior] * qfx[interior])))
         terms.append(row)
     first, last = terms[0], terms[-1]
     seconds = hours * 3600.0
@@ -274,6 +320,7 @@ def history_budgets(frames: list[Path], static: Path, hours: float) -> dict:
         out["water_residual_rel_interior"] = (
             (last["water_atm_interior"] - first["water_atm_interior"])
             + (last["precip_interior"] - first["precip_interior"])
+            - 0.5 * (first["qfx_interior"] + last["qfx_interior"]) * seconds
         ) / first["water_atm_interior"]
     return out
 
@@ -322,7 +369,8 @@ def run_row(row: dict, case: dict, work: Path, backend: str) -> dict:
             "--history-every-minutes", f"{int(hours * 60)}",
             "--out", str(out), "--scratch", str(scratch), "--no-products",
             f"--physics-suite={case.get('suite', 'arwen_mpas_column')}",
-            *physics_args(row, case.get("base_physics", {}))]
+            *physics_args(row, case.get("base_physics", {})),
+            *case.get("row_args", {}).get(row["option"], [])]
     env = dict(os.environ, **case.get("env", {}))
     env["PYTHONPATH"] = str(REPO)
     started = time.monotonic()
@@ -384,13 +432,22 @@ def grade(results: dict) -> dict:
     if not base or base.get("outcome") not in ("ran", "budget"):
         return results
     b = base["budgets"]
+    # Interior cells when the case has a boundary zone: the zone's state is
+    # relaxed toward the boundary stream, so a scheme's water there is not
+    # its own budget (Grell-3D rains in the zone and the stream refills it).
+    dry_key, water_key = (
+        ("dry_rel_change_interior", "water_residual_rel_interior")
+        if "dry_rel_change_interior" in b else
+        ("dry_rel_change", "water_residual_rel"))
     for row in rows.values():
         budgets = row.get("budgets")
         if not budgets or row.get("outcome") not in ("ran", "budget"):
             continue
-        dry = budgets["dry_rel_change"] - b["dry_rel_change"]
-        water = budgets["water_residual_rel"] - b["water_residual_rel"]
+        dry = budgets[dry_key] - b[dry_key]
+        water = budgets[water_key] - b[water_key]
         row["graded"] = {"dry_vs_baseline": dry, "water_vs_baseline": water,
+                         "cells": "interior" if dry_key.endswith("interior")
+                         else "all",
                          "dry_tol": DRY_TOL, "water_tol": WATER_TOL}
         bad = []
         if abs(dry) > DRY_TOL:

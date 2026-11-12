@@ -53,10 +53,16 @@ def test_physics_args_carry_the_case_base_and_let_drag_rows_replace_it():
     drag = {"option": "drag.gwdo", "overrides": {"gwd_opt": "1"}}
     assert matrix.physics_args(drag, {"config_gwdo_scheme": "off"}) == [
         "--physics", "gwd_opt=1"]
+    gf = {"option": "cumulus.grell-freitas",
+          "overrides": {"cu_physics": "3", "ishallow": "1"},
+          "hex_partners": {"ishallow": None, "x": "y"}}
+    assert matrix.physics_args(gf, {}) == [
+        "--physics", "cu_physics=3", "--physics", "x=y"]
 
 
 def test_classify_reads_the_door_verdicts():
-    passed = "woof hex: banner\nDOOR mesh=m steps=120 frames=2 status=passed out=/x\n"
+    passed = ("woof hex: the hex model (preview); its formats may change\n"
+              "DOOR mesh=m steps=120 frames=2 status=passed out=/x\n")
     assert matrix.classify_log(passed, 0) == {"outcome": "ran"}
     assert matrix.classify_log(passed, 1)["outcome"] == "error"
     missing = ("woof hex: refused: missing surface input: sf_surface_physics=1 "
@@ -68,10 +74,15 @@ def test_classify_reads_the_door_verdicts():
     refused = "woof hex: mp_physics=29 is refused by WOOF: RCON-SPEED-01\n"
     assert matrix.classify_log(refused, 2) == {
         "outcome": "refused", "reason": refused.strip()}
-    nan = "FloatingPointError: theta is non-finite at step 7\n"
+    nan = ("woof hex: the forecast driver stopped with FloatingPointError: "
+           "negative accumulated precipitation in rainc  Full traceback: /x\n")
     assert matrix.classify_log(nan, 1)["outcome"] == "non-finite"
-    assert matrix.classify_log("Traceback\nKeyError: 'x'\n", 1)[
-        "outcome"] == "error"
+    named = ("woof hex: the forecast driver stopped with ConfigurationRefused: "
+             "GSFC shortwave requires 2 to 128 layers\n")
+    assert matrix.classify_log(named, 1)["outcome"] == "refused"
+    crash = "Traceback (most recent call last):\n  File x\nKeyError: 'lin-mp2'\n"
+    verdict = matrix.classify_log(crash, 1)
+    assert verdict["outcome"] == "error" and "KeyError" in verdict["reason"]
     stopped = ("REGIONAL class=graded-3997m-dt30-z7-l149 -> REFUSED\n"
                "woof hex: the forecast driver stopped with KeyError: 'x'\n")
     verdict = matrix.classify_log(stopped, 2)
