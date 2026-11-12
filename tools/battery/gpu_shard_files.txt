@@ -1288,6 +1288,10 @@ tests/test_ensemble_random_admission_gpu.py
 # Measured 61 passed on one card of the two-card box at 349e5c457.
 tests/test_mpas_column_suite_gpu.py
 tests/test_mpas_column_physics_gpu.py
+# CCPP TKE-EDMF on the generic entry (hex parity 1.9, 2026-11-12): each
+# column bitwise against the WRF column kernel, and its held TKE rate bank
+# restarting bit for bit at every-step and held PBL cadences.
+tests/test_hex_tke_edmf_gpu.py
 
 # Kain-Fritsch against WRF v4.6.1, device rows (golden/parity, 2026-10-12).
 # cu_physics = 1 is the wizard's default 12 km root cumulus.  The GPU kernel
