@@ -197,22 +197,24 @@ def lake_depth_cells(geometry, assigner, water: np.ndarray, dataset, *,
     return depth.astype(np.float32), receipt
 
 
-def lake_mask_vote(geometry, assigner, water: np.ndarray, dataset, *,
-                   progress: Callable[[str], None] | None = None
-                   ) -> tuple[np.ndarray, dict[str, Any]]:
-    """Dominant with-lakes category == ISLAKE over each WATER cell."""
+def category_counts(geometry, assigner, candidates: np.ndarray, dataset, *,
+                    progress: Callable[[str], None] | None = None
+                    ) -> tuple[np.ndarray, int, tuple[int, int, int, int]]:
+    """Per-cell pixel counts of each category of a categorical dataset.
+
+    Every source pixel goes to the Voronoi cell whose centre is nearest (MPAS
+    init's and geogrid's gcell rule); only ``candidates`` cells are counted.
+    A candidate cell no pixel centre falls in (a cell finer than the source)
+    takes the category of the pixel under its centre, geogrid's nearest
+    neighbour.  Returns ``(counts[n, categories], category_min, window)``.
+    """
     index = dataset.index
-    lake = index.islake
-    if lake is None or lake <= 0:
-        raise SurfaceStaticsRefusal(
-            f"{dataset.path} declares no positive islake, so it carries no lake class")
     cmin = int(index.category_min or 1)
-    cmax = int(index.category_max or lake)
+    cmax = int(index.category_max)
     categories = cmax - cmin + 1
     n = geometry.n_cells
     counts = np.zeros((n, categories), dtype=np.int64)
     window = _source_window(dataset, _footprint(geometry), 1)
-    candidates = water.copy()
     for bx0, bx1, by0, by1 in _bands(window):
         raw = dataset.read_window(bx0, bx1, by0, by1).raw[0].reshape(-1)
         nx = bx1 - bx0 + 1
@@ -225,7 +227,30 @@ def lake_mask_vote(geometry, assigner, water: np.ndarray, dataset, *,
         flat = cells[ok] * categories + (cats[ok] - cmin)
         counts += np.bincount(flat, minlength=n * categories).reshape(n, categories)
         if progress is not None:
-            progress(f"land-use rows {by0}-{by1}")
+            progress(f"{dataset.path.name} rows {by0}-{by1}")
+    empty = np.flatnonzero(candidates & (counts.sum(axis=1) == 0))
+    if empty.size:
+        lat = np.degrees(np.arcsin(np.clip(geometry.xyz[empty, 2], -1, 1)))
+        lon = np.degrees(np.arctan2(geometry.xyz[empty, 1], geometry.xyz[empty, 0]))
+        xs, ys = dataset.latlon_to_xy(lat, lon)
+        for k, cell in enumerate(empty):
+            ci, cj = int(np.rint(xs[k])), int(np.rint(ys[k]))
+            value = int(dataset.read_window(ci, ci, cj, cj).raw[0].reshape(-1)[0])
+            if cmin <= value <= cmax:
+                counts[cell, value - cmin] = 1
+    return counts, cmin, window
+
+
+def lake_mask_vote(geometry, assigner, water: np.ndarray, dataset, *,
+                   progress: Callable[[str], None] | None = None
+                   ) -> tuple[np.ndarray, dict[str, Any]]:
+    """Dominant with-lakes category == ISLAKE over each WATER cell."""
+    lake = dataset.index.islake
+    if lake is None or lake <= 0:
+        raise SurfaceStaticsRefusal(
+            f"{dataset.path} declares no positive islake, so it carries no lake class")
+    counts, cmin, window = category_counts(geometry, assigner, water, dataset,
+                                           progress=progress)
     voted = counts.sum(axis=1) > 0
     dominant = np.argmax(counts, axis=1) + cmin
     mask = voted & (dominant == lake)
@@ -238,8 +263,58 @@ def lake_mask_vote(geometry, assigner, water: np.ndarray, dataset, *,
     }
 
 
+#: The field groups ``--fields`` names: each is one scheme's inputs.
+FIELD_GROUPS = ("lake", "urban")
+
+
+def urban_fraction_cells(counts: np.ndarray, cmin: int, ivgtyp, landmask
+                         ) -> tuple[np.ndarray, dict[str, Any]]:
+    """FRC_URB2D for SLUCM, as WOOF's WRF preparation estimates it.
+
+    The cell's land-use category FRACTIONS (``counts``, the pixel shares of
+    the static's own MODIS land use) weighted by each urban category's
+    URBPARM.TBL FRC_URB, on the cells whose dominant category is urban: the
+    Rust estimate the WRF path runs (woof.static.urban_fraction, algorithm
+    ``landcover-area-urbparm-weighted-v1``), here on a (1, nCells) plane.
+    """
+    from woof.static.urban_fraction import estimate_urban_fraction
+
+    total = counts.sum(axis=1, keepdims=True)
+    fractions = np.where(total > 0, counts / np.maximum(total, 1), 0.0)
+    from woof.core.urban_tables import urban_category_set
+    from woof.static.highres import MODIS21_ISURBAN
+
+    # The estimate weighs every category the urban table set names (ISURBAN
+    # and the LCZ_1..LCZ_11 rows, 51-61), so the plane stack spans them; a
+    # 21-class source has no pixels in the LCZ planes.
+    deepest = max(urban_category_set(isurban=MODIS21_ISURBAN).urban)
+    planes = np.zeros((max(cmin - 1 + fractions.shape[1], deepest),
+                       fractions.shape[0]))
+    planes[cmin - 1:cmin - 1 + fractions.shape[1]] = fractions.T
+    frc, audit = estimate_urban_fraction(
+        {"LANDUSEF": planes[:, None, :],
+         "LU_INDEX": np.asarray(ivgtyp, np.float64)[None, :],
+         "LANDMASK": np.asarray(landmask, np.float64)[None, :]},
+        option=1, use_wudapt_lcz=0)
+    frc = np.asarray(frc, dtype=np.float64).reshape(-1)
+    from types import SimpleNamespace
+
+    from .surface_inputs import urban_table_sha256
+
+    return frc.astype(np.float32), {
+        # The table estimate_urban_fraction read (load_urban_params' default);
+        # the forecast refuses a run whose urban model reads another.
+        "urbparm_sha256": urban_table_sha256(SimpleNamespace()),
+        "method": "LANDUSEF (pixel shares per Voronoi cell) x URBPARM.TBL "
+                  "FRC_URB on dominant-urban land cells (woof.static."
+                  "urban_fraction, the WRF path's SLUCM estimate)",
+        "audit": audit,
+        "urban_cells": int(np.count_nonzero(frc > 0)),
+    }
+
+
 def build(static: Path, out: Path, *, geog_root: Path | None,
-          lake_depth: bool = True,
+          lake_depth: bool = True, fields: tuple[str, ...] = ("lake",),
           progress: Callable[[str], None] | None = None) -> dict[str, Any]:
     """Write ``out`` from ``static`` (and ``geog_root``); return the receipt."""
     import netCDF4
@@ -256,6 +331,8 @@ def build(static: Path, out: Path, *, geog_root: Path | None,
         ivgtyp = np.asarray(dataset.variables["ivgtyp"][:]).reshape(-1)
         tc_lakemask = (np.asarray(dataset.variables["tc_lakemask"][:]).reshape(-1)
                        if "tc_lakemask" in dataset.variables else None)
+        replaced_landuse = (dataset.getncattr("highres_landuse_source")
+                            if "highres_landuse_source" in dataset.ncattrs() else None)
     n = geometry.n_cells
     water = landmask == 0
     selected = np.isfinite(cell_spacing_m(geometry))
@@ -278,54 +355,79 @@ def build(static: Path, out: Path, *, geog_root: Path | None,
                 f"`woof fetch-geog --datasets {name} --root {geog_root}`")
         return GeogDataset(path)
 
+    groups = tuple(dict.fromkeys(fields))
+    unknown = sorted(set(groups) - set(FIELD_GROUPS))
+    if unknown or not groups:
+        raise SurfaceStaticsRefusal(
+            f"--fields names {unknown or 'nothing'}; it takes {list(FIELD_GROUPS)}")
     provenance: dict[str, Any] = {
+        "field_groups": list(groups),
         "parent_static": static.name,
         "parent_static_sha256": _file_sha256(static),
         "cells": int(n),
         "cells_with_closed_polygon": int(np.count_nonzero(selected)),
     }
-    if tc_lakemask is not None:
-        mask = tc_lakemask == 1
-        provenance["lakemask_source"] = (
-            "static tc_lakemask (rw_mpas_static --preserve-lake-mask: the "
-            "with-lakes dominant category == islake)")
-    elif np.any(ivgtyp == MODIS_ISLAKE):
-        mask = ivgtyp == MODIS_ISLAKE
-        provenance["lakemask_source"] = (
-            f"static ivgtyp == {MODIS_ISLAKE} (a with-lakes static that keeps "
-            "the lake class)")
-    else:
-        dataset = geog(LAKE_LANDUSE_DATASET)
-        mask, vote = lake_mask_vote(geometry, need_assigner(), water, dataset,
-                                    progress=progress)
-        vote["index_sha256"] = _index_sha256(dataset.path)
-        provenance["lakemask_source"] = "with-lakes land-use vote on the mesh"
-        provenance["lakemask_vote"] = vote
-    on_land = mask & ~water
-    if np.any(on_land) and provenance["lakemask_source"].startswith("static ivgtyp"):
+    written: dict[str, np.ndarray] = {}
+    attrs: dict[str, Any] = {}
+    if "lake" in groups:
+        if tc_lakemask is not None:
+            mask = tc_lakemask == 1
+            provenance["lakemask_source"] = (
+                "static tc_lakemask (rw_mpas_static --preserve-lake-mask: the "
+                "with-lakes dominant category == islake)")
+        elif np.any(ivgtyp == MODIS_ISLAKE):
+            mask = ivgtyp == MODIS_ISLAKE
+            provenance["lakemask_source"] = (
+                f"static ivgtyp == {MODIS_ISLAKE} (a with-lakes static that keeps "
+                "the lake class)")
+        else:
+            dataset = geog(LAKE_LANDUSE_DATASET)
+            mask, vote = lake_mask_vote(geometry, need_assigner(), water, dataset,
+                                        progress=progress)
+            vote["index_sha256"] = _index_sha256(dataset.path)
+            provenance["lakemask_source"] = "with-lakes land-use vote on the mesh"
+            provenance["lakemask_vote"] = vote
+        on_land = mask & ~water
+        if np.any(on_land) and provenance["lakemask_source"].startswith("static ivgtyp"):
+            raise SurfaceStaticsRefusal(
+                "the static's lake cells are not water cells: a lake is water "
+                "(real.exe turns ISLAKE into ISWATER)")
+        mask = mask & water
+        provenance["lake_cells"] = int(np.count_nonzero(mask))
+        provenance["lake_cells_on_static_land_dropped"] = int(np.count_nonzero(on_land))
+        written["LAKEMASK"] = mask.astype(np.int32)
+        attrs["LAKEFLAG"] = np.int32(1)
+        if lake_depth:
+            dataset = geog(LAKE_DEPTH_DATASET)
+            depth, depth_receipt = lake_depth_cells(
+                geometry, need_assigner(), water, dataset, progress=progress)
+            depth_receipt["index_sha256"] = _index_sha256(dataset.path)
+            if mask.any():
+                values = depth[mask]
+                depth_receipt["lake_depth_on_lake_cells_m"] = {
+                    "min": float(values.min()), "max": float(values.max()),
+                    "mean": float(values.mean())}
+            provenance["lake_depth"] = depth_receipt
+            written["LAKE_DEPTH"] = depth
+            attrs["LAKE_DEPTH_FLAG"] = np.int32(1)
+    if "urban" in groups and replaced_landuse is not None:
         raise SurfaceStaticsRefusal(
-            "the static's lake cells are not water cells: a lake is water "
-            "(real.exe turns ISLAKE into ISWATER)")
-    mask = mask & water
-    provenance["lake_cells"] = int(np.count_nonzero(mask))
-    provenance["lake_cells_on_static_land_dropped"] = int(np.count_nonzero(on_land))
-
-    fields: dict[str, np.ndarray] = {"LAKEMASK": mask.astype(np.int32)}
-    attrs: dict[str, Any] = {"LAKEFLAG": np.int32(1)}
-    if lake_depth:
-        dataset = geog(LAKE_DEPTH_DATASET)
-        depth, depth_receipt = lake_depth_cells(
-            geometry, need_assigner(), water, dataset, progress=progress)
-        depth_receipt["index_sha256"] = _index_sha256(dataset.path)
-        if mask.any():
-            values = depth[mask]
-            depth_receipt["lake_depth_on_lake_cells_m"] = {
-                "min": float(values.min()), "max": float(values.max()),
-                "mean": float(values.mean())}
-        provenance["lake_depth"] = depth_receipt
-        fields["LAKE_DEPTH"] = depth
-        attrs["LAKE_DEPTH_FLAG"] = np.int32(1)
-
+            f"the static's land use was replaced by `woof hex static-highres` "
+            f"({replaced_landuse}); the urban shares here count the 30-arc-second "
+            "MODIS pixels, which would disagree with that static's urban cells. "
+            "Build the urban fraction from a static carrying the 30-arc-second "
+            "land use (the high-resolution source is not wired here yet)")
+    if "urban" in groups:
+        dataset = geog(LAKE_LANDUSE_DATASET)
+        counts, cmin, window = category_counts(
+            geometry, need_assigner(), np.ones(n, dtype=bool), dataset,
+            progress=progress)
+        frc, urban = urban_fraction_cells(counts, cmin, ivgtyp, landmask)
+        urban.update(dataset=dataset.path.name, source_window=list(window),
+                     index_sha256=_index_sha256(dataset.path))
+        provenance["urban"] = urban
+        written["FRC_URB2D"] = frc
+    fields = written
     out = Path(out).expanduser().absolute()
     out.parent.mkdir(parents=True, exist_ok=True)
     partial = out.with_name(f".{out.name}.partial-{os.getpid()}")
@@ -356,7 +458,8 @@ def add_surface_statics_parser(commands) -> None:
     parser = commands.add_parser(
         "surface-statics",
         help="build the per-cell scheme inputs a WRF column selection reads "
-             "(CLM lake mask and bathymetry) beside a hex static",
+             "(CLM lake mask and bathymetry, the SLUCM urban fraction) beside a "
+             "hex static",
         description=__doc__.split("\n\n")[1])
     parser.add_argument("--static", type=Path, required=True, metavar="S",
                         help="the mesh's static file (rw_mpas_static output)")
@@ -366,6 +469,10 @@ def add_surface_statics_parser(commands) -> None:
     parser.add_argument("--geog-root", type=Path, default=None, metavar="DIR",
                         help="WPS_GEOG root holding lake_depth (and, for a static "
                              f"without a lake mask, {LAKE_LANDUSE_DATASET})")
+    parser.add_argument("--fields", default="lake", metavar="GROUPS",
+                        help="comma-separated field groups to build: "
+                             f"{', '.join(FIELD_GROUPS)} (default lake); urban is "
+                             "SLUCM's FRC_URB2D")
     parser.add_argument("--no-lake-depth", action="store_true",
                         help="stage the lake mask only (for use_lakedepth = 0)")
     parser.set_defaults(handler=run_cli)
@@ -378,6 +485,8 @@ def run_cli(arguments: argparse.Namespace) -> int:
         out = builder_default_path(static)
     receipt = build(static, out, geog_root=arguments.geog_root,
                     lake_depth=not arguments.no_lake_depth,
+                    fields=tuple(item.strip() for item in arguments.fields.split(",")
+                                 if item.strip()),
                     progress=lambda message: print(message, flush=True))
     print(json.dumps(receipt, indent=1, sort_keys=True))
     return 0
