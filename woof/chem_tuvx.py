@@ -672,3 +672,213 @@ def exo_layer_columns(layer_columns):
     and a zero exo layer (src/profiles/from_host.F90 update)."""
     lay = _columns(layer_columns)
     return np.concatenate([lay, np.zeros((lay.shape[0], 1))], axis=1)
+
+
+# ------------------------------------------------------------------------------------------------------------
+# O2 Lyman-alpha and Schumann-Runge bands (src/la_sr_bands.F90): the O2 optical depth (radiative transfer) and
+# the O2 photolysis cross section in those bins, from the O2 slant column along the direct beam.  Level and
+# layer arrays are surface first, columns on the leading axis.
+
+#: the Lyman-alpha and Schumann-Runge wavelength grids [nm]
+LA_EDGES = (121.4, 121.9)
+SRB_EDGES = (175.4, 177.0, 178.6, 180.2, 181.8, 183.5, 185.2, 186.9, 188.7, 190.5, 192.3, 194.2, 196.1, 198.0,
+             200.0, 202.0, 204.1, 206.2)
+NSRB = len(SRB_EDGES) - 1
+NPOLY = 20
+PRECIS = 1.0e-7
+#: lymana_OD / lymana_xs parameters
+_LA_B = (6.8431e-01, 2.29841e-01, 8.65412e-02)
+_LA_C = (8.22114e-21, 1.77556e-20, 8.22112e-21)
+_LA_D = (6.0073e-21, 4.28569e-21, 1.28059e-20)
+_LA_E = (8.21666e-21, 1.63296e-20, 4.85121e-17)
+_LA_XSMIN, _LA_TINY, _LA_EXP_LIM, _LA_LARGE_OD = 1.0e-20, 1.0e-100, 100.0e8, 1000.0
+#: schum_OD / schum_xs: the cross sections above the Chebyshev range
+_SRB_XSLOD = (6.2180730e-21, 5.8473627e-22, 5.6996334e-22, 4.5627094e-22, 1.7668250e-22, 1.1178808e-22,
+              1.2040544e-22, 4.0994668e-23, 1.8450616e-23, 1.5639540e-23, 8.7961075e-24, 7.6475608e-24,
+              7.6260556e-24, 7.5565696e-24, 7.6334338e-24, 7.4371992e-24, 7.3642966e-24)
+
+
+def _exp38():
+    """``exp(38._dk)``, a constant gfortran folds with correct rounding."""
+    from decimal import Decimal, getcontext
+    getcontext().prec = 60
+    return float(Decimal(38).exp())
+
+
+SRB_COLMIN = _exp38()
+
+
+def read_srb_parameters(path):
+    """init_srb_xs: (AC, BC), each (NPOLY, NSRB), from two blocks of format (/) then 20 records of
+    17(E23.14, 1x)."""
+    lines = Path(path).read_text().splitlines()
+
+    def block(start):
+        rows = []
+        for line in lines[start:start + NPOLY]:
+            rows.append([float(line[24 * k:24 * k + 23].replace("D", "E")) for k in range(NSRB)])
+        return np.asarray(rows, dtype=np.float64)
+
+    return block(2), block(2 + NPOLY + 2)
+
+
+def _sum3(tau, coefficients):
+    """dot_product of three: 0 + t1 c1 + t2 c2 + t3 c3, in order."""
+    total = tau[0] * coefficients[0]
+    total = total + tau[1] * coefficients[1]
+    return total + tau[2] * coefficients[2]
+
+
+class LaSrBands:
+    """la_sr_bands_t on a wavelength grid (TUV-x's O2 profile form: no "O2 estimate")."""
+
+    def __init__(self, config, grid: WavelengthGrid, *, root):
+        if "O2 estimate" in config:
+            raise TuvxPortError("la_sr_bands 'O2 estimate' is not ported")
+        edge = grid.edge
+        self.has_la = bool(edge[0] <= LA_EDGES[0] and edge[-1] >= LA_EDGES[-1])
+        self.has_srb = bool(edge[0] <= SRB_EDGES[0] and edge[-1] >= SRB_EDGES[-1])
+        self.ila = self.isrb = None
+        if self.has_la:
+            self.ila = self._start(edge, LA_EDGES, "Lyman alpha")
+        if self.has_srb:
+            self.isrb = self._start(edge, SRB_EDGES, "Schumann-Runge")
+            self.ac, self.bc = read_srb_parameters(Path(root) / config["cross section parameters file"])
+
+    @staticmethod
+    def _start(edge, band, what):
+        """The 0-based grid edge where the band starts; its edges must follow within 10 * PRECIS."""
+        hits = [i for i, e in enumerate(edge) if abs(float(e) - band[0]) < 10.0 * PRECIS]
+        if not hits:
+            raise TuvxPortError(f"{what} grid mis-match: below 205.8 nm only the pre-specified grid is permitted")
+        start = hits[0]
+        for k, w in enumerate(band[1:], start=1):
+            if start + k >= edge.size or abs(float(edge[start + k]) - w) > 10.0 * PRECIS:
+                raise TuvxPortError(f"{what} grid mismatch at {w} nm")
+        return start
+
+    @property
+    def bins(self):
+        """The 0-based wavelength bins the bands set."""
+        out = []
+        if self.has_la:
+            out.append(self.ila)
+        if self.has_srb:
+            out.extend(range(self.isrb, self.isrb + NSRB))
+        return out
+
+    # -- the shared front of la_srb_OD / la_srb_xs
+    @staticmethod
+    def _secchi(air_vcol, air_scol):
+        nzm1 = air_vcol.shape[1]
+        secchi = np.empty_like(air_scol)
+        ok = air_scol[:, :nzm1] <= 0.1 * LARGEST
+        with np.errstate(invalid="ignore", divide="ignore", over="ignore"):
+            secchi[:, :nzm1] = np.where(ok, air_scol[:, :nzm1] / air_vcol, 2.0)
+        secchi[:, nzm1] = secchi[:, nzm1 - 1]
+        return secchi
+
+    @staticmethod
+    def _rm(o2col, coeff_c, coeff_b):
+        taus = []
+        for c in coeff_c:
+            sigma = c * o2col
+            taus.append(np.where(sigma < _LA_EXP_LIM, np.exp(-sigma), 0.0))
+        return _sum3(taus, coeff_b)
+
+    def _lyman_alpha_od(self, o2col, secchi):
+        rm = self._rm(o2col, _LA_C, _LA_B)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            lr = np.log(rm)
+            od = lr[:, 1:] / secchi[:, 1:] - lr[:, :-1] / secchi[:, :-1]
+        good = (rm[:, :-1] > _LA_TINY) & (rm[:, 1:] > 0.0)
+        return np.where(good, od, _LA_LARGE_OD)
+
+    def _lyman_alpha_xs(self, o2col):
+        rm = self._rm(o2col, _LA_C, _LA_B)
+        ro2 = self._rm(o2col, _LA_E, _LA_D)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ratio = ro2 / rm
+        out = np.where((rm > _LA_TINY) & (ro2 > _LA_TINY), ratio, _LA_XSMIN)
+        # the top edge takes the ratio whenever rm is above the floor (ro2 is not checked there)
+        out[:, -1] = np.where(rm[:, -1] > _LA_TINY, ratio[:, -1], _LA_XSMIN)
+        return out
+
+    def _chebyshev(self, coefficients, x):
+        """chebyshev_evaluation for every band at once: coefficients (NPOLY, NSRB), x (ncol,)."""
+        if np.any((x < 38.0) | (x > 56.0)):
+            raise TuvxPortError("x out-of-bounds for Chebyshev polynomial")
+        y = ((2.0 * x - (38.0 + 56.0)) / (56.0 - 38.0))[:, None]
+        y2 = 2.0 * y
+        di = np.zeros((x.size, NSRB))
+        di1 = np.zeros((x.size, NSRB))
+        for i in range(NPOLY - 1, 0, -1):
+            dtemp = di
+            di = y2 * di - di1 + coefficients[i]
+            di1 = dtemp
+        return y * di - di1 + 0.5 * coefficients[0]
+
+    def _srb_xs(self, o2col, tlev):
+        """schum_xs: the effective cross sections (ncol, nz, NSRB) and the clamped columns."""
+        ncol, nz = o2col.shape
+        xs = np.broadcast_to(np.asarray(_SRB_XSLOD), (ncol, nz, NSRB)).copy()
+        o2col1 = np.maximum(o2col, SRB_COLMIN)
+        ktop = np.full(ncol, nz)                 # 1-based, as TUV-x
+        kbot = np.zeros(ncol, dtype=np.int64)
+        for k in range(1, nz + 1):
+            low = o2col[:, k - 1] < SRB_COLMIN
+            ktop = np.where(low, np.minimum(k - 1, ktop), ktop)
+            with np.errstate(divide="ignore"):
+                x = np.log(o2col1[:, k - 1])
+            above = ~low & (x > 56.0)
+            kbot = np.where(above, k, kbot)
+            fit = ~low & ~above
+            if fit.any():
+                xf = x[fit]
+                a = self._chebyshev(self.ac, xf)
+                b = self._chebyshev(self.bc, xf)
+                xs[fit, k - 1] = np.exp(a * (tlev[fit, k - 1][:, None] - 220.0) + b)
+        kbot = np.where(kbot == nz, nz - 1, kbot)
+        for c in range(ncol):
+            if kbot[c] > 0:
+                xs[c, :kbot[c]] = xs[c, kbot[c]]
+            if ktop[c] < nz:
+                xs[c, ktop[c]:] = xs[c, ktop[c] - 1]
+        return xs, o2col1
+
+    def _srb_od(self, o2col, tlev, secchi):
+        xs, o2col1 = self._srb_xs(o2col, tlev)
+        nz = o2col.shape[1]
+        norm = 1.0 / float(nz - 1)
+        lo, hi = xs[:, :-1], xs[:, 1:]
+        clo, chi = o2col1[:, :-1, None], o2col1[:, 1:, None]
+        near = np.abs(1.0 - o2col1[:, 1:] / o2col1[:, :-1]) <= 2.0 * PRECIS
+        with np.errstate(divide="ignore", invalid="ignore"):
+            far = np.abs((hi * chi - lo * clo) / (1.0 + np.log(hi / lo) / np.log(chi / clo)))
+            far = 2.0 * far / (secchi[:, :-1] + secchi[:, 1:])[:, :, None]
+        return np.where(near[:, :, None], hi * chi * norm, far)
+
+    def optical_depth(self, air_vcol, air_scol, o2_scol, temperature_edges):
+        """la_srb_OD: ``{bin: O2 optical depth (ncol, nlayer)}`` for the band bins (0-based)."""
+        secchi = self._secchi(_columns(air_vcol), _columns(air_scol))
+        o2col, tlev = _columns(o2_scol), _columns(temperature_edges)
+        out = {}
+        if self.has_la:
+            out[self.ila] = self._lyman_alpha_od(o2col, secchi)
+        if self.has_srb:
+            od = self._srb_od(o2col, tlev, secchi)
+            for k in range(NSRB):
+                out[self.isrb + k] = od[:, :, k]
+        return out
+
+    def cross_section(self, air_vcol, air_scol, o2_scol, temperature_edges):
+        """la_srb_xs: ``{bin: O2 cross section (ncol, nedge)}`` for the band bins (0-based)."""
+        o2col, tlev = _columns(o2_scol), _columns(temperature_edges)
+        out = {}
+        if self.has_la:
+            out[self.ila] = self._lyman_alpha_xs(o2col)
+        if self.has_srb:
+            xs, _ = self._srb_xs(o2col, tlev)
+            for k in range(NSRB):
+                out[self.isrb + k] = xs[:, :, k]
+        return out
