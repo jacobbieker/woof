@@ -3,7 +3,9 @@
 ! One TUV-x core is built from the committed configuration with the column the host supplies: the
 ! height grid and the temperature, air, O2 and O3 profiles (TUV-x's from-host grid and profiles).
 ! Each case on standard input updates them and runs the core; the photolysis rate constants come
-! back as binary64 words in hex, edge by reaction.
+! back as binary64 words in hex, edge by reaction.  Once the core is built, the configuration-time pieces
+! the port is graded on piece by piece follow: the wavelength grid's edges ('wedge') and the
+! extraterrestrial flux on it ('etf', photon cm-2 s-1 per bin).
 !
 ! input:   config <path> / nlev <n> / then per case:
 !          case / sza <deg> / esd <AU> / edges <n+1 km> / temperature <n+1 K> /
@@ -13,6 +15,8 @@ program tuvx_harness
   use musica_constants,     only : dk => musica_dk
   use musica_string,        only : string_t
   use tuvx_core,            only : core_t
+  use tuvx_grid,            only : grid_t
+  use tuvx_profile,         only : profile_t
   use tuvx_grid_from_host,  only : grid_from_host_t, grid_updater_t
   use tuvx_grid_warehouse,  only : grid_warehouse_t
   use tuvx_profile_from_host, only : profile_from_host_t, profile_updater_t
@@ -24,6 +28,8 @@ program tuvx_harness
   character(len=32)   :: key
   integer :: nlev, i, j, ncase
   class(core_t), pointer :: core
+  class(grid_t), pointer :: wavelength
+  class(profile_t), pointer :: etf
   type(string_t) :: config_path
   type(grid_from_host_t), pointer :: height
   type(profile_from_host_t), pointer :: temperature, air, o2, o3
@@ -80,6 +86,15 @@ program tuvx_harness
       do j = 1, size( labels )
         write(*,'(a,i0,1x,a)') 'label ', j, labels(j)%val_
       end do
+      wavelength => core%get_grid( "wavelength", "nm" )
+      do i = 1, size( wavelength%edge_ )
+        write(*,'(a,i0,1x,z16.16)') 'wedge ', i, transfer( wavelength%edge_(i), 0_8 )
+      end do
+      etf => core%get_profile( "extraterrestrial flux", "photon cm-2 s-1" )
+      do i = 1, size( etf%mid_val_ )
+        write(*,'(a,i0,1x,z16.16)') 'etf ', i, transfer( etf%mid_val_(i), 0_8 )
+      end do
+      deallocate( wavelength, etf )
       u_height = core%get_updater( height )
       u_temperature = core%get_updater( temperature )
       u_air = core%get_updater( air )

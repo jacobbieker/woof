@@ -65,25 +65,29 @@ def run(harness, work, cases):
     if proc.returncode:
         sys.exit(f"harness failed with status {proc.returncode}:\n{proc.stderr}")
     out = proc.stdout
-    labels, results = {}, []
+    labels, results, config = {}, [], {"wedge": {}, "etf": {}}
     for line in out.splitlines():
         w = line.split()
         if w[0] == "label":
             labels[int(w[1])] = " ".join(w[2:])
+        elif w[0] in config:
+            config[w[0]][int(w[1])] = float(np.frombuffer(bytes.fromhex(w[2]), dtype=">f8")[0]).hex()
         elif w[0] == "case":
             results.append({})
         elif w[0] == "j":
             j, i = int(w[1]), int(w[2])
             value = np.frombuffer(bytes.fromhex(w[3]), dtype=">f8")[0]
             results[-1].setdefault(labels[j], {})[i] = float(value).hex()
+    configuration = {"wavelength_edges_nm": [config["wedge"][i] for i in sorted(config["wedge"])],
+                     "extraterrestrial_flux_photon_cm-2_s-1": [config["etf"][i] for i in sorted(config["etf"])]}
     return [labels[k] for k in sorted(labels)], [
-        {name: [r[name][i] for i in sorted(r[name])] for name in r} for r in results]
+        {name: [r[name][i] for i in sorted(r[name])] for name in r} for r in results], configuration
 
 
 def main(work):
     work = Path(work).resolve()
     rng = np.random.default_rng(20261110)
-    fixtures = []
+    fixtures, configuration = [], None
     for name, grids in layouts(rng):
         cases = []
         for z in grids:
@@ -91,7 +95,11 @@ def main(work):
             c.update(edges=z, sza=float(rng.uniform(0.0, 89.0)), esd=float(rng.uniform(0.983, 1.017)))
             cases.append(c)
         # One harness per layout: every case shares the layout's level count.
-        labels, results = run(work / "harness", work, cases)
+        labels, results, layout_configuration = run(work / "harness", work, cases)
+        # The configuration-time pieces do not depend on the column: every layout must report the same words.
+        if configuration is not None and layout_configuration != configuration:
+            sys.exit("the configuration-time words differ between column layouts")
+        configuration = layout_configuration
         fixtures.append({
             "layout": name, "reactions": labels,
             "cases": [{"solar_zenith_angle_deg": c["sza"].hex(), "earth_sun_distance_au": c["esd"].hex(),
@@ -103,8 +111,10 @@ def main(work):
                      "tools/tuvx_oracle/photolysis.json (TUV 5.4 cut to O2, O3 -> O(1D), O3 -> O(3P) and NO2); "
                      "x86-64 glibc host, gfortran -O2 -ffp-contract=off (tools/tuvx_oracle/build.sh)",
            "units": {"temperature": "K", "air, O2, O3": "molecule cm-3 at the edges",
-                     "*_layer": "molecule cm-2 per layer", "photolysis_rate_constants_s-1": "s-1 at the edges"},
-           "fixtures": fixtures}
+                     "*_layer": "molecule cm-2 per layer", "photolysis_rate_constants_s-1": "s-1 at the edges",
+                     "configuration": "the wavelength grid's edges (nm) and the extraterrestrial flux on its bins "
+                                      "(photon cm-2 s-1), as the built core holds them"},
+           "configuration": configuration, "fixtures": fixtures}
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(out, indent=0) + "\n")
     print(OUT)
