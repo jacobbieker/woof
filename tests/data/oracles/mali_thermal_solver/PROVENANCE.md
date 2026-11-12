@@ -35,6 +35,7 @@ Written by `tools/mali_oracle/build.sh` (`run_thermal_solver_r4`) and
 | `temperature_none_seroussi` | 96 | 8 | none | temperature | lapse | seroussi | no |
 | `enthalpy_none_file` | 80 | 6 | none | enthalpy | file | file | yes |
 | `no_thermal` | 64 | 5 | sia | none | file | none | yes |
+| `no_thermal_mismip` | 4096 | 3 | none | none | file | mismip | no |
 
 The time step is 30 days. Each case covers:
 
@@ -63,9 +64,15 @@ every edge, so the meshes keep them inside.
 Each case is drawn from the same seed in float64 instead of rounded to
 float32. Its input digests are the `<case>/r8` lines of `inputs.sha256`.
 The double `pow` is glibc 2.44's; the port's is `glibc_pow`
-(`woof/core/kernels/glibc_flt64.cuh`, MIT). The port refuses 'mismip'
-(binary64 `tanh`) and 'seroussi' (binary64 `sin`) at RKIND 8, so
-`enthalpy_sia_mismip` runs 'constant' as `enthalpy_sia_constant` and
+(`woof/core/kernels/glibc_flt64.cuh`, MIT). The double `tanh` ('mismip') is
+glibc 2.44's, which is CORE-MATH's correctly rounded tanh; the port's is
+`g64_tanh::cr_tanh` (`woof/core/kernels/cr_tanh_flt64.cuh`, MIT), equal to
+pb's glibc `tanh` on 2^33 CPU and 2^28 GPU arguments
+(`tools/oracle_libm/grade_tanh.py`). `enthalpy_sia_mismip/r8` was rewritten
+on pb, 2026-11-10, when the RKIND 8 'mismip' refusal was lifted; the other
+cases' bytes are unchanged. `no_thermal_mismip` (both precisions) was added then: it
+grades MISMIP's `tanh` on about a thousand floating cells. The port refuses 'seroussi' (binary64 `sin`,
+glibc's is LGPL and not correctly rounded) at RKIND 8, so
 `temperature_none_seroussi` runs 'none' as `temperature_none_none`.
 The GPU port runs the `MPAS_RKIND8` unit and must match every word.
 

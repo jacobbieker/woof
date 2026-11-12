@@ -2608,6 +2608,10 @@
     "sha256": "543414e82e9042820f6fb386a29bea072b9995ab8046e2c8d1d32e7aff7c2691"
    },
    {
+    "file": "woof/core/kernels/cr_tanh_flt64.cuh",
+    "sha256": "769c8b6d0f0aef936bb6d2d933f4ba804990b6f47405310b53030bc0da68cbcb"
+   },
+   {
     "file": "woof/core/kernels/cu_osas.cu",
     "sha256": "0285766c77cd5f9533562dbbffb5584044499c147bdf626175449377bab8e00c"
    },
@@ -4521,7 +4525,7 @@
    },
    {
     "file": "woof/hex/mpas_ice/thermal_solver_v842.cu",
-    "sha256": "72765d7d8befcf3cefb975f51a6689080ae9408c0af5f8504ff458da52d0ea72"
+    "sha256": "03520a378a4be4eb1d5aa25696f6a796a532c10f76b9ac21cbb33c5231d37bac"
    },
    {
     "file": "woof/hex/mpas_ocean/forcing_v842.cu",
@@ -5411,7 +5415,7 @@
    },
    {
     "file": "woof/hex/mpas_ice/thermal_solver_v842.py",
-    "sha256": "33accbdb844fdc0acd6b56e4e991dc700973dd9667191eb7dc873736aae5b958"
+    "sha256": "00f6cfb72ce7a544d41ed4c790448806da61580669cdad653bd01ea5ffd8f99a"
    },
    {
     "file": "woof/hex/mpas_ocean/forcing_v842.py",
