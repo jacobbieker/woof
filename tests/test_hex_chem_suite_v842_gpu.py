@@ -275,6 +275,12 @@ def test_micm_is_the_woof_routes_per_point_solve(tmp_path):
         got = cp.asnumpy(dycore.atmosphere.state.scalars[nreg:])
         assert got.tobytes() == cp.asnumpy(ref_scalars).tobytes(), step
     assert chem.restart_state()["case_start"] == CONFIGS["config_start_time"]
+    payload = chem.restart_state()
+    assert payload["mechanism_sha256"] == ref.settings["mechanism_sha256"]
+    restart = {"payload": dict(payload, mechanism_sha256="0" * 64),
+               "scalars": cp.asnumpy(dycore.atmosphere.state.scalars)}
+    with pytest.raises(ValueError, match="mechanism"):
+        _suite(tmp_path, raw, area, restart=restart)
     receipt = chem.write_ledger(tmp_path)
     assert receipt["mode"] == "micm" and receipt["committed_steps"] == 3 and "mass_closure_kg" not in receipt
 
