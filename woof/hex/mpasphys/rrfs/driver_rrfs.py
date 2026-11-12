@@ -371,6 +371,10 @@ def resolve_namelist(text: str, *, backends: Mapping[str, str] | None = None,
     if nwp.parse_flag(groups):
         raise ValueError(f"&{nwp.GROUP} {nwp.OPTION} is not available on the RRFS fork route; "
                          "it is an MPAS-A v8.4.2 suite-route option")
+    from ...mpasdiag import tslist_v842 as tslist
+    if tslist.resolve(groups) is not None:
+        raise ValueError(f"&{tslist.GROUP} {tslist.OPTION} is not available on the RRFS fork route; "
+                         "it is an MPAS-A v8.4.2 suite-route option")
     for group, keys in spec["registry_groups"].items():
         for key, value in groups.get(group, {}).items():
             if key not in keys:
