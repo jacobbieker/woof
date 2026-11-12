@@ -50,7 +50,8 @@ FIELDS = (
     *(("geometry", n, "r", (_C,)) for n in (
         "thickness", "thicknessOld", "dHdt", "bedTopography", "upperSurface", "lowerSurface", "sfcMassBal",
         "basalMassBal", "groundedBasalMassBal", "floatingBasalMassBal", "dynamicThickening", "calvingThickness",
-        "basalWaterThickness", "apparentDiffusivity")),
+        "basalWaterThickness", "apparentDiffusivity", "restoreThickness", "eigencalvingParameter",
+        "requiredCalvingVolumeRate", "calvingVelocity", "uncalvedVolume")),
     *(("geometry", n, "r", (_E,)) for n in ("normalSlopeEdge", "slopeEdge", "tangentSlopeEdge")),
     ("geometry", "upperSurfaceVertex", "r", (_V,)),
     ("geometry", "layerThickness", "r", (_C, _L)), ("geometry", "layerThicknessEdge", "r", (_E, _L)),
@@ -71,7 +72,8 @@ FIELDS = (
     ("scratch", "workLevelCell", "r", (_C, _L)), ("scratch", "workTracerCell", "r", (_C, 1)),
     ("scratch", "workTracerCell2", "r", (_C, 1)), ("scratch", "workTracerLevelCell", "r", (_C, _L, 1)),
     ("scratch", "workTracerLevelCell2", "r", (_C, _L, 1)), ("scratch", "workLevelEdge", "r", (_E, _L)),
-    ("scratch", "iceCellMask", "i", (_C,)),
+    ("scratch", "iceCellMask", "i", (_C,)), ("scratch", "iceCellMask2", "i", (_C,)),
+    ("scratch", "iceCellMask3", "i", (_C,)),
 )
 #: the fields a step may change, compared word for word (the mesh's own words and the scratch are not)
 OUTPUTS = tuple((pool, name) for pool, name, kind, _ in FIELDS
@@ -99,6 +101,23 @@ CASES = (
     ("sia_no_advection", 20261165, 64, 6,
      {"config_thickness_advection": "none", "config_thermal_solver": "enthalpy",
       "config_basal_mass_bal_float": "file", "config_thermal_calculate_bmb": False}),
+    ("calving_thickness_threshold", 20261171, 96, 6,
+     {"config_calving": "thickness_threshold", "config_calving_thickness": 300.0,
+      "config_calving_timescale": 8.0e6}),
+    ("calving_floating_data", 20261172, 80, 6,
+     {"config_calving": "floating", "config_data_calving": True, "config_thermal_solver": "enthalpy"}),
+    ("calving_topographic", 20261173, 80, 5,
+     {"config_calving": "topographic_threshold", "config_calving_topography": -400.0,
+      "config_velocity_solver": "none", "config_calving_timescale": 1.0e6}),
+    ("calving_eigen_scalar", 20261174, 200, 6,
+     {"config_calving": "eigencalving", "config_calving_thickness": 80.0, "config_thermal_solver": "none",
+      "config_calving_eigencalving_parameter_scalar_value": 3.0e9, "_bed": (-2500.0, -200.0), "_speed": 0.01}),
+    ("calving_eigen_data", 20261175, 200, 6,
+     {"config_calving": "eigencalving", "config_calving_eigencalving_parameter_source": "data",
+      "config_thermal_solver": "none",
+      "config_calving_thickness": 40.0, "_bed": (-2500.0, 0.0), "_speed": 0.01}),
+    ("calving_restore_front", 20261176, 96, 6,
+     {"config_restore_calving_front": True, "config_calving": "floating", "config_thermal_solver": "enthalpy"}),
 )
 #: at RKIND 8 the cases run planar and without the floating melt whose sin is refused
 R8_OVERRIDES = {"on_a_sphere": False}
@@ -120,6 +139,9 @@ BASE_CONFIG = {
     "config_adaptive_timestep_include_DCFL": False, "config_adaptive_timestep_CFL_fraction": 0.25,
     "config_max_adaptive_timestep": 3.1536e7, "config_min_adaptive_timestep": 60.0,
     "config_restore_calving_front": False, "config_calving": "none", "config_calving_timescale": 0.0,
+    "config_calving_thickness": 100.0, "config_calving_topography": -500.0,
+    "config_calving_eigencalving_parameter_source": "scalar",
+    "config_calving_eigencalving_parameter_scalar_value": 1.0e9,
     "config_data_calving": False, "config_SGH": False, "config_do_velocity_reconstruction_for_external_dycore": False,
     "config_print_thickness_advection_info": False, "config_print_thermal_info": False,
     "config_print_calving_info": False, "config_print_velocity_cleanup_details": False, "config_stats_cell_ID": 0,
@@ -154,7 +176,8 @@ def make_case(name: str, seed: int, n_cells: int, n_levels: int, overrides: dict
     real = PRECISIONS[precision]
     nc, nl = n_cells, n_levels
     ne, nv, me, me2 = 3 * nc, 2 * nc, 7, 10
-    config = dict(BASE_CONFIG, **overrides)
+    config = dict(BASE_CONFIG, **{k: v for k, v in overrides.items() if not k.startswith("_")})
+    bed = overrides.get("_bed", (-1200.0, 900.0))
     if precision == "r8":
         config.update(R8_OVERRIDES)
         config["config_basal_mass_bal_float"] = R8_FLOAT_MELT.get(config["config_basal_mass_bal_float"],
@@ -169,7 +192,7 @@ def make_case(name: str, seed: int, n_cells: int, n_levels: int, overrides: dict
         return (lo + np.floor((hi - lo) * rs.random_sample(shape))).astype(np.int32)
 
     year = 365.0 * 86400.0
-    thickness = uniform(1.0, 2500.0, nc)
+    thickness = uniform(1.0, overrides.get("_max_thickness", 2500.0), nc)
     thickness[rs.random_sample(nc) < 0.2] = 0.0
     thin = rs.random_sample(nc) < 0.08
     thickness[thin] = uniform(0.05, 1.0, int(thin.sum()))
@@ -182,7 +205,7 @@ def make_case(name: str, seed: int, n_cells: int, n_levels: int, overrides: dict
     edges_on_edge = np.full((ne, me2), ne + 5, np.int32)
     for e in range(ne):
         edges_on_edge[e, :n_edges_on_edge[e]] = ints(1, ne + 1, int(n_edges_on_edge[e]))
-    velocity_scale = 30.0 / year
+    velocity_scale = overrides.get("_speed", 30.0) / year
     pools = {
         "mesh": {
             "nEdgesOnCell": np.array([5, 6, 6, 6, 7], np.int32)[ints(0, 5, nc)],
@@ -205,13 +228,16 @@ def make_case(name: str, seed: int, n_cells: int, n_levels: int, overrides: dict
         },
         "geometry": {
             "thickness": thickness, "thicknessOld": uniform(0.0, 2500.0, nc), "dHdt": uniform(-1.0, 1.0, nc),
-            "bedTopography": uniform(-1200.0, 900.0, nc), "upperSurface": uniform(0.0, 3000.0, nc),
+            "bedTopography": uniform(*bed, nc), "upperSurface": uniform(0.0, 3000.0, nc),
             "lowerSurface": uniform(-900.0, 0.0, nc), "sfcMassBal": uniform(-3.0e-5, 3.0e-5, nc),
-            "basalMassBal": uniform(-1.0, 1.0, nc), "groundedBasalMassBal": uniform(-1.0, 1.0, nc),
+            "basalMassBal": uniform(-1.0, 1.0, nc), "groundedBasalMassBal": uniform(-3.0e-5, 3.0e-5, nc),
             "floatingBasalMassBal": uniform(-3.0e-5, 0.0, nc), "dynamicThickening": uniform(-1.0, 1.0, nc),
             "calvingThickness": uniform(0.0, 5.0, nc),
             "basalWaterThickness": np.where(rs.random_sample(nc) < 0.5, uniform(0.0, 1.0, nc), real(0.0)).astype(real),
-            "apparentDiffusivity": uniform(-1.0, 1.0, nc),
+            "apparentDiffusivity": uniform(-1.0, 1.0, nc), "restoreThickness": uniform(-1.0, 1.0, nc),
+            "eigencalvingParameter": uniform(1.0e8, 1.0e10, nc),
+            "requiredCalvingVolumeRate": uniform(-1.0, 1.0, nc), "calvingVelocity": uniform(-1.0, 1.0, nc),
+            "uncalvedVolume": uniform(-1.0, 1.0, nc),
             "normalSlopeEdge": uniform(-0.03, 0.03, ne), "slopeEdge": uniform(-1.0, 1.0, ne),
             "tangentSlopeEdge": uniform(-1.0, 1.0, ne), "upperSurfaceVertex": uniform(-1.0, 1.0, nv),
             "layerThickness": uniform(0.0, 300.0, (nc, nl)), "layerThicknessEdge": uniform(-1.0, 1.0, (ne, nl)),
@@ -219,7 +245,8 @@ def make_case(name: str, seed: int, n_cells: int, n_levels: int, overrides: dict
         },
         "velocity": {
             "normalVelocity": uniform(-velocity_scale, velocity_scale, (ne, nl + 1)),
-            "layerNormalVelocity": uniform(-1.0, 1.0, (ne, nl)),
+            # the edges past nEdgesSolve keep these words, and advection reads them
+            "layerNormalVelocity": uniform(-velocity_scale, velocity_scale, (ne, nl)),
             **{n: uniform(-velocity_scale, velocity_scale, (nc, nl + 1))
                for n in ("uReconstructX", "uReconstructY", "uReconstructZ", "uReconstructZonal",
                          "uReconstructMeridional")},

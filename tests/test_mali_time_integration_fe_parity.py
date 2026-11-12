@@ -183,8 +183,7 @@ def _case_on_device(name: str, precision: str = "r4"):
 
 
 @requires_gpu
-@pytest.mark.parametrize("knob, value", [("config_SGH", True), ("config_calving", "floating"),
-                                         ("config_restore_calving_front", True), ("config_velocity_solver", "simple"),
+@pytest.mark.parametrize("knob, value", [("config_SGH", True), ("config_velocity_solver", "simple"),
                                          ("config_velocity_solver", "FO")])
 def test_the_pieces_not_ported_are_refused_by_name(knob, value):
     from woof.hex.errors import ConfigurationRefusal
