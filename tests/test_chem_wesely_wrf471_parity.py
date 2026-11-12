@@ -7,7 +7,11 @@ and the MODIS map, both seasons and their boundaries, day and night, dry,
 wet and rain flags, stable, neutral and unstable layers including the rmol
 snap, low and high ust and znt, every SO2 temperature arm, the ammonia arms
 with both highnh3 states, and an A/B/A sequence proving the scheme keeps no
-memory.  No CPU mirror is a reference.
+memory.  A second driver runs the same columns with the RADM2/RADM2SORG
+layout (chem_opt 1 and 2, the 42 gases of Registry/registry.chem:3929 at
+chem indices 2:43) on 4 cases, so every RADM2 gas, the zeroed ho/ho2
+surface resistance, the particle velocity of sulf and the hcl = hno3 copy
+are the Fortran's own.  No CPU mirror is a reference.
 """
 from pathlib import Path
 from types import SimpleNamespace
@@ -32,6 +36,14 @@ PARAMETERS = ROOT / 'woof/data/chem/wesely/gas_parameters.v1.json'
 CASES = tuple(sorted(FIXTURES.glob('case_*')))
 #: The fixture's gas slots, in the driver's order (run_wesely.F90).
 ORACLE_ORDER = ('o3', 'no2', 'co', 'so2', 'nh3', 'hno3')
+RADM2_FIXTURES = ROOT / 'tests/data/oracles/chem/wesely_radm2'
+RADM2_CASES = tuple(sorted(RADM2_FIXTURES.glob('case_*')))
+#: Registry/registry.chem:3929, the run_wesely_radm2.F90 gas order.
+RADM2_ORDER = tuple(
+    'so2 sulf no2 no o3 hno3 h2o2 ald hcho op1 op2 paa ora1 ora2 nh3 n2o5 no3 '
+    'pan hc3 hc5 hc8 eth co ol2 olt oli tol xyl aco3 tpan hono hno4 ket gly '
+    'mgly dcb onit csl iso hcl ho ho2'.split())
+_NUMBERS = ('hstar', 'dhr', 'f0', 'dratio', 'scpr23', 'arm')
 
 
 def fixture(case):
@@ -54,10 +66,25 @@ def rows_for(nrow):
         if name in table:
             out.append(table[name])
         else:
-            spec = {k: v for k, v in extras[name].items()
-                    if k in ('hstar', 'dhr', 'f0', 'dratio', 'scpr23', 'arm')}
+            spec = {k: v for k, v in extras[name].items() if k in _NUMBERS}
             out.append(SimpleNamespace(name=name, drydep={'scheme': 'wesely',
                                                           'wesely': spec}))
+    return out
+
+
+def radm2_rows():
+    """The 42 RADM2 gases as rows carrying gas_parameters.v1.json's blocks.
+
+    sulf's drydep scheme is GOCART's (one row per species): the process
+    acts on the block, not on the scheme.
+    """
+    params = json.loads(PARAMETERS.read_text())
+    out = []
+    for name in RADM2_ORDER:
+        spec = {k: v for k, v in params[name].items() if k in _NUMBERS}
+        scheme = 'gocart_aerosol' if spec['arm'] == 'particle' else 'wesely'
+        out.append(SimpleNamespace(name=name, drydep={'scheme': scheme,
+                                                      'wesely': spec}))
     return out
 
 
@@ -105,6 +132,56 @@ def test_tables_and_row_numbers_equal_the_fortran(case):
     np.testing.assert_array_equal(scpr, data['scpr23'][:nrow])
 
 
+def test_radm2_fixture_inventory():
+    assert len(RADM2_CASES) == 4
+    assert sum(p.stat().st_size for p in RADM2_FIXTURES.rglob('*')
+               if p.is_file()) < 1_500_000
+    seen = set()
+    for case in RADM2_CASES:
+        data = fixture(case)
+        seen.add((int(data['chem_opt']), int(data['map_kind']),
+                  int(data['julday']) < 90 or int(data['julday']) > 270))
+        assert int(data['nrow']) == len(RADM2_ORDER)
+        ddvel = data['ddvel']
+        assert np.isfinite(ddvel).all() and (ddvel > 0).all()
+        # chem/module_dep_simple.F:259-264, the Fortran's own copy.
+        np.testing.assert_array_equal(
+            ddvel[..., RADM2_ORDER.index('hcl')],
+            ddvel[..., RADM2_ORDER.index('hno3')])
+        # Both highnh3 states occur (nh3 alternates around 2 x so2).
+        chem = data['chem_k1']
+        high = (chem[..., RADM2_ORDER.index('nh3')]
+                > 2 * chem[..., RADM2_ORDER.index('so2')])
+        assert high.any() and not high.all()
+    assert {opt for opt, _, _ in seen} == {1, 2}
+    assert {kind for _, kind, _ in seen} == {0, 1}
+    assert {winter for _, _, winter in seen} == {False, True}
+
+
+@pytest.mark.parametrize('case', RADM2_CASES, ids=lambda p: p.name)
+def test_radm2_row_numbers_equal_the_fortran(case):
+    """Every RADM2 row's numbers are dep_init's, bit for bit; hcl carries
+    hno3's (the copy at chem/module_dep_simple.F:259-264)."""
+    data = fixture(case)
+    params, arms, nh3, so2, scpr = pack_rows(radm2_rows())
+    source = [RADM2_ORDER.index('hno3') if name == 'hcl' else index
+              for index, name in enumerate(RADM2_ORDER)]
+    for col, name in enumerate(('hstar', 'dhr', 'f0', 'dratio')):
+        np.testing.assert_array_equal(params[:, col], data[name][source],
+                                      err_msg=name)
+    np.testing.assert_array_equal(scpr, data['scpr23'][source])
+    table = json.loads(PARAMETERS.read_text())
+    np.testing.assert_array_equal(
+        np.array([table[name]['dvj'] for name in RADM2_ORDER], np.float32),
+        data['dvj'][source])
+    assert (nh3, so2) == (RADM2_ORDER.index('nh3'), RADM2_ORDER.index('so2'))
+    by_arm = {}
+    for name, arm in zip(RADM2_ORDER, arms):
+        by_arm.setdefault(int(arm), []).append(name)
+    assert by_arm[1] == ['o3'] and by_arm[2] == ['so2'] and by_arm[3] == ['nh3']
+    assert by_arm[4] == ['ho', 'ho2'] and by_arm[5] == ['sulf']
+
+
 def test_the_cams_rows_are_the_wesely_rows():
     """The four cams_aq gases are exactly the rows the process acts on."""
     table = chem_table.load_sets(['cams_aq'])
@@ -118,6 +195,8 @@ def test_packing_is_row_driven():
     params, arms, nh3, so2, scpr = pack_rows(renamed)
     np.testing.assert_array_equal(pack_rows(source)[0], params)
     np.testing.assert_array_equal(arms, [1, 0, 0, 2, 3, 0])
+    radm2 = radm2_rows()
+    assert pack_rows(radm2)[1].tolist().count(0) == len(RADM2_ORDER) - 6
     assert (nh3, so2) == (4, 3)
     assert pack_rows([])[0].shape == (0, 4)
     assert pack_rows(source[:4])[2:4] == (-1, 3)
@@ -152,9 +231,22 @@ def test_a_second_row_on_a_highnh3_arm_is_refused():
 
 
 def test_a_row_naming_the_process_without_the_block_is_refused():
-    bad = SimpleNamespace(name='x', drydep={'scheme': 'none'})
-    with pytest.raises(ValueError, match='not the wesely scheme'):
-        pack_rows([bad])
+    for drydep in ({'scheme': 'none'}, {'scheme': 'wesely'},
+                   {'scheme': 'gocart_aerosol'}, None):
+        bad = SimpleNamespace(name='x', drydep=drydep)
+        with pytest.raises(ValueError, match='carries no wesely numbers'):
+            pack_rows([bad])
+
+
+def test_rows_act_on_the_block_whatever_the_scheme():
+    """A GOCART-scheme row with a wesely block is a Wesely row; a row
+    without the block is not, whatever its scheme says."""
+    radm2 = radm2_rows()
+    plain = SimpleNamespace(name='dust', drydep={'scheme': 'gocart_aerosol'})
+    assert rows([*radm2, plain]) == tuple(radm2)
+    sulf = radm2[RADM2_ORDER.index('sulf')]
+    assert sulf.drydep['scheme'] == 'gocart_aerosol'
+    assert rows([sulf]) == (sulf,)
 
 
 @pytest.mark.parametrize('name', LAUNCH_FIELDS)
@@ -207,3 +299,36 @@ def test_gpu_parity(case):
         measured[name] = max_ulp(cp.asnumpy(fields[name]), data[name].T)
     assert all(value == 0 for value in measured.values()), \
         f'{case.name}: measured ULP {measured}'
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize('case', RADM2_CASES, ids=lambda p: p.name)
+def test_gpu_parity_radm2(case):
+    """All 42 RADM2 gases, 0 ULP to wesely_driver with chem_opt 1 or 2."""
+    cp = pytest.importorskip('cupy')
+    try:
+        count = cp.cuda.runtime.getDeviceCount()
+    except cp.cuda.runtime.CUDARuntimeError as exc:
+        pytest.skip(f'no CuPy device: {exc}')
+    if count == 0:
+        pytest.skip('no CuPy device')
+    data = fixture(case)
+    fields = {name: cp.asarray(np.ascontiguousarray(data[name].T))
+              for name in LAUNCH_FIELDS}
+    fields['chem_k1'] = cp.asarray(np.ascontiguousarray(data['chem_k1'].transpose(2, 1, 0)))
+    for name in ('aer_res_def', 'aer_res_zcen'):
+        fields[name] = cp.empty(fields['tsk'].shape, dtype=cp.float32)
+    mminlu = 'MODIFIED_IGBP_MODIS_NOAH' if data['map_kind'] else 'USGS'
+    acting = radm2_rows()
+    got = cp.asnumpy(wesely_ddvel(fields, acting, julday=int(data['julday']),
+                                  mminlu=mminlu))
+    measured = {row.name: max_ulp(got[index], data['ddvel'][:, :, index].T)
+                for index, row in enumerate(acting)}
+    for name in ('aer_res_def', 'aer_res_zcen'):
+        measured[name] = max_ulp(cp.asnumpy(fields[name]), data[name].T)
+    bad = {name: value for name, value in measured.items() if value != 0}
+    assert not bad, f'{case.name}: measured ULP {bad}'
+    # Word for word, signed zeros and all.
+    np.testing.assert_array_equal(
+        got.view(np.uint32), np.ascontiguousarray(
+            data['ddvel'].transpose(2, 1, 0)).view(np.uint32))

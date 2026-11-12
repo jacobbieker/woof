@@ -188,7 +188,10 @@ def test_the_packaged_so2_row_is_oxidized_only_by_the_gocart_sulfur_sets():
     assert [r.name for r in lite.rows_for("chem.sulfur")] == ["so2", "sulf"]
     assert [r.name for r in lite.rows_for("drydep.wesely")] == ["so2"]
     assert chem_table.catalog().species["so2"].sets == (
-        "gocart_simple", "gocart_lite", "cams_aq")
+        "gocart_simple", "gocart_lite", "cams_aq", "radm2", "radm2sorg")
+    radm2 = chem_table.load_sets(["radm2"])
+    assert "chem.sulfur" not in radm2.processes
+    assert "emission.inventory" not in radm2.processes
 
 
 @pytest.mark.parametrize("gate,message", [

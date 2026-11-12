@@ -3,7 +3,11 @@
 ! One TUV-x core is built from the committed configuration with the column the host supplies: the
 ! height grid and the temperature, air, O2 and O3 profiles (TUV-x's from-host grid and profiles).
 ! Each case on standard input updates them and runs the core; the photolysis rate constants come
-! back as binary64 words in hex, edge by reaction.
+! back as binary64 words in hex, edge by reaction.  Once the core is built, the configuration-time pieces
+! the port is graded on piece by piece follow: the wavelength grid's edges ('wedge') and the
+! extraterrestrial flux on it ('etf', photon cm-2 s-1 per bin).  After every case: each reaction's cross
+! section ('xs') and quantum yield ('qy') and the actinic flux's direct, diffuse-up and diffuse-down parts
+! ('fdr', 'fup', 'fdn'), each (height edge, wavelength bin).
 !
 ! input:   config <path> / nlev <n> / then per case:
 !          case / sza <deg> / esd <AU> / edges <n+1 km> / temperature <n+1 K> /
@@ -13,6 +17,9 @@ program tuvx_harness
   use musica_constants,     only : dk => musica_dk
   use musica_string,        only : string_t
   use tuvx_core,            only : core_t
+  use tuvx_grid,            only : grid_t
+  use tuvx_profile,         only : profile_t
+  use tuvx_solver,          only : radiation_field_t
   use tuvx_grid_from_host,  only : grid_from_host_t, grid_updater_t
   use tuvx_grid_warehouse,  only : grid_warehouse_t
   use tuvx_profile_from_host, only : profile_from_host_t, profile_updater_t
@@ -24,6 +31,8 @@ program tuvx_harness
   character(len=32)   :: key
   integer :: nlev, i, j, ncase
   class(core_t), pointer :: core
+  class(grid_t), pointer :: wavelength
+  class(profile_t), pointer :: etf
   type(string_t) :: config_path
   type(grid_from_host_t), pointer :: height
   type(profile_from_host_t), pointer :: temperature, air, o2, o3
@@ -34,7 +43,8 @@ program tuvx_harness
   type(string_t), allocatable :: labels(:)
   real(dk) :: sza, esd
   real(dk), allocatable :: edges(:), tedge(:), aedge(:), alay(:), o2edge(:), o2lay(:), o3edge(:), o3lay(:)
-  real(dk), allocatable :: rates(:,:)
+  real(dk), allocatable :: rates(:,:), table(:,:)
+  type(radiation_field_t) :: field
 
   read(*,*) key, path
   read(*,*) key, nlev
@@ -80,6 +90,15 @@ program tuvx_harness
       do j = 1, size( labels )
         write(*,'(a,i0,1x,a)') 'label ', j, labels(j)%val_
       end do
+      wavelength => core%get_grid( "wavelength", "nm" )
+      do i = 1, size( wavelength%edge_ )
+        write(*,'(a,i0,1x,z16.16)') 'wedge ', i, transfer( wavelength%edge_(i), 0_8 )
+      end do
+      etf => core%get_profile( "extraterrestrial flux", "photon cm-2 s-1" )
+      do i = 1, size( etf%mid_val_ )
+        write(*,'(a,i0,1x,z16.16)') 'etf ', i, transfer( etf%mid_val_(i), 0_8 )
+      end do
+      deallocate( wavelength, etf )
       u_height = core%get_updater( height )
       u_temperature = core%get_updater( temperature )
       u_air = core%get_updater( air )
@@ -100,10 +119,32 @@ program tuvx_harness
         write(*,'(a,i0,1x,i0,1x,z16.16)') 'j ', j, i, transfer( rates(i,j), 0_8 )
       end do
     end do
+    do j = 1, size( labels )
+      table = core%get_photolysis_cross_section( labels(j) )
+      call dump( 'xs', j, table )
+      table = core%get_photolysis_quantum_yield( labels(j) )
+      call dump( 'qy', j, table )
+    end do
+    field = core%get_radiation_field( )
+    call dump( 'fdr', 0, field%fdr_ )
+    call dump( 'fup', 0, field%fup_ )
+    call dump( 'fdn', 0, field%fdn_ )
   end do
 10 continue
 
 contains
+
+  subroutine dump( tag, j, values )
+    character(len=*), intent(in) :: tag
+    integer, intent(in) :: j
+    real(dk), intent(in) :: values(:,:)
+    integer :: i, k
+    do k = 1, size( values, 2 )
+      do i = 1, size( values, 1 )
+        write(*,'(a,1x,i0,1x,i0,1x,i0,1x,z16.16)') tag, j, i, k, transfer( values(i,k), 0_8 )
+      end do
+    end do
+  end subroutine dump
 
   subroutine set( updater, edge_values, layer_densities )
     type(profile_updater_t), intent(in) :: updater

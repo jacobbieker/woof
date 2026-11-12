@@ -36,6 +36,15 @@ from tools.literal_division_scan import (
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
+@pytest.fixture(autouse=True)
+def _the_cuda_route(monkeypatch):
+    """These tests stand a fake cupy in for the CUDA compile route; on a
+    CPU leg (GPUWM_NO_LOCAL_GPU) the loader would pick the cpu backend and
+    refuse before reaching it, so they take the route they are about."""
+    from woof import backend
+    monkeypatch.setattr(backend, "active", lambda: "cuda")
+
+
 @pytest.mark.parametrize("strict", [False, True])
 def test_port_constant_divisions_take_the_direct_non_ftz_route(monkeypatch, strict):
     """A source exception must follow the actual runtime compile dispatch.

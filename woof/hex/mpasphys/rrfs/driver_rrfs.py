@@ -367,6 +367,18 @@ def resolve_namelist(text: str, *, backends: Mapping[str, str] | None = None,
     if solar.resolve(groups):
         raise ValueError(f"&{solar.GROUP} {solar.OPTION} is not available on the RRFS fork route; "
                          "it is an MPAS-A v8.4.2 suite-route option")
+    from ...mpasdiag import nwp_diag_v842 as nwp
+    if nwp.parse_flag(groups):
+        raise ValueError(f"&{nwp.GROUP} {nwp.OPTION} is not available on the RRFS fork route; "
+                         "it is an MPAS-A v8.4.2 suite-route option")
+    from ...mpasdiag import tslist_v842 as tslist
+    if tslist.resolve(groups) is not None:
+        raise ValueError(f"&{tslist.GROUP} {tslist.OPTION} is not available on the RRFS fork route; "
+                         "it is an MPAS-A v8.4.2 suite-route option")
+    from ...mpasdiag import plevel_diag_v842 as plevel
+    if plevel.resolve(groups) is not None:
+        raise ValueError(f"&{plevel.GROUP} {plevel.P_OPTION}/{plevel.Z_OPTION} are not available on the RRFS fork "
+                         "route; they are MPAS-A v8.4.2 suite-route options")
     for group, keys in spec["registry_groups"].items():
         for key, value in groups.get(group, {}).items():
             if key not in keys:

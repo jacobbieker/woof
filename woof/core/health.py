@@ -545,6 +545,11 @@ def rule_for_field(name: str, *, p_top: float | None = None) -> FieldRule:
                 bound_note=("strict mode permits below-zero scalar residuals "
                             "on the specified rim only"))
         return FieldRule("particle_volume", 0.0, 1.0)
+    if leaf.startswith("chem_") and _chem_number_row(leaf[len("chem_"):]):
+        # A number row (SORGAM's nu0, ac0, corn: particles per kg of dry
+        # air, units kg-1): polluted Aitken modes reach 1e11-1e12 kg-1, so
+        # it takes the number-moment ceiling, not the mass one.
+        return FieldRule("chem", 0.0, 1.0e15)
     if leaf.startswith("chem_"):
         # A chem species (ug kg-1 or ppmv of dry air).  Non-negative, as
         # the positive-definite transport and every process's epsilc floor
@@ -1833,3 +1838,11 @@ def health_validator_for_domain(model, node):
     if bundle is None:
         return StateHealthValidator(node.state)
     return StoreHealthValidator(bundle, node.cfg.run)
+
+
+def _chem_number_row(name: str) -> bool:
+    """True when ``name`` is a chem species row carried as a number (kg-1)."""
+    from woof.chem_table import catalog
+
+    row = catalog().species.get(name)
+    return row is not None and row.units == "kg-1"

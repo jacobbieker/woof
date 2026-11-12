@@ -94,7 +94,8 @@ def test_selected_parameter_trajectories_have_distinct_restart_seals():
             selected.land_options["opt_btr"] = 1
 
 
-@pytest.mark.parametrize("selection", [dict(opt_crop=2)])
+# opt_crop=2 (GECROS2) is ported and admitted; 3 is no WRF option value.
+@pytest.mark.parametrize("selection", [dict(opt_crop=3)])
 def test_native_block_checks_do_not_admit_unqualified_forecast_selectors(selection):
     from woof.config import ConfigurationRefused, RunConfig, validate_run_config
 
