@@ -1054,6 +1054,9 @@ class ForecastRequest:
     stochastic: str | None = None
     #: The drag statistics a column-suite selection reads, ``None`` otherwise.
     orographic_statistics: Path | None = None
+    #: The per-cell scheme inputs a generic-seam selection reads
+    #: (woof.hex.surface_inputs), ``None`` otherwise.
+    surface_statics: Path | None = None
     #: The resolution's receipt, for the door's own receipt.
     physics_resolution: Mapping[str, Any] | None = None
     fullstep_local_timestep: bool = False
@@ -2279,6 +2282,8 @@ def resolve_request(
         arguments, row, grid, static, init, collected)
     orographic_statistics = resolve_orographic_statistics(
         arguments, physics, mesh, grid, collected)
+    surface_statics = resolve_surface_statics(
+        arguments, physics, mesh, grid, collected)
     for problem in microphysics_problems(backend_row, init):
         if collected is None:
             raise _refuse(problem)
@@ -2572,6 +2577,7 @@ def resolve_request(
                 (json.loads(arguments.stochastic) if isinstance(arguments.stochastic, str)
                  else arguments.stochastic))}).json(),
         orographic_statistics=orographic_statistics,
+        surface_statics=surface_statics,
         physics_resolution=None if physics is None else physics.receipt(),
         iau_analysis=iau_analysis,
         iau_window_seconds=iau_window_seconds,
@@ -3061,6 +3067,56 @@ def resolve_orographic_statistics(arguments, physics, mesh, grid, collected):
         collected)
 
 
+def resolve_surface_statics(arguments, physics, mesh, grid, collected):
+    """The per-cell scheme inputs file a generic-seam selection reads.
+
+    THE BREAKAGE THIS PREVENTS: a WRF column scheme that reads per-cell inputs
+    beyond the init's own fields (CLM lake's mask and bathymetry, first) ran on
+    a fallback branch the run never chose, or stopped inside the engine after
+    the card was reserved.  The contract (woof.hex.surface_inputs) names what
+    the selection reads; an input hex does not stage is refused by name, and
+    one it stages is read from ``<mesh>.surface_statics.nc`` (beside --grid
+    by default; ``woof hex surface-statics`` builds it).  A file given for a
+    selection that reads nothing from it is refused: accepted and never read.
+    """
+
+    from . import surface_inputs
+
+    given = getattr(arguments, "surface_statics", None)
+    profile = None if physics is None else physics.column_profile
+    selection = None if profile is None else profile.get("physics")
+    needed = surface_inputs.reads_surface_statics(selection)
+    if needed:
+        problems = surface_inputs.unstaged_problems(
+            surface_inputs.plan_config(selection))
+        if problems:
+            for problem in problems:
+                problem = f"missing surface input: {problem}"
+                if collected is None:
+                    raise _refuse(problem)
+                collected.append(problem)
+            return None
+    if not needed:
+        if given is not None:
+            problem = (
+                f"--surface-statics {given} was given, but this run's physics "
+                "reads no per-cell scheme input from it; the file would be "
+                "accepted and never read")
+            if collected is None:
+                raise _refuse(problem)
+            collected.append(problem)
+        return None
+    if given is None:
+        named = getattr(arguments, "grid", None)
+        given = surface_inputs.default_path(named if named is not None else grid, mesh)
+    return _require_file(
+        Path(given).expanduser().absolute(), "--surface-statics",
+        "This selection's schemes read per-cell inputs beyond the init's own "
+        "fields (woof.hex.surface_inputs.CONTRACT); build them on the mesh with "
+        "`woof hex surface-statics --static <static> --geog-root <WPS_GEOG> "
+        f"--out <mesh>{surface_inputs.FILE_SUFFIX}`.", collected)
+
+
 def mpas_route_orographic_statistics(arguments, native_config) -> Path | None:
     """The GSL drag statistics an MPAS-route run reads when it names none: beside --grid, else built there.
 
@@ -3250,6 +3306,8 @@ def build_driver_argv(request: ForecastRequest) -> list[str]:
             argv += ["--physics", f"{key}={_override_text(value)}"]
     if request.orographic_statistics is not None:
         argv += ["--orographic-statistics", str(request.orographic_statistics)]
+    if request.surface_statics is not None:
+        argv += ["--surface-statics", str(request.surface_statics)]
     if request.chemistry_config is not None:
         argv += ["--chemistry-config", str(request.chemistry_config)]
     if request.wind_farms is not None:
@@ -3611,6 +3669,8 @@ def build_receipt(
                 None if request.orographic_statistics is None
                 else str(request.orographic_statistics)
             ),
+            **({} if request.surface_statics is None else
+               {"surface_statics": str(request.surface_statics)}),
             "source_table": (
                 None if request.source_table is None
                 else str(request.source_table)
@@ -5363,6 +5423,12 @@ def add_forecast_arguments(parser: argparse.ArgumentParser) -> None:
         help="the mesh's GSL drag statistics (<mesh>.ugwp_oro_data.nc), read "
              "when the physics selects config_gwdo_scheme='bl_ugwp_gwdo' "
              "(default: the file of that name beside --grid)")
+    parser.add_argument(
+        "--surface-statics", type=Path, default=None, metavar="FILE",
+        help="the mesh's per-cell scheme inputs (<mesh>.surface_statics.nc, "
+             "woof hex surface-statics), read when a generic-seam selection's "
+             "schemes declare them, e.g. sf_lake_physics=1 (default: the file "
+             "of that name beside --grid)")
     parser.add_argument("--chemistry-config", type=Path, default=None,
                         help="N aerosol species and GPU mixing/deposition/settling inputs (chemistry/v1 JSON)")
     parser.add_argument("--wind-farms", default=None, metavar="uswtdb|TABLE|off",

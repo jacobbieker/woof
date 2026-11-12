@@ -1038,9 +1038,12 @@ def _engine_profile(*, table, selectors, rows, settings, generation, frac_seaice
 
 
 def _statics_spec(fields: tuple[str, ...], table: Mapping[str, Any]) -> Mapping[str, Any] | None:
-    """The mesh file layout that carries exactly these engine statics."""
+    """The mesh file layout that carries these engine statics: an exact
+    source, else one carrying a superset, read for exactly these fields
+    (woof.hex.surface_inputs.match_statics_source)."""
 
-    wanted = set(fields)
+    from .surface_inputs import match_statics_source
+
     sources = [_thaw(item) for item in table["engine_selectors"]["statics"]]
     try:
         gsl = dict(_gsl_statistics_spec())
@@ -1048,10 +1051,7 @@ def _statics_spec(fields: tuple[str, ...], table: Mapping[str, Any]) -> Mapping[
         sources.append(gsl)
     except PhysicsTableError:
         pass
-    for source in sources:
-        if wanted == set(source["variables"]):
-            return source
-    return None
+    return match_statics_source(fields, sources)
 
 
 def _auto_convection(nominal_dx_m: float, options: Mapping[str, Any]) -> str:

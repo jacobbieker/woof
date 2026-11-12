@@ -597,6 +597,8 @@ def _suite_host(
     is_regional: bool,
     cell_area_m2=None,
     interior_column=None,
+    surface_statics: Path | None = None,
+    cell_latlon_rad=None,
 ) -> tuple[dict[str, Any], None, dict[str, Any]]:
     """The suite row's sealed-constructor mapping, drag statistics included.
 
@@ -651,6 +653,43 @@ def _suite_host(
         # Read by wind_farm_scheme = "fitch_wrf" alone (woof.hex.wind_farm); an adapter that
         # predates it is handed exactly the keywords it was handed before.
         extra["interior_column"] = interior_column
+    # The per-cell inputs the selection's schemes read beyond the init's dozen
+    # (woof.hex.surface_inputs): CLM lake's mask and bathymetry first.  A
+    # selection that reads none binds nothing and its mapping is unchanged;
+    # one that reads an input the run does not supply is refused by name here.
+    from woof.hex import surface_inputs as _surface_inputs
+
+    lat_rad, lon_rad = (None, None) if cell_latlon_rad is None else cell_latlon_rad
+    bound, surface_receipt = _surface_inputs.bind(
+        suite.get("physics"), surface_statics,
+        latitude_rad=lat_rad, longitude_rad=lon_rad)
+    if bound:
+        lake = bound.get("lakemask")
+        if lake is not None:
+            # A lake is a water cell (real.exe turns ISLAKE into ISWATER), and
+            # the init's land surface already classified every cell: a lake
+            # column the init calls land would run both surfaces at once.
+            land = np.asarray(values["landmask"])[: lake.size] != np.float32(0.0)
+            on_land = int(np.count_nonzero((lake == np.float32(1.0)) & land))
+            if on_land:
+                raise ConfigurationRefusal(
+                    "surface_statics", str(surface_statics),
+                    f"{on_land} LAKEMASK cells are land in the init (landmask 1); "
+                    "the surface statics were not built from this run's static",
+                    "the surface statics file built from this run's --static")
+        if is_regional:
+            from woof.hex.cuda_regional_forecast_v841 import (
+                pad_regional_physics_column,
+            )
+
+            bound = {
+                name: (pad_regional_physics_column(value)
+                       if isinstance(value, np.ndarray) else value)
+                for name, value in bound.items()
+            }
+            surface_receipt["regional_pad"] = "duplicate-last-real-column"
+        receipt["surface_inputs"] = surface_receipt
+        extra["surface_inputs"] = bound
     mapped = adapter.constructor_values_for(
         values, row_name=row_name, orographic_statistics=oro,
         cell_area_m2=cell_area_m2, **extra,
@@ -2054,6 +2093,7 @@ def prepare_forecast_host(
     damping_start_m: float = 22000.0,
     invariant_path: Path | None = None,
     orographic_statistics: Path | None = None,
+    surface_statics: Path | None = None,
     physics: Any = None,
     dynamics_overrides: Mapping[str, Any] | None = None,
     physics_mode: str = "exact",
@@ -2219,6 +2259,15 @@ def prepare_forecast_host(
             f"--physics-backend {backend_row.name} runs no drag that reads "
             "orographic statistics; the file would be accepted and never read",
             "a row whose drag reads the mesh's orographic statistics",
+        )
+    if suite_adapter is None and surface_statics is not None:
+        raise ConfigurationRefusal(
+            "surface_statics",
+            str(surface_statics),
+            f"--physics-backend {backend_row.name} is not the generic column "
+            "seam, the only seam that reads per-cell scheme inputs; the file "
+            "would be accepted and never read",
+            "no --surface-statics",
         )
     if physics is not None and not physics.is_default():
         # The configuration records the named suite the run was resolved
@@ -2442,6 +2491,10 @@ def prepare_forecast_host(
                 if is_regional else np.asarray(proof._mesh_value(mesh, "areaCell"), dtype=np.float64)),
             interior_column=_windfarm_interior_columns(
                 mesh, is_regional=is_regional, physics=physics),
+            surface_statics=surface_statics,
+            cell_latlon_rad=(
+                np.asarray(proof._mesh_value(mesh, "latCell"), dtype=np.float64),
+                np.asarray(proof._mesh_value(mesh, "lonCell"), dtype=np.float64)),
         )
         seal = suite_adapter.seal_constructor
         relaxation["surface"] = relax_suite_surface_classification(classification)
@@ -5177,6 +5230,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "read by a suite row whose drag uses it"
         ),
     )
+    parser.add_argument(
+        "--surface-statics",
+        type=Path,
+        default=None,
+        help=(
+            "the mesh's per-cell scheme inputs (<mesh>.surface_statics.nc, "
+            "woof hex surface-statics), read by a generic-seam selection whose "
+            "schemes declare them (woof.hex.surface_inputs)"
+        ),
+    )
     parser.add_argument("--preflight-only", action="store_true")
     parser.add_argument(
         "--experimental-dt",
@@ -5892,6 +5955,11 @@ def _main(args: argparse.Namespace, decision: Mapping[str, Any] | None) -> int:
             None
             if args.orographic_statistics is None
             else Path(args.orographic_statistics).expanduser().absolute()
+        ),
+        surface_statics=(
+            None
+            if getattr(args, "surface_statics", None) is None
+            else Path(args.surface_statics).expanduser().absolute()
         ),
         pbl=args.pbl,
         les_model=getattr(args, "les_model", "off"),
