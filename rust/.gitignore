@@ -1,0 +1,2 @@
+# Build outputs of the vendored gpuwm-hex crates (tools/build_hex_helpers.sh).
+*/target/
