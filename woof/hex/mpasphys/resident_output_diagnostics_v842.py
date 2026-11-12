@@ -10,6 +10,7 @@ from ..mpasdiag.isobaric import FIELDS as ISOBARIC, IsobaricDiagnostics
 from ..mpasdiag.convective_v842 import FIELDS as CONVECTIVE, MAXIMA, ConvectiveDiagnosticsModule
 from ..mpasdiag.utils import DiagnosticsUtils, Direction, StreamView
 from ..mpasdiag import nwp_diag_v842 as _nwp
+from ..mpasdiag import plevel_diag_v842 as _plevel
 
 
 PRIMARY = frozenset(('vorticity', 'divergence', 'ke'))
@@ -79,6 +80,8 @@ class ResidentOutputDiagnostics:
     produced = PRODUCED
     #: WRF's nwp_diagnostics maxima (mpasdiag.nwp_diag_v842); built by bind() only with config_nwp_diagnostics.
     nwp = None
+    #: WRF's p_lev / z_lev diagnostics (mpasdiag.plevel_diag_v842); built by bind() only with config_p_lev_diags / config_z_lev_diags.
+    plevel = None
     #: The running maxima/accumulators of the convective module (``accumulates``).
     convective_maxima = MAXIMA
     #: Pools the diagnostic modules read.
@@ -201,6 +204,10 @@ class ResidentOutputDiagnostics:
             self.produced = PRODUCED | frozenset(_nwp.NAMES)
             self.nwp.setup(self.utils)
             self.accumulates = self.accumulates or self.nwp.accumulates
+        if {_plevel.P_PACKAGE, _plevel.Z_PACKAGE} & set(self.session.layout.packages):
+            self.plevel = _plevel.LevelDiagnosticsModule(self, self.session.config.plevel_diagnostics)
+            self.produced = self.produced | frozenset(_plevel.NAMES)
+            self.plevel.setup(self.utils)
 
     def _new_convective(self):
         """The route's convective diagnostics module (MPAS v8.4.2's here)."""
@@ -333,6 +340,8 @@ class ResidentOutputDiagnostics:
         self.convective.compute()
         if self.nwp is not None:
             self.nwp.compute()
+        if self.plevel is not None:
+            self.plevel.compute()
         self.updates += 1
         self.last_step = step
 
