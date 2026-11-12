@@ -119,3 +119,14 @@ def test_options_the_model_rejects_are_refused():
         cv.calve_ice(mesh=dev["mesh"], geometry=dev["geometry"], velocity=dev["velocity"],
                      config=dict(case["config"], config_calving="thickness_threshold",
                                  config_calving_thickness=1.0))
+
+
+def test_omitted_calving_options_take_the_registry_defaults():
+    from woof.hex.mpas_ice import calving_v842 as cv
+    assert cv.DEFAULTS["config_calving_topography"] == -500.0
+    assert cv.DEFAULTS["config_calving_eigencalving_parameter_source"] == "scalar"
+    base = next(c for c in fo.cases() if c["name"] == "calving_eigen_scalar")["config"]
+    trimmed = {k: v for k, v in base.items() if k not in cv.DEFAULTS}
+    cv.check_config(dict(trimmed, config_calving="eigencalving"))
+    merged = cv._with_defaults(dict(trimmed, config_calving="topographic_threshold"))
+    assert merged["config_calving_topography"] == -500.0
