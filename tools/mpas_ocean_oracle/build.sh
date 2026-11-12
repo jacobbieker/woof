@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Build the MPAS-Ocean v8.4.2 tendency oracles (run_oracle: four tendency
-# terms; run_pgrad_hmix: pressure gradient and horizontal momentum mixing) at
-# the strict recipe, in both precisions.
+# Build the MPAS-Ocean v8.4.2 oracles (run_oracle: four tendency terms;
+# run_pgrad_hmix: pressure gradient and horizontal momentum mixing;
+# run_tendency: ocn_tend_vel/thick; run_eos: the equation of state) at the
+# strict recipe, in both precisions.
 #
 #   bash tools/mpas_ocean_oracle/build.sh MPAS_SOURCE_ROOT BUILD_DIR
 #
@@ -53,8 +54,16 @@ for precision in r4 r8; do
     for driver in run_oracle run_pgrad_hmix run_tendency; do
         "${fc[@]}" "${flags[@]}" "${script_dir}/${driver}.F90"
     done
+    # the equation of state, verbatim, in a directory of its own: its modules
+    # replace stubs_tendency.F90's ocn_equation_of_state there
+    mkdir -p eos
+    ( cd eos
+      for unit in mpas_ocn_equation_of_state_linear mpas_ocn_equation_of_state_jm mpas_ocn_equation_of_state; do
+          "${fc[@]}" "${flags[@]}" -I.. "${ocean}/${unit}.F"
+      done
+      "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/run_eos.F90" )
     if command -v objdump >/dev/null; then
-        if objdump -d mpas_ocn_*.o mpas_constants.o | grep -Eq '\bv?fn?m(add|sub)([0-9]|[[:space:]]|$)'; then
+        if objdump -d mpas_ocn_*.o eos/mpas_ocn_*.o mpas_constants.o | grep -Eq '\bv?fn?m(add|sub)([0-9]|[[:space:]]|$)'; then
             echo "an oracle object contains an FMA instruction; refusing" >&2
             exit 4
         fi
@@ -68,6 +77,8 @@ for precision in r4 r8; do
         "${fc[@]}" -o "${build_dir}/${driver}_${precision}" "${driver}.o" mpas_ocn_*.o mpas_constants.o \
             stubs_tendency.o stubs.o mpas_kind_types.o ${libm_objects[@]+"${libm_objects[@]}"}
     done
+    "${fc[@]}" -o "${build_dir}/run_eos_${precision}" eos/run_eos.o eos/mpas_ocn_equation_of_state*.o \
+        mpas_ocn_constants.o stubs.o mpas_kind_types.o ${libm_objects[@]+"${libm_objects[@]}"}
 done
 {
     echo "gfortran: $("${fc[@]}" --version | head -1)"
@@ -75,4 +86,4 @@ done
     echo "host: $(uname -srm)"
     cat "${build_dir}/r4/libm.txt"
 } > "${build_dir}/TOOLCHAIN.txt"
-echo "built ${build_dir}/run_{oracle,pgrad_hmix,tendency}_{r4,r8}"
+echo "built ${build_dir}/run_{oracle,pgrad_hmix,tendency,eos}_{r4,r8}"
