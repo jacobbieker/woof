@@ -4339,6 +4339,17 @@ def _stock_cumulus_rebuild_arrays(scheme) -> frozenset:
     from importlib import import_module
     from woof.physics_registry import component_options
     cls = type(scheme)
+    # The generic MPAS column seam re-classes its cumulus callable as a
+    # same-named subclass that only records the A-grid momentum pair
+    # (woof.core.mpas_column_suite._capture_cumulus_momentum: no slots, no
+    # state), so the stock class is its base.  THE BREAKAGE (hex option
+    # matrix, plan 1.3, 2026-11-12): KIAPS SAS's held PBL height ``_hold``,
+    # declared rebuildable on its registry row, was refused as unclassified at
+    # the first hex history snapshot.
+    while (cls.__bases__ and cls.__dict__.get("__slots__") == ()
+           and cls.__qualname__ == cls.__bases__[0].__qualname__
+           and cls.__module__ == cls.__bases__[0].__module__):
+        cls = cls.__bases__[0]
     dotted = f"{cls.__module__}.{cls.__qualname__}"
     for option in component_options("cumulus").values():
         if (option.get("consumers") or {}).get("stock_callable_class") != dotted:

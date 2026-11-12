@@ -79,3 +79,24 @@ def test_custom_callable_has_no_stock_scratch_allowance():
     assert not _stock_cumulus_rebuild_arrays(Custom())
     assert _stock_cumulus_rebuild_arrays(SasCumulus()) == frozenset({
         "_hold", "_workspace", "raincv", "hbot", "htop"})
+
+
+def test_the_column_seam_momentum_recorder_keeps_the_stock_scratch_allowance():
+    """THE BREAKAGE (hex option matrix, plan 1.3): the generic MPAS column
+    seam re-classes the callable as a same-named recording subclass, and the
+    first hex history snapshot refused KIAPS SAS's held PBL height ``_hold``
+    as an unclassified array."""
+    import numpy as np
+    from woof.core.mpas_column_suite import _capture_cumulus_momentum
+    from woof.core.sas import SasCumulus
+    from woof.io.restart import (CUMULUS_CALLABLE_ARRAYS, CUMULUS_CALLABLE_CONTAINERS,
+                                 CUMULUS_REBUILT_ARRAYS, _callable_state_check,
+                                 _stock_cumulus_rebuild_arrays)
+    scheme = SasCumulus()
+    _capture_cumulus_momentum(SimpleNamespace(cumulus_callable=scheme), {})
+    assert type(scheme) is not SasCumulus and isinstance(scheme, SasCumulus)
+    assert _stock_cumulus_rebuild_arrays(scheme) == _stock_cumulus_rebuild_arrays(SasCumulus())
+    scheme._hold = np.zeros(4, np.float32)
+    _callable_state_check(scheme, CUMULUS_CALLABLE_ARRAYS | CUMULUS_REBUILT_ARRAYS,
+                          CUMULUS_CALLABLE_CONTAINERS, "cumulus",
+                          rebuild_arrays=_stock_cumulus_rebuild_arrays(scheme))
