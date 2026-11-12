@@ -473,6 +473,7 @@ class HexWrfChemistry:
         if driver is not None:
             self.state.physics.noah_params = getattr(driver, "noah_params", None)
             self.state.physics.noahmp_params = getattr(driver, "noahmp_params", None)
+            self.state.physics.ruc_params = getattr(driver, "ruc_params", None)
             from woof.core.chem_context import chem_physics_reads
             if "gsw" in chem_physics_reads(self.cfg) and "gsw" not in driver.fields:
                 import cupy as cp
