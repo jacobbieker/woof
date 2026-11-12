@@ -91,9 +91,15 @@ MP_COUPLING = ("none", "diagnose")
 HEX_KEYS = ("chem_opt", "chem_sets", "geog_root", "aerosol_mp_coupling")
 #: WRF switches that ask for input chemistry from the rows' declared sources (woof.namelist_chem.SOURCE_KEYS).
 SOURCE_SWITCHES = ("chem_in_opt", "have_bcs_chem")
-#: Every key a wrf_chem block may carry.
+#: WRF's anthropogenic-emission switch: emiss_opt = 3 (the eradmsorg package) enables each emission.radm2 row's
+#: first inventory, as the WRF namelist door does (woof.namelist_chem EMISSION_SWITCHES, FIRST_SOURCE_ONLY).
+EMISSION_SWITCHES = {"emiss_opt": {"emission.radm2": 3}}
+#: Every key a wrf_chem block may carry.  ``chem_sources`` is WOOF's RunConfig key: a comma list that names the
+#: run's sources by hand (another inventory than a row's first, e.g. the offline ``synthetic-anthro``) and
+#: replaces the switches' choice, under the same chem law (woof.config.validate_chem_config).
 KNOWN_KEYS = (frozenset(INT_KEYS) | frozenset(FLOAT_KEYS) | frozenset(STR_KEYS) | frozenset(OFF_ONLY_KEYS)
-              | frozenset(HEX_KEYS) | frozenset(SOURCE_SWITCHES))
+              | frozenset(HEX_KEYS) | frozenset(SOURCE_SWITCHES) | frozenset(EMISSION_SWITCHES)
+              | frozenset(("chem_sources",)))
 #: Product suffixes of every transported row.
 ROW_SUFFIXES = ("_column_mass", "_surface_concentration")
 #: units of every product configure() declared, by name (history_units)
@@ -186,17 +192,43 @@ def switches(block):
 
 
 def chem_sources(name, block):
-    """The run's ``chem_sources``: the rows' boundary sources when an input switch is on, as the WRF
-    namelist door enables them (woof.namelist_chem); a source a data store serves is the only kind a frame
-    can be filled from (woof.config.validate_chem_config refuses the rest)."""
+    """The run's ``chem_sources``: the rows' boundary sources when an input switch is on and their inventories
+    when ``emiss_opt`` asks for them, as the WRF namelist door enables them (woof.namelist_chem); or the block's
+    own ``chem_sources``.  A source a data store serves is the only kind a frame can be filled from
+    (woof.config.validate_chem_config refuses the rest)."""
     from woof.namelist_chem import _sources_for
+    if "chem_sources" in block:
+        named = block["chem_sources"]
+        if not isinstance(named, str):
+            raise ValueError(f"wrf_chem chem_sources must be a comma list of source names, got {named!r}")
+        return tuple(n.strip() for n in named.split(",") if n.strip())
     on = switches(block)
     burn = {"biomass_burn_opt": _int(block, "biomass_burn_opt", 0)}
-    if not any(on.values()) and not burn["biomass_burn_opt"]:
+    emiss = emission_switches(name, block)
+    if not any(on.values()) and not burn["biomass_burn_opt"] and not any(emiss.values()):
         return ()
-    sources = _sources_for(name, {**on, **burn})
+    sources = _sources_for(name, {**on, **burn, **emiss})
     if not any(on.values()):
         return sources
+    if not sources:
+        raise ValueError(f"wrf_chem {[k for k, v in on.items() if v]} asks for input chemistry, and set "
+                         f"{name!r} declares no boundary source for its rows")
+    return sources
+
+
+def emission_switches(name, block):
+    """``{emiss_opt}``: 0 (nothing emitted, WRF's default) or the value the set's emission process answers."""
+    from woof.chem_table import load_sets
+    out = {}
+    for key, carriers in EMISSION_SWITCHES.items():
+        value = _int(block, key, 0)
+        if value:
+            processes = set(load_sets([name], ()).processes)
+            answered = {v for process, v in carriers.items() if process in processes}
+            if value not in answered:
+                raise ValueError(f"wrf_chem {key} = {value}: set {name!r} answers {sorted(answered) or 'none'}")
+        out[key] = value
+    return out
     if not sources:
         raise ValueError(f"wrf_chem {[k for k, v in on.items() if v]} asks for input chemistry, and set "
                          f"{name!r} declares no boundary source for its rows")
