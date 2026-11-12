@@ -309,3 +309,49 @@ def test_suite_selections_resolve_as_mpas_does():
     with pytest.raises(ValueError, match="config_pbl_scheme"):
         suite.suite_column_config(ncells=4, nlev=NZ, dt=DT, dx_m=3000.0, ztop=16000.0,
                                   configs={"config_pbl_scheme": "bl_unknown"})
+
+
+def test_wesely_reads_the_suites_land_use_and_gsw(tmp_path, monkeypatch):
+    """cams_aq (drydep.wesely): the suite route hands Wesely MPAS's sfc_input.mminlu and diag_physics.gsw, and
+    its rows are the WOOF route's (whose seam hands the same dataset and GSW, HexWrfChemistry.bind_seam)."""
+    raw = {"schema": "gpuwm-hex.chemistry/v1", "wrf_chem": {"chem_sets": "cams_aq"}}
+    seam = base._seam()
+    dataset = seam._driver.noahmp_params.dataset_identifier
+    monkeypatch.setattr(_Session, "native", SimpleNamespace(
+        get_text_field=lambda pool, name: dataset + "   " if (pool, name) == ("sfc_input", "mminlu") else None),
+        raising=False)
+    area = np.full(NCOL, 2.25e8)
+    chem, dycore, session, holder = _suite(tmp_path, raw, area)
+    assert chem.runtime.state.physics.noah_params.lutype == dataset
+    ref = chem_wrf.HexWrfChemistry("chemistry.json", raw, chem.digest, cfg=seam._cfg, area=area, nlev=NZ,
+                                   ncells=NCOL, offset=0, start_time=START, fnm=seam._state.fnm,
+                                   fnp=seam._state.fnp, terrain=seam._state.ht)
+    ref.bind_seam(seam)
+    ref.set_geography(np.degrees(LAT), np.degrees(LON))
+    nreg = len(REGISTRY)
+    ref_scalars = cp.zeros((len(ref.rows), NZ, NCOL), dtype=cp.float32)
+    for i, value in enumerate((0.04, 0.003, 0.12, 0.002)):
+        ref_scalars[i] = np.float32(value)
+        dycore.atmosphere.state.scalars[nreg + i] = np.float32(value)
+    frames = SimpleNamespace(available_hours=lambda source, field: frozenset(), at=None)
+    ref.state.chem.emission_frames = chem.runtime.state.chem.emission_frames = frames
+    inputs = base._profile()
+    state2 = {n: inputs[n].copy() for n in
+              ("theta", "qv", "qc", "qr", "qi", "qs", "qg", "pressure", "rho_dry", "z_interface")}
+    albedo = cp.full(NCOL, 0.15, dtype=cp.float32)
+    for step in range(1, 5):
+        seam.run_phase1(dt=DT, **inputs)
+        seam.run_phase2(**state2)
+        columns = base._columns(inputs, state2)
+        holder.columns = columns
+        fields = dict(seam._driver.fields)
+        fields["swdown"] = fields["gsw"] / (np.float32(1.0) - albedo.reshape(1, NCOL))
+        session.publish(fields, albedo=albedo)
+        session.pools["diag_physics", "rainncv"] = seam._driver.microphysics.rainncv.reshape(NCOL)
+        ref.step(ref_scalars, ref.columns(_prepared(columns), "post_rk"), dt=DT, elapsed_seconds=step * DT,
+                 physics_fields=fields, microphysics=seam._driver.microphysics)
+        ref.commit()
+        chem.step(session=session, dt=DT)
+        got = cp.asnumpy(dycore.atmosphere.state.scalars[nreg:])
+        assert got.tobytes() == cp.asnumpy(ref_scalars).tobytes(), step
+    assert chem.runtime.ledger()["rows"]["o3"]["deposited_kg"] < 0.0

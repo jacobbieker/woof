@@ -51,7 +51,7 @@ def test_replayed_valid_time_preserves_the_original_frame_and_receipt(tmp_path, 
     owner._published_paths = set()
     owner._metadata_by_grid_id = {1: {}}
     owner._writers = {1: CpuSink()}
-    stream = SimpleNamespace(history_fields=lambda: {"T": np.full((1, 1, 1), 2., np.float32)})
+    stream = SimpleNamespace(history_fields=lambda **_kw: {"T": np.full((1, 1, 1), 2., np.float32)})
     node = SimpleNamespace(cfg=SimpleNamespace(grid_id=1), clock=SimpleNamespace(tick_den=1),
                            state=SimpleNamespace(_streamed_domain=stream))
     monkeypatch.setattr(wrfout, "streamed_carrier_provenance_attrs", lambda _: {})

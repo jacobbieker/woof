@@ -6,8 +6,8 @@ from woof.core import gbmpbl
 
 def test_gbm_source_and_options_are_unchanged_by_loader_isolation():
     source = gbmpbl.module_source().encode()
-    assert len(source) == 65978
-    assert hashlib.sha256(source).hexdigest() == "b9cd4cfaf4d7f29e7531f05c5aa48b440163ec6698e3877619006b3b35ae9ecc"
+    assert len(source) == 65994
+    assert hashlib.sha256(source).hexdigest() == "8e3237593699c8cf4e7903f6229654c43cdb3d645cf8987d657547518b42fda3"
     assert gbmpbl.MODULE_OPTIONS == ("-std=c++17", "-fmad=false", "--ftz=false")
 
 
@@ -16,7 +16,7 @@ def test_shared_loader_is_pinned_after_qualified_port_merges():
     # also owns the merged GCE, FLG, CuP, TEMF, km_opt=5, SBU, WDM and SST declarations.
     # test_flg_wiring checks its unchanged source/options for legacy modules.
     root = Path(__file__).resolve().parents[1]
-    assert hashlib.sha256((root / "woof/core/kernels/__init__.py").read_bytes()).hexdigest() == "c2eff811878fd46042ea94611d63b1c5dd6ee442bbd708f377f914bc7bba0ed3"
+    assert hashlib.sha256((root / "woof/core/kernels/__init__.py").read_bytes()).hexdigest() == "229e5efd3d4d7e1583de06b3cd8305af13236d65f7d419a6d32fa3ac035d3370"
 
 
 def test_fast_transcendentals_leave_the_strict_replay_image_unchanged(monkeypatch):
