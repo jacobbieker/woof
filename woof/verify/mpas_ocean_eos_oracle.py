@@ -83,8 +83,10 @@ CASES = (
     ("jm_clamped", 20261204, 48, 30, "jm", (3, 1), (-6.0, 46.0), (-3.0, 47.0), {}),
     # one level: k + 1 and nVertLevels both fall back to level 1
     ("jm_one_level", 20261205, 32, 1, "jm", (1, 2), (-2.0, 30.0), (0.0, 40.0), {}),
+    # thin surface layers: exp(-0.025 depth) - 1 cancels, so the reference
+    # pressure there carries exp's every bit
     ("jm_deep_short_columns", 20261206, 40, 60, "jm", (2, 1), (-1.5, 25.0), (34.0, 35.5),
-     {"config_density0": 1027.0}),
+     {"config_density0": 1027.0, "_thin_top": 8}),
 )
 
 
@@ -107,6 +109,8 @@ def make_case(name, seed, n_cells, n_levels, eos_type, tracer_index, t_range, s_
         return lo + (hi - lo) * rs.random_sample(shape)
 
     thickness = uniform(2.0, 250.0, nl)
+    thin = overrides.get("_thin_top", 0)
+    thickness[:thin] = uniform(0.05, 2.0, thin)
     ref_bottom_depth = np.cumsum(thickness)
     max_level_cell = rs.randint(1, nl + 1, nc).astype(np.int32)
     max_level_cell[: min(nc, 4)] = nl
@@ -118,7 +122,7 @@ def make_case(name, seed, n_cells, n_levels, eos_type, tracer_index, t_range, s_
     surface[:, tracer_index[1] - 1] = uniform(*s_range, nc)
     if s_range[0] <= 0.0:
         tracers[rs.random_sample((nc, nl)) < 0.05, tracer_index[1] - 1] = 0.0
-    configs = {**DEFAULTS, **overrides}
+    configs = {**DEFAULTS, **{k: v for k, v in overrides.items() if not k.startswith("_")}}
     freeze_s = uniform(0.0, 40.0, (nc, nl))
     freeze_s[rs.random_sample((nc, nl)) < 0.05] = 0.0
     freeze_p = uniform(0.0, 6.0e7, (nc, nl))
