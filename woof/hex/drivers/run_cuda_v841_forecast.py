@@ -1393,6 +1393,17 @@ def select_initial_scalar_names(
     missing_source = [name for name in SOURCE_SCALAR_NAMES if name not in variables]
     if missing_source:
         raise ValueError(f"init is missing required source species {missing_source}")
+    # A PBL-owned advected scalar (CCPP TKE-EDMF's tke_edmf) no init
+    # carries starts from its scheme's own initial value
+    # (prepare_initial_scalar_block); it does not make the row partial.
+    owned = _pbl_owned_initial_values()
+    trailing = 0
+    while (trailing < len(names) - len(SOURCE_SCALAR_NAMES)
+           and names[-1 - trailing] in owned
+           and names[-1 - trailing] not in variables):
+        trailing += 1
+    if trailing:
+        return select_initial_scalar_names(variables, names[:-trailing])
     from woof.hex.species_row import AEROSOL_MASS, species_row_for_names
     row = species_row_for_names(names)
     aerosol_names = tuple(d.name for d in row.species if d.species_class == AEROSOL_MASS)
@@ -1409,6 +1420,15 @@ def select_initial_scalar_names(
             f"missing {missing}; a cold start would discard carried condensate"
         )
     return names
+
+
+def _pbl_owned_initial_values() -> dict[str, float]:
+    """PBL-owned advected scalars -> the engine allocator's initial value."""
+
+    from woof.core.physics_inventory import PBL_ADVECTED_SCALARS
+
+    return {name: float(value) for rows in PBL_ADVECTED_SCALARS.values()
+            for name, value in rows}
 
 
 def prepare_initial_scalar_block(
@@ -1435,7 +1455,17 @@ def prepare_initial_scalar_block(
         }
     if names == tuple(proof.SCALAR_NAMES):
         return proof.augment_exact_wsm6_scalars(state)
-    return proof.augment_cold_scalars(state, names, source_names=source)
+    receipt = proof.augment_cold_scalars(state, names, source_names=source)
+    owned = _pbl_owned_initial_values()
+    seeded = {name: owned[name] for name in names[len(source):]
+              if owned.get(name, 0.0) != 0.0}
+    if seeded:
+        # A PBL-owned scalar starts where the engine allocator starts it
+        # (DomainState: tke_edmf = 0.2), as the WRF path's state does.
+        for name, value in seeded.items():
+            state.scalars[names.index(name)] = np.float32(value)
+        receipt["pbl_scalar_initial_values"] = seeded
+    return receipt
 
 
 def supplied_undriven_scalars(
@@ -1878,7 +1908,10 @@ def build_forecast_constructor_values(
 
     column_refusal = hex_column_level_refusal(
         int(N_LEVELS),
-        microphysics=_row_for_scheme(config.config_microp_scheme).engine_scheme,
+        # An engine-derived row ("mp_wsm6@6", the declared row plus a PBL
+        # scalar) runs the declared row's microphysics kernel.
+        microphysics=_row_for_scheme(
+            str(config.config_microp_scheme).split("@", 1)[0]).engine_scheme,
         pbl=config.config_pbl_scheme,
         p_top_pa=float(p_top_pa),
     )
@@ -1956,11 +1989,15 @@ def build_forecast_constructor_values(
     # identity digest are byte-identical.
     from woof.hex import pbl_admission
 
+    from woof.hex.engine_registry import implemented_options as _engine_options
     from woof.hex.physics_suites import load_table as _physics_table
 
     if (suite_row
             and config.config_pbl_scheme not in pbl_admission.CONFIG_SCHEMES.values()
-            and config.config_pbl_scheme in _physics_table()["options"]["config_pbl_scheme"]):
+            and (config.config_pbl_scheme in _physics_table()["options"]["config_pbl_scheme"]
+                 # A generic-seam row records the engine registry id
+                 # (ccpp-tke-edmf), which the resolver already judged.
+                 or config.config_pbl_scheme in _engine_options("pbl"))):
         # A column-suite or generic-seam row: suite_config recorded the
         # selection's own boundary layer (MYNN), which that seam builds from
         # its selection, not from this frozen-lane key.  THE BREAKAGE: every
@@ -2251,15 +2288,24 @@ def prepare_forecast_host(
     if suite_adapter is not None:
         # The suite row's configuration records the MPAS selectors the run
         # EXECUTES (MYNN, RUC, the GSL drag), not the frozen lane's literals.
+        mpas_selectors = (
+            None if physics is None else {
+                key: value for key, value in physics.selectors.items()
+                if key != "config_convection_scheme"
+            }
+        )
+        carried = suite_adapter.microphysics_for(backend_row.name)
+        if (mpas_selectors is not None
+                and carried.startswith(f"{mpas_selectors.get('config_microp_scheme')}@")):
+            # An engine-derived species row (the selection transports more
+            # than the declared row: CCPP TKE-EDMF's tke_edmf).  The scalar
+            # block, its width checks and the receipts resolve the run's row
+            # from the configuration, as for a provider's scheme alias.
+            mpas_selectors["config_microp_scheme"] = carried
         config = suite_adapter.suite_config(
             config,
             backend_row.name,
-            mpas_selectors=(
-                None if physics is None else {
-                    key: value for key, value in physics.selectors.items()
-                    if key != "config_convection_scheme"
-                }
-            ),
+            mpas_selectors=mpas_selectors,
         )
         _rebind_soil_levels(suite_adapter.soil_levels_for(backend_row.name))
     elif orographic_statistics is not None:

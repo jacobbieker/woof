@@ -4789,10 +4789,15 @@ def _live_driver_tendency_attrs(driver):
 
 
 def _tracer_pbl_manifest(driver):
-    """Snapshot the rate bank; step entry clears it before the PBL gate."""
+    """Snapshot the rate bank; step entry clears it before the PBL gate.
+
+    The bank also carries CCPP TKE-EDMF's held TKE and scalar rates at a
+    positive PBL cadence (woof.core.satmedmf.held_rate_names), which the
+    steps between PBL calls apply and step entry does not clear."""
     from woof.core.passive_tracer_contract import mixed_tracers
+    from woof.core.satmedmf import held_rate_names
     cfg = getattr(driver, "refl_config", None)
-    names = mixed_tracers(cfg)
+    names = mixed_tracers(cfg) + held_rate_names(getattr(driver, "state", None), cfg)
     extra = getattr(driver.pbl_tendencies, "extra_scalars", None) or {}
     missing = set(names) - set(extra)
     if missing:
@@ -6582,6 +6587,8 @@ def _validate_member_namespaces(stored, state, driver, path, format_version, *, 
     # requires exactly the active configuration's held tracer inventory.
     allowed_driver.update(f"driver/pbl_tendencies/extra_scalars/{name}"
                           for name in TRACER_NAMES)
+    if driver is not None:
+        allowed_driver.update(_tracer_pbl_manifest(driver))
     if format_version == 2:
         allowed_driver.update(f"driver/microphysics/{name}"
                               for name in MICROPHYSICS_COMPONENTS)

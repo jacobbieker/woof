@@ -42,11 +42,12 @@ def hashes(state):
     return out
 
 @pytest.mark.gpu
-def test_real_driver_advects_tke_and_restart_is_byte_identical(tmp_path):
+@pytest.mark.parametrize("bldt",[0.,2./60.],ids=["every-step","held"])
+def test_real_driver_advects_tke_and_restart_is_byte_identical(tmp_path,bldt):
     import cupy as cp
     from woof.core.dycore import run_steps
     from woof.io.restart import write_restart,restore_restart
-    c=cfg();live=make_state(c)
+    c=cfg(bldt=bldt);live=make_state(c)
     initial=live.tke_edmf.copy()
     run_steps(live,c,2)
     assert not bool(cp.array_equal(initial,live.tke_edmf))
@@ -59,6 +60,11 @@ def test_real_driver_advects_tke_and_restart_is_byte_identical(tmp_path):
     assert priced["pbl_tendencies/rqr"] == actual_rain.shape
     assert int(np.prod(priced["pbl_tendencies/rqr"])) * actual_rain.dtype.itemsize == actual_rain.nbytes
     path=write_restart(tmp_path/"restart.npz",live,c)
+    # A positive cadence holds the TKE rate of the last call (itimestep 2)
+    # through itimestep 3, so the restart carries it.
+    with np.load(path) as stored:
+        bank=sorted(k for k in stored.files if "extra_scalars" in k)
+    assert bank==([] if bldt==0. else sorted(f"driver/pbl_tendencies/extra_scalars/{n}" for n in ("tke_edmf","qs","qg")))
     resumed=make_state(c)
     restore_restart(path,resumed,c)
     assert hashes(live)==hashes(resumed)
@@ -109,3 +115,20 @@ def test_real_satmedmf_driver_supplies_grell_freitas_coupling():
     for value in state.physics.fields.values():
         if isinstance(value, cp.ndarray) and value.dtype.kind == "f":
             assert bool(cp.isfinite(value).all())
+
+
+@pytest.mark.gpu
+def test_held_cadence_composes_the_held_tke_rate_into_the_rk_target():
+    """With a cumulus scheme the RK target is not the PBL stack; at a
+    positive cadence the held TKE rate must still reach the TKE advance on
+    the steps between PBL calls (itimestep 3 here)."""
+    from woof.core.dycore import run_steps
+    c = cfg(cu_physics=3, bldt=2. / 60.)
+    state = make_state(c)
+    run_steps(state, c, 3)
+    driver = state.physics
+    assert driver.tendencies is not driver.pbl_tendencies
+    held = driver.pbl_tendencies.extra_scalars["tke_edmf"]
+    assert driver.tendencies.scalar_for("tke_edmf") is held
+    import cupy as cp
+    assert bool(cp.any(held != 0))

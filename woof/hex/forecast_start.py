@@ -17,6 +17,7 @@ bare ``woof hex forecast`` run does not have.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -40,6 +41,9 @@ def write_start_record(output_root: Path, *, paths: Mapping[str, Any], schedule:
     partial = target.with_name(target.name + ".partial")
     partial.write_text(json.dumps(record, indent=1, sort_keys=True) + "\n", encoding="utf-8")
     partial.replace(target)
+    from .continuation import REQUEST_ENV, write_request_text
+    if os.environ.get(REQUEST_ENV):
+        write_request_text(Path(output_root), os.environ[REQUEST_ENV])
     return target
 
 
