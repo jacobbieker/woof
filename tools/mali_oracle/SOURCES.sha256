@@ -1,5 +1,6 @@
 # MPAS-Model v8.4.2 (f34984b2c89353cf31c235b08d3b4acd96b37bb3) files the MALI
-# SIA oracle compiles verbatim.  build.sh refuses to build if any differs
+# oracles compile verbatim (the reconstruction file is cut, verbatim, by
+# build.sh).  build.sh refuses to build if any differs
 # from its pin.
 13db2ffce7d70f0c725913eb8c58c2e0b3fbdffb7bfe0c2ac77798e554127c51  src/framework/mpas_kind_types.F
 fa77a86b6d3e9041677ef1cdaf76fbcc172a50607874c80ace5085829ae7be31  src/framework/mpas_constants.F
@@ -13,3 +14,9 @@ c5627e4694a7c5ee231aa27c89c265c7e8b8ae89c1014d02f5b9c284b169712a  src/core_landi
 25b704fe7d548aaa917f5c40f37e397a01001462cdbeb3c5cbc3392ed1003a25  src/core_landice/mode_forward/mpas_li_diagnostic_vars.F
 9947f2be8e77500c3311adbdb2425cf08827c6310331d0f1dd7933e0c1655cd1  src/core_landice/mode_forward/mpas_li_sia.F
 f712a560e57f1a43fff0239aca3c255011e8dc13e231c96c6f6cbb0f1101a8e4  src/core_landice/mode_forward/mpas_li_advection.F
+5f4b7b2819e06acc82202aeeac7e40f4470e2e07e0da939cb23b11327662175f  src/operators/mpas_vector_reconstruction.F
+725b7c4b353747055753170cf5791d33017a7554ef84b21de315d814e7c8dfdc  src/core_landice/mode_forward/mpas_li_calving.F
+33a40abbc79cde1b0540539096c6bf14c953d342fdb177f2f915c5440d2f088d  src/core_landice/mode_forward/mpas_li_velocity_simple.F
+8ee8f3f0f303f4416bab0c97dac886890e0b93ced65dd99e6d04bfd3fdd1ca42  src/core_landice/mode_forward/mpas_li_velocity.F
+6913b30301adff84d13661d91a61928501a8aad6ed9b8f254b32e442e386697f  src/core_landice/mode_forward/mpas_li_subglacial_hydro.F
+b29b66206010c1c75942aa6b63ce5fd81bdac1f5c34b45554eb36fe201ffaeb8  src/core_landice/mode_forward/mpas_li_time_integration_fe.F

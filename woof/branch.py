@@ -53,6 +53,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
+from woof.dfi_control import DFI_KEYS as _DFI_RESTART_FIELDS
 from woof.core.model import (RESTART_TOLERATED_DOMAIN_FIELDS,
                               RESTART_TOLERATED_EXPERIMENT_FIELDS,
                               RESTART_TOLERATED_RUN_FIELDS)
@@ -121,6 +122,9 @@ _RUN_FIELD_SPELLING: dict[str, str] = {
     "surface_energy_diag": "domain.<grid_id>.surface_energy_diag",
     # Correct mode WB1: output-only, so a branch may switch it (books CLOUDNC).
     "thompson_cloud_surface_booking": "domain.<grid_id>.thompson_cloud_surface_booking",
+    # Digital-filter initialization controls: start-of-run only, so tolerated
+    # across a restart like the run-length knobs.
+    **{name: "domain.<grid_id>." + name for name in sorted(_DFI_RESTART_FIELDS)},
 }
 
 _unspelled = (set(RESTART_TOLERATED_EXPERIMENT_FIELDS)

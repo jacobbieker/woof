@@ -1637,6 +1637,9 @@ class RunConfig:
     #: boundary of the chem vertical mixing, for aerosol rows with no dry
     #: deposition scheme of their own.  0 = those rows deposit nothing.
     aer_drydep_opt: int = _config_field(default=0, kw_only=True)
+    #: WRF ``&chem photdt`` (registry.chem, minutes; 0 = every step): the
+    #: photolysis cadence of photolysis.ftuv (chem_driver.F:349-362).
+    photdt: float = _config_field(default=0.0, kw_only=True)
     # The WRF v4.7.1 fire (SFIRE) namelist, appended keyword-only so the
     # positional API and the order of every field above are unchanged.
     # Names, types and defaults are woof.sfire_config.FireRunFields'
@@ -5488,7 +5491,7 @@ CHEM_RUN_FIELDS = (
     "aer_op_opt", "dust_alpha", "dust_gamma", "dust_smtune", "dust_ustune",
     "mynn_chem_vertmx", "fire_emission_mode", "plume_fire_properties",
     "aerosol_mp_coupling", "simple_dir_fdb", "enh_vermix", "flam_part",
-    "aer_drydep_opt")
+    "aer_drydep_opt", "photdt")
 
 #: Every RunConfig field of the fire (SFIRE) block, in declaration order,
 #: appended keyword-only after CHEM_RUN_FIELDS: inert while ``ifire`` is 0
@@ -7392,6 +7395,11 @@ def validate_chem_config(cfg) -> None:
         table = load_sets(sets, sources)
     except ChemTableError as error:
         raise ConfigurationRefused(str(error)) from error
+    photdt = getattr(cfg, "photdt", 0.0)
+    if isinstance(photdt, bool) or not isinstance(photdt, (int, float)) \
+            or not math.isfinite(photdt):
+        raise ConfigurationRefused(f"photdt must be a finite number of minutes "
+                                   f"(WRF declares it a real), got {photdt!r}.")
     for name in ("chem_adv_opt", "kemit", "biomass_burn_opt",
                  "plumerisefire_frq", "dust_opt", "seas_opt", "dmsemis_opt",
                  "wetscav_onoff", "chem_conv_tr", "vertmix_onoff",
@@ -7631,9 +7639,26 @@ def validate_chem_config(cfg) -> None:
     # source frames to read them from".
     from woof.chem_inventory_frames import serves_emission
 
+    from woof.core.chem_radm2_emiss import EMISSIONS as _RADM2_FIELDS
+
+    def _read(row, ref):
+        # An entry a process acting on the row in this run reads: the e_*
+        # fields are emission.radm2's, every other field the other emitting
+        # processes' (a shared row keeps the entries of the sets it serves).
+        if ref["field"] in _RADM2_FIELDS:
+            return row.acts_in("emission.radm2", table.sets)
+        others = [key for key in row.processes
+                  if key.split(".")[0] in ("emission", "plumerise")
+                  and key != "emission.radm2"]
+        if not others:
+            # Only emission.radm2 could read it, and it reads e_* fields
+            # only: a misdeclared entry, refused below.
+            return True
+        return any(row.acts_in(key, table.sets) for key in others)
+
     unserved = sorted({ref["source"] for row in table.rows
                        for ref in row.emissions
-                       if ref["source"] in sources
+                       if ref["source"] in sources and _read(row, ref)
                        and catalog_sources[ref["source"]].kind == "emission"
                        and catalog_sources[ref["source"]].remap
                        not in ("cell_sum", "cell_sum_split")
@@ -9970,6 +9995,45 @@ class RadarHeatingConfig:
 RADAR_HEATING_OFF = RadarHeatingConfig()
 
 
+# ---------------------------------------------------------------------------
+# [model]: which model a `woof go` configuration runs
+# ---------------------------------------------------------------------------
+
+#: The engines ``[model] engine`` names.  ``"wrf"`` is the WRF path every
+#: configuration ran before the table existed; ``"hex"`` routes ``woof go`` to
+#: the hex (MPAS mesh) model through :mod:`woof.go_hex`.
+MODEL_ENGINES = ("wrf", "hex")
+
+MODEL_KEY_ROWS = _key_rows(
+    _KeyRow("engine", "string", "wrf",
+            "the model woof go runs: 'wrf' (the WRF path) or 'hex' (the MPAS mesh model, woof.go_hex)"),
+)
+MODEL_KEYS = frozenset(MODEL_KEY_ROWS)
+
+
+def model_engine(table, *, where: str = "[model]") -> str:
+    """The ``[model]`` table's engine, checked; ``"wrf"`` when the table is absent.
+
+    A key the table does not declare, or an engine outside
+    :data:`MODEL_ENGINES`, is refused: a typo would otherwise run the WRF
+    path under a configuration that asked for another model.
+    """
+
+    if table is None:
+        return "wrf"
+    if not isinstance(table, dict):
+        raise ValueError(f"{where} must be a table, got {table!r}.")
+    unknown = sorted(set(table) - MODEL_KEYS)
+    if unknown:
+        raise ValueError(f"{where} has no key {', '.join(map(repr, unknown))}; "
+                         f"its keys are {sorted(MODEL_KEYS)}.")
+    engine = MODEL_KEY_ROWS["engine"].get(table, where=where)
+    if engine not in MODEL_ENGINES:
+        raise ValueError(f"engine in {where} must be one of {list(MODEL_ENGINES)}, "
+                         f"got {engine!r}.")
+    return engine
+
+
 def declared_key_rows() -> dict[str, dict[str, dict]]:
     """Every declared configuration key row, by the table that owns it.
 
@@ -9996,6 +10060,7 @@ def declared_key_rows() -> dict[str, dict[str, dict]]:
         "ingest": INGEST_TABLE_ROWS,
         "simulated_radar": radar_key_rows(),
         "radar_heating": RADAR_HEATING_KEY_ROWS,
+        "model": MODEL_KEY_ROWS,
     }
     # [output], on the tree-wide table and on a
     # domain's own output = {...} override alike (one parser reads both).

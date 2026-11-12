@@ -214,7 +214,8 @@ class InloopTest(unittest.TestCase):
         submit.body = prefix
         scope = {"Fraction": Fraction, "timedelta": timedelta}
         exec(compile(ast.Module(body=[selector, submit], type_ignores=[]), "history-clock", "exec"), scope)
-        worker = SimpleNamespace(_simulated_radar=None, start_time=self.when, _capture_radar=mock.Mock())
+        worker = SimpleNamespace(_simulated_radar=None, start_time=self.when, _capture_radar=mock.Mock(),
+                           submit_native_auxiliary=mock.Mock())
         self.node.cfg.full_history_interval_s = 3600
         self.node.clock = SimpleNamespace(tick_den=100, spec=SimpleNamespace(start_ticks=0, history_begin_ticks=0))
         for seconds, quick in ((0, False), (300, True), (3600, False), (3900, True)):

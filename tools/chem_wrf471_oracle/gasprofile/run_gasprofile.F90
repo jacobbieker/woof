@@ -16,6 +16,16 @@
 !             midpoints, and heights far below and above the profile.
 ! bdy         bdy_chem_value(chem, z, nch, numgas) for nch = p_so2 ... p_ho2
 !             at the same heights, for chem_opt 1 and 2 (p_nu0 > 1 only for 2).
+! sorgam_bdy  bdy_chem_value_sorgam(chem, z, nch, config_flags, alt, convfac, g)
+!             for nch = p_so4aj ... p_corn (radm2sorg, aer_bc_opt = 1) at the
+!             mk heights plus every zfa_bdy level (zprof, the routine's own
+!             grid), its float32 neighbours, midpoints and 10% points, each
+!             in four atmospheres (cold/high, cool, standard, warm/low
+!             pressure); alt and convfac are made from (t, p, pb) the way
+!             flow_dep_bdy_chem makes convfac (:1751-1752), and written.
+!             Also written: module_data_sorgam's PARAMETERs the routine uses,
+!             as this compiler folds them, and the module variables the
+!             routine sets (xxlsg*, l2sgini*, en1 / ea1 / ec1, es*36).
 ! pnnl        gas_ic_opt = gas_bc_opt = 101: input_chem_profile with
 !             gas_ic_opt = 101 on the nz = 20 grid, and bdy_chem_value after
 !             gasprofile_init_pnnl (CASENAME 4 rewrites only xl(iref(p_sulf-1),:)).
@@ -80,6 +90,8 @@ program run_gasprofile
   call oracle_put('z', zm(1:nzm))
   call oracle_put('chem', bvals(1:nzm, :, :))
   call oracle_close()
+
+  call run_sorgam_bdy()
 
   ! pnnl, last: gasprofile_init_pnnl rewrites the module's xl.
   call run_ic(radm2, 20, gas_ic_pnnl, 'pnnl_ic_c1_nz20')
@@ -193,5 +205,111 @@ contains
       end do
     end do
   end subroutine run_bdy
+
+  subroutine run_sorgam_bdy()
+    use module_data_sorgam, only: rgasuniv, conmin, epsilc, pirs, f6dpi, f6dpim9, &
+        so4fac, nh4fac, no3fac, orgfac, soilfac, seasfac, anthfac, &
+        sginin, sginia, sginic, dginin, dginia, dginic, &
+        xxlsgn, xxlsga, xxlsgc, l2sginin, l2sginia, l2sginic, en1, ea1, ec1, &
+        esn36, esa36, esc36
+    integer, parameter :: nv = 4, naer = 38
+    real, parameter :: dtv(nv) = (/ -30., -8., 0., 22. /)
+    real, parameter :: pfv(nv) = (/ 1.04, 0.92, 1.0, 0.75 /)
+    real :: zs(400), zz, tk, ptot, theta
+    real, allocatable :: zp(:), alt(:), convfac(:), tt(:), pp(:), ppb(:), ch(:, :)
+    real :: tempfac, cube(3), mfac(2)
+    integer :: ns, np, i, v, nch
+    type(grid_config_rec_type) :: config_flags
+    call set_package(radm2sorg)
+    call setup_gasprofile_maps(radm2sorg, get_last_gas(radm2sorg))
+    config_flags%chem_opt = radm2sorg
+    config_flags%aer_bc_opt = aer_bc_default
+    zs(1:nzm) = zm(1:nzm)
+    ns = nzm
+    call bdy_heights(zs, ns)
+    np = ns * nv
+    allocate(zp(np), alt(np), convfac(np), tt(np), pp(np), ppb(np), ch(np, naer))
+    do v = 1, nv
+      do i = 1, ns
+        np = i + (v - 1) * ns
+        zz = max(zs(i), -500.)
+        tk = 288.15 + dtv(v) - 0.0065 * min(zz, 11000.)
+        ptot = pfv(v) * 101325. * exp(-min(zz, 40000.) / 7400.)
+        theta = tk * (p1000mb / ptot) ** rcp
+        zp(np) = zs(i)
+        tt(np) = theta - t0
+        ppb(np) = 0.9 * ptot
+        pp(np) = ptot - ppb(np)
+        ! flow_dep_bdy_chem (:1751-1752), word for word
+        tempfac=(tt(np)+t0)*((pp(np) + ppb(np))/p1000mb)**rcp
+        convfac(np)=(pp(np)+ppb(np))/rgasuniv/tempfac
+        alt(np) = r_d * tempfac / (pp(np) + ppb(np))
+      end do
+    end do
+    np = ns * nv
+    ch = -7.
+    do nch = p_so4aj, p_corn
+      do i = 1, np
+        call bdy_chem_value_sorgam(ch(i, nch - p_so4aj + 1), zp(i), nch, config_flags, &
+                                   alt(i), convfac(i), g)
+      end do
+    end do
+    call oracle_open('sorgam_bdy')
+    call oracle_put('z', zp)
+    call oracle_put('t', tt)
+    call oracle_put('p', pp)
+    call oracle_put('pb', ppb)
+    call oracle_put('alt', alt)
+    call oracle_put('convfac', convfac)
+    call oracle_put('chem', ch)
+    call oracle_put('p_so4aj', p_so4aj)
+    call oracle_put('p_corn', p_corn)
+    call oracle_put('p_sulf', p_sulf)
+    call oracle_put('aer_bc_default', aer_bc_default)
+    call oracle_put('aer_bc_pnnl', aer_bc_pnnl)
+    call oracle_close()
+    call oracle_open('sorgam_tables')
+    call oracle_put('epsilc', epsilc)
+    call oracle_put('conmin', conmin)
+    call oracle_put('rgasuniv', rgasuniv)
+    call oracle_put('pirs', real(pirs))
+    call oracle_put('pirs_lo', real(pirs - dble(real(pirs))))
+    call oracle_put('f6dpi', f6dpi)
+    call oracle_put('f6dpim9', f6dpim9)
+    call oracle_put('so4fac', so4fac)
+    call oracle_put('nh4fac', nh4fac)
+    call oracle_put('no3fac', no3fac)
+    call oracle_put('orgfac', orgfac)
+    call oracle_put('soilfac', soilfac)
+    call oracle_put('seasfac', seasfac)
+    call oracle_put('anthfac', anthfac)
+    call oracle_put('sgini', (/ sginin, sginia, sginic /))
+    call oracle_put('dgini', (/ dginin, dginia, dginic /))
+    cube = (/ dginin**3, dginia**3, dginic**3 /)
+    call oracle_put('dgini3', cube)
+    mfac = (/ conmin*(nh4fac+no3fac+orgfac*9+2*anthfac), conmin*(soilfac+seasfac+anthfac) /)
+    call oracle_put('m3fac', mfac)
+    call oracle_put('xxlsg', (/ xxlsgn, xxlsga, xxlsgc /))
+    call oracle_put('l2sgini', (/ l2sginin, l2sginia, l2sginic /))
+    call oracle_put('e1', (/ en1, ea1, ec1 /))
+    call oracle_put('es36', (/ esn36, esa36, esc36 /))
+    call oracle_close()
+  end subroutine run_sorgam_bdy
+
+  subroutine bdy_heights(z, n)
+    real, intent(inout) :: z(:)
+    integer, intent(inout) :: n
+    real :: zp, zq
+    integer :: k
+    do k = 1, kx
+      zp = 0.5 * (zfa_bdy(k) + zfa_bdy(k + 1))
+      call add_z(z, n, nearest(zp, -1.)); call add_z(z, n, zp); call add_z(z, n, nearest(zp, 1.))
+      if (k < kx) then
+        zq = 0.5 * (zfa_bdy(k + 1) + zfa_bdy(k + 2))
+        call add_z(z, n, 0.5 * (zp + zq)); call add_z(z, n, zp + 0.1 * (zq - zp))
+      end if
+    end do
+    call add_z(z, n, -2000.); call add_z(z, n, 3.5e4); call add_z(z, n, 5.e4)
+  end subroutine bdy_heights
 
 end program run_gasprofile

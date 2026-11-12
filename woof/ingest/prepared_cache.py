@@ -253,6 +253,7 @@ DEFAULT_TOLERANT_IDENTITY_FIELDS = frozenset({
     "run.waves",  # pre-wave path at 'off'
     "run.waves_options",  # no wave options at ''
     "run.wtddt",  # groundwater runtime cadence at 30.0 minutes
+    "run.photdt",  # chem photolysis cadence at 0.0 (every step), forecast-time only
     # Snow optics reads these on radiation steps, not during preparation.
     "run.snicar_snowshape_opt",  # existing shape default at 3
     "run.snicar_snowbc_intmix",  # existing mixing default at True

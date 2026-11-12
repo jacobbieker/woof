@@ -691,7 +691,13 @@ class _Rewriter:
         msl = re.sub(r'__attribute__\(\(annotate\("' + _SPACE_HINT + r'\w+"\)\)\)', "", msl)
         from dataclasses import replace
         if self.spaces.address_casts:
-            self.kernels = {k: replace(v, indirect=True) for k, v in self.kernels.items()}
+            # only the kernels whose calls reach a cast (every kernel when
+            # that cannot be told: kernels_reaching_address_casts)
+            casting = self.spaces.kernels_reaching_address_casts(self._kernel_cursors)
+            if casting is not None and not set(self.kernels) <= {c.spelling for c in self._kernel_cursors}:
+                casting = None
+            self.kernels = {k: replace(v, indirect=True) if casting is None or k in casting else v
+                            for k, v in self.kernels.items()}
         self.kernels = {k: replace(v, indirect=True) if k in self._indirect_kernels else v
                         for k, v in self.kernels.items()}
         return TranslatedUnit(msl=msl, kernels=self.kernels, globals={

@@ -90,6 +90,7 @@ CHEM_CHANGED_VALUES = {
     "enh_vermix": True,
     "flam_part": 0.5,
     "aer_drydep_opt": 111,
+    "photdt": 30.0,
 }
 
 
