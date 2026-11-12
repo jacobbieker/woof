@@ -1806,6 +1806,14 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "c4b42873e4eef457d4b11689f2e65947195a7944b2f432ace6072a557309ea69",
+    "constructor": "compile_using_nvrtc",
+    "factory": "_module_on",
+    "factory_sha256": "a0bd0a59c65d70919cdc2935407be2b413b28c79865955017ce40b10a44873c5",
+    "file": "woof/hex/mpas_ice/calving_v842.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "c4cf3f2922b7c0b70ce6d1a157529edc57598e179c3f9e248f1eefb15e4926ac",
     "constructor": "ReductionKernel",
     "factory": "_nonfinite",
@@ -4520,6 +4528,10 @@
     "sha256": "5f98f8cfe1a6906d51767c52ecf14af278aac305dd9f4576dd735e4025a6a06c"
    },
    {
+    "file": "woof/hex/mpas_ice/calving_v842.cu",
+    "sha256": "f3a1bb02093888d6bfec6cc67c19a217ee4341c6757a02c76455c7108f09f08d"
+   },
+   {
     "file": "woof/hex/mpas_ice/geometry_v842.cu",
     "sha256": "cd6a34598d7574de85a58b7f08f67c7e1837f79b690fb7fe9a9454c6a93268e5"
    },
@@ -5414,6 +5426,10 @@
     "sha256": "1c93ae0d95fec7c9e261b2b675dc67a94db42b1524e66240796543a293f4f342"
    },
    {
+    "file": "woof/hex/mpas_ice/calving_v842.py",
+    "sha256": "e53f18705912fcb665571f79751b137b72c99c4b2c92c6b95f172e48d44b45d3"
+   },
+   {
     "file": "woof/hex/mpas_ice/geometry_v842.py",
     "sha256": "07f53d45dc08ae8e43bdc0b4d4319a47bb1fe847e7541ce970a7c1b1ce766796"
    },
@@ -5431,7 +5447,7 @@
    },
    {
     "file": "woof/hex/mpas_ice/time_integration_fe_v842.py",
-    "sha256": "0d9f801219b13ccd4e141438e9c315c5fbcd6412e4525bbe4777e6e07cffaaf7"
+    "sha256": "fc5e32bcad73decb0f3ceb439a2355dda8cd44d46681d5552a371ddf357ba4b5"
    },
    {
     "file": "woof/hex/mpas_ocean/forcing_v842.py",
