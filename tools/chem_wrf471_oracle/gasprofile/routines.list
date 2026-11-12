@@ -1,0 +1,17 @@
+# Routines copied byte for byte from chem/module_input_chem_data.F, after the
+# file's own lines 1 to CONTAINS (the FSL notice, `#define CASENAME 4`, the
+# module's USE lines and every module DATA statement), in this order:
+# the chem_opt dispatch and its four map routines (:329-564), the vertical
+# interpolation (:567-675), real.exe's chem_in_opt = 0 entry and the profile
+# builder (:677-937), the RADM2 lateral boundary value (:1415-1504) and the
+# gas_ic_opt / gas_bc_opt = 101 profile override (:2772-3350).
+setup_gasprofile_maps
+setup_gasprofile_map_radm_racm
+setup_gasprofile_map_saprcnov
+setup_gasprofile_map_cbmz
+setup_gasprofile_map_cbm4
+vinterp_chem
+input_chem_profile
+make_chem_profile
+bdy_chem_value
+gasprofile_init_pnnl
