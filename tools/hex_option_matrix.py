@@ -352,12 +352,28 @@ def run_row(row: dict, case: dict, work: Path, backend: str) -> dict:
         except Exception as error:  # noqa: BLE001 -- the row is the report
             result["outcome"] = "error"
             result["reason"] = f"budget read: {type(error).__name__}: {error}"
-        # Keep the receipts and log; drop the bulky history and scratch.
-        if not case.get("keep_history"):
-            for frame in frames:
-                frame.unlink()
-            subprocess.run(["rm", "-rf", str(scratch)], check=False)
+    if not case.get("keep_history"):
+        _prune(out, scratch)
     return result
+
+
+#: What a row keeps of its run: the door's receipt and traceback (the log
+#: sits beside ``out``).  History frames, step receipts and the scratch tree
+#: are tens of MB a row, and a host sweeping a hundred rows has no room.
+_KEEP = ("forecast-receipt.json", "forecast-traceback.log")
+
+
+def _prune(out: Path, scratch: Path) -> None:
+    subprocess.run(["rm", "-rf", str(scratch)], check=False)
+    if not out.is_dir():
+        return
+    for path in out.iterdir():
+        if path.name in _KEEP:
+            continue
+        if path.is_dir():
+            subprocess.run(["rm", "-rf", str(path)], check=False)
+        else:
+            path.unlink()
 
 
 def grade(results: dict) -> dict:
