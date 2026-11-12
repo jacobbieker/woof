@@ -1,0 +1,413 @@
+{
+ "schema": "gpuwm.chem.speciation.v1",
+ "name": "radm2",
+ "description": "WOOF's speciation of anthropogenic inventory fields (kg m-2 s-1) into the emis_ant rows WRF-Chem's emiss_opt = 3 reads for RADM2 / RADM2SORG (gases mol km-2 hr-1, aerosols ug m-2 s-1). Each row is the sum of its terms (field x weight, float64), clamped at zero where clamp_at_zero is set. WOOF's choices, not WRF's: WRF reads emis_ant ready-made.",
+ "inputs": [
+  "co",
+  "nox",
+  "nh3",
+  "nmvoc",
+  "so2",
+  "bc",
+  "oc",
+  "pm25",
+  "pm10"
+ ],
+ "input_units": "kg m-2 s-1",
+ "constants": {
+  "nox_molar_split_no_no2": [
+   0.9,
+   0.1
+  ],
+  "aitken_accumulation_mass_split": [
+   0.2,
+   0.8
+  ],
+  "om_per_oc": 1.3,
+  "molar_mass_g_mol": {
+   "co": 28.01,
+   "no2": 46.005,
+   "nh3": 17.031,
+   "so2": 64.066
+  },
+  "nmvoc_mol_per_kg": {
+   "ald": 0.2356444655,
+   "eth": 1.563019621,
+   "hc3": 4.163324043,
+   "hc5": 2.104233952,
+   "hc8": 1.170077934,
+   "hcho": 0.1665223473,
+   "ket": 0.2359568423,
+   "ol2": 1.853568119,
+   "oli": 0.5643877284,
+   "olt": 0.5703286519,
+   "ora2": 0.3437381179,
+   "tol": 0.644321508,
+   "xyl": 0.6383604693
+  },
+  "nmvoc_mass_fraction_emitted": 0.86975
+ },
+ "deviations": [
+  "HERMESv3's printed RADM2 profile omits voc15 (xylene) from every class and lists voc17 (other aromatics) in both HC8 and XYL; WOOF assigns xylene and other aromatics once each, to XYL (Stockwell et al. 1990: XYL is xylene and the more reactive aromatics).",
+  "Acids: HERMESv3 gives 0.44 to ORA1 and 0.56 to ORA2; add_anthropogenics' RADM2 branch adds no e_ora1 (woof.core.chem_radm2_emiss.GAS_TERMS), so the formic share is not emitted and only ORA2's 0.56 is.",
+  "Ethyne: 0.4 of its mass to HC3 (HERMESv3's reactivity-weighted share); the rest, like voc25 'Others' (8.1%, no stated composition) and the shares of benzene outside TOL, is not emitted."
+ ],
+ "outputs": {
+  "e_so2": {
+   "units": "mol km-2 hr-1",
+   "terms": [
+    {
+     "field": "so2",
+     "weight": 56192051950.0
+    }
+   ],
+   "clamp_at_zero": false,
+   "provenance": "SO2 mass / 64.066 g mol-1; all of EDGAR's SO2 is gas (no primary sulfate split: see e_so4i)"
+  },
+  "e_co": {
+   "units": "mol km-2 hr-1",
+   "terms": [
+    {
+     "field": "co",
+     "weight": 128525526600.0
+    }
+   ],
+   "clamp_at_zero": false,
+   "provenance": "CO mass / 28.010 g mol-1"
+  },
+  "e_no": {
+   "units": "mol km-2 hr-1",
+   "terms": [
+    {
+     "field": "nox",
+     "weight": 70427127490.0
+    }
+   ],
+   "clamp_at_zero": false,
+   "provenance": "0.9 of NOx moles (mass / 46.0050 g mol-1) as NO. NOx is NO2-equivalent mass (Crippa et al. 2023, ESSD 15, 2667-2694); molar split 90 % NO / 10 % NO2 of primary NOx, Crippa et al. 2018, ESSD 10, 1987-2013, p. 1989"
+  },
+  "e_no2": {
+   "units": "mol km-2 hr-1",
+   "terms": [
+    {
+     "field": "nox",
+     "weight": 7825236387.0
+    }
+   ],
+   "clamp_at_zero": false,
+   "provenance": "0.1 of NOx moles (mass / 46.0050 g mol-1) as NO2, the complement of e_no. NOx is NO2-equivalent mass (Crippa et al. 2023, ESSD 15, 2667-2694); molar split 90 % NO / 10 % NO2 of primary NOx, Crippa et al. 2018, ESSD 10, 1987-2013, p. 1989"
+  },
+  "e_nh3": {
+   "units": "mol km-2 hr-1",
+   "terms": [
+    {
+     "field": "nh3",
+     "weight": 211379249600.0
+    }
+   ],
+   "clamp_at_zero": false,
+   "provenance": "NH3 mass / 17.031 g mol-1"
+  },
+  "e_hcl": {
+   "units": "mol km-2 hr-1",
+   "terms": [],
+   "clamp_at_zero": false,
+   "provenance": "not emitted: EDGAR v8.1 AP carries no HCl or HONO and the RADM2 profile of Guevara et al. (2019), HERMESv3 Part 1, Geosci. Model Dev. 12, 1885-1907, doi:10.5194/gmd-12-1885-2019, Table 2 assigns none"
+  },
+  "e_csl": {
+   "units": "mol km-2 hr-1",
+   "terms": [],
+   "clamp_at_zero": false,
+   "provenance": "not emitted: IPCC TAR WG1 Ch. 4 (Prather, Ehhalt et al. 2001), Table 4.7b, industrial NMVOC has no cresol group"
+  },
+  "e_iso": {
+   "units": "mol km-2 hr-1",
+   "terms": [],
+   "clamp_at_zero": false,
+   "provenance": "not emitted: IPCC TAR WG1 Ch. 4 (Prather, Ehhalt et al. 2001), Table 4.7b, industrial NMVOC carries no isoprene (voc10); isoprene is biogenic"
+  },
+  "e_ald": {
+   "units": "mol km-2 hr-1",
+   "terms": [
+    {
+     "field": "nmvoc",
+     "weight": 848320075.9
+    }
+   ],
+   "clamp_at_zero": false,
+   "provenance": "0.2356 mol per kg NMVOC = sum of voc22 Other aldehydes 1.6% x 1.0 / 67.899 g mol-1 (CnH2nO, n=3.7). Profile IPCC TAR WG1 Ch. 4 (Prather, Ehhalt et al. 2001), Table 4.7b, industrial NMVOC; classes and shares Guevara et al. (2019), HERMESv3 Part 1, Geosci. Model Dev. 12, 1885-1907, doi:10.5194/gmd-12-1885-2019, Table 2"
+  },
+  "e_hcho": {
+   "units": "mol km-2 hr-1",
+   "terms": [
+    {
+     "field": "nmvoc",
+     "weight": 599480450.3
+    }
+   ],
+   "clamp_at_zero": false,
+   "provenance": "0.1665 mol per kg NMVOC = sum of voc21 Formaldehyde 0.5% x 1.0 / 30.026 g mol-1 (CH2O, n=1.0). Profile IPCC TAR WG1 Ch. 4 (Prather, Ehhalt et al. 2001), Table 4.7b, industrial NMVOC; classes and shares Guevara et al. (2019), HERMESv3 Part 1, Geosci. Model Dev. 12, 1885-1907, doi:10.5194/gmd-12-1885-2019, Table 2"
+  },
+  "e_ora2": {
+   "units": "mol km-2 hr-1",
+   "terms": [
+    {
+     "field": "nmvoc",
+     "weight": 1237457225.0
+    }
+   ],
+   "clamp_at_zero": false,
+   "provenance": "0.3437 mol per kg NMVOC = sum of voc24 Acids 3.6% x 0.56 / 58.649 g mol-1 (CnH2nO2, n=1.9). Profile IPCC TAR WG1 Ch. 4 (Prather, Ehhalt et al. 2001), Table 4.7b, industrial NMVOC; classes and shares Guevara et al. (2019), HERMESv3 Part 1, Geosci. Model Dev. 12, 1885-1907, doi:10.5194/gmd-12-1885-2019, Table 2"
+  },
+  "e_hc3": {
+   "units": "mol km-2 hr-1",
+   "terms": [
+    {
+     "field": "nmvoc",
+     "weight": 14987966550.0
+    }
+   ],
+   "clamp_at_zero": false,
+   "provenance": "4.1633 mol per kg NMVOC = sum of voc01 Alcohols 3.2% x 0.95 / 53.082 g mol-1 (CnH2n+2O, n=2.5); voc03 Propane 5.5% x 1.0 / 44.097 g mol-1 (C3H8, n=3.0); voc04 Butanes 10.9% x 1.0 / 58.124 g mol-1 (C4H10, n=4.0); voc09 Ethyne 2.2% x 0.4 / 26.038 g mol-1 (C2H2, n=2.0); voc18 Esters 1.4% x 0.69 / 104.938 g mol-1 (CnH2nO2, n=5.2); voc20 Chlorinated HC's 0.5% x 1.0 / 131.380 g mol-1 (C2HCl3 (trichloroethene, WOOF's representative), n=2.6). Profile IPCC TAR WG1 Ch. 4 (Prather, Ehhalt et al. 2001), Table 4.7b, industrial NMVOC; classes and shares Guevara et al. (2019), HERMESv3 Part 1, Geosci. Model Dev. 12, 1885-1907, doi:10.5194/gmd-12-1885-2019, Table 2"
+  },
+  "e_hc5": {
+   "units": "mol km-2 hr-1",
+   "terms": [
+    {
+     "field": "nmvoc",
+     "weight": 7575242227.0
+    }
+   ],
+   "clamp_at_zero": false,
+   "provenance": "2.1042 mol per kg NMVOC = sum of voc01 Alcohols 3.2% x 0.05 / 53.082 g mol-1 (CnH2n+2O, n=2.5); voc05 Pentanes 9.4% x 1.0 / 72.151 g mol-1 (C5H12, n=5.0); voc06 Higher alkanes 18.2% x 0.43 / 107.218 g mol-1 (CnH2n+2, n=7.5); voc18 Esters 1.4% x 0.31 / 104.938 g mol-1 (CnH2nO2, n=5.2). Profile IPCC TAR WG1 Ch. 4 (Prather, Ehhalt et al. 2001), Table 4.7b, industrial NMVOC; classes and shares Guevara et al. (2019), HERMESv3 Part 1, Geosci. Model Dev. 12, 1885-1907, doi:10.5194/gmd-12-1885-2019, Table 2"
+  },
+  "e_hc8": {
+   "units": "mol km-2 hr-1",
+   "terms": [
+    {
+     "field": "nmvoc",
+     "weight": 4212280563.0
+    }
+   ],
+   "clamp_at_zero": false,
+   "provenance": "1.1701 mol per kg NMVOC = sum of voc06 Higher alkanes 18.2% x 0.57 / 107.218 g mol-1 (CnH2n+2, n=7.5); voc19 Ethers 1.7% x 1.0 / 83.942 g mol-1 (CnH2n+2O, n=4.7). Profile IPCC TAR WG1 Ch. 4 (Prather, Ehhalt et al. 2001), Table 4.7b, industrial NMVOC; classes and shares Guevara et al. (2019), HERMESv3 Part 1, Geosci. Model Dev. 12, 1885-1907, doi:10.5194/gmd-12-1885-2019, Table 2"
+  },
+  "e_eth": {
+   "units": "mol km-2 hr-1",
+   "terms": [
+    {
+     "field": "nmvoc",
+     "weight": 5626870635.0
+    }
+   ],
+   "clamp_at_zero": false,
+   "provenance": "1.5630 mol per kg NMVOC = sum of voc02 Ethane 4.7% x 1.0 / 30.070 g mol-1 (C2H6, n=2.0). Profile IPCC TAR WG1 Ch. 4 (Prather, Ehhalt et al. 2001), Table 4.7b, industrial NMVOC; classes and shares Guevara et al. (2019), HERMESv3 Part 1, Geosci. Model Dev. 12, 1885-1907, doi:10.5194/gmd-12-1885-2019, Table 2"
+  },
+  "e_olt": {
+   "units": "mol km-2 hr-1",
+   "terms": [
+    {
+     "field": "nmvoc",
+     "weight": 2053183147.0
+    }
+   ],
+   "clamp_at_zero": false,
+   "provenance": "0.5703 mol per kg NMVOC = sum of voc08 Propene 2.4% x 1.0 / 42.081 g mol-1 (C3H6, n=3.0). Profile IPCC TAR WG1 Ch. 4 (Prather, Ehhalt et al. 2001), Table 4.7b, industrial NMVOC; classes and shares Guevara et al. (2019), HERMESv3 Part 1, Geosci. Model Dev. 12, 1885-1907, doi:10.5194/gmd-12-1885-2019, Table 2"
+  },
+  "e_oli": {
+   "units": "mol km-2 hr-1",
+   "terms": [
+    {
+     "field": "nmvoc",
+     "weight": 2031795822.0
+    }
+   ],
+   "clamp_at_zero": false,
+   "provenance": "0.5644 mol per kg NMVOC = sum of voc12 Other alkenes, alkynes, dienes 3.8% x 1.0 / 67.330 g mol-1 (CnH2n, n=4.8). Profile IPCC TAR WG1 Ch. 4 (Prather, Ehhalt et al. 2001), Table 4.7b, industrial NMVOC; classes and shares Guevara et al. (2019), HERMESv3 Part 1, Geosci. Model Dev. 12, 1885-1907, doi:10.5194/gmd-12-1885-2019, Table 2"
+  },
+  "e_tol": {
+   "units": "mol km-2 hr-1",
+   "terms": [
+    {
+     "field": "nmvoc",
+     "weight": 2319557429.0
+    }
+   ],
+   "clamp_at_zero": false,
+   "provenance": "0.6443 mol per kg NMVOC = sum of voc13 Benzene 3.0% x 0.293 / 78.114 g mol-1 (C6H6, n=6.0); voc14 Toluene 4.9% x 1.0 / 92.141 g mol-1 (C7H8, n=7.0). Profile IPCC TAR WG1 Ch. 4 (Prather, Ehhalt et al. 2001), Table 4.7b, industrial NMVOC; classes and shares Guevara et al. (2019), HERMESv3 Part 1, Geosci. Model Dev. 12, 1885-1907, doi:10.5194/gmd-12-1885-2019, Table 2"
+  },
+  "e_xyl": {
+   "units": "mol km-2 hr-1",
+   "terms": [
+    {
+     "field": "nmvoc",
+     "weight": 2298097690.0
+    }
+   ],
+   "clamp_at_zero": false,
+   "provenance": "0.6384 mol per kg NMVOC = sum of voc15 Xylene 3.6% x 1.0 / 106.168 g mol-1 (C8H10, n=8.0); voc16 Trimethylbenzene 0.7% x 1.0 / 120.195 g mol-1 (C9H12, n=9.0); voc17 Other aromatics 3.1% x 1.0 / 128.611 g mol-1 (CnH2n-6, n=9.6). Profile IPCC TAR WG1 Ch. 4 (Prather, Ehhalt et al. 2001), Table 4.7b, industrial NMVOC; classes and shares Guevara et al. (2019), HERMESv3 Part 1, Geosci. Model Dev. 12, 1885-1907, doi:10.5194/gmd-12-1885-2019, Table 2"
+  },
+  "e_ket": {
+   "units": "mol km-2 hr-1",
+   "terms": [
+    {
+     "field": "nmvoc",
+     "weight": 849444632.1
+    }
+   ],
+   "clamp_at_zero": false,
+   "provenance": "0.2360 mol per kg NMVOC = sum of voc23 Ketones 1.9% x 1.0 / 80.523 g mol-1 (CnH2nO, n=4.6). Profile IPCC TAR WG1 Ch. 4 (Prather, Ehhalt et al. 2001), Table 4.7b, industrial NMVOC; classes and shares Guevara et al. (2019), HERMESv3 Part 1, Geosci. Model Dev. 12, 1885-1907, doi:10.5194/gmd-12-1885-2019, Table 2"
+  },
+  "e_ol2": {
+   "units": "mol km-2 hr-1",
+   "terms": [
+    {
+     "field": "nmvoc",
+     "weight": 6672845227.0
+    }
+   ],
+   "clamp_at_zero": false,
+   "provenance": "1.8536 mol per kg NMVOC = sum of voc07 Ethene 5.2% x 1.0 / 28.054 g mol-1 (C2H4, n=2.0). Profile IPCC TAR WG1 Ch. 4 (Prather, Ehhalt et al. 2001), Table 4.7b, industrial NMVOC; classes and shares Guevara et al. (2019), HERMESv3 Part 1, Geosci. Model Dev. 12, 1885-1907, doi:10.5194/gmd-12-1885-2019, Table 2"
+  },
+  "e_hono": {
+   "units": "mol km-2 hr-1",
+   "terms": [],
+   "clamp_at_zero": false,
+   "provenance": "not emitted: EDGAR v8.1 AP carries no HCl or HONO and the RADM2 profile of Guevara et al. (2019), HERMESv3 Part 1, Geosci. Model Dev. 12, 1885-1907, doi:10.5194/gmd-12-1885-2019, Table 2 assigns none"
+  },
+  "e_pm25i": {
+   "units": "ug m-2 s-1",
+   "terms": [
+    {
+     "field": "pm25",
+     "weight": 200000000.0
+    },
+    {
+     "field": "bc",
+     "weight": -200000000.0
+    },
+    {
+     "field": "oc",
+     "weight": -260000000.0
+    }
+   ],
+   "clamp_at_zero": true,
+   "provenance": "0.2 x max(pm25 - bc - 1.3 oc, 0): unspeciated primary PM2.5 (its BC and organic matter removed, OM:OC 1.3, Simpson et al. 2012 Sect. 6.3, which also caps EC+OM below PM); Aitken:accumulation 0.2:0.8, Tuccella et al. (2012) via Guevara et al. (2019), HERMESv3 Part 1, Geosci. Model Dev. 12, 1885-1907, doi:10.5194/gmd-12-1885-2019, Table 2"
+  },
+  "e_pm25j": {
+   "units": "ug m-2 s-1",
+   "terms": [
+    {
+     "field": "pm25",
+     "weight": 800000000.0
+    },
+    {
+     "field": "bc",
+     "weight": -800000000.0
+    },
+    {
+     "field": "oc",
+     "weight": -1040000000.0
+    }
+   ],
+   "clamp_at_zero": true,
+   "provenance": "0.8 x max(pm25 - bc - 1.3 oc, 0): unspeciated primary PM2.5 (its BC and organic matter removed, OM:OC 1.3, Simpson et al. 2012 Sect. 6.3, which also caps EC+OM below PM); Aitken:accumulation 0.2:0.8, Tuccella et al. (2012) via Guevara et al. (2019), HERMESv3 Part 1, Geosci. Model Dev. 12, 1885-1907, doi:10.5194/gmd-12-1885-2019, Table 2"
+  },
+  "e_pm_10": {
+   "units": "ug m-2 s-1",
+   "terms": [
+    {
+     "field": "pm10",
+     "weight": 1000000000.0
+    },
+    {
+     "field": "pm25",
+     "weight": -1000000000.0
+    }
+   ],
+   "clamp_at_zero": true,
+   "provenance": "max(pm10 - pm25, 0): the coarse primary PM"
+  },
+  "e_eci": {
+   "units": "ug m-2 s-1",
+   "terms": [
+    {
+     "field": "bc",
+     "weight": 200000000.0
+    }
+   ],
+   "clamp_at_zero": false,
+   "provenance": "0.2 of BC mass, Tuccella et al. (2012) via Guevara et al. (2019), HERMESv3 Part 1, Geosci. Model Dev. 12, 1885-1907, doi:10.5194/gmd-12-1885-2019, Table 2"
+  },
+  "e_ecj": {
+   "units": "ug m-2 s-1",
+   "terms": [
+    {
+     "field": "bc",
+     "weight": 800000000.0
+    }
+   ],
+   "clamp_at_zero": false,
+   "provenance": "0.8 of BC mass, Tuccella et al. (2012) via Guevara et al. (2019), HERMESv3 Part 1, Geosci. Model Dev. 12, 1885-1907, doi:10.5194/gmd-12-1885-2019, Table 2"
+  },
+  "e_orgi": {
+   "units": "ug m-2 s-1",
+   "terms": [
+    {
+     "field": "oc",
+     "weight": 260000000.0
+    }
+   ],
+   "clamp_at_zero": false,
+   "provenance": "0.2 x 1.3 x OC: SORGAM's orgpa rows are organic mass, EDGAR's OC is carbon (OM:OC 1.3, Simpson et al. 2012, ACP 12, 7825-7865, Sect. 6.3); split Guevara et al. (2019), HERMESv3 Part 1, Geosci. Model Dev. 12, 1885-1907, doi:10.5194/gmd-12-1885-2019, Table 2"
+  },
+  "e_orgj": {
+   "units": "ug m-2 s-1",
+   "terms": [
+    {
+     "field": "oc",
+     "weight": 1040000000.0
+    }
+   ],
+   "clamp_at_zero": false,
+   "provenance": "0.8 x 1.3 x OC: SORGAM's orgpa rows are organic mass, EDGAR's OC is carbon (OM:OC 1.3, Simpson et al. 2012, ACP 12, 7825-7865, Sect. 6.3); split Guevara et al. (2019), HERMESv3 Part 1, Geosci. Model Dev. 12, 1885-1907, doi:10.5194/gmd-12-1885-2019, Table 2"
+  },
+  "e_so4i": {
+   "units": "ug m-2 s-1",
+   "terms": [],
+   "clamp_at_zero": false,
+   "provenance": "not emitted: EDGAR v8.1 AP has no primary sulfate field; whatever primary sulfate it counts stays inside PM2.5 (e_pm25i/j). Guevara et al. (2019), HERMESv3 Part 1, Geosci. Model Dev. 12, 1885-1907, doi:10.5194/gmd-12-1885-2019, Table 2 likewise sets SO4I/SO4J to 0"
+  },
+  "e_so4j": {
+   "units": "ug m-2 s-1",
+   "terms": [],
+   "clamp_at_zero": false,
+   "provenance": "not emitted: EDGAR v8.1 AP has no primary sulfate field; whatever primary sulfate it counts stays inside PM2.5 (e_pm25i/j). Guevara et al. (2019), HERMESv3 Part 1, Geosci. Model Dev. 12, 1885-1907, doi:10.5194/gmd-12-1885-2019, Table 2 likewise sets SO4I/SO4J to 0"
+  },
+  "e_no3i": {
+   "units": "ug m-2 s-1",
+   "terms": [],
+   "clamp_at_zero": false,
+   "provenance": "not emitted: no primary nitrate field in EDGAR v8.1 AP; Guevara et al. (2019), HERMESv3 Part 1, Geosci. Model Dev. 12, 1885-1907, doi:10.5194/gmd-12-1885-2019, Table 2 sets NO3I/NO3J to 0"
+  },
+  "e_no3j": {
+   "units": "ug m-2 s-1",
+   "terms": [],
+   "clamp_at_zero": false,
+   "provenance": "not emitted: no primary nitrate field in EDGAR v8.1 AP; Guevara et al. (2019), HERMESv3 Part 1, Geosci. Model Dev. 12, 1885-1907, doi:10.5194/gmd-12-1885-2019, Table 2 sets NO3I/NO3J to 0"
+  },
+  "e_naaj": {
+   "units": "ug m-2 s-1",
+   "terms": [],
+   "clamp_at_zero": false,
+   "provenance": "not emitted: anthropogenic primary sodium has no EDGAR v8.1 AP field (sea salt is a separate process)"
+  },
+  "e_naai": {
+   "units": "ug m-2 s-1",
+   "terms": [],
+   "clamp_at_zero": false,
+   "provenance": "not emitted: anthropogenic primary sodium has no EDGAR v8.1 AP field (sea salt is a separate process)"
+  }
+ },
+ "provenance": "Generated by tools/chem_speciation/make_radm2_speciation.py. NMVOC: IPCC TAR WG1 Ch. 4 (Prather, Ehhalt et al. 2001), Table 4.7b, industrial NMVOC mapped to RADM2 (Stockwell et al. 1990) with Guevara et al. (2019), HERMESv3 Part 1, Geosci. Model Dev. 12, 1885-1907, doi:10.5194/gmd-12-1885-2019, Table 2; NOx split Crippa et al. 2018; i/j split Tuccella et al. 2012; OM:OC Simpson et al. 2012. Gas weights fold 1e6 m2 km-2 x 3600 s hr-1 x 1000 g kg-1 / M; aerosol weights fold 1e9 ug kg-1."
+}

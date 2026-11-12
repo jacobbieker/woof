@@ -173,9 +173,11 @@ woof render --products smoke_near_surface,pm25_near_surface,aod_550 OUT/wrfout_d
 - With a cumulus scheme on (grids coarser than about 4 km), set
   `chem_conv_tr = 0`: convective transport of the species is not
   transcribed, and leaving it at WRF's default 1 is refused.
-- Anthropogenic emission inventories are not read: the EDGAR rows exist,
-  but enabling `edgar-v81` is refused because no download or remap brings
-  its files onto the grid yet.
+- The GOCART sets read no anthropogenic inventory: the EDGAR rows exist,
+  but enabling `edgar-v81` for them is refused because their emission
+  process has no frame provider for it yet.  The inventory provider
+  (`woof.chem_inventory_frames`) serves EDGAR v8.1, or the download-free
+  `synthetic-anthro`, only to the RADM2 emission rows (`emission.radm2`).
 - MYNN's own chem mixing (`mynn_chem_vertmx`) is refused; species mix
   through WRF-Chem's `vertmx` with any boundary-layer scheme.
 - Tile streaming is refused for chem runs.
