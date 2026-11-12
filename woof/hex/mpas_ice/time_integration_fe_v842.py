@@ -38,13 +38,15 @@ dict also holds ``nCellsSolve`` and ``nEdgesSolve``, and the step's own
 scalars (``deltat``, ``allowableDtACFL``, ``allowableDtDCFL``) as one-word
 device arrays. ``config`` holds the namelist options by their MPAS names.
 
-At RKIND 8 two things are refused by name: the sphere's reconstruction
-(``on_a_sphere``: glibc's binary64 cos and sin) and the strain-rate angle
-``eTheta`` (glibc's binary64 atan). Neither glibc function is correctly
-rounded (atan differs from the correctly rounded one on about 3 in 10^4
-arguments), and both are LGPL, so their words cannot be reproduced under the
-default licence. Leave ``eTheta`` out of the velocity dict at RKIND 8 to run
-the step without it; nothing else in v8.4.2 reads it.
+At RKIND 8 two things are refused by name unless the opt-in glibc 2.39
+transcription is on (``WOOF_GLIBC239_LIBM64=1``, :mod:`woof.core.glibc239_gpu`):
+the sphere's reconstruction (``on_a_sphere``: glibc's binary64 cos and sin)
+and the strain-rate angle ``eTheta`` (glibc's binary64 atan). Neither glibc
+function is correctly rounded (atan differs from the correctly rounded one on
+about 3 in 10^4 arguments), and both are LGPL, so their words cannot be
+reproduced under the default licence. Without the opt-in, leave ``eTheta``
+out of the velocity dict at RKIND 8 to run the step without it; nothing else
+in v8.4.2 reads it.
 """
 from __future__ import annotations
 
@@ -81,14 +83,14 @@ def module_source(precision: str = "r4") -> str:
     rkind.require(precision)
     body = files("woof.hex.mpas_ice").joinpath("time_integration_fe_v842.cu").read_text(encoding="utf-8")
     if precision == "r8":
-        return "#define MPAS_RKIND8 1\n" + body
+        return "#define MPAS_RKIND8 1\n" + rkind.r8_trig_prelude() + body
     import woof.core.kernels as kernels
     root = Path(kernels.__file__).parent
     return "\n".join((root / name).read_text(encoding="utf-8") for name in MATH_HEADERS_R4) + "\n" + body
 
 
 @lru_cache(maxsize=None)
-def _module_on(device: int, precision: str, options: tuple[str, ...]):
+def _module_on(device: int, precision: str, options: tuple[str, ...], trig64: bool = False):
     import cupy as cp
     from woof.nvrtc_ptx_cache import compile_using_nvrtc
 
@@ -102,8 +104,8 @@ def _module_on(device: int, precision: str, options: tuple[str, ...]):
 
 def _function(precision: str, name: str):
     import cupy as cp
-    return _module_on(cp.cuda.Device().id, precision,
-                      _hex_numerics.options(COMPILE_OPTIONS, keep_ftz=True)).get_function(name)
+    return _module_on(cp.cuda.Device().id, precision, _hex_numerics.options(COMPILE_OPTIONS, keep_ftz=True),
+                      precision == "r8" and rkind.trig64()).get_function(name)
 
 
 def _grid(n: int) -> tuple[int]:
@@ -127,15 +129,11 @@ def _check_config(config: dict, precision: str, velocity: dict) -> None:
         subglacial_hydro_v842.check_config(config, precision)
     if not config.get("config_restore_calving_front", False):
         calving_v842.check_config(config)
-    if precision == "r8" and config.get("on_a_sphere", False):
-        _refuse("on_a_sphere", True,
-                "at RKIND 8 the velocity reconstruction calls glibc's binary64 cos and sin, which are LGPL and "
-                "not correctly rounded, so their words cannot be reproduced under the default licence",
+    if precision == "r8" and config.get("on_a_sphere", False) and not rkind.trig64():
+        _refuse("on_a_sphere", True, rkind.trig_refusal("the velocity reconstruction calls glibc's binary64 cos and sin"),
                 "on_a_sphere = .false. at RKIND 8")
-    if precision == "r8" and "eTheta" in velocity:
-        _refuse("eTheta", "computed",
-                "at RKIND 8 the strain-rate angle calls glibc's binary64 atan, which is LGPL and not correctly "
-                "rounded, so its words cannot be reproduced under the default licence",
+    if precision == "r8" and "eTheta" in velocity and not rkind.trig64():
+        _refuse("eTheta", "computed", rkind.trig_refusal("the strain-rate angle calls glibc's binary64 atan"),
                 "leave eTheta out of the velocity pool at RKIND 8")
 
 

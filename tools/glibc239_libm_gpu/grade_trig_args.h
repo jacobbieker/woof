@@ -2,6 +2,10 @@
 // (grade_trig.cpp) and device (grade_trig.py) legs: argument i of function
 // f (0 sin, 1 cos, 2 atan) is a pure function of (f, i).
 #pragma once
+#if defined(__CUDACC_RTC__)
+typedef unsigned long long uint64_t;
+typedef long long int64_t;
+#endif
 __device__ __forceinline__ uint64_t trig_mix(uint64_t z) {
     z += 0x9e3779b97f4a7c15ULL;
     z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;

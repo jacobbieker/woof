@@ -23,7 +23,10 @@
 // and atanf (glibc_trig_flt32.cuh); at RKIND 8 the driver refuses the sphere's
 // reconstruction (glibc's cos and sin) and the strain-rate angle (glibc's
 // atan): neither binary64 function is correctly rounded or permissively
-// licensed, so their words cannot be reproduced here.
+// licensed, so their words cannot be reproduced here. Under the opt-in
+// (WOOF_GLIBC239_LIBM64=1, a source checkout only) the r8 unit is prepended
+// with the LGPL transcription of glibc's (WOOF_GLIBC239_TRIG64,
+// tools/glibc239_libm_gpu/glibc239_trig_flt64.cuh) and nothing is refused.
 //
 // Layout: a Fortran array a(nVertLevels, nCells) is a[iCell*nVertLevels + k];
 // coeffs_reconstruct(3, maxEdges, nCells) is c[(iCell*maxEdges + i)*3 + d].
@@ -38,9 +41,15 @@ typedef double rk;
 #define LI_SQRT(x) __dsqrt_rn(x)
 #define LI_ABS(x) fabs(x)
 #define LI_SIGN1(x) copysign(1.0, (x))
+#ifdef WOOF_GLIBC239_TRIG64
+#define LI_COS(x) g239::g239_cos(x)
+#define LI_SIN(x) g239::g239_sin(x)
+#define LI_ATAN(x) g239::g239_atan(x)
+#else
 #define LI_COS(x) (x)
 #define LI_SIN(x) (x)
 #define LI_ATAN(x) (x)
+#endif
 #define LI_C(x) x
 #else
 typedef float rk;
