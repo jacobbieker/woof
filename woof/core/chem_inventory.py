@@ -46,6 +46,7 @@ WRF_KEMIT_DEFAULT = 9
 
 #: Emission verticals this process owns; ``plumerise`` is the fire process's.
 VERTICALS = ("surface", "kemit")
+from woof.core.chem_radm2_emiss import EMISSIONS as RADM2_EMISSIONS  # noqa: E402
 
 
 def rows(table):
@@ -78,6 +79,10 @@ def pack_terms(row_objs) -> list[InventoryTerm]:
                else lambda key, default=None, _r=row: getattr(_r, key, default))
         for entry in get("emissions") or ():
             if entry["vertical"] not in VERTICALS:
+                continue
+            if entry["field"] in RADM2_EMISSIONS:
+                # A WRF emis_ant name (e_so2, ...): emission.radm2's entry
+                # on a row the RADM2 sets share, never this process's.
                 continue
             terms.append(InventoryTerm(
                 row=get("name"), source=entry["source"], field=entry["field"],

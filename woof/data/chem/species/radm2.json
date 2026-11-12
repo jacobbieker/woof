@@ -1,0 +1,3346 @@
+{
+  "schema": "gpuwm.chem.species.v1",
+  "owner": "aq-radm2",
+  "description": "WRF-Chem's RADM2 gas phase (chem_opt 1) and its MADE/SORGAM modal aerosol (chem_opt 2), WRF v4.7.1 Registry packages radm2 and radm2sorg (registry.chem:3929-3930), one row per species. o3, no2, co (cams_aq.json), so2 and sulf (gocart.json) are shared rows that join both sets (tools/chem_radm2/make_radm2_rows.py).",
+  "rows": [
+    {
+      "name": "no",
+      "output_name": "no",
+      "long_name": "NO mixing ratio",
+      "units": "ppmv",
+      "phase": "gas",
+      "family": "nox",
+      "sets": [
+        "radm2",
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": 30.006,
+      "processes": [
+        "emission.radm2",
+        "drydep.wesely",
+        "mixing.vertmx",
+        "chem.radm2"
+      ],
+      "emissions": [
+        {
+          "source": "edgar-v81",
+          "field": "e_no",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_no (WRF emis_ant units) from EDGAR v8.1 AP 2022 annual totals through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        },
+        {
+          "source": "synthetic-anthro",
+          "field": "e_no",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_no (WRF emis_ant units) from WOOF's synthetic urban-plume fallback through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        }
+      ],
+      "boundary": [],
+      "drydep": {
+        "scheme": "wesely",
+        "wesely": {
+          "hstar": 0.0019,
+          "dhr": 1480.0,
+          "f0": 0.0,
+          "dratio": 1.3621278,
+          "scpr23": 1.1120069,
+          "arm": "general",
+          "from": "hstar chem/module_dep_simple.F:2185; dhr chem/module_dep_simple.F:2461; f0 chem/module_dep_simple.F:2669; dvj chem/module_dep_simple.F:2887; dratio chem/module_dep_simple.F:3482-3484; arm chem/module_dep_simple.F:965-1038; scpr23 chem/module_dep_simple.F:3482-3488 (woof/data/chem/wesely/gas_parameters.v1.json, the RADM2 Wesely oracle)"
+        }
+      },
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); molar mass 30.006 g/mol (NO), read only by the mass ledger; wetdep_ls_alpha 0: WRF's RADM2 packages run no wet removal with wetscav_onoff = 0"
+    },
+    {
+      "name": "hno3",
+      "output_name": "hno3",
+      "long_name": "HNO3 mixing ratio",
+      "units": "ppmv",
+      "phase": "gas",
+      "family": "noy",
+      "sets": [
+        "radm2",
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": 63.012,
+      "processes": [
+        "emission.radm2",
+        "drydep.wesely",
+        "mixing.vertmx",
+        "chem.radm2",
+        "aerosol.sorgam"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": {
+        "scheme": "wesely",
+        "wesely": {
+          "hstar": 26900000000000.0,
+          "dhr": 8684.0,
+          "f0": 0.0,
+          "dratio": 1.9783283,
+          "scpr23": 1.4261369,
+          "arm": "general",
+          "from": "hstar chem/module_dep_simple.F:2209; dhr chem/module_dep_simple.F:2486; f0 chem/module_dep_simple.F:2698; dvj chem/module_dep_simple.F:2913; dratio chem/module_dep_simple.F:3482-3484; arm chem/module_dep_simple.F:965-1038; scpr23 chem/module_dep_simple.F:3482-3488 (woof/data/chem/wesely/gas_parameters.v1.json, the RADM2 Wesely oracle)"
+        }
+      },
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": {
+        "aerosol.sorgam": [
+          "radm2sorg"
+        ]
+      },
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); molar mass 63.012 g/mol (HNO3), read only by the mass ledger; wetdep_ls_alpha 0: WRF's RADM2 packages run no wet removal with wetscav_onoff = 0"
+    },
+    {
+      "name": "h2o2",
+      "output_name": "h2o2",
+      "long_name": "H2O2 mixing ratio",
+      "units": "ppmv",
+      "phase": "gas",
+      "family": "oxidant",
+      "sets": [
+        "radm2",
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": 34.014,
+      "processes": [
+        "emission.radm2",
+        "drydep.wesely",
+        "mixing.vertmx",
+        "chem.radm2"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": {
+        "scheme": "wesely",
+        "wesely": {
+          "hstar": 74500.0,
+          "dhr": 6615.0,
+          "f0": 1.0,
+          "dratio": 1.4577157,
+          "scpr23": 1.1634403,
+          "arm": "general",
+          "from": "hstar chem/module_dep_simple.F:2178; dhr chem/module_dep_simple.F:2454; f0 chem/module_dep_simple.F:2677; dvj chem/module_dep_simple.F:2881; dratio chem/module_dep_simple.F:3482-3484; arm chem/module_dep_simple.F:965-1038; scpr23 chem/module_dep_simple.F:3482-3488 (woof/data/chem/wesely/gas_parameters.v1.json, the RADM2 Wesely oracle)"
+        }
+      },
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); molar mass 34.014 g/mol (H2O2), read only by the mass ledger; wetdep_ls_alpha 0: WRF's RADM2 packages run no wet removal with wetscav_onoff = 0"
+    },
+    {
+      "name": "ald",
+      "output_name": "ald",
+      "long_name": "ALD mixing ratio",
+      "units": "ppmv",
+      "phase": "gas",
+      "family": "voc",
+      "sets": [
+        "radm2",
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": 44.053,
+      "processes": [
+        "emission.radm2",
+        "drydep.wesely",
+        "mixing.vertmx",
+        "chem.radm2"
+      ],
+      "emissions": [
+        {
+          "source": "edgar-v81",
+          "field": "e_ald",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_ald (WRF emis_ant units) from EDGAR v8.1 AP 2022 annual totals through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        },
+        {
+          "source": "synthetic-anthro",
+          "field": "e_ald",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_ald (WRF emis_ant units) from WOOF's synthetic urban-plume fallback through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        }
+      ],
+      "boundary": [],
+      "drydep": {
+        "scheme": "wesely",
+        "wesely": {
+          "hstar": 11.4,
+          "dhr": 6266.0,
+          "f0": 0.0,
+          "dratio": 1.6507907,
+          "scpr23": 1.2640288,
+          "arm": "general",
+          "from": "hstar chem/module_dep_simple.F:2191; dhr chem/module_dep_simple.F:2468; f0 chem/module_dep_simple.F:2679; dvj chem/module_dep_simple.F:2895; dratio chem/module_dep_simple.F:3482-3484; arm chem/module_dep_simple.F:965-1038; scpr23 chem/module_dep_simple.F:3482-3488 (woof/data/chem/wesely/gas_parameters.v1.json, the RADM2 Wesely oracle)"
+        }
+      },
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); molar mass 44.053 g/mol (CH3CHO, the ALD surrogate), read only by the mass ledger; wetdep_ls_alpha 0: WRF's RADM2 packages run no wet removal with wetscav_onoff = 0"
+    },
+    {
+      "name": "hcho",
+      "output_name": "hcho",
+      "long_name": "HCHO mixing ratio",
+      "units": "ppmv",
+      "phase": "gas",
+      "family": "voc",
+      "sets": [
+        "radm2",
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": 30.026,
+      "processes": [
+        "emission.radm2",
+        "drydep.wesely",
+        "mixing.vertmx",
+        "chem.radm2"
+      ],
+      "emissions": [
+        {
+          "source": "edgar-v81",
+          "field": "e_hcho",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_hcho (WRF emis_ant units) from EDGAR v8.1 AP 2022 annual totals through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        },
+        {
+          "source": "synthetic-anthro",
+          "field": "e_hcho",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_hcho (WRF emis_ant units) from WOOF's synthetic urban-plume fallback through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        }
+      ],
+      "boundary": [],
+      "drydep": {
+        "scheme": "wesely",
+        "wesely": {
+          "hstar": 2970.0,
+          "dhr": 7190.0,
+          "f0": 0.0,
+          "dratio": 1.3621278,
+          "scpr23": 1.1120069,
+          "arm": "general",
+          "from": "hstar chem/module_dep_simple.F:2179; dhr chem/module_dep_simple.F:2455; f0 chem/module_dep_simple.F:2665; dvj chem/module_dep_simple.F:2882; dratio chem/module_dep_simple.F:3482-3484; arm chem/module_dep_simple.F:965-1038; scpr23 chem/module_dep_simple.F:3482-3488 (woof/data/chem/wesely/gas_parameters.v1.json, the RADM2 Wesely oracle)"
+        }
+      },
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); molar mass 30.026 g/mol (HCHO), read only by the mass ledger; wetdep_ls_alpha 0: WRF's RADM2 packages run no wet removal with wetscav_onoff = 0"
+    },
+    {
+      "name": "op1",
+      "output_name": "op1",
+      "long_name": "OP1 mixing ratio",
+      "units": "ppmv",
+      "phase": "gas",
+      "family": "oxidant",
+      "sets": [
+        "radm2",
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": 48.041,
+      "processes": [
+        "emission.radm2",
+        "drydep.wesely",
+        "mixing.vertmx",
+        "chem.radm2"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": {
+        "scheme": "wesely",
+        "wesely": {
+          "hstar": 221.0,
+          "dhr": 5607.0,
+          "f0": 0.1,
+          "dratio": 1.7310375,
+          "scpr23": 1.3046677,
+          "arm": "general",
+          "from": "hstar chem/module_dep_simple.F:2192; dhr chem/module_dep_simple.F:2469; f0 chem/module_dep_simple.F:2680; dvj chem/module_dep_simple.F:2896; dratio chem/module_dep_simple.F:3482-3484; arm chem/module_dep_simple.F:965-1038; scpr23 chem/module_dep_simple.F:3482-3488 (woof/data/chem/wesely/gas_parameters.v1.json, the RADM2 Wesely oracle)"
+        }
+      },
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); molar mass 48.041 g/mol (CH3OOH), read only by the mass ledger; wetdep_ls_alpha 0: WRF's RADM2 packages run no wet removal with wetscav_onoff = 0"
+    },
+    {
+      "name": "op2",
+      "output_name": "op2",
+      "long_name": "OP2 mixing ratio",
+      "units": "ppmv",
+      "phase": "gas",
+      "family": "oxidant",
+      "sets": [
+        "radm2",
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": 62.068,
+      "processes": [
+        "emission.radm2",
+        "drydep.wesely",
+        "mixing.vertmx",
+        "chem.radm2"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": {
+        "scheme": "wesely",
+        "wesely": {
+          "hstar": 1680000.0,
+          "dhr": 10240.0,
+          "f0": 0.1,
+          "dratio": 1.9627509,
+          "scpr23": 1.4186406,
+          "arm": "general",
+          "from": "hstar chem/module_dep_simple.F:2193; dhr chem/module_dep_simple.F:2470; f0 chem/module_dep_simple.F:2681; dvj chem/module_dep_simple.F:2897; dratio chem/module_dep_simple.F:3482-3484; arm chem/module_dep_simple.F:965-1038; scpr23 chem/module_dep_simple.F:3482-3488 (woof/data/chem/wesely/gas_parameters.v1.json, the RADM2 Wesely oracle)"
+        }
+      },
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); molar mass 62.068 g/mol (C2H5OOH, the OP2 surrogate), read only by the mass ledger; wetdep_ls_alpha 0: WRF's RADM2 packages run no wet removal with wetscav_onoff = 0"
+    },
+    {
+      "name": "paa",
+      "output_name": "paa",
+      "long_name": "PAA mixing ratio",
+      "units": "ppmv",
+      "phase": "gas",
+      "family": "oxidant",
+      "sets": [
+        "radm2",
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": 76.051,
+      "processes": [
+        "emission.radm2",
+        "drydep.wesely",
+        "mixing.vertmx",
+        "chem.radm2"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": {
+        "scheme": "wesely",
+        "wesely": {
+          "hstar": 473.0,
+          "dhr": 6170.0,
+          "f0": 0.1,
+          "dratio": 2.1675599,
+          "scpr23": 1.5156875,
+          "arm": "general",
+          "from": "hstar chem/module_dep_simple.F:2181; dhr chem/module_dep_simple.F:2458; f0 chem/module_dep_simple.F:2682; dvj chem/module_dep_simple.F:2883; dratio chem/module_dep_simple.F:3482-3484; arm chem/module_dep_simple.F:965-1038; scpr23 chem/module_dep_simple.F:3482-3488 (woof/data/chem/wesely/gas_parameters.v1.json, the RADM2 Wesely oracle)"
+        }
+      },
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); molar mass 76.051 g/mol (CH3C(O)OOH), read only by the mass ledger; wetdep_ls_alpha 0: WRF's RADM2 packages run no wet removal with wetscav_onoff = 0"
+    },
+    {
+      "name": "ora1",
+      "output_name": "ora1",
+      "long_name": "ORA1 mixing ratio",
+      "units": "ppmv",
+      "phase": "gas",
+      "family": "voc",
+      "sets": [
+        "radm2",
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": 46.025,
+      "processes": [
+        "emission.radm2",
+        "drydep.wesely",
+        "mixing.vertmx",
+        "chem.radm2"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": {
+        "scheme": "wesely",
+        "wesely": {
+          "hstar": 9850000.0,
+          "dhr": 5716.0,
+          "f0": 0.0,
+          "dratio": 1.6292117,
+          "scpr23": 1.252989,
+          "arm": "general",
+          "from": "hstar chem/module_dep_simple.F:2210; dhr chem/module_dep_simple.F:2487; f0 chem/module_dep_simple.F:2699; dvj chem/module_dep_simple.F:2914; dratio chem/module_dep_simple.F:3482-3484; arm chem/module_dep_simple.F:965-1038; scpr23 chem/module_dep_simple.F:3482-3488 (woof/data/chem/wesely/gas_parameters.v1.json, the RADM2 Wesely oracle)"
+        }
+      },
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); molar mass 46.025 g/mol (HCOOH), read only by the mass ledger; wetdep_ls_alpha 0: WRF's RADM2 packages run no wet removal with wetscav_onoff = 0"
+    },
+    {
+      "name": "ora2",
+      "output_name": "ora2",
+      "long_name": "ORA2 mixing ratio",
+      "units": "ppmv",
+      "phase": "gas",
+      "family": "voc",
+      "sets": [
+        "radm2",
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": 60.052,
+      "processes": [
+        "emission.radm2",
+        "drydep.wesely",
+        "mixing.vertmx",
+        "chem.radm2"
+      ],
+      "emissions": [
+        {
+          "source": "edgar-v81",
+          "field": "e_ora2",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_ora2 (WRF emis_ant units) from EDGAR v8.1 AP 2022 annual totals through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        },
+        {
+          "source": "synthetic-anthro",
+          "field": "e_ora2",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_ora2 (WRF emis_ant units) from WOOF's synthetic urban-plume fallback through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        }
+      ],
+      "boundary": [],
+      "drydep": {
+        "scheme": "wesely",
+        "wesely": {
+          "hstar": 963000.0,
+          "dhr": 8374.0,
+          "f0": 0.0,
+          "dratio": 2.010237,
+          "scpr23": 1.4414307,
+          "arm": "general",
+          "from": "hstar chem/module_dep_simple.F:2211; dhr chem/module_dep_simple.F:2488; f0 chem/module_dep_simple.F:2700; dvj chem/module_dep_simple.F:2915; dratio chem/module_dep_simple.F:3482-3484; arm chem/module_dep_simple.F:965-1038; scpr23 chem/module_dep_simple.F:3482-3488 (woof/data/chem/wesely/gas_parameters.v1.json, the RADM2 Wesely oracle)"
+        }
+      },
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); molar mass 60.052 g/mol (CH3COOH), read only by the mass ledger; wetdep_ls_alpha 0: WRF's RADM2 packages run no wet removal with wetscav_onoff = 0"
+    },
+    {
+      "name": "nh3",
+      "output_name": "nh3",
+      "long_name": "NH3 mixing ratio",
+      "units": "ppmv",
+      "phase": "gas",
+      "family": "inorganic",
+      "sets": [
+        "radm2",
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": 17.031,
+      "processes": [
+        "emission.radm2",
+        "drydep.wesely",
+        "mixing.vertmx",
+        "chem.radm2",
+        "aerosol.sorgam"
+      ],
+      "emissions": [
+        {
+          "source": "edgar-v81",
+          "field": "e_nh3",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_nh3 (WRF emis_ant units) from EDGAR v8.1 AP 2022 annual totals through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        },
+        {
+          "source": "synthetic-anthro",
+          "field": "e_nh3",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_nh3 (WRF emis_ant units) from WOOF's synthetic urban-plume fallback through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        }
+      ],
+      "boundary": [],
+      "drydep": {
+        "scheme": "wesely",
+        "wesely": {
+          "hstar": 10400.0,
+          "dhr": 3660.0,
+          "f0": 0.0,
+          "dratio": 1.098103,
+          "scpr23": 0.9632174,
+          "arm": "ammonia",
+          "from": "hstar chem/module_dep_simple.F:2212; dhr chem/module_dep_simple.F:2489; f0 chem/module_dep_simple.F:2701; dvj chem/module_dep_simple.F:2916; dratio chem/module_dep_simple.F:3482-3484; arm chem/module_dep_simple.F:1154-1287; scpr23 chem/module_dep_simple.F:3482-3488 (woof/data/chem/wesely/gas_parameters.v1.json, the RADM2 Wesely oracle)"
+        }
+      },
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": {
+        "aerosol.sorgam": [
+          "radm2sorg"
+        ]
+      },
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); molar mass 17.031 g/mol (NH3), read only by the mass ledger; wetdep_ls_alpha 0: WRF's RADM2 packages run no wet removal with wetscav_onoff = 0"
+    },
+    {
+      "name": "n2o5",
+      "output_name": "n2o5",
+      "long_name": "N2O5 mixing ratio",
+      "units": "ppmv",
+      "phase": "gas",
+      "family": "noy",
+      "sets": [
+        "radm2",
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": 108.009,
+      "processes": [
+        "emission.radm2",
+        "drydep.wesely",
+        "mixing.vertmx",
+        "chem.radm2"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": {
+        "scheme": "wesely",
+        "wesely": {
+          "hstar": 10000000000.0,
+          "dhr": 0.0,
+          "f0": 1.0,
+          "dratio": 2.2660854,
+          "scpr23": 1.5612764,
+          "arm": "general",
+          "from": "hstar chem/module_dep_simple.F:2213; dhr chem/module_dep_simple.F:2490; f0 chem/module_dep_simple.F:2702; dvj chem/module_dep_simple.F:2917; dratio chem/module_dep_simple.F:3482-3484; arm chem/module_dep_simple.F:965-1038; scpr23 chem/module_dep_simple.F:3482-3488 (woof/data/chem/wesely/gas_parameters.v1.json, the RADM2 Wesely oracle)"
+        }
+      },
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); molar mass 108.009 g/mol (N2O5), read only by the mass ledger; wetdep_ls_alpha 0: WRF's RADM2 packages run no wet removal with wetscav_onoff = 0"
+    },
+    {
+      "name": "no3",
+      "output_name": "no3",
+      "long_name": "NO3 mixing ratio",
+      "units": "ppmv",
+      "phase": "gas",
+      "family": "noy",
+      "sets": [
+        "radm2",
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": 62.004,
+      "processes": [
+        "emission.radm2",
+        "drydep.wesely",
+        "mixing.vertmx",
+        "chem.radm2"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": {
+        "scheme": "wesely",
+        "wesely": {
+          "hstar": 15.0,
+          "dhr": 0.0,
+          "f0": 1.0,
+          "dratio": 1.9627509,
+          "scpr23": 1.4186406,
+          "arm": "general",
+          "from": "hstar chem/module_dep_simple.F:2189; dhr chem/module_dep_simple.F:2465; f0 chem/module_dep_simple.F:2675; dvj chem/module_dep_simple.F:2892; dratio chem/module_dep_simple.F:3482-3484; arm chem/module_dep_simple.F:965-1038; scpr23 chem/module_dep_simple.F:3482-3488 (woof/data/chem/wesely/gas_parameters.v1.json, the RADM2 Wesely oracle)"
+        }
+      },
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); molar mass 62.004 g/mol (NO3), read only by the mass ledger; wetdep_ls_alpha 0: WRF's RADM2 packages run no wet removal with wetscav_onoff = 0"
+    },
+    {
+      "name": "pan",
+      "output_name": "pan",
+      "long_name": "PAN mixing ratio",
+      "units": "ppmv",
+      "phase": "gas",
+      "family": "noy",
+      "sets": [
+        "radm2",
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": 121.048,
+      "processes": [
+        "emission.radm2",
+        "drydep.wesely",
+        "mixing.vertmx",
+        "chem.radm2"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": {
+        "scheme": "wesely",
+        "wesely": {
+          "hstar": 2.97,
+          "dhr": 5760.0,
+          "f0": 0.1,
+          "dratio": 2.7392242,
+          "scpr23": 1.7716612,
+          "arm": "general",
+          "from": "hstar chem/module_dep_simple.F:2180; dhr chem/module_dep_simple.F:2456; f0 chem/module_dep_simple.F:2670; dvj chem/module_dep_simple.F:2888; dratio chem/module_dep_simple.F:3482-3484; arm chem/module_dep_simple.F:965-1038; scpr23 chem/module_dep_simple.F:3482-3488 (woof/data/chem/wesely/gas_parameters.v1.json, the RADM2 Wesely oracle)"
+        }
+      },
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); molar mass 121.048 g/mol (CH3C(O)OONO2), read only by the mass ledger; wetdep_ls_alpha 0: WRF's RADM2 packages run no wet removal with wetscav_onoff = 0"
+    },
+    {
+      "name": "hc3",
+      "output_name": "hc3",
+      "long_name": "HC3 mixing ratio",
+      "units": "ppmv",
+      "phase": "gas",
+      "family": "voc",
+      "sets": [
+        "radm2",
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": 44.097,
+      "processes": [
+        "emission.radm2",
+        "drydep.wesely",
+        "mixing.vertmx",
+        "chem.radm2"
+      ],
+      "emissions": [
+        {
+          "source": "edgar-v81",
+          "field": "e_hc3",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_hc3 (WRF emis_ant units) from EDGAR v8.1 AP 2022 annual totals through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        },
+        {
+          "source": "synthetic-anthro",
+          "field": "e_hc3",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_hc3 (WRF emis_ant units) from WOOF's synthetic urban-plume fallback through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        }
+      ],
+      "boundary": [],
+      "drydep": {
+        "scheme": "wesely",
+        "wesely": {
+          "hstar": 0.00142,
+          "dhr": 0.0,
+          "f0": 0.0,
+          "dratio": 1.6507907,
+          "scpr23": 1.2640288,
+          "arm": "general",
+          "from": "hstar chem/module_dep_simple.F:2200; dhr chem/module_dep_simple.F:2477; f0 chem/module_dep_simple.F:2689; dvj chem/module_dep_simple.F:2904; dratio chem/module_dep_simple.F:3482-3484; arm chem/module_dep_simple.F:965-1038; scpr23 chem/module_dep_simple.F:3482-3488 (woof/data/chem/wesely/gas_parameters.v1.json, the RADM2 Wesely oracle)"
+        }
+      },
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); molar mass 44.097 g/mol (propane, the HC3 surrogate), read only by the mass ledger; wetdep_ls_alpha 0: WRF's RADM2 packages run no wet removal with wetscav_onoff = 0"
+    },
+    {
+      "name": "hc5",
+      "output_name": "hc5",
+      "long_name": "HC5 mixing ratio",
+      "units": "ppmv",
+      "phase": "gas",
+      "family": "voc",
+      "sets": [
+        "radm2",
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": 72.151,
+      "processes": [
+        "emission.radm2",
+        "drydep.wesely",
+        "mixing.vertmx",
+        "chem.radm2"
+      ],
+      "emissions": [
+        {
+          "source": "edgar-v81",
+          "field": "e_hc5",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_hc5 (WRF emis_ant units) from EDGAR v8.1 AP 2022 annual totals through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        },
+        {
+          "source": "synthetic-anthro",
+          "field": "e_hc5",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_hc5 (WRF emis_ant units) from WOOF's synthetic urban-plume fallback through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        }
+      ],
+      "boundary": [],
+      "drydep": {
+        "scheme": "wesely",
+        "wesely": {
+          "hstar": 0.00113,
+          "dhr": 0.0,
+          "f0": 0.0,
+          "dratio": 2.1124525,
+          "scpr23": 1.4898877,
+          "arm": "general",
+          "from": "hstar chem/module_dep_simple.F:2201; dhr chem/module_dep_simple.F:2478; f0 chem/module_dep_simple.F:2690; dvj chem/module_dep_simple.F:2905; dratio chem/module_dep_simple.F:3482-3484; arm chem/module_dep_simple.F:965-1038; scpr23 chem/module_dep_simple.F:3482-3488 (woof/data/chem/wesely/gas_parameters.v1.json, the RADM2 Wesely oracle)"
+        }
+      },
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); molar mass 72.151 g/mol (n-pentane, the HC5 surrogate), read only by the mass ledger; wetdep_ls_alpha 0: WRF's RADM2 packages run no wet removal with wetscav_onoff = 0"
+    },
+    {
+      "name": "hc8",
+      "output_name": "hc8",
+      "long_name": "HC8 mixing ratio",
+      "units": "ppmv",
+      "phase": "gas",
+      "family": "voc",
+      "sets": [
+        "radm2",
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": 114.232,
+      "processes": [
+        "emission.radm2",
+        "drydep.wesely",
+        "mixing.vertmx",
+        "chem.radm2"
+      ],
+      "emissions": [
+        {
+          "source": "edgar-v81",
+          "field": "e_hc8",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_hc8 (WRF emis_ant units) from EDGAR v8.1 AP 2022 annual totals through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        },
+        {
+          "source": "synthetic-anthro",
+          "field": "e_hc8",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_hc8 (WRF emis_ant units) from WOOF's synthetic urban-plume fallback through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        }
+      ],
+      "boundary": [],
+      "drydep": {
+        "scheme": "wesely",
+        "wesely": {
+          "hstar": 0.00142,
+          "dhr": 0.0,
+          "f0": 0.0,
+          "dratio": 2.651802,
+          "scpr23": 1.7337627,
+          "arm": "general",
+          "from": "hstar chem/module_dep_simple.F:2202; dhr chem/module_dep_simple.F:2479; f0 chem/module_dep_simple.F:2691; dvj chem/module_dep_simple.F:2906; dratio chem/module_dep_simple.F:3482-3484; arm chem/module_dep_simple.F:965-1038; scpr23 chem/module_dep_simple.F:3482-3488 (woof/data/chem/wesely/gas_parameters.v1.json, the RADM2 Wesely oracle)"
+        }
+      },
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); molar mass 114.232 g/mol (n-octane, the HC8 surrogate), read only by the mass ledger; wetdep_ls_alpha 0: WRF's RADM2 packages run no wet removal with wetscav_onoff = 0"
+    },
+    {
+      "name": "eth",
+      "output_name": "eth",
+      "long_name": "ETH mixing ratio",
+      "units": "ppmv",
+      "phase": "gas",
+      "family": "voc",
+      "sets": [
+        "radm2",
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": 30.07,
+      "processes": [
+        "emission.radm2",
+        "drydep.wesely",
+        "mixing.vertmx",
+        "chem.radm2"
+      ],
+      "emissions": [
+        {
+          "source": "edgar-v81",
+          "field": "e_eth",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_eth (WRF emis_ant units) from EDGAR v8.1 AP 2022 annual totals through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        },
+        {
+          "source": "synthetic-anthro",
+          "field": "e_eth",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_eth (WRF emis_ant units) from WOOF's synthetic urban-plume fallback through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        }
+      ],
+      "boundary": [],
+      "drydep": {
+        "scheme": "wesely",
+        "wesely": {
+          "hstar": 0.002,
+          "dhr": 0.0,
+          "f0": 0.0,
+          "dratio": 1.3621278,
+          "scpr23": 1.1120069,
+          "arm": "general",
+          "from": "hstar chem/module_dep_simple.F:2199; dhr chem/module_dep_simple.F:2476; f0 chem/module_dep_simple.F:2688; dvj chem/module_dep_simple.F:2903; dratio chem/module_dep_simple.F:3482-3484; arm chem/module_dep_simple.F:965-1038; scpr23 chem/module_dep_simple.F:3482-3488 (woof/data/chem/wesely/gas_parameters.v1.json, the RADM2 Wesely oracle)"
+        }
+      },
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); molar mass 30.07 g/mol (C2H6), read only by the mass ledger; wetdep_ls_alpha 0: WRF's RADM2 packages run no wet removal with wetscav_onoff = 0"
+    },
+    {
+      "name": "ol2",
+      "output_name": "ol2",
+      "long_name": "OL2 mixing ratio",
+      "units": "ppmv",
+      "phase": "gas",
+      "family": "voc",
+      "sets": [
+        "radm2",
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": 28.054,
+      "processes": [
+        "emission.radm2",
+        "drydep.wesely",
+        "mixing.vertmx",
+        "chem.radm2"
+      ],
+      "emissions": [
+        {
+          "source": "edgar-v81",
+          "field": "e_ol2",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_ol2 (WRF emis_ant units) from EDGAR v8.1 AP 2022 annual totals through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        },
+        {
+          "source": "synthetic-anthro",
+          "field": "e_ol2",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_ol2 (WRF emis_ant units) from WOOF's synthetic urban-plume fallback through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        }
+      ],
+      "boundary": [],
+      "drydep": {
+        "scheme": "wesely",
+        "wesely": {
+          "hstar": 0.00467,
+          "dhr": 0.0,
+          "f0": 0.0,
+          "dratio": 1.3188857,
+          "scpr23": 1.088346,
+          "arm": "general",
+          "from": "hstar chem/module_dep_simple.F:2214; dhr chem/module_dep_simple.F:2491; f0 chem/module_dep_simple.F:2703; dvj chem/module_dep_simple.F:2920; dratio chem/module_dep_simple.F:3482-3484; arm chem/module_dep_simple.F:965-1038; scpr23 chem/module_dep_simple.F:3482-3488 (woof/data/chem/wesely/gas_parameters.v1.json, the RADM2 Wesely oracle)"
+        }
+      },
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); molar mass 28.054 g/mol (C2H4), read only by the mass ledger; wetdep_ls_alpha 0: WRF's RADM2 packages run no wet removal with wetscav_onoff = 0"
+    },
+    {
+      "name": "olt",
+      "output_name": "olt",
+      "long_name": "OLT mixing ratio",
+      "units": "ppmv",
+      "phase": "gas",
+      "family": "voc",
+      "sets": [
+        "radm2",
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": 42.081,
+      "processes": [
+        "emission.radm2",
+        "drydep.wesely",
+        "mixing.vertmx",
+        "chem.radm2"
+      ],
+      "emissions": [
+        {
+          "source": "edgar-v81",
+          "field": "e_olt",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_olt (WRF emis_ant units) from EDGAR v8.1 AP 2022 annual totals through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        },
+        {
+          "source": "synthetic-anthro",
+          "field": "e_olt",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_olt (WRF emis_ant units) from WOOF's synthetic urban-plume fallback through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        }
+      ],
+      "boundary": [],
+      "drydep": {
+        "scheme": "wesely",
+        "wesely": {
+          "hstar": 0.00476,
+          "dhr": 0.0,
+          "f0": 0.0,
+          "dratio": 1.6186323,
+          "scpr23": 1.247559,
+          "arm": "general",
+          "from": "hstar chem/module_dep_simple.F:2203; dhr chem/module_dep_simple.F:2480; f0 chem/module_dep_simple.F:2692; dvj chem/module_dep_simple.F:2907; dratio chem/module_dep_simple.F:3482-3484; arm chem/module_dep_simple.F:965-1038; scpr23 chem/module_dep_simple.F:3482-3488 (woof/data/chem/wesely/gas_parameters.v1.json, the RADM2 Wesely oracle)"
+        }
+      },
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); molar mass 42.081 g/mol (propene, the OLT surrogate), read only by the mass ledger; wetdep_ls_alpha 0: WRF's RADM2 packages run no wet removal with wetscav_onoff = 0"
+    },
+    {
+      "name": "oli",
+      "output_name": "oli",
+      "long_name": "OLI mixing ratio",
+      "units": "ppmv",
+      "phase": "gas",
+      "family": "voc",
+      "sets": [
+        "radm2",
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": 56.108,
+      "processes": [
+        "emission.radm2",
+        "drydep.wesely",
+        "mixing.vertmx",
+        "chem.radm2"
+      ],
+      "emissions": [
+        {
+          "source": "edgar-v81",
+          "field": "e_oli",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_oli (WRF emis_ant units) from EDGAR v8.1 AP 2022 annual totals through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        },
+        {
+          "source": "synthetic-anthro",
+          "field": "e_oli",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_oli (WRF emis_ant units) from WOOF's synthetic urban-plume fallback through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        }
+      ],
+      "boundary": [],
+      "drydep": {
+        "scheme": "wesely",
+        "wesely": {
+          "hstar": 0.00135,
+          "dhr": 0.0,
+          "f0": 0.0,
+          "dratio": 2.0600774,
+          "scpr23": 1.4651586,
+          "arm": "general",
+          "from": "hstar chem/module_dep_simple.F:2204; dhr chem/module_dep_simple.F:2481; f0 chem/module_dep_simple.F:2693; dvj chem/module_dep_simple.F:2908; dratio chem/module_dep_simple.F:3482-3484; arm chem/module_dep_simple.F:965-1038; scpr23 chem/module_dep_simple.F:3482-3488 (woof/data/chem/wesely/gas_parameters.v1.json, the RADM2 Wesely oracle)"
+        }
+      },
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); molar mass 56.108 g/mol (trans-2-butene, the OLI surrogate), read only by the mass ledger; wetdep_ls_alpha 0: WRF's RADM2 packages run no wet removal with wetscav_onoff = 0"
+    },
+    {
+      "name": "tol",
+      "output_name": "tol",
+      "long_name": "TOL mixing ratio",
+      "units": "ppmv",
+      "phase": "gas",
+      "family": "voc",
+      "sets": [
+        "radm2",
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": 92.141,
+      "processes": [
+        "emission.radm2",
+        "drydep.wesely",
+        "mixing.vertmx",
+        "chem.radm2"
+      ],
+      "emissions": [
+        {
+          "source": "edgar-v81",
+          "field": "e_tol",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_tol (WRF emis_ant units) from EDGAR v8.1 AP 2022 annual totals through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        },
+        {
+          "source": "synthetic-anthro",
+          "field": "e_tol",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_tol (WRF emis_ant units) from WOOF's synthetic urban-plume fallback through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        }
+      ],
+      "boundary": [],
+      "drydep": {
+        "scheme": "wesely",
+        "wesely": {
+          "hstar": 0.151,
+          "dhr": 0.0,
+          "f0": 0.0,
+          "dratio": 2.396821,
+          "scpr23": 1.6207623,
+          "arm": "general",
+          "from": "hstar chem/module_dep_simple.F:2205; dhr chem/module_dep_simple.F:2482; f0 chem/module_dep_simple.F:2694; dvj chem/module_dep_simple.F:2909; dratio chem/module_dep_simple.F:3482-3484; arm chem/module_dep_simple.F:965-1038; scpr23 chem/module_dep_simple.F:3482-3488 (woof/data/chem/wesely/gas_parameters.v1.json, the RADM2 Wesely oracle)"
+        }
+      },
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); molar mass 92.141 g/mol (toluene), read only by the mass ledger; wetdep_ls_alpha 0: WRF's RADM2 packages run no wet removal with wetscav_onoff = 0"
+    },
+    {
+      "name": "xyl",
+      "output_name": "xyl",
+      "long_name": "XYL mixing ratio",
+      "units": "ppmv",
+      "phase": "gas",
+      "family": "voc",
+      "sets": [
+        "radm2",
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": 106.168,
+      "processes": [
+        "emission.radm2",
+        "drydep.wesely",
+        "mixing.vertmx",
+        "chem.radm2"
+      ],
+      "emissions": [
+        {
+          "source": "edgar-v81",
+          "field": "e_xyl",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_xyl (WRF emis_ant units) from EDGAR v8.1 AP 2022 annual totals through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        },
+        {
+          "source": "synthetic-anthro",
+          "field": "e_xyl",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_xyl (WRF emis_ant units) from WOOF's synthetic urban-plume fallback through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        }
+      ],
+      "boundary": [],
+      "drydep": {
+        "scheme": "wesely",
+        "wesely": {
+          "hstar": 0.145,
+          "dhr": 0.0,
+          "f0": 0.0,
+          "dratio": 2.5697875,
+          "scpr23": 1.6978282,
+          "arm": "general",
+          "from": "hstar chem/module_dep_simple.F:2207; dhr chem/module_dep_simple.F:2484; f0 chem/module_dep_simple.F:2696; dvj chem/module_dep_simple.F:2911; dratio chem/module_dep_simple.F:3482-3484; arm chem/module_dep_simple.F:965-1038; scpr23 chem/module_dep_simple.F:3482-3488 (woof/data/chem/wesely/gas_parameters.v1.json, the RADM2 Wesely oracle)"
+        }
+      },
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); molar mass 106.168 g/mol (xylene), read only by the mass ledger; wetdep_ls_alpha 0: WRF's RADM2 packages run no wet removal with wetscav_onoff = 0"
+    },
+    {
+      "name": "aco3",
+      "output_name": "aco3",
+      "long_name": "ACO3 mixing ratio",
+      "units": "ppmv",
+      "phase": "gas",
+      "family": "radical",
+      "sets": [
+        "radm2",
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": 75.043,
+      "processes": [
+        "emission.radm2",
+        "drydep.wesely",
+        "mixing.vertmx",
+        "chem.radm2"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": {
+        "scheme": "wesely",
+        "wesely": {
+          "hstar": 11.4,
+          "dhr": 6266.0,
+          "f0": 1.0,
+          "dratio": 2.1675599,
+          "scpr23": 1.5156875,
+          "arm": "general",
+          "from": "hstar chem/module_dep_simple.F:2186; dhr chem/module_dep_simple.F:2462; f0 chem/module_dep_simple.F:2672; dvj chem/module_dep_simple.F:2889; dratio chem/module_dep_simple.F:3482-3484; arm chem/module_dep_simple.F:965-1038; scpr23 chem/module_dep_simple.F:3482-3488 (woof/data/chem/wesely/gas_parameters.v1.json, the RADM2 Wesely oracle)"
+        }
+      },
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); molar mass 75.043 g/mol (CH3C(O)OO), read only by the mass ledger; wetdep_ls_alpha 0: WRF's RADM2 packages run no wet removal with wetscav_onoff = 0"
+    },
+    {
+      "name": "tpan",
+      "output_name": "tpan",
+      "long_name": "TPAN mixing ratio",
+      "units": "ppmv",
+      "phase": "gas",
+      "family": "noy",
+      "sets": [
+        "radm2",
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": 161.069,
+      "processes": [
+        "emission.radm2",
+        "drydep.wesely",
+        "mixing.vertmx",
+        "chem.radm2"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": {
+        "scheme": "wesely",
+        "wesely": {
+          "hstar": 2.97,
+          "dhr": 5760.0,
+          "f0": 0.1,
+          "dratio": 3.0398705,
+          "scpr23": 1.8990322,
+          "arm": "general",
+          "from": "hstar chem/module_dep_simple.F:2187; dhr chem/module_dep_simple.F:2463; f0 chem/module_dep_simple.F:2673; dvj chem/module_dep_simple.F:2890; dratio chem/module_dep_simple.F:3482-3484; arm chem/module_dep_simple.F:965-1038; scpr23 chem/module_dep_simple.F:3482-3488 (woof/data/chem/wesely/gas_parameters.v1.json, the RADM2 Wesely oracle)"
+        }
+      },
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); molar mass 161.069 g/mol (H(CO)CH=CHC(O)OONO2, the TPAN surrogate), read only by the mass ledger; wetdep_ls_alpha 0: WRF's RADM2 packages run no wet removal with wetscav_onoff = 0"
+    },
+    {
+      "name": "hono",
+      "output_name": "hono",
+      "long_name": "HONO mixing ratio",
+      "units": "ppmv",
+      "phase": "gas",
+      "family": "noy",
+      "sets": [
+        "radm2",
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": 47.013,
+      "processes": [
+        "emission.radm2",
+        "drydep.wesely",
+        "mixing.vertmx",
+        "chem.radm2"
+      ],
+      "emissions": [
+        {
+          "source": "edgar-v81",
+          "field": "e_hono",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_hono (WRF emis_ant units) from EDGAR v8.1 AP 2022 annual totals through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        },
+        {
+          "source": "synthetic-anthro",
+          "field": "e_hono",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_hono (WRF emis_ant units) from WOOF's synthetic urban-plume fallback through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        }
+      ],
+      "boundary": [],
+      "drydep": {
+        "scheme": "wesely",
+        "wesely": {
+          "hstar": 347000.0,
+          "dhr": 3775.0,
+          "f0": 0.1,
+          "dratio": 1.6292117,
+          "scpr23": 1.252989,
+          "arm": "general",
+          "from": "hstar chem/module_dep_simple.F:2188; dhr chem/module_dep_simple.F:2464; f0 chem/module_dep_simple.F:2674; dvj chem/module_dep_simple.F:2891; dratio chem/module_dep_simple.F:3482-3484; arm chem/module_dep_simple.F:965-1038; scpr23 chem/module_dep_simple.F:3482-3488 (woof/data/chem/wesely/gas_parameters.v1.json, the RADM2 Wesely oracle)"
+        }
+      },
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); molar mass 47.013 g/mol (HONO), read only by the mass ledger; wetdep_ls_alpha 0: WRF's RADM2 packages run no wet removal with wetscav_onoff = 0"
+    },
+    {
+      "name": "hno4",
+      "output_name": "hno4",
+      "long_name": "HNO4 mixing ratio",
+      "units": "ppmv",
+      "phase": "gas",
+      "family": "noy",
+      "sets": [
+        "radm2",
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": 79.011,
+      "processes": [
+        "emission.radm2",
+        "drydep.wesely",
+        "mixing.vertmx",
+        "chem.radm2"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": {
+        "scheme": "wesely",
+        "wesely": {
+          "hstar": 20000000000000.0,
+          "dhr": 0.0,
+          "f0": 0.1,
+          "dratio": 2.2059238,
+          "scpr23": 1.5335194,
+          "arm": "general",
+          "from": "hstar chem/module_dep_simple.F:2190; dhr chem/module_dep_simple.F:2466; f0 chem/module_dep_simple.F:2676; dvj chem/module_dep_simple.F:2893; dratio chem/module_dep_simple.F:3482-3484; arm chem/module_dep_simple.F:965-1038; scpr23 chem/module_dep_simple.F:3482-3488 (woof/data/chem/wesely/gas_parameters.v1.json, the RADM2 Wesely oracle)"
+        }
+      },
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); molar mass 79.011 g/mol (HO2NO2), read only by the mass ledger; wetdep_ls_alpha 0: WRF's RADM2 packages run no wet removal with wetscav_onoff = 0"
+    },
+    {
+      "name": "ket",
+      "output_name": "ket",
+      "long_name": "KET mixing ratio",
+      "units": "ppmv",
+      "phase": "gas",
+      "family": "voc",
+      "sets": [
+        "radm2",
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": 72.107,
+      "processes": [
+        "emission.radm2",
+        "drydep.wesely",
+        "mixing.vertmx",
+        "chem.radm2"
+      ],
+      "emissions": [
+        {
+          "source": "edgar-v81",
+          "field": "e_ket",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_ket (WRF emis_ant units) from EDGAR v8.1 AP 2022 annual totals through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        },
+        {
+          "source": "synthetic-anthro",
+          "field": "e_ket",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_ket (WRF emis_ant units) from WOOF's synthetic urban-plume fallback through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        }
+      ],
+      "boundary": [],
+      "drydep": {
+        "scheme": "wesely",
+        "wesely": {
+          "hstar": 33.0,
+          "dhr": 5773.0,
+          "f0": 0.0,
+          "dratio": 2.1124525,
+          "scpr23": 1.4898877,
+          "arm": "general",
+          "from": "hstar chem/module_dep_simple.F:2194; dhr chem/module_dep_simple.F:2471; f0 chem/module_dep_simple.F:2683; dvj chem/module_dep_simple.F:2898; dratio chem/module_dep_simple.F:3482-3484; arm chem/module_dep_simple.F:965-1038; scpr23 chem/module_dep_simple.F:3482-3488 (woof/data/chem/wesely/gas_parameters.v1.json, the RADM2 Wesely oracle)"
+        }
+      },
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); molar mass 72.107 g/mol (methyl ethyl ketone, the KET surrogate), read only by the mass ledger; wetdep_ls_alpha 0: WRF's RADM2 packages run no wet removal with wetscav_onoff = 0"
+    },
+    {
+      "name": "gly",
+      "output_name": "gly",
+      "long_name": "GLY mixing ratio",
+      "units": "ppmv",
+      "phase": "gas",
+      "family": "voc",
+      "sets": [
+        "radm2",
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": 58.036,
+      "processes": [
+        "emission.radm2",
+        "drydep.wesely",
+        "mixing.vertmx",
+        "chem.radm2"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": {
+        "scheme": "wesely",
+        "wesely": {
+          "hstar": 1400000.0,
+          "dhr": 0.0,
+          "f0": 0.0,
+          "dratio": 1.9028196,
+          "scpr23": 1.3896135,
+          "arm": "general",
+          "from": "hstar chem/module_dep_simple.F:2195; dhr chem/module_dep_simple.F:2472; f0 chem/module_dep_simple.F:2684; dvj chem/module_dep_simple.F:2899; dratio chem/module_dep_simple.F:3482-3484; arm chem/module_dep_simple.F:965-1038; scpr23 chem/module_dep_simple.F:3482-3488 (woof/data/chem/wesely/gas_parameters.v1.json, the RADM2 Wesely oracle)"
+        }
+      },
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); molar mass 58.036 g/mol (glyoxal), read only by the mass ledger; wetdep_ls_alpha 0: WRF's RADM2 packages run no wet removal with wetscav_onoff = 0"
+    },
+    {
+      "name": "mgly",
+      "output_name": "mgly",
+      "long_name": "MGLY mixing ratio",
+      "units": "ppmv",
+      "phase": "gas",
+      "family": "voc",
+      "sets": [
+        "radm2",
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": 72.063,
+      "processes": [
+        "emission.radm2",
+        "drydep.wesely",
+        "mixing.vertmx",
+        "chem.radm2"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": {
+        "scheme": "wesely",
+        "wesely": {
+          "hstar": 3710.0,
+          "dhr": 7541.0,
+          "f0": 0.0,
+          "dratio": 2.1124525,
+          "scpr23": 1.4898877,
+          "arm": "general",
+          "from": "hstar chem/module_dep_simple.F:2196; dhr chem/module_dep_simple.F:2473; f0 chem/module_dep_simple.F:2685; dvj chem/module_dep_simple.F:2900; dratio chem/module_dep_simple.F:3482-3484; arm chem/module_dep_simple.F:965-1038; scpr23 chem/module_dep_simple.F:3482-3488 (woof/data/chem/wesely/gas_parameters.v1.json, the RADM2 Wesely oracle)"
+        }
+      },
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); molar mass 72.063 g/mol (methylglyoxal), read only by the mass ledger; wetdep_ls_alpha 0: WRF's RADM2 packages run no wet removal with wetscav_onoff = 0"
+    },
+    {
+      "name": "dcb",
+      "output_name": "dcb",
+      "long_name": "DCB mixing ratio",
+      "units": "ppmv",
+      "phase": "gas",
+      "family": "voc",
+      "sets": [
+        "radm2",
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": 98.101,
+      "processes": [
+        "emission.radm2",
+        "drydep.wesely",
+        "mixing.vertmx",
+        "chem.radm2"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": {
+        "scheme": "wesely",
+        "wesely": {
+          "hstar": 1400000.0,
+          "dhr": 0.0,
+          "f0": 0.0,
+          "dratio": 2.3296204,
+          "scpr23": 1.5903244,
+          "arm": "general",
+          "from": "hstar chem/module_dep_simple.F:2197; dhr chem/module_dep_simple.F:2474; f0 chem/module_dep_simple.F:2686; dvj chem/module_dep_simple.F:2901; dratio chem/module_dep_simple.F:3482-3484; arm chem/module_dep_simple.F:965-1038; scpr23 chem/module_dep_simple.F:3482-3488 (woof/data/chem/wesely/gas_parameters.v1.json, the RADM2 Wesely oracle)"
+        }
+      },
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); molar mass 98.101 g/mol (C5H6O2, the DCB surrogate), read only by the mass ledger; wetdep_ls_alpha 0: WRF's RADM2 packages run no wet removal with wetscav_onoff = 0"
+    },
+    {
+      "name": "onit",
+      "output_name": "onit",
+      "long_name": "ONIT mixing ratio",
+      "units": "ppmv",
+      "phase": "gas",
+      "family": "noy",
+      "sets": [
+        "radm2",
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": 119.12,
+      "processes": [
+        "emission.radm2",
+        "drydep.wesely",
+        "mixing.vertmx",
+        "chem.radm2"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": {
+        "scheme": "wesely",
+        "wesely": {
+          "hstar": 1.13,
+          "dhr": 5487.0,
+          "f0": 0.0,
+          "dratio": 2.7094498,
+          "scpr23": 1.7587997,
+          "arm": "general",
+          "from": "hstar chem/module_dep_simple.F:2182; dhr chem/module_dep_simple.F:2457; f0 chem/module_dep_simple.F:2666; dvj chem/module_dep_simple.F:2884; dratio chem/module_dep_simple.F:3482-3484; arm chem/module_dep_simple.F:965-1038; scpr23 chem/module_dep_simple.F:3482-3488 (woof/data/chem/wesely/gas_parameters.v1.json, the RADM2 Wesely oracle)"
+        }
+      },
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); molar mass 119.12 g/mol (C4H9ONO2, the ONIT surrogate), read only by the mass ledger; wetdep_ls_alpha 0: WRF's RADM2 packages run no wet removal with wetscav_onoff = 0"
+    },
+    {
+      "name": "csl",
+      "output_name": "csl",
+      "long_name": "CSL mixing ratio",
+      "units": "ppmv",
+      "phase": "gas",
+      "family": "voc",
+      "sets": [
+        "radm2",
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": 108.14,
+      "processes": [
+        "emission.radm2",
+        "drydep.wesely",
+        "mixing.vertmx",
+        "chem.radm2"
+      ],
+      "emissions": [
+        {
+          "source": "edgar-v81",
+          "field": "e_csl",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_csl (WRF emis_ant units) from EDGAR v8.1 AP 2022 annual totals through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        },
+        {
+          "source": "synthetic-anthro",
+          "field": "e_csl",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_csl (WRF emis_ant units) from WOOF's synthetic urban-plume fallback through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        }
+      ],
+      "boundary": [],
+      "drydep": {
+        "scheme": "wesely",
+        "wesely": {
+          "hstar": 400000.0,
+          "dhr": 0.0,
+          "f0": 0.0,
+          "dratio": 2.596556,
+          "scpr23": 1.7095982,
+          "arm": "general",
+          "from": "hstar chem/module_dep_simple.F:2206; dhr chem/module_dep_simple.F:2483; f0 chem/module_dep_simple.F:2695; dvj chem/module_dep_simple.F:2910; dratio chem/module_dep_simple.F:3482-3484; arm chem/module_dep_simple.F:965-1038; scpr23 chem/module_dep_simple.F:3482-3488 (woof/data/chem/wesely/gas_parameters.v1.json, the RADM2 Wesely oracle)"
+        }
+      },
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); molar mass 108.14 g/mol (cresol), read only by the mass ledger; wetdep_ls_alpha 0: WRF's RADM2 packages run no wet removal with wetscav_onoff = 0"
+    },
+    {
+      "name": "iso",
+      "output_name": "iso",
+      "long_name": "ISO mixing ratio",
+      "units": "ppmv",
+      "phase": "gas",
+      "family": "voc",
+      "sets": [
+        "radm2",
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": 68.119,
+      "processes": [
+        "emission.radm2",
+        "drydep.wesely",
+        "mixing.vertmx",
+        "chem.radm2"
+      ],
+      "emissions": [
+        {
+          "source": "edgar-v81",
+          "field": "e_iso",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_iso (WRF emis_ant units) from EDGAR v8.1 AP 2022 annual totals through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        },
+        {
+          "source": "synthetic-anthro",
+          "field": "e_iso",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_iso (WRF emis_ant units) from WOOF's synthetic urban-plume fallback through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        }
+      ],
+      "boundary": [],
+      "drydep": {
+        "scheme": "wesely",
+        "wesely": {
+          "hstar": 0.00476,
+          "dhr": 0.0,
+          "f0": 0.0,
+          "dratio": 2.0600774,
+          "scpr23": 1.4651586,
+          "arm": "general",
+          "from": "hstar chem/module_dep_simple.F:2208; dhr chem/module_dep_simple.F:2485; f0 chem/module_dep_simple.F:2697; dvj chem/module_dep_simple.F:2912; dratio chem/module_dep_simple.F:3482-3484; arm chem/module_dep_simple.F:965-1038; scpr23 chem/module_dep_simple.F:3482-3488 (woof/data/chem/wesely/gas_parameters.v1.json, the RADM2 Wesely oracle)"
+        }
+      },
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); molar mass 68.119 g/mol (isoprene), read only by the mass ledger; wetdep_ls_alpha 0: WRF's RADM2 packages run no wet removal with wetscav_onoff = 0"
+    },
+    {
+      "name": "hcl",
+      "output_name": "hcl",
+      "long_name": "HCL mixing ratio",
+      "units": "ppmv",
+      "phase": "gas",
+      "family": "inorganic",
+      "sets": [
+        "radm2",
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": 36.458,
+      "processes": [
+        "emission.radm2",
+        "drydep.wesely",
+        "mixing.vertmx",
+        "chem.radm2",
+        "aerosol.sorgam"
+      ],
+      "emissions": [
+        {
+          "source": "edgar-v81",
+          "field": "e_hcl",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_hcl (WRF emis_ant units) from EDGAR v8.1 AP 2022 annual totals through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        },
+        {
+          "source": "synthetic-anthro",
+          "field": "e_hcl",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_hcl (WRF emis_ant units) from WOOF's synthetic urban-plume fallback through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        }
+      ],
+      "boundary": [],
+      "drydep": {
+        "scheme": "wesely",
+        "wesely": {
+          "hstar": 26900000000000.0,
+          "dhr": 8684.0,
+          "f0": 0.0,
+          "dratio": 1.9783283,
+          "scpr23": 1.4261369,
+          "arm": "general",
+          "from": "hstar chem/module_dep_simple.F:2209 (hno3's); dhr chem/module_dep_simple.F:2486 (hno3's); f0 chem/module_dep_simple.F:2698 (hno3's); dvj chem/module_dep_simple.F:2913 (hno3's); dratio chem/module_dep_simple.F:3482-3484 (hno3's); arm chem/module_dep_simple.F:965-1038; scpr23 chem/module_dep_simple.F:3482-3488 (hno3's); copy chem/module_dep_simple.F:259-264: RADM2/RADM2SORG copy ddvel(p_hcl) = ddvel(p_hno3); the row carries hno3's numbers on the general arm, which yields the same bits (woof/data/chem/wesely/gas_parameters.v1.json, the RADM2 Wesely oracle)"
+        }
+      },
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": {
+        "aerosol.sorgam": [
+          "radm2sorg"
+        ]
+      },
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); molar mass 36.458 g/mol (HCl), read only by the mass ledger; wetdep_ls_alpha 0: WRF's RADM2 packages run no wet removal with wetscav_onoff = 0"
+    },
+    {
+      "name": "ho",
+      "output_name": "ho",
+      "long_name": "HO mixing ratio",
+      "units": "ppmv",
+      "phase": "gas",
+      "family": "radical",
+      "sets": [
+        "radm2",
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": 17.007,
+      "processes": [
+        "emission.radm2",
+        "drydep.wesely",
+        "mixing.vertmx",
+        "chem.radm2"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": {
+        "scheme": "wesely",
+        "wesely": {
+          "hstar": 0.0,
+          "dhr": 0.0,
+          "f0": 0.0,
+          "dratio": 1.0257999,
+          "scpr23": 0.92045814,
+          "arm": "zero_surface",
+          "from": "hstar chem/module_dep_simple.F:1952; dhr chem/module_dep_simple.F:1954; f0 chem/module_dep_simple.F:1955; dvj chem/module_dep_simple.F:2918; dratio chem/module_dep_simple.F:3482-3484; arm chem/module_dep_simple.F:243-244; scpr23 chem/module_dep_simple.F:3482-3488 (woof/data/chem/wesely/gas_parameters.v1.json, the RADM2 Wesely oracle)"
+        }
+      },
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); molar mass 17.007 g/mol (OH), read only by the mass ledger; wetdep_ls_alpha 0: WRF's RADM2 packages run no wet removal with wetscav_onoff = 0"
+    },
+    {
+      "name": "ho2",
+      "output_name": "ho2",
+      "long_name": "HO2 mixing ratio",
+      "units": "ppmv",
+      "phase": "gas",
+      "family": "radical",
+      "sets": [
+        "radm2",
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": 33.006,
+      "processes": [
+        "emission.radm2",
+        "drydep.wesely",
+        "mixing.vertmx",
+        "chem.radm2"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": {
+        "scheme": "wesely",
+        "wesely": {
+          "hstar": 0.0,
+          "dhr": 0.0,
+          "f0": 0.0,
+          "dratio": 1.4325827,
+          "scpr23": 1.1500288,
+          "arm": "zero_surface",
+          "from": "hstar chem/module_dep_simple.F:1952; dhr chem/module_dep_simple.F:1954; f0 chem/module_dep_simple.F:1955; dvj chem/module_dep_simple.F:2919; dratio chem/module_dep_simple.F:3482-3484; arm chem/module_dep_simple.F:243-244; scpr23 chem/module_dep_simple.F:3482-3488 (woof/data/chem/wesely/gas_parameters.v1.json, the RADM2 Wesely oracle)"
+        }
+      },
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); molar mass 33.006 g/mol (HO2), read only by the mass ledger; wetdep_ls_alpha 0: WRF's RADM2 packages run no wet removal with wetscav_onoff = 0"
+    },
+    {
+      "name": "so4aj",
+      "output_name": "so4aj",
+      "long_name": "Sulfate conc. Acc. mode",
+      "units": "ug kg-1",
+      "phase": "aerosol",
+      "family": "sulfate",
+      "sets": [
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": null,
+      "processes": [
+        "emission.radm2",
+        "drydep.sorgam",
+        "mixing.vertmx",
+        "aerosol.sorgam"
+      ],
+      "emissions": [
+        {
+          "source": "edgar-v81",
+          "field": "e_so4j",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_so4j (WRF emis_ant units) from EDGAR v8.1 AP 2022 annual totals through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        },
+        {
+          "source": "synthetic-anthro",
+          "field": "e_so4j",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_so4j (WRF emis_ant units) from WOOF's synthetic urban-plume fallback through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        }
+      ],
+      "boundary": [],
+      "drydep": null,
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); dry deposition velocity from sorgam_depdriver (drydep.sorgam), mixed by vertmx"
+    },
+    {
+      "name": "so4ai",
+      "output_name": "so4ai",
+      "long_name": "Sulfate conc. Aitken mode",
+      "units": "ug kg-1",
+      "phase": "aerosol",
+      "family": "sulfate",
+      "sets": [
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": null,
+      "processes": [
+        "emission.radm2",
+        "drydep.sorgam",
+        "mixing.vertmx",
+        "aerosol.sorgam"
+      ],
+      "emissions": [
+        {
+          "source": "edgar-v81",
+          "field": "e_so4i",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_so4i (WRF emis_ant units) from EDGAR v8.1 AP 2022 annual totals through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        },
+        {
+          "source": "synthetic-anthro",
+          "field": "e_so4i",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_so4i (WRF emis_ant units) from WOOF's synthetic urban-plume fallback through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        }
+      ],
+      "boundary": [],
+      "drydep": null,
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); dry deposition velocity from sorgam_depdriver (drydep.sorgam), mixed by vertmx"
+    },
+    {
+      "name": "nh4aj",
+      "output_name": "nh4aj",
+      "long_name": "Ammonium conc. Acc. mode",
+      "units": "ug kg-1",
+      "phase": "aerosol",
+      "family": "ammonium",
+      "sets": [
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": null,
+      "processes": [
+        "emission.radm2",
+        "drydep.sorgam",
+        "mixing.vertmx",
+        "aerosol.sorgam"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": null,
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); dry deposition velocity from sorgam_depdriver (drydep.sorgam), mixed by vertmx"
+    },
+    {
+      "name": "nh4ai",
+      "output_name": "nh4ai",
+      "long_name": "Ammonium  conc. Aitken mode",
+      "units": "ug kg-1",
+      "phase": "aerosol",
+      "family": "ammonium",
+      "sets": [
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": null,
+      "processes": [
+        "emission.radm2",
+        "drydep.sorgam",
+        "mixing.vertmx",
+        "aerosol.sorgam"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": null,
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); dry deposition velocity from sorgam_depdriver (drydep.sorgam), mixed by vertmx"
+    },
+    {
+      "name": "no3aj",
+      "output_name": "no3aj",
+      "long_name": "Nitrate  conc. Acc. mode",
+      "units": "ug kg-1",
+      "phase": "aerosol",
+      "family": "nitrate",
+      "sets": [
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": null,
+      "processes": [
+        "emission.radm2",
+        "drydep.sorgam",
+        "mixing.vertmx",
+        "aerosol.sorgam"
+      ],
+      "emissions": [
+        {
+          "source": "edgar-v81",
+          "field": "e_no3j",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_no3j (WRF emis_ant units) from EDGAR v8.1 AP 2022 annual totals through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        },
+        {
+          "source": "synthetic-anthro",
+          "field": "e_no3j",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_no3j (WRF emis_ant units) from WOOF's synthetic urban-plume fallback through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        }
+      ],
+      "boundary": [],
+      "drydep": null,
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); dry deposition velocity from sorgam_depdriver (drydep.sorgam), mixed by vertmx"
+    },
+    {
+      "name": "no3ai",
+      "output_name": "no3ai",
+      "long_name": "Nitrate  conc. Aitken mode",
+      "units": "ug kg-1",
+      "phase": "aerosol",
+      "family": "nitrate",
+      "sets": [
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": null,
+      "processes": [
+        "emission.radm2",
+        "drydep.sorgam",
+        "mixing.vertmx",
+        "aerosol.sorgam"
+      ],
+      "emissions": [
+        {
+          "source": "edgar-v81",
+          "field": "e_no3i",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_no3i (WRF emis_ant units) from EDGAR v8.1 AP 2022 annual totals through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        },
+        {
+          "source": "synthetic-anthro",
+          "field": "e_no3i",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_no3i (WRF emis_ant units) from WOOF's synthetic urban-plume fallback through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        }
+      ],
+      "boundary": [],
+      "drydep": null,
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); dry deposition velocity from sorgam_depdriver (drydep.sorgam), mixed by vertmx"
+    },
+    {
+      "name": "naaj",
+      "output_name": "naaj",
+      "long_name": "Sodium   conc. Acc. mode",
+      "units": "ug kg-1",
+      "phase": "aerosol",
+      "family": "seasalt",
+      "sets": [
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": null,
+      "processes": [
+        "emission.radm2",
+        "drydep.sorgam",
+        "mixing.vertmx",
+        "aerosol.sorgam"
+      ],
+      "emissions": [
+        {
+          "source": "edgar-v81",
+          "field": "e_naaj",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_naaj (WRF emis_ant units) from EDGAR v8.1 AP 2022 annual totals through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        },
+        {
+          "source": "synthetic-anthro",
+          "field": "e_naaj",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_naaj (WRF emis_ant units) from WOOF's synthetic urban-plume fallback through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        }
+      ],
+      "boundary": [],
+      "drydep": null,
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); dry deposition velocity from sorgam_depdriver (drydep.sorgam), mixed by vertmx"
+    },
+    {
+      "name": "naai",
+      "output_name": "naai",
+      "long_name": "Sodium   conc. Aitken mode",
+      "units": "ug kg-1",
+      "phase": "aerosol",
+      "family": "seasalt",
+      "sets": [
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": null,
+      "processes": [
+        "emission.radm2",
+        "drydep.sorgam",
+        "mixing.vertmx",
+        "aerosol.sorgam"
+      ],
+      "emissions": [
+        {
+          "source": "edgar-v81",
+          "field": "e_naai",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_naai (WRF emis_ant units) from EDGAR v8.1 AP 2022 annual totals through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        },
+        {
+          "source": "synthetic-anthro",
+          "field": "e_naai",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_naai (WRF emis_ant units) from WOOF's synthetic urban-plume fallback through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        }
+      ],
+      "boundary": [],
+      "drydep": null,
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); dry deposition velocity from sorgam_depdriver (drydep.sorgam), mixed by vertmx"
+    },
+    {
+      "name": "claj",
+      "output_name": "claj",
+      "long_name": "Chloride conc. Acc. mode",
+      "units": "ug kg-1",
+      "phase": "aerosol",
+      "family": "seasalt",
+      "sets": [
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": null,
+      "processes": [
+        "emission.radm2",
+        "drydep.sorgam",
+        "mixing.vertmx",
+        "aerosol.sorgam"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": null,
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); dry deposition velocity from sorgam_depdriver (drydep.sorgam), mixed by vertmx"
+    },
+    {
+      "name": "clai",
+      "output_name": "clai",
+      "long_name": "Chloride conc. Aitken mode",
+      "units": "ug kg-1",
+      "phase": "aerosol",
+      "family": "seasalt",
+      "sets": [
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": null,
+      "processes": [
+        "emission.radm2",
+        "drydep.sorgam",
+        "mixing.vertmx",
+        "aerosol.sorgam"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": null,
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); dry deposition velocity from sorgam_depdriver (drydep.sorgam), mixed by vertmx"
+    },
+    {
+      "name": "orgaro1j",
+      "output_name": "orgaro1j",
+      "long_name": "SOA Anth. org. conc. from aromatics Acc. mode",
+      "units": "ug kg-1",
+      "phase": "aerosol",
+      "family": "soa",
+      "sets": [
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": null,
+      "processes": [
+        "emission.radm2",
+        "drydep.sorgam",
+        "mixing.vertmx",
+        "aerosol.sorgam"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": null,
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); dry deposition velocity from sorgam_depdriver (drydep.sorgam), mixed by vertmx"
+    },
+    {
+      "name": "orgaro1i",
+      "output_name": "orgaro1i",
+      "long_name": "SOA Anth. org. conc. from aromatics Aitken mode",
+      "units": "ug kg-1",
+      "phase": "aerosol",
+      "family": "soa",
+      "sets": [
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": null,
+      "processes": [
+        "emission.radm2",
+        "drydep.sorgam",
+        "mixing.vertmx",
+        "aerosol.sorgam"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": null,
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); dry deposition velocity from sorgam_depdriver (drydep.sorgam), mixed by vertmx"
+    },
+    {
+      "name": "orgaro2j",
+      "output_name": "orgaro2j",
+      "long_name": "SOA Anth. org. conc. from aromatics Acc. mode",
+      "units": "ug kg-1",
+      "phase": "aerosol",
+      "family": "soa",
+      "sets": [
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": null,
+      "processes": [
+        "emission.radm2",
+        "drydep.sorgam",
+        "mixing.vertmx",
+        "aerosol.sorgam"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": null,
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); dry deposition velocity from sorgam_depdriver (drydep.sorgam), mixed by vertmx"
+    },
+    {
+      "name": "orgaro2i",
+      "output_name": "orgaro2i",
+      "long_name": "SOA Anth. org. conc. from aromatics Aitken mode",
+      "units": "ug kg-1",
+      "phase": "aerosol",
+      "family": "soa",
+      "sets": [
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": null,
+      "processes": [
+        "emission.radm2",
+        "drydep.sorgam",
+        "mixing.vertmx",
+        "aerosol.sorgam"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": null,
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); dry deposition velocity from sorgam_depdriver (drydep.sorgam), mixed by vertmx"
+    },
+    {
+      "name": "orgalk1j",
+      "output_name": "orgalk1j",
+      "long_name": "SOA Anth. org. conc. from alkanes and others except aromatics Acc. mode",
+      "units": "ug kg-1",
+      "phase": "aerosol",
+      "family": "soa",
+      "sets": [
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": null,
+      "processes": [
+        "emission.radm2",
+        "drydep.sorgam",
+        "mixing.vertmx",
+        "aerosol.sorgam"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": null,
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); dry deposition velocity from sorgam_depdriver (drydep.sorgam), mixed by vertmx"
+    },
+    {
+      "name": "orgalk1i",
+      "output_name": "orgalk1i",
+      "long_name": "SOA Anth. org. conc. from alkanes and others except aromatics Aitken mode",
+      "units": "ug kg-1",
+      "phase": "aerosol",
+      "family": "soa",
+      "sets": [
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": null,
+      "processes": [
+        "emission.radm2",
+        "drydep.sorgam",
+        "mixing.vertmx",
+        "aerosol.sorgam"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": null,
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); dry deposition velocity from sorgam_depdriver (drydep.sorgam), mixed by vertmx"
+    },
+    {
+      "name": "orgole1j",
+      "output_name": "orgole1j",
+      "long_name": "SOA Anth. org. conc. from alkenes and others except aromatics Acc. mode",
+      "units": "ug kg-1",
+      "phase": "aerosol",
+      "family": "soa",
+      "sets": [
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": null,
+      "processes": [
+        "emission.radm2",
+        "drydep.sorgam",
+        "mixing.vertmx",
+        "aerosol.sorgam"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": null,
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); dry deposition velocity from sorgam_depdriver (drydep.sorgam), mixed by vertmx"
+    },
+    {
+      "name": "orgole1i",
+      "output_name": "orgole1i",
+      "long_name": "SOA Anth. org. conc. from alkenes and others except aromatics Aitken mode",
+      "units": "ug kg-1",
+      "phase": "aerosol",
+      "family": "soa",
+      "sets": [
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": null,
+      "processes": [
+        "emission.radm2",
+        "drydep.sorgam",
+        "mixing.vertmx",
+        "aerosol.sorgam"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": null,
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); dry deposition velocity from sorgam_depdriver (drydep.sorgam), mixed by vertmx"
+    },
+    {
+      "name": "orgba1j",
+      "output_name": "orgba1j",
+      "long_name": "SOA Biog. org. conc. from aromatics Acc. mode",
+      "units": "ug kg-1",
+      "phase": "aerosol",
+      "family": "soa",
+      "sets": [
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": null,
+      "processes": [
+        "emission.radm2",
+        "drydep.sorgam",
+        "mixing.vertmx",
+        "aerosol.sorgam"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": null,
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); dry deposition velocity from sorgam_depdriver (drydep.sorgam), mixed by vertmx"
+    },
+    {
+      "name": "orgba1i",
+      "output_name": "orgba1i",
+      "long_name": "SOA Biog. org. conc. from aromatics Aitken mode",
+      "units": "ug kg-1",
+      "phase": "aerosol",
+      "family": "soa",
+      "sets": [
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": null,
+      "processes": [
+        "emission.radm2",
+        "drydep.sorgam",
+        "mixing.vertmx",
+        "aerosol.sorgam"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": null,
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); dry deposition velocity from sorgam_depdriver (drydep.sorgam), mixed by vertmx"
+    },
+    {
+      "name": "orgba2j",
+      "output_name": "orgba2j",
+      "long_name": "SOA Biog. org. conc. from aromatics Acc. mode",
+      "units": "ug kg-1",
+      "phase": "aerosol",
+      "family": "soa",
+      "sets": [
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": null,
+      "processes": [
+        "emission.radm2",
+        "drydep.sorgam",
+        "mixing.vertmx",
+        "aerosol.sorgam"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": null,
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); dry deposition velocity from sorgam_depdriver (drydep.sorgam), mixed by vertmx"
+    },
+    {
+      "name": "orgba2i",
+      "output_name": "orgba2i",
+      "long_name": "SOA Biog. org. conc. from aromatics Aitken mode",
+      "units": "ug kg-1",
+      "phase": "aerosol",
+      "family": "soa",
+      "sets": [
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": null,
+      "processes": [
+        "emission.radm2",
+        "drydep.sorgam",
+        "mixing.vertmx",
+        "aerosol.sorgam"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": null,
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); dry deposition velocity from sorgam_depdriver (drydep.sorgam), mixed by vertmx"
+    },
+    {
+      "name": "orgba3j",
+      "output_name": "orgba3j",
+      "long_name": "SOA Biog. org. conc. from aromatics Acc. mode",
+      "units": "ug kg-1",
+      "phase": "aerosol",
+      "family": "soa",
+      "sets": [
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": null,
+      "processes": [
+        "emission.radm2",
+        "drydep.sorgam",
+        "mixing.vertmx",
+        "aerosol.sorgam"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": null,
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); dry deposition velocity from sorgam_depdriver (drydep.sorgam), mixed by vertmx"
+    },
+    {
+      "name": "orgba3i",
+      "output_name": "orgba3i",
+      "long_name": "SOA Biog. org. conc. from aromatics Aitken mode",
+      "units": "ug kg-1",
+      "phase": "aerosol",
+      "family": "soa",
+      "sets": [
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": null,
+      "processes": [
+        "emission.radm2",
+        "drydep.sorgam",
+        "mixing.vertmx",
+        "aerosol.sorgam"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": null,
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); dry deposition velocity from sorgam_depdriver (drydep.sorgam), mixed by vertmx"
+    },
+    {
+      "name": "orgba4j",
+      "output_name": "orgba4j",
+      "long_name": "SOA Biog. org. conc. from aromatics Acc. mode",
+      "units": "ug kg-1",
+      "phase": "aerosol",
+      "family": "soa",
+      "sets": [
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": null,
+      "processes": [
+        "emission.radm2",
+        "drydep.sorgam",
+        "mixing.vertmx",
+        "aerosol.sorgam"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": null,
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); dry deposition velocity from sorgam_depdriver (drydep.sorgam), mixed by vertmx"
+    },
+    {
+      "name": "orgba4i",
+      "output_name": "orgba4i",
+      "long_name": "SOA Biog. org. conc. from aromatics Aitken mode",
+      "units": "ug kg-1",
+      "phase": "aerosol",
+      "family": "soa",
+      "sets": [
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": null,
+      "processes": [
+        "emission.radm2",
+        "drydep.sorgam",
+        "mixing.vertmx",
+        "aerosol.sorgam"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": null,
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); dry deposition velocity from sorgam_depdriver (drydep.sorgam), mixed by vertmx"
+    },
+    {
+      "name": "orgpaj",
+      "output_name": "orgpaj",
+      "long_name": "Prim. anth. org. conc. from aromatics Acc. mode",
+      "units": "ug kg-1",
+      "phase": "aerosol",
+      "family": "oc",
+      "sets": [
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": null,
+      "processes": [
+        "emission.radm2",
+        "drydep.sorgam",
+        "mixing.vertmx",
+        "aerosol.sorgam"
+      ],
+      "emissions": [
+        {
+          "source": "edgar-v81",
+          "field": "e_orgj",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_orgj (WRF emis_ant units) from EDGAR v8.1 AP 2022 annual totals through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        },
+        {
+          "source": "synthetic-anthro",
+          "field": "e_orgj",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_orgj (WRF emis_ant units) from WOOF's synthetic urban-plume fallback through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        }
+      ],
+      "boundary": [],
+      "drydep": null,
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); dry deposition velocity from sorgam_depdriver (drydep.sorgam), mixed by vertmx"
+    },
+    {
+      "name": "orgpai",
+      "output_name": "orgpai",
+      "long_name": "Prim. anth. org. conc. from aromatics Aitken mode",
+      "units": "ug kg-1",
+      "phase": "aerosol",
+      "family": "oc",
+      "sets": [
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": null,
+      "processes": [
+        "emission.radm2",
+        "drydep.sorgam",
+        "mixing.vertmx",
+        "aerosol.sorgam"
+      ],
+      "emissions": [
+        {
+          "source": "edgar-v81",
+          "field": "e_orgi",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_orgi (WRF emis_ant units) from EDGAR v8.1 AP 2022 annual totals through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        },
+        {
+          "source": "synthetic-anthro",
+          "field": "e_orgi",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_orgi (WRF emis_ant units) from WOOF's synthetic urban-plume fallback through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        }
+      ],
+      "boundary": [],
+      "drydep": null,
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); dry deposition velocity from sorgam_depdriver (drydep.sorgam), mixed by vertmx"
+    },
+    {
+      "name": "ecj",
+      "output_name": "ecj",
+      "long_name": "Elemental carbon Acc. mode",
+      "units": "ug kg-1",
+      "phase": "aerosol",
+      "family": "bc",
+      "sets": [
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": null,
+      "processes": [
+        "emission.radm2",
+        "drydep.sorgam",
+        "mixing.vertmx",
+        "aerosol.sorgam"
+      ],
+      "emissions": [
+        {
+          "source": "edgar-v81",
+          "field": "e_ecj",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_ecj (WRF emis_ant units) from EDGAR v8.1 AP 2022 annual totals through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        },
+        {
+          "source": "synthetic-anthro",
+          "field": "e_ecj",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_ecj (WRF emis_ant units) from WOOF's synthetic urban-plume fallback through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        }
+      ],
+      "boundary": [],
+      "drydep": null,
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); dry deposition velocity from sorgam_depdriver (drydep.sorgam), mixed by vertmx"
+    },
+    {
+      "name": "eci",
+      "output_name": "eci",
+      "long_name": "Elemental carbon Aitken mode",
+      "units": "ug kg-1",
+      "phase": "aerosol",
+      "family": "bc",
+      "sets": [
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": null,
+      "processes": [
+        "emission.radm2",
+        "drydep.sorgam",
+        "mixing.vertmx",
+        "aerosol.sorgam"
+      ],
+      "emissions": [
+        {
+          "source": "edgar-v81",
+          "field": "e_eci",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_eci (WRF emis_ant units) from EDGAR v8.1 AP 2022 annual totals through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        },
+        {
+          "source": "synthetic-anthro",
+          "field": "e_eci",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_eci (WRF emis_ant units) from WOOF's synthetic urban-plume fallback through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        }
+      ],
+      "boundary": [],
+      "drydep": null,
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); dry deposition velocity from sorgam_depdriver (drydep.sorgam), mixed by vertmx"
+    },
+    {
+      "name": "p25j",
+      "output_name": "p25j",
+      "long_name": "Primary PM2.5 Acc. mode",
+      "units": "ug kg-1",
+      "phase": "aerosol",
+      "family": "pm_other",
+      "sets": [
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": null,
+      "processes": [
+        "emission.radm2",
+        "drydep.sorgam",
+        "mixing.vertmx",
+        "aerosol.sorgam"
+      ],
+      "emissions": [
+        {
+          "source": "edgar-v81",
+          "field": "e_pm25j",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_pm25j (WRF emis_ant units) from EDGAR v8.1 AP 2022 annual totals through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        },
+        {
+          "source": "synthetic-anthro",
+          "field": "e_pm25j",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_pm25j (WRF emis_ant units) from WOOF's synthetic urban-plume fallback through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        }
+      ],
+      "boundary": [],
+      "drydep": null,
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); dry deposition velocity from sorgam_depdriver (drydep.sorgam), mixed by vertmx"
+    },
+    {
+      "name": "p25i",
+      "output_name": "p25i",
+      "long_name": "Primary PM2.5 Aitken mode",
+      "units": "ug kg-1",
+      "phase": "aerosol",
+      "family": "pm_other",
+      "sets": [
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": null,
+      "processes": [
+        "emission.radm2",
+        "drydep.sorgam",
+        "mixing.vertmx",
+        "aerosol.sorgam"
+      ],
+      "emissions": [
+        {
+          "source": "edgar-v81",
+          "field": "e_pm25i",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_pm25i (WRF emis_ant units) from EDGAR v8.1 AP 2022 annual totals through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        },
+        {
+          "source": "synthetic-anthro",
+          "field": "e_pm25i",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_pm25i (WRF emis_ant units) from WOOF's synthetic urban-plume fallback through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        }
+      ],
+      "boundary": [],
+      "drydep": null,
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); dry deposition velocity from sorgam_depdriver (drydep.sorgam), mixed by vertmx"
+    },
+    {
+      "name": "antha",
+      "output_name": "antha",
+      "long_name": "Coarse anthropogenic aerosols",
+      "units": "ug kg-1",
+      "phase": "aerosol",
+      "family": "pm_other",
+      "sets": [
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": null,
+      "processes": [
+        "emission.radm2",
+        "drydep.sorgam",
+        "mixing.vertmx",
+        "aerosol.sorgam"
+      ],
+      "emissions": [
+        {
+          "source": "edgar-v81",
+          "field": "e_pm_10",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_pm_10 (WRF emis_ant units) from EDGAR v8.1 AP 2022 annual totals through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        },
+        {
+          "source": "synthetic-anthro",
+          "field": "e_pm_10",
+          "weight": 1.0,
+          "vertical": "kemit",
+          "provenance": "e_pm_10 (WRF emis_ant units) from WOOF's synthetic urban-plume fallback through woof/data/chem/speciation/radm2.v1.json (woof.chem_inventory_frames); added on levels kts..kemit by emission.radm2 (module_emissions_anthropogenics.F)"
+        }
+      ],
+      "boundary": [],
+      "drydep": null,
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); dry deposition velocity from sorgam_depdriver (drydep.sorgam), mixed by vertmx"
+    },
+    {
+      "name": "seas",
+      "output_name": "seas",
+      "long_name": "Coarse marine aerosols",
+      "units": "ug kg-1",
+      "phase": "aerosol",
+      "family": "seasalt",
+      "sets": [
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": null,
+      "processes": [
+        "emission.radm2",
+        "drydep.sorgam",
+        "mixing.vertmx",
+        "aerosol.sorgam"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": null,
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); dry deposition velocity from sorgam_depdriver (drydep.sorgam), mixed by vertmx"
+    },
+    {
+      "name": "soila",
+      "output_name": "soila",
+      "long_name": "Coarse soil-derived aerosols",
+      "units": "ug kg-1",
+      "phase": "aerosol",
+      "family": "dust",
+      "sets": [
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": null,
+      "processes": [
+        "emission.radm2",
+        "drydep.sorgam",
+        "mixing.vertmx",
+        "aerosol.sorgam"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": null,
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); dry deposition velocity from sorgam_depdriver (drydep.sorgam), mixed by vertmx"
+    },
+    {
+      "name": "nu0",
+      "output_name": "nu0",
+      "long_name": "Aitken mode number",
+      "units": "kg-1",
+      "phase": "aerosol",
+      "family": "number",
+      "sets": [
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": null,
+      "processes": [
+        "emission.radm2",
+        "drydep.sorgam",
+        "mixing.vertmx",
+        "aerosol.sorgam"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": null,
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); a number row (particles per kg of dry air): the ledger counts particles, not kilograms; dry deposition velocity from sorgam_depdriver (drydep.sorgam), mixed by vertmx"
+    },
+    {
+      "name": "ac0",
+      "output_name": "ac0",
+      "long_name": "Accumulation mode number",
+      "units": "kg-1",
+      "phase": "aerosol",
+      "family": "number",
+      "sets": [
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": null,
+      "processes": [
+        "emission.radm2",
+        "drydep.sorgam",
+        "mixing.vertmx",
+        "aerosol.sorgam"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": null,
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); a number row (particles per kg of dry air): the ledger counts particles, not kilograms; dry deposition velocity from sorgam_depdriver (drydep.sorgam), mixed by vertmx"
+    },
+    {
+      "name": "corn",
+      "output_name": "corn",
+      "long_name": "Coarse mode number",
+      "units": "kg-1",
+      "phase": "aerosol",
+      "family": "number",
+      "sets": [
+        "radm2sorg"
+      ],
+      "transported": true,
+      "floor": 1e-16,
+      "default_inflow": 1e-16,
+      "molar_mass_g_mol": null,
+      "processes": [
+        "emission.radm2",
+        "drydep.sorgam",
+        "mixing.vertmx",
+        "aerosol.sorgam"
+      ],
+      "emissions": [],
+      "boundary": [],
+      "drydep": null,
+      "settling": null,
+      "wetdep_ls_alpha": 0.0,
+      "aging": null,
+      "optics": null,
+      "mp_coupling": null,
+      "exclusive_group": null,
+      "process_sets": null,
+      "provenance": "registry.chem:3929-3930 packages radm2 (chem_opt 1) and radm2sorg (chem_opt 2); floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5); default_inflow = epsilc: the row's value at an inflow face with no enabled boundary source (WOOF's constant stand-in for WRF's height-dependent bdy_chem_value profile; the receipt's inflow table names it); a number row (particles per kg of dry air): the ledger counts particles, not kilograms; dry deposition velocity from sorgam_depdriver (drydep.sorgam), mixed by vertmx"
+    }
+  ]
+}
