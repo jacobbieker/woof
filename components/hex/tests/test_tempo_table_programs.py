@@ -14,6 +14,7 @@ import hashlib
 import json
 import math
 import subprocess
+import sys
 
 import numpy as np
 import pytest
@@ -48,6 +49,9 @@ def _constants():
     return tables
 
 
+@pytest.mark.xfail(sys.platform == 'darwin', strict=True,
+                   reason='tempo_table_compute differs from the reference words under Apple libm; '
+                          'framework_init_rrfs.tempo_compute_refusal refuses it on macOS')
 @pytest.mark.parametrize('hail,melt', sorted(INIT_SHA256))
 def test_tempo_tables_are_the_reference_words_on_this_host(hail, melt):
     tools, tables = _tools(), _constants()
@@ -75,3 +79,8 @@ def test_tempo_tables_are_the_reference_words_on_this_host(hail, melt):
     raw = subprocess.run([str(tools['tempo_table_compute'])], input=b''.join(parts), check=True,
                          capture_output=True).stdout
     assert hashlib.sha256(raw).hexdigest() == COMPUTE_SHA256
+
+
+def test_macos_refuses_the_tempo_compute_by_name():
+    assert fi.tempo_compute_refusal('linux') is None
+    assert 'macOS' in fi.tempo_compute_refusal('darwin')

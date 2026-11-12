@@ -94,6 +94,7 @@ __all__ = [
     "seal_constructor",
     "seam_options_for",
     "soil_levels_for",
+    "microphysics_for",
     "suite_config",
 ]
 
@@ -274,6 +275,14 @@ def soil_levels_for(row_name: str) -> int:
     """The soil column the row's land surface integrates."""
 
     return int(_suite_for_row(row_name)["n_soil_levels"])
+
+
+def microphysics_for(row_name: str) -> str:
+    """The species row name the row's seam carries (an engine row such as
+    ``mp_wsm6@6`` when the selection transports more than the declared row,
+    e.g. CCPP TKE-EDMF's ``tke_edmf``)."""
+
+    return str(_suite_for_row(row_name)["microphysics"])
 
 
 # --------------------------------------------------------------------------

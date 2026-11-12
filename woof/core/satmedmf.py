@@ -112,6 +112,31 @@ def run_columns(inputs,*,dt=60.0,strict=True):
     device={key:cp.asarray(inputs[key],order="F") for key in _INPUTS}
     return {key:value.get() for key,value in run_device(device,dt=dt,strict=strict).items()}
 
+def column_scalar_names(state):
+    """Transported scalars the column mixes beside its four water slots and TKE."""
+    from woof.core.moist import extra_moist_species
+    from woof.core.passive_tracer_contract import TRACER_NAMES
+    return tuple(name for name in extra_moist_species(state) if name not in ("qv","qc","qr","qi","tke_edmf")+TRACER_NAMES)
+
+def held_rate_names(state,cfg):
+    """The coupled rate bank a positive PBL cadence holds between CCPP calls.
+
+    bldt=0 replaces the bank before every read, so it holds nothing.  A
+    positive cadence applies the TKE and scalar rates of the last call on the
+    steps between calls, exactly like the held R*BLTEN components, so a
+    restart must carry them (woof.io.restart._tracer_pbl_manifest)."""
+    if int(getattr(cfg,"bl_pbl_physics",0) or 0)!=901 or float(cfg.bldt)==0.0:
+        return ()
+    return ("tke_edmf",)+column_scalar_names(state)
+
+def held_rate_names_for_config(cfg):
+    """``held_rate_names`` from a host allocator probe (pricing, no device)."""
+    if int(getattr(cfg,"bl_pbl_physics",0) or 0)!=901 or float(cfg.bldt)==0.0:
+        return ()
+    import dataclasses
+    from woof.core.state import DomainState
+    return held_rate_names(DomainState(dataclasses.replace(cfg,nx=1,ny=1),array_module=np),cfg)
+
 def bind_physics_columns(atmosphere,fields,state,cfg,*,shortwave,longwave):
     """Bind WOOF mass arrays to the pinned GFS bottom-to-top column interface."""
     import cupy as cp

@@ -8116,8 +8116,6 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
             raise ValueError("CCPP TKE-EDMF requires nz >= 8; shorter columns cannot supply its mass-flux searches")
         if cfg.sf_sfclay_physics not in (1, 91):
             raise ValueError("CCPP TKE-EDMF requires sf_sfclay_physics=1 or 91; its stability closure divides by the fm/fh similarity denominators those layers publish")
-        if cfg.bldt != 0:
-            raise ValueError("CCPP TKE-EDMF requires bldt=0; positive cadence would retain a TKE tendency that the current extra-scalar restart stream does not serialize")
     validate_selector_couplings(cfg)
     validate_gbmpbl_config(cfg)
     validate_sase_config(cfg)

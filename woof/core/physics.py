@@ -2729,7 +2729,10 @@ class PhysicsDriver:
             else PhysicsTendencies.zeros(
                 state, optional_components=composed_components))
         from woof.core.passive_tracer_contract import mixed_tracers
-        names = mixed_tracers(cfg)
+        from woof.core.satmedmf import held_rate_names
+        # The CCPP TKE-EDMF held bank exists from construction so a restart
+        # into a fresh driver finds every key it restores (empty at bldt=0).
+        names = mixed_tracers(cfg) + held_rate_names(state, cfg)
         if names:
             self.pbl_tendencies.extra_scalars = {
                 name: cp.zeros_like(state.p) for name in names}
@@ -4145,9 +4148,12 @@ class PhysicsDriver:
         # In particular a skipped PBL call must not lose it when the
         # scalar/radiation sum uses a separate target.
         target.rw = pbl.rw
-        if cfg.tracer_opt == 2 or cfg.madwrf_opt == 2:
+        if (cfg.tracer_opt == 2 or cfg.madwrf_opt == 2
+                or (cfg.bl_pbl_physics == 901 and cfg.bldt != 0.0)):
             # Tracer rates are zeroed every step, then replaced only when
             # PBL runs. Unlike R*BLTEN, WRF does not hold these across calls.
+            # CCPP TKE-EDMF's TKE and scalar rates ARE held like R*BLTEN at
+            # a positive cadence, and the composed target must carry them.
             target.extra_scalars = getattr(pbl, "extra_scalars", None)
         # THE SECOND HALF OF THE MOMENTUM DEFECT.  These two lanes were
         # ASSIGNED from the PBL alone while every scalar lane below
@@ -6142,14 +6148,15 @@ class PhysicsDriver:
         state=self.state; f=self.fields; shape=state.p.shape
         inputs=bind_physics_columns(atmosphere,f,state,cfg,
                                    shortwave=self.rthratensw,longwave=self.rthratenlw)
-        out=run_device(inputs,dt=float(cfg.dt))
+        from woof.core.satmedmf import column_scalar_names
+        # WRF's dtbl: the model step at bldt=0, the held interval otherwise.
+        dtbl=float(cfg.dt) if cfg.bldt==0.0 else float(self.bldt_seconds)
+        out=run_device(inputs,dt=dtbl)
         for name,value in out.items():
             if not bool(cp.isfinite(value).all()):
                 raise FloatingPointError(f"CCPP TKE-EDMF returned non-finite {name}")
-        from woof.core.moist import extra_moist_species
-        from woof.core.passive_tracer_contract import TRACER_NAMES
-        scalar_names=tuple(name for name in extra_moist_species(state) if name not in ("qv","qc","qr","qi","tke_edmf") + TRACER_NAMES)
-        rates=recover_physics_rates(inputs,out,shape,float(cfg.dt),scalar_names=scalar_names)
+        scalar_names=column_scalar_names(state)
+        rates=recover_physics_rates(inputs,out,shape,dtbl,scalar_names=scalar_names)
         f["pblh"][...]=out["hpbl"].reshape(shape[1:]).astype(DTYPE)
         f["kpbl"][...]=out["kpbl"].reshape(shape[1:])
         f["exch_h"][...]=out["dkt"].T.reshape(shape).astype(DTYPE)
