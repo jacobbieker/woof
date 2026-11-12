@@ -1649,13 +1649,13 @@
     },
     {
       "path": "crates/simradar_cuda/src/lib.rs",
-      "bytes": 9539,
-      "sha256": "d8d0fccee0872a3828abfcd172a937e0ef04a4311b000f13bb8fa29fbf0315ff",
+      "bytes": 9719,
+      "sha256": "38e595f4fcd1e70d92cb2c25274b533c42dc3d172b6e0ad46d0372973c6baf1f",
       "origin_revision": "6b752c0a923d8fcef45d58f165b96a20886964d1",
       "origin_path": "crates/simradar_cuda/src/lib.rs",
       "upstream_sha256": "5b764a58b2bb8f6cf9123866802cdcb25e67f67b311d6031cb4a8d741bedc392",
       "origin": "vendoring",
-      "change": "AMD backend: portable canonical source and its digest; select HIP source compilation and architecture reporting through the namespaced driver adapter. CUDA artifact selection is retained."
+      "change": "AMD backend: portable canonical source and its digest; select HIP source compilation and architecture reporting through the namespaced driver adapter. CUDA artifact selection is retained. The HIP shim calls in CudaDeviceInfo are gated to Windows and Linux, the targets where cudarc is a dependency, so the crate builds on macOS."
     },
     {
       "path": "crates/simradar_cuda/src/prepared.rs",

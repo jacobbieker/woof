@@ -462,7 +462,22 @@ class HexWrfChemistry:
     def bind_seam(self, seam):
         """Hand the column seam's radiation the chemistry (WRF aer_ra_feedback): its RunConfig gains the
         chem keys, its state the rows and optics arrays, exactly as a WRF domain's radiation sees them
-        through woof.core.chem_radiation.prepare.  A no-op without feedback."""
+        through woof.core.chem_radiation.prepare.
+
+        Every run also takes from the seam what the WRF driver hands its chem processes beside the fields:
+        the land-surface parameter tables (Wesely deposition reads the run's land-use dataset, WRF's MMINLU,
+        from them) and, when a process reads it, the radiation-time GSW plane, which the WRF driver allocates
+        only for a chem run (woof.core.physics: ``"gsw" in chem_physics_reads(cfg)``) and the column seam's
+        own config names no chemistry."""
+        driver = getattr(seam, "_driver", None)
+        if driver is not None:
+            self.state.physics.noah_params = getattr(driver, "noah_params", None)
+            self.state.physics.noahmp_params = getattr(driver, "noahmp_params", None)
+            self.state.physics.ruc_params = getattr(driver, "ruc_params", None)
+            from woof.core.chem_context import chem_physics_reads
+            if "gsw" in chem_physics_reads(self.cfg) and "gsw" not in driver.fields:
+                import cupy as cp
+                driver.fields["gsw"] = cp.zeros((1, self.ncells), dtype=cp.float32)
         if not self.feedback:
             return
         from woof.core.chem_state import process_attr

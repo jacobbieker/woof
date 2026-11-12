@@ -13,6 +13,7 @@ that need the generator skip by name when it is not on the engine ladder.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -95,6 +96,11 @@ def _generate(engine: Path, out: Path, background_km: float) -> Path:
 def chain(tmp_path_factory) -> SimpleNamespace:
     """Generate, mint the vertical, cull all three: once for the module."""
 
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        pytest.skip("the cull door needs rw_mpas_stream, which links the system "
+                    "netCDF C library (rw-mpas feature system-netcdf) that the "
+                    "public CI runners do not carry, so build-native never "
+                    "builds it; run this on a machine that does")
     engine = _engine()
     root = tmp_path_factory.mktemp("register-vertical")
     grid = _generate(engine, root / "g.grid.nc", 1000.0)
