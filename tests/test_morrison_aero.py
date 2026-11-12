@@ -2,6 +2,7 @@
 import importlib.util
 from pathlib import Path
 import numpy as np
+import pytest
 from woof.core.morrison_aero import constant_words, MA_CONSTANT_NAMES, refuse_aercu_opt
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -95,6 +96,11 @@ def test_mp10_sources_remain_unchanged():
         ref = ("35232daceb2e55d7ae302e960469c2eca93bc71c"
                if path == "woof/core/morrison.py" else
                "4123f1916e3c95984862cd9b21f2fc1e8dd5f850")
+        if subprocess.run(["git","cat-file","-e",ref+":"+path],cwd=ROOT,
+                          capture_output=True).returncode:
+            pytest.skip(f"the commit {ref[:10]} is not in this clone (a shallow "
+                        "checkout, as on a hosted runner); the comparison needs "
+                        "full history")
         base=subprocess.check_output(["git","show",ref+":"+path],cwd=ROOT)
         assert (ROOT/path).read_bytes()==base
 
