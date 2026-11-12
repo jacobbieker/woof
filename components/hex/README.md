@@ -939,6 +939,34 @@ parent). It writes one intermediate per wrfout time and keeps every WRF mass
 level and the parent's Noah soil layers. A cull outside the parent's interior
 is refused, as are missing variables and duplicate times.
 
+### `woof go` on the hex model
+
+An experiment TOML with
+
+```toml
+[model]
+engine = "hex"
+```
+
+runs `woof go CONFIG` through `woof hex regional` (`woof.go_hex`). The one
+`[[domain]]` on its `[projection]` is the region: its outline becomes the drawn
+fine core and `dx` the fine spacing. `[fetch]` names the source and cycle,
+`run_seconds` the length (whole hours) and `history_interval_s` the history
+cadence. Physics selectors written in `[shared]` or the `[[domain]]`
+(`mp_physics = 6`, ...) go to `hex physics resolve`; with none, the run takes the
+hex default suite. go's stages map onto the door's: fetch to intermediate;
+prepare to mesh, init, lbc and contract; forecast to forecast; render to
+products. `--dry-run` prints the plan and the `woof hex regional` command.
+`--outdir`, `--cycle`, `--card`, `--prepare-only`, `--products none` and the
+output-format flags are read. Every other table, key and go flag is refused by
+name, with the parity-matrix item that will add it (nests, chemistry, ensembles,
+nudging, restarts, a WRF eta ladder or time step, ...). A TOML without `[model]`
+runs the WRF path exactly as before.
+
+The contract stage needs the hex helper `hex_contract_hostprep`, and the MPAS
+suite route needs the table decoders and `rw_mpas_physics_pool`. The release's
+Linux helper archive carries them; no macOS build exists yet.
+
 ### Placement and cycling
 
 `woof hex swath` decides where a fine grid should go: detection on
