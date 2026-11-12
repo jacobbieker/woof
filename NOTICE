@@ -796,13 +796,6 @@ scoped by routine: they cover exp, log, pow, cos and acos in
 glibc_flt64.cuh and nothing else in the UW kernel, whose remaining code is
 a transcription of WRF.
 
-MALI's RKIND 8 units also prepend woof/core/kernels/cr_tanh_flt64.cuh,
-CORE-MATH's correctly rounded binary64 tanh, "Copyright (c) 2023-2026
-Alexei Sibidanov, Cyprien Peignier, Paul Zimmermann" under MIT (the same
-permission text, licenses/LICENSE-CORE-MATH-binary64-MIT.txt). glibc 2.44
-carries this function as its own tanh. The header opens with its notice;
-the upstream file is kept verbatim at tools/oracle_libm/upstream/tanh.c.
-
 --------------------------------------------------------------------------
 
 Portable libm in Rust -- Arm optimized-routines and CORE-MATH
@@ -1623,6 +1616,15 @@ of those terms is licenses/LICENSE-CORE-MATH-MIT.txt. cldfra3.cu and
 farms.cu call that separately noticed helper. nssl2_shape_diagnostics.cu
 retains the same Sun FDLIBM e_log10f reduction as nssl2_diagnostics.cu;
 the generated FDLIBM scope below the existing libm notice includes both.
+NCAR MICM and TUV-x (chemistry)
+---------------------------------
+woof/chem_micm.py transcribes NCAR MICM's three-stage Rosenbrock solver and
+NCAR MUSICA's mechanism conversion, and the oracle fixtures under
+tests/data/micm_oracle and tests/data/tuvx_oracle (with
+tools/tuvx_oracle) derive from MUSICA, CheMPAS-A and NCAR TUV-x. Their
+Apache-2.0 grants, the MPAS licence for the CheMPAS-A fixture and the
+statement that no GPL text from TUV-x is copied are retained in
+licenses/NOTICE-NCAR-MICM.txt and licenses/NOTICE-NCAR-TUVX.txt.
 Independently written snow optics and layered snow/ice transfer
 ---------------------------------------------------------------
 Written from papers, not bitwise to WRF. New code uses Apache-2.0.
