@@ -3608,6 +3608,13 @@ def execute_forecast(
         print(json.dumps({"tc_lake_mask": tc_lake_receipt}), flush=True)
     from woof.hex.chem_transport import attach as attach_chemistry
     attach_chemistry(stack["backend"], host, stack["driver"])
+    # --wrf-hydro (woof.wrf_hydro_route): the routing on its own LSM grid through the conservative cell <-> grid
+    # exchange (woof.hex.wrf_hydro_hex); returns at once unless the launch asked for it.
+    from woof.hex.wrf_hydro_hex import attach_host as attach_wrf_hydro
+    wrf_hydro = attach_wrf_hydro(stack["backend"], host, cycling=cycling,
+                                 start_time=datetime.strptime(str(schedule["start_time"]), "%Y-%m-%d_%H:%M:%S"))
+    if wrf_hydro is not None:
+        print(json.dumps({"wrf_hydro": wrf_hydro.remap.receipt}, default=str), flush=True)
     if host.get("wind_farms") not in (None, "", "off"):
         from woof.hex.wind_farm import attach_arwen
         attach_arwen(stack["backend"], host, stack["driver"], output_root=output_root)

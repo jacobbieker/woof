@@ -1567,6 +1567,12 @@ def _run_native_dynamics(arguments, config, layout, payload, streams, library,
     ``execution`` supplies inputs, an optional driver factory and process-local hooks. It does not
     relax the native singleton or the resident glue's global-domain admission.
     """
+    from woof.wrf_hydro_route import configured as wrf_hydro_namelist
+    if wrf_hydro_namelist() is not None:
+        # THE BREAKAGE THIS PREVENTS: MPAS's own Noah and Noah-MP on this route take no WRF_HYDRO planes, so the
+        # routing would read no runoff and hand back no head while the run carried the coupling's name.
+        raise ValueError('--wrf-hydro couples to the hex WOOF route (--physics-suite arwen_mpas_column, whose '
+                         'WRF Noah-MP carries the WRF_HYDRO hooks); the MPAS v8.4.2 suite\'s land surface has none yet')
     from .config_v842 import NativeMpasDycoreConfigV842
     from ..cuda_driver import CudaDryDycoreDriver
     from ..cuda_backend import KernelCache,require_cuda

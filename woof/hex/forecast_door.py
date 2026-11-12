@@ -4177,7 +4177,10 @@ def mpas_suite_lts_refusal(arguments: argparse.Namespace, environ=None) -> str |
 def run_forecast(arguments: argparse.Namespace) -> int:
     from woof.output_formats import command_scope
     from .wave_options import environment as wave_environment
-    with wave_environment(arguments), command_scope(arguments, engine="woof hex") as scope:
+    from woof.wrf_hydro_route import launch_scope as wrf_hydro_scope
+    with wave_environment(arguments), wrf_hydro_scope(getattr(arguments, "wrf_hydro", None),
+                                                      getattr(arguments, "wrf_hydro_output", None)), \
+            command_scope(arguments, engine="woof hex") as scope:
         result = _run_forecast_with_outputs(arguments)
         return scope.finish(result) if scope else result
 
@@ -5367,6 +5370,10 @@ def add_forecast_arguments(parser: argparse.ArgumentParser) -> None:
                         help="N aerosol species and GPU mixing/deposition/settling inputs (chemistry/v1 JSON)")
     parser.add_argument("--wind-farms", default=None, metavar="uswtdb|TABLE|off",
                         help="opt-in Fitch turbine drag and TKE from the shared turbine tables")
+    # --wrf-hydro / --wrf-hydro-output: WRF-Hydro's routing on its own LSM grid, coupled to the hex land surface
+    # through the conservative cell <-> grid exchange (woof.hex.wrf_hydro_hex; WOOF route only).
+    from woof.wrf_hydro_route import add_arguments as add_wrf_hydro_arguments
+    add_wrf_hydro_arguments(parser)
     parser.add_argument(
         "--source-table", type=Path, default=None, metavar="FILE",
         help="a point-source table the selected row's seam releases from "
