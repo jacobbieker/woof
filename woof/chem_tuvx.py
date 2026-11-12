@@ -968,3 +968,168 @@ class Radiators:
         od = dscat_accum + dabs_accum
         ssa = np.where(dscat_accum == KFLOOR, KFLOOR, dscat_accum / od)
         return RadiatorState(od, ssa, asym_accum / dscat_accum)
+
+
+# ------------------------------------------------------------------------------------------------------------
+# Delta-Eddington solver (src/radiative_transfer/solvers/delta_eddington.F90, solver.F90 slant_optical_depth,
+# linear_algebras/linpack.F90 tridiag): the direct, diffuse-up and diffuse-down actinic flux per edge and bin,
+# for unit extraterrestrial flux.  Every wavelength bin is its own two-stream problem; columns and bins are
+# batched together and the layer loops run in TUV-x's order.
+
+#: slant_optical_depth's "beam never arrives" value: the default-REAL literal 1.0e36, promoted
+_NO_BEAM = float(np.float32(1.0e36))
+
+
+class RadiationField:
+    """radiation_field_t: ``fdr``, ``fup``, ``fdn`` (and ``edr``, ``eup``, ``edn``), each (ncol, nedge, nbin),
+    edges surface first."""
+
+    def __init__(self, **parts):
+        self.__dict__.update(parts)
+
+    def scaled(self, factor):
+        """apply_scale_factor: every part times ``factor`` (per column)."""
+        f = np.asarray(factor, dtype=np.float64).reshape(-1, 1, 1)
+        return RadiationField(**{k: v * f for k, v in self.__dict__.items()})
+
+
+def _slant_optical_depth(i, nid, dsdh_row, taun):
+    """slant_optical_depth for edge ``i`` (from the top): nid (ncol,), dsdh_row (ncol, nlayer), taun (ncol,
+    nlayer, nbin), the layers top first."""
+    total = np.zeros((taun.shape[0], taun.shape[2]))
+    single = np.minimum(nid, i)
+    for j in range(1, int(nid.max(initial=0)) + 1):
+        d = dsdh_row[:, j - 1, None]
+        t = taun[:, j - 1]
+        term = np.where((j <= single)[:, None], t * d, 2.0 * t * d)
+        total = np.where((j <= nid)[:, None], total + term, total)
+    return np.where((nid < 0)[:, None], _NO_BEAM, total)
+
+
+def tridiag(a, b, c, r):
+    """linpack tridiag (Thomas algorithm) on the last axis but one: a, b, c, r (..., n, m)."""
+    n = b.shape[-2]
+    cp = np.empty_like(b)
+    u = np.empty_like(b)
+    cp[..., 0, :] = c[..., 0, :] / b[..., 0, :]
+    u[..., 0, :] = r[..., 0, :] / b[..., 0, :]
+    for i in range(1, n):
+        denom = 1.0 / (b[..., i, :] - a[..., i, :] * cp[..., i - 1, :])
+        cp[..., i, :] = c[..., i, :] * denom
+        u[..., i, :] = (r[..., i, :] - a[..., i, :] * u[..., i - 1, :]) * denom
+    for i in range(n - 2, -1, -1):
+        u[..., i, :] = u[..., i, :] - cp[..., i, :] * u[..., i + 1, :]
+    return u
+
+
+def surface_albedo(config, grid):
+    """The "surface albedo" profile on the wavelength bins (a from-config uniform value)."""
+    profiles = {p["name"]: p for p in config["profiles"]}
+    entry = profiles["surface albedo"]
+    if entry.get("type") != "from config file" or "uniform value" not in entry:
+        raise TuvxPortError("only a uniform from-config surface albedo is ported")
+    value = float(entry["uniform value"])
+    return (np.full(grid.ncells, value) + np.full(grid.ncells, value)) * 0.5
+
+
+def delta_eddington(state: RadiatorState, geometry: Geometry, albedo) -> RadiationField:
+    """solver_delta_eddington_t update_radiation_field (unit pifs, no surface emission)."""
+    largest = LARGEST
+    eps = 1.0e-3
+    od, ssa, asym = state.od[:, ::-1], state.ssa[:, ::-1], state.g[:, ::-1]      # top first
+    ncol, n, nbin = od.shape
+    mu = np.cos(geometry.sza * D2R)[:, None]
+    rsfc = np.asarray(albedo, dtype=np.float64)[None, :]
+    nid, dsdh = geometry.nid, geometry.dsdh
+    pifs, fdn0, surfem = 1.0, 0.0, 0.0
+    f = asym * asym
+    gi = (asym - f) / (1.0 - f)
+    omi = (1.0 - f) * ssa / (1.0 - ssa * f)
+    taun = (1.0 - ssa * f) * od
+    tauc = np.zeros((ncol, n + 1, nbin))
+    tausla = np.zeros((ncol, n + 1, nbin))
+    mu2 = np.full((ncol, n + 1, nbin), 1.0 / np.sqrt(largest))
+    below = (mu < 0.0)[:, 0]
+    if below.any():
+        tausla[:, 0] = np.where(below[:, None], _slant_optical_depth(0, nid[:, 0], dsdh[:, 0], taun), 0.0)
+    e1, e2, e3, e4 = (np.empty((ncol, n, nbin)) for _ in range(4))
+    cup, cdn, cuptn, cdntn = (np.empty((ncol, n, nbin)) for _ in range(4))
+    for i in range(1, n + 1):
+        g = gi[:, i - 1]
+        om = omi[:, i - 1]
+        tauc[:, i] = tauc[:, i - 1] + taun[:, i - 1]
+        tempg = np.minimum(np.abs(g), 1.0 - PRECIS)
+        g = np.copysign(tempg, g)
+        om = np.minimum(om, 1.0 - PRECIS)
+        tausla[:, i] = _slant_optical_depth(i, nid[:, i], dsdh[:, i], taun)
+        reach = (nid[:, i] >= 0)[:, None]
+        same = tausla[:, i] == tausla[:, i - 1]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ratio = (tauc[:, i] - tauc[:, i - 1]) / (tausla[:, i] - tausla[:, i - 1])
+        ratio = np.copysign(np.maximum(np.abs(ratio), 1.0 / np.sqrt(largest)), ratio)
+        mu2[:, i] = np.where(reach, np.where(same, np.sqrt(largest), ratio), mu2[:, i])
+        gam1 = (7.0 - om * (4.0 + 3.0 * g)) / 4.0
+        gam2 = -(1.0 - om * (4.0 - 3.0 * g)) / 4.0
+        gam3 = (2.0 - 3.0 * g * mu) / 4.0
+        gam4 = 1.0 - gam3
+        lam = np.sqrt(gam1 * gam1 - gam2 * gam2)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            bgam = np.where(gam2 != 0.0, (gam1 - lam) / gam2, 0.0)
+        expon = np.exp(-(lam * taun[:, i - 1]))
+        e1[:, i - 1] = 1.0 + bgam * expon
+        e2[:, i - 1] = 1.0 - bgam * expon
+        e3[:, i - 1] = bgam + expon
+        e4[:, i - 1] = bgam - expon
+        expon0 = np.exp(-tausla[:, i - 1])
+        expon1 = np.exp(-tausla[:, i])
+        m2 = mu2[:, i]
+        divisr = lam * lam - 1.0 / (m2 * m2)
+        temp = np.maximum(eps, np.abs(divisr))
+        divisr = np.copysign(temp, divisr)
+        up = om * pifs * ((gam1 - 1.0 / m2) * gam3 + gam4 * gam2) / divisr
+        dn = om * pifs * ((gam1 + 1.0 / m2) * gam4 + gam2 * gam3) / divisr
+        cup[:, i - 1] = up * expon0
+        cdn[:, i - 1] = dn * expon0
+        cuptn[:, i - 1] = up * expon1
+        cdntn[:, i - 1] = dn * expon1
+    ssfc = rsfc * mu * np.exp(-tausla[:, n]) * pifs + surfem
+    mrows = 2 * n
+    a, b, d, e = (np.empty((ncol, mrows, nbin)) for _ in range(4))
+    a[:, 0] = 0.0
+    b[:, 0] = e1[:, 0]
+    d[:, 0] = -e2[:, 0]
+    e[:, 0] = fdn0 - cdn[:, 0]
+    # odd rows (1-based 3, 5, ..., mrows - 1) and even rows (2, 4, ..., mrows - 2), layer i (0-based) above i + 1
+    for i in range(n - 1):
+        row = 2 * i + 2                                  # 0-based index of 1-based row 2i + 3
+        a[:, row] = e2[:, i] * e3[:, i] - e4[:, i] * e1[:, i]
+        b[:, row] = e1[:, i] * e1[:, i + 1] - e3[:, i] * e3[:, i + 1]
+        d[:, row] = e3[:, i] * e4[:, i + 1] - e1[:, i] * e2[:, i + 1]
+        e[:, row] = e3[:, i] * (cup[:, i + 1] - cuptn[:, i]) + e1[:, i] * (cdntn[:, i] - cdn[:, i + 1])
+        row = 2 * i + 1                                  # 0-based index of 1-based row 2i + 2
+        a[:, row] = e2[:, i + 1] * e1[:, i] - e3[:, i] * e4[:, i + 1]
+        b[:, row] = e2[:, i] * e2[:, i + 1] - e4[:, i] * e4[:, i + 1]
+        d[:, row] = e1[:, i + 1] * e4[:, i + 1] - e2[:, i + 1] * e3[:, i + 1]
+        e[:, row] = (cup[:, i + 1] - cuptn[:, i]) * e2[:, i + 1] - (cdn[:, i + 1] - cdntn[:, i]) * e4[:, i + 1]
+    a[:, mrows - 1] = e1[:, n - 1] - rsfc * e3[:, n - 1]
+    b[:, mrows - 1] = e2[:, n - 1] - rsfc * e4[:, n - 1]
+    d[:, mrows - 1] = 0.0
+    e[:, mrows - 1] = ssfc - cuptn[:, n - 1] + rsfc * cdntn[:, n - 1]
+    y = tridiag(a, b, d, e)
+    fdr = np.empty((ncol, n + 1, nbin))
+    edn = np.empty_like(fdr)
+    eup = np.empty_like(fdr)
+    fdr[:, 0] = pifs * np.exp(-tausla[:, 0])
+    edn[:, 0] = fdn0
+    eup[:, 0] = y[:, 0] * e3[:, 0] - y[:, 1] * e4[:, 0] + cup[:, 0]
+    for lev in range(1, n + 1):
+        j, row = lev - 1, 2 * (lev - 1)
+        fdr[:, lev] = pifs * np.exp(-tausla[:, lev])
+        edn[:, lev] = y[:, row] * e3[:, j] + y[:, row + 1] * e4[:, j] + cdntn[:, j]
+        eup[:, lev] = y[:, row] * e1[:, j] + y[:, row + 1] * e2[:, j] + cuptn[:, j]
+    edr = mu[:, :, None] * fdr
+    fdn = edn / 0.5
+    fup = eup / 0.5
+    flip = lambda v: v[:, ::-1].copy()  # noqa: E731
+    return RadiationField(fdr=flip(fdr), fup=flip(fup), fdn=flip(fdn), edr=flip(edr), eup=flip(eup),
+                          edn=flip(edn))
