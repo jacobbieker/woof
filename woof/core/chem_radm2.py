@@ -270,6 +270,24 @@ def cold_start(ctx):
         ctx.field(row)[...] = cp.asarray(profile[row.name], dtype=cp.float32)
 
 
+def boundary_inflow(table, z, alt, convfac):
+    """WRF's lateral inflow for the RADM2 gases without an enabled boundary
+    source (have_bcs_chem false: flow_dep_bdy_chem's i_bdy_method 1,
+    bdy_chem_value at the inflow cell's mass-level height z), ppmv.
+    Any array shape; alt and convfac are unused (the routine reads none)."""
+    from woof.core.chem_gas_profile import radm2_boundary_value
+
+    del alt, convfac
+    enabled = set(getattr(table, "enabled_sources", ()))
+    names = [row.name for row in rows(table)
+             if not any(ref["source"] in enabled for ref in row.boundary)]
+    if not names:
+        return {}
+    chem_opt = 2 if table.rows_for(SORGAM_KEY) else 1
+    values = radm2_boundary_value(z, chem_opt=chem_opt)
+    return {name: values[name] for name in names}
+
+
 _SO2SO4 = None
 
 

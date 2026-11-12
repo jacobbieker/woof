@@ -140,6 +140,9 @@ def attach_chem_state(state, cfg, xp) -> None:
     if table is None:
         return
     chem = ChemState(table, cfg.nz, cfg.ny, cfg.nx, xp)
+    # The domain's configuration, for the fresh-run cold start a history
+    # frame written before the first step triggers (chem_driver).
+    chem.cfg = cfg
     state.chem = chem
     chem.bind(state)
     from woof.core.chem_context import LEDGER_BUCKETS

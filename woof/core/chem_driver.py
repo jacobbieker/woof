@@ -212,6 +212,28 @@ def _cold_start(state, cfg, processes) -> None:
         module.cold_start(ctx)
     for row in chem.transported:
         getattr(state, row.time_attr)[...] = getattr(state, row.state_attr)
+    # The outputs a process derives every step (SORGAM's PM sums) describe
+    # the initial state too, so the first history frame shows them.
+    for _key, module in processes:
+        refresh = getattr(module, "refresh_output", None)
+        if refresh is not None:
+            refresh(state)
+
+
+def ensure_cold_start(state, cfg=None) -> None:
+    """Run the fresh-run cold starts now if they have not run (see
+    :func:`_cold_start`); the history writer calls it before the first
+    frame.  ``cfg`` defaults to the one the chem state was built with."""
+    chem = getattr(state, "chem", None)
+    if chem is None or getattr(chem, "cold_start_done", False):
+        return
+    cfg = cfg if cfg is not None else getattr(chem, "cfg", None)
+    if cfg is None:
+        return
+    processes = getattr(chem, "processes", None)
+    if processes is None:
+        processes = chem.processes = chem_processes(chem.table)
+    _cold_start(state, cfg, processes)
 
 
 def chem_pre_transport(state, cfg, dt: float) -> None:
