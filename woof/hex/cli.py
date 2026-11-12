@@ -684,6 +684,8 @@ def _main_once(argv: Sequence[str]) -> int:
         print(f"woof hex: the {_command_word(argv)} door {ENGINE_MISSING} ({error})", file=sys.stderr)
         return 2
     arguments = parser.parse_args(argv)
+    # The door's own command line, for `woof resume` / `woof branch` (woof.hex.continuation).
+    arguments._door_argv = list(argv)
     try:
         if hasattr(arguments, "output_format"):
             from woof.output_formats import options, require_binary
