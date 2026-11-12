@@ -31,8 +31,8 @@ List the whole registry with `woof prep --list-sources`, or one row with
 | `icon-d2` | `icon-2km`, `dwd-icon-d2` | 1 h | f048 | lat 44.0..57.3, lon 0.0..17.3, 542,040-cell icosahedral mesh at nominally 2.2 km |
 | `gfs` | `gfs-0p25`, `gfs-0.25` | 3 h | f384 | global |
 | `gfs-pressure` | -- | 3 h | f120 | global, the whole 0.25 degree pressure product (all five hydrometeor species) |
-| `hafs-a` | `hfsa` | 3 h | f126 | HAFS-A parent or moving storm nest; its fetch needs `--source-parameters STORM=<ATCF id>` |
-| `hafs-b` | `hfsb` | 3 h | f126 | HAFS-B parent or moving storm nest; its fetch needs `--source-parameters STORM=<ATCF id>` |
+| `hafs-a` | `hfsa` | 3 h | f126 | HAFS-A parent or moving storm nest; `woof domain` and `woof fetch` need `--source-parameters STORM=<ATCF id>` |
+| `hafs-b` | `hfsb` | 3 h | f126 | HAFS-B parent or moving storm nest; `woof domain` and `woof fetch` need `--source-parameters STORM=<ATCF id>` |
 | `gdas` | `gdas-0p25`, `gdas-0.25` | 1 h | f009 | global |
 | `gefs` | `gefs-ensemble` | 3 h | f384 | global |
 | `aigfs` | `ai-gfs` | 6 h | f384 | global |

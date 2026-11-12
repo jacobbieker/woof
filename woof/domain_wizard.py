@@ -7771,11 +7771,18 @@ def domain_main(args, *, sizing_budget: SizingBudget | None = None,
     from woof.fetch import era5_combined_name, validate_fetch_hints
     acquisition = {"source": args.source, "cycle": args.cycle,
                    "hours": args.hours, "forecast_start_hour": start_hour}
-    for key in ("member", "cadence", "era5_product", "era5_provider",
+    for key in ("member", "cadence", "era5_product", "era5_provider", "source_parameters",
                 *(hint[0] for hint in get_source_adapter(args.source).acquisition_hints)):
         value = getattr(args, key, None)
         if value is not None:
             acquisition[key] = value
+    from woof import fetch_routes as _routes
+    if args.source in _routes.route_ids():
+        # Resolved here so a route that needs a parameter only the user can
+        # supply (HAFS's storm id) is refused by name BEFORE a [fetch] table
+        # its own fetch would refuse is written.
+        _routes.resolve_parameters(_routes.route_for(args.source),
+                                   acquisition.get("source_parameters"))
     # The spacing this window's own ladder publishes, when it is coarser
     # than the source's usual one (a 240 h IFS window runs past f144, where
     # the files come every 6 h).  Taken as if it had been asked for, so the
@@ -8238,7 +8245,7 @@ def domain_main(args, *, sizing_budget: SizingBudget | None = None,
         "out": _relative_or_absolute(data_dir, Path.cwd()),
     }
     from woof import fetch_routes
-    for key in ("era5_product", "era5_provider", "retrieve", "member",
+    for key in ("era5_product", "era5_provider", "retrieve", "member", "source_parameters",
                 *(hint[0] for hint in get_source_adapter(args.source).acquisition_hints)):
         if key in acquisition:
             fetch_hints[key] = acquisition[key]
@@ -8592,6 +8599,8 @@ def domain_main(args, *, sizing_budget: SizingBudget | None = None,
                             if start_hour else "")
                          + (f"--member {fetch_hints['member']} "
                              if "member" in fetch_hints else "")
+                         + (f"--source-parameters {shlex.quote(str(fetch_hints['source_parameters']))} "
+                            if "source_parameters" in fetch_hints else "")
                          + "".join(f"--{key.replace('_', '-')} {shlex.quote(str(fetch_hints[key]))} "
                                    for key, *_ in get_source_adapter(args.source).acquisition_hints
                                    if key in fetch_hints)
@@ -9254,6 +9263,11 @@ def register_cli(subparsers) -> None:
                              "the spacing of the history files handed to woof prep")
     parser.add_argument("--member", default=None,
                         help="ensemble trajectory member; defaults to the route's control")
+    parser.add_argument("--source-parameters", default=None, metavar="KEY=VALUE,...",
+                        help="values for the parameters the source's published object names carry, "
+                             "as `woof fetch --source-parameters` takes them (HAFS: STORM=<ATCF "
+                             "basin-coded storm id, e.g. 09l>); written into the [fetch] table and "
+                             "the printed fetch command")
     parser.add_argument("--forecast-start-hour", type=int, default=None,
                         metavar="K",
                         help="initialize the run from the cycle's f{K} "
