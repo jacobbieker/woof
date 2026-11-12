@@ -188,8 +188,10 @@ def irrigation_cells(geometry, assigner, land: np.ndarray, dataset, *,
         for k, cell in enumerate(rest):
             i0, j0 = int(np.floor(xs[k])), int(np.floor(ys[k]))
             patch = dataset.read_window(i0, i0 + 1, j0, j0 + 1).values()
-            if np.all(np.isfinite(patch)):
-                out[cell] = float(patch.mean())
+            valid = patch[np.isfinite(patch)]
+            if valid.size:
+                # average_4pt averages the valid points among the four.
+                out[cell] = float(valid.mean())
                 four += 1
                 continue
             ci, cj = int(np.rint(xs[k])), int(np.rint(ys[k]))

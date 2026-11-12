@@ -467,3 +467,21 @@ def test_irrigation_is_geogrids_gcell_then_4pt_with_water_masked():
     assert out[0] > np.float32(10.0) and out[1] == np.float32(10.0)
     assert out[2] == np.float32(0.0)  # water: masked, filled 0
     assert receipt["cells_average_4pt"] == 1
+
+
+def test_the_four_point_fallback_averages_the_valid_points():
+    from woof.hex import surface_statics as ss
+
+    values = np.full((20, 20), 10.0)
+    values[10, 15] = np.nan          # one missing point in cell 0's patch
+    values[10, 16] = 30.0
+    lat = np.array([40.105, 40.0])
+    lon = np.array([-99.845, -99.99])
+    centres = _xyz(lat, lon)
+    geometry = SimpleNamespace(n_cells=2, xyz=centres, vertex_xyz=centres)
+    assigner = _NearestAssigner(centres)
+    assigner.assign = lambda xyz: np.ones(len(np.asarray(xyz).reshape(-1, 3)), int)
+    out, receipt = ss.irrigation_cells(geometry, assigner, np.array([True, False]),
+                                       _Source(values))
+    assert out[0] == np.float32((30.0 + 10.0 + 10.0) / 3)
+    assert receipt["cells_average_4pt"] == 1
