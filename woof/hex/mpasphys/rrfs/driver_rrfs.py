@@ -371,6 +371,10 @@ def resolve_namelist(text: str, *, backends: Mapping[str, str] | None = None,
     if nwp.parse_flag(groups):
         raise ValueError(f"&{nwp.GROUP} {nwp.OPTION} is not available on the RRFS fork route; "
                          "it is an MPAS-A v8.4.2 suite-route option")
+    from ...mpasdiag import tslist_v842 as tslist
+    if tslist.resolve(groups) is not None:
+        raise ValueError(f"&{tslist.GROUP} {tslist.OPTION} is not available on the RRFS fork route; "
+                         "it is an MPAS-A v8.4.2 suite-route option")
     from ...mpasdiag import plevel_diag_v842 as plevel
     if plevel.resolve(groups) is not None:
         raise ValueError(f"&{plevel.GROUP} {plevel.P_OPTION}/{plevel.Z_OPTION} are not available on the RRFS fork "
