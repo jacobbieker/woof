@@ -1859,7 +1859,10 @@ def build_forecast_constructor_values(
 
     column_refusal = hex_column_level_refusal(
         int(N_LEVELS),
-        microphysics=_row_for_scheme(config.config_microp_scheme).engine_scheme,
+        # An engine-derived row ("mp_wsm6@6", the declared row plus a PBL
+        # scalar) runs the declared row's microphysics kernel.
+        microphysics=_row_for_scheme(
+            str(config.config_microp_scheme).split("@", 1)[0]).engine_scheme,
         pbl=config.config_pbl_scheme,
         p_top_pa=float(p_top_pa),
     )
