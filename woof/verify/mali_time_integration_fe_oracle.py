@@ -101,6 +101,14 @@ OUTPUTS = tuple((pool, name) for pool, name, kind, _ in FIELDS
     ("mesh", "deltat"), ("mesh", "allowableDtACFL"), ("mesh", "allowableDtDCFL"))
 #: refused at RKIND 8 (glibc's binary64 atan): not in the r8 fixture
 R8_REFUSED = (("velocity", "eTheta"),)
+#: The fixture "precision" of the RKIND 8 cases run under the opt-in glibc
+#: 2.39 sin/cos/atan transcription (WOOF_GLIBC239_LIBM64=1): RKIND 8 with
+#: nothing refused, its words in oracle-r8-glibc239.npz
+R8_GLIBC239 = "r8-glibc239"
+#: the cases whose RKIND 8 configuration the opt-in lifts: the strain-rate
+#: angle (every SIA case), the sphere, 'seroussi', the SHMIP C and D forcings
+GLIBC239_CASES = ("sia_temperature_fo", "none_temperature_no_tracers", "sia_no_thermal_sphere",
+                  "sgh_overburden_shmip", "sgh_shmip_d")
 
 #: (name, seed, nCells, nVertLevels, overrides of BASE_CONFIG)
 CASES = (
@@ -202,7 +210,8 @@ def field_shape(case: dict, shape: tuple) -> tuple[int, ...]:
     return tuple(case["dims"][s] if isinstance(s, str) else s for s in shape)
 
 
-def make_case(name: str, seed: int, n_cells: int, n_levels: int, overrides: dict, precision: str = "r4") -> dict:
+def make_case(name: str, seed: int, n_cells: int, n_levels: int, overrides: dict, precision: str = "r4",
+              glibc239: bool = False) -> dict:
     """One deterministic case: grounded and floating ice, thin ice and open
     ocean on a random mesh, with an ice sheet's magnitudes.
 
@@ -227,7 +236,7 @@ def make_case(name: str, seed: int, n_cells: int, n_levels: int, overrides: dict
     ne, nv, me, me2 = 3 * nc, 2 * nc, 7, 10
     config = dict(BASE_CONFIG, **{k: v for k, v in overrides.items() if not k.startswith("_")})
     bed = overrides.get("_bed", (-1200.0, 900.0))
-    if precision == "r8":
+    if precision == "r8" and not glibc239:
         config.update(R8_OVERRIDES)
         config["config_basal_mass_bal_float"] = R8_FLOAT_MELT.get(config["config_basal_mass_bal_float"],
                                                                    config["config_basal_mass_bal_float"])
@@ -315,7 +324,7 @@ def make_case(name: str, seed: int, n_cells: int, n_levels: int, overrides: dict
             "basalConductiveFlux": uniform(-1.0, 1.0, nc), "basalPmpTemperature": uniform(-1.0, 1.0, nc),
         },
     }
-    case = {"name": name, "precision": precision, "dims": dims, "config": config,
+    case = {"name": name, "precision": precision, "glibc239": glibc239, "dims": dims, "config": config,
             "clock": (int(400 * 86400), int(400 * 86400 + 20 * 86400)), "pools": pools}
     scratch = {}
     for pool, field, kind, shape in FIELDS:
@@ -342,7 +351,15 @@ def make_case(name: str, seed: int, n_cells: int, n_levels: int, overrides: dict
 
 
 def cases(precision: str = "r4") -> list[dict]:
+    """The cases at 'r4', 'r8' or :data:`R8_GLIBC239` (RKIND 8 under the opt-in)."""
+    if precision == R8_GLIBC239:
+        return [make_case(*row, precision="r8", glibc239=True) for row in CASES if row[0] in GLIBC239_CASES]
     return [make_case(*row, precision=precision) for row in CASES]
+
+
+def refused(case: dict) -> tuple:
+    """The outputs ``case`` leaves out: the RKIND 8 refusals, unless it runs under the opt-in."""
+    return R8_REFUSED if case["precision"] == "r8" and not case.get("glibc239") else ()
 
 
 def _real(case: dict) -> np.dtype:
@@ -395,7 +412,7 @@ def read_outputs(raw: bytes, case: dict) -> dict[str, np.ndarray]:
     (:data:`OUTPUTS`, without the RKIND 8 refusals), plus the error words."""
     head = np.frombuffer(raw, "<i4", 3, 0)
     out = {"errInit": head[0:1].copy(), "errStep": head[1:2].copy(), "logErrors": head[2:3].copy()}
-    off, keep = 12, set(OUTPUTS) - (set(R8_REFUSED) if case["precision"] == "r8" else set())
+    off, keep = 12, set(OUTPUTS) - set(refused(case))
     for pool, name, kind, shape in FIELDS:
         s = field_shape(case, shape) if kind != "d" else ()
         dtype = np.dtype("<i4") if kind in "id" else _real(case)
@@ -439,9 +456,8 @@ def run_gpu(case: dict) -> dict[str, np.ndarray]:
     c = case["config"]
     dev = {pool: {name: cp.asarray(np.ascontiguousarray(value).reshape(np.shape(value) or (1,)))
                   for name, value in case["pools"][pool].items()} for pool in POOLS}
-    if case["precision"] == "r8":
-        for pool, name in R8_REFUSED:
-            del dev[pool][name]
+    for pool, name in refused(case):
+        del dev[pool][name]
     mesh = dict(dev["mesh"], nCellsSolve=case["dims"]["nCellsSolve"], nEdgesSolve=case["dims"]["nEdgesSolve"])
     t, g = dev["thermal"], dev["geometry"]
     # li_thermal_init on a restart: with 'lapse', the surface air temperature
@@ -459,7 +475,7 @@ def run_gpu(case: dict) -> dict[str, np.ndarray]:
                           seconds_to_next_force_time=ring - now)
     out = {}
     for pool, name in OUTPUTS:
-        if case["precision"] == "r8" and (pool, name) in R8_REFUSED:
+        if (pool, name) in refused(case):
             continue
         source = mesh if pool == "mesh" else dev[pool]
         value = cp.asnumpy(source[name])

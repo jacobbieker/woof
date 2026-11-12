@@ -104,14 +104,20 @@ def test_a_mutated_hydrology_order_is_caught(monkeypatch, precision, original, m
 
 
 @requires_gpu
-def test_options_the_model_rejects_and_r8_shmip_are_refused():
+def test_options_the_model_rejects_and_r8_shmip_are_refused(monkeypatch):
     from woof.hex.errors import ConfigurationRefusal
     from woof.hex.mpas_ice import subglacial_hydro_v842 as sg
+    monkeypatch.delenv("WOOF_GLIBC239_LIBM64", raising=False)
     config = next(c for c in fo.cases() if c["name"] == "sgh_sheet_cavity")["config"]
     for knob, value in (("config_SGH_basal_melt", "ismip6"), ("config_SGH_pressure_calc", "flotation"),
                         ("config_SGH_tangent_slope_calculation", "upwind"), ("config_SGH_shmip_forcing", "E1")):
         with pytest.raises(ConfigurationRefusal, match=knob):
             sg.check_config(dict(config, **{knob: value}), "r4")
-    with pytest.raises(ConfigurationRefusal, match="RKIND 8"):
+    with pytest.raises(ConfigurationRefusal, match="RKIND 8.*WOOF_GLIBC239_LIBM64=1"):
         sg.check_config(dict(config, config_SGH_shmip_forcing="C1"), "r8")
     sg.check_config(dict(config, config_SGH_shmip_forcing="C1"), "r4")
+    # the opt-in glibc 2.39 transcription lifts the RKIND 8 refusal (its words:
+    # tests/test_mali_time_integration_fe_parity.py, the r8-glibc239 fixture)
+    monkeypatch.setenv("WOOF_GLIBC239_LIBM64", "1")
+    sg.check_config(dict(config, config_SGH_shmip_forcing="C1"), "r8")
+    sg.check_config(dict(config, config_SGH_shmip_forcing="D3"), "r8")

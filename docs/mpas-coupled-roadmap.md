@@ -143,7 +143,11 @@ Ordered by how self-contained each piece is:
    (Arm optimized-routines, MIT), matched to the oracle host's glibc. Every
    ported MALI piece is word-exact at RKIND 4 and RKIND 8; at RKIND 8 the
    floating melt 'seroussi' (`sin`) is refused by name; 'mismip' (`tanh`) runs
-   on CORE-MATH's correctly rounded `tanh`, which glibc 2.44 carries.
+   on CORE-MATH's correctly rounded `tanh`, which glibc 2.44 carries. The
+   RKIND 8 refusals that rest on glibc's binary64 `sin`, `cos` and `atan`
+   (this one and those in 2 and 4) are lifted by an opt-in LGPL
+   transcription of glibc's own (`WOOF_GLIBC239_LIBM64=1` in a source
+   checkout; `tools/glibc239_libm_gpu`, NOTICE), off by default and in no wheel.
 2. Thickness and tracer advection (`mpas_li_advection.F`) and the
    forward-Euler time integration. The diagnostics advection reads (masks,
    geometry, layer thickness, layer velocity and its CFL step) are ported,
@@ -159,7 +163,8 @@ Ordered by how self-contained each piece is:
    the step: the
    'simple' velocity solver, and at RKIND 8 the sphere's reconstruction
    (glibc's binary64 `cos`/`sin`) and the strain-rate angle `eTheta`
-   (glibc's binary64 `atan`, LGPL and not correctly rounded).
+   (glibc's binary64 `atan`, LGPL and not correctly rounded), unless the
+   opt-in glibc transcription is on.
 3. The thermal solver (`mpas_li_thermal.F`): enthalpy/temperature column
    solves. Ported: the initialisation and the conversions, and
    `li_thermal_solver` (SIA heat dissipation, basal friction, the
@@ -178,7 +183,7 @@ Ordered by how self-contained each piece is:
    `li_SGH_solve` with its subcycling, the sheet and channels, 'cavity' and
    'overburden' pressure, every basal melt input and tangent-slope
    calculation, and the SHMIP C and D forcings (at RKIND 8 the SHMIP
-   forcings are refused by name: glibc's binary64 `sin`/`cos`)
+   forcings are refused by name without the opt-in: glibc's binary64 `sin`/`cos`)
    (`woof/hex/mpas_ice/subglacial_hydro_v842.py`).
 5. **The Albany first-order (Blatter-Pattyn) Stokes solver**
    (`config_velocity_solver` = 'FO', also 'L1L2' and 'Stokes'). This is a C++

@@ -146,9 +146,16 @@ def make_case(name: str, seed: int, n_cells: int, n_levels: int, solver: str, th
 #: At RKIND 8 the port refuses 'seroussi' (glibc's binary64 sin has no matched
 #: transcription), so that case runs 'none'
 R8_FLOAT_MELT = {"seroussi": "none"}
+#: The fixture "precision" of the RKIND 8 cases run under the opt-in glibc
+#: 2.39 sin transcription (WOOF_GLIBC239_LIBM64=1): 'seroussi' as written,
+#: its words in oracle-r8-glibc239.npz
+R8_GLIBC239 = "r8-glibc239"
 
 
 def cases(precision: str = "r4") -> list[dict]:
+    """The cases at 'r4', 'r8' or :data:`R8_GLIBC239` (the 'seroussi' cases at RKIND 8 under the opt-in)."""
+    if precision == R8_GLIBC239:
+        return [make_case(*row, precision="r8") for row in CASES if row[7] in R8_FLOAT_MELT]
     rows = CASES
     if precision == "r8":
         rows = [(row[0].replace(row[7], R8_FLOAT_MELT[row[7]]),) + row[1:7] + (R8_FLOAT_MELT[row[7]],) + row[8:]

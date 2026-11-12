@@ -23,7 +23,9 @@ word is held to those routines compiled verbatim with gfortran ``-O0
 ``tests/test_mali_thermal_solver_parity.py``). At RKIND 8, 'mismip''s
 ``tanh`` is CORE-MATH's correctly rounded one (``cr_tanh_flt64.cuh``), which
 is glibc 2.44's; 'seroussi' is refused by name: glibc's binary64 ``sin`` is
-not correctly rounded and is LGPL (``R8_REFUSED_FLOAT_MELT``).
+not correctly rounded and is LGPL (``R8_REFUSED_FLOAT_MELT``), unless the
+opt-in transcription is on (``WOOF_GLIBC239_LIBM64=1``,
+:mod:`woof.core.glibc239_gpu`).
 
 The model's scratch fields (the thermal cell mask, the edge dissipation) are
 private here. Arrays are device float32 (RKIND 4) or float64 (RKIND 8) with
@@ -71,14 +73,14 @@ def module_source(precision: str = "r4") -> str:
     rkind.require(precision)
     body = files("woof.hex.mpas_ice").joinpath("thermal_solver_v842.cu").read_text(encoding="utf-8")
     if precision == "r8":
-        return rkind.r8_prelude() + body
+        return rkind.r8_prelude() + rkind.r8_trig_prelude() + body
     import woof.core.kernels as kernels
     root = Path(kernels.__file__).parent
     return "\n".join((root / name).read_text(encoding="utf-8") for name in MATH_HEADERS) + "\n" + body
 
 
 @lru_cache(maxsize=None)
-def _module_on(device: int, precision: str, options: tuple[str, ...]):
+def _module_on(device: int, precision: str, options: tuple[str, ...], trig64: bool = False):
     import cupy as cp
     from woof.nvrtc_ptx_cache import compile_using_nvrtc
 
@@ -91,8 +93,8 @@ def _module_on(device: int, precision: str, options: tuple[str, ...]):
 
 def _function(precision: str, name: str):
     import cupy as cp
-    return _module_on(cp.cuda.Device().id, precision,
-                      _hex_numerics.options(COMPILE_OPTIONS, keep_ftz=True)).get_function(name)
+    return _module_on(cp.cuda.Device().id, precision, _hex_numerics.options(COMPILE_OPTIONS, keep_ftz=True),
+                      precision == "r8" and rkind.trig64()).get_function(name)
 
 
 def _check(name: str, array, dtype, shape) -> None:
@@ -144,10 +146,12 @@ def basal_melt_floating_ice(*, mesh: dict, geometry: dict, config_basal_mass_bal
     n_cells = g["thickness"].shape[0]
     precision = rkind.precision_of(g["thickness"])
     real = rkind.PRECISIONS[precision]
-    if precision == "r8" and config_basal_mass_bal_float in R8_REFUSED_FLOAT_MELT:
+    if precision == "r8" and config_basal_mass_bal_float in R8_REFUSED_FLOAT_MELT and not rkind.trig64():
+        from woof.core import glibc239_gpu
         raise ConfigurationRefusal(
             knob="config_basal_mass_bal_float", value=config_basal_mass_bal_float,
-            reason=f"at RKIND 8, {R8_REFUSED_FLOAT_MELT[config_basal_mass_bal_float]}",
+            reason=f"at RKIND 8, {R8_REFUSED_FLOAT_MELT[config_basal_mass_bal_float]}"
+                   + glibc239_gpu.refusal_suffix(),
             declaration="config_basal_mass_bal_float = 'none' | 'file' | 'constant' | 'mismip' at RKIND 8")
     ncs = int(mesh["nCellsSolve"])
     if not 0 <= ncs <= n_cells:

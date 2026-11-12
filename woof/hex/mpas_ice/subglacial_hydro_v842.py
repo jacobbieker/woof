@@ -28,7 +28,8 @@ Real powers use the shared glibc ``powf``/``pow`` transcriptions.
 Refused by name:
 
 - at RKIND 8, the SHMIP forcings, whose ``sin``/``cos`` are glibc's binary64
-  ones (LGPL, and not correctly rounded);
+  ones (LGPL, and not correctly rounded), unless the opt-in transcription is
+  on (``WOOF_GLIBC239_LIBM64=1``, :mod:`woof.core.glibc239_gpu`);
 - the options v8.4.2 reports as errors.
 
 Every word is held to the forward-Euler step compiled verbatim with gfortran
@@ -65,14 +66,14 @@ def module_source(precision: str = "r4") -> str:
     rkind.require(precision)
     body = files("woof.hex.mpas_ice").joinpath("subglacial_hydro_v842.cu").read_text(encoding="utf-8")
     if precision == "r8":
-        return rkind.r8_prelude() + body
+        return rkind.r8_prelude() + rkind.r8_trig_prelude() + body
     import woof.core.kernels as kernels
     root = Path(kernels.__file__).parent
     return "\n".join((root / name).read_text(encoding="utf-8") for name in MATH_HEADERS_R4) + "\n" + body
 
 
 @lru_cache(maxsize=None)
-def _module_on(device: int, precision: str, options: tuple[str, ...]):
+def _module_on(device: int, precision: str, options: tuple[str, ...], trig64: bool = False):
     import cupy as cp
     from woof.nvrtc_ptx_cache import compile_using_nvrtc
 
@@ -86,8 +87,8 @@ def _module_on(device: int, precision: str, options: tuple[str, ...]):
 
 def _function(precision: str, name: str):
     import cupy as cp
-    return _module_on(cp.cuda.Device().id, precision,
-                      _hex_numerics.options(COMPILE_OPTIONS, keep_ftz=True)).get_function(name)
+    return _module_on(cp.cuda.Device().id, precision, _hex_numerics.options(COMPILE_OPTIONS, keep_ftz=True),
+                      precision == "r8" and rkind.trig64()).get_function(name)
 
 
 def _grid(n: int) -> tuple[int]:
@@ -109,10 +110,9 @@ def check_config(config: dict, precision: str) -> None:
     if forcing != "none" and forcing not in SHMIP_C and forcing not in SHMIP_D:
         _refuse("config_SGH_shmip_forcing", forcing, "not a SHMIP experiment the model carries",
                 "config_SGH_shmip_forcing = 'none' | 'C1'..'C4' | 'D1'..'D5'")
-    if precision == "r8" and forcing != "none":
+    if precision == "r8" and forcing != "none" and not rkind.trig64():
         _refuse("config_SGH_shmip_forcing", forcing,
-                "at RKIND 8 the SHMIP forcings call glibc's binary64 sin and cos, which are LGPL and not "
-                "correctly rounded, so their words cannot be reproduced under the default licence",
+                rkind.trig_refusal("the SHMIP forcings call glibc's binary64 sin and cos"),
                 "config_SGH_shmip_forcing = 'none' at RKIND 8")
 
 

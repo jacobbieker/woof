@@ -9,13 +9,13 @@
     "cupy.ReductionKernel",
     "cupy.cuda.compiler.compile_using_nvrtc"
   ],
-  "site_count": 649,
+  "site_count": 651,
   "site_count_by_kind": {
     "cupy.ElementwiseKernel": 45,
     "cupy.RawKernel": 111,
     "cupy.RawModule": 293,
     "cupy.ReductionKernel": 16,
-    "cupy.cuda.compiler.compile_using_nvrtc": 184
+    "cupy.cuda.compiler.compile_using_nvrtc": 186
   },
   "site_count_by_surface": {
     "other": {
@@ -43,7 +43,7 @@
       "cupy.RawKernel": 23,
       "cupy.RawModule": 69,
       "cupy.ReductionKernel": 2,
-      "cupy.cuda.compiler.compile_using_nvrtc": 15
+      "cupy.cuda.compiler.compile_using_nvrtc": 17
     }
   },
   "distinct_literal_option_tuples": [
@@ -4993,6 +4993,50 @@
       "text": "blob, _mapping = cc.compile_using_nvrtc("
     },
     {
+      "file": "tools/glibc239_libm_gpu/grade_trig.py",
+      "line": 188,
+      "column": 15,
+      "surface": "tools",
+      "constructor": "compile_using_nvrtc",
+      "constructor_kind": "cupy.cuda.compiler.compile_using_nvrtc",
+      "enclosing": "gpu",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "(\"--std=c++17\", \"--fmad=true\")",
+      "options": [
+        "--std=c++17",
+        "--fmad=true"
+      ],
+      "options_element_expressions": [
+        "\"--std=c++17\"",
+        "\"--fmad=true\""
+      ],
+      "options_are_literal": true,
+      "text": "image, _ = compile_using_nvrtc(source, (\"--std=c++17\", \"--fmad=true\"), None, \"glibc239_trig_grade.cu\")"
+    },
+    {
+      "file": "tools/glibc239_libm_gpu/grade_trig.py",
+      "line": 222,
+      "column": 19,
+      "surface": "tools",
+      "constructor": "compile_using_nvrtc",
+      "constructor_kind": "cupy.cuda.compiler.compile_using_nvrtc",
+      "enclosing": "gpu",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "(\"--std=c++17\", \"--fmad=true\")",
+      "options": [
+        "--std=c++17",
+        "--fmad=true"
+      ],
+      "options_element_expressions": [
+        "\"--std=c++17\"",
+        "\"--fmad=true\""
+      ],
+      "options_are_literal": true,
+      "text": "pin_image, _ = compile_using_nvrtc(pin_source, (\"--std=c++17\", \"--fmad=true\"), None, \"glibc239_trig_pin.cu\")"
+    },
+    {
       "file": "tools/glibc_flt32_extra_proof/gpu_check.py",
       "line": 39,
       "column": 13,
@@ -9842,7 +9886,7 @@
     },
     {
       "file": "woof/hex/mpas_ice/subglacial_hydro_v842.py",
-      "line": 79,
+      "line": 80,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",
@@ -9874,7 +9918,7 @@
     },
     {
       "file": "woof/hex/mpas_ice/thermal_solver_v842.py",
-      "line": 85,
+      "line": 87,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",
@@ -9890,7 +9934,7 @@
     },
     {
       "file": "woof/hex/mpas_ice/time_integration_fe_v842.py",
-      "line": 95,
+      "line": 97,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",

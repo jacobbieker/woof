@@ -16,7 +16,9 @@
 // round-to-nearest intrinsic in the Fortran's evaluation order (gfortran -O0
 // -ffp-contract=off). Real powers are glibc's powf/pow (the shared
 // transcriptions the driver prepends), x**3 is (x*x)*x as gfortran expands
-// it, and sin/cos (the SHMIP forcings, RKIND 4 only) are glibc's sinf/cosf.
+// it, and sin/cos (the SHMIP forcings) are glibc's sinf/cosf at RKIND 4 and,
+// at RKIND 8, the opt-in LGPL transcription of glibc's sin/cos
+// (WOOF_GLIBC239_TRIG64; without it the driver refuses the forcings).
 // Fortran MIN/MAX return the first argument only if it compares less/greater
 // and the second otherwise, so a tie of signed zeros returns the second: the
 // operand order the x86-64 oracle's gfortran -O0 gives this module's minss/
@@ -40,8 +42,13 @@ typedef double rk;
 #define LI_ABS(x) fabs(x)
 #define LI_SIGN1(x) copysign(1.0, (x))
 #define LI_POW(x,y) glibc_pow((x),(y))
+#ifdef WOOF_GLIBC239_TRIG64
+#define LI_SIN(x) g239::g239_sin(x)
+#define LI_COS(x) g239::g239_cos(x)
+#else
 #define LI_SIN(x) (x)
 #define LI_COS(x) (x)
+#endif
 #define LI_C(x) x
 __device__ __forceinline__ rk li_min(rk a, rk b) {
     return __longlong_as_double(a < b ? __double_as_longlong(a) : __double_as_longlong(b));
