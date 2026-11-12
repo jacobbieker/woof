@@ -96,7 +96,7 @@ def test_fixture_covers_the_branches():
         else:
             assert not g.any()
     # the floating melt options produce melt; Seroussi's cap binds
-    for name in ("temperature_sia_constant", "enthalpy_sia_mismip", "temperature_none_seroussi"):
+    for name in ("temperature_sia_constant", "enthalpy_sia_mismip", "temperature_none_seroussi", "no_thermal_mismip"):
         assert (fixture[name]["floatingBasalMassBal"] < 0).any()
     rhoi = cases["temperature_none_seroussi"]["iceDensity"]
     cap = (F(-1.0) * F(50.0)) * rhoi / F(31536000.0)
@@ -140,6 +140,9 @@ def test_gpu_matches_the_v842_oracle_word_for_word(precision):
     # the internal melt's energy formed as rhoi * (cp * dT)
     ("M(M(M(rhoi, LI_CP_ICE), S(T[k], pmp)), layerThickness)",
      "M(M(rhoi, M(LI_CP_ICE, S(T[k], pmp))), layerThickness)", "groundedBasalMassBal", "temperature_sia_constant"),
+    # MISMIP's cavity scale taken as a reciprocal product
+    ("LI_TANH(D(hCavity, LI_C(75.0)))", "LI_TANH(M(hCavity, D((rk)1.0, LI_C(75.0))))", "floatingBasalMassBal",
+     "no_thermal_mismip"),
     # the basal friction's speed squared after the scale
     ("M(M(betaSolve[iCell], M(basalSpeed[iCell], basalSpeed[iCell])), LI_SCYR)",
      "M(M(M(betaSolve[iCell], basalSpeed[iCell]), basalSpeed[iCell]), LI_SCYR)", "basalFrictionFlux",
@@ -161,6 +164,25 @@ def test_a_mutated_evaluation_order_is_caught(monkeypatch, precision, original, 
         total = sum(to.word_mismatches(got[f], fixture[row["name"]][f])
                     for row in rows for got in (to.run_gpu(row),) for f in fields)
         assert total > 0
+    finally:
+        thermal_solver_v842._module_on.cache_clear()
+
+
+@requires_gpu
+def test_the_platform_tanh_is_caught_at_rkind8(monkeypatch):
+    # CUDA's (or Metal's) own binary64 tanh is not glibc's: the fixture tells them apart
+    from woof.hex.mpas_ice import thermal_solver_v842
+    source = thermal_solver_v842.module_source("r8")
+    original = "#define LI_TANH(x) g64_tanh::cr_tanh(x)"
+    assert source.count(original) == 1
+    monkeypatch.setattr(thermal_solver_v842, "module_source",
+                        lambda p="r4": source.replace(original, "#define LI_TANH(x) tanh(x)"))
+    thermal_solver_v842._module_on.cache_clear()
+    try:
+        row = next(c for c in to.cases("r8") if c["name"] == "no_thermal_mismip")
+        got = to.run_gpu(row)
+        assert to.word_mismatches(got["floatingBasalMassBal"],
+                                  to.load_fixture("r8")[row["name"]]["floatingBasalMassBal"]) > 0
     finally:
         thermal_solver_v842._module_on.cache_clear()
 
@@ -189,12 +211,21 @@ def test_unknown_options_are_refused():
 
 
 @requires_gpu
-@pytest.mark.parametrize("option", ["mismip", "seroussi"])
-def test_rkind8_refuses_the_floating_melts_without_a_matched_libm(option):
+def test_rkind8_refuses_the_floating_melt_without_a_matched_libm():
     from woof.hex.errors import ConfigurationRefusal
-    row = next(c for c in to.cases("r8") if c["name"] == "enthalpy_sia_constant")
+    row = next(c for c in to.cases("r8") if c["name"] == "enthalpy_sia_mismip")
     with pytest.raises(ConfigurationRefusal, match="RKIND 8"):
-        to.run_gpu(dict(row, floatMelt=option))
+        to.run_gpu(dict(row, floatMelt="seroussi"))
+
+
+def test_rkind8_runs_mismip_with_the_correctly_rounded_tanh():
+    # 'mismip' is an RKIND 8 case of its own (glibc 2.44's tanh is CORE-MATH's), and
+    # the r8 unit calls that transcription, not the platform tanh
+    from woof.hex.mpas_ice import thermal_solver_v842
+    assert "enthalpy_sia_mismip" in {c["name"] for c in to.cases("r8")}
+    assert "mismip" not in thermal_solver_v842.R8_REFUSED_FLOAT_MELT
+    source = thermal_solver_v842.module_source("r8")
+    assert "#define LI_TANH(x) g64_tanh::cr_tanh(x)" in source and "namespace g64_tanh" in source
 
 
 @requires_gpu
