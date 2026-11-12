@@ -5439,7 +5439,7 @@
    },
    {
     "file": "woof/hex/mpas_ice/calving_v842.py",
-    "sha256": "e53f18705912fcb665571f79751b137b72c99c4b2c92c6b95f172e48d44b45d3"
+    "sha256": "52f5ddc7ee5c6150f28125cf94be243deea4b5f9f7273078d149119e32663ed4"
    },
    {
     "file": "woof/hex/mpas_ice/geometry_v842.py",

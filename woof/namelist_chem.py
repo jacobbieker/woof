@@ -231,7 +231,8 @@ def carried_menu() -> str:
 
     rows = [f"chem_opt = {row.wrf_chem_opt} ({row.name})"
             for row in catalog().sets.values()
-            if row.wrf_chem_opt is not None and not row.test_only]
+            if row.wrf_chem_opt is not None and not row.test_only
+            and row.wrf_chem_opt not in PLANNED_CHEM_OPT]
     rows += [f"the operational fork's chem_opt = {value} ({name})"
              for value, name in FORK_CHEM_OPT_SETS.items()]
     return ", ".join(sorted(rows))
@@ -240,6 +241,10 @@ def carried_menu() -> str:
 def chem_set_for(chem_opt: int, *, fork: bool) -> str | None:
     from woof.chem_table import catalog
 
+    if chem_opt in PLANNED_CHEM_OPT:
+        # The set exists (chem_sets can name it) while the package's namelist
+        # mapping is still refused as a whole (package_status).
+        return None
     for row in catalog().sets.values():
         if row.wrf_chem_opt == chem_opt and not row.test_only:
             return row.name

@@ -48,8 +48,8 @@ def _load(path: Path):
 
 
 def _ordered(bits: np.ndarray) -> np.ndarray:
-    b = bits.astype(np.int64)
-    return np.where(b & 0x80000000, 0x80000000 - b, b)
+    from woof.core.fp32_ulp import monotone_fp32_key
+    return monotone_fp32_key(np.ascontiguousarray(bits, dtype=np.uint32).view(np.float32))
 
 
 def _regimes(inputs: Path | None) -> dict[int, str]:

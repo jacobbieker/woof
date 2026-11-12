@@ -40,6 +40,11 @@ COMPILE_OPTIONS = ("--std=c++17", "--fmad=false", "--ftz=false",
 MODULE_OPTIONS = COMPILE_OPTIONS
 CALVING = ("none", "thickness_threshold", "floating", "topographic_threshold", "eigencalving")
 EIGENCALVING_PARAMETER_SOURCES = ("scalar", "data")
+#: the Registry's defaults for the calving options a config may leave out
+DEFAULTS = {"config_calving": "none", "config_calving_topography": -500.0, "config_calving_thickness": 100.0,
+            "config_calving_eigencalving_parameter_source": "scalar",
+            "config_calving_eigencalving_parameter_scalar_value": 3.14e16, "config_data_calving": False,
+            "config_calving_timescale": 0.0, "config_restore_calving_front": False}
 _BLOCK = 128
 
 
@@ -85,16 +90,21 @@ def _update_geometry(mesh: dict, geometry: dict, config: dict) -> None:
         config_ocean_density=config["config_ocean_density"], config_sea_level=config["config_sea_level"])
 
 
+def _with_defaults(config: dict) -> dict:
+    return {**DEFAULTS, **config}
+
+
 def check_config(config: dict) -> None:
     """Refuse what li_calve_ice reports as an error, before the step starts."""
-    option = config.get("config_calving", "none")
+    config = _with_defaults(config)
+    option = config["config_calving"]
     if option not in CALVING:
         raise ConfigurationRefusal(knob="config_calving", value=option,
                                    reason="not an option li_calve_ice carries (the model logs it as an error)",
                                    declaration="config_calving = " + " | ".join(map(repr, CALVING)))
     if option == "thickness_threshold" and config["config_calving_thickness"] < config["config_dynamic_thickness"]:
         raise ValueError("config_calving_thickness must be at least config_dynamic_thickness")
-    source = config.get("config_calving_eigencalving_parameter_source", "scalar")
+    source = config["config_calving_eigencalving_parameter_source"]
     if option == "eigencalving" and source not in EIGENCALVING_PARAMETER_SOURCES:
         raise ConfigurationRefusal(knob="config_calving_eigencalving_parameter_source", value=source,
                                    reason="not a source eigencalving carries (the model logs it as an error)",
@@ -108,8 +118,9 @@ def calve_ice(*, mesh: dict, geometry: dict, velocity: dict, config: dict) -> No
     (with a 'scalar' source) ``eigencalvingParameter``. ``velocity`` holds
     ``eMax`` and ``eMin`` for 'eigencalving'."""
     import cupy as cp
+    config = _with_defaults(config)
     check_config(config)
-    option = config.get("config_calving", "none")
+    option = config["config_calving"]
     if option == "none":
         return
     m, g, c = mesh, geometry, config
@@ -138,7 +149,7 @@ def calve_ice(*, mesh: dict, geometry: dict, velocity: dict, config: dict) -> No
             g["thickness"], g["calvingThickness"], active, g["bedTopography"], m["nEdgesOnCell"], m["cellsOnCell"],
             sea, fraction, nc, me))
     elif option in ("floating", "topographic_threshold"):
-        limit = real(c.get("config_calving_topography", 0.0)) + sea
+        limit = real(c["config_calving_topography"]) + sea
         _function(precision, "li_calving_floating_v842")(cells, block, (
             g["thickness"], g["calvingThickness"], g["cellMask"], g["bedTopography"], limit, fraction,
             np.int32(option == "topographic_threshold"), nc))
@@ -179,6 +190,7 @@ def restore_calving_front(*, mesh: dict, geometry: dict, thermal: dict, config: 
     with a linear temperature column; marine ice outside the initial extent
     calves (``calvingThickness``)."""
     import cupy as cp
+    config = _with_defaults(config)
     m, g, t, c = mesh, geometry, thermal, config
     precision = rkind.precision_of(g["thickness"])
     real = rkind.PRECISIONS[precision]
