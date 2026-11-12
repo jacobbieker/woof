@@ -1,0 +1,5 @@
+chem_opt i4 0
+gas_ic_opt i4 0
+ph_1 f4 3 6 4 2
+phb f4 3 6 4 2
+chem f4 4 6 4 2 43
