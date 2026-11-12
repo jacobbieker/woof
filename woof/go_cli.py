@@ -6182,6 +6182,15 @@ def _go_wrfinput(args) -> int:
 @_ledger_main
 def go_main(args, *, observer=None) -> int:
     """Choose native WRF handoff or the existing CONFIG preparation chain."""
+    # [model] engine = "hex" runs the hex model (woof.go_hex); a CONFIG
+    # without [model], or naming "wrf", takes the WRF path below unchanged.
+    from woof.go_hex import HexGoRefusal, configured_engine
+    try:
+        if configured_engine(getattr(args, "config", None)) == "hex":
+            from woof.go_hex import launch as launch_hex
+            return launch_hex(args, observer=observer)
+    except HexGoRefusal as error:
+        raise GoRefusal(str(error)) from None
     from woof.wrfinput_go import refuse_unrouted_go_controls
     if getattr(args, "wrfinput", None) is not None:
         from woof.wrfinput_go import launch

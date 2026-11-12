@@ -9995,6 +9995,45 @@ class RadarHeatingConfig:
 RADAR_HEATING_OFF = RadarHeatingConfig()
 
 
+# ---------------------------------------------------------------------------
+# [model]: which model a `woof go` configuration runs
+# ---------------------------------------------------------------------------
+
+#: The engines ``[model] engine`` names.  ``"wrf"`` is the WRF path every
+#: configuration ran before the table existed; ``"hex"`` routes ``woof go`` to
+#: the hex (MPAS mesh) model through :mod:`woof.go_hex`.
+MODEL_ENGINES = ("wrf", "hex")
+
+MODEL_KEY_ROWS = _key_rows(
+    _KeyRow("engine", "string", "wrf",
+            "the model woof go runs: 'wrf' (the WRF path) or 'hex' (the MPAS mesh model, woof.go_hex)"),
+)
+MODEL_KEYS = frozenset(MODEL_KEY_ROWS)
+
+
+def model_engine(table, *, where: str = "[model]") -> str:
+    """The ``[model]`` table's engine, checked; ``"wrf"`` when the table is absent.
+
+    A key the table does not declare, or an engine outside
+    :data:`MODEL_ENGINES`, is refused: a typo would otherwise run the WRF
+    path under a configuration that asked for another model.
+    """
+
+    if table is None:
+        return "wrf"
+    if not isinstance(table, dict):
+        raise ValueError(f"{where} must be a table, got {table!r}.")
+    unknown = sorted(set(table) - MODEL_KEYS)
+    if unknown:
+        raise ValueError(f"{where} has no key {', '.join(map(repr, unknown))}; "
+                         f"its keys are {sorted(MODEL_KEYS)}.")
+    engine = MODEL_KEY_ROWS["engine"].get(table, where=where)
+    if engine not in MODEL_ENGINES:
+        raise ValueError(f"engine in {where} must be one of {list(MODEL_ENGINES)}, "
+                         f"got {engine!r}.")
+    return engine
+
+
 def declared_key_rows() -> dict[str, dict[str, dict]]:
     """Every declared configuration key row, by the table that owns it.
 
@@ -10021,6 +10060,7 @@ def declared_key_rows() -> dict[str, dict[str, dict]]:
         "ingest": INGEST_TABLE_ROWS,
         "simulated_radar": radar_key_rows(),
         "radar_heating": RADAR_HEATING_KEY_ROWS,
+        "model": MODEL_KEY_ROWS,
     }
     # [output], on the tree-wide table and on a
     # domain's own output = {...} override alike (one parser reads both).

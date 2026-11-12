@@ -2,17 +2,20 @@
 ! of chem/module_input_chem_data.F and the routines extracted from it USE.
 !
 ! module_state_description: the Registry chem_opt / gas_ic_opt package values
-! (Registry/registry.chem:3927-3999, 4164-4167) and the chem species indices.
+! (Registry/registry.chem:3927-3999, 4160-4169) and the chem species indices.
 ! The indices are module VARIABLES, as in WRF, so the driver can switch between
 ! the radm2 (chem_opt = 1, registry.chem:3929) and radm2sorg (chem_opt = 2,
 ! :3930) packages; set_package mirrors what set_scalar_indices_from_config does
 ! for those two package lists: each row in package order after the
 ! PARAM_FIRST_SCALAR = 2 dummy, every row absent from the package at 1.
 ! module_domain: a TYPE(domain) carrying only the fields input_chem_profile
-! reads, WRFU_Time and max_domains for the module's last_chem_time, and
-! get_ijk_from_grid.  module_io_domain and module_get_file_names: only the
-! names the module's USE lines import.  Nothing here computes a physical
-! quantity.
+! reads, a grid_config_rec_type carrying only the two fields
+! bdy_chem_value_sorgam reads (chem_opt, aer_bc_opt), WRFU_Time and
+! max_domains for the module's last_chem_time, and get_ijk_from_grid.
+! sorgam_set_aer_bc_pnnl / sorgam_vbs_set_aer_bc_pnnl (aer_bc_opt = 101, not
+! extracted) are external stand-ins that stop if reached.  module_io_domain
+! and module_get_file_names: only the names the module's USE lines import.
+! Nothing here computes a physical quantity.
 module module_state_description
   implicit none
   integer, parameter :: param_first_scalar = 2
@@ -43,6 +46,7 @@ module module_state_description
                         gas_ic_cbm4 = 102
   integer, parameter :: gas_bc_default = 1, gas_bc_ghg = 16, gas_bc_pnnl = 101, &
                         gas_bc_cbm4 = 102
+  integer, parameter :: aer_bc_default = 1, aer_bc_pnnl = 101
   ! radm2 / radm2sorg rows, set by set_package
   integer :: &
       p_so2 = 1, p_sulf = 1, p_no2 = 1, p_no = 1, p_o3 = 1, p_hno3 = 1,  &
@@ -53,6 +57,15 @@ module module_state_description
       p_hono = 1, p_hno4 = 1, p_ket = 1, p_gly = 1, p_mgly = 1, p_dcb = 1,  &
       p_onit = 1, p_csl = 1, p_iso = 1, p_hcl = 1, p_ho = 1, p_ho2 = 1,  &
       p_nu0 = 1, num_chem = 1
+  ! radm2sorg aerosol rows (registry.chem:3930 after ho2), set by set_package
+  integer :: &
+      p_so4aj = 1, p_so4ai = 1, p_nh4aj = 1, p_nh4ai = 1, p_no3aj = 1, p_no3ai = 1,  &
+      p_naaj = 1, p_naai = 1, p_claj = 1, p_clai = 1, p_orgaro1j = 1, p_orgaro1i = 1,  &
+      p_orgaro2j = 1, p_orgaro2i = 1, p_orgalk1j = 1, p_orgalk1i = 1, p_orgole1j = 1,  &
+      p_orgole1i = 1, p_orgba1j = 1, p_orgba1i = 1, p_orgba2j = 1, p_orgba2i = 1,  &
+      p_orgba3j = 1, p_orgba3i = 1, p_orgba4j = 1, p_orgba4i = 1, p_orgpaj = 1,  &
+      p_orgpai = 1, p_ecj = 1, p_eci = 1, p_p25j = 1, p_p25i = 1, p_antha = 1,  &
+      p_seas = 1, p_soila = 1, p_ac0 = 1, p_corn = 1
   ! rows in neither package (index 1)
   integer :: &
       p_aacd = 1, p_ald2 = 1, p_aldx = 1, p_bc1 = 1, p_bc2 = 1, p_ch4 = 1,  &
@@ -73,7 +86,15 @@ contains
       p_nu0 = 1; num_chem = 43
     else if (chem_opt == radm2sorg) then
       ! so4aj ... corn follow ho2; nu0 is the 36th of the 38 aerosol rows.
-      p_nu0 = 79; num_chem = 81
+      p_so4aj = 44; p_so4ai = 45; p_nh4aj = 46; p_nh4ai = 47; p_no3aj = 48
+      p_no3ai = 49; p_naaj = 50; p_naai = 51; p_claj = 52; p_clai = 53
+      p_orgaro1j = 54; p_orgaro1i = 55; p_orgaro2j = 56; p_orgaro2i = 57
+      p_orgalk1j = 58; p_orgalk1i = 59; p_orgole1j = 60; p_orgole1i = 61
+      p_orgba1j = 62; p_orgba1i = 63; p_orgba2j = 64; p_orgba2i = 65
+      p_orgba3j = 66; p_orgba3i = 67; p_orgba4j = 68; p_orgba4i = 69
+      p_orgpaj = 70; p_orgpai = 71; p_ecj = 72; p_eci = 73; p_p25j = 74
+      p_p25i = 75; p_antha = 76; p_seas = 77; p_soila = 78
+      p_nu0 = 79; p_ac0 = 80; p_corn = 81; num_chem = 81
     else
       error stop 'set_package: only radm2 and radm2sorg'
     end if
@@ -84,6 +105,9 @@ module module_domain
   use module_state_description
   implicit none
   integer, parameter :: max_domains = 21
+  type grid_config_rec_type
+    integer :: chem_opt = radm2sorg, aer_bc_opt = aer_bc_default
+  end type grid_config_rec_type
   type WRFU_Time
     integer :: unused = 0
   end type WRFU_Time
@@ -147,3 +171,19 @@ end subroutine nl_get_debug_level
 subroutine set_wrf_debug_level(level)
   integer, intent(in) :: level
 end subroutine set_wrf_debug_level
+
+subroutine sorgam_set_aer_bc_pnnl(chem, z, nch, config_flags)
+  use module_domain, only: grid_config_rec_type
+  real :: chem, z
+  integer :: nch
+  type(grid_config_rec_type) :: config_flags
+  error stop 'stub sorgam_set_aer_bc_pnnl reached'
+end subroutine sorgam_set_aer_bc_pnnl
+
+subroutine sorgam_vbs_set_aer_bc_pnnl(chem, z, nch, config_flags)
+  use module_domain, only: grid_config_rec_type
+  real :: chem, z
+  integer :: nch
+  type(grid_config_rec_type) :: config_flags
+  error stop 'stub sorgam_vbs_set_aer_bc_pnnl reached'
+end subroutine sorgam_vbs_set_aer_bc_pnnl
