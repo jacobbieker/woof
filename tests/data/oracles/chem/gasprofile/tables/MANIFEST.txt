@@ -1,0 +1,11 @@
+xl f4 2 34 16
+zfa f4 1 17
+zfa_bdy f4 1 17
+dens f4 1 16
+so4vaptoaer f4 0
+grav f4 0
+iref i4 1 50
+fracref f4 1 50
+numgas_radm2 i4 0
+numgas_radm2sorg i4 0
+p_nu0_radm2sorg i4 0
