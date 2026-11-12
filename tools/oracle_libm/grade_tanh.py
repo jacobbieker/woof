@@ -139,6 +139,11 @@ def cpu(lib, count: int) -> int:
 
 
 def gpu(lib, count: int) -> int:
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from woof.backend import install
+
+    install()  # WOOF_BACKEND: CUDA, or Metal through woof's cupy facade
     import cupy as cp
     from woof.nvrtc_ptx_cache import compile_using_nvrtc
 
