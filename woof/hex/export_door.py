@@ -612,6 +612,8 @@ def export_formats(args: argparse.Namespace, frames: list[Path], out: Path) -> d
                                     Path(args.grib2_out) if args.grib2_out else out / "grib2")
     if getattr(args, "earth2", None):
         options = ["--earth2", args.earth2]
+        if getattr(args, "overwrite", False):
+            options.append("--overwrite")
         if args.earth2_for:
             options += ["--for", args.earth2_for]
         if args.earth2_channels:
