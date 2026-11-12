@@ -40,6 +40,7 @@ def synthetic(tmp_path, monkeypatch):
                 "data/cross_sections/X_1.nc": bytes(range(256)) * 40}
     monkeypatch.setattr(data, "FILES", {k: (len(v), hashlib.sha256(v).hexdigest()) for k, v in payloads.items()})
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
     monkeypatch.delenv(data.ENV_ROOT, raising=False)
     source = tmp_path / "tuv-x"
     for relative, payload in payloads.items():
@@ -55,6 +56,9 @@ def test_a_local_copy_installs_verified_under_tuvxs_paths(synthetic):
     for relative, payload in payloads.items():
         assert (root / relative).read_bytes() == payload
     assert data.ensure(from_dir=source) == root          # idempotent: verified, not refetched
+    import shutil
+    shutil.rmtree(source)
+    assert data.ensure(from_dir=source) == root          # the cache serves without its source
 
 
 def test_a_mirror_url_installs_verified_bytes(synthetic, monkeypatch):

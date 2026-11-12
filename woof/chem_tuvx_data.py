@@ -92,6 +92,11 @@ def ensure(files=None, *, root=None, from_dir=None) -> Path:
     base = cache_root()
     url_base = os.environ.get(ENV_URL_BASE, "").strip().rstrip("/") or URL_BASE
     for relative in names:
+        try:
+            _verify(base / relative, relative)
+            continue                  # cached and verified: no source is consulted
+        except TuvxDataError:
+            pass                      # absent or damaged: stage it (the staging helpers refuse wrong bytes)
         directory = base / Path(relative).parent
         directory.mkdir(parents=True, exist_ok=True)
         try:
