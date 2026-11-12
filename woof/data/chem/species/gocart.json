@@ -13,7 +13,9 @@
       "sets": [
         "gocart_simple",
         "gocart_lite",
-        "cams_aq"
+        "cams_aq",
+        "radm2",
+        "radm2sorg"
       ],
       "transported": true,
       "floor": 1e-16,
@@ -23,7 +25,9 @@
         "emission.inventory",
         "chem.sulfur",
         "drydep.wesely",
-        "mixing.vertmx"
+        "mixing.vertmx",
+        "emission.radm2",
+        "chem.radm2"
       ],
       "emissions": [
         {
@@ -87,12 +91,25 @@
       "optics": null,
       "mp_coupling": null,
       "exclusive_group": null,
-      "provenance": "registry.chem:3610 row so2; default_inflow: bdy_chem_value_gocart, chem/module_input_chem_data.F:1267-1298; molar mass 64.066 (WRF-Chem's GOCART value; the CAMS conversion and the mass ledger read it); EDGAR weight kg m-2 s-1 -> mol km-2 hr-1 = 1e6*3600/0.064066; dry deposition through wesely_driver (chem/dry_dep_driver.F:377) with dep_init's general (non-MOZART, non-CBM4/CB05) branch numbers, the dratio and scpr23 float32 words dep_init derives from dvj (tests/test_chem_wesely_wrf471_parity.py holds them to the Fortran dump); chem.sulfur only in the GOCART sulfur sets (process_sets), so the CAMS set carries SO2 without chemistry; wetdep_ls_alpha 0 (large-scale wet scavenging skips gases, chem/module_wetdep_ls.F:39-46)",
+      "provenance": "registry.chem:3610 row so2; default_inflow: bdy_chem_value_gocart, chem/module_input_chem_data.F:1267-1298; molar mass 64.066 (WRF-Chem's GOCART value; the CAMS conversion and the mass ledger read it); EDGAR weight kg m-2 s-1 -> mol km-2 hr-1 = 1e6*3600/0.064066; dry deposition through wesely_driver (chem/dry_dep_driver.F:377) with dep_init's general (non-MOZART, non-CBM4/CB05) branch numbers, the dratio and scpr23 float32 words dep_init derives from dvj (tests/test_chem_wesely_wrf471_parity.py holds them to the Fortran dump); chem.sulfur only in the GOCART sulfur sets (process_sets), so the CAMS set carries SO2 without chemistry; wetdep_ls_alpha 0 (large-scale wet scavenging skips gases, chem/module_wetdep_ls.F:39-46); RADM2/RADM2SORG (registry.chem:3929-3930) share this row: emission.radm2, chem.radm2 act on it only in the RADM2 sets (process_sets)",
       "sulfur_role": "so2",
       "process_sets": {
         "chem.sulfur": [
           "gocart_simple",
           "gocart_lite"
+        ],
+        "emission.inventory": [
+          "gocart_simple",
+          "gocart_lite",
+          "cams_aq"
+        ],
+        "emission.radm2": [
+          "radm2",
+          "radm2sorg"
+        ],
+        "chem.radm2": [
+          "radm2",
+          "radm2sorg"
         ]
       }
     },
@@ -105,7 +122,9 @@
       "family": "sulfate",
       "sets": [
         "gocart_simple",
-        "gocart_lite"
+        "gocart_lite",
+        "radm2",
+        "radm2sorg"
       ],
       "transported": true,
       "floor": 1e-16,
@@ -117,7 +136,10 @@
         "mixing.vertmx",
         "wetdep.ls",
         "optics.gocart",
-        "coupling.thompson"
+        "coupling.thompson",
+        "emission.radm2",
+        "chem.radm2",
+        "aerosol.sorgam"
       ],
       "emissions": [],
       "boundary": [
@@ -198,8 +220,41 @@
         "from": "ccpp-physics 3e6660c6 physics/MP/Thompson/mp_thompson.F90:1062-1066 (get_niwfa, Apache-2.0)"
       },
       "exclusive_group": null,
-      "provenance": "registry.chem:3610 row sulf; default_inflow: bdy_chem_value_gocart, chem/module_input_chem_data.F:1267-1298; wetdep_ls_alpha: chem/module_wetdep_ls.F:39-46 (chem_opt >= 300) (1.0); molar mass 96.0576 (sum_pm_gocart mwso4, chem/module_gocart_aerosols.F:85); gocart_drydep_driver hands sulf the aerosol velocity (chem/module_gocart_drydep.F:116)",
-      "sulfur_role": "so4"
+      "provenance": "registry.chem:3610 row sulf; default_inflow: bdy_chem_value_gocart, chem/module_input_chem_data.F:1267-1298; wetdep_ls_alpha: chem/module_wetdep_ls.F:39-46 (chem_opt >= 300) (1.0); molar mass 96.0576 (sum_pm_gocart mwso4, chem/module_gocart_aerosols.F:85); gocart_drydep_driver hands sulf the aerosol velocity (chem/module_gocart_drydep.F:116); RADM2/RADM2SORG (registry.chem:3929-3930) share this row: emission.radm2, chem.radm2, aerosol.sorgam (radm2sorg) act on it only in the RADM2 sets (process_sets); in RADM2 sulf is WRF's gas-phase H2SO4 (it keeps this row's phase and the GOCART sulfate molar mass 96.0576, which only the mass ledger and vertmx's deposited-mass diagnostic read)",
+      "sulfur_role": "so4",
+      "process_sets": {
+        "chem.sulfur": [
+          "gocart_simple",
+          "gocart_lite"
+        ],
+        "drydep.gocart": [
+          "gocart_simple",
+          "gocart_lite"
+        ],
+        "wetdep.ls": [
+          "gocart_simple",
+          "gocart_lite"
+        ],
+        "optics.gocart": [
+          "gocart_simple",
+          "gocart_lite"
+        ],
+        "coupling.thompson": [
+          "gocart_simple",
+          "gocart_lite"
+        ],
+        "emission.radm2": [
+          "radm2",
+          "radm2sorg"
+        ],
+        "chem.radm2": [
+          "radm2",
+          "radm2sorg"
+        ],
+        "aerosol.sorgam": [
+          "radm2sorg"
+        ]
+      }
     },
     {
       "name": "dms",

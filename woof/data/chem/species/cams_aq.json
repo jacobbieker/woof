@@ -11,7 +11,9 @@
       "phase": "gas",
       "family": "ozone",
       "sets": [
-        "cams_aq"
+        "cams_aq",
+        "radm2",
+        "radm2sorg"
       ],
       "transported": true,
       "floor": 1e-16,
@@ -19,7 +21,10 @@
       "molar_mass_g_mol": 47.997,
       "processes": [
         "drydep.wesely",
-        "mixing.vertmx"
+        "mixing.vertmx",
+        "emission.radm2",
+        "photolysis.ftuv",
+        "chem.radm2"
       ],
       "emissions": [],
       "boundary": [
@@ -64,7 +69,21 @@
       "optics": null,
       "mp_coupling": null,
       "exclusive_group": null,
-      "provenance": "Registry: state o3 (Registry/registry.chem, dname 'o3', ppmv). floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5). default_inflow is WRF-Chem's inflow value for a species the GOCART boundary rule has no explicit case for (chem/module_input_chem_data.F:1295, bdy_chem_value_gocart); it is only ever used when no boundary source is available, and without the CAMS source these rows are refused, so in practice the inflow is CAMS's own value. molar_mass_g_mol from the IUPAC 2013 conventional atomic weights (C 12.011, N 14.007, O 15.999, S 32.06); WRF-Chem carries no common gas molar-mass table for these species. wetdep_ls_alpha 0: large-scale wet scavenging skips gases (chem/module_wetdep_ls.F:39-46). Wesely numbers from dep_init's general (non-MOZART, non-CBM4/CB05) branch, the one a GOCART chem_opt takes. dratio and scpr23 are the float32 values dep_init DERIVES from dvj (the diffusivity corrected to 20 C, then 0.242/dvj and ((0.15/dvj)/0.72)**(2/3), chem/module_dep_simple.F:3478-3489); the column oracle dumps them from the Fortran and tests/test_chem_wesely_wrf471_parity.py asserts these row values equal that dump bit for bit. Carried from CAMS; no photochemistry acts on it (DESIGN 7.4)."
+      "provenance": "Registry: state o3 (Registry/registry.chem, dname 'o3', ppmv). floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5). default_inflow is WRF-Chem's inflow value for a species the GOCART boundary rule has no explicit case for (chem/module_input_chem_data.F:1295, bdy_chem_value_gocart); it is only ever used when no boundary source is available, and without the CAMS source these rows are refused, so in practice the inflow is CAMS's own value. molar_mass_g_mol from the IUPAC 2013 conventional atomic weights (C 12.011, N 14.007, O 15.999, S 32.06); WRF-Chem carries no common gas molar-mass table for these species. wetdep_ls_alpha 0: large-scale wet scavenging skips gases (chem/module_wetdep_ls.F:39-46). Wesely numbers from dep_init's general (non-MOZART, non-CBM4/CB05) branch, the one a GOCART chem_opt takes. dratio and scpr23 are the float32 values dep_init DERIVES from dvj (the diffusivity corrected to 20 C, then 0.242/dvj and ((0.15/dvj)/0.72)**(2/3), chem/module_dep_simple.F:3478-3489); the column oracle dumps them from the Fortran and tests/test_chem_wesely_wrf471_parity.py asserts these row values equal that dump bit for bit. Carried from CAMS; no photochemistry acts on it (DESIGN 7.4).; RADM2/RADM2SORG (registry.chem:3929-3930) share this row: emission.radm2, chem.radm2, photolysis.ftuv (the ozone column Fast-TUV reads) act on it only in the RADM2 sets (process_sets)",
+      "process_sets": {
+        "emission.radm2": [
+          "radm2",
+          "radm2sorg"
+        ],
+        "photolysis.ftuv": [
+          "radm2",
+          "radm2sorg"
+        ],
+        "chem.radm2": [
+          "radm2",
+          "radm2sorg"
+        ]
+      }
     },
     {
       "name": "no2",
@@ -74,7 +93,9 @@
       "phase": "gas",
       "family": "nox",
       "sets": [
-        "cams_aq"
+        "cams_aq",
+        "radm2",
+        "radm2sorg"
       ],
       "transported": true,
       "floor": 1e-16,
@@ -82,7 +103,9 @@
       "molar_mass_g_mol": 46.005,
       "processes": [
         "drydep.wesely",
-        "mixing.vertmx"
+        "mixing.vertmx",
+        "emission.radm2",
+        "chem.radm2"
       ],
       "emissions": [],
       "boundary": [
@@ -127,7 +150,17 @@
       "optics": null,
       "mp_coupling": null,
       "exclusive_group": null,
-      "provenance": "Registry: state no2 (Registry/registry.chem, dname 'no2', ppmv). floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5). default_inflow is WRF-Chem's inflow value for a species the GOCART boundary rule has no explicit case for (chem/module_input_chem_data.F:1295, bdy_chem_value_gocart); it is only ever used when no boundary source is available, and without the CAMS source these rows are refused, so in practice the inflow is CAMS's own value. molar_mass_g_mol from the IUPAC 2013 conventional atomic weights (C 12.011, N 14.007, O 15.999, S 32.06); WRF-Chem carries no common gas molar-mass table for these species. wetdep_ls_alpha 0: large-scale wet scavenging skips gases (chem/module_wetdep_ls.F:39-46). Wesely numbers from dep_init's general (non-MOZART, non-CBM4/CB05) branch, the one a GOCART chem_opt takes. dratio and scpr23 are the float32 values dep_init DERIVES from dvj (the diffusivity corrected to 20 C, then 0.242/dvj and ((0.15/dvj)/0.72)**(2/3), chem/module_dep_simple.F:3478-3489); the column oracle dumps them from the Fortran and tests/test_chem_wesely_wrf471_parity.py asserts these row values equal that dump bit for bit. Carried from CAMS with no chemistry: its daytime chemical lifetime is hours, so the field is only trustworthy for the first hours of a forecast (DESIGN 7.4)."
+      "provenance": "Registry: state no2 (Registry/registry.chem, dname 'no2', ppmv). floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5). default_inflow is WRF-Chem's inflow value for a species the GOCART boundary rule has no explicit case for (chem/module_input_chem_data.F:1295, bdy_chem_value_gocart); it is only ever used when no boundary source is available, and without the CAMS source these rows are refused, so in practice the inflow is CAMS's own value. molar_mass_g_mol from the IUPAC 2013 conventional atomic weights (C 12.011, N 14.007, O 15.999, S 32.06); WRF-Chem carries no common gas molar-mass table for these species. wetdep_ls_alpha 0: large-scale wet scavenging skips gases (chem/module_wetdep_ls.F:39-46). Wesely numbers from dep_init's general (non-MOZART, non-CBM4/CB05) branch, the one a GOCART chem_opt takes. dratio and scpr23 are the float32 values dep_init DERIVES from dvj (the diffusivity corrected to 20 C, then 0.242/dvj and ((0.15/dvj)/0.72)**(2/3), chem/module_dep_simple.F:3478-3489); the column oracle dumps them from the Fortran and tests/test_chem_wesely_wrf471_parity.py asserts these row values equal that dump bit for bit. Carried from CAMS with no chemistry: its daytime chemical lifetime is hours, so the field is only trustworthy for the first hours of a forecast (DESIGN 7.4).; RADM2/RADM2SORG (registry.chem:3929-3930) share this row: emission.radm2, chem.radm2 act on it only in the RADM2 sets (process_sets)",
+      "process_sets": {
+        "emission.radm2": [
+          "radm2",
+          "radm2sorg"
+        ],
+        "chem.radm2": [
+          "radm2",
+          "radm2sorg"
+        ]
+      }
     },
     {
       "name": "co",
@@ -137,7 +170,9 @@
       "phase": "gas",
       "family": "co",
       "sets": [
-        "cams_aq"
+        "cams_aq",
+        "radm2",
+        "radm2sorg"
       ],
       "transported": true,
       "floor": 1e-16,
@@ -145,7 +180,9 @@
       "molar_mass_g_mol": 28.01,
       "processes": [
         "drydep.wesely",
-        "mixing.vertmx"
+        "mixing.vertmx",
+        "emission.radm2",
+        "chem.radm2"
       ],
       "emissions": [],
       "boundary": [
@@ -190,7 +227,17 @@
       "optics": null,
       "mp_coupling": null,
       "exclusive_group": null,
-      "provenance": "Registry: state co (Registry/registry.chem, dname 'co', ppmv). floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5). default_inflow is WRF-Chem's inflow value for a species the GOCART boundary rule has no explicit case for (chem/module_input_chem_data.F:1295, bdy_chem_value_gocart); it is only ever used when no boundary source is available, and without the CAMS source these rows are refused, so in practice the inflow is CAMS's own value. molar_mass_g_mol from the IUPAC 2013 conventional atomic weights (C 12.011, N 14.007, O 15.999, S 32.06); WRF-Chem carries no common gas molar-mass table for these species. wetdep_ls_alpha 0: large-scale wet scavenging skips gases (chem/module_wetdep_ls.F:39-46). Wesely numbers from dep_init's general (non-MOZART, non-CBM4/CB05) branch, the one a GOCART chem_opt takes. dratio and scpr23 are the float32 values dep_init DERIVES from dvj (the diffusivity corrected to 20 C, then 0.242/dvj and ((0.15/dvj)/0.72)**(2/3), chem/module_dep_simple.F:3478-3489); the column oracle dumps them from the Fortran and tests/test_chem_wesely_wrf471_parity.py asserts these row values equal that dump bit for bit. Carried from CAMS; its deposition velocity is small, as in WRF-Chem."
+      "provenance": "Registry: state co (Registry/registry.chem, dname 'co', ppmv). floor = WRF epsilc 1.E-16 (chem/module_data_radm2.F:5). default_inflow is WRF-Chem's inflow value for a species the GOCART boundary rule has no explicit case for (chem/module_input_chem_data.F:1295, bdy_chem_value_gocart); it is only ever used when no boundary source is available, and without the CAMS source these rows are refused, so in practice the inflow is CAMS's own value. molar_mass_g_mol from the IUPAC 2013 conventional atomic weights (C 12.011, N 14.007, O 15.999, S 32.06); WRF-Chem carries no common gas molar-mass table for these species. wetdep_ls_alpha 0: large-scale wet scavenging skips gases (chem/module_wetdep_ls.F:39-46). Wesely numbers from dep_init's general (non-MOZART, non-CBM4/CB05) branch, the one a GOCART chem_opt takes. dratio and scpr23 are the float32 values dep_init DERIVES from dvj (the diffusivity corrected to 20 C, then 0.242/dvj and ((0.15/dvj)/0.72)**(2/3), chem/module_dep_simple.F:3478-3489); the column oracle dumps them from the Fortran and tests/test_chem_wesely_wrf471_parity.py asserts these row values equal that dump bit for bit. Carried from CAMS; its deposition velocity is small, as in WRF-Chem.; RADM2/RADM2SORG (registry.chem:3929-3930) share this row: emission.radm2, chem.radm2 act on it only in the RADM2 sets (process_sets)",
+      "process_sets": {
+        "emission.radm2": [
+          "radm2",
+          "radm2sorg"
+        ],
+        "chem.radm2": [
+          "radm2",
+          "radm2sorg"
+        ]
+      }
     }
   ]
 }

@@ -122,3 +122,109 @@ def launch_radm2_emiss(gas, gas_emis, rho_phy, alt, dz8w, dtstep, *, kemit,
          f["factnumn"], f["factnuma"], f["factnumc"], f["anthfac"], f["orgfac"],
          f["so4fac"], f["no3fac"], np.float32(dtstep), np.int32(kemit), np.int32(nz),
          np.int64(ncol)))
+
+
+# ---------------------------------------------------------------------------
+# The process (``emission.radm2``): the chem driver's view.
+# ---------------------------------------------------------------------------
+#
+# Column-based: the kernel runs one thread per column over ny*nx, so the hex
+# route can hand (nz, 1, ncells) views and frames on the cells.
+
+from woof.core.chem_context import ChemAllocation  # noqa: E402
+
+KEY = "emission.radm2"
+LEDGER = "emitted"
+KERNEL_MODULES = ("chem_radm2_emiss",)
+REQUIRES = ("rho", "alt", "dz8w")
+#: module_data_radm2.F epsilc: chem_driver's chem_minval
+#: (chem_driver.F:454, 693-701).
+EPSILC = np.float32(1.e-16)
+#: chem_driver.F:705-715: RADM2SORG's floor on the Aitken number.
+NU0_FLOOR = np.float32(1.e7)
+SORGAM_KEY = "aerosol.sorgam"
+#: The level-1 emis_ant planes vertical mixing reads for WRF's urban mixing
+#: enhancement (dry_dep_driver.F:672-690): e_co, e_pm25i, e_pm25j.
+PUBLISHED = (("anth_co_kts", "e_co"), ("anth_pm25i_kts", "e_pm25i"),
+             ("anth_pm25j_kts", "e_pm25j"))
+ALLOCATES = tuple(
+    ChemAllocation(name, "2d", restart="rebuild", units="emis_ant units",
+                   description=f"this step's {e} at the lowest level, for "
+                               "vertical mixing (dry_dep_driver.F:672-690)")
+    for name, e in PUBLISHED)
+
+
+def rows(table):
+    return table.rows_for(KEY)
+
+
+def _valid_time(ctx):
+    from datetime import timedelta
+
+    start = (getattr(ctx.cfg, "start_time", None)
+             or getattr(ctx.state.chem, "start_time", None))
+    if start is None:
+        raise ValueError("emission.radm2 needs the run's start time to pick "
+                         "an emission frame")
+    return start + timedelta(seconds=float(ctx.clock.curr_secs))
+
+
+def emission_frames(ctx):
+    """``{e_name: frame}`` from the run's enabled inventory, or None when the
+    run enables none (WRF's emiss_opt = 0: nothing is emitted).
+
+    The inventory module maps a source's fields onto WRF's emis_ant names
+    in WRF's units (woof.chem_inventory_frames)."""
+    from woof.chem_table import catalog
+
+    sources = catalog().sources
+    if not any(sources[name].kind == "emission"
+               for name in getattr(ctx.table, "enabled_sources", ())
+               if name in sources):
+        return None
+    from woof.chem_inventory_frames import radm2_frames_for_context
+
+    return radm2_frames_for_context(ctx, _valid_time(ctx))
+
+
+def init(ctx):
+    names = {row.name for row in rows(ctx.table)}
+    missing = [chem for chem, _e in GAS_TERMS if chem not in names]
+    if ctx.table.rows_for(SORGAM_KEY):
+        missing += [chem for chem in AEROSOL_ROWS if chem not in names]
+    if missing:
+        raise ValueError(f"emission.radm2: rows {missing} of the package do "
+                         "not name the process, so their emissions would "
+                         "be dropped")
+
+
+def step(ctx, dt, ktau):
+    import cupy as cp
+
+    table = ctx.table
+    active = rows(table)
+    for row in active:
+        a = ctx.field(row)
+        cp.maximum(a, EPSILC, out=a)
+    sorgam = bool(table.rows_for(SORGAM_KEY))
+    if sorgam:
+        nu0 = ctx.field(table.row("nu0"))
+        cp.maximum(nu0, NU0_FLOOR, out=nu0)
+    frames = emission_frames(ctx)
+    if frames is None:
+        for name, _e in PUBLISHED:
+            ctx.diag[name][...] = 0
+        return
+    gas = [ctx.field(table.row(chem)) for chem, _e in GAS_TERMS]
+    gas_emis = [frames[e] for _c, e in GAS_TERMS]
+    aerosol = aerosol_emis = None
+    if sorgam:
+        aerosol = [ctx.field(table.row(chem)) for chem in AEROSOL_ROWS]
+        aerosol_emis = [frames[e] for e in AEROSOL_EMISSIONS]
+    launch_radm2_emiss(gas, gas_emis, ctx.met("rho"), ctx.met("alt"),
+                       ctx.met("dz8w"), float(dt),
+                       kemit=int(getattr(ctx.cfg, "kemit", 9)),
+                       aerosol=aerosol, aerosol_emis=aerosol_emis)
+    for name, e in PUBLISHED:
+        frame = frames[e]
+        ctx.diag[name][...] = frame if frame.ndim == 2 else frame[0]

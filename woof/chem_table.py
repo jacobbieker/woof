@@ -82,6 +82,11 @@ CHEM_PROCESS_MODULES: Mapping[str, str] = MappingProxyType({
     "coupling.thompson": "woof.core.chem_mp_coupling",
     "drydep.wesely": "woof.core.chem_drydep_gas",
     "mixing.vertmx": "woof.core.chem_vertmx",
+    "emission.radm2": "woof.core.chem_radm2_emiss",
+    "photolysis.ftuv": "woof.core.chem_ftuv",
+    "drydep.sorgam": "woof.core.chem_sorgam_drydep",
+    "chem.radm2": "woof.core.chem_radm2",
+    "aerosol.sorgam": "woof.core.chem_sorgam",
 })
 
 
@@ -300,6 +305,9 @@ class DiagnosticRow:
     source_file: str
     divide_by_alt: bool = False
     column_scale: float = 1.0
+    #: The sets this diagnostic serves (schema ``sets``); empty: every run
+    #: whose rows complete one of its terms.
+    sets: tuple = ()
 
 
 @lru_cache(maxsize=1)
@@ -630,7 +638,8 @@ def load_sets(sets: Sequence[str], sources: Iterable[str] = (), *,
     used_sources = {name: cat.sources[name] for name in referenced}
     diagnostics = tuple(
         d for d in cat.diagnostics.values()
-        if any(all(sp in seen for sp in term["species"]) for term in d.terms))
+        if (not d.sets or any(name in d.sets for name in sets))
+        and any(all(sp in seen for sp in term["species"]) for term in d.terms))
     h = hashlib.sha256()
     h.update(cat.digest.encode())
     h.update(json.dumps({"sets": list(sets), "rows": list(chosen),
