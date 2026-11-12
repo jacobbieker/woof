@@ -228,6 +228,11 @@ def priced(accepted_keys) -> dict[str, object]:
 
     import itertools
     import os
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        pytest.skip("prices 71,068 compositions in a process pool; on a hosted "
+                    "runner beside xdist workers the pool is killed "
+                    "(BrokenProcessPool, stage1 2026-11-11) and 1,671 s on one "
+                    "core is past its budget. Run it on a workstation.")
     keys = list(accepted_keys)
     available = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)
     jobs = max(1, min(int(os.environ.get("WOOF_COMPOSITION_WORKERS", "8")), available))

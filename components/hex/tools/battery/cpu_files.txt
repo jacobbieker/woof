@@ -1211,6 +1211,7 @@ tests/test_lts_clock_top_and_choice.py
 # pools, streams and driver order are host-only; the CUDA members are on gpu_gates.txt.
 tests/test_mpas_farms_v842.py
 tests/test_mpas_nwp_diagnostics.py
+tests/test_mpas_tslist.py
 tests/test_mpas_plevel_diagnostics.py
 tests/test_mpas_radtran.py
 tests/test_mpas_rrtmg_spectral_output.py

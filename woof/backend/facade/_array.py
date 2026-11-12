@@ -131,7 +131,7 @@ class Storage:
     filled array can be one scalar with stride 0), and a kernel bound to
     such a buffer would read and write past the one element it holds."""
 
-    __slots__ = ("arr", "dtype", "_aliases", "_memory", "_address", "__weakref__")
+    __slots__ = ("arr", "dtype", "_aliases", "_alias_of", "_memory", "_address", "__weakref__")
 
     def __init__(self, arr, dtype: np.dtype, *, fresh: bool = False):
         """``fresh``: ``arr`` is a newly computed value no other array holds
@@ -147,6 +147,7 @@ class Storage:
         self.arr = flat if fresh else mx.array(flat)
         self.dtype = storage_dtype(dtype)
         self._aliases = None
+        self._alias_of = None         # the storage this one reinterprets (alias)
         self._memory = None
         self._address = None
         _count_allocation(self)
@@ -205,7 +206,14 @@ class Storage:
             if int(ext.load().gpu_address(arr)) != int(ext.load().gpu_address(self.arr)):
                 raise NotImplementedError("MLX copied a reinterpreting view; the memory cannot be shared")
             st = self._aliases[dtype] = Storage(arr, dtype, fresh=True)
+            st._alias_of = self._alias_of or self
         return st
+
+    def buffer_root(self) -> "Storage":
+        """The storage owning this one's Metal buffer: itself, or the one it
+        reinterprets (alias).  Two storages share a buffer iff their roots
+        are the same object."""
+        return self._alias_of or self
 
     def address(self) -> int:
         """The buffer's GPU address (evaluating it first).  Recorded, so an
@@ -222,12 +230,48 @@ class Storage:
         # Evaluating for it again waited on every launch still writing the
         # buffer: the microphysics ring copy's table key asked for 390
         # addresses per model step, each a host sync on Metal.
-        _ADDRESSES[base] = weakref.ref(self)
+        if _ADDRESSES.get(base) is None or _ADDRESSES[base]() is not self:
+            _ADDRESSES[base] = weakref.ref(self)
+            _ADDRESS_INDEX[0] = None          # the index is stale
         return base
 
 
 #: GPU base address -> the storage that handed it out (Storage.address)
 _ADDRESSES: dict = {}
+
+#: _ADDRESSES as [built, sorted bases, their references]; every change to
+#: _ADDRESSES clears ``built`` (a dead entry dropped, a base registered)
+_ADDRESS_INDEX: list = [None, [], []]
+
+
+def storages_holding(words) -> list:
+    """The live storages whose handed-out buffers hold any of ``words``
+    (64-bit values, most of them not addresses), each once.  A word that is
+    no storage's address names none.  For kernels handed a by-value table of
+    addresses (rk_copy_words): their targets, for MLX to track."""
+    import bisect
+    found = {}
+    for attempt in (0, 1):
+        if attempt or _ADDRESS_INDEX[0] is None:
+            live = sorted(((base, ref) for base, ref in _ADDRESSES.items() if ref() is not None),
+                          key=lambda row: row[0])
+            _ADDRESS_INDEX[:] = [True, [b for b, _ in live], [r for _, r in live]]
+        bases, refs = _ADDRESS_INDEX[1], _ADDRESS_INDEX[2]
+        found.clear()
+        stale = False
+        for word in words:
+            at = bisect.bisect_right(bases, word) - 1
+            if at < 0:
+                continue
+            st = refs[at]()
+            if st is None or st._address != bases[at]:
+                stale = True                  # freed or rebound since the index
+                continue
+            if word < bases[at] + max(st.nbytes, 1):
+                found[id(st)] = st
+        if not stale:
+            break
+    return list(found.values())
 
 
 def storage_at(address: int):
@@ -237,10 +281,12 @@ def storage_at(address: int):
         st = ref()
         if st is None:
             del _ADDRESSES[base]
+            _ADDRESS_INDEX[0] = None
             continue
         if base <= address < base + max(st.nbytes, 1):
             if int(ext.load().gpu_address(st.arr)) != base:   # rebound since
                 del _ADDRESSES[base]
+                _ADDRESS_INDEX[0] = None
                 continue
             return st, address - base
     return None
