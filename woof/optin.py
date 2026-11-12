@@ -15,6 +15,9 @@ opt-in          environment variable        licence
 ``nemo``        ``WOOF_ENABLE_NEMO=1``      CeCILL v2.0 (copyleft; a build
                                             that loads it may be redistributed
                                             only under CeCILL or the GNU GPL)
+``wrfchem_pnnl`` ``WOOF_ENABLE_WRFCHEM_PNNL=1`` Battelle/PNNL's WRF-Chem terms
+                                            (research and educational use;
+                                            commercial use by request)
 ==============  ==========================  ==================================
 
 ``WOOF_OPTIONAL_ROOT`` points at another ``optional/`` directory (an install
@@ -39,6 +42,10 @@ OPT_INS = {
     "nemo": ("WOOF_ENABLE_NEMO", "woof_nemo",
              "the CeCILL v2.0 copyleft licence, under which a build that loads "
              "it may be redistributed only as CeCILL or GNU GPL as a whole"),
+    "wrfchem_pnnl": ("WOOF_ENABLE_WRFCHEM_PNNL", "woof_wrfchem_pnnl",
+                     "Battelle/PNNL's WRF-Chem terms of use (research and "
+                     "educational purposes; commercial use only by request to "
+                     "the authors), which are not a licence grant"),
 }
 
 

@@ -1,0 +1,4 @@
+dbae1aef8c2eb821dd580831d3179b3bca0dd523ee0afd1e1d3fc45e14b0014b  ./cases/MANIFEST.txt
+65b722f31e40a338d5a6189c51065973cb511cf2c8f6e68e08469d6ac85370f1  ./cases/arrays.bin
+e85d4db1e720117b486d521afd75767ffe8bd0c5b2d06acdb5ef2d3ef998d831  ./cases/ints.bin
+2ea73f4f788bcc38f55ed696a6ebb27c06d92c2c38d4fee3f202bf63234dcb41  ./cases/scalars.bin
