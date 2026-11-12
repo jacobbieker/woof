@@ -1637,6 +1637,9 @@ class RunConfig:
     #: boundary of the chem vertical mixing, for aerosol rows with no dry
     #: deposition scheme of their own.  0 = those rows deposit nothing.
     aer_drydep_opt: int = _config_field(default=0, kw_only=True)
+    #: WRF ``&chem photdt`` (registry.chem, minutes; 0 = every step): the
+    #: photolysis cadence of photolysis.ftuv (chem_driver.F:349-362).
+    photdt: float = _config_field(default=0.0, kw_only=True)
     # The WRF v4.7.1 fire (SFIRE) namelist, appended keyword-only so the
     # positional API and the order of every field above are unchanged.
     # Names, types and defaults are woof.sfire_config.FireRunFields'
@@ -5488,7 +5491,7 @@ CHEM_RUN_FIELDS = (
     "aer_op_opt", "dust_alpha", "dust_gamma", "dust_smtune", "dust_ustune",
     "mynn_chem_vertmx", "fire_emission_mode", "plume_fire_properties",
     "aerosol_mp_coupling", "simple_dir_fdb", "enh_vermix", "flam_part",
-    "aer_drydep_opt")
+    "aer_drydep_opt", "photdt")
 
 #: Every RunConfig field of the fire (SFIRE) block, in declaration order,
 #: appended keyword-only after CHEM_RUN_FIELDS: inert while ``ifire`` is 0
@@ -7392,6 +7395,11 @@ def validate_chem_config(cfg) -> None:
         table = load_sets(sets, sources)
     except ChemTableError as error:
         raise ConfigurationRefused(str(error)) from error
+    photdt = getattr(cfg, "photdt", 0.0)
+    if isinstance(photdt, bool) or not isinstance(photdt, (int, float)) \
+            or not math.isfinite(photdt):
+        raise ConfigurationRefused(f"photdt must be a finite number of minutes "
+                                   f"(WRF declares it a real), got {photdt!r}.")
     for name in ("chem_adv_opt", "kemit", "biomass_burn_opt",
                  "plumerisefire_frq", "dust_opt", "seas_opt", "dmsemis_opt",
                  "wetscav_onoff", "chem_conv_tr", "vertmix_onoff",

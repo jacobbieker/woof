@@ -281,14 +281,65 @@ def test_dust_only_maps_onto_woofs_dust_set(tmp_path):
 
 def test_uncarried_chemistry_package_is_refused_with_the_menu(tmp_path):
     with pytest.raises(NamelistRefusal) as caught:
-        _import(tmp_path, _with_chem(" chem_opt = 2, 2,\n"))
+        _import(tmp_path, _with_chem(" chem_opt = 41, 41,\n"))
     message = str(caught.value)
-    assert "chem_opt = 2 is not carried" in message
+    assert "chem_opt = 41 is not carried" in message
     assert "chem_opt = 300 (gocart_simple)" in message
     assert "chem_opt = 401 (dust)" in message
+    assert "chem_opt = 2 (radm2sorg)" in message
     assert "none of the requested species" in message
-    assert "RADM2SORG (the RADM2 gas phase with the MADE/SORGAM aerosol;" in message
-    assert "RPMARES equilibrium, WRF's ISORROPIA being an opt-in) is being ported" in message
+    assert "RADM2SORG_AQCHEM (the RADM2 gas phase with the MADE/SORGAM" in message
+    assert "is being ported" in message
+
+
+#: A WRF-Chem RADM2SORG &chem as WRF-Chem users write it (chem_opt = 2 with
+#: the eradmsorg emissions, Fast-TUV and Wesely/SORGAM deposition).
+RADM2SORG_CHEM = (" chem_opt = 2, 2,\n emiss_opt = 3, 3,\n emiss_inpt_opt = 1, 1,\n"
+                  " phot_opt = 3, 3,\n gas_drydep_opt = 1, 1,\n"
+                  " aer_drydep_opt = 1, 1,\n chem_in_opt = 0, 0,\n"
+                  " kemit = 19,\n chemdt = 2., 2.,\n photdt = 30., 30.,\n"
+                  " io_style_emissions = 1,\n bio_emiss_opt = 0, 0,\n"
+                  " chem_conv_tr = 0, 0,\n gaschem_onoff = 1, 1,\n"
+                  " aerchem_onoff = 1, 1,\n vertmix_onoff = 1, 1,\n")
+
+
+@pytest.mark.parametrize("chem_opt,chem_set", [(1, "radm2"), (2, "radm2sorg")])
+def test_radm2_packages_map_with_their_switches(tmp_path, chem_opt, chem_set):
+    from woof.experiment import build_experiment
+    body = RADM2SORG_CHEM.replace("chem_opt = 2, 2", f"chem_opt = {chem_opt}, {chem_opt}")
+    if chem_opt == 1:
+        body = body.replace(" aer_drydep_opt = 1, 1,\n", "")
+    text, report = _import(tmp_path, _with_chem(body))
+    shared = tomllib.loads(text)["shared"]
+    assert shared["chem_sets"] == chem_set
+    assert shared["photdt"] == 30.0 and shared["chemdt"] == 2.0 and shared["kemit"] == 19
+    # No inventory row yet: emiss_opt = 3 enables none, so nothing is double-counted.
+    assert "chem_sources" not in shared or "edgar" not in shared["chem_sources"]
+    fixed = {row.key for row in report.fixed}
+    assert {"chem_opt", "emiss_opt", "phot_opt", "gas_drydep_opt"} <= fixed
+    experiment = build_experiment(tomllib.loads(text), source="radm2 namelist")
+    assert all(domain.run.chem_sets == chem_set and domain.run.photdt == 30.0
+               for domain in experiment.domains)
+
+
+@pytest.mark.parametrize("key,value,why", [
+    ("phot_opt", 1, "only 3, photolysis.ftuv"),
+    ("emiss_opt", 2, "only 3, emission.radm2"),
+    ("aer_drydep_opt", 11, "only 1, drydep.sorgam"),
+])
+def test_radm2sorg_refuses_switch_values_it_does_not_run(tmp_path, key, value, why):
+    body = RADM2SORG_CHEM.replace(f" {key} = ", f" {key}_was = ", 1)
+    body = body.replace(f" {key}_was = ", f" {key} = {value}, {value},\n dummy_was = ", 1)
+    body = "\n".join(line for line in body.split("\n") if "dummy_was" not in line) + "\n"
+    with pytest.raises(NamelistRefusal) as caught:
+        _import(tmp_path, _with_chem(body))
+    assert why in str(caught.value)
+
+
+def test_radm2_set_keeps_gocart_and_cams_namelists_unchanged():
+    from woof.namelist_chem import _sources_for
+    assert _sources_for("cams_aq", {"emiss_opt": 3}) == _sources_for("cams_aq", {"emiss_opt": 1})
+    assert "cams-oxidants" not in _sources_for("radm2sorg", {"emiss_opt": 3})
 
 
 def test_cbmz_mosaic_packages_are_refused_naming_their_terms(tmp_path):
