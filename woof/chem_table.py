@@ -82,6 +82,11 @@ CHEM_PROCESS_MODULES: Mapping[str, str] = MappingProxyType({
     "coupling.thompson": "woof.core.chem_mp_coupling",
     "drydep.wesely": "woof.core.chem_drydep_gas",
     "mixing.vertmx": "woof.core.chem_vertmx",
+    "emission.radm2": "woof.core.chem_radm2_emiss",
+    "photolysis.ftuv": "woof.core.chem_ftuv",
+    "drydep.sorgam": "woof.core.chem_sorgam_drydep",
+    "chem.radm2": "woof.core.chem_radm2",
+    "aerosol.sorgam": "woof.core.chem_sorgam",
 })
 
 
@@ -300,6 +305,9 @@ class DiagnosticRow:
     source_file: str
     divide_by_alt: bool = False
     column_scale: float = 1.0
+    #: The sets this diagnostic serves (schema ``sets``); empty: every run
+    #: whose rows complete one of its terms.
+    sets: tuple = ()
 
 
 @lru_cache(maxsize=1)
@@ -591,6 +599,19 @@ class ChemTable:
         return tuple(key for key in CHEM_PROCESS_MODULES if key in named)
 
 
+def _for_sets(row: SpeciesRow, sets) -> SpeciesRow:
+    """``row`` with the boundary entries this selection reads: an entry
+    gated by ``sets`` (schema) fills the row only when one of them is
+    selected."""
+    kept = tuple(ref for ref in row.boundary
+                 if not ref.get("sets") or any(name in ref["sets"] for name in sets))
+    if len(kept) == len(row.boundary):
+        return row
+    from dataclasses import replace
+
+    return replace(row, boundary=kept)
+
+
 def load_sets(sets: Sequence[str], sources: Iterable[str] = (), *,
               root: str | Path | None = None) -> ChemTable:
     """The table for an explicit set selection (see :func:`load`)."""
@@ -612,7 +633,7 @@ def load_sets(sets: Sequence[str], sources: Iterable[str] = (), *,
             if name not in seen:
                 seen.add(name)
                 chosen.append(name)
-    rows = tuple(cat.species[n] for n in chosen)
+    rows = tuple(_for_sets(cat.species[n], sets) for n in chosen)
     for row in rows:
         if row.aging is not None and row.aging["to"] not in seen:
             raise ChemTableError(
@@ -630,7 +651,8 @@ def load_sets(sets: Sequence[str], sources: Iterable[str] = (), *,
     used_sources = {name: cat.sources[name] for name in referenced}
     diagnostics = tuple(
         d for d in cat.diagnostics.values()
-        if any(all(sp in seen for sp in term["species"]) for term in d.terms))
+        if (not d.sets or any(name in d.sets for name in sets))
+        and any(all(sp in seen for sp in term["species"]) for term in d.terms))
     h = hashlib.sha256()
     h.update(cat.digest.encode())
     h.update(json.dumps({"sets": list(sets), "rows": list(chosen),

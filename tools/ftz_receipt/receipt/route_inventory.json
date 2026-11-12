@@ -9,9 +9,9 @@
     "cupy.ReductionKernel",
     "cupy.cuda.compiler.compile_using_nvrtc"
   ],
-  "site_count": 643,
+  "site_count": 644,
   "site_count_by_kind": {
-    "cupy.ElementwiseKernel": 42,
+    "cupy.ElementwiseKernel": 43,
     "cupy.RawKernel": 110,
     "cupy.RawModule": 293,
     "cupy.ReductionKernel": 16,
@@ -25,7 +25,7 @@
       "cupy.cuda.compiler.compile_using_nvrtc": 22
     },
     "package": {
-      "cupy.ElementwiseKernel": 30,
+      "cupy.ElementwiseKernel": 31,
       "cupy.RawKernel": 39,
       "cupy.RawModule": 99,
       "cupy.ReductionKernel": 9,
@@ -6715,6 +6715,22 @@
       "text": "ptx, _mapping = compiler.compile_using_nvrtc("
     },
     {
+      "file": "woof/core/chem_radm2.py",
+      "line": 283,
+      "column": 18,
+      "surface": "package",
+      "constructor": "cp.ElementwiseKernel",
+      "constructor_kind": "cupy.ElementwiseKernel",
+      "enclosing": "_so2so4_kernel",
+      "takes_caller_options": true,
+      "options_argument_present": false,
+      "options_expression": null,
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "_SO2SO4 = cp.ElementwiseKernel("
+    },
+    {
       "file": "woof/core/chem_sfire.py",
       "line": 131,
       "column": 17,
@@ -6732,7 +6748,7 @@
     },
     {
       "file": "woof/core/chem_vertmx.py",
-      "line": 159,
+      "line": 173,
       "column": 20,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
