@@ -121,9 +121,14 @@ def make_case(name, seed, n_cells, n_levels, eos_type, tracer_index, t_range, s_
     configs = {**DEFAULTS, **overrides}
     freeze_s = uniform(0.0, 40.0, (nc, nl))
     freeze_s[rs.random_sample((nc, nl)) < 0.05] = 0.0
-    freeze_p = uniform(-2.0e5, 6.0e7, (nc, nl))
-    at_ref = rs.random_sample((nc, nl)) < 0.05
-    freeze_p[at_ref] = configs["config_open_ocean_freezing_temperature_reference_pressure"]
+    freeze_p = uniform(0.0, 6.0e7, (nc, nl))
+    pick = rs.random_sample((nc, nl))
+    for lo, hi, where in ((0.0, 0.1, "open_ocean"), (0.1, 0.2, "land_ice_cavity")):
+        # a tenth below each reference pressure, and some exactly at it
+        reference = configs[f"config_{where}_freezing_temperature_reference_pressure"]
+        below = (pick >= lo) & (pick < hi)
+        freeze_p[below] = reference - uniform(0.0, 2.0e5, (nc, nl))[below]
+        freeze_p[(pick >= hi) & (pick < hi + 0.03)] = reference
     return {
         "name": name, "nCells": nc, "nVertLevels": nl, "nTracers": nt, "eosType": eos_type,
         "indexT": tracer_index[0], "indexS": tracer_index[1], "configs": configs,
