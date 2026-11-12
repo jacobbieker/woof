@@ -1341,8 +1341,11 @@ BASELINE_PINNED: dict[str, str] = {
     # Constant denominators use wd_div and the existing WFloat div.rn.f32
     # operator. Passing WFloat to the float-only __fdiv_rn cannot compile.
     # The native oracle cases grade these repaired bytes on the card.
+    # Re-pinned for the 42 RADM2 gases: the zero_surface arm (ho/ho2,
+    # srfres = 0, module_dep_simple.F:244) and the particle arm (sulf, vgp,
+    # :1437-1447); 0 ULP on the 4 RADM2/RADM2SORG oracle cases too.
     "chem_drydep_wesely":
-        "33761f22276d75382a03dc2eb67ba1d866e24540eabaedc20daa5ebe31cda63d",
+        "a625591ac2e535942fb6244e188f924d0ffa00d4f389685c0a4b038bbb064b8f",
     # Lane 286-aer-swint: WRF swint_opt = 1 (radconst/calc_coszen at the
     # current xtime, update_swinterp_parameters, interp_sw_radiation).
     # Re-pinned by lane verify-swint-opt (2026-10-07): the kernels follow
@@ -1776,6 +1779,11 @@ COMPOSED_HEADERS = {
     # by the kernel loader); proven equal to upstream on 2^28 arguments by
     # tools/uwpbl_wrf471_oracle/libm64/sweep_cbrt.py.
     "cr_cbrt_flt64.cuh": "543414e82e9042820f6fb386a29bea072b9995ab8046e2c8d1d32e7aff7c2691",
+    # CORE-MATH's correctly rounded binary64 tanh (glibc 2.44's tanh),
+    # prepended to MALI's RKIND 8 units by woof.hex.mpas_ice.rkind.r8_prelude
+    # (not by the kernel loader); proven equal to the oracle host's glibc tanh
+    # by tools/oracle_libm/grade_tanh.py.
+    "cr_tanh_flt64.cuh": "769c8b6d0f0aef936bb6d2d933f4ba804990b6f47405310b53030bc0da68cbcb",
 
     # FAST_SBM's direct NVRTC composition (woof/core/fast_sbm_cuda.py
     # compiles fast_sbm.cu with this directory on its include path).

@@ -48,6 +48,8 @@ CASES = (
     ("temperature_none_seroussi", 20261143, 96, 8, "none", "temperature", "lapse", "seroussi", False),
     ("enthalpy_none_file", 20261144, 80, 6, "none", "enthalpy", "file", "file", True),
     ("no_thermal", 20261145, 64, 5, "sia", "none", "file", "none", True),
+    # many floating cells, so MISMIP's tanh is graded on a thousand arguments
+    ("no_thermal_mismip", 20261146, 4096, 3, "none", "none", "file", "mismip", False),
 )
 
 
@@ -141,9 +143,9 @@ def make_case(name: str, seed: int, n_cells: int, n_levels: int, solver: str, th
     return case
 
 
-#: At RKIND 8 the port refuses 'mismip' and 'seroussi' (their binary64 tanh and
-#: sin have no matched transcription), so those cases run 'constant' and 'none'
-R8_FLOAT_MELT = {"mismip": "constant", "seroussi": "none"}
+#: At RKIND 8 the port refuses 'seroussi' (glibc's binary64 sin has no matched
+#: transcription), so that case runs 'none'
+R8_FLOAT_MELT = {"seroussi": "none"}
 
 
 def cases(precision: str = "r4") -> list[dict]:
