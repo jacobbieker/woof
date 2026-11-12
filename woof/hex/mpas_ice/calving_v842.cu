@@ -14,8 +14,9 @@
 //
 // RKIND = 4 unless MPAS_RKIND8 is defined. Every operation is an explicit
 // round-to-nearest intrinsic in the Fortran's evaluation order (gfortran -O0
-// -ffp-contract=off). Fortran MIN/MAX keep the first argument unless the
-// second compares less/greater (x86-64 minss/maxss), chosen on the words.
+// -ffp-contract=off). Fortran MIN/MAX return the first argument only if it
+// compares less/greater and the second otherwise (x86-64 minss/maxss, as
+// measured for max(0.0, x) in li_subglacial_hydro), chosen on the words.
 //
 // Layout: cellsOnCell(maxEdges, nCells) is c[iCell*maxEdges + j]; a
 // (nVertLevels, nCells) field is a[iCell*nVertLevels + k]. Connectivity is
@@ -29,10 +30,10 @@ typedef double rk;
 #define D(a,b) __ddiv_rn((a),(b))
 #define LI_C(x) x
 __device__ __forceinline__ rk li_min(rk a, rk b) {
-    return __longlong_as_double(b < a ? __double_as_longlong(b) : __double_as_longlong(a));
+    return __longlong_as_double(a < b ? __double_as_longlong(a) : __double_as_longlong(b));
 }
 __device__ __forceinline__ rk li_max(rk a, rk b) {
-    return __longlong_as_double(b > a ? __double_as_longlong(b) : __double_as_longlong(a));
+    return __longlong_as_double(a > b ? __double_as_longlong(a) : __double_as_longlong(b));
 }
 #else
 typedef float rk;
@@ -42,10 +43,10 @@ typedef float rk;
 #define D(a,b) __fdiv_rn((a),(b))
 #define LI_C(x) x##f
 __device__ __forceinline__ rk li_min(rk a, rk b) {
-    return __int_as_float(b < a ? __float_as_int(b) : __float_as_int(a));
+    return __int_as_float(a < b ? __float_as_int(a) : __float_as_int(b));
 }
 __device__ __forceinline__ rk li_max(rk a, rk b) {
-    return __int_as_float(b > a ? __float_as_int(b) : __float_as_int(a));
+    return __int_as_float(a > b ? __float_as_int(a) : __float_as_int(b));
 }
 #endif
 
