@@ -264,7 +264,24 @@ def lake_mask_vote(geometry, assigner, water: np.ndarray, dataset, *,
 
 
 #: The field groups ``--fields`` names: each is one scheme's inputs.
-FIELD_GROUPS = ("lake", "urban")
+FIELD_GROUPS = ("lake", "urban", "landusef")
+
+
+def landuse_fractions(counts: np.ndarray, cmin: int
+                      ) -> tuple[np.ndarray, dict[str, Any]]:
+    """geogrid's LANDUSEF on the mesh: ``[nLandCat, nCells]`` float32, the
+    share of each category among the pixels a cell holds (planes from
+    category 1; a cell with no pixel holds the one under its centre)."""
+    total = counts.sum(axis=1, keepdims=True)
+    fractions = np.where(total > 0, counts / np.maximum(total, 1), 0.0)
+    planes = np.zeros((cmin - 1 + fractions.shape[1], fractions.shape[0]))
+    planes[cmin - 1:] = fractions.T
+    return planes.astype(np.float32), {
+        "method": "pixel shares of each category per Voronoi cell "
+                  "(nearest-centre assignment), geogrid's LANDUSEF",
+        "categories": int(planes.shape[0]),
+        "cells_without_pixels": int(np.count_nonzero(total == 0)),
+    }
 
 
 def urban_fraction_cells(counts: np.ndarray, cmin: int, ivgtyp, landmask
@@ -410,18 +427,31 @@ def build(static: Path, out: Path, *, geog_root: Path | None,
             provenance["lake_depth"] = depth_receipt
             written["LAKE_DEPTH"] = depth
             attrs["LAKE_DEPTH_FLAG"] = np.int32(1)
-    if "urban" in groups and replaced_landuse is not None:
+    if replaced_landuse is not None and ("urban" in groups or "landusef" in groups):
         raise SurfaceStaticsRefusal(
             f"the static's land use was replaced by `woof hex static-highres` "
-            f"({replaced_landuse}); the urban shares here count the 30-arc-second "
-            "MODIS pixels, which would disagree with that static's urban cells. "
-            "Build the urban fraction from a static carrying the 30-arc-second "
-            "land use (the high-resolution source is not wired here yet)")
-    if "urban" in groups:
+            f"({replaced_landuse}); the category shares here count the "
+            "30-arc-second MODIS pixels, which would disagree with that static's "
+            "cells. Build the urban fraction and LANDUSEF from a static carrying "
+            "the 30-arc-second land use (the high-resolution source is not wired "
+            "here yet)")
+    landuse = None
+    if "urban" in groups or "landusef" in groups:
+        # One pass over the with-lakes land use serves both groups.
         dataset = geog(LAKE_LANDUSE_DATASET)
         counts, cmin, window = category_counts(
             geometry, need_assigner(), np.ones(n, dtype=bool), dataset,
             progress=progress)
+        landuse = (dataset, counts, cmin, window)
+    if "landusef" in groups:
+        dataset, counts, cmin, window = landuse
+        written["LANDUSEF"], provenance["landusef"] = landuse_fractions(
+            counts, cmin)
+        provenance["landusef"].update(
+            dataset=dataset.path.name, source_window=list(window),
+            index_sha256=_index_sha256(dataset.path))
+    if "urban" in groups:
+        dataset, counts, cmin, window = landuse
         frc, urban = urban_fraction_cells(counts, cmin, ivgtyp, landmask)
         urban.update(dataset=dataset.path.name, source_window=list(window),
                      index_sha256=_index_sha256(dataset.path))
@@ -438,8 +468,12 @@ def build(static: Path, out: Path, *, geog_root: Path | None,
             # holds the file to its mesh's cells and their order.
             for name, values in (("latCell", lat), ("lonCell", lon)):
                 target.createVariable(name, "f8", ("nCells",))[:] = values
+            if any(values.ndim == 2 for values in fields.values()):
+                target.createDimension("nLandCat", max(
+                    values.shape[0] for values in fields.values() if values.ndim == 2))
             for name, values in fields.items():
-                variable = target.createVariable(name, values.dtype, ("nCells",))
+                dims = ("nLandCat", "nCells") if values.ndim == 2 else ("nCells",)
+                variable = target.createVariable(name, values.dtype, dims)
                 variable[:] = values
             target.setncattr("schema", SCHEMA)
             for name, value in attrs.items():
