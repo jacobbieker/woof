@@ -127,14 +127,15 @@ def _bands(window):
         yield x0, x1, start, min(y1, start + rows - 1)
 
 
-def lake_depth_cells(geometry, assigner, water: np.ndarray, dataset, *,
-                     progress: Callable[[str], None] | None = None
-                     ) -> tuple[np.ndarray, dict[str, Any]]:
-    """GEOGRID's LAKE_DEPTH on the mesh (module docstring)."""
+def gcell_sums(geometry, assigner, dataset, *, pad: int, label: str,
+               progress: Callable[[str], None] | None = None):
+    """geogrid's average_gcell numerator and denominator on the mesh: the sum
+    and count of the valid source pixels whose centres fall in each Voronoi
+    cell (nearest-centre assignment).  Returns ``(total, count, window)``."""
     n = geometry.n_cells
     total = np.zeros(n)
     count = np.zeros(n, dtype=np.int64)
-    window = _source_window(dataset, _footprint(geometry), LAKE_DEPTH_SEARCH + 1)
+    window = _source_window(dataset, _footprint(geometry), pad)
     for bx0, bx1, by0, by1 in _bands(window):
         values = dataset.read_window(bx0, bx1, by0, by1).values()
         valid = np.flatnonzero(np.isfinite(values.reshape(-1)))
@@ -148,7 +149,73 @@ def lake_depth_cells(geometry, assigner, water: np.ndarray, dataset, *,
         total += np.bincount(cells, values.reshape(-1)[valid][keep], minlength=n)
         count += np.bincount(cells, minlength=n)
         if progress is not None:
-            progress(f"lake_depth rows {by0}-{by1}: {int(valid.size)} valid pixels")
+            progress(f"{label} rows {by0}-{by1}: {int(valid.size)} valid pixels")
+    return total, count, window
+
+
+def _cell_source_xy(geometry, dataset, cells):
+    lat = np.degrees(np.arcsin(np.clip(geometry.xyz[cells, 2], -1, 1)))
+    lon = np.degrees(np.arctan2(geometry.xyz[cells, 1], geometry.xyz[cells, 0]))
+    return dataset.latlon_to_xy(lat, lon)
+
+
+#: WPS v4.6.0 GEOGRID.TBL.ARW:511-518 (IRRIGATION).
+IRRIGATION_DATASET = "irrigation/fao"
+IRRIGATION_FILL = 0.0
+
+
+def irrigation_cells(geometry, assigner, land: np.ndarray, dataset, *,
+                     progress: Callable[[str], None] | None = None
+                     ) -> tuple[np.ndarray, dict[str, Any]]:
+    """GEOGRID's IRRIGATION on the mesh.
+
+    ``average_gcell(0.0)+average_4pt+nearest_neighbor``, ``masked = water``,
+    ``fill_missing = 0``: the mean of the valid source pixels in the cell;
+    a cell finer than the source (no pixel centre in it) takes the mean of
+    the four source points around its centre, then the nearest point; water
+    cells hold the fill.
+    """
+    n = geometry.n_cells
+    total, count, window = gcell_sums(geometry, assigner, dataset, pad=2,
+                                      label="irrigation", progress=progress)
+    out = np.full(n, IRRIGATION_FILL)
+    gcell = land & (count > 0)
+    out[gcell] = total[gcell] / count[gcell]
+    rest = np.flatnonzero(land & (count == 0))
+    four = nearest = 0
+    if rest.size:
+        xs, ys = _cell_source_xy(geometry, dataset, rest)
+        for k, cell in enumerate(rest):
+            i0, j0 = int(np.floor(xs[k])), int(np.floor(ys[k]))
+            patch = dataset.read_window(i0, i0 + 1, j0, j0 + 1).values()
+            if np.all(np.isfinite(patch)):
+                out[cell] = float(patch.mean())
+                four += 1
+                continue
+            ci, cj = int(np.rint(xs[k])), int(np.rint(ys[k]))
+            value = dataset.read_window(ci, ci, cj, cj).values().reshape(-1)[0]
+            if np.isfinite(value):
+                out[cell] = float(value)
+                nearest += 1
+    return out.astype(np.float32), {
+        "method": "average_gcell(0.0)+average_4pt+nearest_neighbor, masked=water, "
+                  "fill 0 (GEOGRID.TBL IRRIGATION) over each Voronoi cell",
+        "source_window": list(window),
+        "land_cells": int(np.count_nonzero(land)),
+        "cells_averaged": int(np.count_nonzero(gcell)),
+        "cells_average_4pt": int(four),
+        "cells_nearest": int(nearest),
+    }
+
+
+def lake_depth_cells(geometry, assigner, water: np.ndarray, dataset, *,
+                     progress: Callable[[str], None] | None = None
+                     ) -> tuple[np.ndarray, dict[str, Any]]:
+    """GEOGRID's LAKE_DEPTH on the mesh (module docstring)."""
+    n = geometry.n_cells
+    total, count, window = gcell_sums(
+        geometry, assigner, dataset, pad=LAKE_DEPTH_SEARCH + 1,
+        label="lake_depth", progress=progress)
     depth = np.full(n, LAKE_DEPTH_FILL_M)
     gcell = water & (count > 0)
     depth[gcell] = total[gcell] / count[gcell]
@@ -264,7 +331,7 @@ def lake_mask_vote(geometry, assigner, water: np.ndarray, dataset, *,
 
 
 #: The field groups ``--fields`` names: each is one scheme's inputs.
-FIELD_GROUPS = ("lake", "urban", "landusef")
+FIELD_GROUPS = ("lake", "urban", "landusef", "irrigation")
 
 
 def landuse_fractions(counts: np.ndarray, cmin: int
@@ -457,6 +524,11 @@ def build(static: Path, out: Path, *, geog_root: Path | None,
                      index_sha256=_index_sha256(dataset.path))
         provenance["urban"] = urban
         written["FRC_URB2D"] = frc
+    if "irrigation" in groups:
+        dataset = geog(IRRIGATION_DATASET)
+        written["IRRIGATION"], provenance["irrigation"] = irrigation_cells(
+            geometry, need_assigner(), ~water, dataset, progress=progress)
+        provenance["irrigation"]["index_sha256"] = _index_sha256(dataset.path)
     fields = written
     out = Path(out).expanduser().absolute()
     out.parent.mkdir(parents=True, exist_ok=True)

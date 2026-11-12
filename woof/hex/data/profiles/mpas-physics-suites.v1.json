@@ -545,10 +545,10 @@
         "reason": "windfarm_opt is WRF's &physics switch for the legacy turbine list; WOOF's config has no such field and hex places turbines through wind_farm_scheme",
         "follow_up": "wind_farm_scheme=fitch_wrf with wind_farms=FILE"
       },
-      "sf_surf_irr_scheme": {
-        "inactive_values": ["0"],
-        "reason": "irrigation reads the IRRIGATION percentage and IRR_PH_FIELD phase statics of every cell; hex stages neither, and the engine will not invent the water amount or phase, so the run could only stop at construction",
-        "follow_up": "sf_surf_irr_scheme=0"
+      "irr_ph": {
+        "refused_values": ["1", "2"],
+        "reason": "irr_ph=1 phases each point's irrigation day by its grid index (i*j, module_irrigation.F irr_calc_phase) and irr_ph=2 by Noah's RANDOM_NUMBER seeded from i, j and the domain size (module_sf_noahdrv.F:1874-1886); a Voronoi cell has no i/j, so either phase would be an artefact of the cell numbering",
+        "follow_up": "irr_ph=0 (every cell irrigates on the same days); the IRRIGATION percentage itself is staged by woof hex surface-statics --fields irrigation"
       },
       "lightning_option": {
         "inactive_values": ["0"],

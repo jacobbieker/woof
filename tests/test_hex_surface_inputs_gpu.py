@@ -416,3 +416,40 @@ def test_the_mosaic_seam_reads_the_drivers_resolved_landmask():
                          if key != "landmask"}
     seam = suite.run_mpas_column_physics(**kwargs)
     assert seam._driver.noah_mosaic is not None
+
+
+IRRIGATED = np.float32([60.0, 0.0, 25.0, 100.0, 0.0, 12.5, 80.0, 0.0])
+
+
+def _irrigation_mapping(scheme, *, inputs=True):
+    # The seam's start is 2026-10-03 18:00 (julian day 276): a window from
+    # 18 UTC on days 200..300 irrigates on every one of the test's steps.
+    physics = dict(suite.MPAS_DEFAULT_PHYSICS, sf_surf_irr_scheme=scheme,
+                   irr_daily_amount=8.0, irr_start_hour=18, irr_num_hours=4,
+                   irr_start_julianday=200, irr_end_julianday=300, irr_freq=1,
+                   irr_ph=0)
+    return _mapping(physics, {"irrigation": IRRIGATED.copy(),
+                              "irr_ph_field": np.zeros(NCOL, np.int32)}
+                    if inputs else None)
+
+
+def test_the_irrigation_seam_refuses_without_its_percentage():
+    with pytest.raises(ValueError, match="missing .*irrigation"):
+        _seal(_irrigation_mapping(2, inputs=False))
+
+
+@pytest.mark.parametrize("scheme", [2, 3], ids=["drip", "sprinkler"])
+def test_hex_irrigation_columns_are_wrf_irrigation_twin_columns(scheme):
+    summary: dict = {}
+    restore = _twin_module("hex_irrigation_twin")._install(summary)
+    try:
+        seam = suite.run_mpas_column_physics(
+            **_seal(_irrigation_mapping(scheme)).arwen_kwargs())
+        np.testing.assert_array_equal(
+            _host(seam._driver.fields["irrigation"]).reshape(-1), IRRIGATED)
+        frames = cases.run(cp, seam, 4)
+    finally:
+        restore()
+    assert not cases._finite(frames)
+    assert summary["calls"] >= 1 and summary["calls_adding_water"] >= 1, summary
+    assert not any(summary["step_words_differing"].values()), summary
