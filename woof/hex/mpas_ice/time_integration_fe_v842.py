@@ -10,9 +10,10 @@
 3. ``advection_solver``: ``calculate_layerThicknessEdge``,
    ``li_advection_thickness_tracers``, negative thickness set to zero, the
    masks and ``li_update_geometry``;
-4. subglacial hydrology and calving, which this port carries only when off
-   (``config_SGH`` false, ``config_calving`` 'none' and
-   ``config_restore_calving_front`` false; the rest is refused by name);
+4. subglacial hydrology, which this port carries only when off
+   (``config_SGH`` false; on, it is refused by name), then
+   ``li_calve_ice`` or ``li_restore_calving_front``
+   (:mod:`~woof.hex.mpas_ice.calving_v842`);
 5. ``li_velocity_solve`` for 'sia' and 'none': the masks and geometry, the
    normal surface slope, ``li_sia_solve``, the uphill-margin cleanup,
    ``mpas_reconstruct``, the speeds, ``calculate_strain_rates`` and
@@ -57,7 +58,8 @@ import numpy as np
 from woof.hex import numerics as _hex_numerics
 from woof.hex.errors import ConfigurationRefusal
 
-from . import advection_v842, geometry_v842, rkind, sia_v842, thermal_init_v842, thermal_solver_v842
+from . import (advection_v842, calving_v842, geometry_v842, rkind, sia_v842, thermal_init_v842,
+               thermal_solver_v842)
 
 SOURCE_FILES = (
     "src/core_landice/mode_forward/mpas_li_time_integration_fe.F:75-952",
@@ -124,12 +126,8 @@ def _check_config(config: dict, precision: str, velocity: dict) -> None:
     if config.get("config_SGH", False):
         _refuse("config_SGH", True, "subglacial hydrology (li_SGH_solve) is not ported yet",
                 "config_SGH = .false.")
-    if config.get("config_calving", "none") != "none":
-        _refuse("config_calving", config["config_calving"], "calving (li_calve_ice) is not ported yet",
-                "config_calving = 'none'")
-    if config.get("config_restore_calving_front", False):
-        _refuse("config_restore_calving_front", True, "li_restore_calving_front is not ported yet",
-                "config_restore_calving_front = .false.")
+    if not config.get("config_restore_calving_front", False):
+        calving_v842.check_config(config)
     if precision == "r8" and config.get("on_a_sphere", False):
         _refuse("on_a_sphere", True,
                 "at RKIND 8 the velocity reconstruction calls glibc's binary64 cos and sin, which are LGPL and "
@@ -279,6 +277,12 @@ def forward_euler_step(*, mesh: dict, geometry: dict, thermal: dict, velocity: d
     _function(precision, "li_clamp_thickness_v842")(_grid(n_cells), block, (g["thickness"], np.int32(n_cells)))
     geometry_v842.calculate_mask(mesh=m, geometry=g, **masks)
     _update_geometry(m, g, c)
+
+    # === calving
+    if c.get("config_restore_calving_front", False):
+        calving_v842.restore_calving_front(mesh=m, geometry=g, thermal=t, config=c)
+    else:
+        calving_v842.calve_ice(mesh=m, geometry=g, velocity=v, config=c)
 
     # === li_velocity_solve
     geometry_v842.calculate_mask(mesh=m, geometry=g, **masks)

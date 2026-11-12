@@ -93,6 +93,11 @@ class SpaceAnalysis:
         self.this_spaces: dict = {}
         #: the unit dereferences integer addresses (host-built pointer tables)
         self.address_casts = False
+        #: instances (function usr, spaces) whose bodies cast an integer to
+        #: an address; None among them: a cast outside every instance
+        self.casting_instances: set = set()
+        #: instance -> the instances it requested (its calls)
+        self.instance_calls: dict = {}
         #: space-generic struct names (the translator's detection pass)
         self.generic = set(getattr(rewriter, "generic_structs", ()) or ())
         self._instance = None
@@ -274,6 +279,7 @@ class SpaceAnalysis:
         self.drain()
         # Functions no kernel reaches still have to compile: give them the
         # all-device instance and follow their calls too.
+        self._instance = None
         for usr, info in list(self.functions.items()):
             if usr not in self.instances:
                 # pointers default to buffers; references to objects (locals)
@@ -281,6 +287,35 @@ class SpaceAnalysis:
                                          for _, _, ind in info.slots), None)
         self.drain()
         self._implicit_this_spaces()
+
+    def kernels_reaching_address_casts(self, kernels):
+        """The names of the kernels whose calls reach an integer-to-address
+        cast, or None when that cannot be told kernel by kernel: a cast in a
+        method (a sibling call through implicit ``this`` requests no
+        instance), outside every instance, or in an instance no kernel's
+        recorded calls reach."""
+        K = self.ci.CursorKind
+        if None in self.casting_instances:
+            return None
+        for usr, _ in self.casting_instances:
+            info = self.functions.get(usr)
+            if info is not None and info.cursor.kind in (K.CXX_METHOD, K.CONSTRUCTOR,
+                                                         K.CONVERSION_FUNCTION, K.DESTRUCTOR):
+                return None
+        reached_by = {}
+        for fn in kernels:
+            seen, todo = set(), [(fn.get_usr(), ())]
+            while todo:
+                key = todo.pop()
+                if key in seen:
+                    continue
+                seen.add(key)
+                todo.extend(self.instance_calls.get(key, ()))
+            reached_by[fn.spelling] = seen
+        everything = set().union(*reached_by.values()) if reached_by else set()
+        if not self.casting_instances <= everything:
+            return None
+        return {name for name, seen in reached_by.items() if seen & self.casting_instances}
 
     def _implicit_this_spaces(self):
         """A method qualified for an object in device memory calls its
@@ -336,6 +371,7 @@ class SpaceAnalysis:
             self.analyse_instance(info, spaces)
 
     def request(self, info: FnInfo, spaces: tuple, at) -> None:
+        self.instance_calls.setdefault(self._instance, set()).add((info.cursor.get_usr(), spaces))
         bucket = self.instances.setdefault(info.cursor.get_usr(), set())
         if spaces not in bucket:
             bucket.add(spaces)
@@ -420,6 +456,7 @@ class SpaceAnalysis:
                         space = NULL if o.kind.name == "INTEGER_LITERAL" else DEVICE  # an address
                         if space == DEVICE:
                             self.address_casts = True
+                            self.casting_instances.add(self._instance)
                     else:
                         space = self.space(o, env)
                     key = (node.extent.start.offset, node.extent.end.offset)

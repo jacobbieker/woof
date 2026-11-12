@@ -1,7 +1,8 @@
-# MALI v8.4.2 forward-Euler time-step oracle
+# MALI v8.4.2 forward-Euler time-step oracle (with calving)
 
 Written by `tools/mali_oracle/build.sh` (`run_time_integration_fe_r4`, `_r8`) and
-`make_time_integration_fe_fixture.py` on pb (Linux 6.12 x86_64, glibc 2.44), 2026-11-11.
+`make_time_integration_fe_fixture.py` on pb (Linux 6.12 x86_64, glibc 2.44), 2026-11-11;
+regenerated with the calving cases the same day.
 
 - MPAS source: MPAS-Model v8.4.2, commit
   `f34984b2c89353cf31c235b08d3b4acd96b37bb3`, byte-unmodified
@@ -39,6 +40,12 @@ Written by `tools/mali_oracle/build.sh` (`run_time_integration_fe_r4`, `_r8`) an
 | `none_temperature_no_tracers` | 80 | 6 | none | temperature | fo/none | seroussi (r4), none (r8) | adaptive; the maximum step binds and is floored |
 | `sia_no_thermal_sphere` | 72 | 5 | sia (normal slope, constant A) | none | fo/fo | none | fixed; on a sphere at RKIND 4, planar at RKIND 8 |
 | `sia_no_advection` | 64 | 6 | sia | enthalpy | none/fo | file | fixed |
+| `calving_thickness_threshold` | 96 | 6 | sia | temperature | fo/fo | none | fixed; `config_calving` 'thickness_threshold', 8e6 s timescale |
+| `calving_floating_data` | 80 | 6 | sia | enthalpy | fo/fo | none | fixed; 'floating' with `config_data_calving` |
+| `calving_topographic` | 80 | 5 | none | temperature | fo/fo | none | fixed; 'topographic_threshold', 1e6 s timescale |
+| `calving_eigen_scalar` | 200 | 6 | sia | none | fo/fo | none | fixed; 'eigencalving', scalar parameter, deep beds, slow prior flow |
+| `calving_eigen_data` | 200 | 6 | sia | none | fo/fo | none | fixed; 'eigencalving', parameter from data |
+| `calving_restore_front` | 96 | 6 | sia | enthalpy | fo/fo | none | fixed; `config_restore_calving_front` |
 
 `nCellsSolve = nCells`: `li_calculate_apparent_diffusivity` reads the
 reconstructed slope on every cell, and `mpas_reconstruct` sets it only on the
