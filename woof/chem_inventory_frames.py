@@ -227,8 +227,14 @@ def decode_archive(source, field: str, path: Path) -> np.ndarray:
             raise InventoryFrameError(
                 f"{source.name}/{field}: file units {units!r} differ from the "
                 f"row's {source.variables[field]['units']!r}")
-        variable.set_auto_mask(False)
-        values = np.asarray(variable[:], dtype=np.float64)
+        data = variable[:]
+        masked = int(np.ma.count_masked(data))
+        if masked:
+            raise InventoryFrameError(
+                f"{source.name}/{field}: {masked} values in {selector['member']} "
+                "are the file's fill or missing value; a missing flux is not "
+                "a flux")
+        values = np.asarray(np.ma.getdata(data), dtype=np.float64)
         lat = np.asarray(dataset.variables["lat"][:], dtype=np.float64)
         lon = np.asarray(dataset.variables["lon"][:], dtype=np.float64)
     shape = (int(grid["nlat"]), int(grid["nlon"]))
@@ -460,20 +466,43 @@ def radm2_emission_frames(provider: InventoryFrames, source: str,
             f"speciation radm2 has no rows for {missing}, which "
             "launch_radm2_emiss reads")
     inputs = {}
-    frames = {}
+
+    def read(field):
+        values = inputs.get(field)
+        if values is None:
+            values = inputs[field] = provider.field(source, field, valid_time)
+        return values
+
+    totals = {}
     for name in EMISSIONS:
         spec = outputs[name]
         total = np.zeros(provider.shape, dtype=np.float64)
         for term in spec["terms"]:
-            values = inputs.get(term["field"])
-            if values is None:
-                values = inputs[term["field"]] = provider.field(
-                    source, term["field"], valid_time)
-            total += float(term["weight"]) * values
+            total += float(term["weight"]) * read(term["field"])
         if spec["clamp_at_zero"]:
             np.maximum(total, 0.0, out=total)
-        frames[name] = np.ascontiguousarray(total, dtype=np.float32)
-    return frames
+        totals[name] = total
+    for cap in document.get("caps", ()):
+        members = cap["members"]
+        limit = float(cap["limit"]["weight"]) * read(cap["limit"]["field"])
+        summed = sum(totals[name] for name in members)
+        over = summed > limit
+        if np.any(over):
+            scale = np.where(over, limit / np.where(over, summed, 1.0), 1.0)
+            for name in members:
+                totals[name] = totals[name] * scale
+    return {name: np.ascontiguousarray(totals[name], dtype=np.float32)
+            for name in EMISSIONS}
+
+
+def _source_sha256(catalog, row) -> str:
+    """The row file's sha256 as its catalog recorded it at load; a catalog
+    that records none (a hand-built test catalog) hashes the packaged file."""
+    hashes = getattr(catalog, "file_hashes", None)
+    if hashes is not None and row.source_file in hashes:
+        return hashes[row.source_file]
+    from woof.chem_table import CHEM_DATA_ROOT
+    return hashlib.sha256((CHEM_DATA_ROOT / row.source_file).read_bytes()).hexdigest()
 
 
 def radm2_emission_receipt(provider: InventoryFrames, source: str,
@@ -489,8 +518,6 @@ def radm2_emission_receipt(provider: InventoryFrames, source: str,
     mol hr-1, aerosols in ug s-1 (None without the provider's
     ``cell_area_m2``).
     """
-    from woof.chem_table import CHEM_DATA_ROOT
-
     row = provider.source(source)
     document, digest = load_speciation("radm2")
     fields = sorted({term["field"] for spec in document["outputs"].values()
@@ -514,11 +541,15 @@ def radm2_emission_receipt(provider: InventoryFrames, source: str,
             totals[name] = float(np.sum(frame.astype(np.float64) * area * 1.0e-6))
         else:
             totals[name] = float(np.sum(frame.astype(np.float64) * area))
-    source_path = CHEM_DATA_ROOT / row.source_file
+    catalog = provider._catalog
+    if catalog is None:
+        from woof.chem_table import catalog as load
+        catalog = load()
     return {
         "source": source,
         "source_file": f"woof/data/chem/{row.source_file}",
-        "source_sha256": hashlib.sha256(source_path.read_bytes()).hexdigest(),
+        # The bytes the provider's catalog loaded the row from.
+        "source_sha256": _source_sha256(catalog, row),
         "synthetic": row.format == "synthetic",
         "archives": archives,
         "speciation": "woof/data/chem/speciation/radm2.v1.json",

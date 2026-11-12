@@ -145,6 +145,12 @@ def test_frames_are_the_speciation_applied_with_the_clamp():
     # Row 1: PM2.5 below BC + OM, PM10 below PM2.5 -> clamped to zero.
     assert np.all(frames["e_pm25i"][1] == 0) and np.all(frames["e_pm25j"][1] == 0)
     assert np.all(frames["e_pm_10"][1] == 0)
+    # Row 1: BC + 1.3 OC (8.2e-11) exceeds PM2.5 (2e-11): the carbon rows
+    # are scaled to the PM2.5 total, keeping their ratios.
+    carbon = sum(frames[n].astype(np.float64) for n in ("e_eci", "e_ecj", "e_orgi", "e_orgj"))
+    assert carbon[1] == pytest.approx(np.full(3, 2e-11 * 1e9), rel=1e-6)
+    assert carbon[0] == pytest.approx(np.full(3, (3e-11 + 1.3 * 4e-11) * 1e9), rel=1e-6)
+    assert frames["e_ecj"][1, 0] / frames["e_orgj"][1, 0] == pytest.approx(3e-11 / (1.3 * 4e-11), rel=1e-5)
     for name in ("e_hcl", "e_iso", "e_so4i", "e_naai"):
         assert not np.any(frames[name])
     assert set(AEROSOL_EMISSIONS) <= set(frames)
@@ -323,7 +329,7 @@ def test_bad_units_nonfinite_values_and_outside_points_are_refused(edgar, tmp_pa
                                    cache_dir=tmp_path / "c", download=download)
     with pytest.raises(inv.InventoryFrameError, match="units"):
         provider.field("edgar-fixture", "co")
-    with pytest.raises(inv.InventoryFrameError, match="1 non-finite"):
+    with pytest.raises(inv.InventoryFrameError, match="1 (non-finite|values in .* fill or missing)"):
         provider.field("edgar-fixture", "nox")
     with pytest.raises(inv.InventoryFrameError, match="no field 'xx'"):
         provider.field("edgar-fixture", "xx")

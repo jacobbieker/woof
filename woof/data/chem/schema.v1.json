@@ -242,6 +242,14 @@
         "input_units": {"const": "kg m-2 s-1"},
         "constants": {"type": "object"},
         "deviations": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "caps": {"type": "array", "description": "Applied after every output row: where the members' sum exceeds limit.weight x limit.field, the members are scaled by the ratio (ratios kept).",
+                 "items": {"type": "object", "additionalProperties": false,
+                           "required": ["members", "limit", "provenance"],
+                           "properties": {
+                             "members": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+                             "limit": {"type": "object", "additionalProperties": false, "required": ["field", "weight"],
+                                       "properties": {"field": {"type": "string", "minLength": 1}, "weight": {"type": "number", "exclusiveMinimum": 0}}},
+                             "provenance": {"$ref": "#/definitions/provenance"}}}},
         "outputs": {
           "type": "object",
           "minProperties": 1,
