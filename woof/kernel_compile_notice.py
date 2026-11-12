@@ -416,7 +416,9 @@ def _cache_file_count(directory: Path) -> int:
     renamed, so a count is kept per directory and the scan runs again only
     after the mtime moved.  A warm cache holds tens of thousands of entries
     (38,145 on pb: 18 ms to scan both levels), and every module load
-    counts it twice.
+    counts it twice.  A directory modified in the last two seconds is not
+    kept: on a file system with coarse timestamps a write in the same tick
+    would leave the mtime where it was.
     """
 
     try:
@@ -432,7 +434,10 @@ def _cache_file_count(directory: Path) -> int:
             count = sum(1 for entry in scan if entry.is_file())
     except OSError:
         return 0
-    _cache_counts[key] = (stamp, count)
+    if time.time_ns() - stamp > 2_000_000_000:
+        _cache_counts[key] = (stamp, count)
+    else:
+        _cache_counts.pop(key, None)
     return count
 
 

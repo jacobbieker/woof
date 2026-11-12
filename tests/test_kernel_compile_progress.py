@@ -57,7 +57,10 @@ def test_the_cache_is_scanned_again_only_after_its_directory_changed(
     """A warm cache holds tens of thousands of entries and every module load
     counts it twice: the count is kept until the directory's mtime moves."""
     import os
+    import time
     (tmp_path / "a").write_bytes(b"x")
+    old = time.time_ns() - 60_000_000_000
+    os.utime(tmp_path, ns=(old, old))
     scans = []
     real = os.scandir
     monkeypatch.setattr(notice.os, "scandir",
@@ -66,10 +69,15 @@ def test_the_cache_is_scanned_again_only_after_its_directory_changed(
     assert notice._cache_file_count(tmp_path) == 1
     assert len(scans) == 1
     (tmp_path / "b").write_bytes(b"x")
-    stamp = os.stat(tmp_path).st_mtime_ns
-    os.utime(tmp_path, ns=(stamp + 1, stamp + 1))   # coarse clocks: still moves
+    os.utime(tmp_path, ns=(old + 10_000_000_000,) * 2)   # whole seconds: any clock moves
     assert notice._cache_file_count(tmp_path) == 2
     assert len(scans) == 2
+    # a directory written in the last two seconds is counted every time
+    (tmp_path / "c").write_bytes(b"x")
+    os.utime(tmp_path)
+    assert notice._cache_file_count(tmp_path) == 3
+    assert notice._cache_file_count(tmp_path) == 3
+    assert len(scans) == 4
     assert notice._cache_file_count(tmp_path / "missing") == 0
 
 
