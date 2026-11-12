@@ -70,3 +70,53 @@ def test_values_taken_before_an_in_place_launch_keep_their_words():
     assert not before.get().any()
     assert not doubled.get().any()
     assert (view.get() == 1.0).all()
+
+
+def test_launches_sharing_a_pass_keep_stream_order():
+    """Consecutive in-place launches share one compute pass behind full
+    barriers (launch.cpp ``joins_ordered_pass``), with MLX's own ops, facade
+    copies and fills, and async evaluations between them.  Every value must
+    match the same sequence done on the host in program order: a launch that
+    overtook an earlier reader or writer of its buffers would show here."""
+    from woof import backend
+    if backend.active() != "mlx":
+        pytest.skip("runs under WOOF_BACKEND=mlx")
+    import cupy as cp
+    import mlx.core as mx
+
+    axpy = cp.RawKernel(r'''extern "C" __global__ void axpy(float* y, const float* x, float a, int n) {
+        int i = blockIdx.x * blockDim.x + threadIdx.x;
+        if (i < n) { float v = y[i]; for (int k = 0; k < 16; ++k) v = v * 0.5f + a * x[i]; y[i] = v; } }''',
+                        "axpy")
+
+    def host_axpy(y, x, a):
+        for _ in range(16):
+            y = (y * np.float32(0.5) + np.float32(a) * x).astype(np.float32)
+        return y
+
+    n = 1 << 18
+    grid, block = ((n + 255) // 256,), (256,)
+    rng = np.random.default_rng(7)
+    for _ in range(4):
+        h = [rng.standard_normal(n).astype(np.float32) for _ in range(3)]
+        d = [cp.asarray(v) for v in h]
+        taken, want = [], []
+        for step in range(10):
+            a, b, c = step % 3, (step + 1) % 3, (step + 2) % 3
+            axpy(grid, block, (d[a], d[b], np.float32(0.25 + step), np.int32(n)))
+            h[a] = host_axpy(h[a], h[b], 0.25 + step)
+            snap = d[a] * cp.float32(3.0)              # an MLX reader of what the next launch overwrites
+            mx.async_eval(snap._st.arr)
+            taken.append(snap)
+            want.append((h[a] * np.float32(3.0)).astype(np.float32))
+            axpy(grid, block, (d[a], d[c], np.float32(-1.5), np.int32(n)))
+            h[a] = host_axpy(h[a], h[c], -1.5)
+            d[c][...] = d[b]                           # a facade copy between launches
+            h[c] = h[b].copy()
+            if step % 4 == 3:
+                d[b].fill(np.float32(step))            # and a fill
+                h[b] = np.full(n, step, dtype=np.float32)
+        for got, ref in zip(taken, want):
+            assert np.array_equal(got.get().view(np.uint32), ref.view(np.uint32))
+        for got, ref in zip(d, h):
+            assert np.array_equal(got.get().view(np.uint32), ref.view(np.uint32))

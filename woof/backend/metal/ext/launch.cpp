@@ -388,6 +388,77 @@ static MTL::ComputePipelineState* pipeline_for(MTL::Library* lib, const std::str
 
 namespace {
 
+// MLX's CommandEncoder keeps its open pass and its map of in-flight fences
+// private.  The explicit-instantiation idiom below names those members
+// without changing MLX (an explicit instantiation may name private members).
+template <typename Tag, typename Tag::type Member>
+struct Expose {
+  friend typename Tag::type member(Tag) { return Member; }
+};
+struct OpenPass {
+  using type = NS::SharedPtr<MTL::ComputeCommandEncoder> mx::metal::CommandEncoder::*;
+  friend type member(OpenPass);
+};
+struct InFlightFences {
+  using type = std::unordered_map<const void*, NS::SharedPtr<MTL::Fence>> mx::metal::CommandEncoder::*;
+  friend type member(InFlightFences);
+};
+struct FencesLock {
+  using type = std::mutex mx::metal::CommandEncoder::*;
+  friend type member(FencesLock);
+};
+template struct Expose<OpenPass, &mx::metal::CommandEncoder::encoder_>;
+template struct Expose<InFlightFences, &mx::metal::CommandEncoder::prev_ce_outputs_>;
+template struct Expose<FencesLock, &mx::metal::CommandEncoder::outputs_mtx_>;
+
+// WOOF_METAL_PASS_CHAIN=0: every launch in a compute pass of its own, as
+// before (also under the GPU timer, which reads a launch's command buffer).
+static const bool g_pass_chain = [] {
+  const char* v = std::getenv("WOOF_METAL_PASS_CHAIN");
+  return !(v != nullptr && std::string(v) == "0") && !g_gpu_times;
+}();
+
+// The pass whose start waits on every pass before it (held, so its address
+// cannot be reused by a later pass while it is compared).
+static NS::SharedPtr<MTL::ComputeCommandEncoder> g_ordered_pass;
+
+// Is the open pass one that began by waiting on every earlier pass?  Then
+// an in-place launch may join it behind a full barrier: everything before
+// the pass finished before it started, and the barrier orders everything
+// earlier in it -- CUDA's stream order, without a pass per launch.
+static bool joins_ordered_pass(mx::metal::CommandEncoder& enc) {
+  auto& open = enc.*member(OpenPass{});
+  return g_ordered_pass && open && open.get() == g_ordered_pass.get();
+}
+
+// Start a pass that first waits on every in-flight pass's fence.  Fences
+// are pass-wide in Metal, so the waits cover every dispatch the pass will
+// hold, MLX's own included.  The command buffer keeps no references
+// (MLX makes it with unretained references): the completion handler holds
+// the fences until the GPU is done with them.
+static void start_ordered_pass(mx::metal::CommandEncoder& enc, MTL::ComputePipelineState* pipeline) {
+  enc.end_encoding();
+  enc.set_compute_pipeline_state(pipeline);
+  auto& open = enc.*member(OpenPass{});
+  std::vector<NS::SharedPtr<MTL::Fence>> waited;
+  {
+    std::lock_guard<std::mutex> lock(enc.*member(FencesLock{}));
+    for (auto& [_, fence] : enc.*member(InFlightFences{})) {
+      bool seen = false;
+      for (auto& w : waited) seen = seen || w.get() == fence.get();
+      if (!seen) {
+        open->waitForFence(fence.get());
+        waited.push_back(fence);
+      }
+    }
+  }
+  if (!waited.empty()) {
+    enc.get_command_buffer()->addCompletedHandler(
+        [waited = std::move(waited)](MTL::CommandBuffer*) mutable { waited.clear(); });
+  }
+  g_ordered_pass = open;
+}
+
 using Dim3 = std::tuple<size_t, size_t, size_t>;
 
 // Metal's last buffer slot: never bound by a translated kernel in table mode
@@ -456,11 +527,18 @@ class LaunchTranslated : public mx::Primitive {
     // earlier encoders whose OUTPUTS it reads (it never writes in place).
     // This kernel writes its buffers in place, and an earlier encoder -- in
     // this command buffer or one still in flight -- may still be reading
-    // them.  So it runs in a pass of its own: the earlier work ends its pass
-    // here, and this pass ends below with wait_in_flight, which waits on
-    // every in-flight encoder's fence (CUDA's stream order, on the GPU).
-    enc.end_encoding();
-    enc.set_compute_pipeline_state(pipeline);
+    // them.  So it runs in a pass that waits on every in-flight encoder's
+    // fence (CUDA's stream order, on the GPU).  Consecutive launches share
+    // such a pass behind full barriers (joins_ordered_pass); without the
+    // chain, each launch's pass ends below with wait_in_flight.
+    if (!g_pass_chain) {
+      enc.end_encoding();
+      enc.set_compute_pipeline_state(pipeline);
+    } else if (joins_ordered_pass(enc)) {
+      enc.set_compute_pipeline_state(pipeline);
+    } else {
+      start_ordered_pass(enc, pipeline);
+    }
 
     // Every buffer must be dense memory of its own size: a broadcast or
     // strided view would hand the kernel a buffer holding fewer elements
@@ -536,7 +614,7 @@ class LaunchTranslated : public mx::Primitive {
     auto [gx, gy, gz] = groups_;
     auto [tx, ty, tz] = threads_;
     enc.dispatch_threadgroups(MTL::Size(gx, gy, gz), MTL::Size(tx, ty, tz));
-    enc.end_encoding(/* wait_in_flight = */ true);
+    if (!g_pass_chain) enc.end_encoding(/* wait_in_flight = */ true);
     if (g_gpu_times) {
       std::string kernel = kernel_;
       enc.get_command_buffer()->addCompletedHandler([kernel](MTL::CommandBuffer* buffer) {
