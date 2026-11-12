@@ -1035,6 +1035,14 @@ def _pool_reader_crate() -> Path | None:
     return crate if crate.is_file() else None
 
 
+def _engine_pool_reader() -> Path | None:
+    """A source checkout's own rw_mpas_physics_pool, built from tools/rustwx (crate rw-mpas, feature
+    system-netcdf; tools/build_hex_helpers.sh), for a platform no hex helper archive covers (macOS)."""
+    built = (Path(__file__).resolve().parents[3] / "tools" / "rustwx" / "target" / "release"
+             / (POOL_READER + (".exe" if sys.platform == "win32" else "")))
+    return built if built.is_file() else None
+
+
 def wheel_pool_reader() -> Path:
     """Where this install carries rw_mpas_physics_pool: the wheel, else the release's hex helper archive (the file
     may be absent)."""
@@ -1046,6 +1054,8 @@ def stage_pool_reader(cache: Path, log: Callable[[str], None] = _log) -> dict[st
     """The wheel's rw_mpas_physics_pool (else built from a checkout's crate), copied under its SHA-256."""
     path = wheel_pool_reader()
     name = path.name
+    if not path.is_file() and _engine_pool_reader() is not None:
+        path = _engine_pool_reader()
     if not path.is_file():
         crate, cargo = _pool_reader_crate(), shutil.which("cargo")
         if crate is None or cargo is None:

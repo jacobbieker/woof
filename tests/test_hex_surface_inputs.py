@@ -50,7 +50,7 @@ def test_every_scheme_that_reads_an_unstaged_input_is_refused_by_name():
     for cfg, keyword in (
             (_cfg(sf_surface_physics=1), "thermal_inertia"),
             (_cfg(sf_surface_physics=7), "landusef"),
-            (_cfg(sf_urban_physics=1), "frc_urb2d"),
+            (_cfg(sf_urban_physics=1, use_wudapt_lcz=1), "LCZ"),
             (_cfg(sf_surf_irr_scheme=1), "irrigation"),
             (_cfg(lightning_option=1), "lightning_inputs"),
             (_cfg(sf_surface_physics=3, mosaic_lu=1), "landusef")):
@@ -256,8 +256,10 @@ def test_the_contract_table_lists_every_scheme():
     schemes = {row["scheme"] for row in rows}
     assert {"clm_lake", "slab", "pleim_xiu_lsm", "urban", "irrigation",
             "lightning"} <= schemes
-    assert all(row["staged"] for row in rows if row["scheme"] == "clm_lake")
-    assert not any(row["staged"] for row in rows if row["scheme"] != "clm_lake")
+    staged = {(row["scheme"], row["keyword"]) for row in rows if row["staged"]}
+    assert staged == {("clm_lake", "lakemask"), ("clm_lake", "lake_mask_flag"),
+                      ("clm_lake", "lake_depth"), ("clm_lake", "lake_depth_flag"),
+                      ("urban", "frc_urb2d")}
 
 
 def test_topo_wind_2_reads_var_from_the_static_by_the_superset_match():
@@ -337,3 +339,64 @@ def test_the_builder_bands_are_bounded_by_pixel_count():
     assert all((x1 - x0 + 1) * (y1 - y0 + 1) <= ss._BAND_PIXELS
                for x0, x1, y0, y1 in bands)
     assert bands[0][2] == 1 and bands[-1][3] == 21600
+
+
+def test_urban_reads_frc_urb2d_for_slucm_only_and_lcz_is_refused():
+    assert [n.input.keyword for n in si.required_inputs(_cfg(sf_urban_physics=1))] == ["frc_urb2d"]
+    for option in (2, 3):
+        # BEP / BEP+BEM run on URBPARM.TBL's fractions, as the WRF path hands them.
+        assert si.required_inputs(_cfg(sf_urban_physics=option)) == ()
+    assert si.unstaged_problems(_cfg(sf_urban_physics=1, use_wudapt_lcz=1))
+
+
+def test_the_urban_fraction_is_the_wrf_preparations_estimate_on_the_cells():
+    from woof.core.urban_tables import load_urban_params
+    from woof.hex import surface_statics as ss
+
+    # Three cells: dominant urban with 60 % urban pixels; dominant urban, all
+    # urban; dominant grass with 30 % urban (not an urban cell, so 0).
+    counts = np.zeros((3, 21), np.int64)
+    counts[0, 12], counts[0, 9] = 60, 40
+    counts[1, 12] = 100
+    counts[2, 12], counts[2, 9] = 30, 70
+    ivgtyp = np.array([13, 13, 10])
+    frc, receipt = ss.urban_fraction_cells(counts, 1, ivgtyp, np.ones(3))
+    table = float(load_urban_params(1, 0).FRC_URB_TBL[1])  # ISURBAN -> UTYPE 2
+    np.testing.assert_allclose(frc, np.float32([0.6 * table, table, 0.0]), rtol=1e-6)
+    assert receipt["urban_cells"] == 2
+
+
+def test_the_urban_fraction_must_be_a_fraction():
+    cfg = _cfg(sf_urban_physics=1)
+    with pytest.raises(ValueError, match="outside \\[0, 1\\]"):
+        si.seal(cfg, {"frc_urb2d": np.float32([0.5, 1.2, 0.0])}, n_columns=3)
+    si.seal(cfg, {"frc_urb2d": np.float32([0.5, 1.0, 0.0])}, n_columns=3)
+
+
+def test_the_urban_fraction_is_held_to_the_runs_urban_table(tmp_path):
+    import json
+    from types import SimpleNamespace
+
+    default = si.urban_table_sha256(SimpleNamespace())
+    custom = tmp_path / "tables"
+    custom.mkdir()
+    (custom / "URBPARM.TBL").write_text("# another table\n")
+    assert si.urban_table_sha256(SimpleNamespace(urban_table_dir=str(custom))) != default
+    lat = np.radians([40.0, 41.0, 42.0])
+    lon = np.radians([-80.0, -81.0, -82.0])
+    import netCDF4
+
+    path = tmp_path / "u.nc"
+    with netCDF4.Dataset(path, "w") as dataset:
+        dataset.createDimension("nCells", 3)
+        dataset.createVariable("FRC_URB2D", "f4", ("nCells",))[:] = [0.5, 0, 0]
+        dataset.createVariable("latCell", "f8", ("nCells",))[:] = lat
+        dataset.createVariable("lonCell", "f8", ("nCells",))[:] = lon
+        dataset.setncattr("schema", si.SCHEMA)
+        dataset.setncattr("provenance_json", json.dumps({"urban": {"urbparm_sha256": default}}))
+    physics = dict(_lake_physics(), sf_lake_physics=0, sf_urban_physics=1)
+    inputs, _ = si.bind(physics, path, latitude_rad=lat, longitude_rad=lon)
+    assert list(inputs) == ["frc_urb2d"]
+    with pytest.raises(ConfigurationRefusal, match="another table"):
+        si.bind(dict(physics, urban_table_dir=str(custom)), path,
+                latitude_rad=lat, longitude_rad=lon)

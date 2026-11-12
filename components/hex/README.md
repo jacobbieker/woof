@@ -965,7 +965,15 @@ runs the WRF path exactly as before.
 
 The contract stage needs the hex helper `hex_contract_hostprep`, and the MPAS
 suite route needs the table decoders and `rw_mpas_physics_pool`. The release's
-Linux helper archive carries them; no macOS build exists yet.
+Linux helper archive carries them. Elsewhere (macOS), build them from source
+with `tools/build_hex_helpers.sh`: `hex_contract_hostprep` and the table
+decoders from the gpuwm-hex 0.4.14 crates in `rust/` (`rust/PROVENANCE.md`),
+the pool reader from `tools/rustwx`. The doors find the outputs on their own;
+no wheel carries them. On macOS the TEMPO computed tables differ from the
+reference words, so the TEMPO (hrrrv5) tables are refused there by name, and
+the MPAS suite route's RRTMG LW tables do not yet bind on Metal (the
+translated module exposes no `mpas_static_*` globals), so a Mac regional
+`woof go` runs the WOOF column route (for example `mp_physics = 6`).
 
 ### Placement and cycling
 
