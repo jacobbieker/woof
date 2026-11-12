@@ -52,7 +52,7 @@ from typing import Any, Callable
 import numpy as np
 
 from .errors import MpasPortError
-from .surface_inputs import FILE_SUFFIX, SCHEMA
+from .surface_inputs import FILE_SUFFIX, SCHEMA, builder_default_path
 
 #: WPS GEOGRID.TBL LAKE_DEPTH row (woof.static.lake.LAKE_DEPTH_ROW).
 LAKE_DEPTH_FILL_M = 10.0
@@ -61,8 +61,9 @@ LAKE_DEPTH_DATASET = "lake_depth"
 LAKE_LANDUSE_DATASET = "modis_landuse_20class_30s_with_lakes"
 #: MODIS's lake class (WPS index ``islake``), when the static names none.
 MODIS_ISLAKE = 21
-#: Source rows read per band (a WPS tile row).
-_BAND_ROWS = 1200
+#: Source pixels read per band: bounds the band's values, indices, centres and
+#: assignment temporaries (a few hundred bytes a pixel) on a global source.
+_BAND_PIXELS = 4_000_000
 
 
 class SurfaceStaticsRefusal(MpasPortError):
@@ -118,8 +119,10 @@ def _pixel_xyz(dataset, x: np.ndarray, y: np.ndarray) -> np.ndarray:
                      np.sin(lat)), axis=-1)
 
 
-def _bands(window, rows: int = _BAND_ROWS):
+def _bands(window):
+    """Row bands of ``window`` holding at most ``_BAND_PIXELS`` pixels each."""
     x0, x1, y0, y1 = window
+    rows = max(1, _BAND_PIXELS // (x1 - x0 + 1))
     for start in range(y0, y1 + 1, rows):
         yield x0, x1, start, min(y1, start + rows - 1)
 
@@ -210,8 +213,7 @@ def lake_mask_vote(geometry, assigner, water: np.ndarray, dataset, *,
     counts = np.zeros((n, categories), dtype=np.int64)
     window = _source_window(dataset, _footprint(geometry), 1)
     candidates = water.copy()
-    for bx0, bx1, by0, by1 in _bands(window, rows=max(1, 4_000_000 // (
-            window[1] - window[0] + 1))):
+    for bx0, bx1, by0, by1 in _bands(window):
         raw = dataset.read_window(bx0, bx1, by0, by1).raw[0].reshape(-1)
         nx = bx1 - bx0 + 1
         rows, cols = np.divmod(np.arange(raw.size), nx)
@@ -373,9 +375,7 @@ def run_cli(arguments: argparse.Namespace) -> int:
     static = Path(arguments.static)
     out = arguments.output
     if out is None:
-        stem = static.name[:-3] if static.name.endswith(".nc") else static.name
-        stem = stem[:-7] if stem.endswith(".static") else stem
-        out = static.with_name(f"{stem}{FILE_SUFFIX}")
+        out = builder_default_path(static)
     receipt = build(static, out, geog_root=arguments.geog_root,
                     lake_depth=not arguments.no_lake_depth,
                     progress=lambda message: print(message, flush=True))

@@ -71,6 +71,10 @@ class SurfaceInput:
     staged: bool
     source: str
     needs: str = ""
+    #: The only values the input may hold: a lake mask is 0 or 1, and a
+    #: geogrid flag the builder stages is 1 (0 would select a WRF fallback
+    #: branch the sidecar did not build for).  ``None``: any finite value.
+    allowed: tuple[int, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -95,11 +99,12 @@ _LAKEMASK = SurfaceInput(
     "lakemask", "LAKEMASK", "cell", "float32", True,
     "WRF real.exe's rule on the mesh: a cell whose dominant category in the "
     "with-lakes MODIS land use is ISLAKE (21), a water cell of the run's own "
-    "static (woof hex surface-statics)")
+    "static (woof hex surface-statics)", allowed=(0, 1))
 _LAKEFLAG = SurfaceInput(
     "lake_mask_flag", "LAKEFLAG", "flag", "int32", True,
     "1: the mask comes from geography (WRF's LAKEFLAG); 0 would select "
-    "lakeini's ISWATER-and-elevation fallback, which hex does not stage")
+    "lakeini's ISWATER-and-elevation fallback, which hex does not stage",
+    allowed=(1,))
 _LAKE_DEPTH = SurfaceInput(
     "lake_depth", "LAKE_DEPTH", "cell", "float32", True,
     "WPS lake_depth bathymetry (GEOGRID.TBL LAKE_DEPTH: average_gcell(1.0)+"
@@ -108,7 +113,8 @@ _LAKE_DEPTH = SurfaceInput(
 _LAKE_DEPTH_FLAG = SurfaceInput(
     "lake_depth_flag", "LAKE_DEPTH_FLAG", "flag", "int32", True,
     "1: LAKE_DEPTH was built from the bathymetry dataset (geogrid's "
-    "FLAG_LAKE_DEPTH)")
+    "FLAG_LAKE_DEPTH); 0 would discard the staged bathymetry",
+    allowed=(1,))
 
 
 def _lake_inputs(cfg) -> tuple[SurfaceInput, ...]:
@@ -261,6 +267,28 @@ def default_path(grid: str | Path, mesh: str) -> Path:
     return Path(grid).expanduser().absolute().parent / f"{mesh}{FILE_SUFFIX}"
 
 
+def builder_default_path(static: str | Path) -> Path:
+    """Where ``woof hex surface-statics`` writes without ``-o``: beside the
+    static, named from it with a trailing ``.static`` dropped."""
+
+    static = Path(static).expanduser().absolute()
+    stem = static.name[:-3] if static.name.endswith(".nc") else static.name
+    stem = stem[:-7] if stem.endswith(".static") else stem
+    return static.with_name(f"{stem}{FILE_SUFFIX}")
+
+
+def default_candidates(grid: str | Path, static: str | Path | None,
+                       mesh: str) -> tuple[Path, ...]:
+    """The places a forecast looks for the sidecar when none is named, in
+    order: ``<mesh>.surface_statics.nc`` beside --grid, the same name beside
+    --static, and the builder's own default beside --static."""
+
+    places = [default_path(grid, mesh)]
+    if static is not None:
+        places += [default_path(static, mesh), builder_default_path(static)]
+    return tuple(dict.fromkeys(places))
+
+
 #: Largest centre difference (radians, about 6 mm on the Earth) at which a
 #: sidecar's cells are this run's cells.  Longitudes are compared modulo 2 pi:
 #: a static stores them in [0, 2 pi) and the loaded mesh in (-pi, pi].
@@ -285,8 +313,19 @@ def _array_identity(values: np.ndarray) -> dict[str, Any]:
             "sha256": sha256(contiguous.tobytes()).hexdigest()}
 
 
+def _check_allowed(item: SurfaceInput, values, where: str) -> None:
+    if item.allowed is None:
+        return
+    bad = np.setdiff1d(np.unique(np.asarray(values)), np.asarray(item.allowed))
+    if bad.size:
+        raise ValueError(
+            f"{where}: {item.variable} holds {bad.tolist()[:5]}, and "
+            f"{item.keyword} admits only {list(item.allowed)}")
+
+
 def bind(physics: Mapping[str, Any] | None, path: str | Path | None, *,
-         latitude_rad, longitude_rad) -> tuple[dict[str, Any], dict[str, Any]]:
+         latitude_rad, longitude_rad,
+         static_path: str | Path | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
     """The surface keywords a generic selection reads, from the sidecar.
 
     Returns ``(inputs, receipt)``.  ``inputs`` is empty, and ``receipt`` says
@@ -354,6 +393,19 @@ def bind(physics: Mapping[str, Any] | None, path: str | Path | None, *,
                 "each value would land on another cell",
                 "the surface statics file of this run's mesh")
         provenance = json.loads(getattr(dataset, "provenance_json", "{}"))
+        if static_path is not None:
+            # Two statics can share every cell centre and still differ in the
+            # land use the mask and fractions were built from.
+            run_static = sha256(Path(static_path).expanduser().resolve(
+                strict=True).read_bytes()).hexdigest()
+            if provenance.get("parent_static_sha256") != run_static:
+                raise ConfigurationRefusal(
+                    "surface_statics", str(source),
+                    "the file was built from another static file than this "
+                    f"run's ({provenance.get('parent_static', 'unrecorded')}, "
+                    f"sha256 {provenance.get('parent_static_sha256')}, against "
+                    f"{run_static}), so its per-cell values describe another "
+                    "land use", "the surface statics file built from this run's --static")
         for need in required:
             item = need.input
             if item.kind == "flag":
@@ -364,11 +416,11 @@ def bind(physics: Mapping[str, Any] | None, path: str | Path | None, *,
                         f"records no {item.variable}",
                         f"a surface statics file built with {need.scheme}'s inputs")
                 value = int(dataset.getncattr(item.variable))
-                if item.keyword == "lake_mask_flag" and value != 1:
+                if item.allowed is not None and value not in item.allowed:
                     raise ConfigurationRefusal(
                         "surface_statics", str(source),
-                        "LAKEFLAG is not 1: the file's lake mask does not come "
-                        "from geography", "a file whose LAKEMASK the builder staged")
+                        f"{item.variable} is {value}, not {list(item.allowed)}: "
+                        f"{item.source}", "a file whose inputs the builder staged")
                 inputs[item.keyword] = value
                 receipt_inputs[item.keyword] = {"variable": item.variable,
                                                 "value": value}
@@ -390,6 +442,12 @@ def bind(physics: Mapping[str, Any] | None, path: str | Path | None, *,
                     f"{item.variable} has {values.shape} cells, the mesh {n_cells}")
             if not np.all(np.isfinite(values)):
                 raise FloatingPointError(f"{item.variable} carries non-finite values")
+            try:
+                _check_allowed(item, values, str(source))
+            except ValueError as error:
+                raise ConfigurationRefusal(
+                    "surface_statics", str(source), str(error),
+                    "a file whose inputs the builder staged") from None
             values.setflags(write=False)
             inputs[item.keyword] = values
             receipt_inputs[item.keyword] = {
@@ -439,6 +497,10 @@ def seal(cfg, given: Mapping[str, Any] | None, *, n_columns: int
         if item.kind == "flag":
             if isinstance(value, (bool, np.bool_)) or int(value) != value:
                 raise ValueError(f"{item.keyword} must be an integer flag")
+            if item.allowed is not None and int(value) not in item.allowed:
+                raise ValueError(
+                    f"{item.keyword}={int(value)} is not one of {list(item.allowed)}: "
+                    f"{item.source}")
             sealed[item.keyword] = int(value)
             continue
         array = np.asarray(value)
@@ -448,6 +510,7 @@ def seal(cfg, given: Mapping[str, Any] | None, *, n_columns: int
                 f"{array.dtype}{list(array.shape)}")
         if not np.all(np.isfinite(array)):
             raise ValueError(f"{item.keyword} must be finite")
+        _check_allowed(item, array, "the sealed surface inputs")
         array = np.array(array, copy=True, order="C")
         array.setflags(write=False)
         sealed[item.keyword] = array

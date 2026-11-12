@@ -3108,7 +3108,10 @@ def resolve_surface_statics(arguments, physics, mesh, grid, collected):
         return None
     if given is None:
         named = getattr(arguments, "grid", None)
-        given = surface_inputs.default_path(named if named is not None else grid, mesh)
+        candidates = surface_inputs.default_candidates(
+            named if named is not None else grid,
+            getattr(arguments, "static", None), mesh)
+        given = next((path for path in candidates if path.is_file()), candidates[0])
     return _require_file(
         Path(given).expanduser().absolute(), "--surface-statics",
         "This selection's schemes read per-cell inputs beyond the init's own "

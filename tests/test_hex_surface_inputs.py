@@ -81,21 +81,22 @@ def test_the_seal_refuses_a_missing_input_an_extra_input_and_a_wrong_array():
         si.seal(_cfg(), good, n_columns=3)
 
 
-def _sidecar(path, lat, lon, *, depth=True, flag=1):
+def _sidecar(path, lat, lon, *, depth=True, flag=1, depth_flag=1,
+             mask=(1, 0, 0), provenance="{}"):
     import netCDF4
 
     with netCDF4.Dataset(path, "w") as dataset:
         dataset.createDimension("nCells", lat.size)
-        dataset.createVariable("LAKEMASK", "i4", ("nCells",))[:] = [1, 0, 0]
+        dataset.createVariable("LAKEMASK", "i4", ("nCells",))[:] = list(mask)
         if depth:
             dataset.createVariable("LAKE_DEPTH", "f4", ("nCells",))[:] = [7.5, 10, 10]
-            dataset.setncattr("LAKE_DEPTH_FLAG", np.int32(1))
+            dataset.setncattr("LAKE_DEPTH_FLAG", np.int32(depth_flag))
         dataset.setncattr("LAKEFLAG", np.int32(flag))
         dataset.setncattr("schema", si.SCHEMA)
         dataset.createVariable("latCell", "f8", ("nCells",))[:] = lat
         # Stored in [0, 2 pi) as a static stores it; the mesh's are (-pi, pi].
         dataset.createVariable("lonCell", "f8", ("nCells",))[:] = np.mod(lon, 2 * np.pi)
-        dataset.setncattr("provenance_json", "{}")
+        dataset.setncattr("provenance_json", provenance)
     return path
 
 
@@ -118,7 +119,7 @@ def test_bind_reads_the_sidecar_and_refuses_by_name(tmp_path):
     with pytest.raises(ConfigurationRefusal, match="no LAKE_DEPTH"):
         si.bind(physics, _sidecar(tmp_path / "d.nc", lat, lon, depth=False),
                 latitude_rad=lat, longitude_rad=lon)
-    with pytest.raises(ConfigurationRefusal, match="LAKEFLAG is not 1"):
+    with pytest.raises(ConfigurationRefusal, match="LAKEFLAG is 0"):
         si.bind(physics, _sidecar(tmp_path / "f.nc", lat, lon, flag=0),
                 latitude_rad=lat, longitude_rad=lon)
     # Given for a selection that reads nothing from it: accepted, never read.
@@ -278,3 +279,61 @@ def test_a_lake_selection_resolves_to_the_generic_seam_and_names_its_inputs():
     physics = resolved.column_profile["physics"]
     assert si.reads_surface_statics(physics)
     assert not si.unstaged_problems(si.plan_config(physics))
+
+
+def test_bind_holds_the_sidecar_to_the_runs_static_and_its_values(tmp_path):
+    import hashlib
+    import json
+
+    lat = np.radians([40.0, 41.0, 42.0])
+    lon = np.radians([-80.0, -81.0, -82.0])
+    physics = _lake_physics()
+    static = tmp_path / "m.static.nc"
+    static.write_bytes(b"the run's static")
+    digest = hashlib.sha256(static.read_bytes()).hexdigest()
+    good = _sidecar(tmp_path / "good.nc", lat, lon, provenance=json.dumps(
+        {"parent_static": static.name, "parent_static_sha256": digest}))
+    si.bind(physics, good, latitude_rad=lat, longitude_rad=lon, static_path=static)
+    other = tmp_path / "other.static.nc"
+    other.write_bytes(b"another static, same cell centres")
+    with pytest.raises(ConfigurationRefusal, match="another static file"):
+        si.bind(physics, good, latitude_rad=lat, longitude_rad=lon, static_path=other)
+    with pytest.raises(ConfigurationRefusal, match="admits only \\[0, 1\\]"):
+        si.bind(physics, _sidecar(tmp_path / "m2.nc", lat, lon, mask=(2, 0, 0)),
+                latitude_rad=lat, longitude_rad=lon)
+    with pytest.raises(ConfigurationRefusal, match="LAKE_DEPTH_FLAG is 0"):
+        si.bind(physics, _sidecar(tmp_path / "f0.nc", lat, lon, depth_flag=0),
+                latitude_rad=lat, longitude_rad=lon)
+
+
+def test_the_seal_refuses_a_non_binary_mask_and_an_unstaged_flag():
+    cfg = _cfg(sf_lake_physics=1, use_lakedepth=1)
+    good = {"lakemask": np.array([1, 0, 0], np.float32), "lake_mask_flag": 1,
+            "lake_depth": np.array([12.5, 10, 10], np.float32),
+            "lake_depth_flag": 1}
+    with pytest.raises(ValueError, match="admits only"):
+        si.seal(cfg, dict(good, lakemask=np.array([2, 0, 0], np.float32)), n_columns=3)
+    with pytest.raises(ValueError, match="lake_depth_flag=0"):
+        si.seal(cfg, dict(good, lake_depth_flag=0), n_columns=3)
+
+
+def test_the_forecast_finds_the_builders_default_beside_the_static(tmp_path):
+    grid_dir, static_dir = tmp_path / "grid", tmp_path / "static"
+    grid_dir.mkdir()
+    static_dir.mkdir()
+    static = static_dir / "point-x-cull.static.nc"
+    built = si.builder_default_path(static)
+    assert built == static_dir / f"point-x-cull{si.FILE_SUFFIX}"
+    candidates = si.default_candidates(grid_dir / "g.grid.nc", static, "mesh")
+    assert candidates[0] == grid_dir / f"mesh{si.FILE_SUFFIX}"
+    assert built in candidates
+
+
+def test_the_builder_bands_are_bounded_by_pixel_count():
+    from woof.hex import surface_statics as ss
+
+    window = (1, 43200, 1, 21600)
+    bands = list(ss._bands(window))
+    assert all((x1 - x0 + 1) * (y1 - y0 + 1) <= ss._BAND_PIXELS
+               for x0, x1, y0, y1 in bands)
+    assert bands[0][2] == 1 and bands[-1][3] == 21600

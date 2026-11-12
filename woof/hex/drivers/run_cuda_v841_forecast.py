@@ -599,6 +599,8 @@ def _suite_host(
     interior_column=None,
     surface_statics: Path | None = None,
     cell_latlon_rad=None,
+    static_path: Path | None = None,
+    regional_donor_cell: int | None = None,
 ) -> tuple[dict[str, Any], None, dict[str, Any]]:
     """The suite row's sealed-constructor mapping, drag statistics included.
 
@@ -634,10 +636,13 @@ def _suite_host(
             )
 
             oro = {
-                name: pad_regional_physics_column(value)
+                name: pad_regional_physics_column(
+                    value, donor_cell=regional_donor_cell)
                 for name, value in oro.items()
             }
-            oro_receipt["regional_pad"] = "duplicate-last-real-column"
+            oro_receipt["regional_pad"] = (
+                "duplicate-last-real-column" if regional_donor_cell is None
+                else f"duplicate-declared-donor-cell-{int(regional_donor_cell)}")
         receipt["orographic_statistics"] = oro_receipt
     # The suite rows' sealed mapping is the engine's own initialize_physics
     # keyword set, which has no shdmax; the frozen Noah-MP row binds it after
@@ -662,7 +667,7 @@ def _suite_host(
     lat_rad, lon_rad = (None, None) if cell_latlon_rad is None else cell_latlon_rad
     bound, surface_receipt = _surface_inputs.bind(
         suite.get("physics"), surface_statics,
-        latitude_rad=lat_rad, longitude_rad=lon_rad)
+        latitude_rad=lat_rad, longitude_rad=lon_rad, static_path=static_path)
     if bound:
         lake = bound.get("lakemask")
         if lake is not None:
@@ -682,12 +687,17 @@ def _suite_host(
                 pad_regional_physics_column,
             )
 
+            # The garbage column copies the same donor the base pad copies
+            # (pad_regional_physics_host), so every array agrees on it.
             bound = {
-                name: (pad_regional_physics_column(value)
+                name: (pad_regional_physics_column(
+                    value, donor_cell=regional_donor_cell)
                        if isinstance(value, np.ndarray) else value)
                 for name, value in bound.items()
             }
-            surface_receipt["regional_pad"] = "duplicate-last-real-column"
+            surface_receipt["regional_pad"] = (
+                "duplicate-last-real-column" if regional_donor_cell is None
+                else f"duplicate-declared-donor-cell-{int(regional_donor_cell)}")
         receipt["surface_inputs"] = surface_receipt
         extra["surface_inputs"] = bound
     mapped = adapter.constructor_values_for(
@@ -2492,6 +2502,9 @@ def prepare_forecast_host(
             interior_column=_windfarm_interior_columns(
                 mesh, is_regional=is_regional, physics=physics),
             surface_statics=surface_statics,
+            static_path=paths["static"],
+            regional_donor_cell=getattr(mesh, "attrs", {}).get(
+                "regional_garbage_donor_cell"),
             cell_latlon_rad=(
                 np.asarray(proof._mesh_value(mesh, "latCell"), dtype=np.float64),
                 np.asarray(proof._mesh_value(mesh, "lonCell"), dtype=np.float64)),
