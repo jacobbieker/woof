@@ -9,7 +9,7 @@
     "cupy.ReductionKernel",
     "cupy.cuda.compiler.compile_using_nvrtc"
   ],
-  "site_count": 645,
+  "site_count": 646,
   "site_count_by_kind": {
     "cupy.ElementwiseKernel": 43,
     "cupy.RawKernel": 110,
