@@ -106,3 +106,15 @@ def test_a_grid_outside_the_mesh_and_a_wrong_shape_are_refused():
                           cells.radius_m)
     with pytest.raises(ValueError, match="coverage"):
         CellGridExchange.build(partial, grid, shape)
+
+
+def test_a_declared_area_that_disagrees_with_the_polygons_is_refused():
+    mesh = _mesh()
+    cells = mesh_cells(mesh)
+    mesh.arrays["areaCell"] = cells.area.copy()
+    assert np.array_equal(mesh_cells(mesh).area, cells.area)
+    mesh.arrays["areaCell"] = cells.area / RADIUS ** 2          # a unit-sphere mesh's radians squared
+    mesh_cells(mesh)
+    mesh.arrays["areaCell"] = cells.area * (1.0 + 1e-4)
+    with pytest.raises(ValueError, match="areaCell"):
+        mesh_cells(mesh)

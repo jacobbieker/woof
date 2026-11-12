@@ -3453,6 +3453,8 @@ def execute_forecast(
         if on_history_ready is not None or history_product_session is not None:
             raise NotImplementedError("history-ready callbacks are supported by the native executor; "
                                       "the active class executor owns a different history path")
+        from woof.hex.wrf_hydro_hex import refuse_unwired
+        refuse_unwired("active full-step local time stepping (the class executor)")
         # Active full-step local time stepping: every rate class on its own
         # whole step.  The class executor hands a mesh that classes entirely
         # at rate one back to this function with the option cleared, so a

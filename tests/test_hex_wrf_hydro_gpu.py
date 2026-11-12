@@ -103,6 +103,16 @@ def test_the_host_attaches_only_when_the_launch_asks(monkeypatch):
         attach_host(backend, {}, start_time=START, cycling={"restart_from": None, "checkpoint_steps": {6}})
 
 
+def test_launch_modes_that_do_not_attach_refuse(monkeypatch):
+    from woof import wrf_hydro_route as route
+    from woof.hex.wrf_hydro_hex import refuse_unwired
+    monkeypatch.delenv(route.ENV_NAMELIST, raising=False)
+    refuse_unwired("a same-host rank run")
+    monkeypatch.setenv(route.ENV_NAMELIST, "/x/hydro.namelist")
+    with pytest.raises(NotImplementedError, match="same-host"):
+        refuse_unwired("a same-host rank run")
+
+
 def test_the_wrf_attach_leaves_hex_columns_to_the_hex_host(monkeypatch):
     from woof import wrf_hydro_route as route
     from woof.core.mpas_column_batch import _ColumnBatchState

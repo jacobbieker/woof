@@ -194,3 +194,13 @@ def attach_host(backend, host, *, start_time, cycling=None):
     dzs = driver.noahmp_soil_thickness_m if lsm == 4 else NOAH_LAYER_THICKNESS_M
     return attach(driver, mesh_cells(host["prepared"].mesh), namelist=namelist, start_time=start_time, dzs=dzs,
                   lsm=lsm, output_dir=os.environ.get(ENV_OUTPUT))
+
+
+def refuse_unwired(mode):
+    """Refuse a launch mode that never reaches :func:`attach_host` when the launch asks for WRF-Hydro, rather
+    than run uncoupled under the coupling's name."""
+    from woof.wrf_hydro_route import configured
+    if configured() is not None:
+        raise NotImplementedError(f"--wrf-hydro with {mode}: that path does not attach the routing yet; run the "
+                                  "coupled forecast on one card, as a single member, without active local time "
+                                  "stepping")

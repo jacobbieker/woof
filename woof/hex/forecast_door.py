@@ -4202,6 +4202,10 @@ def _run_forecast_with_outputs(arguments: argparse.Namespace) -> int:
 
 def _run_forecast_with_ocean(arguments: argparse.Namespace) -> int:
     if getattr(arguments, "members", None) is not None:
+        # Every member would route into the one WRF-Hydro output directory (woof.wrf_hydro_route.launch_scope
+        # refuses an ensemble for the same reason).
+        from .wrf_hydro_hex import refuse_unwired
+        refuse_unwired("a --members roster (the members would share one routing output directory)")
         from .multi_member import run_members
         return run_members(arguments, sys.modules[__name__])
     triggers = getattr(arguments, "nest_triggers", None)

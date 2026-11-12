@@ -36,8 +36,7 @@ DEFAULT_RADIUS_M = 6371229.0
 
 def mesh_cells(mesh, *, radius_m=None) -> SphericalCells:
     """The hex cells of ``mesh`` (zero-based ``verticesOnCell``, angles in radians) as convex spherical
-    polygons.  Each cell's area is its polygon's (``ConservativeMap`` checks the mesh's ``areaCell`` against it
-    to FP32 rounding when it is supplied)."""
+    polygons.  Each cell's area is its polygon's; a declared ``areaCell`` must agree with it to FP32 rounding."""
     a = mesh.arrays
     radius = float(radius_m if radius_m is not None else
                    getattr(mesh, "attrs", {}).get("sphere_radius_m", DEFAULT_RADIUS_M))
@@ -50,6 +49,16 @@ def mesh_cells(mesh, *, radius_m=None) -> SphericalCells:
         raise ValueError("a hex cell names an absent vertex")
     vertices = vertex[np.maximum(index, 0)]
     area = np.array([spherical_area(v[:k]) for v, k in zip(vertices, counts)]) * radius ** 2
+    if "areaCell" in a:
+        # The exchange conserves on the polygon areas; the dynamics count water on areaCell.  A mesh whose
+        # declared areas differ beyond FP32 rounding would make the two budgets disagree.
+        declared = np.asarray(a["areaCell"], np.float64)[:n]
+        if float(declared.sum()) < 4 * np.pi * 1.001:
+            declared = declared * radius ** 2      # a unit-sphere mesh stores areas in radians squared
+        mismatch = np.abs(declared / area - 1.0)
+        if not np.all(np.isfinite(mismatch)) or float(mismatch.max()) > float(np.finfo(np.float32).eps):
+            raise ValueError(f"areaCell differs from the cell polygons' spherical areas by "
+                             f"{float(np.nanmax(mismatch)):.3g} (beyond FP32 rounding)")
     return SphericalCells(centers, vertices, counts, area, radius)
 
 
