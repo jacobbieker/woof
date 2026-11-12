@@ -66,22 +66,50 @@ def run(harness, work, cases):
         sys.exit(f"harness failed with status {proc.returncode}:\n{proc.stderr}")
     out = proc.stdout
     labels, results, config = {}, [], {"wedge": {}, "etf": {}}
+    tables = []
+    word = lambda h: float(np.frombuffer(bytes.fromhex(h), dtype=">f8")[0]).hex()  # noqa: E731
     for line in out.splitlines():
         w = line.split()
         if w[0] == "label":
             labels[int(w[1])] = " ".join(w[2:])
         elif w[0] in config:
-            config[w[0]][int(w[1])] = float(np.frombuffer(bytes.fromhex(w[2]), dtype=">f8")[0]).hex()
+            config[w[0]][int(w[1])] = word(w[2])
+        elif w[0] in INTERMEDIATES:
+            # (tag, reaction or 0) -> {(height edge, wavelength bin): word}, 1-based
+            tables[-1].setdefault((w[0], int(w[1])), {})[int(w[2]), int(w[3])] = word(w[4])
         elif w[0] == "case":
             results.append({})
+            tables.append({})
         elif w[0] == "j":
             j, i = int(w[1]), int(w[2])
             value = np.frombuffer(bytes.fromhex(w[3]), dtype=">f8")[0]
             results[-1].setdefault(labels[j], {})[i] = float(value).hex()
     configuration = {"wavelength_edges_nm": [config["wedge"][i] for i in sorted(config["wedge"])],
                      "extraterrestrial_flux_photon_cm-2_s-1": [config["etf"][i] for i in sorted(config["etf"])]}
-    return [labels[k] for k in sorted(labels)], [
-        {name: [r[name][i] for i in sorted(r[name])] for name in r} for r in results], configuration
+    names = [labels[k] for k in sorted(labels)]
+    return names, [
+        {name: [r[name][i] for i in sorted(r[name])] for name in r} for r in results], configuration, [
+        intermediates(t, names) for t in tables]
+
+
+#: per-case intermediate tables the harness writes: cross section, quantum yield, actinic flux parts
+INTERMEDIATES = ("xs", "qy", "fdr", "fup", "fdn")
+#: cases per layout whose intermediates are kept, and their height edges (five, both ends included)
+INTERMEDIATE_CASES = 2
+
+
+def intermediates(table, names):
+    """{"height_edges": [...], "cross_section": {reaction: [[word per bin] per kept edge]}, ...}, 0-based edges."""
+    any_table = next(iter(table.values()))
+    nedge = max(i for i, _ in any_table)
+    nbin = max(k for _, k in any_table)
+    keep = sorted({1, nedge // 4, nedge // 2, (3 * nedge) // 4, nedge})
+    rows = lambda t: [[t[i, k] for k in range(1, nbin + 1)] for i in keep]  # noqa: E731
+    return {"height_edges": [i - 1 for i in keep],
+            "cross_section_cm2": {names[j - 1]: rows(table["xs", j]) for j in range(1, len(names) + 1)},
+            "quantum_yield": {names[j - 1]: rows(table["qy", j]) for j in range(1, len(names) + 1)},
+            "actinic_flux_direct": rows(table["fdr", 0]), "actinic_flux_diffuse_up": rows(table["fup", 0]),
+            "actinic_flux_diffuse_down": rows(table["fdn", 0])}
 
 
 def main(work):
@@ -95,7 +123,7 @@ def main(work):
             c.update(edges=z, sza=float(rng.uniform(0.0, 89.0)), esd=float(rng.uniform(0.983, 1.017)))
             cases.append(c)
         # One harness per layout: every case shares the layout's level count.
-        labels, results, layout_configuration = run(work / "harness", work, cases)
+        labels, results, layout_configuration, tables = run(work / "harness", work, cases)
         # The configuration-time pieces do not depend on the column: every layout must report the same words.
         if configuration is not None and layout_configuration != configuration:
             sys.exit("the configuration-time words differ between column layouts")
@@ -106,14 +134,18 @@ def main(work):
                        "height_edges_km": words(c["edges"]),
                        **{key: words(c[key]) for key in ("temperature", "air", "air_layer", "O2", "O2_layer",
                                                          "O3", "O3_layer")},
-                       "photolysis_rate_constants_s-1": r} for c, r in zip(cases, results)]})
+                       "photolysis_rate_constants_s-1": r,
+                       **({"intermediates": t} if n < INTERMEDIATE_CASES else {})}
+                      for n, (c, r, t) in enumerate(zip(cases, results, tables))]})
     out = {"oracle": "NCAR TUV-x v0.17.0 (ebec1cb4) with a clean-room musica_assert, host-column harness over "
                      "tools/tuvx_oracle/photolysis.json (TUV 5.4 cut to O2, O3 -> O(1D), O3 -> O(3P) and NO2); "
                      "x86-64 glibc host, gfortran -O2 -ffp-contract=off (tools/tuvx_oracle/build.sh)",
            "units": {"temperature": "K", "air, O2, O3": "molecule cm-3 at the edges",
                      "*_layer": "molecule cm-2 per layer", "photolysis_rate_constants_s-1": "s-1 at the edges",
                      "configuration": "the wavelength grid's edges (nm) and the extraterrestrial flux on its bins "
-                                      "(photon cm-2 s-1), as the built core holds them"},
+                                      "(photon cm-2 s-1), as the built core holds them",
+                     "intermediates": "first two cases of each layout, five height edges (0-based): cross "
+                                      "sections cm2, quantum yields, actinic flux parts per bin"},
            "configuration": configuration, "fixtures": fixtures}
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(out, indent=0) + "\n")
