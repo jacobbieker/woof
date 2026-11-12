@@ -58,10 +58,11 @@ def test_number_rows_ledger_counts_particles():
     assert _kg_per_unit(row) == 1.0
 
 
-def test_radm2_cannot_share_a_run_with_gocart_sulfur():
-    table = chem_table.load_sets(["radm2sorg", "gocart_simple"])
-    reason = chem_radm2._table_refusal(table, SimpleNamespace())
-    assert "one mechanism" in reason
+@pytest.mark.parametrize("other", ["gocart_simple", "dust", "cams_aq", "smoke"])
+def test_radm2_runs_alone(other):
+    for sets in (["radm2sorg", other], ["radm2", other]):
+        reason = chem_radm2._table_refusal(chem_table.load_sets(sets), SimpleNamespace())
+        assert "one chem_opt package" in reason
 
 
 def test_sorgam_refuses_a_second_pm_writer():
@@ -69,6 +70,14 @@ def test_sorgam_refuses_a_second_pm_writer():
     assert "PM2_5_DRY" in chem_sorgam._table_refusal(
         chem_table.load_sets(["radm2sorg", "dust"]))
     assert chem_sorgam._table_refusal(chem_table.load_sets(["radm2sorg"])) is None
+
+
+def test_smoke_velocity_fallback_skips_sorgam_rows():
+    """aer_drydep_opt = 111's smoke velocity must not replace drydep.sorgam's."""
+    table = chem_table.load_sets(["radm2sorg"])
+    row = table.row("so4aj")
+    assert row.drydep is None
+    assert any(k.startswith("drydep.") and row.acts_in(k, table.sets) for k in row.processes)
 
 
 def test_cams_sulphate_never_fills_the_radm2_gas_sulf():
