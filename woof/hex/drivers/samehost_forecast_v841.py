@@ -791,6 +791,8 @@ def installed(forecast, *, devices, layouts_path, part_path, transport="auto", r
     """Select rank orchestration for this invocation, restoring the door after."""
     previous = forecast.execute_forecast
     def execute(**kwargs):
+        from woof.hex.wrf_hydro_hex import refuse_unwired
+        refuse_unwired("a same-host rank run")
         # The driver always forwards the full-step option (None when off).
         options = kwargs.pop("fullstep_lts_options", None)
         kwargs["fingerprint_every"] = fingerprint_every

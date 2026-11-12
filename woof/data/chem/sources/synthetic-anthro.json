@@ -1,0 +1,87 @@
+{
+  "schema": "gpuwm.chem.source.v1",
+  "name": "synthetic-anthro",
+  "kind": "emission",
+  "route": null,
+  "credential": null,
+  "format": "synthetic",
+  "description": "A deterministic, download-free stand-in for an anthropogenic inventory: three Gaussian urban plumes placed relative to the domain's own latitude/longitude extent plus a weak uniform background, so any domain emits. For runs without network; never a substitute for a real inventory in a forecast that is read for air quality.",
+  "grid": {
+    "kind": "analytic_plumes",
+    "earth_radius_m": 6371229.0,
+    "background_fraction": 0.01,
+    "plumes": [
+      {
+        "at": [
+          0.5,
+          0.5
+        ],
+        "sigma_km": 10.0,
+        "scale": 1.0
+      },
+      {
+        "at": [
+          0.3,
+          0.4
+        ],
+        "sigma_km": 8.0,
+        "scale": 0.6
+      },
+      {
+        "at": [
+          0.7,
+          0.65
+        ],
+        "sigma_km": 6.0,
+        "scale": 0.35
+      }
+    ]
+  },
+  "variables": {
+    "co": {
+      "peak": 1e-09,
+      "units": "kg m-2 s-1"
+    },
+    "nox": {
+      "peak": 7e-10,
+      "units": "kg m-2 s-1"
+    },
+    "nh3": {
+      "peak": 8e-11,
+      "units": "kg m-2 s-1"
+    },
+    "nmvoc": {
+      "peak": 9e-10,
+      "units": "kg m-2 s-1"
+    },
+    "so2": {
+      "peak": 2.5e-10,
+      "units": "kg m-2 s-1"
+    },
+    "bc": {
+      "peak": 1.8e-11,
+      "units": "kg m-2 s-1"
+    },
+    "oc": {
+      "peak": 2.8e-11,
+      "units": "kg m-2 s-1"
+    },
+    "pm25": {
+      "peak": 1e-10,
+      "units": "kg m-2 s-1"
+    },
+    "pm10": {
+      "peak": 1.2e-10,
+      "units": "kg m-2 s-1"
+    }
+  },
+  "time": {
+    "cadence_s": 31536000,
+    "latency_s": 0,
+    "persistence": "constant"
+  },
+  "remap": "analytic",
+  "licence": "WOOF data (no third-party content): an analytic pattern, no inventory values are copied.",
+  "attribution": "WOOF synthetic anthropogenic emissions (analytic urban plumes); not an emission inventory.",
+  "provenance": "Field f at a point = peak_f x (background_fraction + sum_k scale_k exp(-d_k^2 / (2 sigma_k^2))), d_k the great-circle distance (earth_radius_m) to plume k, whose centre sits at fraction at = [latitude, longitude] of the domain's point extent (longitudes unwrapped about their circular mean), computed in float64 by woof.chem_inventory_frames. Every field shares the one shape, so the speciation's differences (pm25 - bc - 1.3 oc = 0.46 pm25-peak; pm10 - pm25) stay positive everywhere. Peaks are of the order of EDGAR v8.1's 2022 0.1-degree maxima over Glasgow and Edinburgh (kg m-2 s-1: CO 1.1e-9, NOx 6.4e-10 to 8.8e-10, NH3 8.0e-11 (Glasgow; Edinburgh's 7e-10 is one agricultural/industrial cell), NMVOC 8.8e-10 to 9.8e-10, SO2 2.5e-10 (Glasgow), BC 1.5e-11 to 2.1e-11, OC 2.4e-11 to 3.1e-11, PM2.5 9.4e-11 to 1.2e-10, PM10 1.1e-10 to 1.2e-10), rounded; the 1 % background is of the order of EDGAR's rural Scottish lower quartile relative to those maxima. Constant in time (no diurnal, weekly or seasonal profile)."
+}
