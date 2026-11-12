@@ -225,3 +225,342 @@ def configuration(config, *, root):
     files = etf["file path"]
     kinds = etf.get("interpolator", [""] * len(files))
     return grid, extraterrestrial_flux(files, kinds, grid, root=root)
+
+
+# ------------------------------------------------------------------------------------------------------------
+# Cross sections and quantum yields (src/cross_section.F90, cross_sections/{o3_tint,no2_tint}.F90,
+# src/quantum_yield.F90, quantum_yields/{o3-o2_o1d,o3-o2_o3p,no2_tint}.F90): (height edge, wavelength bin) tables
+# from the column's edge temperatures.  The O2 Lyman-alpha / Schumann-Runge bands are applied in the rate
+# calculation, not here (photolysis_rates.F90 "apply O2 bands").
+
+def read_parameters(path, header):
+    """tuvx_netcdf read_netcdf_file: ``(wavelength or None, temperature or None, parameters (nlambda, nparam))``."""
+    from netCDF4 import Dataset
+    with Dataset(path) as ds:
+        params = np.asarray(ds.variables[header + "parameters"][:], dtype=np.float64).T
+        wavelength = (np.asarray(ds.variables["wavelength"][:], dtype=np.float64)
+                      if "wavelength" in ds.variables else None)
+        temperature = (np.asarray(ds.variables["temperature"][:], dtype=np.float64)
+                       if "temperature" in ds.variables else None)
+    if params.ndim != 2 or params.shape[1] < 1:
+        raise TuvxPortError(f"{path} contains no parameters")
+    if wavelength is not None and wavelength.size != params.shape[0]:
+        raise TuvxPortError(f"wavelength and parameters array size mismatch in {path}")
+    return wavelength, temperature, params
+
+
+def _extrapolation(config, key, x, y, *, qy_upper=False):
+    entry = config.get(key)
+    if entry is None:
+        return 0.0
+    kind = entry["type"]
+    if kind == "boundary":
+        return None                     # the caller reads its own boundary value at the point TUV-x does
+    if kind == "constant":
+        return float(entry["value"])
+    raise TuvxPortError(f"bad extrapolation type {kind!r}")
+
+
+def add_points_cross_section(config, x, y):
+    """cross_section.F90 add_points: the extrapolation values are read from the data before any insertion."""
+    x, y = list(x), list(y)
+    lower_x, upper_x = x[0], x[-1]
+    lower = _extrapolation(config, "lower extrapolation", x, y)
+    lower = y[0] if lower is None else lower
+    upper = _extrapolation(config, "upper extrapolation", x, y)
+    upper = y[-1] if upper is None else upper
+    x, y = add_point(x, y, (1.0 - DELTAX) * lower_x, lower)
+    x, y = add_point(x, y, 0.0, lower)
+    x, y = add_point(x, y, (1.0 + DELTAX) * upper_x, upper)
+    x, y = add_point(x, y, 1.0e38, upper)
+    return x, y
+
+
+def add_points_quantum_yield(config, x, y):
+    """quantum_yield.F90 add_points.  Its upper "boundary" value is read after the two lower points went in,
+    so it is the original data's third-from-last value (data_parameter(nRows) on the grown array), kept."""
+    x, y = list(x), list(y)
+    n = len(x)
+    lower_x, upper_x = x[0], x[-1]
+    lower = _extrapolation(config, "lower extrapolation", x, y)
+    lower = y[0] if lower is None else lower
+    x, y = add_point(x, y, 0.0, lower)
+    x, y = add_point(x, y, (1.0 - DELTAX) * lower_x, lower)
+    upper = _extrapolation(config, "upper extrapolation", x, y)
+    upper = y[n - 1] if upper is None else upper
+    x, y = add_point(x, y, (1.0 + DELTAX) * upper_x, upper)
+    x, y = add_point(x, y, 1.0e38, upper)
+    return x, y
+
+
+def _interpolator(entry):
+    kind = (entry.get("interpolator") or {}).get("type", "conserving") if isinstance(entry, dict) else "conserving"
+    if kind not in INTERPOLATORS:
+        raise TuvxPortError(f"interpolator {kind!r} is not ported")
+    return INTERPOLATORS[kind]
+
+
+def _temperature_table(temperature, params):
+    """The tint constructors' deltaT and the reversal of a decreasing temperature table (columns swapped)."""
+    temperature = np.array(temperature, dtype=np.float64)
+    params = np.array(params, dtype=np.float64)
+    nparm = params.shape[1]
+    delta = temperature[1:nparm] - temperature[:nparm - 1]
+    if not np.all(delta > 0.0):
+        if np.any(delta > 0.0):
+            raise TuvxPortError("temperature array not monotonic")
+        for lower in range(nparm // 2):
+            upper = nparm - lower - 1
+            temperature[lower], temperature[upper] = temperature[upper], temperature[lower]
+            params[:, [lower, upper]] = params[:, [upper, lower]]
+        delta = temperature[1:nparm] - temperature[:nparm - 1]
+    return temperature, delta, params
+
+
+def _on_grid(grid, config, entry, wavelength, params, add_points):
+    """Each parameter column extended (add_points) and interpolated onto the grid's edges: (nbins, nparam)."""
+    out = np.empty((grid.ncells, params.shape[1]), dtype=np.float64)
+    interpolate = _interpolator(entry)
+    for j in range(params.shape[1]):
+        x, y = add_points(config, wavelength, params[:, j])
+        out[:, j] = interpolate(grid.edge, x, y)
+    return out
+
+
+def refraction(wavelength, density):
+    """cross_sections/o3_tint.F90 refraction: the refractive index of standard air at ``density``."""
+    divisor = 2.69e19 * 273.15 / 288.15
+    out = []
+    for w in np.asarray(wavelength, dtype=np.float64):
+        wrk = min(max(float(w), 200.0), 2000.0)
+        sig = 1.0e3 / wrk
+        sigsq = sig * sig
+        wrk = 8342.13 + 2406030.0 / (130.0 - sigsq) + 15997.0 / (38.9 - sigsq)
+        wrk = wrk * density / divisor
+        out.append(1.0 + 1.0e-8 * wrk)
+    return np.asarray(out, dtype=np.float64)
+
+
+class BaseCrossSection:
+    """cross_section.F90 base type from netcdf files (no "zero below/above", overrides or merged data)."""
+
+    def __init__(self, config, grid, root):
+        for key in ("override bands", "merge data", "data"):
+            if key in config:
+                raise TuvxPortError(f"base cross section {key!r} is not ported")
+        self.parms = []
+        for entry in config["netcdf files"]:
+            if "zero below" in entry or "zero above" in entry:
+                raise TuvxPortError("base cross section 'zero below/above' is not ported")
+            wavelength, _temperature, params = read_parameters(Path(root) / entry["file path"], "cross_section_")
+            if wavelength is None:
+                self.parms.append(params)
+                continue
+            # parameters%array starts at zero and each file's columns are added in (0 + value); process_file
+            # extends them with the FILE entry's extrapolation (the tint types read the cross section's)
+            self.parms.append(0.0 + _on_grid(grid, entry, entry, wavelength, params,
+                                             lambda _c, x, y: add_points_cross_section(entry, x, y)))
+
+    def calculate(self, temperature_edges):
+        n = np.asarray(temperature_edges).size
+        return np.repeat(self.parms[0][:, 0][None, :], n, axis=0)
+
+
+class O3TintCrossSection:
+    """cross_sections/o3_tint.F90 (type "O3"): four files, refraction-corrected wavelengths, the band chosen by
+    each bin's lower edge (file 3 below 185 nm, file 4 below 195, file 2 below 345, file 1 above)."""
+
+    REFRACTION_DENSITY = 2.45e19
+
+    def __init__(self, config, grid, root):
+        files = config["netcdf files"]
+        if len(files) < 2:
+            raise TuvxPortError("O3 tint needs at least two netcdf files")
+        self.grid = grid
+        self.files = []
+        for index, entry in enumerate(files, start=1):
+            wavelength, temperature, params = read_parameters(Path(root) / entry["file path"], "cross_section_")
+            if index == 2 and params.shape[1] < 4:
+                raise TuvxPortError("O3 tint file 2 must have 4 or more parameters")
+            if wavelength is None or temperature is None:
+                raise TuvxPortError("O3 tint files need wavelengths and temperatures")
+            wavelength = refraction(wavelength, self.REFRACTION_DENSITY) * wavelength
+            delta = None
+            if temperature.size > 1:
+                temperature, delta, params = _temperature_table(temperature, params)
+            array = _on_grid(grid, entry, entry, wavelength, params,
+                             lambda _c, x, y: add_points_cross_section(config, x, y))
+            self.files.append({"temperature": temperature, "delta": delta, "array": array})
+        self.v185 = float(refraction([185.0], self.REFRACTION_DENSITY)[0] * 185.0)
+        self.v195 = float(refraction([195.0], self.REFRACTION_DENSITY)[0] * 195.0)
+        self.v345 = float(refraction([345.0], self.REFRACTION_DENSITY)[0] * 345.0)
+        self.files[1]["array"][:, 3] = self.files[0]["array"][:, 0]
+
+    def calculate(self, temperature_edges):
+        temps = [float(t) for t in np.asarray(temperature_edges, dtype=np.float64)]
+        edge = self.grid.edge
+        out = np.zeros((len(temps), self.grid.ncells), dtype=np.float64)
+        for k, model in enumerate(temps):
+            for w in range(self.grid.ncells):
+                lam = float(edge[w])
+                if lam < self.v185:
+                    f = 2
+                elif lam < self.v195:
+                    f = 3
+                elif lam < self.v345:
+                    f = 1
+                else:
+                    out[k, w] = 0.0 + self.files[0]["array"][w, 0]
+                    continue
+                table = self.files[f]
+                data = table["temperature"]
+                tadj = min(max(model, float(data[0])), float(data[-1]))
+                t = next((i for i in range(1, data.size) if tadj <= data[i]), data.size)
+                t -= 1
+                tstar = (tadj - data[t]) / table["delta"][t]
+                a = table["array"]
+                out[k, w] = 0.0 + a[w, t] + tstar * (a[w, t + 1] - a[w, t])
+        return out
+
+
+class NO2TintCrossSection:
+    """cross_sections/no2_tint.F90: linear in temperature between the file's tables, clamped to its range."""
+
+    def __init__(self, config, grid, root):
+        self.files = []
+        for entry in config["netcdf files"]:
+            wavelength, temperature, params = read_parameters(Path(root) / entry["file path"], "cross_section_")
+            if params.shape[1] < 2 or temperature is None or temperature.size < max(2, params.shape[1]):
+                raise TuvxPortError("NO2 tint needs two or more parameters and as many temperatures")
+            temperature, delta, params = _temperature_table(temperature, params)
+            array = (params if wavelength is None else
+                     _on_grid(grid, entry, entry, wavelength, params,
+                              lambda _c, x, y: add_points_cross_section(config, x, y)))
+            self.files.append({"temperature": temperature, "delta": delta, "array": array})
+        self.nbins = grid.ncells
+
+    def calculate(self, temperature_edges):
+        temps = [float(t) for t in np.asarray(temperature_edges, dtype=np.float64)]
+        out = np.zeros((len(temps), self.nbins), dtype=np.float64)
+        for table in self.files:
+            data, a = table["temperature"], table["array"]
+            for k, model in enumerate(temps):
+                tadj = min(max(model, float(data[0])), float(data[-1]))
+                # Fortran: tNdx exits where tadj <= T(tNdx), else ends at nTemp + 1; tNdx = min(nTemp, tNdx) - 1
+                # (1-based), i.e. 0-based min(nTemp, i + 1) - 2 for the 0-based exit index i
+                i = next((i for i in range(1, data.size) if tadj <= data[i]), data.size)
+                t = min(data.size, i + 1) - 2
+                tstar = (tadj - data[t]) / table["delta"][t]
+                out[k] = out[k] + a[:, t] + tstar * (a[:, t + 1] - a[:, t])
+        return out
+
+
+class BaseQuantumYield:
+    """quantum_yield.F90 base type with a ``constant value`` (the only form the configuration uses)."""
+
+    def __init__(self, config, grid, root):
+        for key in ("netcdf files", "override bands"):
+            if key in config:
+                raise TuvxPortError(f"base quantum yield {key!r} is not ported")
+        self.value = float(config.get("constant value", 0.0))
+        self.nbins = grid.ncells
+
+    def calculate(self, temperature_edges):
+        return np.full((np.asarray(temperature_edges).size, self.nbins), self.value, dtype=np.float64)
+
+
+class O3QuantumYield:
+    """quantum_yields/o3-o2_o1d.F90 (O(1D)); ``o3p`` is o3-o2_o3p.F90's one minus it.  glibc exp/pow words."""
+
+    A = (0.8036, 8.9061, 0.1192)
+    X = (304.225, 314.957, 310.737)
+    OM = (5.576, 6.601, 2.187)
+
+    def __init__(self, config, grid, root, *, o3p=False):
+        self.mid = [float(w) for w in grid.mid]
+        self.o3p = o3p
+
+    def calculate(self, temperature_edges):
+        import math
+        a, x, om = self.A, self.X, self.OM
+        out = np.zeros((np.asarray(temperature_edges).size, len(self.mid)), dtype=np.float64)
+        for k, temp in enumerate(float(t) for t in np.asarray(temperature_edges, dtype=np.float64)):
+            kt = 0.695 * temp
+            q1 = 1.0
+            q2 = math.exp(-825.518 / kt)
+            qfac1 = q1 / (q1 + q2)
+            qfac2 = q2 / (q1 + q2)
+            t300 = temp / 300.0
+            for w, lam in enumerate(self.mid):
+                if lam <= 305.0:
+                    value = 0.90
+                elif 328.0 < lam <= 340.0:
+                    value = 0.08
+                elif 305.0 < lam <= 328.0:
+                    y1 = (x[0] - lam) / om[0]
+                    y1sq = y1 * y1
+                    y2 = (x[1] - lam) / om[1]
+                    y3 = (x[2] - lam) / om[2]
+                    value = (0.0765 + a[0] * qfac1 * math.exp(-(y1sq * y1sq))
+                             + a[1] * t300 * t300 * qfac2 * math.exp(-(y2 * y2))
+                             + a[2] * math.pow(t300, 1.5) * math.exp(-(y3 * y3)))
+                else:
+                    value = 0.0
+                out[k, w] = 1.0 - value if self.o3p else value
+        return out
+
+
+class NO2TintQuantumYield:
+    """quantum_yields/no2_tint.F90: linear in temperature (not clamped), floored at zero."""
+
+    def __init__(self, config, grid, root):
+        self.files = []
+        for name in config["netcdf files"]:
+            wavelength, temperature, params = read_parameters(Path(root) / name, "quantum_yield_")
+            if params.shape[1] < 2 or temperature is None or temperature.size < max(2, params.shape[1]):
+                raise TuvxPortError("NO2 tint quantum yield needs two or more parameters and temperatures")
+            temperature, delta, params = _temperature_table(temperature, params)
+            array = (params if wavelength is None else
+                     _on_grid(grid, {}, {}, wavelength, params,
+                              lambda _c, x, y: add_points_quantum_yield(config, x, y)))
+            self.files.append({"temperature": temperature, "delta": delta, "array": array})
+        self.nbins = grid.ncells
+
+    def calculate(self, temperature_edges):
+        temps = [float(t) for t in np.asarray(temperature_edges, dtype=np.float64)]
+        out = np.zeros((len(temps), self.nbins), dtype=np.float64)
+        for table in self.files:
+            data, a = table["temperature"], table["array"]
+            for k, tadj in enumerate(temps):
+                # Fortran: tNdx exits where tadj <= T(tNdx), else ends at nTemp + 1; tNdx = min(nTemp, tNdx) - 1
+                # (1-based), i.e. 0-based min(nTemp, i + 1) - 2 for the 0-based exit index i
+                i = next((i for i in range(1, data.size) if tadj <= data[i]), data.size)
+                t = min(data.size, i + 1) - 2
+                tstar = (tadj - data[t]) / table["delta"][t]
+                out[k] = out[k] + a[:, t] + tstar * (a[:, t + 1] - a[:, t])
+        return np.maximum(out, 0.0)
+
+
+CROSS_SECTIONS = {"base": BaseCrossSection, "O3": O3TintCrossSection, "NO2 tint": NO2TintCrossSection}
+QUANTUM_YIELDS = {"base": BaseQuantumYield, "NO2 tint": NO2TintQuantumYield,
+                  "O3+hv->O2+O(1D)": O3QuantumYield,
+                  "O3+hv->O2+O(3P)": lambda c, g, r: O3QuantumYield(c, g, r, o3p=True)}
+
+
+class Photolysis:
+    """Each configured reaction's cross section and quantum yield calculators on ``grid``."""
+
+    def __init__(self, config, grid, *, root):
+        self.reactions = []
+        for reaction in config["photolysis"]["reactions"]:
+            xs, qy = reaction["cross section"], reaction["quantum yield"]
+            if xs["type"] not in CROSS_SECTIONS or qy["type"] not in QUANTUM_YIELDS:
+                raise TuvxPortError(f"{reaction['name']}: {xs['type']!r} / {qy['type']!r} is not ported")
+            self.reactions.append((reaction["name"], CROSS_SECTIONS[xs["type"]](xs, grid, root),
+                                   QUANTUM_YIELDS[qy["type"]](qy, grid, root),
+                                   bool(xs.get("apply O2 bands", False))))
+
+    def tables(self, temperature_edges):
+        """``{reaction: (cross section cm2, quantum yield)}``, each (height edge, wavelength bin)."""
+        return {name: (xs.calculate(temperature_edges), qy.calculate(temperature_edges))
+                for name, xs, qy, _bands in self.reactions}
