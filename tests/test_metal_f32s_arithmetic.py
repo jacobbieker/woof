@@ -106,3 +106,53 @@ def test_exact_zero_sums_keep_ieee_signs(cp):
     assert got[7, 0] == (a[7] + b[7]).view(np.uint32) != 0x80000000
     # 0 * y + z with zero z: signed zero by IEEE's sum rule
     assert np.array_equal(got[:4, 4], (a[:4] * b[:4] + c[:4]).view(np.uint32))
+
+
+@pytest.mark.skipif(__import__("os").environ.get("GPUWM_WRF_EXACT", "0") != "1",
+                    reason="the strict facade arithmetic runs under GPUWM_WRF_EXACT=1")
+def test_strict_in_place_arithmetic_keeps_its_words(cp):
+    """``a op= b`` in a strict process writes ``a`` from the one translated
+    kernel (woof/backend/facade/_ops.py ``_strict_in_place``) instead of a
+    new array and a copy.  The words are the binary32 operation's, for an
+    array operand, a broadcast row, a scalar, ``a`` itself, and an
+    overlapping view (which keeps the two-step path)."""
+    a_h, b_h = _operands()
+    n = a_h.size - a_h.size % 64
+    a_h, b_h = a_h[:n].reshape(4, 16, -1), b_h[:n].reshape(4, 16, -1)
+    row_h = b_h[:, :1, :1].copy()
+    with np.errstate(all="ignore"):
+        for op, host in (("__iadd__", np.add), ("__isub__", np.subtract),
+                         ("__imul__", np.multiply), ("__itruediv__", np.divide)):
+            for other_h in (b_h, row_h, np.float32(-0.375), 2.5):
+                a = cp.asarray(a_h)
+                other = cp.asarray(other_h) if isinstance(other_h, np.ndarray) else other_h
+                getattr(a, op)(other)
+                want = host(a_h, other_h).astype(np.float32)
+                assert np.array_equal(a.get().view(np.uint32), want.view(np.uint32)), (op, other_h)
+            a = cp.asarray(a_h)
+            getattr(a, op)(a)
+            want = host(a_h, a_h).astype(np.float32)
+            assert np.array_equal(a.get().view(np.uint32), want.view(np.uint32)), (op, "self")
+            flat = cp.asarray(a_h.ravel())
+            getattr(flat[1:], op)(flat[:-1])
+            want = a_h.ravel().copy()
+            want[1:] = host(want[1:], a_h.ravel()[:-1]).astype(np.float32)
+            assert np.array_equal(flat.get().view(np.uint32), want.view(np.uint32)), (op, "overlap")
+
+
+@pytest.mark.skipif(__import__("os").environ.get("GPUWM_WRF_EXACT", "0") != "1",
+                    reason="the strict facade arithmetic runs under GPUWM_WRF_EXACT=1")
+def test_strict_in_place_arithmetic_is_one_launch(cp, monkeypatch):
+    """No copy follows the kernel for a dense target (the copy kernel is the
+    facade's ``write``); an overlapping view still copies."""
+    from woof.backend.facade import _write
+    writes = []
+    real = _write.write
+    monkeypatch.setattr(_write, "write", lambda view, values: writes.append(view.shape) or real(view, values))
+    a = cp.ones((8, 32), dtype=cp.float32)
+    a += cp.full((8, 32), 0.5, dtype=cp.float32)
+    a *= np.float32(3.0)
+    assert writes == []
+    a[1:] += a[:-1]
+    assert writes and set(writes) == {(7, 32)}
+    assert np.array_equal(a.get()[0], np.full(32, 4.5, np.float32))

@@ -308,7 +308,7 @@ def _operands_f32(hints) -> bool:
         return False
 
 
-def _subnormal_arith(np_name, a, b):
+def _subnormal_arith(np_name, a, b, into=None):
     from woof.backend.facade._elementwise import ElementwiseKernel
     if np_name in _SUBNORMAL_ARITH:
         key, out, body = _SUBNORMAL_ARITH[np_name], "float32 z", f"z = x {_SUBNORMAL_ARITH[np_name]} y"
@@ -330,7 +330,38 @@ def _subnormal_arith(np_name, a, b):
         a = np.asarray(a, dtype=np.float32) if scalars else np.float32(a)
     if not isinstance(b, (ndarray, np.ndarray)):
         b = np.float32(b)
-    return k(a, b)
+    return k(a, b) if into is None else k(a, b, into)
+
+
+def _strict_in_place(np_name, target, other) -> bool:
+    """``target op= other`` under GPUWM_WRF_EXACT=1 as ONE translated kernel
+    writing ``target``, where it was the kernel into a new array and a copy
+    into ``target``: the same kernel and words, one launch fewer.  Only for
+    binary32 arithmetic into a dense ``target`` whose shape the operands
+    broadcast to, and an ``other`` that is either another buffer or
+    ``target`` itself (an overlapping view would read words the kernel has
+    already written)."""
+    if np_name not in _SUBNORMAL_ARITH or not _keeps_subnormals():
+        return False
+    if target.dtype != np.float32 or not target.is_c_contiguous():
+        return False
+    hint = _dtype_hint(other)
+    try:
+        if np.result_type(target.dtype, hint) != np.float32 or on_host(hint):
+            return False
+    except TypeError:
+        return False
+    if isinstance(other, (ndarray, np.ndarray)):
+        try:
+            if np.broadcast_shapes(target.shape, other.shape) != target.shape:
+                return False
+        except ValueError:
+            return False
+    if isinstance(other, ndarray) and other._st is target._st and not (
+            other._offset == target._offset and other.shape == target.shape
+            and other.strides == target.strides):
+        return False
+    return True
 
 
 def _apply(np_name, mx_name, *args, out=None, dtype=None, result_dtype=None):
@@ -633,6 +664,9 @@ def _inplace(name):
     def method(self, other):
         from woof.backend.facade import _capture
         if _capture.defer(method, self, other):
+            return self
+        if _strict_in_place(name, self, other):
+            _subnormal_arith(name, self, other, into=self)
             return self
         self._write(operand_values(fn(self, other), self.dtype))
         return self
