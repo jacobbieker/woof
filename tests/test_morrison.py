@@ -125,7 +125,7 @@ def test_morrison_config_selector_accepts_10_and_rejects_unknown(tmp_path):
                 "[run]\nrun_seconds=0.0\n")
     path.write_text(template.format(mp=10))
     assert load_config(path).mp_physics == 10
-    path.write_text(template.format(mp=11))
+    path.write_text(template.format(mp=12))      # 11 (CAM) is a selector now
     with pytest.raises(ValueError, match="mp_physics"):
         load_config(path)
 
