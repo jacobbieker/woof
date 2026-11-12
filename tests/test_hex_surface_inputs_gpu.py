@@ -217,3 +217,99 @@ def test_the_lake_seam_restarts_bit_identically():
             np.testing.assert_array_equal(
                 _host(second._driver.fields[name]).view(np.uint32),
                 reference[step][name].view(np.uint32), err_msg=f"step {step} {name}")
+
+
+URBAN = np.array([1, 1, 0, 1, 0, 0, 1, 0], dtype=bool)
+FRC = np.array([0.81, 0.405, 0.0, 0.9, 0.0, 0.0, 0.27, 0.0], np.float32)
+
+
+def _urban_mapping():
+    physics = dict(suite.MPAS_DEFAULT_PHYSICS, sf_urban_physics=1)
+    values = _mapping(physics, {"frc_urb2d": FRC.copy()})
+    for name in ("landmask", "xland", "isltyp", "tsk"):
+        values[name] = np.asarray(cases.surface(suite.column_physics_plan(
+            physics))[name]).copy()
+    values["ivgtyp"] = np.where(URBAN, 13, 10).astype(np.int32)
+    return values
+
+
+def test_the_urban_seam_refuses_without_its_fraction_and_carries_it():
+    values = _urban_mapping()
+    sealed = _seal(values)
+    assert sealed.receipt()["surface_inputs"] == ["frc_urb2d"]
+    values.pop("surface_inputs")
+    with pytest.raises(ValueError, match="missing .*frc_urb2d"):
+        _seal(values)
+
+
+def test_hex_urban_columns_are_wrf_urban_twin_columns():
+    """Every SLUCM call on the hex seam equals WRF's urban model replayed on a
+    twin built by the same urban_param_init/urban_var_init from the same
+    staged FRC_URB2D (tools/hex_urban_twin.py, run in-process here)."""
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[1] / "tools" / "hex_urban_twin.py"
+    spec = importlib.util.spec_from_file_location("hex_urban_twin", path)
+    twin = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(twin)
+    summary: dict = {}
+    restore = twin._install(summary)
+    try:
+        seam = suite.run_mpas_column_physics(**_seal(_urban_mapping()).arwen_kwargs())
+        frc = _host(seam._driver.urban.fields["frc_urb2d"]).reshape(-1)
+        # urban_var_init keeps the staged fraction on the urban cells.
+        np.testing.assert_array_equal(frc[URBAN], FRC[URBAN])
+        frames = cases.run(cp, seam, 4)
+    finally:
+        restore()
+    assert not cases._finite(frames)
+    assert summary["calls_after_lsm"] >= 1
+    assert not any(summary["initial_words_differing"].values()), summary
+    assert not any(summary["step_words_differing"].values()), {
+        key: value for key, value in summary["step_words_differing"].items() if value}
+
+
+def test_the_urban_seam_restarts_bit_identically():
+    def make():
+        return suite.run_mpas_column_physics(**_seal(_urban_mapping()).arwen_kwargs())
+
+    def step(seam, theta, species, fields):
+        seam.run_phase1(
+            dt=DT, u=fields["u"], v=fields["v"], theta=theta,
+            pressure=fields["pressure"],
+            pressure_interface=fields["pressure_interface"],
+            z_interface=fields["z_interface"], w=fields["w"],
+            rho_dry=fields["rho_dry"], species=species)
+        seam.run_phase2(
+            theta=theta, pressure=fields["pressure"],
+            z_interface=fields["z_interface"], w=fields["w"],
+            rho_dry=fields["rho_dry"], species=species)
+
+    reference_seam = make()
+    names = tuple(reference_seam._driver.urban.names)
+    fields, species = cases.profile(cp, reference_seam.plan)
+    theta = fields["theta"].copy()
+    reference = []
+    for _ in range(4):
+        step(reference_seam, theta, species, fields)
+        reference.append({
+            "theta": _host(theta),
+            "species": {name: _host(value) for name, value in species.items()},
+            **{name: _host(reference_seam._driver.fields[name]) for name in names}})
+    first = make()
+    cases.run(cp, first, 2)
+    payload = first.export_state()
+    second = make()
+    second.restore_state(payload)
+    fields, _ = cases.profile(cp, second.plan)
+    theta = cp.asarray(reference[1]["theta"])
+    species = {name: cp.asarray(reference[1]["species"][name])
+               for name in second.plan.species}
+    for index in (2, 3):
+        step(second, theta, species, fields)
+        np.testing.assert_array_equal(_host(theta).view(np.uint32),
+                                      reference[index]["theta"].view(np.uint32))
+        for name in names:
+            a, b = _host(second._driver.fields[name]), reference[index][name]
+            np.testing.assert_array_equal(a, b, err_msg=f"step {index} {name}")

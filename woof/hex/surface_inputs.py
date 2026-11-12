@@ -148,10 +148,27 @@ _SOILCTOP = _unstaged(
 _SOILCBOT = _unstaged(
     "soilcbot", "SOILCBOT", "float32",
     "per-cell bottom-soil category fractions from the static builder (plan 1.6)")
-_FRC_URB2D = _unstaged(
-    "frc_urb2d", "FRC_URB2D", "float32",
-    "the per-cell urban fraction (geogrid URB_PARAM / LCZ, plan 1.5); without "
-    "it urban_var_init takes the table's FRC_URB on urban cells only")
+_FRC_URB2D = SurfaceInput(
+    "frc_urb2d", "FRC_URB2D", "cell", "float32", True,
+    "SLUCM's urban fraction as WOOF's WRF preparation estimates it: the cell's "
+    "MODIS land-use category fractions (pixel shares per Voronoi cell) times "
+    "URBPARM.TBL FRC_URB, on dominant-urban land cells (woof hex "
+    "surface-statics --fields urban)")
+_LCZ = _unstaged(
+    "ivgtyp", "LU_INDEX (LCZ 51-61)", "int32",
+    "the Local Climate Zone classes 51-61 kept distinct per cell (CGLC-MODIS-"
+    "LCZ) instead of the static's collapsed ISURBAN, for URBPARM_LCZ.TBL")
+
+
+def _urban_inputs(cfg) -> tuple[SurfaceInput, ...]:
+    if int(_value(cfg, "use_wudapt_lcz")) == 1:
+        return (_LCZ,)
+    if int(_value(cfg, "sf_urban_physics")) == 1:
+        return (_FRC_URB2D,)
+    # BEP and BEP+BEM run on URBPARM.TBL's own fractions, exactly as WOOF's
+    # WRF preparation hands them (woof.static.highres: only SLUCM takes the
+    # land-cover estimate), so they read no per-cell input beyond the init's.
+    return ()
 _IRRIGATION = _unstaged(
     "irrigation", "IRRIGATION", "float32",
     "the per-cell irrigated fraction from the irrigation dataset (plan 6.8)")
@@ -195,7 +212,7 @@ CONTRACT: tuple[SchemeInputs, ...] = (
                  lambda cfg: (_LANDUSEF,)),
     SchemeInputs("urban", "sf_urban_physics=1/2/3",
                  lambda cfg: int(_value(cfg, "sf_urban_physics")) > 0,
-                 lambda cfg: (_FRC_URB2D,)),
+                 _urban_inputs),
     SchemeInputs("irrigation", "sf_surf_irr_scheme>0",
                  lambda cfg: int(_value(cfg, "sf_surf_irr_scheme")) > 0,
                  lambda cfg: (_IRRIGATION, _IRR_PH)),
@@ -539,7 +556,10 @@ def _probe_configs(row: SchemeInputs):
     # The inputs of a row at its widest (every switch of the scheme on).
     from types import SimpleNamespace
 
-    yield SimpleNamespace(use_lakedepth=1, mosaic_lu=1, mosaic_soil=1)
+    yield SimpleNamespace(use_lakedepth=1, mosaic_lu=1, mosaic_soil=1,
+                          sf_urban_physics=1, use_wudapt_lcz=0)
+    if row.scheme == "urban":
+        yield SimpleNamespace(sf_urban_physics=1, use_wudapt_lcz=1)
 
 
 # ---------------------------------------------------------------------------
