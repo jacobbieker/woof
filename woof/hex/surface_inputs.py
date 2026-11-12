@@ -57,7 +57,9 @@ class SurfaceInput:
     """One ``initialize_physics`` keyword a scheme reads, and its hex source.
 
     ``kind`` is ``"cell"`` (one value per cell, float32 or int32 as
-    ``dtype`` says) or ``"flag"`` (one integer the sidecar records as a global
+    ``dtype`` says), ``"categories"`` (one plane per land-use category, one
+    value per cell in each: ``[nLandCat, nCells]``, geogrid's LANDUSEF layout)
+    or ``"flag"`` (one integer the sidecar records as a global
     attribute, WRF's geogrid/real flags).  ``variable`` is the sidecar's name
     for it (WRF's own upper-case name).  ``staged`` says whether the hex static
     builder produces it today; a required input that is not staged is refused
@@ -145,6 +147,14 @@ _LANDUSEF = _unstaged(
     "landusef", "LANDUSEF", "float32",
     "per-cell land-use category FRACTIONS from the static builder (the MPAS "
     "static carries the dominant category only) (plan 1.6)")
+#: Noah mosaic's LANDUSEF: built.  The tile state is built from it by WOOF's
+#: own door (woof.core.noah_mosaic_door, real.exe's edits included), which the
+#: generic seam calls after initialize_physics.
+_LANDUSEF_MOSAIC = SurfaceInput(
+    "landusef", "LANDUSEF", "categories", "float32", True,
+    "geogrid's LANDUSEF on the mesh: each Voronoi cell's pixel shares of the "
+    "21-category with-lakes MODIS land use (woof hex surface-statics --fields "
+    "landusef)", bounds=(0.0, 1.0))
 _SOILCTOP = _unstaged(
     "soilctop", "SOILCTOP", "float32",
     "per-cell top-soil category fractions from the static builder (plan 1.6)")
@@ -212,7 +222,7 @@ CONTRACT: tuple[SchemeInputs, ...] = (
     SchemeInputs("noah_mosaic", "sf_surface_physics=2 with sf_surface_mosaic=1",
                  lambda cfg: int(_value(cfg, "sf_surface_physics")) == 2
                  and int(_value(cfg, "sf_surface_mosaic")) == 1,
-                 lambda cfg: (_LANDUSEF,)),
+                 lambda cfg: (_LANDUSEF_MOSAIC,)),
     SchemeInputs("urban", "sf_urban_physics=1/2/3",
                  lambda cfg: int(_value(cfg, "sf_urban_physics")) > 0,
                  _urban_inputs),
@@ -493,12 +503,14 @@ def bind(physics: Mapping[str, Any] | None, path: str | Path | None, *,
                     f"file carries no {item.variable}",
                     f"`woof hex surface-statics` with the {need.scheme} fields")
             variable = dataset.variables[item.variable]
-            if tuple(variable.dimensions) != ("nCells",):
+            want = (("nLandCat", "nCells") if item.kind == "categories"
+                    else ("nCells",))
+            if tuple(variable.dimensions) != want:
                 raise ValueError(
-                    f"{item.variable} dimensions {variable.dimensions} != ('nCells',)")
+                    f"{item.variable} dimensions {variable.dimensions} != {want}")
             values = np.ascontiguousarray(
                 np.asarray(variable[:]), dtype=np.dtype(item.dtype))
-            if values.shape != (n_cells,):
+            if values.shape[-1:] != (n_cells,):
                 raise ValueError(
                     f"{item.variable} has {values.shape} cells, the mesh {n_cells}")
             if not np.all(np.isfinite(values)):
@@ -565,10 +577,17 @@ def seal(cfg, given: Mapping[str, Any] | None, *, n_columns: int
             sealed[item.keyword] = int(value)
             continue
         array = np.asarray(value)
-        if array.dtype != np.dtype(item.dtype) or array.shape != (int(n_columns),):
+        shape_ok = (array.ndim == 2 and array.shape[0] >= 1
+                    and array.shape[1] == int(n_columns)
+                    if item.kind == "categories" else array.shape == (int(n_columns),))
+        if array.dtype != np.dtype(item.dtype) or not shape_ok:
             raise ValueError(
-                f"{item.keyword} must be {item.dtype}[{int(n_columns)}], got "
-                f"{array.dtype}{list(array.shape)}")
+                f"{item.keyword} must be {item.dtype}"
+                f"[{'nLandCat, ' if item.kind == 'categories' else ''}{int(n_columns)}], "
+                f"got {array.dtype}{list(array.shape)}")
+        if item.kind == "categories" and (
+                np.any(array < 0) or np.any(array > np.float32(1.0 + 1e-6))):
+            raise ValueError(f"{item.keyword} fractions must lie in [0, 1]")
         if not np.all(np.isfinite(array)):
             raise ValueError(f"{item.keyword} must be finite")
         _check_allowed(item, array, "the sealed surface inputs")

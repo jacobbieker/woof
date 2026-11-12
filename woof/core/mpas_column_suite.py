@@ -1668,6 +1668,22 @@ class MpasColumnPhysics(MpasColumnBatchPhysics):
             radiation_longitude=lon.reshape(1, ncol),
             terrain_drag_static=(dict(oro, HGT_M=terrain.reshape(1, ncol))
                                  if oro else None))
+        if int(getattr(cfg, "sf_surface_mosaic", 0) or 0) == 1:
+            # Noah mosaic's tile state is built by WOOF's own door after the
+            # surface initialisation (WRF phy_init after LSMINIT,
+            # module_physics_init.F:3366-3398), from geogrid's LANDUSEF with
+            # real.exe's edits applied there; every other door does the same.
+            from woof.core.noah_mosaic_door import attach_noah_mosaic_to_driver
+            from woof.static.geog import DEFAULT_LANDUSE_ATTRS
+            attach_noah_mosaic_to_driver(
+                self._driver, cfg, landusef=kwargs.get("landusef"),
+                processed=False, landuse_attrs=DEFAULT_LANDUSE_ATTRS,
+                # The driver's own resolved mask (initialize_physics defaults
+                # an omitted landmask), brought to the host the door reads.
+                landmask=cp.asnumpy(cp.asarray(
+                    self._driver.fields["landmask"], dtype=cp.float32)
+                ).reshape(1, ncol),
+                fractional_seaice=bool(int(cfg.fractional_seaice or 0)))
         self.seaice_optics_seed = _seed_ruc_fractional_seaice_optics(
             self._driver, cfg, lat, start_time)
         self._cumulus_momentum = {"pair": None, "seen": False}

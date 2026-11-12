@@ -259,7 +259,7 @@ def test_the_contract_table_lists_every_scheme():
     staged = {(row["scheme"], row["keyword"]) for row in rows if row["staged"]}
     assert staged == {("clm_lake", "lakemask"), ("clm_lake", "lake_mask_flag"),
                       ("clm_lake", "lake_depth"), ("clm_lake", "lake_depth_flag"),
-                      ("urban", "frc_urb2d")}
+                      ("urban", "frc_urb2d"), ("noah_mosaic", "landusef")}
 
 
 def test_topo_wind_2_reads_var_from_the_static_by_the_superset_match():
@@ -400,3 +400,32 @@ def test_the_urban_fraction_is_held_to_the_runs_urban_table(tmp_path):
     with pytest.raises(ConfigurationRefusal, match="another table"):
         si.bind(dict(physics, urban_table_dir=str(custom)), path,
                 latitude_rad=lat, longitude_rad=lon)
+
+
+def test_noah_mosaic_reads_a_landusef_plane_stack():
+    cfg = _cfg(sf_surface_physics=2, sf_surface_mosaic=1)
+    [need] = si.required_inputs(cfg)
+    assert need.input.keyword == "landusef" and need.input.kind == "categories"
+    assert need.input.staged
+    stack = np.zeros((21, 3), np.float32)
+    stack[9] = 1.0
+    sealed = si.seal(cfg, {"landusef": stack}, n_columns=3)
+    assert sealed["landusef"].shape == (21, 3)
+    with pytest.raises(ValueError, match="nLandCat"):
+        si.seal(cfg, {"landusef": stack[0]}, n_columns=3)
+    with pytest.raises(ValueError, match="\\[0, 1\\]"):
+        si.seal(cfg, {"landusef": stack * 2}, n_columns=3)
+    # RUC and PX still read fractions hex does not stage.
+    assert si.unstaged_problems(_cfg(sf_surface_physics=3, mosaic_lu=1))
+    assert si.unstaged_problems(_cfg(sf_surface_physics=7))
+
+
+def test_landusef_is_geogrids_pixel_share_per_cell():
+    from woof.hex import surface_statics as ss
+
+    counts = np.zeros((2, 21), np.int64)
+    counts[0, 9], counts[0, 12] = 3, 1
+    planes, receipt = ss.landuse_fractions(counts, 1)
+    assert planes.shape == (21, 2) and planes.dtype == np.float32
+    assert planes[9, 0] == np.float32(0.75) and planes[12, 0] == np.float32(0.25)
+    assert not planes[:, 1].any() and receipt["cells_without_pixels"] == 1
