@@ -18,7 +18,7 @@
 # run_thermal_solver.F90 makes li_basal_melt_floating_ice's and
 # li_thermal_solver's calls after a restart's thermal init.  The objects must contain no FMA
 # instruction (checked with objdump when it is present).  powf, expf, sinf and
-# tanhf (RKIND 4) and pow and exp (RKIND 8) are the host libm's; TOOLCHAIN.txt records the glibc and whether the CPU has
+# tanhf (RKIND 4) and pow, exp and tanh (RKIND 8) are the host libm's; TOOLCHAIN.txt records the glibc and whether the CPU has
 # FMA.  On a host whose libm is not glibc (macOS), the oracles link
 # tools/oracle_libm/glibc_host.cpp instead: the repository's MIT glibc
 # transcriptions, compiled for the host by CXX (default c++), so they write

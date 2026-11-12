@@ -1,0 +1,29 @@
+ julday int32
+ nrow int32
+ chem_opt int32
+ map_kind int32
+ hstar float32          42
+ dhr float32          42
+ f0 float32          42
+ dvj float32          42
+ dratio float32          42
+ scpr23 float32          42
+ t_phy_k1 float32          24          18
+ p_phy_k1 float32          24          18
+ p8w_k1 float32          24          18
+ qv_k1 float32          24          18
+ qc_k1 float32          24          18
+ qr_k1 float32          24          18
+ dz1 float32          24          18
+ tsk float32          24          18
+ gsw float32          24          18
+ vegfra float32          24          18
+ ust float32          24          18
+ rmol float32          24          18
+ znt float32          24          18
+ raincv float32          24          18
+ ivgtyp int32          24          18
+ chem_k1 float32          24          18          42
+ ddvel float32          24          18          42
+ aer_res_def float32          24          18
+ aer_res_zcen float32          24          18
