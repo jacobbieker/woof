@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+from source_parameter_examples import source_parameter_args
 
 from woof import fetch, fetch_routes
 from woof.era5_member import validate_selection
@@ -204,7 +205,8 @@ def test_table_cli_resolves_latest_and_keeps_the_resolved_request(source, tmp_pa
     # The whole-cycle rule (A136 L2: as-posted is the default, so this
     # names --whole-cycle and keeps every assertion).
     parsed = args("--whole-cycle", "--source", source, "--cycle", "latest", "--hours", str(hours),
-                  "--forecast-start-hour", str(start), "--out", str(tmp_path / source))
+                  "--forecast-start-hour", str(start), "--out", str(tmp_path / source),
+                  *source_parameter_args(source))
     assert fetch.fetch_main(parsed) == 0
     assert calls[0][:3] == ("latest", source, start + hours)
     # Resolving latest already asked about the primary; only a declared
