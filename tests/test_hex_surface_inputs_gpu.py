@@ -406,3 +406,13 @@ def test_the_mosaic_seam_restarts_bit_identically():
             np.testing.assert_array_equal(
                 _host(second._driver.fields[name]), reference[index][name],
                 err_msg=f"step {index} {name}")
+
+
+def test_the_mosaic_seam_reads_the_drivers_resolved_landmask():
+    """An omitted landmask is initialize_physics' default (land); the tile
+    door reads the driver's resolved mask, so the seam builds either way."""
+    kwargs = _seal(_mosaic_mapping()).arwen_kwargs()
+    kwargs["surface"] = {key: value for key, value in kwargs["surface"].items()
+                         if key != "landmask"}
+    seam = suite.run_mpas_column_physics(**kwargs)
+    assert seam._driver.noah_mosaic is not None

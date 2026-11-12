@@ -88,6 +88,15 @@ def _install(summary: dict):
         if twin is None:
             return original_launch(dev, *args, **kwargs)
         twin_fields, owned = twin
+        if kwargs.get("urban") is not None:
+            # SLUCM inside the tile loop advances the live urban state; a
+            # replay on the same object would advance it twice.  The twin does
+            # not carry its own urban state yet, so it refuses rather than
+            # perturb the forecast it watches.
+            raise RuntimeError(
+                "tools/hex_mosaic_twin.py does not yet replay Noah mosaic with "
+                "sf_urban_physics = 1 (the tile loop's SLUCM state); run the "
+                "twin with the urban canopy off")
         for key, value in dev.items():
             if key not in owned:
                 twin_fields[key] = copy_value(value)

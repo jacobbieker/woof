@@ -1680,8 +1680,11 @@ class MpasColumnPhysics(MpasColumnBatchPhysics):
             attach_noah_mosaic_to_driver(
                 self._driver, cfg, landusef=kwargs.get("landusef"),
                 processed=False, landuse_attrs=DEFAULT_LANDUSE_ATTRS,
-                landmask=np.asarray(given["landmask"], dtype=np.float32
-                                    ).reshape(1, ncol),
+                # The driver's own resolved mask (initialize_physics defaults
+                # an omitted landmask), brought to the host the door reads.
+                landmask=cp.asnumpy(cp.asarray(
+                    self._driver.fields["landmask"], dtype=cp.float32)
+                ).reshape(1, ncol),
                 fractional_seaice=bool(int(cfg.fractional_seaice or 0)))
         self.seaice_optics_seed = _seed_ruc_fractional_seaice_optics(
             self._driver, cfg, lat, start_time)
