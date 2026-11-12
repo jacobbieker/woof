@@ -317,6 +317,16 @@ def _temperature_table(temperature, params):
     return temperature, delta, params
 
 
+def _lower_index(data, tadj, *, tint=False):
+    """The 0-based lower table index for each (clamped) temperature.  Fortran exits its search at the first
+    1-based ``i >= 2`` with ``tadj <= T(i)`` (0-based exit index ``i``; ``nTemp`` when none): o3_tint takes
+    ``i - 1``, the tint types ``min(nTemp, i + 1) - 2`` (0-based)."""
+    exit_index = 1 + np.searchsorted(np.asarray(data[1:], dtype=np.float64), tadj, side="left")
+    if tint:
+        return np.minimum(data.size, exit_index + 1) - 2
+    return exit_index - 1
+
+
 def _on_grid(grid, config, entry, wavelength, params, add_points):
     """Each parameter column extended (add_points) and interpolated onto the grid's edges: (nbins, nparam)."""
     out = np.empty((grid.ncells, params.shape[1]), dtype=np.float64)
@@ -362,8 +372,8 @@ class BaseCrossSection:
                                              lambda _c, x, y: add_points_cross_section(entry, x, y)))
 
     def calculate(self, temperature_edges):
-        n = np.asarray(temperature_edges).size
-        return np.repeat(self.parms[0][:, 0][None, :], n, axis=0)
+        shape = np.shape(temperature_edges)
+        return np.broadcast_to(self.parms[0][:, 0], shape + (self.parms[0].shape[0],)).copy()
 
 
 class O3TintCrossSection:
@@ -397,29 +407,25 @@ class O3TintCrossSection:
         self.files[1]["array"][:, 3] = self.files[0]["array"][:, 0]
 
     def calculate(self, temperature_edges):
-        temps = [float(t) for t in np.asarray(temperature_edges, dtype=np.float64)]
-        edge = self.grid.edge
-        out = np.zeros((len(temps), self.grid.ncells), dtype=np.float64)
-        for k, model in enumerate(temps):
-            for w in range(self.grid.ncells):
-                lam = float(edge[w])
-                if lam < self.v185:
-                    f = 2
-                elif lam < self.v195:
-                    f = 3
-                elif lam < self.v345:
-                    f = 1
-                else:
-                    out[k, w] = 0.0 + self.files[0]["array"][w, 0]
-                    continue
-                table = self.files[f]
-                data = table["temperature"]
-                tadj = min(max(model, float(data[0])), float(data[-1]))
-                t = next((i for i in range(1, data.size) if tadj <= data[i]), data.size)
-                t -= 1
-                tstar = (tadj - data[t]) / table["delta"][t]
-                a = table["array"]
-                out[k, w] = 0.0 + a[w, t] + tstar * (a[w, t + 1] - a[w, t])
+        """(..., nbin) for temperatures of any shape: each bin's file chosen by its lower edge."""
+        temps = np.asarray(temperature_edges, dtype=np.float64)
+        edge = self.grid.edge[:self.grid.ncells]
+        choice = np.where(edge < self.v185, 2, np.where(edge < self.v195, 3, np.where(edge < self.v345, 1, 0)))
+        out = np.zeros(temps.shape + (self.grid.ncells,), dtype=np.float64)
+        out[..., choice == 0] = 0.0 + self.files[0]["array"][choice == 0, 0]
+        for f in (1, 2, 3):
+            bins = np.flatnonzero(choice == f)
+            if bins.size == 0:
+                continue
+            table = self.files[f]
+            data = table["temperature"]
+            tadj = np.minimum(np.maximum(temps, data[0]), data[-1])
+            t = _lower_index(data, tadj)
+            tstar = (tadj - data[t]) / table["delta"][t]
+            a = table["array"][bins]                                  # (nb, ntemp)
+            lo, hi = a[:, t], a[:, t + 1]                             # (nb, ...)
+            value = 0.0 + lo + tstar * (hi - lo)
+            out[..., bins] = np.moveaxis(value, 0, -1)
         return out
 
 
@@ -440,18 +446,15 @@ class NO2TintCrossSection:
         self.nbins = grid.ncells
 
     def calculate(self, temperature_edges):
-        temps = [float(t) for t in np.asarray(temperature_edges, dtype=np.float64)]
-        out = np.zeros((len(temps), self.nbins), dtype=np.float64)
+        temps = np.asarray(temperature_edges, dtype=np.float64)
+        out = np.zeros(temps.shape + (self.nbins,), dtype=np.float64)
         for table in self.files:
             data, a = table["temperature"], table["array"]
-            for k, model in enumerate(temps):
-                tadj = min(max(model, float(data[0])), float(data[-1]))
-                # Fortran: tNdx exits where tadj <= T(tNdx), else ends at nTemp + 1; tNdx = min(nTemp, tNdx) - 1
-                # (1-based), i.e. 0-based min(nTemp, i + 1) - 2 for the 0-based exit index i
-                i = next((i for i in range(1, data.size) if tadj <= data[i]), data.size)
-                t = min(data.size, i + 1) - 2
-                tstar = (tadj - data[t]) / table["delta"][t]
-                out[k] = out[k] + a[:, t] + tstar * (a[:, t + 1] - a[:, t])
+            tadj = np.minimum(np.maximum(temps, data[0]), data[-1])
+            t = _lower_index(data, tadj, tint=True)
+            tstar = (tadj - data[t]) / table["delta"][t]
+            lo, hi = np.moveaxis(a[:, t], 0, -1), np.moveaxis(a[:, t + 1], 0, -1)
+            out = out + lo + tstar[..., None] * (hi - lo)
         return out
 
 
@@ -466,7 +469,7 @@ class BaseQuantumYield:
         self.nbins = grid.ncells
 
     def calculate(self, temperature_edges):
-        return np.full((np.asarray(temperature_edges).size, self.nbins), self.value, dtype=np.float64)
+        return np.full(np.shape(temperature_edges) + (self.nbins,), self.value, dtype=np.float64)
 
 
 class O3QuantumYield:
@@ -481,33 +484,26 @@ class O3QuantumYield:
         self.o3p = o3p
 
     def calculate(self, temperature_edges):
-        import math
         a, x, om = self.A, self.X, self.OM
-        out = np.zeros((np.asarray(temperature_edges).size, len(self.mid)), dtype=np.float64)
-        for k, temp in enumerate(float(t) for t in np.asarray(temperature_edges, dtype=np.float64)):
-            kt = 0.695 * temp
-            q1 = 1.0
-            q2 = math.exp(-825.518 / kt)
-            qfac1 = q1 / (q1 + q2)
-            qfac2 = q2 / (q1 + q2)
-            t300 = temp / 300.0
-            for w, lam in enumerate(self.mid):
-                if lam <= 305.0:
-                    value = 0.90
-                elif 328.0 < lam <= 340.0:
-                    value = 0.08
-                elif 305.0 < lam <= 328.0:
-                    y1 = (x[0] - lam) / om[0]
-                    y1sq = y1 * y1
-                    y2 = (x[1] - lam) / om[1]
-                    y3 = (x[2] - lam) / om[2]
-                    value = (0.0765 + a[0] * qfac1 * math.exp(-(y1sq * y1sq))
-                             + a[1] * t300 * t300 * qfac2 * math.exp(-(y2 * y2))
-                             + a[2] * math.pow(t300, 1.5) * math.exp(-(y3 * y3)))
-                else:
-                    value = 0.0
-                out[k, w] = 1.0 - value if self.o3p else value
-        return out
+        temp = np.asarray(temperature_edges, dtype=np.float64)[..., None]
+        lam = np.asarray(self.mid, dtype=np.float64)
+        kt = 0.695 * temp
+        q1 = 1.0
+        q2 = np.exp(-825.518 / kt)
+        qfac1 = q1 / (q1 + q2)
+        qfac2 = q2 / (q1 + q2)
+        t300 = temp / 300.0
+        y1 = (x[0] - lam) / om[0]
+        y1sq = y1 * y1
+        y2 = (x[1] - lam) / om[1]
+        y3 = (x[2] - lam) / om[2]
+        band = (0.0765 + a[0] * qfac1 * np.exp(-(y1sq * y1sq))
+                + a[1] * t300 * t300 * qfac2 * np.exp(-(y2 * y2))
+                + a[2] * np.power(t300, 1.5) * np.exp(-(y3 * y3)))
+        value = np.where(lam <= 305.0, 0.90,
+                         np.where((328.0 < lam) & (lam <= 340.0), 0.08,
+                                  np.where((305.0 < lam) & (lam <= 328.0), band, 0.0)))
+        return 1.0 - value if self.o3p else value
 
 
 class NO2TintQuantumYield:
@@ -527,17 +523,14 @@ class NO2TintQuantumYield:
         self.nbins = grid.ncells
 
     def calculate(self, temperature_edges):
-        temps = [float(t) for t in np.asarray(temperature_edges, dtype=np.float64)]
-        out = np.zeros((len(temps), self.nbins), dtype=np.float64)
+        temps = np.asarray(temperature_edges, dtype=np.float64)
+        out = np.zeros(temps.shape + (self.nbins,), dtype=np.float64)
         for table in self.files:
             data, a = table["temperature"], table["array"]
-            for k, tadj in enumerate(temps):
-                # Fortran: tNdx exits where tadj <= T(tNdx), else ends at nTemp + 1; tNdx = min(nTemp, tNdx) - 1
-                # (1-based), i.e. 0-based min(nTemp, i + 1) - 2 for the 0-based exit index i
-                i = next((i for i in range(1, data.size) if tadj <= data[i]), data.size)
-                t = min(data.size, i + 1) - 2
-                tstar = (tadj - data[t]) / table["delta"][t]
-                out[k] = out[k] + a[:, t] + tstar * (a[:, t + 1] - a[:, t])
+            t = _lower_index(data, temps, tint=True)            # not clamped
+            tstar = (temps - data[t]) / table["delta"][t]
+            lo, hi = np.moveaxis(a[:, t], 0, -1), np.moveaxis(a[:, t + 1], 0, -1)
+            out = out + lo + tstar[..., None] * (hi - lo)
         return np.maximum(out, 0.0)
 
 
@@ -902,7 +895,7 @@ class RayleighCrossSection:
         self.values = 4.02e-28 / np.power(wrk, pwr)
 
     def calculate(self, temperatures):
-        return np.repeat(self.values[None, :], np.asarray(temperatures).size, axis=0)
+        return np.broadcast_to(self.values, np.shape(temperatures) + self.values.shape).copy()
 
 
 RADIATOR_CROSS_SECTIONS = {**CROSS_SECTIONS, "air": RayleighCrossSection}
@@ -945,7 +938,7 @@ class Radiators:
         out = {}
         for name, profile, section, is_air in self.radiators:
             dens = _columns(layer_columns[profile])
-            xs = np.stack([section.calculate(t) for t in tmid])          # (ncol, nlayer, nbin)
+            xs = section.calculate(tmid)                                 # (ncol, nlayer, nbin)
             od = dens[:, :, None] * xs
             if name == "O2" and band_optical_depth:
                 for b, values in band_optical_depth.items():
@@ -1179,8 +1172,8 @@ class Tuvx:
         bands_xs = None
         out = {}
         for r, (name, xs_calc, qy_calc, apply_bands) in enumerate(self.photolysis.reactions):
-            xs = np.stack([xs_calc.calculate(t) for t in temps])          # (ncol, nedge, nbin)
-            qy = np.stack([qy_calc.calculate(t) for t in temps])
+            xs = xs_calc.calculate(temps)                                # (ncol, nedge, nbin)
+            qy = qy_calc.calculate(temps)
             if apply_bands:
                 if bands_xs is None:
                     bands_xs = self.bands.cross_section(avc, asc, osc, temps)
