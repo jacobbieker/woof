@@ -251,7 +251,9 @@ def cold_start(ctx):
                if not any(ref["source"] in enabled for ref in row.boundary)]
     if not targets:
         return
-    profile = radm2_background_profile(cp.asnumpy(ctx.met("z_at_w")))
+    chem_opt = 2 if ctx.table.rows_for(SORGAM_KEY) else 1
+    profile = radm2_background_profile(cp.asnumpy(ctx.met("z_at_w")),
+                                       chem_opt=chem_opt)
     for row in targets:
         if row.name not in profile:
             raise ValueError(f"chem.radm2 row {row.name!r} has no WRF "

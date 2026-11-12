@@ -23,6 +23,9 @@ from woof import chem_table
 from woof.core import chem_radm2
 
 NZ, NY, NX = 24, 2, 3
+#: sha256 of every array after the cold starts and four steps, equal on
+#: pb's CUDA (RTX A6000) and the mac's Metal.
+CHAIN_SHA256 = "b5db957cf98a4a614cea8a489786c0ce7de8fdcf9554f97fb1aa01096c0fe3b3"
 
 
 def test_sets_rows_and_gating():
@@ -85,15 +88,24 @@ def test_chem_clock_is_wrfs():
     assert [g[1] for g in got if g] == [45.0, 135.0, 135.0, 90.0]
 
 
+def _decay(x):
+    """exp(-x) to within a few percent from + - * / only: the host libm's
+    exp differs between macOS and Linux, and the column must be the same
+    bytes on every host for the backends to be compared."""
+    x = np.asarray(x, dtype=np.float64) / 4.0
+    r = 1.0 / (1.0 + x + x * x / 2.0 + x * x * x / 6.0)
+    return r * r * r * r
+
+
 def _column():
     """A mid-latitude summer column, noon UTC at 0 E: float32 (nz, ny, nx)."""
-    z_w = np.linspace(0.0, 16000.0, NZ + 1, dtype=np.float32)
-    z = 0.5 * (z_w[1:] + z_w[:-1])
-    t = (295.0 - 6.5e-3 * np.minimum(z, 11000.0)).astype(np.float32)
-    p = (101325.0 * np.exp(-z / 7600.0)).astype(np.float32)
-    p_w = (101325.0 * np.exp(-z_w / 7600.0)).astype(np.float32)
-    t_w = np.interp(z_w, z, t).astype(np.float32)
-    qv = (0.012 * np.exp(-z / 2500.0)).astype(np.float32)
+    z_w = (np.arange(NZ + 1, dtype=np.float64) * (16000.0 / NZ)).astype(np.float32)
+    z = (0.5 * (z_w[1:].astype(np.float64) + z_w[:-1])).astype(np.float32)
+    t = (295.0 - 6.5e-3 * np.minimum(z.astype(np.float64), 11000.0)).astype(np.float32)
+    p = (101325.0 * _decay(z / 7600.0)).astype(np.float32)
+    p_w = (101325.0 * _decay(z_w / 7600.0)).astype(np.float32)
+    t_w = np.concatenate([t[:1], 0.5 * (t[1:].astype(np.float64) + t[:-1]), t[-1:]]).astype(np.float32)
+    qv = (0.012 * _decay(z / 2500.0)).astype(np.float32)
     dry = p / (287.04 * t * (1.0 + 0.608 * qv))
     def grid(a):
         return np.ascontiguousarray(np.broadcast_to(a[:, None, None], (a.size, NY, NX)), np.float32)
@@ -127,8 +139,6 @@ def _run(steps):
     state = SimpleNamespace()
     for row in table.rows:
         setattr(state, row.state_attr, cp.full((NZ, NY, NX), np.float32(1e-16)))
-    for name, value in GAS_START.items():
-        getattr(state, table.row(name).state_attr)[...] = np.float32(value)
     prep = SimpleNamespace(get=met.get)
     state.chem = SimpleNamespace(table=table, prep=prep)
     processes = [(k, m) for k, m in chem_processes(table)
@@ -155,9 +165,18 @@ def _run(steps):
                                                         ktau=ktau, dt=dt))
     ctx = ctx_for(1)
     import woof.core.chem_sorgam as sorgam
+    # The driver's cold start (chem_driver._cold_start): WRF's background
+    # gas profile, then the SORGAM aerosol start, in CHEM_STEP_ORDER.
+    chem_radm2.cold_start(ctx)
+    from woof.core.chem_gas_profile import radm2_background_profile
+    want = radm2_background_profile(_column()["z_at_w"], chem_opt=2)
+    for name in ("ket", "hc8", "ho2"):
+        assert np.array_equal(cp.asnumpy(getattr(state, table.row(name).state_attr)),
+                              want[name]), name
+    assert float(cp.asnumpy(diag["radm2_last_chem_secs"])[0, 0]) == -dt
+    for name, value in GAS_START.items():
+        getattr(state, table.row(name).state_attr)[...] = np.float32(value)
     sorgam.cold_start(ctx)
-    diag["radm2_last_chem_secs"][...] = -dt
-    state.chem.radm2_last_chem_host = -dt
     for _key, module in processes:
         module.init(ctx)
     o3_start = cp.asnumpy(getattr(state, table.row("o3").state_attr)).copy()
@@ -195,4 +214,6 @@ def test_radm2sorg_chain_runs_and_repeats():
     digest = hashlib.sha256()
     for name in sorted(a):
         digest.update(name.encode() + np.ascontiguousarray(a[name]).tobytes())
+    # The same bytes on CUDA and Metal (the column is host-independent).
     print("radm2sorg chain sha256", digest.hexdigest())
+    assert digest.hexdigest() == CHAIN_SHA256
