@@ -20,9 +20,10 @@ The masks are :func:`woof.hex.mpas_ice.geometry_v842.calculate_mask`. Every
 word is held to those routines compiled verbatim with gfortran ``-O0
 -ffp-contract=off`` at RKIND 4 (MALI's default) and RKIND 8
 (``tools/mali_oracle/run_thermal_solver.F90``,
-``tests/test_mali_thermal_solver_parity.py``). At RKIND 8, 'mismip' and
-'seroussi' are refused by name: no binary64 ``tanh`` or ``sin`` here is
-matched to the oracle host's glibc (``R8_REFUSED_FLOAT_MELT``).
+``tests/test_mali_thermal_solver_parity.py``). At RKIND 8, 'mismip''s
+``tanh`` is CORE-MATH's correctly rounded one (``cr_tanh_flt64.cuh``), which
+is glibc 2.44's; 'seroussi' is refused by name: glibc's binary64 ``sin`` is
+not correctly rounded and is LGPL (``R8_REFUSED_FLOAT_MELT``).
 
 The model's scratch fields (the thermal cell mask, the edge dissipation) are
 private here. Arrays are device float32 (RKIND 4) or float64 (RKIND 8) with
@@ -56,8 +57,6 @@ MODULE_OPTIONS = COMPILE_OPTIONS
 MATH_HEADERS = ("glibc_flt32.cuh", "glibc_trig_flt32.cuh", "sfire_libm.cuh")
 #: Floating melt options whose libm call has no binary64 transcription matched to the oracle host
 R8_REFUSED_FLOAT_MELT = {
-    "mismip": "glibc's binary64 tanh (fdlibm, through expm1) has no transcription here matched to the oracle "
-              "host's words",
     "seroussi": "glibc's binary64 sin is not correctly rounded and is LGPL, so its words cannot be reproduced "
                 "under the default licence",
 }
@@ -149,7 +148,7 @@ def basal_melt_floating_ice(*, mesh: dict, geometry: dict, config_basal_mass_bal
         raise ConfigurationRefusal(
             knob="config_basal_mass_bal_float", value=config_basal_mass_bal_float,
             reason=f"at RKIND 8, {R8_REFUSED_FLOAT_MELT[config_basal_mass_bal_float]}",
-            declaration="config_basal_mass_bal_float = 'none' | 'file' | 'constant' at RKIND 8")
+            declaration="config_basal_mass_bal_float = 'none' | 'file' | 'constant' | 'mismip' at RKIND 8")
     ncs = int(mesh["nCellsSolve"])
     if not 0 <= ncs <= n_cells:
         raise ValueError("nCellsSolve must lie within nCells")

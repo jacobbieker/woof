@@ -359,6 +359,9 @@ NOTICE_CARRIERS: tuple[str, ...] = (
     # (root NOTICE, "FP64 libm transcriptions").
     "woof/core/kernels/cr_cbrt_flt64.cuh",
     "woof/core/cr_cbrt.py",
+    # CORE-MATH's correctly rounded binary64 tanh (MIT), MALI's RKIND 8 tanh
+    # (root NOTICE, "FP64 libm transcriptions").
+    "woof/core/kernels/cr_tanh_flt64.cuh",
     "woof/core/rrtmgp.py",
     "woof/core/ruc.py",
     "woof/core/thompson_aerosol_contract.py",
@@ -463,6 +466,8 @@ _NOT_FDLIBM = {
     # of the noticed Sun reductions in the FDLIBM carriers above.
     "noahmp_log10_profile.cuh": ("noahmp_native_log10", "noahmp_native_log10_special"),
     "wrf471_log10f.cuh": ("wrf471_log10f", "wrf471_log10f_special"),
+    # CORE-MATH's binary64 tanh (MIT notice inline), not FDLIBM's: no expm1.
+    "cr_tanh_flt64.cuh": ("as_tanh_database", "as_tanh_zero", "cr_tanh"),
 
     # GFDL wrappers call portable_libm64 plm_log, gfk_log10 or glibc_atanf;
     # the copied reductions remain in those separately noticed headers.
