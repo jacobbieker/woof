@@ -60,8 +60,14 @@ reconstructed slope on every cell, and `mpas_reconstruct` sets it only on the
 owned cells. In a halo the model would read its uninitialised scratch.
 
 At RKIND 8 the fixture leaves out `eTheta`. glibc's binary64 `atan` is LGPL and
-not correctly rounded, so the port refuses it. Every other output of the step
-is compared at both precisions:
+not correctly rounded, so the port refuses it unless the opt-in glibc 2.39
+transcription is on (`WOOF_GLIBC239_LIBM64=1`, `tools/glibc239_libm_gpu`, LGPL,
+source checkout only). `oracle-r8-glibc239.npz` holds the cases that opt-in
+lifts, at RKIND 8 as written: `eTheta` included, `sia_no_thermal_sphere` on the
+sphere, `none_temperature_no_tracers` with 'seroussi', `sgh_overburden_shmip`
+(C2) and `sgh_shmip_d` (D3) with their forcings (input digests
+`<case>/r8-glibc239`; written on pb 2026-11-12, the other files' bytes
+unchanged). Every other output of the step is compared at both precisions:
 
 - the masks;
 - thickness, layer thickness and edge layer thickness;
