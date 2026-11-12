@@ -2,7 +2,7 @@
 //
 // The committed MPAS oracle fixtures (tools/mali_oracle, tools/mpas_ocean_oracle)
 // were written on x86-64 Linux, where gfortran's exp, real ** real, cos, sin
-// and tanh call glibc's expf/powf/cosf/sinf/tanhf (RKIND 4) and exp/pow
+// and tanh call glibc's expf/powf/cosf/sinf/tanhf (RKIND 4) and exp/pow/tanh
 // (RKIND 8), the
 // FMA builds the x86-64 ifunc selects.  Another libm (Apple's, on macOS)
 // returns different words for some arguments, so an oracle rebuilt there would
@@ -14,9 +14,10 @@
 // through woof/backend/host/cuda_host_shim.h, the same text the GPU kernels
 // call: glibc_flt32.cuh (expf, powf) and glibc_trig_flt32.cuh (cosf, sinf)
 // for RKIND 4, glibc_flt64.cuh (exp, pow) for RKIND 8, all Arm
-// optimized-routines transcriptions under MIT, and sfire_libm.cuh (tanhf):
+// optimized-routines transcriptions under MIT, sfire_libm.cuh (tanhf):
 // CORE-MATH's correctly rounded tanhf under MIT, which glibc carries since
-// 2.41.  No glibc source is involved.
+// 2.41, and cr_tanh_flt64.cuh (tanh): CORE-MATH's correctly rounded binary64
+// tanh under MIT, which glibc 2.44 carries.  No glibc source is involved.
 // One object serves both precisions.
 //
 //   c++ -c -O0 -ffp-contract=off -std=c++17 -fno-exceptions -fno-rtti \
@@ -26,6 +27,7 @@
 #include "glibc_trig_flt32.cuh"
 #include "glibc_flt64.cuh"
 #include "sfire_libm.cuh"
+#include "cr_tanh_flt64.cuh"
 
 extern "C" {
 float expf(float x) { return gfk_exp(x); }
@@ -35,4 +37,5 @@ float sinf(float x) { return glibc_sinf(x); }
 float tanhf(float x) { return sfire_tanhf(x); }
 double exp(double x) { return glibc_exp(x); }
 double pow(double x, double y) { return glibc_pow(x, y); }
+double tanh(double x) { return g64_tanh::cr_tanh(x); }
 }
