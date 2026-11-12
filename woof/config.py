@@ -7631,9 +7631,26 @@ def validate_chem_config(cfg) -> None:
     # source frames to read them from".
     from woof.chem_inventory_frames import serves_emission
 
+    from woof.core.chem_radm2_emiss import EMISSIONS as _RADM2_FIELDS
+
+    def _read(row, ref):
+        # An entry a process acting on the row in this run reads: the e_*
+        # fields are emission.radm2's, every other field the other emitting
+        # processes' (a shared row keeps the entries of the sets it serves).
+        if ref["field"] in _RADM2_FIELDS:
+            return row.acts_in("emission.radm2", table.sets)
+        others = [key for key in row.processes
+                  if key.split(".")[0] in ("emission", "plumerise")
+                  and key != "emission.radm2"]
+        if not others:
+            # Only emission.radm2 could read it, and it reads e_* fields
+            # only: a misdeclared entry, refused below.
+            return True
+        return any(row.acts_in(key, table.sets) for key in others)
+
     unserved = sorted({ref["source"] for row in table.rows
                        for ref in row.emissions
-                       if ref["source"] in sources
+                       if ref["source"] in sources and _read(row, ref)
                        and catalog_sources[ref["source"]].kind == "emission"
                        and catalog_sources[ref["source"]].remap
                        not in ("cell_sum", "cell_sum_split")
