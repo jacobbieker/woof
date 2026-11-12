@@ -9,13 +9,13 @@
     "cupy.ReductionKernel",
     "cupy.cuda.compiler.compile_using_nvrtc"
   ],
-  "site_count": 642,
+  "site_count": 643,
   "site_count_by_kind": {
     "cupy.ElementwiseKernel": 42,
     "cupy.RawKernel": 110,
     "cupy.RawModule": 293,
     "cupy.ReductionKernel": 16,
-    "cupy.cuda.compiler.compile_using_nvrtc": 181
+    "cupy.cuda.compiler.compile_using_nvrtc": 182
   },
   "site_count_by_surface": {
     "other": {
@@ -29,7 +29,7 @@
       "cupy.RawKernel": 39,
       "cupy.RawModule": 99,
       "cupy.ReductionKernel": 9,
-      "cupy.cuda.compiler.compile_using_nvrtc": 109
+      "cupy.cuda.compiler.compile_using_nvrtc": 110
     },
     "tests": {
       "cupy.ElementwiseKernel": 7,
@@ -9791,6 +9791,22 @@
       "options_element_expressions": null,
       "options_are_literal": false,
       "text": "image, _ = compile_using_nvrtc(module_source(precision), options, None, f\"li_thermal_solver_v842_{precision}.cu\")"
+    },
+    {
+      "file": "woof/hex/mpas_ice/time_integration_fe_v842.py",
+      "line": 93,
+      "column": 15,
+      "surface": "package",
+      "constructor": "compile_using_nvrtc",
+      "constructor_kind": "cupy.cuda.compiler.compile_using_nvrtc",
+      "enclosing": "_module_on",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "options",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "image, _ = compile_using_nvrtc(module_source(precision), options, None,"
     },
     {
       "file": "woof/hex/mpas_ocean/forcing_v842.py",

@@ -1,8 +1,8 @@
 // glibc's libm words for the MPAS oracles on a host whose libm is not glibc.
 //
 // The committed MPAS oracle fixtures (tools/mali_oracle, tools/mpas_ocean_oracle)
-// were written on x86-64 Linux, where gfortran's exp, real ** real, cos, sin
-// and tanh call glibc's expf/powf/cosf/sinf/tanhf (RKIND 4) and exp/pow/tanh
+// were written on x86-64 Linux, where gfortran's exp, real ** real, cos, sin,
+// atan and tanh call glibc's expf/powf/cosf/sinf/atanf/tanhf (RKIND 4) and exp/pow/tanh
 // (RKIND 8), the
 // FMA builds the x86-64 ifunc selects.  Another libm (Apple's, on macOS)
 // returns different words for some arguments, so an oracle rebuilt there would
@@ -12,7 +12,7 @@
 //
 // It is the repository's own device transcriptions, compiled for the host
 // through woof/backend/host/cuda_host_shim.h, the same text the GPU kernels
-// call: glibc_flt32.cuh (expf, powf) and glibc_trig_flt32.cuh (cosf, sinf)
+// call: glibc_flt32.cuh (expf, powf) and glibc_trig_flt32.cuh (cosf, sinf, atanf)
 // for RKIND 4, glibc_flt64.cuh (exp, pow) for RKIND 8, all Arm
 // optimized-routines transcriptions under MIT, sfire_libm.cuh (tanhf):
 // CORE-MATH's correctly rounded tanhf under MIT, which glibc carries since
@@ -34,6 +34,7 @@ float expf(float x) { return gfk_exp(x); }
 float powf(float x, float y) { return gfk_pow(x, y); }
 float cosf(float x) { return glibc_cosf(x); }
 float sinf(float x) { return glibc_sinf(x); }
+float atanf(float x) { return glibc_atanf(x); }
 float tanhf(float x) { return sfire_tanhf(x); }
 double exp(double x) { return glibc_exp(x); }
 double pow(double x, double y) { return glibc_pow(x, y); }

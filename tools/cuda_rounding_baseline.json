@@ -262,6 +262,14 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "0f1c6c54c8460a4f3b492ac2e43f0e26c6e455b0d48521acc1ea1cf252668da3",
+    "constructor": "compile_using_nvrtc",
+    "factory": "_module_on",
+    "factory_sha256": "798cbf998509f9c2a5c7e047712ab07dc53233889debd85ab1c0982ab67c6e3a",
+    "file": "woof/hex/mpas_ice/time_integration_fe_v842.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "0f335f66f588a1183b12c7422e33aa9ab72672ca3f135f50a42a5497996904e8",
     "constructor": "createProgram",
     "factory": "raw_nvrtc",
@@ -4528,6 +4536,10 @@
     "sha256": "03520a378a4be4eb1d5aa25696f6a796a532c10f76b9ac21cbb33c5231d37bac"
    },
    {
+    "file": "woof/hex/mpas_ice/time_integration_fe_v842.cu",
+    "sha256": "7d8ae189a4cef4d1fd88a6ffe71791744b824cad54d5bddc7d8389a0d3100a47"
+   },
+   {
     "file": "woof/hex/mpas_ocean/forcing_v842.cu",
     "sha256": "8178e4d7b40d5f838ee6afa0f61d46fbe84829dca4b3225e6139e0347f559502"
    },
@@ -5416,6 +5428,10 @@
    {
     "file": "woof/hex/mpas_ice/thermal_solver_v842.py",
     "sha256": "00f6cfb72ce7a544d41ed4c790448806da61580669cdad653bd01ea5ffd8f99a"
+   },
+   {
+    "file": "woof/hex/mpas_ice/time_integration_fe_v842.py",
+    "sha256": "0d9f801219b13ccd4e141438e9c315c5fbcd6412e4525bbe4777e6e07cffaaf7"
    },
    {
     "file": "woof/hex/mpas_ocean/forcing_v842.py",
