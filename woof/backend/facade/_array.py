@@ -229,6 +229,38 @@ class Storage:
 #: GPU base address -> the storage that handed it out (Storage.address)
 _ADDRESSES: dict = {}
 
+#: _ADDRESSES as sorted bases and their references, rebuilt on demand
+_ADDRESS_INDEX: list = [None, [], []]
+
+
+def storages_holding(words) -> list:
+    """The live storages whose handed-out buffers hold any of ``words``
+    (64-bit values, most of them not addresses), each once.  A word that is
+    no storage's address names none.  For kernels handed a by-value table of
+    addresses (rk_copy_words): their targets, for MLX to track."""
+    import bisect
+    found = {}
+    for attempt in (0, 1):
+        if attempt or _ADDRESS_INDEX[0] != len(_ADDRESSES):
+            live = sorted((base, ref) for base, ref in _ADDRESSES.items() if ref() is not None)
+            _ADDRESS_INDEX[:] = [len(_ADDRESSES), [b for b, _ in live], [r for _, r in live]]
+        bases, refs = _ADDRESS_INDEX[1], _ADDRESS_INDEX[2]
+        found.clear()
+        stale = False
+        for word in words:
+            at = bisect.bisect_right(bases, word) - 1
+            if at < 0:
+                continue
+            st = refs[at]()
+            if st is None or st._address != bases[at]:
+                stale = True                  # freed or rebound since the index
+                continue
+            if word < bases[at] + max(st.nbytes, 1):
+                found[id(st)] = st
+        if not stale:
+            break
+    return list(found.values())
+
 
 def storage_at(address: int):
     """(storage, byte offset) of a GPU address a storage handed out, or None."""
