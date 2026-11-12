@@ -1691,11 +1691,18 @@ def _run_native_dynamics(arguments, config, layout, payload, streams, library,
             # scalars but not the appended species rows, so the plume would be cut at the first move or halo.
             raise ValueError('chemistry on the MPAS suite route runs on one card without a moving region: the '
                              'moving remap and the rank partition carry the Registry scalars only')
+        if layout.configs.get('config_do_restart') and not resumed:
+            # THE BREAKAGE THIS PREVENTS: the pristine Registry restart stream holds no chemistry, so a native-file
+            # restart would append zero rows and restart the chemistry from its initial composition mid-run.
+            raise ValueError('chemistry on the MPAS suite route cannot restart from a native restart file: the '
+                             'Registry restart stream holds no chemistry state; restart from this route\'s own '
+                             'checkpoint, which carries it')
         from .chemistry_v842 import SuiteChemistry
         chemistry=SuiteChemistry(arguments.chemistry_config,registry_names=names,mesh=mesh,
                                  nlev=grid.vertical_grid.n_vert_levels,
                                  grid_path=getattr(arguments,'grid',None) or arguments.init,
-                                 start_text=layout.configs['config_start_time'])
+                                 start_text=layout.configs['config_start_time'],
+                                 vertical=grid.vertical_grid,configs=layout.configs,dt=dt)
         if resumed:
             chemistry.restart=moving.carrier.get('chemistry')
             if chemistry.restart is None:
@@ -2381,8 +2388,9 @@ def _run_native_dynamics(arguments, config, layout, payload, streams, library,
                 receipt['tc_flux'] = tc_receipt(tc, steps=step)
             if chemistry is not None:
                 ledger=chemistry.write_ledger(out)
+                # A micm run's receipt carries no mass ledger (its reactions move mass between species).
                 receipt['chemistry']={k:ledger[k] for k in ('schema','config_sha256','committed_steps',
-                                      'mass_closure_kg','final_mass_kg','emitted_kg','route')}
+                                      'mass_closure_kg','final_mass_kg','emitted_kg','route') if k in ledger}
             session.driver.finalize(session)
     if coupling.iau is not None:
         receipt['iau']=coupling.iau.receipt()
