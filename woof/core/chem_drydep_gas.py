@@ -11,10 +11,20 @@ its lower boundary; this process moves no mass itself.
 ROW DATA, NOT NAMES.  The row's ``drydep.wesely`` block carries WRF's four
 numbers and the two dep_init derives (``hstar``, ``dhr``, ``f0``, ``dratio``,
 ``scpr23``, the float32 values the Fortran computed, pinned by the column
-oracle) and the resistance ``arm`` of ``rc`` it takes (general, ozone,
-sulfur_dioxide, ammonia).  ``rc``'s NH3-over-SO2 test (``highnh3``) reads the
-rows whose arms are ammonia and sulfur_dioxide.  No code here tests a
-species name or index.  The land-use tables (``wesely_tables.v1.json``) are
+oracle) and the resistance ``arm`` it takes: ``rc``'s general, ozone,
+sulfur_dioxide or ammonia arm, ``zero_surface`` (the last two gases of a
+non-MOZART package, whose srfres wesely_driver zeroes, :244) or
+``particle`` (landusevg's ``vgs(p_sulf) = vgp``, :1437-1447).  WRF's
+RADM2 copy ``ddvel(p_hcl) = ddvel(p_hno3)`` (:259-264) is row data too:
+the hcl row carries hno3's numbers on the general arm.  ``rc``'s
+NH3-over-SO2 test (``highnh3``) reads the rows whose arms are ammonia and
+sulfur_dioxide.  No code here tests a species name or index.
+
+A row acts when it names ``drydep.wesely`` and carries a
+``drydep.wesely`` block, whatever its drydep ``scheme`` (one row per
+species: RADM2's ``sulf`` is GOCART's ``sulf`` row, and the set gates which
+processes act on it).  A row naming the process without the block is
+refused.  The land-use tables (``wesely_tables.v1.json``) are
 dep_init's DATA statements; the land-use dataset is the run's own.
 
 Cadence: WRF-Chem runs dry deposition and vertical mixing only after the
@@ -43,7 +53,8 @@ from woof.core.chem_context import ChemAllocation
 
 _DATA = Path(__file__).resolve().parents[1] / 'data' / 'chem' / 'wesely'
 _TABLE_NAMES = ('ri', 'rlu', 'rac', 'rgss', 'rgso', 'rcls', 'rclo')
-_ARMS = {'general': 0, 'ozone': 1, 'sulfur_dioxide': 2, 'ammonia': 3}
+_ARMS = {'general': 0, 'ozone': 1, 'sulfur_dioxide': 2, 'ammonia': 3,
+         'zero_surface': 4, 'particle': 5}
 
 #: The process key (woof.chem_table.CHEM_PROCESS_MODULES).
 KEY = 'drydep.wesely'
@@ -133,13 +144,13 @@ def _get(obj, key, default=None):
 
 
 def _wesely_block(row):
-    drydep = _get(row, 'drydep') or {}
-    if _get(drydep, 'scheme') != 'wesely':
+    block = _get(_get(row, 'drydep') or {}, 'wesely')
+    if block is None:
         raise ValueError(
             f"{_get(row, 'name', '<unnamed>')}: names drydep.wesely but its "
-            "drydep block is not the wesely scheme, so the process has no "
+            "drydep block carries no wesely numbers, so the process has no "
             "numbers to act with")
-    return _get(drydep, 'wesely')
+    return block
 
 
 def rows(table):
@@ -148,7 +159,7 @@ def rows(table):
     if callable(rows_for):
         return rows_for(KEY)
     return tuple(row for row in _get(table, 'rows', table)
-                 if _get(_get(row, 'drydep') or {}, 'scheme') == 'wesely')
+                 if _get(_get(row, 'drydep') or {}, 'wesely') is not None)
 
 
 ROWS = rows

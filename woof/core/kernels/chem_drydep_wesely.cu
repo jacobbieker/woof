@@ -103,8 +103,8 @@ __device__ WFloat wesely_polint(WFloat mol, WFloat zr, WFloat z0) {
     if (mol > 0.f) value = value+4.7f*mol*(zr-z0);
     return value;
 }
-// chem/module_dep_simple.F:1314-1341. Particle/fog outputs are unused
-// by gas rows; retained here for the source subtree and later aerosol use.
+// chem/module_dep_simple.F:1314-1341. dvpart feeds the particle arm's vgp;
+// dvfog is unused, retained for the source subtree.
 __device__ void wesely_deppart(WFloat mol,WFloat ustar,WFloat rh,WFloat clw,
                               WFloat kpart,int lu,WFloat& dvpart,WFloat& dvfog) {
     dvpart=ustar/kpart;
@@ -170,6 +170,9 @@ extern "C" __global__ void chem_wesely_ddvel(
    a=0.74f*(dz*wd_log(dz/2.f)-dz+2.f);
    if(mol>0.f){WFloat d=dz-2.f;a=a+(2.35f*mol)*(d*d);}
  }
+ // chem/module_dep_simple.F:1437,1613, the particle velocity at zr = 2 m.
+ WFloat vgpart=ust[col]*0.4f/pol;
+ WFloat vgp=1.f/((1.f/vgpart)+(1.f/dvpart));
  for(int row=0;row<nrow;++row){
    WFloat hs=params[4*row],dhr=params[4*row+1];
    WFloat f0=params[4*row+2],ratio=params[4*row+3];
@@ -256,11 +259,15 @@ extern "C" __global__ void chem_wesely_ddvel(
      }
      rc=wd_max(1.f,rc);
    }
+   // chem/module_dep_simple.F:244: non-MOZART srfres(numgas-1:numgas) = 0.
+   if(arm==4)rc=0.f;
    // depvel, chem/module_dep_simple.F:1611, with scpr23 as dep_init derived
    // it (:3478-3489); the row carries the Fortran's float32 value.
    WFloat scpr=diffusion[row];
    WFloat v=ust[col]*0.4f/(2.f*scpr+pol);
    v=1.f/(1.f/v+rc);
+   // chem/module_dep_simple.F:1447: the particle row takes vgp instead.
+   if(arm==5)v=vgp;
    ddvel[row*ncol+col]=v/(1.f+v*a/(0.4f*ust[col]*(dz-2.f)));
  }
 }
