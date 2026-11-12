@@ -176,7 +176,6 @@ def test_what_is_still_refused_is_something_woof_cannot_run():
         ("config_convection_scheme", "cu_gf_monan"),
         ("config_radt_lw_scheme", "cam_lw"),
         ("config_radt_sw_scheme", "cam_sw"),
-        ("config_radt_cld_scheme", "cld_fraction_thompson"),
     }
 
 

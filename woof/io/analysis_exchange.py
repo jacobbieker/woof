@@ -285,6 +285,10 @@ def _file_physics(metadata, *, bl_mynn_tkeadvect: bool, wif_input_opt: int):
         mp_physics=int(metadata.mp_physics),
         sf_surface_physics=int(metadata.sf_surface_physics),
         bl_pbl_physics=boundary_layer,
+        # read_wrfinput pins the trajectory axis to cfg.num_traj; the file's
+        # own extent is the one it can agree with (RunConfig's default when
+        # the file carries no trajectory axis).
+        num_traj=int(metadata.dimensions.get("num_traj_stag", 1000)),
         bl_mynn_tkeadvect=bool(bl_mynn_tkeadvect),
         wif_input_opt=int(wif_input_opt))
 

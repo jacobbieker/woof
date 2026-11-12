@@ -22,6 +22,8 @@ from .driver_v842 import DriverConfig
 from . import radiation_spectral_v842 as _spectral
 from . import radtran_v842 as _radtran
 from . import solar_diagnostics_v842 as _solar
+from ..mpasdiag import nwp_diag_v842 as _nwp
+from ..mpasdiag import plevel_diag_v842 as _plevel
 
 _ENTITY = {"nCells", "nEdges", "nVertices"}
 
@@ -133,6 +135,10 @@ def active_packages(config: DriverConfig, configs: Mapping[str, Any]) -> set[str
     packages.update(_radtran.packages(config))
     # WOOF's &diagnostics config_solar_diagnostics (solar_diagnostics_v842).
     packages.update(_solar.packages(config))
+    # WOOF's &diagnostics config_nwp_diagnostics (mpasdiag.nwp_diag_v842).
+    packages.update(_nwp.packages(config))
+    # WOOF's &diagnostics config_p_lev_diags / config_z_lev_diags (mpasdiag.plevel_diag_v842).
+    packages.update(_plevel.packages(config))
     return packages
 
 
@@ -154,6 +160,8 @@ class RegistryLayout:
         # &radtran's package-gated fields likewise, only when the group is set.
         _radtran.extend_registry(self.root, config)
         _solar.extend_registry(self.root, _solar.packages(config))
+        _nwp.extend_registry(self.root, _nwp.packages(config))
+        _plevel.extend_registry(self.root, config)
         self.configs = {}
         self.config_kinds = {}
         for option in self.root.findall(".//nml_option"):

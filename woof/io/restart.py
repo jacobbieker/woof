@@ -6949,6 +6949,12 @@ def _terrain_clock_default_flip(stored, live, *, to="local_face") -> bool:
     return False
 
 
+#: RunConfig fields added after checkpoints existed, with the default that
+#: reproduces those checkpoints' runs (photdt: Fast-TUV every step, the only
+#: cadence before the field).
+LATE_DEFAULT_RUN_FIELDS = {"photdt": 0.0}
+
+
 def _identity_matches_under_current_rules(header, model) -> bool:
     """Do stored and live identity agree once BOTH are normalised?
 
@@ -6991,6 +6997,12 @@ def _identity_matches_under_current_rules(header, model) -> bool:
                 # refuses the change each member accepts.
                 for name in CONFIG_DIAGNOSTIC_FIELDS:
                     run.pop(name, None)
+                # Fields added after checkpoints were written, at the default
+                # that is the run those checkpoints already made: absent and
+                # default are one run.
+                for name, default in LATE_DEFAULT_RUN_FIELDS.items():
+                    if name in run and run[name] == default:
+                        run.pop(name)
                 if run.get("use_adaptive_time_step") in (True, "True"):
                     for name in ADAPTIVE_POLICY_RUN_FIELDS:
                         run.pop(name, None)

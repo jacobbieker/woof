@@ -134,6 +134,8 @@ def _loader_tables():
         # [radar_heating]: rows declared beside the typed table it builds.
         "radar_heating": (config_module.RADAR_HEATING_KEYS,
                           (config_module.RadarHeatingConfig,), {}),
+        # [model]: the engine woof go runs (woof.config.model_engine).
+        "model": (config_module.MODEL_KEYS, (), {}),
     }
 
 

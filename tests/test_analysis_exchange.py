@@ -419,6 +419,9 @@ def test_a_file_a_forecast_cannot_start_from_still_round_trips(tmp_path):
             netCDF4.Dataset(path, "w", format="NETCDF3_64BIT_OFFSET") as dataset:
         dataset.setncatts({name: source.getncattr(name)
                            for name in source.ncattrs()})
+        # 1.1.6 lets a cold WRF V3.9 file omit AL/ALB (restart-only there);
+        # this file is a current-version one, which must carry them.
+        dataset.setncattr("TITLE", " OUTPUT FROM REAL_EM V4.6 PREPROCESSOR")
         for name, dim in source.dimensions.items():
             dataset.createDimension(
                 name, None if dim.isunlimited() else len(dim))

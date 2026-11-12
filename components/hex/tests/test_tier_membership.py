@@ -216,6 +216,12 @@ DUAL_TIER_ALLOWED: dict[str, str] = {
     "tests/test_mpas_shcu_deng_v842.py":
         "tier 1 takes the driver order and service refusals; tier 3 takes "
         "the WRF v4.7.1 entry point, glue, coupling and restart words",
+    "tests/test_mpas_nwp_diagnostics.py":
+        "tier 1 takes the option, refusal, pools and streams; tier 3 holds the "
+        "module's words to the WRF kernels on identical columns on the device",
+    "tests/test_mpas_tslist.py":
+        "tier 1 takes the option, refusals, placement and the plan; tier 3 holds the "
+        "WRF route's own sampler kernel and Rust writer to the pools' columns on the device",
     "tests/test_mpas_solar_diagnostics.py":
         "tier 1 takes the option, door, pools, streams and checkpoints; "
         "tier 3 writes WRF's words on MPAS fields on the device",

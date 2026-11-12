@@ -49,7 +49,8 @@ def frame(path, *, note, volume):
         if note:
             d.setncattr("GPUWM_REFC_NOTE", NOTE)
         times = d.createVariable("Times", "S1", ("Time", "DateStrLen"))
-        times[0, :] = netCDF4.stringtochar(np.array(["2026-10-31_12_00_00"], dtype="S19"))[0]
+        # Built by hand: netCDF4 1.7.x stringtochar cannot take an S-dtype under numpy 2.
+        times[0, :] = np.frombuffer(b"2026-10-31_12_00_00", dtype="S1")
         surface, mass, stag = (("Time", "south_north", "west_east"), ("Time", "bottom_top", "south_north", "west_east"),
                                ("Time", "bottom_top_stag", "south_north", "west_east"))
         lat, lon = np.meshgrid(np.linspace(0.2, 0.8, NY), np.linspace(22.5, 23.5, NX), indexing="ij")

@@ -167,6 +167,13 @@ def validate_table(table: Mapping[str, Any]) -> Mapping[str, Any]:
                     f"options.{key}.{value} is refused and names no follow-up; a "
                     "refusal that does not say what would lift it is a dead end"
                 )
+    for setting, row in table["refused_settings"]["settings"].items():
+        if ("refused_values" in row) == ("inactive_values" in row):
+            raise PhysicsTableError(
+                f"refused_settings.{setting} must name refused_values or inactive_values, one")
+        if not str(row.get("reason", "")).strip() or not str(row.get("follow_up", "")).strip():
+            raise PhysicsTableError(
+                f"refused_settings.{setting} must say why it is refused and what would run instead")
     for pairing in table["pairings"]:
         for side in ("if", "then"):
             for key, values in pairing[side].items():
@@ -377,6 +384,24 @@ def parse_override(text: str) -> tuple[str, Any]:
     return key, raw
 
 
+def _setting_is_refused(row: Mapping[str, Any], value: Any) -> bool:
+    """Whether ``value`` of a ``refused_settings`` row asks for the unsupported thing."""
+
+    text = ("1" if value else "0") if isinstance(value, bool) else str(value).strip().casefold()
+    if "refused_values" in row:
+        return text in {str(item).casefold() for item in row["refused_values"]}
+
+    def number(item: str) -> float | None:
+        try:
+            return float(item)
+        except ValueError:
+            return None
+
+    off = [str(item).casefold() for item in row["inactive_values"]]
+    return not any(text == item or (number(text) is not None and number(text) == number(item))
+                   for item in off)
+
+
 def engine_selector_aliases() -> Mapping[str, str]:
     """WOOF's own selector names -> the MPAS key each one selects.
 
@@ -555,6 +580,17 @@ def resolve_physics(
             refusals.append(OptionRefusal(
                 key, value, str(table["engine_selectors"]["seam_owned_reason"]),
                 "the run's own mesh, timestep and cadence flags"))
+        elif key in table["refused_settings"]["settings"] and _setting_is_refused(
+                table["refused_settings"]["settings"][key], value):
+            row_ = table["refused_settings"]["settings"][key]
+            refusals.append(OptionRefusal(key, value, str(row_["reason"]), str(row_["follow_up"])))
+        elif key in table["refused_settings"]["settings"] and not table[
+                "refused_settings"]["settings"][key].get("engine_field", True):
+            # An explicit off value of a key WOOF's config has no field for
+            # (windfarm_opt=0) asks for nothing; the engine path would reject
+            # the unknown name, so it is recorded and not handed on.  Off
+            # values of real RunConfig fields go on to the engine as before.
+            recorded[key] = value
         else:
             # An engine setting: typed and bounded by the registry's own
             # parameter row when it has one; otherwise handed to the engine,
@@ -1038,9 +1074,12 @@ def _engine_profile(*, table, selectors, rows, settings, generation, frac_seaice
 
 
 def _statics_spec(fields: tuple[str, ...], table: Mapping[str, Any]) -> Mapping[str, Any] | None:
-    """The mesh file layout that carries exactly these engine statics."""
+    """The mesh file layout that carries these engine statics: an exact
+    source, else one carrying a superset, read for exactly these fields
+    (woof.hex.surface_inputs.match_statics_source)."""
 
-    wanted = set(fields)
+    from .surface_inputs import match_statics_source
+
     sources = [_thaw(item) for item in table["engine_selectors"]["statics"]]
     try:
         gsl = dict(_gsl_statistics_spec())
@@ -1048,10 +1087,7 @@ def _statics_spec(fields: tuple[str, ...], table: Mapping[str, Any]) -> Mapping[
         sources.append(gsl)
     except PhysicsTableError:
         pass
-    for source in sources:
-        if wanted == set(source["variables"]):
-            return source
-    return None
+    return match_statics_source(fields, sources)
 
 
 def _auto_convection(nominal_dx_m: float, options: Mapping[str, Any]) -> str:

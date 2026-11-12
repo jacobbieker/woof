@@ -254,7 +254,7 @@ def test_generation_selectors_ride_the_column_suite_and_are_refused_on_the_froze
     ({"config_pbl_scheme": "bl_mynn"}, "config_radt_cld_scheme"),
     ({"config_radt_lw_scheme": "rrtmgp_lw"}, "config_radt_sw_scheme"),
     ({"config_radt_lw_scheme": "cam_lw"}, "config_radt_lw_scheme"),
-    ({"config_radt_cld_scheme": "cld_fraction_thompson"}, "config_radt_cld_scheme"),
+    ({"slope_rad": 1}, "slope_rad"),
     ({"config_convection_scheme": "cu_gf_monan"}, "config_convection_scheme"),
     ({"config_frac_seaice": True}, "config_frac_seaice"),
     ({"config_pbl_scheme": "bl_not_a_scheme"}, "config_pbl_scheme"),
@@ -288,9 +288,9 @@ def test_every_refusal_of_one_request_is_named_together():
     with pytest.raises(ps.PhysicsSelectionRefusal) as caught:
         ps.resolve_physics("arwen_mpas_column", {
             "config_radt_lw_scheme": "cam_lw",
-            "config_radt_cld_scheme": "cld_fraction_thompson"})
+            "slope_rad": 1})
     knobs = {item.knob for item in caught.value.refusals}
-    assert {"config_radt_lw_scheme", "config_radt_cld_scheme"} <= knobs
+    assert {"config_radt_lw_scheme", "slope_rad"} <= knobs
     assert "2 physics option(s) refused" in str(caught.value)
 
 

@@ -107,6 +107,12 @@ class _AirSeries(tuple):
         self.read = []
         return self
 
+    def snapshot_metadata(self, index):
+        # Every lead is on the one grid the test's snapshot is on.
+        from woof.ingest.source_metadata import SourceSnapshotMetadata
+        return SourceSnapshotMetadata(
+            SimpleNamespace, np.zeros((2, 2)), np.zeros((2, 2)), {})
+
     def posted_positions(self):
         return self.ready
 
@@ -120,7 +126,9 @@ class _AirSeries(tuple):
 
 
 def test_the_inland_daily_mean_averages_the_leads_posted_at_the_start():
-    snapshot = SimpleNamespace(fields={"SKINTEMP": np.zeros((2, 2))})
+    snapshot = SimpleNamespace(fields={"SKINTEMP": np.zeros((2, 2))},
+                               latitude=np.zeros((2, 2)),
+                               longitude=np.zeros((2, 2)), projection={})
     series = _AirSeries(49, ready=3)
     field, receipt = horiz.DailyMeanAirTemperature(series)(snapshot)
     assert sorted(series.read) == [0, 1, 2]
