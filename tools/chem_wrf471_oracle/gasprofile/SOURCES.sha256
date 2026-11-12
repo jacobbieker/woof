@@ -1,0 +1,11 @@
+# sha256  path  (WRF v4.7.1, commit f52c197ed39d12e087d02c50f412d90d418f6186).
+# module_model_constants.F, module_data_radm2.F, module_data_sorgam.F and
+# module_chem_share.F are byte-identical in v4.6.1 d66e442f;
+# module_input_chem_data.F differs from v4.6.1 only in the comment on
+# bdy_chem_value_top_pv's xlat declaration (:3846-3847), outside every line
+# this lane compiles.
+5b80377fecdc18a5f0ad38d3b6c15cfc86ad5d76701adbbbb08a08698d0f7062  share/module_model_constants.F
+101beef4c417aa35e4526081aa016be60f2ef777cf5b0d574006ce2d041c723f  chem/module_data_radm2.F
+51ab49d24e570f5565fbc0cb137df566e6403205d885fc7c1fae8999ca010b9b  chem/module_data_sorgam.F
+652bd9445691456ccb21e5dbe9a03997b6031ba74a4badc123e0427272bc4eef  share/module_chem_share.F
+4b65cc83a531df5085668ec0c3bcd5b2af9fed3f6d802b18276dcbb233f00ed0  chem/module_input_chem_data.F
