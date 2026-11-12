@@ -260,11 +260,17 @@ class HexMicmChemistry:
 
     def restart_payload(self):
         return {"mode": MODE, "config_sha256": self.digest, "steps": self.steps,
-                "accumulated": self.accumulated}
+                "accumulated": self.accumulated, "mechanism_sha256": self.settings["mechanism_sha256"]}
 
     def restore_payload(self, payload):
         if payload is None or payload.get("mode") != MODE or payload.get("config_sha256") != self.digest:
             raise ValueError("chemistry restart config identity differs")
+        # The config names its mechanism by path: an edited mechanism file under an unchanged config would
+        # resume checkpointed species under other reactions.  (A payload written before the digest was
+        # recorded carries none.)
+        recorded = payload.get("mechanism_sha256")
+        if recorded is not None and recorded != self.settings["mechanism_sha256"]:
+            raise ValueError("chemistry restart mechanism identity differs: the MICM mechanism file changed")
         self.steps = int(payload["steps"])
         self.accumulated = float(payload["accumulated"])
 
