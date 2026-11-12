@@ -373,8 +373,9 @@ d. CORE-MATH (MIT) -- binary64 tanh (src/binary64/tanh/tanh.c, revision
    glibc 2.44's binary64 tanh is this same CORE-MATH function; no glibc or
    FDLIBM tanh or expm1 is transcribed for it.
 
-The upstream files are kept verbatim, sha256-pinned, at
-tools/uwpbl_wrf471_oracle/libm64/upstream/.  These two grants cover the
+The upstream files of a to c are kept verbatim, sha256-pinned, at
+tools/uwpbl_wrf471_oracle/libm64/upstream/; d's tanh.c is kept verbatim at
+tools/oracle_libm/upstream/tanh.c.  These two grants cover the
 routines named here and nothing else, on the terms section 6 states for the
 others.  CORE-MATH's copyright lines and permission notice, reproduced as
 MIT requires (also at licenses/LICENSE-CORE-MATH-binary64-MIT.txt):
