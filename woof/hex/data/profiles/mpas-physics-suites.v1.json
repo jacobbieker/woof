@@ -487,8 +487,10 @@
         }
       },
       "cld_fraction_thompson": {
-        "refused": "WOOF's radiation admits icloud 0 or 1 (gpuwm/config.py validate_run_config); Thompson's cloud-fraction scheme (WRF icloud=3) is not in the engine, so the run would use another cloud fraction under this name",
-        "follow_up": "icloud=3 in the engine"
+        "engine": {
+          "icloud": 3
+        },
+        "note": "WOOF icloud=3 (cldfra3, WRF v4.7.1 module_radiation_driver.F:4003-4473; the engine's registry row is wrf-matched-run). On the column seam it runs finite and moves the radiation heating against icloud=1 (tests/test_mpas_column_physics_gpu.py selection menu). It needs QC and QI from the microphysics, and is paired off MYNN by the cld_fraction_mynn pairing. The R2 GPU route is a different seam and still refuses it by name until its glue is bound"
       },
       "cld_incidence": {
         "engine": {
@@ -501,6 +503,56 @@
           "icloud": 0
         },
         "note": "WOOF icloud=0: radiation sees no cloud"
+      }
+    }
+  },
+  "refused_settings": {
+    "about": "Engine settings the column route ACCEPTS at resolve time (the registry types them and the engine's own validator passes them once their companions are given) and then never honours: hex integrates with the MPAS-A dycore on an unstructured mesh and hands the engine one column-physics call, so the code that reads each setting never runs, or runs on inputs hex does not stage. A request for one of them is refused by name, before the engine's own validator, so the refusal does not depend on which companion settings happen to be missing. A value in inactive_values is the setting's off state and passes. refused_values, when given, names the only values refused.",
+    "settings": {
+      "ifire": {
+        "inactive_values": ["0"],
+        "reason": "SFIRE needs a fire grid refined by sr_x/sr_y inside each atmospheric cell and WRF's fire-spread and fuel-moisture integration on it; hex has a Voronoi cell column and no fire grid, so ifire=2 would validate and never ignite or spread anything",
+        "follow_up": "the fire-smoke path (biomass_burn_opt, emission frames on cell centres) for a smoke source, or a WRF domain for SFIRE"
+      },
+      "slope_rad": {
+        "inactive_values": ["0"],
+        "reason": "WRF's slope correction of the shortwave reads each point's slope and aspect from the terrain stencil of its neighbours; a hex column has no neighbour terrain, and no per-cell slope or aspect statics are staged, so the radiation would run flat under this name",
+        "follow_up": "slope_rad=0"
+      },
+      "topo_shading": {
+        "inactive_values": ["0"],
+        "reason": "WRF's terrain shadow mask (shadlen) marches the sun direction over the neighbouring terrain; a hex column has no neighbour terrain and no shadow statics are staged, so no cell would ever be shaded",
+        "follow_up": "topo_shading=0"
+      },
+      "shadlen": {
+        "inactive_values": [],
+        "reason": "shadlen is the search length of topo_shading's terrain shadow mask, which hex cannot run (see topo_shading)",
+        "follow_up": "drop shadlen with topo_shading=0"
+      },
+      "wind_farm_scheme": {
+        "refused_values": ["mav", "fitch_legacy"],
+        "reason": "the MAV scheme and WRF's legacy Fitch turbine list (WRF V3.5, windturbines_spec) place turbines by their i/j or lat/lon on a structured grid; only fitch_wrf builds a per-cell placement (CellPlacement) on the mesh, so the turbines would be recorded and exert no drag",
+        "follow_up": "wind_farm_scheme=fitch_wrf with wind_farms=FILE, or --wind-farms on the MPAS suite route"
+      },
+      "windturbines_spec": {
+        "inactive_values": ["none", ""],
+        "reason": "windturbines_spec is WRF's V3.5 legacy turbine list (windturbines.txt, i/j or lat/lon on a structured grid); hex has no cell placement for it, so the turbines would be recorded and exert no drag",
+        "follow_up": "wind_farm_scheme=fitch_wrf with wind_farms=FILE"
+      },
+      "windfarm_opt": {
+        "inactive_values": ["0"],
+        "reason": "windfarm_opt is WRF's &physics switch for the legacy turbine list; WOOF's config has no such field and hex places turbines through wind_farm_scheme",
+        "follow_up": "wind_farm_scheme=fitch_wrf with wind_farms=FILE"
+      },
+      "sf_surf_irr_scheme": {
+        "inactive_values": ["0"],
+        "reason": "irrigation reads the IRRIGATION percentage and IRR_PH_FIELD phase statics of every cell; hex stages neither, and the engine will not invent the water amount or phase, so the run could only stop at construction",
+        "follow_up": "sf_surf_irr_scheme=0"
+      },
+      "lightning_option": {
+        "inactive_values": ["0"],
+        "reason": "the lightning flash-rate fields are computed on the column state but no hex history stream writes them and no lightning_inputs are staged, so the flash rates would be computed and discarded",
+        "follow_up": "lightning_option=0 until the hex lightning history output lands"
       }
     }
   },
