@@ -3114,7 +3114,7 @@ def resolve_surface_statics(arguments, physics, mesh, grid, collected):
         "This selection's schemes read per-cell inputs beyond the init's own "
         "fields (woof.hex.surface_inputs.CONTRACT); build them on the mesh with "
         "`woof hex surface-statics --static <static> --geog-root <WPS_GEOG> "
-        f"--out <mesh>{surface_inputs.FILE_SUFFIX}`.", collected)
+        f"-o <mesh>{surface_inputs.FILE_SUFFIX}`.", collected)
 
 
 def mpas_route_orographic_statistics(arguments, native_config) -> Path | None:

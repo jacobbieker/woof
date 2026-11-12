@@ -261,13 +261,22 @@ def default_path(grid: str | Path, mesh: str) -> Path:
     return Path(grid).expanduser().absolute().parent / f"{mesh}{FILE_SUFFIX}"
 
 
-def cell_geometry_sha256(lat_rad, lon_rad) -> str:
-    """The identity a sidecar is held to: the cells' centres, in mesh order."""
+#: Largest centre difference (radians, about 6 mm on the Earth) at which a
+#: sidecar's cells are this run's cells.  Longitudes are compared modulo 2 pi:
+#: a static stores them in [0, 2 pi) and the loaded mesh in (-pi, pi].
+CELL_CENTRE_TOLERANCE_RAD = 1.0e-9
 
-    digest = sha256()
-    digest.update(np.ascontiguousarray(lat_rad, dtype="<f8").tobytes())
-    digest.update(np.ascontiguousarray(lon_rad, dtype="<f8").tobytes())
-    return digest.hexdigest()
+
+def same_cells(lat_a, lon_a, lat_b, lon_b) -> bool:
+    """Whether two centre lists name the same cells in the same order."""
+
+    lat_a, lat_b = (np.asarray(v, dtype=np.float64).reshape(-1) for v in (lat_a, lat_b))
+    lon_a, lon_b = (np.asarray(v, dtype=np.float64).reshape(-1) for v in (lon_a, lon_b))
+    if lat_a.shape != lat_b.shape or lon_a.shape != lon_b.shape:
+        return False
+    dlon = np.abs(np.mod(lon_a - lon_b + np.pi, 2.0 * np.pi) - np.pi)
+    return bool(np.all(np.abs(lat_a - lat_b) <= CELL_CENTRE_TOLERANCE_RAD)
+                and np.all(dlon <= CELL_CENTRE_TOLERANCE_RAD))
 
 
 def _array_identity(values: np.ndarray) -> dict[str, Any]:
@@ -335,13 +344,15 @@ def bind(physics: Mapping[str, Any] | None, path: str | Path | None, *,
                 "surface_statics", str(source),
                 f"the file's schema is {schema!r}, not {SCHEMA!r}",
                 "a file written by `woof hex surface-statics`")
-        geometry = getattr(dataset, "cell_geometry_sha256", None)
-        if geometry != cell_geometry_sha256(lat, lon):
+        if not ("latCell" in dataset.variables and "lonCell" in dataset.variables
+                and same_cells(dataset.variables["latCell"][:],
+                               dataset.variables["lonCell"][:], lat, lon)):
             raise ConfigurationRefusal(
                 "surface_statics", str(source),
-                "the file was built on other cells than this run's mesh "
-                "(cell_geometry_sha256 differs), so each value would land on "
-                "another cell", "the surface statics file of this run's mesh")
+                "the file was built on other cells than this run's mesh (its "
+                "latCell/lonCell are not the mesh's, in the mesh's order), so "
+                "each value would land on another cell",
+                "the surface statics file of this run's mesh")
         provenance = json.loads(getattr(dataset, "provenance_json", "{}"))
         for need in required:
             item = need.input

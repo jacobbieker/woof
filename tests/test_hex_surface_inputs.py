@@ -16,9 +16,6 @@ import pytest
 from woof.hex import surface_inputs as si
 from woof.hex.errors import ConfigurationRefusal
 
-pytest.importorskip("netCDF4")
-
-
 def _lake_physics(**extra):
     from woof.core.mpas_column_suite import MPAS_DEFAULT_PHYSICS
 
@@ -95,7 +92,9 @@ def _sidecar(path, lat, lon, *, depth=True, flag=1):
             dataset.setncattr("LAKE_DEPTH_FLAG", np.int32(1))
         dataset.setncattr("LAKEFLAG", np.int32(flag))
         dataset.setncattr("schema", si.SCHEMA)
-        dataset.setncattr("cell_geometry_sha256", si.cell_geometry_sha256(lat, lon))
+        dataset.createVariable("latCell", "f8", ("nCells",))[:] = lat
+        # Stored in [0, 2 pi) as a static stores it; the mesh's are (-pi, pi].
+        dataset.createVariable("lonCell", "f8", ("nCells",))[:] = np.mod(lon, 2 * np.pi)
         dataset.setncattr("provenance_json", "{}")
     return path
 

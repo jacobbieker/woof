@@ -52,7 +52,7 @@ from typing import Any, Callable
 import numpy as np
 
 from .errors import MpasPortError
-from .surface_inputs import FILE_SUFFIX, SCHEMA, cell_geometry_sha256
+from .surface_inputs import FILE_SUFFIX, SCHEMA
 
 #: WPS GEOGRID.TBL LAKE_DEPTH row (woof.static.lake.LAKE_DEPTH_ROW).
 LAKE_DEPTH_FILL_M = 10.0
@@ -330,11 +330,14 @@ def build(static: Path, out: Path, *, geog_root: Path | None,
     try:
         with netCDF4.Dataset(partial, "w", format="NETCDF4") as target:
             target.createDimension("nCells", n)
+            # The cells' own centres, as the static stores them: the forecast
+            # holds the file to its mesh's cells and their order.
+            for name, values in (("latCell", lat), ("lonCell", lon)):
+                target.createVariable(name, "f8", ("nCells",))[:] = values
             for name, values in fields.items():
                 variable = target.createVariable(name, values.dtype, ("nCells",))
                 variable[:] = values
             target.setncattr("schema", SCHEMA)
-            target.setncattr("cell_geometry_sha256", cell_geometry_sha256(lat, lon))
             for name, value in attrs.items():
                 target.setncattr(name, value)
             target.setncattr("provenance_json", json.dumps(provenance, sort_keys=True))
