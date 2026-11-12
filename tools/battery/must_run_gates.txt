@@ -289,3 +289,6 @@ tests/test_wrf_hydro_namelist.py  needs the WRF-Hydro opt-in (WOOF_ENABLE_WRF_HY
 tests/test_wrf_hydro_overland_parity.py  needs the WRF-Hydro opt-in (WOOF_ENABLE_WRF_HYDRO=1 and the UCAR-licensed source under optional/wrf_hydro, which no default build or wheel carries); a leg that opts in runs it (a4bef7971).
 tests/test_wrf_hydro_reservoir_da_parity.py  needs the WRF-Hydro opt-in (WOOF_ENABLE_WRF_HYDRO=1 and the UCAR-licensed source under optional/wrf_hydro, which no default build or wheel carries); a leg that opts in runs it (e13e752ac).
 tests/test_wrf_hydro_subsurface_parity.py  needs the WRF-Hydro opt-in (WOOF_ENABLE_WRF_HYDRO=1 and the UCAR-licensed source under optional/wrf_hydro, which no default build or wheel carries); a leg that opts in runs it (edd7ade39).
+
+# woof go on the hex engine (woof.go_hex), end to end.
+tests/test_go_hex_smoke.py  opt-in (WOOF_HEX_GO_SMOKE=1): fetches GFS over the network, builds a mesh and static from WPS_GEOG and runs a 1 h hex regional forecast on a GPU (CUDA or Metal); a GPU leg with network and geography runs it, and tests/test_go_hex.py covers the route host-only.
