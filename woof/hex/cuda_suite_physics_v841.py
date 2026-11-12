@@ -424,6 +424,7 @@ def constructor_values_for(
     orographic_statistics: Mapping[str, np.ndarray] | None,
     cell_area_m2=None,
     interior_column=None,
+    surface_inputs: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The frozen door's mapping, re-shaped to the suite row's seam.
 
@@ -472,7 +473,17 @@ def constructor_values_for(
                     "limited-area mesh's boundary columns would take turbines")
             mapped["interior_column"] = np.asarray(interior_column,
                                                    dtype=np.bool_)
+        if surface_inputs:
+            # The per-cell inputs the selection's schemes read beyond the
+            # init's dozen (woof.hex.surface_inputs).  Only when there are
+            # any, so a selection that reads none seals the mapping it
+            # always sealed.
+            mapped["surface_inputs"] = dict(surface_inputs)
         return mapped
+    if surface_inputs:
+        raise ValueError(
+            "surface_inputs are read only by the generic column seam; this "
+            f"row ({suite['id']}) would accept them and never read them")
     generation = dict(suite.get("generation", {}) or {})
     if generation:
         # Only a profile that selects a generation hands one to the seam, so
@@ -524,6 +535,7 @@ class SealedSuiteConstructorV841:
         if values.get("physics") is not None:
             keys.discard("physics")
             keys.discard("xice_threshold")
+            keys.discard("surface_inputs")
             # The soil column is the engine plan's to require: present
             # exactly when the selection integrates soil (held to that in
             # _from_generic_mapping), absent under sf_surface_physics=0.
@@ -762,6 +774,25 @@ class SealedSuiteConstructorV841:
             physics, n_levels=nlev, dt=dt, radiation_seconds=radiation_seconds,
             surface_pbl_seconds=surface_pbl_seconds, cumulus_seconds=cumulus_seconds)
         n_soil = int(plan.n_soil_levels)
+        # The per-cell inputs the plan's schemes read beyond the init's dozen,
+        # held to exactly the contract's set (woof.hex.surface_inputs): never
+        # defaulted, never carried unread.  Empty for every selection that
+        # reads none, and then absent from the sealed values and the digest.
+        from . import surface_inputs as _surface_inputs
+
+        plan_config = getattr(plan, "config", None)
+        if plan_config is None:
+            # An engine plan that carries no resolved RunConfig (an older
+            # engine tree) cannot say what its schemes read: no scheme
+            # inputs are sealed for it, and any given are refused.
+            if values.get("surface_inputs"):
+                raise ValueError(
+                    "this engine's plan carries no resolved configuration, so "
+                    "the surface inputs given would be sealed unchecked")
+            surface_extra: dict[str, Any] = {}
+        else:
+            surface_extra = _surface_inputs.seal(
+                plan_config, values.get("surface_inputs"), n_columns=ncol)
         # THE BREAKAGE THIS PREVENTS, both ways: a land surface sealed without
         # its soil column, and a soil column sealed for a selection with no
         # land surface (accepted and never read).  Land surface off
@@ -864,6 +895,8 @@ class SealedSuiteConstructorV841:
             **scalars,
             **arrays,
             "orographic_statistics": MappingProxyType(oro) if oro else None,
+            **({"surface_inputs": MappingProxyType(surface_extra)}
+               if surface_extra else {}),
             "plan_species": tuple(str(name) for name in plan.species),
             "plan_identity": json.loads(json.dumps(getattr(plan, "identity", {}), default=str)),
         }
@@ -881,6 +914,8 @@ class SealedSuiteConstructorV841:
         identity = {name: identity_of(value) for name, value in sorted(sealed.items())}
         host_bytes = sum(int(value.nbytes) for value in arrays.values())
         host_bytes += sum(int(value.nbytes) for value in oro.values())
+        host_bytes += sum(int(value.nbytes) for value in surface_extra.values()
+                          if isinstance(value, np.ndarray))
         return cls(
             _values=MappingProxyType(sealed),
             identity_sha256=_json_digest(identity),
@@ -1008,6 +1043,9 @@ class SealedSuiteConstructorV841:
                 surface[name] = values[name]
         if values.get("xice_threshold") is not None:
             surface["xice_threshold"] = float(values["xice_threshold"])
+        # The scheme-declared per-cell inputs (woof.hex.surface_inputs), which
+        # are initialize_physics keywords like the dozen above.
+        surface.update(values.get("surface_inputs", {}))
         oro = values["orographic_statistics"]
         return {
             "physics": dict(values["physics"]),
@@ -1057,6 +1095,12 @@ class SealedSuiteConstructorV841:
                 ),
                 "expected_surface_classification": dict(
                     self.expected_surface_classification()
+                ),
+                # Present only when the selection reads scheme inputs
+                # (woof.hex.surface_inputs), so every other receipt is as it was.
+                **(
+                    {"surface_inputs": sorted(self._values["surface_inputs"])}
+                    if "surface_inputs" in self._values else {}
                 ),
                 # Present only in correct mode (MODE-KEY.md rule 3).
                 **(

@@ -248,6 +248,11 @@ def _off_grid(raw, key, table, *, adaptive):
 
     mutated = _mutated(raw)
     mutated["shared"]["use_adaptive_time_step"] = adaptive
+    # With nwp_diagnostics on, 1.1.6 also demands a whole-minute history
+    # interval (native NWP idump), a different refusal than this file is
+    # about; the step-grid contract is held with that diagnostic off.
+    mutated["shared"]["nwp_diagnostics"] = 0
+    mutated["shared"]["uh_layers"] = 0
     holder = (mutated["experiment"] if table == "experiment"
               else mutated["domain"][0])
     holder[key] = 2.5 * _root_dt(raw)
@@ -497,6 +502,11 @@ def test_the_tree_fingerprint_survives_all_three_permitted_changes(tmp_path):
 
     raw = _raw(_wizard_config(tmp_path, ladder="12-3"))
     assert len(raw["domain"]) == 2
+    # Halving a history interval below a whole minute at least dt is refused
+    # by 1.1.6's native NWP idump rule when nwp_diagnostics is on; this
+    # test is about the fingerprint, not that rule.
+    raw["shared"]["nwp_diagnostics"] = 0
+    raw["shared"]["uh_layers"] = 0
     base = _tree_fingerprint(raw, tmp_path, "base")
 
     extended = _mutated(raw)

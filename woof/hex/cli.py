@@ -486,6 +486,7 @@ _DOORS: tuple[tuple[tuple[str, ...], Callable[[argparse._SubParsersAction], None
     (("mesh-check",), _add_mesh_check_parser),
     (("oracle-gate",), _add_oracle_gate_parser),
     (("static-highres",), _add_static_highres_parser),
+    (("surface-statics",), _door(".surface_statics", "add_surface_statics_parser")),
     (("vertical",), _door(".vertical_door", "add_vertical_parser")),
     (("cull",), _door(".cull_door", "add_cull_parser")),
     (("register",), _door(".register_door", "add_register_parser")),

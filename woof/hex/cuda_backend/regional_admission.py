@@ -835,8 +835,16 @@ class RegionalContract:
 #: DEFECT naming the loaded NVRTC (pack_defect_line); the message text only, no CUDA source string, compile
 #: request or arithmetic changed. The only changed member of this set since (39). Re-derived by
 #: tools/repin_source_tables.py; not a new mint.
+#: (41) 2026-11-12: four merges moved members of this set since (40), none of them arithmetic of a regional
+#: step: cuda_transport_v841.py d33a39ebf (the regional target-density finite/positive test as a broadcast
+#: mask, not boolean indexing: the same OR over the same kept words, without the host wait) and 1e633218a (the
+#: hoist check's ``settle`` hook, run only under WOOF_HEX_EDGE_HOIST_CHECK); cuda_backend/aot.py 8f42ce6b4 (a
+#: Metal-only early return in raw_image); cuda_regional_forecast_v841.py 6527b826e (the boundary scalar kernels
+#: launch once per contiguous run of driven species; with no supplied chemistry rows the one run is
+#: (0, 0, driven), the launches as they were). Equality on the card, not assumed: see the PR for the pb runs.
+#: Re-derived by tools/repin_source_tables.py; not a new mint.
 MINTED_KERNEL_SET_SHA256 = (
-    "f2544037f7c6796cc5eb2f5875861e9251d7704fd320d2e9b5d0e13a684bea61"
+    "25e3cd3b1ab1503681c14a095350feb0274eb2b397efc2c3c968173d689545a8"
 )
 
 _DRY_MINT_CAVEAT = (
