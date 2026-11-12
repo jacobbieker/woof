@@ -222,6 +222,73 @@ def advance_chem_stage(state, cfg, ru, rv, ww, dt_eff: float, final: bool,
         apply_chem_flow_boundaries(state, cfg, ru, rv, dt_eff)
 
 
+#: start_em's and flow_dep_bdy_chem's gas constant for convfac
+#: (module_data_sorgam rgasuniv, J mol-1 K-1).
+RGASUNIV = np.float32(8.314510)
+
+
+def _profile_inflow(state, cfg, rows):
+    """``{row index: (west, east, south, north)}`` device planes of WRF's
+    have_bcs_chem = false inflow for the rows a process defines one for
+    (its ``boundary_inflow(table, z, alt, convfac)`` hook), or None.
+
+    WRF evaluates the profile at each inflow cell's own height
+    (flow_dep_bdy_chem); here it is evaluated once, on the outermost row of
+    each side at the heights of the first call (the spec zone's single row
+    for spec_zone = 1), and kept: the inflow then moves only with the
+    flow's sign, as WRF's does at fixed heights.
+    """
+    chem = state.chem
+    cached = getattr(chem, "profile_inflow", None)
+    if cached is not None:
+        return cached or None
+    if not getattr(cfg, "specified", False):
+        chem.profile_inflow = {}
+        return None
+    from woof.core.chem_context import chem_processes
+
+    hooks = [module for _key, module in chem_processes(chem.table)
+             if getattr(module, "boundary_inflow", None) is not None]
+    prep = getattr(chem, "prep", None)
+    if not hooks or prep is None or prep.get("z") is None:
+        return None
+    import cupy as cp
+
+    host = {name: cp.asnumpy(prep.get(name)) for name in ("z", "alt", "t_phy", "p_phy")}
+    host["convfac"] = (host["p_phy"] / RGASUNIV / host["t_phy"]).astype(np.float32)
+
+    def sides(a):
+        return (a[:, :, 0], a[:, :, -1], a[:, 0, :], a[:, -1, :])
+
+    index = {row.name: i for i, row in enumerate(rows)}
+    out = {}
+    for module in hooks:
+        per_side = [module.boundary_inflow(chem.table, z, alt, conv)
+                    for z, alt, conv in zip(sides(host["z"]), sides(host["alt"]),
+                                            sides(host["convfac"]))]
+        for name in per_side[0]:
+            if name in index:
+                out[index[name]] = tuple(
+                    cp.asarray(np.ascontiguousarray(side[name], np.float32))
+                    for side in per_side)
+    chem.profile_inflow = out
+    return out or None
+
+
+def _profile_tables(chem, rows):
+    """Zero (rows, nz, ny|nx) boundary tables in CHEM_BOUNDARY_SLOTS order,
+    for a domain whose forcing carries no chem row."""
+    tables = getattr(chem, "profile_tables", None)
+    if tables is None:
+        import cupy as cp
+
+        nz, ny, nx = chem.shape
+        tables = chem.profile_tables = tuple(
+            cp.zeros((len(rows), nz, ny if n < 4 else nx), dtype=cp.float32)
+            for n in range(8))
+    return tables
+
+
 def apply_chem_flow_boundaries(state, cfg, ru, rv, dt_rk=0.0) -> None:
     """WRF ``flow_dep_bdy_chem`` on the specified zone of every chem row.
 
@@ -267,12 +334,28 @@ def apply_chem_flow_boundaries(state, cfg, ru, rv, dt_rk=0.0) -> None:
                 "no table for them, so they would take their default inflow "
                 "instead of the source; re-prepare the forcing with this "
                 "configuration")
-    if supplied is None:
+    profile = _profile_inflow(state, cfg, rows)
+    if supplied is None and profile is None:
         launch(chem.fields(state), ru, rv, int(cfg.spec_zone),
                [0] * len(rows), [row.default_inflow for row in rows],
                None, None, None, None, None, None, None, None, 0.0)
         return
-    has, tables, dtbc = supplied
+    if supplied is None:
+        has, tables, dtbc = [0] * len(rows), _profile_tables(chem, rows), 0.0
+    else:
+        has, tables, dtbc = supplied
+        has = list(has)
+    if profile is not None:
+        # Rows whose package defines WRF's own inflow profile (no enabled
+        # boundary source): their tables carry that value with no tendency,
+        # so the kernel's max(epsilc, b + bt*dt) is the profile itself.
+        for index, sides in profile.items():
+            if has[index]:
+                continue
+            has[index] = 1
+            for n, side in enumerate(sides):
+                tables[2 * n][index] = side
+                tables[2 * n + 1][index] = 0
     dt = np.float32(np.float32(dt_rk) + np.float32(dtbc))
     launch(chem.fields(state), ru, rv, int(cfg.spec_zone),
            has, [row.default_inflow for row in rows], *tables, dt)
