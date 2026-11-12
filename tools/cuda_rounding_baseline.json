@@ -4529,7 +4529,7 @@
    },
    {
     "file": "woof/hex/mpas_ice/calving_v842.cu",
-    "sha256": "f3a1bb02093888d6bfec6cc67c19a217ee4341c6757a02c76455c7108f09f08d"
+    "sha256": "9d1f3598f51acc057f2876d018e11448d156f799c2bd2631d2f3c5e57835bc44"
    },
    {
     "file": "woof/hex/mpas_ice/geometry_v842.cu",
