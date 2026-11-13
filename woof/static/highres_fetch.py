@@ -485,7 +485,9 @@ _GEM15_NOTE = (
 
 #: Terrain sources selectable by name only (never by ``auto``), each one
 #: printing :data:`GEM15_EXPERIMENTAL_WARNING` whenever it is used.  Kept
-#: out of :data:`TERRAIN_SOURCES` until a fetcher is wired for them.
+#: out of :data:`TERRAIN_SOURCES` so nothing that walks the established
+#: sources (``auto``, the default rows) can reach them;
+#: :func:`terrain_source_coverage` finds them by name.
 EXPERIMENTAL_TERRAIN_SOURCES: dict[str, SourceCoverage] = {
     "gem15-dtm": SourceCoverage(
         source_id="gem15-dtm", role="terrain", envelope=_GEM15_ENVELOPE,
@@ -686,13 +688,22 @@ def landcover_source_ids_by_wps_token() -> dict[str, str]:
 
 
 def terrain_source_coverage(source_id: str) -> SourceCoverage:
-    """Look up one terrain source, refusing an unknown id by name."""
+    """Look up one terrain source, refusing an unknown id by name.
+
+    The experimental rows (:data:`EXPERIMENTAL_TERRAIN_SOURCES`) are found
+    by name too; ``auto`` never reaches them.
+    """
     try:
         return TERRAIN_SOURCES[source_id]
     except KeyError:
+        pass
+    try:
+        return EXPERIMENTAL_TERRAIN_SOURCES[source_id]
+    except KeyError:
         raise CoverageError(
             f"unknown terrain source {source_id!r}; known sources are "
-            f"{sorted(TERRAIN_SOURCES)}") from None
+            f"{sorted(TERRAIN_SOURCES)}, and by name only the experimental "
+            f"{sorted(EXPERIMENTAL_TERRAIN_SOURCES)}") from None
 
 
 def _continued_longitude_range(lon) -> tuple[float, float]:
