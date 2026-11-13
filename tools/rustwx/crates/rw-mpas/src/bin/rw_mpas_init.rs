@@ -161,7 +161,7 @@ fn run() -> Result<String, String> {
         let names: Vec<String> = args.need("scalar-names")?.split(',').map(str::to_string).collect();
         let fields = args.get_optional("aerosol-fields").map(PathBuf::from);
         let land = args.get_optional("land-surface").unwrap_or_else(||"noah".into());
-        if !["noah", "noahmp", "ruc"].contains(&land.as_str()) { return Err("--land-surface takes noah, noahmp or ruc".into()); }
+        if !["noah", "noahmp", "ruc", "slab", "px"].contains(&land.as_str()) { return Err("--land-surface takes noah, noahmp, ruc, slab or px".into()); }
         let receipt = rw_mpas::init::aerosol::enrich(PathBuf::from(path).as_path(), &names, fields.as_deref(), land != "noah").map_err(|e| e.to_string())?;
         return serde_json::to_string_pretty(&receipt).map_err(|e| e.to_string());
     }
