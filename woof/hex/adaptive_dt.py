@@ -96,8 +96,6 @@ INCOMPATIBLE = (
      "the chemistry transport holds its emission and photolysis clocks on the fixed step"),
     ("wind_farms", "--wind-farms", None,
      "the wind-farm power window is folded per fixed step"),
-    ("stochastic", "--stochastic", None,
-     "the stochastic pattern evolves per fixed step"),
     ("wrf_hydro", "--wrf-hydro", None,
      "the WRF-Hydro routing clock is a whole number of fixed steps"),
     ("members", "--members", None,
@@ -411,6 +409,7 @@ class HexAdaptiveClock:
                 and applied != ctl.last_dt):
             scale = float(ctl.last_dt / applied)
             vert, horiz = vert * scale, horiz * scale
+        self._started_before = ctl.started
         if not ctl.started:
             dt = ctl.first_step()
         else:
@@ -450,6 +449,8 @@ class HexAdaptiveClock:
         if self.pending is not None:
             self.step -= 1
             self.pending = None
+            # first_step is the controller's one side effect before accept.
+            self.controller.started = self._started_before
 
     def state(self) -> dict[str, Any]:
         """Everything the next step depends on, for a checkpoint (both memories, as the WRF route stores)."""
