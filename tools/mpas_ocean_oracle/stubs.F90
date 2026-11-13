@@ -52,7 +52,7 @@ module mpas_pool_routines
             mpas_pool_get_dimension, mpas_pool_get_config, &
             stub_pool_put_subpool, stub_pool_put_array, &
             stub_pool_put_dimension, stub_pool_put_config, &
-            field2DReal, field3DReal, mpas_pool_get_field, stub_pool_put_field, &
+            field1DReal, field2DReal, field3DReal, mpas_pool_get_field, stub_pool_put_field, &
             mpas_allocate_scratch_field, mpas_deallocate_scratch_field, &
             mpas_pool_iterator_type, MPAS_POOL_FIELD, mpas_pool_begin_iteration, mpas_pool_get_next_member
 
@@ -60,6 +60,11 @@ module mpas_pool_routines
 
   ! a scratch field: the driver sets dimSizes, mpas_allocate_scratch_field
   ! allocates array to them
+  type field1DReal
+    real(kind=RKIND), dimension(:), pointer :: array => null()
+    integer, dimension(1) :: dimSizes = 0
+  end type field1DReal
+
   type field2DReal
     real(kind=RKIND), dimension(:,:), pointer :: array => null()
     integer, dimension(2) :: dimSizes = 0
@@ -92,6 +97,7 @@ module mpas_pool_routines
     logical, pointer :: l0 => null()
     character(len=StrKIND), pointer :: c0 => null()
     type(MPAS_pool_type), pointer :: sub => null()
+    type(field1DReal), pointer :: f1 => null()
     type(field2DReal), pointer :: f2 => null()
     type(field3DReal), pointer :: f3 => null()
   end type pool_entry
@@ -122,19 +128,19 @@ module mpas_pool_routines
   end interface mpas_pool_get_array
 
   interface mpas_pool_get_field
-    module procedure get_field_2d, get_field_3d
+    module procedure get_field_1d, get_field_2d, get_field_3d
   end interface mpas_pool_get_field
 
   interface stub_pool_put_field
-    module procedure put_field_2d, put_field_3d
+    module procedure put_field_1d, put_field_2d, put_field_3d
   end interface stub_pool_put_field
 
   interface mpas_allocate_scratch_field
-    module procedure allocate_scratch_2d, allocate_scratch_3d
+    module procedure allocate_scratch_1d, allocate_scratch_2d, allocate_scratch_3d
   end interface mpas_allocate_scratch_field
 
   interface mpas_deallocate_scratch_field
-    module procedure deallocate_scratch_2d, deallocate_scratch_3d
+    module procedure deallocate_scratch_1d, deallocate_scratch_2d, deallocate_scratch_3d
   end interface mpas_deallocate_scratch_field
 
   interface stub_pool_put_array
@@ -365,6 +371,20 @@ contains
     stop 8
   end function mpas_pool_get_next_member
 
+  subroutine get_field_1d(pool, name, f)
+    type(MPAS_pool_type), intent(in) :: pool
+    character(len=*), intent(in) :: name
+    type(field1DReal), pointer :: f
+    f => pool % e(find(pool, name)) % f1
+  end subroutine get_field_1d
+
+  subroutine put_field_1d(pool, name, f)
+    type(MPAS_pool_type), intent(inout) :: pool
+    character(len=*), intent(in) :: name
+    type(field1DReal), pointer :: f
+    pool % e(slot(pool, name)) % f1 => f
+  end subroutine put_field_1d
+
   subroutine get_field_2d(pool, name, f)
     type(MPAS_pool_type), intent(in) :: pool
     character(len=*), intent(in) :: name
@@ -395,6 +415,13 @@ contains
 
   ! The array is filled with huge(): a word the routine reads before it
   ! writes it would show in the output.
+  subroutine allocate_scratch_1d(f, single_block_in, init_array_in)
+    type(field1DReal), pointer :: f
+    logical, intent(in), optional :: single_block_in, init_array_in
+    allocate(f % array(f % dimSizes(1)))
+    f % array = huge(1.0_RKIND)
+  end subroutine allocate_scratch_1d
+
   subroutine allocate_scratch_2d(f, single_block_in, init_array_in)
     type(field2DReal), pointer :: f
     logical, intent(in), optional :: single_block_in, init_array_in
@@ -409,10 +436,18 @@ contains
     f % array = huge(1.0_RKIND)
   end subroutine allocate_scratch_3d
 
+  ! A field freed twice (ocn_diagnostic_solve frees its two vertex vorticity
+  ! fields again at its end) is freed once, as MPAS's own routine does.
+  subroutine deallocate_scratch_1d(f, single_block_in)
+    type(field1DReal), pointer :: f
+    logical, intent(in), optional :: single_block_in
+    if (associated(f % array)) deallocate(f % array)
+  end subroutine deallocate_scratch_1d
+
   subroutine deallocate_scratch_2d(f, single_block_in)
     type(field2DReal), pointer :: f
     logical, intent(in), optional :: single_block_in
-    deallocate(f % array)
+    if (associated(f % array)) deallocate(f % array)
   end subroutine deallocate_scratch_2d
 
   subroutine deallocate_scratch_3d(f, single_block_in)
