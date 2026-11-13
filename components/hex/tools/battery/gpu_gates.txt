@@ -246,6 +246,7 @@ tests/test_fct_horizontal_scale_fusion.py
 tests/test_mpas_farms_v842.py
 tests/test_mpas_nwp_diagnostics.py
 tests/test_mpas_tslist.py
+tests/test_mpas_acc_diagnostics.py
 tests/test_mpas_radtran.py
 tests/test_mpas_rrtmg_spectral_output.py
 tests/test_mpas_shcu_deng_v842.py
