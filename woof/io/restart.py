@@ -3579,7 +3579,9 @@ def _drop_inert_chem_block(values: dict) -> None:
 
 #: The smoke fork's chem keys at the value every earlier chem run held.
 CHEM_FORK_RUN_DEFAULTS = {"simple_dir_fdb": 0, "enh_vermix": False,
-                          "flam_part": -1.0, "aer_drydep_opt": 0}
+                          "flam_part": -1.0, "aer_drydep_opt": 0,
+                          # The opt-in so2so4 cloud threshold at WRF's qc > 0.
+                          "so2so4_qc_threshold": 0.0}
 
 
 def _drop_inert_fire_block(values: dict) -> None:
@@ -6958,8 +6960,8 @@ def _terrain_clock_default_flip(stored, live, *, to="local_face") -> bool:
 
 #: RunConfig fields added after checkpoints existed, with the default that
 #: reproduces those checkpoints' runs (photdt: Fast-TUV every step, the only
-#: cadence before the field).
-LATE_DEFAULT_RUN_FIELDS = {"photdt": 0.0}
+#: cadence before the field; so2so4_qc_threshold: WRF's qc > 0).
+LATE_DEFAULT_RUN_FIELDS = {"photdt": 0.0, "so2so4_qc_threshold": 0.0}
 
 
 def _identity_matches_under_current_rules(header, model) -> bool:

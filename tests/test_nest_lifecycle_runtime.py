@@ -29,6 +29,10 @@ import datetime
 import textwrap
 from types import SimpleNamespace
 
+#: The CLWRF/RASM auxiliary switches submit_native_auxiliary reads, all off.
+_NO_AUX_RUN = SimpleNamespace(mean_diag=0, diurnal_diag=0, output_diagnostics=0,
+                              auxhist3_interval=0)
+
 import numpy as np
 import pytest
 
@@ -263,7 +267,7 @@ def _writer_set(tmp_path, *, episodes):
 
 def _node(grid_id=2):
     return SimpleNamespace(
-        cfg=SimpleNamespace(grid_id=grid_id),
+        cfg=SimpleNamespace(grid_id=grid_id, run=_NO_AUX_RUN),
         clock=SimpleNamespace(tick_den=1),
         state=SimpleNamespace())
 
@@ -447,7 +451,7 @@ def test_one_followers_window_reset_leaves_the_others_intact(tmp_path):
 
 def _tree_node(grid_id, parent=None):
     node = SimpleNamespace(
-        cfg=SimpleNamespace(grid_id=grid_id), parent=parent, children=[],
+        cfg=SimpleNamespace(grid_id=grid_id, run=_NO_AUX_RUN), parent=parent, children=[],
         state=SimpleNamespace(), grid=f"grid-d{grid_id:02d}", _started=True)
     if parent is not None:
         parent.children.append(node)

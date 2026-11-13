@@ -754,6 +754,22 @@ def test_the_gwdo_kernel_source_is_unchanged_at_55_and_sized_otherwise():
         gwdo.gwdo_kernel_source(257)
 
 
+def test_the_gwdo_kernel_source_follows_a_mesh_bound_define(monkeypatch):
+    """THE BREAKAGE (hex option matrix, plan 1.3): the mesh binding rewrites
+    the module source to the bound column's define, and the per-column source
+    then looked only for the anchored 55, so every YSU-GWDO run on a mesh of
+    another level count stopped at its first drag call."""
+
+    from woof.hex import cuda_gwdo_v841 as gwdo
+
+    anchored = gwdo._CUDA_SOURCE
+    bound = anchored.replace("#define GWDO_NLEV 55\n", "#define GWDO_NLEV 149\n")
+    monkeypatch.setattr(gwdo, "_CUDA_SOURCE", bound)
+    assert gwdo.gwdo_kernel_source(149) is bound
+    assert gwdo.gwdo_kernel_source(55) == anchored
+    assert "#define GWDO_NLEV 80\n" in gwdo.gwdo_kernel_source(80)
+
+
 def test_the_gwdo_frame_is_priced_per_level(monkeypatch):
     # The measured sm_86 frames (local_size_bytes, CUDA 13 NVRTC): the price
     # must be at or above every one, or a deep column is under-reserved.

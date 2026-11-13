@@ -104,6 +104,9 @@ _TOP_LEVEL_EXCLUDES = {
     # exists to call is not in this wheel, so shipping it would offer a
     # command that cannot run.
     "go_cli.py",
+    # `woof go` on the hex model (woof.go_hex): it imports go_cli (above) and
+    # drives the hex forecast; its only importer is go_cli.py.
+    "go_hex.py",
     # Native-input and spherical-grid front doors execute the excluded
     # forecast kernels; their input readers remain in the preparation wheel.
     "native_go.py", "global_forecast.py",
