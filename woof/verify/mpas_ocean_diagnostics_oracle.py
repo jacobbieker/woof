@@ -276,7 +276,7 @@ def make_case(name: str, seed: int, n_cells: int, n_levels: int, nested: bool, o
         else:
             # an output the routine writes (some only in part): prior words it must keep or overwrite
             value = uniform(-1.0e3, 1.0e3, shape(case, fshape))
-        if kind == REAL:
+        if kind == REAL and value is not None:
             value = np.asarray(value).astype(real)
         pools.setdefault(pool, {})[field] = value
     case["pools"] = pools
