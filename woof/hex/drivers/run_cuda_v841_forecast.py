@@ -1382,11 +1382,21 @@ def _build_forecast_config(
     )
 
 
+def _species_variables(variables: Mapping[str, Any]) -> Mapping[str, Any]:
+    """The init variables that can carry a model species: every one, except a netCDF variable without the
+    vertical dimension.  An MPAS init's 2-D statics share names with chemistry rows (the GWDO statistic
+    ``ol2`` and RADM2's ``ol2`` gas); such a field is not a species plane and must not make the row look
+    carried.  Mappings without dimensions (tests' name sets) pass through unchanged."""
+    return {name: value for name, value in variables.items()
+            if getattr(value, "dimensions", None) is None or "nVertLevels" in value.dimensions}
+
+
 def select_initial_scalar_names(
     variables: Mapping[str, Any], model_names: Sequence[str],
 ) -> tuple[str, ...]:
     """Preserve a complete carried species row or use the existing cold start."""
 
+    variables = _species_variables(variables)
     names = tuple(model_names)
     if names[:len(SOURCE_SCALAR_NAMES)] != tuple(SOURCE_SCALAR_NAMES):
         raise ValueError("the model species row must begin with qv, qc and qr")

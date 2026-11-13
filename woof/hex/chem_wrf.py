@@ -959,9 +959,34 @@ def attach_statics(runtime, *, lat_deg, lon_deg, landmask=None, fields=None, geo
     return receipt
 
 
+def profile_hooks(table):
+    """The processes of ``table`` that define WRF's own ``have_bcs_chem = .false.`` inflow profile
+    (``boundary_inflow(table, z, alt, convfac)``: chem.radm2's bdy_chem_value, aerosol.sorgam's
+    bdy_chem_value_sorgam), in step order."""
+    from woof.core.chem_context import chem_processes
+    return [module for _key, module in chem_processes(table)
+            if getattr(module, "boundary_inflow", None) is not None]
+
+
+def profile_boundary(raw):
+    """True when a regional run drives the rows at the rings with WRF's default boundary profile:
+    ``have_bcs_chem = 0`` and a set whose processes define that profile (RADM2, RADM2SORG).
+
+    DIFFERENCE FROM WRF.  WRF's flow_dep_bdy_chem (chem/module_input_chem_data.F) puts the profile only in
+    INFLOW cells of the specified zone and copies the inner neighbour into OUTFLOW cells, with no relaxation
+    zone.  Hex drives chemistry rows with MPAS's scalar driving pool (atm_bdy_set_scalars on the specified
+    zone, atm_bdy_adjust_scalars on the relaxation zone) whatever the flow's sign, so here the profile is
+    imposed on outflow cells too, and the relaxation zone is nudged toward it (user decision, 2026-11-12)."""
+    block = raw["wrf_chem"]
+    if switches(block)["have_bcs_chem"]:
+        return False
+    return bool(profile_hooks(load_table(raw)[1]))
+
+
 def lbc_scalar_names(raw):
-    """The boundary-pool names the rows add (``lbc_<row>``), in row order; empty without ``have_bcs_chem``."""
-    if not switches(raw["wrf_chem"])["have_bcs_chem"]:
+    """The boundary-pool names the rows add (``lbc_<row>``), in row order; empty unless ``have_bcs_chem`` or
+    :func:`profile_boundary`."""
+    if not switches(raw["wrf_chem"])["have_bcs_chem"] and not profile_boundary(raw):
         return ()
     numbers = NUMBER_FIELDS if mp_coupling(raw["wrf_chem"]) == "diagnose" else ()
     return tuple("lbc_" + name for name in (*numbers, *(row.name for row in load_table(raw)[1].transported)))
@@ -983,16 +1008,45 @@ def lbc_pressure(fields):
     return _P0 * (_RGAS * rho * theta * (1.0 + _RV / _RGAS * qv) / _P0) ** (_CP / _CV)
 
 
-class BoundaryReader:
-    """``have_bcs_chem = 1`` on a regional mesh: a boundary-pool reader that adds each row's ``lbc_<row>``.
+#: start_em's and flow_dep_bdy_chem's gas constant for convfac (module_data_sorgam rgasuniv, J mol-1 K-1),
+#: as woof.core.chem_transport uses it.
+_RGASUNIV = 8.314510
 
-    It wraps the pool's own reader (woof.hex.lbc.LbcPool.reader), so the met fields are the file's words;
-    each row's field is the WRF path's remap (:func:`woof.chem_source_init.fill_boundary_sources`, the
-    ``boundary`` frame role) at the file's valid time onto the mesh cells, its vertical target the file's own
-    pressure (:func:`lbc_pressure`).  The pool then drives the rows with every other driven scalar.
+
+def profile_rows(table, rows, *, z, rho, pressure, theta):
+    """``{row name: [level, cell] float32}``: WRF's ``have_bcs_chem = .false.`` boundary value for every row,
+    from each process's ``boundary_inflow`` hook (bdy_chem_value, bdy_chem_value_sorgam) at the mass-level
+    heights ``z`` (m), with ``alt = 1/rho`` (dry density) and ``convfac = p / (rgasuniv T)`` (mol m-3, with
+    ``T = theta (p/p0)^(rgas/cp)``) from the boundary state, as flow_dep_bdy_chem forms them.  A row no hook
+    names takes its ``default_inflow`` (WRF's i_bdy_method 0 value).  Arrays are ``[level, cell]``."""
+    z = np.asarray(z, np.float32)
+    rho = np.asarray(rho, np.float64)
+    p = np.asarray(pressure, np.float64)
+    t = np.asarray(theta, np.float64) * (p / _P0) ** (_RGAS / _CP)
+    alt = (1.0 / rho).astype(np.float32)
+    convfac = (p / _RGASUNIV / t).astype(np.float32)
+    values = {}
+    for module in profile_hooks(table):
+        for name, value in module.boundary_inflow(table, z, alt, convfac).items():
+            values.setdefault(name, np.asarray(value, np.float32))
+    return {row.name: values[row.name] if row.name in values
+            else np.full(z.shape, row.default_inflow, np.float32) for row in rows}
+
+
+class BoundaryReader:
+    """A regional mesh's boundary-pool reader that adds each row's ``lbc_<row>``.
+
+    It wraps the pool's own reader (woof.hex.lbc.LbcPool.reader), so the met fields are the file's words.
+    With ``have_bcs_chem = 1`` each row's field is the WRF path's remap
+    (:func:`woof.chem_source_init.fill_boundary_sources`, the ``boundary`` frame role) at the file's valid
+    time onto the mesh cells, its vertical target the file's own pressure (:func:`lbc_pressure`).  Under
+    :func:`profile_boundary` (``have_bcs_chem = 0``, RADM2/RADM2SORG) it is WRF's default boundary profile
+    (:func:`profile_rows`) on the mesh's mass-level heights ``heights`` (``zgrid``, [level + 1, cell]) and the
+    file's own state.  The pool then drives the rows with every other driven scalar.
     """
 
-    def __init__(self, runtime, *, latitude, longitude, base=None, cache_root=None, backend=None):
+    def __init__(self, runtime, *, latitude, longitude, base=None, cache_root=None, backend=None,
+                 heights=None):
         self.runtime = runtime
         self.latitude = np.asarray(latitude, dtype=np.float64)
         self.longitude = np.asarray(longitude, dtype=np.float64)
@@ -1000,6 +1054,15 @@ class BoundaryReader:
         self.cache_root = cache_root
         self.backend = backend
         self.names = lbc_scalar_names(runtime.raw)
+        self.profile = profile_boundary(runtime.raw)
+        self.heights = None
+        if self.profile:
+            if heights is None:
+                raise ValueError("wrf_chem's default boundary profile (have_bcs_chem = 0) needs the mesh's "
+                                 "zgrid heights")
+            zgrid = np.asarray(heights, np.float32)
+            # Mass levels halfway between w levels, in float32 (WRF's grid%z is likewise a level midpoint).
+            self.heights = np.float32(0.5) * (zgrid[:-1] + zgrid[1:])
         self.frames = {}
 
     def _base(self, path, extra_scalars):
@@ -1020,6 +1083,8 @@ class BoundaryReader:
         rt = self.runtime
         pressure = lbc_pressure(admitted.fields)
         nz = pressure.shape[0]
+        if self.profile:
+            return self._profile(admitted, pressure, nz, ncells)
         state = NS(chem=NS(table=rt.table))
         for row in rt.rows:
             setattr(state, row.state_attr, np.zeros((nz, 1, ncells), np.float32))
@@ -1060,14 +1125,41 @@ class BoundaryReader:
             "files": [r.get("files") for r in receipts], "rows_filled": sorted(filled)}
         return LbcFile(admitted.path, admitted.valid_time, fields)
 
+    def _profile(self, admitted, pressure, nz, ncells):
+        from .lbc import LbcFile
+        if self.heights.shape[0] != nz or self.heights.shape[1] < ncells:
+            raise ValueError(f"the mesh's heights are {self.heights.shape} and boundary file {admitted.path} "
+                             f"carries {nz} levels on {ncells} cells")
+        rt = self.runtime
+        values = profile_rows(rt.table, rt.rows, z=self.heights[:, :ncells],
+                              rho=np.asarray(admitted.fields["lbc_rho"], np.float64).T, pressure=pressure,
+                              theta=np.asarray(admitted.fields["lbc_theta"], np.float64).T)
+        fields = dict(admitted.fields)
+        for name, row in zip(self.names, rt.rows):
+            field = values[row.name]
+            if not np.all(np.isfinite(field) & (field >= 0)):
+                raise ValueError(f"boundary profile {row.name} at {admitted.valid_time} is not a finite "
+                                 "non-negative mixing ratio")
+            fields[name] = np.ascontiguousarray(field.T, dtype=np.float32)
+        self.frames[str(admitted.valid_time)] = {"file": str(admitted.path), "sources": ["wrf-default-profile"]}
+        return LbcFile(admitted.path, admitted.valid_time, fields)
+
     def receipt(self):
-        return {"law": "MPAS scalar driving pool (atm_bdy_set_scalars, atm_bdy_adjust_scalars)",
-                "vertical_target": "each boundary file's equation-of-state pressure",
-                "rows": list(self.names), "frames": dict(self.frames)}
+        out = {"law": "MPAS scalar driving pool (atm_bdy_set_scalars, atm_bdy_adjust_scalars)",
+               "vertical_target": "each boundary file's equation-of-state pressure",
+               "rows": list(self.names), "frames": dict(self.frames)}
+        if self.profile:
+            out["vertical_target"] = "the mesh's mass-level heights (zgrid midpoints)"
+            out["values"] = ("WRF's have_bcs_chem = .false. profile (bdy_chem_value, bdy_chem_value_sorgam), "
+                             "imposed on the whole specified zone and nudged over the relaxation zone, "
+                             "outflow cells included; WRF copies the inner neighbour at outflow cells")
+        return out
 
 
-def install_boundary_reader(runtime, driver, *, latitude, longitude, cache_root=None, backend=None):
-    """Hand the regional driving pool the rows' boundary fields (``have_bcs_chem = 1``)."""
+def install_boundary_reader(runtime, driver, *, latitude, longitude, cache_root=None, backend=None,
+                            heights=None):
+    """Hand the regional driving pool the rows' boundary fields (``have_bcs_chem = 1``, or WRF's default
+    profile under :func:`profile_boundary`)."""
     from .lbc import LbcPool
     from .partition_regional_v841 import PartitionLbcPoolV841
     regional = getattr(driver, "regional_v841", None)
@@ -1089,7 +1181,7 @@ def install_boundary_reader(runtime, driver, *, latitude, longitude, cache_root=
         raise ValueError(f"the regional driving pool does not carry {missing}: the run's boundary scalars were "
                          "selected without the chemistry rows (woof.hex.chem_transport.lbc_scalar_names)")
     reader = BoundaryReader(runtime, latitude=latitude, longitude=longitude, base=pool.reader,
-                            cache_root=cache_root, backend=backend)
+                            cache_root=cache_root, backend=backend, heights=heights)
     pool.reader = reader
     runtime.boundary_reader = reader
     return reader
@@ -1129,10 +1221,15 @@ def attach(backend, host, driver):
     runtime = backend.chemistry
     runtime.driver = driver
     regional = host.get("regional") is not None
-    if regional and not runtime.switches["have_bcs_chem"]:
+    profile = regional and profile_boundary(runtime.raw)
+    if profile and runtime.coupling == "diagnose":
+        raise ValueError("wrf_chem's default boundary profile (have_bcs_chem = 0) defines no aerosol-aware "
+                         "Thompson numbers for the rings; set have_bcs_chem = 1 or aerosol_mp_coupling = none")
+    if regional and not runtime.switches["have_bcs_chem"] and not profile:
         raise ValueError("wrf_chem on a regional mesh needs chemistry lateral boundaries over the specified "
                          "and relaxation zones: set have_bcs_chem = 1 with a set whose rows declare a "
-                         "data-store boundary source")
+                         "data-store boundary source, or select a set with WRF's default boundary profile "
+                         "(radm2, radm2sorg)")
     if not regional and runtime.switches["have_bcs_chem"]:
         raise ValueError("wrf_chem have_bcs_chem = 1 on a global mesh: a global mesh has no lateral boundary")
     arrays = host["prepared"].mesh.arrays
@@ -1155,8 +1252,11 @@ def attach(backend, host, driver):
         raise ValueError("chemistry restart source-file identity differs")
     if regional:
         # The boundary files carry every cell of the regional mesh.
+        extra = {}
+        if profile:
+            extra["heights"] = np.asarray(host["prepared"].vertical.zgrid, np.float32)
         install_boundary_reader(runtime, driver, latitude=np.degrees(np.asarray(arrays["latCell"], np.float64)),
-                                longitude=np.degrees(np.asarray(arrays["lonCell"], np.float64)))
+                                longitude=np.degrees(np.asarray(arrays["lonCell"], np.float64)), **extra)
     if runtime.steps == 0:
         rows = driver.atmosphere.state.scalars[runtime.offset:runtime.offset + len(runtime.rows)]
         if bool(cp.any(rows != 0)):
