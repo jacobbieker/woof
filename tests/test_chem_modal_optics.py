@@ -273,3 +273,84 @@ def test_radm2sorg_chain_with_feedback_feeds_fast_tuv():
     assert ((optics["waer"] > 0.8) & (optics["waer"] <= 1.0)).all()
     assert ((optics["gaer"] >= 0.0) & (optics["gaer"] < 0.9)).all()
     assert (optics["tauaerlw"] >= 0).all()
+
+
+def _radm2sorg_config(**kwargs):
+    from woof.config import RunConfig
+    values = dict(nx=12, ny=10, nz=20, dx=3000., dy=3000., ztop=20000., dt=18.,
+                  run_seconds=3600., moist=True, chem_sets="radm2sorg", bl_pbl_physics=1,
+                  sf_sfclay_physics=1, sf_surface_physics=2, ra_lw_physics=4,
+                  ra_sw_physics=4, aer_ra_feedback=1, aer_op_opt=1,
+                  ra_rrtmg_variant="rrtmg_legacy")
+    values.update(kwargs)
+    return RunConfig(**values)
+
+
+def test_the_door_admits_sorgam_feedback_on_legacy_rrtmg_only():
+    from woof.config import validate_chem_config
+    from woof.core.chem_ftuv import refusal as ftuv_refusal
+    for op in (1, 2):
+        cfg = _radm2sorg_config(aer_op_opt=op)
+        validate_chem_config(cfg)
+        assert ftuv_refusal(cfg) is None
+    with pytest.raises(ValueError, match="legacy RRTMG"):
+        validate_chem_config(_radm2sorg_config(ra_rrtmg_variant="rte-rrtmgp"))
+    with pytest.raises(ValueError, match="aer_op_opt=3"):
+        validate_chem_config(_radm2sorg_config(aer_op_opt=3))
+    # RADM2 alone has no aerosol to hand Fast-TUV or radiation.
+    with pytest.raises(ValueError, match="no SORGAM aerosol"):
+        validate_chem_config(_radm2sorg_config(chem_sets="radm2"))
+
+
+def test_sorgam_feedback_memory_is_priced():
+    from woof.core.chem_radiation import feedback_row_count, memory_shapes
+    cfg = _radm2sorg_config()
+    held, work = memory_shapes(cfg, 5000., 64)
+    assert held["chem_modal_optics/bands"] == (28, cfg.nz, cfg.ny, cfg.nx)
+    assert held["chem_modal_optics/table"][0] == MO.host_data()[4].size
+    assert "chem_modal_optics/volumes" in work
+    assert feedback_row_count(cfg) == len(MO.ROWS)
+    assert memory_shapes(_radm2sorg_config(aer_ra_feedback=0), 5000., 64) == ({}, {})
+
+
+@pytest.mark.gpu
+@requires_gpu
+def test_sorgam_feedback_reaches_legacy_rrtmg_fluxes():
+    """The live legacy RRTMG with the SORGAM optics: a polluted accumulation
+    mode dims the surface shortwave and changes the longwave, finite."""
+    from datetime import datetime
+    import cupy as cp
+    from test_chem_transport import _bubble_case
+    from woof.core.physics import _prepare_atmosphere
+    from woof.core.rrtmg_legacy import RRTMGLegacyRadiation
+    cfg, state = _bubble_case(chem_sets="radm2sorg", aer_ra_feedback=1, aer_op_opt=1,
+                              ra_rrtmg_variant="rrtmg_legacy", ra_lw_physics=4,
+                              ra_sw_physics=4, mp_physics=1, icloud=1)
+    shape = state.qv.shape[1:]
+    fields = {name: cp.full(shape, value, cp.float32) for name, value in
+              (("tsk", 290.), ("albedo", .15), ("emiss", .96),
+               ("xland", 1.), ("xice", 0.), ("snow", 0.))}
+    lat, lon = (cp.full(shape, value, cp.float32) for value in (35., -5.))
+    rad = RRTMGLegacyRadiation(datetime(2022, 3, 15, 12), lat, lon, column_chunk=97,
+                               p_top=float(state.p_top))
+    atmosphere = _prepare_atmosphere(state)
+    clean = rad(atmosphere=atmosphere, fields=fields, state=state, cfg=cfg)
+    table = state.chem.table
+    # 40 ug/kg of accumulation-mode sulfate, 4 of elemental carbon, with the
+    # number of a D_g = 0.15 um mode.
+    getattr(state, table.row("so4aj").state_attr).fill(40.)
+    getattr(state, table.row("ecj").state_attr).fill(4.)
+    v = 40e-9 / 1800. + 4e-9 / 2200.
+    getattr(state, table.row("ac0").state_attr).fill(
+        v / (math.pi / 6 * 0.15e-6 ** 3 * math.exp(4.5 * math.log(2.0) ** 2)))
+    # Same model time: drop both caches (radiation's and the shared optics').
+    state.chem.radiation_aerosols_time = None
+    state.chem.modal_optics_time = None
+    polluted = rad(atmosphere=atmosphere, fields=fields, state=state, cfg=cfg)
+    assert bool(cp.all(cp.isfinite(polluted.swdown)))
+    assert bool(cp.all(cp.isfinite(polluted.rthratensw)))
+    dimming = float((clean.swdown - polluted.swdown).mean())
+    # AOD ~1.5 at 600 nm from this heavy whole-column loading.
+    assert 1. < dimming < 600.
+    assert float(cp.abs(clean.glw - polluted.glw).mean()) > 1e-4
+    print("SORGAM legacy RRTMG surface dimming W m-2:", dimming)
