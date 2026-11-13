@@ -35,13 +35,26 @@ from __future__ import annotations
 import base64
 import functools
 import gzip
+import http.client
 import json
 import math
+import re
+import sys
+import urllib.error
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
+
+from woof import fetch_endpoints
+
+from . import cog_range, utm
+from . import highres_fetch as hf
 from .highres_fetch import (EXPERIMENTAL_TERRAIN_SOURCES, FootprintBBox,
                             GEM15_BUCKET_URL, GEM15_LAT_MAX, GEM15_LAT_MIN)
+from .highres_refusal import HighresRefusal
 
 _DATA = Path(__file__).resolve().parent.parent / "data"
 INDEX_PATH = _DATA / "gem15_index.v1.json.gz"
@@ -268,6 +281,358 @@ def fallback_reason(bbox: FootprintBBox, source_id: str) -> str | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Range reads: only the 512 x 512 blocks under the footprint
+# ---------------------------------------------------------------------------
+
+#: Source pixels of margin around the footprint's projection into a cell,
+#: so the mosaic's nearest pick at the window edge always has a pixel.
+WINDOW_MARGIN_PX = 2
+#: Points per side of the lon/lat mesh projected into a cell's UTM plane to
+#: bound the footprint there (UTM bends parallels and meridians).
+_MESH = 41
+
+_CACHE_DIR = "gem15"
+
+
+def _default_range_open(url: str, start: int, end: int):
+    """GET bytes ``start..end`` (inclusive) of ``url``."""
+    request = urllib.request.Request(url, headers={
+        "Range": f"bytes={int(start)}-{int(end)}"})
+    try:
+        return urllib.request.urlopen(request, timeout=120)
+    except urllib.error.HTTPError as error:
+        if error.code in (403, 404):
+            raise hf.SourceAbsent(f"{url} -> HTTP {error.code}") from error
+        raise
+
+
+def _goog_hashes(headers) -> dict[str, str]:
+    """``{"crc32c": b64, "md5": b64}`` from ``x-goog-hash`` header(s)."""
+    getter = getattr(headers, "get_all", None)
+    values = (getter("x-goog-hash") if getter is not None
+              else [headers.get("x-goog-hash")]) or []
+    out = {}
+    for value in values:
+        for part in str(value or "").split(","):
+            name, _, digest = part.strip().partition("=")
+            if digest:
+                out[name.strip().lower()] = digest.strip()
+    return out
+
+
+def _check_identity(headers, obj: Gem15Object, start: int, end: int) -> None:
+    """Refuse a range that does not come from the pinned object version.
+
+    GCS returns the WHOLE object's CRC32C (and MD5, when it has one) and
+    its generation on every range response, so each block read is tied to
+    the exact object the snapshot pinned; a re-upload is refused by name
+    instead of being mixed with cached blocks of the old one.
+    """
+    problems = []
+    hashes = _goog_hashes(headers)
+    if hashes.get("crc32c") != obj.crc32c_base64:
+        problems.append(f"CRC32C {hashes.get('crc32c')!r} (pinned "
+                        f"{obj.crc32c_base64!r})")
+    if obj.md5_base64 is not None and hashes.get("md5") not in (
+            None, obj.md5_base64):
+        problems.append(f"MD5 {hashes.get('md5')!r} (pinned "
+                        f"{obj.md5_base64!r})")
+    generation = headers.get("x-goog-generation")
+    if generation is not None and str(generation) != obj.generation:
+        problems.append(f"generation {generation} (pinned {obj.generation})")
+    match = re.fullmatch(r"bytes (\d+)-(\d+)/(\d+)",
+                         str(headers.get("Content-Range", "")).strip())
+    if match is None:
+        problems.append("no Content-Range (the host ignored the byte range)")
+    else:
+        got = tuple(int(v) for v in match.groups())
+        if got != (start, end, obj.bytes):
+            problems.append(f"Content-Range {got} (asked {start}-{end} of "
+                            f"{obj.bytes})")
+    if problems:
+        raise HighresRefusal(
+            "gem15-object-changed",
+            f"{obj.url} no longer matches the pinned GEM-15 snapshot: the "
+            f"host answered with {'; '.join(problems)}.  Google has "
+            "re-published this cell, so blocks of the pinned version and "
+            "the new one must not be mixed.  Regenerate "
+            "woof/data/gem15_index.v1.json.gz with tools/gem15_index.py "
+            "(a woof update), or choose terrain_source = "
+            "\"copernicus-dem-glo30\" for this domain")
+
+
+def _fetch_range(obj: Gem15Object, start: int, end: int, path: Path, *,
+                 urlopen=None) -> hf.FetchedFile:
+    """Fetch bytes ``start..end`` of ``obj`` into ``path``.
+
+    The cache contract is the shared one (:func:`woof.static.highres_fetch.
+    fetch_file`): a SHA-256 is recorded in the sidecar on first download
+    and the payload is re-hashed against it on every later read, one
+    writer per file, private staging, transient faults asked again with
+    the tree's backoff.  ``url`` in the record carries the range.
+    """
+    url = f"{obj.url}#bytes={int(start)}-{int(end)}"
+    length = int(end) - int(start) + 1
+    cached = hf._cache_hit(path, url)
+    if cached is not None and cached.bytes == length:
+        return cached
+    opener = _default_range_open if urlopen is None else urlopen
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        writer = hf._one_writer(path).acquire()
+    except hf.fetch_guard.FetchLockBusy as error:
+        raise hf._lock_refusal(path, error) from error
+    partial = None
+    try:
+        cached = hf._cache_hit(path, url)
+        if cached is not None and cached.bytes == length:
+            return cached
+        partial = hf._new_partial(path)
+        waited_s = 0.0
+        for attempt in range(1, hf.FETCH_ATTEMPTS + 1):
+            try:
+                response = opener(obj.url, int(start), int(end))
+                with response:
+                    _check_identity(response.headers, obj, int(start),
+                                    int(end))
+                    payload = response.read()
+                if len(payload) != length:
+                    raise http.client.IncompleteRead(
+                        payload, length - len(payload))
+                partial.write_bytes(payload)
+                break
+            except HighresRefusal:
+                raise
+            except Exception as error:  # noqa: BLE001 - classified below
+                delay = fetch_endpoints.retry_delay(
+                    error, attempt, wait_limit_s=hf.FETCH_RETRY_WAIT_LIMIT_S)
+                if delay is None and not isinstance(error, hf._NETWORK_FAULTS):
+                    raise
+                if delay is None or attempt == hf.FETCH_ATTEMPTS:
+                    raise hf._fetch_refusal(path, obj.url, partial, error,
+                                            attempts=attempt,
+                                            waited_s=waited_s) from error
+                print(f"[static.highres] {path.name}: "
+                      f"{hf._network_reason(error)}; asking again in "
+                      f"{delay:g} s (attempt {attempt + 1} of "
+                      f"{hf.FETCH_ATTEMPTS})", file=sys.stderr, flush=True)
+                hf._sleep(delay)
+                waited_s += delay
+        return hf._publish_partial(partial, path, url=url,
+                                   expected_bytes=length)
+    finally:
+        if partial is not None:
+            partial.unlink(missing_ok=True)
+        writer.release()
+
+
+def _cell_cache(cache_root: Path, cell: Gem15Cell, obj: Gem15Object,
+                asset: str) -> Path:
+    # Keyed by the object's CRC32C: blocks of two versions never mix.
+    return (Path(cache_root) / _CACHE_DIR / cell.cell_id / asset
+            / obj.crc32c)
+
+
+def _offline_refusal(missing: list[str], folder: Path):
+    return hf.HighresFetchRefusal(
+        f"[static.highres] offline, and {len(missing)} GEM-15 block(s) are "
+        f"not in the cache: {', '.join(missing[:8])}"
+        + (" ..." if len(missing) > 8 else ""),
+        remedy=(f"remedy: run once with the network to fill {folder}, or "
+                "stage the blocks there with their .sha256.json sidecars"),
+        folders=(folder,))
+
+
+def _cached_or_fetch(obj, start, end, path, *, urlopen, offline, missing):
+    if offline:
+        hit = hf._cache_hit(path, f"{obj.url}#bytes={start}-{end}")
+        if hit is None or hit.bytes != end - start + 1:
+            missing.append(path.name)
+            return None
+        return hit
+    return _fetch_range(obj, start, end, path, urlopen=urlopen)
+
+
+def read_head(cell: Gem15Cell, source_id: str, cache_root: Path, *,
+              urlopen=None, offline: bool = False
+              ) -> tuple[cog_range.CogLayout, hf.FetchedFile]:
+    """The cell's COG head, parsed and checked against the snapshot."""
+    asset, spp, _ = ASSETS[source_id]
+    obj = cell.object(source_id)
+    folder = _cell_cache(cache_root, cell, obj, asset)
+    size = min(cog_range.HEAD_BYTES, obj.bytes)
+    while True:
+        missing: list[str] = []
+        head = _cached_or_fetch(obj, 0, size - 1, folder / f"head_{size}.bin",
+                                urlopen=urlopen, offline=offline,
+                                missing=missing)
+        if head is None:
+            raise _offline_refusal(missing, folder)
+        try:
+            layout = cog_range.parse_head(Path(head.path).read_bytes())
+            break
+        except cog_range.CogHeadTooShort as short:
+            if short.needed > obj.bytes or size >= obj.bytes:
+                raise HighresRefusal(
+                    "gem15-unreadable",
+                    f"{obj.url}: the COG head is not inside the object "
+                    f"({short})") from short
+            size = min(obj.bytes, max(short.needed, 2 * size))
+        except cog_range.CogFormatError as error:
+            raise HighresRefusal("gem15-unreadable",
+                                 f"{obj.url}: {error}") from error
+    expected = (obj.shape[1], obj.shape[0], spp, cell.epsg,
+                tuple(round(v, 6) for v in obj.transform))
+    observed = (layout.width, layout.height, layout.samples_per_pixel,
+                layout.epsg, tuple(round(v, 6) for v in layout.transform))
+    if observed != expected:
+        raise HighresRefusal(
+            "gem15-object-changed",
+            f"{obj.url}: the COG header (width, height, bands, EPSG, "
+            f"transform) {observed} is not the snapshot's {expected}")
+    return layout, head
+
+
+def window_blocks(layout: cog_range.CogLayout, epsg: int,
+                  bbox: FootprintBBox) -> tuple[int, int, int, int] | None:
+    """Inclusive block range ``(row0, row1, col0, col1)`` of ``layout``
+    covering ``bbox`` (plus :data:`WINDOW_MARGIN_PX`), or None when the
+    footprint misses the cell's raster."""
+    lon = np.linspace(bbox.lon_min, bbox.lon_max, _MESH)
+    lat = np.linspace(bbox.lat_min, bbox.lat_max, _MESH)
+    lon2, lat2 = np.meshgrid(lon, lat)
+    x, y = utm.forward(epsg, lon2, lat2)
+    a, _, c, _, e, f = layout.transform
+    col_lo = (np.min(x) - c) / a - WINDOW_MARGIN_PX
+    col_hi = (np.max(x) - c) / a + WINDOW_MARGIN_PX
+    row_lo = (np.max(y) - f) / e - WINDOW_MARGIN_PX
+    row_hi = (np.min(y) - f) / e + WINDOW_MARGIN_PX
+    if (col_hi < 0 or row_hi < 0 or col_lo >= layout.width
+            or row_lo >= layout.height):
+        return None
+    col0 = max(0, int(math.floor(col_lo))) // layout.block_w
+    col1 = min(layout.width - 1, int(math.floor(col_hi))) // layout.block_w
+    row0 = max(0, int(math.floor(row_lo))) // layout.block_h
+    row1 = min(layout.height - 1, int(math.floor(row_hi))) // layout.block_h
+    return row0, row1, col0, col1
+
+
+def fetch_gem15_windows(bbox: FootprintBBox, cache_root: Path,
+                        source_id: str, *, urlopen=None,
+                        offline: bool = False, index: Gem15Index | None = None
+                        ) -> tuple[tuple[hf.FetchedFile, ...], dict]:
+    """Range-read every GEM-15 block under ``bbox``; return one UTM window
+    GeoTIFF per published cell it touches, and the fetch manifest.
+
+    Each window is the cell's own 15 m grid, cut on 512-pixel block
+    boundaries, one float32 band (``dtm``, or ``dsm`` out of the DSM's five
+    interleaved bands), in the cell's UTM CRS; NaN marks the producer's
+    holes and sparse blocks.  Windows are derived artifacts with their own
+    SHA-256 sidecars, keyed by cell, object CRC32C, band and block range,
+    so a later preparation over the same ground reuses them.  ``urlopen``
+    is ``(url, start, end) -> response``; ``offline`` refuses instead of
+    fetching anything not cached.
+    """
+    if source_id not in ASSETS:
+        raise KeyError(f"{source_id!r} is not a GEM-15 source")
+    asset, _, band = ASSETS[source_id]
+    index = load_index() if index is None else index
+    published, unpublished = index.cells_over(bbox)
+    plans = []
+    for cell in published:
+        layout, head = read_head(cell, source_id, cache_root,
+                                 urlopen=urlopen, offline=offline)
+        blocks = window_blocks(layout, cell.epsg, bbox)
+        if blocks is not None:
+            plans.append((cell, layout, head, blocks))
+
+    jobs, cached_bytes, fetch_bytes = [], 0, 0
+    for cell, layout, _, (row0, row1, col0, col1) in plans:
+        obj = cell.object(source_id)
+        folder = _cell_cache(cache_root, cell, obj, asset)
+        for row in range(row0, row1 + 1):
+            for col in range(col0, col1 + 1):
+                offset, count = layout.block(row, col)
+                if not count:
+                    continue
+                path = folder / f"block_r{row:03d}_c{col:03d}.bin"
+                if path.is_file():
+                    cached_bytes += count
+                else:
+                    fetch_bytes += count
+                jobs.append((obj, offset, offset + count - 1, path))
+    folder = Path(cache_root) / _CACHE_DIR
+    print(f"[static.highres] GEM-15 {asset}: {len(plans)} cell(s), "
+          f"{len(jobs)} block(s) of 512 x 512 15 m pixels, about "
+          f"{fetch_bytes / 1e6:.0f} MB to download "
+          f"({cached_bytes / 1e6:.0f} MB already cached); cache {folder}",
+          file=sys.stderr, flush=True)
+
+    missing: list[str] = []
+
+    def one(job):
+        obj, start, end, path = job
+        return path, _cached_or_fetch(obj, start, end, path, urlopen=urlopen,
+                                      offline=offline, missing=missing)
+
+    workers = max(1, min(int(hf.TILE_FETCH_WORKERS), len(jobs)))
+    with ThreadPoolExecutor(workers, thread_name_prefix="gem15") as pool:
+        fetched = dict(pool.map(one, jobs))
+    if missing:
+        raise _offline_refusal(sorted(missing), folder)
+
+    windows, cells_manifest = [], []
+    for cell, layout, head, (row0, row1, col0, col1) in plans:
+        obj = cell.object(source_id)
+        cache = _cell_cache(cache_root, cell, obj, asset)
+        name = (f"{cell.cell_id}_{asset}_b{band}_r{row0}-{row1}"
+                f"_c{col0}-{col1}.tif")
+        out = Path(cache_root) / _CACHE_DIR / "windows" / obj.crc32c / name
+        url = (f"derived:GEM-15 {source_id} band {band} blocks rows "
+               f"{row0}-{row1} cols {col0}-{col1} of {obj.url}")
+        with hf._derivation_writer(out) as partial:
+            window = hf._cache_hit(out, url)
+            if window is None:
+                def blocks():
+                    for row in range(row0, row1 + 1):
+                        for col in range(col0, col1 + 1):
+                            path = cache / f"block_r{row:03d}_c{col:03d}.bin"
+                            payload = (Path(path).read_bytes()
+                                       if path in fetched else None)
+                            yield cog_range.decode_block(layout, payload,
+                                                         band)
+                a, _, c, _, e, f = layout.transform
+                transform = (a, 0.0, c + col0 * layout.block_w * a, 0.0, e,
+                             f + row0 * layout.block_h * e)
+                cog_range.write_tiled_geotiff(
+                    partial, blocks(), rows=row1 - row0 + 1,
+                    cols=col1 - col0 + 1, block=layout.block_w,
+                    transform=transform, epsg=cell.epsg)
+                window = hf._publish_partial(partial, out, url=url)
+        windows.append(window)
+        block_files = [fetched[p] for p in fetched
+                       if Path(p).parent == cache and fetched[p] is not None]
+        cells_manifest.append({
+            "cell": cell.cell_id, "epsg": cell.epsg, "object": obj.echo(),
+            "head": head.receipt(),
+            "blocks": {"rows": [row0, row1], "cols": [col0, col1],
+                       "read": len(block_files),
+                       "sha256": sorted(item.sha256 for item in block_files)},
+            "window": window.receipt()})
+    manifest = {
+        "terrain_source": source_id,
+        "gem15_snapshot_utc": index.snapshot_utc,
+        "gem15_band": f"{asset} band {band}",
+        "gem15_cells": cells_manifest,
+        "gem15_unpublished_squares": [list(sq) for sq in unpublished],
+        "terrain_bytes_fetched": sum(
+            item.bytes for item in fetched.values()
+            if item is not None and not item.cache_hit),
+    }
+    return tuple(windows), manifest
+
+
 def source_row(source_id: str):
     """The registry row of one GEM-15 source id."""
     return EXPERIMENTAL_TERRAIN_SOURCES[source_id]
@@ -275,6 +640,7 @@ def source_row(source_id: str):
 
 __all__ = [
     "ASSETS", "FALLBACK_SOURCE", "Gem15Cell", "Gem15Index", "Gem15Object",
-    "INDEX_PATH", "REGIONS_PATH", "fallback_reason", "load_index",
-    "load_regions", "regions_touched", "source_row",
+    "INDEX_PATH", "REGIONS_PATH", "WINDOW_MARGIN_PX", "fallback_reason",
+    "fetch_gem15_windows", "load_index", "load_regions", "read_head",
+    "regions_touched", "source_row", "window_blocks",
 ]
