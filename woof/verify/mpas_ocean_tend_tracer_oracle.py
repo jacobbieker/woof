@@ -115,7 +115,7 @@ CASES = (
     ("bulk_salt_limit_del4", 20261263, 44, 24,
      {"config_use_activeTracers_surface_bulk_forcing": True, "config_use_tracer_del4": True,
       "config_tracer_del4": 2.0e9, "config_sw_absorption_type": "jerlov", "config_jerlov_water_type": 5,
-      "_fresh": True}),
+      "config_surface_buoyancy_depth": 400.0, "_fresh": True}),
     ("sflux_disabled_runoff", 20261264, 32, 8, {"config_disable_tr_sflux": True, "config_vert_tracer_adv_order": 2}),
     ("active_tracers_off", 20261265, 24, 6, {"config_use_activeTracers": False}),
     ("all_tend_disabled", 20261266, 24, 6, {"config_disable_tr_all_tend": True}),
@@ -170,7 +170,9 @@ def make_case(name: str, seed: int, n_cells: int, n_levels: int, overrides: dict
     tracers[:, :, 0] = uniform(0.5, 28.0, (nc + 1, nl))
     tracers[:, :, 1] = uniform(33.0, 37.0, (nc + 1, nl))
     if overrides.get("_fresh"):
-        tracers[rs.random_sample(nc + 1) < 0.4, 0, 1] = uniform(0.5, 3.5, 1)
+        # salinities this small cannot give up the sea-ice salt flux: it is limited
+        fresh = rs.random_sample(nc + 1) < 0.4
+        tracers[fresh, 0, 1] = uniform(1.0e-4, 5.0e-3, int(fresh.sum()))
     fraction = uniform(0.0, 1.0, (nc + 1, nl))
     fraction /= fraction.sum(axis=1, keepdims=True) * uniform(0.9, 1.3, (nc + 1, 1))
     dims = {"nCells": nc, "nEdges": ne, "nVertLevels": nl, "nTracers": nt, "maxEdges": me, "nAdvectionCells": na}
