@@ -3261,7 +3261,7 @@
    },
    {
     "file": "woof/core/kernels/mskf.cu",
-    "sha256": "2fbd2f3b39d709dfa5f931095f0b978b328999751b031bebc5cc4223aec2ff19"
+    "sha256": "e5596e0f0a59f848e3eb63fe1952a77d3ac10d5cefd4b1ab26e33daee10deac2"
    },
    {
     "file": "woof/core/kernels/mskf_aerosol.cuh",
