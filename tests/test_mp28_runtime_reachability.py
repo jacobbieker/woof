@@ -278,6 +278,12 @@ NON_MP_INTEGER_MAPS = {
     ("woof/member_prep.py", tuple(range(10))),
     # REGIMES in the independent YSU oracle, column fixture identifiers.
     ("woof/verify/ysu_wide_oracle.py", tuple(range(1, 10))),
+    # _TYPES and _SIZES / _NETCDF_TYPE_SIZES, NetCDF classic nc_type codes.
+    ("woof/hex/classic_netcdf.py", (1, 3, 4, 5, 6, 7, 8, 9, 10, 11)),
+    ("woof/hex/classic_netcdf.py", tuple(range(1, 12))),
+    ("woof/hex/drivers/run_cuda_v841_full_physics_x4.py", tuple(range(1, 12))),
+    # loop_counts in the MPAS Thompson phase splitter, keyed by phase index.
+    ("woof/hex/mpasphys/thompson_phases_v842.py", (0, 2, 4, 5, 6, 7, 8, 9, 11, 13)),
 }
 
 # ---------------------------------------------------------------------------
@@ -413,7 +419,7 @@ def test_no_new_scheme_keyed_dict_omits_28():
     assert (set(mt.UNVALIDATED_MIXED_EDGE_MOMENTS)
             == set(mt.UNVALIDATED_MIXED_EDGE_SELECTORS)
             == set(mt._UNVALIDATED_MIXED_EDGE_REASONS)
-            == {3, 5, 14, 15, 26, 30, 38, 40, 51, 52, 53, 55, 56, 97} | set(NAMED_MP_IDS))
+            == {3, 5, 14, 15, 26, 27, 29, 30, 38, 40, 51, 52, 53, 55, 56, 95, 97} | set(NAMED_MP_IDS))
     # WDM6 is double-moment in cloud AND rain and carries a CCN reservoir:
     # ncr(:,:,1)=nn, ncr(:,:,2)=nc, ncr(:,:,3)=nr (module_mp_wdm6.F:238-240),
     # all three prognostic scalars in the WRF Registry.  It has no ni/ns/ng.
@@ -496,13 +502,16 @@ def test_the_hrrr_route_admission_is_derived_not_respelled():
     # ported set is the stale admission plus 50, 9, 16 and 28.
     assert set(mt.PORTED_MP_PHYSICS) == STALE_REFL_ADMISSION | {50, 9, 16, 28, 2, 24, 13}
     # WSM3 (3, phase split), Ferrier-Aligo (5, rime factor) and FAST_SBM (30) are refused for a
-    # genuine missing closure (no
+    # genuine missing closure, as are 1.1.6's UDM (27, graupel/hail partition
+    # and number closure), RCON (29, aerosol and hydrometeor numbers) and Eta
+    # Ferrier (95, total qt with carried fractions), each with its own row in
+    # _UNVALIDATED_MIXED_EDGE_REASONS (no
     # bulk-to-spectrum entry closure is validated for a mixed edge), and the
     # named schemes are refused by name; both are therefore outside
     # PORTED_MP_PHYSICS and this route's admission.  Any other refused
     # selector is a regression.
-    assert set(mt.UNVALIDATED_MIXED_EDGE_SELECTORS) == {3, 5, 14, 15, 26, 30, 38, 40, 51, 52, 53, 55, 56, 97} | set(NAMED_MP_IDS), (
-        "a selector other than WSM3, Ferrier-Aligo, FAST_SBM, GCE or a named scheme is refused for a "
+    assert set(mt.UNVALIDATED_MIXED_EDGE_SELECTORS) == {3, 5, 14, 15, 26, 27, 29, 30, 38, 40, 51, 52, 53, 55, 56, 95, 97} | set(NAMED_MP_IDS), (
+        "a selector other than WSM3, Ferrier-Aligo, FAST_SBM, GCE, UDM, RCON, Eta Ferrier or a named scheme is refused for a "
         "missing closure again; every other mixed edge in this release runs "
         "with its mapping named")
 
@@ -1222,8 +1231,15 @@ def test_the_restart_identity_names_the_scheme_and_its_provenance():
     # registered its own identity with the port, held to the same two
     # properties below, and 40 (Morrison with CESM aerosol) with its port.
     # The WRF-numbered rows are otherwise unchanged.
+    # RE-DERIVED for upstream 1.1.6: UDM (27), RCON (29), Eta Ferrier (95)
+    # and MAD-WRF (96) each registered an identity of their own; nothing else
+    # moved, and each is asserted unique below.
     assert set(restart.MICROPHYSICS_ALGORITHM_IDENTITIES) == {
-        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 13, 14, 15, 16, 18, 24, 26, 28, 30, 38, 40, 50, 51, 52, 53, 55, 56, 97, 106} | set(NAMED_MP_IDS)
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 13, 14, 15, 16, 18, 24, 26, 27, 28, 29, 30, 38, 40, 50, 51, 52, 53, 55, 56, 95, 96, 97, 106} | set(NAMED_MP_IDS)
+    for mp in (27, 29, 95, 96):
+        assert restart.MICROPHYSICS_ALGORITHM_IDENTITIES[mp] not in {
+            value for key, value in restart.MICROPHYSICS_ALGORITHM_IDENTITIES.items()
+            if key != mp}, mp
     fsbm_identity = restart.MICROPHYSICS_ALGORITHM_IDENTITIES[30]
     assert fsbm_identity not in {
         value for key, value in restart.MICROPHYSICS_ALGORITHM_IDENTITIES.items()
