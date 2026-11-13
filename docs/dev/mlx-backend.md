@@ -558,6 +558,38 @@ The partial-depth band (Phase D5) keeps its own measurements:
   operators are bitwise to compiled MPAS v8.4.1 on Metal;
 - the envelope receipt `tests/data/receipts/partial-nest-d5/envelope-mlx.json`.
 
+### The MPAS v8.4.2 suite route (R2)
+
+The default hex physics (`convection_permitting`: RRTMG LW/SW, MYNN, Noah,
+Grell-Freitas and aerosol-aware Thompson) runs on Metal. Running it first
+needed these, each general:
+
+- the translator keeps an initialised `__constant__` (or `const`) global a
+  program-scope `constant` and also gives the host a buffer with its words
+  (`host_mirror`), since RRTMG LW binds its DATA tables by `get_global`;
+- a reference member takes the space its constructor binds (Noah's
+  `NoahThread::g`), and an access through it has that space;
+- a space-generic local declared without an initialiser takes its space
+  from `a.data = p` (MYNN) or `z = (Alias) p` (GF); a cast or functional
+  cast through an alias carries the space, and an identity cast goes; a
+  plain struct's method that makes a generic value gives its return type
+  the space (Thompson's `TcWs::ff`);
+- a member operator call's arguments start after its object (`s = "x"`);
+- a function-scope `static const` array of an anonymous union loses its
+  `static`; pointers into two spaces compare as addresses;
+- the facade: `RawModule(path=...)` loads a `compile_using_nvrtc` image,
+  `ravel(order=...)`, `int(get_global_var(...))`, `regsPerMultiprocessor`;
+- the v8.4.2 route's bound MPAS_to_physics source stays uncontracted
+  (`loader.uncontracted_derivative`), and a direct compiler's cache key on
+  Metal is the translator's (`aot.cache_identity`).
+
+`tests/test_metal_r2_translation.py` runs each construct on the device.
+Measured 2026-11-12 (M3 Max against RTX A6000), on identical synthetic
+columns: RRTMG LW and SW initialised tables and every flux are word for word
+CUDA's; the heating rates differ in 28 and 24 of 3,840 words by 1 ulp. A
+1 h regional R2 `woof go` (12 km, 6,542 cells, GFS) ran end to end on both;
+at 1 h theta differs by rms 0.010 K (max 0.73 K).
+
 ### Translation
 
 `tools/metal_translation_census.py --hex --translate-only` translates every

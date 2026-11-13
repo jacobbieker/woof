@@ -635,6 +635,8 @@ class _Rewriter:
         self._evaluating: dict = {}
         #: usr -> module global (see module_global)
         self.module_globals: dict = {}
+        #: initialised constant globals the host may read (host_mirror): name -> words
+        self.host_mirrors: dict = {}
         self._implicit_needs, self._hoisted, self._global_keys = {}, {}, {}
         self._program_vars_done: set = set()
         self._rendered_regions: set = set()
@@ -701,8 +703,10 @@ class _Rewriter:
         self.kernels = {k: replace(v, indirect=True) if k in self._indirect_kernels else v
                         for k, v in self.kernels.items()}
         return TranslatedUnit(msl=msl, kernels=self.kernels, globals={
-            g["name"]: {"nbytes": g["nbytes"], "ctype": g["ctype"], "space": g["space"], "init": g.get("init")}
-            for g in self.module_globals.values()})
+            **{g["name"]: {key: g[key] for key in ("nbytes", "ctype", "space", "init", "mirror")}
+               for g in self.host_mirrors.values()},
+            **{g["name"]: {"nbytes": g["nbytes"], "ctype": g["ctype"], "space": g["space"], "init": g.get("init")}
+               for g in self.module_globals.values()}})
 
     def _space_generic_structs(self, top) -> set:
         """Structs whose pointer field is given pointers in two address
@@ -711,6 +715,7 @@ class _Rewriter:
         templated on the space of their data (generic_struct)."""
         from woof.backend.translate.spaces import SpaceAnalysis
         self.generic_structs = set()
+        self._reference_field_seed = {}
         self._constant_fields = {}
         self._probing_fields = True
         try:
@@ -724,6 +729,9 @@ class _Rewriter:
             self.spaces = None
         self._constant_fields = {key: set(spaces) for key, spaces in probe.field_spaces.items()
                                  if spaces == {"constant"}}
+        # A reference member's binding is recorded where its constructor runs, which the real pass may
+        # reach after a function that reads through the member: the probe's whole-unit record seeds it.
+        self._reference_field_seed = {key: set(spaces) for key, spaces in probe.ref_field_spaces.items()}
         generic = {owner for (owner, _field), spaces in probe.field_spaces.items() if len(spaces) > 1}
         return self._generic_companions(top, generic)
 
@@ -806,6 +814,8 @@ class _Rewriter:
         if any(c.kind == K.ANNOTATE_ATTR and c.spelling == _CONSTANT for c in cursor.get_children()):
             if not self._has_initialiser(cursor):
                 self.module_global(cursor, "constant")   # filled by the host
+            else:
+                self.host_mirror(cursor)
             return
         if any(c.kind == K.ANNOTATE_ATTR and c.spelling == _SHARED for c in cursor.get_children()):
             return
@@ -822,7 +832,29 @@ class _Rewriter:
                                         "initialiser that is not a list of literals")
             self.module_global(cursor, "device", init=init)
             return
+        self.host_mirror(cursor)
         self.constant_declaration(cursor)
+
+    def host_mirror(self, cursor):
+        """An initialised ``__constant__`` (or ``const``) global stays a
+        program-scope ``constant`` the kernels read in place, and the host
+        also gets its bytes: CUDA lets the host take any module global's
+        address (RawModule.get_global), and a host that reads an
+        initialised table through it (the MPAS RRTMG ports bind their DATA
+        tables this way) found the Metal module had no such global.  The
+        mirror is a buffer holding the declaration's words; it is a copy,
+        so it serves reads: these globals are immutable on both sides
+        (a ``const`` cannot be written, and a host write to an initialised
+        ``__constant__`` table is not a pattern any unit uses).  An
+        initialiser that does not fold to words gets no mirror, and
+        get_global names it as missing."""
+        init = self._initial_words(cursor)
+        if init is None:
+            return
+        t = cursor.type
+        self.host_mirrors[cursor.get_usr()] = {
+            "name": cursor.spelling, "nbytes": int(t.get_size()), "space": "constant", "init": init,
+            "ctype": _canonical(self._base_type(t)).replace("const ", "").strip(), "mirror": True}
 
     def program_var_space(self, cursor) -> str:
         """The space a program-scope variable's storage has in the MSL
@@ -1131,6 +1163,8 @@ class _Rewriter:
                     if stmt is None:
                         continue
                     at = self.generic_type_close(list(stmt.get_tokens()), name)
+                    if at is None:
+                        at = self._spell_out_generic_alias(stmt, n, name)
                     if at is None:
                         self.refuse(n, f"cannot place the address space of {name!r} local {n.spelling!r}")
                     site = self._generic_sites.setdefault(at, (stmt, [], owner.get_usr()))
@@ -2393,6 +2427,8 @@ class _Rewriter:
                 name = self.spaces.generic_name(params[index].type)
                 at = self.generic_type_close(list(params[index].get_tokens()), name)
                 if at is None:
+                    at = self._spell_out_generic_alias(params[index], params[index], name)
+                if at is None:
                     self.refuse(params[index], f"cannot place the address space of {name!r} parameter "
                                                f"{params[index].spelling!r} (spell it {name}<...>)")
                 plan.append((at, f", {self.SPACE_INDEX[space]}"))
@@ -2483,7 +2519,8 @@ class _Rewriter:
             fn = call.referenced
             if fn is None or fn.kind not in kinds:
                 continue
-            for i, arg in enumerate(call.get_arguments()):
+            from woof.backend.translate.spaces import _call_arguments
+            for i, arg in enumerate(_call_arguments(call)):
                 if not _is_table(arg.type):
                     continue
                 if _local_pointer_array(arg) is not None:
@@ -2934,6 +2971,153 @@ class _Rewriter:
             return
         self.edits.insert(toks[close].extent.start.offset, f", {self.SPACE_INDEX[space]}", rank=-30_000)
 
+    def _operand_spaces(self, e) -> set:
+        """Every space a pointer operand takes over the function's instances."""
+        spaces = set()
+        sp = self.spaces.space(e, {})
+        if sp in ("device", "constant", "threadgroup", "thread"):
+            spaces.add(sp)
+        from woof.backend.translate.spaces import _indirection
+        ref = e
+        for _ in range(16):
+            kids = [c for c in ref.get_children() if c.kind.name != "TYPE_REF"]
+            if ref.kind.name in ("UNEXPOSED_EXPR", "PAREN_EXPR", "CSTYLE_CAST_EXPR") and kids:
+                ref = kids[-1]
+            elif ref.kind.name == "BINARY_OPERATOR" and _indirection(ref.type) == "ptr":
+                pointer = [c for c in kids if _indirection(c.type) == "ptr"]
+                if len(pointer) != 1:
+                    break
+                ref = pointer[0]    # `p + n`: p's memory
+            else:
+                break
+        if ref.kind.name == "DECL_REF_EXPR" and ref.referenced is not None:
+            d = ref.referenced
+            spaces |= self.spaces.var_spaces.get(d.get_usr(), set())
+            owner = d.semantic_parent
+            if d.kind.name == "PARM_DECL" and owner is not None and self.is_kernel(owner):
+                spaces.add("device")     # a kernel's pointer parameter is a buffer
+        return spaces
+
+    def cross_space_comparison(self, node):
+        """``d < s`` between pointers into two address spaces (Grell-Freitas's
+        gf_memmove choosing its copy direction, a constant source and a device
+        destination): Metal has no comparison of distinct pointer types.  The
+        addresses compare as integers, which is what CUDA's generic pointers
+        compare; two spaces never overlap, so a memmove's choice is moot."""
+        from woof.backend.translate.spaces import _indirection
+        kids = [c for c in node.get_children() if c.kind.name != "TYPE_REF"]
+        if len(kids) != 2 or any(_indirection(k.type) != "ptr" for k in kids):
+            return
+        op = next((t.spelling for t in node.get_tokens() if t.extent.start.offset >= kids[0].extent.end.offset), None)
+        if op not in ("<", ">", "<=", ">=", "==", "!="):
+            return
+        left, right = self._operand_spaces(kids[0]), self._operand_spaces(kids[1])
+        if not left or not right or (len(left) == 1 and left == right):
+            return
+        for k in kids:
+            start, end = self.span(k)
+            if start < end:
+                self.edits.wrap(start, end, "reinterpret_cast<ulong>(", ")", 10_000)
+
+    def _generic_return_type(self, method):
+        name = self.spaces.generic_name(method.result_type)
+        space = self.spaces._method_return_gspace(method)
+        if space not in self.SPACE_INDEX:
+            return
+        tokens = list(method.get_tokens())
+        head = []
+        for t in tokens:
+            if t.spelling == method.spelling:
+                break
+            head.append(t)
+        at = self.generic_type_close(head, name)
+        done = self.__dict__.setdefault("_generic_cast_sites", set())
+        if at is not None and at not in done:
+            done.add(at)
+            self.edits.insert(at, f", {self.SPACE_INDEX[space]}", rank=-20_000)
+
+    def generic_cast(self, node):
+        """``(S) p`` / ``S(p)`` to a space-generic struct: the struct takes the
+        space of the pointer it wraps (Grell-Freitas's ``zo = (GFP) D;`` over
+        a workspace pointer), where the template's default would be thread."""
+        name = self.spaces.generic_name(node.type)
+        operand = [c for c in node.get_children() if c.kind.name not in ("TYPE_REF", "TEMPLATE_REF", "NAMESPACE_REF")]
+        if not operand:
+            return
+        from woof.backend.translate.spaces import _indirection
+        o = operand[-1]
+        for _ in range(8):
+            if _indirection(o.type) == "ptr":
+                break
+            if o.kind.name == "CALL_EXPR" and o.referenced is not None and o.referenced.kind.name == "CONSTRUCTOR":
+                args = list(o.get_arguments())
+                if len(args) != 1:
+                    break
+                o = args[0]         # the converting constructor's pointer (`GFLanePtr(void* q)`)
+            elif o.kind.name in ("UNEXPOSED_EXPR", "PAREN_EXPR") and len(list(o.get_children())) == 1:
+                o = next(o.get_children())
+            else:
+                break
+        if self.spaces.generic_name(o.type) and \
+                o.type.get_canonical().spelling.replace("const ", "") == node.type.get_canonical().spelling.replace("const ", ""):
+            # `(GFP) dtime` on a value already of that type: the identity copy, so the cast goes and the
+            # value keeps its own space (a parameter's differs between the function's instances)
+            tokens = list(node.get_tokens())
+            if node.kind.name == "CSTYLE_CAST_EXPR" and tokens and tokens[0].spelling == "(":
+                close = next((i for i, t in enumerate(tokens) if t.spelling == ")"), None)
+                if close is not None:
+                    self.edits.replace(tokens[0].extent.start.offset, tokens[close].extent.end.offset, "")
+                    return
+        if self.spaces.generic_name(o.type):
+            # a copy of another space-generic value (`(GFP) dtime`): its space
+            spaces = set()
+            sp = self.spaces.gspace(o, {})
+            if sp in ("device", "constant", "threadgroup", "thread"):
+                spaces.add(sp)
+            inner = o
+            while inner.kind.name in ("UNEXPOSED_EXPR", "PAREN_EXPR") and list(inner.get_children()):
+                inner = list(inner.get_children())[-1]
+            if inner.kind.name == "DECL_REF_EXPR" and inner.referenced is not None:
+                spaces |= self.spaces.var_spaces.get(inner.referenced.get_usr(), set())
+        elif _indirection(o.type) != "ptr":
+            return              # a null: the struct's own value
+        else:
+            spaces = self._operand_spaces(o)
+        if len(spaces) != 1:
+            return
+        space = next(iter(spaces))
+        tokens = list(node.get_tokens())
+        if self.generic_type_close(tokens, name) is not None:
+            return      # `S<...>(p)` spelled out: generic_constructions gives it its space
+        at = self._spell_out_generic_alias(node, node, name)
+        done = self.__dict__.setdefault("_generic_cast_sites", set())
+        if at is not None and at not in done:
+            done.add(at)
+            self.edits.insert(at, f", {self.SPACE_INDEX[space]}", rank=-20_000)
+
+    def _spell_out_generic_alias(self, stmt, var, name):
+        """A generic local spelled through an alias (Grell-Freitas's
+        ``typedef GFLanePtr<GFReal> GFP; ... GFP zo;``): the alias cannot take
+        the space argument, so the statement spells the template out
+        (``GFLanePtr<float`` ... ``>``) and the space goes before its ``>``.
+        The offset that takes the space, or None."""
+        alias = var.type.spelling.replace("const ", "").strip()
+        full = var.type.get_canonical().spelling.replace("const ", "").strip()
+        if not full.startswith(name + "<") or not full.endswith(">") or alias == full or "<" in alias:
+            return None
+        token = next((t for t in stmt.get_tokens() if t.spelling == alias), None)
+        if token is None:
+            return None
+        start, end = token.extent.start.offset, token.extent.end.offset
+        done = getattr(self, "_spelled_aliases", None)
+        if done is None:
+            done = self._spelled_aliases = set()
+        if start not in done:
+            done.add(start)
+            self.edits.replace(start, end, full[:-1])
+            self.edits.insert(end, ">", rank=20_000)
+        return end
+
     def generic_type_close(self, tokens, name):
         """Where a ``name<...>`` among ``tokens`` takes its space argument."""
         for i in range(len(tokens) - 1):
@@ -2993,12 +3177,20 @@ class _Rewriter:
                     seen.add(c.extent.start.offset)
                     space = self._field_space(c)
                     self.edits.insert(c.extent.start.offset, f"{space} ", rank=-20_000)
+            elif c.kind == K.CXX_METHOD and self.spaces is not None and self.spaces.generic_name(c.result_type) \
+                    and c.is_definition():
+                # a plain struct's method making a space-generic value (MPAS Thompson's
+                # `TcCol<float> ff(int i) const { return TcCol<float>(f + ...); }`): its return type
+                # carries the space its returns give
+                self._generic_return_type(c)
             elif c.kind == K.FIELD_DECL and _indirection(c.type) == "ref":
                 # a reference member binds a workspace object of the caller's
-                # (woof's are locals): thread memory
+                # (woof's are locals): thread memory -- unless the struct's
+                # constructors bind it to one other space (the space analysis
+                # records the mem-initialiser's space, as for pointer fields)
                 if c.extent.start.offset not in seen:
                     seen.add(c.extent.start.offset)
-                    self.edits.insert(c.extent.start.offset, "thread ", rank=-20_000)
+                    self.edits.insert(c.extent.start.offset, f"{self._reference_field_space(c)} ", rank=-20_000)
             # (methods and constructors: the space analysis instances them
             # like free functions -- parameters, returns, per-copy edits)
             elif c.kind == K.VAR_DECL:
@@ -3071,6 +3263,19 @@ class _Rewriter:
             e = list(e.get_children())[-1]
         return e.kind.name in ("CXX_NULL_PTR_LITERAL_EXPR", "GNU_NULL_EXPR") or \
             (e.kind.name == "INTEGER_LITERAL" and self.src(e).strip() in ("0", "0L", "0UL"))
+
+    def _reference_field_space(self, field):
+        """A reference member's space: the one its constructors bind it to
+        (spaces.SpaceAnalysis.walk records it), else thread."""
+        from woof.backend.translate.spaces import field_key
+        key = field_key(field)
+        given = set(getattr(self, "_reference_field_seed", {}).get(key, set()))
+        if self.spaces is not None:
+            given |= self.spaces.ref_field_spaces.get(key, set())
+        if len(given) > 1 and not getattr(self, "_probing_fields", False):
+            self.refuse(field, f"reference member {field.spelling!r} is bound to {' and '.join(sorted(given))} "
+                               "objects; a Metal struct field has one address space")
+        return sorted(given)[0] if given else "thread"
 
     def _field_space(self, field):
         """A pointer field's space: its in-class initialiser's when it has
@@ -3404,6 +3609,11 @@ class _Rewriter:
                 self.compound_assign(node, d)
             if kind == K.LAMBDA_EXPR:
                 self.lambda_pointer_params(node)
+            if kind == K.BINARY_OPERATOR and self.spaces is not None:
+                self.cross_space_comparison(node)
+            if kind in (K.CSTYLE_CAST_EXPR, K.CXX_FUNCTIONAL_CAST_EXPR) and getattr(self, "generic_structs", None) \
+                    and self.spaces is not None and self.spaces.generic_name(node.type):
+                self.generic_cast(node)
             if kind == K.VAR_DECL and d > 0:
                 self.local_pointer_decl(node)
                 if node.storage_class == self.ci.StorageClass.STATIC and node.semantic_parent is not None \
@@ -3569,6 +3779,28 @@ class _Rewriter:
         tok = next((t for t in node.get_tokens() if t.spelling == "static"), None)
         if tok is not None:
             self.edits.replace(tok.extent.start.offset, tok.extent.end.offset, "")
+            return
+        # `static const union {...} st[] = ...`: a declaration whose type is
+        # defined in place starts its VAR_DECL after the definition, so the
+        # keyword lies before the cursor.  Walk back over the in-place type's
+        # braces to the statement's start and drop its `static` there.
+        import re
+        i, depth = node.extent.start.offset - 1, 0
+        while i >= 0:
+            ch = self.data[i:i + 1]
+            if ch == b"}":
+                depth += 1
+            elif ch == b"{":
+                if depth == 0:
+                    break           # the enclosing block opens: the statement starts after it
+                depth -= 1
+            elif ch == b";" and depth == 0:
+                break
+            i -= 1
+        found = re.search(rb"\bstatic\b", self.data[i + 1:node.extent.start.offset])
+        if found is not None:
+            at = i + 1 + found.start()
+            self.edits.replace(at, at + len(b"static"), "")
 
     def fold_to_double(self, node):
         """``(double)<integer or float literal>``, implicit: the exact word,
@@ -3621,7 +3853,8 @@ class _Rewriter:
         if ref is None or ref.kind.name not in ("FUNCTION_DECL", "CXX_METHOD") or not self.main_file(ref):
             return
         params = [c for c in ref.get_children() if c.kind.name == "PARM_DECL"]
-        for arg, parm in zip(call.get_arguments(), params):
+        from woof.backend.translate.spaces import _call_arguments
+        for arg, parm in zip(_call_arguments(call), params):
             if parm.type.get_canonical().kind.name != "FLOAT":
                 continue
             inner = arg

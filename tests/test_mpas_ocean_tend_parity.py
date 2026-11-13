@@ -83,7 +83,10 @@ def test_the_ocean_door_verify_grades_the_ported_piece():
                                                      "pressure_gradient_hmix_r4", "pressure_gradient_hmix_r8",
                                                      "full_tendencies_r4", "full_tendencies_r8",
                                                      "equation_of_state_r4", "equation_of_state_r8",
-                                                     "diagnostic_solve_r4", "diagnostic_solve_r8"]
+                                                     "diagnostic_solve_r4", "diagnostic_solve_r8",
+                                                     "tracer_advection_r4", "tracer_advection_r8",
+                                                     "tracer_hmix_r4", "tracer_hmix_r8",
+                                                     "tracer_tendency_r4", "tracer_tendency_r8"]
 
 
 @requires_gpu

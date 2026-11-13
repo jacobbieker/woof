@@ -12,10 +12,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from generic_seam_marks import needs_generic_seam
 from woof.hex import physics_suites
 from woof.hex.vertical_spec import hex_column_level_terms
 
 
+@needs_generic_seam
 def test_the_selection_appends_tke_to_the_declared_row():
     from woof.hex.cuda_suite_physics_v841 import microphysics_for
     from woof.hex.species_row import species_row_for_scheme
