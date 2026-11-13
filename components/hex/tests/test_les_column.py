@@ -142,7 +142,7 @@ def test_the_column_ceiling_is_the_selected_physics_bound():
     # a 5-level floor and no ceiling, so it adds no term.
     assert hex_column_level_ceiling(microphysics="mp_p3", pbl="mynn") == 256
     with pytest.raises(VerticalSpecError, match="no vertical-bound row"):
-        hex_column_level_ceiling(pbl="myj")
+        hex_column_level_ceiling(pbl="no-such-pbl")
     assert hex_column_level_refusal(256, microphysics="mp_p3", pbl="off") is None
     refusal = hex_column_level_refusal(257, microphysics="mp_p3", pbl="off")
     assert "hex column" in refusal and "257 levels" in refusal
