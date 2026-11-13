@@ -58,8 +58,8 @@ contains
     type (mpas_pool_type), intent(inout) :: forcingPool
     real (kind=RKIND), dimension(:,:), intent(inout) :: tracersSurfaceFlux
     integer, intent(out) :: err
-    print *, 'oracle stub: ocn_surface_land_ice_fluxes_tracers is not compiled here'
-    stop 8
+    err = 0
+    call stop_if_on('ocn_surface_land_ice_fluxes_tracers')
   end subroutine ocn_surface_land_ice_fluxes_tracers
 
 end module ocn_surface_land_ice_fluxes
@@ -96,8 +96,13 @@ contains
     type (mpas_pool_type), intent(inout) :: forcingPool
     real (kind=RKIND), dimension(:,:,:), intent(inout) :: tracersTend
     integer, intent(out) :: err
-    print *, 'oracle stub: ocn_frazil_forcing_tracers is not compiled here'
-    stop 8
+    logical, pointer :: config_use_frazil_ice_formation
+    err = 0
+    call mpas_pool_get_config(ocnConfigs, 'config_use_frazil_ice_formation', config_use_frazil_ice_formation)
+    if (config_use_frazil_ice_formation) then
+      print *, 'oracle stub: ocn_frazil_forcing_tracers is not compiled here'
+      stop 8
+    end if
   end subroutine ocn_frazil_forcing_tracers
 
 end module ocn_frazil_forcing
