@@ -6430,6 +6430,7 @@ def _consumer_rows(registry: dict) -> None:
 def _madwrf_metadata(registry: dict) -> None:
     """WRF 4.7.1 empty MP96 package and optional MAD-WRF tracer driver."""
     import dataclasses
+    from woof.core import rrtmgp
     from woof.wrf_physics_inventory import _INVENTORIES
     from woof.core.refl import SCHEME_ABSENT_REFL_10CM
     from woof.checkpoint_identity import MICROPHYSICS_ALGORITHM_IDENTITIES
@@ -6455,7 +6456,9 @@ def _madwrf_metadata(registry: dict) -> None:
                             "moment_fields":[],"refusal":"No qualified MAD-WRF mixed-scheme nest edge"},
         "offline_child": {"same_scheme":False,"refusal":"No qualified MAD-WRF offline-child route"},
         "cloud_optics": {"legacy_declares_radii":False,"rte_rrtmgp_coupling":None,
-                         "rte_rrtmgp_refusal":"MAD-WRF cloud optics are qualified with legacy RRTMG"},
+                         # The judged exclusion and remedy, as every row derives them.
+                         "rte_rrtmgp_refusal":(rrtmgp._NO_CLOUD_OPTICS_COUPLING[96] + ". "
+                                               + rrtmgp._CLOUD_OPTICS_REMEDY)},
         "lateral_forcing_dataset":None,
         "stock_wrf_export": {"inventoried":True,"reason":None,"scheme":inv.scheme,
             "registry_package":inv.registry_package,
