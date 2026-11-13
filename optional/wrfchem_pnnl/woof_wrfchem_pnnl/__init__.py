@@ -18,4 +18,6 @@ WRF_PINS = {
         "d5192f37a45a2b4084165789bdff827813043dd8d16db0958d9c652132c6e9a1",
     "share/module_model_constants.F":
         "5b80377fecdc18a5f0ad38d3b6c15cfc86ad5d76701adbbbb08a08698d0f7062",
+    "phys/module_radiation_driver.F":
+        "779875651512709c47d50ef6c1e1216ad94726f1996c5e45a0db8eb800733ffa",
 }

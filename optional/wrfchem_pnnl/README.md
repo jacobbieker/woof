@@ -21,5 +21,7 @@ and graded bitwise against a gfortran -O0 oracle of the pinned file. The
 clean-room defaults (P8 activation, P9 optics) are graded against these
 ports within a stated tolerance.
 
-Done so far: the opt-in door, and `activate` (with `maxsat`), bitwise against its oracle on 112 cases
+Done so far: the opt-in door; `activate` (with `maxsat`), bitwise against its oracle on 112 cases; and the
+column driver `mixactivate` (with `explmix`, `loadaer`, `cal_cldfra2`), one thread per column, bitwise on a
+modal and a sectional tile over two calls
 (`oracle/activate`, `woof_wrfchem_pnnl/activate.py`).

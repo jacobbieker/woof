@@ -48,5 +48,5 @@ kernel refuses by name.
 
 | WOOF file | WRF v4.7.1 source |
 | --- | --- |
-| `woof_wrfchem_pnnl/activate.cu`, `activate.py`, `tools/transcribe_activate.py` | `phys/module_mixactivate.F`: `activate`, `maxsat`, `maxsat_init`, `erf_alt`, translated by `tools/chem_f2cu` with the control-flow restatements the transcriber lists; `erfc_num_recipes` is translated only into a local cache from your own tree |
-| `oracle/activate/` (harness, extraction list, build script; the WRF files are read from your tree, not copied), `oracle/fixtures/activate/` (numeric output only) | the same routines, compiled unchanged |
+| `woof_wrfchem_pnnl/activate.cu`, `activate.py`, `tools/transcribe_activate.py` | `phys/module_mixactivate.F`: `activate`, `maxsat`, `maxsat_init`, `erf_alt`, the column driver `mixactivate` with `explmix` and `loadaer`, and `cal_cldfra2` from `phys/module_radiation_driver.F` (public WRF code), translated by `tools/chem_f2cu` with the control-flow restatements the transcriber lists; `erfc_num_recipes` is translated only into a local cache from your own tree |
+| `oracle/activate/` (harness, extraction list, build script; the WRF files are read from your tree, not copied), `oracle/fixtures/activate/` and `oracle/fixtures/mixactivate/` (numeric output only) | the same routines, compiled unchanged |

@@ -220,6 +220,7 @@ def hex_column_level_terms(
     microphysics: str | None = DEFAULT_HEX_MICROPHYSICS,
     pbl: str | None = DEFAULT_HEX_PBL,
     p_top_pa: float | None = None,
+    engine_validated: bool = False,
 ) -> tuple[tuple[str, int], ...]:
     """Every ceiling a hex column of this physics must stay under.
 
@@ -239,6 +240,15 @@ def hex_column_level_terms(
     (``legacy_radiation_layer_counts``), and how many depends on the model
     top PRESSURE, so its term is included only when ``p_top_pa`` is given:
     the driver knows it, a plan does not.
+
+    ``engine_validated=True`` is for a selection the generic column seam
+    runs (a registry option this module has no row for: ``mp_physics=2``,
+    ``acm2`` ...).  Sealing that seam runs WOOF's own resolved-physics
+    vertical preflight over EVERY selected registry component
+    (``woof.physics_compat.validate_resolved_physics_vertical_levels``, via
+    ``validate_run_config`` in ``column_physics_plan``), before the first
+    call, so a scheme without a row here is left to it instead of refused.
+    A scheme WITH a row still contributes its term.
     """
 
     from woof import physics_vertical_contract as contract
@@ -251,6 +261,8 @@ def hex_column_level_terms(
         if name is None:
             return
         key = str(name).strip().lower()
+        if key not in table and engine_validated:
+            return
         if key not in table:
             raise VerticalSpecError(
                 f"{what} {name!r} has no vertical-bound row for the hex "
@@ -307,6 +319,7 @@ def hex_column_level_refusal(
     microphysics: str | None = DEFAULT_HEX_MICROPHYSICS,
     pbl: str | None = DEFAULT_HEX_PBL,
     p_top_pa: float | None = None,
+    engine_validated: bool = False,
 ) -> str | None:
     """``None`` when ``levels`` fits, else the sentence naming what refuses it.
 
@@ -319,7 +332,8 @@ def hex_column_level_refusal(
     over = [
         (label, maximum)
         for label, maximum in hex_column_level_terms(
-            microphysics=microphysics, pbl=pbl, p_top_pa=p_top_pa
+            microphysics=microphysics, pbl=pbl, p_top_pa=p_top_pa,
+            engine_validated=engine_validated,
         )
         if levels > maximum
     ]
