@@ -95,3 +95,20 @@ def test_native_warm_start_rebuilds_level_products_before_output():
         plan = scratch_restore_plan(name, 0)
         assert plan[0:2] == ('cold', 0.0)
         assert 'before any output or step' in plan[2]
+
+
+def test_host_setup_state_takes_its_level_targets_in_numpy():
+    """A prepared-cache restore builds a host (NumPy) DomainState; the level
+    targets are stored in that module (woof go --prepare-only with
+    p_lev_diags/z_lev_diags stopped with "Implicit conversion to a NumPy
+    array is not allowed")."""
+    from woof.core.state import DomainState
+    cfg = _cfg(p_lev_diags=1, z_lev_diags=1, press_levels=(92500., 85000.),
+               z_levels=(-10., 1000., 3000.), auxhist22_interval_s=70.,
+               auxhist23_interval_s=50.)
+    state = DomainState(cfg, array_module=np)
+    press = state.existing_scratch('level_press_targets')
+    assert isinstance(press, np.ndarray)
+    np.testing.assert_array_equal(press, np.float32([92500., 85000.]))
+    np.testing.assert_array_equal(state.existing_scratch('level_z_targets'),
+                                  np.float32([-10., 1000., 3000.]))
