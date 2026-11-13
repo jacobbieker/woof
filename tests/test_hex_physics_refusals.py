@@ -18,6 +18,7 @@ import json
 
 import pytest
 
+from generic_seam_marks import needs_generic_seam
 from woof.hex import physics_suites as ps
 from woof.hex.cli import main
 
@@ -69,6 +70,7 @@ def test_off_values_are_not_refused():
                            for item in refusal.refusals), overrides
 
 
+@needs_generic_seam
 def test_cld_fraction_thompson_is_admitted_as_icloud_3():
     resolved = ps.resolve_physics(None, {"config_radt_cld_scheme": "cld_fraction_thompson"})
     assert resolved.seam == "engine"
@@ -107,7 +109,16 @@ ADMITTED = [
 ]
 
 
-@pytest.mark.parametrize("args,digest", ADMITTED, ids=[" ".join(a) or "default" for a, _ in ADMITTED])
+#: Every override here reaches the engine's generic seam, which a CPU-only host
+#: cannot plan (generic_seam_marks); the two suite-only rows run everywhere.
+ADMITTED_PARAMS = [
+    pytest.param(args, digest, id=" ".join(args) or "default",
+                 marks=() if not args or args[0] == "--physics-suite" else needs_generic_seam)
+    for args, digest in ADMITTED
+]
+
+
+@pytest.mark.parametrize("args,digest", ADMITTED_PARAMS)
 def test_admitted_options_resolve_unchanged(args, digest):
     assert _resolve_output(args) == digest
 
