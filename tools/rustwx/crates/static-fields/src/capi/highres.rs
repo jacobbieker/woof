@@ -20,7 +20,8 @@
 //!   `gpuwm_static_highres_audit_json` and released with
 //!   `gpuwm_static_highres_audit_drop`.
 //! * `gpuwm_static_highres_derive_window`: `{kind:
-//!   "terrain-window"|"global-terrain-window"|"landcover-window", ...}`
+//!   "terrain-window"|"global-terrain-window"|"reprojected-terrain-window"|
+//!   "landcover-window", ...}`
 //!   writing the derived GeoTIFF and answering its audit JSON.
 //!
 //! Additive helpers for the parity harness and the routed Python
@@ -1261,6 +1262,37 @@ fn derive_window(request: &DeriveRequest) -> Result<String, DeriveFailure> {
             };
             Ok(audit.to_string())
         }
+        "reprojected-terrain-window" => {
+            // GEM-15: per-cell UTM windows onto one geographic lattice.
+            let bounds = request.bounds.ok_or_else(|| {
+                StaticError::Invalid(
+                    "derive kind \"reprojected-terrain-window\" requires \
+                     bounds [w, s, e, n]"
+                        .into(),
+                )
+            })?;
+            let resolution = request.resolution_deg.ok_or_else(|| {
+                StaticError::Invalid(
+                    "derive kind \"reprojected-terrain-window\" requires \
+                     resolution_deg"
+                        .into(),
+                )
+            })?;
+            let (ny, nx, holes) = warp::mosaic_tiffs_reprojected(
+                &request.tiles,
+                bounds,
+                resolution,
+                &request.out_path,
+            )?;
+            Ok(serde_json::json!({
+                "output_resolution_deg": resolution,
+                "output_shape": [ny, nx], "hole_pixels": holes,
+                "total_pixels": ny * nx,
+                "resampling": "nearest (source pixel containing each lattice \
+                               centre, projected into its own UTM zone)",
+            })
+            .to_string())
+        }
         "landcover-window" => {
             let source_path = request.source.as_ref().ok_or_else(|| {
                 StaticError::Invalid("landcover-window requires a source raster".into())
@@ -1412,7 +1444,8 @@ fn derive_window(request: &DeriveRequest) -> Result<String, DeriveFailure> {
         }
         other => Err(StaticError::Invalid(format!(
             "unknown derive-window kind {other:?} (terrain-window, \
-             global-terrain-window, landcover-window)"
+             global-terrain-window, reprojected-terrain-window, \
+             landcover-window)"
         ))
         .into()),
     }

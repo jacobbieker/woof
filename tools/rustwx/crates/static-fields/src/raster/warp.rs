@@ -483,6 +483,194 @@ pub fn mosaic_tiffs(
     Ok((ny, nx, holes.into_inner(), first_nodata))
 }
 
+/// Mosaic source windows that each carry their OWN projected CRS (GEM-15's
+/// per-cell UTM zones) onto one geographic lattice of declared square
+/// `resolution` degrees over `bounds = [west, south, east, north]`.
+///
+/// The lattice is exactly the declared-resolution lattice of
+/// [`mosaic_tiffs`] (pixel centres on whole multiples of `resolution`),
+/// so a GEM-15 window and a GLO-30 window cut over the same footprint
+/// share the same rule.  Each output pixel centre is projected into each
+/// source's plane and takes the source pixel CONTAINING it (nearest, no
+/// value invented), first-writer-wins in list order; NaN, the source's
+/// nodata and anything no source reaches stay NaN (holes, counted).  Values
+/// are rounded to f32 as the declared-resolution path rounds them.
+///
+/// Returns `(ny, nx, holes)`.  Sources and output are streamed by block,
+/// as [`mosaic_tiffs`] streams them.
+pub fn mosaic_tiffs_reprojected(
+    paths: &[std::path::PathBuf],
+    bounds: [f64; 4],
+    resolution: f64,
+    out_path: &std::path::Path,
+) -> Result<(usize, usize, usize)> {
+    use super::geotiff::{self, TiffReader};
+    use super::proj::PointProjection;
+    if paths.is_empty() {
+        return Err(StaticError::Invalid(
+            "terrain window derivation requires >= 1 tile".into(),
+        ));
+    }
+    if !(resolution > 0.0 && resolution.is_finite()) {
+        return Err(StaticError::Invalid(
+            "terrain mosaic resolution must be positive".into(),
+        ));
+    }
+    struct Source {
+        nx: usize,
+        ny: usize,
+        transform: [f64; 6],
+        projection: Box<dyn PointProjection>,
+        /// Geographic [west, south, east, north] the source can reach.
+        reach: [f64; 4],
+    }
+    let sources: Vec<Source> = paths
+        .iter()
+        .map(|path| {
+            let reader = TiffReader::open(path)?;
+            let crs = reader.crs.clone().ok_or_else(|| {
+                StaticError::Invalid(format!(
+                    "reprojected terrain window: {path:?} names no CRS the                      substrate reads"
+                ))
+            })?;
+            let t = reader.transform;
+            if t[1] != 0.0 || t[3] != 0.0 || t[0] <= 0.0 || t[4] >= 0.0 {
+                return Err(StaticError::Invalid(format!(
+                    "reprojected terrain window: {path:?} is not north-up"
+                )));
+            }
+            let projection = crs.point_projection()?;
+            // Densified outline of the source, inverse-projected.
+            let (w, h) = (reader.width as f64, reader.height as f64);
+            let mut reach = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
+            const STEPS: usize = 64;
+            for k in 0..=STEPS {
+                let s = k as f64 / STEPS as f64;
+                for (c, r) in [(s * w, 0.0), (s * w, h), (0.0, s * h), (w, s * h)] {
+                    let (lon, lat) = projection.inverse(t[2] + c * t[0], t[5] + r * t[4]);
+                    if lon.is_finite() && lat.is_finite() {
+                        reach[0] = reach[0].min(lon);
+                        reach[1] = reach[1].min(lat);
+                        reach[2] = reach[2].max(lon);
+                        reach[3] = reach[3].max(lat);
+                    }
+                }
+            }
+            // Outline curvature between samples: half a degree is far more
+            // than a 1-degree cell's edges bow, and only costs a skipped
+            // quick-reject.
+            let pad = 0.5;
+            Ok(Source {
+                nx: reader.width,
+                ny: reader.height,
+                transform: t,
+                projection,
+                reach: [reach[0] - pad, reach[1] - pad, reach[2] + pad, reach[3] + pad],
+            })
+        })
+        .collect::<Result<_>>()?;
+    let (rx, ry) = (resolution, resolution);
+    let (ox, oy) = (-0.5 * resolution, 0.5 * resolution);
+    let col0 = ((bounds[0] - ox) / rx).floor() as i64;
+    let col1 = ((bounds[2] - ox) / rx).ceil() as i64;
+    let row0 = ((oy - bounds[3]) / ry).floor() as i64;
+    let row1 = ((oy - bounds[1]) / ry).ceil() as i64;
+    if col1 <= col0 || row1 <= row0 {
+        return Err(StaticError::Invalid(
+            "terrain mosaic bounds yield an empty grid".into(),
+        ));
+    }
+    let nx = (col1 - col0) as usize;
+    let ny = (row1 - row0) as usize;
+    let transform = [rx, 0.0, ox + col0 as f64 * rx, 0.0, -ry, oy - row0 as f64 * ry];
+    let holes = std::sync::atomic::AtomicUsize::new(0);
+    let workers = rayon::current_num_threads().max(1);
+    geotiff::write_band1_tiles_parallel(
+        out_path,
+        ny,
+        nx,
+        &transform,
+        &Crs::Geographic,
+        geotiff::SampleType::F32,
+        None,
+        workers,
+        std::collections::VecDeque::<(usize, TiffReader)>::new,
+        |readers, out_col, out_row, w, h| {
+            let mut out = vec![f64::NAN; w * h];
+            let lon_at = |c: usize| ox + ((col0 + (out_col + c) as i64) as f64 + 0.5) * rx;
+            let lat_at = |r: usize| oy - ((row0 + (out_row + r) as i64) as f64 + 0.5) * ry;
+            let (west, east) = (lon_at(0), lon_at(w - 1));
+            let (north, south) = (lat_at(0), lat_at(h - 1));
+            let mut src_col = vec![-1i64; w * h];
+            let mut src_row = vec![-1i64; w * h];
+            for (index, source) in sources.iter().enumerate() {
+                let reach = source.reach;
+                if east < reach[0] || west > reach[2] || north < reach[1] || south > reach[3] {
+                    continue;
+                }
+                let t = source.transform;
+                let (mut c0, mut c1, mut r0, mut r1) = (usize::MAX, 0usize, usize::MAX, 0usize);
+                for r in 0..h {
+                    let lat = lat_at(r);
+                    for c in 0..w {
+                        let slot = r * w + c;
+                        src_col[slot] = -1;
+                        if !out[slot].is_nan() {
+                            continue;
+                        }
+                        let (x, y) = source.projection.forward(lon_at(c), lat);
+                        let sc = ((x - t[2]) / t[0]).floor();
+                        let sr = ((y - t[5]) / t[4]).floor();
+                        if !(sc >= 0.0 && sr >= 0.0 && sc < source.nx as f64 && sr < source.ny as f64) {
+                            continue;
+                        }
+                        let (sc, sr) = (sc as usize, sr as usize);
+                        src_col[slot] = sc as i64;
+                        src_row[slot] = sr as i64;
+                        c0 = c0.min(sc);
+                        c1 = c1.max(sc);
+                        r0 = r0.min(sr);
+                        r1 = r1.max(sr);
+                    }
+                }
+                if c0 == usize::MAX {
+                    continue;
+                }
+                if let Some(position) = readers.iter().position(|(key, _)| *key == index) {
+                    let entry = readers.remove(position).unwrap();
+                    readers.push_back(entry);
+                } else {
+                    if readers.len() == 8 {
+                        readers.pop_front();
+                    }
+                    let mut reader = TiffReader::open(&paths[index])?;
+                    reader.set_cache_budget(MOSAIC_READER_CACHE);
+                    readers.push_back((index, reader));
+                }
+                let reader = &mut readers.back_mut().unwrap().1;
+                let sw = c1 - c0 + 1;
+                let window = reader.read_window_raw(c0, r0, sw, r1 - r0 + 1)?;
+                for slot in 0..w * h {
+                    if src_col[slot] < 0 {
+                        continue;
+                    }
+                    let value = window[(src_row[slot] as usize - r0) * sw
+                        + src_col[slot] as usize
+                        - c0];
+                    if value.is_nan() || reader.nodata == Some(value) {
+                        continue;
+                    }
+                    out[slot] = value as f32 as f64;
+                }
+            }
+            let tile_holes = out.iter().filter(|v| v.is_nan()).count();
+            holes.fetch_add(tile_holes, std::sync::atomic::Ordering::Relaxed);
+            Ok(out)
+        },
+    )?;
+    Ok((ny, nx, holes.into_inner()))
+}
+
 // ---------------------------------------------------------------------------
 // The corner grid: destination pixel corners in source pixel space
 // ---------------------------------------------------------------------------
