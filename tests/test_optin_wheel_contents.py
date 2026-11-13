@@ -31,6 +31,7 @@ OPTIONAL = REPO_ROOT / "optional"
 LICENCE_SENTENCES = {
     "wrf_hydro": "revise and copy the WRF-Hydro® software, in both object and source code",
     "nemo": "The Licensee can include the Modified or unmodified Software in a code",
+    "wrfchem_pnnl": "The MOSAIC source code is intended for research and educational",
 }
 MARKER = "WOOF-OPTIN:"
 

@@ -1,0 +1,9 @@
+# Routines copied byte for byte from phys/module_mixactivate.F (WRF v4.7.1) into
+# the wrapper module activate_extract, in this order: activate and everything it
+# calls.  erfc_num_recipes is Numerical Recipes code: it is compiled here from
+# YOUR tree and never copied into WOOF (opt-in or not).
+activate
+maxsat
+maxsat_init
+erfc_num_recipes
+erf_alt

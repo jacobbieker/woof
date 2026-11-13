@@ -23,7 +23,9 @@ repository's glibc transcriptions for `expf`/`exp`) writes the same words.
   `-DSINGLE_PRECISION` (RKIND = 4) gives `oracle-r4.npz`, RKIND = 8 gives
   `oracle-r8.npz`. build.sh fails if an object contains an FMA instruction.
   The only libm call is JM's `exp` (`expf` at RKIND 4).
-- Driver: `run_diagnostics.F90`, a self-describing one: dt, every config by
+- Driver: `run_diagnostics.F90` (its stream is `oracle_stream.F90`'s; the
+  input digests were rewritten on 2026-11-13 when pool names widened to 24
+  characters, the outputs unchanged), a self-describing one: dt, every config by
   name, every field by pool and name (`mesh`, `state`, `tracers`,
   `diagnostics`, `forcing`, `scratch`). Fields of an inactive package
   (`landIcePressurePKG`, `frazilIce`) are unassociated pointers, as MPAS

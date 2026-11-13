@@ -470,6 +470,14 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "2d9b4c6b74ebdde7fa9aa1e2491194d48a6cf2a7604fb6b8248049ea762b2efd",
+    "constructor": "compile_using_nvrtc",
+    "factory": "_module_on",
+    "factory_sha256": "5d8cb4d40d1ce80f4f85681a825814c39f42f8c60866c9e1a4a399c0594d177f",
+    "file": "woof/hex/mpas_ocean/tracer_advection_v842.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "2ead60be0e2dfc547b939721c1e0938f7c4228c761314a7ceb035ce7b36d05d3",
     "constructor": "RawKernel",
     "factory": "_device_isobaric_height",
@@ -3605,7 +3613,7 @@
    },
    {
     "file": "woof/core/kernels/nwp_hail.cu",
-    "sha256": "749cfa7a650b946e3b4683d523ad2b05f7c63f7c1c4ccfddec42382dea4891d7"
+    "sha256": "730f2016540f574978b37883002034162d28e461528e79e72c31b14b9df09dfe"
    },
    {
     "file": "woof/core/kernels/nwp_hail_bins.cuh",
@@ -4608,6 +4616,10 @@
     "sha256": "bbe6e9a9ab22521180211bb3950c1a42870a9790dc2b3ea0986a5db5ed113822"
    },
    {
+    "file": "woof/hex/mpas_ocean/tracer_advection_v842.cu",
+    "sha256": "385544b1607e8173378150bfbe1b71084d09af60c00d415d6b29329de502fb06"
+   },
+   {
     "file": "woof/hex/mpas_seaice/evp_variational_v842.cu",
     "sha256": "359730130db2e446b9e99f1336eb9710953c20bf1ee98da376a5115e957b3dc9"
    },
@@ -5520,6 +5532,10 @@
    {
     "file": "woof/hex/mpas_ocean/tend_v842.py",
     "sha256": "09d48df40b326dd384e71f097233c60140ee463caa8bbb5dcfcdcc7a4ea51008"
+   },
+   {
+    "file": "woof/hex/mpas_ocean/tracer_advection_v842.py",
+    "sha256": "3802051b4974d609e5544ac541e6c865ba2fe63a52373fe5e42e6f5201aab20b"
    },
    {
     "file": "woof/hex/mpas_seaice/evp_v842.py",

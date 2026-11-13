@@ -24,13 +24,16 @@ def scratch_shapes(cfg):
 def initialize(state, cfg):
     if not active(cfg):
         return
-    from woof.core.state import cp
+    from woof.core.state import _array_module_for
     for name, shape in scratch_shapes(cfg).items():
         state.scratch(shape, name)
-    if cfg.p_lev_diags:
-        state.existing_scratch('level_press_targets')[...] = cp.asarray(cfg.press_levels, dtype=cp.float32)
-    if cfg.z_lev_diags:
-        state.existing_scratch('level_z_targets')[...] = cp.asarray(cfg.z_levels, dtype=cp.float32)
+    # The target's own module: a prepared-cache restore builds a host (NumPy)
+    # setup state, and a CuPy right-hand side cannot be stored into it.
+    for flag, slot, levels in ((cfg.p_lev_diags, 'level_press_targets', cfg.press_levels),
+                               (cfg.z_lev_diags, 'level_z_targets', cfg.z_levels)):
+        if flag:
+            target = state.existing_scratch(slot)
+            target[...] = _array_module_for(target).asarray(levels, dtype=np.float32)
 
 
 def capture_atmosphere(state, cfg, atmosphere):
