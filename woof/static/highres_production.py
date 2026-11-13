@@ -67,6 +67,7 @@ import json
 import math
 import os
 import re
+import sys
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -89,6 +90,9 @@ from .highres_fetch import (COPERNICUS_DEM_VERTICAL_DATUM,
                             SOILGRIDS_DEPTHS, SOILGRIDS_LICENSE,
                             SOILGRIDS_NODATA, SOILGRIDS_SCALE,
                             SOILGRIDS_SOURCE_URL, TERRAIN_SOURCES,
+                            EXPERIMENTAL_TERRAIN_SOURCES,
+                            GEM15_EXPERIMENTAL_WARNING,
+                            GEM15_VERTICAL_DATUM,
                             THREE_DEP_LICENSE,
                             THREE_DEP_SOURCE_URL, CoverageError,
                             LandcoverSource,
@@ -123,7 +127,9 @@ US_COVERAGE_ENVELOPE = FootprintBBox(
 #: reaches part of the footprint and "terrain" where it reaches none of
 #: it, because that is the only accurate thing available there.
 _FIELDS_CHOICES = ("auto", "all", "terrain")
-_TERRAIN_SOURCE_CHOICES = ("auto",) + tuple(sorted(TERRAIN_SOURCES))
+#: The experimental rows are named choices too, never ``auto``.
+_TERRAIN_SOURCE_CHOICES = (("auto",) + tuple(sorted(TERRAIN_SOURCES))
+                           + tuple(sorted(EXPERIMENTAL_TERRAIN_SOURCES)))
 #: ``landcover_source`` choices: "auto" is
 #: :data:`~woof.static.highres_fetch.DEFAULT_LANDCOVER_SOURCE` everywhere.
 _LANDCOVER_SOURCE_CHOICES = ("auto",) + tuple(sorted(LANDCOVER_SOURCES))
@@ -716,6 +722,42 @@ def _resolve_plan(config: HighresStaticConfig, bbox: FootprintBBox
     return mode, coverage
 
 
+def _experimental_terrain(coverage, bbox: FootprintBBox, grid=None,
+                          domain_id=None):
+    """Route an experimental terrain row; ``(coverage, selection)``.
+
+    An established row comes back unchanged with ``selection`` None, so
+    every default receipt is exactly what it was.  A GEM-15 row prints
+    :data:`~woof.static.highres_fetch.GEM15_EXPERIMENTAL_WARNING`, then
+    takes Copernicus GLO-30 instead, with a second warning, wherever
+    :func:`woof.static.gem15.fallback_reason` says GEM-15 may not serve
+    the terrain window (an excluded country, India's offset band, outside
+    61 S .. 84 N, or no published cell).  ``selection`` records what was
+    asked for and what was used, for the receipt.
+    """
+    if not coverage.experimental:
+        return coverage, None
+    from . import gem15
+
+    tag = ("[static.highres]" if domain_id is None
+           else f"[static.highres] d{int(domain_id):02d}:")
+    print(f"{tag} WARNING: terrain_source = \"{coverage.source_id}\": "
+          f"{GEM15_EXPERIMENTAL_WARNING}", file=sys.stderr, flush=True)
+    selection = {"requested": coverage.source_id, "experimental": True,
+                 "warning": GEM15_EXPERIMENTAL_WARNING}
+    reason = gem15.fallback_reason(_terrain_bbox(bbox, grid),
+                                   coverage.source_id)
+    if reason is None:
+        selection["used"] = coverage.source_id
+        return coverage, selection
+    fallback = terrain_source_coverage(gem15.FALLBACK_SOURCE)
+    print(f"{tag} WARNING: {coverage.source_id} is not used for this "
+          f"domain: {reason}; its terrain comes from {fallback.source_id} "
+          "instead", file=sys.stderr, flush=True)
+    selection.update({"used": fallback.source_id, "fallback_reason": reason})
+    return fallback, selection
+
+
 # ---------------------------------------------------------------------------
 # Source binding
 # ---------------------------------------------------------------------------
@@ -799,6 +841,9 @@ def _fetch_terrain(bbox: FootprintBBox, cache_root: Path, coverage, *,
         manifest["terrain_window"] = window.receipt()
         return bound, manifest
 
+    if coverage.experimental:
+        return _fetch_gem15_terrain(bbox, cache_root, coverage)
+
     if coverage.source_id == "copernicus-dem-glo30":
         with prep_stage("static_terrain_fetch", label="Fetch high-resolution terrain"):
             tiles, absent = fetch_copernicus_dem_tiles(bbox, cache_root,
@@ -833,6 +878,45 @@ def _fetch_terrain(bbox: FootprintBBox, cache_root: Path, coverage, *,
                     count=len(tiles)):
         window, window_audit = derive_global_terrain_window(
             tiles, bbox, cache_root, sea_level_fill=None, source_nodata=nodata)
+    bound = _bound(
+        window, source_id=coverage.source_id, role="terrain",
+        source_url=coverage.source_url, license_id=coverage.license_id,
+        license_url=coverage.license_url,
+        nominal_resolution=coverage.nominal_resolution)
+    manifest["terrain_window"] = window.receipt()
+    manifest["terrain_window_audit"] = window_audit
+    return bound, manifest
+
+
+def _fetch_gem15_terrain(bbox: FootprintBBox, cache_root: Path, coverage):
+    """GEM-15: range-read the blocks under ``bbox`` from each published
+    cell, mosaic the UTM windows onto the half-arc-second lattice, bind
+    it.  Same ``(bound, manifest)`` contract as :func:`_fetch_terrain`; an
+    unpublished square is named and its cells keep the baseline."""
+    from . import gem15
+
+    with prep_stage("static_terrain_fetch",
+                    label="Fetch high-resolution terrain"):
+        windows, gem_manifest = gem15.fetch_gem15_windows(
+            bbox, cache_root, coverage.source_id)
+    manifest = {
+        "terrain_source": coverage.source_id,
+        "terrain_tiles": [item.receipt() for item in windows],
+        "terrain_tiles_absent": [
+            f"{lat}/{lon}" for lat, lon
+            in gem_manifest["gem15_unpublished_squares"]],
+        "terrain_window": None,
+        "terrain_window_audit": None,
+        "terrain_vertical_datum": GEM15_VERTICAL_DATUM,
+        "terrain_bytes_fetched": gem_manifest["terrain_bytes_fetched"],
+        "gem15": gem_manifest,
+    }
+    if not windows:
+        return None, manifest
+    with prep_stage("static_terrain_window",
+                    label="Build terrain source window", count=len(windows)):
+        window, window_audit = gem15.derive_gem15_window(windows, bbox,
+                                                         cache_root)
     bound = _bound(
         window, source_id=coverage.source_id, role="terrain",
         source_url=coverage.source_url, license_id=coverage.license_id,
@@ -1430,6 +1514,7 @@ def _apply(baseline, grid, *, config: HighresStaticConfig,
     _require_cut_frame_window(bbox)
     landcover_row = _select_landcover(config)
     mode, coverage = _resolve_plan(config, bbox)
+    coverage, selection = _experimental_terrain(coverage, bbox, grid)
     if mode == "all":
         # The land-use leg targets one inventory: the crosswalk's category
         # numbers are only meaningful against MODIS 21.
@@ -1438,10 +1523,10 @@ def _apply(baseline, grid, *, config: HighresStaticConfig,
     if mode == "terrain":
         smoothing_kw = {} if terrain_smoothing.is_default else {
             "terrain_smoothing": terrain_smoothing}
-        return _apply_terrain_only(baseline, grid, config=config,
-                                   coverage=coverage, bbox=bbox,
-                                   urlopen=urlopen, landcover=landcover_row,
-                                   **smoothing_kw)
+        fields, detail = _apply_terrain_only(
+            baseline, grid, config=config, coverage=coverage, bbox=bbox,
+            urlopen=urlopen, landcover=landcover_row, **smoothing_kw)
+        return fields, _with_selection(detail, selection)
 
     soil_kw = ({} if config.soil_source == "soilgrids"
                else {"soil_source": config.soil_source})
@@ -1551,7 +1636,14 @@ def _apply(baseline, grid, *, config: HighresStaticConfig,
         detail["unchanged_reason"] = (
             "all-water footprint: the baseline calls every cell water, and "
             "the high-resolution sources agree, so no cell changed")
-    return merged, detail
+    return merged, _with_selection(detail, selection)
+
+
+def _with_selection(detail: dict, selection) -> dict:
+    """Add the experimental-source record; a default run gains nothing."""
+    if selection is not None:
+        detail["terrain_source_selection"] = selection
+    return detail
 
 
 def load_static_highres(config_path, *, run_config=None) -> HighresStaticConfig | None:

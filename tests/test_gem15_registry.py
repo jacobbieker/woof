@@ -39,15 +39,16 @@ def test_rows_are_experimental_cc_by_and_attributed(source_id):
     assert gem15.source_row(source_id) is row
 
 
-def test_rows_are_not_selectable_and_established_echoes_unchanged():
-    # Not wired yet: never in the ``terrain_source`` registry, so neither
-    # ``auto`` nor a named choice can reach them.
+def test_rows_are_named_only_and_established_echoes_unchanged():
+    # Never in the established registry, so ``auto`` and the default rows
+    # cannot reach them; a named lookup finds them.
     assert not set(hf.EXPERIMENTAL_TERRAIN_SOURCES) & set(hf.TERRAIN_SOURCES)
     for row in hf.TERRAIN_SOURCES.values():
         assert row.experimental is False
         assert "experimental" not in row.echo()
-    with pytest.raises(hf.CoverageError):
-        hf.terrain_source_coverage("gem15-dtm")
+    assert hf.terrain_source_coverage("gem15-dtm").experimental
+    with pytest.raises(hf.CoverageError, match="gem15-dsm"):
+        hf.terrain_source_coverage("gem15-xyz")
 
 
 def test_datum_and_lattice_constants():

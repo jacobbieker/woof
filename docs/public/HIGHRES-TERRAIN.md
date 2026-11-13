@@ -299,6 +299,7 @@ cache_root = "D:/gpuwm-cache/highres"
 
 # Optional. Defaults shown.
 terrain_source   = "auto"   # auto | copernicus-dem-glo30 | srtm-gl1 | usgs-3dep-13as
+                            # experimental, by name only: gem15-dtm | gem15-dsm
 landcover_source = "auto"   # auto | cglc-modis-lcz | annual-nlcd
 fields           = "auto"   # auto | all | terrain
 on_refuse        = "error"  # required coverage failures stop the run
@@ -311,6 +312,14 @@ domain wholly outside that source's published coverage refuses with the
 source id, the footprint and how far past the edge it lies, and a domain
 that only partly leaves it is built, the cells beyond taking the baseline
 terrain.
+
+`terrain_source = "gem15-dtm"` or `"gem15-dsm"` selects the experimental
+GEM-15 models ([below](#gem-15-experimental-15-m)). `auto` never picks
+either; every run that names one prints the experimental warning, and a
+domain GEM-15 does not serve takes Copernicus GLO-30 with a second
+warning. The receipt's `terrain_source` names the dataset actually used and
+`terrain_source_selection` records what was asked for, what was used and
+why.
 
 `landcover_source = "auto"` uses CGLC-MODIS-LCZ everywhere;
 `"annual-nlcd"` pins the United States collection.
