@@ -25,6 +25,16 @@ from woof.verify.mpas_ocean_tend_oracle import PRECISIONS, bit_mismatches
 
 FIXTURE_DIR = (Path(__file__).resolve().parents[2] / "tests" / "data"
                / "oracles" / "mpas_ocean_tendency")
+#: The RKIND 8 run of the bulk wind stress, which needs glibc's binary64
+#: cos/sin: its words are in oracle-r8-glibc239.npz, and the port runs it only
+#: under the opt-in LGPL transcription (WOOF_GLIBC239_LIBM64=1)
+R8_GLIBC239 = "r8-glibc239"
+#: make_fixture's extra precisions, each with the binary it runs
+EXTRA_PRECISIONS = {R8_GLIBC239: "r8"}
+
+
+def _base(precision: str) -> str:
+    return EXTRA_PRECISIONS.get(precision, precision)
 #: run_tendency.F90's flag and real config order
 FLAGS = ("config_disable_vel_all_tend", "config_disable_thick_all_tend", "config_use_mom_del2",
          "config_use_Leith_del2", "config_use_mom_del4", "config_use_bulk_wind_stress",
@@ -64,7 +74,7 @@ CASES = (
      {"config_pressure_gradient_type": "pressure_and_zmid", "config_use_mom_del2": True,
       "config_use_bulk_thickness_flux": True}),
     # the bulk wind stress needs glibc cosf/sinf: RKIND 4 only
-    ("jts_rk4_bulk_drag", 20261131, 36, 24, True, True, ("r4",),
+    ("jts_rk4_bulk_drag", 20261131, 36, 24, True, True, ("r4", R8_GLIBC239),
      {"config_pressure_gradient_type": "Jacobian_from_TS", "config_use_mom_del4": True,
       "config_use_Leith_del2": True, "config_use_bulk_wind_stress": True, "config_use_bulk_thickness_flux": True,
       "config_use_explicit_bottom_drag": True, "config_Rayleigh_friction": True,
@@ -172,7 +182,7 @@ def _shape(name: str, case: dict) -> tuple[int, ...]:
 
 def input_bytes(case: dict, precision: str) -> bytes:
     """run_tendency.F90's input stream for ``case`` at ``precision``."""
-    real = np.dtype(PRECISIONS[precision]).newbyteorder("<")
+    real = np.dtype(PRECISIONS[_base(precision)]).newbyteorder("<")
     c = case["configs"]
     head = np.array([case["nCells"], case["nEdges"], case["nVertices"], case["maxEdges"], case["maxEdges2"],
                      case["vertexDegree"], case["nVertLevels"], case["nTracers"], case["indexT"], case["indexS"],
@@ -192,12 +202,12 @@ def input_digest(case: dict, precision: str) -> str:
 
 
 def read_outputs(raw: bytes, case: dict, precision: str) -> dict[str, np.ndarray]:
-    real = np.dtype(PRECISIONS[precision]).newbyteorder("<")
+    real = np.dtype(PRECISIONS[_base(precision)]).newbyteorder("<")
     out, off = {}, 0
     for name in OUT_FIELDS:
         shape = _shape(name, case)
         n = int(np.prod(shape))
-        out[name] = np.frombuffer(raw, real, n, off).reshape(shape).astype(PRECISIONS[precision])
+        out[name] = np.frombuffer(raw, real, n, off).reshape(shape).astype(PRECISIONS[_base(precision)])
         off += real.itemsize * n
     if off != len(raw):
         raise ValueError(f"oracle output: {len(raw) - off} trailing bytes")
@@ -214,7 +224,7 @@ def run_gpu(case: dict, precision: str) -> dict[str, np.ndarray]:
     import cupy as cp
     from woof.hex.mpas_ocean import forcing_v842 as fv
 
-    dtype = PRECISIONS[precision]
+    dtype = PRECISIONS[_base(precision)]
     dev = {name: cp.asarray(np.ascontiguousarray(case[name], np.int32)) for name in INT_FIELDS}
     for name in MESH_REAL_FIELDS + STATE_FIELDS + DIAG_FIELDS + FORCING_FIELDS + OUT_FIELDS:
         dev[name] = cp.asarray(np.ascontiguousarray(case[name]).astype(dtype))

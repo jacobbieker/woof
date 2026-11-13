@@ -44,7 +44,8 @@ def test_case_inputs_are_the_recorded_bytes():
     recorded = dict(reversed(line.split()) for line in
                     (oo.FIXTURE_DIR / "inputs.sha256").read_text(encoding="utf-8").splitlines())
     assert recorded == {f"{case['name']}/{p}": oo.input_digest(case, p)
-                        for p in oo.PRECISIONS for case in oo.cases() if p in case["precisions"]}
+                        for p in (*oo.PRECISIONS, *oo.EXTRA_PRECISIONS) for case in oo.cases()
+                        if p in case["precisions"]}
 
 
 def test_fixture_covers_the_branches():
@@ -61,16 +62,18 @@ def test_fixture_covers_the_branches():
         assert min(column) < 1 < max(column)
         if case["configs"]["config_use_explicit_bottom_drag"] or case["configs"]["config_Rayleigh_bottom_friction"]:
             assert (case["maxLevelEdgeTop"] >= 1).all()
-    assert any("r8" not in case["precisions"] and case["configs"]["config_use_bulk_wind_stress"]
-               for case in all_cases)
-    for precision in oo.PRECISIONS:
+    # the bulk wind stress at RKIND 8 is the opt-in's fixture, not the default one
+    assert any("r8" not in case["precisions"] and oo.R8_GLIBC239 in case["precisions"]
+               and case["configs"]["config_use_bulk_wind_stress"] for case in all_cases)
+    for precision in (*oo.PRECISIONS, *oo.EXTRA_PRECISIONS):
         fixture = oo.load_fixture(precision)
         assert set(fixture) == {c["name"] for c in all_cases if precision in c["precisions"]}
         assert all(np.isfinite(v).all() for c in fixture.values() for v in c.values())
 
 
-def test_unported_switches_are_refused_by_name():
+def test_unported_switches_are_refused_by_name(monkeypatch):
     from woof.hex.mpas_ocean import forcing_v842 as fv
+    monkeypatch.setenv("WOOF_GLIBC239_LIBM64", "0")
     base = dict(fv.DEFAULT_CONFIGS)
     for knob, value, precision in (("config_land_ice_flux_mode", "standalone", "r4"),
                                    ("config_use_frazil_ice_formation", True, "r4"),
@@ -106,9 +109,23 @@ def test_a_dry_edge_refuses_the_bottom_terms():
         assert knob in str(exc.value)
 
 
+def test_the_glibc_opt_in_lifts_the_rkind_8_bulk_wind_stress(monkeypatch):
+    from woof.hex.mpas_ocean import forcing_v842 as fv
+    from woof.hex.mpas_ice import rkind
+    configs = {**fv.DEFAULT_CONFIGS, "config_use_bulk_wind_stress": True}
+    monkeypatch.setenv("WOOF_GLIBC239_LIBM64", "1")
+    if not rkind.trig64():
+        pytest.skip("the opt-in transcription is not in this checkout")
+    fv.refuse_unported(configs, "r8")
+    assert "g239_cos" in fv.module_source("r8") and "BW_COS(angleEdge" in fv.module_source("r8")
+
+
 @requires_gpu
-@pytest.mark.parametrize("precision", sorted(oo.PRECISIONS))
+@pytest.mark.parametrize("precision", sorted(oo.PRECISIONS) + [oo.R8_GLIBC239])
 def test_gpu_matches_the_v842_oracle_word_for_word(precision):
+    from woof.hex.mpas_ice import rkind
+    if precision == oo.R8_GLIBC239 and not rkind.trig64():
+        pytest.skip("the RKIND 8 bulk wind stress needs WOOF_GLIBC239_LIBM64=1")
     report = oo.measure(precision)
     bad = {case: {k: v for k, v in fields.items() if v} for case, fields in report.items()}
     assert not any(bad.values()), bad

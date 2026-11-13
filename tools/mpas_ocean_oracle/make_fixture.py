@@ -18,7 +18,9 @@ diagnostics`` runs ``run_diagnostics_{r4,r8}`` into
 ``--piece vert_transport`` ``run_vert_transport_{r4,r8}`` into ``tests/data/oracles/mpas_ocean_vert_transport``,
 ``--piece btr_subcycle`` ``run_btr_subcycle_{r4,r8}`` into ``tests/data/oracles/mpas_ocean_btr_subcycle``,
 ``--piece split_step`` ``run_split_step_{r4,r8}`` into ``tests/data/oracles/mpas_ocean_split_step``
-(their cases are built per precision).  Writes ``oracle-r4.npz`` and
+(their cases are built per precision).  A piece's ``EXTRA_PRECISIONS`` (the
+tendency's ``r8-glibc239``: its RKIND 8 bulk wind stress) add fixtures run by
+the binary they name.  Writes ``oracle-r4.npz`` and
 ``oracle-r8.npz`` (``<case>/<field>``) and ``inputs.sha256`` (every case's
 input-stream digest at each precision).
 """
@@ -77,13 +79,15 @@ def main() -> int:
     args.out = args.out or oo.FIXTURE_DIR
     args.out.mkdir(parents=True, exist_ok=True)
     digests = []
-    for precision in oo.PRECISIONS:
+    extra = getattr(oo, "EXTRA_PRECISIONS", {})
+    for precision in (*oo.PRECISIONS, *extra):
         arrays: dict[str, np.ndarray] = {}
         per_precision = getattr(oo, "CASES_PER_PRECISION", False)
         for case in (oo.cases(precision) if per_precision else oo.cases()):
             if precision not in case.get("precisions", oo.PRECISIONS):
                 continue
-            for field, value in run_case(oo, args.build_dir / f"{stem}_{precision}", case, precision).items():
+            binary = args.build_dir / f"{stem}_{extra.get(precision, precision)}"
+            for field, value in run_case(oo, binary, case, precision).items():
                 arrays[f"{case['name']}/{field}"] = value
             digest = oo.input_digest(case) if per_precision else oo.input_digest(case, precision)
             digests.append(f"{digest}  {case['name']}/{precision}")
