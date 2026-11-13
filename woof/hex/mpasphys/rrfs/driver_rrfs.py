@@ -388,6 +388,11 @@ def resolve_namelist(text: str, *, backends: Mapping[str, str] | None = None,
     if any(key in afwa.OPTIONS for key in (str(k).casefold() for k in groups.get(afwa.GROUP, {}))):
         raise ValueError(f"&{afwa.GROUP} config_afwa_*_opt are not available on the RRFS fork route; "
                          "they are MPAS-A v8.4.2 suite-route options")
+    from ...mpasdiag import reduction_diag_v842 as reduce
+    if any(key in reduce.OPTIONS for key in (str(k).casefold() for k in groups.get(reduce.GROUP, {}))):
+        raise ValueError(f"&{reduce.GROUP} CLWRF / RASM / surface_energy_diag options (config_output_diagnostics, "
+                         "config_mean_diag, config_diurnal_diag, config_surface_energy_diag, ...) are not available on the "
+                         "RRFS fork route; they are MPAS-A v8.4.2 suite-route options")
     for group, keys in spec["registry_groups"].items():
         for key, value in groups.get(group, {}).items():
             if key not in keys:
