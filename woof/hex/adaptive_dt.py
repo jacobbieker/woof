@@ -660,8 +660,8 @@ class AdaptiveRun:
         import numpy as np
 
         driver, backend = self.stack["driver"], self.stack["backend"]
-        driver.config = dataclasses.replace(driver.config, config_dt=float(plan.dt),
-                                            config_number_of_sub_steps=int(plan.substeps))
+        driver.readmit_adaptive_step(dataclasses.replace(driver.config, config_dt=float(plan.dt),
+                                                         config_number_of_sub_steps=int(plan.substeps)))
         regional = getattr(driver, "regional_v841", None)
         if regional is not None and hasattr(regional, "outer_dt"):
             regional.outer_dt = float(plan.dt)

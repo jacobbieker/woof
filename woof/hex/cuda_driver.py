@@ -5536,6 +5536,34 @@ class CudaDryDycoreDriver:
         )
         return CudaDeviceStepResult(result_atmosphere, receipt)
 
+    #: The configuration fields the hex adaptive clock (woof.hex.adaptive_dt) may change between steps.
+    ADAPTIVE_STEP_FIELDS = frozenset({"config_dt", "config_number_of_sub_steps"})
+
+    def readmit_adaptive_step(self, config: DryDycoreConfig) -> None:
+        """Admit the next step's length (woof.hex.adaptive_dt) and nothing else.
+
+        The admitted configuration is what every step re-checks ("CUDA configuration changed after
+        admission"); under the adaptive clock the step and its acoustic substep count change by design, so
+        they alone are re-admitted here, and a change to any other field is still refused.  A linked
+        authority ruler binds one configuration digest, so a run that carries one keeps its fixed step.
+        """
+
+        if self.authority_ruler is not None:
+            raise ConfigurationRefusal(
+                "adaptive_timestep", True,
+                "a linked authority ruler binds one configuration digest, so its step cannot vary",
+                "no authority ruler, or the fixed step",
+            )
+        payload = cuda_configuration_payload(config)
+        changed = sorted(name for name, value in payload.items()
+                         if self.configuration.get(name) != value and name not in self.ADAPTIVE_STEP_FIELDS)
+        if changed or set(payload) != set(self.configuration):
+            raise ValueError(f"the adaptive step may change only {sorted(self.ADAPTIVE_STEP_FIELDS)}, "
+                             f"not {changed or sorted(set(payload) ^ set(self.configuration))}")
+        self.config = config
+        self.configuration = payload
+        self.configuration_sha256 = canonical_sha256(payload)
+
     def step_device_with_physics(
         self, physics_tendencies: Any
     ) -> CudaV841PhysicsStepCandidate:
