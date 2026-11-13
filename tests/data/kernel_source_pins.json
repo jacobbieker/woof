@@ -595,7 +595,8 @@
     "wsm3": "df13c530aac2f4a2f44d3ddc42ed8e1a09d1424f0a920934b37c586286ead2b0",
     "wsm5": "2a096f417e2e57f28b2e170c7f56cfbcaa064069e8b8cbc7cb2f35e84a2e6704",
     "wsm6r": "0551464ba27713acf90df5ece69ef3c9ab9cedb191ef838ed63fe506d48d0c2c",
-    "chem_radm2_emiss": "77443617d519d649a5640c7bbf9926ba558b91a6f377327a51013fb97790ae5d"
+    "chem_radm2_emiss": "77443617d519d649a5640c7bbf9926ba558b91a6f377327a51013fb97790ae5d",
+    "chem_modal_optics": "d320574ffe24079ab5d05a1555e2d8d4b68c054f479806fe4074d19593df797b"
   },
   "schema": "gpuwm-kernel-source-pins-v1"
 }

@@ -182,13 +182,14 @@ def chem_opt_for(table) -> int:
 
 
 def refusal(cfg):
-    if int(getattr(cfg, "aer_ra_feedback", 0)) != 0:
-        return ("aer_ra_feedback = 1 hands Fast-TUV the SORGAM aerosol optical "
-                "depths (ftuv_driver), which no ported optics process computes "
-                "for these rows yet")
     from woof.chem_table import load
 
     table = load(cfg)
+    if (int(getattr(cfg, "aer_ra_feedback", 0)) != 0 and table is not None
+            and not table.rows_for(SORGAM_KEY)):
+        return ("aer_ra_feedback = 1 hands Fast-TUV the SORGAM aerosol optical "
+                "depths (ftuv_driver), and this selection has no SORGAM aerosol "
+                "(RADM2 alone, chem_opt = 1)")
     if table is not None and len(rows(table)) != 1:
         return ("photolysis.ftuv reads one ozone row (the column the TUV "
                 f"radiative transfer sees); {[r.name for r in rows(table)]} "
@@ -219,8 +220,19 @@ def step(ctx, dt, ktau):
               "xlat": cp.ascontiguousarray(ctx.met("xlat"), dtype=cp.float32),
               "xlong": cp.ascontiguousarray(ctx.met("xlong"), dtype=cp.float32)}
     clock = ctx.clock
+    feedback = int(getattr(ctx.cfg, "aer_ra_feedback", 0) or 0)
+    aerosol_optics = None
+    if feedback:
+        # The SORGAM optics at this model time (woof.core.chem_modal_optics,
+        # the default build's clean-room optics): tauaer1..4, waer1..4,
+        # gaer1..4, as ftuv_driver reads them.
+        from woof.core.chem_modal_optics import sorgam_optics
+        optics = sorgam_optics(ctx)
+        aerosol_optics = [cp.ascontiguousarray(optics[name][i])
+                          for name in ("tauaer", "waer", "gaer") for i in range(4)]
     out = launch_ftuv(fields, chem_opt=chem_opt_for(ctx.table),
                       julday=int(clock.julday), gmt=float(clock.gmt),
-                      curr_secs=float(clock.curr_secs))
+                      curr_secs=float(clock.curr_secs), aer_ra_feedback=feedback,
+                      aerosol_optics=aerosol_optics)
     for name in PHOTOLYSIS:
         ctx.diag[f"ph_{name}"][...] = out[name]

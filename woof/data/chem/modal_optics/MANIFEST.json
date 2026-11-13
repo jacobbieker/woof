@@ -1,0 +1,121 @@
+{
+ "classes": [
+  "water",
+  "inorganic",
+  "sea_salt",
+  "organic",
+  "elemental_carbon",
+  "mineral"
+ ],
+ "fine_ln_x": [
+  -11.512925464970229,
+  11.512925464970229,
+  0.01
+ ],
+ "generator": "tools/chem_modal_optics/make_tables.py",
+ "ln_k": [
+  -11.512925464970229,
+  1.3862943611198906,
+  18
+ ],
+ "ln_xg": [
+  -6.907755278982137,
+  4.605170185988092,
+  47
+ ],
+ "longwave_band_cm-1": [
+  [
+   10,
+   350
+  ],
+  [
+   350,
+   500
+  ],
+  [
+   500,
+   630
+  ],
+  [
+   630,
+   700
+  ],
+  [
+   700,
+   820
+  ],
+  [
+   820,
+   980
+  ],
+  [
+   980,
+   1080
+  ],
+  [
+   1080,
+   1180
+  ],
+  [
+   1180,
+   1390
+  ],
+  [
+   1390,
+   1480
+  ],
+  [
+   1480,
+   1800
+  ],
+  [
+   1800,
+   2080
+  ],
+  [
+   2080,
+   2250
+  ],
+  [
+   2250,
+   2380
+  ],
+  [
+   2380,
+   2600
+  ],
+  [
+   2600,
+   3250
+  ]
+ ],
+ "n": [
+  0.3,
+  3.2,
+  59
+ ],
+ "schema": "woof.chem.modal_optics.v1",
+ "sha256": {
+  "mie_lognormal.v1.npy": "79e115f831955db24c253e95818285eea9b8670b08fa5f99d270e5d723adfa45",
+  "refractive_index.v1.json": "6cddb266efff968698966e89b75d7edfb92c8a52c210c8a4383e605f39cfea54"
+ },
+ "shortwave_um": [
+  0.3,
+  0.4,
+  0.6,
+  0.999
+ ],
+ "sigma_g": [
+  1.7,
+  2.0,
+  2.5
+ ],
+ "table_axes": [
+  "sigma (Aitken, accumulation, coarse)",
+  "quantity (ln E_abs, ln E_sca, g)",
+  "ln x_g",
+  "n",
+  "ln k"
+ ],
+ "x_mie_max": 3000.0
+}
