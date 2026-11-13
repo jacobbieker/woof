@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from hashlib import sha256
 import json
 import math
+import re
 import time
 from types import MappingProxyType
 from typing import Any
@@ -1515,6 +1516,7 @@ CUDA_GWDO_V841_KERNEL_SHA256 = sha256(_CUDA_SOURCE.encode("utf-8")).hexdigest()
 _KERNEL_NAME = "bl_ysu_gwdo_v841_f32"
 _KERNELS: dict[tuple[int, int], Any] = {}
 _NLEV_DEFINE = "#define GWDO_NLEV 55\n"
+_NLEV_LINE = re.compile(r"^#define GWDO_NLEV (\d+)\n", re.M)
 
 
 def gwdo_kernel_source(nlev: int) -> str:
@@ -1528,16 +1530,23 @@ def gwdo_kernel_source(nlev: int) -> str:
     """
 
     nlev = int(nlev)
-    if nlev == GWDO_ANCHORED_LEVELS:
-        return _CUDA_SOURCE
     if not 3 <= nlev <= GWDO_MAX_LEVELS:
         raise ValueError(
             f"YSU-GWDO column of {nlev} levels is outside 3..{GWDO_MAX_LEVELS}; "
             f"{GWDO_MAX_LEVELS} is the deepest column it compiles (the hex column's ceiling)"
         )
-    if _CUDA_SOURCE.count(_NLEV_DEFINE) != 1:  # pragma: no cover - source guard
+    # The mesh binding (mpas_mesh_binding._rebind_gwdo_kernel_dimension)
+    # rewrites this module's source to the bound column's define, so the
+    # define is matched at whatever count it holds.  THE BREAKAGE (hex option
+    # matrix, plan 1.3, 2026-11-12): matching only the anchored 55 refused
+    # every YSU-GWDO run on a mesh of any other level count with "GWDO source
+    # no longer carries one GWDO_NLEV define".
+    defines = _NLEV_LINE.findall(_CUDA_SOURCE)
+    if len(defines) != 1:  # pragma: no cover - source guard
         raise RuntimeError("GWDO source no longer carries one GWDO_NLEV define")
-    return _CUDA_SOURCE.replace(_NLEV_DEFINE, f"#define GWDO_NLEV {nlev}\n")
+    if int(defines[0]) == nlev:
+        return _CUDA_SOURCE
+    return _NLEV_LINE.sub(f"#define GWDO_NLEV {nlev}\n", _CUDA_SOURCE, count=1)
 
 
 def gwdo_kernel_variant(nlev: int) -> dict[str, Any]:
