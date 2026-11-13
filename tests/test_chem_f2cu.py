@@ -276,3 +276,71 @@ def test_a_whole_automatic_array_takes_its_bound_from_the_dummy_bounds():
     tr.add_source(src, ["fill"])
     with pytest.raises(NotImplementedError, match="needs a bound"):
         tr.emit_routine(tr.routines["fill"])
+
+
+def test_atan_of_a_constant_folds_correctly_rounded():
+    tr = f2cu.Translator([])
+    scope = f2cu.Scope(tr.module)
+    val, kind = tr.const(f2cu.parse_expr("4.*atan(1.0)"), scope)
+    assert kind == "float"
+    quarter = np.float32(np.arctan(np.float64(1.0)))  # atan(1) rounded once to binary32
+    assert val == _f32(np.float32(4.0) * quarter)
+    # atan(0.5) = 0.4636476090008061162142562...: the nearest binary64 is 8352332796509007 / 2**54
+    # (0.46364760900080609...), one ulp below what some host libms return
+    val, kind = tr.const(f2cu.parse_expr("atan(0.5D0)"), scope)
+    assert kind == "double" and val == Fraction(8352332796509007, 2**54)
+
+
+def test_a_parameter_array_constructor_is_a_constant_table():
+    src = """
+      subroutine pick(i, y)
+      implicit none
+      integer, intent(in) :: i
+      real, intent(out) :: y
+      real, parameter :: table(3) = (/ 0.02, 0.05, 0.1 /)
+      y = table(i)
+      end subroutine pick
+"""
+    tr = f2cu.Translator([], implicit=False, prefix="t_")
+    tr.add_source(src, ["pick"])
+    tr.emit_routine(tr.routines["pick"])
+    assert any("t_pick_table[3]" in line and "0.0199999996f" in line for line in tr.constant_tables)
+
+
+def test_float_automatic_arrays_go_to_their_own_workspace_stack():
+    src = """
+      subroutine col(n, x, y)
+      implicit none
+      integer, intent(in) :: n
+      real, intent(in) :: x
+      real, intent(out) :: y
+      real a(n)
+      a(1) = x
+      y = a(1)
+      end subroutine col
+"""
+    tr = f2cu.Translator([], implicit=False)
+    tr.workspace = {"threshold": 4}
+    tr.add_source(src, ["col"])
+    body = "\n".join(tr.emit_routine(tr.routines["col"]))
+    assert "float *a = mod.ws_f; mod.ws_f +=" in body
+    assert "mod.ws_f > mod.ws_f_end" in body and "mod.ws_f = f2cu_wsf0;" in body
+
+
+def test_a_call_that_leaves_out_an_argument_is_refused():
+    src = """
+      subroutine inner(x, y)
+      implicit none
+      real, intent(in) :: x
+      real, intent(in), optional :: y
+      end subroutine inner
+      subroutine outer(x)
+      implicit none
+      real, intent(in) :: x
+      call inner(x)
+      end subroutine outer
+"""
+    tr = f2cu.Translator([], implicit=False)
+    tr.add_source(src, ["inner", "outer"])
+    with pytest.raises(NotImplementedError, match="with 1 arguments; it declares 2"):
+        tr.emit_routine(tr.routines["outer"])

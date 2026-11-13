@@ -7,3 +7,6 @@ maxsat
 maxsat_init
 erfc_num_recipes
 erf_alt
+explmix
+loadaer
+mixactivate

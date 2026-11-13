@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import subprocess
 import sys
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -99,3 +100,76 @@ def test_activate_matches_the_oracle_word_for_word():
     if diff.size:
         bad.append(("flux_fullact", [int(ints[6, c]) for c in diff[:8]]))
     assert not bad, bad
+
+
+# -- mixactivate: the column driver ---------------------------------------------------------------------
+
+MIX = optin.optional_root() / "wrfchem_pnnl" / "oracle" / "fixtures" / "mixactivate"
+MIX_DIMS = (1, 5, 1, 3, 1, 21, 0, 5, 0, 3, 1, 21, 1, 4, 1, 2, 1, 20)
+
+
+def _case(directory):
+    out = {}
+    for line in (directory / "MANIFEST.txt").read_text().splitlines():
+        parts = line.split()
+        dims = tuple(int(x) for x in parts[3:])
+        dtype = np.dtype("<f4" if parts[1] == "f4" else "<i4")
+        out[parts[0]] = np.fromfile(directory / f"{parts[0]}.bin", dtype=dtype).reshape(dims, order="F")
+    return out
+
+
+def test_mixactivate_fixtures_are_the_ones_the_build_hashed():
+    root = Path(str(MIX))
+    for line in (root / "oracle-sha256sums.txt").read_text().splitlines():
+        digest, rel = line.split()
+        assert hashlib.sha256((root / rel.lstrip("*")).read_bytes()).hexdigest() == digest, rel
+
+
+@requires_gpu
+@pytest.mark.parametrize("config", ["modal", "sectional"])
+def test_mixactivate_matches_the_oracle_word_for_word(config):
+    optin.load("wrfchem_pnnl")
+    from woof_wrfchem_pnnl import activate as act
+    reason = act.byo_reason()
+    if reason is not None:
+        pytest.skip(reason)
+    f = _case(MIX / config)
+    msectional, ntype_aer, nphase_aer, _num_chem = (int(x) for x in f["ints"])
+    desc = {"msectional": msectional, "ntype_aer": ntype_aer, "nphase_aer": nphase_aer, "ai_phase": 1,
+            "cw_phase": 2, "ncomp_aer": f["ncomp_aer"], "nsize_aer": f["nsize_aer"],
+            "numptr_aer": f["numptr_aer"], "massptr_aer": f["massptr_aer"], "waterptr_aer": f["waterptr_aer"],
+            **{k: f[k] for k in ("dlo_sect", "dhi_sect", "sigmag_aer", "dpvolmean_aer", "dens_aer", "mw_aer")}}
+    fields = {k: f[k] for k in ("qv", "qc", "qi", "temp", "w", "rho", "zm", "dz8w", "p_at_w", "t_at_w", "kvh")}
+    fields["qndrop3d"] = f["qndrop3d_0"]
+    fields["cldfra_old"] = f["cldfra_old_0"]
+    chem = f["chem_0"]
+    hygro = f["hygro"].reshape(4, 20, 2, 8, 2, order="F")
+    bad = []
+    for call in (1, 2):
+        fields["cldfra"] = np.full_like(fields["qv"], -9.0)
+        got = act.launch_mixactivate(MIX_DIMS, desc, fields, chem=chem, hygro=hygro, ddvel=f["ddvel"],
+                                     dtstep=float(f["dtstep"]), ktau=call)
+        for name in ("chem", "qndrop3d", "cldfra", "qsrflx", "ccn", "nsource"):
+            want = f[f"{name}_{call}"]
+            diff = got[name].view(np.uint32) != np.ascontiguousarray(want, np.float32).view(np.uint32)
+            if diff.any():
+                bad.append((call, name, int(diff.sum()), int(diff.size)))
+        # the next call: as the oracle does it (its own qc edits come from the fixture's qc being re-read)
+        chem, fields["qndrop3d"] = got["chem"], got["qndrop3d"]
+        fields["cldfra_old"] = got["cldfra"]
+        if call == 1:
+            fields["qc"] = _second_qc(fields["qc"])
+    assert not bad, bad
+
+
+def _second_qc(qc):
+    """run_mixactivate.F90's cloud edit between the calls (exact: adds a literal, or zeroes)."""
+    qc = qc.copy()
+    for j in range(1, 3):
+        for i in range(1, 5):
+            for k in range(1, 21):
+                if (i + j + k) % 3 == 0:
+                    qc[i, k - 1, j] = np.float32(qc[i, k - 1, j] + np.float32(2.0e-5))
+                if (i + 2 * j + k) % 5 == 0:
+                    qc[i, k - 1, j] = 0.0
+    return qc

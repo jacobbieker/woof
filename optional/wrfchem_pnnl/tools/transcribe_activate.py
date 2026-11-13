@@ -7,7 +7,9 @@ WRF_SRC is a WRF v4.7.1 tree; every file read must match oracle/activate/SOURCES
 ``// BEGIN GENERATED`` and ``// END GENERATED`` in woof_wrfchem_pnnl/activate.cu is rewritten (``--check``
 only compares).
 
-Translated: ``activate``, ``maxsat``, ``maxsat_init`` and ``erf_alt``.  ``erfc_num_recipes`` ("from press et
+Translated: ``activate``, ``maxsat``, ``maxsat_init`` and ``erf_alt``; the column driver ``mixactivate`` with
+``explmix`` and ``loadaer``; and ``cal_cldfra2`` from phys/module_radiation_driver.F (public WRF code, the cloud
+fraction mixactivate starts from).  ``erfc_num_recipes`` ("from press et
 al, numerical recipes, 1990") is NEVER written to the committed file: its body is generated only into a local
 cache from the user's own tree (:func:`erfc_source`, woof_wrfchem_pnnl.activate), the rule woof/core/chem_byo.py
 follows.
@@ -24,7 +26,15 @@ holds the restatement to the original on every branch the oracle's cases reach:
   second, diagnostic pass (``goto 40000``) -> two DO WHILE loops with CYCLE / EXIT and a flag;
 * ``present(smax_prescribed)`` -> a LOGICAL argument ``woof_has_smax``;
 * the array constructor ``(/1/)`` handed to maxsat and maxsat_init -> a local ``woof_one = (/1/)``;
-* maxsat's ``go to 1`` out of its two loops -> a flag and EXIT.
+* maxsat's ``go to 1`` out of its two loops -> a flag and EXIT;
+* mixactivate's OPTIONAL ``f_qc``/``f_qi`` -> plain LOGICAL arguments, and ``PRESENT(F_QC) .AND. PRESENT(F_QI)``
+  -> ``.true.`` (both wrappers, module_mixactivate_wrappers.F, always pass them); its two ``activate`` calls pass
+  the restated absent ``smax_prescribed`` (``0.0, .false.``);
+* explmix's OPTIONAL ``qactold`` (read only when ``is_unact``) -> a plain argument, which the three
+  ``is_unact = .false.`` calls fill with an array explmix then never reads.
+
+Automatic arrays whose extent is a level or species count (mixactivate's raercol(kms:kme, num_chem, 2), ...)
+live in a per-column workspace stack (``ws_f``, binary32) sized at launch.
 """
 from __future__ import annotations
 
@@ -41,6 +51,13 @@ KERNEL = HERE / "woof_wrfchem_pnnl" / "activate.cu"
 PINS = HERE / "oracle" / "activate" / "SOURCES.sha256"
 SOURCE = "phys/module_mixactivate.F"
 ROUTINES = ["maxsat", "maxsat_init", "erfc_num_recipes", "erf_alt", "activate"]
+#: the column driver and its helpers, after ``activate``
+MIX_ROUTINES = ["explmix", "loadaer", "mixactivate"]
+RADIATION = "phys/module_radiation_driver.F"
+#: MOSAIC's 8 sections and SORGAM's 2 types; mixactivate's component count (module_data_sorgam maxd_acomp = 19)
+MAXD_ACOMP, MAXD_APHASE = 20, 2
+#: local arrays over this many elements go to the workspace
+WS_THRESHOLD = 64
 #: Numerical Recipes: parsed for the call conventions, never emitted into the committed file.
 NUMERICAL_RECIPES = ("erfc_num_recipes",)
 #: The kernel's array extents (activate's automatic arrays need them at compile time): MOSAIC's
@@ -92,6 +109,21 @@ PATCHES = {
         2413: ("              if ( present( smax_prescribed ) ) then", f"              if ( {_HAS} ) then"),
         2580: ("60000 continue", "      end if"),
     },
+    "mixactivate": {
+        299: ("  LOGICAL, OPTIONAL :: f_qc, f_qi", "  LOGICAL :: f_qc, f_qi"),
+        494: ("  IF( PRESENT(F_QC) .AND. PRESENT ( F_QI ) ) THEN", "  IF( .true. ) THEN"),
+        717: ("                fn,fs,fm,fluxn,fluxs,fluxm,flux_fullact(k), grid_id, ktau, i, j, k )",
+              "                fn,fs,fm,fluxn,fluxs,fluxm,flux_fullact(k), grid_id, ktau, i, j, k, 0.0, .false. )"),
+        1017: ("             qndrop_new,surfrate_drop,kms,kme,kts,kte,dtmix,.false.)",
+               "             qndrop_new,surfrate_drop,kms,kme,kts,kte,dtmix,.false.,qndrop)"),
+        1030: ("                      .false.)", "                      .false.,source)"),
+        1056: ("                      .false.)", "                      .false.,source)"),
+        849: ("                      fn,fs,fm,fluxn,fluxs,fluxm,flux_fullact(k), grid_id, ktau, i, j, k )",
+              "                      fn,fs,fm,fluxn,fluxs,fluxm,flux_fullact(k), grid_id, ktau, i, j, k, 0.0, .false. )"),
+    },
+    "explmix": {
+        1350: ("   real, intent(in),optional :: qactold(kms:kme)", "   real, intent(in) :: qactold(kms:kme)"),
+    },
     "maxsat": {
         2621: ("      real thesum", "      real thesum; logical woof_go"),
         2625: ("      do n=1,ntype_aer", "      woof_go = .false.; do n=1,ntype_aer"),
@@ -124,24 +156,35 @@ def _translator(src):
         patches[routine] = {n: now for n, (_was, now) in edits.items()}
     tr = f2cu.Translator([(src / "share/module_model_constants.F").read_text()],
                          struct_name="ActivateModule", implicit=False, prefix="ma_")
-    for routine in ROUTINES:
-        tr.dummy_bounds.update({(routine, "maxd_asize"): MAXD_ASIZE, (routine, "maxd_atype"): MAXD_ATYPE})
+    for routine in ROUTINES + MIX_ROUTINES:
+        tr.dummy_bounds.update({(routine, "maxd_asize"): MAXD_ASIZE, (routine, "maxd_atype"): MAXD_ATYPE,
+                                (routine, "maxd_acomp"): MAXD_ACOMP, (routine, "maxd_aphase"): MAXD_APHASE})
+    tr.workspace = {"threshold": WS_THRESHOLD}
     tr.add_source(text, ROUTINES, patches=patches)
+    tr.add_source((src / RADIATION).read_text(), ["cal_cldfra2"])
+    tr.add_source(text, MIX_ROUTINES, patches=patches)
     return tr
 
 
 def generate(src: Path) -> str:
     tr = _translator(src)
-    routines = [r for r in ROUTINES if r not in NUMERICAL_RECIPES]
+    every = ROUTINES + ["cal_cldfra2"] + MIX_ROUTINES
+    routines = [r for r in every if r not in NUMERICAL_RECIPES]
     bodies = [tr.emit_routine(tr.routines[n]) for n in routines]
     out = ["// BEGIN GENERATED by optional/wrfchem_pnnl/tools/transcribe_activate.py from",
-           "// phys/module_mixactivate.F and share/module_model_constants.F (WRF v4.7.1).  Do not edit by hand.",
+           "// phys/module_mixactivate.F, share/module_model_constants.F and cal_cldfra2 of",
+           "// phys/module_radiation_driver.F (WRF v4.7.1).  Do not edit by hand.",
            "// erfc_num_recipes (Numerical Recipes) is declared here and defined only in a local build from",
            "// the user's own WRF tree (woof_wrfchem_pnnl.activate.erfc_source)."]
-    out += tr.module_struct()
+    struct = tr.module_struct()
+    # the workspace stacks (woof_wrfchem_pnnl.activate hands each column its slice)
+    struct[-1:-1] = ["    double *ws_d, *ws_d_end;  // workspace stack (binary64 arrays; unused)",
+                     "    int *ws_i, *ws_i_end;     // workspace stack (integer arrays)",
+                     "    float *ws_f, *ws_f_end;   // workspace stack (binary32 arrays)"]
+    out += struct
     out += f2cu.HELPERS.strip().splitlines()
     out += tr.constant_tables
-    for name in ROUTINES:
+    for name in every:
         out.append(tr.prototype(tr.routines[name]) + ";")
     for b in bodies:
         out += b
