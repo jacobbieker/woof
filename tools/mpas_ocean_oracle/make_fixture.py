@@ -8,7 +8,9 @@ runs ``run_oracle_{r4,r8}`` into ``tests/data/oracles/mpas_ocean_tend``;
 ``tests/data/oracles/mpas_ocean_pgrad_hmix``; ``--piece tendency`` runs
 ``run_tendency_{r4,r8}`` into ``tests/data/oracles/mpas_ocean_tendency`` (a
 case that lists its precisions is run at those only); ``--piece eos`` runs
-``run_eos_{r4,r8}`` into ``tests/data/oracles/mpas_ocean_eos``.  Writes ``oracle-r4.npz`` and
+``run_eos_{r4,r8}`` into ``tests/data/oracles/mpas_ocean_eos``; ``--piece
+diagnostics`` runs ``run_diagnostics_{r4,r8}`` into
+``tests/data/oracles/mpas_ocean_diagnostics`` (its cases are built per precision).  Writes ``oracle-r4.npz`` and
 ``oracle-r8.npz`` (``<case>/<field>``) and ``inputs.sha256`` (every case's
 input-stream digest at each precision).
 """
@@ -27,20 +29,25 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from woof.verify import (  # noqa: E402
-    mpas_ocean_eos_oracle, mpas_ocean_pgrad_hmix_oracle, mpas_ocean_tend_oracle, mpas_ocean_tendency_oracle)
+    mpas_ocean_diagnostics_oracle, mpas_ocean_eos_oracle, mpas_ocean_pgrad_hmix_oracle, mpas_ocean_tend_oracle,
+    mpas_ocean_tendency_oracle)
 
 #: piece -> (case module, binary stem)
 PIECES = {"tend": (mpas_ocean_tend_oracle, "run_oracle"),
           "pgrad_hmix": (mpas_ocean_pgrad_hmix_oracle, "run_pgrad_hmix"),
           "tendency": (mpas_ocean_tendency_oracle, "run_tendency"),
-          "eos": (mpas_ocean_eos_oracle, "run_eos")}
+          "eos": (mpas_ocean_eos_oracle, "run_eos"),
+          "diagnostics": (mpas_ocean_diagnostics_oracle, "run_diagnostics")}
 
 
 def run_case(oo, binary: Path, case: dict, precision: str) -> dict[str, np.ndarray]:
+    per_precision = getattr(oo, "CASES_PER_PRECISION", False)
     with tempfile.TemporaryDirectory() as tmp:
         src, dst = Path(tmp) / "in.bin", Path(tmp) / "out.bin"
-        src.write_bytes(oo.input_bytes(case, precision))
+        src.write_bytes(oo.input_bytes(case) if per_precision else oo.input_bytes(case, precision))
         subprocess.run([str(binary), str(src), str(dst)], check=True)
+        if per_precision:
+            return oo.read_outputs(dst.read_bytes(), case)
         return oo.read_outputs(dst.read_bytes(), case, precision)
 
 
@@ -56,12 +63,14 @@ def main() -> int:
     digests = []
     for precision in oo.PRECISIONS:
         arrays: dict[str, np.ndarray] = {}
-        for case in oo.cases():
+        per_precision = getattr(oo, "CASES_PER_PRECISION", False)
+        for case in (oo.cases(precision) if per_precision else oo.cases()):
             if precision not in case.get("precisions", oo.PRECISIONS):
                 continue
             for field, value in run_case(oo, args.build_dir / f"{stem}_{precision}", case, precision).items():
                 arrays[f"{case['name']}/{field}"] = value
-            digests.append(f"{oo.input_digest(case, precision)}  {case['name']}/{precision}")
+            digest = oo.input_digest(case) if per_precision else oo.input_digest(case, precision)
+            digests.append(f"{digest}  {case['name']}/{precision}")
         np.savez_compressed(args.out / f"oracle-{precision}.npz", **arrays)
     (args.out / "inputs.sha256").write_text("\n".join(digests) + "\n", encoding="utf-8")
     print(f"wrote {args.out}")

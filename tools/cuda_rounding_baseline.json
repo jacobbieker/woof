@@ -638,6 +638,14 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "47176d8d8e8e2488c4a0fb42749c55aa69b95c05f6916d5df7d95d72bd8e17fe",
+    "constructor": "compile_using_nvrtc",
+    "factory": "_module_on",
+    "factory_sha256": "8d331dd2ed2f9fe47ae64061d20c2bd406057fde6d78b40ea1148f6affecc037",
+    "file": "woof/hex/mpas_ocean/diagnostics_v842.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "473151f62b52ebf8411799b37e8ba545278ebb3f68a91aaa5f2d512fa9a05e3b",
     "constructor": "RawModule",
     "factory": "_kernel",
@@ -4580,6 +4588,10 @@
     "sha256": "d293e9cfd863a8f2f974a2bab2b8bea0547559838a758888fffd008e864f33e4"
    },
    {
+    "file": "woof/hex/mpas_ocean/diagnostics_v842.cu",
+    "sha256": "2e832a3a429c96d66ac67757afc6d04e364109428daef7ed61b07a12945f0f89"
+   },
+   {
     "file": "woof/hex/mpas_ocean/eos_v842.cu",
     "sha256": "741b58b24ad684da3e7443064db9ef586a70e93363f0a6a8191b57634897db68"
    },
@@ -5488,6 +5500,10 @@
    {
     "file": "woof/hex/mpas_ice/time_integration_fe_v842.py",
     "sha256": "e60b98909a841bd72949993c6079f9989c1270df15579b1eba714b8c182a720e"
+   },
+   {
+    "file": "woof/hex/mpas_ocean/diagnostics_v842.py",
+    "sha256": "435c51086f052425f18c21051bd3ed6ba65df361d30a3c8cefd5ab6a0181df83"
    },
    {
     "file": "woof/hex/mpas_ocean/eos_v842.py",

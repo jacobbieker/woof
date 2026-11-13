@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Build the MPAS-Ocean v8.4.2 oracles (run_oracle: four tendency terms;
 # run_pgrad_hmix: pressure gradient and horizontal momentum mixing;
-# run_tendency: ocn_tend_vel/thick; run_eos: the equation of state) at the
+# run_tendency: ocn_tend_vel/thick; run_eos: the equation of state;
+# run_diagnostics: ocn_diagnostic_solve) at the
 # strict recipe, in both precisions.
 #
 #   bash tools/mpas_ocean_oracle/build.sh MPAS_SOURCE_ROOT BUILD_DIR
@@ -55,13 +56,25 @@ for precision in r4 r8; do
         "${fc[@]}" "${flags[@]}" "${script_dir}/${driver}.F90"
     done
     # the equation of state, verbatim, in a directory of its own: its modules
-    # replace stubs_tendency.F90's ocn_equation_of_state there
+    # replace stubs_tendency.F90's ocn_equation_of_state (and ocn_diagnostics)
+    # there.  ocn_diagnostic_solve, ocn_diagnostics_init and
+    # ocn_compute_land_ice_flux_input_fields are cut verbatim out of
+    # mpas_ocn_diagnostics.F (awk ranges) into diagnostics_cut_head.F90's module.
     mkdir -p eos
     ( cd eos
-      for unit in mpas_ocn_equation_of_state_linear mpas_ocn_equation_of_state_jm mpas_ocn_equation_of_state; do
+      for unit in mpas_ocn_equation_of_state_linear mpas_ocn_equation_of_state_jm mpas_ocn_equation_of_state \
+                  mpas_ocn_diagnostics_routines; do
           "${fc[@]}" "${flags[@]}" -I.. "${ocean}/${unit}.F"
       done
-      "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/run_eos.F90" )
+      { cat "${script_dir}/diagnostics_cut_head.F90"
+        for routine in ocn_diagnostic_solve ocn_diagnostics_init ocn_compute_land_ice_flux_input_fields; do
+            awk -v r="${routine}" '$0 ~ "^ *subroutine " r "\\(" {on=1} on {print} on && $0 ~ "^ *end subroutine " r "[^a-zA-Z_]" {on=0}' \
+                "${ocean}/mpas_ocn_diagnostics.F"
+        done
+        echo "end module ocn_diagnostics"; } > ocn_diagnostics_cut.F
+      "${fc[@]}" "${flags[@]}" -I.. ocn_diagnostics_cut.F
+      "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/run_eos.F90"
+      "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/run_diagnostics.F90" )
     if command -v objdump >/dev/null; then
         if objdump -d mpas_ocn_*.o eos/mpas_ocn_*.o mpas_constants.o | grep -Eq '\bv?fn?m(add|sub)([0-9]|[[:space:]]|$)'; then
             echo "an oracle object contains an FMA instruction; refusing" >&2
@@ -79,6 +92,9 @@ for precision in r4 r8; do
     done
     "${fc[@]}" -o "${build_dir}/run_eos_${precision}" eos/run_eos.o eos/mpas_ocn_equation_of_state*.o \
         mpas_ocn_constants.o stubs.o mpas_kind_types.o ${libm_objects[@]+"${libm_objects[@]}"}
+    "${fc[@]}" -o "${build_dir}/run_diagnostics_${precision}" eos/run_diagnostics.o eos/ocn_diagnostics_cut.o \
+        eos/mpas_ocn_diagnostics_routines.o eos/mpas_ocn_equation_of_state*.o mpas_ocn_constants.o mpas_constants.o \
+        stubs.o mpas_kind_types.o ${libm_objects[@]+"${libm_objects[@]}"}
 done
 {
     echo "gfortran: $("${fc[@]}" --version | head -1)"
@@ -86,4 +102,4 @@ done
     echo "host: $(uname -srm)"
     cat "${build_dir}/r4/libm.txt"
 } > "${build_dir}/TOOLCHAIN.txt"
-echo "built ${build_dir}/run_{oracle,pgrad_hmix,tendency,eos}_{r4,r8}"
+echo "built ${build_dir}/run_{oracle,pgrad_hmix,tendency,eos,diagnostics}_{r4,r8}"
