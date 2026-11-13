@@ -254,7 +254,8 @@ def make_case(name: str, seed: int, n_cells: int, n_levels: int, overrides: dict
     bottom_depth = np.array([thickness[c, :mlc[c]].sum() for c in range(nc + 1)])
     ref_bottom = np.cumsum(resting.mean(axis=0))
     velocity = uniform(-0.3, 0.3, (ne + 1, nl)) * (level < mlet[:, None])
-    btr = uniform(-0.05, 0.05, ne + 1)
+    # no flow through a land edge (maxLevelEdgeTop 0), as a real state has
+    btr = uniform(-0.05, 0.05, ne + 1) * (mlet > 0)
     tracers = np.empty((nc + 1, nl, nt))
     tracers[:, :, 0] = uniform(2.0, 25.0, (nc + 1, nl))
     tracers[:, :, 1] = uniform(33.5, 36.0, (nc + 1, nl))
@@ -287,12 +288,12 @@ def make_case(name: str, seed: int, n_cells: int, n_levels: int, overrides: dict
         "latCell": uniform(-1.4, 1.4, nc + 1), "lonCell": uniform(0.0, 6.28, nc + 1),
         "angleEdge": uniform(-3.1, 3.1, ne + 1), "meshScaling": uniform(0.5, 1.0, ne + 1),
         "meshScalingDel2": uniform(0.3, 1.0, ne + 1), "meshScalingDel4": uniform(0.3, 1.0, ne + 1),
-        "coeffs_reconstruct": uniform(-1.0e-4, 1.0e-4, (nc + 1, me, 3)),
+        "coeffs_reconstruct": uniform(-0.5, 0.5, (nc + 1, me, 3)),
         "advCoefs": uniform(-0.5, 0.5, (ne + 1, na)), "advCoefs3rd": uniform(-0.2, 0.2, (ne + 1, na)),
         "highOrderAdvectionMask": (rs.random_sample((ne + 1, nl)) < 0.8).astype(np.int32),
         "nAdvCellsForEdge": n_adv, "advCellsForEdge": adv_cells, "vertCoordMovementWeights": np.ones(nl),
         "restingThickness": resting,
-        "layerThickness": thickness, "layerThickness@2": thickness, "normalVelocity": velocity + btr[:, None],
+        "layerThickness": thickness, "layerThickness@2": thickness, "normalVelocity": (velocity + btr[:, None]) * (level < mlet[:, None]),
         "normalVelocity@2": velocity, "ssh": ssh, "ssh@2": ssh,
         "normalBarotropicVelocity": btr, "normalBarotropicVelocity@2": btr,
         "normalBaroclinicVelocity": velocity, "normalBaroclinicVelocity@2": velocity,
