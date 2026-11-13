@@ -251,3 +251,28 @@ def test_data_implied_do_and_reserved_names():
     assert tr.module.vars["tab"].data == [1, 2, 3, 4]
     assert "double long_" in text and "y = DMUL(long_,m_tab[" in text
     assert tr.module_tables["tab"] == "__constant__ double m_tab[4] = {1.0, 2.0, 3.0, 4.0};"
+
+
+def test_a_whole_automatic_array_takes_its_bound_from_the_dummy_bounds():
+    """``a = x`` on an automatic array (extent from a dummy, e.g. activate's ``gmlnsig = ...``) fills every
+    element, its count from dummy_bounds; without a bound it is refused by name."""
+    src = """
+      subroutine fill(n, x, y)
+      implicit none
+      integer, intent(in) :: n
+      real, intent(in) :: x
+      real, intent(out) :: y
+      real a(n)
+      a = x
+      y = a(2)
+      end subroutine fill
+"""
+    tr = f2cu.Translator([], implicit=False)
+    tr.dummy_bounds[("fill", "n")] = 3
+    tr.add_source(src, ["fill"])
+    body = "\n".join(tr.emit_routine(tr.routines["fill"]))
+    assert "f2cu_q < 3" in body
+    tr = f2cu.Translator([], implicit=False)
+    tr.add_source(src, ["fill"])
+    with pytest.raises(NotImplementedError, match="needs a bound"):
+        tr.emit_routine(tr.routines["fill"])
