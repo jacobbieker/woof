@@ -159,6 +159,11 @@ the digits shown:
 - The threshold also skips round-off cloud in the interior. Surface PM2.5 at
   06Z falls from 1.9 to 1.7 ug/m3 there.
 
+Applying the threshold domain-wide is the user's decision (2026-11-13).
+Round-off cloud water is not cloud anywhere, so the interior effect is
+expected and physically motivated.  The default stays 0 (WRF's behaviour),
+and the opt-in value is 1e-6.
+
 ## Refusals until then
 
 `woof/namelist_chem.py` maps `chem_opt = 1, 2` onto the `radm2` and
