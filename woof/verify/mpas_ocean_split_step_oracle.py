@@ -43,6 +43,7 @@ TWO_LEVEL = {"state": ("layerThickness", "normalVelocity", "ssh", "normalBarotro
 ABSENT_FIELDS = (("state", "highFreqThickness", ("L", "C1")), ("state", "lowFreqDivergence", ("L", "C1")),
                  ("tend", "highFreqThickness", ("L", "C1")), ("tend", "lowFreqDivergence", ("L", "C1")))
 _EXTRA = (
+    ("tracers", "activeGRP_start", DIM, ()), ("tracers", "activeGRP_end", DIM, ()),
     ("mesh", "nEdgesSolve", DIM, ()), ("mesh", "nVerticesSolve", DIM, ()),
     ("mesh", "fEdge", REAL, ("E1",)), ("mesh", "meshScaling", REAL, ("E1",)), ("mesh", "angleEdge", REAL, ("E1",)),
     ("mesh", "maxLevelVertexTop", INT, ("V1",)), ("mesh", "lonCell", REAL, ("C1",)),
@@ -297,7 +298,8 @@ def make_case(name: str, seed: int, n_cells: int, n_levels: int, overrides: dict
         "normalBaroclinicVelocity": velocity, "normalBaroclinicVelocity@2": velocity,
         "sshSubcycle": ssh, "sshSubcycle@2": ssh, "normalBarotropicVelocitySubcycle": btr,
         "normalBarotropicVelocitySubcycle@2": btr,
-        "index_temperature": 1, "index_salinity": 2, "activeTracers": tracers, "activeTracers@2": tracers,
+        "index_temperature": 1, "index_salinity": 2, "activeGRP_start": 1, "activeGRP_end": nt,
+        "activeTracers": tracers, "activeTracers@2": tracers,
         "index_temperatureSurfaceFlux": 1, "index_salinitySurfaceFlux": 2,
         "fractionAbsorbed": fraction, "fractionAbsorbedRunoff": fraction[::-1].copy(),
         "seaIcePressure": uniform(0.0, 2.0e4, nc + 1), "atmosphericPressure": uniform(9.8e4, 1.03e5, nc + 1),

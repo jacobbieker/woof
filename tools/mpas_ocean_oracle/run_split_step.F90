@@ -14,7 +14,8 @@
 ! (mpas_reconstruct), less GM (stubs_split.F90).  The driver runs the _init
 ! routine of every module the step reaches, as ocn_forward_mode_init does,
 ! builds the block (its structs every pool, its dimensions the mesh pool's),
-! sets nBtrSubcycles from the integer config of that name and takes the step.
+! computes the starting state's diagnostics (ocn_diagnostic_solve at time
+! level 1, as MPAS's init does), sets nBtrSubcycles from the integer config of that name and takes the step.
 
 program run_split_step
   use mpas_kind_types
@@ -100,6 +101,10 @@ program run_split_step
   call ocn_vmix_init(domain, err)
   if (err /= 0) stop 13
 
+  ! the diagnostics of the state the step starts from, as MPAS's init
+  ! computes them before the first step
+  call ocn_diagnostic_solve(dt, pool_named(pools, 'state'), pool_named(pools, 'forcing'), pool_named(pools, 'mesh'), &
+       pool_named(pools, 'diagnostics'), pool_named(pools, 'scratch'), pool_named(pools, 'tracers'), 1)
   call mpas_pool_get_config(pools % configs, 'nBtrSubcycles', n)
   nBtrSubcycles = n
   call ocn_time_integrator_split(domain, dt)
