@@ -60,7 +60,12 @@ tendency oracle uses for modules others compile for real.
 and its coefficient modules verbatim; `stubs_vmix.F90` stands in for CVMix).
 `run_vert_transport.F90` drives `ocn_vert_transport_velocity_top` (in the
 diagnostics cut) with `mpas_ocn_thick_ale.F` verbatim.
-`run_diagnostics.F90`, `run_tracer_advection.F90`, `run_tracer_hmix.F90`, `run_tend_tracer.F90`, `run_vmix.F90` and `run_vert_transport.F90` read and write
+`run_btr_subcycle.F90` drives the split-explicit step's barotropic stage:
+build.sh cuts `ocn_time_integrator_split`'s declarations, config lookups and
+stage 2 verbatim out of `mpas_ocn_time_integration_split.F` (awk ranges)
+into `btr_subcycle_cut_head.F90`'s module. The stubs give a field's time
+level 2 as the pool entry `NAME@2` and make a halo exchange the identity.
+`run_diagnostics.F90`, `run_tracer_advection.F90`, `run_tracer_hmix.F90`, `run_tend_tracer.F90`, `run_vmix.F90`, `run_vert_transport.F90` and `run_btr_subcycle.F90` read and write
 `oracle_stream.F90`'s self-describing streams.
 
 gfortran calls `expf`/`cosf`/`sinf` (RKIND 4) and `exp` (RKIND 8). On glibc
@@ -82,6 +87,7 @@ pixi run -e default python tools/mpas_ocean_oracle/make_fixture.py "$BUILD_DIR" 
 pixi run -e default python tools/mpas_ocean_oracle/make_fixture.py "$BUILD_DIR" --piece tend_tracer
 pixi run -e default python tools/mpas_ocean_oracle/make_fixture.py "$BUILD_DIR" --piece vmix
 pixi run -e default python tools/mpas_ocean_oracle/make_fixture.py "$BUILD_DIR" --piece vert_transport
+pixi run -e default python tools/mpas_ocean_oracle/make_fixture.py "$BUILD_DIR" --piece btr_subcycle
 ```
 
 build.sh checks `SOURCES.sha256` and builds `run_oracle_r4` and
@@ -96,6 +102,7 @@ pixi run -e default python -m pytest tests/test_mpas_ocean_tend_parity.py tests/
     tests/test_mpas_ocean_tendency_parity.py tests/test_mpas_ocean_eos_parity.py \
     tests/test_mpas_ocean_diagnostics_parity.py tests/test_mpas_ocean_tracer_advection_parity.py \
     tests/test_mpas_ocean_tracer_hmix_parity.py tests/test_mpas_ocean_tend_tracer_parity.py \
-    tests/test_mpas_ocean_vmix_parity.py tests/test_mpas_ocean_vert_transport_parity.py
+    tests/test_mpas_ocean_vmix_parity.py tests/test_mpas_ocean_vert_transport_parity.py \
+    tests/test_mpas_ocean_btr_subcycle_parity.py
 pixi run -e default woof hex ocean verify
 ```
