@@ -1,7 +1,7 @@
 ! Stand-ins for the MPAS-Ocean modules mpas_ocn_tendency.F USEs that no
 ! oracle here compiles for real: land-ice fluxes, frazil, the high-frequency
 ! thickness filter, tracer restoring, decay, ideal age and TTD, the
-! ecosystem tracer groups, vertical mixing, and the variable (ohlmann00)
+! ecosystem tracer groups (with stand-ins for their tracer indices), vertical mixing, and the variable (ohlmann00)
 ! short-wave absorption.
 !
 ! The land-ice flux and frazil routines return at once when their switch is
@@ -243,6 +243,21 @@ module ocn_tracer_ecosys
   use mpas_pool_routines
   implicit none
   private
+
+  ! the group's tracer indices (mpas_ocn_time_average_coupled.F reads them
+  ! when the group is on; it is not here)
+  type, public :: ecosys_indices_stand_in
+    integer :: diatC_ind = 1
+    integer :: spC_ind = 1
+    integer :: phaeoC_ind = 1
+    integer :: dic_ind = 1
+    integer :: sio3_ind = 1
+    integer :: no3_ind = 1
+    integer :: nh4_ind = 1
+    integer :: fe_ind = 1
+    integer :: donr_ind = 1
+  end type ecosys_indices_stand_in
+  type(ecosys_indices_stand_in), public :: ecosysIndices
   public :: ocn_tracer_ecosys_compute, ocn_tracer_ecosys_surface_flux_compute
 
 contains
@@ -280,6 +295,14 @@ module ocn_tracer_DMS
   use mpas_pool_routines
   implicit none
   private
+
+  ! the group's tracer indices (mpas_ocn_time_average_coupled.F reads them
+  ! when the group is on; it is not here)
+  type, public :: dms_indices_stand_in
+    integer :: dms_ind = 1
+    integer :: dmsp_ind = 1
+  end type dms_indices_stand_in
+  type(dms_indices_stand_in), public :: dmsIndices
   public :: ocn_tracer_DMS_compute, ocn_tracer_DMS_surface_flux_compute
 
 contains
@@ -318,6 +341,15 @@ module ocn_tracer_MacroMolecules
   use mpas_pool_routines
   implicit none
   private
+
+  ! the group's tracer indices (mpas_ocn_time_average_coupled.F reads them
+  ! when the group is on; it is not here)
+  type, public :: macros_indices_stand_in
+    integer :: poly_ind = 1
+    integer :: lip_ind = 1
+    integer :: prot_ind = 1
+  end type macros_indices_stand_in
+  type(macros_indices_stand_in), public :: macrosIndices
   public :: ocn_tracer_MacroMolecules_compute, ocn_tracer_MacroMolecules_surface_flux_compute
 
 contains

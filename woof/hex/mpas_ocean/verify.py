@@ -11,12 +11,12 @@ from __future__ import annotations
 def verify() -> dict:
     from woof import backend
     from woof.hex.coupled import oracle, registry
-    from woof.verify import (mpas_ocean_btr_subcycle_oracle, mpas_ocean_diagnostics_oracle, mpas_ocean_eos_oracle, mpas_ocean_pgrad_hmix_oracle,
+    from woof.verify import (mpas_ocean_btr_subcycle_oracle, mpas_ocean_diagnostics_oracle, mpas_ocean_split_step_oracle, mpas_ocean_eos_oracle, mpas_ocean_pgrad_hmix_oracle,
                              mpas_ocean_tend_oracle, mpas_ocean_tendency_oracle, mpas_ocean_tracer_advection_oracle,
                              mpas_ocean_tracer_hmix_oracle, mpas_ocean_tend_tracer_oracle, mpas_ocean_vmix_oracle,
                              mpas_ocean_vert_transport_oracle)
 
-    from . import (btr_subcycle_v842, diagnostics_v842, eos_v842, forcing_v842, pgrad_hmix_v842, tend_tracer_v842, tend_v842,
+    from . import (btr_subcycle_v842, diagnostics_v842, split_step_v842, eos_v842, forcing_v842, pgrad_hmix_v842, tend_tracer_v842, tend_v842,
                    tracer_advection_v842, tracer_hmix_v842, vert_transport_v842, vmix_v842)
 
     pieces = []
@@ -32,7 +32,8 @@ def verify() -> dict:
                                        ("vertical_mixing", mpas_ocean_vmix_oracle, vmix_v842),
                                        ("vertical_transport", mpas_ocean_vert_transport_oracle,
                                         vert_transport_v842),
-                                       ("barotropic_stage", mpas_ocean_btr_subcycle_oracle, btr_subcycle_v842)):
+                                       ("barotropic_stage", mpas_ocean_btr_subcycle_oracle, btr_subcycle_v842),
+                                       ("split_explicit_step", mpas_ocean_split_step_oracle, split_step_v842)):
         fixture_dir = oracle_module.FIXTURE_DIR
         for precision in oracle_module.PRECISIONS:
             if not (fixture_dir / f"oracle-{precision}.npz").is_file():
