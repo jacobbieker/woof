@@ -9,13 +9,13 @@
     "cupy.ReductionKernel",
     "cupy.cuda.compiler.compile_using_nvrtc"
   ],
-  "site_count": 655,
+  "site_count": 656,
   "site_count_by_kind": {
     "cupy.ElementwiseKernel": 45,
     "cupy.RawKernel": 111,
     "cupy.RawModule": 293,
     "cupy.ReductionKernel": 16,
-    "cupy.cuda.compiler.compile_using_nvrtc": 190
+    "cupy.cuda.compiler.compile_using_nvrtc": 191
   },
   "site_count_by_surface": {
     "other": {
@@ -29,7 +29,7 @@
       "cupy.RawKernel": 39,
       "cupy.RawModule": 99,
       "cupy.ReductionKernel": 9,
-      "cupy.cuda.compiler.compile_using_nvrtc": 116
+      "cupy.cuda.compiler.compile_using_nvrtc": 117
     },
     "tests": {
       "cupy.ElementwiseKernel": 7,
@@ -10011,6 +10011,22 @@
       "options_element_expressions": null,
       "options_are_literal": false,
       "text": "image, _ = compile_using_nvrtc(module_source(precision), options, None,"
+    },
+    {
+      "file": "woof/hex/mpas_ocean/tend_tracer_v842.py",
+      "line": 82,
+      "column": 15,
+      "surface": "package",
+      "constructor": "compile_using_nvrtc",
+      "constructor_kind": "cupy.cuda.compiler.compile_using_nvrtc",
+      "enclosing": "_module_on",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "options",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "image, _ = compile_using_nvrtc(module_source(precision), options, None, f\"ocn_tend_tracer_v842_{precision}.cu\")"
     },
     {
       "file": "woof/hex/mpas_ocean/tend_v842.py",
