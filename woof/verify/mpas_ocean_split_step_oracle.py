@@ -91,6 +91,54 @@ FIELDS = _field_table()
 ABSENT = {(pool, name) for pool, name, _ in ABSENT_FIELDS} | {(p, f"{n}@2") for p, n, _ in ABSENT_FIELDS
                                                              if p == "state"}
 
+#: Registry.xml (v8.4.2) defaults of every other config the step's modules read
+REGISTRY_DEFAULTS = {
+    'config_Redi_bottom_layer_tapering_depth': 0.0, 'config_Redi_surface_layer_tapering_extent': 0.0,
+    'config_btr_dt': '0000_00:00:15', 'config_check_ssh_consistency': True, 'config_check_zlevel_consistency':
+    False, 'config_cvmix_background_diffusion': 1e-05, 'config_cvmix_background_viscosity': 0.0001,
+    'config_cvmix_convective_basedOnBVF': True, 'config_cvmix_convective_diffusion': 1.0,
+    'config_cvmix_convective_triggerBVF': 0.0, 'config_cvmix_convective_viscosity': 1.0,
+    'config_cvmix_kpp_EkmanOBL': False, 'config_cvmix_kpp_MonObOBL': False,
+    'config_cvmix_kpp_boundary_layer_depth': 30.0, 'config_cvmix_kpp_criticalBulkRichardsonNumber': 0.25,
+    'config_cvmix_kpp_interpolationOMLType': 'quadratic', 'config_cvmix_kpp_matching': 'SimpleShapes',
+    'config_cvmix_kpp_stop_OBL_search': 100.0, 'config_cvmix_kpp_surface_layer_extent': 0.1,
+    'config_cvmix_kpp_use_enhanced_diff': True, 'config_cvmix_num_ri_smooth_loops': 2,
+    'config_cvmix_prandtl_number': 1.0, 'config_cvmix_shear_KPP_Ri_zero': 0.7, 'config_cvmix_shear_KPP_exp':
+    3.0, 'config_cvmix_shear_KPP_nu_zero': 0.005, 'config_cvmix_shear_PP_alpha': 5.0,
+    'config_cvmix_shear_PP_exp': 2.0, 'config_cvmix_shear_PP_nu_zero': 0.005,
+    'config_cvmix_shear_mixing_scheme': 'PP', 'config_cvmix_use_BLD_smoothing': True,
+    'config_disable_redi_horizontal_term1': False, 'config_disable_redi_horizontal_term2': False,
+    'config_disable_redi_horizontal_term3': False, 'config_disable_redi_k33': False,
+    'config_disable_tr_nonlocalflux': False, 'config_do_restart': False, 'config_dt': '00:05:00',
+    'config_frazil_fractional_thickness_limit': 0.1, 'config_frazil_heat_of_fusion': 334000.0,
+    'config_frazil_ice_density': 1000.0, 'config_frazil_in_open_ocean': True,
+    'config_frazil_land_ice_reference_salinity': 0.0, 'config_frazil_maximum_depth': 100.0,
+    'config_frazil_maximum_freezing_temperature': 0.0, 'config_frazil_sea_ice_reference_salinity': 4.0,
+    'config_frazil_under_land_ice': True, 'config_frazil_use_surface_pressure': True,
+    'config_gravWaveSpeed_trunc': 0.3, 'config_highFreqThick_del2': 100.0, 'config_highFreqThick_restore_time':
+    30.0, 'config_hmix_scaleWithMesh': False, 'config_land_ice_cavity_freezing_temperature_coeff_0': 0.0622,
+    'config_land_ice_cavity_freezing_temperature_coeff_S': -0.0563,
+    'config_land_ice_cavity_freezing_temperature_coeff_p': -7.43e-08,
+    'config_land_ice_cavity_freezing_temperature_coeff_pS': -1.74e-10,
+    'config_land_ice_cavity_freezing_temperature_reference_pressure': 0.0, 'config_land_ice_flux_ISOMIP_gammaT':
+    0.0001, 'config_land_ice_flux_attenuation_coefficient': 10.0,
+    'config_land_ice_flux_boundaryLayerNeighborWeight': 0.0, 'config_land_ice_flux_boundaryLayerThickness':
+    10.0, 'config_land_ice_flux_cp_ice': 2009.0, 'config_land_ice_flux_formulation': 'Jenkins',
+    'config_land_ice_flux_jenkins_heat_transfer_coefficient': 0.011,
+    'config_land_ice_flux_jenkins_salt_transfer_coefficient': 0.00031, 'config_land_ice_flux_rho_ice': 918.0,
+    'config_land_ice_flux_rms_tidal_velocity': 0.05, 'config_land_ice_flux_topDragCoeff': 0.0025,
+    'config_land_ice_flux_useHollandJenkinsAdvDiff': False, 'config_maxMeshDensity': -1.0,
+    'config_max_diff_tanh': 0.025, 'config_max_relative_slope': 0.01, 'config_max_visc_tanh': 0.25,
+    'config_min_diff_tanh': 1e-05, 'config_min_visc_tanh': 0.0001, 'config_mom_del4_tensor': 50000000000000.0,
+    'config_specific_heat_sea_water': 3985.0, 'config_standardGM_tracer_kappa': 0.0,
+    'config_tensor_test_function': 'sph_uCosCos', 'config_test_tensors': False,
+    'config_thickness_filter_timescale': 5.0, 'config_use_Redi_bottom_layer_tapering': False,
+    'config_use_Redi_surface_layer_tapering': False, 'config_use_cvmix_background': False,
+    'config_use_cvmix_convection': False, 'config_use_cvmix_double_diffusion': False,
+    'config_use_cvmix_fixed_boundary_layer': False, 'config_use_cvmix_shear': False,
+    'config_use_cvmix_tidal_mixing': False, 'config_use_highFreqThick_del2': False,
+    'config_use_highFreqThick_restore': False, 'config_zMid_tanh': -100.0, 'config_zWidth_tanh': 100.0
+}
 BASE_CONFIG = {
     **{k: v for k, v in _diag.BASE_CONFIG.items()},
     **{k: v for k, v in _tt.BASE_CONFIG.items() if k != "oracle_active_tracers_only"},
@@ -116,6 +164,7 @@ BASE_CONFIG = {
     "config_use_MacroMoleculesTracers": False, "mesh:on_a_sphere": False,
     "config_use_cvmix_kpp": False, "config_include_KE_vertex": False, "config_land_ice_flux_mode": "off",
     "config_use_frazil_ice_formation": False, "nBtrSubcycles": 2, "config_btr_subcycle_loop_factor": 2,
+    **REGISTRY_DEFAULTS,
 }
 #: (name, seed, nCells, nVertLevels, config overrides)
 CASES = (

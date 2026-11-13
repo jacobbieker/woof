@@ -64,7 +64,7 @@ module mpas_pool_routines
             mpas_pool_iterator_type, MPAS_POOL_FIELD, mpas_pool_begin_iteration, mpas_pool_get_next_member, &
             mpas_pool_get_package
 
-  integer, parameter :: maxEntries = 192
+  integer, parameter :: maxEntries = 320
 
   ! a scratch field: the driver sets dimSizes, mpas_allocate_scratch_field
   ! allocates array to them
