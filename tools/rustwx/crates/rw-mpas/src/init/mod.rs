@@ -1588,10 +1588,11 @@ pub fn build_init(cfg: &InitConfig) -> MpasResult<InitReceipt> {
     let zs_flat = tile(&zs_m);
     put("dzs", dzs_flat);
     put("zs", zs_flat);
-    if cfg.land_surface == "ruc" {
+    if matches!(cfg.land_surface.as_str(), "ruc" | "slab" | "px") {
         // This init-stream scratch slot is zero in native real-data
-        // initialization. Its geometry must still agree with RUC's nodes.
-        put("dz", vec![0.; n_cells * 9]);
+        // initialization. Its geometry must still agree with the land
+        // surface's own soil column (RUC's 9 nodes, the slab's 5, PX's 2).
+        put("dz", vec![0.; n_cells * zs_m.len()]);
     }
     if !fg.numbers.is_empty() {
         for (name, field) in &fg.numbers {
