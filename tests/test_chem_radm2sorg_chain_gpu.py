@@ -149,7 +149,7 @@ GAS_START = {"o3": 0.04, "no2": 0.008, "no": 0.004, "co": 0.15, "so2": 0.003,
              "h2o2": 1e-3, "hno3": 1e-3, "nh3": 0.004, "pan": 3e-4}
 
 
-def _run(steps):
+def _run(steps, feedback=0):
     import cupy as cp
     from woof.core.chem_context import (ChemAllocation, ChemClock, ChemContext,
                                         allocation_shape, chem_processes)
@@ -179,7 +179,7 @@ def _run(steps):
     ddvel = cp.zeros((len(table.rows), NY, NX), dtype=cp.float32)
     dt = 60.0
     cfg = SimpleNamespace(dt=dt, chemdt=0.0, kemit=1, vertmix_onoff=1, photdt=0.0,
-                          aer_ra_feedback=0, cu_diag=0, chem_sources="",
+                          aer_ra_feedback=feedback, aer_op_opt=1, cu_diag=0, chem_sources="",
                           start_time=datetime(2026, 6, 21, 12))
 
     def ctx_for(ktau):

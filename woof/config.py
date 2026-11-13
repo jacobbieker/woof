@@ -7551,11 +7551,19 @@ def validate_chem_config(cfg) -> None:
             "the sulfur rows (chem.sulfur) need an oxidant source (OH, H2O2, "
             "NO3) in chem_sources, and none is enabled: SO2 would never "
             "oxidize and sulfate would be emission-only.")
-    if cfg.aer_ra_feedback != 0 and not table.rows_for("optics.gocart"):
+    if cfg.aer_ra_feedback != 0 and not (table.rows_for("optics.gocart")
+                                          or table.rows_for("aerosol.sorgam")):
         raise ConfigurationRefused(
             f"aer_ra_feedback={cfg.aer_ra_feedback} with no active row naming "
-            "optics.gocart: radiation would be handed aerosol optics nothing "
-            "computes.")
+            "optics.gocart and no SORGAM aerosol (aerosol.sorgam): radiation "
+            "would be handed aerosol optics nothing computes.")
+    if cfg.aer_ra_feedback != 0 and table.rows_for("aerosol.sorgam"):
+        # The default build's clean-room modal optics serve the SORGAM rows
+        # (woof/core/chem_modal_optics.py, P9).
+        from woof.core.chem_modal_optics import refusal as _modal_refusal
+        reason = _modal_refusal(cfg)
+        if reason:
+            raise ConfigurationRefused(reason + ".")
     if cfg.aer_ra_feedback != 0:
         lw, sw = radiation_scheme_ids(cfg)
         if any(int(value) not in (0, 4) for value in (lw, sw)) or not (lw or sw):

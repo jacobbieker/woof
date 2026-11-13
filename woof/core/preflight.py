@@ -4571,6 +4571,8 @@ def domain_kernel_modules(dc: DomainConfig, *,
                                            dc.run.chem_adv_opt))
         if getattr(dc.run, "aer_ra_feedback", 0):
             modules.update(("chem_radiation", "chem_rrtmgp_aerosol"))
+            if load_chem_table(dc.run).rows_for("aerosol.sorgam"):
+                modules.add("chem_modal_optics")
     if dc.run.sf_surface_physics==4 and dc.run.noahmp_output==3:
         modules.add("noahmp_output")
     return frozenset(modules)
