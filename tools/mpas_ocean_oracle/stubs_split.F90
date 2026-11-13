@@ -38,3 +38,8 @@ contains
   end subroutine ocn_reconstruct_gm_vectors
 
 end module split_gm_vectors
+
+! mpas_ocn_time_average_coupled.F calls the barrier without USE-ing
+! mpas_threading: the external routine of that name (one thread)
+subroutine mpas_threading_barrier()
+end subroutine mpas_threading_barrier
