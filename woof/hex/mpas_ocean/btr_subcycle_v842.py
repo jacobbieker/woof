@@ -46,7 +46,7 @@ from woof.hex.errors import ConfigurationRefusal
 
 from .tend_v842 import COMPILE_OPTIONS, PRECISIONS, _precision_of
 
-SOURCE_FILES = ("src/core_ocean/mode_forward/mpas_ocn_time_integration_split.F:638-1383",)
+SOURCE_FILES = ("src/core_ocean/mode_forward/mpas_ocn_time_integration_split.F:84-223,227-259,638-1384",)
 MODULE_OPTIONS = COMPILE_OPTIONS
 GRAVITY = 9.80616
 _BLOCK = 128
