@@ -39,16 +39,10 @@ import pytest
 
 from conftest import requires_gpu
 from woof.hex.errors import ConfigurationRefusal
-from woof.hex.mpas_ice import rkind
 from woof.verify import mpas_ocean_split_step_oracle as oo
 
 ROOT = Path(__file__).resolve().parents[1]
 BOTH = ("r4", "r8")
-
-
-def _runs(case: dict) -> bool:
-    """Whether this checkout runs the case: the sphere at RKIND 8 needs the glibc opt-in."""
-    return not (case["precision"] == "r8" and case["config"]["mesh:on_a_sphere"] and not rkind.trig64())
 
 
 def test_case_inputs_are_the_recorded_bytes():
@@ -118,7 +112,7 @@ def test_gpu_matches_the_v842_oracle_word_for_word(precision):
     fixture = oo.load_fixture(precision)
     bad = {}
     for case in oo.cases(precision):
-        if not _runs(case):
+        if not oo.runs(case):
             continue
         got = oo.run_gpu(case)
         want = fixture[case["name"]]
@@ -171,7 +165,7 @@ def test_a_mutated_step_is_caught(monkeypatch, precision, original, mutated, cas
     real = split_step_v842.module_source
     assert real(precision).count(original) == 1
     case = next(c for c in oo.cases(precision) if c["name"] == case_name)
-    if not _runs(case):
+    if not oo.runs(case):
         pytest.skip("the sphere at RKIND 8 needs WOOF_GLIBC239_LIBM64=1")
     monkeypatch.setattr(split_step_v842, "module_source", lambda p="r4": real(p).replace(original, mutated))
     split_step_v842._module_on.cache_clear()

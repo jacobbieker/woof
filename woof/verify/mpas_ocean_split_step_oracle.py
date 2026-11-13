@@ -389,10 +389,20 @@ def run_gpu(case: dict) -> dict[str, np.ndarray]:
             if kind in (REAL, INT) and dev[pool][name] is not None}
 
 
+def runs(case: dict) -> bool:
+    """Whether this checkout runs the case: the sphere at RKIND 8 needs the glibc
+    2.39 opt-in (``WOOF_GLIBC239_LIBM64=1``); without it the step refuses it by name."""
+    from woof.hex.mpas_ice import rkind
+    return not (case["precision"] == "r8" and case["config"]["mesh:on_a_sphere"] and not rkind.trig64())
+
+
 def measure(precision: str, reference: dict | None = None) -> dict[str, dict[str, int]]:
+    """Word mismatches per case and field, over the cases this checkout runs."""
     reference = load_fixture(precision) if reference is None else reference
     report: dict[str, dict[str, int]] = {}
     for case in cases(precision):
+        if not runs(case):
+            continue
         got = run_gpu(case)
         want = reference[case["name"]]
         report[case["name"]] = {name: word_mismatches(got[name], want[name]) for name in want}
