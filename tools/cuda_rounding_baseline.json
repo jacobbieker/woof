@@ -2262,6 +2262,14 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "f33b1c08fe4d4685aacdce406075227262b16d3215ec6f5a898cfe4c0c62f729",
+    "constructor": "compile_using_nvrtc",
+    "factory": "_module_on",
+    "factory_sha256": "e7a7da4bc746fe6ad6bc31e049336c1e61974a5b3d4682fc1814a0d7454db08e",
+    "file": "woof/hex/mpas_ocean/tracer_hmix_v842.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "f378aab668577b0aa9a2d8535466c48cf28cda71a1b7e6ee55fb3c10cdf4ac8e",
     "constructor": "RawKernel",
     "factory": "_kernel",
@@ -4620,6 +4628,10 @@
     "sha256": "385544b1607e8173378150bfbe1b71084d09af60c00d415d6b29329de502fb06"
    },
    {
+    "file": "woof/hex/mpas_ocean/tracer_hmix_v842.cu",
+    "sha256": "5beba674dfb15d9c70833ef25cd40461bde65b7701d7690132682a2318d297f4"
+   },
+   {
     "file": "woof/hex/mpas_seaice/evp_variational_v842.cu",
     "sha256": "359730130db2e446b9e99f1336eb9710953c20bf1ee98da376a5115e957b3dc9"
    },
@@ -5536,6 +5548,10 @@
    {
     "file": "woof/hex/mpas_ocean/tracer_advection_v842.py",
     "sha256": "3802051b4974d609e5544ac541e6c865ba2fe63a52373fe5e42e6f5201aab20b"
+   },
+   {
+    "file": "woof/hex/mpas_ocean/tracer_hmix_v842.py",
+    "sha256": "0f414d177cfae9ef85e9d352055435eadec5c68d152e0a69d1650df306a67704"
    },
    {
     "file": "woof/hex/mpas_seaice/evp_v842.py",
