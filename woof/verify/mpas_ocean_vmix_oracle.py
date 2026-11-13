@@ -44,6 +44,8 @@ FIELDS = (
     ("diagnostics", "tracersSurfaceValue", REAL, ("T", "C1")),
     ("diagnostics", "activeTracerVertMixTendency", REAL, ("T", "L", "C1")),
     ("diagnostics", "vertNonLocalFlux", REAL, ("T", "LP1", "C1")),
+    # Redi's coefficient: its GM package is off, so MPAS leaves it unallocated
+    ("diagnostics", "k33", REAL, ("LP1", "C1")),
     ("tracersSurfaceFlux", "nonLocalSurfaceTracerFlux", REAL, ("T", "C1")),
     ("scratch", "ddensityTopOfCell", SCRATCH, ("LP1", "C1")), ("scratch", "du2TopOfCell", SCRATCH, ("LP1", "C1")),
     ("scratch", "ddensityTopOfEdge", SCRATCH, ("LP1", "E1")), ("scratch", "du2TopOfEdge", SCRATCH, ("LP1", "E1")),
@@ -132,8 +134,8 @@ def make_case(name: str, seed: int, n_cells: int, n_levels: int, overrides: dict
     for pool, field, kind, fshape in FIELDS:
         if kind in (DIM, DIMS):
             value = values[field]
-        elif kind == SCRATCH or (field == "activeTracerVertMixTendency"
-                                 and not config["config_compute_active_tracer_budgets"]):
+        elif kind == SCRATCH or field == "k33" or (field == "activeTracerVertMixTendency"
+                                                   and not config["config_compute_active_tracer_budgets"]):
             value = None
         elif field in values:
             value = values[field]
