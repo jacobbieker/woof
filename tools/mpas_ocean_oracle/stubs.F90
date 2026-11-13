@@ -61,7 +61,8 @@ module mpas_pool_routines
             stub_pool_put_dimension, stub_pool_put_config, &
             field1DReal, field2DReal, field3DReal, mpas_pool_get_field, stub_pool_put_field, &
             mpas_allocate_scratch_field, mpas_deallocate_scratch_field, &
-            mpas_pool_iterator_type, MPAS_POOL_FIELD, mpas_pool_begin_iteration, mpas_pool_get_next_member
+            mpas_pool_iterator_type, MPAS_POOL_FIELD, mpas_pool_begin_iteration, mpas_pool_get_next_member, &
+            mpas_pool_get_package
 
   integer, parameter :: maxEntries = 192
 
@@ -226,6 +227,14 @@ contains
     character(len=StrKIND), pointer :: value
     value => pool % e(find(pool, name)) % c0
   end subroutine get_config_c
+
+  ! a package's switch, which the driver puts in the packages pool by name
+  subroutine mpas_pool_get_package(pool, name, value)
+    type(MPAS_pool_type), intent(in) :: pool
+    character(len=*), intent(in) :: name
+    logical, pointer :: value
+    value => pool % e(find(pool, name)) % l0
+  end subroutine mpas_pool_get_package
 
   subroutine get_config_i(pool, name, value)
     type(MPAS_pool_type), intent(in) :: pool
