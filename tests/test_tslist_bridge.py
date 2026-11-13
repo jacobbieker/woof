@@ -1,7 +1,9 @@
 """Exercise the actual Rust ABI, including failed resume before mutation."""
 import os
+import re
 from pathlib import Path
 import struct
+import tempfile
 import time
 import unittest
 
@@ -20,8 +22,23 @@ def placement():
 
 
 class RustAbiTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # TSLIST_TEST_SCRATCH keeps the files for inspection; otherwise a
+        # temporary directory removed after the class.
+        cls._scratch = None
+        if not os.environ.get("TSLIST_TEST_SCRATCH"):
+            cls._scratch = tempfile.TemporaryDirectory(prefix="tslist-abi-")
+
+    @classmethod
+    def tearDownClass(cls):
+        if cls._scratch is not None:
+            cls._scratch.cleanup()
+
     def directory(self, name):
-        path = Path(os.environ["TSLIST_TEST_SCRATCH"]) / f"{name}-{time.time_ns()}"
+        root = (self._scratch.name if self._scratch is not None
+                else os.environ["TSLIST_TEST_SCRATCH"])
+        path = Path(root) / f"{name}-{time.time_ns()}"
         path.mkdir(parents=True)
         return path
 
@@ -102,8 +119,10 @@ class NativeGoAdmissionTest(unittest.TestCase):
                       ("--hydro", "on"), ("--history-interval", "900")):
             with self.subTest(flags=flags):
                 args = parser.parse_args(["--wrfinput", "/absent/native-input", *flags])
-                # Admission must fail before trying to read that directory.
-                with self.assertRaisesRegex(GoRefusal, "namelist.input"):
+                # Admission must fail before trying to read that directory,
+                # naming the flag it would otherwise drop.
+                with self.assertRaisesRegex(
+                        GoRefusal, "WRF inputs do not consume " + re.escape(flags[0])):
                     _go_wrfinput(args)
 
 
