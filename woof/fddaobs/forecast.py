@@ -13,6 +13,23 @@ import tempfile
 import numpy as np
 
 
+#: WRF's vertical-influence depths per variable, in the order the kernel
+#: reads them (full/ramp for regimes 1, 2 and 4), and the no-PBL switches.
+_VIF_CONTROLS = {
+    'uv': ('obs_nudgezfullr1_uv', 'obs_nudgezrampr1_uv',
+          'obs_nudgezfullr2_uv', 'obs_nudgezrampr2_uv',
+          'obs_nudgezfullr4_uv', 'obs_nudgezrampr4_uv'),
+    't': ('obs_nudgezfullr1_t', 'obs_nudgezrampr1_t',
+         'obs_nudgezfullr2_t', 'obs_nudgezrampr2_t',
+         'obs_nudgezfullr4_t', 'obs_nudgezrampr4_t'),
+    'q': ('obs_nudgezfullr1_q', 'obs_nudgezrampr1_q',
+         'obs_nudgezfullr2_q', 'obs_nudgezrampr2_q',
+         'obs_nudgezfullr4_q', 'obs_nudgezrampr4_q'),
+}
+_NO_PBL_CONTROLS = {'uv': 'obs_no_pbl_nudge_uv', 't': 'obs_no_pbl_nudge_t',
+                    'q': 'obs_no_pbl_nudge_q'}
+
+
 def _record(values, types):
     return np.array(tuple(values), dtype=[('v'+str(i), t) for i,t in enumerate(types)])[()]
 
@@ -88,7 +105,7 @@ def attach(state, cfg, driver, *, start_time, latitude, longitude):
     work={name:cp.zeros(volume if name not in ('wt','w2') or cfg.obs_scl_neg_qv_innov else 1,dtype='f4') for name in volume_names}
     work.update({name:cp.zeros(nxy,dtype='f4') for name in plane_names})
     work['kp']=cp.zeros(nxy,dtype='i4')
-    vif={suffix:cp.asarray([getattr(cfg,f'obs_nudgez{part}r{r}_{suffix}') for r in (1,2,4) for part in ('full','ramp')],dtype='f4') for suffix in ('uv','t','q')}
+    vif={suffix:cp.asarray([getattr(cfg,name) for name in names],dtype='f4') for suffix,names in _VIF_CONTROLS.items()}
     heights={suffix:(cp.zeros(nxy,dtype='f4'),cp.zeros(nxy,dtype='f4')) for suffix in vif}
     surface_top={suffix:cp.zeros(nxy,dtype='i4') for suffix in vif}
     g=_record([1,nx+1,1,ny+1,1,nz+1,1,nx+1,1,ny+1,1,nz,1,nx,1,ny,1,nz],['i4']*18)
@@ -127,7 +144,7 @@ def attach(state, cfg, driver, *, start_time, latitude, longitude):
     interval=cfg.obs_ionf*cfg.obs_parent_grid_ratio**cfg.obs_levelidn
     controls={}
     for ivar,suffix in ((1,'uv'),(2,'uv'),(3,'t'),(4,'q')):
-        no_pbl=getattr(cfg,'obs_no_pbl_nudge_'+suffix)
+        no_pbl=getattr(cfg,_NO_PBL_CONTROLS[suffix])
         coef=cfg.obs_coef_wind if ivar<3 else cfg.obs_coef_temp if ivar==3 else cfg.obs_coef_mois
         controls[ivar]=_record([cfg.obs_domain_id,0,0,0,interval,1-no_pbl,cfg.obs_sfc_scheme_horiz,cfg.obs_sfc_scheme_vert,cfg.obs_scl_neg_qv_innov,
             0.,cfg.dt/60.,cfg.obs_rinxy,cfg.dx,cfg.obs_twindo,cfg.obs_sfcfact,cfg.obs_sfcfacr,1.,2.,50.,1./cfg.obs_dpsmx,1.,coef,cfg.obs_max_sndng_gap],['i4']*9+['f4']*14)

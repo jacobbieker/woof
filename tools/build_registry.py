@@ -126,9 +126,6 @@ IMPLEMENTED: dict[str, dict] = {
        for key,value in dict(td_turbgridid=-1,td_hubheight=100.,td_diameter=60.,td_stdthrcoef=.158,
            td_cutinspeed=4.,td_cutoutspeed=27.,td_power=2.,td_turbpercell=1.,td_ewfx=0,
            td_ewfy=0,td_pwfx=1,td_pwfy=1).items()},
-    "windfarm_opt": {"type":"integer", "enum":[0,1,2], "default":0,
-        "per_domain":True,"component_id":"pbl","consuming_read":"woof/namelist_import.py",
-        "description":"Native WRF wind farm: off, Fitch or MAV. MAV is a named opt-in: measured forecast hook cost 2.044114x Fitch on the retained eight-turbine case; added native wake quadratures are profiled. See docs/wind-farms.md."},
     "windfarm_induction": {"type":"integer", "enum":[0,1], "default":0,
         "per_domain":False,"component_id":"pbl","consuming_read":"woof/core/wind_farm.py",
         "description":"WRF Fitch two-pass axial induction correction; explicit opt-in, measured 1.28x Fitch cost; zero is the default."},
@@ -1379,6 +1376,14 @@ UNIMPLEMENTED_LEDGER: dict[str, tuple[str, str]] = {
         "This selects the vertical injection profile for the biomass-burning "
         "aerosol emissions above. It is a branch inside a subsystem woof "
         "does not have, so there is nothing for it to distribute."),
+    "windfarm_opt": (
+        "c",
+        "WRF's windfarm_opt is a namelist-only spelling: woof/namelist_import.py "
+        "imports windfarm_opt = 1 and 2 as wind_farms (Fitch) and "
+        "wind_farm_scheme = mav rather than a RunConfig field of its own, so "
+        "nothing could carry a value set here. Set wind_farm_scheme and "
+        "wind_farms; the Fitch and MAV wind farms are implemented under MYNN. "
+        "See docs/wind-farms.md."),
 }
 
 NOISE = re.compile(
@@ -13305,6 +13310,8 @@ def _multiscale_parameters(registry):
         parameter['readers']=['woof.core.mskf.launch_mskf','woof.core.morrison_aero.launch_morrison_aero']
     registry['parameters']['cu_rad_feedback']['readers']=['woof.namelist_import.import_namelists','woof.core.physics.initialize_physics','woof.core.kf.KainFritsch.__init__','woof.core.column_cumulus.MskfColumnCumulus.radiation_feedback']
     registry['parameters']['aercu_fct']['default']=1.0
+    # MskfColumnCumulus passes cfg.aercu_fct to launch_mskf.
+    registry['parameters']['aercu_fct']['consuming_read']='woof/core/column_cumulus.py'
     registry['parameters']['aercu_opt']['default']=0
     # Public NASA replacement is an explicit opt-in, off by default.
     registry['parameters']['aercu_opt']['enum']=[0,1,2]

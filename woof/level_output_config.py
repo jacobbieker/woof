@@ -31,13 +31,15 @@ def drop_inert(values):
 
 
 def validate(cfg):
-    for prefix, stream, targets in (('p', 23, cfg.press_levels), ('z', 22, cfg.z_levels)):
+    for prefix, stream, targets, dfi_key in (
+            ('p', 23, cfg.press_levels, 'p_lev_diags_dfi'),
+            ('z', 22, cfg.z_levels, 'z_lev_diags_dfi')):
         switch = getattr(cfg, prefix+'_lev_diags')
         if type(switch) is not int or switch not in (0, 1):
             raise ValueError(prefix+'_lev_diags must be 0 or 1')
-        dfi = getattr(cfg, prefix+'_lev_diags_dfi')
+        dfi = getattr(cfg, dfi_key)
         if type(dfi) is not int or dfi not in (0, 1):
-            raise ValueError(prefix+'_lev_diags_dfi must be 0 or 1')
+            raise ValueError(dfi_key+' must be 0 or 1')
         if not switch:
             continue
         if not 1 <= len(targets) <= 100 or any(
@@ -118,6 +120,20 @@ def import_controls(diags, tc, max_dom, error):
     return rows
 
 
+#: Controls read somewhere other than woof/core/level_output.py: the stream
+#: writer reads the auxhist alarms, windows, frames and filenames, and the
+#: DFI switches are only validated (woof writes no level output during DFI).
+_CONSUMING_READS = {
+    **{f'auxhist{_stream}_{_part}': 'woof/io/level_output.py'
+       for _stream in (22, 23)
+       for _part in ('interval_s', 'begin_s', 'end_s', 'outname')},
+    'frames_per_auxhist22': 'woof/io/level_output.py',
+    'frames_per_auxhist23': 'woof/io/level_output.py',
+    'p_lev_diags_dfi': 'woof/level_output_config.py',
+    'z_lev_diags_dfi': 'woof/level_output_config.py',
+}
+
+
 def registry_rows(registry):
     for name, default in DEFAULTS.items():
         registry.setdefault('parameters', {})[name] = {
@@ -125,7 +141,7 @@ def registry_rows(registry):
             'type': ('array' if isinstance(default, tuple) else 'string' if isinstance(default, str)
                      else 'integer' if type(default) is int else 'real'),
             'per_domain': name.startswith(('auxhist', 'frames_per_')) or name in ('p_lev_interval_s', 'z_lev_interval_s'),
-            'consuming_read': 'woof/core/level_output.py'}
+            'consuming_read': _CONSUMING_READS.get(name, 'woof/core/level_output.py')}
     for switch, stream, suffix in (('p_lev_diags', 23, 'PL'), ('z_lev_diags', 22, 'ZL')):
         registry.setdefault('diagnostic_packages', {})[switch] = {
             '0': {'label': 'Off', 'fields': []},
