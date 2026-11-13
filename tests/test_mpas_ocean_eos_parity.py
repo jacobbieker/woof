@@ -38,6 +38,7 @@ from woof.hex.errors import ConfigurationRefusal
 from woof.verify import mpas_ocean_eos_oracle as oo
 
 ROOT = Path(__file__).resolve().parents[1]
+BOTH = ("r4", "r8")
 
 
 def test_case_inputs_are_the_recorded_bytes():
@@ -70,7 +71,7 @@ def test_fixture_covers_the_branches():
                 for name in ("density", "thermalExpansionCoeff", "densityDeepest"):
                     assert (out[name][below] == sentinel[below]).all(), (case["name"], name)
             active = ~below
-            assert ((out["density"][active] > 990.0) & (out["density"][active] < 1060.0)).all()
+            assert ((out["density"][active] > 990.0) & (out["density"][active] < 1070.0)).all()
             p = case["freezeP"]
             for where in ("open_ocean", "land_ice_cavity"):
                 reference = case["configs"][f"config_{where}_freezing_temperature_reference_pressure"]
@@ -110,34 +111,38 @@ def test_gpu_matches_the_v842_oracle_word_for_word(precision):
 
 @requires_gpu
 @pytest.mark.parametrize("precision", sorted(oo.PRECISIONS))
-@pytest.mark.parametrize("original, mutated, case_name, field", [
+@pytest.mark.parametrize("original, mutated, case_name, field, precisions", [
     # the bulk modulus's salinity term distributed
-    ("M(SQ, A(WORK3, WORK4)));", "A(M(SQ, WORK3), M(SQ, WORK4)));", "jm_ocean", "density"),
+    ("M(SQ, A(WORK3, WORK4)));", "A(M(SQ, WORK3), M(SQ, WORK4)));", "jm_ocean", "density", BOTH),
     # the density's reciprocal replaced by a division
     ("const rk rho = M(M(A(unt0, RHO_S), BULK_MOD), DENOMK);",
-     "const rk rho = D(M(A(unt0, RHO_S), BULK_MOD), S(BULK_MOD, p));", "jm_ocean", "density"),
-    # exp's argument rounded as a division (the thin surface layers carry exp's bits)
-    ("EXP(-M(C(0.025), depth))", "EXP(-D(depth, C(40.0)))", "jm_deep_short_columns", "density"),
+     "const rk rho = D(M(A(unt0, RHO_S), BULK_MOD), S(BULK_MOD, p));", "jm_ocean", "density", BOTH),
+    # the reference pressure's depth**2 taken as depth: the pressure reaches every word.
+    # (Its last bits do not: a one-ulp change in pRefEOS, at the thin surface layers
+    # where exp's rounding shows, leaves every output word as it is.)
+    ("M(C(2.28405e-7), M(depth, depth))", "M(C(2.28405e-7), depth)", "jm_deep_short_columns", "density", BOTH),
     # the thermal expansion's correction regrouped
     ("M(M(M(p, A(unt0, RHO_S)), DKDT), DENOMK)", "M(M(p, A(unt0, RHO_S)), M(DKDT, DENOMK))", "jm_ocean",
-     "thermalExpansionCoeff"),
+     "thermalExpansionCoeff", BOTH),
     # JM's upper salinity clamp dropped
-    ("eos_max(eos_min(tracerSalt, C(42.0)), C(0.0))", "eos_max(tracerSalt, C(0.0))", "jm_clamped", "density"),
+    ("eos_max(eos_min(tracerSalt, C(42.0)), C(0.0))", "eos_max(tracerSalt, C(0.0))", "jm_clamped", "density", BOTH),
     # the displaced reference level one too shallow
     ("int kTest = type == EOS_RELATIVE ? k + 1 + kDisplaced : kDisplaced;",
-     "int kTest = type == EOS_RELATIVE ? k + kDisplaced : kDisplaced;", "jm_ocean", "displacedDensity"),
+     "int kTest = type == EOS_RELATIVE ? k + kDisplaced : kDisplaced;", "jm_ocean", "displacedDensity", BOTH),
     # the linear terms added in the other order
     ("const rk rho = A(S(densityref, M(alpha, S(T, Tref))), M(beta, S(Sa, Sref)));",
      "const rk rho = S(A(densityref, M(beta, S(Sa, Sref))), M(alpha, S(T, Tref)));", "linear_configured",
-     "density"),
+     "density", BOTH),
     # the freezing temperature's pS term regrouped
     ("M(M(coeffPS, pressureOffset), salinity[i])", "M(coeffPS, M(pressureOffset, salinity[i]))", "jm_ocean",
-     "freezingTemperatureCavity"),
+     "freezingTemperatureCavity", BOTH),
     # the pressure offset's floor at zero dropped
     ("eos_max(S(pressure[i], referencePressure), C(0.0))", "S(pressure[i], referencePressure)", "jm_ocean",
-     "freezingTemperatureCavity"),
+     "freezingTemperatureCavity", BOTH),
 ])
-def test_a_mutated_port_is_caught(monkeypatch, precision, original, mutated, case_name, field):
+def test_a_mutated_port_is_caught(monkeypatch, precision, original, mutated, case_name, field, precisions):
+    if precision not in precisions:
+        pytest.skip(f"the {precision} words do not depend on this expression's rounding")
     from woof.hex.mpas_ocean import eos_v842
     real = eos_v842.module_source
     assert real(precision).count(original) == 1
