@@ -334,6 +334,48 @@ def resolve_options(arguments: Any, *, row_dt: float, row_substeps: int, order: 
         order=int(order), notes=tuple(notes))
 
 
+#: One subclass per configuration class, and the step that class's run was admitted at.
+_ADAPTIVE_TYPES: dict[type, type] = {}
+_ADMITTED: dict[type, tuple[float, int]] = {}
+
+
+def _validate_admitted(self, *args: Any, **kwargs: Any) -> Any:
+    import dataclasses
+
+    base = type(self)._adaptive_base
+    dt, substeps = _ADMITTED[base]
+    values = {item.name: getattr(self, item.name) for item in dataclasses.fields(self) if item.init}
+    return base(**{**values, "config_dt": dt, "config_number_of_sub_steps": substeps}).validate(*args, **kwargs)
+
+
+def adaptive_step_config(config: Any, *, dt: float, substeps: int) -> Any:
+    """``config`` at one adaptive step: the live ``config_dt`` and acoustic substeps, validated as admitted.
+
+    The hex configuration's ``validate`` (re-run on every step's physics receipt) refuses a physics cadence
+    that is not a whole number of steps, because on a fixed clock such a cadence has no step to run on.
+    Under the adaptive clock every positive cadence is a deadline the clock lands on, so that rule belongs to
+    the step the run was ADMITTED at: this returns an instance of a subclass whose ``validate`` validates the
+    admitted configuration (the mesh row's step and substeps, every other field this step's), with the same
+    fields and payload as the original class.
+    """
+
+    import dataclasses
+
+    base = getattr(type(config), "_adaptive_base", type(config))
+    if base not in _ADMITTED:
+        if type(config) is not base:
+            raise RuntimeError("an adaptive configuration must first be derived from the admitted one")
+        _ADMITTED[base] = (float(config.config_dt), int(config.config_number_of_sub_steps))
+    cls = _ADAPTIVE_TYPES.get(base)
+    if cls is None:
+        cls = type(f"AdaptiveStep{base.__name__}", (base,),
+                   {"__slots__": (), "_adaptive_base": base, "validate": _validate_admitted,
+                    "__module__": __name__})
+        _ADAPTIVE_TYPES[base] = cls
+    values = {item.name: getattr(config, item.name) for item in dataclasses.fields(config) if item.init}
+    return cls(**{**values, "config_dt": float(dt), "config_number_of_sub_steps": int(substeps)})
+
+
 @dataclass
 class StepPlan:
     """One step as the clock decided it, before the model takes it."""
@@ -655,13 +697,11 @@ class AdaptiveRun:
                 return
 
     def _rebind(self, plan: StepPlan) -> None:
-        import dataclasses
-
         import numpy as np
 
         driver, backend = self.stack["driver"], self.stack["backend"]
-        driver.readmit_adaptive_step(dataclasses.replace(driver.config, config_dt=float(plan.dt),
-                                                         config_number_of_sub_steps=int(plan.substeps)))
+        driver.readmit_adaptive_step(adaptive_step_config(driver.config, dt=float(plan.dt),
+                                                          substeps=int(plan.substeps)))
         regional = getattr(driver, "regional_v841", None)
         if regional is not None and hasattr(regional, "outer_dt"):
             regional.outer_dt = float(plan.dt)
