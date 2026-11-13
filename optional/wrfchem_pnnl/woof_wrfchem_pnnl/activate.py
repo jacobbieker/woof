@@ -127,3 +127,74 @@ def launch_activate(cases):
               for k, name in enumerate(OUTPUTS)}
     result["flux_fullact"] = cp.asnumpy(d[4])
     return result
+
+
+#: mixactivate's compile-time aerosol extents (the transcriber's MAXD_* : the caller's descriptor arrays
+#: must have these shapes)
+MAXD_ACOMP, MAXD_APHASE = 20, 2
+#: the per-column fields, in the kernel's order, each (i, k, j) over memory dims
+MIX_FIELDS = ("qv", "qc", "qi", "qndrop3d", "temp", "w", "rho", "zm", "dz8w", "p_at_w", "t_at_w", "kvh",
+              "cldfra", "cldfra_old")
+
+
+def launch_mixactivate(dims, desc, fields, *, chem, hygro, ddvel, dtstep, grid_id=1, ktau=1,
+                       idrydep_onoff=1, f_qc=True, f_qi=True):
+    """WRF's ``mixactivate`` over one tile, one thread per column.
+
+    ``dims``: ids, ide, jds, jde, kds, kde, ims, ime, jms, jme, kms, kme, its, ite, jts, jte, kts, kte.
+    ``desc``: msectional, ntype_aer, nphase_aer, ai_phase, cw_phase, ncomp_aer (2), nsize_aer (2),
+    numptr_aer (8, 2, 2), massptr_aer (20, 8, 2, 2), waterptr_aer (8, 2), dlo_sect, dhi_sect, sigmag_aer,
+    dpvolmean_aer (8, 2), dens_aer, mw_aer (20, 2).  ``fields``: MIX_FIELDS, NumPy arrays indexed [i, k, j]
+    over the memory dims (Fortran's order, as the oracle writes them); ``chem`` [i, k, j, species];
+    ``hygro`` [i, k, j, m, n] over the tile; ``ddvel`` [i, j, species] over the tile.
+    Returns chem, qndrop3d, cldfra, cldfra_old, qsrflx [i, j, species], ccn [i, k, j, 6], nsource."""
+    import cupy as cp
+    (ids, ide, jds, jde, kds, kde, ims, ime, jms, jme, kms, kme, its, ite, jts, jte, kts, kte) = dims
+    ni, nj, nk = ite - its + 1, jte - jts + 1, kte - kts + 1
+    num_chem = chem.shape[-1]
+    nkm = kme - kms + 1
+    ws_per_column = 2 * nkm * num_chem + 64 * nkm + num_chem + 8192
+    wsi_per_column = 4096
+    ip = np.array([desc["msectional"], num_chem, idrydep_onoff, desc["ntype_aer"], desc["nphase_aer"],
+                   desc["ai_phase"], desc["cw_phase"], ids, ide, jds, jde, kds, kde, ims, ime, jms, jme,
+                   kms, kme, kts, kte, grid_id, ktau, int(f_qc), int(f_qi), its, jts, ni, ws_per_column,
+                   wsi_per_column],
+                  np.int32)
+    f = lambda a, dt=np.float32: np.asarray(a, dt).ravel(order="F")
+    idesc = np.concatenate([f(desc[k], np.int32) for k in
+                            ("ncomp_aer", "nsize_aer", "numptr_aer", "massptr_aer", "waterptr_aer")])
+    fdesc = np.concatenate([f(desc[k]) for k in
+                            ("dlo_sect", "dhi_sect", "sigmag_aer", "dpvolmean_aer", "dens_aer", "mw_aer")])
+    assert idesc.size == 4 + 32 + 640 + 16 and fdesc.size == 64 + 80
+    mem = (ime - ims + 1, nkm, jme - jms + 1)
+    shape = lambda a: tuple(np.shape(a))
+    for name in MIX_FIELDS:
+        if shape(fields[name]) != mem:
+            raise ValueError(f"{name} is {shape(fields[name])}, the memory dims are {mem}")
+    columns = [(i, j) for j in range(nj) for i in range(ni)]
+    hyg = np.concatenate([np.asarray(hygro, np.float32)[i, :, j, :, :].ravel(order="F") for i, j in columns])
+    ddv = np.concatenate([np.asarray(ddvel, np.float32)[i, j, :] for i, j in columns])
+    d = {name: cp.asarray(f(fields[name])) for name in MIX_FIELDS}
+    out_like = lambda: cp.full(int(np.prod(mem)), -9.0, cp.float32)
+    chem_d = cp.asarray(f(chem))
+    qsrflx = cp.full(mem[0] * mem[2] * num_chem, -9.0, cp.float32)
+    ccn = [out_like() for _ in range(6)]
+    nsource = out_like()
+    ws = cp.zeros(len(columns) * ws_per_column, cp.float32)
+    wsi = cp.zeros(len(columns) * wsi_per_column, cp.int32)
+    fatal = cp.zeros(1, cp.int32)
+    _module().get_function("wrfchem_pnnl_mixactivate")(
+        ((len(columns) + 31) // 32,), (32,),
+        (cp.asarray(ip), cp.asarray(idesc), cp.asarray(fdesc), chem_d, d["qv"], d["qc"], d["qi"],
+         d["qndrop3d"], d["temp"], d["w"], d["rho"], d["zm"], d["dz8w"], d["p_at_w"], d["t_at_w"], d["kvh"],
+         d["cldfra"], d["cldfra_old"], qsrflx, *ccn, nsource, cp.asarray(hyg), cp.asarray(ddv), ws, wsi,
+         np.float32(dtstep), fatal, np.int32(len(columns))))
+    code = int(fatal.get()[0])
+    if code:
+        raise RuntimeError("mixactivate: workspace overrun" if code < 0 else
+                           f"mixactivate: wrf_error_fatal at line {code}")
+    back = lambda a, s: cp.asnumpy(a).reshape(s, order="F")
+    return {"chem": back(chem_d, mem + (num_chem,)), "qndrop3d": back(d["qndrop3d"], mem),
+            "cldfra": back(d["cldfra"], mem), "cldfra_old": back(d["cldfra_old"], mem),
+            "qsrflx": back(qsrflx, (mem[0], mem[2], num_chem)),
+            "ccn": np.stack([back(a, mem) for a in ccn], axis=-1), "nsource": back(nsource, mem)}

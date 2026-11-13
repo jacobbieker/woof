@@ -91,8 +91,8 @@ def reshape(a, shape):
     return asarray(a).reshape(shape)
 
 
-def ravel(a):
-    return asarray(a).ravel()
+def ravel(a, order="C"):
+    return asarray(a).ravel(order)
 
 
 def transpose(a, axes=None):
@@ -414,8 +414,16 @@ class RawModule:
     def __init__(self, code=None, path=None, options=(), backend="nvrtc", translate_cucomplex=False,
                  enable_cooperative_groups=False, name_expressions=None, jitify=False):
         if code is None and path is not None:
-            with open(path, encoding="utf-8") as f:
-                code = f.read()
+            with open(path, "rb") as f:
+                data = f.read()
+            from woof.backend.facade.cuda import _MARK, _read_image
+            if data.startswith(_MARK):
+                # an image this facade's compile_using_nvrtc wrote (a direct compiler's cached
+                # ".cubin", e.g. MPAS Noah's): its source and options, as cupy loads a cubin
+                code, image_options, _filename, _digest = _read_image(data)
+                options = tuple(options or ()) or image_options
+            else:
+                code = data.decode("utf-8")
         if code is None:
             raise ValueError("RawModule needs code= or path=")
         from woof.backend.metal.loader import load_unit

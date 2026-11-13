@@ -433,6 +433,18 @@ def uncontracted_source(source: str | None = None, *, module: str | None = None,
         _UNCONTRACTED_PENDING.append((module, attribute))
 
 
+def uncontracted_derivative(original: str, derived: str) -> None:
+    """Register ``derived`` (a source rewritten from ``original``, e.g. with
+    maths headers bound in) as uncontracted exactly when ``original`` is.
+
+    Breakage it prevents: the MPAS v8.4.2 route compiles the MPAS_to_physics
+    preparation through math_v842.bind_common_carrier_math, so its text no
+    longer matched the registered source, contraction came back, and
+    validate_prep_v841_f32 refused every R2 forecast's first step on Metal."""
+    if _uncontracted(original):
+        _UNCONTRACTED_SOURCES.add(_source_digest(derived))
+
+
 def _uncontracted(source: str) -> bool:
     for module, attribute in list(_UNCONTRACTED_PENDING):
         import importlib

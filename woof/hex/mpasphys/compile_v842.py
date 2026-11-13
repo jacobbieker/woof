@@ -32,7 +32,13 @@ class MpasPhysicsKernelCache(KernelCache):
     def _raw_kernel_v842(self, name, source, *, module_key, options=()):
         if module_key == 'hexcore.cuda_physics_prep_v841':
             from .math_v842 import bind_common_carrier_math
-            source = bind_common_carrier_math(source)
+            bound = bind_common_carrier_math(source)
+            from ..metal_lane import installed as _metal_lane
+            if _metal_lane():
+                # The checker kernel compares the producers' words: keep the bound text uncontracted on Metal too.
+                from woof.backend.metal.loader import uncontracted_derivative
+                uncontracted_derivative(source, bound)
+            source = bound
         # The additive shared API is an integrator reconciliation. Until it
         # arrives, the same direct compiler is owned entirely by this seam.
         if _hex_numerics.is_strict() and 'mpas_strict' in inspect.signature(KernelCache.raw_kernel).parameters:

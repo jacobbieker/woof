@@ -862,3 +862,25 @@ def test_the_point_planner_prices_the_declared_column():
     assert native["levels"] == 55 and deep["levels"] == 80
     assert deep["required_free_mib"] > native["required_free_mib"]
     assert deep["cells_that_fit"] < native["cells_that_fit"]
+
+
+def test_generic_seam_schemes_without_a_hex_row_are_left_to_the_engine_preflight():
+    """THE BREAKAGE (hex option matrix, plan 1.3): a generic-seam PBL or
+    microphysics hex keeps no row for (ACM2, Kessler) stopped the forecast
+    driver before the seam was sealed, though sealing that seam runs WOOF's
+    resolved-physics vertical preflight over every selected component."""
+
+    from woof.hex.vertical_spec import hex_column_level_refusal
+
+    for kwargs in ({"pbl": "acm2"}, {"microphysics": "mp_physics=1"}):
+        with pytest.raises(VerticalSpecError, match="no vertical-bound row"):
+            hex_column_level_terms(**kwargs)
+        assert hex_column_level_terms(**kwargs, engine_validated=True) == \
+            hex_column_level_terms(**{key: None for key in kwargs})
+        assert hex_column_level_refusal(149, **kwargs, engine_validated=True) is None
+    # A scheme WITH a row keeps its term on the engine seam too.
+    assert hex_column_level_terms(pbl="ysu", engine_validated=True) == \
+        hex_column_level_terms(pbl="ysu")
+    ceiling, _ = _default_lane_ceiling()
+    assert hex_column_level_refusal(
+        ceiling + 1, pbl="acm2", engine_validated=True) is not None

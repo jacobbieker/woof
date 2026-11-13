@@ -1390,11 +1390,21 @@ def _build_forecast_config(
     )
 
 
+def _species_variables(variables: Mapping[str, Any]) -> Mapping[str, Any]:
+    """The init variables that can carry a model species: every one, except a netCDF variable without the
+    vertical dimension.  An MPAS init's 2-D statics share names with chemistry rows (the GWDO statistic
+    ``ol2`` and RADM2's ``ol2`` gas); such a field is not a species plane and must not make the row look
+    carried.  Mappings without dimensions (tests' name sets) pass through unchanged."""
+    return {name: value for name, value in variables.items()
+            if getattr(value, "dimensions", None) is None or "nVertLevels" in value.dimensions}
+
+
 def select_initial_scalar_names(
     variables: Mapping[str, Any], model_names: Sequence[str],
 ) -> tuple[str, ...]:
     """Preserve a complete carried species row or use the existing cold start."""
 
+    variables = _species_variables(variables)
     names = tuple(model_names)
     if names[:len(SOURCE_SCALAR_NAMES)] != tuple(SOURCE_SCALAR_NAMES):
         raise ValueError("the model species row must begin with qv, qc and qr")
@@ -1914,6 +1924,12 @@ def build_forecast_constructor_values(
     # refuses mid-step.
     from woof.hex.vertical_spec import hex_column_level_refusal
 
+    # A column-suite or generic-seam row's schemes are also judged when the
+    # seam is sealed, by WOOF's resolved-physics vertical preflight over every
+    # registry component; a scheme hex keeps no row for is left to it.  THE
+    # BREAKAGE (hex option matrix, plan 1.3): every generic-seam PBL but YSU
+    # and MYNN, and every microphysics but the four hex rows, stopped here
+    # with "has no vertical-bound row for the hex column".
     column_refusal = hex_column_level_refusal(
         int(N_LEVELS),
         # An engine-derived row ("mp_wsm6@6", the declared row plus a PBL
@@ -1922,6 +1938,7 @@ def build_forecast_constructor_values(
             str(config.config_microp_scheme).split("@", 1)[0]).engine_scheme,
         pbl=config.config_pbl_scheme,
         p_top_pa=float(p_top_pa),
+        engine_validated=bool(suite_row),
     )
     if column_refusal is not None:
         raise ConfigurationRefusal(

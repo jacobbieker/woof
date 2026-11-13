@@ -256,17 +256,21 @@ def prepare_forecast_init(init, destination, physics, start_time):
     from .species_row import species_row_for_scheme
     from .init_door import resolve_engine
     selectors = physics["selectors"]
-    # A land surface the engine alone carries (the slab, Pleim-Xiu) has no
-    # option row and no carried soil block: like an option row without one,
-    # its init is taken as built (woof hex init --land-surface slab|px).
-    land = load_table()["options"]["config_lsm_scheme"].get(
-        selectors["config_lsm_scheme"], {}).get("carried")
+    # A selector the generic column seam runs straight from WOOF's registry
+    # (``lin-mp2``, ``ssib``: its registry option id) has no row in the suite
+    # table at all.  THE BREAKAGE (hex option matrix, plan 1.3, 2026-11-12):
+    # every such microphysics, and SSiB, stopped here with a bare KeyError
+    # before the forecast opened; an absent row is an engine-only row, the
+    # same as a table row without a carried block.
+    options = load_table()["options"]
+    land = options["config_lsm_scheme"].get(selectors["config_lsm_scheme"], {}).get("carried")
     if land is None:
         return init, None
     names = species_row_for_scheme(selectors["config_microp_scheme"]).names()
     # Engine-only rows (including non-aerosol Thompson) have no legacy
     # carried block. Aerosol requirements remain explicit metadata, as for TEMPO.
-    required = load_table()["options"]["config_microp_scheme"][selectors["config_microp_scheme"]].get("carried", {}).get("requires_aerosol_climatology", False)
+    required = (options["config_microp_scheme"].get(selectors["config_microp_scheme"], {})
+                .get("carried", {}).get("requires_aerosol_climatology", False))
     synthetic_source = required and _synthetic_source(init)
     with Dataset(init) as ds:
         soil = len(ds.dimensions["nSoilLevels"])

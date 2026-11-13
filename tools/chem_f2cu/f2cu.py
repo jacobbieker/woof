@@ -88,6 +88,18 @@ def _mp_fn(name, args, kind):
         r = ctx.sqrt(xs[0])
     elif name == "pow":
         r = ctx.power(xs[0], xs[1])
+    elif name == "atan":
+        # halve the argument until it is small (atan x = 2 atan(x / (1 +
+        # sqrt(1 + x^2)))), then the Taylor series
+        x, doublings = xs[0], 0
+        while abs(x) > decimal.Decimal("0.01"):
+            x = ctx.divide(x, ctx.add(1, ctx.sqrt(ctx.add(1, ctx.multiply(x, x)))))
+            doublings += 1
+        r, term, n, x2 = decimal.Decimal(0), x, 1, ctx.multiply(x, x)
+        while term != 0 and n < 400:
+            r = ctx.add(r, ctx.divide(term, n))
+            term, n = ctx.minus(ctx.multiply(term, x2)), n + 2
+        r = ctx.multiply(r, 2 ** doublings)
     else:
         raise NotImplementedError(name)
     return round_to(Fraction(r), kind)
@@ -560,9 +572,11 @@ class Scope:
             if dims is not None:
                 v.dims = dims
             if init is not None:
-                if is_param:
+                if is_param and not (dims is not None and init.strip().startswith("(/")):
                     self.set_param(name, init, evaluator)
                 elif init.strip().startswith("(/"):
+                    # a DATA-initialised array, or a PARAMETER array given by a
+                    # constructor: both are constant tables
                     body = init.strip()[2:-2].strip()
                     ido = re.match(r"^\((.*),\s*(\w+)\s*=\s*([^,]+),\s*([^,]+)\)$", body)
                     if ido:  # implied DO of one constant value
@@ -1227,10 +1241,11 @@ class Translator:
         if name == "real" and len(vals) == 2:
             kind = {4: "float", 8: "double"}[vals[1][0]]
             return self.convert(vals[0][0], kinds[0], kind), kind
-        if name in ("exp", "log", "alog", "sqrt", "log10", "alog10", "dexp", "dlog", "dsqrt"):
+        if name in ("exp", "log", "alog", "sqrt", "log10", "alog10", "dexp", "dlog", "dsqrt",
+                    "atan", "datan"):
             (v, k), = vals
             base = {"alog": "log", "alog10": "log10", "dexp": "exp", "dlog": "log",
-                    "dsqrt": "sqrt"}.get(name, name)
+                    "dsqrt": "sqrt", "datan": "atan"}.get(name, name)
             return _mp_fn(base, [Fraction(v)], k), k
         if name in ("max", "min", "amax1", "amin1", "max0", "min0", "dmax1", "dmin1"):
             kind = kinds[0]
@@ -1423,6 +1438,11 @@ class Translator:
     def _actuals(self, em, callee, args, pre=None):
         out = ["mod"]
         dummies = [a for a in callee.args if a not in callee.ext_alias]
+        if len(args) != len(callee.args):
+            # an OPTIONAL argument left out, or a mismatched call: C++ has no
+            # PRESENT(), so the caller must restate it (a patch)
+            raise NotImplementedError(
+                f"call of {callee.name} with {len(args)} arguments; it declares {len(callee.args)}")
         actual_args = [a for d, a in zip(callee.args, args) if d not in callee.ext_alias]
         for d, a in zip(dummies, actual_args):
             dv = callee.scope.vars[d]
@@ -1505,12 +1525,21 @@ class Translator:
                 out.append(f"    {ctype} {_cid(v.name)};")
         if ws_lines:
             # workspace arrays: a stack in the caller-provided buffers, popped
-            # at every return
-            out += ["    double *f2cu_wsd0 = mod.ws_d;", "    int *f2cu_wsi0 = mod.ws_i;"] + ws_lines
-            out.append("    if ((mod.ws_d > mod.ws_d_end || mod.ws_i > mod.ws_i_end) && "
+            # at every return (binary32 arrays on their own stack, ws_f, only
+            # in a routine that has one)
+            floats = any(".ws_f;" in line for line in ws_lines)
+            out += ["    double *f2cu_wsd0 = mod.ws_d;", "    int *f2cu_wsi0 = mod.ws_i;"]
+            if floats:
+                out.append("    float *f2cu_wsf0 = mod.ws_f;")
+            out += ws_lines
+            over = "mod.ws_d > mod.ws_d_end || mod.ws_i > mod.ws_i_end"
+            if floats:
+                over += " || mod.ws_f > mod.ws_f_end"
+            out.append(f"    if (({over}) && "
                        f"mod.f2cu_fatal == 0) mod.f2cu_fatal = -{r.lines[0][0]};  // workspace overrun")
             self.fatal_used = True
-            self._restore = "mod.ws_d = f2cu_wsd0; mod.ws_i = f2cu_wsi0; "
+            self._restore = "mod.ws_d = f2cu_wsd0; mod.ws_i = f2cu_wsi0; " + (
+                "mod.ws_f = f2cu_wsf0; " if floats else "")
         out += self._block(em, r, r.body, 1)
         if self._restore:
             out.append(f"    {self._restore.strip()}")
@@ -1534,7 +1563,7 @@ class Translator:
         for lo, hi in v.dims:
             exts.append(em.emit(("bin", "+", ("bin", "-", hi, lo), ("num", "1")))[0])
         code = "*".join(f"({e})" for e in exts)
-        buf = {"double": "ws_d", "int": "ws_i"}.get(v.kind)
+        buf = {"double": "ws_d", "int": "ws_i", "float": "ws_f"}.get(v.kind)
         if buf is None:
             raise NotImplementedError(f"{r.name}: workspace for a {v.kind} array {v.name}")
         self.workspace_arrays.append((r.name, v.name, v.kind, v.dims))

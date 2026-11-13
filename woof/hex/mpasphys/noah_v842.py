@@ -3150,8 +3150,8 @@ def _compile_module(source, reserve_stack=True):
     if reserve_stack and _runtime_limit(limit) < 8192:
         _runtime_limit(limit, 8192)
     arch = _compilation_target(xp=cp)
-    from ..cuda_backend.aot import compiler_identity
-    identity = repr((_hex_numerics.options(CUDA_OPTIONS, keep_ftz=True), arch, compiler_identity())) + source
+    from ..cuda_backend.aot import cache_identity
+    identity = repr((_hex_numerics.options(CUDA_OPTIONS, keep_ftz=True), arch, cache_identity())) + source
     key = hashlib.sha256(identity.encode()).hexdigest()
     directory = Path(os.environ.get('CUPY_CACHE_DIR', Path.home() / '.cupy/kernel_cache')) / 'hex-noah'
     directory.mkdir(parents=True, exist_ok=True)

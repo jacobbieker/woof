@@ -1,0 +1,41 @@
+chem_0 f4 4 6 21 4 40
+qndrop3d_0 f4 3 6 21 4
+qv f4 3 6 21 4
+qc f4 3 6 21 4
+qi f4 3 6 21 4
+temp f4 3 6 21 4
+w f4 3 6 21 4
+rho f4 3 6 21 4
+zm f4 3 6 21 4
+dz8w f4 3 6 21 4
+p_at_w f4 3 6 21 4
+t_at_w f4 3 6 21 4
+kvh f4 3 6 21 4
+cldfra_old_0 f4 3 6 21 4
+ddvel f4 3 4 2 40
+hygro f4 4 4 20 2 16
+ints i4 1 4
+ncomp_aer i4 1 2
+nsize_aer i4 1 2
+numptr_aer i4 3 8 2 2
+massptr_aer i4 3 20 8 4
+waterptr_aer i4 2 8 2
+dlo_sect f4 2 8 2
+dhi_sect f4 2 8 2
+sigmag_aer f4 2 8 2
+dpvolmean_aer f4 2 8 2
+dens_aer f4 2 20 2
+mw_aer f4 2 20 2
+dtstep f4 0
+chem_1 f4 4 6 21 4 40
+qndrop3d_1 f4 3 6 21 4
+cldfra_1 f4 3 6 21 4
+qsrflx_1 f4 3 6 4 40
+ccn_1 f4 4 6 21 4 6
+nsource_1 f4 3 6 21 4
+chem_2 f4 4 6 21 4 40
+qndrop3d_2 f4 3 6 21 4
+cldfra_2 f4 3 6 21 4
+qsrflx_2 f4 3 6 4 40
+ccn_2 f4 4 6 21 4 6
+nsource_2 f4 3 6 21 4

@@ -12,7 +12,9 @@
 !
 ! Pools: mesh, state, tracers (the state pool's 'tracers' subpool),
 ! diagnostics, forcing, scratch, tend and tracersTend (the tend pool's
-! 'tracersTend' subpool), tracersSurfaceFlux (the forcing pool's), swForcing.
+! 'tracersTend' subpool), tracersSurfaceFlux (the forcing pool's), swForcing,
+! verticalMesh.  A logical config named 'package:NAME' is the package
+! switch NAME, put in the packages pool (ocnPackages).
 !
 ! OUTPUT: every real and integer field's words, in the input's order.
 module oracle_stream
@@ -24,8 +26,8 @@ module oracle_stream
   public :: oracle_pools, oracle_field, poolNames, read_stream, write_stream, pool_named
 
   integer, parameter :: maxFields = 256
-  character(len=24), parameter :: poolNames(10) = [character(len=24) :: 'mesh', 'state', 'tracers', &
-       'diagnostics', 'forcing', 'scratch', 'tend', 'tracersTend', 'tracersSurfaceFlux', 'swForcing']
+  character(len=24), parameter :: poolNames(11) = [character(len=24) :: 'mesh', 'state', 'tracers', &
+       'diagnostics', 'forcing', 'scratch', 'tend', 'tracersTend', 'tracersSurfaceFlux', 'swForcing', 'verticalMesh']
 
   type oracle_field
     character(len=24) :: pool
@@ -43,7 +45,7 @@ module oracle_stream
   end type pool_ref
 
   type oracle_pools
-    type(pool_ref) :: pool(10)
+    type(pool_ref) :: pool(11)
     type(MPAS_pool_type), pointer :: configs => null(), packages => null()
   end type oracle_pools
 
@@ -111,7 +113,11 @@ contains
           read(u) ivalue
           allocate(lc)
           lc = ivalue /= 0
-          call stub_pool_put_config(pools % configs, trim(cname), lc)
+          if (cname(1:8) == 'package:') then
+             call stub_pool_put_config(pools % packages, trim(cname(9:)), lc)
+          else
+             call stub_pool_put_config(pools % configs, trim(cname), lc)
+          end if
        case (4)
           read(u) cvalue
           allocate(cc)
