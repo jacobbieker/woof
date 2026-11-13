@@ -35,6 +35,7 @@ from __future__ import annotations
 import base64
 import functools
 import gzip
+import hashlib
 import http.client
 import json
 import math
@@ -53,7 +54,8 @@ from woof import fetch_endpoints
 from . import cog_range, utm
 from . import highres_fetch as hf
 from .highres_fetch import (EXPERIMENTAL_TERRAIN_SOURCES, FootprintBBox,
-                            GEM15_BUCKET_URL, GEM15_LAT_MAX, GEM15_LAT_MIN)
+                            GEM15_BUCKET_URL, GEM15_LAT_MAX, GEM15_LAT_MIN,
+                            GEM15_LAT_STEP_DEG, GEM15_VERTICAL_DATUM)
 from .highres_refusal import HighresRefusal
 
 _DATA = Path(__file__).resolve().parent.parent / "data"
@@ -633,6 +635,115 @@ def fetch_gem15_windows(bbox: FootprintBBox, cache_root: Path,
     return tuple(windows), manifest
 
 
+# ---------------------------------------------------------------------------
+# Mosaic: per-cell UTM windows onto one geographic lattice
+# ---------------------------------------------------------------------------
+
+def derive_gem15_window(windows, bbox: FootprintBBox, cache_root: Path, *,
+                        resolution_deg: float = GEM15_LAT_STEP_DEG
+                        ) -> tuple[hf.FetchedFile, dict[str, object]]:
+    """Mosaic the cells' UTM windows onto one EPSG:4326 window over
+    ``bbox``, on the same declared-resolution lattice as
+    :func:`woof.static.highres_fetch.derive_global_terrain_window` (pixel
+    centres on whole multiples of ``resolution_deg``, half an arc second
+    by default so no 15 m pixel is skipped).
+
+    Each lattice pixel takes the source pixel containing its centre,
+    projected into that cell's own UTM zone (nearest: no height is
+    invented; the area-average onto the model grid is what reduces it).
+    Holes stay NaN, so the model cells under them keep the 30-arc-second
+    baseline.  The Rust ``static-fields`` library does the work by
+    default; the rasterio body is the parity reference and the reported
+    fallback (``WOOF_STATIC_PYTHON=1``).
+    """
+    windows = list(windows)
+    if not windows:
+        raise ValueError("GEM-15 window derivation requires >= 1 window")
+    hf._require_cut_frame_window(bbox)
+    identity = hashlib.sha256(json.dumps(
+        {"windows": [item.sha256 for item in windows],
+         "bbox": bbox.as_dict(), "res": float(resolution_deg),
+         "kind": "gem15-terrain-window-v1"},
+        sort_keys=True).encode("utf-8")).hexdigest()[:20]
+    out_dir = Path(cache_root) / "derived"
+    out_path = out_dir / f"terrain_gem15_{identity}.tif"
+    audit_path = out_dir / f"terrain_gem15_{identity}.audit.json"
+    url = ("derived:utm-mosaic of "
+           + ",".join(Path(item.path).name for item in windows))
+    with hf._derivation_writer(out_path) as partial:
+        cached = hf._cache_hit(out_path, url)
+        if cached is not None and audit_path.is_file():
+            return cached, json.loads(audit_path.read_text(encoding="utf-8"))
+        out_dir.mkdir(parents=True, exist_ok=True)
+        margin = 0.01
+        bounds = (bbox.lon_min - margin, bbox.lat_min - margin,
+                  bbox.lon_max + margin, bbox.lat_max + margin)
+        bridge = hf._static_rust("derive_gem15_window")
+        if bridge is not None:
+            audit = bridge.highres_derive_window({
+                "kind": "reprojected-terrain-window",
+                "tiles": [str(item.path) for item in windows],
+                "bounds": list(bounds),
+                "resolution_deg": float(resolution_deg),
+                "out_path": str(partial)})
+            shape = [int(v) for v in audit["output_shape"]]
+            holes = int(audit["hole_pixels"])
+            resampling = str(audit["resampling"])
+        else:
+            shape, holes = _derive_reference(windows, bounds,
+                                             float(resolution_deg), partial)
+            resampling = ("nearest (source pixel containing each lattice "
+                          "centre, projected into its own UTM zone)")
+        artifact = hf._publish_partial(partial, out_path, url=url)
+        audit = {
+            "output_resolution_deg": float(resolution_deg),
+            "output_shape": shape,
+            "sea_level_filled_pixels": 0,
+            "no_data_pixels_outside_coverage": holes,
+            "total_pixels": shape[0] * shape[1],
+            "sea_level_fill_m": None,
+            "source_nodata": None,
+            "resampling": resampling,
+            "vertical_datum": GEM15_VERTICAL_DATUM,
+        }
+        hf.fetch_guard.atomic_write_text(
+            audit_path, json.dumps(audit, indent=2, sort_keys=True) + "\n")
+        return artifact, audit
+
+
+def _derive_reference(windows, bounds, resolution: float, out_path: Path
+                      ) -> tuple[list[int], int]:
+    """The rasterio parity body: GDAL nearest reprojection of each window
+    onto the lattice, first writer wins, exact transformer."""
+    try:
+        import rasterio
+        from rasterio.transform import from_origin
+        from rasterio.warp import Resampling, reproject
+    except ImportError as exc:  # pragma: no cover
+        raise RuntimeError(hf.geog_unavailable_detail()) from exc
+    (rx, ry), origin = hf._terrain_lattice(None, resolution)
+    west, south, east, north = hf._lattice_bounds(bounds, (rx, ry), origin)
+    nx = int(round((east - west) / rx))
+    ny = int(round((north - south) / ry))
+    transform = from_origin(west, north, rx, ry)
+    mosaic = np.full((ny, nx), np.nan, dtype=np.float32)
+    for item in windows:
+        with rasterio.open(item.path) as src:
+            layer = np.full((ny, nx), np.nan, dtype=np.float32)
+            reproject(source=rasterio.band(src, 1), destination=layer,
+                      dst_transform=transform, dst_crs="EPSG:4326",
+                      src_nodata=np.nan, dst_nodata=np.nan,
+                      resampling=Resampling.nearest, tolerance=0.0)
+        empty = np.isnan(mosaic)
+        mosaic[empty] = layer[empty]
+    with rasterio.open(out_path, "w", driver="GTiff", height=ny, width=nx,
+                       count=1, dtype="float32", crs="EPSG:4326",
+                       transform=transform, nodata=None, compress="deflate",
+                       predictor=3, tiled=True) as target:
+        target.write(mosaic, 1)
+    return [ny, nx], int(np.count_nonzero(np.isnan(mosaic)))
+
+
 def source_row(source_id: str):
     """The registry row of one GEM-15 source id."""
     return EXPERIMENTAL_TERRAIN_SOURCES[source_id]
@@ -640,7 +751,8 @@ def source_row(source_id: str):
 
 __all__ = [
     "ASSETS", "FALLBACK_SOURCE", "Gem15Cell", "Gem15Index", "Gem15Object",
-    "INDEX_PATH", "REGIONS_PATH", "WINDOW_MARGIN_PX", "fallback_reason",
+    "INDEX_PATH", "REGIONS_PATH", "WINDOW_MARGIN_PX", "derive_gem15_window",
+    "fallback_reason",
     "fetch_gem15_windows", "load_index", "load_regions", "read_head",
     "regions_touched", "source_row", "window_blocks",
 ]
