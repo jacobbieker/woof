@@ -587,6 +587,26 @@ def _windfarm_interior_columns(mesh: Any, *, is_regional: bool, physics: Any):
     return interior_columns(mesh, is_regional=is_regional)
 
 
+def _init_mminlu(init_path) -> str | None:
+    """The init's land-use inventory (its ``mminlu`` record, else
+    ``config_landuse_data``), which its ``ivgtyp`` categories number."""
+
+    if init_path is None:
+        return None
+    from netCDF4 import Dataset
+
+    with Dataset(init_path) as dataset:
+        if "mminlu" in dataset.variables:
+            raw = np.asarray(dataset.variables["mminlu"][:])
+            text = (raw.tobytes() if raw.dtype.kind in "SU" or raw.dtype == np.uint8
+                    else bytes(raw)).decode("ascii", "ignore").strip(" \0")
+            if text:
+                return text
+        if "config_landuse_data" in dataset.ncattrs():
+            return str(dataset.getncattr("config_landuse_data")).strip()
+    return None
+
+
 def _suite_host(
     adapter: Any,
     row_name: str,
@@ -675,6 +695,7 @@ def _suite_host(
             "ivgtyp": np.asarray(values["ivgtyp"])[:n_real],
             "latitude_deg": np.asarray(values["latitude_deg"])[:n_real],
             "start_time": values["start_time"],
+            "mminlu": _init_mminlu(receipt.get("init_path")),
         })
     if bound:
         lake = bound.get("lakemask")

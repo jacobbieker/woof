@@ -98,13 +98,19 @@ def main(argv: list[str]) -> int:
         print(__doc__)
         return 2
     target = Path(argv[0])
+    # Select the run's backend (--backend / WOOF_BACKEND) before the wrapper
+    # imports the engine, which binds the array module at import time.
+    from woof.backend import consume_backend_option, install
+
+    forecast_argv = consume_backend_option(argv[2:])
+    install()
     summary: dict = {"argv": argv[2:]}
     _install(summary)
     from woof.hex.cli import main as hex_main
 
     rc = None
     try:
-        rc = int(hex_main(["forecast", *argv[2:]]))
+        rc = int(hex_main(["forecast", *forecast_argv]))
     finally:
         summary["exit_code"] = rc
         differing = {key: value for key, value in summary.get(

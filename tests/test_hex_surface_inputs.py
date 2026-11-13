@@ -507,7 +507,8 @@ def test_the_slab_thermal_inertia_is_derived_from_the_runs_own_cells():
     assert need.input.keyword == "thermal_inertia" and need.input.kind == "derived"
     context = {"ivgtyp": np.array([10, 13, 17, 10]),
                "latitude_deg": np.array([40.0, 40.0, 40.0, -40.0]),
-               "start_time": datetime.datetime(2025, 5, 31)}  # julian 151: summer north
+               "start_time": datetime.datetime(2025, 5, 31),  # julian 151: summer north
+               "mminlu": "MODIFIED_IGBP_MODIS_NOAH"}
     thc = si._derive_thermal_inertia(cfg, context)
     table = load_landuse_table("MODIFIED_IGBP_MODIS_NOAH", None)
     want = [table.values[season - 1, category - 1, 4] / np.float32(100.0)
@@ -524,3 +525,23 @@ def test_the_slab_thermal_inertia_is_derived_from_the_runs_own_cells():
     with pytest.raises(ConfigurationRefusal, match="never read"):
         si.bind(physics, "x.nc", latitude_rad=np.zeros(4), longitude_rad=np.zeros(4),
                 context=context)
+
+
+
+def test_the_slab_thermal_inertia_needs_the_inits_land_use_inventory():
+    import datetime
+
+    context = {"ivgtyp": np.array([10]), "latitude_deg": np.array([40.0]),
+               "start_time": datetime.datetime(2025, 5, 31)}
+    with pytest.raises(ValueError, match="MMINLU"):
+        si._derive_thermal_inertia(_cfg(sf_surface_physics=1), context)
+
+
+def test_an_mpas_suite_init_refuses_a_soil_column_other_than_four():
+    from woof.hex.errors import MpasPortError
+    from woof.hex.init_physics import mpas_v842_selection
+
+    for land in ("ruc", "slab", "px"):
+        with pytest.raises(MpasPortError, match=f"--land-surface {land}"):
+            mpas_v842_selection("mpas_mesoscale_reference", land)
+    assert mpas_v842_selection("mpas_mesoscale_reference", "noahmp")["land_surface"] == "noahmp"

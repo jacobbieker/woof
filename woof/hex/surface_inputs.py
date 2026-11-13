@@ -154,7 +154,12 @@ def _derive_thermal_inertia(cfg, context):
     can span both hemispheres, takes each cell's own latitude."""
     from woof.core.landuse import load_landuse_table
 
-    table = load_landuse_table(str(context.get("mminlu", "MODIFIED_IGBP_MODIS_NOAH")), None)
+    if not context.get("mminlu"):
+        raise ValueError(
+            "the slab's THC is LANDUSE.TBL's row for the init's own land-use "
+            "inventory (MMINLU), and the run named none; ivgtyp's categories "
+            "mean nothing without it")
+    table = load_landuse_table(str(context["mminlu"]), None)
     ivgtyp = np.asarray(context["ivgtyp"], dtype=np.int64).reshape(-1)
     latitude = np.asarray(context["latitude_deg"], dtype=np.float64).reshape(-1)
     julday = int(context["start_time"].timetuple().tm_yday)
