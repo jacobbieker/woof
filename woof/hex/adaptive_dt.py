@@ -657,12 +657,19 @@ class AdaptiveRun:
     def _rebind(self, plan: StepPlan) -> None:
         import dataclasses
 
+        import numpy as np
+
         driver, backend = self.stack["driver"], self.stack["backend"]
         driver.config = dataclasses.replace(driver.config, config_dt=float(plan.dt),
                                             config_number_of_sub_steps=int(plan.substeps))
         regional = getattr(driver, "regional_v841", None)
         if regional is not None and hasattr(regional, "outer_dt"):
             regional.outer_dt = float(plan.dt)
+        # The YSU-GWDO guard demands the run's step bit for bit; the kernel takes dt as an argument and is
+        # dt-general (woof.hex.drivers.mpas_mesh_binding rebinds the same constant to the row's step, and the
+        # full-step LTS executor to each class's).
+        from woof.hex import cuda_gwdo_v841
+        cuda_gwdo_v841.X4_DT_SECONDS_F32 = np.float32(float(plan.dt))
         start = float(driver.atmosphere.state.time_seconds)
         backend.set_adaptive_step(dt=float(plan.dt), start_seconds=start, end_seconds=start + float(plan.dt),
                                   due=self.cadence.due(plan.start))
