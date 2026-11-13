@@ -15,6 +15,15 @@ _DESCRIPTIONS = dict(U='U wind', V='V wind', T='Temperature', RH='Relative humid
                      GHT='Geopotential Height', S='Speed', TD='Dew point temperature',
                      Q='Mixing ratio', P='Air Pressure', Z='Height')
 
+#: Each stream's alarm, window, frames and filename controls, spelled out so
+#: the registry's consuming_read citations resolve to this writer's reads.
+_STREAM_CONTROLS = {
+    22: ('auxhist22_interval_s', 'auxhist22_begin_s', 'auxhist22_end_s',
+         'frames_per_auxhist22', 'auxhist22_outname'),
+    23: ('auxhist23_interval_s', 'auxhist23_begin_s', 'auxhist23_end_s',
+         'frames_per_auxhist23', 'auxhist23_outname'),
+}
+
 
 class LevelTape(WrfoutWriter):
     """Only level fields acquire these dimensions; ordinary history is inert."""
@@ -56,9 +65,9 @@ class _Stream:
         seconds = ticks / node.clock.tick_den
         epoch = float(getattr(node.state, 'domain_start_offset', 0.) or 0.)
         elapsed = seconds-epoch
-        stem = f'auxhist{self.stream}'
-        interval = float(getattr(cfg, stem+'_interval_s'))
-        begin, end = getattr(cfg, stem+'_begin_s'), getattr(cfg, stem+'_end_s')
+        interval_key, begin_key, end_key = _STREAM_CONTROLS[self.stream][:3]
+        interval = float(getattr(cfg, interval_key))
+        begin, end = getattr(cfg, begin_key), getattr(cfg, end_key)
         # Native alarms are tested after each step: a nonaligned alarm rings
         # on the first committed state at or beyond it, once per step.
         previous = elapsed if self._last_tick is None else self._last_tick
@@ -104,11 +113,11 @@ class _Stream:
         with device:
             ready.synchronize()
         node, cfg = self.node, self.node.cfg.run
-        frames = getattr(cfg, f'frames_per_auxhist{self.stream}')
+        frames = getattr(cfg, _STREAM_CONTROLS[self.stream][3])
         valid_string = valid.strftime('%Y-%m-%d_%H:%M:%S')
         with _NETCDF4_IO_LOCK:
             if self.tape is None:
-                template = getattr(cfg, f'auxhist{self.stream}_outname')
+                template = getattr(cfg, _STREAM_CONTROLS[self.stream][4])
                 name = template.replace('<domain>', f'{node.cfg.grid_id:02d}').replace('<date>', valid_string)
                 path = Path(name)
                 if not path.is_absolute():
