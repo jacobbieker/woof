@@ -49,7 +49,9 @@ so later pieces can reuse its pattern.
 `run_tracer_advection.F90` drives `ocn_tracer_advection_init` and
 `ocn_tracer_advection_tend` (the three advection modules verbatim, the two
 vertical stencils cut out of `src/operators/mpas_tracer_advection_helpers.F`).
-`run_diagnostics.F90` and `run_tracer_advection.F90` read and write
+`run_tracer_hmix.F90` drives `ocn_tracer_hmix_init`, `ocn_tracer_hmix_redi_init`
+and `ocn_tracer_hmix_tend` (the four mixing modules verbatim).
+`run_diagnostics.F90`, `run_tracer_advection.F90` and `run_tracer_hmix.F90` read and write
 `oracle_stream.F90`'s self-describing streams.
 
 gfortran calls `expf`/`cosf`/`sinf` (RKIND 4) and `exp` (RKIND 8). On glibc
@@ -67,6 +69,7 @@ pixi run -e default python tools/mpas_ocean_oracle/make_fixture.py "$BUILD_DIR" 
 pixi run -e default python tools/mpas_ocean_oracle/make_fixture.py "$BUILD_DIR" --piece eos
 pixi run -e default python tools/mpas_ocean_oracle/make_fixture.py "$BUILD_DIR" --piece diagnostics
 pixi run -e default python tools/mpas_ocean_oracle/make_fixture.py "$BUILD_DIR" --piece tracer_advection
+pixi run -e default python tools/mpas_ocean_oracle/make_fixture.py "$BUILD_DIR" --piece tracer_hmix
 ```
 
 build.sh checks `SOURCES.sha256` and builds `run_oracle_r4` and
@@ -79,6 +82,7 @@ twins (RKIND 8), all at
 ```bash
 pixi run -e default python -m pytest tests/test_mpas_ocean_tend_parity.py tests/test_mpas_ocean_pgrad_hmix_parity.py \
     tests/test_mpas_ocean_tendency_parity.py tests/test_mpas_ocean_eos_parity.py \
-    tests/test_mpas_ocean_diagnostics_parity.py tests/test_mpas_ocean_tracer_advection_parity.py
+    tests/test_mpas_ocean_diagnostics_parity.py tests/test_mpas_ocean_tracer_advection_parity.py \
+    tests/test_mpas_ocean_tracer_hmix_parity.py
 pixi run -e default woof hex ocean verify
 ```
