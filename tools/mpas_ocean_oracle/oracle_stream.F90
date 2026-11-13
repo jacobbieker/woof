@@ -14,7 +14,8 @@
 ! diagnostics, forcing, scratch, tend and tracersTend (the tend pool's
 ! 'tracersTend' subpool), tracersSurfaceFlux (the forcing pool's), swForcing,
 ! verticalMesh.  A logical config named 'package:NAME' is the package
-! switch NAME, put in the packages pool (ocnPackages).
+! switch NAME, put in the packages pool (ocnPackages); one named 'mesh:NAME'
+! is the mesh pool's config NAME (on_a_sphere).
 !
 ! OUTPUT: every real and integer field's words, in the input's order.
 module oracle_stream
@@ -115,6 +116,8 @@ contains
           lc = ivalue /= 0
           if (cname(1:8) == 'package:') then
              call stub_pool_put_config(pools % packages, trim(cname(9:)), lc)
+          else if (cname(1:5) == 'mesh:') then
+             call stub_pool_put_config(pool_named(pools, 'mesh'), trim(cname(6:)), lc)
           else
              call stub_pool_put_config(pools % configs, trim(cname), lc)
           end if

@@ -133,7 +133,7 @@ module mpas_pool_routines
   end interface stub_pool_put_dimension
 
   interface mpas_pool_get_array
-    module procedure get_r0, get_r1, get_r2, get_r3, get_i1, get_i2
+    module procedure get_r0, get_r1, get_r2, get_r3, get_i0, get_i1, get_i2
   end interface mpas_pool_get_array
 
   interface mpas_pool_get_field
@@ -263,6 +263,14 @@ contains
     real(kind=RKIND), pointer :: value
     value => pool % e(find(pool, name)) % r0
   end subroutine get_config_r
+
+  ! an integer scalar field (nAccumulatedCoupled): the stream puts it as a dimension
+  subroutine get_i0(pool, name, a)
+    type(MPAS_pool_type), intent(in) :: pool
+    character(len=*), intent(in) :: name
+    integer, pointer :: a
+    a => pool % e(find(pool, name)) % i0
+  end subroutine get_i0
 
   subroutine get_r0(pool, name, a)
     type(MPAS_pool_type), intent(in) :: pool
@@ -437,7 +445,9 @@ contains
     p % cursor = p % cursor + 1
     iterator % memberName = p % e(p % cursor) % name
     iterator % memberType = 0
-    if (associated(p % e(p % cursor) % r3)) iterator % memberType = MPAS_POOL_FIELD
+    ! a field's level NAME@N is not a member of its own
+    if (associated(p % e(p % cursor) % r3) .and. index(p % e(p % cursor) % name, '@') == 0) &
+         iterator % memberType = MPAS_POOL_FIELD
     mpas_pool_get_next_member = .true.
   end function mpas_pool_get_next_member
 
@@ -579,9 +589,35 @@ module mpas_dmpar
   private
   public :: mpas_dmpar_min_real, mpas_dmpar_exch_group_create, mpas_dmpar_exch_group_add_field, &
             mpas_dmpar_exch_group_reuse_halo_exch, mpas_dmpar_exch_group_full_halo_exch, &
-            mpas_dmpar_exch_group_destroy
+            mpas_dmpar_exch_group_destroy, mpas_dmpar_field_halo_exch, mpas_dmpar_exch_halo_field
+
+  interface mpas_dmpar_exch_halo_field
+    module procedure exch_halo_field1d, exch_halo_field2d, exch_halo_field3d
+  end interface mpas_dmpar_exch_halo_field
 
 contains
+
+  subroutine mpas_dmpar_field_halo_exch(domain, fieldName, timeLevel, haloLayers)
+    type(domain_type), intent(inout) :: domain
+    character(len=*), intent(in) :: fieldName
+    integer, optional, intent(in) :: timeLevel
+    integer, dimension(:), optional, intent(in) :: haloLayers
+  end subroutine mpas_dmpar_field_halo_exch
+
+  subroutine exch_halo_field1d(field, haloLayersIn)
+    type(field1DReal), pointer :: field
+    integer, dimension(:), intent(in), optional :: haloLayersIn
+  end subroutine exch_halo_field1d
+
+  subroutine exch_halo_field2d(field, haloLayersIn)
+    type(field2DReal), pointer :: field
+    integer, dimension(:), intent(in), optional :: haloLayersIn
+  end subroutine exch_halo_field2d
+
+  subroutine exch_halo_field3d(field, haloLayersIn)
+    type(field3DReal), pointer :: field
+    integer, dimension(:), intent(in), optional :: haloLayersIn
+  end subroutine exch_halo_field3d
 
   ! One block on one rank: a halo exchange is the identity.
   subroutine mpas_dmpar_exch_group_create(domain, groupName, iErr)
