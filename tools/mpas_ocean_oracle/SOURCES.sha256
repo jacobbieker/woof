@@ -1,5 +1,5 @@
 # MPAS-Model v8.4.2 (f34984b2c89353cf31c235b08d3b4acd96b37bb3) files the
-# ocean oracles (run_oracle, run_pgrad_hmix) compile verbatim.  build.sh refuses to build if any
+# ocean oracles (run_oracle, run_pgrad_hmix, run_tendency, run_eos) compile verbatim.  build.sh refuses to build if any
 # differs from its pin.
 13db2ffce7d70f0c725913eb8c58c2e0b3fbdffb7bfe0c2ac77798e554127c51  src/framework/mpas_kind_types.F
 3fc1803087eadd55d0748953ebb059f871483fee5c6fa225da6e1da2e8de5849  src/core_ocean/shared/mpas_ocn_constants.F
@@ -21,3 +21,6 @@ b8a5176a15293c67d416303e1c8862be690b83d93fd3a34ee4d4d5bdf4c695c3  src/core_ocean
 40a6b40b874353404ecbc1db7268a2326d7456d9800cb8f4bcbfebeacdbe58f0  src/core_ocean/shared/mpas_ocn_vel_forcing_rayleigh.F
 458afebb836e7267b7c9e45a7a956896ef0cd11774925fd77f6c23765a985a8e  src/core_ocean/shared/mpas_ocn_vel_forcing.F
 b2582476eec43bd4aa7c0703d32beed5cbddebda54312502d5619f19fa8f2284  src/core_ocean/shared/mpas_ocn_tendency.F
+ab9166a6e841c86cffa6527c3a6f76723ccba6b674d5c93e2966e9c39c1bf29d  src/core_ocean/shared/mpas_ocn_equation_of_state_linear.F
+78ec0ac8aa58cef5aa2a4daf9248b05b982ad6bb25dbe1cc33a434c68a708030  src/core_ocean/shared/mpas_ocn_equation_of_state_jm.F
+4edb8fa870b135988f909ef89670dd72755e930b1ea36b454d0ba284df1bc4bd  src/core_ocean/shared/mpas_ocn_equation_of_state.F
