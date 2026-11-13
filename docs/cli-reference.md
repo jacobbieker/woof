@@ -226,6 +226,11 @@ test refuses any drift between the two.
 | `hrrr` | -- |
 | `hrrr-prs` | `hrrr-pressure`, `hrrr-wrfprs` |
 | `gem-gdps` | `gem`, `gdps`, `gem-global` |
+| `gem-hrdps` | `hrdps`, `gem-hrdps-continental`, `hrdps-continental` |
+| `gem-rdps` | `rdps`, `gem-regional` |
+| `gfs-pressure` | -- |
+| `hafs-a` | `hfsa` |
+| `hafs-b` | `hfsb` |
 | `icon-global` | `icon`, `icon-13km`, `dwd-icon`, `dwd-icon-global` |
 | `icon-global-ml` | `icon-ml`, `icon-global-model-level`, `dwd-icon-global-ml` |
 | `icon-eu` | `dwd-icon-eu`, `icon-eu-regular` |

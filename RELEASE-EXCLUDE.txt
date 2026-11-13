@@ -568,6 +568,9 @@ tools/rustwx/crates/rw-mpas/tests/rrfs_native/**
 optional/wrf_hydro/**
 # NEMO kernels, CeCILL v2.0 (a build that loads them is CeCILL/GPL as a whole).
 optional/nemo/**
+# WRF-Chem's Battelle/PNNL files (MOSAIC terms of use: research and educational
+# purposes, commercial use by request to the author).
+optional/wrfchem_pnnl/**
 
 # Private observation workflow instrumentation has no public runtime caller.
 tools/da_case_manifest.py

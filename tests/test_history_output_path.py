@@ -380,7 +380,7 @@ def _streamed_writers(monkeypatch, tmp_path, mode):
         def _ranked_road(self):
             return False
 
-        def history_fields(self, *, snapshot=False):
+        def history_fields(self, *, snapshot=False, state=None):
             calls.append("history_fields")
             self.snapshot_requests.append(snapshot)
             if self.history_snapshot_mode is None:
@@ -402,7 +402,9 @@ def _streamed_writers(monkeypatch, tmp_path, mode):
     cfg = SimpleNamespace(
         grid_id=1, start_time=None,
         run=SimpleNamespace(nx=2, ny=2, nz=1, dx=1.0, dy=1.0,
-                            sf_surface_physics=0, num_soil_layers=4))
+                            sf_surface_physics=0, num_soil_layers=4,
+                            mean_diag=0, diurnal_diag=0, output_diagnostics=0,
+                            auxhist3_interval=0))
     streamed = Streamed()
     state = SimpleNamespace(_streamed_domain=streamed, physics=None)
     case = SimpleNamespace(static_fields={}, geog_selection=None,

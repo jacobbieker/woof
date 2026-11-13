@@ -1833,8 +1833,14 @@ def _inspect_init_column(
     *,
     microphysics: str | None = "mp_wsm6",
     pbl: str | None = "ysu",
+    soil_levels: int | None = None,
 ) -> dict[str, Any]:
     """The column the run's init carries, checked against the row.
+
+    ``soil_levels`` is the run's own land-surface soil column when the
+    selection integrates another count than the row's (a generic-seam RUC,
+    Pleim-Xiu or slab run): the init is held to THAT count, which the driver
+    rebinds after the bind, instead of the row's.
 
     THE VERTICAL STRUCTURE IS A PROPERTY OF THE FILES, NOT OF THIS MODULE.
     The row's ``n_levels`` is measured from the init when the row is
@@ -1911,10 +1917,13 @@ def _inspect_init_column(
             f"mesh {binding.name!r}: init {path} carries nVertLevelsP1="
             f"{interfaces}, the registry row declares {want_interfaces}"
         )
-    if soil is not None and int(soil) != int(binding.n_soil_levels):
+    want_soil = int(binding.n_soil_levels if soil_levels is None else soil_levels)
+    if soil is not None and int(soil) != want_soil:
         raise MeshBindingMismatch(
             f"mesh {binding.name!r}: init {path} carries nSoilLevels={soil}, "
-            f"the registry row declares {binding.n_soil_levels}"
+            + (f"the registry row declares {binding.n_soil_levels}"
+               if soil_levels is None else
+               f"the selected land surface integrates {want_soil}")
         )
     return {
         "nVertLevels": int(levels),
@@ -2104,6 +2113,7 @@ def bind_mesh(
     max_wind_m_s: float | None = None,
     apvm_upwinding: float = 0.5,
     log=print,
+    soil_levels: int | None = None,
 ) -> dict[str, Any]:
     """Cross-examine, stability-admit, and bind one registered mesh before CUDA.
 
@@ -2194,6 +2204,9 @@ def bind_mesh(
     observed["init_column"] = _inspect_init_column(
         None if init is None else Path(init), binding,
         microphysics=microphysics, pbl=pbl,
+        # Only a selection whose land surface integrates another soil count
+        # than the row's passes one (woof.hex.forecast_door._bind).
+        **({} if soil_levels is None else {"soil_levels": int(soil_levels)}),
     )
     # Reconstruct the immutable authority through its public constructor -- the
     # same read a fingerprint baseline performs -- rather than trusting the

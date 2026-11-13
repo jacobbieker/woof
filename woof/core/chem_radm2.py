@@ -322,14 +322,21 @@ def _so2so4_kernel():
     return _SO2SO4
 
 
-def launch_so2so4(so2, sulf, h2o2, t_phy, qc=None):
+def launch_so2so4(so2, sulf, h2o2, t_phy, qc=None, *, qc_threshold=0.0):
     """RADM2SORG's in-cloud SO2 -> sulfate by H2O2 (chem_driver.F:1350-1360
-    -> module_gocart_so2so4.F), in place on every cell."""
+    -> module_gocart_so2so4.F), in place on every cell.
+
+    ``qc_threshold`` (kg/kg, the opt-in ``so2so4_qc_threshold``): a cell is
+    cloudy when qc > float32(qc_threshold).  0 is WRF's own qc > 0 and
+    launches exactly WRF's kernel on qc itself; a positive value hands the
+    same kernel qc with every value at or below the threshold zeroed."""
     import cupy as cp
     shape, _ = columns([so2, sulf, h2o2])
     field(t_phy, shape, "t_phy")
     if qc is not None:
         field(qc, shape, "qc")
+        if qc_threshold:
+            qc = cp.where(qc > np.float32(qc_threshold), qc, np.float32(0))
     has_qc = np.int32(qc is not None)
     _so2so4_kernel()(qc if qc is not None else t_phy, t_phy, has_qc,
                      so2, sulf, h2o2)
@@ -359,4 +366,5 @@ def step(ctx, dt, ktau):
     if sorgam:
         qc = ctx.met("qc") if ctx.has("qc") else None
         launch_so2so4(ctx.field(table.row("so2")), ctx.field(table.row("sulf")),
-                      ctx.field(table.row("h2o2")), ctx.met("t_phy"), qc)
+                      ctx.field(table.row("h2o2")), ctx.met("t_phy"), qc,
+                      qc_threshold=float(getattr(ctx.cfg, "so2so4_qc_threshold", 0.0)))

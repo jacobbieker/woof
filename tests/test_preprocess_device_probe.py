@@ -64,7 +64,8 @@ def _exec_probe(monkeypatch, capsys, *, device, rows, devices,
                 devices[value]["pci"]),
             memGetInfo=mem_get_info,
             getDeviceProperties=device_properties,
-            deviceGetLimit=lambda _limit: 1024),
+            deviceGetLimit=lambda _limit: 1024,
+            is_hip=False),
         Device=lambda _value: SimpleNamespace(compute_capability="120")))
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", visible_devices)
     monkeypatch.setitem(sys.modules, "cupy", cp)

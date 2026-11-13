@@ -18,7 +18,7 @@ def verify() -> dict:
     from woof.verify import mali_thermal_oracle as thermal_oracle
     from woof.verify import mali_thermal_solver_oracle as thermal_solver_oracle
 
-    from . import advection_v842, geometry_v842, sia_v842, thermal_init_v842, thermal_solver_v842
+    from . import advection_v842, geometry_v842, rkind, sia_v842, thermal_init_v842, thermal_solver_v842
 
     pieces = []
     for name, module, oracle_module in (("sia_velocity_solver", sia_v842, sia_oracle),
@@ -48,7 +48,8 @@ def verify() -> dict:
         "oracle": {"repo": oracle.ORACLE_REPO, "tag": oracle.ORACLE_TAG, "pin": oracle.ORACLE_PIN},
         "pieces": pieces,
         "refused": {"config_velocity_solver": list(sia_v842.EXTERNAL_DYCORES) + ["simple", "none"],
-                    "config_basal_mass_bal_float at RKIND 8": sorted(thermal_solver_v842.R8_REFUSED_FLOAT_MELT)},
+                    "config_basal_mass_bal_float at RKIND 8":
+                        [] if rkind.trig64() else sorted(thermal_solver_v842.R8_REFUSED_FLOAT_MELT)},
         "remaining": "docs/mpas-coupled-roadmap.md",
         "passed": all(p["passed"] for p in pieces),
     }

@@ -47,7 +47,8 @@ def _member_with_real_output(tmp_path, monkeypatch, stop):
                           restart_interval_s=0., mp_physics=10, nz=2, nx=2, ny=2,
                           dx=3000., dy=3000., spec_bdy_width=1,
                           # RunConfig's defaults: one history cadence.
-                          history_interval2_s=0., history_interval_change_s=0.)
+                          history_interval2_s=0., history_interval_change_s=0.,
+                          do_avgflx_em=False)
     state = SimpleNamespace(elapsed_seconds=0., thp=np.zeros((2, 2, 2)),
                             qv=np.full((2, 2, 2), .005), ready=False,
                             physics=SimpleNamespace(fields={'swdown': np.zeros((2, 2))},

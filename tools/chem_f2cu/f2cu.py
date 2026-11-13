@@ -1972,8 +1972,12 @@ class Translator:
 
     def _size(self, v, r):
         size = 1
-        for lo, hi in v.dims:
-            size *= self.const(hi, r.scope)[0] - self.const(lo, r.scope)[0] + 1
+        try:
+            for lo, hi in v.dims:
+                size *= self.const(hi, r.scope)[0] - self.const(lo, r.scope)[0] + 1
+        except NotConstant:
+            # an automatic array: its extents from self.dummy_bounds
+            return self._local_size(v, r)
         return size
 
     @staticmethod

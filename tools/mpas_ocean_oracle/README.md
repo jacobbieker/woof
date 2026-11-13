@@ -29,6 +29,23 @@ and the equation of state. Their dummy declarations are copied from v8.4.2
 and their bodies stop by name. Land-ice fluxes and frazil return when
 switched off and stop by name when on.
 
+`run_eos.F90` drives `ocn_equation_of_state_density` ('linear' and 'jm'),
+byte-unmodified, as `ocn_diagnostic_solve` and `ocn_vmix_coefs_rich` call it
+(the five displacement/coefficient combinations, and an 'absolute' one at the
+deepest level), and `ocn_freezing_temperature` with its salinity derivative.
+build.sh compiles the three equation-of-state modules in a directory of their
+own (`eos/`), so the real `ocn_equation_of_state` replaces
+`stubs_tendency.F90`'s stand-in there; `stubs.F90` gains the `dm_info` type
+they declare.
+
+`run_diagnostics.F90` drives `ocn_diagnostic_solve`, cut verbatim with
+`ocn_diagnostics_init` and `ocn_compute_land_ice_flux_input_fields` out of
+`mpas_ocn_diagnostics.F` (awk ranges, in `eos/`) into
+`diagnostics_cut_head.F90`'s module, with the real equation of state and
+`mpas_ocn_diagnostics_routines.F`. It is self-describing (configs and fields
+by pool and name; an inactive package's fields are unassociated pointers),
+so later pieces can reuse its pattern.
+
 gfortran calls `expf`/`cosf`/`sinf` (RKIND 4) and `exp` (RKIND 8). On glibc
 these are the host's. Elsewhere build.sh links `tools/oracle_libm/glibc_host.cpp`,
 the repository's MIT glibc transcriptions compiled for the host, which the
@@ -41,6 +58,8 @@ pixi run -e mpas-oracle bash tools/mpas_ocean_oracle/build.sh "$MPAS_V842" "$BUI
 pixi run -e default python tools/mpas_ocean_oracle/make_fixture.py "$BUILD_DIR"
 pixi run -e default python tools/mpas_ocean_oracle/make_fixture.py "$BUILD_DIR" --piece pgrad_hmix
 pixi run -e default python tools/mpas_ocean_oracle/make_fixture.py "$BUILD_DIR" --piece tendency
+pixi run -e default python tools/mpas_ocean_oracle/make_fixture.py "$BUILD_DIR" --piece eos
+pixi run -e default python tools/mpas_ocean_oracle/make_fixture.py "$BUILD_DIR" --piece diagnostics
 ```
 
 build.sh checks `SOURCES.sha256` and builds `run_oracle_r4` and
@@ -52,6 +71,7 @@ twins (RKIND 8), all at
 
 ```bash
 pixi run -e default python -m pytest tests/test_mpas_ocean_tend_parity.py tests/test_mpas_ocean_pgrad_hmix_parity.py \
-    tests/test_mpas_ocean_tendency_parity.py
+    tests/test_mpas_ocean_tendency_parity.py tests/test_mpas_ocean_eos_parity.py \
+    tests/test_mpas_ocean_diagnostics_parity.py
 pixi run -e default woof hex ocean verify
 ```
