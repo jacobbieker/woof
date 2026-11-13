@@ -256,7 +256,11 @@ def prepare_forecast_init(init, destination, physics, start_time):
     from .species_row import species_row_for_scheme
     from .init_door import resolve_engine
     selectors = physics["selectors"]
-    land = load_table()["options"]["config_lsm_scheme"][selectors["config_lsm_scheme"]].get("carried")
+    # A land surface the engine alone carries (the slab, Pleim-Xiu) has no
+    # option row and no carried soil block: like an option row without one,
+    # its init is taken as built (woof hex init --land-surface slab|px).
+    land = load_table()["options"]["config_lsm_scheme"].get(
+        selectors["config_lsm_scheme"], {}).get("carried")
     if land is None:
         return init, None
     names = species_row_for_scheme(selectors["config_microp_scheme"]).names()
