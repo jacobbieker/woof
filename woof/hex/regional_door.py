@@ -379,6 +379,10 @@ def plan(args: argparse.Namespace) -> dict[str, Any]:
             refusal = coverage_refusal(candidate, point, reach, margin_km=30)
             if refusal:
                 raise RegionalRefusal(refusal)
+    from .regional_terrain import request_from_arguments as terrain_request
+    terrain = terrain_request(
+        args, has_parent=parent is not None,
+        fine_dx_m=float(args.fine_dx_m if args.fine_dx_m is not None else row["fine_dx_m"]))
     start = cycle + timedelta(hours=lead)
     stop = start + timedelta(hours=hours)
     vertical = Path(args.vertical_spec) if args.vertical_spec else (data_dir / row["vertical_spec"])
@@ -393,6 +397,9 @@ def plan(args: argparse.Namespace) -> dict[str, Any]:
                                   _producer_suite({"forecast_args": physics_flags}))
     return {
         "schema": "gpuwm-hex.regional-plan/v1",
+        # Only a run that asked for high-resolution terrain carries the key: the plan of every other run
+        # is the plan it always was.
+        **({"terrain": terrain} if terrain is not None else {}),
         "row": row,
         "source": {"id": source["id"], "display_name": source.get("display_name"),
                    "intermediate_row": (source.get("intermediate") or {}).get("row"),
@@ -622,8 +629,12 @@ def _prefetch_source(argv: list[str]) -> int:
 def _stage_mesh(args, value, status) -> dict[str, Any]:
     _start_source_prefetch(args, value, status)
     mesh_dir = Path(value["paths"]["mesh"])
+    terrain = value.get("terrain")
     if list(mesh_dir.glob("*.point-generate.json")):
         status.note(f"mesh already generated in {mesh_dir}")
+        if terrain is not None:
+            from .regional_terrain import require_applied
+            return {"returncode": 0, "reused": True, "terrain": require_applied(mesh_dir, terrain)}
         return {"returncode": 0, "reused": True}
     lat, lon = value["point_deg"]
     if value.get("drawn_shape"):
@@ -645,7 +656,16 @@ def _stage_mesh(args, value, status) -> dict[str, Any]:
         argv += ["--card", value["card"]]
     if args.geog is not None:
         argv += ["--geog", str(Path(args.geog).expanduser().absolute())]
-    return {"returncode": _cli(argv, status)}
+    if terrain is not None:
+        # The terrain replacement needs the whole parent's static and vertical grid (regional_terrain).
+        argv += ["--parent-static"]
+    code = _cli(argv, status)
+    if terrain is not None and code == 0:
+        from .regional_terrain import apply_terrain
+        return {"returncode": 0, "terrain": apply_terrain(
+            mesh_dir=mesh_dir, vertical_spec=value["paths"]["vertical_spec"], request=terrain,
+            note=status.note)}
+    return {"returncode": code}
 
 
 def _stage_intermediate(args, value, status) -> dict[str, Any]:
@@ -1364,6 +1384,8 @@ def run_regional(args: argparse.Namespace) -> int:
                 write_receipt()
             if name == "mesh" and result["returncode"] == 0:
                 receipt["mesh"] = _generated(value)["cull"]
+                if result.get("terrain") is not None:
+                    receipt["terrain"] = result["terrain"]
             if name == "products":
                 receipt["products"] = result
             if result["returncode"] != 0:
@@ -1404,6 +1426,12 @@ def run_regional(args: argparse.Namespace) -> int:
                 os.environ[key] = previous
         receipt.update(seconds=round(time.monotonic() - started, 2), finished_utc=utc_now())
         write_receipt()
+
+
+def _terrain_choices() -> tuple[str, ...]:
+    from .cli import STATIC_HIGHRES_TERRAIN
+
+    return tuple(name for name in STATIC_HIGHRES_TERRAIN if name != "none")
 
 
 def add_regional_parser(commands: argparse._SubParsersAction) -> None:
@@ -1473,6 +1501,21 @@ def add_regional_parser(commands: argparse._SubParsersAction) -> None:
     parser.add_argument("--gpuwm-checkout", type=Path, default=None,
                         help="woof tree whose seam files the forecast runs (default: the installed engine)")
     parser.add_argument("--no-products", action="store_true", help="end at the history frames")
+    terrain = parser.add_argument_group(
+        "high-resolution terrain (optional; with none given the run is unchanged)")
+    terrain.add_argument(
+        "--terrain-source", choices=_terrain_choices(), default=None, metavar="SOURCE",
+        help="after the static is built and before init, replace the 30-arc-second terrain with cell "
+             "averages of this source (`woof hex static-highres --terrain`): glo30, or the experimental "
+             "gem15-dtm / gem15-dsm (GLO-30 where GEM-15 does not serve; recorded in the receipt).  The "
+             "mesh is built with its whole parent static (minutes), then the vertical grid is re-minted "
+             "and the cull re-cut on the new terrain")
+    terrain.add_argument(
+        "--terrain-max-spacing-km", type=float, default=None, metavar="KM",
+        help="replace only cells this fine or finer (default 1.25 x --fine-dx-m)")
+    terrain.add_argument(
+        "--terrain-cache-root", type=Path, default=None, metavar="DIR",
+        help="high-resolution tile cache (default: the per-user woof highres-cache)")
     from .products_door import add_label_arguments
 
     add_label_arguments(parser)

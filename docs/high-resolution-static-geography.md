@@ -213,6 +213,33 @@ network.
   output's `highres_*` global attributes record the tile hashes, the window
   hash, the lattice and the method.
 
+### In `woof hex regional` and hex `woof go`
+
+`woof hex regional --terrain-source glo30|gem15-dtm|gem15-dsm` runs that
+chain inside the mesh stage, so a regional forecast needs no hand-chained
+doors.  The mesh is built on the `--parent-static` route (the whole
+parent's static, minutes of global geography), `static-highres` replaces
+`ter` on the parent static, the parent vertical grid is re-minted on it,
+the cull's static and vertical grid are re-cut with the same engine and
+region (the cull grid is untouched), and the mesh rows' static SHA-256s
+are refreshed.  The 30-arc-second originals move to `<mesh>/orig30s`.
+`--terrain-max-spacing-km` (default 1.25 x `--fine-dx-m`) picks the cells
+processed and `--terrain-cache-root` the tile cache.  The decision is in
+`<mesh>/terrain-receipt.json` and the regional receipt: the requested
+source, the dataset that served (GLO-30 where GEM-15 does not reach, with
+the reason), the datum and attribution, and the cell counts.  Refused by
+name: a region cut from a kept hex run, `--skip mesh`, a later `--stage`
+on a mesh built without the terrain, and a reused mesh built with another
+terrain.  With no option the run is unchanged.
+
+In `woof go` on the hex engine, the same keys as the WRF path's
+`[static.highres]` select it: `enabled`, `cache_root`, `terrain_source`
+(`glo30` or `copernicus-dem-glo30`, `gem15-dtm`, `gem15-dsm`; `auto`,
+3DEP and SRTM have no hex fetcher) and `max_dx_m`.  `fields`,
+`landcover_source`, `soil_source`, `lcz_pervious` and `on_refuse` are
+accepted only at the values of a terrain-only run, and `[static]`'s other
+keys are refused by name.
+
 ## Reproducing the bounded pilot
 
 The raster work runs in the Rust `static-fields` library, which a plain
