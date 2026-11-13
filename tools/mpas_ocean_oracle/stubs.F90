@@ -458,11 +458,12 @@ contains
     p => pool
   end function pool_target
 
-  subroutine get_field_1d(pool, name, f)
+  subroutine get_field_1d(pool, name, f, timeLevel)
     type(MPAS_pool_type), intent(in) :: pool
     character(len=*), intent(in) :: name
     type(field1DReal), pointer :: f
-    f => pool % e(find(pool, name)) % f1
+    integer, intent(in), optional :: timeLevel
+    f => pool % e(find(pool, level_name(name, timeLevel))) % f1
   end subroutine get_field_1d
 
   subroutine put_field_1d(pool, name, f)
