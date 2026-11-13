@@ -176,7 +176,7 @@ CASES = (
         "config_use_activeTracers_surface_bulk_forcing": True, "config_use_bulk_thickness_flux": True,
         "config_sw_absorption_type": "jerlov", "config_compute_active_tracer_budgets": True,
         "config_use_tracer_del2": True, "config_tracer_del2": 50.0, "config_n_ts_iter": 3,
-        "config_btr_solve_SSH2": True, "config_n_btr_cor_iter": 0, "nBtrSubcycles": 1}),
+        "config_btr_solve_SSH2": True, "config_n_btr_cor_iter": 0, "nBtrSubcycles": 1, "_fresh": True}),
     ("unsplit_const_vmix_prescribed", 20261403, 32, 6, {
         "config_time_integrator": "unsplit_explicit", "config_use_const_visc": True, "config_use_const_diff": True,
         "config_vel_correction": False, "config_prescribe_thickness": True, "config_n_bcl_iter_mid": 1}),
@@ -187,7 +187,8 @@ CASES = (
 def make_case(name: str, seed: int, n_cells: int, n_levels: int, overrides: dict, precision: str = "r4") -> dict:
     """One deterministic case: the diagnostics oracle's random mesh (missing
     neighbours, vertices and kites), the tracer advection stencils, an ocean's
-    magnitudes; ``maxLevelCell`` at least 2."""
+    magnitudes, no flow through land edges; ``maxLevelCell`` at least 2.
+    ``_fresh`` makes a quarter of the columns nearly fresh."""
     rs = np.random.RandomState(seed)
     real = PRECISIONS[precision]
     nc, nl = n_cells, n_levels
@@ -259,6 +260,10 @@ def make_case(name: str, seed: int, n_cells: int, n_levels: int, overrides: dict
     tracers = np.empty((nc + 1, nl, nt))
     tracers[:, :, 0] = uniform(2.0, 25.0, (nc + 1, nl))
     tracers[:, :, 1] = uniform(33.5, 36.0, (nc + 1, nl))
+    if overrides.get("_fresh"):
+        # near-fresh cells, whose salinity the step's floor (0.001) holds
+        fresh = rs.random_sample(nc + 1) < 0.25
+        tracers[fresh, :, 1] = uniform(0.0, 2.0e-3, (int(fresh.sum()), nl))
     fraction = uniform(0.0, 1.0, (nc + 1, nl))
     fraction /= fraction.sum(axis=1, keepdims=True) * uniform(0.9, 1.3, (nc + 1, 1))
     ssh = uniform(-0.5, 0.5, nc + 1)
@@ -363,3 +368,32 @@ word_mismatches = _stream.word_mismatches
 
 def load_fixture(precision: str) -> dict[str, dict[str, np.ndarray]]:
     return _tend.load_fixture(precision, FIXTURE_DIR)
+
+
+def run_gpu(case: dict) -> dict[str, np.ndarray]:
+    """Run woof.hex.mpas_ocean.split_step_v842 on ``case`` as run_split_step.F90
+    drives the Fortran: the starting diagnostics, then the step."""
+    import cupy as cp
+    from woof.hex.mpas_ocean import diagnostics_v842 as dg
+    from woof.hex.mpas_ocean import split_step_v842 as ss
+
+    dev = _stream.on_device(FIELDS, case)
+    config = case["config"]
+    st, tr = dev["state"], dev["tracers"]
+    dg.diagnostic_solve(dt=case["dt"], mesh=dev["mesh"],
+                        state={n: st[n] for n in ("layerThickness", "normalVelocity", "ssh")},
+                        tracers={n: tr[n] for n in ("activeTracers", "index_temperature", "index_salinity")},
+                        diagnostics=dev["diagnostics"], forcing=dev["forcing"], configs=config)
+    ss.split_step(dt=case["dt"], n_btr_subcycles=int(config["nBtrSubcycles"]), pools=dev, configs=config)
+    return {f"{pool}/{name}": cp.asnumpy(dev[pool][name]) for pool, name, kind, _ in FIELDS
+            if kind in (REAL, INT) and dev[pool][name] is not None}
+
+
+def measure(precision: str, reference: dict | None = None) -> dict[str, dict[str, int]]:
+    reference = load_fixture(precision) if reference is None else reference
+    report: dict[str, dict[str, int]] = {}
+    for case in cases(precision):
+        got = run_gpu(case)
+        want = reference[case["name"]]
+        report[case["name"]] = {name: word_mismatches(got[name], want[name]) for name in want}
+    return report
