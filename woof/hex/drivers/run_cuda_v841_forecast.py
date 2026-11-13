@@ -1916,6 +1916,12 @@ def build_forecast_constructor_values(
     # refuses mid-step.
     from woof.hex.vertical_spec import hex_column_level_refusal
 
+    # A column-suite or generic-seam row's schemes are also judged when the
+    # seam is sealed, by WOOF's resolved-physics vertical preflight over every
+    # registry component; a scheme hex keeps no row for is left to it.  THE
+    # BREAKAGE (hex option matrix, plan 1.3): every generic-seam PBL but YSU
+    # and MYNN, and every microphysics but the four hex rows, stopped here
+    # with "has no vertical-bound row for the hex column".
     column_refusal = hex_column_level_refusal(
         int(N_LEVELS),
         # An engine-derived row ("mp_wsm6@6", the declared row plus a PBL
@@ -1924,6 +1930,7 @@ def build_forecast_constructor_values(
             str(config.config_microp_scheme).split("@", 1)[0]).engine_scheme,
         pbl=config.config_pbl_scheme,
         p_top_pa=float(p_top_pa),
+        engine_validated=bool(suite_row),
     )
     if column_refusal is not None:
         raise ConfigurationRefusal(
