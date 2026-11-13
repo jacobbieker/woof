@@ -232,6 +232,7 @@ tests/test_metal_launch_ordering.py  needs the mlx package (an Apple-silicon Met
 tests/test_metal_mapped_host_memory.py  needs the mlx package (an Apple-silicon Metal host, pixi environment mlx); the macOS mlx leg runs it, and no CUDA or Linux leg can (198ab0d62).
 tests/test_metal_memory_order.py  needs the mlx package (an Apple-silicon Metal host, pixi environment mlx); the macOS mlx leg runs it, and no CUDA or Linux leg can (6db8a85a5).
 tests/test_metal_translation_gaps.py  needs the mlx package (an Apple-silicon Metal host, pixi environment mlx); the macOS mlx leg runs it, and no CUDA or Linux leg can (234f3525d).
+tests/test_metal_r2_translation.py  needs the mlx package (an Apple-silicon Metal host, pixi environment mlx); the macOS mlx leg runs it, and no CUDA or Linux leg can (the hex R2 suite on Metal).
 tests/test_metal_hex_translation.py  needs the mlx package (an Apple-silicon Metal host, pixi environment mlx); the macOS mlx leg runs it, and no CUDA or Linux leg can (c5bb90602).
 tests/test_metal_facade_hex.py  needs the mlx package (an Apple-silicon Metal host, pixi environment mlx); the macOS mlx leg runs it, and no CUDA or Linux leg can (16a201877).
 tests/test_metal_aot.py  needs the mlx package (an Apple-silicon Metal host, pixi environment mlx); the macOS mlx leg runs it, and no CUDA or Linux leg can.

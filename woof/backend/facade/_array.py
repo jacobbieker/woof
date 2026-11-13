@@ -783,6 +783,14 @@ class MemoryPointer:
     def mem(self):
         return self
 
+    def __int__(self):
+        # CuPy's function.Module.get_global_var answers the global's device
+        # address as an int; code that takes it so (MPAS MYNN's dynamic column
+        # counter) reads this pointer's address, which the facade maps back
+        return self.ptr
+
+    __index__ = __int__
+
     def __add__(self, nbytes):
         return MemoryPointer(self.storage, self.offset + int(nbytes), untyped=self.untyped)
 
