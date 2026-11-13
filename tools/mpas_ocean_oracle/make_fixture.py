@@ -13,7 +13,8 @@ diagnostics`` runs ``run_diagnostics_{r4,r8}`` into
 ``tests/data/oracles/mpas_ocean_diagnostics`` and ``--piece tracer_advection``
 ``run_tracer_advection_{r4,r8}`` into ``tests/data/oracles/mpas_ocean_tracer_advection``,
 ``--piece tracer_hmix`` ``run_tracer_hmix_{r4,r8}`` into ``tests/data/oracles/mpas_ocean_tracer_hmix``,
-``--piece tend_tracer`` ``run_tend_tracer_{r4,r8}`` into ``tests/data/oracles/mpas_ocean_tend_tracer``
+``--piece tend_tracer`` ``run_tend_tracer_{r4,r8}`` into ``tests/data/oracles/mpas_ocean_tend_tracer``,
+``--piece vmix`` ``run_vmix_{r4,r8}`` into ``tests/data/oracles/mpas_ocean_vmix``
 (their cases are built per precision).  Writes ``oracle-r4.npz`` and
 ``oracle-r8.npz`` (``<case>/<field>``) and ``inputs.sha256`` (every case's
 input-stream digest at each precision).
@@ -35,7 +36,7 @@ if str(ROOT) not in sys.path:
 from woof.verify import (  # noqa: E402
     mpas_ocean_diagnostics_oracle, mpas_ocean_eos_oracle, mpas_ocean_pgrad_hmix_oracle, mpas_ocean_tend_oracle,
     mpas_ocean_tend_tracer_oracle, mpas_ocean_tendency_oracle, mpas_ocean_tracer_advection_oracle,
-    mpas_ocean_tracer_hmix_oracle)
+    mpas_ocean_tracer_hmix_oracle, mpas_ocean_vmix_oracle)
 
 #: piece -> (case module, binary stem)
 PIECES = {"tend": (mpas_ocean_tend_oracle, "run_oracle"),
@@ -45,7 +46,8 @@ PIECES = {"tend": (mpas_ocean_tend_oracle, "run_oracle"),
           "diagnostics": (mpas_ocean_diagnostics_oracle, "run_diagnostics"),
           "tracer_advection": (mpas_ocean_tracer_advection_oracle, "run_tracer_advection"),
           "tracer_hmix": (mpas_ocean_tracer_hmix_oracle, "run_tracer_hmix"),
-          "tend_tracer": (mpas_ocean_tend_tracer_oracle, "run_tend_tracer")}
+          "tend_tracer": (mpas_ocean_tend_tracer_oracle, "run_tend_tracer"),
+          "vmix": (mpas_ocean_vmix_oracle, "run_vmix")}
 
 
 def run_case(oo, binary: Path, case: dict, precision: str) -> dict[str, np.ndarray]:
