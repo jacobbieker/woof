@@ -49,7 +49,6 @@ def test_clm_lake_reads_its_mask_and_bathymetry_by_its_own_default():
 
 def test_every_scheme_that_reads_an_unstaged_input_is_refused_by_name():
     for cfg, keyword in (
-            (_cfg(sf_urban_physics=1, use_wudapt_lcz=1), "LCZ"),
             (_cfg(sf_surf_irr_scheme=2, irr_ph=1), "irr_ph_field"),
             (_cfg(lightning_option=1), "lightning_inputs"),
             (_cfg(sf_surface_physics=4, opt_crop=1), "noahmp_crop_inputs")):
@@ -266,7 +265,7 @@ def test_the_contract_table_lists_every_scheme():
                       ("irrigation", "irrigation"), ("irrigation", "irr_ph_field"),
                       ("ruc_mosaic", "landusef"), ("ruc_mosaic", "soilctop"),
                       ("pleim_xiu_lsm", "landusef"), ("pleim_xiu_lsm", "soilcbot"),
-                      ("slab", "thermal_inertia")}
+                      ("slab", "thermal_inertia"), ("urban", "ivgtyp")}
 
 
 @needs_generic_seam
@@ -350,12 +349,88 @@ def test_the_builder_bands_are_bounded_by_pixel_count():
     assert bands[0][2] == 1 and bands[-1][3] == 21600
 
 
-def test_urban_reads_frc_urb2d_for_slucm_only_and_lcz_is_refused():
+def test_urban_reads_frc_urb2d_for_slucm_only_and_lcz_its_classes():
     assert [n.input.keyword for n in si.required_inputs(_cfg(sf_urban_physics=1))] == ["frc_urb2d"]
     for option in (2, 3):
         # BEP / BEP+BEM run on URBPARM.TBL's fractions, as the WRF path hands them.
         assert si.required_inputs(_cfg(sf_urban_physics=option)) == ()
-    assert si.unstaged_problems(_cfg(sf_urban_physics=1, use_wudapt_lcz=1))
+    # use_wudapt_lcz = 1: the LCZ classes for every option, and SLUCM's
+    # fraction from the LCZ table.
+    lcz = si.required_inputs(_cfg(sf_urban_physics=1, use_wudapt_lcz=1))
+    assert [(n.input.keyword, n.input.variable) for n in lcz] == [
+        ("ivgtyp", "LU_INDEX"), ("frc_urb2d", "FRC_URB2D_LCZ")]
+    for option in (2, 3):
+        assert [n.input.variable for n in si.required_inputs(
+            _cfg(sf_urban_physics=option, use_wudapt_lcz=1))] == ["LU_INDEX"]
+    assert not si.unstaged_problems(_cfg(sf_urban_physics=1, use_wudapt_lcz=1))
+
+
+def test_the_lcz_classes_type_the_urban_cells_and_weigh_the_lcz_table():
+    from woof.core.urban_tables import load_urban_params
+    from woof.hex import surface_statics as ss
+
+    # Four urban cells and one grass cell (all land):
+    #   0: LCZ 6 (56) 50 %, LCZ 8 (58) 30 %, grass 20 %   -> 56
+    #   1: LCZ 2 (52) and LCZ 5 (55) tied at 40 %          -> 52 (lowest)
+    #   2: no LCZ pixel                                     -> keeps 13
+    #   3: LCZ E (61) 100 %                                 -> 61
+    #   4: grass with 30 % LCZ 6: not urban, kept           -> 10
+    shares = np.zeros((5, 61))
+    shares[0, [55, 57, 9]] = 0.5, 0.3, 0.2
+    shares[1, [51, 54, 9]] = 0.4, 0.4, 0.2
+    shares[2, 9] = 1.0
+    shares[3, 60] = 1.0
+    shares[4, [55, 9]] = 0.3, 0.7
+    ivgtyp = np.array([13, 13, 13, 13, 10])
+    lu, frc, receipt = ss.lcz_index_and_fraction(shares, ivgtyp, np.ones(5))
+    np.testing.assert_array_equal(lu, [56, 52, 13, 61, 10])
+    table = np.asarray(load_urban_params(1, 1).FRC_URB_TBL, np.float64)
+    np.testing.assert_allclose(frc, np.float32([
+        0.5 * table[5] + 0.3 * table[7], 0.4 * table[1] + 0.4 * table[4],
+        0.0, table[10], 0.0]), rtol=1e-6)
+    assert receipt["urban_cells_given_lcz"] == 3
+    assert receipt["urban_cells_kept_isurban"] == 1
+    assert receipt["cells_holding_lcz_not_urban"] == 1
+    assert receipt["urban_class_counts"] == {"13": 1, "52": 1, "56": 1, "61": 1}
+
+
+def test_the_lcz_fraction_is_held_to_the_lcz_table(tmp_path):
+    import json
+    from types import SimpleNamespace
+
+    import netCDF4
+
+    lcz_table = si.urban_table_sha256(SimpleNamespace(use_wudapt_lcz=1))
+    assert lcz_table != si.urban_table_sha256(SimpleNamespace())
+    lat = np.radians([40.0, 41.0, 42.0])
+    lon = np.radians([-80.0, -81.0, -82.0])
+    path = tmp_path / "lcz.nc"
+
+    def write(provenance):
+        with netCDF4.Dataset(path, "w") as dataset:
+            dataset.createDimension("nCells", 3)
+            dataset.createVariable("LU_INDEX", "i4", ("nCells",))[:] = [56, 10, 13]
+            dataset.createVariable("FRC_URB2D_LCZ", "f4", ("nCells",))[:] = [0.4, 0, 0]
+            dataset.createVariable("latCell", "f8", ("nCells",))[:] = lat
+            dataset.createVariable("lonCell", "f8", ("nCells",))[:] = lon
+            dataset.setncattr("schema", si.SCHEMA)
+            dataset.setncattr("provenance_json", json.dumps(provenance))
+
+    write({"lcz": {"urbparm_sha256": lcz_table}})
+    physics = dict(_lake_physics(), sf_lake_physics=0, sf_urban_physics=1,
+                   use_wudapt_lcz=1)
+    inputs, receipt = si.bind(physics, path, latitude_rad=lat, longitude_rad=lon)
+    assert sorted(inputs) == ["frc_urb2d", "ivgtyp"]
+    assert inputs["ivgtyp"].dtype == np.int32
+    np.testing.assert_array_equal(inputs["ivgtyp"], [56, 10, 13])
+    # BEP reads the classes and none of the fractions.
+    inputs, _ = si.bind(dict(physics, sf_urban_physics=2), path,
+                        latitude_rad=lat, longitude_rad=lon)
+    assert list(inputs) == ["ivgtyp"]
+    # A fraction weighed by URBPARM.TBL (the non-LCZ group) is refused.
+    write({"lcz": {"urbparm_sha256": si.urban_table_sha256(SimpleNamespace())}})
+    with pytest.raises(ConfigurationRefusal, match="another table"):
+        si.bind(physics, path, latitude_rad=lat, longitude_rad=lon)
 
 
 def test_the_urban_fraction_is_the_wrf_preparations_estimate_on_the_cells():

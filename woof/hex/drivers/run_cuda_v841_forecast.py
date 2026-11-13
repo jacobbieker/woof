@@ -711,6 +711,27 @@ def _suite_host(
                     f"{on_land} LAKEMASK cells are land in the init (landmask 1); "
                     "the surface statics were not built from this run's static",
                     "the surface statics file built from this run's --static")
+        lu_index = bound.get("ivgtyp")
+        if lu_index is not None:
+            # use_wudapt_lcz's LU_INDEX is the init's own land use with the
+            # urban cells typed by Local Climate Zone (woof.hex.surface_statics):
+            # any other difference is another land use than the init's.
+            from woof.hex.surface_inputs import LCZ_CATEGORIES
+            from woof.static.highres import MODIS21_ISURBAN
+
+            init_lu = np.asarray(values["ivgtyp"])[: lu_index.size]
+            changed = lu_index != init_lu
+            foreign = changed & ~((init_lu == MODIS21_ISURBAN)
+                                  & np.isin(lu_index, LCZ_CATEGORIES))
+            if np.any(foreign):
+                raise ConfigurationRefusal(
+                    "surface_statics", str(surface_statics),
+                    f"{int(np.count_nonzero(foreign))} LU_INDEX cells differ from "
+                    "the init's ivgtyp other than by an urban (ISURBAN) cell's "
+                    "LCZ class 51-61; the surface statics were not built from "
+                    "this run's static",
+                    "the surface statics file built from this run's --static")
+            surface_receipt["lcz_cells"] = int(np.count_nonzero(changed))
         if is_regional:
             from woof.hex.cuda_regional_forecast_v841 import (
                 pad_regional_physics_column,
