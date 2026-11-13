@@ -18,7 +18,8 @@ THE BREAKAGES THESE PREVENT
 2. A case generator whose bytes drift. The input digests are pinned.
 3. A gate that cannot fail. A mutated forcing term or a reordered composition
    must produce mismatches.
-4. An unported switch (land-ice fluxes, frazil, the RKIND 8 bulk wind stress,
+4. An unported switch (land-ice fluxes, frazil, the RKIND 8 bulk wind stress
+   without the glibc 2.39 opt-in,
    the bottom-level terms on a mesh with a dry edge) silently running as
    something else. Each is refused by name.
 """
@@ -163,6 +164,29 @@ def test_a_mutated_port_is_caught(monkeypatch, precision, module_name, original,
         assert oo.bit_mismatches(got[field], oo.load_fixture(precision)[case_name][field]) > 0
     finally:
         module._module_on.cache_clear()
+
+
+@requires_gpu
+@pytest.mark.parametrize("precision", ["r4", oo.R8_GLIBC239])
+def test_a_swapped_wind_rotation_is_caught(monkeypatch, precision):
+    """The edge's cos and sin swapped in the bulk wind stress (RKIND 8 under the opt-in)."""
+    from woof.hex.mpas_ice import rkind
+    from woof.hex.mpas_ocean import forcing_v842 as fv
+    if precision == oo.R8_GLIBC239 and not rkind.trig64():
+        pytest.skip("the RKIND 8 bulk wind stress needs WOOF_GLIBC239_LIBM64=1")
+    base = "r8" if precision == oo.R8_GLIBC239 else precision
+    real = fv.module_source
+    original = "M(BW_COS(angleEdge[iEdge]), zonalAverage)"
+    assert real(base).count(original) == 1
+    monkeypatch.setattr(fv, "module_source",
+                        lambda p="r4": real(p).replace(original, "M(BW_SIN(angleEdge[iEdge]), zonalAverage)"))
+    fv._module_on.cache_clear()
+    try:
+        case = next(c for c in oo.cases() if c["name"] == "jts_rk4_bulk_drag")
+        got = oo.run_gpu(case, precision)
+        assert oo.bit_mismatches(got["surfaceStress"], oo.load_fixture(precision)[case["name"]]["surfaceStress"]) > 0
+    finally:
+        fv._module_on.cache_clear()
 
 
 @requires_gpu

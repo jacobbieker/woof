@@ -10066,7 +10066,7 @@
     },
     {
       "file": "woof/hex/mpas_ocean/forcing_v842.py",
-      "line": 103,
+      "line": 110,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",
@@ -10078,7 +10078,7 @@
       "options": null,
       "options_element_expressions": null,
       "options_are_literal": false,
-      "text": "image, _ = compile_using_nvrtc(module_source(precision), options, None, f\"ocn_forcing_v842_{precision}.cu\")"
+      "text": "image, _ = compile_using_nvrtc(module_source(precision), options, None,"
     },
     {
       "file": "woof/hex/mpas_ocean/pgrad_hmix_v842.py",
