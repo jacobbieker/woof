@@ -211,6 +211,23 @@ _PBL_CONTRACT_ROWS = {
     # CCPP sa-TKE-EDMF (bl_pbl_physics = 901, hex parity 1.9): a floor of 8
     # levels for its mass-flux searches and no ceiling.
     "ccpp-tke-edmf": ("CCPP TKE-EDMF", "SATMEDMF_VERTICAL_LEVEL_BOUNDS"),
+    # The generic seam's other PBL options (their registry option ids), each
+    # its own row in woof.physics_vertical_contract.  THE BREAKAGE THESE ROWS
+    # PREVENT: a Pleim-Xiu run (ACM2 is its pairing) stopped here before the
+    # seam was sealed.
+    "acm2": ("ACM2", "ACM2_VERTICAL_LEVEL_BOUNDS"),
+    "boulac": ("BouLac", "BOULAC_VERTICAL_LEVEL_BOUNDS"),
+    "eeps": ("EEPS", "EEPS_VERTICAL_LEVEL_BOUNDS"),
+    "gbm": ("GBM", "GBMPBL_VERTICAL_LEVEL_BOUNDS"),
+    "gfs": ("GFS PBL", "GFS_PBL_VERTICAL_LEVEL_BOUNDS"),
+    "keps": ("k-epsilon", "KEPS_VERTICAL_LEVEL_BOUNDS"),
+    "mrf": ("MRF", "MRF_VERTICAL_LEVEL_BOUNDS"),
+    "myj": ("MYJ", "MYJ_VERTICAL_LEVEL_BOUNDS"),
+    "qnse": ("QNSE", "QNSE_VERTICAL_LEVEL_BOUNDS"),
+    "sase": ("SASE", "SASE_VERTICAL_LEVEL_BOUNDS"),
+    "shinhong": ("Shin-Hong", "SHINHONG_VERTICAL_LEVEL_BOUNDS"),
+    "temf": ("TEMF", "TEMF_VERTICAL_LEVEL_BOUNDS"),
+    "uw": ("UW", "UWPBL_VERTICAL_LEVEL_BOUNDS"),
     "off": None,
 }
 
