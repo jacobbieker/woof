@@ -87,8 +87,8 @@ def test_tropical_preset_inside_and_outside_the_tropics():
 def test_clamps_out_of_order_and_off_lattice_are_refused():
     with pytest.raises(ValueError, match="out of order"):
         _options(adaptive_min_dt="40")
-    with pytest.raises(ValueError, match="hundredths"):
-        _options(adaptive_max_dt="45.005")
+    with pytest.raises(ValueError, match="1/64"):
+        _options(adaptive_max_dt="45.01")
 
 
 def test_acoustic_substeps_hold_the_rows_longest_acoustic_step():
@@ -118,11 +118,13 @@ def test_calm_flow_grows_five_percent_and_lands_on_every_frame_exactly():
     assert set(frames[1:]) <= ends
     assert clock.elapsed == 3600
     assert sum(plan.dt for plan in plans) == 3600
-    assert all((plan.dt * 100).denominator == 1 for plan in plans)
+    assert all((plan.dt * adaptive_dt.PRECISION).denominator == 1 for plan in plans)
+    # Binary64 holds every step and every sum exactly.
+    assert float(sum(plan.dt for plan in plans)) == sum(float(plan.dt) for plan in plans)
     assert max(plan.dt for plan in plans) == options.max_dt
     # The first growth is WRF's full increase factor from the starting step (calc_dt's negligible-CFL arm,
-    # then the 5 % bound), quantised to hundredths.
-    assert plans[1].dt == Fraction(3150, 100)
+    # then the 5 % bound), quantised to 1/64 s: INT(1.05 * 64 + 0.5) = 67.
+    assert plans[1].dt == Fraction(30 * 67, 64)
 
 
 def test_two_step_lookahead_never_takes_a_sliver():
@@ -149,8 +151,9 @@ def test_vertical_courant_above_target_cuts_the_step():
     first = clock.propose()
     clock.commit(vert_rate=3.0 / float(first.dt), horiz_rate=0.0)
     second = clock.propose()
-    # WRF: target - (cfl - target)/2 over cfl = (1.2 - 0.9)/3 = 0.1, the floor, of 30 s.
-    assert second.dt == 3
+    # WRF: target - (cfl - target)/2 over cfl = (1.2 - 0.9)/3 = 0.1, the floor, of 30 s; on the 1/64 lattice
+    # INT(0.1 * 64 + 0.5) = 6.
+    assert second.dt == Fraction(30 * 6, 64)
 
 
 def test_min_equals_max_pins_the_step():

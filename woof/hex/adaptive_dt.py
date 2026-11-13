@@ -28,8 +28,11 @@ differs is what the controller is handed and what a new step has to reach:
   equal to the mesh row's dt, GF's pinned ``cudt = 0``) runs every step at the live dt, and the cumulus
   rain/NCA clock advances on every adaptive step (#278).
 
-Every step is a whole number of hundredths of a second (WRF's ``precision = 100``), so the run's clock is
-an exact :class:`fractions.Fraction` and every landing is exact.
+WRF quantises every step to ``1/precision`` seconds with ``precision = 100`` (the denominator of its
+rational ESMF clock).  hex's clock is binary64 seconds, and hex refuses a step whose multiples are not exact
+in binary64 (:func:`woof.hex.dt_admission.require_cadences`; every step check compares ``start + dt``), so
+hex runs the same ``calc_dt`` with ``precision = 64``: every step is a whole number of 1/64 s, every sum of
+steps is exact in binary64, and every landing is exact.
 
 Off by default (``--adaptive-timestep off``).  With it off nothing here is imported by the forecast loop,
 so the executed path, and every history byte, is the fixed step's.
@@ -42,7 +45,11 @@ from fractions import Fraction
 import math
 from typing import Any, Iterable, Mapping, Sequence
 
-from woof.core.adaptive_timestep import PRECISION, AdaptiveTimestepController
+from woof.core.adaptive_timestep import AdaptiveTimestepController
+
+#: ``calc_dt``'s ``precision`` on hex: a power of two, so every step and every sum of steps is exact in
+#: binary64 (WRF's 100 is exact only in its rational clock).
+PRECISION = 64
 
 SCHEMA = "woof-hex.adaptive-timestep/v1"
 
@@ -150,17 +157,18 @@ def forwarded_arguments(arguments: Any) -> list[str]:
 
 
 def quantise(seconds: Any) -> Fraction:
-    """A step in seconds as WRF holds it: an exact rational with denominator ``precision`` (100)."""
+    """A step in seconds on the hex lattice: an exact rational with denominator ``PRECISION`` (64)."""
 
     value = Fraction(str(seconds)) if not isinstance(seconds, Fraction) else seconds
     scaled = value * PRECISION
     if scaled.denominator != 1:
-        raise ValueError(f"{seconds} s is not a whole number of hundredths of a second (WRF's precision = 100)")
+        raise ValueError(f"{seconds} s is not a whole number of 1/{PRECISION} s (the hex adaptive step lattice, "
+                         "exact in binary64)")
     return value
 
 
 def floor_to_precision(seconds: Fraction) -> Fraction:
-    """The lattice floor a halved landing step is snapped to (never below one hundredth)."""
+    """The lattice floor a halved landing step is snapped to (never below one lattice unit)."""
 
     return max(Fraction(math.floor(seconds * PRECISION), PRECISION), Fraction(1, PRECISION))
 
