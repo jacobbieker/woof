@@ -337,10 +337,10 @@ RESOLVED: dict[str, tuple[str, str]] = {
     # unchanged.)
     # (3.0 port folds moved both launchers seven lines down; the registry
     # now cites :1490 and :1588.  Anchors unchanged.)
-    "woof/core/dycore.py:1505": (
+    "woof/core/dycore.py:1492": (
         "woof/core/dycore.py",
         "WRF v4.6.1 km_opt=2:"),
-    "woof/core/dycore.py:1603": (
+    "woof/core/dycore.py:1590": (
         "woof/core/dycore.py",
         "WRF v4.6.1 km_opt=3:"),
 }
