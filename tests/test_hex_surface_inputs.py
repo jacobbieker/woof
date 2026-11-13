@@ -53,7 +53,7 @@ def test_every_scheme_that_reads_an_unstaged_input_is_refused_by_name():
             (_cfg(sf_urban_physics=1, use_wudapt_lcz=1), "LCZ"),
             (_cfg(sf_surf_irr_scheme=2, irr_ph=1), "irr_ph_field"),
             (_cfg(lightning_option=1), "lightning_inputs"),
-            (_cfg(sf_surface_physics=3, mosaic_lu=1), "landusef")):
+            (_cfg(sf_surface_physics=7), "landusef")):
         problems = si.unstaged_problems(cfg)
         assert problems and keyword in problems[0], cfg
     with pytest.raises(ConfigurationRefusal, match="thermal_inertia"):
@@ -260,7 +260,8 @@ def test_the_contract_table_lists_every_scheme():
     assert staged == {("clm_lake", "lakemask"), ("clm_lake", "lake_mask_flag"),
                       ("clm_lake", "lake_depth"), ("clm_lake", "lake_depth_flag"),
                       ("urban", "frc_urb2d"), ("noah_mosaic", "landusef"),
-                      ("irrigation", "irrigation"), ("irrigation", "irr_ph_field")}
+                      ("irrigation", "irrigation"), ("irrigation", "irr_ph_field"),
+                      ("ruc_mosaic", "landusef"), ("ruc_mosaic", "soilctop")}
 
 
 def test_topo_wind_2_reads_var_from_the_static_by_the_superset_match():
@@ -416,8 +417,9 @@ def test_noah_mosaic_reads_a_landusef_plane_stack():
         si.seal(cfg, {"landusef": stack[0]}, n_columns=3)
     with pytest.raises(ValueError, match="\\[0, 1\\]"):
         si.seal(cfg, {"landusef": stack * 2}, n_columns=3)
-    # RUC and PX still read fractions hex does not stage.
-    assert si.unstaged_problems(_cfg(sf_surface_physics=3, mosaic_lu=1))
+    # RUC's mosaic reads the same staged planes; PX still reads unstaged ones.
+    assert not si.unstaged_problems(_cfg(sf_surface_physics=3, mosaic_lu=1,
+                                         mosaic_soil=1))
     assert si.unstaged_problems(_cfg(sf_surface_physics=7))
 
 
