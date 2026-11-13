@@ -183,7 +183,12 @@ network.
   Voronoi polygon into `ter`.  The tiles are fetched, cached and hashed by
   the same code as the WRF path, under the same per-user cache.  Area an
   unpublished (all-water) tile leaves uncovered takes the cell's own
-  30-arc-second height.
+  30-arc-second height.  `--terrain gem15-dtm` or `gem15-dsm` uses the
+  experimental 15 m GEM-15 bare-earth or surface model instead (sampled
+  at 15 m, a warning on every use, and GLO-30 where GEM-15 does not serve;
+  see [HIGHRES-TERRAIN](public/HIGHRES-TERRAIN.md#gem-15-experimental-15-m)).
+  The static's `highres_terrain_attribution` attribute carries its
+  CC BY 4.0 attribution, "This dataset is produced by Google".
 - **Land use** (`--landuse cglc`).  `ivgtyp`/`lu_index` become the
   per-cell area mode of CGLC-MODIS-LCZ, through the WRF path's crosswalk.
   A cell with under half its area classified keeps its old category.
