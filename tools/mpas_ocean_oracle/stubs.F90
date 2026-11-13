@@ -433,6 +433,11 @@ module mpas_derived_types
     integer :: nprocs = 1
   end type mpas_dminfo_type
 
+  ! the equation of state declares a dm_info it never uses
+  type dm_info
+    integer :: nprocs = 1
+  end type dm_info
+
   type block_type
     type(MPAS_pool_type), pointer :: structs => null()
     type(MPAS_pool_type), pointer :: configs => null()

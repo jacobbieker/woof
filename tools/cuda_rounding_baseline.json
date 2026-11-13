@@ -302,6 +302,14 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "13b969660102d852de0db4d6f6f8b9fb4ece078d171bd31cf8a848a79b86f994",
+    "constructor": "compile_using_nvrtc",
+    "factory": "_module_on",
+    "factory_sha256": "9c91bc696e5b10e58b9c25aeaf799250deafce62f3e1d70122ee1a4b41a82dad",
+    "file": "woof/hex/mpas_ocean/eos_v842.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "153a5266a05205cb6990f1cca49bb8ccc517ba2dd7051fd2ecd62f96cd43d1a3",
     "constructor": "RawModule",
     "factory": "__init__",
@@ -4572,6 +4580,10 @@
     "sha256": "d293e9cfd863a8f2f974a2bab2b8bea0547559838a758888fffd008e864f33e4"
    },
    {
+    "file": "woof/hex/mpas_ocean/eos_v842.cu",
+    "sha256": "741b58b24ad684da3e7443064db9ef586a70e93363f0a6a8191b57634897db68"
+   },
+   {
     "file": "woof/hex/mpas_ocean/forcing_v842.cu",
     "sha256": "8178e4d7b40d5f838ee6afa0f61d46fbe84829dca4b3225e6139e0347f559502"
    },
@@ -5476,6 +5488,10 @@
    {
     "file": "woof/hex/mpas_ice/time_integration_fe_v842.py",
     "sha256": "e60b98909a841bd72949993c6079f9989c1270df15579b1eba714b8c182a720e"
+   },
+   {
+    "file": "woof/hex/mpas_ocean/eos_v842.py",
+    "sha256": "82a26cda3d8f99f90469934ba4bdf16e64c0ed188a6447b7265d72d1012a7413"
    },
    {
     "file": "woof/hex/mpas_ocean/forcing_v842.py",
