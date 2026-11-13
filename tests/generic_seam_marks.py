@@ -13,10 +13,18 @@ on every host that carries the engine (mac Metal, pb CUDA).
 import pytest
 
 
+#: The device stack the seam imports; only its absence means "CPU host".
+DEVICE_MODULES = frozenset({"cupy", "mlx"})
+
+
 def generic_seam_importable() -> bool:
     try:
         import woof.core.mpas_column_suite  # noqa: F401
-    except ImportError:
+    except ModuleNotFoundError as error:
+        # Any other missing module is a broken engine, not a CPU host: let it
+        # fail the run instead of skipping the assertions.
+        if (error.name or "").split(".")[0] not in DEVICE_MODULES:
+            raise
         return False
     return True
 
