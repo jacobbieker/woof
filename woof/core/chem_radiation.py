@@ -78,6 +78,11 @@ class RadiationAerosols:
         return tuple(outputs)
 
 
+def _sorgam(table):
+    """True when the SORGAM aerosol rows are active (RADM2SORG)."""
+    return bool(table.rows_for("aerosol.sorgam"))
+
+
 def _legacy_optics(ctx):
     from woof.core.chem_optics import gocart_optics, _row_dicts, rows
     optics = gocart_optics(
@@ -95,8 +100,9 @@ def prepare(state, cfg):
     if not getattr(cfg, "aer_ra_feedback", 0):
         return None
     chem = getattr(state, "chem", None)
-    if chem is None or not chem.table.rows_for("optics.gocart"):
-        raise ValueError("aerosol feedback needs active optics.gocart mass rows")
+    if chem is None or not (chem.table.rows_for("optics.gocart") or _sorgam(chem.table)):
+        raise ValueError("aerosol feedback needs active optics.gocart mass rows "
+                         "or the SORGAM aerosol (aerosol.sorgam)")
     from woof.core.chem_driver import _context
     from woof.core.chem_optics import update_diagnostics
     now = float(state.elapsed_seconds)
@@ -107,7 +113,12 @@ def prepare(state, cfg):
         ctx.prep.refresh(state)
         from woof.physics_compat import rrtmg_variant, RRTMG_VARIANT_LEGACY
         optics = None
-        if rrtmg_variant(cfg) == RRTMG_VARIANT_LEGACY:
+        if _sorgam(chem.table):
+            # The default build's clean-room modal optics
+            # (woof.core.chem_modal_optics); legacy RRTMG only (its refusal).
+            from woof.core.chem_modal_optics import sorgam_optics
+            optics = sorgam_optics(ctx)
+        elif rrtmg_variant(cfg) == RRTMG_VARIANT_LEGACY:
             optics = _legacy_optics(ctx)
         else:
             update_diagnostics(ctx)
@@ -174,6 +185,18 @@ def memory_shapes(cfg, p_top, column_chunk):
     from woof.chem_table import load
     from woof.physics_compat import rrtmg_variant, RRTMG_VARIANT_LEGACY
     table = load(cfg)
+    if table is not None and _sorgam(table) and getattr(cfg, "aer_ra_feedback", 0):
+        # woof.core.chem_modal_optics: the lognormal Mie table, the 28
+        # full-domain optics planes (tau, ssa, g at 4 wavelengths, LW tau in
+        # 16 bands) held across radiation chunks, and at each refresh the
+        # 18 class volumes and 3 numbers (float64 then float32) and the
+        # kernel's 28 output planes before they are reshaped.
+        from woof.core.chem_modal_optics import host_data
+        nz, ny, nx = cfg.nz, cfg.ny, cfg.nx
+        held = {"chem_modal_optics/table": (int(host_data()[4].size),),
+                "chem_modal_optics/bands": (28, nz, ny, nx)}
+        transient = {"chem_modal_optics/volumes": (3 * 21 + 28, nz, ny, nx)}
+        return held, transient
     if table is None or not table.rows_for("optics.gocart"):
         return {}, {}
     nr = len(table.rows_for("optics.gocart"))
@@ -210,4 +233,8 @@ def feedback_row_count(cfg):
     if not getattr(cfg, "aer_ra_feedback", 0):
         return 0
     from woof.chem_table import load
-    return len(load(cfg).rows_for("optics.gocart"))
+    table = load(cfg)
+    if _sorgam(table):
+        from woof.core.chem_modal_optics import ROWS
+        return len(ROWS)
+    return len(table.rows_for("optics.gocart"))

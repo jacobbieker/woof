@@ -29,6 +29,18 @@ would replace or count the same aerosol twice. `aer_op_opt = 1` selects the
 ported WRF-Chem volume mixing rule. Unsupported radiation families refuse
 at configuration validation rather than dropping the requested optics.
 
+With the RADM2SORG set (`chem_sets = "radm2sorg"`), `aer_ra_feedback = 1`
+uses the default build's clean-room modal optics instead
+(`woof/core/chem_modal_optics.py`). Each SORGAM mode (sigma_g 1.70, 2.00,
+2.50) is an internal mixture of water, inorganic salts, sea salt, organics,
+elemental carbon and mineral matter. Its refractive index is the volume
+average (`aer_op_opt = 1`) or Maxwell Garnett with carbon inclusions (`= 2`).
+Its optics come from a lognormal Mie table. They reach the legacy RRTMG
+shortwave (four wavelengths spread over the 14 bands) and longwave
+(absorption depth in the 16 bands), and Fast-TUV's photolysis. The RRTMGP
+path refuses SORGAM feedback, because its MERRA tables describe GOCART rows.
+This path writes no `EXTCOF55` or `AOD5502D`.
+
 History contains `EXTCOF55` (km^-1) and `AOD5502D` (dimensionless column
 integral); the renderer's existing `aod_550` product reads `AOD5502D`.
 Surface dimming and temperature response depend on aerosol placement,
