@@ -56,7 +56,7 @@ module mpas_pool_routines
             mpas_allocate_scratch_field, mpas_deallocate_scratch_field, &
             mpas_pool_iterator_type, MPAS_POOL_FIELD, mpas_pool_begin_iteration, mpas_pool_get_next_member
 
-  integer, parameter :: maxEntries = 64
+  integer, parameter :: maxEntries = 192
 
   ! a scratch field: the driver sets dimSizes, mpas_allocate_scratch_field
   ! allocates array to them
@@ -278,84 +278,108 @@ contains
     type(MPAS_pool_type), intent(inout) :: pool
     character(len=*), intent(in) :: name
     type(MPAS_pool_type), pointer :: sub
-    pool % e(slot(pool, name)) % sub => sub
+    integer :: i
+    i = slot(pool, name)
+    pool % e(i) % sub => sub
   end subroutine stub_pool_put_subpool
 
   subroutine put_dimension_0d(pool, name, dim)
     type(MPAS_pool_type), intent(inout) :: pool
     character(len=*), intent(in) :: name
     integer, pointer :: dim
-    pool % e(slot(pool, name)) % i0 => dim
+    integer :: i
+    i = slot(pool, name)
+    pool % e(i) % i0 => dim
   end subroutine put_dimension_0d
 
   subroutine put_dimension_1d(pool, name, dim)
     type(MPAS_pool_type), intent(inout) :: pool
     character(len=*), intent(in) :: name
     integer, dimension(:), pointer :: dim
-    pool % e(slot(pool, name)) % d1 => dim
+    integer :: i
+    i = slot(pool, name)
+    pool % e(i) % d1 => dim
   end subroutine put_dimension_1d
 
   subroutine put_config_l(pool, name, value)
     type(MPAS_pool_type), intent(inout) :: pool
     character(len=*), intent(in) :: name
     logical, pointer :: value
-    pool % e(slot(pool, name)) % l0 => value
+    integer :: i
+    i = slot(pool, name)
+    pool % e(i) % l0 => value
   end subroutine put_config_l
 
   subroutine put_config_c(pool, name, value)
     type(MPAS_pool_type), intent(inout) :: pool
     character(len=*), intent(in) :: name
     character(len=StrKIND), pointer :: value
-    pool % e(slot(pool, name)) % c0 => value
+    integer :: i
+    i = slot(pool, name)
+    pool % e(i) % c0 => value
   end subroutine put_config_c
 
   subroutine put_config_r(pool, name, value)
     type(MPAS_pool_type), intent(inout) :: pool
     character(len=*), intent(in) :: name
     real(kind=RKIND), pointer :: value
-    pool % e(slot(pool, name)) % r0 => value
+    integer :: i
+    i = slot(pool, name)
+    pool % e(i) % r0 => value
   end subroutine put_config_r
 
   subroutine put_r0(pool, name, a)
     type(MPAS_pool_type), intent(inout) :: pool
     character(len=*), intent(in) :: name
     real(kind=RKIND), pointer :: a
-    pool % e(slot(pool, name)) % r0 => a
+    integer :: i
+    i = slot(pool, name)
+    pool % e(i) % r0 => a
   end subroutine put_r0
 
   subroutine put_r1(pool, name, a)
     type(MPAS_pool_type), intent(inout) :: pool
     character(len=*), intent(in) :: name
     real(kind=RKIND), dimension(:), pointer :: a
-    pool % e(slot(pool, name)) % r1 => a
+    integer :: i
+    i = slot(pool, name)
+    pool % e(i) % r1 => a
   end subroutine put_r1
 
   subroutine put_r2(pool, name, a)
     type(MPAS_pool_type), intent(inout) :: pool
     character(len=*), intent(in) :: name
     real(kind=RKIND), dimension(:,:), pointer :: a
-    pool % e(slot(pool, name)) % r2 => a
+    integer :: i
+    i = slot(pool, name)
+    pool % e(i) % r2 => a
   end subroutine put_r2
 
   subroutine put_r3(pool, name, a)
     type(MPAS_pool_type), intent(inout) :: pool
     character(len=*), intent(in) :: name
     real(kind=RKIND), dimension(:,:,:), pointer :: a
-    pool % e(slot(pool, name)) % r3 => a
+    integer :: i
+    i = slot(pool, name)
+    pool % e(i) % r3 => a
   end subroutine put_r3
 
   subroutine put_i1(pool, name, a)
     type(MPAS_pool_type), intent(inout) :: pool
     character(len=*), intent(in) :: name
     integer, dimension(:), pointer :: a
-    pool % e(slot(pool, name)) % i1 => a
+    integer :: i
+    i = slot(pool, name)
+    pool % e(i) % i1 => a
   end subroutine put_i1
 
   subroutine put_i2(pool, name, a)
     type(MPAS_pool_type), intent(inout) :: pool
     character(len=*), intent(in) :: name
     integer, dimension(:,:), pointer :: a
-    pool % e(slot(pool, name)) % i2 => a
+    integer :: i
+    i = slot(pool, name)
+    pool % e(i) % i2 => a
   end subroutine put_i2
 
   subroutine mpas_pool_begin_iteration(pool)
@@ -382,7 +406,9 @@ contains
     type(MPAS_pool_type), intent(inout) :: pool
     character(len=*), intent(in) :: name
     type(field1DReal), pointer :: f
-    pool % e(slot(pool, name)) % f1 => f
+    integer :: i
+    i = slot(pool, name)
+    pool % e(i) % f1 => f
   end subroutine put_field_1d
 
   subroutine get_field_2d(pool, name, f)
@@ -403,14 +429,18 @@ contains
     type(MPAS_pool_type), intent(inout) :: pool
     character(len=*), intent(in) :: name
     type(field2DReal), pointer :: f
-    pool % e(slot(pool, name)) % f2 => f
+    integer :: i
+    i = slot(pool, name)
+    pool % e(i) % f2 => f
   end subroutine put_field_2d
 
   subroutine put_field_3d(pool, name, f)
     type(MPAS_pool_type), intent(inout) :: pool
     character(len=*), intent(in) :: name
     type(field3DReal), pointer :: f
-    pool % e(slot(pool, name)) % f3 => f
+    integer :: i
+    i = slot(pool, name)
+    pool % e(i) % f3 => f
   end subroutine put_field_3d
 
   ! The array is filled with huge(): a word the routine reads before it
