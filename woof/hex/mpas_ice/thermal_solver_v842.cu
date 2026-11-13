@@ -34,7 +34,8 @@
 // glibc_flt64.cuh); sin is glibc's sinf (glibc_sinf, glibc_trig_flt32.cuh)
 // and tanh glibc's tanhf or tanh, CORE-MATH's correctly rounded ones
 // (sfire_tanhf, sfire_libm.cuh; g64_tanh::cr_tanh, cr_tanh_flt64.cuh). The
-// RKIND 8 unit carries no sin: 'seroussi' is refused there.
+// RKIND 8 unit carries no sin unless the opt-in LGPL transcription of glibc's
+// is prepended (WOOF_GLIBC239_TRIG64); without it 'seroussi' is refused there.
 //
 // Layout: a Fortran array a(nVertLevels, nCells) is a[iCell*nVertLevels + k];
 // a(maxEdges, nCells) is a[iCell*maxEdges + i]; cellsOnEdge(2, nEdges) is
@@ -49,6 +50,9 @@ typedef double rk;
 #define LI_ABS(x) fabs(x)
 #define LI_POW(x,y) glibc_pow((x),(y))
 #define LI_TANH(x) g64_tanh::cr_tanh(x)
+#ifdef WOOF_GLIBC239_TRIG64
+#define LI_SIN(x) g239::g239_sin(x)
+#endif
 #define LI_C(x) x
 #else
 typedef float rk;
@@ -127,7 +131,7 @@ extern "C" __global__ void li_basal_melt_floating_v842(
                 value = M(M(-omega, LI_TANH(D(hCavity, LI_C(75.0)))), li_max(S(LI_C(-100.0), zDraft), (rk)0.0));
             }
         }
-#ifndef MPAS_RKIND8
+#if !defined(MPAS_RKIND8) || defined(WOOF_GLIBC239_TRIG64)
         else if (option == 4) {
             const rk twoPi = M((rk)2.0, LI_PII);
             const rk interceptSer = A(LI_C(-100.0), M(serAmplitude, LI_SIN(A(

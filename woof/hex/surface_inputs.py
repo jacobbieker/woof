@@ -57,8 +57,12 @@ class SurfaceInput:
     """One ``initialize_physics`` keyword a scheme reads, and its hex source.
 
     ``kind`` is ``"cell"`` (one value per cell, float32 or int32 as
-    ``dtype`` says) or ``"flag"`` (one integer the sidecar records as a global
-    attribute, WRF's geogrid/real flags).  ``variable`` is the sidecar's name
+    ``dtype`` says), ``"categories"`` (one plane per land-use category, one
+    value per cell in each: ``[nLandCat, nCells]``, geogrid's LANDUSEF layout)
+    ``"flag"`` (one integer the sidecar records as a global attribute, WRF's
+    geogrid/real flags) or ``"derived"`` (a per-cell value the contract states
+    itself, never read from the file, with ``source`` saying why it is that
+    value).  ``variable`` is the sidecar's name
     for it (WRF's own upper-case name).  ``staged`` says whether the hex static
     builder produces it today; a required input that is not staged is refused
     with ``needs`` as the remedy.
@@ -145,9 +149,20 @@ _LANDUSEF = _unstaged(
     "landusef", "LANDUSEF", "float32",
     "per-cell land-use category FRACTIONS from the static builder (the MPAS "
     "static carries the dominant category only) (plan 1.6)")
-_SOILCTOP = _unstaged(
-    "soilctop", "SOILCTOP", "float32",
-    "per-cell top-soil category fractions from the static builder (plan 1.6)")
+#: Noah mosaic's LANDUSEF: built.  The tile state is built from it by WOOF's
+#: own door (woof.core.noah_mosaic_door, real.exe's edits included), which the
+#: generic seam calls after initialize_physics.
+_LANDUSEF_MOSAIC = SurfaceInput(
+    "landusef", "LANDUSEF", "categories", "float32", True,
+    "geogrid's LANDUSEF on the mesh: each Voronoi cell's pixel shares of the "
+    "21-category with-lakes MODIS land use (woof hex surface-statics --fields "
+    "landusef)", bounds=(0.0, 1.0))
+#: geogrid's SOILCTOP on the mesh, which RUC's mosaic_soil reads.
+_SOILCTOP_STAGED = SurfaceInput(
+    "soilctop", "SOILCTOP", "categories", "float32", True,
+    "geogrid's SOILCTOP on the mesh: each Voronoi cell's pixel shares of the "
+    "16-category top-layer soil (WPS soiltype_top_30s) (woof hex "
+    "surface-statics --fields soilctop)", bounds=(0.0, 1.0))
 _SOILCBOT = _unstaged(
     "soilcbot", "SOILCBOT", "float32",
     "per-cell bottom-soil category fractions from the static builder (plan 1.6)")
@@ -172,12 +187,24 @@ def _urban_inputs(cfg) -> tuple[SurfaceInput, ...]:
     # WRF preparation hands them (woof.static.highres: only SLUCM takes the
     # land-cover estimate), so they read no per-cell input beyond the init's.
     return ()
-_IRRIGATION = _unstaged(
-    "irrigation", "IRRIGATION", "float32",
-    "the per-cell irrigated fraction from the irrigation dataset (plan 6.8)")
+_IRRIGATION = SurfaceInput(
+    "irrigation", "IRRIGATION", "cell", "float32", True,
+    "geogrid's IRRIGATION on the mesh: the FAO irrigated-land percentage "
+    "(WPS irrigation/fao), average_gcell(0.0)+average_4pt+nearest_neighbor over "
+    "each Voronoi cell, water masked to 0 (woof hex surface-statics --fields "
+    "irrigation)", bounds=(0.0, 100.0))
+#: irr_ph = 0 never reads the phase field (module_irrigation.F irr_calc_phase:
+#: phase 0 everywhere), so the run hands the zeros WRF's Noah init leaves it at
+#: when irr_ph = 0; irr_ph = 1/2 phase cells by grid i/j and are refused by
+#: name (mpas-physics-suites refused_settings.irr_ph).
+_IRR_PH_UNREAD = SurfaceInput(
+    "irr_ph_field", "IRR_RAND_FIELD", "derived", "int32", True,
+    "zeros: irr_ph = 0 puts every cell in phase and never reads the field "
+    "(module_irrigation.F irr_calc_phase)", allowed=(0,))
 _IRR_PH = _unstaged(
-    "irr_ph_field", "IRR_RAND_FIELD", "float32",
-    "the per-cell irrigation phase field (plan 6.8)")
+    "irr_ph_field", "IRR_RAND_FIELD", "int32",
+    "a per-cell irrigation phase; irr_ph = 1/2 phase by grid i/j, which a "
+    "Voronoi mesh does not have (use irr_ph = 0)")
 _LIGHTNING = _unstaged(
     "lightning_inputs", "lightning_inputs", "object",
     "the run's own reflectivity/updraft columns and cell geometry for the "
@@ -206,19 +233,20 @@ CONTRACT: tuple[SchemeInputs, ...] = (
                  lambda cfg: int(_value(cfg, "sf_surface_physics")) == 3
                  and (int(_value(cfg, "mosaic_lu")) or int(_value(cfg, "mosaic_soil"))),
                  lambda cfg: tuple(
-                     row for switch, row in (("mosaic_lu", _LANDUSEF),
-                                             ("mosaic_soil", _SOILCTOP))
+                     row for switch, row in (("mosaic_lu", _LANDUSEF_MOSAIC),
+                                             ("mosaic_soil", _SOILCTOP_STAGED))
                      if int(_value(cfg, switch)))),
     SchemeInputs("noah_mosaic", "sf_surface_physics=2 with sf_surface_mosaic=1",
                  lambda cfg: int(_value(cfg, "sf_surface_physics")) == 2
                  and int(_value(cfg, "sf_surface_mosaic")) == 1,
-                 lambda cfg: (_LANDUSEF,)),
+                 lambda cfg: (_LANDUSEF_MOSAIC,)),
     SchemeInputs("urban", "sf_urban_physics=1/2/3",
                  lambda cfg: int(_value(cfg, "sf_urban_physics")) > 0,
                  _urban_inputs),
     SchemeInputs("irrigation", "sf_surf_irr_scheme>0",
                  lambda cfg: int(_value(cfg, "sf_surf_irr_scheme")) > 0,
-                 lambda cfg: (_IRRIGATION, _IRR_PH)),
+                 lambda cfg: (_IRRIGATION, _IRR_PH_UNREAD
+                              if int(_value(cfg, "irr_ph")) == 0 else _IRR_PH)),
     SchemeInputs("lightning", "lightning_option>0",
                  lambda cfg: int(_value(cfg, "lightning_option")) > 0,
                  lambda cfg: (_LIGHTNING,)),
@@ -469,6 +497,16 @@ def bind(physics: Mapping[str, Any] | None, path: str | Path | None, *,
                     "with the run's table")
         for need in required:
             item = need.input
+            if item.kind == "derived":
+                # Not read from the file: the contract's own value (see the
+                # input's source), recorded as such in the receipt.
+                values = np.zeros(n_cells, dtype=np.dtype(item.dtype))
+                values.setflags(write=False)
+                inputs[item.keyword] = values
+                receipt_inputs[item.keyword] = {
+                    "variable": item.variable, "derived": item.source,
+                    **_array_identity(values)}
+                continue
             if item.kind == "flag":
                 if item.variable not in dataset.ncattrs():
                     raise ConfigurationRefusal(
@@ -493,12 +531,16 @@ def bind(physics: Mapping[str, Any] | None, path: str | Path | None, *,
                     f"file carries no {item.variable}",
                     f"`woof hex surface-statics` with the {need.scheme} fields")
             variable = dataset.variables[item.variable]
-            if tuple(variable.dimensions) != ("nCells",):
+            dims = tuple(variable.dimensions)
+            ok = (len(dims) == 2 and dims[1] == "nCells" if item.kind == "categories"
+                  else dims == ("nCells",))
+            want = "(<categories>, nCells)" if item.kind == "categories" else "(nCells,)"
+            if not ok:
                 raise ValueError(
-                    f"{item.variable} dimensions {variable.dimensions} != ('nCells',)")
+                    f"{item.variable} dimensions {variable.dimensions} != {want}")
             values = np.ascontiguousarray(
                 np.asarray(variable[:]), dtype=np.dtype(item.dtype))
-            if values.shape != (n_cells,):
+            if values.shape[-1:] != (n_cells,):
                 raise ValueError(
                     f"{item.variable} has {values.shape} cells, the mesh {n_cells}")
             if not np.all(np.isfinite(values)):
@@ -565,10 +607,17 @@ def seal(cfg, given: Mapping[str, Any] | None, *, n_columns: int
             sealed[item.keyword] = int(value)
             continue
         array = np.asarray(value)
-        if array.dtype != np.dtype(item.dtype) or array.shape != (int(n_columns),):
+        shape_ok = (array.ndim == 2 and array.shape[0] >= 1
+                    and array.shape[1] == int(n_columns)
+                    if item.kind == "categories" else array.shape == (int(n_columns),))
+        if array.dtype != np.dtype(item.dtype) or not shape_ok:
             raise ValueError(
-                f"{item.keyword} must be {item.dtype}[{int(n_columns)}], got "
-                f"{array.dtype}{list(array.shape)}")
+                f"{item.keyword} must be {item.dtype}"
+                f"[{'nLandCat, ' if item.kind == 'categories' else ''}{int(n_columns)}], "
+                f"got {array.dtype}{list(array.shape)}")
+        if item.kind == "categories" and (
+                np.any(array < 0) or np.any(array > np.float32(1.0 + 1e-6))):
+            raise ValueError(f"{item.keyword} fractions must lie in [0, 1]")
         if not np.all(np.isfinite(array)):
             raise ValueError(f"{item.keyword} must be finite")
         _check_allowed(item, array, "the sealed surface inputs")

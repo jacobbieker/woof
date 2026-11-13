@@ -127,14 +127,15 @@ def _bands(window):
         yield x0, x1, start, min(y1, start + rows - 1)
 
 
-def lake_depth_cells(geometry, assigner, water: np.ndarray, dataset, *,
-                     progress: Callable[[str], None] | None = None
-                     ) -> tuple[np.ndarray, dict[str, Any]]:
-    """GEOGRID's LAKE_DEPTH on the mesh (module docstring)."""
+def gcell_sums(geometry, assigner, dataset, *, pad: int, label: str,
+               progress: Callable[[str], None] | None = None):
+    """geogrid's average_gcell numerator and denominator on the mesh: the sum
+    and count of the valid source pixels whose centres fall in each Voronoi
+    cell (nearest-centre assignment).  Returns ``(total, count, window)``."""
     n = geometry.n_cells
     total = np.zeros(n)
     count = np.zeros(n, dtype=np.int64)
-    window = _source_window(dataset, _footprint(geometry), LAKE_DEPTH_SEARCH + 1)
+    window = _source_window(dataset, _footprint(geometry), pad)
     for bx0, bx1, by0, by1 in _bands(window):
         values = dataset.read_window(bx0, bx1, by0, by1).values()
         valid = np.flatnonzero(np.isfinite(values.reshape(-1)))
@@ -148,7 +149,75 @@ def lake_depth_cells(geometry, assigner, water: np.ndarray, dataset, *,
         total += np.bincount(cells, values.reshape(-1)[valid][keep], minlength=n)
         count += np.bincount(cells, minlength=n)
         if progress is not None:
-            progress(f"lake_depth rows {by0}-{by1}: {int(valid.size)} valid pixels")
+            progress(f"{label} rows {by0}-{by1}: {int(valid.size)} valid pixels")
+    return total, count, window
+
+
+def _cell_source_xy(geometry, dataset, cells):
+    lat = np.degrees(np.arcsin(np.clip(geometry.xyz[cells, 2], -1, 1)))
+    lon = np.degrees(np.arctan2(geometry.xyz[cells, 1], geometry.xyz[cells, 0]))
+    return dataset.latlon_to_xy(lat, lon)
+
+
+#: WPS v4.6.0 GEOGRID.TBL.ARW:511-518 (IRRIGATION).
+IRRIGATION_DATASET = "irrigation/fao"
+IRRIGATION_FILL = 0.0
+
+
+def irrigation_cells(geometry, assigner, land: np.ndarray, dataset, *,
+                     progress: Callable[[str], None] | None = None
+                     ) -> tuple[np.ndarray, dict[str, Any]]:
+    """GEOGRID's IRRIGATION on the mesh.
+
+    ``average_gcell(0.0)+average_4pt+nearest_neighbor``, ``masked = water``,
+    ``fill_missing = 0``: the mean of the valid source pixels in the cell;
+    a cell finer than the source (no pixel centre in it) takes the mean of
+    the four source points around its centre, then the nearest point; water
+    cells hold the fill.
+    """
+    n = geometry.n_cells
+    total, count, window = gcell_sums(geometry, assigner, dataset, pad=2,
+                                      label="irrigation", progress=progress)
+    out = np.full(n, IRRIGATION_FILL)
+    gcell = land & (count > 0)
+    out[gcell] = total[gcell] / count[gcell]
+    rest = np.flatnonzero(land & (count == 0))
+    four = nearest = 0
+    if rest.size:
+        xs, ys = _cell_source_xy(geometry, dataset, rest)
+        for k, cell in enumerate(rest):
+            i0, j0 = int(np.floor(xs[k])), int(np.floor(ys[k]))
+            patch = dataset.read_window(i0, i0 + 1, j0, j0 + 1).values()
+            valid = patch[np.isfinite(patch)]
+            if valid.size:
+                # average_4pt averages the valid points among the four.
+                out[cell] = float(valid.mean())
+                four += 1
+                continue
+            ci, cj = int(np.rint(xs[k])), int(np.rint(ys[k]))
+            value = dataset.read_window(ci, ci, cj, cj).values().reshape(-1)[0]
+            if np.isfinite(value):
+                out[cell] = float(value)
+                nearest += 1
+    return out.astype(np.float32), {
+        "method": "average_gcell(0.0)+average_4pt+nearest_neighbor, masked=water, "
+                  "fill 0 (GEOGRID.TBL IRRIGATION) over each Voronoi cell",
+        "source_window": list(window),
+        "land_cells": int(np.count_nonzero(land)),
+        "cells_averaged": int(np.count_nonzero(gcell)),
+        "cells_average_4pt": int(four),
+        "cells_nearest": int(nearest),
+    }
+
+
+def lake_depth_cells(geometry, assigner, water: np.ndarray, dataset, *,
+                     progress: Callable[[str], None] | None = None
+                     ) -> tuple[np.ndarray, dict[str, Any]]:
+    """GEOGRID's LAKE_DEPTH on the mesh (module docstring)."""
+    n = geometry.n_cells
+    total, count, window = gcell_sums(
+        geometry, assigner, dataset, pad=LAKE_DEPTH_SEARCH + 1,
+        label="lake_depth", progress=progress)
     depth = np.full(n, LAKE_DEPTH_FILL_M)
     gcell = water & (count > 0)
     depth[gcell] = total[gcell] / count[gcell]
@@ -264,7 +333,28 @@ def lake_mask_vote(geometry, assigner, water: np.ndarray, dataset, *,
 
 
 #: The field groups ``--fields`` names: each is one scheme's inputs.
-FIELD_GROUPS = ("lake", "urban")
+FIELD_GROUPS = ("lake", "urban", "landusef", "irrigation", "soilctop", "soilcbot")
+#: geogrid's soil-category fraction fields and their WPS datasets (GEOGRID.TBL
+#: SOILCTOP/SOILCBOT, dest_type categorical, 16 categories).
+SOIL_FRACTION_DATASETS = {"soilctop": ("SOILCTOP", "soiltype_top_30s"),
+                          "soilcbot": ("SOILCBOT", "soiltype_bot_30s")}
+
+
+def landuse_fractions(counts: np.ndarray, cmin: int
+                      ) -> tuple[np.ndarray, dict[str, Any]]:
+    """geogrid's LANDUSEF on the mesh: ``[nLandCat, nCells]`` float32, the
+    share of each category among the pixels a cell holds (planes from
+    category 1; a cell with no pixel holds the one under its centre)."""
+    total = counts.sum(axis=1, keepdims=True)
+    fractions = np.where(total > 0, counts / np.maximum(total, 1), 0.0)
+    planes = np.zeros((cmin - 1 + fractions.shape[1], fractions.shape[0]))
+    planes[cmin - 1:] = fractions.T
+    return planes.astype(np.float32), {
+        "method": "pixel shares of each category per Voronoi cell "
+                  "(nearest-centre assignment), geogrid's LANDUSEF",
+        "categories": int(planes.shape[0]),
+        "cells_without_pixels": int(np.count_nonzero(total == 0)),
+    }
 
 
 def urban_fraction_cells(counts: np.ndarray, cmin: int, ivgtyp, landmask
@@ -410,23 +500,52 @@ def build(static: Path, out: Path, *, geog_root: Path | None,
             provenance["lake_depth"] = depth_receipt
             written["LAKE_DEPTH"] = depth
             attrs["LAKE_DEPTH_FLAG"] = np.int32(1)
-    if "urban" in groups and replaced_landuse is not None:
+    if replaced_landuse is not None and ("urban" in groups or "landusef" in groups):
         raise SurfaceStaticsRefusal(
             f"the static's land use was replaced by `woof hex static-highres` "
-            f"({replaced_landuse}); the urban shares here count the 30-arc-second "
-            "MODIS pixels, which would disagree with that static's urban cells. "
-            "Build the urban fraction from a static carrying the 30-arc-second "
-            "land use (the high-resolution source is not wired here yet)")
-    if "urban" in groups:
+            f"({replaced_landuse}); the category shares here count the "
+            "30-arc-second MODIS pixels, which would disagree with that static's "
+            "cells. Build the urban fraction and LANDUSEF from a static carrying "
+            "the 30-arc-second land use (the high-resolution source is not wired "
+            "here yet)")
+    landuse = None
+    if "urban" in groups or "landusef" in groups:
+        # One pass over the with-lakes land use serves both groups.
         dataset = geog(LAKE_LANDUSE_DATASET)
         counts, cmin, window = category_counts(
             geometry, need_assigner(), np.ones(n, dtype=bool), dataset,
             progress=progress)
+        landuse = (dataset, counts, cmin, window)
+    if "landusef" in groups:
+        dataset, counts, cmin, window = landuse
+        written["LANDUSEF"], provenance["landusef"] = landuse_fractions(
+            counts, cmin)
+        provenance["landusef"].update(
+            dataset=dataset.path.name, source_window=list(window),
+            index_sha256=_index_sha256(dataset.path))
+    if "urban" in groups:
+        dataset, counts, cmin, window = landuse
         frc, urban = urban_fraction_cells(counts, cmin, ivgtyp, landmask)
         urban.update(dataset=dataset.path.name, source_window=list(window),
                      index_sha256=_index_sha256(dataset.path))
         provenance["urban"] = urban
         written["FRC_URB2D"] = frc
+    for group, (variable, name) in SOIL_FRACTION_DATASETS.items():
+        if group not in groups:
+            continue
+        dataset = geog(name)
+        counts, cmin, window = category_counts(
+            geometry, need_assigner(), np.ones(n, dtype=bool), dataset,
+            progress=progress)
+        written[variable], provenance[group] = landuse_fractions(counts, cmin)
+        provenance[group].update(
+            dataset=dataset.path.name, source_window=list(window),
+            index_sha256=_index_sha256(dataset.path))
+    if "irrigation" in groups:
+        dataset = geog(IRRIGATION_DATASET)
+        written["IRRIGATION"], provenance["irrigation"] = irrigation_cells(
+            geometry, need_assigner(), ~water, dataset, progress=progress)
+        provenance["irrigation"]["index_sha256"] = _index_sha256(dataset.path)
     fields = written
     out = Path(out).expanduser().absolute()
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -439,7 +558,15 @@ def build(static: Path, out: Path, *, geog_root: Path | None,
             for name, values in (("latCell", lat), ("lonCell", lon)):
                 target.createVariable(name, "f8", ("nCells",))[:] = values
             for name, values in fields.items():
-                variable = target.createVariable(name, values.dtype, ("nCells",))
+                if values.ndim == 2:
+                    # geogrid's own category dimension names.
+                    dim = "nSoilCat" if name.startswith("SOILC") else "nLandCat"
+                    if dim not in target.dimensions:
+                        target.createDimension(dim, values.shape[0])
+                    dims = (dim, "nCells")
+                else:
+                    dims = ("nCells",)
+                variable = target.createVariable(name, values.dtype, dims)
                 variable[:] = values
             target.setncattr("schema", SCHEMA)
             for name, value in attrs.items():

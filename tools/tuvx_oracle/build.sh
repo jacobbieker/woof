@@ -8,7 +8,10 @@
 # deleted before the build and replaced by musica_assert.F90, a clean-room module written from the
 # call sites.  Nothing it builds or fetches is committed.  Build on an x86-64 glibc host in the
 # mpas-oracle pixi environment (gfortran, netcdf-fortran, cmake); the committed fixtures are glibc
-# words, and the build refuses a library that contracts multiply-adds.
+# words, and the build refuses a library that contracts multiply-adds or calls glibc's vector math
+# (libmvec): gfortran pre-includes math-vector-fortran.h, so at -O2 a vectorized loop calls
+# _ZGVbN2v_exp and friends, whose words are not the scalar libm's.  -fno-tree-vectorize keeps every
+# libm call scalar.
 #
 #   pixi run -e mpas-oracle tools/tuvx_oracle/build.sh <work-dir>   # leaves <work-dir>/harness
 #   pixi run -e default python tools/tuvx_oracle/generate.py <work-dir>
@@ -34,10 +37,10 @@ export PKG_CONFIG_PATH="${CONDA_PREFIX:?run inside the mpas-oracle pixi environm
 # so the link takes the host sysroot (whose libstdc++ needs the host glibc).
 cmake -S tuv-x -B build -DCMAKE_BUILD_TYPE=Release -DTUVX_ENABLE_TESTS=OFF \
   -DTUVX_ENABLE_REGRESSION_TESTS=OFF -DTUVX_BUILD_CLI=OFF -DCMAKE_Fortran_FLAGS= \
-  -DCMAKE_Fortran_FLAGS_RELEASE="-O2 -ffp-contract=off" -DCMAKE_EXE_LINKER_FLAGS=--sysroot=/ > cmake.log
+  -DCMAKE_Fortran_FLAGS_RELEASE="-O2 -ffp-contract=off -fno-tree-vectorize" -DCMAKE_EXE_LINKER_FLAGS=--sysroot=/ > cmake.log
 make -C build -j4 > make.log
 gcc_lib=$(dirname "$(/usr/bin/g++ -print-file-name=libstdc++.so)")
-gfortran --sysroot=/ -O2 -ffp-contract=off -I build/include "$here/harness.F90" -o harness \
+gfortran --sysroot=/ -O2 -ffp-contract=off -fno-tree-vectorize -I build/include "$here/harness.F90" -o harness \
   build/lib/libtuvx.a build/_deps/yaml-cpp-build/libyaml-cpp.a -L"$CONDA_PREFIX/lib" -lnetcdff -lnetcdf \
   -L"$gcc_lib" -lstdc++ -Wl,-rpath,"$CONDA_PREFIX/lib"
 # The disassembly is written out first: grep -q in a pipeline would leave objdump to a SIGPIPE.
@@ -46,5 +49,10 @@ status=0
 grep -qE 'vfn?m(add|sub)' harness.dis || status=$?
 if [ "$status" -ne 1 ]; then
   echo "the oracle contracts multiply-adds, or the scan failed ($status); the fixtures assume none" >&2; exit 1
+fi
+status=0
+grep -qE '_ZGV[a-zA-Z0-9]*_(exp|log|pow|sin|cos|tan|atan|sqrt)' harness.dis || status=$?
+if [ "$status" -ne 1 ]; then
+  echo "the oracle calls glibc's vector math (libmvec), or the scan failed ($status); the fixtures assume scalar libm" >&2; exit 1
 fi
 echo "$work/harness"

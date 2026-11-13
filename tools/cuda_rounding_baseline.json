@@ -73,7 +73,7 @@
     "call_sha256": "079a910b617ca62c0545563defbdb165c874e3e4a3848de7bc13b5e50ec741e4",
     "constructor": "compile_using_nvrtc",
     "factory": "_module_on",
-    "factory_sha256": "16dce8d936c79ab7224b3073a85a2415de9164541ced2a4a17c380d374e957b7",
+    "factory_sha256": "9bfe62b5bbdcbcc2ac343ee5b56297a6e796376772ccb68717d7df2e187b42c1",
     "file": "woof/hex/mpas_ice/thermal_solver_v842.py",
     "status": "unresolved"
    },
@@ -81,7 +81,7 @@
     "call_sha256": "07e451c2a180a26a97cbf4b023eeeacfd00ea77778f59fdc901650cdfc44176e",
     "constructor": "compile_using_nvrtc",
     "factory": "_module_on",
-    "factory_sha256": "03a2ed112f2df7bcbaf7677cf54e1316c7f3c388f5adf5e2f201dbaa8366c9cb",
+    "factory_sha256": "4d3df7d0f076b441f8d394cec8476eccceb33e87412c57bbc894983988daff37",
     "file": "woof/hex/mpas_ice/subglacial_hydro_v842.py",
     "status": "unresolved"
    },
@@ -273,7 +273,7 @@
     "call_sha256": "0f1c6c54c8460a4f3b492ac2e43f0e26c6e455b0d48521acc1ea1cf252668da3",
     "constructor": "compile_using_nvrtc",
     "factory": "_module_on",
-    "factory_sha256": "798cbf998509f9c2a5c7e047712ab07dc53233889debd85ab1c0982ab67c6e3a",
+    "factory_sha256": "c3c4f94958890ca248b612fceb49ffa6ceacf42218e455219d41b19f6f663c2a",
     "file": "woof/hex/mpas_ice/time_integration_fe_v842.py",
     "status": "unresolved"
    },
@@ -299,6 +299,14 @@
     "factory": "_validation_batch_kernel",
     "factory_sha256": "6ca978bffa62b012e9b5d9c8106eeb54cafa2d0de4539b27a17661263c12e98a",
     "file": "woof/core/mynn_pbl_gpu.py",
+    "status": "unresolved"
+   },
+   {
+    "call_sha256": "13b969660102d852de0db4d6f6f8b9fb4ece078d171bd31cf8a848a79b86f994",
+    "constructor": "compile_using_nvrtc",
+    "factory": "_module_on",
+    "factory_sha256": "9c91bc696e5b10e58b9c25aeaf799250deafce62f3e1d70122ee1a4b41a82dad",
+    "file": "woof/hex/mpas_ocean/eos_v842.py",
     "status": "unresolved"
    },
    {
@@ -627,6 +635,14 @@
     "factory": "_batch_module",
     "factory_sha256": "00d487cb51b9f87808e705f28fbc0475e7c3ad2409ce2be46cf9cb4f8a22a742",
     "file": "woof/core/cr_cbrt.py",
+    "status": "unresolved"
+   },
+   {
+    "call_sha256": "47176d8d8e8e2488c4a0fb42749c55aa69b95c05f6916d5df7d95d72bd8e17fe",
+    "constructor": "compile_using_nvrtc",
+    "factory": "_module_on",
+    "factory_sha256": "8d331dd2ed2f9fe47ae64061d20c2bd406057fde6d78b40ea1148f6affecc037",
+    "file": "woof/hex/mpas_ocean/diagnostics_v842.py",
     "status": "unresolved"
    },
    {
@@ -4557,7 +4573,7 @@
    },
    {
     "file": "woof/hex/mpas_ice/subglacial_hydro_v842.cu",
-    "sha256": "c3271b85fe76bb30e3181843eaf7dba08ab2e27ba59a030cbfacb2cf951dff23"
+    "sha256": "a14eb2d401152e8c83b524ce2a1ae28aaff5c72dd3a72d627870a482cdadb471"
    },
    {
     "file": "woof/hex/mpas_ice/thermal_init_v842.cu",
@@ -4565,11 +4581,19 @@
    },
    {
     "file": "woof/hex/mpas_ice/thermal_solver_v842.cu",
-    "sha256": "03520a378a4be4eb1d5aa25696f6a796a532c10f76b9ac21cbb33c5231d37bac"
+    "sha256": "8e41c08d4d688bb480ce3098d8d38b33fc3f9dcdd4f533dc1a0cea6e54409bcd"
    },
    {
     "file": "woof/hex/mpas_ice/time_integration_fe_v842.cu",
-    "sha256": "7d8ae189a4cef4d1fd88a6ffe71791744b824cad54d5bddc7d8389a0d3100a47"
+    "sha256": "d293e9cfd863a8f2f974a2bab2b8bea0547559838a758888fffd008e864f33e4"
+   },
+   {
+    "file": "woof/hex/mpas_ocean/diagnostics_v842.cu",
+    "sha256": "2e832a3a429c96d66ac67757afc6d04e364109428daef7ed61b07a12945f0f89"
+   },
+   {
+    "file": "woof/hex/mpas_ocean/eos_v842.cu",
+    "sha256": "741b58b24ad684da3e7443064db9ef586a70e93363f0a6a8191b57634897db68"
    },
    {
     "file": "woof/hex/mpas_ocean/forcing_v842.cu",
@@ -5463,7 +5487,7 @@
    },
    {
     "file": "woof/hex/mpas_ice/subglacial_hydro_v842.py",
-    "sha256": "156a4c18dc1de685c26d91a9076a6d7cfb12359d7b44de32b068037ee64b3a48"
+    "sha256": "dc1e555728aa2bcd1f2a73ce8a287a626d33e86dfe1a32ea4a08b6985bf662ab"
    },
    {
     "file": "woof/hex/mpas_ice/thermal_init_v842.py",
@@ -5471,11 +5495,19 @@
    },
    {
     "file": "woof/hex/mpas_ice/thermal_solver_v842.py",
-    "sha256": "00f6cfb72ce7a544d41ed4c790448806da61580669cdad653bd01ea5ffd8f99a"
+    "sha256": "31b28cda6779297f16b9f973c4dfa1515b847af008e9b6a8d199cd3a3a22c400"
    },
    {
     "file": "woof/hex/mpas_ice/time_integration_fe_v842.py",
-    "sha256": "d6e13888fa24ce1d7504a2cf4309bfbf0802cba8a70069f5352ec24da4851526"
+    "sha256": "e60b98909a841bd72949993c6079f9989c1270df15579b1eba714b8c182a720e"
+   },
+   {
+    "file": "woof/hex/mpas_ocean/diagnostics_v842.py",
+    "sha256": "435c51086f052425f18c21051bd3ed6ba65df361d30a3c8cefd5ab6a0181df83"
+   },
+   {
+    "file": "woof/hex/mpas_ocean/eos_v842.py",
+    "sha256": "82a26cda3d8f99f90469934ba4bdf16e64c0ed188a6447b7265d72d1012a7413"
    },
    {
     "file": "woof/hex/mpas_ocean/forcing_v842.py",

@@ -313,3 +313,177 @@ def test_the_urban_seam_restarts_bit_identically():
         for name in names:
             a, b = _host(second._driver.fields[name]), reference[index][name]
             np.testing.assert_array_equal(a, b, err_msg=f"step {index} {name}")
+
+
+def _mosaic_mapping(landusef=True):
+    physics = dict(suite.MPAS_DEFAULT_PHYSICS, sf_surface_physics=2,
+                   sf_surface_mosaic=1)
+    stack = np.zeros((21, NCOL), np.float32)
+    # Mixed cells: grass with cropland and shrubs, two of them part urban.
+    stack[9] = [0.6, 0.5, 1.0, 0.4, 0.7, 0.3, 0.8, 0.5]
+    stack[11] = [0.3, 0.2, 0.0, 0.4, 0.3, 0.5, 0.0, 0.25]
+    stack[6] = 1.0 - stack[9] - stack[11]
+    stack[12, 1], stack[6, 1] = 0.2, stack[6, 1] - 0.2
+    values = _mapping(physics, {"landusef": stack} if landusef else None)
+    values["land_surface_scheme"] = "noah"
+    return values
+
+
+def test_the_mosaic_seam_refuses_without_landusef():
+    with pytest.raises(ValueError, match="missing .*landusef"):
+        _seal(_mosaic_mapping(landusef=False))
+
+
+def _twin_module(name):
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[1] / "tools" / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_hex_mosaic_tiles_are_wrf_mosaic_twin_tiles():
+    summary: dict = {}
+    restore = _twin_module("hex_mosaic_twin")._install(summary)
+    try:
+        seam = suite.run_mpas_column_physics(**_seal(_mosaic_mapping()).arwen_kwargs())
+        assert seam._driver.noah_mosaic is not None
+        frames = cases.run(cp, seam, 4)
+    finally:
+        restore()
+    assert not cases._finite(frames)
+    assert summary["calls"] >= 1 and summary["tile_arrays"] > 0
+    assert not any(summary["initial_words_differing"].values()), summary
+    assert not any(summary["step_words_differing"].values()), {
+        key: value for key, value in summary["step_words_differing"].items() if value}
+
+
+def test_the_mosaic_seam_restarts_bit_identically():
+    def make():
+        return suite.run_mpas_column_physics(**_seal(_mosaic_mapping()).arwen_kwargs())
+
+    def step(seam, theta, species, fields):
+        seam.run_phase1(
+            dt=DT, u=fields["u"], v=fields["v"], theta=theta,
+            pressure=fields["pressure"],
+            pressure_interface=fields["pressure_interface"],
+            z_interface=fields["z_interface"], w=fields["w"],
+            rho_dry=fields["rho_dry"], species=species)
+        seam.run_phase2(
+            theta=theta, pressure=fields["pressure"],
+            z_interface=fields["z_interface"], w=fields["w"],
+            rho_dry=fields["rho_dry"], species=species)
+
+    reference_seam = make()
+    names = tuple(key for key in reference_seam._driver.fields if key.endswith("_mosaic"))
+    assert names
+    fields, species = cases.profile(cp, reference_seam.plan)
+    theta = fields["theta"].copy()
+    reference = []
+    for _ in range(4):
+        step(reference_seam, theta, species, fields)
+        reference.append({
+            "theta": _host(theta),
+            "species": {name: _host(value) for name, value in species.items()},
+            **{name: _host(reference_seam._driver.fields[name]) for name in names}})
+    first = make()
+    cases.run(cp, first, 2)
+    payload = first.export_state()
+    second = make()
+    second.restore_state(payload)
+    fields, _ = cases.profile(cp, second.plan)
+    theta = cp.asarray(reference[1]["theta"])
+    species = {name: cp.asarray(reference[1]["species"][name])
+               for name in second.plan.species}
+    for index in (2, 3):
+        step(second, theta, species, fields)
+        np.testing.assert_array_equal(_host(theta).view(np.uint32),
+                                      reference[index]["theta"].view(np.uint32))
+        for name in names:
+            np.testing.assert_array_equal(
+                _host(second._driver.fields[name]), reference[index][name],
+                err_msg=f"step {index} {name}")
+
+
+def test_the_mosaic_seam_reads_the_drivers_resolved_landmask():
+    """An omitted landmask is initialize_physics' default (land); the tile
+    door reads the driver's resolved mask, so the seam builds either way."""
+    kwargs = _seal(_mosaic_mapping()).arwen_kwargs()
+    kwargs["surface"] = {key: value for key, value in kwargs["surface"].items()
+                         if key != "landmask"}
+    seam = suite.run_mpas_column_physics(**kwargs)
+    assert seam._driver.noah_mosaic is not None
+
+
+IRRIGATED = np.float32([60.0, 0.0, 25.0, 100.0, 0.0, 12.5, 80.0, 0.0])
+
+
+def _irrigation_mapping(scheme, *, inputs=True):
+    # The seam's start is 2026-10-03 18:00 (julian day 276): a window from
+    # 18 UTC on days 200..300 irrigates on every one of the test's steps.
+    physics = dict(suite.MPAS_DEFAULT_PHYSICS, sf_surf_irr_scheme=scheme,
+                   irr_daily_amount=8.0, irr_start_hour=18, irr_num_hours=4,
+                   irr_start_julianday=200, irr_end_julianday=300, irr_freq=1,
+                   irr_ph=0)
+    return _mapping(physics, {"irrigation": IRRIGATED.copy(),
+                              "irr_ph_field": np.zeros(NCOL, np.int32)}
+                    if inputs else None)
+
+
+def test_the_irrigation_seam_refuses_without_its_percentage():
+    with pytest.raises(ValueError, match="missing .*irrigation"):
+        _seal(_irrigation_mapping(2, inputs=False))
+
+
+@pytest.mark.parametrize("scheme", [2, 3], ids=["drip", "sprinkler"])
+def test_hex_irrigation_columns_are_wrf_irrigation_twin_columns(scheme):
+    summary: dict = {}
+    restore = _twin_module("hex_irrigation_twin")._install(summary)
+    try:
+        seam = suite.run_mpas_column_physics(
+            **_seal(_irrigation_mapping(scheme)).arwen_kwargs())
+        np.testing.assert_array_equal(
+            _host(seam._driver.fields["irrigation"]).reshape(-1), IRRIGATED)
+        frames = cases.run(cp, seam, 4)
+    finally:
+        restore()
+    assert not cases._finite(frames)
+    assert summary["calls"] >= 1 and summary["calls_adding_water"] >= 1, summary
+    assert not any(summary["step_words_differing"].values()), summary
+
+
+def _ruc_mosaic_mapping(inputs=True):
+    physics = dict(suite.MPAS_DEFAULT_PHYSICS, sf_surface_physics=3,
+                   num_soil_layers=9, mosaic_lu=1, mosaic_soil=1)
+    landusef = np.zeros((21, NCOL), np.float32)
+    landusef[9] = [0.6, 0.5, 1.0, 0.4, 0.7, 0.3, 0.8, 0.5]
+    landusef[11] = 1.0 - landusef[9]
+    soilctop = np.zeros((16, NCOL), np.float32)
+    soilctop[5] = [0.5, 1.0, 0.25, 0.75, 0.5, 0.0, 1.0, 0.6]
+    soilctop[2] = 1.0 - soilctop[5]
+    values = _mapping(physics, {"landusef": landusef, "soilctop": soilctop}
+                      if inputs else None)
+    values["land_surface_scheme"] = "ruc"
+    return values
+
+
+def test_the_ruc_mosaic_seam_refuses_without_its_fractions():
+    with pytest.raises(ValueError, match="missing .*landusef"):
+        _seal(_ruc_mosaic_mapping(inputs=False))
+
+
+def test_hex_ruc_mosaic_columns_are_wrf_ruc_twin_columns():
+    summary: dict = {}
+    restore = _twin_module("hex_ruc_twin")._install(summary)
+    try:
+        seam = suite.run_mpas_column_physics(**_seal(_ruc_mosaic_mapping()).arwen_kwargs())
+        frames = cases.run(cp, seam, 4)
+    finally:
+        restore()
+    assert not cases._finite(frames)
+    assert summary["calls"] >= 1 and summary["mosaic_lu"] == summary["mosaic_soil"] == 1
+    assert not any(summary["step_words_differing"].values()), {
+        key: value for key, value in summary["step_words_differing"].items() if value}

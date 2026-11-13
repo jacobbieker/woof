@@ -4,9 +4,12 @@
 
 BUILD_DIR holds ``run_time_integration_fe_r4`` and ``run_time_integration_fe_r8`` from build.sh.
 Writes ``oracle-r4.npz`` and ``oracle-r8.npz`` (every case's outputs at each
-precision, ``<case>/<pool>/<field>``) and ``inputs.sha256`` (the digest of
-every case's input stream, named ``<case>`` at RKIND 4 and ``<case>/r8`` at
-RKIND 8) into ``tests/data/oracles/mali_time_integration_fe`` by default.
+precision, ``<case>/<pool>/<field>``), ``oracle-r8-glibc239.npz`` (the RKIND 8
+cases the opt-in glibc 2.39 sin/cos/atan transcription lifts, nothing
+refused) and ``inputs.sha256`` (the digest of every case's input stream,
+named ``<case>`` at RKIND 4, ``<case>/r8`` at RKIND 8 and
+``<case>/r8-glibc239``) into ``tests/data/oracles/mali_time_integration_fe``
+by default.
 """
 from __future__ import annotations
 
@@ -38,19 +41,20 @@ def main() -> int:
     parser.add_argument("build_dir", type=Path)
     parser.add_argument("--out", type=Path, default=fo.FIXTURE_DIR)
     args = parser.parse_args()
-    arrays: dict[str, dict[str, np.ndarray]] = {"r4": {}, "r8": {}}
+    arrays: dict[str, dict[str, np.ndarray]] = {"r4": {}, "r8": {}, fo.R8_GLIBC239: {}}
     digests = []
-    for precision in ("r4", "r8"):
-        binary = args.build_dir / f"run_time_integration_fe_{precision}"
+    for precision in arrays:
+        binary = args.build_dir / f"run_time_integration_fe_{'r4' if precision == 'r4' else 'r8'}"
         for case in fo.cases(precision):
             for field, value in run_case(binary, case).items():
                 arrays[precision][f"{case['name']}/{field}"] = value
-            digests.append(f"{fo.input_digest(case)}  {case['name']}" + ("/r8" if precision == "r8" else ""))
+            digests.append(f"{fo.input_digest(case)}  {case['name']}" + ("" if precision == "r4" else f"/{precision}"))
     args.out.mkdir(parents=True, exist_ok=True)
     for precision, named in arrays.items():
         np.savez_compressed(args.out / f"oracle-{precision}.npz", **named)
     (args.out / "inputs.sha256").write_text("\n".join(digests) + "\n", encoding="utf-8")
-    print(f"wrote {args.out} (oracle-r4.npz, oracle-r8.npz: {sum(map(len, arrays.values()))} arrays)")
+    print(f"wrote {args.out} (oracle-r4.npz, oracle-r8.npz, oracle-{fo.R8_GLIBC239}.npz: "
+          f"{sum(map(len, arrays.values()))} arrays)")
     return 0
 
 

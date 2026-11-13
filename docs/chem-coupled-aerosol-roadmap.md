@@ -126,6 +126,39 @@ the cited papers only, with no text, structure or constants taken from the
 PNNL files.  They are graded against the opt-in ports within a stated
 tolerance, never bitwise.
 
+## Opt-in: the so2so4 cloud threshold (`so2so4_qc_threshold`)
+
+RADM2SORG converts SO2 to sulfate in cloud through GOCART's `so2so4`
+(`chem_driver.F:1350-1360`), which calls a cell cloudy when `qc > 0`.  In a
+real-data run the specified boundary ring carries round-off cloud water
+(1e-38 to 1e-10 kg/kg) from the lateral forcing.  In such a cell `so2so4`
+turns all the SO2 that H2O2 allows into sulfate in one chem step, and SORGAM
+nucleates it into an Aitken burst.  An outflow cell carries the interior's SO2
+there.  On a 9 km, 6 h GFS case (80 x 100 cells), every ring-0 cell with
+`nu0 > 1e13 /kg` had `qc > 0`, and none with `qc = 0` did.  The 5-cell edge
+band's surface `nu0` averaged 1.6e12 /kg, against 2.3e11 in the interior.
+The thin inflow aerosol was not the cause: the inflow cells hold
+`bdy_chem_value_sorgam`'s ~1e9 /kg.
+
+`so2so4_qc_threshold` (kg/kg, default 0) is not a WRF key.  At 0 the run is
+WRF's: the kernel runs on `qc` itself, and the history is byte-identical to
+a run without the key.  A positive value makes a cell cloudy only when
+`qc > threshold`.  `1e-6` is WRF's own cloud test in `cal_cldfra`
+(`phys/module_radiation_driver.F:3714`).  The threshold applies to every
+cell, not only the boundary.  The door refuses it for a selection without
+`aerosol.sorgam`, since nothing else runs `so2so4`.  It needs no boundary
+source.
+
+On the same case with `so2so4_qc_threshold = 1e-6`, CUDA and Metal agree to
+the digits shown:
+
+- Ring-0 cells with `nu0 > 1e13 /kg` in the lowest 20 levels fall from 360-530
+  per hourly frame to 0-1.
+- At 06Z, the edge band's surface `nu0` falls from 1.56e12 /kg to 8.9e10 /kg,
+  below the interior's 1.8e11-2.2e11.
+- The threshold also skips round-off cloud in the interior. Surface PM2.5 at
+  06Z falls from 1.9 to 1.7 ug/m3 there.
+
 ## Refusals until then
 
 `woof/namelist_chem.py` maps `chem_opt = 1, 2` onto the `radm2` and

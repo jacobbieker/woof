@@ -91,6 +91,8 @@ CHEM_CHANGED_VALUES = {
     "flam_part": 0.5,
     "aer_drydep_opt": 111,
     "photdt": 30.0,
+    # The opt-in so2so4 cloud threshold (WRF's qc > 0 at 0).
+    "so2so4_qc_threshold": 1e-6,
 }
 
 

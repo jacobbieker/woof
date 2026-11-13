@@ -317,6 +317,16 @@ def _temperature_table(temperature, params):
     return temperature, delta, params
 
 
+def _lower_index(data, tadj, *, tint=False):
+    """The 0-based lower table index for each (clamped) temperature.  Fortran exits its search at the first
+    1-based ``i >= 2`` with ``tadj <= T(i)`` (0-based exit index ``i``; ``nTemp`` when none): o3_tint takes
+    ``i - 1``, the tint types ``min(nTemp, i + 1) - 2`` (0-based)."""
+    exit_index = 1 + np.searchsorted(np.asarray(data[1:], dtype=np.float64), tadj, side="left")
+    if tint:
+        return np.minimum(data.size, exit_index + 1) - 2
+    return exit_index - 1
+
+
 def _on_grid(grid, config, entry, wavelength, params, add_points):
     """Each parameter column extended (add_points) and interpolated onto the grid's edges: (nbins, nparam)."""
     out = np.empty((grid.ncells, params.shape[1]), dtype=np.float64)
@@ -362,8 +372,8 @@ class BaseCrossSection:
                                              lambda _c, x, y: add_points_cross_section(entry, x, y)))
 
     def calculate(self, temperature_edges):
-        n = np.asarray(temperature_edges).size
-        return np.repeat(self.parms[0][:, 0][None, :], n, axis=0)
+        shape = np.shape(temperature_edges)
+        return np.broadcast_to(self.parms[0][:, 0], shape + (self.parms[0].shape[0],)).copy()
 
 
 class O3TintCrossSection:
@@ -397,29 +407,25 @@ class O3TintCrossSection:
         self.files[1]["array"][:, 3] = self.files[0]["array"][:, 0]
 
     def calculate(self, temperature_edges):
-        temps = [float(t) for t in np.asarray(temperature_edges, dtype=np.float64)]
-        edge = self.grid.edge
-        out = np.zeros((len(temps), self.grid.ncells), dtype=np.float64)
-        for k, model in enumerate(temps):
-            for w in range(self.grid.ncells):
-                lam = float(edge[w])
-                if lam < self.v185:
-                    f = 2
-                elif lam < self.v195:
-                    f = 3
-                elif lam < self.v345:
-                    f = 1
-                else:
-                    out[k, w] = 0.0 + self.files[0]["array"][w, 0]
-                    continue
-                table = self.files[f]
-                data = table["temperature"]
-                tadj = min(max(model, float(data[0])), float(data[-1]))
-                t = next((i for i in range(1, data.size) if tadj <= data[i]), data.size)
-                t -= 1
-                tstar = (tadj - data[t]) / table["delta"][t]
-                a = table["array"]
-                out[k, w] = 0.0 + a[w, t] + tstar * (a[w, t + 1] - a[w, t])
+        """(..., nbin) for temperatures of any shape: each bin's file chosen by its lower edge."""
+        temps = np.asarray(temperature_edges, dtype=np.float64)
+        edge = self.grid.edge[:self.grid.ncells]
+        choice = np.where(edge < self.v185, 2, np.where(edge < self.v195, 3, np.where(edge < self.v345, 1, 0)))
+        out = np.zeros(temps.shape + (self.grid.ncells,), dtype=np.float64)
+        out[..., choice == 0] = 0.0 + self.files[0]["array"][choice == 0, 0]
+        for f in (1, 2, 3):
+            bins = np.flatnonzero(choice == f)
+            if bins.size == 0:
+                continue
+            table = self.files[f]
+            data = table["temperature"]
+            tadj = np.minimum(np.maximum(temps, data[0]), data[-1])
+            t = _lower_index(data, tadj)
+            tstar = (tadj - data[t]) / table["delta"][t]
+            a = table["array"][bins]                                  # (nb, ntemp)
+            lo, hi = a[:, t], a[:, t + 1]                             # (nb, ...)
+            value = 0.0 + lo + tstar * (hi - lo)
+            out[..., bins] = np.moveaxis(value, 0, -1)
         return out
 
 
@@ -440,18 +446,15 @@ class NO2TintCrossSection:
         self.nbins = grid.ncells
 
     def calculate(self, temperature_edges):
-        temps = [float(t) for t in np.asarray(temperature_edges, dtype=np.float64)]
-        out = np.zeros((len(temps), self.nbins), dtype=np.float64)
+        temps = np.asarray(temperature_edges, dtype=np.float64)
+        out = np.zeros(temps.shape + (self.nbins,), dtype=np.float64)
         for table in self.files:
             data, a = table["temperature"], table["array"]
-            for k, model in enumerate(temps):
-                tadj = min(max(model, float(data[0])), float(data[-1]))
-                # Fortran: tNdx exits where tadj <= T(tNdx), else ends at nTemp + 1; tNdx = min(nTemp, tNdx) - 1
-                # (1-based), i.e. 0-based min(nTemp, i + 1) - 2 for the 0-based exit index i
-                i = next((i for i in range(1, data.size) if tadj <= data[i]), data.size)
-                t = min(data.size, i + 1) - 2
-                tstar = (tadj - data[t]) / table["delta"][t]
-                out[k] = out[k] + a[:, t] + tstar * (a[:, t + 1] - a[:, t])
+            tadj = np.minimum(np.maximum(temps, data[0]), data[-1])
+            t = _lower_index(data, tadj, tint=True)
+            tstar = (tadj - data[t]) / table["delta"][t]
+            lo, hi = np.moveaxis(a[:, t], 0, -1), np.moveaxis(a[:, t + 1], 0, -1)
+            out = out + lo + tstar[..., None] * (hi - lo)
         return out
 
 
@@ -466,7 +469,7 @@ class BaseQuantumYield:
         self.nbins = grid.ncells
 
     def calculate(self, temperature_edges):
-        return np.full((np.asarray(temperature_edges).size, self.nbins), self.value, dtype=np.float64)
+        return np.full(np.shape(temperature_edges) + (self.nbins,), self.value, dtype=np.float64)
 
 
 class O3QuantumYield:
@@ -481,33 +484,26 @@ class O3QuantumYield:
         self.o3p = o3p
 
     def calculate(self, temperature_edges):
-        import math
         a, x, om = self.A, self.X, self.OM
-        out = np.zeros((np.asarray(temperature_edges).size, len(self.mid)), dtype=np.float64)
-        for k, temp in enumerate(float(t) for t in np.asarray(temperature_edges, dtype=np.float64)):
-            kt = 0.695 * temp
-            q1 = 1.0
-            q2 = math.exp(-825.518 / kt)
-            qfac1 = q1 / (q1 + q2)
-            qfac2 = q2 / (q1 + q2)
-            t300 = temp / 300.0
-            for w, lam in enumerate(self.mid):
-                if lam <= 305.0:
-                    value = 0.90
-                elif 328.0 < lam <= 340.0:
-                    value = 0.08
-                elif 305.0 < lam <= 328.0:
-                    y1 = (x[0] - lam) / om[0]
-                    y1sq = y1 * y1
-                    y2 = (x[1] - lam) / om[1]
-                    y3 = (x[2] - lam) / om[2]
-                    value = (0.0765 + a[0] * qfac1 * math.exp(-(y1sq * y1sq))
-                             + a[1] * t300 * t300 * qfac2 * math.exp(-(y2 * y2))
-                             + a[2] * math.pow(t300, 1.5) * math.exp(-(y3 * y3)))
-                else:
-                    value = 0.0
-                out[k, w] = 1.0 - value if self.o3p else value
-        return out
+        temp = np.asarray(temperature_edges, dtype=np.float64)[..., None]
+        lam = np.asarray(self.mid, dtype=np.float64)
+        kt = 0.695 * temp
+        q1 = 1.0
+        q2 = np.exp(-825.518 / kt)
+        qfac1 = q1 / (q1 + q2)
+        qfac2 = q2 / (q1 + q2)
+        t300 = temp / 300.0
+        y1 = (x[0] - lam) / om[0]
+        y1sq = y1 * y1
+        y2 = (x[1] - lam) / om[1]
+        y3 = (x[2] - lam) / om[2]
+        band = (0.0765 + a[0] * qfac1 * np.exp(-(y1sq * y1sq))
+                + a[1] * t300 * t300 * qfac2 * np.exp(-(y2 * y2))
+                + a[2] * np.power(t300, 1.5) * np.exp(-(y3 * y3)))
+        value = np.where(lam <= 305.0, 0.90,
+                         np.where((328.0 < lam) & (lam <= 340.0), 0.08,
+                                  np.where((305.0 < lam) & (lam <= 328.0), band, 0.0)))
+        return 1.0 - value if self.o3p else value
 
 
 class NO2TintQuantumYield:
@@ -527,17 +523,14 @@ class NO2TintQuantumYield:
         self.nbins = grid.ncells
 
     def calculate(self, temperature_edges):
-        temps = [float(t) for t in np.asarray(temperature_edges, dtype=np.float64)]
-        out = np.zeros((len(temps), self.nbins), dtype=np.float64)
+        temps = np.asarray(temperature_edges, dtype=np.float64)
+        out = np.zeros(temps.shape + (self.nbins,), dtype=np.float64)
         for table in self.files:
             data, a = table["temperature"], table["array"]
-            for k, tadj in enumerate(temps):
-                # Fortran: tNdx exits where tadj <= T(tNdx), else ends at nTemp + 1; tNdx = min(nTemp, tNdx) - 1
-                # (1-based), i.e. 0-based min(nTemp, i + 1) - 2 for the 0-based exit index i
-                i = next((i for i in range(1, data.size) if tadj <= data[i]), data.size)
-                t = min(data.size, i + 1) - 2
-                tstar = (tadj - data[t]) / table["delta"][t]
-                out[k] = out[k] + a[:, t] + tstar * (a[:, t + 1] - a[:, t])
+            t = _lower_index(data, temps, tint=True)            # not clamped
+            tstar = (temps - data[t]) / table["delta"][t]
+            lo, hi = np.moveaxis(a[:, t], 0, -1), np.moveaxis(a[:, t + 1], 0, -1)
+            out = out + lo + tstar[..., None] * (hi - lo)
         return np.maximum(out, 0.0)
 
 
@@ -564,3 +557,659 @@ class Photolysis:
         """``{reaction: (cross section cm2, quantum yield)}``, each (height edge, wavelength bin)."""
         return {name: (xs.calculate(temperature_edges), qy.calculate(temperature_edges))
                 for name, xs, qy, _bands in self.reactions}
+
+
+# ------------------------------------------------------------------------------------------------------------
+# Spherical geometry (src/spherical_geometry.F90): the direct beam's path through each layer, per column.
+# Columns are batched on a leading axis; every column's arithmetic is its own, in TUV-x's order, so a batch
+# gives each column's words.  Indices follow TUV-x: an edge ``i`` counts from the top of the atmosphere
+# (0 = top), a layer ``j`` (1-based in TUV-x, 0-based here) from the top as well.
+
+#: src/constants.F90
+PI = 3.1415926535898
+RADIUS_KM = 6.371e3
+LARGEST = 1.0e36
+D2R = PI / 180.0
+
+
+class Geometry:
+    """spherical_geometry_t after set_parameters: ``nid`` (ncol, nlayer + 1), the number of layers the direct
+    beam crosses to reach each edge (-1 when it never does), and ``dsdh`` (ncol, nlayer + 1, nlayer), its
+    slant path over vertical depth in each layer crossed; ``sza`` (ncol,) in degrees."""
+
+    def __init__(self, nid, dsdh, sza):
+        self.nid, self.dsdh, self.sza = nid, dsdh, sza
+
+    @property
+    def nlayer(self):
+        return self.dsdh.shape[2]
+
+
+def _columns(values):
+    a = np.asarray(values, dtype=np.float64)
+    return a[None, :] if a.ndim == 1 else a
+
+
+def spherical_geometry(edges_km, sza_deg) -> Geometry:
+    """set_parameters (Dahlback and Stamnes 1991, appendix B) for each column's height edges (km, ascending,
+    (ncol, nz) or (nz,)) and solar zenith angle (degrees)."""
+    z = _columns(edges_km)
+    zen = np.atleast_1d(np.asarray(sza_deg, dtype=np.float64))
+    ncol, nz = z.shape
+    if zen.shape != (ncol,):
+        raise TuvxPortError(f"{zen.size} solar zenith angles for {ncol} columns")
+    nlayer = nz - 1
+    zenrad = zen * D2R
+    re = RADIUS_KM + z[:, 0]
+    zd = (z - z[:, :1])[:, ::-1]                 # zd(0:nlayer): heights above the surface, top first
+    sinrad = np.sin(zenrad)
+    twilight = zen > 90.0
+    nid = np.zeros((ncol, nlayer + 1), dtype=np.int64)
+    dsdh = np.zeros((ncol, nlayer + 1, nlayer), dtype=np.float64)
+    for i in range(nlayer + 1):
+        rpsinz = (re + zd[:, i]) * sinrad
+        dark = twilight & (rpsinz < re)
+        ident = np.where(twilight, -1, i)
+        for j in range(1, nlayer + 1):           # the layer holding the screening height
+            inside = (rpsinz < (zd[:, j - 1] + re)) & (rpsinz >= (zd[:, j] + re))
+            ident = np.where(twilight & inside, j, ident)
+        ident = np.where(dark, -1, ident)
+        for j in range(1, nlayer + 1):
+            active = j <= ident
+            if not active.any():
+                continue
+            sm = np.where((j == ident) & (ident == i) & twilight, -1.0, 1.0)
+            rj = re + zd[:, j - 1]
+            rjp1 = re + zd[:, j]
+            dhj = zd[:, j - 1] - zd[:, j]
+            ga = np.maximum(0.0, rj * rj - rpsinz * rpsinz)
+            gb = np.maximum(0.0, rjp1 * rjp1 - rpsinz * rpsinz)
+            dsj = np.where((ident > i) & (j == ident), np.sqrt(ga), np.sqrt(ga) - sm * np.sqrt(gb))
+            dsdh[:, i, j - 1] = np.where(active, dsj / dhj, 0.0)
+        nid[:, i] = ident
+    return Geometry(nid, dsdh, zen)
+
+
+def air_mass(geometry: Geometry, column):
+    """spherical_geometry_t%air_mass: ``(vertical, slant)`` columns of a species from its layer columns
+    (ncol, nlayer + 1; the exo layer last, molecule cm-2).  ``vertical`` (ncol, nlayer) is the column above
+    each layer's base, surface first; ``slant`` (ncol, nlayer + 1) the column along the direct beam above
+    each edge, surface first (LARGEST where the beam does not reach)."""
+    aircol = _columns(column)
+    ncol, nz = aircol.shape
+    nlayer = nz - 1
+    if geometry.nlayer != nlayer:
+        raise TuvxPortError(f"a {nz}-element column for a {geometry.nlayer}-layer geometry")
+    vcol = np.empty((ncol, nlayer), dtype=np.float64)
+    accum = aircol[:, nz - 1].copy()
+    for ident in range(nlayer, 0, -1):
+        accum = accum + aircol[:, ident - 1]
+        vcol[:, ident - 1] = accum
+    scol = np.empty((ncol, nz), dtype=np.float64)
+    scol[:, nz - 1] = geometry.dsdh[:, 1, 0] * aircol[:, nz - 1]
+    for ident in range(1, nlayer + 1):
+        nid = geometry.nid[:, ident]
+        single = np.minimum(nid, ident)
+        accum = scol[:, nz - 1].copy()
+        for j in range(1, nlayer + 1):
+            d = geometry.dsdh[:, ident, j - 1]
+            a = aircol[:, nz - 1 - j]
+            term = np.where(j <= single, a * d, 2.0 * a * d)
+            accum = np.where(j <= nid, accum + term, accum)
+        scol[:, nz - 1 - ident] = np.where(nid < 0, LARGEST, accum)
+    return vcol, scol
+
+
+def exo_layer_columns(layer_columns):
+    """A from-host profile's exo_layer_dens_ without a scale height or exo density: the host's layer columns
+    and a zero exo layer (src/profiles/from_host.F90 update)."""
+    lay = _columns(layer_columns)
+    return np.concatenate([lay, np.zeros((lay.shape[0], 1))], axis=1)
+
+
+# ------------------------------------------------------------------------------------------------------------
+# O2 Lyman-alpha and Schumann-Runge bands (src/la_sr_bands.F90): the O2 optical depth (radiative transfer) and
+# the O2 photolysis cross section in those bins, from the O2 slant column along the direct beam.  Level and
+# layer arrays are surface first, columns on the leading axis.
+
+#: the Lyman-alpha and Schumann-Runge wavelength grids [nm]
+LA_EDGES = (121.4, 121.9)
+SRB_EDGES = (175.4, 177.0, 178.6, 180.2, 181.8, 183.5, 185.2, 186.9, 188.7, 190.5, 192.3, 194.2, 196.1, 198.0,
+             200.0, 202.0, 204.1, 206.2)
+NSRB = len(SRB_EDGES) - 1
+NPOLY = 20
+PRECIS = 1.0e-7
+#: lymana_OD / lymana_xs parameters
+_LA_B = (6.8431e-01, 2.29841e-01, 8.65412e-02)
+_LA_C = (8.22114e-21, 1.77556e-20, 8.22112e-21)
+_LA_D = (6.0073e-21, 4.28569e-21, 1.28059e-20)
+_LA_E = (8.21666e-21, 1.63296e-20, 4.85121e-17)
+_LA_XSMIN, _LA_TINY, _LA_EXP_LIM, _LA_LARGE_OD = 1.0e-20, 1.0e-100, 100.0e8, 1000.0
+#: schum_OD / schum_xs: the cross sections above the Chebyshev range
+_SRB_XSLOD = (6.2180730e-21, 5.8473627e-22, 5.6996334e-22, 4.5627094e-22, 1.7668250e-22, 1.1178808e-22,
+              1.2040544e-22, 4.0994668e-23, 1.8450616e-23, 1.5639540e-23, 8.7961075e-24, 7.6475608e-24,
+              7.6260556e-24, 7.5565696e-24, 7.6334338e-24, 7.4371992e-24, 7.3642966e-24)
+
+
+def _exp38():
+    """``exp(38._dk)``, a constant gfortran folds with correct rounding."""
+    from decimal import Decimal, getcontext
+    getcontext().prec = 60
+    return float(Decimal(38).exp())
+
+
+SRB_COLMIN = _exp38()
+
+
+def read_srb_parameters(path):
+    """init_srb_xs: (AC, BC), each (NPOLY, NSRB), from two blocks of format (/) then 20 records of
+    17(E23.14, 1x)."""
+    lines = Path(path).read_text().splitlines()
+
+    def block(start):
+        rows = []
+        for line in lines[start:start + NPOLY]:
+            rows.append([float(line[24 * k:24 * k + 23].replace("D", "E")) for k in range(NSRB)])
+        return np.asarray(rows, dtype=np.float64)
+
+    return block(2), block(2 + NPOLY + 2)
+
+
+def _sum3(tau, coefficients):
+    """dot_product of three: 0 + t1 c1 + t2 c2 + t3 c3, in order."""
+    total = tau[0] * coefficients[0]
+    total = total + tau[1] * coefficients[1]
+    return total + tau[2] * coefficients[2]
+
+
+class LaSrBands:
+    """la_sr_bands_t on a wavelength grid (TUV-x's O2 profile form: no "O2 estimate")."""
+
+    def __init__(self, config, grid: WavelengthGrid, *, root):
+        if "O2 estimate" in config:
+            raise TuvxPortError("la_sr_bands 'O2 estimate' is not ported")
+        edge = grid.edge
+        self.has_la = bool(edge[0] <= LA_EDGES[0] and edge[-1] >= LA_EDGES[-1])
+        self.has_srb = bool(edge[0] <= SRB_EDGES[0] and edge[-1] >= SRB_EDGES[-1])
+        self.ila = self.isrb = None
+        if self.has_la:
+            self.ila = self._start(edge, LA_EDGES, "Lyman alpha")
+        if self.has_srb:
+            self.isrb = self._start(edge, SRB_EDGES, "Schumann-Runge")
+            self.ac, self.bc = read_srb_parameters(Path(root) / config["cross section parameters file"])
+
+    @staticmethod
+    def _start(edge, band, what):
+        """The 0-based grid edge where the band starts; its edges must follow within 10 * PRECIS."""
+        hits = [i for i, e in enumerate(edge) if abs(float(e) - band[0]) < 10.0 * PRECIS]
+        if not hits:
+            raise TuvxPortError(f"{what} grid mis-match: below 205.8 nm only the pre-specified grid is permitted")
+        start = hits[0]
+        for k, w in enumerate(band[1:], start=1):
+            if start + k >= edge.size or abs(float(edge[start + k]) - w) > 10.0 * PRECIS:
+                raise TuvxPortError(f"{what} grid mismatch at {w} nm")
+        return start
+
+    @property
+    def bins(self):
+        """The 0-based wavelength bins the bands set."""
+        out = []
+        if self.has_la:
+            out.append(self.ila)
+        if self.has_srb:
+            out.extend(range(self.isrb, self.isrb + NSRB))
+        return out
+
+    # -- the shared front of la_srb_OD / la_srb_xs
+    @staticmethod
+    def _secchi(air_vcol, air_scol):
+        nzm1 = air_vcol.shape[1]
+        secchi = np.empty_like(air_scol)
+        ok = air_scol[:, :nzm1] <= 0.1 * LARGEST
+        with np.errstate(invalid="ignore", divide="ignore", over="ignore"):
+            secchi[:, :nzm1] = np.where(ok, air_scol[:, :nzm1] / air_vcol, 2.0)
+        secchi[:, nzm1] = secchi[:, nzm1 - 1]
+        return secchi
+
+    @staticmethod
+    def _rm(o2col, coeff_c, coeff_b):
+        taus = []
+        for c in coeff_c:
+            sigma = c * o2col
+            taus.append(np.where(sigma < _LA_EXP_LIM, np.exp(-sigma), 0.0))
+        return _sum3(taus, coeff_b)
+
+    def _lyman_alpha_od(self, o2col, secchi):
+        rm = self._rm(o2col, _LA_C, _LA_B)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            lr = np.log(rm)
+            od = lr[:, 1:] / secchi[:, 1:] - lr[:, :-1] / secchi[:, :-1]
+        good = (rm[:, :-1] > _LA_TINY) & (rm[:, 1:] > 0.0)
+        return np.where(good, od, _LA_LARGE_OD)
+
+    def _lyman_alpha_xs(self, o2col):
+        rm = self._rm(o2col, _LA_C, _LA_B)
+        ro2 = self._rm(o2col, _LA_E, _LA_D)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ratio = ro2 / rm
+        out = np.where((rm > _LA_TINY) & (ro2 > _LA_TINY), ratio, _LA_XSMIN)
+        # the top edge takes the ratio whenever rm is above the floor (ro2 is not checked there)
+        out[:, -1] = np.where(rm[:, -1] > _LA_TINY, ratio[:, -1], _LA_XSMIN)
+        return out
+
+    def _chebyshev(self, coefficients, x):
+        """chebyshev_evaluation for every band at once: coefficients (NPOLY, NSRB), x (ncol,)."""
+        if np.any((x < 38.0) | (x > 56.0)):
+            raise TuvxPortError("x out-of-bounds for Chebyshev polynomial")
+        y = ((2.0 * x - (38.0 + 56.0)) / (56.0 - 38.0))[:, None]
+        y2 = 2.0 * y
+        di = np.zeros((x.size, NSRB))
+        di1 = np.zeros((x.size, NSRB))
+        for i in range(NPOLY - 1, 0, -1):
+            dtemp = di
+            di = y2 * di - di1 + coefficients[i]
+            di1 = dtemp
+        return y * di - di1 + 0.5 * coefficients[0]
+
+    def _srb_xs(self, o2col, tlev):
+        """schum_xs: the effective cross sections (ncol, nz, NSRB) and the clamped columns."""
+        ncol, nz = o2col.shape
+        xs = np.broadcast_to(np.asarray(_SRB_XSLOD), (ncol, nz, NSRB)).copy()
+        o2col1 = np.maximum(o2col, SRB_COLMIN)
+        ktop = np.full(ncol, nz)                 # 1-based, as TUV-x
+        kbot = np.zeros(ncol, dtype=np.int64)
+        for k in range(1, nz + 1):
+            low = o2col[:, k - 1] < SRB_COLMIN
+            ktop = np.where(low, np.minimum(k - 1, ktop), ktop)
+            with np.errstate(divide="ignore"):
+                x = np.log(o2col1[:, k - 1])
+            above = ~low & (x > 56.0)
+            kbot = np.where(above, k, kbot)
+            fit = ~low & ~above
+            if fit.any():
+                xf = x[fit]
+                a = self._chebyshev(self.ac, xf)
+                b = self._chebyshev(self.bc, xf)
+                xs[fit, k - 1] = np.exp(a * (tlev[fit, k - 1][:, None] - 220.0) + b)
+        kbot = np.where(kbot == nz, nz - 1, kbot)
+        for c in range(ncol):
+            if kbot[c] > 0:
+                xs[c, :kbot[c]] = xs[c, kbot[c]]
+            if ktop[c] < nz:
+                xs[c, ktop[c]:] = xs[c, ktop[c] - 1]
+        return xs, o2col1
+
+    def _srb_od(self, o2col, tlev, secchi):
+        xs, o2col1 = self._srb_xs(o2col, tlev)
+        nz = o2col.shape[1]
+        norm = 1.0 / float(nz - 1)
+        lo, hi = xs[:, :-1], xs[:, 1:]
+        clo, chi = o2col1[:, :-1, None], o2col1[:, 1:, None]
+        near = np.abs(1.0 - o2col1[:, 1:] / o2col1[:, :-1]) <= 2.0 * PRECIS
+        with np.errstate(divide="ignore", invalid="ignore"):
+            far = np.abs((hi * chi - lo * clo) / (1.0 + np.log(hi / lo) / np.log(chi / clo)))
+            far = 2.0 * far / (secchi[:, :-1] + secchi[:, 1:])[:, :, None]
+        return np.where(near[:, :, None], hi * chi * norm, far)
+
+    def optical_depth(self, air_vcol, air_scol, o2_scol, temperature_edges):
+        """la_srb_OD: ``{bin: O2 optical depth (ncol, nlayer)}`` for the band bins (0-based)."""
+        secchi = self._secchi(_columns(air_vcol), _columns(air_scol))
+        o2col, tlev = _columns(o2_scol), _columns(temperature_edges)
+        out = {}
+        if self.has_la:
+            out[self.ila] = self._lyman_alpha_od(o2col, secchi)
+        if self.has_srb:
+            od = self._srb_od(o2col, tlev, secchi)
+            for k in range(NSRB):
+                out[self.isrb + k] = od[:, :, k]
+        return out
+
+    def cross_section(self, air_vcol, air_scol, o2_scol, temperature_edges):
+        """la_srb_xs: ``{bin: O2 cross section (ncol, nedge)}`` for the band bins (0-based)."""
+        o2col, tlev = _columns(o2_scol), _columns(temperature_edges)
+        out = {}
+        if self.has_la:
+            out[self.ila] = self._lyman_alpha_xs(o2col)
+        if self.has_srb:
+            xs, _ = self._srb_xs(o2col, tlev)
+            for k in range(NSRB):
+                out[self.isrb + k] = xs[:, :, k]
+        return out
+
+
+# ------------------------------------------------------------------------------------------------------------
+# Radiators (src/radiative_transfer/radiator.F90 update_state and accumulate, radiative_transfer.F90
+# calculate): each radiator's layer optical depth, single-scattering albedo and asymmetry factor from its layer
+# columns and its cross section at the layer mid-point temperatures, the O2 band optical depths in place, and
+# the sum over radiators the solver takes.  Arrays are (column, layer surface first, wavelength bin).
+
+KFLOOR = 1.0 / LARGEST
+
+
+class RayleighCrossSection:
+    """cross_sections/rayliegh.F90 (type "air"): one cross section per bin from the bin's mid-point."""
+
+    def __init__(self, config, grid, root):
+        wrk = 1.0e-3 * grid.mid
+        pwr = np.where(wrk <= 0.55, 3.6772 + 0.389 * wrk + 0.09426 / wrk, 4.04)
+        self.values = 4.02e-28 / np.power(wrk, pwr)
+
+    def calculate(self, temperatures):
+        return np.broadcast_to(self.values, np.shape(temperatures) + self.values.shape).copy()
+
+
+RADIATOR_CROSS_SECTIONS = {**CROSS_SECTIONS, "air": RayleighCrossSection}
+
+
+class RadiatorState:
+    """radiator_state_t: ``od``, ``ssa``, ``g`` (ncol, nlayer, nbin)."""
+
+    def __init__(self, od, ssa, g):
+        self.od, self.ssa, self.g = od, ssa, g
+
+
+class Radiators:
+    """The configuration's "radiative transfer" radiators (base type, from host profiles), in warehouse order."""
+
+    def __init__(self, config, grid, *, root):
+        rt = config["radiative transfer"]
+        sections = {}
+        for entry in rt["cross sections"]:
+            if entry["type"] not in RADIATOR_CROSS_SECTIONS:
+                raise TuvxPortError(f"radiator cross section {entry['type']!r} is not ported")
+            sections[entry["name"]] = RADIATOR_CROSS_SECTIONS[entry["type"]](entry, grid, root)
+        self.radiators = []
+        for entry in rt["radiators"]:
+            if entry.get("type", "base") != "base":
+                raise TuvxPortError(f"radiator type {entry['type']!r} is not ported")
+            if entry.get("vertical profile units") != "molecule cm-3":
+                raise TuvxPortError(f"radiator {entry['name']!r}: profile units {entry.get('vertical profile units')!r}")
+            self.radiators.append((entry["name"], entry["vertical profile"], sections[entry["cross section"]],
+                                   bool(entry.get("treat as air", False))))
+        self.nbins = grid.ncells
+
+    def states(self, layer_columns, temperature_edges, band_optical_depth=None):
+        """``{name: RadiatorState}`` after update_state, with la_srb's band optical depths (``{bin: (ncol,
+        nlayer)}``) written into the O2 radiator, as radiative_transfer calculate does.  ``layer_columns`` maps
+        each vertical profile's name to its layer columns (ncol, nlayer), molecule cm-2; the cross sections take
+        the layer mid-point temperatures ((lower + upper) * 0.5)."""
+        tedge = _columns(temperature_edges)
+        tmid = (tedge[:, :-1] + tedge[:, 1:]) * 0.5
+        out = {}
+        for name, profile, section, is_air in self.radiators:
+            dens = _columns(layer_columns[profile])
+            xs = section.calculate(tmid)                                 # (ncol, nlayer, nbin)
+            od = dens[:, :, None] * xs
+            if name == "O2" and band_optical_depth:
+                for b, values in band_optical_depth.items():
+                    od[:, :, b] = values
+            ssa = np.full_like(od, 1.0 if is_air else 0.0)
+            out[name] = RadiatorState(od, ssa, np.zeros_like(od))
+        return out
+
+    def accumulate(self, states):
+        """radiator_state_t accumulate with one stream: the radiators' sum, floored at 1 / LARGEST."""
+        dscat_accum = dabs_accum = asym_accum = 0.0
+        for name, _profile, _section, is_air in self.radiators:
+            s = states[name]
+            dscat = s.od * s.ssa
+            dscat_accum = dscat_accum + dscat
+            dabs_accum = dabs_accum + s.od * (1.0 - s.ssa)
+            asym_accum = asym_accum + s.g * dscat           # G**1 for the others; air takes G * dscat with one stream
+        dscat_accum = np.maximum(dscat_accum, KFLOOR)
+        dabs_accum = np.maximum(dabs_accum, KFLOOR)
+        od = dscat_accum + dabs_accum
+        ssa = np.where(dscat_accum == KFLOOR, KFLOOR, dscat_accum / od)
+        return RadiatorState(od, ssa, asym_accum / dscat_accum)
+
+
+# ------------------------------------------------------------------------------------------------------------
+# Delta-Eddington solver (src/radiative_transfer/solvers/delta_eddington.F90, solver.F90 slant_optical_depth,
+# linear_algebras/linpack.F90 tridiag): the direct, diffuse-up and diffuse-down actinic flux per edge and bin,
+# for unit extraterrestrial flux.  Every wavelength bin is its own two-stream problem; columns and bins are
+# batched together and the layer loops run in TUV-x's order.
+
+#: slant_optical_depth's "beam never arrives" value: the default-REAL literal 1.0e36, promoted
+_NO_BEAM = float(np.float32(1.0e36))
+
+
+class RadiationField:
+    """radiation_field_t: ``fdr``, ``fup``, ``fdn`` (and ``edr``, ``eup``, ``edn``), each (ncol, nedge, nbin),
+    edges surface first."""
+
+    def __init__(self, **parts):
+        self.__dict__.update(parts)
+
+    def scaled(self, factor):
+        """apply_scale_factor: every part times ``factor`` (per column)."""
+        f = np.asarray(factor, dtype=np.float64).reshape(-1, 1, 1)
+        return RadiationField(**{k: v * f for k, v in self.__dict__.items()})
+
+
+def _slant_optical_depth(i, nid, dsdh_row, taun):
+    """slant_optical_depth for edge ``i`` (from the top): nid (ncol,), dsdh_row (ncol, nlayer), taun (ncol,
+    nlayer, nbin), the layers top first."""
+    total = np.zeros((taun.shape[0], taun.shape[2]))
+    single = np.minimum(nid, i)
+    for j in range(1, int(nid.max(initial=0)) + 1):
+        d = dsdh_row[:, j - 1, None]
+        t = taun[:, j - 1]
+        term = np.where((j <= single)[:, None], t * d, 2.0 * t * d)
+        total = np.where((j <= nid)[:, None], total + term, total)
+    return np.where((nid < 0)[:, None], _NO_BEAM, total)
+
+
+def tridiag(a, b, c, r):
+    """linpack tridiag (Thomas algorithm) on the last axis but one: a, b, c, r (..., n, m)."""
+    n = b.shape[-2]
+    cp = np.empty_like(b)
+    u = np.empty_like(b)
+    cp[..., 0, :] = c[..., 0, :] / b[..., 0, :]
+    u[..., 0, :] = r[..., 0, :] / b[..., 0, :]
+    for i in range(1, n):
+        denom = 1.0 / (b[..., i, :] - a[..., i, :] * cp[..., i - 1, :])
+        cp[..., i, :] = c[..., i, :] * denom
+        u[..., i, :] = (r[..., i, :] - a[..., i, :] * u[..., i - 1, :]) * denom
+    for i in range(n - 2, -1, -1):
+        u[..., i, :] = u[..., i, :] - cp[..., i, :] * u[..., i + 1, :]
+    return u
+
+
+def surface_albedo(config, grid):
+    """The "surface albedo" profile on the wavelength bins (a from-config uniform value)."""
+    profiles = {p["name"]: p for p in config["profiles"]}
+    entry = profiles["surface albedo"]
+    if entry.get("type") != "from config file" or "uniform value" not in entry:
+        raise TuvxPortError("only a uniform from-config surface albedo is ported")
+    value = float(entry["uniform value"])
+    return (np.full(grid.ncells, value) + np.full(grid.ncells, value)) * 0.5
+
+
+def delta_eddington(state: RadiatorState, geometry: Geometry, albedo) -> RadiationField:
+    """solver_delta_eddington_t update_radiation_field (unit pifs, no surface emission)."""
+    largest = LARGEST
+    eps = 1.0e-3
+    od, ssa, asym = state.od[:, ::-1], state.ssa[:, ::-1], state.g[:, ::-1]      # top first
+    ncol, n, nbin = od.shape
+    mu = np.cos(geometry.sza * D2R)[:, None]
+    rsfc = np.asarray(albedo, dtype=np.float64)[None, :]
+    nid, dsdh = geometry.nid, geometry.dsdh
+    pifs, fdn0, surfem = 1.0, 0.0, 0.0
+    f = asym * asym
+    gi = (asym - f) / (1.0 - f)
+    omi = (1.0 - f) * ssa / (1.0 - ssa * f)
+    taun = (1.0 - ssa * f) * od
+    tauc = np.zeros((ncol, n + 1, nbin))
+    tausla = np.zeros((ncol, n + 1, nbin))
+    mu2 = np.full((ncol, n + 1, nbin), 1.0 / np.sqrt(largest))
+    below = (mu < 0.0)[:, 0]
+    if below.any():
+        tausla[:, 0] = np.where(below[:, None], _slant_optical_depth(0, nid[:, 0], dsdh[:, 0], taun), 0.0)
+    e1, e2, e3, e4 = (np.empty((ncol, n, nbin)) for _ in range(4))
+    cup, cdn, cuptn, cdntn = (np.empty((ncol, n, nbin)) for _ in range(4))
+    for i in range(1, n + 1):
+        g = gi[:, i - 1]
+        om = omi[:, i - 1]
+        tauc[:, i] = tauc[:, i - 1] + taun[:, i - 1]
+        tempg = np.minimum(np.abs(g), 1.0 - PRECIS)
+        g = np.copysign(tempg, g)
+        om = np.minimum(om, 1.0 - PRECIS)
+        tausla[:, i] = _slant_optical_depth(i, nid[:, i], dsdh[:, i], taun)
+        reach = (nid[:, i] >= 0)[:, None]
+        same = tausla[:, i] == tausla[:, i - 1]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ratio = (tauc[:, i] - tauc[:, i - 1]) / (tausla[:, i] - tausla[:, i - 1])
+        ratio = np.copysign(np.maximum(np.abs(ratio), 1.0 / np.sqrt(largest)), ratio)
+        mu2[:, i] = np.where(reach, np.where(same, np.sqrt(largest), ratio), mu2[:, i])
+        gam1 = (7.0 - om * (4.0 + 3.0 * g)) / 4.0
+        gam2 = -(1.0 - om * (4.0 - 3.0 * g)) / 4.0
+        gam3 = (2.0 - 3.0 * g * mu) / 4.0
+        gam4 = 1.0 - gam3
+        lam = np.sqrt(gam1 * gam1 - gam2 * gam2)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            bgam = np.where(gam2 != 0.0, (gam1 - lam) / gam2, 0.0)
+        expon = np.exp(-(lam * taun[:, i - 1]))
+        e1[:, i - 1] = 1.0 + bgam * expon
+        e2[:, i - 1] = 1.0 - bgam * expon
+        e3[:, i - 1] = bgam + expon
+        e4[:, i - 1] = bgam - expon
+        expon0 = np.exp(-tausla[:, i - 1])
+        expon1 = np.exp(-tausla[:, i])
+        m2 = mu2[:, i]
+        divisr = lam * lam - 1.0 / (m2 * m2)
+        temp = np.maximum(eps, np.abs(divisr))
+        divisr = np.copysign(temp, divisr)
+        up = om * pifs * ((gam1 - 1.0 / m2) * gam3 + gam4 * gam2) / divisr
+        dn = om * pifs * ((gam1 + 1.0 / m2) * gam4 + gam2 * gam3) / divisr
+        cup[:, i - 1] = up * expon0
+        cdn[:, i - 1] = dn * expon0
+        cuptn[:, i - 1] = up * expon1
+        cdntn[:, i - 1] = dn * expon1
+    ssfc = rsfc * mu * np.exp(-tausla[:, n]) * pifs + surfem
+    mrows = 2 * n
+    a, b, d, e = (np.empty((ncol, mrows, nbin)) for _ in range(4))
+    a[:, 0] = 0.0
+    b[:, 0] = e1[:, 0]
+    d[:, 0] = -e2[:, 0]
+    e[:, 0] = fdn0 - cdn[:, 0]
+    # odd rows (1-based 3, 5, ..., mrows - 1) and even rows (2, 4, ..., mrows - 2), layer i (0-based) above i + 1
+    for i in range(n - 1):
+        row = 2 * i + 2                                  # 0-based index of 1-based row 2i + 3
+        a[:, row] = e2[:, i] * e3[:, i] - e4[:, i] * e1[:, i]
+        b[:, row] = e1[:, i] * e1[:, i + 1] - e3[:, i] * e3[:, i + 1]
+        d[:, row] = e3[:, i] * e4[:, i + 1] - e1[:, i] * e2[:, i + 1]
+        e[:, row] = e3[:, i] * (cup[:, i + 1] - cuptn[:, i]) + e1[:, i] * (cdntn[:, i] - cdn[:, i + 1])
+        row = 2 * i + 1                                  # 0-based index of 1-based row 2i + 2
+        a[:, row] = e2[:, i + 1] * e1[:, i] - e3[:, i] * e4[:, i + 1]
+        b[:, row] = e2[:, i] * e2[:, i + 1] - e4[:, i] * e4[:, i + 1]
+        d[:, row] = e1[:, i + 1] * e4[:, i + 1] - e2[:, i + 1] * e3[:, i + 1]
+        e[:, row] = (cup[:, i + 1] - cuptn[:, i]) * e2[:, i + 1] - (cdn[:, i + 1] - cdntn[:, i]) * e4[:, i + 1]
+    a[:, mrows - 1] = e1[:, n - 1] - rsfc * e3[:, n - 1]
+    b[:, mrows - 1] = e2[:, n - 1] - rsfc * e4[:, n - 1]
+    d[:, mrows - 1] = 0.0
+    e[:, mrows - 1] = ssfc - cuptn[:, n - 1] + rsfc * cdntn[:, n - 1]
+    y = tridiag(a, b, d, e)
+    fdr = np.empty((ncol, n + 1, nbin))
+    edn = np.empty_like(fdr)
+    eup = np.empty_like(fdr)
+    fdr[:, 0] = pifs * np.exp(-tausla[:, 0])
+    edn[:, 0] = fdn0
+    eup[:, 0] = y[:, 0] * e3[:, 0] - y[:, 1] * e4[:, 0] + cup[:, 0]
+    for lev in range(1, n + 1):
+        j, row = lev - 1, 2 * (lev - 1)
+        fdr[:, lev] = pifs * np.exp(-tausla[:, lev])
+        edn[:, lev] = y[:, row] * e3[:, j] + y[:, row + 1] * e4[:, j] + cdntn[:, j]
+        eup[:, lev] = y[:, row] * e1[:, j] + y[:, row + 1] * e2[:, j] + cuptn[:, j]
+    edr = mu[:, :, None] * fdr
+    fdn = edn / 0.5
+    fup = eup / 0.5
+    flip = lambda v: v[:, ::-1].copy()  # noqa: E731
+    return RadiationField(fdr=flip(fdr), fup=flip(fup), fdn=flip(fdn), edr=flip(edr), eup=flip(eup),
+                          edn=flip(edn))
+
+
+# ------------------------------------------------------------------------------------------------------------
+# Photolysis rate constants (src/core.F90 run, src/photolysis_rates.F90 get): the whole column calculation.
+
+class Tuvx:
+    """A TUV-x core over host columns (the oracle harness's from-host height grid and temperature, air, O2 and O3
+    profiles), built once from a configuration and its data root.  ``run`` takes a batch of columns that share a
+    level count and returns each reaction's rate constants on the height edges."""
+
+    def __init__(self, config, *, root):
+        self.config = config
+        self.grid, self.etf = configuration(config, root=root)
+        self.photolysis = Photolysis(config, self.grid, root=root)
+        self.bands = LaSrBands(config["O2 absorption"], self.grid, root=root)
+        self.radiators = Radiators(config, self.grid, root=root)
+        self.albedo = surface_albedo(config, self.grid)
+        self.scaling = [float(r.get("scaling factor", 1.0)) for r in config["photolysis"]["reactions"]]
+
+    @property
+    def reactions(self):
+        return [name for name, *_ in self.photolysis.reactions]
+
+    def radiation_field(self, edges_km, temperature, air_layer, o2_layer, o3_layer, sza_deg):
+        """radiative_transfer calculate: (geometry, field for unit flux, air columns) for the batch."""
+        geometry = spherical_geometry(edges_km, sza_deg)
+        avc, asc = air_mass(geometry, exo_layer_columns(air_layer))
+        _ovc, osc = air_mass(geometry, exo_layer_columns(o2_layer))
+        temps = _columns(temperature)
+        band_od = self.bands.optical_depth(avc, asc, osc, temps)
+        states = self.radiators.states({"air": air_layer, "O2": o2_layer, "O3": o3_layer}, temps, band_od)
+        field = delta_eddington(self.radiators.accumulate(states), geometry, self.albedo)
+        return geometry, field, (avc, asc, osc)
+
+    def run(self, edges_km, temperature, air_layer, o2_layer, o3_layer, sza_deg, earth_sun_distance):
+        """core run: ``{reaction: rate constants (ncol, nedge), s-1}``.  Every column array is (ncol, n) or
+        (n,); ``sza_deg`` and ``earth_sun_distance`` (the factor TUV-x scales the field by) per column."""
+        temps = _columns(temperature)
+        _geometry, field, (avc, asc, osc) = self.radiation_field(edges_km, temps, _columns(air_layer),
+                                                                 _columns(o2_layer), _columns(o3_layer), sza_deg)
+        field = field.scaled(np.broadcast_to(np.asarray(earth_sun_distance, dtype=np.float64), (temps.shape[0],)))
+        actinic = (field.fdr + field.fup + field.fdn) * self.etf
+        actinic = np.where(actinic < 0.0, 0.0, actinic)
+        bands_xs = None
+        out = {}
+        for r, (name, xs_calc, qy_calc, apply_bands) in enumerate(self.photolysis.reactions):
+            xs = xs_calc.calculate(temps)                                # (ncol, nedge, nbin)
+            qy = qy_calc.calculate(temps)
+            if apply_bands:
+                if bands_xs is None:
+                    bands_xs = self.bands.cross_section(avc, asc, osc, temps)
+                xs = xs.copy()
+                for b, values in bands_xs.items():
+                    xs[:, :, b] = values
+            xsqy = xs * qy
+            total = np.zeros(actinic.shape[:2])
+            for k in range(actinic.shape[2]):                            # dot_product, in order
+                total = total + actinic[:, :, k] * xsqy[:, :, k]
+            out[name] = total * self.scaling[r]
+        return out
+
+
+def earth_sun_distance(year, month, day, hour_utc):
+    """src/profiles/profile_utils.F90 earth_sun_distance (AU) at ``hour_utc`` of the date: the factor TUV-x's
+    "Earth-Sun distance" profile hands core%run, which scales the radiation field by it (TUV-x's own form)."""
+    import math
+    year, month, day = int(year), int(month), int(day)
+    if not 1950 <= year <= 2050:
+        raise TuvxPortError("1950 <= Year <= 2050")
+    days = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    if (year % 4 == 0 and year % 100 != 0) or year % 400 == 0:
+        days[1] = 29
+    if not 1 <= month <= 12 or day > days[month - 1]:
+        raise TuvxPortError(f"bad date {year}-{month}-{day}")
+    jday = sum(days[:month - 1]) + day
+    delta = year - 1949
+    leap = delta // 4
+    jd = 32916.5 + float(delta * 365 + leap + jday) + float(hour_utc) / 24.0
+    if year % 100 == 0 and year % 400 != 0:
+        jd = jd - 1.0
+    time = jd - 51545.0
+    anomaly = 357.528 + 0.9856003 * time
+    anomaly = math.fmod(anomaly, 360.0)
+    if anomaly < 0.0:
+        anomaly = anomaly + 360.0
+    anomaly = anomaly * (math.pi / 180.0)
+    return 1.00014 - 0.01671 * math.cos(anomaly) - 0.00014 * math.cos(2.0 * anomaly)
