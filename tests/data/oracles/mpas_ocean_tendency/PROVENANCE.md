@@ -31,8 +31,13 @@ Written by `tools/mpas_ocean_oracle/build.sh` and
   `glibc_flt64.cuh`). On a host whose libm is not glibc, build.sh links them
   in place of the host libm (`tools/oracle_libm/glibc_host.cpp`).
 
-  glibc's double `cos`/`sin` have no permissive equal, so the bulk wind stress
-  case is recorded at RKIND 4 only. The port refuses that switch at RKIND 8.
+  glibc's double `cos`/`sin` have no permissive equal. The bulk wind stress
+  case's RKIND 8 run is therefore kept apart, in `oracle-r8-glibc239.npz`
+  (2026-11-13, the same build). The port runs it only under the opt-in LGPL
+  transcription of glibc 2.39's (`WOOF_GLIBC239_LIBM64=1`) and refuses the
+  switch at RKIND 8 otherwise. The case's edge angles lie in [-pi, pi]; there
+  glibc 2.44's and 2.39's binary64 `cos`/`sin` words agree. They differ only
+  for arguments of 10^8 and above.
 - Driver: `run_tendency.F90`.
   1. It fills the mesh, state (with the `tracers` subpool), diagnostics,
      forcing, tendency and scratch pools, and the configs.
@@ -51,6 +56,7 @@ Written by `tools/mpas_ocean_oracle/build.sh` and
 | file | content |
 |---|---|
 | `oracle-r4.npz`, `oracle-r8.npz` | `<case>/<field>` for `tendNormalVelocity`, `surfaceStress`, `surfaceStressMagnitude`, `viscosity`, `tendLayerThickness`, `surfaceThicknessFlux`, `surfaceThicknessFluxRunoff`, `tendVelForcing`, `tendThickSflux` |
+| `oracle-r8-glibc239.npz` | the same fields for `jts_rk4_bulk_drag` at RKIND 8 (the opt-in's fixture) |
 | `inputs.sha256` | the input-stream digest of each case at each of its precisions (`woof.verify.mpas_ocean_tendency_oracle.input_bytes`) |
 
 ## Coverage
@@ -58,7 +64,7 @@ Written by `tools/mpas_ocean_oracle/build.sh` and
 | case | precisions | what it switches on |
 |---|---|---|
 | `zmid_del2_split` | r4, r8 | split-explicit, pressure_and_zmid, del2, bulk thickness flux, surface stress (zero in the composition, nonzero standalone), surface flux; dry edges |
-| `jts_rk4_bulk_drag` | r4 | RK4, Jacobian_from_TS, del4 + Leith, bulk wind stress and thickness flux, explicit bottom drag, Rayleigh friction and bottom friction; every edge wet |
+| `jts_rk4_bulk_drag` | r4, r8-glibc239 | RK4, Jacobian_from_TS, del4 + Leith, bulk wind stress and thickness flux, explicit bottom drag, Rayleigh friction and bottom friction; every edge wet |
 | `jdens_drag_rayleigh` | r4, r8 | Jacobian_from_density, del2 + del4, bulk thickness flux, bottom drag, Rayleigh and bottom friction, rho_sw 1027.5; every edge wet |
 | `all_tend_off` | r4, r8 | `config_disable_vel_all_tend` and `_thick_all_tend` (the composed outputs are the Fortran's zeros); standalone forcing with bottom drag; every edge wet |
 | `mont_forcing_off` | r4, r8 | RK4, pgrad and hmix disabled, surface stress and surface flux disabled, Rayleigh friction |
