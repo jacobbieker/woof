@@ -27,6 +27,7 @@ import tomllib
 from pathlib import Path
 
 import pytest
+from source_parameter_examples import source_parameter_args
 
 from woof.cli import main as cli_main
 from woof import source_adapters as registry
@@ -109,7 +110,8 @@ def _emit(tmp_path: Path, source: str, *extra: str,
     rc = cli_main([
         "domain", f"--point={lat:.4f},{lon:.4f}", "--card", extra_card,
         "--root-dx", "3", "--hours", hours, "--source", source,
-        "--cycle", cycle, "--out", str(out), *licence_args, *extra])
+        "--cycle", cycle, "--out", str(out), *licence_args,
+        *source_parameter_args(source), *extra])
     return rc, out
 
 
@@ -293,6 +295,7 @@ def test_printed_fetch_step_plans_through_the_real_planner(
         cadence=(int(flags["--cadence"]) if "--cadence" in flags else None),
         start_hour=int(flags.get("--forecast-start-hour", 0)),
         host=None, member=None,
+        source_parameters=flags.get("--source-parameters"),
         area=flags.get("--area"), out=Path(flags["--out"]))
 
 

@@ -2,7 +2,7 @@
 
 Written by `tools/mali_oracle/build.sh` (`run_time_integration_fe_r4`, `_r8`) and
 `make_time_integration_fe_fixture.py` on pb (Linux 6.12 x86_64, glibc 2.44), 2026-11-11;
-regenerated with the calving cases the same day.
+regenerated with the calving and subglacial hydrology cases on 2026-11-12.
 
 - MPAS source: MPAS-Model v8.4.2, commit
   `f34984b2c89353cf31c235b08d3b4acd96b37bb3`, byte-unmodified
@@ -46,14 +46,28 @@ regenerated with the calving cases the same day.
 | `calving_eigen_scalar` | 200 | 6 | sia | none | fo/fo | none | fixed; 'eigencalving', scalar parameter, deep beds, slow prior flow |
 | `calving_eigen_data` | 200 | 6 | sia | none | fo/fo | none | fixed; 'eigencalving', parameter from data |
 | `calving_restore_front` | 96 | 6 | sia | enthalpy | fo/fo | none | fixed; `config_restore_calving_front` |
+| `sgh_sheet_cavity` | 96 | 6 | sia | none | fo/fo | none | 1 h; `config_SGH`, sheet only, 'cavity', melt from file, tangent from the normal slope |
+| `sgh_channels_thermal` | 96 | 6 | sia | temperature | fo/fo | none | 1 h; channels, melt from the thermal solver, barycentric tangent |
+| `sgh_overburden_shmip` | 80 | 5 | sia | none | fo/fo | none | 1 h; channels without pressure melt, 'overburden', basal-heat melt, kite-area tangent, SHMIP C2 (r4) |
+| `sgh_shmip_d` | 80 | 5 | sia | none | fo/fo | none | 1 h; SHMIP D3 (r4), 900 s maximum hydrology step |
+
+The hydrology cases use an englacial porosity of 1 and a sheet conductivity of
+1e-4, which keeps the subcycles to tens per hour on these random meshes.
+Each case subcycles.
 
 `nCellsSolve = nCells`: `li_calculate_apparent_diffusivity` reads the
 reconstructed slope on every cell, and `mpas_reconstruct` sets it only on the
 owned cells. In a halo the model would read its uninitialised scratch.
 
 At RKIND 8 the fixture leaves out `eTheta`. glibc's binary64 `atan` is LGPL and
-not correctly rounded, so the port refuses it. Every other output of the step
-is compared at both precisions:
+not correctly rounded, so the port refuses it unless the opt-in glibc 2.39
+transcription is on (`WOOF_GLIBC239_LIBM64=1`, `tools/glibc239_libm_gpu`, LGPL,
+source checkout only). `oracle-r8-glibc239.npz` holds the cases that opt-in
+lifts, at RKIND 8 as written: `eTheta` included, `sia_no_thermal_sphere` on the
+sphere, `none_temperature_no_tracers` with 'seroussi', `sgh_overburden_shmip`
+(C2) and `sgh_shmip_d` (D3) with their forcings (input digests
+`<case>/r8-glibc239`; written on pb 2026-11-12, the other files' bytes
+unchanged). Every other output of the step is compared at both precisions:
 
 - the masks;
 - thickness, layer thickness and edge layer thickness;

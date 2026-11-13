@@ -1640,6 +1640,15 @@ class RunConfig:
     #: WRF ``&chem photdt`` (registry.chem, minutes; 0 = every step): the
     #: photolysis cadence of photolysis.ftuv (chem_driver.F:349-362).
     photdt: float = _config_field(default=0.0, kw_only=True)
+    #: Opt-in, not a WRF key: the cloud-water mixing ratio (kg/kg) above
+    #: which RADM2SORG's in-cloud SO2 -> sulfate (chem_driver.F:1350-1360 ->
+    #: module_gocart_so2so4.F so2so4) treats a cell as cloudy.  0 (the
+    #: default) is WRF's own test, qc > 0, under which round-off cloud water
+    #: (1e-38 .. 1e-10 kg/kg, common in the specified boundary ring) turns all
+    #: of a cell's SO2 that H2O2 allows into sulfate in one chem step and
+    #: SORGAM nucleates it into an Aitken burst.  1e-6 is WRF's own cloud
+    #: test in cal_cldfra (phys/module_radiation_driver.F:3714).
+    so2so4_qc_threshold: float = _config_field(default=0.0, kw_only=True)
     # The WRF v4.7.1 fire (SFIRE) namelist, appended keyword-only so the
     # positional API and the order of every field above are unchanged.
     # Names, types and defaults are woof.sfire_config.FireRunFields'
@@ -5491,7 +5500,7 @@ CHEM_RUN_FIELDS = (
     "aer_op_opt", "dust_alpha", "dust_gamma", "dust_smtune", "dust_ustune",
     "mynn_chem_vertmx", "fire_emission_mode", "plume_fire_properties",
     "aerosol_mp_coupling", "simple_dir_fdb", "enh_vermix", "flam_part",
-    "aer_drydep_opt", "photdt")
+    "aer_drydep_opt", "photdt", "so2so4_qc_threshold")
 
 #: Every RunConfig field of the fire (SFIRE) block, in declaration order,
 #: appended keyword-only after CHEM_RUN_FIELDS: inert while ``ifire`` is 0
@@ -7400,6 +7409,18 @@ def validate_chem_config(cfg) -> None:
             or not math.isfinite(photdt):
         raise ConfigurationRefused(f"photdt must be a finite number of minutes "
                                    f"(WRF declares it a real), got {photdt!r}.")
+    threshold = getattr(cfg, "so2so4_qc_threshold", 0.0)
+    if isinstance(threshold, bool) or not isinstance(threshold, (int, float)) \
+            or not math.isfinite(threshold) or threshold < 0:
+        raise ConfigurationRefused(
+            "so2so4_qc_threshold must be a finite cloud-water mixing ratio "
+            f">= 0 (kg/kg; 0 is WRF's qc > 0), got {threshold!r}.")
+    if threshold and not table.rows_for("aerosol.sorgam"):
+        raise ConfigurationRefused(
+            f"so2so4_qc_threshold={threshold}: only RADM2SORG runs so2so4 "
+            "(the in-cloud SO2 -> sulfate the threshold gates), and this "
+            "selection has no aerosol.sorgam rows, so the key would change "
+            "nothing.  Leave it at 0.")
     for name in ("chem_adv_opt", "kemit", "biomass_burn_opt",
                  "plumerisefire_frq", "dust_opt", "seas_opt", "dmsemis_opt",
                  "wetscav_onoff", "chem_conv_tr", "vertmix_onoff",
@@ -8116,8 +8137,6 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
             raise ValueError("CCPP TKE-EDMF requires nz >= 8; shorter columns cannot supply its mass-flux searches")
         if cfg.sf_sfclay_physics not in (1, 91):
             raise ValueError("CCPP TKE-EDMF requires sf_sfclay_physics=1 or 91; its stability closure divides by the fm/fh similarity denominators those layers publish")
-        if cfg.bldt != 0:
-            raise ValueError("CCPP TKE-EDMF requires bldt=0; positive cadence would retain a TKE tendency that the current extra-scalar restart stream does not serialize")
     validate_selector_couplings(cfg)
     validate_gbmpbl_config(cfg)
     validate_sase_config(cfg)

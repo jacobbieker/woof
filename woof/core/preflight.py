@@ -6630,7 +6630,8 @@ def physics_array_shapes(cfg: RunConfig, *, cam_ozone: bool = False,
         if (radiation_enabled(cfg) or cfg.cu_physics) and not reuse_pbl:
             shapes[f"tendencies/{component}"] = m
     from woof.core.passive_tracer_contract import mixed_tracers
-    for name in mixed_tracers(cfg):
+    from woof.core.satmedmf import held_rate_names_for_config
+    for name in mixed_tracers(cfg) + held_rate_names_for_config(cfg):
         shapes[f"pbl_tendencies/extra_scalars/{name}"] = m
     if cfg.cu_physics:
         # Mixed-phase KF returns QR/QI/QS independently.  At bldt=0 the fresh

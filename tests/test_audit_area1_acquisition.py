@@ -5,6 +5,7 @@ from pathlib import Path
 import dataclasses
 
 import pytest
+from source_parameter_examples import source_parameter_args
 
 from woof import cli, fetch, fetch_routes, runplan
 from woof.filesystem_paths import canonical_path
@@ -1112,6 +1113,7 @@ def _emit_domain(tmp_path, source, accepted=()):
         "domain", f"--point={centre[0]:.4f},{centre[1]:.4f}",
         "--card", "16gb", "--root-dx", "3", "--hours", "6",
         "--source", source, "--cycle", _archive_test_cycle(source), "--out", str(out),
+        *source_parameter_args(source),
         *[token for name in accepted for token in ("--accept-licence", name)]])
     assert rc == 0, f"{source} did not plan"
     return out

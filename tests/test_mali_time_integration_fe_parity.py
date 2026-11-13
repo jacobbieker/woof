@@ -52,7 +52,9 @@ def test_case_inputs_are_the_recorded_bytes():
         digest, name = line.split()
         recorded[name] = digest
     assert recorded == {**{case["name"]: fo.input_digest(case) for case in fo.cases()},
-                        **{case["name"] + "/r8": fo.input_digest(case) for case in fo.cases("r8")}}
+                        **{case["name"] + "/r8": fo.input_digest(case) for case in fo.cases("r8")},
+                        **{case["name"] + "/" + fo.R8_GLIBC239: fo.input_digest(case)
+                           for case in fo.cases(fo.R8_GLIBC239)}}
 
 
 @pytest.mark.parametrize("precision", ["r4", "r8"])
@@ -183,7 +185,7 @@ def _case_on_device(name: str, precision: str = "r4"):
 
 
 @requires_gpu
-@pytest.mark.parametrize("knob, value", [("config_SGH", True), ("config_velocity_solver", "simple"),
+@pytest.mark.parametrize("knob, value", [("config_velocity_solver", "simple"),
                                          ("config_velocity_solver", "FO")])
 def test_the_pieces_not_ported_are_refused_by_name(knob, value):
     from woof.hex.errors import ConfigurationRefusal
@@ -195,9 +197,10 @@ def test_the_pieces_not_ported_are_refused_by_name(knob, value):
 
 
 @requires_gpu
-def test_rkind8_refuses_the_sphere_and_the_strain_angle():
+def test_rkind8_refuses_the_sphere_and_the_strain_angle(monkeypatch):
     from woof.hex.errors import ConfigurationRefusal
     from woof.hex.mpas_ice import time_integration_fe_v842 as fe
+    monkeypatch.delenv("WOOF_GLIBC239_LIBM64", raising=False)
     case, mesh, dev = _case_on_device("sia_temperature_fo", "r8")
     with pytest.raises(ConfigurationRefusal, match="eTheta"):
         fe.forward_euler_step(mesh=mesh, geometry=dev["geometry"], thermal=dev["thermal"],
@@ -206,6 +209,93 @@ def test_rkind8_refuses_the_sphere_and_the_strain_angle():
     with pytest.raises(ConfigurationRefusal, match="on_a_sphere"):
         fe.forward_euler_step(mesh=mesh, geometry=dev["geometry"], thermal=dev["thermal"],
                               velocity=dev["velocity"], config=dict(case["config"], on_a_sphere=True))
+
+
+@pytest.fixture
+def glibc239(monkeypatch):
+    """The opt-in glibc 2.39 binary64 sin/cos/atan transcription (LGPL, source checkout only)."""
+    monkeypatch.setenv("WOOF_GLIBC239_LIBM64", "1")
+    yield
+
+
+def test_the_glibc239_fixture_lifts_the_rkind8_refusals():
+    fixture = fo.load_fixture(fo.R8_GLIBC239)
+    cases = {case["name"]: case for case in fo.cases(fo.R8_GLIBC239)}
+    assert set(fixture) == set(cases) == set(fo.GLIBC239_CASES)
+    configs = [c["config"] for c in cases.values()]
+    assert all(c["precision"] == "r8" for c in cases.values())
+    assert any(c["on_a_sphere"] for c in configs)
+    assert {c["config_SGH_shmip_forcing"] for c in configs} >= {"C2", "D3"}
+    assert "seroussi" in {c["config_basal_mass_bal_float"] for c in configs}
+    for name, out in fixture.items():
+        assert not any(out[k][0] for k in ("errInit", "errStep", "logErrors"))
+        assert out["velocity/eTheta"].dtype == np.float64
+    theta = fixture["sia_temperature_fo"]["velocity/eTheta"]
+    assert np.isfinite(theta).all() and np.count_nonzero(theta) > 0
+
+
+@requires_gpu
+def test_rkind8_matches_the_oracle_under_the_glibc239_opt_in(glibc239):
+    report = fo.measure(precision=fo.R8_GLIBC239)
+    bad = {case: {k: v for k, v in fields.items() if v} for case, fields in report.items()}
+    assert not any(bad.values()), bad
+
+
+_GLIBC239_MUTATIONS = [
+    # the sphere's meridional velocity with the latitude's sine distributed
+    ("time_integration_fe_v842", "me[k] = A(-M(A(M(cx[k], clon), M(cy[k], slon)), slat), M(cz[k], clat));",
+     "me[k] = A(-A(M(M(cx[k], clon), slat), M(M(cy[k], slon), slat)), M(cz[k], clat));",
+     "velocity/uReconstructMeridional", "sia_no_thermal_sphere"),
+    # the reconstruction's cosine and sine exchanged
+    ("time_integration_fe_v842", "#define LI_COS(x) g239::g239_cos(x)\n#define LI_SIN(x) g239::g239_sin(x)",
+     "#define LI_COS(x) g239::g239_sin(x)\n#define LI_SIN(x) g239::g239_cos(x)",
+     "velocity/uReconstructZonal", "sia_no_thermal_sphere"),
+    # atan's pi/2 low word left out for 1 <= |x| < 16 (Metal's own binary64 atan
+    # gives glibc's words on these ~90 arguments, so a platform atan is no gate here;
+    # tools/glibc239_libm_gpu/grade_trig.py holds the words argument by argument)
+    ("time_integration_fe_v842", "const double yy = g239_fma(-z, table_poly(z, i), G239_HPI1);",
+     "const double yy = g239_fma(-z, table_poly(z, i), 0.0);", "velocity/eTheta", "sia_temperature_fo"),
+    # the SHMIP forcing's sine and cosine exchanged
+    ("subglacial_hydro_v842", "#define LI_SIN(x) g239::g239_sin(x)\n#define LI_COS(x) g239::g239_cos(x)",
+     "#define LI_SIN(x) g239::g239_cos(x)\n#define LI_COS(x) g239::g239_sin(x)",
+     "hydro/waterThickness", None),
+]
+
+
+@requires_gpu
+@pytest.mark.parametrize("unit, original, mutated, field, case", _GLIBC239_MUTATIONS)
+def test_a_mutated_rkind8_trig_is_caught(monkeypatch, glibc239, unit, original, mutated, field, case):
+    import importlib
+    module = importlib.import_module(f"woof.hex.mpas_ice.{unit}")
+    source = module.module_source("r8")
+    assert source.count(original) == 1
+    monkeypatch.setattr(module, "module_source", lambda p="r4": source.replace(original, mutated))
+    module._module_on.cache_clear()
+    try:
+        rows = [c for c in fo.cases(fo.R8_GLIBC239) if case is None or c["name"] == case]
+        rows = [c for c in rows if case is not None or c["config"]["config_SGH_shmip_forcing"] != "none"]
+        fixture = fo.load_fixture(fo.R8_GLIBC239)
+        total = sum(fo.word_mismatches(fo.run_gpu(row)[field], fixture[row["name"]][field]) for row in rows)
+        assert total > 0
+    finally:
+        module._module_on.cache_clear()
+
+
+def test_the_glibc239_opt_in_is_off_by_default_and_not_package_data(monkeypatch):
+    from woof.core import glibc239_gpu
+    from woof.hex.mpas_ice import subglacial_hydro_v842, thermal_solver_v842, time_integration_fe_v842 as fe
+    monkeypatch.delenv("WOOF_GLIBC239_LIBM64", raising=False)
+    assert not glibc239_gpu.enabled()
+    for module in (fe, subglacial_hydro_v842, thermal_solver_v842):
+        assert "namespace g239" not in module.module_source("r8")
+    monkeypatch.setenv("WOOF_GLIBC239_LIBM64", "1")
+    for module in (fe, subglacial_hydro_v842, thermal_solver_v842):
+        source = module.module_source("r8")
+        assert "namespace g239" in source and "#define WOOF_GLIBC239_TRIG64 1" in source
+        assert "namespace g239" not in module.module_source("r4")
+    # the LGPL transcription lives outside the package
+    assert glibc239_gpu.header_path().is_file()
+    assert not list((ROOT / "woof").rglob("glibc239_trig*"))
 
 
 @requires_gpu
@@ -241,7 +331,7 @@ def test_the_oracle_rebuilt_here_writes_the_fixture(tmp_path):
                    check=True, env={**os.environ, "GFORTRAN": gfortran})
     subprocess.run([sys.executable, str(ROOT / "tools" / "mali_oracle" / "make_time_integration_fe_fixture.py"),
                     str(tmp_path / "build"), "--out", str(tmp_path / "fixture")], check=True)
-    for precision in ("r4", "r8"):
+    for precision in ("r4", "r8", fo.R8_GLIBC239):
         fresh = np.load(tmp_path / "fixture" / f"oracle-{precision}.npz")
         pinned = np.load(fo.FIXTURE_DIR / f"oracle-{precision}.npz")
         assert sorted(fresh.files) == sorted(pinned.files)

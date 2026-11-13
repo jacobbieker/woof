@@ -10,8 +10,8 @@
 3. ``advection_solver``: ``calculate_layerThicknessEdge``,
    ``li_advection_thickness_tracers``, negative thickness set to zero, the
    masks and ``li_update_geometry``;
-4. subglacial hydrology, which this port carries only when off
-   (``config_SGH`` false; on, it is refused by name), then
+4. subglacial hydrology (``li_SGH_solve``,
+   :mod:`~woof.hex.mpas_ice.subglacial_hydro_v842`, with ``config_SGH``), then
    ``li_calve_ice`` or ``li_restore_calving_front``
    (:mod:`~woof.hex.mpas_ice.calving_v842`);
 5. ``li_velocity_solve`` for 'sia' and 'none': the masks and geometry, the
@@ -38,13 +38,15 @@ dict also holds ``nCellsSolve`` and ``nEdgesSolve``, and the step's own
 scalars (``deltat``, ``allowableDtACFL``, ``allowableDtDCFL``) as one-word
 device arrays. ``config`` holds the namelist options by their MPAS names.
 
-At RKIND 8 two things are refused by name: the sphere's reconstruction
-(``on_a_sphere``: glibc's binary64 cos and sin) and the strain-rate angle
-``eTheta`` (glibc's binary64 atan). Neither glibc function is correctly
-rounded (atan differs from the correctly rounded one on about 3 in 10^4
-arguments), and both are LGPL, so their words cannot be reproduced under the
-default licence. Leave ``eTheta`` out of the velocity dict at RKIND 8 to run
-the step without it; nothing else in v8.4.2 reads it.
+At RKIND 8 two things are refused by name unless the opt-in glibc 2.39
+transcription is on (``WOOF_GLIBC239_LIBM64=1``, :mod:`woof.core.glibc239_gpu`):
+the sphere's reconstruction (``on_a_sphere``: glibc's binary64 cos and sin)
+and the strain-rate angle ``eTheta`` (glibc's binary64 atan). Neither glibc
+function is correctly rounded (atan differs from the correctly rounded one on
+about 3 in 10^4 arguments), and both are LGPL, so their words cannot be
+reproduced under the default licence. Without the opt-in, leave ``eTheta``
+out of the velocity dict at RKIND 8 to run the step without it; nothing else
+in v8.4.2 reads it.
 """
 from __future__ import annotations
 
@@ -58,8 +60,8 @@ import numpy as np
 from woof.hex import numerics as _hex_numerics
 from woof.hex.errors import ConfigurationRefusal
 
-from . import (advection_v842, calving_v842, geometry_v842, rkind, sia_v842, thermal_init_v842,
-               thermal_solver_v842)
+from . import (advection_v842, calving_v842, geometry_v842, rkind, sia_v842, subglacial_hydro_v842,
+               thermal_init_v842, thermal_solver_v842)
 
 SOURCE_FILES = (
     "src/core_landice/mode_forward/mpas_li_time_integration_fe.F:75-952",
@@ -81,14 +83,14 @@ def module_source(precision: str = "r4") -> str:
     rkind.require(precision)
     body = files("woof.hex.mpas_ice").joinpath("time_integration_fe_v842.cu").read_text(encoding="utf-8")
     if precision == "r8":
-        return "#define MPAS_RKIND8 1\n" + body
+        return "#define MPAS_RKIND8 1\n" + rkind.r8_trig_prelude() + body
     import woof.core.kernels as kernels
     root = Path(kernels.__file__).parent
     return "\n".join((root / name).read_text(encoding="utf-8") for name in MATH_HEADERS_R4) + "\n" + body
 
 
 @lru_cache(maxsize=None)
-def _module_on(device: int, precision: str, options: tuple[str, ...]):
+def _module_on(device: int, precision: str, options: tuple[str, ...], trig64: bool = False):
     import cupy as cp
     from woof.nvrtc_ptx_cache import compile_using_nvrtc
 
@@ -102,8 +104,8 @@ def _module_on(device: int, precision: str, options: tuple[str, ...]):
 
 def _function(precision: str, name: str):
     import cupy as cp
-    return _module_on(cp.cuda.Device().id, precision,
-                      _hex_numerics.options(COMPILE_OPTIONS, keep_ftz=True)).get_function(name)
+    return _module_on(cp.cuda.Device().id, precision, _hex_numerics.options(COMPILE_OPTIONS, keep_ftz=True),
+                      precision == "r8" and rkind.trig64()).get_function(name)
 
 
 def _grid(n: int) -> tuple[int]:
@@ -124,19 +126,14 @@ def _check_config(config: dict, precision: str, velocity: dict) -> None:
         if config[knob] not in ADVECTION:
             raise ValueError(f"{knob} must be one of {ADVECTION}")
     if config.get("config_SGH", False):
-        _refuse("config_SGH", True, "subglacial hydrology (li_SGH_solve) is not ported yet",
-                "config_SGH = .false.")
+        subglacial_hydro_v842.check_config(config, precision)
     if not config.get("config_restore_calving_front", False):
         calving_v842.check_config(config)
-    if precision == "r8" and config.get("on_a_sphere", False):
-        _refuse("on_a_sphere", True,
-                "at RKIND 8 the velocity reconstruction calls glibc's binary64 cos and sin, which are LGPL and "
-                "not correctly rounded, so their words cannot be reproduced under the default licence",
+    if precision == "r8" and config.get("on_a_sphere", False) and not rkind.trig64():
+        _refuse("on_a_sphere", True, rkind.trig_refusal("the velocity reconstruction calls glibc's binary64 cos and sin"),
                 "on_a_sphere = .false. at RKIND 8")
-    if precision == "r8" and "eTheta" in velocity:
-        _refuse("eTheta", "computed",
-                "at RKIND 8 the strain-rate angle calls glibc's binary64 atan, which is LGPL and not correctly "
-                "rounded, so its words cannot be reproduced under the default licence",
+    if precision == "r8" and "eTheta" in velocity and not rkind.trig64():
+        _refuse("eTheta", "computed", rkind.trig_refusal("the strain-rate angle calls glibc's binary64 atan"),
                 "leave eTheta out of the velocity pool at RKIND 8")
 
 
@@ -184,6 +181,7 @@ def _set_timestep(precision: str, advec_dt, diff_dt, config: dict, seconds_to_ne
 
 
 def forward_euler_step(*, mesh: dict, geometry: dict, thermal: dict, velocity: dict, config: dict,
+                       hydro: dict | None = None,
                        seconds_to_next_force_time: int | None = None) -> None:
     """``li_time_integrator_forwardeuler`` for one block, in place.
 
@@ -277,6 +275,12 @@ def forward_euler_step(*, mesh: dict, geometry: dict, thermal: dict, velocity: d
     _function(precision, "li_clamp_thickness_v842")(_grid(n_cells), block, (g["thickness"], np.int32(n_cells)))
     geometry_v842.calculate_mask(mesh=m, geometry=g, **masks)
     _update_geometry(m, g, c)
+
+    # === subglacial hydrology
+    if c.get("config_SGH", False):
+        if hydro is None:
+            raise ValueError("config_SGH needs the hydro pool")
+        subglacial_hydro_v842.sgh_solve(mesh=m, geometry=g, thermal=t, velocity=v, hydro=hydro, config=c)
 
     # === calving
     if c.get("config_restore_calving_front", False):

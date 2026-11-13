@@ -34,8 +34,10 @@ REFUSED = [
     ({"windturbines_spec": "windturbines.txt"}, "windturbines_spec", "legacy turbine list",
      "fitch_wrf"),
     ({"windfarm_opt": 1}, "windfarm_opt", "legacy turbine list", "fitch_wrf"),
-    ({"sf_surf_irr_scheme": 1, "sf_surface_physics": 2, "irr_num_hours": 4}, "sf_surf_irr_scheme",
-     "IRR_PH_FIELD", "sf_surf_irr_scheme=0"),
+    ({"sf_surf_irr_scheme": 2, "irr_num_hours": 4, "irr_ph": 1}, "irr_ph",
+     "grid index", "irr_ph=0"),
+    ({"sf_surf_irr_scheme": 2, "irr_num_hours": 4, "irr_ph": 2}, "irr_ph",
+     "RANDOM_NUMBER", "irr_ph=0"),
     ({"lightning_option": 1, "do_radar_ref": 1}, "lightning_option", "discarded",
      "lightning_option=0"),
 ]
@@ -56,7 +58,8 @@ def test_each_silent_no_op_is_refused_by_name(overrides, knob, reason, alternati
 
 def test_off_values_are_not_refused():
     for overrides in ({"ifire": 0}, {"slope_rad": 0, "topo_shading": 0}, {"lightning_option": 0},
-                      {"sf_surf_irr_scheme": 0}, {"windturbines_spec": "none"},
+                      {"sf_surf_irr_scheme": 0}, {"irr_ph": 0},
+                      {"windturbines_spec": "none"},
                       {"windfarm_opt": 0}, {"wind_farm_scheme": "off"},
                       {"wind_farm_scheme": "fitch_wrf", "wind_farms": "off"}):
         try:

@@ -24,7 +24,9 @@ def test_distinct_non_wrf_selector_and_dispatch():
     row=document["components"]["pbl"]["options"]["ccpp-tke-edmf"]
     assert row["selectors"]=={"bl_pbl_physics":901}
     assert row["wrf_counterpart"]["exists"] is False
-    assert row["constraints"]["required_settings"]["bldt"]==0
+    # A positive cadence is admitted: its held TKE/scalar rate bank rides
+    # the restart extra-scalar stream (woof.core.satmedmf.held_rate_names).
+    assert "bldt" not in row["constraints"]["required_settings"]
 
 def test_carrier_allocated_and_inventoried():
     c=cfg();state=DomainState(c,array_module=np)
@@ -36,12 +38,22 @@ def test_carrier_allocated_and_inventoried():
 
 @pytest.mark.parametrize("change,reason",[
     ({"moist":False,"mp_physics":0},"moist=true"),
-    ({"bldt":1.},"positive cadence"),
     ({"sf_sfclay_physics":5},"fm/fh"),
     ({"nz":4},"mass-flux searches")])
 def test_refusal_names_breakage(change,reason):
     with pytest.raises(ValueError,match=reason):
         validate_run_config(cfg(**change))
+
+def test_positive_cadence_is_admitted_with_its_held_bank():
+    from woof.core.satmedmf import held_rate_names_for_config
+    from woof.core.preflight import physics_array_shapes
+    held=validate_run_config(cfg(bldt=2./60.))
+    assert held_rate_names_for_config(held)==("tke_edmf","qs","qg")
+    assert held_rate_names_for_config(cfg())==()
+    shapes=physics_array_shapes(held)
+    for name in ("tke_edmf","qs","qg"):
+        assert shapes[f"pbl_tendencies/extra_scalars/{name}"]==(24,16,16)
+    assert not [k for k in physics_array_shapes(cfg()) if "extra_scalars" in k]
 
 def test_bare_namelist_keeps_the_non_wrf_selector(tmp_path):
     from woof.namelist_import import import_namelists

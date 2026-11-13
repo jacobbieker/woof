@@ -301,7 +301,8 @@ def _drive_forecast_loop(monkeypatch, tmp_path, refuse_step, *, stop_on_refusal)
     try:
         forecast.execute_forecast(host={"scalar_names": ("qv",), "surface_accumulators": (),
                                         "prepared": SimpleNamespace(mesh=None)},
-            schedule={"capture_steps": [], "labels": {}, "steps": 4}, cache_root=tmp_path,
+            schedule={"capture_steps": [], "labels": {}, "steps": 4,
+                      "start_time": "2026-01-01_00:00:00"}, cache_root=tmp_path,
             output_root=tmp_path, arwen_checkout=tmp_path, source_receipt={}, authority_receipt={},
             fingerprint_every=0, stop_on_refusal=stop_on_refusal)
     except _LoopDone:

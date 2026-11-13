@@ -1052,6 +1052,10 @@ PREPARATION_INERT_RUN_FIELDS = SFIRE_PREPARATION_INERT_RUN_FIELDS | frozenset({
     "run.smoke_off_reason",
     # Eclipse attenuation is evaluated at forecast UTC; preparation never reads it.
     "run.ra_sw_eclipse",
+    # RADM2SORG's opt-in so2so4 cloud threshold is read by the chem step
+    # only (woof/core/chem_radm2.py); the chem cold start runs in the
+    # forecast, so one prepared bundle serves every value.
+    "run.so2so4_qc_threshold",
     # The zero-layer sea ice model (woof/ocean/seaice) is seeded by the
     # forecast's initialize_physics from the restored surface state; nothing
     # under woof/ingest names it, so one prepared bundle serves either value.

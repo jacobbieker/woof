@@ -61,7 +61,8 @@ GIB = 1024 ** 3
 #: What this build's probe ships for a card: its census, no sample.
 _CARD = {"name": "fixture 68-SM card", "multiprocessor_count": 68,
          "max_threads_per_multiprocessor": 1536,
-         "default_stack_limit_bytes": 1024, "compile_platform": None}
+         "default_stack_limit_bytes": 1024, "compile_platform": None,
+         "backend": "cuda"}
 
 
 def _payload(free_bytes: int, *, total_bytes: int = 10 * GIB,
@@ -479,6 +480,8 @@ def test_a_declared_capacity_names_the_card_whose_total_it_is(declared, total, e
 
 
 class _Runtime:
+    is_hip = False
+
     @staticmethod
     def memGetInfo():
         return 8 * GIB, 10 * GIB
@@ -535,6 +538,8 @@ def test_the_probe_ships_the_census_and_no_sample(tmp_path):
     (shadow / "cupy").mkdir(parents=True)
     (shadow / "cupy" / "__init__.py").write_text(textwrap.dedent("""\
         class _Runtime:
+            is_hip = False
+
             @staticmethod
             def deviceGetPCIBusId(device):
                 return "0000:01:00.0"

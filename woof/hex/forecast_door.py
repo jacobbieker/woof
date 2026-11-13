@@ -3876,6 +3876,22 @@ _BIND_REMEDY = (
 )
 
 
+def _selection_soil_levels(request: ForecastRequest, driver) -> dict[str, Any]:
+    """``{"soil_levels": n}`` when the selected column-suite row's land
+    surface integrates a soil column other than the frozen proof's, else
+    ``{}`` (the default backend, and every 4-level land surface)."""
+
+    if request.physics_backend == DEFAULT_BACKEND:
+        return {}
+    from . import cuda_suite_physics_v841 as adapter
+
+    try:
+        levels = int(adapter.soil_levels_for(request.physics_backend))
+    except Exception:  # noqa: BLE001 -- a row the adapter does not know binds as before
+        return {}
+    return {} if levels == int(driver.proof.N_SOIL_LEVELS) else {"soil_levels": levels}
+
+
 def _bind(binding, driver, request: ForecastRequest) -> dict[str, Any]:
     # The whole schedule and the run's timestep, always: the bind measures
     # stability and cadence integrality against what the run executes.
@@ -3902,6 +3918,10 @@ def _bind(binding, driver, request: ForecastRequest) -> dict[str, Any]:
             # The init's column is held to the row's at bind.  A preflight
             # with no init yet binds on the row's declaration alone.
             init=request.init if Path(request.init).is_file() else None,
+            # A generic-seam land surface with its own soil column (RUC's 9,
+            # Pleim-Xiu's, the slab's) holds the init to that count; every
+            # other run binds exactly as it always has.
+            **_selection_soil_levels(request, driver),
             pbl=request.pbl,
             les_model=request.les_model,
             allow_pbl_off_gray_zone=request.allow_pbl_off_gray_zone,
@@ -4965,6 +4985,11 @@ def _run_forecast(arguments: argparse.Namespace) -> int:
         raise _refuse(moving_refusal)
     from .speculative_contract import validate_output
     validate_output(request.out)
+    if getattr(arguments, "_door_argv", None) and not getattr(arguments, "preflight", False):
+        # The run's own command line, for `woof resume` / `woof branch`: the forecast writers record it
+        # beside the start record, once they have made the output directory (woof.hex.forecast_start).
+        from .continuation import REQUEST_ENV, request_text
+        os.environ[REQUEST_ENV] = request_text(arguments._door_argv)
     registry = load_registry(request.repo)
     samehost_options = None
     samehost = None

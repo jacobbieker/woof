@@ -1,0 +1,28 @@
+# glibc239_trig_flt64.cuh verification (tools/glibc239_libm_gpu/grade_trig.py), 2026-11-12.
+# Reference: the oracle host's libm (pb: GNU libc 2.44, AMD Ryzen 9 5950X, x86-64 with FMA+AVX2, so
+# glibc's ifunc picks __sin_fma/__cos_fma/__atan_fma).  glibc 2.44's s_sin.c, branred.c, s_atan.c and the
+# x86-64 FMA wrappers are glibc 2.39's (only the copyright years differ); its build of branred.c rounds
+# some huge-argument reductions differently, so for sin and cos the |x| >= 105414350 range is counted
+# apart (the transcription gives glibc 2.39's words there: the pinned words, and
+# tools/glibc239_libm_proof/verification.log for the Rust transcription it follows).
+# Argument stream: grade_trig_args.h (eight families: every binary64 word; |x| < 105414350 all binades;
+# 2^-27..2pi; 1/16..16; 16..atan's 2^52.3 bound; every branch point +- 2^23 ulp; near k pi/2; huge |x|).
+
+# cpu: pixi run -e default python tools/glibc239_libm_gpu/grade_trig.py cpu --count 4294967296 (pb)
+host libm: glibc 2.44; x86_64
+cpu sin: 4294967296 arguments; transcription vs glibc: 0 mismatches below 105414350; branred range: 720 of 1134096494 differ
+cpu cos: 4294967296 arguments; transcription vs glibc: 0 mismatches below 105414350; branred range: 759 of 1134093408 differ
+cpu atan: 4294967296 arguments; transcription vs glibc: 0 mismatches below 105414350
+pinned: 42 glibc 2.39 words: 0 mismatches
+
+# gpu, CUDA (RTX A6000, NVRTC --fmad=true): WOOF_BACKEND=cuda ... grade_trig.py gpu --count 268435456 (pb)
+gpu sin: 268435456 arguments; device vs host transcription: 0 mismatches; vs glibc 2.44: 0 mismatches below 105414350, 43 in the branred range
+gpu cos: 268435456 arguments; device vs host transcription: 0 mismatches; vs glibc 2.44: 0 mismatches below 105414350, 54 in the branred range
+gpu atan: 268435456 arguments; device vs host transcription: 0 mismatches; vs glibc 2.44: 0 mismatches below 105414350
+pinned: 42 glibc 2.39 words: 0 mismatches
+
+# gpu, Metal (Apple M3 Max, soft binary64): pixi run -e mlx python ... grade_trig.py gpu --count 268435456 (mac)
+gpu sin: 268435456 arguments; device vs host transcription: 0 mismatches; no glibc on this host
+gpu cos: 268435456 arguments; device vs host transcription: 0 mismatches; no glibc on this host
+gpu atan: 268435456 arguments; device vs host transcription: 0 mismatches; no glibc on this host
+pinned: 42 glibc 2.39 words: 0 mismatches

@@ -552,8 +552,12 @@ def test_the_request_bound_flag_and_the_flagless_door_give_one_answer(
 # 5.845.  The fit headroom, 5% of the budget, is now LARGER than that
 # withholding, so the fit target sits under the price across the whole
 # band and the flag's own budget is the number that clears it: from 5.57
-# the budget is above the price and the run is refused anyway.)
-TILE_BAND = [5.83, 5.835, 5.84]
+# the budget is above the price and the run is refused anyway.  Upstream
+# 1.1.6 prices the floor at 5,987,971,732 B and this fork's tree at
+# 5,988,791,841 B, read at 0.005 GiB steps from 5.84 to 5.905: the tile road
+# refuses through 5.85 and admits from 5.855.  Upstream's own 1.1.6 test
+# still named the 1.1.5 band and failed on it.)
+TILE_BAND = [5.84, 5.845, 5.85]
 
 
 @pytest.mark.parametrize("budget_gib", TILE_BAND)
@@ -583,7 +587,7 @@ def test_the_tile_roads_band_ends_where_its_own_budget_clears_the_price():
     """And it ends there rather than where the flat road's budget or the fit
     target does, which is the whole reason neither can be the number quoted."""
     plan = tc.plan_cyclone(cycle=CYCLE, point=POINT, sizing=CARD, hours=3,
-                           tiles="auto", nest_budget_gib=5.845)
+                           tiles="auto", nest_budget_gib=5.855)
     assert plan["nest"]["dimensions"] == list(tc.CHILD_DIMS)
 
 

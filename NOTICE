@@ -927,6 +927,44 @@ operation.
 
 --------------------------------------------------------------------------
 
+glibc 2.39 binary64 sin, cos and atan for the GPU -- IBM Accurate
+Mathematical Library (LGPL), opt-in, source checkout only
+
+tools/glibc239_libm_gpu/glibc239_trig_flt64.cuh transcribes glibc 2.39's
+binary64 sin, cos and atan, with their shared argument reduction, tables
+and dla.h helpers, to CUDA C++ (sysdeps/ieee754/dbl-64/s_sin.c, usncs.h,
+sincostab.c, branred.c, branred.h, s_atan.c, atnat.h, uatan.tbl and dla.h),
+by way of the glibc239-libm crate's Rust transcription above, in the form
+of glibc's x86-64 FMA IFUNC variants.  GPU kernels that must equal a
+gfortran oracle's binary64 sin, cos or atan word for word (MALI at RKIND 8:
+the strain-rate angle, the sphere's velocity reconstruction, the SHMIP
+forcings and 'seroussi' floating melt) compile it in.  Its notice reads
+"IBM Accurate Mathematical Library, written by International Business
+Machines Corp., Copyright (C) 2001-2024 Free Software Foundation, Inc.",
+under the GNU Lesser General Public License, version 2.1 or (at your
+option) any later version; the file keeps that notice and states that it
+was modified (transcribed to CUDA C++ in 2026).  The licence text is at
+licenses/LICENSE-glibc-LGPL-2.1.txt.
+
+THE TRANSCRIPTION IS OPT-IN.  Only a source checkout with
+WOOF_GLIBC239_LIBM64=1 set uses it (woof/core/glibc239_gpu.py; without it
+those configurations are refused by name).  It is not package data, so the
+recast-woof and metal-woof wheels and every default build contain none of
+its code, and nothing in this section applies to them.  The kernels that
+use it are compiled from source at run time on the user's own machine; the
+complete source of the header is this repository, so a modified header can
+be used in its place (WOOF_GLIBC239_LIBM64_SOURCE names another copy).
+Whoever distributes it, or a build that contains it, must keep that
+source available as LGPL 2.1 section 6 requires, and give its recipients
+licenses/LICENSE-glibc-LGPL-2.1.txt with it.
+
+The verification record (every argument stream of
+tools/glibc239_libm_gpu/grade_trig.py against the oracle host's glibc, on
+the CPU and on CUDA and Metal devices) is
+tools/glibc239_libm_gpu/verification.log, beside its harness.
+
+--------------------------------------------------------------------------
+
 CUDA powf transcription -- opt-in, source checkout only
 
 On the Apple-silicon (MLX) backend, cupy.power on binary32 under
