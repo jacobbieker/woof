@@ -112,6 +112,7 @@ module mpas_pool_routines
   type MPAS_pool_type
     type(pool_entry), dimension(maxEntries) :: e
     integer :: n = 0
+    integer :: cursor = 0   ! mpas_pool_begin_iteration / mpas_pool_get_next_member
   end type MPAS_pool_type
 
   interface mpas_pool_get_config
@@ -405,18 +406,36 @@ contains
     pool % e(i) % i2 => a
   end subroutine put_i2
 
+  ! Iteration visits every entry in the order it was put; a 3-D real array
+  ! (a tracer group) is an MPAS_POOL_FIELD member, anything else another type.
+  ! ocn_tend_tracer iterates the tracers pool this way.
   subroutine mpas_pool_begin_iteration(pool)
     type(MPAS_pool_type), intent(in) :: pool
-    print *, 'oracle stub: mpas_pool_begin_iteration is not provided'
-    stop 8
+    type(MPAS_pool_type), pointer :: p
+    p => pool_target(pool)
+    p % cursor = 0
   end subroutine mpas_pool_begin_iteration
 
   logical function mpas_pool_get_next_member(pool, iterator)
     type(MPAS_pool_type), intent(in) :: pool
     type(mpas_pool_iterator_type), intent(inout) :: iterator
-    print *, 'oracle stub: mpas_pool_get_next_member is not provided'
-    stop 8
+    type(MPAS_pool_type), pointer :: p
+    p => pool_target(pool)
+    mpas_pool_get_next_member = .false.
+    if (p % cursor >= p % n) return
+    p % cursor = p % cursor + 1
+    iterator % memberName = p % e(p % cursor) % name
+    iterator % memberType = 0
+    if (associated(p % e(p % cursor) % r3)) iterator % memberType = MPAS_POOL_FIELD
+    mpas_pool_get_next_member = .true.
   end function mpas_pool_get_next_member
+
+  ! the pool object itself, so the cursor can move under an intent(in) dummy
+  function pool_target(pool) result(p)
+    type(MPAS_pool_type), intent(in), target :: pool
+    type(MPAS_pool_type), pointer :: p
+    p => pool
+  end function pool_target
 
   subroutine get_field_1d(pool, name, f)
     type(MPAS_pool_type), intent(in) :: pool
