@@ -318,7 +318,7 @@ def make_case(name: str, seed: int, n_cells: int, n_levels: int, overrides: dict
         "riverRunoffFlux": uniform(0.0, 5.0e-6, nc + 1), "penetrativeTemperatureFlux": uniform(0.0, 0.05, nc + 1),
         "windStressZonal": uniform(-0.2, 0.2, nc + 1), "windStressMeridional": uniform(-0.2, 0.2, nc + 1),
         "index_surfaceVelocityZonal": 1, "index_surfaceVelocityMeridional": 2, "index_SSHGradientZonal": 1,
-        "index_SSHGradientMeridional": 2, "nAccumulatedCoupled": 3, "index_avgTemperatureSurfaceValue": 1,
+        "index_SSHGradientMeridional": 2, "nAccumulatedCoupled": 2, "index_avgTemperatureSurfaceValue": 1,
         "index_avgSSHGradientZonal": 1, "index_avgSSHGradientMeridional": 2,
         "avgTracersSurfaceValue": uniform(0.0, 300.0, (nc + 1, nt)),
         "avgSurfaceVelocity": uniform(-0.3, 0.3, (nc + 1, 2)), "avgSSHGradient": uniform(-1.0e-5, 1.0e-5, (nc + 1, 2)),
