@@ -208,6 +208,53 @@ SRTM_GL1_NODATA = -32768.0
 SRTM_GL1_VERTICAL_DATUM = "EGM96 geoid (orthometric metres)"
 
 
+#: GEM-15 v1 (Google Research; experimental, under review): near-global
+#: 15 m surface (``dsm``) and bare-earth terrain (``dtm``) models from
+#: sub-metre optical stereo, one Cloud-Optimized BigTIFF per 1x1-degree
+#: cell in its local UTM zone, in Google's public bucket.  Anonymous HTTPS
+#: range reads; no Earth Engine, no account, no token.  Cell URLs come from
+#: the pinned STAC snapshot (:mod:`woof.static.gem15`), never a formula.
+GEM15_BUCKET_URL = ("https://storage.googleapis.com/"
+                    "climate-and-sustainability/gem-15")
+GEM15_SOURCE_URL = (
+    "https://developers.google.com/earth-engine/datasets/catalog/"
+    "projects_climate-and-sustainability_assets_gem-15_v1")
+GEM15_LICENSE = ("CC-BY-4.0", "https://creativecommons.org/licenses/by/4.0/")
+#: The catalog page's required attribution string comes first, verbatim.
+GEM15_ATTRIBUTION = (
+    "This dataset is produced by Google. GEM-15 v1 (experimental): "
+    "Batchu, Neumann, Li, Allen, Zhang and Van Arsdale (2026), "
+    "\"GEM-15: Global surface and terrain elevation models (15 meters) "
+    "from sub-meter optical stereo imagery\", EarthArXiv, "
+    "doi:10.31223/X55N75, CC BY 4.0; read by woof from "
+    "gs://climate-and-sustainability/gem-15, reprojected from its UTM "
+    "cells and area-averaged to the model grid.")
+#: Elevations are metres above the EGM96 geoid (EPSG:5773), the same datum
+#: as SRTM.  No shift to EGM2008 (Copernicus) is applied: the two geoids
+#: differ by up to about a metre, inside the product's own regional bias.
+GEM15_VERTICAL_DATUM = "EGM96 geoid (orthometric metres)"
+#: The catalog says 60 S .. 84 N; the pinned snapshot's southernmost cells
+#: (the South Orkney Islands) start at 61 S, so the envelope is the
+#: published one.  Russia, China, Mongolia, Greenland and Antarctica are
+#: excluded and India is deliberately offset (:mod:`woof.static.gem15`).
+GEM15_LAT_MIN = -61.0
+GEM15_LAT_MAX = 84.0
+#: Native pixel, metres in the cell's UTM plane.
+GEM15_PIXEL_M = 15.0
+#: The geographic lattice a GEM-15 window is mosaicked on: half an arc
+#: second (about 15.4 m of latitude), so no 15 m pixel is skipped.
+GEM15_LAT_STEP_DEG = 1.0 / 7200.0
+#: What a run that selects GEM-15 prints and records.
+GEM15_EXPERIMENTAL_WARNING = (
+    "GEM-15 is an EXPERIMENTAL dataset (Google Research, preprint under "
+    "review): heights are on EGM96 with regional offsets against lidar of "
+    "-4.8 to +1.9 m that woof does not correct, the bare-earth model is "
+    "weaker under closed canopy, and water, snow, ice and low-texture "
+    "pixels are holes that keep the 30-arc-second baseline.  Compare "
+    "against terrain_source = \"copernicus-dem-glo30\" before relying on "
+    "it.")
+
+
 class CoverageError(RuntimeError):
     """A source does not cover the requested footprint; names what is
     missing."""
@@ -296,6 +343,10 @@ class SourceCoverage:
     #: (see :func:`domain_footprint`), would be reported as leaving an
     #: envelope that in truth wraps around and meets itself.
     global_lon: bool = False
+    #: The producer calls the dataset experimental.  Such a source is never
+    #: chosen by ``auto``, prints a warning whenever it is used, and says
+    #: so in its receipt echo.
+    experimental: bool = False
 
     def outside(self, bbox: FootprintBBox) -> dict[str, float]:
         """Per-edge overshoot in degrees; empty when fully covered."""
@@ -361,7 +412,10 @@ class SourceCoverage:
                 "license_id": self.license_id,
                 "license_url": self.license_url,
                 "attribution": self.attribution, "note": self.note,
-                "global_lon": self.global_lon}
+                "global_lon": self.global_lon,
+                # Only an experimental row carries the key, so the echo
+                # (and receipt) of every established source is unchanged.
+                **({"experimental": True} if self.experimental else {})}
 
 
 #: Envelope where the two US collections are JOINTLY published: 3DEP staged
@@ -413,6 +467,41 @@ TERRAIN_SOURCES: dict[str, SourceCoverage] = {
              "anonymous OpenTopography mirror because NASA's own "
              "distribution requires an Earthdata login.",
         global_lon=True),
+}
+
+#: GEM-15's published extent.  The excluded countries and India's offset
+#: band are inside it and are policy, not envelope: a footprint touching
+#: them takes Copernicus GLO-30 instead (:func:`woof.static.gem15.fallback_reason`).
+_GEM15_ENVELOPE = FootprintBBox(lat_min=GEM15_LAT_MIN, lat_max=GEM15_LAT_MAX,
+                                lon_min=-180.0, lon_max=180.0)
+_GEM15_NOTE = (
+    "GEM-15 is published 61 S to 84 N, without Russia, China, Mongolia, "
+    "Greenland or Antarctica, and is intentionally offset inside India and "
+    "a band outside its border; a domain touching any of those takes "
+    "Copernicus GLO-30 instead, with a warning.  Water bodies, snow, ice "
+    "and low-texture pixels are holes that keep the 30-arc-second "
+    "baseline.  Heights are EGM96, not corrected for the product's "
+    "regional lidar offsets.")
+
+#: Terrain sources selectable by name only (never by ``auto``), each one
+#: printing :data:`GEM15_EXPERIMENTAL_WARNING` whenever it is used.  Kept
+#: out of :data:`TERRAIN_SOURCES` so nothing that walks the established
+#: sources (``auto``, the default rows) can reach them;
+#: :func:`terrain_source_coverage` finds them by name.
+EXPERIMENTAL_TERRAIN_SOURCES: dict[str, SourceCoverage] = {
+    "gem15-dtm": SourceCoverage(
+        source_id="gem15-dtm", role="terrain", envelope=_GEM15_ENVELOPE,
+        nominal_resolution="15 m (bare-earth DTM, local UTM cells)",
+        source_url=GEM15_SOURCE_URL, license_id=GEM15_LICENSE[0],
+        license_url=GEM15_LICENSE[1], attribution=GEM15_ATTRIBUTION,
+        note=_GEM15_NOTE, global_lon=True, experimental=True),
+    "gem15-dsm": SourceCoverage(
+        source_id="gem15-dsm", role="terrain", envelope=_GEM15_ENVELOPE,
+        nominal_resolution="15 m (surface DSM with buildings and canopy, "
+                           "local UTM cells)",
+        source_url=GEM15_SOURCE_URL, license_id=GEM15_LICENSE[0],
+        license_url=GEM15_LICENSE[1], attribution=GEM15_ATTRIBUTION,
+        note=_GEM15_NOTE, global_lon=True, experimental=True),
 }
 
 #: Land-cover fetch kinds.  Each is a way a collection is PUBLISHED, not a
@@ -599,13 +688,22 @@ def landcover_source_ids_by_wps_token() -> dict[str, str]:
 
 
 def terrain_source_coverage(source_id: str) -> SourceCoverage:
-    """Look up one terrain source, refusing an unknown id by name."""
+    """Look up one terrain source, refusing an unknown id by name.
+
+    The experimental rows (:data:`EXPERIMENTAL_TERRAIN_SOURCES`) are found
+    by name too; ``auto`` never reaches them.
+    """
     try:
         return TERRAIN_SOURCES[source_id]
     except KeyError:
+        pass
+    try:
+        return EXPERIMENTAL_TERRAIN_SOURCES[source_id]
+    except KeyError:
         raise CoverageError(
             f"unknown terrain source {source_id!r}; known sources are "
-            f"{sorted(TERRAIN_SOURCES)}") from None
+            f"{sorted(TERRAIN_SOURCES)}, and by name only the experimental "
+            f"{sorted(EXPERIMENTAL_TERRAIN_SOURCES)}") from None
 
 
 def _continued_longitude_range(lon) -> tuple[float, float]:
@@ -2095,7 +2193,10 @@ __all__ = [
     "COPERNICUS_DEM_ATTRIBUTION", "COPERNICUS_DEM_LAT_STEP_DEG",
     "COPERNICUS_DEM_LICENSE", "COPERNICUS_DEM_SOURCE_URL",
     "COPERNICUS_DEM_TILE_URL", "COPERNICUS_DEM_VERTICAL_DATUM",
-    "CoverageError", "FETCH_ATTEMPTS", "FetchedFile", "FootprintBBox",
+    "CoverageError", "EXPERIMENTAL_TERRAIN_SOURCES", "FETCH_ATTEMPTS",
+    "FetchedFile", "FootprintBBox", "GEM15_ATTRIBUTION", "GEM15_BUCKET_URL",
+    "GEM15_EXPERIMENTAL_WARNING", "GEM15_LAT_STEP_DEG", "GEM15_LICENSE",
+    "GEM15_PIXEL_M", "GEM15_SOURCE_URL", "GEM15_VERTICAL_DATUM",
     "HIGHRES_FETCH_REMEDY", "HighresFetchRefusal", "LANDCOVER_SOURCES",
     "SOILGRIDS_COMPONENTS", "SOILGRIDS_CRS", "SOILGRIDS_DEPTHS",
     "SOILGRIDS_NODATA", "SOILGRIDS_SCALE", "SRTM_GL1_LICENSE",
