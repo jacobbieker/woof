@@ -157,9 +157,12 @@ _LANDUSEF_MOSAIC = SurfaceInput(
     "geogrid's LANDUSEF on the mesh: each Voronoi cell's pixel shares of the "
     "21-category with-lakes MODIS land use (woof hex surface-statics --fields "
     "landusef)", bounds=(0.0, 1.0))
-_SOILCTOP = _unstaged(
-    "soilctop", "SOILCTOP", "float32",
-    "per-cell top-soil category fractions from the static builder (plan 1.6)")
+#: geogrid's SOILCTOP on the mesh, which RUC's mosaic_soil reads.
+_SOILCTOP_STAGED = SurfaceInput(
+    "soilctop", "SOILCTOP", "categories", "float32", True,
+    "geogrid's SOILCTOP on the mesh: each Voronoi cell's pixel shares of the "
+    "16-category top-layer soil (WPS soiltype_top_30s) (woof hex "
+    "surface-statics --fields soilctop)", bounds=(0.0, 1.0))
 _SOILCBOT = _unstaged(
     "soilcbot", "SOILCBOT", "float32",
     "per-cell bottom-soil category fractions from the static builder (plan 1.6)")
@@ -230,8 +233,8 @@ CONTRACT: tuple[SchemeInputs, ...] = (
                  lambda cfg: int(_value(cfg, "sf_surface_physics")) == 3
                  and (int(_value(cfg, "mosaic_lu")) or int(_value(cfg, "mosaic_soil"))),
                  lambda cfg: tuple(
-                     row for switch, row in (("mosaic_lu", _LANDUSEF),
-                                             ("mosaic_soil", _SOILCTOP))
+                     row for switch, row in (("mosaic_lu", _LANDUSEF_MOSAIC),
+                                             ("mosaic_soil", _SOILCTOP_STAGED))
                      if int(_value(cfg, switch)))),
     SchemeInputs("noah_mosaic", "sf_surface_physics=2 with sf_surface_mosaic=1",
                  lambda cfg: int(_value(cfg, "sf_surface_physics")) == 2
@@ -528,9 +531,11 @@ def bind(physics: Mapping[str, Any] | None, path: str | Path | None, *,
                     f"file carries no {item.variable}",
                     f"`woof hex surface-statics` with the {need.scheme} fields")
             variable = dataset.variables[item.variable]
-            want = (("nLandCat", "nCells") if item.kind == "categories"
-                    else ("nCells",))
-            if tuple(variable.dimensions) != want:
+            dims = tuple(variable.dimensions)
+            ok = (len(dims) == 2 and dims[1] == "nCells" if item.kind == "categories"
+                  else dims == ("nCells",))
+            want = "(<categories>, nCells)" if item.kind == "categories" else "(nCells,)"
+            if not ok:
                 raise ValueError(
                     f"{item.variable} dimensions {variable.dimensions} != {want}")
             values = np.ascontiguousarray(

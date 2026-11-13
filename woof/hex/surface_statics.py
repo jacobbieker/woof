@@ -333,7 +333,11 @@ def lake_mask_vote(geometry, assigner, water: np.ndarray, dataset, *,
 
 
 #: The field groups ``--fields`` names: each is one scheme's inputs.
-FIELD_GROUPS = ("lake", "urban", "landusef", "irrigation")
+FIELD_GROUPS = ("lake", "urban", "landusef", "irrigation", "soilctop", "soilcbot")
+#: geogrid's soil-category fraction fields and their WPS datasets (GEOGRID.TBL
+#: SOILCTOP/SOILCBOT, dest_type categorical, 16 categories).
+SOIL_FRACTION_DATASETS = {"soilctop": ("SOILCTOP", "soiltype_top_30s"),
+                          "soilcbot": ("SOILCBOT", "soiltype_bot_30s")}
 
 
 def landuse_fractions(counts: np.ndarray, cmin: int
@@ -526,6 +530,17 @@ def build(static: Path, out: Path, *, geog_root: Path | None,
                      index_sha256=_index_sha256(dataset.path))
         provenance["urban"] = urban
         written["FRC_URB2D"] = frc
+    for group, (variable, name) in SOIL_FRACTION_DATASETS.items():
+        if group not in groups:
+            continue
+        dataset = geog(name)
+        counts, cmin, window = category_counts(
+            geometry, need_assigner(), np.ones(n, dtype=bool), dataset,
+            progress=progress)
+        written[variable], provenance[group] = landuse_fractions(counts, cmin)
+        provenance[group].update(
+            dataset=dataset.path.name, source_window=list(window),
+            index_sha256=_index_sha256(dataset.path))
     if "irrigation" in groups:
         dataset = geog(IRRIGATION_DATASET)
         written["IRRIGATION"], provenance["irrigation"] = irrigation_cells(
@@ -542,11 +557,15 @@ def build(static: Path, out: Path, *, geog_root: Path | None,
             # holds the file to its mesh's cells and their order.
             for name, values in (("latCell", lat), ("lonCell", lon)):
                 target.createVariable(name, "f8", ("nCells",))[:] = values
-            if any(values.ndim == 2 for values in fields.values()):
-                target.createDimension("nLandCat", max(
-                    values.shape[0] for values in fields.values() if values.ndim == 2))
             for name, values in fields.items():
-                dims = ("nLandCat", "nCells") if values.ndim == 2 else ("nCells",)
+                if values.ndim == 2:
+                    # geogrid's own category dimension names.
+                    dim = "nSoilCat" if name.startswith("SOILC") else "nLandCat"
+                    if dim not in target.dimensions:
+                        target.createDimension(dim, values.shape[0])
+                    dims = (dim, "nCells")
+                else:
+                    dims = ("nCells",)
                 variable = target.createVariable(name, values.dtype, dims)
                 variable[:] = values
             target.setncattr("schema", SCHEMA)

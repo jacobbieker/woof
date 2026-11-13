@@ -453,3 +453,37 @@ def test_hex_irrigation_columns_are_wrf_irrigation_twin_columns(scheme):
     assert not cases._finite(frames)
     assert summary["calls"] >= 1 and summary["calls_adding_water"] >= 1, summary
     assert not any(summary["step_words_differing"].values()), summary
+
+
+def _ruc_mosaic_mapping(inputs=True):
+    physics = dict(suite.MPAS_DEFAULT_PHYSICS, sf_surface_physics=3,
+                   num_soil_layers=9, mosaic_lu=1, mosaic_soil=1)
+    landusef = np.zeros((21, NCOL), np.float32)
+    landusef[9] = [0.6, 0.5, 1.0, 0.4, 0.7, 0.3, 0.8, 0.5]
+    landusef[11] = 1.0 - landusef[9]
+    soilctop = np.zeros((16, NCOL), np.float32)
+    soilctop[5] = [0.5, 1.0, 0.25, 0.75, 0.5, 0.0, 1.0, 0.6]
+    soilctop[2] = 1.0 - soilctop[5]
+    values = _mapping(physics, {"landusef": landusef, "soilctop": soilctop}
+                      if inputs else None)
+    values["land_surface_scheme"] = "ruc"
+    return values
+
+
+def test_the_ruc_mosaic_seam_refuses_without_its_fractions():
+    with pytest.raises(ValueError, match="missing .*landusef"):
+        _seal(_ruc_mosaic_mapping(inputs=False))
+
+
+def test_hex_ruc_mosaic_columns_are_wrf_ruc_twin_columns():
+    summary: dict = {}
+    restore = _twin_module("hex_ruc_twin")._install(summary)
+    try:
+        seam = suite.run_mpas_column_physics(**_seal(_ruc_mosaic_mapping()).arwen_kwargs())
+        frames = cases.run(cp, seam, 4)
+    finally:
+        restore()
+    assert not cases._finite(frames)
+    assert summary["calls"] >= 1 and summary["mosaic_lu"] == summary["mosaic_soil"] == 1
+    assert not any(summary["step_words_differing"].values()), {
+        key: value for key, value in summary["step_words_differing"].items() if value}
