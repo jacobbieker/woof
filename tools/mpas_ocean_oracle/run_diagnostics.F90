@@ -4,7 +4,8 @@
 !   run_diagnostics INPUT.bin OUTPUT.bin
 !
 ! INPUT.bin is written by woof.verify.mpas_ocean_diagnostics_oracle.  It is
-! self-describing: dt, then every config (name, type, value), then every
+! self-describing: dt, then every config (name, type: 1 real, 3 logical,
+! 4 character; value), then every
 ! field (pool, name, kind, rank, shape, words).  Kinds: 1 real array, 2
 ! integer array, 3 a dimension, 4 a dimension array (nCellsArray, ...), 5 an
 ! absent field (a package that is off: an unassociated pointer, which the
@@ -57,7 +58,6 @@ program run_diagnostics
   real(kind=RKIND) :: rvalue, dt
   integer :: ivalue
   real(kind=RKIND), pointer :: rc
-  integer, pointer :: ic
   logical, pointer :: lc
   character(len=StrKIND), pointer :: cc
   integer, pointer :: d0
@@ -89,11 +89,6 @@ program run_diagnostics
         allocate(rc)
         rc = rvalue
         call stub_pool_put_config(configs, trim(cname), rc)
-     case (2)
-        read(u) ivalue
-        allocate(ic)
-        ic = ivalue
-        call stub_pool_put_config(configs, trim(cname), ic)
      case (3)
         read(u) ivalue
         allocate(lc)
