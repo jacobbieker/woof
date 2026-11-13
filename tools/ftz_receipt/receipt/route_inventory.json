@@ -9,13 +9,13 @@
     "cupy.ReductionKernel",
     "cupy.cuda.compiler.compile_using_nvrtc"
   ],
-  "site_count": 663,
+  "site_count": 664,
   "site_count_by_kind": {
     "cupy.ElementwiseKernel": 45,
     "cupy.RawKernel": 111,
     "cupy.RawModule": 296,
     "cupy.ReductionKernel": 16,
-    "cupy.cuda.compiler.compile_using_nvrtc": 195
+    "cupy.cuda.compiler.compile_using_nvrtc": 196
   },
   "site_count_by_surface": {
     "other": {
@@ -29,7 +29,7 @@
       "cupy.RawKernel": 39,
       "cupy.RawModule": 99,
       "cupy.ReductionKernel": 9,
-      "cupy.cuda.compiler.compile_using_nvrtc": 120
+      "cupy.cuda.compiler.compile_using_nvrtc": 121
     },
     "tests": {
       "cupy.ElementwiseKernel": 7,
@@ -6956,7 +6956,7 @@
     },
     {
       "file": "woof/core/dycore.py",
-      "line": 323,
+      "line": 310,
       "column": 11,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
@@ -6976,7 +6976,7 @@
     },
     {
       "file": "woof/core/dycore.py",
-      "line": 354,
+      "line": 341,
       "column": 11,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
@@ -9250,7 +9250,7 @@
     },
     {
       "file": "woof/fddaobs/forecast.py",
-      "line": 96,
+      "line": 113,
       "column": 11,
       "surface": "package",
       "constructor": "cp.RawModule",
@@ -9270,7 +9270,7 @@
     },
     {
       "file": "woof/fddaobs/forecast.py",
-      "line": 202,
+      "line": 219,
       "column": 11,
       "surface": "package",
       "constructor": "cp.RawModule",
@@ -10083,6 +10083,22 @@
     {
       "file": "woof/hex/mpas_ocean/pgrad_hmix_v842.py",
       "line": 109,
+      "column": 15,
+      "surface": "package",
+      "constructor": "compile_using_nvrtc",
+      "constructor_kind": "cupy.cuda.compiler.compile_using_nvrtc",
+      "enclosing": "_module_on",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "options",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "image, _ = compile_using_nvrtc(module_source(precision), options, None,"
+    },
+    {
+      "file": "woof/hex/mpas_ocean/split_step_v842.py",
+      "line": 87,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",

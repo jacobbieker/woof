@@ -65,7 +65,14 @@ build.sh cuts `ocn_time_integrator_split`'s declarations, config lookups and
 stage 2 verbatim out of `mpas_ocn_time_integration_split.F` (awk ranges)
 into `btr_subcycle_cut_head.F90`'s module. The stubs give a field's time
 level 2 as the pool entry `NAME@2` and make a halo exchange the identity.
-`run_diagnostics.F90`, `run_tracer_advection.F90`, `run_tracer_hmix.F90`, `run_tend_tracer.F90`, `run_vmix.F90`, `run_vert_transport.F90` and `run_btr_subcycle.F90` read and write
+`run_split_step.F90` drives one whole `ocn_time_integrator_split` (cut
+verbatim) over every module it reaches, compiled verbatim:
+`mpas_ocn_time_average_coupled.F`, `mpas_ocn_effective_density_in_land_ice.F`,
+and the two `mpas_reconstruct` routines cut out of
+`mpas_vector_reconstruction.F` (`vector_reconstruction_cut_head.F90`). GM is
+replaced by stand-ins (`stubs_split.F90`). The driver computes the starting
+diagnostics first, as MPAS's init does.
+`run_diagnostics.F90`, `run_tracer_advection.F90`, `run_tracer_hmix.F90`, `run_tend_tracer.F90`, `run_vmix.F90`, `run_vert_transport.F90`, `run_btr_subcycle.F90` and `run_split_step.F90` read and write
 `oracle_stream.F90`'s self-describing streams.
 
 gfortran calls `expf`/`cosf`/`sinf` (RKIND 4) and `exp` (RKIND 8). On glibc
@@ -88,6 +95,7 @@ pixi run -e default python tools/mpas_ocean_oracle/make_fixture.py "$BUILD_DIR" 
 pixi run -e default python tools/mpas_ocean_oracle/make_fixture.py "$BUILD_DIR" --piece vmix
 pixi run -e default python tools/mpas_ocean_oracle/make_fixture.py "$BUILD_DIR" --piece vert_transport
 pixi run -e default python tools/mpas_ocean_oracle/make_fixture.py "$BUILD_DIR" --piece btr_subcycle
+pixi run -e default python tools/mpas_ocean_oracle/make_fixture.py "$BUILD_DIR" --piece split_step
 ```
 
 build.sh checks `SOURCES.sha256` and builds `run_oracle_r4` and
@@ -103,6 +111,6 @@ pixi run -e default python -m pytest tests/test_mpas_ocean_tend_parity.py tests/
     tests/test_mpas_ocean_diagnostics_parity.py tests/test_mpas_ocean_tracer_advection_parity.py \
     tests/test_mpas_ocean_tracer_hmix_parity.py tests/test_mpas_ocean_tend_tracer_parity.py \
     tests/test_mpas_ocean_vmix_parity.py tests/test_mpas_ocean_vert_transport_parity.py \
-    tests/test_mpas_ocean_btr_subcycle_parity.py
+    tests/test_mpas_ocean_btr_subcycle_parity.py tests/test_mpas_ocean_split_step_parity.py
 pixi run -e default woof hex ocean verify
 ```

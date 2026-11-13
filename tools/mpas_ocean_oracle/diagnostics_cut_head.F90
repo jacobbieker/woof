@@ -3,7 +3,7 @@
 ! ocn_diagnostics_cut.F: ocn_diagnostic_solve, ocn_diagnostics_init,
 ! ocn_compute_land_ice_flux_input_fields, ocn_compute_KPP_input_fields
 ! (which ocn_tend_tracer calls when KPP is on) and
-! ocn_vert_transport_velocity_top.  This header repeats the module's
+! ocn_vert_transport_velocity_top and ocn_fuperp.  This header repeats the module's
 ! own USE list (less the modules only its other routines need: the vector
 ! reconstruction, stream manager, IO units and GM) and its module variables;
 ! the routines follow it unchanged.
@@ -23,7 +23,8 @@ module ocn_diagnostics
    public :: ocn_diagnostic_solve, &
              ocn_diagnostics_init, &
              ocn_compute_KPP_input_fields, &
-             ocn_vert_transport_velocity_top
+             ocn_vert_transport_velocity_top, &
+             ocn_fuperp
    integer :: ke_cell_flag, ke_vertex_flag
    real (kind=RKIND) ::  fCoef
    real (kind=RKIND), pointer ::  coef_3rd_order

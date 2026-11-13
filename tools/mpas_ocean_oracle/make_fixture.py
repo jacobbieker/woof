@@ -16,7 +16,8 @@ diagnostics`` runs ``run_diagnostics_{r4,r8}`` into
 ``--piece tend_tracer`` ``run_tend_tracer_{r4,r8}`` into ``tests/data/oracles/mpas_ocean_tend_tracer``,
 ``--piece vmix`` ``run_vmix_{r4,r8}`` into ``tests/data/oracles/mpas_ocean_vmix``,
 ``--piece vert_transport`` ``run_vert_transport_{r4,r8}`` into ``tests/data/oracles/mpas_ocean_vert_transport``,
-``--piece btr_subcycle`` ``run_btr_subcycle_{r4,r8}`` into ``tests/data/oracles/mpas_ocean_btr_subcycle``
+``--piece btr_subcycle`` ``run_btr_subcycle_{r4,r8}`` into ``tests/data/oracles/mpas_ocean_btr_subcycle``,
+``--piece split_step`` ``run_split_step_{r4,r8}`` into ``tests/data/oracles/mpas_ocean_split_step``
 (their cases are built per precision).  Writes ``oracle-r4.npz`` and
 ``oracle-r8.npz`` (``<case>/<field>``) and ``inputs.sha256`` (every case's
 input-stream digest at each precision).
@@ -36,7 +37,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from woof.verify import (  # noqa: E402
-    mpas_ocean_btr_subcycle_oracle, mpas_ocean_diagnostics_oracle, mpas_ocean_eos_oracle, mpas_ocean_pgrad_hmix_oracle, mpas_ocean_tend_oracle,
+    mpas_ocean_btr_subcycle_oracle, mpas_ocean_diagnostics_oracle, mpas_ocean_split_step_oracle, mpas_ocean_eos_oracle, mpas_ocean_pgrad_hmix_oracle, mpas_ocean_tend_oracle,
     mpas_ocean_tend_tracer_oracle, mpas_ocean_tendency_oracle, mpas_ocean_tracer_advection_oracle,
     mpas_ocean_tracer_hmix_oracle, mpas_ocean_vert_transport_oracle, mpas_ocean_vmix_oracle)
 
@@ -51,7 +52,8 @@ PIECES = {"tend": (mpas_ocean_tend_oracle, "run_oracle"),
           "tend_tracer": (mpas_ocean_tend_tracer_oracle, "run_tend_tracer"),
           "vmix": (mpas_ocean_vmix_oracle, "run_vmix"),
           "vert_transport": (mpas_ocean_vert_transport_oracle, "run_vert_transport"),
-          "btr_subcycle": (mpas_ocean_btr_subcycle_oracle, "run_btr_subcycle")}
+          "btr_subcycle": (mpas_ocean_btr_subcycle_oracle, "run_btr_subcycle"),
+          "split_step": (mpas_ocean_split_step_oracle, "run_split_step")}
 
 
 def run_case(oo, binary: Path, case: dict, precision: str) -> dict[str, np.ndarray]:
