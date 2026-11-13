@@ -82,6 +82,10 @@ class SurfaceInput:
     #: The closed range a ``cell`` input's values must lie in (a fraction is
     #: in [0, 1]); ``None``: any finite value.
     bounds: tuple[float, float] | None = None
+    #: A ``derived`` input's value: ``derive(cfg, context)`` with the run's
+    #: own per-cell ``ivgtyp``/``latitude_deg`` and ``start_time``; ``None``
+    #: derives zeros.
+    derive: Callable[[Any, Mapping[str, Any]], np.ndarray] | None = None
 
 
 @dataclass(frozen=True)
@@ -142,9 +146,33 @@ def _unstaged(keyword, variable, dtype, needs, kind="cell"):
     return SurfaceInput(keyword, variable, kind, dtype, False, "not staged", needs)
 
 
-_THERMAL_INERTIA = _unstaged(
-    "thermal_inertia", "THC", "float32",
-    "LANDUSE.TBL THERIN/100 per cell from the static's land use (plan 1.6)")
+def _derive_thermal_inertia(cfg, context):
+    """THC = LANDUSE.TBL THERIN/100 of the cell's own category, as WRF's
+    landuse_init sets it (module_physics_init.F; woof.core.landuse): the season
+    from the start's julian day (winter before day 105 or after 288), reversed
+    south of the equator.  WRF reverses by the domain's CEN_LAT; a mesh, which
+    can span both hemispheres, takes each cell's own latitude."""
+    from woof.core.landuse import load_landuse_table
+
+    table = load_landuse_table(str(context.get("mminlu", "MODIFIED_IGBP_MODIS_NOAH")), None)
+    ivgtyp = np.asarray(context["ivgtyp"], dtype=np.int64).reshape(-1)
+    latitude = np.asarray(context["latitude_deg"], dtype=np.float64).reshape(-1)
+    julday = int(context["start_time"].timetuple().tm_yday)
+    north = 2 if julday < 105 or julday > 288 else 1
+    season = np.where(latitude < 0.0, 3 - north, north)
+    if table.luseas == 1:
+        season[:] = 1
+    if np.any(ivgtyp < 1) or np.any(ivgtyp > table.lucats):
+        raise ValueError("an ivgtyp category lies outside LANDUSE.TBL")
+    therin = np.asarray(table.values[season - 1, ivgtyp - 1, 4], np.float32)
+    return (therin / np.float32(100.0)).astype(np.float32)
+
+
+_THERMAL_INERTIA = SurfaceInput(
+    "thermal_inertia", "THC", "derived", "float32", True,
+    "LANDUSE.TBL THERIN/100 of each cell's own category and season, derived at "
+    "forecast time as WRF's landuse_init sets it", bounds=(0.0, 1.0e3),
+    derive=_derive_thermal_inertia)
 _LANDUSEF = _unstaged(
     "landusef", "LANDUSEF", "float32",
     "per-cell land-use category FRACTIONS from the static builder (the MPAS "
@@ -163,9 +191,12 @@ _SOILCTOP_STAGED = SurfaceInput(
     "geogrid's SOILCTOP on the mesh: each Voronoi cell's pixel shares of the "
     "16-category top-layer soil (WPS soiltype_top_30s) (woof hex "
     "surface-statics --fields soilctop)", bounds=(0.0, 1.0))
-_SOILCBOT = _unstaged(
-    "soilcbot", "SOILCBOT", "float32",
-    "per-cell bottom-soil category fractions from the static builder (plan 1.6)")
+#: geogrid's SOILCBOT on the mesh, which Pleim-Xiu's SOILPROP reads.
+_SOILCBOT_STAGED = SurfaceInput(
+    "soilcbot", "SOILCBOT", "categories", "float32", True,
+    "geogrid's SOILCBOT on the mesh: each Voronoi cell's pixel shares of the "
+    "16-category bottom-layer soil (WPS soiltype_bot_30s) (woof hex "
+    "surface-statics --fields soilcbot)", bounds=(0.0, 1.0))
 _FRC_URB2D = SurfaceInput(
     "frc_urb2d", "FRC_URB2D", "cell", "float32", True,
     "SLUCM's urban fraction as WOOF's WRF preparation estimates it: the cell's "
@@ -228,7 +259,7 @@ CONTRACT: tuple[SchemeInputs, ...] = (
                  lambda cfg: (_THERMAL_INERTIA,)),
     SchemeInputs("pleim_xiu_lsm", "sf_surface_physics=7",
                  lambda cfg: int(_value(cfg, "sf_surface_physics")) == 7,
-                 lambda cfg: (_LANDUSEF, _SOILCBOT)),
+                 lambda cfg: (_LANDUSEF_MOSAIC, _SOILCBOT_STAGED)),
     SchemeInputs("ruc_mosaic", "sf_surface_physics=3 with mosaic_lu/mosaic_soil",
                  lambda cfg: int(_value(cfg, "sf_surface_physics")) == 3
                  and (int(_value(cfg, "mosaic_lu")) or int(_value(cfg, "mosaic_soil"))),
@@ -308,7 +339,8 @@ def reads_surface_statics(physics: Mapping[str, Any] | None) -> bool:
 
     if not physics:
         return False
-    return bool(required_inputs(plan_config(physics)))
+    return any(need.input.kind != "derived"
+               for need in required_inputs(plan_config(physics)))
 
 
 def default_path(grid: str | Path, mesh: str) -> Path:
@@ -398,9 +430,29 @@ def _check_allowed(item: SurfaceInput, values, where: str) -> None:
             f"{item.keyword} admits only {list(item.allowed)}")
 
 
+def _derived(item: SurfaceInput, cfg, context, n_cells: int):
+    """A ``derived`` input's value and receipt (zeros without ``derive``)."""
+    if item.derive is None:
+        values = np.zeros(n_cells, dtype=np.dtype(item.dtype))
+    else:
+        if context is None:
+            raise ValueError(
+                f"{item.keyword} is derived from the run's own cells, and bind "
+                "was given no context (ivgtyp, latitude_deg, start_time)")
+        values = np.ascontiguousarray(item.derive(cfg, context), dtype=np.dtype(item.dtype))
+        if values.shape != (n_cells,):
+            raise ValueError(f"derived {item.keyword} has {values.shape} cells, "
+                             f"the mesh {n_cells}")
+    _check_allowed(item, values, "the derived surface input")
+    values.setflags(write=False)
+    return values, {"variable": item.variable, "derived": item.source,
+                    **_array_identity(values)}
+
+
 def bind(physics: Mapping[str, Any] | None, path: str | Path | None, *,
          latitude_rad, longitude_rad,
-         static_path: str | Path | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
+         static_path: str | Path | None = None,
+         context: Mapping[str, Any] | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
     """The surface keywords a generic selection reads, from the sidecar.
 
     Returns ``(inputs, receipt)``.  ``inputs`` is empty, and ``receipt`` says
@@ -435,6 +487,29 @@ def bind(physics: Mapping[str, Any] | None, path: str | Path | None, *,
             "a selection whose per-cell inputs hex stages (woof.hex."
             "surface_inputs.CONTRACT), or stage them first")
     names = [need.input.keyword for need in required]
+    from_file = [need for need in required if need.input.kind != "derived"]
+    if not from_file:
+        # Every input is the contract's own (the slab's THC): nothing is read
+        # from a sidecar, so one given would be accepted and never read.
+        if path is not None:
+            raise ConfigurationRefusal(
+                "surface_statics", str(path),
+                f"this selection's per-cell inputs {names} are derived from the "
+                "run's own cells; the file would be accepted and never read",
+                "no --surface-statics")
+        inputs, receipt_inputs = {}, {}
+        lat = np.asarray(latitude_rad, dtype=np.float64).reshape(-1)
+        for need in required:
+            inputs[need.input.keyword], receipt_inputs[need.input.keyword] = _derived(
+                need.input, cfg, context, lat.size)
+        return inputs, {
+            "path": None, "schema": SCHEMA,
+            "required": [
+                {"scheme": need.scheme, "selector": need.selector,
+                 "keyword": need.input.keyword, "variable": need.input.variable,
+                 "source": need.input.source}
+                for need in required],
+            "inputs": receipt_inputs, "provenance": None}
     if path is None:
         raise ConfigurationRefusal(
             "surface_statics", None,
@@ -500,12 +575,8 @@ def bind(physics: Mapping[str, Any] | None, path: str | Path | None, *,
             if item.kind == "derived":
                 # Not read from the file: the contract's own value (see the
                 # input's source), recorded as such in the receipt.
-                values = np.zeros(n_cells, dtype=np.dtype(item.dtype))
-                values.setflags(write=False)
-                inputs[item.keyword] = values
-                receipt_inputs[item.keyword] = {
-                    "variable": item.variable, "derived": item.source,
-                    **_array_identity(values)}
+                inputs[item.keyword], receipt_inputs[item.keyword] = _derived(
+                    item, cfg, context, n_cells)
                 continue
             if item.kind == "flag":
                 if item.variable not in dataset.ncattrs():

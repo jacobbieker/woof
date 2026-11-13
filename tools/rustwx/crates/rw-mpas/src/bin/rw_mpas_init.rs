@@ -190,7 +190,7 @@ fn run() -> Result<String, String> {
     }
 
     let land_surface = args.get_optional("land-surface").unwrap_or_else(|| "noah".into());
-    if !["noah", "noahmp", "ruc"].contains(&land_surface.as_str()) { return Err("--land-surface takes noah, noahmp or ruc".into()); }
+    if !["noah", "noahmp", "ruc", "slab", "px"].contains(&land_surface.as_str()) { return Err("--land-surface takes noah, noahmp, ruc, slab or px".into()); }
     let cfg = InitConfig {
         met_path: args.path("met")?,
         gocart_path: args.get_optional("gocart").map(PathBuf::from),

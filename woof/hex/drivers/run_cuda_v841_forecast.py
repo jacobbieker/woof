@@ -665,9 +665,17 @@ def _suite_host(
     from woof.hex import surface_inputs as _surface_inputs
 
     lat_rad, lon_rad = (None, None) if cell_latlon_rad is None else cell_latlon_rad
+    n_real = None if lat_rad is None else int(np.asarray(lat_rad).size)
     bound, surface_receipt = _surface_inputs.bind(
         suite.get("physics"), surface_statics,
-        latitude_rad=lat_rad, longitude_rad=lon_rad, static_path=static_path)
+        latitude_rad=lat_rad, longitude_rad=lon_rad, static_path=static_path,
+        # The run's own cells, for an input the contract derives from them
+        # (the slab's THC): the init's categories, as the seam receives them.
+        context=None if n_real is None else {
+            "ivgtyp": np.asarray(values["ivgtyp"])[:n_real],
+            "latitude_deg": np.asarray(values["latitude_deg"])[:n_real],
+            "start_time": values["start_time"],
+        })
     if bound:
         lake = bound.get("lakemask")
         if lake is not None:

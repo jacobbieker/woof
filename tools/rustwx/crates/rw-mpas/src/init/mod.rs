@@ -26,6 +26,7 @@ pub mod hinterp;
 pub mod metfile;
 pub mod soil;
 pub mod ruc;
+pub mod wrf_soil;
 pub mod aerosol;
 pub mod surface;
 mod surface_met;
@@ -421,6 +422,10 @@ pub struct InitReceipt {
     pub aerosols: aerosols::AerosolReceipt,
     pub soil: soil::SoilCounts,
     pub soil_categories_reconciled: usize,
+    /// Slab / Pleim-Xiu: the source layer mid-depth (cm) the deep temperature
+    /// was taken from (real.exe's nearest-30-cm rule); absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub soil_tmn_source_layer_cm: Option<f32>,
     pub seaice: soil::SeaiceCounts,
     /// The two init ceilings native MPAS does not apply (snow water
     /// equivalent and soil moisture above porosity): cap values, counts and
@@ -1201,6 +1206,41 @@ pub fn build_init(cfg: &InitConfig) -> MpasResult<InitReceipt> {
             sh2o[c] = smois[c].clone(); smcrel[c] = vec![0.;9];
         }
     }
+    if cfg.land_surface == "slab" || cfg.land_surface == "px" {
+        // WRF real.exe's own columns for the land surfaces MPAS init has no
+        // geometry for (init::wrf_soil).  The deep temperature is real.exe's
+        // too: the (terrain-adjusted) source layer nearest 30 cm, on land.
+        let mut layer_mid_cm = Vec::with_capacity(fg.dzs_cm.len());
+        let mut top = 0i64;
+        for &dz in &fg.dzs_cm {
+            let bottom = top + dz.round() as i64;
+            layer_mid_cm.push(((top + bottom) / 2) as f32);
+            top = bottom;
+        }
+        let k30 = wrf_soil::closest_to_30cm(&layer_mid_cm).ok_or_else(|| MpasError::Refusal(
+            "the source carries no soil temperature layer for the slab/PX deep temperature".into()))?;
+        let (zs, _) = if cfg.land_surface == "slab" {wrf_soil::slab_geometry()} else {wrf_soil::px_geometry()};
+        let n = zs.len();
+        for c in 0..n_cells {
+            if statics.landmask[c] == 0 {
+                tslb[c] = vec![skintemp[c]; n];
+                smois[c] = vec![1.0; n];
+            } else {
+                tmn[c] = fg.st[c][k30];
+                if cfg.land_surface == "slab" {
+                    // init_soil_1_real sets no moisture; the slab reads none.
+                    tslb[c] = wrf_soil::slab_column(&zs, skintemp[c], tmn[c]);
+                    smois[c] = vec![0.0; n];
+                } else {
+                    (tslb[c], smois[c]) = wrf_soil::px_column(&zs, &layer_mid_cm, &fg.sm[c], skintemp[c], tmn[c])
+                        .map_err(|e| MpasError::Refusal(format!("cell {c}: {e}")))?;
+                }
+            }
+            sh2o[c] = smois[c].clone();
+            smcrel[c] = vec![0.0; n];
+        }
+        receipt.soil_tmn_source_layer_cm = Some(layer_mid_cm[k30]);
+    }
     soil_counts.land_moisture_repaired = repaired;
     soil_counts.land_temperature_flagged = flagged;
     receipt.soil = soil_counts;
@@ -1531,8 +1571,12 @@ pub fn build_init(cfg: &InitConfig) -> MpasResult<InitReceipt> {
     // the emitter would have refused if it were passed.
     let _ = &smcrel;
     // Soil layer geometry, which the file carries per cell.
-    let zs_m = if cfg.land_surface == "ruc" {ruc::DEPTHS.to_vec()} else {soil::noah_mid_depths().to_vec()};
-    let dzs_m = if cfg.land_surface == "ruc" {ruc::thicknesses()} else {soil::NOAH_LAYER_THICKNESS.to_vec()};
+    let (zs_m, dzs_m) = match cfg.land_surface.as_str() {
+        "ruc" => (ruc::DEPTHS.to_vec(), ruc::thicknesses()),
+        "slab" => wrf_soil::slab_geometry(),
+        "px" => wrf_soil::px_geometry(),
+        _ => (soil::noah_mid_depths().to_vec(), soil::NOAH_LAYER_THICKNESS.to_vec()),
+    };
     let tile = |layers: &[f32]| -> Vec<f32> {
         let mut out = vec![0.0f32; n_cells * layers.len()];
         if !layers.is_empty() {
