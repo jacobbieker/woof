@@ -10,6 +10,9 @@ high-resolution path already fetches, caches and hashes
 
 * ``--terrain glo30``: Copernicus DEM GLO-30 (1 arc-second, about 30 m),
   area-averaged over each MPAS cell's Voronoi polygon into ``ter``;
+  ``--terrain gem15-dtm|gem15-dsm`` the experimental 15 m GEM-15 models
+  the same way (:mod:`woof.static.gem15`: range reads, a warning on every
+  use, and GLO-30 instead where GEM-15 does not serve);
 * ``--landuse cglc``: CGLC-MODIS-LCZ (100 m), the per-cell area MODE for
   ``ivgtyp``/``lu_index`` through the same crosswalk the WRF path uses
   (:data:`woof.static.highres.CGLC_MODIS_LCZ_TO_MODIS21`), with
@@ -81,7 +84,13 @@ SCHEMA = "woof-hex.static-highres.v1"
 #: ``--terrain`` choices -> :data:`woof.static.highres_fetch.TERRAIN_SOURCES`
 #: ids.  Rows, not code paths: another terrain source is another row here
 #: plus a fetcher in the shared fetch module.
-TERRAIN_CHOICES: Mapping[str, str] = {"glo30": "copernicus-dem-glo30"}
+TERRAIN_CHOICES: Mapping[str, str] = {
+    "glo30": "copernicus-dem-glo30",
+    # Experimental (GEM-15, Google Research), named only: a warning on every
+    # use, and Copernicus GLO-30 instead where GEM-15 does not serve.
+    "gem15-dtm": "gem15-dtm",
+    "gem15-dsm": "gem15-dsm",
+}
 #: ``--landuse`` choices -> :data:`woof.static.highres_fetch.LANDCOVER_SOURCES`.
 LANDUSE_CHOICES: Mapping[str, str] = {"cglc": "cglc-modis-lcz"}
 
@@ -94,6 +103,8 @@ WPS_EARTH_RADIUS_M = 6_370_000.0
 #: sampling coarser than the source would discard source pixels.
 SOURCE_PIXEL_M: Mapping[str, float] = {
     "copernicus-dem-glo30": 30.0,
+    "gem15-dtm": 15.0,
+    "gem15-dsm": 15.0,
     "cglc-modis-lcz": 100.0,
 }
 
@@ -841,6 +852,15 @@ def fetch_terrain(bbox, cache_root: Path, source_id: str, *, offline: bool,
     from woof.static.highres import BoundRaster
 
     coverage = hf.terrain_source_coverage(source_id)
+    selection = None
+    if coverage.experimental:
+        coverage, selection = _route_experimental(coverage, bbox)
+        source_id = coverage.source_id
+        if coverage.experimental:
+            bound, manifest = _fetch_gem15(bbox, cache_root, coverage,
+                                           offline=offline)
+            manifest["terrain_source_selection"] = selection
+            return bound, manifest
     try:
         coverage.require_reach(bbox)
     except hf.CoverageError as error:
@@ -894,6 +914,74 @@ def fetch_terrain(bbox, cache_root: Path, source_id: str, *, offline: bool,
         "terrain_vertical_datum": hf.COPERNICUS_DEM_VERTICAL_DATUM,
         "terrain_attribution": coverage.attribution,
         "terrain_license": coverage.license_id,
+    }
+    if selection is not None:
+        manifest["terrain_source_selection"] = selection
+    return bound, manifest
+
+
+def _route_experimental(coverage, bbox):
+    """The WRF path's rule (:func:`woof.static.highres_production.
+    _experimental_terrain`), said in this door's words: warn, then take
+    Copernicus GLO-30 wherever GEM-15 may not serve the footprint."""
+    from woof.static import gem15
+    from woof.static import highres_fetch as hf
+
+    _progress(f"WARNING: --terrain {coverage.source_id}: "
+              f"{hf.GEM15_EXPERIMENTAL_WARNING}")
+    selection = {"requested": coverage.source_id, "experimental": True,
+                 "warning": hf.GEM15_EXPERIMENTAL_WARNING}
+    reason = gem15.fallback_reason(bbox, coverage.source_id)
+    if reason is None:
+        selection["used"] = coverage.source_id
+        return coverage, selection
+    fallback = hf.terrain_source_coverage(gem15.FALLBACK_SOURCE)
+    _progress(f"WARNING: {coverage.source_id} is not used here: {reason}; "
+              f"the terrain comes from {fallback.source_id} instead")
+    selection.update({"used": fallback.source_id, "fallback_reason": reason})
+    return fallback, selection
+
+
+def _fetch_gem15(bbox, cache_root: Path, coverage, *, offline: bool):
+    """GEM-15 range reads, UTM mosaic and binding (the WRF path's
+    :func:`woof.static.highres_production._fetch_gem15_terrain`)."""
+    from woof.static import gem15
+    from woof.static import highres_fetch as hf
+    from woof.static.highres import BoundRaster
+
+    try:
+        windows, gem_manifest = gem15.fetch_gem15_windows(
+            bbox, cache_root, coverage.source_id, offline=offline)
+        if not windows:
+            raise StaticHighresRefusal(
+                f"no terrain coverage: GEM-15 publishes no cell under the "
+                f"footprint {bbox.as_dict()}.  Use --terrain glo30")
+        window, window_audit = gem15.derive_gem15_window(windows, bbox,
+                                                         cache_root)
+    except hf.HighresRefusal as error:
+        raise StaticHighresRefusal(str(error)) from error
+    bound = BoundRaster(
+        path=Path(window.path), sha256=window.sha256,
+        source_id=coverage.source_id, role="terrain",
+        source_url=coverage.source_url, license_id=coverage.license_id,
+        license_url=coverage.license_url,
+        nominal_resolution=coverage.nominal_resolution,
+        expected_bytes=int(window.bytes))
+    manifest = {
+        "terrain_source": coverage.source_id,
+        "terrain_tiles": [{"tile": Path(t.path).name, "sha256": t.sha256,
+                           "bytes": int(t.bytes), "url": t.url,
+                           "cache_hit": bool(t.cache_hit)} for t in windows],
+        "terrain_tiles_absent": [
+            f"{lat}/{lon}" for lat, lon
+            in gem_manifest["gem15_unpublished_squares"]],
+        "terrain_window": {"name": Path(window.path).name,
+                           "sha256": window.sha256, "bytes": int(window.bytes)},
+        "terrain_window_audit": window_audit,
+        "terrain_vertical_datum": hf.GEM15_VERTICAL_DATUM,
+        "terrain_attribution": coverage.attribution,
+        "terrain_license": coverage.license_id,
+        "gem15": gem_manifest,
     }
     return bound, manifest
 
@@ -1209,7 +1297,8 @@ def run_static_highres(static: Path, out: Path, *,
         written["ter"] = after
         delta = new_ter - before
         receipt["terrain"] = {
-            "source": TERRAIN_CHOICES[terrain],
+            # The dataset used: GLO-30 where an experimental choice fell back.
+            "source": manifest["terrain_source"],
             **coverage_counts,
             "before": _stats(before), "after": _stats(new_ter),
             "delta_mean_abs_m": round(float(np.abs(delta).mean()), 3),
@@ -1311,6 +1400,9 @@ def _write(static: Path, out: Path, written: Mapping[str, np.ndarray],
                     "highres_terrain_attribution":
                         sources["terrain_attribution"],
                 })
+                if "terrain_source_selection" in sources:
+                    stamp["highres_terrain_source_selection"] = json.dumps(
+                        sources["terrain_source_selection"], sort_keys=True)
             if "landuse_source" in sources:
                 stamp.update({
                     "highres_landuse_source": sources["landuse_source"],
