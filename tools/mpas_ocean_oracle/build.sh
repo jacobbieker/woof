@@ -4,7 +4,7 @@
 # run_tendency: ocn_tend_vel/thick; run_eos: the equation of state;
 # run_diagnostics: ocn_diagnostic_solve; run_tracer_advection: the tracer
 # advection; run_tracer_hmix: horizontal tracer mixing; run_tend_tracer:
-# ocn_tend_tracer) at the
+# ocn_tend_tracer; run_vmix: implicit vertical mixing) at the
 # strict recipe, in both precisions.
 #
 #   bash tools/mpas_ocean_oracle/build.sh MPAS_SOURCE_ROOT BUILD_DIR
@@ -105,7 +105,14 @@ for precision in r4 r8; do
       "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/run_diagnostics.F90"
       "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/run_tracer_advection.F90"
       "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/run_tracer_hmix.F90"
-      "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/run_tend_tracer.F90" )
+      "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/run_tend_tracer.F90"
+      # vertical mixing, after mpas_ocn_tendency.F (which links stubs_unported.F90's ocn_vmix)
+      "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/stubs_vmix.F90"
+      for unit in mpas_ocn_vmix_coefs_const mpas_ocn_vmix_coefs_tanh mpas_ocn_vmix_coefs_rich \
+                  mpas_ocn_vmix_coefs_redi mpas_ocn_vmix; do
+          "${fc[@]}" "${flags[@]}" -I.. "${ocean}/${unit}.F"
+      done
+      "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/run_vmix.F90" )
     if command -v objdump >/dev/null; then
         if objdump -d mpas_ocn_*.o eos/mpas_ocn_*.o mpas_constants.o | grep -Eq '\bv?fn?m(add|sub)([0-9]|[[:space:]]|$)'; then
             echo "an oracle object contains an FMA instruction; refusing" >&2
@@ -138,6 +145,9 @@ for precision in r4 r8; do
         eos/mpas_tracer_advection_helpers_cut.o eos/ocn_diagnostics_cut.o eos/mpas_ocn_diagnostics_routines.o \
         eos/mpas_ocn_equation_of_state*.o mpas_ocn_vel_*.o mpas_ocn_thick_*.o mpas_ocn_forcing.o mpas_ocn_constants.o \
         mpas_constants.o stubs_unported.o stubs.o mpas_kind_types.o ${libm_objects[@]+"${libm_objects[@]}"}
+    "${fc[@]}" -o "${build_dir}/run_vmix_${precision}" eos/run_vmix.o eos/oracle_stream.o eos/mpas_ocn_vmix*.o \
+        eos/stubs_vmix.o eos/mpas_ocn_equation_of_state*.o mpas_ocn_constants.o mpas_constants.o stubs.o \
+        mpas_kind_types.o ${libm_objects[@]+"${libm_objects[@]}"}
 done
 {
     echo "gfortran: $("${fc[@]}" --version | head -1)"
@@ -145,4 +155,4 @@ done
     echo "host: $(uname -srm)"
     cat "${build_dir}/r4/libm.txt"
 } > "${build_dir}/TOOLCHAIN.txt"
-echo "built ${build_dir}/run_{oracle,pgrad_hmix,tendency,eos,diagnostics,tracer_advection,tracer_hmix,tend_tracer}_{r4,r8}"
+echo "built ${build_dir}/run_{oracle,pgrad_hmix,tendency,eos,diagnostics,tracer_advection,tracer_hmix,tend_tracer,vmix}_{r4,r8}"
