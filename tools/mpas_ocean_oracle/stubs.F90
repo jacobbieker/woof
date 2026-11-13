@@ -21,6 +21,7 @@ module mpas_log
   ! informational line is dropped. An error or critical message stops,
   ! as MPAS_LOG_CRIT aborts the model.  As in MPAS, mpas_pool_routines (and
   ! through it mpas_derived_types) re-exports these names.
+  use mpas_kind_types
   implicit none
   private
   public :: mpas_log_write, MPAS_LOG_WARN, MPAS_LOG_ERR, MPAS_LOG_CRIT
@@ -29,9 +30,15 @@ module mpas_log
 
 contains
 
-  subroutine mpas_log_write(message, messageType)
+  subroutine mpas_log_write(message, messageType, masterOnly, flushNow, intArgs, realArgs, logicArgs, err)
     character(len=*), intent(in) :: message
     integer, optional, intent(in) :: messageType
+    logical, optional, intent(in) :: masterOnly, flushNow
+    integer, dimension(:), optional, intent(in) :: intArgs
+    real(kind=RKIND), dimension(:), optional, intent(in) :: realArgs
+    logical, dimension(:), optional, intent(in) :: logicArgs
+    integer, optional, intent(out) :: err
+    if (present(err)) err = 0
     if (present(messageType)) then
       if (messageType == MPAS_LOG_ERR .or. messageType == MPAS_LOG_CRIT) then
         print *, 'oracle stub: mpas_log_write: ', trim(message)
@@ -108,7 +115,7 @@ module mpas_pool_routines
   end type MPAS_pool_type
 
   interface mpas_pool_get_config
-    module procedure get_config_l, get_config_c, get_config_r
+    module procedure get_config_l, get_config_c, get_config_r, get_config_i
   end interface mpas_pool_get_config
 
   interface mpas_pool_get_dimension
@@ -116,7 +123,7 @@ module mpas_pool_routines
   end interface mpas_pool_get_dimension
 
   interface stub_pool_put_config
-    module procedure put_config_l, put_config_c, put_config_r
+    module procedure put_config_l, put_config_c, put_config_r, put_config_i
   end interface stub_pool_put_config
 
   interface stub_pool_put_dimension
@@ -218,6 +225,22 @@ contains
     character(len=StrKIND), pointer :: value
     value => pool % e(find(pool, name)) % c0
   end subroutine get_config_c
+
+  subroutine get_config_i(pool, name, value)
+    type(MPAS_pool_type), intent(in) :: pool
+    character(len=*), intent(in) :: name
+    integer, pointer :: value
+    value => pool % e(find(pool, name)) % i0
+  end subroutine get_config_i
+
+  subroutine put_config_i(pool, name, value)
+    type(MPAS_pool_type), intent(inout) :: pool
+    character(len=*), intent(in) :: name
+    integer, pointer :: value
+    integer :: i
+    i = slot(pool, name)
+    pool % e(i) % i0 => value
+  end subroutine put_config_i
 
   subroutine get_config_r(pool, name, value)
     type(MPAS_pool_type), intent(in) :: pool
@@ -411,10 +434,12 @@ contains
     pool % e(i) % f1 => f
   end subroutine put_field_1d
 
-  subroutine get_field_2d(pool, name, f)
+  subroutine get_field_2d(pool, name, f, timeLevel)
     type(MPAS_pool_type), intent(in) :: pool
     character(len=*), intent(in) :: name
     type(field2DReal), pointer :: f
+    integer, intent(in), optional :: timeLevel
+    call one_time_level(name, timeLevel)
     f => pool % e(find(pool, name)) % f2
   end subroutine get_field_2d
 
@@ -658,3 +683,13 @@ module mpas_timekeeping
   ! call read no time manager routine
   implicit none
 end module mpas_timekeeping
+
+! modules the ocean units USE without calling anything in them here
+module mpas_sort
+end module mpas_sort
+
+module mpas_hash
+end module mpas_hash
+
+module mpas_io_units
+end module mpas_io_units
