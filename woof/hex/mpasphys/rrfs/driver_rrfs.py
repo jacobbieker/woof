@@ -379,6 +379,11 @@ def resolve_namelist(text: str, *, backends: Mapping[str, str] | None = None,
     if plevel.resolve(groups) is not None:
         raise ValueError(f"&{plevel.GROUP} {plevel.P_OPTION}/{plevel.Z_OPTION} are not available on the RRFS fork "
                          "route; they are MPAS-A v8.4.2 suite-route options")
+    from ...mpasdiag import acc_diag_v842 as acc
+    if acc.resolve(groups) is not None:
+        raise ValueError(f"&{acc.GROUP} {acc.PREC_OPTION}/{acc.TEND_OPTION} are not available on the RRFS fork "
+                         "route (its prec_acc_* windows follow the fork's own diagnostics interval); they are "
+                         "MPAS-A v8.4.2 suite-route options")
     for group, keys in spec["registry_groups"].items():
         for key, value in groups.get(group, {}).items():
             if key not in keys:
