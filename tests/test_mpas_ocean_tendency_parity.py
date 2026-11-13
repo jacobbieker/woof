@@ -227,7 +227,7 @@ def test_the_oracle_rebuilt_here_writes_the_fixture(tmp_path):
     subprocess.run([sys.executable, str(ROOT / "tools" / "mpas_ocean_oracle" / "make_fixture.py"),
                     str(tmp_path / "build"), "--piece", "tendency", "--out", str(tmp_path / "fixture")],
                    check=True)
-    for precision in oo.PRECISIONS:
+    for precision in (*oo.PRECISIONS, *oo.EXTRA_PRECISIONS):
         fresh = np.load(tmp_path / "fixture" / f"oracle-{precision}.npz")
         pinned = np.load(oo.FIXTURE_DIR / f"oracle-{precision}.npz")
         assert sorted(fresh.files) == sorted(pinned.files)
