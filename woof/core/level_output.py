@@ -88,6 +88,19 @@ def compute(state, cfg, seconds, *, initial=False):
                           missing=cfg.z_lev_missing)
 
 
+def reference_constants(cfg, metadata):
+    """(P00, T00, TLP) as float32: the input file's when its frame carries
+    them, else the base state woof builds the run on -- WRF's Registry
+    defaults base_pres = 1e5 Pa and base_lapse = 50 K with the run's
+    base_temp (woof.core.nest_vertical P00/TLP).  A woof go preparation
+    and every nest have no input-file frame.  THE BREAKAGE: p_lev_diags or
+    z_lev_diags on a real-data woof go case stopped before step 1 with
+    'requires input reference constant P00'."""
+    defaults = {'P00': 100000.0, 'T00': float(cfg.base_temp), 'TLP': 50.0}
+    return [np.float32(np.asarray(metadata[name]).reshape(-1)[0]) if name in metadata
+            else np.float32(defaults[name]) for name in ('P00', 'T00', 'TLP')]
+
+
 def initial_diagnostics(state, cfg, metadata):
     """start_em initializes p_hyd from total P, then recurs upward for PW."""
     from woof.core.kernels import get_kernel
@@ -99,11 +112,7 @@ def initial_diagnostics(state, cfg, metadata):
     # These are the actual file's reference-profile constants, not a new
     # case-specific reference profile. Prepared non-file inputs supply their
     # own constants through the same metadata frame.
-    constants = []
-    for name in ('P00', 'T00', 'TLP'):
-        if name not in metadata:
-            raise ValueError('native level initialization requires input reference constant '+name)
-        constants.append(np.float32(np.asarray(metadata[name]).reshape(-1)[0]))
+    constants = reference_constants(cfg, metadata)
     n = cfg.nx*cfg.ny
     get_kernel('level_diagnostics', 'level_initial_pressure')(((n+127)//128,), (128,),
         (state.p, state.pb, state.ht, state.c3f, state.c4f, s('level_pw'), s('level_pressure_bounds'),
