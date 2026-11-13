@@ -10,7 +10,9 @@ runs ``run_oracle_{r4,r8}`` into ``tests/data/oracles/mpas_ocean_tend``;
 case that lists its precisions is run at those only); ``--piece eos`` runs
 ``run_eos_{r4,r8}`` into ``tests/data/oracles/mpas_ocean_eos``; ``--piece
 diagnostics`` runs ``run_diagnostics_{r4,r8}`` into
-``tests/data/oracles/mpas_ocean_diagnostics`` (its cases are built per precision).  Writes ``oracle-r4.npz`` and
+``tests/data/oracles/mpas_ocean_diagnostics`` and ``--piece tracer_advection``
+``run_tracer_advection_{r4,r8}`` into ``tests/data/oracles/mpas_ocean_tracer_advection``
+(their cases are built per precision).  Writes ``oracle-r4.npz`` and
 ``oracle-r8.npz`` (``<case>/<field>``) and ``inputs.sha256`` (every case's
 input-stream digest at each precision).
 """
@@ -30,14 +32,15 @@ if str(ROOT) not in sys.path:
 
 from woof.verify import (  # noqa: E402
     mpas_ocean_diagnostics_oracle, mpas_ocean_eos_oracle, mpas_ocean_pgrad_hmix_oracle, mpas_ocean_tend_oracle,
-    mpas_ocean_tendency_oracle)
+    mpas_ocean_tendency_oracle, mpas_ocean_tracer_advection_oracle)
 
 #: piece -> (case module, binary stem)
 PIECES = {"tend": (mpas_ocean_tend_oracle, "run_oracle"),
           "pgrad_hmix": (mpas_ocean_pgrad_hmix_oracle, "run_pgrad_hmix"),
           "tendency": (mpas_ocean_tendency_oracle, "run_tendency"),
           "eos": (mpas_ocean_eos_oracle, "run_eos"),
-          "diagnostics": (mpas_ocean_diagnostics_oracle, "run_diagnostics")}
+          "diagnostics": (mpas_ocean_diagnostics_oracle, "run_diagnostics"),
+          "tracer_advection": (mpas_ocean_tracer_advection_oracle, "run_tracer_advection")}
 
 
 def run_case(oo, binary: Path, case: dict, precision: str) -> dict[str, np.ndarray]:

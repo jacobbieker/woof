@@ -2,7 +2,8 @@
 # Build the MPAS-Ocean v8.4.2 oracles (run_oracle: four tendency terms;
 # run_pgrad_hmix: pressure gradient and horizontal momentum mixing;
 # run_tendency: ocn_tend_vel/thick; run_eos: the equation of state;
-# run_diagnostics: ocn_diagnostic_solve) at the
+# run_diagnostics: ocn_diagnostic_solve; run_tracer_advection: the tracer
+# advection) at the
 # strict recipe, in both precisions.
 #
 #   bash tools/mpas_ocean_oracle/build.sh MPAS_SOURCE_ROOT BUILD_DIR
@@ -73,8 +74,22 @@ for precision in r4 r8; do
         done
         echo "end module ocn_diagnostics"; } > ocn_diagnostics_cut.F
       "${fc[@]}" "${flags[@]}" -I.. ocn_diagnostics_cut.F
+      # tracer advection: the two vertical stencils cut out of the operators'
+      # helpers, then the three advection modules verbatim
+      { cat "${script_dir}/tracer_advection_helpers_head.F90"
+        for fn in mpas_tracer_advection_vflux4 mpas_tracer_advection_vflux3; do
+            awk -v r="${fn}" '$0 ~ "function " r "\\(" {on=1} on {print} on && $0 ~ "^ *end function" {on=0}' \
+                "${source_root}/src/operators/mpas_tracer_advection_helpers.F"
+        done
+        echo "end module mpas_tracer_advection_helpers"; } > mpas_tracer_advection_helpers_cut.F
+      "${fc[@]}" "${flags[@]}" -I.. mpas_tracer_advection_helpers_cut.F
+      for unit in mpas_ocn_tracer_advection_std mpas_ocn_tracer_advection_mono mpas_ocn_tracer_advection; do
+          "${fc[@]}" "${flags[@]}" -I.. "${ocean}/${unit}.F"
+      done
+      "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/oracle_stream.F90"
       "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/run_eos.F90"
-      "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/run_diagnostics.F90" )
+      "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/run_diagnostics.F90"
+      "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/run_tracer_advection.F90" )
     if command -v objdump >/dev/null; then
         if objdump -d mpas_ocn_*.o eos/mpas_ocn_*.o mpas_constants.o | grep -Eq '\bv?fn?m(add|sub)([0-9]|[[:space:]]|$)'; then
             echo "an oracle object contains an FMA instruction; refusing" >&2
@@ -92,9 +107,12 @@ for precision in r4 r8; do
     done
     "${fc[@]}" -o "${build_dir}/run_eos_${precision}" eos/run_eos.o eos/mpas_ocn_equation_of_state*.o \
         mpas_ocn_constants.o stubs.o mpas_kind_types.o ${libm_objects[@]+"${libm_objects[@]}"}
-    "${fc[@]}" -o "${build_dir}/run_diagnostics_${precision}" eos/run_diagnostics.o eos/ocn_diagnostics_cut.o \
-        eos/mpas_ocn_diagnostics_routines.o eos/mpas_ocn_equation_of_state*.o mpas_ocn_constants.o mpas_constants.o \
-        stubs.o mpas_kind_types.o ${libm_objects[@]+"${libm_objects[@]}"}
+    "${fc[@]}" -o "${build_dir}/run_diagnostics_${precision}" eos/run_diagnostics.o eos/oracle_stream.o \
+        eos/ocn_diagnostics_cut.o eos/mpas_ocn_diagnostics_routines.o eos/mpas_ocn_equation_of_state*.o \
+        mpas_ocn_constants.o mpas_constants.o stubs.o mpas_kind_types.o ${libm_objects[@]+"${libm_objects[@]}"}
+    "${fc[@]}" -o "${build_dir}/run_tracer_advection_${precision}" eos/run_tracer_advection.o eos/oracle_stream.o \
+        eos/mpas_ocn_tracer_advection*.o eos/mpas_tracer_advection_helpers_cut.o mpas_ocn_constants.o \
+        mpas_constants.o stubs.o mpas_kind_types.o ${libm_objects[@]+"${libm_objects[@]}"}
 done
 {
     echo "gfortran: $("${fc[@]}" --version | head -1)"
@@ -102,4 +120,4 @@ done
     echo "host: $(uname -srm)"
     cat "${build_dir}/r4/libm.txt"
 } > "${build_dir}/TOOLCHAIN.txt"
-echo "built ${build_dir}/run_{oracle,pgrad_hmix,tendency,eos,diagnostics}_{r4,r8}"
+echo "built ${build_dir}/run_{oracle,pgrad_hmix,tendency,eos,diagnostics,tracer_advection}_{r4,r8}"

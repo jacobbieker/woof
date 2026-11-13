@@ -27,16 +27,15 @@ from pathlib import Path
 
 import numpy as np
 
+from woof.verify import mpas_ocean_stream as _stream
 from woof.verify import mpas_ocean_tend_oracle as _tend
 from woof.verify.mpas_ocean_tend_oracle import PRECISIONS
 
 FIXTURE_DIR = (Path(__file__).resolve().parents[2] / "tests" / "data" / "oracles" / "mpas_ocean_diagnostics")
-STRKIND = 512
 #: Cases are built at a precision (their reals rounded once to it)
 CASES_PER_PRECISION = True
-#: Field kinds of the stream: real array, integer array, dimension, dimension
-#: array, absent (a package that is off), scratch field
-REAL, INT, DIM, DIMS, ABSENT, SCRATCH = 1, 2, 3, 4, 5, 6
+REAL, INT, DIM, DIMS, ABSENT, SCRATCH = (_stream.REAL, _stream.INT, _stream.DIM, _stream.DIMS, _stream.ABSENT,
+                                        _stream.SCRATCH)
 #: (pool, name, kind, Fortran shape in the case's dimension names). C1, E1 and
 #: V1 are nCells+1, nEdges+1 and nVertices+1; LP1 is nVertLevels+1.
 FIELDS = (
@@ -139,11 +138,7 @@ CASES = (
 
 def shape(case: dict, fortran_shape: tuple) -> tuple[int, ...]:
     """A field's C-order shape: the Fortran shape's dimension names resolved, reversed."""
-    d = case["dims"]
-    sizes = {"C1": d["nCells"] + 1, "E1": d["nEdges"] + 1, "V1": d["nVertices"] + 1, "L": d["nVertLevels"],
-             "LP1": d["nVertLevels"] + 1, "T": d["nTracers"], "ME": d["maxEdges"], "ME2": d["maxEdges2"],
-             "VD": d["vertexDegree"]}
-    return tuple(sizes[s] if isinstance(s, str) else s for s in reversed(fortran_shape))
+    return _stream.shape(case, fortran_shape)
 
 
 def present(case: dict, name: str) -> bool:
@@ -287,50 +282,9 @@ def cases(precision: str = "r4") -> list[dict]:
     return [make_case(*row, precision=precision) for row in CASES]
 
 
-def _text(value: str, width: int) -> bytes:
-    raw = value.encode("ascii")
-    if len(raw) > width:
-        raise ValueError(f"{value!r} is longer than {width} characters")
-    return raw.ljust(width, b" ")
-
-
-def _real(case: dict) -> np.dtype:
-    return np.dtype(PRECISIONS[case["precision"]]).newbyteorder("<")
-
-
 def input_bytes(case: dict) -> bytes:
     """run_diagnostics.F90's input stream for ``case``."""
-    real = _real(case)
-    config = case["config"]
-    parts = [np.array(case["dt"], real).tobytes(), np.array([len(config), len(FIELDS)], "<i4").tobytes()]
-    for name in sorted(config):
-        value = config[name]
-        if isinstance(value, bool):
-            parts += [_text(name, 64), np.array([3, int(value)], "<i4").tobytes()]
-        elif isinstance(value, int):
-            parts += [_text(name, 64), np.array([2, value], "<i4").tobytes()]
-        elif isinstance(value, float):
-            parts += [_text(name, 64), np.array([1], "<i4").tobytes(), np.array(value, real).tobytes()]
-        else:
-            parts += [_text(name, 64), np.array([4], "<i4").tobytes(), _text(value, STRKIND)]
-    for pool, name, kind, fshape in FIELDS:
-        value = case["pools"][pool][name]
-        stream_kind = kind
-        if kind in (REAL, INT) and value is None:
-            stream_kind = ABSENT
-        rank = len(fshape)
-        dims = [shape(case, fshape)[::-1][i] if i < rank else 1 for i in range(3)] if rank else [1, 1, 1]
-        code_rank = 4 if (stream_kind == ABSENT and kind == INT) else rank
-        parts += [_text(pool, 16), _text(name, 64), np.array([stream_kind, code_rank, *dims], "<i4").tobytes()]
-        if stream_kind in (REAL, INT):
-            if tuple(np.shape(value)) != shape(case, fshape):
-                raise ValueError(f"{pool}/{name} has shape {np.shape(value)}, not {shape(case, fshape)}")
-            parts.append(np.ascontiguousarray(value, real if kind == REAL else "<i4").tobytes())
-        elif stream_kind == DIM:
-            parts.append(np.array(value, "<i4").tobytes())
-        elif stream_kind == DIMS:
-            parts.append(np.ascontiguousarray(value, "<i4").tobytes())
-    return b"".join(parts)
+    return _stream.input_bytes(FIELDS, case)
 
 
 def input_digest(case: dict) -> str:
@@ -339,29 +293,10 @@ def input_digest(case: dict) -> str:
 
 def read_outputs(raw: bytes, case: dict) -> dict[str, np.ndarray]:
     """run_diagnostics.F90's output stream -> ``pool/name`` arrays (present fields only)."""
-    out, off = {}, 0
-    kinds = {(pool, name): (kind, fshape) for pool, name, kind, fshape in FIELDS}
-    for pool, name in ARRAYS:
-        kind, fshape = kinds[(pool, name)]
-        if case["pools"][pool][name] is None:
-            continue
-        dtype = _real(case) if kind == REAL else np.dtype("<i4")
-        shp = shape(case, fshape)
-        n = int(np.prod(shp))
-        out[f"{pool}/{name}"] = np.frombuffer(raw, dtype, n, off).reshape(shp).astype(dtype.newbyteorder("="))
-        off += dtype.itemsize * n
-    if off != len(raw):
-        raise ValueError(f"oracle output: {len(raw) - off} trailing bytes")
-    return out
+    return _stream.read_outputs(FIELDS, raw, case)
 
 
-def word_mismatches(a: np.ndarray, b: np.ndarray) -> int:
-    """Words that differ as bit patterns (so -0.0 != 0.0), real or integer."""
-    a, b = np.ascontiguousarray(a), np.ascontiguousarray(b)
-    if a.shape != b.shape or a.dtype.itemsize != b.dtype.itemsize:
-        return int(max(a.size, b.size))
-    word = np.dtype(f"u{a.dtype.itemsize}")
-    return int(np.count_nonzero(a.view(word) != b.view(word)))
+word_mismatches = _stream.word_mismatches
 
 
 def load_fixture(precision: str) -> dict[str, dict[str, np.ndarray]]:
@@ -374,15 +309,7 @@ def run_gpu(case: dict) -> dict[str, np.ndarray]:
     import cupy as cp
     from woof.hex.mpas_ocean import diagnostics_v842 as dg
 
-    dev = {}
-    for pool, name, kind, _ in FIELDS:
-        value = case["pools"][pool][name]
-        if kind in (REAL, INT) and value is not None:
-            dev.setdefault(pool, {})[name] = cp.asarray(np.ascontiguousarray(value))
-        elif kind in (DIM, DIMS):
-            dev.setdefault(pool, {})[name] = value
-        else:
-            dev.setdefault(pool, {})[name] = None
+    dev = _stream.on_device(FIELDS, case)
     dg.diagnostic_solve(dt=case["dt"], mesh=dev["mesh"], state=dev["state"], tracers=dev["tracers"],
                         diagnostics=dev["diagnostics"], forcing=dev["forcing"], configs=case["config"])
     return {f"{pool}/{name}": cp.asnumpy(dev[pool][name]) for pool, name in ARRAYS
