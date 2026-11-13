@@ -35,8 +35,8 @@ def validate(c):
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
             raise ValueError(f"{key} must be a finite number")
     for key in ("obs_npfi", "obs_prt_max", "obs_prt_freq"):
-        if type(getattr(c, key)) is not int or getattr(c, key) < 0:
-            raise ValueError(f"{key} must be a nonnegative integer")
+        if type(getattr(c, key)) is not int:
+            raise ValueError(f"{key} must be an integer")
     for key in ("obs_ipf_in4dob", "obs_ipf_errob", "obs_ipf_nudob", "obs_ipf_init"):
         if not isinstance(getattr(c, key), bool):
             raise ValueError(f"{key} must be a logical")
