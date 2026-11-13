@@ -1412,6 +1412,22 @@ cover carries terms of its own:
     Zenodo, unmodified, and maps its classes into WRF's MODIS categories
     at preparation time.
 
+  * GEM-15 v1, the experimental 15 m surface and terrain elevation models
+    (selectable terrain sources gem15-dtm and gem15-dsm, never a default):
+    This dataset is produced by Google. Batchu, Neumann, Li, Allen, Zhang
+    and Van Arsdale (2026), "GEM-15: Global surface and terrain elevation
+    models (15 meters) from sub-meter optical stereo imagery", EarthArXiv,
+    doi:10.31223/X55N75, licensed CC BY 4.0
+    (https://creativecommons.org/licenses/by/4.0/). WOOF reads byte ranges
+    of the published Cloud-Optimized GeoTIFFs anonymously from
+    gs://climate-and-sustainability/gem-15 into the user's cache;
+    changes made: reprojected from the per-cell UTM grids to a
+    geographic lattice and area-averaged onto the model grid. No GEM-15
+    data is redistributed with WOOF; woof/data/gem15_index.v1.json.gz
+    pins only the published object metadata (sizes, checksums, grids).
+    The fallback-region outlines in woof/data/gem15_fallback_regions.v1.json
+    are Natural Earth 1:110m admin-0 countries (public domain).
+
 
 --------------------------------------------------------------------------
 
