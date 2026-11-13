@@ -544,7 +544,8 @@ DEFAULT_TOLERANT_IDENTITY_FIELDS = frozenset({
     # initialization), so a stated non-default against an older header
     # must re-prepare -- which default tolerance does (the safe side);
     # the rest are read only by the forecast.
-    "run.cu_rad_feedback", "run.shcu_physics", "run.use_theta_m",
+    # (cu_rad_feedback moved to PREPARATION_INERT_RUN_FIELDS with 1.1.6.)
+    "run.shcu_physics", "run.use_theta_m",
     "run.multi_perturb", "run.pert_farms", "run.pert_farms_albedo",
     "run.pert_farms_aod", "run.pert_farms_angexp", "run.pert_farms_aerasy",
     "run.pert_farms_qv", "run.pert_farms_qc", "run.pert_farms_qs",
@@ -766,6 +767,22 @@ DEFAULT_TOLERANT_IDENTITY_FIELDS = frozenset({
     # exactly the default.  A tree prepared for coordinate-surface
     # diffusion carries diff_opt = 1 and is compared strictly.
     "run.diff_opt", "run.mix_full_fields",
+    # Upstream 1.1.6's WRF controls, ruled here after they joined
+    # RunConfig without one.  Nothing under woof/ingest reads the
+    # irrigation block, grav_settling, momentum_adv_opt, rk_ord or the
+    # sea-ice thickness/snow-depth/albedo options; the WRF restart importer
+    # (woof/ingest/wrfrst.py) reads kfeta_trigger only to refuse trigger 2
+    # and ra_call_offset to place the restart's last radiation step.  Each
+    # default is what every older tree was prepared with, and a stated
+    # value against an older header is compared and refused (re-prepare).
+    "run.grav_settling", "run.kfeta_trigger", "run.momentum_adv_opt",
+    "run.ra_call_offset", "run.rk_ord",
+    "run.sf_surf_irr_scheme", "run.irr_daily_amount", "run.irr_start_hour",
+    "run.irr_num_hours", "run.irr_start_julianday", "run.irr_end_julianday",
+    "run.irr_ph", "run.irr_freq",
+    "run.seaice_albedo_opt", "run.seaice_snowdepth_opt",
+    "run.seaice_snowdepth_max", "run.seaice_snowdepth_min",
+    "run.seaice_thickness_opt", "run.seaice_thickness_default",
 })
 
 #: RunConfig fields that joined after the identity header and for which
@@ -1156,6 +1173,11 @@ PREPARATION_INERT_RUN_FIELDS = SFIRE_PREPARATION_INERT_RUN_FIELDS | frozenset({
     "run.v_sca_adv_order",
     "run.v_mom_adv_order",
     "run.h_mom_adv_order",
+    # 1.1.6's h_sca_adv_order legacy marker is in an identity only for an
+    # explicitly written order 2 (woof/experiment.py drops it otherwise), so
+    # its absence is the pre-field state; a stated False against an older
+    # header is not its default and is refused (re-prepare, the safe side).
+    "run._legacy_h_sca",
     "run.inflow_perturbation",
     "run.inflow_perturbation_seed",
     "run.inflow_perturbation_amplitude_scale",

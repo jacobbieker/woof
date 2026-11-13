@@ -1845,6 +1845,11 @@ def test_old_regional_header_accepts_only_default_polar_controls(changed):
     from woof.ingest.prepared_cache import compare_prepared_domain_config
 
     live = _live_domain_identity()
+    # A regional run document drops both controls while polar is off
+    # (woof/experiment.py), so seed their defaults as a document that
+    # carries them would; the tolerance table is what admits the old header.
+    assert "polar" not in live["run"] and "fft_filter_lat" not in live["run"]
+    live["run"].update(polar=False, fft_filter_lat=45.0)
     cached = {**live, "run": {key: value for key, value in live["run"].items()
                                if key not in ("polar", "fft_filter_lat")}}
     if changed is not None:
