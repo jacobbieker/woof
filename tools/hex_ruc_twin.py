@@ -9,10 +9,15 @@ mosaic or not).  The forecast runs in this process, unchanged; the engine's
 ``ruc_lsm_step`` (WRF's ``CASE (RUCLSMSCHEME)`` arm: the RUC column, the mosaic
 tile loop over LANDUSEF/SOILCTOP, SFCDIAGS_RUCLSM) is wrapped in memory only.
 Every call is replayed on a twin holding copies of every field and atmosphere
-array the seam's call received, with the same parameters and clock, and every
-field either call can write is compared word for word.  RUC's whole state lives
-in those fields, so a twin that matches after each call shows the seam's
-column is WRF's on the same inputs.
+array the seam's call received, with the same parameters and clock, through
+the engine's REFERENCE arm (``woof.core.ruc_runtime._ruc_lsm_step_reference``,
+the per-routine transcription the fused production step is graded against),
+not the callable the forecast ran, and every field either call can write is
+compared word for word.  RUC's whole state lives in those fields, so a twin
+that matches after each call shows the seam's fused column equals the reference
+transcription on the same inputs.  (Under ``spp_lsm = 1`` production already
+runs the reference arm, and the comparison is then a repeat; the summary says
+which path ran.)
 """
 
 from __future__ import annotations
@@ -27,6 +32,7 @@ def _install(summary: dict):
     import numpy as np
 
     from woof.core import physics as physics_module
+    from woof.core.ruc_runtime import _ruc_lsm_step_reference
     from woof.core.surface_forcing import SurfacePrecipitationForcing
 
     original = physics_module.ruc_lsm_step
@@ -62,7 +68,14 @@ def _install(summary: dict):
         if kwargs.get("field_sf") is not None:
             twin_kwargs["field_sf"] = twin_fields.get("field_sf")
         census = original(fields, atmosphere, **kwargs)
-        original(twin_fields, twin_atm, **twin_kwargs)
+        # The reference arm takes no alb_sol: ruc_lsm_step applies that remap
+        # before dispatching, so the twin applies it the same way.
+        alb_sol = int(twin_kwargs.pop("alb_sol", 0) or 0)
+        twin_call = (dict(twin_fields, albedo=twin_fields["albsol"],
+                          albbck=twin_fields["albbcksol"])
+                     if alb_sol == 1 else twin_fields)
+        _ruc_lsm_step_reference(twin_call, twin_atm, **twin_kwargs)
+        summary["reference_is_production"] = bool(int(kwargs.get("spp_lsm", 0)))
         summary["calls"] = summary.get("calls", 0) + 1
         summary["mosaic_lu"] = int(kwargs.get("mosaic_lu", 0))
         summary["mosaic_soil"] = int(kwargs.get("mosaic_soil", 0))
