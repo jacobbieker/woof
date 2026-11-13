@@ -26,6 +26,7 @@ from ..mpasdiag import nwp_diag_v842 as _nwp
 from ..mpasdiag import tslist_v842 as _tslist
 from ..mpasdiag import plevel_diag_v842 as _plevel
 from ..mpasdiag import acc_diag_v842 as _acc
+from ..mpasdiag import afwa_diag_v842 as _afwa
 from . import wrfsolar_eps_v842 as _eps
 
 SCHEMA = "mpas-port.physics-driver-v842/v1"
@@ -327,6 +328,9 @@ class DriverConfig:
     #: WOOF's &diagnostics config_prec_acc_dt / config_acc_phy_tend / config_acc_phy_tend_interval (mpasdiag.acc_diag_v842):
     #: WRF's precipitation windows and physics-tendency accumulators (an acc_diag_v842.AccConfig), or None.  Not Registry options.
     acc_diagnostics: Any = None
+    #: WOOF's &diagnostics config_afwa_*_opt (mpasdiag.afwa_diag_v842): WRF's AFWA diagnostics (an
+    #: afwa_diag_v842.AfwaConfig), or None.  Not Registry options.
+    afwa_diagnostics: Any = None
     #: WOOF's &wrfsolar_eps group (wrfsolar_eps_v842): WRF-Solar EPS's multi_perturb hooks at the
     #: FARMS, Deng, Thompson and cloudiness seats, or None.  Not a Registry option.
     wrfsolar_eps: Any = None
@@ -451,6 +455,10 @@ class DriverConfig:
         if self.tslist is not None:
             o = self.tslist
             result["tslist"] = dict(path=o.path, max_locs=o.max_locs, max_level=o.max_level, buf_size=o.buf_size)
+        if self.afwa_diagnostics is not None:
+            o = self.afwa_diagnostics
+            result["afwa_diagnostics"] = dict(options=list(o.options), ptype_ccn_tmp=o.ptype_ccn_tmp,
+                                              ptype_tot_melt=o.ptype_tot_melt)
         if self.acc_diagnostics is not None:
             o = self.acc_diagnostics
             result["acc_diagnostics"] = dict(prec_acc_dt=o.prec_acc_dt, acc_phy_tend=o.acc_phy_tend,
@@ -766,6 +774,7 @@ def resolve_namelist(text: str, *, backends: Mapping[str, str] | None = None,
     tslist = _tslist.resolve(groups)
     plevels = _plevel.resolve(groups)
     accs = _acc.resolve(groups)
+    afwa = _afwa.resolve(groups)
     multi_perturb = _eps.resolve(groups)
 
     def record(config: DriverConfig) -> DriverConfig:
@@ -786,6 +795,8 @@ def resolve_namelist(text: str, *, backends: Mapping[str, str] | None = None,
             config = _replace(config, plevel_diagnostics=plevels)
         if accs is not None:
             config = _replace(config, acc_diagnostics=accs)
+        if afwa is not None:
+            config = _replace(config, afwa_diagnostics=afwa)
         if multi_perturb is not None:
             config = _replace(config, wrfsolar_eps=multi_perturb)
             _eps.check(config)

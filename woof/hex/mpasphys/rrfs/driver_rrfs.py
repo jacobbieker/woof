@@ -384,6 +384,10 @@ def resolve_namelist(text: str, *, backends: Mapping[str, str] | None = None,
         raise ValueError(f"&{acc.GROUP} {acc.PREC_OPTION}/{acc.TEND_OPTION} are not available on the RRFS fork "
                          "route (its prec_acc_* windows follow the fork's own diagnostics interval); they are "
                          "MPAS-A v8.4.2 suite-route options")
+    from ...mpasdiag import afwa_diag_v842 as afwa
+    if any(key in afwa.OPTIONS for key in (str(k).casefold() for k in groups.get(afwa.GROUP, {}))):
+        raise ValueError(f"&{afwa.GROUP} config_afwa_*_opt are not available on the RRFS fork route; "
+                         "they are MPAS-A v8.4.2 suite-route options")
     for group, keys in spec["registry_groups"].items():
         for key, value in groups.get(group, {}).items():
             if key not in keys:

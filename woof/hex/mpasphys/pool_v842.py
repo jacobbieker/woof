@@ -25,6 +25,7 @@ from . import solar_diagnostics_v842 as _solar
 from ..mpasdiag import nwp_diag_v842 as _nwp
 from ..mpasdiag import plevel_diag_v842 as _plevel
 from ..mpasdiag import acc_diag_v842 as _acc
+from ..mpasdiag import afwa_diag_v842 as _afwa
 
 _ENTITY = {"nCells", "nEdges", "nVertices"}
 
@@ -142,6 +143,8 @@ def active_packages(config: DriverConfig, configs: Mapping[str, Any]) -> set[str
     packages.update(_plevel.packages(config))
     # WOOF's &diagnostics config_prec_acc_dt / config_acc_phy_tend (mpasdiag.acc_diag_v842).
     packages.update(_acc.packages(config))
+    # WOOF's &diagnostics config_afwa_*_opt (mpasdiag.afwa_diag_v842).
+    packages.update(_afwa.packages(config))
     return packages
 
 
@@ -166,6 +169,7 @@ class RegistryLayout:
         _nwp.extend_registry(self.root, _nwp.packages(config))
         _plevel.extend_registry(self.root, config)
         _acc.extend_registry(self.root, _acc.packages(config))
+        _afwa.extend_registry(self.root, _afwa.packages(config))
         self.configs = {}
         self.config_kinds = {}
         for option in self.root.findall(".//nml_option"):
