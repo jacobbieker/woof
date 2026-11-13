@@ -49,17 +49,15 @@ def test_clm_lake_reads_its_mask_and_bathymetry_by_its_own_default():
 
 def test_every_scheme_that_reads_an_unstaged_input_is_refused_by_name():
     for cfg, keyword in (
-            (_cfg(sf_surface_physics=1), "thermal_inertia"),
-            (_cfg(sf_surface_physics=7), "landusef"),
             (_cfg(sf_urban_physics=1, use_wudapt_lcz=1), "LCZ"),
             (_cfg(sf_surf_irr_scheme=2, irr_ph=1), "irr_ph_field"),
             (_cfg(lightning_option=1), "lightning_inputs"),
-            (_cfg(sf_surface_physics=7), "landusef")):
+            (_cfg(sf_surface_physics=4, opt_crop=1), "noahmp_crop_inputs")):
         problems = si.unstaged_problems(cfg)
         assert problems and keyword in problems[0], cfg
-    with pytest.raises(ConfigurationRefusal, match="thermal_inertia"):
-        si.bind(dict(_lake_physics(), sf_lake_physics=0, sf_surface_physics=1), None, latitude_rad=[0.0],
-                longitude_rad=[0.0])
+    with pytest.raises(ConfigurationRefusal, match="lightning_inputs"):
+        si.bind(dict(_lake_physics(), sf_lake_physics=0, lightning_option=1,
+                     do_radar_ref=1), None, latitude_rad=[0.0], longitude_rad=[0.0])
 
 
 def test_the_seal_refuses_a_missing_input_an_extra_input_and_a_wrong_array():
@@ -246,10 +244,14 @@ def test_the_forecast_door_resolves_the_sidecar_beside_the_grid(tmp_path):
         SimpleNamespace(surface_statics=grid, grid=grid), plain, "m", grid, collected)
     assert collected and "never read" in collected[0]
     collected = []
+    lightning = SimpleNamespace(column_profile={"physics": dict(
+        _lake_physics(), sf_lake_physics=0, lightning_option=1, do_radar_ref=1)})
+    forecast_door.resolve_surface_statics(arguments, lightning, "m", grid, collected)
+    assert collected and "lightning_inputs" in collected[0]
+    # The slab's only input is derived: no sidecar is looked for at all.
     slab = SimpleNamespace(column_profile={"physics": dict(
-        _lake_physics(), sf_lake_physics=0, sf_surface_physics=1)})
-    forecast_door.resolve_surface_statics(arguments, slab, "m", grid, collected)
-    assert collected and "thermal_inertia" in collected[0]
+        _lake_physics(), sf_lake_physics=0, sf_surface_physics=1, num_soil_layers=5)})
+    assert forecast_door.resolve_surface_statics(arguments, slab, "m", grid, None) is None
 
 
 def test_the_contract_table_lists_every_scheme():
@@ -262,7 +264,9 @@ def test_the_contract_table_lists_every_scheme():
                       ("clm_lake", "lake_depth"), ("clm_lake", "lake_depth_flag"),
                       ("urban", "frc_urb2d"), ("noah_mosaic", "landusef"),
                       ("irrigation", "irrigation"), ("irrigation", "irr_ph_field"),
-                      ("ruc_mosaic", "landusef"), ("ruc_mosaic", "soilctop")}
+                      ("ruc_mosaic", "landusef"), ("ruc_mosaic", "soilctop"),
+                      ("pleim_xiu_lsm", "landusef"), ("pleim_xiu_lsm", "soilcbot"),
+                      ("slab", "thermal_inertia")}
 
 
 @needs_generic_seam
@@ -420,10 +424,10 @@ def test_noah_mosaic_reads_a_landusef_plane_stack():
         si.seal(cfg, {"landusef": stack[0]}, n_columns=3)
     with pytest.raises(ValueError, match="\\[0, 1\\]"):
         si.seal(cfg, {"landusef": stack * 2}, n_columns=3)
-    # RUC's mosaic reads the same staged planes; PX still reads unstaged ones.
+    # RUC's mosaic and Pleim-Xiu read the same staged planes.
     assert not si.unstaged_problems(_cfg(sf_surface_physics=3, mosaic_lu=1,
                                          mosaic_soil=1))
-    assert si.unstaged_problems(_cfg(sf_surface_physics=7))
+    assert not si.unstaged_problems(_cfg(sf_surface_physics=7))
 
 
 def test_landusef_is_geogrids_pixel_share_per_cell():
@@ -490,3 +494,54 @@ def test_the_four_point_fallback_averages_the_valid_points():
                                        _Source(values))
     assert out[0] == np.float32((30.0 + 10.0 + 10.0) / 3)
     assert receipt["cells_average_4pt"] == 1
+
+
+@needs_generic_seam
+def test_the_slab_thermal_inertia_is_derived_from_the_runs_own_cells():
+    import datetime
+
+    from woof.core.landuse import load_landuse_table
+
+    cfg = _cfg(sf_surface_physics=1)
+    [need] = si.required_inputs(cfg)
+    assert need.input.keyword == "thermal_inertia" and need.input.kind == "derived"
+    context = {"ivgtyp": np.array([10, 13, 17, 10]),
+               "latitude_deg": np.array([40.0, 40.0, 40.0, -40.0]),
+               "start_time": datetime.datetime(2025, 5, 31),  # julian 151: summer north
+               "mminlu": "MODIFIED_IGBP_MODIS_NOAH"}
+    thc = si._derive_thermal_inertia(cfg, context)
+    table = load_landuse_table("MODIFIED_IGBP_MODIS_NOAH", None)
+    want = [table.values[season - 1, category - 1, 4] / np.float32(100.0)
+            for category, season in ((10, 1), (13, 1), (17, 1), (10, 2))]
+    np.testing.assert_array_equal(thc, np.float32(want))
+    # No sidecar is read for a selection whose inputs are all derived.
+    physics = dict(_lake_physics(), sf_lake_physics=0, sf_surface_physics=1,
+                   num_soil_layers=5)
+    assert not si.reads_surface_statics(physics)
+    inputs, receipt = si.bind(physics, None, latitude_rad=np.radians(context["latitude_deg"]),
+                              longitude_rad=np.zeros(4), context=context)
+    np.testing.assert_array_equal(inputs["thermal_inertia"], thc)
+    assert receipt["path"] is None
+    with pytest.raises(ConfigurationRefusal, match="never read"):
+        si.bind(physics, "x.nc", latitude_rad=np.zeros(4), longitude_rad=np.zeros(4),
+                context=context)
+
+
+
+def test_the_slab_thermal_inertia_needs_the_inits_land_use_inventory():
+    import datetime
+
+    context = {"ivgtyp": np.array([10]), "latitude_deg": np.array([40.0]),
+               "start_time": datetime.datetime(2025, 5, 31)}
+    with pytest.raises(ValueError, match="MMINLU"):
+        si._derive_thermal_inertia(_cfg(sf_surface_physics=1), context)
+
+
+def test_an_mpas_suite_init_refuses_a_soil_column_other_than_four():
+    from woof.hex.errors import MpasPortError
+    from woof.hex.init_physics import mpas_v842_selection
+
+    for land in ("ruc", "slab", "px"):
+        with pytest.raises(MpasPortError, match=f"--land-surface {land}"):
+            mpas_v842_selection("mpas_mesoscale_reference", land)
+    assert mpas_v842_selection("mpas_mesoscale_reference", "noahmp")["land_surface"] == "noahmp"

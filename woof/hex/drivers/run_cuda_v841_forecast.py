@@ -587,6 +587,26 @@ def _windfarm_interior_columns(mesh: Any, *, is_regional: bool, physics: Any):
     return interior_columns(mesh, is_regional=is_regional)
 
 
+def _init_mminlu(init_path) -> str | None:
+    """The init's land-use inventory (its ``mminlu`` record, else
+    ``config_landuse_data``), which its ``ivgtyp`` categories number."""
+
+    if init_path is None:
+        return None
+    from netCDF4 import Dataset
+
+    with Dataset(init_path) as dataset:
+        if "mminlu" in dataset.variables:
+            raw = np.asarray(dataset.variables["mminlu"][:])
+            text = (raw.tobytes() if raw.dtype.kind in "SU" or raw.dtype == np.uint8
+                    else bytes(raw)).decode("ascii", "ignore").strip(" \0")
+            if text:
+                return text
+        if "config_landuse_data" in dataset.ncattrs():
+            return str(dataset.getncattr("config_landuse_data")).strip()
+    return None
+
+
 def _suite_host(
     adapter: Any,
     row_name: str,
@@ -665,9 +685,18 @@ def _suite_host(
     from woof.hex import surface_inputs as _surface_inputs
 
     lat_rad, lon_rad = (None, None) if cell_latlon_rad is None else cell_latlon_rad
+    n_real = None if lat_rad is None else int(np.asarray(lat_rad).size)
     bound, surface_receipt = _surface_inputs.bind(
         suite.get("physics"), surface_statics,
-        latitude_rad=lat_rad, longitude_rad=lon_rad, static_path=static_path)
+        latitude_rad=lat_rad, longitude_rad=lon_rad, static_path=static_path,
+        # The run's own cells, for an input the contract derives from them
+        # (the slab's THC): the init's categories, as the seam receives them.
+        context=None if n_real is None else {
+            "ivgtyp": np.asarray(values["ivgtyp"])[:n_real],
+            "latitude_deg": np.asarray(values["latitude_deg"])[:n_real],
+            "start_time": values["start_time"],
+            "mminlu": _init_mminlu(receipt.get("init_path")),
+        })
     if bound:
         lake = bound.get("lakemask")
         if lake is not None:

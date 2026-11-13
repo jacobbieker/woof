@@ -107,6 +107,12 @@ _SWITCHES = (
 )
 
 
+#: Soil layers each ``--land-surface`` integrates, as WRF real.exe builds them
+#: (share/module_soil_pre.F init_soil_depth_2/3/1/7): Noah and Noah-MP 4, RUC 9
+#: nodes, the thermal-diffusion slab 5, Pleim-Xiu 2.
+LAND_SURFACE_SOIL_LEVELS = {"noah": 4, "noahmp": 4, "ruc": 9, "slab": 5, "px": 2}
+
+
 def _refuse(message: str) -> None:
     raise InitDoorRefusal(message)
 
@@ -708,7 +714,7 @@ def run_declarations(arguments: argparse.Namespace) -> dict[str, Any]:
         "config_start_time": arguments.start_time,
         "config_nfglevels": int(arguments.nfglevels),
         "config_nfgsoillevels": int(arguments.nfgsoillevels),
-        "config_nsoillevels": 9 if getattr(arguments, "land_surface", "noah") == "ruc" else 4,
+        "config_nsoillevels": LAND_SURFACE_SOIL_LEVELS[getattr(arguments, "land_surface", None) or "noah"],
         "config_use_spechumd": arguments.use_spechumd == "yes",
         "config_frac_seaice": arguments.frac_seaice == "yes",
         "config_extrap_airtemp": arguments.extrap_airtemp,
@@ -870,7 +876,7 @@ def add_init_parser(commands: Any) -> None:
                              "where the init is MPAS-A v8.4.2 case 7's unmasked interpolation)")
     parser.add_argument("--receipt", type=Path, default=None, help="provenance receipt path")
     parser.add_argument("--physics-profile", help="profile initialization row, including verified monthly aerosols")
-    parser.add_argument("--land-surface", choices=("noah", "noahmp", "ruc"), default=None,
+    parser.add_argument("--land-surface", choices=tuple(LAND_SURFACE_SOIL_LEVELS), default=None,
                         help="target soil geometry; defaults to the physics suite, or Noah")
     parser.add_argument("--physics-suite", default=None, help="initialize this suite's soil and complete species row")
     parser.add_argument("--wif-climatology", type=Path, default=None, help="explicit WIF dataset; missing or invalid named input refuses")
@@ -1171,7 +1177,7 @@ def run_init_command(arguments: argparse.Namespace) -> int:
             f"the engine reported success but {out} does not exist; rebuild the current rw_mpas_init "
             "or inspect an ABI mismatch between door and engine"
         )
-    expected_soil = 9 if arguments.land_surface == "ruc" else 4
+    expected_soil = LAND_SURFACE_SOIL_LEVELS[arguments.land_surface or "noah"]
     from netCDF4 import Dataset as _InitDataset
     with _InitDataset(out) as _written:
         written_soil = len(_written.dimensions["nSoilLevels"]) if "nSoilLevels" in _written.dimensions else None

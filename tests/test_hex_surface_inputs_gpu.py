@@ -487,3 +487,47 @@ def test_hex_ruc_mosaic_columns_are_wrf_ruc_twin_columns():
     assert summary["calls"] >= 1 and summary["mosaic_lu"] == summary["mosaic_soil"] == 1
     assert not any(summary["step_words_differing"].values()), {
         key: value for key, value in summary["step_words_differing"].items() if value}
+
+
+def _slab_mapping(inputs=True):
+    physics = dict(suite.MPAS_DEFAULT_PHYSICS, sf_surface_physics=1,
+                   num_soil_layers=5)
+    thc = np.float32([0.03, 0.04, 0.03, 0.05, 0.04, 0.03, 0.04, 0.05])
+    values = _mapping(physics, {"thermal_inertia": thc} if inputs else None)
+    values["land_surface_scheme"] = "slab"
+    return values
+
+
+def _px_mapping(inputs=True):
+    physics = dict(suite.MPAS_DEFAULT_PHYSICS, sf_surface_physics=7,
+                   sf_sfclay_physics=7, bl_pbl_physics=7, num_soil_layers=2)
+    landusef = np.zeros((21, NCOL), np.float32)
+    landusef[9] = [0.6, 0.5, 1.0, 0.4, 0.7, 0.3, 0.8, 0.5]
+    landusef[11] = 1.0 - landusef[9]
+    soilcbot = np.zeros((16, NCOL), np.float32)
+    soilcbot[5] = [0.5, 1.0, 0.25, 0.75, 0.5, 0.0, 1.0, 0.6]
+    soilcbot[2] = 1.0 - soilcbot[5]
+    values = _mapping(physics, {"landusef": landusef, "soilcbot": soilcbot}
+                      if inputs else None)
+    values["land_surface_scheme"] = "pleim_xiu"
+    values["surface_layer_scheme"] = "pleim_xiu"
+    values["pbl_scheme"] = "acm2"
+    return values
+
+
+@pytest.mark.parametrize("scheme,mapping,missing", [
+    ("slab", _slab_mapping, "thermal_inertia"), ("px", _px_mapping, "landusef")])
+def test_hex_land_columns_are_the_wrf_ports_on_the_same_inputs(scheme, mapping, missing):
+    with pytest.raises(ValueError, match=f"missing .*{missing}"):
+        _seal(mapping(inputs=False))
+    summary: dict = {}
+    restore = _twin_module("hex_land_twin")._install(scheme, summary)
+    try:
+        seam = suite.run_mpas_column_physics(**_seal(mapping()).arwen_kwargs())
+        frames = cases.run(cp, seam, 4)
+    finally:
+        restore()
+    assert not cases._finite(frames)
+    assert summary["calls"] >= 1
+    assert not any(summary["step_words_differing"].values()), {
+        key: value for key, value in summary["step_words_differing"].items() if value}
