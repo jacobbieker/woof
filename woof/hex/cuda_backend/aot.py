@@ -207,6 +207,17 @@ def compiler_identity():
             "debug": os.environ.get("CUPY_CUDA_COMPILE_WITH_DEBUG", "0")}
 
 
+def cache_identity():
+    """The compiler identity a module's own binary cache is keyed on: NVRTC's
+    (compiler_identity), or on the Metal lane the translator's, since there is
+    no NVRTC to measure (the facade's compiler has no _get_nvrtc_version, and
+    a Noah or Grell-Freitas compile on a Mac stopped there)."""
+    from woof.hex.metal_lane import installed, metal_fingerprint
+    if installed():
+        return {"metal": metal_fingerprint()}
+    return compiler_identity()
+
+
 def default_pack(identity):
     """Resolve a pinned on-demand pack, or None for the NVRTC compile path."""
     explicit = os.environ.get("WOOF_HEX_AOT_PACK")

@@ -248,6 +248,10 @@ def _properties(device=0):
         # resident threads per GPU core: only local-memory frames are priced
         # with it (woof.core.preflight), and Metal reports no CUDA frame
         "maxThreadsPerMultiProcessor": 1024,
+        # registers per GPU core, as CUDA's occupancy arithmetic reads them
+        # (MPAS Grell-Freitas sizes its column slab with it): Metal names no
+        # register file, so CUDA's 64 Ki leaves the thread bound to decide
+        "regsPerMultiprocessor": 65536, "regsPerBlock": 65536,
         "warpSize": 32,
         "sharedMemPerBlock": 32768,
         "architecture": str(info.get("architecture", "")),

@@ -2120,7 +2120,15 @@ TRPPT = ((TRPPT+PPTLIQ(KQ))+PPTICE(KQ));
                 DDR(NK) = DDR(NK) * DDINC;
             }
             CPR = TRPPT;
-            PPTFLX = TRPPT - TDER;
+            /* Declared divergence from WRF, the one kf.cu already carries
+             * for module_cu_kfeta.F: when the cap above sets DDINC =
+             * TRPPT/TDER, binary32 TDER*DDINC can round above TRPPT, and the
+             * bare TRPPT-TDER is then minus a few ulp, so PRATEC is negative
+             * and RAINC accumulates below zero (hex option matrix,
+             * cumulus.multiscale-kf: 9 cells at -5e-10 .. -4.5e-9 mm after
+             * 1 h on a 5 km regional mesh; the hex snapshot gate refuses a
+             * negative accumulation).  The float64 answer there is 0. */
+            PPTFLX = fmaxf(TRPPT - TDER, 0.0f);
             PEFF = PPTFLX / TRPPT;
             if (LDB > 1) {
                 for (NK = 1; NK <= LDB - 1; ++NK) {

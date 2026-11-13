@@ -64,6 +64,17 @@ def _indirection(t) -> str | None:
     return None
 
 
+def _call_arguments(node) -> list:
+    """A call's arguments, one per callee parameter: a member operator call
+    (`s = "text"`, `a[i]`) lists its object first, before the parameters."""
+    args = list(node.get_arguments())
+    ref = node.referenced
+    if ref is not None and ref.kind.name == "CXX_METHOD" and ref.spelling.startswith("operator") \
+            and len(args) == len([p for p in ref.get_children() if p.kind.name == "PARM_DECL"]) + 1:
+        return args[1:]
+    return args
+
+
 class SpaceAnalysis:
     def __init__(self, rewriter):
         self.rw = rewriter
@@ -80,6 +91,8 @@ class SpaceAnalysis:
         self.variant: dict = {}
         #: pointer field USR -> spaces aggregate initialisers give it
         self.field_spaces: dict = {}
+        #: reference member key -> spaces its constructors bind it to
+        self.ref_field_spaces: dict = {}
         #: local pointer/reference variable usr -> spaces it took (all instances)
         self.var_spaces: dict = {}
         #: function usr -> PARM_DECLs copied to a thread local at entry
@@ -397,14 +410,18 @@ class SpaceAnalysis:
         returned = set()
         if fn.kind == K.CONSTRUCTOR:
             # `S(T* v) : p(v) {}`: a pointer field takes its initialiser's
-            # space (flg_column's FLGPtr wraps local arrays and buffers)
+            # space (flg_column's FLGPtr wraps local arrays and buffers); so
+            # does a reference member (`S(const T& t) : g(t) {}`: Noah's
+            # NoahThread binds the one device copy of its tables)
             kids = list(fn.get_children())
             for i, k in enumerate(kids[:-1]):
                 if k.kind == K.MEMBER_REF and k.referenced is not None \
-                        and k.referenced.kind == K.FIELD_DECL and _indirection(k.referenced.type) == "ptr":
-                    sp = self.space(kids[i + 1], env)
+                        and k.referenced.kind == K.FIELD_DECL and _indirection(k.referenced.type) in ("ptr", "ref"):
+                    ref = _indirection(k.referenced.type) == "ref"
+                    sp = self.space(kids[i + 1], env, lvalue=ref)
                     if sp in (DEVICE, CONSTANT, THREADGROUP, THREAD):
-                        self.field_spaces.setdefault(field_key(k.referenced), set()).add(sp)
+                        spaces = self.ref_field_spaces if ref else self.field_spaces
+                        spaces.setdefault(field_key(k.referenced), set()).add(sp)
         stack = [fn]
         while stack:
             node = stack.pop()
@@ -437,7 +454,10 @@ class SpaceAnalysis:
                     self.inst_var_spaces.setdefault(self._instance, {}).setdefault(
                         node.get_usr(), set()).add(space)
             elif kind == K.CALL_EXPR:
+                self._generic_local_assignment(node, env)
                 self.call(node, env)
+            elif kind == K.BINARY_OPERATOR and self.generic_name(node.type):
+                self._generic_local_assignment(node, env)
             if kind == K.CONDITIONAL_OPERATOR and _indirection(node.type) == "ptr":
                 self.space(node, env)       # names a `(T*)0` branch after the other
             if kind == K.INIT_LIST_EXPR:
@@ -501,6 +521,19 @@ class SpaceAnalysis:
                         sp = self.space(kids[1], env)
                         if sp in (CONSTANT, THREAD, THREADGROUP, DEVICE):
                             self.field_spaces.setdefault(field_key(kids[0].referenced), set()).add(sp)
+                            # `a.data = p` on a space-generic local declared without an initialiser
+                            # (MPAS MYNN's `MynnArray<float,2> a_dz; a_dz.data=dz;`): the local's data
+                            # space, as an initialiser would give it
+                            base = [c for c in kids[0].get_children()
+                                    if c.kind not in (K.TYPE_REF, K.TEMPLATE_REF, K.NAMESPACE_REF)]
+                            if len(base) == 1 and base[0].kind == K.DECL_REF_EXPR and base[0].referenced is not None \
+                                    and base[0].referenced.kind.name == "VAR_DECL" \
+                                    and self.generic_name(base[0].referenced.type):
+                                usr = base[0].referenced.get_usr()
+                                env.setdefault(usr, sp)
+                                self.var_spaces.setdefault(usr, set()).add(sp)
+                                self.inst_var_spaces.setdefault(self._instance, {}).setdefault(
+                                    usr, set()).add(sp)
             elif kind == K.RETURN_STMT and collect_returns:
                 children = list(node.get_children())
                 if children:
@@ -625,6 +658,74 @@ class SpaceAnalysis:
             return kids[1]
         return first
 
+    def _generic_local_assignment(self, node, env):
+        """`g = e` on a space-generic local declared without an initialiser
+        (Grell-Freitas's `GFP zo; ... zo = (GFP) D;`): the local's data space,
+        as an initialiser would give it."""
+        K = self.ci.CursorKind
+        if node.kind == K.CALL_EXPR:
+            ref = node.referenced
+            if ref is None or ref.spelling != "operator=":
+                return
+        kids = [c for c in node.get_children() if c.kind not in (K.TYPE_REF, K.TEMPLATE_REF, K.NAMESPACE_REF)]
+        if node.kind == K.CALL_EXPR:
+            args = list(node.get_arguments())
+            if len(args) != 2:
+                return
+            lhs, rhs = args
+        else:
+            if len(kids) != 2:
+                return
+            lhs, rhs = kids
+            op = next((t.spelling for t in node.get_tokens() if t.extent.start.offset >= lhs.extent.end.offset), None)
+            if op != "=":
+                return
+        while lhs.kind.name in ("UNEXPOSED_EXPR", "PAREN_EXPR") and len(list(lhs.get_children())) == 1:
+            lhs = next(lhs.get_children())
+        if lhs.kind != K.DECL_REF_EXPR or lhs.referenced is None or lhs.referenced.kind.name != "VAR_DECL" \
+                or not self.generic_name(lhs.referenced.type):
+            return
+        space = self.gspace(rhs, env)
+        if space == NULL:
+            space = DEVICE
+        if space in (None, NULL):
+            return
+        usr = lhs.referenced.get_usr()
+        env.setdefault(usr, space)
+        self.var_spaces.setdefault(usr, set()).add(space)
+        self.inst_var_spaces.setdefault(self._instance, {}).setdefault(usr, set()).add(space)
+
+    def _method_return_gspace(self, method):
+        """The one data space a method's ``return S(...)`` statements give a space-generic value."""
+        body = method.get_definition() or method
+        spaces = set()
+        for n in body.walk_preorder():
+            if n.kind.name != "RETURN_STMT":
+                continue
+            kids = list(n.get_children())
+            if kids:
+                sp = self.gspace(kids[0], {})
+                if sp not in (None, NULL):
+                    spaces.add(sp)
+        return next(iter(spaces)) if len(spaces) == 1 else None
+
+    def _held_pointer_space(self, t):
+        """The space of the one pointer field of the struct ``t`` (or ``t&``) names, when the
+        analysis has given that field exactly one space; else None."""
+        canonical = t.get_canonical()
+        if canonical.kind.name == "LVALUEREFERENCE":
+            canonical = canonical.get_pointee().get_canonical()
+        decl = canonical.get_declaration()
+        if decl is None or decl.kind.name not in ("STRUCT_DECL", "CLASS_DECL"):
+            return None
+        pointers = [f for f in decl.get_children() if f.kind.name == "FIELD_DECL" and _indirection(f.type) == "ptr"]
+        if len(pointers) != 1:
+            return None
+        spaces = self.field_spaces.get(field_key(pointers[0]), set())
+        if len(spaces) == 1:
+            return next(iter(spaces))
+        return self.rw._field_space(pointers[0]) if not spaces else None
+
     def gspace(self, e, env):
         """The space of a space-generic struct value's data: a parameter's
         or local's (env), an aggregate's first pointer, or the object a
@@ -656,7 +757,15 @@ class SpaceAnalysis:
                     # (also a method of a struct that is not itself generic:
                     # MYNN 4.7.1's M471Ref::operator& hands back the M471Ptr
                     # its M471Ptr::operator[] made)
-                    e = self._call_object(e)
+                    obj = self._call_object(e)
+                    if ref.kind.name == "CXX_METHOD" and obj is not None and not self.generic_name(obj.type) \
+                            and not self._generic_method(ref):
+                        # a plain struct's method making one (MPAS Thompson's TcWs::ff(i) wraps
+                        # its own `float* f`): the data space its returns give
+                        made = self._method_return_gspace(ref)
+                        if made is not None:
+                            return made
+                    e = obj
                     continue
                 # a factory returning the struct by value (MYNN 4.7.1's
                 # m471_array(work, offset, n)): its data is the memory of
@@ -664,6 +773,12 @@ class SpaceAnalysis:
                 for a in e.get_arguments():
                     if _indirection(a.type) in ("ptr", "array"):
                         return self.space(a, env)
+                # ... or of the one pointer field of the object it is handed (MPAS MYNN's
+                # mynn_array(arena, lo, hi) carves the struct's data out of arena.data)
+                for a in e.get_arguments():
+                    sp = self._held_pointer_space(a.type)
+                    if sp is not None:
+                        return sp
                 return None
             if kind == "MEMBER_REF_EXPR" and kids:
                 e = kids[0]
@@ -771,7 +886,7 @@ class SpaceAnalysis:
         if not info.slots:
             self.request(info, (), node)
             return
-        args = list(node.get_arguments())
+        args = _call_arguments(node)
         spaces = []
         for index, parm, ind in info.slots:
             if ind == "gstruct":
@@ -890,6 +1005,9 @@ class SpaceAnalysis:
             if member is not None and member.kind.name == "FIELD_DECL" and not lvalue \
                     and _indirection(member.type) == "ptr":
                 return self.rw._field_space(member)
+            if member is not None and member.kind.name == "FIELD_DECL" and _indirection(member.type) == "ref":
+                # `s.r` names the object the reference member is bound to: its space, not s's
+                return self.rw._reference_field_space(member)
             if not children:
                 return THREAD  # implicit this->member inside a method
             base = children[0]
@@ -942,7 +1060,7 @@ class SpaceAnalysis:
                 return self.gspace(self._call_object(e), env)
             info = self.resolve_call(e)
             if info is not None and info.returns:
-                args = list(e.get_arguments())
+                args = _call_arguments(e)
                 spaces = tuple(((self.gspace(args[i], env) if ind == "gstruct" else
                                  self.space(args[i], env, lvalue=(ind == "ref"))) if i < len(args) else None)
                                or (THREAD if ind in ("ref", "gstruct") else DEVICE)
