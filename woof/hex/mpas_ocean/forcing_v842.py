@@ -10,7 +10,8 @@
 - ``ocn_vel_forcing_tend``: the surface stress (with
   ``ocn_forcing_transmission``), the explicit bottom drag and Rayleigh
   friction;
-- ``ocn_thick_surface_flux_tend``.
+- ``ocn_thick_surface_flux_tend``;
+- ``ocn_forcing_build_fraction_absorbed_array`` (:func:`fraction_absorbed`).
 
 :func:`tend_vel` and :func:`tend_thick` compose them with the other ported
 terms in the Fortran's order, and zero the arrays the Fortran zeroes. Every
@@ -55,7 +56,7 @@ from .tend_v842 import COMPILE_OPTIONS, PRECISIONS, _check, _grid, _precision_of
 SOURCE_FILES = (
     "src/core_ocean/shared/mpas_ocn_tendency.F:107-350,1034-1049",
     "src/core_ocean/shared/mpas_ocn_surface_bulk_forcing.F:139-306,320-334",
-    "src/core_ocean/shared/mpas_ocn_forcing.F:191-196",
+    "src/core_ocean/shared/mpas_ocn_forcing.F:98-175,191-196",
     "src/core_ocean/shared/mpas_ocn_vel_forcing.F",
     "src/core_ocean/shared/mpas_ocn_vel_forcing_surface_stress.F",
     "src/core_ocean/shared/mpas_ocn_vel_forcing_explicit_bottom_drag.F",
@@ -207,6 +208,19 @@ def vel_forcing_tend(*, mesh: dict, normal_velocity, surface_flux_attenuation_co
         _function(precision, "ocn_vel_forcing_rayleigh_v842")(*grid, (
             tend, normal_velocity, mesh["maxLevelEdgeTop"], dtype(c["config_Rayleigh_damping_coeff"]),
             np.int32(bottom), np.int32(n_edges), np.int32(n_levels)))
+
+
+def fraction_absorbed(*, mesh: dict, layer_thickness, diagnostics: dict, forcing: dict) -> None:
+    """``ocn_forcing_build_fraction_absorbed_array``: ``fractionAbsorbed`` and
+    ``fractionAbsorbedRunoff`` from the layer thicknesses and the two
+    attenuation coefficients, over ``nCellsArray(2)``; arrays with MPAS's
+    missing-cell element."""
+    precision = _precision_of(layer_thickness)
+    n_cells, nl = int(mesh["nCellsArray"][1]), int(mesh["nVertLevels"])
+    for out, att in (("fractionAbsorbed", "surfaceFluxAttenuationCoefficient"),
+                     ("fractionAbsorbedRunoff", "surfaceFluxAttenuationCoefficientRunoff")):
+        _function(precision, "ocn_fraction_absorbed_v842")(_grid(n_cells), (_BLOCK,), (
+            forcing[out], layer_thickness, diagnostics[att], mesh["maxLevelCell"], np.int32(n_cells), np.int32(nl)))
 
 
 def thick_surface_flux_tend(*, mesh: dict, transmission_coefficients, transmission_coefficients_runoff,
