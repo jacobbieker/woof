@@ -2568,6 +2568,10 @@
     "sha256": "014cd83469ecca52a4c357df30ec3039b8ab07bf2b140455d750f977d8170c8c"
    },
    {
+    "file": "woof/core/kernels/chem_activation.cu",
+    "sha256": "87f345c64f4249ef75ba28aee40351d96ceb690507c6aa987d6bce22b31791a4"
+   },
+   {
     "file": "woof/core/kernels/chem_ageing.cu",
     "sha256": "895cc8c46773b5354ed05cbcd1a703babdba536fc54f0d2dc2bea5c578f33be0"
    },
@@ -10398,6 +10402,53 @@
     ]
    },
    "source_sha256": "ac21798675be906ae4c069cdd944c43cfcee1c5a857d36463f2d749393f175c4"
+  },
+  "kernels:chem_activation": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "9086266f835307c8894740eba357f2e77073eb5cd6f3c91c004abb54ab71b031",
+    "sites": {
+     "100": 49
+    }
+   },
+   "native_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "768cae0d1b8a76a63d12ea4b4028d01553ea1ff637edc3f130b553261076af88"
   },
   "kernels:chem_ageing": {
    "assessment": "static_diagnostic_only",
