@@ -141,7 +141,9 @@ ROUTE_TABLE_SHA256 = (
     # is supported.
     # Moved by feat/hrdps-source: the gem-hrdps and gem-rdps rows (ECCC MSC
     # Datamart, one object per variable and level).
-    "d3ec8ec864c133a12a3ca400d5d52c5d42a3ccfbcc01ab65f18295403c156a28"
+    # Moved by the GEM HRDPS/RDPS, GFS pressure and HAFS rows added after the
+    # 1.1.6 merge (each with its own tests); re-pinned to the table as it ships.
+    "e8c68c2f20c546b68c96b6d8163ad1a23df66b78214a1c78d1098f2b630236e3"
 )
 
 #: Sources whose acquisition predates the route table and keeps its own
