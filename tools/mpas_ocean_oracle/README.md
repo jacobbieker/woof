@@ -56,7 +56,9 @@ compiled in `eos/` against the real tracer modules, bulk forcing,
 diagnostics and equation of state. `stubs_unported.F90` stands in for the
 modules no oracle compiles; `stubs_tendency.F90` keeps the stand-ins the
 tendency oracle uses for modules others compile for real.
-`run_diagnostics.F90`, `run_tracer_advection.F90`, `run_tracer_hmix.F90` and `run_tend_tracer.F90` read and write
+`run_vmix.F90` drives `ocn_vmix_init` and `ocn_vmix_implicit` (`mpas_ocn_vmix.F`
+and its coefficient modules verbatim; `stubs_vmix.F90` stands in for CVMix).
+`run_diagnostics.F90`, `run_tracer_advection.F90`, `run_tracer_hmix.F90`, `run_tend_tracer.F90` and `run_vmix.F90` read and write
 `oracle_stream.F90`'s self-describing streams.
 
 gfortran calls `expf`/`cosf`/`sinf` (RKIND 4) and `exp` (RKIND 8). On glibc
@@ -76,6 +78,7 @@ pixi run -e default python tools/mpas_ocean_oracle/make_fixture.py "$BUILD_DIR" 
 pixi run -e default python tools/mpas_ocean_oracle/make_fixture.py "$BUILD_DIR" --piece tracer_advection
 pixi run -e default python tools/mpas_ocean_oracle/make_fixture.py "$BUILD_DIR" --piece tracer_hmix
 pixi run -e default python tools/mpas_ocean_oracle/make_fixture.py "$BUILD_DIR" --piece tend_tracer
+pixi run -e default python tools/mpas_ocean_oracle/make_fixture.py "$BUILD_DIR" --piece vmix
 ```
 
 build.sh checks `SOURCES.sha256` and builds `run_oracle_r4` and
@@ -89,6 +92,7 @@ twins (RKIND 8), all at
 pixi run -e default python -m pytest tests/test_mpas_ocean_tend_parity.py tests/test_mpas_ocean_pgrad_hmix_parity.py \
     tests/test_mpas_ocean_tendency_parity.py tests/test_mpas_ocean_eos_parity.py \
     tests/test_mpas_ocean_diagnostics_parity.py tests/test_mpas_ocean_tracer_advection_parity.py \
-    tests/test_mpas_ocean_tracer_hmix_parity.py tests/test_mpas_ocean_tend_tracer_parity.py
+    tests/test_mpas_ocean_tracer_hmix_parity.py tests/test_mpas_ocean_tend_tracer_parity.py \
+    tests/test_mpas_ocean_vmix_parity.py
 pixi run -e default woof hex ocean verify
 ```

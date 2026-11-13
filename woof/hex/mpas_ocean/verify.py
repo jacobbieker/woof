@@ -13,10 +13,10 @@ def verify() -> dict:
     from woof.hex.coupled import oracle, registry
     from woof.verify import (mpas_ocean_diagnostics_oracle, mpas_ocean_eos_oracle, mpas_ocean_pgrad_hmix_oracle,
                              mpas_ocean_tend_oracle, mpas_ocean_tendency_oracle, mpas_ocean_tracer_advection_oracle,
-                             mpas_ocean_tracer_hmix_oracle, mpas_ocean_tend_tracer_oracle)
+                             mpas_ocean_tracer_hmix_oracle, mpas_ocean_tend_tracer_oracle, mpas_ocean_vmix_oracle)
 
     from . import (diagnostics_v842, eos_v842, forcing_v842, pgrad_hmix_v842, tend_tracer_v842, tend_v842,
-                   tracer_advection_v842, tracer_hmix_v842)
+                   tracer_advection_v842, tracer_hmix_v842, vmix_v842)
 
     pieces = []
     for label, oracle_module, port in (("tendency_terms", mpas_ocean_tend_oracle, tend_v842),
@@ -27,7 +27,8 @@ def verify() -> dict:
                                        ("tracer_advection", mpas_ocean_tracer_advection_oracle,
                                         tracer_advection_v842),
                                        ("tracer_hmix", mpas_ocean_tracer_hmix_oracle, tracer_hmix_v842),
-                                       ("tracer_tendency", mpas_ocean_tend_tracer_oracle, tend_tracer_v842)):
+                                       ("tracer_tendency", mpas_ocean_tend_tracer_oracle, tend_tracer_v842),
+                                       ("vertical_mixing", mpas_ocean_vmix_oracle, vmix_v842)):
         fixture_dir = oracle_module.FIXTURE_DIR
         for precision in oracle_module.PRECISIONS:
             if not (fixture_dir / f"oracle-{precision}.npz").is_file():

@@ -1719,7 +1719,7 @@ MODULE_KEY_ROOT = "woof.core.kernels"
 
 
 # Headers that consume the loader integer tier.
-_HEADERS_NEED_INT_DEFINES = frozenset({'goddard', 'cu_osas', 'km5_geometry', 'flg_column', 'cammgmp'})
+_HEADERS_NEED_INT_DEFINES = frozenset({'goddard', 'cu_osas', 'km5_geometry', 'flg_column', 'cammgmp', 'lin'})
 
 def module_source_int_defines(
         name: str, defines: tuple[tuple[str, int], ...],
