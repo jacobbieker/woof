@@ -542,6 +542,14 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "3906e794ed37c2b114e021e89124cd4712eade511394f273ba751a0f4df17ebc",
+    "constructor": "compile_using_nvrtc",
+    "factory": "_module_on",
+    "factory_sha256": "f072dd33be2323ae178a38483e0f62d6be8d336f1b20c70d7003ccc4465a1374",
+    "file": "woof/hex/mpas_ocean/btr_subcycle_v842.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "39cd6deec7083721214c7a1fb9f5d0b0b5ee2869d671e9eaa7526d41ad8e1c01",
     "constructor": "ElementwiseKernel",
     "factory": "_so2so4_kernel",
@@ -4628,6 +4636,10 @@
     "sha256": "d293e9cfd863a8f2f974a2bab2b8bea0547559838a758888fffd008e864f33e4"
    },
    {
+    "file": "woof/hex/mpas_ocean/btr_subcycle_v842.cu",
+    "sha256": "36432f927f6521fd212c7e924fa6db127a6af5a7d345cdd11fccc951a848ae30"
+   },
+   {
     "file": "woof/hex/mpas_ocean/diagnostics_v842.cu",
     "sha256": "2e832a3a429c96d66ac67757afc6d04e364109428daef7ed61b07a12945f0f89"
    },
@@ -5560,6 +5572,10 @@
    {
     "file": "woof/hex/mpas_ice/time_integration_fe_v842.py",
     "sha256": "e60b98909a841bd72949993c6079f9989c1270df15579b1eba714b8c182a720e"
+   },
+   {
+    "file": "woof/hex/mpas_ocean/btr_subcycle_v842.py",
+    "sha256": "a9f0fff3d0d612466be26a7d7b671bd93581a155da24f8250cad21943a6fd156"
    },
    {
     "file": "woof/hex/mpas_ocean/diagnostics_v842.py",

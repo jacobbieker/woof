@@ -181,17 +181,22 @@ contains
     slot = pool % n
   end function slot
 
-  ! a pool holds one time level: a lookup of another stops by name
-  subroutine one_time_level(name, timeLevel)
+  ! A field's time level 1 is its name; level N > 1 is the entry NAME@N
+  ! (the split-explicit stage's two levels).  A lookup of a level the driver
+  ! did not put stops by name.
+  function level_name(name, timeLevel) result(key)
     character(len=*), intent(in) :: name
     integer, intent(in), optional :: timeLevel
+    character(len=64) :: key
+    key = name
     if (present(timeLevel)) then
-      if (timeLevel /= 1) then
+      if (timeLevel < 1 .or. timeLevel > 9) then
         print *, 'oracle stub: time level ', timeLevel, ' of ', trim(name)
         stop 6
       end if
+      if (timeLevel > 1) key = trim(name) // '@' // achar(48 + timeLevel)
     end if
-  end subroutine one_time_level
+  end function level_name
 
   subroutine mpas_pool_get_subpool(pool, name, sub)
     type(MPAS_pool_type), intent(in) :: pool
@@ -271,8 +276,7 @@ contains
     character(len=*), intent(in) :: name
     real(kind=RKIND), dimension(:), pointer :: a
     integer, intent(in), optional :: timeLevel
-    call one_time_level(name, timeLevel)
-    a => pool % e(find(pool, name)) % r1
+    a => pool % e(find(pool, level_name(name, timeLevel))) % r1
   end subroutine get_r1
 
   subroutine get_r2(pool, name, a, timeLevel)
@@ -280,8 +284,7 @@ contains
     character(len=*), intent(in) :: name
     real(kind=RKIND), dimension(:,:), pointer :: a
     integer, intent(in), optional :: timeLevel
-    call one_time_level(name, timeLevel)
-    a => pool % e(find(pool, name)) % r2
+    a => pool % e(find(pool, level_name(name, timeLevel))) % r2
   end subroutine get_r2
 
   subroutine get_r3(pool, name, a, timeLevel)
@@ -289,8 +292,7 @@ contains
     character(len=*), intent(in) :: name
     real(kind=RKIND), dimension(:,:,:), pointer :: a
     integer, intent(in), optional :: timeLevel
-    call one_time_level(name, timeLevel)
-    a => pool % e(find(pool, name)) % r3
+    a => pool % e(find(pool, level_name(name, timeLevel))) % r3
   end subroutine get_r3
 
   subroutine get_i1(pool, name, a)
@@ -467,8 +469,7 @@ contains
     character(len=*), intent(in) :: name
     type(field2DReal), pointer :: f
     integer, intent(in), optional :: timeLevel
-    call one_time_level(name, timeLevel)
-    f => pool % e(find(pool, name)) % f2
+    f => pool % e(find(pool, level_name(name, timeLevel))) % f2
   end subroutine get_field_2d
 
   subroutine get_field_3d(pool, name, f)
@@ -558,12 +559,14 @@ module mpas_derived_types
 
   type block_type
     type(MPAS_pool_type), pointer :: structs => null()
+    type(MPAS_pool_type), pointer :: dimensions => null()
     type(MPAS_pool_type), pointer :: configs => null()
     type(block_type), pointer :: next => null()
   end type block_type
 
   type domain_type
     type(block_type), pointer :: blocklist => null()
+    type(MPAS_pool_type), pointer :: configs => null()
     type(mpas_dminfo_type) :: dminfo
   end type domain_type
 
@@ -574,9 +577,52 @@ module mpas_dmpar
   use mpas_derived_types
   implicit none
   private
-  public :: mpas_dmpar_min_real
+  public :: mpas_dmpar_min_real, mpas_dmpar_exch_group_create, mpas_dmpar_exch_group_add_field, &
+            mpas_dmpar_exch_group_reuse_halo_exch, mpas_dmpar_exch_group_full_halo_exch, &
+            mpas_dmpar_exch_group_destroy
 
 contains
+
+  ! One block on one rank: a halo exchange is the identity.
+  subroutine mpas_dmpar_exch_group_create(domain, groupName, iErr)
+    type(domain_type), intent(inout) :: domain
+    character(len=*), intent(in) :: groupName
+    integer, optional, intent(out) :: iErr
+    if (present(iErr)) iErr = 0
+  end subroutine mpas_dmpar_exch_group_create
+
+  subroutine mpas_dmpar_exch_group_add_field(domain, groupName, fieldName, timeLevel, haloLayers, iErr)
+    type(domain_type), intent(inout) :: domain
+    character(len=*), intent(in) :: groupName, fieldName
+    integer, optional, intent(in) :: timeLevel
+    integer, dimension(:), optional, intent(in) :: haloLayers
+    integer, optional, intent(out) :: iErr
+    if (present(iErr)) iErr = 0
+  end subroutine mpas_dmpar_exch_group_add_field
+
+  subroutine mpas_dmpar_exch_group_reuse_halo_exch(domain, groupName, timeLevel, haloLayers, iErr)
+    type(domain_type), intent(inout) :: domain
+    character(len=*), intent(in) :: groupName
+    integer, optional, intent(in) :: timeLevel
+    integer, dimension(:), optional, intent(in) :: haloLayers
+    integer, optional, intent(out) :: iErr
+    if (present(iErr)) iErr = 0
+  end subroutine mpas_dmpar_exch_group_reuse_halo_exch
+
+  subroutine mpas_dmpar_exch_group_full_halo_exch(domain, groupName, withGPUAwareMPI, iErr)
+    type(domain_type), intent(inout) :: domain
+    character(len=*), intent(in) :: groupName
+    logical, optional, intent(in) :: withGPUAwareMPI
+    integer, optional, intent(out) :: iErr
+    if (present(iErr)) iErr = 0
+  end subroutine mpas_dmpar_exch_group_full_halo_exch
+
+  subroutine mpas_dmpar_exch_group_destroy(domain, groupName, iErr)
+    type(domain_type), intent(inout) :: domain
+    character(len=*), intent(in) :: groupName
+    integer, optional, intent(out) :: iErr
+    if (present(iErr)) iErr = 0
+  end subroutine mpas_dmpar_exch_group_destroy
 
   subroutine mpas_dmpar_min_real(dminfo, inValue, outValue)
     type(mpas_dminfo_type), intent(in) :: dminfo

@@ -1626,6 +1626,13 @@ fn write_band1_tile_batches(
             geo_shorts.extend(d5);
             geo_shorts.extend(d6);
         }
+        Crs::Utm { zone, north } => {
+            let epsg = if *north { 32600 } else { 32700 } + *zone as u16;
+            geo_shorts.extend([1, 1, 0, 3]);
+            geo_shorts.extend([1024, 0, 1, 1]); // projected
+            geo_shorts.extend([1025, 0, 1, 1]); // RasterPixelIsArea
+            geo_shorts.extend([3072, 0, 1, epsg]);
+        }
         Crs::ModelSphere(_) => {
             return Err(invalid(format!(
                 "cannot write {path:?}: model-grid CRS rasters are \
