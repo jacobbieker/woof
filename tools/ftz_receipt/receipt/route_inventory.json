@@ -9,13 +9,13 @@
     "cupy.ReductionKernel",
     "cupy.cuda.compiler.compile_using_nvrtc"
   ],
-  "site_count": 655,
+  "site_count": 660,
   "site_count_by_kind": {
     "cupy.ElementwiseKernel": 45,
     "cupy.RawKernel": 111,
-    "cupy.RawModule": 293,
+    "cupy.RawModule": 296,
     "cupy.ReductionKernel": 16,
-    "cupy.cuda.compiler.compile_using_nvrtc": 190
+    "cupy.cuda.compiler.compile_using_nvrtc": 192
   },
   "site_count_by_surface": {
     "other": {
@@ -29,14 +29,14 @@
       "cupy.RawKernel": 39,
       "cupy.RawModule": 99,
       "cupy.ReductionKernel": 9,
-      "cupy.cuda.compiler.compile_using_nvrtc": 116
+      "cupy.cuda.compiler.compile_using_nvrtc": 117
     },
     "tests": {
       "cupy.ElementwiseKernel": 7,
       "cupy.RawKernel": 40,
-      "cupy.RawModule": 106,
+      "cupy.RawModule": 109,
       "cupy.ReductionKernel": 4,
-      "cupy.cuda.compiler.compile_using_nvrtc": 35
+      "cupy.cuda.compiler.compile_using_nvrtc": 36
     },
     "tools": {
       "cupy.ElementwiseKernel": 5,
@@ -2373,6 +2373,74 @@
       "options_element_expressions": null,
       "options_are_literal": false,
       "text": "cp.RawKernel(_SOURCE, \"after_loops\")((1,), (64,), (cp.asarray(rho), q, out, np.int32(nz), np.int32(n)))"
+    },
+    {
+      "file": "tests/test_metal_r2_translation.py",
+      "line": 45,
+      "column": 13,
+      "surface": "tests",
+      "constructor": "cp.RawModule",
+      "constructor_kind": "cupy.RawModule",
+      "enclosing": "_run",
+      "takes_caller_options": true,
+      "options_argument_present": false,
+      "options_expression": null,
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "module = cp.RawModule(code=src)"
+    },
+    {
+      "file": "tests/test_metal_r2_translation.py",
+      "line": 58,
+      "column": 13,
+      "surface": "tests",
+      "constructor": "cp.RawModule",
+      "constructor_kind": "cupy.RawModule",
+      "enclosing": "test_initialised_constant_tables_are_host_readable",
+      "takes_caller_options": true,
+      "options_argument_present": false,
+      "options_expression": null,
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "module = cp.RawModule(code=src)"
+    },
+    {
+      "file": "tests/test_metal_r2_translation.py",
+      "line": 161,
+      "column": 15,
+      "surface": "tests",
+      "constructor": "compiler.compile_using_nvrtc",
+      "constructor_kind": "cupy.cuda.compiler.compile_using_nvrtc",
+      "enclosing": "test_facade_answers_the_direct_compilers",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "(\"--std=c++17\",)",
+      "options": [
+        "--std=c++17"
+      ],
+      "options_element_expressions": [
+        "\"--std=c++17\""
+      ],
+      "options_are_literal": true,
+      "text": "image, _ = compiler.compile_using_nvrtc(src, options=(\"--std=c++17\",), arch=\"120\", filename=\"k.cu\")"
+    },
+    {
+      "file": "tests/test_metal_r2_translation.py",
+      "line": 170,
+      "column": 14,
+      "surface": "tests",
+      "constructor": "cp.RawModule",
+      "constructor_kind": "cupy.RawModule",
+      "enclosing": "test_facade_answers_the_direct_compilers",
+      "takes_caller_options": true,
+      "options_argument_present": false,
+      "options_expression": null,
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "counter = cp.RawModule(code=r'''"
     },
     {
       "file": "tests/test_metal_storage_address.py",
@@ -6618,7 +6686,7 @@
     },
     {
       "file": "woof/backend/facade/__init__.py",
-      "line": 445,
+      "line": 453,
       "column": 25,
       "surface": "package",
       "constructor": "RawModule",
@@ -9254,7 +9322,7 @@
     },
     {
       "file": "woof/hex/cuda_backend/aot.py",
-      "line": 551,
+      "line": 562,
       "column": 14,
       "surface": "package",
       "constructor": "compiler.compile_using_nvrtc",
@@ -10011,6 +10079,22 @@
       "options_element_expressions": null,
       "options_are_literal": false,
       "text": "image, _ = compile_using_nvrtc(module_source(precision), options, None,"
+    },
+    {
+      "file": "woof/hex/mpas_ocean/tend_tracer_v842.py",
+      "line": 82,
+      "column": 15,
+      "surface": "package",
+      "constructor": "compile_using_nvrtc",
+      "constructor_kind": "cupy.cuda.compiler.compile_using_nvrtc",
+      "enclosing": "_module_on",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "options",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "image, _ = compile_using_nvrtc(module_source(precision), options, None, f\"ocn_tend_tracer_v842_{precision}.cu\")"
     },
     {
       "file": "woof/hex/mpas_ocean/tend_v842.py",
