@@ -28,7 +28,7 @@ from pathlib import Path
 import numpy as np
 
 from woof.verify import mpas_ocean_tend_oracle as _tend
-from woof.verify.mpas_ocean_tend_oracle import PRECISIONS, bit_mismatches
+from woof.verify.mpas_ocean_tend_oracle import PRECISIONS
 
 FIXTURE_DIR = (Path(__file__).resolve().parents[2] / "tests" / "data" / "oracles" / "mpas_ocean_diagnostics")
 STRKIND = 512
@@ -355,6 +355,15 @@ def read_outputs(raw: bytes, case: dict) -> dict[str, np.ndarray]:
     return out
 
 
+def word_mismatches(a: np.ndarray, b: np.ndarray) -> int:
+    """Words that differ as bit patterns (so -0.0 != 0.0), real or integer."""
+    a, b = np.ascontiguousarray(a), np.ascontiguousarray(b)
+    if a.shape != b.shape or a.dtype.itemsize != b.dtype.itemsize:
+        return int(max(a.size, b.size))
+    word = np.dtype(f"u{a.dtype.itemsize}")
+    return int(np.count_nonzero(a.view(word) != b.view(word)))
+
+
 def load_fixture(precision: str) -> dict[str, dict[str, np.ndarray]]:
     return _tend.load_fixture(precision, FIXTURE_DIR)
 
@@ -386,5 +395,5 @@ def measure(precision: str, reference: dict | None = None) -> dict[str, dict[str
     for case in cases(precision):
         got = run_gpu(case)
         want = reference[case["name"]]
-        report[case["name"]] = {name: bit_mismatches(got[name], want[name]) for name in want}
+        report[case["name"]] = {name: word_mismatches(got[name], want[name]) for name in want}
     return report

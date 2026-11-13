@@ -11,16 +11,17 @@ from __future__ import annotations
 def verify() -> dict:
     from woof import backend
     from woof.hex.coupled import oracle, registry
-    from woof.verify import (mpas_ocean_eos_oracle, mpas_ocean_pgrad_hmix_oracle, mpas_ocean_tend_oracle,
-                             mpas_ocean_tendency_oracle)
+    from woof.verify import (mpas_ocean_diagnostics_oracle, mpas_ocean_eos_oracle, mpas_ocean_pgrad_hmix_oracle,
+                             mpas_ocean_tend_oracle, mpas_ocean_tendency_oracle)
 
-    from . import eos_v842, forcing_v842, pgrad_hmix_v842, tend_v842
+    from . import diagnostics_v842, eos_v842, forcing_v842, pgrad_hmix_v842, tend_v842
 
     pieces = []
     for label, oracle_module, port in (("tendency_terms", mpas_ocean_tend_oracle, tend_v842),
                                        ("pressure_gradient_hmix", mpas_ocean_pgrad_hmix_oracle, pgrad_hmix_v842),
                                        ("full_tendencies", mpas_ocean_tendency_oracle, forcing_v842),
-                                       ("equation_of_state", mpas_ocean_eos_oracle, eos_v842)):
+                                       ("equation_of_state", mpas_ocean_eos_oracle, eos_v842),
+                                       ("diagnostic_solve", mpas_ocean_diagnostics_oracle, diagnostics_v842)):
         fixture_dir = oracle_module.FIXTURE_DIR
         for precision in oracle_module.PRECISIONS:
             if not (fixture_dir / f"oracle-{precision}.npz").is_file():
