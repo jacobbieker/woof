@@ -1,0 +1,2 @@
+c1e87739334987c20b143cd1136f9614040f475fb746feee96ee3e304ded0835  phys/module_diag_afwa.F
+2a0fef330fe08eb0598e4521467a04c55adf1f884ebce8ffa9ef1210e2d8eb3e  phys/module_diag_functions.F
