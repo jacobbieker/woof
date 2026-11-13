@@ -5,7 +5,8 @@
 # run_diagnostics: ocn_diagnostic_solve; run_tracer_advection: the tracer
 # advection; run_tracer_hmix: horizontal tracer mixing; run_tend_tracer:
 # ocn_tend_tracer; run_vmix: implicit vertical mixing; run_vert_transport:
-# ocn_vert_transport_velocity_top) at the
+# ocn_vert_transport_velocity_top; run_btr_subcycle: the split-explicit
+# barotropic stage) at the
 # strict recipe, in both precisions.
 #
 #   bash tools/mpas_ocean_oracle/build.sh MPAS_SOURCE_ROOT BUILD_DIR
@@ -114,9 +115,20 @@ for precision in r4 r8; do
           "${fc[@]}" "${flags[@]}" -I.. "${ocean}/${unit}.F"
       done
       "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/run_vmix.F90"
-      "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/run_vert_transport.F90" )
+      "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/run_vert_transport.F90"
+      # the split-explicit step's barotropic stage: ocn_time_integrator_split's
+      # declarations, config lookups and stage 2, cut verbatim (awk ranges)
+      split="${source_root}/src/core_ocean/mode_forward/mpas_ocn_time_integration_split.F"
+      { cat "${script_dir}/btr_subcycle_cut_head.F90"
+        awk '/subroutine ocn_time_integrator_split\(domain, dt\)/ {on=1; next} on {print} on && /integer :: temp_mask/ {on=0}' "${split}"
+        awk "/call mpas_pool_get_config\(domain % configs, 'config_n_bcl_iter_beg'/ {on=1} on {print} on && /'config_compute_active_tracer_budgets', config_compute_active_tracer_budgets\)/ {on=0}" "${split}"
+        awk '/^ *oldBtrSubcycleTime = 1 *$/ {on=1} on {print} on && /endif ! split_explicit *$/ {on=0}' "${split}"
+        echo "    end subroutine ocn_btr_stage"
+        echo "end module ocn_btr_stage_cut"; } > ocn_btr_stage_cut.F
+      "${fc[@]}" "${flags[@]}" -I.. ocn_btr_stage_cut.F
+      "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/run_btr_subcycle.F90" )
     if command -v objdump >/dev/null; then
-        if objdump -d mpas_ocn_*.o eos/mpas_ocn_*.o mpas_constants.o | grep -Eq '\bv?fn?m(add|sub)([0-9]|[[:space:]]|$)'; then
+        if objdump -d mpas_ocn_*.o eos/mpas_ocn_*.o eos/ocn_*.o mpas_constants.o | grep -Eq '\bv?fn?m(add|sub)([0-9]|[[:space:]]|$)'; then
             echo "an oracle object contains an FMA instruction; refusing" >&2
             exit 4
         fi
@@ -154,6 +166,8 @@ for precision in r4 r8; do
         eos/ocn_diagnostics_cut.o eos/mpas_ocn_diagnostics_routines.o eos/mpas_ocn_thick_ale.o \
         eos/mpas_ocn_equation_of_state*.o mpas_ocn_constants.o mpas_constants.o stubs.o mpas_kind_types.o \
         ${libm_objects[@]+"${libm_objects[@]}"}
+    "${fc[@]}" -o "${build_dir}/run_btr_subcycle_${precision}" eos/run_btr_subcycle.o eos/oracle_stream.o \
+        eos/ocn_btr_stage_cut.o mpas_constants.o stubs.o mpas_kind_types.o
 done
 {
     echo "gfortran: $("${fc[@]}" --version | head -1)"
@@ -161,4 +175,4 @@ done
     echo "host: $(uname -srm)"
     cat "${build_dir}/r4/libm.txt"
 } > "${build_dir}/TOOLCHAIN.txt"
-echo "built ${build_dir}/run_{oracle,pgrad_hmix,tendency,eos,diagnostics,tracer_advection,tracer_hmix,tend_tracer,vmix,vert_transport}_{r4,r8}"
+echo "built ${build_dir}/run_{oracle,pgrad_hmix,tendency,eos,diagnostics,tracer_advection,tracer_hmix,tend_tracer,vmix,vert_transport,btr_subcycle}_{r4,r8}"
