@@ -13350,7 +13350,18 @@ def _misc_rcon_component(registry):
         "implemented": True, "maturity": "implemented-unverified", "scientific_evidence": "none",
         "parameters": {"moist": True, "moist_cq": True}, "asset_requirements": [],
         "constraints": {"required_settings": {"moist": True},
-                        "required_settings_reasons": {"moist": "RCON advances vapor, five condensate classes and number moments."}},
+                        "required_settings_reasons": {"moist": "RCON advances vapor, five condensate classes and number moments."},
+                        # RCON-SPEED-01 (woof/config.py refuses every mp=29 run): the
+                        # plan review says what the run door says, until the handoff.
+                        "refused_when": [{
+                            "components": {"microphysics": ["rcon-mp29"]},
+                            "reason": ("RCON-SPEED-01: mp_physics=29 (RCON) is ported but its "
+                                       "release speed proof is open: the whole-forecast "
+                                       "microphysics stage costs 1.885431x MP28, and a qualified "
+                                       "speed handoff is required before forecast admission."),
+                            "remedy_label": ("Select another microphysics scheme, such as "
+                                             "mp_physics=28 (the Thompson aerosol-aware scheme it "
+                                             "is timed against).")}]},
         "extensions": {"preset_scope_reason": "Strict replay and a three-hour forecast pass. The measured 1.885431x MP28 GPU stage cost exceeds the speed gate; RCON-SPEED-01 refuses forecast admission until a qualified handoff."},
         "warnings": ["Requires the native initialized RCON table stream, validated by size and SHA-256. Set WOOF_RCON_TABLE_ROOT to its directory. Strict real-input replay: 0/25246820 words, no exclusions. A three-hour forecast passes, but measured stage cost is 1.885431x MP28; the native 1.053748x profile does not justify the GPU excess. Forecast admission is refused by RCON-SPEED-01 until speed qualification."]}
 
