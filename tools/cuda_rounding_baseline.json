@@ -3605,7 +3605,7 @@
    },
    {
     "file": "woof/core/kernels/nwp_hail.cu",
-    "sha256": "749cfa7a650b946e3b4683d523ad2b05f7c63f7c1c4ccfddec42382dea4891d7"
+    "sha256": "730f2016540f574978b37883002034162d28e461528e79e72c31b14b9df09dfe"
    },
    {
     "file": "woof/core/kernels/nwp_hail_bins.cuh",

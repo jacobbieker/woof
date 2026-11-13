@@ -108,9 +108,12 @@ extern "C" __global__ void nwp_hail(
         double n0=(double)(number/gg2)*nh_pow64(lambda,(double)ge2);
         double sum=0., previous=0.;
         int bin;
+        // pow(d, 0) is exactly 1 for every d (C99 F.9.4.4, glibc, libdevice),
+        // so the zero-shape schemes skip the binary64 pow and keep its words.
+        const bool shaped=mu!=0.f;
         for(bin=49;bin>=0;--bin){
             double d=nwp_hail_d[bin];
-            double f=n0*nh_pow64(d,(double)mu)*nh_exp64(-lambda*d)*nwp_hail_width[bin];
+            double f=n0*(shaped?nh_pow64(d,(double)mu):1.)*nh_exp64(-lambda*d)*nwp_hail_width[bin];
             sum=sum+f;
             if(sum>.0005) break;
             previous=sum;
