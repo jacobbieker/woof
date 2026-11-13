@@ -13,6 +13,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from generic_seam_marks import needs_generic_seam
 from woof.hex import surface_inputs as si
 from woof.hex.errors import ConfigurationRefusal
 
@@ -264,6 +265,7 @@ def test_the_contract_table_lists_every_scheme():
                       ("ruc_mosaic", "landusef"), ("ruc_mosaic", "soilctop")}
 
 
+@needs_generic_seam
 def test_topo_wind_2_reads_var_from_the_static_by_the_superset_match():
     from woof.hex.physics_suites import resolve_physics
 
@@ -274,6 +276,7 @@ def test_topo_wind_2_reads_var_from_the_static_by_the_superset_match():
     assert spec["file"] == "static" and dict(spec["variables"]) == {"VAR": "var2d"}
 
 
+@needs_generic_seam
 def test_a_lake_selection_resolves_to_the_generic_seam_and_names_its_inputs():
     from woof.hex.physics_suites import resolve_physics
 
