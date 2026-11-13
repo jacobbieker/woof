@@ -225,6 +225,9 @@ DUAL_TIER_ALLOWED: dict[str, str] = {
     "tests/test_mpas_afwa_diagnostics.py":
         "tier 1 takes the options, refusals, pools, streams and the off-state digests; tier 3 holds the "
         "module's words to the WRF route's kernels and WRF's Fortran (gfortran oracle) on the device",
+    "tests/test_mpas_reduction_diagnostics.py":
+        "tier 1 takes the options, refusals, pools, streams and the off-state digests; tier 3 holds the "
+        "module's words to WRF's CLWRF Fortran fixture and the RASM/energy arithmetic on the device",
     "tests/test_mpas_tslist.py":
         "tier 1 takes the option, refusals, placement and the plan; tier 3 holds the "
         "WRF route's own sampler kernel and Rust writer to the pools' columns on the device",
