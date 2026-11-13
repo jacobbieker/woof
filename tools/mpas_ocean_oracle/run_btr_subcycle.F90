@@ -30,7 +30,8 @@ program run_btr_subcycle
   call get_command_argument(2, outPath)
   call read_stream(inPath, dt, pools, fields)
   allocate(domain)
-  allocate(domain % blocklist, domain % blocklist % structs)
+  allocate(domain % blocklist)
+  allocate(domain % blocklist % structs)
   domain % configs => pools % configs
   domain % blocklist % configs => pools % configs
   domain % blocklist % dimensions => pool_named(pools, 'mesh')
