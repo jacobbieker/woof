@@ -1059,6 +1059,8 @@ class ForecastRequest:
     surface_statics: Path | None = None
     #: The resolution's receipt, for the door's own receipt.
     physics_resolution: Mapping[str, Any] | None = None
+    #: ``--adaptive-*`` (woof.hex.adaptive_dt), as the driver argv it forwards; empty with the option off.
+    adaptive_timestep: tuple[str, ...] = ()
     fullstep_local_timestep: bool = False
     fullstep_lts_mode: str = "shadow"
     # 8, not the ladder top: see the guard in drivers/fullstep_lts_forecast_v841.py
@@ -2513,6 +2515,10 @@ def resolve_request(
         if (getattr(arguments, "samehost_devices", None) is not None
                 and fullstep_values.get("fullstep_lts_mode", "shadow") != "active"):
             raise _refuse("the full-step shadow runs on one device: the partitioned shadow has no owner-only donor reduction (halo duplicates would corrupt the rate census)")
+    from . import adaptive_dt
+    adaptive_problem = adaptive_dt.refusal(arguments)
+    if adaptive_problem is not None:
+        raise _refuse(adaptive_problem)
     return ForecastRequest(
         repo=repo,
         mesh=mesh,
@@ -2589,6 +2595,7 @@ def resolve_request(
         **mode_fields,
         fullstep_local_timestep=fullstep_enabled,
         **fullstep_values,
+        adaptive_timestep=tuple(adaptive_dt.forwarded_arguments(arguments)),
         cycling_argv=_cycling_argv(arguments),
         experimental_dt=experimental_dt,
         levels=levels,
@@ -3346,6 +3353,7 @@ def build_driver_argv(request: ForecastRequest) -> list[str]:
             argv += ["--les-initial-tke", repr(request.les_initial_tke)]
     if request.fingerprint_every:
         argv += ["--fingerprint-every", str(request.fingerprint_every)]
+    argv += list(request.adaptive_timestep)
     if request.fullstep_local_timestep:
         argv += ["--fullstep-local-timestep", "--fullstep-lts-mode", request.fullstep_lts_mode,
                  "--fullstep-lts-max-rate", str(request.fullstep_lts_max_rate),
@@ -4926,6 +4934,11 @@ def _run_forecast(arguments: argparse.Namespace) -> int:
                     "does), without --physics-suite")
             if getattr(arguments, "tc_climate", None) is not None:
                 raise ValueError("--tc-climate currently requires the WOOF forecast executor")
+            if getattr(arguments, "adaptive_timestep", "off") != "off":
+                raise ValueError(
+                    "--adaptive-timestep runs on the WOOF column route (--physics-suite arwen_mpas_column or "
+                    "arwen_thompson_column): the MPAS v8.4.2 suite route's framework clock and physics alarms take "
+                    "one fixed step (HEX-WRF parity item 4.1 covers the WOOF route first)")
             # Retired (named gap W1-G2): the suite route applies IAU now (mpasphys.runtime_v842.SuiteIau, MPAS's
             # atm_add_tend_anal_incr once per step).  The door's IAU flags become MPAS's own &iau group and iau
             # stream input, so a flag run and a namelist run execute the same code.
@@ -5725,6 +5738,8 @@ def add_forecast_arguments(parser: argparse.ArgumentParser) -> None:
              ".npz (key cell_rate) instead of the grid file's dcEdge, so a "
              "class interface can be placed in a cull's interior and measured. "
              "Needs --local-timestep. tools/lts_forced_classing.py writes it")
+    from . import adaptive_dt
+    adaptive_dt.add_arguments(parser)
     parser.add_argument(
         "--headroom-mib", type=float, default=None, metavar="MIB",
         help="override the margin the admission decision holds back from the "
