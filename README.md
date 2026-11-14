@@ -278,7 +278,8 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   - MPAS-Seaice: variational EVP internal stress, the velocity solve and
     elastic subcycles, the pre-subcycle routines, ocean stress,
     incremental-remap advection on planar and spherical meshes (the rotated
-    grid, hexagons and quadrilaterals, variable resolution), and a forward
+    grid, hexagons and quadrilaterals, variable resolution) with its
+    optional conservation and monotonicity checks (one rank), and a forward
     time step with advection (N steps, bitwise restart);
   - MALI: the shallow-ice velocity solver, masks and geometry diagnostics,
     thermal initialisation, the thermal solver and basal melt, thickness
@@ -286,10 +287,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     subglacial hydrology and one forward-Euler time step.
 
   Limits: Albany's higher-order solvers are refused by name. The sea-ice
-  remap takes its init geometry as input and refuses halo exchanges and
-  the conservation and monotonicity checks by name. Sea-ice column
-  physics (thermodynamics), ocean KPP and GM/Redi, and the coupler
-  import and export are not ported. A few RKIND 8 cases need the LGPL libm
+  remap takes its init geometry as input and refuses halo exchanges by
+  name. Sea-ice column physics (thermodynamics), ocean KPP and GM/Redi,
+  and the coupler import and export are not ported. A few RKIND 8 cases need the LGPL libm
   opt-in below. These are ported pieces and steps, not coupled forecasts.
   Plan: [docs/mpas-coupled-roadmap.md](docs/mpas-coupled-roadmap.md).
 - **Further WRF physics,** each held word for word to compiled WRF Fortran

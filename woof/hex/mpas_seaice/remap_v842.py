@@ -20,6 +20,11 @@ remapping (Dukowicz and Baumgardner 2000; Lipscomb and Hunke 2004):
 - :func:`integrate_fluxes`, :func:`mass_tracer_products`,
   :func:`update_mass_and_tracers`, :func:`recover_tracer_means` (the
   ``config_recover_tracer_means_check`` warnings) and :func:`zap_small_mass`;
+- :func:`sum_tracers`, :func:`check_conservation`, :func:`local_min_max` and
+  :func:`check_monotonicity`: the optional ``config_conservation_check`` and
+  ``config_monotonicity_check`` (one rank: the global sums are the block's,
+  the halo exchanges of the local extremes change nothing); a failure raises
+  :class:`RemapCheckError` with v8.4.2's error messages and code;
 - :func:`remap_block` is ``incremental_remap_block`` and :func:`run`
   ``seaice_run_advection_incremental_remap``;
   :mod:`~woof.hex.mpas_seaice.timestep_v842` calls it each dynamics subcycle.
@@ -42,9 +47,8 @@ edge, the cells' geometric moments, the local frames, ``coeffs_reconstruct``)
 is the input's, as the variational basis is the velocity solver's.
 
 Refused by name: upwind advection (v8.4.2 cannot run it,
-:data:`UPWIND_REASON`), halo exchanges, the conservation and monotonicity
-checks, meshes other than hexagons and quadrilaterals, and tracer lists
-v8.4.2's update cannot run.
+:data:`UPWIND_REASON`), halo exchanges, meshes other than hexagons and
+quadrilaterals, and tracer lists v8.4.2's update cannot run.
 
 Pools are dicts of device arrays named as in MPAS, in the Fortran layout
 reversed (a tracer ``t(nLayers, nCategories, nCells+1)`` is C-order
@@ -65,7 +69,7 @@ from woof.hex.errors import ConfigurationRefusal
 SOURCE_FILES = (
     "src/core_seaice/shared/mpas_seaice_advection_incremental_remap_tracers.F:165-911",
     "src/core_seaice/shared/mpas_seaice_advection_incremental_remap.F:66-77,2345-2678,2751-3403,3418-5375,"
-    "5390-6674,6689-8043,8825-8947,8995-9295,9309-9387",
+    "5390-6674,6689-8043,8059-8314,8329-8810,8825-8947,8995-9295,9309-9387",
 )
 COMPILE_OPTIONS = ("--std=c++17", "--fmad=false", "--ftz=false", "--prec-div=true", "--prec-sqrt=true")
 MODULE_OPTIONS = COMPILE_OPTIONS
@@ -247,14 +251,9 @@ def check_config(configs: dict) -> None:
     if scheme != "incremental_remap":
         _refuse("config_advection_type", scheme, "v8.4.2 knows 'incremental_remap' and 'upwind' only",
                 "config_advection_type = 'incremental_remap'")
-    for knob, reason in (
-            ("config_use_halo_exch", "halo exchanges: this port runs one block"),
-            ("config_conservation_check", "the conservation check sums over ranks (mpas_dmpar_sum_real) and "
-                                          "only logs; not ported"),
-            ("config_monotonicity_check", "the monotonicity check (local min/max with a halo update) only "
-                                          "logs; not ported")):
-        if configs.get(knob, False):
-            _refuse(knob, True, reason, f"{knob} = .false.")
+    if configs.get("config_use_halo_exch", False):
+        _refuse("config_use_halo_exch", True, "halo exchanges: this port runs one block",
+                "config_use_halo_exch = .false.")
 
 
 # ---------------------------------------------------------------------------
@@ -335,6 +334,26 @@ def thickness_to_volume(tree, *, tracers: dict, remap: dict) -> None:
 
 class RemapError(RuntimeError):
     """A condition under which v8.4.2's remap stops the model (or would run on garbage)."""
+
+
+#: mpas_seaice_error.F:48-50
+SEAICE_ERROR_IR_MONO = 22
+SEAICE_ERROR_IR_CONS = 23
+
+
+class RemapCheckError(RemapError):
+    """The conservation or monotonicity check failed: v8.4.2 logs ``log`` (each
+    entry an MPAS_LOG_ERR message with its integer and real arguments) and
+    returns ``ierr`` from ``seaice_run_advection_incremental_remap`` before
+    the thicknesses go back to volume; the time step then stops the model
+    (``seaice_check_critical_error``). The pools are left as v8.4.2 leaves them;
+    ``warnings`` are the step's mean-recovery warnings (logged before the check)."""
+
+    def __init__(self, message: str, *, ierr: int, log: list[dict], warnings: list[dict] | None = None):
+        super().__init__(message)
+        self.ierr = ierr
+        self.log = log
+        self.warnings = list(warnings or [])
 
 
 def _int(value) -> np.int32:
@@ -624,11 +643,142 @@ def recover_tracer_means(tree, *, pools: dict, mesh: dict) -> list[dict]:
     return warnings
 
 
+def _values(field) -> int:
+    """Values per cell: categories times layers."""
+    return int(field.shape[1]) * _layers(field)
+
+
+def _entry(message: str, ints=(), reals=()) -> dict:
+    return {"message": message, "ints": [int(i) for i in ints], "reals": [float(r) for r in reals]}
+
+
+def sum_tracers(tree, *, pools: dict, mesh: dict, final: bool) -> None:
+    """``sum_tracers``: per tracer, category and layer the sum of ``areaCell``
+    times the mass-tracer product over cells 1..nCellsSolve, into the
+    ``tracer_conservation`` pool's ``<tracer>Cons`` (``Cons@2`` when ``final``)."""
+    ncs = int(mesh["nCellsSolve"])
+    for t in tree:
+        product = aux(pools, t, "product")
+        n = _values(pools["tracers"][t.name])
+        out = pools["tracer_conservation"][t.name + ("Cons@2" if final else "Cons")]
+        _launch(precision_of(product), "seaice_ir_sum_tracer_v842", n, (out, product, mesh["areaCell"], _int(ncs),
+                                                                        _int(n)))
+
+
+def check_conservation(tree, *, pools: dict) -> list[dict]:
+    """``check_tracer_conservation`` (one rank): the error messages v8.4.2
+    logs for the first tracer, category and layer whose final sum differs from
+    its initial one by more than eps11 relative, or ``[]``."""
+    import cupy as cp
+    for t in tree:
+        field = pools["tracers"][t.name]
+        n, nl = _values(field), _layers(field)
+        init = pools["tracer_conservation"][t.name + "Cons"]
+        final = pools["tracer_conservation"][t.name + "Cons@2"]
+        fail = cp.zeros(max(n, 1), cp.int32)
+        difference = cp.zeros(max(n, 1), field.dtype)
+        ratio = cp.zeros(max(n, 1), field.dtype)
+        _launch(precision_of(field), "seaice_ir_conservation_v842", n, (fail, difference, ratio, init, final,
+                                                                         _int(n)))
+        bad = np.flatnonzero(cp.asnumpy(fail[:n]))
+        if not bad.size:
+            continue
+        i = int(bad[0])
+        cat, layer = divmod(i, nl)
+        sums = (cp.asnumpy(init.reshape(-1)[i]), cp.asnumpy(final.reshape(-1)[i]))
+        if nl == 1:
+            head = _entry("IR: Tracer conservation error: tracer, category =" + t.name + " $i", [cat + 1])
+        else:
+            head = _entry("IR: Tracer conservation error: tracer, category, layer =" + t.name + " $i $i",
+                          [cat + 1, layer + 1])
+        return [head, _entry("Init value, final value: $r $r", reals=sums),
+                _entry("Difference, ratio: $r $r", reals=(cp.asnumpy(difference[i]), cp.asnumpy(ratio[i])))]
+    return []
+
+
+def _monotonicity_pool(pools: dict, t: Tracer):
+    pool = pools["tracer_monotonicity"]
+    return pool[t.name + "LocalMin"], pool[t.name + "LocalMax"]
+
+
+def local_min_max(tree, *, pools: dict, mesh: dict) -> None:
+    """``tracer_local_min_max``: each tracer's min and max over each owned
+    cell's neighbourhood (the masks of the moment: ``make_masks`` at threshold
+    0), into the ``tracer_monotonicity`` pool (zeroed first, the halo too)."""
+    nc, ncs, me = int(mesh["nCells"]), int(mesh["nCellsSolve"]), int(mesh["maxEdges"])
+    for t in tree:
+        field = pools["tracers"][t.name]
+        n = _values(field)
+        lmin, lmax = _monotonicity_pool(pools, t)
+        lmin[...] = 0
+        lmax[...] = 0
+        _launch(precision_of(field), "seaice_ir_local_min_max_v842", ncs * n, (
+            lmin, lmax, field, aux(pools, t, "mask"), mesh["nEdgesOnCell"], mesh["cellsOnCell"], _int(nc), _int(ncs),
+            _int(n), _int(me)))
+
+
+def check_monotonicity(tree, *, pools: dict, mesh: dict) -> list[dict]:
+    """``check_tracer_monotonicity`` (one rank, so the halo exchanges change
+    nothing): tracer by tracer (not the mass-like field) the local extremes
+    extended by one ring in place, then each meaningful new value against
+    them; the error messages v8.4.2 logs for the first violation, or ``[]``
+    (the tracers after it are left unextended, as v8.4.2 returns there)."""
+    import cupy as cp
+    nc, ncs, me = int(mesh["nCells"]), int(mesh["nCellsSolve"]), int(mesh["maxEdges"])
+    ids = mesh["indexToCellID"]
+    for t in tree:
+        if t.n_parents == 0:
+            continue
+        field = pools["tracers"][t.name]
+        precision, n, nl = precision_of(field), _values(field), _layers(field)
+        lmin, lmax = _monotonicity_pool(pools, t)
+        mask = aux(pools, t, "mask")
+        _launch(precision, "seaice_ir_extend_min_max_v842", n, (
+            lmin, lmax, mask, mesh["nEdgesOnCell"], mesh["cellsOnCell"], _int(nc), _int(ncs), _int(n), _int(me)))
+        m = ncs * n
+        violation = cp.zeros(max(m, 1), cp.int32)
+        tolerance = cp.zeros(max(m, 1), field.dtype)
+        difference = cp.zeros(max(m, 1), field.dtype)
+        _launch(precision, "seaice_ir_monotonicity_v842", m, (
+            violation, tolerance, difference, field, mask, lmin, lmax, _int(ncs), _int(n)))
+        bad = np.flatnonzero(cp.asnumpy(violation[:m]))
+        if not bad.size:
+            continue
+        i = int(bad[0])
+        kind = int(violation[i])
+        c, rest = divmod(i, n)
+        cat, layer = divmod(rest, nl)
+        old = cp.asnumpy((lmin if kind == 1 else lmax).reshape(-1)[i])
+        new = cp.asnumpy(field.reshape(-1)[i])
+        which = "min" if kind == 1 else "max"
+        global_id = int(ids[c])
+        if nl == 1:
+            # v8.4.2's two 2-D branches differ: no space after '=' and $f in the min branch
+            where = _entry(("Tracer, iCat, iCell, global iCell =" if kind == 1
+                            else "Tracer, iCat, iCell, global iCell = ") + t.name + " $i $i $i",
+                           [cat + 1, c + 1, global_id])
+            old_message = f"Old {which} value in neighborhood = " + ("$f" if kind == 1 else "$r")
+        else:
+            where = _entry("Tracer, iLayer, iCat, iCell, global iCell = " + t.name + " $i $i $i $i",
+                           [layer + 1, cat + 1, c + 1, global_id])
+            old_message = f"Old {which} value in neighborhood = $r"
+        return [_entry(""), _entry("IR advection, monotonicity violation!"), where, _entry(old_message, reals=[old]),
+                _entry("New value in cell = $r", reals=[new]),
+                _entry("Tolerance, difference: $r $r", reals=(cp.asnumpy(tolerance[i]), cp.asnumpy(difference[i]))),
+                _entry(f"IR advection, monotonicity violation ({which}, nDims == {2 if nl == 1 else 3})")]
+    return []
+
+
 def remap_block(tree, *, pools: dict, mesh: dict, configs: dict, dt) -> tuple[int, list[dict]]:
-    """``incremental_remap_block`` (without the monotonicity and conservation
-    checks): returns the CFL-flagged vertex count and the mean-recovery
-    warnings."""
+    """``incremental_remap_block``: returns the CFL-flagged vertex count and
+    the mean-recovery warnings. Under ``config_monotonicity_check`` the local
+    extremes are taken first (masks at threshold 0); under
+    ``config_conservation_check`` the sums before and after the update (the
+    products recomputed after it). The checks themselves are :func:`run`'s."""
     flags = geometry_flags(configs)
+    if configs.get("config_monotonicity_check", False):
+        make_masks(tree, pools=pools, mesh=mesh, threshold=0.0)
+        local_min_max(tree, pools=pools, mesh=mesh)
     make_masks(tree, pools=pools, mesh=mesh)
     construct_linear_fields(tree, pools=pools, mesh=mesh, flags=flags)
     remap = pools["incremental_remap"]
@@ -640,7 +790,13 @@ def remap_block(tree, *, pools: dict, mesh: dict, configs: dict, dt) -> tuple[in
     warnings = []
     if configs.get("config_recover_tracer_means_check", False):
         warnings = recover_tracer_means(tree, pools=pools, mesh=mesh)
+    conservation = bool(configs.get("config_conservation_check", False))
+    if conservation:
+        sum_tracers(tree, pools=pools, mesh=mesh, final=False)
     update_mass_and_tracers(tree, pools=pools, mesh=mesh)
+    if conservation:
+        mass_tracer_products(tree, pools=pools, mesh=mesh)
+        sum_tracers(tree, pools=pools, mesh=mesh, final=True)
     zap_small_mass(tree, pools=pools, mesh=mesh)
     return cfl, warnings
 
@@ -673,8 +829,10 @@ def check_tree(tree) -> None:
 def run(tree, *, pools: dict, mesh: dict, configs: dict) -> tuple[int, list[dict]]:
     """``seaice_run_advection_incremental_remap`` (time level 1, one block, no
     halo exchanges): the volumes to thickness, the remap at
-    ``dynamicsTimeStep``, the thicknesses back to volume. Returns the
-    CFL-flagged vertex count and the mean-recovery warnings."""
+    ``dynamicsTimeStep``, the optional conservation and monotonicity checks
+    (:class:`RemapCheckError` where one fails, before the thicknesses go
+    back to volume, as v8.4.2 returns there), the thicknesses back to volume.
+    Returns the CFL-flagged vertex count and the mean-recovery warnings."""
     check_config(configs)
     check_tree(tree)
     if int(mesh.get("vertexDegree", 3)) not in (3, 4):
@@ -688,5 +846,15 @@ def run(tree, *, pools: dict, mesh: dict, configs: dict) -> tuple[int, list[dict
     volume_to_thickness(tree, tracers=tracers, remap=remap)
     dt = pools["velocity_solver"]["dynamicsTimeStep"].item()
     result = remap_block(tree, pools=pools, mesh=mesh, configs=configs, dt=dt)
+    if configs.get("config_conservation_check", False):
+        log = check_conservation(tree, pools=pools)
+        if log:
+            raise RemapCheckError("check_tracer_conservation: " + log[0]["message"], ierr=SEAICE_ERROR_IR_CONS,
+                                  log=log, warnings=result[1])
+    if configs.get("config_monotonicity_check", False):
+        log = check_monotonicity(tree, pools=pools, mesh=mesh)
+        if log:
+            raise RemapCheckError("check_tracer_monotonicity: " + log[-1]["message"], ierr=SEAICE_ERROR_IR_MONO,
+                                  log=log, warnings=result[1])
     thickness_to_volume(tree, tracers=tracers, remap=remap)
     return result

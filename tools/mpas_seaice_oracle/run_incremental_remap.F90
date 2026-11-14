@@ -26,13 +26,15 @@
 !   4  seaice_run_advection_incremental_remap itself, oracle_n_steps times.
 !
 ! LOG.txt gets the ordered tracer list ('TRACER name parent nParents
-! hasChild'), each warning the routines log (the mean-recovery check), and the
-! error code ('IERR n') of stage 4.
+! hasChild'), each warning the routines log (the mean-recovery check), each
+! MPAS_LOG_ERR message ('ERR ...': the conservation and monotonicity checks;
+! as in MPAS they do not stop the run, the error code does) and the error code
+! ('IERR n') of stage 4.
 program run_incremental_remap
   use mpas_kind_types
   use mpas_derived_types
   use mpas_pool_routines
-  use mpas_log, only: stub_log_warn_unit
+  use mpas_log, only: stub_log_warn_unit, stub_log_err_unit
   use mpas_timekeeping
   use seaice_advection_incremental_remap_tracers, only: tracer_type, tracersHead, &
        seaice_add_tracers_to_linked_list, seaice_set_tracer_array_pointers
@@ -71,6 +73,7 @@ program run_incremental_remap
   call read_stream(inPath, inputDt, pools, fields)
   open(newunit=logUnit, file=trim(logPath), status='replace', action='write')
   stub_log_warn_unit = logUnit
+  stub_log_err_unit = logUnit
   allocate(domain)
   allocate(domain % blocklist)
   allocate(domain % blocklist % structs)

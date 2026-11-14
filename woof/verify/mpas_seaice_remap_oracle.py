@@ -277,6 +277,13 @@ def make_case(name, seed, stage, kind, owned, packages, config_overrides, field_
     still = (xv - cx) ** 2 + (yv - cy) ** 2 < 1.6e4 ** 2
     u[still] = 0.0
     v[still] = 0.0
+    if field_overrides.get("closed"):
+        # still at every vertex of a halo cell: nothing crosses the owned cells' rim, so the
+        # block conserves (a one-rank global mesh has no halo)
+        for c in range(int(m["nCellsArray"][0]), nc):
+            for iv in m["verticesOnCell"][c, :m["nEdgesOnCell"][c]]:
+                u[iv - 1] = 0.0
+                v[iv - 1] = 0.0
     values["uVelocity"], values["vVelocity"] = u, v
     # the ice: areas per category with an ice-free run of cells and tiny areas
     area = uniform(0.0, 0.35, (nc + 1, ncat))
@@ -352,21 +359,31 @@ word_mismatches = _stream.word_mismatches
 
 def parse_log(text: str) -> dict:
     """The oracle's log: the ordered tracers, the warnings (message, ints,
-    reals as floats), and stage 4's error code."""
-    tree, warnings, ierr = [], [], None
+    reals as floats), the MPAS_LOG_ERR messages ("errors", only where there
+    are any: the conservation and monotonicity checks) and stage 4's error
+    code."""
+    tree, warnings, errors, ierr = [], [], [], None
+    last = None
     for line in text.splitlines():
         if line.startswith("TRACER "):
             _, name, parent, n_parents, has_child = line.split()
             tree.append([name, parent, int(n_parents), has_child == "T"])
         elif line.startswith("WARN "):
-            warnings.append({"message": line[5:], "ints": [], "reals": []})
+            last = {"message": line[5:], "ints": [], "reals": []}
+            warnings.append(last)
+        elif line == "ERR" or line.startswith("ERR "):
+            last = {"message": line[4:], "ints": [], "reals": []}
+            errors.append(last)
         elif line.startswith("INTS"):
-            warnings[-1]["ints"] = [int(x) for x in line.split()[1:]]
+            last["ints"] = [int(x) for x in line.split()[1:]]
         elif line.startswith("REALS"):
-            warnings[-1]["reals"] = [float(x) for x in line.split()[1:]]
+            last["reals"] = [float(x) for x in line.split()[1:]]
         elif line.startswith("IERR "):
             ierr = int(line.split()[1])
-    return {"tree": tree, "warnings": warnings, "ierr": ierr}
+    log = {"tree": tree, "warnings": warnings, "ierr": ierr}
+    if errors:
+        log["errors"] = errors
+    return log
 
 
 def run_oracle(build_dir: Path, case: dict) -> tuple[dict[str, np.ndarray], dict]:
@@ -469,6 +486,8 @@ def on_device(case: dict, fixture: dict[str, np.ndarray] | None = None) -> dict[
 
 #: the mean-recovery warnings of the last stage-4 GPU run, by (case, precision)
 last_warnings: dict = {}
+#: the check errors and error code of the last stage-4 GPU run, by (case, precision)
+last_errors: dict = {}
 
 
 def run_gpu(case: dict, fixture: dict[str, np.ndarray] | None = None) -> dict[str, np.ndarray]:
@@ -496,11 +515,18 @@ def run_gpu(case: dict, fixture: dict[str, np.ndarray] | None = None) -> dict[st
         rv.make_masks(tree, pools=dev, mesh=dev["mesh"])
         rv.construct_linear_fields(tree, pools=dev, mesh=dev["mesh"], flags=rv.geometry_flags(case["config"]))
     elif stage == 4:
-        warnings = []
+        warnings, errors, ierr = [], [], 0
         for _ in range(int(case["config"]["oracle_n_steps"])):
-            _, w = rv.run(tree, pools=dev, mesh=dev["mesh"], configs=case["config"])
+            # run_incremental_remap.F90 stops stepping on an error code, as the time step does
+            try:
+                _, w = rv.run(tree, pools=dev, mesh=dev["mesh"], configs=case["config"])
+            except rv.RemapCheckError as failed:
+                errors, ierr = failed.log, failed.ierr
+                warnings += failed.warnings
+                break
             warnings += w
         dev["_warnings"] = warnings
+        last_errors[case["name"], case["precision"]] = (errors, ierr)
     elif stage != 0:
         raise ValueError(f"stage {stage} is not ported")
     if stage == 4:
@@ -520,7 +546,10 @@ def measure(precision: str, reference: dict | None = None, *, rows=CASES,
         want = expected_outputs(case, fixture)
         report[case["name"]] = {key: word_mismatches(got[key], want[key]) for key in want if graded(case, key)}
         if case["stage"] == 4:
-            want_warnings = load_logs(fixture_dir)[case["name"]][precision]["warnings"]
+            log = load_logs(fixture_dir)[case["name"]][precision]
             report[case["name"]]["warnings"] = warning_mismatches(last_warnings[case["name"], precision],
-                                                                  want_warnings, precision)
+                                                                  log["warnings"], precision)
+            errors, ierr = last_errors[case["name"], precision]
+            report[case["name"]]["errors"] = warning_mismatches(errors, log.get("errors", []), precision)
+            report[case["name"]]["ierr"] = int(ierr != log["ierr"])
     return report
