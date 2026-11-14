@@ -4750,6 +4750,12 @@ def _construct_device_stack(
             raise ValueError("stochastic restart is absent from this checkpoint")
     elif stochastic_restart is not None:
         raise ValueError("checkpoint stochastic physics must remain enabled on resume")
+    # WRF's SPP (spp_conv/spp_pbl/spp_lsm) on the generic seam: the pattern
+    # source its WRF driver reads (woof.hex.spp); nothing without a switch.
+    from woof.hex.spp import attach as attach_spp
+    spp_receipt = attach_spp(backend, physics_mesh, stochastic=host.get("stochastic"))
+    if spp_receipt is not None:
+        print(json.dumps({"spp": spp_receipt}), flush=True)
     from woof.hex.cuda_held_suarez import attach as attach_held_suarez
     attach_held_suarez(backend, driver)
     api = require_staged_backend_api(backend)

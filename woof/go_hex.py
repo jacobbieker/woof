@@ -120,8 +120,8 @@ KEY_REASONS: Mapping[str, str] = {
     "blend_width": "hex's regional zones are MPAS's fixed nSpecZone=2/nRelaxZone=5 (matrix A.9)",
     "feedback": "nest feedback is N/A on the mesh (matrix item 5.8)",
     "smooth_option": "nest feedback smoothing is N/A on the mesh (matrix item 5.8)",
-    "spp_conv": "SPP on hex is matrix item 5.4", "spp_pbl": "SPP on hex is matrix item 5.4",
-    "spp_lsm": "SPP on hex is matrix item 5.4",
+    **{key: (f"SPP on hex is `woof hex forecast --physics {key}=1` on the generic column seam (matrix item 5.4); "
+             "the go route has no mapping yet") for key in ("spp_conv", "spp_pbl", "spp_lsm")},
     "multi_perturb": "regional WRF-Solar EPS on hex is matrix item 5.5",
     "grid_fdda": "grid and spectral nudging on hex are matrix item 5.1",
     "obs_nudge_opt": "obs nudging on hex is matrix item 5.2",
