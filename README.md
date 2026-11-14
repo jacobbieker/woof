@@ -172,7 +172,8 @@ Everything above describes Recast WOOF, and is kept as upstream wrote it.
 This section is the fork's own. The fork carries upstream WOOF 1.1.6 and adds
 the work below on top of it. It does not change upstream's defaults: each new
 option is off until selected, and a configuration that selects none of them
-runs as upstream's does. Every merge into the fork's `main` is released as a
+runs as upstream's does. The section is grouped by area, and where
+something is partial it says so. Every merge into the fork's `main` is released as a
 new `metal-woof` build (`metal-vX.Y.Z.N`). The fork's own changes are recorded
 in [FORK-CHANGELOG.md](FORK-CHANGELOG.md).
 
@@ -190,28 +191,55 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   is translated to Metal when it first loads, and `import cupy` resolves to a
   CuPy-compatible layer over MLX. CUDA runs exactly as before. Under strict
   numerics, binary32 `pow` on Metal is WOOF's own correctly rounded `powf`,
-  so it carries no vendor code. Design and details:
-  [docs/dev/mlx-backend.md](docs/dev/mlx-backend.md).
+  so it carries no vendor code. Numerics come in two modes: strict
+  (`GPUWM_WRF_EXACT=1`, bit-exact software binary64, with exact
+  df64-seeded division and square root) and fast (the default, binary64
+  libm computed in df64). The WRF regional model runs on a Mac, and so
+  does the hex model, including its MPAS v8.4.2 suite route (R2); the hex
+  helper libraries are built from source on macOS. A parity ledger
+  (`tests/test_backend_parity_ledger.py`) records every MLX-against-CUDA
+  gap by name. Design and details:
+  [docs/dev/mlx-backend.md](docs/dev/mlx-backend.md); limits are under
+  "Limitations of the MLX backend" below.
 - **A host (CPU) backend.** `WOOF_BACKEND=host` runs the same GPU code on
   any CPU. Each `.cu` unit is compiled by the host C++ compiler, and
   `import cupy` resolves to a CuPy-compatible layer over NumPy. It is never
   selected by default. Design and measurements:
   [docs/dev/host-backend.md](docs/dev/host-backend.md).
 - **WRF-Chem gas and aerosol chemistry,** each piece held word for word to
-  WRF v4.6.1's chem code: RADM2 gas phase, MADE/SORGAM aerosol dynamics,
-  equilibrium and dry deposition. These form the `chem_opt = 2` package,
-  which is still refused while photolysis and emissions are ported. Where a
-  WRF routine is not freely licensed, the default build uses a version
-  written from the published method instead. The exact routine is either an
-  explicit opt-in, or is generated from your own WRF tree
-  (`WOOF_WRF_SOURCE`). Plan and licence table:
+  WRF's chem code (v4.7.1; the earlier pieces v4.6.1, being re-pinned): RADM2
+  gas phase, MADE/SORGAM aerosol dynamics, SORGAM initial and boundary
+  values, equilibrium, Wesely and SORGAM dry deposition, and Fast-TUV
+  photolysis (`phot_opt = 3`). Anthropogenic emissions (`emiss_opt = 3`)
+  take EDGAR v8.1 AP inventory frames (CC-BY-4.0), speciated onto RADM2.
+  Namelists with `chem_opt = 1, 2` import. Aerosol feedback on radiation
+  (`aer_ra_feedback`, legacy RRTMG only) uses optical properties, and
+  multimode aerosol activation uses a solver, both written clean-room from
+  the published methods and checked black-box. `so2so4_qc_threshold` is an
+  opt-in guard against nucleation bursts from round-off-sized cloud water;
+  by default WRF's any-cloud rule applies. Where a WRF routine is not freely
+  licensed, the default build uses a version written from the published
+  method. The exact routine is either an explicit opt-in (the PNNL files
+  under `optional/wrfchem_pnnl`: Abdul-Razzak-Ghan `activate` and the
+  `mixactivate` column driver, bitwise against WRF v4.7.1,
+  `WOOF_ENABLE_WRFCHEM_PNNL=1`, never in the wheels), or is generated from
+  your own WRF tree (`WOOF_WRF_SOURCE`). Not ported yet: WRF's own optics
+  and the other `chem_opt` packages, which are refused by name. Plan and
+  licence table:
   [docs/chem-coupled-aerosol-roadmap.md](docs/chem-coupled-aerosol-roadmap.md).
 - **Chemistry on the hex mesh.** Hex runs select a WRF-Chem species set with
   `chem_opt` and the `&chem` options under their WRF names. The WRF column
   processes run unchanged on hex columns, bitwise per column against the
   regional model: dust, sea salt, dry deposition, vertical mixing, settling,
-  ageing, wet deposition and optics. Aerosol feedback on radiation and an
-  MICM gas-phase option (NCAR MUSICA) are in progress.
+  ageing, wet deposition and optics. RADM2 and RADM2SORG (`chem_opt = 1, 2`)
+  run there with their emissions, input chemistry, regional boundary
+  values, fire smoke and plume rise, aerosol feedback on radiation and
+  Thompson aerosol coupling, also on the MPAS v8.4.2 suite route. An MICM
+  gas-phase option (NCAR MUSICA's Rosenbrock solver) is word-exact to its
+  oracle; its photolysis is the `j_max` form by default, or a port of NCAR
+  TUV-x v0.17.0 under `"photolysis": "tuvx"` (input files are fetched,
+  hash-verified and cached on first use). Not every combination of these has
+  been run as a live forecast.
 - **WRF-Hydro and NEMO coupling, as explicit opt-ins.** Both are under
   `optional/` and are never in the wheels, because their licences (UCAR
   WRF-Hydro, CeCILL NEMO) are not ones the default build carries.
@@ -221,9 +249,16 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     Muskingum-Cunge and diffusive-wave channels, the groundwater bucket,
     level-pool reservoirs and `hydro.namelist`. Each piece is bitwise against
     WRF 4.7.1's `hydro/`.
+    Also ported: the 2-D groundwater model (`GWBASESWCRT = 3`),
+    `rt_option = 2`, reservoir `lake_option 3` and Route_Link reaches. It is
+    wired into the forecast route (`--wrf-hydro`, `[wrf_hydro]`), and into
+    hex through a conservative cell-to-routing-grid exchange. Unported
+    `hydro.namelist` options are refused by name.
   - NEMO 5.0.2: the equation of state, TKE mixing, vertical and lateral
     tracer diffusion, FCT advection and solar penetration. A coupled column
-    ocean is driven by WRF's ocean-coupler exchange (SST only for now).
+    ocean is driven by WRF's ocean-coupler exchange (SST only for now); a
+    step splits at the coupling time on adaptive clocks.
+  - Details: [docs/coupling/WRF-HYDRO-NEMO.md](docs/coupling/WRF-HYDRO-NEMO.md).
 - **Noah-MP follows WRF 4.7.1's submodule (e5c0859), at the user's
   request.** This is not a default change: the default
   `noahmp_snow_age = "wrf_470"` already ages snow at night as e5c0859 does,
@@ -231,15 +266,28 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   capacity, and e5c0859's other edits are dead in WRF or arithmetic-neutral.
   `noahmp_snow_age = "wrf_461"` keeps WRF 4.6.1's daytime-only aging.
 - **MPAS-Ocean, MPAS-Seaice and MALI land ice,** ported a piece at a time,
-  each word-exact to MPAS v8.4.2 on CUDA and Metal, behind the MPAS coupling
-  spine (`woof hex ice verify` and friends). So far:
-  - ocean tendency terms;
-  - sea-ice EVP internal stress;
-  - the MALI shallow-ice velocity solver, geometry diagnostics and thermal
-    initialisation.
+  each word-exact to MPAS v8.4.2 on CUDA and Metal (RKIND 4 and 8 unless
+  noted), behind the MPAS coupling spine (`woof hex ice verify` and
+  friends). So far:
+  - MPAS-Ocean: the equation of state and freezing temperature,
+    diagnostics, pressure gradient and horizontal mixing, momentum and
+    thickness tendencies, tracer tendencies, monotone tracer advection,
+    implicit vertical mixing, vertical transport velocity, the
+    split-explicit barotropic stage and whole split-explicit step, and
+    forward mode (clock, cold start, N steps, bitwise restart);
+  - MPAS-Seaice: variational EVP internal stress, the velocity solve and
+    elastic subcycles, the pre-subcycle routines, ocean stress, and a
+    forward time step (dynamics only: N steps, bitwise restart);
+  - MALI: the shallow-ice velocity solver, masks and geometry diagnostics,
+    thermal initialisation, the thermal solver and basal melt, thickness
+    and tracer advection, calving (every option, and front restoration),
+    subglacial hydrology and one forward-Euler time step.
 
-  Albany's higher-order solvers are refused by name. Plan:
-  [docs/mpas-coupled-roadmap.md](docs/mpas-coupled-roadmap.md).
+  Limits: Albany's higher-order solvers are refused by name. Sea-ice
+  advection and thermodynamics, ocean KPP and GM/Redi, and the coupler
+  import and export are not ported. A few RKIND 8 cases need the LGPL libm
+  opt-in below. These are ported pieces and steps, not coupled forecasts.
+  Plan: [docs/mpas-coupled-roadmap.md](docs/mpas-coupled-roadmap.md).
 - **Further WRF physics,** each held word for word to compiled WRF Fortran
   where the port says so:
   - SMS-3DTKE (`km_opt = 5`);
@@ -249,6 +297,44 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     unequal-area cells;
   - coupled fire spread and smoke;
   - Morrison with CESM aerosol (`mp_physics = 40`, `aercu_opt = 0`).
+- **Hex (MPAS) parity with WRF's options.** The goal is for the hex model
+  to accept the options WRF does, reusing WRF's column implementations
+  rather than copies, and to refuse by name what it cannot yet do. Landed:
+  - `woof go` runs hex with `[model] engine = "hex"` (regional route);
+  - surface inputs on the generic column seam: CLM lake, SLUCM urban on
+    per-cell fractions, WUDAPT LCZ classes, Noah and RUC mosaic, Pleim-Xiu
+    and the slab with their soil inits, irrigation and `topo_wind = 1`
+    ([docs/ruc-mosaic-and-clm-lake.md](docs/ruc-mosaic-and-clm-lake.md));
+  - CCPP TKE-EDMF on the column seam;
+  - diagnostics: `nwp_diagnostics` maxima, `p_lev`/`z_lev` levels, `tslist`
+    station series, `prec_acc_dt` windows and `acc_phy_tend`, AFWA
+    (icing and some radar/VIL/visibility options are refused), CLWRF, and
+    RASM and surface-energy reductions. `afwa_ptype` keeps its intended
+    logic rather than WRF's literal operator precedence; the module
+    documents the difference;
+  - `aer_opt = 1, 2`, `w_damping`, and grid and spectral analysis nudging;
+  - `woof resume` and `woof branch` for hex runs
+    ([docs/branch-from-checkpoint.md](docs/branch-from-checkpoint.md));
+  - GRIB2 and Earth2 export ([docs/grib2-export.md](docs/grib2-export.md));
+  - a terrain hook (`--terrain-source`, `[static.highres]`);
+  - an option matrix that runs generic-seam column options through a real
+    hex forecast on CUDA and Metal.
+
+  Limits: the MPAS v8.4.2 suite route (R2) takes a subset of these, and
+  refuses the rest by name. WRF's adaptive time step (`--adaptive-timestep`)
+  runs on the WOOF column route (R1) only, and is refused with `--nudging`.
+  Accuracy against source WRF and MPAS over day-long runs is not
+  yet measured, and several options have unit and oracle evidence but no
+  live forecast yet.
+- **Terrain: GEM-15 (experimental).** `terrain_source = "gem15-dtm"` or
+  `"gem15-dsm"` (WRF `[static.highres]`; hex `--terrain`) read Google
+  Research's 15 m global elevation models by range reads of verified COG
+  blocks, against a pinned cell index. Neither is ever the default. The data
+  is CC-BY-4.0, and its attribution travels with the static. It is a
+  preprint dataset with offsets of several metres, covers roughly 60S to 84N,
+  and excluded regions are refused by name
+  ([docs/high-resolution-static-geography.md](docs/high-resolution-static-geography.md),
+  [docs/public/HIGHRES-TERRAIN.md](docs/public/HIGHRES-TERRAIN.md)).
 - **Height-dependent resolution:** a partial-depth two-way nest, fine near
   the ground and coarser aloft, on WRF and (dry dynamics only) on MPAS; and
   WRF's live vertical nesting (`vert_refine_method = 2`).  On WRF the band
@@ -268,10 +354,33 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   storm-track planning, and delete-after-commit backpressure and domain
   selection for upstream's Icechunk store export
   (`[output] icechunk_delete_after_commit`, `icechunk_domains`).
+- **Performance work.** Metal: out-of-line compilation of the largest units,
+  compile prefetch and persisted translations, fewer host syncs per step,
+  and hardware fast paths that keep the same words (a strict 3 km forecast
+  went from 47.7 to 42.1 s per forecast hour); CUDA: a memory-capped compile
+  pool and fewer boundary launches. `WOOF_METAL_GPU_TIMES` times each kernel.
 - **Continuous integration and releases:** GitHub Actions on Linux and
-  macOS, with a self-hosted CUDA job. Every merge to `main` tags, writes
-  release notes and publishes `metal-woof` to PyPI
+  macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
+  tests by name, and main's full run is periodic. Every merge to `main`
+  tags, writes release notes and publishes `metal-woof` to PyPI
   ([docs/dev/ci.md](docs/dev/ci.md)).
+
+### Licensing and opt-ins
+
+The default build and the published wheels (`metal-woof`, `recast-woof`)
+carry none of the following. Each is off until selected:
+
+- **LGPL glibc 2.39 libm** (`WOOF_GLIBC239_LIBM64`, `WOOF_GLIBC239_TRIG64`):
+  glibc's binary64 words on the GPU and host. It lifts some MALI and
+  MPAS-Ocean RKIND 8 refusals.
+- **NVIDIA-derived `powf`**: CUDA's transcription for Metal strict numerics.
+  The default is WOOF's own correctly rounded `powf`.
+- **WRF-Hydro** (`WOOF_ENABLE_WRF_HYDRO=1`), **NEMO**
+  (`WOOF_ENABLE_NEMO=1`) and **WRF-Chem PNNL** (`WOOF_ENABLE_WRFCHEM_PNNL=1`),
+  under `optional/`.
+- WRF routines that are not freely licensed come from your own WRF tree
+  (`WOOF_WRF_SOURCE`).
+- GEM-15 terrain is CC-BY-4.0 and needs its attribution.
 
 ### Install on a Mac
 
@@ -280,7 +389,8 @@ pip install metal-woof        # macOS 14 or newer on Apple silicon, Python 3.11+
 ```
 
 The `metal-woof` wheel carries the macOS builds of the Rust bridges and the
-MLX stack, and selects the MLX backend on its own. It installs the same
+MLX stack, and selects the MLX backend on its own. The hex helper libraries
+(host preparation and physics tables) are built from source on macOS. It installs the same
 `woof` package and commands as `recast-woof`; install one or the other, not
 both. From a checkout, `pixi run -e mlx ...` uses the same backend.
 
@@ -318,8 +428,10 @@ on it:
   (`WOOF_HEX_METAL=0` opts out; on a virtual Mac it refuses). Its words differ from CUDA's where binary32 libm does (`precise::`
   against libdevice), so a forecast drifts about as far from CUDA as CUDA's
   own run does with contraction off. Within hex:
-  - 8 of the 361 kernel units are refused by name: RRFS smoke, RRFS NSSL and
-    the Grell-Freitas MPAS-columns route;
+  - the MPAS v8.4.2 suite route (R2) runs end to end on a Mac (a new
+    12 km geometry for 1 h took about 10 minutes of wall time), but some
+    kernel units are refused by name: TEMPO on macOS, Grell-Freitas
+    `gfl_columns` and RRFS `mynnedmf_run_l1` on Metal;
   - the LTS executor's reserve census needs 64-bit atomic adds, which Apple
     GPUs lack;
   - the dynamics subcycle runs eager, because the facade has no CUDA graphs;
