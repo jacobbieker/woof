@@ -3798,6 +3798,11 @@ def execute_forecast(
         print(json.dumps({"tc_lake_mask": tc_lake_receipt}), flush=True)
     from woof.hex.chem_transport import attach as attach_chemistry
     attach_chemistry(stack["backend"], host, stack["driver"])
+    if host.get("w_damping") is not None:
+        from woof.hex.cuda_w_damping import WDamping
+        stack["driver"].w_damping = WDamping(w_crit_cfl=float(host["w_damping"]["w_crit_cfl"]))
+        print(json.dumps({"w_damping": {"w_crit_cfl": float(host["w_damping"]["w_crit_cfl"]),
+                                        "w_damp_on": WDamping().w_damp_on}}), flush=True)
     # --wrf-hydro (woof.wrf_hydro_route): the routing on its own LSM grid through the conservative cell <-> grid
     # exchange (woof.hex.wrf_hydro_hex); returns at once unless the launch asked for it.
     from woof.hex.wrf_hydro_hex import attach_host as attach_wrf_hydro
@@ -5290,6 +5295,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--chemistry-config", type=Path, default=None)
     parser.add_argument("--wind-farms", default=None)
+    parser.add_argument("--w-damping", action="store_true")
+    parser.add_argument("--w-crit-cfl", type=float, default=1.0)
     parser.add_argument(
         "--source-table",
         type=Path,
@@ -6127,6 +6134,8 @@ def _main(args: argparse.Namespace, decision: Mapping[str, Any] | None) -> int:
     from woof.hex.stochastic import resolve_options
     if getattr(args, "wind_farms", None) is not None:
         host["wind_farms"] = args.wind_farms
+    if getattr(args, "w_damping", False):
+        host["w_damping"] = {"w_crit_cfl": float(args.w_crit_cfl)}
     host["stochastic"] = resolve_options(args.stochastic).json()
     if args.preflight_only or not DEFER_PREPARED_FINGERPRINT:
         join_prepared_fingerprint(host)

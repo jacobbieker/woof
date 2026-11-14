@@ -49,6 +49,7 @@ from dataclasses import dataclass, field
 import datetime as _dt
 import importlib.util
 import json
+import math
 import os
 from pathlib import Path
 import sys
@@ -969,6 +970,8 @@ class ForecastRequest:
     source_table: Path | None = None
     chemistry_config: Path | None = None
     wind_farms: str | None = field(default=None, kw_only=True)
+    #: WRF's w_crit_cfl when --w-damping asked for the limiter (woof.hex.cuda_w_damping), else None.
+    w_damping: float | None = field(default=None, kw_only=True)
     #: Input problems collected rather than raised, preflight only.  Always
     #: empty on a real run, because there the same conditions refuse.
     input_problems: tuple[str, ...] = ()
@@ -2565,6 +2568,7 @@ def resolve_request(
         source_table=source_table,
         chemistry_config=getattr(arguments, "chemistry_config", None),
         wind_farms=getattr(arguments, "wind_farms", None),
+        w_damping=_resolve_w_damping(arguments),
         input_problems=tuple(collected or ()),
         preset=preset.name,
         pbl_cadence_source=pbl_cadence_source,
@@ -3146,6 +3150,25 @@ def resolve_surface_statics(arguments, physics, mesh, grid, collected):
         f"-o <mesh>{surface_inputs.FILE_SUFFIX}`.", collected)
 
 
+def _resolve_w_damping(arguments) -> float | None:
+    """WRF's w_crit_cfl when ``--w-damping`` is on, else None; refuses what it cannot honour."""
+
+    crit = getattr(arguments, "w_crit_cfl", None)
+    if not getattr(arguments, "w_damping", False):
+        if crit is not None:
+            raise _refuse("--w-crit-cfl is read only with --w-damping; it would be accepted and never read")
+        return None
+    crit = 1.0 if crit is None else float(crit)
+    if not math.isfinite(crit) or crit <= 0:
+        raise _refuse(f"--w-crit-cfl {crit!r} must be finite and positive")
+    for flag in ("local_timestep", "fullstep_local_timestep", "partial_nest"):
+        if getattr(arguments, flag, False):
+            raise _refuse(
+                f"--w-damping acts in the resident dycore driver; --{flag.replace('_', '-')} runs its own drivers "
+                "that do not carry it, so the limiter would be accepted and never applied")
+    return crit
+
+
 def mpas_route_orographic_statistics(arguments, native_config) -> Path | None:
     """The GSL drag statistics an MPAS-route run reads when it names none: beside --grid, else built there.
 
@@ -3341,6 +3364,8 @@ def build_driver_argv(request: ForecastRequest) -> list[str]:
         argv += ["--chemistry-config", str(request.chemistry_config)]
     if request.wind_farms is not None:
         argv += ["--wind-farms", request.wind_farms]
+    if request.w_damping is not None:
+        argv += ["--w-damping", "--w-crit-cfl", repr(float(request.w_damping))]
     if request.source_table is not None:
         argv += ["--source-table", str(request.source_table)]
     if request.start_time:
@@ -3700,6 +3725,7 @@ def build_receipt(
             ),
             **({} if request.surface_statics is None else
                {"surface_statics": str(request.surface_statics)}),
+            **({} if request.w_damping is None else {"w_damping": {"w_crit_cfl": request.w_damping}}),
             "source_table": (
                 None if request.source_table is None
                 else str(request.source_table)
@@ -4928,6 +4954,9 @@ def _run_forecast(arguments: argparse.Namespace) -> int:
             from . import multihost
             multihost.begin(arguments)
         if native_config is not None:
+            if getattr(arguments, "w_damping", False):
+                raise ValueError("--w-damping is carried by the WOOF-physics route's dycore driver; the MPAS "
+                                 "suite route (matrix item 4.2 follow-up) would accept it and never apply it")
             from .mpasphys.resident_v842 import ported_route_refusal
             from .mpasphys.forecast_v842 import named_library_route
             suite_refusal = ported_route_refusal(native_config)
@@ -5492,6 +5521,12 @@ def add_forecast_arguments(parser: argparse.ArgumentParser) -> None:
              "of that name beside --grid)")
     parser.add_argument("--chemistry-config", type=Path, default=None,
                         help="N aerosol species and GPU mixing/deposition/settling inputs (chemistry/v1 JSON)")
+    parser.add_argument("--w-damping", action="store_true",
+                        help="WRF's w_damping = 1 vertical-velocity limiter as a w-tendency term "
+                             "(|w| dt/dz above 1 pushes w back by 0.3 * (cfl - --w-crit-cfl)); "
+                             "WOOF-physics route only; default off")
+    parser.add_argument("--w-crit-cfl", type=float, default=None, metavar="CFL",
+                        help="WRF's w_crit_cfl for --w-damping (default 1.0, WOOF's)")
     parser.add_argument("--wind-farms", default=None, metavar="uswtdb|TABLE|off",
                         help="opt-in Fitch turbine drag and TKE from the shared turbine tables")
     # --wrf-hydro / --wrf-hydro-output: WRF-Hydro's routing on its own LSM grid, coupled to the hex land surface
