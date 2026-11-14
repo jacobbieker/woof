@@ -201,3 +201,133 @@ void diff6(const real* __restrict__ f,      // (nlev, nys, nxs)
 #undef MSFX
 #undef MSFY
 }
+
+// ---------------------------------------------------------------------------
+// diff6_multi: the mass-point (variant 0, half-level) rows of one step in a
+// single launch.  prepare_fixed_tendencies filters theta, every moist and
+// chem species and TKE with the same mut, hybrid coefficients, map factors,
+// slope taper and loop bounds; only the field, its carrying tendency and the
+// row's coef differ.  The per-point face masses mu_*_p0/p1, the slope tapers
+// and the map factor are formed once here and reused for every row, and each
+// row then evaluates exactly the statements diff6 evaluates for a variant-0
+// point, in the same order, so every word written equals the one the
+// per-field launch writes.  The rows arrive by value as device addresses
+// (the rk_bookkeeping word-table precedent): row r of ``rows`` is
+// (field, tend, coef bits in the low 32 bits).  Rows 0-2 carry the shared
+// planes: (mut, c1, c2), (phb, msfu, msfv), (msft, 0, 0).
+// ---------------------------------------------------------------------------
+
+#define DIFF6_MULTI_MAX_ROWS 32
+#define DIFF6_MULTI_HEADER_ROWS 3
+
+struct Diff6Table {
+    unsigned long long rows[DIFF6_MULTI_HEADER_ROWS + DIFF6_MULTI_MAX_ROWS][3];
+};
+
+#if __CUDA_ARCH__ >= 700
+#define DIFF6_TABLE_PARAM const __grid_constant__ Diff6Table
+#else
+#define DIFF6_TABLE_PARAM const Diff6Table
+#endif
+
+extern "C" __global__
+void diff6_multi(DIFF6_TABLE_PARAM table, int nrows,
+                 int mono, int slopeopt, real dzthr_x, real dzthr_y,
+                 int nlev, int ny, int nx,
+                 int i_lo, int i_hi, int j_lo, int j_hi)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int j = blockIdx.y * blockDim.y + threadIdx.y;
+    int k = blockIdx.z * blockDim.z + threadIdx.z;
+    if (i >= nx || j >= ny || k >= nlev) return;
+    if (i < i_lo || i > i_hi || j < j_lo || j > j_hi) return;
+    const real* mut = (const real*)table.rows[0][0];
+    const real* c1 = (const real*)table.rows[0][1];
+    const real* c2 = (const real*)table.rows[0][2];
+    const real* phb = (const real*)table.rows[1][0];
+    const real* msfu = (const real*)table.rows[1][1];
+    const real* msfv = (const real*)table.rows[1][2];
+    const real* msft = (const real*)table.rows[2][0];
+    const int nys = ny, nxs = nx;          // variant 0: unstaggered storage
+
+    int ic = PERIODIC(i, nx);
+    int jc = PERIODIC(j, ny);
+
+#define FX(m) f[I3S(k, jc, PERIODIC(ic + (m), nx), nys, nxs)]
+#define FY(m) f[I3S(k, PERIODIC(jc + (m), ny), ic, nys, nxs)]
+#define MU(jj, ii) mut[(size_t)PERIODIC(jj, ny) * nx + PERIODIC(ii, nx)]
+#define CM(jj, ii) (__fmul_rn(c1[k], MU(jj, ii)) + c2[k])
+#define PHB(jj, ii) phb[I3(k, PERIODIC(jj, ny), PERIODIC(ii, nx), ny, nx)]
+#define MSFX(jj, ii) msfu[(size_t)PERIODIC(jj, ny) * (nx + 1) \
+                          + PERIODIC(ii, nx)]
+#define MSFY(jj, ii) msfv[(size_t)PERIODIC(jj, ny) * nx + PERIODIC(ii, nx)]
+
+    // The field-independent factors, exactly diff6's variant-0 statements.
+    real mu_x_p0 = 0.5f * (CM(jc, ic - 1) + CM(jc, ic));
+    real mu_x_p1 = 0.5f * (CM(jc, ic) + CM(jc, ic + 1));
+    real sdx_p0 = 1.0f, sdx_p1 = 1.0f;
+    if (slopeopt >= 1) {
+        real a0 = fabsf(PHB(jc, ic) - PHB(jc, ic - 1)) * MSFX(jc, ic);
+        real a1 = fabsf(PHB(jc, ic + 1) - PHB(jc, ic)) * MSFX(jc, ic + 1);
+        real dz0 = a0, dz1 = a1;
+        sdx_p0 = fmaxf(1.0f - __fdiv_rn(dz0, dzthr_x), 0.0f);
+        sdx_p1 = fmaxf(1.0f - __fdiv_rn(dz1, dzthr_x), 0.0f);
+    }
+    real map = msft[(size_t)jc * nx + ic];
+    real mu_y_p0 = 0.5f * (CM(jc - 1, ic) + CM(jc, ic));
+    real mu_y_p1 = 0.5f * (CM(jc, ic) + CM(jc + 1, ic));
+    real sdy_p0 = 1.0f, sdy_p1 = 1.0f;
+    if (slopeopt >= 1) {
+        real b0 = fabsf(PHB(jc, ic) - PHB(jc - 1, ic)) * MSFY(jc, ic);
+        real b1 = fabsf(PHB(jc + 1, ic) - PHB(jc, ic)) * MSFY(jc + 1, ic);
+        real dz0 = b0, dz1 = b1;
+        sdy_p0 = fmaxf(1.0f - __fdiv_rn(dz0, dzthr_y), 0.0f);
+        sdy_p1 = fmaxf(1.0f - __fdiv_rn(dz1, dzthr_y), 0.0f);
+    }
+    // The products diff6 forms per field from these factors, once.
+    real wx_p0 = __fmul_rn(sdx_p0, mu_x_p0);
+    real wx_p1 = __fmul_rn(sdx_p1, mu_x_p1);
+    real wy_p0 = __fmul_rn(sdy_p0, mu_y_p0);
+    real wy_p1 = __fmul_rn(sdy_p1, mu_y_p1);
+
+    for (int r = 0; r < nrows; ++r) {
+        const unsigned long long* row = table.rows[DIFF6_MULTI_HEADER_ROWS + r];
+        const real* f = (const real*)row[0];
+        real* tend = (real*)row[1];
+        real coef = __uint_as_float((unsigned int)row[2]);
+        real cmap = __fmul_rn(coef, map);
+
+        real dflux_x_p0 = __fmul_rn(10.0f, (FX(0) - FX(-1))) - __fmul_rn(5.0f, (FX(1) - FX(-2)))
+                          + (FX(2) - FX(-3));
+        real dflux_x_p1 = __fmul_rn(10.0f, (FX(1) - FX(0))) - __fmul_rn(5.0f, (FX(2) - FX(-1)))
+                          + (FX(3) - FX(-2));
+        if (mono == 2) {
+            if (dflux_x_p0 * (FX(0) - FX(-1)) <= 0.0f) dflux_x_p0 = 0.0f;
+            if (dflux_x_p1 * (FX(1) - FX(0)) <= 0.0f) dflux_x_p1 = 0.0f;
+        }
+        real tendency_x = __fmul_rn(cmap,
+            (__fmul_rn(wx_p1, dflux_x_p1) - __fmul_rn(wx_p0, dflux_x_p0)));
+
+        real dflux_y_p0 = __fmul_rn(10.0f, (FY(0) - FY(-1))) - __fmul_rn(5.0f, (FY(1) - FY(-2)))
+                          + (FY(2) - FY(-3));
+        real dflux_y_p1 = __fmul_rn(10.0f, (FY(1) - FY(0))) - __fmul_rn(5.0f, (FY(2) - FY(-1)))
+                          + (FY(3) - FY(-2));
+        if (mono == 2) {
+            if (dflux_y_p0 * (FY(0) - FY(-1)) <= 0.0f) dflux_y_p0 = 0.0f;
+            if (dflux_y_p1 * (FY(1) - FY(0)) <= 0.0f) dflux_y_p1 = 0.0f;
+        }
+        real tendency_y = __fmul_rn(cmap,
+            (__fmul_rn(wy_p1, dflux_y_p1) - __fmul_rn(wy_p0, dflux_y_p0)));
+
+        size_t at = I3S(k, j, i, nys, nxs);
+        tend[at] = (tend[at] + tendency_x) + tendency_y;
+    }
+
+#undef FX
+#undef FY
+#undef MU
+#undef CM
+#undef PHB
+#undef MSFX
+#undef MSFY
+}
