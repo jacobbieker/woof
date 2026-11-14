@@ -638,7 +638,7 @@ module mpas_derived_types
   public
 
   type mpas_dminfo_type
-    integer :: nprocs = 1
+    integer :: nprocs = 1, my_proc_id = 0
   end type mpas_dminfo_type
 
   ! the equation of state declares a dm_info it never uses
@@ -669,7 +669,10 @@ module mpas_dmpar
   private
   public :: mpas_dmpar_min_real, mpas_dmpar_exch_group_create, mpas_dmpar_exch_group_add_field, &
             mpas_dmpar_exch_group_reuse_halo_exch, mpas_dmpar_exch_group_full_halo_exch, &
-            mpas_dmpar_exch_group_destroy, mpas_dmpar_field_halo_exch, mpas_dmpar_exch_halo_field
+            mpas_dmpar_exch_group_destroy, mpas_dmpar_field_halo_exch, mpas_dmpar_exch_halo_field, &
+            mpas_dmpar_exch_group_build_reusable_buffers, MPAS_DMPAR_NOERR
+
+  integer, parameter :: MPAS_DMPAR_NOERR = 0
 
   interface mpas_dmpar_exch_halo_field
     module procedure exch_halo_field1d, exch_halo_field2d, exch_halo_field3d
@@ -732,6 +735,13 @@ contains
     integer, optional, intent(out) :: iErr
     if (present(iErr)) iErr = 0
   end subroutine mpas_dmpar_exch_group_full_halo_exch
+
+  subroutine mpas_dmpar_exch_group_build_reusable_buffers(domain, groupName, iErr)
+    type(domain_type), intent(inout) :: domain
+    character(len=*), intent(in) :: groupName
+    integer, optional, intent(out) :: iErr
+    if (present(iErr)) iErr = 0
+  end subroutine mpas_dmpar_exch_group_build_reusable_buffers
 
   subroutine mpas_dmpar_exch_group_destroy(domain, groupName, iErr)
     type(domain_type), intent(inout) :: domain
@@ -1033,4 +1043,20 @@ module mpas_hash
 end module mpas_hash
 
 module mpas_io_units
+  ! seaice_check_state opens a log unit when its check fails
+  implicit none
+  public
+
+contains
+
+  subroutine mpas_new_unit(newUnit, unformatted)
+    integer, intent(out) :: newUnit
+    logical, optional, intent(in) :: unformatted
+    newUnit = 77
+  end subroutine mpas_new_unit
+
+  subroutine mpas_release_unit(releasedUnit)
+    integer, intent(in) :: releasedUnit
+  end subroutine mpas_release_unit
+
 end module mpas_io_units

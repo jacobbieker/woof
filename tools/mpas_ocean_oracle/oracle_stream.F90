@@ -13,7 +13,9 @@
 ! Pools: mesh, state, tracers (the state pool's 'tracers' subpool),
 ! diagnostics, forcing, scratch, tend and tracersTend (the tend pool's
 ! 'tracersTend' subpool), tracersSurfaceFlux (the forcing pool's), swForcing,
-! verticalMesh.  A logical config named 'package:NAME' is the package
+! verticalMesh; and MPAS-Seaice's: boundary, velocity_solver,
+! velocity_variational, velocity_weak, icestate, tracers_aggregate,
+! atmos_coupling, ocean_coupling, ridging.  A logical config named 'package:NAME' is the package
 ! switch NAME, put in the packages pool (ocnPackages); one named 'mesh:NAME'
 ! is the mesh pool's config NAME (on_a_sphere); a character config named
 ! 'diagnostics:NAME' is the diagnostics pool's character field NAME (xtime).
@@ -29,8 +31,10 @@ module oracle_stream
   public :: oracle_pools, oracle_field, poolNames, read_stream, write_stream, pool_named
 
   integer, parameter :: maxFields = 256
-  character(len=24), parameter :: poolNames(11) = [character(len=24) :: 'mesh', 'state', 'tracers', &
-       'diagnostics', 'forcing', 'scratch', 'tend', 'tracersTend', 'tracersSurfaceFlux', 'swForcing', 'verticalMesh']
+  character(len=24), parameter :: poolNames(20) = [character(len=24) :: 'mesh', 'state', 'tracers', &
+       'diagnostics', 'forcing', 'scratch', 'tend', 'tracersTend', 'tracersSurfaceFlux', 'swForcing', 'verticalMesh', &
+       'boundary', 'velocity_solver', 'velocity_variational', 'velocity_weak', 'icestate', 'tracers_aggregate', &
+       'atmos_coupling', 'ocean_coupling', 'ridging']
 
   type oracle_field
     character(len=24) :: pool
@@ -49,7 +53,7 @@ module oracle_stream
   end type pool_ref
 
   type oracle_pools
-    type(pool_ref) :: pool(11)
+    type(pool_ref) :: pool(20)
     type(MPAS_pool_type), pointer :: configs => null(), packages => null()
   end type oracle_pools
 

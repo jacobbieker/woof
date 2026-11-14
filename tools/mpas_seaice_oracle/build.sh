@@ -84,6 +84,59 @@ for precision in r4 r8; do
     "${fc[@]}" -o "${build_dir}/run_subcycle_${precision}" run_subcycle.o "${seaice_objects[@]}" stubs.o mpas_kind_types.o
     "${fc[@]}" -o "${build_dir}/run_presubcycle_${precision}" run_presubcycle.o "${seaice_objects[@]}" \
         ${libm_objects[@]+"${libm_objects[@]}"} stubs.o mpas_kind_types.o
+    # the time-step oracle, on the framework stand-ins the ocean oracles share
+    # (tools/mpas_ocean_oracle/stubs.F90: pools with time levels, the time
+    # manager, the self-describing stream), in a directory of its own
+    mkdir -p step
+    ( cd step
+      cut() {  # cut FILE ROUTINE...: the routines, verbatim
+          local file=$1; shift
+          for routine in "$@"; do
+              awk -v r="${routine}" '$0 ~ "^ *subroutine +" r "\\(" {on=1} on {print} on && $0 ~ "^ *end subroutine +" r "([^a-zA-Z_0-9]|$)" {on=0}' "${file}"
+          done
+      }
+      "${fc[@]}" "${flags[@]}" "${source_root}/src/framework/mpas_kind_types.F"
+      "${fc[@]}" "${flags[@]}" "${script_dir}/../mpas_ocean_oracle/stubs.F90"
+      "${fc[@]}" "${flags[@]}" "${script_dir}/../mpas_ocean_oracle/oracle_stream.F90"
+      "${fc[@]}" "${flags[@]}" "${mesh_cut}"
+      "${fc[@]}" "${flags[@]}" "${seaice}/column/ice_kinds_mod.F90"
+      "${fc[@]}" "${flags[@]}" "${seaice}/column/constants/cice/ice_constants_colpkg.F90"
+      "${fc[@]}" "${flags[@]}" "${seaice}/shared/mpas_seaice_constants.F"
+      "${fc[@]}" "${flags[@]}" "${script_dir}/step_standins.F90"
+      "${fc[@]}" "${flags[@]}" "${seaice}/shared/mpas_seaice_velocity_solver_constitutive_relation.F"
+      "${fc[@]}" "${flags[@]}" "${seaice}/shared/mpas_seaice_velocity_solver_variational.F"
+      { cat "${script_dir}/diagnostics_cut_head.F90"
+        cut "${seaice}/shared/mpas_seaice_diagnostics.F" seaice_initialize_time_diagnostics \
+            seaice_set_time_diagnostics seaice_check_state seaice_load_balance_timers
+        echo "end module seaice_diagnostics"; } > seaice_diagnostics_cut.F
+      "${fc[@]}" "${flags[@]}" seaice_diagnostics_cut.F
+      "${fc[@]}" "${flags[@]}" "${seaice}/shared/mpas_seaice_velocity_solver.F"
+      { cat "${script_dir}/column_cut_head.F90"
+        cut "${seaice}/shared/mpas_seaice_column.F" seaice_column_predynamics_time_integration \
+            seaice_column_dynamics_time_integration seaice_column_postdynamics_time_integration \
+            seaice_column_reinitialize_fluxes seaice_column_reinitialize_atmospheric_fluxes \
+            seaice_column_reinitialize_oceanic_fluxes seaice_column_reinitialize_diagnostics_thermodynamics \
+            seaice_column_reinitialize_diagnostics_bgc seaice_column_reinitialize_diagnostics_dynamics
+        cat "${script_dir}/column_cut_tail.F90"; } > seaice_column_cut.F
+      "${fc[@]}" "${flags[@]}" seaice_column_cut.F
+      { cat "${script_dir}/timestep_cut_head.F90"
+        cut "${seaice}/shared/mpas_seaice_time_integration.F" seaice_timestep store_timestep_counter \
+            seaice_timestep_finalize
+        echo "end module seaice_time_integration"; } > seaice_time_integration_cut.F
+      "${fc[@]}" "${flags[@]}" seaice_time_integration_cut.F
+      "${fc[@]}" "${flags[@]}" "${script_dir}/run_seaice_step.F90"
+      if command -v objdump >/dev/null; then
+          if objdump -d mpas_seaice_*.o seaice_*.o | grep -Eq '\bv?fn?m(add|sub)([0-9]|[[:space:]]|$)'; then
+              echo "a time-step oracle object contains an FMA instruction; refusing" >&2
+              exit 4
+          fi
+      fi
+      "${fc[@]}" -o "${build_dir}/run_seaice_step_${precision}" run_seaice_step.o seaice_time_integration_cut.o \
+          seaice_column_cut.o mpas_seaice_velocity_solver.o seaice_diagnostics_cut.o \
+          mpas_seaice_velocity_solver_variational.o mpas_seaice_velocity_solver_constitutive_relation.o \
+          step_standins.o mpas_seaice_constants.o ice_constants_colpkg.o ice_kinds_mod.o \
+          seaice_mesh_interpolation.o oracle_stream.o stubs.o mpas_kind_types.o \
+          ${libm_objects[@]+"${libm_objects[@]}"} )
 done
 {
     echo "gfortran: $("${fc[@]}" --version | head -1)"
@@ -93,4 +146,4 @@ done
     echo "expf/exp: $(sed 's/^libm: //' "${build_dir}/r8/libm.txt")"
     echo "fma: $(grep -m1 -ow fma /proc/cpuinfo 2>/dev/null || echo absent)"
 } > "${build_dir}/TOOLCHAIN.txt"
-echo "built ${build_dir}/run_oracle_r{4,8} ${build_dir}/run_subcycle_r{4,8} ${build_dir}/run_presubcycle_r{4,8}"
+echo "built ${build_dir}/run_oracle_r{4,8} ${build_dir}/run_subcycle_r{4,8} ${build_dir}/run_presubcycle_r{4,8} ${build_dir}/run_seaice_step_r{4,8}"

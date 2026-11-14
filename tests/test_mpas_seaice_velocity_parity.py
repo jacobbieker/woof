@@ -95,7 +95,8 @@ def test_the_seaice_door_verify_grades_every_piece():
     assert report["passed"] and report["status"] == "stub"
     assert [p["name"] for p in report["pieces"]] == ["evp_variational_internal_stress",
                                                     "evp_velocity_solve_r4", "evp_velocity_solve_r8",
-                                                    "velocity_pre_subcycle_r4", "velocity_pre_subcycle_r8"]
+                                                    "velocity_pre_subcycle_r4", "velocity_pre_subcycle_r8",
+                                                    "time_step_dynamics_r4", "time_step_dynamics_r8"]
 
 
 @requires_gpu
