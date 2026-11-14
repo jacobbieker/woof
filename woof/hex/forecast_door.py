@@ -3037,6 +3037,25 @@ def resolve_orographic_statistics(arguments, physics, mesh, grid, collected):
             "--orographic-statistics",
             "The engine's YSU orographic drag (WOOF gwd_opt=1) reads the ten "
             "statistics the mesh's static file carries.", collected)
+    if spec.get("file") == "surface_statics":
+        # topo_wind = 1's VAR_SSO rides in the surface statics file
+        # (woof hex surface-statics --fields var_sso).
+        from . import surface_inputs
+
+        if given is None:
+            given = getattr(arguments, "surface_statics", None)
+        if given is None:
+            named = getattr(arguments, "grid", None)
+            candidates = surface_inputs.default_candidates(
+                named if named is not None else grid,
+                getattr(arguments, "static", None), mesh)
+            given = next((path for path in candidates if path.is_file()), candidates[0])
+        return _require_file(
+            Path(given).expanduser().absolute(), "--surface-statics",
+            "topo_wind = 1 reads VAR_SSO from the mesh's surface statics file; "
+            "build it with `woof hex surface-statics --static <static> "
+            "--geog-root <WPS_GEOG> --fields var_sso -o "
+            f"<mesh>{surface_inputs.FILE_SUFFIX}`.", collected)
     if given is None:
         # Beside --grid as named (a run directory of links) before beside the
         # file a linked grid reaches; built at the named place when neither has it.
@@ -3086,6 +3105,13 @@ def resolve_surface_statics(arguments, physics, mesh, grid, collected):
     profile = None if physics is None else physics.column_profile
     selection = None if profile is None else profile.get("physics")
     needed = surface_inputs.reads_surface_statics(selection)
+    if (not needed and given is not None and physics is not None
+            and physics.column_profile is not None
+            and (physics.column_profile.get("orographic_statistics") or {}).get(
+                "file") == "surface_statics"):
+        # topo_wind = 1 reads VAR_SSO from this file through the orographic
+        # statistics resolver (resolve_orographic_statistics).
+        return None
     if needed:
         problems = surface_inputs.unstaged_problems(
             surface_inputs.plan_config(selection))

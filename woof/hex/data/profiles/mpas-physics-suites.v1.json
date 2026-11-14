@@ -102,6 +102,15 @@
           "OL3": "ol3",
           "OL4": "ol4"
         }
+      },
+      {
+        "about": "topo_wind = 1's VAR_SSO (GEOGRID.TBL varsso_10m), which the surface statics file carries per cell (woof hex surface-statics --fields var_sso).",
+        "file": "surface_statics",
+        "file_suffix": ".surface_statics.nc",
+        "dimension": "nCells",
+        "variables": {
+          "VAR_SSO": "VAR_SSO"
+        }
       }
     ],
     "species_history_names": {

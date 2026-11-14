@@ -553,35 +553,7 @@ def bind(physics: Mapping[str, Any] | None, path: str | Path | None, *,
     inputs: dict[str, Any] = {}
     receipt_inputs: dict[str, Any] = {}
     with netCDF4.Dataset(source, "r") as dataset:
-        schema = getattr(dataset, "schema", None)
-        if schema != SCHEMA:
-            raise ConfigurationRefusal(
-                "surface_statics", str(source),
-                f"the file's schema is {schema!r}, not {SCHEMA!r}",
-                "a file written by `woof hex surface-statics`")
-        if not ("latCell" in dataset.variables and "lonCell" in dataset.variables
-                and same_cells(dataset.variables["latCell"][:],
-                               dataset.variables["lonCell"][:], lat, lon)):
-            raise ConfigurationRefusal(
-                "surface_statics", str(source),
-                "the file was built on other cells than this run's mesh (its "
-                "latCell/lonCell are not the mesh's, in the mesh's order), so "
-                "each value would land on another cell",
-                "the surface statics file of this run's mesh")
-        provenance = json.loads(getattr(dataset, "provenance_json", "{}"))
-        if static_path is not None:
-            # Two statics can share every cell centre and still differ in the
-            # land use the mask and fractions were built from.
-            run_static = sha256(Path(static_path).expanduser().resolve(
-                strict=True).read_bytes()).hexdigest()
-            if provenance.get("parent_static_sha256") != run_static:
-                raise ConfigurationRefusal(
-                    "surface_statics", str(source),
-                    "the file was built from another static file than this "
-                    f"run's ({provenance.get('parent_static', 'unrecorded')}, "
-                    f"sha256 {provenance.get('parent_static_sha256')}, against "
-                    f"{run_static}), so its per-cell values describe another "
-                    "land use", "the surface statics file built from this run's --static")
+        provenance = _verify_open(dataset, source, lat, lon, static_path)
         if any(need.input.keyword == "frc_urb2d" for need in required):
             # The fraction weighs each urban category by URBPARM.TBL's FRC_URB;
             # the run's urban model must read the same table bytes.
@@ -669,6 +641,57 @@ def bind(physics: Mapping[str, Any] | None, path: str | Path | None, *,
         "provenance": provenance,
     }
     return inputs, receipt
+
+
+def _verify_open(dataset, source, lat, lon, static_path) -> dict[str, Any]:
+    """The sidecar's own checks (schema, cells, parent static); returns its
+    provenance."""
+
+    schema = getattr(dataset, "schema", None)
+    if schema != SCHEMA:
+        raise ConfigurationRefusal(
+            "surface_statics", str(source),
+            f"the file's schema is {schema!r}, not {SCHEMA!r}",
+            "a file written by `woof hex surface-statics`")
+    if not ("latCell" in dataset.variables and "lonCell" in dataset.variables
+            and same_cells(dataset.variables["latCell"][:],
+                           dataset.variables["lonCell"][:], lat, lon)):
+        raise ConfigurationRefusal(
+            "surface_statics", str(source),
+            "the file was built on other cells than this run's mesh (its "
+            "latCell/lonCell are not the mesh's, in the mesh's order), so "
+            "each value would land on another cell",
+            "the surface statics file of this run's mesh")
+    provenance = json.loads(getattr(dataset, "provenance_json", "{}"))
+    if static_path is not None:
+        # Two statics can share every cell centre and still differ in the
+        # land use the mask and fractions were built from.
+        run_static = sha256(Path(static_path).expanduser().resolve(
+            strict=True).read_bytes()).hexdigest()
+        if provenance.get("parent_static_sha256") != run_static:
+            raise ConfigurationRefusal(
+                "surface_statics", str(source),
+                "the file was built from another static file than this "
+                f"run's ({provenance.get('parent_static', 'unrecorded')}, "
+                f"sha256 {provenance.get('parent_static_sha256')}, against "
+                f"{run_static}), so its per-cell values describe another "
+                "land use", "the surface statics file built from this run's --static")
+    return provenance
+
+
+def verify_sidecar(path: str | Path, *, latitude_rad, longitude_rad,
+                   static_path: str | Path | None = None) -> dict[str, Any]:
+    """Hold a surface statics file to this run's cells and static (schema,
+    ``latCell``/``lonCell`` in the mesh's order, the static it was built
+    from); returns its provenance."""
+
+    import netCDF4
+
+    source = Path(path).expanduser().resolve(strict=True)
+    lat = np.asarray(latitude_rad, dtype=np.float64).reshape(-1)
+    lon = np.asarray(longitude_rad, dtype=np.float64).reshape(-1)
+    with netCDF4.Dataset(source, "r") as dataset:
+        return _verify_open(dataset, source, lat, lon, static_path)
 
 
 def seal(cfg, given: Mapping[str, Any] | None, *, n_columns: int
