@@ -935,3 +935,50 @@ Tests: `tests/test_adaptive_timestep_{oracle,controller,surface,checkpoint,execu
 (`run_calc_dt.F90` + `stubs.F90`), which compiles `calc_dt` against a
 local WRF checkout and captures **1728 rows**; the port is graded against
 them at `max_ulp == 0`.
+
+---
+
+## Hex (the MPAS mesh): HEX-WRF parity item 4.1
+
+`woof hex forecast --adaptive-timestep {off,on,tropical}` runs the same controller
+(`woof.core.adaptive_timestep`, the graded `calc_dt`) on the hex WOOF column route
+(`--physics-suite arwen_mpas_column` / `arwen_thompson_column`, the frozen column batch whose
+physics is WRF's own `PhysicsDriver`).  Off by default; with it off the forecast loop never imports
+the module and every history byte is the fixed step's.  `woof.hex.adaptive_dt` is the whole of it;
+what differs from the WRF route:
+
+- **CFL numbers.**  Horizontal: the edge Courant number `|u_n| dt / dcEdge` over owned edges and
+  levels (end of step).  Vertical: WRF's form, the coordinate vertical velocity over the coordinate
+  layer depth on the interior w levels: `|ww| / rho_zz(face) * rdzu * dt`, `ww` the vertical mass flux
+  the scalar transport moved on each RK stage.  The geometric `|w| dt / dz` is the wrong number over
+  terrain: on the 5 km Arizona hexcase it reads 1.27 at the fixed 30 s step, at the first interface
+  above steep ground, where the flow follows the coordinate surfaces; a controller fed it held the step
+  under the row's (106 steps for the hour against 88 with the coordinate form).
+- **Lattice.**  WRF's `precision = 100` is exact only in its rational ESMF clock.  hex's clock is
+  binary64 seconds and every step check compares `start + dt`, so hex runs `calc_dt` with
+  `precision = 64`: every step is n/64 s and every sum of steps is exact.
+- **Acoustic substeps.**  WRF derives `time_step_sound` from the live step.  hex keeps MPAS's split
+  (three dynamics subcycles, which the v8.4.1 CUDA subcycle requires) and raises
+  `config_number_of_sub_steps` to the fewest (even) substeps whose acoustic steps are no longer than the
+  longest the admitted row takes.  Third-order RK takes stage one as one acoustic step of `dt_dyn/3`,
+  so at order 3 the step is capped where that one reaches the row's longest (`acoustic_ceiling`).
+- **Defaults.**  WRF's targets (vertical 1.2, horizontal 0.84, 5 % growth), starting at the mesh row's
+  admitted step with WRF's ratios to it (max 2x, min 3/4).  `tropical` is `--clock tropical-adaptive`
+  (#276): vertical target 1.0, the row's step as the floor, refused outside |lat| < 25.  WRF's opt-in
+  also writes `w_damping = 1`; hex has no w-damping term yet (item 4.2), which the receipt notes.
+- **Landings and cadences.**  The step lands, through `step_to_time`'s two-step look-ahead, on every
+  history frame, checkpoint, the run end, the lateral-boundary interval and every positive physics
+  period.  Radiation, and any held surface/PBL or cumulus period, fire on those exact time deadlines
+  through the driver's `*_due_override` hooks; a cadence welded to the step (the default PBL, GF's
+  pinned `cudt = 0`) runs every step at the live dt, so the cumulus rain/NCA clock advances on every
+  adaptive step (#278).
+- **Restart.**  The checkpoint carries the clock (exact elapsed time, both CFL memories, `last_dt`,
+  `stepping_to_time`), so a resume takes the step the straight run takes.  A fixed-step checkpoint
+  resumed adaptive, or the reverse, is refused.
+- **Refused by name**: `--local-timestep`, `--fullstep-local-timestep` (mutually exclusive), IAU,
+  `--tc-climate`, `--les-model`, `--nest-triggers`, DA cycling and the JEDI background, the balance
+  series, chemistry, wind farms, WRF-Hydro, `--members`, same-host ranks, an explicit `--dt`, and at run
+  time the stochastic physics, radar snapshots, the surface update and the large-step recovery; the
+  MPAS v8.4.2 suite route is refused at the door (its framework clock and alarms take one step).
+
+Evidence: see the HEX-WRF parity matrix row "adaptive dt"; tests `tests/test_hex_adaptive_dt.py`.
