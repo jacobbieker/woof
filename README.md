@@ -398,7 +398,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   on CUDA and Metal). Its advection receipts for the RTX 5090 and RTX PRO 6000
   (Blackwell) are **not re-pinned**: no Blackwell card was available, so
   `certified_unrepinned` in each fixture's `gpu-receipts.json` records the
-  pins and the commit, and the gate warns rather than fails for those pins.
+  pins and the commit, and the gate warns rather than fails for those pins. An RK stage's lateral specified/relaxation
+  rows (u, v, theta, phi, w, mu) are one launch that also absorbs their held
+  zero-fills and interior ufuncs (`state_relaxation_multi`, byte-identical;
+  about 33 launches, 15 memsets and 15 strided adds fewer per nested domain
+  step on the LES, 34 launches fewer per step on a 3 km specified domain;
+  `WOOF_LBC_RELAX_MULTI=0` restores the per-row launches).
   `WOOF_METAL_GPU_TIMES` times each kernel.
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
