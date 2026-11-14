@@ -655,6 +655,10 @@ def publish(loaded: list[dict]) -> dict:
     names = sorted({name for data in loaded for name in data["rows"]})
     for name in names:
         held = [(data["backend"], data["rows"][name]) for data in loaded if name in data["rows"]]
+        lacking = [backend for backend, row in held if "row_args" not in row]
+        if lacking:
+            raise ValueError(f"row {name} has no recorded row_args on {', '.join(lacking)} (a results file "
+                             "written before rows recorded their flags): rerun it with a fresh --out")
         for field in ("overrides", "physics_args", "row_args"):
             values = {json.dumps(row.get(field), sort_keys=True) for _, row in held if field in row}
             if len(values) > 1:

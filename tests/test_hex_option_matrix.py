@@ -181,15 +181,15 @@ def test_grading_is_against_the_baseline_row():
 def test_publish_scrubs_paths_and_states_one_verdict_per_option():
     loaded = [
         {"backend": "cuda", "case": "c", "hours": 1, "rows": {
-            "x": {"overrides": {"mp_physics": "2"}, "outcome": "ran",
+            "x": {"row_args": [], "overrides": {"mp_physics": "2"}, "outcome": "ran",
                   "wall_seconds": 10.0, "receipt": {"seam": "engine"}},
-            "y": {"overrides": {"sf_surface_physics": "1"},
+            "y": {"row_args": [], "overrides": {"sf_surface_physics": "1"},
                   "outcome": "refused", "needs": ["thermal_inertia (THC)"],
                   "reason": "missing surface input: ... /home/u/run/out"},
-            "z": {"overrides": {"cu_physics": "7"}, "outcome": "error",
+            "z": {"row_args": [], "overrides": {"cu_physics": "7"}, "outcome": "error",
                   "reason": "KeyError in /home/u/tree/woof/x.py"}}},
         {"backend": "metal", "case": "c", "hours": 1, "rows": {
-            "x": {"overrides": {"mp_physics": "2"}, "outcome": "ran",
+            "x": {"row_args": [], "overrides": {"mp_physics": "2"}, "outcome": "ran",
                   "wall_seconds": 30.0}}},
     ]
     evidence = matrix.publish(loaded)
@@ -328,6 +328,10 @@ def test_publish_refuses_inputs_that_are_not_one_comparison():
         matrix.publish([results("cuda"), results("metal", args=("--physics", "a=2"))])
     with pytest.raises(ValueError, match="row x ran with different row_args"):
         matrix.publish([results("cuda"), results("metal", row_args=("--geog", "/other"))])
+    legacy = results("metal")
+    del legacy["rows"]["x"]["row_args"]
+    with pytest.raises(ValueError, match="no recorded row_args on metal"):
+        matrix.publish([results("cuda"), legacy])
 
 
 def test_the_smoke_holds_each_backend_to_its_own_record():
