@@ -4038,7 +4038,12 @@ def execute_forecast(
     # subcycle, which a captured graph would replay around.  On Metal the
     # facade's stream capture records no graph, so a replay would launch
     # nothing: the subcycle runs eager there.
-    if (graph_requested and lts_attachment is None and fullstep_shadow is None
+    # Local time stepping's rate classes are launches of the same subcycle,
+    # chosen on the host by the sub-step and stage alone, so they capture and
+    # replay with it (WOOF_HEX_CUDA_GRAPHS_LTS=0: eager, the path before
+    # 2026-11-15).
+    lts_graphs = lts_attachment is None or os.environ.get("WOOF_HEX_CUDA_GRAPHS_LTS", "1") != "0"
+    if (graph_requested and lts_graphs and fullstep_shadow is None
             and les_attachment is None and recovery_attachment is None and not metal_lane()
             and adaptive is None):
         from woof.hex.cuda_subcycle_graphs import attach_subcycle_graphs
@@ -4972,7 +4977,7 @@ def execute_forecast(
             "fully_replayed_committed_steps": graph_full_steps,
             "partly_replayed_committed_steps": graph_partial_steps,
             "subcycles": None if graph_controller is None else graph_controller.receipt(),
-            "skip_reason": ("local_timestep_controller" if lts_attachment is not None
+            "skip_reason": ("local_timestep_controller" if lts_attachment is not None and not lts_graphs
                             else "metal_facade_captures_no_graph" if metal_lane() else None),
         }} if graph_requested else {}),
         "cuda_graphs_policy": graph_policy(int(N_CELLS)),

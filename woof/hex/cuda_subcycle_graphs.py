@@ -309,7 +309,7 @@ class SubcycleGraphs:
         self.boundaries: dict[tuple[str, int], Any] = {}
         self.tendencies: dict[str, Any] = {}
         self.pool: dict[int, Any] = {}
-        self.counter_delta = (0, 0, 0)
+        self.counter_delta: tuple[int, ...] = (0, 0, 0)
         self.disabled_key = None
         self.disabled_error = None
         self.subcycle = 0
@@ -368,18 +368,26 @@ class SubcycleGraphs:
         self._fallback(state, reason, error)
         return eager(state, **kwargs)
 
-    def _counters(self) -> tuple[int, int, int]:
+    def _counters(self) -> tuple[int, ...]:
         regional = self.driver.regional_v841
+        lts = getattr(self.driver, "local_timestep", None)
         return (self.driver.mixing_calls_v841,
                 0 if regional is None else regional.discipline.scrubs,
-                0 if regional is None else getattr(regional.discipline, "fused_launches", 0))
+                0 if regional is None else getattr(regional.discipline, "fused_launches", 0),
+                # --local-timestep (woof.hex.cuda_driver_lts): its receipt counts the class launches a
+                # subcycle makes, so a replay adds the captured subcycle's counts like the others.
+                *(() if lts is None else tuple(lts.launch_counts[name] for name in sorted(lts.launch_counts))))
 
-    def _set_counters(self, value: tuple[int, int, int]) -> None:
+    def _set_counters(self, value: tuple[int, ...]) -> None:
         self.driver.mixing_calls_v841 = value[0]
         if self.driver.regional_v841 is not None:
             self.driver.regional_v841.discipline.scrubs = value[1]
             if hasattr(self.driver.regional_v841.discipline, "fused_launches"):
                 self.driver.regional_v841.discipline.fused_launches = value[2]
+        lts = getattr(self.driver, "local_timestep", None)
+        if lts is not None:
+            for name, count in zip(sorted(lts.launch_counts), value[3:]):
+                lts.launch_counts[name] = count
 
     def _refresh_boundaries(self) -> None:
         regional = self.driver.regional_v841
