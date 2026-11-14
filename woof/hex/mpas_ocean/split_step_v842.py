@@ -36,8 +36,7 @@ verbatim with gfortran ``-O0 -ffp-contract=off`` at RKIND 4 and 8
 Refused by name, beyond what the pieces refuse: the high-frequency thickness
 filter, GM (``config_use_standardGM``), the coupled land-ice effective
 density, a time integrator other than 'split_explicit' or
-'unsplit_explicit', nested halo extents (the momentum and thickness
-tendencies run over the block), and the sphere's reconstruction at RKIND 8
+'unsplit_explicit', and the sphere's reconstruction at RKIND 8
 without the glibc 2.39 opt-in (``WOOF_GLIBC239_LIBM64=1``).
 """
 from __future__ import annotations
@@ -52,8 +51,8 @@ from woof.hex import numerics as _hex_numerics
 from woof.hex.errors import ConfigurationRefusal
 from woof.hex.mpas_ice import rkind
 
-from . import (btr_subcycle_v842, diagnostics_v842, forcing_v842, tend_tracer_v842, vert_transport_v842,
-               vmix_v842)
+from . import (btr_subcycle_v842, diagnostics_v842, forcing_v842, tend_tracer_v842, tend_v842,
+               vert_transport_v842, vmix_v842)
 from .tend_v842 import COMPILE_OPTIONS, PRECISIONS, _precision_of
 
 SOURCE_FILES = (
@@ -120,11 +119,6 @@ def check_config(configs: dict, precision: str, mesh: dict) -> None:
     if configs.get("config_land_ice_flux_mode", "off") == "coupled":
         _refuse("config_land_ice_flux_mode", "coupled", "the coupled land-ice effective density is not ported",
                 "config_land_ice_flux_mode = 'off' | 'pressure_only'")
-    for name, count in (("nCellsArray", mesh["nCells"]), ("nEdgesArray", mesh["nEdges"])):
-        if any(int(x) != int(count) for x in mesh[name]):
-            _refuse(name, [int(x) for x in mesh[name]],
-                    "the momentum and thickness tendencies here run over the whole block",
-                    f"every {name} entry the block's count")
     if configs.get("mesh:on_a_sphere", False) and precision == "r8" and not rkind.trig64():
         _refuse("on_a_sphere", True, rkind.trig_refusal("mpas_reconstruct calls glibc's double cos and sin"),
                 "on_a_sphere = .false. at RKIND 8, or WOOF_GLIBC239_LIBM64=1")
@@ -192,12 +186,14 @@ def split_step(*, dt: float, n_btr_subcycles: int, pools: dict, configs: dict) -
             break
         level = min(step, 2)
         # stage 1: the momentum tendency and the baroclinic iterations
-        forcing_v842.tend_vel(
-            mesh=mesh_cut, state={"normalVelocity": lv(st, "normalVelocity", level)[:ne],
-                                  "activeTracers": lv(tr, "activeTracers", level)[:nc]},
-            diagnostics=_cut(d, sizes), forcing=_cut(f, sizes), tend=td["normalVelocity"][:ne],
-            configs=tend_configs, index_temperature=int(tr["index_temperature"]),
-            index_salinity=int(tr["index_salinity"]))
+        with tend_v842.halo_extents(cells=m["nCellsArray"], edges=m["nEdgesArray"],
+                                    vertices=m["nVerticesArray"]):
+            forcing_v842.tend_vel(
+                mesh=mesh_cut, state={"normalVelocity": lv(st, "normalVelocity", level)[:ne],
+                                      "activeTracers": lv(tr, "activeTracers", level)[:nc]},
+                diagnostics=_cut(d, sizes), forcing=_cut(f, sizes), tend=td["normalVelocity"][:ne],
+                configs=tend_configs, index_temperature=int(tr["index_temperature"]),
+                index_salinity=int(tr["index_salinity"]))
         if not (configs.get("config_disable_vel_all_tend", False) or configs.get("config_disable_vel_hmix", False)):
             # ocn_vel_hmix_tend zeroes the whole viscosity array, the missing edge's row too
             d["viscosity"][ne:] = 0
@@ -223,8 +219,10 @@ def split_step(*, dt: float, n_btr_subcycles: int, pools: dict, configs: dict) -
             mesh=m, resting_thickness=vm["restingThickness"], old_layer_thickness=st["layerThickness"],
             layer_thickness_edge=d["layerThicknessEdge"], normal_velocity=d["normalTransportVelocity"],
             old_ssh=st["ssh"], dt=dt, vert_ale_transport_top=d["vertAleTransportTop"], configs=configs)
-        forcing_v842.tend_thick(mesh=mesh_cut, diagnostics=_cut(d, sizes), forcing=_cut(f, sizes),
-                                tend=td["layerThickness"][:nc], configs=tend_configs)
+        with tend_v842.halo_extents(cells=m["nCellsArray"], edges=m["nEdgesArray"],
+                                    vertices=m["nVerticesArray"]):
+            forcing_v842.tend_thick(mesh=mesh_cut, diagnostics=_cut(d, sizes), forcing=_cut(f, sizes),
+                                    tend=td["layerThickness"][:nc], configs=tend_configs)
         tend_tracer_v842.tend_tracer(dt=dt, mesh=m, state=state_at(2), tracers=tracers_at(2), tracers_tend=tt,
                                      tracers_surface_flux=tsf, diagnostics=d, forcing=f, configs=configs)
         del active_only  # one tracer group: the active tracers either way

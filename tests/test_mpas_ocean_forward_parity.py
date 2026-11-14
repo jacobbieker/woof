@@ -170,6 +170,22 @@ def test_a_mutated_absorbed_fraction_is_caught(monkeypatch):
 
 
 @requires_gpu
+def test_the_tendencies_keep_to_the_halo_extents(monkeypatch):
+    """The nested case's tendencies run over the Fortran's halo extents: run
+    over the whole block instead, the words differ."""
+    import contextlib
+    from woof.hex.mpas_ocean import tend_v842
+    case = next(c for c in oo.cases("r8") if c["name"] == "split_nested_halos")
+    mesh = case["pools"]["mesh"]
+    assert mesh["nCellsArray"][0] < mesh["nCellsArray"][1] < mesh["nCellsArray"][2] < mesh["nCellsArray"][3]
+    assert mesh["nEdgesArray"][0] < mesh["nEdgesArray"][3] and mesh["nVerticesArray"][0] < mesh["nVerticesArray"][3]
+    monkeypatch.setattr(tend_v842, "halo_extents", lambda **kw: contextlib.nullcontext())
+    got = oo.run_gpu(case)
+    want = oo.load_fixture("r8")[case["name"]]
+    assert oo.word_mismatches(got["tend/normalVelocity"], want["tend/normalVelocity"]) > 0
+
+
+@requires_gpu
 @pytest.mark.parametrize("mutation", ["subcycles_without_remainder", "no_level_shift", "no_coupler_count"])
 def test_a_mutated_driver_is_caught(monkeypatch, mutation):
     from woof.hex.mpas_ocean import forward_v842 as fw
