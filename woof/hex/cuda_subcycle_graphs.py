@@ -61,12 +61,19 @@ def launch_timed(kernel, grid, block, args, *, warmup=1, repeats=1, stream=None)
     )
 
 
-def attach_subcycle_graphs(driver: Any) -> "SubcycleGraphs":
-    """Attach the host controller to one already-admitted driver."""
+def attach_subcycle_graphs(driver: Any, *, adaptive: bool = False) -> "SubcycleGraphs":
+    """Attach the host controller to one already-admitted driver.
+
+    ``adaptive``: the run's step varies (woof.hex.adaptive_dt); keep up to
+    :data:`ADAPTIVE_GRAPH_KEYS` graphs and capture a key only once it repeats.
+    """
     existing = getattr(driver, "subcycle_graphs", None)
     if existing is not None:
         return existing
-    graphs = driver.subcycle_graphs = SubcycleGraphs(driver)
+    keys, capture_after = (ADAPTIVE_GRAPH_KEYS, ADAPTIVE_CAPTURE_AFTER) if adaptive else (1, 1)
+    graphs = driver.subcycle_graphs = SubcycleGraphs(
+        driver, keys=_positive_env("WOOF_HEX_CUDA_GRAPHS_KEYS", keys),
+        capture_after=_positive_env("WOOF_HEX_CUDA_GRAPHS_CAPTURE_AFTER", capture_after))
     eager = driver._advance_dynamics_subcycle_v841
 
     def advance(state, **kwargs):
@@ -124,6 +131,41 @@ def graph_policy(cells: int) -> dict[str, Any]:
     return {"setting": os.environ.get("WOOF_HEX_CUDA_GRAPHS", "auto"),
             "cells": int(cells), "eager_from_cells": GRAPH_EAGER_FROM_CELLS,
             "replay": graphs_enabled(cells)}
+
+
+#: The per-graph state a key owns.  One graph holds a key's staged inputs, its
+#: retained scratch and its descriptor tables; :class:`SubcycleGraphs` keeps
+#: up to ``keys`` of them (``_ENTRY_FIELDS``) and parks the others.
+_ENTRY_FIELDS = ("graph", "inputs", "result", "allocations", "tables",
+                 "boundaries", "tendencies", "pool", "counter_delta")
+
+#: How many distinct dynamics keys keep a graph under the hex adaptive clock
+#: (woof.hex.adaptive_dt), and how many steps a key must be seen at before it is
+#: captured.  The step length is part of the key (``outer_dt``, the config), so
+#: every step of the ramp and every landing on a deadline is a key of its own,
+#: seen once; capturing those would cost three eager passes each and replay
+#: nothing.  The step the clock settles at (its ceiling, or a CFL-held step)
+#: repeats, and that key is captured on its second step and then replayed.
+#: ``WOOF_HEX_CUDA_GRAPHS_ADAPTIVE=0`` runs every adaptive subcycle eager (the
+#: path before 2026-11-15); ``WOOF_HEX_CUDA_GRAPHS_KEYS`` and
+#: ``WOOF_HEX_CUDA_GRAPHS_CAPTURE_AFTER`` override the two numbers.
+ADAPTIVE_GRAPH_KEYS = 2
+ADAPTIVE_CAPTURE_AFTER = 2
+
+
+def adaptive_graphs_enabled() -> bool:
+    """Whether a run under the hex adaptive clock replays its subcycle graphs."""
+    return os.environ.get("WOOF_HEX_CUDA_GRAPHS_ADAPTIVE", "1") != "0"
+
+
+def _positive_env(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return int(default)
+    value = int(raw)
+    if value < 1:
+        raise ValueError(f"{name} must be a positive integer, got {raw!r}")
+    return value
 
 
 def _error_detail(error: BaseException) -> dict[str, Any]:
@@ -290,7 +332,7 @@ class _Driving:
 class SubcycleGraphs:
     """One reusable graph per driver, with eager fallback on layout changes."""
 
-    def __init__(self, driver: Any) -> None:
+    def __init__(self, driver: Any, *, keys: int = 1, capture_after: int = 1) -> None:
         # Recovery imports its timing helper by value. This driver wrapper
         # delegates unchanged outside the context-local graph setup scope,
         # including calls from other threads and other drivers.
@@ -315,11 +357,61 @@ class SubcycleGraphs:
         self.subcycle = 0
         self.schedule = None
         self.fallbacks: list[dict[str, Any]] = []
+        #: Graphs of other keys, most recently used last (``keys`` > 1 only).
+        self.keys = int(keys)
+        self.capture_after = int(capture_after)
+        self.parked: dict[Any, dict[str, Any]] = {}
+        self.disabled: dict[Any, Any] = {}
+        self.sightings: dict[Any, int] = {}
+        self.new_step = False
         self.stats: dict[str, Any] = {
             "captured_subcycles": 0, "replayed_subcycles": 0,
             "eager_subcycles": 0, "fallback_reasons": {},
             "prepare_seconds": 0.0, "capture_seconds": 0.0,
         }
+        if self.keys > 1 or self.capture_after > 1:
+            self.stats.update(graph_keys=self.keys, capture_after=self.capture_after,
+                              key_switches=0, parked_reuses=0, evicted_graphs=0)
+
+    def note_step(self) -> None:
+        """A new model step begins (the adaptive clock calls this once per step)."""
+        self.new_step = True
+
+    def _switch(self, key: Any) -> None:
+        """Make ``key`` the current key, parking or dropping the current graph."""
+        if self.graph is not None:
+            self.last_launch.synchronize()
+        entry = self.parked.pop(key, None)
+        if self.keys > 1:
+            self.stats["key_switches"] += 1
+            if self.disabled_key is not None and self.disabled_key == self.key:
+                # A key whose capture failed stays eager when it comes back.
+                self.disabled[self.key] = self.disabled_error
+                while len(self.disabled) > 64:
+                    del self.disabled[next(iter(self.disabled))]
+            if self.graph is not None:
+                self.parked.pop(self.key, None)
+                self.parked[self.key] = {name: getattr(self, name) for name in _ENTRY_FIELDS}
+                while len(self.parked) > self.keys - 1:
+                    del self.parked[next(iter(self.parked))]
+                    self.stats["evicted_graphs"] += 1
+        if entry is not None:
+            for name, value in entry.items():
+                setattr(self, name, value)
+            self.stats["parked_reuses"] += 1
+        else:
+            self.graph = self.result = self.inputs = self.allocations = None
+            self.tables = None
+            self.boundaries = {}
+            self.tendencies = {}
+            self.pool = {}
+            self.counter_delta = (0, 0, 0)
+        self.key = key
+        if self.keys > 1:
+            self.disabled_error = self.disabled.get(key)
+            self.disabled_key = key if key in self.disabled else None
+        else:
+            self.disabled_key = self.disabled_error = None
 
     def receipt(self) -> dict[str, Any]:
         return {**self.stats, "fallback_reasons": dict(self.stats["fallback_reasons"]),
@@ -475,17 +567,23 @@ class SubcycleGraphs:
             ),
         )
         if key != self.key:
-            if self.graph is not None:
-                self.last_launch.synchronize()
-            self.graph = self.result = self.inputs = self.allocations = None
-            self.tables = None
-            self.boundaries.clear()
-            self.tendencies.clear()
-            self.pool.clear()
-            self.key = key
-            self.disabled_key = self.disabled_error = None
+            self._switch(key)
         if key == self.disabled_key:
             return self._eager(eager, state, kwargs, "capture_unavailable")
+        if self.capture_after > 1:
+            if self.new_step:
+                self.new_step = False
+                seen = self.sightings.pop(key, 0) + 1
+                self.sightings[key] = seen
+                while len(self.sightings) > 256:
+                    del self.sightings[next(iter(self.sightings))]
+            if self.graph is None and self.sightings.get(key, 0) < self.capture_after:
+                # A step length seen fewer than capture_after steps (the adaptive
+                # ramp, a landing): eager, keeping every parked graph.
+                self.stats["eager_subcycles"] += 1
+                counts = self.stats["fallback_reasons"]
+                counts["awaiting_repeat"] = counts.get("awaiting_repeat", 0) + 1
+                return eager(state, **kwargs)
         try:
             self.inputs = _stage(dynamic, cp, self.inputs)
             self._refresh_boundaries()
