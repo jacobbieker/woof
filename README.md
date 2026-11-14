@@ -363,7 +363,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   compile prefetch and persisted translations, fewer host syncs per step,
   and hardware fast paths that keep the same words (a strict 3 km forecast
   went from 47.7 to 42.1 s per forecast hour); CUDA: a memory-capped compile
-  pool and fewer boundary launches. `WOOF_METAL_GPU_TIMES` times each kernel.
+  pool and fewer boundary launches. The sixth-order filter of every
+  mass-point row (theta, moisture, chem, TKE) is one launch per step
+  (`diff6_multi`, byte-identical: CUDA Haleakala 333 m LES about 9 % less
+  wall per forecast hour, Edinburgh 3 km about 2 %; `WOOF_DIFF6_MULTI=0`
+  restores the per-field launches). `WOOF_METAL_GPU_TIMES` times each kernel.
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
   tests by name, and main's full run is periodic. Every merge to `main`
