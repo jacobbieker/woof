@@ -295,3 +295,26 @@ def test_an_adaptive_step_that_crosses_the_coupling_time_is_split_there():
     for name, value in fixed.fluxes[0].items():
         assert np.allclose(adaptive.fluxes[0][name], value, rtol=1e-6, atol=0), name
     assert cpl.averager.elapsed == pytest.approx(40.0)  # 15 s of step 3 and step 4
+
+
+def test_an_external_ocean_is_the_one_water_owner(tmp_path):
+    """The multi-day mixed-layer default does not engage under an external
+    ocean, and an explicit sf_ocean_physics beside one is refused (a 48 h
+    NEMO run also ran the defaulted 3D PWP; both wrote the water TSK)."""
+
+    from woof.config import ConfigurationRefused, RunConfig, validate_run_config
+    from woof.surface_ocean import apply_ocean_defaults
+
+    nemo = _toml(tmp_path, '[external_ocean]\nmodel="nemo_column"\n'
+                           'coupling_interval_seconds=900.0\nstate="s.npz"\n')
+    waves = tmp_path / "waves.toml"
+    waves.write_text('[ocean]\nsolvers=["waves"]\nprepared="p"\n')
+    long = dict(run_seconds=172800.0, sf_sfclay_physics=1)
+    assert "sf_ocean_physics" not in apply_ocean_defaults({**long, "ocean_config": str(nemo)})
+    assert apply_ocean_defaults({**long, "ocean_config": str(waves)})["sf_ocean_physics"] == 2
+    assert apply_ocean_defaults(dict(long))["sf_ocean_physics"] == 2
+    cfg = RunConfig(nx=10, ny=10, nz=20, dx=3000.0, dy=3000.0, ztop=20000.0, dt=15.0,
+                    run_seconds=3600.0, sf_ocean_physics=1, sf_sfclay_physics=1,
+                    ocean_config=str(nemo))
+    with pytest.raises(ConfigurationRefused, match="both would own"):
+        validate_run_config(cfg)
