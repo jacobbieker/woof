@@ -18,8 +18,10 @@ THE BREAKAGES THESE PREVENT
    packages leave out leaves its child a mass-like field).
 2. A volume/thickness conversion that drifts by a word, or treats an
    ice-free category as anything but zero thickness.
-3. A gate that cannot fail: each of the above, mutated, must be caught.
-4. Upwind advection run silently: v8.4.2 cannot run it (refused by name).
+3. Departure triangles in the wrong cell, with the wrong sign, or with
+   quadrature points summed in another order.
+4. A gate that cannot fail: each of the above, mutated, must be caught.
+5. Upwind advection run silently: v8.4.2 cannot run it (refused by name).
 """
 from __future__ import annotations
 
@@ -178,3 +180,64 @@ def test_the_oracle_rebuilt_here_writes_the_fixture(tmp_path):
         assert sorted(fresh.files) == sorted(pinned.files)
         for key in pinned.files:
             assert ro.word_mismatches(fresh[key], pinned[key]) == 0, (precision, key)
+
+
+def _mutated_source(monkeypatch, old: str, new: str) -> None:
+    from woof.hex.mpas_seaice import remap_v842 as rv
+    source = rv.module_source
+    assert old in source("r8"), old
+
+    def mutated(precision="r4"):
+        return source(precision).replace(old, new)
+    monkeypatch.setattr(rv, "module_source", mutated)
+    rv._module_on.cache_clear()
+
+
+def _mismatches_after(case_name: str, field: str, precision: str = "r8") -> int:
+    from woof.hex.mpas_seaice import remap_v842 as rv
+    case = next(c for c in ro.cases(precision) if c["name"] == case_name)
+    fixture = ro.load_fixture(precision)[case_name]
+    try:
+        got = ro.run_gpu(case, fixture)
+    finally:
+        rv._module_on.cache_clear()
+    return ro.word_mismatches(got[field], ro.expected_outputs(case, fixture)[field])
+
+
+def test_the_departure_cases_cover_the_branches():
+    most, missing = 0, False
+    for precision in BOTH:
+        fixture = ro.load_fixture(precision)
+        for case in ro.cases(precision):
+            if case["stage"] != 2:
+                continue
+            out = fixture[case["name"]]
+            ne, nc = case["dims"]["nEdges"], case["dims"]["nCells"]
+            cells = out["incremental_remap/iCellTriangle"][:ne]
+            remap_cells = out["incremental_remap/cellsOnEdgeRemap"][:ne]
+            counts = np.count_nonzero(cells, axis=1)
+            most = max(most, int(counts.max()))
+            assert counts.max() >= 3 and (counts == 2).any() and (counts == 0).any()
+            # triangles in side cells, missing ones among them, and both signs of flux
+            side = [(cells[e, t] == remap_cells[e, 2:]).any() for e in range(ne) for t in range(6) if cells[e, t]]
+            assert sum(side) > 10
+            missing = missing or bool((cells == nc + 1).any())
+            area = out["incremental_remap/triangleArea"][:ne]
+            assert (area > 0).any() and (area < 0).any()
+            if case["mesh_kind"] == "quad":
+                assert any((cells[e] == remap_cells[e, 4]).any() or (cells[e] == remap_cells[e, 5]).any()
+                           for e in range(ne) if cells[e].any())
+    assert most >= 4 and missing
+
+
+@requires_gpu
+@pytest.mark.parametrize("mutation", ["side_sign", "quadrature_order"])
+def test_a_mutated_departure_geometry_is_caught(monkeypatch, mutation):
+    if mutation == "side_sign":
+        _mutated_source(monkeypatch, "sign[t] = side == 0 ? 1 : -1;", "sign[t] = 1;")
+        field = "incremental_remap/triangleArea"
+    else:
+        _mutated_source(monkeypatch, "x[0] = A(A(M(IR_Q1, x1), M(IR_Q1, x2)), M(IR_Q2, x3));",
+                        "x[0] = A(M(IR_Q1, x1), A(M(IR_Q1, x2), M(IR_Q2, x3)));")
+        field = "incremental_remap/xTriangle"
+    assert _mismatches_after("departure_quad_fast", field) > 0

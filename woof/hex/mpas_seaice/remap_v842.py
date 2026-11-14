@@ -10,7 +10,10 @@ remapping (Dukowicz and Baumgardner 2000; Lipscomb and Hunke 2004):
 - :func:`volume_to_thickness` and :func:`thickness_to_volume` are the
   conversions ``seaice_run_advection_incremental_remap`` wraps around the
   remap (it treats every field after the ice area as a tracer, so the volumes
-  travel as thicknesses).
+  travel as thicknesses);
+- :func:`departure_points`, :func:`departure_triangles` (with
+  ``shift_vertices_of_departure_triangle``) and :func:`quadrature_points`: the
+  region each edge's flux comes from, as triangles in their source cells.
 
 The kernels (``remap_v842.cu``) are held word for word to v8.4.2 compiled
 verbatim with gfortran ``-O0 -ffp-contract=off`` at RKIND 4 and 8
@@ -44,7 +47,8 @@ from woof.hex.errors import ConfigurationRefusal
 
 SOURCE_FILES = (
     "src/core_seaice/shared/mpas_seaice_advection_incremental_remap_tracers.F:165-911",
-    "src/core_seaice/shared/mpas_seaice_advection_incremental_remap.F:66-77,2510-2552,2619-2661,9309-9387",
+    "src/core_seaice/shared/mpas_seaice_advection_incremental_remap.F:66-77,2510-2552,2619-2661,5280-5375,"
+    "5390-6674,8995-9295,9309-9387",
 )
 COMPILE_OPTIONS = ("--std=c++17", "--fmad=false", "--ftz=false", "--prec-div=true", "--prec-sqrt=true")
 MODULE_OPTIONS = COMPILE_OPTIONS
@@ -307,3 +311,64 @@ def volume_to_thickness(tree, *, tracers: dict, remap: dict) -> None:
 def thickness_to_volume(tree, *, tracers: dict, remap: dict) -> None:
     """The ice and snow thickness back to volume (``thickness_to_volume``), in place."""
     _conversion(tree, tracers, remap, "seaice_ir_thickness_to_volume_v842")
+
+
+class RemapError(RuntimeError):
+    """A condition under which v8.4.2's remap stops the model (or would run on garbage)."""
+
+
+def _int(value) -> np.int32:
+    return np.int32(int(value))
+
+
+def _dims(mesh: dict) -> tuple[int, int, int, int, int]:
+    return (int(mesh["nCells"]), int(mesh["nEdges"]), int(mesh["nVertices"]), int(mesh["maxEdges"]),
+            int(mesh["vertexDegree"]))
+
+
+def departure_points(*, mesh: dict, velocity: dict, remap: dict, dt) -> int:
+    """``find_departure_points``: ``departurePoint`` (zeroed, then the drift
+    back over ``dt`` at vertices 1..nVertices). Returns how many vertices
+    trip v8.4.2's CFL check (it logs them and carries on)."""
+    import cupy as cp
+    dp = remap["departurePoint"]
+    precision = precision_of(dp)
+    real = PRECISIONS[precision]
+    nv = int(mesh["nVertices"])
+    dp[...] = 0
+    cfl = cp.zeros(max(nv, 1), cp.int32)
+    _launch(precision, "seaice_ir_departure_points_v842", nv, (
+        dp, cfl, velocity["uVelocity"], velocity["vVelocity"], remap["minLengthEdgesOnVertex"], real(dt),
+        _int(nv)))
+    return int(cfl[:nv].sum())
+
+
+def departure_triangles(*, mesh: dict, remap: dict) -> None:
+    """``find_departure_triangles`` with ``shift_vertices_of_departure_triangle``
+    (planar): ``maskEdge``, ``xTriangle``/``yTriangle`` (vertices 1-3 of each
+    triangle in its source cell's frame), ``iCellTriangle`` and the signed
+    ``triangleArea``."""
+    import cupy as cp
+    nc, ne, nv, me, vd = _dims(mesh)
+    precision = precision_of(remap["xTriangle"])
+    for name in ("xTriangle", "yTriangle", "triangleArea", "iCellTriangle", "maskEdge"):
+        remap[name][...] = 0
+    error = cp.zeros(1, cp.int32)
+    _launch(precision, "seaice_ir_departure_triangles_v842", ne, (
+        remap["xTriangle"], remap["yTriangle"], remap["iCellTriangle"], remap["triangleArea"], remap["maskEdge"],
+        error, remap["departurePoint"], remap["xVertexOnEdge"], remap["yVertexOnEdge"], remap["xVertexOnCell"],
+        remap["yVertexOnCell"], mesh["nEdgesOnCell"], mesh["verticesOnCell"], mesh["verticesOnEdge"],
+        remap["remapEdge"], remap["cellsOnEdgeRemap"], remap["edgesOnEdgeRemap"], _int(ne), _int(nc), _int(me),
+        _int(vd)))
+    if int(error[0]):
+        raise RemapError("find_departure_triangles: a departure triangle without its source cell's vertex, or "
+                         "more than nTriPerEdgeRemap triangles on an edge (the mesh and its remap geometry "
+                         "disagree; v8.4.2 would read or write outside its arrays)")
+
+
+def quadrature_points(*, mesh: dict, remap: dict) -> None:
+    """``get_triangle_quadrature_points``: each masked edge's triangles' six
+    quadrature points, over their vertices."""
+    ne = int(mesh["nEdges"])
+    _launch(precision_of(remap["xTriangle"]), "seaice_ir_quadrature_points_v842", ne * 6, (
+        remap["xTriangle"], remap["yTriangle"], remap["maskEdge"], _int(ne)))
