@@ -28,6 +28,7 @@ from ..mpasdiag import plevel_diag_v842 as _plevel
 from ..mpasdiag import acc_diag_v842 as _acc
 from ..mpasdiag import afwa_diag_v842 as _afwa
 from ..mpasdiag import lightning_diag_v842 as _lightning
+from ..mpasdiag import hailcast_diag_v842 as _hailcast
 from ..mpasdiag import reduction_diag_v842 as _reduce
 from . import wrfsolar_eps_v842 as _eps
 
@@ -336,6 +337,9 @@ class DriverConfig:
     #: WOOF's &diagnostics config_lightning_option (mpasdiag.lightning_diag_v842): WRF's lightning diagnostics (a
     #: lightning_diag_v842.LightningConfig), or None.  Not Registry options.
     lightning_diagnostics: Any = None
+    #: WOOF's &diagnostics config_hailcast_opt (mpasdiag.hailcast_diag_v842): WRF-HAILCAST (a
+    #: hailcast_diag_v842.HailcastConfig), or None.  Not Registry options.
+    hailcast_diagnostics: Any = None
     #: WOOF's &diagnostics config_output_diagnostics / config_auxhist3_interval / config_mean_diag / config_mean_freq /
     #: config_mean_interval / config_diurnal_diag / config_surface_energy_diag (mpasdiag.reduction_diag_v842): WRF's
     #: CLWRF, RASM and surface-energy reductions (a reduction_diag_v842.ReductionConfig), or None.  Not Registry options.
@@ -477,6 +481,8 @@ class DriverConfig:
                 result["afwa_diagnostics"]["severe_ignore_qng_gate"] = True
         if self.lightning_diagnostics is not None:
             result["lightning_diagnostics"] = self.lightning_diagnostics.receipt()
+        if self.hailcast_diagnostics is not None:
+            result["hailcast_diagnostics"] = self.hailcast_diagnostics.receipt()
         if self.acc_diagnostics is not None:
             o = self.acc_diagnostics
             result["acc_diagnostics"] = dict(prec_acc_dt=o.prec_acc_dt, acc_phy_tend=o.acc_phy_tend,
@@ -794,6 +800,7 @@ def resolve_namelist(text: str, *, backends: Mapping[str, str] | None = None,
     accs = _acc.resolve(groups)
     afwa = _afwa.resolve(groups)
     lightning = _lightning.resolve(groups)
+    hailcast = _hailcast.resolve(groups)
     reductions = _reduce.resolve(groups)
     multi_perturb = _eps.resolve(groups)
 
@@ -821,6 +828,8 @@ def resolve_namelist(text: str, *, backends: Mapping[str, str] | None = None,
         if lightning is not None:
             config = _replace(config, lightning_diagnostics=lightning)
             _lightning.check(config)
+        if hailcast is not None:
+            config = _replace(config, hailcast_diagnostics=hailcast)
         if reductions is not None:
             config = _replace(config, reduction_diagnostics=reductions)
         if multi_perturb is not None:

@@ -1621,6 +1621,19 @@ def _run_native_dynamics(arguments, config, layout, payload, streams, library,
         raise ValueError('a native-file restart with IAU on in correct mode would admit the window again: the '
                          'pristine restart stream holds no IAU window position. Restart with config_do_DAcycling '
                          '= true (a new DA cycle, a new window), in exact mode, or start the window on a cold start')
+    # Lightning and HAILCAST (mpasdiag). Breakage this refusal prevents: their working state (the lightning
+    # activation clock and flash counts; HAILCAST's updraft mask and duration, run maximum and interval fields) lives
+    # in the output diagnostics, and the pristine Registry restart stream holds none of it, so a native-file restart
+    # would start them from zero mid-run: HAILCAST's updraft qualification period begins again and omits stones the
+    # straight run reports. This route's own checkpoint carries the state (accumulator_state), so a resume runs.
+    if layout.configs['config_do_restart'] and not resumed:
+        from ..mpasdiag import hailcast_diag_v842 as _hailcast, lightning_diag_v842 as _lightning
+        held = sorted(({_hailcast.PACKAGE} | set(_lightning.PACKAGES.values())) & set(getattr(layout,'packages',())))
+        if held:
+            raise ValueError('a native-file restart with &diagnostics lightning or HAILCAST on ('+', '.join(held)+
+                             ') would restart their working state from zero: the Registry restart stream holds none '
+                             'of it. Restart from this route\'s own checkpoint (--checkpoint-hours/--restart-from), '
+                             'which carries it')
     signature=inspect.signature(CudaDryDycoreDriver._step_device_v841).parameters
     missing={'physics_post_transport_callback','physics_mass_loading_count'}-set(signature)
     if config.moist_physics and missing:
@@ -2090,7 +2103,7 @@ def _run_native_dynamics(arguments, config, layout, payload, streams, library,
                 OutputDiagnostics = output_diagnostics_type(config)
                 diagnostics = (OutputDiagnostics(session, dycore) if halo is None else
                                OutputDiagnostics(session, dycore, halo=halo))
-                # The diagnostics' elapsed-time clocks (lightning) run on the physics clock of a continuation.
+                # The diagnostics' elapsed-time clocks (lightning, HAILCAST) run on the physics clock of a continuation.
                 diagnostics.step_offset = physics_step_offset
             # The writer binds the stream contract of the session's route row (route_table.stream_contract).
             streams_type = getattr(execution, 'streams_type', None) or PhysicsStreams
