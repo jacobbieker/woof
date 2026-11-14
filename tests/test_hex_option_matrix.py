@@ -203,6 +203,26 @@ def test_publish_scrubs_paths_and_states_one_verdict_per_option():
     assert "Counts: error 1, refused 1, supported 1" in text
 
 
+def test_results_say_whether_the_case_mesh_is_variable_resolution(tmp_path):
+    """The run records the case grid's spacing range and steepest per-cell change; publish carries it."""
+    import netCDF4
+
+    grid = tmp_path / "grid.nc"
+    area = np.array([1.0, 1.0, 4.0, 16.0]) * 9.0e6 * np.sqrt(3.0) / 2.0  # 3, 3, 6, 12 km cells
+    with netCDF4.Dataset(str(grid), "w") as data:
+        data.createDimension("nCells", 4)
+        data.createDimension("maxEdges", 2)
+        data.createVariable("areaCell", "f8", ("nCells",))[:] = area
+        data.createVariable("nEdgesOnCell", "i4", ("nCells",))[:] = [1, 2, 2, 1]
+        data.createVariable("cellsOnCell", "i4", ("nCells", "maxEdges"))[:] = [[2, 0], [1, 3], [2, 4], [3, 0]]
+    mesh = matrix.mesh_summary(grid)
+    assert mesh["cells"] == 4 and mesh["spacing_km"] == [3.0, 12.0] and mesh["spacing_ratio"] == 4.0
+    assert mesh["steepest_gradient_percent_per_cell"] == pytest.approx(200.0 / 3.0, abs=0.01)
+    loaded = [{"backend": "cuda", "case": "c", "hours": 1, "mesh": mesh, "rows": {}}]
+    assert matrix.publish(loaded)["mesh"] == mesh
+    assert "mesh" not in matrix.publish([{"backend": "cuda", "case": "c", "hours": 1, "rows": {}}])
+
+
 def test_the_committed_evidence_covers_every_planned_option():
     evidence = json.loads(EVIDENCE.read_text())
     assert evidence["schema"] == matrix.SCHEMA
