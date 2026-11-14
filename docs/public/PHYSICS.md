@@ -3781,6 +3781,18 @@ aerosols, the named schemes that carry `QNC`, and has no path that derives
 `QNC`. Radar, VIL and visibility run with `mp_wsm6`, `mp_thompson` and
 `mp_thompson_aerosols` and are refused for other microphysics.
 
+On the same route, `&diagnostics config_lightning_option` 1, 2 or 3 (with WRF's
+`lightning_dt`, `lightning_start_seconds`, `flashrate_factor`, `iccg_method`
+0–3, `iccg_prescribed_num/den` and `cellcount_method` as `config_*` names)
+runs the WRF route's lightning launcher per mesh column
+(`woof/hex/mpasdiag/lightning_diag_v842.py`) and writes `ic_flashcount`,
+`cg_flashcount`, `ic_flashrate`, `cg_flashrate` and, for option 3, `lpi` to
+the diagnostics stream. PR92 (1, 2) reads the 10 cm reflectivity that
+Thompson's own radar operator gives on each lightning step's end state, and the
+mesh is one WRF patch for the convective-cell statistics. Option 11, PR92 with
+WSM6, LPI without graupel, `iccg_method = 4` and multi-rank meshes are refused
+by name.
+
 ### Native WRF precipitation windows
 
 Stock `prec_acc_dt` follows pinned WRF 4.7.1 `module_diag_misc.F:415-448` on

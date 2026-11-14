@@ -14,6 +14,7 @@ from ..mpasdiag import tslist_v842 as _tslist
 from ..mpasdiag import plevel_diag_v842 as _plevel
 from ..mpasdiag import acc_diag_v842 as _acc
 from ..mpasdiag import afwa_diag_v842 as _afwa
+from ..mpasdiag import lightning_diag_v842 as _lightning
 from ..mpasdiag import reduction_diag_v842 as _reduce
 
 
@@ -93,12 +94,18 @@ class ResidentOutputDiagnostics:
     accdiag = None
     #: WRF's AFWA diagnostics (mpasdiag.afwa_diag_v842); built by bind() only with a config_afwa_*_opt option.
     afwa = None
+    #: WRF's lightning diagnostics (mpasdiag.lightning_diag_v842); built by bind() only with config_lightning_option.
+    lightning = None
     #: WRF's CLWRF / RASM / surface-energy reductions (mpasdiag.reduction_diag_v842); built by bind() only with their options.
     reduction = None
     #: The running maxima/accumulators of the convective module (``accumulates``).
     convective_maxima = MAXIMA
     #: Pools the diagnostic modules read.
     pool_names = ('mesh', 'state', 'diag')
+    #: The straight run's outer steps before this segment (runtime_v842 sets it from the checkpoint route's
+    #: physics_clock_offset on a correct-mode continuation, else 0). The loop's steps stay local (output naming,
+    #: the step-0 resume); the modules on WRF's elapsed-time clock (lightning) add it, as physics does.
+    step_offset = 0
 
     def __init__(self, session, dycore, *, halo=None):
         self.session, self.dycore = session, dycore
@@ -142,6 +149,8 @@ class ResidentOutputDiagnostics:
             fields |= set(_reduce.NAMES)
         if set(_afwa.SELECTORS) & packages:
             fields |= set(_afwa.NAMES)
+        if set(_lightning.PACKAGES.values()) & packages:
+            fields |= set(_lightning.NAMES)
         if {_plevel.P_PACKAGE, _plevel.Z_PACKAGE} & packages:
             fields |= set(_plevel.NAMES)
         return frozenset(fields)
@@ -156,6 +165,8 @@ class ResidentOutputDiagnostics:
             state.update(self.accdiag.state())
         if self.afwa is not None:
             state.update(self.afwa.state())
+        if self.lightning is not None:
+            state.update(self.lightning.state())
         if self.reduction is not None:
             state.update(self.reduction.state())
         return state
@@ -185,6 +196,9 @@ class ResidentOutputDiagnostics:
         if self.afwa is not None:
             self._resume.update((name, value) for name, value in state.items()
                                 if name.startswith(_afwa.STATE_PREFIX))
+        if self.lightning is not None:
+            self._resume.update((name, value) for name, value in state.items()
+                                if name.startswith(_lightning.STATE_PREFIX))
         if self.reduction is not None:
             self._resume.update((name, value) for name, value in state.items()
                                 if name.startswith(_reduce.STATE_PREFIX))
@@ -280,6 +294,11 @@ class ResidentOutputDiagnostics:
             self.produced = self.produced | frozenset(_afwa.NAMES)
             self.afwa.setup(self.utils)
             self.accumulates = self.accumulates or self.afwa.accumulates
+        if set(_lightning.PACKAGES.values()) & set(self.session.layout.packages):
+            self.lightning = _lightning.LightningModule(self, self.session.config.lightning_diagnostics)
+            self.produced = self.produced | frozenset(_lightning.NAMES)
+            self.lightning.setup(self.utils)
+            self.accumulates = True
         if {_plevel.P_PACKAGE, _plevel.Z_PACKAGE} & set(self.session.layout.packages):
             self.plevel = _plevel.LevelDiagnosticsModule(self, self.session.config.plevel_diagnostics)
             self.produced = self.produced | frozenset(_plevel.NAMES)
@@ -302,6 +321,8 @@ class ResidentOutputDiagnostics:
             self.accdiag.update()
         if self.afwa is not None:
             self.afwa.update()
+        if self.lightning is not None:
+            self.lightning.update()
         if self.reduction is not None:
             self.reduction.update()
         if self.tslist is not None:
@@ -375,6 +396,8 @@ class ResidentOutputDiagnostics:
             self.accdiag.begin(step, when)
         if self.afwa is not None:
             self.afwa.begin(step, when)
+        if self.lightning is not None:
+            self.lightning.begin(step, when)
         if self.reduction is not None:
             self.reduction.begin(step, when)
         # No stream is due on a deferred step, so only the maxima read the
@@ -417,13 +440,16 @@ class ResidentOutputDiagnostics:
             self.accdiag.begin(step, when)
         if self.afwa is not None:
             self.afwa.begin(step, when)
+        if self.lightning is not None:
+            self.lightning.begin(step, when)
         if self.reduction is not None:
             self.reduction.begin(step, when)
         self._begin_event()
         resume, self._resume = (self._resume, None) if step == 0 else (None, self._resume)
         if resume is not None:
             for name, value in resume.items():
-                if not name.startswith((_nwp.STATE_PREFIX, _acc.STATE_PREFIX, _afwa.STATE_PREFIX, _reduce.STATE_PREFIX)):
+                if not name.startswith((_nwp.STATE_PREFIX, _acc.STATE_PREFIX, _afwa.STATE_PREFIX, _lightning.STATE_PREFIX,
+                                         _reduce.STATE_PREFIX)):
                     target = self.buffers['diag', name]
                     target[...] = self.cp.asarray(value).reshape(target.shape)
             if self.nwp is not None:
@@ -432,6 +458,8 @@ class ResidentOutputDiagnostics:
                 self.accdiag.resume(resume)
             if self.afwa is not None:
                 self.afwa.resume(resume)
+            if self.lightning is not None:
+                self.lightning.resume(resume)
             if self.reduction is not None:
                 self.reduction.resume(resume)
         elif step == 0:
@@ -450,6 +478,8 @@ class ResidentOutputDiagnostics:
             self.accdiag.compute()
         if self.afwa is not None:
             self.afwa.compute()
+        if self.lightning is not None:
+            self.lightning.compute()
         if self.reduction is not None:
             self.reduction.compute()
         if self.plevel is not None:

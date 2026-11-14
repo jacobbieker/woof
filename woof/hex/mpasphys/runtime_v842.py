@@ -2090,6 +2090,8 @@ def _run_native_dynamics(arguments, config, layout, payload, streams, library,
                 OutputDiagnostics = output_diagnostics_type(config)
                 diagnostics = (OutputDiagnostics(session, dycore) if halo is None else
                                OutputDiagnostics(session, dycore, halo=halo))
+                # The diagnostics' elapsed-time clocks (lightning) run on the physics clock of a continuation.
+                diagnostics.step_offset = physics_step_offset
             # The writer binds the stream contract of the session's route row (route_table.stream_contract).
             streams_type = getattr(execution, 'streams_type', None) or PhysicsStreams
             output=output_lifetime.enter_context(streams_type(session,streams,out,final_time=stop,
