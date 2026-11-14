@@ -2833,7 +2833,7 @@
    },
    {
     "file": "woof/core/kernels/diff6.cu",
-    "sha256": "0e0de46ac99d264eef27a50ac74e6e92fd68374ebd42698aceb4e1a4808a7467"
+    "sha256": "f190b5a95ce930ec89014903277f5c907f7a825efc45b9622d2af03ba1356462"
    },
    {
     "file": "woof/core/kernels/diff6_seam.cu",
@@ -5007,7 +5007,7 @@
    },
    {
     "file": "woof/core/dycore.py",
-    "sha256": "3ce8e729efdf653b0a7d70526d1159db9601e11f9bd041579dd902e85d43b94a"
+    "sha256": "282e3343acb3f904dc8dfeda51e7b1744844000d87a99f7778e3520e7c0c774f"
    },
    {
     "file": "woof/core/etanew.py",
@@ -12438,9 +12438,9 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "3f5d743e7d8f8559667a0b76566607fd7630d0fd7d9a551000330a8d3fbece4c",
+    "sha256": "0f7bcb751bf558ccb4c605f47bf16560bb8d8da8ec0e4081971f07d47acaeffc",
     "sites": {
-     "100": 5
+     "100": 10
     }
    },
    "native_differences": {
@@ -12474,7 +12474,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "be41f8092a63933c6165f67e59f03afaa89bacbd6ffbf1a5ddcef367f38e4bcc"
+   "source_sha256": "eb7092fe35468df087797638e6a562b3d6db92dc8e5f8f6dc91682dc51a00ef5"
   },
   "kernels:diff6_seam": {
    "assessment": "static_diagnostic_only",
