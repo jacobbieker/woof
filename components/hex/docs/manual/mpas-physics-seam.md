@@ -108,8 +108,9 @@ scaled by its standard deviation and clipped at its cutoff, constant in height (
 table's random-phase vertical structure belongs to WRF's FFT), and lengths below the
 truncation's resolution (about 2*pi*R/degree) are smoothed to it. They move on WRF's
 cadence -- the first step and every `max(nint(spdt*60/dt), 1)` steps -- after the
-physics that precede the dynamics, travel in the physics restart state, and need a
-global mesh (the harmonic basis refuses a regional mesh). The RRFS fork route refuses
+physics that precede the dynamics, and travel in the physics restart state. A regional
+mesh draws the same law at its own cells and, as SPPT and SKEB do, leaves the
+lateral-boundary zone (`bdyMaskCell` > 0) unperturbed. The RRFS fork route refuses
 the group (`components/hex/tests/test_mpas_wrfsolar_eps_v842.py`). Without it nothing
 runs and the receipt is unchanged.
 
