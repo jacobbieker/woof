@@ -1546,12 +1546,17 @@ def _run_relaxation_rows(state, rows, common, weights) -> None:
 def _relaxation_multi_rows(state, rows) -> bool:
     """True when ``rows`` can share state_relaxation_multi launches:
     contiguous float32 device arrays throughout, each row's target its
-    own, and no row of a kind the kernel does not know."""
+    own, and no row of a kind the kernel does not know.  A row whose
+    target or held array is not a device array is refused before any
+    boundary or state attribute is read (host-array callers)."""
     import cupy as cp
+
+    def device(a):
+        return (isinstance(a, cp.ndarray) and a.dtype == np.dtype(np.float32)
+                and a.flags.c_contiguous)
 
     if not rows:
         return False
-    targets = []
     for row in rows:
         if row.held_mode not in ("none", "compute", "read"):
             return False
@@ -1563,19 +1568,14 @@ def _relaxation_multi_rows(state, rows) -> bool:
                 row.name in COUPLED_SCALAR_STATE_FIELDS
                 or _is_chem_field(row.name)):
             return False
-        if row.target is not None:
-            targets.append(int(row.target.data.ptr))
-    if len(set(targets)) != len(targets):
-        return False
+        if row.target is not None and not device(row.target):
+            return False
+        if row.held is not None and not device(row.held):
+            return False
     arrays = [state.mub2d, state.thb, state.c1h, state.c2h, state.c1f,
               state.c2f, state.msft, state.msfu,
               state.msfv_inv if WRF_EXACT else state.msfv]
     for row in rows:
-        if row.target is not None:
-            arrays.append(row.target)
-        if row.held is not None and (row.held_mode == "read"
-                                     or row.held_store):
-            arrays.append(row.held)
         arrays.append(row.source_field if row.source_field is not None
                       else _relax_field(state, row.name))
         arrays.append(row.source_mup if row.source_mup is not None
@@ -1583,8 +1583,11 @@ def _relaxation_multi_rows(state, rows) -> bool:
         for side in (row.boundary.west, row.boundary.east,
                      row.boundary.south, row.boundary.north):
             arrays.extend((side.value, side.tendency))
-    return all(isinstance(a, cp.ndarray) and a.dtype == np.dtype(np.float32)
-               and a.flags.c_contiguous for a in arrays)
+    if not all(device(a) for a in arrays):
+        return False
+    targets = [int(row.target.data.ptr) for row in rows
+               if row.target is not None]
+    return len(set(targets)) == len(targets)
 
 
 def _launch_relaxation_multi(state, rows, *, dtbc, spec_zone, relax_zone,

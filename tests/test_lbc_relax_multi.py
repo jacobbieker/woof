@@ -283,14 +283,12 @@ def test_rows_sharing_a_target_fall_back_to_the_per_row_path():
     class Boundary:
         west = east = south = north = Side()
 
-    class Target:
-        class data:
-            ptr = 0x1000
-
     class State:
         pass
 
-    rows = [lbc._RelaxRow("u", Boundary(), target=Target()),
-            lbc._RelaxRow("v", Boundary(), target=Target())]
+    target = np.zeros((2, 3, 4), np.float32)
+    rows = [lbc._RelaxRow("u", Boundary(), target=target),
+            lbc._RelaxRow("v", Boundary(), target=target)]
+    # Host arrays are refused before any device address is read.
     assert lbc._relaxation_multi_rows(State(), rows) is False
     assert lbc._relaxation_multi_rows(State(), []) is False
