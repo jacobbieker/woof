@@ -115,6 +115,20 @@ extern "C" __global__ void afwa_ptype(
   for(int k=nz-1;k>=0;--k){size_t x=(size_t)k*n+c;
    if(z[x]-ht[c]>0.0f){
     maxtmp=fmaxf(t[x],maxtmp);float rh=af_rh(p[x],t[x],q[x]);
+    // KNOWN DIFFERENCE FROM WRF'S FORTRAN, kept by decision (2026-11-13).
+    // WRF 4.7.1 precip_type_diagnostics writes
+    //   IF (rh(i,k,j) .gt. 80 .and. saturation(i,j) .eqv. .false.) THEN
+    // .eqv. binds weaker than .and., so Fortran evaluates
+    //   (rh > 80 .and. saturation) .eqv. .false.
+    // which is true at every level that is not both moist and already
+    // saturated: WRF re-takes the cloud top at dry levels too.  This kernel
+    // keeps the evident intent, rh > 80 && !saturation: the cloud top is the
+    // first level (from the top) above 80% RH, taken again only after a level
+    // at or below 70% has ended that moist layer.  The next test
+    // (rh .le. 70 .and. saturation .eqv. .true.) means the same either way.
+    // Columns with a dry gap between two moist layers can get another
+    // precipitation type.  Pinned against the gfortran oracle by
+    // PTYPE_DIVERGES_AT in components/hex/tests/test_mpas_afwa_diagnostics.py.
     if(rh>80.0f&&!saturation){cloudtop=t[x];top=k;saturation=true;type=2;}
     if(rh<=70.0f&&saturation)saturation=false;
    }

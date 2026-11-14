@@ -7,8 +7,9 @@
 # afwa_diagnostics_driver (severe_wx, vil, icing, radar, dbzcalc, precip_type, vis, cloud, thermal, turbulence
 # diagnostics: the lines between "END SUBROUTINE afwa_diagnostics_driver" and "END MODULE module_diag_afwa", cut by
 # marker) wrapped in a module of its own, sha256 of both files in wrf471_sha256.txt.  The driver itself needs the
-# WRF domain, configuration and clock modules, so run_afwa.F90 writes out its glue.  Runs on the columns make_columns.py
-# writes and leaves OUT_DIR/{columns.bin,oracle.bin,receipt.txt}.  The committed copies live in
+# WRF domain, configuration and clock modules, so run_afwa.F90 and run_severe.F90 (severe_wx_diagnostics and the
+# driver's gust/shear blocks over three steps) write out its glue.  Runs on the columns make_columns.py writes and leaves
+# OUT_DIR/{columns.bin,oracle.bin,severe_columns.bin,severe.bin,receipt.txt}.  The committed copies live in
 # components/hex/tests/afwa_oracle; components/hex/tests/test_mpas_afwa_diagnostics.py grades the hex module against
 # them.  gfortran -O0 -ffp-contract=off; the libm (exp, log10, powf) is the build machine's, which the receipt records,
 # so the test grades with a tolerance rather than bitwise.
@@ -35,6 +36,9 @@ flags="-O0 -ffp-contract=off -fno-fast-math -ffree-form -ffree-line-length-none 
 gfortran $flags -c "$(src module_diag_functions.F)"
 gfortran $flags -c afwa_cut.F90
 gfortran $flags -c "$here/run_afwa.F90"
+gfortran $flags -c "$here/run_severe.F90"
 gfortran -o run_afwa run_afwa.o afwa_cut.o module_diag_functions.o
+gfortran -o run_severe run_severe.o afwa_cut.o module_diag_functions.o
 ./run_afwa columns.bin oracle.bin
+./run_severe columns.bin severe_columns.bin severe.bin
 { echo "gfortran: $(gfortran --version | head -1)"; echo "host: $(uname -sm)"; echo "libm: ${LIBM_NOTE:-system}"; } > receipt.txt

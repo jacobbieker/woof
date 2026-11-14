@@ -2529,11 +2529,11 @@
    },
    {
     "file": "woof/core/kernels/afwa_diagnostics.cu",
-    "sha256": "0b9b3b3cbe2b8c90eb65992cd412d76823017edec463aecb647cef0cf27ef1a5"
+    "sha256": "df39d565be7c839db4d05810a40c45a03e77b1abb7f3878772af5fac67bacd2c"
    },
    {
     "file": "woof/core/kernels/afwa_severe.cu",
-    "sha256": "a6261f1227d03fd27ad2a598362d6349fc2d99b05d480e4b32f54b63159a7747"
+    "sha256": "cfdef0a7e6f812ec37f438313d40c692b398f999997b595c990590e4094ede28"
    },
    {
     "file": "woof/core/kernels/atan_scalar_flt32.cuh",
