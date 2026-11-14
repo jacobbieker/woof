@@ -159,7 +159,7 @@ def reference_case(na, volc, sigman, hygro, *, wbar, sigw, tair, rhoair, wdiab=0
     fl = np.zeros((nm, 3))
     full = 0.0
     if sigw <= SIGW_DELTA:
-        if wbar > 0:
+        if wbar > 0 and wmin <= wbar <= wmax:
             f = np.array(_fractions(th, wbar + wdiab, sgiven, modes))
             acc, fl, full = f, wbar * f, wbar
     else:
@@ -173,7 +173,7 @@ def reference_case(na, volc, sigman, hygro, *, wbar, sigw, tair, rhoair, wdiab=0
                 wt = 1.0 if j in (0, nq) else (4.0 if j % 2 else 2.0)
                 q = wt * h / 3.0 * norm * math.exp(-0.5 * ((w - wbar) / sigw) ** 2)
                 full += q * w
-                if w > 0:
+                if w >= 0:
                     f = np.array(_fractions(th, w + wdiab, sgiven, modes))
                     acc += q * f
                     fl += q * w * f
@@ -252,9 +252,11 @@ def launch_activate(cases):
     :data:`OUTPUTS` and flux_fullact start from the case's values where
     given, and every type's size-0 entry is written.  Returns
     ``{name: (ncase, 8, 2) float32}`` plus ``flux_fullact`` (ncase,)."""
+    # Refuse the cases before CuPy is needed: a refusal reads the same on a
+    # host without it.
+    ntypes = [_check_case(c) for c in cases]
     import cupy as cp
 
-    ntypes = [_check_case(c) for c in cases]
     nc = len(cases)
     nmode = max(ntypes) if ntypes else 1
     planes = {k: np.zeros((nmode, nc), np.float32) for k in ("na", "volc", "sigman", "hygro")}

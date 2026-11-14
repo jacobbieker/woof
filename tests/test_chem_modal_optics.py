@@ -232,6 +232,22 @@ def test_kernel_matches_the_float64_twin(mixing):
     assert (np.abs(host["g"]) <= 1).all() and (host["tau"] >= 0).all()
 
 
+@requires_gpu
+def test_device_tables_are_cached_per_device(monkeypatch):
+    """A second card gets its own tables, never the first card's arrays."""
+    import cupy as cp
+    monkeypatch.setattr(MO, "_DEVICE_DATA", {})
+    here = cp.cuda.Device().id
+    first = MO._device_data()
+    assert MO._device_data() is first
+
+    class _Other:
+        id = here + 1
+    monkeypatch.setattr(cp.cuda, "Device", lambda *a: _Other())
+    second = MO._device_data()
+    assert second is not first and set(MO._DEVICE_DATA) == {here, here + 1}
+
+
 def test_refusals():
     from types import SimpleNamespace
     assert MO.refusal(SimpleNamespace(aer_ra_feedback=0)) is None
