@@ -143,3 +143,11 @@ def test_other_dtypes_keep_the_general_path(cp):
     assert not _write.arith_in_place("add", a, np.float64(1.0))
     assert not _write.arith_in_place("power", a, 2.0)
     assert not _write.arith_in_place("add", cp.zeros(8, dtype=cp.int32), 1)
+
+
+def test_zero_stride_destination_keeps_the_general_path(cp):
+    from woof.backend.facade import _write
+    a = cp.broadcast_to(cp.zeros(1, dtype=cp.float32), (8,))
+    assert not _write.arith_in_place("add", a, 1.0)
+    b = cp.broadcast_to(cp.zeros((1, 4), dtype=cp.float32), (3, 4))
+    assert not _write.arith_in_place("multiply", b, cp.ones((3, 4), dtype=cp.float32))

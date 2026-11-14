@@ -240,6 +240,8 @@ def arith_in_place(np_name, view, other) -> bool:
         return False
     if view._offset % 4 or any(s % 4 for s in view.strides):
         return False
+    if any(s == 0 and m > 1 for s, m in zip(view.strides, view.shape)):
+        return False   # a broadcast destination aliases itself; the general path writes it once
     shape = view.shape or (1,)
     dst_strides = [s // 4 for s in view.strides] or [1]
     src_strides = src_strides or [0]
