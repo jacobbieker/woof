@@ -321,8 +321,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     hex forecast on CUDA and Metal.
 
   Limits: the MPAS v8.4.2 suite route (R2) takes a subset of these, and
-  refuses the rest by name. WRF's adaptive time step on hex is an open PR
-  (R1 only). Accuracy against source WRF and MPAS over day-long runs is not
+  refuses the rest by name. WRF's adaptive time step (`--adaptive-timestep`)
+  runs on the WOOF column route (R1) only, and is refused with `--nudging`.
+  Accuracy against source WRF and MPAS over day-long runs is not
   yet measured, and several options have unit and oracle evidence but no
   live forecast yet.
 - **Terrain: GEM-15 (experimental).** `terrain_source = "gem15-dtm"` or
