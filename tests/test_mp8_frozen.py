@@ -614,8 +614,8 @@ FROZEN_MODULE_DIGESTS = {
         # Re-pinned for diff6_multi: the step's mass-point rows in one launch,
         # each row the main kernel's variant-0 statements word for word
         # (tests/test_diff6_multi.py).  Previously 0e0de46a/be41f809.
-        '6b492e028c359955c4c3b61d201a7bbe6322fe3eccc0b80794b0e79e1786e328',
-        '3dc6ee681775a4626adce4a1a837eccf6123884bb8ec8e2184159a35dd51edb1'),
+        'f190b5a95ce930ec89014903277f5c907f7a825efc45b9622d2af03ba1356462',
+        'eb7092fe35468df087797638e6a562b3d6db92dc8e5f8f6dc91682dc51a00ef5'),
     'diff6_seam': (
         # Re-pinned for the compiled WRF v4.7.1 diffusion oracle (83fde6032,
         # merged dd4908a0f): sixth-order filtering supplies each field's
