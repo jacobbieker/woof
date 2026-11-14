@@ -246,15 +246,22 @@ extern "C" __global__ void seaice_stress_divergence_variational_v842(
 
 // seaice_final_divergence_shear_variational, variational.F:665-806: one thread
 // per cell. The ridging parameters (useColumnPackage) take the unscaled
-// divergence; the closing unit conversion applies to every cell.
+// divergence; the closing unit conversion applies to every cell. The loops
+// run to nCellsLoop (nCells); the conversion, a whole-array operation, to
+// nCells (the arrays' length, MPAS's missing-cell element included).
 extern "C" __global__ void seaice_final_divergence_shear_variational_v842(
     rk *divergence, rk *shear, rk *ridgeConvergence, rk *ridgeShear,
     const rk *strain11, const rk *strain22, const rk *strain12,
     const int *solveStress, const int *nEdgesOnCell, int useColumnPackage,
-    int nCells, int maxEdges)
+    int nCells, int maxEdges, int nCellsLoop)
 {
     int iCell = blockIdx.x * blockDim.x + threadIdx.x;
     if (iCell >= nCells) return;
+    if (iCell >= nCellsLoop) {
+        divergence[iCell] = M(M(divergence[iCell], RL(100.0)), RL(86400.0));
+        shear[iCell] = M(M(shear[iCell], RL(100.0)), RL(86400.0));
+        return;
+    }
     rk div = RL(0.0), shr = RL(0.0), deltaAverage = RL(0.0);
     const bool solve = solveStress[iCell] == 1;
     if (solve) {

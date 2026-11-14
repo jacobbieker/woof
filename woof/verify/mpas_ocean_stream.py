@@ -26,7 +26,8 @@ def shape(case: dict, fortran_shape: tuple) -> tuple[int, ...]:
     d = case["dims"]
     sizes = {"C1": d["nCells"] + 1, "E1": d["nEdges"] + 1, "V1": d.get("nVertices", 0) + 1, "L": d["nVertLevels"],
              "LP1": d["nVertLevels"] + 1, "T": d.get("nTracers", 0), "ME": d.get("maxEdges", 0),
-             "ME2": d.get("maxEdges2", 0), "VD": d.get("vertexDegree", 0), "NA": d.get("nAdvectionCells", 0)}
+             "ME2": d.get("maxEdges2", 0), "VD": d.get("vertexDegree", 0), "NA": d.get("nAdvectionCells", 0),
+             "NCAT": d.get("nCategories", 0)}
     return tuple(sizes[s] if isinstance(s, str) else s for s in reversed(fortran_shape))
 
 

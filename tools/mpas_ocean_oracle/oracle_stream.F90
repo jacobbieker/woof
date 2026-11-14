@@ -13,8 +13,13 @@
 ! Pools: mesh, state, tracers (the state pool's 'tracers' subpool),
 ! diagnostics, forcing, scratch, tend and tracersTend (the tend pool's
 ! 'tracersTend' subpool), tracersSurfaceFlux (the forcing pool's), swForcing,
-! verticalMesh.  A logical config named 'package:NAME' is the package
-! switch NAME, put in the packages pool (ocnPackages).
+! verticalMesh; and MPAS-Seaice's: boundary, velocity_solver,
+! velocity_variational, velocity_weak, icestate, tracers_aggregate,
+! atmos_coupling, ocean_coupling, ridging.  A logical config named 'package:NAME' is the package
+! switch NAME, put in the packages pool (ocnPackages); one named 'mesh:NAME'
+! is the mesh pool's config NAME (on_a_sphere); a character config named
+! 'diagnostics:NAME' is the diagnostics pool's character field NAME (xtime).
+! A real field of rank 0 is a scalar (daysSinceStartOfSim).
 !
 ! OUTPUT: every real and integer field's words, in the input's order.
 module oracle_stream
@@ -26,13 +31,16 @@ module oracle_stream
   public :: oracle_pools, oracle_field, poolNames, read_stream, write_stream, pool_named
 
   integer, parameter :: maxFields = 256
-  character(len=24), parameter :: poolNames(11) = [character(len=24) :: 'mesh', 'state', 'tracers', &
-       'diagnostics', 'forcing', 'scratch', 'tend', 'tracersTend', 'tracersSurfaceFlux', 'swForcing', 'verticalMesh']
+  character(len=24), parameter :: poolNames(20) = [character(len=24) :: 'mesh', 'state', 'tracers', &
+       'diagnostics', 'forcing', 'scratch', 'tend', 'tracersTend', 'tracersSurfaceFlux', 'swForcing', 'verticalMesh', &
+       'boundary', 'velocity_solver', 'velocity_variational', 'velocity_weak', 'icestate', 'tracers_aggregate', &
+       'atmos_coupling', 'ocean_coupling', 'ridging']
 
   type oracle_field
     character(len=24) :: pool
     character(len=64) :: name
     integer :: kind = 0, rank = 0
+    real(kind=RKIND), pointer :: r0 => null()
     real(kind=RKIND), dimension(:), pointer :: r1 => null()
     real(kind=RKIND), dimension(:,:), pointer :: r2 => null()
     real(kind=RKIND), dimension(:,:,:), pointer :: r3 => null()
@@ -45,7 +53,7 @@ module oracle_stream
   end type pool_ref
 
   type oracle_pools
-    type(pool_ref) :: pool(11)
+    type(pool_ref) :: pool(20)
     type(MPAS_pool_type), pointer :: configs => null(), packages => null()
   end type oracle_pools
 
@@ -115,6 +123,8 @@ contains
           lc = ivalue /= 0
           if (cname(1:8) == 'package:') then
              call stub_pool_put_config(pools % packages, trim(cname(9:)), lc)
+          else if (cname(1:5) == 'mesh:') then
+             call stub_pool_put_config(pool_named(pools, 'mesh'), trim(cname(6:)), lc)
           else
              call stub_pool_put_config(pools % configs, trim(cname), lc)
           end if
@@ -122,7 +132,11 @@ contains
           read(u) cvalue
           allocate(cc)
           cc = cvalue
-          call stub_pool_put_config(pools % configs, trim(cname), cc)
+          if (cname(1:12) == 'diagnostics:') then
+             call stub_pool_put_config(pool_named(pools, 'diagnostics'), trim(cname(13:)), cc)
+          else
+             call stub_pool_put_config(pools % configs, trim(cname), cc)
+          end if
        case default
           stop 8
        end select
@@ -134,6 +148,10 @@ contains
        read(u) fields(i) % pool, fields(i) % name, fields(i) % kind, fields(i) % rank, dims
        associate (f => fields(i), pool => pool_named(pools, trim(fields(i) % pool)))
          select case (f % kind * 10 + f % rank)
+         case (10)
+            allocate(f % r0)
+            read(u) f % r0
+            call stub_pool_put_array(pool, trim(f % name), f % r0)
          case (11)
             allocate(f % r1(dims(1)))
             read(u) f % r1
@@ -200,6 +218,8 @@ contains
     do i = 1, size(fields)
        associate (f => fields(i))
          select case (f % kind * 10 + f % rank)
+         case (10)
+            write(u) f % r0
          case (11)
             write(u) f % r1
          case (12)

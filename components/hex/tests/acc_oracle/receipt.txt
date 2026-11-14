@@ -1,0 +1,2 @@
+gfortran: GNU Fortran (Homebrew GCC 16.2.0) 16.2.0
+host: Darwin arm64

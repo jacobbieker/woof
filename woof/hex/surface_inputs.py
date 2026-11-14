@@ -208,21 +208,39 @@ _FRC_URB2D = SurfaceInput(
     "MODIS land-use category fractions (pixel shares per Voronoi cell) times "
     "URBPARM.TBL FRC_URB, on dominant-urban land cells (woof hex "
     "surface-statics --fields urban)", bounds=(0.0, 1.0))
-_LCZ = _unstaged(
-    "ivgtyp", "LU_INDEX (LCZ 51-61)", "int32",
-    "the Local Climate Zone classes 51-61 kept distinct per cell (CGLC-MODIS-"
-    "LCZ) instead of the static's collapsed ISURBAN, for URBPARM_LCZ.TBL")
+#: WRF's MODIS-with-LCZ land-use inventory: categories 1-21 and the Local
+#: Climate Zones 51-61 (num_land_cat = 61).
+LCZ_CATEGORIES = tuple(range(51, 62))
+_LCZ_INDEX = SurfaceInput(
+    "ivgtyp", "LU_INDEX", "cell", "int32", True,
+    "the init's own land-use category with each urban (ISURBAN 13) cell given "
+    "its dominant CGLC-MODIS-LCZ Local Climate Zone class 51-61 (the area mode "
+    "of the 100 m raster's LCZ pixels in the Voronoi cell; a cell holding none "
+    "keeps ISURBAN, which urban_var_init types 5), so urban_var_init derives "
+    "UTYPE 1-11 from it as from geogrid's LU_INDEX (woof hex surface-statics "
+    "--fields lcz)", bounds=(1.0, 61.0))
+_FRC_URB2D_LCZ = SurfaceInput(
+    "frc_urb2d", "FRC_URB2D_LCZ", "cell", "float32", True,
+    "SLUCM's urban fraction with the LCZ table, as WOOF's WRF preparation "
+    "estimates it from CGLC-MODIS-LCZ: each cell's LCZ area shares times "
+    "URBPARM_LCZ.TBL FRC_URB, on dominant-urban land cells (woof hex "
+    "surface-statics --fields lcz)", bounds=(0.0, 1.0))
 
 
 def _urban_inputs(cfg) -> tuple[SurfaceInput, ...]:
     if int(_value(cfg, "use_wudapt_lcz")) == 1:
-        return (_LCZ,)
+        # BEP and BEP+BEM read the LCZ classes only: URBPARM_LCZ.TBL's own
+        # fractions, as WOOF's WRF preparation hands them.
+        return (_LCZ_INDEX,) + ((_FRC_URB2D_LCZ,)
+                                if int(_value(cfg, "sf_urban_physics")) == 1 else ())
     if int(_value(cfg, "sf_urban_physics")) == 1:
         return (_FRC_URB2D,)
     # BEP and BEP+BEM run on URBPARM.TBL's own fractions, exactly as WOOF's
     # WRF preparation hands them (woof.static.highres: only SLUCM takes the
     # land-cover estimate), so they read no per-cell input beyond the init's.
     return ()
+
+
 _IRRIGATION = SurfaceInput(
     "irrigation", "IRRIGATION", "cell", "float32", True,
     "geogrid's IRRIGATION on the mesh: the FAO irrigated-land percentage "
@@ -399,21 +417,24 @@ def _array_identity(values: np.ndarray) -> dict[str, Any]:
 
 
 def urban_table_sha256(cfg) -> str:
-    """SHA-256 of the URBPARM.TBL a run's urban model reads, chosen exactly as
-    woof.core.physics._attach_urban chooses it (urban_table_dir, else the
-    urban_ucm_generation's vendored table)."""
+    """SHA-256 of the urban table a run's urban model reads, chosen exactly as
+    woof.core.physics._attach_urban chooses it: URBPARM.TBL, or URBPARM_LCZ.TBL
+    with use_wudapt_lcz = 1, from urban_table_dir, else the
+    urban_ucm_generation's vendored table."""
 
     from woof.core.urban_tables import URBAN_TABLE_DIR, urban_table_path
     from woof.tables import table_path
 
+    lcz = int(_value(cfg, "use_wudapt_lcz"))
     generation = str(_value(cfg, "urban_ucm_generation", "wrf_471"))
     custom = str(_value(cfg, "urban_table_dir", "") or "")
     if custom:
-        path = urban_table_path(0, Path(custom))
+        path = urban_table_path(lcz, Path(custom))
     else:
         directory = URBAN_TABLE_DIR / "wrf480" if generation == "wrf_480" else None
-        path = table_path("urban-480" if generation == "wrf_480" else "urban",
-                          urban_table_path(0, directory))
+        family = ("urban-lcz" if lcz else "urban") + (
+            "-480" if generation == "wrf_480" else "")
+        path = table_path(family, urban_table_path(lcz, directory))
     return sha256(Path(path).read_bytes()).hexdigest()
 
 
@@ -564,12 +585,13 @@ def bind(physics: Mapping[str, Any] | None, path: str | Path | None, *,
         if any(need.input.keyword == "frc_urb2d" for need in required):
             # The fraction weighs each urban category by URBPARM.TBL's FRC_URB;
             # the run's urban model must read the same table bytes.
-            built = (provenance.get("urban") or {}).get("urbparm_sha256")
+            group = "lcz" if int(_value(cfg, "use_wudapt_lcz")) == 1 else "urban"
+            built = (provenance.get(group) or {}).get("urbparm_sha256")
             run_table = urban_table_sha256(cfg)
             if built != run_table:
                 raise ConfigurationRefusal(
                     "surface_statics", str(source),
-                    f"FRC_URB2D was estimated with the URBPARM.TBL of sha256 "
+                    f"FRC_URB2D was estimated with the urban table of sha256 "
                     f"{built}, and this run's urban model reads {run_table} "
                     "(urban_table_dir / urban_ucm_generation), so the staged "
                     "fractions would weigh the categories by another table",

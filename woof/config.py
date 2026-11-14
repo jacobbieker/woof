@@ -5899,6 +5899,12 @@ def validate_eeps_config(cfg: RunConfig) -> None:
             "Registry.EM_COMMON:1053-1054) that the dycore advects between "
             "PBL calls, and a dry state runs no scalar transport, so the "
             "pair would never move.")
+#: Microphysics schemes that carry the QI field WRF's UW shallow convection
+#: reads (module_shallowcu_driver.F:519-522); tools/build_registry.py
+#: publishes the same set as the registry's shcu_physics=2 refusal.
+UW_SHALLOW_QI_MP_PHYSICS = (2, 4, 5, 6, 8, 9, 10, 11, 16, 18, 24, 28, 30, 50, 106, 900)
+
+
 def qnse_mfshconv_active(cfg: RunConfig) -> bool:
     """Whether the EDMF shallow mass flux runs: ``mfshconv = 1`` under the
     QNSE PBL only.  WRF resets the switch to 0 for every other PBL
@@ -9256,7 +9262,7 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
         raise ConfigurationRefused("Deng requires QC and QR condensate carriers")
     if cfg.shcu_physics == 2 and not (cfg.moist and cfg.moist_cq):
         raise ConfigurationRefused("UW shallow convection requires moist condensate carriers")
-    if cfg.shcu_physics == 2 and cfg.mp_physics not in (2,4,5,6,8,9,10,11,16,18,24,28,30,50,106,900):
+    if cfg.shcu_physics == 2 and cfg.mp_physics not in UW_SHALLOW_QI_MP_PHYSICS:
         raise ConfigurationRefused("WRF UW shallow convection requires the QI carrier (module_shallowcu_driver.F:519-522)")
     if cfg.cu_physics == 7:
         from woof.core.camzm_contract import pbl_arm_refusal

@@ -11139,6 +11139,7 @@ def build(registry: dict) -> dict:
     # every maturity renamed, so the consumer rows see the final
     # option set.
     _cam5_components(registry)
+    _shallow_cumulus_constraints(registry)
     _consumer_rows(registry)
     # After the consumer rows exist, because it reads one of them, and
     # BEFORE the reachability pass below, which prices a way out through
@@ -13350,7 +13351,18 @@ def _misc_rcon_component(registry):
         "implemented": True, "maturity": "implemented-unverified", "scientific_evidence": "none",
         "parameters": {"moist": True, "moist_cq": True}, "asset_requirements": [],
         "constraints": {"required_settings": {"moist": True},
-                        "required_settings_reasons": {"moist": "RCON advances vapor, five condensate classes and number moments."}},
+                        "required_settings_reasons": {"moist": "RCON advances vapor, five condensate classes and number moments."},
+                        # RCON-SPEED-01 (woof/config.py refuses every mp=29 run): the
+                        # plan review says what the run door says, until the handoff.
+                        "refused_when": [{
+                            "components": {"microphysics": ["rcon-mp29"]},
+                            "reason": ("RCON-SPEED-01: mp_physics=29 (RCON) is ported but its "
+                                       "release speed proof is open: the whole-forecast "
+                                       "microphysics stage costs 1.885431x MP28, and a qualified "
+                                       "speed handoff is required before forecast admission."),
+                            "remedy_label": ("Select another microphysics scheme, such as "
+                                             "mp_physics=28 (the Thompson aerosol-aware scheme it "
+                                             "is timed against).")}]},
         "extensions": {"preset_scope_reason": "Strict replay and a three-hour forecast pass. The measured 1.885431x MP28 GPU stage cost exceeds the speed gate; RCON-SPEED-01 refuses forecast admission until a qualified handoff."},
         "warnings": ["Requires the native initialized RCON table stream, validated by size and SHA-256. Set WOOF_RCON_TABLE_ROOT to its directory. Strict real-input replay: 0/25246820 words, no exclusions. A three-hour forecast passes, but measured stage cost is 1.885431x MP28; the native 1.053748x profile does not justify the GPU excess. Forecast admission is refused by RCON-SPEED-01 until speed qualification."]}
 
@@ -13364,6 +13376,82 @@ def _misc_udm_component(registry):
             "required_settings_reasons": {"moist": "UDM advances vapor, six condensate classes and three number fields."}},
         "extensions": {"preset_scope_reason": "Retained WRF 4.7.1 driver replay, whole forecast and interleaved speed evidence are recorded in misc-wrf471.json."},
         "warnings": ["UDM retains WRF 4.7.1 initialized tables and native REAL kinds. Use legacy RRTMG; the native optional radius routine receives uninitialized density and is not qualified."]}
+
+
+def _shallow_cumulus_constraints(registry):
+    """Publish validate_run_config's shcu_physics laws as refused_when rules.
+
+    shcu_physics is a parameter, so its pairing laws live on the options
+    they pair with.  The PBL rows are DERIVED from
+    woof.shallow_cumulus.shallow_refusal by enumerating its inputs, so the
+    plan review and the run door read one law; a combination is written as
+    one rule when its refused values form a product, else one rule each.
+    """
+    import itertools
+    from woof.config import UW_SHALLOW_QI_MP_PHYSICS
+    from woof.shallow_cumulus import shallow_refusal
+
+    axes = (("bl_mynn_edmf", (0, 1)), ("icloud", (0, 1, 2, 3)),
+            ("icloud_bl", (0, 1)))
+    carriers = [
+        ({"shcu_physics": [3, 4, 5], "moist": [False]},
+         "shallow convection requires a water-vapour carrier"),
+        ({"shcu_physics": [5], "moist_cq": [False]},
+         "Deng requires QC and QR condensate carriers"),
+        ({"shcu_physics": [2], "moist": [False]},
+         "UW shallow convection requires moist condensate carriers"),
+        ({"shcu_physics": [2], "moist_cq": [False]},
+         "UW shallow convection requires moist condensate carriers"),
+    ]
+    remedy = {"remedy_label": "Set shcu_physics=0.",
+              "remedy_settings": {"shcu_physics": 0}}
+    for option in registry["components"]["pbl"]["options"].values():
+        pbl = option.get("selectors", {}).get("bl_pbl_physics")
+        if option.get("implemented") is not True or pbl is None:
+            continue
+        refused: dict[str, dict[int, set]] = {}
+        for shcu in range(1, 6):
+            for combo in itertools.product(*(values for _, values in axes)):
+                kwargs = dict(zip((name for name, _ in axes), combo))
+                why = shallow_refusal(shcu, pbl, kwargs["bl_mynn_edmf"], 0,
+                                      icloud=kwargs["icloud"],
+                                      icloud_bl=kwargs["icloud_bl"])
+                if why:
+                    refused.setdefault(why, {}).setdefault(shcu, set()).add(combo)
+        rules = []
+        for why, by_shcu in refused.items():
+            grouped: dict[tuple, list[int]] = {}
+            for shcu, combos in sorted(by_shcu.items()):
+                columns = [sorted({c[i] for c in combos}) for i in range(len(axes))]
+                if len(combos) == len(list(itertools.product(*columns))):
+                    pieces = [tuple(columns)]
+                else:
+                    pieces = [tuple([v] for v in c) for c in sorted(combos)]
+                for piece in pieces:
+                    grouped.setdefault(tuple(map(tuple, piece)), []).append(shcu)
+            for piece, shcus in grouped.items():
+                settings = {"shcu_physics": shcus}
+                for (name, domain), values in zip(axes, piece):
+                    if tuple(values) != tuple(domain):
+                        settings[name] = list(values)
+                rules.append({"settings": settings, "reason": why, **remedy})
+        rules += [{"settings": settings, "reason": why, **remedy}
+                  for settings, why in carriers]
+        option.setdefault("constraints", {}).setdefault(
+            "refused_when", []).extend(rules)
+    uw = ("WRF UW shallow convection requires the QI carrier "
+          "(module_shallowcu_driver.F:519-522)")
+    for option in registry["components"]["microphysics"]["options"].values():
+        mp = option.get("selectors", {}).get("mp_physics")
+        if (option.get("implemented") is True and mp is not None
+                and mp not in UW_SHALLOW_QI_MP_PHYSICS):
+            option.setdefault("constraints", {}).setdefault(
+                "refused_when", []).append(
+                    {"settings": {"shcu_physics": [2]}, "reason": uw, **remedy})
+    nsas = registry["components"]["cumulus"]["options"]["new-sas"]
+    nsas.setdefault("constraints", {}).setdefault("refused_when", []).append({
+        "settings": {"shcu_physics": [4]},
+        "reason": shallow_refusal(4, 1, 0, 96), **remedy})
 
 
 def _misc_qualified_components(registry):

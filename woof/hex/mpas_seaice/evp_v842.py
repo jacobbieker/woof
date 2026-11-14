@@ -36,6 +36,9 @@ layout: ``a(maxEdges, nCells)`` is C-order ``(nCells, maxEdges)``. See the
 """
 from __future__ import annotations
 
+import contextvars
+from contextlib import contextmanager
+
 from functools import lru_cache
 from importlib.resources import files
 
@@ -114,6 +117,29 @@ def _check(name: str, array, dtype, shape) -> None:
         raise ValueError(f"{name} must be a contiguous device {np.dtype(dtype).name} array of shape {tuple(shape)}")
 
 
+#: the block's cell and vertex counts while :func:`block_counts` is in force:
+#: the loops v8.4.2 bounds by nCells run to it over arrays that carry MPAS's
+#: missing-cell element (whose whole-array operations still cover it)
+_COUNTS = contextvars.ContextVar("mpas_seaice_block_counts", default=None)
+
+
+@contextmanager
+def block_counts(*, cells: int, vertices: int):
+    """Run the kernels over arrays with MPAS's extra element: the loops the
+    Fortran bounds by ``nCells``/``nVertices`` stop at them."""
+    token = _COUNTS.set({"cells": int(cells), "vertices": int(vertices)})
+    try:
+        yield
+    finally:
+        _COUNTS.reset(token)
+
+
+def loop_count(kind: str, n: int) -> int:
+    """``nCells``/``nVertices`` within :func:`block_counts`, else ``n`` (the arrays' length)."""
+    counts = _COUNTS.get()
+    return n if counts is None else counts[kind]
+
+
 def _grid(n: int) -> tuple[int]:
     return ((n + _BLOCK - 1) // _BLOCK,)
 
@@ -183,10 +209,11 @@ def internal_stress_variational(*, mesh: dict, solver: dict, variational: dict, 
         v["basisGradientU"], v["basisGradientV"], v["tanLatVertexRotatedOverRadius"],
         solver["solveStress"], mesh["nEdgesOnCell"], mesh["verticesOnCell"],
         np.int32(n_cells), np.int32(max_edges)))
-    _function(precision, "seaice_stress_tensor_variational_v842")(_grid(n_cells), (_BLOCK,), (
+    n_loop = loop_count("cells", n_cells)
+    _function(precision, "seaice_stress_tensor_variational_v842")(_grid(n_loop), (_BLOCK,), (
         v["stress11"], v["stress22"], v["stress12"], v["strain11"], v["strain22"], v["strain12"],
         solver["icePressure"], v["replacementPressure"], solver["solveStress"], mesh["nEdgesOnCell"],
-        consts, dtype(elastic_time_step), np.int32(bool(revised_evp)), np.int32(n_cells),
+        consts, dtype(elastic_time_step), np.int32(bool(revised_evp)), np.int32(n_loop),
         np.int32(max_edges)))
     _function(precision, "seaice_stress_divergence_variational_v842")(_grid(n_vertices), (_BLOCK,), (
         solver["stressDivergenceU"], solver["stressDivergenceV"], v["stress11"], v["stress22"],
@@ -222,4 +249,5 @@ def final_divergence_shear_variational(*, mesh: dict, solver: dict, variational:
     _function(precision, "seaice_final_divergence_shear_variational_v842")(_grid(n_cells), (_BLOCK,), (
         solver["divergence"], solver["shear"], *ridge, variational["strain11"], variational["strain22"],
         variational["strain12"], solver["solveStress"], mesh["nEdgesOnCell"],
-        np.int32(bool(use_column_package)), np.int32(n_cells), np.int32(max_edges)))
+        np.int32(bool(use_column_package)), np.int32(n_cells), np.int32(max_edges),
+        np.int32(loop_count("cells", n_cells))))

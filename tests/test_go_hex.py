@@ -309,3 +309,58 @@ def test_frame_deletion_is_refused_while_products_run(tmp_path):
     plain = _write(tmp_path)
     with pytest.raises(go_hex.HexGoRefusal, match="--products none"):
         go_hex.plan(_args(str(plain), "--icechunk-delete-after-commit"))
+
+
+# ---------------------------------------------------------------------------
+# [static.highres] terrain (the regional door's --terrain-source)
+# ---------------------------------------------------------------------------
+def _static_table(**keys) -> str:
+    body = {"enabled": "true", "cache_root": '"/tmp/hexgo-cache"', **keys}
+    return "\n[static.highres]\n" + "".join(f"{key} = {value}\n" for key, value in body.items())
+
+
+def test_the_default_plan_has_no_terrain_hook(tmp_path):
+    value = go_hex.plan(_args(str(_write(tmp_path))))
+    assert "terrain" not in value
+    assert not any(part.startswith("--terrain") for part in value["regional_argv"])
+
+
+@pytest.mark.parametrize("name,expect", [("glo30", "glo30"), ("copernicus-dem-glo30", "glo30"),
+                                         ("gem15-dtm", "gem15-dtm"), ("gem15-dsm", "gem15-dsm")])
+def test_static_highres_terrain_source_rides_to_the_regional_door(tmp_path, name, expect):
+    config = _write(tmp_path, tail=_static_table(terrain_source=f'"{name}"'))
+    value = go_hex.plan(_args(str(config)))
+    argv = value["regional_argv"]
+    assert argv[argv.index("--terrain-source") + 1] == expect
+    assert argv[argv.index("--terrain-cache-root") + 1] == "/tmp/hexgo-cache"
+    assert value["terrain"] == {"source": expect, "cache_root": "/tmp/hexgo-cache"}
+    base = go_hex.plan(_args(str(_write(tmp_path))))["regional_argv"]
+    assert [p for p in argv if p not in ("--terrain-source", expect, "--terrain-cache-root", "/tmp/hexgo-cache")] == base
+
+
+def test_a_disabled_block_or_one_scoped_below_the_spacing_adds_nothing(tmp_path):
+    for keys in ({"terrain_source": '"glo30"', "enabled": "false"},
+                 {"terrain_source": '"glo30"', "max_dx_m": "1000.0"}):
+        config = _write(tmp_path, tail=_static_table(**keys))
+        assert "terrain" not in go_hex.plan(_args(str(config)))
+
+
+@pytest.mark.parametrize("keys,words", [
+    ({}, "name it"),
+    ({"terrain_source": '"auto"'}, r"hex has no 'auto'|no hex fetcher"),
+    ({"terrain_source": '"usgs-3dep-13as"'}, "no hex fetcher"),
+    ({"terrain_source": '"srtm-gl1"'}, "no hex fetcher"),
+    ({"terrain_source": '"glo30"', "fields": '"all"'}, "terrain only"),
+    ({"terrain_source": '"glo30"', "landcover_source": '"annual-nlcd"'}, "terrain only"),
+    ({"terrain_source": '"glo30"', "on_refuse": '"skip"'}, "on_refuse"),
+    ({"terrain_source": '"nope"'}, "terrain_source"),
+])
+def test_static_highres_combinations_hex_cannot_run_are_refused_by_name(tmp_path, keys, words):
+    with pytest.raises(go_hex.HexGoRefusal, match=words):
+        go_hex.plan(_args(str(_write(tmp_path, tail=_static_table(**keys)))))
+
+
+def test_static_keys_other_than_highres_are_refused(tmp_path):
+    config = _write(tmp_path, tail='\n[static]\ngeog_root = "/tmp/geog"\n')
+    with pytest.raises(go_hex.HexGoRefusal, match=r"\[static\] geog_root"):
+        go_hex.plan(_args(str(config)))

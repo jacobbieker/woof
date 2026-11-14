@@ -56,6 +56,15 @@ def field_definition(name: str, *, physics: bool = True) -> dict:
     from .mpasdiag import plevel_diag_v842 as plevel
     if physics and name in plevel.FIELDS:
         return plevel.field_definition(name)
+    from .mpasdiag import acc_diag_v842 as acc
+    if physics and name in acc.FIELDS:
+        return acc.field_definition(name)
+    from .mpasdiag import afwa_diag_v842 as afwa
+    if physics and name in afwa.FIELDS:
+        return afwa.field_definition(name)
+    from .mpasdiag import reduction_diag_v842 as reduce
+    if physics and name in reduce.FIELDS:
+        return reduce.field_definition(name)
     raise ValueError(f'{name}: unknown v8.4.2 Registry field')
 
 
@@ -417,7 +426,10 @@ def _all_packages() -> frozenset[str]:
     from .mpasphys.solar_diagnostics_v842 import PACKAGE as SOLAR_PACKAGE
     from .mpasdiag.nwp_diag_v842 import PACKAGE as NWP_PACKAGE
     from .mpasdiag.plevel_diag_v842 import P_PACKAGE, Z_PACKAGE
-    return frozenset(PACKAGES.values()) | {RADTRAN_PACKAGE, SOLAR_PACKAGE, NWP_PACKAGE, P_PACKAGE, Z_PACKAGE} | frozenset(p for f in _REGISTRY['fields'].values() for gate in f['gates']
+    from .mpasdiag.acc_diag_v842 import PREC_PACKAGE, TEND_PACKAGE
+    from .mpasdiag.afwa_diag_v842 import SELECTORS as AFWA_PACKAGES
+    from .mpasdiag.reduction_diag_v842 import PACKAGES as REDUCTION_PACKAGES
+    return frozenset(PACKAGES.values()) | {RADTRAN_PACKAGE, SOLAR_PACKAGE, NWP_PACKAGE, P_PACKAGE, Z_PACKAGE, PREC_PACKAGE, TEND_PACKAGE, *AFWA_PACKAGES, *REDUCTION_PACKAGES} | frozenset(p for f in _REGISTRY['fields'].values() for gate in f['gates']
                      for p in gate.split(';')) | frozenset(
                      p for s in _REGISTRY['streams'].values()
                      for p in s['options'].get('packages','').split(';')) | {'no_invariant_stream'}

@@ -315,6 +315,125 @@ def test_the_urban_seam_restarts_bit_identically():
             np.testing.assert_array_equal(a, b, err_msg=f"step {index} {name}")
 
 
+#: use_wudapt_lcz = 1: the init's ivgtyp (ISURBAN 13 on the urban cells) and
+#: the sidecar's LU_INDEX, which types the urban cells by Local Climate Zone;
+#: the last urban cell held no LCZ pixel and keeps ISURBAN (UTYPE 5).
+LCZ_INDEX = np.array([51, 56, 10, 58, 10, 10, 13, 10], np.int32)
+LCZ_UTYPE = np.array([1, 6, 0, 8, 0, 0, 5, 0], np.int32)
+
+
+def _lcz_mapping(option):
+    physics = dict(suite.MPAS_DEFAULT_PHYSICS, sf_urban_physics=option,
+                   use_wudapt_lcz=1)
+    inputs = {"ivgtyp": LCZ_INDEX.copy()}
+    if option == 1:
+        inputs["frc_urb2d"] = FRC.copy()
+    values = _mapping(physics, inputs)
+    for name in ("landmask", "xland", "isltyp", "tsk"):
+        values[name] = np.asarray(cases.surface(suite.column_physics_plan(
+            physics))[name]).copy()
+    values["ivgtyp"] = np.where(URBAN, 13, 10).astype(np.int32)
+    return values
+
+
+def test_the_lcz_seam_refuses_without_its_classes_and_carries_them():
+    values = _lcz_mapping(1)
+    assert _seal(values).receipt()["surface_inputs"] == ["frc_urb2d", "ivgtyp"]
+    values["surface_inputs"].pop("ivgtyp")
+    with pytest.raises(ValueError, match="missing .*ivgtyp"):
+        _seal(values)
+    values = _lcz_mapping(2)
+    assert _seal(values).receipt()["surface_inputs"] == ["ivgtyp"]
+    values["surface_inputs"]["frc_urb2d"] = FRC.copy()
+    with pytest.raises(ValueError, match="extra .*frc_urb2d"):
+        _seal(values)
+
+
+@pytest.mark.parametrize("option", [1, 2])
+def test_hex_lcz_columns_are_wrf_urban_twin_columns(option):
+    """With use_wudapt_lcz = 1 the seam's land use is the sidecar's LU_INDEX:
+    urban_var_init types each urban cell by its LCZ class (URBPARM_LCZ.TBL),
+    and every urban call equals WRF's urban model replayed on a twin built
+    from the same fields (tools/hex_urban_twin.py, in-process)."""
+    import importlib.util
+    from pathlib import Path
+
+    from woof.core.urban_tables import load_urban_params
+
+    path = Path(__file__).resolve().parents[1] / "tools" / "hex_urban_twin.py"
+    spec = importlib.util.spec_from_file_location("hex_urban_twin", path)
+    twin = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(twin)
+    summary: dict = {}
+    restore = twin._install(summary)
+    try:
+        seam = suite.run_mpas_column_physics(**_seal(_lcz_mapping(option)).arwen_kwargs())
+        fields = seam._driver.urban.fields
+        np.testing.assert_array_equal(
+            _host(fields["utype_urb2d"]).reshape(-1), LCZ_UTYPE)
+        frc = _host(fields["frc_urb2d"]).reshape(-1)
+        if option == 1:
+            # SLUCM keeps the staged LCZ-table fraction on the urban cells.
+            np.testing.assert_array_equal(frc[URBAN], FRC[URBAN])
+        else:
+            table = load_urban_params(option, 1).FRC_URB_TBL
+            np.testing.assert_array_equal(
+                frc[URBAN], np.asarray(table, np.float32)[LCZ_UTYPE[URBAN] - 1])
+        frames = cases.run(cp, seam, 4)
+    finally:
+        restore()
+    assert not cases._finite(frames)
+    assert summary["calls_after_lsm"] >= 1
+    assert not any(summary["initial_words_differing"].values()), summary
+    assert not any(summary["step_words_differing"].values()), {
+        key: value for key, value in summary["step_words_differing"].items() if value}
+
+
+def test_the_lcz_seam_restarts_bit_identically():
+    def make():
+        return suite.run_mpas_column_physics(**_seal(_lcz_mapping(1)).arwen_kwargs())
+
+    def step(seam, theta, species, fields):
+        seam.run_phase1(
+            dt=DT, u=fields["u"], v=fields["v"], theta=theta,
+            pressure=fields["pressure"],
+            pressure_interface=fields["pressure_interface"],
+            z_interface=fields["z_interface"], w=fields["w"],
+            rho_dry=fields["rho_dry"], species=species)
+        seam.run_phase2(
+            theta=theta, pressure=fields["pressure"],
+            z_interface=fields["z_interface"], w=fields["w"],
+            rho_dry=fields["rho_dry"], species=species)
+
+    reference_seam = make()
+    names = tuple(reference_seam._driver.urban.names)
+    fields, species = cases.profile(cp, reference_seam.plan)
+    theta = fields["theta"].copy()
+    reference = []
+    for _ in range(4):
+        step(reference_seam, theta, species, fields)
+        reference.append({
+            "theta": _host(theta),
+            "species": {name: _host(value) for name, value in species.items()},
+            **{name: _host(reference_seam._driver.fields[name]) for name in names}})
+    first = make()
+    cases.run(cp, first, 2)
+    payload = first.export_state()
+    second = make()
+    second.restore_state(payload)
+    fields, _ = cases.profile(cp, second.plan)
+    theta = cp.asarray(reference[1]["theta"])
+    species = {name: cp.asarray(reference[1]["species"][name])
+               for name in second.plan.species}
+    for index in (2, 3):
+        step(second, theta, species, fields)
+        np.testing.assert_array_equal(_host(theta).view(np.uint32),
+                                      reference[index]["theta"].view(np.uint32))
+        for name in names:
+            a, b = _host(second._driver.fields[name]), reference[index][name]
+            np.testing.assert_array_equal(a, b, err_msg=f"step {index} {name}")
+
+
 def _mosaic_mapping(landusef=True):
     physics = dict(suite.MPAS_DEFAULT_PHYSICS, sf_surface_physics=2,
                    sf_surface_mosaic=1)

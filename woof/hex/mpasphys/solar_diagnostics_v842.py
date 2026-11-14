@@ -68,7 +68,10 @@ def resolve(groups: Mapping[str, Mapping[str, Any]]) -> bool:
     from woof.hex.mpasdiag.nwp_diag_v842 import OPTION as NWP_OPTION
     from woof.hex.mpasdiag.plevel_diag_v842 import OPTIONS as PLEVEL_OPTIONS
     from woof.hex.mpasdiag.tslist_v842 import OPTIONS as TSLIST_OPTIONS
-    unknown = sorted(set(supplied) - {OPTION, NWP_OPTION, *PLEVEL_OPTIONS, *TSLIST_OPTIONS})
+    from woof.hex.mpasdiag.acc_diag_v842 import OPTIONS as ACC_OPTIONS
+    from woof.hex.mpasdiag.afwa_diag_v842 import OPTIONS as AFWA_OPTIONS
+    from woof.hex.mpasdiag.reduction_diag_v842 import OPTIONS as REDUCTION_OPTIONS
+    unknown = sorted(set(supplied) - {OPTION, NWP_OPTION, *PLEVEL_OPTIONS, *TSLIST_OPTIONS, *ACC_OPTIONS, *AFWA_OPTIONS, *REDUCTION_OPTIONS})
     if unknown:
         raise ValueError(f"&{GROUP} has no option {unknown[0]!r}; its (WOOF) options are {OPTION} and {NWP_OPTION}")
     value = supplied.get(OPTION, False)

@@ -72,3 +72,30 @@ pixi run -e default woof hex seaice verify
 To rebuild the oracle inside the test and compare it with the committed
 fixture, set `GFORTRAN=.pixi/envs/mpas-oracle/bin/gfortran` and
 `WOOF_MPAS_V842_SOURCE=<tree>`. Without them, that test skips by name.
+
+## The time-step oracle (`run_seaice_step.F90`)
+
+`run_seaice_step.F90` drives the forward model over N steps with the column
+package, advection and forcing off:
+- init: the velocity solver's time steps, `seaice_init_evp`, and
+  `seaice_initialize_time_diagnostics`;
+- each step: the clock, `seaice_timestep`, and `seaice_timestep_finalize`.
+
+Its inputs come in three kinds:
+- **Cut verbatim by build.sh (awk ranges):**
+  - `seaice_timestep`, `store_timestep_counter` and `seaice_timestep_finalize`
+    (`timestep_cut_head.F90`);
+  - the column wrappers and re-initialisations (`column_cut_head.F90`;
+    `column_cut_tail.F90` stands in for the column routines they call only
+    under the column package);
+  - the time diagnostics and `seaice_check_state` (`diagnostics_cut_head.F90`).
+- **Compiled verbatim:** `mpas_seaice_velocity_solver.F`, without
+  `-Dprivate=public` (the driver calls its public routine).
+- **Stand-ins:**
+  - `step_standins.F90` for the basis setup, the weak solver, colpkg, the unit
+    tests and advection;
+  - the framework from `tools/mpas_ocean_oracle/stubs.F90` and
+    `oracle_stream.F90`, shared with the ocean oracles (the time manager on
+    whole seconds and the self-describing stream with MPAS-Seaice's pools).
+
+`make_step_fixture.py` writes `tests/data/oracles/mpas_seaice_step`.

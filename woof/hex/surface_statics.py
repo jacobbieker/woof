@@ -37,6 +37,21 @@ cell (the same nearest-centre assignment); a water cell that holds none takes
 geogrid's breadth-first search of up to 5 source pixels from the pixel under
 the cell centre; a land cell, and a water cell the search does not reach, get
 the fill.  ``LAKE_DEPTH_FLAG`` is 1.
+
+``LU_INDEX`` and ``FRC_URB2D_LCZ`` (``use_wudapt_lcz = 1``, ``--fields lcz``).
+With WRF's LCZ geography (GEOGRID.TBL.ARW_LCZ, CGLC-MODIS-LCZ) LU_INDEX holds
+the Local Climate Zones as categories 51-61, and ``urban_var_init`` types each
+urban cell from it (LCZ_n -> UTYPE n; ISURBAN -> 5).  The 100 m raster is
+fetched on demand (pinned URL, size, MD5 and SHA-256; cached under
+``--cache-root``, never committed) and sampled cell by cell exactly as ``woof
+hex static-highres --landuse cglc`` samples it, with the LCZ classes kept
+apart (:func:`woof.static.highres.landcover_legend`).  The static's own
+urban/non-urban decision stands (its landmask, soil and the init were built
+from it): each cell the static calls urban (ISURBAN) takes the class holding
+the most of its LCZ area (lowest class on a tie, as geogrid's), and a cell
+holding no LCZ pixel keeps ISURBAN.  ``FRC_URB2D_LCZ`` is SLUCM's fraction
+from the same areas, weighted by URBPARM_LCZ.TBL's FRC_URB through the WRF
+path's own estimate (:func:`woof.static.urban_fraction.estimate_urban_fraction`).
 """
 
 from __future__ import annotations
@@ -333,7 +348,8 @@ def lake_mask_vote(geometry, assigner, water: np.ndarray, dataset, *,
 
 
 #: The field groups ``--fields`` names: each is one scheme's inputs.
-FIELD_GROUPS = ("lake", "urban", "landusef", "irrigation", "soilctop", "soilcbot")
+FIELD_GROUPS = ("lake", "urban", "landusef", "irrigation", "soilctop", "soilcbot",
+                "lcz")
 #: geogrid's soil-category fraction fields and their WPS datasets (GEOGRID.TBL
 #: SOILCTOP/SOILCBOT, dest_type categorical, 16 categories).
 SOIL_FRACTION_DATASETS = {"soilctop": ("SOILCTOP", "soiltype_top_30s"),
@@ -403,8 +419,144 @@ def urban_fraction_cells(counts: np.ndarray, cmin: int, ivgtyp, landmask
     }
 
 
+#: The land-cover source the LCZ classes come from
+#: (woof.static.highres_fetch.LANDCOVER_SOURCES).
+LCZ_SOURCE = "cglc-modis-lcz"
+
+
+def lcz_cells(geometry, assigner, ivgtyp, landmask, *, cache_root: Path,
+              offline: bool = False, urlopen=None, sampler=None,
+              band_samples: int | None = None,
+              progress: Callable[[str], None] | None = None
+              ) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    """LU_INDEX with the LCZ classes on urban cells, and SLUCM's LCZ fraction.
+
+    Returns ``(lu_index int32[n], frc_urb2d float32[n], receipt)`` (module
+    docstring).  The raster is fetched and warped through the same seams as
+    ``woof hex static-highres`` (:func:`woof.hex.static_highres.fetch_landuse`,
+    :func:`~woof.hex.static_highres.accumulate`): a sample lattice no coarser
+    than the 100 m pixel, each sample given to the nearest cell centre and
+    weighed by its area.
+    """
+    from woof.core.urban_tables import urban_category_set
+    from woof.static.highres import MODIS21_ISURBAN, landcover_legend
+
+    from . import static_highres as sh
+    from .surface_inputs import LCZ_CATEGORIES
+
+    lcz = urban_category_set(isurban=MODIS21_ISURBAN).lcz
+    if tuple(lcz) != LCZ_CATEGORIES:
+        raise SurfaceStaticsRefusal(
+            f"VEGPARM.TBL numbers LCZ_1..LCZ_11 {lcz}, not the CGLC-MODIS-LCZ "
+            f"raster's {LCZ_CATEGORIES[0]}..{LCZ_CATEGORIES[-1]}")
+    n = geometry.n_cells
+    cells = assigner.cells
+    inradius = sh.cell_inradius_m(geometry, cells)
+    spacing = sh.cell_spacing_m(geometry, cells)
+    dx = min(sh.SOURCE_PIXEL_M[LCZ_SOURCE],
+             sh._INRADIUS_TO_SPACING * float(np.nanmin(inradius)),
+             float(np.nanmedian(spacing)) / sh._SAMPLES_ACROSS_CELL)
+    bbox = sh._footprint(geometry, cells, pad_deg=2.0 * dx / 111_000.0)
+    lattice = sh.SampleLattice.over(bbox, dx)
+    if lattice.samples > sh.MAX_SAMPLES:
+        raise SurfaceStaticsRefusal(
+            f"the mesh footprint {bbox.as_dict()} at a {dx:.3g} m lattice is "
+            f"{lattice.samples:,} samples, beyond {sh.MAX_SAMPLES:,}; the LCZ "
+            "classes are built for a regional (culled) mesh")
+    bound, manifest, source = sh.fetch_landuse(
+        bbox, Path(cache_root), LCZ_SOURCE, offline=offline, urlopen=urlopen)
+    mapping, categories = landcover_legend(LCZ_SOURCE, sf_urban_physics=1,
+                                           use_wudapt_lcz=1)
+    acc = sh.accumulate(
+        lattice, assigner, landuse_bound=bound,
+        landuse_lookup=sh._category_lookup(mapping, source.nodata),
+        landuse_source_id=source.source_id, categories=int(categories),
+        sampler=sampler or sh.rust_sampler,
+        band_samples=band_samples or sh.BAND_SAMPLES, progress=progress)
+    shares = np.zeros((n, int(categories)))
+    shares[cells] = np.divide(acc.landuse, acc.area[:, None],
+                              out=np.zeros_like(acc.landuse),
+                              where=acc.area[:, None] > 0.0)
+    lu_index, frc, counts = lcz_index_and_fraction(shares, ivgtyp, landmask)
+    return lu_index, frc, {
+        **counts,
+        "lattice": {"projection": "mercator", "dx_m": round(dx, 4),
+                    "nx": lattice.nx, "ny": lattice.ny,
+                    "samples": int(acc.samples),
+                    "samples_in_cells": int(acc.samples_kept)},
+        "footprint": bbox.as_dict(),
+        "source": manifest,
+    }
+
+
+def lcz_index_and_fraction(shares, ivgtyp, landmask
+                           ) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    """LU_INDEX and FRC_URB2D_LCZ from per-cell category area shares.
+
+    ``shares[n, 61]``: each category's share of the cell's area (geogrid's
+    LANDUSEF with the LCZ classes 51-61 kept apart).  Each ISURBAN cell of
+    ``ivgtyp`` takes the LCZ class with the largest share (lowest on a tie);
+    one with no LCZ share keeps ISURBAN (and a fraction of 0, which
+    urban_var_init replaces by FRC_URB_TBL(5)); every other cell keeps its
+    category.  The fraction is the WRF path's SLUCM estimate with
+    URBPARM_LCZ.TBL.
+    Returns ``(lu_index, frc, receipt)``.
+    """
+    from types import SimpleNamespace
+
+    from woof.static.highres import MODIS21_ISURBAN
+    from woof.static.urban_fraction import estimate_urban_fraction
+
+    from .surface_inputs import LCZ_CATEGORIES, urban_table_sha256
+
+    shares = np.asarray(shares, dtype=np.float64)
+    ivgtyp = np.asarray(ivgtyp, dtype=np.int64).reshape(-1)
+    lcz_area = shares[:, LCZ_CATEGORIES[0] - 1:LCZ_CATEGORIES[-1]]
+    holds = lcz_area.sum(axis=1) > 0.0
+    dominant = np.argmax(lcz_area, axis=1) + LCZ_CATEGORIES[0]
+    urban = ivgtyp == MODIS21_ISURBAN
+    lu_index = np.where(urban & holds, dominant, ivgtyp).astype(np.int32)
+    landmask = np.asarray(landmask, np.float64).reshape(-1)
+    # An urban cell with no LCZ area has no area estimate (the WRF path's
+    # Rust estimate refuses one rather than fall back to the table): it
+    # stays out of the estimate at 0, and urban_var_init gives it
+    # FRC_URB_TBL(5), WRF's own rule for an urban cell with FRC_URB2D = 0.
+    estimated = ~(urban & ~holds)
+    frc = np.zeros(ivgtyp.size, dtype=np.float32)
+    audit = None
+    if np.any(estimated):
+        values, audit = estimate_urban_fraction(
+            {"LANDUSEF": shares[estimated].T[:, None, :],
+             "LU_INDEX": lu_index[estimated][None, :].astype(np.float64),
+             "LANDMASK": landmask[estimated][None, :]}, option=1, use_wudapt_lcz=1)
+        frc[estimated] = np.asarray(values, dtype=np.float64).reshape(-1)
+    classes, counts = np.unique(lu_index[urban], return_counts=True)
+    return lu_index, frc, {
+        "method": "CGLC-MODIS-LCZ area per Voronoi cell (woof hex static-highres "
+                  "lattice: nearest-centre assignment, area-weighted), LCZ 51-61 "
+                  "kept apart; each ISURBAN cell of the static takes the LCZ "
+                  "class holding the most of its area (lowest on a tie), one "
+                  "holding none keeps ISURBAN",
+        "frc_method": "LCZ area shares x URBPARM_LCZ.TBL FRC_URB on dominant-"
+                      "urban land cells (woof.static.urban_fraction, the WRF "
+                      "path's SLUCM estimate with use_wudapt_lcz = 1)",
+        # The table the estimate read (load_urban_params' default, LCZ); the
+        # forecast refuses a run whose urban model reads another.
+        "urbparm_sha256": urban_table_sha256(SimpleNamespace(use_wudapt_lcz=1)),
+        "audit": audit,
+        "urban_cells": int(np.count_nonzero(urban)),
+        "urban_cells_given_lcz": int(np.count_nonzero(urban & holds)),
+        "urban_cells_kept_isurban": int(np.count_nonzero(urban & ~holds)),
+        "cells_holding_lcz_not_urban": int(np.count_nonzero(holds & ~urban)),
+        "urban_class_counts": {str(int(c)): int(k) for c, k in zip(classes, counts)},
+        "frc_cells": int(np.count_nonzero(frc > 0)),
+    }
+
+
 def build(static: Path, out: Path, *, geog_root: Path | None,
           lake_depth: bool = True, fields: tuple[str, ...] = ("lake",),
+          cache_root: Path | None = None, offline: bool = False,
+          urlopen=None, sampler=None,
           progress: Callable[[str], None] | None = None) -> dict[str, Any]:
     """Write ``out`` from ``static`` (and ``geog_root``); return the receipt."""
     import netCDF4
@@ -500,6 +652,24 @@ def build(static: Path, out: Path, *, geog_root: Path | None,
             provenance["lake_depth"] = depth_receipt
             written["LAKE_DEPTH"] = depth
             attrs["LAKE_DEPTH_FLAG"] = np.int32(1)
+    if "lcz" in groups:
+        from .static_highres import LANDUSE_CHOICES
+
+        if replaced_landuse not in (None, LANDUSE_CHOICES["cglc"]):
+            raise SurfaceStaticsRefusal(
+                f"the static's land use was replaced from {replaced_landuse}; "
+                "the LCZ classes refine the urban cells of a 30-arc-second or "
+                "CGLC-MODIS-LCZ static only")
+        if cache_root is None:
+            from woof.static.highres_production import default_highres_cache_root
+
+            cache_root = default_highres_cache_root()
+        lu_index, frc_lcz, provenance["lcz"] = lcz_cells(
+            geometry, need_assigner(), ivgtyp, landmask,
+            cache_root=Path(cache_root), offline=offline, urlopen=urlopen,
+            sampler=sampler, progress=progress)
+        written["LU_INDEX"] = lu_index
+        written["FRC_URB2D_LCZ"] = frc_lcz
     if replaced_landuse is not None and ("urban" in groups or "landusef" in groups):
         raise SurfaceStaticsRefusal(
             f"the static's land use was replaced by `woof hex static-highres` "
@@ -599,7 +769,13 @@ def add_surface_statics_parser(commands) -> None:
     parser.add_argument("--fields", default="lake", metavar="GROUPS",
                         help="comma-separated field groups to build: "
                              f"{', '.join(FIELD_GROUPS)} (default lake); urban is "
-                             "SLUCM's FRC_URB2D")
+                             "SLUCM's FRC_URB2D; lcz is use_wudapt_lcz's LU_INDEX "
+                             "and FRC_URB2D_LCZ from CGLC-MODIS-LCZ (fetched)")
+    parser.add_argument("--cache-root", type=Path, default=None, metavar="DIR",
+                        help="where --fields lcz caches the CGLC-MODIS-LCZ raster "
+                             "(default: the high-resolution static cache)")
+    parser.add_argument("--offline", action="store_true",
+                        help="--fields lcz reads the cached raster only")
     parser.add_argument("--no-lake-depth", action="store_true",
                         help="stage the lake mask only (for use_lakedepth = 0)")
     parser.set_defaults(handler=run_cli)
@@ -612,6 +788,7 @@ def run_cli(arguments: argparse.Namespace) -> int:
         out = builder_default_path(static)
     receipt = build(static, out, geog_root=arguments.geog_root,
                     lake_depth=not arguments.no_lake_depth,
+                    cache_root=arguments.cache_root, offline=arguments.offline,
                     fields=tuple(item.strip() for item in arguments.fields.split(",")
                                  if item.strip()),
                     progress=lambda message: print(message, flush=True))

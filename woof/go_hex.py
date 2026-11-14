@@ -61,7 +61,7 @@ STAGE_MAP: Mapping[str, tuple[str, ...]] = {
 }
 
 #: Tables the hex route reads.  ``[output]`` is read for its format keys only.
-READ_TABLES = ("model", "experiment", "projection", "domain", "shared", "fetch", "output")
+READ_TABLES = ("model", "experiment", "projection", "domain", "shared", "fetch", "output", "static")
 
 #: Tables with no hex equivalent on the go route yet, each with the matrix item that adds it.
 REFUSED_TABLES: Mapping[str, str] = {
@@ -81,7 +81,6 @@ REFUSED_TABLES: Mapping[str, str] = {
     "physics_params": "per-scheme parameter tables have no hex go mapping yet (matrix item 1.3)",
     "case_data": "[case_data] is the WRF preparation's input table; hex prepares through its own "
                  "mesh/init doors from [fetch]",
-    "static": "[static] is the WRF static builder's table; hex builds its static in the mesh stage",
     "ingest": "[ingest] is WRF ingest policy; hex ingests through its source table",
     "lineage": "cyclone lineage is a WRF go provenance table; hex storm workflows are `woof hex moving`",
 }
@@ -129,6 +128,15 @@ KEY_REASONS: Mapping[str, str] = {
     "dfi_opt": "DFI on hex is matrix item 4.4 (IAU is the hex alternative)",
     "w_damping": "w_damping on hex is matrix item 4.2",
 }
+
+
+#: [static.highres] terrain_source values -> ``woof hex regional --terrain-source``.  The WRF registry ids
+#: and the hex door's names are both accepted; "auto", 3DEP and SRTM have no hex fetcher.
+TERRAIN_SOURCE_NAMES: Mapping[str, str] = {"glo30": "glo30", "copernicus-dem-glo30": "glo30",
+                                           "gem15-dtm": "gem15-dtm", "gem15-dsm": "gem15-dsm"}
+#: [static.highres] keys accepted only at the value that makes them inert when only terrain is replaced.
+STATIC_INERT: Mapping[str, Any] = {"fields": "terrain", "landcover_source": "auto", "soil_source": "soilgrids",
+                                   "lcz_pervious": "urban", "on_refuse": "error"}
 
 
 class HexGoRefusal(ValueError):
@@ -260,6 +268,49 @@ def _key_refusal(table: str, key: str) -> str:
     return f"[{table}] {key}: {reason}"
 
 
+def _terrain_request(static: Any, *, source: str, base_dir: Path) -> tuple[dict[str, Any] | None, list[str]]:
+    """The ``[static.highres]`` block as a hex terrain request (or None), and what it asks that hex cannot do.
+
+    The block is validated by the WRF path's own parser (:func:`woof.static.highres_production.
+    parse_static_table`); hex then accepts the part its mesh stage runs (``woof hex static-highres``
+    terrain: GLO-30, GEM-15) and refuses the rest by name."""
+
+    if not isinstance(static, dict):
+        return None, [f"[static]: must be a table, got {static!r}"]
+    refusals = [f"[static] {key}: hex builds its static from WPS_GEOG in the mesh stage and takes no "
+                "external static or geography root on the go route" for key in static if key != "highres"]
+    table = static.get("highres")
+    if table is None or not isinstance(table, dict):
+        return None, refusals or ["[static] declares no [static.highres] table"]
+    table = dict(table)
+    wanted = table.get("terrain_source")
+    if wanted == "glo30":
+        table["terrain_source"] = "copernicus-dem-glo30"  # the WRF registry id, which its parser knows
+    from woof.static.highres_production import parse_static_table
+    try:
+        config = parse_static_table({"highres": table}, source=source, base_dir=base_dir)
+    except ValueError as error:
+        return None, refusals + [str(error)]
+    if refusals or config is None or not config.enabled:
+        return None, refusals
+    for key, inert in STATIC_INERT.items():
+        value = table.get(key, inert)  # unwritten is the terrain-only run the hex mesh stage makes
+        if value != inert:
+            refusals.append(f"[static.highres] {key} = {value!r}: the hex mesh stage replaces terrain only "
+                            f"(`woof hex static-highres --terrain`); {key} is accepted only as {inert!r}, "
+                            "so it is not silently dropped (hex land use is `woof hex static-highres --landuse`)")
+    if "terrain_source" not in table:
+        refusals.append("[static.highres] terrain_source: name it (glo30, gem15-dtm, gem15-dsm); hex has no 'auto'")
+    elif TERRAIN_SOURCE_NAMES.get(str(wanted)) is None:
+        refusals.append(f"[static.highres] terrain_source = {wanted!r}: hex static-highres serves "
+                        f"{', '.join(sorted(set(TERRAIN_SOURCE_NAMES.values())))} (3DEP, SRTM and 'auto' "
+                        "have no hex fetcher)")
+    if refusals:
+        return None, refusals
+    return {"source": TERRAIN_SOURCE_NAMES[str(wanted)], "cache_root": str(config.cache_root),
+            "max_dx_m": config.max_dx_m}, []
+
+
 def read_request(document: Mapping[str, Any], *, source: str = "CONFIG") -> dict[str, Any]:
     """The hex request a go TOML makes, every unread key refused by name (all at once)."""
 
@@ -313,6 +364,11 @@ def read_request(document: Mapping[str, Any], *, source: str = "CONFIG") -> dict
         if key not in OUTPUT_KEYS:
             refusals.append(f"[output] {key}: hex history writes its own streams; a go field selection on "
                             "hex has no matrix item yet (3.1 follow-up)")
+    terrain = None
+    if "static" in document:
+        terrain, static_refusals = _terrain_request(document["static"], source=source,
+                                                    base_dir=Path(source).expanduser().absolute().parent)
+        refusals.extend(static_refusals)
     fetch = document.get("fetch")
     if not isinstance(fetch, dict) or "source" not in fetch or "cycle" not in fetch:
         refusals.append("[fetch] source and cycle: the hex route fetches the named source's cycle and "
@@ -360,8 +416,19 @@ def read_request(document: Mapping[str, Any], *, source: str = "CONFIG") -> dict
             "start_time": experiment["start_time"], "hours": int(run_seconds // 3600),
             "history_every_minutes": int(history // 60), "projection": dict(projection),
             "nx": int(domain["nx"]), "ny": int(domain["ny"]), "dx_m": float(domain["dx"]),
-            "fetch": dict(fetch), "physics": physics,
+            "fetch": dict(fetch), "physics": physics, "terrain": _scoped(terrain, float(domain["dx"])),
             "output_table": bool(output), "output": dict(output)}
+
+
+def _scoped(terrain: dict[str, Any] | None, dx_m: float) -> dict[str, Any] | None:
+    """``max_dx_m`` scopes the block to domains at or below that spacing, as it does on the WRF path."""
+
+    if terrain is None:
+        return None
+    limit = terrain.get("max_dx_m")
+    if limit is not None and dx_m > float(limit):
+        return None
+    return {key: value for key, value in terrain.items() if key != "max_dx_m"}
 
 
 def region_polygon(projection: Mapping[str, Any], nx: int, ny: int, dx_m: float, *,
@@ -449,6 +516,9 @@ def regional_argv(request: Mapping[str, Any], args, config: Path, *, shape: Path
         argv += ["--lead-hours", str(lead)]
     if getattr(args, "card", None):
         argv += ["--card", str(args.card)]
+    terrain = request.get("terrain")
+    if terrain is not None:
+        argv += ["--terrain-source", terrain["source"], "--terrain-cache-root", terrain["cache_root"]]
     for key, value in request["physics"].items():
         text = str(value).lower() if isinstance(value, bool) else str(value)
         argv += [f"--forecast-arg=--physics={key}={text}"]
@@ -492,6 +562,8 @@ def plan(args, *, config: Path | None = None, document: Mapping[str, Any] | None
     return {"schema": "woof.go-hex-plan/v1", "engine": "hex", "config": str(config),
             "name": request["name"], "stages": stages, "region": polygon,
             "fine_dx_m": request["dx_m"], "hours": request["hours"], "physics": request["physics"],
+            # Only a [static.highres] terrain block adds the key: every other go plan is unchanged.
+            **({"terrain": request["terrain"]} if request.get("terrain") else {}),
             "work_dir": str(root), "regional_argv": argv,
             "command": "woof hex " + " ".join(shlex.quote(part) for part in argv)}
 
