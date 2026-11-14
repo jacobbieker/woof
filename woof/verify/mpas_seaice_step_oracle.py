@@ -204,3 +204,29 @@ word_mismatches = _stream.word_mismatches
 
 def load_fixture(precision: str) -> dict[str, dict[str, np.ndarray]]:
     return _tend.load_fixture(precision, FIXTURE_DIR)
+
+
+def run_gpu(case: dict, n_steps: int | None = None) -> dict[str, np.ndarray]:
+    """Run woof.hex.mpas_seaice.timestep_v842 on ``case`` as run_seaice_step.F90 drives the Fortran."""
+    import cupy as cp
+    from woof.hex.mpas_seaice import timestep_v842 as ts
+
+    dev = _stream.on_device(FIELDS, case)
+    config = case["config"]
+    dev["diagnostics"]["xtime"] = config["diagnostics:xtime"]
+    dev["diagnostics"]["simulationStartTime"] = config["diagnostics:simulationStartTime"]
+    clock = ts.initialize(pools=dev, configs=config)
+    ts.advance(pools=dev, configs=config, clock=clock,
+               n_steps=int(config["oracle_n_steps"]) if n_steps is None else n_steps)
+    return {f"{pool}/{name}": cp.asnumpy(dev[pool][name]) for pool, name, kind, _ in FIELDS
+            if kind in (REAL, INT)}
+
+
+def measure(precision: str, reference: dict | None = None) -> dict[str, dict[str, int]]:
+    reference = load_fixture(precision) if reference is None else reference
+    report: dict[str, dict[str, int]] = {}
+    for case in cases(precision):
+        got = run_gpu(case)
+        want = reference[case["name"]]
+        report[case["name"]] = {name: word_mismatches(got[name], want[name]) for name in want}
+    return report
