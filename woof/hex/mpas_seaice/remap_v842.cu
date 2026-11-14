@@ -1,17 +1,18 @@
-// MPAS-Seaice v8.4.2: incremental remap advection (planar meshes).
+// MPAS-Seaice v8.4.2: incremental remap advection (planar and spherical meshes).
 //
 // A modified derivative of MPAS-Model v8.4.2 (MPAS-Dev/MPAS-Model,
 // f34984b2c89353cf31c235b08d3b4acd96b37bb3), transcribed from
 //   src/core_seaice/shared/mpas_seaice_advection_incremental_remap.F:
 //     66-77     module parameters (eps11, the triangle quadrature)
 //     3418-3579 make_masks
-//     3594-4203 construct_linear_tracer_fields (planar), with
-//     4218-4435 compute_gradient_2d, 4450-4672 compute_gradient_3d (planar),
+//     3594-4203 construct_linear_tracer_fields, with
+//     4218-4435 compute_gradient_2d, 4450-4672 compute_gradient_3d (the rotated
+//               grid and the transform to the cell's plane on a sphere),
 //     4687-4816 compute_barycenter_coordinates,
 //     4831-5011 limit_tracer_gradient_2d, 5026-5265 limit_tracer_gradient_3d
 //     5280-5375 find_departure_points
-//     5390-6280 find_departure_triangles (the planar branches)
-//     6295-6522 shift_vertices_of_departure_triangle (the planar branch)
+//     5390-6280 find_departure_triangles (with the spherical edge-vector basis)
+//     6295-6522 shift_vertices_of_departure_triangle
 //     6568-6674 get_triangle_quadrature_points (nQuadPoints = 6)
 //     8995-9077 find_line_intersection, 9144-9156 cross_product_2d,
 //     9198-9246 quadrilateral_area, triangle_area, 9262-9295 point_in_half_plane
@@ -162,16 +163,20 @@ __device__ __forceinline__ int ir_vertex_on_cell(int iVertex, int iCell, int kee
 }
 
 // find_departure_triangles (5390-6280) for one edge, with
-// shift_vertices_of_departure_triangle's planar branch (6500-6520). The caller
-// zeroes xTriangle, yTriangle, triangleArea, iCellTriangle and maskEdge.
-// error[0] is set where v8.4.2 would read a triangle's vertex index it never
-// set, or write a seventh triangle (an inconsistent mesh).
+// shift_vertices_of_departure_triangle (6295-6522). The caller zeroes
+// xTriangle, yTriangle, triangleArea, iCellTriangle and maskEdge. error[0] is
+// set to 1 where v8.4.2 would read a triangle's vertex index it never set, or
+// write a seventh triangle (an inconsistent mesh), and to 2 where a spherical
+// triangle's basis vectors are parallel (v8.4.2 stops, MPAS_LOG_CRIT).
+// onSphere: each triangle also carries the two edge vectors (edge-based
+// coordinates, pointing away from its edge vertex) that the spherical shift
+// expands its vertices in.
 extern "C" __global__ void seaice_ir_departure_triangles_v842(
     rk *xTriangle, rk *yTriangle, int *iCellTriangle, rk *triangleArea, int *maskEdge, int *error,
     const rk *departurePointIn, const rk *xVertexOnEdge, const rk *yVertexOnEdge,
     const rk *xVertexOnCell, const rk *yVertexOnCell, const int *nEdgesOnCell, const int *verticesOnCell,
     const int *verticesOnEdge, const int *remapEdge, const int *cellsOnEdgeRemap, const int *edgesOnEdgeRemap,
-    int nEdges, int nCells, int maxEdges, int vertexDegree)
+    int nEdges, int nCells, int maxEdges, int vertexDegree, int onSphere)
 {
     const int e = ir_thread();
     if (e >= nEdges) return;
@@ -192,8 +197,12 @@ extern "C" __global__ void seaice_ir_departure_triangles_v842(
 #define CER(i) cellsOnEdgeRemap[e * 6 + (i) - 1]
 #define EER(i) edgesOnEdgeRemap[e * 6 + (i) - 1]
     rk dpx[2], dpy[2], tx[6][3], ty[6][3];
+    rk ev1x[6], ev1y[6], ev2x[6], ev2y[6];
     int cellT[6], onEdge[6], onCell[6], sign[6];
-    for (int t = 0; t < 6; ++t) { cellT[t] = 0; onEdge[t] = 0; onCell[t] = 0; sign[t] = 0; }
+    for (int t = 0; t < 6; ++t) {
+        cellT[t] = 0; onEdge[t] = 0; onCell[t] = 0; sign[t] = 0;
+        ev1x[t] = C(0.0); ev1y[t] = C(0.0); ev2x[t] = C(0.0); ev2y[t] = C(0.0);
+    }
     for (int k = 0; k < 2; ++k) {
         const int v = verticesOnEdge[2 * e + k] - 1;
         dpx[k] = A(XVE(k + 1), departurePointIn[2 * v]);
@@ -223,6 +232,16 @@ extern "C" __global__ void seaice_ir_departure_triangles_v842(
             onEdge[t] = k + 1;
             cellT[t] = CER(k + 3);
             onCell[t] = ir_vertex_on_cell(vertexK, cellT[t], onCell[t], nEdgesOnCell, verticesOnCell, maxEdges);
+            if (onSphere) {
+                // the side edge the intersection lies on, then the other side edge at this vertex (5798-5820):
+                // E3 with E1 and E4 with E2 on hexagons, E5 or E6 on quadrilaterals
+                ev1x[t] = S(XVE(iVertexOnEdgeRemap), evx[k]);
+                ev1y[t] = S(YVE(iVertexOnEdgeRemap), evy[k]);
+                int iOtherEdge = vertexDegree == 3 ? iEdgeOnEdgeRemap + 2 : k + 1 + 4;
+                if (vertexDegree == 3 && iOtherEdge > 4) iOtherEdge -= 4;
+                ev2x[t] = S(XVE(iOtherEdge + 2), evx[k]);
+                ev2y[t] = S(YVE(iOtherEdge + 2), evy[k]);
+            }
             sign[t] = side == 0 ? 1 : -1;
             if (vertexDegree == 4) {
                 const int neighbour2 = EER(k + 5);
@@ -238,6 +257,12 @@ extern "C" __global__ void seaice_ir_departure_triangles_v842(
                         onCell[t] = ir_vertex_on_cell(vertexK, cellT[t], onCell[t], nEdgesOnCell, verticesOnCell,
                                                       maxEdges);
                     }
+                    if (onSphere) {
+                        // edgeVector1 to the side edge across the main edge's line: V3 <-> V5, V4 <-> V6
+                        const int iOtherVertex = side == 0 ? iVertexOnEdgeRemap + 2 : iVertexOnEdgeRemap - 2;
+                        ev1x[t] = S(XVE(iOtherVertex), evx[k]);
+                        ev1y[t] = S(YVE(iOtherVertex), evy[k]);
+                    }
                     if (count >= 6) { bad = true; break; }
                     const int t2 = count++;
                     tx[t2][0] = evx[k]; ty[t2][0] = evy[k];
@@ -247,6 +272,12 @@ extern "C" __global__ void seaice_ir_departure_triangles_v842(
                     onEdge[t2] = onEdge[t2 - 1];
                     onCell[t2] = ir_vertex_on_cell(vertexK, cellT[t2], onCell[t2], nEdgesOnCell, verticesOnCell,
                                                    maxEdges);
+                    if (onSphere) {
+                        ev1x[t2] = S(XVE(iVertexOnEdgeRemap), evx[k]);
+                        ev1y[t2] = S(YVE(iVertexOnEdgeRemap), evy[k]);
+                        ev2x[t2] = ev2x[t2 - 1];
+                        ev2y[t2] = ev2y[t2 - 1];
+                    }
                     sign[t2] = sign[t2 - 1];
                 } else if (side == 1) {
                     cellT[t] = CER(k + 5);
@@ -278,6 +309,14 @@ extern "C" __global__ void seaice_ir_departure_triangles_v842(
             sign[t] = left ? 1 : -1;
             onCell[t] = ir_vertex_on_cell(verticesOnEdge[2 * e + k], cellT[t], onCell[t], nEdgesOnCell,
                                           verticesOnCell, maxEdges);
+            if (onSphere) {
+                // the main edge, then E1/E2 (left) or E3/E4 (right) at this vertex (6044-6067)
+                ev1x[t] = S(evx[1 - k], evx[k]);
+                ev1y[t] = S(evy[1 - k], evy[k]);
+                const int iOtherEdge = left ? k + 1 : k + 3;
+                ev2x[t] = S(XVE(iOtherEdge + 2), evx[k]);
+                ev2y[t] = S(YVE(iOtherEdge + 2), evy[k]);
+            }
         }
     } else {
         const rk quadArea = A(ir_triangle_area(evx[0], evy[0], evx[1], evy[1], dpx[1], dpy[1]),
@@ -296,6 +335,13 @@ extern "C" __global__ void seaice_ir_departure_triangles_v842(
                 sign[t] = left ? 1 : -1;
                 onCell[t] = ir_vertex_on_cell(verticesOnEdge[2 * e], cellT[t], onCell[t], nEdgesOnCell,
                                               verticesOnCell, maxEdges);
+                if (onSphere) {
+                    // assigned to vertex 1: the main edge, then E1 (left) or E3 (right) (6122-6142)
+                    ev1x[t] = S(evx[1], evx[0]);
+                    ev1y[t] = S(evy[1], evy[0]);
+                    ev2x[t] = S(XVE(left ? 3 : 5), evx[0]);
+                    ev2y[t] = S(YVE(left ? 3 : 5), evy[0]);
+                }
                 t = count++;
                 tx[t][0] = evx[1]; ty[t][0] = evy[1];
                 tx[t][1] = dpx[0]; ty[t][1] = dpy[0];
@@ -306,6 +352,13 @@ extern "C" __global__ void seaice_ir_departure_triangles_v842(
                 sign[t] = left ? 1 : -1;
                 onCell[t] = ir_vertex_on_cell(verticesOnEdge[2 * e + 1], cellT[t], onCell[t], nEdgesOnCell,
                                               verticesOnCell, maxEdges);
+                if (onSphere) {
+                    // assigned to vertex 2: the main edge, then E2 (left) or E4 (right) (6184-6204)
+                    ev1x[t] = S(evx[0], evx[1]);
+                    ev1y[t] = S(evy[0], evy[1]);
+                    ev2x[t] = S(XVE(left ? 4 : 6), evx[1]);
+                    ev2y[t] = S(YVE(left ? 4 : 6), evy[1]);
+                }
             }
         }
     }
@@ -317,11 +370,38 @@ extern "C" __global__ void seaice_ir_departure_triangles_v842(
         if (iCell >= 1 && iCell <= nCells) {
             if (onCell[t] < 1) { error[0] = 1; return; }
             const rk xe = XVE(onEdge[t]), ye = YVE(onEdge[t]);
-            const rk xc = xVertexOnCell[(iCell - 1) * maxEdges + onCell[t] - 1];
-            const rk yc = yVertexOnCell[(iCell - 1) * maxEdges + onCell[t] - 1];
-            for (int j = 0; j < 3; ++j) {
-                tx[t][j] = A(S(tx[t][j], xe), xc);
-                ty[t][j] = A(S(ty[t][j], ye), yc);
+            const rk *xvc = xVertexOnCell + (iCell - 1) * maxEdges, *yvc = yVertexOnCell + (iCell - 1) * maxEdges;
+            const rk xc = xvc[onCell[t] - 1], yc = yvc[onCell[t] - 1];
+            if (onSphere) {
+                // shift_vertices_of_departure_triangle on a sphere (6430-6498): each vertex as
+                // a*edgeVector1 + b*edgeVector2 about the edge vertex, then the same combination of
+                // the two edges in the cell's plane (edgeVector2 following edgeVector1 CCW)
+                rk e1x = ev1x[t], e1y = ev1y[t], e2x = ev2x[t], e2y = ev2y[t];
+                const rk crossProduct = S(M(e1x, e2y), M(e1y, e2x));
+                if (ABS(crossProduct) < IR_EPS11) { error[0] = 2; return; }
+                if (crossProduct > C(0.0)) {
+                    const rk sx = e1x, sy = e1y;
+                    e1x = e2x; e1y = e2y; e2x = sx; e2y = sy;
+                }
+                const int n = nEdgesOnCell[iCell - 1];
+                int m1 = onCell[t] - 1, p1 = onCell[t] + 1;
+                if (m1 < 1) m1 += n;
+                if (p1 > n) p1 -= n;
+                const rk c1x = S(xvc[m1 - 1], xc), c1y = S(yvc[m1 - 1], yc);
+                const rk c2x = S(xvc[p1 - 1], xc), c2y = S(yvc[p1 - 1], yc);
+                const rk denom = S(M(e1x, e2y), M(e2x, e1y));
+                for (int j = 0; j < 3; ++j) {
+                    const rk x = S(tx[t][j], xe), y = S(ty[t][j], ye);
+                    const rk a = D(S(M(x, e2y), M(y, e2x)), denom);
+                    const rk b = D(S(M(y, e1x), M(x, e1y)), denom);
+                    tx[t][j] = A(A(xc, M(a, c1x)), M(b, c2x));
+                    ty[t][j] = A(A(yc, M(a, c1y)), M(b, c2y));
+                }
+            } else {
+                for (int j = 0; j < 3; ++j) {
+                    tx[t][j] = A(S(tx[t][j], xe), xc);
+                    ty[t][j] = A(S(ty[t][j], ye), yc);
+                }
             }
             const rk area = ir_triangle_area(tx[t][0], ty[t][0], tx[t][1], ty[t][1], tx[t][2], ty[t][2]);
             triangleArea[e * 6 + t] = M(area, (rk)sign[t]);
@@ -449,25 +529,29 @@ __device__ void ir_barycenter(int n, const rk *mean, const rk *center, const rk 
 }
 
 // construct_linear_tracer_fields (3594-4203) for one tracer, one value
-// (layer, category) of cells 1..nCells: compute_gradient (planar), the
+// (layer, category) of cells 1..nCells: compute_gradient, the
 // limiter against the parent's barycenter (the cell's geometric centre for
 // the mass-like field), the centre value, and, for a tracer with children, its
 // barycenter (compute_barycenter_coordinates with its ancestors). The caller
 // zeroes centre, gradients and barycenters (whole arrays).
 //   anc: the parent's and the grandparent's (array, centre, x/y gradient)
 //   fields (null when absent); ancLayers their first extents.
+//   onSphere: the gradient is reconstructed in global x/y/z, turned by 90
+//   degrees about y under rotate (config_rotate_cartesian_grid), and taken into
+//   the cell's plane with transGlobalToCell(3, 3, nCells+1).
 extern "C" __global__ void seaice_ir_construct_v842(
     rk *center, rk *xGrad, rk *yGrad, rk *xBarycenter, rk *yBarycenter,
     const rk *field, const int *mask, const int *maskCell,
     const int *nEdgesOnCell, const int *cellsOnCell, const int *edgesOnCell, const int *cellsOnEdge,
-    const rk *dcEdge, const rk *coeffsReconstruct, const rk *xVertexOnCell, const rk *yVertexOnCell,
+    const rk *dcEdge, const rk *coeffsReconstruct, const rk *transGlobalToCell, const rk *xVertexOnCell,
+    const rk *yVertexOnCell,
     const rk *g0, const rk *g1, const rk *g2, const rk *g3, const rk *g4, const rk *g5, const rk *g6,
     const rk *g7, const rk *g8, const rk *g9, const rk *g10, const rk *g11, const rk *g12, const rk *g13,
     const rk *parentXBarycenter, const rk *parentYBarycenter,
     const rk *parentField, const rk *parentCenter, const rk *parentXGrad, const rk *parentYGrad,
     const rk *grandField, const rk *grandCenter, const rk *grandXGrad, const rk *grandYGrad,
     int parentLayers, int grandLayers, int nParents, int hasChild,
-    int nCells, int nCategories, int nLayers, int maxEdges)
+    int nCells, int nCategories, int nLayers, int maxEdges, int onSphere, int rotate)
 {
     const int i = ir_thread();
     if (i >= nCells * nCategories * nLayers) return;
@@ -478,10 +562,11 @@ extern "C" __global__ void seaice_ir_construct_v842(
     // the parent's barycenter: the dummy tracer's geometric centre for the mass-like field
     const rk bx = nParents == 0 ? g0[c] : parentXBarycenter[pi];
     const rk by = nParents == 0 ? g1[c] : parentYBarycenter[pi];
-    rk xg = C(0.0), yg = C(0.0);
+    rk xg = C(0.0), yg = C(0.0), zg = C(0.0);
     const int nEdges = nEdgesOnCell[c];
     if (maskCell[c] == 1) {
-        // compute_gradient_2d/3d (4315-4405 / 4548-4642), planar
+        // compute_gradient_2d/3d (4315-4405 / 4548-4642): the reconstruction in global x/y/z (the plane's
+        // gradient is its first two components)
         for (int k = 0; k < nEdges; ++k) {
             const int n = cellsOnCell[c * maxEdges + k];
             rk normalGrad = C(0.0);
@@ -495,6 +580,20 @@ extern "C" __global__ void seaice_ir_construct_v842(
             }
             xg = A(xg, M(coeffsReconstruct[(c * maxEdges + k) * 3], normalGrad));
             yg = A(yg, M(coeffsReconstruct[(c * maxEdges + k) * 3 + 1], normalGrad));
+            zg = A(zg, M(coeffsReconstruct[(c * maxEdges + k) * 3 + 2], normalGrad));
+        }
+        if (onSphere) {
+            if (rotate) {
+                // the North Pole to (-1, 0, 0): xR = -z, yR = y, zR = x (4375-4380 / 4612-4617)
+                const rk gx = xg;
+                xg = -zg;
+                zg = gx;
+            }
+            // global x/y/z to the cell's east/north (4384-4396 / 4621-4633)
+            const rk *T = transGlobalToCell + c * 9;   // T(i, j) at T[(j-1)*3 + i-1]
+            const rk gx = xg, gy = yg, gz = zg;
+            xg = A(A(M(T[0], gx), M(T[3], gy)), M(T[6], gz));
+            yg = A(A(M(T[1], gx), M(T[4], gy)), M(T[7], gz));
         }
         // limit_tracer_gradient_2d/3d (4905-5003 / 5117-5257)
         rk maxNeighbor = fc, minNeighbor = fc;

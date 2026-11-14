@@ -1,9 +1,10 @@
 """Run the built MPAS-Seaice incremental-remap oracle on every case and write the fixture.
 
-    pixi run -e default python tools/mpas_seaice_oracle/make_remap_fixture.py BUILD_DIR [--out DIR]
+    pixi run -e default python tools/mpas_seaice_oracle/make_remap_fixture.py BUILD_DIR [--sphere] [--out DIR]
 
 BUILD_DIR holds ``run_incremental_remap_r4`` and ``run_incremental_remap_r8``
-from build.sh. Writes into ``tests/data/oracles/mpas_seaice_remap`` by default:
+from build.sh. Writes into ``tests/data/oracles/mpas_seaice_remap`` by default
+(``--sphere``: the spherical cases, into ``tests/data/oracles/mpas_seaice_remap_sphere``):
 
 - ``oracle-r4.npz`` and ``oracle-r8.npz``: per case (``<case>/<pool>/<field>``)
   every output field whose words differ from the input's;
@@ -25,18 +26,23 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from woof.verify import mpas_seaice_remap_oracle as ro  # noqa: E402
+from woof.verify import mpas_seaice_remap_sphere_oracle as rso  # noqa: E402
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("build_dir", type=Path)
-    parser.add_argument("--out", type=Path, default=ro.FIXTURE_DIR)
+    parser.add_argument("--sphere", action="store_true", help="the spherical cases")
+    parser.add_argument("--out", type=Path)
     args = parser.parse_args()
+    family = rso if args.sphere else ro
+    if args.out is None:
+        args.out = family.FIXTURE_DIR
     args.out.mkdir(parents=True, exist_ok=True)
     digests, logs = [], {}
     for precision in ro.PRECISIONS:
         arrays: dict[str, np.ndarray] = {}
-        for case in ro.cases(precision):
+        for case in family.cases(precision):
             outputs, log = ro.run_oracle(args.build_dir, case)
             for key, value in ro.changed_fields(case, outputs).items():
                 arrays[f"{case['name']}/{key}"] = value

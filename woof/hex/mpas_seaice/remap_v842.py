@@ -1,4 +1,4 @@
-"""MPAS-Seaice v8.4.2: incremental remap advection on the GPU (planar meshes).
+"""MPAS-Seaice v8.4.2: incremental remap advection on the GPU (planar and spherical meshes).
 
 ``mpas_seaice_advection_incremental_remap.F`` (with its tracers module) moves
 the ice area, the ice and snow volume and every tracer by incremental
@@ -29,14 +29,22 @@ verbatim with gfortran ``-O0 -ffp-contract=off`` at RKIND 4 and 8
 (``tools/mpas_seaice_oracle/run_incremental_remap.F90``,
 ``tests/test_mpas_seaice_remap_parity.py``).
 
+On a sphere (``on_a_sphere``) the gradient is reconstructed in global x/y/z,
+turned by 90 degrees under ``config_rotate_cartesian_grid`` (the poles to the
+equator) and taken into each cell's plane (``transGlobalToCell``); each
+departure triangle carries two edge vectors, and
+``shift_vertices_of_departure_triangle`` moves its vertices into the source
+cell's plane as combinations of them (:func:`geometry_flags`).
+
 The remap's geometry (``seaice_init_advection_incremental_remap``: the vertex
 coordinates in each cell's and edge's plane, the remap neighbours of each
-edge, the cells' geometric moments, ``coeffs_reconstruct``) is the input's,
-as the variational basis is the velocity solver's.
+edge, the cells' geometric moments, the local frames, ``coeffs_reconstruct``)
+is the input's, as the variational basis is the velocity solver's.
 
 Refused by name: upwind advection (v8.4.2 cannot run it,
-:data:`UPWIND_REASON`), spherical meshes, halo exchanges, the conservation
-and monotonicity checks, and tracer lists v8.4.2's update cannot run.
+:data:`UPWIND_REASON`), halo exchanges, the conservation and monotonicity
+checks, meshes other than hexagons and quadrilaterals, and tracer lists
+v8.4.2's update cannot run.
 
 Pools are dicts of device arrays named as in MPAS, in the Fortran layout
 reversed (a tracer ``t(nLayers, nCategories, nCells+1)`` is C-order
@@ -220,6 +228,13 @@ UPWIND_REASON = (
     "config and prepare_tracers dereferences it, so the model crashes")
 
 
+def geometry_flags(configs: dict) -> tuple[bool, bool]:
+    """(``on_a_sphere``, the gradient's rotation): v8.4.2 rotates only under
+    ``config_rotate_cartesian_grid`` (Registry default true) on a sphere."""
+    sphere = bool(configs.get("mesh:on_a_sphere", configs.get("on_a_sphere", False)))
+    return sphere, sphere and bool(configs.get("config_rotate_cartesian_grid", True))
+
+
 def _refuse(knob: str, value, reason: str, declaration: str):
     raise ConfigurationRefusal(knob=knob, value=value, reason=reason, declaration=declaration)
 
@@ -232,10 +247,6 @@ def check_config(configs: dict) -> None:
     if scheme != "incremental_remap":
         _refuse("config_advection_type", scheme, "v8.4.2 knows 'incremental_remap' and 'upwind' only",
                 "config_advection_type = 'incremental_remap'")
-    if configs.get("mesh:on_a_sphere", configs.get("on_a_sphere", False)):
-        _refuse("on_a_sphere", True, "the spherical remap (the triangles' edge-vector basis, compute_gradient on "
-                                     "the sphere, the rotated grid) is not ported; planar meshes are",
-                "a planar mesh (on_a_sphere = .false.)")
     for knob, reason in (
             ("config_use_halo_exch", "halo exchanges: this port runs one block"),
             ("config_conservation_check", "the conservation check sums over ranks (mpas_dmpar_sum_real) and "
@@ -352,10 +363,11 @@ def departure_points(*, mesh: dict, velocity: dict, remap: dict, dt) -> int:
     return int(cfl[:nv].sum())
 
 
-def departure_triangles(*, mesh: dict, remap: dict) -> None:
+def departure_triangles(*, mesh: dict, remap: dict, sphere: bool = False) -> None:
     """``find_departure_triangles`` with ``shift_vertices_of_departure_triangle``
-    (planar): ``maskEdge``, ``xTriangle``/``yTriangle`` (vertices 1-3 of each
-    triangle in its source cell's frame), ``iCellTriangle`` and the signed
+    (on a sphere, ``sphere``: through each triangle's edge-vector basis):
+    ``maskEdge``, ``xTriangle``/``yTriangle`` (vertices 1-3 of each triangle
+    in its source cell's frame), ``iCellTriangle`` and the signed
     ``triangleArea``."""
     import cupy as cp
     nc, ne, nv, me, vd = _dims(mesh)
@@ -368,7 +380,10 @@ def departure_triangles(*, mesh: dict, remap: dict) -> None:
         error, remap["departurePoint"], remap["xVertexOnEdge"], remap["yVertexOnEdge"], remap["xVertexOnCell"],
         remap["yVertexOnCell"], mesh["nEdgesOnCell"], mesh["verticesOnCell"], mesh["verticesOnEdge"],
         remap["remapEdge"], remap["cellsOnEdgeRemap"], remap["edgesOnEdgeRemap"], _int(ne), _int(nc), _int(me),
-        _int(vd)))
+        _int(vd), _int(sphere)))
+    if int(error[0]) == 2:
+        raise RemapError("shift_vertices_of_departure_triangle: the basis vectors of a departure triangle are "
+                         "parallel (v8.4.2 stops, MPAS_LOG_CRIT)")
     if int(error[0]):
         raise RemapError("find_departure_triangles: a departure triangle without its source cell's vertex, or "
                          "more than nTriPerEdgeRemap triangles on an edge (the mesh and its remap geometry "
@@ -427,9 +442,11 @@ def make_masks(tree, *, pools: dict, mesh: dict, threshold: float = EPS11) -> No
                 _int(_layers(parent))))
 
 
-def construct_linear_fields(tree, *, pools: dict, mesh: dict) -> None:
-    """``construct_linear_tracer_fields`` (planar): each tracer's limited
-    gradient, centre value and, for parents, barycenter, in tree order."""
+def construct_linear_fields(tree, *, pools: dict, mesh: dict, flags: tuple[bool, bool] = (False, False)) -> None:
+    """``construct_linear_tracer_fields``: each tracer's limited gradient,
+    centre value and, for parents, barycenter, in tree order. ``flags`` is
+    :func:`geometry_flags`' (on a sphere, the gradient goes through the rotated
+    grid and ``transGlobalToCell``)."""
     nc, ne, nv, me, vd = _dims(mesh)
     remap, tracers = pools["incremental_remap"], pools["tracers"]
     moments = [remap[f"{m}AvgCell"] for m in MOMENTS]
@@ -457,8 +474,9 @@ def construct_linear_fields(tree, *, pools: dict, mesh: dict) -> None:
         _launch(precision, "seaice_ir_construct_v842", nc * ncat * nl, (
             *out, field, aux(pools, t, "mask"), remap["maskCell"], mesh["nEdgesOnCell"], mesh["cellsOnCell"],
             mesh["edgesOnCell"], mesh["cellsOnEdge"], mesh["dcEdge"], mesh["coeffs_reconstruct"],
-            remap["xVertexOnCell"], remap["yVertexOnCell"], *moments, pxb, pyb, *pf, *gf, _int(pl), _int(gl),
-            _int(t.n_parents), _int(t.has_child), _int(nc), _int(ncat), _int(nl), _int(me)))
+            remap["transGlobalToCell"], remap["xVertexOnCell"], remap["yVertexOnCell"], *moments, pxb, pyb, *pf,
+            *gf, _int(pl), _int(gl), _int(t.n_parents), _int(t.has_child), _int(nc), _int(ncat), _int(nl), _int(me),
+            _int(flags[0]), _int(flags[1])))
 
 
 def integrate_fluxes(tree, *, pools: dict, mesh: dict) -> None:
@@ -607,14 +625,15 @@ def recover_tracer_means(tree, *, pools: dict, mesh: dict) -> list[dict]:
 
 
 def remap_block(tree, *, pools: dict, mesh: dict, configs: dict, dt) -> tuple[int, list[dict]]:
-    """``incremental_remap_block`` (planar, without the monotonicity and
-    conservation checks): returns the CFL-flagged vertex count and the
-    mean-recovery warnings."""
+    """``incremental_remap_block`` (without the monotonicity and conservation
+    checks): returns the CFL-flagged vertex count and the mean-recovery
+    warnings."""
+    flags = geometry_flags(configs)
     make_masks(tree, pools=pools, mesh=mesh)
-    construct_linear_fields(tree, pools=pools, mesh=mesh)
+    construct_linear_fields(tree, pools=pools, mesh=mesh, flags=flags)
     remap = pools["incremental_remap"]
     cfl = departure_points(mesh=mesh, velocity=pools["velocity_solver"], remap=remap, dt=dt)
-    departure_triangles(mesh=mesh, remap=remap)
+    departure_triangles(mesh=mesh, remap=remap, sphere=flags[0])
     quadrature_points(mesh=mesh, remap=remap)
     integrate_fluxes(tree, pools=pools, mesh=mesh)
     mass_tracer_products(tree, pools=pools, mesh=mesh)
@@ -658,6 +677,10 @@ def run(tree, *, pools: dict, mesh: dict, configs: dict) -> tuple[int, list[dict
     CFL-flagged vertex count and the mean-recovery warnings."""
     check_config(configs)
     check_tree(tree)
+    if int(mesh.get("vertexDegree", 3)) not in (3, 4):
+        raise ConfigurationRefusal(knob="vertexDegree", value=mesh["vertexDegree"],
+                                   reason="v8.4.2's remap knows hexagonal (vertexDegree 3) and quadrilateral "
+                                          "(vertexDegree 4) meshes only", declaration="vertexDegree = 3 or 4")
     if int(mesh.get("nQuadPoints", 6)) != 6:
         raise ConfigurationRefusal(knob="nQuadPoints", value=mesh["nQuadPoints"],
                                    reason="the Registry fixes nQuadPoints = 6", declaration="nQuadPoints = 6")

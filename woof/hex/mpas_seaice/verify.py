@@ -14,15 +14,19 @@ def verify() -> dict:
     from woof.verify import mpas_seaice_evp_oracle as evp_oracle
     from woof.verify import mpas_seaice_presubcycle_oracle as presubcycle_oracle
     from woof.verify import mpas_seaice_remap_oracle as remap_oracle
+    from woof.verify import mpas_seaice_remap_sphere_oracle as remap_sphere_oracle
     from woof.verify import mpas_seaice_step_oracle as step_oracle
     from woof.verify import mpas_seaice_step_remap_oracle as step_remap_oracle
+    from woof.verify import mpas_seaice_step_remap_sphere_oracle as step_remap_sphere_oracle
     from woof.verify import mpas_seaice_velocity_oracle as velocity_oracle
 
     from . import evp_v842, presubcycle_v842, remap_v842, timestep_v842, velocity_v842
 
     for fixture in (evp_oracle.FIXTURE_DIR / "oracle-r4.npz", velocity_oracle.FIXTURE_DIR / "oracle-r4.npz",
                     presubcycle_oracle.FIXTURE_DIR / "oracle-r4.npz", step_oracle.FIXTURE_DIR / "oracle-r4.npz",
-                    remap_oracle.FIXTURE_DIR / "oracle-r4.npz", step_remap_oracle.FIXTURE_DIR / "oracle-r4.npz"):
+                    remap_oracle.FIXTURE_DIR / "oracle-r4.npz", step_remap_oracle.FIXTURE_DIR / "oracle-r4.npz",
+                    remap_sphere_oracle.FIXTURE_DIR / "oracle-r4.npz",
+                    step_remap_sphere_oracle.FIXTURE_DIR / "oracle-r4.npz"):
         if not fixture.is_file():
             raise FileNotFoundError(
                 f"the MPAS-Seaice oracle fixture is not here ({fixture.parent}); it ships with the "
@@ -56,6 +60,12 @@ def verify() -> dict:
     for precision in step_remap_oracle.PRECISIONS:
         pieces.append(piece(f"time_step_incremental_remap_{precision}", timestep_v842, step_remap_oracle,
                             step_remap_oracle.measure(precision)))
+    for precision in remap_sphere_oracle.PRECISIONS:
+        pieces.append(piece(f"incremental_remap_sphere_{precision}", remap_v842, remap_sphere_oracle,
+                            remap_sphere_oracle.measure(precision)))
+    for precision in step_remap_sphere_oracle.PRECISIONS:
+        pieces.append(piece(f"time_step_incremental_remap_sphere_{precision}", timestep_v842,
+                            step_remap_sphere_oracle, step_remap_sphere_oracle.measure(precision)))
     return {
         "model": "seaice",
         "status": registry.component("seaice").status,

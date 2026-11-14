@@ -99,7 +99,10 @@ def test_the_seaice_door_verify_grades_every_piece():
                                                     "time_step_dynamics_r4", "time_step_dynamics_r8",
                                                     "incremental_remap_r4", "incremental_remap_r8",
                                                     "time_step_incremental_remap_r4",
-                                                    "time_step_incremental_remap_r8"]
+                                                    "time_step_incremental_remap_r8",
+                                                    "incremental_remap_sphere_r4", "incremental_remap_sphere_r8",
+                                                    "time_step_incremental_remap_sphere_r4",
+                                                    "time_step_incremental_remap_sphere_r8"]
 
 
 @requires_gpu

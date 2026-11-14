@@ -26,6 +26,8 @@ THE BREAKAGES THESE PREVENT
    that drift from v8.4.2 over several remap steps.
 6. A gate that cannot fail: each of the above, mutated, must be caught.
 7. Upwind advection run silently: v8.4.2 cannot run it (refused by name).
+
+The spherical remap is held in tests/test_mpas_seaice_remap_sphere_parity.py.
 """
 from __future__ import annotations
 
@@ -103,7 +105,7 @@ def test_an_inactive_parent_with_an_active_child_is_refused():
 
 
 @pytest.mark.parametrize("knob, value", [
-    ("config_advection_type", "upwind"), ("mesh:on_a_sphere", True), ("config_use_halo_exch", True),
+    ("config_advection_type", "upwind"), ("config_use_halo_exch", True),
     ("config_conservation_check", True), ("config_monotonicity_check", True),
 ])
 def test_what_the_remap_does_not_carry_is_refused_by_name(knob, value):
