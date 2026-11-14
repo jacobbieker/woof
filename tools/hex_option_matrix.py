@@ -490,7 +490,10 @@ def mesh_summary(grid: Path) -> dict:
 
 def _case_grid(case: dict) -> Path | None:
     args = case.get("forecast_args") or []
-    return Path(args[args.index("--grid") + 1]) if "--grid" in args else None
+    if "--grid" not in args:
+        return None
+    grid = Path(args[args.index("--grid") + 1])
+    return grid if grid.is_absolute() else REPO / grid  # run_row runs the forecast with cwd=REPO
 
 
 def command_run(args) -> int:

@@ -232,3 +232,11 @@ def test_the_committed_evidence_covers_every_planned_option():
     for name, row in evidence["rows"].items():
         assert row["overrides"] == planned[name], name
         assert row["backends"], name
+
+
+def test_a_relative_case_grid_is_read_where_the_forecast_runs(tmp_path):
+    """run_row runs the forecast with cwd=REPO, so the summary reads a relative --grid from there too."""
+    assert matrix._case_grid({"forecast_args": ["--grid", "a/b.nc"]}) == matrix.REPO / "a/b.nc"
+    absolute = tmp_path / "g.nc"
+    assert matrix._case_grid({"forecast_args": ["--grid", str(absolute)]}) == absolute
+    assert matrix._case_grid({"forecast_args": []}) is None

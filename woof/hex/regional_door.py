@@ -670,7 +670,17 @@ def _stage_mesh(args, value, status) -> dict[str, Any]:
     _start_source_prefetch(args, value, status)
     mesh_dir = Path(value["paths"]["mesh"])
     terrain = value.get("terrain")
+    grading_stamp = mesh_dir / "regional-grading.json"
+    requested = {"grading": dict(value.get("grading") or {}),
+                 "density_rasters": list(value.get("density_rasters") or ())}
     if list(mesh_dir.glob("*.point-generate.json")):
+        # A mesh made before the grading flags existed carries no stamp: it was the default grading, no raster.
+        made = (json.loads(grading_stamp.read_text(encoding="utf-8")) if grading_stamp.is_file()
+                else {"grading": {}, "density_rasters": []})
+        if made != requested:
+            raise RegionalRefusal(
+                f"the mesh in {mesh_dir} was generated with {made}, this run asks for {requested}: "
+                "use a new --work-dir (or remove the mesh directory) to regenerate it")
         status.note(f"mesh already generated in {mesh_dir}")
         if terrain is not None:
             from .regional_terrain import require_applied
@@ -704,6 +714,9 @@ def _stage_mesh(args, value, status) -> dict[str, Any]:
         # The terrain replacement needs the whole parent's static and vertical grid (regional_terrain).
         argv += ["--parent-static"]
     code = _cli(argv, status)
+    if code == 0:
+        mesh_dir.mkdir(parents=True, exist_ok=True)
+        grading_stamp.write_text(json.dumps(requested, indent=1, sort_keys=True) + "\n", encoding="utf-8")
     if terrain is not None and code == 0:
         from .regional_terrain import apply_terrain
         return {"returncode": 0, "terrain": apply_terrain(

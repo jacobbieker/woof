@@ -23,9 +23,11 @@ COMMANDS (pixi; mac ``-e mlx``, pb ``-e default``)::
     python tools/hex_varres.py analyze --grid GRID --history-dir DIR [--center LAT,LON] [--bins KM]
                                       [--json OUT] [--screen]
 
-``prep`` runs every stage up to the forecast (``--skip forecast --skip products``); the forecast is then
-``woof hex regional`` with the same arguments and ``--skip mesh --skip intermediate --skip init --skip lbc
---skip contract``, as the bench scripts run it.
+``prep`` of a regional row runs every stage up to the forecast (``--skip forecast --skip products``); the
+forecast is then ``woof hex regional`` with the same arguments and ``--skip mesh --skip intermediate --skip init
+--skip lbc --skip contract``, as the bench scripts run it.  ``prep`` of the global row is the whole run:
+``mesh-plan --global-mesh --generate --run`` makes the mesh, the init and the forecast in one door (it has no stage
+that stops before the forecast; init-source needs ``--run``), so ``--hours`` there is the forecast length.
 
 THE DIAGNOSTICS (``analyze``), per radial bin from the centre (or per spacing class): the local cell spacing
 ``h`` (from ``areaCell``) and the per-cell spacing gradient ``g`` (the largest relative change to a
@@ -37,7 +39,9 @@ accumulated and convective precipitation and the mean gravity-wave-drag surface 
 THE SCREEN (``--screen``) is not a proof.  It flags a non-finite field, and a bin inside a transition band
 (``g`` above :data:`TRANSITION_GRADIENT`) whose 2-dx noise of ``w`` exceeds :data:`IMPRINT_FACTOR` times the
 larger of its two neighbouring bins' -- a transition that makes grid-scale noise rather than passing the flow
-through.  Measured (2026-11-14, Edinburgh 6 h from GFS, CUDA): the graded 3 -> 20 km mesh (edi-vr) reads at
+through.  It compares absolute noise, not noise over rms ``w``: a band where ``w`` itself is weak would raise
+the ratio with no added noise, and a band where the flow forces more ``w`` (terrain) would hide noise that grows
+with it; ``noise_over_w`` is reported per bin beside it.  Measured (2026-11-14, Edinburgh 6 h from GFS, CUDA): the graded 3 -> 20 km mesh (edi-vr) reads at
 most 1.35 against its neighbours, the quasi-uniform 3 km mesh's own ladder band (edi-u3) 1.26 and the 12 km
 mesh (edi-u12) 1.19.
 """
@@ -334,6 +338,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("\n".join(case_arguments(case_row(a.name), a.work_dir)))
         return 0
     if a.command == "prep":
+        a.work_dir = Path(a.work_dir).absolute()  # the door runs with cwd=REPO
         data = load_cases()
         case = case_row(a.name, data)
         commands = prep_commands(case, work_dir=a.work_dir, cycle=a.cycle or data["cycle_default"],
@@ -351,7 +356,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     print("\n".join(_table(result)))
     if a.json:
         a.json.write_text(json.dumps(result, indent=1) + "\n", encoding="utf-8")
-    if a.screen and (result["nonfinite"] or result["series"][-1]["screen"]["flagged"]):
+    if a.screen and (result["nonfinite"] or any(frame["screen"]["flagged"] for frame in result["series"])):
         return 1
     return 0
 

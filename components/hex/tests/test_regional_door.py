@@ -121,6 +121,27 @@ def test_mesh_grading_rides_to_the_mesh_door_only_when_given(tmp_path, monkeypat
     assert parsed.density_raster == [raster.resolve()]
 
 
+
+def test_a_generated_mesh_is_reused_only_for_the_grading_it_was_made_with(tmp_path, monkeypatch):
+    """A rerun in the same work dir with other grading or rasters would bind the old mesh to a plan that names
+    the new one: the door refuses instead."""
+    monkeypatch.setattr(door, "_start_source_prefetch", lambda *args: None)
+    monkeypatch.setattr(door, "_cli", lambda argv, status: 0)
+    note = type("S", (), {"note": staticmethod(lambda text: None)})()
+    args = type("A", (), {"geog": None})()
+    value = _gfs_region(tmp_path, "2026-10-27T18", 3, 12, "--ring-factor", "1")
+    door._stage_mesh(args, value, note)
+    mesh_dir = Path(value["paths"]["mesh"])
+    (mesh_dir / "x.point-generate.json").write_text("{}")
+    assert door._stage_mesh(args, value, note)["reused"] is True
+    other = _gfs_region(tmp_path, "2026-10-27T18", 3, 12, "--ring-factor", "2")
+    with pytest.raises(door.RegionalRefusal, match="was generated with"):
+        door._stage_mesh(args, other, note)
+    (mesh_dir / "regional-grading.json").unlink()  # a mesh made before the flags: the default grading only
+    with pytest.raises(door.RegionalRefusal, match="was generated with"):
+        door._stage_mesh(args, value, note)
+    assert door._stage_mesh(args, _gfs_region(tmp_path, "2026-10-27T18", 3, 12), note)["reused"] is True
+
 def test_gfs_region_starts_at_any_lead_gfs_writes(tmp_path):
     """GFS writes every hour to 120 h (its row's ladder). A region from GFS 18Z +3 h was refused because the plan
     read only the row's 6 h interval."""

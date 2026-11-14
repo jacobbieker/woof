@@ -97,6 +97,9 @@ def test_an_hour_on_a_variable_resolution_mesh(tmp_path):
     assert float(cull["dt_seconds"]) <= float(admission["maximum_admitted_dt_seconds"])
 
     receipt = json.loads((work / "forecast" / "forecast-receipt.json").read_text(encoding="utf-8"))
+    # ... and the forecast stepped with it, not only the row.
+    ran_dt = float(receipt["driver_receipt"]["forecast"]["schedule"]["dt_seconds"])
+    assert ran_dt <= float(admission["maximum_admitted_dt_seconds"])
     found = _receipt_values(receipt, {"scheme", "gf_dx_column"}, {})
     if found.get("scheme") == "cu_grell_freitas":
         assert found.get("gf_dx_column") == "per-column"
