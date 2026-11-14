@@ -155,6 +155,7 @@ class HexInflowPerturbation:
         z = zgrid[:, :interior.size][:, interior]
         # WRF: the domain-mean half-level height above ground (the base state).
         self.z_half_agl = (0.5 * (z[:-1] + z[1:]) - z[0]).mean(axis=1)
+        self.start = runtime.clock
         self._ticks = refresh_ticks(1, float(runtime.outer_dt))
         self._key = None
         self._delta = None
@@ -185,8 +186,9 @@ class HexInflowPerturbation:
     def delta(self):
         """This step's (nlev, ncells) Kelvin increment, or None."""
         import cupy as cp
-        # Model seconds since the simulation start (carried across a restart).
-        elapsed = float(self.runtime.atmosphere.state.time_seconds)
+        # Model seconds since the simulation start (the runtime's lbc clock,
+        # which advances once per model step; ``start`` is set at attach).
+        elapsed = (self.runtime.clock - self.start).total_seconds()
         if elapsed == self._key:
             return self._delta
         self._key = elapsed
@@ -270,10 +272,14 @@ def attach(driver, backend, options: Mapping | None):
     if source is None:
         raise ValueError(parent_pbl_refusal(0).replace("parent-diagnosed", "run's own")
                          + " (the hex run's own PBL scheme)")
-    runtime.inflow_perturbation = HexInflowPerturbation(
+    seeding = HexInflowPerturbation(
         runtime, seed=int(options.get("seed", 0)),
         amplitude_scale=float(options.get("amplitude_scale", 1.0)),
         faces=str(options.get("faces", "inflow")), pblh_source=source)
+    # The simulation start: a resumed run's clock is already past it.
+    from datetime import timedelta
+    seeding.start = runtime.clock - timedelta(seconds=float(driver.atmosphere.state.time_seconds))
+    runtime.inflow_perturbation = seeding
     return runtime.inflow_perturbation.receipt()
 
 

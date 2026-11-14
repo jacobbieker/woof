@@ -14,6 +14,7 @@ whose rings count inward from the edge, as bdyMaskCell does) this file holds:
 """
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 import math
 
@@ -28,6 +29,7 @@ NLEV = 10
 DT = 20.0
 DX = 3000.0
 R = 6371229.0
+START = datetime(2025, 5, 31)
 
 
 def _patch():
@@ -78,6 +80,7 @@ class _Runtime:
         z = np.linspace(0.0, 10000.0, NLEV + 1)[:, None] * np.ones((1, n + 1))
         self.atmosphere = SimpleNamespace(vertical=SimpleNamespace(zgrid=cp.asarray(z, dtype=cp.float32)),
                                           state=SimpleNamespace(time_seconds=time))
+        self.clock = START + timedelta(seconds=time)
         coe = mesh.arrays["cellsOnEdge"]
         lon = mesh.arrays["lonCell"]
         # A uniform eastward wind: an edge's normal component (c1 -> c2) is
@@ -103,6 +106,7 @@ def test_increment_is_wrfs_formulas_on_the_relax_rings(mode, face):
     pblh = 2600.0
     p = hexip.HexInflowPerturbation(runtime, seed=11, amplitude_scale=1.0, faces=mode,
                                     pblh_source=lambda: pblh)
+    p.start = START
     got = cp.asnumpy(p.target(runtime.rt, 1))
     rt, theta = cp.asnumpy(runtime.rt), cp.asnumpy(runtime.theta)
     g = p.geometry[face]
@@ -135,12 +139,12 @@ def test_hold_redraw_and_zero_depth():
     depth["pblh"] = 3000.0
     frames = []
     for seconds in (20.0, 80.0, 100.0, 120.0):
-        runtime.atmosphere.state.time_seconds = seconds
+        runtime.clock = START + timedelta(seconds=seconds)
         frames.append(cp.asnumpy(p.target(runtime.rt, 1)))
     assert np.array_equal(frames[0], frames[1])              # held for 100 s
     assert not np.array_equal(frames[1], frames[2])          # redrawn at the next hold
     assert np.array_equal(frames[2], frames[3])
-    runtime.atmosphere.state.time_seconds = 20.0
+    runtime.clock = START + timedelta(seconds=20.0)
     with pytest.raises(ValueError, match="went backward"):
         p.target(runtime.rt, 1)
 
