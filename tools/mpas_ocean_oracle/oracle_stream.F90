@@ -15,7 +15,9 @@
 ! 'tracersTend' subpool), tracersSurfaceFlux (the forcing pool's), swForcing,
 ! verticalMesh.  A logical config named 'package:NAME' is the package
 ! switch NAME, put in the packages pool (ocnPackages); one named 'mesh:NAME'
-! is the mesh pool's config NAME (on_a_sphere).
+! is the mesh pool's config NAME (on_a_sphere); a character config named
+! 'diagnostics:NAME' is the diagnostics pool's character field NAME (xtime).
+! A real field of rank 0 is a scalar (daysSinceStartOfSim).
 !
 ! OUTPUT: every real and integer field's words, in the input's order.
 module oracle_stream
@@ -34,6 +36,7 @@ module oracle_stream
     character(len=24) :: pool
     character(len=64) :: name
     integer :: kind = 0, rank = 0
+    real(kind=RKIND), pointer :: r0 => null()
     real(kind=RKIND), dimension(:), pointer :: r1 => null()
     real(kind=RKIND), dimension(:,:), pointer :: r2 => null()
     real(kind=RKIND), dimension(:,:,:), pointer :: r3 => null()
@@ -125,7 +128,11 @@ contains
           read(u) cvalue
           allocate(cc)
           cc = cvalue
-          call stub_pool_put_config(pools % configs, trim(cname), cc)
+          if (cname(1:12) == 'diagnostics:') then
+             call stub_pool_put_config(pool_named(pools, 'diagnostics'), trim(cname(13:)), cc)
+          else
+             call stub_pool_put_config(pools % configs, trim(cname), cc)
+          end if
        case default
           stop 8
        end select
@@ -137,6 +144,10 @@ contains
        read(u) fields(i) % pool, fields(i) % name, fields(i) % kind, fields(i) % rank, dims
        associate (f => fields(i), pool => pool_named(pools, trim(fields(i) % pool)))
          select case (f % kind * 10 + f % rank)
+         case (10)
+            allocate(f % r0)
+            read(u) f % r0
+            call stub_pool_put_array(pool, trim(f % name), f % r0)
          case (11)
             allocate(f % r1(dims(1)))
             read(u) f % r1
@@ -203,6 +214,8 @@ contains
     do i = 1, size(fields)
        associate (f => fields(i))
          select case (f % kind * 10 + f % rank)
+         case (10)
+            write(u) f % r0
          case (11)
             write(u) f % r1
          case (12)
