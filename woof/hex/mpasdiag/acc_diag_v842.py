@@ -237,10 +237,11 @@ class AccumulatorModule:
         if int(step) <= 0:
             self._seconds = None
             return
-        # A continuation's writer starts at the checkpoint; its windows run on the straight run's clock, the
-        # steps before the segment being the owner's step_offset (as lightning's and the physics clock's are).
-        elapsed = (when - self.owner.writer.start).total_seconds() + int(getattr(self.owner, "step_offset", 0)) * self.dt
-        self._seconds = elapsed - self.dt
+        # The start-of-step clock is the straight run's step index times dt: a continuation's steps before the
+        # segment are the owner's step_offset (as lightning's and the physics clock's are).  The writer's datetime
+        # (whole microseconds) is not used: at dt = 1/3 s it puts step 4's start at 0.9999997 s and misses the
+        # 1 s window reset that the step index lands on exactly.
+        self._seconds = (int(step) - 1 + int(getattr(self.owner, "step_offset", 0))) * self.dt
 
     def update(self):
         if not self.accumulates or self._seconds is None or not self.nc:

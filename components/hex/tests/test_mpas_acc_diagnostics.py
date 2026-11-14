@@ -443,3 +443,19 @@ def test_every_window_boundary_is_checked_in_float32(cp):
     owner.writer = SimpleNamespace(start=owner.start, final=owner.start + dt.timedelta(seconds=60))
     with pytest.raises(ValueError, match="boundary 3"):
         acc.AccumulatorModule(owner, acc.AccConfig(0.0, True, 0.01)).setup(_Utils(acc.NAMES), 0.2)
+
+
+def test_the_window_clock_is_the_step_index_not_the_writers_microseconds():
+    """At dt = 1/3 s the writer's datetime (whole microseconds) puts step 4's start at 0.9999997 s, so the 1 s
+    window (prec_acc_dt = 1/60 min) would not reset.  THE BREAKAGE: the clock was taken from that datetime; the
+    start-of-step clock is (step - 1 + step_offset) * dt, which lands on 1.0 exactly."""
+    owner = _owner(np, 1, 1)
+    module = acc.AccumulatorModule(owner, acc.AccConfig(1.0 / 60.0, False, 0.0))
+    module.dt = 1.0 / 3.0
+    when = owner.start + dt.timedelta(seconds=4.0 / 3.0)
+    assert (when - owner.start).total_seconds() - module.dt != 1.0
+    module.begin(4, when)
+    assert module._seconds == 1.0
+    owner.step_offset = 3
+    module.begin(1, when)
+    assert module._seconds == 1.0
