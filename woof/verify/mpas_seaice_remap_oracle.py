@@ -8,7 +8,8 @@ then the stage a case names (``oracle_stage``):
 - 1: the volume-to-thickness conversion of ``seaice_run_advection_incremental_remap``
   (and, under ``oracle_round_trip``, back to volume);
 - 2: the departure points, triangles and quadrature points;
-- 3: the masks and the limited linear reconstruction.
+- 3: the masks and the limited linear reconstruction;
+- 4: ``seaice_run_advection_incremental_remap`` itself, over N steps.
 
 Everything is built with gfortran -O0 -ffp-contract=off at RKIND 4 and 8. The
 stream is :mod:`woof.verify.mpas_ocean_stream`'s, with the remap's pools.
@@ -93,6 +94,13 @@ CASES = (
     ("reconstruct_hex_cesm_ponds_snow_layers", 20261733, 3, "hex", 3, {
         "pkgColumnTracerPondsActive": True, "pkgTracerBrineActive": True}, {"config_use_level_meltponds": False},
      {"nSnowLayers": 2}),
+    ("remap_hex_three_steps", 20261741, 4, "hex", 2, {}, {"oracle_n_steps": 3}, {"speed": 0.6}),
+    ("remap_quad_ponds_recover", 20261742, 4, "quad", 1, {
+        "pkgColumnTracerLevelIceActive": True, "pkgColumnTracerPondsActive": True,
+        "pkgColumnTracerLidThicknessActive": True}, {"config_recover_tracer_means_check": True,
+                                                     "oracle_n_steps": 2}, {"speed": 1.2}),
+    ("remap_hex_snow_layers_recover", 20261743, 4, "hex", 1, {"pkgTracerBrineActive": True},
+     {"config_recover_tracer_means_check": True}, {"nSnowLayers": 2}),
 )
 
 
@@ -366,6 +374,19 @@ def changed_fields(case: dict, outputs: dict[str, np.ndarray]) -> dict[str, np.n
     return changed
 
 
+def warning_mismatches(got: list[dict], want: list[dict], precision: str) -> int:
+    """Log entries that differ (message, integer arguments, real arguments as
+    words of the precision), plus any difference in count."""
+    real = PRECISIONS[precision]
+    bad = abs(len(got) - len(want))
+    for g, w in zip(got, want):
+        if g["message"] != w["message"] or g["ints"] != w["ints"] or len(g["reals"]) != len(w["reals"]):
+            bad += 1
+        elif word_mismatches(np.array(g["reals"], real), np.array(w["reals"], real)):
+            bad += 1
+    return bad
+
+
 def load_fixture(precision: str) -> dict[str, dict[str, np.ndarray]]:
     data = np.load(FIXTURE_DIR / f"oracle-{precision}.npz")
     out: dict[str, dict[str, np.ndarray]] = {}
@@ -418,6 +439,10 @@ def on_device(case: dict, fixture: dict[str, np.ndarray] | None = None) -> dict[
     return dev
 
 
+#: the mean-recovery warnings of the last stage-4 GPU run, by (case, precision)
+last_warnings: dict = {}
+
+
 def run_gpu(case: dict, fixture: dict[str, np.ndarray] | None = None) -> dict[str, np.ndarray]:
     """Run woof.hex.mpas_seaice.remap_v842 on ``case`` as run_incremental_remap.F90 drives the Fortran."""
     import cupy as cp
@@ -441,8 +466,16 @@ def run_gpu(case: dict, fixture: dict[str, np.ndarray] | None = None) -> dict[st
         rv.volume_to_thickness(tree, tracers=dev["tracers"], remap=dev["incremental_remap"])
         rv.make_masks(tree, pools=dev, mesh=dev["mesh"])
         rv.construct_linear_fields(tree, pools=dev, mesh=dev["mesh"])
+    elif stage == 4:
+        warnings = []
+        for _ in range(int(case["config"]["oracle_n_steps"])):
+            _, w = rv.run(tree, pools=dev, mesh=dev["mesh"], configs=case["config"])
+            warnings += w
+        dev["_warnings"] = warnings
     elif stage != 0:
         raise ValueError(f"stage {stage} is not ported")
+    if stage == 4:
+        last_warnings[case["name"], case["precision"]] = dev.pop("_warnings")
     return {f"{pool}/{name}": cp.asnumpy(dev[pool][name]) for pool, name, kind, _ in case["fields"]
             if kind in (REAL, INT) and dev[pool][name] is not None}
 
@@ -456,4 +489,8 @@ def measure(precision: str, reference: dict | None = None) -> dict[str, dict[str
         got = run_gpu(case, fixture)
         want = expected_outputs(case, fixture)
         report[case["name"]] = {key: word_mismatches(got[key], want[key]) for key in want if graded(case, key)}
+        if case["stage"] == 4:
+            want_warnings = load_logs()[case["name"]][precision]["warnings"]
+            report[case["name"]]["warnings"] = warning_mismatches(last_warnings[case["name"], precision],
+                                                                  want_warnings, precision)
     return report

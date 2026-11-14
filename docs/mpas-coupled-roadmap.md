@@ -87,17 +87,19 @@ Ordered by how self-contained each piece is:
    Its outputs (`basisGradientU/V`, `basisIntegrals*`) are the inputs the
    kernels in item 1 read.
 4. The weak-form solver (`..._weak.F`), an alternative velocity discretisation.
-5. Incremental-remap advection (`mpas_seaice_advection_incremental_remap*.F`),
-   staged on planar meshes. Ported: the tracer tree the packages build, the
-   volume/thickness conversions around the remap, and the departure points and
-   triangles (with each triangle moved into its source cell's frame and its
-   quadrature points), and the masks and limited linear reconstruction (with
-   the barycenters). The init's geometry (`get_geometry_incremental_remap`, the
-   RBF reconstruction coefficients) is the input's, as the variational basis
-   is. Still to port: the flux integration and update, and the remap inside the
-   time step. Upwind advection cannot run in v8.4.2 (it reads configs the
-   sea-ice Registry does not declare and mesh fields it does not carry), so it
-   is refused by name with that reason.
+5. Incremental-remap advection (`mpas_seaice_advection_incremental_remap*.F`)
+   on planar meshes. Ported: the tracer tree the packages build, the
+   volume/thickness conversions, the departure points and triangles, the masks
+   and limited linear reconstruction, the flux integration, the mass and tracer
+   update, the mean-recovery check and the zap of tiny areas, and the remap
+   inside the forward time step (`config_use_advection`, each dynamics
+   subcycle, N steps with a bitwise restart). The init's geometry
+   (`get_geometry_incremental_remap`, the RBF reconstruction coefficients) is
+   the input's, as the variational basis is. Refused by name: spherical meshes,
+   halo exchanges, the conservation and monotonicity checks. Upwind advection
+   cannot run in v8.4.2 (it reads configs the sea-ice Registry does not declare
+   and mesh fields it does not carry), so it is refused by name with that
+   reason.
 6. Column physics (`column/`, colpkg): `ice_therm_vertical` (BL99 and mushy
    thermodynamics), `ice_therm_itd`, `ice_mechred` (ridging), `ice_shortwave`
    (delta-Eddington), melt ponds, `ice_atmo`. These are double precision.

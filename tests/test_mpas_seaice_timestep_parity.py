@@ -24,7 +24,8 @@ THE BREAKAGES THESE PREVENT
 3. A restart that does not continue the run bitwise.
 4. A gate that cannot fail: mutated counts, a skipped finalize or a wrong
    subcycle count must produce mismatches.
-5. A configuration this driver does not carry, run silently: refused by name.
+5. A configuration this driver does not carry, run silently: refused by name
+   (upwind advection, which v8.4.2 cannot run, among them).
 """
 from __future__ import annotations
 
@@ -77,7 +78,7 @@ def test_fixture_covers_the_branches(precision):
 
 
 @pytest.mark.parametrize("knob, value", [
-    ("config_use_column_package", True), ("config_use_advection", True), ("config_use_forcing", True),
+    ("config_use_column_package", True), ("config_advection_type", "upwind"), ("config_use_forcing", True),
     ("config_perform_unit_test", True), ("config_do_restart", True), ("config_use_halo_exch", True),
     ("config_stress_divergence_scheme", "weak"),
 ])
@@ -86,7 +87,7 @@ def test_what_the_driver_does_not_carry_is_refused_by_name(knob, value):
     config = oo.cases()[0]["config"]
     ts.check_config(config)
     with pytest.raises(ConfigurationRefusal, match=knob):
-        ts.check_config(dict(config, **{knob: value}))
+        ts.check_config(dict(config, config_use_advection=knob == "config_advection_type", **{knob: value}))
 
 
 @requires_gpu

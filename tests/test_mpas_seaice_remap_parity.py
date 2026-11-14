@@ -22,8 +22,10 @@ THE BREAKAGES THESE PREVENT
    quadrature points summed in another order.
 4. A reconstruction without the limiter, or a barycenter whose terms are
    summed in another order.
-5. A gate that cannot fail: each of the above, mutated, must be caught.
-6. Upwind advection run silently: v8.4.2 cannot run it (refused by name).
+5. Fluxes, updates, the zap of tiny areas or the mean-recovery warnings
+   that drift from v8.4.2 over several remap steps.
+6. A gate that cannot fail: each of the above, mutated, must be caught.
+7. Upwind advection run silently: v8.4.2 cannot run it (refused by name).
 """
 from __future__ import annotations
 
@@ -203,6 +205,9 @@ def _mismatches_after(case_name: str, field: str, precision: str = "r8") -> int:
         got = ro.run_gpu(case, fixture)
     finally:
         rv._module_on.cache_clear()
+    if field == "warnings":
+        return ro.warning_mismatches(ro.last_warnings[case_name, precision],
+                                     ro.load_logs()[case_name][precision]["warnings"], precision)
     return ro.word_mismatches(got[field], ro.expected_outputs(case, fixture)[field])
 
 
@@ -232,6 +237,25 @@ def test_the_departure_cases_cover_the_branches():
     assert most >= 4 and missing
 
 
+def test_the_remap_cases_cover_the_branches():
+    logs = ro.load_logs()
+    cases = [c for c in ro.cases("r8") if c["stage"] == 4]
+    assert any(c["config"]["oracle_n_steps"] > 1 for c in cases)
+    assert {c["mesh_kind"] for c in cases} == {"hex", "quad"}
+    assert len(logs["remap_quad_ponds_recover"]["r4"]["warnings"]) > 0
+    for c in cases:
+        assert logs[c["name"]]["r8"]["ierr"] == 0
+    fixture = ro.load_fixture("r8")
+    for c in cases:
+        nc = c["dims"]["nCells"]
+        before = c["pools"]["tracers"]["iceAreaCategory"]
+        after = fixture[c["name"]]["tracers/iceAreaCategory"]
+        assert ro.word_mismatches(after[:nc], before[:nc]) > 0
+        # the zap: tiny areas went to zero
+        tiny = (before > 0) & (before < 1.0e-22)
+        assert tiny.any()
+
+
 @requires_gpu
 @pytest.mark.parametrize("mutation", ["side_sign", "quadrature_order"])
 def test_a_mutated_departure_geometry_is_caught(monkeypatch, mutation):
@@ -256,3 +280,38 @@ def test_a_mutated_reconstruction_is_caught(monkeypatch, mutation):
                         "*xb = M(A(M(c0, g[0]), A(M(cx, g[2]), M(cy, g[3]))), reciprocal);")
         field = "tracer_barycenter/iceAreaCategoryBarycenterx"
     assert _mismatches_after("reconstruct_quad_ponds", field) > 0
+
+
+@requires_gpu
+@pytest.mark.parametrize("mutation", ["update_order", "no_zap", "mean_threshold"])
+def test_a_mutated_remap_step_is_caught(monkeypatch, mutation):
+    from woof.hex.mpas_seaice import remap_v842 as rv
+    case, field = "remap_hex_three_steps", "tracers/iceVolumeCategory"
+    if mutation == "update_order":
+        _mutated_source(monkeypatch, "f = D(S(product[i], D(fluxFromCell, areaCell[c])), p);",
+                        "f = S(D(product[i], p), D(D(fluxFromCell, areaCell[c]), p));")
+    elif mutation == "no_zap":
+        monkeypatch.setattr(rv, "zap_small_mass", lambda tree, pools, mesh: None)
+        field = "tracers/iceAreaCategory"
+    else:
+        _mutated_source(monkeypatch, "warn[i] = (ABS(diff) > M(IR_EPS11, ABS(product[i])) && ABS(diff) > IR_EPS11)",
+                        "warn[i] = (ABS(diff) > M(IR_EPS11, ABS(product[i])))")
+        case, field = "remap_quad_ponds_recover", "warnings"
+    assert _mismatches_after(case, field, "r4" if field == "warnings" else "r8") > 0
+
+
+def test_a_second_mass_like_field_is_refused_at_run_time():
+    from woof.hex.mpas_seaice import remap_v842 as rv
+    case = next(c for c in ro.cases("r8") if c["name"] == "tree_inactive_leaf")
+    with pytest.raises(ConfigurationRefusal, match="mass-like"):
+        rv.check_tree(ro.gpu_tree(case))
+
+
+def test_an_inactive_mass_field_with_active_children_is_refused_at_run_time():
+    from woof.hex.mpas_seaice import remap_v842 as rv
+    tree = rv.tracer_tree({}, {}, lambda name: name != "iceAreaCategory")
+    assert all(t.name != "iceAreaCategory" for t in tree)
+    with pytest.raises(ConfigurationRefusal, match="iceAreaCategory is inactive"):
+        rv.check_tree(tree)
+    with pytest.raises(ConfigurationRefusal, match="iceAreaCategory is inactive"):
+        rv.run(tree, pools={}, mesh={}, configs={})

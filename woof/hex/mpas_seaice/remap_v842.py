@@ -16,7 +16,13 @@ remapping (Dukowicz and Baumgardner 2000; Lipscomb and Hunke 2004):
   region each edge's flux comes from, as triangles in their source cells;
 - :func:`make_masks` and :func:`construct_linear_fields`: each tracer as a
   linear function in each cell, its gradient limited (no new extrema at the
-  cell's vertices) about its parent's barycenter.
+  cell's vertices) about its parent's barycenter;
+- :func:`integrate_fluxes`, :func:`mass_tracer_products`,
+  :func:`update_mass_and_tracers`, :func:`recover_tracer_means` (the
+  ``config_recover_tracer_means_check`` warnings) and :func:`zap_small_mass`;
+- :func:`remap_block` is ``incremental_remap_block`` and :func:`run`
+  ``seaice_run_advection_incremental_remap``;
+  :mod:`~woof.hex.mpas_seaice.timestep_v842` calls it each dynamics subcycle.
 
 The kernels (``remap_v842.cu``) are held word for word to v8.4.2 compiled
 verbatim with gfortran ``-O0 -ffp-contract=off`` at RKIND 4 and 8
@@ -30,7 +36,7 @@ as the variational basis is the velocity solver's.
 
 Refused by name: upwind advection (v8.4.2 cannot run it,
 :data:`UPWIND_REASON`), spherical meshes, halo exchanges, the conservation
-and monotonicity checks.
+and monotonicity checks, and tracer lists v8.4.2's update cannot run.
 
 Pools are dicts of device arrays named as in MPAS, in the Fortran layout
 reversed (a tracer ``t(nLayers, nCategories, nCells+1)`` is C-order
@@ -50,8 +56,8 @@ from woof.hex.errors import ConfigurationRefusal
 
 SOURCE_FILES = (
     "src/core_seaice/shared/mpas_seaice_advection_incremental_remap_tracers.F:165-911",
-    "src/core_seaice/shared/mpas_seaice_advection_incremental_remap.F:66-77,2510-2552,2619-2661,3418-5375,"
-    "5390-6674,8995-9295,9309-9387",
+    "src/core_seaice/shared/mpas_seaice_advection_incremental_remap.F:66-77,2345-2678,2751-3403,3418-5375,"
+    "5390-6674,6689-8043,8825-8947,8995-9295,9309-9387",
 )
 COMPILE_OPTIONS = ("--std=c++17", "--fmad=false", "--ftz=false", "--prec-div=true", "--prec-sqrt=true")
 MODULE_OPTIONS = COMPILE_OPTIONS
@@ -453,3 +459,211 @@ def construct_linear_fields(tree, *, pools: dict, mesh: dict) -> None:
             mesh["edgesOnCell"], mesh["cellsOnEdge"], mesh["dcEdge"], mesh["coeffs_reconstruct"],
             remap["xVertexOnCell"], remap["yVertexOnCell"], *moments, pxb, pyb, *pf, *gf, _int(pl), _int(gl),
             _int(t.n_parents), _int(t.has_child), _int(nc), _int(ncat), _int(nl), _int(me)))
+
+
+def integrate_fluxes(tree, *, pools: dict, mesh: dict) -> None:
+    """``integrate_fluxes_over_triangles``: each tracer's edge fluxes (and its
+    triangle values), in tree order. Raises :class:`RemapError` where v8.4.2
+    stops on a negative ice area at a quadrature point."""
+    import cupy as cp
+    ne = int(mesh["nEdges"])
+    remap, tracers = pools["incremental_remap"], pools["tracers"]
+    negative = cp.zeros(1, cp.int32)
+    for t in tree:
+        field = tracers[t.name]
+        precision = precision_of(field)
+        ncat, nl = int(field.shape[1]), _layers(field)
+        flux = aux(pools, t, "edgeFlux")
+        flux[...] = 0
+        if t.n_parents == 0:
+            parent, pl = None, 1
+        else:
+            parent, pl = aux(pools, t.parent, "triangle"), _layers(tracers[t.parent.name])
+        _launch(precision, "seaice_ir_integrate_fluxes_v842", ne * ncat * nl, (
+            flux, aux(pools, t, "triangle"), negative, parent, aux(pools, t, "center"), aux(pools, t, "xGrad"),
+            aux(pools, t, "yGrad"), remap["xTriangle"], remap["yTriangle"], remap["triangleArea"],
+            remap["iCellTriangle"], remap["maskEdge"], _int(t.name == "iceAreaCategory"), _int(ne), _int(ncat),
+            _int(nl), _int(pl)))
+        if int(negative[0]):
+            raise RemapError("integrate_fluxes_over_triangles: negative ice area at a departure triangle's "
+                             "quadrature point (v8.4.2: SEAICE_ERROR_IR_NEG_AREA)")
+
+
+def _parent_product(pools, t):
+    if t.n_parents == 0:
+        return None, 1
+    return aux(pools, t.parent, "product"), _layers(pools["tracers"][t.parent.name])
+
+
+def mass_tracer_products(tree, *, pools: dict, mesh: dict) -> None:
+    """``compute_mass_tracer_products`` over cells 1..nCells."""
+    nc = int(mesh["nCells"])
+    for t in tree:
+        field = pools["tracers"][t.name]
+        ncat, nl = int(field.shape[1]), _layers(field)
+        parent, pl = _parent_product(pools, t)
+        _launch(precision_of(field), "seaice_ir_products_v842", nc * ncat * nl, (
+            aux(pools, t, "product"), field, parent, _int(nc), _int(ncat), _int(nl), _int(pl)))
+
+
+def update_mass_and_tracers(tree, *, pools: dict, mesh: dict) -> None:
+    """``update_mass_and_tracers`` over cells 1..nCellsSolve, in tree order (a
+    child divides by its parent's new product)."""
+    import cupy as cp
+    ncs, me = int(mesh["nCellsSolve"]), int(mesh["maxEdges"])
+    negative = cp.zeros(1, cp.int32)
+    for t in tree:
+        field = pools["tracers"][t.name]
+        ncat, nl = int(field.shape[1]), _layers(field)
+        parent, pl = _parent_product(pools, t)
+        _launch(precision_of(field), "seaice_ir_update_v842", ncs * ncat * nl, (
+            field, aux(pools, t, "product"), negative, parent, aux(pools, t, "edgeFlux"), mesh["nEdgesOnCell"],
+            mesh["edgesOnCell"], mesh["cellsOnEdge"], mesh["areaCell"], _int(ncs), _int(ncat), _int(nl), _int(pl),
+            _int(me)))
+        if int(negative[0]):
+            raise RemapError(f"update_mass_and_tracers: negative {t.name} (v8.4.2: SEAICE_ERROR_IR_NEG_MASS)")
+
+
+def zap_small_mass(tree, *, pools: dict, mesh: dict) -> None:
+    """``zap_small_mass``: the mass-like field (the list's head) below 1e-22 to
+    zero, with every other tracer in those categories."""
+    ncs = int(mesh["nCellsSolve"])
+    remap = pools["incremental_remap"]
+    head = tree[0]
+    field = pools["tracers"][head.name]
+    ncat = int(field.shape[1])
+    if _layers(field) != 1:
+        raise RemapError(f"zap_small_mass: a 3-D mass-like field ({head.name}) stops v8.4.2")
+    remap["maskCategoryCell"][...] = 0
+    precision = precision_of(field)
+    _launch(precision, "seaice_ir_zap_mass_v842", ncs * ncat, (
+        field, aux(pools, head, "mask"), remap["maskCategoryCell"], _int(ncs), _int(ncat)))
+    for t in tree[1:]:
+        f = pools["tracers"][t.name]
+        _launch(precision, "seaice_ir_zap_tracer_v842", ncs * ncat * _layers(f), (
+            f, aux(pools, t, "mask"), remap["maskCategoryCell"], _int(ncs), _int(ncat), _int(_layers(f))))
+
+
+def recover_tracer_means(tree, *, pools: dict, mesh: dict) -> list[dict]:
+    """``recover_tracer_means`` (``config_recover_tracer_means_check``): the
+    warnings v8.4.2 logs where a cell's reconstruction does not recover its
+    product of means, in its order (cell, tracer, category, layer), each as
+    the four log entries (message, integer and real arguments)."""
+    import cupy as cp
+    nc, me = int(mesh["nCells"]), int(mesh["maxEdges"])
+    remap, tracers = pools["incremental_remap"], pools["tracers"]
+    # the check's layer count is the last 3-D tracer's (recover_tracer_means:7672, read at 7973)
+    last_layers = 0
+    for t in tree:
+        if _layers(tracers[t.name]) > 1:
+            last_layers = _layers(tracers[t.name])
+    per_tracer = []
+    for t in tree:
+        field = tracers[t.name]
+        precision = precision_of(field)
+        ncat, nl = int(field.shape[1]), _layers(field)
+        if nl > 1 and last_layers > nl:
+            raise RemapError(f"recover_tracer_means: {t.name} has {nl} layers but the check loops over "
+                             f"{last_layers} (v8.4.2 reads past its arrays)")
+        chain = [t] + t.ancestors()
+        if len(chain) > 4:
+            raise RemapError(f"recover_tracer_means: {t.name} has more than three parents")
+        sets, layers = [], []
+        for k in range(4):
+            tr = chain[k] if k < len(chain) else chain[-1]
+            sets += [aux(pools, tr, "center"), aux(pools, tr, "xGrad"), aux(pools, tr, "yGrad")]
+            layers.append(_layers(tracers[tr.name]))
+        n = nc * ncat * nl
+        warn = cp.zeros(max(n, 1), cp.int32)
+        rec = cp.zeros(max(n, 1), field.dtype)
+        diff = cp.zeros(max(n, 1), field.dtype)
+        _launch(precision, "seaice_ir_recover_means_v842", n, (
+            warn, rec, diff, aux(pools, t, "product"), *sets, _int(layers[1]), _int(layers[2]), _int(layers[3]),
+            _int(len(chain)), mesh["nEdgesOnCell"], mesh["edgesOnCell"], mesh["dcEdge"], mesh["dvEdge"],
+            remap["xVertexOnCell"], remap["yVertexOnCell"], _int(nc), _int(ncat), _int(nl), _int(me)))
+        product = aux(pools, t, "product")
+        per_tracer.append((t, ncat, nl, cp.asnumpy(warn[:n]).reshape(nc, ncat, nl),
+                           cp.asnumpy(rec[:n]).reshape(nc, ncat, nl), cp.asnumpy(diff[:n]).reshape(nc, ncat, nl),
+                           cp.asnumpy(product[:nc]).reshape(nc, ncat, nl)))
+    warnings = []
+    for c in range(nc):
+        for t, ncat, nl, warn, rec, diff, prod in per_tracer:
+            layers = range(1) if nl == 1 else range(min(nl, last_layers))
+            for cat in range(ncat):
+                for lay in layers:
+                    if not warn[c, cat, lay]:
+                        continue
+                    head = ("Reconstructed tracer does not recover the mean, iCat, iCell, tracer = $i $i $r "
+                            if nl == 1 else "Reconstructed tracer does not recover the mean, iCat, iCell, "
+                                            "tracer = $i $i")
+                    warnings += [{"message": head + t.name, "ints": [cat + 1, c + 1], "reals": []},
+                                 {"message": "Product of means:      $r", "ints": [],
+                                  "reals": [float(prod[c, cat, lay])]},
+                                 {"message": "Reconstructed product: $r", "ints": [],
+                                  "reals": [float(rec[c, cat, lay])]},
+                                 {"message": "Difference:            $r", "ints": [],
+                                  "reals": [float(diff[c, cat, lay])]}]
+    return warnings
+
+
+def remap_block(tree, *, pools: dict, mesh: dict, configs: dict, dt) -> tuple[int, list[dict]]:
+    """``incremental_remap_block`` (planar, without the monotonicity and
+    conservation checks): returns the CFL-flagged vertex count and the
+    mean-recovery warnings."""
+    make_masks(tree, pools=pools, mesh=mesh)
+    construct_linear_fields(tree, pools=pools, mesh=mesh)
+    remap = pools["incremental_remap"]
+    cfl = departure_points(mesh=mesh, velocity=pools["velocity_solver"], remap=remap, dt=dt)
+    departure_triangles(mesh=mesh, remap=remap)
+    quadrature_points(mesh=mesh, remap=remap)
+    integrate_fluxes(tree, pools=pools, mesh=mesh)
+    mass_tracer_products(tree, pools=pools, mesh=mesh)
+    warnings = []
+    if configs.get("config_recover_tracer_means_check", False):
+        warnings = recover_tracer_means(tree, pools=pools, mesh=mesh)
+    update_mass_and_tracers(tree, pools=pools, mesh=mesh)
+    zap_small_mass(tree, pools=pools, mesh=mesh)
+    return cfl, warnings
+
+
+def check_tree(tree) -> None:
+    """Refuse a tracer list v8.4.2's remap cannot run: a second mass-like
+    field (a tracer whose parent the packages leave out) is updated against a
+    freed dummy tracer, and a tracer whose parent was dropped as inactive (an
+    inactive iceAreaCategory: remove_inactive_tracers only checks children
+    with nParents > 1) is reconstructed against a parent outside the list."""
+    kept = set(map(id, tree))
+    orphan = [t for t in tree if t.parent is not None and id(t.parent) not in kept]
+    if orphan:
+        raise ConfigurationRefusal(
+            knob=f"tracer {orphan[0].parent.name}", value="inactive",
+            reason=f"{orphan[0].parent.name} is inactive but its child {orphan[0].name} is active; v8.4.2's "
+                   "remove_inactive_tracers drops the parent without stopping (it checks only children with "
+                   "nParents > 1), so the remap would read a parent outside the tracer list",
+            declaration="every active tracer's parent active")
+    extra = [t.name for t in tree[1:] if t.n_parents == 0]
+    if extra:
+        raise ConfigurationRefusal(
+            knob=f"tracer {extra[0]}", value="no parent",
+            reason=f"{extra[0]}'s parent is not in the tracer list (e.g. pondArea under config_use_level_meltponds "
+                   "without the level-ice tracers), so it is a second mass-like field and v8.4.2's "
+                   "update_mass_and_tracers divides it by a freed dummy tracer",
+            declaration="every tracer's parent in the list")
+
+
+def run(tree, *, pools: dict, mesh: dict, configs: dict) -> tuple[int, list[dict]]:
+    """``seaice_run_advection_incremental_remap`` (time level 1, one block, no
+    halo exchanges): the volumes to thickness, the remap at
+    ``dynamicsTimeStep``, the thicknesses back to volume. Returns the
+    CFL-flagged vertex count and the mean-recovery warnings."""
+    check_config(configs)
+    check_tree(tree)
+    if int(mesh.get("nQuadPoints", 6)) != 6:
+        raise ConfigurationRefusal(knob="nQuadPoints", value=mesh["nQuadPoints"],
+                                   reason="the Registry fixes nQuadPoints = 6", declaration="nQuadPoints = 6")
+    tracers, remap = pools["tracers"], pools["incremental_remap"]
+    volume_to_thickness(tree, tracers=tracers, remap=remap)
+    dt = pools["velocity_solver"]["dynamicsTimeStep"].item()
+    result = remap_block(tree, pools=pools, mesh=mesh, configs=configs, dt=dt)
+    thickness_to_volume(tree, tracers=tracers, remap=remap)
+    return result

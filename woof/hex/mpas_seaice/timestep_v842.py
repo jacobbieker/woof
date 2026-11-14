@@ -16,7 +16,9 @@ package, advection and forcing are off:
   (:mod:`~woof.hex.mpas_seaice.presubcycle_v842`'s pre-subcycle,
   ``config_elastic_subcycle_number`` elastic subcycles of
   :mod:`~woof.hex.mpas_seaice.evp_v842` and
-  :mod:`~woof.hex.mpas_seaice.velocity_v842`, and the post-subcycle); then
+  :mod:`~woof.hex.mpas_seaice.velocity_v842`, and the post-subcycle) and,
+  under ``config_use_advection``, ``seaice_run_advection``'s incremental remap
+  (:mod:`~woof.hex.mpas_seaice.remap_v842`; its geometry is the input's); then
   ``seaice_timestep_finalize`` (the atmospheric fluxes re-initialised).
 
 The pools are dicts of device arrays named as in MPAS (``mesh``, ``boundary``,
@@ -30,9 +32,11 @@ Held word for word over N steps to v8.4.2 (``seaice_timestep``,
 ``store_timestep_counter``, ``seaice_timestep_finalize``, the column wrappers
 and the time diagnostics cut verbatim, ``mpas_seaice_velocity_solver.F``
 compiled verbatim; ``tools/mpas_seaice_oracle/run_seaice_step.F90``,
-``tests/test_mpas_seaice_timestep_parity.py``).
+``tests/test_mpas_seaice_timestep_parity.py``; with advection
+``tests/test_mpas_seaice_timestep_remap_parity.py``).
 
-Refused by name: the column package, advection, forcing, the weak-form
+Refused by name: the column package, upwind advection (v8.4.2 cannot run
+it), the spherical remap, forcing, the weak-form
 stress divergence, the unit tests, a restart start, and halo exchanges.
 ``seaice_check_state`` changes no state and is not run.
 """
@@ -43,7 +47,7 @@ import numpy as np
 from woof.hex.errors import ConfigurationRefusal
 from woof.hex.mpas_ocean.forward_v842 import Clock, parse_time, read_restart, write_restart
 
-from . import evp_v842, presubcycle_v842, velocity_v842
+from . import evp_v842, presubcycle_v842, remap_v842, velocity_v842
 
 SOURCE_FILES = (
     "src/core_seaice/model_forward/mpas_seaice_core.F:260-410",
@@ -51,6 +55,7 @@ SOURCE_FILES = (
     "src/core_seaice/shared/mpas_seaice_diagnostics.F:47-156",
     "src/core_seaice/shared/mpas_seaice_column.F:11028-11157",
     "src/core_seaice/shared/mpas_seaice_velocity_solver.F:80-135",
+    "src/core_seaice/shared/mpas_seaice_advection.F:85-143",
 )
 
 __all__ = ("Clock", "initialize", "advance", "write_restart", "read_restart", "clock_from_configs")
@@ -73,19 +78,28 @@ def check_config(configs: dict) -> None:
     for knob, reason in (
             ("config_use_column_package", "the column package (colpkg: thermodynamics, ITD, ridging, shortwave) "
                                           "is not ported"),
-            ("config_use_advection", "sea-ice advection (incremental remap, upwind) is not ported"),
             ("config_use_forcing", "the sea-ice forcing streams are not ported; the forcing fields are held"),
             ("config_perform_unit_test", "the unit tests are not ported"),
             ("config_do_restart", "this port restarts from its own restart (read_restart), not MPAS's stream"),
             ("config_use_halo_exch", "halo exchanges: this port runs one block")):
         if configs.get(knob, False):
             _refuse(knob, True, reason, f"{knob} = .false.")
+    if configs.get("config_use_advection", False):
+        remap_v842.check_config(configs)
     if not configs.get("config_use_velocity_solver", True):
         return
     scheme = configs.get("config_stress_divergence_scheme", "variational")
     if scheme != "variational":
         _refuse("config_stress_divergence_scheme", scheme, "only the variational stress divergence is ported",
                 "config_stress_divergence_scheme = 'variational'")
+
+
+def advection_tree(pools: dict, configs: dict):
+    """The remap's tracer list: the packages are the configs ``package:NAME``,
+    a tracer field is active where the tracers pool carries it."""
+    packages = {k.split(":", 1)[1]: bool(v) for k, v in configs.items() if k.startswith("package:")}
+    tracers = pools["tracers"]
+    return remap_v842.tracer_tree(packages, configs, lambda name: tracers.get(name) is not None)
 
 
 def clock_from_configs(configs: dict) -> Clock:
@@ -131,7 +145,8 @@ def _velocity_solver(pools: dict, configs: dict, consts) -> None:
     real = PRECISIONS[_precision_of(solver["uVelocity"])]
     dynamics_dt, elastic_dt = real(dynamics_dt), real(elastic_dt)
     # the category tracers' (1, nCategories, nCells) as the pre-subcycle reads them, (nCategories, nCells)
-    tracers = {name: value.reshape(value.shape[0], value.shape[1]) for name, value in p["tracers"].items()}
+    tracers = {name: p["tracers"][name].reshape(p["tracers"][name].shape[0], p["tracers"][name].shape[1])
+               for name in ("iceAreaCategory", "iceVolumeCategory", "snowVolumeCategory")}
     presubcycle_v842.pre_subcycle(
         mesh=mesh, boundary=p["boundary"], tracers=tracers, aggregate=p["tracers_aggregate"],
         icestate=icestate, ocean=p["ocean_coupling"], atmos=p["atmos_coupling"], solver=solver,
@@ -169,6 +184,7 @@ def advance(*, pools: dict, configs: dict, clock: Clock, n_steps: int, first_ste
         # seaice_init_evp, at the init's time steps
         consts = evp_v842.init_evp(m["dvEdge"][:ne], int(m["nEdgesSolve"]), solver["dynamicsTimeStep"].item(),
                                    solver["elasticTimeStep"].item())
+    tree = advection_tree(pools, configs) if configs.get("config_use_advection", False) else None
     itimestep = first_step
     for _ in range(n_steps):
         clock.now += clock.step
@@ -183,6 +199,9 @@ def advance(*, pools: dict, configs: dict, clock: Clock, n_steps: int, first_ste
             if configs.get("config_use_velocity_solver", True):
                 with evp_v842.block_counts(cells=nc, vertices=nv):
                     _velocity_solver(pools, configs, consts)
+            if tree is not None:
+                # seaice_run_advection: incremental remap at dynamicsTimeStep
+                remap_v842.run(tree, pools=pools, mesh=m, configs=configs)
         # seaice_timestep_finalize: seaice_column_reinitialize_atmospheric_fluxes
         solver["airStressCellU"][...] = 0
         solver["airStressCellV"][...] = 0
