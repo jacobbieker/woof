@@ -604,6 +604,7 @@ STATE_INFRA_ATTRS = frozenset({
     "_madwrf_observations", "_madwrf_hydrostatic_pressure",
     # Cached launch descriptors are rebuilt from the live state buffers.
     "_rk_copy_launch", "_rk_zero_launch", "_glue_add_launch",
+    "_fixed_tendency_zero_launch", "_smag_scalar_zero_launch",
     # Used only by analysis snapshot producers. The published LBC field
     # names/bytes, not this preparation selector, own forecast forcing and
     # are already covered by setup_fingerprint/lateral prefix identity.

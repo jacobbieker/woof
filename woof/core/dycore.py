@@ -93,8 +93,10 @@ _PROGNOSTICS = ("u", "v", "w", "thp", "php", "mup")
 _TENDENCIES = ("ru_t", "rv_t", "rw_t", "rth_t", "rph_t", "rmu_t")
 
 
-def _prepare_bookkeeping(state, pairs, *, zero=False):
-    """Cache word-copy descriptors, refreshing when a state buffer changes."""
+def _prepare_bookkeeping(state, pairs, *, zero=False, attr=None):
+    """Cache word-copy descriptors, refreshing when a state buffer changes.
+    ``attr`` names the state attribute holding the cache (one per call site
+    whose arrays differ)."""
     if not pairs or len(pairs) > 64:
         return None
     arrays = tuple(a for pair in pairs for a in pair)
@@ -104,7 +106,7 @@ def _prepare_bookkeeping(state, pairs, *, zero=False):
     if any(src.shape != dst.shape for src, dst in pairs):
         return None
     key = tuple((a.data.ptr, a.size) for a in arrays)
-    attr = '_rk_zero_launch' if zero else '_rk_copy_launch'
+    attr = attr or ('_rk_zero_launch' if zero else '_rk_copy_launch')
     cached = getattr(state, attr, None)
     if cached is not None and cached[0] == key:
         return cached[1]
@@ -170,6 +172,21 @@ def _prepare_tendency_zero(state):
         for a in arrays:
             a[...] = 0
     return clear
+
+
+def _zero_buffers(state, arrays, attr):
+    """``a[...] = 0`` for each of ``arrays``, in one rk_zero_words launch when
+    they are distinct dense binary32 buffers (the same zero words), else one
+    write each, in order."""
+    arrays = tuple(arrays)
+    launch = _prepare_bookkeeping(state, tuple((a, a) for a in arrays),
+                                  zero=True, attr=attr)
+    if launch is not None:
+        launch()
+        return
+    for a in arrays:
+        a[...] = 0
+
 
 #: WRF turbulent Prandtl number (share/module_model_constants.F:
 #: prandtl = 1./3.0) -- scalars mix with K_h = K_m/prandtl = 3*K_m.
@@ -2323,9 +2340,13 @@ def _compute_wrf_smag_tendencies(state: DomainState, cfg: RunConfig,
     # (module_diffusion_em.F:3054); vertical_diffusion_2's chem loop
     # (:4409-4421) has no such gate, so the rows stay in the vertical pass.
     mix2_exempt = chem_mix2_exempt_slots(state, cfg)
+    # Each launch below writes only its own buffer (and the diff6_x/y face
+    # workspaces), so the buffers are cleared together first.
+    _zero_buffers(state, (state.scratch(f.shape, slot)
+                          for f, _tend, _xk, _c1, _c2, slot, _stag in specs[2:]),
+                  "_smag_scalar_zero_launch")
     for f, _tend, xk, _c1, _c2, slot, stag in specs[2:]:
         buf = state.scratch(f.shape, slot)
-        buf[...] = 0
         if slot in mix2_exempt:
             continue
         launch_wrf_smag2d_hd(state, cfg, f, xk, buf, stagger=stag,
@@ -2661,12 +2682,14 @@ def prepare_fixed_tendencies(state: DomainState, cfg: RunConfig,
         km = kh = None
     specs = _smag2d_specs(state, km, kh, time_t=True,
                           kmv=_horizontal_w_km(state, cfg))
-    for f0, _tend, _xk, _c1, _c2, slot, _stag in specs:
-        state.scratch(f0.shape, slot)[...] = 0
+    cleared = [state.scratch(f0.shape, slot)
+               for f0, _tend, _xk, _c1, _c2, slot, _stag in specs]
     if cfg.km_opt in (2, 5):
         # The prognostic-TKE forward tendency (tke_rhs + self-diffusion),
         # consumed by advance_tke_stage on every RK pass.
-        state.scratch((nz, ny, nx), "smag_rtke")[...] = 0
+        cleared.append(state.scratch((nz, ny, nx), "smag_rtke"))
+    _zero_buffers(state, cleared, "_fixed_tendency_zero_launch")
+    if cfg.km_opt in (2, 5):
         # A term this configuration never produces must read as an accurate
         # zero for the step, not as the previous step's value.
         tke_budget.clear_fields(state, cfg)
