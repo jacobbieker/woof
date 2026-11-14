@@ -13,6 +13,7 @@ def verify() -> dict:
     from woof.hex.coupled import oracle, registry
     from woof.verify import mpas_seaice_evp_oracle as evp_oracle
     from woof.verify import mpas_seaice_presubcycle_oracle as presubcycle_oracle
+    from woof.verify import mpas_seaice_remap_checks_oracle as remap_checks_oracle
     from woof.verify import mpas_seaice_remap_oracle as remap_oracle
     from woof.verify import mpas_seaice_remap_sphere_oracle as remap_sphere_oracle
     from woof.verify import mpas_seaice_step_oracle as step_oracle
@@ -26,7 +27,8 @@ def verify() -> dict:
                     presubcycle_oracle.FIXTURE_DIR / "oracle-r4.npz", step_oracle.FIXTURE_DIR / "oracle-r4.npz",
                     remap_oracle.FIXTURE_DIR / "oracle-r4.npz", step_remap_oracle.FIXTURE_DIR / "oracle-r4.npz",
                     remap_sphere_oracle.FIXTURE_DIR / "oracle-r4.npz",
-                    step_remap_sphere_oracle.FIXTURE_DIR / "oracle-r4.npz"):
+                    step_remap_sphere_oracle.FIXTURE_DIR / "oracle-r4.npz",
+                    remap_checks_oracle.FIXTURE_DIR / "oracle-r4.npz"):
         if not fixture.is_file():
             raise FileNotFoundError(
                 f"the MPAS-Seaice oracle fixture is not here ({fixture.parent}); it ships with the "
@@ -66,6 +68,9 @@ def verify() -> dict:
     for precision in step_remap_sphere_oracle.PRECISIONS:
         pieces.append(piece(f"time_step_incremental_remap_sphere_{precision}", timestep_v842,
                             step_remap_sphere_oracle, step_remap_sphere_oracle.measure(precision)))
+    for precision in remap_checks_oracle.PRECISIONS:
+        pieces.append(piece(f"incremental_remap_checks_{precision}", remap_v842, remap_checks_oracle,
+                            remap_checks_oracle.measure(precision)))
     return {
         "model": "seaice",
         "status": registry.component("seaice").status,

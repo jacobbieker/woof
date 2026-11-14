@@ -24,12 +24,16 @@ module mpas_log
   use mpas_kind_types
   implicit none
   private
-  public :: mpas_log_write, MPAS_LOG_WARN, MPAS_LOG_ERR, MPAS_LOG_CRIT, stub_log_warn_unit
+  public :: mpas_log_write, MPAS_LOG_WARN, MPAS_LOG_ERR, MPAS_LOG_CRIT, stub_log_warn_unit, stub_log_err_unit
 
   integer, parameter :: MPAS_LOG_WARN = 2, MPAS_LOG_ERR = 3, MPAS_LOG_CRIT = 4
   ! a unit a driver opened to record warnings (message, integer and real
   ! arguments, the reals to 17 digits); 0 drops them
   integer :: stub_log_warn_unit = 0
+  ! a unit a driver opened to record MPAS_LOG_ERR messages (as the warnings);
+  ! with it set they are recorded and the run goes on, as in MPAS, where only
+  ! MPAS_LOG_CRIT aborts; 0 (the default) stops on them
+  integer :: stub_log_err_unit = 0
 
 contains
 
@@ -48,7 +52,11 @@ contains
         if (present(intArgs)) write(stub_log_warn_unit, '(a,*(1x,i0))') 'INTS', intArgs
         if (present(realArgs)) write(stub_log_warn_unit, '(a,*(1x,es25.17e3))') 'REALS', realArgs
       end if
-      if (messageType == MPAS_LOG_ERR .or. messageType == MPAS_LOG_CRIT) then
+      if (messageType == MPAS_LOG_ERR .and. stub_log_err_unit /= 0) then
+        write(stub_log_err_unit, '(a)') 'ERR ' // trim(message)
+        if (present(intArgs)) write(stub_log_err_unit, '(a,*(1x,i0))') 'INTS', intArgs
+        if (present(realArgs)) write(stub_log_err_unit, '(a,*(1x,es25.17e3))') 'REALS', realArgs
+      else if (messageType == MPAS_LOG_ERR .or. messageType == MPAS_LOG_CRIT) then
         print *, 'oracle stub: mpas_log_write: ', trim(message)
         stop 7
       end if

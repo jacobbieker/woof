@@ -123,7 +123,9 @@ RBF reconstruction coefficients (`coeffs_reconstruct`) are the input's:
 
 The third argument is a log file. It gets the ordered tracer list, every
 warning the routines log (the mean-recovery check, with its real arguments
-to 17 digits) and stage 4's error code.
+to 17 digits), every MPAS_LOG_ERR message (the conservation and monotonicity
+checks; the stubs' `stub_log_err_unit` records them and carries on, as MPAS
+does, where by default they stop) and stage 4's error code.
 
 `remap_standins.F90` also supplies:
 - `seaice_error`'s codes;
@@ -143,9 +145,12 @@ are built with correctly rounded operations only (no libm trigonometry, BLAS
 or LAPACK), so their input words are the same on every host.
 
 `make_remap_fixture.py` writes `tests/data/oracles/mpas_seaice_remap` (with
-`--sphere`, `tests/data/oracles/mpas_seaice_remap_sphere`). For each case it
-keeps the output fields whose words changed, and writes `remap-logs.json`
-(the tracer lists and warnings).
+`--sphere`, `tests/data/oracles/mpas_seaice_remap_sphere`; with `--checks`,
+the conservation and monotonicity checks' cases,
+`woof.verify.mpas_seaice_remap_checks_oracle`, into
+`tests/data/oracles/mpas_seaice_remap_checks`). For each case it keeps the
+output fields whose words changed, and writes `remap-logs.json` (the tracer
+lists, warnings and error messages).
 
 The time-step oracle (`run_seaice_step.F90`) runs `seaice_init_advection` and,
 under `config_use_advection`, `seaice_run_advection` (both
