@@ -638,7 +638,7 @@ module mpas_derived_types
   public
 
   type mpas_dminfo_type
-    integer :: nprocs = 1
+    integer :: nprocs = 1, my_proc_id = 0
   end type mpas_dminfo_type
 
   ! the equation of state declares a dm_info it never uses

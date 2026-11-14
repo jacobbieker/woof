@@ -92,7 +92,7 @@ for precision in r4 r8; do
       cut() {  # cut FILE ROUTINE...: the routines, verbatim
           local file=$1; shift
           for routine in "$@"; do
-              awk -v r="${routine}" '$0 ~ "^ *subroutine +" r "\\(" {on=1} on {print} on && $0 ~ "^ *end subroutine +" r "[^a-zA-Z_0-9]" {on=0}' "${file}"
+              awk -v r="${routine}" '$0 ~ "^ *subroutine +" r "\\(" {on=1} on {print} on && $0 ~ "^ *end subroutine +" r "([^a-zA-Z_0-9]|$)" {on=0}' "${file}"
           done
       }
       "${fc[@]}" "${flags[@]}" "${source_root}/src/framework/mpas_kind_types.F"
