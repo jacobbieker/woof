@@ -36,11 +36,14 @@ Written by `tools/mpas_ocean_oracle/build.sh` and
 | `split_three_steps` | 7 x 6 | 8 | 3 | 120 s / 50 s (3 subcycles, a remainder) | split-explicit cold start, an odd step count |
 | `split_jm_rich_bulk` | 8 x 6 | 10 | 4 | 180 s / 60 s | JM, Jacobian_from_TS, Richardson mixing, bulk forcing with Jerlov, budgets, tracer del2, the coupler's running means over four steps |
 | `unsplit_two_steps` | 6 x 5 | 6 | 2 | 60 s / 20 s | unsplit-explicit cold start, constant vertical mixing |
+| `split_nested_halos` | 12 x 6, 3 owned columns | 8 | 3 | 120 s / 30 s | one block of a decomposition: owned cells and three halo layers numbered by layer, nested `nCellsArray`/`nEdgesArray`/`nVerticesArray` (16/26/36/48 cells), the outermost halo pointing at the missing cell |
 | `split_filter_btr_mode` | 6 x 6 | 7 | 2 | 120 s / 40 s | `config_filter_btr_mode`'s cold start; the clock across a leap day (2000-02-28 23:58 to 2000-02-29), days since a start in January |
 
 The meshes are `woof.verify.mpas_ocean_hexmesh.hex_mesh`'s: hexagonal cells on
 a doubly periodic torus, with a sixth culled as land the way MPAS culls
-meshes. Their extents, masks, signs and kite indices are derived as v8.4.2's
+meshes. With `owned_columns`, the mesh is one block of a decomposition: its own
+cells, three halo layers of neighbours, and nothing beyond. Halo exchanges are
+the identity on one block, as in the other oracles. Their extents, masks, signs and kite indices are derived as v8.4.2's
 init routines derive them, and their geometry is random.
 
 ## Grading
