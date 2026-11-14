@@ -627,9 +627,20 @@ def remap_block(tree, *, pools: dict, mesh: dict, configs: dict, dt) -> tuple[in
 
 
 def check_tree(tree) -> None:
-    """Refuse a tracer list v8.4.2's update cannot run: a second mass-like
+    """Refuse a tracer list v8.4.2's remap cannot run: a second mass-like
     field (a tracer whose parent the packages leave out) is updated against a
-    freed dummy tracer."""
+    freed dummy tracer, and a tracer whose parent was dropped as inactive (an
+    inactive iceAreaCategory: remove_inactive_tracers only checks children
+    with nParents > 1) is reconstructed against a parent outside the list."""
+    kept = set(map(id, tree))
+    orphan = [t for t in tree if t.parent is not None and id(t.parent) not in kept]
+    if orphan:
+        raise ConfigurationRefusal(
+            knob=f"tracer {orphan[0].parent.name}", value="inactive",
+            reason=f"{orphan[0].parent.name} is inactive but its child {orphan[0].name} is active; v8.4.2's "
+                   "remove_inactive_tracers drops the parent without stopping (it checks only children with "
+                   "nParents > 1), so the remap would read a parent outside the tracer list",
+            declaration="every active tracer's parent active")
     extra = [t.name for t in tree[1:] if t.n_parents == 0]
     if extra:
         raise ConfigurationRefusal(

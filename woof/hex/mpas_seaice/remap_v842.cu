@@ -679,16 +679,16 @@ extern "C" __global__ void seaice_ir_recover_means_v842(
     // the ancestors' indices: from the mass-like field (level depth-1) down to this tracer (level 0)
     const int i0 = cc * nLayers + (nLayers == 1 ? 0 : layer), i1 = cc * l1 + (l1 == 1 ? 0 : layer);
     const int i2 = cc * l2 + (l2 == 1 ? 0 : layer), i3 = cc * l3 + (l3 == 1 ? 0 : layer);
-    rk fracEdgeArea[16];
+    // fracEdgeArea is recomputed in the second loop (the same words; no per-thread array bounded by maxEdges)
     rk sumArea = C(0.0);
     for (int k = 0; k < n; ++k) {
         const int e = edgesOnCell[c * maxEdges + k] - 1;
-        fracEdgeArea[k] = M(M(C(0.25), dcEdge[e]), dvEdge[e]);
-        sumArea = A(sumArea, fracEdgeArea[k]);
+        sumArea = A(sumArea, M(M(C(0.25), dcEdge[e]), dvEdge[e]));
     }
     rk cell = C(0.0);
     for (int k = 0; k < n; ++k) {
-        fracEdgeArea[k] = D(fracEdgeArea[k], sumArea);
+        const int e = edgesOnCell[c * maxEdges + k] - 1;
+        const rk fracEdgeArea = D(M(M(C(0.25), dcEdge[e]), dvEdge[e]), sumArea);
         const rk x1v = C(0.0), y1v = C(0.0);
         const rk x2v = xVertexOnCell[c * maxEdges + k], y2v = yVertexOnCell[c * maxEdges + k];
         const int kp = k + 1 < n ? k + 1 : 0;
@@ -710,7 +710,7 @@ extern "C" __global__ void seaice_ir_recover_means_v842(
             v = M(A(A(c0[i0], M(x0[i0], xq[q])), M(y0[i0], yq[q])), v);
             triangle = A(triangle, M(q < 3 ? IR_W1 : IR_W2, v));
         }
-        cell = A(cell, M(fracEdgeArea[k], triangle));
+        cell = A(cell, M(fracEdgeArea, triangle));
     }
     const rk diff = S(cell, product[i]);
     reconstructed[i] = cell;

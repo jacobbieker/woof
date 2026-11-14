@@ -305,3 +305,13 @@ def test_a_second_mass_like_field_is_refused_at_run_time():
     case = next(c for c in ro.cases("r8") if c["name"] == "tree_inactive_leaf")
     with pytest.raises(ConfigurationRefusal, match="mass-like"):
         rv.check_tree(ro.gpu_tree(case))
+
+
+def test_an_inactive_mass_field_with_active_children_is_refused_at_run_time():
+    from woof.hex.mpas_seaice import remap_v842 as rv
+    tree = rv.tracer_tree({}, {}, lambda name: name != "iceAreaCategory")
+    assert all(t.name != "iceAreaCategory" for t in tree)
+    with pytest.raises(ConfigurationRefusal, match="iceAreaCategory is inactive"):
+        rv.check_tree(tree)
+    with pytest.raises(ConfigurationRefusal, match="iceAreaCategory is inactive"):
+        rv.run(tree, pools={}, mesh={}, configs={})
