@@ -1756,6 +1756,11 @@ RADIATION_CALLABLE_CONTAINERS = frozenset({
     # construction (never mutated per call); _night_outputs is a
     # per-radiation-call product fully rebuilt before every consumption.
     "_C", "_sw_tables", "_cuda_sw", "_ozone_climo", "_night_outputs",
+    # hex's aer_opt = 2 records (woof.core.aer_opt2.UserAerosolFrames): the
+    # auxinput15 frames remapped to the cells, set once at construction from
+    # the sealed constructor's own inputs (they are in its digest) and never
+    # mutated -- rebuild-on-load by the resumed run's identical constructor.
+    "user_aerosol_frames",
     # _ozone is the woof.ingest.wrf_ozone MODULE reference (its globals
     # include cached climatology arrays); modules are code, not state.
     "_ozone",

@@ -733,6 +733,8 @@
     "aer_opt": {
       "values": [
         0,
+        1,
+        2,
         3
       ],
       "slot": "radiation_scheme",
