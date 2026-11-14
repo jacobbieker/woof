@@ -112,3 +112,15 @@ def test_host_setup_state_takes_its_level_targets_in_numpy():
     np.testing.assert_array_equal(press, np.float32([92500., 85000.]))
     np.testing.assert_array_equal(state.existing_scratch('level_z_targets'),
                                   np.float32([-10., 1000., 3000.]))
+
+
+def test_reference_constants_fall_back_to_the_run_base_state():
+    """A woof go preparation or a nest has no input-file frame; the level
+    diagnostics then read the base state the run is built on (p_lev/z_lev
+    on a real-data case stopped with 'requires input reference constant P00')."""
+    from types import SimpleNamespace as NS
+    from woof.core.level_output import reference_constants
+    cfg = NS(base_temp=290.0)
+    assert reference_constants(cfg, {}) == [np.float32(1.0e5), np.float32(290.0), np.float32(50.0)]
+    frame = {'P00': np.float32(1.0e5), 'T00': np.float32(300.0), 'TLP': np.float32(42.0)}
+    assert reference_constants(cfg, frame) == [np.float32(1.0e5), np.float32(300.0), np.float32(42.0)]

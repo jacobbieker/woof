@@ -12,6 +12,9 @@ from ..mpasdiag.utils import DiagnosticsUtils, Direction, StreamView
 from ..mpasdiag import nwp_diag_v842 as _nwp
 from ..mpasdiag import tslist_v842 as _tslist
 from ..mpasdiag import plevel_diag_v842 as _plevel
+from ..mpasdiag import acc_diag_v842 as _acc
+from ..mpasdiag import afwa_diag_v842 as _afwa
+from ..mpasdiag import reduction_diag_v842 as _reduce
 
 
 PRIMARY = frozenset(('vorticity', 'divergence', 'ke'))
@@ -85,6 +88,13 @@ class ResidentOutputDiagnostics:
     tslist = None
     #: WRF's p_lev / z_lev diagnostics (mpasdiag.plevel_diag_v842); built by bind() only with config_p_lev_diags / config_z_lev_diags.
     plevel = None
+    #: WRF's prec_acc_dt windows / acc_phy_tend accumulators (mpasdiag.acc_diag_v842); built by bind() only with
+    #: config_prec_acc_dt / config_acc_phy_tend.
+    accdiag = None
+    #: WRF's AFWA diagnostics (mpasdiag.afwa_diag_v842); built by bind() only with a config_afwa_*_opt option.
+    afwa = None
+    #: WRF's CLWRF / RASM / surface-energy reductions (mpasdiag.reduction_diag_v842); built by bind() only with their options.
+    reduction = None
     #: The running maxima/accumulators of the convective module (``accumulates``).
     convective_maxima = MAXIMA
     #: Pools the diagnostic modules read.
@@ -118,6 +128,12 @@ class ResidentOutputDiagnostics:
                  for name in self.convective_maxima if ('diag', name) in self.buffers}
         if self.nwp is not None:
             state.update(self.nwp.state())
+        if self.accdiag is not None:
+            state.update(self.accdiag.state())
+        if self.afwa is not None:
+            state.update(self.afwa.state())
+        if self.reduction is not None:
+            state.update(self.reduction.state())
         return state
 
     def resume_accumulators(self, state):
@@ -139,6 +155,15 @@ class ResidentOutputDiagnostics:
         if self.nwp is not None:
             self._resume.update((name, value) for name, value in state.items()
                                 if name.startswith(_nwp.STATE_PREFIX))
+        if self.accdiag is not None:
+            self._resume.update((name, value) for name, value in state.items()
+                                if name.startswith(_acc.STATE_PREFIX))
+        if self.afwa is not None:
+            self._resume.update((name, value) for name, value in state.items()
+                                if name.startswith(_afwa.STATE_PREFIX))
+        if self.reduction is not None:
+            self._resume.update((name, value) for name, value in state.items()
+                                if name.startswith(_reduce.STATE_PREFIX))
 
     def buffer(self, pool, name):
         key = pool, name
@@ -216,6 +241,21 @@ class ResidentOutputDiagnostics:
             self.tslist = _tslist.TslistModule(self, stations)
             self.tslist.setup()
             self.accumulates = True
+        if {_acc.PREC_PACKAGE, _acc.TEND_PACKAGE} & set(self.session.layout.packages):
+            self.accdiag = _acc.AccumulatorModule(self, self.session.config.acc_diagnostics)
+            self.produced = self.produced | frozenset(_acc.NAMES)
+            self.accdiag.setup(self.utils, self.dycore.config.config_dt)
+            self.accumulates = self.accumulates or self.accdiag.accumulates
+        if set(_reduce.PACKAGES) & set(self.session.layout.packages):
+            self.reduction = _reduce.ReductionModule(self, self.session.config.reduction_diagnostics)
+            self.produced = self.produced | frozenset(_reduce.NAMES)
+            self.reduction.setup(self.utils, self.dycore.config.config_dt)
+            self.accumulates = self.accumulates or self.reduction.accumulates
+        if set(_afwa.SELECTORS) & set(self.session.layout.packages):
+            self.afwa = _afwa.AfwaModule(self, self.session.config.afwa_diagnostics)
+            self.produced = self.produced | frozenset(_afwa.NAMES)
+            self.afwa.setup(self.utils)
+            self.accumulates = self.accumulates or self.afwa.accumulates
         if {_plevel.P_PACKAGE, _plevel.Z_PACKAGE} & set(self.session.layout.packages):
             self.plevel = _plevel.LevelDiagnosticsModule(self, self.session.config.plevel_diagnostics)
             self.produced = self.produced | frozenset(_plevel.NAMES)
@@ -234,6 +274,12 @@ class ResidentOutputDiagnostics:
         self.convective.update()
         if self.nwp is not None:
             self.nwp.update()
+        if self.accdiag is not None:
+            self.accdiag.update()
+        if self.afwa is not None:
+            self.afwa.update()
+        if self.reduction is not None:
+            self.reduction.update()
         if self.tslist is not None:
             self.tslist.update()
 
@@ -301,6 +347,12 @@ class ResidentOutputDiagnostics:
         self.when = when
         if self.tslist is not None:
             self.tslist.begin(step, when)
+        if self.accdiag is not None:
+            self.accdiag.begin(step, when)
+        if self.afwa is not None:
+            self.afwa.begin(step, when)
+        if self.reduction is not None:
+            self.reduction.begin(step, when)
         # No stream is due on a deferred step, so only the maxima read the
         # primary diagnostics: vorticity alone (divergence/KE are formed
         # again by before_write whenever a stream needs them).
@@ -337,15 +389,27 @@ class ResidentOutputDiagnostics:
         self.when = when
         if self.tslist is not None:
             self.tslist.begin(step, when)
+        if self.accdiag is not None:
+            self.accdiag.begin(step, when)
+        if self.afwa is not None:
+            self.afwa.begin(step, when)
+        if self.reduction is not None:
+            self.reduction.begin(step, when)
         self._begin_event()
         resume, self._resume = (self._resume, None) if step == 0 else (None, self._resume)
         if resume is not None:
             for name, value in resume.items():
-                if not name.startswith(_nwp.STATE_PREFIX):
+                if not name.startswith((_nwp.STATE_PREFIX, _acc.STATE_PREFIX, _afwa.STATE_PREFIX, _reduce.STATE_PREFIX)):
                     target = self.buffers['diag', name]
                     target[...] = self.cp.asarray(value).reshape(target.shape)
             if self.nwp is not None:
                 self.nwp.resume(resume)
+            if self.accdiag is not None:
+                self.accdiag.resume(resume)
+            if self.afwa is not None:
+                self.afwa.resume(resume)
+            if self.reduction is not None:
+                self.reduction.resume(resume)
         elif step == 0:
             self.convective.reset()
             if self.nwp is not None:
@@ -358,6 +422,12 @@ class ResidentOutputDiagnostics:
         self.convective.compute()
         if self.nwp is not None:
             self.nwp.compute()
+        if self.accdiag is not None:
+            self.accdiag.compute()
+        if self.afwa is not None:
+            self.afwa.compute()
+        if self.reduction is not None:
+            self.reduction.compute()
         if self.plevel is not None:
             self.plevel.compute()
         self.updates += 1

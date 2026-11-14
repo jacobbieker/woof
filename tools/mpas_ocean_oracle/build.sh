@@ -6,7 +6,8 @@
 # advection; run_tracer_hmix: horizontal tracer mixing; run_tend_tracer:
 # ocn_tend_tracer; run_vmix: implicit vertical mixing; run_vert_transport:
 # ocn_vert_transport_velocity_top; run_btr_subcycle: the split-explicit
-# barotropic stage) at the
+# barotropic stage; run_split_step: the whole split-explicit step;
+# run_forward: the forward mode over N steps) at the
 # strict recipe, in both precisions.
 #
 #   bash tools/mpas_ocean_oracle/build.sh MPAS_SOURCE_ROOT BUILD_DIR
@@ -73,7 +74,7 @@ for precision in r4 r8; do
       done
       { cat "${script_dir}/diagnostics_cut_head.F90"
         for routine in ocn_diagnostic_solve ocn_diagnostics_init ocn_compute_land_ice_flux_input_fields \
-                       ocn_compute_KPP_input_fields ocn_vert_transport_velocity_top; do
+                       ocn_compute_KPP_input_fields ocn_vert_transport_velocity_top ocn_fuperp; do
             awk -v r="${routine}" '$0 ~ "^ *subroutine " r "\\(" {on=1} on {print} on && $0 ~ "^ *end subroutine " r "[^a-zA-Z_]" {on=0}' \
                 "${ocean}/mpas_ocn_diagnostics.F"
         done
@@ -126,7 +127,36 @@ for precision in r4 r8; do
         echo "    end subroutine ocn_btr_stage"
         echo "end module ocn_btr_stage_cut"; } > ocn_btr_stage_cut.F
       "${fc[@]}" "${flags[@]}" -I.. ocn_btr_stage_cut.F
-      "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/run_btr_subcycle.F90" )
+      "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/run_btr_subcycle.F90"
+      # the whole split-explicit step: the vector reconstruction's two routines
+      # and ocn_time_integrator_split cut verbatim (awk ranges), the time
+      # averaging and land-ice effective density verbatim, GM's stand-ins
+      { cat "${script_dir}/vector_reconstruction_cut_head.F90"
+        for routine in mpas_reconstruct_2d mpas_reconstruct_1d; do
+            awk -v r="${routine}" '$0 ~ "^ *subroutine " r "\\(" {on=1} on {print} on && $0 ~ "^ *end subroutine " r "[^a-zA-Z_0-9]" {on=0}' \
+                "${source_root}/src/operators/mpas_vector_reconstruction.F"
+        done
+        echo "end module mpas_vector_reconstruction"; } > mpas_vector_reconstruction_cut.F
+      "${fc[@]}" "${flags[@]}" -I.. mpas_vector_reconstruction_cut.F
+      "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/stubs_split.F90"
+      for unit in mpas_ocn_time_average_coupled mpas_ocn_effective_density_in_land_ice; do
+          "${fc[@]}" "${flags[@]}" -I.. "${ocean}/${unit}.F"
+      done
+      { cat "${script_dir}/split_step_cut_head.F90"
+        awk '/^ *subroutine ocn_time_integrator_split\(domain, dt\)/ {on=1} on {print} on && /^ *end subroutine ocn_time_integrator_split/ {on=0}' "${split}"
+        awk '/^ *subroutine ocn_time_integration_split_init\(domain\)/ {on=1} on {print} on && /^ *end subroutine ocn_time_integration_split_init/ {on=0}' "${split}"
+        echo "end module ocn_split_step_cut"; } > ocn_split_step_cut.F
+      "${fc[@]}" "${flags[@]}" -I.. ocn_split_step_cut.F
+      "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/run_split_step.F90"
+      # the forward mode: ocn_timestep and ocn_timestep_init cut verbatim
+      { cat "${script_dir}/timestep_cut_head.F90"
+        for routine in ocn_timestep ocn_timestep_init; do
+            awk -v r="${routine}" '$0 ~ "^ *subroutine " r "\\(" {on=1} on {print} on && $0 ~ "^ *end subroutine " r "[^a-zA-Z_0-9]" {on=0}' \
+                "${source_root}/src/core_ocean/mode_forward/mpas_ocn_time_integration.F"
+        done
+        echo "end module ocn_timestep_cut"; } > ocn_timestep_cut.F
+      "${fc[@]}" "${flags[@]}" -I.. ocn_timestep_cut.F
+      "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/run_forward.F90" )
     if command -v objdump >/dev/null; then
         if objdump -d mpas_ocn_*.o eos/mpas_ocn_*.o eos/ocn_*.o mpas_constants.o | grep -Eq '\bv?fn?m(add|sub)([0-9]|[[:space:]]|$)'; then
             echo "an oracle object contains an FMA instruction; refusing" >&2
@@ -168,6 +198,25 @@ for precision in r4 r8; do
         ${libm_objects[@]+"${libm_objects[@]}"}
     "${fc[@]}" -o "${build_dir}/run_btr_subcycle_${precision}" eos/run_btr_subcycle.o eos/oracle_stream.o \
         eos/ocn_btr_stage_cut.o mpas_constants.o stubs.o mpas_kind_types.o
+    # the step: every real module of the tendencies, diagnostics, tracers and vertical mixing
+    "${fc[@]}" -o "${build_dir}/run_split_step_${precision}" eos/run_split_step.o eos/oracle_stream.o \
+        eos/ocn_split_step_cut.o eos/mpas_vector_reconstruction_cut.o eos/stubs_split.o \
+        eos/mpas_ocn_time_average_coupled.o eos/mpas_ocn_effective_density_in_land_ice.o \
+        eos/mpas_ocn_tendency.o eos/mpas_ocn_surface_bulk_forcing.o eos/mpas_ocn_tracer_*.o \
+        eos/mpas_tracer_advection_helpers_cut.o eos/ocn_diagnostics_cut.o eos/mpas_ocn_diagnostics_routines.o \
+        eos/mpas_ocn_thick_ale.o eos/mpas_ocn_vmix*.o eos/stubs_vmix.o eos/mpas_ocn_equation_of_state*.o \
+        mpas_ocn_vel_*.o mpas_ocn_thick_hadv.o mpas_ocn_thick_vadv.o mpas_ocn_thick_surface_flux.o mpas_ocn_forcing.o \
+        mpas_ocn_constants.o mpas_constants.o stubs_unported.o stubs.o mpas_kind_types.o \
+        ${libm_objects[@]+"${libm_objects[@]}"}
+    "${fc[@]}" -o "${build_dir}/run_forward_${precision}" eos/run_forward.o eos/ocn_timestep_cut.o eos/oracle_stream.o \
+        eos/ocn_split_step_cut.o eos/mpas_vector_reconstruction_cut.o eos/stubs_split.o \
+        eos/mpas_ocn_time_average_coupled.o eos/mpas_ocn_effective_density_in_land_ice.o \
+        eos/mpas_ocn_tendency.o eos/mpas_ocn_surface_bulk_forcing.o eos/mpas_ocn_tracer_*.o \
+        eos/mpas_tracer_advection_helpers_cut.o eos/ocn_diagnostics_cut.o eos/mpas_ocn_diagnostics_routines.o \
+        eos/mpas_ocn_thick_ale.o eos/mpas_ocn_vmix*.o eos/stubs_vmix.o eos/mpas_ocn_equation_of_state*.o \
+        mpas_ocn_vel_*.o mpas_ocn_thick_hadv.o mpas_ocn_thick_vadv.o mpas_ocn_thick_surface_flux.o mpas_ocn_forcing.o \
+        mpas_ocn_constants.o mpas_constants.o stubs_unported.o stubs.o mpas_kind_types.o \
+        ${libm_objects[@]+"${libm_objects[@]}"}
 done
 {
     echo "gfortran: $("${fc[@]}" --version | head -1)"
@@ -175,4 +224,4 @@ done
     echo "host: $(uname -srm)"
     cat "${build_dir}/r4/libm.txt"
 } > "${build_dir}/TOOLCHAIN.txt"
-echo "built ${build_dir}/run_{oracle,pgrad_hmix,tendency,eos,diagnostics,tracer_advection,tracer_hmix,tend_tracer,vmix,vert_transport,btr_subcycle}_{r4,r8}"
+echo "built ${build_dir}/run_{oracle,pgrad_hmix,tendency,eos,diagnostics,tracer_advection,tracer_hmix,tend_tracer,vmix,vert_transport,btr_subcycle,split_step,forward}_{r4,r8}"

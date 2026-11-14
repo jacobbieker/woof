@@ -62,9 +62,9 @@ module mpas_pool_routines
             field1DReal, field2DReal, field3DReal, mpas_pool_get_field, stub_pool_put_field, &
             mpas_allocate_scratch_field, mpas_deallocate_scratch_field, &
             mpas_pool_iterator_type, MPAS_POOL_FIELD, mpas_pool_begin_iteration, mpas_pool_get_next_member, &
-            mpas_pool_get_package
+            mpas_pool_get_package, mpas_pool_shift_time_levels, mpas_pool_initialize_time_levels
 
-  integer, parameter :: maxEntries = 192
+  integer, parameter :: maxEntries = 320
 
   ! a scratch field: the driver sets dimSizes, mpas_allocate_scratch_field
   ! allocates array to them
@@ -133,7 +133,7 @@ module mpas_pool_routines
   end interface stub_pool_put_dimension
 
   interface mpas_pool_get_array
-    module procedure get_r0, get_r1, get_r2, get_r3, get_i1, get_i2
+    module procedure get_r0, get_r1, get_r2, get_r3, get_i0, get_i1, get_i2, get_c0
   end interface mpas_pool_get_array
 
   interface mpas_pool_get_field
@@ -263,6 +263,75 @@ contains
     real(kind=RKIND), pointer :: value
     value => pool % e(find(pool, name)) % r0
   end subroutine get_config_r
+
+  ! a character field (xtime): the stream puts it as a character config of the pool
+  subroutine get_c0(pool, name, a)
+    type(MPAS_pool_type), intent(in) :: pool
+    character(len=*), intent(in) :: name
+    character(len=StrKIND), pointer :: a
+    a => pool % e(find(pool, name)) % c0
+  end subroutine get_c0
+
+  ! MPAS's mpas_pool_shift_time_levels for two levels: each field NAME and its
+  ! level NAME@2 trade arrays, in the pool and its subpools
+  recursive subroutine mpas_pool_shift_time_levels(pool)
+    type(MPAS_pool_type), intent(inout) :: pool
+    integer :: i, j
+    real(kind=RKIND), dimension(:), pointer :: t1
+    real(kind=RKIND), dimension(:,:), pointer :: t2
+    real(kind=RKIND), dimension(:,:,:), pointer :: t3
+    do i = 1, pool % n
+      if (associated(pool % e(i) % sub)) then
+        call mpas_pool_shift_time_levels(pool % e(i) % sub)
+        cycle
+      end if
+      j = level_two(pool, i)
+      if (j == 0) cycle
+      t1 => pool % e(i) % r1; pool % e(i) % r1 => pool % e(j) % r1; pool % e(j) % r1 => t1
+      t2 => pool % e(i) % r2; pool % e(i) % r2 => pool % e(j) % r2; pool % e(j) % r2 => t2
+      t3 => pool % e(i) % r3; pool % e(i) % r3 => pool % e(j) % r3; pool % e(j) % r3 => t3
+    end do
+  end subroutine mpas_pool_shift_time_levels
+
+  ! MPAS's mpas_pool_initialize_time_levels for two levels: NAME@2 takes NAME's words
+  recursive subroutine mpas_pool_initialize_time_levels(pool)
+    type(MPAS_pool_type), intent(inout) :: pool
+    integer :: i, j
+    do i = 1, pool % n
+      if (associated(pool % e(i) % sub)) then
+        call mpas_pool_initialize_time_levels(pool % e(i) % sub)
+        cycle
+      end if
+      j = level_two(pool, i)
+      if (j == 0) cycle
+      if (associated(pool % e(i) % r1) .and. associated(pool % e(j) % r1)) pool % e(j) % r1 = pool % e(i) % r1
+      if (associated(pool % e(i) % r2) .and. associated(pool % e(j) % r2)) pool % e(j) % r2 = pool % e(i) % r2
+      if (associated(pool % e(i) % r3) .and. associated(pool % e(j) % r3)) pool % e(j) % r3 = pool % e(i) % r3
+    end do
+  end subroutine mpas_pool_initialize_time_levels
+
+  ! the entry NAME@2 of entry i's field, or 0
+  integer function level_two(pool, i)
+    type(MPAS_pool_type), intent(in) :: pool
+    integer, intent(in) :: i
+    integer :: j
+    level_two = 0
+    if (index(pool % e(i) % name, '@') /= 0) return
+    do j = 1, pool % n
+      if (trim(pool % e(j) % name) == trim(pool % e(i) % name) // '@2') then
+        level_two = j
+        return
+      end if
+    end do
+  end function level_two
+
+  ! an integer scalar field (nAccumulatedCoupled): the stream puts it as a dimension
+  subroutine get_i0(pool, name, a)
+    type(MPAS_pool_type), intent(in) :: pool
+    character(len=*), intent(in) :: name
+    integer, pointer :: a
+    a => pool % e(find(pool, name)) % i0
+  end subroutine get_i0
 
   subroutine get_r0(pool, name, a)
     type(MPAS_pool_type), intent(in) :: pool
@@ -437,7 +506,9 @@ contains
     p % cursor = p % cursor + 1
     iterator % memberName = p % e(p % cursor) % name
     iterator % memberType = 0
-    if (associated(p % e(p % cursor) % r3)) iterator % memberType = MPAS_POOL_FIELD
+    ! a field's level NAME@N is not a member of its own
+    if (associated(p % e(p % cursor) % r3) .and. index(p % e(p % cursor) % name, '@') == 0) &
+         iterator % memberType = MPAS_POOL_FIELD
     mpas_pool_get_next_member = .true.
   end function mpas_pool_get_next_member
 
@@ -448,11 +519,12 @@ contains
     p => pool
   end function pool_target
 
-  subroutine get_field_1d(pool, name, f)
+  subroutine get_field_1d(pool, name, f, timeLevel)
     type(MPAS_pool_type), intent(in) :: pool
     character(len=*), intent(in) :: name
     type(field1DReal), pointer :: f
-    f => pool % e(find(pool, name)) % f1
+    integer, intent(in), optional :: timeLevel
+    f => pool % e(find(pool, level_name(name, timeLevel))) % f1
   end subroutine get_field_1d
 
   subroutine put_field_1d(pool, name, f)
@@ -542,8 +614,25 @@ contains
 
 end module mpas_pool_routines
 
+module mpas_timekeeping_types
+  ! the time manager's types (whole seconds; mpas_timekeeping's routines)
+  use mpas_kind_types
+  implicit none
+  public
+  type MPAS_Time_type
+    integer(kind=I8KIND) :: s = 0
+  end type MPAS_Time_type
+  type MPAS_TimeInterval_type
+    integer(kind=I8KIND) :: s = 0
+  end type MPAS_TimeInterval_type
+  type MPAS_Clock_type
+    integer(kind=I8KIND) :: start = 0, now = 0, step = 0
+  end type MPAS_Clock_type
+end module mpas_timekeeping_types
+
 module mpas_derived_types
   use mpas_kind_types
+  use mpas_timekeeping_types
   use mpas_pool_routines
   implicit none
   public
@@ -567,6 +656,7 @@ module mpas_derived_types
   type domain_type
     type(block_type), pointer :: blocklist => null()
     type(MPAS_pool_type), pointer :: configs => null()
+    type(MPAS_Clock_type), pointer :: clock => null()
     type(mpas_dminfo_type) :: dminfo
   end type domain_type
 
@@ -579,9 +669,35 @@ module mpas_dmpar
   private
   public :: mpas_dmpar_min_real, mpas_dmpar_exch_group_create, mpas_dmpar_exch_group_add_field, &
             mpas_dmpar_exch_group_reuse_halo_exch, mpas_dmpar_exch_group_full_halo_exch, &
-            mpas_dmpar_exch_group_destroy
+            mpas_dmpar_exch_group_destroy, mpas_dmpar_field_halo_exch, mpas_dmpar_exch_halo_field
+
+  interface mpas_dmpar_exch_halo_field
+    module procedure exch_halo_field1d, exch_halo_field2d, exch_halo_field3d
+  end interface mpas_dmpar_exch_halo_field
 
 contains
+
+  subroutine mpas_dmpar_field_halo_exch(domain, fieldName, timeLevel, haloLayers)
+    type(domain_type), intent(inout) :: domain
+    character(len=*), intent(in) :: fieldName
+    integer, optional, intent(in) :: timeLevel
+    integer, dimension(:), optional, intent(in) :: haloLayers
+  end subroutine mpas_dmpar_field_halo_exch
+
+  subroutine exch_halo_field1d(field, haloLayersIn)
+    type(field1DReal), pointer :: field
+    integer, dimension(:), intent(in), optional :: haloLayersIn
+  end subroutine exch_halo_field1d
+
+  subroutine exch_halo_field2d(field, haloLayersIn)
+    type(field2DReal), pointer :: field
+    integer, dimension(:), intent(in), optional :: haloLayersIn
+  end subroutine exch_halo_field2d
+
+  subroutine exch_halo_field3d(field, haloLayersIn)
+    type(field3DReal), pointer :: field
+    integer, dimension(:), intent(in), optional :: haloLayersIn
+  end subroutine exch_halo_field3d
 
   ! One block on one rank: a halo exchange is the identity.
   subroutine mpas_dmpar_exch_group_create(domain, groupName, iErr)
@@ -753,9 +869,160 @@ contains
 end module mpas_tensor_operations
 
 module mpas_timekeeping
-  ! ocn_forcing and ocn_surface_bulk_forcing USE it; the routines the oracles
-  ! call read no time manager routine
+  ! The time manager the forward-mode oracle reaches, on whole seconds: a time
+  ! is the seconds since 0001-01-01_00:00:00 on the proleptic Gregorian
+  ! calendar (MPAS's default), an interval a count of seconds.  It parses and
+  ! writes MPAS's strings ('YYYY-MM-DD_hh:mm:ss', '[DDDD_]hh:mm:ss').
+  ! mpas_get_timeInterval's dt is the seconds as a real, as MPAS gives a whole
+  ! interval.  ocn_forcing and ocn_surface_bulk_forcing USE the module and
+  ! call nothing in it.
+  use mpas_kind_types
+  use mpas_timekeeping_types
   implicit none
+  private
+  public :: MPAS_Time_type, MPAS_TimeInterval_type, MPAS_Clock_type, MPAS_NOW, MPAS_START_TIME, &
+            mpas_get_clock_time, mpas_set_timeInterval, mpas_interval_division, mpas_set_time, mpas_get_time, &
+            mpas_get_timeInterval, mpas_advance_clock, mpas_set_clock, operator(>), operator(-)
+
+  integer, parameter :: MPAS_NOW = 1, MPAS_START_TIME = 2
+
+  interface operator(>)
+    module procedure interval_gt
+  end interface
+  interface operator(-)
+    module procedure time_minus
+  end interface
+
+contains
+
+  logical function interval_gt(a, b)
+    type(MPAS_TimeInterval_type), intent(in) :: a, b
+    interval_gt = a % s > b % s
+  end function interval_gt
+
+  function time_minus(a, b) result(d)
+    type(MPAS_Time_type), intent(in) :: a, b
+    type(MPAS_TimeInterval_type) :: d
+    d % s = a % s - b % s
+  end function time_minus
+
+  function mpas_get_clock_time(clock, whichTime, ierr) result(t)
+    type(MPAS_Clock_type), intent(in) :: clock
+    integer, intent(in) :: whichTime
+    integer, intent(out), optional :: ierr
+    type(MPAS_Time_type) :: t
+    t % s = clock % now
+    if (whichTime == MPAS_START_TIME) t % s = clock % start
+    if (present(ierr)) ierr = 0
+  end function mpas_get_clock_time
+
+  subroutine mpas_set_clock(clock, startString, stepString)
+    type(MPAS_Clock_type), intent(inout) :: clock
+    character(len=*), intent(in) :: startString, stepString
+    type(MPAS_Time_type) :: t
+    type(MPAS_TimeInterval_type) :: dt
+    call mpas_set_time(t, dateTimeString=startString)
+    call mpas_set_timeInterval(dt, timeString=stepString)
+    clock % start = t % s
+    clock % now = t % s
+    clock % step = dt % s
+  end subroutine mpas_set_clock
+
+  subroutine mpas_advance_clock(clock)
+    type(MPAS_Clock_type), intent(inout) :: clock
+    clock % now = clock % now + clock % step
+  end subroutine mpas_advance_clock
+
+  subroutine mpas_set_timeInterval(interval, S, timeString, ierr)
+    type(MPAS_TimeInterval_type), intent(out) :: interval
+    integer, intent(in), optional :: S
+    character(len=*), intent(in), optional :: timeString
+    integer, intent(out), optional :: ierr
+    integer :: u, d, h, m, sec
+    interval % s = 0
+    if (present(S)) interval % s = S
+    if (present(timeString)) then
+      u = index(timeString, '_')
+      d = 0
+      if (u > 0) read(timeString(1:u-1), *) d
+      read(timeString(u+1:u+2), *) h
+      read(timeString(u+4:u+5), *) m
+      read(timeString(u+7:u+8), *) sec
+      interval % s = ((int(d, I8KIND) * 24 + h) * 60 + m) * 60 + sec
+    end if
+    if (present(ierr)) ierr = 0
+  end subroutine mpas_set_timeInterval
+
+  subroutine mpas_interval_division(ref_time, num, den, n, rem)
+    type(MPAS_Time_type), intent(in) :: ref_time
+    type(MPAS_TimeInterval_type), intent(in) :: num, den
+    integer(kind=I8KIND), intent(out) :: n
+    type(MPAS_TimeInterval_type), intent(out) :: rem
+    n = num % s / den % s
+    rem % s = num % s - n * den % s
+  end subroutine mpas_interval_division
+
+  subroutine mpas_get_timeInterval(interval, dt, ierr)
+    type(MPAS_TimeInterval_type), intent(in) :: interval
+    real(kind=RKIND), intent(out), optional :: dt
+    integer, intent(out), optional :: ierr
+    if (present(dt)) dt = real(interval % s, RKIND)
+    if (present(ierr)) ierr = 0
+  end subroutine mpas_get_timeInterval
+
+  ! days since 0001-01-01 on the proleptic Gregorian calendar
+  integer(kind=I8KIND) function civil_days(y, mo, d)
+    integer, intent(in) :: y, mo, d
+    integer(kind=I8KIND) :: yy, era, yoe, doy, doe
+    yy = y
+    if (mo <= 2) yy = yy - 1
+    era = yy / 400
+    if (yy < 0 .and. mod(yy, 400_I8KIND) /= 0) era = era - 1
+    yoe = yy - era * 400
+    doy = (153 * (mo + merge(-3, 9, mo > 2)) + 2) / 5 + d - 1
+    doe = yoe * 365 + yoe / 4 - yoe / 100 + doy
+    civil_days = era * 146097 + doe - 306
+  end function civil_days
+
+  subroutine mpas_set_time(curr_time, dateTimeString, ierr)
+    type(MPAS_Time_type), intent(out) :: curr_time
+    character(len=*), intent(in) :: dateTimeString
+    integer, intent(out), optional :: ierr
+    integer :: y, mo, d, h, m, sec
+    read(dateTimeString(1:4), *) y
+    read(dateTimeString(6:7), *) mo
+    read(dateTimeString(9:10), *) d
+    read(dateTimeString(12:13), *) h
+    read(dateTimeString(15:16), *) m
+    read(dateTimeString(18:19), *) sec
+    curr_time % s = ((civil_days(y, mo, d) * 24 + h) * 60 + m) * 60 + sec
+    if (present(ierr)) ierr = 0
+  end subroutine mpas_set_time
+
+  subroutine mpas_get_time(curr_time, dateTimeString, ierr)
+    type(MPAS_Time_type), intent(in) :: curr_time
+    character(len=*), intent(out) :: dateTimeString
+    integer, intent(out), optional :: ierr
+    integer(kind=I8KIND) :: days, rest, z, era, doe, yoe, y, doy, mp, d, mo
+    days = curr_time % s / 86400
+    rest = curr_time % s - days * 86400
+    z = days + 306
+    era = z / 146097
+    if (z < 0 .and. mod(z, 146097_I8KIND) /= 0) era = era - 1
+    doe = z - era * 146097
+    yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
+    y = yoe + era * 400
+    doy = doe - (365 * yoe + yoe / 4 - yoe / 100)
+    mp = (5 * doy + 2) / 153
+    d = doy - (153 * mp + 2) / 5 + 1
+    mo = mp + 3
+    if (mo > 12) mo = mo - 12
+    if (mo <= 2) y = y + 1
+    write(dateTimeString, '(i4.4,"-",i2.2,"-",i2.2,"_",i2.2,":",i2.2,":",i2.2)') y, mo, d, rest / 3600, &
+         mod(rest, 3600_I8KIND) / 60, mod(rest, 60_I8KIND)
+    if (present(ierr)) ierr = 0
+  end subroutine mpas_get_time
+
 end module mpas_timekeeping
 
 ! modules the ocean units USE without calling anything in them here

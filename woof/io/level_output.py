@@ -123,9 +123,15 @@ class _Stream:
                 if not path.is_absolute():
                     path = self.owner.parent.output_dir.parent / path
                 attrs = self.owner.parent._writers[node.cfg.grid_id].global_attrs
+                # Every create, write and close of this tape runs inside
+                # _NETCDF4_IO_LOCK (here and in close()), so the tape must not
+                # take that non-reentrant lock again for its closing
+                # validation.  THE BREAKAGE: the first closed level tape
+                # deadlocked the run (auxhist22/23 writers and every wrfout
+                # writer waiting on the lock its own thread held).
                 self.tape = LevelTape(path, nx=cfg.nx, ny=cfg.ny, nz=cfg.nz,
                     dx=cfg.dx, dy=cfg.dy, title=self.owner.parent.title,
-                    global_attrs=attrs, field_schema=fields)
+                    global_attrs=attrs, field_schema=fields, _session_locked=True)
                 self.paths.append(path)
             self.tape.write_frame(valid_string, fields)
             self.count += 1

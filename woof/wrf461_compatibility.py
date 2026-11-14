@@ -164,6 +164,13 @@ AXIS_EXCLUSIONS = MappingProxyType({
         "share/module_check_a_mundo.F:2294-2299 law."),
     ("sf_sfclay_physics", 10): (
         "The other side of the same TEMF bidirectional coupling row."),
+    ("sf_sfclay_physics", 89): (
+        "The ideal SCM surface (IDEALSCMSFCSCHEME) leaves isfc unassigned "
+        "(phys/module_physics_init.F:3140-3237, CASE DEFAULT), so every PBL "
+        "that checks isfc would compare an undefined value: there is no "
+        "verdict to transcribe. woof.config refuses it with any PBL but "
+        "bl_pbl_physics=0, and with any land surface but 0, before this "
+        "module is consulted."),
 
     ("bl_pbl_physics", 2): (
         "MYJ's WRF law is stronger than a matrix cell and is implemented "
@@ -463,10 +470,6 @@ def _pair(
 PBL_SURFACE_LAYER_AUTHORITY: Mapping[
     tuple[int, int], tuple[WRFVerdict, WRFCitation]
 ] = MappingProxyType({
-    (0, 89): _pair(
-        WRFVerdict.LEGAL, "phys/module_physics_init.F", "3140-3237,3697-3915",
-        "the ideal SCM surface leaves isfc unassigned; PBL-off selects no "
-        "PBL initializer and never reads it"),
     (0, 0): _pair(
         WRFVerdict.LEGAL, "phys/module_physics_init.F", "3697-3915",
         "bl_pbl_physics=0 selects no PBL initialization branch"),

@@ -18,7 +18,8 @@ THE BREAKAGES THESE PREVENT
 2. A case generator whose bytes drift. The input digests are pinned.
 3. A gate that cannot fail. A mutated forcing term or a reordered composition
    must produce mismatches.
-4. An unported switch (land-ice fluxes, frazil, the RKIND 8 bulk wind stress,
+4. An unported switch (land-ice fluxes, frazil, the RKIND 8 bulk wind stress
+   without the glibc 2.39 opt-in,
    the bottom-level terms on a mesh with a dry edge) silently running as
    something else. Each is refused by name.
 """
@@ -44,7 +45,8 @@ def test_case_inputs_are_the_recorded_bytes():
     recorded = dict(reversed(line.split()) for line in
                     (oo.FIXTURE_DIR / "inputs.sha256").read_text(encoding="utf-8").splitlines())
     assert recorded == {f"{case['name']}/{p}": oo.input_digest(case, p)
-                        for p in oo.PRECISIONS for case in oo.cases() if p in case["precisions"]}
+                        for p in (*oo.PRECISIONS, *oo.EXTRA_PRECISIONS) for case in oo.cases()
+                        if p in case["precisions"]}
 
 
 def test_fixture_covers_the_branches():
@@ -61,16 +63,18 @@ def test_fixture_covers_the_branches():
         assert min(column) < 1 < max(column)
         if case["configs"]["config_use_explicit_bottom_drag"] or case["configs"]["config_Rayleigh_bottom_friction"]:
             assert (case["maxLevelEdgeTop"] >= 1).all()
-    assert any("r8" not in case["precisions"] and case["configs"]["config_use_bulk_wind_stress"]
-               for case in all_cases)
-    for precision in oo.PRECISIONS:
+    # the bulk wind stress at RKIND 8 is the opt-in's fixture, not the default one
+    assert any("r8" not in case["precisions"] and oo.R8_GLIBC239 in case["precisions"]
+               and case["configs"]["config_use_bulk_wind_stress"] for case in all_cases)
+    for precision in (*oo.PRECISIONS, *oo.EXTRA_PRECISIONS):
         fixture = oo.load_fixture(precision)
         assert set(fixture) == {c["name"] for c in all_cases if precision in c["precisions"]}
         assert all(np.isfinite(v).all() for c in fixture.values() for v in c.values())
 
 
-def test_unported_switches_are_refused_by_name():
+def test_unported_switches_are_refused_by_name(monkeypatch):
     from woof.hex.mpas_ocean import forcing_v842 as fv
+    monkeypatch.setenv("WOOF_GLIBC239_LIBM64", "0")
     base = dict(fv.DEFAULT_CONFIGS)
     for knob, value, precision in (("config_land_ice_flux_mode", "standalone", "r4"),
                                    ("config_use_frazil_ice_formation", True, "r4"),
@@ -106,9 +110,23 @@ def test_a_dry_edge_refuses_the_bottom_terms():
         assert knob in str(exc.value)
 
 
+def test_the_glibc_opt_in_lifts_the_rkind_8_bulk_wind_stress(monkeypatch):
+    from woof.hex.mpas_ocean import forcing_v842 as fv
+    from woof.hex.mpas_ice import rkind
+    configs = {**fv.DEFAULT_CONFIGS, "config_use_bulk_wind_stress": True}
+    monkeypatch.setenv("WOOF_GLIBC239_LIBM64", "1")
+    if not rkind.trig64():
+        pytest.skip("the opt-in transcription is not in this checkout")
+    fv.refuse_unported(configs, "r8")
+    assert "g239_cos" in fv.module_source("r8") and "BW_COS(angleEdge" in fv.module_source("r8")
+
+
 @requires_gpu
-@pytest.mark.parametrize("precision", sorted(oo.PRECISIONS))
+@pytest.mark.parametrize("precision", sorted(oo.PRECISIONS) + [oo.R8_GLIBC239])
 def test_gpu_matches_the_v842_oracle_word_for_word(precision):
+    from woof.hex.mpas_ice import rkind
+    if precision == oo.R8_GLIBC239 and not rkind.trig64():
+        pytest.skip("the RKIND 8 bulk wind stress needs WOOF_GLIBC239_LIBM64=1")
     report = oo.measure(precision)
     bad = {case: {k: v for k, v in fields.items() if v} for case, fields in report.items()}
     assert not any(bad.values()), bad
@@ -149,6 +167,29 @@ def test_a_mutated_port_is_caught(monkeypatch, precision, module_name, original,
 
 
 @requires_gpu
+@pytest.mark.parametrize("precision", ["r4", oo.R8_GLIBC239])
+def test_a_swapped_wind_rotation_is_caught(monkeypatch, precision):
+    """The edge's cos and sin swapped in the bulk wind stress (RKIND 8 under the opt-in)."""
+    from woof.hex.mpas_ice import rkind
+    from woof.hex.mpas_ocean import forcing_v842 as fv
+    if precision == oo.R8_GLIBC239 and not rkind.trig64():
+        pytest.skip("the RKIND 8 bulk wind stress needs WOOF_GLIBC239_LIBM64=1")
+    base = "r8" if precision == oo.R8_GLIBC239 else precision
+    real = fv.module_source
+    original = "M(BW_COS(angleEdge[iEdge]), zonalAverage)"
+    assert real(base).count(original) == 1
+    monkeypatch.setattr(fv, "module_source",
+                        lambda p="r4": real(p).replace(original, "M(BW_SIN(angleEdge[iEdge]), zonalAverage)"))
+    fv._module_on.cache_clear()
+    try:
+        case = next(c for c in oo.cases() if c["name"] == "jts_rk4_bulk_drag")
+        got = oo.run_gpu(case, precision)
+        assert oo.bit_mismatches(got["surfaceStress"], oo.load_fixture(precision)[case["name"]]["surfaceStress"]) > 0
+    finally:
+        fv._module_on.cache_clear()
+
+
+@requires_gpu
 def test_a_reordered_composition_is_caught(monkeypatch):
     """Adding the pressure gradient before the vertical advection changes words."""
     from woof.hex.mpas_ocean import forcing_v842 as fv
@@ -186,7 +227,7 @@ def test_the_oracle_rebuilt_here_writes_the_fixture(tmp_path):
     subprocess.run([sys.executable, str(ROOT / "tools" / "mpas_ocean_oracle" / "make_fixture.py"),
                     str(tmp_path / "build"), "--piece", "tendency", "--out", str(tmp_path / "fixture")],
                    check=True)
-    for precision in oo.PRECISIONS:
+    for precision in (*oo.PRECISIONS, *oo.EXTRA_PRECISIONS):
         fresh = np.load(tmp_path / "fixture" / f"oracle-{precision}.npz")
         pinned = np.load(oo.FIXTURE_DIR / f"oracle-{precision}.npz")
         assert sorted(fresh.files) == sorted(pinned.files)

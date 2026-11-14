@@ -4,12 +4,14 @@
 ``ocn_tend_thick`` (``mpas_ocn_tendency.F``) add beyond those of
 ``tend_v842`` and ``pgrad_hmix_v842``:
 
-- ``ocn_surface_bulk_forcing_vel`` (the wind stress, RKIND 4 only) and
+- ``ocn_surface_bulk_forcing_vel`` (the wind stress; at RKIND 8 only under
+  the glibc 2.39 opt-in) and
   ``ocn_surface_bulk_forcing_thick``;
 - ``ocn_vel_forcing_tend``: the surface stress (with
   ``ocn_forcing_transmission``), the explicit bottom drag and Rayleigh
   friction;
-- ``ocn_thick_surface_flux_tend``.
+- ``ocn_thick_surface_flux_tend``;
+- ``ocn_forcing_build_fraction_absorbed_array`` (:func:`fraction_absorbed`).
 
 :func:`tend_vel` and :func:`tend_thick` compose them with the other ported
 terms in the Fortran's order, and zero the arrays the Fortran zeroes. Every
@@ -24,9 +26,12 @@ MIT Arm optimized-routines transcription).
 
 Refused by name:
 
-- the bulk wind stress at RKIND 8 (``config_use_bulk_wind_stress``): gfortran
-  calls glibc's double ``cos``/``sin``, which are LGPL IBM code and are not
-  correctly rounded, so no permissive transcription equals them;
+- the bulk wind stress at RKIND 8 (``config_use_bulk_wind_stress``) unless
+  the opt-in is on: gfortran calls glibc's double ``cos``/``sin``, which are
+  LGPL IBM code and are not correctly rounded, so no permissive transcription
+  equals them. ``WOOF_GLIBC239_LIBM64=1`` (:mod:`woof.core.glibc239_gpu`, a
+  source checkout) prepends the LGPL transcription of glibc 2.39's and lifts
+  the refusal;
 - land-ice fluxes (``config_land_ice_flux_mode`` 'standalone' or 'coupled')
   and frazil (``config_use_frazil_ice_formation``), not ported;
 - the explicit bottom drag, or Rayleigh bottom friction, on a mesh with an
@@ -51,7 +56,7 @@ from .tend_v842 import COMPILE_OPTIONS, PRECISIONS, _check, _grid, _precision_of
 SOURCE_FILES = (
     "src/core_ocean/shared/mpas_ocn_tendency.F:107-350,1034-1049",
     "src/core_ocean/shared/mpas_ocn_surface_bulk_forcing.F:139-306,320-334",
-    "src/core_ocean/shared/mpas_ocn_forcing.F:191-196",
+    "src/core_ocean/shared/mpas_ocn_forcing.F:98-175,191-196",
     "src/core_ocean/shared/mpas_ocn_vel_forcing.F",
     "src/core_ocean/shared/mpas_ocn_vel_forcing_surface_stress.F",
     "src/core_ocean/shared/mpas_ocn_vel_forcing_explicit_bottom_drag.F",
@@ -92,15 +97,19 @@ def module_source(precision: str = "r4") -> str:
     root = Path(kernels.__file__).parent
     math = "\n".join((root / name).read_text(encoding="utf-8") for name in MATH_HEADERS[precision])
     body = files("woof.hex.mpas_ocean").joinpath("forcing_v842.cu").read_text(encoding="utf-8")
-    return ("#define MPAS_RKIND8 1\n" if precision == "r8" else "") + math + "\n" + body
+    if precision == "r8":
+        from woof.hex.mpas_ice import rkind
+        return "#define MPAS_RKIND8 1\n" + math + "\n" + rkind.r8_trig_prelude() + body
+    return math + "\n" + body
 
 
 @lru_cache(maxsize=None)
-def _module_on(device: int, precision: str, options: tuple[str, ...]):
+def _module_on(device: int, precision: str, options: tuple[str, ...], trig64: bool = False):
     import cupy as cp
     from woof.nvrtc_ptx_cache import compile_using_nvrtc
 
-    image, _ = compile_using_nvrtc(module_source(precision), options, None, f"ocn_forcing_v842_{precision}.cu")
+    image, _ = compile_using_nvrtc(module_source(precision), options, None,
+                                   f"ocn_forcing_v842_{precision}{'_trig64' if trig64 else ''}.cu")
     with cp.cuda.Device(device):
         module = cp.cuda.function.Module()
         module.load(image.encode() if isinstance(image, str) else image)
@@ -110,7 +119,9 @@ def _module_on(device: int, precision: str, options: tuple[str, ...]):
 def _function(precision: str, name: str):
     import cupy as cp
     options = _hex_numerics.options(COMPILE_OPTIONS, keep_ftz=True)
-    return _module_on(cp.cuda.Device().id, precision, options).get_function(name)
+    from woof.hex.mpas_ice import rkind
+    return _module_on(cp.cuda.Device().id, precision, options, precision == "r8" and rkind.trig64()).get_function(
+        name)
 
 
 def _configs(configs: dict | None) -> dict:
@@ -136,11 +147,12 @@ def refuse_unported(configs: dict, precision: str) -> None:
             reason="the frazil terms (mpas_ocn_frazil_forcing.F) are not ported",
             declaration="config_use_frazil_ice_formation = .false.")
     if configs["config_use_bulk_wind_stress"] and precision == "r8":
-        raise ConfigurationRefusal(
-            knob="config_use_bulk_wind_stress", value=True,
-            reason="at RKIND 8 gfortran calls glibc's double cos/sin (LGPL, not correctly rounded); "
-                   "no permissive transcription equals them",
-            declaration="config_use_bulk_wind_stress = .false. at RKIND 8")
+        from woof.hex.mpas_ice import rkind
+        if not rkind.trig64():
+            raise ConfigurationRefusal(
+                knob="config_use_bulk_wind_stress", value=True,
+                reason=rkind.trig_refusal("the bulk wind stress calls glibc's double cos and sin"),
+                declaration="config_use_bulk_wind_stress = .false. at RKIND 8, or WOOF_GLIBC239_LIBM64=1")
     pgrad_hmix_v842.refuse_hmix_tensor(configs["config_use_mom_del2_tensor"], configs["config_use_mom_del4_tensor"])
 
 
@@ -196,6 +208,19 @@ def vel_forcing_tend(*, mesh: dict, normal_velocity, surface_flux_attenuation_co
         _function(precision, "ocn_vel_forcing_rayleigh_v842")(*grid, (
             tend, normal_velocity, mesh["maxLevelEdgeTop"], dtype(c["config_Rayleigh_damping_coeff"]),
             np.int32(bottom), np.int32(n_edges), np.int32(n_levels)))
+
+
+def fraction_absorbed(*, mesh: dict, layer_thickness, diagnostics: dict, forcing: dict) -> None:
+    """``ocn_forcing_build_fraction_absorbed_array``: ``fractionAbsorbed`` and
+    ``fractionAbsorbedRunoff`` from the layer thicknesses and the two
+    attenuation coefficients, over ``nCellsArray(2)``; arrays with MPAS's
+    missing-cell element."""
+    precision = _precision_of(layer_thickness)
+    n_cells, nl = int(mesh["nCellsArray"][1]), int(mesh["nVertLevels"])
+    for out, att in (("fractionAbsorbed", "surfaceFluxAttenuationCoefficient"),
+                     ("fractionAbsorbedRunoff", "surfaceFluxAttenuationCoefficientRunoff")):
+        _function(precision, "ocn_fraction_absorbed_v842")(_grid(n_cells), (_BLOCK,), (
+            forcing[out], layer_thickness, diagnostics[att], mesh["maxLevelCell"], np.int32(n_cells), np.int32(nl)))
 
 
 def thick_surface_flux_tend(*, mesh: dict, transmission_coefficients, transmission_coefficients_runoff,
