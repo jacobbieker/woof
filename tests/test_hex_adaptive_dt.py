@@ -233,3 +233,25 @@ def test_forwarded_arguments_round_trip_through_the_driver_parser():
     adaptive_dt.add_arguments(parser)
     parsed = parser.parse_args(argv)
     assert (parsed.adaptive_timestep, parsed.adaptive_target_cfl, parsed.adaptive_max_dt) == ("on", 1.0, "45")
+
+
+def test_adaptive_step_config_validates_as_admitted_and_keeps_the_payload():
+    import dataclasses
+
+    from woof.hex.config_v841 import V841MpasColumnPhysicsConfig
+    from woof.hex.errors import ConfigurationRefusal
+
+    admitted = V841MpasColumnPhysicsConfig(config_dt=30.0, config_bldt_seconds=30.0, config_cudt_seconds=30.0,
+                                           config_radt_seconds=1800.0)
+    admitted.validate()
+    # 1800 s of radiation is no whole number of 2010/64 s steps: a fixed clock refuses that step ...
+    with pytest.raises(ConfigurationRefusal):
+        dataclasses.replace(admitted, config_dt=2010 / 64).validate()
+    # ... and the adaptive step, which lands on the radiation deadline instead, validates as admitted.
+    step = adaptive_dt.adaptive_step_config(admitted, dt=2010 / 64, substeps=6)
+    step.validate()
+    assert isinstance(step, V841MpasColumnPhysicsConfig)
+    assert (step.config_dt, step.config_number_of_sub_steps) == (2010 / 64, 6)
+    assert [f.name for f in dataclasses.fields(step)] == [f.name for f in dataclasses.fields(admitted)]
+    again = adaptive_dt.adaptive_step_config(step, dt=40.0, substeps=6)
+    assert type(again) is type(step) and again.config_dt == 40.0
