@@ -82,19 +82,6 @@ def test_options_hold_their_recorded_outcome(tmp_path):
     assert matrix.main(argv) == 0
     results = json.loads(
         (tmp_path / f"results-{backend}.json").read_text())["rows"]
-    problems = []
-    for name, row in results.items():
-        recorded = matrix.verdict(EVIDENCE["rows"][name])
-        outcome = row["outcome"]
-        if outcome in ("non-finite", "budget", "error"):
-            problems.append(f"{name}: {outcome}: {row.get('reason')}")
-        elif recorded == "supported" and outcome != "ran":
-            problems.append(f"{name}: recorded supported, now {outcome}: "
-                            f"{row.get('reason')}")
-        elif recorded.startswith("refused") and outcome != "refused":
-            problems.append(f"{name}: recorded {recorded}, now {outcome}")
-        elif recorded.startswith("refused (needs") and \
-                recorded != f"refused (needs {', '.join(row['needs'])})":
-            problems.append(f"{name}: recorded {recorded}, now needs "
-                            f"{row.get('needs')}")
+    problems = [problem for name, row in results.items()
+                if (problem := matrix.regression(name, EVIDENCE, backend, row)) is not None]
     assert not problems, "\n".join(problems)

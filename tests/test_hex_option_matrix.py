@@ -181,15 +181,15 @@ def test_grading_is_against_the_baseline_row():
 def test_publish_scrubs_paths_and_states_one_verdict_per_option():
     loaded = [
         {"backend": "cuda", "case": "c", "hours": 1, "rows": {
-            "x": {"overrides": {"mp_physics": "2"}, "outcome": "ran",
+            "x": {"row_args": [], "overrides": {"mp_physics": "2"}, "outcome": "ran",
                   "wall_seconds": 10.0, "receipt": {"seam": "engine"}},
-            "y": {"overrides": {"sf_surface_physics": "1"},
+            "y": {"row_args": [], "overrides": {"sf_surface_physics": "1"},
                   "outcome": "refused", "needs": ["thermal_inertia (THC)"],
                   "reason": "missing surface input: ... /home/u/run/out"},
-            "z": {"overrides": {"cu_physics": "7"}, "outcome": "error",
+            "z": {"row_args": [], "overrides": {"cu_physics": "7"}, "outcome": "error",
                   "reason": "KeyError in /home/u/tree/woof/x.py"}}},
         {"backend": "metal", "case": "c", "hours": 1, "rows": {
-            "x": {"overrides": {"mp_physics": "2"}, "outcome": "ran",
+            "x": {"row_args": [], "overrides": {"mp_physics": "2"}, "outcome": "ran",
                   "wall_seconds": 30.0}}},
     ]
     evidence = matrix.publish(loaded)
@@ -234,9 +234,142 @@ def test_the_committed_evidence_covers_every_planned_option():
         assert row["backends"], name
 
 
+def test_a_component_filter_keeps_the_baseline():
+    """THE BREAKAGE: ``run --components radiation`` dropped the baseline, so grade() screened nothing and the
+    rows were published as supported."""
+    options = [row["option"] for row in matrix.plan(["radiation"])]
+    assert matrix.BASELINE in options
+    assert all(o.split(".")[0] == "radiation" for o in options if o != matrix.BASELINE)
+
+
+def test_rows_without_a_baseline_are_ungraded_until_it_runs():
+    results = {"rows": {"a": _ran(-4e-4, 0.02), "d": {"outcome": "refused", "overrides": {}}}}
+    rows = matrix.grade(results)["rows"]
+    assert rows["a"]["outcome"] == "ungraded" and matrix.BASELINE in rows["a"]["reason"]
+    assert rows["d"]["outcome"] == "refused"
+    results["rows"][matrix.BASELINE] = {"outcome": "error", "reason": "boom", "overrides": {}}
+    assert matrix.grade(results)["rows"]["a"]["outcome"] == "ungraded"
+    results["rows"][matrix.BASELINE] = _ran(-4e-4, 0.02)
+    rows = matrix.grade(results)["rows"]
+    assert rows["a"]["outcome"] == "ran" and "reason" not in rows["a"] and rows["a"]["graded"]
+
+
+def _fake_run(monkeypatch, ran):
+    def run_row(row, case, work, backend):
+        ran.append(row["option"])
+        return {"option": row["option"], "backend": backend, "overrides": row["overrides"],
+                "physics_args": matrix.physics_args(row, case.get("base_physics", {})),
+                "row_args": list(case.get("row_args", {}).get(row["option"], [])),
+                "outcome": "refused", "needs": ["x"]}
+
+    monkeypatch.setattr(matrix, "run_row", run_row)
+
+
+def _case(tmp_path, **changes):
+    init = tmp_path / "init.nc"
+    if not init.exists():
+        init.write_bytes(b"init")
+    case = {"forecast_args": ["--init", str(init)], "hours": 1, "label": "c", **changes}
+    path = tmp_path / "case.json"
+    path.write_text(json.dumps(case))
+    return str(path)
+
+
+def test_a_resume_of_another_case_is_refused(tmp_path, monkeypatch):
+    """THE BREAKAGE: a reused --out loaded the previous case's rows, skipped them and graded new rows against
+    its baseline."""
+    ran = []
+    _fake_run(monkeypatch, ran)
+    out = str(tmp_path / "out")
+    argv = ["run", "--out", out, "--backend", "cuda", "--only", "pbl.myj"]
+    assert matrix.main([*argv, "--case", _case(tmp_path)]) == 0
+    assert matrix.main([*argv, "--case", _case(tmp_path)]) == 0       # same case: resumed, nothing reruns
+    assert ran == [matrix.BASELINE, "pbl.myj"]
+    with pytest.raises(SystemExit, match="another case"):
+        matrix.main([*argv, "--case", _case(tmp_path, hours=2)])
+    (tmp_path / "init.nc").write_bytes(b"a re-staged init")               # same path, other file
+    with pytest.raises(SystemExit, match="another case"):
+        matrix.main([*argv, "--case", _case(tmp_path)])
+
+
+def test_a_twin_is_reused_only_for_the_same_effective_configuration(tmp_path, monkeypatch):
+    """pbl.myj and surface_layer.eta-similarity have equal overrides; THE BREAKAGE: a row flag for one of them
+    was ignored and the other's result copied."""
+    by_name = {row["option"]: row for row in matrix.plan()}
+    assert by_name["pbl.myj"]["overrides"] == by_name["surface_layer.eta-similarity"]["overrides"]
+    rows = ["pbl.myj", "surface_layer.eta-similarity"]
+    ran = []
+    _fake_run(monkeypatch, ran)
+    case = _case(tmp_path, row_args={"surface_layer.eta-similarity": ["--flag"]})
+    matrix.main(["run", "--case", case, "--out", str(tmp_path / "a"), "--backend", "cuda", "--only", *rows])
+    assert sorted(ran) == sorted([matrix.BASELINE, *rows])
+    ran.clear()
+    matrix.main(["run", "--case", _case(tmp_path, row_args={}), "--out", str(tmp_path / "b"),
+                 "--backend", "cuda", "--only", *rows])
+    assert len(ran) == 2          # with no row flags the second IS the first run
+    results = json.loads((tmp_path / "b" / "results-cuda.json").read_text())["rows"]
+    assert any(row.get("same_run_as") for row in results.values())
+
+
+def test_publish_refuses_inputs_that_are_not_one_comparison():
+    def results(backend, case="c", hours=1, args=("--physics", "a=1"), row_args=()):
+        return {"backend": backend, "case": case, "hours": hours, "rows": {
+            "x": {"overrides": {"a": "1"}, "physics_args": list(args), "row_args": list(row_args),
+                  "outcome": "ran"}}}
+
+    matrix.publish([results("cuda"), results("metal")])
+    with pytest.raises(ValueError, match="more than one results file for backend cuda"):
+        matrix.publish([results("cuda"), results("cuda")])
+    with pytest.raises(ValueError, match="different cases"):
+        matrix.publish([results("cuda"), results("metal", case="other")])
+    with pytest.raises(ValueError, match="different hours"):
+        matrix.publish([results("cuda"), results("metal", hours=6)])
+    with pytest.raises(ValueError, match="row x ran with different physics_args"):
+        matrix.publish([results("cuda"), results("metal", args=("--physics", "a=2"))])
+    with pytest.raises(ValueError, match="row x ran with different row_args"):
+        matrix.publish([results("cuda"), results("metal", row_args=("--geog", "/other"))])
+    legacy = results("metal")
+    del legacy["rows"]["x"]["row_args"]
+    with pytest.raises(ValueError, match="no recorded row_args on metal"):
+        matrix.publish([results("cuda"), legacy])
+
+
+def test_the_smoke_holds_each_backend_to_its_own_record():
+    """THE BREAKAGE: the cross-backend verdict of a row that ran on CUDA and errored on Metal is "error", so a
+    CUDA smoke run accepted any CUDA outcome."""
+    evidence = {"rows": {"k": {"backends": {"cuda": {"outcome": "ran"}, "metal": {"outcome": "error"}}},
+                         "r": {"backends": {"cuda": {"outcome": "refused", "needs": ["THC"]}}}}}
+    assert matrix.regression("k", evidence, "cuda", {"outcome": "ran"}) is None
+    assert "recorded ran on cuda, now refused" in matrix.regression("k", evidence, "cuda", {"outcome": "refused"})
+    assert matrix.regression("r", evidence, "cuda", {"outcome": "refused", "needs": ["THC"]}) is None
+    assert "now needs" in matrix.regression("r", evidence, "cuda", {"outcome": "refused", "needs": ["LAI"]})
+    assert "no recorded metal outcome" in matrix.regression("r", evidence, "metal", {"outcome": "refused"})
+
+
+def test_case_identity_names_inline_option_files(tmp_path):
+    """THE BREAKAGE: an --init=PATH argument was skipped as a flag, so a re-staged init at the same path kept
+    the old rows on resume."""
+    init = tmp_path / "init.nc"
+    init.write_bytes(b"one")
+    case = {"forecast_args": [f"--init={init}"], "hours": 1}
+    first = matrix.case_identity(case)
+    init.write_bytes(b"a longer re-staged init")
+    assert matrix.case_identity(case) != first
+
+
 def test_a_relative_case_grid_is_read_where_the_forecast_runs(tmp_path):
     """run_row runs the forecast with cwd=REPO, so the summary reads a relative --grid from there too."""
     assert matrix._case_grid({"forecast_args": ["--grid", "a/b.nc"]}) == matrix.REPO / "a/b.nc"
     absolute = tmp_path / "g.nc"
     assert matrix._case_grid({"forecast_args": ["--grid", str(absolute)]}) == absolute
     assert matrix._case_grid({"forecast_args": []}) is None
+
+
+def test_case_identity_reads_the_static_where_the_budgets_do(tmp_path, monkeypatch):
+    """THE BREAKAGE: a caller-relative static was fingerprinted under REPO, so re-staging it kept old budgets."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "budget-grid.nc").write_bytes(b"one")
+    case = {"forecast_args": [], "static": "budget-grid.nc", "hours": 1}
+    first = matrix.case_identity(case)
+    (tmp_path / "budget-grid.nc").write_bytes(b"a re-staged static")
+    assert matrix.case_identity(case) != first
