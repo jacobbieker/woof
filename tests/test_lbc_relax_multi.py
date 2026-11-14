@@ -106,6 +106,35 @@ def _assert_same(a, b):
         assert np.array_equal(a[key], b[key]), key
 
 
+def _fused_counter(monkeypatch):
+    """Count the fused launches while keeping the real implementation, so
+    an enabled run is known to have taken the fused path (a silent
+    fallback to the per-row launches would otherwise pass every check)."""
+    import woof.ingest.lateral_bc as lbc
+
+    counts = {"calls": 0, "launches": 0}
+    real_launch = lbc._launch_relaxation_multi
+    real_get = lbc.get_kernel
+
+    def get_kernel(name, func, shape=()):
+        kernel = real_get(name, func, shape)
+        if func != "state_relaxation_multi":
+            return kernel
+
+        def launch(*args, **kwargs):
+            counts["launches"] += 1
+            return kernel(*args, **kwargs)
+        return launch
+
+    def wrapped(*args, **kwargs):
+        counts["calls"] += 1
+        return real_launch(*args, **kwargs)
+
+    monkeypatch.setattr(lbc, "_launch_relaxation_multi", wrapped)
+    monkeypatch.setattr(lbc, "get_kernel", get_kernel)
+    return counts
+
+
 @requires_gpu
 @pytest.mark.gpu
 @pytest.mark.parametrize("map_factors", [False, True])
@@ -115,6 +144,7 @@ def test_stage_rows_match_the_per_row_path(monkeypatch, map_factors):
     import woof.ingest.lateral_bc as lbc
 
     cfg, state, _ = _setup(map_factors=map_factors)
+    counts = _fused_counter(monkeypatch)
     results = {}
     for enabled in (False, True):
         monkeypatch.setattr(lbc, "LBC_RELAX_MULTI_ENABLED", enabled)
@@ -125,6 +155,8 @@ def test_stage_rows_match_the_per_row_path(monkeypatch, map_factors):
             lbc.apply_state_lateral_boundaries(state, cfg, rk_stage=stage)
             stages.append(_words(state))
         results[enabled] = stages
+        # one fused launch per stage, none on the per-row path
+        assert counts["launches"] == (3 if enabled else 0)
     for per_row, fused in zip(results[False], results[True]):
         _assert_same(per_row, fused)
     # The stage changed the rows: the check is not vacuous.
@@ -231,18 +263,22 @@ def test_every_row_form_matches_the_per_row_path(monkeypatch, form):
     # the per-row path writes its shared temporary: only the tendencies
     # are the contract there.
     compare_held = form in ("nested_store", "strict", "capture")
+    counts = _fused_counter(monkeypatch)
     results = {}
     for enabled in (False, True):
         monkeypatch.setattr(lbc, "LBC_RELAX_MULTI_ENABLED", enabled)
         _seed(state, np.random.default_rng(3))
         stages = []
+        launched = 0
         for plan in plans():
             lbc._run_relaxation_rows(state, plan, common, weights)
+            launched += 1
             words = _words(state)
             if not compare_held:
                 words = {k: v for k, v in words.items() if k in _TENDENCIES}
             stages.append(words)
         results[enabled] = stages
+        assert counts["launches"] == (launched if enabled else 0)
     for per_row, fused in zip(results[False], results[True]):
         _assert_same(per_row, fused)
 
@@ -260,6 +296,7 @@ def test_more_rows_than_one_table_take_further_launches(monkeypatch):
     rng = np.random.default_rng(13)
     seeds = [rng.normal(0.0, 1e-3, state.thp.shape).astype(np.float32)
              for _ in range(nrows)]
+    counts = _fused_counter(monkeypatch)
     results = {}
     for enabled in (False, True):
         monkeypatch.setattr(lbc, "LBC_RELAX_MULTI_ENABLED", enabled)
@@ -268,6 +305,8 @@ def test_more_rows_than_one_table_take_further_launches(monkeypatch):
                               apply_relax=True) for t in targets]
         lbc._run_relaxation_rows(state, plan, common, weights)
         results[enabled] = [cp.asnumpy(t).view(np.uint32) for t in targets]
+    # one call, two tables (12 + 3 rows)
+    assert counts["calls"] == 1 and counts["launches"] == 2
     for per_row, fused, seed in zip(results[False], results[True], seeds):
         assert np.array_equal(per_row, fused)
         assert not np.array_equal(fused, seed.view(np.uint32))
@@ -292,3 +331,28 @@ def test_rows_sharing_a_target_fall_back_to_the_per_row_path():
     # Host arrays are refused before any device address is read.
     assert lbc._relaxation_multi_rows(State(), rows) is False
     assert lbc._relaxation_multi_rows(State(), []) is False
+
+
+@requires_gpu
+@pytest.mark.gpu
+def test_overlapping_device_targets_fall_back_to_the_per_row_path():
+    """Two views of one backing that share cells at different offsets."""
+    import cupy as cp
+
+    import woof.ingest.lateral_bc as lbc
+
+    cfg, state, _ = _setup()
+    device, _common, _weights = lbc._relaxation_context(state, cfg)
+    n = state.thp.size
+    backing = cp.zeros((n + 1,), dtype=cp.float32)
+    first = backing[:n].reshape(state.thp.shape)
+    second = backing[1:n + 1].reshape(state.thp.shape)
+    rows = [lbc._RelaxRow("theta", device.fields["theta"], target=first,
+                          apply_relax=True),
+            lbc._RelaxRow("theta", device.fields["theta"], target=second,
+                          apply_relax=True)]
+    assert lbc._relaxation_multi_rows(state, rows) is False
+    apart = cp.zeros_like(state.thp)
+    rows[1] = lbc._RelaxRow("theta", device.fields["theta"], target=apart,
+                            apply_relax=True)
+    assert lbc._relaxation_multi_rows(state, rows) is True

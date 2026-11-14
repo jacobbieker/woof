@@ -1585,9 +1585,20 @@ def _relaxation_multi_rows(state, rows) -> bool:
             arrays.extend((side.value, side.tendency))
     if not all(device(a) for a in arrays):
         return False
-    targets = [int(row.target.data.ptr) for row in rows
-               if row.target is not None]
-    return len(set(targets)) == len(targets)
+    # The rows run concurrently: no two written arrays (targets, stored
+    # or read held rows) may share a byte, not only a first address (two
+    # views of one backing can overlap at different offsets).
+    spans = []
+    for row in rows:
+        written = [row.target]
+        if row.held is not None and (row.held_mode == "read" or (
+                row.held_mode == "compute" and row.held_store)):
+            written.append(row.held)
+        for a in written:
+            if a is not None:
+                spans.append((int(a.data.ptr), int(a.data.ptr) + int(a.nbytes)))
+    spans.sort()
+    return all(hi <= lo_next for (_lo, hi), (lo_next, _hi) in zip(spans, spans[1:]))
 
 
 def _launch_relaxation_multi(state, rows, *, dtbc, spec_zone, relax_zone,
