@@ -2557,7 +2557,7 @@
    },
    {
     "file": "woof/core/kernels/advection.cu",
-    "sha256": "b56dd055bc0860fd51160332d6f1fec1b5b168de42ee7a8962624c786ef9ca80"
+    "sha256": "735fa3d2a56b8b48e2bb706ece09d4a536dfae1dfd447fb100973f78466f81f9"
    },
    {
     "file": "woof/core/kernels/aer_opt2.cu",
@@ -3777,7 +3777,7 @@
    },
    {
     "file": "woof/core/kernels/pd_advection.cu",
-    "sha256": "50dea4bb4d588e0943fd313b0533fd2dba7d3c4834922251c1af2a2d2b805c7f"
+    "sha256": "dc46b64c4c28cb865dc0fff2e6e16512f00f5a4e87017c43f0f53d7d44ea38c6"
    },
    {
     "file": "woof/core/kernels/pd_vertical_sl.cu",
@@ -5067,7 +5067,7 @@
    },
    {
     "file": "woof/core/moist.py",
-    "sha256": "d660aec5524583ceb2d91cdc0311a0c726d3051144e2bc57d412031396ae007c"
+    "sha256": "ffd180ae7ba2bf711f9a359d37327d933e436c7154b8f56edcb91d34c4e20baf"
    },
    {
     "file": "woof/core/morrison.py",
@@ -9878,13 +9878,13 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "26f9a39ff355dcd873653dd7464a13c2a7c242a0c4ceb8f95b5bab010c298edb",
+    "sha256": "a9ac9a836ce9d8a43975f160f6b07f0bb1ce2c59354deaa5003b07501abee6b7",
     "sites": {
      "100": 199
     }
    },
    "native_differences": {
-    "sha256": "244fa6247a6b743de930d38fa79a06668d677ccd6d7ad29efb6ae662683dcae6",
+    "sha256": "d0f8eb3a358233da23e3704faff0e07e9de16b4704491e72f5e00c98b359861a",
     "sites": {
      "100": 110
     }
@@ -9906,7 +9906,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "075f8edde330612422da3a096fb83f882920449da97162d51d9c0a7b3457211d"
+   "source_sha256": "f4fb3d53f54b5ed237ded3f6fbb3689cbede3dfb4dbf93d99a5c0bc8fcaa8c0d"
   },
   "kernels:aer_opt2": {
    "assessment": "static_diagnostic_only",
@@ -18862,13 +18862,13 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "fa2fb0e61ed1fa8d5a52c48b4e974fede009a45c21d73045c9f5d6e6801a95d8",
+    "sha256": "0f534258db1bf9d26873bc8df8472b0a8ef20b912c56a470bbde54f36665c508",
     "sites": {
      "100": 92
     }
    },
    "native_differences": {
-    "sha256": "40bc636efd1505eb3b838bd4cb74fe878872be18d4fa460a076da67da69d6ad7",
+    "sha256": "38db5f867161a8ab77a0b100db88848e35e36579a7b6e7b5b2b67b98474016b2",
     "sites": {
      "100": 13
     }
@@ -18890,7 +18890,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "59139c1b2c592a4f3b098976ef11d5a749d93f7ec29f2cd7b2c7332db5767766"
+   "source_sha256": "61d26e3f47fd2ddd74e76a37fee373599a16199b39b67a142f54d043ff4ee073"
   },
   "kernels:pd_vertical_sl": {
    "assessment": "static_diagnostic_only",

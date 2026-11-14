@@ -414,6 +414,15 @@ real zface_w_centered(const real* w, real vel, int m, int j, int i,
 // ---------------------------------------------------------------------------
 // Scalar q at mass points (nz, ny, nx).
 // ---------------------------------------------------------------------------
+// GPUWM_FLUX_DIV_ZERO_FIRST: the caller's ``tend[...] = 0`` before this
+// accumulating launch is folded in.  The incoming word is the exact +0.0f
+// the fill wrote, and every path below adds its terms onto it the same way,
+// so the words written are those of the fill followed by the accumulate.
+#ifdef GPUWM_FLUX_DIV_ZERO_FIRST
+#define FLUX_DIV_TEND0(at) (0.0f)
+#else
+#define FLUX_DIV_TEND0(at) (tend_out[at])
+#endif
 extern "C" __global__
 void flux_div_scalar(const real* __restrict__ q,
                      const real* __restrict__ ru,       // (nz, ny, nx+1)
@@ -429,15 +438,6 @@ void flux_div_scalar(const real* __restrict__ q,
                      int open_x, int open_y, int has_msf, int spec,
                      int vorder)
 {
-// GPUWM_FLUX_DIV_ZERO_FIRST: the caller's ``tend[...] = 0`` before this
-// accumulating launch is folded in.  The incoming word is the exact +0.0f
-// the fill wrote, and every path below adds its terms onto it the same way,
-// so the words written are those of the fill followed by the accumulate.
-#ifdef GPUWM_FLUX_DIV_ZERO_FIRST
-#define FLUX_DIV_TEND0(at) (0.0f)
-#else
-#define FLUX_DIV_TEND0(at) (tend_out[at])
-#endif
 #if GPUWM_WRF_EXACT_C_ADVECTION || GPUWM_NO_HADV || GPUWM_HORDER == 2 || GPUWM_HORDER == 3 || GPUWM_HORDER == 4 || GPUWM_HORDER == 6
 
     int i = blockIdx.x * blockDim.x + threadIdx.x;

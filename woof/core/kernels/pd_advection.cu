@@ -489,6 +489,15 @@ real pd_scale(int k, int j, int i,
     return 1.0f;
 }
 
+// GPUWM_PD_ZERO_FIRST: the caller's ``tend[...] = 0`` before this
+// accumulating launch is folded in.  The incoming word is the exact +0.0f
+// the fill wrote, and every path below adds its terms onto it the same way,
+// so the words written are those of the fill followed by the accumulate.
+#ifdef GPUWM_PD_ZERO_FIRST
+#define PD_TEND0(at) (0.0f)
+#else
+#define PD_TEND0(at) (tend_out[at])
+#endif
 extern "C" __global__
 void pd_renorm_apply(const real* __restrict__ q0,      // (nz, ny, nx)
                      const real* __restrict__ mu_old,  // (ny, nx) time-t mass
@@ -511,15 +520,6 @@ void pd_renorm_apply(const real* __restrict__ q0,      // (nz, ny, nx)
 #endif
                      )
 {
-// GPUWM_PD_ZERO_FIRST: the caller's ``tend[...] = 0`` before this
-// accumulating launch is folded in.  The incoming word is the exact +0.0f
-// the fill wrote, and every path below adds its terms onto it the same way,
-// so the words written are those of the fill followed by the accumulate.
-#ifdef GPUWM_PD_ZERO_FIRST
-#define PD_TEND0(at) (0.0f)
-#else
-#define PD_TEND0(at) (tend_out[at])
-#endif
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     int j = blockIdx.y;
     int k = blockIdx.z;

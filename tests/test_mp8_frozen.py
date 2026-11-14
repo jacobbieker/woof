@@ -530,8 +530,8 @@ FROZEN_MODULE_DIGESTS = {
         # 40ee6058c WRFV3.9) holds the four explicit routines bitwise under
         # the exact-C build (tests/test_advect_wrf_legacy_parity.py).
         # Previously 85062bec/e3fa6135.
-        'b56dd055bc0860fd51160332d6f1fec1b5b168de42ee7a8962624c786ef9ca80',
-        '075f8edde330612422da3a096fb83f882920449da97162d51d9c0a7b3457211d'),
+        '735fa3d2a56b8b48e2bb706ece09d4a536dfae1dfd447fb100973f78466f81f9',
+        'f4fb3d53f54b5ed237ded3f6fbb3689cbede3dfb4dbf93d99a5c0bc8fcaa8c0d'),
     # Re-pinned for the WOOF 1.0.0 text scrub: comments only (punctuation, host
     # labels), proven equal with comments stripped; the preprocessor drops
     # comments, so the compiled binary does not move.
@@ -1593,8 +1593,8 @@ FROZEN_MODULE_DIGESTS = {
         # the exact-C build on the HRRR-fork fixture's cases
         # (tests/test_advect_wrf_legacy_parity.py).
         # Previously 20a2dd79/b4832282.
-        '50dea4bb4d588e0943fd313b0533fd2dba7d3c4834922251c1af2a2d2b805c7f',
-        '59139c1b2c592a4f3b098976ef11d5a749d93f7ec29f2cd7b2c7332db5767766'),
+        'dc46b64c4c28cb865dc0fff2e6e16512f00f5a4e87017c43f0f53d7d44ea38c6',
+        '61d26e3f47fd2ddd74e76a37fee373599a16199b39b67a142f54d043ff4ee073'),
     'refl': (
         # Re-pinned for A146 (a98f2482e): every float division by a compile-time
         # constant is spelled __fdiv_rn, because NVRTC compiles x / C as a
