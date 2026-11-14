@@ -97,12 +97,14 @@ def test_more_rows_than_one_table_take_further_launches():
                               single[row].view(np.uint32)), row
 
 
-def test_rows_sharing_a_target_or_shapes_fall_back():
+@requires_gpu
+def test_rows_sharing_a_target_or_shapes_fall_back(monkeypatch):
     """Two rows into one buffer, or a strided view, keep the per-field path."""
-    pytest.importorskip("cupy")
     import cupy as cp
+    from woof.core import dycore
     from woof.core.dycore import _diff6_multi_rows
 
+    monkeypatch.setattr(dycore, "DIFF6_MULTI_ENABLED", True)
     a = cp.zeros((2, 4, 5), dtype=cp.float32)
     b = cp.zeros((2, 4, 5), dtype=cp.float32)
     t = cp.zeros((2, 4, 5), dtype=cp.float32)
@@ -115,3 +117,5 @@ def test_rows_sharing_a_target_or_shapes_fall_back():
     assert not _diff6_multi_rows([(a[:, ::2], t[:, ::2], 0.1, 1.0)],
                                  c, c, mut, planes)
     assert not _diff6_multi_rows([], c, c, mut, planes)
+    monkeypatch.setattr(dycore, "DIFF6_MULTI_ENABLED", False)
+    assert not _diff6_multi_rows([(a, t, 0.1, 1.0)], c, c, mut, planes)
