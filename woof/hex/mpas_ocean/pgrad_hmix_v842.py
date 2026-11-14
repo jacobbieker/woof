@@ -40,7 +40,7 @@ import numpy as np
 from woof.hex import numerics as _hex_numerics
 from woof.hex.errors import ConfigurationRefusal
 
-from .tend_v842 import COMPILE_OPTIONS, PRECISIONS, _check, _grid, _precision_of
+from .tend_v842 import COMPILE_OPTIONS, PRECISIONS, _check, _grid, _precision_of, loop_extent
 
 SOURCE_FILES = (
     "src/core_ocean/shared/mpas_ocn_vel_pressure_grad.F:80-411,625-664",
@@ -160,11 +160,12 @@ def vel_pressure_grad_tend(*, mesh: dict, pressure, montgomery_potential, z_mid,
     _check("dcEdge", mesh["dcEdge"], dtype, (n_edges,))
     _check("edgeMask", mesh["edgeMask"], cp.int32, (n_edges, n_levels))
     density0_inv, gdensity0_inv = pgrad_constants(config_density0, precision)
-    _function(precision, "ocn_vel_pressure_grad_tend_v842")(_grid(n_edges), (_BLOCK,), (
+    n_edges_loop = loop_extent("edges", 1, n_edges)
+    _function(precision, "ocn_vel_pressure_grad_tend_v842")(_grid(n_edges_loop), (_BLOCK,), (
         tend, pressure, montgomery_potential, z_mid, density, potential_density, tracers, alpha, beta,
         mesh["maxLevelEdgeTop"], mesh["cellsOnEdge"], mesh["dcEdge"], mesh["edgeMask"], np.int32(code),
         density0_inv, gdensity0_inv, dtype(config_common_level_weight), np.int32(index_temperature),
-        np.int32(index_salinity), np.int32(n_tracers), np.int32(n_edges), np.int32(n_levels)))
+        np.int32(index_salinity), np.int32(n_tracers), np.int32(n_edges_loop), np.int32(n_levels)))
 
 
 def vel_hmix_tend(*, mesh: dict, divergence, relative_vorticity, viscosity, tend,
@@ -212,18 +213,19 @@ def vel_hmix_tend(*, mesh: dict, divergence, relative_vorticity, viscosity, tend
     del4_on = config_use_mom_del4 and dtype(config_mom_del4) > 0
     common = (mesh["maxLevelEdgeTop"], mesh["cellsOnEdge"], mesh["verticesOnEdge"])
     del2_leith = _function(precision, "ocn_vel_hmix_del2_leith_tend_v842")
+    n_edges_loop = loop_extent("edges", 1, n_edges)
     if del2_on:
         _check("meshScalingDel2", mesh["meshScalingDel2"], dtype, (n_edges,))
-        del2_leith(_grid(n_edges), (_BLOCK,), (
+        del2_leith(_grid(n_edges_loop), (_BLOCK,), (
             tend, viscosity, divergence, relative_vorticity, *common, mesh["meshScalingDel2"], mesh["dcEdge"],
             mesh["dvEdge"], mesh["edgeMask"], np.int32(0), dtype(config_mom_del2), dtype(0), dtype(0),
-            np.int32(n_edges), np.int32(n_levels)))
+            np.int32(n_edges_loop), np.int32(n_levels)))
     if config_use_Leith_del2:
         _check("meshScaling", mesh["meshScaling"], dtype, (n_edges,))
-        del2_leith(_grid(n_edges), (_BLOCK,), (
+        del2_leith(_grid(n_edges_loop), (_BLOCK,), (
             tend, viscosity, divergence, relative_vorticity, *common, mesh["meshScaling"], mesh["dcEdge"],
             mesh["dvEdge"], mesh["edgeMask"], np.int32(1), dtype(config_Leith_parameter), dtype(config_Leith_dx),
-            dtype(config_Leith_visc2_max), np.int32(n_edges), np.int32(n_levels)))
+            dtype(config_Leith_visc2_max), np.int32(n_edges_loop), np.int32(n_levels)))
     if del4_on:
         max_edges = mesh["edgesOnCell"].shape[1]
         vertex_degree = mesh["edgesOnVertex"].shape[1]
@@ -240,18 +242,22 @@ def vel_hmix_tend(*, mesh: dict, divergence, relative_vorticity, viscosity, tend
         delsq_u = cp.empty((n_edges, n_levels), dtype)
         delsq_vorticity = cp.empty((n_vertices, n_levels), dtype)
         delsq_divergence = cp.empty((n_cells, n_levels), dtype)
-        _function(precision, "ocn_vel_hmix_del4_delsq_u_v842")(_grid(n_edges), (_BLOCK,), (
+        n_edges_loop = loop_extent("edges", 3, n_edges)
+        _function(precision, "ocn_vel_hmix_del4_delsq_u_v842")(_grid(n_edges_loop), (_BLOCK,), (
             delsq_u, divergence, relative_vorticity, *common, mesh["dcEdge"], mesh["dvEdge"],
-            np.int32(n_edges), np.int32(n_levels)))
-        _function(precision, "ocn_vel_hmix_del4_delsq_vorticity_v842")(_grid(n_vertices), (_BLOCK,), (
+            np.int32(n_edges_loop), np.int32(n_levels)))
+        n_vertices_loop = loop_extent("vertices", 2, n_vertices)
+        _function(precision, "ocn_vel_hmix_del4_delsq_vorticity_v842")(_grid(n_vertices_loop), (_BLOCK,), (
             delsq_vorticity, delsq_u, mesh["maxLevelVertexTop"], mesh["edgesOnVertex"], mesh["edgeSignOnVertex"],
-            mesh["dcEdge"], mesh["areaTriangle"], np.int32(n_vertices), np.int32(n_levels),
+            mesh["dcEdge"], mesh["areaTriangle"], np.int32(n_vertices_loop), np.int32(n_levels),
             np.int32(vertex_degree)))
-        _function(precision, "ocn_vel_hmix_del4_delsq_divergence_v842")(_grid(n_cells), (_BLOCK,), (
+        n_cells_loop = loop_extent("cells", 2, n_cells)
+        _function(precision, "ocn_vel_hmix_del4_delsq_divergence_v842")(_grid(n_cells_loop), (_BLOCK,), (
             delsq_divergence, delsq_u, mesh["maxLevelCell"], mesh["nEdgesOnCell"], mesh["edgesOnCell"],
-            mesh["edgeSignOnCell"], mesh["dvEdge"], mesh["areaCell"], np.int32(n_cells), np.int32(n_levels),
+            mesh["edgeSignOnCell"], mesh["dvEdge"], mesh["areaCell"], np.int32(n_cells_loop), np.int32(n_levels),
             np.int32(max_edges)))
-        _function(precision, "ocn_vel_hmix_del4_tend_v842")(_grid(n_edges), (_BLOCK,), (
+        n_edges_loop = loop_extent("edges", 1, n_edges)
+        _function(precision, "ocn_vel_hmix_del4_tend_v842")(_grid(n_edges_loop), (_BLOCK,), (
             tend, delsq_divergence, delsq_vorticity, *common, mesh["meshScalingDel4"], mesh["dcEdge"],
             mesh["dvEdge"], mesh["edgeMask"], dtype(config_mom_del4), dtype(config_mom_del4_div_factor),
-            np.int32(n_edges), np.int32(n_levels)))
+            np.int32(n_edges_loop), np.int32(n_levels)))

@@ -9,13 +9,13 @@
     "cupy.ReductionKernel",
     "cupy.cuda.compiler.compile_using_nvrtc"
   ],
-  "site_count": 664,
+  "site_count": 665,
   "site_count_by_kind": {
     "cupy.ElementwiseKernel": 45,
     "cupy.RawKernel": 111,
     "cupy.RawModule": 296,
     "cupy.ReductionKernel": 16,
-    "cupy.cuda.compiler.compile_using_nvrtc": 196
+    "cupy.cuda.compiler.compile_using_nvrtc": 197
   },
   "site_count_by_surface": {
     "other": {
@@ -29,7 +29,7 @@
       "cupy.RawKernel": 39,
       "cupy.RawModule": 99,
       "cupy.ReductionKernel": 9,
-      "cupy.cuda.compiler.compile_using_nvrtc": 121
+      "cupy.cuda.compiler.compile_using_nvrtc": 122
     },
     "tests": {
       "cupy.ElementwiseKernel": 7,
@@ -10066,7 +10066,7 @@
     },
     {
       "file": "woof/hex/mpas_ocean/forcing_v842.py",
-      "line": 110,
+      "line": 111,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",
@@ -10079,6 +10079,22 @@
       "options_element_expressions": null,
       "options_are_literal": false,
       "text": "image, _ = compile_using_nvrtc(module_source(precision), options, None,"
+    },
+    {
+      "file": "woof/hex/mpas_ocean/forward_v842.py",
+      "line": 78,
+      "column": 15,
+      "surface": "package",
+      "constructor": "compile_using_nvrtc",
+      "constructor_kind": "cupy.cuda.compiler.compile_using_nvrtc",
+      "enclosing": "_module_on",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "options",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "image, _ = compile_using_nvrtc(module_source(precision), options, None, f\"ocn_forward_v842_{precision}.cu\")"
     },
     {
       "file": "woof/hex/mpas_ocean/pgrad_hmix_v842.py",
@@ -10098,7 +10114,7 @@
     },
     {
       "file": "woof/hex/mpas_ocean/split_step_v842.py",
-      "line": 87,
+      "line": 86,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",
@@ -10130,7 +10146,7 @@
     },
     {
       "file": "woof/hex/mpas_ocean/tend_v842.py",
-      "line": 83,
+      "line": 86,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",
@@ -10470,7 +10486,7 @@
     },
     {
       "file": "woof/hex/mpasphys/rrfs/driver_rrfs.py",
-      "line": 908,
+      "line": 922,
       "column": 31,
       "surface": "package",
       "constructor": "compiler.compile_using_nvrtc",

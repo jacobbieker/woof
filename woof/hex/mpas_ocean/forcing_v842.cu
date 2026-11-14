@@ -188,3 +188,22 @@ extern "C" __global__ void ocn_thick_surface_flux_v842(
     if (kmax > 0 && remainingFluxRunoff > (rk)0.0)
         tend[base + kmax - 1] = A(tend[base + kmax - 1], M(remainingFluxRunoff, fr));
 }
+
+// ocn_forcing_build_fraction_absorbed_array (mpas_ocn_forcing.F), cells
+// 1..nCellsArray(2): each layer's share of the surface flux, the transmission
+// at its top less that at its bottom; for the runoff with its own attenuation
+extern "C" __global__ void ocn_fraction_absorbed_v842(
+    rk *fraction, const rk *layerThickness, const rk *attenuation, const int *maxLevelCell, int nCells, int nl)
+{
+    const int iCell = blockIdx.x * blockDim.x + threadIdx.x;
+    if (iCell >= nCells) return;
+    rk zTop = (rk)0.0;
+    rk tTop = ocn_transmission(zTop, attenuation[iCell]);
+    for (int k = 0; k < maxLevelCell[iCell]; ++k) {
+        const rk zBot = S(zTop, layerThickness[iCell * nl + k]);
+        const rk tBot = ocn_transmission(zBot, attenuation[iCell]);
+        fraction[iCell * nl + k] = S(tTop, tBot);
+        zTop = zBot;
+        tTop = tBot;
+    }
+}

@@ -10,7 +10,8 @@
 - ``ocn_vel_forcing_tend``: the surface stress (with
   ``ocn_forcing_transmission``), the explicit bottom drag and Rayleigh
   friction;
-- ``ocn_thick_surface_flux_tend``.
+- ``ocn_thick_surface_flux_tend``;
+- ``ocn_forcing_build_fraction_absorbed_array`` (:func:`fraction_absorbed`).
 
 :func:`tend_vel` and :func:`tend_thick` compose them with the other ported
 terms in the Fortran's order, and zero the arrays the Fortran zeroes. Every
@@ -50,12 +51,12 @@ from woof.hex import numerics as _hex_numerics
 from woof.hex.errors import ConfigurationRefusal
 
 from . import pgrad_hmix_v842, tend_v842
-from .tend_v842 import COMPILE_OPTIONS, PRECISIONS, _check, _grid, _precision_of
+from .tend_v842 import COMPILE_OPTIONS, PRECISIONS, _check, _grid, _precision_of, loop_extent
 
 SOURCE_FILES = (
     "src/core_ocean/shared/mpas_ocn_tendency.F:107-350,1034-1049",
     "src/core_ocean/shared/mpas_ocn_surface_bulk_forcing.F:139-306,320-334",
-    "src/core_ocean/shared/mpas_ocn_forcing.F:191-196",
+    "src/core_ocean/shared/mpas_ocn_forcing.F:98-175,191-196",
     "src/core_ocean/shared/mpas_ocn_vel_forcing.F",
     "src/core_ocean/shared/mpas_ocn_vel_forcing_surface_stress.F",
     "src/core_ocean/shared/mpas_ocn_vel_forcing_explicit_bottom_drag.F",
@@ -188,17 +189,18 @@ def vel_forcing_tend(*, mesh: dict, normal_velocity, surface_flux_attenuation_co
     _check("maxLevelEdgeTop", mesh["maxLevelEdgeTop"], cp.int32, (n_edges,))
     _check("cellsOnEdge", mesh["cellsOnEdge"], cp.int32, (n_edges, 2))
     _check("edgeMask", mesh["edgeMask"], cp.int32, (n_edges, n_levels))
-    grid = (_grid(n_edges), (_BLOCK,))
+    n_edges_loop = loop_extent("edges", 1, n_edges)
+    grid = (_grid(n_edges_loop), (_BLOCK,))
     if not c["config_disable_vel_surface_stress"]:
         _function(precision, "ocn_vel_forcing_surface_stress_v842")(*grid, (
             tend, surface_flux_attenuation_coefficient, surface_stress, layer_thickness_edge,
             mesh["maxLevelEdgeTop"], mesh["cellsOnEdge"], mesh["edgeMask"], rho_sw(c, precision),
-            np.int32(n_edges), np.int32(n_levels)))
+            np.int32(n_edges_loop), np.int32(n_levels)))
     if c["config_use_explicit_bottom_drag"] and not c["config_disable_vel_explicit_bottom_drag"]:
         _refuse_level_zero("config_use_explicit_bottom_drag", mesh["maxLevelEdgeTop"])
         _function(precision, "ocn_vel_forcing_explicit_bottom_drag_v842")(*grid, (
             tend, normal_velocity, kinetic_energy_cell, layer_thickness_edge, mesh["maxLevelEdgeTop"],
-            mesh["cellsOnEdge"], dtype(c["config_explicit_bottom_drag_coeff"]), np.int32(n_edges),
+            mesh["cellsOnEdge"], dtype(c["config_explicit_bottom_drag_coeff"]), np.int32(n_edges_loop),
             np.int32(n_levels)))
     if c["config_Rayleigh_friction"]:
         bottom = bool(c["config_Rayleigh_bottom_friction"])
@@ -206,7 +208,20 @@ def vel_forcing_tend(*, mesh: dict, normal_velocity, surface_flux_attenuation_co
             _refuse_level_zero("config_Rayleigh_bottom_friction", mesh["maxLevelEdgeTop"])
         _function(precision, "ocn_vel_forcing_rayleigh_v842")(*grid, (
             tend, normal_velocity, mesh["maxLevelEdgeTop"], dtype(c["config_Rayleigh_damping_coeff"]),
-            np.int32(bottom), np.int32(n_edges), np.int32(n_levels)))
+            np.int32(bottom), np.int32(n_edges_loop), np.int32(n_levels)))
+
+
+def fraction_absorbed(*, mesh: dict, layer_thickness, diagnostics: dict, forcing: dict) -> None:
+    """``ocn_forcing_build_fraction_absorbed_array``: ``fractionAbsorbed`` and
+    ``fractionAbsorbedRunoff`` from the layer thicknesses and the two
+    attenuation coefficients, over ``nCellsArray(2)``; arrays with MPAS's
+    missing-cell element."""
+    precision = _precision_of(layer_thickness)
+    n_cells, nl = int(mesh["nCellsArray"][1]), int(mesh["nVertLevels"])
+    for out, att in (("fractionAbsorbed", "surfaceFluxAttenuationCoefficient"),
+                     ("fractionAbsorbedRunoff", "surfaceFluxAttenuationCoefficientRunoff")):
+        _function(precision, "ocn_fraction_absorbed_v842")(_grid(n_cells), (_BLOCK,), (
+            forcing[out], layer_thickness, diagnostics[att], mesh["maxLevelCell"], np.int32(n_cells), np.int32(nl)))
 
 
 def thick_surface_flux_tend(*, mesh: dict, transmission_coefficients, transmission_coefficients_runoff,
@@ -226,9 +241,10 @@ def thick_surface_flux_tend(*, mesh: dict, transmission_coefficients, transmissi
     _check("surfaceThicknessFlux", surface_thickness_flux, dtype, (n_cells,))
     _check("surfaceThicknessFluxRunoff", surface_thickness_flux_runoff, dtype, (n_cells,))
     _check("maxLevelCell", mesh["maxLevelCell"], cp.int32, (n_cells,))
-    _function(precision, "ocn_thick_surface_flux_v842")(_grid(n_cells), (_BLOCK,), (
+    n_cells_loop = loop_extent("cells", 1, n_cells)
+    _function(precision, "ocn_thick_surface_flux_v842")(_grid(n_cells_loop), (_BLOCK,), (
         tend, transmission_coefficients, transmission_coefficients_runoff, surface_thickness_flux,
-        surface_thickness_flux_runoff, mesh["maxLevelCell"], np.int32(n_cells), np.int32(n_levels)))
+        surface_thickness_flux_runoff, mesh["maxLevelCell"], np.int32(n_cells_loop), np.int32(n_levels)))
 
 
 def tend_vel(*, mesh: dict, state: dict, diagnostics: dict, forcing: dict, tend, configs: dict | None = None,
@@ -265,11 +281,13 @@ def tend_vel(*, mesh: dict, state: dict, diagnostics: dict, forcing: dict, tend,
             _check(name, forcing[name], dtype, (n_cells,))
         _check("angleEdge", mesh["angleEdge"], dtype, (n_edges,))
         _check("cellsOnEdge", mesh["cellsOnEdge"], cp.int32, (n_edges, 2))
-        _function(precision, "ocn_bulk_wind_stress_edges_v842")(_grid(n_edges), (_BLOCK,), (
+        n_edges_loop = loop_extent("edges", 4, n_edges)
+        _function(precision, "ocn_bulk_wind_stress_edges_v842")(_grid(n_edges_loop), (_BLOCK,), (
             surface_stress, forcing["windStressZonal"], forcing["windStressMeridional"], mesh["angleEdge"],
-            mesh["cellsOnEdge"], np.int32(n_edges)))
-        _function(precision, "ocn_bulk_wind_stress_cells_v842")(_grid(n_cells), (_BLOCK,), (
-            magnitude, forcing["windStressZonal"], forcing["windStressMeridional"], np.int32(n_cells)))
+            mesh["cellsOnEdge"], np.int32(n_edges_loop)))
+        n_cells_loop = loop_extent("cells", 3, n_cells)
+        _function(precision, "ocn_bulk_wind_stress_cells_v842")(_grid(n_cells_loop), (_BLOCK,), (
+            magnitude, forcing["windStressZonal"], forcing["windStressMeridional"], np.int32(n_cells_loop)))
     d = diagnostics
     tend_v842.vel_coriolis_tend(
         mesh=mesh, normalized_relative_vorticity_edge=d["normalizedRelativeVorticityEdge"],
@@ -333,8 +351,9 @@ def tend_thick(*, mesh: dict, diagnostics: dict, forcing: dict, tend, configs: d
                  "riverRunoffFlux")
         for name in names:
             _check(name, forcing[name], dtype, (n_cells,))
-        _function(precision, "ocn_bulk_thickness_flux_v842")(_grid(n_cells), (_BLOCK,), (
-            flux, runoff, *(forcing[n] for n in names), rho_sw(c, precision), np.int32(n_cells)))
+        n_cells_loop = loop_extent("cells", 3, n_cells)
+        _function(precision, "ocn_bulk_thickness_flux_v842")(_grid(n_cells_loop), (_BLOCK,), (
+            flux, runoff, *(forcing[n] for n in names), rho_sw(c, precision), np.int32(n_cells_loop)))
     d = diagnostics
     tend_v842.thick_hadv_tend(mesh=mesh, normal_velocity=d["normalTransportVelocity"],
                               layer_thickness_edge=d["layerThicknessEdge"], tend=tend,

@@ -111,6 +111,8 @@ EXTERNAL: dict[str, str] = {
 
     "module_bl_keps.F": _WRF471,
     "phys/module_sf_idealscmsfclay.F": _WRF471,
+    # The CAM UW shallow QI-carrier fatal (lines 519-522, the same in v4.6.1).
+    "module_shallowcu_driver.F": _WRF471,
 
     # CU99's native pin includes the column and driver scalar/expiry gates.
     # tools/kf_old_wrf461_oracle/PIN.json records both public-source digests.
@@ -337,10 +339,10 @@ RESOLVED: dict[str, tuple[str, str]] = {
     # unchanged.)
     # (3.0 port folds moved both launchers seven lines down; the registry
     # now cites :1490 and :1588.  Anchors unchanged.)
-    "woof/core/dycore.py:1505": (
+    "woof/core/dycore.py:1492": (
         "woof/core/dycore.py",
         "WRF v4.6.1 km_opt=2:"),
-    "woof/core/dycore.py:1603": (
+    "woof/core/dycore.py:1590": (
         "woof/core/dycore.py",
         "WRF v4.6.1 km_opt=3:"),
 }
