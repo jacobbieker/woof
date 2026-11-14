@@ -114,6 +114,11 @@ def test_mesh_grading_rides_to_the_mesh_door_only_when_given(tmp_path, monkeypat
     assert (parsed.transition_factor, parsed.ring_factor, parsed.cull_pad_scale) == (18.0, 1.0, 2.5)
     with pytest.raises(door.RegionalRefusal, match="--transition-factor 0.0 is not positive"):
         _gfs_region(tmp_path, "2026-10-27T18", 3, 12, "--transition-factor", "0")
+    raster = tmp_path / "terrain.nc"
+    raster.write_bytes(b"")  # the generator reads the file; the door only resolves and forwards it
+    value, parsed = mesh_argv("--density-raster", str(raster))
+    assert value["density_rasters"] == [str(raster.resolve())]
+    assert parsed.density_raster == [raster.resolve()]
 
 
 def test_gfs_region_starts_at_any_lead_gfs_writes(tmp_path):
