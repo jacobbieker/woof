@@ -42,7 +42,10 @@ absolute vorticity, 250 hPa height and wind (jet), precipitation since init,
 precipitable water, simulated infrared brightness temperature, SBCAPE,
 composite reflectivity and precipitation type everywhere; regional views add
 2 m dewpoint, 500 hPa height and wind, 850 hPa temperature, MUCAPE and cloud
-cover by level. Precipitation type is the model's own: where rain, snow and
+cover by level, and the severe-weather set: MLCAPE, 0-1 and 0-3 km
+storm-relative helicity, 0-1 and 0-6 km bulk shear, 0-1 km EHI, the
+fixed-layer significant tornado parameter, McCaul's total lightning threat and
+the 10 m gust. Precipitation type is the model's own: where rain, snow and
 graupel reach the lowest level (0.01 g/kg together), the frozen mass fraction
 and that level's temperature choose rain, freezing rain, ice pellets or snow
 (`rw-wrfbatch` `explicit_precipitation_type`).
