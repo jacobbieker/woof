@@ -972,6 +972,9 @@ class ForecastRequest:
     wind_farms: str | None = field(default=None, kw_only=True)
     #: WRF's w_crit_cfl when --w-damping asked for the limiter (woof.hex.cuda_w_damping), else None.
     w_damping: float | None = field(default=None, kw_only=True)
+    #: WRF's inflow perturbation controls when --inflow-perturbation asked for it
+    #: (woof.hex.inflow_perturbation), else None.
+    inflow_perturbation: dict | None = field(default=None, kw_only=True)
     #: Input problems collected rather than raised, preflight only.  Always
     #: empty on a real run, because there the same conditions refuse.
     input_problems: tuple[str, ...] = ()
@@ -2569,6 +2572,7 @@ def resolve_request(
         chemistry_config=getattr(arguments, "chemistry_config", None),
         wind_farms=getattr(arguments, "wind_farms", None),
         w_damping=_resolve_w_damping(arguments),
+        inflow_perturbation=_resolve_inflow_perturbation(arguments),
         input_problems=tuple(collected or ()),
         preset=preset.name,
         pbl_cadence_source=pbl_cadence_source,
@@ -3169,6 +3173,34 @@ def _resolve_w_damping(arguments) -> float | None:
     return crit
 
 
+def _resolve_inflow_perturbation(arguments) -> dict | None:
+    """WRF's inflow perturbation controls when ``--inflow-perturbation`` is on, else None."""
+
+    names = ("inflow_perturbation_seed", "inflow_perturbation_amplitude_scale", "inflow_perturbation_faces")
+    given = {name: getattr(arguments, name, None) for name in names}
+    if not getattr(arguments, "inflow_perturbation", False):
+        stray = [name for name, value in given.items() if value is not None]
+        if stray:
+            raise _refuse(f"--{stray[0].replace('_', '-')} is read only with --inflow-perturbation; "
+                          "it would be accepted and never read")
+        return None
+    seed = 0 if given[names[0]] is None else int(given[names[0]])
+    scale = 1.0 if given[names[1]] is None else float(given[names[1]])
+    faces = "inflow" if given[names[2]] is None else str(given[names[2]])
+    if seed < 0:
+        raise _refuse(f"--inflow-perturbation-seed {seed} must be non-negative")
+    if not math.isfinite(scale) or scale < 0:
+        raise _refuse(f"--inflow-perturbation-amplitude-scale {scale!r} must be finite and non-negative")
+    if faces not in ("inflow", "outflow"):
+        raise _refuse(f"--inflow-perturbation-faces {faces!r} must be inflow or outflow")
+    for flag in ("local_timestep", "fullstep_local_timestep", "partial_nest"):
+        if getattr(arguments, flag, False):
+            raise _refuse(
+                f"--inflow-perturbation acts in the resident regional runtime; --{flag.replace('_', '-')} "
+                "runs its own drivers that do not carry it, so the seeding would be accepted and never applied")
+    return {"seed": seed, "amplitude_scale": scale, "faces": faces}
+
+
 def mpas_route_orographic_statistics(arguments, native_config) -> Path | None:
     """The GSL drag statistics an MPAS-route run reads when it names none: beside --grid, else built there.
 
@@ -3366,6 +3398,8 @@ def build_driver_argv(request: ForecastRequest) -> list[str]:
         argv += ["--wind-farms", request.wind_farms]
     if request.w_damping is not None:
         argv += ["--w-damping", "--w-crit-cfl", repr(float(request.w_damping))]
+    if request.inflow_perturbation is not None:
+        argv += ["--inflow-perturbation", json.dumps(request.inflow_perturbation, sort_keys=True)]
     if request.source_table is not None:
         argv += ["--source-table", str(request.source_table)]
     if request.start_time:
@@ -3726,6 +3760,8 @@ def build_receipt(
             **({} if request.surface_statics is None else
                {"surface_statics": str(request.surface_statics)}),
             **({} if request.w_damping is None else {"w_damping": {"w_crit_cfl": request.w_damping}}),
+            **({} if request.inflow_perturbation is None else
+               {"inflow_perturbation": dict(request.inflow_perturbation)}),
             "source_table": (
                 None if request.source_table is None
                 else str(request.source_table)
@@ -4957,6 +4993,9 @@ def _run_forecast(arguments: argparse.Namespace) -> int:
             if getattr(arguments, "w_damping", False):
                 raise ValueError("--w-damping is carried by the WOOF-physics route's dycore driver; the MPAS "
                                  "suite route (matrix item 4.2 follow-up) would accept it and never apply it")
+            if getattr(arguments, "inflow_perturbation", False):
+                raise ValueError("--inflow-perturbation is carried by the WOOF-physics route's regional runtime; "
+                                 "the MPAS suite route (matrix item 5.7 follow-up) would accept it and never apply it")
             from .mpasphys.resident_v842 import ported_route_refusal
             from .mpasphys.forecast_v842 import named_library_route
             suite_refusal = ported_route_refusal(native_config)
@@ -5527,6 +5566,16 @@ def add_forecast_arguments(parser: argparse.ArgumentParser) -> None:
                              "WOOF-physics route only; default off")
     parser.add_argument("--w-crit-cfl", type=float, default=None, metavar="CFL",
                         help="WRF's w_crit_cfl for --w-damping (default 1.0, WOOF's)")
+    parser.add_argument("--inflow-perturbation", action="store_true",
+                        help="WRF's inflow perturbation on a regional mesh: cell-blocked theta increments "
+                             "(Eckert amplitude, PBL depth, 100 s holds) on the inflow faces' relaxation-zone "
+                             "target; WOOF-physics route only; default off")
+    parser.add_argument("--inflow-perturbation-seed", type=int, default=None, metavar="N",
+                        help="WRF's inflow_perturbation_seed (default 0)")
+    parser.add_argument("--inflow-perturbation-amplitude-scale", type=float, default=None, metavar="X",
+                        help="WRF's inflow_perturbation_amplitude_scale (default 1.0)")
+    parser.add_argument("--inflow-perturbation-faces", default=None, choices=("inflow", "outflow"),
+                        help="WRF's inflow_perturbation_faces (default inflow)")
     parser.add_argument("--wind-farms", default=None, metavar="uswtdb|TABLE|off",
                         help="opt-in Fitch turbine drag and TKE from the shared turbine tables")
     # --wrf-hydro / --wrf-hydro-output: WRF-Hydro's routing on its own LSM grid, coupled to the hex land surface
