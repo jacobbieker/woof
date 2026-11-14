@@ -290,6 +290,10 @@ void diff6_multi(DIFF6_TABLE_PARAM table, int nrows,
     real wy_p0 = __fmul_rn(sdy_p0, mu_y_p0);
     real wy_p1 = __fmul_rn(sdy_p1, mu_y_p1);
 
+    // One copy of the row body on every architecture: the rounding audit
+    // (tools/cuda_rounding_check.py) compares per-site instruction counts
+    // across targets, and an unroll choice must not read as a change.
+#pragma unroll 1
     for (int r = 0; r < nrows; ++r) {
         const unsigned long long* row = table.rows[DIFF6_MULTI_HEADER_ROWS + r];
         const real* f = (const real*)row[0];
