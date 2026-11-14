@@ -126,7 +126,7 @@ KEY_REASONS: Mapping[str, str] = {
     "grid_fdda": "grid and spectral nudging on hex are matrix item 5.1",
     "obs_nudge_opt": "obs nudging on hex is matrix item 5.2",
     "dfi_opt": "DFI on hex is matrix item 4.4 (IAU is the hex alternative)",
-    "w_damping": "w_damping on hex is matrix item 4.2",
+    "w_damping": "w_damping on hex is `woof hex forecast --w-damping` (matrix item 4.2); the go route has no mapping yet",
 }
 
 
