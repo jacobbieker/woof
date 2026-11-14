@@ -115,6 +115,22 @@ REGIONAL_EXTRA_PRODUCTS = (
     "1km_reflectivity_uh0to2km",
     "1km_reflectivity_uh0to3km",
     "1km_reflectivity_uh2to5km",
+    # The severe-weather set the renderer derives from a hex frame's own columns (rw-wrfbatch derived/direct
+    # recipes, the same ones the WRF path's `woof render` draws from wrfout): mixed-layer CAPE, 0-1 and 0-3 km
+    # storm-relative helicity, 0-1 and 0-6 km bulk shear, 0-1 km EHI, the fixed-layer significant tornado
+    # parameter, McCaul's total lightning threat and the 10 m gust.  THE GAP THIS CLOSES (severe-weather
+    # inventory, 2026-11-14): a hex regional run drew SBCAPE/MUCAPE and UH only, so its viewer had none of the
+    # shear/helicity/composite maps a convective day is read from, although every one of them renders from the
+    # frames the door already stores.
+    "mlcape",
+    "srh_0_1km",
+    "srh_0_3km",
+    "bulk_shear_0_1km",
+    "bulk_shear_0_6km",
+    "ehi_0_1km",
+    "stp_fixed",
+    "lightning_threat_3",
+    "10m_wind_gusts",
 )
 GLOBAL_PRODUCTS = BASE_GLOBAL_PRODUCTS + WINDOWED_PRODUCTS
 REGIONAL_PRODUCTS = GLOBAL_PRODUCTS + REGIONAL_EXTRA_PRODUCTS
