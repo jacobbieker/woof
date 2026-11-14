@@ -1,8 +1,9 @@
 ! Stand-ins for the MPAS-Seaice modules the time-step oracle (run_seaice_step)
 ! compiles against but does not drive: the variational basis setup
 ! (Wachspress, PWL: the driver gives the basis arrays), the weak-form solver,
-! the column package's ice strength, the unit tests and advection (refused:
-! config_use_advection = .false.).  Each stops by name if reached.  The
+! the column package's ice strength and the unit tests.  Each stops by name
+! if reached.  (Incremental-remap advection is compiled verbatim; its
+! stand-ins are remap_standins.F90.)  The
 ! framework is tools/mpas_ocean_oracle/stubs.F90, shared with the ocean.
 module seaice_velocity_solver_wachspress
   use mpas_derived_types
@@ -112,22 +113,3 @@ contains
   end subroutine seaice_perform_unit_test
 
 end module seaice_unit_test
-
-module seaice_advection
-  use mpas_derived_types
-  use mpas_timekeeping
-  implicit none
-  private
-  public :: seaice_run_advection
-
-contains
-
-  subroutine seaice_run_advection(domain, clock, ierr)
-    type(domain_type), intent(inout) :: domain
-    type(MPAS_Clock_type), intent(in) :: clock
-    integer, intent(inout) :: ierr
-    print *, 'oracle stub: seaice_run_advection is not compiled here'
-    stop 6
-  end subroutine seaice_run_advection
-
-end module seaice_advection

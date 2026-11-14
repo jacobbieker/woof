@@ -99,3 +99,48 @@ Its inputs come in three kinds:
     whole seconds and the self-describing stream with MPAS-Seaice's pools).
 
 `make_step_fixture.py` writes `tests/data/oracles/mpas_seaice_step`.
+
+## The incremental-remap oracle (`run_incremental_remap.F90`)
+
+`run_incremental_remap.F90` drives MPAS-Seaice v8.4.2's incremental remap on
+one block:
+- `mpas_seaice_advection_incremental_remap_tracers.F` is compiled verbatim;
+- `mpas_seaice_advection_incremental_remap.F` is compiled verbatim with
+  `-Dprivate=public` (visibility only), so the driver can call its stages.
+
+Every run starts with `seaice_init_advection_incremental_remap` itself: the
+tracer list from the packages, the halo check and the remap geometry. The
+RBF reconstruction coefficients (`coeffs_reconstruct`) are the input's:
+`remap_standins.F90` makes `mpas_rbf_interp_initialize` and
+`mpas_init_reconstruct` no-ops. Then, by `oracle_stage`:
+- 0: nothing more (the tracer tree and the geometry);
+- 1: the volume-to-thickness loop of `seaice_run_advection_incremental_remap`
+  (and back, under `oracle_round_trip`);
+- 2: `find_departure_points`, `find_departure_triangles` and
+  `get_triangle_quadrature_points`;
+- 3: `make_masks` and `construct_linear_tracer_fields`;
+- 4: `seaice_run_advection_incremental_remap`, `oracle_n_steps` times.
+
+The third argument is a log file. It gets the ordered tracer list, every
+warning the routines log (the mean-recovery check, with its real arguments
+to 17 digits) and stage 4's error code.
+
+`remap_standins.F90` also supplies:
+- `seaice_error`'s codes;
+- a no-op abort write;
+- an upwind module that stops by name. v8.4.2's upwind advection reads
+  configs the sea-ice Registry does not declare and mesh fields it does not
+  carry, so it cannot run.
+
+The meshes (`woof.verify.mpas_seaice_planar_mesh`) are planar hexagon and
+quadrilateral blocks with land and halo layers. Cases are built with
+correctly rounded operations only (no libm trigonometry, BLAS or LAPACK), so
+their input words are the same on every host.
+
+`make_remap_fixture.py` writes `tests/data/oracles/mpas_seaice_remap`. For
+each case it keeps the output fields whose words changed, and writes
+`remap-logs.json` (the tracer lists and warnings).
+
+The time-step oracle (`run_seaice_step.F90`) runs `seaice_init_advection` and,
+under `config_use_advection`, `seaice_run_advection` (both
+`mpas_seaice_advection.F` and the remap compiled verbatim).
