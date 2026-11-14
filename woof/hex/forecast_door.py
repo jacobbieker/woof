@@ -3188,17 +3188,20 @@ def _partitioned_samehost_refusal(request) -> str | None:
     driver: each would be recorded in the receipt and never applied.
     """
 
+    # --samehost-devices always selects the partitioned executor (even naming one card), and automatic selection
+    # may choose it when several cards are visible: the one-card route is no --samehost-devices and one visible card.
+    one_card = "omit --samehost-devices and make one card visible, e.g. CUDA_VISIBLE_DEVICES=0"
     if request.nudging is not None:
         return ("HEX_NUDGING_PARTITIONED: nudging runs on one card; the partitioned same-host "
-                "executor has no nudging seat (pin one device)")
+                f"executor has no nudging seat ({one_card})")
     if request.tc_climate is not None:
-        return "--tc-climate is not wired to the partitioned same-host executor"
+        return f"--tc-climate is not wired to the partitioned same-host executor ({one_card})"
     if request.w_damping is not None:
         return ("--w-damping acts in the one-card resident dycore driver; the partitioned same-host executor's "
-                "rank drivers do not carry it (pin one device)")
+                f"rank drivers do not carry it ({one_card})")
     if request.inflow_perturbation is not None:
         return ("--inflow-perturbation acts in the one-card regional runtime; the partitioned same-host "
-                "executor's rank runtimes do not carry it (pin one device)")
+                f"executor's rank runtimes do not carry it ({one_card})")
     return None
 
 

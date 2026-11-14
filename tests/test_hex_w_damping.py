@@ -66,6 +66,15 @@ def test_the_partitioned_samehost_executor_refuses_what_its_ranks_do_not_install
     assert "HEX_NUDGING_PARTITIONED" in door._partitioned_samehost_refusal(_request(nudging={}))
 
 
+def test_the_partitioned_refusals_name_the_one_card_route():
+    """--samehost-devices selects the partitioned executor even when it names one card, so "pin one device" was
+    no way out: each refusal names the route that reaches the one-card driver."""
+    for changes in (dict(nudging={}), dict(tc_climate={}), dict(w_damping=1.0),
+                    dict(inflow_perturbation={"seed": 0})):
+        message = door._partitioned_samehost_refusal(_request(**changes))
+        assert "omit --samehost-devices" in message and "CUDA_VISIBLE_DEVICES" in message, changes
+
+
 def test_the_driver_refuses_nudging_before_the_class_executor(monkeypatch):
     """execute_forecast hands an active full-step LTS run to the class executor, which is given no nudging.  The
     door refuses it (HEX_NUDGING_LTS); the driver's own entry point now does too, before the delegation."""
