@@ -285,7 +285,7 @@ class AfwaModule:
 
     def __init__(self, owner, config: AfwaConfig):
         self.owner, self.config = owner, config
-        self._step = None
+        self._step, self._first = None, False
 
     # -- setup -----------------------------------------------------------------------------------------
     def setup(self, utils):
@@ -410,6 +410,8 @@ class AfwaModule:
     def begin(self, step, when):
         """The step the next :meth:`update` folds (steps <= 0 fold nothing)."""
         self._step = int(step) if int(step) > 0 else None
+        # WRF's first step (itimestep 1) on the straight run's clock: a continuation's local step 1 is not it.
+        self._first = self._step is not None and self._step + int(getattr(self.owner, "step_offset", 0)) == 1
 
     def _base(self, col, output):
         from woof.core.kernels import get_kernel
@@ -474,7 +476,7 @@ class AfwaModule:
                      w["w_up_max"], w["w_dn_max"], w["afwa_hail"], w["tcoli_max"], w["grpl_flx_max"], i32(nl), i32(nc),
                      col["qv"], i32(not wrf_exact.ENABLED)))
         # WRF: on the first step and on output steps
-        if self._step == 1 or any(self.utils.field_will_be_written(n) for n in self.carried):
+        if self._first or any(self.utils.field_will_be_written(n) for n in self.carried):
             work = (cp.zeros((2, nl, nc), dtype=cp.float32), cp.zeros((2, nl, nc), dtype=cp.float32),
                     cp.zeros((2, nl, nc), dtype=cp.float32), cp.zeros((2, 6, nc), dtype=cp.float32))
             mu = (cp.zeros(nc, dtype=cp.float32), cp.zeros(nc, dtype=cp.float32))

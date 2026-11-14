@@ -94,6 +94,66 @@ def test_a_southern_region_reaches_the_mesh_door_on_every_python(tmp_path, monke
     assert build_parser().parse_args(seen[0]).point == "-5.5,18.5"
 
 
+def test_mesh_grading_rides_to_the_mesh_door_only_when_given(tmp_path, monkeypatch):
+    """--transition-factor/--ring-factor/--cull-pad-scale reach `mesh-plan --point` (a cull graded over several
+    doublings: a 3 km core to 12-24 km); a run without them keeps the plan and the mesh command it always had."""
+    monkeypatch.setattr(door, "_start_source_prefetch", lambda *args: None)
+
+    def mesh_argv(*extra):
+        value = _gfs_region(tmp_path, "2026-10-27T18", 3, 12, *extra)
+        seen = []
+        monkeypatch.setattr(door, "_cli", lambda argv, status: seen.append(argv) or 0)
+        door._stage_mesh(type("A", (), {"geog": None})(), value, None)
+        return value, build_parser().parse_args(seen[0])
+
+    value, parsed = mesh_argv()
+    assert "grading" not in value
+    assert (parsed.transition_factor, parsed.ring_factor, parsed.cull_pad_scale) == (18.0, 3.0, 1.35)
+    value, parsed = mesh_argv("--ring-factor", "1", "--cull-pad-scale", "2.5")
+    assert value["grading"] == {"ring_factor": 1.0, "cull_pad_scale": 2.5}
+    assert (parsed.transition_factor, parsed.ring_factor, parsed.cull_pad_scale) == (18.0, 1.0, 2.5)
+    with pytest.raises(door.RegionalRefusal, match="--transition-factor 0.0 is not positive"):
+        _gfs_region(tmp_path, "2026-10-27T18", 3, 12, "--transition-factor", "0")
+    raster = tmp_path / "terrain.nc"
+    raster.write_bytes(b"")  # the generator reads the file; the door only resolves and forwards it
+    value, parsed = mesh_argv("--density-raster", str(raster))
+    assert value["density_rasters"] == [str(raster.resolve())]
+    assert parsed.density_raster == [raster.resolve()]
+
+
+
+def test_a_generated_mesh_is_reused_only_for_the_grading_it_was_made_with(tmp_path, monkeypatch):
+    """A rerun in the same work dir with other grading or rasters would bind the old mesh to a plan that names
+    the new one: the door refuses instead."""
+    monkeypatch.setattr(door, "_start_source_prefetch", lambda *args: None)
+    monkeypatch.setattr(door, "_cli", lambda argv, status: 0)
+    note = type("S", (), {"note": staticmethod(lambda text: None)})()
+    args = type("A", (), {"geog": None})()
+    value = _gfs_region(tmp_path, "2026-10-27T18", 3, 12, "--ring-factor", "1")
+    door._stage_mesh(args, value, note)
+    mesh_dir = Path(value["paths"]["mesh"])
+    (mesh_dir / "x.point-generate.json").write_text("{}")
+    assert door._stage_mesh(args, value, note)["reused"] is True
+    other = _gfs_region(tmp_path, "2026-10-27T18", 3, 12, "--ring-factor", "2")
+    with pytest.raises(door.RegionalRefusal, match="was generated with"):
+        door._stage_mesh(args, other, note)
+    (mesh_dir / "regional-grading.json").unlink()  # a mesh made before the flags: the default grading only
+    with pytest.raises(door.RegionalRefusal, match="was generated with"):
+        door._stage_mesh(args, value, note)
+    assert door._stage_mesh(args, _gfs_region(tmp_path, "2026-10-27T18", 3, 12), note)["reused"] is True
+    # A raster rewritten at the same path is another request.
+    raster = tmp_path / "terrain.nc"
+    raster.write_bytes(b"a")
+    work = tmp_path / "raster-run"
+    work.mkdir()
+    painted = _gfs_region(work, "2026-10-27T18", 3, 12, "--density-raster", str(raster))
+    door._stage_mesh(args, painted, note)
+    (Path(painted["paths"]["mesh"]) / "x.point-generate.json").write_text("{}")
+    assert door._stage_mesh(args, painted, note)["reused"] is True
+    raster.write_bytes(b"b")
+    with pytest.raises(door.RegionalRefusal, match="was generated with"):
+        door._stage_mesh(args, painted, note)
+
 def test_gfs_region_starts_at_any_lead_gfs_writes(tmp_path):
     """GFS writes every hour to 120 h (its row's ladder). A region from GFS 18Z +3 h was refused because the plan
     read only the row's 6 h interval."""

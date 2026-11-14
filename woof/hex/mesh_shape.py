@@ -594,7 +594,8 @@ def predicted_shape_cull_cells(*, spec: Mapping[str, Any], drawn: Mapping[str, A
     lat0, lon0 = centroid(cull)
     proj = _Azimuthal(lat0, lon0, equal_area=True)
     background = float(spec["background_km"])
-    regions = list(spec["regions"])
+    # Density-raster rows refine by a field this integral does not read (the cull receipt counts them).
+    regions = [r for r in spec["regions"] if r.get("shape") != "raster"]
     fine = min(float(r["spacing_km"]) for r in regions)
     cull_lat, cull_lon = _latlon(_xyz(*_ring(cull).T))
     cx, cy = proj.forward(cull_lat, cull_lon)

@@ -4777,7 +4777,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/remap_v842.cu",
-    "sha256": "5c739279b95cc688eb0b7553c40bf2ab8674b524f2d3853afda4b586eb18a03d"
+    "sha256": "a48b2bacaf9ff6432e081d6a3eafc3fc389833517ea71c1572cc6eeab0edc4c7"
    },
    {
     "file": "woof/hex/mpas_seaice/velocity_v842.cu",
@@ -5579,7 +5579,7 @@
    },
    {
     "file": "woof/hex/cuda_w_damping.py",
-    "sha256": "9cdf43bc7e162dda236e0838a3ee6a75df32307d5578585259a531934fe3e7d6"
+    "sha256": "eb0138e5c2f4406eab79fa9e0392866f747b71552deac292a90704c64ca2f86c"
    },
    {
     "file": "woof/hex/iau_forcing.py",
@@ -5691,7 +5691,7 @@
    },
    {
     "file": "woof/hex/mpas_ocean/forcing_v842.py",
-    "sha256": "a75c4e6bce26d5482bba8012ce72f67d7105ba4c861cbe008ff1e1e7e4e5e92f"
+    "sha256": "a97fa340e9170c44397235ae182f2abcfab140e52567e5c3f8781a01717046d6"
    },
    {
     "file": "woof/hex/mpas_ocean/forward_v842.py",
@@ -5739,7 +5739,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/remap_v842.py",
-    "sha256": "0ff405ec3e6f588a7174af1b9413438fc58597a72675bb1be9717a7ed2a11db9"
+    "sha256": "fa74255fa378407c2a4feec237517d35afda2a514fd87033106058166f586b04"
    },
    {
     "file": "woof/hex/mpas_seaice/velocity_v842.py",
@@ -6039,7 +6039,7 @@
    },
    {
     "file": "woof/hex/nudging.py",
-    "sha256": "b4844e70251138f66d07cfd0fab8b5591dd8ba4ea6006c4417f3a71a82e8cabc"
+    "sha256": "bce0fbdfcdfc43d336ae6c5e8a99cc490d3d69eeb581e624750b8ea1ea8e6601"
    },
    {
     "file": "woof/hex/ocean_mixed_layer.py",

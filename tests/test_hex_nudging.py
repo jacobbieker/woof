@@ -111,3 +111,20 @@ def test_specified_zone_and_garbage_column_are_never_forced():
     mesh.arrays["bdyMaskCell"] = np.array([0, 1, 5, 6, 7, 0, 0, 3, 7, 0])
     mask = nudging.nudged_cell_mask(mesh, 11)
     assert mask.tolist() == [1, 1, 1, 0, 0, 1, 1, 1, 0, 1, 0]
+
+
+def test_a_checkpoint_route_on_the_runs_own_mesh_is_not_partitioned():
+    from woof.hex.mpasphys.runtime_v842 import nudging_partitioned
+
+    assert not nudging_partitioned(None, None)
+    assert not nudging_partitioned(None, SimpleNamespace(fixed_mesh=True))      # --checkpoint-hours / resume
+    assert nudging_partitioned(None, SimpleNamespace(fixed_mesh=False))         # a moving nest
+    assert nudging_partitioned(object(), None)                                  # a rank/rate-class split
+
+
+def test_nudging_works_on_a_copy_of_the_lent_scalar_sources():
+    from woof.hex.mpasphys.runtime_v842 import forcing_writes_scalar_sources
+
+    assert not forcing_writes_scalar_sources(SimpleNamespace(stochastic=None, iau=None, nudging=None))
+    for name in ("stochastic", "iau", "nudging"):
+        assert forcing_writes_scalar_sources(SimpleNamespace(**{name: object()}))

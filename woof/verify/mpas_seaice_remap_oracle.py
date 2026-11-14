@@ -37,6 +37,7 @@ import numpy as np
 
 from woof.hex.mpas_seaice.remap_v842 import PACKAGES, TRACER_TABLE
 from woof.verify import mpas_ocean_stream as _stream
+from woof.verify import mpas_seaice_sphere_mesh as _sphere
 from woof.verify.mpas_seaice_planar_mesh import ordered_sum, planar_mesh
 
 FIXTURE_DIR = Path(__file__).resolve().parents[2] / "tests" / "data" / "oracles" / "mpas_seaice_remap"
@@ -56,7 +57,11 @@ TRACER_AUX = (("tracer_masks", "Mask"), ("tracer_edge_fluxes", "EdgeFlux"), ("tr
 GEOMETRY = ("xVertexOnCell", "yVertexOnCell", "xVertexOnEdge", "yVertexOnEdge", "remapEdge", "cellsOnEdgeRemap",
             "edgesOnEdgeRemap", "minLengthEdgesOnVertex",
             *(f"{m}AvgCell" for m in ("x", "y", "xx", "xy", "yy", "xxx", "xxy", "xyy", "yyy", "xxxx", "xxxy",
-                                      "xxyy", "xyyy", "yyyy")))
+                                      "xxyy", "xyyy", "yyyy")),
+            "transGlobalToCell", "transCellToGlobal", "transGlobalToVertex", "transVertexToGlobal",
+            "transGlobalToEdge", "transEdgeToGlobal")
+#: the rotated global vectors (config_rotate_cartesian_grid on a sphere): the init's, not graded
+ROTATED = tuple(f"{a}{b}Rotate" for b in ("Cell", "Vertex", "Edge") for a in "xyz")
 BASE_CONFIG = {
     "config_rotate_cartesian_grid": True, "config_use_level_meltponds": True, "config_use_halo_exch": False,
     "config_aggregate_halo_exch": False, "config_reuse_halo_exch": False, "config_conservation_check": False,
@@ -160,11 +165,15 @@ def field_rows(case: dict) -> list:
                                                                       "transGlobalToVertex")),
              *(("incremental_remap", n, REAL, (3, 3, "E1")) for n in ("transEdgeToGlobal", "transGlobalToEdge")),
              ("incremental_remap", "minLengthEdgesOnVertex", REAL, _V),
-             *(("incremental_remap", n, REAL, _C) for n in GEOMETRY[8:]),
+             *(("incremental_remap", n, REAL, _C) for n in GEOMETRY[8:22]),
              ("incremental_remap", "maskEdge", INT, _E), ("incremental_remap", "maskCell", INT, _C),
              ("incremental_remap", "maskCategoryCell", INT, ("NCAT", "C1")),
              ("incremental_remap", "workCategoryCell", REAL, ("NCAT", "C1"))]
-    return mesh + velocity + remap + _tracer_rows(case["tracer_fields"], case["stage"] >= 1)
+    rotated = []
+    if case.get("sphere"):
+        rotated = [("rotated_mesh", f"{a}{b}Rotate", REAL, (f"{b[0]}1",)) for b in ("Cell", "Vertex", "Edge")
+                   for a in "xyz"]
+    return mesh + velocity + remap + rotated + _tracer_rows(case["tracer_fields"], case["stage"] >= 1)
 
 
 def tracer_fields(packages: dict) -> list[str]:
@@ -204,6 +213,15 @@ def reconstruction_coefficients(m: dict) -> np.ndarray:
     return coeffs
 
 
+def case_mesh(kind: str, rs: np.random.RandomState, owned: int, field_overrides: dict) -> dict:
+    """The case's block: planar, or on the sphere where ``field_overrides``
+    names a ``sphere`` centre (``varres`` stretches it)."""
+    if field_overrides.get("sphere"):
+        return _sphere.sphere_mesh(kind, rs, owned=owned, centre=field_overrides["sphere"],
+                                   varres=bool(field_overrides.get("varres", False)))
+    return planar_mesh(kind, rs, owned=owned)
+
+
 def make_case(name, seed, stage, kind, owned, packages, config_overrides, field_overrides,
               precision="r4") -> dict:
     """One deterministic case: five categories' worth of ice (three here) with
@@ -211,17 +229,22 @@ def make_case(name, seed, stage, kind, owned, packages, config_overrides, field_
     snow-free ice, a 10 km mesh and drift up to 0.3 m/s over an hour."""
     rs = np.random.RandomState(seed)
     real = PRECISIONS[precision]
-    m = planar_mesh(kind, rs, owned=owned)
+    m = case_mesh(kind, rs, owned, field_overrides)
+    sphere = bool(field_overrides.get("sphere"))
     nc, ne, nv, me, vd = m["nCells"], m["nEdges"], m["nVertices"], m["maxEdges"], m["vertexDegree"]
     ncat, nil, nsl = 3, 3, int(field_overrides.get("nSnowLayers", 1))
     dims = {"nCells": nc, "nEdges": ne, "nVertices": nv, "maxEdges": me, "vertexDegree": vd, "nCategories": ncat,
             "nIceLayers": nil, "nSnowLayers": nsl, "nVertLevels": 1}
-    config = {**BASE_CONFIG, "config_num_halos": m["nHalos"], **config_overrides, "oracle_stage": stage}
+    config = {**BASE_CONFIG, "config_num_halos": m["nHalos"], "mesh:on_a_sphere": sphere, **config_overrides,
+              "oracle_stage": stage}
     for package in PACKAGES:
         config[f"package:{package}"] = bool(packages.get(package, False))
     case = {"name": name, "precision": precision, "dims": dims, "config": config, "dt": 3600.0, "stage": stage,
             "mesh_kind": kind, "packages": {p: bool(packages.get(p, False)) for p in PACKAGES},
             "tracer_fields": tracer_fields(packages), "absent": tuple(field_overrides.get("absent", ()))}
+    if sphere:
+        case["sphere"] = field_overrides["sphere"]
+        case["varres"] = bool(field_overrides.get("varres", False))
 
     def uniform(lo, hi, shp):
         return lo + (hi - lo) * rs.random_sample(shp)
@@ -233,10 +256,14 @@ def make_case(name, seed, stage, kind, owned, packages, config_overrides, field_
     values.update({"nCellsSolve": int(m["nCellsArray"][0]), "nEdgesSolve": int(m["nEdgesArray"][0]),
                    "nVerticesSolve": int(m["nVerticesArray"][0]), "nQuadPoints": 6, "nTriPerEdgeRemap": 6,
                    "indexToCellID": np.arange(1, nc + 2), "indexToVertexID": np.arange(1, nv + 2),
-                   "indexToEdgeID": np.arange(1, ne + 2), "coeffs_reconstruct": reconstruction_coefficients(m),
+                   "indexToEdgeID": np.arange(1, ne + 2),
+                   "coeffs_reconstruct": (_sphere.reconstruction_coefficients if sphere
+                                          else reconstruction_coefficients)(m),
                    "dynamicsTimeStep": 3600.0})
-    # drift at the vertices: a smooth field up to about 0.3 m/s
-    xv, yv = m["xVertex"], m["yVertex"]
+    # drift at the vertices: a smooth field up to about 0.3 m/s (on the sphere, drawn on the
+    # block's plane: east/north in each vertex's frame)
+    plane = m.get("plane", m)
+    xv, yv = plane["xVertex"], plane["yVertex"]
     # a smooth bilinear-plus-quadratic drift (no libm: the same words on every host)
     a = uniform(-1.0, 1.0, (2, 4)) / 4.0
     speed = float(field_overrides.get("speed", 0.3))
@@ -245,7 +272,8 @@ def make_case(name, seed, stage, kind, owned, packages, config_overrides, field_
     u = speed * (a[0, 0] + a[0, 1] * sx + a[0, 2] * sy + a[0, 3] * sx * sy) * 4.0 / 1.5
     v = speed * (a[1, 0] + a[1, 1] * sx + a[1, 2] * sy + a[1, 3] * sx * sy) * 4.0 / 1.5
     # still over the block's middle (owned cells there keep their values, tiny areas among them)
-    cx, cy = ordered_sum(m["xCell"][:nc].tolist()) / nc, ordered_sum(m["yCell"][:nc].tolist()) / nc
+    pxc, pyc = plane["xCell"], plane["yCell"]
+    cx, cy = ordered_sum(pxc[:nc].tolist()) / nc, ordered_sum(pyc[:nc].tolist()) / nc
     still = (xv - cx) ** 2 + (yv - cy) ** 2 < 1.6e4 ** 2
     u[still] = 0.0
     v[still] = 0.0
@@ -253,12 +281,12 @@ def make_case(name, seed, stage, kind, owned, packages, config_overrides, field_
     # the ice: areas per category with an ice-free run of cells and tiny areas
     area = uniform(0.0, 0.35, (nc + 1, ncat))
     area[rs.random_sample((nc + 1, ncat)) < 0.12] = 0.0
-    free = (m["xCell"] - m["xCell"][:nc].max()) ** 2 + (m["yCell"] - m["yCell"][:nc].max()) ** 2 < 3.0e4 ** 2
+    free = (pxc - pxc[:nc].max()) ** 2 + (pyc - pyc[:nc].max()) ** 2 < 3.0e4 ** 2
     area[free] = 0.0
     tiny = rs.random_sample((nc + 1, ncat))
     area[tiny < 0.03] = 1.0e-12
     area[(tiny >= 0.03) & (tiny < 0.05)] = 1.0e-23
-    middle = (m["xCell"] - cx) ** 2 + (m["yCell"] - cy) ** 2 < 0.7e4 ** 2
+    middle = (pxc - cx) ** 2 + (pyc - cy) ** 2 < 0.7e4 ** 2
     area[middle, 0] = 1.0e-23
     thickness = uniform(0.2, 3.0, (nc + 1, ncat))
     snow = uniform(0.0, 0.4, (nc + 1, ncat))
@@ -303,8 +331,8 @@ def make_case(name, seed, stage, kind, owned, packages, config_overrides, field_
     return case
 
 
-def cases(precision: str = "r4") -> list[dict]:
-    return [make_case(*row, precision=precision) for row in CASES]
+def cases(precision: str = "r4", rows=CASES) -> list[dict]:
+    return [make_case(*row, precision=precision) for row in rows]
 
 
 def input_bytes(case: dict) -> bytes:
@@ -356,7 +384,7 @@ def graded(case: dict, key: str) -> bool:
     input) and, over whole remap steps, the triangle values (scratch whose
     words reach the fluxes, which are graded)."""
     pool, name = key.split("/", 1)
-    if name in GEOMETRY:
+    if name in GEOMETRY or name in ROTATED:
         return False
     return not (case["stage"] == 4 and pool == "tracer_triangles")
 
@@ -387,8 +415,8 @@ def warning_mismatches(got: list[dict], want: list[dict], precision: str) -> int
     return bad
 
 
-def load_fixture(precision: str) -> dict[str, dict[str, np.ndarray]]:
-    data = np.load(FIXTURE_DIR / f"oracle-{precision}.npz")
+def load_fixture(precision: str, fixture_dir: Path = FIXTURE_DIR) -> dict[str, dict[str, np.ndarray]]:
+    data = np.load(fixture_dir / f"oracle-{precision}.npz")
     out: dict[str, dict[str, np.ndarray]] = {}
     for key in data.files:
         case, field = key.split("/", 1)
@@ -396,8 +424,8 @@ def load_fixture(precision: str) -> dict[str, dict[str, np.ndarray]]:
     return out
 
 
-def load_logs() -> dict:
-    return json.loads((FIXTURE_DIR / "remap-logs.json").read_text(encoding="utf-8"))
+def load_logs(fixture_dir: Path = FIXTURE_DIR) -> dict:
+    return json.loads((fixture_dir / "remap-logs.json").read_text(encoding="utf-8"))
 
 
 def expected_outputs(case: dict, fixture: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
@@ -460,12 +488,13 @@ def run_gpu(case: dict, fixture: dict[str, np.ndarray] | None = None) -> dict[st
         v = dev["velocity_solver"]
         rv.departure_points(mesh=dev["mesh"], velocity=v, remap=dev["incremental_remap"],
                             dt=float(case["pools"]["velocity_solver"]["dynamicsTimeStep"]))
-        rv.departure_triangles(mesh=dev["mesh"], remap=dev["incremental_remap"])
+        rv.departure_triangles(mesh=dev["mesh"], remap=dev["incremental_remap"],
+                               sphere=rv.geometry_flags(case["config"])[0])
         rv.quadrature_points(mesh=dev["mesh"], remap=dev["incremental_remap"])
     elif stage == 3:
         rv.volume_to_thickness(tree, tracers=dev["tracers"], remap=dev["incremental_remap"])
         rv.make_masks(tree, pools=dev, mesh=dev["mesh"])
-        rv.construct_linear_fields(tree, pools=dev, mesh=dev["mesh"])
+        rv.construct_linear_fields(tree, pools=dev, mesh=dev["mesh"], flags=rv.geometry_flags(case["config"]))
     elif stage == 4:
         warnings = []
         for _ in range(int(case["config"]["oracle_n_steps"])):
@@ -480,17 +509,18 @@ def run_gpu(case: dict, fixture: dict[str, np.ndarray] | None = None) -> dict[st
             if kind in (REAL, INT) and dev[pool][name] is not None}
 
 
-def measure(precision: str, reference: dict | None = None) -> dict[str, dict[str, int]]:
+def measure(precision: str, reference: dict | None = None, *, rows=CASES,
+            fixture_dir: Path = FIXTURE_DIR) -> dict[str, dict[str, int]]:
     """Per case and field, the words the GPU gets wrong (the geometry is the input's, so not graded)."""
-    reference = load_fixture(precision) if reference is None else reference
+    reference = load_fixture(precision, fixture_dir) if reference is None else reference
     report: dict[str, dict[str, int]] = {}
-    for case in cases(precision):
+    for case in cases(precision, rows):
         fixture = reference.get(case["name"], {})
         got = run_gpu(case, fixture)
         want = expected_outputs(case, fixture)
         report[case["name"]] = {key: word_mismatches(got[key], want[key]) for key in want if graded(case, key)}
         if case["stage"] == 4:
-            want_warnings = load_logs()[case["name"]][precision]["warnings"]
+            want_warnings = load_logs(fixture_dir)[case["name"]][precision]["warnings"]
             report[case["name"]]["warnings"] = warning_mismatches(last_warnings[case["name"], precision],
                                                                   want_warnings, precision)
     return report

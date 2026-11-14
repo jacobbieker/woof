@@ -253,3 +253,44 @@ def test_harmonic_filter_on_a_cap_drops_unresolved_modes():
     out = cp.asnumpy(filt.apply(cp.asarray(smooth[None, :])))[0]
     interior = mesh.arrays["bdyMaskCell"] == 0
     np.testing.assert_allclose(out[interior], smooth[interior], atol=2e-3)
+
+
+def _bare(config, frames=2, pbl_height=None):
+    mesh = SimpleNamespace(n_cells=NC, n_edges=7, attrs={},
+                           arrays={"latCell": np.zeros(NC), "lonCell": np.zeros(NC)})
+    z = _columns()[0]
+    return nudging.HexNudging(
+        config, frames=[nudging.AnalysisFrame(None, "t", i * INTERVAL_M * 60.0, "") for i in range(frames)],
+        mesh=mesh, prep_geometry=SimpleNamespace(n_cells=NC, n_edges=7), physics_geometry=None, zgrid=z,
+        scalar_names=("qv", "qc"), dt=DT, kernel_cache=None, run_seconds=(frames - 1) * INTERVAL_M * 60.0,
+        pbl_height=pbl_height)
+
+
+def test_an_inactive_fields_pbl_control_needs_no_pbl_height():
+    # Temperature-only nudging with the default uv/q PBL controls on: only the active field's control counts.
+    row = dict(enabled=True, convention="wrf", gfdda_interval_m=INTERVAL_M, boundary_cells=1, cutoff_x=0,
+               cutoff_y=0, mode="grid", guv=0.0, gt=3e-4, gq=0.0, if_no_pbl_nudging_uv=1,
+               if_no_pbl_nudging_t=0, if_no_pbl_nudging_q=1)
+    forcing = _bare(NudgingConfig(**row))
+    assert forcing.active == ("temperature",) and not forcing.uses_pbl
+    row["if_no_pbl_nudging_t"] = 1
+    with pytest.raises(nudging.HexNudgingRefusal):
+        _bare(NudgingConfig(**row))
+
+
+def test_host_frames_keep_only_the_active_endpoint_pair(monkeypatch):
+    forcing = _bare(_config("grid-plain"), frames=5, pbl_height=lambda: None)
+    reads = []
+
+    def read(frame, *, n_cells, n_edges, n_levels):
+        reads.append(frame.offset_seconds)
+        return {"theta": np.zeros((n_levels, n_cells), np.float32), "qv": np.zeros((n_levels, n_cells), np.float32),
+                "u": np.zeros((n_levels, n_edges), np.float32)}
+
+    monkeypatch.setattr(nudging, "read_analysis", read)
+    winds = {name: cp.zeros((NZ, NC), cp.float32) for name in ("x", "y", "z", "u", "v")}
+    monkeypatch.setattr(forcing, "_reconstruct", lambda normal: winds)
+    for index in range(4):
+        forcing._endpoints(index)
+        assert sorted(forcing._host_frames) == [index, index + 1]
+    assert len(reads) == 5            # each frame read from its file once

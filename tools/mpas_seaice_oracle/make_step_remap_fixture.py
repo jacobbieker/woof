@@ -1,11 +1,12 @@
 """Run the built MPAS-Seaice time-step oracle on the cases with advection on and write the fixture.
 
-    pixi run -e default python tools/mpas_seaice_oracle/make_step_remap_fixture.py BUILD_DIR [--out DIR]
+    pixi run -e default python tools/mpas_seaice_oracle/make_step_remap_fixture.py BUILD_DIR [--sphere] [--out DIR]
 
 BUILD_DIR holds ``run_seaice_step_r4`` and ``run_seaice_step_r8`` from
 build.sh. Writes ``oracle-r4.npz`` and ``oracle-r8.npz`` (``<case>/<pool>/<field>``,
 the fields whose words the run changed, the remap's triangle values left out)
-and ``inputs.sha256`` into ``tests/data/oracles/mpas_seaice_step_remap`` by default.
+and ``inputs.sha256`` into ``tests/data/oracles/mpas_seaice_step_remap`` by default
+(``--sphere``: the spherical cases, into ``tests/data/oracles/mpas_seaice_step_remap_sphere``).
 """
 from __future__ import annotations
 
@@ -23,18 +24,23 @@ if str(ROOT) not in sys.path:
 
 from woof.verify import mpas_seaice_remap_oracle as ro  # noqa: E402
 from woof.verify import mpas_seaice_step_remap_oracle as sr  # noqa: E402
+from woof.verify import mpas_seaice_step_remap_sphere_oracle as srs  # noqa: E402
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("build_dir", type=Path)
-    parser.add_argument("--out", type=Path, default=sr.FIXTURE_DIR)
+    parser.add_argument("--sphere", action="store_true", help="the spherical cases")
+    parser.add_argument("--out", type=Path)
     args = parser.parse_args()
+    family = srs if args.sphere else sr
+    if args.out is None:
+        args.out = family.FIXTURE_DIR
     args.out.mkdir(parents=True, exist_ok=True)
     digests = []
     for precision in sr.PRECISIONS:
         arrays: dict[str, np.ndarray] = {}
-        for case in sr.cases(precision):
+        for case in family.cases(precision):
             with tempfile.TemporaryDirectory() as tmp:
                 src, dst = Path(tmp) / "in.bin", Path(tmp) / "out.bin"
                 src.write_bytes(sr.input_bytes(case))

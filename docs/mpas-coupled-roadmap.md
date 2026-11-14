@@ -88,14 +88,18 @@ Ordered by how self-contained each piece is:
    kernels in item 1 read.
 4. The weak-form solver (`..._weak.F`), an alternative velocity discretisation.
 5. Incremental-remap advection (`mpas_seaice_advection_incremental_remap*.F`)
-   on planar meshes. Ported: the tracer tree the packages build, the
+   on planar and spherical meshes. Ported: the tracer tree the packages build, the
    volume/thickness conversions, the departure points and triangles, the masks
    and limited linear reconstruction, the flux integration, the mass and tracer
    update, the mean-recovery check and the zap of tiny areas, and the remap
    inside the forward time step (`config_use_advection`, each dynamics
-   subcycle, N steps with a bitwise restart). The init's geometry
-   (`get_geometry_incremental_remap`, the RBF reconstruction coefficients) is
-   the input's, as the variational basis is. Refused by name: spherical meshes,
+   subcycle, N steps with a bitwise restart). On a sphere: the gradient through
+   the rotated grid (`config_rotate_cartesian_grid`) and the cell's local frame,
+   and the departure triangles' edge-vector basis in
+   `shift_vertices_of_departure_triangle`, on hexagons and quadrilaterals about
+   either pole and at mid-latitude, uniform and stretched. The init's geometry
+   (`get_geometry_incremental_remap`, the local frames, the RBF reconstruction
+   coefficients) is the input's, as the variational basis is. Refused by name:
    halo exchanges, the conservation and monotonicity checks. Upwind advection
    cannot run in v8.4.2 (it reads configs the sea-ice Registry does not declare
    and mesh fields it does not carry), so it is refused by name with that
