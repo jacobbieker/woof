@@ -960,8 +960,14 @@ what differs from the WRF route:
 - **Acoustic substeps.**  WRF derives `time_step_sound` from the live step.  hex keeps MPAS's split
   (three dynamics subcycles, which the v8.4.1 CUDA subcycle requires) and raises
   `config_number_of_sub_steps` to the fewest (even) substeps whose acoustic steps are no longer than the
-  longest the admitted row takes.  Third-order RK takes stage one as one acoustic step of `dt_dyn/3`,
-  so at order 3 the step is capped where that one reaches the row's longest (`acoustic_ceiling`).
+  one the mesh row's step was run at: the row step with MPAS-A v8.4.1's two substeps, which every bare
+  hex forecast ran before the 2026-10-11 re-pin to v8.4.2's four (`longest_acoustic_step`; an acoustic
+  Courant number near 0.34 at a 6 s/km row, against about 0.57 for WRF's own adaptive rule).  So up to
+  2x the row step the substep count stays at the row's four.  Holding the v8.4.2 row's own acoustic step
+  instead (the first cut) grew the substeps with dt and, on CUDA, where the acoustic loop is most of a
+  hexcase step, made the adaptive hour slower than the fixed one (125 s against 89 s for 88 against 120
+  steps).  Third-order RK takes stage one as one acoustic step of `dt_dyn/3`, so at order 3 the step is
+  capped where that one reaches the bound (`acoustic_ceiling`, 1.5x the row).
 - **Defaults.**  WRF's targets (vertical 1.2, horizontal 0.84, 5 % growth), starting at the mesh row's
   admitted step with WRF's ratios to it (max 2x, min 3/4).  `tropical` is `--clock tropical-adaptive`
   (#276): vertical target 1.0, the row's step as the floor, refused outside |lat| < 25.  WRF's opt-in

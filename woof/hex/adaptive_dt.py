@@ -14,8 +14,8 @@ differs is what the controller is handed and what a new step has to reach:
   from the live step (``dyn_em/solve_em.F:451-463``), because a fixed count under a growing dt walks the
   acoustic Courant number up until the split scheme fails.  hex keeps MPAS's own split (three dynamics
   subcycles, which the v8.4.1 CUDA subcycle requires) and raises ``config_number_of_sub_steps`` instead,
-  so no acoustic step is longer than the longest one the admitted mesh row takes
-  (:func:`acoustic_substeps`).  Third-order Runge-Kutta takes its first stage as ONE acoustic step of
+  so no acoustic step is longer than the one the mesh row's step was run at
+  (:func:`longest_acoustic_step`, :func:`acoustic_substeps`).  Third-order Runge-Kutta takes its first stage as ONE acoustic step of
   ``dt_dyn/3`` whatever the substep count, so there the count cannot hold the bound and the largest step
   is capped instead (:func:`acoustic_ceiling`).
 * the deadlines.  The root domain lands on every history frame, the run end, every checkpoint and every
@@ -204,18 +204,35 @@ def acoustic_steps(dt: Fraction, substeps: int, order: int, splits: int = 3) -> 
     raise ValueError(f"config_time_integration_order={order}: MPAS-A has only orders 2 and 3")
 
 
+#: The substep count hex ran every bare forecast at before the 2026-10-11 re-pin to MPAS-A v8.4.2's four
+#: (``woof.hex.mpas_defaults.PREVIOUS_ACOUSTIC_SUBSTEPS``, MPAS-A v8.4.1's Registry default).
+REFERENCE_ACOUSTIC_SUBSTEPS = 2
+
+
+def longest_acoustic_step(row_dt: Fraction, row_substeps: int, order: int) -> Fraction:
+    """The longest acoustic step the adaptive step may take: what the mesh row's step was run at.
+
+    The larger of the row's own longest acoustic step and the one the same row step takes with MPAS-A
+    v8.4.1's two substeps, which every hex forecast ran before the 2026-10-11 re-pin (and MPAS-A ran as its
+    default through v8.4.1).  At a 6 s/km row that is ``dx[km]`` seconds, an acoustic Courant number near
+    0.34; WRF's own adaptive rule (``num_sound_steps = 2*(INT(300 dt/dx) + 1)``) admits up to about 0.57.
+    """
+
+    return max(max(acoustic_steps(row_dt, row_substeps, order)),
+               max(acoustic_steps(row_dt, min(int(row_substeps), REFERENCE_ACOUSTIC_SUBSTEPS), order)))
+
+
 def acoustic_ceiling(row_dt: Fraction, row_substeps: int, order: int) -> Fraction | None:
-    """The largest step whose acoustic steps can all stay within the row's longest; ``None`` = unbounded.
+    """The largest step whose acoustic steps can all stay within :func:`longest_acoustic_step`; ``None`` = unbounded.
 
     Second order divides every stage into ``dt_dyn/n``, so a large enough ``n`` always holds the bound.  Third
     order takes stage one as one acoustic step of ``dt_dyn/3`` (MPAS ``number_sub_steps(1) = 1``), so the step
-    may grow only until that one reaches the row's longest acoustic step.
+    may grow only until that one reaches the bound.
     """
 
-    longest = max(acoustic_steps(row_dt, row_substeps, order))
     if order == 2:
         return None
-    return longest * 9
+    return longest_acoustic_step(row_dt, row_substeps, order) * 9
 
 
 def acoustic_substeps(dt: Fraction, row_dt: Fraction, row_substeps: int, order: int) -> int:
@@ -223,16 +240,16 @@ def acoustic_substeps(dt: Fraction, row_dt: Fraction, row_substeps: int, order: 
 
     The fewest substeps, never fewer than the row's and even when the row's is even (MPAS stage two takes
     ``n/2`` substeps for half the step, which is exact only for even ``n``), whose every acoustic step is no
-    longer than the longest acoustic step the admitted row takes.
+    longer than :func:`longest_acoustic_step`.
     """
 
-    longest = max(acoustic_steps(row_dt, row_substeps, order))
+    longest = longest_acoustic_step(row_dt, row_substeps, order)
     n = int(row_substeps)
     while max(acoustic_steps(dt, n, order)) > longest:
         n += 2 if row_substeps % 2 == 0 else 1
         if n > 64 * max(1, row_substeps):
             raise ValueError(
-                f"no acoustic substep count holds a {float(dt):g} s step within the row's longest acoustic "
+                f"no acoustic substep count holds a {float(dt):g} s step within the longest acoustic "
                 f"step ({float(longest):g} s) at time_integration_order={order}")
     return n
 

@@ -91,21 +91,24 @@ def test_clamps_out_of_order_and_off_lattice_are_refused():
         _options(adaptive_max_dt="45.01")
 
 
-def test_acoustic_substeps_hold_the_rows_longest_acoustic_step():
+def test_acoustic_substeps_hold_the_longest_acoustic_step_the_row_ran():
     row = Fraction(30)
-    for dt in (Fraction(15), Fraction(30), Fraction(3001, 100), Fraction(45), Fraction(60)):
+    # MPAS-A v8.4.1's two substeps at the row step: dt_dyn/2 = 5 s at order 2.
+    assert adaptive_dt.longest_acoustic_step(row, 4, 2) == 5
+    for dt in (Fraction(15), Fraction(30), Fraction(3001, 64), Fraction(60), Fraction(90)):
         n = acoustic_substeps(dt, row, 4, 2)
         assert n >= 4 and n % 2 == 0
-        assert max(adaptive_dt.acoustic_steps(dt, n, 2)) <= max(adaptive_dt.acoustic_steps(row, 4, 2))
-    assert acoustic_substeps(Fraction(45), row, 4, 2) == 6
+        assert max(adaptive_dt.acoustic_steps(dt, n, 2)) <= 5
+    assert acoustic_substeps(Fraction(60), row, 4, 2) == 4
+    assert acoustic_substeps(Fraction(61), row, 4, 2) == 6
     assert acoustic_ceiling(row, 4, 2) is None
     # Third order: the single first-stage acoustic step dt/9 bounds the step.
     assert acoustic_ceiling(row, 2, 3) == 45
-    assert acoustic_ceiling(row, 4, 3) == 30
-    options = resolve_options(_arguments(), row_dt=30.0, row_substeps=2, order=3, center_latitude=0.0)
+    assert acoustic_ceiling(row, 4, 3) == 45
+    options = resolve_options(_arguments(), row_dt=30.0, row_substeps=4, order=3, center_latitude=0.0)
     assert options.max_dt == 45
     with pytest.raises(ValueError, match="acoustic step"):
-        resolve_options(_arguments(adaptive_max_dt="50"), row_dt=30.0, row_substeps=2, order=3,
+        resolve_options(_arguments(adaptive_max_dt="50"), row_dt=30.0, row_substeps=4, order=3,
                         center_latitude=0.0)
 
 
