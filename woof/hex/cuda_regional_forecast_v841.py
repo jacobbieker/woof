@@ -2112,6 +2112,11 @@ class CudaRegionalRuntimeV841:
             )
         values_ru = self.driving_values("ru", rk_step)
         values_rt = self.driving_values("rtheta_m", rk_step)
+        inflow = getattr(self, "inflow_perturbation", None)
+        if inflow is not None:
+            # --inflow-perturbation (woof.hex.inflow_perturbation): WRF's
+            # seeding on the relax rings' theta target only.
+            values_rt = inflow.target(values_rt, rk_step)
         values_rho = self.driving_values("rho_zz", rk_step)
         fifty_dt = np.float32(np.float32(50.0) * np.float32(self.outer_dt))
         ten_dt = np.float32(np.float32(10.0) * np.float32(self.outer_dt))

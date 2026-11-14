@@ -127,6 +127,8 @@ KEY_REASONS: Mapping[str, str] = {
     "obs_nudge_opt": "obs nudging on hex is matrix item 5.2",
     "dfi_opt": "DFI on hex is matrix item 4.4 (IAU is the hex alternative)",
     "w_damping": "w_damping on hex is `woof hex forecast --w-damping` (matrix item 4.2); the go route has no mapping yet",
+    "inflow_perturbation": ("inflow perturbation on hex is `woof hex forecast --inflow-perturbation` on a regional "
+                            "mesh (matrix item 5.7); the go route has no mapping yet"),
 }
 
 
