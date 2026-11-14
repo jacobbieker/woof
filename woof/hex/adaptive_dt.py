@@ -7,9 +7,9 @@ differs is what the controller is handed and what a new step has to reach:
 
 * the CFL numbers.  WRF reduces ``|u| dt msf / dx`` and its eta-coordinate ``|ww| dt rdnw / mu`` over the
   mass grid.  On the Voronoi mesh the horizontal number is the edge Courant number ``|u_n| dt / dcEdge``
-  over every owned edge and level, and the vertical one is ``|w| dt / dz`` on the interior w levels
-  (WRF's k = 2 .. kde-1), ``dz`` the distance between the cell-centre heights either side of the face.
-  The vertical number is geometric, not WRF's eta form; :class:`MeshCflProbe` says so in its receipt.
+  over every owned edge and level, and the vertical one is ``w dt / dz`` in the model's own coordinate:
+  the scalar transport's vertical mass flux over the face density, times ``rdzu``, on the interior w
+  levels (WRF's k = 2 .. kde-1).  See :class:`MeshCflProbe` for why not the geometric ``|w| / dz``.
 * the acoustic substeps.  WRF sets ``time_step_sound = 0`` under an adaptive clock and derives the count
   from the live step (``dyn_em/solve_em.F:451-463``), because a fixed count under a growing dt walks the
   acoustic Courant number up until the split scheme fails.  hex keeps MPAS's own split (three dynamics
@@ -553,44 +553,82 @@ class HexAdaptiveClock:
 class MeshCflProbe:
     """The two Courant reductions on the device, one host read per step.
 
-    ``rates`` returns the maximum ``|u_n| / dcEdge`` over owned edges and levels and the maximum
-    ``|w| / dz`` over owned cells and interior w levels, in 1/s; the clock multiplies by the step taken.
+    Horizontal: the edge Courant number ``|u_n| dt / dcEdge`` over owned edges and levels, from the step's
+    end-of-step normal velocity.  Vertical: WRF's form, the COORDINATE vertical velocity over the coordinate
+    layer depth (WRF reduces ``|ww/mu| rdnw dt``, its eta-dot), on the interior w levels.  On the MPAS
+    terrain-following height coordinate that is ``|ww| / rho_zz(face) * rdzu * dt``, ``ww`` the vertical mass
+    flux the scalar transport actually moved (``split_flux_w``), observed on every RK stage of the step.  The
+    geometric ``|w| dt / dz`` is NOT this number over steep terrain: there the physical w carries the flow
+    along the coordinate surfaces (measured on the hexcase at its 30 s row step: 1.27 geometric at the first
+    interface above the ground, where nothing crosses a layer).
     """
 
-    def __init__(self, cp: Any, *, dc_edge: Any, zgrid: Any, n_cells: int, n_edges: int):
+    def __init__(self, cp: Any, *, dc_edge: Any, rdzu: Any, fzm: Any, fzp: Any, n_cells: int, n_edges: int):
         import numpy as np
 
         dc = np.asarray(dc_edge, dtype=np.float64).reshape(-1)[:n_edges]
         if dc.size != n_edges or not np.all(np.isfinite(dc)) or float(dc.min()) <= 1.0:
             raise ValueError("the CFL probe needs dcEdge in metres for every owned edge")
-        z = np.asarray(zgrid, dtype=np.float64)
-        if z.ndim != 2 or z.shape[1] < n_cells:
-            raise ValueError(f"the CFL probe needs zgrid [nVertLevels+1, nCells], got {z.shape}")
-        z = z[:, :n_cells]
-        mid = 0.5 * (z[1:] + z[:-1])
-        dz = mid[1:] - mid[:-1]
-        if not np.all(dz > 0.0):
-            raise ValueError("the CFL probe found a non-increasing cell-centre height")
+        rdzu = np.asarray(rdzu, dtype=np.float64).reshape(-1)
+        if rdzu.size < 2 or not np.all(np.isfinite(rdzu[1:])) or not np.all(rdzu[1:] > 0.0):
+            raise ValueError("the CFL probe needs a positive rdzu on every interior w level")
         self.cp = cp
         self.n_cells, self.n_edges = int(n_cells), int(n_edges)
-        self.n_levels = int(mid.shape[0])
+        self.n_levels = int(rdzu.size)
         self.inv_dc = cp.asarray((1.0 / dc).astype(np.float32))
-        self.inv_dz = cp.asarray((1.0 / dz).astype(np.float32))
+        self.rdzu = cp.asarray(rdzu[1:].astype(np.float32))[:, None]
+        self.fzm = cp.asarray(np.asarray(fzm, dtype=np.float32).reshape(-1)[1:])[:, None]
+        self.fzp = cp.asarray(np.asarray(fzp, dtype=np.float32).reshape(-1)[1:])[:, None]
+        self.vertical_max = cp.zeros((), dtype=cp.float32)
+        self.observed = 0
 
-    def rates(self, *, normal_velocity: Any, vertical_velocity: Any) -> tuple[float, float]:
+    def observe(self, rho: Any, ww: Any) -> None:
+        """One scalar-transport call's vertical rate, folded into the step's maximum (no host read)."""
+
         cp = self.cp
+        n, nk = self.n_cells, self.n_levels
+        face_rho = self.fzm * rho[1:nk, :n] + self.fzp * rho[:nk - 1, :n]
+        rate = cp.max(cp.abs(ww[1:nk, :n]) / face_rho * self.rdzu)
+        cp.maximum(self.vertical_max, rate.astype(cp.float32), out=self.vertical_max)
+        self.observed += 1
+
+    def attach(self, driver: Any) -> None:
+        """Watch the scalar transport's fluxes on this driver only (as the full-step LTS shadow does)."""
+
+        import types
+
+        original = driver._step_device_v841.__func__
+        native = original.__globals__["advance_scalar_transport_cuda_v841"]
+        probe = self
+
+        def observed(*args: Any, **kwargs: Any) -> Any:
+            # cuda_driver: (mesh, context, scalars, stage scalars, source-old rho, rho, flux_u, flux_w, dt, ...)
+            probe.observe(args[4], args[7])
+            return native(*args, **kwargs)
+
+        private_globals = dict(original.__globals__)
+        private_globals["advance_scalar_transport_cuda_v841"] = observed
+        instrumented = types.FunctionType(original.__code__, private_globals, original.__name__,
+                                          original.__defaults__, original.__closure__)
+        instrumented.__kwdefaults__ = original.__kwdefaults__
+        driver._step_device_v841 = types.MethodType(instrumented, driver)
+
+    def rates(self, *, normal_velocity: Any) -> tuple[float, float]:
+        cp = self.cp
+        if not self.observed:
+            raise RuntimeError("the adaptive CFL probe saw no scalar transport this step")
         u = normal_velocity[:, :self.n_edges]
-        w = vertical_velocity[1:self.n_levels, :self.n_cells]
-        horiz = cp.max(cp.abs(u) * self.inv_dc[None, :])
-        vert = cp.max(cp.abs(w) * self.inv_dz)
-        values = cp.asnumpy(cp.stack((vert.astype(cp.float32), horiz.astype(cp.float32))))
+        horiz = cp.max(cp.abs(u) * self.inv_dc[None, :]).astype(cp.float32)
+        values = cp.asnumpy(cp.stack((self.vertical_max, horiz)))
+        self.vertical_max[...] = 0
+        self.observed = 0
         return float(values[0]), float(values[1])
 
     def receipt(self) -> dict[str, Any]:
-        return {"horizontal": "max |u_n| dt / dcEdge over owned edges and levels",
-                "vertical": ("max |w| dt / dz over owned cells and interior w levels (WRF's k = 2 .. kde-1); "
-                             "dz between the cell-centre heights either side of the face; geometric, not WRF's "
-                             "eta-coordinate |ww| rdnw / mu")}
+        return {"horizontal": "max |u_n| dt / dcEdge over owned edges and levels, end of step",
+                "vertical": ("max |ww| / rho_zz(face) * rdzu * dt over owned cells and interior w levels "
+                             "(WRF's k = 2 .. kde-1), ww the scalar transport's vertical mass flux on every RK "
+                             "stage: the coordinate form WRF's eta-dot CFL measures, not geometric |w|/dz")}
 
 
 @dataclass
@@ -675,8 +713,9 @@ class AdaptiveRun:
                                       start=start)
         from datetime import datetime
         self.start_time = datetime.strptime(start_text, "%Y-%m-%d_%H:%M:%S")
-        self.probe = MeshCflProbe(driver.cp, dc_edge=mesh.dcEdge, zgrid=vertical.zgrid, n_cells=int(n_cells),
-                                  n_edges=int(n_edges))
+        self.probe = MeshCflProbe(driver.cp, dc_edge=mesh.dcEdge, rdzu=vertical.rdzu, fzm=vertical.fzm,
+                                  fzp=vertical.fzp, n_cells=int(n_cells), n_edges=int(n_edges))
+        self.probe.attach(driver)
         #: The dycore's own model time (binary64, as it sums the steps) at the end of each step, for the
         #: snapshot and checkpoint clock checks; the exact time is the clock's.
         self.model_time: dict[int, float] = {}
@@ -728,8 +767,7 @@ class AdaptiveRun:
         if plan is None or plan.step != step:
             raise RuntimeError(f"adaptive step {step} closed out of order")
         saved = driver.atmosphere.saved
-        vert, horiz = self.probe.rates(normal_velocity=saved.normal_velocity,
-                                       vertical_velocity=saved.vertical_velocity)
+        vert, horiz = self.probe.rates(normal_velocity=saved.normal_velocity)
         self.clock.commit(vert_rate=vert, horiz_rate=horiz)
         held = float(driver.atmosphere.state.time_seconds)
         if abs(held - float(plan.end)) > 1.0e-6 * max(1.0, float(plan.end)):
