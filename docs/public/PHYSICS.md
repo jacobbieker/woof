@@ -3751,6 +3751,36 @@ The public source, strict replay tools, exact commands, figures, remaining gaps
 and qualification limits are in `tools/diag_wrf471_oracle/README.md` and the
 lane report. No substitute diagnostic is selected under an unfinished option.
 
+Precipitation type keeps one known difference from WRF's Fortran, by decision
+(2026-11-13). WRF 4.7.1 `precip_type_diagnostics` writes
+`IF (rh .gt. 80 .and. saturation .eqv. .false.)`. Fortran's `.eqv.` binds
+weaker than `.and.`, so this reads `(rh > 80 .and. saturation) .eqv. .false.`
+and re-takes the cloud top at every level that is not both moist and already
+saturated, dry levels included. The CUDA kernel (`afwa_ptype` in
+`woof/core/kernels/afwa_diagnostics.cu`, shared by both routes) implements the
+evident intent, `rh > 80 && !saturation`. Columns with a dry gap between two
+moist layers can get another precipitation type; the hex oracle test pins the
+one such column in its gfortran comparison (`PTYPE_DIVERGES_AT`).
+
+On the hex MPAS v8.4.2 suite route, `&diagnostics config_afwa_*_opt` runs the
+same kernels per mesh column (`woof/hex/mpasdiag/afwa_diag_v842.py`), severe
+included. Severe follows WRF's `F_QNG` guard: without a graupel-number carrier
+only the 10 m gust and 0–2000 ft shear maxima move, which is WRF's own result
+for Thompson, Thompson aerosol-aware and WSM6. With a carrier, hail and tornado
+read MPAS's per-step 2–5 km updraft helicity (the value whose interval maximum
+is `updraft_helicity_max`) in place of WRF's finite-difference `cal_helicity`,
+and the tornado duration spreads over `cellsOnCell` instead of WRF's 3×3 box.
+`config_afwa_severe_ignore_qng_gate = .true.` (off by default) departs from WRF:
+it drops the `QNG` term of the guard, so hail, tornado, the w maxima, column ice
+and graupel flux also run for `mp_wsm6`, `mp_thompson` and
+`mp_thompson_aerosols`. The routine never reads `QNG`, so the fields are those
+WRF writes for a scheme that carries it; WRF itself leaves them at zero for
+these schemes.
+Icing is refused by name. WRF computes it only for WDM6 and Morrison with
+aerosols, the named schemes that carry `QNC`, and has no path that derives
+`QNC`. Radar, VIL and visibility run with `mp_wsm6`, `mp_thompson` and
+`mp_thompson_aerosols` and are refused for other microphysics.
+
 ### Native WRF precipitation windows
 
 Stock `prec_acc_dt` follows pinned WRF 4.7.1 `module_diag_misc.F:415-448` on

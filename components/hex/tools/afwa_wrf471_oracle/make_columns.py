@@ -5,7 +5,9 @@
 and hands the same words to the hex module, to the WRF route's afwa_diagnostics kernels and (through ``write``) to the
 Fortran oracle (run_afwa.F90).  ``write`` writes ``columns.bin``: little endian int32 (nc, nl), float32 ccn, melt, then
 float32 arrays C-contiguous: zgrid (nl+1, nc); the (nl, nc) fields rho_dry T p qv qc qi qr qs qg u v; the (nc,) fields
-psfc t2 q2 u10 v10 swdown raincv rainncv rainc rainnc.
+psfc t2 q2 u10 v10 swdown raincv rainncv rainc rainnc.  ``severe_columns()`` adds what WRF's severe package reads
+besides: ``severe_columns.bin`` is float32 dt, then w (nl+1, nc) (WRF's w_2; layer k reads face k) and the step's
+2-5 km updraft helicity uh (nc), little endian, C-contiguous.
 
     make_columns.py OUT_DIR
 """
@@ -80,6 +82,31 @@ def columns(seed=11, nl=NL, nc=NC):
     return mass, surface
 
 
+SEVERE_DT = 12.0
+
+
+def severe_columns(seed=7, nl=NL, nc=NC):
+    """Vertical velocity and updraft helicity for the severe package: strong and weak updrafts and downdrafts below
+    400 hPa, helicity on both sides of the tornado ramp (25-75 m2 s-2) and the hail scale (100 m2 s-2)."""
+    rng = np.random.default_rng(seed)
+    f = np.float32
+    shape = np.sin(np.linspace(0.0, np.pi, nl + 1))[:, None]
+    peak = rng.uniform(-6.0, 45.0, nc)
+    w = (shape * peak[None, :] + rng.uniform(-1.5, 1.5, (nl + 1, nc))).astype(f)
+    w[0] = 0.0
+    uh = rng.uniform(0.0, 220.0, nc).astype(f)
+    uh[rng.uniform(size=nc) < 0.25] = 0.0
+    return w, uh
+
+
+def write_severe(out):
+    w, uh = severe_columns()
+    with open(Path(out) / "severe_columns.bin", "wb") as h:
+        h.write(np.array([SEVERE_DT], "<f4").tobytes())
+        h.write(w.astype("<f4").tobytes())
+        h.write(uh.astype("<f4").tobytes())
+
+
 def write(out):
     mass, surface = columns()
     with open(Path(out) / "columns.bin", "wb") as h:
@@ -94,3 +121,4 @@ def write(out):
 
 if __name__ == "__main__":
     write(sys.argv[1])
+    write_severe(sys.argv[1])

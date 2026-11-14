@@ -156,11 +156,26 @@ class ExternalOceanCoupling:
             hfx=fields_["hfx"], u_phy=self.u_phy, v_phy=self.v_phy, uoce=self.uoce,
             voce=self.voce, rho=self.rho, ust=fields_["ust"])
         wrf_cpl.send(surface, self.sent, dt=dt)
-        self.averager.accumulate(self.sent, dt)
-        if self.averager.due:
-            self.averager.deliver(self.delivered)
-            self.ocean.set_fluxes(self.delivered)
-            self.ocean.step(self.interval)
+        # A step that crosses a coupling time (an adaptive clock's steps are
+        # not divisors of the interval) is split there: the part up to the
+        # coupling time closes this interval's average, the ocean steps, and
+        # the rest opens the next one.  The step's fluxes are constant over
+        # the step, so the split is exact in time; a fixed clock whose step
+        # divides the interval never splits.  THE BREAKAGE: every adaptive
+        # run coupled to NEMO stopped at its first crossing ("step crosses
+        # the coupling time"; Edinburgh 9 km at step 16, Maui 3 km
+        # tropical-adaptive).
+        remaining = float(dt)
+        eps = self.averager.interval * 1e-9
+        while remaining > eps:
+            room = self.averager.interval - self.averager.elapsed
+            part = remaining if remaining <= room + eps else room
+            self.averager.accumulate(self.sent, part)
+            remaining -= part
+            if self.averager.due:
+                self.averager.deliver(self.delivered)
+                self.ocean.set_fluxes(self.delivered)
+                self.ocean.step(self.interval)
 
 
 def attach(driver, cfg, *, latitude=None) -> None:

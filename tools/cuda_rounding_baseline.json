@@ -30,6 +30,14 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "018fd4037e2b62388032910aa46ce27680b50640f53de17fec5e2ea1f19a616b",
+    "constructor": "ElementwiseKernel",
+    "factory": "_theta_kernel",
+    "factory_sha256": "05ca251ccbb79ced98fd013b6464c8e299ffb4478c457b1212362096f7ec3650",
+    "file": "woof/hex/nudging.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "02f09ed2879ffc253f6f919b0680eb4177abebdd2c0c2cacade45e2fd4b19e3f",
     "constructor": "RawKernel",
     "factory": "__init__",
@@ -291,6 +299,14 @@
     "factory": "raw_nvrtc",
     "factory_sha256": "8c3dc5d6bb28a687fcb1a8df965ea62091ed493ae6621d365b40ac5f762a35e6",
     "file": "woof/hex/cuda_backend/aot.py",
+    "status": "unresolved"
+   },
+   {
+    "call_sha256": "10110161cddb95a1865716c4a527914ec924c5a20bb6e10e0159a64046ebb06f",
+    "constructor": "RawModule",
+    "factory": "fdda_kernels",
+    "factory_sha256": "dc01c68d185553fe15651bbe22e831f382632d013aa51bc63694a62dd9ef3a4a",
+    "file": "woof/hex/nudging.py",
     "status": "unresolved"
    },
    {
@@ -1107,6 +1123,14 @@
     "factory": "_module_on",
     "factory_sha256": "6a0b8504945f8d222893c5f06802cd889f239804416695ccc8df22f586874123",
     "file": "woof/hex/mpas_ocean/split_step_v842.py",
+    "status": "unresolved"
+   },
+   {
+    "call_sha256": "749bb0e7fb69c98afc4d0ab76f266050591104faac95b2de4eccd9faf4fb0032",
+    "constructor": "RawModule",
+    "factory": "_coupling_kernels",
+    "factory_sha256": "cf725ab23c761981171ed5977bcd1188f96e72c03077416689cbd30fc6e76d70",
+    "file": "woof/hex/nudging.py",
     "status": "unresolved"
    },
    {
@@ -2302,6 +2326,14 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "f15e79882170cb8921d7fa43a98821cb847b48b7c39549cd80e90e9e14933800",
+    "constructor": "RawModule",
+    "factory": "fdda_kernels",
+    "factory_sha256": "dc01c68d185553fe15651bbe22e831f382632d013aa51bc63694a62dd9ef3a4a",
+    "file": "woof/hex/nudging.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "f1b40bd5a95201969bbe5c48b2a1c505f5828acfb955698fdb9737c48dea9aea",
     "constructor": "createProgram",
     "factory": "compile_program",
@@ -2529,11 +2561,11 @@
    },
    {
     "file": "woof/core/kernels/afwa_diagnostics.cu",
-    "sha256": "0b9b3b3cbe2b8c90eb65992cd412d76823017edec463aecb647cef0cf27ef1a5"
+    "sha256": "df39d565be7c839db4d05810a40c45a03e77b1abb7f3878772af5fac67bacd2c"
    },
    {
     "file": "woof/core/kernels/afwa_severe.cu",
-    "sha256": "a6261f1227d03fd27ad2a598362d6349fc2d99b05d480e4b32f54b63159a7747"
+    "sha256": "cfdef0a7e6f812ec37f438313d40c692b398f999997b595c990590e4094ede28"
    },
    {
     "file": "woof/core/kernels/atan_scalar_flt32.cuh",
@@ -5119,7 +5151,7 @@
    },
    {
     "file": "woof/core/physics.py",
-    "sha256": "8e369dc3fc6ec64ee864f2927f6cd743ce0e169f1b1d11e374e267f24b0e6602"
+    "sha256": "ed7d4a1ce348ff0b06816f8055b5dd611f93c5e1e4772aaf895192ae6ea71675"
    },
    {
     "file": "woof/core/preflight.py",
@@ -5984,6 +6016,10 @@
    {
     "file": "woof/hex/native_powf.py",
     "sha256": "3fcdc2ffb1ea6115def1d0b005cbb2feb388763cc6954cadbeee8e37532101cc"
+   },
+   {
+    "file": "woof/hex/nudging.py",
+    "sha256": "b4844e70251138f66d07cfd0fab8b5591dd8ba4ea6006c4417f3a71a82e8cabc"
    },
    {
     "file": "woof/hex/ocean_mixed_layer.py",
@@ -8288,6 +8324,10 @@
     "sha256": "999de2f25f8b7934b860c021408807ea720a5dca9598bf79d50641a13bdf404c"
    },
    {
+    "file": "woof/hex/nudging.py",
+    "sha256": "d679a89c397b6cb9157bf749a5c5b7ca83c01174a54de63c68608a9f5ffc8fed"
+   },
+   {
     "file": "woof/hex/partition_overlap_v841.py",
     "sha256": "50539ab5beb330a508baba1e21ed526dac7274ec609783687c59a1922081517f"
    },
@@ -9957,13 +9997,13 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "95193e80c5c362de5c63285c206900501f368c0282d1d8880f69513db680a701",
+    "sha256": "9c790e0311a1bd28c7ada6d679f05e40e0a525fe47f8ce70c5a375a9d32215df",
     "sites": {
      "100": 65
     }
    },
    "native_differences": {
-    "sha256": "994dd37a79d7cf0238245f8029b30167b56cdaccca1b324da5f9ea58c37df460",
+    "sha256": "8af56efb84c55ebd385b702813152a2af6410132713af85bdbfe9d11d2c9375d",
     "sites": {
      "100": 12
     }
@@ -9985,7 +10025,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "212874e990ab8615f1271e421bd03afa495a8b4499b77089050a7002417b12b4"
+   "source_sha256": "5acf6f0893ad2623eb13d1371592fc3e9b7ce3a4afbd30acf45b404ba10d57b6"
   },
   "kernels:afwa_severe": {
    "assessment": "static_diagnostic_only",
@@ -10004,15 +10044,15 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "88374c96ec4d70a173ac7784b56bd574348fd666de2f6d4a7c50115734edba58",
+    "sha256": "4ebac2279777da5604d9eb5ba71a6e09ee4cfcf00c517b1eaa89871526701a73",
     "sites": {
-     "100": 28
+     "100": 34
     }
    },
    "native_differences": {
-    "sha256": "1aa7c1299b0560846ef5922fcdc07847ddd6013e7c978aefc75b37b7b54a4556",
+    "sha256": "732c01fa135ffe5586e42593c0d9c1b1059888e5205795df7505ed31d4ae0fef",
     "sites": {
-     "100": 9
+     "100": 12
     }
    },
    "native_errors": {},
@@ -10032,7 +10072,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "61aaee81cc0981ca7c3f4cd6e11a1f53bc9fd6b27aa36c0d2822c3942c44e4d7"
+   "source_sha256": "cd9e14c0d0e33c0f148198bcff3935618bd33ee357bf139becac086bdb494fce"
   },
   "kernels:avgflx": {
    "assessment": "static_diagnostic_only",

@@ -52,6 +52,16 @@ the most of its LCZ area (lowest class on a tie, as geogrid's), and a cell
 holding no LCZ pixel keeps ISURBAN.  ``FRC_URB2D_LCZ`` is SLUCM's fraction
 from the same areas, weighted by URBPARM_LCZ.TBL's FRC_URB through the WRF
 path's own estimate (:func:`woof.static.urban_fraction.estimate_urban_fraction`).
+
+``VAR_SSO`` (``topo_wind = 1``, ``--fields var_sso``).  GEOGRID.TBL.ARW's row
+for the sub-grid terrain variance (``varsso_10m``): ``average_gcell(4.0)+
+four_pt+average_4pt``, fill 0, no water mask.  WPS takes the cell average only
+where the model spacing is at least ``4.0 * 111 km * source spacing in degrees``
+(:func:`var_sso_cells`; 74 km for the 10-arc-minute source) and otherwise the
+bilinear value at the cell centre, falling to the mean of the valid points
+among the four around it.  On a mesh the model spacing is each cell's own
+(area-equivalent) spacing, so a variable-resolution mesh takes the cell
+average only where its cells are that coarse.
 """
 
 from __future__ import annotations
@@ -225,6 +235,78 @@ def irrigation_cells(geometry, assigner, land: np.ndarray, dataset, *,
     }
 
 
+#: WPS v4.6.0 GEOGRID.TBL.ARW VAR_SSO (varsso_10m).
+VAR_SSO_DATASET = "varsso_10m"
+VAR_SSO_GCELL_RATIO = 4.0
+VAR_SSO_FILL = 0.0
+
+
+def var_sso_cells(geometry, assigner, spacing_m: np.ndarray, dataset, *,
+                  progress: Callable[[str], None] | None = None
+                  ) -> tuple[np.ndarray, dict[str, Any]]:
+    """GEOGRID's VAR_SSO on the mesh (module docstring).
+
+    ``spacing_m`` is each cell's own spacing (NaN for an open polygon, which
+    takes the point rule).  The point arithmetic is WPS's, in float32, as
+    ``static-fields``' ``orographic_real`` does it.
+    """
+    n = geometry.n_cells
+    index = dataset.index
+    threshold_km = np.float32(VAR_SSO_GCELL_RATIO) * np.float32(
+        max(index.dx, index.dy)) * np.float32(111.0)
+    gcell_cells = np.isfinite(spacing_m) & (
+        threshold_km <= (spacing_m / 1000.0).astype(np.float32))
+    out = np.full(n, np.nan)
+    window = None
+    averaged = 0
+    if gcell_cells.any():
+        total, count, window = gcell_sums(geometry, assigner, dataset, pad=2,
+                                          label="var_sso", progress=progress)
+        take = gcell_cells & (count > 0)
+        out[take] = (total[take] / count[take]).astype(np.float32)
+        averaged = int(np.count_nonzero(take))
+    rest = np.flatnonzero(np.isnan(out))
+    four = average = missing = 0
+    if rest.size:
+        xs, ys = _cell_source_xy(geometry, dataset, rest)
+        xs, ys = np.asarray(xs, np.float32), np.asarray(ys, np.float32)
+        for k, cell in enumerate(rest):
+            x, y = xs[k], ys[k]
+            ix, jx = int(np.floor(x)), int(np.ceil(x))
+            iy, jy = int(np.floor(y)), int(np.ceil(y))
+            patch = dataset.read_window(ix, jx, iy, jy).values().astype(np.float32)
+            a, b = patch[0, 0], patch[jy - iy, 0]
+            c, d = patch[0, jx - ix], patch[jy - iy, jx - ix]
+            if np.isfinite([a, b, c, d]).all():
+                if ix == jx:
+                    value = a if iy == jy else a * (jy - y) + b * (y - iy)
+                elif iy == jy:
+                    value = a * (jx - x) + c * (x - ix)
+                else:
+                    value = ((y - iy) * (b * (jx - x) + d * (x - ix))
+                             + (jy - y) * (a * (jx - x) + c * (x - ix)))
+                out[cell] = np.float32(value)
+                four += 1
+                continue
+            valid = np.asarray([a, b, c, d], np.float32)
+            valid = valid[np.isfinite(valid)]
+            if valid.size:
+                out[cell] = np.float32(valid.sum(dtype=np.float32) / np.float32(valid.size))
+                average += 1
+            else:
+                missing += 1
+    out[np.isnan(out)] = VAR_SSO_FILL
+    return out.astype(np.float32), {
+        "method": "average_gcell(4.0)+four_pt+average_4pt, fill 0, unmasked "
+                  "(GEOGRID.TBL VAR_SSO) per cell",
+        "gcell_threshold_km": float(threshold_km),
+        "source_window": None if window is None else list(window),
+        "cells_gcell_average": averaged,
+        "cells_four_pt": int(four), "cells_average_4pt": int(average),
+        "cells_filled": int(missing),
+    }
+
+
 def lake_depth_cells(geometry, assigner, water: np.ndarray, dataset, *,
                      progress: Callable[[str], None] | None = None
                      ) -> tuple[np.ndarray, dict[str, Any]]:
@@ -349,7 +431,7 @@ def lake_mask_vote(geometry, assigner, water: np.ndarray, dataset, *,
 
 #: The field groups ``--fields`` names: each is one scheme's inputs.
 FIELD_GROUPS = ("lake", "urban", "landusef", "irrigation", "soilctop", "soilcbot",
-                "lcz")
+                "lcz", "var_sso")
 #: geogrid's soil-category fraction fields and their WPS datasets (GEOGRID.TBL
 #: SOILCTOP/SOILCBOT, dest_type categorical, 16 categories).
 SOIL_FRACTION_DATASETS = {"soilctop": ("SOILCTOP", "soiltype_top_30s"),
@@ -716,6 +798,12 @@ def build(static: Path, out: Path, *, geog_root: Path | None,
         written["IRRIGATION"], provenance["irrigation"] = irrigation_cells(
             geometry, need_assigner(), ~water, dataset, progress=progress)
         provenance["irrigation"]["index_sha256"] = _index_sha256(dataset.path)
+    if "var_sso" in groups:
+        dataset = geog(VAR_SSO_DATASET)
+        written["VAR_SSO"], provenance["var_sso"] = var_sso_cells(
+            geometry, need_assigner(), cell_spacing_m(geometry), dataset,
+            progress=progress)
+        provenance["var_sso"]["index_sha256"] = _index_sha256(dataset.path)
     fields = written
     out = Path(out).expanduser().absolute()
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -770,7 +858,8 @@ def add_surface_statics_parser(commands) -> None:
                         help="comma-separated field groups to build: "
                              f"{', '.join(FIELD_GROUPS)} (default lake); urban is "
                              "SLUCM's FRC_URB2D; lcz is use_wudapt_lcz's LU_INDEX "
-                             "and FRC_URB2D_LCZ from CGLC-MODIS-LCZ (fetched)")
+                             "and FRC_URB2D_LCZ from CGLC-MODIS-LCZ (fetched); "
+                             "var_sso is topo_wind = 1's VAR_SSO (varsso_10m)")
     parser.add_argument("--cache-root", type=Path, default=None, metavar="DIR",
                         help="where --fields lcz caches the CGLC-MODIS-LCZ raster "
                              "(default: the high-resolution static cache)")

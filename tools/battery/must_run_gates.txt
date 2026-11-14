@@ -303,3 +303,7 @@ tests/test_go_hex_smoke.py  opt-in (WOOF_HEX_GO_SMOKE=1): fetches GFS over the n
 # cache) are opt-in; the fixture deck tests/test_chem_inventory_frames.py
 # runs the same decode, remap and speciation everywhere.
 tests/test_chem_inventory_edgar_live.py  needs WOOF_EDGAR_LIVE=1 and network (or the nine pinned EDGAR v8.1 archives already in the emission cache); a leg that opts in runs it, and pb ran it for the change that added it.
+
+# The hex forecast smoke matrix (plan 1.3) runs real `woof hex forecast`
+# subprocesses on a staged hex case that no clone carries.
+tests/test_hex_option_matrix_smoke.py  needs WOOF_HEX_OPTION_MATRIX_CASE naming a staged hex case (mesh, static, init, LBCs) and a GPU backend; a leg that stages one runs it, and pb (CUDA) and the mac (Metal) ran the full matrix for the change that added it.

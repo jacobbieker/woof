@@ -9,11 +9,11 @@
     "cupy.ReductionKernel",
     "cupy.cuda.compiler.compile_using_nvrtc"
   ],
-  "site_count": 665,
+  "site_count": 669,
   "site_count_by_kind": {
-    "cupy.ElementwiseKernel": 45,
+    "cupy.ElementwiseKernel": 46,
     "cupy.RawKernel": 111,
-    "cupy.RawModule": 296,
+    "cupy.RawModule": 299,
     "cupy.ReductionKernel": 16,
     "cupy.cuda.compiler.compile_using_nvrtc": 197
   },
@@ -25,9 +25,9 @@
       "cupy.cuda.compiler.compile_using_nvrtc": 22
     },
     "package": {
-      "cupy.ElementwiseKernel": 33,
+      "cupy.ElementwiseKernel": 34,
       "cupy.RawKernel": 39,
-      "cupy.RawModule": 99,
+      "cupy.RawModule": 102,
       "cupy.ReductionKernel": 9,
       "cupy.cuda.compiler.compile_using_nvrtc": 122
     },
@@ -10829,6 +10829,70 @@
       "options_element_expressions": null,
       "options_are_literal": false,
       "text": "binary, _ = compiler.compile_using_nvrtc("
+    },
+    {
+      "file": "woof/hex/nudging.py",
+      "line": 347,
+      "column": 16,
+      "surface": "package",
+      "constructor": "cp.RawModule",
+      "constructor_kind": "cupy.RawModule",
+      "enclosing": "fdda_kernels",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "options",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "first = cp.RawModule(code=fdda, options=options)"
+    },
+    {
+      "file": "woof/hex/nudging.py",
+      "line": 349,
+      "column": 17,
+      "surface": "package",
+      "constructor": "cp.RawModule",
+      "constructor_kind": "cupy.RawModule",
+      "enclosing": "fdda_kernels",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "options",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "second = cp.RawModule(code=weights, options=options)"
+    },
+    {
+      "file": "woof/hex/nudging.py",
+      "line": 363,
+      "column": 24,
+      "surface": "package",
+      "constructor": "cp.ElementwiseKernel",
+      "constructor_kind": "cupy.ElementwiseKernel",
+      "enclosing": "_theta_kernel",
+      "takes_caller_options": true,
+      "options_argument_present": false,
+      "options_expression": null,
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "_MODULES[key] = cp.ElementwiseKernel("
+    },
+    {
+      "file": "woof/hex/nudging.py",
+      "line": 386,
+      "column": 17,
+      "surface": "package",
+      "constructor": "cp.RawModule",
+      "constructor_kind": "cupy.RawModule",
+      "enclosing": "_coupling_kernels",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "options",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "module = cp.RawModule(code=_CUDA_SOURCE, options=options)"
     },
     {
       "file": "woof/hex/ocean_mixed_layer.py",

@@ -74,6 +74,7 @@ class ResidentNativeCoupling:
         self.regional = getattr(dycore, 'regional_v841', None)
         # IAU (SuiteIau): None without config_IAU_option; itimestep is the run's step (MPAS itimestep).
         self.iau = None
+        self.nudging = None
         self.itimestep = 0
         # A same-host rank (samehost_v842) widens the owned-column sources to
         # its local cells and edges before stochastic forcing and IAU (which
@@ -271,6 +272,11 @@ class ResidentNativeCoupling:
                 self.sources=self.iau.apply(itimestep=self.itimestep,sources=self.sources,state=state,
                                             saved=saved,diagnostics=diagnostics,cache=self.dycore.cache,
                                             solve=self.solve_extent)
+            if self.nudging is not None:
+                # WRF grid/spectral analysis nudging (woof.hex.nudging) at the same seat, after IAU.
+                self.nudging.add(0, self.sources, float(self.dycore.atmosphere.state.time_seconds),
+                                 self.nudging.dt, rho_edge=diagnostics.h_edge,
+                                 normal_velocity=saved.normal_velocity, state=state, theta_m=saved.theta_m)
             if self.exchange_sources is not None:
                 self.sources=self.exchange_sources(self.sources)
             # The driver's held copy of physics_get_tend's result is dead from here (the RRFS driver's
@@ -1925,10 +1931,8 @@ def _run_native_dynamics(arguments, config, layout, payload, streams, library,
                 **({'prehydrated': prehydrated} if prehydrated is not None else {}), **pool_options)
         session.output_config_snapshot=output_config_snapshot
         if getattr(config,'wrfsolar_eps',None) is not None:
-            # WOOF's &wrfsolar_eps (wrfsolar_eps_v842): the STOCHPERT.TBL fields on the mesh's harmonics.
-            if limited_area:
-                raise ValueError('&wrfsolar_eps config_multi_perturb runs on global meshes: its harmonic '
-                                 'patterns need every neighbour, and a regional mesh has none at its edge')
+            # WOOF's &wrfsolar_eps (wrfsolar_eps_v842): the STOCHPERT.TBL fields on the mesh's harmonics
+            # (a regional mesh's boundary zone carries none, as SPPT/SKEB).
             from .wrfsolar_eps_v842 import MpasMultiPerturb
             session.wrfsolar_eps=MpasMultiPerturb(config.wrfsolar_eps,mesh,dt=dt,
                                                   n_solve=int(layout.dimensions['nCellsSolve']))
@@ -1996,6 +2000,16 @@ def _run_native_dynamics(arguments, config, layout, payload, streams, library,
             session.iau_window = coupling.iau
             receipt['iau']=coupling.iau.receipt()
             print(json.dumps({'iau':receipt['iau']}),flush=True)
+        if getattr(arguments, 'nudging', None) is not None:
+            from ..nudging import attach_v842
+            coupling.nudging = attach_v842(
+                arguments, mesh=mesh, geometry_mesh=geometry_mesh, prep_geometry=geometry,
+                zgrid=grid.vertical_grid.zgrid, names=names, dt=dt, cache=dycore.cache,
+                run_seconds=float(steps) * float(dt), start_time=layout.configs['config_start_time'],
+                restarted=bool(resumed), partitioned=execution is not None or moving is not None,
+                pbl_height=lambda: session.field('diag_physics', 'hpbl'))
+            receipt['nudging'] = coupling.nudging.receipt()
+            print(json.dumps({'nudging': receipt['nudging']}, default=str), flush=True)
         from .diagnostics_v842 import initialize_thermodynamics
         # A restart forms the cold start's base state too (the restart stream's base words), never the
         # perturbation state it carries.
@@ -2289,6 +2303,8 @@ def _run_native_dynamics(arguments, config, layout, payload, streams, library,
                         receipt['stochastic'] = coupling.stochastic.receipt()
                     if coupling.iau is not None:
                         receipt['iau']=coupling.iau.receipt()
+                    if getattr(coupling, 'nudging', None) is not None:
+                        receipt['nudging']=coupling.nudging.receipt()
                     if les is not None:
                         receipt['les_execution']=les.receipt(step)
                     records.append(calls_path, json.dumps(dict(step=step,calls=session.driver.calls))+'\n')

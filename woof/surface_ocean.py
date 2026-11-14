@@ -18,13 +18,28 @@ def apply_ocean_defaults(values):
     from woof.config import RunConfig
     table = json.loads((Path(__file__).parent / "data/surface_ocean.json").read_text(encoding="utf-8"))
     policy = table['multiday_default']
+    # An external ocean (ocean_config's [external_ocean], NEMO) owns the
+    # water SST and TSK itself; the multi-day mixed layer would be a second
+    # owner of the same cells.  THE BREAKAGE: a 48 h run coupled to NEMO
+    # also ran the defaulted 3D PWP, and both wrote the water TSK.
     if ('sf_ocean_physics' not in values
+            and not _external_ocean(values.get('ocean_config'))
             and values.get('run_seconds', 0) >= policy['minimum_run_seconds']
             and (not policy['requires_surface_fluxes'] or
                  values.get('sf_sfclay_physics', RunConfig.sf_sfclay_physics) != 0)):
         values['sf_ocean_physics'] = policy['option']
         values.setdefault('ocean_mld_climatology', policy['initialization_fallback'])
     return values
+
+def _external_ocean(path):
+    """Does ``ocean_config`` name an ``[external_ocean]`` (not the waves/surge door)?"""
+    if not path:
+        return False
+    from woof.ocean.external import configured
+    try:
+        return configured(path)
+    except OSError:          # an unreadable TOML is refused by name where it is read
+        return False
 
 def ocean_fields(cfg):
     option = int(getattr(cfg, "sf_ocean_physics", 0) or 0)

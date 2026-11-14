@@ -1446,7 +1446,7 @@ BASELINE_PINNED: dict[str, str] = {
     "wind_farm": "693cd368feb1beffdc8805017806b13fe95a9558fb3a43e2e3a657dd89100412",
     # r290 exact-chain intake: source identity, numerical gates separate.
     'afwa_buoyancy': '723bf51131ebde5a89fb8b3b98603181b72a5fb6e13786f84ff11c5fe616fd3d',
-    'afwa_severe': 'a6261f1227d03fd27ad2a598362d6349fc2d99b05d480e4b32f54b63159a7747',
+    'afwa_severe': 'cfdef0a7e6f812ec37f438313d40c692b398f999997b595c990590e4094ede28',
     'misc_diag_print': 'a71ad9fc19c27755d351c57ecd31999d6b6b0ec14703e66543d54962aa356cf4',
     'noahmp_output': 'ef24fdd73a747b8dec610e8d6420e33f5e5f3a0850447275f11f736aa0243442',
     'snow_papers': '6910e7580f9d4dcf6c7ee9b53f349ee3c982f075d4d7f2b8cf924ee19ffa6ad6',

@@ -8851,6 +8851,13 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
         raise ValueError("ocean_levels must be an integer from 2 through 256: PWP needs adjacent levels and bounded per-column device storage")
     from woof.surface_ocean import validate_pwp_profile
     validate_pwp_profile(cfg)
+    from woof.surface_ocean import _external_ocean
+    if cfg.sf_ocean_physics and _external_ocean(getattr(cfg, "ocean_config", "")):
+        raise ConfigurationRefused(
+            f"sf_ocean_physics={cfg.sf_ocean_physics} with an external ocean "
+            "(ocean_config): both would own the water SST and TSK.  Choose one: "
+            "the mixed-layer ocean (sf_ocean_physics) or the coupled external "
+            "ocean (ocean_config, sf_ocean_physics = 0)")
     if cfg.sf_ocean_physics:
         if cfg.oml_gamma <= 0:
             raise ValueError("oml_gamma must be positive: OML1D divides by the lapse rate and buoyancy frequency")

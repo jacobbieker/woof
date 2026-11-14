@@ -395,6 +395,14 @@ class SubcycleGraphs:
                     name, regional.clock, regional._stage_offset(stage),
                     out=self.boundaries.get(key),
                 )
+        inflow = getattr(regional, "inflow_perturbation", None)
+        if inflow is not None:
+            # --inflow-perturbation (woof.hex.inflow_perturbation): the graph
+            # reads the staged target, so the seeding is staged here, outside
+            # capture, and the captured adjust leaves it as staged.
+            for stage in (1, 2, 3):
+                staged = self.boundaries[("rtheta_m", stage)]
+                staged[...] = inflow.target(staged, stage)
 
     @contextmanager
     def _boundary_scope(self):
@@ -406,11 +414,13 @@ class SubcycleGraphs:
         old_hook = regional.driving_values
         regional.driving = _Driving(base, self.tendencies)
         regional.driving_values = lambda name, stage: self.boundaries[(name, stage)]
+        regional.inflow_staged = True
         try:
             yield
         finally:
             regional.driving = base
             regional.driving_values = old_hook
+            regional.inflow_staged = False
 
     def advance(self, eager: Any, state: Any, **kwargs: Any) -> Any:
         self.subcycle += 1

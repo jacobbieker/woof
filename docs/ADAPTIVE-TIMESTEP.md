@@ -935,3 +935,74 @@ Tests: `tests/test_adaptive_timestep_{oracle,controller,surface,checkpoint,execu
 (`run_calc_dt.F90` + `stubs.F90`), which compiles `calc_dt` against a
 local WRF checkout and captures **1728 rows**; the port is graded against
 them at `max_ulp == 0`.
+
+---
+
+## Hex (the MPAS mesh): HEX-WRF parity item 4.1
+
+`woof hex forecast --adaptive-timestep {off,on,tropical}` runs the same controller
+(`woof.core.adaptive_timestep`, the graded `calc_dt`) on the hex WOOF column route
+(`--physics-suite arwen_mpas_column` / `arwen_thompson_column`, the frozen column batch whose
+physics is WRF's own `PhysicsDriver`).  Off by default; with it off the forecast loop never imports
+the module and every history byte is the fixed step's.  `woof.hex.adaptive_dt` is the whole of it;
+what differs from the WRF route:
+
+- **CFL numbers.**  Horizontal: the edge Courant number `|u_n| dt / dcEdge` over owned edges and
+  levels (end of step).  Vertical: WRF's form, the coordinate vertical velocity over the coordinate
+  layer depth on the interior w levels: `|ww| / rho_zz(face) * rdzu * dt`, `ww` the vertical mass flux
+  the scalar transport moved on each RK stage.  The geometric `|w| dt / dz` is the wrong number over
+  terrain: on the 5 km Arizona hexcase it reads 1.27 at the fixed 30 s step, at the first interface
+  above steep ground, where the flow follows the coordinate surfaces; a controller fed it held the step
+  under the row's (106 steps for the hour against 88 with the coordinate form).
+- **Lattice.**  WRF's `precision = 100` is exact only in its rational ESMF clock.  hex's clock is
+  binary64 seconds and every step check compares `start + dt`, so hex runs `calc_dt` with
+  `precision = 64`: every step is n/64 s and every sum of steps is exact.
+- **Acoustic substeps.**  WRF derives `time_step_sound` from the live step.  hex keeps MPAS's split
+  (three dynamics subcycles, which the v8.4.1 CUDA subcycle requires) and raises
+  `config_number_of_sub_steps` to the fewest (even) substeps whose acoustic steps are no longer than the
+  one the mesh row's step was run at: the row step with MPAS-A v8.4.1's two substeps, which every bare
+  hex forecast ran before the 2026-10-11 re-pin to v8.4.2's four (`longest_acoustic_step`; an acoustic
+  Courant number near 0.34 at a 6 s/km row, against about 0.57 for WRF's own adaptive rule).  So up to
+  2x the row step the substep count stays at the row's four.  Holding the v8.4.2 row's own acoustic step
+  instead (the first cut) grew the substeps with dt and, on CUDA, where the acoustic loop is most of a
+  hexcase step, made the adaptive hour slower than the fixed one (125 s against 89 s for 88 against 120
+  steps).  Third-order RK takes stage one as one acoustic step of `dt_dyn/3`, so at order 3 the step is
+  capped where that one reaches the bound (`acoustic_ceiling`, 1.5x the row).
+- **Defaults.**  WRF's targets (vertical 1.2, horizontal 0.84, 5 % growth), starting at the mesh row's
+  admitted step with WRF's ratios to it (max 2x, min 3/4).  `tropical` is `--clock tropical-adaptive`
+  (#276): vertical target 1.0, the row's step as the floor, refused outside |lat| < 25.  WRF's opt-in
+  also writes `w_damping = 1`; on hex that is the separate `--w-damping` opt-in (item 4.2, #420), which
+  the receipt names and the tropical evidence below did not use.
+- **Landings and cadences.**  The step lands, through `step_to_time`'s two-step look-ahead, on every
+  history frame, checkpoint, the run end, the lateral-boundary interval and every positive physics
+  period.  Radiation, and any held surface/PBL or cumulus period, fire on those exact time deadlines
+  through the driver's `*_due_override` hooks; a cadence welded to the step (the default PBL, GF's
+  pinned `cudt = 0`) runs every step at the live dt, so the cumulus rain/NCA clock advances on every
+  adaptive step (#278).
+- **Restart.**  The checkpoint carries the clock (exact elapsed time, both CFL memories, `last_dt`,
+  `stepping_to_time`), so a resume takes the step the straight run takes.  A fixed-step checkpoint
+  resumed adaptive, or the reverse, is refused.
+- **Refused by name**: `--local-timestep`, `--fullstep-local-timestep` (mutually exclusive), IAU,
+  `--tc-climate`, `--les-model`, `--nest-triggers`, DA cycling and the JEDI background, the balance
+  series, grid/spectral nudging, chemistry, wind farms, WRF-Hydro, `--members`, same-host ranks, an explicit `--dt`, and at run
+  time the stochastic physics, radar snapshots, the surface update and the large-step recovery; the
+  MPAS v8.4.2 suite route is refused at the door (its framework clock and alarms take one step).
+
+Evidence (2026-11-14, WOOF column route `arwen_mpas_column`; Metal = M3 Max, CUDA = RTX A6000; both
+machines shared with other jobs, so the walls are indicative):
+
+| check | Metal | CUDA |
+|---|---|---|
+| off: 1 h Arizona 5 km hexcase history, main vs branch | identical (`466dfa34`) | identical (`a8e5f438`) |
+| on: 1 h hexcase | 88 steps (fixed 120), dt 23.9-43.9 s, vertical CFL max 1.25 (target 1.2), every frame on time | the same 88 steps |
+| pinned (min = max = 36 s on the 30 s row) vs a fixed `--dt 36` run | history byte-identical | byte-identical |
+| 2 h with a 1 h checkpoint, resumed | 02 h history byte-identical | byte-identical |
+| Maui 3 km (7,042 cells, 18 s row), 12 h, `tropical` vs fixed | 1206 vs 2400 steps, 580 s vs 1451 s | 1206 vs 2400 steps, 259 s vs 359 s (1.38x) |
+
+The pinned run is the strongest of these: an adaptive run held at a step the row was not built with
+reproduces a fixed run built at that step, so nothing in the dycore, its boundary runtime or the
+column physics kept the construction-time step.  The 12 h tropical runs stayed finite in every field of
+every frame, with 3-hourly max |w| of 2.8-3.4 m/s against the fixed run's 2.6-4.2; the step reached its 2x ceiling within
+the first quarter hour and held there with the vertical Courant number at 1.0.  On CUDA the 2x step
+buys 1.38x, not 2x: CUDA graphs are off on the adaptive path (a captured graph replays one step length)
+and each step reads its CFL back to the host once.  Tests: `tests/test_hex_adaptive_dt.py`.

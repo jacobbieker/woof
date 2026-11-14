@@ -309,7 +309,8 @@ def seam_options_for(*, source_table: str | None = None) -> dict[str, Any]:
 
 
 def read_orographic_statistics(
-    path: str | Path, *, row_name: str, n_cells: int
+    path: str | Path, *, row_name: str, n_cells: int,
+    cell_latlon_rad=None, static_path: str | Path | None = None,
 ) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
     """The row's drag statistics from the mesh's orographic file.
 
@@ -339,6 +340,19 @@ def read_orographic_statistics(
             f"'*{spec['file_suffix']}' statistics file",
             f"the mesh's {spec['file_suffix']} file",
         )
+    if spec["file"] == "surface_statics":
+        # A statistic that rides in the surface statics file (topo_wind = 1's
+        # VAR_SSO) is held to this run's cells and static as every input of
+        # that file is (woof.hex.surface_inputs.verify_sidecar).
+        from .surface_inputs import verify_sidecar
+
+        if cell_latlon_rad is None or cell_latlon_rad[0] is None:
+            raise ConfigurationRefusal(
+                "orographic_statistics", str(source),
+                "the file is the mesh's surface statics file and the run gave "
+                "no cell centres to hold it to", "the forecast door")
+        verify_sidecar(source, latitude_rad=cell_latlon_rad[0],
+                       longitude_rad=cell_latlon_rad[1], static_path=static_path)
     dataset = open_dataset(source)
     out: dict[str, np.ndarray] = {}
     hashes: dict[str, Any] = {}
@@ -1750,6 +1764,11 @@ class PersistentSuiteCudaPhysicsBackendV841(PersistentTwoPhaseCudaPhysicsBackend
         return receipt
 
     def begin_step(self, **kwargs: Any):
+        spp = getattr(self, "spp_patterns", None)
+        if spp is not None:
+            # WRF's SPP (woof.hex.spp): this step's patterns, drawn at its
+            # start time, bound to the seam's WRF driver before phase one.
+            spp.bind(self._seam._driver, float(kwargs["atmosphere"].state.time_seconds))
         raw = super().begin_step(**kwargs)
         try:
             raw, extra = self._with_scalar_rates(raw, kwargs["scalar_names"])
@@ -1957,6 +1976,8 @@ class PersistentSuiteCudaPhysicsBackendV841(PersistentTwoPhaseCudaPhysicsBackend
 
         payload = dict(super().restart_state())
         payload["schema"] = CUDA_SUITE_PHYSICS_V841_SCHEMA
+        if getattr(self, "spp_patterns", None) is not None:
+            payload["spp"] = self.spp_patterns.snapshot()
         return payload
 
     def restore_restart_state(self, payload: Mapping[str, Any]) -> None:
@@ -1964,7 +1985,14 @@ class PersistentSuiteCudaPhysicsBackendV841(PersistentTwoPhaseCudaPhysicsBackend
             raise ValueError("backend restart schema is not the column suite's")
         frozen = dict(payload)
         frozen["schema"] = "mpas-port.cuda-woof-physics-v841/v3"
+        spp_state = frozen.pop("spp", None)
+        spp = getattr(self, "spp_patterns", None)
+        if (spp is None) != (spp_state is None):
+            raise ValueError("SPP must stay on (or off) across a restart: the restart "
+                             + ("carries" if spp is None else "lacks") + " SPP pattern state")
         super().restore_restart_state(frozen)
+        if spp is not None:
+            spp.restore(spp_state)
 
     def _restart_identity(self) -> Mapping[str, Any]:
         # The frozen adapter's identity fields first, then the suite's own.

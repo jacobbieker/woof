@@ -142,7 +142,7 @@ class _Source:
 
     def __init__(self, values, *, x0_lon=-100.0, y0_lat=40.0, dx=0.01):
         self.values = np.asarray(values, np.float64)
-        self.index = SimpleNamespace(dx=dx, islake=21, category_min=1, category_max=21)
+        self.index = SimpleNamespace(dx=dx, dy=dx, islake=21, category_min=1, category_max=21)
         self.nx_global = self.values.shape[1]
         self.ny_global = self.values.shape[0]
         self.x0_lon, self.y0_lat, self.dx = x0_lon, y0_lat, dx
@@ -265,7 +265,9 @@ def test_the_contract_table_lists_every_scheme():
                       ("irrigation", "irrigation"), ("irrigation", "irr_ph_field"),
                       ("ruc_mosaic", "landusef"), ("ruc_mosaic", "soilctop"),
                       ("pleim_xiu_lsm", "landusef"), ("pleim_xiu_lsm", "soilcbot"),
-                      ("slab", "thermal_inertia"), ("urban", "ivgtyp")}
+                      ("slab", "thermal_inertia"), ("urban", "ivgtyp"),
+                      ("user_aerosol", "aerosol_frames"),
+                      ("user_aerosol", "aerosol_frame_offsets")}
 
 
 @needs_generic_seam
@@ -620,3 +622,112 @@ def test_an_mpas_suite_init_refuses_a_soil_column_other_than_four():
         with pytest.raises(MpasPortError, match=f"--land-surface {land}"):
             mpas_v842_selection("mpas_mesoscale_reference", land)
     assert mpas_v842_selection("mpas_mesoscale_reference", "noahmp")["land_surface"] == "noahmp"
+
+
+def _var_sso_case(values, lat, lon):
+    centres = _xyz(np.asarray(lat, float), np.asarray(lon, float))
+    # The source's four corners, so the cells' footprint spans every pixel.
+    corners = _xyz(np.array([40.0, 40.0, 40.2, 40.2]), np.array([-100.0, -99.8, -100.0, -99.8]))
+    geometry = SimpleNamespace(n_cells=len(lat), xyz=centres, vertex_xyz=corners)
+    return geometry, _NearestAssigner(centres), _Source(values)
+
+
+def test_var_sso_is_the_four_point_value_where_the_cell_is_finer_than_the_gcell_ratio():
+    from woof.hex import surface_statics as ss
+
+    values = np.arange(400, dtype=np.float64).reshape(20, 20) * 3.0
+    geometry, assigner, source = _var_sso_case(values, [40.105], [-99.845])
+    # 4.0 * 111 * 0.01 degrees = 4.44 km: a 2 km cell takes the point rule.
+    out, receipt = ss.var_sso_cells(geometry, assigner, np.array([2000.0]), source)
+    x, y = (float(v[0]) for v in source.latlon_to_xy(np.array([40.105]), np.array([-99.845])))
+    ix, iy = int(np.floor(x)), int(np.floor(y))
+    fx, fy = x - ix, y - iy
+    a, c = values[iy - 1, ix - 1], values[iy - 1, ix]
+    b, d = values[iy, ix - 1], values[iy, ix]
+    want = (fy * (b * (1 - fx) + d * fx) + (1 - fy) * (a * (1 - fx) + c * fx))
+    assert out.dtype == np.float32
+    assert abs(float(out[0]) - want) < 1e-3 * abs(want)
+    assert receipt["cells_four_pt"] == 1 and receipt["cells_gcell_average"] == 0
+    assert receipt["gcell_threshold_km"] == pytest.approx(4.44, abs=1e-3)
+
+
+def test_var_sso_is_the_pixel_average_where_the_cell_is_coarser_than_the_gcell_ratio():
+    from woof.hex import surface_statics as ss
+
+    values = np.full((20, 20), 7.0)
+    values[0:5, 0:5] = 12.0
+    geometry, assigner, source = _var_sso_case(values, [40.02], [-99.98])
+    out, receipt = ss.var_sso_cells(geometry, assigner, np.array([20000.0]), source)
+    assert out[0] == np.float32((12.0 * 25 + 7.0 * 375) / 400)
+    assert receipt["cells_gcell_average"] == 1 and receipt["cells_four_pt"] == 0
+
+
+def test_var_sso_falls_to_the_valid_point_mean_then_the_fill_and_is_never_water_masked():
+    from woof.hex import surface_statics as ss
+
+    values = np.full((20, 20), 10.0)
+    values[10, 15] = np.nan
+    values[10, 16] = 30.0
+    values[3:6, 3:6] = np.nan
+    geometry, assigner, source = _var_sso_case(
+        values, [40.105, 40.04], [-99.845, -99.96])
+    out, receipt = ss.var_sso_cells(geometry, assigner, np.array([2000.0, 2000.0]), source)
+    assert out[0] == np.float32((30.0 + 10.0 + 10.0) / 3)
+    assert out[1] == np.float32(ss.VAR_SSO_FILL)
+    assert receipt["cells_average_4pt"] == 1 and receipt["cells_filled"] == 1
+
+
+def test_a_mixed_mesh_averages_its_coarse_cells_and_interpolates_its_fine_ones():
+    from woof.hex import surface_statics as ss
+
+    values = np.full((20, 20), 5.0)
+    geometry, assigner, source = _var_sso_case(values, [40.02, 40.15], [-99.98, -99.85])
+    out, receipt = ss.var_sso_cells(
+        geometry, assigner, np.array([30000.0, 1000.0]), source)
+    assert out.tolist() == [5.0, 5.0]
+    assert receipt["cells_gcell_average"] == 1 and receipt["cells_four_pt"] == 1
+
+
+@needs_generic_seam
+def test_topo_wind_1_reads_var_sso_from_the_surface_statics_file():
+    from woof.hex.physics_suites import resolve_physics
+
+    resolved = resolve_physics("arwen_thompson_column", {
+        "config_gwdo_scheme": "off", "topo_wind": 1})
+    assert resolved.seam == "engine"
+    spec = resolved.column_profile["orographic_statistics"]
+    assert spec["file"] == "surface_statics"
+    assert spec["file_suffix"] == si.FILE_SUFFIX
+    assert dict(spec["variables"]) == {"VAR_SSO": "VAR_SSO"}
+
+
+def test_the_forecast_door_reads_var_sso_from_the_surface_statics_it_is_given(tmp_path):
+    from woof.hex import forecast_door
+
+    sidecar = tmp_path / "m.surface_statics.nc"
+    sidecar.write_bytes(b"x")
+    physics = SimpleNamespace(column_profile={
+        "orographic_statistics": {"file": "surface_statics"}, "physics": {"topo_wind": 1, "bl_pbl_physics": 1, "sf_sfclay_physics": 1}})
+    arguments = SimpleNamespace(surface_statics=sidecar, orographic_statistics=None,
+                                static=None, grid=tmp_path / "m.grid.nc")
+    assert forecast_door.resolve_orographic_statistics(
+        arguments, physics, "m", tmp_path / "m.grid.nc", None) == sidecar
+    # The file is read by the orographic resolver: the surface resolver does
+    # not call it "accepted and never read".
+    assert forecast_door.resolve_surface_statics(
+        arguments, physics, "m", tmp_path / "m.grid.nc", None) is None
+
+
+def test_verify_sidecar_holds_the_file_to_the_runs_cells(tmp_path):
+    import netCDF4
+
+    path = tmp_path / "m.surface_statics.nc"
+    lat, lon = np.array([0.1, 0.2]), np.array([0.3, -0.4])
+    with netCDF4.Dataset(path, "w") as d:
+        d.createDimension("nCells", 2)
+        d.createVariable("latCell", "f8", ("nCells",))[:] = lat
+        d.createVariable("lonCell", "f8", ("nCells",))[:] = lon
+        d.setncattr("schema", si.SCHEMA)
+    assert si.verify_sidecar(path, latitude_rad=lat, longitude_rad=lon) == {}
+    with pytest.raises(ConfigurationRefusal, match="other cells"):
+        si.verify_sidecar(path, latitude_rad=lat[::-1], longitude_rad=lon[::-1])
