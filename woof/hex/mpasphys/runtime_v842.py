@@ -1634,6 +1634,17 @@ def _run_native_dynamics(arguments, config, layout, payload, streams, library,
                              ') would restart their working state from zero: the Registry restart stream holds none '
                              'of it. Restart from this route\'s own checkpoint (--checkpoint-hours/--restart-from), '
                              'which carries it')
+        # The accumulating &diagnostics packages (prec_acc_dt/acc_phy_tend windows, AFWA's precipitation type and
+        # severe maxima, CLWRF/RASM/surface-energy reductions) keep their sums in the same output diagnostics, which
+        # the restart stream does not hold either: a native-file restart would publish windows that silently lost
+        # everything before it. The route's own checkpoint carries them.
+        from ..mpasdiag import acc_diag_v842 as _acc, reduction_diag_v842 as _reduction
+        held = sorted(({_acc.PREC_PACKAGE, _acc.TEND_PACKAGE, 'afwa_ptype_opt', 'afwa_severe_opt',
+                        *_reduction.PACKAGES}) & set(getattr(layout,'packages',())))
+        if held:
+            raise ValueError('a native-file restart with &diagnostics accumulators on ('+', '.join(held)+') would '
+                             'restart their sums from zero: the Registry restart stream holds none of them. Restart '
+                             'from this route\'s own checkpoint (--checkpoint-hours/--restart-from), which carries them')
     signature=inspect.signature(CudaDryDycoreDriver._step_device_v841).parameters
     missing={'physics_post_transport_callback','physics_mass_loading_count'}-set(signature)
     if config.moist_physics and missing:
