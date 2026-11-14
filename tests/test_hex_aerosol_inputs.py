@@ -109,3 +109,34 @@ def test_a_constant_record_remaps_to_the_same_constant(tmp_path):
     except ModuleNotFoundError:
         pytest.skip("the Rust NetCDF bridge is not built")
     np.testing.assert_allclose(frames, np.float32(0.37), rtol=1e-6)
+
+
+def _write_records(path, records):
+    """An auxinput15 file whose XLAT/XLONG carry one plane per record (as WRF writes them)."""
+    import netCDF4
+
+    n = 6
+    with netCDF4.Dataset(path, "w") as ds:
+        ds.createDimension("Time", len(records))
+        ds.createDimension("south_north", n)
+        ds.createDimension("west_east", n)
+        ds.createVariable("AOD5502D", "f4", ("Time", "south_north", "west_east"))[:] = 0.2
+        lat = ds.createVariable("XLAT", "f8", ("Time", "south_north", "west_east"))
+        lon = ds.createVariable("XLONG", "f8", ("Time", "south_north", "west_east"))
+        for t, shift in enumerate(records):
+            lat_c, lon_c = np.meshgrid(30.5 + np.arange(n) + shift, -99.5 + np.arange(float(n)),
+                                       indexing="ij")
+            lat[t], lon[t] = lat_c, lon_c
+
+
+def test_a_multi_record_coordinate_takes_its_one_grid(tmp_path):
+    pytest.importorskip("netCDF4")
+    one, two = str(tmp_path / "one.nc"), str(tmp_path / "two.nc")
+    _write_records(one, [0.0])
+    _write_records(two, [0.0, 0.0])
+    for got, want in zip(ai.grid_corners(two), ai.grid_corners(one)):
+        np.testing.assert_array_equal(got, want)
+    moved = str(tmp_path / "moved.nc")
+    _write_records(moved, [0.0, 0.5])
+    with pytest.raises(ConfigurationRefusal, match="differs between the file's records"):
+        ai.grid_corners(moved)

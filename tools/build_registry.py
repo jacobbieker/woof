@@ -13391,6 +13391,13 @@ def _shallow_cumulus_constraints(registry):
     from woof.config import UW_SHALLOW_QI_MP_PHYSICS
     from woof.shallow_cumulus import shallow_refusal
 
+    def _publish(option, rules):
+        # The rebuild reads the tracked registry, which already holds this
+        # pass's rules: drop those copies before appending, so a rebuild is a
+        # fixpoint (rules whose text an earlier build wrote differently stay).
+        held = option.setdefault("constraints", {}).setdefault("refused_when", [])
+        held[:] = [rule for rule in held if rule not in rules] + rules
+
     axes = (("bl_mynn_edmf", (0, 1)), ("icloud", (0, 1, 2, 3)),
             ("icloud_bl", (0, 1)))
     carriers = [
@@ -13437,21 +13444,18 @@ def _shallow_cumulus_constraints(registry):
                 rules.append({"settings": settings, "reason": why, **remedy})
         rules += [{"settings": settings, "reason": why, **remedy}
                   for settings, why in carriers]
-        option.setdefault("constraints", {}).setdefault(
-            "refused_when", []).extend(rules)
+        _publish(option, rules)
     uw = ("WRF UW shallow convection requires the QI carrier "
           "(module_shallowcu_driver.F:519-522)")
     for option in registry["components"]["microphysics"]["options"].values():
         mp = option.get("selectors", {}).get("mp_physics")
         if (option.get("implemented") is True and mp is not None
                 and mp not in UW_SHALLOW_QI_MP_PHYSICS):
-            option.setdefault("constraints", {}).setdefault(
-                "refused_when", []).append(
-                    {"settings": {"shcu_physics": [2]}, "reason": uw, **remedy})
-    nsas = registry["components"]["cumulus"]["options"]["new-sas"]
-    nsas.setdefault("constraints", {}).setdefault("refused_when", []).append({
+            _publish(option, [
+                {"settings": {"shcu_physics": [2]}, "reason": uw, **remedy}])
+    _publish(registry["components"]["cumulus"]["options"]["new-sas"], [{
         "settings": {"shcu_physics": [4]},
-        "reason": shallow_refusal(4, 1, 0, 96), **remedy})
+        "reason": shallow_refusal(4, 1, 0, 96), **remedy}])
 
 
 def _misc_qualified_components(registry):

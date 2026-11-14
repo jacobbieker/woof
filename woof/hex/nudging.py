@@ -529,8 +529,10 @@ class HexNudging:
         self.ht = cp.asarray(np.ascontiguousarray(padded[0]))
         self.mask = cp.asarray(nudged_cell_mask(mesh, self.nc)[None, :])
         self.active = tuple(name for name in FIELDS if config.coefficient(name) > 0)
-        self.uses_pbl = any(getattr(config, "if_no_pbl_nudging_" + suffix)
-                            for suffix in ("uv", "t", "q"))
+        # Only an ACTIVE field's PBL control reads the PBL height (temperature-only nudging with the default uv/q
+        # flags needs none).
+        controls = {"u": "uv", "v": "uv", "temperature": "t", "qv": "q"}
+        self.uses_pbl = any(getattr(config, "if_no_pbl_nudging_" + controls[name]) for name in self.active)
         self.pbl_height = pbl_height
         if self.uses_pbl and pbl_height is None:
             raise HexNudgingRefusal(
@@ -604,6 +606,10 @@ class HexNudging:
             reuse = self._pair[2] if self._pair is not None and self._pair[0] + 1 == index else None
             start = reuse if reuse is not None else self._frame_device(index)
             self._pair = (index, start, self._frame_device(index + 1))
+            # Host frames outside the active endpoint pair are never read again (the bracket only moves forward
+            # within a run): drop them, so host storage does not grow with the forecast's length.
+            for stale in [key for key in self._host_frames if key not in (index, index + 1)]:
+                del self._host_frames[stale]
         return self._pair[1], self._pair[2]
 
     # -- model fields --------------------------------------------------------

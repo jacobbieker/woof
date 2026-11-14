@@ -38,24 +38,37 @@ def run_offsets(cfg, run_seconds: float) -> list[float]:
     return [float(k * interval) for k in range(int(last // interval) + 1)]
 
 
+def _one_record(value, name, path):
+    """One horizontal plane of a coordinate that may carry a Time dimension.  The grid does not move between
+    records, so a multi-record file's records must agree; the first is the grid."""
+    value = np.asarray(value, np.float64)
+    if value.ndim > 2:
+        planes = value.reshape((-1,) + value.shape[-2:])
+        if not np.array_equal(planes, np.broadcast_to(planes[:1], planes.shape)):
+            raise ConfigurationRefusal(
+                "aer_auxinput15", str(path),
+                f"{name} differs between the file's records: hex remaps every record with one grid",
+                "an auxinput15 file on one fixed grid")
+        value = planes[0]
+    return value
+
+
 def grid_corners(path):
     """``(lat_c, lon_c)`` (ny+1, nx+1) degrees of the WRF grid in ``path``."""
     from netCDF4 import Dataset
 
     with Dataset(path) as ds:
         if "XLAT_C" in ds.variables and "XLONG_C" in ds.variables:
-            lat = np.asarray(ds.variables["XLAT_C"][:], np.float64)
-            lon = np.asarray(ds.variables["XLONG_C"][:], np.float64)
-            return lat.reshape(lat.shape[-2:]), lon.reshape(lon.shape[-2:])
+            return (_one_record(ds.variables["XLAT_C"][:], "XLAT_C", path),
+                    _one_record(ds.variables["XLONG_C"][:], "XLONG_C", path))
         for name in ("XLAT", "XLONG"):
             if name not in ds.variables:
                 raise ConfigurationRefusal(
                     "aer_auxinput15", str(path),
                     f"the file carries neither XLAT_C/XLONG_C nor {name}, so the WRF grid's "
                     "cells cannot be placed on the sphere", "an auxinput15 file with its grid")
-        lat = np.asarray(ds.variables["XLAT"][:], np.float64)
-        lon = np.asarray(ds.variables["XLONG"][:], np.float64)
-    lat, lon = lat.reshape(lat.shape[-2:]), lon.reshape(lon.shape[-2:])
+        lat = _one_record(ds.variables["XLAT"][:], "XLAT", path)
+        lon = _one_record(ds.variables["XLONG"][:], "XLONG", path)
     from .moving_remap import sphere_xyz
 
     xyz = sphere_xyz(np.radians(lat), np.radians(lon))

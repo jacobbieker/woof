@@ -221,6 +221,7 @@ def _wrf_columns(cols, refl_on):
     return out
 
 
+@pytest.mark.gpu
 def test_the_mesh_columns_are_wrfs_columns(cp):
     cols = _columns()
     module = ltng.LightningModule(_owner(cp, cols), ltng.LightningConfig(option=2))
@@ -240,6 +241,7 @@ def test_the_mesh_columns_are_wrfs_columns(cp):
                          flashrate_factor=0.5, cellcount_method=2),
     ltng.LightningConfig(option=3, lightning_dt=60.0),
 ])
+@pytest.mark.gpu
 def test_every_word_equals_the_wrf_routes_launcher_over_the_steps(cp, config):
     """Five steps of the module against launch_lightning + next_activation (the WRF route's driver) on WRF's
     columns of the same cells, word for word, including the steps the clock skips."""
@@ -285,6 +287,7 @@ def test_every_word_equals_the_wrf_routes_launcher_over_the_steps(cp, config):
     (ltng.LightningConfig(option=2, lightning_dt=60.0, start_seconds=20.0), 4),
     (ltng.LightningConfig(option=3), 5),
 ])
+@pytest.mark.gpu
 def test_a_checkpoint_resumes_the_counts_and_the_clock(cp, config, checkpoint):
     """A continuation counts its loop steps from 0 again (runtime_v842) with the straight run's steps before it as
     the owner's step_offset, as physics_clock_offset hands physics: every activation and word equals the straight
@@ -334,6 +337,7 @@ def test_the_runtime_hands_the_continuation_offset_to_the_diagnostics():
         source.index("diagnostics.step_offset = physics_step_offset")
 
 
+@pytest.mark.gpu
 def test_lightning_is_refused_on_a_multi_rank_mesh(cp):
     owner = _owner(cp, _columns())
     owner.halo = object()

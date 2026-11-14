@@ -81,6 +81,11 @@ def apply_w_damping(tend_rw, w, rho, vertical, *, dt, damping: WDamping, cache):
         if tuple(field.shape) != (rows, ncells):
             raise ValueError(f"w damping {name} has shape {tuple(field.shape)}, "
                              f"not ({rows}, {ncells})")
+    # The kernel reads levels 1 .. nlev - 1 of each coefficient as packed float.
+    for name in ("fzm", "fzp", "rdzw"):
+        field = require_resident_array(f"w damping {name}", getattr(vertical, name), dtype=np.float32, ndim=1)
+        if field.size < nlev:
+            raise ValueError(f"w damping {name} has {field.size} levels, fewer than the {nlev} the w tendency has")
     kernel = cache.raw_kernel("w_damping_f32", _CUDA_SOURCE,
                               module_key="hexcore.cuda_w_damping")
     kernel((((nlev - 1) * ncells + 127) // 128,), (128,),

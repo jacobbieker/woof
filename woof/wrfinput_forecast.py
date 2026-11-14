@@ -960,6 +960,21 @@ def _door_initialization(initialization, plan_path, outdir):
     return AnalysisInitialization(initialization, load_plan(plan_path), outdir=outdir)
 
 
+#: Backends with no NVIDIA card for the supervisor to select.  The supervised
+#: launch reserves its card through nvidia-smi (woof.supervisor.select_gpu),
+#: so on these it failed closed before a step ("nvidia-smi was not found")
+#: and Metal could only run a WRF directory with --no-supervise.
+UNSUPERVISED_BACKENDS = ("mlx", "cpu", "host")
+
+
+def supervised_launch(exclusive_gpu: bool) -> bool:
+    """Whether this run is launched under the exclusive-GPU supervisor."""
+    if not exclusive_gpu:
+        return False
+    from woof import backend
+    return backend.requested() not in UNSUPERVISED_BACKENDS
+
+
 def run_wrf_forecast(directory, outdir, *, run_seconds=None, restart=None,
                      io_mode="history", health_debug=False, gpu_uuid=None,
                      exclusive_gpu=True, rrtmg_variant=None,
@@ -978,6 +993,7 @@ def run_wrf_forecast(directory, outdir, *, run_seconds=None, restart=None,
     # WRF-directory go/run launches share the same catalog admission as
     # configured go launches: an invalid name must fail before integration.
     admit_render_products(render_products)
+    exclusive_gpu = supervised_launch(exclusive_gpu)
     from woof.stage_reuse import claim_run_output
     from woof.wrfinput_door import resolve_wrfinput_run
     started = time.perf_counter()

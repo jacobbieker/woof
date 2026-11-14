@@ -323,6 +323,7 @@ def _wrf_route(cp, mass, surface, options, ccn=264.15, melt=50.0, mp_physics=8, 
 
 @pytest.mark.parametrize("options", [afwa.SELECTORS, ("afwa_diag_opt", "afwa_ptype_opt"), ("afwa_diag_opt", "afwa_buoy_opt",
                                                                                           "afwa_therm_opt")])
+@pytest.mark.gpu
 def test_every_field_equals_the_wrf_routes_kernels_on_the_same_columns(cp, options):
     module, owner, utils, mass, surface = _module(cp, options, ptype_ccn_tmp=263.15, ptype_tot_melt=45.0)
     expected = _wrf_route(cp, mass, surface, options, ccn=263.15, melt=45.0)
@@ -394,6 +395,7 @@ def _columns_from_file():
     return nc, nl, ccn, melt, mass, surface
 
 
+@pytest.mark.gpu
 def test_fields_equal_wrf_fortran_on_the_same_columns(cp):
     nc, nl, ccn, melt, mass, surface = _columns_from_file()
     assert (nc, nl) == (NC, NL) and (ccn, melt) == (np.float32(MAKE.CCN), np.float32(MAKE.MELT))
@@ -428,6 +430,7 @@ def test_fields_equal_wrf_fortran_on_the_same_columns(cp):
     assert (alpha == np.float32(3.6)).any() and (alpha < np.float32(3.6)).any()      # hydrometeor- and haze-dominated
 
 
+@pytest.mark.gpu
 def test_the_precip_type_divergence_from_wrf_fortran_is_pinned(cp):
     """If this fails the shared kernel was changed to WRF's actual operator precedence: drop PTYPE_DIVERGES_AT."""
     nc, nl, ccn, melt, mass, surface = _columns_from_file()
@@ -447,6 +450,7 @@ def test_the_precip_type_divergence_from_wrf_fortran_is_pinned(cp):
 # ---------------------------------------------------------------------------
 # the per-step fold, the due frame, checkpoint, refusals, the provider
 # ---------------------------------------------------------------------------
+@pytest.mark.gpu
 def test_ptype_accumulates_every_step_and_the_t0_frame_computes_the_instantaneous_packages(cp):
     module, owner, utils, mass, surface = _module(cp, afwa.SELECTORS)
     module.begin(0, owner.start)
@@ -470,6 +474,7 @@ def test_ptype_accumulates_every_step_and_the_t0_frame_computes_the_instantaneou
 NO_SEVERE = tuple(s for s in afwa.SELECTORS if s != "afwa_severe_opt")
 
 
+@pytest.mark.gpu
 def test_a_checkpoint_resumes_the_ptype_accumulators(cp):
     module, owner, utils, mass, surface = _module(cp, NO_SEVERE)
     for step in (1, 2, 3):
@@ -487,6 +492,7 @@ def test_a_checkpoint_resumes_the_ptype_accumulators(cp):
         np.testing.assert_array_equal(cp.asnumpy(fresh.w[n]).view(np.uint32), cp.asnumpy(module.w[n]).view(np.uint32))
 
 
+@pytest.mark.gpu
 def test_radar_vil_and_vis_need_the_hydrometeors_wrf_reads(cp):
     for options, scalars, missing in (
             (("afwa_diag_opt", "afwa_radar_opt"), ("qv", "qc", "qr"), "qs, qg"),
@@ -501,6 +507,7 @@ def test_radar_vil_and_vis_need_the_hydrometeors_wrf_reads(cp):
     afwa.AfwaModule(owner, afwa.AfwaConfig(("afwa_diag_opt", "afwa_therm_opt", "afwa_buoy_opt"))).setup(_Utils(afwa.NAMES))
 
 
+@pytest.mark.gpu
 def test_only_due_carried_fields_are_published(cp):
     module, owner, utils, mass, surface = _module(cp, afwa.SELECTORS)
     utils.written = {"afwa_cape", "afwa_mslp"}
@@ -514,6 +521,7 @@ def test_only_due_carried_fields_are_published(cp):
     assert not o2.buffers
 
 
+@pytest.mark.gpu
 def test_resident_provider_folds_publishes_and_carries_the_module(cp):
     from woof.hex.mpasdiag.convective_v842 import MAXIMA
     from woof.hex.mpasphys.resident_output_diagnostics_v842 import PRODUCED, ResidentOutputDiagnostics as R
@@ -556,6 +564,7 @@ def _severe_steps(module, owner, utils):
     return after
 
 
+@pytest.mark.gpu
 def test_severe_equals_the_wrf_routes_kernels_over_three_steps(cp):
     options = ("afwa_diag_opt", "afwa_severe_opt")
     module, owner, utils, mass, surface = _module(cp, options, scalars=WITH_NG)
@@ -572,6 +581,7 @@ def test_severe_equals_the_wrf_routes_kernels_over_three_steps(cp):
     assert (last["tcoli_max"] > 0).any() and (last["grpl_flx_max"] > 0).any() and (last["w_dn_max"] < 0).any()
 
 
+@pytest.mark.gpu
 def test_severe_without_graupel_number_moves_only_gust_and_shear(cp):
     """WRF calls severe_wx_diagnostics only with F_QNG; no microphysics of this route carries ng."""
     module, owner, utils, mass, surface = _module(cp, ("afwa_diag_opt", "afwa_severe_opt"))
@@ -583,6 +593,7 @@ def test_severe_without_graupel_number_moves_only_gust_and_shear(cp):
     assert (after["afwa_midrh_min"] == np.float32(999.0)).all()     # reset, never folded: WRF's words too
 
 
+@pytest.mark.gpu
 def test_the_qng_gate_opt_in_gives_the_ng_carriers_fields_without_ng(cp):
     """config_afwa_severe_ignore_qng_gate (WOOF, not WRF): without ng the column part runs, and every severe word
     equals the run with an ng carrier (which test_severe_equals_the_wrf_routes_kernels_over_three_steps holds to the
@@ -599,6 +610,7 @@ def test_the_qng_gate_opt_in_gives_the_ng_carriers_fields_without_ng(cp):
     assert (got[-1]["afwa_hail"] > 0).any() and (got[-1]["afwa_tornado"] > 0).any()
 
 
+@pytest.mark.gpu
 def test_the_qng_gate_opt_in_is_refused_at_setup_without_graupel(cp):
     with pytest.raises(ValueError, match="ignore_qng_gate .* has no qg"):
         _module(cp, ("afwa_diag_opt", "afwa_severe_opt"), scalars=("qv", "qc", "qi", "qr", "qs"),
@@ -611,6 +623,7 @@ SEVERE_ORACLE_FIELDS = ("wspd10max", "afwa_llws", "w_up_max", "w_dn_max", "tcoli
 SEVERE_RTOL = {"afwa_cape": 2e-3, "afwa_cin": 2e-3, "afwa_tornado": 1e-3}
 
 
+@pytest.mark.gpu
 def test_severe_equals_wrf_fortran_over_three_steps(cp):
     """run_severe.F90: severe_wx_diagnostics and the driver's gust/shear blocks, gfortran, on the committed columns.
     The Fortran's row has zero halos at both ends: the module's neighbours are the row without wrap."""
@@ -641,6 +654,7 @@ def test_severe_equals_wrf_fortran_over_three_steps(cp):
     assert (oracle[2, SEVERE_ORACLE_FIELDS.index("afwa_midrh_min_old")] > 0).all()
 
 
+@pytest.mark.gpu
 def test_the_step_helicity_is_the_one_updraft_helicity_max_folds(cp):
     """helicity() runs MPAS's update_diag on a zeroed row: its values over the steps fold to updraft_helicity_max."""
     from woof.hex.mpasdiag.convective_v842 import ConvectiveDiagnostics, FIELDS as CONVECTIVE
@@ -671,6 +685,7 @@ def test_the_step_helicity_is_the_one_updraft_helicity_max_folds(cp):
     np.testing.assert_array_equal(np.max(np.stack(values), axis=0), cp.asnumpy(reference[CONVECTIVE.index("updraft_helicity_max")]))
 
 
+@pytest.mark.gpu
 def test_a_checkpoint_resumes_the_severe_state(cp):
     options = ("afwa_diag_opt", "afwa_severe_opt")
     module, owner, utils, mass, surface = _module(cp, options, scalars=WITH_NG)
@@ -692,6 +707,7 @@ def test_a_checkpoint_resumes_the_severe_state(cp):
         np.testing.assert_array_equal(cp.asnumpy(fresh.w[n]).view(np.uint32), cp.asnumpy(module.w[n]).view(np.uint32), n)
 
 
+@pytest.mark.gpu
 def test_severe_is_refused_on_a_multi_rank_mesh(cp):
     mass, surface = columns()
     owner = _owner(cp, mass, surface)
@@ -722,3 +738,16 @@ def test_radar_vil_and_vis_are_refused_for_microphysics_without_the_hydrometeors
     with pytest.raises(ValueError, match=f"config_afwa_{option}_opt needs the .* mp_wsm6, mp_thompson, "
                                          f"mp_thompson_aerosols carry them.*'{scheme}'"):
         _resolve({f"config_afwa_{option}_opt": ".true."}, (f" config_microp_scheme='{scheme}'",))
+
+
+@pytest.mark.parametrize("offset, first", [(0, True), (6, False)])
+def test_the_first_step_buoyancy_is_wrfs_first_step_not_a_continuations(offset, first):
+    """WRF computes the severe surface-parcel buoyancy on itimestep 1 and on output steps.  A route-checkpoint
+    continuation counts its loop steps from 1 again with the straight run's steps before it as the owner's
+    step_offset; its local step 1 is not WRF's first step.  THE BREAKAGE: the continuation's first step recomputed
+    the buoyancy the straight run does not."""
+    module = afwa.AfwaModule(SimpleNamespace(step_offset=offset), afwa.AfwaConfig(("afwa_severe_opt",)))
+    module.begin(1, None)
+    assert module._first is first
+    module.begin(2, None)
+    assert module._first is False

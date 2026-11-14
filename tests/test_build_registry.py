@@ -487,3 +487,19 @@ def test_citation_workers_use_process_count_when_available(monkeypatch):
     monkeypatch.setattr(build_registry.os, "process_cpu_count", lambda: 3, raising=False)
     monkeypatch.setattr(build_registry.os, "cpu_count", lambda: 256)
     assert build_registry.available_cpus() == 3
+
+
+def test_the_shallow_cumulus_rules_publish_idempotently() -> None:
+    """The rebuild reads the tracked registry, which already carries the shallow-cumulus refused_when rules.
+    THE BREAKAGE: the pass appended them again on every rebuild (ysu 5 -> 10 -> 15 rules), so the builder was no
+    fixpoint."""
+    import copy
+    import json
+
+    from tools.build_registry import _shallow_cumulus_constraints
+
+    once = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
+    _shallow_cumulus_constraints(once)
+    twice = copy.deepcopy(once)
+    _shallow_cumulus_constraints(twice)
+    assert twice == once
