@@ -242,6 +242,11 @@ def arith_in_place(np_name, view, other) -> bool:
         return False
     if any(s == 0 and m > 1 for s, m in zip(view.strides, view.shape)):
         return False   # a broadcast destination aliases itself; the general path writes it once
+    extent = 4   # bytes spanned by the axes already checked, plus one element
+    for s, m in sorted((abs(s), m) for s, m in zip(view.strides, view.shape) if m > 1):
+        if s < extent:
+            return False   # two elements share a word; the general path writes each once
+        extent += (m - 1) * s
     shape = view.shape or (1,)
     dst_strides = [s // 4 for s in view.strides] or [1]
     src_strides = src_strides or [0]

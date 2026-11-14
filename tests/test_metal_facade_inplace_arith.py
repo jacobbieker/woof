@@ -151,3 +151,13 @@ def test_zero_stride_destination_keeps_the_general_path(cp):
     assert not _write.arith_in_place("add", a, 1.0)
     b = cp.broadcast_to(cp.zeros((1, 4), dtype=cp.float32), (3, 4))
     assert not _write.arith_in_place("multiply", b, cp.ones((3, 4), dtype=cp.float32))
+
+
+def test_self_overlapping_destination_keeps_the_general_path(cp):
+    from woof.backend.facade import _write
+    base = cp.zeros(16, dtype=cp.float32)
+    # rows of 4 words starting every 2 words: elements (r, c) and (r + 1, c - 2) share a word
+    from woof.backend.facade._array import MemoryPointer
+    over = cp.ndarray((4, 4), dtype=cp.float32, memptr=MemoryPointer(base._st, 0), strides=(8, 4))
+    assert not _write.arith_in_place("add", over, 1.0)
+    assert _write.arith_in_place("add", base[::-1], 1.0)   # a reversed view does not overlap
