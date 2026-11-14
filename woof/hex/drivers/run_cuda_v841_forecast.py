@@ -648,7 +648,8 @@ def _suite_host(
                 "--orographic-statistics <mesh>.ugwp_oro_data.nc",
             )
         oro, oro_receipt = adapter.read_orographic_statistics(
-            orographic_statistics, row_name=row_name, n_cells=int(N_CELLS)
+            orographic_statistics, row_name=row_name, n_cells=int(N_CELLS),
+            cell_latlon_rad=cell_latlon_rad, static_path=static_path,
         )
         if is_regional:
             from woof.hex.cuda_regional_forecast_v841 import (
