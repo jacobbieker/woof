@@ -141,6 +141,18 @@ def test_a_generated_mesh_is_reused_only_for_the_grading_it_was_made_with(tmp_pa
     with pytest.raises(door.RegionalRefusal, match="was generated with"):
         door._stage_mesh(args, value, note)
     assert door._stage_mesh(args, _gfs_region(tmp_path, "2026-10-27T18", 3, 12), note)["reused"] is True
+    # A raster rewritten at the same path is another request.
+    raster = tmp_path / "terrain.nc"
+    raster.write_bytes(b"a")
+    work = tmp_path / "raster-run"
+    work.mkdir()
+    painted = _gfs_region(work, "2026-10-27T18", 3, 12, "--density-raster", str(raster))
+    door._stage_mesh(args, painted, note)
+    (Path(painted["paths"]["mesh"]) / "x.point-generate.json").write_text("{}")
+    assert door._stage_mesh(args, painted, note)["reused"] is True
+    raster.write_bytes(b"b")
+    with pytest.raises(door.RegionalRefusal, match="was generated with"):
+        door._stage_mesh(args, painted, note)
 
 def test_gfs_region_starts_at_any_lead_gfs_writes(tmp_path):
     """GFS writes every hour to 120 h (its row's ladder). A region from GFS 18Z +3 h was refused because the plan

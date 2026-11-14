@@ -666,13 +666,24 @@ def _prefetch_source(argv: list[str]) -> int:
     return 0
 
 
+def _raster_identity(path: str) -> dict[str, str]:
+    """A density raster by path and content: one rewritten at the same path asks for another mesh."""
+    import hashlib
+
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for block in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(block)
+    return {"path": str(path), "sha256": digest.hexdigest()}
+
+
 def _stage_mesh(args, value, status) -> dict[str, Any]:
     _start_source_prefetch(args, value, status)
     mesh_dir = Path(value["paths"]["mesh"])
     terrain = value.get("terrain")
     grading_stamp = mesh_dir / "regional-grading.json"
     requested = {"grading": dict(value.get("grading") or {}),
-                 "density_rasters": list(value.get("density_rasters") or ())}
+                 "density_rasters": [_raster_identity(path) for path in value.get("density_rasters") or ()]}
     if list(mesh_dir.glob("*.point-generate.json")):
         # A mesh made before the grading flags existed carries no stamp: it was the default grading, no raster.
         made = (json.loads(grading_stamp.read_text(encoding="utf-8")) if grading_stamp.is_file()
