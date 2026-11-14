@@ -1075,6 +1075,10 @@ class ForecastRequest:
     #: the increment enters by (woof.hex.iau_native: "native" or "hex").
     iau_increment: Path | None = None
     iau_route: str | None = None
+    #: WRF grid/spectral analysis nudging (woof.hex.nudging): the &fdda / [nudging] configuration
+    #: and its analyses on this mesh.  None (the default) is off.
+    nudging: Path | None = None
+    nudging_analyses: tuple[Path, ...] = ()
     #: ``--analysis``: the bundle's receipt block (woof.hex.analysis_door), None without one.
     analysis_bundle: Mapping[str, Any] | None = None
     #: Surface-pressure tendency statistics at every macro boundary.
@@ -2493,6 +2497,19 @@ def resolve_request(
         if iau_route == "hex" and iau_analysis is None:
             raise _refuse("--iau-route hex forms its increment from two recoupled initial-conditions files "
                           "and needs --iau-analysis; an MPAS increment file alone runs --iau-route native")
+    nudging = getattr(arguments, "nudging", None)
+    nudging_analyses = tuple(getattr(arguments, "nudging_analysis", None) or ())
+    if (nudging is None) != (not nudging_analyses):
+        raise _refuse("--nudging and --nudging-analysis go together: a nudging configuration reads its "
+                      "analyses, and an analysis without a configuration would never be read")
+    if nudging is not None:
+        for value in (nudging, *nudging_analyses):
+            if not Path(value).expanduser().is_file():
+                raise _refuse(f"nudging input {value} does not exist")
+        if fullstep_enabled or local_timestep:
+            raise _refuse("HEX_NUDGING_LTS: nudging runs on fixed-step hex runs; drop the local time step")
+        nudging = Path(nudging).expanduser().resolve()
+        nudging_analyses = tuple(Path(value).expanduser().resolve() for value in nudging_analyses)
     # Retired 2026-10-14 (lane W1): IAU and the balance series needed the active full-step
     # class executor, the only one with a held-tendency hook.  The fixed-step executor has the
     # same hook now (woof.hex.iau_native), and so do the same-host ranks (one class per rank);
@@ -2587,6 +2604,8 @@ def resolve_request(
         iau_window_seconds=iau_window_seconds,
         iau_increment=iau_increment,
         iau_route=iau_route,
+        nudging=nudging,
+        nudging_analyses=nudging_analyses,
         analysis_bundle=getattr(arguments, "analysis_receipt", None),
         balance_series=bool(getattr(arguments, "balance_series", False)),
         tc_climate=getattr(arguments, "tc_climate", None),
@@ -3408,6 +3427,10 @@ def build_driver_argv(request: ForecastRequest) -> list[str]:
             argv += ["--iau-increment", str(request.iau_increment)]
         argv += ["--iau-window-seconds", repr(float(request.iau_window_seconds)),
                  "--iau-route", str(request.iau_route)]
+    if request.nudging is not None:
+        argv += ["--nudging", str(request.nudging)]
+        for path in request.nudging_analyses:
+            argv += ["--nudging-analysis", str(path)]
     if request.balance_series:
         argv.append("--balance-series")
     if request.tc_climate is not None:
@@ -4953,6 +4976,10 @@ def _run_forecast(arguments: argparse.Namespace) -> int:
             # Every other host starts now, so its preparation runs beside this host's (woof.hex.multihost).
             from . import multihost
             multihost.begin(arguments)
+        if native_config is not None and (getattr(arguments, "nudging", None) is None) != (
+                not getattr(arguments, "nudging_analysis", None)):
+            raise ValueError("--nudging and --nudging-analysis go together: a nudging configuration reads its "
+                             "analyses, and an analysis without a configuration would never be read")
         if native_config is not None:
             if getattr(arguments, "w_damping", False):
                 raise ValueError("--w-damping is carried by the WOOF-physics route's dycore driver; the MPAS "
@@ -5060,6 +5087,9 @@ def _run_forecast(arguments: argparse.Namespace) -> int:
             samehost_options = samehost.automatic_options(arguments, request)
         except (ValueError, OSError, RuntimeError) as error:
             raise _refuse(str(error)) from error
+    if samehost_options is not None and request.nudging is not None:
+        raise _refuse("HEX_NUDGING_PARTITIONED: nudging runs on one card; the partitioned same-host "
+                      "executor has no nudging seat (pin one device)")
     if samehost_options is not None and request.tc_climate is not None:
         raise _refuse("--tc-climate is not wired to the partitioned same-host executor")
     if samehost_options is not None and len(set(samehost_options["devices"])) > 1:
@@ -5847,6 +5877,16 @@ def add_forecast_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--iau-window-seconds", type=float, default=None, metavar="S",
         help="IAU window length from the start of the run")
+    parser.add_argument(
+        "--nudging", type=Path, default=None, metavar="CONFIG",
+        help="WRF grid (grid_fdda = 1) or spectral (grid_fdda = 2) analysis nudging: a TOML [nudging] "
+             "table or a WRF namelist.input &fdda group (guv, gt, gq, if_no_pbl_nudging_*, if_zfac_*, "
+             "k_zfac_*, dk_zfac_*, xwavenum, ywavenum, fgdt, gfdda_interval_m, gfdda_end_h, if_ramping, "
+             "dtramp_min); off by default (woof.hex.nudging)")
+    parser.add_argument(
+        "--nudging-analysis", type=Path, action="append", default=None, metavar="INIT",
+        help="an analysis on this mesh (hex init format, e.g. from the hex analysis remap), one at the "
+             "start and one every gfdda_interval_m; repeat the flag")
     parser.add_argument(
         "--balance-series", action="store_true",
         help="write balance-series.jsonl: surface-pressure tendency statistics at every macro "

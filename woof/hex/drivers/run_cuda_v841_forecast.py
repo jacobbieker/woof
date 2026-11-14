@@ -3602,6 +3602,7 @@ def execute_forecast(
     fullstep_lts_options: Mapping[str, Any] | None = None,
     cycling: Mapping[str, Any] | None = None,
     iau: Mapping[str, Any] | None = None,
+    nudging: Mapping[str, Any] | None = None,
     balance_series: bool = False,
     tc_climate: Path | None = None,
     on_history_ready: Callable[[dict[str, Any]], Any] | None = None,
@@ -3817,6 +3818,15 @@ def execute_forecast(
     surface_receipt = attach_host(stack["backend"], host, schedule, output_root, dt=float(DT_SECONDS))
     if surface_receipt is not None:
         print(json.dumps({"surface_update": surface_receipt}), flush=True)
+    nudging_forcing = None
+    if nudging is not None:
+        # WRF grid/spectral analysis nudging (woof.hex.nudging), off unless --nudging names a config.
+        from woof.hex.nudging import attach_v841
+
+        nudging_forcing = attach_v841(nudging, stack=stack, host=host, cache=cache,
+                                      dt=float(DT_SECONDS), run_seconds=float(schedule["steps"]) * float(DT_SECONDS),
+                                      restart_seconds=float(start_step) * float(DT_SECONDS))
+        print(json.dumps({"nudging": nudging_forcing.receipt()}, default=str), flush=True)
     time_ledger.emit("prep.device_upload", "end", attrs={"scope": "device_stack_including_kernel_load"})
     from woof.hex.cuda_column_order_v841 import attach_column_order
     column_order_receipt = attach_column_order(stack["backend"], host["prepared"].mesh)
@@ -4483,9 +4493,10 @@ def execute_forecast(
                     refl_10cm_due=(step in capture_steps or radar.due(step) or
                                    (nest_trigger is not None and nest_trigger.due(step)
                                     and "refl10cm" in nest_trigger.needed_sources())),
-                    **({} if iau_forcing is None else {"held_forcing": (
-                        lambda held, start, length, **context:
-                        iau_forcing.add(0, held, start, length, **context))}),
+                    **({} if iau_forcing is None and nudging_forcing is None else {"held_forcing": (
+                        lambda held, start, length, **context: [
+                            forcing.add(0, held, start, length, **context)
+                            for forcing in (iau_forcing, nudging_forcing) if forcing is not None])}),
                 )
             except (proof.CompositeTransactionError, FloatingPointError) as error:
                 # An earlier health refusal has precedence over a successor's
@@ -4779,6 +4790,7 @@ def execute_forecast(
         "stochastic": (None if getattr(stack["driver"], "stochastic", None) is None
                        else stack["driver"].stochastic.receipt()),
         **({"iau": iau_record} if iau_record is not None else {}),
+        **({"nudging": nudging_forcing.receipt()} if nudging_forcing is not None else {}),
         **({"balance_series": {"path": str(output_root / "balance-series.jsonl"),
                                "rows": len(balance.rows)}} if balance is not None else {}),
         "final_state_digest": final_state_digest,
@@ -5419,6 +5431,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="incremental analysis update: the analysis init (same mesh and cell order as --init, "
              "which is the background); analysis minus background enters as a constant tendency "
              "over --iau-window-seconds (woof.hex.iau_forcing)")
+    parser.add_argument(
+        "--nudging", type=Path, default=None, metavar="CONFIG",
+        help="WRF grid (grid_fdda=1) or spectral (grid_fdda=2) analysis nudging (woof.hex.nudging): a TOML "
+             "[nudging] table or a WRF namelist.input &fdda group; off by default")
+    parser.add_argument(
+        "--nudging-analysis", type=Path, action="append", default=None, metavar="INIT",
+        help="an analysis on this mesh (hex init format, e.g. from woof.hex.analysis_remap), one per "
+             "gfdda_interval_m from the start; repeat in any order")
     parser.add_argument("--iau-window-seconds", type=float, default=None,
                         help="IAU window length from the start of the run")
     parser.add_argument(
@@ -5439,6 +5459,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
                         help="write balance-series.jsonl: surface-pressure tendency statistics "
                              "at every macro boundary (initialization-shock measure)")
     args = parser.parse_args(argv)
+    if (args.nudging is None) != (not args.nudging_analysis):
+        parser.error("--nudging and --nudging-analysis go together: a nudging configuration reads its "
+                     "analyses, and an analysis without a configuration would never be read")
     has_increment = args.iau_analysis is not None or args.iau_increment is not None
     if has_increment != (args.iau_window_seconds is not None):
         parser.error("--iau-analysis (or --iau-increment) and --iau-window-seconds go together: an "
@@ -6317,6 +6340,10 @@ def _main(args: argparse.Namespace, decision: Mapping[str, Any] | None) -> int:
             "analysis": (None if args.iau_analysis is None else Path(args.iau_analysis).resolve(strict=True)),
             "increment": (None if args.iau_increment is None else Path(args.iau_increment).resolve(strict=True)),
             "background": paths["init"], "window_seconds": float(args.iau_window_seconds)}),
+        nudging=(None if args.nudging is None else {
+            "config": Path(args.nudging).resolve(strict=True),
+            "analyses": [Path(path).resolve(strict=True) for path in (args.nudging_analysis or ())],
+            "start_time": host["start_time_text"]}),
         balance_series=bool(args.balance_series),
         history_selection=args.history_selection,
         history_zgrid=history_zgrid,
