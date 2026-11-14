@@ -1043,4 +1043,20 @@ module mpas_hash
 end module mpas_hash
 
 module mpas_io_units
+  ! seaice_check_state opens a log unit when its check fails
+  implicit none
+  public
+
+contains
+
+  subroutine mpas_new_unit(newUnit, unformatted)
+    integer, intent(out) :: newUnit
+    logical, optional, intent(in) :: unformatted
+    newUnit = 77
+  end subroutine mpas_new_unit
+
+  subroutine mpas_release_unit(releasedUnit)
+    integer, intent(in) :: releasedUnit
+  end subroutine mpas_release_unit
+
 end module mpas_io_units
