@@ -3089,8 +3089,13 @@ def execute_composite_step(
     refl_10cm_due: bool = False,
     before_phase_two: Callable[[Any], None] | None = None,
     held_forcing: Callable[..., None] | None = None,
+    dt: float | None = None,
 ) -> CompositeStepResult:
     """Execute exactly one staged two-owner full-physics transaction.
+
+    ``dt`` is this step's length under the hex adaptive clock
+    (woof.hex.adaptive_dt), which has already rebound the dycore and the
+    physics seam to it; ``None`` is ``DT_SECONDS``, every fixed-step run.
 
     ``held_forcing`` (incremental analysis update, ``woof.hex.iau_native`` or
     ``woof.hex.iau_forcing``) adds its share of an analysis increment to the held
@@ -3119,6 +3124,7 @@ def execute_composite_step(
     from woof.hex.species_row import species_row_for_names
 
     species_row_for_names(tuple(scalar_names))
+    step_dt = DT_SECONDS if dt is None else dt
     if couple is None or clamp is None or recover is None:
         from woof.hex.cuda_physics_v841 import (
             clamp_wsm6_scalars_in_place_v841,
@@ -3151,7 +3157,7 @@ def execute_composite_step(
             raw = backend.begin_step(
                 atmosphere=driver.atmosphere,
                 scalar_names=scalar_names,
-                dt=DT_SECONDS,
+                dt=step_dt,
                 dynamics_tendencies=dynamics_tendencies,
             )
         backend_active = True
@@ -3177,9 +3183,9 @@ def execute_composite_step(
         if stochastic is not None:
             stochastic.apply(held, state=start_state, rho_edge=edge_fields.rho_edge,
                              normal_velocity=edge_fields.normal_velocity,
-                             time_seconds=start_time, dt=DT_SECONDS, names=tuple(scalar_names))
+                             time_seconds=start_time, dt=step_dt, names=tuple(scalar_names))
         if held_forcing is not None:
-            held_forcing(held, start_time, DT_SECONDS, driver=driver,
+            held_forcing(held, start_time, step_dt, driver=driver,
                          rho_edge=edge_fields.rho_edge,
                          normal_velocity=edge_fields.normal_velocity,
                          geometry=physics_geometry, state=start_state)
@@ -3217,7 +3223,7 @@ def execute_composite_step(
             update = backend.finish_step(
                 atmosphere=candidate.atmosphere,
                 scalar_names=scalar_names,
-                dt=DT_SECONDS,
+                dt=step_dt,
                 refl_10cm_due=refl_10cm_due,
             )
         if _phase_from_receipt(backend) != "finished_unpublished":
@@ -3227,7 +3233,7 @@ def execute_composite_step(
             update,
             scalar_names=scalar_names,
             kernel_cache=kernel_cache,
-            phase2_dt_seconds=DT_SECONDS,
+            phase2_dt_seconds=step_dt,
             previous_surface_updates=previous_surface_updates,
         )
         # Recovery retains the published surface/radius outputs and state.
@@ -3238,7 +3244,7 @@ def execute_composite_step(
         driver_committed = True
         backend.commit_step()
         backend_active = False
-        if float(committed.atmosphere.state.time_seconds) != start_time + DT_SECONDS:
+        if float(committed.atmosphere.state.time_seconds) != start_time + step_dt:
             raise RuntimeError("composite transaction committed the wrong endpoint time")
         receipt = dict(backend.step_receipt())
         if receipt.get("phase") not in ("complete", "boundary"):
@@ -3508,8 +3514,13 @@ def capture_snapshot(
     scalar_names: Sequence[str] = SCALAR_NAMES,
     surface_accumulators: Sequence[str] = ("rainnc", "snownc", "graupelnc"),
     tc_sampler: Any = None,
+    model_seconds: float | None = None,
 ) -> dict[str, Any]:
     """Download one committed diagnostic boundary outside step receipts.
+
+    ``model_seconds`` is the frame's model time when the steps differ in
+    length (the hex adaptive clock, woof.hex.adaptive_dt); ``None`` is
+    ``step * DT_SECONDS``, every fixed-step run.
 
     ``scalar_names`` and ``surface_accumulators`` are the RUN's row (the
     forecast driver hands the row it selected); the defaults are the frozen
@@ -3529,7 +3540,9 @@ def capture_snapshot(
 
     if label != SNAPSHOT_LABELS.get(step):
         raise ValueError("snapshot label/step mismatch")
-    if float(driver.atmosphere.state.time_seconds) != step * DT_SECONDS:
+    if model_seconds is None:
+        model_seconds = step * DT_SECONDS
+    if float(driver.atmosphere.state.time_seconds) != model_seconds:
         raise ValueError("snapshot model time does not equal its exact step")
     phase = _phase_from_receipt(backend)
     if phase not in ("complete", "boundary", "restored"):
@@ -3582,7 +3595,7 @@ def capture_snapshot(
         arrays.update(diagnostics)
         if tc_sampler is not None:
             for name, value in tc_sampler(prepared, backend_snapshot, driver.atmosphere,
-                                          step * DT_SECONDS / 3600.).items():
+                                          model_seconds / 3600.).items():
                 arrays[name] = download(value, cp)
         if expect_refl10cm:
             staged_refl = backend.take_history_refl10cm()
@@ -3675,7 +3688,7 @@ def capture_snapshot(
                 "schema": SNAPSHOT_SCHEMA,
                 "label": label,
                 "step": step,
-                "time_seconds": step * DT_SECONDS,
+                "time_seconds": model_seconds,
                 "arwen_v2_surface_execution": surface_execution,
                 "audit_d2h_outside_step_receipt": True,
                 "prep": prepared_receipt,
