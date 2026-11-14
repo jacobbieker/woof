@@ -313,6 +313,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     logic rather than WRF's literal operator precedence; the module
     documents the difference;
   - `aer_opt = 1, 2`, `w_damping`, and grid and spectral analysis nudging;
+  - stochastic physics: SPP (`spp_conv`, `spp_pbl`, `spp_lsm`) on the WOOF
+    column route, WRF-Solar EPS (`multi_perturb`) on regional meshes, and
+    WRF's inflow perturbation on the regional relax rings
+    (`woof hex forecast --inflow-perturbation`, which takes its depth from
+    the run's own boundary-layer height since hex has no parent model);
   - `woof resume` and `woof branch` for hex runs
     ([docs/branch-from-checkpoint.md](docs/branch-from-checkpoint.md));
   - GRIB2 and Earth2 export ([docs/grib2-export.md](docs/grib2-export.md));
