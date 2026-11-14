@@ -101,14 +101,23 @@ def host_data():
     return manifest, n, k, wl, table
 
 
-@lru_cache(maxsize=1)
+#: The tables on each device, keyed by device id: arrays allocated on the
+#: first card must not reach a kernel launched on a second.
+_DEVICE_DATA: dict = {}
+
+
 def _device_data():
     import cupy as cp
-    manifest, n, k, wl, table = host_data()
-    return (cp.asarray(n.astype(np.float32)), cp.asarray(k.astype(np.float32)),
+    device = cp.cuda.Device().id
+    cached = _DEVICE_DATA.get(device)
+    if cached is None:
+        manifest, n, k, wl, table = host_data()
+        cached = _DEVICE_DATA[device] = (
+            cp.asarray(n.astype(np.float32)), cp.asarray(k.astype(np.float32)),
             cp.asarray(wl.astype(np.float32)),
             cp.asarray(np.log(np.array(SIGMA_G)).astype(np.float32)),
             cp.asarray(np.ascontiguousarray(table)))
+    return cached
 
 
 def _grid(manifest):

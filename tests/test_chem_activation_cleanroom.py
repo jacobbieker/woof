@@ -122,6 +122,55 @@ def test_single_updraft_flux_is_fraction_times_updraft():
     assert full == 0.0 and not f.any()
 
 
+def test_single_updraft_outside_the_bounds_activates_nothing():
+    """The updraft bounds cut the delta distribution as they cut a Gaussian:
+    wbar = 1 with [wmin, wmax] = [2, 3] holds none of it."""
+    f, full, _s = _one(1.0, wmin=2.0, wmax=3.0)
+    assert full == 0.0 and not f.any()
+    f, full, _s = _one(1.0, wmin=1.0, wmax=1.0)
+    assert full == 1.0 and f[0] > 0.0
+
+
+def test_prescribed_supersaturation_over_the_distribution_is_the_updraft_probability():
+    """With smax prescribed every positive updraft activates the same
+    fraction, so fn = f * P(0 <= w <= 8 sigw) in closed form; the w = 0
+    endpoint of the Simpson rule carries its share (about 0.0166 f here)."""
+    f_one = _one(0.5, smax=0.003)[0][:3]
+    f, _full, _s = _one(0.0, sigw=1.0, wmin=0.0, wmax=8.0, smax=0.003)
+    p = 0.5 * math.erf(8.0 / math.sqrt(2.0))
+    np.testing.assert_allclose(f[:3], f_one * p, rtol=1e-7)
+
+
+def test_sectional_refusal_needs_no_cupy(monkeypatch):
+    import sys
+    monkeypatch.setitem(sys.modules, "cupy", None)
+    c = _sweep(np.random.default_rng(1), "single", 1)[0]
+    c["msectional"] = 1
+    with pytest.raises(ValueError, match="modal aerosol only"):
+        CR.launch_activate([c])
+
+
+@requires_gpu
+def test_kernel_bounds_and_zero_updraft_endpoint():
+    rng = np.random.default_rng(3)
+    cases = _sweep(rng, "single", 1) + _sweep(rng, "distribution", 1)
+    cases[0].update(wbar=1.0, sigw=0.0, wminf=2.0, wmaxf=3.0)
+    cases[1].update(wbar=0.0, sigw=1.0, wminf=0.0, wmaxf=8.0, smax=0.003, wdiab=0.0)
+    out = CR.launch_activate(cases)
+    nt = cases[0]["ntype_aer"]
+    for k in CR.OUTPUTS:
+        assert not out[k][0, 0, :nt].any(), k
+    assert out["flux_fullact"][0] == 0.0
+    c = cases[1]
+    nt = c["ntype_aer"]
+    f_one, _full, _s = CR.reference_case(
+        c["na"][0, :nt], c["volc"][0, :nt], c["sigman"][0, :nt], c["hygro"][0, :nt],
+        wbar=0.5, sigw=0.0, tair=c["tair"], rhoair=c["rhoair"], smax=0.003)
+    p = 0.5 * math.erf(8.0 / math.sqrt(2.0))
+    for j, k in enumerate(CR.OUTPUTS[:3]):
+        np.testing.assert_allclose(out[k][1, 0, :nt], f_one[:, j] * p, rtol=2e-5, atol=1e-7)
+
+
 def _sweep(rng, regime, ncase):
     cases = []
     for _ in range(ncase):
@@ -162,6 +211,8 @@ def test_kernel_matches_the_float64_reference():
         scale = max(abs(c["wbar"]), c["sigw"])
         for j, k in enumerate(CR.OUTPUTS):
             d = np.abs(out[k][i, 0, :nt] - f[:, j]) / (1.0 if j < 3 else scale)
+            # max() keeps a finite worst past a NaN, so a NaN output fails here.
+            assert np.isfinite(d).all(), (i, k)
             worst = max(worst, float(d.max()))
         assert abs(out["flux_fullact"][i] - full) <= 2e-5 * scale + 1e-7
     assert worst < 2e-5, worst

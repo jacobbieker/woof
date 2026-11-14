@@ -490,3 +490,19 @@ def test_active_requests_validate_and_still_refuse_the_other_schedules():
         assert validate_fullstep_lts_request(SimpleNamespace(**request, acoustic_substeps=substeps))
     with pytest.raises(ConfigurationRefusal, match="odd count"):
         validate_fullstep_lts_request(SimpleNamespace(**request, acoustic_substeps=3))
+
+
+def test_lts_divergence_damping_takes_every_keyword_the_acoustic_loop_passes():
+    """The v8.4.1 acoustic loop calls ``horizontal.divergence_damping_3d(..., native_stored_inverse=True)``;
+    under --local-timestep ``horizontal`` is the LocalTimestepAttachment, whose method lacked the keyword and
+    stopped every LTS run at its first step."""
+    import inspect
+
+    from woof.hex.cuda_driver_lts import LocalTimestepAttachment
+    from woof.hex.cuda_horizontal import CudaHorizontal
+
+    def keywords(function):
+        return {name for name, p in inspect.signature(function).parameters.items()
+                if p.kind is inspect.Parameter.KEYWORD_ONLY and not name.startswith("_")}
+
+    assert keywords(CudaHorizontal.divergence_damping_3d) <= keywords(LocalTimestepAttachment.divergence_damping_3d)
