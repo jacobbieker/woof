@@ -150,8 +150,9 @@ extern "C" __global__ void chem_activation_modal(
     const float wb = wbar[c], sw = sigw[c];
     float fullact = 0.0f;
     if (sw <= SIGW_DELTA) {
-        // A single updraft wbar (Ghan et al. 1997 with a delta distribution).
-        if (wb > 0.0f) {
+        // A single updraft wbar (Ghan et al. 1997 with a delta distribution),
+        // counted only inside the updraft bounds, as the distribution is.
+        if (wb > 0.0f && wb >= wmin[c] && wb <= wmax[c]) {
             act_fractions(th, wb + wd, sgiven, nmode, n, sm, lnsg, f);
             for (int k = 0; k < 3 * nmode; ++k) { acc[k] = f[k]; fl[k] = wb * f[k]; }
             fullact = wb;
@@ -168,7 +169,10 @@ extern "C" __global__ void chem_activation_modal(
                 const float wt = (j == 0 || j == ACT_NQ) ? 1.0f : ((j & 1) ? 4.0f : 2.0f);
                 const float q = __fdiv_rn(wt * h, 3.0f) * norm * expf(-0.5f * z * z);
                 fullact += q * w;
-                if (!(w > 0.0f)) continue;
+                // w = 0 is the interval's lower endpoint when lo = 0: its
+                // Simpson weight carries the fractions' limit at w -> 0+
+                // (a prescribed smax, or wdiab > 0, makes it nonzero).
+                if (w < 0.0f) continue;
                 act_fractions(th, w + wd, sgiven, nmode, n, sm, lnsg, f);
                 for (int k = 0; k < 3 * nmode; ++k) {
                     acc[k] += q * f[k];
