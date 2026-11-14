@@ -248,6 +248,18 @@ def test_device_tables_are_cached_per_device(monkeypatch):
     assert second is not first and set(MO._DEVICE_DATA) == {here, here + 1}
 
 
+@requires_gpu
+def test_device_tables_live_on_each_device(monkeypatch):
+    """With two real cards, each card's tables are allocated on that card (skipped on one card)."""
+    import cupy as cp
+    if cp.cuda.runtime.getDeviceCount() < 2:
+        pytest.skip("needs two CUDA devices")
+    monkeypatch.setattr(MO, "_DEVICE_DATA", {})
+    for device in (0, 1):
+        with cp.cuda.Device(device):
+            assert all(array.device.id == device for array in MO._device_data())
+
+
 def test_refusals():
     from types import SimpleNamespace
     assert MO.refusal(SimpleNamespace(aer_ra_feedback=0)) is None
