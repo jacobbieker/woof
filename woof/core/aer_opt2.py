@@ -134,43 +134,103 @@ def optics_device(p, t, qv, dz8w, ht, *, aer_type=1, options=DEFAULT_OPTIONS,
     return (*out,aod,diag)
 
 
+def required_fields(cfg):
+    """The auxinput15 fields the run's gridded aerosol options read."""
+    return [key for key, opt in zip(INPUT_FIELDS, (getattr(cfg, k) for k in OPTION_KEYS)) if opt == 2]
+
+
+def auxinput15_offset(cfg, elapsed_seconds):
+    """The offset (s from the start) of the auxinput15 record a radiation call
+    at ``elapsed_seconds`` reads: the call's own time, cut to the file interval."""
+    interval = int(cfg.aer_auxinput15_interval)
+    offset = float(elapsed_seconds)
+    if interval:
+        offset = int(offset // interval) * interval
+    return offset
+
+
+def auxinput15_name(cfg, start_time, offset):
+    """The file name the record at ``offset`` is read from (WRF's <domain> and <date> tokens)."""
+    from datetime import timedelta
+    valid = start_time + timedelta(seconds=offset)
+    return cfg.aer_auxinput15.replace('<domain>', f'{int(cfg.grid_id):02d}').replace(
+        '<date>', valid.strftime('%Y-%m-%d_%H:%M:%S')), valid
+
+
+def read_auxinput15(cfg, name, valid, *, shape=None, extra=()):
+    """The selected fields of the record of ``name`` at or before ``valid``,
+    through the shared Rust NetCDF reader.  ``shape`` holds them to the WRF
+    radiation grid; ``extra`` names more variables to return as they are."""
+    from woof.netcdf_bridge import open_dataset
+    required = required_fields(cfg)
+    with open_dataset(name) as dataset:
+        missing = [key for key in required if key not in dataset.variables]
+        if missing:
+            raise ValueError(f"auxinput15 {name} lacks {', '.join(missing)}; selected aerosol fields cannot be replaced by fixed values")
+        index = 0
+        if 'Times' in dataset.variables:
+            rows = dataset.variables['Times'][:]
+            times = [b''.join(row).decode('ascii').rstrip('\x00 ') for row in rows]
+            matches = [i for i, text in enumerate(times) if text <= valid.strftime('%Y-%m-%d_%H:%M:%S')]
+            if not matches:
+                raise ValueError(f"auxinput15 {name} has no record at or before the radiation time")
+            index = matches[-1]
+        out = {}
+        for key in required:
+            variable = dataset.variables[key]
+            dims = tuple(variable.dimensions)
+            if dims not in (('Time', 'south_north', 'west_east'), ('south_north', 'west_east')):
+                raise ValueError(f"auxinput15 {key} must use the WRF horizontal mass grid, got {dims}")
+            value = variable[index] if len(dims) == 3 else variable[:]
+            if shape is not None and value.shape != shape:
+                raise ValueError(f"auxinput15 {key} shape {value.shape} differs from the radiation grid {shape}")
+            out[key] = value
+        for key in extra:
+            if key not in dataset.variables:
+                raise ValueError(f"auxinput15 {name} lacks {key}")
+            variable = dataset.variables[key]
+            out[key] = variable[0] if variable.dimensions and variable.dimensions[0] == 'Time' else variable[:]
+        return out
+
+
 def auxiliary_inputs(cfg, start_time, elapsed_seconds, shape):
     """Select WRF auxinput15 through the shared Rust NetCDF reader.
 
     Python chooses the file and time index. The bridge decodes its fields.
     Missing selected input or a mismatched grid is refused before optics run.
     """
-    from datetime import timedelta
-    from woof.netcdf_bridge import open_dataset
-    required=[key for key,opt in zip(INPUT_FIELDS,(getattr(cfg,k) for k in OPTION_KEYS)) if opt==2]
-    if not required:
+    if not required_fields(cfg):
         return {}
-    interval=int(cfg.aer_auxinput15_interval)
-    offset=float(elapsed_seconds)
-    if interval:
-        offset=int(offset//interval)*interval
-    valid=start_time+timedelta(seconds=offset)
-    name=cfg.aer_auxinput15.replace('<domain>',f'{int(cfg.grid_id):02d}').replace('<date>',valid.strftime('%Y-%m-%d_%H:%M:%S'))
-    with open_dataset(name) as dataset:
-        missing=[key for key in required if key not in dataset.variables]
-        if missing:
-            raise ValueError(f"auxinput15 {name} lacks {', '.join(missing)}; selected aerosol fields cannot be replaced by fixed values")
-        index=0
-        if 'Times' in dataset.variables:
-            rows=dataset.variables['Times'][:]
-            times=[b''.join(row).decode('ascii').rstrip('\x00 ') for row in rows]
-            matches=[i for i,text in enumerate(times) if text<=valid.strftime('%Y-%m-%d_%H:%M:%S')]
-            if not matches:
-                raise ValueError(f"auxinput15 {name} has no record at or before the radiation time")
-            index=matches[-1]
-        out={}
-        for key in required:
-            variable=dataset.variables[key]
-            dims=tuple(variable.dimensions)
-            if dims not in (('Time','south_north','west_east'),('south_north','west_east')):
-                raise ValueError(f"auxinput15 {key} must use the WRF horizontal mass grid, got {dims}")
-            value=variable[index] if len(dims)==3 else variable[:]
-            if value.shape!=shape:
-                raise ValueError(f"auxinput15 {key} shape {value.shape} differs from the radiation grid {shape}")
-            out[key]=value
-        return out
+    name, valid = auxinput15_name(cfg, start_time, auxinput15_offset(cfg, elapsed_seconds))
+    return read_auxinput15(cfg, name, valid, shape=shape)
+
+
+class UserAerosolFrames:
+    """auxinput15 records already on the run's columns (the hex mesh cells).
+
+    ``frames[i, j]`` is the field ``required_fields(cfg)[j]`` of the record the
+    radiation calls at offset ``offsets[i]`` read (:func:`auxinput15_offset`),
+    one value per column.  A call at an offset the run did not stage is
+    refused, never answered with another record.
+    """
+
+    def __init__(self, offsets, frames, fields):
+        import numpy as np
+        self.offsets = np.asarray(offsets, dtype=np.float64).reshape(-1)
+        self.frames = np.asarray(frames, dtype=np.float32)
+        self.fields = tuple(fields)
+        if (self.frames.ndim != 3 or self.frames.shape[0] != self.offsets.size
+                or self.frames.shape[1] != len(self.fields)):
+            raise ValueError("aerosol frames must be (offsets, fields, columns)")
+
+    def select(self, cfg, offset, shape):
+        import numpy as np
+        if self.fields != tuple(required_fields(cfg)):
+            raise ValueError(f"staged aerosol fields {self.fields} are not the run's {required_fields(cfg)}")
+        hit = np.flatnonzero(self.offsets == float(offset))
+        if hit.size != 1:
+            raise ValueError(f"no auxinput15 record was staged for offset {offset} s "
+                             f"(staged {self.offsets.tolist()})")
+        if int(np.prod(shape)) != self.frames.shape[2]:
+            raise ValueError(f"radiation grid {shape} is not the {self.frames.shape[2]} staged columns")
+        return {key: self.frames[hit[0], j].reshape(shape) for j, key in enumerate(self.fields)}

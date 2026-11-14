@@ -3698,7 +3698,23 @@ class CudaDryDycoreDriver:
         )
         return result
 
+    #: WRF's w_damping limiter (woof.hex.cuda_w_damping.WDamping), attached by
+    #: the forecast door when --w-damping is given; None leaves every
+    #: tendency exactly as it was.
+    w_damping = None
+
     def _w_tendency(self, state: DevicePrognosticState, w: Any) -> Any:
+        result = self._w_tendency_dynamics(state, w)
+        if self.w_damping is not None:
+            from .cuda_w_damping import apply_w_damping
+
+            apply_w_damping(
+                result, w, state.rho, self.atmosphere.vertical,
+                dt=float(self.config.config_dt), damping=self.w_damping,
+                cache=self.cache)
+        return result
+
+    def _w_tendency_dynamics(self, state: DevicePrognosticState, w: Any) -> Any:
         cp = self.cp
         coefficient = self.coefficients
         width = int(coefficient.adv_coefs.shape[1])
