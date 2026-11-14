@@ -4636,6 +4636,11 @@ def execute_forecast(
         (output_root / "nest-trigger-receipt.json").write_text(
             json.dumps(nest_trigger.receipt(), indent=2, sort_keys=True, default=str) + "\n",
             encoding="utf-8", newline="\n")
+    inflow = getattr(getattr(stack["driver"], "regional_v841", None), "inflow_perturbation", None)
+    if inflow is not None:
+        # What the inflow seeding put on the boundary (woof.hex.inflow_perturbation).
+        (output_root / "inflow-perturbation-receipt.json").write_text(
+            json.dumps(inflow.receipt(), indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
     if last_step_clock is not None:
         if product_ready is not None:
             product_ready.forecast_ended(*last_step_clock)
