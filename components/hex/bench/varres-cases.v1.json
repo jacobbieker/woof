@@ -1,0 +1,69 @@
+{
+  "schema": "woof-hex.varres-cases/v1",
+  "about": "Variable-resolution hex cases for testing and benchmarking (tools/hex_varres.py). Each regional case is `woof hex regional` arguments: a fine core graded over several doublings inside the cut (--ring-factor/--transition-factor/--cull-pad-scale) or refined by a terrain density raster (`woof hex density --terrain-gradient`, painted with the ladder by --density-raster). Each names a reference: the same region on a quasi-uniform fine mesh and on a coarse mesh, so transition-band diagnostics read against meshes without the transition. The global case is `woof hex mesh-plan --global-mesh` (the MPAS v8.4.2 suite route, R2). Coordinates only; no site data.",
+  "cycle_default": "2026-11-07T00",
+  "source_default": "gfs",
+  "cases": [
+    {
+      "id": "edi-vr",
+      "about": "Edinburgh, 3 km core (100 km) graded straight through the rungs to about 14 km at the cut (240 km) and 20 km in the relax rings; about 4,600 cells, dt 18 s",
+      "kind": "regional",
+      "center": [55.95, -3.19],
+      "regional_args": ["--point=55.95,-3.19", "--radius-km", "100", "--fine-dx-m", "3000", "--background-km", "96",
+                        "--ring-factor", "1", "--transition-factor", "30", "--cull-pad-scale", "2.4"],
+      "references": ["edi-u3", "edi-u12"]
+    },
+    {
+      "id": "edi-u3",
+      "about": "reference: Edinburgh quasi-uniform 3 km to 250 km (about 26,500 cells)",
+      "kind": "regional",
+      "center": [55.95, -3.19],
+      "regional_args": ["--point=55.95,-3.19", "--radius-km", "250", "--fine-dx-m", "3000", "--background-km", "96"]
+    },
+    {
+      "id": "edi-u12",
+      "about": "reference: Edinburgh 12 km core to 250 km (about 2,100 cells)",
+      "kind": "regional",
+      "center": [55.95, -3.19],
+      "regional_args": ["--point=55.95,-3.19", "--radius-km", "250", "--fine-dx-m", "12000", "--background-km", "96"]
+    },
+    {
+      "id": "pdx-vr",
+      "about": "Portland, the edi-vr grading over the Cascades and the coast",
+      "kind": "regional",
+      "center": [45.52, -122.68],
+      "regional_args": ["--point=45.52,-122.68", "--radius-km", "100", "--fine-dx-m", "3000", "--background-km", "96",
+                        "--ring-factor", "1", "--transition-factor", "30", "--cull-pad-scale", "2.4"]
+    },
+    {
+      "id": "haw-terrain",
+      "about": "Maui and Hawaii island: a small 3 km core plus 3 km wherever GLO-30 slopes are steep (Haleakala, Mauna Kea, Mauna Loa, West Maui), ocean at the ladder's 6-12 km; cut 240 km",
+      "kind": "regional",
+      "center": [20.2, -155.9],
+      "density": {"raster": "hawaii-terrain-3km.nc",
+                  "args": ["--terrain-gradient", "--bbox=-157.4,18.8,-154.7,21.4", "--fine-km", "3",
+                           "--background-km", "96", "--slope-coarse-deg", "3", "--slope-fine-deg", "12",
+                           "--allow-rough", "--grade-percent-per-cell", "8"],
+                  "why_allow_rough": "graded to the 96 km background at 3.06 %/cell the raster would cross the antimeridian; 8 %/cell is inside the generator's ceiling and the ladder's own 10.7 %/cell"},
+      "regional_args": ["--point=20.2,-155.9", "--radius-km", "40", "--fine-dx-m", "3000", "--background-km", "96",
+                        "--cull-pad-scale", "6"],
+      "references": ["haw-ladder"]
+    },
+    {
+      "id": "haw-ladder",
+      "about": "reference: haw-terrain without the terrain raster",
+      "kind": "regional",
+      "center": [20.2, -155.9],
+      "regional_args": ["--point=20.2,-155.9", "--radius-km", "40", "--fine-dx-m", "3000", "--background-km", "96",
+                        "--cull-pad-scale", "6"]
+    },
+    {
+      "id": "glob-vr",
+      "about": "global 120 km to 30 km (MPAS 60-15 style, a factor of four) over the North Atlantic and Europe, R2 suite route; about 52,600 cells",
+      "kind": "global",
+      "center": [50.0, 0.0],
+      "mesh_plan_args": ["--point=50,0", "--radius-km", "1500", "--fine-dx-m", "30000", "--background-km", "120",
+                         "--global-mesh", "--card", "32gb"]
+    }
+  ]
+}
