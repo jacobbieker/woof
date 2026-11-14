@@ -254,8 +254,10 @@ def analyze(grid: Path, history_dir: Path, *, center: tuple[float, float] | None
                     nonfinite.append(f"{Path(path).name}:{name}")
             w = np.asarray(d["w"][0], dtype=float)
             zgrid = np.asarray(d["zgrid"][:], dtype=float)
-            u = np.asarray(d["u_zonal"][0], dtype=float)
-            v = np.asarray(d["v_meridional"][0], dtype=float)
+            # R1 history carries u_zonal/v_meridional; the MPAS v8.4.2 suite route (R2) MPAS's own names.
+            u = np.asarray(d["u_zonal" if "u_zonal" in names else "uReconstructZonal"][0], dtype=float)
+            v = np.asarray(d["v_meridional" if "v_meridional" in names else "uReconstructMeridional"][0],
+                           dtype=float)
             zero = np.zeros(n_cells)
             rainc = np.asarray(d["rainc"][0], dtype=float) if "rainc" in names else zero
             rainnc = np.asarray(d["rainnc"][0], dtype=float) if "rainnc" in names else zero
