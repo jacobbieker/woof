@@ -274,6 +274,27 @@ def _parent(args: argparse.Namespace, hours: int) -> dict[str, Any] | None:
             "history": [str(Path(p).absolute()) for p in window], "start": start.strftime("%Y-%m-%dT%H:%M")}
 
 
+#: The ladder's grading knobs ``mesh-plan --point`` takes, by plan key.  Together they decide how far the
+#: cull grades out from the fine core: the default (ramp 18x, ring 3x, pad 1.35x) ends the cut about one
+#: doubling out; ``--ring-factor 1`` and a wider pad carry it over several (a 3 km core to 12-24 km).
+GRADING_FLAGS = {"transition_factor": "--transition-factor", "ring_factor": "--ring-factor",
+                 "cull_pad_scale": "--cull-pad-scale"}
+
+
+def _grading(args: argparse.Namespace) -> dict[str, float]:
+    given = {key: getattr(args, key, None) for key in GRADING_FLAGS}
+    for key, number in given.items():
+        if number is not None and not (float(number) > 0.0):
+            raise RegionalRefusal(f"{GRADING_FLAGS[key]} {number} is not positive")
+    return {key: float(number) for key, number in given.items() if number is not None}
+
+
+def _grading_keywords(args: argparse.Namespace) -> dict[str, float]:
+    """The :func:`woof.hex.mesh_point.ladder_spec` keywords the grading changes (the pad is the cut's, not the
+    spec's)."""
+    return {key: number for key, number in _grading(args).items() if key != "cull_pad_scale"}
+
+
 def plan(args: argparse.Namespace) -> dict[str, Any]:
     from . import mesh_shape
     from .mesh_point import drawn_shape, parse_point
@@ -372,8 +393,11 @@ def plan(args: argparse.Namespace) -> dict[str, Any]:
                 np.sin(a)*np.sin(c)+np.cos(a)*np.cos(c)*np.cos(b-d), -1, 1)).max())
         fine = float(args.fine_dx_m if args.fine_dx_m is not None else row["fine_dx_m"])
         background = float(getattr(args, "background_km", None) or row.get("background_km") or DEFAULT_BACKGROUND_KM)
-        spec = ladder_spec(point, fine_dx_m=fine, radius_km=radius, background_km=background)
-        cut = predicted_cull_cells(spec=spec, radius_km=radius, pad_scale=DEFAULT_CULL_PAD_SCALE)
+        spec = ladder_spec(point, fine_dx_m=fine, radius_km=radius, background_km=background,
+                           **_grading_keywords(args))
+        pad = getattr(args, "cull_pad_scale", None)
+        cut = predicted_cull_cells(spec=spec, radius_km=radius,
+                                   pad_scale=DEFAULT_CULL_PAD_SCALE if pad is None else float(pad))
         reach = cut["cut_radius_km"] + cut["halo_km"]
         for candidate in (source, boundary):
             refusal = coverage_refusal(candidate, point, reach, margin_km=30)
@@ -420,6 +444,9 @@ def plan(args: argparse.Namespace) -> dict[str, Any]:
         # being limited to the 120 km ladder's 937.5 m / 1.875 km / 3.75 km.
         "background_km": (float(args.background_km) if getattr(args, "background_km", None) is not None
                           else (float(row["background_km"]) if row.get("background_km") is not None else None)),
+        # The ladder's grading (ramp width, ring spacing, cull pad): only a run that asked for one carries the key,
+        # so every other plan is the plan it always was.
+        **({"grading": _grading(args)} if _grading(args) else {}),
         "card": args.card,
         "cycle": args.cycle if parent is None else parent["start"],
         "parent": parent,
@@ -652,6 +679,8 @@ def _stage_mesh(args, value, status) -> dict[str, Any]:
             "--vertical-spec", value["paths"]["vertical_spec"]]
     if value.get("background_km") is not None:
         argv += ["--background-km", repr(value["background_km"])]
+    for key, number in (value.get("grading") or {}).items():
+        argv += [GRADING_FLAGS[key], repr(float(number))]
     if value["card"]:
         argv += ["--card", value["card"]]
     if args.geog is not None:
@@ -1485,6 +1514,17 @@ def add_regional_parser(commands: argparse._SubParsersAction) -> None:
     parser.add_argument("--background-km", type=float, default=None,
                         help="the halving ladder's coarsest spacing; --fine-dx-m must be a rung of it "
                              "(background / 2^k). Default: the row's, else the mesh door's 120 km")
+    grading = parser.add_argument_group(
+        "mesh grading (optional; with none given the mesh is the row's)",
+        "how the variable-resolution ladder grades out from the fine core; passed to `woof hex mesh-plan --point`")
+    grading.add_argument("--transition-factor", type=float, default=None, metavar="X",
+                         help="each rung's ramp as a multiple of its own spacing (mesh-plan default 18)")
+    grading.add_argument("--ring-factor", type=float, default=None, metavar="X",
+                         help="how many ramps of the next finer rung a cap sits outside it (mesh-plan default 3; "
+                              "1 grades straight through the rungs)")
+    grading.add_argument("--cull-pad-scale", type=float, default=None, metavar="X",
+                         help="the limited-area cut as a multiple of the core radius (mesh-plan default 1.35); "
+                              "a wider cut keeps more of the graded ring")
     parser.add_argument("--card", default=None,
                         help="a measured card key, so the mesh plan prices the cull on it")
     parser.add_argument("--vertical-spec", type=Path, default=None, help="default: the row's")

@@ -94,6 +94,28 @@ def test_a_southern_region_reaches_the_mesh_door_on_every_python(tmp_path, monke
     assert build_parser().parse_args(seen[0]).point == "-5.5,18.5"
 
 
+def test_mesh_grading_rides_to_the_mesh_door_only_when_given(tmp_path, monkeypatch):
+    """--transition-factor/--ring-factor/--cull-pad-scale reach `mesh-plan --point` (a cull graded over several
+    doublings: a 3 km core to 12-24 km); a run without them keeps the plan and the mesh command it always had."""
+    monkeypatch.setattr(door, "_start_source_prefetch", lambda *args: None)
+
+    def mesh_argv(*extra):
+        value = _gfs_region(tmp_path, "2026-10-27T18", 3, 12, *extra)
+        seen = []
+        monkeypatch.setattr(door, "_cli", lambda argv, status: seen.append(argv) or 0)
+        door._stage_mesh(type("A", (), {"geog": None})(), value, None)
+        return value, build_parser().parse_args(seen[0])
+
+    value, parsed = mesh_argv()
+    assert "grading" not in value
+    assert (parsed.transition_factor, parsed.ring_factor, parsed.cull_pad_scale) == (18.0, 3.0, 1.35)
+    value, parsed = mesh_argv("--ring-factor", "1", "--cull-pad-scale", "2.5")
+    assert value["grading"] == {"ring_factor": 1.0, "cull_pad_scale": 2.5}
+    assert (parsed.transition_factor, parsed.ring_factor, parsed.cull_pad_scale) == (18.0, 1.0, 2.5)
+    with pytest.raises(door.RegionalRefusal, match="--transition-factor 0.0 is not positive"):
+        _gfs_region(tmp_path, "2026-10-27T18", 3, 12, "--transition-factor", "0")
+
+
 def test_gfs_region_starts_at_any_lead_gfs_writes(tmp_path):
     """GFS writes every hour to 120 h (its row's ladder). A region from GFS 18Z +3 h was refused because the plan
     read only the row's 6 h interval."""
