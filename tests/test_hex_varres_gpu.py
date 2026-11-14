@@ -44,8 +44,10 @@ NAME = os.environ.get("WOOF_HEX_VARRES_NAME", "edi-vr")
 def _receipt_values(node, wanted, found):
     if isinstance(node, dict):
         for key, value in node.items():
-            if key in wanted and not isinstance(value, (dict, list)):
-                found.setdefault(key, value)
+            # Digest scalars are flat keys (``physics/seam/identity/gf_dx_column``): match the last part.
+            name = key.rsplit("/", 1)[-1]
+            if name in wanted and not isinstance(value, (dict, list)):
+                found.setdefault(name, value)
             _receipt_values(value, wanted, found)
     elif isinstance(node, list):
         for value in node:
