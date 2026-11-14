@@ -111,6 +111,8 @@ EXTERNAL: dict[str, str] = {
 
     "module_bl_keps.F": _WRF471,
     "phys/module_sf_idealscmsfclay.F": _WRF471,
+    # The CAM UW shallow QI-carrier fatal (lines 519-522, the same in v4.6.1).
+    "module_shallowcu_driver.F": _WRF471,
 
     # CU99's native pin includes the column and driver scalar/expiry gates.
     # tools/kf_old_wrf461_oracle/PIN.json records both public-source digests.
