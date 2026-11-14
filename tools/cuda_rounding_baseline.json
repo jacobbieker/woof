@@ -2557,7 +2557,7 @@
    },
    {
     "file": "woof/core/kernels/advection.cu",
-    "sha256": "735fa3d2a56b8b48e2bb706ece09d4a536dfae1dfd447fb100973f78466f81f9"
+    "sha256": "1b6f1755649e54846e154cb9fb33b453509776b873e8836365a5b99c56dd6832"
    },
    {
     "file": "woof/core/kernels/aer_opt2.cu",
@@ -3777,7 +3777,7 @@
    },
    {
     "file": "woof/core/kernels/pd_advection.cu",
-    "sha256": "dc46b64c4c28cb865dc0fff2e6e16512f00f5a4e87017c43f0f53d7d44ea38c6"
+    "sha256": "db86f46e0ae5d6e0040a49b6af11e638527e9fc0afb458729d32c6df23844af9"
    },
    {
     "file": "woof/core/kernels/pd_vertical_sl.cu",
@@ -9906,7 +9906,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "f4fb3d53f54b5ed237ded3f6fbb3689cbede3dfb4dbf93d99a5c0bc8fcaa8c0d"
+   "source_sha256": "37a6363818ad5b6ac4442739c86be877acbcadc613563d04faf6aac0b7bbf2af"
   },
   "kernels:aer_opt2": {
    "assessment": "static_diagnostic_only",
@@ -18890,7 +18890,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "61d26e3f47fd2ddd74e76a37fee373599a16199b39b67a142f54d043ff4ee073"
+   "source_sha256": "43d703b4b6fcc3440f534621950a45ecf5c525966e0b6724b0f1295bc42dcf01"
   },
   "kernels:pd_vertical_sl": {
    "assessment": "static_diagnostic_only",
