@@ -58,7 +58,7 @@ __device__ static ActThermo act_thermo(float T, float rho) {
     ActThermo th;
     const float p = rho * R_DRY * T;
     const float es = 611.2f * expf(17.67f * (T - 273.15f) / (T - 29.65f));
-    const float dv = 0.211e-4f * powf(T / 273.15f, 1.94f) * (101325.0f / p);
+    const float dv = 0.211e-4f * powf(__fdiv_rn(T, 273.15f), 1.94f) * (101325.0f / p);
     const float ka = 1.0e-3f * (4.39f + 0.071f * T);
     th.A = 2.0f * SURF_TENSION * MW_WATER / (RHO_WATER * R_UNIV * T);
     const float alpha = GRAV * MW_WATER * L_VAP / (CP_AIR * R_UNIV * T * T)
@@ -75,7 +75,7 @@ __device__ static ActThermo act_thermo(float T, float rho) {
 __device__ static float act_smax(const ActThermo& th, float w, int nmode,
                                  const float* n, const float* sm, const float* lnsg) {
     const float awg = th.aw_g * w;
-    const float zeta = 2.0f * th.A / 3.0f * sqrtf(awg);
+    const float zeta = __fdiv_rn(2.0f * th.A, 3.0f) * sqrtf(awg);
     const float awg32 = awg * sqrtf(awg);
     float sum = 0.0f;
     for (int m = 0; m < nmode; ++m) {
@@ -166,7 +166,7 @@ extern "C" __global__ void chem_activation_modal(
                 const float w = lo + h * (float)j;
                 const float z = (w - wb) / sw;
                 const float wt = (j == 0 || j == ACT_NQ) ? 1.0f : ((j & 1) ? 4.0f : 2.0f);
-                const float q = wt * h / 3.0f * norm * expf(-0.5f * z * z);
+                const float q = __fdiv_rn(wt * h, 3.0f) * norm * expf(-0.5f * z * z);
                 fullact += q * w;
                 if (!(w > 0.0f)) continue;
                 act_fractions(th, w + wd, sgiven, nmode, n, sm, lnsg, f);
