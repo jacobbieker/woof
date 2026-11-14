@@ -30,6 +30,14 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "018fd4037e2b62388032910aa46ce27680b50640f53de17fec5e2ea1f19a616b",
+    "constructor": "ElementwiseKernel",
+    "factory": "_theta_kernel",
+    "factory_sha256": "05ca251ccbb79ced98fd013b6464c8e299ffb4478c457b1212362096f7ec3650",
+    "file": "woof/hex/nudging.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "02f09ed2879ffc253f6f919b0680eb4177abebdd2c0c2cacade45e2fd4b19e3f",
     "constructor": "RawKernel",
     "factory": "__init__",
@@ -291,6 +299,14 @@
     "factory": "raw_nvrtc",
     "factory_sha256": "8c3dc5d6bb28a687fcb1a8df965ea62091ed493ae6621d365b40ac5f762a35e6",
     "file": "woof/hex/cuda_backend/aot.py",
+    "status": "unresolved"
+   },
+   {
+    "call_sha256": "10110161cddb95a1865716c4a527914ec924c5a20bb6e10e0159a64046ebb06f",
+    "constructor": "RawModule",
+    "factory": "fdda_kernels",
+    "factory_sha256": "dc01c68d185553fe15651bbe22e831f382632d013aa51bc63694a62dd9ef3a4a",
+    "file": "woof/hex/nudging.py",
     "status": "unresolved"
    },
    {
@@ -1107,6 +1123,14 @@
     "factory": "_module_on",
     "factory_sha256": "6a0b8504945f8d222893c5f06802cd889f239804416695ccc8df22f586874123",
     "file": "woof/hex/mpas_ocean/split_step_v842.py",
+    "status": "unresolved"
+   },
+   {
+    "call_sha256": "749bb0e7fb69c98afc4d0ab76f266050591104faac95b2de4eccd9faf4fb0032",
+    "constructor": "RawModule",
+    "factory": "_coupling_kernels",
+    "factory_sha256": "cf725ab23c761981171ed5977bcd1188f96e72c03077416689cbd30fc6e76d70",
+    "file": "woof/hex/nudging.py",
     "status": "unresolved"
    },
    {
@@ -2299,6 +2323,14 @@
     "factory": "_module_on",
     "factory_sha256": "d76bcd480b10f78cdea250bb5aea328d00cf7831668f1d30ce2b01507f75f650",
     "file": "woof/hex/mpas_ocean/pgrad_hmix_v842.py",
+    "status": "unresolved"
+   },
+   {
+    "call_sha256": "f15e79882170cb8921d7fa43a98821cb847b48b7c39549cd80e90e9e14933800",
+    "constructor": "RawModule",
+    "factory": "fdda_kernels",
+    "factory_sha256": "dc01c68d185553fe15651bbe22e831f382632d013aa51bc63694a62dd9ef3a4a",
+    "file": "woof/hex/nudging.py",
     "status": "unresolved"
    },
    {
@@ -5986,6 +6018,10 @@
     "sha256": "3fcdc2ffb1ea6115def1d0b005cbb2feb388763cc6954cadbeee8e37532101cc"
    },
    {
+    "file": "woof/hex/nudging.py",
+    "sha256": "b4844e70251138f66d07cfd0fab8b5591dd8ba4ea6006c4417f3a71a82e8cabc"
+   },
+   {
     "file": "woof/hex/ocean_mixed_layer.py",
     "sha256": "2df8d6dedce01541ee59f2abcaa7b287acf43e2ee24dc993399132f1af6b2a61"
    },
@@ -8286,6 +8322,10 @@
    {
     "file": "woof/hex/native_powf.py",
     "sha256": "999de2f25f8b7934b860c021408807ea720a5dca9598bf79d50641a13bdf404c"
+   },
+   {
+    "file": "woof/hex/nudging.py",
+    "sha256": "d679a89c397b6cb9157bf749a5c5b7ca83c01174a54de63c68608a9f5ffc8fed"
    },
    {
     "file": "woof/hex/partition_overlap_v841.py",
