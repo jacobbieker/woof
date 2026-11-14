@@ -311,7 +311,7 @@ def spacing_profile(spec: Mapping[str, Any]) -> list[tuple[float, float, float]]
     rows: list[tuple[float, float, float]] = []
     for region in spec.get("regions", ()):
         shape = region.get("shape") or {}
-        if shape.get("kind") != "cap":
+        if not isinstance(shape, Mapping) or shape.get("kind") != "cap":
             continue
         spacing = float(region["spacing_km"])
         transition = float(
@@ -651,6 +651,11 @@ class PointRequest:
     #: the cap at ``point``.  ``point`` is then its centroid and
     #: ``radius_km`` its equal-area radius, both descriptive.
     shape: Mapping[str, Any] | None = None
+    #: ``--density-raster`` files (``woof-hex.density.v1``, e.g. ``woof hex
+    #: density --terrain-gradient``): field-driven refinement painted with the
+    #: ladder by the generator's finer-wins rule, as ``{"shape": "raster"}``
+    #: rows of the same spec.  None is finer than the fine rung.
+    density_rasters: tuple[str, ...] = ()
 
     @property
     def fine_km(self) -> float:
@@ -729,13 +734,66 @@ def request_from_arguments(arguments: argparse.Namespace) -> PointRequest:
         experimental_dt=bool(getattr(arguments, "experimental_dt", False)),
         levels=_declared_levels(getattr(arguments, "vertical_spec", None)),
         shape=shape,
+        density_rasters=density_raster_paths(
+            getattr(arguments, "density_raster", None) or (), fine_dx_m=float(arguments.fine_dx_m)),
     )
+
+
+def density_raster_paths(paths: Sequence[Path | str], *, fine_dx_m: float) -> tuple[str, ...]:
+    """The absolute paths of ``--density-raster`` files a point mesh paints with its ladder.
+
+    A raster finer than the fine rung is refused: the rows, the cull's ``nominalMinDc`` and every scale-aware
+    length (``config_len_disp / meshDensity**0.25``) are keyed on the fine rung being the finest spacing, so a
+    raster that went finer would make them all describe a coarser mesh than the one built.
+    """
+
+    from woof.mpas_mesh import MeshRequestError, raster_region
+
+    rows = []
+    for path in paths:
+        try:
+            resolved = raster_region(Path(path))["path"]
+        except MeshRequestError as error:
+            raise PointPlanRefusal(str(error)) from error
+        finest = _raster_finest_km(Path(resolved))
+        if finest is not None and finest * 1000.0 < float(fine_dx_m) * (1.0 - 1e-6):
+            raise PointPlanRefusal(
+                f"--density-raster {path} asks for {finest:g} km, finer than the fine rung "
+                f"{float(fine_dx_m) / 1000.0:g} km; the rows, nominalMinDc and the scale-aware lengths "
+                f"(len_disp / meshDensity**0.25) would describe a coarser mesh than the one built.  Build "
+                f"the raster with --fine-km {float(fine_dx_m) / 1000.0:g} or coarser, or lower --fine-dx-m")
+        rows.append(resolved)
+    return tuple(rows)
+
+
+def _raster_finest_km(path: Path) -> float | None:
+    """The raster's finest requested spacing (its ``spacing_km`` minimum), or None when unreadable here (the
+    generator reads and checks the file itself)."""
+
+    try:
+        import netCDF4
+        import numpy as np
+
+        with netCDF4.Dataset(str(path)) as data:
+            return float(np.asarray(data.variables["spacing_km"][:]).min())
+    except Exception:  # noqa: BLE001 - the generator is the file's reader of record
+        return None
 
 
 def request_spec(request: PointRequest) -> dict[str, Any]:
     """The resolution spec a request builds: the cap ladder at the point, or
     the same ladder around a drawn region (:mod:`woof.hex.mesh_shape`)."""
 
+    spec = _ladder_request_spec(request)
+    if request.density_rasters:
+        # Raster rows FIRST: the analytic rows keep their order, so the innermost cap stays the last row,
+        # which is the row the generator's region_attainment is read from (plan_point).
+        spec["regions"] = [{"shape": "raster", "path": path} for path in request.density_rasters] + list(
+            spec["regions"])
+    return spec
+
+
+def _ladder_request_spec(request: PointRequest) -> dict[str, Any]:
     if request.shape is None:
         return ladder_spec(
             request.point,
@@ -829,6 +887,11 @@ def plan_point(request: PointRequest) -> dict[str, Any]:
         cull["outline_grown_km"] = request.transition_km
         cull["attainment_basis"] = "generator region_attainment on the innermost region"
     cull["attained_fine_spacing_km"] = attained_km
+    if request.density_rasters:
+        cull["density_rasters"] = list(request.density_rasters)
+        cull["density_raster_note"] = (
+            "the density rasters' refinement is not in this integral (the ladder's only); the cull "
+            "receipt's count is the authority")
     verdict = None
     if request.card is not None:
         verdict = device_verdict(
@@ -2198,6 +2261,10 @@ def add_point_arguments(parser: argparse.ArgumentParser) -> None:
     group.add_argument(
         "--cull-pad-scale", type=float, default=DEFAULT_CULL_PAD_SCALE, metavar="X",
         help=f"the limited-area cut, as a multiple of the core radius (default {DEFAULT_CULL_PAD_SCALE:g}, the measured knee)")
+    group.add_argument(
+        "--density-raster", action="append", default=[], type=Path, metavar="FILE",
+        help="a woof-hex.density.v1 raster (`woof hex density`, e.g. --terrain-gradient) painted with the "
+             "ladder, finer wins; repeatable.  Its finest spacing may not be finer than --fine-dx-m")
     group.add_argument(
         "--name", default=None, metavar="TEXT",
         help="file-name stem and spec name (default: derived from the point)")
