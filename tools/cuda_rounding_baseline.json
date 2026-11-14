@@ -4927,7 +4927,7 @@
    },
    {
     "file": "woof/backend/facade/_ops.py",
-    "sha256": "2003de569a6a59f28fb30bda514854ef71b4c100fc8b5d0a20204e2bdbaa6ca5"
+    "sha256": "480cca25a332579713d1678f0f26eae988f243fbff49b44b017b4874d9447092"
    },
    {
     "file": "woof/backend/facade/cuda.py",
@@ -4947,7 +4947,7 @@
    },
    {
     "file": "woof/backend/translate/__init__.py",
-    "sha256": "6efea28c437e13d21e8caa9ba29249d09aad6a8e5517129f4e827585e2441810"
+    "sha256": "d1202ddc09f81c367623d6ada57946af868d3d54ab99ea6829e413180d921434"
    },
    {
     "file": "woof/chem_micm.py",
