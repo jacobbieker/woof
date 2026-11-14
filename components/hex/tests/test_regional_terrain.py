@@ -377,3 +377,44 @@ def test_an_unfinished_replacement_is_not_retried_under_built_artifacts(tmp_path
     assert rt.pending(mesh)
     init.unlink()
     assert door._stage_mesh(parse(tmp_path), value, status)["terrain"]["requested"] == "glo30"
+
+
+@pytest.mark.parametrize("killed_at", [rt.PENDING_NAME, "m.point-generate.json", rt.RECEIPT_NAME])
+def test_a_replacement_killed_while_writing_a_record_is_retried(tmp_path, monkeypatch, killed_at):
+    """The marker, the point-generate receipt and the terrain receipt are written whole or not at all.  THE
+    BREAKAGE: a process stopped mid-write left half a JSON file that the retry (or require_applied) could not
+    parse, or a half terrain receipt that made pending() skip the retry."""
+    import os
+
+    mesh, names, rows, generated = _mesh(tmp_path)
+    generated_before = generated.read_bytes()
+    _fake_doors(monkeypatch)
+    monkeypatch.setattr(rt, "_roll_back", lambda mesh_dir: None)        # the process dies: nothing runs
+    replace = os.replace
+
+    def dies(src, dst):
+        if Path(dst).name == killed_at:
+            raise KeyboardInterrupt
+        return replace(src, dst)
+
+    monkeypatch.setattr(rt.os, "replace", dies)
+    request = {"source": "glo30", "max_spacing_km": 1.0, "cache_root": None}
+    with pytest.raises(KeyboardInterrupt):
+        rt.apply_terrain(mesh_dir=mesh, vertical_spec="spec.json", note=lambda t: None, request=request)
+    assert not (mesh / rt.RECEIPT_NAME).exists()
+    assert rt.pending(mesh)
+    json.loads(generated.read_text())                                    # never half written
+    monkeypatch.undo()
+    _fake_doors(monkeypatch)
+    monkeypatch.setattr(door, "_start_source_prefetch", lambda *a: None)
+
+    class Status:
+        def note(self, text):
+            pass
+
+    value = {"paths": {"mesh": str(mesh), "work": str(tmp_path), "vertical_spec": "spec.json"}, "terrain": request}
+    result = door._stage_mesh(parse(tmp_path), value, Status())
+    assert result["terrain"]["requested"] == "glo30" and not rt.pending(mesh)
+    assert names["static"].read_bytes() == b"hr static"
+    assert json.loads(generated.read_text())["terrain"]["requested"] == "glo30"
+    assert not list(mesh.glob("*.partial")) and generated_before != generated.read_bytes()

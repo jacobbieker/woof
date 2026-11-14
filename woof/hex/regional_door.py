@@ -649,7 +649,7 @@ def _stage_mesh(args, value, status) -> dict[str, Any]:
         status.note(f"mesh already generated in {mesh_dir}")
         from .regional_terrain import pending, pending_request
         if pending(mesh_dir):
-            asked = pending_request(mesh_dir).get("source")
+            asked = pending_request(mesh_dir).get("source") or "<the source it was begun with>"
             if terrain is None:
                 raise RegionalRefusal(
                     f"a terrain replacement (--terrain-source {asked}) began in {mesh_dir} and did not finish; "

@@ -91,17 +91,40 @@ def request_from_arguments(args, *, fine_dx_m: float, has_parent: bool) -> dict[
     return request
 
 
+def _write_atomic(path: Path, text: str) -> None:
+    """Write ``path`` whole or not at all (a temporary file renamed over it): a process killed mid-write leaves
+    neither a half marker, a half point-generate receipt nor a half terrain receipt for the retry to read."""
+
+    path = Path(path)
+    partial = path.with_name(path.name + ".partial")
+    with open(partial, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(text)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(partial, path)
+
+
 def pending(mesh_dir: Path) -> bool:
-    """True when a terrain replacement began in ``mesh_dir`` and did not finish (it rolled back)."""
+    """True when a terrain replacement began in ``mesh_dir`` and did not finish (it rolled back, or the process
+    stopped part way -- even while writing the marker itself)."""
 
     mesh_dir = Path(mesh_dir)
-    return (mesh_dir / PENDING_NAME).is_file() and not (mesh_dir / RECEIPT_NAME).is_file()
+    begun = (mesh_dir / PENDING_NAME).is_file() or (mesh_dir / (PENDING_NAME + ".partial")).is_file()
+    return begun and not (mesh_dir / RECEIPT_NAME).is_file()
+
+
+def _marker(mesh_dir: Path) -> dict[str, Any]:
+    """The pending marker; ``{}`` when only a half-written one exists (nothing had changed yet)."""
+
+    path = Path(mesh_dir) / PENDING_NAME
+    return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
 
 
 def pending_request(mesh_dir: Path) -> dict[str, Any]:
-    """The terrain request an unfinished replacement in ``mesh_dir`` was made for."""
+    """The terrain request an unfinished replacement in ``mesh_dir`` was made for (``{}`` if it never got as
+    far as recording it)."""
 
-    marker = json.loads((Path(mesh_dir) / PENDING_NAME).read_text(encoding="utf-8"))
+    marker = _marker(mesh_dir)
     return dict(marker.get("request", marker))
 
 
@@ -112,7 +135,7 @@ def _roll_back(mesh_dir: Path) -> None:
     itself stays, so the mesh stage retries."""
 
     mesh_dir = Path(mesh_dir)
-    marker = json.loads((mesh_dir / PENDING_NAME).read_text(encoding="utf-8"))
+    marker = _marker(mesh_dir)
     for created in marker.get("created", ()):
         Path(created).unlink(missing_ok=True)
     for backup, target in marker.get("restore", ()):
@@ -120,7 +143,9 @@ def _roll_back(mesh_dir: Path) -> None:
         if backup.is_file():
             target.unlink(missing_ok=True)
             shutil.move(str(backup), target)
-    (mesh_dir / RECEIPT_NAME).unlink(missing_ok=True)
+        target.with_name(target.name + ".partial").unlink(missing_ok=True)
+    for name in (RECEIPT_NAME, RECEIPT_NAME + ".partial", PENDING_NAME + ".partial"):
+        (mesh_dir / name).unlink(missing_ok=True)
 
 
 def require_applied(mesh_dir: Path, request: Mapping[str, Any]) -> dict[str, Any]:
@@ -199,9 +224,8 @@ def apply_terrain(*, mesh_dir: Path, vertical_spec: Path | str, request: Mapping
     restore = [(str(originals / part.name), str(part)) for part in parts if part.is_file()]
     restore += [(str(copy), str(path)) for path, copy in snapshots.items()]
     created = [str(part) for part in parts if not part.is_file()]
-    (mesh_dir / PENDING_NAME).write_text(json.dumps({"request": dict(request), "restore": restore,
-                                                    "created": created}, indent=2, sort_keys=True) + "\n",
-                                         encoding="utf-8")
+    _write_atomic(mesh_dir / PENDING_NAME, json.dumps({"request": dict(request), "restore": restore,
+                                                      "created": created}, indent=2, sort_keys=True) + "\n")
     try:
         for path, copy in snapshots.items():
             # Copied under a temporary name and renamed, so a killed copy is never restored as the rows file.
@@ -265,9 +289,8 @@ def apply_terrain(*, mesh_dir: Path, vertical_spec: Path | str, request: Mapping
             "gwd_statistics": "kept on the 30-arc-second static (box statistics by definition)",
         }
         generated["terrain"] = receipt
-        generated_path.write_text(json.dumps(generated, indent=2, sort_keys=True, default=str) + "\n",
-                                  encoding="utf-8", newline="\n")
-        (mesh_dir / RECEIPT_NAME).write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        _write_atomic(generated_path, json.dumps(generated, indent=2, sort_keys=True, default=str) + "\n")
+        _write_atomic(mesh_dir / RECEIPT_NAME, json.dumps(receipt, indent=2, sort_keys=True) + "\n")
     except BaseException:
         # A refused (or failed) request leaves the mesh as it was generated: statics, vertical grids, rows file
         # and point-generate receipt all put back.
