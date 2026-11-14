@@ -25,6 +25,11 @@
   under GPUWM_WRF_EXACT=1 ``cp.maximum(qr, 0)`` zeroed a subnormal rain
   mixing ratio that CUDA keeps (RRTM's rain path).  Float32 comparisons
   and min/max take the f32s kernels in that process.
+* An accessor struct whose pointer field only ever holds threadgroup memory
+  (fast GBM's cooperative workspace, woof/core/gbmpbl_fast.py) gave its
+  ``operator[]`` a ``device`` reference when a function using it was
+  analysed before the field's threadgroup assignment, and the MSL did not
+  compile.  The field's space is now seeded from the whole-unit probe.
 """
 
 import importlib.util
@@ -155,6 +160,34 @@ def test_kernel_pointer_parameter_repointed_at_shared_memory(cp):
     out = cp.zeros(8, dtype=cp.float32)
     cp.RawKernel(_REPOINTED, "repointed")((1,), (8,), (src, out, np.int32(8)))
     assert cp.asnumpy(out).tolist() == [4, 6, 8, 10, 4, 6, 8, 10]
+
+
+_THREADGROUP_FIELD = r'''
+#define LANES 32
+struct Col {
+    float *p;
+    __device__ __forceinline__ float &operator[](int k) const { return p[k * LANES]; }
+};
+struct Work { Col a, b; };
+__device__ Work make(float *base) { Work w; w.a.p = base; w.b.p = base + 4 * LANES; return w; }
+__device__ void step(const Col &a, const Col &b, int n) {
+    for (int k = 1; k < n; ++k) b[k] = a[k] + b[k - 1];
+}
+extern "C" __global__ void threadgroup_field(const float *in, float *out, int n) {
+    __shared__ float ws[8 * LANES];
+    const Work w = make(ws + threadIdx.x);
+    for (int k = 0; k < n; ++k) { w.a[k] = in[k * LANES + threadIdx.x]; w.b[k] = 0.0f; }
+    step(w.a, w.b, n);
+    out[threadIdx.x] = w.b[n - 1];
+}
+'''
+
+
+def test_accessor_field_holding_only_threadgroup_memory(cp):
+    host = np.arange(4 * 32, dtype=np.float32)
+    out = cp.zeros(32, dtype=cp.float32)
+    cp.RawKernel(_THREADGROUP_FIELD, "threadgroup_field")((1,), (32,), (cp.asarray(host), out, np.int32(4)))
+    assert cp.asnumpy(out).tobytes() == host.reshape(4, 32)[1:].sum(axis=0).tobytes()
 
 
 _FREXP_SCALBN = r'''

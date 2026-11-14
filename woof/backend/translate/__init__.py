@@ -664,8 +664,9 @@ class _Rewriter:
         self._kernel_cursors = self._kernels(top)
         self.generic_structs = self._space_generic_structs(top)
         self.spaces = SpaceAnalysis(self)
-        # a field given constant data anywhere (the probe saw every function)
-        # is constant before the first call passes it on
+        # a field given constant (or threadgroup) data anywhere (the probe saw
+        # every function) is in that space before the first call passes it on,
+        # so a method analysed earlier returns references into it
         self.spaces.field_spaces.update(self._constant_fields)
         self.spaces.collect(top)
         self.spaces.run(self._kernel_cursors)
@@ -728,7 +729,7 @@ class _Rewriter:
             self._probing_fields = False
             self.spaces = None
         self._constant_fields = {key: set(spaces) for key, spaces in probe.field_spaces.items()
-                                 if spaces == {"constant"}}
+                                 if spaces in ({"constant"}, {"threadgroup"})}
         # A reference member's binding is recorded where its constructor runs, which the real pass may
         # reach after a function that reads through the member: the probe's whole-unit record seeds it.
         self._reference_field_seed = {key: set(spaces) for key, spaces in probe.ref_field_spaces.items()}
