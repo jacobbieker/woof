@@ -35,6 +35,9 @@ from .errors import MpasPortError
 
 SCHEMA = "woof-hex.regional-terrain.v1"
 RECEIPT_NAME = "terrain-receipt.json"
+#: Written before the chain moves anything and removed when it succeeds: a rolled-back chain leaves it, so the
+#: next mesh stage retries the replacement instead of refusing the mesh as one built without terrain.
+PENDING_NAME = "terrain-pending.json"
 #: ``--terrain-max-spacing-km`` defaults to this multiple of the fine spacing, so the refined core is
 #: processed and the coarser ramp keeps its 30-arc-second terrain.
 DEFAULT_SPACING_FACTOR = 1.25
@@ -72,19 +75,26 @@ def request_from_arguments(args, *, fine_dx_m: float, has_parent: bool) -> dict[
         raise RegionalTerrainRefusal(
             "--terrain-source runs inside the mesh stage, and --skip mesh was given; build the mesh with "
             "the terrain, or drop --terrain-source")
-    if getattr(args, "stage", "all") not in ("all", "mesh"):
-        mesh_dir = Path(args.work_dir).expanduser().absolute() / "mesh"
-        if not (mesh_dir / RECEIPT_NAME).is_file():
-            raise RegionalTerrainRefusal(
-                f"--stage {args.stage} with --terrain-source needs a mesh already built with that terrain "
-                f"({mesh_dir / RECEIPT_NAME} is absent)")
     if spacing is None:
         spacing = default_max_spacing_km(fine_dx_m)
     spacing = float(spacing)
     if not spacing > 0.0 or spacing != spacing or spacing == float("inf"):
         raise RegionalTerrainRefusal(f"--terrain-max-spacing-km {spacing!r} must be a positive spacing")
-    return {"source": str(source), "max_spacing_km": spacing,
-            "cache_root": None if cache is None else str(Path(cache).expanduser().absolute())}
+    request = {"source": str(source), "max_spacing_km": spacing,
+               "cache_root": None if cache is None else str(Path(cache).expanduser().absolute())}
+    # A stage invoked on its own after the mesh stage (``--stage init``, ``--stage forecast`` ...) consumes the mesh
+    # already built: it must carry the terrain THIS request names, source and spacing, since no mesh stage runs to
+    # check it.  ``--stage plan`` only plans (no mesh yet); ``all`` and ``mesh`` check it in the mesh stage.
+    if getattr(args, "stage", "all") not in ("all", "mesh", "plan"):
+        require_applied(Path(args.work_dir).expanduser().absolute() / "mesh", request)
+    return request
+
+
+def pending(mesh_dir: Path) -> bool:
+    """True when a terrain replacement began in ``mesh_dir`` and did not finish (it rolled back)."""
+
+    mesh_dir = Path(mesh_dir)
+    return (mesh_dir / PENDING_NAME).is_file() and not (mesh_dir / RECEIPT_NAME).is_file()
 
 
 def require_applied(mesh_dir: Path, request: Mapping[str, Any]) -> dict[str, Any]:
@@ -146,6 +156,7 @@ def apply_terrain(*, mesh_dir: Path, vertical_spec: Path | str, request: Mapping
 
     originals = mesh_dir / "orig30s"
     originals.mkdir(exist_ok=True)
+    (mesh_dir / PENDING_NAME).write_text(json.dumps(dict(request), indent=2, sort_keys=True) + "\n", encoding="utf-8")
     moved = [parent_static, parent_vertical, cull_static, cull_vertical]
     for path in moved:
         for part in (path, path.with_name(path.name + ".cull-receipt.json"),
@@ -169,7 +180,10 @@ def apply_terrain(*, mesh_dir: Path, vertical_spec: Path | str, request: Mapping
         note("terrain: re-cutting the cull's static and vertical grid")
         engine = resolve(MESH, None)
         for parent_file, out in ((parent_static, cull_static), (parent_vertical, cull_vertical)):
-            row = cull_one(engine, parent_file, region, out, clobber=False, provenance_grid=cull_grid)
+            # The region is marked on the parent GRID, as the original cut was (cull_door: the static's binary32
+            # coordinates can tie-break the boundary rings differently from the grid's).
+            row = cull_one(engine, parent_file, region, out, clobber=False, provenance_grid=cull_grid,
+                           mark_parent=parent_grid)
             row["lineage"] = carry_lineage(parent_file, out, drives_boundaries=False)
     except BaseException:
         # Put the 30-arc-second files back: a refused request leaves the mesh as it was.
@@ -219,8 +233,9 @@ def apply_terrain(*, mesh_dir: Path, vertical_spec: Path | str, request: Mapping
     generated_path.write_text(json.dumps(generated, indent=2, sort_keys=True, default=str) + "\n",
                               encoding="utf-8", newline="\n")
     (mesh_dir / RECEIPT_NAME).write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    (mesh_dir / PENDING_NAME).unlink(missing_ok=True)
     return receipt
 
 
-__all__ = ["RECEIPT_NAME", "RegionalTerrainRefusal", "SCHEMA", "apply_terrain", "default_max_spacing_km",
-           "request_from_arguments", "require_applied"]
+__all__ = ["PENDING_NAME", "RECEIPT_NAME", "RegionalTerrainRefusal", "SCHEMA", "apply_terrain",
+           "default_max_spacing_km", "pending", "request_from_arguments", "require_applied"]

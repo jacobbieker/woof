@@ -35,7 +35,7 @@ def test_request_defaults_the_spacing_to_the_fine_core(tmp_path):
     (["--terrain-max-spacing-km", "2"], False, "qualify --terrain-source"),
     (["--terrain-cache-root", "x"], False, "qualify --terrain-source"),
     (["--terrain-source", "glo30", "--skip", "mesh"], False, "--skip mesh"),
-    (["--terrain-source", "glo30", "--stage", "init"], False, "built with that terrain"),
+    (["--terrain-source", "glo30", "--stage", "init"], False, "built without --terrain-source"),
     (["--terrain-source", "glo30", "--terrain-max-spacing-km", "0"], False, "positive spacing"),
     (["--terrain-source", "glo30"], True, "kept hex run"),
 ])
@@ -136,7 +136,8 @@ def _fake_doors(monkeypatch, selection=None):
         return {}
 
     def cull(engine, parent, region, out, **kw):
-        calls.append(("cull", Path(parent).name, Path(out).name, Path(kw["provenance_grid"]).name))
+        calls.append(("cull", Path(parent).name, Path(out).name, Path(kw["provenance_grid"]).name,
+                      Path(kw["mark_parent"]).name))
         Path(out).write_bytes(b"cut " + Path(parent).read_bytes())
         return {}
 
@@ -211,3 +212,64 @@ def test_the_halo_route_is_refused(tmp_path):
     with pytest.raises(rt.RegionalTerrainRefusal, match="--parent-static"):
         rt.apply_terrain(mesh_dir=mesh, vertical_spec="spec.json", note=lambda t: None,
                          request={"source": "glo30", "max_spacing_km": 1.0, "cache_root": None})
+
+
+def test_plan_needs_no_mesh(tmp_path):
+    """``--stage plan`` on a fresh work directory plans; the mesh it would build does not exist yet."""
+    args = parse(tmp_path, "--terrain-source", "glo30", "--stage", "plan")
+    assert rt.request_from_arguments(args, fine_dx_m=3000.0, has_parent=False)["source"] == "glo30"
+
+
+def test_a_separate_stage_must_match_the_meshs_terrain(tmp_path):
+    """A stage run on its own consumes the mesh built earlier and runs no mesh stage to check it: a GLO-30 mesh is
+    refused for a GEM-15 request, and for another spacing limit, not just for a missing receipt."""
+    mesh = tmp_path / "run" / "mesh"
+    mesh.mkdir(parents=True)
+    (mesh / rt.RECEIPT_NAME).write_text(json.dumps({"requested": "glo30", "max_spacing_km": 3.75}))
+    ok = parse(tmp_path, "--terrain-source", "glo30", "--stage", "forecast")
+    assert rt.request_from_arguments(ok, fine_dx_m=3000.0, has_parent=False)["source"] == "glo30"
+    for extra in (["--terrain-source", "gem15-dtm"], ["--terrain-source", "glo30", "--terrain-max-spacing-km", "9"]):
+        with pytest.raises(rt.RegionalTerrainRefusal, match="was built with"):
+            rt.request_from_arguments(parse(tmp_path, *extra, "--stage", "forecast"), fine_dx_m=3000.0,
+                                      has_parent=False)
+
+
+def test_the_replacement_cut_is_marked_on_the_parent_grid(tmp_path, monkeypatch):
+    mesh, names, *_ = _mesh(tmp_path)
+    calls = _fake_doors(monkeypatch)
+    rt.apply_terrain(mesh_dir=mesh, vertical_spec="spec.json", note=lambda t: None,
+                     request={"source": "glo30", "max_spacing_km": 1.0, "cache_root": None})
+    assert [c[4] for c in calls if c[0] == "cull"] == ["m.grid", "m.grid"]
+
+
+def test_a_rolled_back_replacement_is_retried_by_the_mesh_stage(tmp_path, monkeypatch):
+    """THE BREAKAGE: after a rollback the point-generate receipt remained and no terrain receipt existed, so the
+    next mesh stage refused the mesh as one built without terrain instead of retrying the replacement."""
+    from woof.hex import static_highres
+
+    mesh, names, *_ = _mesh(tmp_path)
+    calls = _fake_doors(monkeypatch)
+    good = static_highres.run_static_highres
+
+    def refuse(*a, **k):
+        raise static_highres.StaticHighresRefusal("source acquisition failed")
+
+    monkeypatch.setattr(static_highres, "run_static_highres", refuse)
+    request = {"source": "glo30", "max_spacing_km": 1.0, "cache_root": None}
+    with pytest.raises(static_highres.StaticHighresRefusal):
+        rt.apply_terrain(mesh_dir=mesh, vertical_spec="spec.json", note=lambda t: None, request=request)
+    assert rt.pending(mesh)
+    monkeypatch.setattr(static_highres, "run_static_highres", good)
+
+    class Status:
+        def note(self, text):
+            pass
+
+    monkeypatch.setattr(door, "_start_source_prefetch", lambda *a: None)
+    value = {"paths": {"mesh": str(mesh), "work": str(tmp_path), "vertical_spec": "spec.json"}, "terrain": request}
+    result = door._stage_mesh(parse(tmp_path), value, Status())
+    assert result["reused"] and result["terrain"]["requested"] == "glo30"
+    assert not rt.pending(mesh) and (mesh / rt.RECEIPT_NAME).is_file()
+    assert names["static"].read_bytes() == b"hr static"
+    # once applied, a further mesh stage reuses it
+    assert door._stage_mesh(parse(tmp_path), value, Status())["terrain"]["requested"] == "glo30"

@@ -633,7 +633,14 @@ def _stage_mesh(args, value, status) -> dict[str, Any]:
     if list(mesh_dir.glob("*.point-generate.json")):
         status.note(f"mesh already generated in {mesh_dir}")
         if terrain is not None:
-            from .regional_terrain import require_applied
+            from .regional_terrain import apply_terrain, pending, require_applied
+            if pending(mesh_dir):
+                # An earlier replacement rolled back (its source acquisition failed, say): the mesh is the 30 s
+                # one it was generated as, so the replacement runs again rather than the mesh being refused.
+                status.note(f"terrain: retrying the replacement that rolled back in {mesh_dir}")
+                return {"returncode": 0, "reused": True, "terrain": apply_terrain(
+                    mesh_dir=mesh_dir, vertical_spec=value["paths"]["vertical_spec"], request=terrain,
+                    note=status.note)}
             return {"returncode": 0, "reused": True, "terrain": require_applied(mesh_dir, terrain)}
         return {"returncode": 0, "reused": True}
     lat, lon = value["point_deg"]
