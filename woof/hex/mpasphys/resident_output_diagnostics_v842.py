@@ -482,6 +482,8 @@ class ResidentOutputDiagnostics:
             self.convective.reset()
             if self.nwp is not None:
                 self.nwp.reset()
+            if self.afwa is not None:
+                self.afwa.reset()
         finally:
             self._end_event()
         self.acoustic.clear()

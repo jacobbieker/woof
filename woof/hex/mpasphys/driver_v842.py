@@ -808,6 +808,7 @@ def resolve_namelist(text: str, *, backends: Mapping[str, str] | None = None,
             config = _replace(config, acc_diagnostics=accs)
         if afwa is not None:
             config = _replace(config, afwa_diagnostics=afwa)
+            _afwa.check(config)
         if reductions is not None:
             config = _replace(config, reduction_diagnostics=reductions)
         if multi_perturb is not None:

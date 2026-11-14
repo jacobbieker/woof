@@ -2529,11 +2529,11 @@
    },
    {
     "file": "woof/core/kernels/afwa_diagnostics.cu",
-    "sha256": "0b9b3b3cbe2b8c90eb65992cd412d76823017edec463aecb647cef0cf27ef1a5"
+    "sha256": "df39d565be7c839db4d05810a40c45a03e77b1abb7f3878772af5fac67bacd2c"
    },
    {
     "file": "woof/core/kernels/afwa_severe.cu",
-    "sha256": "a6261f1227d03fd27ad2a598362d6349fc2d99b05d480e4b32f54b63159a7747"
+    "sha256": "cfdef0a7e6f812ec37f438313d40c692b398f999997b595c990590e4094ede28"
    },
    {
     "file": "woof/core/kernels/atan_scalar_flt32.cuh",
@@ -9957,13 +9957,13 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "95193e80c5c362de5c63285c206900501f368c0282d1d8880f69513db680a701",
+    "sha256": "9c790e0311a1bd28c7ada6d679f05e40e0a525fe47f8ce70c5a375a9d32215df",
     "sites": {
      "100": 65
     }
    },
    "native_differences": {
-    "sha256": "994dd37a79d7cf0238245f8029b30167b56cdaccca1b324da5f9ea58c37df460",
+    "sha256": "8af56efb84c55ebd385b702813152a2af6410132713af85bdbfe9d11d2c9375d",
     "sites": {
      "100": 12
     }
@@ -9985,7 +9985,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "212874e990ab8615f1271e421bd03afa495a8b4499b77089050a7002417b12b4"
+   "source_sha256": "5acf6f0893ad2623eb13d1371592fc3e9b7ce3a4afbd30acf45b404ba10d57b6"
   },
   "kernels:afwa_severe": {
    "assessment": "static_diagnostic_only",
@@ -10004,15 +10004,15 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "88374c96ec4d70a173ac7784b56bd574348fd666de2f6d4a7c50115734edba58",
+    "sha256": "4ebac2279777da5604d9eb5ba71a6e09ee4cfcf00c517b1eaa89871526701a73",
     "sites": {
-     "100": 28
+     "100": 34
     }
    },
    "native_differences": {
-    "sha256": "1aa7c1299b0560846ef5922fcdc07847ddd6013e7c978aefc75b37b7b54a4556",
+    "sha256": "732c01fa135ffe5586e42593c0d9c1b1059888e5205795df7505ed31d4ae0fef",
     "sites": {
-     "100": 9
+     "100": 12
     }
    },
    "native_errors": {},
@@ -10032,7 +10032,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "61aaee81cc0981ca7c3f4cd6e11a1f53bc9fd6b27aa36c0d2822c3942c44e4d7"
+   "source_sha256": "cd9e14c0d0e33c0f148198bcff3935618bd33ee357bf139becac086bdb494fce"
   },
   "kernels:avgflx": {
    "assessment": "static_diagnostic_only",
