@@ -14,6 +14,8 @@
   and the driver's gust/shear blocks over three steps included;
 * severe follows WRF's F_QNG guard (only gust and shear without a graupel-number carrier), reads the step's MPAS
   updraft helicity, and its maxima and tornado state reset after a frame and ride a checkpoint;
+* the WOOF opt-in config_afwa_severe_ignore_qng_gate (off by default, not WRF) runs the column part without ``ng``,
+  giving, word for word, the fields a run with an ``ng`` carrier writes;
 * ptype accumulates every step and rides a checkpoint, the t = 0 frame computes the instantaneous packages on the
   initial state, and a run whose microphysics lacks WRF's required hydrometeors is refused.
 """
@@ -72,10 +74,33 @@ def test_options_default_off_and_resolve():
     ({"config_afwa_ptype_ccn_tmp": 260.0}, "read by nothing"),
     ({"config_afwa_diag_opt": ".true.", "config_afwa_ptype_tot_melt": 40.0}, "read by nothing"),
     ({"config_afwa_diag_opt": ".true.", "config_afwa_ptype_opt": ".true.", "config_afwa_ptype_ccn_tmp": ".true."}, "is real"),
+    ({"config_afwa_severe_ignore_qng_gate": ".true."}, "ignore_qng_gate is set while config_afwa_severe_opt is off"),
+    ({"config_afwa_diag_opt": ".true.", "config_afwa_severe_ignore_qng_gate": ".true."}, "read by nothing"),
+    ({"config_afwa_severe_opt": ".true.", "config_afwa_severe_ignore_qng_gate": 1}, "logical"),
 ])
 def test_inconsistent_or_unavailable_options_are_refused(extra, message):
     with pytest.raises(ValueError, match=message):
         _resolve(extra)
+
+
+def test_the_qng_gate_opt_in_is_off_by_default_and_recorded_only_when_on():
+    severe = _resolve({"config_afwa_severe_opt": ".true."})
+    assert severe.afwa_diagnostics.severe_ignore_qng_gate is False
+    assert "severe_ignore_qng_gate" not in severe.receipt()["afwa_diagnostics"]
+    assert _resolve({"config_afwa_severe_opt": ".true.", "config_afwa_severe_ignore_qng_gate": ".false."}).receipt() \
+        == severe.receipt()
+    on = _resolve({"config_afwa_severe_opt": ".true.", "config_afwa_severe_ignore_qng_gate": ".true."},
+                  (" config_microp_scheme='mp_wsm6'",))
+    assert on.afwa_diagnostics.severe_ignore_qng_gate is True
+    assert on.receipt()["afwa_diagnostics"]["severe_ignore_qng_gate"] is True
+    assert afwa.QNG_GATE_OPTION not in on.options
+
+
+@pytest.mark.parametrize("scheme", ["mp_kessler", "off"])
+def test_the_qng_gate_opt_in_is_refused_without_the_six_carriers(scheme):
+    with pytest.raises(ValueError, match=f"ignore_qng_gate runs severe's column part.*'{scheme}'"):
+        _resolve({"config_afwa_severe_opt": ".true.", "config_afwa_severe_ignore_qng_gate": ".true."},
+                 (f" config_microp_scheme='{scheme}'",))
 
 
 def test_rrfs_fork_route_refuses_the_options():
@@ -556,6 +581,28 @@ def test_severe_without_graupel_number_moves_only_gust_and_shear(cp):
     for name in set(SEVERE_CHECKED) - {"wspd10max", "afwa_llws", "afwa_midrh_min", "afwa_midrh_min_old"}:
         assert not after[name].any(), name
     assert (after["afwa_midrh_min"] == np.float32(999.0)).all()     # reset, never folded: WRF's words too
+
+
+def test_the_qng_gate_opt_in_gives_the_ng_carriers_fields_without_ng(cp):
+    """config_afwa_severe_ignore_qng_gate (WOOF, not WRF): without ng the column part runs, and every severe word
+    equals the run with an ng carrier (which test_severe_equals_the_wrf_routes_kernels_over_three_steps holds to the
+    WRF route), since the routine never reads QNG."""
+    options = ("afwa_diag_opt", "afwa_severe_opt")
+    with_ng, owner, utils, _, _ = _module(cp, options, scalars=WITH_NG)
+    want = _severe_steps(with_ng, owner, utils)
+    module, owner, utils, _, _ = _module(cp, options, severe_ignore_qng_gate=True)
+    assert module.severe_column and not module._has_scalar("ng")
+    got = _severe_steps(module, owner, utils)
+    for step, (g, e) in enumerate(zip(got, want), 1):
+        for name in SEVERE_CHECKED:
+            np.testing.assert_array_equal(g[name].view(np.uint32), e[name].view(np.uint32), err_msg=f"{name} step {step}")
+    assert (got[-1]["afwa_hail"] > 0).any() and (got[-1]["afwa_tornado"] > 0).any()
+
+
+def test_the_qng_gate_opt_in_is_refused_at_setup_without_graupel(cp):
+    with pytest.raises(ValueError, match="ignore_qng_gate .* has no qg"):
+        _module(cp, ("afwa_diag_opt", "afwa_severe_opt"), scalars=("qv", "qc", "qi", "qr", "qs"),
+                severe_ignore_qng_gate=True)
 
 
 SEVERE_ORACLE_FIELDS = ("wspd10max", "afwa_llws", "w_up_max", "w_dn_max", "tcoli_max", "grpl_flx_max", "afwa_hail",

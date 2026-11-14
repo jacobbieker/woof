@@ -469,6 +469,8 @@ class DriverConfig:
             o = self.afwa_diagnostics
             result["afwa_diagnostics"] = dict(options=list(o.options), ptype_ccn_tmp=o.ptype_ccn_tmp,
                                               ptype_tot_melt=o.ptype_tot_melt)
+            if o.severe_ignore_qng_gate:
+                result["afwa_diagnostics"]["severe_ignore_qng_gate"] = True
         if self.acc_diagnostics is not None:
             o = self.acc_diagnostics
             result["acc_diagnostics"] = dict(prec_acc_dt=o.prec_acc_dt, acc_phy_tend=o.acc_phy_tend,
