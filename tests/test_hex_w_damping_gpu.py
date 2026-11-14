@@ -89,3 +89,19 @@ def test_the_limiter_pushes_against_the_motion_above_the_critical_courant_number
     assert live.any()
     assert np.all(np.sign(got[1:NLEV][live]) == -np.sign(w[1:NLEV][live]))
     assert np.all(got[1:NLEV][~live] == 0)
+
+
+def test_the_vertical_coefficients_share_the_resident_array_boundary():
+    """The kernel reads fzm, fzp and rdzw as packed float: a float64 or short array is refused, as the 3-D fields
+    are, instead of read as wrong coefficients or past its end."""
+    from woof.hex.cuda_backend import KernelCache
+    from woof.hex.cuda_w_damping import WDamping, apply_w_damping
+
+    rdzw, w, rho, fzm, fzp, tend = _columns()
+    good = dict(fzm=cp.asarray(fzm), fzp=cp.asarray(fzp), rdzw=cp.asarray(rdzw))
+    for name, bad, error in (("fzm", cp.asarray(fzm, dtype=cp.float64), TypeError),
+                             ("rdzw", cp.asarray(rdzw[:-2]), ValueError),
+                             ("fzp", cp.asarray(np.stack([fzp, fzp], 1))[:, 0], ValueError)):
+        with pytest.raises(error, match=name):
+            apply_w_damping(cp.asarray(tend), cp.asarray(w), cp.asarray(rho),
+                            SimpleNamespace(**{**good, name: bad}), dt=DT, damping=WDamping(), cache=KernelCache())

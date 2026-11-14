@@ -3180,6 +3180,28 @@ def resolve_surface_statics(arguments, physics, mesh, grid, collected):
         f"-o <mesh>{surface_inputs.FILE_SUFFIX}`.", collected)
 
 
+def _partitioned_samehost_refusal(request) -> str | None:
+    """Why the partitioned same-host executor cannot run ``request``, or None.
+
+    Its rank stacks are built by samehost_forecast_v841's own construction, which never reaches the code in
+    execute_forecast that installs nudging, the w_damping limiter or the inflow perturbation on the one-card
+    driver: each would be recorded in the receipt and never applied.
+    """
+
+    if request.nudging is not None:
+        return ("HEX_NUDGING_PARTITIONED: nudging runs on one card; the partitioned same-host "
+                "executor has no nudging seat (pin one device)")
+    if request.tc_climate is not None:
+        return "--tc-climate is not wired to the partitioned same-host executor"
+    if request.w_damping is not None:
+        return ("--w-damping acts in the one-card resident dycore driver; the partitioned same-host executor's "
+                "rank drivers do not carry it (pin one device)")
+    if request.inflow_perturbation is not None:
+        return ("--inflow-perturbation acts in the one-card regional runtime; the partitioned same-host "
+                "executor's rank runtimes do not carry it (pin one device)")
+    return None
+
+
 def _resolve_w_damping(arguments) -> float | None:
     """WRF's w_crit_cfl when ``--w-damping`` is on, else None; refuses what it cannot honour."""
 
@@ -5139,11 +5161,9 @@ def _run_forecast(arguments: argparse.Namespace) -> int:
             samehost_options = samehost.automatic_options(arguments, request)
         except (ValueError, OSError, RuntimeError) as error:
             raise _refuse(str(error)) from error
-    if samehost_options is not None and request.nudging is not None:
-        raise _refuse("HEX_NUDGING_PARTITIONED: nudging runs on one card; the partitioned same-host "
-                      "executor has no nudging seat (pin one device)")
-    if samehost_options is not None and request.tc_climate is not None:
-        raise _refuse("--tc-climate is not wired to the partitioned same-host executor")
+    partitioned_refusal = None if samehost_options is None else _partitioned_samehost_refusal(request)
+    if partitioned_refusal is not None:
+        raise _refuse(partitioned_refusal)
     if samehost_options is not None and len(set(samehost_options["devices"])) > 1:
         # Ranks on distinct cards share this process: the engine's land kernels are held per card before
         # any is compiled (woof.hex.engine_per_card names the breakage).
