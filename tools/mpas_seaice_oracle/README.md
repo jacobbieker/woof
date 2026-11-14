@@ -133,15 +133,23 @@ to 17 digits) and stage 4's error code.
   carry, so it cannot run.
 
 The meshes (`woof.verify.mpas_seaice_planar_mesh`) are planar hexagon and
-quadrilateral blocks with land and halo layers. Cases are built with
-correctly rounded operations only (no libm trigonometry, BLAS or LAPACK), so
-their input words are the same on every host.
+quadrilateral blocks with land and halo layers. The spherical cases
+(`woof.verify.mpas_seaice_remap_sphere_oracle`) lay the same blocks on the
+sphere (`woof.verify.mpas_seaice_sphere_mesh`: the inverse gnomonic
+projection, turned to either pole or 53 degrees north, optionally stretched to
+variable resolution), with and without `config_rotate_cartesian_grid`; the
+init derives the local frames and the tangent-plane geometry from them. Cases
+are built with correctly rounded operations only (no libm trigonometry, BLAS
+or LAPACK), so their input words are the same on every host.
 
-`make_remap_fixture.py` writes `tests/data/oracles/mpas_seaice_remap`. For
-each case it keeps the output fields whose words changed, and writes
-`remap-logs.json` (the tracer lists and warnings).
+`make_remap_fixture.py` writes `tests/data/oracles/mpas_seaice_remap` (with
+`--sphere`, `tests/data/oracles/mpas_seaice_remap_sphere`). For each case it
+keeps the output fields whose words changed, and writes `remap-logs.json`
+(the tracer lists and warnings).
 
 The time-step oracle (`run_seaice_step.F90`) runs `seaice_init_advection` and,
 under `config_use_advection`, `seaice_run_advection` (both
 `mpas_seaice_advection.F` and the remap compiled verbatim).
-`make_step_remap_fixture.py` writes `tests/data/oracles/mpas_seaice_step_remap`.
+`make_step_remap_fixture.py` writes `tests/data/oracles/mpas_seaice_step_remap`
+(with `--sphere`, the spherical cases into
+`tests/data/oracles/mpas_seaice_step_remap_sphere`).
