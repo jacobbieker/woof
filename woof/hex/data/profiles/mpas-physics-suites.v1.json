@@ -562,7 +562,7 @@
       "lightning_option": {
         "inactive_values": ["0"],
         "reason": "the lightning flash-rate fields are computed on the column state but no hex history stream writes them and no lightning_inputs are staged, so the flash rates would be computed and discarded",
-        "follow_up": "lightning_option=0 until the hex lightning history output lands"
+        "follow_up": "lightning_option=0 on this route; the MPAS-A v8.4.2 suite route writes WRF's flash rates, counts and LPI (&diagnostics config_lightning_option 1-3, woof.hex.mpasdiag.lightning_diag_v842)"
       }
     }
   },
