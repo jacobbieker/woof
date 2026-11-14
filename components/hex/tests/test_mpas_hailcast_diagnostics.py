@@ -23,6 +23,7 @@ import numpy as np
 import pytest
 
 from woof.hex.mpasdiag import hailcast_diag_v842 as hc
+from woof.hex.mpasdiag import lightning_diag_v842 as ltng
 from woof.hex.mpasphys import resolve_namelist
 
 DT = 20.0
@@ -331,3 +332,14 @@ def test_hailcast_is_refused_on_a_multi_rank_mesh(cp):
     owner.halo = object()
     with pytest.raises(ValueError, match="multi-rank"):
         hc.HailcastModule(owner, hc.HailcastConfig()).setup(_Utils())
+
+
+@pytest.mark.parametrize("package", [hc.PACKAGE, *sorted(set(ltng.PACKAGES.values()))])
+def test_a_native_file_restart_is_refused_with_the_state_on(tmp_path, package):
+    """The Registry restart stream holds no HAILCAST/lightning working state, so a native-file restart (no route
+    checkpoint carrier) is refused by name before anything runs; the route's own checkpoint carries it."""
+    from woof.hex.mpasphys.runtime_v842 import _run_native_dynamics
+    layout = SimpleNamespace(configs={"config_do_restart": True}, packages={package})
+    with pytest.raises(ValueError, match="native-file restart with &diagnostics lightning or HAILCAST on"):
+        _run_native_dynamics(SimpleNamespace(), SimpleNamespace(mode="correct"), layout, None, None, None,
+                             None, None, 20.0, 1, Path(tmp_path))
