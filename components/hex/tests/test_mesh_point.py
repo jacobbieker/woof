@@ -926,3 +926,49 @@ def test_a_static_proof_requires_complete_valid_receipts(tmp_path, damage) -> No
                                         static_receipt=receipt, cut_grid=cut, log=lambda *args: None)
     assert not check["agreed"]
     assert check["why"]
+
+
+def _density_raster(path: Path, finest_km: float) -> Path:
+    import netCDF4
+    import numpy as np
+
+    with netCDF4.Dataset(str(path), "w") as data:
+        data.createDimension("lat", 3)
+        data.createDimension("lon", 3)
+        data.createVariable("lat", "f8", ("lat",))[:] = [20.0, 20.5, 21.0]
+        data.createVariable("lon", "f8", ("lon",))[:] = [-157.0, -156.5, -156.0]
+        data.createVariable("spacing_km", "f8", ("lat", "lon"))[:] = np.full((3, 3), 48.0) - np.eye(3) * (
+            48.0 - finest_km)
+        data.schema = "woof-hex.density.v1"
+    return path
+
+
+def test_a_density_raster_rides_the_ladder_spec_ahead_of_the_caps(tmp_path: Path, fake_mesh_exe: Path,
+                                                                   monkeypatch) -> None:
+    """``--density-raster`` adds ``{"shape": "raster"}`` rows FIRST, so the innermost cap stays the last row (the
+    row region_attainment is read from) and the cap-only cull integral skips the raster rows."""
+    from woof.hex import mesh_spec_gates
+
+    monkeypatch.setattr(mesh_spec_gates, "gates_from_receipt", lambda spec, receipt, measure=None: {})
+    raster = _density_raster(tmp_path / "terrain.nc", 3.0)
+    arguments = build_parser().parse_args([
+        "mesh-plan", "--point=20.2,-155.9", "--fine-dx-m", "3000", "--background-km", "96", "--radius-km", "40",
+        "--density-raster", str(raster), "--mesh-exe", str(fake_mesh_exe)])
+    request = mesh_point.request_from_arguments(arguments)
+    spec = mesh_point.request_spec(request)
+    assert spec["regions"][0] == {"shape": "raster", "path": str(raster.resolve())}
+    assert [r["spacing_km"] for r in spec["regions"][1:]] == [48.0, 24.0, 12.0, 6.0, 3.0]
+    assert mesh_point.spacing_profile(spec)[0][1] == 3.0
+    plan = mesh_point.plan_point(request)
+    assert plan["cull"]["density_rasters"] == [str(raster.resolve())]
+
+
+def test_a_density_raster_finer_than_the_fine_rung_is_refused(tmp_path: Path) -> None:
+    raster = _density_raster(tmp_path / "terrain.nc", 1.5)
+    arguments = build_parser().parse_args([
+        "mesh-plan", "--point=20.2,-155.9", "--fine-dx-m", "3000", "--background-km", "96",
+        "--density-raster", str(raster)])
+    with pytest.raises(PointPlanRefusal, match="asks for 1.5 km, finer than the fine rung 3 km"):
+        mesh_point.request_from_arguments(arguments)
+    with pytest.raises(PointPlanRefusal, match="no such file"):
+        mesh_point.density_raster_paths([tmp_path / "absent.nc"], fine_dx_m=3000.0)

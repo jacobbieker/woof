@@ -326,6 +326,14 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     ([docs/branch-from-checkpoint.md](docs/branch-from-checkpoint.md));
   - GRIB2 and Earth2 export ([docs/grib2-export.md](docs/grib2-export.md));
   - a terrain hook (`--terrain-source`, `[static.highres]`);
+  - variable-resolution regional meshes: `woof hex regional` grades the cut
+    over several doublings (`--ring-factor`, `--transition-factor`,
+    `--cull-pad-scale`, e.g. a 3 km core to 20 km) or refines it by a
+    `woof hex density` raster (`--density-raster`, e.g. steep terrain).
+    `tools/hex_varres.py` holds the variable-resolution test and bench
+    cases (graded, terrain-driven and a global 120-30 km mesh) and the
+    transition-band diagnostics. The step is set by the smallest cell, so
+    a graded mesh costs about what its finest cells cost;
   - an option matrix that runs generic-seam column options through a real
     hex forecast on CUDA and Metal.
 
