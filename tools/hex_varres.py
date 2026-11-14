@@ -318,7 +318,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     p_prep.add_argument("--source")
     p_prep.add_argument("--hours", type=float, default=6.0)
     p_prep.add_argument("--dry-run", action="store_true", help="print the commands only")
-    p_prep.add_argument("extra", nargs="*", help="after --: more door arguments")
+    p_prep.set_defaults(extra=[])  # "-- EXTRA..." is split off before parsing (see below)
     p_an = sub.add_parser("analyze")
     p_an.add_argument("--grid", type=Path, required=True)
     p_an.add_argument("--history-dir", type=Path, required=True)
@@ -328,7 +328,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     p_an.add_argument("--zhi", type=float, default=6000.0)
     p_an.add_argument("--json", type=Path)
     p_an.add_argument("--screen", action="store_true", help="exit 1 on a non-finite field or a flagged bin")
+    argv = list(sys.argv[1:] if argv is None else argv)
+    # The door arguments after "--" are cut off first: argparse would hand an empty "extra" positional out with
+    # the name and then refuse the trailing ones (Python 3.11).
+    extra: list[str] = []
+    if "--" in argv:
+        at = argv.index("--")
+        argv, extra = argv[:at], argv[at + 1:]
     a = parser.parse_args(argv)
+    if extra:
+        if a.command != "prep":
+            parser.error("only prep takes door arguments after --")
+        a.extra = extra
     if a.command == "list":
         for case in load_cases()["cases"]:
             refs = f" (references: {', '.join(case['references'])})" if case.get("references") else ""

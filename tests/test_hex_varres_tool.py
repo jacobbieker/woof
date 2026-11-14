@@ -91,3 +91,11 @@ def test_the_screen_flags_noise_made_in_a_transition_band_and_not_a_smooth_ramp(
     hit = screen(imprinted)
     assert [row["key"] for row in hit["flagged"]] == [3]
     assert hit["flagged"][0]["noise_ratio_to_neighbours"] > vr.IMPRINT_FACTOR
+
+
+def test_prep_forwards_the_door_arguments_after_the_double_dash(tmp_path, capsys):
+    assert vr.main(["prep", "edi-vr", "--work-dir", str(tmp_path), "--dry-run", "--", "--card", "32gb"]) == 0
+    printed = capsys.readouterr().out.strip().splitlines()[-1]
+    assert printed.endswith("--skip forecast --skip products --card 32gb")
+    with pytest.raises(SystemExit):
+        vr.main(["list", "--", "--card", "32gb"])
