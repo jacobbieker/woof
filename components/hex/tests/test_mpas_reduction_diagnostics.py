@@ -217,6 +217,7 @@ def _pub(cp, owner, name, nc, bins=False):
     return arr[:8, :nc] if bins else arr[:nc]
 
 
+@pytest.mark.gpu
 def test_clwrf_equals_wrf_module_diag_cl_on_mesh_columns(cp):
     from woof.core.clwrf import HISTORY, INPUTS
     with np.load(ROOT / "tests/data/oracles/clwrf/vectors.npz") as v:
@@ -246,6 +247,7 @@ def test_clwrf_equals_wrf_module_diag_cl_on_mesh_columns(cp):
             np.testing.assert_array_equal(got, expected[index][k].reshape(nc), err_msg=f"call {index} {name}")
 
 
+@pytest.mark.gpu
 def test_clwrf_module_update_drives_the_same_kernel(cp):
     """update() itself (not the direct launch above): its clock is the step's start time, xtime = seconds / 60."""
     nc = 5
@@ -263,6 +265,7 @@ def test_clwrf_module_update_drives_the_same_kernel(cp):
     np.testing.assert_allclose(_pub(cp, owner, "clwrf_t2mean", nc), celsius.mean(0) + 273, atol=1e-3)
 
 
+@pytest.mark.gpu
 def test_rasm_mean_and_energy_sums_follow_the_step_sequence(cp):
     nc, dt_s = 7, 600.0
     config = red.ReductionConfig(0, True, 2, 30, False, True)          # 30 min means: 3 steps
@@ -296,6 +299,7 @@ def test_rasm_mean_and_energy_sums_follow_the_step_sequence(cp):
     assert (pmsl > 50000).all() and (pmsl < 120000).all()
 
 
+@pytest.mark.gpu
 def test_rasm_diurnal_bins_take_the_three_hour_window_means(cp):
     nc, dt_s = 4, 3600.0
     module, owner, utils = _module(cp, nc, red.ReductionConfig(0, False, 0, 0, True, False), dt_s)
@@ -316,6 +320,7 @@ def test_rasm_diurnal_bins_take_the_three_hour_window_means(cp):
     assert not bins[3:].any()
 
 
+@pytest.mark.gpu
 def test_t0_frame_is_zero_windows_must_be_whole_steps_and_a_checkpoint_resumes(cp):
     nc = 4
     module, owner, utils = _module(cp, nc, red.ReductionConfig(30, True, 2, 30, False, True), 600.0)
@@ -340,6 +345,7 @@ def test_t0_frame_is_zero_windows_must_be_whole_steps_and_a_checkpoint_resumes(c
         red.ReductionModule(owner2, red.ReductionConfig(0, False, 0, 0, True, False)).setup(_Utils(red.NAMES), 700.0)
 
 
+@pytest.mark.gpu
 def test_resident_provider_folds_publishes_and_carries_the_module(cp):
     from woof.hex.mpasdiag.convective_v842 import MAXIMA
     from woof.hex.mpasphys.resident_output_diagnostics_v842 import PRODUCED, ResidentOutputDiagnostics as R
@@ -359,3 +365,83 @@ def test_resident_provider_folds_publishes_and_carries_the_module(cp):
     assert {red.STATE_PREFIX + n for n in red.ENERGY_NAMES} <= set(state)
     provider.resume_accumulators(state)
     assert set(provider._resume) == set(state)
+
+
+def _constant(owner, nc, value=300.0):
+    for k in SURF:
+        owner.fields["diag_physics", k] = owner.pad(np.full(nc, value, np.float32))
+    owner.fields["diag", "surface_pressure"] = owner.pad(np.full(nc, 1.0e5, np.float32))
+
+
+@pytest.mark.gpu
+def test_an_unfinished_mean_window_publishes_the_mean_so_far(cp):
+    """A daily mean with dt 600 written at a three-hourly frame: the words hold 18 samples' sum (the kernel divides
+    only when the day ends).  THE BREAKAGE: constant 300 K published 5400 K as rasm_t2_mean."""
+    nc = 3
+    module, owner, utils = _module(cp, nc, red.ReductionConfig(0, True, 4, 1, False, False), 600.0)
+    _constant(owner, nc)
+    for step in range(1, 19):
+        _step(module, owner, step)
+    module.compute()
+    np.testing.assert_allclose(_pub(cp, owner, "rasm_t2_mean", nc), 300.0, rtol=1e-6)
+    assert float(cp.asnumpy(module.words["rasm_t2_mean"])[0]) == pytest.approx(5400.0)   # the words stay sums
+
+
+@pytest.mark.gpu
+def test_diurnal_bins_publish_their_monthly_mean_so_far(cp):
+    """Two constant 300 K days: each completed bin holds the sum of two daily bin means until the month ends.
+    THE BREAKAGE: 600 K was published for a completed bin."""
+    nc = 2
+    module, owner, utils = _module(cp, nc, red.ReductionConfig(0, False, 0, 0, True, False), 3600.0)
+    _constant(owner, nc)
+    for step in range(1, 49):
+        _step(module, owner, step)
+    module.compute()
+    np.testing.assert_allclose(_pub(cp, owner, "rasm_t2_diurn", nc, bins=True), 300.0, rtol=1e-6)
+    state = module.state()
+    fresh, f_owner, _ = _module(cp, nc, red.ReductionConfig(0, False, 0, 0, True, False), 3600.0)
+    fresh.resume(state)
+    fresh.compute()
+    np.testing.assert_allclose(_pub(cp, f_owner, "rasm_t2_diurn", nc, bins=True), 300.0, rtol=1e-6)
+
+
+@pytest.mark.gpu
+def test_a_diurnal_start_off_the_three_hour_calendar_is_refused_at_setup(cp):
+    """A 01:00 start closes its first bin at 04:00, which the calendar-hour selection cannot place: refused before
+    the forecast, not at the first bin's end."""
+    with pytest.raises(ValueError, match="three-hour boundary"):
+        _module(cp, 2, red.ReductionConfig(0, False, 0, 0, True, False), 600.0, start=dt.datetime(2026, 1, 1, 1))
+    _module(cp, 2, red.ReductionConfig(0, False, 0, 0, True, False), 600.0, start=dt.datetime(2026, 1, 1, 3))
+
+
+@pytest.mark.gpu
+def test_a_continuation_keeps_the_straight_runs_window_and_bin_phase(cp):
+    """A route-checkpoint continuation's writer starts at the checkpoint (here 01:00, off the three-hour calendar)
+    with the steps before it as the owner's step_offset: windows and bins keep the straight run's phase, words
+    bitwise.  THE BREAKAGE: the clock was taken from the segment's start."""
+    nc, dt_s, k = 3, 600.0, 6
+    config = red.ReductionConfig(0, True, 2, 30, True, False)
+    straight, s_owner, _ = _module(cp, nc, config, dt_s)
+    first, f_owner, _ = _module(cp, nc, config, dt_s)
+    rng = np.random.default_rng(5)
+    for step in range(1, 40):
+        values = _feed(s_owner, nc, rng)
+        for name, v in values.items():
+            f_owner.fields["diag" if name == "surface_pressure" else "diag_physics", name] = f_owner.pad(v)
+        _step(straight, s_owner, step)
+        if step <= k:
+            _step(first, f_owner, step)
+            continue
+        if step == k + 1:
+            r_owner = _owner(cp, nc)
+            r_owner.writer = SimpleNamespace(start=r_owner.start + dt.timedelta(seconds=k * dt_s))
+            r_owner.step_offset = k
+            resumed = red.ReductionModule(r_owner, config)
+            resumed.setup(_Utils(red.NAMES), dt_s)
+            resumed.resume(first.state())
+        r_owner.fields.update({key: value for key, value in s_owner.fields.items()})
+        resumed.begin(step - k, s_owner.start + dt.timedelta(seconds=step * dt_s))
+        resumed.update()
+        for name, word in straight.words.items():
+            np.testing.assert_array_equal(cp.asnumpy(resumed.words[name]).view(np.uint32),
+                                          cp.asnumpy(word).view(np.uint32), f"{name} step {step}")

@@ -259,6 +259,7 @@ def _step(module, owner, case, step):
     module.update()
 
 
+@pytest.mark.gpu
 def test_every_accumulator_equals_wrf_module_diag_misc_after_every_step(cp):
     case = _load_oracle()
     module, owner, utils = _module(cp, case)
@@ -295,6 +296,7 @@ def test_the_oracle_is_load_bearing():
     assert not np.array_equal(pc, case["expected"][end]["prec"][0])
 
 
+@pytest.mark.gpu
 def test_t0_frame_is_zero_and_an_unallocated_input_is_zero(cp):
     case = _load_oracle()
     module, owner, utils = _module(cp, case, precip=("raincv", "t2m"), with_cu=False)
@@ -311,6 +313,7 @@ def test_t0_frame_is_zero_and_an_unallocated_input_is_zero(cp):
     assert not cp.asnumpy(module.tend["athshten"]).any()            # MPAS has no shallow-cumulus pool
 
 
+@pytest.mark.gpu
 def test_a_window_that_is_not_whole_steps_is_refused(cp):
     case = _load_oracle()
     owner = _owner(cp, case["nc"], case["nl"])
@@ -320,6 +323,7 @@ def test_a_window_that_is_not_whole_steps_is_refused(cp):
         acc.AccumulatorModule(owner, acc.AccConfig(0.0, True, 5.0)).setup(_Utils(acc.NAMES), 70.0)
 
 
+@pytest.mark.gpu
 def test_only_carried_fields_accumulate_and_a_checkpoint_resumes(cp):
     case = _load_oracle()
     module, owner, utils = _module(cp, case)
@@ -350,6 +354,7 @@ def test_only_carried_fields_accumulate_and_a_checkpoint_resumes(cp):
     assert not owner2.buffers
 
 
+@pytest.mark.gpu
 def test_resident_provider_folds_publishes_and_carries_the_module(cp):
     from woof.hex.mpasdiag.convective_v842 import MAXIMA
     from woof.hex.mpasphys.resident_output_diagnostics_v842 import PRODUCED, ResidentOutputDiagnostics as R
@@ -372,3 +377,58 @@ def test_resident_provider_folds_publishes_and_carries_the_module(cp):
     assert set(provider._resume) == {acc.STATE_PREFIX + n for n in (*acc.NAMES, "graup_acc_nc")}
     provider.after_snapshot()           # clock windows: nothing is reset by a write
     assert cp.asnumpy(module.acc["prec_acc_c"]).any()
+
+
+@pytest.mark.gpu
+def test_a_window_the_kernels_float32_test_would_miss_is_refused(cp):
+    """0.13 min at dt 0.2 s is 39 whole steps in float64, but the kernel's float32 clock (7.8000002) and window
+    (60.f * 0.13f = 7.7999997) never MOD to zero, so the window would never reset."""
+    case = _load_oracle()
+    owner = _owner(cp, case["nc"], case["nl"])
+    with pytest.raises(ValueError, match="float32"):
+        acc.AccumulatorModule(owner, acc.AccConfig(0.13, False, 0.0)).setup(_Utils(acc.NAMES), 0.2)
+    acc.AccumulatorModule(owner, acc.AccConfig(0.5, False, 0.0)).setup(_Utils(acc.NAMES), 0.2)
+
+
+@pytest.mark.gpu
+def test_a_continuation_keeps_the_straight_runs_window_phase(cp):
+    """A route-checkpoint continuation's writer starts at the checkpoint and its loop counts steps from 0 again;
+    the windows run on the straight run's clock through the owner's step_offset (runtime_v842).  THE BREAKAGE: the
+    elapsed time was taken from the segment's start, so every window after a checkpoint reset late."""
+    case = _load_oracle()
+    window = round(60.0 * case["prec_min"] / case["dt"])
+    k = 1
+    assert window > 1 and case["ns"] > window + k
+    straight, s_owner, _ = _module(cp, case)
+    first, f_owner, _ = _module(cp, case)
+    for s in range(k):
+        _step(straight, s_owner, case, s)
+        _step(first, f_owner, case, s)
+    resumed, r_owner, _ = _module(cp, case)
+    r_owner.writer = SimpleNamespace(start=r_owner.start + dt.timedelta(seconds=k * case["dt"]))
+    r_owner.step_offset = k
+    resumed.resume(first.state())
+    for s in range(k, case["ns"]):
+        _feed(s_owner, case, s)
+        _feed(r_owner, case, s)
+        when = s_owner.start + dt.timedelta(seconds=(s + 1) * case["dt"])
+        straight.begin(s + 1, when)
+        resumed.begin(s + 1 - k, when)
+        straight.update()
+        resumed.update()
+        for name in acc.PREC_NAMES:
+            np.testing.assert_array_equal(cp.asnumpy(resumed.acc[name]).view(np.uint32),
+                                          cp.asnumpy(straight.acc[name]).view(np.uint32), f"{name} step {s}")
+
+
+@pytest.mark.parametrize("package", ["prec_acc_dt", "acc_phy_tend", "afwa_ptype_opt", "afwa_severe_opt", "clwrf",
+                                     "rasm_mean", "rasm_diurnal", "surface_energy_diag"])
+def test_a_native_file_restart_is_refused_with_an_accumulator_on(tmp_path, package):
+    """The Registry restart stream holds none of the &diagnostics accumulators, so a native-file restart (no route
+    checkpoint carrier) is refused by name before anything runs; the route's own checkpoint carries them."""
+    from pathlib import Path
+    from woof.hex.mpasphys.runtime_v842 import _run_native_dynamics
+    layout = SimpleNamespace(configs={"config_do_restart": True}, packages={package})
+    with pytest.raises(ValueError, match="native-file restart with &diagnostics accumulators on"):
+        _run_native_dynamics(SimpleNamespace(), SimpleNamespace(mode="correct"), layout, None, None, None,
+                             None, None, 20.0, 1, Path(tmp_path))

@@ -118,6 +118,8 @@ NAMES = tuple(FIELDS)
 
 #: Prefix of this module's keys in the output diagnostics' checkpoint accumulator dict.
 STATE_PREFIX = "red:"
+#: the checkpoint row of the publication state (ReductionModule.compute): mean finished, month finished, bin days
+PUBLISH_KEY = "publish_state"
 
 
 @dataclass(frozen=True)
@@ -220,6 +222,12 @@ class ReductionModule:
         self.owner, self.config = owner, config
         self._seconds = None
         self._now = None
+        # What the last fold left in the words (publication normalises the rest; see compute): whether the RASM
+        # mean window just finished (the kernel divided it), the completed diurnal bins per slot since the month
+        # began, and whether the month just finished (the kernel divided the bins).
+        self._mean_done = False
+        self._bin_count = np.zeros(DIURNAL_BINS, dtype=np.int64)
+        self._month_done = False
 
     # -- setup -----------------------------------------------------------------------------------------
     def setup(self, utils, dt):
@@ -246,6 +254,15 @@ class ReductionModule:
         if self.diurnal and not (self.dt == int(self.dt) and 10800 % int(self.dt) == 0):
             raise ValueError("config_diurnal_diag needs a whole-second step that divides three hours: WRF's three-hour "
                              "bins must close on a step boundary")
+        if self.diurnal:
+            # The bins close on the elapsed-time alarm (every 10800 s from the start) and are selected by the calendar
+            # hour: only a start on a three-hour boundary of the day makes the two agree.  Refused here, before the
+            # forecast, rather than at the first bin's end.
+            origin = self._origin()
+            if (origin.hour * 3600 + origin.minute * 60 + origin.second) % 10800 or origin.microsecond:
+                raise ValueError(f"config_diurnal_diag needs a start on a three-hour boundary of the day (00, 03, ... "
+                                 f"21 UTC); this run starts at {origin:%H:%M:%S}, so its first bin would close off "
+                                 "the calendar's three-hour bins")
         self.words = {}
         z2 = lambda: cp.zeros(nc, dtype=f32)
         if self.clwrf:
@@ -290,9 +307,15 @@ class ReductionModule:
         if int(step) <= 0:
             self._seconds = self._now = None
             return
-        start = self.owner.writer.start
+        start = self._origin()
         self._seconds = (when - start).total_seconds() - self.dt
         self._now = start + timedelta(seconds=self._seconds)
+
+    def _origin(self):
+        """The straight run's start: a continuation's writer starts at the checkpoint, and the steps before it are
+        the owner's step_offset (the physics clock's), so every window and calendar bin keeps the straight run's
+        phase."""
+        return self.owner.writer.start - timedelta(seconds=int(getattr(self.owner, "step_offset", 0)) * self.dt)
 
     def update(self):
         if not self.accumulates or self._seconds is None or not self.nc:
@@ -314,6 +337,7 @@ class ReductionModule:
                               moist=self._qv0().reshape(1, nc),
                               ht=self.cp.ascontiguousarray(self.owner.authority("mesh", "zgrid")[0, :nc],
                                                            dtype=self.cp.float32).reshape(1, nc))
+            self._mean_done = bool(finish)
             rasm_mean(surface, atmosphere, {k: s[f"rasm_{k}_mean"].reshape(1, nc) for k in MEANS},
                       s["rasm_nsteps_mean"].reshape(1, nc), reset=reset, finish=finish, _validated=True)
         if self.diurnal:
@@ -323,6 +347,11 @@ class ReductionModule:
             hour = (self._now + timedelta(seconds=int(self.dt))).hour
             if finish and hour % 3:
                 raise RuntimeError("native RASM cannot select this diurnal cycle")
+            if rm:
+                self._bin_count[:] = 0
+            if finish:
+                self._bin_count[(hour // 3 or 8) - 1] += 1
+            self._month_done = bool(fm)
             rasm_diurnal(surface, {k: s[f"rasm_{k}_dtmp"].reshape(1, nc) for k in SURFACE},
                          {k: s[f"rasm_{k}_diurn"] for k in SURFACE}, s["rasm_nsteps_dtmp"].reshape(1, nc),
                          s["rasm_nsteps_diurn"].reshape(1, nc), reset=reset, reset_month=rm, finish=finish,
@@ -337,23 +366,48 @@ class ReductionModule:
 
     # -- publication -----------------------------------------------------------------------------------
     def compute(self):
-        """Publish the statistics into the diag buffers a due stream will write."""
-        nc, s, write = self.nc, self.words, self.utils.field_will_be_written
+        """Publish the statistics into the diag buffers a due stream will write.
+
+        The RASM words hold running SUMS until their window closes (the kernels divide only on the finishing step:
+        a daily mean's words are 18 samples' sum at a three-hourly frame).  Published means are therefore the mean so
+        far: an unfinished mean window is divided by its sample count, and each diurnal bin by the days it has
+        completed this month.  A finished window or month is published as the kernel left it.  The words themselves
+        (and the checkpoint) are untouched."""
+        nc, s, write, cp = self.nc, self.words, self.utils.field_will_be_written, self.cp
         for name in self.clwrf:
             if write(name):
                 self.owner.buffer("diag", name)[:nc] = s[CLWRF_SLOT[name]]
-        for name in (*self.mean, *self.energy):
+        for name in self.energy:
             if write(name):
                 self.owner.buffer("diag", name)[:nc] = s[name]
+        count = None
+        for name in self.mean:
+            if write(name):
+                if self._mean_done:
+                    self.owner.buffer("diag", name)[:nc] = s[name]
+                    continue
+                if count is None:
+                    count = s["rasm_nsteps_mean"].astype(cp.float32)
+                self.owner.buffer("diag", name)[:nc] = cp.where(count > 0, s[name] / cp.maximum(count, 1), 0)
+        days = cp.asarray(self._bin_count.astype(np.float32)).reshape(DIURNAL_BINS, 1)
         for name in self.diurnal:
             if write(name):
-                self.owner.buffer("diag", name)[:DIURNAL_BINS, :nc] = s[name]
+                self.owner.buffer("diag", name)[:DIURNAL_BINS, :nc] = (
+                    s[name] if self._month_done else cp.where(days > 0, s[name] / cp.maximum(days, 1), 0))
 
     # -- checkpoint continuation -----------------------------------------------------------------------
     def state(self):
-        return {STATE_PREFIX + k: self.cp.asnumpy(v) for k, v in self.words.items()}
+        out = {STATE_PREFIX + k: self.cp.asnumpy(v) for k, v in self.words.items()}
+        out[STATE_PREFIX + PUBLISH_KEY] = np.array([int(self._mean_done), int(self._month_done),
+                                                    *self._bin_count], dtype=np.int64)
+        return out
 
     def resume(self, state):
+        flags = state.get(STATE_PREFIX + PUBLISH_KEY)
+        if flags is not None:
+            flags = np.asarray(flags).reshape(-1)
+            self._mean_done, self._month_done = bool(flags[0]), bool(flags[1])
+            self._bin_count[:] = flags[2:2 + DIURNAL_BINS]
         for key, value in state.items():
             if key.startswith(STATE_PREFIX) and key[len(STATE_PREFIX):] in self.words:
                 target = self.words[key[len(STATE_PREFIX):]]

@@ -179,6 +179,14 @@ class AccumulatorModule:
             if minutes and abs(steps - round(steps)) > 1e-9:
                 raise ValueError(f"{key} = {minutes:g} min is not a whole number of {self.dt:g} s steps: WRF's window "
                                  "reset (MOD of the start-of-step clock) would never fire after the first window")
+            # The kernels test the window in float32 (output_diagnostics.cu: fmodf of the float32 start-of-step clock
+            # by 60.f * minutes, or by the float32 interval): a window whole in float64 can still miss there
+            # (0.13 min at dt 0.2 s: 7.8000002 against 7.7999997), and it would then never reset.
+            f32 = np.float32
+            window = (f32(60.0) * f32(minutes) if key == "prec_acc_dt" else f32(60.0 * minutes))
+            if minutes and np.fmod(f32(round(steps) * self.dt), window) != 0:
+                raise ValueError(f"{key} = {minutes:g} min ends on step {round(steps)} in float64, but the kernel's "
+                                 "float32 window test misses that step, so the window would never reset")
         carried = lambda names: [n for n in names if utils.stream_inclusion_count(n, Direction.OUTPUT) > 0]
         self.prec_names = carried(PREC_NAMES) if self.config.prec_acc_dt > 0 else []
         self.tend_names = carried(TEND_NAMES) if self.config.acc_phy_tend else []
@@ -214,7 +222,9 @@ class AccumulatorModule:
         if int(step) <= 0:
             self._seconds = None
             return
-        elapsed = (when - self.owner.writer.start).total_seconds()
+        # A continuation's writer starts at the checkpoint; its windows run on the straight run's clock, the
+        # steps before the segment being the owner's step_offset (as lightning's and the physics clock's are).
+        elapsed = (when - self.owner.writer.start).total_seconds() + int(getattr(self.owner, "step_offset", 0)) * self.dt
         self._seconds = elapsed - self.dt
 
     def update(self):
