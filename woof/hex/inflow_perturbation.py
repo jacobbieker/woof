@@ -221,7 +221,10 @@ class HexInflowPerturbation:
 
     def target(self, values_rt, rk_step: int):
         """The rtheta_m relaxation target with this step's increment added."""
-        import cupy as cp
+        if getattr(self.runtime, "inflow_staged", False):
+            # The CUDA subcycle graph staged its target with the increment
+            # already (cuda_subcycle_graphs._refresh_boundaries).
+            return values_rt
         delta = self.delta()
         if delta is None:
             return values_rt
