@@ -429,6 +429,15 @@ void flux_div_scalar(const real* __restrict__ q,
                      int open_x, int open_y, int has_msf, int spec,
                      int vorder)
 {
+// GPUWM_FLUX_DIV_ZERO_FIRST: the caller's ``tend[...] = 0`` before this
+// accumulating launch is folded in.  The incoming word is the exact +0.0f
+// the fill wrote, and every path below adds its terms onto it the same way,
+// so the words written are those of the fill followed by the accumulate.
+#ifdef GPUWM_FLUX_DIV_ZERO_FIRST
+#define FLUX_DIV_TEND0(at) (0.0f)
+#else
+#define FLUX_DIV_TEND0(at) (tend_out[at])
+#endif
 #if GPUWM_WRF_EXACT_C_ADVECTION || GPUWM_NO_HADV || GPUWM_HORDER == 2 || GPUWM_HORDER == 3 || GPUWM_HORDER == 4 || GPUWM_HORDER == 6
 
     int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -529,7 +538,7 @@ void flux_div_scalar(const real* __restrict__ q,
                 -rv[I3(k,j,i,ny+1,nx)]*(q[IDX3(k,j,i)]+q[IDX3(k,jm,i)]));
         }
 #endif
-        real t = tend_out[IDX3(k,j,i)];
+        real t = FLUX_DIV_TEND0(IDX3(k,j,i));
 #if GPUWM_HORDER == 2 || GPUWM_HORDER == 3 || GPUWM_HORDER == 4
         if(applyx)t=t-tx;
         if(applyy)t=t-ty;
@@ -572,7 +581,7 @@ void flux_div_scalar(const real* __restrict__ q,
         real vel = rw[I3(kf, j, i, ny, nx)];
         fz[s] = zface_half(q, vel, kf, j, i, nz, ny, nx, fnm, fnp, vorder);
     }
-    real result=tend_out[IDX3(k,j,i)];
+    real result=FLUX_DIV_TEND0(IDX3(k,j,i));
 #if GPUWM_NO_HADV
 #ifdef GPUWM_THETA_OFFSET
     result -= (mscale*dx_inv)*300.0f*(ru[I3(k,j,i+1,ny,nx+1)]-ru[I3(k,j,i,ny,nx+1)]);
@@ -676,7 +685,8 @@ void flux_div_scalar(const real* __restrict__ q,
             fzo[s] = zface_half(q, rw[I3(kf, j, i, ny, nx)], kf, j, i,
                                 nz, ny, nx, fnm, fnp, vorder);
         }
-        tend_out[IDX3(k, j, i)] += t - (fzo[1] - fzo[0]) * rdnw[k];
+        tend_out[IDX3(k, j, i)] = FLUX_DIV_TEND0(IDX3(k, j, i))
+                                + (t - (fzo[1] - fzo[0]) * rdnw[k]);
         return;
     }
 
@@ -755,7 +765,8 @@ void flux_div_scalar(const real* __restrict__ q,
                                 nz, ny, nx, fnm, fnp, vorder);
         }
         real t = msf[(size_t)j * nx + i] * th + tb;    // WRF mrdx/mrdy
-        tend_out[IDX3(k, j, i)] += t - (fzo[1] - fzo[0]) * rdnw[k];
+        tend_out[IDX3(k, j, i)] = FLUX_DIV_TEND0(IDX3(k, j, i))
+                                + (t - (fzo[1] - fzo[0]) * rdnw[k]);
         return;
     }
 
@@ -782,16 +793,19 @@ void flux_div_scalar(const real* __restrict__ q,
         fz[s] = zface_half(q, vel, kf, j, i, nz, ny, nx, fnm, fnp, vorder);
     }
     if (has_msf) {                       // WRF mrdx/mrdy = msft*rdx/rdy
-        tend_out[IDX3(k, j, i)] += msf[(size_t)j * nx + i]
+        tend_out[IDX3(k, j, i)] = FLUX_DIV_TEND0(IDX3(k, j, i))
+                                + (msf[(size_t)j * nx + i]
                                    * (-(fx[1] - fx[0]) * dx_inv
                                       - (fy[1] - fy[0]) * dy_inv)
-                                   - (fz[1] - fz[0]) * rdnw[k];
+                                   - (fz[1] - fz[0]) * rdnw[k]);
     } else {                             // original: bitwise Phase 2
-        tend_out[IDX3(k, j, i)] += -(fx[1] - fx[0]) * dx_inv
+        tend_out[IDX3(k, j, i)] = FLUX_DIV_TEND0(IDX3(k, j, i))
+                                + (-(fx[1] - fx[0]) * dx_inv
                                    - (fy[1] - fy[0]) * dy_inv
-                                   - (fz[1] - fz[0]) * rdnw[k];
+                                   - (fz[1] - fz[0]) * rdnw[k]);
     }
 #endif
+#undef FLUX_DIV_TEND0
 }
 
 // ---------------------------------------------------------------------------
