@@ -295,6 +295,15 @@ def _grading_keywords(args: argparse.Namespace) -> dict[str, float]:
     return {key: number for key, number in _grading(args).items() if key != "cull_pad_scale"}
 
 
+def _density_rasters(args: argparse.Namespace, fine_dx_m: float) -> tuple[str, ...]:
+    from .mesh_point import PointPlanRefusal, density_raster_paths
+
+    try:
+        return density_raster_paths(getattr(args, "density_raster", None) or (), fine_dx_m=fine_dx_m)
+    except PointPlanRefusal as error:
+        raise RegionalRefusal(str(error)) from error
+
+
 def plan(args: argparse.Namespace) -> dict[str, Any]:
     from . import mesh_shape
     from .mesh_point import drawn_shape, parse_point
@@ -447,6 +456,10 @@ def plan(args: argparse.Namespace) -> dict[str, Any]:
         # The ladder's grading (ramp width, ring spacing, cull pad): only a run that asked for one carries the key,
         # so every other plan is the plan it always was.
         **({"grading": _grading(args)} if _grading(args) else {}),
+        # Field-driven refinement painted with the ladder (finer wins), e.g. `woof hex density --terrain-gradient`.
+        **({"density_rasters": list(_density_rasters(
+            args, float(args.fine_dx_m if args.fine_dx_m is not None else row["fine_dx_m"])))}
+           if getattr(args, "density_raster", None) else {}),
         "card": args.card,
         "cycle": args.cycle if parent is None else parent["start"],
         "parent": parent,
@@ -681,6 +694,8 @@ def _stage_mesh(args, value, status) -> dict[str, Any]:
         argv += ["--background-km", repr(value["background_km"])]
     for key, number in (value.get("grading") or {}).items():
         argv += [GRADING_FLAGS[key], repr(float(number))]
+    for raster in value.get("density_rasters") or ():
+        argv += ["--density-raster", raster]
     if value["card"]:
         argv += ["--card", value["card"]]
     if args.geog is not None:
@@ -1525,6 +1540,9 @@ def add_regional_parser(commands: argparse._SubParsersAction) -> None:
     grading.add_argument("--cull-pad-scale", type=float, default=None, metavar="X",
                          help="the limited-area cut as a multiple of the core radius (mesh-plan default 1.35); "
                               "a wider cut keeps more of the graded ring")
+    grading.add_argument("--density-raster", action="append", default=[], type=Path, metavar="FILE",
+                         help="a woof-hex.density.v1 raster (`woof hex density`, e.g. --terrain-gradient) painted "
+                              "with the ladder, finer wins; repeatable; none finer than --fine-dx-m")
     parser.add_argument("--card", default=None,
                         help="a measured card key, so the mesh plan prices the cull on it")
     parser.add_argument("--vertical-spec", type=Path, default=None, help="default: the row's")
