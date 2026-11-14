@@ -654,7 +654,14 @@ def test_diff6_dry_and_scalar_rows_take_different_dt(monkeypatch):
     def record(f, tend, mut, c1, c2, factor, dt, opt, **kw):
         seen[id(f)] = dt
 
+    def record_multi(rows, mut, c1, c2, opt, **kw):
+        # The mass-point rows share one diff6_multi launch; each row still
+        # carries its own (factor, dt).
+        for f, _tend, _factor, dt in rows:
+            seen[id(f)] = dt
+
     monkeypatch.setattr(dycore, "launch_diff6", record)
+    monkeypatch.setattr(dycore, "launch_diff6_multi", record_multi)
     dycore.prepare_fixed_tendencies(state, cfg)
 
     for name in ("u0", "v0", "w0", "thp0"):
