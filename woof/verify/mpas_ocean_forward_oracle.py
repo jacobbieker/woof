@@ -48,6 +48,8 @@ CASES = (
     ("unsplit_two_steps", 20261503, (6, 5), 6, 2, "00:01:00", "0000_00:00:20", {
         "config_time_integrator": "unsplit_explicit", "config_use_const_visc": True,
         "config_use_const_diff": True}),
+    # one block of a decomposition: three owned columns, three halo layers
+    ("split_nested_halos", 20261505, (12, 6), 8, 3, "00:02:00", "0000_00:00:30", {"_owned": 3}),
     ("split_filter_btr_mode", 20261504, (6, 6), 7, 2, "00:02:00", "0000_00:00:40", {
         "config_filter_btr_mode": True, "config_start_time": "2000-02-28_23:58:00",
         "diagnostics:simulationStartTime": "2000-01-01_00:00:00"}),
@@ -67,10 +69,11 @@ def make_case(name, seed, torus, n_levels, steps, dt, btr_dt, overrides, precisi
     through land edges; the geometry, weights and coefficients drawn at random."""
     rs = np.random.RandomState(seed)
     real = PRECISIONS[precision]
-    mesh = hex_mesh(*torus, 1.0 / 6.0, n_levels, rs)
+    mesh = hex_mesh(*torus, 1.0 / 6.0, n_levels, rs, owned_columns=overrides.get("_owned"))
     nc, ne, nv, nl = mesh["nCells"], mesh["nEdges"], mesh["nVertices"], n_levels
     me, me2, vd, nt, na = mesh["maxEdges"], mesh["maxEdges2"], mesh["vertexDegree"], 2, 14
-    config = {**_ss.BASE_CONFIG, **CLOCK_CONFIG, **overrides, "config_dt": dt, "config_btr_dt": btr_dt,
+    config = {**_ss.BASE_CONFIG, **CLOCK_CONFIG, **{k: v for k, v in overrides.items() if not k.startswith("_")},
+              "config_dt": dt, "config_btr_dt": btr_dt,
               "oracle_n_steps": steps}
 
     def uniform(lo, hi, shp):
@@ -106,9 +109,8 @@ def make_case(name, seed, torus, n_levels, steps, dt, btr_dt, overrides, precisi
             "dt": float(interval_seconds(dt))}
     values = {
         **{k: v for k, v in mesh.items()},
-        "nVertLevels": nl, "nCellsSolve": nc, "nEdgesSolve": ne, "nVerticesSolve": nv,
-        "nCellsArray": np.array([nc] * 4, np.int32), "nEdgesArray": np.array([ne] * 4, np.int32),
-        "nVerticesArray": np.array([nv] * 4, np.int32),
+        "nVertLevels": nl, "nCellsSolve": int(mesh["nCellsArray"][0]), "nEdgesSolve": int(mesh["nEdgesArray"][0]),
+        "nVerticesSolve": int(mesh["nVerticesArray"][0]),
         "weightsOnEdge": uniform(-0.3, 0.3, (ne + 1, me2)), "kiteAreasOnVertex": uniform(1.0e7, 1.5e8, (nv + 1, vd)),
         "dcEdge": uniform(1.0e4, 3.0e4, ne + 1), "dvEdge": uniform(5.0e3, 2.0e4, ne + 1),
         "areaCell": uniform(1.0e8, 8.0e8, nc + 1), "areaTriangle": uniform(5.0e7, 4.0e8, nv + 1),
