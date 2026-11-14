@@ -292,9 +292,10 @@ def test_a_twin_is_reused_only_for_the_same_effective_configuration(tmp_path, mo
 
 
 def test_publish_refuses_inputs_that_are_not_one_comparison():
-    def results(backend, case="c", hours=1, args=("--physics", "a=1")):
+    def results(backend, case="c", hours=1, args=("--physics", "a=1"), row_args=()):
         return {"backend": backend, "case": case, "hours": hours, "rows": {
-            "x": {"overrides": {"a": "1"}, "physics_args": list(args), "outcome": "ran"}}}
+            "x": {"overrides": {"a": "1"}, "physics_args": list(args), "row_args": list(row_args),
+                  "outcome": "ran"}}}
 
     matrix.publish([results("cuda"), results("metal")])
     with pytest.raises(ValueError, match="more than one results file for backend cuda"):
@@ -305,6 +306,8 @@ def test_publish_refuses_inputs_that_are_not_one_comparison():
         matrix.publish([results("cuda"), results("metal", hours=6)])
     with pytest.raises(ValueError, match="row x ran with different physics_args"):
         matrix.publish([results("cuda"), results("metal", args=("--physics", "a=2"))])
+    with pytest.raises(ValueError, match="row x ran with different row_args"):
+        matrix.publish([results("cuda"), results("metal", row_args=("--geog", "/other"))])
 
 
 def test_the_smoke_holds_each_backend_to_its_own_record():
@@ -317,3 +320,14 @@ def test_the_smoke_holds_each_backend_to_its_own_record():
     assert matrix.regression("r", evidence, "cuda", {"outcome": "refused", "needs": ["THC"]}) is None
     assert "now needs" in matrix.regression("r", evidence, "cuda", {"outcome": "refused", "needs": ["LAI"]})
     assert "no recorded metal outcome" in matrix.regression("r", evidence, "metal", {"outcome": "refused"})
+
+
+def test_case_identity_names_inline_option_files(tmp_path):
+    """THE BREAKAGE: an --init=PATH argument was skipped as a flag, so a re-staged init at the same path kept
+    the old rows on resume."""
+    init = tmp_path / "init.nc"
+    init.write_bytes(b"one")
+    case = {"forecast_args": [f"--init={init}"], "hours": 1}
+    first = matrix.case_identity(case)
+    init.write_bytes(b"a longer re-staged init")
+    assert matrix.case_identity(case) != first

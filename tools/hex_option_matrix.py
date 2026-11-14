@@ -496,6 +496,8 @@ def case_identity(case: dict) -> str:
     named = {}
     for value in [*case.get("forecast_args", []), case.get("static"),
                   *(arg for args in case.get("row_args", {}).values() for arg in args)]:
+        if isinstance(value, str) and value.startswith("-") and "=" in value:
+            value = value.split("=", 1)[1]      # --init=PATH names the same file as --init PATH
         if isinstance(value, str) and value and not value.startswith("-"):
             path = Path(value) if Path(value).is_absolute() else REPO / value
             if path.is_file():
@@ -608,7 +610,7 @@ def publish(loaded: list[dict]) -> dict:
     """Merge per-backend results into the committed evidence file.
 
     The inputs must be one comparison: one file per backend, the same case label and duration, and each row
-    run with the same assignment (overrides and physics arguments) on every backend."""
+    run with the same assignment (overrides, physics arguments and row flags) on every backend."""
 
     backends = [data.get("backend") for data in loaded]
     duplicated = sorted({b for b in backends if backends.count(b) > 1})
@@ -621,7 +623,7 @@ def publish(loaded: list[dict]) -> dict:
     names = sorted({name for data in loaded for name in data["rows"]})
     for name in names:
         held = [(data["backend"], data["rows"][name]) for data in loaded if name in data["rows"]]
-        for field in ("overrides", "physics_args"):
+        for field in ("overrides", "physics_args", "row_args"):
             values = {json.dumps(row.get(field), sort_keys=True) for _, row in held if field in row}
             if len(values) > 1:
                 raise ValueError(f"row {name} ran with different {field} on "
