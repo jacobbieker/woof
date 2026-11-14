@@ -288,3 +288,5 @@ def split_step(*, dt: float, n_btr_subcycles: int, pools: dict, configs: dict) -
         i32(f["avgTracersSurfaceValue"].shape[1]), i32(f["index_avgTemperatureSurfaceValue"]),
         i32(f["index_avgSSHGradientZonal"]), i32(f["index_avgSSHGradientMeridional"]),
         i32(f["nAccumulatedCoupled"]), real(T0_KELVIN)))
+    # ocn_time_average_coupled_accumulate counts the step in
+    f["nAccumulatedCoupled"] = int(f["nAccumulatedCoupled"]) + 1
