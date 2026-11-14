@@ -342,8 +342,12 @@ class LightningModule:
 
     # -- the per-step fold ------------------------------------------------------------------------------
     def begin(self, step, when):
-        """The step the next :meth:`update` folds (steps <= 0 fold nothing)."""
-        self._step = int(step) if int(step) > 0 else None
+        """The step the next :meth:`update` folds (steps <= 0 fold nothing), on the straight run's clock.
+
+        ``step`` is the loop's local step; a checkpoint continuation's owner carries the straight run's steps before
+        the segment (``step_offset``), as the physics clock does, so the window matches the restored activation.
+        """
+        self._step = int(step) + int(getattr(self.owner, "step_offset", 0)) if int(step) > 0 else None
 
     def due(self) -> float | None:
         """The activation clock's next value when the step that :meth:`begin` named is due, else None."""

@@ -11,7 +11,8 @@ fields.  Here:
 * over several steps, with WRF's activation clock (lightning_start_seconds, lightning_dt), every published word
   equals woof.core.lightning.launch_lightning (the kernels graded against WRF's Fortran by
   tests/test_lightning_cuda.py) on those columns: PR92 w (1), PR92 cloud top (2) and LPI (3);
-* the flash counts and the clock ride a checkpoint.
+* the flash counts and the clock ride a checkpoint: a continuation on local steps plus the straight run's step
+  offset is bitwise the straight run.
 """
 from __future__ import annotations
 
@@ -279,31 +280,58 @@ def test_every_word_equals_the_wrf_routes_launcher_over_the_steps(cp, config):
         assert not cp.asnumpy(want["lpi"]).any()
 
 
-def test_a_checkpoint_resumes_the_counts_and_the_clock(cp):
+@pytest.mark.parametrize("config, checkpoint", [
+    (ltng.LightningConfig(option=1, lightning_dt=40.0), 3),
+    (ltng.LightningConfig(option=2, lightning_dt=60.0, start_seconds=20.0), 4),
+    (ltng.LightningConfig(option=3), 5),
+])
+def test_a_checkpoint_resumes_the_counts_and_the_clock(cp, config, checkpoint):
+    """A continuation counts its loop steps from 0 again (runtime_v842) with the straight run's steps before it as
+    the owner's step_offset, as physics_clock_offset hands physics: every activation and word equals the straight
+    run's.  THE BREAKAGE: the window was formed from the local step, so the restored activation (the straight run's
+    clock) lay past it and lightning stopped updating after a resume."""
     cols = _columns()
-    config = ltng.LightningConfig(option=1, lightning_dt=40.0)
 
-    def module():
-        m = ltng.LightningModule(_owner(cp, cols), config)
+    def module(offset=0):
+        owner = _owner(cp, cols)
+        owner.step_offset = offset
+        m = ltng.LightningModule(owner, config)
         m.setup(_Utils(ltng.NAMES))
         m.reflectivity = lambda theta, zgrid: cp.asarray(cols["refl"])
         return m
 
     straight, first = module(), module()
-    for step in (1, 2, 3):
+    for step in range(1, checkpoint + 1):
         for m in (straight, first):
             m.begin(step, None)
             m.update()
-    resumed = module()
+    resumed = module(offset=checkpoint)
+    resumed.begin(0, None)
     resumed.resume(first.state())
-    for step in (4, 5, 6):
+    before = straight.activations
+    for local in range(1, 7):
+        straight.begin(checkpoint + local, None)
+        resumed.begin(local, None)
         for m in (straight, resumed):
-            m.begin(step, None)
             m.update()
-    assert resumed.activation == straight.activation
-    for name in config.names:
-        np.testing.assert_array_equal(cp.asnumpy(resumed.out[name]).view(np.uint32),
-                                      cp.asnumpy(straight.out[name]).view(np.uint32), name)
+        assert resumed.activation == straight.activation, local
+        for name in config.names:
+            np.testing.assert_array_equal(cp.asnumpy(resumed.out[name]).view(np.uint32),
+                                          cp.asnumpy(straight.out[name]).view(np.uint32), f"{name} step {local}")
+    assert resumed.activations == straight.activations - before > 0
+
+
+def test_the_runtime_hands_the_continuation_offset_to_the_diagnostics():
+    """runtime_v842 sets the diagnostics' step_offset from the same physics_clock_offset as physics' begin_step;
+    a fresh run's stays 0."""
+    import inspect
+    from woof.hex.mpasphys import runtime_v842
+    from woof.hex.mpasphys.resident_output_diagnostics_v842 import ResidentOutputDiagnostics
+    assert ResidentOutputDiagnostics.step_offset == 0
+    source = inspect.getsource(runtime_v842._run_native_dynamics)
+    assert "diagnostics.step_offset = physics_step_offset" in source
+    assert source.index("physics_step_offset,physics_seconds_offset=clock_offset(dt)") < \
+        source.index("diagnostics.step_offset = physics_step_offset")
 
 
 def test_lightning_is_refused_on_a_multi_rank_mesh(cp):
