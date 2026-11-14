@@ -13,7 +13,10 @@ remapping (Dukowicz and Baumgardner 2000; Lipscomb and Hunke 2004):
   travel as thicknesses);
 - :func:`departure_points`, :func:`departure_triangles` (with
   ``shift_vertices_of_departure_triangle``) and :func:`quadrature_points`: the
-  region each edge's flux comes from, as triangles in their source cells.
+  region each edge's flux comes from, as triangles in their source cells;
+- :func:`make_masks` and :func:`construct_linear_fields`: each tracer as a
+  linear function in each cell, its gradient limited (no new extrema at the
+  cell's vertices) about its parent's barycenter.
 
 The kernels (``remap_v842.cu``) are held word for word to v8.4.2 compiled
 verbatim with gfortran ``-O0 -ffp-contract=off`` at RKIND 4 and 8
@@ -47,7 +50,7 @@ from woof.hex.errors import ConfigurationRefusal
 
 SOURCE_FILES = (
     "src/core_seaice/shared/mpas_seaice_advection_incremental_remap_tracers.F:165-911",
-    "src/core_seaice/shared/mpas_seaice_advection_incremental_remap.F:66-77,2510-2552,2619-2661,5280-5375,"
+    "src/core_seaice/shared/mpas_seaice_advection_incremental_remap.F:66-77,2510-2552,2619-2661,3418-5375,"
     "5390-6674,8995-9295,9309-9387",
 )
 COMPILE_OPTIONS = ("--std=c++17", "--fmad=false", "--ftz=false", "--prec-div=true", "--prec-sqrt=true")
@@ -372,3 +375,81 @@ def quadrature_points(*, mesh: dict, remap: dict) -> None:
     ne = int(mesh["nEdges"])
     _launch(precision_of(remap["xTriangle"]), "seaice_ir_quadrature_points_v842", ne * 6, (
         remap["xTriangle"], remap["yTriangle"], remap["maskEdge"], _int(ne)))
+
+
+#: incremental_remap_block's mask threshold (eps11, remap.F:67)
+EPS11 = 1.0e-11
+#: the cell moments compute_barycenter_coordinates reads, in its order
+MOMENTS = ("x", "y", "xx", "xy", "yy", "xxx", "xxy", "xyy", "yyy", "xxxx", "xxxy", "xxyy", "xyyy", "yyyy")
+#: per-tracer pool fields: (pool, suffix)
+_AUX = {"mask": ("tracer_masks", "Mask"), "edgeFlux": ("tracer_edge_fluxes", "EdgeFlux"),
+        "product": ("tracer_products", "Product"), "triangle": ("tracer_triangles", "Triangle"),
+        "xBarycenter": ("tracer_barycenter", "Barycenterx"), "yBarycenter": ("tracer_barycenter", "Barycentery"),
+        "center": ("tracer_reconstruction", "Center"), "xGrad": ("tracer_reconstruction", "Gradx"),
+        "yGrad": ("tracer_reconstruction", "Grady")}
+
+
+def aux(pools: dict, tracer: Tracer, what: str):
+    """One of a tracer's remap fields (``iceAreaCategoryMask`` ...) from its pool."""
+    pool, suffix = _AUX[what]
+    return pools[pool][tracer.name + suffix]
+
+
+def _layers(array) -> int:
+    return int(array.shape[2])
+
+
+def make_masks(tree, *, pools: dict, mesh: dict, threshold: float = EPS11) -> None:
+    """``make_masks``: each tracer's mask (and the remap pool's ``maskCell``)."""
+    nc = int(mesh["nCells"])
+    remap, tracers = pools["incremental_remap"], pools["tracers"]
+    for t in tree:
+        field = tracers[t.name]
+        precision = precision_of(field)
+        mask = aux(pools, t, "mask")
+        mask[...] = 0
+        ncat, nl = int(field.shape[1]), _layers(field)
+        if t.n_parents == 0:
+            _launch(precision, "seaice_ir_mask_mass_v842", nc, (mask, remap["maskCell"], field, _int(nc),
+                                                                _int(ncat * nl)))
+        else:
+            parent = tracers[t.parent.name]
+            if nl == 1 and _layers(parent) != 1:
+                raise RemapError(f"{t.name}: a 2-D tracer under a 3-D parent ({t.parent.name})")
+            _launch(precision, "seaice_ir_mask_child_v842", nc * ncat * nl, (
+                mask, parent, PRECISIONS[precision](threshold), _int(nc), _int(ncat), _int(nl),
+                _int(_layers(parent))))
+
+
+def construct_linear_fields(tree, *, pools: dict, mesh: dict) -> None:
+    """``construct_linear_tracer_fields`` (planar): each tracer's limited
+    gradient, centre value and, for parents, barycenter, in tree order."""
+    nc, ne, nv, me, vd = _dims(mesh)
+    remap, tracers = pools["incremental_remap"], pools["tracers"]
+    moments = [remap[f"{m}AvgCell"] for m in MOMENTS]
+    for t in tree:
+        field = tracers[t.name]
+        precision = precision_of(field)
+        ncat, nl = int(field.shape[1]), _layers(field)
+        out = [aux(pools, t, k) for k in ("center", "xGrad", "yGrad", "xBarycenter", "yBarycenter")]
+        for array in out:
+            array[...] = 0
+        if t.has_child and t.n_parents >= 3:
+            raise RemapError(f"{t.name}: a tracer with three parents and a child (v8.4.2 stops, MPAS_LOG_CRIT)")
+        parent = t.parent if t.n_parents >= 1 else None
+        grand = parent.parent if t.n_parents >= 2 else None
+
+        def fields_of(tr):
+            if tr is None:
+                return [field] * 4, 1
+            return [tracers[tr.name], aux(pools, tr, "center"), aux(pools, tr, "xGrad"),
+                    aux(pools, tr, "yGrad")], _layers(tracers[tr.name])
+        pf, pl = fields_of(parent)
+        gf, gl = fields_of(grand)
+        pxb = aux(pools, parent, "xBarycenter") if parent is not None else field
+        pyb = aux(pools, parent, "yBarycenter") if parent is not None else field
+        _launch(precision, "seaice_ir_construct_v842", nc * ncat * nl, (
+            *out, field, aux(pools, t, "mask"), remap["maskCell"], mesh["nEdgesOnCell"], mesh["cellsOnCell"],
+            mesh["edgesOnCell"], mesh["cellsOnEdge"], mesh["dcEdge"], mesh["coeffs_reconstruct"],
+            remap["xVertexOnCell"], remap["yVertexOnCell"], *moments, pxb, pyb, *pf, *gf, _int(pl), _int(gl),
+            _int(t.n_parents), _int(t.has_child), _int(nc), _int(ncat), _int(nl), _int(me)))
