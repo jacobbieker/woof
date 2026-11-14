@@ -14,15 +14,17 @@
 !   dynamicsTimeStep = config_dt / config_dynamics_subcycle_number,
 !   elasticTimeStep = dynamicsTimeStep / config_elastic_subcycle_number),
 !   seaice_init_evp (verbatim) and seaice_initialize_time_diagnostics (cut
-!   verbatim); the basis functions, masks and the rest of the mesh setup are
-!   the input's;
+!   verbatim), seaice_init_advection (verbatim: the upwind tracer
+!   connectivities; the normal vectors are the input's, mesh_normals_standin.F90);
+!   the basis functions, masks and the rest of the mesh setup are the input's;
 !   then oracle_n_steps times: the clock advanced, seaice_timestep (cut
 !   verbatim: the time diagnostics, the step counter, the column wrappers, the
-!   dynamics subcycles with seaice_run_velocity_solver compiled verbatim) and
+!   dynamics subcycles with seaice_run_velocity_solver and, under
+!   config_use_advection, seaice_run_advection compiled verbatim) and
 !   seaice_timestep_finalize.
 !
-! Forcing (config_use_forcing), advection and the column package are off: the
-! GPU driver refuses them by name.  Analysis members, streams and
+! Forcing (config_use_forcing) and the column package are off, and advection is
+! upwind or off: the GPU driver refuses the rest by name.  Analysis members, streams and
 ! seaice_check_critical_error change no state and are not run.  The time
 ! manager is the stubs' (whole seconds).
 
@@ -33,6 +35,7 @@ program run_seaice_step
   use mpas_timekeeping
   use seaice_velocity_solver_constitutive_relation, only: seaice_init_evp
   use seaice_diagnostics, only: seaice_initialize_time_diagnostics
+  use seaice_advection, only: seaice_init_advection
   use seaice_time_integration
   use oracle_stream
   implicit none
@@ -44,9 +47,10 @@ program run_seaice_step
   integer, pointer :: nSteps, config_dynamics_subcycle_number, config_elastic_subcycle_number
   character(len=StrKIND), pointer :: config_start_time, clockStep
   integer :: itimestep, ierr, p
-  character(len=24), parameter :: structNames(13) = [character(len=24) :: 'mesh', 'boundary', 'velocity_solver', &
+  character(len=24), parameter :: structNames(16) = [character(len=24) :: 'mesh', 'boundary', 'velocity_solver', &
        'velocity_variational', 'velocity_weak', 'icestate', 'tracers', 'tracers_aggregate', 'atmos_coupling', &
-       'ocean_coupling', 'ridging', 'diagnostics', 'scratch']
+       'ocean_coupling', 'ridging', 'diagnostics', 'scratch', 'tracer_tendencies', 'tracer_edge_fluxes', &
+       'tracer_conservation']
   character(len=1024) :: inPath, outPath
 
   call get_command_argument(1, inPath)
@@ -77,6 +81,7 @@ program run_seaice_step
   dynamicsTimeStep = config_dt / real(config_dynamics_subcycle_number,RKIND)
   elasticTimeStep = dynamicsTimeStep / real(config_elastic_subcycle_number,RKIND)
   call seaice_init_evp(domain)
+  call seaice_init_advection(domain)
   call seaice_initialize_time_diagnostics(domain)
 
   ! seaice_core_run's loop

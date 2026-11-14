@@ -62,7 +62,8 @@ module mpas_pool_routines
             field1DReal, field2DReal, field3DReal, mpas_pool_get_field, stub_pool_put_field, &
             mpas_allocate_scratch_field, mpas_deallocate_scratch_field, &
             mpas_pool_iterator_type, MPAS_POOL_FIELD, mpas_pool_begin_iteration, mpas_pool_get_next_member, &
-            mpas_pool_get_package, mpas_pool_shift_time_levels, mpas_pool_initialize_time_levels
+            mpas_pool_get_package, mpas_pool_shift_time_levels, mpas_pool_initialize_time_levels, &
+            mpas_pool_get_field_info, mpas_pool_field_info_type
 
   integer, parameter :: maxEntries = 320
 
@@ -109,6 +110,11 @@ module mpas_pool_routines
     type(field2DReal), pointer :: f2 => null()
     type(field3DReal), pointer :: f3 => null()
   end type pool_entry
+
+  type mpas_pool_field_info_type
+    integer :: fieldType = 0, nDims = 0, nTimeLevels = 1, nHaloLayers = 0
+    logical :: isActive = .true.
+  end type mpas_pool_field_info_type
 
   type MPAS_pool_type
     type(pool_entry), dimension(maxEntries) :: e
@@ -544,12 +550,39 @@ contains
     f => pool % e(find(pool, level_name(name, timeLevel))) % f2
   end subroutine get_field_2d
 
-  subroutine get_field_3d(pool, name, f)
+  ! a scratch field, or a field wrapped around an array the stream put
+  ! (MPAS-Seaice's advection reads its tracers as fields)
+  subroutine get_field_3d(pool, name, f, timeLevel)
     type(MPAS_pool_type), intent(in) :: pool
     character(len=*), intent(in) :: name
     type(field3DReal), pointer :: f
-    f => pool % e(find(pool, name)) % f3
+    integer, intent(in), optional :: timeLevel
+    type(MPAS_pool_type), pointer :: p
+    integer :: i
+    p => pool_target(pool)
+    i = find(pool, level_name(name, timeLevel))
+    if (.not. associated(p % e(i) % f3) .and. associated(p % e(i) % r3)) then
+      allocate(p % e(i) % f3)
+      p % e(i) % f3 % array => p % e(i) % r3
+      p % e(i) % f3 % dimSizes = shape(p % e(i) % r3)
+    end if
+    f => p % e(i) % f3
   end subroutine get_field_3d
+
+  ! the dimension count of a field (MPAS's mpas_pool_get_field_info)
+  subroutine mpas_pool_get_field_info(pool, name, info)
+    type(MPAS_pool_type), intent(in) :: pool
+    character(len=*), intent(in) :: name
+    type(mpas_pool_field_info_type), intent(out) :: info
+    integer :: i
+    i = find(pool, name)
+    info % nDims = 0
+    if (associated(pool % e(i) % r1)) info % nDims = 1
+    if (associated(pool % e(i) % r2)) info % nDims = 2
+    if (associated(pool % e(i) % r3)) info % nDims = 3
+    info % nTimeLevels = 1
+    info % isActive = .true.
+  end subroutine mpas_pool_get_field_info
 
   subroutine put_field_2d(pool, name, f)
     type(MPAS_pool_type), intent(inout) :: pool

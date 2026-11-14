@@ -98,7 +98,13 @@ for precision in r4 r8; do
       "${fc[@]}" "${flags[@]}" "${source_root}/src/framework/mpas_kind_types.F"
       "${fc[@]}" "${flags[@]}" "${script_dir}/../mpas_ocean_oracle/stubs.F90"
       "${fc[@]}" "${flags[@]}" "${script_dir}/../mpas_ocean_oracle/oracle_stream.F90"
-      "${fc[@]}" "${flags[@]}" "${mesh_cut}"
+      # seaice_mesh's interpolation routines (verbatim) and a stand-in for the
+      # normal vectors, which the advection's init would recompute from the mesh
+      sed '/^end module seaice_mesh/d' "${mesh_cut}" > seaice_mesh_step.F90
+      { sed 's/^  public :: seaice_interpolate_cell_to_vertex, seaice_interpolate_vertex_to_cell$/&, seaice_normal_vectors_polygon/' \
+            seaice_mesh_step.F90; cat "${script_dir}/mesh_normals_standin.F90"; echo "end module seaice_mesh"; } \
+          > seaice_mesh_interpolation.F90
+      "${fc[@]}" "${flags[@]}" seaice_mesh_interpolation.F90
       "${fc[@]}" "${flags[@]}" "${seaice}/column/ice_kinds_mod.F90"
       "${fc[@]}" "${flags[@]}" "${seaice}/column/constants/cice/ice_constants_colpkg.F90"
       "${fc[@]}" "${flags[@]}" "${seaice}/shared/mpas_seaice_constants.F"
@@ -111,6 +117,8 @@ for precision in r4 r8; do
         echo "end module seaice_diagnostics"; } > seaice_diagnostics_cut.F
       "${fc[@]}" "${flags[@]}" seaice_diagnostics_cut.F
       "${fc[@]}" "${flags[@]}" "${seaice}/shared/mpas_seaice_velocity_solver.F"
+      "${fc[@]}" "${flags[@]}" "${seaice}/shared/mpas_seaice_advection_upwind.F"
+      "${fc[@]}" "${flags[@]}" "${seaice}/shared/mpas_seaice_advection.F"
       { cat "${script_dir}/column_cut_head.F90"
         cut "${seaice}/shared/mpas_seaice_column.F" seaice_column_predynamics_time_integration \
             seaice_column_dynamics_time_integration seaice_column_postdynamics_time_integration \
@@ -133,6 +141,7 @@ for precision in r4 r8; do
       fi
       "${fc[@]}" -o "${build_dir}/run_seaice_step_${precision}" run_seaice_step.o seaice_time_integration_cut.o \
           seaice_column_cut.o mpas_seaice_velocity_solver.o seaice_diagnostics_cut.o \
+          mpas_seaice_advection.o mpas_seaice_advection_upwind.o \
           mpas_seaice_velocity_solver_variational.o mpas_seaice_velocity_solver_constitutive_relation.o \
           step_standins.o mpas_seaice_constants.o ice_constants_colpkg.o ice_kinds_mod.o \
           seaice_mesh_interpolation.o oracle_stream.o stubs.o mpas_kind_types.o \

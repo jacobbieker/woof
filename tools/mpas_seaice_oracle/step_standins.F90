@@ -1,8 +1,8 @@
 ! Stand-ins for the MPAS-Seaice modules the time-step oracle (run_seaice_step)
 ! compiles against but does not drive: the variational basis setup
 ! (Wachspress, PWL: the driver gives the basis arrays), the weak-form solver,
-! the column package's ice strength, the unit tests and advection (refused:
-! config_use_advection = .false.).  Each stops by name if reached.  The
+! the column package's ice strength, the unit tests and incremental-remap
+! advection.  Each stops by name if reached.  The
 ! framework is tools/mpas_ocean_oracle/stubs.F90, shared with the ocean.
 module seaice_velocity_solver_wachspress
   use mpas_derived_types
@@ -113,21 +113,28 @@ contains
 
 end module seaice_unit_test
 
-module seaice_advection
+module seaice_advection_incremental_remap
+  ! incremental remap, not compiled here: config_advection_type 'upwind' only
   use mpas_derived_types
   use mpas_timekeeping
   implicit none
   private
-  public :: seaice_run_advection
+  public :: seaice_init_advection_incremental_remap, seaice_run_advection_incremental_remap
 
 contains
 
-  subroutine seaice_run_advection(domain, clock, ierr)
+  subroutine seaice_init_advection_incremental_remap(domain)
+    type(domain_type), intent(inout) :: domain
+    print *, 'oracle stub: seaice_init_advection_incremental_remap is not compiled here'
+    stop 6
+  end subroutine seaice_init_advection_incremental_remap
+
+  subroutine seaice_run_advection_incremental_remap(domain, clock, ierr)
     type(domain_type), intent(inout) :: domain
     type(MPAS_Clock_type), intent(in) :: clock
     integer, intent(inout) :: ierr
-    print *, 'oracle stub: seaice_run_advection is not compiled here'
+    print *, 'oracle stub: seaice_run_advection_incremental_remap is not compiled here'
     stop 6
-  end subroutine seaice_run_advection
+  end subroutine seaice_run_advection_incremental_remap
 
-end module seaice_advection
+end module seaice_advection_incremental_remap
