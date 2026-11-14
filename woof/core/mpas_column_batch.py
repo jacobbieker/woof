@@ -662,6 +662,10 @@ class MpasColumnBatchPhysics:
     #: The phase-2 entry IS the ARW post-RK microphysics dispatch
     #: (woof/core/dycore.py:2507).
     _PHASE2_MICROPHYSICS = staticmethod(_arw_microphysics_apply)
+    #: ``(start, end)`` model seconds of the step in flight under the hex
+    #: adaptive clock (woof.hex.adaptive_dt, set_adaptive_step); ``None`` on
+    #: every fixed-step run, where the clock is ``steps * dt`` as before.
+    _adaptive_span = None
 
     def __init__(self, *, n_levels, n_columns, dt,
                  radiation_seconds, surface_pbl_seconds,
@@ -990,10 +994,6 @@ class MpasColumnBatchPhysics:
         self._step_index = 0
         self._pending_phase = _PHASE1
         state.elapsed_seconds = 0.0
-        #: ``(start, end)`` model seconds of the step in flight under the
-        #: hex adaptive clock (woof.hex.adaptive_dt); ``None`` on every
-        #: fixed-step run, where the clock is ``steps * dt`` as before.
-        self._adaptive_span = None
 
     # ------------------------------------------------------------------
     def set_adaptive_step(self, *, dt, start_seconds, end_seconds,

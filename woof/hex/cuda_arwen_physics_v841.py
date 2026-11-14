@@ -1209,6 +1209,10 @@ class InitialReflectivityViewV841:
 class PersistentTwoPhaseCudaPhysicsBackendV841:
     """Transactional frozen-v2 Arwen aggregate implementing the MPAS protocol."""
 
+    #: The hex adaptive clock's live step (woof.hex.adaptive_dt, set_adaptive_step); None on every
+    #: fixed-step run, where the sealed constructor's dt is the step.
+    _adaptive_dt: float | None = None
+
     def __init__(
         self,
         *,
@@ -1256,9 +1260,6 @@ class PersistentTwoPhaseCudaPhysicsBackendV841:
         self._phase = "boundary"
         self._boundary_snapshot: Mapping[str, Any] | None = None
         self._step_start: float | None = None
-        # The hex adaptive clock's live step (woof.hex.adaptive_dt); None on
-        # every fixed-step run, where the sealed constructor's dt is the step.
-        self._adaptive_dt: float | None = None
         self._candidate_scalar_target: Any | None = None
         self._candidate_scalar_backup: Any | None = None
         self._pending_gwdo_result: CudaYsuGwdoResultV841 | None = None
