@@ -107,7 +107,7 @@ class ResidentOutputDiagnostics:
     pool_names = ('mesh', 'state', 'diag')
     #: The straight run's outer steps before this segment (runtime_v842 sets it from the checkpoint route's
     #: physics_clock_offset on a correct-mode continuation, else 0). The loop's steps stay local (output naming,
-    #: the step-0 resume); the modules on WRF's elapsed-time clock (lightning) add it, as physics does.
+    #: the step-0 resume); the modules on WRF's elapsed-time clock (lightning, HAILCAST) add it, as physics does.
     step_offset = 0
 
     def __init__(self, session, dycore, *, halo=None):

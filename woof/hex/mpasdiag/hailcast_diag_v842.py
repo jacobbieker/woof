@@ -221,10 +221,16 @@ class HailcastModule:
 
     # -- the per-step fold ------------------------------------------------------------------------------
     def begin(self, step, when):
-        self._step = int(step) if int(step) > 0 else None
+        """The step the next :meth:`update` folds (steps <= 0 fold nothing), on the straight run's clock.
+
+        ``step`` is the loop's local step; a checkpoint continuation's owner carries the straight run's steps before
+        the segment (``step_offset``), as the physics clock does, so the haildt cadence and its first-step call
+        follow the straight run's schedule, not a restart at the checkpoint.
+        """
+        self._step = int(step) + int(getattr(self.owner, "step_offset", 0)) if int(step) > 0 else None
 
     def due(self) -> bool:
-        """woof.core.hail.update's cadence on the step that :meth:`begin` named."""
+        """woof.core.hail.update's cadence on the step that :meth:`begin` named (the straight run's elapsed time)."""
         interval = self.config.haildt
         start = (self._step - 1) * self.dt
         end = start + self.dt

@@ -291,6 +291,41 @@ def test_the_interval_fields_restart_after_a_frame_and_ride_a_checkpoint(cp):
     assert (cp.asnumpy(straight.w["hailcast_runmax"]) >= runmax).all()
 
 
+@pytest.mark.parametrize("haildt, checkpoint", [(60.0, 10), (40.0, 7), (0.0, 5)])
+def test_a_continuation_keeps_the_straight_runs_cadence(cp, haildt, checkpoint):
+    """A continuation counts its loop steps from 0 again (runtime_v842) with the straight run's steps before it as
+    the owner's step_offset: every word and call equals the straight run's.  THE BREAKAGE: due() read the local
+    step, so the first resumed step took the first-step exception and the cadence restarted at the checkpoint (an
+    extra HAILCAST call at 3620 s for dt 20, haildt 60, a 3600 s checkpoint)."""
+    cols = _real_columns()
+    config = hc.HailcastConfig(haildt, "wrf_461")
+
+    def module(offset=0):
+        owner = _owner(cp, cols)
+        owner.step_offset = offset
+        m = hc.HailcastModule(owner, config)
+        m.setup(_Utils(hc.NAMES))
+        return m
+
+    straight = module()
+    for step in range(1, checkpoint + 1):
+        straight.begin(step, None)
+        straight.update()
+    resumed = module(offset=checkpoint)
+    resumed.begin(0, None)
+    resumed.resume(straight.state())
+    before = straight.calls
+    for local in range(1, 13):
+        straight.begin(checkpoint + local, None)
+        resumed.begin(local, None)
+        for m in (straight, resumed):
+            m.update()
+        for name in CHECKED:
+            np.testing.assert_array_equal(cp.asnumpy(resumed.w[name]).view(np.uint32),
+                                          cp.asnumpy(straight.w[name]).view(np.uint32), f"{name} step {local}")
+    assert resumed.calls == straight.calls - before == (12 if haildt == 0 else int(12 * DT // haildt))
+
+
 def test_hailcast_is_refused_on_a_multi_rank_mesh(cp):
     owner = _owner(cp, _real_columns(4))
     owner.halo = object()
