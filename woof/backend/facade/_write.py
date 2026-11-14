@@ -125,3 +125,142 @@ def write(view, values) -> None:
                                (_TPB, 1, 1), [st.arr, src], [0, 0], [True, False], [0, 1], -1,
                                [blob], [2], 0, 0)
     st.rebind_written(out)
+
+
+#: ``a op= b`` in fast numerics (binary32): one kernel reading both operands
+#: and writing ``a`` in place, where it was MLX's op into a new array plus a
+#: strided copy.  Metal's safe-math ``+ - * /`` give MLX's words, subnormal
+#: flushing included (checked word for word over random and subnormal-biased
+#: operands), so the result is the same; the kernel is built with safe math.
+_ARITH_SOURCE = """#include <metal_stdlib>
+struct WoofArith { long n; long dst_offset; long src_offset; long ndim;
+                   long shape[8]; long dst_stride[8]; long src_stride[8]; };
+#define WOOF_ARITH(NAME, OP)                                                            \\
+[[kernel]] void NAME(device float* dst [[buffer(0)]], const device float* src [[buffer(1)]], \\
+                     constant WoofArith& c [[buffer(2)]],                               \\
+                     uint3 tid [[thread_position_in_threadgroup]],                      \\
+                     uint3 bid [[threadgroup_position_in_grid]],                        \\
+                     uint3 bd [[threads_per_threadgroup]]) {                            \\
+  long i = (long)bid.x * (long)bd.x + (long)tid.x;                                     \\
+  if (i >= c.n) return;                                                                 \\
+  long d = c.dst_offset, s = c.src_offset;                                              \\
+  if (c.n <= 0xFFFFFFFFl) {   /* 32-bit division where the index fits */                \\
+    uint rem = uint(i);                                                                 \\
+    for (long a = c.ndim - 1; a > 0; --a) {                                             \\
+      uint m = uint(c.shape[a]), k = rem % m; rem /= m;                                 \\
+      d += long(k) * c.dst_stride[a]; s += long(k) * c.src_stride[a];                   \\
+    }                                                                                   \\
+    d += long(rem) * c.dst_stride[0]; s += long(rem) * c.src_stride[0];                 \\
+  } else {                                                                              \\
+    long rem = i;                                                                       \\
+    for (long a = c.ndim - 1; a > 0; --a) {                                             \\
+      long k = rem % c.shape[a]; rem /= c.shape[a];                                     \\
+      d += k * c.dst_stride[a]; s += k * c.src_stride[a];                               \\
+    }                                                                                   \\
+    d += rem * c.dst_stride[0]; s += rem * c.src_stride[0];                             \\
+  }                                                                                     \\
+  dst[d] = dst[d] OP src[s];                                                            \\
+}
+WOOF_ARITH(woof_iadd_f32, +)
+WOOF_ARITH(woof_isub_f32, -)
+WOOF_ARITH(woof_imul_f32, *)
+WOOF_ARITH(woof_idiv_f32, /)
+"""
+_ARITH_KEY = "woof:facade-inplace-arith:v1"
+_ARITH_KERNELS = {"add": "woof_iadd_f32", "subtract": "woof_isub_f32",
+                  "multiply": "woof_imul_f32", "divide": "woof_idiv_f32",
+                  "true_divide": "woof_idiv_f32"}
+
+
+@lru_cache(maxsize=1)
+def _arith_compiled():
+    from woof.backend.metal import ext
+    ext.load().compile(_ARITH_KEY, _ARITH_SOURCE, sorted(set(_ARITH_KERNELS.values())), 0)
+    return True
+
+
+def _collapsed_pair(shape, dst, src):
+    """:func:`_collapsed` over two stride sets walked together."""
+    dims = [(n, a, b) for n, a, b in zip(shape, dst, src) if n != 1] or [(1, 0, 0)]
+    out = [dims[-1]]
+    for n, a, b in reversed(dims[:-1]):
+        inner_n, inner_a, inner_b = out[-1]
+        if a == inner_a * inner_n and b == inner_b * inner_n:
+            out[-1] = (n * inner_n, inner_a, inner_b)
+        else:
+            out.append((n, a, b))
+    out.reverse()
+    return [d[0] for d in out], [d[1] for d in out], [d[2] for d in out]
+
+
+def arith_in_place(np_name, view, other) -> bool:
+    """``view op= other`` as one kernel, for a binary32 ``view`` (any strides)
+    and a binary32 facade array or a Python/NumPy scalar whose result type is
+    binary32.  False (nothing done) where the general path must run: another
+    op or dtype, an ``other`` sharing the view's buffer, or a shape the
+    operands do not broadcast to."""
+    import mlx.core as mx
+    from woof.backend.facade._array import flush_pending, ndarray
+    from woof.backend.metal import ext
+    kernel = _ARITH_KERNELS.get(np_name)
+    if kernel is None or view.dtype != np.float32 or view.ndim > MAX_DIMS:
+        return False
+    n = view.size
+    if n == 0:
+        return False
+    if isinstance(other, ndarray):
+        if other.dtype != np.float32 or other.ndim > view.ndim:
+            return False
+        if other._st.buffer_root() is view._st.buffer_root():
+            return False
+        try:
+            if np.broadcast_shapes(view.shape, other.shape) != view.shape:
+                return False
+        except ValueError:
+            return False
+        lead = view.ndim - other.ndim
+        o_shape = (1,) * lead + other.shape
+        o_strides = (0,) * lead + other.strides
+        if other._offset % 4 or any(s % 4 for s in other.strides):
+            return False
+        src_strides = [0 if m == 1 and v != 1 else s // 4
+                       for m, v, s in zip(o_shape, view.shape, o_strides)]
+        src_offset = other._offset // 4
+        src = other._st.arr
+    elif isinstance(other, (int, float, np.floating, np.integer)) and not isinstance(other, (bool, np.bool_)):
+        try:
+            if np.result_type(view.dtype, other if isinstance(other, (int, float)) else other.dtype) \
+                    != np.float32:
+                return False
+        except TypeError:
+            return False
+        src = mx.array(np.asarray([other], dtype=np.float32))
+        src_strides, src_offset = [0] * view.ndim, 0
+    else:
+        return False
+    if view._offset % 4 or any(s % 4 for s in view.strides):
+        return False
+    if any(s == 0 and m > 1 for s, m in zip(view.strides, view.shape)):
+        return False   # a broadcast destination aliases itself; the general path writes it once
+    extent = 4   # bytes spanned by the axes already checked, plus one element
+    for s, m in sorted((abs(s), m) for s, m in zip(view.strides, view.shape) if m > 1):
+        if s < extent:
+            return False   # two elements share a word; the general path writes each once
+        extent += (m - 1) * s
+    shape = view.shape or (1,)
+    dst_strides = [s // 4 for s in view.strides] or [1]
+    src_strides = src_strides or [0]
+    shape, dst_strides, src_strides = _collapsed_pair(shape, dst_strides, src_strides)
+    pad = [0] * (MAX_DIMS - len(shape))
+    blob = struct.pack("<qqqq", n, view._offset // 4, src_offset, len(shape))
+    blob += struct.pack(f"<{MAX_DIMS}q", *(list(shape) + [1] * len(pad)))
+    blob += struct.pack(f"<{MAX_DIMS}q", *(dst_strides + pad))
+    blob += struct.pack(f"<{MAX_DIMS}q", *(src_strides + pad))
+    _arith_compiled()
+    flush_pending()
+    st = view._st
+    (out,) = ext.load().launch(_ARITH_KEY, _ARITH_SOURCE, kernel, ((n + _TPB - 1) // _TPB, 1, 1),
+                               (_TPB, 1, 1), [st.arr, src], [0, 0], [True, False], [0, 1], -1,
+                               [blob], [2], 0, 0)
+    st.rebind_written(out)
+    return True
