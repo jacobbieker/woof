@@ -392,6 +392,10 @@ def resolve_namelist(text: str, *, backends: Mapping[str, str] | None = None,
     if any(key in lightning.OPTIONS for key in (str(k).casefold() for k in groups.get(lightning.GROUP, {}))):
         raise ValueError(f"&{lightning.GROUP} config_lightning_option and its options are not available on the RRFS "
                          "fork route; they are MPAS-A v8.4.2 suite-route options")
+    from ...mpasdiag import hailcast_diag_v842 as hailcast
+    if any(key in hailcast.OPTIONS for key in (str(k).casefold() for k in groups.get(hailcast.GROUP, {}))):
+        raise ValueError(f"&{hailcast.GROUP} {hailcast.OPTION} and its options are not available on the RRFS fork "
+                         "route (its TEMPO writes its own max_hail_diameter); they are MPAS-A v8.4.2 suite-route options")
     from ...mpasdiag import reduction_diag_v842 as reduce
     if any(key in reduce.OPTIONS for key in (str(k).casefold() for k in groups.get(reduce.GROUP, {}))):
         raise ValueError(f"&{reduce.GROUP} CLWRF / RASM / surface_energy_diag options (config_output_diagnostics, "

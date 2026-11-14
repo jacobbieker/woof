@@ -27,6 +27,7 @@ from ..mpasdiag import plevel_diag_v842 as _plevel
 from ..mpasdiag import acc_diag_v842 as _acc
 from ..mpasdiag import afwa_diag_v842 as _afwa
 from ..mpasdiag import lightning_diag_v842 as _lightning
+from ..mpasdiag import hailcast_diag_v842 as _hailcast
 from ..mpasdiag import reduction_diag_v842 as _reduce
 
 _ENTITY = {"nCells", "nEdges", "nVertices"}
@@ -149,6 +150,8 @@ def active_packages(config: DriverConfig, configs: Mapping[str, Any]) -> set[str
     packages.update(_afwa.packages(config))
     # WOOF's &diagnostics config_lightning_option (mpasdiag.lightning_diag_v842).
     packages.update(_lightning.packages(config))
+    # WOOF's &diagnostics config_hailcast_opt (mpasdiag.hailcast_diag_v842).
+    packages.update(_hailcast.packages(config))
     # WOOF's &diagnostics CLWRF / RASM / surface_energy_diag options (mpasdiag.reduction_diag_v842).
     packages.update(_reduce.packages(config))
     return packages
@@ -177,6 +180,7 @@ class RegistryLayout:
         _acc.extend_registry(self.root, _acc.packages(config))
         _afwa.extend_registry(self.root, _afwa.packages(config))
         _lightning.extend_registry(self.root, _lightning.packages(config))
+        _hailcast.extend_registry(self.root, _hailcast.packages(config))
         _reduce.extend_registry(self.root, _reduce.packages(config))
         self.configs = {}
         self.config_kinds = {}

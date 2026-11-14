@@ -3793,6 +3793,16 @@ mesh is one WRF patch for the convective-cell statistics. Option 11, PR92 with
 WSM6, LPI without graupel, `iccg_method = 4` and multi-rank meshes are refused
 by name.
 
+`&diagnostics config_hailcast_opt` (with `config_haildt`, WRF's default 0 =
+every step, and `config_hailcast_version`, `wrf_461` by default) runs the WRF
+route's HAILCAST kernels per mesh column
+(`woof/hex/mpasdiag/hailcast_diag_v842.py`) and writes the `hailcast_*`
+fields (mm) to the diagnostics stream. The 10 m/s updraft duration that gates
+HAILCAST (more than 900 s) spreads over the cell and its `cellsOnCell`
+neighbours in place of WRF's 3×3 box. The WRF route's duration kernel on the
+one-row column layout of the WOOF hex route zeroes every duration, so
+`hailcast_opt` never produced a stone there.
+
 ### Native WRF precipitation windows
 
 Stock `prec_acc_dt` follows pinned WRF 4.7.1 `module_diag_misc.F:415-448` on
