@@ -3438,7 +3438,11 @@ def launch_diff6_multi(rows, mut, c1, c2, opt: int, *, phb=None, msfu=None,
                * (DTYPE(1.0) / DTYPE(1.0 / dx))) if slope else DTYPE(0)
     dzthr_y = (DTYPE(thresh) * DTYPE(9.81)
                * (DTYPE(1.0) / DTYPE(1.0 / dy))) if slope else DTYPE(0)
-    kern = get_kernel("diff6", "diff6_multi")
+    if scalar_index32_fits(nlev, ny, nx):
+        kern = get_kernel_int_defines("diff6", "diff6_multi",
+                                      (("GPUWM_DIFF6_INDEX32", 1),))
+    else:
+        kern = get_kernel("diff6", "diff6_multi")
     grid = ((nx + _TPB - 1) // _TPB, ny, nlev)
     header = 3
     for start in range(0, len(rows), DIFF6_MULTI_MAX_ROWS):

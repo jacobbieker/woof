@@ -253,8 +253,25 @@ void diff6_multi(DIFF6_TABLE_PARAM table, int nrows,
     int ic = PERIODIC(i, nx);
     int jc = PERIODIC(j, ny);
 
-#define FX(m) f[I3S(k, jc, PERIODIC(ic + (m), nx), nys, nxs)]
-#define FY(m) f[I3S(k, PERIODIC(jc + (m), ny), ic, nys, nxs)]
+    // The stencil's fourteen storage offsets, once per point for every row.
+    // With GPUWM_DIFF6_INDEX32 (the host proved nlev*ny*nx fits uint32,
+    // smag2d.scalar_index32_fits) they are 32-bit words, which Apple GPUs
+    // and CUDA both address natively; the values are the same.
+#ifdef GPUWM_DIFF6_INDEX32
+    typedef unsigned int Diff6Index;
+#else
+    typedef size_t Diff6Index;
+#endif
+    Diff6Index ox[7], oy[7];
+#pragma unroll
+    for (int m = -3; m <= 3; ++m) {
+        ox[m + 3] = (Diff6Index)I3S(k, jc, PERIODIC(ic + m, nx), nys, nxs);
+        oy[m + 3] = (Diff6Index)I3S(k, PERIODIC(jc + m, ny), ic, nys, nxs);
+    }
+    const Diff6Index at = (Diff6Index)I3S(k, j, i, nys, nxs);
+
+#define FX(m) f[ox[(m) + 3]]
+#define FY(m) f[oy[(m) + 3]]
 #define MU(jj, ii) mut[(size_t)PERIODIC(jj, ny) * nx + PERIODIC(ii, nx)]
 #define CM(jj, ii) (__fmul_rn(c1[k], MU(jj, ii)) + c2[k])
 #define PHB(jj, ii) phb[I3(k, PERIODIC(jj, ny), PERIODIC(ii, nx), ny, nx)]
@@ -323,7 +340,6 @@ void diff6_multi(DIFF6_TABLE_PARAM table, int nrows,
         real tendency_y = __fmul_rn(cmap,
             (__fmul_rn(wy_p1, dflux_y_p1) - __fmul_rn(wy_p0, dflux_y_p0)));
 
-        size_t at = I3S(k, j, i, nys, nxs);
         tend[at] = (tend[at] + tendency_x) + tendency_y;
     }
 
