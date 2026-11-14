@@ -87,8 +87,15 @@ Ordered by how self-contained each piece is:
    Its outputs (`basisGradientU/V`, `basisIntegrals*`) are the inputs the
    kernels in item 1 read.
 4. The weak-form solver (`..._weak.F`), an alternative velocity discretisation.
-5. Incremental-remap advection (`mpas_seaice_advection_incremental_remap*.F`)
-   and upwind advection.
+5. Incremental-remap advection (`mpas_seaice_advection_incremental_remap*.F`),
+   staged on planar meshes. Ported: the tracer tree the packages build, and
+   the volume/thickness conversions around the remap. The init's geometry
+   (`get_geometry_incremental_remap`, the RBF reconstruction coefficients) is
+   the input's, as the variational basis is. Still to port: the departure
+   triangles, the limited reconstruction, the flux integration and update,
+   and the remap inside the time step. Upwind advection cannot run in v8.4.2
+   (it reads configs the sea-ice Registry does not declare and mesh fields it
+   does not carry), so it is refused by name with that reason.
 6. Column physics (`column/`, colpkg): `ice_therm_vertical` (BL99 and mushy
    thermodynamics), `ice_therm_itd`, `ice_mechred` (ridging), `ice_shortwave`
    (delta-Eddington), melt ponds, `ice_atmo`. These are double precision.
