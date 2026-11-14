@@ -227,6 +227,10 @@ def test_every_row_form_matches_the_per_row_path(monkeypatch, form):
         return [_strict_plan(state, device, 0),
                 _nested_plan(state, device, store=False)]
 
+    # A register-held row (held_store=False) leaves its buffer alone, where
+    # the per-row path writes its shared temporary: only the tendencies
+    # are the contract there.
+    compare_held = form in ("nested_store", "strict", "capture")
     results = {}
     for enabled in (False, True):
         monkeypatch.setattr(lbc, "LBC_RELAX_MULTI_ENABLED", enabled)
@@ -234,7 +238,10 @@ def test_every_row_form_matches_the_per_row_path(monkeypatch, form):
         stages = []
         for plan in plans():
             lbc._run_relaxation_rows(state, plan, common, weights)
-            stages.append(_words(state))
+            words = _words(state)
+            if not compare_held:
+                words = {k: v for k, v in words.items() if k in _TENDENCIES}
+            stages.append(words)
         results[enabled] = stages
     for per_row, fused in zip(results[False], results[True]):
         _assert_same(per_row, fused)
