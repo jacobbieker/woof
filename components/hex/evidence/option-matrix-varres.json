@@ -1,0 +1,895 @@
+{
+ "backends": [
+  "cuda",
+  "metal"
+ ],
+ "baseline": "microphysics.wsm6-mp6",
+ "case": "variable-resolution regional cull (tools/hex_varres.py edi-vr): 3 km core graded to 20 km, 4565 cells, 55 levels, GFS-driven, 1 h, dt 18 s",
+ "hours": 1,
+ "mesh": {
+  "cells": 4565,
+  "spacing_km": [
+   2.972,
+   23.221
+  ],
+  "spacing_ratio": 7.81,
+  "steepest_gradient_percent_per_cell": 22.93
+ },
+ "rows": {
+  "cumulus.kain-fritsch": {
+   "backends": {
+    "cuda": {
+     "budgets": {
+      "dry_rel_change": -0.0002456066185162638,
+      "dry_rel_change_interior": -0.00026670904446784554,
+      "precip_kg": 10642542364.954807,
+      "q_min_end": {
+       "qc": 0.0,
+       "qg": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qs": 0.0,
+       "qv": 1.6547195400562487e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs",
+       "qg"
+      ],
+      "water_residual_rel": -0.00118939230422074,
+      "water_residual_rel_interior": -0.004290816954839576
+     },
+     "call_counts": {
+      "cumulus": 200,
+      "cumulus_history": 200,
+      "noah": 200,
+      "radiation": 2,
+      "sfclay": 200,
+      "ysu": 200
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": -9.39916598733043e-07,
+      "water_tol": 0.05,
+      "water_vs_baseline": 1.1771430248287348e-06
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 1,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "mp_physics": 6,
+      "ntiedtke_dry_mass_coupling": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true
+     },
+     "seam": "engine",
+     "wall_seconds": 101.3
+    },
+    "metal": {
+     "budgets": {
+      "dry_rel_change": -0.0002455534310556055,
+      "dry_rel_change_interior": -0.0002666611901324572,
+      "precip_kg": 10644536159.853376,
+      "q_min_end": {
+       "qc": 0.0,
+       "qg": -0.0,
+       "qi": 0.0,
+       "qr": -0.0,
+       "qs": -0.0,
+       "qv": 1.6547195400562487e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs",
+       "qg"
+      ],
+      "water_residual_rel": -0.001188292744138626,
+      "water_residual_rel_interior": -0.004295044399561988
+     },
+     "call_counts": {
+      "cumulus": 200,
+      "cumulus_history": 200,
+      "noah": 200,
+      "radiation": 2,
+      "sfclay": 200,
+      "ysu": 200
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": -9.134066186933698e-07,
+      "water_tol": 0.05,
+      "water_vs_baseline": -8.01728261389488e-07
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 1,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "mp_physics": 6,
+      "ntiedtke_dry_mass_coupling": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true
+     },
+     "seam": "engine",
+     "wall_seconds": 327.4
+    }
+   },
+   "overrides": {
+    "cu_physics": "1"
+   }
+  },
+  "land_surface.noah": {
+   "backends": {
+    "cuda": {
+     "budgets": {
+      "dry_rel_change": -0.000245598077428424,
+      "dry_rel_change_interior": -0.00026676998116496593,
+      "precip_kg": 10319922771.581182,
+      "q_min_end": {
+       "qc": 0.0,
+       "qg": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qs": 0.0,
+       "qv": 1.6547195400562487e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs",
+       "qg"
+      ],
+      "water_residual_rel": -0.0011470705138328927,
+      "water_residual_rel_interior": -0.004269007787992396
+     },
+     "call_counts": {
+      "cumulus": 200,
+      "cumulus_history": 0,
+      "noah": 200,
+      "radiation": 2,
+      "sfclay": 200,
+      "ysu": 200
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": -1.0008532958534337e-06,
+      "water_tol": 0.05,
+      "water_vs_baseline": 2.2986309872008275e-05
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 6,
+      "ntiedtke_dry_mass_coupling": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 2,
+      "thompson_cloud_surface_booking": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true
+     },
+     "seam": "engine",
+     "wall_seconds": 195.0
+    },
+    "metal": {
+     "budgets": {
+      "dry_rel_change": -0.00024556972254181046,
+      "dry_rel_change_interior": -0.000266733742336782,
+      "precip_kg": 10322177841.627207,
+      "q_min_end": {
+       "qc": 0.0,
+       "qg": -0.0,
+       "qi": 0.0,
+       "qr": -0.0,
+       "qs": -0.0,
+       "qv": 1.6547195400562487e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs",
+       "qg"
+      ],
+      "water_residual_rel": -0.001145614653072574,
+      "water_residual_rel_interior": -0.004270984047916071
+     },
+     "call_counts": {
+      "cumulus": 200,
+      "cumulus_history": 0,
+      "noah": 200,
+      "radiation": 2,
+      "sfclay": 200,
+      "ysu": 200
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": -9.85958823018166e-07,
+      "water_tol": 0.05,
+      "water_vs_baseline": 2.3258623384527985e-05
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 6,
+      "ntiedtke_dry_mass_coupling": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 2,
+      "thompson_cloud_surface_booking": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true
+     },
+     "seam": "engine",
+     "wall_seconds": 125.5
+    }
+   },
+   "overrides": {
+    "sf_surface_physics": "2"
+   }
+  },
+  "land_surface.slab": {
+   "backends": {
+    "cuda": {
+     "outcome": "refused",
+     "reason": "woof hex: the mesh bind refused: mesh '<mesh>': init <path> carries nSoilLevels=4, the selected land surface integrates 5  The registry pins each row's grid and static by byte count and SHA-256 and admits its timestep against the file's own dcEdge, so this is the supplied files disagreeing with the named row, not a transient failure.  `woof hex mesh-check --grid ... --static ...` prints the digests the files actually carry.",
+     "wall_seconds": 17.2
+    },
+    "metal": {
+     "outcome": "refused",
+     "reason": "woof hex: the mesh bind refused: mesh '<mesh>': init <path> carries nSoilLevels=4, the selected land surface integrates 5  The registry pins each row's grid and static by byte count and SHA-256 and admits its timestep against the file's own dcEdge, so this is the supplied files disagreeing with the named row, not a transient failure.  `woof hex mesh-check --grid ... --static ...` prints the digests the files actually carry.",
+     "wall_seconds": 2.4
+    }
+   },
+   "overrides": {
+    "sf_surface_physics": "1"
+   }
+  },
+  "microphysics.lin-mp2": {
+   "backends": {
+    "cuda": {
+     "budgets": {
+      "dry_rel_change": -0.000239866517447636,
+      "dry_rel_change_interior": -0.00026014737974008645,
+      "precip_kg": 14535466234.276375,
+      "q_min_end": {
+       "qc": 0.0,
+       "qg": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qs": 0.0,
+       "qv": 1.6547195400562487e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs",
+       "qg"
+      ],
+      "water_residual_rel": -0.0009872006356330975,
+      "water_residual_rel_interior": -0.004359144860560417
+     },
+     "call_counts": {
+      "cumulus": 200,
+      "cumulus_history": 0,
+      "noah": 200,
+      "radiation": 2,
+      "sfclay": 200,
+      "ysu": 200
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 5.621748129026047e-06,
+      "water_tol": 0.05,
+      "water_vs_baseline": -6.715076269601244e-05
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 2,
+      "ntiedtke_dry_mass_coupling": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true
+     },
+     "seam": "engine",
+     "wall_seconds": 152.1
+    },
+    "metal": {
+     "budgets": {
+      "dry_rel_change": -0.00023982677531669009,
+      "dry_rel_change_interior": -0.00026009474203936923,
+      "precip_kg": 14540927730.433575,
+      "q_min_end": {
+       "qc": 0.0,
+       "qg": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qs": 0.0,
+       "qv": 1.6547195400562487e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs",
+       "qg"
+      ],
+      "water_residual_rel": -0.0009863623608062895,
+      "water_residual_rel_interior": -0.004360896404099799
+     },
+     "call_counts": {
+      "cumulus": 200,
+      "cumulus_history": 0,
+      "noah": 200,
+      "radiation": 2,
+      "sfclay": 200,
+      "ysu": 200
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 5.653041474394606e-06,
+      "water_tol": 0.05,
+      "water_vs_baseline": -6.665373279920051e-05
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 2,
+      "ntiedtke_dry_mass_coupling": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true
+     },
+     "seam": "engine",
+     "wall_seconds": 191.0
+    }
+   },
+   "overrides": {
+    "mp_physics": "2"
+   }
+  },
+  "microphysics.wsm6-mp6": {
+   "backends": {
+    "cuda": {
+     "budgets": {
+      "dry_rel_change": -0.00024519243172087675,
+      "dry_rel_change_interior": -0.0002657691278691125,
+      "precip_kg": 10328686549.49962,
+      "q_min_end": {
+       "qc": 0.0,
+       "qg": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qs": 0.0,
+       "qv": 1.6547195400562487e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs",
+       "qg"
+      ],
+      "water_residual_rel": -0.001185103698396636,
+      "water_residual_rel_interior": -0.0042919940978644044
+     },
+     "call_counts": {
+      "cumulus": 200,
+      "cumulus_history": 0,
+      "noah": 200,
+      "radiation": 2,
+      "sfclay": 200,
+      "ysu": 200
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 0.0,
+      "water_tol": 0.05,
+      "water_vs_baseline": 0.0
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 6,
+      "ntiedtke_dry_mass_coupling": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true
+     },
+     "seam": "engine",
+     "wall_seconds": 207.1
+    },
+    "metal": {
+     "budgets": {
+      "dry_rel_change": -0.00024514352533629613,
+      "dry_rel_change_interior": -0.00026574778351376384,
+      "precip_kg": 10330945554.696136,
+      "q_min_end": {
+       "qc": 0.0,
+       "qg": -0.0,
+       "qi": 0.0,
+       "qr": -0.0,
+       "qs": -0.0,
+       "qv": 1.6547195400562487e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs",
+       "qg"
+      ],
+      "water_residual_rel": -0.001184206181710669,
+      "water_residual_rel_interior": -0.004294242671300599
+     },
+     "call_counts": {
+      "cumulus": 200,
+      "cumulus_history": 0,
+      "noah": 200,
+      "radiation": 2,
+      "sfclay": 200,
+      "ysu": 200
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 0.0,
+      "water_tol": 0.05,
+      "water_vs_baseline": 0.0
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 6,
+      "ntiedtke_dry_mass_coupling": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true
+     },
+     "seam": "engine",
+     "wall_seconds": 369.9
+    }
+   },
+   "overrides": {}
+  },
+  "pbl.mynn": {
+   "backends": {
+    "cuda": {
+     "budgets": {
+      "dry_rel_change": -0.00024515689586115095,
+      "dry_rel_change_interior": -0.0002656659112403135,
+      "precip_kg": 10458621929.060555,
+      "q_min_end": {
+       "qc": 0.0,
+       "qg": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qs": 0.0,
+       "qv": 1.6547195400562487e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs",
+       "qg"
+      ],
+      "water_residual_rel": -0.0011726050977506832,
+      "water_residual_rel_interior": -0.004289332527616619
+     },
+     "call_counts": {
+      "cumulus": 200,
+      "cumulus_history": 0,
+      "noah": 200,
+      "radiation": 2,
+      "sfclay": 200,
+      "ysu": 200
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 1.0321662879898743e-07,
+      "water_tol": 0.05,
+      "water_vs_baseline": 2.66157024778578e-06
+     },
+     "outcome": "ran",
+     "sealed_physics": null,
+     "seam": "column_suite",
+     "wall_seconds": 173.9
+    },
+    "metal": {
+     "budgets": {
+      "dry_rel_change": -0.00024514490837882066,
+      "dry_rel_change_interior": -0.0002656718374080463,
+      "precip_kg": 10459924486.306473,
+      "q_min_end": {
+       "qc": 0.0,
+       "qg": -0.0,
+       "qi": 0.0,
+       "qr": -0.0,
+       "qs": -0.0,
+       "qv": 1.6547195400562487e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs",
+       "qg"
+      ],
+      "water_residual_rel": -0.0011719652990558314,
+      "water_residual_rel_interior": -0.004291874997040663
+     },
+     "call_counts": {
+      "cumulus": 200,
+      "cumulus_history": 0,
+      "noah": 200,
+      "radiation": 2,
+      "sfclay": 200,
+      "ysu": 200
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 7.594610571752102e-08,
+      "water_tol": 0.05,
+      "water_vs_baseline": 2.367674259935726e-06
+     },
+     "outcome": "ran",
+     "sealed_physics": null,
+     "seam": "column_suite",
+     "wall_seconds": 192.0
+    }
+   },
+   "overrides": {
+    "bl_pbl_physics": "5"
+   }
+  },
+  "radiation.new-goddard": {
+   "backends": {
+    "cuda": {
+     "budgets": {
+      "dry_rel_change": -0.0002636479349166449,
+      "dry_rel_change_interior": -0.00029699584960441957,
+      "precip_kg": 10166507951.131773,
+      "q_min_end": {
+       "qc": 0.0,
+       "qg": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qs": 0.0,
+       "qv": 1.6547195400562487e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs",
+       "qg"
+      ],
+      "water_residual_rel": -0.0011510245092185255,
+      "water_residual_rel_interior": -0.004305256308371006
+     },
+     "call_counts": {
+      "cumulus": 200,
+      "cumulus_history": 0,
+      "noah": 200,
+      "radiation": 2,
+      "sfclay": 200,
+      "ysu": 200
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": -3.122672173530707e-05,
+      "water_tol": 0.05,
+      "water_vs_baseline": -1.326221050660173e-05
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 6,
+      "ntiedtke_dry_mass_coupling": true,
+      "ra_lw_physics": 5,
+      "ra_sw_physics": 5,
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true
+     },
+     "seam": "engine",
+     "wall_seconds": 201.8
+    },
+    "metal": {
+     "budgets": {
+      "dry_rel_change": -0.0002636501397239466,
+      "dry_rel_change_interior": -0.0002969985151076027,
+      "precip_kg": 10166833950.246887,
+      "q_min_end": {
+       "qc": 0.0,
+       "qg": -0.0,
+       "qi": 0.0,
+       "qr": -0.0,
+       "qs": -0.0,
+       "qv": 1.6547195400562487e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs",
+       "qg"
+      ],
+      "water_residual_rel": -0.0011510270635936297,
+      "water_residual_rel_interior": -0.004305322293560363
+     },
+     "call_counts": {
+      "cumulus": 200,
+      "cumulus_history": 0,
+      "noah": 200,
+      "radiation": 2,
+      "sfclay": 200,
+      "ysu": 200
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": -3.125073159383887e-05,
+      "water_tol": 0.05,
+      "water_vs_baseline": -1.1079622259764325e-05
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 6,
+      "ntiedtke_dry_mass_coupling": true,
+      "ra_lw_physics": 5,
+      "ra_sw_physics": 5,
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true
+     },
+     "seam": "engine",
+     "wall_seconds": 286.2
+    }
+   },
+   "overrides": {
+    "ra_lw_physics": "5",
+    "ra_sw_physics": "5"
+   }
+  },
+  "surface_layer.mynn": {
+   "backends": {
+    "cuda": {
+     "budgets": {
+      "dry_rel_change": -0.0002447590368682776,
+      "dry_rel_change_interior": -0.00026514330403103263,
+      "precip_kg": 10443397027.418024,
+      "q_min_end": {
+       "qc": 0.0,
+       "qg": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qs": 0.0,
+       "qv": 1.6547195400562487e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs",
+       "qg"
+      ],
+      "water_residual_rel": -0.0019957532888574734,
+      "water_residual_rel_interior": -0.00504258337625098
+     },
+     "call_counts": {
+      "cumulus": 200,
+      "cumulus_history": 0,
+      "noah": 200,
+      "radiation": 2,
+      "sfclay": 200,
+      "ysu": 200
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 6.258238380798696e-07,
+      "water_tol": 0.05,
+      "water_vs_baseline": -0.0007505892783865754
+     },
+     "outcome": "ran",
+     "sealed_physics": null,
+     "seam": "column_suite",
+     "wall_seconds": 167.1
+    },
+    "metal": {
+     "budgets": {
+      "dry_rel_change": -0.00024472573296023217,
+      "dry_rel_change_interior": -0.0002651046141425326,
+      "precip_kg": 10444827315.712608,
+      "q_min_end": {
+       "qc": 0.0,
+       "qg": -0.0,
+       "qi": 0.0,
+       "qr": -0.0,
+       "qs": -0.0,
+       "qv": 1.6547195400562487e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs",
+       "qg"
+      ],
+      "water_residual_rel": -0.0019949452022716076,
+      "water_residual_rel_interior": -0.005045076098713449
+     },
+     "call_counts": {
+      "cumulus": 200,
+      "cumulus_history": 0,
+      "noah": 200,
+      "radiation": 2,
+      "sfclay": 200,
+      "ysu": 200
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 6.431693712312197e-07,
+      "water_tol": 0.05,
+      "water_vs_baseline": -0.0007508334274128501
+     },
+     "outcome": "ran",
+     "sealed_physics": null,
+     "seam": "column_suite",
+     "wall_seconds": 324.6
+    }
+   },
+   "overrides": {
+    "bl_pbl_physics": "5",
+    "sf_sfclay_physics": "5"
+   }
+  }
+ },
+ "schema": "woof.hex-option-matrix/v1",
+ "tolerances": {
+  "dry": 0.001,
+  "water": 0.05
+ }
+}
