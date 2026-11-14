@@ -622,6 +622,8 @@ def _suite_host(
     cell_latlon_rad=None,
     static_path: Path | None = None,
     regional_donor_cell: int | None = None,
+    mesh=None,
+    run_seconds: float | None = None,
 ) -> tuple[dict[str, Any], None, dict[str, Any]]:
     """The suite row's sealed-constructor mapping, drag statistics included.
 
@@ -649,7 +651,8 @@ def _suite_host(
                 "--orographic-statistics <mesh>.ugwp_oro_data.nc",
             )
         oro, oro_receipt = adapter.read_orographic_statistics(
-            orographic_statistics, row_name=row_name, n_cells=int(N_CELLS)
+            orographic_statistics, row_name=row_name, n_cells=int(N_CELLS),
+            cell_latlon_rad=cell_latlon_rad, static_path=static_path,
         )
         if is_regional:
             from woof.hex.cuda_regional_forecast_v841 import (
@@ -697,6 +700,9 @@ def _suite_host(
             "latitude_deg": np.asarray(values["latitude_deg"])[:n_real],
             "start_time": values["start_time"],
             "mminlu": _init_mminlu(receipt.get("init_path")),
+            # aer_opt = 2's auxinput15 records, remapped to this mesh's cells
+            # for the run's length (woof.hex.aerosol_inputs).
+            "aerosol": {"mesh": mesh, "run_seconds": run_seconds},
         })
     if bound:
         lake = bound.get("lakemask")
@@ -743,7 +749,8 @@ def _suite_host(
             bound = {
                 name: (pad_regional_physics_column(
                     value, donor_cell=regional_donor_cell)
-                       if isinstance(value, np.ndarray) else value)
+                       if isinstance(value, np.ndarray)
+                       and name != "aerosol_frame_offsets" else value)
                 for name, value in bound.items()
             }
             surface_receipt["regional_pad"] = (
@@ -2206,6 +2213,7 @@ def prepare_forecast_host(
     cam_damping_levels: int = 4,
     rayleigh_u: bool = False,
     damping_start_m: float = 22000.0,
+    run_seconds: float | None = None,
     invariant_path: Path | None = None,
     orographic_statistics: Path | None = None,
     surface_statics: Path | None = None,
@@ -2617,6 +2625,7 @@ def prepare_forecast_host(
                 mesh, is_regional=is_regional, physics=physics),
             surface_statics=surface_statics,
             static_path=paths["static"],
+            mesh=mesh, run_seconds=run_seconds,
             regional_donor_cell=getattr(mesh, "attrs", {}).get(
                 "regional_garbage_donor_cell"),
             cell_latlon_rad=(
@@ -3893,6 +3902,11 @@ def execute_forecast(
         print(json.dumps({"tc_lake_mask": tc_lake_receipt}), flush=True)
     from woof.hex.chem_transport import attach as attach_chemistry
     attach_chemistry(stack["backend"], host, stack["driver"])
+    if host.get("w_damping") is not None:
+        from woof.hex.cuda_w_damping import WDamping
+        stack["driver"].w_damping = WDamping(w_crit_cfl=float(host["w_damping"]["w_crit_cfl"]))
+        print(json.dumps({"w_damping": {"w_crit_cfl": float(host["w_damping"]["w_crit_cfl"]),
+                                        "w_damp_on": WDamping().w_damp_on}}), flush=True)
     # --wrf-hydro (woof.wrf_hydro_route): the routing on its own LSM grid through the conservative cell <-> grid
     # exchange (woof.hex.wrf_hydro_hex); returns at once unless the launch asked for it.
     from woof.hex.wrf_hydro_hex import attach_host as attach_wrf_hydro
@@ -5428,6 +5442,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--chemistry-config", type=Path, default=None)
     parser.add_argument("--wind-farms", default=None)
+    parser.add_argument("--w-damping", action="store_true")
+    parser.add_argument("--w-crit-cfl", type=float, default=1.0)
     parser.add_argument(
         "--source-table",
         type=Path,
@@ -6236,6 +6252,7 @@ def _main(args: argparse.Namespace, decision: Mapping[str, Any] | None) -> int:
         monotonic=args.monotonic,
         cam_coefficient=args.cam_coefficient,cam_damping_levels=args.cam_damping_levels,
         rayleigh_u=args.rayleigh_u,damping_start_m=args.damping_start_m,
+        run_seconds=float(args.hours) * 3600.0,
         dynamics_overrides=parse_dynamics_overrides(args.dynamics),
         orographic_statistics=(
             None
@@ -6287,6 +6304,8 @@ def _main(args: argparse.Namespace, decision: Mapping[str, Any] | None) -> int:
     from woof.hex.stochastic import resolve_options
     if getattr(args, "wind_farms", None) is not None:
         host["wind_farms"] = args.wind_farms
+    if getattr(args, "w_damping", False):
+        host["w_damping"] = {"w_crit_cfl": float(args.w_crit_cfl)}
     host["stochastic"] = resolve_options(args.stochastic).json()
     if args.preflight_only or not DEFER_PREPARED_FINGERPRINT:
         join_prepared_fingerprint(host)

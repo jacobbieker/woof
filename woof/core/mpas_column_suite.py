@@ -180,7 +180,7 @@ GENERATION_SELECTORS = MappingProxyType({
         "values": ("off", "bao2000", "barr2023"),
         "requires": ("surface_layer_scheme", ("revised_mm5", "mynn"))},
     "aer_opt": {
-        "values": (0, 3),
+        "values": (0, 1, 2, 3),
         "requires": ("radiation_scheme", ("rrtmg_legacy",))},
     "tempo_ml_for_bl_nc": {
         "values": (False, True),
@@ -1518,6 +1518,11 @@ class MpasColumnPhysics(MpasColumnBatchPhysics):
                       "terrain_drag_static", "radiation", "cumulus",
                       "windfarm_grid"}
         given = {} if surface is None else dict(surface)
+        # aer_opt = 2's auxinput15 records on the columns (woof.hex.
+        # aerosol_inputs): the radiation scheme reads them, not
+        # initialize_physics.
+        aerosol_frames = given.pop("aerosol_frames", None)
+        aerosol_offsets = given.pop("aerosol_frame_offsets", None)
         unknown = sorted(name for name in given
                          if name not in accepted or name in seam_bound)
         if unknown:
@@ -1668,6 +1673,14 @@ class MpasColumnPhysics(MpasColumnBatchPhysics):
             radiation_longitude=lon.reshape(1, ncol),
             terrain_drag_static=(dict(oro, HGT_M=terrain.reshape(1, ncol))
                                  if oro else None))
+        if aerosol_frames is not None:
+            from woof.core import aer_opt2
+            from woof.core.radiation_composition import radiation_adapters
+            staged = aer_opt2.UserAerosolFrames(
+                aerosol_offsets, aerosol_frames, aer_opt2.required_fields(cfg))
+            for leaf in radiation_adapters(self._driver.radiation_callable):
+                if getattr(leaf, "aer_opt", 0) == 2:
+                    leaf.user_aerosol_frames = staged
         if int(getattr(cfg, "sf_surface_mosaic", 0) or 0) == 1:
             # Noah mosaic's tile state is built by WOOF's own door after the
             # surface initialisation (WRF phy_init after LSMINIT,

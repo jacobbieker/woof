@@ -119,11 +119,12 @@ extern "C" __global__ void seaice_init_subcycle_vertices_v842(
 // Every strain word is zeroed; the stresses of cells not solved are zeroed.
 extern "C" __global__ void seaice_init_subcycle_cells_variational_v842(
     rk *strain11, rk *strain22, rk *strain12, rk *stress11, rk *stress22, rk *stress12,
-    const int *solveStress, int nCells, int maxEdges)
+    const int *solveStress, int nCells, int maxEdges, int nCellsLoop)
 {
+    // strain is zeroed whole (nCells, the arrays' length); stress in the loop to nCellsLoop
     int iCell = blockIdx.x * blockDim.x + threadIdx.x;
     if (iCell >= nCells) return;
-    const bool zeroStress = solveStress[iCell] != 1;
+    const bool zeroStress = iCell < nCellsLoop && solveStress[iCell] != 1;
     for (int i = 0; i < maxEdges; ++i) {
         const int p = iCell * maxEdges + i;
         strain11[p] = (rk)0.0;

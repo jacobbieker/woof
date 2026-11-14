@@ -2529,11 +2529,11 @@
    },
    {
     "file": "woof/core/kernels/afwa_diagnostics.cu",
-    "sha256": "0b9b3b3cbe2b8c90eb65992cd412d76823017edec463aecb647cef0cf27ef1a5"
+    "sha256": "df39d565be7c839db4d05810a40c45a03e77b1abb7f3878772af5fac67bacd2c"
    },
    {
     "file": "woof/core/kernels/afwa_severe.cu",
-    "sha256": "a6261f1227d03fd27ad2a598362d6349fc2d99b05d480e4b32f54b63159a7747"
+    "sha256": "cfdef0a7e6f812ec37f438313d40c692b398f999997b595c990590e4094ede28"
    },
    {
     "file": "woof/core/kernels/atan_scalar_flt32.cuh",
@@ -4729,7 +4729,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/evp_variational_v842.cu",
-    "sha256": "359730130db2e446b9e99f1336eb9710953c20bf1ee98da376a5115e957b3dc9"
+    "sha256": "c46b9b54299de54a01178590bf6fae320e8bb6a3fbeef3054b4206d21e51b6a2"
    },
    {
     "file": "woof/hex/mpas_seaice/presubcycle_v842.cu",
@@ -4737,7 +4737,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/velocity_v842.cu",
-    "sha256": "75b2eb1ad5ae779519ff34407542f0de33f81704f662f4c9f574a412564c97c5"
+    "sha256": "130e5723a8a2c34a45bac6bb2ad39ccb47ca9439dcff7d017341099fb77df03d"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_sunpro.cuh",
@@ -5643,7 +5643,7 @@
    },
    {
     "file": "woof/hex/mpas_ocean/forcing_v842.py",
-    "sha256": "6df3a6d13a21ce98ff35098574ae682641833245b079736fcff86bd514188411"
+    "sha256": "a75c4e6bce26d5482bba8012ce72f67d7105ba4c861cbe008ff1e1e7e4e5e92f"
    },
    {
     "file": "woof/hex/mpas_ocean/forward_v842.py",
@@ -5651,11 +5651,11 @@
    },
    {
     "file": "woof/hex/mpas_ocean/pgrad_hmix_v842.py",
-    "sha256": "9e56ebee511091b2e7e69008787278fcb16facaf75ef751fe280660201e8b04e"
+    "sha256": "32c365f476ca0935ac29a19fb04486e8d5c5cb86fe883096a06c4c237d26a6f8"
    },
    {
     "file": "woof/hex/mpas_ocean/split_step_v842.py",
-    "sha256": "4e9dbaa4189ea413e93c57f50a84ce1edf8ec8693e304381d23106453f545322"
+    "sha256": "8076b405a133ad3b3c86faf9dd6ce1265ebb4c287ab89bc5384432f966079cac"
    },
    {
     "file": "woof/hex/mpas_ocean/tend_tracer_v842.py",
@@ -5663,7 +5663,7 @@
    },
    {
     "file": "woof/hex/mpas_ocean/tend_v842.py",
-    "sha256": "09d48df40b326dd384e71f097233c60140ee463caa8bbb5dcfcdcc7a4ea51008"
+    "sha256": "277b5cecdd2fd65d3f07cabc3709c8c665ca96a0544cf353042095a7ca2515ba"
    },
    {
     "file": "woof/hex/mpas_ocean/tracer_advection_v842.py",
@@ -5683,15 +5683,15 @@
    },
    {
     "file": "woof/hex/mpas_seaice/evp_v842.py",
-    "sha256": "6f02dc0977b59abede8522f98e70598a44ec936ef8e47c9676ccca8914e0a443"
+    "sha256": "6b0caebc0c116964cf389c2a2f3f8e14abad5c591c02e28d632a4544678d33c8"
    },
    {
     "file": "woof/hex/mpas_seaice/presubcycle_v842.py",
-    "sha256": "a4b7ec5d0a41787dc5056beb58f7cf18a2b920929552421c4e161fd480d26acb"
+    "sha256": "2541ba6d5771b575c31863132bead18b0b635219ca193ece3825b7acf20c9642"
    },
    {
     "file": "woof/hex/mpas_seaice/velocity_v842.py",
-    "sha256": "99713ad9cd7a31e78d52c31acb3d36f172678b0631ab9a7cbfeecd45f0615a83"
+    "sha256": "a1395275ef2f7a35c008f3a188ccc6543eead8b7b6650849a7219b5d0824ba1e"
    },
    {
     "file": "woof/hex/mpasdiag/_kernels.py",
@@ -9957,13 +9957,13 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "95193e80c5c362de5c63285c206900501f368c0282d1d8880f69513db680a701",
+    "sha256": "9c790e0311a1bd28c7ada6d679f05e40e0a525fe47f8ce70c5a375a9d32215df",
     "sites": {
      "100": 65
     }
    },
    "native_differences": {
-    "sha256": "994dd37a79d7cf0238245f8029b30167b56cdaccca1b324da5f9ea58c37df460",
+    "sha256": "8af56efb84c55ebd385b702813152a2af6410132713af85bdbfe9d11d2c9375d",
     "sites": {
      "100": 12
     }
@@ -9985,7 +9985,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "212874e990ab8615f1271e421bd03afa495a8b4499b77089050a7002417b12b4"
+   "source_sha256": "5acf6f0893ad2623eb13d1371592fc3e9b7ce3a4afbd30acf45b404ba10d57b6"
   },
   "kernels:afwa_severe": {
    "assessment": "static_diagnostic_only",
@@ -10004,15 +10004,15 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "88374c96ec4d70a173ac7784b56bd574348fd666de2f6d4a7c50115734edba58",
+    "sha256": "4ebac2279777da5604d9eb5ba71a6e09ee4cfcf00c517b1eaa89871526701a73",
     "sites": {
-     "100": 28
+     "100": 34
     }
    },
    "native_differences": {
-    "sha256": "1aa7c1299b0560846ef5922fcdc07847ddd6013e7c978aefc75b37b7b54a4556",
+    "sha256": "732c01fa135ffe5586e42593c0d9c1b1059888e5205795df7505ed31d4ae0fef",
     "sites": {
-     "100": 9
+     "100": 12
     }
    },
    "native_errors": {},
@@ -10032,7 +10032,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "61aaee81cc0981ca7c3f4cd6e11a1f53bc9fd6b27aa36c0d2822c3942c44e4d7"
+   "source_sha256": "cd9e14c0d0e33c0f148198bcff3935618bd33ee357bf139becac086bdb494fce"
   },
   "kernels:avgflx": {
    "assessment": "static_diagnostic_only",

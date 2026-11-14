@@ -80,6 +80,29 @@ extern "C" __global__ void afwa_severe_column(
  if(ice>tcoli_max[c])tcoli_max[c]=ice;
  if(flux>flux_max[c])flux_max[c]=flux;
 }
+// One cell's tornado wind (before the duration ramp), and the fold of that wind
+// into the mask, duration and interval maximum given the neighbourhood's
+// previous mask and duration maxima (pm, pd).  Shared by the structured-grid
+// kernel (WRF's 3x3 MAXVAL) and the mesh kernel (the cell and its Voronoi
+// neighbours: woof/hex/mpasdiag/afwa_diag_v842.py).
+__device__ float severe_tornado_wind(float uh,float llws,float zlfc,float minrh,float oldrh){
+ float tornado=0.f;
+ if(zlfc>=0.f){
+  float a=fminf(fmaxf((uh-25.f)/50.f,0.f),1.f);
+  float b=fminf(fmaxf((llws-2.f)/10.f,0.f),1.f);
+  float d=fminf(fmaxf((3000.f-zlfc)/1500.f,0.f),1.f);
+  float e=fminf(fmaxf((90.f-fminf(minrh,oldrh))/30.f,0.f),1.f);
+  tornado=(((50.f*a)*b)*d)*e;
+ }
+ return tornado;
+}
+__device__ void severe_tornado_fold(int c,float tornado,float pm,float pd,
+ float *mask,float *dur,float *maximum,float dt){
+ if(tornado>0.f)mask[c]=1.f;
+ if(mask[c]>.5f||pm>.5f)dur[c]=pd+dt;
+ tornado=tornado*fminf(dur[c]/900.f,1.f);
+ if(tornado>maximum[c])maximum[c]=tornado;
+}
 extern "C" __global__ void afwa_severe_tornado(
  const float *uh,const float *llws,const float *zlfc,
  const float *minrh,const float *oldrh,const float *mask_prev,const float *dur_prev,
@@ -88,15 +111,7 @@ extern "C" __global__ void afwa_severe_tornado(
  int c=blockIdx.x*blockDim.x+threadIdx.x,n=ny*nx;if(c>=n)return;
  int i=c%nx,j=c/nx;mask[c]=0.f;dur[c]=0.f;
  if(i<west||i>=nx-east||j<south||j>=ny-north)return;
- float tornado=0.f;
- if(zlfc[c]>=0.f){
-  float a=fminf(fmaxf((uh[c]-25.f)/50.f,0.f),1.f);
-  float b=fminf(fmaxf((llws[c]-2.f)/10.f,0.f),1.f);
-  float d=fminf(fmaxf((3000.f-zlfc[c])/1500.f,0.f),1.f);
-  float e=fminf(fmaxf((90.f-fminf(minrh[c],oldrh[c]))/30.f,0.f),1.f);
-  tornado=(((50.f*a)*b)*d)*e;
- }
- if(tornado>0.f)mask[c]=1.f;
+ float tornado=severe_tornado_wind(uh[c],llws[c],zlfc[c],minrh[c],oldrh[c]);
  float pm=0.f,pd=0.f;
  for(int y=-1;y<=1;y++)for(int x=-1;x<=1;x++){
   int yy=j+y,xx=i+x;
@@ -104,7 +119,24 @@ extern "C" __global__ void afwa_severe_tornado(
   if(yy<0||yy>=ny||xx<0||xx>=nx)continue;
   pm=fmaxf(pm,mask_prev[yy*nx+xx]);pd=fmaxf(pd,dur_prev[yy*nx+xx]);
  }
- if(mask[c]>.5f||pm>.5f)dur[c]=pd+dt;
- tornado=tornado*fminf(dur[c]/900.f,1.f);
- if(tornado>maximum[c])maximum[c]=tornado;
+ severe_tornado_fold(c,tornado,pm,pd,mask,dur,maximum,dt);
+}
+// The mesh form: WRF's MAXVAL over the 3x3 box becomes the maximum over the
+// cell and its cellsOnCell neighbours (one-based, (maxEdges, n) C order; an
+// index outside 1..n, MPAS's nCells+1 sentinel, is no neighbour).
+extern "C" __global__ void afwa_severe_tornado_mesh(
+ const float *uh,const float *llws,const float *zlfc,
+ const float *minrh,const float *oldrh,const float *mask_prev,const float *dur_prev,
+ float *mask,float *dur,float *maximum,const int *cells_on_cell,const int *edges_on_cell,
+ float dt,int n) {
+ int c=blockIdx.x*blockDim.x+threadIdx.x;if(c>=n)return;
+ mask[c]=0.f;dur[c]=0.f;
+ float tornado=severe_tornado_wind(uh[c],llws[c],zlfc[c],minrh[c],oldrh[c]);
+ float pm=fmaxf(0.f,mask_prev[c]),pd=fmaxf(0.f,dur_prev[c]);
+ for(int e=0;e<edges_on_cell[c];e++){
+  int m=cells_on_cell[(size_t)e*n+c]-1;
+  if(m<0||m>=n)continue;
+  pm=fmaxf(pm,mask_prev[m]);pd=fmaxf(pd,dur_prev[m]);
+ }
+ severe_tornado_fold(c,tornado,pm,pd,mask,dur,maximum,dt);
 }

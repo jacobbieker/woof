@@ -92,9 +92,9 @@ def test_what_the_step_does_not_carry_is_refused_by_name(overrides, knob):
     ss.check_config(case["config"], "r4", mesh)
     with pytest.raises(ConfigurationRefusal, match=knob):
         ss.check_config(dict(case["config"], **overrides), "r4", mesh)
+    # nested halo extents run (tests/test_mpas_ocean_forward_parity.py holds them)
     nested = dict(mesh, nEdgesArray=np.array([mesh["nEdges"] - 3] + [mesh["nEdges"]] * 3, np.int32))
-    with pytest.raises(ConfigurationRefusal, match="nEdgesArray"):
-        ss.check_config(case["config"], "r4", nested)
+    ss.check_config(case["config"], "r4", nested)
 
 
 def test_the_sphere_at_rkind_8_needs_the_glibc_opt_in(monkeypatch):

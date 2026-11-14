@@ -23,9 +23,17 @@ DIRECTIONS = ((1, 0), (1, -1), (0, -1), (-1, 0), (-1, 1), (0, 1))
 
 
 def hex_mesh(nq: int, nr: int, land_fraction: float, n_levels: int, rs: np.random.RandomState,
-             min_levels: int = 2) -> dict:
+             min_levels: int = 2, owned_columns: int | None = None, n_halos: int = 3) -> dict:
     """The mesh's integer fields and counts; ``maxLevelCell`` drawn in
-    ``[min_levels, n_levels]`` (the first three ocean cells full depth)."""
+    ``[min_levels, n_levels]`` (the first three ocean cells full depth).
+
+    ``owned_columns`` makes the mesh one block of a decomposition: the ocean
+    cells of the first ``owned_columns`` torus columns are the block's own,
+    ``n_halos`` layers of neighbours (by ocean adjacency) its halo, and the
+    rest outside it. Cells, edges and vertices are numbered by halo layer (an
+    edge's or vertex's layer the least of its cells'), so ``nCellsArray(i)``
+    and the others count those up to layer ``i-1``; what points outside the
+    block points at the missing cell, as MPAS's outermost halo does."""
     n_all = nq * nr
 
     def cell(q, r):
@@ -38,7 +46,23 @@ def hex_mesh(nq: int, nr: int, land_fraction: float, n_levels: int, rs: np.rando
 
     land = rs.random_sample(n_all) < land_fraction
     land[0] = False
-    ocean = np.nonzero(~land)[0]
+    # the halo layer of each ocean cell (0 owned); everything is owned without a decomposition
+    layer = np.zeros(n_all, np.int64)
+    if owned_columns is not None:
+        layer[:] = n_halos + 1
+        front = [c for c in range(n_all) if not land[c] and c // nr < owned_columns]
+        layer[front] = 0
+        for depth in range(1, n_halos + 1):
+            nxt = []
+            for c in front:
+                for k in range(6):
+                    n = neighbour(c, k)
+                    if not land[n] and layer[n] > depth:
+                        layer[n] = depth
+                        nxt.append(n)
+            front = nxt
+        land = land | (layer > n_halos)
+    ocean = np.array(sorted(np.nonzero(~land)[0], key=lambda c: (layer[c], c)), np.int64)
     nc = len(ocean)
     new_cell = np.full(n_all, nc, np.int64)          # 0-based; nc is the missing cell
     new_cell[ocean] = np.arange(nc)
@@ -58,8 +82,13 @@ def hex_mesh(nq: int, nr: int, land_fraction: float, n_levels: int, rs: np.rando
     for c in range(n_all):
         for k in range(6):
             vertex_cells.setdefault(vertex_id(c, k), []).append(c)
-    kept_edges = [e for e in sorted(edge_cells) if not (land[edge_cells[e][0]] and land[edge_cells[e][1]])]
-    kept_vertices = [v for v in sorted(vertex_cells) if not all(land[c] for c in vertex_cells[v])]
+    def least_layer(cells):
+        return min(layer[c] for c in cells if not land[c])
+
+    kept_edges = sorted((e for e in edge_cells if not (land[edge_cells[e][0]] and land[edge_cells[e][1]])),
+                        key=lambda e: (least_layer(edge_cells[e]), e))
+    kept_vertices = sorted((v for v in vertex_cells if not all(land[c] for c in vertex_cells[v])),
+                           key=lambda v: (least_layer(vertex_cells[v]), v))
     ne, nv = len(kept_edges), len(kept_vertices)
     new_edge = {e: i for i, e in enumerate(kept_edges)}
     new_vertex = {v: i for i, v in enumerate(kept_vertices)}
@@ -138,7 +167,14 @@ def hex_mesh(nq: int, nr: int, land_fraction: float, n_levels: int, rs: np.rando
             e = edges_on_vertex[v, i] - 1
             edge_sign_on_vertex[v, i] = -1 if v + 1 == vertices_on_edge[e, 0] else 1
 
+    def counts(items, layer_of):
+        layers = [layer_of(x) for x in items]
+        return np.array([sum(1 for lay in layers if lay <= i) for i in range(n_halos + 1)], np.int32)
+
     return {
+        "nCellsArray": counts(ocean, lambda c: layer[c]),
+        "nEdgesArray": counts(kept_edges, lambda e: least_layer(edge_cells[e])),
+        "nVerticesArray": counts(kept_vertices, lambda v: least_layer(vertex_cells[v])),
         "nCells": nc, "nEdges": ne, "nVertices": nv, "maxEdges": me, "maxEdges2": me2, "vertexDegree": vd,
         "nEdgesOnCell": n_edges_on_cell, "edgesOnCell": edges_on_cell, "verticesOnCell": vertices_on_cell,
         "cellsOnCell": cells_on_cell, "cellsOnEdge": cells_on_edge, "verticesOnEdge": vertices_on_edge,

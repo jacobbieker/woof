@@ -121,6 +121,30 @@ class ResidentOutputDiagnostics:
         self._fields, self._fields_state = {}, None
         # A checkpoint continuation's running accumulators (resume_accumulators), installed at step 0.
         self._resume = None
+        # The optional modules' fields, known from the active packages before bind(): the
+        # output writer (streams_output_v842.PhysicsStreams) checks every enabled stream's
+        # fields against ``produced`` when it is built, which is before it binds this
+        # object.  THE BREAKAGE: with produced extended only in bind(), every live run
+        # with config_nwp_diagnostics, p/z_lev, prec_acc/acc_phy_tend, AFWA or the
+        # CLWRF/mean/diurnal/surface-energy reductions stopped before step 1 with
+        # "MPAS output fields lack computed authority".
+        self.produced = type(self).produced | self._package_fields()
+
+    def _package_fields(self):
+        """The diagnostic fields the active Registry packages make this object produce."""
+        packages = set(getattr(self.session.layout, 'packages', ()) or ())
+        fields = set()
+        if _nwp.PACKAGE in packages:
+            fields |= set(_nwp.NAMES)
+        if {_acc.PREC_PACKAGE, _acc.TEND_PACKAGE} & packages:
+            fields |= set(_acc.NAMES)
+        if set(_reduce.PACKAGES) & packages:
+            fields |= set(_reduce.NAMES)
+        if set(_afwa.SELECTORS) & packages:
+            fields |= set(_afwa.NAMES)
+        if {_plevel.P_PACKAGE, _plevel.Z_PACKAGE} & packages:
+            fields |= set(_plevel.NAMES)
+        return frozenset(fields)
 
     def accumulator_state(self):
         """The convective running accumulators' words, for a checkpoint that a continuation resumes."""
@@ -458,6 +482,8 @@ class ResidentOutputDiagnostics:
             self.convective.reset()
             if self.nwp is not None:
                 self.nwp.reset()
+            if self.afwa is not None:
+                self.afwa.reset()
         finally:
             self._end_event()
         self.acoustic.clear()

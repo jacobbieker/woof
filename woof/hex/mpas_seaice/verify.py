@@ -13,22 +13,24 @@ def verify() -> dict:
     from woof.hex.coupled import oracle, registry
     from woof.verify import mpas_seaice_evp_oracle as evp_oracle
     from woof.verify import mpas_seaice_presubcycle_oracle as presubcycle_oracle
+    from woof.verify import mpas_seaice_step_oracle as step_oracle
     from woof.verify import mpas_seaice_velocity_oracle as velocity_oracle
 
-    from . import evp_v842, presubcycle_v842, velocity_v842
+    from . import evp_v842, presubcycle_v842, timestep_v842, velocity_v842
 
     for fixture in (evp_oracle.FIXTURE_DIR / "oracle-r4.npz", velocity_oracle.FIXTURE_DIR / "oracle-r4.npz",
-                    presubcycle_oracle.FIXTURE_DIR / "oracle-r4.npz"):
+                    presubcycle_oracle.FIXTURE_DIR / "oracle-r4.npz", step_oracle.FIXTURE_DIR / "oracle-r4.npz"):
         if not fixture.is_file():
             raise FileNotFoundError(
                 f"the MPAS-Seaice oracle fixture is not here ({fixture.parent}); it ships with the "
                 "source tree (tests/data/oracles), not the wheel: run verify from a checkout")
 
     def piece(name, module, oracle_module, report):
+        source = getattr(module, "SOURCE_FILES", ())
         mismatched = sum(n for fields in report.values() for n in fields.values())
         return {
             "name": name,
-            "source": list(module.SOURCE_FILES),
+            "source": list(source),
             "fixture": str(oracle_module.FIXTURE_DIR.relative_to(oracle_module.FIXTURE_DIR.parents[3])),
             "cases": sorted(report),
             "mismatched_words": report,
@@ -42,6 +44,9 @@ def verify() -> dict:
     for precision in presubcycle_oracle.PRECISIONS:
         pieces.append(piece(f"velocity_pre_subcycle_{precision}", presubcycle_v842, presubcycle_oracle,
                             presubcycle_oracle.measure(precision)))
+    for precision in step_oracle.PRECISIONS:
+        pieces.append(piece(f"time_step_dynamics_{precision}", timestep_v842, step_oracle,
+                            step_oracle.measure(precision)))
     return {
         "model": "seaice",
         "status": registry.component("seaice").status,

@@ -88,7 +88,8 @@ _ROWS = (
 FIELDS: dict[str, dict[str, Any]] = {
     name: {"type": "real", "dimensions": ["nCells", "Time"],
            "attrs": {"units": units, "long_name": description, "wrf_name": wrf},
-           "gates": [PACKAGE]}
+           # one WRF array each, also written by the AFWA severe package (afwa_diag_v842.NWP_SHARED)
+           "gates": [PACKAGE + (";afwa_severe_opt" if name in ("wspd10max", "w_up_max", "w_dn_max") else "")]}
     for name, wrf, units, description in _ROWS}
 NAMES = tuple(FIELDS)
 
