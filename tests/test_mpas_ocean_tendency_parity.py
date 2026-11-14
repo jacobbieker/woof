@@ -110,6 +110,34 @@ def test_a_dry_edge_refuses_the_bottom_terms():
         assert knob in str(exc.value)
 
 
+@requires_gpu
+def test_a_dry_halo_edge_outside_the_launch_extent_is_not_refused():
+    """The bottom-term guards read the edges the kernels run (nEdgesArray(1) under halo_extents), as v8.4.2's loops
+    do: a dry halo edge past that extent is never indexed.  THE BREAKAGE: the guard read every allocated edge and
+    refused a step whose launched edges were all wet."""
+    import cupy as cp
+    from woof.hex.mpas_ocean import forcing_v842 as fv
+    from woof.hex.mpas_ocean.tend_v842 import halo_extents
+    ne, nl, nc = 2, 3, 3
+    i32, f32 = np.int32, np.float32
+    mesh = {"maxLevelEdgeTop": cp.asarray(np.array([1, 0], i32)),
+            "cellsOnEdge": cp.asarray(np.array([[1, 2], [2, 3]], i32)),
+            "edgeMask": cp.asarray(np.array([[1, 0, 0], [0, 0, 0]], i32))}
+
+    def run(configs):
+        fv.vel_forcing_tend(mesh=mesh, normal_velocity=cp.full((ne, nl), 0.1, f32),
+                            surface_flux_attenuation_coefficient=cp.ones(nc, f32),
+                            surface_stress=cp.zeros(ne, f32), kinetic_energy_cell=cp.full((nc, nl), 0.01, f32),
+                            layer_thickness_edge=cp.full((ne, nl), 10.0, f32), tend=cp.zeros((ne, nl), f32),
+                            configs=configs)
+    for knob in ("config_use_explicit_bottom_drag", "config_Rayleigh_bottom_friction"):
+        configs = {knob: True, "config_Rayleigh_friction": True}
+        with halo_extents(cells=[2, nc], edges=[1, ne], vertices=[1, 1]):
+            run(configs)
+        with pytest.raises(ConfigurationRefusal):
+            run(configs)
+
+
 def test_the_glibc_opt_in_lifts_the_rkind_8_bulk_wind_stress(monkeypatch):
     from woof.hex.mpas_ocean import forcing_v842 as fv
     from woof.hex.mpas_ice import rkind
