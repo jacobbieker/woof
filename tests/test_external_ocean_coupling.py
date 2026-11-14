@@ -261,3 +261,37 @@ def test_the_nemo_column_couples_through_the_driver_wiring(tmp_path):
     cpl.ocean.qsr_solver.qsr_hc[...] += 1.0
     assert _canonical_digest_document(cpl.digest_arrays(), {}, "trajectory") != before
     assert AtmosphereSurface is not None
+
+
+@pytest.mark.gpu
+@requires_gpu
+def test_an_adaptive_step_that_crosses_the_coupling_time_is_split_there():
+    """An adaptive clock's steps need not divide the interval: the crossing
+    step closes the interval at the coupling time and opens the next one
+    (every adaptive NEMO run stopped at its first crossing before)."""
+    import cupy as cp
+
+    from woof.ocean.external import ExternalOceanCoupling
+
+    shape = (2, 3)
+    z = lambda v: cp.full(shape, v, cp.float32)  # noqa: E731
+    surf = dict(qfx=z(1.0e-5), gsw=z(400.0), glw=z(300.0), emiss=z(0.98), sst=z(290.0),
+                lh=z(25.0), hfx=z(10.0), ust=z(0.3))
+    atm = dict(u=cp.full((2, *shape), 5.0, cp.float32), v=cp.zeros((2, *shape), cp.float32),
+               rho=cp.full((2, *shape), 1.2, cp.float32))
+
+    def run(steps):
+        ocean = StubOcean(shape, 290.0)
+        cpl = ExternalOceanCoupling(ocean, cplmask=np.ones(shape), interval=60.0, dt=20.0,
+                                    shape=shape)
+        for dt in steps:
+            cpl.capture_lowest_level(atm)
+            cpl.send(surf, raincv=None, rainncv=z(0.0), dt=dt)
+        return ocean, cpl
+
+    fixed, _ = run([20.0, 20.0, 20.0])
+    adaptive, cpl = run([25.0, 25.0, 25.0, 25.0])      # crosses 60 s inside the third step
+    assert adaptive.steps == fixed.steps == [60.0]
+    for name, value in fixed.fluxes[0].items():
+        assert np.allclose(adaptive.fluxes[0][name], value, rtol=1e-6, atol=0), name
+    assert cpl.averager.elapsed == pytest.approx(40.0)  # 15 s of step 3 and step 4
