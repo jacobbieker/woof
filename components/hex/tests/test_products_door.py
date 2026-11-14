@@ -655,6 +655,90 @@ def test_completed_chemistry_run_adds_species_to_normal_products(monkeypatch, tm
     assert "var:wrf_dust_bin_7_dry_deposition" in manifest["chemistry_products"]
 
 
+def test_severe_option_products_follow_the_fields_the_run_carries(tmp_path):
+    """HAILCAST, lightning and AFWA maps are requested exactly when the last frame or its diag stream carries them."""
+    bridge = pytest.importorskip("woof.netcdf_bridge")
+    if bridge.find_netcdf_bin() is None:
+        pytest.skip("rw_netcdf is not installed")
+    netCDF4 = pytest.importorskip("netCDF4")
+
+    def write(path, names):
+        with netCDF4.Dataset(path, "w") as ds:
+            ds.createDimension("Time", None)
+            ds.createDimension("nCells", 2)
+            for name in names:
+                ds.createVariable(name, "f4", ("Time", "nCells"))[0, :] = [0.0, 1.0]
+
+    history = tmp_path / "history.2024-05-21_20.00.00.nc"
+    write(history, ("theta", "t2m"))
+    assert products_door.severe_option_products([history]) == ()
+    write(tmp_path / "diag.2024-05-21_20.00.00.nc", ("refl10cm_max", "lpi", "ic_flashcount", "hailcast_diam_max",
+                                                      "hailcast_runmax", "afwa_hail", "afwa_echotop", "hail_maxk1"))
+    assert products_door.severe_option_products([history]) == (
+        "hail_max_hailcast", "hail_max_hailcast_run", "hail_max_surface", "var:wrf_ic_flashcount", "var:wrf_lpi",
+        "var:wrf_afwa_hail", "var:wrf_echotop")
+    # A frame that cannot be read requests nothing; the draw names its own reason.
+    broken = tmp_path / "history.2024-05-21_21.00.00.nc"
+    broken.write_bytes(b"h")
+    assert products_door.severe_option_products([history, broken]) == ()
+
+
+def _severe_fieldmap_rows():
+    fieldmap = (Path(__file__).resolve().parents[3] / "tools/rustwx/crates/rw-mpas/src/fieldmap.rs").read_text()
+    return {mpas: (wrf, units) for wrf, mpas, units in re.findall(
+        r'f\("([A-Z0-9_]+)", Some\("([a-z0-9_]+)"\), Rank::Surface, "([^"]*)".*SEVERE_OPTION\)', fieldmap)}
+
+
+def test_every_severe_option_field_hex_writes_is_mapped_under_its_wrf_name():
+    """rw_mpas_convert carries each mpasdiag severe field under the WRF name and units its history attribute states."""
+    from woof.hex.mpasdiag import afwa_diag_v842, hailcast_diag_v842, lightning_diag_v842, nwp_diag_v842
+
+    rows = _severe_fieldmap_rows()
+    for module in (afwa_diag_v842, hailcast_diag_v842, lightning_diag_v842):
+        for name, row in module.FIELDS.items():
+            assert rows.get(name) == (row["attrs"]["wrf_name"], row["attrs"]["units"]), name
+    for name in ("hail_maxk1", "hail_max2d", "wspd10max", "w_up_max", "w_dn_max"):
+        row = nwp_diag_v842.FIELDS[name]["attrs"]
+        assert rows.get(name) == (row["wrf_name"], row["units"]), name
+
+
+def test_every_severe_option_map_reads_a_mapped_field():
+    """Every map is a renderer recipe or the generic plane of a field the converter maps (fieldmap.rs)."""
+    mapped = {mpas: wrf for mpas, (wrf, _) in _severe_fieldmap_rows().items()}
+    for name, slug in products_door.SEVERE_OPTION_PRODUCTS:
+        wrf = mapped.get(name)
+        assert wrf is not None, f"{name} is not mapped by rw_mpas_convert"
+        if slug.startswith("var:"):
+            assert slug == "var:wrf_" + wrf.lower(), (name, slug)
+
+
+def test_a_severe_run_draws_its_option_maps_and_names_them(monkeypatch, tmp_path):
+    histories = _histories(tmp_path)
+    args = _arguments(tmp_path, histories, case="severe")
+    args.no_points = args.no_mesh_view = True
+    seen = []
+    _stand_in_engines(monkeypatch, tmp_path, uniform=True, seen=seen)
+    monkeypatch.setattr(products_door, "severe_option_products",
+                        lambda frames: ("hail_max_hailcast", "var:wrf_lpi"))
+    renderer = render_door._run
+
+    def with_severe_catalog(command, *, log_prefix, env=None):
+        result = renderer(command, log_prefix=log_prefix, env=env)
+        if log_prefix == "CATALOG":
+            result.stdout += "".join(f"PRODUCT\t{slug}\tdirect\trenderable\tready\t\n"
+                                     for slug in ("hail_max_hailcast", "var:wrf_lpi"))
+        return result
+    monkeypatch.setattr(render_door, "_run", with_severe_catalog)
+    assert products_door.run_products(args) == 0
+    commands = [command for label, command in seen if label == "RENDER"]
+    assert commands
+    for command in commands:
+        drawn = command[command.index("--products") + 1].split(",")
+        assert {"hail_max_hailcast", "var:wrf_lpi"} <= set(drawn)
+    manifest = json.loads((tmp_path / "out/severe/products-manifest.json").read_text())
+    assert manifest["severe_option_products"] == ["hail_max_hailcast", "var:wrf_lpi"]
+
+
 def test_limited_area_products_only_convert_the_domain(monkeypatch, tmp_path):
     seen = []
     _stand_in_engines(monkeypatch, tmp_path, uniform=False, seen=seen)
