@@ -4,6 +4,12 @@
     stop 6
   end subroutine column_stand_in
 
+  function seaice_column_initial_air_drag_coefficient() result(airDragCoefficient)
+    real(kind=RKIND) :: airDragCoefficient
+    airDragCoefficient = 0.0_RKIND
+    call column_stand_in('seaice_column_initial_air_drag_coefficient')
+  end function seaice_column_initial_air_drag_coefficient
+
   subroutine column_prep_radiation(domain)
     type(domain_type), intent(inout) :: domain
     call column_stand_in('column_prep_radiation')
