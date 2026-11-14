@@ -1882,6 +1882,18 @@ def wrf_start_base_state(raw, hypsometric_opt: int):
     return {'MUB': mub, 'PB': pb, 'T_INIT': t_init, 'ALB': alb, 'PHB': phb}
 
 
+def oml_cold_start_fields(cfg) -> frozenset:
+    """The slab-ocean carriers a cold start takes from OMLINIT, not the file.
+
+    The file's H0ML/HUML/HVML/TMOML reach initialize_ocean as ocean_initial;
+    the cold-start field pass must not copy them back afterwards.
+    """
+    if int(getattr(cfg, "sf_ocean_physics", 0) or 0) != 1:
+        return frozenset()
+    from woof.surface_ocean import ocean_fields
+    return frozenset(ocean_fields(cfg))
+
+
 def restore_domain_state(restored: RestoredDomain, cfg, *, scratch_arena=None,
                          dycore_state_workspace=None, radiation=None,
                          radiation_start_time=None, radiation_latitude=None,
@@ -2206,7 +2218,14 @@ def initialize_wrfinput_physics(state, restored, cfg, *, radiation=None,
     # (woof.ingest.wrfrst.apply_warm_start_physics); the cold-start alias
     # pass would read a restart's staggered PBL carriers as surface inputs.
     warm = getattr(restored, "warm_start", None) is not None
+    oml_initialized = oml_cold_start_fields(cfg)
     for field in (() if warm else driver.fields):
+        if field in oml_initialized:
+            # OMLINIT owns these at start_of_simulation
+            # (module_sf_oml.F:200-230).  real.exe writes H0ML=TMOML=0, so
+            # copying them back left a zero initial depth, which pinned HML
+            # at its start value, and no deep-layer temperature floor.
+            continue
         if int(cfg.bl_pbl_physics) == 10 and field in ("te_temf", "cf3d_temf"):
             # TEMFINIT runs after the input read and replaces these at cold
             # start (module_bl_temf.F:1431-1446), even if real.exe wrote them.
