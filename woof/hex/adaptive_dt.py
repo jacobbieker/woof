@@ -63,8 +63,8 @@ DEFAULT_MAX_STEP_INCREASE_PCT = 5
 
 #: ``woof domain --clock tropical-adaptive`` (#276): the vertical Courant target capped at 1.0 (the limit
 #: the fixed tropical clock was measured to keep), 5 % growth, the fixed step as the floor.  Admitted only
-#: inside the tropics, as on WRF.  WRF's opt-in also writes ``w_damping = 1``; hex has no w-damping term
-#: yet (parity item 4.2), which the receipt records.
+#: inside the tropics, as on WRF.  WRF's opt-in also writes ``w_damping = 1``; on hex that is the separate
+#: ``--w-damping`` opt-in (parity item 4.2), which the receipt names.
 TROPICAL_TARGET_CFL = 1.0
 TROPICAL_MAX_LAT = 25.0
 
@@ -312,8 +312,8 @@ def resolve_options(arguments: Any, *, row_dt: float, row_substeps: int, order: 
         target_cfl = TROPICAL_TARGET_CFL
         floor_ratio = Fraction(1)
         notes.append("tropical preset (woof domain --clock tropical-adaptive, #276): target_cfl 1.0, 5 % "
-                     "growth, the row's fixed step as the floor; WRF's w_damping = 1 has no hex term yet "
-                     "(parity item 4.2)")
+                     "growth, the row's fixed step as the floor; WRF's opt-in also writes w_damping = 1, which "
+                     "on hex is the separate --w-damping opt-in (parity item 4.2)")
 
     def seconds(name: str, default: Fraction) -> Fraction:
         value = getattr(arguments, name, None)

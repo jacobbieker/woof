@@ -971,7 +971,8 @@ what differs from the WRF route:
 - **Defaults.**  WRF's targets (vertical 1.2, horizontal 0.84, 5 % growth), starting at the mesh row's
   admitted step with WRF's ratios to it (max 2x, min 3/4).  `tropical` is `--clock tropical-adaptive`
   (#276): vertical target 1.0, the row's step as the floor, refused outside |lat| < 25.  WRF's opt-in
-  also writes `w_damping = 1`; hex has no w-damping term yet (item 4.2), which the receipt notes.
+  also writes `w_damping = 1`; on hex that is the separate `--w-damping` opt-in (item 4.2, #420), which
+  the receipt names and the tropical evidence below did not use.
 - **Landings and cadences.**  The step lands, through `step_to_time`'s two-step look-ahead, on every
   history frame, checkpoint, the run end, the lateral-boundary interval and every positive physics
   period.  Radiation, and any held surface/PBL or cumulus period, fire on those exact time deadlines
@@ -987,4 +988,21 @@ what differs from the WRF route:
   time the stochastic physics, radar snapshots, the surface update and the large-step recovery; the
   MPAS v8.4.2 suite route is refused at the door (its framework clock and alarms take one step).
 
-Evidence: see the HEX-WRF parity matrix row "adaptive dt"; tests `tests/test_hex_adaptive_dt.py`.
+Evidence (2026-11-14, WOOF column route `arwen_mpas_column`; Metal = M3 Max, CUDA = RTX A6000; both
+machines shared with other jobs, so the walls are indicative):
+
+| check | Metal | CUDA |
+|---|---|---|
+| off: 1 h Arizona 5 km hexcase history, main vs branch | identical (`466dfa34`) | identical (`a8e5f438`) |
+| on: 1 h hexcase | 88 steps (fixed 120), dt 23.9-43.9 s, vertical CFL max 1.25 (target 1.2), every frame on time | the same 88 steps |
+| pinned (min = max = 36 s on the 30 s row) vs a fixed `--dt 36` run | history byte-identical | byte-identical |
+| 2 h with a 1 h checkpoint, resumed | 02 h history byte-identical | byte-identical |
+| Maui 3 km (7,042 cells, 18 s row), 12 h, `tropical` vs fixed | 1206 vs 2400 steps, 580 s vs 1451 s | 1206 vs 2400 steps, 259 s vs 359 s (1.38x) |
+
+The pinned run is the strongest of these: an adaptive run held at a step the row was not built with
+reproduces a fixed run built at that step, so nothing in the dycore, its boundary runtime or the
+column physics kept the construction-time step.  The 12 h tropical runs stayed finite in every field of
+every frame, with max |w| at or under the fixed run's; the step reached its 2x ceiling within
+the first quarter hour and held there with the vertical Courant number at 1.0.  On CUDA the 2x step
+buys 1.38x, not 2x: CUDA graphs are off on the adaptive path (a captured graph replays one step length)
+and each step reads its CFL back to the host once.  Tests: `tests/test_hex_adaptive_dt.py`.
