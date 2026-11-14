@@ -45,6 +45,14 @@ from woof.hex.mpas_ocean.forward_v842 import Clock, parse_time, read_restart, wr
 
 from . import evp_v842, presubcycle_v842, velocity_v842
 
+SOURCE_FILES = (
+    "src/core_seaice/model_forward/mpas_seaice_core.F:260-410",
+    "src/core_seaice/shared/mpas_seaice_time_integration.F:42-259",
+    "src/core_seaice/shared/mpas_seaice_diagnostics.F:47-156",
+    "src/core_seaice/shared/mpas_seaice_column.F:11028-11157",
+    "src/core_seaice/shared/mpas_seaice_velocity_solver.F:80-135",
+)
+
 __all__ = ("Clock", "initialize", "advance", "write_restart", "read_restart", "clock_from_configs")
 PRECISIONS = {"r4": np.float32, "r8": np.float64}
 
@@ -110,19 +118,9 @@ def initialize(*, pools: dict, configs: dict) -> Clock:
     return clock
 
 
-def _cut(pool: dict, sizes: dict) -> dict:
-    """The pool with every cell, edge and vertex array cut to the block's count."""
-    out = {}
-    for name, value in pool.items():
-        on_device = value is not None and hasattr(value, "shape") and not isinstance(value, np.ndarray)
-        n = sizes.get(int(value.shape[0])) if on_device and value.ndim else None
-        out[name] = value[:n] if n is not None else value
-    return out
-
-
-def _velocity_solver(pools: dict, configs: dict, consts, sizes: dict) -> None:
+def _velocity_solver(pools: dict, configs: dict, consts) -> None:
     """``seaice_run_velocity_solver``: pre-subcycle, elastic subcycles, post-subcycle."""
-    p = {name: _cut(pool, sizes) for name, pool in pools.items()}
+    p = pools
     mesh = {**p["mesh"]}
     solver, variational, icestate = p["velocity_solver"], p["velocity_variational"], p["icestate"]
     flags = {"use_column_package": False, "use_column_vertical_thermodynamics": False}
@@ -132,8 +130,10 @@ def _velocity_solver(pools: dict, configs: dict, consts, sizes: dict) -> None:
     elastic_dt = solver["elasticTimeStep"].item()
     real = PRECISIONS[_precision_of(solver["uVelocity"])]
     dynamics_dt, elastic_dt = real(dynamics_dt), real(elastic_dt)
+    # the category tracers' (1, nCategories, nCells) as the pre-subcycle reads them, (nCategories, nCells)
+    tracers = {name: value.reshape(value.shape[0], value.shape[1]) for name, value in p["tracers"].items()}
     presubcycle_v842.pre_subcycle(
-        mesh=mesh, boundary=p["boundary"], tracers=p["tracers"], aggregate=p["tracers_aggregate"],
+        mesh=mesh, boundary=p["boundary"], tracers=tracers, aggregate=p["tracers_aggregate"],
         icestate=icestate, ocean=p["ocean_coupling"], atmos=p["atmos_coupling"], solver=solver,
         variational=variational, use_air_stress=bool(configs.get("config_use_air_stress", False)),
         use_ocean_stress=use_ocean_stress, tilt=_tilt(configs), **flags)
@@ -161,7 +161,6 @@ def advance(*, pools: dict, configs: dict, clock: Clock, n_steps: int, first_ste
     precision = _precision_of(solver["uVelocity"])
     real = PRECISIONS[precision]
     nc, ne, nv = int(m["nCells"]), int(m["nEdges"]), int(m["nVertices"])
-    sizes = {nc + 1: nc, ne + 1: ne, nv + 1: nv}
     days_per_second = real(real(1.0) / real(real(24.0) * real(3600.0)))
     seconds_per_day = real(real(24.0) * real(3600.0))
     config_dt = real(configs["config_dt"])
@@ -182,7 +181,8 @@ def advance(*, pools: dict, configs: dict, clock: Clock, n_steps: int, first_ste
         d["timeAverageTestVariable"][...] = d["timeAverageTestVariable"] + real(config_dt / seconds_per_day)
         for _ in range(int(configs["config_dynamics_subcycle_number"])):
             if configs.get("config_use_velocity_solver", True):
-                _velocity_solver(pools, configs, consts, sizes)
+                with evp_v842.block_counts(cells=nc, vertices=nv):
+                    _velocity_solver(pools, configs, consts)
         # seaice_timestep_finalize: seaice_column_reinitialize_atmospheric_fluxes
         solver["airStressCellU"][...] = 0
         solver["airStressCellV"][...] = 0

@@ -4729,7 +4729,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/evp_variational_v842.cu",
-    "sha256": "359730130db2e446b9e99f1336eb9710953c20bf1ee98da376a5115e957b3dc9"
+    "sha256": "c46b9b54299de54a01178590bf6fae320e8bb6a3fbeef3054b4206d21e51b6a2"
    },
    {
     "file": "woof/hex/mpas_seaice/presubcycle_v842.cu",
@@ -4737,7 +4737,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/velocity_v842.cu",
-    "sha256": "75b2eb1ad5ae779519ff34407542f0de33f81704f662f4c9f574a412564c97c5"
+    "sha256": "130e5723a8a2c34a45bac6bb2ad39ccb47ca9439dcff7d017341099fb77df03d"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_sunpro.cuh",
@@ -5683,15 +5683,15 @@
    },
    {
     "file": "woof/hex/mpas_seaice/evp_v842.py",
-    "sha256": "6f02dc0977b59abede8522f98e70598a44ec936ef8e47c9676ccca8914e0a443"
+    "sha256": "6b0caebc0c116964cf389c2a2f3f8e14abad5c591c02e28d632a4544678d33c8"
    },
    {
     "file": "woof/hex/mpas_seaice/presubcycle_v842.py",
-    "sha256": "a4b7ec5d0a41787dc5056beb58f7cf18a2b920929552421c4e161fd480d26acb"
+    "sha256": "2541ba6d5771b575c31863132bead18b0b635219ca193ece3825b7acf20c9642"
    },
    {
     "file": "woof/hex/mpas_seaice/velocity_v842.py",
-    "sha256": "99713ad9cd7a31e78d52c31acb3d36f172678b0631ab9a7cbfeecd45f0615a83"
+    "sha256": "a1395275ef2f7a35c008f3a188ccc6543eead8b7b6650849a7219b5d0824ba1e"
    },
    {
     "file": "woof/hex/mpasdiag/_kernels.py",

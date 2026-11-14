@@ -166,10 +166,12 @@ def init_subcycle_variables(*, mesh: dict, solver: dict, variational: dict) -> N
     _function(precision, "seaice_init_subcycle_vertices_v842")(_grid(n_vertices), (_BLOCK,), (
         solver["stressDivergenceU"], solver["stressDivergenceV"], solver["uVelocity"], solver["vVelocity"],
         solver["oceanStressCoeff"], solver["solveVelocity"], np.int32(nvs), np.int32(n_vertices)))
+    from .evp_v842 import loop_count
     v = variational
     _function(precision, "seaice_init_subcycle_cells_variational_v842")(_grid(n_cells), (_BLOCK,), (
         v["strain11"], v["strain22"], v["strain12"], v["stress11"], v["stress22"], v["stress12"],
-        solver["solveStress"], np.int32(n_cells), np.int32(max_edges)))
+        solver["solveStress"], np.int32(n_cells), np.int32(max_edges),
+        np.int32(loop_count("cells", n_cells))))
 
 
 def pre_subcycle(*, mesh: dict, icestate: dict, solver: dict, variational: dict,

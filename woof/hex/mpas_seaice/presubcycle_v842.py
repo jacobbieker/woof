@@ -46,7 +46,7 @@ import numpy as np
 from woof.hex import numerics as _hex_numerics
 from woof.hex.errors import ConfigurationRefusal
 
-from . import velocity_v842
+from . import evp_v842, velocity_v842
 from .velocity_v842 import COMPILE_OPTIONS, PRECISIONS, _check, _grid, _precision_of, _solve_bounds
 
 SOURCE_FILES = (
@@ -166,17 +166,19 @@ def aggregate_and_masks(*, mesh: dict, boundary: dict, tracers: dict, aggregate:
     _check("solveStress", solver["solveStress"], cp.int32, (n_cells,))
     _check("solveVelocity", solver["solveVelocity"], cp.int32, (n_vertices,))
     a, i = aggregate, icestate
-    _function(precision, "seaice_aggregate_mass_and_area_v842")(_grid(n_cells), (_BLOCK,), (
+    n_loop = evp_v842.loop_count("cells", n_cells)
+    _function(precision, "seaice_aggregate_mass_and_area_v842")(_grid(n_loop), (_BLOCK,), (
         a["iceAreaCell"], a["iceVolumeCell"], a["snowVolumeCell"], i["totalMassCell"],
         tracers["iceAreaCategory"], tracers["iceVolumeCategory"], tracers["snowVolumeCategory"],
-        np.int32(n_cells), np.int32(n_cat)))
+        np.int32(n_loop), np.int32(n_cat)))
     if not (use_column_package and use_column_vertical_thermodynamics):
         _copy(precision, i["iceAreaCellInitial"], a["iceAreaCell"])
     interpolate_cell_to_vertex(mesh=mesh, vertex=i["iceAreaVertex"], cell=i["iceAreaCellInitial"])
     interpolate_cell_to_vertex(mesh=mesh, vertex=i["totalMassVertex"], cell=i["totalMassCell"])
-    _function(precision, "seaice_stress_calculation_mask_v842")(_grid(n_cells), (_BLOCK,), (
+    n_loop = evp_v842.loop_count("cells", n_cells)
+    _function(precision, "seaice_stress_calculation_mask_v842")(_grid(n_loop), (_BLOCK,), (
         solver["solveStress"], i["iceAreaCellInitial"], i["totalMassCell"], ocean["landIceMask"],
-        mesh["nEdgesOnCell"], mesh["cellsOnCell"], np.int32(n_cells), np.int32(max_edges)))
+        mesh["nEdgesOnCell"], mesh["cellsOnCell"], np.int32(n_loop), np.int32(max_edges)))
     _function(precision, "seaice_velocity_calculation_mask_v842")(_grid(n_vertices), (_BLOCK,), (
         solver["solveVelocity"], boundary["interiorVertex"], ocean["landIceMaskVertex"], i["iceAreaVertex"],
         i["totalMassVertex"], np.int32(nvs), np.int32(n_vertices)))
