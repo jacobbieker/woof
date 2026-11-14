@@ -1002,7 +1002,7 @@ machines shared with other jobs, so the walls are indicative):
 The pinned run is the strongest of these: an adaptive run held at a step the row was not built with
 reproduces a fixed run built at that step, so nothing in the dycore, its boundary runtime or the
 column physics kept the construction-time step.  The 12 h tropical runs stayed finite in every field of
-every frame, with max |w| at or under the fixed run's; the step reached its 2x ceiling within
+every frame, with 3-hourly max |w| of 2.8-3.4 m/s against the fixed run's 2.6-4.2; the step reached its 2x ceiling within
 the first quarter hour and held there with the vertical Courant number at 1.0.  On CUDA the 2x step
 buys 1.38x, not 2x: CUDA graphs are off on the adaptive path (a captured graph replays one step length)
 and each step reads its CFL back to the host once.  Tests: `tests/test_hex_adaptive_dt.py`.
