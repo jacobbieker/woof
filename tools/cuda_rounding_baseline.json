@@ -5691,7 +5691,7 @@
    },
    {
     "file": "woof/hex/mpas_ocean/forcing_v842.py",
-    "sha256": "a75c4e6bce26d5482bba8012ce72f67d7105ba4c861cbe008ff1e1e7e4e5e92f"
+    "sha256": "a97fa340e9170c44397235ae182f2abcfab140e52567e5c3f8781a01717046d6"
    },
    {
     "file": "woof/hex/mpas_ocean/forward_v842.py",
@@ -6039,7 +6039,7 @@
    },
    {
     "file": "woof/hex/nudging.py",
-    "sha256": "b4844e70251138f66d07cfd0fab8b5591dd8ba4ea6006c4417f3a71a82e8cabc"
+    "sha256": "bce0fbdfcdfc43d336ae6c5e8a99cc490d3d69eeb581e624750b8ea1ea8e6601"
    },
    {
     "file": "woof/hex/ocean_mixed_layer.py",

@@ -50,6 +50,22 @@ def commit_outer_scalar_groups(session, atmosphere, cp):
         target[first:last, :, :source.shape[-1]] = cp.asarray(source[first:last])
 
 
+def forcing_writes_scalar_sources(coupling) -> bool:
+    """Whether a forcing (SPPT/SKEBS, IAU or analysis nudging) adds into the stage's scalar sources in place.
+
+    Compact resident assembly lends Registry publication its scalar allocation, so such a forcing must work on a
+    copy or it would rewrite the published pre-forcing words."""
+    return any(getattr(coupling, name, None) is not None for name in ('stochastic', 'iau', 'nudging'))
+
+
+def nudging_partitioned(execution, moving) -> bool:
+    """Whether analysis nudging would run on a partitioned/moving executor (which it refuses).
+
+    A checkpoint route on the run's own mesh (``fixed_mesh``: ``--checkpoint-hours``, a resume) is one card on
+    one fixed mesh; only a moving wrapper or an execution split elsewhere is partitioned."""
+    return execution is not None or (moving is not None and not getattr(moving, 'fixed_mesh', False))
+
+
 class ResidentNativeCoupling:
     """Hold outer sources and hand transport to native; mpas_atm_time_integration.F:2140-2816."""
 
@@ -246,9 +262,7 @@ class ResidentNativeCoupling:
             # allocation. Preserve those pre-forcing words when either forcing
             # path modifies the dynamics source in place.
             from ..device_memory_release import shared_card_memory
-            if (shared_card_memory() and
-                    (getattr(self, 'stochastic', None) is not None
-                     or getattr(self, 'iau', None) is not None)):
+            if shared_card_memory() and forcing_writes_scalar_sources(self):
                 scalar_sources = scalar_sources.copy()
             if getattr(self, 'chemistry', None) is not None:
                 scalar_sources=self.chemistry.pad_sources(self.cp,scalar_sources)
@@ -2019,7 +2033,7 @@ def _run_native_dynamics(arguments, config, layout, payload, streams, library,
                 arguments, mesh=mesh, geometry_mesh=geometry_mesh, prep_geometry=geometry,
                 zgrid=grid.vertical_grid.zgrid, names=names, dt=dt, cache=dycore.cache,
                 run_seconds=float(steps) * float(dt), start_time=layout.configs['config_start_time'],
-                restarted=bool(resumed), partitioned=execution is not None or moving is not None,
+                restarted=bool(resumed), partitioned=nudging_partitioned(execution, moving),
                 pbl_height=lambda: session.field('diag_physics', 'hpbl'))
             receipt['nudging'] = coupling.nudging.receipt()
             print(json.dumps({'nudging': receipt['nudging']}, default=str), flush=True)
