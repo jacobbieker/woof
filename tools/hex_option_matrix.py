@@ -494,7 +494,11 @@ def case_identity(case: dict) -> str:
     import hashlib
 
     named = {}
-    for value in [*case.get("forecast_args", []), case.get("static"),
+    static = case.get("static")
+    if isinstance(static, str) and static and Path(static).is_file():
+        stat = Path(static).stat()      # history_budgets reads it from the caller's directory
+        named[f"static:{Path(static).resolve()}"] = [stat.st_size, stat.st_mtime_ns]
+    for value in [*case.get("forecast_args", []),
                   *(arg for args in case.get("row_args", {}).values() for arg in args)]:
         if isinstance(value, str) and value.startswith("-") and "=" in value:
             value = value.split("=", 1)[1]      # --init=PATH names the same file as --init PATH

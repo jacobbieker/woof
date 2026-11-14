@@ -363,3 +363,13 @@ def test_a_relative_case_grid_is_read_where_the_forecast_runs(tmp_path):
     absolute = tmp_path / "g.nc"
     assert matrix._case_grid({"forecast_args": ["--grid", str(absolute)]}) == absolute
     assert matrix._case_grid({"forecast_args": []}) is None
+
+
+def test_case_identity_reads_the_static_where_the_budgets_do(tmp_path, monkeypatch):
+    """THE BREAKAGE: a caller-relative static was fingerprinted under REPO, so re-staging it kept old budgets."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "budget-grid.nc").write_bytes(b"one")
+    case = {"forecast_args": [], "static": "budget-grid.nc", "hours": 1}
+    first = matrix.case_identity(case)
+    (tmp_path / "budget-grid.nc").write_bytes(b"a re-staged static")
+    assert matrix.case_identity(case) != first
