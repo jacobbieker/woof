@@ -626,14 +626,42 @@ def _prefetch_source(argv: list[str]) -> int:
     return 0
 
 
+def _artifacts_on_the_mesh(value: Mapping[str, Any]) -> list[Path]:
+    """The init, boundary and contract artifacts present in this work directory (built on its mesh)."""
+
+    paths = value.get("paths", {})
+    found = [Path(paths[key]) for key in ("init",) if paths.get(key)]
+    if paths.get("contract"):
+        found.append(Path(paths["contract"]) / "contract.json")
+    receipts = sorted(Path(paths["mesh"]).glob("*.point-generate.json"))
+    if len(receipts) == 1:
+        lbc_dir = json.loads(receipts[0].read_text(encoding="utf-8")).get("cull", {}).get("lbc_dir")
+        if lbc_dir:
+            found.append(Path(lbc_dir) / "lbc-door-receipt.json")
+    return [path for path in found if path.exists()]
+
+
 def _stage_mesh(args, value, status) -> dict[str, Any]:
     _start_source_prefetch(args, value, status)
     mesh_dir = Path(value["paths"]["mesh"])
     terrain = value.get("terrain")
     if list(mesh_dir.glob("*.point-generate.json")):
         status.note(f"mesh already generated in {mesh_dir}")
+        from .regional_terrain import pending, pending_request
+        if pending(mesh_dir):
+            asked = pending_request(mesh_dir).get("source")
+            if terrain is None:
+                raise RegionalRefusal(
+                    f"a terrain replacement (--terrain-source {asked}) began in {mesh_dir} and did not finish; "
+                    f"run again with --terrain-source {asked} to finish it, or use a fresh --work-dir")
+            # Anything built on the mesh before the retry stands on the 30-arc-second terrain the retry replaces.
+            stale = _artifacts_on_the_mesh(value)
+            if stale:
+                raise RegionalRefusal(
+                    f"{stale[0]} was built on the mesh in {mesh_dir} while its terrain replacement was unfinished; "
+                    "finishing the replacement now would leave it on the old terrain.  Use a fresh --work-dir")
         if terrain is not None:
-            from .regional_terrain import apply_terrain, pending, require_applied
+            from .regional_terrain import apply_terrain, require_applied
             if pending(mesh_dir):
                 # An earlier replacement rolled back (its source acquisition failed, say): the mesh is the 30 s
                 # one it was generated as, so the replacement runs again rather than the mesh being refused.

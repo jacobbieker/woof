@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
 import shutil
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -97,6 +98,31 @@ def pending(mesh_dir: Path) -> bool:
     return (mesh_dir / PENDING_NAME).is_file() and not (mesh_dir / RECEIPT_NAME).is_file()
 
 
+def pending_request(mesh_dir: Path) -> dict[str, Any]:
+    """The terrain request an unfinished replacement in ``mesh_dir`` was made for."""
+
+    marker = json.loads((Path(mesh_dir) / PENDING_NAME).read_text(encoding="utf-8"))
+    return dict(marker.get("request", marker))
+
+
+def _roll_back(mesh_dir: Path) -> None:
+    """Put back every file the marker's manifest names (the 30-arc-second statics and vertical grids moved to
+    ``orig30s``, the rows file and point-generate receipt copied there) and remove what the replacement created,
+    whatever step it reached: an exception, or a process killed part way (rolled back on the retry).  The marker
+    itself stays, so the mesh stage retries."""
+
+    mesh_dir = Path(mesh_dir)
+    marker = json.loads((mesh_dir / PENDING_NAME).read_text(encoding="utf-8"))
+    for created in marker.get("created", ()):
+        Path(created).unlink(missing_ok=True)
+    for backup, target in marker.get("restore", ()):
+        backup, target = Path(backup), Path(target)
+        if backup.is_file():
+            target.unlink(missing_ok=True)
+            shutil.move(str(backup), target)
+    (mesh_dir / RECEIPT_NAME).unlink(missing_ok=True)
+
+
 def require_applied(mesh_dir: Path, request: Mapping[str, Any]) -> dict[str, Any]:
     """The terrain receipt of a mesh already built, refused when it is not the terrain asked for."""
 
@@ -133,6 +159,10 @@ def apply_terrain(*, mesh_dir: Path, vertical_spec: Path | str, request: Mapping
     from .vertical_door import mint_vertical
 
     mesh_dir = Path(mesh_dir)
+    if pending(mesh_dir):
+        # An earlier replacement did not finish: return the mesh to its generated state first (its exception
+        # handler did already, unless the process was killed part way).
+        _roll_back(mesh_dir)
     receipts = sorted(mesh_dir.glob("*.point-generate.json"))
     if len(receipts) != 1:
         raise RegionalTerrainRefusal(f"{mesh_dir} holds {len(receipts)} point-generate receipts, not one")
@@ -156,17 +186,31 @@ def apply_terrain(*, mesh_dir: Path, vertical_spec: Path | str, request: Mapping
 
     originals = mesh_dir / "orig30s"
     originals.mkdir(exist_ok=True)
-    (mesh_dir / PENDING_NAME).write_text(json.dumps(dict(request), indent=2, sort_keys=True) + "\n", encoding="utf-8")
     moved = [parent_static, parent_vertical, cull_static, cull_vertical]
-    for path in moved:
-        for part in (path, path.with_name(path.name + ".cull-receipt.json"),
-                     path.with_name(path.name + ".receipt.json")):
-            if part.is_file():
-                if (originals / part.name).exists():
-                    raise RegionalTerrainRefusal(f"{originals / part.name} exists; terrain was applied here already")
-                shutil.move(str(part), originals / part.name)
-
+    parts = [part for path in moved for part in (path, path.with_name(path.name + ".cull-receipt.json"),
+                                                 path.with_name(path.name + ".receipt.json"))]
+    for part in parts:
+        if part.is_file() and (originals / part.name).exists():
+            raise RegionalTerrainRefusal(f"{originals / part.name} exists; terrain was applied here already")
+    # The manifest is written before anything changes: every file the replacement touches and where its
+    # 30-arc-second copy is held, so a failure at any later step (or a killed process, on the retry) puts the
+    # mesh back as it was generated.
+    snapshots = {path: originals / ("pre-terrain." + path.name) for path in (rows_path, generated_path)}
+    restore = [(str(originals / part.name), str(part)) for part in parts if part.is_file()]
+    restore += [(str(copy), str(path)) for path, copy in snapshots.items()]
+    created = [str(part) for part in parts if not part.is_file()]
+    (mesh_dir / PENDING_NAME).write_text(json.dumps({"request": dict(request), "restore": restore,
+                                                    "created": created}, indent=2, sort_keys=True) + "\n",
+                                         encoding="utf-8")
     try:
+        for path, copy in snapshots.items():
+            # Copied under a temporary name and renamed, so a killed copy is never restored as the rows file.
+            partial = copy.with_name(copy.name + ".partial")
+            shutil.copy2(path, partial)
+            os.replace(partial, copy)
+        for part in parts:
+            if part.is_file():
+                shutil.move(str(part), originals / part.name)
         note(f"terrain: static-highres {request['source']} on {parent_static.name}")
         highres = run_static_highres(
             originals / parent_static.name, parent_static, terrain=request["source"], landuse=None,
@@ -185,57 +229,55 @@ def apply_terrain(*, mesh_dir: Path, vertical_spec: Path | str, request: Mapping
             row = cull_one(engine, parent_file, region, out, clobber=False, provenance_grid=cull_grid,
                            mark_parent=parent_grid)
             row["lineage"] = carry_lineage(parent_file, out, drives_boundaries=False)
+
+        rows = mesh_rows.read_rows(rows_path)
+        names = {generated["parent"]["row"]: parent_static, cull["row"]: cull_static}
+        refreshed = []
+        for row in rows:
+            path = names.get(row.name)
+            if path is not None:
+                row = dataclasses.replace(row, static_bytes=path.stat().st_size, static_sha256=_sha256(path))
+            refreshed.append(row)
+        mesh_rows.write_rows(rows_path, refreshed)
+
+        terrain = highres.get("terrain", {})
+        sources = highres.get("sources", {})
+        selection = sources.get("terrain_source_selection")
+        receipt = {
+            "schema": SCHEMA,
+            "requested": request["source"],
+            "max_spacing_km": float(request["max_spacing_km"]),
+            # The dataset that served: GLO-30 where an experimental choice fell back (the reason is in
+            # ``selection``).
+            "used": terrain.get("source", sources.get("terrain_source")),
+            "fallback": bool(selection and selection.get("used") != selection.get("requested")),
+            "selection": selection,
+            "datum": sources.get("terrain_vertical_datum"),
+            "attribution": sources.get("terrain_attribution"),
+            "license": sources.get("terrain_license"),
+            "cells_selected": highres.get("cells_selected"),
+            "delta_mean_abs_m": terrain.get("delta_mean_abs_m"),
+            "delta_max_abs_m": terrain.get("delta_max_abs_m"),
+            "static_highres_receipt": str(mesh_dir / "terrain-static-highres.json"),
+            "originals": str(originals),
+            "static_sha256": {"parent": _sha256(parent_static), "cull": _sha256(cull_static)},
+            "rows_file": str(rows_path),
+            "gwd_statistics": "kept on the 30-arc-second static (box statistics by definition)",
+        }
+        generated["terrain"] = receipt
+        generated_path.write_text(json.dumps(generated, indent=2, sort_keys=True, default=str) + "\n",
+                                  encoding="utf-8", newline="\n")
+        (mesh_dir / RECEIPT_NAME).write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     except BaseException:
-        # Put the 30-arc-second files back: a refused request leaves the mesh as it was.
-        for path in moved:
-            for part in (path, path.with_name(path.name + ".cull-receipt.json"),
-                         path.with_name(path.name + ".receipt.json")):
-                part.unlink(missing_ok=True)
-                if (originals / part.name).is_file():
-                    shutil.move(str(originals / part.name), part)
+        # A refused (or failed) request leaves the mesh as it was generated: statics, vertical grids, rows file
+        # and point-generate receipt all put back.
+        _roll_back(mesh_dir)
         raise
-
-    rows = mesh_rows.read_rows(rows_path)
-    names = {generated["parent"]["row"]: parent_static, cull["row"]: cull_static}
-    refreshed = []
-    for row in rows:
-        path = names.get(row.name)
-        if path is not None:
-            row = dataclasses.replace(row, static_bytes=path.stat().st_size, static_sha256=_sha256(path))
-        refreshed.append(row)
-    mesh_rows.write_rows(rows_path, refreshed)
-
-    terrain = highres.get("terrain", {})
-    sources = highres.get("sources", {})
-    selection = sources.get("terrain_source_selection")
-    receipt = {
-        "schema": SCHEMA,
-        "requested": request["source"],
-        "max_spacing_km": float(request["max_spacing_km"]),
-        # The dataset that served: GLO-30 where an experimental choice fell back (the reason is in
-        # ``selection``).
-        "used": terrain.get("source", sources.get("terrain_source")),
-        "fallback": bool(selection and selection.get("used") != selection.get("requested")),
-        "selection": selection,
-        "datum": sources.get("terrain_vertical_datum"),
-        "attribution": sources.get("terrain_attribution"),
-        "license": sources.get("terrain_license"),
-        "cells_selected": highres.get("cells_selected"),
-        "delta_mean_abs_m": terrain.get("delta_mean_abs_m"),
-        "delta_max_abs_m": terrain.get("delta_max_abs_m"),
-        "static_highres_receipt": str(mesh_dir / "terrain-static-highres.json"),
-        "originals": str(originals),
-        "static_sha256": {"parent": _sha256(parent_static), "cull": _sha256(cull_static)},
-        "rows_file": str(rows_path),
-        "gwd_statistics": "kept on the 30-arc-second static (box statistics by definition)",
-    }
-    generated["terrain"] = receipt
-    generated_path.write_text(json.dumps(generated, indent=2, sort_keys=True, default=str) + "\n",
-                              encoding="utf-8", newline="\n")
-    (mesh_dir / RECEIPT_NAME).write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    for copy in snapshots.values():
+        copy.unlink(missing_ok=True)
     (mesh_dir / PENDING_NAME).unlink(missing_ok=True)
     return receipt
 
 
 __all__ = ["PENDING_NAME", "RECEIPT_NAME", "RegionalTerrainRefusal", "SCHEMA", "apply_terrain",
-           "default_max_spacing_km", "pending", "request_from_arguments", "require_applied"]
+           "default_max_spacing_km", "pending", "pending_request", "request_from_arguments", "require_applied"]

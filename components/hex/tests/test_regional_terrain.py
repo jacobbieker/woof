@@ -273,3 +273,107 @@ def test_a_rolled_back_replacement_is_retried_by_the_mesh_stage(tmp_path, monkey
     assert names["static"].read_bytes() == b"hr static"
     # once applied, a further mesh stage reuses it
     assert door._stage_mesh(parse(tmp_path), value, Status())["terrain"]["requested"] == "glo30"
+
+
+def test_a_failure_after_the_cut_restores_the_rows_and_receipt_and_retries(tmp_path, monkeypatch):
+    """THE BREAKAGE: a failure after the replacement cut (the rows refresh, its write, the receipts) was outside
+    the rollback, so the replacements stayed beside their orig30s copies and every retry was refused as "applied
+    here already"."""
+    from woof.hex import mesh_rows
+
+    mesh, names, rows, generated = _mesh(tmp_path)
+    before = {key: path.read_bytes() for key, path in names.items()}
+    rows_before, generated_before = rows.read_bytes(), generated.read_bytes()
+    _fake_doors(monkeypatch)
+    write_rows = mesh_rows.write_rows
+
+    def broken(*a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(mesh_rows, "write_rows", broken)
+    request = {"source": "glo30", "max_spacing_km": 1.0, "cache_root": None}
+    with pytest.raises(OSError, match="disk full"):
+        rt.apply_terrain(mesh_dir=mesh, vertical_spec="spec.json", note=lambda t: None, request=request)
+    assert {key: path.read_bytes() for key, path in names.items()} == before
+    assert rows.read_bytes() == rows_before and generated.read_bytes() == generated_before
+    assert rt.pending(mesh) and not (mesh / rt.RECEIPT_NAME).exists()
+    monkeypatch.setattr(mesh_rows, "write_rows", write_rows)
+    receipt = rt.apply_terrain(mesh_dir=mesh, vertical_spec="spec.json", note=lambda t: None, request=request)
+    assert receipt["requested"] == "glo30" and not rt.pending(mesh)
+    assert names["static"].read_bytes() == b"hr static"
+    assert not list((mesh / "orig30s").glob("pre-terrain.*"))
+
+
+def test_a_replacement_killed_part_way_is_rolled_back_by_the_retry(tmp_path, monkeypatch):
+    """A killed process runs no exception handler: the retry puts the manifest's files back before it starts."""
+    mesh, names, rows, generated = _mesh(tmp_path)
+    before = {key: path.read_bytes() for key, path in names.items()}
+    rows_before = rows.read_bytes()
+    _fake_doors(monkeypatch)
+    monkeypatch.setattr(rt, "_roll_back", lambda mesh_dir: None)        # the process dies: nothing runs
+    from woof.hex import vertical_door
+
+    def killed(**kw):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(vertical_door, "mint_vertical", killed)
+    request = {"source": "glo30", "max_spacing_km": 1.0, "cache_root": None}
+    with pytest.raises(KeyboardInterrupt):
+        rt.apply_terrain(mesh_dir=mesh, vertical_spec="spec.json", note=lambda t: None, request=request)
+    assert names["static"].read_bytes() == b"hr static"               # left half replaced
+    monkeypatch.undo()
+    calls = _fake_doors(monkeypatch)
+    assert rt.pending(mesh)
+    receipt = rt.apply_terrain(mesh_dir=mesh, vertical_spec="spec.json", note=lambda t: None, request=request)
+    assert receipt["requested"] == "glo30"
+    assert calls[0][1:] == ("m.static", "m.static", "glo30", 1.0)
+    assert (mesh / "orig30s" / "m.static").read_bytes() == before["static"]
+    assert names["cull-static"].read_bytes() == b"cut hr static"
+    assert rows.read_bytes() != rows_before and not rt.pending(mesh)
+
+
+def _rolled_back(tmp_path, monkeypatch):
+    from woof.hex import static_highres
+
+    mesh, names, *_ = _mesh(tmp_path)
+    _fake_doors(monkeypatch)
+
+    def refuse(*a, **k):
+        raise static_highres.StaticHighresRefusal("source acquisition failed")
+
+    good = static_highres.run_static_highres
+    monkeypatch.setattr(static_highres, "run_static_highres", refuse)
+    request = {"source": "glo30", "max_spacing_km": 1.0, "cache_root": None}
+    with pytest.raises(static_highres.StaticHighresRefusal):
+        rt.apply_terrain(mesh_dir=mesh, vertical_spec="spec.json", note=lambda t: None, request=request)
+    monkeypatch.setattr(static_highres, "run_static_highres", good)
+    monkeypatch.setattr(door, "_start_source_prefetch", lambda *a: None)
+
+    class Status:
+        def note(self, text):
+            pass
+
+    return mesh, request, Status()
+
+
+def test_an_unfinished_replacement_is_not_reused_without_its_terrain(tmp_path, monkeypatch):
+    mesh, request, status = _rolled_back(tmp_path, monkeypatch)
+    value = {"paths": {"mesh": str(mesh), "work": str(tmp_path), "vertical_spec": "spec.json"}, "terrain": None}
+    with pytest.raises(door.RegionalRefusal, match="--terrain-source glo30 to finish it"):
+        door._stage_mesh(parse(tmp_path), value, status)
+
+
+def test_an_unfinished_replacement_is_not_retried_under_built_artifacts(tmp_path, monkeypatch):
+    """THE BREAKAGE: an init (or boundary, contract) stage run between the rollback and the retry built on the
+    30 s terrain; the retry then replaced the mesh's terrain under it and the reuse guards kept it."""
+    mesh, request, status = _rolled_back(tmp_path, monkeypatch)
+    init = tmp_path / "init" / "init.nc"
+    init.parent.mkdir()
+    init.write_bytes(b"init on 30s")
+    value = {"paths": {"mesh": str(mesh), "work": str(tmp_path), "vertical_spec": "spec.json",
+                       "init": str(init), "contract": str(tmp_path / "contract")}, "terrain": request}
+    with pytest.raises(door.RegionalRefusal, match="init.nc was built on the mesh"):
+        door._stage_mesh(parse(tmp_path), value, status)
+    assert rt.pending(mesh)
+    init.unlink()
+    assert door._stage_mesh(parse(tmp_path), value, status)["terrain"]["requested"] == "glo30"
