@@ -3662,6 +3662,25 @@ def _arm_nest_trigger(*, host: Mapping[str, Any], schedule: Mapping[str, Any], o
     return trigger
 
 
+def check_adaptive_restart_frame(checkpoint: Mapping[str, Any], schedule: Mapping[str, Any], *, row_dt: float) -> None:
+    """Refuse an adaptive checkpoint that is not a history frame of THIS run, before its end, at the valid time this
+    run gives that frame.  The adaptive frames are the fixed schedule's frames in exact seconds, so the frame's valid
+    time is the schedule's at that step: a checkpoint of another forecast start (same mesh, step and elapsed time)
+    is refused, as the fixed-step branch refuses it."""
+    from woof.hex.adaptive_dt import history_frames
+    resumed_at = Fraction(checkpoint["adaptive"]["elapsed"])
+    row = Fraction(str(float(row_dt)))
+    if (resumed_at not in history_frames(start_step=0, capture_steps=schedule["capture_steps"], row_dt=row_dt)
+            or resumed_at >= int(schedule["steps"]) * row):
+        raise ValueError(
+            "the checkpoint time must be a history frame of this run and "
+            "before its end; --start-time/--hours name the ORIGINAL run"
+        )
+    frame_step = resumed_at / row
+    if frame_step.denominator != 1 or schedule["valid_times"][int(frame_step)] != checkpoint["valid_time"]:
+        raise ValueError("checkpoint valid time differs from this schedule's")
+
+
 def execute_forecast(
     *,
     host: Mapping[str, Any],
@@ -3728,6 +3747,11 @@ def execute_forecast(
                                       "the active class executor owns a different history path")
         from woof.hex.wrf_hydro_hex import refuse_unwired
         refuse_unwired("active full-step local time stepping (the class executor)")
+        if nudging is not None:
+            # The class executor is handed no nudging, so the forecast would run without the forcing it asked for;
+            # the door refuses the same combination (HEX_NUDGING_LTS), this is the driver's own entry point.
+            from woof.hex.nudging import HexNudgingRefusal
+            raise HexNudgingRefusal("HEX_NUDGING_LTS", "nudging runs on fixed-step hex runs; drop the local time step")
         # Active full-step local time stepping: every rate class on its own
         # whole step.  The class executor hands a mesh that classes entirely
         # at rate one back to this function with the option cleared, so a
@@ -3814,16 +3838,7 @@ def execute_forecast(
             if schedule["valid_times"][start_step] != checkpoint["valid_time"]:
                 raise ValueError("checkpoint valid time differs from this schedule's")
         else:
-            from woof.hex.adaptive_dt import history_frames
-            resumed_at = Fraction(adaptive_restart["elapsed"])
-            row = Fraction(str(float(DT_SECONDS)))
-            if (resumed_at not in history_frames(start_step=0, capture_steps=schedule["capture_steps"],
-                                                 row_dt=DT_SECONDS)
-                    or resumed_at >= int(schedule["steps"]) * row):
-                raise ValueError(
-                    "the checkpoint time must be a history frame of this run and "
-                    "before its end; --start-time/--hours name the ORIGINAL run"
-                )
+            check_adaptive_restart_frame(checkpoint, schedule, row_dt=DT_SECONDS)
         state = checkpoint["state"]
         saved = checkpoint["saved_diagnostics"]
         restart_receipt = {

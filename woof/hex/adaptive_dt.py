@@ -682,16 +682,19 @@ def physics_cadence(*, row_dt: Fraction, radiation_seconds: float | None, surfac
                     cumulus_seconds: float | None) -> PhysicsCadence:
     """The frozen column batch's three cadences as adaptive deadlines.
 
-    A cadence equal to the row's step is the weld (``bldt``/``cudt`` = dt, GF's ``cudt = 0``): every step.
+    A surface/PBL or cumulus cadence equal to the row's step is the weld (``bldt``/``cudt`` = dt, GF's
+    ``cudt = 0``): every step.  Radiation has no weld: a positive ``radt`` is a period in model time on the WRF
+    route's adaptive clock (``_physics_deadline_minutes``), so one equal to the row's step stays a deadline every
+    that many seconds, not "every step" at whatever dt the clock grows to.
     """
 
-    def period(seconds: float | None) -> Fraction | None:
+    def period(seconds: float | None, *, weld: bool = True) -> Fraction | None:
         if seconds is None or float(seconds) <= 0.0:
             return None
         value = Fraction(str(float(seconds)))
-        return None if value == row_dt else quantise(value)
+        return None if weld and value == row_dt else quantise(value)
 
-    return PhysicsCadence(radiation=period(radiation_seconds), surface_pbl=period(surface_pbl_seconds),
+    return PhysicsCadence(radiation=period(radiation_seconds, weld=False), surface_pbl=period(surface_pbl_seconds),
                           cumulus=period(cumulus_seconds))
 
 

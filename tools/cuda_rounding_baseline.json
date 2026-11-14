@@ -5579,7 +5579,7 @@
    },
    {
     "file": "woof/hex/cuda_w_damping.py",
-    "sha256": "9cdf43bc7e162dda236e0838a3ee6a75df32307d5578585259a531934fe3e7d6"
+    "sha256": "eb0138e5c2f4406eab79fa9e0392866f747b71552deac292a90704c64ca2f86c"
    },
    {
     "file": "woof/hex/iau_forcing.py",
