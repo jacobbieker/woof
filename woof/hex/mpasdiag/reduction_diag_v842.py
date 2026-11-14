@@ -118,7 +118,8 @@ NAMES = tuple(FIELDS)
 
 #: Prefix of this module's keys in the output diagnostics' checkpoint accumulator dict.
 STATE_PREFIX = "red:"
-#: the checkpoint row of the publication state (ReductionModule.compute): mean finished, month finished, bin days
+#: the checkpoint rows of the publication state (ReductionModule.compute): mean finished, month finished and the bin
+#: days, repeated in every cell
 PUBLISH_KEY = "publish_state"
 
 
@@ -398,16 +399,28 @@ class ReductionModule:
     # -- checkpoint continuation -----------------------------------------------------------------------
     def state(self):
         out = {STATE_PREFIX + k: self.cp.asnumpy(v) for k, v in self.words.items()}
-        out[STATE_PREFIX + PUBLISH_KEY] = np.array([int(self._mean_done), int(self._month_done),
-                                                    *self._bin_count], dtype=np.int64)
+        if self.mean or self.diurnal:
+            # The publication state is run-wide, but it is written as a per-cell row (every cell the same) so the
+            # multi-rank continuation's cell assembly and projection carry it like every other accumulator word.
+            row = np.array([int(self._mean_done), int(self._month_done), *self._bin_count], dtype=np.int32)
+            out[STATE_PREFIX + PUBLISH_KEY] = np.repeat(row[:, None], self.nc, axis=1)
         return out
 
     def resume(self, state):
-        flags = state.get(STATE_PREFIX + PUBLISH_KEY)
-        if flags is not None:
-            flags = np.asarray(flags).reshape(-1)
-            self._mean_done, self._month_done = bool(flags[0]), bool(flags[1])
-            self._bin_count[:] = flags[2:2 + DIURNAL_BINS]
+        if self.mean or self.diurnal:
+            flags = state.get(STATE_PREFIX + PUBLISH_KEY)
+            if flags is None:
+                if any(key.startswith(STATE_PREFIX) for key in state):
+                    # The day counts cannot be rebuilt from the sums: refused rather than published as zero.
+                    raise ValueError("this checkpoint's RASM accumulators carry no publication state (written "
+                                     "before it was carried): resume it with the build that wrote it, or start "
+                                     "the RASM windows again from a fresh run")
+            else:
+                flags = np.asarray(flags)
+                if flags.shape[-1]:
+                    column = flags.reshape(flags.shape[0], -1)[:, 0]
+                    self._mean_done, self._month_done = bool(column[0]), bool(column[1])
+                    self._bin_count[:] = column[2:2 + DIURNAL_BINS]
         for key, value in state.items():
             if key.startswith(STATE_PREFIX) and key[len(STATE_PREFIX):] in self.words:
                 target = self.words[key[len(STATE_PREFIX):]]

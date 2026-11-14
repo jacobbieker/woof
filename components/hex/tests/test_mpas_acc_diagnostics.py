@@ -432,3 +432,14 @@ def test_a_native_file_restart_is_refused_with_an_accumulator_on(tmp_path, packa
     with pytest.raises(ValueError, match="native-file restart with &diagnostics accumulators on"):
         _run_native_dynamics(SimpleNamespace(), SimpleNamespace(mode="correct"), layout, None, None, None,
                              None, None, 20.0, 1, Path(tmp_path))
+
+
+@pytest.mark.gpu
+def test_every_window_boundary_is_checked_in_float32(cp):
+    """0.01 min at dt 0.2 s passes the first two float32 boundaries and misses the third (float32(1.8) against
+    float32(0.6)): the windows would merge there.  Every boundary up to the run's end is checked."""
+    case = _load_oracle()
+    owner = _owner(cp, case["nc"], case["nl"])
+    owner.writer = SimpleNamespace(start=owner.start, final=owner.start + dt.timedelta(seconds=60))
+    with pytest.raises(ValueError, match="boundary 3"):
+        acc.AccumulatorModule(owner, acc.AccConfig(0.0, True, 0.01)).setup(_Utils(acc.NAMES), 0.2)

@@ -445,3 +445,26 @@ def test_a_continuation_keeps_the_straight_runs_window_and_bin_phase(cp):
         for name, word in straight.words.items():
             np.testing.assert_array_equal(cp.asnumpy(resumed.words[name]).view(np.uint32),
                                           cp.asnumpy(word).view(np.uint32), f"{name} step {step}")
+
+
+@pytest.mark.gpu
+def test_the_publication_state_rides_the_cell_assembly_and_old_checkpoints_are_refused(cp):
+    """The publication state is a per-cell row, so a rank's slice of the cells (the multi-rank continuation's
+    projection, ``[..., cells]``) restores it like any accumulator word; a checkpoint without it is refused, since
+    the diurnal day counts cannot be rebuilt from the sums."""
+    nc = 5
+    config = red.ReductionConfig(0, True, 4, 1, True, False)
+    module, owner, _ = _module(cp, nc, config, 3600.0)
+    _constant(owner, nc)
+    for step in range(1, 49):
+        _step(module, owner, step)
+    state = module.state()
+    assert state[red.STATE_PREFIX + red.PUBLISH_KEY].shape[-1] == nc
+    rank, r_owner, _ = _module(cp, 2, config, 3600.0)
+    rank.resume({key: np.ascontiguousarray(np.asarray(value)[..., [3, 1]]) for key, value in state.items()})
+    rank.compute()
+    np.testing.assert_allclose(_pub(cp, r_owner, "rasm_t2_diurn", 2, bins=True), 300.0, rtol=1e-6)
+    old = {key: value for key, value in state.items() if not key.endswith(red.PUBLISH_KEY)}
+    fresh, _, _ = _module(cp, nc, config, 3600.0)
+    with pytest.raises(ValueError, match="publication state"):
+        fresh.resume(old)

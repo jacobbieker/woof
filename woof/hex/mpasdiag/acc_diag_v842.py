@@ -179,14 +179,8 @@ class AccumulatorModule:
             if minutes and abs(steps - round(steps)) > 1e-9:
                 raise ValueError(f"{key} = {minutes:g} min is not a whole number of {self.dt:g} s steps: WRF's window "
                                  "reset (MOD of the start-of-step clock) would never fire after the first window")
-            # The kernels test the window in float32 (output_diagnostics.cu: fmodf of the float32 start-of-step clock
-            # by 60.f * minutes, or by the float32 interval): a window whole in float64 can still miss there
-            # (0.13 min at dt 0.2 s: 7.8000002 against 7.7999997), and it would then never reset.
-            f32 = np.float32
-            window = (f32(60.0) * f32(minutes) if key == "prec_acc_dt" else f32(60.0 * minutes))
-            if minutes and np.fmod(f32(round(steps) * self.dt), window) != 0:
-                raise ValueError(f"{key} = {minutes:g} min ends on step {round(steps)} in float64, but the kernel's "
-                                 "float32 window test misses that step, so the window would never reset")
+            if minutes:
+                self._check_float32_windows(key, minutes, round(steps))
         carried = lambda names: [n for n in names if utils.stream_inclusion_count(n, Direction.OUTPUT) > 0]
         self.prec_names = carried(PREC_NAMES) if self.config.prec_acc_dt > 0 else []
         self.tend_names = carried(TEND_NAMES) if self.config.acc_phy_tend else []
@@ -200,6 +194,27 @@ class AccumulatorModule:
         if self.tend_names:
             self.tend = {n: cp.zeros((self.nl, nc), dtype=f32) for n in TEND_NAMES}
             self.qv_before = cp.zeros(1, dtype=f32)                # read only on the (unused) qv-difference path
+
+    def _check_float32_windows(self, key, minutes, steps):
+        """The kernels test each window in float32 (output_diagnostics.cu: fmodf of the float32 start-of-step clock
+        by 60.f * minutes, or by the float32 interval), so a window whole in float64 can still miss a boundary there
+        (0.13 min at dt 0.2 s: 7.8000002 against 7.7999997; 0.01 min at dt 0.2 s passes twice and misses the third)
+        and merge two windows.  Every boundary up to the run's end is checked (the first 1000 when the writer names
+        no end); the kernel's WRF arithmetic itself is kept."""
+        f32 = np.float32
+        window = f32(60.0) * f32(minutes) if key == "prec_acc_dt" else f32(60.0 * minutes)
+        writer = getattr(self.owner, "writer", None)
+        final, start = getattr(writer, "final", None), getattr(writer, "start", None)
+        offset = int(getattr(self.owner, "step_offset", 0)) * self.dt
+        count = 1000
+        if final is not None and start is not None:
+            count = max(1, int(((final - start).total_seconds() + offset) // (steps * self.dt)))
+        boundaries = (np.arange(1, count + 1, dtype=np.float64) * (steps * self.dt)).astype(f32)
+        missed = np.nonzero(np.fmod(boundaries, window) != 0)[0]
+        if missed.size:
+            raise ValueError(f"{key} = {minutes:g} min is {steps} whole steps in float64, but the kernel's float32 "
+                             f"window test misses its boundary {int(missed[0]) + 1} (at "
+                             f"{float(boundaries[missed[0]]):.9g} s), so that window would not reset")
 
     # -- inputs ----------------------------------------------------------------------------------------
     def _has(self, pool, name):
