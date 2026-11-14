@@ -62,6 +62,7 @@ def test_defaults_keep_wrf_ratios_to_the_row_step():
     ("les_model", "3d_smagorinsky", "--les-model"),
     ("chemistry_config", "chem.json", "--chemistry-config"),
     ("members", "3", "--members"),
+    ("nudging", "nudging.toml", "--nudging"),
 ])
 def test_incompatible_options_are_refused_by_name(attribute, value, flag):
     problem = adaptive_dt.refusal(_arguments(**{attribute: value}))

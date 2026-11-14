@@ -984,7 +984,7 @@ what differs from the WRF route:
   resumed adaptive, or the reverse, is refused.
 - **Refused by name**: `--local-timestep`, `--fullstep-local-timestep` (mutually exclusive), IAU,
   `--tc-climate`, `--les-model`, `--nest-triggers`, DA cycling and the JEDI background, the balance
-  series, chemistry, wind farms, WRF-Hydro, `--members`, same-host ranks, an explicit `--dt`, and at run
+  series, grid/spectral nudging, chemistry, wind farms, WRF-Hydro, `--members`, same-host ranks, an explicit `--dt`, and at run
   time the stochastic physics, radar snapshots, the surface update and the large-step recovery; the
   MPAS v8.4.2 suite route is refused at the door (its framework clock and alarms take one step).
 
