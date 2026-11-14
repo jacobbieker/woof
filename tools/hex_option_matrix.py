@@ -510,6 +510,8 @@ def command_run(args) -> int:
 # the published evidence and its table
 # ---------------------------------------------------------------------------
 _PATH = re.compile(r"(?:/[\w.@+-]+){2,}")
+#: Mesh rows and cull names carry the case's centre (q5.40.5069.n33.80w112.25, point-n33.80w112.25-...).
+_SITE = re.compile(r"\b[\w.-]*[ns]\d+\.\d+[ew]\d+\.\d+[\w.-]*")
 
 
 def _scrub(text: str | None) -> str | None:
@@ -517,7 +519,7 @@ def _scrub(text: str | None) -> str | None:
 
     if text is None:
         return None
-    return _PATH.sub("<path>", text)
+    return _SITE.sub("<mesh>", _PATH.sub("<path>", text))
 
 
 def _published_row(row: dict) -> dict:
