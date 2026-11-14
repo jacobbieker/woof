@@ -2641,7 +2641,7 @@
    },
    {
     "file": "woof/core/kernels/chem_activation.cu",
-    "sha256": "7966dadbc38a8ff265b7dcac9dfa60a9a312b41c4c4c2e1f4ef35c8253f7f548"
+    "sha256": "bbccda68823fcae78ba55cf36cf4ee649f5d298044bc7eaa78339818ba03ccc5"
    },
    {
     "file": "woof/core/kernels/chem_ageing.cu",
@@ -4927,7 +4927,7 @@
    },
    {
     "file": "woof/backend/facade/_ops.py",
-    "sha256": "2003de569a6a59f28fb30bda514854ef71b4c100fc8b5d0a20204e2bdbaa6ca5"
+    "sha256": "480cca25a332579713d1678f0f26eae988f243fbff49b44b017b4874d9447092"
    },
    {
     "file": "woof/backend/facade/cuda.py",
@@ -4947,7 +4947,7 @@
    },
    {
     "file": "woof/backend/translate/__init__.py",
-    "sha256": "6efea28c437e13d21e8caa9ba29249d09aad6a8e5517129f4e827585e2441810"
+    "sha256": "d1202ddc09f81c367623d6ada57946af868d3d54ab99ea6829e413180d921434"
    },
    {
     "file": "woof/chem_micm.py",
@@ -5471,7 +5471,7 @@
    },
    {
     "file": "woof/hex/cuda_driver.py",
-    "sha256": "844b344ee2656d0756b57c900f37ac534a692bdd4f93e8e7cd6bbbfbd9b08500"
+    "sha256": "d8615882fee2cddc925f5cf089aa7b95ce363d19e2005c28e9cf3ff45433a518"
    },
    {
     "file": "woof/hex/cuda_dynamics_rrfs.py",
@@ -5859,7 +5859,7 @@
    },
    {
     "file": "woof/hex/mpasphys/rrfs/driver_rrfs.py",
-    "sha256": "e749b54977e2719505154991bea99ea6c15b2d5f0cfb183706849c1613ed8ffe"
+    "sha256": "d0cdbf1a62ea4df6d7306b7d21768ded2e2faec98c74aff6514e5ea6a29b825e"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/framework_init_rrfs.py",

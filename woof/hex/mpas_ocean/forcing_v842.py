@@ -197,7 +197,7 @@ def vel_forcing_tend(*, mesh: dict, normal_velocity, surface_flux_attenuation_co
             mesh["maxLevelEdgeTop"], mesh["cellsOnEdge"], mesh["edgeMask"], rho_sw(c, precision),
             np.int32(n_edges_loop), np.int32(n_levels)))
     if c["config_use_explicit_bottom_drag"] and not c["config_disable_vel_explicit_bottom_drag"]:
-        _refuse_level_zero("config_use_explicit_bottom_drag", mesh["maxLevelEdgeTop"])
+        _refuse_level_zero("config_use_explicit_bottom_drag", mesh["maxLevelEdgeTop"][:n_edges_loop])
         _function(precision, "ocn_vel_forcing_explicit_bottom_drag_v842")(*grid, (
             tend, normal_velocity, kinetic_energy_cell, layer_thickness_edge, mesh["maxLevelEdgeTop"],
             mesh["cellsOnEdge"], dtype(c["config_explicit_bottom_drag_coeff"]), np.int32(n_edges_loop),
@@ -205,7 +205,7 @@ def vel_forcing_tend(*, mesh: dict, normal_velocity, surface_flux_attenuation_co
     if c["config_Rayleigh_friction"]:
         bottom = bool(c["config_Rayleigh_bottom_friction"])
         if bottom:
-            _refuse_level_zero("config_Rayleigh_bottom_friction", mesh["maxLevelEdgeTop"])
+            _refuse_level_zero("config_Rayleigh_bottom_friction", mesh["maxLevelEdgeTop"][:n_edges_loop])
         _function(precision, "ocn_vel_forcing_rayleigh_v842")(*grid, (
             tend, normal_velocity, mesh["maxLevelEdgeTop"], dtype(c["config_Rayleigh_damping_coeff"]),
             np.int32(bottom), np.int32(n_edges_loop), np.int32(n_levels)))
