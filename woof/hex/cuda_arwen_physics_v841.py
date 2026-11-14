@@ -1209,6 +1209,10 @@ class InitialReflectivityViewV841:
 class PersistentTwoPhaseCudaPhysicsBackendV841:
     """Transactional frozen-v2 Arwen aggregate implementing the MPAS protocol."""
 
+    #: The hex adaptive clock's live step (woof.hex.adaptive_dt, set_adaptive_step); None on every
+    #: fixed-step run, where the sealed constructor's dt is the step.
+    _adaptive_dt: float | None = None
+
     def __init__(
         self,
         *,
@@ -1616,11 +1620,29 @@ class PersistentTwoPhaseCudaPhysicsBackendV841:
             ],
         }
 
+    def _step_dt(self) -> float:
+        return self._constructor.dt if self._adaptive_dt is None else self._adaptive_dt
+
+    def set_adaptive_step(self, *, dt: float, start_seconds: float, end_seconds: float,
+                          due: Mapping[str, bool | None]) -> None:
+        """Take the next step at ``dt`` under the hex adaptive clock (woof.hex.adaptive_dt).
+
+        Legal only at a clean boundary.  The engine seam takes the live step, the step's exact span and the
+        cadences decided on model time (``due``: ``None`` for a cadence welded to the step).
+        """
+
+        if self._phase not in ("boundary", "complete", "restored"):
+            raise RuntimeError(f"set_adaptive_step requires a clean step boundary, not {self._phase!r}")
+        self._seam.set_adaptive_step(
+            dt=float(dt), start_seconds=float(start_seconds), end_seconds=float(end_seconds),
+            radiation_due=due["radiation"], surface_pbl_due=due["surface_pbl"], cumulus_due=due["cumulus"])
+        self._adaptive_dt = float(dt)
+
     def _validate_dt(self, dt: float) -> None:
-        if float(dt) != self._constructor.dt:
+        if float(dt) != self._step_dt():
             raise ValueError(
                 f"backend dt={dt} does not equal sealed constructor dt="
-                f"{self._constructor.dt}"
+                f"{self._step_dt()}"
             )
 
     def _validate_phase1_output(self, output: Any, *, time_seconds: float) -> None:
@@ -1937,7 +1959,7 @@ class PersistentTwoPhaseCudaPhysicsBackendV841:
                 **self._base_receipt(),
                 "phase": "begun",
                 "start_time_seconds": start,
-                "end_time_seconds": start + self._constructor.dt,
+                "end_time_seconds": start + self._step_dt(),
                 "arwen_step_index": int(output.step_index),
                 "surface_classification": dict(surface_classification),
                 "noahmp_census": dict(noahmp_census),
@@ -2118,10 +2140,10 @@ class PersistentTwoPhaseCudaPhysicsBackendV841:
             self._validate_dt(dt)
             start = float(self._step_start)
             endpoint = float(atmosphere.state.time_seconds)
-            if endpoint != start + self._constructor.dt:
+            if endpoint != start + self._step_dt():
                 raise ValueError(
                     "post-RK candidate time must equal the exact step endpoint: "
-                    f"{endpoint} != {start + self._constructor.dt}"
+                    f"{endpoint} != {start + self._step_dt()}"
                 )
         except Exception:
             prior = self._last_receipt

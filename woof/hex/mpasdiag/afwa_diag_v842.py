@@ -14,6 +14,8 @@ MPAS style names, all logical (default false)::
                                        afwa_tornado afwa_cape afwa_cin afwa_zlfc afwa_plfc afwa_lidx
     config_afwa_ptype_ccn_tmp  real  WRF afwa_ptype_ccn_tmp (default 264.15 K)
     config_afwa_ptype_tot_melt real  WRF afwa_ptype_tot_melt (default 50.)
+    config_afwa_severe_ignore_qng_gate logical  WOOF-only, default false: run severe's column part without WRF's
+                                       F_QNG guard (a departure from WRF; see "Severe" below)
 
 As native WRF does (module_check_a_mundo), any sub-option switches ``afwa_diag_opt`` on.  The fields are ``diag``
 fields [nCells] (packages named by WRF's selector, members of the ``diagnostics`` stream), with WRF's names and
@@ -55,6 +57,13 @@ Severe (``config_afwa_severe_opt``).  As in WRF (and woof.core.afwa_severe) the 
   minimum and hail; the surface-parcel buoyancy on the first step and on output steps; the tornado wind) runs per
   cell.  None of this route's microphysics (Thompson, Thompson aerosol-aware, WSM6, Kessler) carries ``ng``, so,
   as WRF's own result for mp_physics 8, 28 and 6, those fields stay 0 and only the gust and shear maxima move.
+
+  ``config_afwa_severe_ignore_qng_gate = .true.`` (WOOF-only, off by default) DEPARTS FROM WRF: it drops the ``ng``
+  term of the guard, so the column part, the buoyancy and the tornado run whenever the run carries ``qv qr qc qi qs
+  qg`` (mp_wsm6, mp_thompson, mp_thompson_aerosols here).  Nothing else changes: the routine never reads QNG, so on
+  the same columns the fields are bitwise the ones a run with an ``ng`` carrier writes (WRF's numbers for a
+  microphysics that carries QNG).  WRF itself writes zeros for those schemes.  The option needs
+  ``config_afwa_severe_opt``, and a microphysics without the six carriers (mp_kessler, off) is refused.
 
   Definitional differences from WRF in the column part (all reached only with an ``ng`` carrier):
 
@@ -124,7 +133,9 @@ REFUSED = {
 }
 OPTION = {name: "config_" + name for name in (*SELECTORS, *REFUSED)}
 CCN_OPTION, MELT_OPTION = "config_afwa_ptype_ccn_tmp", "config_afwa_ptype_tot_melt"
-OPTIONS = (*OPTION.values(), CCN_OPTION, MELT_OPTION)
+#: WOOF-only (a departure from WRF, off by default): severe's column part without the F_QNG guard
+QNG_GATE_OPTION = "config_afwa_severe_ignore_qng_gate"
+OPTIONS = (*OPTION.values(), CCN_OPTION, MELT_OPTION, QNG_GATE_OPTION)
 #: The severe package's WRF rows this route publishes: WRF's UP_HELI_MAX is the route's updraft_helicity_max and
 #: W_MEAN is nwp_diagnostics' (see the module docstring).
 SEVERE_ROWS = {name: row for name, row in _wrf.SEVERE_HISTORY.items() if name not in ("up_heli_max", "w_mean")}
@@ -171,6 +182,8 @@ class AfwaConfig:
     options: tuple[str, ...] = ()
     ptype_ccn_tmp: float = 264.15
     ptype_tot_melt: float = 50.0
+    #: config_afwa_severe_ignore_qng_gate: run severe's column part without ``ng`` (not WRF; the module docstring)
+    severe_ignore_qng_gate: bool = False
 
 
 def field_definition(name: str) -> dict[str, Any]:
@@ -200,6 +213,10 @@ def resolve(groups: Mapping[str, Mapping[str, Any]]) -> AfwaConfig | None:
             raise ValueError(f"&{GROUP} {OPTION['afwa_severe_opt']} with {NWP_OPTION} is not available: WRF's "
                              f"{', '.join(n.upper() for n in NWP_SHARED)} are one array each, written by both "
                              "packages' windows; choose one")
+    ignore_qng = _logical(QNG_GATE_OPTION, supplied.get(QNG_GATE_OPTION, False))
+    if ignore_qng and not on["afwa_severe_opt"]:
+        raise ValueError(f"&{GROUP} {QNG_GATE_OPTION} is set while {OPTION['afwa_severe_opt']} is off; it would be "
+                         "read by nothing")
     ptype_keys = [k for k in (CCN_OPTION, MELT_OPTION) if k in supplied]
     values = {}
     for key, default in ((CCN_OPTION, 264.15), (MELT_OPTION, 50.0)):
@@ -215,7 +232,7 @@ def resolve(groups: Mapping[str, Mapping[str, Any]]) -> AfwaConfig | None:
         raise ValueError(f"&{GROUP} {ptype_keys[0]} is set while {OPTION['afwa_ptype_opt']} is off; it would be read by nothing")
     # module_check_a_mundo: any sub-option enables the base package
     chosen = tuple(s for s in SELECTORS if on[s] or s == "afwa_diag_opt")
-    return AfwaConfig(chosen, values[CCN_OPTION], values[MELT_OPTION])
+    return AfwaConfig(chosen, values[CCN_OPTION], values[MELT_OPTION], ignore_qng)
 
 
 def check(config: Any) -> None:
@@ -231,6 +248,10 @@ def check(config: Any) -> None:
             raise ValueError(f"&{GROUP} {OPTION[selector]} needs the {needs} carriers, which WRF's AFWA routine reads "
                              f"without a guard; on this route {', '.join(HYDROMETEOR_SCHEMES)} carry them, and this "
                              f"run's microphysics is {scheme!r}")
+    if afwa.severe_ignore_qng_gate and scheme not in HYDROMETEOR_SCHEMES:
+        raise ValueError(f"&{GROUP} {QNG_GATE_OPTION} runs severe's column part on the qv, qr, qc, qi, qs and qg "
+                         f"carriers; on this route {', '.join(HYDROMETEOR_SCHEMES)} carry them, and this run's "
+                         f"microphysics is {scheme!r}")
 
 
 def packages(config: Any) -> set[str]:
@@ -283,8 +304,14 @@ class AfwaModule:
                         if utils.stream_inclusion_count(name, Direction.OUTPUT) > 0}
         self.ptype = [n for n in PTYPE_NAMES if n in self.carried]
         self.severe = "afwa_severe_opt" in on
-        # WRF's F_QNG guard on severe_wx_diagnostics (the module docstring)
-        self.severe_column = self.severe and all(self._has_scalar(n) for n in SEVERE_COLUMN_SCALARS)
+        # WRF's F_QNG guard on severe_wx_diagnostics (the module docstring); the WOOF opt-in drops its ng term
+        ignore_qng = self.severe and self.config.severe_ignore_qng_gate
+        guard = tuple(n for n in SEVERE_COLUMN_SCALARS if not (ignore_qng and n == "ng"))
+        self.severe_column = self.severe and all(self._has_scalar(n) for n in guard)
+        if ignore_qng and not self.severe_column:
+            missing = [n for n in guard if not self._has_scalar(n)]
+            raise ValueError(f"&{GROUP} {QNG_GATE_OPTION} runs severe's column part on the {', '.join(guard)} "
+                             f"carriers; the run's microphysics has no {', '.join(missing)}")
         self.accumulates = bool(self.ptype) or self.severe
         # one carrier per field a kernel writes (the ptype and severe ones persist: they accumulate), and the step's
         # precipitation

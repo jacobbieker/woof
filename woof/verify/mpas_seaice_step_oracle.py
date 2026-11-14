@@ -78,7 +78,8 @@ FIELDS = (
 BASE_CONFIG = {
     "config_start_time": "0001-01-01_00:00:00", "diagnostics:xtime": "0001-01-01_00:00:00",
     "diagnostics:simulationStartTime": "0001-01-01_00:00:00", "config_do_restart": False,
-    "config_use_advection": False, "config_perform_unit_test": False, "config_use_column_package": False,
+    "config_use_advection": False, "config_advection_type": "incremental_remap", "config_perform_unit_test": False,
+    "config_use_column_package": False,
     "config_use_column_vertical_thermodynamics": False, "config_use_column_biogeochemistry": False,
     "config_use_velocity_solver": True, "config_stress_divergence_scheme": "variational",
     "config_revised_evp": False, "config_use_air_stress": True, "config_use_ocean_stress": True,
@@ -103,14 +104,17 @@ def _interval(seconds: float) -> str:
     return f"{s // 86400:04d}_{s % 86400 // 3600:02d}:{s % 3600 // 60:02d}:{s % 60:02d}"
 
 
-def make_case(name, seed, torus, owned, steps, dt, overrides, precision="r4") -> dict:
-    """One deterministic case with a 10 km mesh's magnitudes: five thickness
-    categories, an ice-free run of cells, fVertex in both hemispheres, ocean
-    currents up to 0.5 m/s, winds up to 20 m/s."""
+def make_case(name, seed, torus, owned, steps, dt, overrides, precision="r4", mesh=None,
+              n_categories: int = 5) -> dict:
+    """One deterministic case with a 10 km mesh's magnitudes (``mesh``, if
+    given, instead of a culled torus): five thickness categories, an ice-free
+    run of cells, fVertex in both hemispheres, ocean currents up to 0.5 m/s,
+    winds up to 20 m/s."""
     rs = np.random.RandomState(seed)
     real = PRECISIONS[precision]
-    m = hex_mesh(*torus, 0.08, 1, rs, min_levels=1, owned_columns=owned)
-    nc, ne, nv, me, vd, ncat = m["nCells"], m["nEdges"], m["nVertices"], m["maxEdges"], m["vertexDegree"], 5
+    m = hex_mesh(*torus, 0.08, 1, rs, min_levels=1, owned_columns=owned) if mesh is None else mesh
+    nc, ne, nv, me, vd = m["nCells"], m["nEdges"], m["nVertices"], m["maxEdges"], m["vertexDegree"]
+    ncat = n_categories
     config = {**BASE_CONFIG, **overrides, "config_dt": float(dt), "oracle_clock_step": _interval(dt),
               "oracle_n_steps": steps}
 

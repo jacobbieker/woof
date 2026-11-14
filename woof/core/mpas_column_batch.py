@@ -662,6 +662,10 @@ class MpasColumnBatchPhysics:
     #: The phase-2 entry IS the ARW post-RK microphysics dispatch
     #: (woof/core/dycore.py:2507).
     _PHASE2_MICROPHYSICS = staticmethod(_arw_microphysics_apply)
+    #: ``(start, end)`` model seconds of the step in flight under the hex
+    #: adaptive clock (woof.hex.adaptive_dt, set_adaptive_step); ``None`` on
+    #: every fixed-step run, where the clock is ``steps * dt`` as before.
+    _adaptive_span = None
 
     def __init__(self, *, n_levels, n_columns, dt,
                  radiation_seconds, surface_pbl_seconds,
@@ -992,6 +996,52 @@ class MpasColumnBatchPhysics:
         state.elapsed_seconds = 0.0
 
     # ------------------------------------------------------------------
+    def set_adaptive_step(self, *, dt, start_seconds, end_seconds,
+                          radiation_due, surface_pbl_due, cumulus_due):
+        """Take the next step at ``dt`` under the hex adaptive clock.
+
+        The WRF route's adaptive clock (woof.core.adaptive_clock) on this
+        seam's one driver: the live ``cfg.dt``, the step's exact span (the
+        elapsed time is no longer ``steps * dt`` once the steps differ),
+        and the three cadences decided on model TIME through the driver's
+        due overrides.  A cadence welded to the step (``None``) runs every
+        step at the live dt -- PBL/surface integrate over ``bldt_seconds``
+        and GF/KF over ``stepcu * dt``, so both follow the step.
+        """
+        import dataclasses
+        import math
+        if self._pending_phase != _PHASE1:
+            raise RuntimeError(
+                "set_adaptive_step is legal only at a step boundary")
+        dt = float(dt)
+        if not math.isfinite(dt) or dt <= 0.0:
+            raise ValueError(f"adaptive dt must be positive, got {dt!r}")
+        driver = self._driver
+        self._dt = dt
+        self._cfg = dataclasses.replace(self._cfg, dt=dt)
+        welded_pbl = surface_pbl_due is None
+        welded_cu = cumulus_due is None
+        if welded_pbl:
+            self._cfg = dataclasses.replace(self._cfg, bldt=dt / 60.0)
+            driver.bldt_seconds = dt
+            driver.stepbl = 1
+        if welded_cu and getattr(driver, "cudt_minutes", 0.0):
+            driver.cudt_minutes = dt / 60.0
+            driver.cudt_seconds = dt
+        driver.noah_seaice_dt = dt
+        driver.radiation_due_override = bool(radiation_due)
+        driver.surface_pbl_due_override = (
+            True if welded_pbl else bool(surface_pbl_due))
+        driver.cumulus_due_override = (
+            True if welded_cu else bool(cumulus_due))
+        self._adaptive_span = (float(start_seconds), float(end_seconds))
+        self._state.elapsed_seconds = float(start_seconds)
+
+    def _elapsed_after(self, steps):
+        if self._adaptive_span is not None:
+            return self._adaptive_span[1]
+        return float(np.float64(steps) * np.float64(self._dt))
+
     def _supplied_atmosphere(self):
         if self._atmosphere is None:
             raise RuntimeError(
@@ -1188,8 +1238,9 @@ class MpasColumnBatchPhysics:
             "qv": state.qv, "qc": state.qc, "qi": state.qi,
             "qs": atmosphere_qs, "rho": buf["rho"],
         }
-        state.elapsed_seconds = float(
-            np.float64(self._step_index) * np.float64(self._dt))
+        state.elapsed_seconds = (
+            self._adaptive_span[0] if self._adaptive_span is not None
+            else float(np.float64(self._step_index) * np.float64(self._dt)))
         driver, cfg = self._driver, self._cfg
         before = dict(driver.call_counts)
         try:
@@ -1399,8 +1450,7 @@ class MpasColumnBatchPhysics:
         # ARW step epilogue (woof/core/dycore.py:2512): the clock
         # advances once per completed model step, exact as steps * dt.
         self._step_index += 1
-        state.elapsed_seconds = float(
-            np.float64(self._step_index) * np.float64(self._dt))
+        state.elapsed_seconds = self._elapsed_after(self._step_index)
         self._pending_phase = _PHASE1
         return receipt
 

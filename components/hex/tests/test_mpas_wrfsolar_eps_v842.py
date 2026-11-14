@@ -197,3 +197,29 @@ def test_the_seats_apply_wrfs_statements():
                              p.column_grid("QVAPOR", nl), 1.0, 1.0)
     assert np.array_equal(cp.asnumpy(out["t"]), cp.asnumpy(tt))
     assert np.array_equal(cp.asnumpy(out["qv"]), cp.asnumpy(qq))
+
+
+@pytest.mark.gpu
+def test_regional_mesh_draws_the_same_fields_with_the_boundary_zone_unperturbed():
+    """Matrix 5.5: a limited-area mesh is handled as SPPT/SKEB handle it
+    (MeshHarmonics.cell_mask): the boundary zone carries zero, every other
+    cell the global law's words; a global mesh (no mask) is unchanged."""
+    cp = pytest.importorskip("cupy")
+    opts = _options(pert_thom=True)
+    whole = _resource(cp)
+    regional = _resource(cp)
+    zone = np.zeros(regional.cells, bool)
+    zone[:25] = True                              # bdyMaskCell > 0
+    zone[300:310] = True
+    regional.cell_mask = cp.asarray((~zone).astype(np.float32))
+    a = mpeps.MpasMultiPerturb(opts, None, dt=20.0, n_solve=600, resource=whole)
+    b = mpeps.MpasMultiPerturb(opts, None, dt=20.0, n_solve=600, resource=regional)
+    assert a.active is None
+    for step in (1, 4):
+        a.update(step, (step - 1) * 20.0)
+        b.update(step, (step - 1) * 20.0)
+        for name in a.values:
+            got, want = cp.asnumpy(b.values[name]), cp.asnumpy(a.values[name])
+            inside = ~zone[:600]
+            assert np.array_equal(got[inside].view(np.uint32), want[inside].view(np.uint32))
+            assert not np.any(got[~inside]) and np.any(want[~inside])

@@ -15,7 +15,14 @@
 ! 'tracersTend' subpool), tracersSurfaceFlux (the forcing pool's), swForcing,
 ! verticalMesh; and MPAS-Seaice's: boundary, velocity_solver,
 ! velocity_variational, velocity_weak, icestate, tracers_aggregate,
-! atmos_coupling, ocean_coupling, ridging.  A logical config named 'package:NAME' is the package
+! atmos_coupling, ocean_coupling, ridging, tracer_tendencies,
+! tracer_edge_fluxes, tracer_conservation, and incremental remap's
+! incremental_remap, rotated_mesh, tracer_masks, tracer_products,
+! tracer_triangles, tracer_barycenter, tracer_reconstruction,
+! tracer_monotonicity.  A real field of rank 4 or 5 (or an integer one of
+! rank 3) carries its further extents after the header's three.  An absent
+! real field is also marked as a field whose package is off (isActive
+! false).  A logical config named 'package:NAME' is the package
 ! switch NAME, put in the packages pool (ocnPackages); one named 'mesh:NAME'
 ! is the mesh pool's config NAME (on_a_sphere); a character config named
 ! 'diagnostics:NAME' is the diagnostics pool's character field NAME (xtime).
@@ -30,11 +37,13 @@ module oracle_stream
   private
   public :: oracle_pools, oracle_field, poolNames, read_stream, write_stream, pool_named
 
-  integer, parameter :: maxFields = 256
-  character(len=24), parameter :: poolNames(20) = [character(len=24) :: 'mesh', 'state', 'tracers', &
+  integer, parameter :: maxFields = 1024
+  character(len=24), parameter :: poolNames(31) = [character(len=24) :: 'mesh', 'state', 'tracers', &
        'diagnostics', 'forcing', 'scratch', 'tend', 'tracersTend', 'tracersSurfaceFlux', 'swForcing', 'verticalMesh', &
        'boundary', 'velocity_solver', 'velocity_variational', 'velocity_weak', 'icestate', 'tracers_aggregate', &
-       'atmos_coupling', 'ocean_coupling', 'ridging']
+       'atmos_coupling', 'ocean_coupling', 'ridging', 'tracer_tendencies', 'tracer_edge_fluxes', &
+       'tracer_conservation', 'incremental_remap', 'rotated_mesh', 'tracer_masks', 'tracer_products', &
+       'tracer_triangles', 'tracer_barycenter', 'tracer_reconstruction', 'tracer_monotonicity']
 
   type oracle_field
     character(len=24) :: pool
@@ -44,8 +53,11 @@ module oracle_stream
     real(kind=RKIND), dimension(:), pointer :: r1 => null()
     real(kind=RKIND), dimension(:,:), pointer :: r2 => null()
     real(kind=RKIND), dimension(:,:,:), pointer :: r3 => null()
+    real(kind=RKIND), dimension(:,:,:,:), pointer :: r4 => null()
+    real(kind=RKIND), dimension(:,:,:,:,:), pointer :: r5 => null()
     integer, dimension(:), pointer :: i1 => null()
     integer, dimension(:,:), pointer :: i2 => null()
+    integer, dimension(:,:,:), pointer :: i3 => null()
   end type oracle_field
 
   type pool_ref
@@ -53,7 +65,7 @@ module oracle_stream
   end type pool_ref
 
   type oracle_pools
-    type(pool_ref) :: pool(20)
+    type(pool_ref) :: pool(31)
     type(MPAS_pool_type), pointer :: configs => null(), packages => null()
   end type oracle_pools
 
@@ -74,7 +86,7 @@ contains
     real(kind=RKIND), intent(out) :: dt
     type(oracle_pools), intent(inout) :: pools
     type(oracle_field), allocatable, intent(out) :: fields(:)
-    integer :: nConfigs, nFields, i, u, ctype, dims(3), p, err, ivalue
+    integer :: nConfigs, nFields, i, u, ctype, dims(5), p, err, ivalue
     character(len=64) :: cname
     character(len=StrKIND) :: cvalue
     real(kind=RKIND) :: rvalue
@@ -145,7 +157,8 @@ contains
     if (nFields > maxFields) stop 9
     allocate(fields(nFields))
     do i = 1, nFields
-       read(u) fields(i) % pool, fields(i) % name, fields(i) % kind, fields(i) % rank, dims
+       read(u) fields(i) % pool, fields(i) % name, fields(i) % kind, fields(i) % rank, dims(1:3)
+       if (fields(i) % kind == 1 .and. fields(i) % rank > 3) read(u) dims(4:fields(i) % rank)
        associate (f => fields(i), pool => pool_named(pools, trim(fields(i) % pool)))
          select case (f % kind * 10 + f % rank)
          case (10)
@@ -164,6 +177,18 @@ contains
             allocate(f % r3(dims(1), dims(2), dims(3)))
             read(u) f % r3
             call stub_pool_put_array(pool, trim(f % name), f % r3)
+         case (14)
+            allocate(f % r4(dims(1), dims(2), dims(3), dims(4)))
+            read(u) f % r4
+            call stub_pool_put_array(pool, trim(f % name), f % r4)
+         case (15)
+            allocate(f % r5(dims(1), dims(2), dims(3), dims(4), dims(5)))
+            read(u) f % r5
+            call stub_pool_put_array(pool, trim(f % name), f % r5)
+         case (23)
+            allocate(f % i3(dims(1), dims(2), dims(3)))
+            read(u) f % i3
+            call stub_pool_put_array(pool, trim(f % name), f % i3)
          case (21)
             allocate(f % i1(dims(1)))
             read(u) f % i1
@@ -182,10 +207,13 @@ contains
             call stub_pool_put_dimension(pool, trim(f % name), d1)
          case (51)
             call stub_pool_put_array(pool, trim(f % name), null1)
+            call stub_pool_mark_absent(pool, trim(f % name))
          case (52)
             call stub_pool_put_array(pool, trim(f % name), null2)
+            call stub_pool_mark_absent(pool, trim(f % name))
          case (53)
             call stub_pool_put_array(pool, trim(f % name), null3)
+            call stub_pool_mark_absent(pool, trim(f % name))
          case (54)
             call stub_pool_put_array(pool, trim(f % name), nullI1)
          case (61)
@@ -226,6 +254,12 @@ contains
             write(u) f % r2
          case (13)
             write(u) f % r3
+         case (14)
+            write(u) f % r4
+         case (15)
+            write(u) f % r5
+         case (23)
+            write(u) f % i3
          case (21)
             write(u) f % i1
          case (22)

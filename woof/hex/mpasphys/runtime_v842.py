@@ -1931,10 +1931,8 @@ def _run_native_dynamics(arguments, config, layout, payload, streams, library,
                 **({'prehydrated': prehydrated} if prehydrated is not None else {}), **pool_options)
         session.output_config_snapshot=output_config_snapshot
         if getattr(config,'wrfsolar_eps',None) is not None:
-            # WOOF's &wrfsolar_eps (wrfsolar_eps_v842): the STOCHPERT.TBL fields on the mesh's harmonics.
-            if limited_area:
-                raise ValueError('&wrfsolar_eps config_multi_perturb runs on global meshes: its harmonic '
-                                 'patterns need every neighbour, and a regional mesh has none at its edge')
+            # WOOF's &wrfsolar_eps (wrfsolar_eps_v842): the STOCHPERT.TBL fields on the mesh's harmonics
+            # (a regional mesh's boundary zone carries none, as SPPT/SKEB).
             from .wrfsolar_eps_v842 import MpasMultiPerturb
             session.wrfsolar_eps=MpasMultiPerturb(config.wrfsolar_eps,mesh,dt=dt,
                                                   n_solve=int(layout.dimensions['nCellsSolve']))

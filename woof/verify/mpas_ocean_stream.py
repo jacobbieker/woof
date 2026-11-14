@@ -5,7 +5,7 @@ name, every field by pool and name with its kind and Fortran shape. A case is
 ``{"precision", "dims", "config", "dt", "pools": {pool: {name: value}}}`` and
 a field table is ``(pool, name, kind, Fortran shape)`` rows whose shapes name
 the case's dimensions (``C1``/``E1``/``V1`` are nCells+1 ..., ``LP1`` is
-nVertLevels+1).
+nVertLevels+1, ``NIL``/``NSL`` the sea-ice and snow layers).
 """
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ def shape(case: dict, fortran_shape: tuple) -> tuple[int, ...]:
     sizes = {"C1": d["nCells"] + 1, "E1": d["nEdges"] + 1, "V1": d.get("nVertices", 0) + 1, "L": d["nVertLevels"],
              "LP1": d["nVertLevels"] + 1, "T": d.get("nTracers", 0), "ME": d.get("maxEdges", 0),
              "ME2": d.get("maxEdges2", 0), "VD": d.get("vertexDegree", 0), "NA": d.get("nAdvectionCells", 0),
-             "NCAT": d.get("nCategories", 0)}
+             "NCAT": d.get("nCategories", 0), "NIL": d.get("nIceLayers", 0), "NSL": d.get("nSnowLayers", 0)}
     return tuple(sizes[s] if isinstance(s, str) else s for s in reversed(fortran_shape))
 
 
@@ -65,6 +65,9 @@ def input_bytes(fields, case: dict) -> bytes:
         code_rank = 4 if (stream_kind == ABSENT and kind == INT) else rank
         parts += [_text(pool, POOL_WIDTH), _text(name, 64),
                   np.array([stream_kind, code_rank, *dims], "<i4").tobytes()]
+        if stream_kind == REAL and rank > 3:
+            # a rank 4 or 5 real field's further extents follow the header's three
+            parts.append(np.array(shape(case, fshape)[::-1][3:], "<i4").tobytes())
         if stream_kind in (REAL, INT):
             if tuple(np.shape(value)) != shape(case, fshape):
                 raise ValueError(f"{pool}/{name} has shape {np.shape(value)}, not {shape(case, fshape)}")

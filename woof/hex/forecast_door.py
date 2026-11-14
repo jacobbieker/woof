@@ -972,6 +972,9 @@ class ForecastRequest:
     wind_farms: str | None = field(default=None, kw_only=True)
     #: WRF's w_crit_cfl when --w-damping asked for the limiter (woof.hex.cuda_w_damping), else None.
     w_damping: float | None = field(default=None, kw_only=True)
+    #: WRF's inflow perturbation controls when --inflow-perturbation asked for it
+    #: (woof.hex.inflow_perturbation), else None.
+    inflow_perturbation: dict | None = field(default=None, kw_only=True)
     #: Input problems collected rather than raised, preflight only.  Always
     #: empty on a real run, because there the same conditions refuse.
     input_problems: tuple[str, ...] = ()
@@ -1062,6 +1065,8 @@ class ForecastRequest:
     surface_statics: Path | None = None
     #: The resolution's receipt, for the door's own receipt.
     physics_resolution: Mapping[str, Any] | None = None
+    #: ``--adaptive-*`` (woof.hex.adaptive_dt), as the driver argv it forwards; empty with the option off.
+    adaptive_timestep: tuple[str, ...] = ()
     fullstep_local_timestep: bool = False
     fullstep_lts_mode: str = "shadow"
     # 8, not the ladder top: see the guard in drivers/fullstep_lts_forecast_v841.py
@@ -2533,6 +2538,10 @@ def resolve_request(
         if (getattr(arguments, "samehost_devices", None) is not None
                 and fullstep_values.get("fullstep_lts_mode", "shadow") != "active"):
             raise _refuse("the full-step shadow runs on one device: the partitioned shadow has no owner-only donor reduction (halo duplicates would corrupt the rate census)")
+    from . import adaptive_dt
+    adaptive_problem = adaptive_dt.refusal(arguments)
+    if adaptive_problem is not None:
+        raise _refuse(adaptive_problem)
     return ForecastRequest(
         repo=repo,
         mesh=mesh,
@@ -2586,6 +2595,7 @@ def resolve_request(
         chemistry_config=getattr(arguments, "chemistry_config", None),
         wind_farms=getattr(arguments, "wind_farms", None),
         w_damping=_resolve_w_damping(arguments),
+        inflow_perturbation=_resolve_inflow_perturbation(arguments),
         input_problems=tuple(collected or ()),
         preset=preset.name,
         pbl_cadence_source=pbl_cadence_source,
@@ -2612,6 +2622,7 @@ def resolve_request(
         **mode_fields,
         fullstep_local_timestep=fullstep_enabled,
         **fullstep_values,
+        adaptive_timestep=tuple(adaptive_dt.forwarded_arguments(arguments)),
         cycling_argv=_cycling_argv(arguments),
         experimental_dt=experimental_dt,
         levels=levels,
@@ -3188,6 +3199,34 @@ def _resolve_w_damping(arguments) -> float | None:
     return crit
 
 
+def _resolve_inflow_perturbation(arguments) -> dict | None:
+    """WRF's inflow perturbation controls when ``--inflow-perturbation`` is on, else None."""
+
+    names = ("inflow_perturbation_seed", "inflow_perturbation_amplitude_scale", "inflow_perturbation_faces")
+    given = {name: getattr(arguments, name, None) for name in names}
+    if not getattr(arguments, "inflow_perturbation", False):
+        stray = [name for name, value in given.items() if value is not None]
+        if stray:
+            raise _refuse(f"--{stray[0].replace('_', '-')} is read only with --inflow-perturbation; "
+                          "it would be accepted and never read")
+        return None
+    seed = 0 if given[names[0]] is None else int(given[names[0]])
+    scale = 1.0 if given[names[1]] is None else float(given[names[1]])
+    faces = "inflow" if given[names[2]] is None else str(given[names[2]])
+    if seed < 0:
+        raise _refuse(f"--inflow-perturbation-seed {seed} must be non-negative")
+    if not math.isfinite(scale) or scale < 0:
+        raise _refuse(f"--inflow-perturbation-amplitude-scale {scale!r} must be finite and non-negative")
+    if faces not in ("inflow", "outflow"):
+        raise _refuse(f"--inflow-perturbation-faces {faces!r} must be inflow or outflow")
+    for flag in ("local_timestep", "fullstep_local_timestep", "partial_nest"):
+        if getattr(arguments, flag, False):
+            raise _refuse(
+                f"--inflow-perturbation acts in the resident regional runtime; --{flag.replace('_', '-')} "
+                "runs its own drivers that do not carry it, so the seeding would be accepted and never applied")
+    return {"seed": seed, "amplitude_scale": scale, "faces": faces}
+
+
 def mpas_route_orographic_statistics(arguments, native_config) -> Path | None:
     """The GSL drag statistics an MPAS-route run reads when it names none: beside --grid, else built there.
 
@@ -3385,6 +3424,8 @@ def build_driver_argv(request: ForecastRequest) -> list[str]:
         argv += ["--wind-farms", request.wind_farms]
     if request.w_damping is not None:
         argv += ["--w-damping", "--w-crit-cfl", repr(float(request.w_damping))]
+    if request.inflow_perturbation is not None:
+        argv += ["--inflow-perturbation", json.dumps(request.inflow_perturbation, sort_keys=True)]
     if request.source_table is not None:
         argv += ["--source-table", str(request.source_table)]
     if request.start_time:
@@ -3416,6 +3457,7 @@ def build_driver_argv(request: ForecastRequest) -> list[str]:
             argv += ["--les-initial-tke", repr(request.les_initial_tke)]
     if request.fingerprint_every:
         argv += ["--fingerprint-every", str(request.fingerprint_every)]
+    argv += list(request.adaptive_timestep)
     if request.fullstep_local_timestep:
         argv += ["--fullstep-local-timestep", "--fullstep-lts-mode", request.fullstep_lts_mode,
                  "--fullstep-lts-max-rate", str(request.fullstep_lts_max_rate),
@@ -3749,6 +3791,8 @@ def build_receipt(
             **({} if request.surface_statics is None else
                {"surface_statics": str(request.surface_statics)}),
             **({} if request.w_damping is None else {"w_damping": {"w_crit_cfl": request.w_damping}}),
+            **({} if request.inflow_perturbation is None else
+               {"inflow_perturbation": dict(request.inflow_perturbation)}),
             "source_table": (
                 None if request.source_table is None
                 else str(request.source_table)
@@ -4984,6 +5028,9 @@ def _run_forecast(arguments: argparse.Namespace) -> int:
             if getattr(arguments, "w_damping", False):
                 raise ValueError("--w-damping is carried by the WOOF-physics route's dycore driver; the MPAS "
                                  "suite route (matrix item 4.2 follow-up) would accept it and never apply it")
+            if getattr(arguments, "inflow_perturbation", False):
+                raise ValueError("--inflow-perturbation is carried by the WOOF-physics route's regional runtime; "
+                                 "the MPAS suite route (matrix item 5.7 follow-up) would accept it and never apply it")
             from .mpasphys.resident_v842 import ported_route_refusal
             from .mpasphys.forecast_v842 import named_library_route
             suite_refusal = ported_route_refusal(native_config)
@@ -5008,6 +5055,11 @@ def _run_forecast(arguments: argparse.Namespace) -> int:
                     "does), without --physics-suite")
             if getattr(arguments, "tc_climate", None) is not None:
                 raise ValueError("--tc-climate currently requires the WOOF forecast executor")
+            if getattr(arguments, "adaptive_timestep", "off") != "off":
+                raise ValueError(
+                    "--adaptive-timestep runs on the WOOF column route (--physics-suite arwen_mpas_column or "
+                    "arwen_thompson_column): the MPAS v8.4.2 suite route's framework clock and physics alarms take "
+                    "one fixed step (HEX-WRF parity item 4.1 covers the WOOF route first)")
             # Retired (named gap W1-G2): the suite route applies IAU now (mpasphys.runtime_v842.SuiteIau, MPAS's
             # atm_add_tend_anal_incr once per step).  The door's IAU flags become MPAS's own &iau group and iau
             # stream input, so a flag run and a namelist run execute the same code.
@@ -5557,6 +5609,16 @@ def add_forecast_arguments(parser: argparse.ArgumentParser) -> None:
                              "WOOF-physics route only; default off")
     parser.add_argument("--w-crit-cfl", type=float, default=None, metavar="CFL",
                         help="WRF's w_crit_cfl for --w-damping (default 1.0, WOOF's)")
+    parser.add_argument("--inflow-perturbation", action="store_true",
+                        help="WRF's inflow perturbation on a regional mesh: cell-blocked theta increments "
+                             "(Eckert amplitude, PBL depth, 100 s holds) on the inflow faces' relaxation-zone "
+                             "target; WOOF-physics route only; default off")
+    parser.add_argument("--inflow-perturbation-seed", type=int, default=None, metavar="N",
+                        help="WRF's inflow_perturbation_seed (default 0)")
+    parser.add_argument("--inflow-perturbation-amplitude-scale", type=float, default=None, metavar="X",
+                        help="WRF's inflow_perturbation_amplitude_scale (default 1.0)")
+    parser.add_argument("--inflow-perturbation-faces", default=None, choices=("inflow", "outflow"),
+                        help="WRF's inflow_perturbation_faces (default inflow)")
     parser.add_argument("--wind-farms", default=None, metavar="uswtdb|TABLE|off",
                         help="opt-in Fitch turbine drag and TKE from the shared turbine tables")
     # --wrf-hydro / --wrf-hydro-output: WRF-Hydro's routing on its own LSM grid, coupled to the hex land surface
@@ -5816,6 +5878,8 @@ def add_forecast_arguments(parser: argparse.ArgumentParser) -> None:
              ".npz (key cell_rate) instead of the grid file's dcEdge, so a "
              "class interface can be placed in a cull's interior and measured. "
              "Needs --local-timestep. tools/lts_forced_classing.py writes it")
+    from . import adaptive_dt
+    adaptive_dt.add_arguments(parser)
     parser.add_argument(
         "--headroom-mib", type=float, default=None, metavar="MIB",
         help="override the margin the admission decision holds back from the "

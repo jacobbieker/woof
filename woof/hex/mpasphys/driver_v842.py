@@ -473,6 +473,8 @@ class DriverConfig:
             o = self.afwa_diagnostics
             result["afwa_diagnostics"] = dict(options=list(o.options), ptype_ccn_tmp=o.ptype_ccn_tmp,
                                               ptype_tot_melt=o.ptype_tot_melt)
+            if o.severe_ignore_qng_gate:
+                result["afwa_diagnostics"]["severe_ignore_qng_gate"] = True
         if self.lightning_diagnostics is not None:
             result["lightning_diagnostics"] = self.lightning_diagnostics.receipt()
         if self.acc_diagnostics is not None:

@@ -120,13 +120,15 @@ KEY_REASONS: Mapping[str, str] = {
     "blend_width": "hex's regional zones are MPAS's fixed nSpecZone=2/nRelaxZone=5 (matrix A.9)",
     "feedback": "nest feedback is N/A on the mesh (matrix item 5.8)",
     "smooth_option": "nest feedback smoothing is N/A on the mesh (matrix item 5.8)",
-    "spp_conv": "SPP on hex is matrix item 5.4", "spp_pbl": "SPP on hex is matrix item 5.4",
-    "spp_lsm": "SPP on hex is matrix item 5.4",
-    "multi_perturb": "regional WRF-Solar EPS on hex is matrix item 5.5",
+    **{key: (f"SPP on hex is `woof hex forecast --physics {key}=1` on the generic column seam (matrix item 5.4); "
+             "the go route has no mapping yet") for key in ("spp_conv", "spp_pbl", "spp_lsm")},
+    "multi_perturb": "WRF-Solar EPS on hex is the MPAS suite route's &wrfsolar_eps (`woof hex forecast --physics config_multi_perturb=true ...`, global and regional, matrix item 5.5); the go route has no mapping yet",
     "grid_fdda": "grid and spectral nudging on hex are matrix item 5.1",
     "obs_nudge_opt": "obs nudging on hex is matrix item 5.2",
     "dfi_opt": "DFI on hex is matrix item 4.4 (IAU is the hex alternative)",
     "w_damping": "w_damping on hex is `woof hex forecast --w-damping` (matrix item 4.2); the go route has no mapping yet",
+    "inflow_perturbation": ("inflow perturbation on hex is `woof hex forecast --inflow-perturbation` on a regional "
+                            "mesh (matrix item 5.7); the go route has no mapping yet"),
 }
 
 

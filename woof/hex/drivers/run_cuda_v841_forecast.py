@@ -154,6 +154,7 @@ import contextlib
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, fields as dataclass_fields
 from datetime import datetime, timedelta
+from fractions import Fraction
 import gc
 import hashlib
 import json
@@ -3231,8 +3232,12 @@ def download_forecast_checkpoint(
     label: str,
     valid_time: str,
     dynamics_tendencies: Any,
+    model_seconds: float | None = None,
 ) -> dict[str, Any]:
     """The full hex restart state at a committed history boundary, on the host.
+
+    ``model_seconds`` is the boundary's model time under the adaptive clock (woof.hex.adaptive_dt), where
+    it is not ``step * DT_SECONDS``; ``None`` on every fixed-step run.
 
     The same four parts the proof harness's F030 checkpoint carries (dycore
     state, saved diagnostics, physics backend payload, the GF advective
@@ -3249,7 +3254,8 @@ def download_forecast_checkpoint(
     backend = stack["backend"]
     cp = driver.cp
     cp.cuda.get_current_stream().synchronize()
-    if float(driver.atmosphere.state.time_seconds) != step * DT_SECONDS:
+    if float(driver.atmosphere.state.time_seconds) != (step * DT_SECONDS if model_seconds is None
+                                                       else model_seconds):
         raise RuntimeError("checkpoint clock does not equal its step")
     device_state = driver.atmosphere.state.to_host()
     saved = driver.atmosphere.saved
@@ -3540,6 +3546,80 @@ def _mixing_treatment_proof(driver: Any, executed_steps: int) -> dict[str, Any]:
 from woof.hex.nest_triggers import NEST_TRIGGERS_ENV  # noqa: E402  (one name for both physics routes)
 
 
+def _start_adaptive_run(adaptive: Any, *, stack: Mapping[str, Any], host: Mapping[str, Any],
+                        schedule: dict[str, Any], cycling: dict[str, Any] | None, capture_steps: set[int],
+                        start_step: int, restart: Mapping[str, Any] | None, radar_minutes: Any,
+                        attachments: Mapping[str, Any]) -> Any:
+    """The adaptive clock for this run (woof.hex.adaptive_dt), with the schedule re-keyed to its steps.
+
+    A fixed-step schedule names its frames by step; under the adaptive clock the frames keep their TIMES and
+    take whichever step lands on them, so the step-keyed maps are emptied here (the start frame and a
+    resumed checkpoint's frame keep their own numbers) and filled as the clock lands.
+    """
+
+    from woof.hex import adaptive_dt
+
+    for name, attachment in attachments.items():
+        if attachment is not None:
+            raise ConfigurationRefusal(
+                "adaptive_timestep", adaptive.mode,
+                f"{name} is attached to this run and holds the fixed step", "--adaptive-timestep off")
+    if radar_minutes:
+        raise ConfigurationRefusal("adaptive_timestep", adaptive.mode,
+                                   "the radar snapshots are cut on a fixed step count", "--adaptive-timestep off")
+    for name, value in (("the stochastic physics", getattr(stack["driver"], "stochastic", None)),
+                        ("the wind farms", getattr(stack["backend"], "windfarm_power", None)),
+                        ("the wave coupling", getattr(stack["backend"], "wave_binding", None)),
+                        ("the surface update", getattr(stack["backend"], "_surface_updates", None)),
+                        ("the chemistry", getattr(stack["backend"], "chemistry", None))):
+        if value is not None:
+            raise ConfigurationRefusal("adaptive_timestep", adaptive.mode,
+                                       f"{name} runs on the fixed step", "--adaptive-timestep off")
+    row = Fraction(str(float(DT_SECONDS)))
+    frames = adaptive_dt.history_frames(start_step=0, capture_steps=schedule["capture_steps"], row_dt=DT_SECONDS)
+    checkpoints = ([] if cycling is None else
+                   [Fraction(step) * row for step in cycling["checkpoint_steps"]])
+    config = host["config"]
+    cadence = adaptive_dt.physics_cadence(
+        row_dt=row, radiation_seconds=config.config_radt_seconds,
+        surface_pbl_seconds=config.config_bldt_seconds, cumulus_seconds=config.config_cudt_seconds)
+    lbc_interval = None
+    regional = host.get("regional")
+    if regional is not None and len(regional.get("lbc_paths") or ()) >= 2:
+        from woof.hex.lbc import read_lbc_valid_time
+        first, second = (read_lbc_valid_time(Path(path)) for path in regional["lbc_paths"][:2])
+        interval = Fraction(int((second - first).total_seconds()))
+        start = datetime.strptime(str(schedule["start_time"]), "%Y-%m-%d_%H:%M:%S")
+        if interval > 0 and Fraction(int((first - start).total_seconds())) % interval == 0:
+            lbc_interval = interval
+    resumed = Fraction(0) if restart is None else Fraction(restart["elapsed"])
+    run = adaptive_dt.AdaptiveRun(
+        adaptive, stack=stack, end=int(schedule["steps"]) * row, frames=frames, checkpoints=checkpoints,
+        cadence=cadence, start_text=str(schedule["start_time"]), mesh=host["prepared"].mesh,
+        vertical=host["prepared"].vertical, n_cells=int(N_CELLS), n_edges=int(N_EDGES),
+        lbc_interval=lbc_interval, start=resumed)
+    if restart is not None:
+        run.clock.restore(restart)
+        run.model_time[start_step] = float(stack["driver"].atmosphere.state.time_seconds)
+        run.exact_time[start_step] = resumed
+    # Re-key the step maps: only the start frame keeps its number.
+    keep = {} if start_step else {0: (schedule["labels"].get(0), schedule["valid_times"].get(0))}
+    if restart is not None:
+        keep[start_step] = run.label(resumed)
+    schedule["labels"].clear()
+    schedule["valid_times"].clear()
+    for step, (label, valid_time) in keep.items():
+        if label is not None:
+            schedule["labels"][step] = label
+            schedule["valid_times"][step] = valid_time
+    capture_steps.intersection_update({0} if start_step == 0 else set())
+    if cycling is not None:
+        cycling["checkpoint_steps"].clear()
+    install_capture_labels(schedule["labels"])
+    print(json.dumps({"adaptive_timestep": adaptive.receipt()}), flush=True)
+    return run
+
+
 def _arm_nest_trigger(*, host: Mapping[str, Any], schedule: Mapping[str, Any], output_root: Path,
                       backend: Any, cp: Any, start_step: int):
     """The armed ``[hex_nests]`` look, or None when the run names no table.
@@ -3609,8 +3689,12 @@ def execute_forecast(
     history_product_session: Callable[[], Any] | None = None,
     history_product_max_pending: int = 2,
     required_product_ids: Sequence[str] = (),
+    adaptive: Any | None = None,
 ) -> dict[str, Any]:
     """Run the native forecast; optionally notify products of closed frames.
+
+    ``adaptive`` (:class:`woof.hex.adaptive_dt.AdaptiveTimestepOptions`) runs the step on WRF's adaptive
+    clock; ``None``, every default run, keeps the fixed step and this function's path exactly as before.
 
     Notifications carry only native file metadata and run on a separate
     worker. Consumer failures surface at the final callback drain.
@@ -3715,13 +3799,31 @@ def execute_forecast(
         if float(checkpoint["dt_seconds"]) != float(DT_SECONDS) or int(checkpoint["n_cells"]) != int(N_CELLS):
             raise ValueError("checkpoint was written on a different mesh or timestep")
         start_step = int(checkpoint["step"])
-        if start_step not in schedule["capture_steps"] or start_step >= int(schedule["steps"]):
+        adaptive_restart = checkpoint.get("adaptive")
+        if (adaptive is None) != (adaptive_restart is None):
             raise ValueError(
-                "the checkpoint step must be a history frame of this run and "
-                "before its end; --start-time/--hours name the ORIGINAL run"
-            )
-        if schedule["valid_times"][start_step] != checkpoint["valid_time"]:
-            raise ValueError("checkpoint valid time differs from this schedule's")
+                "--restart-from: the checkpoint was written by a "
+                f"{'fixed' if adaptive_restart is None else 'adaptive'}-step run and this run is "
+                f"{'fixed' if adaptive is None else 'adaptive'}-step; resume a run on its own clock")
+        if adaptive is None:
+            if start_step not in schedule["capture_steps"] or start_step >= int(schedule["steps"]):
+                raise ValueError(
+                    "the checkpoint step must be a history frame of this run and "
+                    "before its end; --start-time/--hours name the ORIGINAL run"
+                )
+            if schedule["valid_times"][start_step] != checkpoint["valid_time"]:
+                raise ValueError("checkpoint valid time differs from this schedule's")
+        else:
+            from woof.hex.adaptive_dt import history_frames
+            resumed_at = Fraction(adaptive_restart["elapsed"])
+            row = Fraction(str(float(DT_SECONDS)))
+            if (resumed_at not in history_frames(start_step=0, capture_steps=schedule["capture_steps"],
+                                                 row_dt=DT_SECONDS)
+                    or resumed_at >= int(schedule["steps"]) * row):
+                raise ValueError(
+                    "the checkpoint time must be a history frame of this run and "
+                    "before its end; --start-time/--hours name the ORIGINAL run"
+                )
         state = checkpoint["state"]
         saved = checkpoint["saved_diagnostics"]
         restart_receipt = {
@@ -3773,11 +3875,13 @@ def execute_forecast(
         from woof.hex.iau_native import IAU_WINDOW_KEY, resolve_restart_window
 
         iau = resolve_restart_window(iau, carried=checkpoint.get(IAU_WINDOW_KEY),
-                                     restart_seconds=float(start_step) * float(DT_SECONDS))
+                                     restart_seconds=(float(start_step) * float(DT_SECONDS) if adaptive is None
+                                                      else float(Fraction(adaptive_restart["elapsed"]))))
         stochastic_restart = checkpoint.get("stochastic")
         del checkpoint
     else:
         restart_gf = None
+        adaptive_restart = None
     time_ledger.emit("prep.device_upload", "begin")
     stack = proof._construct_device_stack(
         host=host,
@@ -3799,6 +3903,11 @@ def execute_forecast(
         print(json.dumps({"tc_lake_mask": tc_lake_receipt}), flush=True)
     from woof.hex.chem_transport import attach as attach_chemistry
     attach_chemistry(stack["backend"], host, stack["driver"])
+    if host.get("inflow_perturbation") is not None:
+        # WRF's inflow perturbation on the relax rings (woof.hex.inflow_perturbation).
+        from woof.hex.inflow_perturbation import attach as attach_inflow
+        print(json.dumps({"inflow_perturbation": attach_inflow(
+            stack["driver"], stack["backend"], host["inflow_perturbation"])}), flush=True)
     if host.get("w_damping") is not None:
         from woof.hex.cuda_w_damping import WDamping
         stack["driver"].w_damping = WDamping(w_crit_cfl=float(host["w_damping"]["w_crit_cfl"]))
@@ -3915,7 +4024,8 @@ def execute_forecast(
     # facade's stream capture records no graph, so a replay would launch
     # nothing: the subcycle runs eager there.
     if (graph_requested and lts_attachment is None and fullstep_shadow is None
-            and les_attachment is None and recovery_attachment is None and not metal_lane()):
+            and les_attachment is None and recovery_attachment is None and not metal_lane()
+            and adaptive is None):
         from woof.hex.cuda_subcycle_graphs import attach_subcycle_graphs
 
         graph_controller = attach_subcycle_graphs(stack["driver"])
@@ -3938,6 +4048,27 @@ def execute_forecast(
     install_step_gate_batch(stack, cp)
     labels = schedule["labels"]
     steps = int(schedule["steps"])
+    adaptive_run = None
+    if adaptive is not None:
+        adaptive_run = _start_adaptive_run(
+            adaptive, stack=stack, host=host, schedule=schedule, cycling=cycling, capture_steps=capture_steps,
+            start_step=start_step, restart=adaptive_restart, radar_minutes=radar.minutes,
+            attachments={"local time stepping": lts_attachment, "the full-step LTS shadow": fullstep_shadow,
+                         "the LES closure": les_attachment, "the large-step recovery": recovery_attachment,
+                         "WRF-Hydro": wrf_hydro})
+
+    def model_seconds(step: int) -> float:
+        return step * DT_SECONDS if adaptive_run is None else adaptive_run.seconds_at(step)
+
+    def register_landing(step: int, seconds: Any, checkpoint: bool) -> None:
+        label, valid_time = adaptive_run.label(seconds)
+        if seconds in adaptive_run.frames:
+            labels[step] = label
+            schedule["valid_times"][step] = valid_time
+            capture_steps.add(step)
+            install_capture_labels(labels)
+        if checkpoint and cycling is not None:
+            cycling["checkpoint_steps"].add(step)
     # Incremental analysis update on this executor (lane W1): one class, every cell and
     # edge, the same hook the full-step class executor uses.  None leaves the step loop
     # exactly as before.
@@ -4124,7 +4255,10 @@ def execute_forecast(
                 label=labels[step],
                 valid_time=schedule["valid_times"][step],
                 dynamics_tendencies=current_gf["value"],
+                **({} if adaptive_run is None else {"model_seconds": adaptive_run.seconds_at(step)}),
             )
+            if adaptive_run is not None:
+                payload["adaptive"] = adaptive_run.clock.state()
             if iau is not None:
                 from woof.hex.iau_native import IAU_WINDOW_KEY, window_record
 
@@ -4302,6 +4436,7 @@ def execute_forecast(
             scalar_names=host["scalar_names"],
             surface_accumulators=host["surface_accumulators"],
             **({"tc_sampler": tc_sampler} if tc_sampler is not None else {}),
+            **({} if adaptive_run is None else {"model_seconds": adaptive_run.seconds_at(step)}),
         )
         capture_seconds += time.perf_counter() - mark
         wind = getattr(stack['backend'], 'wind_farms', None)
@@ -4435,7 +4570,7 @@ def execute_forecast(
                 "reason": str(error)})
         refusal = {
             "refused": True, "refused_in": "step health gate",
-            "step": checked_step, "model_seconds": checked_step * DT_SECONDS,
+            "step": checked_step, "model_seconds": model_seconds(checked_step),
             **refusal_exception_details(error), "last_committed_step": checked_step,
             "note": (
                 "the composite step committed but its state fails the "
@@ -4465,8 +4600,12 @@ def execute_forecast(
         if held_f000:
             finish_capture(0, held_f000.pop(), cycling_done=True)
 
+    step_numbers = (range(start_step + 1, steps + 1) if adaptive_run is None
+                    else adaptive_run.steps(start_step, register=register_landing))
     try:
-        for step in range(start_step + 1, steps + 1):
+        for step in step_numbers:
+            if adaptive_run is not None and step == adaptive_run.final_step:
+                steps = step
             if step == start_step + 1:
                 time_ledger.emit("forecast.construct", "end")
                 time_ledger.emit("forecast.integrate", "begin", attrs=card_attrs)
@@ -4497,6 +4636,7 @@ def execute_forecast(
                         lambda held, start, length, **context: [
                             forcing.add(0, held, start, length, **context)
                             for forcing in (iau_forcing, nudging_forcing) if forcing is not None])}),
+                    **({} if adaptive_run is None else {"dt": adaptive_run.dt()}),
                 )
             except (proof.CompositeTransactionError, FloatingPointError) as error:
                 # An earlier health refusal has precedence over a successor's
@@ -4521,7 +4661,7 @@ def execute_forecast(
                 refusal = {
                     "refused": True,
                     "step": step,
-                    "model_seconds": step * DT_SECONDS,
+                    "model_seconds": model_seconds(step),
                     **refusal_exception_details(error),
                     "last_committed_step": step - 1,
                     "note": (
@@ -4532,6 +4672,10 @@ def execute_forecast(
                 }
                 executed_steps = step - 1
                 break
+            if adaptive_run is not None:
+                # The CFL the committed step ended with, read once (one small
+                # host copy), for the next step's calc_dt.
+                adaptive_run.after_step(step)
             # Numeric transaction gates remain owned by the predecessor. They
             # already close the endpoint D2H event. The main loop needs no stream
             # drain, and inspects the prior health only after the next launch.
@@ -4616,7 +4760,7 @@ def execute_forecast(
                         "refused": True,
                         "refused_in": "history capture",
                         "step": step,
-                        "model_seconds": step * DT_SECONDS,
+                        "model_seconds": model_seconds(step),
                         **refusal_exception_details(error),
                         "last_committed_step": step,
                         "note": (
@@ -4634,6 +4778,11 @@ def execute_forecast(
             first_call.put(None)  # no first call will come; never leave a writer waiting
         with time_ledger.stage("post.forecast.step_receipts"):
             step_receipts = receipt_writer.close()
+    if adaptive_run is not None:
+        adaptive_run.abandon()
+        if refusal is None:
+            executed_steps = steps = adaptive_run.final_step
+        adaptive_run.write_series(output_root / "adaptive-timestep.jsonl")
     if held_f000:
         finish_capture(0, held_f000.pop(), cycling_done=True)
     loop_seconds = time.perf_counter() - loop_started
@@ -4642,6 +4791,11 @@ def execute_forecast(
         (output_root / "nest-trigger-receipt.json").write_text(
             json.dumps(nest_trigger.receipt(), indent=2, sort_keys=True, default=str) + "\n",
             encoding="utf-8", newline="\n")
+    inflow = getattr(getattr(stack["driver"], "regional_v841", None), "inflow_perturbation", None)
+    if inflow is not None:
+        # What the inflow seeding put on the boundary (woof.hex.inflow_perturbation).
+        (output_root / "inflow-perturbation-receipt.json").write_text(
+            json.dumps(inflow.receipt(), indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
     if last_step_clock is not None:
         if product_ready is not None:
             product_ready.forecast_ended(*last_step_clock)
@@ -4655,7 +4809,7 @@ def execute_forecast(
         # Keep the last committed state renderable even though the refusal
         # landed between scheduled captures.
         stamp = datetime.strptime(schedule["start_time"], "%Y-%m-%d_%H:%M:%S") + timedelta(
-            seconds=executed_steps * DT_SECONDS
+            seconds=model_seconds(executed_steps)
         )
         labels[executed_steps] = stamp.strftime("%Y-%m-%d_%H.%M.%S")
         schedule["valid_times"][executed_steps] = stamp.strftime("%Y-%m-%d_%H:%M:%S")
@@ -4932,7 +5086,7 @@ def execute_forecast(
             "boundary_fingerprint_seconds": fingerprint_seconds,
             "health_gate_seconds": health_seconds,
             "steps": steps,
-            "forecast_seconds": steps * DT_SECONDS,
+            "forecast_seconds": model_seconds(steps),
         },
         "physical_gates": physical_gates,
         "step_health": health,
@@ -4975,6 +5129,7 @@ def execute_forecast(
             "steps": fingerprints.steps if fingerprints is not None else [],
         },
         "surface_evolution": evolution,
+        **({} if adaptive_run is None else {"adaptive_timestep": adaptive_run.receipt()}),
         "local_timestep_treatment": (
             None
             if stack.get("local_timestep") is None
@@ -5250,6 +5405,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "tools/lts_forced_classing.py writes the file"
         ),
     )
+    from woof.hex import adaptive_dt
+    adaptive_dt.add_arguments(parser)
     parser.add_argument(
         "--park-physics-tier",
         action="store_true",
@@ -5308,6 +5465,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--chemistry-config", type=Path, default=None)
     parser.add_argument("--wind-farms", default=None)
     parser.add_argument("--w-damping", action="store_true")
+    parser.add_argument("--inflow-perturbation", default=None)
     parser.add_argument("--w-crit-cfl", type=float, default=1.0)
     parser.add_argument(
         "--source-table",
@@ -5560,6 +5718,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
                 f"--local-timestep-classing {args.local_timestep_classing} "
                 "is not a file"
             )
+    from woof.hex import adaptive_dt
+    adaptive_problem = adaptive_dt.refusal(args)
+    if adaptive_problem is not None:
+        parser.error(adaptive_problem)
     return args
 
 
@@ -6154,11 +6316,32 @@ def _main(args: argparse.Namespace, decision: Mapping[str, Any] | None) -> int:
     )
     if decision is not None:
         host["timestep_evidence"] = dict(decision)
+    adaptive = None
+    if getattr(args, "adaptive_timestep", "off") != "off":
+        from woof.hex import adaptive_dt
+        if physics is not None and not physics.is_default() and physics.seam != "frozen":
+            raise ConfigurationRefusal(
+                "adaptive_timestep", args.adaptive_timestep,
+                f"the {physics.seam} physics seam takes no adaptive step yet; the frozen column batch "
+                "(arwen_mpas_column, arwen_thompson_column) carries one",
+                "--adaptive-timestep off, or --physics-suite arwen_mpas_column")
+        config = host["config"]
+        latitudes = np.asarray(host["prepared"].mesh.latCell, dtype=np.float64)
+        try:
+            adaptive = adaptive_dt.resolve_options(
+                args, row_dt=float(DT_SECONDS), row_substeps=int(config.config_number_of_sub_steps),
+                order=int(config.config_time_integration_order),
+                center_latitude=float(np.degrees(np.mean(latitudes))))
+        except ValueError as error:
+            raise ConfigurationRefusal("adaptive_timestep", args.adaptive_timestep, str(error),
+                                       "--adaptive-timestep off") from None
     from woof.hex.stochastic import resolve_options
     if getattr(args, "wind_farms", None) is not None:
         host["wind_farms"] = args.wind_farms
     if getattr(args, "w_damping", False):
         host["w_damping"] = {"w_crit_cfl": float(args.w_crit_cfl)}
+    if getattr(args, "inflow_perturbation", None):
+        host["inflow_perturbation"] = json.loads(args.inflow_perturbation)
     host["stochastic"] = resolve_options(args.stochastic).json()
     if args.preflight_only or not DEFER_PREPARED_FINGERPRINT:
         join_prepared_fingerprint(host)
@@ -6348,6 +6531,7 @@ def _main(args: argparse.Namespace, decision: Mapping[str, Any] | None) -> int:
         history_selection=args.history_selection,
         history_zgrid=history_zgrid,
         tc_climate=args.tc_climate,
+        **({} if adaptive is None else {"adaptive": adaptive}),
     )
     join_prepared_fingerprint(host)
     source_after = proof.measure_execution_sources()

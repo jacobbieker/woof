@@ -24,9 +24,12 @@ module mpas_log
   use mpas_kind_types
   implicit none
   private
-  public :: mpas_log_write, MPAS_LOG_WARN, MPAS_LOG_ERR, MPAS_LOG_CRIT
+  public :: mpas_log_write, MPAS_LOG_WARN, MPAS_LOG_ERR, MPAS_LOG_CRIT, stub_log_warn_unit
 
   integer, parameter :: MPAS_LOG_WARN = 2, MPAS_LOG_ERR = 3, MPAS_LOG_CRIT = 4
+  ! a unit a driver opened to record warnings (message, integer and real
+  ! arguments, the reals to 17 digits); 0 drops them
+  integer :: stub_log_warn_unit = 0
 
 contains
 
@@ -40,6 +43,11 @@ contains
     integer, optional, intent(out) :: err
     if (present(err)) err = 0
     if (present(messageType)) then
+      if (messageType == MPAS_LOG_WARN .and. stub_log_warn_unit /= 0) then
+        write(stub_log_warn_unit, '(a)') 'WARN ' // trim(message)
+        if (present(intArgs)) write(stub_log_warn_unit, '(a,*(1x,i0))') 'INTS', intArgs
+        if (present(realArgs)) write(stub_log_warn_unit, '(a,*(1x,es25.17e3))') 'REALS', realArgs
+      end if
       if (messageType == MPAS_LOG_ERR .or. messageType == MPAS_LOG_CRIT) then
         print *, 'oracle stub: mpas_log_write: ', trim(message)
         stop 7
@@ -57,12 +65,14 @@ module mpas_pool_routines
   public :: mpas_log_write, MPAS_LOG_WARN, MPAS_LOG_ERR, MPAS_LOG_CRIT
   public :: MPAS_pool_type, mpas_pool_get_subpool, mpas_pool_get_array, &
             mpas_pool_get_dimension, mpas_pool_get_config, &
-            stub_pool_put_subpool, stub_pool_put_array, &
+            stub_pool_put_subpool, stub_pool_put_array, stub_pool_mark_absent, &
             stub_pool_put_dimension, stub_pool_put_config, &
             field1DReal, field2DReal, field3DReal, mpas_pool_get_field, stub_pool_put_field, &
             mpas_allocate_scratch_field, mpas_deallocate_scratch_field, &
             mpas_pool_iterator_type, MPAS_POOL_FIELD, mpas_pool_begin_iteration, mpas_pool_get_next_member, &
-            mpas_pool_get_package, mpas_pool_shift_time_levels, mpas_pool_initialize_time_levels
+            mpas_pool_get_package, mpas_pool_shift_time_levels, mpas_pool_initialize_time_levels, &
+            mpas_pool_get_field_info, mpas_pool_field_info_type, &
+            field4DReal, field5DReal, field2DInteger, field3DInteger
 
   integer, parameter :: maxEntries = 320
 
@@ -82,6 +92,24 @@ module mpas_pool_routines
     real(kind=RKIND), dimension(:,:,:), pointer :: array => null()
     integer, dimension(3) :: dimSizes = 0
   end type field3DReal
+
+  ! fields wrapped around arrays the stream put (MPAS-Seaice's incremental
+  ! remap reads its tracer pools as fields of these ranks)
+  type field4DReal
+    real(kind=RKIND), dimension(:,:,:,:), pointer :: array => null()
+  end type field4DReal
+
+  type field5DReal
+    real(kind=RKIND), dimension(:,:,:,:,:), pointer :: array => null()
+  end type field5DReal
+
+  type field2DInteger
+    integer, dimension(:,:), pointer :: array => null()
+  end type field2DInteger
+
+  type field3DInteger
+    integer, dimension(:,:,:), pointer :: array => null()
+  end type field3DInteger
 
   ! ocn_tend_tracer walks the tracer groups with a pool iterator; the
   ! oracles do not call it, and the iteration stops by name
@@ -108,7 +136,21 @@ module mpas_pool_routines
     type(field1DReal), pointer :: f1 => null()
     type(field2DReal), pointer :: f2 => null()
     type(field3DReal), pointer :: f3 => null()
+    real(kind=RKIND), dimension(:,:,:,:), pointer :: r4 => null()
+    real(kind=RKIND), dimension(:,:,:,:,:), pointer :: r5 => null()
+    integer, dimension(:,:,:), pointer :: i3 => null()
+    type(field4DReal), pointer :: f4 => null()
+    type(field5DReal), pointer :: f5 => null()
+    type(field2DInteger), pointer :: fi2 => null()
+    type(field3DInteger), pointer :: fi3 => null()
+    ! a field whose package is off: mpas_pool_get_field_info's isActive
+    logical :: absent = .false.
   end type pool_entry
+
+  type mpas_pool_field_info_type
+    integer :: fieldType = 0, nDims = 0, nTimeLevels = 1, nHaloLayers = 0
+    logical :: isActive = .true.
+  end type mpas_pool_field_info_type
 
   type MPAS_pool_type
     type(pool_entry), dimension(maxEntries) :: e
@@ -137,7 +179,8 @@ module mpas_pool_routines
   end interface mpas_pool_get_array
 
   interface mpas_pool_get_field
-    module procedure get_field_1d, get_field_2d, get_field_3d
+    module procedure get_field_1d, get_field_2d, get_field_3d, get_field_4d, get_field_5d, &
+                     get_field_2di, get_field_3di
   end interface mpas_pool_get_field
 
   interface stub_pool_put_field
@@ -153,7 +196,7 @@ module mpas_pool_routines
   end interface mpas_deallocate_scratch_field
 
   interface stub_pool_put_array
-    module procedure put_r0, put_r1, put_r2, put_r3, put_i1, put_i2
+    module procedure put_r0, put_r1, put_r2, put_r3, put_r4, put_r5, put_i1, put_i2, put_i3
   end interface stub_pool_put_array
 
 contains
@@ -486,6 +529,40 @@ contains
     pool % e(i) % i2 => a
   end subroutine put_i2
 
+  subroutine put_r4(pool, name, a)
+    type(MPAS_pool_type), intent(inout) :: pool
+    character(len=*), intent(in) :: name
+    real(kind=RKIND), dimension(:,:,:,:), pointer :: a
+    integer :: i
+    i = slot(pool, name)
+    pool % e(i) % r4 => a
+  end subroutine put_r4
+
+  subroutine put_r5(pool, name, a)
+    type(MPAS_pool_type), intent(inout) :: pool
+    character(len=*), intent(in) :: name
+    real(kind=RKIND), dimension(:,:,:,:,:), pointer :: a
+    integer :: i
+    i = slot(pool, name)
+    pool % e(i) % r5 => a
+  end subroutine put_r5
+
+  subroutine put_i3(pool, name, a)
+    type(MPAS_pool_type), intent(inout) :: pool
+    character(len=*), intent(in) :: name
+    integer, dimension(:,:,:), pointer :: a
+    integer :: i
+    i = slot(pool, name)
+    pool % e(i) % i3 => a
+  end subroutine put_i3
+
+  ! the entry the stream put last is a field whose package is off
+  subroutine stub_pool_mark_absent(pool, name)
+    type(MPAS_pool_type), intent(inout) :: pool
+    character(len=*), intent(in) :: name
+    pool % e(find(pool, name)) % absent = .true.
+  end subroutine stub_pool_mark_absent
+
   ! Iteration visits every entry in the order it was put; a 3-D real array
   ! (a tracer group) is an MPAS_POOL_FIELD member, anything else another type.
   ! ocn_tend_tracer iterates the tracers pool this way.
@@ -519,12 +596,22 @@ contains
     p => pool
   end function pool_target
 
+  ! a scratch field, or a field wrapped around an array the stream put
   subroutine get_field_1d(pool, name, f, timeLevel)
     type(MPAS_pool_type), intent(in) :: pool
     character(len=*), intent(in) :: name
     type(field1DReal), pointer :: f
     integer, intent(in), optional :: timeLevel
-    f => pool % e(find(pool, level_name(name, timeLevel))) % f1
+    type(MPAS_pool_type), pointer :: p
+    integer :: i
+    p => pool_target(pool)
+    i = find(pool, level_name(name, timeLevel))
+    if (.not. associated(p % e(i) % f1) .and. associated(p % e(i) % r1)) then
+      allocate(p % e(i) % f1)
+      p % e(i) % f1 % array => p % e(i) % r1
+      p % e(i) % f1 % dimSizes = shape(p % e(i) % r1)
+    end if
+    f => p % e(i) % f1
   end subroutine get_field_1d
 
   subroutine put_field_1d(pool, name, f)
@@ -541,15 +628,118 @@ contains
     character(len=*), intent(in) :: name
     type(field2DReal), pointer :: f
     integer, intent(in), optional :: timeLevel
-    f => pool % e(find(pool, level_name(name, timeLevel))) % f2
+    type(MPAS_pool_type), pointer :: p
+    integer :: i
+    p => pool_target(pool)
+    i = find(pool, level_name(name, timeLevel))
+    if (.not. associated(p % e(i) % f2) .and. associated(p % e(i) % r2)) then
+      allocate(p % e(i) % f2)
+      p % e(i) % f2 % array => p % e(i) % r2
+      p % e(i) % f2 % dimSizes = shape(p % e(i) % r2)
+    end if
+    f => p % e(i) % f2
   end subroutine get_field_2d
 
-  subroutine get_field_3d(pool, name, f)
+  ! a scratch field, or a field wrapped around an array the stream put
+  ! (MPAS-Seaice's advection reads its tracers as fields)
+  subroutine get_field_3d(pool, name, f, timeLevel)
     type(MPAS_pool_type), intent(in) :: pool
     character(len=*), intent(in) :: name
     type(field3DReal), pointer :: f
-    f => pool % e(find(pool, name)) % f3
+    integer, intent(in), optional :: timeLevel
+    type(MPAS_pool_type), pointer :: p
+    integer :: i
+    p => pool_target(pool)
+    i = find(pool, level_name(name, timeLevel))
+    if (.not. associated(p % e(i) % f3) .and. associated(p % e(i) % r3)) then
+      allocate(p % e(i) % f3)
+      p % e(i) % f3 % array => p % e(i) % r3
+      p % e(i) % f3 % dimSizes = shape(p % e(i) % r3)
+    end if
+    f => p % e(i) % f3
   end subroutine get_field_3d
+
+  subroutine get_field_4d(pool, name, f, timeLevel)
+    type(MPAS_pool_type), intent(in) :: pool
+    character(len=*), intent(in) :: name
+    type(field4DReal), pointer :: f
+    integer, intent(in), optional :: timeLevel
+    type(MPAS_pool_type), pointer :: p
+    integer :: i
+    p => pool_target(pool)
+    i = find(pool, level_name(name, timeLevel))
+    if (.not. associated(p % e(i) % f4)) then
+      allocate(p % e(i) % f4)
+      p % e(i) % f4 % array => p % e(i) % r4
+    end if
+    f => p % e(i) % f4
+  end subroutine get_field_4d
+
+  subroutine get_field_5d(pool, name, f, timeLevel)
+    type(MPAS_pool_type), intent(in) :: pool
+    character(len=*), intent(in) :: name
+    type(field5DReal), pointer :: f
+    integer, intent(in), optional :: timeLevel
+    type(MPAS_pool_type), pointer :: p
+    integer :: i
+    p => pool_target(pool)
+    i = find(pool, level_name(name, timeLevel))
+    if (.not. associated(p % e(i) % f5)) then
+      allocate(p % e(i) % f5)
+      p % e(i) % f5 % array => p % e(i) % r5
+    end if
+    f => p % e(i) % f5
+  end subroutine get_field_5d
+
+  subroutine get_field_2di(pool, name, f, timeLevel)
+    type(MPAS_pool_type), intent(in) :: pool
+    character(len=*), intent(in) :: name
+    type(field2DInteger), pointer :: f
+    integer, intent(in), optional :: timeLevel
+    type(MPAS_pool_type), pointer :: p
+    integer :: i
+    p => pool_target(pool)
+    i = find(pool, level_name(name, timeLevel))
+    if (.not. associated(p % e(i) % fi2)) then
+      allocate(p % e(i) % fi2)
+      p % e(i) % fi2 % array => p % e(i) % i2
+    end if
+    f => p % e(i) % fi2
+  end subroutine get_field_2di
+
+  subroutine get_field_3di(pool, name, f, timeLevel)
+    type(MPAS_pool_type), intent(in) :: pool
+    character(len=*), intent(in) :: name
+    type(field3DInteger), pointer :: f
+    integer, intent(in), optional :: timeLevel
+    type(MPAS_pool_type), pointer :: p
+    integer :: i
+    p => pool_target(pool)
+    i = find(pool, level_name(name, timeLevel))
+    if (.not. associated(p % e(i) % fi3)) then
+      allocate(p % e(i) % fi3)
+      p % e(i) % fi3 % array => p % e(i) % i3
+    end if
+    f => p % e(i) % fi3
+  end subroutine get_field_3di
+
+  ! the dimension count of a field and whether its package is on (MPAS's
+  ! mpas_pool_get_field_info)
+  subroutine mpas_pool_get_field_info(pool, name, info)
+    type(MPAS_pool_type), intent(in) :: pool
+    character(len=*), intent(in) :: name
+    type(mpas_pool_field_info_type), intent(out) :: info
+    integer :: i
+    i = find(pool, name)
+    info % nDims = 0
+    if (associated(pool % e(i) % r1) .or. associated(pool % e(i) % i1)) info % nDims = 1
+    if (associated(pool % e(i) % r2) .or. associated(pool % e(i) % i2)) info % nDims = 2
+    if (associated(pool % e(i) % r3) .or. associated(pool % e(i) % i3)) info % nDims = 3
+    if (associated(pool % e(i) % r4)) info % nDims = 4
+    if (associated(pool % e(i) % r5)) info % nDims = 5
+    info % nTimeLevels = 1
+    info % isActive = .not. pool % e(i) % absent
+  end subroutine mpas_pool_get_field_info
 
   subroutine put_field_2d(pool, name, f)
     type(MPAS_pool_type), intent(inout) :: pool
@@ -637,19 +827,17 @@ module mpas_derived_types
   implicit none
   public
 
-  type mpas_dminfo_type
-    integer :: nprocs = 1, my_proc_id = 0
-  end type mpas_dminfo_type
-
-  ! the equation of state declares a dm_info it never uses
+  ! one rank (the equation of state declares a dm_info it never uses)
   type dm_info
-    integer :: nprocs = 1
+    integer :: nprocs = 1, my_proc_id = 0
   end type dm_info
 
   type block_type
     type(MPAS_pool_type), pointer :: structs => null()
     type(MPAS_pool_type), pointer :: dimensions => null()
     type(MPAS_pool_type), pointer :: configs => null()
+    type(MPAS_pool_type), pointer :: packages => null()
+    integer :: localBlockID = 0
     type(block_type), pointer :: next => null()
   end type block_type
 
@@ -657,7 +845,7 @@ module mpas_derived_types
     type(block_type), pointer :: blocklist => null()
     type(MPAS_pool_type), pointer :: configs => null()
     type(MPAS_Clock_type), pointer :: clock => null()
-    type(mpas_dminfo_type) :: dminfo
+    type(dm_info), pointer :: dminfo => null()
   end type domain_type
 
 end module mpas_derived_types
@@ -667,7 +855,7 @@ module mpas_dmpar
   use mpas_derived_types
   implicit none
   private
-  public :: mpas_dmpar_min_real, mpas_dmpar_exch_group_create, mpas_dmpar_exch_group_add_field, &
+  public :: mpas_dmpar_min_real, mpas_dmpar_sum_real, mpas_dmpar_exch_group_create, mpas_dmpar_exch_group_add_field, &
             mpas_dmpar_exch_group_reuse_halo_exch, mpas_dmpar_exch_group_full_halo_exch, &
             mpas_dmpar_exch_group_destroy, mpas_dmpar_field_halo_exch, mpas_dmpar_exch_halo_field, &
             mpas_dmpar_exch_group_build_reusable_buffers, MPAS_DMPAR_NOERR
@@ -751,12 +939,19 @@ contains
   end subroutine mpas_dmpar_exch_group_destroy
 
   subroutine mpas_dmpar_min_real(dminfo, inValue, outValue)
-    type(mpas_dminfo_type), intent(in) :: dminfo
+    type(dm_info), intent(in) :: dminfo
     real(kind=RKIND), intent(in) :: inValue
     real(kind=RKIND), intent(out) :: outValue
     ! one rank: the reduction is the identity
     outValue = inValue
   end subroutine mpas_dmpar_min_real
+
+  subroutine mpas_dmpar_sum_real(dminfo, inValue, outValue)
+    type(dm_info), intent(in) :: dminfo
+    real(kind=RKIND), intent(in) :: inValue
+    real(kind=RKIND), intent(out) :: outValue
+    outValue = inValue
+  end subroutine mpas_dmpar_sum_real
 
 end module mpas_dmpar
 

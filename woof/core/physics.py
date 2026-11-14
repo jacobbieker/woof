@@ -7372,7 +7372,10 @@ class PhysicsDriver:
             raise ValueError(
                 f"SPP pattern keys must match enabled consumers {sorted(expected)}; "
                 f"got {sorted(patterns)}")
-        device = self.state.u.device.id
+        # A column caller's state (woof.core.mpas_column_suite) has no
+        # C-grid winds; its theta carrier is on the same device.
+        anchor = getattr(self.state, "u", None)
+        device = (self.state.thp if anchor is None else anchor).device.id
         for key, value in patterns.items():
             if (not isinstance(value, cp.ndarray)
                     or value.dtype != np.dtype("float32")

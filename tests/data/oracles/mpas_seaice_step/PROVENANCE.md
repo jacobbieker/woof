@@ -52,3 +52,8 @@ cells.
 `woof.hex.mpas_seaice.timestep_v842` (`initialize`, `advance`), and every word
 must be bit-identical. The restart test runs one step, writes a restart, reads
 it into fresh pools and runs the rest.
+
+2026-11-14: the cases now set `config_advection_type = 'incremental_remap'`
+(MPAS's default), which `seaice_init_advection` reads. The time-step oracle
+now compiles `mpas_seaice_advection.F` and the incremental remap verbatim.
+`inputs.sha256` was regenerated; every output word is unchanged.

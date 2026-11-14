@@ -2486,6 +2486,14 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "f9a279f12923394dbf2e4bfa2b7e01e3550c4f235c7eee98674c13b1abaa4356",
+    "constructor": "compile_using_nvrtc",
+    "factory": "_module_on",
+    "factory_sha256": "9d91a6f3a1e42d7ca4c48bb6116f47f9aa7a284d64aed27a42582b0174e9e938",
+    "file": "woof/hex/mpas_seaice/remap_v842.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "fa6980af6a960b307f2be4dc558f9a3f29c438bbc05282527e5d0507b82faba5",
     "constructor": "ElementwiseKernel",
     "factory": "__init__",
@@ -4768,6 +4776,10 @@
     "sha256": "b3ffc29511a4ce23af9cb393af822bba947e3d9a1ee3e152a9935d5069f451e7"
    },
    {
+    "file": "woof/hex/mpas_seaice/remap_v842.cu",
+    "sha256": "7f077271121d940fa6e233b2aca04438e5b4864a75b147c9787bb970859556bd"
+   },
+   {
     "file": "woof/hex/mpas_seaice/velocity_v842.cu",
     "sha256": "130e5723a8a2c34a45bac6bb2ad39ccb47ca9439dcff7d017341099fb77df03d"
    },
@@ -5151,7 +5163,7 @@
    },
    {
     "file": "woof/core/physics.py",
-    "sha256": "8e369dc3fc6ec64ee864f2927f6cd743ce0e169f1b1d11e374e267f24b0e6602"
+    "sha256": "ed7d4a1ce348ff0b06816f8055b5dd611f93c5e1e4772aaf895192ae6ea71675"
    },
    {
     "file": "woof/core/preflight.py",
@@ -5720,6 +5732,10 @@
    {
     "file": "woof/hex/mpas_seaice/presubcycle_v842.py",
     "sha256": "2541ba6d5771b575c31863132bead18b0b635219ca193ece3825b7acf20c9642"
+   },
+   {
+    "file": "woof/hex/mpas_seaice/remap_v842.py",
+    "sha256": "a9bf01a274398929755f8b922769fdd21a44ae40a777461cb88e2ba2471f8673"
    },
    {
     "file": "woof/hex/mpas_seaice/velocity_v842.py",

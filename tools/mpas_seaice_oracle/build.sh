@@ -88,6 +88,11 @@ for precision in r4 r8; do
     # (tools/mpas_ocean_oracle/stubs.F90: pools with time levels, the time
     # manager, the self-describing stream), in a directory of its own
     mkdir -p step
+    # the host libm shim's objects (non-glibc hosts) sit one directory up
+    step_libm=()
+    for object in ${libm_objects[@]+"${libm_objects[@]}"}; do
+        [[ ${object} == /* ]] && step_libm+=("${object}") || step_libm+=("../${object}")
+    done
     ( cd step
       cut() {  # cut FILE ROUTINE...: the routines, verbatim
           local file=$1; shift
@@ -111,6 +116,14 @@ for precision in r4 r8; do
         echo "end module seaice_diagnostics"; } > seaice_diagnostics_cut.F
       "${fc[@]}" "${flags[@]}" seaice_diagnostics_cut.F
       "${fc[@]}" "${flags[@]}" "${seaice}/shared/mpas_seaice_velocity_solver.F"
+      # incremental remap, verbatim (the remap module with -Dprivate=public, a
+      # visibility change only, so run_incremental_remap can call its stages);
+      # remap_standins.F90: the RBF setup (the coefficients are the input's),
+      # seaice_error's codes and abort write, and upwind, which cannot run in v8.4.2
+      "${fc[@]}" "${flags[@]}" "${script_dir}/remap_standins.F90"
+      "${fc[@]}" "${flags[@]}" "${seaice}/shared/mpas_seaice_advection_incremental_remap_tracers.F"
+      "${fc[@]}" "${flags[@]}" -Dprivate=public "${seaice}/shared/mpas_seaice_advection_incremental_remap.F"
+      "${fc[@]}" "${flags[@]}" "${seaice}/shared/mpas_seaice_advection.F"
       { cat "${script_dir}/column_cut_head.F90"
         cut "${seaice}/shared/mpas_seaice_column.F" seaice_column_predynamics_time_integration \
             seaice_column_dynamics_time_integration seaice_column_postdynamics_time_integration \
@@ -125,6 +138,7 @@ for precision in r4 r8; do
         echo "end module seaice_time_integration"; } > seaice_time_integration_cut.F
       "${fc[@]}" "${flags[@]}" seaice_time_integration_cut.F
       "${fc[@]}" "${flags[@]}" "${script_dir}/run_seaice_step.F90"
+      "${fc[@]}" "${flags[@]}" "${script_dir}/run_incremental_remap.F90"
       if command -v objdump >/dev/null; then
           if objdump -d mpas_seaice_*.o seaice_*.o | grep -Eq '\bv?fn?m(add|sub)([0-9]|[[:space:]]|$)'; then
               echo "a time-step oracle object contains an FMA instruction; refusing" >&2
@@ -133,10 +147,15 @@ for precision in r4 r8; do
       fi
       "${fc[@]}" -o "${build_dir}/run_seaice_step_${precision}" run_seaice_step.o seaice_time_integration_cut.o \
           seaice_column_cut.o mpas_seaice_velocity_solver.o seaice_diagnostics_cut.o \
+          mpas_seaice_advection.o mpas_seaice_advection_incremental_remap.o \
+          mpas_seaice_advection_incremental_remap_tracers.o remap_standins.o \
           mpas_seaice_velocity_solver_variational.o mpas_seaice_velocity_solver_constitutive_relation.o \
           step_standins.o mpas_seaice_constants.o ice_constants_colpkg.o ice_kinds_mod.o \
           seaice_mesh_interpolation.o oracle_stream.o stubs.o mpas_kind_types.o \
-          ${libm_objects[@]+"${libm_objects[@]}"} )
+          ${step_libm[@]+"${step_libm[@]}"}
+      "${fc[@]}" -o "${build_dir}/run_incremental_remap_${precision}" run_incremental_remap.o \
+          mpas_seaice_advection_incremental_remap.o mpas_seaice_advection_incremental_remap_tracers.o \
+          remap_standins.o seaice_diagnostics_cut.o oracle_stream.o stubs.o mpas_kind_types.o )
 done
 {
     echo "gfortran: $("${fc[@]}" --version | head -1)"
@@ -146,4 +165,5 @@ done
     echo "expf/exp: $(sed 's/^libm: //' "${build_dir}/r8/libm.txt")"
     echo "fma: $(grep -m1 -ow fma /proc/cpuinfo 2>/dev/null || echo absent)"
 } > "${build_dir}/TOOLCHAIN.txt"
-echo "built ${build_dir}/run_oracle_r{4,8} ${build_dir}/run_subcycle_r{4,8} ${build_dir}/run_presubcycle_r{4,8} ${build_dir}/run_seaice_step_r{4,8}"
+echo "built ${build_dir}/run_oracle_r{4,8} ${build_dir}/run_subcycle_r{4,8} ${build_dir}/run_presubcycle_r{4,8}" \
+     "${build_dir}/run_seaice_step_r{4,8} ${build_dir}/run_incremental_remap_r{4,8}"

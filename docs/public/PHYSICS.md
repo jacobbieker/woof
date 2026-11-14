@@ -3770,6 +3770,12 @@ for Thompson, Thompson aerosol-aware and WSM6. With a carrier, hail and tornado
 read MPAS's per-step 2–5 km updraft helicity (the value whose interval maximum
 is `updraft_helicity_max`) in place of WRF's finite-difference `cal_helicity`,
 and the tornado duration spreads over `cellsOnCell` instead of WRF's 3×3 box.
+`config_afwa_severe_ignore_qng_gate = .true.` (off by default) departs from WRF:
+it drops the `QNG` term of the guard, so hail, tornado, the w maxima, column ice
+and graupel flux also run for `mp_wsm6`, `mp_thompson` and
+`mp_thompson_aerosols`. The routine never reads `QNG`, so the fields are those
+WRF writes for a scheme that carries it; WRF itself leaves them at zero for
+these schemes.
 Icing is refused by name. WRF computes it only for WDM6 and Morrison with
 aerosols, the named schemes that carry `QNC`, and has no path that derives
 `QNC`. Radar, VIL and visibility run with `mp_wsm6`, `mp_thompson` and
