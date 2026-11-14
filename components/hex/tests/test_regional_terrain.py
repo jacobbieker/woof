@@ -418,3 +418,42 @@ def test_a_replacement_killed_while_writing_a_record_is_retried(tmp_path, monkey
     assert names["static"].read_bytes() == b"hr static"
     assert json.loads(generated.read_text())["terrain"]["requested"] == "glo30"
     assert not list(mesh.glob("*.partial")) and generated_before != generated.read_bytes()
+
+
+def test_a_rollback_killed_while_restoring_the_receipt_is_retried(tmp_path, monkeypatch):
+    """THE BREAKAGE: the rollback unlinked the point-generate receipt before moving its backup back; a process
+    killed between the two left no receipt, so the next mesh stage skipped recovery and refused the grid."""
+    import shutil
+    from woof.hex import static_highres
+
+    mesh, names, rows, generated = _mesh(tmp_path)
+    _fake_doors(monkeypatch)
+
+    def refuse(*a, **k):
+        raise static_highres.StaticHighresRefusal("source acquisition failed")
+
+    def dies_on_receipt(real):
+        def wrapped(src, dst, *a, **k):
+            if Path(dst).name == generated.name and "orig30s" in str(src):
+                raise KeyboardInterrupt
+            return real(src, dst, *a, **k)
+        return wrapped
+
+    monkeypatch.setattr(static_highres, "run_static_highres", refuse)
+    monkeypatch.setattr(rt.os, "replace", dies_on_receipt(rt.os.replace))
+    monkeypatch.setattr(rt.shutil, "move", dies_on_receipt(shutil.move))
+    request = {"source": "glo30", "max_spacing_km": 1.0, "cache_root": None}
+    with pytest.raises(KeyboardInterrupt):
+        rt.apply_terrain(mesh_dir=mesh, vertical_spec="spec.json", note=lambda t: None, request=request)
+    assert generated.is_file()
+    monkeypatch.undo()
+    _fake_doors(monkeypatch)
+    monkeypatch.setattr(door, "_start_source_prefetch", lambda *a: None)
+
+    class Status:
+        def note(self, text):
+            pass
+
+    value = {"paths": {"mesh": str(mesh), "work": str(tmp_path), "vertical_spec": "spec.json"}, "terrain": request}
+    result = door._stage_mesh(parse(tmp_path), value, Status())
+    assert result["terrain"]["requested"] == "glo30" and not rt.pending(mesh)

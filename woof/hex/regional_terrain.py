@@ -141,8 +141,7 @@ def _roll_back(mesh_dir: Path) -> None:
     for backup, target in marker.get("restore", ()):
         backup, target = Path(backup), Path(target)
         if backup.is_file():
-            target.unlink(missing_ok=True)
-            shutil.move(str(backup), target)
+            os.replace(backup, target)      # one rename: no moment without the target or its backup
         target.with_name(target.name + ".partial").unlink(missing_ok=True)
     for name in (RECEIPT_NAME, RECEIPT_NAME + ".partial", PENDING_NAME + ".partial"):
         (mesh_dir / name).unlink(missing_ok=True)
