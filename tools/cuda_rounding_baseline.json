@@ -2641,7 +2641,7 @@
    },
    {
     "file": "woof/core/kernels/chem_activation.cu",
-    "sha256": "7966dadbc38a8ff265b7dcac9dfa60a9a312b41c4c4c2e1f4ef35c8253f7f548"
+    "sha256": "bbccda68823fcae78ba55cf36cf4ee649f5d298044bc7eaa78339818ba03ccc5"
    },
    {
     "file": "woof/core/kernels/chem_ageing.cu",
