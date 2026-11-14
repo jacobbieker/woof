@@ -4,6 +4,11 @@
 // f34984b2c89353cf31c235b08d3b4acd96b37bb3), transcribed from
 //   src/core_seaice/shared/mpas_seaice_advection_incremental_remap.F:
 //     66-77     module parameters (eps11, the triangle quadrature)
+//     3418-3579 make_masks
+//     3594-4203 construct_linear_tracer_fields (planar), with
+//     4218-4435 compute_gradient_2d, 4450-4672 compute_gradient_3d (planar),
+//     4687-4816 compute_barycenter_coordinates,
+//     4831-5011 limit_tracer_gradient_2d, 5026-5265 limit_tracer_gradient_3d
 //     5280-5375 find_departure_points
 //     5390-6280 find_departure_triangles (the planar branches)
 //     6295-6522 shift_vertices_of_departure_triangle (the planar branch)
@@ -350,4 +355,186 @@ extern "C" __global__ void seaice_ir_quadrature_points_v842(
     y[4] = A(A(M(IR_Q4, y1), M(IR_Q3, y2)), M(IR_Q4, y3));
     x[5] = A(A(M(IR_Q4, x1), M(IR_Q4, x2)), M(IR_Q3, x3));
     y[5] = A(A(M(IR_Q4, y1), M(IR_Q4, y2)), M(IR_Q3, y3));
+}
+
+// ---------------------------------------------------------------------------
+// make_masks (3418-3579), one tracer. The caller zeroes the tracer's mask (the
+// whole array). The mass-like field: every value of cells 1..nCells
+// meaningful, and maskCell where its sum over the cell is positive (gfortran's
+// SUM: from zero, in array order). A child: meaningful where its parent's
+// value exceeds the threshold (the parent's category for a 2-D parent).
+extern "C" __global__ void seaice_ir_mask_mass_v842(
+    int *mask, int *maskCell, const rk *field, int nCells, int nValues)
+{
+    const int c = ir_thread();
+    if (c >= nCells) return;
+    rk massSumCell = C(0.0);
+    for (int i = 0; i < nValues; ++i) {
+        mask[c * nValues + i] = 1;
+        massSumCell = A(massSumCell, field[c * nValues + i]);
+    }
+    maskCell[c] = massSumCell > C(0.0) ? 1 : 0;
+}
+
+extern "C" __global__ void seaice_ir_mask_child_v842(
+    int *mask, const rk *parent, rk threshold, int nCells, int nCategories, int nLayers, int parentLayers)
+{
+    const int i = ir_thread();
+    if (i >= nCells * nCategories * nLayers) return;
+    const int layer = i % nLayers, cc = i / nLayers;
+    const rk p = parent[cc * parentLayers + (parentLayers == 1 ? 0 : layer)];
+    if (p > threshold) mask[i] = 1;
+}
+
+// SSE maxss/minss with the destination first, as the limiter's MAX/MIN are
+// compiled: the ties they can meet (+0 against -0) leave the limited gradient
+// the same either way (the factor is max(0, factor - eps11), never a zero
+// that a sign could reach)
+__device__ __forceinline__ rk ir_max(rk a, rk b) { return a > b ? a : b; }
+__device__ __forceinline__ rk ir_min(rk a, rk b) { return a < b ? a : b; }
+
+// compute_barycenter_coordinates (4687-4816): one, two or three fields
+// (mass-like, tracer 1, tracer 2); g: the cell's moments x, y, xx, xy, yy,
+// xxx, xxy, xyy, yyy, xxxx, xxxy, xxyy, xyyy, yyyy
+__device__ void ir_barycenter(int n, const rk *mean, const rk *center, const rk *xg, const rk *yg, const rk *g,
+                              rk *xb, rk *yb)
+{
+    rk reciprocal, prod;
+    if (n == 1) {
+        const rk c0 = center[0], cx = xg[0], cy = yg[0];
+        reciprocal = ABS(mean[0]) > C(0.0) ? D(C(1.0), mean[0]) : C(0.0);
+        *xb = M(A(A(M(c0, g[0]), M(cx, g[2])), M(cy, g[3])), reciprocal);
+        *yb = M(A(A(M(c0, g[1]), M(cx, g[3])), M(cy, g[4])), reciprocal);
+    } else if (n == 2) {
+        const rk c0 = M(center[0], center[1]);
+        const rk cx = A(M(center[0], xg[1]), M(xg[0], center[1]));
+        const rk cy = A(M(center[0], yg[1]), M(yg[0], center[1]));
+        const rk cxx = M(xg[0], xg[1]);
+        const rk cxy = A(M(xg[0], yg[1]), M(yg[0], xg[1]));
+        const rk cyy = M(yg[0], yg[1]);
+        prod = M(mean[0], mean[1]);
+        reciprocal = ABS(prod) > C(0.0) ? D(C(1.0), prod) : C(0.0);
+        *xb = M(A(A(A(A(A(M(c0, g[0]), M(cx, g[2])), M(cy, g[3])), M(cxx, g[5])), M(cxy, g[6])), M(cyy, g[7])),
+                reciprocal);
+        *yb = M(A(A(A(A(A(M(c0, g[1]), M(cx, g[3])), M(cy, g[4])), M(cxx, g[6])), M(cxy, g[7])), M(cyy, g[8])),
+                reciprocal);
+    } else {
+        const rk c0 = center[0], c1 = center[1], c2 = center[2];
+        const rk x0 = xg[0], x1 = xg[1], x2 = xg[2], y0 = yg[0], y1 = yg[1], y2 = yg[2];
+        const rk k0 = M(M(c0, c1), c2);
+        const rk kx = A(A(M(M(c0, c1), x2), M(M(c0, x1), c2)), M(M(x0, c1), c2));
+        const rk ky = A(A(M(M(c0, c1), y2), M(M(c0, y1), c2)), M(M(y0, c1), c2));
+        const rk kxx = A(A(M(M(c0, x1), x2), M(M(x0, c1), x2)), M(M(x0, x1), c2));
+        const rk kxy = A(A(A(A(A(M(M(c0, x1), y2), M(M(x0, y1), c2)), M(M(y0, c1), x2)), M(M(c0, y1), x2)),
+                           M(M(x0, c1), y2)), M(M(y0, x1), c2));
+        const rk kyy = A(A(M(M(c0, y1), y2), M(M(y0, c1), y2)), M(M(y0, y1), c2));
+        const rk kxxx = M(M(x0, x1), x2);
+        const rk kxxy = A(A(M(M(x0, x1), y2), M(M(x0, y1), x2)), M(M(y0, x1), x2));
+        const rk kxyy = A(A(M(M(y0, y1), x2), M(M(y0, x1), y2)), M(M(x0, y1), y2));
+        const rk kyyy = M(M(y0, y1), y2);
+        prod = M(M(mean[0], mean[1]), mean[2]);
+        reciprocal = ABS(prod) > C(0.0) ? D(C(1.0), prod) : C(0.0);
+        *xb = M(A(A(A(A(A(A(A(A(A(M(k0, g[0]), M(kx, g[2])), M(ky, g[3])), M(kxx, g[5])), M(kxy, g[6])),
+                           M(kyy, g[7])), M(kxxx, g[9])), M(kxxy, g[10])), M(kxyy, g[11])), M(kyyy, g[12])),
+                reciprocal);
+        *yb = M(A(A(A(A(A(A(A(A(A(M(k0, g[1]), M(kx, g[3])), M(ky, g[4])), M(kxx, g[6])), M(kxy, g[7])),
+                           M(kyy, g[8])), M(kxxx, g[10])), M(kxxy, g[11])), M(kxyy, g[12])), M(kyyy, g[13])),
+                reciprocal);
+    }
+}
+
+// construct_linear_tracer_fields (3594-4203) for one tracer, one value
+// (layer, category) of cells 1..nCells: compute_gradient (planar), the
+// limiter against the parent's barycenter (the cell's geometric centre for
+// the mass-like field), the centre value, and, for a tracer with children, its
+// barycenter (compute_barycenter_coordinates with its ancestors). The caller
+// zeroes centre, gradients and barycenters (whole arrays).
+//   anc: the parent's and the grandparent's (array, centre, x/y gradient)
+//   fields (null when absent); ancLayers their first extents.
+extern "C" __global__ void seaice_ir_construct_v842(
+    rk *center, rk *xGrad, rk *yGrad, rk *xBarycenter, rk *yBarycenter,
+    const rk *field, const int *mask, const int *maskCell,
+    const int *nEdgesOnCell, const int *cellsOnCell, const int *edgesOnCell, const int *cellsOnEdge,
+    const rk *dcEdge, const rk *coeffsReconstruct, const rk *xVertexOnCell, const rk *yVertexOnCell,
+    const rk *g0, const rk *g1, const rk *g2, const rk *g3, const rk *g4, const rk *g5, const rk *g6,
+    const rk *g7, const rk *g8, const rk *g9, const rk *g10, const rk *g11, const rk *g12, const rk *g13,
+    const rk *parentXBarycenter, const rk *parentYBarycenter,
+    const rk *parentField, const rk *parentCenter, const rk *parentXGrad, const rk *parentYGrad,
+    const rk *grandField, const rk *grandCenter, const rk *grandXGrad, const rk *grandYGrad,
+    int parentLayers, int grandLayers, int nParents, int hasChild,
+    int nCells, int nCategories, int nLayers, int maxEdges)
+{
+    const int i = ir_thread();
+    if (i >= nCells * nCategories * nLayers) return;
+    const int layer = i % nLayers, cc = i / nLayers, c = cc / nCategories;
+    const int stride = nCategories * nLayers;
+    const int pi = cc * parentLayers + (parentLayers == 1 ? 0 : layer);
+    const rk fc = field[i];
+    // the parent's barycenter: the dummy tracer's geometric centre for the mass-like field
+    const rk bx = nParents == 0 ? g0[c] : parentXBarycenter[pi];
+    const rk by = nParents == 0 ? g1[c] : parentYBarycenter[pi];
+    rk xg = C(0.0), yg = C(0.0);
+    const int nEdges = nEdgesOnCell[c];
+    if (maskCell[c] == 1) {
+        // compute_gradient_2d/3d (4315-4405 / 4548-4642), planar
+        for (int k = 0; k < nEdges; ++k) {
+            const int n = cellsOnCell[c * maxEdges + k];
+            rk normalGrad = C(0.0);
+            if (n >= 1 && n <= nCells) {
+                const int e = edgesOnCell[c * maxEdges + k] - 1;
+                const int ni = (n - 1) * stride + (i - c * stride);
+                if (mask[i] == 1 && mask[ni] == 1) {
+                    const rk signGradient = (c + 1 == cellsOnEdge[2 * e]) ? C(1.0) : C(-1.0);
+                    normalGrad = D(M(signGradient, S(field[ni], fc)), dcEdge[e]);
+                }
+            }
+            xg = A(xg, M(coeffsReconstruct[(c * maxEdges + k) * 3], normalGrad));
+            yg = A(yg, M(coeffsReconstruct[(c * maxEdges + k) * 3 + 1], normalGrad));
+        }
+        // limit_tracer_gradient_2d/3d (4905-5003 / 5117-5257)
+        rk maxNeighbor = fc, minNeighbor = fc;
+        for (int k = 0; k < nEdges; ++k) {
+            const int n = cellsOnCell[c * maxEdges + k];
+            const int ni = (n - 1) * stride + (i - c * stride);
+            if (mask[ni] == 1) {
+                maxNeighbor = ir_max(maxNeighbor, field[ni]);
+                minNeighbor = ir_min(minNeighbor, field[ni]);
+            }
+        }
+        maxNeighbor = S(maxNeighbor, fc);
+        minNeighbor = S(minNeighbor, fc);
+        rk maxLocal = C(0.0), minLocal = C(0.0);
+        for (int k = 0; k < nEdges; ++k) {
+            const rk deviationAtVertex = A(M(xg, S(xVertexOnCell[c * maxEdges + k], bx)),
+                                           M(yg, S(yVertexOnCell[c * maxEdges + k], by)));
+            maxLocal = ir_max(maxLocal, deviationAtVertex);
+            minLocal = ir_min(minLocal, deviationAtVertex);
+        }
+        const rk gradFactor1 = ABS(maxLocal) > ABS(maxNeighbor) ? ir_max(C(0.0), D(maxNeighbor, maxLocal)) : C(1.0);
+        const rk gradFactor2 = ABS(minLocal) > ABS(minNeighbor) ? ir_max(C(0.0), D(minNeighbor, minLocal)) : C(1.0);
+        rk gradFactor = ir_min(gradFactor1, gradFactor2);
+        gradFactor = ir_max(C(0.0), S(gradFactor, IR_EPS11));
+        xg = M(xg, gradFactor);
+        yg = M(yg, gradFactor);
+    }
+    xGrad[i] = xg;
+    yGrad[i] = yg;
+    // the value at the cell centre (3799-3805 / 3944-3983)
+    const rk ce = S(S(fc, M(xg, bx)), M(yg, by));
+    center[i] = ce;
+    if (!hasChild || maskCell[c] != 1) return;
+    const rk g[14] = {g0[c], g1[c], g2[c], g3[c], g4[c], g5[c], g6[c], g7[c], g8[c], g9[c], g10[c], g11[c],
+                      g12[c], g13[c]};
+    rk mean[3], cent[3], xs[3], ys[3];
+    int n = 0;
+    if (nParents == 2) {
+        const int gi = cc * grandLayers + (grandLayers == 1 ? 0 : layer);
+        mean[n] = grandField[gi]; cent[n] = grandCenter[gi]; xs[n] = grandXGrad[gi]; ys[n] = grandYGrad[gi]; ++n;
+    }
+    if (nParents >= 1) {
+        mean[n] = parentField[pi]; cent[n] = parentCenter[pi]; xs[n] = parentXGrad[pi]; ys[n] = parentYGrad[pi];
+        ++n;
+    }
+    mean[n] = fc; cent[n] = ce; xs[n] = xg; ys[n] = yg; ++n;
+    ir_barycenter(n, mean, cent, xs, ys, g, &xBarycenter[i], &yBarycenter[i]);
 }

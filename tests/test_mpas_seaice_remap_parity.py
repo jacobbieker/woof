@@ -20,8 +20,10 @@ THE BREAKAGES THESE PREVENT
    ice-free category as anything but zero thickness.
 3. Departure triangles in the wrong cell, with the wrong sign, or with
    quadrature points summed in another order.
-4. A gate that cannot fail: each of the above, mutated, must be caught.
-5. Upwind advection run silently: v8.4.2 cannot run it (refused by name).
+4. A reconstruction without the limiter, or a barycenter whose terms are
+   summed in another order.
+5. A gate that cannot fail: each of the above, mutated, must be caught.
+6. Upwind advection run silently: v8.4.2 cannot run it (refused by name).
 """
 from __future__ import annotations
 
@@ -241,3 +243,16 @@ def test_a_mutated_departure_geometry_is_caught(monkeypatch, mutation):
                         "x[0] = A(M(IR_Q1, x1), A(M(IR_Q1, x2), M(IR_Q2, x3)));")
         field = "incremental_remap/xTriangle"
     assert _mismatches_after("departure_quad_fast", field) > 0
+
+
+@requires_gpu
+@pytest.mark.parametrize("mutation", ["no_limiter", "barycenter_order"])
+def test_a_mutated_reconstruction_is_caught(monkeypatch, mutation):
+    if mutation == "no_limiter":
+        _mutated_source(monkeypatch, "gradFactor = ir_max(C(0.0), S(gradFactor, IR_EPS11));", "gradFactor = C(1.0);")
+        field = "tracer_reconstruction/iceVolumeCategoryGradx"
+    else:
+        _mutated_source(monkeypatch, "*xb = M(A(A(M(c0, g[0]), M(cx, g[2])), M(cy, g[3])), reciprocal);",
+                        "*xb = M(A(M(c0, g[0]), A(M(cx, g[2]), M(cy, g[3]))), reciprocal);")
+        field = "tracer_barycenter/iceAreaCategoryBarycenterx"
+    assert _mismatches_after("reconstruct_quad_ponds", field) > 0
