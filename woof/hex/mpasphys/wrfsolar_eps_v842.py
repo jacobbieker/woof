@@ -39,8 +39,10 @@ vertical structure is a property of WRF's FFT and is not reproduced), and
 correlation lengths below the truncation's resolution (about 2*pi*R/degree)
 are smoothed to it.  Updates follow WRF's cadence: the first step and every
 ``max(nint(spdt*60/dt), 1)`` steps, after the physics that precede the
-dynamics.  Global meshes only (the harmonic basis refuses a regional
-mesh's missing neighbours).
+dynamics.  A regional mesh draws the same law at its own cells (the
+harmonics need no neighbours) and is handled as hex's SPPT and SKEB handle
+it (``MeshHarmonics.cell_mask``): the lateral-boundary zone (``bdyMaskCell``
+> 0), which the boundary series drives, carries zero perturbation.
 
 MAD-WRF (madwrf_opt, mp_physics = 96, madwrf_cldinit) is refused by name on
 this route: woof's MPAS initialization (the Rust init engine) writes no qc,
@@ -212,6 +214,11 @@ class MpasMultiPerturb:
         if resource is None:
             resource = MeshHarmonics.cached(mesh, options.degree)
         self.resource = resource
+        # A limited-area mesh's boundary zone (stochastic.MeshHarmonics.
+        # cell_mask, as SPPT and SKEB): None on a global mesh.
+        mask = getattr(resource, "cell_mask", None)
+        self.active = (None if mask is None else
+                       cp.ascontiguousarray(mask[:self.n_solve] > 0))
         self.rows, self.patterns, self.values = {}, {}, {}
         for name in self.names:
             row = table.get(name)
@@ -240,7 +247,10 @@ class MpasMultiPerturb:
             unit = cp.matmul(self.resource.basis[:self.n_solve],
                              pattern.coefficients[:, :1]).reshape(-1)
             std, limit = F(row.std), F(F(row.cutoff) * F(row.std))
-            self.values[name][...] = cp.clip(unit.astype(cp.float32) * std, -limit, limit)
+            value = cp.clip(unit.astype(cp.float32) * std, -limit, limit)
+            if self.active is not None:
+                value = cp.where(self.active, value, F(0))
+            self.values[name][...] = value
         return True
 
     def level_patterns(self, columns: int | None = None) -> dict:
