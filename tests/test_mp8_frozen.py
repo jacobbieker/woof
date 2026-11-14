@@ -611,8 +611,11 @@ FROZEN_MODULE_DIGESTS = {
         # keeps WRF's REAL staging in the main and seam kernels.  Reading: zero
         # differing words over 376,160 against compiled WRF on the 4090 and 5090
         # (tests/test_diff6_wrf471_parity.py).  Previously 7dbcfb2d/563febbc.
-        '0e0de46ac99d264eef27a50ac74e6e92fd68374ebd42698aceb4e1a4808a7467',
-        'be41f8092a63933c6165f67e59f03afaa89bacbd6ffbf1a5ddcef367f38e4bcc'),
+        # Re-pinned for diff6_multi: the step's mass-point rows in one launch,
+        # each row the main kernel's variant-0 statements word for word
+        # (tests/test_diff6_multi.py).  Previously 0e0de46a/be41f809.
+        '6b492e028c359955c4c3b61d201a7bbe6322fe3eccc0b80794b0e79e1786e328',
+        '3dc6ee681775a4626adce4a1a837eccf6123884bb8ec8e2184159a35dd51edb1'),
     'diff6_seam': (
         # Re-pinned for the compiled WRF v4.7.1 diffusion oracle (83fde6032,
         # merged dd4908a0f): sixth-order filtering supplies each field's
