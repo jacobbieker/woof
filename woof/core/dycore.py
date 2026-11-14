@@ -2705,11 +2705,19 @@ def prepare_fixed_tendencies(state: DomainState, cfg: RunConfig,
                                state.c2h, "smag_rtke", ""))
         edge = ({"work": _diff6_edge_work(state, cfg)} if to_edge
                 else None)
+        multi = []
         for f0, _tend, _xk, c1, c2, slot, stag in diff6_rows:
             if _tend is None and _strict_defers_scalar_diff6(cfg):
                 continue
             maps = dict(phb=state.phb, msfu=state.msfu, msfv=state.msfv,
                         msft=state.msft)
+            if (edge is None and stag == "" and c1 is state.c1h
+                    and c2 is state.c2h and slot != "smag_rtke"):
+                # Mass-point rows share one launch below (diff6_multi):
+                # the same words per row, order-independent targets.
+                multi.append((f0, state.scratch(f0.shape, slot),
+                              _diff6_factor(cfg, slot), _diff6_dt(cfg, slot)))
+                continue
             if slot == "smag_rtke":
                 budget_6 = tke_budget.term(state, cfg, "diffusion_6th")
                 if budget_6 is not None:
@@ -2722,6 +2730,7 @@ def prepare_fixed_tendencies(state: DomainState, cfg: RunConfig,
                     budget_6[...] = tmp
             add_diff6_row(cfg, slot, f0, state.scratch(f0.shape, slot),
                           mu_t, c1, c2, stag, edge=edge, **maps)
+        _add_diff6_mass_rows(state, cfg, multi, mu_t)
 
     # rk_addtend_dry's 1/msf, taken once over the sum both packages left in
     # the dry slots, after diff6 has accumulated (WRF divides ru_tendf etc.
@@ -2865,10 +2874,20 @@ def add_scalar_diff6_wrf(state: DomainState, cfg: RunConfig) -> None:
     if cfg.km_opt in (2, 5) and not cfg.tke_mix6_off:
         rows.append((state.tke0, None, None, state.c1h, state.c2h,
                      "smag_rtke", ""))
+    multi = []
     for f0, _tend, _xk, c1, c2, slot, stag in rows:
+        if (stag == "" and c1 is state.c1h and c2 is state.c2h
+                and slot != "smag_rtke" and not diff6_to_edge(cfg)):
+            # In place in one launch: WRF's loop bounds never write the
+            # strip _accumulate_diff6_wrf_order restores, so the held
+            # words there and the computed words inside are the same.
+            multi.append((f0, state.scratch(f0.shape, slot),
+                          _diff6_factor(cfg, slot), _diff6_dt(cfg, slot)))
+            continue
         tmp = state.scratch(f0.shape, "diff6_m")
         _accumulate_diff6_wrf_order(state, cfg, f0, tmp, muts, c1, c2, slot,
                                     stag)
+    _add_diff6_mass_rows(state, cfg, multi, muts)
 
 
 def _diff6_launch_kwargs(state: DomainState, cfg: RunConfig, slot: str,
@@ -3185,6 +3204,29 @@ def _advance_stage(state: DomainState, dt_eff: float) -> None:
                      + dt_eff * rwt) / (c1f * mu[None] + c2f))
 
 
+def _add_diff6_mass_rows(state: DomainState, cfg: RunConfig, rows, mut) -> None:
+    """Add the sixth-order filter of the collected mass-point rows in place:
+    one diff6_multi launch when the rows qualify, else :func:`add_diff6_row`
+    per row (the same words either way)."""
+    if not rows:
+        return
+    planes = (state.phb, state.msfu, state.msfv, state.msft)
+    if _diff6_multi_rows(rows, state.c1h, state.c2h, mut, planes):
+        launch_diff6_multi(rows, mut, state.c1h, state.c2h, cfg.diff_6th_opt,
+                           phb=state.phb, msfu=state.msfu, msfv=state.msfv,
+                           msft=state.msft, slopeopt=cfg.diff_6th_slopeopt,
+                           thresh=cfg.diff_6th_thresh, dx=cfg.dx, dy=cfg.dy,
+                           bnd_x=_boundary_x(cfg), bnd_y=_boundary_y(cfg))
+        return
+    for f0, target, factor, dt in rows:
+        launch_diff6(f0, target, mut, state.c1h, state.c2h, factor, dt,
+                     cfg.diff_6th_opt, stagger="", phb=state.phb,
+                     msfu=state.msfu, msfv=state.msfv, msft=state.msft,
+                     slopeopt=cfg.diff_6th_slopeopt, thresh=cfg.diff_6th_thresh,
+                     dx=cfg.dx, dy=cfg.dy, bnd_x=_boundary_x(cfg),
+                     bnd_y=_boundary_y(cfg))
+
+
 def add_diff6_row(cfg: RunConfig, slot: str, f0, target, mut, c1, c2,
                   stagger: str, *, phb, msfu, msfv, msft,
                   edge: dict | None = None) -> None:
@@ -3294,7 +3336,7 @@ def launch_diff6(f, tend, mut, c1, c2, factor: float, dt: float, opt: int,
     ny = nys - 1 if stagger == "y" else nys
     variant = 1 if stagger == "x" else (2 if stagger == "y" else 0)
     bounds = diff6_loop_bounds(nx, ny, nxs, nys, bnd_x, bnd_y)
-    coef = DTYPE(factor) * DTYPE(0.015625) / (DTYPE(2.0) * DTYPE(dt))
+    coef = _diff6_coef(factor, dt)
     slope = int(slopeopt) >= 1 and phb is not None and phb.ndim == 3
     if slope and (dx <= 0.0 or dy <= 0.0):
         raise ValueError("diff_6th_slopeopt >= 1 needs positive dx/dy")
@@ -3331,6 +3373,92 @@ def launch_diff6(f, tend, mut, c1, c2, factor: float, dt: float, opt: int,
                            msfu_arg, msfv_arg, msft_arg, coef, opt, slope,
                            dzthr_x, dzthr_y, nlev, ny, nx, bnd_x,
                            base=seam_base)
+
+
+def _diff6_coef(factor: float, dt: float):
+    """WRF ``diff_6th_coef = factor*0.015625/(2.0*dt)`` in float32."""
+    return DTYPE(factor) * DTYPE(0.015625) / (DTYPE(2.0) * DTYPE(dt))
+
+
+#: Mass-point rows per diff6_multi launch (kernels/diff6.cu
+#: DIFF6_MULTI_MAX_ROWS); more rows take further launches.
+DIFF6_MULTI_MAX_ROWS = 32
+#: ``WOOF_DIFF6_MULTI=0`` keeps the one-launch-per-field path (A/B and
+#: byte-identity checks).
+DIFF6_MULTI_ENABLED = os.environ.get("WOOF_DIFF6_MULTI", "1") != "0"
+
+
+def _diff6_multi_rows(rows, c1, c2, mut, planes) -> bool:
+    """True when ``rows`` (f, tend, factor, dt) can share one diff6_multi
+    launch: contiguous float32 mass-point fields of one shape, no two
+    rows accumulating into the same buffer, and contiguous planes."""
+    if not rows or not DIFF6_MULTI_ENABLED:
+        return False
+    shape = rows[0][0].shape
+    arrays = [a for f, t, _factor, _dt in rows for a in (f, t)]
+    arrays += [c1, c2, mut] + [a for a in planes if a is not None]
+    if any(not isinstance(a, cp.ndarray) or a.dtype != np.dtype(np.float32)
+           or not a.flags.c_contiguous for a in arrays):
+        return False
+    if any(f.shape != shape or t.shape != shape for f, t, _f, _d in rows):
+        return False
+    if len(rows) > 1 and len({int(t.data.ptr) for _f, t, _a, _b in rows}) != len(rows):
+        return False
+    return len(shape) == 3
+
+
+def launch_diff6_multi(rows, mut, c1, c2, opt: int, *, phb=None, msfu=None,
+                       msfv=None, msft=None, slopeopt: int = 0,
+                       thresh: float = 0.10, dx: float = 0.0, dy: float = 0.0,
+                       bnd_x: bool = False, bnd_y: bool = False) -> None:
+    """ADD the sixth-order tendency of several mass-point fields in one
+    launch (kernels/diff6.cu ``diff6_multi``).
+
+    ``rows`` are ``(f, tend, factor, dt)`` half-level mass-point fields of
+    one shape that share ``mut``, ``c1``/``c2`` and the maps; each row's
+    ``tend`` receives exactly the words :func:`launch_diff6` writes for it
+    (same statements, same order; the field-independent face masses, slope
+    tapers and map factor are formed once per point).  The rows arrive as
+    a by-value table of device addresses, the rk_copy_words form, so the
+    launch binds no array parameter.  Mass points take no seam pass.
+    """
+    nlev, ny, nx = rows[0][0].shape
+    bounds = diff6_loop_bounds(nx, ny, nx, ny, bnd_x, bnd_y)
+    slope = int(slopeopt) >= 1 and phb is not None and phb.ndim == 3
+    if slope and (dx <= 0.0 or dy <= 0.0):
+        raise ValueError("diff_6th_slopeopt >= 1 needs positive dx/dy")
+    phb_arg = phb if slope else mut  # not dereferenced without slopeopt
+    msfu_arg = (msfu if msfu is not None
+                else cp.ones((ny, nx + 1), dtype=DTYPE))
+    msfv_arg = (msfv if msfv is not None
+                else cp.ones((ny + 1, nx), dtype=DTYPE))
+    msft_arg = (msft if msft is not None
+                else cp.ones((ny, nx), dtype=DTYPE))
+    dzthr_x = (DTYPE(thresh) * DTYPE(9.81)
+               * (DTYPE(1.0) / DTYPE(1.0 / dx))) if slope else DTYPE(0)
+    dzthr_y = (DTYPE(thresh) * DTYPE(9.81)
+               * (DTYPE(1.0) / DTYPE(1.0 / dy))) if slope else DTYPE(0)
+    kern = get_kernel("diff6", "diff6_multi")
+    grid = ((nx + _TPB - 1) // _TPB, ny, nlev)
+    header = 3
+    for start in range(0, len(rows), DIFF6_MULTI_MAX_ROWS):
+        chunk = rows[start:start + DIFF6_MULTI_MAX_ROWS]
+        table = np.zeros((header + DIFF6_MULTI_MAX_ROWS, 3), dtype=np.uint64)
+        table[0] = (mut.data.ptr, c1.data.ptr, c2.data.ptr)
+        table[1] = (phb_arg.data.ptr, msfu_arg.data.ptr, msfv_arg.data.ptr)
+        table[2] = (msft_arg.data.ptr, 0, 0)
+        for r, (f, tend, factor, dt) in enumerate(chunk):
+            coef = _diff6_coef(factor, dt)
+            table[header + r] = (f.data.ptr, tend.data.ptr,
+                                 int(np.float32(coef).view(np.uint32)))
+        # By value, as rk_copy_words passes its rows (dycore._prepare_bookkeeping).
+        blob = table.reshape(-1).view(np.dtype(('V', table.nbytes)))
+        kern(grid, (_TPB, 1, 1),
+             (blob, np.int32(len(chunk)), np.int32(opt),
+              np.int32(1 if slope else 0), dzthr_x, dzthr_y,
+              np.int32(nlev), np.int32(ny), np.int32(nx),
+              *(np.int32(b) for b in bounds)))
+    del phb_arg, msfu_arg, msfv_arg, msft_arg   # alive until the launches
 
 
 def _launch_diff6_seam(name, f, tend, mut, c1, c2, phb_arg, msfu_arg,

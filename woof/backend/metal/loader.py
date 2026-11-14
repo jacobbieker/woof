@@ -296,6 +296,7 @@ _RESOLVE_TABLES = os.environ.get("WOOF_METAL_RESOLVE_TABLES", "1") != "0"
 FLAT_ADDRESS_TABLES = frozenset({
     "rk_copy_words", "rk_zero_words",        # woof/core/kernels/rk_bookkeeping.cu
     "glue_add_arrays",                       # woof/core/kernels/bandwidth_glue.cu
+    "diff6_multi",                           # woof/core/kernels/diff6.cu
 })
 
 #: C type of a module global's element -> the storage dtype it is held in
