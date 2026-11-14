@@ -669,7 +669,10 @@ module mpas_dmpar
   private
   public :: mpas_dmpar_min_real, mpas_dmpar_exch_group_create, mpas_dmpar_exch_group_add_field, &
             mpas_dmpar_exch_group_reuse_halo_exch, mpas_dmpar_exch_group_full_halo_exch, &
-            mpas_dmpar_exch_group_destroy, mpas_dmpar_field_halo_exch, mpas_dmpar_exch_halo_field
+            mpas_dmpar_exch_group_destroy, mpas_dmpar_field_halo_exch, mpas_dmpar_exch_halo_field, &
+            mpas_dmpar_exch_group_build_reusable_buffers, MPAS_DMPAR_NOERR
+
+  integer, parameter :: MPAS_DMPAR_NOERR = 0
 
   interface mpas_dmpar_exch_halo_field
     module procedure exch_halo_field1d, exch_halo_field2d, exch_halo_field3d
@@ -732,6 +735,13 @@ contains
     integer, optional, intent(out) :: iErr
     if (present(iErr)) iErr = 0
   end subroutine mpas_dmpar_exch_group_full_halo_exch
+
+  subroutine mpas_dmpar_exch_group_build_reusable_buffers(domain, groupName, iErr)
+    type(domain_type), intent(inout) :: domain
+    character(len=*), intent(in) :: groupName
+    integer, optional, intent(out) :: iErr
+    if (present(iErr)) iErr = 0
+  end subroutine mpas_dmpar_exch_group_build_reusable_buffers
 
   subroutine mpas_dmpar_exch_group_destroy(domain, groupName, iErr)
     type(domain_type), intent(inout) :: domain
