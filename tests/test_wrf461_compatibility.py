@@ -81,7 +81,9 @@ def _run_config(cell) -> RunConfig:
         "sf_surface_physics": cell.sf_surface_physics,
         "num_soil_layers": (
             9 if cell.sf_surface_physics == 3 else
-            5 if cell.sf_surface_physics == 1 else 3 if cell.sf_surface_physics == 8 else 4),
+            5 if cell.sf_surface_physics == 1 else 3 if cell.sf_surface_physics == 8 else
+            # Pleim-Xiu defines two soil levels (woof.config refuses others).
+            2 if cell.sf_surface_physics == 7 else 4),
         "cu_physics": cell.cu_physics,
         # KF keeps its 5-minute template cadence; GF pins cudt to 0 (it
         # runs on the model step) and cumulus-off carries no cadence.
@@ -225,6 +227,8 @@ def test_every_front_door_tuple_agrees_with_the_wrf_matrix():
     requires the expert acknowledgement.
     """
 
+    from woof.core import rrtmgp
+
     observed = Counter()
     for cell in iter_compatibility_matrix():
         cfg = _run_config(cell)
@@ -276,7 +280,8 @@ def test_every_front_door_tuple_agrees_with_the_wrf_matrix():
                     "cu_physics=3 .* requires a PBL scheme")):
                 validate_run_config(cfg)
             observed["arwen-structural-gf-pbl"] += 1
-        elif cell.mp_physics in (2, 13, 30) and cell.radiation == "rrtmg-rte-rrtmgp":
+        elif (cell.mp_physics in rrtmgp._NO_CLOUD_OPTICS_COUPLING
+              and cell.radiation == "rrtmg-rte-rrtmgp"):
             # A JUDGED cloud-optics exclusion, not a WRF rule (Lin, mp=2, has no
             # effective-radius producer at all): WRF pairs
             # FAST_SBM with RRTMG, but its bin effective-radius integrals
@@ -361,12 +366,18 @@ def test_every_front_door_tuple_agrees_with_the_wrf_matrix():
     # no LSM or GF-without-PBL structural refusal.
     # Combined axes measured by the full walk in batch003-unit-broad-first.xml.
     # The old pins represented only part of the independently merged axes.
+    # MAD-WRF (mp 96) joined the axis: 806400 -> 831600 cells (33/32).
+    # wrf-fatal, both structural seams, the GFS/RMOL seam and the SSiB
+    # constraint scale by exactly 33/32.  The judged cloud-optics refusal
+    # now reads rrtmgp._NO_CLOUD_OPTICS_COUPLING, so it covers mp 2, 13,
+    # 30, 56, 95 and 96 at 2054 cells each (12324).  Pleim-Xiu cells now
+    # carry its two soil levels and are admitted.  Read off the sweep.
     assert observed == {
-        "admitted": 322958,
-        "arwen-judged-cloud-optics": 6162,
-        "arwen-structural": 12000,
-        "arwen-structural-gf-pbl": 4960,
-        "arwen-structural-gfs-rmol": 28800,
-        "ssib-named-constraint": 114720,
-        "wrf-fatal": 316800
+        "admitted": 327081,
+        "arwen-judged-cloud-optics": 12324,
+        "arwen-structural": 12375,
+        "arwen-structural-gf-pbl": 5115,
+        "arwen-structural-gfs-rmol": 29700,
+        "ssib-named-constraint": 118305,
+        "wrf-fatal": 326700
     }
