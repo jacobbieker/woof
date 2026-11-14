@@ -3289,7 +3289,7 @@
    },
    {
     "file": "woof/core/kernels/lbc_state.cu",
-    "sha256": "b35120f7012a89b7e8b3a0da7e30ce434ae3867e1ff35fea4665e3f645a16949"
+    "sha256": "7d05819c39a4936b4771cb479926ec261fe7039303e59c1380acf5b4d4fce03a"
    },
    {
     "file": "woof/core/kernels/lbc_time.cu",
@@ -15999,15 +15999,15 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "891e112d46fb1a3c84c748db5a6f25e586262817170089a95bb2c10509a64dba",
+    "sha256": "1c2b56f209ae699b6e3c51169a5152e9e794f9d099d172f5efd7c33ee262ac67",
     "sites": {
-     "100": 96
+     "100": 162
     }
    },
    "native_differences": {
-    "sha256": "9412b3dc6a0e9ea6ebdbf18961e3c1eef7d159eb7c9bbc6c2d796808dbfef0b4",
+    "sha256": "97b533ea5aa29baf37972b63375f39d2cf99a5ce408309f190ff84290e3b1467",
     "sites": {
-     "100": 30
+     "100": 59
     }
    },
    "native_errors": {},
@@ -16027,7 +16027,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "1730a72093ba5b64c04aada3d8ebc94fc7c0a40ace6b1685e5fd3a04b405cdaf"
+   "source_sha256": "84515bc54f0bf9888908e579e3712540dabf703649df2a9b331b29d73cc738cb"
   },
   "kernels:lbc_time": {
    "assessment": "static_diagnostic_only",
