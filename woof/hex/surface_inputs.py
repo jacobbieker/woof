@@ -86,6 +86,10 @@ class SurfaceInput:
     #: own per-cell ``ivgtyp``/``latitude_deg`` and ``start_time``; ``None``
     #: derives zeros.
     derive: Callable[[Any, Mapping[str, Any]], np.ndarray] | None = None
+    #: A ``derived`` input that is not one value per cell: 1 is a stack
+    #: ``[..., nCells]`` of per-cell planes (aer_opt = 2's remapped records), 2 a
+    #: free-length vector that indexes the stack.
+    frames: int = 0
 
 
 @dataclass(frozen=True)
@@ -241,6 +245,33 @@ def _urban_inputs(cfg) -> tuple[SurfaceInput, ...]:
     return ()
 
 
+def _aerosol_derive(which):
+    def derive(cfg, context):
+        from .aerosol_inputs import stage_user_aerosol
+
+        if not context.get("aerosol"):
+            raise ValueError("aer_opt = 2's auxinput15 records are staged from the run's "
+                             "mesh and length, and bind was given neither")
+        return stage_user_aerosol(cfg, context["start_time"], **context["aerosol"])[which]
+    return derive
+
+
+_AEROSOL_FRAMES = SurfaceInput(
+    "aerosol_frames", "AUXINPUT15", "derived", "float32", True,
+    "the auxinput15 records the run's radiation calls read, conservatively "
+    "remapped from the WRF grid to each mesh cell (woof.hex.aerosol_inputs)",
+    derive=_aerosol_derive(0), frames=1)
+_AEROSOL_OFFSETS = SurfaceInput(
+    "aerosol_frame_offsets", "AUXINPUT15_OFFSETS", "derived", "float64", True,
+    "the offsets (s from the start) of those records", derive=_aerosol_derive(1), frames=2)
+
+
+def _aerosol_inputs(cfg) -> tuple[SurfaceInput, ...]:
+    from woof.core.aer_opt2 import required_fields
+
+    return (_AEROSOL_FRAMES, _AEROSOL_OFFSETS) if required_fields(cfg) else ()
+
+
 _IRRIGATION = SurfaceInput(
     "irrigation", "IRRIGATION", "cell", "float32", True,
     "geogrid's IRRIGATION on the mesh: the FAO irrigated-land percentage "
@@ -301,6 +332,9 @@ CONTRACT: tuple[SchemeInputs, ...] = (
                  lambda cfg: int(_value(cfg, "sf_surf_irr_scheme")) > 0,
                  lambda cfg: (_IRRIGATION, _IRR_PH_UNREAD
                               if int(_value(cfg, "irr_ph")) == 0 else _IRR_PH)),
+    SchemeInputs("user_aerosol", "aer_opt=2 with a gridded aer_*_opt=2",
+                 lambda cfg: int(_value(cfg, "aer_opt")) == 2,
+                 _aerosol_inputs),
     SchemeInputs("lightning", "lightning_option>0",
                  lambda cfg: int(_value(cfg, "lightning_option")) > 0,
                  lambda cfg: (_LIGHTNING,)),
@@ -466,7 +500,14 @@ def _derived(item: SurfaceInput, cfg, context, n_cells: int):
                 f"{item.keyword} is derived from the run's own cells, and bind "
                 "was given no context (ivgtyp, latitude_deg, start_time)")
         values = np.ascontiguousarray(item.derive(cfg, context), dtype=np.dtype(item.dtype))
-        if values.shape != (n_cells,):
+        if item.frames == 1:
+            if values.ndim != 3 or values.shape[-1] != n_cells:
+                raise ValueError(f"derived {item.keyword} has {values.shape}, "
+                                 f"not [records, fields, {n_cells}]")
+        elif item.frames == 2:
+            if values.ndim != 1:
+                raise ValueError(f"derived {item.keyword} must be one-dimensional")
+        elif values.shape != (n_cells,):
             raise ValueError(f"derived {item.keyword} has {values.shape} cells, "
                              f"the mesh {n_cells}")
     _check_allowed(item, values, "the derived surface input")
@@ -728,6 +769,19 @@ def seal(cfg, given: Mapping[str, Any] | None, *, n_columns: int
             sealed[item.keyword] = int(value)
             continue
         array = np.asarray(value)
+        if item.kind == "derived" and item.frames:
+            ok = (array.ndim == 3 and array.shape[-1] == int(n_columns)
+                  if item.frames == 1 else array.ndim == 1)
+            if array.dtype != np.dtype(item.dtype) or not ok:
+                raise ValueError(f"{item.keyword} must be {item.dtype} "
+                                 f"{'[records, fields, columns]' if item.frames == 1 else 'one-dimensional'}, "
+                                 f"got {array.dtype}{list(array.shape)}")
+            if not np.all(np.isfinite(array)):
+                raise ValueError(f"{item.keyword} must be finite")
+            array = np.array(array, copy=True, order="C")
+            array.setflags(write=False)
+            sealed[item.keyword] = array
+            continue
         shape_ok = (array.ndim == 2 and array.shape[0] >= 1
                     and array.shape[1] == int(n_columns)
                     if item.kind == "categories" else array.shape == (int(n_columns),))
@@ -771,7 +825,9 @@ def _probe_configs(row: SchemeInputs):
     from types import SimpleNamespace
 
     yield SimpleNamespace(use_lakedepth=1, mosaic_lu=1, mosaic_soil=1,
-                          sf_urban_physics=1, use_wudapt_lcz=0)
+                          sf_urban_physics=1, use_wudapt_lcz=0, aer_opt=2,
+                          aer_aod550_opt=2, aer_angexp_opt=2, aer_ssa_opt=2,
+                          aer_asy_opt=2)
     if row.scheme == "urban":
         yield SimpleNamespace(sf_urban_physics=1, use_wudapt_lcz=1)
 

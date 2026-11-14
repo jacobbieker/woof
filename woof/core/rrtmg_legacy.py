@@ -2760,7 +2760,13 @@ class RRTMGLegacyRadiation:
         stock_aer3 = self.aer_opt == 3 and cfg.rrtmg_aer3_source == "wrf_461"
         aerosol_aod = cp.zeros((nz,ncol),cp.float32) if stock_aer3 else (cp.empty((nz,ncol),cp.float32) if self.aer_opt==2 else None)
         aerosol_diag = cp.empty((ncol,4),cp.float32) if self.aer_opt==2 or stock_aer3 else None
-        user_inputs = _aer2.auxiliary_inputs(cfg,self.start_time,state.elapsed_seconds,(ny,nx)) if self.aer_opt==2 else {}
+        if self.aer_opt == 2 and getattr(self, "user_aerosol_frames", None) is not None:
+            # hex: the auxinput15 records already remapped to the mesh cells
+            # (woof.hex.aerosol_inputs), selected by the same offset rule.
+            user_inputs = self.user_aerosol_frames.select(
+                cfg, _aer2.auxinput15_offset(cfg, state.elapsed_seconds), (ny, nx))
+        else:
+            user_inputs = _aer2.auxiliary_inputs(cfg,self.start_time,state.elapsed_seconds,(ny,nx)) if self.aer_opt==2 else {}
         def user_optics(kw,sel):
             if self.aer_opt != 2:
                 return None

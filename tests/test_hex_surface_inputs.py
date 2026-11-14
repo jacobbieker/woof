@@ -265,7 +265,9 @@ def test_the_contract_table_lists_every_scheme():
                       ("irrigation", "irrigation"), ("irrigation", "irr_ph_field"),
                       ("ruc_mosaic", "landusef"), ("ruc_mosaic", "soilctop"),
                       ("pleim_xiu_lsm", "landusef"), ("pleim_xiu_lsm", "soilcbot"),
-                      ("slab", "thermal_inertia"), ("urban", "ivgtyp")}
+                      ("slab", "thermal_inertia"), ("urban", "ivgtyp"),
+                      ("user_aerosol", "aerosol_frames"),
+                      ("user_aerosol", "aerosol_frame_offsets")}
 
 
 @needs_generic_seam
