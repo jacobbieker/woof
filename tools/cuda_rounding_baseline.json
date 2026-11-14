@@ -4947,7 +4947,7 @@
    },
    {
     "file": "woof/backend/translate/__init__.py",
-    "sha256": "6efea28c437e13d21e8caa9ba29249d09aad6a8e5517129f4e827585e2441810"
+    "sha256": "d1202ddc09f81c367623d6ada57946af868d3d54ab99ea6829e413180d921434"
    },
    {
     "file": "woof/chem_micm.py",
