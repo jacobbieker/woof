@@ -6,7 +6,8 @@ then the stage a case names (``oracle_stage``):
 
 - 0: nothing more: the tracer tree (from the packages) and the geometry;
 - 1: the volume-to-thickness conversion of ``seaice_run_advection_incremental_remap``
-  (and, under ``oracle_round_trip``, back to volume).
+  (and, under ``oracle_round_trip``, back to volume);
+- 2: the departure points, triangles and quadrature points.
 
 Everything is built with gfortran -O0 -ffp-contract=off at RKIND 4 and 8. The
 stream is :mod:`woof.verify.mpas_ocean_stream`'s, with the remap's pools.
@@ -80,6 +81,10 @@ CASES = (
         "pkgColumnTracerIceAgeActive": True}, {}, {"absent": ("pondLidThickness", "iceAge")}),
     ("convert_hex", 20261711, 1, "hex", 3, {"pkgColumnTracerLevelIceActive": True}, {}, {}),
     ("convert_quad_round_trip", 20261712, 1, "quad", 3, {}, {"oracle_round_trip": True}, {}),
+    ("departure_hex", 20261721, 2, "hex", 3, {}, {}, {}),
+    ("departure_quad", 20261722, 2, "quad", 3, {}, {}, {}),
+    ("departure_hex_fast", 20261723, 2, "hex", 2, {}, {}, {"speed": 0.75}),
+    ("departure_quad_fast", 20261724, 2, "quad", 2, {}, {}, {"speed": 1.3}),
 )
 
 
@@ -417,6 +422,13 @@ def run_gpu(case: dict, fixture: dict[str, np.ndarray] | None = None) -> dict[st
         rv.volume_to_thickness(tree, tracers=dev["tracers"], remap=dev["incremental_remap"])
         if case["config"]["oracle_round_trip"]:
             rv.thickness_to_volume(tree, tracers=dev["tracers"], remap=dev["incremental_remap"])
+    elif stage == 2:
+        rv.volume_to_thickness(tree, tracers=dev["tracers"], remap=dev["incremental_remap"])
+        v = dev["velocity_solver"]
+        rv.departure_points(mesh=dev["mesh"], velocity=v, remap=dev["incremental_remap"],
+                            dt=float(case["pools"]["velocity_solver"]["dynamicsTimeStep"]))
+        rv.departure_triangles(mesh=dev["mesh"], remap=dev["incremental_remap"])
+        rv.quadrature_points(mesh=dev["mesh"], remap=dev["incremental_remap"])
     elif stage != 0:
         raise ValueError(f"stage {stage} is not ported")
     return {f"{pool}/{name}": cp.asnumpy(dev[pool][name]) for pool, name, kind, _ in case["fields"]
