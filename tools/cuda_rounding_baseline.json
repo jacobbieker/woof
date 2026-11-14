@@ -4777,7 +4777,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/remap_v842.cu",
-    "sha256": "aa12aee949de6542ac3637d64982855df912017e39fe87f34f2f1777758d6e88"
+    "sha256": "47e871bb04415e7b6cf202099a70e7a90739fca8905f62f777c830c0845184f0"
    },
    {
     "file": "woof/hex/mpas_seaice/velocity_v842.cu",
@@ -5739,7 +5739,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/remap_v842.py",
-    "sha256": "e0b9ef3164b17a05b9ee2338d44184bce62703bc00edbe0eb610df2d59c56025"
+    "sha256": "1bb191e86b6af80414784fbacdf23be07b45249867174ee79a8e121302e0e691"
    },
    {
     "file": "woof/hex/mpas_seaice/velocity_v842.py",

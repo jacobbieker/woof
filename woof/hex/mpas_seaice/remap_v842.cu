@@ -15,6 +15,11 @@
 //     6568-6674 get_triangle_quadrature_points (nQuadPoints = 6)
 //     8995-9077 find_line_intersection, 9144-9156 cross_product_2d,
 //     9198-9246 quadrilateral_area, triangle_area, 9262-9295 point_in_half_plane
+//     6689-7039 integrate_fluxes_over_triangles
+//     7054-7181 compute_mass_tracer_products
+//     7197-7584 update_mass_and_tracers
+//     7602-8043 recover_tracer_means
+//     8825-8947 zap_small_mass
 //     9309-9387 volume_to_thickness, thickness_to_volume
 // (William Lipscomb, LANL, 2015). Copyright (c) 2015, Los Alamos National
 // Security, LLC (LANS) and the University Corporation for Atmospheric
@@ -537,4 +542,178 @@ extern "C" __global__ void seaice_ir_construct_v842(
     }
     mean[n] = fc; cent[n] = ce; xs[n] = xg; ys[n] = yg; ++n;
     ir_barycenter(n, mean, cent, xs, ys, g, &xBarycenter[i], &yBarycenter[i]);
+}
+
+// ---------------------------------------------------------------------------
+// integrate_fluxes_over_triangles (6689-7039), one tracer, one edge of
+// 1..nEdges. The caller zeroes the tracer's edge flux (whole array). For each
+// triangle of nonzero area: the reconstruction of its source cell at the six
+// quadrature points, times the parent's values there (1 for the mass-like
+// field), integrated (weights w1, w2) and times the signed area into the
+// flux. negative[0] is set where iceAreaCategory goes negative at a point
+// (v8.4.2 stops: SEAICE_ERROR_IR_NEG_AREA).
+//   value: the tracer's triangle values (nLayers, nCategories, 6, 6, nEdges+1);
+//   parentValue the parent's (its own first extent), null for the mass-like field.
+extern "C" __global__ void seaice_ir_integrate_fluxes_v842(
+    rk *edgeFlux, rk *value, int *negative, const rk *parentValue, const rk *center, const rk *xGrad,
+    const rk *yGrad, const rk *xTriangle, const rk *yTriangle, const rk *triangleArea, const int *iCellTriangle,
+    const int *maskEdge, int checkNegative, int nEdges, int nCategories, int nLayers, int parentLayers)
+{
+    const int i = ir_thread();
+    if (i >= nEdges * nCategories * nLayers) return;
+    const int layer = i % nLayers, cat = (i / nLayers) % nCategories, e = i / (nLayers * nCategories);
+    const int stride = nCategories * nLayers, inner = cat * nLayers + layer;
+    rk flux = C(0.0);
+    for (int t = 0; t < 6; ++t) {
+        const rk area = triangleArea[e * 6 + t];
+        if (maskEdge[e] != 1 || area == C(0.0)) continue;
+        const int c = iCellTriangle[e * 6 + t] - 1;
+        const rk ce = center[c * stride + inner], gx = xGrad[c * stride + inner], gy = yGrad[c * stride + inner];
+        rk integral = C(0.0);
+        for (int q = 0; q < 6; ++q) {
+            const int k = (e * 6 + t) * 6 + q;
+            rk v = A(A(ce, M(gx, xTriangle[k])), M(gy, yTriangle[k]));
+            if (parentValue == 0) {
+                v = M(C(1.0), v);
+            } else {
+                v = M(parentValue[k * nCategories * parentLayers + cat * parentLayers
+                                  + (parentLayers == 1 ? 0 : layer)], v);
+            }
+            value[k * stride + inner] = v;
+            integral = A(integral, M(q < 3 ? IR_W1 : IR_W2, v));
+            if (checkNegative && v < C(0.0)) negative[0] = 1;
+        }
+        flux = A(flux, M(area, integral));
+    }
+    edgeFlux[e * stride + inner] = flux;
+}
+
+// compute_mass_tracer_products (7054-7181), one tracer, cells 1..nCells: the
+// parent's product times the tracer (1 times the mass-like field)
+extern "C" __global__ void seaice_ir_products_v842(
+    rk *product, const rk *field, const rk *parentProduct, int nCells, int nCategories, int nLayers,
+    int parentLayers)
+{
+    const int i = ir_thread();
+    if (i >= nCells * nCategories * nLayers) return;
+    const int layer = i % nLayers, cc = i / nLayers;
+    const rk p = parentProduct == 0 ? C(1.0) : parentProduct[cc * parentLayers + (parentLayers == 1 ? 0 : layer)];
+    product[i] = M(p, field[i]);
+}
+
+// update_mass_and_tracers (7197-7584), one tracer, cells 1..nCellsSolve: the
+// net flux out of the cell over its edges, the new mean against the parent's
+// new product (1 for the mass-like field), and the new product. negative[0]
+// is set where the mass-like field goes negative (SEAICE_ERROR_IR_NEG_MASS).
+extern "C" __global__ void seaice_ir_update_v842(
+    rk *field, rk *product, int *negative, const rk *parentProduct, const rk *edgeFlux,
+    const int *nEdgesOnCell, const int *edgesOnCell, const int *cellsOnEdge, const rk *areaCell,
+    int nCellsSolve, int nCategories, int nLayers, int parentLayers, int maxEdges)
+{
+    const int i = ir_thread();
+    if (i >= nCellsSolve * nCategories * nLayers) return;
+    const int layer = i % nLayers, cc = i / nLayers, c = cc / nCategories;
+    const int inner = i - c * nCategories * nLayers;
+    rk fluxFromCell = C(0.0);
+    for (int k = 0; k < nEdgesOnCell[c]; ++k) {
+        const int e = edgesOnCell[c * maxEdges + k] - 1;
+        const rk edgeSignOnCell = (c + 1 == cellsOnEdge[2 * e]) ? C(1.0) : C(-1.0);
+        fluxFromCell = A(fluxFromCell, M(edgeFlux[e * nCategories * nLayers + inner], edgeSignOnCell));
+    }
+    const rk p = parentProduct == 0 ? C(1.0) : parentProduct[cc * parentLayers + (parentLayers == 1 ? 0 : layer)];
+    rk f;
+    if (p > C(0.0)) {
+        f = D(S(product[i], D(fluxFromCell, areaCell[c])), p);
+    } else {
+        f = C(0.0);
+    }
+    field[i] = f;
+    product[i] = M(p, f);
+    if (parentProduct == 0 && f < C(0.0)) negative[0] = 1;
+}
+
+// zap_small_mass (8825-8947): the mass-like field below 1e-22 (but positive)
+// in cells 1..nCellsSolve to zero, with its mask; maskCategoryCell (zeroed by
+// the caller) marks them, then every other tracer's values there are zeroed.
+extern "C" __global__ void seaice_ir_zap_mass_v842(
+    rk *field, int *mask, int *maskCategoryCell, int nCellsSolve, int nCategories)
+{
+    const int i = ir_thread();
+    if (i >= nCellsSolve * nCategories) return;
+    if (field[i] > C(0.0) && field[i] < C(1.0e-22)) {
+        field[i] = C(0.0);
+        mask[i] = 0;
+        maskCategoryCell[i] = 1;
+    }
+}
+
+extern "C" __global__ void seaice_ir_zap_tracer_v842(
+    rk *field, int *mask, const int *maskCategoryCell, int nCellsSolve, int nCategories, int nLayers)
+{
+    const int i = ir_thread();
+    if (i >= nCellsSolve * nCategories * nLayers) return;
+    if (maskCategoryCell[i / nLayers] == 1) {
+        field[i] = C(0.0);
+        mask[i] = 0;
+    }
+}
+
+// recover_tracer_means (7602-8043), one tracer, one value of cells 1..nCells:
+// the reconstruction (with its ancestors': depth levels up to four, each a set
+// center/xGrad/yGrad with its first extent) integrated over the cell's edge
+// triangles (centre, vertex i, vertex i+1; weights from 0.25*dcEdge*dvEdge)
+// against the product of means. warn: 1 where v8.4.2 logs that the mean is not
+// recovered; reconstructed and difference: the values it logs.
+extern "C" __global__ void seaice_ir_recover_means_v842(
+    int *warn, rk *reconstructed, rk *difference, const rk *product,
+    const rk *c0, const rk *x0, const rk *y0, const rk *c1, const rk *x1, const rk *y1,
+    const rk *c2, const rk *x2, const rk *y2, const rk *c3, const rk *x3, const rk *y3,
+    int l1, int l2, int l3, int depth,
+    const int *nEdgesOnCell, const int *edgesOnCell, const rk *dcEdge, const rk *dvEdge,
+    const rk *xVertexOnCell, const rk *yVertexOnCell, int nCells, int nCategories, int nLayers, int maxEdges)
+{
+    const int i = ir_thread();
+    if (i >= nCells * nCategories * nLayers) return;
+    const int layer = i % nLayers, cc = i / nLayers, c = cc / nCategories;
+    const int n = nEdgesOnCell[c];
+    // the ancestors' indices: from the mass-like field (level depth-1) down to this tracer (level 0)
+    const int i0 = cc * nLayers + (nLayers == 1 ? 0 : layer), i1 = cc * l1 + (l1 == 1 ? 0 : layer);
+    const int i2 = cc * l2 + (l2 == 1 ? 0 : layer), i3 = cc * l3 + (l3 == 1 ? 0 : layer);
+    rk fracEdgeArea[16];
+    rk sumArea = C(0.0);
+    for (int k = 0; k < n; ++k) {
+        const int e = edgesOnCell[c * maxEdges + k] - 1;
+        fracEdgeArea[k] = M(M(C(0.25), dcEdge[e]), dvEdge[e]);
+        sumArea = A(sumArea, fracEdgeArea[k]);
+    }
+    rk cell = C(0.0);
+    for (int k = 0; k < n; ++k) {
+        fracEdgeArea[k] = D(fracEdgeArea[k], sumArea);
+        const rk x1v = C(0.0), y1v = C(0.0);
+        const rk x2v = xVertexOnCell[c * maxEdges + k], y2v = yVertexOnCell[c * maxEdges + k];
+        const int kp = k + 1 < n ? k + 1 : 0;
+        const rk x3v = xVertexOnCell[c * maxEdges + kp], y3v = yVertexOnCell[c * maxEdges + kp];
+        rk xq[6], yq[6];
+        xq[0] = A(A(M(IR_Q1, x1v), M(IR_Q1, x2v)), M(IR_Q2, x3v)); yq[0] = A(A(M(IR_Q1, y1v), M(IR_Q1, y2v)), M(IR_Q2, y3v));
+        xq[1] = A(A(M(IR_Q1, x1v), M(IR_Q2, x2v)), M(IR_Q1, x3v)); yq[1] = A(A(M(IR_Q1, y1v), M(IR_Q2, y2v)), M(IR_Q1, y3v));
+        xq[2] = A(A(M(IR_Q2, x1v), M(IR_Q1, x2v)), M(IR_Q1, x3v)); yq[2] = A(A(M(IR_Q2, y1v), M(IR_Q1, y2v)), M(IR_Q1, y3v));
+        xq[3] = A(A(M(IR_Q3, x1v), M(IR_Q4, x2v)), M(IR_Q4, x3v)); yq[3] = A(A(M(IR_Q3, y1v), M(IR_Q4, y2v)), M(IR_Q4, y3v));
+        xq[4] = A(A(M(IR_Q4, x1v), M(IR_Q3, x2v)), M(IR_Q4, x3v)); yq[4] = A(A(M(IR_Q4, y1v), M(IR_Q3, y2v)), M(IR_Q4, y3v));
+        xq[5] = A(A(M(IR_Q4, x1v), M(IR_Q4, x2v)), M(IR_Q3, x3v)); yq[5] = A(A(M(IR_Q4, y1v), M(IR_Q4, y2v)), M(IR_Q3, y3v));
+        rk triangle = C(0.0);
+        for (int q = 0; q < 6; ++q) {
+            // the mass-like field's value times 1, then each child's times its parent's
+            rk v = C(1.0);
+            if (depth >= 4) v = M(A(A(c3[i3], M(x3[i3], xq[q])), M(y3[i3], yq[q])), v);
+            if (depth >= 3) v = M(A(A(c2[i2], M(x2[i2], xq[q])), M(y2[i2], yq[q])), v);
+            if (depth >= 2) v = M(A(A(c1[i1], M(x1[i1], xq[q])), M(y1[i1], yq[q])), v);
+            v = M(A(A(c0[i0], M(x0[i0], xq[q])), M(y0[i0], yq[q])), v);
+            triangle = A(triangle, M(q < 3 ? IR_W1 : IR_W2, v));
+        }
+        cell = A(cell, M(fracEdgeArea[k], triangle));
+    }
+    const rk diff = S(cell, product[i]);
+    reconstructed[i] = cell;
+    difference[i] = diff;
+    warn[i] = (ABS(diff) > M(IR_EPS11, ABS(product[i])) && ABS(diff) > IR_EPS11) ? 1 : 0;
 }
