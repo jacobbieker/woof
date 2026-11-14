@@ -71,7 +71,11 @@ Usage (pixi; mac Metal ``-e mlx``, pb CUDA ``-e default``)::
     python tools/hex_option_matrix.py table EVIDENCE.json
 
 ``run`` writes ``DIR/results-<backend>.json`` after every row and skips rows
-already recorded there (resumable).
+already recorded there (resumable); a results file of another case (its
+arguments, duration, environment, physics, row flags or input files) is
+refused rather than resumed.  ``publish`` refuses inputs that are not one
+comparison (two files of one backend, different cases or durations, a row
+run with different assignments).
 """
 
 from __future__ import annotations
@@ -165,7 +169,12 @@ def plan(components=None) -> list[dict]:
     cases = _cases()
     base = dict(cases.suite.MPAS_DEFAULT_PHYSICS)
     rows = []
-    for name, physics in cases.selections(components).items():
+    selections = dict(cases.selections(components))
+    if components:
+        # Every row is graded against the baseline: a component filter that leaves it out would publish rows
+        # as supported with no budget screen.
+        selections.setdefault(BASELINE, cases.selections()[BASELINE])
+    for name, physics in selections.items():
         if name.split(".")[0] in SKIPPED_COMPONENTS:
             continue
         rows.append({"option": name, "physics": physics,
@@ -382,6 +391,7 @@ def run_row(row: dict, case: dict, work: Path, backend: str) -> dict:
     result = {"option": row["option"], "backend": backend,
               "overrides": row["overrides"],
               "physics_args": physics_args(row, case.get("base_physics", {})),
+              "row_args": list(case.get("row_args", {}).get(row["option"], [])),
               "returncode": proc.returncode, "wall_seconds": round(wall, 1)}
     result.update(classify_log(text, proc.returncode))
     receipt = out / "forecast-receipt.json"
@@ -429,7 +439,14 @@ def grade(results: dict) -> dict:
 
     rows = results["rows"]
     base = rows.get(BASELINE)
-    if not base or base.get("outcome") not in ("ran", "budget"):
+    if not base or base.get("outcome") not in ("ran", "budget", "ungraded") or not base.get("budgets"):
+        # No baseline budgets to screen against: a row that ran is not published as supported unscreened.
+        why = (f"baseline {BASELINE} did not run" if not base else
+               f"baseline {BASELINE} {base.get('outcome')}: {base.get('reason')}")
+        for name, row in rows.items():
+            if name != BASELINE and row.get("outcome") in ("ran", "budget", "ungraded") and row.get("budgets"):
+                row.pop("graded", None)
+                row["outcome"], row["reason"] = "ungraded", why
         return results
     b = base["budgets"]
     # Interior cells when the case has a boundary zone: the zone's state is
@@ -441,8 +458,10 @@ def grade(results: dict) -> dict:
         ("dry_rel_change", "water_residual_rel"))
     for row in rows.values():
         budgets = row.get("budgets")
-        if not budgets or row.get("outcome") not in ("ran", "budget"):
+        if not budgets or row.get("outcome") not in ("ran", "budget", "ungraded"):
             continue
+        if row.get("outcome") == "ungraded":
+            row.pop("reason", None)
         dry = budgets[dry_key] - b[dry_key]
         water = budgets[water_key] - b[water_key]
         row["graded"] = {"dry_vs_baseline": dry, "water_vs_baseline": water,
@@ -467,15 +486,50 @@ def _save(path: Path, results: dict) -> None:
     tmp.replace(path)
 
 
+def case_identity(case: dict) -> str:
+    """What a results file's rows were run on: the case's arguments, duration, environment, physics and
+    per-row flags, and the size and modification time of every file they name (a re-staged init at the same
+    path is a different case).  A resumed ``--out`` must carry the same identity."""
+
+    import hashlib
+
+    named = {}
+    for value in [*case.get("forecast_args", []), case.get("static"),
+                  *(arg for args in case.get("row_args", {}).values() for arg in args)]:
+        if isinstance(value, str) and value and not value.startswith("-"):
+            path = Path(value) if Path(value).is_absolute() else REPO / value
+            if path.is_file():
+                stat = path.stat()
+                named[value] = [stat.st_size, stat.st_mtime_ns]
+    keys = ("forecast_args", "static", "suite", "base_physics", "env", "hours", "row_args")
+    text = json.dumps({"case": {key: case.get(key) for key in keys}, "files": named}, sort_keys=True,
+                      default=str)
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def run_key(row: dict, case: dict) -> list:
+    """The effective forecast configuration of a row: equal keys are one run."""
+
+    return [physics_args(row, case.get("base_physics", {})),
+            list(case.get("row_args", {}).get(row["option"], []))]
+
+
 def command_run(args) -> int:
     case = json.loads(Path(args.case).read_text())
     work = Path(args.out).absolute()
     work.mkdir(parents=True, exist_ok=True)
     path = work / f"results-{args.backend}.json"
-    results = (json.loads(path.read_text()) if path.is_file() else
-               {"schema": SCHEMA, "backend": args.backend,
-                "case": case.get("label", ""),
-                "hours": case.get("hours", 1), "rows": {}})
+    identity = case_identity(case)
+    if path.is_file():
+        results = json.loads(path.read_text())
+        if results.get("case_identity") != identity:
+            raise SystemExit(
+                f"{path} holds rows run on another case (its arguments, duration, environment, physics, "
+                "row flags or input files differ, or it predates the case identity): resuming would skip "
+                "them and grade new rows against its baseline.  Use a fresh --out")
+    else:
+        results = {"schema": SCHEMA, "backend": args.backend, "case": case.get("label", ""),
+                   "hours": case.get("hours", 1), "case_identity": identity, "rows": {}}
     rows = plan(args.components)
     # The baseline first: every other row is graded against it.
     rows.sort(key=lambda row: row["option"] != BASELINE)
@@ -488,8 +542,11 @@ def command_run(args) -> int:
             continue
         # A row whose assignment equals one already run (the frozen
         # default's own options: noah-mp, ysu, revised-mm5 ...) IS that run.
+        # Equal overrides are not enough: the base physics, the hex partners and the row's own flags
+        # make the run.
+        key = run_key(row, case)
         twin = next((other for other in results["rows"].values()
-                     if other.get("overrides") == row["overrides"]
+                     if [other.get("physics_args"), other.get("row_args")] == key
                      and "same_run_as" not in other
                      and other["option"] != row["option"]), None)
         if twin is not None:
@@ -548,9 +605,27 @@ def _published_row(row: dict) -> dict:
 
 
 def publish(loaded: list[dict]) -> dict:
-    """Merge per-backend results into the committed evidence file."""
+    """Merge per-backend results into the committed evidence file.
 
+    The inputs must be one comparison: one file per backend, the same case label and duration, and each row
+    run with the same assignment (overrides and physics arguments) on every backend."""
+
+    backends = [data.get("backend") for data in loaded]
+    duplicated = sorted({b for b in backends if backends.count(b) > 1})
+    if duplicated:
+        raise ValueError(f"more than one results file for backend {', '.join(map(str, duplicated))}")
+    for key in ("case", "hours"):
+        values = {json.dumps(data.get(key)) for data in loaded}
+        if len(values) > 1:
+            raise ValueError(f"the results files are of different {key}s: {', '.join(sorted(values))}")
     names = sorted({name for data in loaded for name in data["rows"]})
+    for name in names:
+        held = [(data["backend"], data["rows"][name]) for data in loaded if name in data["rows"]]
+        for field in ("overrides", "physics_args"):
+            values = {json.dumps(row.get(field), sort_keys=True) for _, row in held if field in row}
+            if len(values) > 1:
+                raise ValueError(f"row {name} ran with different {field} on "
+                                 f"{', '.join(backend for backend, _ in held)}")
     rows = {}
     for name in names:
         first = next(data["rows"][name] for data in loaded
@@ -580,6 +655,24 @@ def verdict(row: dict) -> str:
         return "refused"
     bad = outcomes - {"ran", "refused"}
     return " / ".join(sorted(bad or outcomes))
+
+
+def regression(name: str, evidence: dict, backend: str, row: dict) -> str | None:
+    """Why ``row`` (this run's result on ``backend``) departs from the evidence recorded for that backend,
+    or None.  The comparison is per backend: the cross-backend verdict of a row that ran on one backend and
+    errored on the other would accept any result here."""
+
+    recorded = (evidence.get("rows", {}).get(name) or {}).get("backends", {}).get(backend)
+    outcome = row["outcome"]
+    if outcome in ("non-finite", "budget", "error", "ungraded"):
+        return f"{name}: {outcome}: {row.get('reason')}"
+    if recorded is None:
+        return f"{name}: no recorded {backend} outcome to hold it to (publish the {backend} results first)"
+    if outcome != recorded.get("outcome"):
+        return f"{name}: recorded {recorded.get('outcome')} on {backend}, now {outcome}: {row.get('reason')}"
+    if outcome == "refused" and list(recorded.get("needs") or []) != list(row.get("needs") or []):
+        return f"{name}: recorded needs {recorded.get('needs')} on {backend}, now needs {row.get('needs')}"
+    return None
 
 
 def _cell(row: dict | None) -> str:
