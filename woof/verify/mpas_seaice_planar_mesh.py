@@ -37,6 +37,14 @@ _HEX_CORNERS = ((0.5, 0.5 / _R3), (0.0, 1.0 / _R3), (-0.5, 0.5 / _R3), (-0.5, -0
                 (0.5, -0.5 / _R3))
 
 
+def ordered_sum(values) -> float:
+    """Left-to-right float sum (builtin ``sum`` compensates on Python 3.12+, so its words vary by version)."""
+    total = 0.0
+    for value in values:
+        total += value
+    return total
+
+
 def _length(dx: float, dy: float) -> float:
     return math.sqrt(dx * dx + dy * dy)
 
@@ -155,7 +163,7 @@ def planar_mesh(kind: str, rs: np.random.RandomState, *, owned: int = 3, n_halos
         vx = [float(xv[vertex_id[v] - 1]) for v in cs]
         vy = [float(yv[vertex_id[v] - 1]) for v in cs]
         # plain float sums in order (no BLAS, no SIMD reductions: the same words on every host)
-        xc[c], yc[c] = sum(vx) / n, sum(vy) / n
+        xc[c], yc[c] = ordered_sum(vx) / n, ordered_sum(vy) / n
         twice = 0.0
         for j in range(n):
             twice += vx[j] * vy[(j + 1) % n] - vy[j] * vx[(j + 1) % n]
@@ -217,15 +225,15 @@ def planar_mesh(kind: str, rs: np.random.RandomState, *, owned: int = 3, n_halos
 
         centres = {}
         for key in around:
-            cx = sum(positions[w][0] for w in cells[key]) / len(cells[key])
-            cy = sum(positions[w][1] for w in cells[key]) / len(cells[key])
+            cx = ordered_sum(positions[w][0] for w in cells[key]) / len(cells[key])
+            cy = ordered_sum(positions[w][1] for w in cells[key]) / len(cells[key])
             centres[key] = (cx, cy)
         ordered = sorted(around, key=lambda k: angle(centres[k]))
         for j, key in enumerate(ordered[:vd]):
             if key in cell_id:
                 cells_on_vertex[i - 1, j] = cell_id[key]
         incident = [e for e in vertex_edges[v]]
-        mids = {e: tuple(sum(positions[w][t] for w in e) / 2.0 for t in range(2)) for e in incident}
+        mids = {e: tuple(ordered_sum(positions[w][t] for w in e) / 2.0 for t in range(2)) for e in incident}
         for j, e in enumerate(sorted(incident, key=lambda e: angle(mids[e]))[:vd]):
             if e in edge_id:
                 edges_on_vertex[i - 1, j] = edge_id[e]

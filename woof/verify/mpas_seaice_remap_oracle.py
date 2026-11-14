@@ -34,7 +34,7 @@ import numpy as np
 
 from woof.hex.mpas_seaice.remap_v842 import PACKAGES, TRACER_TABLE
 from woof.verify import mpas_ocean_stream as _stream
-from woof.verify.mpas_seaice_planar_mesh import planar_mesh
+from woof.verify.mpas_seaice_planar_mesh import ordered_sum, planar_mesh
 
 FIXTURE_DIR = Path(__file__).resolve().parents[2] / "tests" / "data" / "oracles" / "mpas_seaice_remap"
 PRECISIONS = {"r4": np.float32, "r8": np.float64}
@@ -219,12 +219,12 @@ def make_case(name, seed, stage, kind, owned, packages, config_overrides, field_
     # a smooth bilinear-plus-quadratic drift (no libm: the same words on every host)
     a = uniform(-1.0, 1.0, (2, 4)) / 4.0
     speed = float(field_overrides.get("speed", 0.3))
-    sx = (xv - sum(xv[:nv].tolist()) / nv) / (xv[:nv].max() - xv[:nv].min())
-    sy = (yv - sum(yv[:nv].tolist()) / nv) / (yv[:nv].max() - yv[:nv].min())
+    sx = (xv - ordered_sum(xv[:nv].tolist()) / nv) / (xv[:nv].max() - xv[:nv].min())
+    sy = (yv - ordered_sum(yv[:nv].tolist()) / nv) / (yv[:nv].max() - yv[:nv].min())
     u = speed * (a[0, 0] + a[0, 1] * sx + a[0, 2] * sy + a[0, 3] * sx * sy) * 4.0 / 1.5
     v = speed * (a[1, 0] + a[1, 1] * sx + a[1, 2] * sy + a[1, 3] * sx * sy) * 4.0 / 1.5
     # still over the block's middle (owned cells there keep their values, tiny areas among them)
-    cx, cy = sum(m["xCell"][:nc].tolist()) / nc, sum(m["yCell"][:nc].tolist()) / nc
+    cx, cy = ordered_sum(m["xCell"][:nc].tolist()) / nc, ordered_sum(m["yCell"][:nc].tolist()) / nc
     still = (xv - cx) ** 2 + (yv - cy) ** 2 < 1.6e4 ** 2
     u[still] = 0.0
     v[still] = 0.0

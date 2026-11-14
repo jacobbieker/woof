@@ -144,4 +144,3 @@ each case it keeps the output fields whose words changed, and writes
 The time-step oracle (`run_seaice_step.F90`) runs `seaice_init_advection` and,
 under `config_use_advection`, `seaice_run_advection` (both
 `mpas_seaice_advection.F` and the remap compiled verbatim).
-`make_step_remap_fixture.py` writes `tests/data/oracles/mpas_seaice_step_remap`.
