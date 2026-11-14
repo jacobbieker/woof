@@ -257,3 +257,18 @@ def test_attach_is_nothing_without_a_switch_and_masks_regional_rings():
     assert receipt["schemes"] == ["pbl"] and receipt["masked_columns"] == 3
     values = cp.asnumpy(backend.spp_patterns.advance(0.0)["pbl"])
     assert not np.any(values[[0, 1, NCOL - 1]]) and np.all(values[2:-1] != 0)
+
+
+def test_patterns_are_packed_buffers_with_every_level_the_pattern():
+    # A stride-0 broadcast over the levels would let a kernel reading level k at k * ncol run off the pattern.
+    lat, lon = _fibonacci(200)
+    source = _source(("pbl", "conv"), lat, lon)
+    for time in (0.0, 60.0):
+        bound = source.patterns(time)
+        for name, value in bound.items():
+            assert tuple(value.shape) == source.shapes[name]
+            assert value.strides[0] == value.shape[2] * value.dtype.itemsize
+            levels = cp.asnumpy(value)
+            want = cp.asnumpy(source.values[name])
+            for k in range(levels.shape[0]):
+                np.testing.assert_array_equal(levels[k, 0].view(np.uint32), want.view(np.uint32))

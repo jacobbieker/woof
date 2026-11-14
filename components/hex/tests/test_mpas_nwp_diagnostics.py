@@ -205,6 +205,7 @@ def _structured(col, inputs, cp):
         fnm=col["fzm"], fnp=col["fzp"])
 
 
+@pytest.mark.gpu
 def test_windows_equal_the_wrf_kernels_on_identical_columns(cp):
     from woof.core.kernels import get_kernel
     from woof.core.nwp_windows import update as wrf_windows, FIELDS
@@ -239,6 +240,7 @@ def test_windows_equal_the_wrf_kernels_on_identical_columns(cp):
     assert float(cp.asnumpy(module.acc["grpl_max"]).max()) > 0
 
 
+@pytest.mark.gpu
 def test_gust_and_10m_peak_equal_the_numpy_mirror_of_the_wrf_kernel(cp):
     from woof.core import wind_gust_diag as wg
     module, owner, utils, col = _module(cp)
@@ -269,6 +271,7 @@ def test_gust_and_10m_peak_equal_the_numpy_mirror_of_the_wrf_kernel(cp):
     assert np.all(cp.asnumpy(module.acc["gust"]) >= cp.asnumpy(module.acc["wspd10max"]) - 1e-4)
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("mp,scalars", [("mp_thompson", ("qv", "qr", "qg", "nr")), ("mp_wsm6", ("qv", "qg"))])
 def test_hail_equals_the_psd_leaf_on_the_same_columns(cp, mp, scalars):
     from woof.core.nwp_hail import update as psd
@@ -295,6 +298,7 @@ def test_hail_equals_the_psd_leaf_on_the_same_columns(cp, mp, scalars):
     assert not cp.asnumpy(other.acc["hail_max2d"]).any()
 
 
+@pytest.mark.gpu
 def test_t2_extremes_equal_the_clwrf_kernel(cp):
     from woof.core import clwrf
     module, owner, utils, col = _module(cp)
@@ -318,6 +322,7 @@ def test_t2_extremes_equal_the_clwrf_kernel(cp):
                                       cp.asnumpy(out[slot]).view(np.uint32), err_msg=name)
 
 
+@pytest.mark.gpu
 def test_reset_after_the_carrying_frame_and_resume(cp):
     module, owner, utils, col = _module(cp)
     rng = np.random.default_rng(21)
@@ -355,6 +360,7 @@ def test_reset_after_the_carrying_frame_and_resume(cp):
                                       checkpoint[nwp.STATE_PREFIX + name].view(np.uint32), err_msg=name)
 
 
+@pytest.mark.gpu
 def test_resident_provider_folds_resets_and_carries_the_module(cp):
     from woof.hex.mpasdiag.convective_v842 import MAXIMA
     from woof.hex.mpasphys.resident_output_diagnostics_v842 import PRODUCED, ResidentOutputDiagnostics as R
@@ -381,6 +387,7 @@ def test_resident_provider_folds_resets_and_carries_the_module(cp):
     assert cp.asnumpy(module.acc["gust"]).any()               # not carried by the due stream
 
 
+@pytest.mark.gpu
 def test_absent_scalars_are_not_read_as_the_last_row(cp):
     """RegistryLayout's index_qg is -1 without graupel; slicing it would read the last scalar row."""
     module, owner, utils, col = _module(cp)
@@ -392,6 +399,7 @@ def test_absent_scalars_are_not_read_as_the_last_row(cp):
     assert cp.asnumpy(module.acc["wspd10max"]).any()
 
 
+@pytest.mark.gpu
 def test_refl10cm_is_read_from_diag_physics_only(cp):
     module, owner, utils, col = _module(cp)
     inputs = _step_inputs(np.random.default_rng(4))

@@ -217,6 +217,7 @@ def _cfg(cols, version, haildt):
 CHECKED = (*hc.NAMES, "hailcast_wup_mask", "hailcast_wdur")
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("version, haildt", [("wrf_461", 0.0), ("wrf_39_noaa", 60.0)])
 def test_every_word_equals_the_wrf_routes_hail_update_on_a_ring(cp, version, haildt):
     from woof.core import hail
@@ -239,6 +240,7 @@ def test_every_word_equals_the_wrf_routes_hail_update_on_a_ring(cp, version, hai
     assert (cp.asnumpy(module.w["hailcast_diam_max"]) > 5).any()      # stones land
 
 
+@pytest.mark.gpu
 def test_the_wrf_routes_duration_kernel_is_inert_on_a_one_row_grid_and_the_mesh_one_is_not(cp):
     from woof.core.kernels import get_kernel
     nc = 8
@@ -260,6 +262,7 @@ def test_the_wrf_routes_duration_kernel_is_inert_on_a_one_row_grid_and_the_mesh_
     assert (cp.asnumpy(module.w["hailcast_wdur"]) == np.float32(3 * DT)).all()
 
 
+@pytest.mark.gpu
 def test_the_interval_fields_restart_after_a_frame_and_ride_a_checkpoint(cp):
     cols = _real_columns()
     config = hc.HailcastConfig(0.0, "wrf_461")
@@ -292,6 +295,7 @@ def test_the_interval_fields_restart_after_a_frame_and_ride_a_checkpoint(cp):
     assert (cp.asnumpy(straight.w["hailcast_runmax"]) >= runmax).all()
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("haildt, checkpoint", [(60.0, 10), (40.0, 7), (0.0, 5)])
 def test_a_continuation_keeps_the_straight_runs_cadence(cp, haildt, checkpoint):
     """A continuation counts its loop steps from 0 again (runtime_v842) with the straight run's steps before it as
@@ -327,6 +331,7 @@ def test_a_continuation_keeps_the_straight_runs_cadence(cp, haildt, checkpoint):
     assert resumed.calls == straight.calls - before == (12 if haildt == 0 else int(12 * DT // haildt))
 
 
+@pytest.mark.gpu
 def test_hailcast_is_refused_on_a_multi_rank_mesh(cp):
     owner = _owner(cp, _real_columns(4))
     owner.halo = object()

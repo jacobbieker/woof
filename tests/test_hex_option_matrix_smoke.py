@@ -36,8 +36,12 @@ import hex_option_matrix as matrix  # noqa: E402
 
 pytestmark = pytest.mark.slow
 
+#: ``WOOF_HEX_OPTION_MATRIX_EVIDENCE`` picks the evidence the case is held to: the quasi-uniform case's
+#: (default) or ``option-matrix-varres.json``, the smoke rows on a variable-resolution case
+#: (tools/hex_varres.py edi-vr).
 EVIDENCE = json.loads(
-    (REPO / "components/hex/evidence/option-matrix.json").read_text())
+    (REPO / "components/hex/evidence" / os.environ.get(
+        "WOOF_HEX_OPTION_MATRIX_EVIDENCE", "option-matrix.json")).read_text())
 
 DEFAULT_ROWS = (
     "microphysics.lin-mp2",

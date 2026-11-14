@@ -516,6 +516,35 @@ def run_key(row: dict, case: dict) -> list:
             list(case.get("row_args", {}).get(row["option"], []))]
 
 
+def mesh_summary(grid: Path) -> dict:
+    """The case mesh's spacing range and steepest per-cell spacing change, so a results file says whether
+    its rows ran on a quasi-uniform or a variable-resolution mesh (tools/hex_varres.py)."""
+
+    import netCDF4
+
+    sys.path.insert(0, str(REPO / "tools"))
+    import hex_varres
+
+    with netCDF4.Dataset(str(grid)) as data:
+        area = np.asarray(data["areaCell"][:], dtype=float)
+        if area.max() < 1.0:
+            area = area * hex_varres.EARTH_RADIUS_M ** 2
+        index, valid = hex_varres.neighbour_table(data["cellsOnCell"][:] - 1, data["nEdgesOnCell"][:], area.size)
+    h = np.sqrt(area / (np.sqrt(3.0) / 2.0)) / 1000.0
+    gradient = hex_varres.spacing_gradient(h, index, valid)
+    return {"cells": int(area.size), "spacing_km": [round(float(h.min()), 3), round(float(h.max()), 3)],
+            "spacing_ratio": round(float(h.max() / h.min()), 2),
+            "steepest_gradient_percent_per_cell": round(float(gradient.max() * 100.0), 2)}
+
+
+def _case_grid(case: dict) -> Path | None:
+    args = case.get("forecast_args") or []
+    if "--grid" not in args:
+        return None
+    grid = Path(args[args.index("--grid") + 1])
+    return grid if grid.is_absolute() else REPO / grid  # run_row runs the forecast with cwd=REPO
+
+
 def command_run(args) -> int:
     case = json.loads(Path(args.case).read_text())
     work = Path(args.out).absolute()
@@ -532,6 +561,9 @@ def command_run(args) -> int:
     else:
         results = {"schema": SCHEMA, "backend": args.backend, "case": case.get("label", ""),
                    "hours": case.get("hours", 1), "case_identity": identity, "rows": {}}
+    grid = _case_grid(case)
+    if grid is not None and grid.is_file() and "mesh" not in results:
+        results["mesh"] = mesh_summary(grid)
     rows = plan(args.components)
     # The baseline first: every other row is graded against it.
     rows.sort(key=lambda row: row["option"] != BASELINE)
@@ -638,6 +670,8 @@ def publish(loaded: list[dict]) -> dict:
     return {"schema": SCHEMA,
             "case": next((data.get("case") for data in loaded), ""),
             "hours": next((data.get("hours") for data in loaded), None),
+            **({"mesh": mesh} if (mesh := next((data["mesh"] for data in loaded if data.get("mesh")), None))
+               else {}),
             "baseline": BASELINE,
             "tolerances": {"dry": DRY_TOL, "water": WATER_TOL},
             "backends": [data["backend"] for data in loaded],

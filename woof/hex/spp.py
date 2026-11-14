@@ -99,6 +99,7 @@ class HexSppPatterns:
                 raise ValueError(f"SPP {name} pattern shape {shape} is not (levels, 1, {columns})")
         self.names, self.columns = names, columns
         self.shapes = {name: tuple(shapes[name]) for name in names}
+        self._packed: dict = {}                  # patterns(): each scheme's packed per-level buffer
         self.wrf = wrf_configs(names)
         radius = EARTH_RADIUS_M if radius is None else float(radius)
         self.configs = {name: hex_config(self.wrf[name], member=member, seed=seed)
@@ -145,11 +146,23 @@ class HexSppPatterns:
         return self.values
 
     def patterns(self, time_seconds: float) -> dict:
-        """The driver's ``spp_patterns`` mapping: each value at every level."""
+        """The driver's ``spp_patterns`` mapping: each value at every level, as packed arrays.
+
+        A broadcast view has stride 0 over the levels; a consumer that hands the buffer to a kernel reading level
+        ``k`` at ``k * ncol`` (MYNN's pattern_spp_pbl reshape keeps the view) would read past the ``ncol`` words
+        behind it.  So each pattern is written into a packed, reused (levels, 1, columns) buffer.
+        """
         import cupy as cp
         values = self.advance(time_seconds)
-        return {name: cp.broadcast_to(values[name].reshape(1, 1, -1), self.shapes[name])
-                for name in self.names}
+        held = self._packed
+        out = {}
+        for name in self.names:
+            buffer = held.get(name)
+            if buffer is None:
+                buffer = held[name] = cp.empty(self.shapes[name], dtype=values[name].dtype)
+            buffer[...] = values[name].reshape(1, 1, -1)
+            out[name] = buffer
+        return out
 
     def bind(self, driver, time_seconds: float) -> None:
         bind = getattr(driver, "bind_spp_patterns", None)

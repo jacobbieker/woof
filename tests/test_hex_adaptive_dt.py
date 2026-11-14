@@ -259,3 +259,28 @@ def test_adaptive_step_config_validates_as_admitted_and_keeps_the_payload():
     assert [f.name for f in dataclasses.fields(step)] == [f.name for f in dataclasses.fields(admitted)]
     again = adaptive_dt.adaptive_step_config(step, dt=40.0, substeps=6)
     assert type(again) is type(step) and again.config_dt == 40.0
+
+
+def test_a_radiation_period_equal_to_the_row_step_stays_a_deadline():
+    """A positive radt is a period in model time (the WRF route's adaptive clock); only surface/PBL and cumulus
+    weld to the step.  THE BREAKAGE: radiation_seconds == row_dt became "every step", so radiation ran every
+    60 s once the adaptive step grew to 60 s."""
+    cadence = physics_cadence(row_dt=Fraction(30), radiation_seconds=30.0, surface_pbl_seconds=30.0,
+                              cumulus_seconds=30.0)
+    assert cadence.radiation == Fraction(30) and cadence.periods() == (Fraction(30),)
+    assert cadence.due(Fraction(45))["radiation"] is False
+    assert cadence.due(Fraction(60)) == {"radiation": True, "surface_pbl": None, "cumulus": None}
+
+
+def test_an_adaptive_restart_checks_the_frames_valid_time():
+    """THE BREAKAGE: the adaptive branch accepted any checkpoint whose elapsed time is a frame of this run, so a
+    checkpoint of another forecast start (same mesh, step and elapsed) resumed under this run's valid times."""
+    from woof.hex.drivers.run_cuda_v841_forecast import check_adaptive_restart_frame
+    schedule = {"capture_steps": [0, 120, 240], "steps": 360,
+                "valid_times": {0: "2026-01-01_00:00:00", 120: "2026-01-01_01:00:00", 240: "2026-01-01_02:00:00"}}
+    good = {"adaptive": {"elapsed": "3600"}, "valid_time": "2026-01-01_01:00:00"}
+    check_adaptive_restart_frame(good, schedule, row_dt=30.0)
+    with pytest.raises(ValueError, match="valid time"):
+        check_adaptive_restart_frame({**good, "valid_time": "2026-01-02_01:00:00"}, schedule, row_dt=30.0)
+    with pytest.raises(ValueError, match="history frame"):
+        check_adaptive_restart_frame({**good, "adaptive": {"elapsed": "1800"}}, schedule, row_dt=30.0)

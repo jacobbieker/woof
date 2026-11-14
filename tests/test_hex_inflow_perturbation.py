@@ -166,3 +166,18 @@ def test_door_flags():
         _resolve_inflow_perturbation(SimpleNamespace(**{**vars(off), "inflow_perturbation_seed": 3}))
     on = SimpleNamespace(**{**vars(off), "inflow_perturbation": True, "inflow_perturbation_faces": "outflow"})
     assert _resolve_inflow_perturbation(on) == {"seed": 0, "amplitude_scale": 1.0, "faces": "outflow"}
+
+
+def test_the_refresh_clock_keeps_the_construction_step_when_dt_grows():
+    """The refresh ticks are counted in the construction-time step.  THE BREAKAGE: the bucket divided model time by
+    the LIVE outer_dt, so an adaptive dt that doubled turned the refresh index backward and stopped the run."""
+    cp = _gpu()
+    runtime = _Runtime(cp, 6.0)
+    fixed = hexip.HexInflowPerturbation(_Runtime(cp, 6.0), seed=1, pblh_source=lambda: 3000.0)
+    p = hexip.HexInflowPerturbation(runtime, seed=1, pblh_source=lambda: 3000.0)
+    for seconds, dt_s in ((80.0, DT), (100.0, 2 * DT), (120.0, 2 * DT), (220.0, 4 * DT)):
+        runtime.clock = fixed.runtime.clock = START + timedelta(seconds=seconds)
+        runtime.outer_dt = dt_s
+        got, want = cp.asnumpy(p.target(runtime.rt, 1)), cp.asnumpy(fixed.target(fixed.runtime.rt, 1))
+        np.testing.assert_array_equal(got, want)
+        assert p._last_refresh == fixed._last_refresh

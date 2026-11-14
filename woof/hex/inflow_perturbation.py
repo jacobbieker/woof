@@ -156,7 +156,11 @@ class HexInflowPerturbation:
         # WRF: the domain-mean half-level height above ground (the base state).
         self.z_half_agl = (0.5 * (z[:-1] + z[1:]) - z[0]).mean(axis=1)
         self.start = runtime.clock
-        self._ticks = refresh_ticks(1, float(runtime.outer_dt))
+        # The step the refresh ticks are counted in; an adaptive clock moves runtime.outer_dt, so the bucket below
+        # divides model time by this construction-time step, never the live one (else the refresh index can run
+        # backward as dt grows).  A fixed step is unchanged: the two are equal.
+        self._step_dt = float(runtime.outer_dt)
+        self._ticks = refresh_ticks(1, self._step_dt)
         self._key = None
         self._delta = None
         self._last_refresh = None
@@ -193,7 +197,7 @@ class HexInflowPerturbation:
             return self._delta
         self._key = elapsed
         self._delta = None
-        step = int(round(elapsed / float(self.runtime.outer_dt)))
+        step = int(round(elapsed / self._step_dt))
         pblh = float(self.pblh_source())
         n_levels = perturbed_level_count(self.z_half_agl, pblh)
         if n_levels == 0:
