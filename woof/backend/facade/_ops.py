@@ -668,6 +668,10 @@ def _inplace(name):
         if _strict_in_place(name, self, other):
             _subnormal_arith(name, self, other, into=self)
             return self
+        if not _keeps_subnormals():
+            from woof.backend.facade._write import arith_in_place
+            if arith_in_place(name, self, other):
+                return self
         self._write(operand_values(fn(self, other), self.dtype))
         return self
     return method
