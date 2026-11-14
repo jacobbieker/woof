@@ -29,7 +29,7 @@ pub mod warp;
 use crate::error::{Result, StaticError};
 use crate::raster::proj::{
     AeaEllipsoid, GeographicIdentity, Igh, LccSphere, MercSphere,
-    PointProjection, StereSpherePolar, GRS80_A, GRS80_RF, IGH_WGS84_A,
+    PointProjection, StereSpherePolar, Utm, GRS80_A, GRS80_RF, IGH_WGS84_A,
 };
 use crate::projection::ProjectionKind;
 use crate::EARTH_RADIUS_M;
@@ -94,6 +94,9 @@ pub enum Crs {
         false_easting: f64,
         false_northing: f64,
     },
+    /// WGS84 UTM (EPSG 326zz north, 327zz south): the per-cell CRS of
+    /// the GEM-15 elevation models.
+    Utm { zone: u8, north: bool },
 }
 
 impl Crs {
@@ -123,6 +126,18 @@ impl Crs {
         {
             return Ok(Crs::InterruptedGoodeHomolosine);
         }
+        if let Some(code) = trimmed
+            .to_ascii_uppercase()
+            .strip_prefix("EPSG:")
+            .and_then(|code| code.parse::<u32>().ok())
+        {
+            if (32601..=32660).contains(&code) {
+                return Ok(Crs::Utm { zone: (code - 32600) as u8, north: true });
+            }
+            if (32701..=32760).contains(&code) {
+                return Ok(Crs::Utm { zone: (code - 32700) as u8, north: false });
+            }
+        }
         if trimmed.eq_ignore_ascii_case("EPSG:4326")
             || trimmed.eq_ignore_ascii_case("EPSG:4269")
         {
@@ -131,7 +146,8 @@ impl Crs {
         Err(StaticError::Invalid(format!(
             "crs_override {text:?} is not in the raster substrate's \
              closed CRS inventory (known: the SoilGrids Interrupted \
-             Goode Homolosine proj string, EPSG:4326, EPSG:4269)"
+             Goode Homolosine proj string, EPSG:4326, EPSG:4269, WGS84 \
+             UTM EPSG:32601-32660 and EPSG:32701-32760)"
         )))
     }
 
@@ -139,6 +155,7 @@ impl Crs {
     pub(crate) fn point_projection(&self) -> Result<Box<dyn PointProjection>> {
         Ok(match self {
             Crs::Geographic => Box::new(GeographicIdentity),
+            Crs::Utm { zone, north } => Box::new(Utm::new(*zone, *north)),
             Crs::InterruptedGoodeHomolosine => Box::new(Igh::new(IGH_WGS84_A)),
             Crs::AlbersConusNad83 {
                 lat_1,

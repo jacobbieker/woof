@@ -46,6 +46,14 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "03e61ca45f970284c5df2ab58ba43792de797153b3a596f203510fe329d5a63d",
+    "constructor": "ElementwiseKernel",
+    "factory": "_accumulate_scaled_kernel",
+    "factory_sha256": "3a0afb77aadbc7261b0b25d7c534de2df4e424293bdc3e28bc732b0d0f6c670e",
+    "file": "woof/core/bandwidth_glue.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "046a60590144606884ab5848e97953705c2eddf11ecf76811915ab5a085b0a4c",
     "constructor": "compile_using_nvrtc",
     "factory": "_module",
@@ -531,6 +539,14 @@
     "factory": "_module_on",
     "factory_sha256": "8d497c22deef74f7ca648e8ff7696b359242e4958c80df4b26996b3c8593c269",
     "file": "woof/hex/mpas_seaice/velocity_v842.py",
+    "status": "unresolved"
+   },
+   {
+    "call_sha256": "35dc95af1e6af5736e37b12b489fc13797c51251cba634f0639af47323fdbd62",
+    "constructor": "ElementwiseKernel",
+    "factory": "_frame_kernel",
+    "factory_sha256": "f1d460bcc54306a0e986aced702d224392e456501d1fdfe20c452a53a18406b3",
+    "file": "woof/core/ring_frame.py",
     "status": "unresolved"
    },
    {
@@ -1593,7 +1609,7 @@
     "call_sha256": "a51727b229a7530f5460443040105b95727ad0e84b3e2a245f58cb6d1f2799ea",
     "constructor": "RawModule",
     "factory": "_compile_module",
-    "factory_sha256": "ea989be88c1842a5948418908a36428fe999b67fc309251f7615ce4b5469da40",
+    "factory_sha256": "b26961c9791143b79941733f27171272ff7f93ef73eef97b43fa5d0f90ff6585",
     "file": "woof/hex/mpasphys/noah_v842.py",
     "status": "unresolved"
    },
@@ -2568,6 +2584,10 @@
     "sha256": "014cd83469ecca52a4c357df30ec3039b8ab07bf2b140455d750f977d8170c8c"
    },
    {
+    "file": "woof/core/kernels/chem_activation.cu",
+    "sha256": "87f345c64f4249ef75ba28aee40351d96ceb690507c6aa987d6bce22b31791a4"
+   },
+   {
     "file": "woof/core/kernels/chem_ageing.cu",
     "sha256": "895cc8c46773b5354ed05cbcd1a703babdba536fc54f0d2dc2bea5c578f33be0"
    },
@@ -2602,6 +2622,10 @@
    {
     "file": "woof/core/kernels/chem_ledger.cu",
     "sha256": "b5d47493bc53b8ce243799b3513bbd6c8b42a22133a055587af36519e9a6528e"
+   },
+   {
+    "file": "woof/core/kernels/chem_modal_optics.cu",
+    "sha256": "d320574ffe24079ab5d05a1555e2d8d4b68c054f479806fe4074d19593df797b"
    },
    {
     "file": "woof/core/kernels/chem_mp_coupling.cu",
@@ -4827,7 +4851,7 @@
    },
    {
     "file": "woof/backend/facade/__init__.py",
-    "sha256": "d19aa5aef6f702a6d3fdd5d19cbd4cde5fda072ec234709f843a8a89aafcf8cc"
+    "sha256": "4fec9c3a8257cb401be4db6c6917b0d31e6f5129a69f2ab5acda6490bb21c72d"
    },
    {
     "file": "woof/backend/facade/_elementwise.py",
@@ -4839,7 +4863,7 @@
    },
    {
     "file": "woof/backend/facade/cuda.py",
-    "sha256": "2d96755cb39894691803c87e803b9cf47450a729ec3f50d28e2364602388a8f2"
+    "sha256": "5330953e2daef167950e33a49cd61c7318f1da25a1c628b1ce632b9951547e70"
    },
    {
     "file": "woof/backend/host/loader.py",
@@ -4855,7 +4879,7 @@
    },
    {
     "file": "woof/backend/translate/__init__.py",
-    "sha256": "f2e538487af75319d17c7e9081184daf7dcf8c9d55434e1fd15194529bb552ad"
+    "sha256": "6efea28c437e13d21e8caa9ba29249d09aad6a8e5517129f4e827585e2441810"
    },
    {
     "file": "woof/chem_micm.py",
@@ -4874,6 +4898,10 @@
     "sha256": "01cc4853f547d66f3102ffb3b66a1179bafd9c8e9237db24dc2c6ee07e4a3205"
    },
    {
+    "file": "woof/core/bandwidth_glue.py",
+    "sha256": "7c451749f1d9d3ffc08c2fcb04f80d2e7ff943c26bf934e45a12a53103ae84aa"
+   },
+   {
     "file": "woof/core/cam3_fast.py",
     "sha256": "c52101c69905f441b0bd15a299ff11237363db261906722a437dd26ba408808e"
    },
@@ -4883,7 +4911,7 @@
    },
    {
     "file": "woof/core/chem_radm2.py",
-    "sha256": "20b1b4b0c5faaaa2442a292f3e039d3a9c20473bff1e25815f2ed33d2194c578"
+    "sha256": "0e42b23f95cde5cc3fe5bfb6d8b9ac8e97e600dbe5ba31fbba2b04dc84892f7c"
    },
    {
     "file": "woof/core/chem_sfire.py",
@@ -4911,7 +4939,7 @@
    },
    {
     "file": "woof/core/dycore.py",
-    "sha256": "a53720792233d2c8eafa30ed2d8e51fd07d35b4ff5efa9dbbf30e6ce2bbc98cd"
+    "sha256": "3ce8e729efdf653b0a7d70526d1159db9601e11f9bd041579dd902e85d43b94a"
    },
    {
     "file": "woof/core/etanew.py",
@@ -4951,7 +4979,7 @@
    },
    {
     "file": "woof/core/kernels/__init__.py",
-    "sha256": "229e5efd3d4d7e1583de06b3cd8305af13236d65f7d419a6d32fa3ac035d3370"
+    "sha256": "efc1495372db3d6584a34d75dd6e9135df2e2114e627b88efb94242b9195d22d"
    },
    {
     "file": "woof/core/kernels/no_ftz.py",
@@ -4971,7 +4999,7 @@
    },
    {
     "file": "woof/core/moist.py",
-    "sha256": "dc32422168ecb138ddfc712a1d419df7313ab6dd71b1f06a5b13f65f66a927d6"
+    "sha256": "d660aec5524583ceb2d91cdc0311a0c726d3051144e2bc57d412031396ae007c"
    },
    {
     "file": "woof/core/morrison.py",
@@ -5067,15 +5095,19 @@
    },
    {
     "file": "woof/core/physics.py",
-    "sha256": "def8eba8e95ad61ddd7f3b54060b42869251dbbc740f22d9ef94340c5877b3f5"
+    "sha256": "8e369dc3fc6ec64ee864f2927f6cd743ce0e169f1b1d11e374e267f24b0e6602"
    },
    {
     "file": "woof/core/preflight.py",
-    "sha256": "373010dc45b2e629407787b41bc018a0dc014d323009d6f6b791ae5f523bb497"
+    "sha256": "8266f0f80c8947a3f46e57878f6dff7b66165f0abcd14f6e8c669c4dc24b36b0"
    },
    {
     "file": "woof/core/refl.py",
     "sha256": "512956ce1475d7385a88b356c8df67298880866959e9f8274fe7314bc0ce1c45"
+   },
+   {
+    "file": "woof/core/ring_frame.py",
+    "sha256": "cece2244359a6d005dd53b3c571c5d205ee97ce7619fed5a68dd2c7eb1229e4e"
    },
    {
     "file": "woof/core/rrtm_lw.py",
@@ -5335,7 +5367,7 @@
    },
    {
     "file": "woof/hex/cuda_backend/aot.py",
-    "sha256": "0dbed14e756a23cba269625e28cde65af43d26f6149c4afa74c2749dbf56ccbc"
+    "sha256": "a6c9509b7904c08160b53af91e118d860f77fe3e8c398dd395af5c16c77c04b9"
    },
    {
     "file": "woof/hex/cuda_backend/aot_build.py",
@@ -5699,7 +5731,7 @@
    },
    {
     "file": "woof/hex/mpasphys/noah_v842.py",
-    "sha256": "121b55891d906a6af7e5b6957dddeab8a2e3eaea303415991f76dc3fa9ab6487"
+    "sha256": "13cbe971da5ddb820ac7d10beb74ee2d51c21051f78a624076353b74387dc98a"
    },
    {
     "file": "woof/hex/mpasphys/ntiedtke_v842.py",
@@ -5727,7 +5759,7 @@
    },
    {
     "file": "woof/hex/mpasphys/resources_build.py",
-    "sha256": "a5212f37ed5586abb1a697f3f92d839b64b0223c9a3c9fcdd153a54969dce1a1"
+    "sha256": "ed9ff952a14afa504ad4f93e44651d868bfa8b65b16e0886b74f97a7b865beb7"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/bl_mynnedmf_c6d08709.py",
@@ -5747,7 +5779,7 @@
    },
    {
     "file": "woof/hex/mpasphys/rrfs/framework_init_rrfs.py",
-    "sha256": "d39dd7661c878ce8e5362b61e40a66450956dd03dfb1b4aef0615d0bf2c724df"
+    "sha256": "741098d7ad8540a460768c39153a8cafbce0c8b2e7cbdf1f1150d61d4db0f759"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/glue_plan.py",
@@ -10399,6 +10431,53 @@
    },
    "source_sha256": "ac21798675be906ae4c069cdd944c43cfcee1c5a857d36463f2d749393f175c4"
   },
+  "kernels:chem_activation": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "9086266f835307c8894740eba357f2e77073eb5cd6f3c91c004abb54ab71b031",
+    "sites": {
+     "100": 49
+    }
+   },
+   "native_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "768cae0d1b8a76a63d12ea4b4028d01553ea1ff637edc3f130b553261076af88"
+  },
   "kernels:chem_ageing": {
    "assessment": "static_diagnostic_only",
    "coverage": "compiled",
@@ -10823,6 +10902,53 @@
     ]
    },
    "source_sha256": "2d7dcccc0ac8ae3e7be9bf723b176f9b048dd9b5ee36f44efbec77a4ecf31219"
+  },
+  "kernels:chem_modal_optics": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "dbe6b9635c5e9013d1ab561c281be39f14d77901240915ea55198df2b60aab63",
+    "sites": {
+     "100": 34
+    }
+   },
+   "native_differences": {
+    "sha256": "6d816edd09bfc0aeb9f675a62d098c1e6f25ccdbcbb8e7e0b5b338d5dfd9aa82",
+    "sites": {
+     "100": 2
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "a647583e9d95afe7b815e08bbee58d9f4fcebf5f231ebcde5f24a70572ddf1fa"
   },
   "kernels:chem_mp_coupling": {
    "assessment": "static_diagnostic_only",

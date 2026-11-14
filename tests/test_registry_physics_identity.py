@@ -1471,12 +1471,14 @@ def test_without_the_configuration_an_added_knob_is_named(monkeypatch):
                    and spec.get("implemented", True))
     # These declarations belong only to options this fixture does not select.
     # Keep the list explicit so a newly dropped active part still fails.
+    # aercu_fct and ocean_mld_climatology left this set when they cited
+    # their reads (woof/core/column_cumulus.py, woof/core/surface_ocean.py).
     unread = {
-        "aercu_fct", "bmj_rad_feedback", "cam_abs_freq_s", "co2tf",
+        "bmj_rad_feedback", "cam_abs_freq_s", "co2tf",
         "convtrans_avglen_m", "cu_diag", "cugd_avedx", "ensdim",
         "fractional_seaice", "ifsnow", "maxens", "maxens2", "maxens3",
         "maxiens", "mfshconv", "mynn_sfclay_variant", "nsas_dx_factor",
-        "num_urban_hi", "ocean_mld_climatology", "ruc_2m_diagnostic",
+        "num_urban_hi", "ruc_2m_diagnostic",
         "ruc_irrigation", "ruc_qvg_cold_start", "ruc_snow", "ruc_soilprop",
         "sas_pgcon", "scalar_pblmix", "sf_lake_physics",
         "thompson_fork_snow_fall", "thompson_version", "urban_fvg",

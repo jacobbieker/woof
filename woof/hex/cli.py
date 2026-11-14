@@ -206,7 +206,7 @@ def _static_highres(arguments: argparse.Namespace) -> int:
 
 #: ``woof hex static-highres`` choices; held equal to
 #: ``static_highres.TERRAIN_CHOICES``/``LANDUSE_CHOICES`` by a test.
-STATIC_HIGHRES_TERRAIN = ("glo30", "none")
+STATIC_HIGHRES_TERRAIN = ("gem15-dsm", "gem15-dtm", "glo30", "none")
 STATIC_HIGHRES_LANDUSE = ("cglc", "none")
 STATIC_HIGHRES_MAX_SPACING_KM = 2.0
 
@@ -235,7 +235,9 @@ def _add_static_highres_parser(commands) -> None:
     parser.add_argument("--terrain", choices=STATIC_HIGHRES_TERRAIN,
                         default="glo30",
                         help="terrain source (default glo30: Copernicus DEM "
-                             "GLO-30); none keeps ter")
+                             "GLO-30; gem15-dtm / gem15-dsm: the experimental "
+                             "15 m GEM-15 bare-earth / surface models, GLO-30 "
+                             "where GEM-15 does not serve); none keeps ter")
     parser.add_argument("--landuse", choices=STATIC_HIGHRES_LANDUSE,
                         default="none",
                         help="land-use source (cglc: CGLC-MODIS-LCZ 100 m, a "

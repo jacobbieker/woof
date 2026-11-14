@@ -61,8 +61,15 @@ def test_classic_default_kernel_sources_and_options_are_unchanged():
     # Protect legacy modules, including composed strict headers. Other admitted
     # ports have their own source/options checks and intentionally new loaders.
     import subprocess
+    from pathlib import Path
     from woof.core import kernels
-    source=subprocess.check_output(['git','show','4123f1916e3:woof/core/kernels/__init__.py'],text=True)
+    root=Path(__file__).resolve().parents[1]
+    if subprocess.run(['git','cat-file','-e','4123f1916e3:woof/core/kernels/__init__.py'],
+                      cwd=root,capture_output=True).returncode:
+        pytest.skip("the commit 4123f1916e is not in this clone (a shallow "
+                    "checkout, as on a hosted runner); the comparison needs "
+                    "full history")
+    source=subprocess.check_output(['git','show','4123f1916e3:woof/core/kernels/__init__.py'],text=True,cwd=root)
     old={'__name__':'woof.core.kernels','__package__':'woof.core.kernels','__file__':kernels.__file__}
     exec(compile(source,'candidate-kernel-loader','exec'),old)
     checked=0
@@ -72,7 +79,8 @@ def test_classic_default_kernel_sources_and_options_are_unchanged():
                   # The lightning lane changed its fast FMA policy.
                   'lightning'}
     candidate_paths = subprocess.check_output(
-        ['git', 'ls-tree', '--name-only', '4123f1916e3:woof/core/kernels'], text=True).splitlines()
+        ['git', 'ls-tree', '--name-only', '4123f1916e3:woof/core/kernels'], text=True,
+        cwd=root).splitlines()
     for name in candidate_paths:
         if not name.endswith('.cu'): continue
         path = kernels._KDIR / name

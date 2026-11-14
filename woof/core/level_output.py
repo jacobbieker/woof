@@ -50,11 +50,13 @@ def capture_atmosphere(state, cfg, atmosphere):
 
 def _due(cfg, seconds, *, initial=False):
     due = []
-    for prefix, stream in (('p', 23), ('z', 22)):
+    for prefix, calculation, stream_interval in (
+            ('p', 'p_lev_interval_s', 'auxhist23_interval_s'),
+            ('z', 'z_lev_interval_s', 'auxhist22_interval_s')):
         if not getattr(cfg, prefix+'_lev_diags'):
             continue
-        interval = (getattr(cfg, prefix+'_lev_interval_s')
-                    or getattr(cfg, f'auxhist{stream}_interval_s'))
+        interval = (getattr(cfg, calculation)
+                    or getattr(cfg, stream_interval))
         if initial or cfg.use_adaptive_time_step or (
                 int(math.floor(seconds+.5)) % int(math.floor(interval+.5)) == 0):
             due.append(prefix)

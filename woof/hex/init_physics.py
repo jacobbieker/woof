@@ -90,10 +90,13 @@ def mpas_v842_selection(suite, land_surface):
     caller that names the suite for both the init and the forecast, as it does on the WOOF route, stopped.
     """
     from .errors import MpasPortError
-    if land_surface == "ruc":
-        # THE BREAKAGE THIS PREVENTS: RUC's nine soil levels in an init whose suite's land model reads four.
+    if land_surface not in (None, "noah", "noahmp"):
+        # THE BREAKAGE THIS PREVENTS: RUC's nine, the slab's five or Pleim-Xiu's two soil levels in an init whose
+        # suite's land model reads four.
+        from .init_door import LAND_SURFACE_SOIL_LEVELS
         raise MpasPortError(f"--physics-suite {suite} is an MPAS-A v8.4.2 suite, whose land models (Noah, Noah-MP) "
-                            "read four soil levels, and --land-surface ruc writes nine; drop --land-surface ruc")
+                            f"read four soil levels, and --land-surface {land_surface} writes "
+                            f"{LAND_SURFACE_SOIL_LEVELS.get(land_surface, '?')}; drop --land-surface {land_surface}")
     return {"land_surface": land_surface or "noah", "scalar_names": (),
             "physics_initialization": {
                 "suite": suite, "route": "mpas-suite (MPAS-A v8.4.2)",

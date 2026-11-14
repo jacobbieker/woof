@@ -74,7 +74,7 @@ class WRFCompatibilityCell:
 # verdict count by 10/6 and the pinned counts in
 # tests/test_wrf461_compatibility.py were re-measured off the enlarged
 # matrix rather than projected.
-MP_OPTIONS = (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 18, 24, 26, 28, 30, 38, 40, 50, 51, 52, 53, 55, 56, 95, 97, 106)
+MP_OPTIONS = (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 18, 24, 26, 28, 30, 38, 40, 50, 51, 52, 53, 55, 56, 95, 96, 97, 106)
 # 11 (Shin-Hong) joined the PBL axis with the Shin-Hong port: an implemented
 # scheme with a certified oracle (max ULP 0 CPU authority against the
 # byte-frozen WRF v4.6.1 module_bl_shinhong.F,
@@ -194,6 +194,13 @@ AXIS_EXCLUSIONS = MappingProxyType({
         "cell is refused by woof.config.validate_myj_pairing for its own "
         "reason (the TKE_MYJ scan). A row here would be a second "
         "authority over questions that already have one."),
+    ("mp_physics", 27): (
+        "UDM is ported from WRF v4.7.1 (Registry.EM_COMMON:3040 udmscheme); "
+        "WRF v4.6.1, which this matrix transcribes, has no mp_physics=27 "
+        "package, so there is no v4.6.1 citation for the axis to carry."),
+    ("mp_physics", 29): (
+        "RCON is ported from WRF v4.7.1 (Registry.EM_COMMON:3053 "
+        "rcon_mp_scheme); WRF v4.6.1 has no mp_physics=29 package to cite."),
     ("bl_pbl_physics", 901): ("CCPP TKE-EDMF has no WRF selector counterpart; its admission follows its own registry metadata."),
     ("bl_pbl_physics", 12): (
         "GBM's WRF law is one surface-layer fatal, stronger than a matrix "
@@ -249,6 +256,8 @@ _MP_CITATION = MappingProxyType({
         "the fast spectral bin package binds mp_physics=30"),
     95: WRFCitation("Registry/Registry.EM_COMMON", "3045",
         "WRF declares the mp_physics=95 package and its own carried species"),
+    96: WRFCitation("Registry/Registry.EM_COMMON", "3047",
+        "the madwrf_mp package binds mp_physics=96"),
     0: WRFCitation(
         "Registry/Registry.EM_COMMON", "3014",
         "the passiveqv package binds mp_physics=0 and allocates qv alone"),

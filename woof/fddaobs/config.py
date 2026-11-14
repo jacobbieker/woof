@@ -26,6 +26,20 @@ def validate(c):
                 "obs_sfcfact", "obs_sfcfacr", "obs_twindo", "obs_rinxy", "obs_dpsmx"):
         if not math.isfinite(getattr(c, key)) or getattr(c, key) < 0:
             raise ValueError(f"{key} must be finite and nonnegative")
+    # WRF v4.7.1 reads these only for diagnostic prints (obs_rinsig is
+    # printed in wrf_fddaobs_in.F, never used as a weight: the obs_nudgez*
+    # depths replaced it) or not at all (obs_coef_pstr: Registry "Not used").
+    # Neither changes a tendency, so woof carries them and checks their type.
+    for key in ("obs_coef_pstr", "obs_rinsig"):
+        value = getattr(c, key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+            raise ValueError(f"{key} must be a finite number")
+    for key in ("obs_npfi", "obs_prt_max", "obs_prt_freq"):
+        if type(getattr(c, key)) is not int:
+            raise ValueError(f"{key} must be an integer")
+    for key in ("obs_ipf_in4dob", "obs_ipf_errob", "obs_ipf_nudob", "obs_ipf_init"):
+        if not isinstance(getattr(c, key), bool):
+            raise ValueError(f"{key} must be a logical")
     if c.obs_idynin and c.obs_dtramp == 0:
         raise ValueError("WRF observation dynamic initialization divides by obs_dtramp; use a nonzero ramp")
     if c.map_proj not in (1, 2, 3):

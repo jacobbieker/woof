@@ -50,19 +50,6 @@ from woof.core.diff6_edge_workspace import (
     plane_shapes as diff6_edge_plane_shapes,
     planes_values as diff6_edge_planes_values)
 from woof.core import health_ledger
-from woof.core import ieva
-from woof.core.bandwidth_glue import (
-    capture_theta_forcing, prepare_add_arrays,
-    total_theta as _glue_total_theta)
-from woof.core.ieva import stage_face_masses
-from woof.core.kernels import get_kernel, get_kernel_int_defines
-from woof.core.smag2d import scalar_index32_fits
-from woof.core.microphysics import apply as apply_microphysics
-from woof.core.moist import (SPECIES, WRF_MOIST_ARRAY_SPECIES,
-                              extra_moist_species, advance_scalars_stage)
-from woof.core.moist_n2_mutation import calc_n2_kernel
-from woof.core.physics import physics_enabled
-from woof.core import tke_budget
 from woof.core import interval_diagnostics
 from woof.core.state import (DTYPE, DomainState, mu_at_u_faces,
                               mu_at_v_faces)

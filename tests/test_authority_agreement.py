@@ -1656,15 +1656,20 @@ def test_every_implemented_scheme_couples_to_rte_rrtmgp_at_plan_review():
     # SBU-YLin (13) and NTU (56) landed with the same judged exclusion as
     # Lin: neither hands radiation radii (NTU is absent from WRF's use_mp_re
     # disjunction), and each row names the legacy-RRTMG remedy.
-    assert uncoupled == [2, 13, 30, 56], (
+    # 1.1.6 added three more, each with its row in
+    # woof.core.rrtmgp._NO_CLOUD_OPTICS_COUPLING: UDM (27, its radius routine
+    # reads uninitialized den1d), Eta Ferrier (95, no qualified optics) and
+    # MAD-WRF (96, passive hydrometeors with no radii or moments).
+    assert uncoupled == [2, 13, 27, 30, 56, 95, 96], (
         "a scheme publishes a null RTE+RRTMGP coupling other than the "
-        f"judged FAST_SBM, Lin, SBU-YLin and NTU exclusions: {uncoupled}")
-    for mp in (13, 56):
+        "judged FAST_SBM, Lin, SBU-YLin, NTU, UDM, Eta Ferrier and MAD-WRF "
+        f"exclusions: {uncoupled}")
+    for mp in (13, 27, 56, 95, 96):
         assert "rrtmg_legacy" in rows[mp]["rte_rrtmgp_refusal"]
     assert rows[30]["rte_rrtmgp_refusal"] is not None
     # MAD-WRF (mp=96): passive hydrometeors, no size distribution
     # (WRF's use_mp_re = 0), so radiation computes its own radii.
-    assert "MAD-WRF's passive hydrometeors" in rows[96]["rte_rrtmgp_refusal"]
+    assert "MAD-WRF declares no effective radii" in rows[96]["rte_rrtmgp_refusal"]
     # Lin (mp=2) has no effective-radius output at all (Registry.EM_COMMON:3016).
     assert "Lin supplies no effective radii" in rows[2]["rte_rrtmgp_refusal"]
     assert rows[9]["rte_rrtmgp_coupling"] == "milbrandt2"
@@ -1673,14 +1678,25 @@ def test_every_implemented_scheme_couples_to_rte_rrtmgp_at_plan_review():
     for mp in sorted(rows):
         if mp == 0:
             continue
+        if mp == 29:
+            # RCON-SPEED-01 (woof/config.py) refuses every mp=29 run until its
+            # speed proof is handed off, so no radiation pairing is reachable;
+            # the registry's implemented row against that door is reported by
+            # test_every_reachable_plan_the_registry_calls_launchable_actually_validates.
+            continue
         kwargs = dict(_GEOMETRY, moist=True, mp_physics=mp,
                       ra_lw_physics=4, ra_sw_physics=4, cu_physics=0,
                       bl_pbl_physics=1, sf_sfclay_physics=91,
                       sf_surface_physics=2, num_soil_layers=4)
         refusal = _config_refusal(dict(kwargs), nested=False)
         if rows[mp]["rte_rrtmgp_coupling"] is None:
-            # The run door refuses before step 0, naming the remedy.
-            assert refusal is not None and "cloud-optics" in refusal, (mp, refusal)
+            # The run door refuses before step 0, naming the remedy.  UDM and
+            # Eta Ferrier are refused earlier by their own validators, each
+            # with its own reason; the generic cloud-optics refusal names the
+            # rest.
+            own_reason = {27: "module_mp_udm.F:411",
+                          95: "no total-ice partition"}.get(mp, "cloud-optics")
+            assert refusal is not None and own_reason in refusal, (mp, refusal)
             assert "rrtmg_legacy" in refusal, (mp, refusal)
         else:
             assert refusal is None, (mp, refusal)
@@ -1952,6 +1968,11 @@ class _HandoffState:
 
     def __init__(self):
         self.physics = SimpleNamespace(refl_10cm=np.zeros((1,)))
+
+    def existing_scratch(self, slot):
+        # DomainState.existing_scratch never allocates; this tile holds no
+        # history-theta slot, so the hook skips that copy.
+        return None
 
 
 def test_a_store_without_the_reflectivity_slot_is_left_alone():
@@ -2235,9 +2256,10 @@ def test_the_consumer_export_for_the_rust_crates_matches_the_registry():
         inventory = consumer_rows_by_selector("microphysics", "stock_wrf_export")[mp]
         assert row["stock_wrf_export_inventoried"] is bool(inventory["inventoried"])
     # HAILNC is filled by the admitted hail-bearing schemes: Milbrandt-Yau,
-    # NSSL and WSM7, then Goddard four-ice, WDM7 and NTU from their ports.
+    # NSSL and WSM7, then Goddard four-ice, WDM7 and NTU from their ports,
+    # and UDM (WRF 4.7.1 module_microphysics_driver.F passes HAIL=hailnc).
     assert export["scheme_bound_precipitation_fields"]["HAILNC"] == [
-        7, 9, 18, 24, 26, 56]
+        7, 9, 18, 24, 26, 27, 56]
 
 
 def test_every_transcribed_axis_covers_the_selectable_set_or_declares_why():

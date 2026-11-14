@@ -1837,6 +1837,16 @@ _PHYSICS_ALLOCATION_INVENTORY['woof/core/chem_sorgam.py'] = {
     'launch_sorgam': 1, 'launch_sorgam_drydep': 1,
     'launch_sorgam_sum_pm': 1, 'launch_sorgam_ic': 1}
 
+# Clean-room activation (P8): the per-case defaults and the kernel's
+# outputs (6 (nmode, ncase) planes, flux_fullact and smax), per call.
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/chem_activation.py'] = {
+    'per_case': 1, 'launch_activation': 3}
+# Clean-room SORGAM optics (P9): the kernel's four output arrays per
+# radiation refresh (tau, ssa, g (4, ncell); LW tau (16, ncell)) and the
+# class-volume stack (18, ncell); bounded by memory_shapes' 28 + 91 planes.
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/chem_modal_optics.py'] = {
+    'launch_modal_optics': 4, 'sorgam_volumes': 1}
+
 def test_no_physics_gpu_module_allocates_outside_its_workspace():
     """The property, not the instance: scan every physics GPU module.
 

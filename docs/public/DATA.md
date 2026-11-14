@@ -1141,6 +1141,7 @@ does not cover keep the 30-arc-second baseline.
 | land use (default) | CGLC-MODIS-LCZ (Demuzere, He, Martilli, Zonato 2023, doi:10.5281/zenodo.7670653), one 2.28 GB GeoTIFF fetched once and checked against its published size and MD5 | 100 m, 2018 | 60 S to 78 N, all longitudes | CC BY 4.0, attribution required |
 | land use (`landcover_source = "annual-nlcd"`) | Annual NLCD Collection 1 (MRLC), the year nearest the case | 30 m | conterminous United States | public domain |
 | terrain (default abroad) | Copernicus DEM GLO-30 | ~30 m | 90 S to 84 N | Copernicus DEM licence, attribution required |
+| terrain (experimental, named only) | GEM-15 v1 DTM / DSM (Google) | 15 m | 61 S to 84 N, without Russia, China, Mongolia, Greenland, Antarctica; India offset | CC BY 4.0, "This dataset is produced by Google" |
 | terrain (default in the US) | USGS 3DEP 1/3 arc-second | ~10 m | conterminous United States | public domain |
 | terrain (on request) | SRTM 1 arc-second v3 (OpenTopography mirror) | ~30 m | 56 S to 60 N | public domain |
 | soil texture | SoilGrids v2 (ISRIC WCS) | 250 m | global | CC BY 4.0, attribution required |

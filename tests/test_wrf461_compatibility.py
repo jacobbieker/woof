@@ -122,7 +122,7 @@ def test_matrix_has_every_cell_every_citation_and_pinned_counts():
     # Integrated axes: 806,400 cells. Counts were measured in
     # logs/batch008-matrix-counts.json and checked by the full admission walk.
     cells = tuple(iter_compatibility_matrix())
-    assert len(cells) == MATRIX_CELL_COUNT == 806400
+    assert len(cells) == MATRIX_CELL_COUNT == 831600
     assert len({
         (
             cell.mp_physics,
@@ -172,18 +172,21 @@ def test_matrix_has_every_cell_every_citation_and_pinned_counts():
     # axis with the new schemes in it.
     # cu_physics=10 adds its independent Registry axis. Counts below were
     # read from the enlarged matrix: 38080 -> 43520, a factor of 8/7.
+    # mp_physics=96 (MAD-WRF, Registry.EM_COMMON:3047) joined the mp axis
+    # (806400 -> 831600): every verdict scaled by exactly 33/32, read off
+    # the enlarged matrix.
     assert Counter(cell.verdict for cell in cells) == {
-        WRFVerdict.LEGAL_RECONFIGURED: 49920,
-        WRFVerdict.NOT_EXPRESSIBLE: 74880,
-        WRFVerdict.LEGAL: 252480,
-        WRFVerdict.FATAL: 429120,
+        WRFVerdict.LEGAL_RECONFIGURED: 51480,
+        WRFVerdict.NOT_EXPRESSIBLE: 77220,
+        WRFVerdict.LEGAL: 260370,
+        WRFVerdict.FATAL: 442530,
     }
     # Every represented cumulus value carries its own Registry citation,
     # on the same terms the mp assertion below states.
     assert {cell.cu_physics for cell in cells} == {0, 1, 2, 3, 96, 5, 6, 99, 10, 11, 14, 16, 93, 94, 95}
     # Every represented mp value carries its own Registry citation, so the
     # matrix cannot grow an axis value that is admitted without one.
-    assert {cell.mp_physics for cell in cells} == {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 18, 24, 26, 28, 30, 38, 40, 50, 51, 52, 53, 55, 56, 95, 97, 106}
+    assert {cell.mp_physics for cell in cells} == {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 18, 24, 26, 28, 30, 38, 40, 50, 51, 52, 53, 55, 56, 95, 96, 97, 106}
     assert WRF_COMMIT == "d66e442fccc04111067e29274c9f9eaccc3cef28"
 
 

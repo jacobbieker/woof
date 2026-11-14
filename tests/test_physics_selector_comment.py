@@ -1,5 +1,6 @@
 """Explicit generation metadata survives WRF-compatible route files."""
 from pathlib import Path
+import re
 import tomllib
 
 import pytest
@@ -12,6 +13,20 @@ FIXTURE = Path(__file__).parent / "fixtures/source_requests"
 MARKER = "! gpuwm-physics-selectors-v1: "
 
 
+def _unnamed_hrrr_text():
+    """The HRRR fixture as a stock WRF namelist.input.
+
+    Named hrrr_wrf.nl, its output_diagnostics = 1 is the NOAA fork's
+    diagnostics switch.  Unnamed, the importer reads stock WRF, where it is
+    CLWRF and WRF fatals without an auxhist3_interval; these tests are about
+    the selector comment, so the unnamed copy turns that switch off.
+    """
+    text = (FIXTURE / "hrrr_wrf.nl.c18c").read_text()
+    unnamed = re.sub(r"(?m)^(\s*output_diagnostics\s*=\s*)1\b", r"\g<1>0", text)
+    assert unnamed != text
+    return unnamed
+
+
 def test_omitted_metadata_preserves_exact_namelist_bytes():
     text = (FIXTURE / "hrrr_wrf.nl.c18c").read_text()
     assert read_physics_selector_comment(text) == {}
@@ -21,7 +36,7 @@ def test_omitted_metadata_preserves_exact_namelist_bytes():
 @pytest.mark.parametrize("value", ("gsl_wrf39", "wrf_461"))
 def test_explicit_metadata_survives_an_unnamed_import(tmp_path, value):
     from woof.namelist_import import import_namelists, parse_namelist
-    text = (FIXTURE / "hrrr_wrf.nl.c18c").read_text()
+    text = _unnamed_hrrr_text()
     carried = with_physics_selector_comment(text, {"mynn_sfclay_variant": value})
     assert with_physics_selector_comment(carried, {"mynn_sfclay_variant": value}) is carried
     original = tmp_path / "control.input"
@@ -74,7 +89,7 @@ def test_urban_water_balance_generation_survives_an_unnamed_import(tmp_path, val
     comment refused the key before it had a row, and the old rule could not
     ride a WRF route file."""
     from woof.namelist_import import import_namelists
-    text = (FIXTURE / "hrrr_wrf.nl.c18c").read_text()
+    text = _unnamed_hrrr_text()
     carried = with_physics_selector_comment(text, {"urban_water_balance": value})
     assert read_physics_selector_comment(carried) == {"urban_water_balance": value}
     namelist = tmp_path / "namelist.input"

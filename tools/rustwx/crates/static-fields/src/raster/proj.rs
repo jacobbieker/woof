@@ -658,3 +658,145 @@ impl PointProjection for GeographicIdentity {
         (x, y)
     }
 }
+
+// ---------------------------------------------------------------------------
+// WGS84 Universal Transverse Mercator (GEM-15's per-cell CRS).  Krueger
+// series to sixth order in the third flattening (Karney 2011, J. Geodesy
+// 85, 475): nanometre agreement with PROJ's `tmerc` inside a zone and its
+// neighbours.  `woof/static/utm.py` is the same series for the fetch side;
+// the tests hold both to pyproj.
+// ---------------------------------------------------------------------------
+
+pub const WGS84_A: f64 = 6_378_137.0;
+pub const WGS84_RF: f64 = 298.257_223_563;
+
+#[derive(Debug, Clone)]
+pub struct Utm {
+    lon0: f64,
+    false_northing: f64,
+    e: f64,
+    rect: f64,
+    alpha: [f64; 6],
+    beta: [f64; 6],
+}
+
+impl Utm {
+    const K0: f64 = 0.9996;
+    const FALSE_EASTING: f64 = 500_000.0;
+
+    pub fn new(zone: u8, north: bool) -> Self {
+        let f = 1.0 / WGS84_RF;
+        let n = f / (2.0 - f);
+        let (n2, n3, n4, n5, n6) = (n * n, n.powi(3), n.powi(4), n.powi(5), n.powi(6));
+        let alpha = [
+            n / 2.0 - 2.0 * n2 / 3.0 + 5.0 * n3 / 16.0 + 41.0 * n4 / 180.0 - 127.0 * n5 / 288.0
+                + 7891.0 * n6 / 37800.0,
+            13.0 * n2 / 48.0 - 3.0 * n3 / 5.0 + 557.0 * n4 / 1440.0 + 281.0 * n5 / 630.0
+                - 1983433.0 * n6 / 1935360.0,
+            61.0 * n3 / 240.0 - 103.0 * n4 / 140.0 + 15061.0 * n5 / 26880.0
+                + 167603.0 * n6 / 181440.0,
+            49561.0 * n4 / 161280.0 - 179.0 * n5 / 168.0 + 6601661.0 * n6 / 7257600.0,
+            34729.0 * n5 / 80640.0 - 3418889.0 * n6 / 1995840.0,
+            212378941.0 * n6 / 319334400.0,
+        ];
+        let beta = [
+            n / 2.0 - 2.0 * n2 / 3.0 + 37.0 * n3 / 96.0 - n4 / 360.0 - 81.0 * n5 / 512.0
+                + 96199.0 * n6 / 604800.0,
+            n2 / 48.0 + n3 / 15.0 - 437.0 * n4 / 1440.0 + 46.0 * n5 / 105.0
+                - 1118711.0 * n6 / 3870720.0,
+            17.0 * n3 / 480.0 - 37.0 * n4 / 840.0 - 209.0 * n5 / 4480.0 + 5569.0 * n6 / 90720.0,
+            4397.0 * n4 / 161280.0 - 11.0 * n5 / 504.0 - 830251.0 * n6 / 7257600.0,
+            4583.0 * n5 / 161280.0 - 108847.0 * n6 / 3991680.0,
+            20648693.0 * n6 / 638668800.0,
+        ];
+        Utm {
+            lon0: -183.0 + 6.0 * zone as f64,
+            false_northing: if north { 0.0 } else { 10_000_000.0 },
+            e: (f * (2.0 - f)).sqrt(),
+            rect: WGS84_A / (1.0 + n) * (1.0 + n2 / 4.0 + n4 / 64.0 + n6 / 256.0),
+            alpha,
+            beta,
+        }
+    }
+}
+
+impl PointProjection for Utm {
+    fn forward(&self, lon_deg: f64, lat_deg: f64) -> (f64, f64) {
+        let dlon = ((lon_deg - self.lon0 + 180.0).rem_euclid(360.0) - 180.0).to_radians();
+        let sin_phi = lat_deg.to_radians().sin();
+        let tau = (sin_phi.atanh() - self.e * (self.e * sin_phi).atanh()).sinh();
+        let xi_p = tau.atan2(dlon.cos());
+        let eta_p = (dlon.sin() / (1.0 + tau * tau).sqrt()).atanh();
+        let (mut xi, mut eta) = (xi_p, eta_p);
+        for (j, alpha) in self.alpha.iter().enumerate() {
+            let k = 2.0 * (j + 1) as f64;
+            xi += alpha * (k * xi_p).sin() * (k * eta_p).cosh();
+            eta += alpha * (k * xi_p).cos() * (k * eta_p).sinh();
+        }
+        let scale = Self::K0 * self.rect;
+        (
+            Self::FALSE_EASTING + scale * eta,
+            scale * xi + self.false_northing,
+        )
+    }
+
+    fn inverse(&self, x_m: f64, y_m: f64) -> (f64, f64) {
+        let scale = Self::K0 * self.rect;
+        let xi = (y_m - self.false_northing) / scale;
+        let eta = (x_m - Self::FALSE_EASTING) / scale;
+        let (mut xi_p, mut eta_p) = (xi, eta);
+        for (j, beta) in self.beta.iter().enumerate() {
+            let k = 2.0 * (j + 1) as f64;
+            xi_p -= beta * (k * xi).sin() * (k * eta).cosh();
+            eta_p -= beta * (k * xi).cos() * (k * eta).sinh();
+        }
+        let tau_p = xi_p.sin() / (eta_p.sinh().powi(2) + xi_p.cos().powi(2)).sqrt();
+        let e2 = self.e * self.e;
+        let mut tau = tau_p;
+        for _ in 0..6 {
+            let sigma = (self.e * (self.e * tau / (1.0 + tau * tau).sqrt()).atanh()).sinh();
+            let tau_i = tau * (1.0 + sigma * sigma).sqrt() - sigma * (1.0 + tau * tau).sqrt();
+            tau += (tau_p - tau_i) / (1.0 + tau_i * tau_i).sqrt()
+                * ((1.0 + (1.0 - e2) * tau * tau) / ((1.0 - e2) * (1.0 + tau * tau).sqrt()));
+        }
+        let lon = self.lon0 + eta_p.sinh().atan2(xi_p.cos()).to_degrees();
+        (
+            (lon + 180.0).rem_euclid(360.0) - 180.0,
+            tau.atan().to_degrees(),
+        )
+    }
+}
+
+#[cfg(test)]
+mod utm_tests {
+    use super::{PointProjection, Utm};
+
+    /// Reference values from pyproj 3.8 (PROJ `tmerc`, WGS84), one point
+    /// per hemisphere and zone family, including a point outside its
+    /// nominal zone (8.9 E in zone 31) as GEM-15 cells near a boundary are.
+    #[test]
+    fn utm_matches_proj_and_round_trips() {
+        let cases = [
+            (14, true, -100.3, 40.7, 390172.3585670315, 4506267.64582423),
+            (13, true, -105.6, 39.9, 448709.3801924682, 4416830.562171828),
+            (19, false, -71.2, -33.4, 295397.56073525955, 6302204.614789249),
+            (60, false, 178.9, -17.8, 701394.7228048018, 8030920.393604867),
+            (31, true, 8.9, 62.1, 807706.2012121506, 6899339.607125179),
+        ];
+        for (zone, north, lon, lat, x, y) in cases {
+            let utm = Utm::new(zone, north);
+            let (fx, fy) = utm.forward(lon, lat);
+            assert!((fx - x).abs() < 1e-6 && (fy - y).abs() < 1e-6, "{zone} {fx} {fy}");
+            let (blon, blat) = utm.inverse(fx, fy);
+            assert!((blon - lon).abs() < 1e-10 && (blat - lat).abs() < 1e-10);
+        }
+    }
+
+    #[test]
+    fn utm_epsg_codes_parse() {
+        use crate::raster::Crs;
+        assert_eq!(Crs::parse_override("EPSG:32614").unwrap(), Crs::Utm { zone: 14, north: true });
+        assert_eq!(Crs::parse_override("epsg:32760").unwrap(), Crs::Utm { zone: 60, north: false });
+        assert!(Crs::parse_override("EPSG:32661").is_err());
+    }
+}
