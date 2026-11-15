@@ -49,7 +49,9 @@ the 10 m gust. A run that turned on a severe-weather option also gets that
 option's maps, on every view, whenever its last frame (or that frame's
 `diag` stream file) carries the field (`SEVERE_OPTION_PRODUCTS`):
 HAILCAST maximum, mean and run-maximum diameter and the PSD hail diameters
-(`nwp_diagnostics`) on the renderer's hail recipes; IC/CG flash counts and
+(`nwp_diagnostics`) on the renderer's hail recipes; the -10 C reflectivity
+maximum (`REFDM10C_MAX`, written by `nwp_diagnostics` when a stream carries it, from
+the WRF route's gsd kernel run on the mesh columns); IC/CG flash counts and
 rates and LPI (`lightning_option`); and AFWA hail, tornado wind, 0-2000 ft
 shear, column ice, graupel flux, updraft/downdraft and 10 m wind maxima, echo
 top, VIL, composite reflectivity, CAPE/CIN/lifted index, heat index, wind

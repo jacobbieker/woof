@@ -124,7 +124,6 @@ KEY_REASONS: Mapping[str, str] = {
              "the go route has no mapping yet") for key in ("spp_conv", "spp_pbl", "spp_lsm")},
     "multi_perturb": "WRF-Solar EPS on hex is the MPAS suite route's &wrfsolar_eps (`woof hex forecast --physics config_multi_perturb=true ...`, global and regional, matrix item 5.5); the go route has no mapping yet",
     "grid_fdda": "grid and spectral nudging on hex are matrix item 5.1",
-    "obs_nudge_opt": "obs nudging on hex is matrix item 5.2",
     "dfi_opt": "DFI on hex is matrix item 4.4 (IAU is the hex alternative)",
     "w_damping": "w_damping on hex is `woof hex forecast --w-damping` (matrix item 4.2); the go route has no mapping yet",
     "inflow_perturbation": ("inflow perturbation on hex is `woof hex forecast --inflow-perturbation` on a regional "
@@ -294,6 +293,45 @@ def _chem_reason(key: str) -> str | None:
     return None
 
 
+#: WRF observation-nudging keys (RunConfig's obs_* and their window), which a hex go run hands to the forecast
+#: door's --obs-nudging as an [fdda] table (woof.hex.obs_nudging).
+OBS_NUDGING_EXTRA_KEYS = ("max_obs", "fdda_start", "fdda_end")
+OBS_NUDGING_CONFIG = "go-obs-nudging.toml"
+
+
+def _obs_nudging_key(key: str) -> bool:
+    return key.startswith("obs_") or key in OBS_NUDGING_EXTRA_KEYS
+
+
+def obs_nudging_table(controls: Mapping[str, Any], *, base_dir: Path) -> str:
+    """The [fdda] TOML the forecast door reads, obs_inputfile (default OBS_DOMAIN101) anchored beside the config."""
+
+    row = dict(controls)
+    name = Path(str(row.get("obs_inputfile") or "OBS_DOMAIN101")).expanduser()
+    row["obs_inputfile"] = str(name if name.is_absolute() else (base_dir / name).absolute())
+    lines = ["[fdda]"]
+    for key in sorted(row):
+        lines.append(f"{key} = {json.dumps(row[key])}")
+    return "\n".join(lines) + "\n"
+
+
+def _check_obs_nudging_table(table: str) -> None:
+    """The forecast door's own reading of the table (unknown keys, refused controls), before any preparation."""
+    import tempfile
+
+    from woof.hex.obs_nudging import load_config, refusals
+
+    with tempfile.TemporaryDirectory() as scratch:
+        path = Path(scratch) / OBS_NUDGING_CONFIG
+        path.write_text(table, encoding="utf-8")
+        try:
+            problems = refusals(load_config(path))
+        except ValueError as error:
+            raise HexGoRefusal(f"obs_nudge_* keys: {error}") from None
+    if problems:
+        raise HexGoRefusal("obs_nudge_* keys: " + "; ".join(str(problem) for problem in problems))
+
+
 def _key_refusal(table: str, key: str) -> str:
     reason = KEY_REASONS.get(key) or _chem_reason(key) or (
         "it has no hex mapping on the go route (hex runs MPAS dynamics and its own namelist; "
@@ -371,6 +409,7 @@ def read_request(document: Mapping[str, Any], *, source: str = "CONFIG") -> dict
                         "hangs a WRF child under a hex run")
     domain = domains[0]
     physics: dict[str, Any] = {}
+    observation: dict[str, Any] = {}
     physics_keys = _physics_keys()
     # WRF's severe-weather diagnostics (AFWA, lightning, HAILCAST, nwp_diagnostics) run on the MPAS v8.4.2 suite
     # route's &diagnostics; the go run hands them to the regional door as a --physics-namelist holding only that
@@ -394,6 +433,9 @@ def read_request(document: Mapping[str, Any], *, source: str = "CONFIG") -> dict
     for key, value in domain.items():
         if key in DOMAIN_KEYS:
             continue
+        if _obs_nudging_key(key):
+            observation[key] = value
+            continue
         if key in DOMAIN_ROOT:
             if value != DOMAIN_ROOT[key]:
                 refusals.append(f"[[domain]] {key} = {value!r}: a hex go run is one root domain (matrix A.9)")
@@ -407,6 +449,12 @@ def read_request(document: Mapping[str, Any], *, source: str = "CONFIG") -> dict
         refusals.append(_key_refusal("domain", key))
     shared = document.get("shared") or {}
     for key, value in shared.items():
+        if _obs_nudging_key(key):
+            if key in observation and observation[key] != value:
+                refusals.append(f"{key} is {value!r} in [shared] and {observation[key]!r} in [[domain]]; "
+                                "a hex mesh runs one observation-nudging configuration")
+            observation.setdefault(key, value)
+            continue
         if key in diagnostics_keys and key not in physics_keys:
             diagnostic("shared", key, value)
             continue
@@ -477,11 +525,20 @@ def read_request(document: Mapping[str, Any], *, source: str = "CONFIG") -> dict
     history = float(domain["history_interval_s"])
     if history <= 0 or history % 60:
         raise HexGoRefusal(f"[[domain]] history_interval_s = {history:g}: hex history is in whole minutes")
+    if observation.get("obs_nudge_opt", 0) and not physics:
+        # With no physics key the regional door appends the hex default, an MPAS suite, and the forecast door
+        # refuses --obs-nudging there (HEX_OBS_NUDGING_ROUTE) only after mesh, init and boundary preparation.
+        raise HexGoRefusal("HEX_OBS_NUDGING_ROUTE: obs_nudge_opt = 1 runs on the WOOF-physics route, but this run "
+                           "names no physics key, so it takes the hex default (an MPAS suite).  Write the WRF physics "
+                           "selectors (mp_physics, bl_pbl_physics, ...) in [shared] or the [[domain]]")
     return {"name": str(experiment.get("name") or Path(source).stem),
             "start_time": experiment["start_time"], "hours": int(run_seconds // 3600),
             "history_every_minutes": int(history // 60), "projection": dict(projection),
             "nx": int(domain["nx"]), "ny": int(domain["ny"]), "dx_m": float(domain["dx"]),
             "fetch": dict(fetch), "physics": physics, "terrain": _scoped(terrain, float(domain["dx"])),
+            # obs_nudge_opt = 1 runs WRF observation nudging on the mesh (matrix 5.2); off, the obs_* keys are
+            # inert, as they are on the WRF path.
+            "obs_nudging": (dict(observation) if observation.get("obs_nudge_opt", 0) else None),
             "output_table": bool(output), "output": dict(output),
             # Only a run that asks for a severe-weather diagnostic carries the key: every other request is unchanged.
             **({"diagnostics": diagnostics} if diagnostics else {})}
@@ -594,6 +651,8 @@ def regional_argv(request: Mapping[str, Any], args, config: Path, *, shape: Path
     for key, value in request["physics"].items():
         text = str(value).lower() if isinstance(value, bool) else str(value)
         argv += [f"--forecast-arg=--physics={key}={text}"]
+    if request.get("obs_nudging") is not None:
+        argv += [f"--forecast-arg=--obs-nudging={work_dir(args, config) / OBS_NUDGING_CONFIG}"]
     if request.get("diagnostics"):
         argv += [f"--forecast-arg=--physics-namelist={diagnostics_path(shape)}"]
     from woof.output_formats import argument_values
@@ -629,6 +688,10 @@ def plan(args, *, config: Path | None = None, document: Mapping[str, Any] | None
     shape = root / "go-region.json"
     polygon = region_polygon(request["projection"], request["nx"], request["ny"], request["dx_m"])
     argv = regional_argv(request, args, config, shape=shape)
+    table = None
+    if request.get("obs_nudging") is not None:
+        table = obs_nudging_table(request["obs_nudging"], base_dir=config.expanduser().absolute().parent)
+        _check_obs_nudging_table(table)
     stages = {go: [hex_stage for hex_stage in hex_stages
                    if not (getattr(args, "prepare_only", False) and hex_stage in ("forecast", "products"))
                    and not ("--no-products" in argv and hex_stage == "products")]
@@ -640,6 +703,7 @@ def plan(args, *, config: Path | None = None, document: Mapping[str, Any] | None
             **({"terrain": request["terrain"]} if request.get("terrain") else {}),
             **({"diagnostics_namelist": diagnostics_namelist(request["diagnostics"])}
                if request.get("diagnostics") else {}),
+            **({"obs_nudging": table} if table is not None else {}),
             "work_dir": str(root), "regional_argv": argv,
             "command": "woof hex " + " ".join(shlex.quote(part) for part in argv)}
 
@@ -661,6 +725,8 @@ def launch(args, *, observer=None) -> int:
     if value.get("diagnostics_namelist"):
         diagnostics_path(shape).write_text(value["diagnostics_namelist"], encoding="utf-8")
     (root / "go-hex-plan.json").write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+    if "obs_nudging" in value:
+        (root / OBS_NUDGING_CONFIG).write_text(value["obs_nudging"], encoding="utf-8")
     print(f"go: engine hex, {value['name']}: {value['command']}", flush=True)
     from woof.hex.cli import main as hex_main
 
