@@ -193,7 +193,10 @@ Every run starts with `seaice_init_column_physics_package_parameters`, then
 by `oracle_stage`: `init` (`initialize_coupler_fields`,
 `seaice_init_column_physics_package_variables`, `init_ice_state`,
 `seaice_reset_coupler_fluxes`), `aggregate` (`seaice_column_aggregate`) or
-`update_state` (`seaice_column_update_state`). The log carries the tracer
+`update_state` (`seaice_column_update_state`) or `vertical_thermodynamics`
+(`colpkg_init_thermo`, which sets `l_brine` and `heat_capacity`, then
+`seaice_column_vertical_thermodynamics`, whose abort status is logged as
+`TOBJ IERR`). The log carries the tracer
 object (`TOBJ` lines). The field table is the Registry's
 (`woof/hex/mpas_seaice/data/registry-fields.json`, written by
 `tools/mpas_coupled_options.py --fields-out`), with the fields of packages
@@ -206,3 +209,6 @@ and the GPU port accepts only the counts whose words it reproduces.
 `make_column_fixture.py` writes `tests/data/oracles/mpas_seaice_column`
 (the changed fields, `column-logs.json`, `init-thermo-r8.npy`,
 `inputs.sha256`). Generate it on the x86-64 glibc oracle host.
+`--cases therm` writes the vertical-thermodynamics cases to
+`tests/data/oracles/mpas_seaice_column_therm` instead. Their `atan`
+(`psimhu`/`psixhu`), `exp` and `log` are the host glibc 2.44's.
