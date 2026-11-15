@@ -23,7 +23,7 @@ pub use render_netcdf4::{render_frame_compression, RenderCompression};
 
 use crate::composite::{COMPOSITE_SCHEMA, CompositePlan, SeamStat};
 use crate::error::{MpasError, MpasResult};
-use crate::fieldmap::{FIELD_MAP, FieldSource, Rank, field_set_allows, field_set_is_known, remap_class};
+use crate::fieldmap::{FIELD_MAP, FieldSource, Rank, field_set_allows, field_set_is_known, is_optional, remap_class};
 use crate::remap::{PRODUCT_REMAP_METHOD, ProductRemap};
 use crate::history::{MpasFrame, Timestamp, expected_levels};
 use crate::weights::NearestCellWeights;
@@ -870,7 +870,7 @@ fn convert_frame_inner(
             continue;
         }
         if mapping.source != FieldSource::Constant && !frame.fields.contains_key(mapping.wrf_name) {
-            if !absent.iter().any(|n| n == mapping.wrf_name) {
+            if !is_optional(mapping) && !absent.iter().any(|n| n == mapping.wrf_name) {
                 absent.push(mapping.wrf_name.to_string());
             }
             continue;

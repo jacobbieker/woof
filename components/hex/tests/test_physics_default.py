@@ -160,3 +160,54 @@ def test_a_suite_with_its_own_producer_reaches_the_cold_init():
 
     assert init_flags(["--physics-suite=hrrrv5"]) == ["--physics-suite", "hrrrv5"]
     assert init_flags(["--physics-suite=convection_permitting"]) == []
+
+
+def _write(tmp_path, name, text):
+    path = tmp_path / name
+    path.write_text(text)
+    return path
+
+
+def test_a_diagnostics_only_namelist_keeps_the_default_mpas_suite(tmp_path):
+    """&diagnostics alone names no physics: the default MPAS suite (R2) is added and the namelist rides beside it.
+
+    THE GAP THIS CLOSES (severe-weather worker, 2026-11-14): `woof hex regional --forecast-arg=--physics-namelist=F`
+    with F holding only &diagnostics added no suite, so the run took the WOOF route, whose importer refuses
+    &diagnostics."""
+    diag = _write(tmp_path, "diag.namelist", "&diagnostics\n config_lightning_option=1\n config_hailcast_opt=.true.\n/\n")
+    physics = _write(tmp_path, "physics.namelist",
+                     "&physics\n config_physics_suite='convection_permitting'\n/\n&diagnostics\n config_lightning_option=1\n/\n")
+    flags = [f"--physics-namelist={diag}"]
+    assert not physics_default.names_physics(flags)
+    assert not physics_default.names_physics(["--physics-namelist", str(diag)])
+    assert physics_default.ensure(flags) == [*flags, "--physics-suite=convection_permitting"]
+    regional = physics_default.ensure(flags, context={"geometry": "limited-area", "source": "gfs", "start": "cold"})
+    assert regional[0] == flags[0] and "--physics-suite=convection_permitting" in regional
+    # A namelist with any other group, or one that cannot be read, still names the physics.
+    assert physics_default.names_physics([f"--physics-namelist={physics}"])
+    assert physics_default.names_physics([f"--physics-namelist={tmp_path / 'missing.namelist'}"])
+    bare = _forecast_namespace("--physics-namelist", str(diag))
+    assert physics_default.apply(bare)["suite"] == "convection_permitting"
+    named = _forecast_namespace("--physics-namelist", str(physics))
+    assert physics_default.apply(named) is None and named.physics_suite is None
+
+
+def test_a_diagnostics_only_namelist_reaches_the_mpas_suite_route_with_its_options(tmp_path):
+    from woof.hex.mpasphys.forecast_v842 import native_route
+
+    diag = _write(tmp_path, "diag.namelist", "&diagnostics\n config_lightning_option=1\n/\n")
+    run = _forecast_namespace("--physics-namelist", str(diag))
+    physics_default.apply(run)
+    config, text = native_route(run, default_mode="correct")
+    assert config is not None, "the MPAS suite route"
+    assert "config_lightning_option" in text and "convection_permitting" in text
+
+
+def test_the_woof_route_refuses_diagnostics_by_name_with_the_remedy():
+    from woof.hex.physics_namelist import import_physics_namelist
+
+    result = import_physics_namelist(
+        "&physics\n config_physics_suite='arwen_mpas_column'\n/\n&diagnostics\n config_lightning_option=1\n/\n")
+    refused = [r for r in result.refusals if r.knob == "config_lightning_option"]
+    assert refused and "MPAS v8.4.2 suite route (R2)" in refused[0].reason
+    assert "config_physics_suite" in refused[0].follow_up

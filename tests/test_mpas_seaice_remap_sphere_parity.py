@@ -166,7 +166,7 @@ def test_a_restart_continues_the_spherical_run_bitwise(tmp_path, precision):
     fixture = srs.load_fixture(precision)[case["name"]]
     config = case["config"]
     dev = sr.device_pools(case, fixture)
-    clock = ts.initialize(pools=dev, configs=config)
+    clock = ts.initialize(pools=dev, configs=config, remap_geometry="input")
     next_step = ts.advance(pools=dev, configs=config, clock=clock, n_steps=1)
     dev["diagnostics"]["oracle_next_step"] = next_step
     ts.write_restart(tmp_path / "restart.npz", pools=dev, clock=clock)

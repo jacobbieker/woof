@@ -8,6 +8,16 @@
   "NVIDIA GeForce RTX 5090": "gpu-receipt-sm120.json",
   "NVIDIA H100 80GB HBM3": "gpu-receipt-h100.json"
  },
+ "certified_unrepinned": {
+  "gpu-receipt-sm120.json": {
+   "pins": {
+    "advection": "075f8edde330612422da3a096fb83f882920449da97162d51d9c0a7b3457211d",
+    "pd_advection": "59139c1b2c592a4f3b098976ef11d5a749d93f7ec29f2cd7b2c7332db5767766"
+   },
+   "reason": "zero_first (advection.cu, pd_advection.cu) moved the source; no Blackwell card was available to recapture (decision 2026-11-14). tests/test_advection_zero_first.py holds zero_first word-identical to fill-then-accumulate on CUDA and Metal",
+   "staled_by": "9c318097754f31ff351f0bd888b130545d9b9e0e"
+  }
+ },
  "schema_version": 1,
  "uncertified_stale": {
   "gpu-receipt-h100.json": {
@@ -16,6 +26,13 @@
     "pd_advection": "b4832282be55c3658586478788e979e3595a66a9fae56e00378843c25f62b28f"
    },
    "staled_by": "b70a94a4869e1dcf65149c0701e83b54208a6a07"
+  },
+  "gpu-receipt.json": {
+   "pins": {
+    "advection": "af8f5c6cb0441dcdc8198ac7453bca539edaaf56aa1d450e9ab0fb7d1d8de66e",
+    "pd_advection": "9011930b5b510770f81e11c56a7fd6764233e1592127edc05c1d9c20f7e5142b"
+   },
+   "staled_by": "9c318097754f31ff351f0bd888b130545d9b9e0e"
   }
  }
 }

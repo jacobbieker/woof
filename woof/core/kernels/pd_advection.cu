@@ -489,6 +489,15 @@ real pd_scale(int k, int j, int i,
     return 1.0f;
 }
 
+// GPUWM_PD_ZERO_FIRST: the caller's ``tend[...] = 0`` before this
+// accumulating launch is folded in.  The incoming word is the exact +0.0f
+// the fill wrote, and every path below adds its terms onto it the same way,
+// so the words written are those of the fill followed by the accumulate.
+#ifdef GPUWM_PD_ZERO_FIRST
+#define PD_TEND0(at) (0.0f)
+#else
+#define PD_TEND0(at) (tend_out[at])
+#endif
 extern "C" __global__
 void pd_renorm_apply(const real* __restrict__ q0,      // (nz, ny, nx)
                      const real* __restrict__ mu_old,  // (ny, nx) time-t mass
@@ -592,7 +601,7 @@ void pd_renorm_apply(const real* __restrict__ q0,      // (nz, ny, nx)
 
     // The native limiter first advances z, then x, then y.  Correction
     // differences and the two low-order fluxes retain their round points.
-    real result=tend_out[IDX3(k,j,i)];
+    real result=PD_TEND0(IDX3(k,j,i));
     real zbracket=sz_t*fzc_t-sz_b*fzc_b+fzl[IDX3(k+1,j,i)]-fzl[IDX3(k,j,i)];
     result=result-rdnw[k]*zbracket;
     real m=has_msf?msft[(size_t)j*nx+i]:1.0f;
@@ -610,21 +619,21 @@ void pd_renorm_apply(const real* __restrict__ q0,      // (nz, ny, nx)
     if (!open_x && !open_y) {            // ORIGINAL periodic apply
         if (has_msf) {                   // WRF "un-canceled" msftx weighting
             real m = msft[(size_t)j * nx + i];
-            tend_out[IDX3(k, j, i)] +=
+            tend_out[IDX3(k, j, i)] = PD_TEND0(IDX3(k, j, i)) + (
                 -m * dx_inv * ((sx_r * fxc_r + fxl[I3(k, j, i + 1, ny, nx + 1)])
                                - (sx_l * fxc_l + fxl[I3(k, j, i, ny, nx + 1)]))
                 - m * dy_inv * ((sy_r * fyc_r + fyl[I3(k, j + 1, i, ny + 1, nx)])
                                 - (sy_l * fyc_l + fyl[I3(k, j, i, ny + 1, nx)]))
                 - rdnw[k] * ((sz_t * fzc_t + fzl[IDX3(k + 1, j, i)])
-                             - (sz_b * fzc_b + fzl[IDX3(k, j, i)]));
+                             - (sz_b * fzc_b + fzl[IDX3(k, j, i)])));
         } else {                         // original: bitwise Phase 2
-            tend_out[IDX3(k, j, i)] +=
+            tend_out[IDX3(k, j, i)] = PD_TEND0(IDX3(k, j, i)) + (
                 -dx_inv * ((sx_r * fxc_r + fxl[I3(k, j, i + 1, ny, nx + 1)])
                            - (sx_l * fxc_l + fxl[I3(k, j, i, ny, nx + 1)]))
                 - dy_inv * ((sy_r * fyc_r + fyl[I3(k, j + 1, i, ny + 1, nx)])
                             - (sy_l * fyc_l + fyl[I3(k, j, i, ny + 1, nx)]))
                 - rdnw[k] * ((sz_t * fzc_t + fzl[IDX3(k + 1, j, i)])
-                             - (sz_b * fzc_b + fzl[IDX3(k, j, i)]));
+                             - (sz_b * fzc_b + fzl[IDX3(k, j, i)])));
         }
         return;
     }
@@ -641,6 +650,7 @@ void pd_renorm_apply(const real* __restrict__ q0,      // (nz, ny, nx)
     if (!open_y || (j >= 1 && j <= ny - 2))
         t += -m * dy_inv * ((sy_r * fyc_r + fyl[I3(k, j + 1, i, ny + 1, nx)])
                             - (sy_l * fyc_l + fyl[I3(k, j, i, ny + 1, nx)]));
-    tend_out[IDX3(k, j, i)] += t;
+    tend_out[IDX3(k, j, i)] = PD_TEND0(IDX3(k, j, i)) + t;
 #endif
+#undef PD_TEND0
 }

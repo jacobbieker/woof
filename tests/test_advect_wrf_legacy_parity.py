@@ -26,7 +26,8 @@ from woof.verify.advect_oracle import (
     defined_output_mask, measure_words, measure_advect_parity, advect_port_outputs,
     advect_gpu_identity, advect_nvrtc_key, architecture_is_certified, check_receipt_format,
     receipt_staleness, check_uncertified_stale_records, uncertified_stale_report,
-    UncertifiedReceiptStale, UNCERTIFIED_STALE_KEY)
+    UncertifiedReceiptStale, UNCERTIFIED_STALE_KEY,
+    check_certified_unrepinned_records, check_certified_receipt_pins)
 
 LEGACY_DIR = ADVECT_ORACLE_DIR.parent / "wrf_legacy_advect"
 COLUMN_DIR = ADVECT_ORACLE_DIR.parent / "wrf_legacy_vertical_columns"
@@ -266,8 +267,8 @@ def test_cuda_receipts_pin_the_compiled_source_and_replay_their_words():
     """Blackwell receipts gate their pins; older ones are reported when stale
     (byte identity is certified on Blackwell and newer only, ruling
     2026-10-04).  Every receipt's format and committed words are checked."""
-    from woof.core.kernels import module_source
     records = check_uncertified_stale_records(_INDEX, LEGACY_DIR, RECEIPT_MODULES)
+    unrepinned = check_certified_unrepinned_records(_INDEX, LEGACY_DIR, RECEIPT_MODULES)
     cases = _cases()
     found = False
     for name, receipt in _available_receipts():
@@ -281,10 +282,7 @@ def test_cuda_receipts_pin_the_compiled_source_and_replay_their_words():
             if "fixture" in moved:
                 continue
         else:
-            for module in RECEIPT_MODULES:
-                digest = receipt["kernels"][module]
-                assert hashlib.sha256(module_source(module).encode("utf-8")).hexdigest() == digest, (name, module)
-            assert receipt["fixture_manifest_sha256"] == hashlib.sha256((LEGACY_DIR / "cases.json").read_bytes()).hexdigest(), name
+            check_certified_receipt_pins(name, receipt, LEGACY_DIR, RECEIPT_MODULES, unrepinned)
         words_directory = receipt["words_directory"]
         for case in cases:
             row = receipt["cases"][case.name]

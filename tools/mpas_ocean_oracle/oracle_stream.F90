@@ -23,8 +23,9 @@
 ! rank 3) carries its further extents after the header's three.  An absent
 ! real field is also marked as a field whose package is off (isActive
 ! false).  A logical config named 'package:NAME' is the package
-! switch NAME, put in the packages pool (ocnPackages); one named 'mesh:NAME'
-! is the mesh pool's config NAME (on_a_sphere); a character config named
+! switch NAME, put in the packages pool (ocnPackages); a logical or real
+! config named 'mesh:NAME' is the mesh pool's config NAME (on_a_sphere,
+! x_period); a character config named
 ! 'diagnostics:NAME' is the diagnostics pool's character field NAME (xtime).
 ! A real field of rank 0 is a scalar (daysSinceStartOfSim).
 !
@@ -123,7 +124,11 @@ contains
           read(u) rvalue
           allocate(rc)
           rc = rvalue
-          call stub_pool_put_config(pools % configs, trim(cname), rc)
+          if (cname(1:5) == 'mesh:') then
+             call stub_pool_put_config(pool_named(pools, 'mesh'), trim(cname(6:)), rc)
+          else
+             call stub_pool_put_config(pools % configs, trim(cname), rc)
+          end if
        case (2)
           read(u) ivalue
           allocate(ic)

@@ -3,7 +3,7 @@
 ! (Wachspress, PWL: the driver gives the basis arrays), the weak-form solver,
 ! the column package's ice strength and the unit tests.  Each stops by name
 ! if reached.  (Incremental-remap advection is compiled verbatim; its
-! stand-ins are remap_standins.F90.)  The
+! stand-ins are remap_standins.F90 and rbf_standins.F90.)  The
 ! framework is tools/mpas_ocean_oracle/stubs.F90, shared with the ocean.
 module seaice_velocity_solver_wachspress
   use mpas_derived_types
