@@ -160,6 +160,15 @@ def test_more_categories_than_ice_layers_are_refused():
     crad.refuse_unported(coupled["config"], {**coupled["dims"], "nCategories": 8})
 
 
+def test_a_state_built_from_other_configs_is_refused():
+    from types import SimpleNamespace
+    case = _case("rad_ccsm3_constant_albedos")
+    calc = bool(case["config"]["config_calc_surface_temperature"])
+    crad.refuse_state_mismatch(case["config"], SimpleNamespace(calc_tsfc=calc))
+    with pytest.raises(ConfigurationRefusal, match="ColumnState was initialised"):
+        crad.refuse_state_mismatch(case["config"], SimpleNamespace(calc_tsfc=not calc))
+
+
 def test_the_default_build_refuses_glibc_s_atan(default_build):
     case = _case("rad_ccsm3_albedos")
     with pytest.raises(ConfigurationRefusal, match="atan.*WOOF_GLIBC239_LIBM64=1"):

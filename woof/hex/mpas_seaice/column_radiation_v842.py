@@ -92,6 +92,16 @@ def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
                 "WOOF_GLIBC239_LIBM64=1 or config_albedo_type = 'constant'")
 
 
+def refuse_state_mismatch(configs: dict, state: "cv.ColumnState") -> None:
+    """The kernel takes calc_Tsfc from the state (``init_parameters``) and the
+    refusals take it from the configs: refuse a state built from other configs."""
+    calc_tsfc = bool(configs["config_calc_surface_temperature"])
+    if calc_tsfc != bool(state.calc_tsfc):
+        _refuse("config_calc_surface_temperature", calc_tsfc,
+                f"the ColumnState was initialised with config_calc_surface_temperature = {bool(state.calc_tsfc)}",
+                "the configs the ColumnState was initialised with")
+
+
 def module_source() -> str:
     from woof.hex.mpas_ice import rkind
     body = files("woof.hex.mpas_seaice").joinpath("column_radiation_v842.cu").read_text(encoding="utf-8")
@@ -150,6 +160,7 @@ def radiation(pools: dict, configs: dict, state: "cv.ColumnState") -> None:
     import cupy as cp
 
     d = state.dims
+    refuse_state_mismatch(configs, state)
     refuse_unported(configs, d)
     n1, n_solve, ncat, nil, nsl = d["nCells"] + 1, d["nCellsSolve"], d["nCategories"], d["nIceLayers"], d["nSnowLayers"]
     cat1 = (n1, ncat, 1)

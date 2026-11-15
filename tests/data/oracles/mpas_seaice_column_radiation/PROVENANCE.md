@@ -25,7 +25,7 @@ glibc 2.44), 2026-11-15.
     temperature);
   - `ccsm3` with `compute_albedos` (BL99; on the `new` bounds with a
     thickness limit of 0.7, other band albedos and two categories);
-  - coupled runs (`config_use_surface_temperature` false): `dEdd` with topo
+  - coupled runs (`config_calc_surface_temperature` false): `dEdd` with topo
     ponds and `ccsm3` with level ponds (BL99), whose shortwave is the
     coupler's;
   - `column_prep_radiation` with one and with three categories (four
@@ -60,7 +60,7 @@ glibc 2.44), 2026-11-15.
   `../mpas_seaice_column_therm/`. Without the opt-in, `compute_albedos` is
   refused by name; the cases that need it are `RADIATION_TRIG_CASES`. The
   constant albedos, the coupled runs and `column_prep_radiation` need no
-  opt-in. delta-Eddington with `config_use_surface_temperature` (the orbit
+  opt-in. delta-Eddington with `config_calc_surface_temperature` true (the orbit
   and `coszen`: `sin`, `cos`, `asin`, `atan`) is not ported and refused.
 
 ## Licence
