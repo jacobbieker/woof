@@ -39,7 +39,10 @@
 !                 categoryThicknessLimits and the column package's hi_min, as
 !                 seaice_init_column_physics_package_variables runs them), then
 !                 column_itd_thermodynamics(domain, clock, ierr), its ierr
-!                 logged as above (SEAICE_ERROR_COL_ITD_THERM after an abort).
+!                 logged as above (SEAICE_ERROR_COL_ITD_THERM after an abort);
+!   ridging       colpkg_init_thermo and init_column_itd as above, then
+!                 column_ridging(domain, ierr), its ierr logged as above
+!                 (SEAICE_ERROR_COL_RIDGING after an abort).
 !
 ! The Registry struct alternative_atmos_forcing is longer than the stream's
 ! 24-character pool names; the stream spells it 'alternative_atmos_forcin'
@@ -128,6 +131,14 @@ program run_column
      call init_column_itd(domain)
      ierr = 0
      call column_itd_thermodynamics(domain, domain % clock, ierr)
+     call write_ints('IERR', [ierr])
+  case ('ridging')
+     call mpas_pool_get_dimension(pool_named(pools, 'mesh'), 'nIceLayers', nIceLayers)
+     allocate(sprofile(nIceLayers + 1))
+     call colpkg_init_thermo(nIceLayers, sprofile)
+     call init_column_itd(domain)
+     ierr = 0
+     call column_ridging(domain, ierr)
      call write_ints('IERR', [ierr])
   case default
      print *, 'run_column: unknown oracle_stage ', trim(stage)
