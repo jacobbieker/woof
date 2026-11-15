@@ -446,6 +446,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   horizontal flux and divergence launches four rows at a time with the face
   and cell metrics formed once (`wrf_smag_flux_s_multi`/`wrf_smag_hd_s_multi`,
   byte-identical; `WOOF_SMAG_MULTI=0` restores one launch pair per row).
+  The u and v Smagorinsky stress divergences read the tau11/tau22/tau12
+  stresses stored once per step (`smag2d_uv_faces`, byte-identical in fast
+  and strict numerics) where each point re-evaluated up to ten of them: the
+  u+v pair 1.3 -> 0.35 ms at 49x120x150 and 9.7 -> 1.6 ms at 49x300x300 on an
+  A6000, 5.6 -> 2.5 ms and 23 -> 10.5 ms on an M3 Max (`WOOF_SMAG_UV_FACES=0`
+  restores the per-point kernels).
   `WOOF_ACOUSTIC_KPAR=1` takes a level-parallel w''-phi'' solve (32 columns
   x 8 lanes per block; 1.7-2.2x the column kernel's speed per launch on an
   A6000): opt-in, because on CUDA its words are the column kernel's generic

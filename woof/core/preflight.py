@@ -2898,6 +2898,9 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # wrf_smag_hd_w on stored face stresses (composes smag2d.cu), RTX A6000,
     # default and strict numerics, 2026-11-08: 0 B.
     "smag2d_w_faces": 0,
+    # wrf_smag_hd_u / wrf_smag_hd_v on stored stresses (composes smag2d.cu),
+    # RTX A6000, default and strict numerics, 2026-11-15: 0 B.
+    "smag2d_uv_faces": 0,
     # The partial-depth nest's coupling (Phase D3, kernels/partial_nest.cu),
     # RTX A6000 sm_86, NVRTC 12.9, 2026-10-30: all eight entry points 0 B.
     "partial_nest": 0,
@@ -7888,6 +7891,11 @@ def scratch_slot_registry(cfg: RunConfig, *,
         for extra in range(1, SMAG_MULTI_ROWS):
             slots[f"smag_fx_{extra}"] = xs
             slots[f"smag_fy_{extra}"] = ys
+        # The u/v stress divergences read the horizontal stresses stored
+        # once per step (dycore.launch_wrf_smag_uv_faces): tau11 and tau22
+        # at the mass points, tau12 at the corners.
+        slots.update(smag_t11=m, smag_t22=m,
+                     smag_t12=(nz, ny + 1, nx + 1))
     if cfg.diff_6th_opt:
         slots.update(diff6_z=fl, diff6_m=m)
         # The NOAA WRFV3.9 fork's edge-to-edge form (diff_6th_form =
@@ -8468,6 +8476,12 @@ SCRATCH_SLOT_LIFETIME_AUDIT = (
         "the window accumulator and its step counter are read many steps "
         "after the step that wrote them (drain ends the window), and both "
         "are float64 while ScratchArena is float32-only"),
+    ScratchSlotLifetime(
+        ("smag_t11", "smag_t22", "smag_t12"), "write_before_read",
+        "woof/core/dycore.py:launch_wrf_smag_uv_faces",
+        "the stored horizontal momentum stresses are written once per "
+        "step and read by the u and v divergence launches that follow "
+        "within the same step"),
     ScratchSlotLifetime(
         ("smag_fx_1", "smag_fy_1", "smag_fx_2", "smag_fy_2",
          "smag_fx_3", "smag_fy_3"),
