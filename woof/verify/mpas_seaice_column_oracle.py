@@ -124,10 +124,20 @@ def field_rows(config: dict) -> tuple[list, dict[str, int], dict[str, bool]]:
     return rows, dims, active
 
 
+def _uniform(rs):
+    """``rs.uniform`` with the scaling done in numpy: RandomState.uniform's C
+    ``low + scale * r`` is contracted into an FMA on arm64 builds and not on
+    x86-64, so its words differ by host; separate ufuncs round each step."""
+    def u(low, high, size=None):
+        r = rs.random_sample(size)
+        return np.add(np.multiply(np.subtract(high, low), r), low)
+    return u
+
+
 def _values(rs, name: str, shp: tuple, dims: dict, stage: str):
     """Plausible values per field; the rest uniform in [-1, 1)."""
     nc = dims["nCells"]
-    u = rs.uniform
+    u = _uniform(rs)
     if name == "latCell":
         # mostly polar, a temperate cell, and cells exactly on the bounds' degrees
         lat = np.radians(np.where(u(0.0, 1.0, shp) < 0.5, u(70.5, 89.0, shp), u(-89.0, -60.5, shp)))
@@ -164,7 +174,7 @@ def _tracers(rs, pools: dict, dims: dict):
     sub-puny area, ice without volume, ice ages and level ice that are zero."""
     nc, ncat = dims["nCells"], dims["nCategories"]
     t = pools["tracers"]
-    u = rs.uniform
+    u = _uniform(rs)
     area = u(0.0, 1.0 / ncat, (nc + 1, ncat, 1))
     area[1] = 0.0
     area[3] = 2.0e-12 / ncat
@@ -207,7 +217,7 @@ def make_case(name, seed, stage, overrides) -> dict:
         shp = _stream.shape(case, fshape)
         value = _values(rs, fname, shp, case["dims"], stage)
         if value is None:
-            value = rs.randint(0, 2, shp).astype(np.int32) if kind == INT else rs.uniform(-1.0, 1.0, shp)
+            value = rs.randint(0, 2, shp).astype(np.int32) if kind == INT else _uniform(rs)(-1.0, 1.0, shp)
         p[fname] = value
     _tracers(rs, case["pools"], case["dims"])
     for key, on in active.items():
