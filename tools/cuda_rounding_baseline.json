@@ -4141,7 +4141,7 @@
    },
    {
     "file": "woof/core/kernels/smag2d.cu",
-    "sha256": "db91a5f9f8dd5def67cd7ae2fb1c8f8e887c20c1deb470cd8ab394ca4d01ede9"
+    "sha256": "6ee9ec60dd39deba2c8ddcea7ad0e717b94101879ab55fd33eb5fe9c5968c137"
    },
    {
     "file": "woof/core/kernels/smag2d_theta_m.cu",
@@ -5031,7 +5031,7 @@
    },
    {
     "file": "woof/core/dycore.py",
-    "sha256": "c9b049a3bd21de4aab56459debe004fe846ca52418b0e58d36181b6e247ce4c8"
+    "sha256": "cba53a997a29d23201f7b6ce860370447a37a3ed0221c5ec5f75a5ad085815cf"
    },
    {
     "file": "woof/core/etanew.py",
@@ -5191,7 +5191,7 @@
    },
    {
     "file": "woof/core/preflight.py",
-    "sha256": "9770da67fa54dd587de7bed76bc6b7c4bfedd910735cdc978fcfd3d761694a4b"
+    "sha256": "2f43dda86baa394764875d2a9a23952714a616e90c15cb0af2b08f03f57a422c"
    },
    {
     "file": "woof/core/refl.py",
@@ -21427,15 +21427,15 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "bfb9c0d08565a9b9ab0b7ceadd76d31358b3fb095302d00f8c91e0806be70244",
+    "sha256": "7229c4ce5b119ddc23f5251e89dd0065140d6732d785116139d2765a1204ec7e",
     "sites": {
-     "100": 414
+     "100": 437
     }
    },
    "native_differences": {
-    "sha256": "fc7c8e7353851db73b56ee2d9f0c1444949b783ecd4226c4a4fe89d87681ab89",
+    "sha256": "57853f261179ad8c5638b4ce1682a7526b949b26b9ab7b764678e1c45df1008c",
     "sites": {
-     "100": 152
+     "100": 167
     }
    },
    "native_errors": {},
@@ -21463,7 +21463,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "7dec200c373ce4a01684df3dca4d3797b511bba4c50c0c71465f979a2fb380a2"
+   "source_sha256": "64164164291fa1e59bf59592e73df3cc13b56a043be40725a3f57d937b9ae329"
   },
   "kernels:smag2d_theta_m": {
    "assessment": "static_diagnostic_only",

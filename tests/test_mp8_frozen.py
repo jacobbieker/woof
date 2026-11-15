@@ -2028,10 +2028,17 @@ FROZEN_MODULE_DIGESTS = {
         # strict words are graded in tests/test_wrf_exact_round3_gpu.py and against
         # WRF's own dumped words (tools/wrf_exact_localize).  Previously
         # 932359b9/400d89d0.
-        'db91a5f9f8dd5def67cd7ae2fb1c8f8e887c20c1deb470cd8ab394ca4d01ede9',
+        # Re-pinned for wrf_smag_flux_s_multi / wrf_smag_hd_s_multi: several
+        # scalar rows per launch with the face and cell metrics formed once
+        # (dycore.launch_wrf_smag2d_hd_multi, WOOF_SMAG_MULTI=0 restores
+        # the per-row launches).  New entries after wrf_smag_hd_s; every
+        # other entry is untouched text.  Each row's words equal the
+        # per-row launches' (tests/test_smag_multi.py, CUDA and Metal, both
+        # modes).  Previously db91a5f9/7dec200c.
+        '6ee9ec60dd39deba2c8ddcea7ad0e717b94101879ab55fd33eb5fe9c5968c137',
         # smag2d's default composition keeps 2.9.1's glibc_flt32 text
         # (glibc_flt32_default.cuh); the exact chain's header is strict-only.
-        '7dec200c373ce4a01684df3dca4d3797b511bba4c50c0c71465f979a2fb380a2'),
+        '64164164291fa1e59bf59592e73df3cc13b56a043be40725a3f57d937b9ae329'),
     'spec_bdy': (
         'bcc7090fbbb8ea307bd6dd6c65ab9b8a3f56948c4752ae3d744127b450d20161',
         'bc03ed595bacc546d8e041fbb1d11b5bb3b3b90760ef06ea1dd1f0f18b4de931'),
