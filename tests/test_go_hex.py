@@ -202,6 +202,7 @@ def test_severe_diagnostics_ride_to_the_mpas_suite_route_as_a_namelist(tmp_path,
     from woof.hex.mpasdiag import hailcast_diag_v842, lightning_diag_v842
     groups = parse_fortran_namelist(text)
     assert set(groups) == {"diagnostics"}
+    assert float(groups["diagnostics"]["config_haildt"]) == 60.0
     assert hailcast_diag_v842.resolve(groups) is not None
     # The default plan is unchanged: no key, no flag.
     (tmp_path / "plain").mkdir()
