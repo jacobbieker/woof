@@ -1085,8 +1085,8 @@ rate-class launches are now captured and replayed with the subcycle, and their
 the eager path. On the Edinburgh variable-resolution mesh (4,565 cells, 3 km
 graded to 23 km, 2 h, RTX A6000 on a shared host), LTS with graphs is
 byte-identical to eager LTS. Its rest-of-run time was 47 / 105 / 108 / 56 s
-against eager's 201 / 93 / 90 / 80 s. The fixed step with graphs took
-64-65 / 61 / 58 s in the same rounds. LTS still buys nothing on a mesh this
+against eager's 201 / 93 / 90 / 80 s. In the same four rounds, the fixed step
+with graphs took 105 / 64 / 66 / 61 s. LTS still buys nothing on a mesh this
 small, for the one-wave reason above, and it stays off by default.
 
 #### The full-step form, measured to a no-go
