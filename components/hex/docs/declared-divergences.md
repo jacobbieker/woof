@@ -477,6 +477,68 @@ than the stations are. That is not one of the three declared divergences and it
 is not claimed as one here; it is what the guardrail measured, recorded so it
 is not discovered twice.
 
+### Opt-in: `gf_deep_rain_evaporation_booking` against Stage-IV (2026-11-15)
+
+This option is off by default, and the measurements above were made with it
+off. It removes one source of excess GF deep rain: WRF's `cup_output_ens_3d`
+adds back downdraft evaporation that the vapour tendency already holds (the
+mechanism is in [PHYSICS.md](../../../docs/public/PHYSICS.md)). It is a
+mechanism fix with no tuned parameter, so no case was used for tuning, and
+all five cases below are verification cases.
+
+**Setup.**
+- Runs: hex global `global-120km` (x1.40962), 72 h forecasts on the CUDA
+  backend.
+- Physics: `--physics-suite arwen_mpas_column --convection gf`, with and
+  without `--physics gf_deep_rain_evaporation_booking=true`. Nothing else
+  differs between the two arms.
+- Inits: 2026-10-28 00Z, 2026-10-30 12Z, 2026-11-02 00Z, 2026-11-04 12Z and
+  2026-11-06 12Z.
+- Referee: `woof.hex.qpe_cell_referee` (see
+  [obs-referee.md](obs-referee.md)). It scores 24 h Stage-IV totals on the
+  748 CONUS cells, using every 24 h window that ends at 12Z.
+- Statistics: paired case-block bootstrap with 5,000 replicates and seed
+  20261115.
+
+**Result: booked minus stock, means over five cases** (mm per 24 h; ETS and
+FBI are at 1 and 10 mm):
+
+| statistic | stock | booked | difference | 95 % interval |
+| --- | ---: | ---: | ---: | --- |
+| bias | +0.492 | −0.107 | **−0.598** | [−0.892, −0.367] |
+| \|bias\| | 0.589 | 0.336 | −0.253 | [−0.711, +0.066] |
+| RMSE | 7.999 | 6.707 | **−1.292** | [−1.817, −0.785] |
+| model/obs ratio | 1.216 | 0.965 | **−0.251** | [−0.301, −0.201] |
+| FBI 1 mm | 0.958 | 0.875 | −0.083 | [−0.121, −0.056] |
+| FBI 10 mm | 1.095 | 0.899 | −0.196 | [−0.294, −0.114] |
+| ETS 1 mm | 0.410 | 0.390 | **−0.021** | [−0.034, −0.008] |
+| ETS 10 mm | 0.307 | 0.297 | −0.010 | [−0.026, −0.001] |
+
+- Bias went down in every case: −0.44, −0.70, −1.15, −0.40 and −0.30 mm.
+- RMSE went down in every case: −1.10, −1.39, −2.22, −0.42 and −1.33 mm.
+
+**What this means.**
+- **Rain amounts are better.** The stock GF arm is 22 % too wet. The booked
+  arm is within 4 % of Stage-IV, and RMSE is lower in every case.
+- **Rain area and placement are slightly worse.** At 1 mm the
+  frequency bias drops below one (0.96 → 0.88), so the booked arm rains over
+  too little area. ETS falls by 0.02 at 1 mm and 0.01 at 10 mm, and both
+  intervals exclude zero.
+- **The option is a correction to WRF's water budget, not a skill upgrade.**
+  That is why it stays opt-in.
+- **New Tiedtke still scores better.** On the same five cases, the default
+  row (New Tiedtke at this spacing) has the higher ETS of the two (+0.074 at
+  1 mm and +0.036 at 10 mm over the booked arm). It also has a lower RMSE
+  (5.03 against 6.71 mm).
+
+**Sondes (temperature).** The arms were also compared with
+`woof.hex.sonde_profile_referee` on the same five cases (WIS2 TEMP
+radiosondes, 16 mandatory levels, leads 0 to 72 h). The result is neutral:
+- Most level and lead differences are within ±0.02 K.
+- The largest systematic change is at 1000 hPa, where global RMSE is
+  0.04 to 0.10 K higher.
+- In the southern polar band, 925 hPa RMSE is 0.24 to 0.67 K lower.
+
 ## 3. Downstream condensate surplus
 
 **Magnitude.** With more rain made explicitly, the port carries **+50 % cloud

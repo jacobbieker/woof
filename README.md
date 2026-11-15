@@ -311,7 +311,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     WRF's deep GF counts the downdraft evaporation it returns to vapour as
     surface rain too, so deep `pret` is 1.29 to 1.66 times the column's
     water loss. The option closes that budget and leaves the tendencies
-    unchanged. Evidence:
+    unchanged. On five global 120 km cases scored against Stage-IV, the
+    24 h bias goes from +0.49 to −0.11 mm and RMSE falls by 1.3 mm. ETS
+    at 1 mm falls by 0.02. Evidence:
     [declared-divergences.md](components/hex/docs/declared-divergences.md)
     section 2.
 - **Hex (MPAS) parity with WRF's options.** The goal is for the hex model

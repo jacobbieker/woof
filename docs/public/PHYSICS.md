@@ -2660,9 +2660,19 @@ With the option on, the evaporation is subtracted (`gf.cu`,
 It is per domain, refused off `cu_physics = 3`, and reachable from the TOML
 (`[shared]` or `[[domain]]`) and from the hex WOOF arm with `--physics
 gf_deep_rain_evaporation_booking=true`. The default keeps WRF's arithmetic,
-so the GF oracles are unchanged. Observation evidence is in
-[declared-divergences.md](../../components/hex/docs/declared-divergences.md)
-section 2.
+so the GF oracles are unchanged.
+
+Against Stage-IV 24 h totals on five 72 h global 120 km cases, the option
+changes the scores as follows:
+- The CONUS-mean bias goes from +0.49 to −0.11 mm, with a paired 95 %
+  interval of [−0.89, −0.37] mm.
+- RMSE drops by 1.29 mm.
+- ETS at 1 mm drops by 0.02.
+- The 1 mm frequency bias goes from 0.96 to 0.88.
+
+So rain amounts improve and the rain area shrinks. The tables are in
+[declared-divergences.md](../../components/hex/docs/declared-divergences.md),
+section 2, under "Opt-in: `gf_deep_rain_evaporation_booking`".
 
 ## Passive tracers (`tracer_opt`)
 
