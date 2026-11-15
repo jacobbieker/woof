@@ -541,6 +541,8 @@ class ColumnState:
     calc_tsfc: bool
     heat_capacity: bool | None = None
     hi_min: float | None = None
+    #: column_therm_v842.vertical_thermodynamics' (ierr, cell, message)
+    abort: tuple | None = None
 
 
 def init_parameters(pools: dict, configs: dict) -> ColumnState:

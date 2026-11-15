@@ -25,7 +25,19 @@
 !                 exchanges are not part of it);
 !   aggregate     seaice_column_aggregate;
 !   update_state  seaice_column_update_state(domain, oracle_update_type,
-!                 dt, oracle_ice_age_time_offset).
+!                 dt, oracle_ice_age_time_offset);
+!   vertical_thermodynamics
+!                 colpkg_init_thermo (which sets the column package's
+!                 heat_capacity and l_brine, as seaice_init's
+!                 init_column_thermodynamic_profiles does before any step),
+!                 then column_vertical_thermodynamics(domain, clock, ierr),
+!                 whose ierr is logged ('TOBJ IERR n'): 0, or
+!                 SEAICE_ERROR_COL_VERT_THERM after an abort (its message and
+!                 cell are logged too).
+!
+! The Registry struct alternative_atmos_forcing is longer than the stream's
+! 24-character pool names; the stream spells it 'alternative_atmos_forcin'
+! and the driver files that pool under the full name as well.
 !
 ! LOG.txt gets the tracer object ('TOBJ name values...': nTracers, the
 ! physics tracer indices, parentIndex, firstAncestorMask (as integers),
@@ -41,6 +53,7 @@ program run_column
   use seaice_initialize, only: init_ice_state, initialize_coupler_fields
   use seaice_forcing, only: seaice_reset_coupler_fluxes
   use ice_colpkg_tracers, only: nt_Tsfc, nt_fbri
+  use ice_colpkg, only: colpkg_init_thermo
   use oracle_stream
   implicit none
   type(oracle_pools) :: pools
@@ -49,7 +62,9 @@ program run_column
   real(kind=RKIND) :: inputDt
   real(kind=RKIND), pointer :: iceAgeTimeOffset
   character(len=StrKIND), pointer :: stage, updateType, config_start_time, clockStep
-  integer :: p, logUnit
+  integer :: p, logUnit, ierr
+  integer, pointer :: nIceLayers
+  real(kind=RKIND), allocatable :: sprofile(:)
   character(len=1024) :: inPath, outPath, logPath
 
   call get_command_argument(1, inPath)
@@ -71,6 +86,8 @@ program run_column
   do p = 1, size(poolNames)
      call stub_pool_put_subpool(domain % blocklist % structs, trim(poolNames(p)), pool_named(pools, trim(poolNames(p))))
   end do
+  call stub_pool_put_subpool(domain % blocklist % structs, 'alternative_atmos_forcing', &
+       pool_named(pools, 'alternative_atmos_forcin'))
   call mpas_pool_get_config(pools % configs, 'config_start_time', config_start_time)
   call mpas_pool_get_config(pools % configs, 'oracle_clock_step', clockStep)
   call mpas_set_clock(domain % clock, config_start_time, clockStep)
@@ -91,6 +108,13 @@ program run_column
      call mpas_pool_get_config(pools % configs, 'oracle_update_type', updateType)
      call mpas_pool_get_config(pools % configs, 'oracle_ice_age_time_offset', iceAgeTimeOffset)
      call seaice_column_update_state(domain, trim(updateType), inputDt, iceAgeTimeOffset)
+  case ('vertical_thermodynamics')
+     call mpas_pool_get_dimension(pool_named(pools, 'mesh'), 'nIceLayers', nIceLayers)
+     allocate(sprofile(nIceLayers + 1))
+     call colpkg_init_thermo(nIceLayers, sprofile)
+     ierr = 0
+     call column_vertical_thermodynamics(domain, domain % clock, ierr)
+     call write_ints('IERR', [ierr])
   case default
      print *, 'run_column: unknown oracle_stage ', trim(stage)
      stop 2
