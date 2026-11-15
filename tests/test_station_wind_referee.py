@@ -91,7 +91,7 @@ def test_compare_pairs_cases_and_is_seeded():
         r.compare(a, [_record("other", "base", 0.0)])
 
 
-def test_score_on_a_synthetic_history(tmp_path):
+def _history(tmp_path, with_ter=True):
     netCDF4 = pytest.importorskip("netCDF4")
     lat, lon = _mesh()
     for hour, speed in ((0, 5.0), (6, 8.0)):
@@ -103,9 +103,15 @@ def test_score_on_a_synthetic_history(tmp_path):
             x[0, :] = np.frombuffer(f"2026-10-28_{hour:02d}:00:00".ljust(64).encode(), dtype="S1")
             d.createVariable("latCell", "f8", ("nCells",))[:] = np.radians(lat)
             d.createVariable("lonCell", "f8", ("nCells",))[:] = np.radians(lon)
-            d.createVariable("ter", "f4", ("nCells",))[:] = 0.0
+            if with_ter:
+                d.createVariable("ter", "f4", ("nCells",))[:] = 0.0
             d.createVariable("u10", "f4", ("Time", "nCells"))[0] = speed * 0.6
             d.createVariable("v10", "f4", ("Time", "nCells"))[0] = speed * 0.8
+    return lat, lon
+
+
+def test_score_on_a_synthetic_history(tmp_path):
+    lat, lon = _history(tmp_path)
     station = ("s", float(lat[100]), float(lon[100]), 10.0)
     reports = {T0: [station + (4.0,)], T6: [station + (6.0,)]}
     rec = r.score(str(tmp_path), "c", "a", reports=reports)
@@ -113,3 +119,18 @@ def test_score_on_a_synthetic_history(tmp_path):
     assert rec["table"]["GL"]["0"]["bias"] == pytest.approx(1.0, abs=1e-5)
     assert rec["table"]["GL"]["6"]["bias"] == pytest.approx(2.0, abs=1e-5)
     assert rec["table"]["GL"]["drift_m_s_per_24h"] == pytest.approx(4.0, abs=1e-4)
+
+
+def test_score_refuses_a_history_without_terrain_unless_given_a_file(tmp_path):
+    netCDF4 = pytest.importorskip("netCDF4")
+    lat, lon = _history(tmp_path, with_ter=False)
+    station = ("s", float(lat[100]), float(lon[100]), 10.0)
+    reports = {T0: [station + (4.0,)], T6: [station + (6.0,)]}
+    with pytest.raises(ValueError, match="carries no ter"):
+        r.score(str(tmp_path), "c", "a", reports=reports)
+    static = tmp_path / "static.nc"
+    with netCDF4.Dataset(static, "w") as d:
+        d.createDimension("nCells", lat.size)
+        d.createVariable("ter", "f4", ("nCells",))[:] = 1000.0
+    rec = r.score(str(tmp_path), "c", "a", reports=reports, terrain_file=str(static))
+    assert rec["pairs"] == 0  # the station sits 990 m below its cell: dropped, not scored

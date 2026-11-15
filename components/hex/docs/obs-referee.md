@@ -218,7 +218,9 @@ exploratory.
   - The station's cell is the profile referee's owner, with the same
     boundary mask and refusal. A station whose elevation is unknown, or
     differs from its cell's `ter` by more than 300 m, is dropped: that cell
-    does not represent the site's exposure.
+    does not represent the site's exposure. `ter` comes from the history or
+    from `--terrain` (a static or init file of the same mesh); a history
+    with neither is refused, so the check is never skipped.
   - A station whose initial-time report departs from the shared initial
     state by more than 15 m/s is dropped from every lead of the case, and
     the record lists it.

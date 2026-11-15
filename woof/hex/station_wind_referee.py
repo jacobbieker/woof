@@ -23,7 +23,8 @@ Statistics: per (band, lead) the count, bias (model - obs), RMSE and the mean ob
 speed; ``compare`` pairs two arms over the same cases and resamples whole cases with a
 fixed seed (the radiosonde referee's ``paired_interval``).
 
-    python -m woof.hex.station_wind_referee score --history DIR --case CASE --arm ARM --out OUT.json
+    python -m woof.hex.station_wind_referee score --history DIR --case CASE --arm ARM --out OUT.json \
+        [--mask FILE] [--terrain FILE]
     python -m woof.hex.station_wind_referee compare A1.json [A2.json ...] --against B1.json [...] \
         --out CMP.json [--replicates 5000] [--seed 20261115]
 """
@@ -157,13 +158,34 @@ def summarise(pairs):
     return table
 
 
-def score(history_dir, case, arm, *, reports=None, mask_file=None):
+def read_terrain(path, n_cells):
+    """``ter`` (m) from a static or init file of the same mesh."""
+    import netCDF4
+
+    with netCDF4.Dataset(path) as d:
+        if "ter" not in d.variables:
+            raise ValueError(f"{path} carries no ter")
+        ter = np.asarray(d.variables["ter"][:], dtype=np.float64).reshape(-1)
+    if ter.size != n_cells:
+        raise ValueError(f"{path} has {ter.size} cells and the history {n_cells}")
+    return ter
+
+
+def score(history_dir, case, arm, *, reports=None, mask_file=None, terrain_file=None):
+    """One case and arm. The terrain filter is never skipped: ``ter`` comes from the
+    history, else from ``terrain_file``, and a history with neither is refused."""
     frames = [read_frame(p) for p in history_frames(history_dir)]
     start = min(f["valid"] for f in frames)
     hourly = [f for f in frames if f["valid"].minute == 0 and f["valid"].second == 0]
     geo = frames[0]
     if "lat" not in geo:
         raise ValueError(f"{geo['path']} carries no latCell/lonCell")
+    ter = geo.get("ter")
+    if ter is None and terrain_file is not None:
+        ter = read_terrain(terrain_file, geo["lat"].size)
+    if ter is None:
+        raise ValueError(f"{geo['path']} carries no ter: pass --terrain with a static or init file "
+                         "of the same mesh, so the station elevation check can run")
     cell_xyz = unit_vectors(geo["lat"], geo["lon"])
     usable = usable_cells(geo["lat"], geo["lon"], geo.get("bdy"), mask_file)
     if reports is None:
@@ -171,7 +193,7 @@ def score(history_dir, case, arm, *, reports=None, mask_file=None):
     pairs = []
     for f in hourly:
         lead = int(round((f["valid"] - start).total_seconds() / 3600.0))
-        for row in pair_frame(f, reports.get(f["valid"], []), cell_xyz, usable, geo.get("ter")):
+        for row in pair_frame(f, reports.get(f["valid"], []), cell_xyz, usable, ter):
             pairs.append((lead,) + row)
     rejected = initial_blacklist(pairs)
     pairs = [p for p in pairs if p[1] not in rejected]
@@ -230,6 +252,7 @@ def main(argv=None):
     s.add_argument("--arm", required=True)
     s.add_argument("--out", required=True)
     s.add_argument("--mask", help="MPAS file of the same mesh carrying bdyMaskCell (regional history without it)")
+    s.add_argument("--terrain", help="static or init file of the same mesh carrying ter (history without it)")
     c = sub.add_parser("compare")
     c.add_argument("arm_a", nargs="+")
     c.add_argument("--against", nargs="+", required=True)
@@ -238,7 +261,7 @@ def main(argv=None):
     c.add_argument("--seed", type=int, default=20261115)
     a = ap.parse_args(argv)
     if a.command == "score":
-        record = score(a.history, a.case, a.arm, mask_file=a.mask)
+        record = score(a.history, a.case, a.arm, mask_file=a.mask, terrain_file=a.terrain)
     else:
         load = lambda paths: [json.load(open(p, encoding="utf-8")) for p in paths]  # noqa: E731
         record = compare(load(a.arm_a), load(a.against), replicates=a.replicates, seed=a.seed)
