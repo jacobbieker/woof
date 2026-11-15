@@ -24,7 +24,7 @@
 # a host whose libm is not glibc.  The column-package oracles (run_column,
 # run_init_thermo; README.md) are built at RKIND 8 only, in BUILD_DIR/column:
 # the column package is dbl_kind and mpas_seaice_column.F does not compile at
-# RKIND 4; its cos, pow and tanh are the host libm's.  gfortran is the
+# RKIND 4; its atan, cos, exp, log, pow and tanh are the host libm's.  gfortran is the
 # mpas-oracle pixi environment's unless GFORTRAN names one.
 set -euo pipefail
 if [[ $# -ne 2 ]]; then

@@ -31,6 +31,11 @@ def shape(case: dict, fortran_shape: tuple) -> tuple[int, ...]:
     return tuple(sizes[s] if isinstance(s, str) else s for s in reversed(fortran_shape))
 
 
+#: Registry structs whose names are longer than the stream's pool field, as
+#: the stream spells them (the driver files the pool under its full name)
+POOL_ALIASES = {"alternative_atmos_forcing": "alternative_atmos_forcin"}
+
+
 def _text(value: str, width: int) -> bytes:
     raw = value.encode("ascii")
     if len(raw) > width:
@@ -63,7 +68,7 @@ def input_bytes(fields, case: dict) -> bytes:
         rank = len(fshape)
         dims = [shape(case, fshape)[::-1][i] if i < rank else 1 for i in range(3)] if rank else [1, 1, 1]
         code_rank = 4 if (stream_kind == ABSENT and kind == INT) else rank
-        parts += [_text(pool, POOL_WIDTH), _text(name, 64),
+        parts += [_text(POOL_ALIASES.get(pool, pool), POOL_WIDTH), _text(name, 64),
                   np.array([stream_kind, code_rank, *dims], "<i4").tobytes()]
         if stream_kind == REAL and rank > 3:
             # a rank 4 or 5 real field's further extents follow the header's three

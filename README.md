@@ -283,7 +283,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     time step with advection (N steps, bitwise restart), and the column
     package's (colpkg's) initialisation and aggregation (RKIND 8: the
     tracer object, thickness categories, salinity profiles, initial ice
-    state, coupler fields, aggregate and state update);
+    state, coupler fields, aggregate and state update), and its BL99
+    vertical thermodynamics (`ice_atmo`'s stability-corrected boundary
+    layer, the temperature solve, growth and melt, snow ice). That
+    thermodynamics runs only with the LGPL libm opt-in
+    `WOOF_GLIBC239_LIBM64=1`, because it needs glibc's atan word for word;
   - MALI: the shallow-ice velocity solver, masks and geometry diagnostics,
     thermal initialisation, the thermal solver and basal melt, thickness
     and tracer advection, calving (every option, and front restoration),
@@ -292,7 +296,7 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   Limits: Albany's higher-order solvers are refused by name. The sea-ice
   remap computes its init geometry (frames, moments, MPAS's RBF
   coefficients) itself, and refuses halo exchanges and periodic planar
-  meshes by name. The sea-ice column physics' time step (thermodynamics, ITD, ridging,
+  meshes by name. The sea-ice column physics' time step (mushy thermodynamics, ITD, ridging,
   shortwave), ocean KPP and GM/Redi,
   and the coupler import and export are not ported. A few RKIND 8 cases need the LGPL libm
   opt-in below. These are ported pieces and steps, not coupled forecasts.

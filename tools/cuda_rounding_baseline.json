@@ -662,6 +662,14 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "43fdf723fe8e06cd15884fb9bd490c21788fbc62eb9d2b31ac77d73c41ddeb26",
+    "constructor": "compile_using_nvrtc",
+    "factory": "_module_on",
+    "factory_sha256": "db4f0a40e13b9e60953c5f85ba8b7abd9d01e7f974010f088cfe798104950c37",
+    "file": "woof/hex/mpas_seaice/column_therm_v842.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "441eb087a58545217b1728cb59e45534459800c752f0b79a9af52fa5d7b14c24",
     "constructor": "compile_using_nvrtc",
     "factory": "_module",
@@ -4776,6 +4784,10 @@
     "sha256": "c1a253e775826ab249a894dd987c2b698099b6334b58b42eefaa307b5abf428d"
    },
    {
+    "file": "woof/hex/mpas_seaice/column_therm_v842.cu",
+    "sha256": "2eb0460257ea3e4c6bb2c2359e51bfaa98396274ebe4becab36af35fa8743935"
+   },
+   {
     "file": "woof/hex/mpas_seaice/column_v842.cu",
     "sha256": "090287b41e448373b5e5eaa4869d5e31a01570bfc387b299999186f6a044f543"
    },
@@ -5742,8 +5754,12 @@
     "sha256": "9041d8ae106ffeeac68b8fe259e3b28e1267b9f6c4e5ac15bcad95e484d97e56"
    },
    {
+    "file": "woof/hex/mpas_seaice/column_therm_v842.py",
+    "sha256": "72c3246f98927b8a63f1fec3f9d2b329e5d51a05c8c822532b71fb849277d11c"
+   },
+   {
     "file": "woof/hex/mpas_seaice/column_v842.py",
-    "sha256": "092196e2bd4e30ef4cf9f1627d1d597e4ad50a55452f56d7f0dc93e53082c81f"
+    "sha256": "e261d8e85351e5220fe6f614d096cdb8dbbb2472751c909b6dc55d099f18dcea"
    },
    {
     "file": "woof/hex/mpas_seaice/evp_v842.py",

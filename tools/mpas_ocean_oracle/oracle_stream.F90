@@ -41,14 +41,15 @@ module oracle_stream
   public :: oracle_pools, oracle_field, poolNames, read_stream, write_stream, pool_named
 
   integer, parameter :: maxFields = 1024
-  character(len=24), parameter :: poolNames(42) = [character(len=24) :: 'mesh', 'state', 'tracers', &
+  character(len=24), parameter :: poolNames(43) = [character(len=24) :: 'mesh', 'state', 'tracers', &
        'diagnostics', 'forcing', 'scratch', 'tend', 'tracersTend', 'tracersSurfaceFlux', 'swForcing', 'verticalMesh', &
        'boundary', 'velocity_solver', 'velocity_variational', 'velocity_weak', 'icestate', 'tracers_aggregate', &
        'atmos_coupling', 'ocean_coupling', 'ridging', 'tracer_tendencies', 'tracer_edge_fluxes', &
        'tracer_conservation', 'incremental_remap', 'rotated_mesh', 'tracer_masks', 'tracer_products', &
        'tracer_triangles', 'tracer_barycenter', 'tracer_reconstruction', 'tracer_monotonicity', &
        'atmos_fluxes', 'ocean_fluxes', 'melt_growth_rates', 'shortwave', 'drag', 'ponds', 'aerosols', &
-       'biogeochemistry', 'initial', 'ocean_atmosphere', 'atmos_forcing']
+       'biogeochemistry', 'initial', 'ocean_atmosphere', 'atmos_forcing', &
+       'alternative_atmos_forcin']
 
   type oracle_field
     character(len=24) :: pool
@@ -70,7 +71,7 @@ module oracle_stream
   end type pool_ref
 
   type oracle_pools
-    type(pool_ref) :: pool(42)
+    type(pool_ref) :: pool(43)
     type(MPAS_pool_type), pointer :: configs => null(), packages => null()
   end type oracle_pools
 

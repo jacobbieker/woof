@@ -119,10 +119,17 @@ Ordered by how self-contained each piece is:
    `colpkg_init_itd`, `colpkg_init_thermo` (graded for 1 to 64 ice layers),
    `colpkg_init_trcr`, the `cice_default`, `uniform` and `no_ice` initial
    states, `initialize_coupler_fields`, `seaice_reset_coupler_fluxes`,
-   `colpkg_aggregate` and `seaice_column_update_state`. Still to port:
-   `ice_therm_vertical` (BL99 and mushy thermodynamics), `ice_therm_itd`,
-   `ice_mechred` (ridging), `ice_shortwave` (delta-Eddington), melt ponds,
-   `ice_atmo`, then the column time step.
+   `colpkg_aggregate` and `seaice_column_update_state`. Also ported:
+   `seaice_column_vertical_thermodynamics` with BL99 (bubbly or MU71
+   conductivity, CCSM3 atmosphere boundary layer, coupled or computed surface
+   temperature; `woof/hex/mpas_seaice/column_therm_v842.py`,
+   `tests/test_mpas_seaice_column_therm_parity.py`). It runs only behind
+   `WOOF_GLIBC239_LIBM64=1`: `psimhu`/`psixhu` call atan, glibc's atan is
+   not correctly rounded, and the port matches it word for word only through
+   the LGPL transcription. Still to port: mushy thermodynamics,
+   `ice_therm_itd`, `ice_mechred` (ridging), `ice_shortwave`
+   (delta-Eddington), melt ponds, the other `ice_atmo` options, then the
+   column time step.
 7. Biogeochemistry (`ice_zbgc*`, `ice_algae`, `ice_aerosol`). Refused by name
    until ported.
 
