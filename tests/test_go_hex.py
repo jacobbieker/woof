@@ -184,6 +184,48 @@ def test_physics_selectors_go_to_hex_resolve(tmp_path):
     assert "--forecast-arg=--physics=mp_physics=8" in argv
 
 
+def test_severe_diagnostics_ride_to_the_mpas_suite_route_as_a_namelist(tmp_path, monkeypatch):
+    """WRF's lightning, HAILCAST, AFWA and nwp_diagnostics keys become the route's &diagnostics (severe-weather
+    worker, 2026-11-14): a --physics-namelist holding only that group, so the region keeps its default MPAS suite."""
+    config = _write(tmp_path, domain_extra="lightning_option = 1\nhailcast_opt = 1",
+                    shared="[shared]\nafwa_severe_opt = 1\nnwp_diagnostics = 1\nhaildt = 60.0\n")
+    value = go_hex.plan(_args(str(config)))
+    namelist = Path(value["work_dir"]) / "go-diagnostics.namelist"
+    assert f"--forecast-arg=--physics-namelist={namelist}" in value["regional_argv"]
+    assert not any(item.startswith("--forecast-arg=--physics=") for item in value["regional_argv"])
+    text = value["diagnostics_namelist"]
+    for line in ("config_lightning_option = 1", "config_hailcast_opt = .true.", "config_afwa_severe_opt = .true.",
+                 "config_nwp_diagnostics = .true.", "config_haildt = 60.0"):
+        assert line in text, text
+    from woof.hex.config import parse_fortran_namelist
+    from woof.hex.mpasdiag import hailcast_diag_v842, lightning_diag_v842
+    groups = parse_fortran_namelist(text)
+    assert set(groups) == {"diagnostics"}
+    assert hailcast_diag_v842.resolve(groups) is not None
+    # The default plan is unchanged: no key, no flag.
+    (tmp_path / "plain").mkdir()
+    plain = go_hex.plan(_args(str(_write(tmp_path / "plain"))))
+    assert "diagnostics_namelist" not in plain
+    assert not any("physics-namelist" in item for item in plain["regional_argv"])
+    # launch writes the namelist beside the region outline.
+    from woof.hex import cli as hex_cli
+    monkeypatch.setattr(hex_cli, "main", lambda argv: 0)
+    assert go_hex.launch(_args(str(config))) == 0
+    assert namelist.read_text() == text
+
+
+@pytest.mark.parametrize("edit, words", [
+    (dict(domain_extra="lightning_option = 1", shared="[shared]\nmp_physics = 8\n"),
+     "MPAS v8.4.2 suite route only"),
+    (dict(shared="[shared]\nhailcast_opt = 2\n"), "hailcast_opt = 2: a switch"),
+    (dict(domain_extra="lightning_option = 1", shared="[shared]\nlightning_option = 2\n"),
+     "lightning_option differs"),
+])
+def test_severe_diagnostics_the_route_cannot_take_are_refused_by_name(tmp_path, edit, words):
+    with pytest.raises(go_hex.HexGoRefusal, match=words):
+        go_hex.plan(_args(str(_write(tmp_path, **edit))))
+
+
 def test_go_flags_the_route_reads(tmp_path):
     config = _write(tmp_path, tail="forecast_start_hour = 0\n")
     out = tmp_path / "elsewhere"

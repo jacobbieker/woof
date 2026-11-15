@@ -252,6 +252,17 @@ def import_physics_namelist(
             for option, value in assignments.items():
                 dispositions.append(Disposition(group, option, value, "outside", outside[group]))
             continue
+        if group == "diagnostics":
+            # The WOOF route has no history writer for MPAS-A's &diagnostics packages; the MPAS v8.4.2 suite route
+            # (woof.hex.mpasdiag) runs them.  Named, so the remedy is in the refusal.
+            for option, value in assignments.items():
+                refuse(group, option, value,
+                       "&diagnostics (lightning, HAILCAST, AFWA, nwp_diagnostics, ...) runs on the MPAS v8.4.2 "
+                       "suite route (R2) only, and this namelist selects the WOOF physics route (R1)",
+                       "name an MPAS suite (config_physics_suite in &physics, or --physics-suite "
+                       "convection_permitting / mesoscale_reference), or drop &physics so the hex default MPAS "
+                       "suite runs with this namelist")
+            continue
         if group not in physics_groups:
             for option, value in assignments.items():
                 refuse(group, option, value,

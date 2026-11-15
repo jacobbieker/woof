@@ -252,6 +252,37 @@ def _physics_keys() -> frozenset[str]:
     return frozenset(engine_selector_aliases()) | frozenset(generation_keys())
 
 
+def _diagnostics_keys() -> dict[str, tuple[str, bool]]:
+    """WRF's severe-weather diagnostic keys -> (the MPAS v8.4.2 suite route's &diagnostics option, logical?).
+
+    The route (woof.hex.mpasdiag) reads WRF's options under ``config_<wrf name>`` in &diagnostics: AFWA,
+    lightning, HAILCAST and nwp_diagnostics.  WRF writes the switches as integers 0/1, the route as logicals."""
+    from woof.hex.mpasdiag import afwa_diag_v842 as afwa, hailcast_diag_v842 as hailcast
+    from woof.hex.mpasdiag import lightning_diag_v842 as lightning, nwp_diag_v842 as nwp
+
+    logical = {*afwa.OPTION.values(), afwa.QNG_GATE_OPTION, hailcast.OPTION, nwp.OPTION}
+    options = (*afwa.OPTIONS, *lightning.OPTIONS, *hailcast.OPTIONS, nwp.OPTION)
+    return {option[len("config_"):]: (option, option in logical) for option in options}
+
+
+def _diagnostics_literal(key: str, value: Any, logical: bool) -> tuple[str | None, str | None]:
+    """The Fortran literal of one diagnostics value, or a refusal."""
+    if logical:
+        if isinstance(value, bool) or value in (0, 1):
+            return (".true." if bool(value) else ".false."), None
+        return None, f"{key} = {value!r}: a switch, 0/1 or true/false"
+    if isinstance(value, bool):
+        return None, f"{key} = {value!r}: a number, not a switch"
+    if isinstance(value, (int, float)):
+        return repr(value), None
+    return "'" + str(value).replace("'", "") + "'", None
+
+
+def diagnostics_namelist(diagnostics: Mapping[str, str]) -> str:
+    """The &diagnostics namelist a go run's severe-weather keys become."""
+    return "&diagnostics\n" + "".join(f" {option} = {text}\n" for option, text in diagnostics.items()) + "/\n"
+
+
 def _chem_reason(key: str) -> str | None:
     from woof.config import CHEM_RUN_FIELDS, FIRE_RUN_FIELDS
 
@@ -341,6 +372,22 @@ def read_request(document: Mapping[str, Any], *, source: str = "CONFIG") -> dict
     domain = domains[0]
     physics: dict[str, Any] = {}
     physics_keys = _physics_keys()
+    # WRF's severe-weather diagnostics (AFWA, lightning, HAILCAST, nwp_diagnostics) run on the MPAS v8.4.2 suite
+    # route's &diagnostics; the go run hands them to the regional door as a --physics-namelist holding only that
+    # group, so the region keeps its default MPAS suite (woof.hex.physics_default.ROUTE_ONLY_GROUPS).
+    diagnostics_keys = _diagnostics_keys()
+    diagnostics: dict[str, str] = {}
+
+    def diagnostic(table: str, key: str, value: Any) -> None:
+        option, logical = diagnostics_keys[key]
+        text, refusal = _diagnostics_literal(key, value, logical)
+        if refusal is not None:
+            refusals.append(f"[{table}] {refusal}")
+        elif option in diagnostics and diagnostics[option] != text:
+            refusals.append(f"{key} differs between [shared] and [[domain]]; a hex mesh runs one setting")
+        else:
+            diagnostics[option] = text
+
     for key, value in domain.items():
         if key in DOMAIN_KEYS:
             continue
@@ -351,9 +398,15 @@ def read_request(document: Mapping[str, Any], *, source: str = "CONFIG") -> dict
         if key in physics_keys:
             physics[key] = value
             continue
+        if key in diagnostics_keys:
+            diagnostic("domain", key, value)
+            continue
         refusals.append(_key_refusal("domain", key))
     shared = document.get("shared") or {}
     for key, value in shared.items():
+        if key in diagnostics_keys and key not in physics_keys:
+            diagnostic("shared", key, value)
+            continue
         if key in physics_keys:
             if key in physics and physics[key] != value:
                 refusals.append(f"{key} is {value!r} in [shared] and {physics[key]!r} in [[domain]]; "
@@ -400,6 +453,13 @@ def read_request(document: Mapping[str, Any], *, source: str = "CONFIG") -> dict
     for key in ("start_time", "run_seconds"):
         if key not in experiment:
             refusals.append(f"[experiment] {key}: the hex route needs it")
+    if diagnostics and physics:
+        refusals.append(
+            f"{', '.join(o[len('config_'):] for o in diagnostics)} with physics selectors "
+            f"({', '.join(physics)}): the severe-weather diagnostics run on the MPAS v8.4.2 suite route only, and "
+            "physics selectors on the go route take the WOOF column route, which has no &diagnostics writer. "
+            "Drop the selectors (the region runs the hex default MPAS suite), or run `woof hex regional` with "
+            "--forecast-arg=--physics-namelist=F where F names an MPAS suite in &physics and holds &diagnostics")
     if refusals:
         raise HexGoRefusal(f"{source} asks the hex engine for what it cannot run yet:\n  - "
                            + "\n  - ".join(refusals))
@@ -419,7 +479,9 @@ def read_request(document: Mapping[str, Any], *, source: str = "CONFIG") -> dict
             "history_every_minutes": int(history // 60), "projection": dict(projection),
             "nx": int(domain["nx"]), "ny": int(domain["ny"]), "dx_m": float(domain["dx"]),
             "fetch": dict(fetch), "physics": physics, "terrain": _scoped(terrain, float(domain["dx"])),
-            "output_table": bool(output), "output": dict(output)}
+            "output_table": bool(output), "output": dict(output),
+            # Only a run that asks for a severe-weather diagnostic carries the key: every other request is unchanged.
+            **({"diagnostics": diagnostics} if diagnostics else {})}
 
 
 def _scoped(terrain: dict[str, Any] | None, dx_m: float) -> dict[str, Any] | None:
@@ -505,6 +567,11 @@ def work_dir(args, config: Path) -> Path:
         config.expanduser().absolute().with_name(f"{config.stem}-go")
 
 
+def diagnostics_path(shape: Path) -> Path:
+    """The &diagnostics namelist a go run writes beside its region outline."""
+    return Path(shape).with_name("go-diagnostics.namelist")
+
+
 def regional_argv(request: Mapping[str, Any], args, config: Path, *, shape: Path) -> list[str]:
     """The ``woof hex regional`` command this go run is."""
 
@@ -524,6 +591,8 @@ def regional_argv(request: Mapping[str, Any], args, config: Path, *, shape: Path
     for key, value in request["physics"].items():
         text = str(value).lower() if isinstance(value, bool) else str(value)
         argv += [f"--forecast-arg=--physics={key}={text}"]
+    if request.get("diagnostics"):
+        argv += [f"--forecast-arg=--physics-namelist={diagnostics_path(shape)}"]
     from woof.output_formats import argument_values
     argv += argument_values(args)
     if request.get("output_table") and getattr(args, "output_config", None) is None:
@@ -566,6 +635,8 @@ def plan(args, *, config: Path | None = None, document: Mapping[str, Any] | None
             "fine_dx_m": request["dx_m"], "hours": request["hours"], "physics": request["physics"],
             # Only a [static.highres] terrain block adds the key: every other go plan is unchanged.
             **({"terrain": request["terrain"]} if request.get("terrain") else {}),
+            **({"diagnostics_namelist": diagnostics_namelist(request["diagnostics"])}
+               if request.get("diagnostics") else {}),
             "work_dir": str(root), "regional_argv": argv,
             "command": "woof hex " + " ".join(shlex.quote(part) for part in argv)}
 
@@ -584,6 +655,8 @@ def launch(args, *, observer=None) -> int:
     root.mkdir(parents=True, exist_ok=True)
     shape = root / "go-region.json"
     shape.write_text(json.dumps(value["region"], indent=2) + "\n", encoding="utf-8")
+    if value.get("diagnostics_namelist"):
+        diagnostics_path(shape).write_text(value["diagnostics_namelist"], encoding="utf-8")
     (root / "go-hex-plan.json").write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
     print(f"go: engine hex, {value['name']}: {value['command']}", flush=True)
     from woof.hex.cli import main as hex_main

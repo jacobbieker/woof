@@ -305,6 +305,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   to accept the options WRF does, reusing WRF's column implementations
   rather than copies, and to refuse by name what it cannot yet do. Landed:
   - `woof go` runs hex with `[model] engine = "hex"` (regional route);
+    WRF's severe-weather keys there (`lightning_option`, `hailcast_opt`,
+    `afwa_*_opt`, `nwp_diagnostics` and their knobs) become the MPAS suite
+    route's `&diagnostics`. A `--physics-namelist` holding only
+    `&diagnostics` keeps the default MPAS suite, from `woof hex forecast`
+    and from `woof hex regional --forecast-arg`. The WOOF column route
+    refuses `&diagnostics` by name and says how to fix the request;
   - surface inputs on the generic column seam: CLM lake, SLUCM urban on
     per-cell fractions, WUDAPT LCZ classes, Noah and RUC mosaic, Pleim-Xiu
     and the slab with their soil inits, irrigation and `topo_wind = 1`
