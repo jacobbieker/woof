@@ -118,8 +118,10 @@ for precision in r4 r8; do
       "${fc[@]}" "${flags[@]}" "${seaice}/shared/mpas_seaice_velocity_solver.F"
       # incremental remap, verbatim (the remap module with -Dprivate=public, a
       # visibility change only, so run_incremental_remap can call its stages);
-      # remap_standins.F90: the RBF setup (the coefficients are the input's),
+      # rbf_standins.F90: the RBF setup (the coefficients are the input's);
+      # remap_standins.F90:
       # seaice_error's codes and abort write, and upwind, which cannot run in v8.4.2
+      "${fc[@]}" "${flags[@]}" "${script_dir}/rbf_standins.F90"
       "${fc[@]}" "${flags[@]}" "${script_dir}/remap_standins.F90"
       "${fc[@]}" "${flags[@]}" "${seaice}/shared/mpas_seaice_advection_incremental_remap_tracers.F"
       "${fc[@]}" "${flags[@]}" -Dprivate=public "${seaice}/shared/mpas_seaice_advection_incremental_remap.F"
@@ -148,14 +150,56 @@ for precision in r4 r8; do
       "${fc[@]}" -o "${build_dir}/run_seaice_step_${precision}" run_seaice_step.o seaice_time_integration_cut.o \
           seaice_column_cut.o mpas_seaice_velocity_solver.o seaice_diagnostics_cut.o \
           mpas_seaice_advection.o mpas_seaice_advection_incremental_remap.o \
-          mpas_seaice_advection_incremental_remap_tracers.o remap_standins.o \
+          mpas_seaice_advection_incremental_remap_tracers.o remap_standins.o rbf_standins.o \
           mpas_seaice_velocity_solver_variational.o mpas_seaice_velocity_solver_constitutive_relation.o \
           step_standins.o mpas_seaice_constants.o ice_constants_colpkg.o ice_kinds_mod.o \
           seaice_mesh_interpolation.o oracle_stream.o stubs.o mpas_kind_types.o \
           ${step_libm[@]+"${step_libm[@]}"}
       "${fc[@]}" -o "${build_dir}/run_incremental_remap_${precision}" run_incremental_remap.o \
           mpas_seaice_advection_incremental_remap.o mpas_seaice_advection_incremental_remap_tracers.o \
-          remap_standins.o seaice_diagnostics_cut.o oracle_stream.o stubs.o mpas_kind_types.o )
+          remap_standins.o rbf_standins.o seaice_diagnostics_cut.o oracle_stream.o stubs.o mpas_kind_types.o
+      # the init oracle: the same driver and remap objects with MPAS's own RBF set-up
+      # (mpas_rbf_interp_initialize = mpas_initialize_vectors, mpas_init_reconstruct and
+      # what they call), cut verbatim out of the pinned operator sources into modules of
+      # those names, so the init derives coeffs_reconstruct itself
+      rm -rf init && mkdir init && ( cd init
+        cutr() {  # cutr FILE ROUTINE...: the subroutines and functions, verbatim (any case, any prefix)
+            local file=$1; shift
+            for routine in "$@"; do
+                awk -v r="${routine}" '{ l = tolower($0) }
+                    l ~ "^ *(real[^ ]* +)?(subroutine|function) +" tolower(r) " *\\(" {on=1}
+                    on {print}
+                    on && l ~ "^ *end +(subroutine|function) +" tolower(r) "([^a-z_0-9]|$)" {on=0}' "${file}"
+            done
+        }
+        ops="${source_root}/src/operators"
+        { printf 'module mpas_vector_operations\n  use mpas_kind_types\n  use mpas_derived_types\n'
+          printf '  use mpas_pool_routines\n  implicit none\n  public\ncontains\n'
+          cutr "${ops}/mpas_vector_operations.F" mpas_unit_vec_in_r3 mpas_cross_product_in_r3 \
+              mpas_initialize_vectors mpas_fix_periodicity
+          printf 'end module mpas_vector_operations\n'
+          printf 'module mpas_rbf_interpolation\n  use mpas_kind_types\n  use mpas_derived_types\n'
+          printf '  use mpas_pool_routines\n  use mpas_vector_operations\n  implicit none\n  private\n'
+          printf '  public :: mpas_rbf_interp_initialize, mpas_rbf_interp_func_3D_plane_vec_const_dir_comp_coeffs\n'
+          printf 'contains\n'
+          cutr "${ops}/mpas_rbf_interpolation.F" mpas_rbf_interp_initialize \
+              mpas_rbf_interp_func_3D_plane_vec_const_dir_comp_coeffs evaluate_rbf \
+              mpas_set_up_vector_dirichlet_rbf_matrix_and_rhs mpas_legs elgs
+          printf 'end module mpas_rbf_interpolation\n'
+          printf 'module mpas_vector_reconstruction\n  use mpas_kind_types\n  use mpas_derived_types\n'
+          printf '  use mpas_pool_routines\n  use mpas_rbf_interpolation\n  use mpas_vector_operations\n'
+          printf '  implicit none\n  private\n  public :: mpas_init_reconstruct\ncontains\n'
+          cutr "${ops}/mpas_vector_reconstruction.F" mpas_init_reconstruct
+          printf 'end module mpas_vector_reconstruction\n'; } > rbf_cut.F
+        "${fc[@]}" "${flags[@]}" -I.. rbf_cut.F
+        if command -v objdump >/dev/null && objdump -d rbf_cut.o | grep -Eq '\bv?fn?m(add|sub)([0-9]|[[:space:]]|$)'; then
+            echo "the init oracle's RBF object contains an FMA instruction; refusing" >&2
+            exit 4
+        fi
+        "${fc[@]}" -o "${build_dir}/run_incremental_remap_init_${precision}" ../run_incremental_remap.o \
+            ../mpas_seaice_advection_incremental_remap.o ../mpas_seaice_advection_incremental_remap_tracers.o \
+            ../remap_standins.o rbf_cut.o ../seaice_diagnostics_cut.o ../oracle_stream.o ../stubs.o \
+            ../mpas_kind_types.o ) )
 done
 {
     echo "gfortran: $("${fc[@]}" --version | head -1)"
@@ -166,4 +210,5 @@ done
     echo "fma: $(grep -m1 -ow fma /proc/cpuinfo 2>/dev/null || echo absent)"
 } > "${build_dir}/TOOLCHAIN.txt"
 echo "built ${build_dir}/run_oracle_r{4,8} ${build_dir}/run_subcycle_r{4,8} ${build_dir}/run_presubcycle_r{4,8}" \
-     "${build_dir}/run_seaice_step_r{4,8} ${build_dir}/run_incremental_remap_r{4,8}"
+     "${build_dir}/run_seaice_step_r{4,8} ${build_dir}/run_incremental_remap_r{4,8}" \
+     "${build_dir}/run_incremental_remap_init_r{4,8}"

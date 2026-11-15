@@ -1131,3 +1131,318 @@ void finalize_state_field(
         target[tid] = result;
     }
 }
+
+// ---------------------------------------------------------------------------
+// state_relaxation_multi: one RK stage's state relaxation rows in ONE launch.
+//
+// apply_state_lateral_boundaries runs, per dry row (u, v, theta, phi, w, mu)
+// and per stage, up to three device operations: a zero-fill of the held
+// array, a frame-only state_specified_relaxation launch into it (relaxation
+// toward the table, specified rows cleared, theta/phi divided by the map
+// factor) and a second launch that writes the table's tendency onto the
+// specified rows of the stage tendency and adds the held row, plus the
+// whole-array interior division and addition of the former full-domain
+// ufunc path (_apply_legacy_held_interior).  Here every row of the stage is
+// one blockIdx.y of a single launch that sweeps the row's whole array: a
+// perimeter cell (ring d < active_width) evaluates exactly the statements
+// state_specified_relaxation evaluates for it, held pass then target pass,
+// with the held value carried in a register; an interior cell takes the
+// legacy ufunc effects (held = 0/msft, tend = tend + held).  The relaxation
+// expression occurs ONCE in this kernel, so the compiler's contraction
+// choices for it cannot differ between the held and the direct forms.
+//
+// The rows arrive by value as device addresses (the rk_copy_words /
+// diff6_multi form): header words name the shared planes and weights, row
+// words the row's own arrays, shape and flags (LBC_MULTI_* below).  A row
+// with a held buffer stores the held value for later stages
+// (LBC_MULTI_HELD_STORE); the nested path, which recomputes the row every
+// stage from the time-t copies, keeps it in the register only.
+// ---------------------------------------------------------------------------
+
+#define LBC_MULTI_MAX_ROWS 12
+#define LBC_MULTI_HEADER_WORDS 12
+#define LBC_MULTI_ROW_WORDS 16
+
+// row flags (word 12, high half)
+#define LBC_MULTI_HELD_COMPUTE 1   // held pass: relax from zero into the register
+#define LBC_MULTI_HELD_STORE   2   // ... and write it to the held buffer
+#define LBC_MULTI_HELD_READ    4   // read the held buffer written on stage 1
+#define LBC_MULTI_TARGET       8   // the row has a stage tendency to write
+#define LBC_MULTI_APPLY_RELAX 16   // relax straight into the target (no held)
+#define LBC_MULTI_DIVIDE_MSF  32   // the held pass divides by msft
+
+struct LbcRelaxTable {
+    unsigned long long header[LBC_MULTI_HEADER_WORDS];
+    unsigned long long rows[LBC_MULTI_MAX_ROWS][LBC_MULTI_ROW_WORDS];
+};
+
+#if __CUDA_ARCH__ >= 700
+#define LBC_TABLE_PARAM const __grid_constant__ LbcRelaxTable
+#else
+#define LBC_TABLE_PARAM const LbcRelaxTable
+#endif
+
+extern "C" __global__
+void state_relaxation_multi(LBC_TABLE_PARAM table, int nrows, real dtbc,
+                            int spec_zone, int relax_zone, int has_msf,
+                            int thb_3d, int relax_sides)
+{
+    const int r = blockIdx.y;
+    if (r >= nrows) return;
+    const unsigned long long* row = table.rows[r];
+    const int kind = (int)(row[12] & 0xffffffffull);
+    const int flags = (int)(row[12] >> 32);
+    const int nz = (int)(row[13] & 0xffffffffull);
+    const int ny = (int)(row[13] >> 32);
+    const int nx = (int)(row[14] & 0xffffffffull);
+    const int width = (int)(row[14] >> 32);
+    const int active_width = (int)(row[15] & 0xffffffffull);
+    // The host proved every row's cell count fits 32 bits (the per-row
+    // path takes any larger array), so the cell index is 32-bit integer
+    // arithmetic; the byte address below is still size_t.
+    const unsigned int ncol = (unsigned int)ny * (unsigned int)nx;
+    const unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= (unsigned int)nz * ncol) return;
+    const int k = (int)(tid / ncol);
+    const int rem = (int)(tid - (unsigned int)k * ncol);
+    const int j = rem / nx;
+    const int i = rem - j * nx;
+    const bool held_compute = (flags & LBC_MULTI_HELD_COMPUTE) != 0;
+    const bool held_store = (flags & LBC_MULTI_HELD_STORE) != 0;
+    const bool held_read = (flags & LBC_MULTI_HELD_READ) != 0;
+    const bool target = (flags & LBC_MULTI_TARGET) != 0;
+    const bool apply_relax = (flags & LBC_MULTI_APPLY_RELAX) != 0;
+    const bool divide_msf = (flags & LBC_MULTI_DIVIDE_MSF) != 0;
+    const bool perimeter = min4(j, ny - 1 - j, i, nx - 1 - i) < active_width;
+    // A row without a held pass (mu; the strict specified-only rows) touches
+    // its frames only, as the frame launch does.
+    if (!perimeter && !(held_compute || held_read)) return;
+
+    real* field_tend = (real*)row[0];
+    real* held = (real*)row[1];
+    const real* src = (const real*)row[2];
+    const real* mup = (const real*)row[3];
+    const real* west = (const real*)row[4];
+    const real* west_t = (const real*)row[5];
+    const real* east = (const real*)row[6];
+    const real* east_t = (const real*)row[7];
+    const real* south = (const real*)row[8];
+    const real* south_t = (const real*)row[9];
+    const real* north = (const real*)row[10];
+    const real* north_t = (const real*)row[11];
+    const real* mub2d = (const real*)table.header[0];
+    const real* thb = (const real*)table.header[1];
+    const real* c1h = (const real*)table.header[2];
+    const real* c2h = (const real*)table.header[3];
+    const real* c1f = (const real*)table.header[4];
+    const real* c2f = (const real*)table.header[5];
+    const real* msft = (const real*)table.header[6];
+    const real* msfu = (const real*)table.header[7];
+    const real* msfv = (const real*)table.header[8];
+    const real* fcx = (const real*)table.header[9];
+    const real* gcx = (const real*)table.header[10];
+    // coupled_current reads only the row's own field for the row's kind
+    // (u for LBC_U, thp for LBC_THETA, ...): the row's source stands in every
+    // field slot, as the frame launch hands its source to that one slot.
+    const real* u = src;
+    const real* v = src;
+    const real* w = src;
+    const real* thp = src;
+    const real* php = src;
+    const real* scalar = src;
+
+    const size_t idx = I3(k, j, i, ny, nx);
+    real specified = 0.0f;
+    bool spec = false;
+    if (perimeter)
+        spec = boundary_index(k, j, i, ny, nx, spec_zone, width,
+                              west, west_t, east, east_t, south, south_t,
+                              north, north_t, dtbc, &specified, false);
+    // The stage tendency's incoming word, read once: the direct form
+    // accumulates onto it, the held form adds the held value to it, and
+    // the write below is skipped when the word is unchanged (most of the
+    // interior, where tend + 0 is tend unless tend is -0).
+    const real incoming = target ? field_tend[idx] : 0.0f;
+    // The accumulator the relaxation adds to: the zeroed held array in the
+    // held pass, the stage tendency in the direct form.
+    real result = held_compute ? 0.0f : incoming;
+    if (perimeter) {
+        const bool own_s = (relax_sides & 1) != 0;
+        const bool own_n = (relax_sides & 2) != 0;
+        const bool own_w = (relax_sides & 4) != 0;
+        const bool own_e = (relax_sides & 8) != 0;
+        if (spec) {
+            // clear_specified in the held pass; the table's tendency otherwise
+            result = held_compute ? 0.0f : specified;
+        } else if (held_compute || apply_relax) {
+            int ds = j;
+            int dn = ny - 1 - j;
+            int dw = i;
+            int de = nx - 1 - i;
+            real f0, f1, f2, f3, f4;
+            if (own_s && ds >= spec_zone && ds < relax_zone
+                && (!own_w || i >= ds) && (!own_e || i < nx - ds)) {
+                int d = ds;
+                size_t b0 = ((size_t)k*width + d)*nx + i;
+                size_t bm = ((size_t)k*width + d)*nx + max(i - 1, 0);
+                size_t bp = ((size_t)k*width + d)*nx + min(i + 1, nx - 1);
+                size_t bo = ((size_t)k*width + d - 1)*nx + i;
+                size_t bi = ((size_t)k*width + d + 1)*nx + i;
+                f0 = lbc_value(south, south_t, b0, dtbc)
+                     - coupled_current(kind, k, j, i, mub2d, mup, u, v, w,
+                                       thp, thb, php, scalar, c1h, c2h, c1f, c2f,
+                                       msft, msfu, msfv, has_msf, thb_3d, ny, nx);
+                f1 = lbc_value(south, south_t, bm, dtbc)
+                     - coupled_current(kind, k, j, max(i - 1, 0), mub2d, mup,
+                                       u, v, w, thp, thb, php, scalar, c1h, c2h,
+                                       c1f, c2f, msft, msfu, msfv, has_msf, thb_3d,
+                                       ny, nx);
+                f2 = lbc_value(south, south_t, bp, dtbc)
+                     - coupled_current(kind, k, j, min(i + 1, nx - 1),
+                                       mub2d, mup, u, v, w, thp, thb, php, scalar,
+                                       c1h, c2h, c1f, c2f, msft, msfu, msfv,
+                                       has_msf, thb_3d, ny, nx);
+                f3 = lbc_value(south, south_t, bo, dtbc)
+                     - coupled_current(kind, k, j - 1, i, mub2d, mup, u, v, w,
+                                       thp, thb, php, scalar, c1h, c2h, c1f, c2f,
+                                       msft, msfu, msfv, has_msf, thb_3d, ny, nx);
+                f4 = lbc_value(south, south_t, bi, dtbc)
+                     - coupled_current(kind, k, j + 1, i, mub2d, mup, u, v, w,
+                                       thp, thb, php, scalar, c1h, c2h, c1f, c2f,
+                                       msft, msfu, msfv, has_msf, thb_3d, ny, nx);
+#if GPUWM_WRF_EXACT
+                LBC_RELAX_ADD(result, fcx[d], gcx[d], f0, f1, f2, f3, f4);
+#else
+                result += fcx[d]*f0 - gcx[d]*(f1+f2+f3+f4-4.0f*f0);
+#endif
+            } else if (own_n && dn >= spec_zone && dn < relax_zone
+                       && (!own_w || i >= dn) && (!own_e || i < nx - dn)) {
+                int d = dn;
+                size_t b0 = ((size_t)k*width + d)*nx + i;
+                size_t bm = ((size_t)k*width + d)*nx + max(i - 1, 0);
+                size_t bp = ((size_t)k*width + d)*nx + min(i + 1, nx - 1);
+                size_t bo = ((size_t)k*width + d - 1)*nx + i;
+                size_t bi = ((size_t)k*width + d + 1)*nx + i;
+                f0 = lbc_value(north, north_t, b0, dtbc)
+                     - coupled_current(kind, k, j, i, mub2d, mup, u, v, w,
+                                       thp, thb, php, scalar, c1h, c2h, c1f, c2f,
+                                       msft, msfu, msfv, has_msf, thb_3d, ny, nx);
+                f1 = lbc_value(north, north_t, bm, dtbc)
+                     - coupled_current(kind, k, j, max(i - 1, 0), mub2d, mup,
+                                       u, v, w, thp, thb, php, scalar, c1h, c2h,
+                                       c1f, c2f, msft, msfu, msfv, has_msf, thb_3d,
+                                       ny, nx);
+                f2 = lbc_value(north, north_t, bp, dtbc)
+                     - coupled_current(kind, k, j, min(i + 1, nx - 1),
+                                       mub2d, mup, u, v, w, thp, thb, php, scalar,
+                                       c1h, c2h, c1f, c2f, msft, msfu, msfv,
+                                       has_msf, thb_3d, ny, nx);
+                f3 = lbc_value(north, north_t, bo, dtbc)
+                     - coupled_current(kind, k, j + 1, i, mub2d, mup, u, v, w,
+                                       thp, thb, php, scalar, c1h, c2h, c1f, c2f,
+                                       msft, msfu, msfv, has_msf, thb_3d, ny, nx);
+                f4 = lbc_value(north, north_t, bi, dtbc)
+                     - coupled_current(kind, k, j - 1, i, mub2d, mup, u, v, w,
+                                       thp, thb, php, scalar, c1h, c2h, c1f, c2f,
+                                       msft, msfu, msfv, has_msf, thb_3d, ny, nx);
+#if GPUWM_WRF_EXACT
+                LBC_RELAX_ADD(result, fcx[d], gcx[d], f0, f1, f2, f3, f4);
+#else
+                result += fcx[d]*f0 - gcx[d]*(f1+f2+f3+f4-4.0f*f0);
+#endif
+            } else if (own_w && dw >= spec_zone && dw < relax_zone
+                       && (!own_s || j >= dw + 1)
+                       && (!own_n || j < ny - dw - 1)) {
+                int d = dw;
+                int jm = max(j - 1, 0);
+                int jp = min(j + 1, ny - 1);
+                size_t b0 = ((size_t)k*ny + j)*width + d;
+                size_t bm = ((size_t)k*ny + jm)*width + d;
+                size_t bp = ((size_t)k*ny + jp)*width + d;
+                size_t bo = ((size_t)k*ny + j)*width + d - 1;
+                size_t bi = ((size_t)k*ny + j)*width + d + 1;
+                f0 = lbc_value(west, west_t, b0, dtbc)
+                     - coupled_current(kind, k, j, i, mub2d, mup, u, v, w,
+                                       thp, thb, php, scalar, c1h, c2h, c1f, c2f,
+                                       msft, msfu, msfv, has_msf, thb_3d, ny, nx);
+                f1 = lbc_value(west, west_t, bm, dtbc)
+                     - coupled_current(kind, k, jm, i, mub2d, mup, u, v, w,
+                                       thp, thb, php, scalar, c1h, c2h, c1f, c2f,
+                                       msft, msfu, msfv, has_msf, thb_3d, ny, nx);
+                f2 = lbc_value(west, west_t, bp, dtbc)
+                     - coupled_current(kind, k, jp, i, mub2d, mup, u, v, w,
+                                       thp, thb, php, scalar, c1h, c2h, c1f, c2f,
+                                       msft, msfu, msfv, has_msf, thb_3d, ny, nx);
+                f3 = lbc_value(west, west_t, bo, dtbc)
+                     - coupled_current(kind, k, j, i - 1, mub2d, mup, u, v, w,
+                                       thp, thb, php, scalar, c1h, c2h, c1f, c2f,
+                                       msft, msfu, msfv, has_msf, thb_3d, ny, nx);
+                f4 = lbc_value(west, west_t, bi, dtbc)
+                     - coupled_current(kind, k, j, i + 1, mub2d, mup, u, v, w,
+                                       thp, thb, php, scalar, c1h, c2h, c1f, c2f,
+                                       msft, msfu, msfv, has_msf, thb_3d, ny, nx);
+#if GPUWM_WRF_EXACT
+                LBC_RELAX_ADD(result, fcx[d], gcx[d], f0, f1, f2, f3, f4);
+#else
+                result += fcx[d]*f0 - gcx[d]*(f1+f2+f3+f4-4.0f*f0);
+#endif
+            } else if (own_e && de >= spec_zone && de < relax_zone
+                       && (!own_s || j >= de + 1)
+                       && (!own_n || j < ny - de - 1)) {
+                int d = de;
+                int jm = max(j - 1, 0);
+                int jp = min(j + 1, ny - 1);
+                size_t b0 = ((size_t)k*ny + j)*width + d;
+                size_t bm = ((size_t)k*ny + jm)*width + d;
+                size_t bp = ((size_t)k*ny + jp)*width + d;
+                size_t bo = ((size_t)k*ny + j)*width + d - 1;
+                size_t bi = ((size_t)k*ny + j)*width + d + 1;
+                f0 = lbc_value(east, east_t, b0, dtbc)
+                     - coupled_current(kind, k, j, i, mub2d, mup, u, v, w,
+                                       thp, thb, php, scalar, c1h, c2h, c1f, c2f,
+                                       msft, msfu, msfv, has_msf, thb_3d, ny, nx);
+                f1 = lbc_value(east, east_t, bm, dtbc)
+                     - coupled_current(kind, k, jm, i, mub2d, mup, u, v, w,
+                                       thp, thb, php, scalar, c1h, c2h, c1f, c2f,
+                                       msft, msfu, msfv, has_msf, thb_3d, ny, nx);
+                f2 = lbc_value(east, east_t, bp, dtbc)
+                     - coupled_current(kind, k, jp, i, mub2d, mup, u, v, w,
+                                       thp, thb, php, scalar, c1h, c2h, c1f, c2f,
+                                       msft, msfu, msfv, has_msf, thb_3d, ny, nx);
+                f3 = lbc_value(east, east_t, bo, dtbc)
+                     - coupled_current(kind, k, j, i + 1, mub2d, mup, u, v, w,
+                                       thp, thb, php, scalar, c1h, c2h, c1f, c2f,
+                                       msft, msfu, msfv, has_msf, thb_3d, ny, nx);
+                f4 = lbc_value(east, east_t, bi, dtbc)
+                     - coupled_current(kind, k, j, i - 1, mub2d, mup, u, v, w,
+                                       thp, thb, php, scalar, c1h, c2h, c1f, c2f,
+                                       msft, msfu, msfv, has_msf, thb_3d, ny, nx);
+#if GPUWM_WRF_EXACT
+                LBC_RELAX_ADD(result, fcx[d], gcx[d], f0, f1, f2, f3, f4);
+#else
+                result += fcx[d]*f0 - gcx[d]*(f1+f2+f3+f4-4.0f*f0);
+#endif
+            }
+        }
+    }
+    real h = 0.0f;
+    if (held_compute) {
+        // The frame launch's division, and the legacy whole-array division
+        // of the zeroed interior (held = 0/msft there).
+        if (divide_msf) result = __fdiv_rn(result, msft[(size_t)j*nx + i]);
+        h = result;
+        if (held_store) held[idx] = h;
+    } else if (held_read) {
+        h = held[idx];
+    }
+    if (!target) return;
+    if (held_compute || held_read) {
+        // The second launch: the table's tendency on the specified rows,
+        // plus the held row (the interior through the legacy ufunc add).
+        result = incoming;
+        if (spec) result = specified;
+        result = __fadd_rn(result, h);
+    }
+    if (__float_as_uint(result) != __float_as_uint(incoming))
+        field_tend[idx] = result;
+}

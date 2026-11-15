@@ -98,9 +98,17 @@ Ordered by how self-contained each piece is:
    and the departure triangles' edge-vector basis in
    `shift_vertices_of_departure_triangle`, on hexagons and quadrilaterals about
    either pole and at mid-latitude, uniform and stretched. The init's geometry
-   (`get_geometry_incremental_remap`, the local frames, the RBF reconstruction
-   coefficients) is the input's, as the variational basis is. Refused by name:
-   halo exchanges, the conservation and monotonicity checks. Upwind advection
+   (`seaice_init_advection_incremental_remap`: the rotated grid, the local
+   frames, the vertices in each plane, the remap neighbours, the moments, and
+   MPAS's RBF set-up with `coeffs_reconstruct`), computed on the host from the
+   mesh at init (`woof/hex/mpas_seaice/remap_init_v842.py`,
+   `tests/test_mpas_seaice_remap_init_parity.py`); periodic planar meshes are
+   refused by name. The optional
+   checks (`config_conservation_check`: the sums before and after the update
+   and `check_tracer_conservation`; `config_monotonicity_check`: the local
+   extremes, their in-place extension and the test), one rank, with v8.4.2's
+   error messages and codes (`tests/test_mpas_seaice_remap_checks_parity.py`).
+   Refused by name: halo exchanges. Upwind advection
    cannot run in v8.4.2 (it reads configs the sea-ice Registry does not declare
    and mesh fields it does not carry), so it is refused by name with that
    reason.

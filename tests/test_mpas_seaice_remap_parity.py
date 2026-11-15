@@ -106,7 +106,6 @@ def test_an_inactive_parent_with_an_active_child_is_refused():
 
 @pytest.mark.parametrize("knob, value", [
     ("config_advection_type", "upwind"), ("config_use_halo_exch", True),
-    ("config_conservation_check", True), ("config_monotonicity_check", True),
 ])
 def test_what_the_remap_does_not_carry_is_refused_by_name(knob, value):
     from woof.hex.mpas_seaice import remap_v842 as rv

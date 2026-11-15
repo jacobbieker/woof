@@ -169,6 +169,10 @@ def field_rows(case: dict) -> list:
              ("incremental_remap", "maskEdge", INT, _E), ("incremental_remap", "maskCell", INT, _C),
              ("incremental_remap", "maskCategoryCell", INT, ("NCAT", "C1")),
              ("incremental_remap", "workCategoryCell", REAL, ("NCAT", "C1"))]
+    if case.get("init"):
+        # the RBF set-up's vectors (mpas_initialize_vectors), which the init oracle fills
+        mesh += [("mesh", "localVerticalUnitVectors", REAL, (3, "C1")), ("mesh", "edgeNormalVectors", REAL, (3, "E1")),
+                 ("mesh", "cellTangentPlane", REAL, (3, 2, "C1"))]
     rotated = []
     if case.get("sphere"):
         rotated = [("rotated_mesh", f"{a}{b}Rotate", REAL, (f"{b[0]}1",)) for b in ("Cell", "Vertex", "Edge")
@@ -242,6 +246,10 @@ def make_case(name, seed, stage, kind, owned, packages, config_overrides, field_
     case = {"name": name, "precision": precision, "dims": dims, "config": config, "dt": 3600.0, "stage": stage,
             "mesh_kind": kind, "packages": {p: bool(packages.get(p, False)) for p in PACKAGES},
             "tracer_fields": tracer_fields(packages), "absent": tuple(field_overrides.get("absent", ()))}
+    if field_overrides.get("init"):
+        # run_incremental_remap_init: MPAS's own RBF set-up derives coeffs_reconstruct
+        case["init"] = True
+        config.update({"mesh:is_periodic": False, "mesh:x_period": 0.0, "mesh:y_period": 0.0})
     if sphere:
         case["sphere"] = field_overrides["sphere"]
         case["varres"] = bool(field_overrides.get("varres", False))
@@ -277,6 +285,13 @@ def make_case(name, seed, stage, kind, owned, packages, config_overrides, field_
     still = (xv - cx) ** 2 + (yv - cy) ** 2 < 1.6e4 ** 2
     u[still] = 0.0
     v[still] = 0.0
+    if field_overrides.get("closed"):
+        # still at every vertex of a halo cell: nothing crosses the owned cells' rim, so the
+        # block conserves (a one-rank global mesh has no halo)
+        for c in range(int(m["nCellsArray"][0]), nc):
+            for iv in m["verticesOnCell"][c, :m["nEdgesOnCell"][c]]:
+                u[iv - 1] = 0.0
+                v[iv - 1] = 0.0
     values["uVelocity"], values["vVelocity"] = u, v
     # the ice: areas per category with an ice-free run of cells and tiny areas
     area = uniform(0.0, 0.35, (nc + 1, ncat))
@@ -352,21 +367,31 @@ word_mismatches = _stream.word_mismatches
 
 def parse_log(text: str) -> dict:
     """The oracle's log: the ordered tracers, the warnings (message, ints,
-    reals as floats), and stage 4's error code."""
-    tree, warnings, ierr = [], [], None
+    reals as floats), the MPAS_LOG_ERR messages ("errors", only where there
+    are any: the conservation and monotonicity checks) and stage 4's error
+    code."""
+    tree, warnings, errors, ierr = [], [], [], None
+    last = None
     for line in text.splitlines():
         if line.startswith("TRACER "):
             _, name, parent, n_parents, has_child = line.split()
             tree.append([name, parent, int(n_parents), has_child == "T"])
         elif line.startswith("WARN "):
-            warnings.append({"message": line[5:], "ints": [], "reals": []})
+            last = {"message": line[5:], "ints": [], "reals": []}
+            warnings.append(last)
+        elif line == "ERR" or line.startswith("ERR "):
+            last = {"message": line[4:], "ints": [], "reals": []}
+            errors.append(last)
         elif line.startswith("INTS"):
-            warnings[-1]["ints"] = [int(x) for x in line.split()[1:]]
+            last["ints"] = [int(x) for x in line.split()[1:]]
         elif line.startswith("REALS"):
-            warnings[-1]["reals"] = [float(x) for x in line.split()[1:]]
+            last["reals"] = [float(x) for x in line.split()[1:]]
         elif line.startswith("IERR "):
             ierr = int(line.split()[1])
-    return {"tree": tree, "warnings": warnings, "ierr": ierr}
+    log = {"tree": tree, "warnings": warnings, "ierr": ierr}
+    if errors:
+        log["errors"] = errors
+    return log
 
 
 def run_oracle(build_dir: Path, case: dict) -> tuple[dict[str, np.ndarray], dict]:
@@ -374,17 +399,19 @@ def run_oracle(build_dir: Path, case: dict) -> tuple[dict[str, np.ndarray], dict
     with tempfile.TemporaryDirectory() as tmp:
         src, dst, log = Path(tmp) / "in.bin", Path(tmp) / "out.bin", Path(tmp) / "log.txt"
         src.write_bytes(input_bytes(case))
-        subprocess.run([str(Path(build_dir) / f"run_incremental_remap_{case['precision']}"), str(src), str(dst),
+        binary = "run_incremental_remap_init" if case.get("init") else "run_incremental_remap"
+        subprocess.run([str(Path(build_dir) / f"{binary}_{case['precision']}"), str(src), str(dst),
                         str(log)], check=True)
         return read_outputs(dst.read_bytes(), case), parse_log(log.read_text(encoding="utf-8"))
 
 
 def graded(case: dict, key: str) -> bool:
     """Whether a field is graded: everything but the geometry (the GPU's
-    input) and, over whole remap steps, the triangle values (scratch whose
-    words reach the fluxes, which are graded)."""
+    input, except in the init cases, where the host derives it) and, over
+    whole remap steps, the triangle values (scratch whose words reach the
+    fluxes, which are graded)."""
     pool, name = key.split("/", 1)
-    if name in GEOMETRY or name in ROTATED:
+    if not case.get("init") and (name in GEOMETRY or name in ROTATED):
         return False
     return not (case["stage"] == 4 and pool == "tracer_triangles")
 
@@ -455,10 +482,15 @@ def tree_rows(tree) -> list:
 
 
 def on_device(case: dict, fixture: dict[str, np.ndarray] | None = None) -> dict[str, dict]:
-    """The case's pools on the device, with the init's geometry (the fixture's
-    remap-pool words where the oracle's init changed them) in place."""
+    """The case's pools on the device, with the init's geometry in place: the
+    fixture's remap-pool words where the oracle's init changed them, or, in
+    the init cases, :func:`woof.hex.mpas_seaice.remap_init_v842.initialize_pools`'."""
     dev = _stream.on_device(case["fields"], case)
-    if fixture is not None:
+    if case.get("init"):
+        from woof.hex.mpas_seaice import remap_init_v842 as ri
+        dev.setdefault("rotated_mesh", {})
+        ri.initialize_pools(dev, case["config"])
+    elif fixture is not None:
         import cupy as cp
         for name in GEOMETRY:
             key = f"incremental_remap/{name}"
@@ -469,6 +501,8 @@ def on_device(case: dict, fixture: dict[str, np.ndarray] | None = None) -> dict[
 
 #: the mean-recovery warnings of the last stage-4 GPU run, by (case, precision)
 last_warnings: dict = {}
+#: the check errors and error code of the last stage-4 GPU run, by (case, precision)
+last_errors: dict = {}
 
 
 def run_gpu(case: dict, fixture: dict[str, np.ndarray] | None = None) -> dict[str, np.ndarray]:
@@ -496,12 +530,19 @@ def run_gpu(case: dict, fixture: dict[str, np.ndarray] | None = None) -> dict[st
         rv.make_masks(tree, pools=dev, mesh=dev["mesh"])
         rv.construct_linear_fields(tree, pools=dev, mesh=dev["mesh"], flags=rv.geometry_flags(case["config"]))
     elif stage == 4:
-        warnings = []
+        warnings, errors, ierr = [], [], 0
         for _ in range(int(case["config"]["oracle_n_steps"])):
-            _, w = rv.run(tree, pools=dev, mesh=dev["mesh"], configs=case["config"])
+            # run_incremental_remap.F90 stops stepping on an error code, as the time step does
+            try:
+                _, w = rv.run(tree, pools=dev, mesh=dev["mesh"], configs=case["config"])
+            except rv.RemapCheckError as failed:
+                errors, ierr = failed.log, failed.ierr
+                warnings += failed.warnings
+                break
             warnings += w
         dev["_warnings"] = warnings
-    elif stage != 0:
+        last_errors[case["name"], case["precision"]] = (errors, ierr)
+    elif stage not in (0, 5):
         raise ValueError(f"stage {stage} is not ported")
     if stage == 4:
         last_warnings[case["name"], case["precision"]] = dev.pop("_warnings")
@@ -520,7 +561,10 @@ def measure(precision: str, reference: dict | None = None, *, rows=CASES,
         want = expected_outputs(case, fixture)
         report[case["name"]] = {key: word_mismatches(got[key], want[key]) for key in want if graded(case, key)}
         if case["stage"] == 4:
-            want_warnings = load_logs(fixture_dir)[case["name"]][precision]["warnings"]
+            log = load_logs(fixture_dir)[case["name"]][precision]
             report[case["name"]]["warnings"] = warning_mismatches(last_warnings[case["name"], precision],
-                                                                  want_warnings, precision)
+                                                                  log["warnings"], precision)
+            errors, ierr = last_errors[case["name"], precision]
+            report[case["name"]]["errors"] = warning_mismatches(errors, log.get("errors", []), precision)
+            report[case["name"]]["ierr"] = int(ierr != log["ierr"])
     return report

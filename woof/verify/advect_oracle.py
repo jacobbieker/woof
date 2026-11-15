@@ -17,6 +17,7 @@ from pathlib import Path
 import subprocess
 import re
 from types import SimpleNamespace
+import warnings
 
 import numpy as np
 
@@ -164,6 +165,89 @@ def uncertified_stale_report(name: str, receipt: dict, moved: dict, record: dict
             "byte identity is certified on Blackwell and newer only (ruling 2026-10-04). "
             f"It trails the tree: {'; '.join(parts)}. A capture on that card with "
             "tools/advect_wrf471_oracle/recapture_receipt.py --install brings it current.")
+
+
+#: The receipt-index key for a Blackwell receipt whose kernel pins trail the
+#: tree because no card of its architecture was available to recapture it
+#: (user ruling 2026-11-14): {receipt file: {"staled_by": 40-hex commit,
+#: "pins": {module: digest}, "reason": text}}.  Only kernel pins may trail; the
+#: receipt's committed words still replay against the reference and a card of
+#: that architecture still compares every word it launches.
+#: tools/advect_wrf471_oracle/recapture_receipt.py drops the record when it
+#: installs that receipt again.
+CERTIFIED_UNREPINNED_KEY = "certified_unrepinned"
+
+
+class CertifiedReceiptNotRepinned(UserWarning):
+    """A Blackwell receipt's kernel pins trail the source, recorded as not re-pinned."""
+
+
+def _selectable_receipts(index: dict) -> set:
+    names = set(index["cards"].values()) | set(index["architectures"].values())
+    for by_architecture in index.get("compilers", {}).values():
+        names |= set(by_architecture.values())
+    return names
+
+
+def check_certified_unrepinned_records(index: dict, fixture_dir: Path, modules) -> dict:
+    """Every not-re-pinned record must be true; returns them by receipt file.
+
+    A record names a Blackwell receipt the index selects, a full commit, a
+    reason, and kernel digests the receipt still carries and the tree has
+    left.  The fixture pin may not trail (its words would measure another
+    reference), and a record that outlives a recapture fails here.
+    """
+    records = index.get(CERTIFIED_UNREPINNED_KEY, {})
+    selectable = _selectable_receipts(index)
+    for name, record in records.items():
+        assert name in selectable, f"{CERTIFIED_UNREPINNED_KEY} names {name}, which the index never selects"
+        receipt = json.loads((Path(fixture_dir) / name).read_text(encoding="ascii"))
+        assert architecture_is_certified(receipt["compute_capability"]), (
+            f"{name} is not a certified receipt; record it under {UNCERTIFIED_STALE_KEY!r}")
+        assert re.fullmatch(r"[0-9a-f]{40}", str(record.get("staled_by"))), (name, record.get("staled_by"))
+        assert isinstance(record.get("reason"), str) and record["reason"], name
+        moved = receipt_staleness(receipt, fixture_dir, modules)
+        assert "fixture" not in moved, (
+            f"{name}'s fixture pin trails the tree: a not-re-pinned record covers kernel pins only")
+        assert record.get("pins"), name
+        for pin, digest in record["pins"].items():
+            assert pin in modules, (name, pin)
+            assert digest == receipt["kernels"][pin], (
+                f"{name}'s not-re-pinned record pins {pin} {str(digest)[:8]}, but the receipt now "
+                f"pins {receipt['kernels'][pin][:8]}: drop or rewrite the record")
+            assert pin in moved, f"{name}'s {pin} pin is current again; its not-re-pinned record must go"
+    return records
+
+
+def certified_unrepinned_report(name: str, receipt: dict, moved: dict, record: dict) -> str:
+    """The line for a Blackwell receipt recorded as not re-pinned."""
+    major, minor = receipt["compute_capability"]
+    parts = "; ".join(f"{pin} {was[:8]} -> {now[:8]}" for pin, (was, now) in sorted(moved.items()))
+    return (f"{name} ({receipt['gpu']}, sm_{major}{minor}) is NOT re-pinned: {parts}, "
+            f"staled by {record['staled_by'][:9]} ({record['reason']}). Its committed words "
+            "still replay; a capture on that card with tools/advect_wrf471_oracle/"
+            "recapture_receipt.py --install re-pins it.")
+
+
+def check_certified_receipt_pins(name: str, receipt: dict, fixture_dir: Path, modules, records: dict) -> None:
+    """A Blackwell receipt's pins equal the tree, except recorded not-re-pinned kernel pins."""
+    moved = receipt_staleness(receipt, fixture_dir, modules)
+    excused = (records.get(name) or {}).get("pins", {})
+    gating = {pin: pair for pin, pair in moved.items() if pin not in excused}
+    # Exactly the source the default loader compiles (and the fixture's
+    # cases.json). A pin moves only with a fresh capture on the receipt's card
+    # or architecture reproducing every recorded word, or a not-re-pinned
+    # record when no such card is available.
+    fixture = Path(fixture_dir).relative_to(Path(fixture_dir).parents[2]).as_posix()
+    assert not gating, (
+        f"{name} trails the tree ({'; '.join(f'{pin} {was[:8]} -> {now[:8]}' for pin, (was, now) in sorted(gating.items()))}) "
+        f"and {receipt['gpu']} has not reproduced its words at it. On that card: python "
+        f"tools/advect_wrf471_oracle/recapture_receipt.py --fixture {fixture} --scratch <empty dir> "
+        f"--install (with no such card, record its kernel pins under {CERTIFIED_UNREPINNED_KEY!r} "
+        "in gpu-receipts.json)")
+    if moved:
+        warnings.warn(CertifiedReceiptNotRepinned(
+            certified_unrepinned_report(name, receipt, moved, records[name])))
 
 
 @dataclass(frozen=True)

@@ -1,15 +1,19 @@
 """Run the built MPAS-Seaice incremental-remap oracle on every case and write the fixture.
 
-    pixi run -e default python tools/mpas_seaice_oracle/make_remap_fixture.py BUILD_DIR [--sphere] [--out DIR]
+    pixi run -e default python tools/mpas_seaice_oracle/make_remap_fixture.py BUILD_DIR [--sphere|--checks|--init] [--out DIR]
 
 BUILD_DIR holds ``run_incremental_remap_r4`` and ``run_incremental_remap_r8``
 from build.sh. Writes into ``tests/data/oracles/mpas_seaice_remap`` by default
-(``--sphere``: the spherical cases, into ``tests/data/oracles/mpas_seaice_remap_sphere``):
+(``--sphere``: the spherical cases, into ``tests/data/oracles/mpas_seaice_remap_sphere``;
+``--checks``: the conservation and monotonicity checks' cases, into
+``tests/data/oracles/mpas_seaice_remap_checks``; ``--init``: the init-geometry cases, run on
+``run_incremental_remap_init_{r4,r8}``, into ``tests/data/oracles/mpas_seaice_remap_init``):
 
 - ``oracle-r4.npz`` and ``oracle-r8.npz``: per case (``<case>/<pool>/<field>``)
   every output field whose words differ from the input's;
 - ``remap-logs.json``: per case and precision the ordered tracer list, the
-  warnings the routines logged and stage 4's error code;
+  warnings the routines logged, the error messages (the checks') and stage
+  4's error code;
 - ``inputs.sha256``: every case's input-stream digest at each precision.
 """
 from __future__ import annotations
@@ -25,6 +29,8 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from woof.verify import mpas_seaice_remap_checks_oracle as rco  # noqa: E402
+from woof.verify import mpas_seaice_remap_init_oracle as rio  # noqa: E402
 from woof.verify import mpas_seaice_remap_oracle as ro  # noqa: E402
 from woof.verify import mpas_seaice_remap_sphere_oracle as rso  # noqa: E402
 
@@ -32,10 +38,13 @@ from woof.verify import mpas_seaice_remap_sphere_oracle as rso  # noqa: E402
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("build_dir", type=Path)
-    parser.add_argument("--sphere", action="store_true", help="the spherical cases")
+    which = parser.add_mutually_exclusive_group()
+    which.add_argument("--sphere", action="store_true", help="the spherical cases")
+    which.add_argument("--checks", action="store_true", help="the conservation and monotonicity checks' cases")
+    which.add_argument("--init", action="store_true", help="the init-geometry cases (MPAS's own RBF set-up)")
     parser.add_argument("--out", type=Path)
     args = parser.parse_args()
-    family = rso if args.sphere else ro
+    family = rso if args.sphere else rco if args.checks else rio if args.init else ro
     if args.out is None:
         args.out = family.FIXTURE_DIR
     args.out.mkdir(parents=True, exist_ok=True)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from functools import lru_cache
@@ -1466,6 +1467,229 @@ def _launch_state_relaxation(state, field_name, tendency, boundary, *,
         divide_msf=divide_msf, add_held=(add_held is not None))
 
 
+#: Rows per state_relaxation_multi launch (kernels/lbc_state.cu
+#: LBC_MULTI_MAX_ROWS); more rows take further launches.
+LBC_RELAX_MULTI_MAX_ROWS = 12
+_LBC_MULTI_HEADER_WORDS = 12
+_LBC_MULTI_ROW_WORDS = 16
+#: ``WOOF_LBC_RELAX_MULTI=0`` keeps the per-row launches (zero-fill, frame
+#: relaxation into the held row, frame add, interior ufuncs) for A/B and
+#: byte-identity checks.
+LBC_RELAX_MULTI_ENABLED = os.environ.get("WOOF_LBC_RELAX_MULTI", "1") != "0"
+_LBC_KINDS = {"u": 0, "v": 1, "theta": 2, "phi": 3, "mu": 4, "qv": 5, "w": 6}
+
+
+@dataclass
+class _RelaxRow:
+    """One state field's specified/relaxation work in an RK stage.
+
+    ``held_mode`` is ``"compute"`` (relax from zero into the held row,
+    specified rows cleared, then add it to ``target``), ``"read"`` (add the
+    held row a previous stage computed) or ``"none"`` (``target`` takes the
+    table's tendency on the specified rows and, with ``apply_relax``, the
+    relaxation straight into itself).  ``held`` is the row's held buffer:
+    stored by a compute row unless ``held_store`` is false (the nested
+    path's shared temporary, which the fused launch never writes).
+    """
+    name: str
+    boundary: FieldBoundary
+    target: object = None
+    held: object = None
+    held_mode: str = "none"
+    held_store: bool = True
+    apply_relax: bool = False
+    divide_msf: bool = False
+    source_field: object = None
+    source_mup: object = None
+
+
+def _relax_field(state, name):
+    """The live state array the relaxation couples for ``name``."""
+    if name == "mu":
+        return state.mup[None]
+    return getattr(state, {"theta": "thp", "phi": "php"}.get(name, name))
+
+
+def _run_relaxation_rows(state, rows, common, weights) -> None:
+    """Run the rows of one RK stage: one fused launch when every row
+    qualifies (:func:`_launch_relaxation_multi`), else each row's own
+    launches in the order the rows were given."""
+    if LBC_RELAX_MULTI_ENABLED and _relaxation_multi_rows(state, rows):
+        _launch_relaxation_multi(state, rows, dtbc=common["dtbc"],
+                                 spec_zone=common["spec_zone"],
+                                 relax_zone=common["relax_zone"],
+                                 weights=weights)
+        return
+    for row in rows:
+        field = _relax_field(state, row.name)
+        if row.held_mode == "compute":
+            row.held[...] = 0
+            apply_specified_relaxation(
+                field, row.held, row.boundary, **common, apply_relax=True,
+                state=state, field_name=row.name, weights=weights,
+                clear_specified=True, divide_msf=row.divide_msf,
+                source_field=row.source_field, source_mup=row.source_mup)
+        if row.target is None:
+            continue
+        if row.held_mode == "none":
+            apply_specified_relaxation(
+                field, row.target, row.boundary, **common,
+                apply_relax=row.apply_relax, state=state, field_name=row.name,
+                weights=weights)
+        else:
+            apply_specified_relaxation(
+                field, row.target, row.boundary, **common, apply_relax=False,
+                state=state, field_name=row.name, weights=weights,
+                add_held=row.held)
+
+
+def _relaxation_multi_rows(state, rows) -> bool:
+    """True when ``rows`` can share state_relaxation_multi launches:
+    contiguous float32 device arrays throughout, each row's target its
+    own, and no row of a kind the kernel does not know.  A row whose
+    target or held array is not a device array is refused before any
+    boundary or state attribute is read (host-array callers)."""
+    import cupy as cp
+
+    def device(a):
+        return (isinstance(a, cp.ndarray) and a.dtype == np.dtype(np.float32)
+                and a.flags.c_contiguous)
+
+    if not rows:
+        return False
+    for row in rows:
+        if row.held_mode not in ("none", "compute", "read"):
+            return False
+        if row.held_mode != "none" and row.held is None:
+            return False
+        if row.target is None and row.held_mode != "compute":
+            return False
+        if row.name not in _LBC_KINDS and not (
+                row.name in COUPLED_SCALAR_STATE_FIELDS
+                or _is_chem_field(row.name)):
+            return False
+        if row.target is not None and not device(row.target):
+            return False
+        if row.held is not None and not device(row.held):
+            return False
+        # The kernel's cell index is a 32-bit unsigned word and its plane
+        # offset a signed int (lbc_state.cu): a row of 2^32 cells or more,
+        # or a plane of more than 2^31 - 1 cells, takes the per-row path.
+        array = row.target if row.target is not None else row.held
+        if int(array.size) >= 2**32 or int(array.shape[-1]) * int(array.shape[-2]) > 2**31 - 1:
+            return False
+    arrays = [state.mub2d, state.thb, state.c1h, state.c2h, state.c1f,
+              state.c2f, state.msft, state.msfu,
+              state.msfv_inv if WRF_EXACT else state.msfv]
+    for row in rows:
+        arrays.append(row.source_field if row.source_field is not None
+                      else _relax_field(state, row.name))
+        arrays.append(row.source_mup if row.source_mup is not None
+                      else state.mup)
+        for side in (row.boundary.west, row.boundary.east,
+                     row.boundary.south, row.boundary.north):
+            arrays.extend((side.value, side.tendency))
+    if not all(device(a) for a in arrays):
+        return False
+    # The rows run concurrently: no two written arrays (targets, stored
+    # or read held rows) may share a byte, not only a first address (two
+    # views of one backing can overlap at different offsets).
+    spans = []
+    for row in rows:
+        written = [row.target]
+        if row.held is not None and (row.held_mode == "read" or (
+                row.held_mode == "compute" and row.held_store)):
+            written.append(row.held)
+        for a in written:
+            if a is not None:
+                spans.append((int(a.data.ptr), int(a.data.ptr) + int(a.nbytes)))
+    spans.sort()
+    return all(hi <= lo_next for (_lo, hi), (lo_next, _hi) in zip(spans, spans[1:]))
+
+
+def _launch_relaxation_multi(state, rows, *, dtbc, spec_zone, relax_zone,
+                             weights) -> None:
+    """The stage's rows in one launch (kernels/lbc_state.cu
+    ``state_relaxation_multi``): a by-value table of device addresses,
+    the rk_copy_words form, names the shared planes and each row's
+    arrays; every row's words equal the per-row path's
+    (:func:`_launch_state_relaxation` and the interior ufuncs it follows
+    with), and no held zero-fill or interior ufunc remains."""
+    import cupy as cp
+
+    fcx, gcx = weights
+    relax_sides = _relax_side_mask(getattr(state, "lateral_boundaries", None))
+    header = (state.mub2d, state.thb, state.c1h, state.c2h, state.c1f,
+              state.c2f, state.msft, state.msfu,
+              state.msfv_inv if WRF_EXACT else state.msfv, fcx, gcx)
+    kernel = get_kernel("lbc_state", "state_relaxation_multi")
+    for start in range(0, len(rows), LBC_RELAX_MULTI_MAX_ROWS):
+        chunk = rows[start:start + LBC_RELAX_MULTI_MAX_ROWS]
+        table = np.zeros(
+            _LBC_MULTI_HEADER_WORDS
+            + LBC_RELAX_MULTI_MAX_ROWS * _LBC_MULTI_ROW_WORDS,
+            dtype=np.uint64)
+        table[:len(header)] = [int(a.data.ptr) for a in header]
+        max_count = 0
+        for r, row in enumerate(chunk):
+            array = row.target if row.target is not None else row.held
+            nz, ny, nx = array.shape
+            shape = ((1, *state.mup.shape) if row.name == "mu"
+                     else _relax_field(state, row.name).shape)
+            if array.shape != shape or (
+                    row.held is not None and row.held.shape != shape):
+                raise ValueError(
+                    f"{row.name} tendency has shape {array.shape}, "
+                    f"expected {shape}")
+            width = row.boundary.west.value.shape[-1]
+            if width < spec_zone + relax_zone:
+                raise ValueError(
+                    "boundary width is smaller than spec_zone + relax_zone")
+            active_width = max(spec_zone, relax_zone)
+            _validate_relaxation_window(
+                ny, nx, active_width, relax_sides,
+                f"{row.name} specified/relaxation")
+            active_width = _frame_rings(ny, nx, active_width)
+            flags = 0
+            if row.held_mode == "compute":
+                flags |= 1 | (2 if row.held_store else 0)
+                if row.divide_msf:
+                    flags |= 32
+            elif row.held_mode == "read":
+                flags |= 4
+            if row.target is not None:
+                flags |= 8
+                if row.held_mode == "none" and row.apply_relax:
+                    flags |= 16
+            source = (row.source_field if row.source_field is not None
+                      else _relax_field(state, row.name))
+            mup = row.source_mup if row.source_mup is not None else state.mup
+            held = row.held if (row.held_mode == "read" or (
+                row.held_mode == "compute" and row.held_store)) else None
+            words = [
+                int(row.target.data.ptr) if row.target is not None else 0,
+                int(held.data.ptr) if held is not None else 0,
+                int(source.data.ptr), int(mup.data.ptr)]
+            for side in (row.boundary.west, row.boundary.east,
+                         row.boundary.south, row.boundary.north):
+                words.extend((int(side.value.data.ptr),
+                              int(side.tendency.data.ptr)))
+            kind = _LBC_KINDS.get(row.name, 7)
+            words.extend((kind | (flags << 32), nz | (ny << 32),
+                          nx | (width << 32), active_width))
+            at = _LBC_MULTI_HEADER_WORDS + r * _LBC_MULTI_ROW_WORDS
+            table[at:at + len(words)] = words
+            max_count = max(max_count, int(nz) * int(ny) * int(nx))
+        # By value, as rk_copy_words passes its rows (dycore._prepare_bookkeeping).
+        blob = table.view(np.dtype(('V', table.nbytes)))
+        kernel(((max_count + _THREADS - 1) // _THREADS, len(chunk)),
+               (_THREADS,),
+               (blob, np.int32(len(chunk)), cp.float32(dtbc),
+                np.int32(spec_zone), np.int32(relax_zone),
+                np.int32(state.has_msf), np.int32(state.thb.ndim == 3),
+                np.int32(relax_sides)))
+
+
 def _coupled_device_fields(state):
     """Fields in the same coupled units as WRF boundary tendencies."""
     return dict(_coupled_device_field_items(state))
@@ -2630,17 +2854,17 @@ def capture_folded_relaxation(state, cfg) -> dict:
     nested_sources = {"u": state.u0, "v": state.v0, "w": state.w0,
                       "theta": state.thp0}
     held_rows = {}
+    plan = []
     for name in rows:
         target = getattr(state, {"theta": "thp"}.get(name, name))
         held = state.scratch(target.shape, "lbc_relax_" + name)
-        held[...] = 0
-        apply_specified_relaxation(
-            target, held, device_interval.fields[name], **common,
-            apply_relax=True, state=state, field_name=name, weights=weights,
-            clear_specified=True, divide_msf=False,
+        plan.append(_RelaxRow(
+            name, device_interval.fields[name], held=held,
+            held_mode="compute", divide_msf=False,
             source_field=nested_sources[name] if cfg.nested else None,
-            source_mup=state.mup0 if cfg.nested else None)
+            source_mup=state.mup0 if cfg.nested else None))
         held_rows[name] = held
+    _run_relaxation_rows(state, plan, common, weights)
     return held_rows
 
 
@@ -2658,28 +2882,23 @@ def _apply_state_lateral_boundaries_wrf(state, cfg, rk_stage,
     rows = [("u", state.ru_t), ("v", state.rv_t), ("theta", state.rth_t)]
     if "w" in folded:
         rows.append(("w", state.rw_t))
-    for name, tendency in rows:
-        apply_specified_relaxation(
-            getattr(state, {"theta": "thp"}.get(name, name)), tendency,
-            device_interval.fields[name], **common, apply_relax=False,
-            state=state, field_name=name, weights=weights)
+    plan = [_RelaxRow(name, device_interval.fields[name], target=tendency)
+            for name, tendency in rows]
     held = state.scratch(state.rph_t.shape, "lbc_relax_phi")
     if rk_stage == 0 or cfg.nested:
-        held[...] = 0
-        apply_specified_relaxation(
-            state.php, held, device_interval.fields["phi"], **common,
-            apply_relax=True, state=state, field_name="phi", weights=weights,
-            clear_specified=True, divide_msf=state.has_msf,
+        plan.append(_RelaxRow(
+            "phi", device_interval.fields["phi"], target=state.rph_t,
+            held=held, held_mode="compute", divide_msf=state.has_msf,
             source_field=state.php0 if cfg.nested else None,
-            source_mup=state.mup0 if cfg.nested else None)
-    apply_specified_relaxation(
-        state.php, state.rph_t, device_interval.fields["phi"], **common,
-        apply_relax=False, state=state, field_name="phi", weights=weights,
-        add_held=held)
-    apply_specified_relaxation(
-        state.mup[None], state.rmu_t[None], device_interval.fields["mu"],
-        **common, apply_relax=(rk_stage == 0), state=state, field_name="mu",
-        weights=weights)
+            source_mup=state.mup0 if cfg.nested else None))
+    else:
+        plan.append(_RelaxRow(
+            "phi", device_interval.fields["phi"], target=state.rph_t,
+            held=held, held_mode="read"))
+    plan.append(_RelaxRow(
+        "mu", device_interval.fields["mu"], target=state.rmu_t[None],
+        apply_relax=(rk_stage == 0)))
+    _run_relaxation_rows(state, plan, common, weights)
 
 
 def prepare_lateral_boundary_graph(state, cfg) -> None:
@@ -2749,22 +2968,15 @@ def apply_state_lateral_boundaries(state, cfg, *, rk_stage: int) -> None:
                     "for this forcing, or force the domain from parent "
                     "history, which carries W.")
             held_rows = held_rows + [("w", state.rw_t)]
+        plan = []
         for name, tendency in held_rows:
             held = state.scratch(tendency.shape, "lbc_relax_" + name)
-            if rk_stage == 0:
-                held[...] = 0
-                # Preserve the frozen d01 held-tendency path byte-for-byte.
-                apply_specified_relaxation(
-                    getattr(state, {"theta": "thp", "phi": "php"}.get(
-                        name, name)), held, device_interval.fields[name],
-                    **common, apply_relax=True, state=state, field_name=name,
-                    weights=weights, clear_specified=True,
-                    divide_msf=(state.has_msf and name in ("theta", "phi")))
-            apply_specified_relaxation(
-                getattr(state, {"theta": "thp", "phi": "php"}.get(
-                    name, name)), tendency, device_interval.fields[name],
-                **common, apply_relax=False, state=state, field_name=name,
-                weights=weights, add_held=held)
+            # Preserve the frozen d01 held-tendency path byte-for-byte:
+            # stage 1 relaxes into the held row, every stage adds it.
+            plan.append(_RelaxRow(
+                name, device_interval.fields[name], target=tendency,
+                held=held, held_mode="compute" if rk_stage == 0 else "read",
+                divide_msf=(state.has_msf and name in ("theta", "phi"))))
     else:
         # Nested tables are rolling and all RK time-t copies already exist.
         # Re-evaluate the same held increment from those copies on each stage
@@ -2778,30 +2990,24 @@ def apply_state_lateral_boundaries(state, cfg, *, rk_stage: int) -> None:
         relax_capacity = max(int(tendency.size)
                              for _name, tendency in nested_rows)
         backing = state.scratch((relax_capacity,), "lbc_nested_relax")
+        plan = []
         for name, tendency in nested_rows:
             count = tendency.size
             if count > backing.size:
                 raise RuntimeError("nested LBC temporary is too small")
             held = backing.reshape(-1)[:count].reshape(tendency.shape)
-            held[...] = 0
-            apply_specified_relaxation(
-                getattr(state, {"theta": "thp", "phi": "php"}.get(
-                    name, name)), held, device_interval.fields[name],
-                **common, apply_relax=True, state=state, field_name=name,
-                weights=weights, source_field=sources[name],
-                source_mup=state.mup0,
-                clear_specified=True,
-                divide_msf=(state.has_msf and name in ("theta", "phi")))
-            apply_specified_relaxation(
-                getattr(state, {"theta": "thp", "phi": "php"}.get(
-                    name, name)), tendency, device_interval.fields[name],
-                **common, apply_relax=False, state=state, field_name=name,
-                weights=weights, add_held=held)
+            # The fused launch keeps each row's held value in a register
+            # (held_store=False); the per-row path shares this temporary.
+            plan.append(_RelaxRow(
+                name, device_interval.fields[name], target=tendency,
+                held=held, held_mode="compute", held_store=False,
+                source_field=sources[name], source_mup=state.mup0,
+                divide_msf=(state.has_msf and name in ("theta", "phi"))))
 
-    apply_specified_relaxation(
-        state.mup[None], state.rmu_t[None], device_interval.fields["mu"],
-        **common, apply_relax=(rk_stage == 0), state=state, field_name="mu",
-        weights=weights)
+    plan.append(_RelaxRow(
+        "mu", device_interval.fields["mu"], target=state.rmu_t[None],
+        apply_relax=(rk_stage == 0)))
+    _run_relaxation_rows(state, plan, common, weights)
 
 
 def apply_state_scalar_lateral_boundary(state, cfg, field_name, tendency, *,

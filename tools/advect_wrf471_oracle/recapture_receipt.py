@@ -89,6 +89,9 @@ CAPTURED_WORDS = "captured-words"
 #: which commit staled an uncertified receipt.  A record that outlived the
 #: capture that brought its receipt current would fail the parity tests.
 STALE_RECORD_KEY = "uncertified_stale"
+#: woof.verify.advect_oracle.CERTIFIED_UNREPINNED_KEY: the index's record of a
+#: Blackwell receipt left un-re-pinned for want of a card; dropped the same way.
+UNREPINNED_RECORD_KEY = "certified_unrepinned"
 CAPTURED_RECEIPT = "captured-receipt.json"
 
 
@@ -412,15 +415,16 @@ def settle(fixture: Path, captured_receipt: Path, captured_words: Path, *,
             index["architectures"][key] = name
             write_index(fixture, index)
             written.append(fixture / INDEX_NAME)
-    stale = index.get(STALE_RECORD_KEY, {})
-    if name in stale:
-        # This capture is that receipt's new truth; the staling it recorded is over.
-        del stale[name]
-        if not stale:
-            del index[STALE_RECORD_KEY]
-        write_index(fixture, index)
-        written.append(fixture / INDEX_NAME)
-        record["stale_record_dropped"] = True
+    for key in (STALE_RECORD_KEY, UNREPINNED_RECORD_KEY):
+        stale = index.get(key, {})
+        if name in stale:
+            # This capture is that receipt's new truth; the staling it recorded is over.
+            del stale[name]
+            if not stale:
+                del index[key]
+            write_index(fixture, index)
+            written.append(fixture / INDEX_NAME)
+            record["stale_record_dropped"] = True
     sums_name = FIXTURE_SUMS.get(fixture.name)
     if sums_name:
         record["sums_changed"] = _sums_update(fixture / sums_name, written,

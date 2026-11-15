@@ -101,11 +101,40 @@ def _unwrap(items: Iterable[Any]) -> list[str]:
     return out
 
 
+#: Namelist groups only the MPAS v8.4.2 suite route (R2) reads, and that choose no physics: a ``--physics-namelist``
+#: holding nothing else (``&diagnostics`` alone: lightning, HAILCAST, AFWA, nwp_diagnostics) names no physics, so the
+#: run keeps the default MPAS suite and the namelist rides beside it.  THE GAP THIS CLOSES (severe-weather worker,
+#: 2026-11-14): such a namelist counted as naming physics, so no suite was added; with no config_physics_suite the
+#: run took the WOOF route, whose importer refuses ``&diagnostics``, and a region (``woof hex regional
+#: --forecast-arg=--physics-namelist=F``) or a bare ``woof hex forecast --physics-namelist F`` could not turn on a
+#: severe-weather diagnostic without also restating the suite.
+ROUTE_ONLY_GROUPS = ("diagnostics",)
+
+
+def namelist_names_physics(path: Any) -> bool:
+    """Whether the namelist at ``path`` names physics: anything but :data:`ROUTE_ONLY_GROUPS` does, and so does a
+    file that cannot be read or parsed (the forecast door refuses it by name)."""
+    from .config import parse_fortran_namelist
+
+    try:
+        from pathlib import Path
+
+        groups = parse_fortran_namelist(Path(str(path)).expanduser().read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 -- an unreadable namelist is the forecast door's to refuse
+        return True
+    return not groups or any(str(group).casefold() not in ROUTE_ONLY_GROUPS for group in groups)
+
+
 def names_physics(flags: Sequence[Any] | None) -> bool:
     """Whether a forecast-flag list names the run's physics (so no default applies)."""
     items = _unwrap(flags or ())
     for index, item in enumerate(items):
         name = _flag_name(item)
+        if name == "--physics-namelist":
+            value = item.split("=", 1)[1] if "=" in item else (items[index + 1] if index + 1 < len(items) else "")
+            if namelist_names_physics(value):
+                return True
+            continue
         if name in _NAMING_FLAGS:
             return True
         if name == "--convection":
@@ -165,7 +194,7 @@ def namespace_names_physics(arguments: Any) -> bool:
         return True
     if getattr(arguments, "physics_suite", None) not in (None, ""):
         return True
-    if getattr(arguments, "physics_namelist", None) is not None:
+    if getattr(arguments, "physics_namelist", None) is not None and namelist_names_physics(arguments.physics_namelist):
         return True
     if getattr(arguments, "physics", None):
         return True
