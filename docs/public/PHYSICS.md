@@ -2597,8 +2597,11 @@ earlier build is refused by name on resume and the run must restart from
 its prepared state; no other configuration's checkpoints are
 affected. The uncertified half is the same sentence
 YSU, MYNN and Shin-Hong carry: no matched WOOF-versus-WRF forecast
-trajectory has been run with `cu_physics = 3`, and no receipt comparing a real case against WRF or against observations
-exists -- which is why the label is
+trajectory has been run with `cu_physics = 3`, and no receipt comparing a real case against WRF
+exists. The only observation comparison is the five-case hex global Stage-IV scoring of
+the stock and booked arms under the opt-in below. It is a score of the
+two GF arms against each other and against New Tiedtke, not a check of the port against
+WRF -- which is why the label stays
 `implemented-unverified` and the scheme is always opt-in, never a
 default: a per-domain override on the named routes, or an explicit
 `cu_physics = 3` in a config you wrote.
