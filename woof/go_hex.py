@@ -377,16 +377,19 @@ def read_request(document: Mapping[str, Any], *, source: str = "CONFIG") -> dict
     # group, so the region keeps its default MPAS suite (woof.hex.physics_default.ROUTE_ONLY_GROUPS).
     diagnostics_keys = _diagnostics_keys()
     diagnostics: dict[str, str] = {}
+    diagnostic_values: dict[str, Any] = {}  # compared by value: haildt = 60 and 60.0 are one setting
 
     def diagnostic(table: str, key: str, value: Any) -> None:
         option, logical = diagnostics_keys[key]
         text, refusal = _diagnostics_literal(key, value, logical)
+        same = text if logical or isinstance(value, bool) or not isinstance(value, (int, float)) else float(value)
         if refusal is not None:
             refusals.append(f"[{table}] {refusal}")
-        elif option in diagnostics and diagnostics[option] != text:
+        elif option in diagnostic_values and diagnostic_values[option] != same:
             refusals.append(f"{key} differs between [shared] and [[domain]]; a hex mesh runs one setting")
-        else:
+        elif option not in diagnostics:
             diagnostics[option] = text
+            diagnostic_values[option] = same
 
     for key, value in domain.items():
         if key in DOMAIN_KEYS:

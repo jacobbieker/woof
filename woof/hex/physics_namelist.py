@@ -260,8 +260,8 @@ def import_physics_namelist(
                        "&diagnostics (lightning, HAILCAST, AFWA, nwp_diagnostics, ...) runs on the MPAS v8.4.2 "
                        "suite route (R2) only, and this namelist selects the WOOF physics route (R1)",
                        "name an MPAS suite (config_physics_suite in &physics, or --physics-suite "
-                       "convection_permitting / mesoscale_reference), or drop &physics so the hex default MPAS "
-                       "suite runs with this namelist")
+                       "convection_permitting / mesoscale_reference), or keep only &diagnostics in this "
+                       "namelist so the hex default MPAS suite runs with it")
             continue
         if group not in physics_groups:
             for option, value in assignments.items():

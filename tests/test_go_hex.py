@@ -187,7 +187,8 @@ def test_physics_selectors_go_to_hex_resolve(tmp_path):
 def test_severe_diagnostics_ride_to_the_mpas_suite_route_as_a_namelist(tmp_path, monkeypatch):
     """WRF's lightning, HAILCAST, AFWA and nwp_diagnostics keys become the route's &diagnostics (severe-weather
     worker, 2026-11-14): a --physics-namelist holding only that group, so the region keeps its default MPAS suite."""
-    config = _write(tmp_path, domain_extra="lightning_option = 1\nhailcast_opt = 1",
+    # haildt = 60 here and 60.0 in [shared] are one setting (compared by value, CodeRabbit on #466).
+    config = _write(tmp_path, domain_extra="lightning_option = 1\nhailcast_opt = 1\nhaildt = 60",
                     shared="[shared]\nafwa_severe_opt = 1\nnwp_diagnostics = 1\nhaildt = 60.0\n")
     value = go_hex.plan(_args(str(config)))
     namelist = Path(value["work_dir"]) / "go-diagnostics.namelist"
@@ -195,7 +196,7 @@ def test_severe_diagnostics_ride_to_the_mpas_suite_route_as_a_namelist(tmp_path,
     assert not any(item.startswith("--forecast-arg=--physics=") for item in value["regional_argv"])
     text = value["diagnostics_namelist"]
     for line in ("config_lightning_option = 1", "config_hailcast_opt = .true.", "config_afwa_severe_opt = .true.",
-                 "config_nwp_diagnostics = .true.", "config_haildt = 60.0"):
+                 "config_nwp_diagnostics = .true.", "config_haildt = 60"):
         assert line in text, text
     from woof.hex.config import parse_fortran_namelist
     from woof.hex.mpasdiag import hailcast_diag_v842, lightning_diag_v842
