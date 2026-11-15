@@ -30009,6 +30009,53 @@
    },
    "source_sha256": "c6b3cca50503c44b863d066fc9b04ce13b5cd02e2a19814fc7c4db7c6d9add25"
   },
+  "operation:woof/hex/nudging.py:_theta_kernel[018fd4037e]": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "d5b257ca92b95714ea02893b743c48321fa697469f18aac326ba100ef9014c1c",
+    "sites": {
+     "100": 2
+    }
+   },
+   "native_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "7e6879d3633c5c2f3631b8d2a310defe0a2e32f8cd82ac9feb6dd461072c2112"
+  },
   "operation:woof/hex/obs_nudging.py:_theta[77c9a36fe3]": {
    "assessment": "static_diagnostic_only",
    "coverage": "compiled",
