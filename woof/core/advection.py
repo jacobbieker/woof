@@ -58,7 +58,8 @@ def _launch(func: str, q, ru, rv, rw, tend, rdnw, fnm, fnp,
             open_x: bool = False, open_y: bool = False,
             msf=None, has_msf=None, msf_shape=None,
             spec: bool = False, vorder: int = 3, weno: bool = False,
-            horder: int = 5, theta_offset: bool = False) -> None:
+            horder: int = 5, theta_offset: bool = False,
+            zero_first: bool = False) -> None:
     """Common launch path: 3D grid over the target points, i fastest.
 
     ``open_x``/``open_y`` select the kernels' WRF open-lateral-boundary
@@ -80,6 +81,8 @@ def _launch(func: str, q, ru, rv, rw, tend, rdnw, fnm, fnp,
     upstream-normal-wind substitution in the boundary-adjacent u/v
     fluxes.  ``vorder`` is WRF's vertical advection order, 3 or 5.
     """
+    if zero_first and func != "flux_div_scalar":
+        raise ValueError("zero_first is a flux_div_scalar option")
     if vorder not in VERTICAL_ADV_ORDERS:
         raise ValueError(
             f"vorder must be one of {VERTICAL_ADV_ORDERS} (WRF vert_order "
@@ -92,6 +95,10 @@ def _launch(func: str, q, ru, rv, rw, tend, rdnw, fnm, fnp,
         has_msf = msf is not None
     if msf is None:
         msf = cp.ones(msf_shape, dtype=DTYPE)
+    # zero_first: the scalar kernel starts every point from +0.0f instead
+    # of reading ``tend`` (the caller's ``tend[...] = 0`` folded into the
+    # launch: the same words, one launch fewer per species and stage).
+    zero = (("GPUWM_FLUX_DIV_ZERO_FIRST", 1),) if zero_first else ()
     if weno:
         kern = get_kernel_int_defines("advection", func,
                                      (("GPUWM_WENO_MOM", 1),), (nz, ny, nx))
@@ -104,7 +111,10 @@ def _launch(func: str, q, ru, rv, rw, tend, rdnw, fnm, fnp,
         if theta_offset:
             assert horder == 0 and func == "flux_div_scalar"
             defines += (("GPUWM_THETA_OFFSET", 1),)
-        kern = get_kernel_int_defines("advection", func, defines, (nz, ny, nx))
+        kern = get_kernel_int_defines("advection", func, defines + zero,
+                                      (nz, ny, nx))
+    elif zero:
+        kern = get_kernel_int_defines("advection", func, zero, (nz, ny, nx))
     else:
         kern = get_kernel("advection", func, (nz, ny, nx))
     grid = ((n_i + _TPB - 1) // _TPB, n_j, n_k)
@@ -120,16 +130,21 @@ def _launch(func: str, q, ru, rv, rw, tend, rdnw, fnm, fnp,
 def launch_flux_div_scalar(q, ru, rv, rw, tend, coord, dx, dy,
                            open_x=False, open_y=False,
                            msf=None, has_msf=None, spec=False,
-                           vorder=3, horder=5, theta_offset=False) -> None:
+                           vorder=3, horder=5, theta_offset=False,
+                           zero_first=False) -> None:
     """Add the flux divergence of scalar ``q`` (mass points) into ``tend``.
 
     ``msf`` (optional) is the mass-point map factor ``msft (ny, nx)``;
-    ``vorder`` is ``cfg.v_sca_adv_order`` (3 or 5)."""
+    ``vorder`` is ``cfg.v_sca_adv_order`` (3 or 5).  ``zero_first`` writes
+    the divergence over ``tend`` as if it had been zero-filled first: the
+    kernel starts every point from +0.0f, the word a fill writes, so the
+    result equals ``tend[...] = 0`` followed by the accumulating launch."""
     nz, ny, nx = q.shape
     _launch("flux_div_scalar", q, ru, rv, rw, tend, coord.rdnw,
             coord.fnm, coord.fnp, dx, dy,
             nz, ny, nx, nx, ny, nz, open_x, open_y,
-            msf, has_msf, (ny, nx), spec, vorder, False, horder, theta_offset)
+            msf, has_msf, (ny, nx), spec, vorder, False, horder, theta_offset,
+            zero_first=zero_first)
 
 
 def launch_flux_div_u(u, ru, rv, rw, tend, coord, dx, dy,

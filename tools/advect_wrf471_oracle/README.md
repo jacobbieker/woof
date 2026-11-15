@@ -426,6 +426,26 @@ rule (`CERTIFIED_MIN_COMPUTE_MAJOR`) for both advection fixtures:
   `recapture_receipt.py --install` drops the record of the receipt it
   installs. The H100 receipt's record names b70a94a48.
 
+## Blackwell receipts not re-pinned
+
+A Blackwell receipt whose kernel pins trail the tree because no card of its
+architecture was available to recapture it is recorded, not hidden
+(decision 2026-11-14): `certified_unrepinned` in the fixture's
+`gpu-receipts.json` (`{receipt: {"staled_by": commit, "reason": text,
+"pins": {module: digest}}}`). The receipt-pin test then warns
+`CertifiedReceiptNotRepinned` for those pins and still gates every other
+pin; its committed words still replay, and a Blackwell card still compares
+every word it launches against them. A record must be true: a Blackwell
+receipt, kernel pins only (never the fixture), the receipt's own digests,
+still trailing. `recapture_receipt.py --install` on that card drops it.
+
+Not re-pinned today: `advection`, `pd_advection` (and, in the HRRR-fork
+fixture, `pd_vertical_sl`) in the RTX 5090 receipts of both fixtures and the
+HRRR-fork RTX PRO 6000 NVRTC 13.2 receipt, staled by 9c3180977 (zero_first,
+#453). `tests/test_advection_zero_first.py` holds zero_first word-identical
+to fill-then-accumulate on CUDA and Metal. The RTX 4090 receipts trail the
+same commit under `uncertified_stale`.
+
 ## Moving a receipt: `recapture_receipt.py`
 
 A receipt moves only through `recapture_receipt.py`, on the card it names

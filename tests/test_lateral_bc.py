@@ -600,6 +600,9 @@ def test_davies_run_wiring_uses_outer_clock_for_dry_and_moist(monkeypatch):
 
     monkeypatch.setattr(lbc, "apply_specified_relaxation",
                         capture_coefficients)
+    # The per-row launches are what this spy sees; the fused stage launch
+    # (state_relaxation_multi) takes the same resident weights.
+    monkeypatch.setattr(lbc, "LBC_RELAX_MULTI_ENABLED", False)
     apply_state_lateral_boundaries(states[0], cfg, rk_stage=0)
     advance_scalars_stage(
         states[0], cfg, cp.zeros_like(states[0].u),

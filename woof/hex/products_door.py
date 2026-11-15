@@ -135,6 +135,72 @@ REGIONAL_EXTRA_PRODUCTS = (
 GLOBAL_PRODUCTS = BASE_GLOBAL_PRODUCTS + WINDOWED_PRODUCTS
 REGIONAL_PRODUCTS = GLOBAL_PRODUCTS + REGIONAL_EXTRA_PRODUCTS
 
+#: The severe-weather options' maps, each drawn only when the run carries its field (history or diag stream):
+#: (the hex history/diag name, the renderer product).  rw_mpas_convert carries each under WRF 4.7.1's Registry
+#: name (fieldmap.rs SEVERE_OPTION rows); HAILCAST and the PSD hail diameters draw through the renderer's own
+#: hail recipes, the rest through its generic ``var:wrf_<name>`` plane (the file's units, the generic ramp).
+#: THE GAP THIS CLOSES (severe-weather inventory, 2026-11-14): HAILCAST, lightning and AFWA fields were written
+#: to hex history and the converter mapped none of them, so no map of them was ever drawn.  A run without the
+#: options requests none of these, so its manifest is unchanged.
+SEVERE_OPTION_PRODUCTS = (
+    ("hailcast_diam_max", "hail_max_hailcast"),
+    ("hailcast_diam_mean", "hail_max_hailcast_mean"),
+    ("hailcast_runmax", "hail_max_hailcast_run"),
+    ("hail_maxk1", "hail_max_surface"),
+    ("hail_max2d", "hail_max_column"),
+    ("ic_flashcount", "var:wrf_ic_flashcount"),
+    ("cg_flashcount", "var:wrf_cg_flashcount"),
+    ("ic_flashrate", "var:wrf_ic_flashrate"),
+    ("cg_flashrate", "var:wrf_cg_flashrate"),
+    ("lpi", "var:wrf_lpi"),
+    ("afwa_hail", "var:wrf_afwa_hail"),
+    ("afwa_tornado", "var:wrf_afwa_tornado"),
+    ("afwa_llws", "var:wrf_afwa_llws"),
+    ("tcoli_max", "var:wrf_tcoli_max"),
+    ("grpl_flx_max", "var:wrf_grpl_flx_max"),
+    ("w_up_max", "var:wrf_w_up_max"),
+    ("w_dn_max", "var:wrf_w_dn_max"),
+    ("wspd10max", "var:wrf_wspd10max"),
+    ("afwa_refd_com", "var:wrf_refd_com"),
+    ("afwa_echotop", "var:wrf_echotop"),
+    ("afwa_vil", "var:wrf_vil"),
+    ("afwa_radarvil", "var:wrf_radarvil"),
+    ("afwa_cape", "var:wrf_afwa_cape"),
+    ("afwa_cin", "var:wrf_afwa_cin"),
+    ("afwa_cape_mu", "var:wrf_afwa_cape_mu"),
+    ("afwa_lidx", "var:wrf_afwa_lidx"),
+    ("afwa_zlfc", "var:wrf_afwa_zlfc"),
+    ("afwa_heatidx", "var:wrf_afwa_heatidx"),
+    ("afwa_wchill", "var:wrf_afwa_wchill"),
+    ("afwa_fits", "var:wrf_afwa_fits"),
+    ("afwa_snowfall", "var:wrf_afwa_snowfall"),
+    ("afwa_fzra", "var:wrf_afwa_fzra"),
+    ("afwa_ice", "var:wrf_afwa_ice"),
+    ("afwa_vis", "var:wrf_afwa_vis"),
+)
+
+
+def severe_option_products(histories: list[Path]) -> tuple[str, ...]:
+    """The :data:`SEVERE_OPTION_PRODUCTS` the run's last frame (or its diag companion) carries, in table order.
+
+    One header read of two files; a frame that cannot be opened requests none (the converter names its own reason).
+    """
+
+    if not histories:
+        return ()
+    from woof.netcdf_bridge import open_dataset
+
+    carried: set[str] = set()
+    last = Path(histories[-1])
+    for path in (last, diag_companion(last)):
+        if path is None:
+            continue
+        try:
+            carried.update(open_dataset(path).variables)
+        except Exception:  # noqa: BLE001 -- a header that cannot be read requests nothing; the draw reports it
+            continue
+    return tuple(slug for name, slug in SEVERE_OPTION_PRODUCTS if name in carried)
+
 
 def windowed_for_history(histories: list[Path], start: str) -> tuple[tuple[str, ...], dict[str, str]]:
     """The window products the stored frames can close, and why each other one is not requested.
@@ -1749,6 +1815,8 @@ def run_products(args) -> int:
             f"heights behind the pressure-level maps and the soundings, lives "
             f"there; pass --init INIT.nc.")
     start = simulation_start(args.simulation_start, forecast_dir, histories)
+    option_products = severe_option_products(histories)
+    extra_products = chemistry_products + option_products
     windowed, windows_not_requested = windowed_for_history(histories, start)
     global_products = BASE_GLOBAL_PRODUCTS + windowed
     regional_products = global_products + REGIONAL_EXTRA_PRODUCTS
@@ -1812,24 +1880,31 @@ def run_products(args) -> int:
                 int((_parse_stamp(frame_stamp(p)) - _parse_stamp(start)).total_seconds()), p.name)
                 for p in live["frames"]]
             rc, manifest, refusal = _render_view(histories=histories,
-                products=tuple(dict.fromkeys((*products, *WINDOWED_PRODUCTS))) + chemistry_products,
+                products=tuple(dict.fromkeys((*products, *WINDOWED_PRODUCTS))) + extra_products,
                 draw_latest=getattr(args, "draw_latest", False), preserve_leads=preserve,
                 incremental_import=True, **common)
         elif live is None:
             rc, manifest, refusal = _render_view(
-                histories=histories, products=tuple(products) + chemistry_products, **common)
+                histories=histories, products=tuple(products) + extra_products, **common)
         else:
             # The frames drawn live keep their pictures (the same door rendered them, byte for byte); this pass draws
             # the windowed maps, which need the whole series, and every map of the frames no live draw took, side
             # by side. A view with nothing else to draw redraws the last frame, so it still names its window.
             whole_run = tuple(p for p in products if p in WINDOWED_PRODUCTS)
-            per_frame = tuple(p for p in products if p not in WINDOWED_PRODUCTS) + chemistry_products
+            per_frame = tuple(p for p in products if p not in WINDOWED_PRODUCTS) + extra_products
             rest = redraw or ([] if whole_run else histories[-1:])
             jobs_here = []
             if whole_run:
                 jobs_here.append(dict(histories=histories, products=whole_run, part="-series"))
             if rest:
                 jobs_here.append(dict(histories=rest, products=per_frame, part="-rest"))
+            # A chemistry or severe-option map the live draws did not make (its field reached the frames only
+            # later, say) is drawn here for the live frames; with every frame drawn live and a whole-run map to
+            # draw, no -rest job would carry it, and a -rest job covers only the frames it redraws (CodeRabbit on #465).
+            missing = tuple(p for p in extra_products if p not in live.get("products", ()))
+            option_frames = [p for p in live["frames"] if p not in rest]
+            if missing and option_frames:
+                jobs_here.append(dict(histories=option_frames, products=missing, part="-options"))
             results: list = [None] * len(jobs_here)
 
             def part(index):
@@ -2134,6 +2209,7 @@ def run_products(args) -> int:
         "views": views,
         "points": points_record,
         "chemistry_products": list(chemistry_products),
+        "severe_option_products": list(option_products),
         "wave_products": wave_products,
         "windows_not_requested": windows_not_requested,
         "maps_rendered": rendered,

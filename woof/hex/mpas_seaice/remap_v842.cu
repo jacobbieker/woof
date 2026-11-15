@@ -20,6 +20,8 @@
 //     7054-7181 compute_mass_tracer_products
 //     7197-7584 update_mass_and_tracers
 //     7602-8043 recover_tracer_means
+//     8059-8172 sum_tracers, 8187-8314 check_tracer_conservation
+//     8329-8453 tracer_local_min_max, 8477-8810 check_tracer_monotonicity
 //     8825-8947 zap_small_mass
 //     9309-9387 volume_to_thickness, thickness_to_volume
 // (William Lipscomb, LANL, 2015). Copyright (c) 2015, Los Alamos National
@@ -815,4 +817,120 @@ extern "C" __global__ void seaice_ir_recover_means_v842(
     reconstructed[i] = cell;
     difference[i] = diff;
     warn[i] = (ABS(diff) > M(IR_EPS11, ABS(product[i])) && ABS(diff) > IR_EPS11) ? 1 : 0;
+}
+
+// ---------------------------------------------------------------------------
+// The optional checks (config_conservation_check, config_monotonicity_check).
+//
+// sum_tracers (8059-8172), one tracer: per (category, layer) the sum over cells
+// 1..nCellsSolve of areaCell times the mass-tracer product, from zero in cell
+// order (one thread per sum, so the words are the Fortran loop's).
+extern "C" __global__ void seaice_ir_sum_tracer_v842(
+    rk *tracerSum, const rk *product, const rk *areaCell, int nCellsSolve, int nValues)
+{
+    const int i = ir_thread();
+    if (i >= nValues) return;
+    rk s = C(0.0);
+    for (int c = 0; c < nCellsSolve; ++c) s = A(s, M(areaCell[c], product[c * nValues + i]));
+    tracerSum[i] = s;
+}
+
+// check_tracer_conservation (8187-8314), one tracer: per (category, layer)
+// the difference and ratio of the final and initial sums (one rank:
+// mpas_dmpar_sum_real hands each sum back); fail 1 where v8.4.2 reports an
+// error (|initial| > eps11 and |ratio| > eps11).
+extern "C" __global__ void seaice_ir_conservation_v842(
+    int *fail, rk *difference, rk *ratio, const rk *initSum, const rk *finalSum, int nValues)
+{
+    const int i = ir_thread();
+    if (i >= nValues) return;
+    fail[i] = 0;
+    if (ABS(initSum[i]) > IR_EPS11) {
+        const rk d = S(finalSum[i], initSum[i]);
+        const rk r = D(d, initSum[i]);
+        difference[i] = d;
+        ratio[i] = r;
+        if (ABS(r) > IR_EPS11) fail[i] = 1;
+    }
+}
+
+// tracer_local_min_max (8329-8453), one tracer, cells 1..nCellsSolve: the
+// min and max of the meaningful values (mask 1) over the cell and its
+// neighbours 1..nCells; a cell whose own value is not meaningful starts from
+// the caller's zero.
+extern "C" __global__ void seaice_ir_local_min_max_v842(
+    rk *localMin, rk *localMax, const rk *field, const int *mask, const int *nEdgesOnCell,
+    const int *cellsOnCell, int nCells, int nCellsSolve, int nValues, int maxEdges)
+{
+    const int i = ir_thread();
+    if (i >= nCellsSolve * nValues) return;
+    const int c = i / nValues, v = i - c * nValues;
+    rk mn = localMin[i], mx = localMax[i];
+    if (mask[i] == 1) {
+        mn = field[i];
+        mx = field[i];
+    }
+    for (int k = 0; k < nEdgesOnCell[c]; ++k) {
+        const int n = cellsOnCell[c * maxEdges + k];
+        if (n >= 1 && n <= nCells) {
+            const int j = (n - 1) * nValues + v;
+            if (mask[j] == 1) {
+                if (field[j] < mn) mn = field[j];
+                if (field[j] > mx) mx = field[j];
+            }
+        }
+    }
+    localMin[i] = mn;
+    localMax[i] = mx;
+}
+
+// check_tracer_monotonicity's extended min/max (8550-8602, 8673-8732), one
+// tracer: in place, cell after cell (a neighbour earlier in the loop has
+// already been extended, so its extension carries on), one thread per
+// (category, layer) to keep that order.
+extern "C" __global__ void seaice_ir_extend_min_max_v842(
+    rk *localMin, rk *localMax, const int *mask, const int *nEdgesOnCell, const int *cellsOnCell, int nCells,
+    int nCellsSolve, int nValues, int maxEdges)
+{
+    const int v = ir_thread();
+    if (v >= nValues) return;
+    for (int c = 0; c < nCellsSolve; ++c) {
+        const int i = c * nValues + v;
+        if (mask[i] != 1) continue;
+        for (int k = 0; k < nEdgesOnCell[c]; ++k) {
+            const int n = cellsOnCell[c * maxEdges + k];
+            if (n >= 1 && n <= nCells) {
+                const int j = (n - 1) * nValues + v;
+                if (mask[j] == 1) {
+                    if (localMin[j] < localMin[i]) localMin[i] = localMin[j];
+                    if (localMax[j] > localMax[i]) localMax[i] = localMax[j];
+                }
+            }
+        }
+    }
+}
+
+// check_tracer_monotonicity's test (8604-8666, 8734-8801), one tracer, cells
+// 1..nCellsSolve: violation 1 below the neighbourhood's min less its
+// tolerance, 2 above its max plus its tolerance (eps11 * max(1, |extreme|));
+// tolerance and difference: the values v8.4.2 logs for it.
+extern "C" __global__ void seaice_ir_monotonicity_v842(
+    int *violation, rk *tolerance, rk *difference, const rk *field, const int *mask, const rk *localMin,
+    const rk *localMax, int nCellsSolve, int nValues)
+{
+    const int i = ir_thread();
+    if (i >= nCellsSolve * nValues) return;
+    violation[i] = 0;
+    if (mask[i] != 1) return;
+    const rk toleranceMin = M(IR_EPS11, ir_max(C(1.0), ABS(localMin[i])));
+    const rk toleranceMax = M(IR_EPS11, ir_max(C(1.0), ABS(localMax[i])));
+    if (field[i] < S(localMin[i], toleranceMin)) {
+        violation[i] = 1;
+        tolerance[i] = toleranceMin;
+        difference[i] = S(localMin[i], field[i]);
+    } else if (field[i] > A(localMax[i], toleranceMax)) {
+        violation[i] = 2;
+        tolerance[i] = toleranceMax;
+        difference[i] = S(field[i], localMax[i]);
+    }
 }

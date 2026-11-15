@@ -278,7 +278,8 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   - MPAS-Seaice: variational EVP internal stress, the velocity solve and
     elastic subcycles, the pre-subcycle routines, ocean stress,
     incremental-remap advection on planar and spherical meshes (the rotated
-    grid, hexagons and quadrilaterals, variable resolution), and a forward
+    grid, hexagons and quadrilaterals, variable resolution) with its
+    optional conservation and monotonicity checks (one rank), and a forward
     time step with advection (N steps, bitwise restart);
   - MALI: the shallow-ice velocity solver, masks and geometry diagnostics,
     thermal initialisation, the thermal solver and basal melt, thickness
@@ -286,10 +287,10 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     subglacial hydrology and one forward-Euler time step.
 
   Limits: Albany's higher-order solvers are refused by name. The sea-ice
-  remap takes its init geometry as input and refuses halo exchanges and
-  the conservation and monotonicity checks by name. Sea-ice column
-  physics (thermodynamics), ocean KPP and GM/Redi, and the coupler
-  import and export are not ported. A few RKIND 8 cases need the LGPL libm
+  remap computes its init geometry (frames, moments, MPAS's RBF
+  coefficients) itself, and refuses halo exchanges and periodic planar
+  meshes by name. Sea-ice column physics (thermodynamics), ocean KPP and GM/Redi,
+  and the coupler import and export are not ported. A few RKIND 8 cases need the LGPL libm
   opt-in below. These are ported pieces and steps, not coupled forecasts.
   Plan: [docs/mpas-coupled-roadmap.md](docs/mpas-coupled-roadmap.md).
 - **Further WRF physics,** each held word for word to compiled WRF Fortran
@@ -305,6 +306,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   to accept the options WRF does, reusing WRF's column implementations
   rather than copies, and to refuse by name what it cannot yet do. Landed:
   - `woof go` runs hex with `[model] engine = "hex"` (regional route);
+    WRF's severe-weather keys there (`lightning_option`, `hailcast_opt`,
+    `afwa_*_opt`, `nwp_diagnostics` and their knobs) become the MPAS suite
+    route's `&diagnostics`. A `--physics-namelist` holding only
+    `&diagnostics` keeps the default MPAS suite, from `woof hex forecast`
+    and from `woof hex regional --forecast-arg`. The WOOF column route
+    refuses `&diagnostics` by name and says how to fix the request;
   - surface inputs on the generic column seam: CLM lake, SLUCM urban on
     per-cell fractions, WUDAPT LCZ classes, Noah and RUC mosaic, Pleim-Xiu
     and the slab with their soil inits, irrigation and `topo_wind = 1`
@@ -316,6 +323,13 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     RASM and surface-energy reductions. `afwa_ptype` keeps its intended
     logic rather than WRF's literal operator precedence; the module
     documents the difference;
+  - severe weather on the MPAS v8.4.2 suite route (R2): lightning
+    (`lightning_option = 1, 2, 3`, flash counts, rates and LPI) and HAILCAST.
+    `woof hex products` draws these, the AFWA fields and the PSD hail sizes
+    whenever a run writes them (HAILCAST and PSD hail on the renderer's hail
+    maps; lightning and AFWA as plain field maps with generic colour scales),
+    beside the regional severe set (MLCAPE, SRH, shear, EHI, STP, lightning
+    threat, gust);
   - `aer_opt = 1, 2`, `w_damping`, grid and spectral analysis nudging, and
     WRF observation nudging (`obs_nudge_opt = 1`, `--obs-nudging`), with
     WRF's weights and great-circle radii found through a cell KD-tree;
@@ -381,7 +395,35 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   mass-point row (theta, moisture, chem, TKE) is one launch per step
   (`diff6_multi`, byte-identical: CUDA Haleakala 333 m LES about 9 % less
   wall per forecast hour, Edinburgh 3 km about 2 %; `WOOF_DIFF6_MULTI=0`
-  restores the per-field launches). `WOOF_METAL_GPU_TIMES` times each kernel.
+  restores the per-field launches). Advection folds each species' tendency
+  zero-fill into its first accumulating launch (`zero_first`, word-identical
+  on CUDA and Metal). Its advection receipts for the RTX 5090 and RTX PRO 6000
+  (Blackwell) are **not re-pinned**: no Blackwell card was available, so
+  `certified_unrepinned` in each fixture's `gpu-receipts.json` records the
+  pins and the commit, and the gate warns rather than fails for those pins. An RK stage's lateral specified/relaxation
+  rows (u, v, theta, phi, w, mu) are one launch that also absorbs their held
+  zero-fills and interior ufuncs (`state_relaxation_multi`, byte-identical;
+  about 33 launches, 15 memsets and 15 strided adds fewer per nested domain
+  step on the LES, 34 launches fewer per step on a 3 km specified domain;
+  `WOOF_LBC_RELAX_MULTI=0` restores the per-row launches). WRF-Solar's
+  FARMS surface irradiance (`swint_opt = 2`) is one launch per step: the
+  column kernel composes the cloud fraction per cell, merges the MYNN
+  boundary-layer cloud, scales the microphysics radii and writes the six
+  fluxes and the published cloud fraction itself (byte-identical; about 20
+  launches and copies fewer per step; `WOOF_FARMS_FUSED=0` restores the
+  per-step glue; cloud options outside the shared composition keep it). Hex: CUDA
+  subcycle graphs stay on under the adaptive time step, one graph per
+  repeated step length. On a 4,565-cell variable-resolution mesh, a
+  byte-identical adaptive run takes 0.47-0.64x the eager adaptive time and
+  0.38-0.47x the fixed-step time (`WOOF_HEX_CUDA_GRAPHS_ADAPTIVE=0` restores
+  the eager path). Hex on Metal: the regional garbage-column scrub passes
+  its descriptors by value (`WOOF_HEX_SCRUB_WORDS=0` restores the device
+  table), and a fresh storage's address waits only for its scheduling
+  (`WOOF_METAL_ADDRESS_ASYNC=0` restores the eval). Together they remove
+  about 96 % of the queue drains on that mesh, and the hour takes 0.59x the
+  wall time on edi-vr and 0.64x on a uniform 12 km mesh. Both are
+  byte-identical.
+  `WOOF_METAL_GPU_TIMES` times each kernel.
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
   tests by name, and main's full run is periodic. Every merge to `main`

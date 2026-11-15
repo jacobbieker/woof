@@ -124,7 +124,7 @@ def run_gpu(case: dict, fixture: dict[str, np.ndarray], n_steps: int | None = No
 
     dev = device_pools(case, fixture)
     config = case["config"]
-    clock = ts.initialize(pools=dev, configs=config)
+    clock = ts.initialize(pools=dev, configs=config, remap_geometry="input")
     ts.advance(pools=dev, configs=config, clock=clock,
                n_steps=int(config["oracle_n_steps"]) if n_steps is None else n_steps)
     return {f"{pool}/{name}": cp.asnumpy(dev[pool][name]) for pool, name, kind, _ in case["fields"]

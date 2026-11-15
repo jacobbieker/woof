@@ -11,7 +11,8 @@
 ! may call.  Every run starts with seaice_init_advection_incremental_remap
 ! (verbatim: the tracer linked list from the packages, the halo check, the
 ! remap geometry; the RBF reconstruction coefficients, coeffs_reconstruct, are
-! the input's, see remap_standins.F90).  Then, by oracle_stage:
+! the input's, see rbf_standins.F90, except in run_incremental_remap_init,
+! which links MPAS's own RBF set-up).  Then, by oracle_stage:
 !
 !   0  nothing more (the tracer tree and the geometry);
 !   1  seaice_set_tracer_array_pointers and the volume-to-thickness loop of
@@ -23,16 +24,20 @@
 !   3  the volume-to-thickness loop, then make_masks (threshold eps11) and
 !      construct_linear_tracer_fields as incremental_remap_block calls them
 !      (3035-3069);
-!   4  seaice_run_advection_incremental_remap itself, oracle_n_steps times.
+!   4  seaice_run_advection_incremental_remap itself, oracle_n_steps times;
+!   5  nothing more (the init's geometry: built as run_incremental_remap_init,
+!      with MPAS's own RBF set-up, coeffs_reconstruct included).
 !
 ! LOG.txt gets the ordered tracer list ('TRACER name parent nParents
-! hasChild'), each warning the routines log (the mean-recovery check), and the
-! error code ('IERR n') of stage 4.
+! hasChild'), each warning the routines log (the mean-recovery check), each
+! MPAS_LOG_ERR message ('ERR ...': the conservation and monotonicity checks;
+! as in MPAS they do not stop the run, the error code does) and the error code
+! ('IERR n') of stage 4.
 program run_incremental_remap
   use mpas_kind_types
   use mpas_derived_types
   use mpas_pool_routines
-  use mpas_log, only: stub_log_warn_unit
+  use mpas_log, only: stub_log_warn_unit, stub_log_err_unit
   use mpas_timekeeping
   use seaice_advection_incremental_remap_tracers, only: tracer_type, tracersHead, &
        seaice_add_tracers_to_linked_list, seaice_set_tracer_array_pointers
@@ -71,6 +76,7 @@ program run_incremental_remap
   call read_stream(inPath, inputDt, pools, fields)
   open(newunit=logUnit, file=trim(logPath), status='replace', action='write')
   stub_log_warn_unit = logUnit
+  stub_log_err_unit = logUnit
   allocate(domain)
   allocate(domain % blocklist)
   allocate(domain % blocklist % structs)
@@ -181,6 +187,7 @@ program run_incremental_remap
           indexToCellID,                 &
           indexToEdgeID,                 &
           block)
+  case (5)
   case (4)
      call mpas_pool_get_config(pools % configs, 'oracle_n_steps', nSteps)
      ierr = 0
