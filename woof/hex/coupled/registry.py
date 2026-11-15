@@ -73,6 +73,8 @@ def require_ported(name: str, schemes: Sequence[str] | None = None) -> Component
     name. Anything else is refused as not ported.
     """
     info = component(name)
+    if isinstance(schemes, str):
+        schemes = (schemes,)  # one scheme, not its characters
     if info.status == "ported_subset":
         declared = ", ".join(info.schemes)
         if not schemes:

@@ -61,7 +61,11 @@ def test_ported_subset_refuses_an_undeclared_scheme_by_name(monkeypatch) -> None
     assert "velocity_solver" in str(exc.value)
     with pytest.raises(ConfigurationRefusal):
         require_ported("seaice")  # a subset component must be told what runs
-    for empty in ([], ()):
+    assert require_ported("seaice", "velocity_solver").schemes == ("velocity_solver",)
+    with pytest.raises(ConfigurationRefusal) as exc:
+        require_ported("seaice", "advection")
+    assert "'advection'" in str(exc.value)
+    for empty in ([], (), ""):
         with pytest.raises(ConfigurationRefusal):
             require_ported("seaice", empty)
 
