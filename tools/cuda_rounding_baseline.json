@@ -4805,7 +4805,7 @@
    },
    {
     "file": "woof/hex/obs_nudging.cu",
-    "sha256": "240ac02e8095a1290dacde9440b27e15db36c1d59ebb39ebc205d90d4f62d783"
+    "sha256": "3ad915a3db0eff32a7704b79d07beef09191f0a9ea8f9606a11df6e4e07b2ecd"
    },
    {
     "file": "woof/hex/stochastic.cu",
@@ -6063,7 +6063,7 @@
    },
    {
     "file": "woof/hex/obs_nudging.py",
-    "sha256": "5e026cc31425e9e56969add1098220d4a0afafcbedbfa4510ec0f4635829b7f5"
+    "sha256": "fd13f17cece1834c233b06f5a46e7dc8d3c28ba3651b453ba022fe08feb48afb"
    },
    {
     "file": "woof/hex/ocean_mixed_layer.py",

@@ -3409,6 +3409,20 @@ def tc_workspace_bytes(request: ForecastRequest, *, levels: int = 55) -> int:
     return workspace_allowance(request.cells, levels, samples, recipe)
 
 
+def obs_nudging_bytes(request: ForecastRequest, *, levels: int = 55) -> int:
+    """Device storage WRF observation nudging adds (woof.hex.obs_nudging.device_bytes); 0 when off."""
+    if request.obs_nudging is None:
+        return 0
+    from .obs_nudging import device_bytes, load_config
+    cfg = load_config(request.obs_nudging, input_file=request.obs_nudging_input)
+    return device_bytes(request.cells, levels, max_obs=int(cfg.max_obs))
+
+
+def diagnostic_workspace_bytes(request: ForecastRequest, *, levels: int = 55) -> int:
+    """TC diagnostics plus observation nudging: the run's own workspaces beyond the forecast state."""
+    return tc_workspace_bytes(request, levels=levels) + obs_nudging_bytes(request, levels=levels)
+
+
 def build_driver_argv(request: ForecastRequest) -> list[str]:
     """The argument vector handed to the engineering forecast driver.
 
@@ -3439,7 +3453,7 @@ def build_driver_argv(request: ForecastRequest) -> list[str]:
                                 request.headroom_bytes) +
             stochastic_array_bytes(request.cells, request.stochastic,
                                    levels=floor_model.levels if floor_model is not None else 55) +
-            tc_workspace_bytes(request, levels=floor_model.levels if floor_model is not None else 55)),
+            diagnostic_workspace_bytes(request, levels=floor_model.levels if floor_model is not None else 55)),
     ]
     if request.stochastic is not None:
         argv += ["--stochastic", request.stochastic]
@@ -4268,8 +4282,8 @@ def _run_preflight(request: ForecastRequest, registry: Mapping[str, MeshRow],
             headroom_bytes=request.headroom_bytes, registry=registry,
             model=request.model,
             stochastic=request.stochastic,
-            **({"diagnostic_bytes": tc_workspace_bytes(request, levels=request.model.levels)}
-               if request.tc_climate is not None else {}),
+            **({"diagnostic_bytes": diagnostic_workspace_bytes(request, levels=request.model.levels)}
+               if request.tc_climate is not None or request.obs_nudging is not None else {}),
         )
         _print_admission(request, admission)
         if not admission.admitted:
@@ -5257,8 +5271,8 @@ def _run_forecast(arguments: argparse.Namespace) -> int:
             mesh=request.mesh, cells=request.cells, headroom_bytes=request.headroom_bytes,
             registry=registry, model=request.model,
             stochastic=request.stochastic,
-            **({"diagnostic_bytes": tc_workspace_bytes(request, levels=request.model.levels)}
-               if request.tc_climate is not None else {}),
+            **({"diagnostic_bytes": diagnostic_workspace_bytes(request, levels=request.model.levels)}
+               if request.tc_climate is not None or request.obs_nudging is not None else {}),
         )
     else:
         admission = samehost.admit_request(request, registry, samehost_options, sys.modules[__name__])
@@ -5279,8 +5293,8 @@ def _run_forecast(arguments: argparse.Namespace) -> int:
                 mesh=request.mesh, cells=request.cells, headroom_bytes=request.headroom_bytes,
                 registry=registry, model=request.model,
                 stochastic=request.stochastic,
-                **({"diagnostic_bytes": tc_workspace_bytes(request, levels=request.model.levels)}
-                   if request.tc_climate is not None else {}),
+                **({"diagnostic_bytes": diagnostic_workspace_bytes(request, levels=request.model.levels)}
+                   if request.tc_climate is not None or request.obs_nudging is not None else {}),
             )
             return verdict
 

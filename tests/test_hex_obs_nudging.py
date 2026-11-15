@@ -244,3 +244,32 @@ def test_door_flags_and_partitioned_refusal():
     request = SimpleNamespace(nudging=None, obs_nudging=Path("a.toml"), tc_climate=None, w_damping=None,
                               inflow_perturbation=None)
     assert forecast_door._partitioned_samehost_refusal(request).startswith("HEX_OBS_NUDGING_PARTITIONED")
+
+
+def test_checkpoint_identity_binds_the_numerical_controls(tmp_path):
+    """A restart under another coefficient is refused; paths and print switches do not matter."""
+    cfg = obs.load_config(_toml(tmp_path))
+    base = obs.controls_identity(cfg)
+    assert "obs_coef_temp" in base and "obs_inputfile" not in base
+    moved = SimpleNamespace(**{**vars(cfg), "obs_inputfile": "/elsewhere/OBS_DOMAIN101", "obs_prt_freq": 7})
+    assert obs.controls_identity(moved) == base
+    other = SimpleNamespace(**{**vars(cfg), "obs_coef_temp": cfg.obs_coef_temp * 2})
+    assert obs.controls_identity(other) != base
+    forcing = object.__new__(obs.HexObsNudging)
+    forcing.identity = "written-under-other-controls"
+    with pytest.raises(obs.HexObsNudgingRefusal, match="HEX_OBS_NUDGING_RESTART"):
+        forcing.restore({"schema": obs.SCHEMA, "identity": "another"})
+
+
+def test_admission_prices_observation_nudging_storage(tmp_path):
+    """The door's workspace sum carries the cell-level arrays (savwt alone is NVAR words per cell level)."""
+    from woof.hex import forecast_door
+
+    path = _toml(tmp_path)
+    cells, levels = 655362, 55
+    expected = obs.device_bytes(cells, levels, max_obs=500)
+    assert expected > 4 * cells * levels * obs.NVAR + 4 * 500 * obs.REPORT_WORDS
+    request = SimpleNamespace(obs_nudging=path, obs_nudging_input=tmp_path / "OBS", tc_climate=None, cells=cells)
+    assert forecast_door.obs_nudging_bytes(request, levels=levels) == expected
+    assert forecast_door.diagnostic_workspace_bytes(request, levels=levels) == expected
+    assert forecast_door.obs_nudging_bytes(SimpleNamespace(obs_nudging=None), levels=levels) == 0

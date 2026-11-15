@@ -3808,8 +3808,14 @@ def execute_forecast(
             int(host["prepared"].mesh.n_cells), stochastic_options,
             levels=int(host["prepared"].vertical.n_vert_levels))
             if StochasticConfig.parse(stochastic_options).enabled else 0)
+        obs_bytes = 0
+        if obs_nudging is not None:
+            from woof.hex.obs_nudging import device_bytes, load_config as load_obs_config
+            obs_bytes = device_bytes(int(host["prepared"].mesh.n_cells), int(host["prepared"].vertical.n_vert_levels),
+                                     max_obs=int(load_obs_config(obs_nudging["config"],
+                                                                 input_file=obs_nudging.get("input")).max_obs))
         memory = proof.gpu_memory_admission(cp, minimum=int(proof.MIN_FREE_DEVICE_BYTES) +
-            stochastic_bytes + tc_allowance)
+            stochastic_bytes + tc_allowance + obs_bytes)
     else:
         memory = proof.gpu_memory_admission(cp, minimum=int(required_free_bytes))
     cache = KernelCache(capability=capability, cache_dir=cache_root)
@@ -3968,6 +3974,14 @@ def execute_forecast(
                                          restart_seconds=float(start_step) * float(DT_SECONDS),
                                          carried=obs_nudging_carried)
         print(json.dumps({"obs_nudging": obs_forcing.receipt()}, default=str), flush=True)
+    elif obs_nudging_carried is not None:
+        # The checkpoint was written with observation nudging; continuing without it would silently run a
+        # forcing-off forecast under the restart's name.
+        from woof.hex.obs_nudging import HexObsNudgingRefusal
+
+        raise HexObsNudgingRefusal(
+            "HEX_OBS_NUDGING_RESTART",
+            "the checkpoint carries observation nudging; pass --obs-nudging with the config it was written with")
     time_ledger.emit("prep.device_upload", "end", attrs={"scope": "device_stack_including_kernel_load"})
     from woof.hex.cuda_column_order_v841 import attach_column_order
     column_order_receipt = attach_column_order(stack["backend"], host["prepared"].mesh)

@@ -408,6 +408,31 @@ def grid_record(nc: int, nz: int):
     return _record([1, nc + 1, 1, 2, 1, nz + 1, 1, nc, 1, 1, 1, nz, 1, nc, 1, 1, 1, nz], ["i4"] * 18)
 
 
+#: Float32 (level, cell) arrays HexObsNudging holds besides the scalar ambient copy: z, up to four tendencies,
+#: savwt (NVAR words), tb/theta work, five wind work arrays, the ambient theta and density, and the unit zz.
+LEVEL_ARRAYS = 1 + 4 + NVAR + 2 + 5 + 2 + 1
+#: Per-cell planes: ht, dz1, mask, three surface ratios, three VIF height pairs and tops, and seam fields.
+PLANE_ARRAYS = 32
+#: Per-report words: varobs, errf, time/nlev/lev/rko, three corners and weights, the nearest cell.
+REPORT_WORDS = NVAR + NERR + 4 + 6 + 1
+
+
+def device_bytes(cells: int, levels: int, *, max_obs: int, scalars: int = 8) -> int:
+    """Device storage observation nudging adds before its reach lists (priced after placement).
+
+    ``scalars`` bounds the ambient scalar copy (through qv's index).  The reach lists depend on where the
+    reports fall; :class:`HexObsNudging` checks them against the device's free memory before allocating.
+    """
+    level = 4 * int(cells) * int(levels) * (LEVEL_ARRAYS + int(scalars))
+    return level + 4 * int(cells) * PLANE_ARRAYS + 4 * int(max_obs) * REPORT_WORDS
+
+
+def controls_identity(cfg) -> dict[str, Any]:
+    """Every numerical control a checkpoint carrier depends on (paths and print switches excluded)."""
+    return {key: value for key, value in sorted(vars(cfg).items())
+            if key not in ("obs_inputfile", "config_path") and not key.startswith(("obs_prt_", "obs_ipf_"))}
+
+
 def controls_record(cfg, ivar: int, dt: float):
     """WRF's Controls record, as woof/fddaobs/forecast.py fills it, with the hex distance unit for dx."""
     suffix = "uv" if ivar < 3 else "t" if ivar == 3 else "q"
@@ -426,6 +451,19 @@ _VIF_CONTROLS = {suffix: tuple(f"obs_nudgez{kind}r{regime}_{suffix}" for regime 
 # ----------------------------------------------------------------------------
 # the forcing
 # ----------------------------------------------------------------------------
+
+def _admit_reach(cp, required: int) -> None:
+    """Refuse by name, before allocating, a reach list the device cannot hold (dense reports, wide radii)."""
+    try:
+        free = int(cp.cuda.runtime.memGetInfo()[0])
+    except Exception:  # The Metal facade has no free-memory query; unified memory is admitted at the door.
+        return
+    if required > free:
+        raise HexObsNudgingRefusal(
+            "HEX_OBS_NUDGING_MEMORY",
+            f"the report reach lists need {required} bytes and the device has {free} free; "
+            "lower obs_rinxy or max_obs, or thin the reports")
+
 
 class HexObsNudging:
     """WRF observation nudging on hex cell columns, added at the IAU seat.
@@ -537,6 +575,7 @@ class HexObsNudging:
         starts = np.flatnonzero(rows["lev"][select] == 1) if self.count else np.zeros(0, np.int64)
         reach_m = self.cfg.obs_rinxy * 1000.0 * max(self.cfg.obs_sfcfacr, RINFMX, RINFMN)
         start, report, rsq = locator.reach(lat[select][starts], lon[select][starts], reach_m)
+        _admit_reach(cp, 8 * int(report.size) + 4 * (self.nc + 1))
         padded_start = np.full(self.nc + 1, start[-1], dtype=np.int32)
         padded_start[:start.size] = start
         self.reach_start = cp.asarray(padded_start)
@@ -548,7 +587,9 @@ class HexObsNudging:
         identity.update(admitted_rows=self.count, rejected_reports=self.rejected_reports,
                         cells=int(mesh.n_cells), sphere_radius=locator.radius,
                         mesh_cells_sha256=hashlib.sha256(np.ascontiguousarray(locator.xyz).tobytes()).hexdigest(),
-                        source_sha256=hashlib.sha256(kernel_source().encode()).hexdigest())
+                        source_sha256=hashlib.sha256(kernel_source().encode()).hexdigest(),
+                        # Every numerical control: a restart under other coefficients, radii or windows is refused.
+                        controls=controls_identity(self.cfg))
         self.metadata = rows["metadata"]
         self.identity = hashlib.sha256(json.dumps(identity, sort_keys=True, default=str).encode()).hexdigest()
 

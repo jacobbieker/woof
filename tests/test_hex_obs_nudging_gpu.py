@@ -30,6 +30,12 @@ def _device():
     cp = pytest.importorskip("cupy")
 
 
+def _same_words(a, b) -> bool:
+    """FP32 word identity (signed zeros and NaN payloads included), not element equality."""
+    a, b = np.ascontiguousarray(a, dtype=np.float32), np.ascontiguousarray(b, dtype=np.float32)
+    return a.shape == b.shape and np.array_equal(a.view(np.uint32), b.view(np.uint32))
+
+
 def _wrf_module():
     if backend.active() in backend.FACADE_BACKENDS:
         pytest.skip("WRF's fddaobs_nudob_rows does not translate to MSL (a conditional thread/device lvalue); "
@@ -166,19 +172,41 @@ def _errob_pair(uniform, wind):
 
 def test_errob_mass_innovations_equal_wrf_at_mass_points():
     hex_out, wrf_out, count = _errob_pair(uniform=False, wind=0)
-    assert np.array_equal(hex_out["rko"], wrf_out["rko"]) and (hex_out["rko"] >= 1).all()
-    assert np.array_equal(hex_out["obs"], wrf_out["obs"])
+    assert _same_words(hex_out["rko"], wrf_out["rko"]) and (hex_out["rko"] >= 1).all()
+    assert _same_words(hex_out["obs"], wrf_out["obs"])
     he, we = hex_out["err"].reshape(count, obs.NERR), wrf_out["err"].reshape(count, obs.NERR)
     for column in (2, 3, 4, 5, 8, 9):  # theta, qv, PBL level, surface pressure, rko, model qv
-        assert np.array_equal(he[:, column], we[:, column]), column
+        assert _same_words(he[:, column], we[:, column]), column
 
 
 def test_errob_wind_innovations_equal_wrf_on_uniform_columns():
     """On horizontally uniform columns WRF's staggered u/v interpolation is the cell value: every word agrees."""
     hex_out, wrf_out, count = _errob_pair(uniform=True, wind=1)
-    assert np.array_equal(hex_out["rko"], wrf_out["rko"])
-    assert np.array_equal(hex_out["err"], wrf_out["err"])
-    assert np.array_equal(hex_out["obs"], wrf_out["obs"])
+    assert _same_words(hex_out["rko"], wrf_out["rko"])
+    assert _same_words(hex_out["err"], wrf_out["err"])
+    assert _same_words(hex_out["obs"], wrf_out["obs"])
+
+
+def test_errob_report_without_pressure_or_height_is_rejected_inside_the_column():
+    """rko stays -99: WRF's penalty rejects the report, and the model read is clamped to the first level."""
+    col = _columns(11)
+    cell = 3 + NX * 4
+    varobs = np.array([[6.0, -3.0, -888888.0, -888888.0, -888888.0, -888888.0]], dtype=np.float32)
+    k = obs.kernels()
+    d = {name: cp.asarray(np.ascontiguousarray(col[name].reshape(-1))) for name in
+         ("u", "v", "tb", "qv", "pb", "pp", "z", "ur", "vr", "tr", "kpbl")}
+    out = dict(rko=cp.asarray(np.array([-99.0], np.float32)), obs=cp.asarray(varobs.reshape(-1)),
+               err=cp.zeros(obs.NERR, cp.float32))
+    k["hex_fddaobs_errob"]((1,), (128,), (
+        d["u"], d["v"], d["tb"], d["qv"], d["pb"], d["pp"], d["z"], d["ur"], d["vr"], d["tr"], d["kpbl"],
+        cp.asarray(np.array([cell + 1] * 3, np.int32)), cp.asarray(np.array([1.0, 0.0, 0.0], np.float32)),
+        cp.asarray(np.array([cell + 1], np.int32)), out["rko"], out["obs"], out["err"],
+        np.int32(1), np.int32(obs.NVAR), np.int32(obs.NERR), np.int32(1), np.int32(0), np.int32(0),
+        np.float32(300.), np.float32(287. / 1004.5), obs.grid_record(NC, NZ), _frame(1)))
+    err = cp.asnumpy(out["err"])
+    assert float(cp.asnumpy(out["rko"])[0]) == -99.0
+    assert np.isfinite(err).all()
+    assert (err[:4] == np.float32(-888888.0)).all()  # rejected: the 99999 penalty trips the theta check
 
 
 @pytest.mark.parametrize("over", [
@@ -272,8 +300,8 @@ def test_nudob_weights_and_tendencies_equal_wrf(over):
             j_hi = NY - 2 if ivar >= 3 else NY - 1
             interior = (slice(None), slice(2, j_hi), slice(1, NX))
             assert np.count_nonzero(hs[interior]) > 20, (suffix, ivar)
-            assert np.array_equal(hs[interior], ws[interior]), (suffix, ivar)
-            assert np.array_equal(ht_[interior], wt_[interior]), (suffix, ivar)
+            assert _same_words(hs[interior], ws[interior]), (suffix, ivar)
+            assert _same_words(ht_[interior], wt_[interior]), (suffix, ivar)
             assert coef > 0
 
 

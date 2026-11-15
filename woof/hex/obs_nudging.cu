@@ -58,7 +58,9 @@ extern "C" __global__ void hex_fddaobs_errob(
  if(rko[n]<1.f)dummy+=99999.f;
  for(int v=0;v<=4;v++)e[v]+=dummy;
  e[8]=rko[n];
- int k=min(kend,ic),kp=min(k+1,kend);
+ // WRF reads level ic even when rko stayed -99 (no pressure or height); the dummy penalty above already
+ // rejects that report, so the read is clamped to the first level to stay inside the column.
+ int k=max(g.kts,min(kend,ic)),kp=min(k+1,kend);
  if(wind==1){
   float ratio=1.f;if(rko[n]==1.f){ratio=TRI2(ur);}
   if(fabsf(ratio)<1.e-3f)ratio=1.f;

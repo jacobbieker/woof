@@ -445,6 +445,12 @@ def read_request(document: Mapping[str, Any], *, source: str = "CONFIG") -> dict
     history = float(domain["history_interval_s"])
     if history <= 0 or history % 60:
         raise HexGoRefusal(f"[[domain]] history_interval_s = {history:g}: hex history is in whole minutes")
+    if observation.get("obs_nudge_opt", 0) and not physics:
+        # With no physics key the regional door appends the hex default, an MPAS suite, and the forecast door
+        # refuses --obs-nudging there (HEX_OBS_NUDGING_ROUTE) only after mesh, init and boundary preparation.
+        raise HexGoRefusal("HEX_OBS_NUDGING_ROUTE: obs_nudge_opt = 1 runs on the WOOF-physics route, but this run "
+                           "names no physics key, so it takes the hex default (an MPAS suite).  Write the WRF physics "
+                           "selectors (mp_physics, bl_pbl_physics, ...) in [shared] or the [[domain]]")
     return {"name": str(experiment.get("name") or Path(source).stem),
             "start_time": experiment["start_time"], "hours": int(run_seconds // 3600),
             "history_every_minutes": int(history // 60), "projection": dict(projection),
