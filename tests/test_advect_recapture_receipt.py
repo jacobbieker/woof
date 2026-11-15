@@ -219,6 +219,25 @@ def test_installing_an_uncertified_receipt_again_drops_its_staleness_record(tool
     assert "gpu-receipts.json" in record["written"]
 
 
+def test_installing_a_blackwell_receipt_again_drops_its_not_repinned_record(tool, tmp_path):
+    """A Blackwell receipt left un-re-pinned (no card, 2026-11-14) is re-pinned
+    only by a capture on that card, which takes the record with it."""
+    from woof.verify.advect_oracle import CERTIFIED_UNREPINNED_KEY
+    assert tool.UNREPINNED_RECORD_KEY == CERTIFIED_UNREPINNED_KEY
+    fixture = _fixture(tmp_path, "wrf471_advect", {"Card A": "gpu-receipt-sm120.json"},
+                       {"12.0": "gpu-receipt-sm120.json"},
+                       {"gpu-receipt-sm120.json": ("Card A", (12, 0), "gpu-words-sm120")})
+    index_path = fixture / "gpu-receipts.json"
+    index = json.loads(index_path.read_text(encoding="ascii"))
+    index[CERTIFIED_UNREPINNED_KEY] = {"gpu-receipt-sm120.json": {
+        "staled_by": "c" * 40, "reason": "no card", "pins": {"advection": "old" + "0" * 61}}}
+    tool.write_index(fixture, index)
+    receipt, words = _capture(tmp_path, "Card A", (12, 0))
+    status, record = tool.settle(fixture, receipt, words, install=True)
+    assert (status, record["mode"], record["stale_record_dropped"]) == (0, "card", True)
+    assert CERTIFIED_UNREPINNED_KEY not in json.loads(index_path.read_text(encoding="ascii"))
+
+
 def test_a_first_capture_writes_its_receipt_words_and_index(tool, tmp_path):
     fixture = _fixture(tmp_path, "wrf_legacy_advect", {"Card A": "gpu-receipt.json"}, {},
                        {"gpu-receipt.json": ("Card A", (8, 9), "gpu-words")})

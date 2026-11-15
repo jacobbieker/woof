@@ -25,7 +25,9 @@ from woof.verify.advect_oracle import (
     mapped_radiation_control_cases, advect_gpu_identity,
     architecture_is_certified, check_receipt_format, receipt_staleness,
     check_uncertified_stale_records, uncertified_stale_report,
-    UncertifiedReceiptStale, UNCERTIFIED_STALE_KEY)
+    UncertifiedReceiptStale, UNCERTIFIED_STALE_KEY,
+    check_certified_unrepinned_records, check_certified_receipt_pins,
+    CertifiedReceiptNotRepinned, CERTIFIED_UNREPINNED_KEY)
 
 #: The modules every receipt of this fixture pins by assembled source.
 RECEIPT_MODULES = ("advection", "pd_advection", "openbc")
@@ -163,6 +165,47 @@ def test_advect_receipts_certify_blackwell_and_report_older_cards_with_their_sta
         check_uncertified_stale_records(index, ADVECT_ORACLE_DIR, RECEIPT_MODULES)
 
 
+def test_advect_blackwell_receipt_trails_only_through_a_true_not_repinned_record(monkeypatch):
+    """A Blackwell receipt's kernel pins may trail only under a record saying
+    it was not re-pinned (no card, decision 2026-11-14), and the record must
+    be true: it names a Blackwell receipt, kernel pins only, the receipt's own
+    digests, and pins that still trail.  Nothing here depends on today's tree.
+    """
+    import woof.verify.advect_oracle as oracle
+    certified = _receipt("gpu-receipt-sm120.json")
+    h100 = _receipt("gpu-receipt-h100.json")
+    pins = {"advection": certified["kernels"]["advection"]}
+    record = {"staled_by": "c" * 40, "reason": "no Blackwell card", "pins": pins}
+    moved = {"advection": (pins["advection"], "a" * 64)}
+    monkeypatch.setattr(oracle, "receipt_staleness", lambda *args: dict(moved))
+    index = dict(RECEIPT_INDEX, **{CERTIFIED_UNREPINNED_KEY: {"gpu-receipt-sm120.json": record}})
+    records = check_certified_unrepinned_records(index, ADVECT_ORACLE_DIR, RECEIPT_MODULES)
+    with pytest.warns(CertifiedReceiptNotRepinned, match="NOT re-pinned: advection .* staled by ccccccccc"):
+        check_certified_receipt_pins("gpu-receipt-sm120.json", certified, ADVECT_ORACLE_DIR,
+                                     RECEIPT_MODULES, records)
+    with pytest.raises(AssertionError, match="trails the tree"):
+        check_certified_receipt_pins("gpu-receipt-sm120.json", certified, ADVECT_ORACLE_DIR,
+                                     RECEIPT_MODULES, {})
+    monkeypatch.setattr(oracle, "receipt_staleness", lambda *args: dict(moved, openbc=("b" * 64, "d" * 64)))
+    with pytest.raises(AssertionError, match="openbc"):
+        check_certified_receipt_pins("gpu-receipt-sm120.json", certified, ADVECT_ORACLE_DIR,
+                                     RECEIPT_MODULES, records)
+    monkeypatch.setattr(oracle, "receipt_staleness", lambda *args: dict(moved, fixture=("b" * 64, "d" * 64)))
+    with pytest.raises(AssertionError, match="kernel pins only"):
+        check_certified_unrepinned_records(index, ADVECT_ORACLE_DIR, RECEIPT_MODULES)
+    monkeypatch.setattr(oracle, "receipt_staleness", lambda *args: dict(moved))
+    for bad, match in (({"gpu-receipt-h100.json": dict(record, pins={"advection": h100["kernels"]["advection"]})},
+                        "not a certified"),
+                       ({"gpu-receipt-sm120.json": dict(record, reason="")}, "sm120"),
+                       ({"gpu-receipt-sm120.json": dict(record, pins={"advection": "0" * 64})}, "drop or rewrite")):
+        with pytest.raises(AssertionError, match=match):
+            check_certified_unrepinned_records(dict(RECEIPT_INDEX, **{CERTIFIED_UNREPINNED_KEY: bad}),
+                                               ADVECT_ORACLE_DIR, RECEIPT_MODULES)
+    monkeypatch.setattr(oracle, "receipt_staleness", lambda *args: {})
+    with pytest.raises(AssertionError, match="current again"):
+        check_certified_unrepinned_records(index, ADVECT_ORACLE_DIR, RECEIPT_MODULES)
+
+
 def test_advect_device_receipt_gates_blackwell_and_skips_older_cards_only_when_stale(monkeypatch):
     """The device half of the 2026-10-04 ruling, without a card.
 
@@ -248,8 +291,8 @@ def test_advect_native_reference_and_cuda_words_match_their_receipts():
     committed words replay against the reference; only a Blackwell
     receipt's kernel and fixture pins must equal the tree.
     """
-    from woof.core.kernels import module_source
     records = check_uncertified_stale_records(RECEIPT_INDEX, ADVECT_ORACLE_DIR, RECEIPT_MODULES)
+    unrepinned = check_certified_unrepinned_records(RECEIPT_INDEX, ADVECT_ORACLE_DIR, RECEIPT_MODULES)
     cases = load_advect_cases()
     for name, receipt in _available_receipts():
         check_receipt_format(receipt, ADVECT_ORACLE_DIR, RECEIPT_MODULES, cases)
@@ -262,19 +305,7 @@ def test_advect_native_reference_and_cuda_words_match_their_receipts():
                 # Its words were measured against another fixture's reference.
                 continue
         else:
-            for module in RECEIPT_MODULES:
-                # Exactly the source the default loader compiles. A receipt
-                # digest moves only with a PTX identity receipt for the kernels
-                # this oracle runs, or a fresh capture on the receipt's card (or
-                # architecture, for sm_120) reproducing every recorded word
-                # (tools/advect_wrf471_oracle/README.md).
-                digest = receipt["kernels"][module]
-                assert hashlib.sha256(module_source(module).encode("utf-8")).hexdigest() == digest, (
-                    f"{name} pins {module} source {digest[:8]}, not the source the loader compiles: "
-                    f"the kernel moved and {receipt['gpu']} has not reproduced its words at it. "
-                    "On that card: python tools/advect_wrf471_oracle/recapture_receipt.py "
-                    "--fixture tests/data/wrf471_advect --scratch <empty dir> --install")
-            assert receipt["fixture_manifest_sha256"] == hashlib.sha256((ADVECT_ORACLE_DIR / "cases.json").read_bytes()).hexdigest(), name
+            check_certified_receipt_pins(name, receipt, ADVECT_ORACLE_DIR, RECEIPT_MODULES, unrepinned)
         words_directory = receipt.get("words_directory", "gpu-words")
         for case in cases:
             assert set(ROUTINES).issubset(case.reference)

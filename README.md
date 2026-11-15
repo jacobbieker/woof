@@ -393,7 +393,13 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   mass-point row (theta, moisture, chem, TKE) is one launch per step
   (`diff6_multi`, byte-identical: CUDA Haleakala 333 m LES about 9 % less
   wall per forecast hour, Edinburgh 3 km about 2 %; `WOOF_DIFF6_MULTI=0`
-  restores the per-field launches). `WOOF_METAL_GPU_TIMES` times each kernel.
+  restores the per-field launches). Advection folds each species' tendency
+  zero-fill into its first accumulating launch (`zero_first`, word-identical
+  on CUDA and Metal). Its advection receipts for the RTX 5090 and RTX PRO 6000
+  (Blackwell) are **not re-pinned**: no Blackwell card was available, so
+  `certified_unrepinned` in each fixture's `gpu-receipts.json` records the
+  pins and the commit, and the gate warns rather than fails for those pins.
+  `WOOF_METAL_GPU_TIMES` times each kernel.
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
   tests by name, and main's full run is periodic. Every merge to `main`
