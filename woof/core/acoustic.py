@@ -650,6 +650,9 @@ def prepare_acoustic_substep_launch(state: DomainState, cfg: RunConfig,
         )
 
     dampmag = damp_magnitude(cfg, dtau)
+    # The joined column entry (acoustic_fusion) is built from the column
+    # kernel's text; the separate launch may take the level-parallel entry.
+    w_name = "advance_w_phi_msf" if state.has_msf else "advance_w_phi"
     w_kernel, w_grid, w_block = _w_phi_launch(state, nz, ny, nx)
     w_map_args = (state.msft,) if state.has_msf else ()
     w_args = (
