@@ -265,6 +265,45 @@ def test_clockwise_cells_are_refused():
         _host_geometry(case)
 
 
+def _owned_edge(m: dict, *, second_owned: bool = False, min_sides: int = 0) -> int:
+    coe, neoc, nc = m["cellsOnEdge"], m["nEdgesOnCell"], m["nCells"]
+    for e in range(m["nEdges"]):
+        c0, c1 = coe[e]
+        if (1 <= c0 <= m["nCellsSolve"] and neoc[c0 - 1] >= min_sides
+                and (not second_owned or 1 <= c1 <= nc)):
+            return e
+    raise AssertionError("no such edge")
+
+
+def test_a_second_cell_missing_the_edge_is_refused_not_given_the_first_cells_index():
+    """CodeRabbit #468: the edge's slot is looked up afresh in each of its
+    cells; a miss in the second must not reuse the first cell's index."""
+    case = _case()
+    m = case["pools"]["mesh"]
+    e = _owned_edge(m, second_owned=True)
+    cell = m["cellsOnEdge"][e, 1]
+    row = m["edgesOnCell"][cell - 1]
+    row[list(row[:m["nEdgesOnCell"][cell - 1]]).index(e + 1)] = 0
+    with pytest.raises(RemapError, match=f"edge {e + 1} is not among its cell's edges"):
+        _host_geometry(case)
+
+
+def test_a_side_edge_sharing_no_vertex_is_refused_not_given_the_last_match():
+    """CodeRabbit #468: each side edge's shared vertex is matched afresh; a
+    side edge with none must not reuse the previous side edge's match."""
+    case = _case()
+    m = case["pools"]["mesh"]
+    e = _owned_edge(m, min_sides=5)
+    cell = m["cellsOnEdge"][e, 0]
+    n = int(m["nEdgesOnCell"][cell - 1])
+    row = m["edgesOnCell"][cell - 1]
+    k = list(row[:n]).index(e + 1)
+    a, b = (k + 1) % n, (k + 2) % n
+    row[a], row[b] = row[b], row[a]   # the forward side edge is now two edges away: no shared vertex
+    with pytest.raises(RemapError, match=f"edge {e + 1}: a side edge shares no vertex"):
+        _host_geometry(case)
+
+
 def _oracle_toolchain():
     source = os.environ.get("WOOF_MPAS_V842_SOURCE")
     gfortran = os.environ.get("GFORTRAN") or shutil.which("gfortran")

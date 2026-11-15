@@ -257,7 +257,6 @@ def geometry(m: dict, g: dict, sphere: bool, c, out: dict) -> None:
     eoer, coer = out["edgesOnEdgeRemap"], out["cellsOnEdgeRemap"]
     eoer[...] = 0
     coer[...] = 0
-    main_on_cell = None
     for e in edges:
         for i in range(2):
             coer[e, i] = coe[e, i]
@@ -266,6 +265,7 @@ def geometry(m: dict, g: dict, sphere: bool, c, out: dict) -> None:
             if not 1 <= cell <= nc:
                 continue
             n = int(neoc[cell - 1])
+            main_on_cell = None   # each cell's lookup stands alone: a miss is refused, never inherited
             for k in range(n):
                 if eoc[cell - 1, k] == e + 1:
                     main_on_cell = k + 1
@@ -318,7 +318,6 @@ def geometry(m: dict, g: dict, sphere: bool, c, out: dict) -> None:
         xv, yv = _to_plane(T, all_e, xV[v2] - xV[v1], yV[v2] - yV[v1], zV[v2] - zV[v1])
         xvoe[:ne, 0], yvoe[:ne, 0] = -c.half * xv, -c.half * yv
         xvoe[:ne, 1], yvoe[:ne, 1] = c.half * xv, c.half * yv
-    stale = {}
     for e in edges:
         if not sphere:
             for iv in range(2):
@@ -329,6 +328,7 @@ def geometry(m: dict, g: dict, sphere: bool, c, out: dict) -> None:
             nb = eoer[e, k]
             if not 1 <= nb <= ne:
                 continue
+            stale = {}   # each side edge's match stands alone: a miss is refused, never inherited
             for n in range(2):
                 for mm in range(2):
                     if voe[nb - 1, mm] == voe[e, n]:
