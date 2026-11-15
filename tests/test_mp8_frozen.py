@@ -920,8 +920,17 @@ FROZEN_MODULE_DIGESTS = {
         # Assembled pin re-read for 2.9.11 (paper/conus-suite-exact 0e21ecf29a): the row's strict MF_VX_INV
         # edit sits inside `#if GPUWM_WRF_EXACT`; it moved the file pin above and left this one stale.
         # Default route unchanged: the 2.9.11 assembled-legacy replay, 0 differing words in all three families.
-        'b35120f7012a89b7e8b3a0da7e30ce434ae3867e1ff35fea4665e3f645a16949',
-        '1730a72093ba5b64c04aada3d8ebc94fc7c0a40ace6b1685e5fd3a04b405cdaf'),
+        # Re-pinned for state_relaxation_multi: an RK stage's state relaxation
+        # rows in one launch, each row the frame kernel's statements word for
+        # word plus the interior ufunc effects (tests/test_lbc_relax_multi.py,
+        # both backends and modes; wrfout byte-identical on the LES and 3 km
+        # cases).  The seven existing entries are untouched text; the audit's
+        # PTX signatures stay identical across sm100/sm120.
+        # Re-read for the 32-bit cell index and the write-if-changed store
+        # (integer and store logic only; the audit record was re-taken).
+        # Previously b35120f7/1730a720.
+        'a5bc696d4f3e0ce4e04608bac1b956fd8c80fdfaa869082d70da1d7b7f7d213d',
+        'b83b8ec8b0ab60b5f7863a391d5b7cb6099302878bd4460ff164c2b5c758e82a'),
     'morrison': (
         # Re-pinned by the cat6 fix, 2026-11-02: 51bb93111ee (export hygiene)
         # rewrote comments only in glibc_flt32.cuh, flt32_expf_fma.cuh, kf.cu,
