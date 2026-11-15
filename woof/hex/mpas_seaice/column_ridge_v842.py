@@ -30,7 +30,10 @@ brine fraction (the pond tracers start from zero on new ridges).
 
 On an abort MPAS writes the aborting cell back, logs its message and returns
 from the whole routine, so the later cells keep their words: :func:`ridging`
-restores them and returns that cell and message.
+restores them and returns that cell and message. ``ridge_shift``'s two aborts
+never get that far: v8.4.2 writes their 512-character stop label into a
+256-character warning and dies with a gfortran runtime error, so
+:func:`ridging` raises :class:`FortranRuntimeError` there.
 """
 from __future__ import annotations
 
@@ -40,6 +43,7 @@ from importlib.resources import files
 import numpy as np
 
 from woof.hex import numerics as _hex_numerics
+from woof.hex.errors import MpasPortError
 
 from . import column_itd_v842 as citd
 from . import column_v842 as cv
@@ -66,7 +70,26 @@ STOP_LABELS = {
     5: "ice: ITD cleanup error in colpkg_step_ridge",
 }
 
+#: ridge_shift's aborts write their stop label (column_ridging's abortMessage,
+#: strKIND = 512 characters) list-directed into a char_len_long = 256 character
+#: warning: v8.4.2 dies there with this gfortran runtime error, by abort code
+RUNTIME_ERRORS = {
+    2: {"file": "ice_mechred.F90", "line": 1257, "error": "End of record"},
+    3: {"file": "ice_mechred.F90", "line": 1294, "error": "End of record"},
+}
+
 refuse_unported = citd.refuse_unported
+
+
+class FortranRuntimeError(MpasPortError):
+    """MPAS v8.4.2 itself terminates here (a gfortran runtime error); the
+    port stops the same way instead of inventing an outcome."""
+
+    def __init__(self, crash: dict, cell: int) -> None:
+        self.crash = crash
+        self.cell = cell
+        super().__init__(f"At line {crash['line']} of file {crash['file']} (indexToCellID {cell}): "
+                         f"Fortran runtime error: {crash['error']} (MPAS v8.4.2 terminates here)")
 
 
 def module_source(n_ice_layers: int) -> str:
@@ -177,4 +200,6 @@ def ridging(pools: dict, configs: dict, state: "cv.ColumnState") -> tuple[int, i
     if not bad.size:
         return 0, None, None
     cell = int(cp.asnumpy(pools["mesh"]["indexToCellID"][last:last + 1])[0])
+    if int(codes[last]) in RUNTIME_ERRORS:
+        raise FortranRuntimeError(RUNTIME_ERRORS[int(codes[last])], cell)
     return SEAICE_ERROR_COL_RIDGING, cell, "column_ridging: " + STOP_LABELS[int(codes[last])]

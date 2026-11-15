@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -190,7 +191,7 @@ RIDGE_CASES = (
     ("ridge_bl99_single_category", 20261977, _RDG, {**_BL99, "config_nCategories": 1,
                                                     "config_category_bounds_type": "single category",
                                                     "config_itd_conversion_type": "delta function"}),
-    ("ridge_abort_open_water", 20261978, _RDG, {}),
+    ("ridge_negative_opening_dies", 20261978, _RDG, {}),
     ("ridge_abort_iterations", 20261979, _RDG, {**_HIBLER}),
     ("ridge_abort_cleanup", 20261980, _RDG, {**_BL99}),
 )
@@ -598,7 +599,7 @@ def _ridge_state(rs, case: dict) -> None:
     hsn = u(0.0, 0.3, (n1, ncat))
     hsn[5, -1] = 0.3
     snow = area * hsn
-    if name == "ridge_abort_open_water":
+    if name == "ridge_negative_opening_dies":
         # an opening rate below zero (a negative convergence) and no open water to give
         for r in (3, 6):
             aice0[r], conv[r] = 0.0, -1.0e-3
@@ -710,12 +711,32 @@ def parse_log(text: str) -> dict:
     return {"tracer_object": tobj, "log": other}
 
 
-def run_oracle(build_dir: Path, case: dict) -> tuple[dict[str, np.ndarray], dict]:
+def _runtime_error(stderr: str) -> dict | None:
+    """A gfortran runtime error's file, line and message (``At line N of file
+    F`` / ``Fortran runtime error: M``), or None."""
+    at = re.search(r"At line (\d+) of file (\S+)", stderr)
+    error = re.search(r"Fortran runtime error: (.+)", stderr)
+    if not at or not error:
+        return None
+    return {"file": Path(at.group(2)).name, "line": int(at.group(1)), "error": error.group(1).strip()}
+
+
+def run_oracle(build_dir: Path, case: dict) -> tuple[dict[str, np.ndarray] | None, dict]:
+    """The oracle's outputs and log. A case on which v8.4.2 itself dies with
+    a Fortran runtime error has no outputs; its log carries ``crash`` (the
+    error's file, line and message)."""
     with tempfile.TemporaryDirectory() as tmp:
         src, dst, log = Path(tmp) / "in.bin", Path(tmp) / "out.bin", Path(tmp) / "log.txt"
         src.write_bytes(input_bytes(case))
-        subprocess.run([str(Path(build_dir) / "run_column_r8"), str(src), str(dst), str(log)], check=True)
-        return read_outputs(dst.read_bytes(), case), parse_log(log.read_text(encoding="utf-8"))
+        run = subprocess.run([str(Path(build_dir) / "run_column_r8"), str(src), str(dst), str(log)],
+                             capture_output=True, text=True)
+        parsed = parse_log(log.read_text(encoding="utf-8"))
+        if run.returncode:
+            crash = _runtime_error(run.stderr)
+            if crash is None:
+                raise subprocess.CalledProcessError(run.returncode, run.args, run.stdout, run.stderr)
+            return None, {**parsed, "crash": crash}
+        return read_outputs(dst.read_bytes(), case), parsed
 
 
 word_mismatches = _stream.word_mismatches
@@ -881,13 +902,23 @@ def measure_ridge(reference: dict | None = None, logs: dict | None = None, *, ro
     """Per ridging case: the words the GPU gets wrong per field (an aborting
     case's too), whether its abort (ierr, first aborting cell, message)
     differs from the oracle's, whether its graded warning lines do, and the
-    tracer object's integers that differ."""
+    tracer object's integers that differ; for a case v8.4.2 dies on, whether
+    the port fails to stop with the same runtime error."""
     reference = load_fixture(fixture_dir) if reference is None else reference
     logs = load_logs(fixture_dir) if logs is None else logs
     report: dict[str, dict[str, int]] = {}
     for case in cases("r8", rows):
-        got, state = run_gpu(case)
         log = logs[case["name"]]
+        if "crash" in log:
+            # v8.4.2 dies: the port must stop with the same runtime error, nothing to compare
+            try:
+                run_gpu(case)
+            except crdg.FortranRuntimeError as error:
+                report[case["name"]] = {"crash": int(error.crash != log["crash"])}
+            else:
+                report[case["name"]] = {"crash": 1}
+            continue
+        got, state = run_gpu(case)
         row = {"abort": int(tuple(state.abort) != oracle_abort(log, "column_ridging")),
                "warnings": int(state.warnings != oracle_ridge_warnings(log))}
         want = expected_outputs(case, reference.get(case["name"], {}))

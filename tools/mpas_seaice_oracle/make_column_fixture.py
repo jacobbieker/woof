@@ -46,8 +46,9 @@ def main() -> int:
     logs, digests = {}, []
     for case in co.cases("r8", rows):
         outputs, log = co.run_oracle(args.build_dir, case)
-        for key, value in co.changed_fields(case, outputs).items():
-            arrays[f"{case['name']}/{key}"] = value
+        if outputs is not None:         # None: v8.4.2 died (log["crash"])
+            for key, value in co.changed_fields(case, outputs).items():
+                arrays[f"{case['name']}/{key}"] = value
         logs[case["name"]] = log
         digests.append(f"{co.input_digest(case)}  {case['name']}/r8")
     np.savez_compressed(args.out / "oracle-r8.npz", **arrays)
