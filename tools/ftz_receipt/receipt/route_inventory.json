@@ -9,13 +9,13 @@
     "cupy.ReductionKernel",
     "cupy.cuda.compiler.compile_using_nvrtc"
   ],
-  "site_count": 670,
+  "site_count": 672,
   "site_count_by_kind": {
     "cupy.ElementwiseKernel": 46,
-    "cupy.RawKernel": 111,
+    "cupy.RawKernel": 112,
     "cupy.RawModule": 299,
     "cupy.ReductionKernel": 16,
-    "cupy.cuda.compiler.compile_using_nvrtc": 198
+    "cupy.cuda.compiler.compile_using_nvrtc": 199
   },
   "site_count_by_surface": {
     "other": {
@@ -29,11 +29,11 @@
       "cupy.RawKernel": 39,
       "cupy.RawModule": 102,
       "cupy.ReductionKernel": 9,
-      "cupy.cuda.compiler.compile_using_nvrtc": 123
+      "cupy.cuda.compiler.compile_using_nvrtc": 124
     },
     "tests": {
       "cupy.ElementwiseKernel": 7,
-      "cupy.RawKernel": 40,
+      "cupy.RawKernel": 41,
       "cupy.RawModule": 109,
       "cupy.ReductionKernel": 4,
       "cupy.cuda.compiler.compile_using_nvrtc": 36
@@ -2460,7 +2460,7 @@
     },
     {
       "file": "tests/test_metal_translation_gaps.py",
-      "line": 65,
+      "line": 70,
       "column": 13,
       "surface": "tests",
       "constructor": "cp.RawKernel",
@@ -2476,7 +2476,7 @@
     },
     {
       "file": "tests/test_metal_translation_gaps.py",
-      "line": 108,
+      "line": 113,
       "column": 13,
       "surface": "tests",
       "constructor": "cp.RawModule",
@@ -2496,7 +2496,7 @@
     },
     {
       "file": "tests/test_metal_translation_gaps.py",
-      "line": 132,
+      "line": 137,
       "column": 13,
       "surface": "tests",
       "constructor": "cp.RawModule",
@@ -2512,7 +2512,7 @@
     },
     {
       "file": "tests/test_metal_translation_gaps.py",
-      "line": 156,
+      "line": 161,
       "column": 4,
       "surface": "tests",
       "constructor": "cp.RawKernel",
@@ -2528,7 +2528,23 @@
     },
     {
       "file": "tests/test_metal_translation_gaps.py",
-      "line": 181,
+      "line": 189,
+      "column": 4,
+      "surface": "tests",
+      "constructor": "cp.RawKernel",
+      "constructor_kind": "cupy.RawKernel",
+      "enclosing": "test_accessor_field_holding_only_threadgroup_memory",
+      "takes_caller_options": true,
+      "options_argument_present": false,
+      "options_expression": null,
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "cp.RawKernel(_THREADGROUP_FIELD, \"threadgroup_field\")((1,), (32,), (cp.asarray(host), out, np.int32(4)))"
+    },
+    {
+      "file": "tests/test_metal_translation_gaps.py",
+      "line": 214,
       "column": 13,
       "surface": "tests",
       "constructor": "cp.RawModule",
@@ -2544,7 +2560,7 @@
     },
     {
       "file": "tests/test_metal_translation_gaps.py",
-      "line": 195,
+      "line": 228,
       "column": 17,
       "surface": "tests",
       "constructor": "cp.ElementwiseKernel",
@@ -2624,7 +2640,7 @@
     },
     {
       "file": "tests/test_mp8_frozen.py",
-      "line": 3200,
+      "line": 3212,
       "column": 8,
       "surface": "tests",
       "constructor": "cp.RawModule",
@@ -6956,7 +6972,7 @@
     },
     {
       "file": "woof/core/dycore.py",
-      "line": 310,
+      "line": 327,
       "column": 11,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
@@ -6976,7 +6992,7 @@
     },
     {
       "file": "woof/core/dycore.py",
-      "line": 341,
+      "line": 358,
       "column": 11,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
@@ -7538,7 +7554,7 @@
     },
     {
       "file": "woof/core/moist.py",
-      "line": 582,
+      "line": 591,
       "column": 11,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
@@ -7554,7 +7570,7 @@
     },
     {
       "file": "woof/core/moist.py",
-      "line": 684,
+      "line": 693,
       "column": 11,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
@@ -10225,6 +10241,22 @@
       "text": "image, _ = compile_using_nvrtc(module_source(precision), options, None, f\"ocn_vmix_v842_{precision}.cu\")"
     },
     {
+      "file": "woof/hex/mpas_seaice/column_v842.py",
+      "line": 573,
+      "column": 15,
+      "surface": "package",
+      "constructor": "compile_using_nvrtc",
+      "constructor_kind": "cupy.cuda.compiler.compile_using_nvrtc",
+      "enclosing": "_module_on",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "options",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "image, _ = compile_using_nvrtc(module_source(), options, None, \"seaice_column_v842.cu\")"
+    },
+    {
       "file": "woof/hex/mpas_seaice/evp_v842.py",
       "line": 92,
       "column": 15,
@@ -11710,7 +11742,7 @@
     },
     {
       "file": "woof/verify/advect_oracle.py",
-      "line": 624,
+      "line": 708,
       "column": 21,
       "surface": "package",
       "constructor": "cp.RawModule",
@@ -11726,7 +11758,7 @@
     },
     {
       "file": "woof/verify/advect_oracle.py",
-      "line": 678,
+      "line": 762,
       "column": 13,
       "surface": "package",
       "constructor": "cp.RawModule",
