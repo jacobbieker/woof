@@ -4040,7 +4040,12 @@ def execute_forecast(
     # nothing: the subcycle runs eager there.  Under the adaptive clock the
     # step length is part of the graph key: the controller keeps a graph for
     # each repeated step length (WOOF_HEX_CUDA_GRAPHS_ADAPTIVE=0: eager).
-    if (graph_requested and lts_attachment is None and fullstep_shadow is None
+    # Local time stepping's rate classes are launches of the same subcycle,
+    # chosen on the host by the sub-step and stage alone, so they capture and
+    # replay with it (WOOF_HEX_CUDA_GRAPHS_LTS=0: eager, the path before
+    # 2026-11-15).
+    lts_graphs = lts_attachment is None or os.environ.get("WOOF_HEX_CUDA_GRAPHS_LTS", "1") != "0"
+    if (graph_requested and lts_graphs and fullstep_shadow is None
             and les_attachment is None and recovery_attachment is None and not metal_lane()
             and (adaptive is None or adaptive_graphs_enabled())):
         from woof.hex.cuda_subcycle_graphs import attach_subcycle_graphs
@@ -4974,7 +4979,7 @@ def execute_forecast(
             "fully_replayed_committed_steps": graph_full_steps,
             "partly_replayed_committed_steps": graph_partial_steps,
             "subcycles": None if graph_controller is None else graph_controller.receipt(),
-            "skip_reason": ("local_timestep_controller" if lts_attachment is not None
+            "skip_reason": ("local_timestep_controller" if lts_attachment is not None and not lts_graphs
                             else "metal_facade_captures_no_graph" if metal_lane()
                             else "adaptive_timestep_graphs_off" if (adaptive is not None
                                                                     and graph_controller is None)

@@ -2640,7 +2640,7 @@
     },
     {
       "file": "tests/test_mp8_frozen.py",
-      "line": 3212,
+      "line": 3220,
       "column": 8,
       "surface": "tests",
       "constructor": "cp.RawModule",
@@ -10242,7 +10242,7 @@
     },
     {
       "file": "woof/hex/mpas_seaice/column_v842.py",
-      "line": 583,
+      "line": 589,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",

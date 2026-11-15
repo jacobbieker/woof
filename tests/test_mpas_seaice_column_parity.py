@@ -119,6 +119,7 @@ def test_the_initial_air_drag_is_gfortran_s_folded_constant():
     ({"config_initial_condition_type": "circle"}, "initial conditions"),
     ({"config_initial_velocity_type": "ocean"}, "initial velocities"),
     ({"config_use_column_package": False}, "column package"),
+    ({"config_use_level_ice": False}, "level-ice tracer"),
 ])
 def test_unported_configurations_are_refused_by_name(overrides, match):
     case = co.make_case("refused", 1, "init", overrides)
@@ -210,9 +211,10 @@ def _oracle_toolchain() -> tuple[str, Path] | None:
 
 
 @pytest.mark.skipif(_oracle_toolchain() is None or platform.machine() != "x86_64"
-                    or platform.libc_ver()[0] != "glibc",
-                    reason="the column oracle's words are the x86-64 glibc host's libm (cos, pow, tanh); it "
-                           "needs gfortran (pixi -e mpas-oracle) and WOOF_MPAS_V842_SOURCE")
+                    or platform.libc_ver() != ("glibc", "2.44"),
+                    reason="the column oracle's words are the x86-64 glibc 2.44 host's libm (cos, pow, tanh; "
+                           "the fixture's, PROVENANCE.md); it needs gfortran (pixi -e mpas-oracle) and "
+                           "WOOF_MPAS_V842_SOURCE")
 def test_the_oracle_rebuilt_here_writes_the_fixture(tmp_path):
     gfortran, source = _oracle_toolchain()
     subprocess.run(["bash", str(ROOT / "tools" / "mpas_seaice_oracle" / "build.sh"), str(source),
