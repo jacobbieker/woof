@@ -407,12 +407,24 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   zero-fills and interior ufuncs (`state_relaxation_multi`, byte-identical;
   about 33 launches, 15 memsets and 15 strided adds fewer per nested domain
   step on the LES, 34 launches fewer per step on a 3 km specified domain;
-  `WOOF_LBC_RELAX_MULTI=0` restores the per-row launches). Hex: CUDA
+  `WOOF_LBC_RELAX_MULTI=0` restores the per-row launches). WRF-Solar's
+  FARMS surface irradiance (`swint_opt = 2`) is one launch per step: the
+  column kernel composes the cloud fraction per cell, merges the MYNN
+  boundary-layer cloud, scales the microphysics radii and writes the six
+  fluxes and the published cloud fraction itself (byte-identical; about 20
+  launches and copies fewer per step; `WOOF_FARMS_FUSED=0` restores the
+  per-step glue; cloud options outside the shared composition keep it). Hex: CUDA
   subcycle graphs stay on under the adaptive time step, one graph per
   repeated step length. On a 4,565-cell variable-resolution mesh, a
   byte-identical adaptive run takes 0.47-0.64x the eager adaptive time and
   0.38-0.47x the fixed-step time (`WOOF_HEX_CUDA_GRAPHS_ADAPTIVE=0` restores
-  the eager path).
+  the eager path). Hex on Metal: the regional garbage-column scrub passes
+  its descriptors by value (`WOOF_HEX_SCRUB_WORDS=0` restores the device
+  table), and a fresh storage's address waits only for its scheduling
+  (`WOOF_METAL_ADDRESS_ASYNC=0` restores the eval). Together they remove
+  about 96 % of the queue drains on that mesh, and the hour takes 0.59x the
+  wall time on edi-vr and 0.64x on a uniform 12 km mesh. Both are
+  byte-identical.
   `WOOF_METAL_GPU_TIMES` times each kernel.
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight

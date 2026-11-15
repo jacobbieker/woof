@@ -2889,7 +2889,7 @@
    },
    {
     "file": "woof/core/kernels/farms.cu",
-    "sha256": "153023d0a11f2c128e058ce0e3d63be9ffb5e8fd12862bc2b7c35bafaf5bff11"
+    "sha256": "60c8c1af663db4c395d25bbf00910a881fbdc659a1c21c9e2c7d8ddc603dea38"
    },
    {
     "file": "woof/core/kernels/farms_wrf471.cu",
@@ -5563,7 +5563,7 @@
    },
    {
     "file": "woof/hex/cuda_solve_region_v841.py",
-    "sha256": "22723f83bb25199c32184803338b378d1dc753c66b0581d0905214e4b3e2f5fd"
+    "sha256": "961b3744dbbdf263949836fd8467d151f6029716371ba874b91a2cec17001046"
    },
    {
     "file": "woof/hex/cuda_transport.py",
@@ -7073,7 +7073,7 @@
    },
    {
     "file": "woof/hex/cuda_solve_region_v841.py",
-    "sha256": "6ced5f964c9cc6914ce5f8330e839d961495760da3428f05f20f22442d68901e"
+    "sha256": "51c313eacc566d4071e1ec0db0d124c3709dda5e38dad078bb3b37597314759c"
    },
    {
     "file": "woof/hex/cuda_transport.py",
@@ -12971,15 +12971,15 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "8d976f13ee4bbf0186168fa111f4fac450e14840efd4e0f5144c4b02cc758f5f",
+    "sha256": "0ceea94a5c986955f7b768c5263bfaed506df210e914902b6bf6a86d5c60683b",
     "sites": {
-     "100": 176
+     "100": 197
     }
    },
    "native_differences": {
-    "sha256": "28883e0f08d58569c9cd653fce4cf8268bc868948461c54b60a6f16bb77351a5",
+    "sha256": "6e8a0829765a3eca1bbe8d807e47fe93d9e7f64e7a5301116cf38838b1a06309",
     "sites": {
-     "100": 34
+     "100": 37
     }
    },
    "native_errors": {},
@@ -12999,7 +12999,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "9c06f39ea25d8c545b074becc20cca4adb3a5c671a240aea676f9fe2391b49c4"
+   "source_sha256": "aae02b4292b7fe94fead28f012062be87202384f6dcce998cd18e0138b73119d"
   },
   "kernels:farms_wrf471": {
    "assessment": "static_diagnostic_only",
