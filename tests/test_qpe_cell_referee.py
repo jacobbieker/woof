@@ -36,8 +36,9 @@ def test_assign_pixels_honours_the_usable_mask():
     pytest.importorskip("scipy")
     lat = np.array([0.0, 0.0, 10.0])
     lon = np.array([0.0, 1.0, 0.0])
-    assert list(q.assign_pixels(lat, lon, [0.1], [0.6])) == [1]
-    assert list(q.assign_pixels(lat, lon, [0.1], [0.6], np.array([True, False, True]))) == [0]
+    assert list(q.assign_pixels(lat, lon, [0.1, 0.1], [0.6, 0.4])) == [1, 0]
+    # the pixel a masked cell owns is dropped, not handed to its usable neighbour
+    assert list(q.assign_pixels(lat, lon, [0.1, 0.1], [0.6, 0.4], np.array([True, False, True]))) == [-1, 0]
 
 
 def test_compare_is_case_paired_and_seeded():
@@ -90,6 +91,13 @@ def test_compare_pairs_finite_cases_for_means_and_intervals():
     row = q.compare(a, b, replicates=50, stats=("fbi_10",))["stats"]["fbi_10"]
     assert (row["a"], row["b"], row["mean_diff"], row["cases"]) == (2.0, 1.0, 1.0, 1)
     assert row["ci95"] is None and row["exploratory"]
+
+
+def test_compare_pairs_windows_where_both_arms_define_the_statistic():
+    a = [_window_rec("c0", "A", {"24": {"ets_1": None}, "48": {"ets_1": 1.0}})]
+    b = [_window_rec("c0", "B", {"24": {"ets_1": 0.0}, "48": {"ets_1": 1.0}})]
+    row = q.compare(a, b, replicates=10, stats=("ets_1",))["stats"]["ets_1"]
+    assert (row["a"], row["b"], row["mean_diff"]) == (1.0, 1.0, 0.0)
 
 
 def _pack(path, schema, meta, arrays):

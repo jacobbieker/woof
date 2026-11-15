@@ -207,13 +207,14 @@ exploratory.
   (`rainc + rainnc` differenced between two frames) against the Stage-IV
   packs `rw_stage4` writes (`tools/obs_fetch_stage4.py --accumulations 24h`).
   - The comparison is made on the model's cells. Each 4.8 km pixel goes to
-    its nearest usable cell if it lies inside that cell's footprint (within
-    0.75 of the distance to the cell's nearest neighbour); a pixel outside
-    the mesh, or beside a boundary cell, is dropped. A cell is scored only
+    the cell that owns it: the nearest centre on the full mesh, within 0.75
+    of that cell's distance to its nearest neighbour. A pixel owned by a
+    masked boundary cell (`bdyMaskCell > 0`) or outside every footprint is
+    dropped. A cell is scored only
     when it lies fully inside the observed area (at least 70 % of a full
     cell's pixel count, at least 90 % of them valid).
-  - Two arms are compared over the windows both scored, and they must share
-    the initial time and the window length.
+  - Two arms must share the initial time and the window length. Each
+    statistic is averaged over the windows where both arms define it.
   - Per window it reports the bias, RMSE, model/observed ratio, and the
     frequency bias and equitable threat score at 1, 5, 10 and 25 mm.
 

@@ -53,16 +53,22 @@ def assign_pixels(cell_lat, cell_lon, pixel_lat, pixel_lon, usable=None):
     from scipy.spatial import cKDTree
 
     xyz = unit_vectors(cell_lat, cell_lon)
-    cells = np.arange(len(xyz)) if usable is None else np.flatnonzero(usable)
     pixels = unit_vectors(np.ravel(pixel_lat), np.ravel(pixel_lon))
-    if cells.size == 0:
-        return np.full(len(pixels), -1, dtype=np.int64)
     if len(xyz) < 2:
         raise ValueError("a footprint needs at least two model cells")
-    spacing = cKDTree(xyz).query(xyz[cells], k=2)[0][:, 1]
-    distance, index = cKDTree(xyz[cells]).query(pixels)
-    owner = cells[index].astype(np.int64)
-    owner[distance > FOOTPRINT * spacing[index]] = -1
+    # Ownership is decided on the full mesh (the nearest centre is the
+    # Voronoi owner); the mask is applied after, so a pixel a masked cell
+    # owns is dropped, never handed to a usable neighbour.  A regional
+    # mesh's outer rings are masked (bdyMaskCell > 0), so a pixel beyond the
+    # mesh edge is owned by a masked cell or lies outside every footprint.
+    tree = cKDTree(xyz)
+    spacing = tree.query(xyz, k=2)[0][:, 1]
+    distance, owner = tree.query(pixels)
+    owner = owner.astype(np.int64)
+    outside = distance > FOOTPRINT * spacing[owner]
+    if usable is not None:
+        outside |= ~np.asarray(usable, bool)[owner]
+    owner[outside] = -1
     return owner
 
 
@@ -180,10 +186,17 @@ def score(history_dir, qpe_dir, case, arm, *, hours=24):
     return record
 
 
-def _case_metric(record, stat, leads):
-    values = [record["windows"][k].get(stat) for k in leads]
-    values = [v for v in values if v is not None]
-    return float(np.mean(values)) if values else None
+def _finite(value):
+    return value is not None and np.isfinite(value)
+
+
+def _case_pair(a, b, stat, leads):
+    """``(A, B)`` case means of ``stat`` over the windows where both arms define it."""
+    pairs = [(a["windows"][k].get(stat), b["windows"][k].get(stat)) for k in leads]
+    pairs = [(x, y) for x, y in pairs if _finite(x) and _finite(y)]
+    if not pairs:
+        return np.nan, np.nan
+    return float(np.mean([x for x, _ in pairs])), float(np.mean([y for _, y in pairs]))
 
 
 def _shared_windows(a, b):
@@ -210,8 +223,7 @@ def compare(arm_a, arm_b, *, replicates=5000, seed=20261115, stats=STATS):
            "arm_a": sorted({r["arm"] for r in arm_a}), "arm_b": sorted({r["arm"] for r in arm_b}),
            "windows": shared, "stats": {}}
     for stat in stats:
-        a = np.array([np.nan if (x := _case_metric(by_a[c], stat, shared[c])) is None else x for c in cases])
-        b = np.array([np.nan if (x := _case_metric(by_b[c], stat, shared[c])) is None else x for c in cases])
+        a, b = np.array([_case_pair(by_a[c], by_b[c], stat, shared[c]) for c in cases]).T
         diff = a - b
         pair = np.isfinite(diff)
         if not pair.any():
