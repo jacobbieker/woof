@@ -442,6 +442,10 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   fluxes and the published cloud fraction itself (byte-identical; about 20
   launches and copies fewer per step; `WOOF_FARMS_FUSED=0` restores the
   per-step glue; cloud options outside the shared composition keep it).
+  The Smagorinsky scalar rows (theta, moisture, chem, TKE) take their
+  horizontal flux and divergence launches four rows at a time with the face
+  and cell metrics formed once (`wrf_smag_flux_s_multi`/`wrf_smag_hd_s_multi`,
+  byte-identical; `WOOF_SMAG_MULTI=0` restores one launch pair per row).
   `WOOF_ACOUSTIC_KPAR=1` takes a level-parallel w''-phi'' solve (32 columns
   x 8 lanes per block; 1.7-2.2x the column kernel's speed per launch on an
   A6000): opt-in, because on CUDA its words are the column kernel's generic

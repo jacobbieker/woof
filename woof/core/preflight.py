@@ -7881,6 +7881,13 @@ def scratch_slot_registry(cfg: RunConfig, *,
         # diff6_x prefix during the K computation); sixth-order diffusion
         # subsequently overwrites them.  z/m are required only by diff6.
         slots.update(diff6_x=xs, diff6_y=ys)
+    if mixing_package:
+        # The multi-row scalar flux launch (dycore.launch_wrf_smag2d_hd_multi)
+        # holds one H1/H2 face pair per row of a chunk: diff6_x/y and these.
+        from woof.core.dycore import SMAG_MULTI_ROWS
+        for extra in range(1, SMAG_MULTI_ROWS):
+            slots[f"smag_fx_{extra}"] = xs
+            slots[f"smag_fy_{extra}"] = ys
     if cfg.diff_6th_opt:
         slots.update(diff6_z=fl, diff6_m=m)
         # The NOAA WRFV3.9 fork's edge-to-edge form (diff_6th_form =
@@ -8461,6 +8468,13 @@ SCRATCH_SLOT_LIFETIME_AUDIT = (
         "the window accumulator and its step counter are read many steps "
         "after the step that wrote them (drain ends the window), and both "
         "are float64 while ScratchArena is float32-only"),
+    ScratchSlotLifetime(
+        ("smag_fx_1", "smag_fy_1", "smag_fx_2", "smag_fy_2",
+         "smag_fx_3", "smag_fy_3"),
+        "write_before_read", "woof/core/dycore.py:launch_wrf_smag2d_hd_multi",
+        "the multi-row Smagorinsky scalar launch writes a chunk's H1/H2 "
+        "face fluxes and reads them in the divergence launch that follows "
+        "within the same step; diff6_x/y are the chunk's first pair"),
     ScratchSlotLifetime(
         ("diff6_x", "diff6_y", "diff6_z", "diff6_m"),
         "write_before_read", "woof/core/dycore.py:prepare_fixed_tendencies; "
