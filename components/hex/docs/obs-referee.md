@@ -172,6 +172,41 @@ A history stream produced before this publication is refused by the model
 bundle producer by field name; re-run the forecast rather than repacking
 around the hole.
 
+## Profile and cell-mean QPE referees (2026-11)
+
+Two small referees score claims the surface battery cannot see. Both read
+MPAS-layout history (`*history.*.nc`, from woof hex or native MPAS-A), write
+one JSON record per case and arm, and compare two arms with the same
+case-paired block bootstrap: whole cases are resampled with a fixed seed, so
+station, level and cell counts never narrow the interval. With fewer than four
+cases the record says the interval is exploratory.
+
+- `python -m woof.hex.sonde_profile_referee` scores model temperature against
+  radiosondes at the sixteen mandatory levels (1000 to 10 hPa). Results are
+  grouped by latitude band (90-60S, 60-20S, 20S-20N, 20-60N, 60-90N, global)
+  and by lead. Each group reports the count, the bias, the RMSE and the
+  least-squares drift of bias against lead, in K per 24 h.
+  - Sondes are read anonymously and read-only from the Source Cooperative
+    icechunk stores `bkr/obs/igra_v2_16_levels.icechunk` (IGRA v2 on the
+    mandatory levels, ending in 2025-07) and
+    `bkr/obs/wis2_upper_air.icechunk` (WIS2 BUFR soundings, from late
+    October 2026).
+  - These are normalized stores, so no raw IGRA or BUFR text is parsed here.
+  - The model value comes from the nearest usable cell (`bdyMaskCell == 0`)
+    and is interpolated linearly in ln p. Nothing is extrapolated.
+  - This is the secondary profile referee the "Scientific boundary"
+    section asks for, for the upper-band drift in
+    [declared-divergences.md](declared-divergences.md) section 1.
+- `python -m woof.hex.qpe_cell_referee` scores 24 h precipitation
+  (`rainc + rainnc` differenced between two frames) against the Stage-IV
+  packs `rw_stage4` writes (`tools/obs_fetch_stage4.py --accumulations 24h`).
+  - The comparison is made on the model's cells. Each valid 4.8 km pixel
+    goes to its nearest cell, and a cell is scored only when it lies fully
+    inside the observed area (at least 70 % of a full cell's pixel count, at
+    least 90 % of them valid).
+  - Per window it reports the bias, RMSE, model/observed ratio, and the
+    frequency bias and equitable threat score at 1, 5, 10 and 25 mm.
+
 ## Deterministic workflow
 
 From the root of this distribution. `verification/producers/` materializes the
