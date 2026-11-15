@@ -638,6 +638,14 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "42b8305d4cb3f4eceac8f0854ca15c058202456bd568c62daf4674ff532410b8",
+    "constructor": "RawModule",
+    "factory": "kernels",
+    "factory_sha256": "b1dbf9946be49829880d2d020890d1b1659e1c476a1cf9d6e974c8209922a595",
+    "file": "woof/hex/obs_nudging.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "42cfbfdbb4860622e5477f8d95556bc25b59fc580f2cd8801b63609f6029eda8",
     "constructor": "RawKernel",
     "factory": "__init__",
@@ -1179,6 +1187,14 @@
     "factory": "raw_kernel",
     "factory_sha256": "58c8f930b88f18d65bee058bf1ffeebf265c54633656c6d18f63a128f6a5ebc9",
     "file": "woof/hex/cuda_upper_damping_v842.py",
+    "status": "unresolved"
+   },
+   {
+    "call_sha256": "77c9a36fe3d30d6c273e5744dba4ad98e354a63c7e8733d96ae50bd456522ed5",
+    "constructor": "ElementwiseKernel",
+    "factory": "_theta",
+    "factory_sha256": "837bae4e0e7d2e7033ae6577f205f5d66678de88a0c5991232a4e65ce1479949",
+    "file": "woof/hex/obs_nudging.py",
     "status": "unresolved"
    },
    {
@@ -4824,6 +4840,10 @@
     "sha256": "d38b8170869f84a478b834752eff171c40a79cc2b1a5522df4d9900eb04d59f1"
    },
    {
+    "file": "woof/hex/obs_nudging.cu",
+    "sha256": "3ad915a3db0eff32a7704b79d07beef09191f0a9ea8f9606a11df6e4e07b2ecd"
+   },
+   {
     "file": "woof/hex/stochastic.cu",
     "sha256": "81e11046e7efef4eaecf1dd61e4c50684d5b1accdce860b6f4c6505ffc72b342"
    },
@@ -6088,6 +6108,10 @@
    {
     "file": "woof/hex/nudging.py",
     "sha256": "bce0fbdfcdfc43d336ae6c5e8a99cc490d3d69eeb581e624750b8ea1ea8e6601"
+   },
+   {
+    "file": "woof/hex/obs_nudging.py",
+    "sha256": "59e6814d0c54ed84b074e5152a8209b3eb5c361cfc16fba66940ef089c61430a"
    },
    {
     "file": "woof/hex/ocean_mixed_layer.py",
@@ -8398,6 +8422,26 @@
    {
     "file": "woof/hex/nudging.py",
     "sha256": "d679a89c397b6cb9157bf749a5c5b7ca83c01174a54de63c68608a9f5ffc8fed"
+   },
+   {
+    "file": "woof/hex/obs_nudging.py",
+    "sha256": "0a003b4397b08dfbb0863763f2b11dcd0d8bacfabd19cfcee303c50750b27da0"
+   },
+   {
+    "file": "woof/hex/obs_nudging.py",
+    "sha256": "31b1497542c65df1763dfd5486b82639ecbeab8ea56bdc030547c9934bb2a641"
+   },
+   {
+    "file": "woof/hex/obs_nudging.py",
+    "sha256": "34ba71f5fe36773c4d26d6d3f2babc7936ed5004e4b0366616e59e0499019b3e"
+   },
+   {
+    "file": "woof/hex/obs_nudging.py",
+    "sha256": "b1e79e4d72ca6ceea61bbbdb7d5e81afcf292f8de73d0a2256729cc946a3ff88"
+   },
+   {
+    "file": "woof/hex/obs_nudging.py",
+    "sha256": "d7996509c4f0115c3b7f2580524565b3e9f9c3408490d21484774a38cf945eb3"
    },
    {
     "file": "woof/hex/partition_overlap_v841.py",
@@ -29601,6 +29645,53 @@
     ]
    },
    "source_sha256": "c6b3cca50503c44b863d066fc9b04ce13b5cd02e2a19814fc7c4db7c6d9add25"
+  },
+  "operation:woof/hex/obs_nudging.py:_theta[77c9a36fe3]": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "16a19be9328f2d6211eecc4131921dad89f847334f02e9c5f62eeb7831b3034d",
+    "sites": {
+     "100": 2
+    }
+   },
+   "native_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "b4a63ec3704c84c29dee89c6702f66b1e1c047656dd27936e32dd3cbcfe54648"
   },
   "p3_device": {
    "assessment": "static_diagnostic_only",

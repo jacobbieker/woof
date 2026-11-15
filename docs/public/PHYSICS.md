@@ -3986,6 +3986,30 @@ duration, including adaptive steps; no device readback is added. Packed
 ensembles use the existing member-local route so every member retains its
 own reports, QC, weights and captured operator.
 
+On hex meshes, `woof hex forecast --obs-nudging <config>` (or
+`--forecast-arg=--obs-nudging=<config>` on `woof hex regional`, or
+`obs_nudge_opt = 1` under `woof go` with `engine = "hex"`) runs the same
+observation nudging. The config is a TOML `[fdda]` table or a WRF `&fdda`
+namelist; `--obs-nudging-input` names the `OBS_DOMAIN` file, which by default
+sits beside the config. The kernels are WRF 4.7.1's ERROB/NUDOB arithmetic
+with one mesh cell standing for one WRF column. The mesh-specific changes are
+these:
+- reports are read without a map projection and located on the mesh's
+  Delaunay triangles;
+- barycentric interpolation replaces WRF's bilinear interpolation;
+- the horizontal radius of influence is a great-circle distance in
+  kilometres, found through a cell KD-tree;
+- the boundary-layer top comes from the nearest cell;
+- MPAS's base and perturbation pressure stand in for WRF's `pb`/`pp`;
+- no tendency is applied in the specified boundary zone.
+
+Vertical weighting, time windows, `obs_ionf` cadence, `obs_idynin` ramps
+and surface-ratio factors are WRF's. Checkpoints carry every observation
+carrier, so a restart continues the straight run bit for bit; WRF instead
+refreshes those carriers when it restarts. Adaptive time steps, LTS,
+partitioned runs, the MPAS suite route and `obs_scl_neg_qv_innov` are each
+refused by name. `woof/hex/obs_nudging.py` documents each adaptation.
+
 ### WRF selector 31 forcing
 
 `ra_lw_physics=31` selects the native WRF thermal
