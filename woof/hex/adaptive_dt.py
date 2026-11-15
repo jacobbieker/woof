@@ -780,6 +780,10 @@ class AdaptiveRun:
         # full-step LTS executor to each class's).
         from woof.hex import cuda_gwdo_v841
         cuda_gwdo_v841.X4_DT_SECONDS_F32 = np.float32(float(plan.dt))
+        graphs = getattr(driver, "subcycle_graphs", None)
+        if graphs is not None:
+            # The CUDA subcycle graphs (woof.hex.cuda_subcycle_graphs) count steps per step length.
+            graphs.note_step()
         start = float(driver.atmosphere.state.time_seconds)
         backend.set_adaptive_step(dt=float(plan.dt), start_seconds=start, end_seconds=start + float(plan.dt),
                                   due=self.cadence.due(plan.start))

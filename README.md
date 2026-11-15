@@ -403,7 +403,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   zero-fills and interior ufuncs (`state_relaxation_multi`, byte-identical;
   about 33 launches, 15 memsets and 15 strided adds fewer per nested domain
   step on the LES, 34 launches fewer per step on a 3 km specified domain;
-  `WOOF_LBC_RELAX_MULTI=0` restores the per-row launches).
+  `WOOF_LBC_RELAX_MULTI=0` restores the per-row launches). Hex: CUDA
+  subcycle graphs stay on under the adaptive time step, one graph per
+  repeated step length. On a 4,565-cell variable-resolution mesh, a
+  byte-identical adaptive run takes 0.47-0.64x the eager adaptive time and
+  0.38-0.47x the fixed-step time (`WOOF_HEX_CUDA_GRAPHS_ADAPTIVE=0` restores
+  the eager path).
   `WOOF_METAL_GPU_TIMES` times each kernel.
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight

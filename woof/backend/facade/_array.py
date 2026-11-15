@@ -32,6 +32,7 @@ float64's does.
 from __future__ import annotations
 
 import operator
+import os
 import weakref
 from functools import reduce
 
@@ -223,8 +224,7 @@ class Storage:
         from woof.backend.metal import ext
         base = self._address
         if base is None:
-            mx.eval(self.arr)
-            base = self._address = int(ext.load().gpu_address(self.arr))
+            base = self._address = _gpu_address(self.arr)
         # Known: an in-place launch's output is the same buffer (rebind_written),
         # so the address stands until rebind() gives the storage a new one.
         # Evaluating for it again waited on every launch still writing the
@@ -234,6 +234,36 @@ class Storage:
             _ADDRESSES[base] = weakref.ref(self)
             _ADDRESS_INDEX[0] = None          # the index is stale
         return base
+
+
+#: WOOF_METAL_ADDRESS_ASYNC=0: Storage.address waits for the buffer's value
+#: (mx.eval), as it did before 2026-11-15.
+_ADDRESS_ASYNC = os.environ.get("WOOF_METAL_ADDRESS_ASYNC", "1") != "0"
+
+
+def _gpu_address(arr) -> int:
+    """The GPU address of ``arr``'s buffer.
+
+    An address needs the buffer, not its value: once ``arr`` is scheduled
+    (``async_eval`` encodes it and allocates its output) the buffer exists, so
+    this does not wait for the queue.  ``mx.eval`` waited for every launch
+    still in flight: the regional garbage-column scrub asks each fresh
+    argument of each dycore launch for its address, about 680 queue drains
+    a step on the 4,565-cell Edinburgh variable-resolution mesh.  Anything
+    the scheduled form cannot answer falls back to the evaluated one.
+    """
+    import mlx.core as mx
+    from woof.backend.metal import ext
+    if _ADDRESS_ASYNC:
+        mx.async_eval(arr)
+        try:
+            address = int(ext.load().gpu_address(arr))
+        except (ValueError, RuntimeError):
+            address = 0
+        if address:
+            return address
+    mx.eval(arr)
+    return int(ext.load().gpu_address(arr))
 
 
 #: GPU base address -> the storage that handed it out (Storage.address)
