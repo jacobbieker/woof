@@ -862,8 +862,8 @@ class TrackWriter:
             if self.bridge_missing:
                 try:
                     print(f"woof: warning: [relocation.track] {self.stream.path.name}: "
-                          f"{self.bridge_missing}; every row will be skipped and counted "
-                          "on the run receipt", file=sys.stderr)
+                          f"{self.bridge_missing}; rows that need surface diagnosis will be "
+                          "skipped and counted on the run receipt", file=sys.stderr)
                 except (OSError, ValueError):
                     pass                 # a closed stderr must not stop the forecast
 

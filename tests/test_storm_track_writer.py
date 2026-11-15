@@ -1097,7 +1097,7 @@ def test_a_missing_tc_bridge_is_announced_when_the_file_opens(tmp_path, monkeypa
     assert writer.bridge_missing == "install this release's TC bridge library"
     err = capsys.readouterr().err
     assert err.count("warning: [relocation.track] track.csv") == 1
-    assert "every row will be skipped" in err
+    assert "rows that need surface diagnosis will be skipped" in err
 
 
 def test_no_warning_when_the_tc_bridge_is_present(tmp_path, monkeypatch, capsys):
