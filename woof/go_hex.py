@@ -680,6 +680,11 @@ def plan(args, *, config: Path | None = None, document: Mapping[str, Any] | None
             "fine_dx_m": request["dx_m"], "hours": request["hours"], "physics": request["physics"],
             # Only a [static.highres] terrain block adds the key: every other go plan is unchanged.
             **({"terrain": request["terrain"]} if request.get("terrain") else {}),
+            **({"diagnostics_namelist": diagnostics_namelist(request["diagnostics"])}
+               if request.get("diagnostics") else {}),
+            **({"obs_nudging": obs_nudging_table(request["obs_nudging"],
+                                                 base_dir=config.expanduser().absolute().parent)}
+               if request.get("obs_nudging") is not None else {}),
             "work_dir": str(root), "regional_argv": argv,
             "command": "woof hex " + " ".join(shlex.quote(part) for part in argv)}
 
