@@ -196,11 +196,15 @@ by `oracle_stage`: `init` (`initialize_coupler_fields`,
 `update_state` (`seaice_column_update_state`) or `vertical_thermodynamics`
 (`colpkg_init_thermo`, which sets `l_brine` and `heat_capacity`, then
 `seaice_column_vertical_thermodynamics`, whose abort status is logged as
-`TOBJ IERR`). The log carries the tracer
+`TOBJ IERR`) or `itd_thermodynamics` (`colpkg_init_thermo` and
+`init_column_itd`, then `column_itd_thermodynamics`, its abort status
+logged the same way). The log carries the tracer
 object (`TOBJ` lines). The field table is the Registry's
 (`woof/hex/mpas_seaice/data/registry-fields.json`, written by
 `tools/mpas_coupled_options.py --fields-out`), with the fields of packages
-that are off absent.
+that are off absent (the ITD stage gates each var by its own packages only,
+as the Registry allocates them: biogeochemistry's `newlyFormedIce` is the
+column package's).
 
 `run_init_thermo.F90` writes `colpkg_init_thermo`'s salinity profile for
 every ice-layer count from 1 to N: its `cos` and `pow` are the host libm's,
@@ -212,3 +216,6 @@ and the GPU port accepts only the counts whose words it reproduces.
 `--cases therm` writes the vertical-thermodynamics cases to
 `tests/data/oracles/mpas_seaice_column_therm` instead. Their `atan`
 (`psimhu`/`psixhu`), `exp`, `log` and `pow` are the host glibc 2.44's.
+`--cases itd` writes the ITD-thermodynamics cases to
+`tests/data/oracles/mpas_seaice_column_itd`; the only libm on their path is
+`colpkg_init_itd`'s tanh.

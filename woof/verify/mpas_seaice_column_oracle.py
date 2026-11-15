@@ -14,7 +14,12 @@ stage a case names (``oracle_stage``):
   ``heat_capacity`` and ``l_brine``, as seaice_init sets them), then
   ``column_vertical_thermodynamics`` at the clock's start
   (``config_start_time``), its ierr logged as ``TOBJ IERR``. Its cases carry
-  a physically consistent BL99 column state (:func:`_thermo_state`).
+  a physically consistent BL99 column state (:func:`_thermo_state`);
+- ``itd_thermodynamics``: ``colpkg_init_thermo`` and ``init_column_itd``
+  (``categoryThicknessLimits`` and ``hi_min``), then
+  ``column_itd_thermodynamics`` at the clock's start, its ierr logged the
+  same way. Its cases carry a thickness distribution before and after a
+  thermodynamic step (:func:`_itd_state`).
 
 ``mpas_seaice_column.F``, ``mpas_seaice_initialize.F``'s and
 ``mpas_seaice_forcing.F``'s routines and the column package are compiled
@@ -38,6 +43,7 @@ from pathlib import Path
 
 import numpy as np
 
+from woof.hex.mpas_seaice import column_itd_v842 as citd
 from woof.hex.mpas_seaice import column_therm_v842 as ct
 from woof.hex.mpas_seaice import column_v842 as cv
 from woof.verify import mpas_ocean_stream as _stream
@@ -45,6 +51,8 @@ from woof.verify import mpas_ocean_stream as _stream
 FIXTURE_DIR = Path(__file__).resolve().parents[2] / "tests" / "data" / "oracles" / "mpas_seaice_column"
 #: the vertical thermodynamics' fixture (VT_CASES)
 VT_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_column_therm"
+#: the ITD thermodynamics' fixture (ITD_CASES)
+ITD_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_column_itd"
 PRECISIONS = {"r8": np.float64}
 REAL, INT, DIM = _stream.REAL, _stream.INT, _stream.DIM
 #: the Registry structs the column routines read and write, as oracle_stream pools
@@ -126,6 +134,32 @@ VT_CASES = (
         "config_use_first_year_ice": False, "config_use_level_ice": False}),
     ("vt_bl99_abort_salinity", 20261948, "vertical_thermodynamics", _VT),
 )
+_ITD = "itd_thermodynamics"
+_DELTA_NEW = {"config_itd_conversion_type": "delta function", "config_category_bounds_type": "new"}
+#: the ITD thermodynamics (colpkg stage 3): name, seed, stage, overrides; the Registry
+#: default is mushy with level ponds and config_update_ocean_fluxes = .false.
+ITD_CASES = (
+    ("itd_mushy_level_ponds", 20261951, _ITD, {}),
+    ("itd_mushy_three_layers_update_ocean", 20261952, _ITD, {"config_nIceLayers": 3,
+                                                             "config_update_ocean_fluxes": True}),
+    ("itd_bl99_update_ocean", 20261953, _ITD, {**_BL99, "config_update_ocean_fluxes": True}),
+    ("itd_bl99_cesm_ponds", 20261954, _ITD, {**_BL99, "config_use_level_meltponds": False,
+                                             "config_use_cesm_meltponds": True,
+                                             "config_pond_refreezing_type": "cesm"}),
+    ("itd_mushy_topo_ponds_bare", 20261955, _ITD, {"config_use_level_meltponds": False,
+                                                   "config_use_topo_meltponds": True,
+                                                   "config_use_ice_age": False,
+                                                   "config_use_first_year_ice": False}),
+    ("itd_bl99_delta_function", 20261956, _ITD, {**_BL99, **_DELTA_NEW, "config_nCategories": 4,
+                                                 "config_use_level_meltponds": False,
+                                                 "config_use_level_ice": False}),
+    ("itd_bl99_single_category", 20261957, _ITD, {**_BL99, "config_nCategories": 1,
+                                                  "config_category_bounds_type": "single category",
+                                                  "config_itd_conversion_type": "delta function"}),
+    ("itd_abort_shift_ice", 20261958, _ITD, {}),
+    ("itd_abort_area_bounds", 20261959, _ITD, {**_BL99}),
+    ("itd_delta_abort_zap_negative", 20261960, _ITD, {**_DELTA_NEW}),
+)
 
 
 def configs_of(overrides: dict, stage: str) -> dict:
@@ -141,10 +175,15 @@ def field_rows(config: dict) -> tuple[list, dict[str, int], dict[str, bool]]:
     rows += [("mesh", name, DIM, ()) for name in ("nCellsSolve", "nEdgesSolve", "nVerticesSolve")]
     rows += [("tracers_aggregate", "nCellsSolve", DIM, ())]
     pools = VT_POOLS if config.get("oracle_stage") == "vertical_thermodynamics" else POOLS
+    # The Registry allocates a var by its own packages: gen_inc.c's parse_var never reads
+    # the var_struct's (biogeochemistry's newlyFormedIce is the column package's).  The
+    # earlier stages' cases keep the struct gate, which only drops fields their routines
+    # never read, so their bytes (and fixtures) stay; the ITD stage reads newlyFormedIce.
+    var_packages_only = config.get("oracle_stage") == "itd_thermodynamics"
     for struct in cv.registry_fields()["var_structs"]:
         if struct["name"] not in pools:
             continue
-        struct_on = all(active[f"{p}Active"] for p in struct["packages"])
+        struct_on = var_packages_only or all(active[f"{p}Active"] for p in struct["packages"])
         for name, kind, dimension_text, package_text in struct["vars"]:
             if kind not in ("real", "integer"):
                 continue
@@ -348,6 +387,130 @@ def _thermo_state(rs, case: dict) -> None:
     alt["surfaceConductiveFluxCouple"] = alt["surfaceHeatFluxCouple"] + u(0.0, 5.0, (n1, ncat))
 
 
+#: approximate category bounds (hin_max(0:ncat-1), and a finite top) for the case
+#: generator only: colpkg_init_itd's own words come from the oracle and the GPU
+_APPROX_BOUNDS = {
+    ("original", 5): (0.0, 0.6445, 1.3914, 2.4702, 4.5673, 9.3354),
+    ("single category", 1): (0.0, 3.0),
+}
+
+
+def _approx_bounds(config: dict, ncat: int) -> tuple[float, ...]:
+    kind = config["config_category_bounds_type"]
+    if kind == "new":
+        # n * (3/ncat + (n-1) * 0.5/ncat), its top widened like the others'
+        d1, d2 = 3.0 / ncat, 0.5 / ncat
+        b = [0.0] + [n * (d1 + (n - 1) * d2) for n in range(1, ncat + 1)]
+        return tuple(b)
+    return _APPROX_BOUNDS[(kind, ncat)]
+
+
+def _itd_state(rs, case: dict) -> None:
+    """A thickness distribution before (``*CategoryInitial``) and after a
+    thermodynamic step, each category's thickness inside its bounds, and the
+    owned cells' branches (row r is indexToCellID r + 1):
+
+    0. a plain cell: lateral melt, ocean melting potential;
+    1. open water only, freezing: new ice in category 1;
+    2. 0.5 % open water and a large freezing potential: the frazil thicker
+       than hi0max spreads over every category (hsurp);
+    3. sub-puny categories: zap_small_areas;
+    4. snow too warm and too cold in two categories, a third below hs_min:
+       zap_snow_temperature (its warnings);
+    5. growth past the bounds: linear_itd gives up its remap, rebin moves ice;
+    6. category 1 thinned below hi_min (its area removed);
+    7. a total area in (1, 1 + puny): zap_small_areas' excess-area branch;
+    8. melting: thinner categories and lateral melt.
+
+    The abort cases change one or two cells (the later never reached). Every
+    step is a separate numpy ufunc (no reductions), so the words are the same
+    on every host."""
+    pools, dims, name, config = case["pools"], case["dims"], case["name"], case["config"]
+    nc, ncat, nil, nsl = dims["nCells"], dims["nCategories"], dims["nIceLayers"], dims["nSnowLayers"]
+    n1 = nc + 1
+    u = _uniform(rs)
+    bounds = np.array(_approx_bounds(config, ncat))
+    lo, hi = bounds[:-1][None, :], bounds[1:][None, :]
+    share = u(0.3, 1.0, (n1, ncat))
+    total = np.zeros((n1, 1))
+    for n in range(ncat):
+        total[:, 0] = total[:, 0] + share[:, n]
+    area_init = share / total * u(0.5, 0.95, (n1, 1))
+    h_init = lo + (hi - lo) * u(0.2, 0.8, (n1, ncat))
+    dh = u(-0.12, 0.12, (n1, ncat))
+    area_init[1] = 0.0
+    area_init[2] = share[2] / total[2] * 0.995
+    area_init[3] = 2.0e-12 / ncat
+    dh[5] = 0.9
+    dh[7] = np.abs(dh[7])
+    dh[8] = -0.1
+    area = area_init.copy()
+    h = h_init + dh
+    h[6, 0] = 0.005
+    area[7] = 1.0 / ncat
+    area[7, -1] = area[7, -1] + 4.0e-12
+    area_init[7] = area[7]
+    if name == "itd_abort_area_bounds":
+        area[0] = share[0] / total[0] * 1.3
+    hsn = u(0.0, 0.3, (n1, ncat))
+    if ncat >= 3:
+        hsn[4, 2] = 5.0e-5
+    volume, snow = area * h, area * hsn
+    volume_init = area_init * h_init
+    if name == "itd_abort_shift_ice":
+        # a negative category between empty ones: linear_itd's donor takes all of it
+        area_init[5], h_init[5] = 0.0, 0.0
+        area_init[5, 0], h_init[5, 0] = 0.5, 0.3
+        volume_init[5] = area_init[5] * h_init[5]
+        area[5], volume[5], snow[5] = 0.0, 0.0, 0.0
+        area[5, 0], volume[5, 0], snow[5, 0] = 0.5, 0.5 * 0.32, 0.5 * 0.1
+        area[5, 2] = -1.0e-6
+    if name in ("itd_abort_shift_ice", "itd_delta_abort_zap_negative"):
+        area[7] = area[7] * 1.3           # out of bounds, in a cell MPAS never reaches
+    if name == "itd_delta_abort_zap_negative":
+        area[6, 1], volume[6, 1], snow[6, 1] = -1.0e-6, 0.0, 0.0
+    t, ist = pools["tracers"], pools["icestate"]
+    t["iceAreaCategory"], t["iceVolumeCategory"] = area[:, :, None], volume[:, :, None]
+    t["snowVolumeCategory"] = snow[:, :, None]
+    ist["iceAreaCategoryInitial"], ist["iceVolumeCategoryInitial"] = area_init, volume_init
+    aggregate = np.zeros(n1)
+    for n in range(ncat):
+        aggregate = aggregate + area[:, n]
+    pools["tracers_aggregate"]["iceAreaCell"] = aggregate
+    t["surfaceTemperature"] = u(-20.0, -1.0, (n1, ncat, 1))
+    tsn = u(-20.0, -1.0, (n1, ncat, nsl))
+    tsn[4, 0] = 0.5
+    zqsn = -_RHOS * (_LFRESH - _CP_ICE * tsn)
+    if ncat >= 2:
+        zqsn[4, 1] = -_RHOS * (_LFRESH + _CP_ICE * 150.0)
+    sal = u(2.0, 8.0, (n1, ncat, nil))
+    tmlt = -sal * _DEPRESST
+    tin = u(-15.0, -2.0, (n1, ncat, nil))
+    t["iceSalinity"], t["snowEnthalpy"] = sal, zqsn
+    t["iceEnthalpy"] = -_RHOI * (_CP_ICE * (tmlt - tin) + _LFRESH * (1.0 - tmlt / tin) - _CP_OCN * tmlt)
+    for key, (a, b) in (("iceAge", (0.0, 3.0e7)), ("firstYearIceArea", (0.0, 1.0)),
+                        ("levelIceArea", (0.2, 1.0)), ("levelIceVolume", (0.2, 1.0)),
+                        ("pondArea", (0.0, 0.5)), ("pondDepth", (0.0, 0.3)),
+                        ("pondLidThickness", (0.0, 0.05))):
+        if t.get(key) is not None:
+            t[key] = u(a, b, t[key].shape)
+    pools["mesh"]["indexToCellID"] = np.arange(1, n1 + 1, dtype=np.int32)
+    pools["initial"]["initialSalinityProfile"] = u(0.5, 3.5, (n1, nil + 1))
+    oc = pools["ocean_coupling"]
+    oc["seaSurfaceSalinity"] = u(28.0, 35.0, (n1,))
+    oc["seaFreezingTemperature"] = -_DEPRESST * oc["seaSurfaceSalinity"]
+    frzmlt = u(-150.0, 400.0, (n1,))
+    frzmlt[1], frzmlt[2], frzmlt[3], frzmlt[7] = 300.0, 1000.0, 0.0, -50.0
+    oc["freezingMeltingPotential"] = frzmlt
+    rside = u(0.0, 0.04, (n1,))
+    rside[[2, 3, 7]] = 0.0
+    pools["melt_growth_rates"]["lateralIceMeltFraction"] = rside
+    pools["atmos_coupling"]["rainfallRate"] = u(0.0, 2.0e-5, (n1,))
+    onset = u(0.0, 365.0, (n1,))
+    onset[::2] = 0.0
+    pools["diagnostics"]["freezeOnset"] = onset
+
+
 def make_case(name, seed, stage, overrides) -> dict:
     rs = np.random.RandomState(seed)
     config = configs_of(overrides, stage)
@@ -372,6 +535,8 @@ def make_case(name, seed, stage, overrides) -> dict:
     _tracers(rs, case["pools"], case["dims"])
     if stage == "vertical_thermodynamics":
         _thermo_state(rs, case)
+    if stage == "itd_thermodynamics":
+        _itd_state(rs, case)
     for key, on in active.items():
         config[f"package:{key}"] = on
     case["fields"] = [r[:4] for r in rows]
@@ -477,6 +642,9 @@ def run_gpu(case: dict) -> tuple[dict[str, np.ndarray], "cv.ColumnState"]:
                         config["oracle_ice_age_time_offset"])
     elif stage == "vertical_thermodynamics":
         state.abort = ct.vertical_thermodynamics(dev, config, state)
+    elif stage == "itd_thermodynamics":
+        cv.init_column_itd(dev, state)
+        state.abort = citd.itd_thermodynamics(dev, config, state)
     else:
         raise ValueError(f"unknown stage {stage}")
     outputs = {f"{pool}/{name}": cp.asnumpy(dev[pool][name]) for pool, name, kind, _ in case["fields"]
@@ -501,15 +669,16 @@ def measure(reference: dict | None = None, logs: dict | None = None, *, rows=CAS
     return report
 
 
-def oracle_abort(log: dict) -> tuple[int, int | None, str | None]:
-    """The oracle's ``column_vertical_thermodynamics`` outcome: ``(ierr, cell,
-    message)`` as :func:`woof.hex.mpas_seaice.column_therm_v842.vertical_thermodynamics`
-    returns it (the cell is ``indexToCellID``, the message the logged error)."""
+def oracle_abort(log: dict, routine: str = "column_vertical_thermodynamics") -> tuple[int, int | None, str | None]:
+    """The oracle's ``routine`` outcome: ``(ierr, cell, message)`` as
+    :func:`woof.hex.mpas_seaice.column_therm_v842.vertical_thermodynamics` (and
+    :func:`~woof.hex.mpas_seaice.column_itd_v842.itd_thermodynamics`) return it
+    (the cell is ``indexToCellID``, the message the logged error)."""
     ierr = log["tracer_object"]["IERR"][0]
     if not ierr:
         return 0, None, None
     lines = log["log"]
-    prefix = "ERR column_vertical_thermodynamics: "
+    prefix = f"ERR {routine}: "
     message = next(line for line in lines if line.startswith(prefix))[len("ERR "):]
     cell = int(lines[lines.index("ERR iCell: $i") + 1].split()[1])
     return ierr, cell, message
@@ -532,6 +701,29 @@ def measure_vt(reference: dict | None = None, logs: dict | None = None, *, rows=
         if not oracle[0]:
             want = expected_outputs(case, reference.get(case["name"], {}))
             row.update({key: word_mismatches(got[key], want[key]) for key in want})
+        mine = state.tracers.log_rows()
+        row["tracer_object"] = sum(int(mine[k] != log["tracer_object"].get(k)) for k in mine)
+        report[case["name"]] = row
+    return report
+
+
+def measure_itd(reference: dict | None = None, logs: dict | None = None, *, rows=ITD_CASES,
+                fixture_dir: Path = ITD_FIXTURE_DIR) -> dict[str, dict[str, int]]:
+    """Per ITD-thermodynamics case: the words the GPU gets wrong per field
+    (an aborting case's too: the cells after the abort keep their words),
+    whether its abort (ierr, first aborting cell, message) differs from the
+    oracle's, whether the number of zap_snow_temperature warnings does, and
+    the tracer object's integers that differ."""
+    reference = load_fixture(fixture_dir) if reference is None else reference
+    logs = load_logs(fixture_dir) if logs is None else logs
+    report: dict[str, dict[str, int]] = {}
+    for case in cases("r8", rows):
+        got, state = run_gpu(case)
+        log = logs[case["name"]]
+        row = {"abort": int(tuple(state.abort) != oracle_abort(log, "column_itd_thermodynamics")),
+               "warnings": int(state.warnings != log["log"].count(citd.ZAP_WARNING))}
+        want = expected_outputs(case, reference.get(case["name"], {}))
+        row.update({key: word_mismatches(got[key], want[key]) for key in want})
         mine = state.tracers.log_rows()
         row["tracer_object"] = sum(int(mine[k] != log["tracer_object"].get(k)) for k in mine)
         report[case["name"]] = row
