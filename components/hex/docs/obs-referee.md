@@ -194,6 +194,10 @@ cases the record says the interval is exploratory.
   - These are normalized stores, so no raw IGRA or BUFR text is parsed here.
   - The model value comes from the nearest usable cell (`bdyMaskCell == 0`)
     and is interpolated linearly in ln p. Nothing is extrapolated.
+  - A station whose initial-time sounding departs from the initial state by
+    more than 5 K in median over its levels is dropped from every lead of
+    the case, and the record lists it. The initial state is shared by every
+    arm of a case, so the rejection is the same for all arms.
   - This is the secondary profile referee the "Scientific boundary"
     section asks for, for the upper-band drift in
     [declared-divergences.md](declared-divergences.md) section 1.
