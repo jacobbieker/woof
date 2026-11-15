@@ -3,10 +3,8 @@
 ! advection dispatcher (mpas_seaice_advection.F, verbatim) USE but whose work
 ! is outside this oracle:
 !
-! - mpas_rbf_interpolation / mpas_vector_reconstruction: the remap's init
-!   calls mpas_rbf_interp_initialize and mpas_init_reconstruct to fill the
-!   mesh pool's coeffs_reconstruct.  Here those coefficients are the input's
-!   (as the variational basis is the velocity oracles'), so both are no-ops.
+! - (rbf_standins.F90 holds the RBF set-up's stand-ins; the init oracle
+!   builds MPAS's own instead.)
 ! - seaice_error: its error codes (verbatim values) and
 !   seaice_critical_error_write_block, which writes the abort stream (no state).
 ! - seaice_advection_upwind: upwind advection cannot run in v8.4.2 (it reads
@@ -14,39 +12,6 @@
 !   and others, and mesh fields it does not carry, derivTwo, advCoefs and
 !   others; MPAS_pool_get_config hands back a null pointer that it then
 !   dereferences), so it stops by name.
-module mpas_rbf_interpolation
-  use mpas_derived_types
-  use mpas_pool_routines
-  implicit none
-  private
-  public :: mpas_rbf_interp_initialize
-
-contains
-
-  subroutine mpas_rbf_interp_initialize(meshPool)
-    type(MPAS_pool_type), intent(inout) :: meshPool
-    ! the input carries coeffs_reconstruct
-  end subroutine mpas_rbf_interp_initialize
-
-end module mpas_rbf_interpolation
-
-module mpas_vector_reconstruction
-  use mpas_derived_types
-  use mpas_pool_routines
-  implicit none
-  private
-  public :: mpas_init_reconstruct
-
-contains
-
-  subroutine mpas_init_reconstruct(meshPool, includeHalos)
-    type(MPAS_pool_type), intent(in) :: meshPool
-    logical, optional, intent(in) :: includeHalos
-    ! the input carries coeffs_reconstruct
-  end subroutine mpas_init_reconstruct
-
-end module mpas_vector_reconstruction
-
 module seaice_error
   use mpas_derived_types
   implicit none

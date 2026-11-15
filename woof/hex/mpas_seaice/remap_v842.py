@@ -44,7 +44,10 @@ cell's plane as combinations of them (:func:`geometry_flags`).
 The remap's geometry (``seaice_init_advection_incremental_remap``: the vertex
 coordinates in each cell's and edge's plane, the remap neighbours of each
 edge, the cells' geometric moments, the local frames, ``coeffs_reconstruct``)
-is the input's, as the variational basis is the velocity solver's.
+is :mod:`~woof.hex.mpas_seaice.remap_init_v842`'s, computed on the host from
+the mesh at init and held word for word to v8.4.2 with MPAS's own RBF set-up
+(``tests/test_mpas_seaice_remap_init_parity.py``); :func:`run` reads it from
+the pools.
 
 Refused by name: upwind advection (v8.4.2 cannot run it,
 :data:`UPWIND_REASON`), halo exchanges, meshes other than hexagons and
