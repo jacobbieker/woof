@@ -250,6 +250,24 @@ def test_actual_source_capture_keeps_options_and_restores_hooks_on_error(tmp_pat
     assert units[1]["options"] == ["-arch=compute_120", "--ftz=false"]
 
 
+def test_operation_probe_types_index_placeholders_and_closes_the_expression():
+    from types import SimpleNamespace
+    from tools.cuda_rounding_check import elementwise_operation_unit
+
+    def parameter(name, ctype, dtype, raw=False, is_const=True):
+        return SimpleNamespace(name=name, ctype=ctype, dtype=dtype, raw=raw, is_const=is_const)
+
+    kernel = SimpleNamespace(
+        in_params=[parameter("edges", "I", None, raw=True), parameter("a", "float", "float32")],
+        out_params=[parameter("out", "T", None, is_const=False)],
+        operation="out = __fmul_rn(a, (T)edges[i])", preamble="")
+    source = elementwise_operation_unit("probe", kernel).source
+    assert "typedef int I;" in source and "typedef int T;" not in source
+    assert "out = __fmul_rn(a, (T)edges[i]);" in source
+    closed = SimpleNamespace(**dict(vars(kernel), operation="out = a;"))
+    assert "out = a;;" not in elementwise_operation_unit("probe", closed).source
+
+
 @pytest.fixture(scope="module")
 def compiled_rounding_audit(tmp_path_factory):
     # Compilation is CPU-only and is enabled whenever a capable toolkit is
@@ -258,6 +276,12 @@ def compiled_rounding_audit(tmp_path_factory):
     environment = dict(os.environ, CUDA_VISIBLE_DEVICES="", GPUWM_NO_LOCAL_GPU="1",
                        TMPDIR=str(temporary), OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1",
                        MKL_NUM_THREADS="1", RAYON_NUM_THREADS="1")
+    # The baseline records the default build: fast numerics, no WRF-exact
+    # controls, the default referee glibc. tests/conftest.py names strict for
+    # the battery, which would audit (and fail on) the strict compositions.
+    environment["GPUWM_NUMERICS"] = "fast"
+    for variable in ("GPUWM_WRF_EXACT", "GPUWM_WRF_GLIBC", "WOOF_FMAD_OFF"):
+        environment.pop(variable, None)
     probe = subprocess.run([sys.executable, "-m", "tools.cuda_rounding_check", "--compiler-info"],
                            cwd=ROOT, env=environment, capture_output=True, text=True, timeout=60)
     assert probe.returncode == 0, probe.stderr[-4000:]
@@ -269,6 +293,13 @@ def compiled_rounding_audit(tmp_path_factory):
     baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
     library = os.environ.get("WOOF_NVRTC_LIBRARY")
     native_tool = os.environ.get("WOOF_NVDISASM") or shutil.which("nvdisasm")
+    if not library:
+        # The PTX half compiles with CuPy's NVRTC, the environment's cu13
+        # wheel. Compile the cubins with the same library: the baseline is
+        # NVRTC 13.4's, and an older toolkit's NVRTC moves native signatures.
+        wheel = sorted(Path(sys.prefix).glob("lib/python*/site-packages/nvidia/cu13/lib/libnvrtc.so.13"))
+        if wheel:
+            library = str(wheel[-1])
     if not library and os.environ.get("CUDA_PATH"):
         candidate = Path(os.environ["CUDA_PATH"]) / "lib" / "libnvrtc.so.13"
         if candidate.exists():
@@ -283,14 +314,16 @@ def compiled_rounding_audit(tmp_path_factory):
     if native_tool:
         command += ["--nvrtc-library", library, "--nvdisasm", native_tool]
     process = subprocess.run(command, cwd=ROOT, env=environment, capture_output=True, text=True,
-                             timeout=3600)
+                             timeout=7200)
     assert process.returncode == 0, process.stderr[-4000:]
     compiled = json.loads(result_file.read_text(encoding="utf-8"))
     results = [(row["unit"], audit_record(row)) for row in compiled["units"]]
     return baseline, results, bool(native_tool)
 
 
-@pytest.mark.timeout(3700)  # Let the fixture's bounded 3600 s audit finish.
+# The native sweep of ~460 units took 1 h 45 min on four workers on a shared
+# host (load 25-50, 2026-11-15), so the bound is two hours.
+@pytest.mark.timeout(7300)  # Let the fixture's bounded 7200 s audit finish.
 def test_every_compiled_source_keeps_its_sm100_sm120_rounding_diagnostics(compiled_rounding_audit):
     baseline, results, native = compiled_rounding_audit
     changes = []
