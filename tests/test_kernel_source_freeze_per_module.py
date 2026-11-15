@@ -277,6 +277,10 @@ BASELINE_PINNED: dict[str, str] = {
     # (composes smag2d.cu, which keeps its bytes): the same tendency words
     # (tests/test_smag2d_uv_faces.py, CUDA and Metal, GPUWM_WRF_EXACT=0 and 1).
     "smag2d_uv_faces": "b6f43f8e3f48e05a835637f80a1ab5f34356bd7507cf9d16012150ed324f8323",
+    # wrf_tke_rhs on stored defor13/defor23 faces (composes smag2d.cu, which
+    # keeps its bytes): the same TKE source words (tests/test_smag2d_tke_faces.py,
+    # CUDA and Metal, GPUWM_WRF_EXACT=0 and 1).
+    "smag2d_tke_faces": "421c718311e7724d3fd5ba733bfd3c59eca0cf828a753d284bac6e3142128f59",
     # e677dccb6: active table edits multiply binary64 values on the GPU,
     # round once to REAL, and reject non-positive crop roughness.
     "physics_params":

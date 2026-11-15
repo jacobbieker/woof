@@ -451,7 +451,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   and strict numerics) where each point re-evaluated up to ten of them: the
   u+v pair 1.3 -> 0.35 ms at 49x120x150 and 9.7 -> 1.6 ms at 49x300x300 on an
   A6000, 5.6 -> 2.5 ms and 23 -> 10.5 ms on an M3 Max (`WOOF_SMAG_UV_FACES=0`
-  restores the per-point kernels).
+  restores the per-point kernels). `km_opt = 2`'s TKE source reads the
+  defor13/defor23 faces stored once (`smag2d_tke_faces`, the `wrf_tke_rhs`
+  statements on the stored words, byte-identical in both numerics modes)
+  where each mass point re-evaluated up to six of them (`WOOF_TKE_FACES=0`
+  restores the per-point kernel).
   `WOOF_ACOUSTIC_KPAR=1` takes a level-parallel w''-phi'' solve (32 columns
   x 8 lanes per block; 1.7-2.2x the column kernel's speed per launch on an
   A6000): opt-in, because on CUDA its words are the column kernel's generic

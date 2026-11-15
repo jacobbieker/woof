@@ -1442,12 +1442,18 @@ def launch_wrf_isotropic_km(state: DomainState, cfg: RunConfig,
     return d11, d22, d12
 
 
-def _thermal_diffusion_kernel(cfg, name):
+def _thermal_diffusion_kernel(cfg, name, module="smag2d"):
     """Compile-select WRF's moist-theta diffusion terms; dry source unchanged."""
     if cfg.use_theta_m:
         from woof.core.kernels import get_kernel_int_defines
-        return get_kernel_int_defines("smag2d", name, (("GPUWM_USE_THETA_M", 1),))
-    return get_kernel("smag2d", name)
+        return get_kernel_int_defines(module, name, (("GPUWM_USE_THETA_M", 1),))
+    return get_kernel(module, name)
+
+
+#: ``WOOF_TKE_FACES=0`` keeps wrf_tke_rhs evaluating every defor13 / defor23
+#: face at every point that reads it (A/B and byte-identity checks).
+def _tke_faces_enabled() -> bool:
+    return os.environ.get("WOOF_TKE_FACES", "1") != "0"
 
 
 def launch_wrf_calc_n2(state: DomainState, cfg: RunConfig, bn2, *,
@@ -1585,9 +1591,23 @@ def launch_wrf_tke_km(state: DomainState, cfg: RunConfig,
         # MARTA wall production uses ground wind, including prescribed Cd.
         from woof.moving_frame import ground_relative_components
         common[:2] = ground_relative_components(state, *common[:2])
-    _thermal_diffusion_kernel(cfg, "wrf_tke_rhs")(
+    # The stored-face route (kernels/smag2d_tke_faces.cu): each defor13 /
+    # defor23 face once into the scalar multi launch's spare face pair
+    # (free until the scalar rows, after the u/v staging), then tke_rhs's
+    # statements on the stored words.
+    faces = []
+    rhs_name, rhs_module = "wrf_tke_rhs", "smag2d"
+    if _tke_faces_enabled():
+        d13 = state.scratch((nz, ny, nx + 1), "smag_fx_1")
+        d23 = state.scratch((nz, ny + 1, nx), "smag_fy_1")
+        get_kernel("smag2d_tke_faces", "wrf_tke_defor_faces")(
+            ((nx + 1 + _TPB - 1) // _TPB, ny + 1, nz), (_TPB, 1, 1),
+            tuple(common + [d13, d23] + dims))
+        faces = [d13, d23]
+        rhs_name, rhs_module = "wrf_tke_rhs_faces", "smag2d_tke_faces"
+    _thermal_diffusion_kernel(cfg, rhs_name, rhs_module)(
         grid, (_TPB, 1, 1),
-        tuple(common + [
+        tuple(common + faces + [
             thp, state.thb, np.int32(state.thb.ndim == 3),
             tke, bn2, d11, d22, d12,
             xkmh, xkmv, xkhv,
