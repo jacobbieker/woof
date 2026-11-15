@@ -4030,14 +4030,16 @@ def execute_forecast(
             raise RuntimeError("restored GF forcing is not stamped with the restored model time")
         stack["gf_dynamics_tendencies"] = carrier
 
-    from woof.hex.cuda_subcycle_graphs import graph_policy, graphs_enabled
+    from woof.hex.cuda_subcycle_graphs import adaptive_graphs_enabled, graph_policy, graphs_enabled
     from woof.hex.metal_lane import installed as metal_lane
     graph_requested = graphs_enabled(int(N_CELLS))
     graph_controller = None
     # The fork's LES and large-step-recovery attachments rebind the dynamics
     # subcycle, which a captured graph would replay around.  On Metal the
     # facade's stream capture records no graph, so a replay would launch
-    # nothing: the subcycle runs eager there.
+    # nothing: the subcycle runs eager there.  Under the adaptive clock the
+    # step length is part of the graph key: the controller keeps a graph for
+    # each repeated step length (WOOF_HEX_CUDA_GRAPHS_ADAPTIVE=0: eager).
     # Local time stepping's rate classes are launches of the same subcycle,
     # chosen on the host by the sub-step and stage alone, so they capture and
     # replay with it (WOOF_HEX_CUDA_GRAPHS_LTS=0: eager, the path before
@@ -4045,10 +4047,10 @@ def execute_forecast(
     lts_graphs = lts_attachment is None or os.environ.get("WOOF_HEX_CUDA_GRAPHS_LTS", "1") != "0"
     if (graph_requested and lts_graphs and fullstep_shadow is None
             and les_attachment is None and recovery_attachment is None and not metal_lane()
-            and adaptive is None):
+            and (adaptive is None or adaptive_graphs_enabled())):
         from woof.hex.cuda_subcycle_graphs import attach_subcycle_graphs
 
-        graph_controller = attach_subcycle_graphs(stack["driver"])
+        graph_controller = attach_subcycle_graphs(stack["driver"], adaptive=adaptive is not None)
     graph_full_steps = graph_partial_steps = 0
 
     physics_park = None
@@ -4978,7 +4980,10 @@ def execute_forecast(
             "partly_replayed_committed_steps": graph_partial_steps,
             "subcycles": None if graph_controller is None else graph_controller.receipt(),
             "skip_reason": ("local_timestep_controller" if lts_attachment is not None and not lts_graphs
-                            else "metal_facade_captures_no_graph" if metal_lane() else None),
+                            else "metal_facade_captures_no_graph" if metal_lane()
+                            else "adaptive_timestep_graphs_off" if (adaptive is not None
+                                                                    and graph_controller is None)
+                            else None),
         }} if graph_requested else {}),
         "cuda_graphs_policy": graph_policy(int(N_CELLS)),
         "architecture": architecture_status(capability.compute).as_dict(),
