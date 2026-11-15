@@ -30,11 +30,15 @@ _THREADS = 256
 # A column solve does not share work between threads.  Smaller fast mapped
 # blocks expose enough column blocks to fill the device on nested domains.
 _W_PHI_MSF_THREADS = 64
-#: ``WOOF_ACOUSTIC_KPAR=0`` keeps the one-thread-per-column w''-phi'' solve
-#: (kernels/acoustic.cu advance_w_phi_msf) on the fast mapped path; the
-#: default is the level-parallel entry advance_w_phi_msf_kpar, 32 columns x
-#: 8 lanes per block, the same words.
-ACOUSTIC_KPAR_ENABLED = os.environ.get("WOOF_ACOUSTIC_KPAR", "1") != "0"
+#: ``WOOF_ACOUSTIC_KPAR=1`` takes the level-parallel w''-phi'' solve
+#: (kernels/acoustic.cu advance_w_phi_msf_kpar, 32 columns x 8 lanes per
+#: block) on the fast mapped path instead of the one-thread-per-column
+#: kernel.  Its words are the column kernel's generic build's, which on
+#: Metal is what runs; on CUDA the shape-specialized column kernel's words
+#: differ from its own generic build's by NVRTC's contraction choices on
+#: the folded loops, so the switch is off until that word change is
+#: accepted (see the PR / PERF-HANDOFF).
+ACOUSTIC_KPAR_ENABLED = os.environ.get("WOOF_ACOUSTIC_KPAR", "0") != "0"
 _W_PHI_KPAR_BLOCK = (32, 8)
 
 
