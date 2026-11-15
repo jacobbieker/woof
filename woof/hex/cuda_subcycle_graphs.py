@@ -71,9 +71,13 @@ def attach_subcycle_graphs(driver: Any, *, adaptive: bool = False) -> "SubcycleG
     if existing is not None:
         return existing
     keys, capture_after = (ADAPTIVE_GRAPH_KEYS, ADAPTIVE_CAPTURE_AFTER) if adaptive else (1, 1)
+    if adaptive:
+        # Only the adaptive clock calls note_step(), so delayed capture is
+        # adaptive-only: a fixed run with capture_after > 1 would never capture.
+        capture_after = _positive_env("WOOF_HEX_CUDA_GRAPHS_CAPTURE_AFTER", capture_after)
     graphs = driver.subcycle_graphs = SubcycleGraphs(
         driver, keys=_positive_env("WOOF_HEX_CUDA_GRAPHS_KEYS", keys),
-        capture_after=_positive_env("WOOF_HEX_CUDA_GRAPHS_CAPTURE_AFTER", capture_after))
+        capture_after=capture_after)
     eager = driver._advance_dynamics_subcycle_v841
 
     def advance(state, **kwargs):
@@ -377,6 +381,16 @@ class SubcycleGraphs:
         """A new model step begins (the adaptive clock calls this once per step)."""
         self.new_step = True
 
+    def _remember_failures(self) -> bool:
+        """Failed keys stay eager across switches on a varying step (fixed runs reset)."""
+        return self.keys > 1 or self.capture_after > 1
+
+    def _evict(self) -> None:
+        """Trim parked graphs to make room for the current key's capture."""
+        while len(self.parked) > self.keys - 1:
+            del self.parked[next(iter(self.parked))]
+            self.stats["evicted_graphs"] += 1
+
     def _switch(self, key: Any) -> None:
         """Make ``key`` the current key, parking or dropping the current graph."""
         if self.graph is not None:
@@ -384,17 +398,17 @@ class SubcycleGraphs:
         entry = self.parked.pop(key, None)
         if self.keys > 1:
             self.stats["key_switches"] += 1
+            if self.graph is not None:
+                # Parked without eviction: a one-off eager key keeps every
+                # retained graph; _evict() trims only before a new capture.
+                self.parked.pop(self.key, None)
+                self.parked[self.key] = {name: getattr(self, name) for name in _ENTRY_FIELDS}
+        if self._remember_failures():
             if self.disabled_key is not None and self.disabled_key == self.key:
                 # A key whose capture failed stays eager when it comes back.
                 self.disabled[self.key] = self.disabled_error
                 while len(self.disabled) > 64:
                     del self.disabled[next(iter(self.disabled))]
-            if self.graph is not None:
-                self.parked.pop(self.key, None)
-                self.parked[self.key] = {name: getattr(self, name) for name in _ENTRY_FIELDS}
-                while len(self.parked) > self.keys - 1:
-                    del self.parked[next(iter(self.parked))]
-                    self.stats["evicted_graphs"] += 1
         if entry is not None:
             for name, value in entry.items():
                 setattr(self, name, value)
@@ -407,7 +421,7 @@ class SubcycleGraphs:
             self.pool = {}
             self.counter_delta = (0, 0, 0)
         self.key = key
-        if self.keys > 1:
+        if self._remember_failures():
             self.disabled_error = self.disabled.get(key)
             self.disabled_key = key if key in self.disabled else None
         else:
@@ -584,6 +598,8 @@ class SubcycleGraphs:
                 counts = self.stats["fallback_reasons"]
                 counts["awaiting_repeat"] = counts.get("awaiting_repeat", 0) + 1
                 return eager(state, **kwargs)
+        if self.graph is None and self.keys > 1:
+            self._evict()
         try:
             self.inputs = _stage(dynamic, cp, self.inputs)
             self._refresh_boundaries()

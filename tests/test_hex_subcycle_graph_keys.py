@@ -68,6 +68,9 @@ def test_fixed_step_attach_keeps_one_graph_and_captures_at_once(monkeypatch):
     graphs = attach_subcycle_graphs(_driver())
     assert (graphs.keys, graphs.capture_after) == (1, 1)
     assert "graph_keys" not in graphs.stats  # the fixed-step receipt is unchanged
+    # A fixed run has no note_step() caller, so delayed capture would never capture.
+    monkeypatch.setenv("WOOF_HEX_CUDA_GRAPHS_CAPTURE_AFTER", "3")
+    assert attach_subcycle_graphs(_driver()).capture_after == 1
 
 
 def test_adaptive_attach_policy_and_overrides(monkeypatch):
@@ -126,13 +129,38 @@ def test_switch_parks_restores_and_evicts_graphs():
     assert graphs.graph == "g36" and graphs.inputs == {"staged": "g36"}
     assert graphs.boundaries == {("ru", 1): "g36"} and graphs.stats["parked_reuses"] == 1
     assert list(graphs.parked) == ["k20"]
-    graphs._switch("k30")  # keys=2: parking g36 evicts the older parked g20
+    graphs._switch("k30")  # a new key parks g36 and keeps g20 while it is only seen once
+    assert list(graphs.parked) == ["k20", "k36"] and graphs.stats["evicted_graphs"] == 0
+    graphs._evict()  # trimmed only when k30 is about to be captured
     assert list(graphs.parked) == ["k36"] and graphs.stats["evicted_graphs"] == 1
     assert graphs.last_launch.synchronized == 3  # every switch away from a live graph drains it
 
 
+def test_a_one_off_key_keeps_both_retained_graphs():
+    graphs = SubcycleGraphs(_driver(), keys=2, capture_after=2)
+    graphs.last_launch = _Event()
+    graphs._switch("k20")
+    graphs.graph = "g20"
+    graphs._switch("k36")
+    graphs.graph = "g36"
+    graphs.note_step()
+    result, eager = _call(graphs, 30.0)  # seen once: eager, nothing evicted
+    assert result == ("eager", 30.0) and eager == [30.0]
+    assert sorted(graphs.parked) == ["k20", "k36"] and graphs.stats["evicted_graphs"] == 0
+
+
 def test_a_disabled_key_stays_disabled_when_it_returns():
     graphs = SubcycleGraphs(_driver(), keys=2, capture_after=2)
+    graphs._switch("bad")
+    graphs.disabled_key, graphs.disabled_error = "bad", {"type": "X"}
+    graphs._switch("good")
+    assert graphs.disabled_key is None
+    graphs._switch("bad")
+    assert graphs.disabled_key == "bad" and graphs.disabled_error == {"type": "X"}
+
+
+def test_an_adaptive_single_graph_still_remembers_failed_keys():
+    graphs = SubcycleGraphs(_driver(), keys=1, capture_after=2)
     graphs._switch("bad")
     graphs.disabled_key, graphs.disabled_error = "bad", {"type": "X"}
     graphs._switch("good")

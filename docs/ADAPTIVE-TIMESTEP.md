@@ -1004,7 +1004,7 @@ reproduces a fixed run built at that step, so nothing in the dycore, its boundar
 column physics kept the construction-time step.  The 12 h tropical runs stayed finite in every field of
 every frame, with 3-hourly max |w| of 2.8-3.4 m/s against the fixed run's 2.6-4.2; the step reached its 2x ceiling within
 the first quarter hour and held there with the vertical Courant number at 1.0.  On CUDA the 2x step
-bought 1.38x, not 2x, in these runs: CUDA graphs were off on the adaptive path (a captured graph
+bought 1.38x, not 2x, in these runs: CUDA graphs were off (fixed below) on the adaptive path (a captured graph
 replays one step length) and each step reads its CFL back to the host once.  Tests:
 `tests/test_hex_adaptive_dt.py`.
 
@@ -1018,5 +1018,14 @@ Edinburgh variable-resolution mesh (`edi-vr`, 4,565 cells, 18 s row) 2 h adaptiv
 them fully replayed from one captured graph, 19 eager.  Replay is byte-identical to eager (F1), and the
 histories and snapshot hashes of the adaptive run with and without graphs are identical.
 `WOOF_HEX_CUDA_GRAPHS_ADAPTIVE=0` restores the eager adaptive path; `WOOF_HEX_CUDA_GRAPHS_KEYS` and
-`WOOF_HEX_CUDA_GRAPHS_CAPTURE_AFTER` override the two numbers.  Tests:
-`tests/test_hex_subcycle_graph_keys.py`.
+`WOOF_HEX_CUDA_GRAPHS_CAPTURE_AFTER` override the two numbers (the second on adaptive runs only: only the
+adaptive clock marks step boundaries).  Tests: `tests/test_hex_subcycle_graph_keys.py`.
+
+Timing (A6000, `edi-vr` 2 h, three interleaved rounds on a shared host at 1-minute load 42-61, seconds
+after the first step so per-work-dir kernel compiles are excluded): adaptive with graphs 68.6 / 29.7 /
+25.0 s (median step 0.28 / 0.13 / 0.11 s), adaptive eager 59.8 / 46.4 / 53.6 s (0.24 / 0.22 / 0.23 s),
+fixed 18 s step with graphs 104.7 / 63.5 / 65.5 s for 400 steps.  Round 1 ran the graph arm at load 59
+against 42 and is not usable; rounds 2-3 put adaptive with graphs at 0.47-0.64x the eager adaptive run
+and 0.38-0.47x the fixed run.  The earlier "adaptive slower than fixed" wall times (268 s vs 190 s)
+were dominated by the first step's kernel compile, which the regional door caches per work directory;
+set `WOOF_HEX_KERNEL_CACHE_ROOT` to a persistent directory when timing.
