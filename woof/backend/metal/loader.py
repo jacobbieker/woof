@@ -298,6 +298,7 @@ FLAT_ADDRESS_TABLES = frozenset({
     "glue_add_arrays",                       # woof/core/kernels/bandwidth_glue.cu
     "diff6_multi",                           # woof/core/kernels/diff6.cu
     "state_relaxation_multi",                # woof/core/kernels/lbc_state.cu
+    "solve_region_scrub_words_v841",         # woof/hex/cuda_solve_region_v841.py
 })
 
 #: C type of a module global's element -> the storage dtype it is held in

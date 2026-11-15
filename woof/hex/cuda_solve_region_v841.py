@@ -47,6 +47,7 @@ SOLVE_REGION_KERNELS: tuple[str, ...] = (
     "solve_region_envelope_finish_v841",
     "solve_region_validate_v841",
     "solve_region_scrub_columns_v841",
+    "solve_region_scrub_words_v841",
 )
 
 _ENVELOPE_THREADS = 256
@@ -284,7 +285,46 @@ extern "C" __global__ void solve_region_scrub_columns_v841(
     const long long solve = table[j * SR_DESC + 3];
     base[r * stride + solve] = sr_ll2f(table[j * SR_DESC + 4]);
 }
+
+/* The same fill with its descriptors passed BY VALUE (the rk_copy_words
+   form): every address the launch writes is a word of its parameter block,
+   so the Metal backend orders it by those words instead of draining the
+   queue around a launch that reads its addresses from device memory. */
+#define SR_SCRUB_WORDS_MAX 32
+struct SrScrubWords {
+    unsigned long long rows[SR_SCRUB_WORDS_MAX][SR_DESC];
+};
+#if __CUDA_ARCH__ >= 700
+#define SR_SCRUB_WORDS_PARAM const __grid_constant__ SrScrubWords
+#else
+#define SR_SCRUB_WORDS_PARAM const SrScrubWords
+#endif
+
+extern "C" __global__ void solve_region_scrub_words_v841(
+    SR_SCRUB_WORDS_PARAM table, int n_arrays)
+{
+    const int j = blockIdx.y;
+    if (j >= n_arrays) return;
+    const long long rows = (long long)table.rows[j][1];
+    const long long r = (long long)blockIdx.x * blockDim.x + threadIdx.x;
+    if (r >= rows) return;
+    float* base = (float*)table.rows[j][0];
+    const long long stride = (long long)table.rows[j][2];
+    const long long solve = (long long)table.rows[j][3];
+    base[r * stride + solve] = sr_ll2f((long long)table.rows[j][4]);
+}
 """
+
+#: The by-value scrub's row capacity (SR_SCRUB_WORDS_MAX in the source).
+_SCRUB_WORDS_MAX = 32
+
+
+def scrub_words_enabled() -> bool:
+    """``WOOF_HEX_SCRUB_WORDS=0`` restores the device-table scrub launch (the path before 2026-11-15)."""
+
+    import os
+
+    return os.environ.get("WOOF_HEX_SCRUB_WORDS", "1") != "0"
 
 
 def _cp() -> Any:
@@ -557,6 +597,21 @@ class SolveRegionKernels:
             (int(pointer), int(count), int(stride), int(solve), _bits(pool))
             for pointer, count, stride, solve, pool in entries
         ]
+        if scrub_words_enabled():
+            # By value: no device table, and on Metal no queue drain around the launch
+            # (woof.backend.metal.loader.FLAT_ADDRESS_TABLES).  The stores are the same.
+            for start in range(0, len(rows), _SCRUB_WORDS_MAX):
+                chunk = rows[start:start + _SCRUB_WORDS_MAX]
+                words = np.zeros((_SCRUB_WORDS_MAX, _DESCRIPTOR_WORDS), dtype=np.uint64)
+                words[:len(chunk)] = np.asarray(chunk, dtype=np.int64).view(np.uint64)
+                tallest = max(count for _p, count, _s, _v, _b in chunk)
+                blocks = max(1, (tallest + _SCRUB_THREADS - 1) // _SCRUB_THREADS)
+                self.kernel("solve_region_scrub_words_v841")(
+                    (blocks, len(chunk)),
+                    (_SCRUB_THREADS,),
+                    (words.reshape(-1).view(np.dtype(("V", words.nbytes))), np.int32(len(chunk))),
+                )
+            return
         table = self.table(rows)
         tallest = max(count for _p, count, _s, _v, _b in rows)
         blocks = max(1, (tallest + _SCRUB_THREADS - 1) // _SCRUB_THREADS)
