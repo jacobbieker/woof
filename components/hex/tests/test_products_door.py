@@ -958,6 +958,18 @@ def test_an_option_map_the_live_draws_missed_is_drawn_for_the_live_frames(monkey
     seen.clear()
     assert products_door.run_products(_arguments(tmp_path, histories, case="patch-case", live_frames=str(receipt))) == 0
     assert not any("hail_max_hailcast" in c[c.index("--products") + 1] for stage, c in seen if stage == "RENDER")
+    # Only the first frame drawn live: the -rest job draws the second frame's maps, the option map among them,
+    # and the -options job still draws it for the live frame (CodeRabbit on #465).
+    doc["products"].remove("hail_max_hailcast")
+    doc["drawn"] = [histories[0].name]
+    doc["stat"] = {histories[0].name: doc["stat"][histories[0].name]}
+    receipt.write_text(json.dumps(doc), encoding="utf-8")
+    seen.clear()
+    assert products_door.run_products(_arguments(tmp_path, histories, case="patch-case", live_frames=str(receipt))) == 0
+    drawn = [Path(x).name for stage, c in seen if stage == "RENDER"
+             and "hail_max_hailcast" in c[c.index("--products") + 1].split(",") for x in c
+             if Path(x).name.startswith("wrfout_d01_")]
+    assert set(drawn) == {"wrfout_d01_2026-10-03_12_00_00", "wrfout_d01_2026-10-03_18_00_00"}
 
 
 def _write_patch_mesh(path: Path, *, lat0=35.0, lon0=-97.0, half_deg=3.0, step_deg=0.25, limited=True):
