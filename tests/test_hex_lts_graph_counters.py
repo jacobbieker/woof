@@ -39,3 +39,24 @@ def test_counters_without_lts_are_the_three_dycore_counters():
     assert graphs._counters() == (5, 0, 0)
     graphs._set_counters((7, 0, 0))
     assert graphs.driver.mixing_calls_v841 == 7
+
+
+def test_an_interrupted_pass_restores_the_lts_stage_tracker():
+    from woof.hex.cuda_driver_lts import _StageTracker
+
+    tracker = _StageTracker(expected=(1, 3, 6))
+    for stage in (1, 3, 6):  # one whole subcycle: the tracker ends on the last stage
+        for small_step in range(1, stage + 1):
+            tracker.note(small_step)
+    lts = SimpleNamespace(launch_counts={}, tracker=tracker)
+    graphs = SubcycleGraphs(_driver(lts))
+    saved = graphs._tracker_state()
+    assert saved == (2, 6)
+    tracker.note(1)
+    tracker.note(1)  # a warm pass stopped by an OOM inside the second stage
+    graphs._restore_tracker(saved)
+    for stage in (1, 3, 6):  # the eager fallback restarts at RK1 without a refusal
+        for small_step in range(1, stage + 1):
+            tracker.note(small_step)
+    assert graphs._tracker_state() == (2, 6)
+    assert SubcycleGraphs(_driver(None))._tracker_state() is None
