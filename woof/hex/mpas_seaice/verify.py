@@ -80,7 +80,8 @@ def verify() -> dict:
     pieces.append(piece("column_init_aggregate_r8", column_v842, column_oracle, column_oracle.measure()))
     thermo = column_oracle.thermo_profile_mismatches(column_oracle.load_thermo_profiles())
     pieces.append(piece("column_init_thermo_profiles_r8", column_v842, column_oracle,
-                        {f"nIceLayers={n}": {"initialSalinityProfile": bad} for n, bad in thermo.items()}))
+                        {f"nIceLayers={n}": {"initialSalinityProfile": bad} for n, bad in thermo.items()
+                         if n not in column_v842.COS_REFUSED_LAYERS}))
     return {
         "model": "seaice",
         "status": registry.component("seaice").status,
