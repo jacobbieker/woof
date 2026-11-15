@@ -6523,6 +6523,12 @@ def _main(args: argparse.Namespace, decision: Mapping[str, Any] | None) -> int:
         provenance["timestep_evidence_reason"] = decision["timestep_evidence_reason"]
         provenance["experimental_timestep"] = dict(decision)
 
+    # Resolved before the preflight return, so a missing observation file fails preflight too.
+    obs_nudging = (None if args.obs_nudging is None else {
+        "config": Path(args.obs_nudging).resolve(strict=True),
+        "input": (None if args.obs_nudging_input is None else Path(args.obs_nudging_input).resolve(strict=True)),
+        "start_time": host["start_time_text"]})
+
     if args.preflight_only:
         source_after = proof.measure_execution_sources()
         authority_after = verify_forecast_authorities(paths)
@@ -6592,10 +6598,7 @@ def _main(args: argparse.Namespace, decision: Mapping[str, Any] | None) -> int:
             "config": Path(args.nudging).resolve(strict=True),
             "analyses": [Path(path).resolve(strict=True) for path in (args.nudging_analysis or ())],
             "start_time": host["start_time_text"]}),
-        obs_nudging=(None if args.obs_nudging is None else {
-            "config": Path(args.obs_nudging).resolve(strict=True),
-            "input": (None if args.obs_nudging_input is None else Path(args.obs_nudging_input).resolve(strict=True)),
-            "start_time": host["start_time_text"]}),
+        obs_nudging=obs_nudging,
         balance_series=bool(args.balance_series),
         history_selection=args.history_selection,
         history_zgrid=history_zgrid,

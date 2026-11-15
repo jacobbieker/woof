@@ -436,6 +436,12 @@ def test_observation_nudging_without_physics_keys_is_refused_before_preparation(
         go_hex.plan(_args(str(config)))
 
 
+def test_observation_nudging_unknown_key_is_refused_at_the_plan(tmp_path):
+    config = _write(tmp_path, domain_extra="mp_physics = 8\nobs_nudge_opt = 1\nobs_coef_tempp = 1.0e-4")
+    with pytest.raises(go_hex.HexGoRefusal, match="HEX_OBS_NUDGING_KEYS"):
+        go_hex.plan(_args(str(config)))
+
+
 def test_observation_nudging_off_adds_nothing(tmp_path):
     config = _write(tmp_path, domain_extra="obs_nudge_opt = 0\nobs_rinxy = 50.0")
     value = go_hex.plan(_args(str(config)))

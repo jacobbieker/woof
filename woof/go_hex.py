@@ -315,6 +315,23 @@ def obs_nudging_table(controls: Mapping[str, Any], *, base_dir: Path) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _check_obs_nudging_table(table: str) -> None:
+    """The forecast door's own reading of the table (unknown keys, refused controls), before any preparation."""
+    import tempfile
+
+    from woof.hex.obs_nudging import load_config, refusals
+
+    with tempfile.TemporaryDirectory() as scratch:
+        path = Path(scratch) / OBS_NUDGING_CONFIG
+        path.write_text(table, encoding="utf-8")
+        try:
+            problems = refusals(load_config(path))
+        except ValueError as error:
+            raise HexGoRefusal(f"obs_nudge_* keys: {error}") from None
+    if problems:
+        raise HexGoRefusal("obs_nudge_* keys: " + "; ".join(str(problem) for problem in problems))
+
+
 def _key_refusal(table: str, key: str) -> str:
     reason = KEY_REASONS.get(key) or _chem_reason(key) or (
         "it has no hex mapping on the go route (hex runs MPAS dynamics and its own namelist; "
@@ -671,6 +688,10 @@ def plan(args, *, config: Path | None = None, document: Mapping[str, Any] | None
     shape = root / "go-region.json"
     polygon = region_polygon(request["projection"], request["nx"], request["ny"], request["dx_m"])
     argv = regional_argv(request, args, config, shape=shape)
+    table = None
+    if request.get("obs_nudging") is not None:
+        table = obs_nudging_table(request["obs_nudging"], base_dir=config.expanduser().absolute().parent)
+        _check_obs_nudging_table(table)
     stages = {go: [hex_stage for hex_stage in hex_stages
                    if not (getattr(args, "prepare_only", False) and hex_stage in ("forecast", "products"))
                    and not ("--no-products" in argv and hex_stage == "products")]
@@ -682,9 +703,7 @@ def plan(args, *, config: Path | None = None, document: Mapping[str, Any] | None
             **({"terrain": request["terrain"]} if request.get("terrain") else {}),
             **({"diagnostics_namelist": diagnostics_namelist(request["diagnostics"])}
                if request.get("diagnostics") else {}),
-            **({"obs_nudging": obs_nudging_table(request["obs_nudging"],
-                                                 base_dir=config.expanduser().absolute().parent)}
-               if request.get("obs_nudging") is not None else {}),
+            **({"obs_nudging": table} if table is not None else {}),
             "work_dir": str(root), "regional_argv": argv,
             "command": "woof hex " + " ".join(shlex.quote(part) for part in argv)}
 
