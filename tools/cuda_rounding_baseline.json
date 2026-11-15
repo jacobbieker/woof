@@ -6247,7 +6247,7 @@
    },
    {
     "file": "woof/verify/advect_oracle.py",
-    "sha256": "046717ed88952017e1cf928db79bb9ca3e0d541341522bbd825d2f45b44d2eee"
+    "sha256": "92b2666c71f6cbb08f1ff2e62f57b3e33c2a73cd983a7e6a3cca34eab7fafec0"
    },
    {
     "file": "woof/verify/gwdo_kim_oracle.py",
