@@ -2553,7 +2553,7 @@
    },
    {
     "file": "woof/core/kernels/acoustic.cu",
-    "sha256": "14f8d637ecfa54b7b8c19d80fc2bbf5ad5566f6fdc57b9671d0cfa8566f4331b"
+    "sha256": "97a7e1646a217ad7e19c17f52a70e7d6c7cb1837b557e1ab6168084932dc3876"
    },
    {
     "file": "woof/core/kernels/advection.cu",
@@ -9831,15 +9831,15 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "4eb213df1ca30792f12883ab229a606fb3614e1f9c61150ba6832fe0b23eecb0",
+    "sha256": "fc8635a507286ed26280af48a9b52aada17511faa23a7350094a2d07f13efd16",
     "sites": {
-     "100": 157
+     "100": 187
     }
    },
    "native_differences": {
-    "sha256": "8d9490a84ff48fc49b5806d777bf6c4f7d63f403d6c5a51f673d6d750ea700b8",
+    "sha256": "dd96a3dfd95ffd23192dba3d787bad2af3bf8d713943cc87bcc7bfc96305e562",
     "sites": {
-     "100": 53
+     "100": 59
     }
    },
    "native_errors": {},
@@ -9859,7 +9859,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "5c7205005dfa7457f8e27bc1f636a751a297f78710b03bfd5920256de3d2d57c"
+   "source_sha256": "cfd6ba49dee0bce96b7cd472eafdd53d5c41e18e57dc04beefb92802d20dd4c3"
   },
   "kernels:advection": {
    "assessment": "static_diagnostic_only",

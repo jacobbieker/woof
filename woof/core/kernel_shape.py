@@ -13,7 +13,8 @@ from functools import lru_cache
 FUNCTIONS = {
     "mynn_pbl": ("mynn_dmp_mf_columns", "mynn_tendencies_columns"),
     "mynn_dmp_sibling": ("mynn_dmp_mf_columns", "mynn_tendencies_columns"),
-    "acoustic": ("advance_w_phi_msf", "advance_mu_th_msf", "advance_nested_phi_w"),
+    "acoustic": ("advance_w_phi_msf", "advance_mu_th_msf", "advance_nested_phi_w",
+                 "advance_w_phi_msf_kpar"),
     "advection": ("flux_div_scalar",),
     "diagnostics": ("calc_p_alpha",),
     "diff_opt1": ("wrf_diff_opt1_horizontal",),

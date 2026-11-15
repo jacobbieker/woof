@@ -409,7 +409,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   boundary-layer cloud, scales the microphysics radii and writes the six
   fluxes and the published cloud fraction itself (byte-identical; about 20
   launches and copies fewer per step; `WOOF_FARMS_FUSED=0` restores the
-  per-step glue; cloud options outside the shared composition keep it). Hex: CUDA
+  per-step glue; cloud options outside the shared composition keep it).
+  `WOOF_ACOUSTIC_KPAR=1` takes a level-parallel w''-phi'' solve (32 columns
+  x 8 lanes per block; 1.7-2.2x the column kernel's speed per launch on an
+  A6000): opt-in, because on CUDA its words are the column kernel's generic
+  build's, not the shape-specialized build's that runs by default. Hex: CUDA
   subcycle graphs stay on under the adaptive time step, one graph per
   repeated step length. On a 4,565-cell variable-resolution mesh, a
   byte-identical adaptive run takes 0.47-0.64x the eager adaptive time and
