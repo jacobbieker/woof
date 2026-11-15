@@ -17,7 +17,8 @@ cp = pytest.importorskip("cupy")
 
 def _arrays(seed):
     rng = np.random.default_rng(seed)
-    shapes = [(56, 41), (57, 41), (41,), (3, 5, 30), (56, 30)] * 8  # 40 rows: two by-value launches
+    # 40 rows: two by-value launches; 129 and 257 rows span more than one 128-thread block
+    shapes = [(56, 41), (57, 41), (41,), (3, 5, 30), (56, 30), (129, 30), (257, 41), (3, 43, 30)] * 5
     return [rng.normal(0.0, 1.0, shape).astype(np.float32) for shape in shapes]
 
 
