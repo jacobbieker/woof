@@ -41,8 +41,11 @@ oracle host's: ``tanh`` (``colpkg_init_itd``) is CORE-MATH's (glibc 2.44's
 own, ``cr_tanh_flt64.cuh``), ``pow`` the shared glibc transcription
 (``glibc_pow``) and ``cos`` CORE-MATH's ``cr_cos`` (``uw_cos``), which equals
 glibc's ``cos`` on every argument ``colpkg_init_thermo`` forms for 1 to
-:data:`MAX_ICE_LAYERS` ice layers (``tools/oracle_libm/grade_colpkg_cos.py``);
-more layers are refused by name. ``log`` and the powers in the initial air
+:data:`MAX_ICE_LAYERS` ice layers except :data:`COS_REFUSED_LAYERS`, where
+glibc's cos (LGPL IBM code, not transcribed) is 1 ULP off the correctly rounded
+word on one profile level (graded on the oracle host by
+``tests/test_mpas_seaice_column_parity.py`` against ``init-thermo-r8.npy``);
+those counts and more layers are refused by name. ``log`` and the powers in the initial air
 drag coefficient and upward longwave are constants gfortran folds at compile
 time (correctly rounded, :func:`_folded_constants`).
 
@@ -95,6 +98,8 @@ MODULE_OPTIONS = COMPILE_OPTIONS
 MATH_HEADERS = ("glibc_flt64.cuh", "cr_tanh_flt64.cuh")
 #: colpkg_init_thermo's cos arguments are graded against glibc's cos for this many ice layers
 MAX_ICE_LAYERS = 64
+#: the ice-layer counts whose profile meets one of glibc's not correctly rounded cos words
+COS_REFUSED_LAYERS = frozenset({11, 31, 33, 55})
 _BLOCK = 128
 _DATA = files("woof.hex.mpas_seaice").joinpath("data")
 
@@ -362,6 +367,11 @@ def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
         _refuse("config_nIceLayers", dims["nIceLayers"],
                 f"colpkg_init_thermo's cos is graded against glibc's for 1 to {MAX_ICE_LAYERS} ice layers",
                 f"1 <= config_nIceLayers <= {MAX_ICE_LAYERS}")
+    if dims["nIceLayers"] in COS_REFUSED_LAYERS:
+        _refuse("config_nIceLayers", dims["nIceLayers"],
+                "colpkg_init_thermo's salinity profile at this many ice layers meets a glibc cos "
+                "word that is not correctly rounded, and glibc's cos is not transcribed",
+                f"config_nIceLayers not in {sorted(COS_REFUSED_LAYERS)}")
     if c["config_do_restart"]:
         _refuse("config_do_restart", True, "a restart re-initialises the column shortwave, which is not ported",
                 "config_do_restart = .false.")

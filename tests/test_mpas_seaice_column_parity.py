@@ -114,6 +114,7 @@ def test_the_initial_air_drag_is_gfortran_s_folded_constant():
     ({"config_use_column_biogeochemistry": True}, "biogeochemistry"),
     ({"config_nSnowLayers": 2}, "snow layer"),
     ({"config_nIceLayers": cv.MAX_ICE_LAYERS + 1}, "cos"),
+    ({"config_nIceLayers": 11}, "glibc cos"),
     ({"config_do_restart": True}, "restart"),
     ({"config_initial_condition_type": "circle"}, "initial conditions"),
     ({"config_initial_velocity_type": "ocean"}, "initial velocities"),
@@ -149,8 +150,9 @@ def test_gpu_matches_the_v842_oracle_word_for_word():
 
 @requires_gpu
 def test_every_accepted_ice_layer_count_s_profile_is_the_oracle_s():
+    # the refused counts are exactly the ones glibc's cos rounds differently
     bad = {n: v for n, v in co.thermo_profile_mismatches(co.load_thermo_profiles()).items() if v}
-    assert not bad, bad
+    assert set(bad) == cv.COS_REFUSED_LAYERS, bad
 
 
 @requires_gpu

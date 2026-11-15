@@ -24,6 +24,11 @@ on pb (Linux 6.12 x86_64, glibc 2.44), 2026-11-14.
   input's. `column-logs.json`: the tracer object (`TOBJ`) and any log lines.
   `init-thermo-r8.npy`: the profiles `sprofile(1:n+1)`, n = 1..64, one after
   the other. `inputs.sha256`: the input-stream digests.
+- Grading: the GPU's `uw_cos` (CORE-MATH, correctly rounded) equals these
+  profiles for every count except 11, 31, 33 and 55 ice layers, where glibc's
+  cos is 1 ULP off on one level; `column_v842.COS_REFUSED_LAYERS` refuses
+  them. The inputs draw `random_sample` and scale it in numpy, because
+  `RandomState.uniform` fuses an FMA on arm64; the digests are host-independent.
 
 ## Licence
 
