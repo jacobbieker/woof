@@ -9,13 +9,13 @@
     "cupy.ReductionKernel",
     "cupy.cuda.compiler.compile_using_nvrtc"
   ],
-  "site_count": 674,
+  "site_count": 675,
   "site_count_by_kind": {
     "cupy.ElementwiseKernel": 46,
     "cupy.RawKernel": 112,
     "cupy.RawModule": 299,
     "cupy.ReductionKernel": 16,
-    "cupy.cuda.compiler.compile_using_nvrtc": 201
+    "cupy.cuda.compiler.compile_using_nvrtc": 202
   },
   "site_count_by_surface": {
     "other": {
@@ -29,7 +29,7 @@
       "cupy.RawKernel": 39,
       "cupy.RawModule": 102,
       "cupy.ReductionKernel": 9,
-      "cupy.cuda.compiler.compile_using_nvrtc": 126
+      "cupy.cuda.compiler.compile_using_nvrtc": 127
     },
     "tests": {
       "cupy.ElementwiseKernel": 7,
@@ -10257,6 +10257,22 @@
       "text": "image, _ = compile_using_nvrtc(module_source(n_ice_layers), options, None,"
     },
     {
+      "file": "woof/hex/mpas_seaice/column_ridge_v842.py",
+      "line": 105,
+      "column": 15,
+      "surface": "package",
+      "constructor": "compile_using_nvrtc",
+      "constructor_kind": "cupy.cuda.compiler.compile_using_nvrtc",
+      "enclosing": "_module_on",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "options",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "image, _ = compile_using_nvrtc(module_source(n_ice_layers), options, None,"
+    },
+    {
       "file": "woof/hex/mpas_seaice/column_therm_v842.py",
       "line": 161,
       "column": 15,
@@ -10274,7 +10290,7 @@
     },
     {
       "file": "woof/hex/mpas_seaice/column_v842.py",
-      "line": 593,
+      "line": 594,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",

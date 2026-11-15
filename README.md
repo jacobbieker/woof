@@ -291,7 +291,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     Also its ITD thermodynamics (BL99 or mushy: the linear remap of the
     thickness distribution or the delta function, frazil and new ice,
     lateral melt, rebinning and zapping, with level, CESM or topo ponds),
-    which needs no opt-in;
+    and its ridging (both participation and both redistribution functions,
+    the ridging iterations and the cleanup after them), neither of which
+    needs an opt-in;
   - MALI: the shallow-ice velocity solver, masks and geometry diagnostics,
     thermal initialisation, the thermal solver and basal melt, thickness
     and tracer advection, calving (every option, and front restoration),
@@ -301,7 +303,7 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   remap computes its init geometry (frames, moments, MPAS's RBF
   coefficients) itself, and refuses halo exchanges and periodic planar
   meshes by name. The sea-ice column physics' time step (mushy vertical thermodynamics,
-  ridging, shortwave), ocean KPP and GM/Redi,
+  shortwave), ocean KPP and GM/Redi,
   and the coupler import and export are not ported. A few RKIND 8 cases need the LGPL libm
   opt-in below. These are ported pieces and steps, not coupled forecasts.
   Plan: [docs/mpas-coupled-roadmap.md](docs/mpas-coupled-roadmap.md).
