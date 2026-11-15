@@ -6289,47 +6289,47 @@
    },
    {
     "file": "woof/backend/host/loader.py",
-    "sha256": "c77cee97ba0ad9608c3c9d1762c2b61d55cdc2eb84394d812cf560d2025064ae"
+    "sha256": "87cf8eb09a6787526bdc8446a76383298fd5f57b6fd4f7b6abaf65d0e2074267"
+   },
+   {
+    "file": "woof/backend/host/loader.py",
+    "sha256": "94485b54350ca55089502cdf5951120a58b6def7f95d56090b89a9f76933e5c7"
    },
    {
     "file": "woof/backend/host/loader.py",
     "sha256": "c77cee97ba0ad9608c3c9d1762c2b61d55cdc2eb84394d812cf560d2025064ae"
    },
    {
-    "file": "woof/backend/host/loader.py",
-    "sha256": "c77cee97ba0ad9608c3c9d1762c2b61d55cdc2eb84394d812cf560d2025064ae"
+    "file": "woof/backend/translate/__init__.py",
+    "sha256": "09760bdad708b8841b2ae328ff0db241d6ec55bb1b20e15292ff6246858955ea"
    },
    {
     "file": "woof/backend/translate/__init__.py",
-    "sha256": "fa665a819807c597363e98b5b3b6544edb5ea0a52c649dd8d3dd239ce983320b"
+    "sha256": "0dea47724568543123b2d39af5618d0ea9016639aca093604864f3635b2a88b5"
    },
    {
     "file": "woof/backend/translate/__init__.py",
-    "sha256": "fa665a819807c597363e98b5b3b6544edb5ea0a52c649dd8d3dd239ce983320b"
+    "sha256": "1c5e502e15c8e0b30306e21c0ac23f5b020aa88fabdc9085c1ca29638870eb2a"
    },
    {
     "file": "woof/backend/translate/__init__.py",
-    "sha256": "fa665a819807c597363e98b5b3b6544edb5ea0a52c649dd8d3dd239ce983320b"
+    "sha256": "1c741fc72f9825c842ccacedf5de36b3c40e8d314597ff69e527a14bb95f9543"
    },
    {
     "file": "woof/backend/translate/__init__.py",
-    "sha256": "fa665a819807c597363e98b5b3b6544edb5ea0a52c649dd8d3dd239ce983320b"
+    "sha256": "81987962543494921c9a18abc85b9787488b80e25d2516b1ac4110eac1b51a1b"
    },
    {
     "file": "woof/backend/translate/__init__.py",
-    "sha256": "fa665a819807c597363e98b5b3b6544edb5ea0a52c649dd8d3dd239ce983320b"
+    "sha256": "81987962543494921c9a18abc85b9787488b80e25d2516b1ac4110eac1b51a1b"
    },
    {
     "file": "woof/backend/translate/__init__.py",
-    "sha256": "fa665a819807c597363e98b5b3b6544edb5ea0a52c649dd8d3dd239ce983320b"
+    "sha256": "97c9feb0c39c946455d6812804a5ad28d02e57497f5913c570a777ce1aa4c6b9"
    },
    {
     "file": "woof/backend/translate/__init__.py",
-    "sha256": "fa665a819807c597363e98b5b3b6544edb5ea0a52c649dd8d3dd239ce983320b"
-   },
-   {
-    "file": "woof/backend/translate/__init__.py",
-    "sha256": "fa665a819807c597363e98b5b3b6544edb5ea0a52c649dd8d3dd239ce983320b"
+    "sha256": "eefde56b5c6b93071a1652b876947dd9ba3efe33e1ace86adf2cc91233f0c1e1"
    },
    {
     "file": "woof/backend/translate/__init__.py",
@@ -6337,27 +6337,27 @@
    },
    {
     "file": "woof/chem_micm.py",
-    "sha256": "dc7469778444d3aef67886e1f5e126cfb298680304b5b0c1d9f266bbd0f89b34"
+    "sha256": "1e9989f0be12a56335faf566462298d884a3f39fa8377bba194a9d2412f03625"
    },
    {
     "file": "woof/chem_micm.py",
-    "sha256": "dc7469778444d3aef67886e1f5e126cfb298680304b5b0c1d9f266bbd0f89b34"
+    "sha256": "4c37f4d6f8b195bd99d3fd7fea5c3c7120f5f0716249f7b65712f0dd03396694"
    },
    {
     "file": "woof/chem_micm.py",
-    "sha256": "dc7469778444d3aef67886e1f5e126cfb298680304b5b0c1d9f266bbd0f89b34"
+    "sha256": "8fcc4413203106a8b0c97b7aa7e12a247ac0c28036ae747daf6d9336138982a7"
    },
    {
     "file": "woof/chem_micm.py",
-    "sha256": "dc7469778444d3aef67886e1f5e126cfb298680304b5b0c1d9f266bbd0f89b34"
+    "sha256": "93d3265cbee8451e3fba86c4230f5a4110c3b02e2e089b2ced40bc815244b2dc"
    },
    {
     "file": "woof/chem_micm.py",
-    "sha256": "dc7469778444d3aef67886e1f5e126cfb298680304b5b0c1d9f266bbd0f89b34"
+    "sha256": "b3ebb22687e347152971b4184ef471af714263f05d9c942ef1eddf62db07a7f0"
    },
    {
     "file": "woof/chem_micm.py",
-    "sha256": "dc7469778444d3aef67886e1f5e126cfb298680304b5b0c1d9f266bbd0f89b34"
+    "sha256": "b9b6deb0a28f22160641568a34e1b5bb53ad4bbfec37711b796fabb0561b4209"
    },
    {
     "file": "woof/chem_micm.py",
@@ -6365,27 +6365,27 @@
    },
    {
     "file": "woof/core/acoustic_fusion.py",
-    "sha256": "fd34a7e8ba61eced5e9f0add0dd9454b680602ed46ac2cc0a045caa2b351885c"
+    "sha256": "02c8818e150d298cd83ed16836b5d8ba2c2f178738c79784429804d6ed57e546"
    },
    {
     "file": "woof/core/acoustic_fusion.py",
-    "sha256": "fd34a7e8ba61eced5e9f0add0dd9454b680602ed46ac2cc0a045caa2b351885c"
+    "sha256": "0a7644c38dc4c94fe3749785dcab60bb3acff7d674dd30f6c2e27c5bd4b7326e"
    },
    {
     "file": "woof/core/acoustic_fusion.py",
-    "sha256": "fd34a7e8ba61eced5e9f0add0dd9454b680602ed46ac2cc0a045caa2b351885c"
+    "sha256": "21859766f0718a4250e64fbfac0270dc3d0ec398a92dbfd2348239a58d389502"
    },
    {
     "file": "woof/core/acoustic_fusion.py",
-    "sha256": "fd34a7e8ba61eced5e9f0add0dd9454b680602ed46ac2cc0a045caa2b351885c"
+    "sha256": "e8c8a90cf2fdeb033a541402ddbee3a8a79ca4271ebb4eaf509f37140176ea06"
    },
    {
     "file": "woof/core/acoustic_fusion.py",
-    "sha256": "fd34a7e8ba61eced5e9f0add0dd9454b680602ed46ac2cc0a045caa2b351885c"
+    "sha256": "f382c1ea72ca557417a8a0686472fe4fead5e719c13d4ce15d75eb0a2f140f15"
    },
    {
     "file": "woof/core/acoustic_fusion.py",
-    "sha256": "fd34a7e8ba61eced5e9f0add0dd9454b680602ed46ac2cc0a045caa2b351885c"
+    "sha256": "fc6cea29a5e86e26ac7aee2e1984519760542bde106f6690a6d0a93daf9e4bc4"
    },
    {
     "file": "woof/core/acoustic_fusion.py",
@@ -6393,7 +6393,7 @@
    },
    {
     "file": "woof/core/cam3_fast.py",
-    "sha256": "f91cb2f401683aca6c2c31c32704ce9e86a4441e7d29300c9d93d8d2fef186f4"
+    "sha256": "f4ddc98e11fda84ef4c4ad67b20feeadec3510071901e02c138b08d4c84dea03"
    },
    {
     "file": "woof/core/cam3_fast.py",
@@ -6405,7 +6405,7 @@
    },
    {
     "file": "woof/core/cumulus_clock.py",
-    "sha256": "a13636196e595cba934c2e82c980bae2a74902845182e9750efeb3edecb520df"
+    "sha256": "64c16e571a4426685bf6c0a35889dfc8951740b20af685a45ec1f3143e2f3190"
    },
    {
     "file": "woof/core/cumulus_clock.py",
@@ -6413,51 +6413,51 @@
    },
    {
     "file": "woof/core/gbmpbl_fast.py",
-    "sha256": "f9d0a70635f6a7ffa273b8b50796564772087b32ffb0b364819ab14a33797357"
+    "sha256": "25b53308fcf336eedba3a2f73a2f45635c4c35f5b303f14e7bedd8b5a3dce8e1"
    },
    {
     "file": "woof/core/gbmpbl_fast.py",
-    "sha256": "f9d0a70635f6a7ffa273b8b50796564772087b32ffb0b364819ab14a33797357"
+    "sha256": "25b53308fcf336eedba3a2f73a2f45635c4c35f5b303f14e7bedd8b5a3dce8e1"
    },
    {
     "file": "woof/core/gbmpbl_fast.py",
-    "sha256": "f9d0a70635f6a7ffa273b8b50796564772087b32ffb0b364819ab14a33797357"
+    "sha256": "25b53308fcf336eedba3a2f73a2f45635c4c35f5b303f14e7bedd8b5a3dce8e1"
    },
    {
     "file": "woof/core/gbmpbl_fast.py",
-    "sha256": "f9d0a70635f6a7ffa273b8b50796564772087b32ffb0b364819ab14a33797357"
+    "sha256": "2e53555f615e5b22bf653db808149ed90b348c2d5c83ba10dcf11d6a24f8bf2c"
    },
    {
     "file": "woof/core/gbmpbl_fast.py",
-    "sha256": "f9d0a70635f6a7ffa273b8b50796564772087b32ffb0b364819ab14a33797357"
+    "sha256": "2e53555f615e5b22bf653db808149ed90b348c2d5c83ba10dcf11d6a24f8bf2c"
    },
    {
     "file": "woof/core/gbmpbl_fast.py",
-    "sha256": "f9d0a70635f6a7ffa273b8b50796564772087b32ffb0b364819ab14a33797357"
+    "sha256": "2e53555f615e5b22bf653db808149ed90b348c2d5c83ba10dcf11d6a24f8bf2c"
    },
    {
     "file": "woof/core/gbmpbl_fast.py",
-    "sha256": "f9d0a70635f6a7ffa273b8b50796564772087b32ffb0b364819ab14a33797357"
+    "sha256": "36a9a20d37b44ada7b689251b9d00a55f0442da1a3f2a4048e50f0c68e0b3bac"
    },
    {
     "file": "woof/core/gbmpbl_fast.py",
-    "sha256": "f9d0a70635f6a7ffa273b8b50796564772087b32ffb0b364819ab14a33797357"
+    "sha256": "433815c8aa2a211c0881778a234759505d1efbf5104b18cf9a68502fba48899c"
    },
    {
     "file": "woof/core/gbmpbl_fast.py",
-    "sha256": "f9d0a70635f6a7ffa273b8b50796564772087b32ffb0b364819ab14a33797357"
+    "sha256": "5f41b19bb0e73659878c2b3789433e5fba2db12d202abaca03d2d849ac95e398"
    },
    {
     "file": "woof/core/gbmpbl_fast.py",
-    "sha256": "f9d0a70635f6a7ffa273b8b50796564772087b32ffb0b364819ab14a33797357"
+    "sha256": "6d259835a5bee0a422ab1cf0e3a74d597904bc534521a4d995d4e3f63b8bf712"
    },
    {
     "file": "woof/core/gbmpbl_fast.py",
-    "sha256": "f9d0a70635f6a7ffa273b8b50796564772087b32ffb0b364819ab14a33797357"
+    "sha256": "9ca1b50e0017f76d2415b4267a2b252c5f6f8d6f0f59a066f9072ed636c1883f"
    },
    {
     "file": "woof/core/gbmpbl_fast.py",
-    "sha256": "f9d0a70635f6a7ffa273b8b50796564772087b32ffb0b364819ab14a33797357"
+    "sha256": "eb128a863d7678fabca02a9f0a7877e03b16898f894c21ace2dc0e3ac5d26eca"
    },
    {
     "file": "woof/core/gbmpbl_fast.py",
@@ -6465,7 +6465,7 @@
    },
    {
     "file": "woof/core/health_ledger.py",
-    "sha256": "461aa8bdafa1080490a0dd40ec9d4e3d668e12175fe448d819e8dfb99828a17b"
+    "sha256": "2d569e567dc0c58b8909ae66b52cfa361a23ba363bb03ac75f293c47c5a93750"
    },
    {
     "file": "woof/core/health_ledger.py",
@@ -6481,19 +6481,19 @@
    },
    {
     "file": "woof/core/kernels/__init__.py",
-    "sha256": "8c5126984c1be5464390ffa5891298fc3596069a04969bb5b671ba5357492842"
+    "sha256": "0dea47724568543123b2d39af5618d0ea9016639aca093604864f3635b2a88b5"
    },
    {
     "file": "woof/core/kernels/__init__.py",
-    "sha256": "8c5126984c1be5464390ffa5891298fc3596069a04969bb5b671ba5357492842"
+    "sha256": "0dea47724568543123b2d39af5618d0ea9016639aca093604864f3635b2a88b5"
    },
    {
     "file": "woof/core/kernels/__init__.py",
-    "sha256": "8c5126984c1be5464390ffa5891298fc3596069a04969bb5b671ba5357492842"
+    "sha256": "444fe130d3c3c7f975928377a213f7e164783bcb39bcd44762bc18de82e20000"
    },
    {
     "file": "woof/core/kernels/__init__.py",
-    "sha256": "8c5126984c1be5464390ffa5891298fc3596069a04969bb5b671ba5357492842"
+    "sha256": "6faa41c03b93776eadf4a8c01d23691b27d3c2f23156d8d384a674bb0355da11"
    },
    {
     "file": "woof/core/kernels/__init__.py",
@@ -6505,19 +6505,19 @@
    },
    {
     "file": "woof/core/mynn471_gpu.py",
-    "sha256": "faeaac03dc0fa5743db3c11f4a3664d016e3f226bb9b03b606e939ed7b9b2e64"
+    "sha256": "22a8081edc4e279c0170871460f6b7257a77f5933b0a15821e71485b062261d5"
    },
    {
     "file": "woof/core/mynn471_gpu.py",
-    "sha256": "faeaac03dc0fa5743db3c11f4a3664d016e3f226bb9b03b606e939ed7b9b2e64"
+    "sha256": "6faa41c03b93776eadf4a8c01d23691b27d3c2f23156d8d384a674bb0355da11"
    },
    {
     "file": "woof/core/mynn471_gpu.py",
-    "sha256": "faeaac03dc0fa5743db3c11f4a3664d016e3f226bb9b03b606e939ed7b9b2e64"
+    "sha256": "efacbcdfb5b79ac81510990356bd89d2329f6479e189943dcbe0353fd8f2010d"
    },
    {
     "file": "woof/core/mynn471_gpu.py",
-    "sha256": "faeaac03dc0fa5743db3c11f4a3664d016e3f226bb9b03b606e939ed7b9b2e64"
+    "sha256": "f5cacd08e5dfd9ddf8fda1cadcd45f409fcc7c5c166801dd876d54ebe7a874f7"
    },
    {
     "file": "woof/core/mynn471_gpu.py",
@@ -6537,7 +6537,7 @@
    },
    {
     "file": "woof/core/noahmp_column_slab.py",
-    "sha256": "f10ea9e6d50d33a07cdcdda9e66942e47908e117002ba0089b63a617df835039"
+    "sha256": "80d79c7d0bb17175ef88dcd715a81b65c1bedcba27e8f1adf3e32d61cc3f2ccb"
    },
    {
     "file": "woof/core/noahmp_column_slab.py",
@@ -6557,7 +6557,7 @@
    },
    {
     "file": "woof/core/noahmp_kernel_sources.py",
-    "sha256": "b6b6707d62ab288756166fd9b0c6fbb0edd9ffd9f2ec02bcade25f7cdec69f69"
+    "sha256": "9706a0d17b4af62dffbcfef8453a448823195b95d47603c4fff0da15bb3c3116"
    },
    {
     "file": "woof/core/noahmp_kernel_sources.py",
@@ -6565,43 +6565,43 @@
    },
    {
     "file": "woof/core/noahmp_slab_libm.py",
-    "sha256": "fb2879046241bfb662724db3d9f3056539c05e6198b69ae171d26c55c1f81da8"
+    "sha256": "291cd52ecada8efdd86f357dcb47095f2d232957b39d48c4377aecccdf522c53"
    },
    {
     "file": "woof/core/noahmp_slab_libm.py",
-    "sha256": "fb2879046241bfb662724db3d9f3056539c05e6198b69ae171d26c55c1f81da8"
+    "sha256": "4cfbb169d5bf8319bc383bbf9176173370e05bfe683cf6ae1b03a376b7696d92"
    },
    {
     "file": "woof/core/noahmp_slab_libm.py",
-    "sha256": "fb2879046241bfb662724db3d9f3056539c05e6198b69ae171d26c55c1f81da8"
+    "sha256": "5319e3349fe4352ba825e255f99e11a666fc0ea2087ee5ce5bba5af5f65017e6"
    },
    {
     "file": "woof/core/noahmp_slab_libm.py",
-    "sha256": "fb2879046241bfb662724db3d9f3056539c05e6198b69ae171d26c55c1f81da8"
+    "sha256": "5f1181fcf943f10a68ca5af009d4dccb7d8fa4ce3c20ccb304308360bec603a0"
    },
    {
     "file": "woof/core/noahmp_slab_libm.py",
-    "sha256": "fb2879046241bfb662724db3d9f3056539c05e6198b69ae171d26c55c1f81da8"
+    "sha256": "67ed71706b8ec90c425542aaa7d8c2858365553aaae5ef9ab322ce8c011053ba"
    },
    {
     "file": "woof/core/noahmp_slab_libm.py",
-    "sha256": "fb2879046241bfb662724db3d9f3056539c05e6198b69ae171d26c55c1f81da8"
+    "sha256": "6ef5c103a37bcaf2b81ffc5d681057e9da8229ae8611ca98aa751f9ccd9026f1"
    },
    {
     "file": "woof/core/noahmp_slab_libm.py",
-    "sha256": "fb2879046241bfb662724db3d9f3056539c05e6198b69ae171d26c55c1f81da8"
+    "sha256": "86631f9153f197126d9c063d254d47aca251ca63a07f8c62707a02225cbb320f"
    },
    {
     "file": "woof/core/noahmp_slab_libm.py",
-    "sha256": "fb2879046241bfb662724db3d9f3056539c05e6198b69ae171d26c55c1f81da8"
+    "sha256": "a817f5df3c4f7fdf1c34fad48187cd884e99d6164c5f2c242744c9bcee217e91"
    },
    {
     "file": "woof/core/noahmp_slab_libm.py",
-    "sha256": "fb2879046241bfb662724db3d9f3056539c05e6198b69ae171d26c55c1f81da8"
+    "sha256": "aa4b49c7d3d6d5e593bc026b1c7040786afd83049130fdaabaf3b15a45d87f16"
    },
    {
     "file": "woof/core/noahmp_slab_libm.py",
-    "sha256": "fb2879046241bfb662724db3d9f3056539c05e6198b69ae171d26c55c1f81da8"
+    "sha256": "fadda72219eeee6f483df887d12d03806c866e029f3354a77439cc56276a6c0a"
    },
    {
     "file": "woof/core/noahmp_slab_libm.py",
@@ -6609,59 +6609,59 @@
    },
    {
     "file": "woof/core/nssl1_coefficients.py",
-    "sha256": "b5e58ed428505ea85896780ac86e3635205b1e901160bdc261f45854761dc4ba"
+    "sha256": "1ed904403a22ad9c3dbe2055bd9e7355e75625135b20e048697ee5599186c8a5"
+   },
+   {
+    "file": "woof/core/nssl1_coefficients.py",
+    "sha256": "5cbfee1eac256e5155a7a2efb6a6d1d7c49bbd129492b0a4e7ee74cef8b4d7f3"
    },
    {
     "file": "woof/core/nssl1_coefficients.py",
     "sha256": "b5e58ed428505ea85896780ac86e3635205b1e901160bdc261f45854761dc4ba"
    },
    {
-    "file": "woof/core/nssl1_coefficients.py",
-    "sha256": "b5e58ed428505ea85896780ac86e3635205b1e901160bdc261f45854761dc4ba"
+    "file": "woof/core/ntiedtke_fused.py",
+    "sha256": "7113bd547cb8210592a945603c6a0e4b7ffaa3b6b1ad5095bcfd5a37be1f1fc9"
+   },
+   {
+    "file": "woof/core/ntiedtke_fused.py",
+    "sha256": "c878fd2d9bf3a11a227b6e59902a9edfeef9b12717be82db7b274e2246f50dbf"
    },
    {
     "file": "woof/core/ntiedtke_fused.py",
     "sha256": "fb39994494898b779e1121fb08b6479d254a466a308e686a7b0136d0eb239f15"
    },
    {
-    "file": "woof/core/ntiedtke_fused.py",
-    "sha256": "fb39994494898b779e1121fb08b6479d254a466a308e686a7b0136d0eb239f15"
-   },
-   {
-    "file": "woof/core/ntiedtke_fused.py",
-    "sha256": "fb39994494898b779e1121fb08b6479d254a466a308e686a7b0136d0eb239f15"
+    "file": "woof/core/rrtmg_lw.py",
+    "sha256": "15ceef67490453d170f14f830146473efb86844cacb2f64e3805229990db8f3c"
    },
    {
     "file": "woof/core/rrtmg_lw.py",
-    "sha256": "f6a194290a23e53f7b111ae6aa40467f4e4c1c20739d6d2132fb9dbf271a50ae"
+    "sha256": "98ca0e4cef63fb6109360d9744c2939aaf032a64de6a49358bfc40f055c65a96"
    },
    {
     "file": "woof/core/rrtmg_lw.py",
-    "sha256": "f6a194290a23e53f7b111ae6aa40467f4e4c1c20739d6d2132fb9dbf271a50ae"
+    "sha256": "9e1907d50d640992f3c686217ef85f05fd46165115e14434b0b2016c61919e2e"
    },
    {
     "file": "woof/core/rrtmg_lw.py",
-    "sha256": "f6a194290a23e53f7b111ae6aa40467f4e4c1c20739d6d2132fb9dbf271a50ae"
+    "sha256": "9e1907d50d640992f3c686217ef85f05fd46165115e14434b0b2016c61919e2e"
    },
    {
     "file": "woof/core/rrtmg_lw.py",
-    "sha256": "f6a194290a23e53f7b111ae6aa40467f4e4c1c20739d6d2132fb9dbf271a50ae"
+    "sha256": "9e1907d50d640992f3c686217ef85f05fd46165115e14434b0b2016c61919e2e"
    },
    {
     "file": "woof/core/rrtmg_lw.py",
-    "sha256": "f6a194290a23e53f7b111ae6aa40467f4e4c1c20739d6d2132fb9dbf271a50ae"
+    "sha256": "d4c687e41f63da9dcfa3370febce01c09ad31ec8e4142d26d064def80e158358"
    },
    {
     "file": "woof/core/rrtmg_lw.py",
-    "sha256": "f6a194290a23e53f7b111ae6aa40467f4e4c1c20739d6d2132fb9dbf271a50ae"
+    "sha256": "d4c687e41f63da9dcfa3370febce01c09ad31ec8e4142d26d064def80e158358"
    },
    {
     "file": "woof/core/rrtmg_lw.py",
-    "sha256": "f6a194290a23e53f7b111ae6aa40467f4e4c1c20739d6d2132fb9dbf271a50ae"
-   },
-   {
-    "file": "woof/core/rrtmg_lw.py",
-    "sha256": "f6a194290a23e53f7b111ae6aa40467f4e4c1c20739d6d2132fb9dbf271a50ae"
+    "sha256": "e2074bb687423ca04aa2971d5e50034ae4171ed94ef8266fc58d1d1fe7b77c87"
    },
    {
     "file": "woof/core/rrtmg_lw.py",
@@ -6677,11 +6677,11 @@
    },
    {
     "file": "woof/core/ruc_tier.py",
-    "sha256": "aa9ccd84b45884901e366e944adf265a04c4d1d694540b6a648c3be87420535f"
+    "sha256": "0e3d963b531891927577b741e8606dc7bfef79d353bcbc9a12851b034354def0"
    },
    {
     "file": "woof/core/ruc_tier.py",
-    "sha256": "aa9ccd84b45884901e366e944adf265a04c4d1d694540b6a648c3be87420535f"
+    "sha256": "4bc8bc5dbcdc17e4a9e80b7557ff7201c2b5f6a60355db37d30b1de184b30efb"
    },
    {
     "file": "woof/core/ruc_tier.py",
@@ -6729,7 +6729,7 @@
    },
    {
     "file": "woof/doctor.py",
-    "sha256": "a9db1b20389e71ce19eac4917d22a43dd65642e77f8b842d34215a6548d7b769"
+    "sha256": "38a12a42f4ae4a4b12d7787ece51de2586481e8c2e45b37b12cf717813790eef"
    },
    {
     "file": "woof/doctor.py",
@@ -6749,19 +6749,19 @@
    },
    {
     "file": "woof/ensemble/batch_kernel.py",
-    "sha256": "da1c16929ca37a5d716d1f9133a6b11b06ab5693e748fa8457d4f2c337d6445f"
+    "sha256": "0bb80e95c7ba64ed3724f3e4fc769352ca8c60416f8782bbcee3edb1ab442d20"
    },
    {
     "file": "woof/ensemble/batch_kernel.py",
-    "sha256": "da1c16929ca37a5d716d1f9133a6b11b06ab5693e748fa8457d4f2c337d6445f"
+    "sha256": "0dea47724568543123b2d39af5618d0ea9016639aca093604864f3635b2a88b5"
    },
    {
     "file": "woof/ensemble/batch_kernel.py",
-    "sha256": "da1c16929ca37a5d716d1f9133a6b11b06ab5693e748fa8457d4f2c337d6445f"
+    "sha256": "9ce47ee740264325dfe8509edd654587f816ced786aec4b17b39b2e5f018cc85"
    },
    {
     "file": "woof/ensemble/batch_kernel.py",
-    "sha256": "da1c16929ca37a5d716d1f9133a6b11b06ab5693e748fa8457d4f2c337d6445f"
+    "sha256": "b20529cdc4be23ad5c880d45e7d35e547e8759ae190864ce16ed822f60cb908e"
    },
    {
     "file": "woof/ensemble/batch_kernel.py",
@@ -6769,19 +6769,19 @@
    },
    {
     "file": "woof/ensemble/batch_layout_trials.py",
-    "sha256": "8e4dd8fa1717ff9d78fbc8fa6a58dbbd498fc0c8571d9df3783b3fc0985f5c49"
+    "sha256": "1f08c7024d3a7e0925f28f7043d430859052abe04ea4c7f288f481211981f951"
    },
    {
     "file": "woof/ensemble/batch_layout_trials.py",
-    "sha256": "8e4dd8fa1717ff9d78fbc8fa6a58dbbd498fc0c8571d9df3783b3fc0985f5c49"
+    "sha256": "484a8d1af5e3c4a6bd68477538c839fd0acc6e44d3f9ccadd7b416619161ec8c"
    },
    {
     "file": "woof/ensemble/batch_layout_trials.py",
-    "sha256": "8e4dd8fa1717ff9d78fbc8fa6a58dbbd498fc0c8571d9df3783b3fc0985f5c49"
+    "sha256": "6faa41c03b93776eadf4a8c01d23691b27d3c2f23156d8d384a674bb0355da11"
    },
    {
     "file": "woof/ensemble/batch_layout_trials.py",
-    "sha256": "8e4dd8fa1717ff9d78fbc8fa6a58dbbd498fc0c8571d9df3783b3fc0985f5c49"
+    "sha256": "8c8ba3121ce2648d65e109a8786278e023dcb9c8c26a73c26c5accfe8e833727"
    },
    {
     "file": "woof/ensemble/batch_layout_trials.py",
@@ -6801,7 +6801,7 @@
    },
    {
     "file": "woof/ensemble/batch_physics.py",
-    "sha256": "aa3255ad884eddc46748ca4e4232188cc3a22c415444c5b956f7dc7dd3c70246"
+    "sha256": "8af2856deefe4d5ddbbd56522760edb69388e69cf19f5344624270e76dea5e0f"
    },
    {
     "file": "woof/ensemble/batch_physics.py",
@@ -6813,7 +6813,7 @@
    },
    {
     "file": "woof/ensemble/batch_product_output.py",
-    "sha256": "d7c5d91bfbd90c9bb1a4963c3498a5cdcf56ee1bf3c633cc9e7f584a830a2031"
+    "sha256": "a0b10b1c539c685d17092e62d3d7b25c7785dfc98234ac2d87e9b8a9bac372e7"
    },
    {
     "file": "woof/ensemble/batch_product_output.py",
@@ -6821,11 +6821,11 @@
    },
    {
     "file": "woof/ensemble/batch_products.py",
-    "sha256": "9f4889e9a442ea3c13fd7cca68f53754710679463b40fafe03cda1c49006c86e"
+    "sha256": "1c0e694b12d86a13c5dc750eaefa7d9d00da7946ebf256c4930f6309c4ce99df"
    },
    {
     "file": "woof/ensemble/batch_products.py",
-    "sha256": "9f4889e9a442ea3c13fd7cca68f53754710679463b40fafe03cda1c49006c86e"
+    "sha256": "9c978f3894d1c8b119348f975e01c1b7ed3aefd445c852087fcf1048a44cb713"
    },
    {
     "file": "woof/ensemble/batch_products.py",
@@ -6833,11 +6833,11 @@
    },
    {
     "file": "woof/ensemble/batch_ruc.py",
-    "sha256": "e0ac26a424b218ffb9ab3b2ed8d982487047d01bdde5974504a5f2654d286667"
+    "sha256": "229798d367ef258d578966a64d2555c8749a54129f059dbb7429491657680897"
    },
    {
     "file": "woof/ensemble/batch_ruc.py",
-    "sha256": "e0ac26a424b218ffb9ab3b2ed8d982487047d01bdde5974504a5f2654d286667"
+    "sha256": "8156976eb66890ee09076f8837fcd9dae3214b3588ab49d2fa7255afe01d4657"
    },
    {
     "file": "woof/ensemble/batch_ruc.py",
@@ -6869,39 +6869,39 @@
    },
    {
     "file": "woof/hex/cuda_acoustic_fusion_v841.py",
-    "sha256": "b60a3c426b9263706011821ead3123ebe7c06d83c8caa7705ab1c5d6559689ef"
+    "sha256": "229798d367ef258d578966a64d2555c8749a54129f059dbb7429491657680897"
+   },
+   {
+    "file": "woof/hex/cuda_acoustic_fusion_v841.py",
+    "sha256": "229798d367ef258d578966a64d2555c8749a54129f059dbb7429491657680897"
    },
    {
     "file": "woof/hex/cuda_acoustic_fusion_v841.py",
     "sha256": "b60a3c426b9263706011821ead3123ebe7c06d83c8caa7705ab1c5d6559689ef"
    },
    {
-    "file": "woof/hex/cuda_acoustic_fusion_v841.py",
-    "sha256": "b60a3c426b9263706011821ead3123ebe7c06d83c8caa7705ab1c5d6559689ef"
+    "file": "woof/hex/cuda_acoustic_lts.py",
+    "sha256": "229798d367ef258d578966a64d2555c8749a54129f059dbb7429491657680897"
    },
    {
     "file": "woof/hex/cuda_acoustic_lts.py",
-    "sha256": "b363ec117395d084819502257b87a4b603219d5e033044c375901bdefd97ff77"
+    "sha256": "229798d367ef258d578966a64d2555c8749a54129f059dbb7429491657680897"
    },
    {
     "file": "woof/hex/cuda_acoustic_lts.py",
-    "sha256": "b363ec117395d084819502257b87a4b603219d5e033044c375901bdefd97ff77"
+    "sha256": "229798d367ef258d578966a64d2555c8749a54129f059dbb7429491657680897"
    },
    {
     "file": "woof/hex/cuda_acoustic_lts.py",
-    "sha256": "b363ec117395d084819502257b87a4b603219d5e033044c375901bdefd97ff77"
+    "sha256": "55832c9fe801cad5de9421fbcbfbd8e73a07982b61566a7eaed5f69855a213b6"
    },
    {
     "file": "woof/hex/cuda_acoustic_lts.py",
-    "sha256": "b363ec117395d084819502257b87a4b603219d5e033044c375901bdefd97ff77"
+    "sha256": "8410fe23e7a69bc5802b9cc5f783c5116687bfda9736ae80d67754c9420ad6ad"
    },
    {
     "file": "woof/hex/cuda_acoustic_lts.py",
-    "sha256": "b363ec117395d084819502257b87a4b603219d5e033044c375901bdefd97ff77"
-   },
-   {
-    "file": "woof/hex/cuda_acoustic_lts.py",
-    "sha256": "b363ec117395d084819502257b87a4b603219d5e033044c375901bdefd97ff77"
+    "sha256": "976b6c37d0e9e206665c4f277f101c8c173428a6d0e986e6e1843ffd31c6f08b"
    },
    {
     "file": "woof/hex/cuda_acoustic_lts.py",
@@ -6917,7 +6917,7 @@
    },
    {
     "file": "woof/hex/cuda_backend/aot_build.py",
-    "sha256": "e6dfcb6c8cdaff5d3a90be3e47b360fcd8e5341097800cc0cf84e86d513719ff"
+    "sha256": "623399132caef8be8ea36627a416f69fd1af3fc5bbcd722f256b030d2e823c02"
    },
    {
     "file": "woof/hex/cuda_backend/aot_build.py",
@@ -6949,7 +6949,7 @@
    },
    {
     "file": "woof/hex/cuda_driver.py",
-    "sha256": "e7735ddb29c64294d04dc94b5b1168fdb8f6b38b2d986b947edf25e387116e7d"
+    "sha256": "54c4ed6f0781dab7831091b9832215c3a806f9635725390ca8182e7477411da9"
    },
    {
     "file": "woof/hex/cuda_driver.py",
@@ -7009,7 +7009,7 @@
    },
    {
     "file": "woof/hex/cuda_les_v841.py",
-    "sha256": "d9e30ca92ba0fd3dc8d0aa6cae6c6111b26a7376cc50a1c165dffd60ea205153"
+    "sha256": "d8654af2887caa9d3850d288ed18302ee7d7be897f0f047e32b3bf1c2a8d35e8"
    },
    {
     "file": "woof/hex/cuda_les_v841.py",
@@ -7025,7 +7025,7 @@
    },
    {
     "file": "woof/hex/cuda_physics_prep_v841.py",
-    "sha256": "4935b970119225479f6e4e853d9e4b5ef2226d8be02b000d406e01656808ea6f"
+    "sha256": "1f0789547151977bf64fc95f4dbf183c8606b87ac1d70b7fda6d05653b6a38c4"
    },
    {
     "file": "woof/hex/cuda_physics_prep_v841.py",
@@ -7033,7 +7033,7 @@
    },
    {
     "file": "woof/hex/cuda_physics_v841.py",
-    "sha256": "c3d5d2be049ac316742967ff78149682d2f3031081a3677fbe634e9b3c603c47"
+    "sha256": "a84a300da18b055ec99e0089dcf95840178b9dd52f1a40883786f0f01904c359"
    },
    {
     "file": "woof/hex/cuda_physics_v841.py",
@@ -7045,7 +7045,7 @@
    },
    {
     "file": "woof/hex/cuda_regional_v841.py",
-    "sha256": "3becca6e64ef4607de51d91a606410131024895fba00d6cb39c7395d396da529"
+    "sha256": "229798d367ef258d578966a64d2555c8749a54129f059dbb7429491657680897"
    },
    {
     "file": "woof/hex/cuda_regional_v841.py",
@@ -7093,11 +7093,11 @@
    },
    {
     "file": "woof/hex/mixing_v842.py",
-    "sha256": "d02fc20f803f88aeb6ba2f3a05efffcf2f9b0ac5decb5df4d04d9465f6ef490a"
+    "sha256": "22fe3a6ffcfa0ade5542245a43785323373692785ba1f95e9034f736a6679913"
    },
    {
     "file": "woof/hex/mixing_v842.py",
-    "sha256": "d02fc20f803f88aeb6ba2f3a05efffcf2f9b0ac5decb5df4d04d9465f6ef490a"
+    "sha256": "3bcaa26eef26a80b4bd2b99c57e5a4261fe2e21b559800445e5e996a3c09503a"
    },
    {
     "file": "woof/hex/mixing_v842.py",
@@ -7133,7 +7133,7 @@
    },
    {
     "file": "woof/hex/moving_saturation_cuda.py",
-    "sha256": "ab4f30e4a0a99035588ed2b31bbdcb1c99772a648efbed8a5d4ca6a362b99aae"
+    "sha256": "103521f906f97d9c6becbe78bd06ecc88b685222ca4425a0020a3b1e8624bbe8"
    },
    {
     "file": "woof/hex/moving_saturation_cuda.py",
@@ -7145,7 +7145,7 @@
    },
    {
     "file": "woof/hex/moving_velocity_cuda.py",
-    "sha256": "f5e5dbfe8dbb4220b3fe2d1639c19c175ca10096e780c3f590a1636aa3e4bf14"
+    "sha256": "aa0a2c16b7e430beebe1dbf3355cf79445b905f4bade197de17df31474ac4d1a"
    },
    {
     "file": "woof/hex/moving_velocity_cuda.py",
@@ -7153,19 +7153,19 @@
    },
    {
     "file": "woof/hex/moving_vertical_cuda.py",
-    "sha256": "b4614dd4221d921e595ee89f1cb841ee63aaee069ecd91f649a78b7fdcba2258"
+    "sha256": "16645f8b80b86bda06131bdf1cffc4269b79a35cda489d433ba08cb67ba43aa4"
    },
    {
     "file": "woof/hex/moving_vertical_cuda.py",
-    "sha256": "b4614dd4221d921e595ee89f1cb841ee63aaee069ecd91f649a78b7fdcba2258"
+    "sha256": "3194bac5f30c153a6579ecede72e30a312dd77b44fc61d24b5b7c1f7c5d2ab7d"
    },
    {
     "file": "woof/hex/moving_vertical_cuda.py",
-    "sha256": "b4614dd4221d921e595ee89f1cb841ee63aaee069ecd91f649a78b7fdcba2258"
+    "sha256": "8909904f66767a60ce578cb132dfe8b3199662881aec5c7c5421ff6095f96bd3"
    },
    {
     "file": "woof/hex/moving_vertical_cuda.py",
-    "sha256": "b4614dd4221d921e595ee89f1cb841ee63aaee069ecd91f649a78b7fdcba2258"
+    "sha256": "a9ccf4f523311fae31a237fe6059dabafeabb6ea0da52872507518453f1818fb"
    },
    {
     "file": "woof/hex/moving_vertical_cuda.py",
@@ -7197,19 +7197,19 @@
    },
    {
     "file": "woof/hex/mpasphys/bl_mynn_v842.py",
-    "sha256": "b1ff86e0ca8d0df3867a5612572c26144b1f50aaeac3ead7fa01e3052ee22850"
+    "sha256": "098fb7679de6c71a5ccc11955facb846dc9d92c7ef2b57af70d39ddd1c5b2910"
    },
    {
     "file": "woof/hex/mpasphys/bl_mynn_v842.py",
-    "sha256": "b1ff86e0ca8d0df3867a5612572c26144b1f50aaeac3ead7fa01e3052ee22850"
+    "sha256": "4001ac466ae48dd9adca57d0f5040c30f7ee6930bb4832f41586daecc96ef0f7"
    },
    {
     "file": "woof/hex/mpasphys/bl_mynn_v842.py",
-    "sha256": "b1ff86e0ca8d0df3867a5612572c26144b1f50aaeac3ead7fa01e3052ee22850"
+    "sha256": "8a9dd2bf7d016b93009f18909071362aa12bd265de7a0036c1c2cbc41a29bdd1"
    },
    {
     "file": "woof/hex/mpasphys/bl_mynn_v842.py",
-    "sha256": "b1ff86e0ca8d0df3867a5612572c26144b1f50aaeac3ead7fa01e3052ee22850"
+    "sha256": "a08714affd5fe11e34ed7469d869cacd8f1cf26cc16cd3614e568f9f705fbd21"
    },
    {
     "file": "woof/hex/mpasphys/bl_mynn_v842.py",
@@ -7229,27 +7229,27 @@
    },
    {
     "file": "woof/hex/mpasphys/gf_lanes.py",
-    "sha256": "deecfe6f311e20df4f673c325b40b172df3466327125fe4b86a6c98983b89aee"
+    "sha256": "0be5dd8fb911f62803c7c473fced76c7bb35d4aabaf17a89c556d9d762af6a72"
    },
    {
     "file": "woof/hex/mpasphys/gf_lanes.py",
-    "sha256": "deecfe6f311e20df4f673c325b40b172df3466327125fe4b86a6c98983b89aee"
+    "sha256": "1d0c28399003c130a59e3dac853ed59e8f91295b853683e7d63bda5f333b40fd"
    },
    {
     "file": "woof/hex/mpasphys/gf_lanes.py",
-    "sha256": "deecfe6f311e20df4f673c325b40b172df3466327125fe4b86a6c98983b89aee"
+    "sha256": "62f1b879c84c9dc005705cbb9380eb2fce22bfb5ab7944f76b6836237f826e2d"
    },
    {
     "file": "woof/hex/mpasphys/gf_lanes.py",
-    "sha256": "deecfe6f311e20df4f673c325b40b172df3466327125fe4b86a6c98983b89aee"
+    "sha256": "8bf8dd8c482cc0a8e8398949896b7d7c29a150aa9ac260594539a1fae724865d"
    },
    {
     "file": "woof/hex/mpasphys/gf_lanes.py",
-    "sha256": "deecfe6f311e20df4f673c325b40b172df3466327125fe4b86a6c98983b89aee"
+    "sha256": "9699ac8510d76fa55b2c5459581aebae38bab4d0daf680f71728b314fa2160f8"
    },
    {
     "file": "woof/hex/mpasphys/gf_lanes.py",
-    "sha256": "deecfe6f311e20df4f673c325b40b172df3466327125fe4b86a6c98983b89aee"
+    "sha256": "ce69829ebb3f6c474aaf9a90cbbc83b46d8544dcbf341a7dd34b24ea9367fbcc"
    },
    {
     "file": "woof/hex/mpasphys/gf_lanes.py",
@@ -7257,23 +7257,23 @@
    },
    {
     "file": "woof/hex/mpasphys/gf_mpas_v842.py",
-    "sha256": "9aa063267219f4641e0bd841acaadee35a60a29b4fa69358ab45f76209a0ce30"
+    "sha256": "06d46f29fab6fa59c9d0ff92678de7da2a813e15683dd367f0a59752c6af7e6a"
    },
    {
     "file": "woof/hex/mpasphys/gf_mpas_v842.py",
-    "sha256": "9aa063267219f4641e0bd841acaadee35a60a29b4fa69358ab45f76209a0ce30"
+    "sha256": "475934f4caa0163b9fde2a81c644af83be89d0797a84f4a944907cba8333145e"
    },
    {
     "file": "woof/hex/mpasphys/gf_mpas_v842.py",
-    "sha256": "9aa063267219f4641e0bd841acaadee35a60a29b4fa69358ab45f76209a0ce30"
+    "sha256": "56644ef01cb7b49768586c8d5cbd4aed5d3eaacaf3c4b090ad38f164ec992d4c"
    },
    {
     "file": "woof/hex/mpasphys/gf_mpas_v842.py",
-    "sha256": "9aa063267219f4641e0bd841acaadee35a60a29b4fa69358ab45f76209a0ce30"
+    "sha256": "888b14ae6cf6387a85f1dfda3a2b90c6a9e83cbaff6901593f7297943d80ddf7"
    },
    {
     "file": "woof/hex/mpasphys/gf_mpas_v842.py",
-    "sha256": "9aa063267219f4641e0bd841acaadee35a60a29b4fa69358ab45f76209a0ce30"
+    "sha256": "9567703c763381dadfc76afe568514fb5dd5a6704c7e18da6b1a1277fc25d189"
    },
    {
     "file": "woof/hex/mpasphys/gf_mpas_v842.py",
@@ -7285,11 +7285,11 @@
    },
    {
     "file": "woof/hex/mpasphys/kessler_v842.py",
-    "sha256": "faf5f84fa841cc7a41150e56036a839bcc9c28c009730d86aa1b83e1e76d06b7"
+    "sha256": "7f0523b1fc6908db38a46a0c487e5539e52b460730cbb0953fd60c26bc8f99df"
    },
    {
     "file": "woof/hex/mpasphys/kessler_v842.py",
-    "sha256": "faf5f84fa841cc7a41150e56036a839bcc9c28c009730d86aa1b83e1e76d06b7"
+    "sha256": "940b7c999abcd9a9d8ad7e55f636e2ea9de6a5dbd4d825c5b4bedfbc37d19697"
    },
    {
     "file": "woof/hex/mpasphys/kessler_v842.py",
@@ -7305,43 +7305,43 @@
    },
    {
     "file": "woof/hex/mpasphys/noah_v842.py",
-    "sha256": "f6f984bf9ff02aa8f736cd4e1c25d5a1c0b902245cb7d83afe77ca6a28e53d99"
+    "sha256": "11979eb34ee976e25ba90eae680941d98ea83403e1dd3edf3fee3fd1a79158ae"
    },
    {
     "file": "woof/hex/mpasphys/noah_v842.py",
-    "sha256": "f6f984bf9ff02aa8f736cd4e1c25d5a1c0b902245cb7d83afe77ca6a28e53d99"
+    "sha256": "26beef4a131e7a26ee8ea1254f917304e2154870443657e52a4d5be3c2a3a75b"
    },
    {
     "file": "woof/hex/mpasphys/noah_v842.py",
-    "sha256": "f6f984bf9ff02aa8f736cd4e1c25d5a1c0b902245cb7d83afe77ca6a28e53d99"
+    "sha256": "4c15e1cf0469085a51851364d46a4b8f1c1c417b05b2530ceef3a2a72b1459cd"
    },
    {
     "file": "woof/hex/mpasphys/noah_v842.py",
-    "sha256": "f6f984bf9ff02aa8f736cd4e1c25d5a1c0b902245cb7d83afe77ca6a28e53d99"
+    "sha256": "64822b0c834f5a5b652d0675c6b5d391e70ec9d635a8ced48c960675cbb227d3"
    },
    {
     "file": "woof/hex/mpasphys/noah_v842.py",
-    "sha256": "f6f984bf9ff02aa8f736cd4e1c25d5a1c0b902245cb7d83afe77ca6a28e53d99"
+    "sha256": "6685139cf2e7f0eef60a0c66f3795222c81f795eee6135c1f65c5b51ea6bf38c"
    },
    {
     "file": "woof/hex/mpasphys/noah_v842.py",
-    "sha256": "f6f984bf9ff02aa8f736cd4e1c25d5a1c0b902245cb7d83afe77ca6a28e53d99"
+    "sha256": "826c2efa310b8bae454bf31e4208c1c77f3daf86126b50084f5fc23155484c65"
    },
    {
     "file": "woof/hex/mpasphys/noah_v842.py",
-    "sha256": "f6f984bf9ff02aa8f736cd4e1c25d5a1c0b902245cb7d83afe77ca6a28e53d99"
+    "sha256": "c2be92dd7aa73a7997508f2db42a19c2019493898dad5564f2c87ca6522f0bbf"
    },
    {
     "file": "woof/hex/mpasphys/noah_v842.py",
-    "sha256": "f6f984bf9ff02aa8f736cd4e1c25d5a1c0b902245cb7d83afe77ca6a28e53d99"
+    "sha256": "de0967a244288e4a096638d422a3bdb0c31f01ea16bf45a1faf83cb532e30e60"
    },
    {
     "file": "woof/hex/mpasphys/noah_v842.py",
-    "sha256": "f6f984bf9ff02aa8f736cd4e1c25d5a1c0b902245cb7d83afe77ca6a28e53d99"
+    "sha256": "df572badb9365891cfa5390b96b9f1283fd9d6aeb3cb711c5a8f39fa19d78a20"
    },
    {
     "file": "woof/hex/mpasphys/noah_v842.py",
-    "sha256": "f6f984bf9ff02aa8f736cd4e1c25d5a1c0b902245cb7d83afe77ca6a28e53d99"
+    "sha256": "f1f5f1ccdc852bcd104b16f211bd3e12cdfebae9c6409c1ec8c67447b7febffe"
    },
    {
     "file": "woof/hex/mpasphys/noah_v842.py",
@@ -7349,7 +7349,7 @@
    },
    {
     "file": "woof/hex/mpasphys/ntiedtke_v842.py",
-    "sha256": "f65e269936403c392e4a20b885edba0b9fd7e38a9f79815c5dd64aa661f6e21e"
+    "sha256": "1b0ab1fe710f6057137fa1acaf9b104d3dba676a572fb6f498e0630a256db78e"
    },
    {
     "file": "woof/hex/mpasphys/ntiedtke_v842.py",
@@ -7369,23 +7369,23 @@
    },
    {
     "file": "woof/hex/mpasphys/radshared_v842.py",
-    "sha256": "e3e3c40daa10304c4685e716673941f5929672a7fb70a8ff8a3ac7c5663af3d5"
+    "sha256": "92defbfe04c116df18f7329d93933bc39d97f1285a034737ee53f186a0e5bd86"
+   },
+   {
+    "file": "woof/hex/mpasphys/radshared_v842.py",
+    "sha256": "995f88a945fba44057b6ea0bc71af5b59f8cdd2948cbe2b68a53d259421a01e7"
    },
    {
     "file": "woof/hex/mpasphys/radshared_v842.py",
     "sha256": "e3e3c40daa10304c4685e716673941f5929672a7fb70a8ff8a3ac7c5663af3d5"
    },
    {
-    "file": "woof/hex/mpasphys/radshared_v842.py",
-    "sha256": "e3e3c40daa10304c4685e716673941f5929672a7fb70a8ff8a3ac7c5663af3d5"
+    "file": "woof/hex/mpasphys/resident_v842.py",
+    "sha256": "9c7a78319a75d1ff2a08a110470db14b6b9e208a5d997ed4becade7629e9ba8b"
    },
    {
     "file": "woof/hex/mpasphys/resident_v842.py",
-    "sha256": "f9dd4446ab770bb97dbf4d39808027b6b46cafe879fc4a45f2dc19df0af5229e"
-   },
-   {
-    "file": "woof/hex/mpasphys/resident_v842.py",
-    "sha256": "f9dd4446ab770bb97dbf4d39808027b6b46cafe879fc4a45f2dc19df0af5229e"
+    "sha256": "ab778b01e3af2b717f33765caabb9dfc0f5b885bf2bd5c2e8cd65697368b767d"
    },
    {
     "file": "woof/hex/mpasphys/resident_v842.py",
@@ -7393,27 +7393,27 @@
    },
    {
     "file": "woof/hex/mpasphys/resources_build.py",
-    "sha256": "dfa76709be1493507a799f8a12e3883c02f6501106acc3e3ff3604d54ad9584b"
+    "sha256": "4cab801b99eae98dc34d64d00e374d8af233c1b8b6e03f1fcbece21220d2cb86"
+   },
+   {
+    "file": "woof/hex/mpasphys/resources_build.py",
+    "sha256": "b237673570dea6fe57c9186e9054b382ec1ace4669f49650fe4783c6c85be6c4"
    },
    {
     "file": "woof/hex/mpasphys/resources_build.py",
     "sha256": "dfa76709be1493507a799f8a12e3883c02f6501106acc3e3ff3604d54ad9584b"
    },
    {
-    "file": "woof/hex/mpasphys/resources_build.py",
-    "sha256": "dfa76709be1493507a799f8a12e3883c02f6501106acc3e3ff3604d54ad9584b"
+    "file": "woof/hex/mpasphys/rrfs/bl_mynnedmf_c6d08709.py",
+    "sha256": "32ce71b78a8438c208a62e375ff44eab3e2aa57cfdabdee8e4f62ab11c228c43"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/bl_mynnedmf_c6d08709.py",
-    "sha256": "eb977779f6ce28149524e8fbd6c8214e1866eb5e6285b0ffb3f6206d079b2e10"
+    "sha256": "d5c2ae7df56d5d19932733cadc05551e18b37712974778ad9b416a549abd0da4"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/bl_mynnedmf_c6d08709.py",
-    "sha256": "eb977779f6ce28149524e8fbd6c8214e1866eb5e6285b0ffb3f6206d079b2e10"
-   },
-   {
-    "file": "woof/hex/mpasphys/rrfs/bl_mynnedmf_c6d08709.py",
-    "sha256": "eb977779f6ce28149524e8fbd6c8214e1866eb5e6285b0ffb3f6206d079b2e10"
+    "sha256": "d9410165f9d1be5ed13fbc3bd315698474ae8484387b37866dd1dc54a24d2ebe"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/bl_mynnedmf_c6d08709.py",
@@ -7421,59 +7421,59 @@
    },
    {
     "file": "woof/hex/mpasphys/rrfs/bl_mynnedmf_c942418.py",
-    "sha256": "eb977779f6ce28149524e8fbd6c8214e1866eb5e6285b0ffb3f6206d079b2e10"
+    "sha256": "9630f0c5b0aa5cb4d56ef1f8100e2836132f26a19ed1dc5175510c0cb2ae3694"
+   },
+   {
+    "file": "woof/hex/mpasphys/rrfs/bl_mynnedmf_c942418.py",
+    "sha256": "d5c2ae7df56d5d19932733cadc05551e18b37712974778ad9b416a549abd0da4"
+   },
+   {
+    "file": "woof/hex/mpasphys/rrfs/bl_mynnedmf_c942418.py",
+    "sha256": "d9410165f9d1be5ed13fbc3bd315698474ae8484387b37866dd1dc54a24d2ebe"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/bl_mynnedmf_c942418.py",
     "sha256": "eb977779f6ce28149524e8fbd6c8214e1866eb5e6285b0ffb3f6206d079b2e10"
    },
    {
-    "file": "woof/hex/mpasphys/rrfs/bl_mynnedmf_c942418.py",
-    "sha256": "eb977779f6ce28149524e8fbd6c8214e1866eb5e6285b0ffb3f6206d079b2e10"
-   },
-   {
-    "file": "woof/hex/mpasphys/rrfs/bl_mynnedmf_c942418.py",
-    "sha256": "eb977779f6ce28149524e8fbd6c8214e1866eb5e6285b0ffb3f6206d079b2e10"
+    "file": "woof/hex/mpasphys/rrfs/cu_gfl_bf6a4b0.py",
+    "sha256": "14a88963bed7834004d474add7bebcba0c9ebfa4e15533978eee905d7c5427e9"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/cu_gfl_bf6a4b0.py",
-    "sha256": "fa6c9f43b3de36f3f7b0644fe78ec40910cc4815c4e88694ba684c700c0bbacc"
+    "sha256": "2329a57b9b5e932f6df0f7d6ddbf91d9591f65ede70da0049d7238a3e3af379d"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/cu_gfl_bf6a4b0.py",
-    "sha256": "fa6c9f43b3de36f3f7b0644fe78ec40910cc4815c4e88694ba684c700c0bbacc"
+    "sha256": "3756d5d4433a0c9a67bb1c0937e6e2d9eaeb05a6bcd9d948c4244947049abb1f"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/cu_gfl_bf6a4b0.py",
-    "sha256": "fa6c9f43b3de36f3f7b0644fe78ec40910cc4815c4e88694ba684c700c0bbacc"
+    "sha256": "37cd0ec3799d406ea0a26b6fcc86c4efce210d493ff884c4cbe003dfe6316b06"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/cu_gfl_bf6a4b0.py",
-    "sha256": "fa6c9f43b3de36f3f7b0644fe78ec40910cc4815c4e88694ba684c700c0bbacc"
+    "sha256": "3e02e3f661242c1fc4cda15891c78409cae5b514af9899667971938822242ebd"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/cu_gfl_bf6a4b0.py",
-    "sha256": "fa6c9f43b3de36f3f7b0644fe78ec40910cc4815c4e88694ba684c700c0bbacc"
+    "sha256": "45d8c5daa41dd235615880f33f877fce70c6369b8a867fac3544d6122aab7b8e"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/cu_gfl_bf6a4b0.py",
-    "sha256": "fa6c9f43b3de36f3f7b0644fe78ec40910cc4815c4e88694ba684c700c0bbacc"
+    "sha256": "7f70dcd278ddcb76080b159480b6c7c84ccc1fe01e2fead31939562b62c71d14"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/cu_gfl_bf6a4b0.py",
-    "sha256": "fa6c9f43b3de36f3f7b0644fe78ec40910cc4815c4e88694ba684c700c0bbacc"
+    "sha256": "86344902029a9fab649a5b5a55bb3361681a2d6ec1060455f64f4b01a459ab03"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/cu_gfl_bf6a4b0.py",
-    "sha256": "fa6c9f43b3de36f3f7b0644fe78ec40910cc4815c4e88694ba684c700c0bbacc"
+    "sha256": "c5a8b8f6b8d29b4e87cfd576ab76b4175d67f439e97b3d055115d6d78b96a960"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/cu_gfl_bf6a4b0.py",
-    "sha256": "fa6c9f43b3de36f3f7b0644fe78ec40910cc4815c4e88694ba684c700c0bbacc"
-   },
-   {
-    "file": "woof/hex/mpasphys/rrfs/cu_gfl_bf6a4b0.py",
-    "sha256": "fa6c9f43b3de36f3f7b0644fe78ec40910cc4815c4e88694ba684c700c0bbacc"
+    "sha256": "e2610f5077264fa6bf58e418effe83525d1e387d5b715a8940a629207616f486"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/cu_gfl_bf6a4b0.py",
@@ -7481,31 +7481,31 @@
    },
    {
     "file": "woof/hex/mpasphys/rrfs/driver_rrfs.py",
-    "sha256": "ff73d1bf84485af2b4f1b0c683468609fcc2f6678e81324e4882c26263f5f365"
+    "sha256": "4b53067291d57d31cf989c552be25fcc32bf530af8615677b10b6d0439780748"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/driver_rrfs.py",
-    "sha256": "ff73d1bf84485af2b4f1b0c683468609fcc2f6678e81324e4882c26263f5f365"
+    "sha256": "57612752d1a8a0b1fe73628539767680691b8f150fe357b2e32c3a8b4646ec7e"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/driver_rrfs.py",
-    "sha256": "ff73d1bf84485af2b4f1b0c683468609fcc2f6678e81324e4882c26263f5f365"
+    "sha256": "583d27b2051e9ce3fea664748f84b6473d026ec1a74834cfcc7faf97fd7fbea4"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/driver_rrfs.py",
-    "sha256": "ff73d1bf84485af2b4f1b0c683468609fcc2f6678e81324e4882c26263f5f365"
+    "sha256": "8765aff207116833583a9d238f34f0c0a07910d9886c5034052958dd3438e4ff"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/driver_rrfs.py",
-    "sha256": "ff73d1bf84485af2b4f1b0c683468609fcc2f6678e81324e4882c26263f5f365"
+    "sha256": "879ffc3d61fb71ee8bca605ca589e90dd4fa4cfdb5d3e44f8ab68a4095fb0687"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/driver_rrfs.py",
-    "sha256": "ff73d1bf84485af2b4f1b0c683468609fcc2f6678e81324e4882c26263f5f365"
+    "sha256": "988f47a600560eea44024caf9b41bf341ccab6d8bb0f5ff0a0748777f6f74faf"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/driver_rrfs.py",
-    "sha256": "ff73d1bf84485af2b4f1b0c683468609fcc2f6678e81324e4882c26263f5f365"
+    "sha256": "aef85825a955cfae15820e1af593a9918246d84baac9c2db6a6d79c4f5c68d57"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/driver_rrfs.py",
@@ -7521,23 +7521,23 @@
    },
    {
     "file": "woof/hex/mpasphys/rrfs/mp_nssl2m.py",
-    "sha256": "f15e58089cca155cb6c7c29ff22e55998eb7546c6d2f36450710991cbba20bf6"
+    "sha256": "78b2c87e099037b0d3b2fd95cd456569a487273d5fccfa59c18f86af6b29b280"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/mp_nssl2m.py",
-    "sha256": "f15e58089cca155cb6c7c29ff22e55998eb7546c6d2f36450710991cbba20bf6"
+    "sha256": "972de7893beae9727ffd2ce264d82b978973d532b355929a72181b1cb26f36ba"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/mp_nssl2m.py",
-    "sha256": "f15e58089cca155cb6c7c29ff22e55998eb7546c6d2f36450710991cbba20bf6"
+    "sha256": "bad26f08915e79474350cd64cdd8f29067a0e460412e821d2aaa03c59db984db"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/mp_nssl2m.py",
-    "sha256": "f15e58089cca155cb6c7c29ff22e55998eb7546c6d2f36450710991cbba20bf6"
+    "sha256": "e2a724acb3a10189ec59f8ac0ef15f586359107487c03768cd62282e56ac36b2"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/mp_nssl2m.py",
-    "sha256": "f15e58089cca155cb6c7c29ff22e55998eb7546c6d2f36450710991cbba20bf6"
+    "sha256": "eb977779f6ce28149524e8fbd6c8214e1866eb5e6285b0ffb3f6206d079b2e10"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/mp_nssl2m.py",
@@ -7545,235 +7545,235 @@
    },
    {
     "file": "woof/hex/mpasphys/rrfs/myj.py",
-    "sha256": "8fdebf0d970241b321c44242af9fd6bbc34c94d19f3339ae3aebdd684cd29202"
+    "sha256": "3c576d045654d5672094302a204ce674751025d4b6bf4c3cabe988547b2fca79"
+   },
+   {
+    "file": "woof/hex/mpasphys/rrfs/myj.py",
+    "sha256": "4a67d3a26bed8642c23e8e609faf061162444a337a4c0a875badfc432d36ec46"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/myj.py",
     "sha256": "8fdebf0d970241b321c44242af9fd6bbc34c94d19f3339ae3aebdd684cd29202"
    },
    {
-    "file": "woof/hex/mpasphys/rrfs/myj.py",
-    "sha256": "8fdebf0d970241b321c44242af9fd6bbc34c94d19f3339ae3aebdd684cd29202"
+    "file": "woof/hex/mpasphys/rrfs/nssl_collection.py",
+    "sha256": "23099ec56f38930400926a0e6de607a516aa41218e6b781f21640753b21c7636"
+   },
+   {
+    "file": "woof/hex/mpasphys/rrfs/nssl_collection.py",
+    "sha256": "66ede588aa0b0c769c29fc45a747a593845a104aa6eda2360c85b7aab841b316"
+   },
+   {
+    "file": "woof/hex/mpasphys/rrfs/nssl_collection.py",
+    "sha256": "68db0bf87c1b38c0aa28328ebeaf63e4f831a683fd0069fca28ee68d9d3522c5"
+   },
+   {
+    "file": "woof/hex/mpasphys/rrfs/nssl_collection.py",
+    "sha256": "80bb8fbfe1d1b9edc2721d2a6718e3db557d717a3ef6237c7e174ff945aa7eb5"
+   },
+   {
+    "file": "woof/hex/mpasphys/rrfs/nssl_collection.py",
+    "sha256": "80bb8fbfe1d1b9edc2721d2a6718e3db557d717a3ef6237c7e174ff945aa7eb5"
+   },
+   {
+    "file": "woof/hex/mpasphys/rrfs/nssl_collection.py",
+    "sha256": "8924901540d24c671f6fd1eac3484622a1c322c05153ec53e4845fc35e11c68d"
+   },
+   {
+    "file": "woof/hex/mpasphys/rrfs/nssl_collection.py",
+    "sha256": "b02e169a34d133b070c81063fc04172f13eedcc0817215bd6522c8d83ef670c0"
+   },
+   {
+    "file": "woof/hex/mpasphys/rrfs/nssl_collection.py",
+    "sha256": "b02e169a34d133b070c81063fc04172f13eedcc0817215bd6522c8d83ef670c0"
+   },
+   {
+    "file": "woof/hex/mpasphys/rrfs/nssl_collection.py",
+    "sha256": "bb206628e1ef5ef13d4d89a0bc82dfb5a5762ee5f6dc2a20ec5b6349cfd34d0d"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_collection.py",
     "sha256": "faf2a7474177160fa9b09381eb301d726c8a8adc21ee65c3fb944e65ba27e7fc"
    },
    {
-    "file": "woof/hex/mpasphys/rrfs/nssl_collection.py",
-    "sha256": "faf2a7474177160fa9b09381eb301d726c8a8adc21ee65c3fb944e65ba27e7fc"
-   },
-   {
-    "file": "woof/hex/mpasphys/rrfs/nssl_collection.py",
-    "sha256": "faf2a7474177160fa9b09381eb301d726c8a8adc21ee65c3fb944e65ba27e7fc"
-   },
-   {
-    "file": "woof/hex/mpasphys/rrfs/nssl_collection.py",
-    "sha256": "faf2a7474177160fa9b09381eb301d726c8a8adc21ee65c3fb944e65ba27e7fc"
-   },
-   {
-    "file": "woof/hex/mpasphys/rrfs/nssl_collection.py",
-    "sha256": "faf2a7474177160fa9b09381eb301d726c8a8adc21ee65c3fb944e65ba27e7fc"
-   },
-   {
-    "file": "woof/hex/mpasphys/rrfs/nssl_collection.py",
-    "sha256": "faf2a7474177160fa9b09381eb301d726c8a8adc21ee65c3fb944e65ba27e7fc"
-   },
-   {
-    "file": "woof/hex/mpasphys/rrfs/nssl_collection.py",
-    "sha256": "faf2a7474177160fa9b09381eb301d726c8a8adc21ee65c3fb944e65ba27e7fc"
-   },
-   {
-    "file": "woof/hex/mpasphys/rrfs/nssl_collection.py",
-    "sha256": "faf2a7474177160fa9b09381eb301d726c8a8adc21ee65c3fb944e65ba27e7fc"
-   },
-   {
-    "file": "woof/hex/mpasphys/rrfs/nssl_collection.py",
-    "sha256": "faf2a7474177160fa9b09381eb301d726c8a8adc21ee65c3fb944e65ba27e7fc"
-   },
-   {
-    "file": "woof/hex/mpasphys/rrfs/nssl_collection.py",
-    "sha256": "faf2a7474177160fa9b09381eb301d726c8a8adc21ee65c3fb944e65ba27e7fc"
+    "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
+    "sha256": "031f6f316867831bae7e32b6ce547b0eaf9844cefbb1bf425a5dcf73978990f2"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "0e017ef3d3037df8ae2c08a35d59ca2bfb2119cc66e7079b62b2ea1d1b6a9bba"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "13802b76aa7eeef36f84ccdcff7c1a39bf39b74c9696f669651488b2861877c3"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "1385c55f82909a070e7f35ea3777c5beef46944d690136da62919e50816ba477"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "179ae407802ae05778dcf2b54e864c20080091ece4f42e1839e044294bc8caa3"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "1c98b9b4964d056154a6d38f90e98e121bb5ea4411d1173f50f6f154fb18dc3d"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "1fdba364e151c85233cd35fdd8bd62e5f3a981503dc4f2c947ec504fed65b942"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "29245cbf9fef90598c9b42a0d7c69025bd48bd252111284be2c62da4569e4692"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "3119ad2704c9d42c16636bc3e85411f71211f61554b06e25f4f38d9ca28228d6"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "37835776c2491e055a1c1f2680ad6d6cf099c5919eb0ea8481d9b5c4093fcc5f"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "391d14de756dc9c9aa783ed08cc7f002d33df20b9c2c6211a69fa068c4a89912"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "3f90c5c947a46f3e75df8a38644c9d10a8f30683e362245c70b9fe1387e012f3"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "41ea85aaddca6e9a426afe92f59b36489c9ce8165bebe1aaef8eb48242450e1d"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "4b779b888d4544c1c0b69bdf8a3d26466ae2ffde5d405a9cd1fef2d87c00b95a"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "4eb2195681b57b26bb54908e57924a4103f0d48a2b0702bfb0baf92f80186d77"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "4f808ef203ac6254bdd43c202fae1429e31f1642c970f0f17271f04c06b533a7"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "543cebbfc86b4a78961fb8be3aa6fd36108f6299d08869c576282c095e9a20b9"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "61b3745f9507da4597dcd59cef8d9ef9798f42c4fee9e97933cca592c5b2695a"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "679789f7d0246ddf8cab1d3f68d995e023faf0e83839ce0fa1764a0927e9b8aa"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "681e5ab364502c3178ed3f1b4461698652353fbfb7cbbaa0c5f837e9961473a8"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "72b64235a8fb4a58b68d00677422208c769d242169daa98fa4b19c72cf237739"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "75322a21dcebe1aa1f146eddc135907440a22e53f9b643003289afc7c3f585de"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "764ce5c7d450eae64f1197a4b939380b0bd08b4c56fcfbd76cf2816719bebef6"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "76f6eb88605500019a75a23e681632323f95cffa9d2acdb08cf473dc84a2cdc0"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "775ad2865a2009e8663ffbc0b83abc85ee8f9dbbcdd16dc033290c13cfca42ba"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "8039492b3576579f552f75cfaa94abb3eee0c715c025874229b6717187fc7d54"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "819dd6d73d6e62eae216df8a1f9a56d89d430cb4947d745b180f2bdf83d4ef92"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "82fb7a104f381dcbbb1d2150fe8103e2c50241ff5a3025cc089340fba8ef201e"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "83469b9031b0f86f6c67d29ae299e471c981334606bf84828e756946b206ff51"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "88cba83388a18b3bdb4a3b5d38cbdb76b0794f144bd83a63d8d01456d6479524"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "8d24497d3fb888205559f1ff73eb4a918a4a1853e019c12ddc029ebe33022990"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "966be212546d7b83f62e913eb4af8f60b1e8271749cf10ab464527e5b885e931"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "9ad0a03f5adcd7f62bd7d6cb83c9fb4f670cc5de3ae708e74f6af1391b1b0e00"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "a30c2fe5276c1067ac2f6fccd7918151cd6f596ada3641902a3d010fe0d7dec5"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "a35af0cc34e669405a66a18c2a03a61b2f002ad71669ca1f75165119ec5c0332"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "b9a41393e04b2bbdd8f39c5e6cb3c396bab6eff6bfd810ef4e6fa26780ef6b39"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "ca77b5ef6210724fda027328e987f9c45cde0cee30c92f5efc61b6d201f79798"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "cc6a99bbaa4e184f80486b0ea92c66b852593876caf46877d0c3354514b172f3"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "d466bcddd5475831cf1dbd27fa224fabf6045fd825fd5f5463cbe16070352daa"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "d69e28ac28514db741da24dd1d9ee0ba0e7802e9118a790711d820b656b6b2bc"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "dcc0d42404ec99ca6e0ca818aa6884680415415245d90103b3657de2ba0e078d"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "e2c36c86cb8dccc314e2018f45cb47db6e17749ec4b3b1c51f60fea868351971"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "e53ca530e766195e4c85cd8ff6df03490ccbf525c946a570c32407f33c45109f"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "ec24bc26270c2a50d330d7497bcba90f03be80eac4b73c60535d9d5c020b4b87"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
-   },
-   {
-    "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
-    "sha256": "ff64eaa30b3ecf9c21451d68a94dde156baebd5cd50f8297864a9557b2030a5f"
+    "sha256": "f8b1f2e88b00e8f4dfebc0735d552a076904c4c1506190ef69af86c0ab395f94"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fast.py",
@@ -7781,47 +7781,47 @@
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fastcond.py",
-    "sha256": "b02e169a34d133b070c81063fc04172f13eedcc0817215bd6522c8d83ef670c0"
+    "sha256": "642e284124ba7aefa9a62a264151c15a600efe432b89ad06672eb03a0a5c9721"
+   },
+   {
+    "file": "woof/hex/mpasphys/rrfs/nssl_fastcond.py",
+    "sha256": "67cb2a60092c5bb82f4d3512318397bf9b0f6c445a8d82042777dc214cc11db8"
+   },
+   {
+    "file": "woof/hex/mpasphys/rrfs/nssl_fastcond.py",
+    "sha256": "9fed018e1763a0cba7a8845e45a2323a0e0236876cd35519a557c31202a2630f"
+   },
+   {
+    "file": "woof/hex/mpasphys/rrfs/nssl_fastcond.py",
+    "sha256": "ad30f8e74d4a6765992178d29b983edb1da067b3d973302dc54fde4b7b06a7a7"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fastcond.py",
     "sha256": "b02e169a34d133b070c81063fc04172f13eedcc0817215bd6522c8d83ef670c0"
    },
    {
-    "file": "woof/hex/mpasphys/rrfs/nssl_fastcond.py",
+    "file": "woof/hex/mpasphys/rrfs/nssl_fastsed.py",
+    "sha256": "058626afb91e2f48bbd842a6a05a405160766cdfee8ef9e2fb893bdac579cd66"
+   },
+   {
+    "file": "woof/hex/mpasphys/rrfs/nssl_fastsed.py",
+    "sha256": "4c8f12cd1139284be5fb40b57969bf23afb9ce53875541f6eccb48fb23bd060c"
+   },
+   {
+    "file": "woof/hex/mpasphys/rrfs/nssl_fastsed.py",
+    "sha256": "66a195b9a53a3c9bbd8dc1d21880549f5722d54b5492f513008ebfb9e8e8187d"
+   },
+   {
+    "file": "woof/hex/mpasphys/rrfs/nssl_fastsed.py",
+    "sha256": "80bb8fbfe1d1b9edc2721d2a6718e3db557d717a3ef6237c7e174ff945aa7eb5"
+   },
+   {
+    "file": "woof/hex/mpasphys/rrfs/nssl_fastsed.py",
     "sha256": "b02e169a34d133b070c81063fc04172f13eedcc0817215bd6522c8d83ef670c0"
    },
    {
-    "file": "woof/hex/mpasphys/rrfs/nssl_fastcond.py",
-    "sha256": "b02e169a34d133b070c81063fc04172f13eedcc0817215bd6522c8d83ef670c0"
-   },
-   {
-    "file": "woof/hex/mpasphys/rrfs/nssl_fastcond.py",
-    "sha256": "b02e169a34d133b070c81063fc04172f13eedcc0817215bd6522c8d83ef670c0"
-   },
-   {
     "file": "woof/hex/mpasphys/rrfs/nssl_fastsed.py",
-    "sha256": "b60a3c426b9263706011821ead3123ebe7c06d83c8caa7705ab1c5d6559689ef"
-   },
-   {
-    "file": "woof/hex/mpasphys/rrfs/nssl_fastsed.py",
-    "sha256": "b60a3c426b9263706011821ead3123ebe7c06d83c8caa7705ab1c5d6559689ef"
-   },
-   {
-    "file": "woof/hex/mpasphys/rrfs/nssl_fastsed.py",
-    "sha256": "b60a3c426b9263706011821ead3123ebe7c06d83c8caa7705ab1c5d6559689ef"
-   },
-   {
-    "file": "woof/hex/mpasphys/rrfs/nssl_fastsed.py",
-    "sha256": "b60a3c426b9263706011821ead3123ebe7c06d83c8caa7705ab1c5d6559689ef"
-   },
-   {
-    "file": "woof/hex/mpasphys/rrfs/nssl_fastsed.py",
-    "sha256": "b60a3c426b9263706011821ead3123ebe7c06d83c8caa7705ab1c5d6559689ef"
-   },
-   {
-    "file": "woof/hex/mpasphys/rrfs/nssl_fastsed.py",
-    "sha256": "b60a3c426b9263706011821ead3123ebe7c06d83c8caa7705ab1c5d6559689ef"
+    "sha256": "b275f10e17c9e0702f295f5315c1892bddc84deedf229a2f0b775b718277f721"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_fastsed.py",
@@ -7829,43 +7829,43 @@
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_math.py",
-    "sha256": "6505b5b1ea18afa0eafbd20d0c719de5d7ba6b69cdfd534b9490dabc439790f0"
+    "sha256": "14a88963bed7834004d474add7bebcba0c9ebfa4e15533978eee905d7c5427e9"
+   },
+   {
+    "file": "woof/hex/mpasphys/rrfs/nssl_math.py",
+    "sha256": "5d50c5de0fbcdaec967398c3db5cc89397bda4a1d592a3b7695c757ec76a0070"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_math.py",
     "sha256": "6505b5b1ea18afa0eafbd20d0c719de5d7ba6b69cdfd534b9490dabc439790f0"
    },
    {
-    "file": "woof/hex/mpasphys/rrfs/nssl_math.py",
-    "sha256": "6505b5b1ea18afa0eafbd20d0c719de5d7ba6b69cdfd534b9490dabc439790f0"
+    "file": "woof/hex/mpasphys/rrfs/nssl_phases.py",
+    "sha256": "68db0bf87c1b38c0aa28328ebeaf63e4f831a683fd0069fca28ee68d9d3522c5"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_phases.py",
-    "sha256": "ce2399a65ab16b811fe46010a433d15d03474d60a052f3010409a8536241b65c"
+    "sha256": "7bf0040e4b9410738b04203ee99d2bfc9ca07ed6231ca9e35f96be16fc0e7146"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_phases.py",
-    "sha256": "ce2399a65ab16b811fe46010a433d15d03474d60a052f3010409a8536241b65c"
+    "sha256": "7bf0040e4b9410738b04203ee99d2bfc9ca07ed6231ca9e35f96be16fc0e7146"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_phases.py",
-    "sha256": "ce2399a65ab16b811fe46010a433d15d03474d60a052f3010409a8536241b65c"
+    "sha256": "7bf0040e4b9410738b04203ee99d2bfc9ca07ed6231ca9e35f96be16fc0e7146"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_phases.py",
-    "sha256": "ce2399a65ab16b811fe46010a433d15d03474d60a052f3010409a8536241b65c"
+    "sha256": "8924901540d24c671f6fd1eac3484622a1c322c05153ec53e4845fc35e11c68d"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_phases.py",
-    "sha256": "ce2399a65ab16b811fe46010a433d15d03474d60a052f3010409a8536241b65c"
+    "sha256": "8924901540d24c671f6fd1eac3484622a1c322c05153ec53e4845fc35e11c68d"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_phases.py",
-    "sha256": "ce2399a65ab16b811fe46010a433d15d03474d60a052f3010409a8536241b65c"
-   },
-   {
-    "file": "woof/hex/mpasphys/rrfs/nssl_phases.py",
-    "sha256": "ce2399a65ab16b811fe46010a433d15d03474d60a052f3010409a8536241b65c"
+    "sha256": "b3d15659836634d9f4dbdb86fd5afb69c56868a2d396603ccdea9132a36e9d1d"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/nssl_phases.py",
@@ -7889,15 +7889,15 @@
    },
    {
     "file": "woof/hex/mpasphys/rrfs/ruc_lsm_8c9f1a8.py",
-    "sha256": "f6f984bf9ff02aa8f736cd4e1c25d5a1c0b902245cb7d83afe77ca6a28e53d99"
+    "sha256": "c3fddb310769c537340e73ad6cc0aa3c36db02d59744b9d08c0a7f44431da30c"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/ruc_lsm_8c9f1a8.py",
-    "sha256": "f6f984bf9ff02aa8f736cd4e1c25d5a1c0b902245cb7d83afe77ca6a28e53d99"
+    "sha256": "cd18d3e4c0e7d6564c034c54dfa95bb96b5136aef940ffbb7bad4ae928376700"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/ruc_lsm_8c9f1a8.py",
-    "sha256": "f6f984bf9ff02aa8f736cd4e1c25d5a1c0b902245cb7d83afe77ca6a28e53d99"
+    "sha256": "f3ee5dc9375b2df113566d3ce58cb6e2e72de3bbc64602e53d30f428fc2d1715"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/ruc_lsm_8c9f1a8.py",
@@ -7909,7 +7909,7 @@
    },
    {
     "file": "woof/hex/mpasphys/rrfs/sf_mynnsfc_v600.py",
-    "sha256": "98df75d230195487a65c9f944be38aae0ac5b6c064b7a2e83f3f7248e7bf22f4"
+    "sha256": "7482aaf633911dc5aaf3252dd25d1655a5f2376e37e5435319c2c0c622eb424a"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/sf_mynnsfc_v600.py",
@@ -7917,7 +7917,7 @@
    },
    {
     "file": "woof/hex/mpasphys/rrfs/smoke_9652bbf.py",
-    "sha256": "1b3d4693bf0d275fe5408f2287371390ea0fd589977415865f8848070026bc4c"
+    "sha256": "0fbbff7a60d95d35f9d1539ec326f8be9ebab9cac482a8952e0dc9921cf841fe"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/smoke_9652bbf.py",
@@ -7925,11 +7925,11 @@
    },
    {
     "file": "woof/hex/mpasphys/rrfs/smoke_columns.py",
-    "sha256": "b20acfb9df9c2281143e9caeabe01632bc3fb125ab34fa4f10d863f08514e0c1"
+    "sha256": "976828890172e7726a45818cbd4a79f21c8e9d7fc2baea244ef99974c4085973"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/smoke_columns.py",
-    "sha256": "b20acfb9df9c2281143e9caeabe01632bc3fb125ab34fa4f10d863f08514e0c1"
+    "sha256": "a9871e3aeeb8097c991bc4c049f5505e3ccf526928326f567ff7d7f768bb1da0"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/smoke_columns.py",
@@ -7949,19 +7949,19 @@
    },
    {
     "file": "woof/hex/mpasphys/rrfs/tempo_phase_v303.py",
-    "sha256": "cc7043016a6241799ea4d964aff3f5f4fd0bf11649b9eebdf304be6abf679791"
+    "sha256": "58a302c968c4346d2caa3d216536aa669da7d7687f1e74b82d4603fa29c744c3"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/tempo_phase_v303.py",
-    "sha256": "cc7043016a6241799ea4d964aff3f5f4fd0bf11649b9eebdf304be6abf679791"
+    "sha256": "a8cbc53353f41b3f934878320f82b88119985ab528b4377f045c99ce5cec817d"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/tempo_phase_v303.py",
-    "sha256": "cc7043016a6241799ea4d964aff3f5f4fd0bf11649b9eebdf304be6abf679791"
+    "sha256": "aa19e871f11c32dafdfb21fb783a899fd00e62ecd050f094e3a2c2b4bb1b52cf"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/tempo_phase_v303.py",
-    "sha256": "cc7043016a6241799ea4d964aff3f5f4fd0bf11649b9eebdf304be6abf679791"
+    "sha256": "bb2cd967d2987db9ac11c8c97abff5e956db7a6a3f91fcba26bb85aa1e4be27b"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/tempo_phase_v303.py",
@@ -7973,19 +7973,19 @@
    },
    {
     "file": "woof/hex/mpasphys/rrfs/tempo_v303.py",
-    "sha256": "fce240d8453b3af980e539c5ff91d65b8570569804c3480919c3a4938fc13a07"
+    "sha256": "0260ba6f7fbc93f352e3adbe0038585e6471743da41242eb13e2f8487916924c"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/tempo_v303.py",
-    "sha256": "fce240d8453b3af980e539c5ff91d65b8570569804c3480919c3a4938fc13a07"
+    "sha256": "23453bb50ada99ac7d1ec20ae7c52adb4fb3f9604df81aba2eea952cf8243711"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/tempo_v303.py",
-    "sha256": "fce240d8453b3af980e539c5ff91d65b8570569804c3480919c3a4938fc13a07"
+    "sha256": "92a04142cef6288290783aede627954953bf96a10794b29f99376d750de40880"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/tempo_v303.py",
-    "sha256": "fce240d8453b3af980e539c5ff91d65b8570569804c3480919c3a4938fc13a07"
+    "sha256": "984484fe9e5526bec48f139ad44c0ec2a50cc72564c4020af0b49e394e9d2df7"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/tempo_v303.py",
@@ -7993,7 +7993,7 @@
    },
    {
     "file": "woof/hex/mpasphys/rrfs/wsm6.py",
-    "sha256": "6faa41c03b93776eadf4a8c01d23691b27d3c2f23156d8d384a674bb0355da11"
+    "sha256": "131241ec65fac285462bfa746f71c00102cd27f2af56c5dde1652ed296cf5d90"
    },
    {
     "file": "woof/hex/mpasphys/rrfs/wsm6.py",
@@ -8001,19 +8001,19 @@
    },
    {
     "file": "woof/hex/mpasphys/rrtmg_lw_v842.py",
-    "sha256": "bac80a17324b79fea4ccb3a1eca54b75a7f55f05072008a9215d0334f74bd256"
+    "sha256": "28a4ffb8c949132ee6d4437ba96a930ad9d72e76f05ee8c5b6c2e5fef58a01df"
    },
    {
     "file": "woof/hex/mpasphys/rrtmg_lw_v842.py",
-    "sha256": "bac80a17324b79fea4ccb3a1eca54b75a7f55f05072008a9215d0334f74bd256"
+    "sha256": "4af5b39a19aad2398e033382afc0d55a666ee5da082b194207d939598d104011"
    },
    {
     "file": "woof/hex/mpasphys/rrtmg_lw_v842.py",
-    "sha256": "bac80a17324b79fea4ccb3a1eca54b75a7f55f05072008a9215d0334f74bd256"
+    "sha256": "878b89e2cc26706911ec1a2ef3fb278c302b0bb3e7a46b0a7c2a4739a6b8cd54"
    },
    {
     "file": "woof/hex/mpasphys/rrtmg_lw_v842.py",
-    "sha256": "bac80a17324b79fea4ccb3a1eca54b75a7f55f05072008a9215d0334f74bd256"
+    "sha256": "b83ef114d32bf9c0d4cda9816ad56f1d206c475e4e800c96dc4e06f83c45a815"
    },
    {
     "file": "woof/hex/mpasphys/rrtmg_lw_v842.py",
@@ -8029,15 +8029,15 @@
    },
    {
     "file": "woof/hex/mpasphys/sf_mynn_v842.py",
-    "sha256": "f498e2a046b9451cd961c1d5a6d4e5a6ea8dd57e9da704c7d46a1f7ee777285a"
+    "sha256": "80f8b8f400298bee792f12d258169d915b49721842ce3d8c4c504a5de04727d9"
    },
    {
     "file": "woof/hex/mpasphys/sf_mynn_v842.py",
-    "sha256": "f498e2a046b9451cd961c1d5a6d4e5a6ea8dd57e9da704c7d46a1f7ee777285a"
+    "sha256": "a5ebeb7015d24bb796a2e83998e61a830f5207d89554a184adfbe6afec2613a4"
    },
    {
     "file": "woof/hex/mpasphys/sf_mynn_v842.py",
-    "sha256": "f498e2a046b9451cd961c1d5a6d4e5a6ea8dd57e9da704c7d46a1f7ee777285a"
+    "sha256": "b7ad3bea1a21866f78a38c6d6fa929966e78c6fbce55922570d8f5ce3a9a9f80"
    },
    {
     "file": "woof/hex/mpasphys/sf_mynn_v842.py",
@@ -8053,7 +8053,7 @@
    },
    {
     "file": "woof/hex/mpasphys/thompson_aero_v842.py",
-    "sha256": "99bc142887fac67ee13f0a1a482da90b9f0abccf6bdc6d8ca343b7d128d6647b"
+    "sha256": "4d5abf173b2d915bdd588f9f4f8d58afcf7b2957b769795bbe702fa7167badf5"
    },
    {
     "file": "woof/hex/mpasphys/thompson_aero_v842.py",
@@ -8061,131 +8061,131 @@
    },
    {
     "file": "woof/hex/mpasphys/thompson_phases_v842.py",
-    "sha256": "f243ce278d40b9d3f3409f927d37a3bf63001a48adb513f92776b0bf0fdd183d"
+    "sha256": "26a1434f6ea74c60be3f2216d87fcddd05d199bac51b4a1c58d0b68927fd2c1e"
+   },
+   {
+    "file": "woof/hex/mpasphys/thompson_phases_v842.py",
+    "sha256": "42d6da8b813519799feea18a18f154dc0856d622244ff5d4ea711ce407cdc828"
+   },
+   {
+    "file": "woof/hex/mpasphys/thompson_phases_v842.py",
+    "sha256": "6df76a8d4016787091efe7a27c55a650e3dc53391609962e26fac2efbd37f8d0"
+   },
+   {
+    "file": "woof/hex/mpasphys/thompson_phases_v842.py",
+    "sha256": "ab0cf07bf8edeedae78c1e446e3e7acc22266ecfa55fe60c5050f02db365d7f7"
    },
    {
     "file": "woof/hex/mpasphys/thompson_phases_v842.py",
     "sha256": "f243ce278d40b9d3f3409f927d37a3bf63001a48adb513f92776b0bf0fdd183d"
    },
    {
-    "file": "woof/hex/mpasphys/thompson_phases_v842.py",
-    "sha256": "f243ce278d40b9d3f3409f927d37a3bf63001a48adb513f92776b0bf0fdd183d"
-   },
-   {
-    "file": "woof/hex/mpasphys/thompson_phases_v842.py",
-    "sha256": "f243ce278d40b9d3f3409f927d37a3bf63001a48adb513f92776b0bf0fdd183d"
-   },
-   {
-    "file": "woof/hex/mpasphys/thompson_phases_v842.py",
-    "sha256": "f243ce278d40b9d3f3409f927d37a3bf63001a48adb513f92776b0bf0fdd183d"
+    "file": "woof/hex/mpasphys/thompson_v842.py",
+    "sha256": "0cc677852ea771bae5ff653bbe0521af17595a672b736b0f4a3e0e89fefc03ba"
    },
    {
     "file": "woof/hex/mpasphys/thompson_v842.py",
-    "sha256": "ff20220776c9c51ac15535dc47d3238f392e899a0b49bfbe0add68d23a7e10fb"
+    "sha256": "14a88963bed7834004d474add7bebcba0c9ebfa4e15533978eee905d7c5427e9"
    },
    {
     "file": "woof/hex/mpasphys/thompson_v842.py",
-    "sha256": "ff20220776c9c51ac15535dc47d3238f392e899a0b49bfbe0add68d23a7e10fb"
+    "sha256": "229798d367ef258d578966a64d2555c8749a54129f059dbb7429491657680897"
    },
    {
     "file": "woof/hex/mpasphys/thompson_v842.py",
-    "sha256": "ff20220776c9c51ac15535dc47d3238f392e899a0b49bfbe0add68d23a7e10fb"
+    "sha256": "2daad544f06b0055a6bddd110d044cbbf36f6d8cf79034e200a4344e451bdef6"
    },
    {
     "file": "woof/hex/mpasphys/thompson_v842.py",
-    "sha256": "ff20220776c9c51ac15535dc47d3238f392e899a0b49bfbe0add68d23a7e10fb"
+    "sha256": "39e6d1f727a686e09ad279f5414c3976fee81f3e4d0e61fcf5e45b626131057d"
    },
    {
     "file": "woof/hex/mpasphys/thompson_v842.py",
-    "sha256": "ff20220776c9c51ac15535dc47d3238f392e899a0b49bfbe0add68d23a7e10fb"
+    "sha256": "44747b8a342924662d31685c71d23ae873ae1f0fe8c11f2efebfe61b191ff9c5"
    },
    {
     "file": "woof/hex/mpasphys/thompson_v842.py",
-    "sha256": "ff20220776c9c51ac15535dc47d3238f392e899a0b49bfbe0add68d23a7e10fb"
+    "sha256": "460dc08928501f44a59dfeffba4aab006f30acfd05774f5be700cff60944404f"
    },
    {
     "file": "woof/hex/mpasphys/thompson_v842.py",
-    "sha256": "ff20220776c9c51ac15535dc47d3238f392e899a0b49bfbe0add68d23a7e10fb"
+    "sha256": "5b4627b5c67b1b7d0c1edbb04caa7763d343f4cc234b0d5e5f1e1b879f845723"
    },
    {
     "file": "woof/hex/mpasphys/thompson_v842.py",
-    "sha256": "ff20220776c9c51ac15535dc47d3238f392e899a0b49bfbe0add68d23a7e10fb"
+    "sha256": "686a7bf289de25be41c396b5c165f863e9148e6249ff8f87f6f0000ac534e955"
    },
    {
     "file": "woof/hex/mpasphys/thompson_v842.py",
-    "sha256": "ff20220776c9c51ac15535dc47d3238f392e899a0b49bfbe0add68d23a7e10fb"
+    "sha256": "73e9986b58c33d7a0af2d6a7db020a881bfe3b178e535f848eab53399061ff96"
    },
    {
     "file": "woof/hex/mpasphys/thompson_v842.py",
-    "sha256": "ff20220776c9c51ac15535dc47d3238f392e899a0b49bfbe0add68d23a7e10fb"
+    "sha256": "755e13a11b0c97203627f7dfa5652e7469c8da38182cfb20d960c9ebb017d49a"
    },
    {
     "file": "woof/hex/mpasphys/thompson_v842.py",
-    "sha256": "ff20220776c9c51ac15535dc47d3238f392e899a0b49bfbe0add68d23a7e10fb"
+    "sha256": "812779ee6801dc2fc0461e15d2b1f7be3ac5f38a60df367a003f6675c6a8f6f0"
    },
    {
     "file": "woof/hex/mpasphys/thompson_v842.py",
-    "sha256": "ff20220776c9c51ac15535dc47d3238f392e899a0b49bfbe0add68d23a7e10fb"
+    "sha256": "9c7081fc83154154ade30fc6809c4fdbf5b5e9069e985ab25e45aec03ce9d150"
    },
    {
     "file": "woof/hex/mpasphys/thompson_v842.py",
-    "sha256": "ff20220776c9c51ac15535dc47d3238f392e899a0b49bfbe0add68d23a7e10fb"
+    "sha256": "a7651d99d3e9be9f9a29eeb86dbef9d2dc153d7fe662c794f755ccaa80916e8a"
    },
    {
     "file": "woof/hex/mpasphys/thompson_v842.py",
-    "sha256": "ff20220776c9c51ac15535dc47d3238f392e899a0b49bfbe0add68d23a7e10fb"
+    "sha256": "b112cab2b2fcf5137bb05fda411c932036896ce9ba96dacf2718088d5a46237e"
    },
    {
     "file": "woof/hex/mpasphys/thompson_v842.py",
-    "sha256": "ff20220776c9c51ac15535dc47d3238f392e899a0b49bfbe0add68d23a7e10fb"
+    "sha256": "b2b6454f0ab6a893e69e9ad4c57668bdabd31716976dacf8705ec4db3bfb714d"
    },
    {
     "file": "woof/hex/mpasphys/thompson_v842.py",
-    "sha256": "ff20220776c9c51ac15535dc47d3238f392e899a0b49bfbe0add68d23a7e10fb"
+    "sha256": "b60a3c426b9263706011821ead3123ebe7c06d83c8caa7705ab1c5d6559689ef"
    },
    {
     "file": "woof/hex/mpasphys/thompson_v842.py",
-    "sha256": "ff20220776c9c51ac15535dc47d3238f392e899a0b49bfbe0add68d23a7e10fb"
+    "sha256": "bbd9e0debe0ece8b4fbeab5f2ffdebf48871c3d42da16e8232a41286fabf4d73"
    },
    {
     "file": "woof/hex/mpasphys/thompson_v842.py",
-    "sha256": "ff20220776c9c51ac15535dc47d3238f392e899a0b49bfbe0add68d23a7e10fb"
+    "sha256": "c98939f29dc34a36a909a18c11eeed90f690a8b4974def61ed37e972290e180e"
    },
    {
     "file": "woof/hex/mpasphys/thompson_v842.py",
-    "sha256": "ff20220776c9c51ac15535dc47d3238f392e899a0b49bfbe0add68d23a7e10fb"
+    "sha256": "e594300a31872c93acdd3389afe4598d363752b0c4dd3f27ec06d676f2441e12"
    },
    {
     "file": "woof/hex/mpasphys/thompson_v842.py",
-    "sha256": "ff20220776c9c51ac15535dc47d3238f392e899a0b49bfbe0add68d23a7e10fb"
+    "sha256": "e654abe3af056a4a6e898099e3b09948f48e4e389e2f65571e31c71df71b8240"
    },
    {
     "file": "woof/hex/mpasphys/thompson_v842.py",
-    "sha256": "ff20220776c9c51ac15535dc47d3238f392e899a0b49bfbe0add68d23a7e10fb"
+    "sha256": "ea62a06d445b0831696699b5e204c5cb4a68277f1cd3bda05c08e2674df9bdd6"
    },
    {
     "file": "woof/hex/mpasphys/thompson_v842.py",
-    "sha256": "ff20220776c9c51ac15535dc47d3238f392e899a0b49bfbe0add68d23a7e10fb"
+    "sha256": "f53d2c1def463264d5153cfb910398ffd7c8c71adacbef252a1213c0d4005aac"
    },
    {
     "file": "woof/hex/mpasphys/thompson_v842.py",
-    "sha256": "ff20220776c9c51ac15535dc47d3238f392e899a0b49bfbe0add68d23a7e10fb"
+    "sha256": "f5e5dbfe8dbb4220b3fe2d1639c19c175ca10096e780c3f590a1636aa3e4bf14"
    },
    {
     "file": "woof/hex/mpasphys/thompson_v842.py",
-    "sha256": "ff20220776c9c51ac15535dc47d3238f392e899a0b49bfbe0add68d23a7e10fb"
+    "sha256": "f6cd3c7441612dc9877f03694c5142098c28c36c08bcd6fe494fd4f0f831a6f3"
    },
    {
     "file": "woof/hex/mpasphys/thompson_v842.py",
-    "sha256": "ff20220776c9c51ac15535dc47d3238f392e899a0b49bfbe0add68d23a7e10fb"
+    "sha256": "f6e67361762a18d1419988e8715615531cdd6d504afa11cc8da13bc9539595bd"
    },
    {
     "file": "woof/hex/mpasphys/thompson_v842.py",
-    "sha256": "ff20220776c9c51ac15535dc47d3238f392e899a0b49bfbe0add68d23a7e10fb"
-   },
-   {
-    "file": "woof/hex/mpasphys/thompson_v842.py",
-    "sha256": "ff20220776c9c51ac15535dc47d3238f392e899a0b49bfbe0add68d23a7e10fb"
+    "sha256": "fef57d44bec1f48be26220ac4bc7566d29af29c0866abb305a2ae0d5fabdfeb9"
    },
    {
     "file": "woof/hex/mpasphys/thompson_v842.py",
@@ -8193,11 +8193,11 @@
    },
    {
     "file": "woof/hex/mpasphys/tiedtke_v842.py",
-    "sha256": "eb5fc030b6beedac8a42e5fa70380d00e31ce701058ac3b1913790bb649a6ddb"
+    "sha256": "696bf0a9be2180bee1f3450c80b08497c0285454d64020e610987542ed165cef"
    },
    {
     "file": "woof/hex/mpasphys/tiedtke_v842.py",
-    "sha256": "eb5fc030b6beedac8a42e5fa70380d00e31ce701058ac3b1913790bb649a6ddb"
+    "sha256": "987cefe4f395ff8d3cc6d480fe37f69f65bfa87c2567bd343f4ce6043ac504c6"
    },
    {
     "file": "woof/hex/mpasphys/tiedtke_v842.py",
@@ -8205,7 +8205,7 @@
    },
    {
     "file": "woof/hex/mpasphys/ugwp_ngw_v842.py",
-    "sha256": "fdee6caa0a8dff07cd7a78817cd0e14ccd17325209fca452f5e0fabb01f7fb06"
+    "sha256": "0d77f56569e8bbf3b28c6f8277715e24a614195b83a43657f8b172ce8a32b7a2"
    },
    {
     "file": "woof/hex/mpasphys/ugwp_ngw_v842.py",
@@ -8221,99 +8221,99 @@
    },
    {
     "file": "woof/hex/mpasphys/wsm6_v842.py",
-    "sha256": "f365287c92e0f34ffb3751a2b5d75c1c75bf83515a01a16af121fb2ebad45fe2"
+    "sha256": "275e1d86b7639586e75b7242e25670590653e23e088ae5e02d624ab499632694"
    },
    {
     "file": "woof/hex/mpasphys/wsm6_v842.py",
-    "sha256": "f365287c92e0f34ffb3751a2b5d75c1c75bf83515a01a16af121fb2ebad45fe2"
+    "sha256": "754bf2551522782991abe77f22beb2b0c5ccebd6e82c3257e1290dc23ced957b"
    },
    {
     "file": "woof/hex/mpasphys/wsm6_v842.py",
-    "sha256": "f365287c92e0f34ffb3751a2b5d75c1c75bf83515a01a16af121fb2ebad45fe2"
+    "sha256": "756b7cc6f17643f53cfa142a553dfe51785b3dfc43d1d0bc97244d6265c96f2b"
    },
    {
     "file": "woof/hex/mpasphys/wsm6_v842.py",
-    "sha256": "f365287c92e0f34ffb3751a2b5d75c1c75bf83515a01a16af121fb2ebad45fe2"
+    "sha256": "756b7cc6f17643f53cfa142a553dfe51785b3dfc43d1d0bc97244d6265c96f2b"
    },
    {
     "file": "woof/hex/mpasphys/wsm6_v842.py",
-    "sha256": "f365287c92e0f34ffb3751a2b5d75c1c75bf83515a01a16af121fb2ebad45fe2"
+    "sha256": "7a11d07d6a8f714569ea8e3d5aa5d57e42671ad9ca7ebb1c14f894aa4c55eeb9"
    },
    {
     "file": "woof/hex/mpasphys/wsm6_v842.py",
-    "sha256": "f365287c92e0f34ffb3751a2b5d75c1c75bf83515a01a16af121fb2ebad45fe2"
+    "sha256": "7e08b6ebb9fe46aa8d0e32c25c8bc84de8865dc070f4d8ac99e396c99b24d69a"
    },
    {
     "file": "woof/hex/mpasphys/wsm6_v842.py",
-    "sha256": "f365287c92e0f34ffb3751a2b5d75c1c75bf83515a01a16af121fb2ebad45fe2"
+    "sha256": "7f8da0b87289095a6066fc143d28998e45cd72959edfee11ca9aea0cd7b8b995"
    },
    {
     "file": "woof/hex/mpasphys/wsm6_v842.py",
-    "sha256": "f365287c92e0f34ffb3751a2b5d75c1c75bf83515a01a16af121fb2ebad45fe2"
+    "sha256": "8999402d5d6bf977d2f49a04d4f291bdc89a3905ae39b65164b7dcba7071fd2e"
    },
    {
     "file": "woof/hex/mpasphys/wsm6_v842.py",
-    "sha256": "f365287c92e0f34ffb3751a2b5d75c1c75bf83515a01a16af121fb2ebad45fe2"
+    "sha256": "8c1baec1af0de0d9e03f272e507729110748c4b217c74c0580377beb95f425a1"
    },
    {
     "file": "woof/hex/mpasphys/wsm6_v842.py",
-    "sha256": "f365287c92e0f34ffb3751a2b5d75c1c75bf83515a01a16af121fb2ebad45fe2"
+    "sha256": "a20b2f5c93c5517e5b5e6653f8212f46ccc060794588a23e38bf57b55cf2dc57"
    },
    {
     "file": "woof/hex/mpasphys/wsm6_v842.py",
-    "sha256": "f365287c92e0f34ffb3751a2b5d75c1c75bf83515a01a16af121fb2ebad45fe2"
+    "sha256": "a3183ac8a5b2a26c408e309f8507b193b4eebedd2a5fe9933a710746a808aee2"
    },
    {
     "file": "woof/hex/mpasphys/wsm6_v842.py",
-    "sha256": "f365287c92e0f34ffb3751a2b5d75c1c75bf83515a01a16af121fb2ebad45fe2"
+    "sha256": "a354a9ed6b6f78848e0d366f599f820091879de5faefb1e9d9fa700aaecfc195"
    },
    {
     "file": "woof/hex/mpasphys/wsm6_v842.py",
-    "sha256": "f365287c92e0f34ffb3751a2b5d75c1c75bf83515a01a16af121fb2ebad45fe2"
+    "sha256": "ae2cb4bae380742b6dbb3c1113e363223a0e5419f46f13d81f6014baf340b031"
    },
    {
     "file": "woof/hex/mpasphys/wsm6_v842.py",
-    "sha256": "f365287c92e0f34ffb3751a2b5d75c1c75bf83515a01a16af121fb2ebad45fe2"
+    "sha256": "b16bc23c78538426957c29fe16029160a1ad3bfb5f3956bcdf34a18be63c26c4"
    },
    {
     "file": "woof/hex/mpasphys/wsm6_v842.py",
-    "sha256": "f365287c92e0f34ffb3751a2b5d75c1c75bf83515a01a16af121fb2ebad45fe2"
+    "sha256": "b9a59873153ed249f29c20ace347d79f20006250711d7acad29b3c326c22aec0"
    },
    {
     "file": "woof/hex/mpasphys/wsm6_v842.py",
-    "sha256": "f365287c92e0f34ffb3751a2b5d75c1c75bf83515a01a16af121fb2ebad45fe2"
+    "sha256": "be6fccdd94b2bb733daa23d2c13275c381620ad4304b9df30903e99f2e67bc69"
    },
    {
     "file": "woof/hex/mpasphys/wsm6_v842.py",
-    "sha256": "f365287c92e0f34ffb3751a2b5d75c1c75bf83515a01a16af121fb2ebad45fe2"
+    "sha256": "c251db7ce71df9ec17ccaed1da32505ba81746b8e5f3d102e96cb51ace43e7a3"
    },
    {
     "file": "woof/hex/mpasphys/wsm6_v842.py",
-    "sha256": "f365287c92e0f34ffb3751a2b5d75c1c75bf83515a01a16af121fb2ebad45fe2"
+    "sha256": "d6cc1b51573131bd014c0d3466c11ad9ae1eb3df3207d15c6fe48bb3933160c5"
    },
    {
     "file": "woof/hex/mpasphys/wsm6_v842.py",
-    "sha256": "f365287c92e0f34ffb3751a2b5d75c1c75bf83515a01a16af121fb2ebad45fe2"
+    "sha256": "d9f400d060c998ce978ce0d9e62baff4f1ad3d5cc6310f604d85b85f3e0777ee"
    },
    {
     "file": "woof/hex/mpasphys/wsm6_v842.py",
-    "sha256": "f365287c92e0f34ffb3751a2b5d75c1c75bf83515a01a16af121fb2ebad45fe2"
+    "sha256": "df0d1deeec26e04b34da2bb92187c8e6297124fd5ccda83bca4ed3a1fd74b109"
    },
    {
     "file": "woof/hex/mpasphys/wsm6_v842.py",
-    "sha256": "f365287c92e0f34ffb3751a2b5d75c1c75bf83515a01a16af121fb2ebad45fe2"
+    "sha256": "e2f1812de7e71f95945b53e9ddcdc5f3801ad9eb9a9bf1febec4078cd4f08341"
    },
    {
     "file": "woof/hex/mpasphys/wsm6_v842.py",
-    "sha256": "f365287c92e0f34ffb3751a2b5d75c1c75bf83515a01a16af121fb2ebad45fe2"
+    "sha256": "e4d07cc27663ee02c77e5b2218a3e520e2335815ecbb8a02d96a6ebb9d17c74a"
    },
    {
     "file": "woof/hex/mpasphys/wsm6_v842.py",
-    "sha256": "f365287c92e0f34ffb3751a2b5d75c1c75bf83515a01a16af121fb2ebad45fe2"
+    "sha256": "e7651144e3a405712fdb97d0ba19c9faba31e0a4c6955763ee3ed7c6426bc330"
    },
    {
     "file": "woof/hex/mpasphys/wsm6_v842.py",
-    "sha256": "f365287c92e0f34ffb3751a2b5d75c1c75bf83515a01a16af121fb2ebad45fe2"
+    "sha256": "ef7e9c4332a4238dbe3d1a41983b41b0587f5486efb0dd6b6dab3ba38b96acdf"
    },
    {
     "file": "woof/hex/mpasphys/wsm6_v842.py",
@@ -8325,11 +8325,11 @@
    },
    {
     "file": "woof/hex/mpasphys/ysu_v842.py",
-    "sha256": "78441f2974f9feb19a25feb5e4854e34ec3c9912c0f481a5dfb9a09e4f950046"
+    "sha256": "28ddeaa099af4681c68aa26e3aa578f74a449224df2929af82bacb8c17a51bab"
    },
    {
     "file": "woof/hex/mpasphys/ysu_v842.py",
-    "sha256": "78441f2974f9feb19a25feb5e4854e34ec3c9912c0f481a5dfb9a09e4f950046"
+    "sha256": "3e5e2ec43fe2c70dbca79e956faa0bc28bc417e759acf405ea626e07e200bee8"
    },
    {
     "file": "woof/hex/mpasphys/ysu_v842.py",
@@ -8337,7 +8337,7 @@
    },
    {
     "file": "woof/hex/mynn_glibc_math.py",
-    "sha256": "ad147545e82ba2b7bb521ab1cfbd39e666127e3eaad742c58e8122c4bcf7df1a"
+    "sha256": "76baaa69ff4be8567ac4d47cf40af835cbdb1f14ae393ff1946331b8580a1a14"
    },
    {
     "file": "woof/hex/mynn_glibc_math.py",
@@ -8353,11 +8353,11 @@
    },
    {
     "file": "woof/hex/partition_overlap_v841.py",
-    "sha256": "8bfd5d0e679ea4671894caf1a71a8fdd74a3d46a0ec91f57bccee058ace9e387"
+    "sha256": "50539ab5beb330a508baba1e21ed526dac7274ec609783687c59a1922081517f"
    },
    {
     "file": "woof/hex/partition_overlap_v841.py",
-    "sha256": "8bfd5d0e679ea4671894caf1a71a8fdd74a3d46a0ec91f57bccee058ace9e387"
+    "sha256": "6a8c2b3c5cb9a779e1a1b4781dbbe20de30f5b60cd0847634825b597e25ae07e"
    },
    {
     "file": "woof/hex/partition_overlap_v841.py",
@@ -8365,7 +8365,7 @@
    },
    {
     "file": "woof/hex/partition_samehost_transport_v841.py",
-    "sha256": "909898b592d933a1d5ceeec94000928351667d8bfd1bb6052d4719396e5ea5e5"
+    "sha256": "0a9e2500951d44561eda38ba72724eb6a64197ef292b1c7469a6934c79cda63c"
    },
    {
     "file": "woof/hex/partition_samehost_transport_v841.py",
@@ -8381,15 +8381,15 @@
    },
    {
     "file": "woof/hex/wave_surface.py",
-    "sha256": "f518c2529e675e4a755b9d674bfc0ef2184897a43449cb80e460447b128b53ee"
+    "sha256": "0dea47724568543123b2d39af5618d0ea9016639aca093604864f3635b2a88b5"
    },
    {
     "file": "woof/hex/wave_surface.py",
-    "sha256": "f518c2529e675e4a755b9d674bfc0ef2184897a43449cb80e460447b128b53ee"
+    "sha256": "4e0101ad57880effb109324242f665881af15b09980831d62dca2d5dc31775be"
    },
    {
     "file": "woof/hex/wave_surface.py",
-    "sha256": "f518c2529e675e4a755b9d674bfc0ef2184897a43449cb80e460447b128b53ee"
+    "sha256": "89e9dce6d2350d986e941372a2cc1e3537220d7c856fcc56be46301492d064b6"
    },
    {
     "file": "woof/hex/wave_surface.py",
@@ -8401,7 +8401,7 @@
    },
    {
     "file": "woof/hip_source.py",
-    "sha256": "ed7371362b5410ad83bb2087245cd05de6c62134a08303378a27c04b4f293c19"
+    "sha256": "6f029b2201cf4f140307ed72eea1d5296d15d2fb4a81e8113a9e88e57f816fcc"
    },
    {
     "file": "woof/hip_source.py",
@@ -8425,7 +8425,7 @@
    },
    {
     "file": "woof/nvrtc_cache_key.py",
-    "sha256": "dd2fa4b1fe9255f66a5f54fc44f545fec25adb90ce9d75039c8a716b0ed1b0de"
+    "sha256": "938b481f3c5c5ffcbe9bc3fdc0ba18e919ec68d47c95fd6b08905196ec1b8ee0"
    },
    {
     "file": "woof/nvrtc_cache_key.py",
@@ -8449,7 +8449,7 @@
    },
    {
     "file": "woof/ocean/waves/validation/make_swell_friction.py",
-    "sha256": "76ca90137728b8694c01559a7c0e9ece7f932fe53ff31d2c64b82387c37a5d48"
+    "sha256": "3f19355662f43b6faacca687104a43da63ab348e149eb3b3c7d4ed59b1f14642"
    },
    {
     "file": "woof/ocean/waves/validation/make_swell_friction.py",
@@ -8465,7 +8465,7 @@
    },
    {
     "file": "woof/verify/gwdo_kim_oracle.py",
-    "sha256": "c7dfab82b8a3e5e532363a3f10814ecd667caa64044b39ec75bcead21f236584"
+    "sha256": "3eb35f666126defb2ee23bee889e40dff520cebc1af2fd3140a99a1511a061f7"
    },
    {
     "file": "woof/verify/gwdo_kim_oracle.py",
@@ -8477,11 +8477,11 @@
    },
    {
     "file": "woof/verify/wsm6_process_budget.py",
-    "sha256": "e64a5dc89ac239deed3b6cfca2bd5e23d60edd1d7d5a945f879bba11030610af"
+    "sha256": "4b8ddc169bf62265b83fa8b44425a7db38eb7ab45889e671ec5c6ade2a6a7839"
    },
    {
     "file": "woof/verify/wsm6_process_budget.py",
-    "sha256": "e64a5dc89ac239deed3b6cfca2bd5e23d60edd1d7d5a945f879bba11030610af"
+    "sha256": "ce0d06a9d376f77ab1c7e8c94e2e035df0b21cda3d14c4490ddc305b047c96c7"
    },
    {
     "file": "woof/verify/wsm6_process_budget.py",
