@@ -46,7 +46,11 @@ def _w_phi_launch(state, nz: int, ny: int, nx: int):
     """The w''-phi'' solve's (kernel, grid, block) for this state: the
     level-parallel entry on the fast mapped path, else the column kernel."""
     if state.has_msf and not WRF_EXACT:
-        if ACOUSTIC_KPAR_ENABLED:
+        # The entry's shared RHS rows are WPHI_MAX_LEV x 32 floats: the two
+        # lower tiers fit every device's 32 KB threadgroup memory, the top
+        # tier (257 levels, 32.9 KB) does not, so a column that deep keeps
+        # the column kernel.
+        if ACOUSTIC_KPAR_ENABLED and wphi_level_tier(nz) * 32 * 4 <= 32768:
             kernel = _w_phi_kernel("advance_w_phi_msf_kpar", nz, ny, nx)
             return kernel, ((ny * nx + 31) // 32,), _W_PHI_KPAR_BLOCK
         threads = _W_PHI_MSF_THREADS

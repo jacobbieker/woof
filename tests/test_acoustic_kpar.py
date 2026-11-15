@@ -95,10 +95,15 @@ def test_level_parallel_solve_matches_the_column_kernel(
     common = dict(moist_cq=moist_cq, top_lid=top_lid, dampmag=dampmag,
                   spec_zone=spec_zone, base3d=base3d, boundary=boundary,
                   nz=nz, ny=ny, nx=nx)
-    column = _run(_w_phi_kernel("advance_w_phi_msf", nz, ny, nx),
+    # Both from the generic unit (no shape defines): the contract is the
+    # column kernel's generic build.  The forecast compiles the column kernel
+    # shape-specialized, and on CUDA that build's words differ from its own
+    # generic build's by NVRTC's contraction choices (PR #475), which is why
+    # the level-parallel entry is opt-in there.
+    column = _run(_w_phi_kernel("advance_w_phi_msf", nz),
                   ((ny * nx + _W_PHI_MSF_THREADS - 1) // _W_PHI_MSF_THREADS,),
                   (_W_PHI_MSF_THREADS,), arrays, **common)
-    kpar = _run(_w_phi_kernel("advance_w_phi_msf_kpar", nz, ny, nx),
+    kpar = _run(_w_phi_kernel("advance_w_phi_msf_kpar", nz),
                 ((ny * nx + 31) // 32,), _W_PHI_KPAR_BLOCK, arrays, **common)
     before = {k: arrays[k].get().view(np.uint32) for k in _WRITTEN}
     for key in _WRITTEN:
@@ -128,3 +133,9 @@ def test_launcher_selects_the_level_parallel_entry_on_the_fast_mapped_path(monke
     assert block == ((ac._THREADS,) if ENABLED else (ac._W_PHI_MSF_THREADS,))
     kernel, _grid, block = ac._w_phi_launch(SimpleNamespace(has_msf=False), 49, 30, 37)
     assert kernel == "advance_w_phi" and block == (ac._THREADS,)
+    # the top tier's shared rows exceed 32 KB: the column kernel keeps it
+    monkeypatch.setattr(ac, "ACOUSTIC_KPAR_ENABLED", True)
+    kernel, _grid, block = ac._w_phi_launch(mapped, 200, 30, 37)
+    assert kernel == "advance_w_phi_msf"
+    kernel, _grid, _block = ac._w_phi_launch(mapped, 192, 30, 37)
+    assert kernel == ("advance_w_phi_msf" if ENABLED else "advance_w_phi_msf_kpar")
