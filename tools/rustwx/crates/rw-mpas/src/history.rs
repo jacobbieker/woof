@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use crate::error::{MpasError, MpasResult};
 use crate::fieldmap::{
-    FIELD_MAP, FieldMapping, FieldSource, field_set_allows, field_set_is_known, native_history_name,
+    FIELD_MAP, FieldMapping, FieldSource, field_set_allows, field_set_is_known, is_optional, native_history_name,
 };
 use crate::weights::MeshCoordinates;
 use rw_store::netcdf_classic::{NcAttr, NcAttrValue};
@@ -769,13 +769,27 @@ fn read_history_body(
     // when a field is missing, so a complete history reads exactly as before.
     let mut companion: Option<DiagCompanion> = None;
     if own_centres.is_some() {
-        let lacks_a_field = FIELD_MAP.iter().any(|mapping| {
-            mapping.source == FieldSource::History
-                && field_set_allows(field_set, mapping)
-                && mapping
-                    .mpas_name
-                    .is_some_and(|mpas| !carries_mapped(&file, mapping.wrf_name, mpas))
-        });
+        let history = &file;
+        let lacking = move |optional: bool| {
+            FIELD_MAP.iter().filter(move |mapping| {
+                mapping.source == FieldSource::History
+                    && is_optional(mapping) == optional
+                    && field_set_allows(field_set, mapping)
+                    && mapping
+                        .mpas_name
+                        .is_some_and(|mpas| !carries_mapped(history, mapping.wrf_name, mpas))
+            })
+        };
+        // A severe option's diagnostic the history lacks opens the diag file only when that file carries it (hex
+        // writes them to the diag stream): a run without the option reads exactly as before, digest included.
+        let lacks_a_field = lacking(false).next().is_some()
+            || diag_companion(history_path).filter(|p| p.is_file()).is_some_and(|path| {
+                netcrust::File::open(&path).is_ok_and(|peek| {
+                    lacking(true).any(|mapping| {
+                        mapping.mpas_name.is_some_and(|mpas| carries_mapped(&peek, mapping.wrf_name, mpas))
+                    })
+                })
+            });
         if lacks_a_field {
             if let Some((path, sha256, opened)) =
                 open_diag_companion(history_path, n_cells, n_levels, true)?
@@ -794,9 +808,13 @@ fn read_history_body(
         Diag(&'static str),
     }
     let mut planned: Vec<(&'static str, Option<Carrier>)> = Vec::new();
+    let mut optional: Vec<&'static str> = Vec::new();
     for mapping in FIELD_MAP.iter() {
         if mapping.source != FieldSource::History || !field_set_allows(field_set, mapping) {
             continue;
+        }
+        if is_optional(mapping) {
+            optional.push(mapping.wrf_name);
         }
         let Some(mpas_name) = mapping.mpas_name else {
             continue;
@@ -853,6 +871,8 @@ fn read_history_body(
             (_, Some(value)) => {
                 fields.insert(wrf_name.to_string(), value);
             }
+            // A severe option the run did not turn on is not an output-stream gap.
+            (_, None) if optional.contains(wrf_name) => {}
             (_, None) => absent.push(wrf_name.to_string()),
         }
     }

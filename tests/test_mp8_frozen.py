@@ -530,8 +530,8 @@ FROZEN_MODULE_DIGESTS = {
         # 40ee6058c WRFV3.9) holds the four explicit routines bitwise under
         # the exact-C build (tests/test_advect_wrf_legacy_parity.py).
         # Previously 85062bec/e3fa6135.
-        'b56dd055bc0860fd51160332d6f1fec1b5b168de42ee7a8962624c786ef9ca80',
-        '075f8edde330612422da3a096fb83f882920449da97162d51d9c0a7b3457211d'),
+        '1b6f1755649e54846e154cb9fb33b453509776b873e8836365a5b99c56dd6832',
+        '37a6363818ad5b6ac4442739c86be877acbcadc613563d04faf6aac0b7bbf2af'),
     # Re-pinned for the WOOF 1.0.0 text scrub: comments only (punctuation, host
     # labels), proven equal with comments stripped; the preprocessor drops
     # comments, so the compiled binary does not move.
@@ -920,8 +920,17 @@ FROZEN_MODULE_DIGESTS = {
         # Assembled pin re-read for 2.9.11 (paper/conus-suite-exact 0e21ecf29a): the row's strict MF_VX_INV
         # edit sits inside `#if GPUWM_WRF_EXACT`; it moved the file pin above and left this one stale.
         # Default route unchanged: the 2.9.11 assembled-legacy replay, 0 differing words in all three families.
-        'b35120f7012a89b7e8b3a0da7e30ce434ae3867e1ff35fea4665e3f645a16949',
-        '1730a72093ba5b64c04aada3d8ebc94fc7c0a40ace6b1685e5fd3a04b405cdaf'),
+        # Re-pinned for state_relaxation_multi: an RK stage's state relaxation
+        # rows in one launch, each row the frame kernel's statements word for
+        # word plus the interior ufunc effects (tests/test_lbc_relax_multi.py,
+        # both backends and modes; wrfout byte-identical on the LES and 3 km
+        # cases).  The seven existing entries are untouched text; the audit's
+        # PTX signatures stay identical across sm100/sm120.
+        # Re-read for the 32-bit cell index and the write-if-changed store
+        # (integer and store logic only; the audit record was re-taken).
+        # Previously b35120f7/1730a720.
+        'a5bc696d4f3e0ce4e04608bac1b956fd8c80fdfaa869082d70da1d7b7f7d213d',
+        'b83b8ec8b0ab60b5f7863a391d5b7cb6099302878bd4460ff164c2b5c758e82a'),
     'morrison': (
         # Re-pinned by the cat6 fix, 2026-11-02: 51bb93111ee (export hygiene)
         # rewrote comments only in glibc_flt32.cuh, flt32_expf_fma.cuh, kf.cu,
@@ -1593,8 +1602,8 @@ FROZEN_MODULE_DIGESTS = {
         # the exact-C build on the HRRR-fork fixture's cases
         # (tests/test_advect_wrf_legacy_parity.py).
         # Previously 20a2dd79/b4832282.
-        '50dea4bb4d588e0943fd313b0533fd2dba7d3c4834922251c1af2a2d2b805c7f',
-        '59139c1b2c592a4f3b098976ef11d5a749d93f7ec29f2cd7b2c7332db5767766'),
+        'db86f46e0ae5d6e0040a49b6af11e638527e9fc0afb458729d32c6df23844af9',
+        '43d703b4b6fcc3440f534621950a45ecf5c525966e0b6724b0f1295bc42dcf01'),
     'refl': (
         # Re-pinned for A146 (a98f2482e): every float division by a compile-time
         # constant is spelled __fdiv_rn, because NVRTC compiles x / C as a

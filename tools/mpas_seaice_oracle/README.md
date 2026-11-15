@@ -109,17 +109,29 @@ one block:
   `-Dprivate=public` (visibility only), so the driver can call its stages.
 
 Every run starts with `seaice_init_advection_incremental_remap` itself: the
-tracer list from the packages, the halo check and the remap geometry. The
-RBF reconstruction coefficients (`coeffs_reconstruct`) are the input's:
-`remap_standins.F90` makes `mpas_rbf_interp_initialize` and
-`mpas_init_reconstruct` no-ops. Then, by `oracle_stage`:
+tracer list from the packages, the halo check and the remap geometry. In
+`run_incremental_remap_{r4,r8}` the RBF reconstruction coefficients
+(`coeffs_reconstruct`) are the input's: `rbf_standins.F90` makes
+`mpas_rbf_interp_initialize` and `mpas_init_reconstruct` no-ops. In
+`run_incremental_remap_init_{r4,r8}` they are MPAS's own: build.sh cuts
+`mpas_initialize_vectors` (with `mpas_unit_vec_in_r3`,
+`mpas_cross_product_in_r3` and `mpas_fix_periodicity`),
+`mpas_rbf_interp_initialize`,
+`mpas_rbf_interp_func_3D_plane_vec_const_dir_comp_coeffs`, `evaluate_rbf`,
+`mpas_set_up_vector_dirichlet_rbf_matrix_and_rhs`, `mpas_legs`, `elgs` and
+`mpas_init_reconstruct` verbatim out of `src/operators` (`init/rbf_cut.F`);
+the mesh pool carries `is_periodic`, `x_period` and `y_period` (`mesh:` real
+and logical configs). `mpas_legs`/`elgs` are Tao Pang's partial-pivoting
+elimination ("Copyright (c) Tao Pang 2001"), as distributed in MPAS's
+BSD-licensed tree. Then, by `oracle_stage`:
 - 0: nothing more (the tracer tree and the geometry);
 - 1: the volume-to-thickness loop of `seaice_run_advection_incremental_remap`
   (and back, under `oracle_round_trip`);
 - 2: `find_departure_points`, `find_departure_triangles` and
   `get_triangle_quadrature_points`;
 - 3: `make_masks` and `construct_linear_tracer_fields`;
-- 4: `seaice_run_advection_incremental_remap`, `oracle_n_steps` times.
+- 4: `seaice_run_advection_incremental_remap`, `oracle_n_steps` times;
+- 5: nothing more (the init binary's cases: the geometry and RBF set-up).
 
 The third argument is a log file. It gets the ordered tracer list, every
 warning the routines log (the mean-recovery check, with its real arguments

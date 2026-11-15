@@ -460,8 +460,13 @@ def launch_pd_fluxes(q, q0, ru, rv, rw, mut, coord, dx, dy, dt,
 def launch_pd_renorm_apply(q0, mu_old, fxl, fxc, fyl, fyc, fzl, fzc,
                            tend, coord, dx, dy, dt,
                            msft=None, has_msf=None,
-                           open_x=False, open_y=False) -> None:
+                           open_x=False, open_y=False,
+                           zero_first=False) -> None:
     """ADD the renormalized PD flux divergence into ``tend``.
+
+    ``zero_first`` starts every point from +0.0f instead of reading
+    ``tend`` (the caller's ``tend[...] = 0`` folded into the launch: the
+    same words, one launch fewer per species).
 
     ``mu_old`` is the time-t column mass (WRF ``mu_old``, coupling
     ``ph_low``); flux arrays as filled by :func:`launch_pd_fluxes`.
@@ -478,7 +483,11 @@ def launch_pd_renorm_apply(q0, mu_old, fxl, fxc, fyl, fyc, fzl, fzc,
         has_msf = msft is not None
     if msft is None:
         msft = cp.ones((ny, nx), dtype=DTYPE)
-    kern = get_kernel("pd_advection", "pd_renorm_apply")
+    if zero_first:
+        kern = get_kernel_int_defines("pd_advection", "pd_renorm_apply",
+                                      (("GPUWM_PD_ZERO_FIRST", 1),))
+    else:
+        kern = get_kernel("pd_advection", "pd_renorm_apply")
     grid = ((nx + _TPB - 1) // _TPB, ny, nz)
     args = (q0, _mut2d(mu_old, ny, nx), fxl, fxc, fyl, fyc, fzl, fzc,
           cp.asarray(coord.c1h, dtype=DTYPE),
@@ -815,7 +824,6 @@ def _advance_species_wrf(state: DomainState, cfg: RunConfig, name: str, q, q0,
     if pd:
         q0_eff = state.scratch((nz, ny, nx), "moist_pd_q0")
         _fold_wrf_pd_sources(q0, chm0, source, dt_eff, q0_eff)
-        tend[...] = 0
         # advect_scalar_pd's mut is rk_scalar_tend's grid%muts, the
         # acoustic loop's MUT + MU'' (the ring its own carrier), not
         # mub + mu_2 after small_step_finish: 1674 interior words of the
@@ -831,7 +839,8 @@ def _advance_species_wrf(state: DomainState, cfg: RunConfig, name: str, q, q0,
         launch_pd_renorm_apply(q0_eff, mu0, *bufs, tend=tend, coord=state,
                                dx=cfg.dx, dy=cfg.dy, dt=dt_eff,
                                msft=state.msft, has_msf=state.has_msf,
-                               open_x=boundary_x, open_y=boundary_y)
+                               open_x=boundary_x, open_y=boundary_y,
+                               zero_first=True)
         if implicit is not None:
             _ieva_scalar(state, tend, q0_eff, implicit, mu0, mu, dt_eff)
         if name == "qv" and WRF_EXACT and cfg.cu_physics in (3, 6, 16):
@@ -843,12 +852,12 @@ def _advance_species_wrf(state: DomainState, cfg: RunConfig, name: str, q, q0,
             msft=(state.msft.reshape(-1) if state.has_msf else None),
             clamp=False)
         return
-    tend[...] = 0
     launch_flux_div_scalar(q, ru, rv, ww_explicit, tend, state,
                            cfg.dx, cfg.dy, open_x=boundary_x,
                            open_y=boundary_y, msf=state.msft,
                            has_msf=state.has_msf, spec=boundary_forced,
-                           vorder=vertical_orders(cfg)[0], horder=scalar_horizontal_order(cfg))
+                           vorder=vertical_orders(cfg)[0], horder=scalar_horizontal_order(cfg),
+                           zero_first=True)
     if implicit is not None:
         _ieva_scalar(state, tend, q0, implicit, mu0, mu, dt_eff)
     if name == "qv" and (export_advective_forcing or (WRF_EXACT and cfg.cu_physics in (3, 6, 16))):
@@ -1075,8 +1084,9 @@ def advance_scalars_stage(state: DomainState, cfg: RunConfig,
             # scalar and then clears it before advect_scalar_pd accumulates
             # the advective tendency.  Nested forcing aliases ``tend`` here,
             # so retaining it would consume B once in q0_eff and again as
-            # msft*B in the final update.
-            tend[...] = 0
+            # msft*B in the final update.  pd_renorm_apply starts from
+            # that cleared buffer itself (zero_first; pd_fluxes never
+            # reads it).
             launch_pd_fluxes(q, q0_eff, ru, rv, ww_explicit, mu, state,
                              cfg.dx, cfg.dy, dt_eff, *bufs,
                              msft=state.msft, has_msf=state.has_msf,
@@ -1086,7 +1096,8 @@ def advance_scalars_stage(state: DomainState, cfg: RunConfig,
                                    coord=state,
                                    dx=cfg.dx, dy=cfg.dy, dt=dt_eff,
                                    msft=state.msft, has_msf=state.has_msf,
-                                   open_x=boundary_x, open_y=boundary_y)
+                                   open_x=boundary_x, open_y=boundary_y,
+                                   zero_first=True)
             if implicit is not None:
                 _ieva_scalar(state, tend, q0_eff, implicit, mu0, mu, dt_eff)
             if name == "qv" and cfg.cu_physics == 16:
@@ -1100,16 +1111,16 @@ def advance_scalars_stage(state: DomainState, cfg: RunConfig,
                 dt_eff, msft=(msft_row if state.has_msf else None),
                 clamp=True)
         else:
-            # flux_div_scalar accumulates into ``tend`` and deliberately
-            # writes nothing at specified-boundary cells, so this branch
-            # must start from a clean buffer.
-            tend[...] = 0
+            # flux_div_scalar accumulates into ``tend``; zero_first starts
+            # it from the clean buffer the fill used to write (the same
+            # words, one launch fewer per species).
             launch_flux_div_scalar(q, ru, rv, ww_explicit, tend, state,
                                    cfg.dx, cfg.dy,
                                    open_x=boundary_x, open_y=boundary_y,
                                    msf=state.msft, has_msf=state.has_msf,
                                    spec=boundary_forced,
-                                   vorder=vertical_orders(cfg)[0], horder=scalar_horizontal_order(cfg))
+                                   vorder=vertical_orders(cfg)[0], horder=scalar_horizontal_order(cfg),
+                                   zero_first=True)
             if implicit is not None:
                 _ieva_scalar(state, tend, q0, implicit, mu0, mu, dt_eff)
             if export_advective_forcing and name == "qv":
@@ -1205,8 +1216,8 @@ def advance_scalars_stage(state: DomainState, cfg: RunConfig,
                     lbc_held=(nested_held if nested_held is not None
                               else held_lbc.get(name)))
                 # See the qv/qc/qr loop above: WRF clears sc_tend after the
-                # positive-definite source fold and before advection.
-                tend[...] = 0
+                # positive-definite source fold and before advection
+                # (zero_first on the renorm launch below).
                 launch_pd_fluxes(q, q0_eff, ru, rv, ww_explicit, mu, state,
                                  cfg.dx, cfg.dy, dt_eff, *bufs,
                                  msft=state.msft, has_msf=state.has_msf,
@@ -1217,7 +1228,8 @@ def advance_scalars_stage(state: DomainState, cfg: RunConfig,
                                        dx=cfg.dx, dy=cfg.dy, dt=dt_eff,
                                        msft=state.msft,
                                        has_msf=state.has_msf,
-                                       open_x=boundary_x, open_y=boundary_y)
+                                       open_x=boundary_x, open_y=boundary_y,
+                                       zero_first=True)
                 if implicit is not None:
                     _ieva_scalar(state, tend, q0_eff, implicit, mu0, mu,
                                  dt_eff)
@@ -1233,15 +1245,16 @@ def advance_scalars_stage(state: DomainState, cfg: RunConfig,
                     # native signed tracer words for exact replay.
                     clamp=name not in TR17_NAMES)
             else:
-                # flux_div_scalar accumulates; start from a clean buffer.
-                tend[...] = 0
+                # flux_div_scalar accumulates; zero_first is the clean
+                # buffer (the same words as a fill followed by the launch).
                 launch_flux_div_scalar(q, ru, rv, ww_explicit, tend, state,
                                        cfg.dx, cfg.dy,
                                        open_x=boundary_x, open_y=boundary_y,
                                        msf=state.msft,
                                        has_msf=state.has_msf,
                                        spec=boundary_forced,
-                                       vorder=vertical_orders(cfg)[0], horder=scalar_horizontal_order(cfg))
+                                       vorder=vertical_orders(cfg)[0], horder=scalar_horizontal_order(cfg),
+                                       zero_first=True)
                 if implicit is not None:
                     _ieva_scalar(state, tend, q0, implicit, mu0, mu, dt_eff)
                 held = held_lbc.get(name)
@@ -1452,7 +1465,8 @@ def advance_tke_stage(state: DomainState, cfg: RunConfig,
     q = state.tke
     q0 = state.tke0
     pd = final and not (cfg.open_x or cfg.open_y)
-    tend[...] = 0
+    # Both branches' first accumulating launch starts from zero itself
+    # (zero_first), the words a fill here would have written.
     if pd:
         bufs = (state.scratch((nz, ny, nx + 1), "pd_fxl"),
                 state.scratch((nz, ny, nx + 1), "pd_fxc"),
@@ -1491,7 +1505,8 @@ def advance_tke_stage(state: DomainState, cfg: RunConfig,
                                coord=state,
                                dx=cfg.dx, dy=cfg.dy, dt=dt_eff,
                                msft=state.msft, has_msf=state.has_msf,
-                               open_x=boundary_x, open_y=boundary_y)
+                               open_x=boundary_x, open_y=boundary_y,
+                               zero_first=True)
         if implicit is not None:
             _ieva_scalar(state, tend, q0_eff, implicit, mu0, mu, dt_eff)
         if state.has_msf:
@@ -1508,7 +1523,8 @@ def advance_tke_stage(state: DomainState, cfg: RunConfig,
                                open_x=boundary_x, open_y=boundary_y,
                                msf=state.msft, has_msf=state.has_msf,
                                spec=(cfg.specified or cfg.nested),
-                               vorder=vertical_orders(cfg)[0], horder=scalar_horizontal_order(cfg))
+                               vorder=vertical_orders(cfg)[0], horder=scalar_horizontal_order(cfg),
+                               zero_first=True)
         if implicit is not None:
             _ieva_scalar(state, tend, q0, implicit, mu0, mu, dt_eff)
         if state.has_msf:

@@ -16,7 +16,7 @@
 !   seaice_init_evp (verbatim) and seaice_initialize_time_diagnostics (cut
 !   verbatim), seaice_init_advection (verbatim: under config_use_advection the
 !   incremental remap's init, with coeffs_reconstruct the input's,
-!   remap_standins.F90); the basis functions, masks and the rest of the mesh
+!   rbf_standins.F90); the basis functions, masks and the rest of the mesh
 !   setup are the input's;
 !   then oracle_n_steps times: the clock advanced, seaice_timestep (cut
 !   verbatim: the time diagnostics, the step counter, the column wrappers, the

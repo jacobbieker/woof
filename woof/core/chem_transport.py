@@ -145,7 +145,6 @@ def advance_chem_stage(state, cfg, ru, rv, ww, dt_eff: float, final: bool,
             q0_eff = _pd_fold_sources(
                 state, cfg, name, q0, chm0, dt_eff, None,
                 fixed_tendency=fixed, lbc_held=nested_held)
-            tend[...] = 0
             launch_pd_fluxes(q, q0_eff, ru, rv, ww_explicit, mu, state,
                              cfg.dx, cfg.dy, dt_eff, *bufs,
                              msft=state.msft, has_msf=state.has_msf,
@@ -155,7 +154,8 @@ def advance_chem_stage(state, cfg, ru, rv, ww, dt_eff: float, final: bool,
                                    coord=state, dx=cfg.dx, dy=cfg.dy,
                                    dt=dt_eff, msft=state.msft,
                                    has_msf=state.has_msf,
-                                   open_x=boundary_x, open_y=boundary_y)
+                                   open_x=boundary_x, open_y=boundary_y,
+                                   zero_first=True)
             if implicit is not None:
                 _ieva_scalar(state, tend, q0_eff, implicit, mu0, mu, dt_eff)
             if boundary_forced:
@@ -199,12 +199,12 @@ def advance_chem_stage(state, cfg, ru, rv, ww, dt_eff: float, final: bool,
                 dt_eff, msft=(msft_row if state.has_msf else None),
                 clamp=True)
         else:
-            tend[...] = 0
             launch_flux_div_scalar(q, ru, rv, ww_explicit, tend, state,
                                    cfg.dx, cfg.dy,
                                    open_x=boundary_x, open_y=boundary_y,
                                    msf=state.msft, has_msf=state.has_msf,
-                                   spec=boundary_forced, vorder=vorder)
+                                   spec=boundary_forced, vorder=vorder,
+                                   zero_first=True)
             if implicit is not None:
                 _ieva_scalar(state, tend, q0, implicit, mu0, mu, dt_eff)
             lbc_after_msf = apply_scalar_lbc is not None

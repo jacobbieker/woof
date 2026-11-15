@@ -297,6 +297,7 @@ FLAT_ADDRESS_TABLES = frozenset({
     "rk_copy_words", "rk_zero_words",        # woof/core/kernels/rk_bookkeeping.cu
     "glue_add_arrays",                       # woof/core/kernels/bandwidth_glue.cu
     "diff6_multi",                           # woof/core/kernels/diff6.cu
+    "state_relaxation_multi",                # woof/core/kernels/lbc_state.cu
     "solve_region_scrub_words_v841",         # woof/hex/cuda_solve_region_v841.py
 })
 
