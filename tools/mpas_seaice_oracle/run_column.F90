@@ -42,7 +42,15 @@
 !                 logged as above (SEAICE_ERROR_COL_ITD_THERM after an abort);
 !   ridging       colpkg_init_thermo and init_column_itd as above, then
 !                 column_ridging(domain, ierr), its ierr logged as above
-!                 (SEAICE_ERROR_COL_RIDGING after an abort).
+!                 (SEAICE_ERROR_COL_RIDGING after an abort);
+!   prep_radiation
+!                 column_prep_radiation;
+!   radiation     colpkg_init_thermo (heat_capacity), then
+!                 column_radiation(domain, clock, .false.);
+!   init_shortwave
+!                 colpkg_init_thermo, then seaice_init_column_shortwave(domain,
+!                 clock) (the orbit for the delta-Eddington shortwave,
+!                 column_radiation at initialisation and the albedos).
 !
 ! The Registry struct alternative_atmos_forcing is longer than the stream's
 ! 24-character pool names; the stream spells it 'alternative_atmos_forcin'
@@ -140,6 +148,18 @@ program run_column
      ierr = 0
      call column_ridging(domain, ierr)
      call write_ints('IERR', [ierr])
+  case ('prep_radiation')
+     call column_prep_radiation(domain)
+  case ('radiation')
+     call mpas_pool_get_dimension(pool_named(pools, 'mesh'), 'nIceLayers', nIceLayers)
+     allocate(sprofile(nIceLayers + 1))
+     call colpkg_init_thermo(nIceLayers, sprofile)
+     call column_radiation(domain, domain % clock, .false.)
+  case ('init_shortwave')
+     call mpas_pool_get_dimension(pool_named(pools, 'mesh'), 'nIceLayers', nIceLayers)
+     allocate(sprofile(nIceLayers + 1))
+     call colpkg_init_thermo(nIceLayers, sprofile)
+     call seaice_init_column_shortwave(domain, domain % clock)
   case default
      print *, 'run_column: unknown oracle_stage ', trim(stage)
      stop 2

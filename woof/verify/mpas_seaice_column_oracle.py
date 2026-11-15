@@ -49,6 +49,7 @@ from pathlib import Path
 import numpy as np
 
 from woof.hex.mpas_seaice import column_itd_v842 as citd
+from woof.hex.mpas_seaice import column_radiation_v842 as crad
 from woof.hex.mpas_seaice import column_ridge_v842 as crdg
 from woof.hex.mpas_seaice import column_therm_v842 as ct
 from woof.hex.mpas_seaice import column_v842 as cv
@@ -61,6 +62,8 @@ VT_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_column_therm"
 ITD_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_column_itd"
 #: the ridging's fixture (RIDGE_CASES)
 RIDGE_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_column_ridge"
+#: the shortwave's fixture (RADIATION_CASES)
+RADIATION_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_column_radiation"
 PRECISIONS = {"r8": np.float64}
 REAL, INT, DIM = _stream.REAL, _stream.INT, _stream.DIM
 #: the Registry structs the column routines read and write, as oracle_stream pools
@@ -195,6 +198,35 @@ RIDGE_CASES = (
     ("ridge_abort_iterations", 20261979, _RDG, {**_HIBLER}),
     ("ridge_abort_cleanup", 20261980, _RDG, {**_BL99}),
 )
+_CCSM3 = {"config_shortwave_type": "ccsm3", **_NO_PONDS}
+_CONSTANT = {**_CCSM3, "config_albedo_type": "constant"}
+_COUPLED = {"config_calc_surface_temperature": False}
+#: the shortwave without the delta-Eddington solution (colpkg stage 5a): name, seed,
+#: stage, overrides. The Registry default is the delta-Eddington shortwave with the
+#: ccsm3 albedos; MPAS refuses ponds with the CCSM3 shortwave and a computed surface
+#: temperature. ccsm3 albedos need the opt-in atan (RADIATION_TRIG_CASES).
+RADIATION_CASES = (
+    ("rad_ccsm3_constant_albedos", 20261981, "radiation", {**_CONSTANT, **_BL99}),
+    ("rad_ccsm3_constant_mushy_five_layers", 20261982, "radiation", {**_CONSTANT, "config_nIceLayers": 5}),
+    ("rad_ccsm3_constant_zero_layer", 20261983, "radiation", {
+        **_CONSTANT, "config_thermodynamics_type": "zero layer",
+        "config_sea_freezing_temperature_type": "linear_salt", "config_nCategories": 3}),
+    ("rad_ccsm3_albedos", 20261984, "radiation", {**_CCSM3, **_BL99}),
+    ("rad_ccsm3_albedos_thickness_limit", 20261985, "radiation", {
+        **_CCSM3, "config_variable_albedo_thickness_limit": 0.7, "config_visible_ice_albedo": 0.75,
+        "config_infrared_snow_albedo": 0.68, "config_nCategories": 2, "config_category_bounds_type": "new"}),
+    ("rad_coupled_dedd_topo_ponds", 20261986, "radiation", {**_COUPLED, **_BL99, **_TOPO}),
+    ("rad_coupled_ccsm3_level_ponds", 20261987, "radiation", {**_COUPLED, **_BL99, "config_shortwave_type": "ccsm3"}),
+    ("prep_radiation_default", 20261988, "prep_radiation", {}),
+    ("prep_radiation_three_categories", 20261989, "prep_radiation", {"config_nCategories": 3,
+                                                                     "config_nIceLayers": 4}),
+    ("init_shortwave_ccsm3_constant", 20261990, "init_shortwave", {**_CONSTANT}),
+    ("init_shortwave_ccsm3_albedos", 20261991, "init_shortwave", {**_CCSM3, **_BL99}),
+    ("init_shortwave_coupled_topo_ponds", 20261992, "init_shortwave", {**_COUPLED, **_BL99, **_TOPO}),
+)
+#: the cases that call glibc's atan (the ccsm3 albedos with a computed surface temperature)
+RADIATION_TRIG_CASES = ("rad_ccsm3_albedos", "rad_ccsm3_albedos_thickness_limit", "init_shortwave_ccsm3_albedos")
+_RADIATION_STAGES = ("radiation", "prep_radiation", "init_shortwave")
 
 
 def configs_of(overrides: dict, stage: str) -> dict:
@@ -214,7 +246,7 @@ def field_rows(config: dict) -> tuple[list, dict[str, int], dict[str, bool]]:
     # the var_struct's (biogeochemistry's newlyFormedIce is the column package's).  The
     # earlier stages' cases keep the struct gate, which only drops fields their routines
     # never read, so their bytes (and fixtures) stay; the ITD stage reads newlyFormedIce.
-    var_packages_only = config.get("oracle_stage") in ("itd_thermodynamics", "ridging")
+    var_packages_only = config.get("oracle_stage") in ("itd_thermodynamics", "ridging", *_RADIATION_STAGES)
     for struct in cv.registry_fields()["var_structs"]:
         if struct["name"] not in pools:
             continue
@@ -645,6 +677,75 @@ def _ridge_state(rs, case: dict) -> None:
         float(config["config_dt"]) / config["config_dynamics_subcycle_number"])
 
 
+def _radiation_state(rs, case: dict) -> None:
+    """The shortwave's inputs on _tracers' categories (ice-free cells and
+    categories, a sub-puny cell, ice without volume), with the owned cells'
+    branches (row r is indexToCellID r + 1):
+
+    0. a category at the melting point (the warm albedos, fT = 0);
+    1. no ice;
+    2. a category just above -2 puny (warm) and one just below (cold);
+    3. sub-puny ice;
+    4. bare ice (no snow), the first category ice-free;
+    5. ice without volume in the last category (atan(0));
+    6. thick ice and deep snow;
+    7. no sun;
+    8. for prep_radiation: no previous net shortwave (scaling factor 0) and
+       no ice area; row 6 a sub-puny previous net shortwave.
+
+    The topo ponds' area and lid thickness straddle puny and
+    config_critical_pond_ice_thickness."""
+    pools, dims, config = case["pools"], case["dims"], case["config"]
+    nc, ncat = dims["nCells"], dims["nCategories"]
+    n1 = nc + 1
+    u = _uniform(rs)
+    t = pools["tracers"]
+    tsfc = u(-30.0, -0.5, (n1, ncat, 1))
+    tsfc[0, 0] = 0.0
+    if ncat >= 2:
+        tsfc[2, 0], tsfc[2, 1] = -1.0e-11, -3.0e-11
+    t["surfaceTemperature"] = tsfc
+    snow = t["snowVolumeCategory"]
+    snow[4] = 0.0
+    t["iceAreaCategory"][4, 0] = 0.0
+    if ncat >= 2:
+        t["iceVolumeCategory"][6, -1] = t["iceAreaCategory"][6, -1] * 6.0
+        snow[6, -1] = t["iceAreaCategory"][6, -1] * 1.5
+    ac = pools["atmos_coupling"]
+    for key, hi in (("shortwaveVisibleDirectDown", 250.0), ("shortwaveVisibleDiffuseDown", 120.0),
+                    ("shortwaveIRDirectDown", 200.0), ("shortwaveIRDiffuseDown", 100.0)):
+        value = u(0.0, hi, (n1,))
+        value[7] = 0.0
+        ac[key] = value
+    sw = pools["shortwave"]
+    for key in ("albedoVisibleDirectArea", "albedoVisibleDiffuseArea", "albedoIRDirectArea", "albedoIRDiffuseArea"):
+        sw[key] = u(0.0, 0.9, (n1,))
+    scale = u(50.0, 400.0, (n1,))
+    scale[8], scale[6] = 0.0, 5.0e-12
+    sw["shortwaveScalingFactor"] = scale
+    aggregate = np.zeros(n1)
+    for n in range(ncat):
+        aggregate = aggregate + t["iceAreaCategory"][:, n, 0]
+    aggregate[8] = 0.0
+    pools["tracers_aggregate"]["iceAreaCell"] = aggregate
+    coszen = u(0.05, 0.9, (n1,))
+    coszen[7] = -0.3
+    sw["solarZenithAngleCosine"] = coszen
+    for key in ("surfaceShortwaveFlux", "interiorShortwaveFlux", "penetratingShortwaveFlux",
+                "shortwaveLayerPenetration", "absorbedShortwaveSnowLayer", "absorbedShortwaveIceLayer"):
+        sw[key] = u(0.0, 200.0, sw[key].shape)
+    hp1 = float(config["config_critical_pond_ice_thickness"])
+    if t.get("pondArea") is not None:
+        pond = u(0.0, 0.4, t["pondArea"].shape)
+        pond[0, 0] = 5.0e-12
+        t["pondArea"] = pond
+    if t.get("pondLidThickness") is not None:
+        lid = u(0.0, 2.0 * hp1, t["pondLidThickness"].shape)
+        lid[2] = hp1
+        t["pondLidThickness"] = lid
+    pools["mesh"]["indexToCellID"] = np.arange(1, n1 + 1, dtype=np.int32)
+
+
 def make_case(name, seed, stage, overrides) -> dict:
     rs = np.random.RandomState(seed)
     config = configs_of(overrides, stage)
@@ -673,6 +774,8 @@ def make_case(name, seed, stage, overrides) -> dict:
         _itd_state(rs, case)
     if stage == "ridging":
         _ridge_state(rs, case)
+    if stage in _RADIATION_STAGES:
+        _radiation_state(rs, case)
     for key, on in active.items():
         config[f"package:{key}"] = on
     case["fields"] = [r[:4] for r in rows]
@@ -804,6 +907,12 @@ def run_gpu(case: dict) -> tuple[dict[str, np.ndarray], "cv.ColumnState"]:
     elif stage == "ridging":
         cv.init_column_itd(dev, state)
         state.abort = crdg.ridging(dev, config, state)
+    elif stage == "prep_radiation":
+        crad.prep_radiation(dev, config, state)
+    elif stage == "radiation":
+        crad.radiation(dev, config, state)
+    elif stage == "init_shortwave":
+        crad.init_shortwave(dev, config, state)
     else:
         raise ValueError(f"unknown stage {stage}")
     outputs = {f"{pool}/{name}": cp.asnumpy(dev[pool][name]) for pool, name, kind, _ in case["fields"]
@@ -927,6 +1036,13 @@ def measure_ridge(reference: dict | None = None, logs: dict | None = None, *, ro
         row["tracer_object"] = sum(int(mine[k] != log["tracer_object"].get(k)) for k in mine)
         report[case["name"]] = row
     return report
+
+
+def measure_radiation(reference: dict | None = None, logs: dict | None = None, *, rows=RADIATION_CASES,
+                      fixture_dir: Path = RADIATION_FIXTURE_DIR) -> dict[str, dict[str, int]]:
+    """Per shortwave case and field, the words the GPU gets wrong, and the
+    tracer object's integers that differ from the oracle's."""
+    return measure(reference, logs, rows=rows, fixture_dir=fixture_dir)
 
 
 #: colpkg_init_thermo's profiles are graded for every ice-layer count up to this
