@@ -129,3 +129,33 @@ def test_row_eligibility_and_chunking():
     rows = [(a, a, a, False), (a, a, a.copy(), False)]
     assert dy._smag_multi_rows(rows, 2, 3, 4) is False      # host arrays
     assert dy._smag_multi_rows([], 2, 3, 4) is False
+
+
+def test_dispatch_batches_the_mass_point_rows_around_the_w_row(monkeypatch):
+    """The step's scalar specs carry the w row (stagger "z") among the
+    mass-point rows: the mass-point rows must still take the multi launch,
+    w its own, and every row its open-strip zeroing."""
+    from types import SimpleNamespace
+
+    import woof.core.dycore as dy
+
+    calls = []
+    monkeypatch.setattr(dy, "_smag_multi_rows", lambda rows, nz, ny, nx: bool(rows))
+    monkeypatch.setattr(dy, "launch_wrf_smag2d_hd_multi",
+                        lambda state, cfg, rows, *, time_t: calls.append(("multi", [r[3] for r in rows])))
+    monkeypatch.setattr(dy, "launch_wrf_smag2d_hd",
+                        lambda state, cfg, f, xk, buf, *, stagger, time_t, full_theta=False:
+                        calls.append(("row", stagger, full_theta)))
+    zeroed = []
+    monkeypatch.setattr(dy, "_zero_open_strips", lambda buf, cfg, width, **kw: zeroed.append(buf))
+    monkeypatch.setattr(dy, "chem_mix2_exempt_slots", lambda state, cfg: set())
+    bufs = {}
+    state = SimpleNamespace(thp=np.zeros((2, 3, 4), np.float32),
+                            scratch=lambda shape, slot: bufs.setdefault(slot, np.zeros(shape, np.float32)))
+    mass = np.zeros((2, 3, 4), np.float32); w = np.zeros((3, 3, 4), np.float32)
+    specs = [(mass, None, mass, None, None, "smag_ru", "x"), (mass, None, mass, None, None, "smag_rv", "y"),
+             (w, None, mass, None, None, "smag_rw", "z"), (mass, None, mass, None, None, "smag_rth", ""),
+             (mass, None, mass, None, None, "smag_rqv", ""), (mass, None, mass, None, None, "smag_rqc", "")]
+    dy._launch_wrf_smag_scalar_rows(state, SimpleNamespace(), specs, time_t=True)
+    assert calls == [("multi", [True, False, False]), ("row", "z", False)]
+    assert len(zeroed) == 4
