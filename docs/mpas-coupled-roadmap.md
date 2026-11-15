@@ -126,10 +126,16 @@ Ordered by how self-contained each piece is:
    `tests/test_mpas_seaice_column_therm_parity.py`). It runs only behind
    `WOOF_GLIBC239_LIBM64=1`: `psimhu`/`psixhu` call atan, glibc's atan is
    not correctly rounded, and the port matches it word for word only through
-   the LGPL transcription. Still to port: mushy thermodynamics,
-   `ice_therm_itd`, `ice_mechred` (ridging), `ice_shortwave`
-   (delta-Eddington), melt ponds, the other `ice_atmo` options, then the
-   column time step.
+   the LGPL transcription. Also ported: `column_itd_thermodynamics`
+   (`colpkg_step_therm2`: `linear_itd` or the delta function,
+   `add_new_ice` for BL99 and mushy, `lateral_melt`, `reduce_area` and
+   `cleanup_itd`, with level, CESM or topo ponds;
+   `woof/hex/mpas_seaice/column_itd_v842.py`,
+   `tests/test_mpas_seaice_column_itd_parity.py`), which calls no libm and
+   needs no opt-in. Still to port: mushy vertical thermodynamics,
+   `ice_mechred` (ridging), `ice_shortwave` (delta-Eddington), the melt
+   ponds' own physics, the other `ice_atmo` options, then the column time
+   step.
 7. Biogeochemistry (`ice_zbgc*`, `ice_algae`, `ice_aerosol`). Refused by name
    until ported.
 
