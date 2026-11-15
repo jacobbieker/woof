@@ -1004,5 +1004,19 @@ reproduces a fixed run built at that step, so nothing in the dycore, its boundar
 column physics kept the construction-time step.  The 12 h tropical runs stayed finite in every field of
 every frame, with 3-hourly max |w| of 2.8-3.4 m/s against the fixed run's 2.6-4.2; the step reached its 2x ceiling within
 the first quarter hour and held there with the vertical Courant number at 1.0.  On CUDA the 2x step
-buys 1.38x, not 2x: CUDA graphs are off on the adaptive path (a captured graph replays one step length)
-and each step reads its CFL back to the host once.  Tests: `tests/test_hex_adaptive_dt.py`.
+bought 1.38x, not 2x, in these runs: CUDA graphs were off on the adaptive path (a captured graph
+replays one step length) and each step reads its CFL back to the host once.  Tests:
+`tests/test_hex_adaptive_dt.py`.
+
+**CUDA graphs on the adaptive step (2026-11-15).**  The step length is part of the subcycle graph's
+key (`woof.hex.cuda_subcycle_graphs`: `outer_dt` and the config), so a graph replays one step length.
+The adaptive run now keeps a graph for each REPEATED step length: a key is captured on its second step
+and up to two graphs are kept (the least recently used is dropped), and a step length seen once (the
+ramp from the row step, the two steps of each landing on a deadline) runs eager without disturbing the
+kept graphs.  The step the clock settles at (its 2x ceiling, or a CFL-held step) replays.  On the
+Edinburgh variable-resolution mesh (`edi-vr`, 4,565 cells, 18 s row) 2 h adaptive: 205 steps, 186 of
+them fully replayed from one captured graph, 19 eager.  Replay is byte-identical to eager (F1), and the
+histories and snapshot hashes of the adaptive run with and without graphs are identical.
+`WOOF_HEX_CUDA_GRAPHS_ADAPTIVE=0` restores the eager adaptive path; `WOOF_HEX_CUDA_GRAPHS_KEYS` and
+`WOOF_HEX_CUDA_GRAPHS_CAPTURE_AFTER` override the two numbers.  Tests:
+`tests/test_hex_subcycle_graph_keys.py`.
