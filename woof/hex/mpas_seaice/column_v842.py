@@ -549,6 +549,8 @@ class ColumnState:
     hi_min: float | None = None
     #: column_therm_v842.vertical_thermodynamics' (ierr, cell, message)
     abort: tuple | None = None
+    #: the warnings the last column routine logged (column_itd_v842: zap_snow_temperature's)
+    warnings: int = 0
 
 
 def init_parameters(pools: dict, configs: dict) -> ColumnState:
@@ -691,18 +693,11 @@ def init_thermo_profile(n_ice_layers: int, ktherm: int = 1) -> np.ndarray:
     return cp.asnumpy(_init_thermo(n_ice_layers, ktherm))
 
 
-def init_variables(pools: dict, configs: dict, state: ColumnState) -> None:
-    """``seaice_init_column_physics_package_variables`` without the
-    biogeochemistry and the restart shortwave (refused)."""
+def init_column_itd(pools: dict, state: ColumnState) -> None:
+    """``init_column_itd``: ``colpkg_init_itd`` writes ``categoryThicknessLimits``
+    and sets the column package's ``hi_min``."""
     import cupy as cp
-    d = state.dims
-    n_cells, n_solve, ncat, nil = d["nCells"], d["nCellsSolve"], d["nCategories"], d["nIceLayers"]
-    tracers = pools["tracers"]
-    # init_column_level_ice_tracers: the whole arrays
-    if configs["config_use_level_ice"] and not configs["config_do_restart"]:
-        _fill(tracers["levelIceArea"], 1.0)
-        _fill(tracers["levelIceVolume"], 1.0)
-    # init_column_itd: colpkg_init_itd
+    ncat = state.dims["nCategories"]
     limits = _need(pools["initial"], "categoryThicknessLimits", (ncat + 1,))
     hi_min = cp.zeros(1, np.float64)
     status = cp.zeros(1, np.int32)
@@ -711,6 +706,19 @@ def init_variables(pools: dict, configs: dict, state: ColumnState) -> None:
     if int(status.get()[0]):
         raise ValueError("init_column_itd: kcatbound=2 (WMO) must have ncat=5, 6 or 7")
     state.hi_min = float(hi_min.get()[0])
+
+
+def init_variables(pools: dict, configs: dict, state: ColumnState) -> None:
+    """``seaice_init_column_physics_package_variables`` without the
+    biogeochemistry and the restart shortwave (refused)."""
+    d = state.dims
+    n_cells, n_solve, ncat, nil = d["nCells"], d["nCellsSolve"], d["nCategories"], d["nIceLayers"]
+    tracers = pools["tracers"]
+    # init_column_level_ice_tracers: the whole arrays
+    if configs["config_use_level_ice"] and not configs["config_do_restart"]:
+        _fill(tracers["levelIceArea"], 1.0)
+        _fill(tracers["levelIceVolume"], 1.0)
+    init_column_itd(pools, state)
     # init_column_thermodynamic_profiles: colpkg_init_thermo, then every owned cell's profiles
     state.heat_capacity = state.ktherm != 0
     profile = _init_thermo(nil, state.ktherm)

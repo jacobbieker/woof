@@ -1,7 +1,7 @@
 """Run the built MPAS-Seaice column-package oracle on every case and write the fixture.
 
     pixi run -e default python tools/mpas_seaice_oracle/make_column_fixture.py BUILD_DIR [--out DIR]
-        [--cases init|therm]
+        [--cases init|therm|itd]
 
 BUILD_DIR holds ``run_column_r8`` and ``run_init_thermo_r8`` from build.sh.
 Writes into ``tests/data/oracles/mpas_seaice_column`` by default:
@@ -11,7 +11,8 @@ Writes into ``tests/data/oracles/mpas_seaice_column`` by default:
 ``THERMO_LAYERS`` ice layers) and ``inputs.sha256`` (every case's
 input-stream digest). ``--cases therm`` runs the vertical thermodynamics'
 cases (``VT_CASES``) into ``tests/data/oracles/mpas_seaice_column_therm``
-instead, without the profiles.
+instead, without the profiles; ``--cases itd`` the ITD thermodynamics'
+(``ITD_CASES``) into ``tests/data/oracles/mpas_seaice_column_itd``.
 """
 from __future__ import annotations
 
@@ -33,14 +34,15 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("build_dir", type=Path)
     parser.add_argument("--out", type=Path, default=None)
-    parser.add_argument("--cases", choices=("init", "therm"), default="init")
+    parser.add_argument("--cases", choices=("init", "therm", "itd"), default="init")
     args = parser.parse_args()
-    therm = args.cases == "therm"
-    args.out = args.out or (co.VT_FIXTURE_DIR if therm else co.FIXTURE_DIR)
+    rows, fixture_dir = {"init": (co.CASES, co.FIXTURE_DIR), "therm": (co.VT_CASES, co.VT_FIXTURE_DIR),
+                         "itd": (co.ITD_CASES, co.ITD_FIXTURE_DIR)}[args.cases]
+    args.out = args.out or fixture_dir
     args.out.mkdir(parents=True, exist_ok=True)
     arrays: dict[str, np.ndarray] = {}
     logs, digests = {}, []
-    for case in co.cases("r8", co.VT_CASES if therm else co.CASES):
+    for case in co.cases("r8", rows):
         outputs, log = co.run_oracle(args.build_dir, case)
         for key, value in co.changed_fields(case, outputs).items():
             arrays[f"{case['name']}/{key}"] = value
@@ -49,7 +51,7 @@ def main() -> int:
     np.savez_compressed(args.out / "oracle-r8.npz", **arrays)
     (args.out / "column-logs.json").write_text(json.dumps(logs, indent=1, sort_keys=True) + "\n",
                                                encoding="utf-8")
-    if not therm:
+    if args.cases == "init":
         np.save(args.out / "init-thermo-r8.npy", co.oracle_thermo_profiles(args.build_dir))
     (args.out / "inputs.sha256").write_text("\n".join(digests) + "\n", encoding="utf-8")
     print(f"wrote {args.out}")
