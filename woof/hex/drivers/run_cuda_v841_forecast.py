@@ -3702,6 +3702,7 @@ def execute_forecast(
     cycling: Mapping[str, Any] | None = None,
     iau: Mapping[str, Any] | None = None,
     nudging: Mapping[str, Any] | None = None,
+    obs_nudging: Mapping[str, Any] | None = None,
     balance_series: bool = False,
     tc_climate: Path | None = None,
     on_history_ready: Callable[[dict[str, Any]], Any] | None = None,
@@ -3752,6 +3753,10 @@ def execute_forecast(
             # the door refuses the same combination (HEX_NUDGING_LTS), this is the driver's own entry point.
             from woof.hex.nudging import HexNudgingRefusal
             raise HexNudgingRefusal("HEX_NUDGING_LTS", "nudging runs on fixed-step hex runs; drop the local time step")
+        if obs_nudging is not None:
+            from woof.hex.obs_nudging import HexObsNudgingRefusal
+            raise HexObsNudgingRefusal("HEX_OBS_NUDGING_LTS",
+                                       "observation nudging runs on fixed-step hex runs; drop the local time step")
         # Active full-step local time stepping: every rate class on its own
         # whole step.  The class executor hands a mesh that classes entirely
         # at rate one back to this function with the option cleared, so a
@@ -3803,8 +3808,14 @@ def execute_forecast(
             int(host["prepared"].mesh.n_cells), stochastic_options,
             levels=int(host["prepared"].vertical.n_vert_levels))
             if StochasticConfig.parse(stochastic_options).enabled else 0)
+        obs_bytes = 0
+        if obs_nudging is not None:
+            from woof.hex.obs_nudging import device_bytes, load_config as load_obs_config
+            obs_bytes = device_bytes(int(host["prepared"].mesh.n_cells), int(host["prepared"].vertical.n_vert_levels),
+                                     max_obs=int(load_obs_config(obs_nudging["config"],
+                                                                 input_file=obs_nudging.get("input")).max_obs))
         memory = proof.gpu_memory_admission(cp, minimum=int(proof.MIN_FREE_DEVICE_BYTES) +
-            stochastic_bytes + tc_allowance)
+            stochastic_bytes + tc_allowance + obs_bytes)
     else:
         memory = proof.gpu_memory_admission(cp, minimum=int(required_free_bytes))
     cache = KernelCache(capability=capability, cache_dir=cache_root)
@@ -3893,10 +3904,12 @@ def execute_forecast(
                                      restart_seconds=(float(start_step) * float(DT_SECONDS) if adaptive is None
                                                       else float(Fraction(adaptive_restart["elapsed"]))))
         stochastic_restart = checkpoint.get("stochastic")
+        obs_nudging_carried = checkpoint.get("obs_nudging")
         del checkpoint
     else:
         restart_gf = None
         adaptive_restart = None
+        obs_nudging_carried = None
     time_ledger.emit("prep.device_upload", "begin")
     stack = proof._construct_device_stack(
         host=host,
@@ -3951,6 +3964,24 @@ def execute_forecast(
                                       dt=float(DT_SECONDS), run_seconds=float(schedule["steps"]) * float(DT_SECONDS),
                                       restart_seconds=float(start_step) * float(DT_SECONDS))
         print(json.dumps({"nudging": nudging_forcing.receipt()}, default=str), flush=True)
+    obs_forcing = None
+    if obs_nudging is not None:
+        # WRF observation nudging (woof.hex.obs_nudging), off unless --obs-nudging names a config.  A checkpoint
+        # written with it carries its whole report/weight/clock carrier, so the restart continues word for word.
+        from woof.hex.obs_nudging import attach_v841 as attach_obs_nudging
+
+        obs_forcing = attach_obs_nudging(obs_nudging, stack=stack, host=host, cache=cache, dt=float(DT_SECONDS),
+                                         restart_seconds=float(start_step) * float(DT_SECONDS),
+                                         carried=obs_nudging_carried)
+        print(json.dumps({"obs_nudging": obs_forcing.receipt()}, default=str), flush=True)
+    elif obs_nudging_carried is not None:
+        # The checkpoint was written with observation nudging; continuing without it would silently run a
+        # forcing-off forecast under the restart's name.
+        from woof.hex.obs_nudging import HexObsNudgingRefusal
+
+        raise HexObsNudgingRefusal(
+            "HEX_OBS_NUDGING_RESTART",
+            "the checkpoint carries observation nudging; pass --obs-nudging with the config it was written with")
     time_ledger.emit("prep.device_upload", "end", attrs={"scope": "device_stack_including_kernel_load"})
     from woof.hex.cuda_column_order_v841 import attach_column_order
     column_order_receipt = attach_column_order(stack["backend"], host["prepared"].mesh)
@@ -4285,6 +4316,8 @@ def execute_forecast(
                 from woof.hex.iau_native import IAU_WINDOW_KEY, window_record
 
                 payload[IAU_WINDOW_KEY] = window_record(iau)
+            if obs_forcing is not None:
+                payload["obs_nudging"] = obs_forcing.snapshot()
             target = output_root / f"checkpoint.{labels[step]}.pkl"
             from woof.hex.checkpoint_io import write_checkpoint
             write_checkpoint(target, payload)
@@ -4654,10 +4687,11 @@ def execute_forecast(
                     refl_10cm_due=(step in capture_steps or radar.due(step) or
                                    (nest_trigger is not None and nest_trigger.due(step)
                                     and "refl10cm" in nest_trigger.needed_sources())),
-                    **({} if iau_forcing is None and nudging_forcing is None else {"held_forcing": (
+                    **({} if iau_forcing is None and nudging_forcing is None and obs_forcing is None
+                       else {"held_forcing": (
                         lambda held, start, length, **context: [
                             forcing.add(0, held, start, length, **context)
-                            for forcing in (iau_forcing, nudging_forcing) if forcing is not None])}),
+                            for forcing in (iau_forcing, nudging_forcing, obs_forcing) if forcing is not None])}),
                     **({} if adaptive_run is None else {"dt": adaptive_run.dt()}),
                 )
             except (proof.CompositeTransactionError, FloatingPointError) as error:
@@ -4967,6 +5001,7 @@ def execute_forecast(
                        else stack["driver"].stochastic.receipt()),
         **({"iau": iau_record} if iau_record is not None else {}),
         **({"nudging": nudging_forcing.receipt()} if nudging_forcing is not None else {}),
+        **({"obs_nudging": obs_forcing.receipt()} if obs_forcing is not None else {}),
         **({"balance_series": {"path": str(output_root / "balance-series.jsonl"),
                                "rows": len(balance.rows)}} if balance is not None else {}),
         "final_state_digest": final_state_digest,
@@ -5622,6 +5657,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--nudging-analysis", type=Path, action="append", default=None, metavar="INIT",
         help="an analysis on this mesh (hex init format, e.g. from woof.hex.analysis_remap), one per "
              "gfdda_interval_m from the start; repeat in any order")
+    parser.add_argument(
+        "--obs-nudging", type=Path, default=None, metavar="CONFIG",
+        help="WRF observation nudging (obs_nudge_opt=1, woof.hex.obs_nudging): a TOML [fdda] (or [run]) table or a "
+             "WRF namelist.input &fdda group; off by default")
+    parser.add_argument(
+        "--obs-nudging-input", type=Path, default=None, metavar="OBS_DOMAIN101",
+        help="the observation file (WRF OBS_DOMAIN format); default: the config's obs_inputfile, else OBS_DOMAIN101 "
+             "beside the config")
     parser.add_argument("--iau-window-seconds", type=float, default=None,
                         help="IAU window length from the start of the run")
     parser.add_argument(
@@ -5642,6 +5685,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
                         help="write balance-series.jsonl: surface-pressure tendency statistics "
                              "at every macro boundary (initialization-shock measure)")
     args = parser.parse_args(argv)
+    if args.obs_nudging_input is not None and args.obs_nudging is None:
+        parser.error("--obs-nudging-input names the observation file of --obs-nudging; give the configuration too")
     if (args.nudging is None) != (not args.nudging_analysis):
         parser.error("--nudging and --nudging-analysis go together: a nudging configuration reads its "
                      "analyses, and an analysis without a configuration would never be read")
@@ -6483,6 +6528,12 @@ def _main(args: argparse.Namespace, decision: Mapping[str, Any] | None) -> int:
         provenance["timestep_evidence_reason"] = decision["timestep_evidence_reason"]
         provenance["experimental_timestep"] = dict(decision)
 
+    # Resolved before the preflight return, so a missing observation file fails preflight too.
+    obs_nudging = (None if args.obs_nudging is None else {
+        "config": Path(args.obs_nudging).resolve(strict=True),
+        "input": (None if args.obs_nudging_input is None else Path(args.obs_nudging_input).resolve(strict=True)),
+        "start_time": host["start_time_text"]})
+
     if args.preflight_only:
         source_after = proof.measure_execution_sources()
         authority_after = verify_forecast_authorities(paths)
@@ -6552,6 +6603,7 @@ def _main(args: argparse.Namespace, decision: Mapping[str, Any] | None) -> int:
             "config": Path(args.nudging).resolve(strict=True),
             "analyses": [Path(path).resolve(strict=True) for path in (args.nudging_analysis or ())],
             "start_time": host["start_time_text"]}),
+        obs_nudging=obs_nudging,
         balance_series=bool(args.balance_series),
         history_selection=args.history_selection,
         history_zgrid=history_zgrid,

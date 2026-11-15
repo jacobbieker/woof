@@ -833,11 +833,11 @@ def run_oracle(build_dir: Path, case: dict) -> tuple[dict[str, np.ndarray] | Non
         src.write_bytes(input_bytes(case))
         run = subprocess.run([str(Path(build_dir) / "run_column_r8"), str(src), str(dst), str(log)],
                              capture_output=True, text=True)
+        crash = _runtime_error(run.stderr) if run.returncode else None
+        if run.returncode and crash is None:
+            raise subprocess.CalledProcessError(run.returncode, run.args, run.stdout, run.stderr)
         parsed = parse_log(log.read_text(encoding="utf-8"))
-        if run.returncode:
-            crash = _runtime_error(run.stderr)
-            if crash is None:
-                raise subprocess.CalledProcessError(run.returncode, run.args, run.stdout, run.stderr)
+        if crash is not None:
             return None, {**parsed, "crash": crash}
         return read_outputs(dst.read_bytes(), case), parsed
 

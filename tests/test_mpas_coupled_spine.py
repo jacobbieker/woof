@@ -40,6 +40,44 @@ def test_require_ported_passes_the_atmosphere_and_refuses_a_stub() -> None:
     assert "docs/mpas-coupled-roadmap.md" in str(exc.value)
 
 
+def _declare_subset(monkeypatch, name: str, schemes: tuple[str, ...]) -> None:
+    monkeypatch.setitem(registry._COMPONENTS, name, ("core_x", "ported_subset", "x"))
+    monkeypatch.setitem(registry._SUBSETS, name, schemes)
+
+
+def test_ported_subset_runs_a_declared_subset(monkeypatch) -> None:
+    _declare_subset(monkeypatch, "seaice", ("velocity_solver", "timestep"))
+    info = require_ported("seaice", ["velocity_solver"])
+    assert info.status == "ported_subset"
+    assert info.schemes == ("velocity_solver", "timestep")
+    assert component("seaice").schemes == ("velocity_solver", "timestep")
+
+
+def test_ported_subset_refuses_an_undeclared_scheme_by_name(monkeypatch) -> None:
+    _declare_subset(monkeypatch, "seaice", ("velocity_solver",))
+    with pytest.raises(ConfigurationRefusal) as exc:
+        require_ported("seaice", ["velocity_solver", "advection"])
+    assert "advection" in str(exc.value)
+    assert "velocity_solver" in str(exc.value)
+    with pytest.raises(ConfigurationRefusal):
+        require_ported("seaice")  # a subset component must be told what runs
+    assert require_ported("seaice", "velocity_solver").schemes == ("velocity_solver",)
+    with pytest.raises(ConfigurationRefusal) as exc:
+        require_ported("seaice", "advection")
+    assert "'advection'" in str(exc.value)
+    for empty in ([], (), ""):
+        with pytest.raises(ConfigurationRefusal):
+            require_ported("seaice", empty)
+
+
+def test_strict_rule_is_unchanged_without_a_declared_subset() -> None:
+    assert component("seaice").schemes == ()
+    assert require_ported("atmosphere", ["anything"]).status == "ported"
+    with pytest.raises(ConfigurationRefusal) as exc:
+        require_ported("seaice", ["velocity_solver"])
+    assert "not yet ported" in str(exc.value)
+
+
 def test_clock_yields_intervals_and_substeps() -> None:
     clk = CoupledClock(start=0.0, end=3600.0, cadence=900.0, dts={"atmosphere": 300.0})
     intervals = list(clk.intervals())

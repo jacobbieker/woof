@@ -408,3 +408,42 @@ def test_static_keys_other_than_highres_are_refused(tmp_path):
     config = _write(tmp_path, tail='\n[static]\ngeog_root = "/tmp/geog"\n')
     with pytest.raises(go_hex.HexGoRefusal, match=r"\[static\] geog_root"):
         go_hex.plan(_args(str(config)))
+
+
+# ---------------------------------------------------------------------------
+# WRF observation nudging (matrix 5.2): the [[domain]] / [shared] obs_* keys
+# ---------------------------------------------------------------------------
+def test_observation_nudging_keys_ride_to_the_forecast_door(tmp_path):
+    from woof.hex.obs_nudging import load_config
+
+    config = _write(tmp_path, domain_extra="mp_physics = 8\nobs_nudge_opt = 1\nobs_rinxy = 50.0\nobs_coef_wind = 6.0e-4\n"
+                                           "obs_nudge_wind = 1\nobs_twindo = 0.5\nfdda_end = 60.0",
+                    shared="[shared]\nmax_obs = 300\n")
+    value = go_hex.plan(_args(str(config)))
+    table = tmp_path / "hexgo-go" / go_hex.OBS_NUDGING_CONFIG
+    assert f"--forecast-arg=--obs-nudging={table}" in value["regional_argv"]
+    written = tmp_path / "written.toml"
+    written.write_text(value["obs_nudging"])
+    cfg = load_config(written)
+    assert (cfg.obs_nudge_opt, cfg.obs_rinxy, cfg.max_obs, cfg.fdda_end) == (1, 50.0, 300, 60.0)
+    assert cfg.obs_inputfile == str(tmp_path / "OBS_DOMAIN101")
+
+
+def test_observation_nudging_without_physics_keys_is_refused_before_preparation(tmp_path):
+    """No physics key takes the hex default MPAS suite, where the forecast door refuses --obs-nudging."""
+    config = _write(tmp_path, domain_extra="obs_nudge_opt = 1\nobs_rinxy = 50.0")
+    with pytest.raises(go_hex.HexGoRefusal, match="HEX_OBS_NUDGING_ROUTE"):
+        go_hex.plan(_args(str(config)))
+
+
+def test_observation_nudging_unknown_key_is_refused_at_the_plan(tmp_path):
+    config = _write(tmp_path, domain_extra="mp_physics = 8\nobs_nudge_opt = 1\nobs_coef_tempp = 1.0e-4")
+    with pytest.raises(go_hex.HexGoRefusal, match="HEX_OBS_NUDGING_KEYS"):
+        go_hex.plan(_args(str(config)))
+
+
+def test_observation_nudging_off_adds_nothing(tmp_path):
+    config = _write(tmp_path, domain_extra="obs_nudge_opt = 0\nobs_rinxy = 50.0")
+    value = go_hex.plan(_args(str(config)))
+    assert "obs_nudging" not in value
+    assert not any("obs-nudging" in part for part in value["regional_argv"])
