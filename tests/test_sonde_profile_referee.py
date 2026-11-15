@@ -8,20 +8,52 @@ from woof.hex import sonde_profile_referee as r
 
 
 def test_nearest_cells_respects_boundary_mask():
-    lat = np.array([0.0, 0.0, 10.0])
+    lat = np.array([0.0, 0.0, 1.0])
     lon = np.array([0.0, 1.0, 0.0])
     xyz = r.unit_vectors(lat, lon)
-    assert list(r.nearest_cells(xyz, [0.1], [0.9])) == [1]
+    assert list(r.nearest_cells(xyz, [0.1, 0.1], [0.9, 0.2])) == [1, 0]
     usable = np.array([True, False, True])
-    assert list(r.nearest_cells(xyz, [0.1], [0.9], usable)) == [0]
+    # the station a masked cell owns is dropped, not paired with a neighbour
+    assert list(r.nearest_cells(xyz, [0.1, 0.1], [0.9, 0.2], usable)) == [-1, 0]
+    # a station beyond the mesh is dropped
+    assert list(r.nearest_cells(xyz, [30.0], [30.0])) == [-1]
+
+
+def _fibonacci(n):
+    k = np.arange(n) + 0.5
+    lat = np.degrees(np.arcsin(1.0 - 2.0 * k / n))
+    lon = np.degrees(np.pi * (1.0 + 5.0 ** 0.5) * k) % 360.0 - 180.0
+    return lat, lon
+
+
+def test_a_regional_history_without_its_mask_is_refused(tmp_path):
+    netCDF4 = pytest.importorskip("netCDF4")
+    lat, lon = _fibonacci(4000)
+    assert not r.is_regional(r.unit_vectors(lat, lon))
+    assert r.usable_cells(lat, lon) is None
+    cap = lat > 40.0
+    rlat, rlon = lat[cap], lon[cap]
+    assert r.is_regional(r.unit_vectors(rlat, rlon))
+    with pytest.raises(ValueError, match="--mask"):
+        r.usable_cells(rlat, rlon)
+    bdy = (rlat < 45.0).astype(np.int32)
+    path = tmp_path / "x.static.nc"
+    with netCDF4.Dataset(path, "w") as d:
+        d.createDimension("nCells", rlat.size)
+        d.createVariable("bdyMaskCell", "i4", ("nCells",))[:] = bdy
+    assert list(r.usable_cells(rlat, rlon, mask_file=path)) == list(bdy == 0)
+    assert list(r.usable_cells(rlat, rlon, bdy)) == list(bdy == 0)
+    with pytest.raises(ValueError, match="cells"):
+        r.usable_cells(rlat[:-1], rlon[:-1], mask_file=path)
 
 
 def test_nearest_cells_never_returns_a_masked_cell():
-    # antipode of (0, 0): the masked sentinel used to outscore every usable cell
-    xyz = r.unit_vectors(np.array([0.0, 0.0]), np.array([0.0, 90.0]))
-    assert list(r.nearest_cells(xyz, [0.0], [180.0], np.array([False, True]))) == [1]
-    with pytest.raises(ValueError):
-        r.nearest_cells(xyz, [0.0], [0.0], np.array([False, False]))
+    lat, lon = _fibonacci(500)
+    xyz = r.unit_vectors(lat, lon)
+    usable = np.ones(lat.size, bool)
+    usable[::2] = False
+    got = r.nearest_cells(xyz, lat, lon, usable)
+    assert np.all(got[::2] == -1) and np.array_equal(got[1::2], np.arange(lat.size)[1::2])
 
 
 def test_interval_uses_the_cases_that_supply_the_metric():
@@ -103,6 +135,7 @@ def test_score_pairs_frames_at_synoptic_hours(tmp_path):
             x[0, :] = np.frombuffer(f"2025-01-15_{hour:02d}:00:00".ljust(64).encode(), dtype="S1")
             d.createVariable("latCell", "f8", ("nCells",))[:] = np.radians(lat)
             d.createVariable("lonCell", "f8", ("nCells",))[:] = np.radians(lon)
+            d.createVariable("bdyMaskCell", "i4", ("nCells",))[:] = 0
             temps = np.tile(np.array([280.0, 250.0, 220.0]), (3, 1)) + offset
             d.createVariable("theta", "f4", ("Time", "nCells", "nVertLevels"))[0] = temps / (pressure / 1e5) ** r.RD_OVER_CP
             d.createVariable("pressure", "f4", ("Time", "nCells", "nVertLevels"))[0] = pressure

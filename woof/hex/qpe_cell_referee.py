@@ -28,7 +28,7 @@ from datetime import datetime, timedelta, timezone
 
 import numpy as np
 
-from woof.hex.sonde_profile_referee import paired_interval
+from woof.hex.sonde_profile_referee import nearest_cells, paired_interval, unit_vectors, usable_cells
 
 THRESHOLDS_MM = (1.0, 5.0, 10.0, 25.0)
 COVERAGE = 0.7
@@ -36,40 +36,9 @@ VALID = 0.9
 STATS = ("bias", "absbias", "rmse", "ratio", "fbi_1", "fbi_10", "ets_1", "ets_10")
 
 
-def unit_vectors(lat_deg, lon_deg):
-    lat, lon = np.radians(np.asarray(lat_deg, float)), np.radians(np.asarray(lon_deg, float))
-    return np.stack([np.cos(lat) * np.cos(lon), np.cos(lat) * np.sin(lon), np.sin(lat)], axis=-1)
-
-
-# A pixel belongs to a cell only inside that cell's footprint: within
-# FOOTPRINT times the distance to the cell's nearest neighbour. A regular
-# hexagon's circumradius is 1/sqrt(3) = 0.577 of the centre spacing; 0.75
-# leaves room for the irregular cells of a variable-resolution mesh.
-FOOTPRINT = 0.75
-
-
 def assign_pixels(cell_lat, cell_lon, pixel_lat, pixel_lon, usable=None):
-    """Owning (usable) cell of every pixel; -1 for a pixel outside every usable cell's footprint."""
-    from scipy.spatial import cKDTree
-
-    xyz = unit_vectors(cell_lat, cell_lon)
-    pixels = unit_vectors(np.ravel(pixel_lat), np.ravel(pixel_lon))
-    if len(xyz) < 2:
-        raise ValueError("a footprint needs at least two model cells")
-    # Ownership is decided on the full mesh (the nearest centre is the
-    # Voronoi owner); the mask is applied after, so a pixel a masked cell
-    # owns is dropped, never handed to a usable neighbour.  A regional
-    # mesh's outer rings are masked (bdyMaskCell > 0), so a pixel beyond the
-    # mesh edge is owned by a masked cell or lies outside every footprint.
-    tree = cKDTree(xyz)
-    spacing = tree.query(xyz, k=2)[0][:, 1]
-    distance, owner = tree.query(pixels)
-    owner = owner.astype(np.int64)
-    outside = distance > FOOTPRINT * spacing[owner]
-    if usable is not None:
-        outside |= ~np.asarray(usable, bool)[owner]
-    owner[outside] = -1
-    return owner
+    """Owning (usable) cell of every pixel; -1 for a pixel a masked cell owns or outside every footprint."""
+    return nearest_cells(unit_vectors(cell_lat, cell_lon), pixel_lat, pixel_lon, usable)
 
 
 def cell_means(assignment, values, valid, ncells):
@@ -146,7 +115,7 @@ def qpe_windows(folder, hours):
     return found
 
 
-def score(history_dir, qpe_dir, case, arm, *, hours=24):
+def score(history_dir, qpe_dir, case, arm, *, hours=24, mask_file=None):
     from woof.obs.obspack import read_geo_pack, read_grid_pack
 
     frames = {}
@@ -163,7 +132,7 @@ def score(history_dir, qpe_dir, case, arm, *, hours=24):
     if not geometry:
         raise FileNotFoundError(f"no geometry.obspack under {qpe_dir}")
     plat, plon = read_geo_pack(geometry[0])
-    usable = None if bdy is None else (bdy == 0)
+    usable = usable_cells(lat, lon, bdy, mask_file)
     assignment = assign_pixels(lat, lon, plat, plon, usable)
     init = min(frames)
     record = {"case": case, "arm": arm, "hours": hours, "init": init.isoformat(), "windows": {}}
@@ -244,6 +213,7 @@ def main(argv=None):
     s.add_argument("--history", required=True, help="directory holding history.*.nc frames")
     s.add_argument("--qpe", required=True, help="directory holding decoded QPE packs and geometry.obspack")
     s.add_argument("--hours", type=int, default=24)
+    s.add_argument("--mask", help="MPAS file of the same mesh carrying bdyMaskCell (regional history without it)")
     s.add_argument("--case", required=True)
     s.add_argument("--arm", required=True)
     s.add_argument("--out", required=True)
@@ -255,7 +225,7 @@ def main(argv=None):
     c.add_argument("--seed", type=int, default=20261115)
     a = ap.parse_args(argv)
     if a.command == "score":
-        result = score(a.history, a.qpe, a.case, a.arm, hours=a.hours)
+        result = score(a.history, a.qpe, a.case, a.arm, hours=a.hours, mask_file=a.mask)
     else:
         def load(paths):
             return [json.load(open(p, encoding="utf-8")) for p in paths]

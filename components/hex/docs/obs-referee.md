@@ -194,8 +194,9 @@ exploratory.
     `bkr/obs/wis2_upper_air.icechunk` (WIS2 BUFR soundings, from late
     October 2026).
   - These are normalized stores, so no raw IGRA or BUFR text is parsed here.
-  - The model value comes from the nearest usable cell (`bdyMaskCell == 0`)
-    and is interpolated linearly in ln p. Nothing is extrapolated.
+  - The model value comes from the cell that owns the station (as for the
+    QPE pixels below) and is interpolated linearly in ln p. Nothing is
+    extrapolated.
   - A station whose initial-time sounding departs from the initial state by
     more than 5 K in median over its levels is dropped from every lead of
     the case, and the record lists it. The initial state is shared by every
@@ -210,7 +211,10 @@ exploratory.
     the cell that owns it: the nearest centre on the full mesh, within 0.75
     of that cell's distance to its nearest neighbour. A pixel owned by a
     masked boundary cell (`bdyMaskCell > 0`) or outside every footprint is
-    dropped. A cell is scored only
+    dropped. The mask is read from the history, or from `--mask` (a grid,
+    static or init file of the same mesh). Both referees refuse a regional
+    history that has neither: some of the sphere is uncovered, and its outer
+    rings would be scored as interior cells. A cell is scored only
     when it lies fully inside the observed area (at least 70 % of a full
     cell's pixel count, at least 90 % of them valid).
   - Two arms must share the initial time and the window length. Each

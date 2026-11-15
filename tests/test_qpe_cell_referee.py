@@ -129,6 +129,7 @@ def test_score_differences_frames_across_the_window(tmp_path):
             x[0, :] = np.frombuffer(f"2026-11-0{day}_12:00:00".ljust(64).encode(), dtype="S1")
             d.createVariable("latCell", "f8", ("nCells",))[:] = np.radians(lat)
             d.createVariable("lonCell", "f8", ("nCells",))[:] = np.radians(lon)
+            d.createVariable("bdyMaskCell", "i4", ("nCells",))[:] = 0
             d.createVariable("rainc", "f4", ("Time", "nCells"))[0] = [rc, 0.0]
             d.createVariable("rainnc", "f4", ("Time", "nCells"))[0] = [rn, 3.0 * day]
     plat = np.array([[29.9, 30.1], [39.9, 40.1]])

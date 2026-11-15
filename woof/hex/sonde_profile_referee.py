@@ -66,17 +66,82 @@ def unit_vectors(lat_deg, lon_deg):
     return np.stack([np.cos(lat) * np.cos(lon), np.cos(lat) * np.sin(lon), np.sin(lat)], axis=-1)
 
 
+# A point belongs to a cell only inside that cell's footprint: within
+# FOOTPRINT times the distance to the cell's nearest neighbour. A regular
+# hexagon's circumradius is 1/sqrt(3) = 0.577 of the centre spacing; 0.75
+# leaves room for the irregular cells of a variable-resolution mesh.
+FOOTPRINT = 0.75
+
+
 def nearest_cells(cell_xyz, lat_deg, lon_deg, usable=None):
-    """Index of the nearest usable cell to each point (maximum dot product of unit vectors)."""
-    points = unit_vectors(lat_deg, lon_deg)
-    out = np.empty(len(points), dtype=np.int64)
-    cells = np.arange(len(cell_xyz)) if usable is None else np.flatnonzero(usable)
-    if cells.size == 0:
-        raise ValueError("no usable model cell to pair against")
-    xyz = np.asarray(cell_xyz)[cells]
-    for start in range(0, len(points), 256):
-        out[start:start + 256] = cells[np.argmax(points[start:start + 256] @ xyz.T, axis=1)]
-    return out
+    """The usable cell that owns each point, or -1.
+
+    Ownership is decided on the full mesh (the nearest centre is the Voronoi
+    owner) and the mask applied after, so a point a masked cell owns is
+    dropped, never handed to a usable neighbour. A point beyond FOOTPRINT
+    of its owner's spacing (outside a regional mesh) is dropped too.
+    """
+    from scipy.spatial import cKDTree
+
+    xyz = np.asarray(cell_xyz, float)
+    points = unit_vectors(np.ravel(lat_deg), np.ravel(lon_deg))
+    if len(xyz) < 2:
+        raise ValueError("a footprint needs at least two model cells")
+    tree = cKDTree(xyz)
+    spacing = tree.query(xyz, k=2)[0][:, 1]
+    distance, owner = tree.query(points)
+    owner = owner.astype(np.int64)
+    outside = distance > FOOTPRINT * spacing[owner]
+    if usable is not None:
+        outside |= ~np.asarray(usable, bool)[owner]
+    owner[outside] = -1
+    return owner
+
+
+def is_regional(cell_xyz, probes=20000):
+    """Whether the cells leave part of the sphere uncovered (a regional mesh).
+
+    On a global mesh every point lies within its owner's circumradius
+    (about 0.58 of the local spacing, at any resolution); a probe further
+    than twice its owner's spacing sits in a hole the mesh does not cover.
+    """
+    from scipy.spatial import cKDTree
+
+    xyz = np.asarray(cell_xyz, float)
+    k = np.arange(probes) + 0.5
+    z = 1.0 - 2.0 * k / probes
+    phi = np.pi * (1.0 + 5.0 ** 0.5) * k
+    r = np.sqrt(1.0 - z * z)
+    probe = np.stack([r * np.cos(phi), r * np.sin(phi), z], axis=-1)
+    tree = cKDTree(xyz)
+    spacing = tree.query(xyz, k=2)[0][:, 1]
+    distance, owner = tree.query(probe)
+    return bool(np.any(distance > 2.0 * spacing[owner]))
+
+
+def usable_cells(lat_deg, lon_deg, bdy=None, mask_file=None):
+    """``bdyMaskCell == 0`` per cell, or None on a global mesh.
+
+    The mask comes from the history, else from ``mask_file`` (any MPAS
+    file of the same mesh carrying ``bdyMaskCell``: grid, static, init).
+    A regional mesh without one is refused: its outer rings would be scored
+    as interior cells.
+    """
+    if bdy is None and mask_file is not None:
+        import netCDF4
+
+        with netCDF4.Dataset(mask_file) as d:
+            if "bdyMaskCell" not in d.variables:
+                raise ValueError(f"{mask_file} carries no bdyMaskCell")
+            bdy = np.asarray(d.variables["bdyMaskCell"][:])
+        if bdy.shape != np.shape(lat_deg):
+            raise ValueError(f"{mask_file} has {bdy.size} cells and the history {np.size(lat_deg)}")
+    if bdy is not None:
+        return np.asarray(bdy) == 0
+    if is_regional(unit_vectors(lat_deg, lon_deg)):
+        raise ValueError("the history is a regional mesh without bdyMaskCell; pass --mask with "
+                         "a grid, static or init file of the same mesh")
+    return None
 
 
 def column_temperature_at(theta_col, pressure_col, level_pa):
@@ -228,6 +293,8 @@ def pair_frame(frame, soundings, cell_xyz, usable):
     cells = nearest_cells(cell_xyz, lat, lon, usable)
     rows = []
     for (station, slat, slon, profile), cell in zip(soundings, cells):
+        if cell < 0:
+            continue
         theta, pres = frame["theta"][cell], frame["pressure"][cell]
         for lev, obs in sorted(profile.items(), reverse=True):
             model = column_temperature_at(theta, pres, lev * 100.0)
@@ -282,7 +349,7 @@ def summarise(pairs):
     return table
 
 
-def score(history_dir, source, case, arm, *, pairs_out=None, soundings=None):
+def score(history_dir, source, case, arm, *, pairs_out=None, soundings=None, mask_file=None):
     paths = history_frames(history_dir)
     frames = [read_frame(p) for p in paths]
     start = min(f["valid"] for f in frames)
@@ -291,7 +358,7 @@ def score(history_dir, source, case, arm, *, pairs_out=None, soundings=None):
     if "lat" not in geo:
         raise ValueError(f"{paths[0]} carries no latCell/lonCell")
     cell_xyz = unit_vectors(geo["lat"], geo["lon"])
-    usable = (geo["bdy"] == 0) if "bdy" in geo else None
+    usable = usable_cells(geo["lat"], geo["lon"], geo.get("bdy"), mask_file)
     if soundings is None:
         soundings = SOURCES[source]([f["valid"] for f in synoptic])
     pairs = []
@@ -384,6 +451,7 @@ def main(argv=None):
     s.add_argument("--arm", required=True)
     s.add_argument("--out", required=True)
     s.add_argument("--pairs")
+    s.add_argument("--mask", help="MPAS file of the same mesh carrying bdyMaskCell (regional history without it)")
     c = sub.add_parser("compare")
     c.add_argument("arm_a", nargs="+")
     c.add_argument("--against", nargs="+", required=True)
@@ -392,7 +460,7 @@ def main(argv=None):
     c.add_argument("--seed", type=int, default=20261115)
     a = ap.parse_args(argv)
     if a.command == "score":
-        record = score(a.history, a.sondes, a.case, a.arm, pairs_out=a.pairs)
+        record = score(a.history, a.sondes, a.case, a.arm, pairs_out=a.pairs, mask_file=a.mask)
     else:
         load = lambda paths: [json.load(open(p, encoding="utf-8")) for p in paths]  # noqa: E731
         record = compare(load(a.arm_a), load(a.against), replicates=a.replicates, seed=a.seed)
