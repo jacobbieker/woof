@@ -75,7 +75,7 @@ def require_ported(name: str, schemes: Sequence[str] | None = None) -> Component
     info = component(name)
     if info.status == "ported_subset":
         declared = ", ".join(info.schemes)
-        if schemes is None:
+        if not schemes:
             raise ConfigurationRefusal(
                 knob="coupled.schemes",
                 value=name,
