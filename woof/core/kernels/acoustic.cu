@@ -2135,15 +2135,12 @@ void advance_w_phi_msf_kpar(real* __restrict__ w_pp, real* __restrict__ ph_pp,
                            (c1h[k] * muts + c2h[k])
                               * (thb[(size_t)k * bstr + boff] + thp[h]));
                 real rhs_hi = rhs_s[k + 1][x], rhs_mid = rhs_s[k][x], rhs_lo = rhs_s[k - 1][x];
-                // The phi'' term first: the shape-specialized column kernel
-                // fuses that product (NVRTC's choice on its folded loop), and
-                // the words follow the fused operand.
-                real dph_up = (1.0f - epssm) * (ph_pp[(size_t)(k + 1) * st + c]
-                                                - ph_pp[(size_t)k * st + c])
-                            + (1.0f + epssm) * (rhs_hi - rhs_mid);
-                real dph_dn = (1.0f - epssm) * (ph_pp[(size_t)k * st + c]
-                                                - ph_pp[(size_t)(k - 1) * st + c])
-                            + (1.0f + epssm) * (rhs_mid - rhs_lo);
+                real dph_up = (1.0f + epssm) * (rhs_hi - rhs_mid)
+                            + (1.0f - epssm) * (ph_pp[(size_t)(k + 1) * st + c]
+                                                - ph_pp[(size_t)k * st + c]);
+                real dph_dn = (1.0f + epssm) * (rhs_mid - rhs_lo)
+                            + (1.0f - epssm) * (ph_pp[(size_t)k * st + c]
+                                                - ph_pp[(size_t)(k - 1) * st + c]);
                 size_t f = (size_t)k * st + c;
                 if (moist_cq) {
                     w_pp[f] += dtau * rw_t[f]
@@ -2177,9 +2174,9 @@ void advance_w_phi_msf_kpar(real* __restrict__ w_pp, real* __restrict__ ph_pp,
                            (c1h[nz - 1] * muts + c2h[nz - 1])
                               * (thb[(size_t)(nz - 1) * bstr + boff] + thp[h]));
                 real rhs_mid = rhs_s[nz][x], rhs_lo = rhs_s[nz - 1][x];
-                real dph_dn = (1.0f - epssm)
-                              * (ph_pp[f] - ph_pp[(size_t)(nz - 1) * st + c])
-                            + (1.0f + epssm) * (rhs_mid - rhs_lo);
+                real dph_dn = (1.0f + epssm) * (rhs_mid - rhs_lo)
+                            + (1.0f - epssm)
+                              * (ph_pp[f] - ph_pp[(size_t)(nz - 1) * st + c]);
                 w_pp[f] += dtau * rw_t[f]
                          + msf_i
                            * (__fdiv_rn(-dtau * G * c2a[h] * rdnw[nz - 1] * rdnw[nz - 1],
