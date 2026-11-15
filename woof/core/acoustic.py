@@ -13,6 +13,8 @@ c1/c2 coefficient arrays, 1-D or 3-D base profiles via ``base3d``).
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 
 from woof.config import RunConfig
@@ -28,6 +30,27 @@ _THREADS = 256
 # A column solve does not share work between threads.  Smaller fast mapped
 # blocks expose enough column blocks to fill the device on nested domains.
 _W_PHI_MSF_THREADS = 64
+#: ``WOOF_ACOUSTIC_KPAR=0`` keeps the one-thread-per-column w''-phi'' solve
+#: (kernels/acoustic.cu advance_w_phi_msf) on the fast mapped path; the
+#: default is the level-parallel entry advance_w_phi_msf_kpar, 32 columns x
+#: 8 lanes per block, the same words.
+ACOUSTIC_KPAR_ENABLED = os.environ.get("WOOF_ACOUSTIC_KPAR", "1") != "0"
+_W_PHI_KPAR_BLOCK = (32, 8)
+
+
+def _w_phi_launch(state, nz: int, ny: int, nx: int):
+    """The w''-phi'' solve's (kernel, grid, block) for this state: the
+    level-parallel entry on the fast mapped path, else the column kernel."""
+    if state.has_msf and not WRF_EXACT:
+        if ACOUSTIC_KPAR_ENABLED:
+            kernel = _w_phi_kernel("advance_w_phi_msf_kpar", nz, ny, nx)
+            return kernel, ((ny * nx + 31) // 32,), _W_PHI_KPAR_BLOCK
+        threads = _W_PHI_MSF_THREADS
+        name = "advance_w_phi_msf"
+    else:
+        threads = _THREADS
+        name = "advance_w_phi_msf" if state.has_msf else "advance_w_phi"
+    return _w_phi_kernel(name, nz, ny, nx), ((ny * nx + threads - 1) // threads,), (threads,)
 
 
 def prepare_upper_wind_limiter(state, cfg, dtau):
@@ -623,11 +646,7 @@ def prepare_acoustic_substep_launch(state: DomainState, cfg: RunConfig,
         )
 
     dampmag = damp_magnitude(cfg, dtau)
-    w_name = "advance_w_phi_msf" if state.has_msf else "advance_w_phi"
-    w_kernel = _w_phi_kernel(w_name, nz, ny, nx)
-    w_threads = _W_PHI_MSF_THREADS if state.has_msf and not WRF_EXACT else _THREADS
-    w_grid = ((ny * nx + w_threads - 1) // w_threads,)
-    w_block = (w_threads,)
+    w_kernel, w_grid, w_block = _w_phi_launch(state, nz, ny, nx)
     w_map_args = (state.msft,) if state.has_msf else ()
     w_args = (
         state.w_pp, state.ph_pp, state.rw_t, state.rph_t, state.ww_pp,
@@ -879,14 +898,11 @@ def acoustic_substep(state: DomainState, cfg: RunConfig,
         coefficients = prepare_acoustic_coefficients(state, cfg, dtau, cq=cq)
     c2a, a, alpha, gam = coefficients[:4]
     cqu, cqv, cqw, use_cq = cq
-    w_threads = _W_PHI_MSF_THREADS if state.has_msf and not WRF_EXACT else _THREADS
-    blocks = (ny * nx + w_threads - 1) // w_threads
 
     dampmag = damp_magnitude(cfg, dtau)
     # Map factors (Task 3): the _msf variant carries WRF advance_w's msfty
     # factors; the msf==1 kernel stays byte-identical to Phase 2.
-    name = "advance_w_phi_msf" if state.has_msf else "advance_w_phi"
-    kernel = _w_phi_kernel(name, nz, ny, nx)
+    kernel, w_grid, w_block = _w_phi_launch(state, nz, ny, nx)
     args = [state.w_pp, state.ph_pp, state.rw_t, state.rph_t, state.ww_pp,
             state.mu_pp, mu_old, state.th_pp, th_old,
              state.thp, state.thb, state.php, state.phb, state.alt, c2a,
@@ -906,7 +922,7 @@ def acoustic_substep(state: DomainState, cfg: RunConfig,
               np.int32(_mass_w_boundary_zone(cfg)), _base3d(state),
               np.int32(cfg.top_lid),
               np.int32(nz), np.int32(ny), np.int32(nx)]
-    kernel((blocks,), (w_threads,), tuple(args))
+    kernel(w_grid, w_block, tuple(args))
 
     upper_wind_limiter = prepare_upper_wind_limiter(state, cfg, dtau)
     if upper_wind_limiter is not None:

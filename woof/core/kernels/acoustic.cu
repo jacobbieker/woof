@@ -1974,6 +1974,281 @@ void advance_w_phi_msf(real* __restrict__ w_pp, real* __restrict__ ph_pp,
 #endif
 }
 
+#if !(GPUWM_WRF_EXACT || GPUWM_WRF_EXACT_C_BIGSTEP || GPUWM_WRF_EXACT_C_ADVECTION || GPUWM_WRF_EXACT_C_DIFFUSION || GPUWM_WRF_EXACT_D_DIAGNOSTICS)
+// ---- advance_w_phi_msf, level-parallel (woof/core/acoustic.py, the default
+// fast-path launch; WOOF_ACOUSTIC_KPAR=0 restores the column kernel above).
+//
+// The column kernel above runs one thread per column through every level
+// serially: on 14-18k columns the GPU holds about seven warps per SM and
+// waits on memory.  This entry gives a block 32 adjacent columns x 8
+// lanes; the lanes split the levels (lane y owns k = y+1, y+9, ...) for
+// the parts that are independent per level -- the RHS rows, the forcing
+// rows, the damper, the phi'' update and the pressure diagnosis -- and
+// lane 0 alone runs the Thomas sweeps, which are a recurrence.  Every
+// statement is the column kernel's statement, textually, on the same
+// operands: the RHS rows live in shared memory instead of the rolling
+// three registers (and the phi'' rows are never overwritten with them,
+// the forcing reads the original phi'' as the column kernel does), the
+// theta averages are formed again where the column kernel carried them
+// in a register, and the surface w'' is formed by lane 0.  So every word
+// written equals the column kernel's (tests/test_acoustic_kpar.py).
+// --------------------------------------------------------------------------
+extern "C" __global__
+__launch_bounds__(256)
+void advance_w_phi_msf_kpar(real* __restrict__ w_pp, real* __restrict__ ph_pp,
+                       const real* __restrict__ rw_t,
+                       const real* __restrict__ rph_t,
+                       const real* __restrict__ ww_pp,
+                       const real* __restrict__ mu_pp,
+                       const real* __restrict__ mu_pp_old,
+                       const real* __restrict__ th_pp,
+                       const real* __restrict__ th_pp_old,
+                       const real* __restrict__ thp,
+                       const real* __restrict__ thb,
+                       const real* __restrict__ php,
+                       const real* __restrict__ phb,
+                       const real* __restrict__ alt,
+                       const real* __restrict__ c2a,
+                       const real* __restrict__ a,
+                       const real* __restrict__ alpha,
+                       const real* __restrict__ gam,
+                       const real* __restrict__ mup,
+                       const real* __restrict__ u_pp,
+                       const real* __restrict__ v_pp,
+                       const real* __restrict__ w_ref,
+                       const real* __restrict__ ht,
+                       const real* __restrict__ rdn,
+                       const real* __restrict__ rdnw,
+                       const real* __restrict__ fnm,
+                       const real* __restrict__ fnp,
+                       const real* __restrict__ c1h,
+                       const real* __restrict__ c2h,
+                       const real* __restrict__ c1f,
+                       const real* __restrict__ c2f,
+                       const real* __restrict__ mub2d,
+                       const real* __restrict__ cqw, int moist_cq,
+                       const real* __restrict__ msft,      // (ny, nx)
+                       real* __restrict__ p_pp,
+                       real* __restrict__ al_pp,
+                       real cf1, real cf2, real cf3, real rdx, real rdy,
+                       real dtau, real epssm,
+                       real dampmag, real zdamp,
+                       int boundary_x, int boundary_y,
+                       int spec_zone, int base3d, int top_lid,
+                       int nz, int ny, int nx)
+{
+    if (nz + 1 > WPHI_MAX_LEV) return;             // uniform: before any barrier
+    __shared__ real rhs_s[WPHI_MAX_LEV][32];
+    const int x = threadIdx.x, y = threadIdx.y;
+    const int c = blockIdx.x * 32 + x;
+    bool active = c < ny * nx;
+    int j = 0, i = 0;
+    if (active) {
+        j = c / nx; i = c - j * nx;
+        if (i < spec_zone || i >= nx - spec_zone
+            || j < spec_zone || j >= ny - spec_zone) active = false;
+    }
+    size_t st = (size_t)ny * nx;
+    size_t bstr = base3d ? st : 1;             // base-profile level stride
+    size_t boff = base3d ? (size_t)c : 0;
+    real mut = 0.0f, muts = 0.0f, muave = 0.0f, msf_c = 1.0f, msf_i = 1.0f;
+    if (active) {
+        mut = mub2d[c] + mup[c];
+        muts = mut + mu_pp[c];
+        muave = 0.5f * ((1.0f + epssm) * mu_pp[c]
+                      + (1.0f - epssm) * mu_pp_old[c]);
+        msf_c = msft[c];
+        msf_i = __fdiv_rn(1.0f, msf_c);
+    }
+
+    // RHS rows k = 1..nz (the column kernel's rhs_hi at kr = k; its first
+    // row is rhs_mid at k = 1); the surface row is exactly zero.
+    if (active) {
+        if (y == 0) rhs_s[0][x] = 0.0f;
+        for (int k = y + 1; k <= nz; k += 8) {
+            size_t fr = (size_t)k * st + c;
+            real rhs_hi = arn_mul(dtau, rph_t[fr]
+                                 + 0.5f * G * (1.0f - epssm) * w_pp[fr]);
+            if (k < nz) {
+                real ph_lo = phb[(size_t)k * bstr + boff]
+                           + php[(size_t)k * st + c];
+                real ph_hi = phb[(size_t)(k + 1) * bstr + boff]
+                           + php[(size_t)(k + 1) * st + c];
+                real ph_lo_dn = phb[(size_t)(k - 1) * bstr + boff]
+                              + php[(size_t)(k - 1) * st + c];
+                real wd_hi = 0.5f * (ww_pp[(size_t)(k + 1) * st + c]
+                                   + ww_pp[(size_t)k * st + c])
+                           * rdnw[k] * (ph_hi - ph_lo);
+                real wd_lo = 0.5f * (ww_pp[(size_t)k * st + c]
+                                   + ww_pp[(size_t)(k - 1) * st + c])
+                           * rdnw[k - 1] * (ph_lo - ph_lo_dn);
+                rhs_hi -= dtau * (fnm[k] * wd_hi + fnp[k] * wd_lo);
+            }
+            rhs_hi = ph_pp[fr]
+                   + __fdiv_rn(msf_c * rhs_hi, c1f[k] * mut + c2f[k]);
+            if (top_lid && k == nz) rhs_hi = 0.0f;
+            rhs_s[k][x] = rhs_hi;
+        }
+        // Kinematic terrain lower BC (WRF advance_w: msfty*(v part) +
+        // msftx*(u part); the isotropic single factor multiplies the sum).
+        if (y == 0) {
+            int ip = boundary_x ? min(i + 1, nx - 1) : (i + 1) % nx;
+            int im = boundary_x ? max(i - 1, 0)      : (i - 1 + nx) % nx;
+            int jp = boundary_y ? min(j + 1, ny - 1) : (j + 1) % ny;
+            int jm = boundary_y ? max(j - 1, 0)      : (j - 1 + ny) % ny;
+            int nxf = nx + 1;
+            size_t cip = (size_t)j * nx + ip, cim = (size_t)j * nx + im;
+            size_t cjp = (size_t)jp * nx + i, cjm = (size_t)jm * nx + i;
+            real ue = cf1 * u_pp[I3S(0, j, i + 1, ny, nxf)]
+                    + cf2 * u_pp[I3S(1, j, i + 1, ny, nxf)]
+                    + cf3 * u_pp[I3S(2, j, i + 1, ny, nxf)];
+            real uw = cf1 * u_pp[I3S(0, j, i, ny, nxf)]
+                    + cf2 * u_pp[I3S(1, j, i, ny, nxf)]
+                    + cf3 * u_pp[I3S(2, j, i, ny, nxf)];
+            real vn = cf1 * v_pp[I3S(0, j + 1, i, ny + 1, nx)]
+                    + cf2 * v_pp[I3S(1, j + 1, i, ny + 1, nx)]
+                    + cf3 * v_pp[I3S(2, j + 1, i, ny + 1, nx)];
+            real vs = cf1 * v_pp[I3S(0, j, i, ny + 1, nx)]
+                    + cf2 * v_pp[I3S(1, j, i, ny + 1, nx)]
+                    + cf3 * v_pp[I3S(2, j, i, ny + 1, nx)];
+            w_pp[c] = msf_c * (0.5f * rdy * ((ht[cjp] - ht[c]) * vn
+                                             + (ht[c] - ht[cjm]) * vs)
+                               + 0.5f * rdx * ((ht[cip] - ht[c]) * ue
+                                               + (ht[c] - ht[cim]) * uw));
+        }
+    }
+    __syncthreads();
+
+    // Forcing rows of the implicit w'' system (interior w levels), each
+    // from its own and its neighbours' RHS rows and the original phi''.
+    if (active) {
+        for (int k = y + 1; k <= nz; k += 8) {
+            if (k < nz) {
+                size_t h = (size_t)k * st + c;                 // half level above
+                size_t hm = h - st;                            // half level below
+                real t2_dn = __fdiv_rn(0.5f * ((1.0f + epssm) * th_pp[hm]
+                                   + (1.0f - epssm) * th_pp_old[hm]),
+                           (c1h[k - 1] * muts + c2h[k - 1])
+                              * (thb[(size_t)(k - 1) * bstr + boff] + thp[hm]));
+                real t2_up = __fdiv_rn(0.5f * ((1.0f + epssm) * th_pp[h]
+                                   + (1.0f - epssm) * th_pp_old[h]),
+                           (c1h[k] * muts + c2h[k])
+                              * (thb[(size_t)k * bstr + boff] + thp[h]));
+                real rhs_hi = rhs_s[k + 1][x], rhs_mid = rhs_s[k][x], rhs_lo = rhs_s[k - 1][x];
+                real dph_up = (1.0f + epssm) * (rhs_hi - rhs_mid)
+                            + (1.0f - epssm) * (ph_pp[(size_t)(k + 1) * st + c]
+                                                - ph_pp[(size_t)k * st + c]);
+                real dph_dn = (1.0f + epssm) * (rhs_mid - rhs_lo)
+                            + (1.0f - epssm) * (ph_pp[(size_t)k * st + c]
+                                                - ph_pp[(size_t)(k - 1) * st + c]);
+                size_t f = (size_t)k * st + c;
+                if (moist_cq) {
+                    w_pp[f] += dtau * rw_t[f]
+                             + msf_i * cqw[f] * (0.5f * dtau * G * rdn[k]
+                                                * (__fdiv_rn(c2a[h] * rdnw[k], c1h[k] * mut + c2h[k]) * dph_up
+                                                   - __fdiv_rn(c2a[hm] * rdnw[k - 1], c1h[k - 1] * mut + c2h[k - 1])
+                                                     * dph_dn))
+                             + dtau * G * msf_i
+                               * (rdn[k] * (c2a[h] * alt[h] * t2_up
+                                            - c2a[hm] * alt[hm] * t2_dn)
+                                  - c1f[k] * muave);
+                } else {
+                    w_pp[f] += dtau * rw_t[f]
+                             + msf_i * (0.5f * dtau * G * rdn[k]
+                                        * (__fdiv_rn(c2a[h] * rdnw[k], c1h[k] * mut + c2h[k]) * dph_up
+                                           - __fdiv_rn(c2a[hm] * rdnw[k - 1], c1h[k - 1] * mut + c2h[k - 1])
+                                             * dph_dn))
+                             + dtau * G * msf_i
+                               * (rdn[k] * (c2a[h] * alt[h] * t2_up
+                                            - c2a[hm] * alt[hm] * t2_dn)
+                                  - c1f[k] * muave);
+                }
+            } else if (top_lid) {
+                w_pp[(size_t)nz * st + c] = 0.0f;              // legacy rigid lid
+            } else {
+                // WRF v4.6.1 module_small_step_em.F:1420-1431, with msfty^-1.
+                size_t h = (size_t)(nz - 1) * st + c;
+                size_t f = (size_t)nz * st + c;
+                real t2_dn = __fdiv_rn(0.5f * ((1.0f + epssm) * th_pp[h]
+                                   + (1.0f - epssm) * th_pp_old[h]),
+                           (c1h[nz - 1] * muts + c2h[nz - 1])
+                              * (thb[(size_t)(nz - 1) * bstr + boff] + thp[h]));
+                real rhs_mid = rhs_s[nz][x], rhs_lo = rhs_s[nz - 1][x];
+                real dph_dn = (1.0f + epssm) * (rhs_mid - rhs_lo)
+                            + (1.0f - epssm)
+                              * (ph_pp[f] - ph_pp[(size_t)(nz - 1) * st + c]);
+                w_pp[f] += dtau * rw_t[f]
+                         + msf_i
+                           * (__fdiv_rn(-dtau * G * c2a[h] * rdnw[nz - 1] * rdnw[nz - 1],
+                              c1h[nz - 1] * mut + c2h[nz - 1]) * dph_dn
+                              - dtau * G
+                                * (2.0f * rdnw[nz - 1] * c2a[h] * alt[h] * t2_dn
+                                   + c1f[nz] * muave));
+            }
+        }
+    }
+    __syncthreads();
+
+    // Thomas solve with the precomputed factors: a recurrence, lane 0.
+    if (active && y == 0) {
+        for (int k = 1; k <= nz; ++k)
+            w_pp[(size_t)k * st + c] =
+                (w_pp[(size_t)k * st + c]
+                 - a[(size_t)k * st + c] * w_pp[(size_t)(k - 1) * st + c])
+                * alpha[(size_t)k * st + c];
+        for (int k = nz - 1; k >= 1; --k)
+            w_pp[(size_t)k * st + c] -= gam[(size_t)k * st + c]
+                                      * w_pp[(size_t)(k + 1) * st + c];
+    }
+    __syncthreads();
+
+    if (active) {
+        // damp_opt=3 implicit w damper (msf-free damp target: WRF literal).
+        if (dampmag > 0.0f) {
+            real htop = __fdiv_rn((phb[(size_t)nz * bstr + boff]
+                         + php[(size_t)nz * st + c]), G);
+            real hbot = htop - zdamp;
+            for (int k = y + 1; k <= nz; k += 8) {
+                real hk = __fdiv_rn((phb[(size_t)k * bstr + boff]
+                           + php[(size_t)k * st + c]), G);
+                if (hk >= hbot) {
+                    real sn = sinf(__fdiv_rn(1.5707963267948966f * (hk - hbot), zdamp));
+                    real dw = dampmag * sn * sn;
+                    real cfm = c1f[k] * mut + c2f[k];
+                    size_t f = (size_t)k * st + c;
+                    w_pp[f] = __fdiv_rn(w_pp[f] - dw * cfm * w_ref[f], 1.0f + dw);
+                }
+            }
+        }
+        // phi'' forward update (WRF: + msfty*0.5*dts*g*(1+epssm)*w/C_f(muts)),
+        // from the RHS row the column kernel had stored in phi''.
+        for (int k = y + 1; k <= nz; k += 8)
+            ph_pp[(size_t)k * st + c] =
+                rhs_s[k][x]
+                         + __fdiv_rn(msf_c * 0.5f * dtau * G * (1.0f + epssm)
+                         * w_pp[(size_t)k * st + c],
+                         c1f[k] * muts + c2f[k]);
+    }
+    __syncthreads();
+
+    // diagnose_p_column, one level per lane pass (its statements).
+    if (active) {
+        for (int k = y; k < nz; k += 8) {
+            size_t tid = (size_t)k * st + c;
+            real chm = c1h[k] * (mub2d[c] + mup[c] + mu_pp[c]) + c2h[k];
+            real th_ref = thb[base3d ? tid : (size_t)k] + thp[tid];
+            real al = -(alt[tid] * (c1h[k] * mu_pp[c])
+                        + rdnw[k] * (ph_pp[tid + st] - ph_pp[tid])) / chm;
+            al_pp[tid] = al;
+            p_pp[tid] = c2a[tid]
+                      * (alt[tid]
+                         * (th_pp[tid] - c1h[k] * mu_pp[c] * th_ref)
+                         / (chm * th_ref) - al);
+        }
+    }
+}
+#endif
+
 // Specified-frame phi update followed by zero-gradient w.  The two outputs
 // are independent; one thread owns one frame point, and every source w point
 // is clamped to the untouched interior.  arn_* matches each former eager
