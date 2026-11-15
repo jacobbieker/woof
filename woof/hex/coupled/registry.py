@@ -9,10 +9,16 @@ rather than running something that looks right.
 
 A component is ``ported`` only when its dynamical core and every scheme are on
 the GPU and its landing gate is green; until then it is ``stub``.
+
+A component may instead be ``ported_subset``: it declares, in ``_SUBSETS``, the
+exact schemes a coupled step can run. A step names the schemes it asks for;
+any scheme outside the declared subset is refused by name, never skipped. A
+component that declares no subset keeps the strict rule above.
 """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from woof.hex.errors import ConfigurationRefusal
@@ -25,6 +31,9 @@ _COMPONENTS: dict[str, tuple[str, str, str]] = {
     "landice": ("core_landice", "stub", "ice"),
 }
 
+#: component -> the schemes a ``ported_subset`` component can run in a coupled step
+_SUBSETS: dict[str, tuple[str, ...]] = {}
+
 
 @dataclass(frozen=True)
 class ComponentInfo:
@@ -32,11 +41,12 @@ class ComponentInfo:
     core_dir: str
     status: str
     branch: str
+    schemes: tuple[str, ...] = ()
 
 
 def all_components() -> tuple[ComponentInfo, ...]:
     return tuple(
-        ComponentInfo(name, core_dir, status, branch)
+        ComponentInfo(name, core_dir, status, branch, _SUBSETS.get(name, ()))
         for name, (core_dir, status, branch) in _COMPONENTS.items()
     )
 
@@ -51,11 +61,36 @@ def component(name: str) -> ComponentInfo:
             reason="not a coupled component",
             declaration="the coupled components are: " + ", ".join(_COMPONENTS),
         ) from None
-    return ComponentInfo(name, core_dir, status, branch)
+    return ComponentInfo(name, core_dir, status, branch, _SUBSETS.get(name, ()))
 
 
-def require_ported(name: str) -> ComponentInfo:
+def require_ported(name: str, schemes: Sequence[str] | None = None) -> ComponentInfo:
+    """Refuse a component a coupled step cannot run.
+
+    ``ported`` passes (``schemes`` is not consulted). ``ported_subset`` passes
+    only when ``schemes`` names the schemes the step runs and every one is in
+    the component's declared subset; the first one outside it is refused by
+    name. Anything else is refused as not ported.
+    """
     info = component(name)
+    if info.status == "ported_subset":
+        declared = ", ".join(info.schemes)
+        if schemes is None:
+            raise ConfigurationRefusal(
+                knob="coupled.schemes",
+                value=name,
+                reason=f"the {name} core is ported for a declared subset of schemes only",
+                declaration=f"name the schemes the step runs; the declared subset is: {declared}",
+            )
+        for scheme in schemes:
+            if scheme not in info.schemes:
+                raise ConfigurationRefusal(
+                    knob="coupled.schemes",
+                    value=scheme,
+                    reason=f"the {name} scheme {scheme!r} is not in its declared ported subset",
+                    declaration=f"the {name} declared subset is: {declared}",
+                )
+        return info
     if info.status != "ported":
         raise ConfigurationRefusal(
             knob="coupled.component",
