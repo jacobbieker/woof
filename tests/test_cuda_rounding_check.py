@@ -297,7 +297,8 @@ def compiled_rounding_audit(tmp_path_factory):
         # The PTX half compiles with CuPy's NVRTC, the environment's cu13
         # wheel. Compile the cubins with the same library: the baseline is
         # NVRTC 13.4's, and an older toolkit's NVRTC moves native signatures.
-        wheel = sorted(Path(sys.prefix).glob("lib/python*/site-packages/nvidia/cu13/lib/libnvrtc.so.13"))
+        wheel = sorted(Path(sys.prefix).glob(
+            f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages/nvidia/cu13/lib/libnvrtc.so.13"))
         if wheel:
             library = str(wheel[-1])
     if not library and os.environ.get("CUDA_PATH"):
