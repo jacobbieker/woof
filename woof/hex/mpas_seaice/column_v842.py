@@ -372,6 +372,12 @@ def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
                 "colpkg_init_thermo's salinity profile at this many ice layers meets a glibc cos "
                 "word that is not correctly rounded, and glibc's cos is not transcribed",
                 f"config_nIceLayers not in {sorted(COS_REFUSED_LAYERS)}")
+    if c["config_use_level_meltponds"] and not c["config_use_level_ice"]:
+        _refuse("config_use_level_ice", False,
+                "level melt ponds without the level-ice tracer: v8.4.2 leaves index_levelIceArea at 0 and makes "
+                "it the ponds' ancestor (init_column_tracer_object, mpas_seaice_column.F:5106-5110), so the "
+                "aggregate reads the tracer array out of bounds",
+                "config_use_level_ice = .true. with config_use_level_meltponds")
     if c["config_do_restart"]:
         _refuse("config_do_restart", True, "a restart re-initialises the column shortwave, which is not ported",
                 "config_do_restart = .false.")
