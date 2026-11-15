@@ -2070,19 +2070,30 @@ void advance_w_phi_msf_kpar(real* __restrict__ w_pp, real* __restrict__ ph_pp,
             real rhs_hi = arn_mul(dtau, rph_t[fr]
                                  + 0.5f * G * (1.0f - epssm) * w_pp[fr]);
             if (k < nz) {
-                real ph_lo = phb[(size_t)k * bstr + boff]
-                           + php[(size_t)k * st + c];
-                real ph_hi = phb[(size_t)(k + 1) * bstr + boff]
-                           + php[(size_t)(k + 1) * st + c];
-                real ph_lo_dn = phb[(size_t)(k - 1) * bstr + boff]
-                              + php[(size_t)(k - 1) * st + c];
-                real wd_hi = 0.5f * (ww_pp[(size_t)(k + 1) * st + c]
-                                   + ww_pp[(size_t)k * st + c])
-                           * rdnw[k] * (ph_hi - ph_lo);
-                real wd_lo = 0.5f * (ww_pp[(size_t)k * st + c]
-                                   + ww_pp[(size_t)(k - 1) * st + c])
-                           * rdnw[k - 1] * (ph_lo - ph_lo_dn);
-                rhs_hi -= dtau * (fnm[k] * wd_hi + fnp[k] * wd_lo);
+                // The column kernel carries ph_lo/wd_lo in registers, so
+                // its compilers see rounded sums and one rounded product
+                // chain; here they are re-formed, and spelled with the
+                // explicit roundings so no compiler reassociates them.
+                real ph_lo = __fadd_rn(phb[(size_t)k * bstr + boff],
+                                       php[(size_t)k * st + c]);
+                real ph_hi = __fadd_rn(phb[(size_t)(k + 1) * bstr + boff],
+                                       php[(size_t)(k + 1) * st + c]);
+                real ph_lo_dn = __fadd_rn(phb[(size_t)(k - 1) * bstr + boff],
+                                          php[(size_t)(k - 1) * st + c]);
+                real wd_hi = __fmul_rn(__fmul_rn(__fmul_rn(0.5f,
+                               __fadd_rn(ww_pp[(size_t)(k + 1) * st + c],
+                                         ww_pp[(size_t)k * st + c])),
+                               rdnw[k]), __fsub_rn(ph_hi, ph_lo));
+                real wd_lo = __fmul_rn(__fmul_rn(__fmul_rn(0.5f,
+                               __fadd_rn(ww_pp[(size_t)k * st + c],
+                                         ww_pp[(size_t)(k - 1) * st + c])),
+                               rdnw[k - 1]), __fsub_rn(ph_lo, ph_lo_dn));
+                // The column kernel's compilers (NVRTC generic and
+                // shape-specialized, Metal) fuse the loop-carried product
+                // here: fnp*wd_lo is the fma's product, fnm*wd_hi is rounded
+                // first.  Spelled out, so this entry's words do not depend on
+                // the choice a compiler makes for a recomputed wd_lo.
+                rhs_hi -= dtau * __fmaf_rn(fnp[k], wd_lo, __fmul_rn(fnm[k], wd_hi));
             }
             rhs_hi = ph_pp[fr]
                    + __fdiv_rn(msf_c * rhs_hi, c1f[k] * mut + c2f[k]);

@@ -23,10 +23,16 @@ def _column_inputs(rng, nz, ny, nx, *, base3d):
     c1f = eta_h.copy(); c2f = ((1.0 - eta_h) * 5000.0).astype(np.float32)
     c1h = (0.5 * (eta_h[1:] + eta_h[:-1])).astype(np.float32)
     c2h = ((1.0 - c1h) * 5000.0).astype(np.float32)
-    dnw = np.full(nz, -1.0 / nz, np.float32)
+    # WRF's stretched eta: negative dnw/rdnw and interpolation weights
+    # that are NOT 0.5 (a product by 0.5 is exact, which would hide a
+    # contraction choice at fnm*wd_hi + fnp*wd_lo).
+    eta_w = (1.0 - (np.arange(nz + 1) / nz) ** 1.4).astype(np.float32)
+    dnw = np.diff(eta_w).astype(np.float32)
     rdnw = (1.0 / dnw).astype(np.float32)
-    rdn = rdnw.copy()
-    fnm = np.full(nz, 0.5, np.float32); fnp = np.full(nz, 0.5, np.float32)
+    dn = np.concatenate([[dnw[0]], 0.5 * (dnw[1:] + dnw[:-1])]).astype(np.float32)
+    rdn = (1.0 / dn).astype(np.float32)
+    fnm = np.concatenate([[0.5], 0.5 * dnw[1:] / dn[1:]]).astype(np.float32)
+    fnp = np.concatenate([[0.5], 0.5 * dnw[:-1] / dn[1:]]).astype(np.float32)
     z = np.cumsum(np.full(nz + 1, 400.0, np.float32)) - 400.0
     phb = (z * 9.81).astype(np.float32)
     phb3 = np.broadcast_to(phb[:, None, None], full).copy()
@@ -95,15 +101,12 @@ def test_level_parallel_solve_matches_the_column_kernel(
     common = dict(moist_cq=moist_cq, top_lid=top_lid, dampmag=dampmag,
                   spec_zone=spec_zone, base3d=base3d, boundary=boundary,
                   nz=nz, ny=ny, nx=nx)
-    # Both from the generic unit (no shape defines): the contract is the
-    # column kernel's generic build.  The forecast compiles the column kernel
-    # shape-specialized, and on CUDA that build's words differ from its own
-    # generic build's by NVRTC's contraction choices (PR #475), which is why
-    # the level-parallel entry is opt-in there.
-    column = _run(_w_phi_kernel("advance_w_phi_msf", nz),
+    # Both as the forecast compiles them (shape-specialized): the contract
+    # is the column kernel the forecast runs.
+    column = _run(_w_phi_kernel("advance_w_phi_msf", nz, ny, nx),
                   ((ny * nx + _W_PHI_MSF_THREADS - 1) // _W_PHI_MSF_THREADS,),
                   (_W_PHI_MSF_THREADS,), arrays, **common)
-    kpar = _run(_w_phi_kernel("advance_w_phi_msf_kpar", nz),
+    kpar = _run(_w_phi_kernel("advance_w_phi_msf_kpar", nz, ny, nx),
                 ((ny * nx + 31) // 32,), _W_PHI_KPAR_BLOCK, arrays, **common)
     before = {k: arrays[k].get().view(np.uint32) for k in _WRITTEN}
     for key in _WRITTEN:
