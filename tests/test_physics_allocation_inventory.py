@@ -2087,7 +2087,10 @@ _PHYSICS_ALLOCATION_INVENTORY['woof/core/dfi.py'] = {'__init__': 9}
 _PHYSICS_ALLOCATION_INVENTORY['woof/core/dfi_model.py'] = {'__init__': 6}
 # FARMS: six outputs per column plus shared zero profiles/surface defaults;
 # preflight's 12 profile and 16 surface envelope includes their copies.
-_PHYSICS_ALLOCATION_INVENTORY['woof/core/farms.py'] = {'farms_surface_columns': 1, 'every_step': 4}
+# The fused step (_every_step_fused) allocates nothing per step: its
+# constant aerosol surfaces are built once per driver (_aerosol_surface).
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/farms.py'] = {'farms_surface_columns': 1, 'every_step': 4,
+                                                      '_aerosol_surface': 2}
 # G3 persistent diagnostics use the named cumulus_state_layout shapes;
 # all other GF buffers retain the measured column-workspace owner.
 _PHYSICS_ALLOCATION_INVENTORY['woof/core/gf.py'] = {'__call__': 23, 'held_lane': 1, 'gd_launch': 4}

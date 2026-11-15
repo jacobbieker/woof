@@ -24,7 +24,9 @@ with Dataset(src) as ds:
 zero=cp.zeros(n,cp.float32);one=cp.ones(n,cp.float32)
 vzero=cp.zeros_like(qv);out=cp.empty((6,n),cp.float32)
 k=get_kernel('farms','farms_column')
-args=(np.int32(n),np.int32(nz-1),np.int32(0),np.int32(0),np.int32(0),np.float32(24),p,rho,dz,alb,zero,zero,zero,zero,cz,qv,qi,qs,qc,vzero,vzero,vzero,cf,out)
+# the fused options off: packed radii, the cloud fraction read from cf, no MYNN merge, no published fraction
+args=(np.int32(n),np.int32(nz-1),np.int32(0),np.int32(0),np.int32(0),np.float32(24),p,rho,dz,alb,zero,zero,zero,zero,cz,qv,qi,qs,qc,vzero,vzero,vzero,cf,*(out[a] for a in range(6)),
+ np.float32(1),np.int32(nz),np.int32(0),np.int32(0),np.int32(0),np.int32(0),np.int32(0),qv,qv,np.int32(0),np.int32(0),qv,qv,qv,np.int32(0),out[0])
 interp=get_kernel('swint','swint_interp');io=[cp.empty_like(zero) for _ in range(5)]
 def timing(fn):
     for _ in range(3):fn()
@@ -43,9 +45,9 @@ result={'input':str(src),'input_sha256':hashlib.sha256(src.read_bytes()).hexdige
 # Diagnostic-only attribution: retain every path integral and publish its
 # intermediates instead of invoking the radiative solve. Never a forecast arm.
 source=module_source('farms')
-needle='farms_farms(p[i],alb[i],ssa[i],g[i],cz[i],beta,ang[i],pmw,tc,ti,ts,cwp>0.f?FDIV(ncf,cwp):0.f,c,ice,snow,(int)julian,out[i],out[2*n+i],out[3*n+i],out[n+i],out[4*n+i],out[5*n+i]);'
+needle='farms_farms(p[i],alb[i],ssa[i],g[i],cz[i],beta,ang[i],pmw,tc,ti,ts,cwp>0.f?FDIV(ncf,cwp):0.f,c,ice,snow,(int)julian,o0[i],o2[i],o3[i],o1[i],o4[i],o5[i]);'
 assert source.count(needle)==1
-replacement='out[i]=pmw; out[n+i]=tc; out[2*n+i]=ti; out[3*n+i]=ts; out[4*n+i]=cwp>0.f?FDIV(ncf,cwp):0.f; out[5*n+i]=c+ice+snow+beta;'
+replacement='o0[i]=pmw; o1[i]=tc; o2[i]=ti; o3[i]=ts; o4[i]=cwp>0.f?FDIV(ncf,cwp):0.f; o5[i]=c+ice+snow+beta;'
 from woof.core.kernels import module_options
 part=cp.RawModule(code=source.replace(needle,replacement),options=module_options('farms')).get_function('farms_column')
 result['milliseconds']['full']=timing(lambda:k(((n+63)//64,),(64,),args))
