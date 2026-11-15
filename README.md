@@ -350,6 +350,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     `woof hex products` draws these, the AFWA fields and the PSD hail sizes
     whenever a run writes them (HAILCAST and PSD hail on the renderer's hail
     maps; lightning and AFWA as plain field maps with generic colour scales),
+    plus the -10 C reflectivity maximum (`REFDM10C_MAX`: the WRF route's gsd
+    kernel on mesh columns, written when a stream asks for it; max vertical
+    vorticity is not on hex because WRF's grid stencil does not carry over),
     beside the regional severe set (MLCAPE, SRH, shear, EHI, STP, lightning
     threat, gust);
   - `aer_opt = 1, 2`, `w_damping`, and grid and spectral analysis nudging;

@@ -17,6 +17,7 @@ Fields (MPAS style lower case of WRF's name)::
     refd_max   REFD_MAX    dBZ     max lowest-level reflectivity (refl10cm)
     hail_maxk1 HAIL_MAXK1  m       max PSD hail diameter at the lowest level
     hail_max2d HAIL_MAX2D  m       max PSD hail diameter in the column
+    refdm10c_max REFDM10C_MAX dBZ  max reflectivity at the -10 C level (HRRR gsd diagnostics)
     t2max      T2MAX       K       max 2 m temperature
     t2min      T2MIN       K       min 2 m temperature
 
@@ -50,6 +51,14 @@ Definitional differences from the WRF route:
   ``cal_helicity`` needs the structured grid's staggered metrics; the optional 0-1/0-2/0-3 km layers are
   woof.hex.uh_layers.
 * W_MEAN is not published: WRF averages w over eta 0.5-0.8 and MPAS has no eta coordinate.
+* REFDM10C_MAX is the WRF route's gsd diagnostics kernel (woof/core/kernels/gsd_diagnostics.cu ``gsd_columns``,
+  HRRR module_diag_gsd.F) run on the mesh columns, one cell per column, written word for word as WRF's: the
+  reflectivity is the kernel's own Rayleigh sum of qr, qs and qg (``gd_refl``, not ``refl10cm``), interpolated
+  to the highest crossing of 263.15 K by the kernel's own temperature ((theta * (p / 1e5)^0.2859), theta the dry
+  potential temperature, ``PHB`` as above).  It is computed only when a stream due in the run carries the field,
+  every other output of that kernel (lightning, winds, cloud paths) is discarded, and a column that never
+  crosses -10 C stays 0.  It needs ``qr`` (``qs``, ``qg`` are zero where the scheme has none).  MAX vertical
+  vorticity (REL_VORT_MAX) is not repeated: it needs WRF's grid stencil.
 * REFD_MAX reads ``refl10cm`` (``diag_physics``; Thompson/WSM6 packages); without it the field stays 0, as WRF's does without
   reflectivity.  HAIL_* run for Thompson (mp 8), Thompson-aerosol (28) and WSM6 (6) and stay 0 for the other
   schemes, WRF's no-PSD branch.
@@ -80,6 +89,7 @@ _ROWS = (
     ("w_dn_max", "W_DN_MAX", "m s-1", "Minimum downdraft velocity below 400 hPa"),
     ("grpl_max", "GRPL_MAX", "kg m-2", "Maximum column integrated graupel"),
     ("refd_max", "REFD_MAX", "dBZ", "Maximum lowest-level derived radar reflectivity"),
+    ("refdm10c_max", "REFDM10C_MAX", "dBZ", "Maximum reflectivity at the -10 C level"),
     ("hail_maxk1", "HAIL_MAXK1", "m", "Maximum PSD hail diameter at lowest level"),
     ("hail_max2d", "HAIL_MAX2D", "m", "Maximum PSD hail diameter in column"),
     ("t2max", "T2MAX", "K", "Maximum 2 m temperature in history interval"),
@@ -179,6 +189,14 @@ class NwpDiagnosticsModule:
         self.fnp = cp.ascontiguousarray(self._get("mesh", "fzp")[:self.nl], dtype=f32)
         self.znw = cp.zeros(self.nl + 1, dtype=f32)     # no eta: W_MEAN is not published
         self.ph = cp.zeros((self.nl + 1, nc), dtype=f32)
+        self.m10 = utils.stream_inclusion_count("refdm10c_max", Direction.OUTPUT) > 0
+        if self.m10:
+            # gsd_columns' unused-here arrays and the outputs this module discards
+            self.gsd_zero3 = cp.zeros((self.nl + 1, nc), dtype=f32)
+            self.gsd_thb = cp.zeros(self.nl, dtype=f32)
+            self.gsd_msft = cp.ones(nc, dtype=f32)
+            self.gsd_pw = cp.zeros((self.nl + 1, nc), dtype=f32)
+            self.gsd_out = [cp.zeros(nc, dtype=f32) for _ in range(21)]
 
     # -- inputs ----------------------------------------------------------------------------------------
     def _has(self, pool, name):
@@ -265,11 +283,44 @@ class NwpDiagnosticsModule:
                        acc["hail_maxk1"].reshape(1, nc), acc["hail_max2d"].reshape(1, nc),
                        mp_physics=self.mp,
                        **{k: v.reshape(nl, 1, nc) for k, v in kw.items() if v is not None})
+        if self.m10:
+            self._minus10c(w, phb, p, alt, qv, u10, v10)
         if self._has("diag_physics", "t2m"):
             # clwrf_six on t2 - 273 (Celsius, as WRF accumulates), extremes seeded by the first sample.
             c = cp.subtract(self._plane("diag_physics", "t2m"), f32(273))
             cp.maximum(acc["t2max"], c, out=acc["t2max"])
             cp.minimum(acc["t2min"], c, out=acc["t2min"])
+
+    def _theta(self, qv):
+        """Dry potential temperature (level, cell): ``diag theta`` or ``theta_m / (1 + Rv/Rd qv)``."""
+        cp, nl = self.cp, self.nl
+        if self._has("diag", "theta"):
+            return self._levels("diag", "theta", nl)
+        theta_m = self._levels("state", "theta_m", nl)
+        if qv is None:
+            return theta_m
+        return cp.divide(theta_m, cp.add(np.float32(1), cp.multiply(np.float32(461.6 / 287.0), qv)))
+
+    def _minus10c(self, w, phb, p, alt, qv, u10, v10):
+        """REFDM10C_MAX: the WRF route's ``gsd_columns`` on the mesh columns (module docstring)."""
+        from woof.core.kernels import get_kernel
+        cp, nc, nl = self.cp, self.nc, self.nl
+        qr = self._scalar("qr")
+        if qr is None:
+            return
+        qs, qg = self._scalar("qs"), self._scalar("qg")
+        z3 = self.gsd_zero3
+        zl = z3[:nl]
+        theta = self._theta(qv)
+        o = self.gsd_out
+        f32, i32 = np.float32, np.int32
+        # outputs in the kernel's order: wspdmax umax vmax wup wdn wmean wsum count grplmax refmax refm10 ...
+        outs = o[:10] + [self.acc["refdm10c_max"]] + o[10:]
+        get_kernel("gsd_diagnostics", "gsd_columns")(((nc + 127) // 128,), (128,),
+            (zl, zl, w, z3, phb, i32(1), theta, self.gsd_thb, i32(0), p, alt,
+             zl if qv is None else qv, zl, qr, zl, zl if qs is None else qs, zl if qg is None else qg, zl,
+             self.znw, self.rho, zl, zl, zl, self.gsd_msft, zl, zl, u10, v10, self.gsd_pw, *outs,
+             i32(nc), i32(1), i32(nl), f32(0), i32(0), i32(0), i32(0)))
 
     # -- publication and reset -------------------------------------------------------------------------
     def compute(self):
