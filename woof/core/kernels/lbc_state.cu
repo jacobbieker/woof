@@ -1197,12 +1197,14 @@ void state_relaxation_multi(LBC_TABLE_PARAM table, int nrows, real dtbc,
     const int nx = (int)(row[14] & 0xffffffffull);
     const int width = (int)(row[14] >> 32);
     const int active_width = (int)(row[15] & 0xffffffffull);
-    const unsigned long long ncol = (unsigned long long)ny * (unsigned long long)nx;
-    const unsigned long long tid =
-        (unsigned long long)blockIdx.x * blockDim.x + threadIdx.x;
-    if (tid >= (unsigned long long)nz * ncol) return;
+    // The host proved every row's cell count fits 32 bits (the per-row
+    // path takes any larger array), so the cell index is 32-bit integer
+    // arithmetic; the byte address below is still size_t.
+    const unsigned int ncol = (unsigned int)ny * (unsigned int)nx;
+    const unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= (unsigned int)nz * ncol) return;
     const int k = (int)(tid / ncol);
-    const int rem = (int)(tid - (unsigned long long)k * ncol);
+    const int rem = (int)(tid - (unsigned int)k * ncol);
     const int j = rem / nx;
     const int i = rem - j * nx;
     const bool held_compute = (flags & LBC_MULTI_HELD_COMPUTE) != 0;
@@ -1256,10 +1258,14 @@ void state_relaxation_multi(LBC_TABLE_PARAM table, int nrows, real dtbc,
         spec = boundary_index(k, j, i, ny, nx, spec_zone, width,
                               west, west_t, east, east_t, south, south_t,
                               north, north_t, dtbc, &specified, false);
+    // The stage tendency's incoming word, read once: the direct form
+    // accumulates onto it, the held form adds the held value to it, and
+    // the write below is skipped when the word is unchanged (most of the
+    // interior, where tend + 0 is tend unless tend is -0).
+    const real incoming = target ? field_tend[idx] : 0.0f;
     // The accumulator the relaxation adds to: the zeroed held array in the
     // held pass, the stage tendency in the direct form.
-    real result = held_compute ? 0.0f
-                               : (target ? field_tend[idx] : 0.0f);
+    real result = held_compute ? 0.0f : incoming;
     if (perimeter) {
         const bool own_s = (relax_sides & 1) != 0;
         const bool own_n = (relax_sides & 2) != 0;
@@ -1433,9 +1439,10 @@ void state_relaxation_multi(LBC_TABLE_PARAM table, int nrows, real dtbc,
     if (held_compute || held_read) {
         // The second launch: the table's tendency on the specified rows,
         // plus the held row (the interior through the legacy ufunc add).
-        result = field_tend[idx];
+        result = incoming;
         if (spec) result = specified;
         result = __fadd_rn(result, h);
     }
-    field_tend[idx] = result;
+    if (__float_as_uint(result) != __float_as_uint(incoming))
+        field_tend[idx] = result;
 }

@@ -1572,6 +1572,9 @@ def _relaxation_multi_rows(state, rows) -> bool:
             return False
         if row.held is not None and not device(row.held):
             return False
+        # The kernel's cell index is 32-bit (lbc_state.cu).
+        if int((row.target if row.target is not None else row.held).size) >= 2**32:
+            return False
     arrays = [state.mub2d, state.thb, state.c1h, state.c2h, state.c1f,
               state.c2f, state.msft, state.msfu,
               state.msfv_inv if WRF_EXACT else state.msfv]
