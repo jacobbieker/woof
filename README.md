@@ -310,6 +310,16 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     unequal-area cells;
   - coupled fire spread and smoke;
   - Morrison with CESM aerosol (`mp_physics = 40`, `aercu_opt = 0`).
+- **Observation-driven corrections, each opt-in and off by default:**
+  - `gf_deep_rain_evaporation_booking` (Grell-Freitas, `cu_physics = 3`).
+    WRF's deep GF counts the downdraft evaporation it returns to vapour as
+    surface rain too, so deep `pret` is 1.29 to 1.66 times the column's
+    water loss. The option closes that budget and leaves the tendencies
+    unchanged. On five global 120 km cases scored against Stage-IV, the
+    24 h bias goes from +0.49 to −0.11 mm and RMSE falls by 1.3 mm. ETS
+    at 1 mm falls by 0.02. Evidence:
+    [declared-divergences.md](components/hex/docs/declared-divergences.md)
+    section 2.
 - **Hex (MPAS) parity with WRF's options.** The goal is for the hex model
   to accept the options WRF does, reusing WRF's column implementations
   rather than copies, and to refuse by name what it cannot yet do. Landed:
@@ -393,6 +403,16 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   storm-track planning, and delete-after-commit backpressure and domain
   selection for upstream's Icechunk store export
   (`[output] icechunk_delete_after_commit`, `icechunk_domains`).
+- **Observation referees for MPAS-layout history.** These are for the hex
+  model or native MPAS-A.
+  - `woof.hex.sonde_profile_referee` scores temperature against radiosondes
+    at the mandatory levels, by latitude band and lead, including the drift
+    per 24 h. The sondes are IGRA v2 and WIS2, read from the Source
+    Cooperative icechunk stores.
+  - `woof.hex.qpe_cell_referee` scores 24 h precipitation against Stage-IV,
+    averaged onto the model's cells.
+  - Both compare two arms with a case-paired bootstrap
+    ([obs-referee.md](components/hex/docs/obs-referee.md)).
 - **Performance work.** Metal: out-of-line compilation of the largest units,
   compile prefetch and persisted translations, fewer host syncs per step,
   and hardware fast paths that keep the same words (a strict 3 km forecast
