@@ -287,8 +287,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     subglacial hydrology and one forward-Euler time step.
 
   Limits: Albany's higher-order solvers are refused by name. The sea-ice
-  remap takes its init geometry as input and refuses halo exchanges by
-  name. Sea-ice column physics (thermodynamics), ocean KPP and GM/Redi,
+  remap computes its init geometry (frames, moments, MPAS's RBF
+  coefficients) itself, and refuses halo exchanges and periodic planar
+  meshes by name. Sea-ice column physics (thermodynamics), ocean KPP and GM/Redi,
   and the coupler import and export are not ported. A few RKIND 8 cases need the LGPL libm
   opt-in below. These are ported pieces and steps, not coupled forecasts.
   Plan: [docs/mpas-coupled-roadmap.md](docs/mpas-coupled-roadmap.md).

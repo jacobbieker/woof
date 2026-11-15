@@ -8,7 +8,9 @@ package, advection and forcing are off:
   config_dynamics_subcycle_number``, ``elasticTimeStep = dynamicsTimeStep /
   config_elastic_subcycle_number``) and ``seaice_initialize_time_diagnostics``
   (``xtime`` and, on a cold start, ``simulationStartTime``). The variational
-  basis, masks and the rest of the mesh setup are the input's;
+  basis, masks and the rest of the mesh setup are the input's; under
+  ``config_use_advection`` the remap's init geometry is computed (see
+  :func:`initialize`);
 - each step: the clock advanced, then ``seaice_timestep``:
   ``seaice_set_time_diagnostics`` (``xtime``, ``daysSinceStartOfSim``),
   ``store_timestep_counter`` (``itimestep``, ``timeAverageTestVariable``), and
@@ -18,7 +20,8 @@ package, advection and forcing are off:
   :mod:`~woof.hex.mpas_seaice.evp_v842` and
   :mod:`~woof.hex.mpas_seaice.velocity_v842`, and the post-subcycle) and,
   under ``config_use_advection``, ``seaice_run_advection``'s incremental remap
-  (:mod:`~woof.hex.mpas_seaice.remap_v842`; its geometry is the input's); then
+  (:mod:`~woof.hex.mpas_seaice.remap_v842`, on the geometry
+  :mod:`~woof.hex.mpas_seaice.remap_init_v842` derives at init); then
   ``seaice_timestep_finalize`` (the atmospheric fluxes re-initialised).
 
 The pools are dicts of device arrays named as in MPAS (``mesh``, ``boundary``,
@@ -36,11 +39,13 @@ compiled verbatim; ``tools/mpas_seaice_oracle/run_seaice_step.F90``,
 ``tests/test_mpas_seaice_timestep_remap_parity.py``).
 
 Refused by name: the column package, upwind advection (v8.4.2 cannot run
-it), the spherical remap, forcing, the weak-form
+it), a periodic planar mesh under advection, forcing, the weak-form
 stress divergence, the unit tests, a restart start, and halo exchanges.
 ``seaice_check_state`` changes no state and is not run.
 """
 from __future__ import annotations
+
+import logging
 
 import numpy as np
 
@@ -48,6 +53,8 @@ from woof.hex.errors import ConfigurationRefusal
 from woof.hex.mpas_ocean.forward_v842 import Clock, parse_time, read_restart, write_restart
 
 from . import evp_v842, presubcycle_v842, remap_v842, velocity_v842
+
+_log = logging.getLogger(__name__)
 
 SOURCE_FILES = (
     "src/core_seaice/model_forward/mpas_seaice_core.F:260-410",
@@ -117,9 +124,27 @@ def _tilt(configs: dict) -> str:
     return "geostrophic" if configs.get("config_geostrophic_surface_tilt", False) else "ssh_gradient"
 
 
-def initialize(*, pools: dict, configs: dict) -> Clock:
-    """The init's time steps and time diagnostics; the clock at its start."""
+def initialize(*, pools: dict, configs: dict, remap_geometry: str | None = None) -> Clock:
+    """The init's time steps and time diagnostics; the clock at its start.
+
+    Under ``config_use_advection`` with ``remap_geometry="compute"`` (the
+    default then), ``seaice_init_advection_incremental_remap``'s geometry
+    (:mod:`~woof.hex.mpas_seaice.remap_init_v842`: the frames, vertex
+    coordinates, moments, rotated coordinates, the RBF vectors and
+    ``coeffs_reconstruct``) is derived from the mesh into the pools;
+    ``"input"`` keeps the pools' own (a harness replaying a fixture whose
+    geometry came from elsewhere). The halo-layer warnings v8.4.2 logs go to
+    this module's logger."""
     check_config(configs)
+    advection = configs.get("config_use_advection", False)
+    if remap_geometry is None:
+        remap_geometry = "compute" if advection else "input"
+    if remap_geometry not in ("compute", "input"):
+        raise ValueError(f"remap_geometry is 'compute' or 'input', not {remap_geometry!r}")
+    if advection and remap_geometry == "compute":
+        from . import remap_init_v842
+        for w in remap_init_v842.initialize_pools(pools, configs):
+            _log.info("%s %s", w["message"], w["ints"])
     solver = pools["velocity_solver"]
     real = PRECISIONS[_precision_of(solver["uVelocity"])]
     dynamics = real(real(configs["config_dt"]) / real(configs["config_dynamics_subcycle_number"]))

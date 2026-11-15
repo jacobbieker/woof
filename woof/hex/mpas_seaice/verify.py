@@ -14,6 +14,7 @@ def verify() -> dict:
     from woof.verify import mpas_seaice_evp_oracle as evp_oracle
     from woof.verify import mpas_seaice_presubcycle_oracle as presubcycle_oracle
     from woof.verify import mpas_seaice_remap_checks_oracle as remap_checks_oracle
+    from woof.verify import mpas_seaice_remap_init_oracle as remap_init_oracle
     from woof.verify import mpas_seaice_remap_oracle as remap_oracle
     from woof.verify import mpas_seaice_remap_sphere_oracle as remap_sphere_oracle
     from woof.verify import mpas_seaice_step_oracle as step_oracle
@@ -21,14 +22,15 @@ def verify() -> dict:
     from woof.verify import mpas_seaice_step_remap_sphere_oracle as step_remap_sphere_oracle
     from woof.verify import mpas_seaice_velocity_oracle as velocity_oracle
 
-    from . import evp_v842, presubcycle_v842, remap_v842, timestep_v842, velocity_v842
+    from . import evp_v842, presubcycle_v842, remap_init_v842, remap_v842, timestep_v842, velocity_v842
 
     for fixture in (evp_oracle.FIXTURE_DIR / "oracle-r4.npz", velocity_oracle.FIXTURE_DIR / "oracle-r4.npz",
                     presubcycle_oracle.FIXTURE_DIR / "oracle-r4.npz", step_oracle.FIXTURE_DIR / "oracle-r4.npz",
                     remap_oracle.FIXTURE_DIR / "oracle-r4.npz", step_remap_oracle.FIXTURE_DIR / "oracle-r4.npz",
                     remap_sphere_oracle.FIXTURE_DIR / "oracle-r4.npz",
                     step_remap_sphere_oracle.FIXTURE_DIR / "oracle-r4.npz",
-                    remap_checks_oracle.FIXTURE_DIR / "oracle-r4.npz"):
+                    remap_checks_oracle.FIXTURE_DIR / "oracle-r4.npz",
+                    remap_init_oracle.FIXTURE_DIR / "oracle-r4.npz"):
         if not fixture.is_file():
             raise FileNotFoundError(
                 f"the MPAS-Seaice oracle fixture is not here ({fixture.parent}); it ships with the "
@@ -71,6 +73,9 @@ def verify() -> dict:
     for precision in remap_checks_oracle.PRECISIONS:
         pieces.append(piece(f"incremental_remap_checks_{precision}", remap_v842, remap_checks_oracle,
                             remap_checks_oracle.measure(precision)))
+    for precision in remap_init_oracle.PRECISIONS:
+        pieces.append(piece(f"incremental_remap_init_{precision}", remap_init_v842, remap_init_oracle,
+                            remap_init_oracle.measure(precision)))
     return {
         "model": "seaice",
         "status": registry.component("seaice").status,

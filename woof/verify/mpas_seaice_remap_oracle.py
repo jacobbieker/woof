@@ -169,6 +169,10 @@ def field_rows(case: dict) -> list:
              ("incremental_remap", "maskEdge", INT, _E), ("incremental_remap", "maskCell", INT, _C),
              ("incremental_remap", "maskCategoryCell", INT, ("NCAT", "C1")),
              ("incremental_remap", "workCategoryCell", REAL, ("NCAT", "C1"))]
+    if case.get("init"):
+        # the RBF set-up's vectors (mpas_initialize_vectors), which the init oracle fills
+        mesh += [("mesh", "localVerticalUnitVectors", REAL, (3, "C1")), ("mesh", "edgeNormalVectors", REAL, (3, "E1")),
+                 ("mesh", "cellTangentPlane", REAL, (3, 2, "C1"))]
     rotated = []
     if case.get("sphere"):
         rotated = [("rotated_mesh", f"{a}{b}Rotate", REAL, (f"{b[0]}1",)) for b in ("Cell", "Vertex", "Edge")
@@ -242,6 +246,10 @@ def make_case(name, seed, stage, kind, owned, packages, config_overrides, field_
     case = {"name": name, "precision": precision, "dims": dims, "config": config, "dt": 3600.0, "stage": stage,
             "mesh_kind": kind, "packages": {p: bool(packages.get(p, False)) for p in PACKAGES},
             "tracer_fields": tracer_fields(packages), "absent": tuple(field_overrides.get("absent", ()))}
+    if field_overrides.get("init"):
+        # run_incremental_remap_init: MPAS's own RBF set-up derives coeffs_reconstruct
+        case["init"] = True
+        config.update({"mesh:is_periodic": False, "mesh:x_period": 0.0, "mesh:y_period": 0.0})
     if sphere:
         case["sphere"] = field_overrides["sphere"]
         case["varres"] = bool(field_overrides.get("varres", False))
@@ -391,17 +399,19 @@ def run_oracle(build_dir: Path, case: dict) -> tuple[dict[str, np.ndarray], dict
     with tempfile.TemporaryDirectory() as tmp:
         src, dst, log = Path(tmp) / "in.bin", Path(tmp) / "out.bin", Path(tmp) / "log.txt"
         src.write_bytes(input_bytes(case))
-        subprocess.run([str(Path(build_dir) / f"run_incremental_remap_{case['precision']}"), str(src), str(dst),
+        binary = "run_incremental_remap_init" if case.get("init") else "run_incremental_remap"
+        subprocess.run([str(Path(build_dir) / f"{binary}_{case['precision']}"), str(src), str(dst),
                         str(log)], check=True)
         return read_outputs(dst.read_bytes(), case), parse_log(log.read_text(encoding="utf-8"))
 
 
 def graded(case: dict, key: str) -> bool:
     """Whether a field is graded: everything but the geometry (the GPU's
-    input) and, over whole remap steps, the triangle values (scratch whose
-    words reach the fluxes, which are graded)."""
+    input, except in the init cases, where the host derives it) and, over
+    whole remap steps, the triangle values (scratch whose words reach the
+    fluxes, which are graded)."""
     pool, name = key.split("/", 1)
-    if name in GEOMETRY or name in ROTATED:
+    if not case.get("init") and (name in GEOMETRY or name in ROTATED):
         return False
     return not (case["stage"] == 4 and pool == "tracer_triangles")
 
@@ -472,10 +482,15 @@ def tree_rows(tree) -> list:
 
 
 def on_device(case: dict, fixture: dict[str, np.ndarray] | None = None) -> dict[str, dict]:
-    """The case's pools on the device, with the init's geometry (the fixture's
-    remap-pool words where the oracle's init changed them) in place."""
+    """The case's pools on the device, with the init's geometry in place: the
+    fixture's remap-pool words where the oracle's init changed them, or, in
+    the init cases, :func:`woof.hex.mpas_seaice.remap_init_v842.initialize_pools`'."""
     dev = _stream.on_device(case["fields"], case)
-    if fixture is not None:
+    if case.get("init"):
+        from woof.hex.mpas_seaice import remap_init_v842 as ri
+        dev.setdefault("rotated_mesh", {})
+        ri.initialize_pools(dev, case["config"])
+    elif fixture is not None:
         import cupy as cp
         for name in GEOMETRY:
             key = f"incremental_remap/{name}"
@@ -527,7 +542,7 @@ def run_gpu(case: dict, fixture: dict[str, np.ndarray] | None = None) -> dict[st
             warnings += w
         dev["_warnings"] = warnings
         last_errors[case["name"], case["precision"]] = (errors, ierr)
-    elif stage != 0:
+    elif stage not in (0, 5):
         raise ValueError(f"stage {stage} is not ported")
     if stage == 4:
         last_warnings[case["name"], case["precision"]] = dev.pop("_warnings")
