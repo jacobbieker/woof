@@ -923,6 +923,43 @@ def test_frames_drawn_live_keep_their_maps_and_the_full_pass_draws_the_rest(monk
     assert json.loads((case / "products-manifest.json").read_text())["live_frames"] is None
 
 
+def test_an_option_map_the_live_draws_missed_is_drawn_for_the_live_frames(monkeypatch, tmp_path):
+    """Every frame drawn live and a whole-run map to draw: no -rest job runs, so a severe-option map the live
+    receipt does not list is drawn over the live frames by a job of its own (CodeRabbit on #465)."""
+    seen: list = []
+    _stand_in_engines(monkeypatch, tmp_path, uniform=False, seen=seen)
+    _points_stand_in(monkeypatch, seen)
+    histories = _histories(tmp_path)
+    renderer = render_door._run
+
+    def with_option_catalog(command, *, log_prefix, env=None):
+        result = renderer(command, log_prefix=log_prefix, env=env)
+        if log_prefix == "CATALOG":
+            result.stdout += "PRODUCT\thail_max_hailcast\tdirect\trenderable\tready\t\n"
+        return result
+    monkeypatch.setattr(render_door, "_run", with_option_catalog)
+    assert products_door.run_products(_arguments(tmp_path, histories, case="patch-case")) == 0
+    monkeypatch.setattr(products_door, "severe_option_products", lambda frames: ("hail_max_hailcast",))
+    receipt = tmp_path / "live-frames.json"
+    receipt.write_text(json.dumps({
+        "schema": "gpuwm-hex.live-frames/v1", "out": str(tmp_path / "out"), "case": "patch-case",
+        "drawn": [h.name for h in histories],
+        "stat": {h.name: [h.stat().st_size, h.stat().st_mtime_ns] for h in histories},
+        "products": ["2m_temperature_10m_winds", "total_qpf"]}), encoding="utf-8")
+    seen.clear()
+    assert products_door.run_products(_arguments(tmp_path, histories, case="patch-case", live_frames=str(receipt))) == 0
+    renders = [c for stage, c in seen if stage == "RENDER"]
+    options = [c for c in renders if c[c.index("--products") + 1] == "hail_max_hailcast"]
+    assert options and all(sum(Path(x).name.startswith("wrfout_d01_") for x in c) == 2 for c in options)
+    # A live receipt that already lists it draws it no second time.
+    doc = json.loads(receipt.read_text())
+    doc["products"].append("hail_max_hailcast")
+    receipt.write_text(json.dumps(doc), encoding="utf-8")
+    seen.clear()
+    assert products_door.run_products(_arguments(tmp_path, histories, case="patch-case", live_frames=str(receipt))) == 0
+    assert not any("hail_max_hailcast" in c[c.index("--products") + 1] for stage, c in seen if stage == "RENDER")
+
+
 def _write_patch_mesh(path: Path, *, lat0=35.0, lon0=-97.0, half_deg=3.0, step_deg=0.25, limited=True):
     """A tiny MPAS-shaped grid file: a lat-lon patch of cell centres (radians),
     unit-sphere areas, and a boundary ring when ``limited``."""

@@ -1898,6 +1898,12 @@ def run_products(args) -> int:
                 jobs_here.append(dict(histories=histories, products=whole_run, part="-series"))
             if rest:
                 jobs_here.append(dict(histories=rest, products=per_frame, part="-rest"))
+            # A chemistry or severe-option map the live draws did not make (its field reached the frames only
+            # later, say) is drawn here for the live frames; with every frame drawn live and a whole-run map to
+            # draw, no -rest job would carry it (CodeRabbit on #465).
+            missing = tuple(p for p in extra_products if p not in live.get("products", ()))
+            if missing and not redraw:
+                jobs_here.append(dict(histories=list(live["frames"]), products=missing, part="-options"))
             results: list = [None] * len(jobs_here)
 
             def part(index):
