@@ -1,6 +1,12 @@
 //! WRF v4.7.1 observation admission, projection and unit conversion.
 //! Public domain source: wrf_fddaobs_in.F and module_llxy.F, pinned and
 //! noticed in tools/fddaobs_wrf471_oracle. No competitor source is used.
+//!
+//! `map_proj = 0` is woof's geographic mode for the hex (MPAS mesh) model,
+//! which has no map projection: the carrier's i and j are the report's
+//! longitude (wrapped to [-180, 180]) and latitude in degrees, the ARW
+//! domain trim is skipped (the hex side admits a report by the mesh cell
+//! that contains it), and winds stay earth-relative, as on Mercator.
 use super::fddaobs::{Datum, Measurements, Report};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, thread};
@@ -44,13 +50,13 @@ struct Map {
 }
 impl Map {
     fn new(p: &Projection) -> Result<Self, String> {
-        if ![1, 2, 3, 6].contains(&p.map_proj) {
+        if ![0, 1, 2, 3, 6].contains(&p.map_proj) {
             return Err(format!(
                 "WRF observation projection {} is not an ARW projection",
                 p.map_proj
             ));
         }
-        if p.dx <= 0. || p.dy <= 0. {
+        if p.map_proj != 0 && (p.dx <= 0. || p.dy <= 0.) {
             return Err("projection grid spacing must be positive".into());
         }
         let hemi = if p.truelat1 < 0. { -1. } else { 1. };
@@ -105,6 +111,9 @@ impl Map {
             / (1. + self.hemi * (lat * RAD).sin())
     }
     fn ij(&self, lat: f32, lon: f32) -> (f32, f32) {
+        if self.p.map_proj == 0 {
+            return (wrap(lon), lat);
+        }
         let (i, j) = match self.p.map_proj {
             1 => {
                 let rm = self.lc_radius(lat);
@@ -224,7 +233,9 @@ fn platform(r: &Report) -> (i32, String) {
 fn prepare(r: &Report, m: &Map, origin: i64, rovg: f32) -> Vec<Level> {
     let (i, j) = m.ij(r.latitude, r.longitude);
     let (pf, pl) = platform(r);
-    if i < 2. || i > (m.p.e_we - 1) as f32 || j < 2. || j > (m.p.e_sn - 1) as f32 {
+    if m.p.map_proj != 0
+        && (i < 2. || i > (m.p.e_we - 1) as f32 || j < 2. || j > (m.p.e_sn - 1) as f32)
+    {
         return vec![];
     }
     if pf == 4 && pl.get(6..16) == Some("SYNOP PRET") && r.id.get(6..15) == Some("METNET= 3") {
@@ -432,4 +443,54 @@ pub fn admit(
         out.append(&mut new);
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fddaobs::decode;
+
+    fn report(lat: f32, lon: f32, u: f32, v: f32) -> String {
+        let mut s = format!(
+            " 20240101003000\n  {:9.4} {:9.4} \n  {:40}   {:40}\n  {:16}  {:16}  {:8.0}  {:>4}  {:>4}  {:5}\n ",
+            lat, lon, "synthetic", "synthetic", "FM-12 SYNOP", "synthetic", 100.0, "F", "F", 1
+        );
+        let values = [101000., -888888., 100., 290., u, v, 50., 100000., -888888.];
+        for value in values {
+            let qc = if value == -888888. { -888888. } else { 129. };
+            s.push_str(&format!("{:11.3} {:11.3} ", value, qc));
+        }
+        s.push('\n');
+        s
+    }
+
+    #[test]
+    fn geographic_mode_carries_longitude_latitude_without_trim_or_rotation() {
+        let text = report(-33.25, 190.5, 3., -4.) + &report(89.5, -10.25, 1., 2.);
+        let reports = decode(text.as_bytes(), 8, 1).unwrap();
+        let projection = Projection {
+            map_proj: 0,
+            latitude_origin: 0.,
+            longitude_origin: 0.,
+            truelat1: 30.,
+            truelat2: 60.,
+            stand_lon: -100.,
+            dx: 0.,
+            dy: 0.,
+            e_we: 1,
+            e_sn: 1,
+        };
+        let start = utc_seconds_for_test();
+        let rows = admit(&reports, &projection, start, 287. / 9.81, 1).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!((rows[0].i, rows[0].j), (-169.5, -33.25));
+        assert_eq!((rows[1].i, rows[1].j), (-10.25, 89.5));
+        // QC 129 marks earth-relative winds; no map rotation applies.
+        assert_eq!((rows[0].vars[0], rows[0].vars[1]), (3., -4.));
+        assert_eq!(rows[0].time, 0.5);
+    }
+
+    fn utc_seconds_for_test() -> i64 {
+        crate::fddaobs::utc_seconds("20240101000000").unwrap()
+    }
 }

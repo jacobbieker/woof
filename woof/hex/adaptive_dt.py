@@ -90,6 +90,9 @@ INCOMPATIBLE = (
     ("nudging", "--nudging", None,
      "the grid/spectral nudging is built for one step (its fgdt cadence counts fixed steps and its analysis "
      "intervals must be whole steps; woof.hex.nudging refuses a different dt)"),
+    ("obs_nudging", "--obs-nudging", None,
+     "observation nudging counts obs_ionf in fixed steps and checkpoints its step clock (woof.hex.obs_nudging "
+     "refuses a different dt)"),
     ("tc_climate", "--tc-climate", None,
      "the TC tracker samples on a fixed step count"),
     ("les_model", "--les-model", "off",

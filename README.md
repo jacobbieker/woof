@@ -316,7 +316,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     RASM and surface-energy reductions. `afwa_ptype` keeps its intended
     logic rather than WRF's literal operator precedence; the module
     documents the difference;
-  - `aer_opt = 1, 2`, `w_damping`, and grid and spectral analysis nudging;
+  - `aer_opt = 1, 2`, `w_damping`, grid and spectral analysis nudging, and
+    WRF observation nudging (`obs_nudge_opt = 1`, `--obs-nudging`), with
+    WRF's weights and great-circle radii found through a cell KD-tree;
   - stochastic physics: SPP (`spp_conv`, `spp_pbl`, `spp_lsm`) on the WOOF
     column route, WRF-Solar EPS (`multi_perturb`) on regional meshes, and
     WRF's inflow perturbation on the regional relax rings

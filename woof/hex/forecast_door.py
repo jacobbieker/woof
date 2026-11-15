@@ -1084,6 +1084,10 @@ class ForecastRequest:
     #: and its analyses on this mesh.  None (the default) is off.
     nudging: Path | None = None
     nudging_analyses: tuple[Path, ...] = ()
+    #: WRF observation nudging (woof.hex.obs_nudging): the &fdda / [fdda] configuration and its
+    #: OBS_DOMAIN file (None: the config's obs_inputfile).  None (the default) is off.
+    obs_nudging: Path | None = None
+    obs_nudging_input: Path | None = None
     #: ``--analysis``: the bundle's receipt block (woof.hex.analysis_door), None without one.
     analysis_bundle: Mapping[str, Any] | None = None
     #: Surface-pressure tendency statistics at every macro boundary.
@@ -2515,6 +2519,28 @@ def resolve_request(
             raise _refuse("HEX_NUDGING_LTS: nudging runs on fixed-step hex runs; drop the local time step")
         nudging = Path(nudging).expanduser().resolve()
         nudging_analyses = tuple(Path(value).expanduser().resolve() for value in nudging_analyses)
+    obs_nudging = getattr(arguments, "obs_nudging", None)
+    obs_nudging_input = getattr(arguments, "obs_nudging_input", None)
+    if obs_nudging_input is not None and obs_nudging is None:
+        raise _refuse("--obs-nudging-input names the observation file of --obs-nudging; give the configuration too")
+    if obs_nudging is not None:
+        for value in (obs_nudging, obs_nudging_input):
+            if value is not None and not Path(value).expanduser().is_file():
+                raise _refuse(f"observation-nudging input {value} does not exist")
+        if fullstep_enabled or local_timestep:
+            raise _refuse("HEX_OBS_NUDGING_LTS: observation nudging runs on fixed-step hex runs; "
+                          "drop the local time step")
+        from .obs_nudging import HexObsNudgingRefusal, load_config as load_obs_config, refusals as obs_refusals
+
+        try:
+            problems = obs_refusals(load_obs_config(obs_nudging, input_file=obs_nudging_input))
+        except HexObsNudgingRefusal as error:
+            problems = [error]
+        if problems:
+            raise _refuse("; ".join(str(problem) for problem in problems))
+        obs_nudging = Path(obs_nudging).expanduser().resolve()
+        obs_nudging_input = (None if obs_nudging_input is None
+                             else Path(obs_nudging_input).expanduser().resolve())
     # Retired 2026-10-14 (lane W1): IAU and the balance series needed the active full-step
     # class executor, the only one with a held-tendency hook.  The fixed-step executor has the
     # same hook now (woof.hex.iau_native), and so do the same-host ranks (one class per rank);
@@ -2616,6 +2642,8 @@ def resolve_request(
         iau_route=iau_route,
         nudging=nudging,
         nudging_analyses=nudging_analyses,
+        obs_nudging=obs_nudging,
+        obs_nudging_input=obs_nudging_input,
         analysis_bundle=getattr(arguments, "analysis_receipt", None),
         balance_series=bool(getattr(arguments, "balance_series", False)),
         tc_climate=getattr(arguments, "tc_climate", None),
@@ -3194,6 +3222,9 @@ def _partitioned_samehost_refusal(request) -> str | None:
     if request.nudging is not None:
         return ("HEX_NUDGING_PARTITIONED: nudging runs on one card; the partitioned same-host "
                 f"executor has no nudging seat ({one_card})")
+    if request.obs_nudging is not None:
+        return ("HEX_OBS_NUDGING_PARTITIONED: observation nudging runs on one card; the partitioned same-host "
+                f"executor has no nudging seat ({one_card})")
     if request.tc_climate is not None:
         return f"--tc-climate is not wired to the partitioned same-host executor ({one_card})"
     if request.w_damping is not None:
@@ -3498,6 +3529,10 @@ def build_driver_argv(request: ForecastRequest) -> list[str]:
         argv += ["--nudging", str(request.nudging)]
         for path in request.nudging_analyses:
             argv += ["--nudging-analysis", str(path)]
+    if request.obs_nudging is not None:
+        argv += ["--obs-nudging", str(request.obs_nudging)]
+        if request.obs_nudging_input is not None:
+            argv += ["--obs-nudging-input", str(request.obs_nudging_input)]
     if request.balance_series:
         argv.append("--balance-series")
     if request.tc_climate is not None:
@@ -5050,6 +5085,10 @@ def _run_forecast(arguments: argparse.Namespace) -> int:
             raise ValueError("--nudging and --nudging-analysis go together: a nudging configuration reads its "
                              "analyses, and an analysis without a configuration would never be read")
         if native_config is not None:
+            if getattr(arguments, "obs_nudging", None) is not None:
+                raise ValueError("HEX_OBS_NUDGING_ROUTE: --obs-nudging runs on the WOOF-physics route (--physics-backend "
+                                 "arwen, the column seam); the MPAS suite route has no observation-nudging seat yet "
+                                 "(matrix item 5.2 follow-up) and would accept it and never apply it")
             if getattr(arguments, "w_damping", False):
                 raise ValueError("--w-damping is carried by the WOOF-physics route's dycore driver; the MPAS "
                                  "suite route (matrix item 4.2 follow-up) would accept it and never apply it")
@@ -5974,6 +6013,17 @@ def add_forecast_arguments(parser: argparse.ArgumentParser) -> None:
         "--nudging-analysis", type=Path, action="append", default=None, metavar="INIT",
         help="an analysis on this mesh (hex init format, e.g. from the hex analysis remap), one at the "
              "start and one every gfdda_interval_m; repeat the flag")
+    parser.add_argument(
+        "--obs-nudging", type=Path, default=None, metavar="CONFIG",
+        help="WRF observation nudging (obs_nudge_opt = 1): a WRF namelist.input &fdda group or a TOML [fdda] "
+             "(or [run]) table of WRF's obs_* keys (obs_nudge_wind/temp/mois, obs_coef_*, obs_rinxy, obs_twindo, "
+             "obs_ionf, obs_idynin/obs_dtramp, obs_sfcfact/sfcfacr, obs_nudgez*, max_obs, fdda_start/fdda_end, "
+             "...); reports within obs_rinxy km on the sphere (a cell KD-tree), one cell is one WRF column; "
+             "WOOF-physics route, fixed step; off by default (woof.hex.obs_nudging)")
+    parser.add_argument(
+        "--obs-nudging-input", type=Path, default=None, metavar="OBS_DOMAIN101",
+        help="the WRF OBS_DOMAIN observation file (its 02, 03, ... volumes are read beside it); default: the "
+             "config's obs_inputfile, else OBS_DOMAIN101 beside the config")
     parser.add_argument(
         "--balance-series", action="store_true",
         help="write balance-series.jsonl: surface-pressure tendency statistics at every macro "
