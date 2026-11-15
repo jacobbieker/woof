@@ -860,9 +860,12 @@ class TrackWriter:
         if self.surface and not self.position_only:
             self.bridge_missing = missing_tc_bridge()
             if self.bridge_missing:
-                print(f"woof: warning: [relocation.track] {self.stream.path.name}: "
-                      f"{self.bridge_missing}; every row will be skipped and counted "
-                      "on the run receipt", file=sys.stderr)
+                try:
+                    print(f"woof: warning: [relocation.track] {self.stream.path.name}: "
+                          f"{self.bridge_missing}; every row will be skipped and counted "
+                          "on the run receipt", file=sys.stderr)
+                except (OSError, ValueError):
+                    pass                 # a closed stderr must not stop the forecast
 
     def valid_time(self, t: float):
         """Model seconds since the run's start -> the row's clock."""

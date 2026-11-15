@@ -1124,3 +1124,16 @@ def test_missing_tc_bridge_reports_the_lookup_failure(monkeypatch):
     assert "tc_frames_io" in tw.missing_tc_bridge()
     monkeypatch.setattr(mv, "library_path", lambda: "/x/libtc_frames_io.so")
     assert tw.missing_tc_bridge() is None
+
+
+def test_a_closed_stderr_does_not_stop_the_writer(tmp_path, monkeypatch):
+    class Closed:
+        def write(self, _):
+            raise BrokenPipeError(32, "Broken pipe")
+
+        def flush(self):
+            raise BrokenPipeError(32, "Broken pipe")
+    monkeypatch.setattr(tw, "missing_tc_bridge", lambda: "no bridge")
+    monkeypatch.setattr(tw.sys, "stderr", Closed())
+    writer = _writer(tmp_path)
+    assert writer.bridge_missing == "no bridge"
