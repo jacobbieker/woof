@@ -293,7 +293,10 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     lateral melt, rebinning and zapping, with level, CESM or topo ponds),
     and its ridging (both participation and both redistribution functions,
     the ridging iterations and the cleanup after them), neither of which
-    needs an opt-in;
+    needs an opt-in, and its shortwave without delta-Eddington (the CCSM3
+    shortwave with constant or computed albedos, the coupled shortwave,
+    `column_prep_radiation` and the initial shortwave). Only the computed
+    albedos need the opt-in, for glibc's atan;
   - MALI: the shallow-ice velocity solver, masks and geometry diagnostics,
     thermal initialisation, the thermal solver and basal melt, thickness
     and tracer advection, calving (every option, and front restoration),

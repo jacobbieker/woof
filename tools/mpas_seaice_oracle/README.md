@@ -198,11 +198,14 @@ by `oracle_stage`: `init` (`initialize_coupler_fields`,
 `seaice_column_vertical_thermodynamics`, whose abort status is logged as
 `TOBJ IERR`) or `itd_thermodynamics` (`colpkg_init_thermo` and
 `init_column_itd`, then `column_itd_thermodynamics`, its abort status
-logged the same way) or `ridging` (the same two, then `column_ridging`). The log carries the tracer
+logged the same way) or `ridging` (the same two, then `column_ridging`)
+or `prep_radiation` (`column_prep_radiation`) or `radiation`
+(`colpkg_init_thermo`, then `column_radiation`) or `init_shortwave`
+(`colpkg_init_thermo`, then `seaice_init_column_shortwave`). The log carries the tracer
 object (`TOBJ` lines). The field table is the Registry's
 (`woof/hex/mpas_seaice/data/registry-fields.json`, written by
 `tools/mpas_coupled_options.py --fields-out`), with the fields of packages
-that are off absent (the ITD and ridging stages gate each var by its own packages only,
+that are off absent (the ITD, ridging and radiation stages gate each var by its own packages only,
 as the Registry allocates them: biogeochemistry's `newlyFormedIce` is the
 column package's).
 
@@ -220,5 +223,8 @@ and the GPU port accepts only the counts whose words it reproduces.
 `tests/data/oracles/mpas_seaice_column_itd`; the only libm on their path is
 `colpkg_init_itd`'s tanh. `--cases ridge` writes the ridging cases to
 `tests/data/oracles/mpas_seaice_column_ridge`; their `exp` is glibc 2.44's.
+`--cases radiation` writes the shortwave cases to
+`tests/data/oracles/mpas_seaice_column_radiation`; their `exp`
+(`absorbed_solar`) and `atan` (`compute_albedos`) are glibc 2.44's.
 A case on which v8.4.2 dies with a gfortran runtime error has no outputs,
 and its log records the error's file, line and message (`crash`).
