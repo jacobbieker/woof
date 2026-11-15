@@ -408,7 +408,13 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   repeated step length. On a 4,565-cell variable-resolution mesh, a
   byte-identical adaptive run takes 0.47-0.64x the eager adaptive time and
   0.38-0.47x the fixed-step time (`WOOF_HEX_CUDA_GRAPHS_ADAPTIVE=0` restores
-  the eager path).
+  the eager path). Hex on Metal: the regional garbage-column scrub passes
+  its descriptors by value (`WOOF_HEX_SCRUB_WORDS=0` restores the device
+  table), and a fresh storage's address waits only for its scheduling
+  (`WOOF_METAL_ADDRESS_ASYNC=0` restores the eval). Together they remove
+  about 96 % of the queue drains on that mesh, and the hour takes 0.59x the
+  wall time on edi-vr and 0.64x on a uniform 12 km mesh. Both are
+  byte-identical.
   `WOOF_METAL_GPU_TIMES` times each kernel.
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight

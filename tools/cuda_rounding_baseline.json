@@ -5551,7 +5551,7 @@
    },
    {
     "file": "woof/hex/cuda_solve_region_v841.py",
-    "sha256": "22723f83bb25199c32184803338b378d1dc753c66b0581d0905214e4b3e2f5fd"
+    "sha256": "961b3744dbbdf263949836fd8467d151f6029716371ba874b91a2cec17001046"
    },
    {
     "file": "woof/hex/cuda_transport.py",
@@ -7057,7 +7057,7 @@
    },
    {
     "file": "woof/hex/cuda_solve_region_v841.py",
-    "sha256": "6ced5f964c9cc6914ce5f8330e839d961495760da3428f05f20f22442d68901e"
+    "sha256": "51c313eacc566d4071e1ec0db0d124c3709dda5e38dad078bb3b37597314759c"
    },
    {
     "file": "woof/hex/cuda_transport.py",
