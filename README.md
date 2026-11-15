@@ -279,8 +279,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     elastic subcycles, the pre-subcycle routines, ocean stress,
     incremental-remap advection on planar and spherical meshes (the rotated
     grid, hexagons and quadrilaterals, variable resolution) with its
-    optional conservation and monotonicity checks (one rank), and a forward
-    time step with advection (N steps, bitwise restart);
+    optional conservation and monotonicity checks (one rank), a forward
+    time step with advection (N steps, bitwise restart), and the column
+    package's (colpkg's) initialisation and aggregation (RKIND 8: the
+    tracer object, thickness categories, salinity profiles, initial ice
+    state, coupler fields, aggregate and state update);
   - MALI: the shallow-ice velocity solver, masks and geometry diagnostics,
     thermal initialisation, the thermal solver and basal melt, thickness
     and tracer advection, calving (every option, and front restoration),
@@ -289,7 +292,8 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   Limits: Albany's higher-order solvers are refused by name. The sea-ice
   remap computes its init geometry (frames, moments, MPAS's RBF
   coefficients) itself, and refuses halo exchanges and periodic planar
-  meshes by name. Sea-ice column physics (thermodynamics), ocean KPP and GM/Redi,
+  meshes by name. The sea-ice column physics' time step (thermodynamics, ITD, ridging,
+  shortwave), ocean KPP and GM/Redi,
   and the coupler import and export are not ported. A few RKIND 8 cases need the LGPL libm
   opt-in below. These are ported pieces and steps, not coupled forecasts.
   Plan: [docs/mpas-coupled-roadmap.md](docs/mpas-coupled-roadmap.md).

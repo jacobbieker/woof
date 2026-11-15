@@ -21,8 +21,11 @@
 # routines.  The objects must contain no FMA instruction (checked with objdump
 # when it is present).  expf (RKIND 4) and exp (RKIND 8), which ice_strength
 # calls, are the host glibc's, or tools/oracle_libm's transcriptions of them on
-# a host whose libm is not glibc.  gfortran is the mpas-oracle pixi
-# environment's unless GFORTRAN names one.
+# a host whose libm is not glibc.  The column-package oracles (run_column,
+# run_init_thermo; README.md) are built at RKIND 8 only, in BUILD_DIR/column:
+# the column package is dbl_kind and mpas_seaice_column.F does not compile at
+# RKIND 4; its cos, pow and tanh are the host libm's.  gfortran is the
+# mpas-oracle pixi environment's unless GFORTRAN names one.
 set -euo pipefail
 if [[ $# -ne 2 ]]; then
     echo "usage: build.sh MPAS_SOURCE_ROOT BUILD_DIR" >&2

@@ -129,7 +129,8 @@ def _values(rs, name: str, shp: tuple, dims: dict, stage: str):
     nc = dims["nCells"]
     u = rs.uniform
     if name == "latCell":
-        lat = np.radians(u(-89.0, 89.0, shp))
+        # mostly polar, a temperate cell, and cells exactly on the bounds' degrees
+        lat = np.radians(np.where(u(0.0, 1.0, shp) < 0.5, u(70.5, 89.0, shp), u(-89.0, -60.5, shp)))
         lat[:4] = np.radians([75.0, -65.0, 10.0, 70.0])
         return lat
     if name == "seaSurfaceSalinity":
@@ -137,7 +138,10 @@ def _values(rs, name: str, shp: tuple, dims: dict, stage: str):
         s[2], s[5] = 130.0, 0.0
         return s
     if name == "seaSurfaceTemperature":
-        return u(-2.2, 0.5, shp)
+        # mostly at or below freezing, two warm cells
+        t = u(-2.2, -1.6, shp)
+        t[[4, 8]] = 0.5
+        return t
     if name == "airTemperature":
         t = u(240.0, 280.0, shp)
         t[0] = 278.0
@@ -358,3 +362,7 @@ def thermo_profile_mismatches(want: np.ndarray, n_max: int = THERMO_LAYERS) -> d
         out[n] = word_mismatches(got[off:off + n + 1], want[off:off + n + 1])
         off += n + 1
     return out
+
+
+def load_thermo_profiles(fixture_dir: Path = FIXTURE_DIR) -> np.ndarray:
+    return np.load(fixture_dir / "init-thermo-r8.npy")
