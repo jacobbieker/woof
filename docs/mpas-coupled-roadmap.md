@@ -112,9 +112,17 @@ Ordered by how self-contained each piece is:
    cannot run in v8.4.2 (it reads configs the sea-ice Registry does not declare
    and mesh fields it does not carry), so it is refused by name with that
    reason.
-6. Column physics (`column/`, colpkg): `ice_therm_vertical` (BL99 and mushy
-   thermodynamics), `ice_therm_itd`, `ice_mechred` (ridging), `ice_shortwave`
-   (delta-Eddington), melt ponds, `ice_atmo`. These are double precision.
+6. Column physics (`column/`, colpkg), double precision only
+   (`mpas_seaice_column.F` does not compile at RKIND 4). Ported: the
+   initialisation and aggregation (`woof/hex/mpas_seaice/column_v842.py`,
+   `tests/test_mpas_seaice_column_parity.py`): the tracer object,
+   `colpkg_init_itd`, `colpkg_init_thermo` (graded for 1 to 64 ice layers),
+   `colpkg_init_trcr`, the `cice_default`, `uniform` and `no_ice` initial
+   states, `initialize_coupler_fields`, `seaice_reset_coupler_fluxes`,
+   `colpkg_aggregate` and `seaice_column_update_state`. Still to port:
+   `ice_therm_vertical` (BL99 and mushy thermodynamics), `ice_therm_itd`,
+   `ice_mechred` (ridging), `ice_shortwave` (delta-Eddington), melt ponds,
+   `ice_atmo`, then the column time step.
 7. Biogeochemistry (`ice_zbgc*`, `ice_algae`, `ice_aerosol`). Refused by name
    until ported.
 

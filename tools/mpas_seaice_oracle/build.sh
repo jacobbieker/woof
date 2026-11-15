@@ -21,8 +21,11 @@
 # routines.  The objects must contain no FMA instruction (checked with objdump
 # when it is present).  expf (RKIND 4) and exp (RKIND 8), which ice_strength
 # calls, are the host glibc's, or tools/oracle_libm's transcriptions of them on
-# a host whose libm is not glibc.  gfortran is the mpas-oracle pixi
-# environment's unless GFORTRAN names one.
+# a host whose libm is not glibc.  The column-package oracles (run_column,
+# run_init_thermo; README.md) are built at RKIND 8 only, in BUILD_DIR/column:
+# the column package is dbl_kind and mpas_seaice_column.F does not compile at
+# RKIND 4; its cos, pow and tanh are the host libm's.  gfortran is the
+# mpas-oracle pixi environment's unless GFORTRAN names one.
 set -euo pipefail
 if [[ $# -ne 2 ]]; then
     echo "usage: build.sh MPAS_SOURCE_ROOT BUILD_DIR" >&2
@@ -201,14 +204,81 @@ for precision in r4 r8; do
             ../remap_standins.o rbf_cut.o ../seaice_diagnostics_cut.o ../oracle_stream.o ../stubs.o \
             ../mpas_kind_types.o ) )
 done
+# The column oracle, at RKIND 8 only: the column package is dbl_kind and
+# mpas_seaice_column.F hands it RKIND arrays, so the wrappers do not compile at
+# RKIND 4 (REAL(4) actual arguments to REAL(8) dummies).  The column package
+# (column/*.F90, the stand-alone build's cice constants, as column/Makefile
+# copies them) and mpas_seaice_column.F are compiled verbatim, the latter with
+# -Dprivate=public (a visibility change only: run_column reads the tracer
+# object and calls the init wrappers); seaice_init's state routines are cut
+# verbatim out of mpas_seaice_initialize.F (initialize_cut_head.F90 and
+# initialize_cut_tail.F90 hold the module head and stand-ins that stop by name
+# for the initial conditions this oracle does not run), the coupler-flux reset
+# out of mpas_seaice_forcing.F.  Built on the shared framework stand-ins in a
+# directory of its own.  tanh, pow and cos (colpkg_init_itd,
+# colpkg_init_thermo) are the host glibc's.
+rm -rf "${build_dir}/column" && mkdir -p "${build_dir}/column" && cd "${build_dir}/column"
+flags=(-c -cpp -O0 -ffp-contract=off -ffree-form -ffree-line-length-none)
+column="${seaice}/column"
+cut() {  # cut FILE ROUTINE...: the routines, verbatim
+    local file=$1; shift
+    for routine in "$@"; do
+        awk -v r="${routine}" '$0 ~ "^ *subroutine +" r "\\(" {on=1} on {print} on && $0 ~ "^ *end subroutine +" r "([^a-zA-Z_0-9]|$)" {on=0}' "${file}"
+    done
+}
+"${fc[@]}" "${flags[@]}" "${source_root}/src/framework/mpas_kind_types.F"
+"${fc[@]}" "${flags[@]}" "${script_dir}/../mpas_ocean_oracle/stubs.F90"
+"${fc[@]}" "${flags[@]}" "${script_dir}/../mpas_ocean_oracle/oracle_stream.F90"
+"${fc[@]}" "${flags[@]}" "${column}/ice_kinds_mod.F90"
+"${fc[@]}" "${flags[@]}" "${column}/ice_warnings.F90"
+"${fc[@]}" "${flags[@]}" "${column}/constants/cice/ice_constants_colpkg.F90"
+for module in ice_colpkg_shared ice_therm_shared ice_orbital ice_mushy_physics ice_colpkg_tracers ice_zbgc_shared \
+              ice_therm_mushy ice_atmo ice_age ice_firstyear ice_flux_colpkg ice_meltpond_cesm ice_meltpond_lvl \
+              ice_meltpond_topo ice_therm_bl99 ice_therm_0layer ice_therm_vertical ice_itd ice_aerosol ice_brine \
+              ice_zsalinity ice_zbgc ice_therm_itd ice_algae ice_shortwave ice_mechred ice_colpkg; do
+    "${fc[@]}" "${flags[@]}" "${column}/${module}.F90"
+done
+"${fc[@]}" "${flags[@]}" "${seaice}/shared/mpas_seaice_constants.F"
+"${fc[@]}" "${flags[@]}" "${script_dir}/remap_standins.F90"
+"${fc[@]}" "${flags[@]}" -Dprivate=public "${seaice}/shared/mpas_seaice_column.F"
+{ cat "${script_dir}/initialize_cut_head.F90"
+  cut "${seaice}/shared/mpas_seaice_initialize.F" init_ice_state init_ice_state_uniform_ice init_ice_cice_default \
+      initial_category_areas_and_volumes init_ice_velocity_uniform initialize_coupler_fields
+  cat "${script_dir}/initialize_cut_tail.F90"; } > seaice_initialize_cut.F
+"${fc[@]}" "${flags[@]}" seaice_initialize_cut.F
+{ printf 'module seaice_forcing\n  use mpas_derived_types\n  use mpas_pool_routines\n  implicit none\n'
+  printf '  private\n  public :: seaice_reset_coupler_fluxes\ncontains\n'
+  cut "${seaice}/shared/mpas_seaice_forcing.F" seaice_reset_coupler_fluxes reset_atmospheric_coupler_fluxes \
+      reset_ocean_coupler_fluxes
+  printf 'end module seaice_forcing\n'; } > seaice_forcing_cut.F
+"${fc[@]}" "${flags[@]}" seaice_forcing_cut.F
+"${fc[@]}" "${flags[@]}" "${script_dir}/run_column.F90"
+"${fc[@]}" "${flags[@]}" "${script_dir}/run_init_thermo.F90"
+column_libm=()
+while read -r object; do column_libm+=("${object}"); done \
+    < <(bash "${script_dir}/../oracle_libm/build_host_libm.sh" 2> libm.txt)
+if command -v objdump >/dev/null; then
+    if objdump -d ice_*.o mpas_seaice_*.o seaice_*.o | grep -Eq '\bv?fn?m(add|sub)([0-9]|[[:space:]]|$)'; then
+        echo "a column oracle object contains an FMA instruction; refusing" >&2
+        exit 4
+    fi
+fi
+"${fc[@]}" -o "${build_dir}/run_column_r8" run_column.o seaice_forcing_cut.o seaice_initialize_cut.o \
+    mpas_seaice_column.o remap_standins.o mpas_seaice_constants.o ice_*.o oracle_stream.o stubs.o \
+    mpas_kind_types.o ${column_libm[@]+"${column_libm[@]}"}
+"${fc[@]}" -o "${build_dir}/run_init_thermo_r8" run_init_thermo.o ice_*.o \
+    ${column_libm[@]+"${column_libm[@]}"}
+cd "${build_dir}"
 {
     echo "gfortran: $("${fc[@]}" --version | head -1)"
     echo "flags: -O0 -ffp-contract=off -cpp -ffree-form -ffree-line-length-none; r4 adds -DSINGLE_PRECISION;"
-    echo "       mpas_seaice_velocity_solver.F adds -Dprivate=public"
+    echo "       mpas_seaice_velocity_solver.F adds -Dprivate=public; the column oracle (RKIND 8 only)"
+    echo "       builds mpas_seaice_column.F with -Dprivate=public"
     echo "host: $(uname -srm); libm: $(ldd --version 2>/dev/null | head -1)"
     echo "expf/exp: $(sed 's/^libm: //' "${build_dir}/r8/libm.txt")"
     echo "fma: $(grep -m1 -ow fma /proc/cpuinfo 2>/dev/null || echo absent)"
 } > "${build_dir}/TOOLCHAIN.txt"
 echo "built ${build_dir}/run_oracle_r{4,8} ${build_dir}/run_subcycle_r{4,8} ${build_dir}/run_presubcycle_r{4,8}" \
      "${build_dir}/run_seaice_step_r{4,8} ${build_dir}/run_incremental_remap_r{4,8}" \
-     "${build_dir}/run_incremental_remap_init_r{4,8}"
+     "${build_dir}/run_incremental_remap_init_r{4,8}" "${build_dir}/run_column_r8" \
+     "${build_dir}/run_init_thermo_r8"
