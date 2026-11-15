@@ -461,7 +461,7 @@ def _admit_reach(cp, required: int) -> None:
     if required > free:
         raise HexObsNudgingRefusal(
             "HEX_OBS_NUDGING_MEMORY",
-            f"the report reach lists need {required} bytes and the device has {free} free; "
+            f"the report reach lists and the forcing arrays need {required} bytes and the device has {free} free; "
             "lower obs_rinxy or max_obs, or thin the reports")
 
 
@@ -575,7 +575,10 @@ class HexObsNudging:
         starts = np.flatnonzero(rows["lev"][select] == 1) if self.count else np.zeros(0, np.int64)
         reach_m = self.cfg.obs_rinxy * 1000.0 * max(self.cfg.obs_sfcfacr, RINFMX, RINFMN)
         start, report, rsq = locator.reach(lat[select][starts], lon[select][starts], reach_m)
-        _admit_reach(cp, 8 * int(report.size) + 4 * (self.nc + 1))
+        # The fixed forcing storage (savwt, tendencies, work and ambient copies) is allocated after placement,
+        # so it is reserved here beside the reach lists.
+        _admit_reach(cp, 8 * int(report.size) + 4 * (self.nc + 1)
+                     + device_bytes(self.nc, self.nz, max_obs=0, scalars=self.index_qv + 1))
         padded_start = np.full(self.nc + 1, start[-1], dtype=np.int32)
         padded_start[:start.size] = start
         self.reach_start = cp.asarray(padded_start)
