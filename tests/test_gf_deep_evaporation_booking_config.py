@@ -121,3 +121,7 @@ def test_experiment_shared_value_reaches_only_grell_freitas_domains(tmp_path):
     assert _tree(tmp_path, root="cu_physics = 3\n" + on) == [(3, True), (0, False)]
     with pytest.raises(ValueError, match="cu_physics = 0"):
         _tree(tmp_path, shared=on)
+    # A Grell-family tree without a Grell-Freitas domain (Grell 3D only)
+    # has no consumer, so the shared value is refused rather than dropped.
+    with pytest.raises(ValueError, match="cu_physics = 5"):
+        _tree(tmp_path, shared=on, root="cu_physics = 5\n")

@@ -4358,6 +4358,14 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
                     shared.get("cu_physics", RunConfig.cu_physics)))
         in GRELL_FAMILY_CU_PHYSICS
         for dom in domain_tables)
+    # The GF deep evaporation booking is read only by Grell-Freitas
+    # (cu_physics = 3), so its shared value needs a GF domain to reach.
+    tree_runs_gf = any(
+        physics_mode.settings.get(
+            "cu_physics",
+            dom.get("cu_physics",
+                    shared.get("cu_physics", RunConfig.cu_physics))) == 3
+        for dom in domain_tables)
     # And for the SAS-family keys (nsas_dx_factor, sas_pgcon), read only
     # where cu_physics is a SAS scheme: a [shared] value reaches the SAS
     # domains and leaves the others on the Registry defaults.
@@ -4942,7 +4950,7 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
             for key, default in GRELL_FAMILY_DEFAULTS.items():
                 if key not in dom:
                     kw[key] = default
-        if (tree_runs_grell and kw.get("cu_physics", RunConfig.cu_physics) != 3
+        if (tree_runs_gf and kw.get("cu_physics", RunConfig.cu_physics) != 3
                 and "gf_deep_rain_evaporation_booking" not in dom):
             kw["gf_deep_rain_evaporation_booking"] = False
         # G3-only shared controls reach only G3 domains. Explicit domain
