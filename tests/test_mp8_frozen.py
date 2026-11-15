@@ -471,8 +471,16 @@ FROZEN_MODULE_DIGESTS = {
         # 2.9.11 assembled-legacy replay (base 2.9.10 b8165c59fe vs f5e393fb8c, RTX 5070 Ti) reproduces all
         # 132 published acoustic arrays / 305,632 words and the coordinate and driver families with 0
         # differing words on the default route; strict words are the row's own CONUS receipts.
-        '14f8d637ecfa54b7b8c19d80fc2bbf5ad5566f6fdc57b9671d0cfa8566f4331b',
-        '5c7205005dfa7457f8e27bc1f636a751a297f78710b03bfd5920256de3d2d57c'),
+        # Re-pinned for advance_w_phi_msf_kpar, the level-parallel w''-phi''
+        # solve (opt-in, WOOF_ACOUSTIC_KPAR=1): a new entry after the column
+        # kernel inside a `#if !(strict selectors)` guard; the column kernel
+        # and every other entry are untouched text.  Its words equal the
+        # column kernel's generic build's (tests/test_acoustic_kpar.py, CUDA
+        # and Metal); the shape-specialized CUDA column build's words differ
+        # from that generic build's by NVRTC's contraction on the folded loops
+        # (PR #475).  Previously 14f8d637/5c720500.
+        '97a7e1646a217ad7e19c17f52a70e7d6c7cb1837b557e1ab6168084932dc3876',
+        'cfd6ba49dee0bce96b7cd472eafdd53d5c41e18e57dc04beefb92802d20dd4c3'),
     # Re-pinned for the WOOF 1.0.0 text scrub: comments only (punctuation, host
     # labels), proven equal with comments stripped; the preprocessor drops
     # comments, so the compiled binary does not move.

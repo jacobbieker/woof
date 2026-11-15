@@ -24,7 +24,9 @@ with Dataset(src) as ds:
 zero=cp.zeros(n,cp.float32);one=cp.ones(n,cp.float32)
 vzero=cp.zeros_like(qv);out=cp.empty((6,n),cp.float32)
 k=get_kernel('farms','farms_column')
-args=(np.int32(n),np.int32(nz-1),np.int32(0),np.int32(0),np.int32(0),np.float32(24),p,rho,dz,alb,zero,zero,zero,zero,cz,qv,qi,qs,qc,vzero,vzero,vzero,cf,out)
+# the fused options off: packed radii, the cloud fraction read from cf, no MYNN merge, no published fraction
+args=(np.int32(n),np.int32(nz-1),np.int32(0),np.int32(0),np.int32(0),np.float32(24),p,rho,dz,alb,zero,zero,zero,zero,cz,qv,qi,qs,qc,vzero,vzero,vzero,cf,*(out[a] for a in range(6)),
+ np.float32(1),np.int32(nz),np.int32(0),np.int32(0),np.int32(0),np.int32(0),np.int32(0),qv,qv,np.int32(0),np.int32(0),qv,qv,qv,np.int32(0),out[0])
 interp=get_kernel('swint','swint_interp');io=[cp.empty_like(zero) for _ in range(5)]
 def timing(fn):
     for _ in range(3):fn()

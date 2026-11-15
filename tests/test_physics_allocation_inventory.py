@@ -498,6 +498,9 @@ _PHYSICS_ALLOCATION_INVENTORY = {
         # Bound: (ny, nx + 1), (ny + 1, nx) and (ny, nx) float32 per such
         # call, freed on return.
         'launch_diff6': 3,
+        # diff6_multi (#441): the unit map-factor planes a caller without
+        # map factors takes, three ones() per launch at most.
+        'launch_diff6_multi': 3,
         # The NOAA WRFV3.9 fork's edge-to-edge sixth-order filter
         # (75c95b9dd, diff_6th_form = "noaa_wrf39", specified or nested
         # domains).  NOT opt-in: request-defaults.v1.toml makes it the
@@ -2087,7 +2090,10 @@ _PHYSICS_ALLOCATION_INVENTORY['woof/core/dfi.py'] = {'__init__': 9}
 _PHYSICS_ALLOCATION_INVENTORY['woof/core/dfi_model.py'] = {'__init__': 6}
 # FARMS: six outputs per column plus shared zero profiles/surface defaults;
 # preflight's 12 profile and 16 surface envelope includes their copies.
-_PHYSICS_ALLOCATION_INVENTORY['woof/core/farms.py'] = {'farms_surface_columns': 1, 'every_step': 4}
+# The fused step (_every_step_fused) allocates nothing per step: its
+# constant aerosol surfaces are built once per driver (_aerosol_surface).
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/farms.py'] = {'farms_surface_columns': 1, 'every_step': 4,
+                                                      '_aerosol_surface': 2}
 # G3 persistent diagnostics use the named cumulus_state_layout shapes;
 # all other GF buffers retain the measured column-workspace owner.
 _PHYSICS_ALLOCATION_INVENTORY['woof/core/gf.py'] = {'__call__': 23, 'held_lane': 1, 'gd_launch': 4}

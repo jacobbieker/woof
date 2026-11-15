@@ -2553,7 +2553,7 @@
    },
    {
     "file": "woof/core/kernels/acoustic.cu",
-    "sha256": "14f8d637ecfa54b7b8c19d80fc2bbf5ad5566f6fdc57b9671d0cfa8566f4331b"
+    "sha256": "97a7e1646a217ad7e19c17f52a70e7d6c7cb1837b557e1ab6168084932dc3876"
    },
    {
     "file": "woof/core/kernels/advection.cu",
@@ -2881,7 +2881,7 @@
    },
    {
     "file": "woof/core/kernels/farms.cu",
-    "sha256": "153023d0a11f2c128e058ce0e3d63be9ffb5e8fd12862bc2b7c35bafaf5bff11"
+    "sha256": "60c8c1af663db4c395d25bbf00910a881fbdc659a1c21c9e2c7d8ddc603dea38"
    },
    {
     "file": "woof/core/kernels/farms_wrf471.cu",
@@ -5551,7 +5551,7 @@
    },
    {
     "file": "woof/hex/cuda_solve_region_v841.py",
-    "sha256": "22723f83bb25199c32184803338b378d1dc753c66b0581d0905214e4b3e2f5fd"
+    "sha256": "961b3744dbbdf263949836fd8467d151f6029716371ba874b91a2cec17001046"
    },
    {
     "file": "woof/hex/cuda_transport.py",
@@ -7057,7 +7057,7 @@
    },
    {
     "file": "woof/hex/cuda_solve_region_v841.py",
-    "sha256": "6ced5f964c9cc6914ce5f8330e839d961495760da3428f05f20f22442d68901e"
+    "sha256": "51c313eacc566d4071e1ec0db0d124c3709dda5e38dad078bb3b37597314759c"
    },
    {
     "file": "woof/hex/cuda_transport.py",
@@ -9831,15 +9831,15 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "4eb213df1ca30792f12883ab229a606fb3614e1f9c61150ba6832fe0b23eecb0",
+    "sha256": "fc8635a507286ed26280af48a9b52aada17511faa23a7350094a2d07f13efd16",
     "sites": {
-     "100": 157
+     "100": 187
     }
    },
    "native_differences": {
-    "sha256": "8d9490a84ff48fc49b5806d777bf6c4f7d63f403d6c5a51f673d6d750ea700b8",
+    "sha256": "dd96a3dfd95ffd23192dba3d787bad2af3bf8d713943cc87bcc7bfc96305e562",
     "sites": {
-     "100": 53
+     "100": 59
     }
    },
    "native_errors": {},
@@ -9859,7 +9859,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "5c7205005dfa7457f8e27bc1f636a751a297f78710b03bfd5920256de3d2d57c"
+   "source_sha256": "cfd6ba49dee0bce96b7cd472eafdd53d5c41e18e57dc04beefb92802d20dd4c3"
   },
   "kernels:advection": {
    "assessment": "static_diagnostic_only",
@@ -12955,15 +12955,15 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "8d976f13ee4bbf0186168fa111f4fac450e14840efd4e0f5144c4b02cc758f5f",
+    "sha256": "0ceea94a5c986955f7b768c5263bfaed506df210e914902b6bf6a86d5c60683b",
     "sites": {
-     "100": 176
+     "100": 197
     }
    },
    "native_differences": {
-    "sha256": "28883e0f08d58569c9cd653fce4cf8268bc868948461c54b60a6f16bb77351a5",
+    "sha256": "6e8a0829765a3eca1bbe8d807e47fe93d9e7f64e7a5301116cf38838b1a06309",
     "sites": {
-     "100": 34
+     "100": 37
     }
    },
    "native_errors": {},
@@ -12983,7 +12983,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "9c06f39ea25d8c545b074becc20cca4adb3a5c671a240aea676f9fe2391b49c4"
+   "source_sha256": "aae02b4292b7fe94fead28f012062be87202384f6dcce998cd18e0138b73119d"
   },
   "kernels:farms_wrf471": {
    "assessment": "static_diagnostic_only",
