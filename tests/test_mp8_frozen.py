@@ -926,9 +926,11 @@ FROZEN_MODULE_DIGESTS = {
         # both backends and modes; wrfout byte-identical on the LES and 3 km
         # cases).  The seven existing entries are untouched text; the audit's
         # PTX signatures stay identical across sm100/sm120.
+        # Re-read for the 32-bit cell index and the write-if-changed store
+        # (integer and store logic only; the audit record was re-taken).
         # Previously b35120f7/1730a720.
-        '7d05819c39a4936b4771cb479926ec261fe7039303e59c1380acf5b4d4fce03a',
-        '84515bc54f0bf9888908e579e3712540dabf703649df2a9b331b29d73cc738cb'),
+        'a5bc696d4f3e0ce4e04608bac1b956fd8c80fdfaa869082d70da1d7b7f7d213d',
+        'b83b8ec8b0ab60b5f7863a391d5b7cb6099302878bd4460ff164c2b5c758e82a'),
     'morrison': (
         # Re-pinned by the cat6 fix, 2026-11-02: 51bb93111ee (export hygiene)
         # rewrote comments only in glibc_flt32.cuh, flt32_expf_fma.cuh, kf.cu,
