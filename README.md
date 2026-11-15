@@ -420,9 +420,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     at the mandatory levels, by latitude band and lead, including the drift
     per 24 h. The sondes are IGRA v2 and WIS2, read from the Source
     Cooperative icechunk stores.
+  - `woof.hex.station_wind_referee` scores the 10 m wind speed against
+    WIS2 land SYNOP reports by latitude band and lead, globally.
   - `woof.hex.qpe_cell_referee` scores 24 h precipitation against Stage-IV,
     averaged onto the model's cells.
-  - Both compare two arms with a case-paired bootstrap
+  - All three compare two arms with a case-paired bootstrap
     ([obs-referee.md](components/hex/docs/obs-referee.md)).
 - **Performance work.** Metal: out-of-line compilation of the largest units,
   compile prefetch and persisted translations, fewer host syncs per step,
