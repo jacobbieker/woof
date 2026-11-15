@@ -228,6 +228,66 @@ pub static FIELD_MAP: &[FieldMapping] = &[
     f("CLDFRA_BL", Some("cldfrac_bl"), Rank::Mass3d, "1", "boundary-layer cloud fraction", FieldSource::History, "mpassit"),
     f("QKE", Some("qke"), Rank::Mass3d, "m2 s-2", "twice the turbulent kinetic energy", FieldSource::History, "mpassit"),
     f("EL_PBL", Some("el_pbl"), Rank::Mass3d, "m", "mixing length", FieldSource::History, "mpassit"),
+    // --- the severe-weather options' diagnostics (woof.hex.mpasdiag) --------
+    // Written by a hex run only when the namelist asks for the option (&diagnostics config_hailcast_opt,
+    // config_lightning_option, config_afwa_*_opt, config_nwp_diagnostics), under WRF 4.7.1's Registry names and
+    // units (the history attribute `wrf_name` each one carries).  THE GAP THIS CLOSES (severe-weather inventory,
+    // 2026-11-14): the run wrote them and the converter mapped none, so `woof hex products` could not draw a
+    // HAILCAST, lightning or AFWA map.  A run without the option carries none of them, and its frames are
+    // unchanged (SEVERE_OPTION rows are never named absent).
+    f("HAILCAST_DIAM_MAX", Some("hailcast_diam_max"), Rank::Surface, "mm", "HAILCAST maximum surviving ice diameter", FieldSource::History, SEVERE_OPTION),
+    f("HAILCAST_DIAM_MEAN", Some("hailcast_diam_mean"), Rank::Surface, "mm", "HAILCAST mean surviving ice diameter", FieldSource::History, SEVERE_OPTION),
+    f("HAILCAST_DIAM_STD", Some("hailcast_diam_std"), Rank::Surface, "mm", "HAILCAST sample diameter standard deviation", FieldSource::History, SEVERE_OPTION),
+    f("HAILCAST_DHAIL1", Some("hailcast_dhail1"), Rank::Surface, "mm", "HAILCAST embryo 1 diameter", FieldSource::History, SEVERE_OPTION),
+    f("HAILCAST_DHAIL2", Some("hailcast_dhail2"), Rank::Surface, "mm", "HAILCAST embryo 2 diameter", FieldSource::History, SEVERE_OPTION),
+    f("HAILCAST_DHAIL3", Some("hailcast_dhail3"), Rank::Surface, "mm", "HAILCAST embryo 3 diameter", FieldSource::History, SEVERE_OPTION),
+    f("HAILCAST_DHAIL4", Some("hailcast_dhail4"), Rank::Surface, "mm", "HAILCAST embryo 4 diameter", FieldSource::History, SEVERE_OPTION),
+    f("HAILCAST_DHAIL5", Some("hailcast_dhail5"), Rank::Surface, "mm", "HAILCAST embryo 5 diameter", FieldSource::History, SEVERE_OPTION),
+    f("HAILCAST_RUNMAX", Some("hailcast_runmax"), Rank::Surface, "mm", "Run maximum HAILCAST surviving ice diameter", FieldSource::History, SEVERE_OPTION),
+    f("IC_FLASHCOUNT", Some("ic_flashcount"), Rank::Surface, "#", "Accumulated IC flash count", FieldSource::History, SEVERE_OPTION),
+    f("CG_FLASHCOUNT", Some("cg_flashcount"), Rank::Surface, "#", "Accumulated CG flash count", FieldSource::History, SEVERE_OPTION),
+    f("IC_FLASHRATE", Some("ic_flashrate"), Rank::Surface, "#/s", "IC flash rate", FieldSource::History, SEVERE_OPTION),
+    f("CG_FLASHRATE", Some("cg_flashrate"), Rank::Surface, "#/s", "CG flash rate", FieldSource::History, SEVERE_OPTION),
+    f("LPI", Some("lpi"), Rank::Surface, "m^2 s-2", "Lightning Potential Index", FieldSource::History, SEVERE_OPTION),
+    f("AFWA_MSLP", Some("afwa_mslp"), Rank::Surface, "Pa", "AFWA Diagnostic: Mean sea level pressure", FieldSource::History, SEVERE_OPTION),
+    f("AFWA_PWAT", Some("afwa_pwat"), Rank::Surface, "kg m-2", "AFWA Diagnostic: Precipitable Water", FieldSource::History, SEVERE_OPTION),
+    f("AFWA_TOTPRECIP", Some("afwa_totprecip"), Rank::Surface, "mm", "AFWA Diagnostic: Total simulation precip", FieldSource::History, SEVERE_OPTION),
+    f("AFWA_HEATIDX", Some("afwa_heatidx"), Rank::Surface, "K", "AFWA Diagnostic: Heat index", FieldSource::History, SEVERE_OPTION),
+    f("AFWA_WCHILL", Some("afwa_wchill"), Rank::Surface, "K", "AFWA Diagnostic: Wind chill", FieldSource::History, SEVERE_OPTION),
+    f("AFWA_FITS", Some("afwa_fits"), Rank::Surface, "K", "AFWA Diagnostic: Fighter Index of Thermal Stress", FieldSource::History, SEVERE_OPTION),
+    f("AFWA_RAIN", Some("afwa_rain"), Rank::Surface, "mm", "AFWA Diagnostic: Rain fall", FieldSource::History, SEVERE_OPTION),
+    f("AFWA_SNOW", Some("afwa_snow"), Rank::Surface, "mm", "AFWA Diagnostic: Liq Equiv Snow fall", FieldSource::History, SEVERE_OPTION),
+    f("AFWA_ICE", Some("afwa_ice"), Rank::Surface, "mm", "AFWA Diagnostic: Ice fall", FieldSource::History, SEVERE_OPTION),
+    f("AFWA_FZRA", Some("afwa_fzra"), Rank::Surface, "mm", "AFWA Diagnostic: Freezing rain fall", FieldSource::History, SEVERE_OPTION),
+    f("AFWA_SNOWFALL", Some("afwa_snowfall"), Rank::Surface, "mm", "AFWA Diagnostic: Snow fall", FieldSource::History, SEVERE_OPTION),
+    f("VIL", Some("afwa_vil"), Rank::Surface, "kg m-2", "Vertically integrated liquid water", FieldSource::History, SEVERE_OPTION),
+    f("RADARVIL", Some("afwa_radarvil"), Rank::Surface, "kg m-2", "Vertically integrated liquid water from Ze", FieldSource::History, SEVERE_OPTION),
+    f("REFD", Some("afwa_refd"), Rank::Surface, "dbZ", "Derived radar reflectivity", FieldSource::History, SEVERE_OPTION),
+    f("REFD_COM", Some("afwa_refd_com"), Rank::Surface, "dbZ", "Derived composite radar reflectivity", FieldSource::History, SEVERE_OPTION),
+    f("ECHOTOP", Some("afwa_echotop"), Rank::Surface, "m", "Echo top height from Ze", FieldSource::History, SEVERE_OPTION),
+    f("AFWA_VIS", Some("afwa_vis"), Rank::Surface, "m", "AFWA Diagnostic: Visibility", FieldSource::History, SEVERE_OPTION),
+    f("AFWA_VIS_DUST", Some("afwa_vis_dust"), Rank::Surface, "m", "AFWA Diagnostic: Visibility due to dust", FieldSource::History, SEVERE_OPTION),
+    f("AFWA_VIS_ALPHA", Some("afwa_vis_alpha"), Rank::Surface, "dimensionless", "AFWA Diagnostic: Vis alpha Weibull term", FieldSource::History, SEVERE_OPTION),
+    f("AFWA_CAPE", Some("afwa_cape"), Rank::Surface, "J kg-1", "AFWA Diagnostic: Convective Avail Pot Energy", FieldSource::History, SEVERE_OPTION),
+    f("AFWA_CIN", Some("afwa_cin"), Rank::Surface, "J kg-1", "AFWA Diagnostic: Convective Inhibition", FieldSource::History, SEVERE_OPTION),
+    f("AFWA_ZLFC", Some("afwa_zlfc"), Rank::Surface, "m", "AFWA Diagnostic: Level of Free Convection", FieldSource::History, SEVERE_OPTION),
+    f("AFWA_PLFC", Some("afwa_plfc"), Rank::Surface, "Pa", "AFWA Diagnostic: Pressure of LFC", FieldSource::History, SEVERE_OPTION),
+    f("AFWA_LIDX", Some("afwa_lidx"), Rank::Surface, "K", "AFWA Diagnostic: Surface Lifted Index", FieldSource::History, SEVERE_OPTION),
+    f("AFWA_CAPE_MU", Some("afwa_cape_mu"), Rank::Surface, "J kg-1", "AFWA Diagnostic: Most unstable CAPE 0-180mb", FieldSource::History, SEVERE_OPTION),
+    f("AFWA_CIN_MU", Some("afwa_cin_mu"), Rank::Surface, "J kg-1", "AFWA Diagnostic: Most unstable CIN 0-180mb", FieldSource::History, SEVERE_OPTION),
+    f("AFWA_HAIL", Some("afwa_hail"), Rank::Surface, "mm", "AFWA Diagnostic: Hail Diameter (Weibull)", FieldSource::History, SEVERE_OPTION),
+    f("AFWA_LLWS", Some("afwa_llws"), Rank::Surface, "m s-1", "AFWA Diagnostic: 0-2000 ft wind shear", FieldSource::History, SEVERE_OPTION),
+    f("AFWA_TORNADO", Some("afwa_tornado"), Rank::Surface, "m s-1", "AFWA Diagnostic: Tornado wind speed (Weibull)", FieldSource::History, SEVERE_OPTION),
+    f("TCOLI_MAX", Some("tcoli_max"), Rank::Surface, "kg m-2", "Maximum column integrated ice", FieldSource::History, SEVERE_OPTION),
+    f("GRPL_FLX_MAX", Some("grpl_flx_max"), Rank::Surface, "g m-2 s-1", "Maximum graupel flux", FieldSource::History, SEVERE_OPTION),
+    // The interval extremes hex's nwp_diagnostics and afwa_severe_opt share, under WRF's Registry spellings (the
+    // mpassit rows above read MPAS-A's own names for the same WRF variables; field_set_allows keeps one row per
+    // WRF name in every set).
+    f("WSPD10MAX", Some("wspd10max"), Rank::Surface, "m s-1", "Maximum 10 m wind speed in history interval", FieldSource::History, SEVERE_OPTION),
+    f("W_UP_MAX", Some("w_up_max"), Rank::Surface, "m s-1", "Maximum updraft velocity below 400 hPa", FieldSource::History, SEVERE_OPTION),
+    f("W_DN_MAX", Some("w_dn_max"), Rank::Surface, "m s-1", "Minimum downdraft velocity below 400 hPa", FieldSource::History, SEVERE_OPTION),
+    f("HAIL_MAXK1", Some("hail_maxk1"), Rank::Surface, "m", "Maximum PSD hail diameter at lowest level", FieldSource::History, SEVERE_OPTION),
+    f("HAIL_MAX2D", Some("hail_max2d"), Rank::Surface, "m", "Maximum PSD hail diameter in column", FieldSource::History, SEVERE_OPTION),
 ];
 
 /// WRF variables some catalogue product wants that the port's history stream
@@ -274,15 +334,34 @@ impl RemapClass {
 pub static CONSERVATIVE_FIELDS: &[&str] = &[
     "RAINC", "RAINNC", "SNOWNC", "GRAUPELNC", "ACSNOW", "ACGRAUP", "SFROFF", "ACFRAIN", "PREC_ACC_C",
     "PREC_ACC_NC", "SNOW_ACC_NC", "SNOWFALLAC", "RAINNCV", "SNOWNCV", "GRAUPELNCV",
+    "AFWA_TOTPRECIP", "AFWA_RAIN", "AFWA_SNOW", "AFWA_ICE", "AFWA_FZRA", "AFWA_SNOWFALL",
 ];
 
 /// Categories have no average; soil arrays carry placeholders over water
-/// that a blend would smear into the coast.
-pub static NEAREST_FIELDS: &[&str] = &["LANDMASK", "LU_INDEX", "TSLB", "SMOIS", "XLAND", "ISLTYP", "IVGTYP"];
+/// that a blend would smear into the coast.  WRF's flash counts and rates are
+/// per model column (module_lightning_driver), so a pixel takes its column's
+/// own value: a blend would draw fractional flashes no column produced.
+pub static NEAREST_FIELDS: &[&str] = &[
+    "LANDMASK", "LU_INDEX", "TSLB", "SMOIS", "XLAND", "ISLTYP", "IVGTYP",
+    "IC_FLASHCOUNT", "CG_FLASHCOUNT", "IC_FLASHRATE", "CG_FLASHRATE",
+];
 
 /// The note that marks a row only the `mpassit` field set emits, so the
 /// `full` and `surface` render frames keep exactly the fields they had.
 pub const MPASSIT_ONLY: &str = "mpassit";
+
+/// The note that marks a severe-weather option's diagnostic: a hex run
+/// writes it only when its namelist turns the option on, so a frame without
+/// it is complete, and the row is never named in `MPAS_ABSENT_WRF_FIELDS`.
+/// It rides every field set (a 2-D map deliverable, like updraft helicity)
+/// except where an `mpassit` row already spells the same WRF variable.
+pub const SEVERE_OPTION: &str = "severe-option";
+
+/// Whether a missing carrier of this row is simply an option the run did
+/// not turn on, rather than an output-stream gap to record.
+pub fn is_optional(mapping: &FieldMapping) -> bool {
+    mapping.note == SEVERE_OPTION
+}
 
 pub fn remap_class(wrf_name: &str) -> RemapClass {
     if CONSERVATIVE_FIELDS.contains(&wrf_name) {
@@ -307,6 +386,10 @@ pub fn field_set_allows(field_set: &str, mapping: &FieldMapping) -> bool {
     }
     if mapping.note == MPASSIT_ONLY {
         return field_set == "mpassit";
+    }
+    if mapping.note == SEVERE_OPTION {
+        return field_set != "mpassit"
+            || !FIELD_MAP.iter().any(|m| m.note == MPASSIT_ONLY && m.wrf_name == mapping.wrf_name);
     }
     match field_set {
         "full" | "mpassit" => true,
@@ -355,7 +438,8 @@ mod tests {
     fn every_accumulation_is_conservative_and_every_category_nearest() {
         for m in FIELD_MAP {
             let class = remap_class(m.wrf_name);
-            if m.units == "mm" {
+            // (A hail diameter in mm is a state, not an accumulation.)
+            if m.units == "mm" && !m.description.contains("iameter") {
                 assert_eq!(class, RemapClass::Conservative, "{} is an accumulation", m.wrf_name);
             }
             if m.units.is_empty() && m.source != FieldSource::Constant {
@@ -383,6 +467,43 @@ mod tests {
         assert_eq!(refl.source, FieldSource::History);
         assert!(field_set_allows("surface", refl));
         assert!(field_set_allows("full", refl));
+    }
+
+    #[test]
+    fn every_set_writes_one_row_per_wrf_name() {
+        for set in ["full", "surface"] {
+            let mut seen = std::collections::BTreeSet::new();
+            for m in FIELD_MAP.iter().filter(|m| field_set_allows(set, m)) {
+                assert!(seen.insert(m.wrf_name), "{set} plans {} twice", m.wrf_name);
+            }
+        }
+        // (The mpassit set already spells REFD_MAX and OLR twice, MPASSIT's own way; a severe row adds none.)
+        for m in FIELD_MAP.iter().filter(|m| is_optional(m) && field_set_allows("mpassit", m)) {
+            let rows = FIELD_MAP.iter().filter(|o| o.wrf_name == m.wrf_name && field_set_allows("mpassit", o)).count();
+            assert_eq!(rows, 1, "mpassit plans {} twice", m.wrf_name);
+        }
+    }
+
+    #[test]
+    fn severe_option_rows_ride_the_render_sets_and_are_optional() {
+        for name in ["HAILCAST_DIAM_MAX", "HAILCAST_RUNMAX", "IC_FLASHCOUNT", "CG_FLASHRATE", "LPI", "AFWA_HAIL",
+                     "AFWA_TORNADO", "ECHOTOP", "WSPD10MAX", "HAIL_MAXK1"] {
+            let row = FIELD_MAP.iter().find(|m| m.wrf_name == name && m.note == SEVERE_OPTION)
+                .unwrap_or_else(|| panic!("{name} has no severe-option row"));
+            assert!(is_optional(row));
+            assert_eq!(row.rank, Rank::Surface);
+            assert!(field_set_allows("full", row), "full lost {name}");
+            assert!(field_set_allows("surface", row), "surface lost {name}");
+        }
+        // The mpassit set keeps MPAS-A's own spelling of a shared WRF variable.
+        let mpassit = |name: &str| FIELD_MAP.iter().filter(|m| m.wrf_name == name && field_set_allows("mpassit", m))
+            .map(|m| m.mpas_name).collect::<Vec<_>>();
+        assert_eq!(mpassit("WSPD10MAX"), vec![Some("wind_speed_10m_max")]);
+        assert_eq!(mpassit("HAIL_MAXK1"), vec![Some("max_hail_diameter_sfc_acc")]);
+        assert_eq!(mpassit("LPI"), vec![Some("lpi")]);
+        assert_eq!(remap_class("IC_FLASHCOUNT"), RemapClass::Nearest);
+        assert_eq!(remap_class("AFWA_SNOWFALL"), RemapClass::Conservative);
+        assert_eq!(remap_class("AFWA_HAIL"), RemapClass::Linear);
     }
 
     #[test]

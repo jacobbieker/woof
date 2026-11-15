@@ -316,6 +316,13 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     RASM and surface-energy reductions. `afwa_ptype` keeps its intended
     logic rather than WRF's literal operator precedence; the module
     documents the difference;
+  - severe weather on the MPAS v8.4.2 suite route (R2): lightning
+    (`lightning_option = 1, 2, 3`, flash counts, rates and LPI) and HAILCAST.
+    `woof hex products` draws these, the AFWA fields and the PSD hail sizes
+    whenever a run writes them (HAILCAST and PSD hail on the renderer's hail
+    maps; lightning and AFWA as plain field maps with generic colour scales),
+    beside the regional severe set (MLCAPE, SRH, shear, EHI, STP, lightning
+    threat, gust);
   - `aer_opt = 1, 2`, `w_damping`, and grid and spectral analysis nudging;
   - stochastic physics: SPP (`spp_conv`, `spp_pbl`, `spp_lsm`) on the WOOF
     column route, WRF-Solar EPS (`multi_perturb`) on regional meshes, and
