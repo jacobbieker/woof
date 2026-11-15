@@ -1572,8 +1572,11 @@ def _relaxation_multi_rows(state, rows) -> bool:
             return False
         if row.held is not None and not device(row.held):
             return False
-        # The kernel's cell index is 32-bit (lbc_state.cu).
-        if int((row.target if row.target is not None else row.held).size) >= 2**32:
+        # The kernel's cell index is a 32-bit unsigned word and its plane
+        # offset a signed int (lbc_state.cu): a row of 2^32 cells or more,
+        # or a plane of more than 2^31 - 1 cells, takes the per-row path.
+        array = row.target if row.target is not None else row.held
+        if int(array.size) >= 2**32 or int(array.shape[-1]) * int(array.shape[-2]) > 2**31 - 1:
             return False
     arrays = [state.mub2d, state.thb, state.c1h, state.c2h, state.c1f,
               state.c2f, state.msft, state.msfu,
