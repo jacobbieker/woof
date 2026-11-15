@@ -28,6 +28,8 @@ from datetime import datetime, timedelta, timezone
 
 import numpy as np
 
+from woof.hex.sonde_profile_referee import paired_interval
+
 THRESHOLDS_MM = (1.0, 5.0, 10.0, 25.0)
 COVERAGE = 0.7
 VALID = 0.9
@@ -39,21 +41,38 @@ def unit_vectors(lat_deg, lon_deg):
     return np.stack([np.cos(lat) * np.cos(lon), np.cos(lat) * np.sin(lon), np.sin(lat)], axis=-1)
 
 
+# A pixel belongs to a cell only inside that cell's footprint: within
+# FOOTPRINT times the distance to the cell's nearest neighbour. A regular
+# hexagon's circumradius is 1/sqrt(3) = 0.577 of the centre spacing; 0.75
+# leaves room for the irregular cells of a variable-resolution mesh.
+FOOTPRINT = 0.75
+
+
 def assign_pixels(cell_lat, cell_lon, pixel_lat, pixel_lon, usable=None):
-    """Nearest (usable) cell of every pixel; -1 for none."""
+    """Owning (usable) cell of every pixel; -1 for a pixel outside every usable cell's footprint."""
     from scipy.spatial import cKDTree
 
-    cells = np.arange(len(cell_lat)) if usable is None else np.flatnonzero(usable)
-    tree = cKDTree(unit_vectors(np.asarray(cell_lat)[cells], np.asarray(cell_lon)[cells]))
-    _, index = tree.query(unit_vectors(np.ravel(pixel_lat), np.ravel(pixel_lon)))
-    return cells[index]
+    xyz = unit_vectors(cell_lat, cell_lon)
+    cells = np.arange(len(xyz)) if usable is None else np.flatnonzero(usable)
+    pixels = unit_vectors(np.ravel(pixel_lat), np.ravel(pixel_lon))
+    if cells.size == 0:
+        return np.full(len(pixels), -1, dtype=np.int64)
+    if len(xyz) < 2:
+        raise ValueError("a footprint needs at least two model cells")
+    spacing = cKDTree(xyz).query(xyz[cells], k=2)[0][:, 1]
+    distance, index = cKDTree(xyz[cells]).query(pixels)
+    owner = cells[index].astype(np.int64)
+    owner[distance > FOOTPRINT * spacing[index]] = -1
+    return owner
 
 
 def cell_means(assignment, values, valid, ncells):
     """``(mean, scored)`` per cell: the valid-pixel mean, and whether the cell is fully observed."""
     assignment = np.ravel(assignment)
-    valid = np.ravel(valid).astype(bool)
-    values = np.ravel(values).astype(np.float64)
+    inside = assignment >= 0
+    assignment = assignment[inside]
+    valid = np.ravel(valid).astype(bool)[inside]
+    values = np.ravel(values).astype(np.float64)[inside]
     total = np.bincount(assignment, minlength=ncells).astype(np.float64)
     count = np.bincount(assignment[valid], minlength=ncells).astype(np.float64)
     summed = np.bincount(assignment[valid], weights=values[valid], minlength=ncells)
@@ -161,10 +180,22 @@ def score(history_dir, qpe_dir, case, arm, *, hours=24):
     return record
 
 
-def _case_metric(record, stat, leads=None):
-    values = [w.get(stat) for k, w in record["windows"].items() if leads is None or int(k) in leads]
+def _case_metric(record, stat, leads):
+    values = [record["windows"][k].get(stat) for k in leads]
     values = [v for v in values if v is not None]
     return float(np.mean(values)) if values else None
+
+
+def _shared_windows(a, b):
+    """Window keys both arms scored over the same window (same init, hours and end)."""
+    if a["init"] != b["init"] or a["hours"] != b["hours"]:
+        raise ValueError(f"case {a['case']!r}: the arms differ in init or window length "
+                         f"({a['init']}/{a['hours']} h against {b['init']}/{b['hours']} h)")
+    shared = sorted(set(a["windows"]) & set(b["windows"]), key=int)
+    for k in shared:
+        if a["windows"][k].get("end") != b["windows"][k].get("end"):
+            raise ValueError(f"case {a['case']!r}: window {k} ends at different times in the two arms")
+    return shared
 
 
 def compare(arm_a, arm_b, *, replicates=5000, seed=20261115, stats=STATS):
@@ -174,23 +205,20 @@ def compare(arm_a, arm_b, *, replicates=5000, seed=20261115, stats=STATS):
     cases = sorted(set(by_a) & set(by_b))
     if not cases:
         raise ValueError("the two arms share no case")
-    rng = np.random.default_rng(seed)
-    draws = rng.integers(0, len(cases), size=(replicates, len(cases)))
+    shared = {c: _shared_windows(by_a[c], by_b[c]) for c in cases}
     out = {"cases": cases, "replicates": replicates, "seed": seed,
-           "arm_a": sorted({r["arm"] for r in arm_a}), "arm_b": sorted({r["arm"] for r in arm_b}), "stats": {}}
+           "arm_a": sorted({r["arm"] for r in arm_a}), "arm_b": sorted({r["arm"] for r in arm_b}),
+           "windows": shared, "stats": {}}
     for stat in stats:
-        a = np.array([np.nan if (x := _case_metric(by_a[c], stat)) is None else x for c in cases])
-        b = np.array([np.nan if (x := _case_metric(by_b[c], stat)) is None else x for c in cases])
+        a = np.array([np.nan if (x := _case_metric(by_a[c], stat, shared[c])) is None else x for c in cases])
+        b = np.array([np.nan if (x := _case_metric(by_b[c], stat, shared[c])) is None else x for c in cases])
         diff = a - b
-        if not np.isfinite(diff).any():
+        pair = np.isfinite(diff)
+        if not pair.any():
             continue
-        boot = np.nanmean(diff[draws], axis=1)
-        boot = boot[np.isfinite(boot)]
-        lo, hi = (np.percentile(boot, [2.5, 97.5]) if len(cases) >= 2 and boot.size else (np.nan, np.nan))
         out["stats"][stat] = {
-            "a": float(np.nanmean(a)), "b": float(np.nanmean(b)), "mean_diff": float(np.nanmean(diff)),
-            "ci95": [float(lo), float(hi)] if np.isfinite([lo, hi]).all() else None,
-            "cases": int(np.isfinite(diff).sum()),
+            "a": float(a[pair].mean()), "b": float(b[pair].mean()),
+            **paired_interval(diff, replicates=replicates, seed=seed),
             "per_case": [None if not np.isfinite(d) else float(d) for d in diff]}
     out["note"] = ("fewer than four independent cases: the interval is exploratory"
                    if len(cases) < 4 else "cases are the resampled blocks")

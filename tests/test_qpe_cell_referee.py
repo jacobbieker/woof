@@ -36,13 +36,14 @@ def test_assign_pixels_honours_the_usable_mask():
     pytest.importorskip("scipy")
     lat = np.array([0.0, 0.0, 10.0])
     lon = np.array([0.0, 1.0, 0.0])
-    assert list(q.assign_pixels(lat, lon, [0.1], [0.9])) == [1]
-    assert list(q.assign_pixels(lat, lon, [0.1], [0.9], np.array([True, False, True]))) == [0]
+    assert list(q.assign_pixels(lat, lon, [0.1], [0.6])) == [1]
+    assert list(q.assign_pixels(lat, lon, [0.1], [0.6], np.array([True, False, True]))) == [0]
 
 
 def test_compare_is_case_paired_and_seeded():
     def rec(case, arm, bias):
-        return {"case": case, "arm": arm, "windows": {"24": {"bias": bias, "rmse": abs(bias) + 1}}}
+        return {"case": case, "arm": arm, "init": "2026-11-01T00:00:00+00:00", "hours": 24,
+                "windows": {"24": {"bias": bias, "rmse": abs(bias) + 1, "end": "2026-11-02T00:00:00+00:00"}}}
     a = [rec(f"c{i}", "A", 1.0 + 0.1 * i) for i in range(5)]
     b = [rec(f"c{i}", "B", 0.5) for i in range(5)]
     one = q.compare(a, b, replicates=500, seed=3, stats=("bias", "rmse"))
@@ -51,6 +52,44 @@ def test_compare_is_case_paired_and_seeded():
     lo, hi = one["stats"]["bias"]["ci95"]
     assert 0.5 < lo < 0.7 < hi < 0.9
     assert q.compare(a[:1], b[:1], replicates=10, stats=("bias",))["stats"]["bias"]["ci95"] is None
+
+
+def test_assign_pixels_rejects_pixels_outside_every_footprint():
+    pytest.importorskip("scipy")
+    lat = np.array([0.0, 0.0, 1.0])
+    lon = np.array([0.0, 1.0, 0.0])
+    # inside cell 1's footprint, then far outside the mesh
+    assert list(q.assign_pixels(lat, lon, [0.1, 40.0], [0.9, 60.0])) == [1, -1]
+    # a pixel beside a masked cell is not handed to a distant usable cell
+    assert list(q.assign_pixels(lat, lon, [0.0], [1.0], np.array([True, False, True]))) == [-1]
+    mean, scored = q.cell_means(np.array([0, 0, -1, -1]), np.array([1.0, 3.0, 50.0, 50.0]),
+                                np.ones(4), 3)
+    assert mean[0] == 2.0 and list(scored) == [True, False, False]
+
+
+def _window_rec(case, arm, windows, init="2026-11-01T00:00:00+00:00", hours=24):
+    return {"case": case, "arm": arm, "init": init, "hours": hours,
+            "windows": {k: dict(v, end=f"lead{k}") for k, v in windows.items()}}
+
+
+def test_compare_averages_only_the_windows_both_arms_scored():
+    a = [_window_rec("c0", "A", {"24": {"bias": 0.0}, "48": {"bias": 10.0}})]
+    b = [_window_rec("c0", "B", {"24": {"bias": 0.0}})]
+    out = q.compare(a, b, replicates=10, stats=("bias",))
+    assert out["windows"] == {"c0": ["24"]}
+    assert out["stats"]["bias"]["mean_diff"] == 0.0
+    with pytest.raises(ValueError, match="init or window length"):
+        q.compare(a, [_window_rec("c0", "B", {"24": {"bias": 0.0}}, hours=6)], stats=("bias",))
+
+
+def test_compare_pairs_finite_cases_for_means_and_intervals():
+    a = [_window_rec("c0", "A", {"24": {"fbi_10": 2.0}}),
+         _window_rec("c1", "A", {"24": {"fbi_10": 10.0}})]
+    b = [_window_rec("c0", "B", {"24": {"fbi_10": 1.0}}),
+         _window_rec("c1", "B", {"24": {"fbi_10": None}})]
+    row = q.compare(a, b, replicates=50, stats=("fbi_10",))["stats"]["fbi_10"]
+    assert (row["a"], row["b"], row["mean_diff"], row["cases"]) == (2.0, 1.0, 1.0, 1)
+    assert row["ci95"] is None and row["exploratory"]
 
 
 def _pack(path, schema, meta, arrays):

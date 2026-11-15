@@ -178,8 +178,10 @@ Two small referees score claims the surface battery cannot see. Both read
 MPAS-layout history (`*history.*.nc`, from woof hex or native MPAS-A), write
 one JSON record per case and arm, and compare two arms with the same
 case-paired block bootstrap: whole cases are resampled with a fixed seed, so
-station, level and cell counts never narrow the interval. With fewer than four
-cases the record says the interval is exploratory.
+station, level and cell counts never narrow the interval. Each statistic is
+resampled over the cases that supply it in both arms; with one such case there
+is no interval, and with fewer than four the record says the interval is
+exploratory.
 
 - `python -m woof.hex.sonde_profile_referee` scores model temperature against
   radiosondes at the sixteen mandatory levels (1000 to 10 hPa). Results are
@@ -204,10 +206,14 @@ cases the record says the interval is exploratory.
 - `python -m woof.hex.qpe_cell_referee` scores 24 h precipitation
   (`rainc + rainnc` differenced between two frames) against the Stage-IV
   packs `rw_stage4` writes (`tools/obs_fetch_stage4.py --accumulations 24h`).
-  - The comparison is made on the model's cells. Each valid 4.8 km pixel
-    goes to its nearest cell, and a cell is scored only when it lies fully
-    inside the observed area (at least 70 % of a full cell's pixel count, at
-    least 90 % of them valid).
+  - The comparison is made on the model's cells. Each 4.8 km pixel goes to
+    its nearest usable cell if it lies inside that cell's footprint (within
+    0.75 of the distance to the cell's nearest neighbour); a pixel outside
+    the mesh, or beside a boundary cell, is dropped. A cell is scored only
+    when it lies fully inside the observed area (at least 70 % of a full
+    cell's pixel count, at least 90 % of them valid).
+  - Two arms are compared over the windows both scored, and they must share
+    the initial time and the window length.
   - Per window it reports the bias, RMSE, model/observed ratio, and the
     frequency bias and equitable threat score at 1, 5, 10 and 25 mm.
 

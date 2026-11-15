@@ -16,6 +16,21 @@ def test_nearest_cells_respects_boundary_mask():
     assert list(r.nearest_cells(xyz, [0.1], [0.9], usable)) == [0]
 
 
+def test_nearest_cells_never_returns_a_masked_cell():
+    # antipode of (0, 0): the masked sentinel used to outscore every usable cell
+    xyz = r.unit_vectors(np.array([0.0, 0.0]), np.array([0.0, 90.0]))
+    assert list(r.nearest_cells(xyz, [0.0], [180.0], np.array([False, True]))) == [1]
+    with pytest.raises(ValueError):
+        r.nearest_cells(xyz, [0.0], [0.0], np.array([False, False]))
+
+
+def test_interval_uses_the_cases_that_supply_the_metric():
+    out = r.paired_interval(np.array([0.4, np.nan, np.nan, np.nan]), replicates=20, seed=1)
+    assert out == {"mean_diff": 0.4, "ci95": None, "cases": 1, "exploratory": True}
+    two = r.paired_interval(np.array([0.0, np.nan, 1.0]), replicates=200, seed=1)
+    assert two["cases"] == 2 and two["ci95"][0] < two["ci95"][1]
+
+
 def test_column_interpolation_is_linear_in_lnp_and_never_extrapolates():
     pressure = np.array([100000.0, 50000.0, 10000.0])
     # theta chosen so that T is 300, 250, 200 K at those pressures

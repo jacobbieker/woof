@@ -70,9 +70,12 @@ def nearest_cells(cell_xyz, lat_deg, lon_deg, usable=None):
     """Index of the nearest usable cell to each point (maximum dot product of unit vectors)."""
     points = unit_vectors(lat_deg, lon_deg)
     out = np.empty(len(points), dtype=np.int64)
-    xyz = cell_xyz if usable is None else np.where(usable[:, None], cell_xyz, -2.0)
+    cells = np.arange(len(cell_xyz)) if usable is None else np.flatnonzero(usable)
+    if cells.size == 0:
+        raise ValueError("no usable model cell to pair against")
+    xyz = np.asarray(cell_xyz)[cells]
     for start in range(0, len(points), 256):
-        out[start:start + 256] = np.argmax(points[start:start + 256] @ xyz.T, axis=1)
+        out[start:start + 256] = cells[np.argmax(points[start:start + 256] @ xyz.T, axis=1)]
     return out
 
 
@@ -321,6 +324,24 @@ def _metric(record, band, level, lead, stat):
     return abs(cell["bias"]) if stat == "absbias" else cell[stat]
 
 
+def paired_interval(diff, *, replicates, seed):
+    """Mean and 95 % bootstrap interval of the finite case-paired differences.
+
+    Only the cases that supply this metric are resampled; with fewer than
+    two of them there is no interval, and with fewer than four it is
+    flagged exploratory.
+    """
+    finite = np.asarray(diff, float)
+    finite = finite[np.isfinite(finite)]
+    record = {"mean_diff": float(finite.mean()), "ci95": None, "cases": int(finite.size),
+              "exploratory": bool(finite.size < 4)}
+    if finite.size >= 2:
+        draws = np.random.default_rng(seed).integers(0, finite.size, size=(replicates, finite.size))
+        lo, hi = np.percentile(finite[draws].mean(axis=1), [2.5, 97.5])
+        record["ci95"] = [float(lo), float(hi)]
+    return record
+
+
 def compare(arm_a, arm_b, *, replicates=5000, seed=20261115, stats=("bias", "absbias", "rmse")):
     """Case-paired difference A - B per (band, level, lead, stat), resampling whole cases."""
     by_case_a = {r["case"]: r for r in arm_a}
@@ -328,8 +349,6 @@ def compare(arm_a, arm_b, *, replicates=5000, seed=20261115, stats=("bias", "abs
     cases = sorted(set(by_case_a) & set(by_case_b))
     if not cases:
         raise ValueError("the two arms share no case")
-    rng = np.random.default_rng(seed)
-    draws = rng.integers(0, len(cases), size=(replicates, len(cases)))
     out = {"cases": cases, "replicates": replicates, "seed": seed,
            "arm_a": sorted({r["arm"] for r in arm_a}), "arm_b": sorted({r["arm"] for r in arm_b}), "table": {}}
     bands = sorted(set().union(*[r["table"] for r in arm_a + arm_b]))
@@ -347,14 +366,8 @@ def compare(arm_a, arm_b, *, replicates=5000, seed=20261115, stats=("bias", "abs
                     diff = np.array(diff)
                     if not np.isfinite(diff).any():
                         continue
-                    boot = np.nanmean(diff[draws], axis=1)
-                    boot = boot[np.isfinite(boot)]
-                    lo, hi = (np.percentile(boot, [2.5, 97.5]) if len(cases) >= 2 and boot.size
-                              else (np.nan, np.nan))
                     out["table"].setdefault(band, {}).setdefault(str(lev), {}).setdefault(str(lead), {})[stat] = {
-                        "mean_diff": float(np.nanmean(diff)),
-                        "ci95": [float(lo), float(hi)] if np.isfinite([lo, hi]).all() else None,
-                        "cases": int(np.isfinite(diff).sum()),
+                        **paired_interval(diff, replicates=replicates, seed=seed),
                         "per_case": [None if not np.isfinite(d) else float(d) for d in diff]}
     out["note"] = ("fewer than four independent cases: the interval is exploratory"
                    if len(cases) < 4 else "cases are the resampled blocks")
