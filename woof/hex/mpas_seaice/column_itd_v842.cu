@@ -427,7 +427,7 @@ __device__ int itd_linear_itd(const ItdTracers &T, int ncat, const double *hin_m
             for (int k = 0; k < ITD_NSLYR; ++k)
                 trcrn[n * nt + T.idx[TI_QSNO] + k] = A(trcrn[n * nt + T.idx[TI_QSNO] + k], rhosL);
         int stop = itd_shift_ice(T, ncat, aicen, trcrn, vicen, vsnon, hicen, donor, daice, dvice, atrcrn);
-        if (stop) return stop;
+        if (stop) return stop;   // the snow enthalpies still shifted, as MPAS returns
         for (int n = 0; n < ncat; ++n)
             for (int k = 0; k < ITD_NSLYR; ++k)
                 trcrn[n * nt + T.idx[TI_QSNO] + k] = S(trcrn[n * nt + T.idx[TI_QSNO] + k], rhosL);
