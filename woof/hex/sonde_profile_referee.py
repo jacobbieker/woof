@@ -20,6 +20,10 @@ levels that bracket the sonde level; a level outside the column is dropped, neve
 extrapolated. Cells with ``bdyMaskCell > 0`` (a regional mesh's relaxation zone) are never
 used.
 
+Quality control: a station whose initial-time sounding departs from the initial state (the
+analysis every arm shares) by more than ``INITIAL_MEDIAN_DEPARTURE_K`` in median over its
+levels is dropped from every lead of the case; the record lists the stations dropped.
+
 Statistics: per (band, level, lead) the count, bias (model - obs) and RMSE; the drift is the
 least-squares slope of bias against lead (K per 24 h). ``compare`` pairs two arms over the
 same cases and resamples whole cases (the independent blocks) with a fixed seed, so station
@@ -52,6 +56,8 @@ BUCKET = "us-west-2.opendata.source.coop"
 LAUNCH_WINDOW = (timedelta(minutes=-150), timedelta(minutes=60))
 # Gross bounds; a value outside them is instrument garbage and is dropped, never repaired.
 T_BOUNDS = (150.0, 340.0)
+INITIAL_MEDIAN_DEPARTURE_K = 5.0
+INITIAL_MIN_LEVELS = 3
 
 
 # ----------------------------------------------------------------------------- model side
@@ -227,6 +233,23 @@ def pair_frame(frame, soundings, cell_xyz, usable):
     return rows
 
 
+def initial_blacklist(pairs):
+    """Stations whose sounding at the initial time departs from the initial state by more than
+    ``INITIAL_MEDIAN_DEPARTURE_K`` in median over its levels (at least ``INITIAL_MIN_LEVELS``).
+
+    At lead 0 the model state is the analysis every arm of a case shares, so the decision is
+    the same for every arm and never depends on the forecast being judged. A station that far
+    from the analysis through its whole column is a bad report or bad metadata, not weather
+    (WIS2, 2026-10-28 00Z: a column 10-14 K off the analysis at every level at two stations).
+    Such a station is dropped from every lead of the case."""
+    by_station = {}
+    for lead, station, _lat, _lon, _lev, obs, model in pairs:
+        if lead == 0:
+            by_station.setdefault(station, []).append(abs(model - obs))
+    return {station for station, dev in by_station.items()
+            if len(dev) >= INITIAL_MIN_LEVELS and float(np.median(dev)) > INITIAL_MEDIAN_DEPARTURE_K}
+
+
 def band_of(lat):
     return [name for name, (lo, hi) in BANDS.items() if name != "GL" and lo <= lat < hi or (name == "NP" and lat == 90.0)]
 
@@ -273,6 +296,8 @@ def score(history_dir, source, case, arm, *, pairs_out=None, soundings=None):
         lead = int(round((f["valid"] - start).total_seconds() / 3600.0))
         for row in pair_frame(f, soundings.get(f["valid"], []), cell_xyz, usable):
             pairs.append((lead,) + row)
+    rejected = initial_blacklist(pairs)
+    pairs = [p for p in pairs if p[1] not in rejected]
     if pairs_out:
         with open(pairs_out, "w", newline="", encoding="utf-8") as handle:
             w = csv.writer(handle)
@@ -283,7 +308,9 @@ def score(history_dir, source, case, arm, *, pairs_out=None, soundings=None):
             "store": STORES.get(source), "start": start.strftime("%Y-%m-%dT%H:%MZ"),
             "frames": [os.path.basename(f["path"]) for f in synoptic],
             "soundings": {f["valid"].strftime("%Y-%m-%dT%HZ"): len(soundings.get(f["valid"], [])) for f in synoptic},
-            "pairs": len(pairs), "table": summarise(pairs)}
+            "pairs": len(pairs), "rejected_stations": sorted(rejected),
+            "qc": {"initial_median_departure_k": INITIAL_MEDIAN_DEPARTURE_K, "min_levels": INITIAL_MIN_LEVELS},
+            "table": summarise(pairs)}
 
 
 # ----------------------------------------------------------------------------- comparison

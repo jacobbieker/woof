@@ -102,3 +102,11 @@ def test_score_pairs_frames_at_synoptic_hours(tmp_path):
     assert nh["drift_k_per_24h"] == pytest.approx(4.0, abs=1e-2)
     assert out["table"]["NH"]["10"]["0"]["bias"] == pytest.approx(0.0, abs=1e-3)
     assert (tmp_path / "p.csv").read_text().count("\n") == 4
+
+
+def test_initial_blacklist_uses_lead_zero_only():
+    good = [(0, "A", 0.0, 0.0, lev, 250.0, 250.5) for lev in (850, 500, 250)]
+    bad = [(0, "B", 0.0, 0.0, lev, 250.0, 262.0) for lev in (850, 500, 250)]
+    late = [(48, "C", 0.0, 0.0, lev, 250.0, 270.0) for lev in (850, 500, 250)]
+    short = [(0, "D", 0.0, 0.0, 850, 250.0, 270.0)]
+    assert r.initial_blacklist(good + bad + late + short) == {"B"}
