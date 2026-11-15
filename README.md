@@ -306,6 +306,14 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     unequal-area cells;
   - coupled fire spread and smoke;
   - Morrison with CESM aerosol (`mp_physics = 40`, `aercu_opt = 0`).
+- **Observation-driven corrections, each opt-in and off by default:**
+  - `gf_deep_rain_evaporation_booking` (Grell-Freitas, `cu_physics = 3`).
+    WRF's deep GF counts the downdraft evaporation it returns to vapour as
+    surface rain too, so deep `pret` is 1.29 to 1.66 times the column's
+    water loss. The option closes that budget and leaves the tendencies
+    unchanged. Evidence:
+    [declared-divergences.md](components/hex/docs/declared-divergences.md)
+    section 2.
 - **Hex (MPAS) parity with WRF's options.** The goal is for the hex model
   to accept the options WRF does, reusing WRF's column implementations
   rather than copies, and to refuse by name what it cannot yet do. Landed:

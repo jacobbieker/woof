@@ -444,8 +444,14 @@ BASELINE_PINNED: dict[str, str] = {
     # breaking out of the pass, as WRF does; it moved the strict A071 hour's
     # first wind difference from step 87 to step 169 against stock WRF
     # 4.6.1 (2026-10-09 exact-chain-resume).  Previously ad4148a8.
+    # RE-PINNED 2026-11-14 by the opt-in gf_deep_rain_evaporation_booking
+    # (default off): a GF_DEEP_EVAP_BOOKING define, 0 unless the run asks,
+    # selects pre = pre + xmb*pwtot in cup_output_ens_3d's deep branch; the
+    # #else arm is the previous line, so the default preprocessed program is
+    # unchanged (tests/test_gf_deep_evaporation_booking_gpu.py: default
+    # tendencies and rain bitwise on CUDA and Metal).  Previously 1dfaed78.
     "gf":
-        "1dfaed78588a04d58d6fb5d544cc1d989df6e08505d5c403618488c936eaa668",
+        "83366ecddaef8522b33a2914ba6bba98fa405dc5ac27c1a6fc80039e97f417c8",
     # 1ee7f0be0 tiles: name the streamed-run config table, and part it from cycle streaming
     "health_tile":
         "2943d5e226a61487aefbe7f191dc120420a4cfe3f96deef19c90c2bb8c15bead",

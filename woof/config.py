@@ -2299,6 +2299,19 @@ class RunConfig:
     num_pert_3d: int = 15
     nens: int = 1
     stochpert_tbl: str = ""
+    # Appended last (fields are reviewed in append order).
+    # Observation-driven option, default OFF (it is not a correct-mode key,
+    # so a default run keeps WRF 4.6.1/4.7.1's Grell-Freitas arithmetic).
+    # module_cu_gf_deep.F cup_output_ens_3d takes the downdraft evaporation
+    # from detrained condensate first and accumulates what "needs to come
+    # from rain" as -xmb*E_unc, then negates the accumulator (:3348), so
+    # deep GF reports xmb*(sum pwo + E_unc) as surface rain while its
+    # tendencies already return E_unc to vapour: that water is counted
+    # twice, and deep pret is 1.29-1.66x the column water loss on the GF
+    # oracle columns.  True subtracts it (pre = xmb*(sum pwo - E_unc)), which
+    # closes the deep column budget; tendencies are unchanged
+    # (kernels/gf.cu GF_DEEP_EVAP_BOOKING).  Read only where cu_physics = 3.
+    gf_deep_rain_evaporation_booking: bool = _config_field(default=False, kw_only=True)
 
 @dataclass(frozen=True)
 class _DfiBackwardRunConfig(RunConfig):
@@ -9014,6 +9027,14 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
             "(public WRF's 2 m flux form) or 'log_profile' (the operational "
             "RAP/HRRR branch's logarithmic profile): the two write different "
             "2 m values, so an unknown name cannot select either.")
+    if type(cfg.gf_deep_rain_evaporation_booking) is not bool:
+        raise ConfigurationRefused(
+            "gf_deep_rain_evaporation_booking must be true or false")
+    if cfg.gf_deep_rain_evaporation_booking and int(cfg.cu_physics) != 3:
+        raise ConfigurationRefused(
+            "gf_deep_rain_evaporation_booking corrects Grell-Freitas's deep "
+            f"precipitation (cu_physics = 3); this run selects cu_physics = "
+            f"{cfg.cu_physics}, where it would change nothing")
     if cfg.ruc_qvg_cold_start not in ("air", "wrf"):
         raise ConfigurationRefused(
             f"ruc_qvg_cold_start={cfg.ruc_qvg_cold_start!r} must be 'air' "

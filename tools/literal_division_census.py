@@ -363,11 +363,24 @@ def production_units(root) -> list[Unit]:
     assert gf.source == K.module_source_int_defines(
         "gf", (("GF_KMAX", 60),), kernel_dir=kdir)
     units.append(gf)
+    # The opt-in GF deep evaporation booking (woof.core.gf._gf_module):
+    # always the integer tier, with its own define after GF_KMAX.
+    booked = _segmented("kernels:gf[GF_KMAX=40,GF_DEEP_EVAP_BOOKING=1]",
+                        pre + extra + [("<GF_KMAX,GF_DEEP_EVAP_BOOKING>",
+                                        "#define GF_KMAX 40\n#define GF_DEEP_EVAP_BOOKING 1\n"),
+                                       kfile("gf.cu")], ("-std=c++17",))
+    assert booked.source == K.module_source_int_defines(
+        "gf", (("GF_KMAX", 40), ("GF_DEEP_EVAP_BOOKING", 1)), kernel_dir=kdir)
+    units.append(booked)
     from woof.core.spp_kernel_sources import specialized_source
     for name, capacity in (("gf", 40), ("gf", 60), ("mynn_pbl", 40), ("mynn_surface", 40)):
         units.append(Unit(f"spp:{name}[capacity={capacity}]",
                           specialized_source(name, capacity=capacity, kernel_dir=kdir),
                           ("-std=c++17",), []))
+    units.append(Unit("spp:gf[capacity=40,GF_DEEP_EVAP_BOOKING=1]",
+                      specialized_source("gf", capacity=40, kernel_dir=kdir,
+                                         defines=(("GF_DEEP_EVAP_BOOKING", 1),)),
+                      ("-std=c++17",), []))
     for name, parts in N.NOAHMP_TRANSLATION_UNITS.items():
         ru = N.runtime_unit(name, kernel_dir=kdir)
         pieces = ([] if ru.preamble_sha256 != N._sha(K._preamble(kdir))

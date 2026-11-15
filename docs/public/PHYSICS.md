@@ -2636,6 +2636,34 @@ forcing lanes were zero. It has not been re-measured since those lanes
 were connected; these numbers do not describe the expected behaviour
 of the current engine.
 
+**Opt-in: `gf_deep_rain_evaporation_booking` (default off).** WRF
+4.6.1/4.7.1's `cup_output_ens_3d` (`module_cu_gf_deep.F`, lines 3330-3348)
+counts some deep water twice.
+- The downdraft evaporation first comes from detrained condensate. What
+  that cannot supply "needs to come from rain", and the routine
+  accumulates it as `PRE = -xmb*E`.
+- It then writes `PRE = -PRE + xmb*pwtot`. That adds this evaporation to
+  the surface rain instead of subtracting it, while the vapour tendency
+  already holds the same water.
+- On the 216 GFDRV oracle columns, the deep rain is 1.28 to 1.66 times
+  the vapour plus condensate the deep tendencies remove.
+- MPAS v8.4.2's own GF (`module_cu_gf.mpas.F`, the 2013 fork) has no such
+  step, and GSL's later GF rewrote the block.
+
+With the option on, the evaporation is subtracted (`gf.cu`,
+`GF_DEEP_EVAP_BOOKING`):
+- The deep budget closes to within 0.4 per cent on the same columns, and
+  deep rain is 0.775 times WRF's over the 60 deep columns.
+- Every tendency and every shallow output is bitwise WRF's
+  (`tests/test_gf_deep_evaporation_booking_gpu.py`).
+
+It is per domain, refused off `cu_physics = 3`, and reachable from the TOML
+(`[shared]` or `[[domain]]`) and from the hex WOOF arm with `--physics
+gf_deep_rain_evaporation_booking=true`. The default keeps WRF's arithmetic,
+so the GF oracles are unchanged. Observation evidence is in
+[declared-divergences.md](../../components/hex/docs/declared-divergences.md)
+section 2.
+
 ## Passive tracers (`tracer_opt`)
 
 The non-Chem EM package `tracer_opt=2` carries WRF's eight dimensionless

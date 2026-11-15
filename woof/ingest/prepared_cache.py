@@ -535,6 +535,9 @@ DEFAULT_TOLERANT_IDENTITY_FIELDS = frozenset({
     # any other cumulus scheme), so a tree prepared before they existed
     # could not have selected anything but their defaults.
     "run.nsas_dx_factor", "run.sas_pgcon",
+    # The opt-in GF deep evaporation booking (cu_physics = 3 only, default
+    # off): a tree prepared before it existed ran it off.
+    "run.gf_deep_rain_evaporation_booking",
     # The WRF-Solar fields (b14dfd8bb cu_rad_feedback; 61107f3fe the
     # Deng shallow-cumulus slot, the EPS &stoch switches and MAD-WRF;
     # 9d6b47c4f use_theta_m), each appended last and off by default, so

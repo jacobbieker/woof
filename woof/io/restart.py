@@ -3438,6 +3438,10 @@ def _drop_default_off_run_keys(values: dict) -> None:
         values.pop("ysu_version", None)
     if values.get("bl_mynn_gsd41_unsquared_qtke", False) is False:
         values.pop("bl_mynn_gsd41_unsquared_qtke", None)
+    # The opt-in GF deep evaporation booking: off is what every earlier
+    # header ran, so it is omitted there and echoed only when selected.
+    if values.get("gf_deep_rain_evaporation_booking", False) is False:
+        values.pop("gf_deep_rain_evaporation_booking", None)
     if values.get("bl_mynn_cloud_tendency_form", "wrf_461") == "wrf_461":
         values.pop("bl_mynn_cloud_tendency_form", None)
     # WRF's cycling flag: omitted at its .false. default.
@@ -5618,6 +5622,7 @@ _RESTART_ABSENT_RUN_DEFAULTS = {
     'bl_mynn_version': 'wrf_461',
     'bl_mynn_cloud_tendency_form': 'wrf_461',
     'bl_mynn_gsd41_unsquared_qtke': False,
+    'gf_deep_rain_evaporation_booking': False,
     'ruc_soilprop': 'wrf_45',
     'rrtmg_cloud_optics_form': 'wrf_461',
     'rrtmg_aer3_type_source': 'rural',
@@ -6183,6 +6188,7 @@ ECHO_ABSENT_RUN_VALUES = {"nest_accumulation_archive": False,
                           "ysu_version": "wrf_461",
                           "noahmp_snow_age": "wrf_461",
                           "urban_water_balance": "wrf_471",
+                          "gf_deep_rain_evaporation_booking": False,
                           # The correct-mode keys (2.9.0): the default is
                           # on, the echo drops off, so a header without
                           # the key ran the exact arithmetic.
