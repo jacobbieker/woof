@@ -1076,6 +1076,19 @@ launch is a further wave. The corridor cull (40,520 cells, GFS-driven) gives
 the same numbers (0.989x, 1.068x). What the forced interface does to the
 fields is in [`docs/local-timestep-lam.md`](https://github.com/FahrenheitResearch/gpuwm-hex/blob/v0.4.14/tree/docs/local-timestep-lam.md).
 
+#### With CUDA graphs, measured 2026-11-15
+
+Until 2026-11-15 `--local-timestep` switched the CUDA subcycle graphs off, so
+on a small mesh LTS paid the eager launch path on top of its own launches. The
+rate-class launches are now captured and replayed with the subcycle, and their
+`launch_counts` advance on every replay. `WOOF_HEX_CUDA_GRAPHS_LTS=0` restores
+the eager path. On the Edinburgh variable-resolution mesh (4,565 cells, 3 km
+graded to 23 km, 2 h, RTX A6000 on a shared host), LTS with graphs is
+byte-identical to eager LTS. Its rest-of-run time was 47 / 105 / 108 / 56 s
+against eager's 201 / 93 / 90 / 80 s. The fixed step with graphs took
+64-65 / 61 / 58 s in the same rounds. LTS still buys nothing on a mesh this
+small, for the one-wave reason above, and it stays off by default.
+
 #### The full-step form, measured to a no-go
 
 The stronger form of this feature (every dycore kernel launched per rate
