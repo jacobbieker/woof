@@ -124,7 +124,7 @@ def pair_frame(frame, reports, cell_xyz, usable, ter):
     for (station, lat, lon, elev, obs), cell in zip(reports, cells):
         if cell < 0:
             continue
-        if ter is not None and (not np.isfinite(elev) or abs(elev - ter[cell]) > MAX_TERRAIN_DIFF_M):
+        if ter is not None and not (abs(elev - ter[cell]) <= MAX_TERRAIN_DIFF_M):  # NaN on either side fails
             continue
         rows.append((station, lat, lon, obs, float(frame["speed"][cell])))
     return rows

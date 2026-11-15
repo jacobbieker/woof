@@ -53,6 +53,8 @@ def test_pairing_drops_stations_whose_cell_misrepresents_the_site():
                ("unknown", float(lat[30]), float(lon[30]), np.nan, 5.0)]
     rows = r.pair_frame(frame, reports, xyz, None, ter)
     assert [row[0] for row in rows] == ["low"]
+    ter[10] = np.nan  # a cell without a terrain value cannot vouch for the site
+    assert r.pair_frame(frame, reports, xyz, None, ter) == []
     assert rows[0][3:] == (5.0, 7.0)
 
 
