@@ -211,4 +211,4 @@ and the GPU port accepts only the counts whose words it reproduces.
 `inputs.sha256`). Generate it on the x86-64 glibc oracle host.
 `--cases therm` writes the vertical-thermodynamics cases to
 `tests/data/oracles/mpas_seaice_column_therm` instead. Their `atan`
-(`psimhu`/`psixhu`), `exp` and `log` are the host glibc 2.44's.
+(`psimhu`/`psixhu`), `exp`, `log` and `pow` are the host glibc 2.44's.

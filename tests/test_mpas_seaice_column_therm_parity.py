@@ -207,7 +207,7 @@ def _oracle_toolchain() -> tuple[str, Path] | None:
 
 @pytest.mark.skipif(_oracle_toolchain() is None or platform.machine() != "x86_64"
                     or platform.libc_ver() != ("glibc", "2.44"),
-                    reason="the column oracle's words are the x86-64 glibc 2.44 host's libm (atan, exp, log; "
+                    reason="the column oracle's words are the x86-64 glibc 2.44 host's libm (atan, exp, log, pow; "
                            "the fixture's, PROVENANCE.md); "
                            "it needs gfortran (pixi -e mpas-oracle) and WOOF_MPAS_V842_SOURCE")
 def test_the_oracle_rebuilt_here_writes_the_fixture(tmp_path):

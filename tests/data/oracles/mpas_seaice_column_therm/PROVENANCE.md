@@ -32,7 +32,7 @@ Written by `tools/mpas_seaice_oracle/build.sh` and
 - `oracle-r8.npz`: per case, every output field whose words differ from the
   input's. `column-logs.json`: the tracer object and the log lines.
   `inputs.sha256`: the input-stream digests.
-- libm: `atan` (`psimhu`, `psixhu`), `exp` and `log` are the host's
+- libm: `atan` (`psimhu`, `psixhu`), `exp`, `log` and `pow` are the host's
   glibc 2.44. glibc's binary64 atan is not correctly rounded on these
   arguments. `tools/mpas_seaice_oracle/grade_atmo_atan.cpp` compared it with
   the repository's correctly rounded `wcr_atan` on 75,497,472 arguments in
@@ -42,9 +42,12 @@ Written by `tools/mpas_seaice_oracle/build.sh` and
   word for word against glibc 2.44 in `verification.log`). It does so only
   with the existing opt-in `WOOF_GLIBC239_LIBM64=1`. Without the opt-in the
   port refuses BL99 by name.
-- The arguments of `log` are folded on the host: `rdn_ice` is
-  `vonkar/log(zref/iceruf)` and `al2` is `log(zref/zTrf)`. These are the
-  host's words.
+- On the GPU, `exp`, `log` and `pow` (`deltaT**1.36`, the lateral melt) are the
+  repository's default transcriptions in `glibc_flt64.cuh`, the same as in
+  stage 1. gfortran folds two `log` constant expressions, `rdn_ice =
+  vonkar/log(zref/iceruf)` and `al2 = log(zref/zTrf)`. The port computes them
+  on the host, with each operation correctly rounded as gfortran's MPFR
+  folding does.
 
 ## Licence
 
