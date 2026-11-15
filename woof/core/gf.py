@@ -184,17 +184,21 @@ _OUT_ISCA = ("ktop_deep", "k22_shallow", "kbcon_shallow", "ktop_shallow",
              "kbcon", "ktop")
 
 
-def _gf_module(nz: int, *, spp_conv: int = 0):
+def _gf_module(nz: int, *, spp_conv: int = 0, evaporation_booking: bool = False):
+    # RunConfig.gf_deep_rain_evaporation_booking (default off) compiles
+    # gf.cu's GF_DEEP_EVAP_BOOKING tier; off, every module is the one this
+    # adapter always loaded.
+    extra = (("GF_DEEP_EVAP_BOOKING", 1),) if evaporation_booking else ()
     if spp_conv:
         from woof.core.spp_kernel_sources import load_spp_module
-        return load_spp_module("gf", gf_kernel_capacity(nz))
-    if nz <= _GF_KMAX_DEFAULT:
+        return load_spp_module("gf", gf_kernel_capacity(nz), defines=extra)
+    if nz <= _GF_KMAX_DEFAULT and not extra:
         from woof.core.kernels import load_module
 
         return load_module("gf")
     from woof.core.kernels import load_module_int_defines
 
-    return load_module_int_defines("gf", (("GF_KMAX", int(nz)),))
+    return load_module_int_defines("gf", (("GF_KMAX", gf_kernel_capacity(nz)),) + extra)
 
 
 def gf_kernel_capacity(nz: int) -> int:
@@ -590,7 +594,8 @@ class GrellFreitas:
         sca = cp.empty((n, len(_OUT_SCA)), dtype=DTYPE)
         isc = cp.empty((n, len(_OUT_ISCA)), dtype=cp.int32)
 
-        module = _gf_module(nz, spp_conv=int(stochastic))
+        module = _gf_module(nz, spp_conv=int(stochastic), evaporation_booking=bool(
+            getattr(cfg, "gf_deep_rain_evaporation_booking", False)))
         fn = module.get_function("gf_gfdrv_stage")
         block = GF_BLOCK
         # The column arrays live in a global workspace sized to the threads

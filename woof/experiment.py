@@ -321,6 +321,9 @@ _DOMAIN_RUN_OVERRIDES = (
     # the Grell-Freitas domains only (see tree_runs_grell below).
     # cugd_avedx joins them for Grell 3D (cu_physics = 5) on the same terms.
     "cu_physics", "shcu_physics", "icloud_bl", "cudt_minutes", "bmj_rad_feedback", "clos_choice", "ishallow", "cugd_avedx",
+    # The opt-in GF deep evaporation booking, on the same terms: a [shared]
+    # value reaches the cu_physics = 3 domains only.
+    "gf_deep_rain_evaporation_booking",
     "kf_edrates",
     "maxiens", "maxens", "maxens2", "maxens3", "ensdim", "cu_diag", "convtrans_avglen_m",
     # The SAS-family keys, on the Grell keys' terms (tree_runs_sas below):
@@ -4355,6 +4358,14 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
                     shared.get("cu_physics", RunConfig.cu_physics)))
         in GRELL_FAMILY_CU_PHYSICS
         for dom in domain_tables)
+    # The GF deep evaporation booking is read only by Grell-Freitas
+    # (cu_physics = 3), so its shared value needs a GF domain to reach.
+    tree_runs_gf = any(
+        physics_mode.settings.get(
+            "cu_physics",
+            dom.get("cu_physics",
+                    shared.get("cu_physics", RunConfig.cu_physics))) == 3
+        for dom in domain_tables)
     # And for the SAS-family keys (nsas_dx_factor, sas_pgcon), read only
     # where cu_physics is a SAS scheme: a [shared] value reaches the SAS
     # domains and leaves the others on the Registry defaults.
@@ -4939,6 +4950,9 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
             for key, default in GRELL_FAMILY_DEFAULTS.items():
                 if key not in dom:
                     kw[key] = default
+        if (tree_runs_gf and kw.get("cu_physics", RunConfig.cu_physics) != 3
+                and "gf_deep_rain_evaporation_booking" not in dom):
+            kw["gf_deep_rain_evaporation_booking"] = False
         # G3-only shared controls reach only G3 domains. Explicit domain
         # controls remain validated, so an off-scheme value is not discarded.
         from woof.config import G3_RUN_DEFAULTS
@@ -6328,7 +6342,8 @@ def _public_config_value(value):
                                   ("use_theta_m", 0), ("do_avgflx_em", 0),
                                   *MULTI_PERTURB_RUN_DEFAULTS.items(),
                                   ("madwrf_opt", 0), ("madwrf_dt_relax", 60.0),
-                                  ("madwrf_dt_nudge", 60.0), ("madwrf_cldinit", 0)):
+                                  ("madwrf_dt_nudge", 60.0), ("madwrf_cldinit", 0),
+                                  ("gf_deep_rain_evaporation_booking", False)):
                 value = run_document.get(name, default)
                 if isinstance(value, list):
                     value = tuple(value)

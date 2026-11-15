@@ -136,6 +136,16 @@
 #ifndef GF_KMAX
 #define GF_KMAX 40
 #endif
+// GF_DEEP_EVAP_BOOKING (RunConfig.gf_deep_rain_evaporation_booking, default
+// off): 1 books the downdraft evaporation that detrained condensate cannot
+// cover against the deep surface precipitation, as the source's own comments
+// ("needs to come from rain", "what is evaporated") describe.
+// module_cu_gf_deep.F:3348 negates the accumulator and so ADDS it, which
+// counts that water twice (vapour gained by the column and surface rain);
+// see gfd_cup_output_ens_3d.  0 is WRF 4.6.1/4.7.1's arithmetic.
+#ifndef GF_DEEP_EVAP_BOOKING
+#define GF_DEEP_EVAP_BOOKING 0
+#endif
 // 1-based level arrays: slot 0 exists and is never read (the reference's
 // _a(nz)).  The +8 pad keeps get_inversion_layers' k_inv bookkeeping and
 // the kbmax+2 argmax scan inside defined memory; the pad is zero-filled and
@@ -1490,7 +1500,12 @@ __device__ void gfd_cup_output_ens_3d(float *xf_ens, int *ierr_io,
             xf_ens[nn] = FMUL(sig, xf_ens[nn]);
         pre = FSUB(pre, FMUL(xmb, dtpwd));
     }
+#if GF_DEEP_EVAP_BOOKING
+    // pre holds -xmb*sum(uncovered evaporation): rain = xmb*pwtot minus it.
+    pre = FADD(pre, FMUL(xmb, pwtot));
+#else
     pre = FADD(-pre, FMUL(xmb, pwtot));
+#endif
     *pre_out = pre;
 }
 

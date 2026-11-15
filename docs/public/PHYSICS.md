@@ -2597,8 +2597,11 @@ earlier build is refused by name on resume and the run must restart from
 its prepared state; no other configuration's checkpoints are
 affected. The uncertified half is the same sentence
 YSU, MYNN and Shin-Hong carry: no matched WOOF-versus-WRF forecast
-trajectory has been run with `cu_physics = 3`, and no receipt comparing a real case against WRF or against observations
-exists -- which is why the label is
+trajectory has been run with `cu_physics = 3`, and no receipt comparing a real case against WRF
+exists. The only observation comparison is the five-case hex global Stage-IV scoring of
+the stock and booked arms under the opt-in below. It is a score of the
+two GF arms against each other and against New Tiedtke, not a check of the port against
+WRF -- which is why the label stays
 `implemented-unverified` and the scheme is always opt-in, never a
 default: a per-domain override on the named routes, or an explicit
 `cu_physics = 3` in a config you wrote.
@@ -2635,6 +2638,44 @@ the same run with Kain-Fritsch, that was the documented behaviour on 2026-08-17,
 forcing lanes were zero. It has not been re-measured since those lanes
 were connected; these numbers do not describe the expected behaviour
 of the current engine.
+
+**Opt-in: `gf_deep_rain_evaporation_booking` (default off).** WRF
+4.6.1/4.7.1's `cup_output_ens_3d` (`module_cu_gf_deep.F`, lines 3330-3348)
+counts some deep water twice.
+- The downdraft evaporation first comes from detrained condensate. What
+  that cannot supply "needs to come from rain", and the routine
+  accumulates it as `PRE = -xmb*E`.
+- It then writes `PRE = -PRE + xmb*pwtot`. That adds this evaporation to
+  the surface rain instead of subtracting it, while the vapour tendency
+  already holds the same water.
+- On the 216 GFDRV oracle columns, the deep rain is 1.28 to 1.66 times
+  the vapour plus condensate the deep tendencies remove.
+- MPAS v8.4.2's own GF (`module_cu_gf.mpas.F`, the 2013 fork) has no such
+  step, and GSL's later GF rewrote the block.
+
+With the option on, the evaporation is subtracted (`gf.cu`,
+`GF_DEEP_EVAP_BOOKING`):
+- The deep budget closes to within 0.4 per cent on the same columns, and
+  deep rain is 0.775 times WRF's over the 60 deep columns.
+- Every tendency and every shallow output is bitwise WRF's
+  (`tests/test_gf_deep_evaporation_booking_gpu.py`).
+
+It is per domain, refused off `cu_physics = 3`, and reachable from the TOML
+(`[shared]` or `[[domain]]`) and from the hex WOOF arm with `--physics
+gf_deep_rain_evaporation_booking=true`. The default keeps WRF's arithmetic,
+so the GF oracles are unchanged.
+
+Against Stage-IV 24 h totals on five 72 h global 120 km cases, the option
+changes the scores as follows:
+- The CONUS-mean bias goes from +0.49 to −0.11 mm, with a paired 95 %
+  interval of [−0.89, −0.37] mm.
+- RMSE drops by 1.29 mm.
+- ETS at 1 mm drops by 0.02.
+- The 1 mm frequency bias goes from 0.96 to 0.88.
+
+So rain amounts improve and the rain area shrinks. The tables are in
+[declared-divergences.md](../../components/hex/docs/declared-divergences.md),
+section 2, under "Opt-in: `gf_deep_rain_evaporation_booking`".
 
 ## Passive tracers (`tracer_opt`)
 

@@ -231,7 +231,10 @@ def test_spp_specializations_leave_default_compiler_sources_frozen():
             # branch and reworded its header comment (the default #else arm
             # is the retained code), and 51bb93111ee reworded two comments in
             # glibc_flt32.cuh. Previously b5b0d38c.
-            "gf": "704111403acd51eeae88e0715108bf8633cf3830f8a606d12cfec721bc81aa19",
+            # RE-PINNED 2026-11-14, default compiled program unchanged: the
+            # opt-in GF_DEEP_EVAP_BOOKING define (0 by default) adds an
+            # #if arm in cup_output_ens_3d. Previously 70411140.
+            "gf": "02fb1d6bf5047e1082e7df89964878261498fd74c66dd4c778db8293da31ec59",
             # Accepted staging adds source-selected GSD41 entry points.
             # This pins the actual default compiler string and checks that
             # constructing an SPP specialization leaves that string intact.
