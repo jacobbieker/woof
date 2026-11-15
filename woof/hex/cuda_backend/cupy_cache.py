@@ -50,3 +50,29 @@ def bound(directory):
             os.environ["CUPY_CACHE_DIR"] = previous
         if backend is not None:
             compiler._set_kernel_cache_backend(backend)
+
+
+#: ``0`` keeps a forecast's kernel images in its own ``--scratch`` (the route before 2026-11-15).
+SHARED_ENV = "WOOF_HEX_SHARED_KERNEL_IMAGES"
+
+
+def forecast_directory(scratch):
+    """The kernel image cache a forecast driver binds: the box's, unless switched off.
+
+    THE COST THIS REMOVES (hex perf, 2026-11-15): every regional door run makes a fresh work dir and
+    the forecast bound CuPy's disk cache to that run's ``--scratch``, so each run compiled again
+    whatever the box kernel store (woof.hex.kernel_warm) does not hold -- the compiles whose source
+    names ``assert`` or ``__FILE__``, which that store bypasses -- and re-wrote every direct NVRTC
+    image (woof.nvrtc_ptx_cache) there: 40-190 s of NVRTC in step 1 of every 1 h edi-vr run on an
+    RTX A6000. Every key involved (CuPy's own disk key, the direct-image identity, the kernel plan's
+    probe) is taken after the final compiler options are applied (woof.numerics, woof.wrf_exact),
+    so fast, strict and WRF-exact images never share an entry, and an image never changes a
+    forecast bit. The one thing a shared image keeps from the run that compiled it is CuPy's
+    temporary program path, which only an ``assert`` failure message would print -- as a re-run
+    in the same ``--scratch`` always did. ``WOOF_HEX_SHARED_KERNEL_IMAGES=0`` restores the
+    per-run cache.
+    """
+    if os.environ.get(SHARED_ENV, "1") == "0":
+        return scratch
+    from woof.hex.kernel_warm import cache_root
+    return cache_root() / "cupy"
