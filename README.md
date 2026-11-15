@@ -403,7 +403,13 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   zero-fills and interior ufuncs (`state_relaxation_multi`, byte-identical;
   about 33 launches, 15 memsets and 15 strided adds fewer per nested domain
   step on the LES, 34 launches fewer per step on a 3 km specified domain;
-  `WOOF_LBC_RELAX_MULTI=0` restores the per-row launches). Hex: CUDA
+  `WOOF_LBC_RELAX_MULTI=0` restores the per-row launches). WRF-Solar's
+  FARMS surface irradiance (`swint_opt = 2`) is one launch per step: the
+  column kernel composes the cloud fraction per cell, merges the MYNN
+  boundary-layer cloud, scales the microphysics radii and writes the six
+  fluxes and the published cloud fraction itself (byte-identical; about 20
+  launches and copies fewer per step; `WOOF_FARMS_FUSED=0` restores the
+  per-step glue; cloud options outside the shared composition keep it). Hex: CUDA
   subcycle graphs stay on under the adaptive time step, one graph per
   repeated step length. On a 4,565-cell variable-resolution mesh, a
   byte-identical adaptive run takes 0.47-0.64x the eager adaptive time and

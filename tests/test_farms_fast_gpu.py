@@ -24,9 +24,13 @@ def test_fast_farms_partial_tile_matches_ordered_reduction():
     got = farms_surface_columns(p, rho, dz, alb, ssa, asy, aod, ang, cz,
         qv, qi, qs, qc, rc, ri, rs, cf, julian=24, has_reqc=1, has_reqs=1)
     ref = cp.empty_like(got)
+    # the ordered referee entry, its fused options off (farms.cu)
     args = (np.int32(nc), np.int32(nz-1), np.int32(1), np.int32(0),
         np.int32(1), np.float32(24), p, rho, dz, alb, ssa, asy, aod, ang,
-        cz, qv, qi, qs, qc, rc, ri, rs, cf, ref)
+        cz, qv, qi, qs, qc, rc, ri, rs, cf, *(ref[a] for a in range(6)),
+        np.float32(1), np.int32(nz), np.int32(0), np.int32(0), np.int32(0),
+        np.int32(0), np.int32(0), qv, qv, np.int32(0), np.int32(0),
+        qv, qv, qv, np.int32(0), ref[0])
     get_kernel('farms', 'farms_column')((1,), (64,), args)
     cp.testing.assert_allclose(got, ref, rtol=2.e-6, atol=.002)
     cp.testing.assert_array_equal(got[:, ::3], cp.zeros_like(got[:, ::3]))

@@ -6,33 +6,66 @@
 // The shared cal_cldfra1 array composition uses native float32 libm even
 // in fast forecasts. Fuse its operations without contracting their roundings.
 // Keep this entry before the FARMS-only fast libm aliases below.
+// One cell of the composition, shared by the standalone kernel and the
+// fused column entries below (same statements, same explicit roundings).
+__device__ __forceinline__ float farms_cell_fraction(
+ float qvx,float qcx,float qix,float qsx,float tx,float px,int fi,int fs,int ferrier){
+ float tc=__fsub_rn(tx,273.15f);
+ float esw=__fmul_rn(__fmul_rn(1000.f,.61078f),
+   gfk_exp(__fdiv_rn(__fmul_rn(17.2693882f,tc),__fsub_rn(tx,35.86f))));
+ float esi=__fmul_rn(__fmul_rn(1000.f,.61078f),
+   gfk_exp(__fdiv_rn(__fmul_rn(21.8745584f,tc),__fsub_rn(tx,7.66f))));
+ float ep2=__fdiv_rn(287.f,461.6f);
+ float qvsw=__fdiv_rn(__fmul_rn(ep2,esw),__fsub_rn(px,esw));
+ float qvsi=__fdiv_rn(__fmul_rn(ep2,esi),__fsub_rn(px,esi));
+ float qcld,weight;
+ if(fi&&fs){qcld=__fadd_rn(__fadd_rn(qix,qcx),qsx);
+   weight=qcld<1.e-12f?0.f:__fdiv_rn(__fadd_rn(qix,qsx),fmaxf(qcld,1.e-12f));}
+ else if(fi){qcld=__fadd_rn(qix,qcx);
+   weight=qcld<1.e-12f?0.f:__fdiv_rn(qix,fmaxf(qcld,1.e-12f));
+   if(ferrier&&qcld>=1.e-12f&&tc< -40.f)weight=1.f;}
+ else{qcld=qcx;weight=qcld<1.e-12f?0.f:(tx>273.15f?0.f:1.f);}
+ float qvs=__fadd_rn(__fmul_rn(__fsub_rn(1.f,weight),qvsw),__fmul_rn(weight,qvsi));
+ float rh=__fdiv_rn(qvx,qvs);
+ float subsat=fmaxf(1.e-10f,__fsub_rn(qvs,qvx));
+ float arg=fmaxf(-6.9f,__fdiv_rn(__fmul_rn(-100.f,qcld),gfk_pow(subsat,.49f)));
+ float frac=__fmul_rn(gfk_pow(fmaxf(1.e-10f,rh),.25f),__fsub_rn(1.f,gfk_exp(arg)));
+ if(frac<.01f)frac=0.f;
+ return qcld<1.e-12f?0.f:(rh>=1.f?1.f:frac);
+}
 extern "C" __global__ void farms_cloud_fraction(
  const float* qv,const float* qc,const float* qi,const float* qs,
  const float* t,const float* p,float* out,int n,int fc,int fi,int fs,int ferrier){
  int x=blockIdx.x*blockDim.x+threadIdx.x;if(x>=n)return;
  if(!fc){out[x]=0.f;return;}
- float tc=__fsub_rn(t[x],273.15f);
- float esw=__fmul_rn(__fmul_rn(1000.f,.61078f),
-   gfk_exp(__fdiv_rn(__fmul_rn(17.2693882f,tc),__fsub_rn(t[x],35.86f))));
- float esi=__fmul_rn(__fmul_rn(1000.f,.61078f),
-   gfk_exp(__fdiv_rn(__fmul_rn(21.8745584f,tc),__fsub_rn(t[x],7.66f))));
- float ep2=__fdiv_rn(287.f,461.6f);
- float qvsw=__fdiv_rn(__fmul_rn(ep2,esw),__fsub_rn(p[x],esw));
- float qvsi=__fdiv_rn(__fmul_rn(ep2,esi),__fsub_rn(p[x],esi));
- float qcld,weight;
- if(fi&&fs){qcld=__fadd_rn(__fadd_rn(qi[x],qc[x]),qs[x]);
-   weight=qcld<1.e-12f?0.f:__fdiv_rn(__fadd_rn(qi[x],qs[x]),fmaxf(qcld,1.e-12f));}
- else if(fi){qcld=__fadd_rn(qi[x],qc[x]);
-   weight=qcld<1.e-12f?0.f:__fdiv_rn(qi[x],fmaxf(qcld,1.e-12f));
-   if(ferrier&&qcld>=1.e-12f&&tc< -40.f)weight=1.f;}
- else{qcld=qc[x];weight=qcld<1.e-12f?0.f:(t[x]>273.15f?0.f:1.f);}
- float qvs=__fadd_rn(__fmul_rn(__fsub_rn(1.f,weight),qvsw),__fmul_rn(weight,qvsi));
- float rh=__fdiv_rn(qv[x],qvs);
- float subsat=fmaxf(1.e-10f,__fsub_rn(qvs,qv[x]));
- float arg=fmaxf(-6.9f,__fdiv_rn(__fmul_rn(-100.f,qcld),gfk_pow(subsat,.49f)));
- float frac=__fmul_rn(gfk_pow(fmaxf(1.e-10f,rh),.25f),__fsub_rn(1.f,gfk_exp(arg)));
- if(frac<.01f)frac=0.f;
- out[x]=qcld<1.e-12f?0.f:(rh>=1.f?1.f:frac);
+ out[x]=farms_cell_fraction(qv[x],qc[x],qi[x],qs[x],t[x],p[x],fi,fs,ferrier);
+}
+
+// The column entries' fused cloud input (farms.py FastSurfaceShortwave):
+// cf_mode 1 composes the fraction per cell from (t, pres) with the
+// statements above; mynn merges the carried MYNN boundary-layer cloud the
+// way woof.core.mynn_radiation.merge_mynn_bl_clouds does (the fraction
+// replaced by cldfra_bl after the first step, QC_BL/QI_BL added where the
+// resolved phase is below WRF's threshold under a cloudy CLDFRA_BL); the
+// radii arrive in microns and are scaled by re_scale (1.e-6f: the same
+// word as the host multiply it replaces); write_cf publishes the merged
+// fraction at every level of every column, as the host copy did.
+__device__ __forceinline__ void farms_cell_inputs(
+ int j,const float* qv,const float* qc,const float* qi,const float* qs,const float* cf,
+ int cf_mode,int fc,int fi,int fs,int ferrier,const float* t,const float* pres,
+ int mynn,int replace_cf,const float* qc_bl,const float* qi_bl,const float* cldfra_bl,
+ float &qcj,float &qij,float &cfj){
+ qcj=qc[j];qij=qi[j];
+ if(cf_mode){
+  cfj=(!fc||(mynn&&replace_cf))?0.f:farms_cell_fraction(qv[j],qcj,qij,qs[j],t[j],pres[j],fi,fs,ferrier);
+ }else cfj=cf[j];
+ if(mynn){
+  float fb=cldfra_bl[j];
+  bool cloudy=fb>1.e-3f;
+  if(replace_cf)cfj=fb;
+  if(qcj<1.e-6f&&cloudy)qcj=__fadd_rn(qcj,qc_bl[j]);
+  if(qij<1.e-8f&&cloudy)qij=__fadd_rn(qij,qi_bl[j]);
+ }
 }
 
 #ifndef GPUWM_WRF_EXACT
@@ -251,33 +284,42 @@ const float *p,const float *rho,const float *dz,const float *alb,
 const float *ssa,const float *g,const float *aod,const float *ang,
 const float *cz,const float *qv,const float *qi,const float *qs,const float *qc,
 const float *rc,const float *ri,const float *rs,const float *cf,
-float *out) {
+float *o0,float *o1,float *o2,float *o3,float *o4,float *o5,
+float re_scale,int nzfull,int cf_mode,int fc,int fi,int fs,int ferrier,
+const float *t,const float *pres,int mynn,int replace_cf,
+const float *qc_bl,const float *qi_bl,const float *cldfra_bl,int write_cf,float *cf_out) {
 int i=blockIdx.x*blockDim.x+threadIdx.x; if(i>=n) return;
-if(cz[i]<=0.f) { for(int a=0;a<6;a++) out[a*n+i]=0.f; return; }
+const bool daylight=cz[i]>0.f;
+if(!daylight) { o0[i]=0.f;o1[i]=0.f;o2[i]=0.f;o3[i]=0.f;o4[i]=0.f;o5[i]=0.f; if(!write_cf) return; }
 float pmw=0.f,lwp=0.f,iwp=0.f,swp=0.f,nrc=0.f,nri=0.f,nrs=0.f,cwp=0.f,ncf=0.f;
-for(int k=0;k<nz;k++) {
+for(int k=0;k<nzfull;k++) {
 int j=k*n+i;
+float qcj,qij,cfj;
+farms_cell_inputs(j,qv,qc,qi,qs,cf,cf_mode,fc,fi,fs,ferrier,t,pres,mynn,replace_cf,qc_bl,qi_bl,cldfra_bl,qcj,qij,cfj);
+if(write_cf) cf_out[j]=cfj;
+if(!daylight||k>=nz) continue;
 float rhodz=FDIV(FMUL(rho[j],dz[j]),FADD(1.f,qv[j]));
-float c=has_reqc?rc[j]:8.e-6f, ice=has_reqi?ri[j]:24.e-6f, snow=has_reqs?rs[j]:24.e-6f;
-if(has_reqc && cf[j]>0.f && c<2.5e-6f) c=8.e-6f;
-if(has_reqi && cf[j]>0.f && ice<5.e-6f) ice=24.e-6f;
-if(has_reqs && cf[j]>0.f && snow<10.e-6f) snow=24.e-6f;
+float c=has_reqc?__fmul_rn(rc[j],re_scale):8.e-6f, ice=has_reqi?__fmul_rn(ri[j],re_scale):24.e-6f, snow=has_reqs?__fmul_rn(rs[j],re_scale):24.e-6f;
+if(has_reqc && cfj>0.f && c<2.5e-6f) c=8.e-6f;
+if(has_reqi && cfj>0.f && ice<5.e-6f) ice=24.e-6f;
+if(has_reqs && cfj>0.f && snow<10.e-6f) snow=24.e-6f;
 pmw=FADD(pmw,FMUL(qv[j],rhodz));
-lwp=FADD(lwp,FMUL(qc[j],rhodz));
-iwp=FADD(iwp,FMUL(qi[j],rhodz));
+lwp=FADD(lwp,FMUL(qcj,rhodz));
+iwp=FADD(iwp,FMUL(qij,rhodz));
 swp=FADD(swp,FMUL(qs[j],rhodz));
-nrc=FADD(nrc,FMUL(FMUL(qc[j],c),rhodz));
-nri=FADD(nri,FMUL(FMUL(qi[j],ice),rhodz));
+nrc=FADD(nrc,FMUL(FMUL(qcj,c),rhodz));
+nri=FADD(nri,FMUL(FMUL(qij,ice),rhodz));
 nrs=FADD(nrs,FMUL(FMUL(qs[j],snow),rhodz));
-float q=FADD(FADD(qc[j],qi[j]),qs[j]);
-cwp=FADD(cwp,FMUL(q,rhodz)); ncf=FADD(ncf,FMUL(FMUL(q,cf[j]),rhodz));
+float q=FADD(FADD(qcj,qij),qs[j]);
+cwp=FADD(cwp,FMUL(q,rhodz)); ncf=FADD(ncf,FMUL(FMUL(q,cfj),rhodz));
 }
+if(!daylight) return;
 float c=lwp>0.f?FDIV(nrc,lwp):0.f, ice=iwp>0.f?FDIV(nri,iwp):0.f,snow=swp>0.f?FDIV(nrs,swp):0.f;
 float tc=c>0.f?FDIV(FDIV(FMUL(1.5f,lwp),c),1000.f):0.f;
 float ti=ice>0.f?FMUL(FMUL(iwp,1000.f),FADD(.02f,FDIV(4.2f,FMUL(FMUL(2.f,ice),1.e6f)))):0.f;
 float ts=snow>0.f?FMUL(FMUL(swp,1000.f),FADD(.02f,FDIV(4.2f,FMUL(FMUL(2.f,snow),1.e6f)))):0.f;
 float beta=FMUL(aod[i],gfk_pow(FDIV(1000.f,550.f),-ang[i]));
-farms_farms(p[i],alb[i],ssa[i],g[i],cz[i],beta,ang[i],pmw,tc,ti,ts,cwp>0.f?FDIV(ncf,cwp):0.f,c,ice,snow,(int)julian,out[i],out[2*n+i],out[3*n+i],out[n+i],out[4*n+i],out[5*n+i]);
+farms_farms(p[i],alb[i],ssa[i],g[i],cz[i],beta,ang[i],pmw,tc,ti,ts,cwp>0.f?FDIV(ncf,cwp):0.f,c,ice,snow,(int)julian,o0[i],o2[i],o3[i],o1[i],o4[i],o5[i]);
 }
 
 #ifndef GPUWM_WRF_EXACT
@@ -289,22 +331,29 @@ const float *p,const float *rho,const float *dz,const float *alb,
 const float *ssa,const float *g,const float *aod,const float *ang,
 const float *cz,const float *qv,const float *qi,const float *qs,const float *qc,
 const float *rc,const float *ri,const float *rs,const float *cf,
-float *out) {
+float *o0,float *o1,float *o2,float *o3,float *o4,float *o5,
+float re_scale,int nzfull,int cf_mode,int fc,int fi,int fs,int ferrier,
+const float *t,const float *pres,int mynn,int replace_cf,
+const float *qc_bl,const float *qi_bl,const float *cldfra_bl,int write_cf,float *cf_out) {
  const int x=threadIdx.x, y=threadIdx.y, i=blockIdx.x*32+x;
  const bool daylight=i<n && cz[i]>0.f;
  float v[9]={0.f,0.f,0.f,0.f,0.f,0.f,0.f,0.f,0.f};
- if(daylight) for(int k=y;k<nz;k+=8) {
+ if(daylight||(write_cf&&i<n)) for(int k=y;k<nzfull;k+=8) {
   const int j=k*n+i;
+  float qcj,qij,cfj;
+  farms_cell_inputs(j,qv,qc,qi,qs,cf,cf_mode,fc,fi,fs,ferrier,t,pres,mynn,replace_cf,qc_bl,qi_bl,cldfra_bl,qcj,qij,cfj);
+  if(write_cf) cf_out[j]=cfj;
+  if(!daylight||k>=nz) continue;
   const float rhodz=rho[j]*dz[j]/(1.f+qv[j]);
-  float c=has_reqc?rc[j]:8.e-6f, ice=has_reqi?ri[j]:24.e-6f, snow=has_reqs?rs[j]:24.e-6f;
-  if(has_reqc && cf[j]>0.f && c<2.5e-6f) c=8.e-6f;
-  if(has_reqi && cf[j]>0.f && ice<5.e-6f) ice=24.e-6f;
-  if(has_reqs && cf[j]>0.f && snow<10.e-6f) snow=24.e-6f;
-  v[0]+=qv[j]*rhodz; v[1]+=qc[j]*rhodz;
-  v[2]+=qi[j]*rhodz; v[3]+=qs[j]*rhodz;
-  v[4]+=qc[j]*c*rhodz; v[5]+=qi[j]*ice*rhodz; v[6]+=qs[j]*snow*rhodz;
-  const float q=qc[j]+qi[j]+qs[j];
-  v[7]+=q*rhodz; v[8]+=q*cf[j]*rhodz;
+  float c=has_reqc?__fmul_rn(rc[j],re_scale):8.e-6f, ice=has_reqi?__fmul_rn(ri[j],re_scale):24.e-6f, snow=has_reqs?__fmul_rn(rs[j],re_scale):24.e-6f;
+  if(has_reqc && cfj>0.f && c<2.5e-6f) c=8.e-6f;
+  if(has_reqi && cfj>0.f && ice<5.e-6f) ice=24.e-6f;
+  if(has_reqs && cfj>0.f && snow<10.e-6f) snow=24.e-6f;
+  v[0]+=qv[j]*rhodz; v[1]+=qcj*rhodz;
+  v[2]+=qij*rhodz; v[3]+=qs[j]*rhodz;
+  v[4]+=qcj*c*rhodz; v[5]+=qij*ice*rhodz; v[6]+=qs[j]*snow*rhodz;
+  const float q=qcj+qij+qs[j];
+  v[7]+=q*rhodz; v[8]+=q*cfj*rhodz;
  }
  __shared__ float partial[9][8][32];
  #pragma unroll
@@ -312,8 +361,7 @@ float *out) {
  __syncthreads();
  if(y || i>=n) return;
  if(!daylight) {
-  #pragma unroll
-  for(int a=0;a<6;a++) out[a*n+i]=0.f;
+  o0[i]=0.f;o1[i]=0.f;o2[i]=0.f;o3[i]=0.f;o4[i]=0.f;o5[i]=0.f;
   return;
  }
  #pragma unroll
@@ -330,6 +378,6 @@ float *out) {
  const float beta=aod[i]*powf(1000.f/550.f,-ang[i]);
  farms_farms(p[i],alb[i],ssa[i],g[i],cz[i],beta,ang[i],pmw,tc,ti,ts,
   v[7]>0.f?v[8]/v[7]:0.f,c,ice,snow,(int)julian,
-  out[i],out[2*n+i],out[3*n+i],out[n+i],out[4*n+i],out[5*n+i]);
+  o0[i],o2[i],o3[i],o1[i],o4[i],o5[i]);
 }
 #endif
