@@ -102,6 +102,9 @@ MOVED = {
                                      {"bl_mynn_gsd41_unsquared_qtke"}),
     "mynn_sfclay_variant": (dict(mynn_sfclay_variant="gsl_wrf39"),
                             {"mynn_sfclay_variant"}),
+    "gf_deep_rain_evaporation_booking": (
+        dict(gf_deep_rain_evaporation_booking=True),
+        {"gf_deep_rain_evaporation_booking"}),
     "cycling": (dict(bl_mynn_version="gsd_41", cycling=True),
                 {"bl_mynn_version", "cycling"}),
     "diff_6th_form": (dict(diff_6th_form="noaa_wrf39", diff_6th_factor2=0.04),
@@ -192,6 +195,8 @@ DEFAULT_OFF = frozenset({
     # is echoed, and "measured" (every earlier header's clock) drops out.
     "bl_mynn_version", "bl_mynn_gsd41_unsquared_qtke", "bl_mynn_cloud_tendency_form",
     "mynn_sfclay_variant",
+    # The opt-in GF deep evaporation booking, absent while off.
+    "gf_deep_rain_evaporation_booking",
     # TEMPO's optional coupling arms, absent while off.
     "tempo_ml_for_bl_nc", "tempo_surface_emission_before",
     # The RUC sea-ice threshold switch, absent at 0 as in a 2.8.5 header.
@@ -664,6 +669,7 @@ def test_the_digest_drops_what_the_echo_drops():
 @pytest.mark.parametrize("field", (
     "bl_mynn_version", "bl_mynn_gsd41_unsquared_qtke",
     "bl_mynn_cloud_tendency_form", "swint_opt", "aer_opt", "alb_sol",
+    "gf_deep_rain_evaporation_booking",
 ))
 def test_inherited_default_off_fields_bind_both_restart_directions(field):
     """An old header may omit the default, never an active selector."""

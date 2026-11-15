@@ -377,7 +377,7 @@ consumed `RunConfig` field -- the knob-parity battery
 consuming kernel/module rather than being decorative -- and every one
 is importable from a WRF namelist.
 
-**Which keys a `[[domain]]` table may override.** Exactly these 446,
+**Which keys a `[[domain]]` table may override.** Exactly these 447,
 and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
 
     madwrf_opt  madwrf_cldinit  madwrf_dt_relax  madwrf_dt_nudge  ra_call_offset
@@ -406,6 +406,7 @@ and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
     iccg_prescribed_den  cellcount_method  cldtop_adjustment  do_radar_ref
     cu_physics  shcu_physics  icloud_bl  cudt_minutes  bmj_rad_feedback  clos_choice
     ishallow  cugd_avedx  kf_edrates  maxiens  maxens  maxens2  maxens3  ensdim
+    gf_deep_rain_evaporation_booking
     cu_diag  convtrans_avglen_m  sas_pgcon  nsas_dx_factor  shalconv  radt
     radt_minutes  bldt  grav_settling  ra_physics  ra_lw_physics  ra_sw_physics
     ra_rrtmg_variant  wrf_rrtmg_compatibility  o3input  use_mp_re  swrad_scat
@@ -562,6 +563,18 @@ domains and leaves the others at 0; a value written into a non-Grell
 domain's own table is refused. The HRRR route writes both keys into its
 namelists, where WRF reads each once for the whole run, so on that
 route every Grell-Freitas domain of a tree takes the same values.
+
+`gf_deep_rain_evaporation_booking` (default `false`) is an opt-in
+correction to Grell-Freitas's deep surface rain, on the same per-domain
+terms as `clos_choice`. It is refused on a domain that does not select
+`cu_physics = 3`. WRF's `cup_output_ens_3d` books the downdraft
+evaporation that detrained condensate cannot supply as extra surface rain
+instead of subtracting it, while the vapour tendency already holds that
+water. With `true`, the deep rain is reduced by that amount, so the deep
+column budget closes; every tendency is unchanged. It is not a WRF
+namelist key, so it is set in the TOML (or as `--physics
+gf_deep_rain_evaporation_booking=true` on the hex WOOF arm). See the
+Grell-Freitas notes in [PHYSICS.md](PHYSICS.md#cumulus-cu_physics).
 
 The eleven numerics from `diff_6th_slopeopt` through `tke_budget` are
 per domain because WRF declares every one of them `max_domains` and the

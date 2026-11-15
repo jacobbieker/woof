@@ -1664,14 +1664,83 @@ def launch_wrf_smag3d_km(state: DomainState, cfg: RunConfig,
     return d11, d22, d12
 
 
+#: Scalar rows per multi-row Smagorinsky launch: diff6_x/y plus
+#: SMAG_MULTI_ROWS - 1 preflight-registered face pairs (smag_fx_n/smag_fy_n)
+#: hold a chunk's H1/H2 fluxes.  Bounded by kernels/smag2d.cu
+#: SMAG_MULTI_MAX_ROWS.
+SMAG_MULTI_ROWS = 4
+#: ``WOOF_SMAG_MULTI=0`` keeps one flux and one divergence launch per
+#: scalar row (A/B and byte-identity checks).
+SMAG_MULTI_ENABLED = os.environ.get("WOOF_SMAG_MULTI", "1") != "0"
+
+
 def _wrf_smag_scalar_kernel(name: str, nz: int, ny: int, nx: int):
     """Select narrow addressing only for the range-checked scalar pair."""
-    if name not in ("wrf_smag_flux_s", "wrf_smag_hd_s"):
+    if name not in ("wrf_smag_flux_s", "wrf_smag_hd_s",
+                    "wrf_smag_flux_s_multi", "wrf_smag_hd_s_multi"):
         raise ValueError(f"not a Smagorinsky scalar kernel: {name!r}")
     if scalar_index32_fits(nz, ny, nx):
         return get_kernel_int_defines(
             "smag2d", name, (("GPUWM_SMAG_INDEX32", 1),))
     return get_kernel("smag2d", name)
+
+
+def _smag_multi_rows(rows, nz, ny, nx) -> bool:
+    """True when ``rows`` ((field, kh, tend, full_theta) mass-point rows)
+    can share multi-row launches: contiguous float32 device arrays of the
+    mass shape, one K for all, and no two rows adding into one buffer."""
+    if not rows or not SMAG_MULTI_ENABLED:
+        return False
+    shape = (nz, ny, nx)
+    arrays = [a for f, xk, tend, _full in rows for a in (f, xk, tend)]
+    if any(not isinstance(a, cp.ndarray) or a.dtype != np.dtype(np.float32)
+           or not a.flags.c_contiguous or a.shape != shape for a in arrays):
+        return False
+    if len({int(xk.data.ptr) for _f, xk, _t, _full in rows}) != 1:
+        return False
+    tends = [int(t.data.ptr) for _f, _xk, t, _full in rows]
+    return len(set(tends)) == len(tends)
+
+
+def launch_wrf_smag2d_hd_multi(state: DomainState, cfg: RunConfig, rows,
+                               *, time_t: bool) -> None:
+    """ADD WRF's metric-aware scalar-flux horizontal tendency of several
+    mass-point rows with SMAG_MULTI_ROWS rows per launch pair
+    (kernels/smag2d.cu wrf_smag_flux_s_multi / wrf_smag_hd_s_multi): the
+    words :func:`launch_wrf_smag2d_hd` writes for each row with
+    ``stagger=""``.  ``rows`` are ``(field, kh, tend, full_theta)``."""
+    nz, ny, nx = rows[0][0].shape
+    common = _wrf_smag_grid_args(state, cfg, time_t=time_t)
+    tail = [np.int32(nz), np.int32(ny), np.int32(nx),
+            np.int32(state.phb.ndim == 3),
+            np.int32(_boundary_x(cfg)), np.int32(_boundary_y(cfg))]
+    pairs = [(state.scratch((nz, ny, nx + 1), "diff6_x"),
+              state.scratch((nz, ny + 1, nx), "diff6_y"))]
+    for extra in range(1, SMAG_MULTI_ROWS):
+        pairs.append((state.scratch((nz, ny, nx + 1), f"smag_fx_{extra}"),
+                      state.scratch((nz, ny + 1, nx), f"smag_fy_{extra}")))
+    flux_kernel = _wrf_smag_scalar_kernel("wrf_smag_flux_s_multi", nz, ny, nx)
+    hd_kernel = _wrf_smag_scalar_kernel("wrf_smag_hd_s_multi", nz, ny, nx)
+    flux_grid = ((nx + 1 + _TPB - 1) // _TPB, ny + 1, nz)
+    grid = ((nx + _TPB - 1) // _TPB, ny, nz)
+    xk = rows[0][1]
+    for start in range(0, len(rows), SMAG_MULTI_ROWS):
+        chunk = rows[start:start + SMAG_MULTI_ROWS]
+        table = np.zeros((8, 4), dtype=np.uint64)
+        for r, (f, _xk, _tend, full_theta) in enumerate(chunk):
+            fx, fy = pairs[r]
+            table[r] = (f.data.ptr, fx.data.ptr, fy.data.ptr, int(bool(full_theta)))
+        blob = table.reshape(-1).view(np.dtype(('V', table.nbytes)))
+        flux_kernel(flux_grid, (_TPB, 1, 1),
+                    tuple(common + [xk, state.thb, np.int32(state.thb.ndim == 3),
+                                    blob, np.int32(len(chunk))] + tail))
+        table = np.zeros((8, 4), dtype=np.uint64)
+        for r, (_f, _xk, tend, _full) in enumerate(chunk):
+            fx, fy = pairs[r]
+            table[r] = (fx.data.ptr, fy.data.ptr, tend.data.ptr, 0)
+        blob = table.reshape(-1).view(np.dtype(('V', table.nbytes)))
+        hd_kernel(grid, (_TPB, 1, 1),
+                  tuple(common + [blob, np.int32(len(chunk))] + tail))
 
 
 def launch_wrf_smag2d_hd(state: DomainState, cfg: RunConfig, f, xk, tend,
@@ -2280,6 +2349,29 @@ def add_scalar_coordinate_wrf(state: DomainState, cfg: RunConfig) -> None:
                 budget[...] = target
 
 
+def _launch_wrf_smag_scalar_rows(state: DomainState, cfg: RunConfig, specs,
+                                 *, time_t: bool) -> None:
+    """The horizontal mixing of ``specs[2:]``: the mass-point rows (theta,
+    moisture, chem, TKE) share SMAG_MULTI_ROWS per launch pair, the per-row
+    words (kernels/smag2d.cu); w (stagger "z") and any row the multi launch
+    cannot take keep their own launches; every row then takes its open-strip
+    zeroing.  chem_mix2_off drops a chem row's horizontal mixing only."""
+    mix2_exempt = chem_mix2_exempt_slots(state, cfg)
+    scalar_rows = [(f, xk, state.scratch(f.shape, slot), slot == "smag_rth", stag)
+                   for f, _tend, xk, _c1, _c2, slot, stag in specs[2:]
+                   if slot not in mix2_exempt]
+    multi = [(f, xk, buf, full) for f, xk, buf, full, stag in scalar_rows
+             if stag == ""]
+    batched = _smag_multi_rows(multi, *state.thp.shape)
+    if batched:
+        launch_wrf_smag2d_hd_multi(state, cfg, multi, time_t=time_t)
+    for f, xk, buf, full, stag in scalar_rows:
+        if not (batched and stag == ""):
+            launch_wrf_smag2d_hd(state, cfg, f, xk, buf, stagger=stag,
+                                 time_t=time_t, full_theta=full)
+        _zero_open_strips(buf, cfg, 1)
+
+
 def _compute_wrf_smag_tendencies(state: DomainState, cfg: RunConfig,
                                   km, kh, specs, *, time_t: bool,
                                   physics_tendencies=None) -> None:
@@ -2339,20 +2431,12 @@ def _compute_wrf_smag_tendencies(state: DomainState, cfg: RunConfig,
     # chem_mix2_off drops the chem array's HORIZONTAL mixing only
     # (module_diffusion_em.F:3054); vertical_diffusion_2's chem loop
     # (:4409-4421) has no such gate, so the rows stay in the vertical pass.
-    mix2_exempt = chem_mix2_exempt_slots(state, cfg)
     # Each launch below writes only its own buffer (and the diff6_x/y face
     # workspaces), so the buffers are cleared together first.
     _zero_buffers(state, (state.scratch(f.shape, slot)
                           for f, _tend, _xk, _c1, _c2, slot, _stag in specs[2:]),
                   "_smag_scalar_zero_launch")
-    for f, _tend, xk, _c1, _c2, slot, stag in specs[2:]:
-        buf = state.scratch(f.shape, slot)
-        if slot in mix2_exempt:
-            continue
-        launch_wrf_smag2d_hd(state, cfg, f, xk, buf, stagger=stag,
-                             time_t=time_t,
-                             full_theta=(slot == "smag_rth"))
-        _zero_open_strips(buf, cfg, 1)
+    _launch_wrf_smag_scalar_rows(state, cfg, specs, time_t=time_t)
 
     if cfg.km_opt == 2:
         # TKE self-diffusion: horizontal with 2*Km_h regardless of the PBL

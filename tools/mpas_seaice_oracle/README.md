@@ -170,3 +170,52 @@ under `config_use_advection`, `seaice_run_advection` (both
 `make_step_remap_fixture.py` writes `tests/data/oracles/mpas_seaice_step_remap`
 (with `--sphere`, the spherical cases into
 `tests/data/oracles/mpas_seaice_step_remap_sphere`).
+
+## The column-package oracle (`run_column.F90`, `run_init_thermo.F90`)
+
+`run_column.F90` drives MPAS-Seaice v8.4.2's column package (colpkg) on one
+block, at RKIND 8 only: the column package is `dbl_kind`, and
+`mpas_seaice_column.F` passes it RKIND arrays, so the wrappers do not compile
+with `-DSINGLE_PRECISION`. build.sh compiles, in a separate `column`
+directory:
+- the column package (`column/ice_*.F90`, `column/constants/cice`) verbatim;
+- `mpas_seaice_column.F` verbatim with `-Dprivate=public` (visibility only:
+  the driver logs the tracer object);
+- `init_ice_state`, `init_ice_state_uniform_ice`, `init_ice_cice_default`,
+  `initial_category_areas_and_volumes`, `init_ice_velocity_uniform` and
+  `initialize_coupler_fields` cut verbatim from `mpas_seaice_initialize.F`
+  (`initialize_cut_head.F90`/`initialize_cut_tail.F90`: the initial
+  conditions and velocities the port does not carry stop by name), and
+  `seaice_reset_coupler_fluxes` with its two helpers from
+  `mpas_seaice_forcing.F`.
+
+Every run starts with `seaice_init_column_physics_package_parameters`, then
+by `oracle_stage`: `init` (`initialize_coupler_fields`,
+`seaice_init_column_physics_package_variables`, `init_ice_state`,
+`seaice_reset_coupler_fluxes`), `aggregate` (`seaice_column_aggregate`) or
+`update_state` (`seaice_column_update_state`) or `vertical_thermodynamics`
+(`colpkg_init_thermo`, which sets `l_brine` and `heat_capacity`, then
+`seaice_column_vertical_thermodynamics`, whose abort status is logged as
+`TOBJ IERR`) or `itd_thermodynamics` (`colpkg_init_thermo` and
+`init_column_itd`, then `column_itd_thermodynamics`, its abort status
+logged the same way). The log carries the tracer
+object (`TOBJ` lines). The field table is the Registry's
+(`woof/hex/mpas_seaice/data/registry-fields.json`, written by
+`tools/mpas_coupled_options.py --fields-out`), with the fields of packages
+that are off absent (the ITD stage gates each var by its own packages only,
+as the Registry allocates them: biogeochemistry's `newlyFormedIce` is the
+column package's).
+
+`run_init_thermo.F90` writes `colpkg_init_thermo`'s salinity profile for
+every ice-layer count from 1 to N: its `cos` and `pow` are the host libm's,
+and the GPU port accepts only the counts whose words it reproduces.
+
+`make_column_fixture.py` writes `tests/data/oracles/mpas_seaice_column`
+(the changed fields, `column-logs.json`, `init-thermo-r8.npy`,
+`inputs.sha256`). Generate it on the x86-64 glibc oracle host.
+`--cases therm` writes the vertical-thermodynamics cases to
+`tests/data/oracles/mpas_seaice_column_therm` instead. Their `atan`
+(`psimhu`/`psixhu`), `exp`, `log` and `pow` are the host glibc 2.44's.
+`--cases itd` writes the ITD-thermodynamics cases to
+`tests/data/oracles/mpas_seaice_column_itd`; the only libm on their path is
+`colpkg_init_itd`'s tanh.

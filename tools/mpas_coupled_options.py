@@ -12,6 +12,16 @@ Usage:
         --core core_seaice \
         --pin f34984b2c89353cf31c235b08d3b4acd96b37bb3 \
         --out woof/hex/mpas_seaice/data/registry-options.json
+
+``--fields-out`` also writes the Registry's field inventory: every dimension
+(name, definition), package and ``var_struct`` (name, time levels, packages)
+with its ``var`` rows (name, type, dimensions, packages), which the column
+package's oracle stream is built from:
+
+    python tools/mpas_coupled_options.py --source ... --core core_seaice \
+        --pin f34984b2c89353cf31c235b08d3b4acd96b37bb3 \
+        --out woof/hex/mpas_seaice/data/registry-options.json \
+        --fields-out woof/hex/mpas_seaice/data/registry-fields.json
 """
 
 from __future__ import annotations
@@ -45,12 +55,36 @@ def parse_options(registry: Path) -> list[dict[str, str]]:
     return options
 
 
+def parse_fields(registry: Path) -> dict:
+    """The Registry's dimensions, packages and var_structs with their vars, in file order."""
+    root = etree.parse(registry).getroot()
+    dims = [{"name": d.get("name", ""), "definition": d.get("definition", "")} for d in root.iter("dim")]
+    packages = [p.get("name", "") for p in root.iter("package")]
+    structs = []
+    for struct in root.iter("var_struct"):
+        # a var is [name, type, dimensions, packages] (space- and semicolon-separated as in the Registry)
+        variables = [[v.get("name", ""), v.get("type", ""), " ".join((v.get("dimensions") or "").split()),
+                      v.get("packages") or ""] for v in struct.iter("var")]
+        structs.append({"name": struct.get("name", ""), "time_levs": int(struct.get("time_levs", "1")),
+                        "packages": [p for p in (struct.get("packages") or "").split(";") if p],
+                        "vars": variables})
+    return {"dims": dims, "packages": packages, "var_structs": structs}
+
+
+def _one_var_per_line(text: str) -> str:
+    """json.dumps(indent=1) with each innermost list of strings folded onto its own line."""
+    import re
+    return re.sub(r"\[\n\s*(\"[^\[\]{}]*?\")\n\s*\]",
+                  lambda m: "[" + ", ".join(x.strip() for x in m.group(1).split(",\n")) + "]", text)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, required=True, help="the MPAS-Model reference checkout")
     parser.add_argument("--core", required=True, help="the core directory, e.g. core_seaice")
     parser.add_argument("--pin", required=True, help="the oracle commit (the v8.4.2 SHA)")
     parser.add_argument("--out", type=Path, required=True, help="where to write the inventory JSON")
+    parser.add_argument("--fields-out", type=Path, help="where to write the field inventory JSON (optional)")
     args = parser.parse_args(argv)
 
     registry = args.source / "src" / args.core / "Registry.xml"
@@ -72,6 +106,13 @@ def main(argv: list[str] | None = None) -> int:
     }
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(inventory, indent=2) + "\n", encoding="utf-8")
+    if args.fields_out is not None:
+        fields = {"schema": "gpuwm-hex.mpas-core-fields/v1", "core": args.core, "pin": args.pin,
+                  "registry": inventory["registry"], **parse_fields(registry)}
+        args.fields_out.parent.mkdir(parents=True, exist_ok=True)
+        # one var per line
+        text = json.dumps(fields, indent=1)
+        args.fields_out.write_text(_one_var_per_line(text) + "\n", encoding="utf-8")
     print(
         f"mpas_coupled_options: {args.core}: {len(options)} options "
         f"from {registry} (sha256 {inventory['registry']['sha256'][:12]}...)",

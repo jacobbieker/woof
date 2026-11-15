@@ -83,8 +83,9 @@ def _refuse(knob: str, value, reason: str, declaration: str):
 def check_config(configs: dict) -> None:
     """Refuse, by name, what the dynamics-only step does not carry."""
     for knob, reason in (
-            ("config_use_column_package", "the column package (colpkg: thermodynamics, ITD, ridging, shortwave) "
-                                          "is not ported"),
+            ("config_use_column_package", "the column package's time step (colpkg: thermodynamics, ITD, "
+                                          "ridging, shortwave) is not ported; its initialisation and aggregation "
+                                          "are (woof.hex.mpas_seaice.column_v842)"),
             ("config_use_forcing", "the sea-ice forcing streams are not ported; the forcing fields are held"),
             ("config_perform_unit_test", "the unit tests are not ported"),
             ("config_do_restart", "this port restarts from its own restart (read_restart), not MPAS's stream"),

@@ -387,8 +387,11 @@ def plan_config(physics: Mapping[str, Any]):
     """The resolved ``RunConfig`` of a generic selection (pure host)."""
 
     from woof.core.mpas_column_suite import column_physics_plan
+    from .physics_suites import probe_cumulus
 
-    return column_physics_plan(dict(physics)).config
+    # The selection carries no cumulus (the bind decides it); a setting
+    # only one cumulus reads is probed with that scheme.
+    return column_physics_plan(probe_cumulus(physics)).config
 
 
 def reads_surface_statics(physics: Mapping[str, Any] | None) -> bool:

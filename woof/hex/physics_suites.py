@@ -849,6 +849,27 @@ def resolve_physics(
 # ---------------------------------------------------------------------------
 # the generic seam: a selection as WOOF's own RunConfig assignments
 # ---------------------------------------------------------------------------
+#: Engine settings that only one cumulus scheme reads, by that scheme's
+#: ``cu_physics``.  The suite's cumulus is ``auto`` until the mesh bind
+#: (or ``--convection``) decides it, so a selection carrying one of these
+#: is judged here with the scheme that reads it; the bind hands the engine
+#: the cumulus it actually decided (cuda_suite_physics_v841's
+#: ``_from_generic_mapping``), and the engine's validator refuses the
+#: setting there if that cumulus does not read it.
+CUMULUS_SCOPED_SETTINGS = {"gf_deep_rain_evaporation_booking": 3}
+
+
+def probe_cumulus(physics: Mapping[str, Any]) -> dict:
+    """``physics`` with the cumulus a scoped setting needs, where none is set."""
+    probe = dict(physics)
+    if "cu_physics" not in probe:
+        for name, number in CUMULUS_SCOPED_SETTINGS.items():
+            if probe.get(name):
+                probe["cu_physics"] = number
+                break
+    return probe
+
+
 def _engine_profile(*, table, selectors, rows, settings, generation, frac_seaice,
                     suite, row, nominal_dx_m, engine_checkout, beyond, refusals):
     """The profile of a selection the generic column seam runs.
@@ -920,6 +941,13 @@ def _engine_profile(*, table, selectors, rows, settings, generation, frac_seaice
         if decided != "auto":
             plan_physics["cu_physics"] = convection_admission.cu_physics_for_constructor_scheme(
                 None if decided == "off" else decided)
+        if carried_cu == "auto":
+            # The resolution rule's pick is a default --convection may
+            # replace at the bind; a cumulus-scoped setting is judged with
+            # the scheme that reads it (CUMULUS_SCOPED_SETTINGS).
+            scoped = probe_cumulus({k: v for k, v in plan_physics.items() if k != "cu_physics"})
+            if "cu_physics" in scoped:
+                plan_physics["cu_physics"] = scoped["cu_physics"]
     else:
         number = int(cumulus["engine"]["cu_physics"])
         label = selectors["config_convection_scheme"]

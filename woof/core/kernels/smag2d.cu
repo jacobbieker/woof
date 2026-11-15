@@ -2117,6 +2117,205 @@ void wrf_smag_hd_s(WRF_SMAG_GRID_ARGS, const real* fx, const real* fy,
 }
 
 // ---------------------------------------------------------------------------
+// Several scalar rows per launch (woof/core/dycore.py
+// _compute_wrf_smag_tendencies; WOOF_SMAG_MULTI=0 restores one launch per
+// row).  The step mixes theta, every moisture/chem species and TKE with the
+// same metrics: per u/v face the density and K averages, the slope and the
+// face rdz, and the map factor; per cell the map factor, the slope averages
+// and rdzw.  wrf_smag_flux_s and wrf_smag_hd_s re-derived them for every
+// row.  Here they are formed once per thread, with wrf_h1/wrf_h2's and
+// wrf_smag_hd_s's own statements, and each row then evaluates exactly the
+// row-dependent statements those entries evaluate, in the same order: the
+// shared factors are either explicit roundings (the fast build) or
+// products and quotients with no multiply-add neighbour (every build), so
+// hoisting them moves no rounding.  The rows arrive by value as device
+// addresses (the diff6_multi form): a flux row is (field, fx, fy,
+// full_theta), a divergence row is (fx, fy, tend, 0).
+// ---------------------------------------------------------------------------
+
+#define SMAG_MULTI_MAX_ROWS 8
+
+struct SmagRowTable {
+    unsigned long long rows[SMAG_MULTI_MAX_ROWS][4];
+};
+
+#if __CUDA_ARCH__ >= 700
+#define SMAG_TABLE_PARAM const __grid_constant__ SmagRowTable
+#else
+#define SMAG_TABLE_PARAM const SmagRowTable
+#endif
+
+extern "C" __global__
+void wrf_smag_flux_s_multi(WRF_SMAG_GRID_ARGS, const real* kh,
+                           const real* thb, int thb3d,
+                           SMAG_TABLE_PARAM table, int nrows,
+                           int nz, int ny, int nx, int phb3d,
+                           int boundary_x, int boundary_y)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int j = blockIdx.y * blockDim.y + threadIdx.y;
+    int k = blockIdx.z * blockDim.z + threadIdx.z;
+    if (k >= nz) return;
+    WRF_SMAG_MAKE_GRID;
+    if (i < nx + 1 && j < ny) {
+        // wrf_h1's row-independent factors, its statements.
+        real rhoavg = 0.5f * (wrf_rho(q, k, j, i - 1)
+                               + wrf_rho(q, k, j, i));
+        real kavg = 0.5f * (wrf_k(q, kh, k, j, i - 1)
+                             + wrf_k(q, kh, k, j, i));
+        real tmpzx = 0.5f * (wrf_zx(q, k, j, i) + wrf_zx(q, k + 1, j, i));
+        real rdzu = 2.0f / (1.0f / wrf_rdzw(q, k, j, i)
+                             + 1.0f / wrf_rdzw(q, k, j, i - 1));
+        int jj = wrf_iy(q, j), iu = wrf_iu(q, i);
+        real map = q.msfu[(SmagIndex)jj * (q.nx + 1) + iu];
+#ifdef GPUWM_WRF_EXACT_C_DIFFUSION
+        real xkxavg = kavg*0.5f*(wrf_rho(q,k,j,i-1)+wrf_rho(q,k,j,i));
+        real coef = -map*xkxavg;
+#else
+#ifndef GPUWM_WRF_EXACT
+        real coef = __fmul_rn(__fmul_rn(-map, rhoavg), kavg);
+#else
+        real coef = -map * rhoavg * kavg;
+#endif
+#endif
+        SmagIndex at = I3S(k, j, i, ny, nx + 1);
+#pragma unroll 1
+        for (int r = 0; r < nrows; ++r) {
+            const unsigned long long* row = table.rows[r];
+            WrfScalarField s = {(const real*)row[0], thb, (int)row[3], thb3d};
+            real* fx = (real*)row[1];
+#if !defined(GPUWM_WRF_EXACT) && !defined(GPUWM_WRF_EXACT_C_DIFFUSION)
+            real horizontal = __fmul_rn(q.rdx, __fsub_rn(
+                wrf_scalar(q, s, k, j, i), wrf_scalar(q, s, k, j, i - 1)));
+            real vertical = __fmul_rn(tmpzx, __fsub_rn(
+                wrf_scalar_w_xface(q, s, k + 1, j, i),
+                wrf_scalar_w_xface(q, s, k, j, i)));
+            real grad = __fmaf_rn(-rdzu, vertical, horizontal);
+            fx[at] = __fmul_rn(coef, grad);
+#else
+            real grad = q.rdx * (wrf_scalar(q, s, k, j, i)
+                                 - wrf_scalar(q, s, k, j, i - 1))
+                      - tmpzx * (wrf_scalar_w_xface(q, s, k + 1, j, i)
+                                 - wrf_scalar_w_xface(q, s, k, j, i)) * rdzu;
+            fx[at] = coef * grad;
+#endif
+        }
+    }
+    if (i < nx && j < ny + 1) {
+        // wrf_h2's row-independent factors, its statements.
+        real rhoavg = 0.5f * (wrf_rho(q, k, j - 1, i)
+                               + wrf_rho(q, k, j, i));
+        real kavg = 0.5f * (wrf_k(q, kh, k, j - 1, i)
+                             + wrf_k(q, kh, k, j, i));
+        real tmpzy = 0.5f * (wrf_zy(q, k, j, i) + wrf_zy(q, k + 1, j, i));
+        real rdzv = 2.0f / (1.0f / wrf_rdzw(q, k, j, i)
+                             + 1.0f / wrf_rdzw(q, k, j - 1, i));
+        int jv = wrf_jv(q, j), ii = wrf_ix(q, i);
+        real map = q.msfv[(SmagIndex)jv * q.nx + ii];
+#ifdef GPUWM_WRF_EXACT_C_DIFFUSION
+        real xkxavg = kavg*0.5f*(wrf_rho(q,k,j-1,i)+wrf_rho(q,k,j,i));
+        real coef = -map*xkxavg;
+#else
+#ifndef GPUWM_WRF_EXACT
+        real coef = __fmul_rn(__fmul_rn(-map, rhoavg), kavg);
+#else
+        real coef = -map * rhoavg * kavg;
+#endif
+#endif
+        SmagIndex at = I3S(k, j, i, ny + 1, nx);
+#pragma unroll 1
+        for (int r = 0; r < nrows; ++r) {
+            const unsigned long long* row = table.rows[r];
+            WrfScalarField s = {(const real*)row[0], thb, (int)row[3], thb3d};
+            real* fy = (real*)row[2];
+#if !defined(GPUWM_WRF_EXACT) && !defined(GPUWM_WRF_EXACT_C_DIFFUSION)
+            real horizontal = __fmul_rn(q.rdy, __fsub_rn(
+                wrf_scalar(q, s, k, j, i), wrf_scalar(q, s, k, j - 1, i)));
+            real vertical = __fmul_rn(tmpzy, __fsub_rn(
+                wrf_scalar_w_yface(q, s, k + 1, j, i),
+                wrf_scalar_w_yface(q, s, k, j, i)));
+            real grad = __fmaf_rn(-rdzv, vertical, horizontal);
+            fy[at] = __fmul_rn(coef, grad);
+#else
+            real grad = q.rdy * (wrf_scalar(q, s, k, j, i)
+                                 - wrf_scalar(q, s, k, j - 1, i))
+                      - tmpzy * (wrf_scalar_w_yface(q, s, k + 1, j, i)
+                                 - wrf_scalar_w_yface(q, s, k, j, i)) * rdzv;
+            fy[at] = coef * grad;
+#endif
+        }
+    }
+}
+
+extern "C" __global__
+void wrf_smag_hd_s_multi(WRF_SMAG_GRID_ARGS, SMAG_TABLE_PARAM table, int nrows,
+                         int nz, int ny, int nx, int phb3d,
+                         int boundary_x, int boundary_y)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int j = blockIdx.y * blockDim.y + threadIdx.y;
+    int k = blockIdx.z * blockDim.z + threadIdx.z;
+    if (i >= nx || j >= ny || k >= nz) return;
+    WRF_SMAG_MAKE_GRID;
+    int ii = wrf_ix(q, i), jj = wrf_iy(q, j);
+    real map = msft[(SmagIndex)jj * nx + ii];
+    real zx_m = 0.25f * (wrf_zx(q, k, j, i) + wrf_zx(q, k, j, i + 1)
+                          + wrf_zx(q, k + 1, j, i)
+                          + wrf_zx(q, k + 1, j, i + 1));
+    real zy_m = 0.25f * (wrf_zy(q, k, j, i) + wrf_zy(q, k, j + 1, i)
+                          + wrf_zy(q, k + 1, j, i)
+                          + wrf_zy(q, k + 1, j + 1, i));
+    real rz = wrf_rdzw(q, k, j, i);
+    SmagIndex at = IDX3(k, j, i);
+#if !defined(GPUWM_WRF_EXACT) && !defined(GPUWM_WRF_EXACT_C_DIFFUSION)
+    real map_rdy = __fmul_rn(map, rdy);
+    real map_rdx = __fmul_rn(map, rdx);
+    real map_zx = __fmul_rn(map, zx_m);
+    real map_zy = __fmul_rn(map, zy_m);
+    real quotient = __fdiv_rn(G, __fmul_rn(dnw[k], rz));
+#else
+    real map_rdx = map * rdx;
+    real map_rdy = map * rdy;
+    real map_zx = map * zx_m;
+    real map_zy = map * zy_m;
+#endif
+#pragma unroll 1
+    for (int r = 0; r < nrows; ++r) {
+        const unsigned long long* row = table.rows[r];
+        const real* fx = (const real*)row[0];
+        const real* fy = (const real*)row[1];
+        real* tend = (real*)row[2];
+#if !defined(GPUWM_WRF_EXACT) && !defined(GPUWM_WRF_EXACT_C_DIFFUSION)
+        real xdiff = __fsub_rn(wrf_fx(q, fx, k, j, i + 1), wrf_fx(q, fx, k, j, i));
+        real ydiff = __fsub_rn(wrf_fy(q, fy, k, j + 1, i), wrf_fy(q, fy, k, j, i));
+        real divh = __fmaf_rn(map_rdy, ydiff, __fmul_rn(map_rdx, xdiff));
+        real xvert = __fmul_rn(map_zx, __fsub_rn(
+            wrf_h1_mavg(q, fx, k + 1, j, i), wrf_h1_mavg(q, fx, k, j, i)));
+        real yvert = __fmul_rn(map_zy, __fsub_rn(
+            wrf_h2_mavg(q, fy, k + 1, j, i), wrf_h2_mavg(q, fy, k, j, i)));
+        real divz = __fmaf_rn(rz, xvert, __fmul_rn(rz, yvert));
+        tend[at] = __fmaf_rn(quotient, __fsub_rn(divh, divz), tend[at]);
+#else
+        real divh = map_rdx * (wrf_fx(q, fx, k, j, i + 1)
+                               - wrf_fx(q, fx, k, j, i))
+                  + map_rdy * (wrf_fy(q, fy, k, j + 1, i)
+                               - wrf_fy(q, fy, k, j, i));
+#ifdef GPUWM_WRF_EXACT_C_DIFFUSION
+        real first=map_zx*(wrf_h1_mavg(q,fx,k+1,j,i)-wrf_h1_mavg(q,fx,k,j,i))*rz;
+        real second=map_zy*(wrf_h2_mavg(q,fy,k+1,j,i)-wrf_h2_mavg(q,fy,k,j,i))*rz;
+        tend[at] += __fdiv_rn(G, dnw[k] * rz)*((divh-first)-second);
+#else
+        real divz = map_zx * (wrf_h1_mavg(q, fx, k + 1, j, i)
+                              - wrf_h1_mavg(q, fx, k, j, i)) * rz
+                  + map_zy * (wrf_h2_mavg(q, fy, k + 1, j, i)
+                              - wrf_h2_mavg(q, fy, k, j, i)) * rz;
+        tend[at] += G / (dnw[k] * rz) * (divh - divz);
+#endif
+#endif
+    }
+}
+
+// ---------------------------------------------------------------------------
 // WRF v4.6.1 diff_opt=2 / km_opt=3 (3-D Smagorinsky) closure.
 //
 // Transcribed from module_diffusion_em.F: calculate_N2 (:1485-1713), smag_km

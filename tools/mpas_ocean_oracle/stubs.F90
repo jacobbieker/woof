@@ -396,7 +396,12 @@ contains
     character(len=*), intent(in) :: name
     real(kind=RKIND), dimension(:), pointer :: a
     integer, intent(in), optional :: timeLevel
-    a => pool % e(find(pool, level_name(name, timeLevel))) % r1
+    integer :: i
+    i = find(pool, level_name(name, timeLevel))
+    a => pool % e(i) % r1
+    ! a field whose array was pointed elsewhere (MPAS-Seaice's stand-ins for
+    ! the arrays of packages that are off) or a scratch field: the field's array
+    if (.not. associated(a) .and. associated(pool % e(i) % f1)) a => pool % e(i) % f1 % array
   end subroutine get_r1
 
   subroutine get_r2(pool, name, a, timeLevel)
@@ -404,7 +409,12 @@ contains
     character(len=*), intent(in) :: name
     real(kind=RKIND), dimension(:,:), pointer :: a
     integer, intent(in), optional :: timeLevel
-    a => pool % e(find(pool, level_name(name, timeLevel))) % r2
+    integer :: i
+    i = find(pool, level_name(name, timeLevel))
+    a => pool % e(i) % r2
+    ! a field whose array was pointed elsewhere (MPAS-Seaice's stand-ins for
+    ! the arrays of packages that are off) or a scratch field: the field's array
+    if (.not. associated(a) .and. associated(pool % e(i) % f2)) a => pool % e(i) % f2 % array
   end subroutine get_r2
 
   subroutine get_r3(pool, name, a, timeLevel)
@@ -412,7 +422,12 @@ contains
     character(len=*), intent(in) :: name
     real(kind=RKIND), dimension(:,:,:), pointer :: a
     integer, intent(in), optional :: timeLevel
-    a => pool % e(find(pool, level_name(name, timeLevel))) % r3
+    integer :: i
+    i = find(pool, level_name(name, timeLevel))
+    a => pool % e(i) % r3
+    ! a field whose array was pointed elsewhere (MPAS-Seaice's stand-ins for
+    ! the arrays of packages that are off) or a scratch field: the field's array
+    if (.not. associated(a) .and. associated(pool % e(i) % f3)) a => pool % e(i) % f3 % array
   end subroutine get_r3
 
   subroutine get_i1(pool, name, a)
@@ -618,6 +633,9 @@ contains
       allocate(p % e(i) % f1)
       p % e(i) % f1 % array => p % e(i) % r1
       p % e(i) % f1 % dimSizes = shape(p % e(i) % r1)
+    else if (.not. associated(p % e(i) % f1) .and. p % e(i) % absent) then
+      ! a field whose package is off: MPAS's field with no array
+      allocate(p % e(i) % f1)
     end if
     f => p % e(i) % f1
   end subroutine get_field_1d
@@ -644,6 +662,9 @@ contains
       allocate(p % e(i) % f2)
       p % e(i) % f2 % array => p % e(i) % r2
       p % e(i) % f2 % dimSizes = shape(p % e(i) % r2)
+    else if (.not. associated(p % e(i) % f2) .and. p % e(i) % absent) then
+      ! a field whose package is off: MPAS's field with no array
+      allocate(p % e(i) % f2)
     end if
     f => p % e(i) % f2
   end subroutine get_field_2d
@@ -663,6 +684,9 @@ contains
       allocate(p % e(i) % f3)
       p % e(i) % f3 % array => p % e(i) % r3
       p % e(i) % f3 % dimSizes = shape(p % e(i) % r3)
+    else if (.not. associated(p % e(i) % f3) .and. p % e(i) % absent) then
+      ! a field whose package is off: MPAS's field with no array
+      allocate(p % e(i) % f3)
     end if
     f => p % e(i) % f3
   end subroutine get_field_3d
@@ -1095,9 +1119,13 @@ module mpas_timekeeping
   private
   public :: MPAS_Time_type, MPAS_TimeInterval_type, MPAS_Clock_type, MPAS_NOW, MPAS_START_TIME, &
             mpas_get_clock_time, mpas_set_timeInterval, mpas_interval_division, mpas_set_time, mpas_get_time, &
-            mpas_get_timeInterval, mpas_advance_clock, mpas_set_clock, operator(>), operator(-)
+            mpas_get_timeInterval, mpas_advance_clock, mpas_set_clock, operator(>), operator(-), &
+            isLeapYear, daysInMonth, daysInMonthLeap
 
   integer, parameter :: MPAS_NOW = 1, MPAS_START_TIME = 2
+  ! mpas_timekeeping.F:25-26 (the column package's day counts read them)
+  integer, dimension(12), parameter :: daysInMonth     = (/31,28,31,30,31,30,31,31,30,31,30,31/)
+  integer, dimension(12), parameter :: daysInMonthLeap = (/31,29,31,30,31,30,31,31,30,31,30,31/)
 
   interface operator(>)
     module procedure interval_gt
@@ -1212,11 +1240,34 @@ contains
     if (present(ierr)) ierr = 0
   end subroutine mpas_set_time
 
-  subroutine mpas_get_time(curr_time, dateTimeString, ierr)
+  ! mpas_timekeeping.F:2187-2205, verbatim
+    logical function isLeapYear(year)
+
+       implicit none
+
+       integer, intent(in) :: year
+
+       isLeapYear = .false.
+       
+       if (mod(year,4) == 0) then
+          if (mod(year,100) == 0) then
+             if (mod(year,400) == 0) then
+                isLeapYear = .true.
+             end if
+          else
+             isLeapYear = .true.
+          end if
+       end if
+
+    end function isLeapYear
+
+  ! the calendar fields ESMF_TimeGet hands back (DoY counts from 1 on 1 January)
+  subroutine mpas_get_time(curr_time, YYYY, MM, DD, DoY, H, M, S, dateTimeString, ierr)
     type(MPAS_Time_type), intent(in) :: curr_time
-    character(len=*), intent(out) :: dateTimeString
+    integer, intent(out), optional :: YYYY, MM, DD, DoY, H, M, S
+    character(len=*), intent(out), optional :: dateTimeString
     integer, intent(out), optional :: ierr
-    integer(kind=I8KIND) :: days, rest, z, era, doe, yoe, y, doy, mp, d, mo
+    integer(kind=I8KIND) :: days, rest, z, era, doe, yoe, y, yday, mp, d, mo
     days = curr_time % s / 86400
     rest = curr_time % s - days * 86400
     z = days + 306
@@ -1225,14 +1276,22 @@ contains
     doe = z - era * 146097
     yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
     y = yoe + era * 400
-    doy = doe - (365 * yoe + yoe / 4 - yoe / 100)
-    mp = (5 * doy + 2) / 153
-    d = doy - (153 * mp + 2) / 5 + 1
+    yday = doe - (365 * yoe + yoe / 4 - yoe / 100)
+    mp = (5 * yday + 2) / 153
+    d = yday - (153 * mp + 2) / 5 + 1
     mo = mp + 3
     if (mo > 12) mo = mo - 12
     if (mo <= 2) y = y + 1
-    write(dateTimeString, '(i4.4,"-",i2.2,"-",i2.2,"_",i2.2,":",i2.2,":",i2.2)') y, mo, d, rest / 3600, &
+    if (present(dateTimeString)) &
+         write(dateTimeString, '(i4.4,"-",i2.2,"-",i2.2,"_",i2.2,":",i2.2,":",i2.2)') y, mo, d, rest / 3600, &
          mod(rest, 3600_I8KIND) / 60, mod(rest, 60_I8KIND)
+    if (present(YYYY)) YYYY = int(y)
+    if (present(MM)) MM = int(mo)
+    if (present(DD)) DD = int(d)
+    if (present(DoY)) DoY = int(days - civil_days(int(y), 1, 1)) + 1
+    if (present(H)) H = int(rest / 3600)
+    if (present(M)) M = int(mod(rest, 3600_I8KIND) / 60)
+    if (present(S)) S = int(mod(rest, 60_I8KIND))
     if (present(ierr)) ierr = 0
   end subroutine mpas_get_time
 

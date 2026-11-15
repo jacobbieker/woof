@@ -444,8 +444,14 @@ BASELINE_PINNED: dict[str, str] = {
     # breaking out of the pass, as WRF does; it moved the strict A071 hour's
     # first wind difference from step 87 to step 169 against stock WRF
     # 4.6.1 (2026-10-09 exact-chain-resume).  Previously ad4148a8.
+    # RE-PINNED 2026-11-14 by the opt-in gf_deep_rain_evaporation_booking
+    # (default off): a GF_DEEP_EVAP_BOOKING define, 0 unless the run asks,
+    # selects pre = pre + xmb*pwtot in cup_output_ens_3d's deep branch; the
+    # #else arm is the previous line, so the default preprocessed program is
+    # unchanged (tests/test_gf_deep_evaporation_booking_gpu.py: default
+    # tendencies and rain bitwise on CUDA and Metal).  Previously 1dfaed78.
     "gf":
-        "1dfaed78588a04d58d6fb5d544cc1d989df6e08505d5c403618488c936eaa668",
+        "83366ecddaef8522b33a2914ba6bba98fa405dc5ac27c1a6fc80039e97f417c8",
     # 1ee7f0be0 tiles: name the streamed-run config table, and part it from cycle streaming
     "health_tile":
         "2943d5e226a61487aefbe7f191dc120420a4cfe3f96deef19c90c2bb8c15bead",
@@ -1719,7 +1725,7 @@ PINNED_HEADERS = {
     'nsas_constants.cuh': 'e50bd02c62e11ec3c4bf5619bab6e30805832401df930c1235a136db2fb4c907',
     'radar_backscatter_common.cuh': '7564e059e3e99be94134b97c625d85a9a74fdee872bba193197ade7196d9fd72',
     'refl.cu': '1e2c45699a721b4b042769f9f868d85d8a6eb4960fc547ce9affb59b69f43f66',
-    'smag2d.cu': 'db91a5f9f8dd5def67cd7ae2fb1c8f8e887c20c1deb470cd8ab394ca4d01ede9',
+    'smag2d.cu': '6ee9ec60dd39deba2c8ddcea7ad0e717b94101879ab55fd33eb5fe9c5968c137',
     'swint.cu': '9a79b7e43cb92553ae454975a943acedc3d8510b5c7eae59ec2c5bb8c8b47c5b',
     'temf_log10_flt32.cuh': '61c2596ef9b7456c1328eb5b9064c84b72f15acad698b084b87a831c478bb69f',
     'wdm_common.cuh': '77590100c6d6066bda9bb347caa318839a107104fceaf1c7690ba184779b01f8',

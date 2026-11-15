@@ -279,8 +279,19 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     elastic subcycles, the pre-subcycle routines, ocean stress,
     incremental-remap advection on planar and spherical meshes (the rotated
     grid, hexagons and quadrilaterals, variable resolution) with its
-    optional conservation and monotonicity checks (one rank), and a forward
-    time step with advection (N steps, bitwise restart);
+    optional conservation and monotonicity checks (one rank), a forward
+    time step with advection (N steps, bitwise restart), and the column
+    package's (colpkg's) initialisation and aggregation (RKIND 8: the
+    tracer object, thickness categories, salinity profiles, initial ice
+    state, coupler fields, aggregate and state update), and its BL99
+    vertical thermodynamics (`ice_atmo`'s stability-corrected boundary
+    layer, the temperature solve, growth and melt, snow ice). That
+    thermodynamics runs only with the LGPL libm opt-in
+    `WOOF_GLIBC239_LIBM64=1`, because it needs glibc's atan word for word.
+    Also its ITD thermodynamics (BL99 or mushy: the linear remap of the
+    thickness distribution or the delta function, frazil and new ice,
+    lateral melt, rebinning and zapping, with level, CESM or topo ponds),
+    which needs no opt-in;
   - MALI: the shallow-ice velocity solver, masks and geometry diagnostics,
     thermal initialisation, the thermal solver and basal melt, thickness
     and tracer advection, calving (every option, and front restoration),
@@ -289,7 +300,8 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   Limits: Albany's higher-order solvers are refused by name. The sea-ice
   remap computes its init geometry (frames, moments, MPAS's RBF
   coefficients) itself, and refuses halo exchanges and periodic planar
-  meshes by name. Sea-ice column physics (thermodynamics), ocean KPP and GM/Redi,
+  meshes by name. The sea-ice column physics' time step (mushy vertical thermodynamics,
+  ridging, shortwave), ocean KPP and GM/Redi,
   and the coupler import and export are not ported. A few RKIND 8 cases need the LGPL libm
   opt-in below. These are ported pieces and steps, not coupled forecasts.
   Plan: [docs/mpas-coupled-roadmap.md](docs/mpas-coupled-roadmap.md).
@@ -302,6 +314,16 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     unequal-area cells;
   - coupled fire spread and smoke;
   - Morrison with CESM aerosol (`mp_physics = 40`, `aercu_opt = 0`).
+- **Observation-driven corrections, each opt-in and off by default:**
+  - `gf_deep_rain_evaporation_booking` (Grell-Freitas, `cu_physics = 3`).
+    WRF's deep GF counts the downdraft evaporation it returns to vapour as
+    surface rain too, so deep `pret` is 1.29 to 1.66 times the column's
+    water loss. The option closes that budget and leaves the tendencies
+    unchanged. On five global 120 km cases scored against Stage-IV, the
+    24 h bias goes from +0.49 to −0.11 mm and RMSE falls by 1.3 mm. ETS
+    at 1 mm falls by 0.02. Evidence:
+    [declared-divergences.md](components/hex/docs/declared-divergences.md)
+    section 2.
 - **Hex (MPAS) parity with WRF's options.** The goal is for the hex model
   to accept the options WRF does, reusing WRF's column implementations
   rather than copies, and to refuse by name what it cannot yet do. Landed:
@@ -385,6 +407,16 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   storm-track planning, and delete-after-commit backpressure and domain
   selection for upstream's Icechunk store export
   (`[output] icechunk_delete_after_commit`, `icechunk_domains`).
+- **Observation referees for MPAS-layout history.** These are for the hex
+  model or native MPAS-A.
+  - `woof.hex.sonde_profile_referee` scores temperature against radiosondes
+    at the mandatory levels, by latitude band and lead, including the drift
+    per 24 h. The sondes are IGRA v2 and WIS2, read from the Source
+    Cooperative icechunk stores.
+  - `woof.hex.qpe_cell_referee` scores 24 h precipitation against Stage-IV,
+    averaged onto the model's cells.
+  - Both compare two arms with a case-paired bootstrap
+    ([obs-referee.md](components/hex/docs/obs-referee.md)).
 - **Performance work.** Metal: out-of-line compilation of the largest units,
   compile prefetch and persisted translations, fewer host syncs per step,
   and hardware fast paths that keep the same words (a strict 3 km forecast
@@ -410,6 +442,10 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   fluxes and the published cloud fraction itself (byte-identical; about 20
   launches and copies fewer per step; `WOOF_FARMS_FUSED=0` restores the
   per-step glue; cloud options outside the shared composition keep it).
+  The Smagorinsky scalar rows (theta, moisture, chem, TKE) take their
+  horizontal flux and divergence launches four rows at a time with the face
+  and cell metrics formed once (`wrf_smag_flux_s_multi`/`wrf_smag_hd_s_multi`,
+  byte-identical; `WOOF_SMAG_MULTI=0` restores one launch pair per row).
   `WOOF_ACOUSTIC_KPAR=1` takes a level-parallel w''-phi'' solve (32 columns
   x 8 lanes per block; 1.7-2.2x the column kernel's speed per launch on an
   A6000): opt-in, because on CUDA its words are the column kernel's generic
