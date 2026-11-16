@@ -328,7 +328,8 @@ def source_units(root: Path, *, captures: Path | None = None) -> tuple[list[Unit
                  "windfarm_fitch", "fire_spread", "nest_vertical", "windfarm_fitch_cells",
                  "rrtmg_lw_chain", "rrtmg_lw_chain_coalesced", "rrtmg_lw_zbatched",
                  "rrtmg_lw_taugb02_10_11_12", "rrtmg_lw_taugb03_05",
-                 "rrtmg_lw_taugb06_09", "rrtmg_lw_taugb13_16"}
+                 "rrtmg_lw_taugb06_09", "rrtmg_lw_taugb13_16",
+                 "rrtmgk_prep", "rrtmgk_lw", "rrtmgk_sw"}
     direct = {"rrtmg_legacy_prep", "rrtmg_legacy_adapter", "rrtmg_mcica_wrf", "ruc_spp"}
     stock = [unit for unit in stock
              if unit.key not in {"kernels:" + name for name in fragments | direct | DEDICATED_ROUTES}]
@@ -426,6 +427,12 @@ def composed_units(root: Path) -> list[Unit]:
         Unit("composed:nest", module_source("nest", kernel_dir=kdir),
              ("-std=c++17", "-fmad=false")),
     ]
+    # RRTMG-K's three units, as woof.core.rrtmgk._load compiles them.
+    rk = module("rrtmgk")
+    units.extend((
+        Unit("composed:rrtmgk_prep", rk.prep_source(), ("-std=c++17", "--ftz=false")),
+        Unit("composed:rrtmgk_lw", rk.lw_post_source(), ("-std=c++17", "--ftz=false")),
+        Unit("composed:rrtmgk_sw", rk.sw_source(), ("-std=c++17", "--ftz=false"))))
     for name in ("rrtmg_legacy_prep", "rrtmg_legacy_adapter", "rrtmg_mcica_wrf"):
         units.append(Unit("direct:" + name,
                           (kdir / f"{name}.cu").read_text(encoding="utf-8"),

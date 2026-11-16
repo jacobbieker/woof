@@ -396,6 +396,16 @@ def lw_post_source():
         "rrtmg_lw.cu", "rrtmg_lw_taugb06_09.cu", "rrtmgk_lw.cu"))
 
 
+def sw_source(defines=None):
+    """K's SW unit: the packed-table defines (K's tables unless given),
+    kernels/rrtmg_sw.cu, its spectral helpers and kernels/rrtmgk_sw.cu."""
+    if defines is None:
+        defines = _sw._pack_cuda_tables(sw_tables_k())[1]
+    return (defines + (_KDIR / "rrtmg_sw.cu").read_text(encoding="ascii")
+            + _sw.spectral_source()
+            + (_KDIR / "rrtmgk_sw.cu").read_text(encoding="ascii"))
+
+
 _MODULES = {}
 
 
@@ -452,10 +462,8 @@ class CudaSWK(_sw.CudaSW):
         self.tab = tab
         self.spectral_output = "none"
         packed, defines = _sw._pack_cuda_tables(tab)
-        code = (defines + (_KDIR / "rrtmg_sw.cu").read_text(encoding="ascii")
-                + _sw.spectral_source()
-                + (_KDIR / "rrtmgk_sw.cu").read_text(encoding="ascii"))
-        self.module = _load(cp, code, "rrtmgk_sw.cu", "woof.core.rrtmgk:sw")
+        self.module = _load(cp, sw_source(defines), "rrtmgk_sw.cu",
+                            "woof.core.rrtmgk:sw")
         self.tab_gpu = cp.asarray(packed)
         self.ngb_gpu = cp.asarray(np.asarray(tab.ngb, dtype=np.int32))
         self._laysolfr_spec_gpu = cp.asarray(

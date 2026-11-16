@@ -1630,6 +1630,14 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "9bf6eabbe1634869ca04bcb69fb0114a7e980e5be3b6a39acdcda4f93ed18ed4",
+    "constructor": "compile_using_nvrtc",
+    "factory": "_load",
+    "factory_sha256": "d380f4718292a22139813c5d2f20f756beb8eced0a97a38a98b9e4b84e1e0630",
+    "file": "woof/core/rrtmgk.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "9c480f73d15b85055fe812a8ea19a62df49c70cddc5822a41e9b87ad39ec455d",
     "constructor": "compile_using_nvrtc",
     "factory": "_module",
@@ -3980,6 +3988,18 @@
     "sha256": "5ea756c7d433fa382657f484179adfcb6dfd4b83a4d774061a11d3e968d72340"
    },
    {
+    "file": "woof/core/kernels/rrtmgk_lw.cu",
+    "sha256": "887e276ea96ee776f0a32a70e38e76ab1bba4e7bac70a4ea4e992dfdfb1b1ecf"
+   },
+   {
+    "file": "woof/core/kernels/rrtmgk_prep.cu",
+    "sha256": "2df3ca5b115cc58d9a68bfb914321db666c54d23a483838957ac79f75999b5b6"
+   },
+   {
+    "file": "woof/core/kernels/rrtmgk_sw.cu",
+    "sha256": "a56b6b3b2254967ca4a767dd99766df1c7bce186b35bc9a69fd3031ee7574ab0"
+   },
+   {
     "file": "woof/core/kernels/rrtmgp_cloud.cu",
     "sha256": "512157c75edf4637d99a1cad490e8db71e51cd2c3643ff129adebefa81557560"
    },
@@ -5119,7 +5139,7 @@
    },
    {
     "file": "woof/core/kernel_frame_recordings.py",
-    "sha256": "63acbc1bc7ea48a0a6b33d3b85a116f0b182a700ec51635b60468c61aa25ea5c"
+    "sha256": "03fe1c3c19f7b2d2c9f8f771ab0b894ae0bc36ab85b52c102221e6e3de70f4d7"
    },
    {
     "file": "woof/core/kernels/__init__.py",
@@ -5243,7 +5263,7 @@
    },
    {
     "file": "woof/core/preflight.py",
-    "sha256": "2ce151ebdabc732afdb67099913c3e20151f37d7dbe0adcb2aa181dcf02958dc"
+    "sha256": "0bb820235c56fef926f956cb32878d780035d1f88bbf30de0432dcb0b965724f"
    },
    {
     "file": "woof/core/refl.py",
@@ -5271,7 +5291,7 @@
    },
    {
     "file": "woof/core/rrtmg_lw.py",
-    "sha256": "0d553e50906a7ae9878db7118e2ff4b2ad4de859257083b9ad1c4e14aa047b8b"
+    "sha256": "595d1c4714a9e8eef47224d51ac7d42f30d6c15dd91dcf5688ded9d694fdd0c8"
    },
    {
     "file": "woof/core/rrtmg_mcica.py",
@@ -5280,6 +5300,10 @@
    {
     "file": "woof/core/rrtmg_sw.py",
     "sha256": "ba69215adda415ebed037e7818ffa270ad07a16bb0b771bce7d2b9d8f425c9f3"
+   },
+   {
+    "file": "woof/core/rrtmgk.py",
+    "sha256": "c171c5375773e2cabfb69b7afad4832a776e768f199deb90cd184f21f85ce218"
    },
    {
     "file": "woof/core/ruc_gpu.py",
@@ -21871,6 +21895,116 @@
    },
    "source_sha256": "d3704148fba64a2a3d37ae9a94fdd92938f9d12021de54f8feb106cae2591696"
   },
+  "kernels:smag2d_tke_faces": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "5ccc144c71ac35b2b10bdbd9ef3e52e353d60e442f8ddda7a90e62086be18a9c",
+    "sites": {
+     "100": 500
+    }
+   },
+   "native_differences": {
+    "sha256": "de3f8be1e8d617ae374dd54bdb93a7153ed428533afc0ca52f5e6f4241cba2a0",
+    "sites": {
+     "100": 177
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "--fmad=false",
+     "--ftz=false",
+     "--prec-div=true",
+     "--prec-sqrt=true",
+     "-DGPUWM_WRF_EXACT_C_DIFFUSION=1",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "--fmad=false",
+     "--ftz=false",
+     "--prec-div=true",
+     "--prec-sqrt=true",
+     "-DGPUWM_WRF_EXACT_C_DIFFUSION=1",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "af43f5ec718c3b9968acc1da29e7e360be4235d50703129fb7df5b81bfc25c11"
+  },
+  "kernels:smag2d_uv_faces": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "f23f985f51fb6412e3465cff6471e205f14f84a4d62da2356c516726b7586fb1",
+    "sites": {
+     "100": 497
+    }
+   },
+   "native_differences": {
+    "sha256": "5c39275a7eb7e3b2c5478c4d2d429bdffa0e824d6b930892cdb7432c59085ec1",
+    "sites": {
+     "100": 177
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "--fmad=false",
+     "--ftz=false",
+     "--prec-div=true",
+     "--prec-sqrt=true",
+     "-DGPUWM_WRF_EXACT_C_DIFFUSION=1",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "--fmad=false",
+     "--ftz=false",
+     "--prec-div=true",
+     "--prec-sqrt=true",
+     "-DGPUWM_WRF_EXACT_C_DIFFUSION=1",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "a7c7cdfd321aabd08e13a9ff8abb4efb3bd5eb2bc96a992d57fd98939554f49b"
+  },
   "kernels:smag2d_w_faces": {
    "assessment": "static_diagnostic_only",
    "coverage": "compiled",
@@ -30488,116 +30622,6 @@
     ]
    },
    "source_sha256": "122dd59495c7f40fd44ec7ca97969051d98c82e08ca1d08fabd4c602e7e46b42"
-  },
-  "kernels:smag2d_uv_faces": {
-   "assessment": "static_diagnostic_only",
-   "coverage": "compiled",
-   "dataflow_differences": {
-    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
-    "sites": {
-     "100": 0
-    }
-   },
-   "differences": {
-    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
-    "sites": {
-     "100": 0
-    }
-   },
-   "errors": {},
-   "native_dataflow_differences": {
-    "sha256": "f23f985f51fb6412e3465cff6471e205f14f84a4d62da2356c516726b7586fb1",
-    "sites": {
-     "100": 497
-    }
-   },
-   "native_differences": {
-    "sha256": "5c39275a7eb7e3b2c5478c4d2d429bdffa0e824d6b930892cdb7432c59085ec1",
-    "sites": {
-     "100": 177
-    }
-   },
-   "native_errors": {},
-   "options": {
-    "100": [
-     "-std=c++17",
-     "--fmad=false",
-     "--ftz=false",
-     "--prec-div=true",
-     "--prec-sqrt=true",
-     "-DGPUWM_WRF_EXACT_C_DIFFUSION=1",
-     "--device-as-default-execution-space",
-     "-lineinfo",
-     "-arch=compute_100"
-    ],
-    "120": [
-     "-std=c++17",
-     "--fmad=false",
-     "--ftz=false",
-     "--prec-div=true",
-     "--prec-sqrt=true",
-     "-DGPUWM_WRF_EXACT_C_DIFFUSION=1",
-     "--device-as-default-execution-space",
-     "-lineinfo",
-     "-arch=compute_120"
-    ]
-   },
-   "source_sha256": "a7c7cdfd321aabd08e13a9ff8abb4efb3bd5eb2bc96a992d57fd98939554f49b"
-  },
-  "kernels:smag2d_tke_faces": {
-   "assessment": "static_diagnostic_only",
-   "coverage": "compiled",
-   "dataflow_differences": {
-    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
-    "sites": {
-     "100": 0
-    }
-   },
-   "differences": {
-    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
-    "sites": {
-     "100": 0
-    }
-   },
-   "errors": {},
-   "native_dataflow_differences": {
-    "sha256": "5ccc144c71ac35b2b10bdbd9ef3e52e353d60e442f8ddda7a90e62086be18a9c",
-    "sites": {
-     "100": 500
-    }
-   },
-   "native_differences": {
-    "sha256": "de3f8be1e8d617ae374dd54bdb93a7153ed428533afc0ca52f5e6f4241cba2a0",
-    "sites": {
-     "100": 177
-    }
-   },
-   "native_errors": {},
-   "options": {
-    "100": [
-     "-std=c++17",
-     "--fmad=false",
-     "--ftz=false",
-     "--prec-div=true",
-     "--prec-sqrt=true",
-     "-DGPUWM_WRF_EXACT_C_DIFFUSION=1",
-     "--device-as-default-execution-space",
-     "-lineinfo",
-     "-arch=compute_100"
-    ],
-    "120": [
-     "-std=c++17",
-     "--fmad=false",
-     "--ftz=false",
-     "--prec-div=true",
-     "--prec-sqrt=true",
-     "-DGPUWM_WRF_EXACT_C_DIFFUSION=1",
-     "--device-as-default-execution-space",
-     "-lineinfo",
-     "-arch=compute_120"
-    ]
-   },
-   "source_sha256": "af43f5ec718c3b9968acc1da29e7e360be4235d50703129fb7df5b81bfc25c11"
   }
  }
 }
