@@ -4189,7 +4189,7 @@
    },
    {
     "file": "woof/core/kernels/smag2d_w_faces.cu",
-    "sha256": "7a318dcdb9d8322e06469cdd30e56bac5f999b128a52fa50cdf33de3d0152a34"
+    "sha256": "09a35fbd19ac813b0bbc73c6eab5bc513dc5b565de8abdb13f19787ca00b4060"
    },
    {
     "file": "woof/core/kernels/sms3dtke.cu",
@@ -5083,7 +5083,7 @@
    },
    {
     "file": "woof/core/dycore.py",
-    "sha256": "2ebce9594d934e01c70109221d92d999e9e7b5b54fc4ab112a3df78e731a5d2e"
+    "sha256": "ebd2430d7cb17c1e61575a8c0f9aa49fbc81adb48d8cc7dc3c369b9b5b42ccf5"
    },
    {
     "file": "woof/core/etanew.py",
@@ -5119,7 +5119,7 @@
    },
    {
     "file": "woof/core/kernel_frame_recordings.py",
-    "sha256": "f325b7495f94aea3cabbe3bb8d40ba025f2b1b603ab7bdafc920b2387930a135"
+    "sha256": "37fd71d366ed2cd61d2442ebb2baf805f1c93f6ebb19cfc63f9562de83a1080e"
    },
    {
     "file": "woof/core/kernels/__init__.py",
@@ -5571,11 +5571,11 @@
    },
    {
     "file": "woof/hex/cuda_fullstep_lts_multi.py",
-    "sha256": "04f82a5b91f402014887d31aabde06199fd585eb98381eee5f2ff0146fbfebab"
+    "sha256": "7829bc25ed35ecb6050732da3deeae274ceffdbc330aa5875c72e6fb2b238bd5"
    },
    {
     "file": "woof/hex/cuda_fullstep_lts_scalars.py",
-    "sha256": "0b2805e0bf29e0d2326e6992e077076d66390735adb77656fd9b62eafc1b9d73"
+    "sha256": "6012ea0fa65867e3cc6bba61772574d21d0ff112b3aec3af5ec97e7e6b5640ab"
    },
    {
     "file": "woof/hex/cuda_gwdo_v841.py",
@@ -7085,7 +7085,7 @@
    },
    {
     "file": "woof/hex/cuda_fullstep_lts_scalars.py",
-    "sha256": "3f8377f382559d6fcb446fab5a77e7e6806acabcc52d6f49fca6b03ac78fbf6e"
+    "sha256": "a14d6c6cab59e48c3700fdb4a5b14d8d710b6de39e1e38547663d119f003dd8f"
    },
    {
     "file": "woof/hex/cuda_gwdo_v841.py",
@@ -21888,13 +21888,13 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "2efc8db9fd9040f26cfc064fb3f00a1e5f2257f75e7594d1f272827487273e42",
+    "sha256": "98472fb82e5a536e72138c3d0b9e905b50ffc6253ce2bd1aa294567fc04c5a92",
     "sites": {
-     "100": 495
+     "100": 497
     }
    },
    "native_differences": {
-    "sha256": "2cbd9bd09097b2b6247ea58d162e7d03cebd4c36dae3b959ce600096627e874a",
+    "sha256": "42a0caabde1f2b216a37db0a2b0d307ab43beb60ca9ef419f84f60ac82e0e48f",
     "sites": {
      "100": 178
     }
@@ -21924,7 +21924,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "14ac1cfc6b3eabc26d786a1e296cfe040da7def01c62f7ff510b5cbd3b44cd6b"
+   "source_sha256": "12f034f30d514e9340b094731900011400a54ef87bd1c5218a3b3ddb14495b51"
   },
   "kernels:sms3dtke": {
    "assessment": "static_diagnostic_only",

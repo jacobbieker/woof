@@ -53,7 +53,7 @@ from .cuda_fullstep_lts_active import (
     _RESET, _SOURCE as ACTIVE_SOURCE, _SPLIT_START_MASK, _WRITE, _ZERO, _Holder, _field)
 from .cuda_fullstep_lts_scalars import (
     AMOUNT_NAMES, END, MID, SCALAR_PLANES, START, STAT_NAMES, _FINISH, _KERNEL_NAMES as SCALAR_KERNELS,
-    _LOW_ORDER, _RESERVE_MARGIN, _SOURCE as SCALAR_SOURCE, _UntappedAudit, tap_kernel)
+    _LOW_ORDER, _RESERVE_MARGIN, _SOURCE as SCALAR_SOURCE, _UntappedAudit, fold_sums, sums_buffer, tap_kernel)
 from .fullstep_lts_classes import (
     child_flux_intervals, lts_acoustic_substeps, macro_schedule, plan_macros, plane_weights, planes_per_step, trajectory_plane)
 
@@ -1427,10 +1427,13 @@ class FullStepLtsMulti:
         ntr, nlev, _ncells, nedges = (int(v) for v in arguments[:4])
         if block.index > 0:
             rows = block.n_cap_owned
+            # The capture's receipt sums: CUDA adds into block.amounts; Metal into a per-element buffer folded here.
+            sums = sums_buffer(self.cp, block.amounts, ntr * nlev * rows)
             block.lane.run("lts_packet_capture", ntr * nlev * rows, (
                 i32(ntr), i32(nlev), i32(rows), i32(block.cap_width), i32(nedges), i32(self.nslots),
                 block.cap_slot, block.cap_coef, block.edge_of_slot, block.lane.hold, arguments[10],
-                block.lane.reg_scalar, block.reserve, block.amounts))
+                block.lane.reg_scalar, block.reserve, sums))
+            fold_sums(block.amounts, sums, ntr, 0, 3)
         if block.audit is not None:
             block.audit.observe(arguments)
 

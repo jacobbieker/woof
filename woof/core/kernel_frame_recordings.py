@@ -3575,10 +3575,10 @@ KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
     frames=MappingProxyType({"theta_m_cumulus": 0, "smag2d_theta_m": 0}),
 ),)
 
-# wrf_smag_hd_w on stored face stresses (kernels/smag2d_w_faces.cu, which
-# composes smag2d.cu), production loader, default and strict
-# (GPUWM_WRF_EXACT=1) numerics, read 2026-11-08 on the RTX A6000 CUDA host
-# with get_kernel + kernel_local_size_bytes: wrf_smag_w_tau_faces and
+# wrf_smag_hd_w on stored defor13/defor23 faces (kernels/smag2d_w_faces.cu,
+# which composes smag2d.cu), production loader, fast and strict numerics at
+# GPUWM_WRF_EXACT=0 and 1, read 2026-11-16 on the RTX A6000 CUDA host with
+# get_kernel + kernel_local_size_bytes: wrf_smag_w_defor_faces and
 # wrf_smag_hd_w_faces both 0 B.
 KERNEL_LOCAL_FRAME_RECORDINGS = tuple(
     replace(row, complete=False)
@@ -3587,7 +3587,7 @@ KERNEL_LOCAL_FRAME_RECORDINGS = tuple(
 KERNEL_LOCAL_FRAME_RECORDINGS += (KernelFrameRecording(
     box="pb", device="NVIDIA RTX A6000",
     compute_capability="86", nvrtc_build="13.4.92", platform_family="linux",
-    measured="2026-11-08", complete=False,
+    measured="2026-11-16", complete=False,
     frames=MappingProxyType({"smag2d_w_faces": 0}),
 ),)
 

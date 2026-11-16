@@ -480,7 +480,13 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   (`smag2d_tke_faces`, the `wrf_tke_rhs` statements on the stored words,
   byte-identical in fast and strict numerics) where each mass point
   re-evaluated up to six of them (`WOOF_TKE_FACES=0` restores the
-  per-point kernel).
+  per-point kernel). The w stress divergence reads the defor13/defor23
+  faces stored once and keeps the stresses' density and K averages at the
+  reader (`smag2d_w_faces`, byte-identical in fast and strict numerics; the
+  earlier stored-stress route moved fast-numerics words through FMA
+  contraction): 9.0 -> 2.6 ms at 49x120x150 and 60 -> 17 ms at 49x300x300
+  on an A6000, 18 -> 3.4 ms and 75 -> 22 ms on an M3 Max
+  (`WOOF_SMAG_W_FACES=0` restores the per-point kernel).
   `WOOF_ACOUSTIC_KPAR=1` takes a level-parallel w''-phi'' solve (32 columns
   x 8 lanes per block; 1.7-2.2x the column kernel's speed per launch on an
   A6000): opt-in, because on CUDA its words are the column kernel's generic
@@ -500,7 +506,20 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   `--scratch`, so a regional run in a fresh work dir no longer recompiles
   in its first step (edi-vr 1 h on an A6000: step 1 from 42.5 s to 3.6 s,
   byte-identical; `WOOF_HEX_SHARED_KERNEL_IMAGES=0` restores the per-run
-  cache). WRF on Metal: the Smagorinsky row kernels' by-value address
+  cache).
+  Hex `woof hex moving`: the resident forecast process prepares the next
+  region beside the running one only when the host has room for a second
+  copy (`WOOF_HEX_MOVING_PREPARE_HOST_GATE=0` always prepares;
+  `WOOF_HEX_MOVING_PREPARE_HOST_RESERVE_GB`, default 2, is the room kept
+  free; the copy is priced at the last preparation's peak growth times
+  `WOOF_HEX_MOVING_PREPARE_HOST_MARGIN`, default 1.25), and on Linux it gives the freed heap back at each move. A skipped
+  preparation makes the move slower; the words are the same.
+  The Metal facade's `get(out=)` reads the evaluated buffer in
+  place from unified memory and copies once, into `out`: the history
+  writers' per-field staging into page-locked blocks takes about half the
+  time (40 Edinburgh 3 km fields: 51-86 ms against 111-143 ms median,
+  byte-identical; `WOOF_METAL_DIRECT_OUT=0` restores the two copies).
+  WRF on Metal: the Smagorinsky row kernels' by-value address
   tables beside their grid pointers, and the spec-zone ring copy's device
   table, are resolved to the buffers they name and ordered by MLX instead
   of a queue drain before and after each launch (Edinburgh 3 km: 26.5 to
@@ -580,8 +599,12 @@ on it:
     12 km geometry for 1 h took about 10 minutes of wall time), but some
     kernel units are refused by name: TEMPO on macOS, Grell-Freitas
     `gfl_columns` and RRFS `mynnedmf_run_l1` on Metal;
-  - the LTS executor's reserve census needs 64-bit atomic adds, which Apple
-    GPUs lack;
+  - the LTS executor's scalar kernels run without 64-bit atomics on Metal:
+    the reserve census counts with two 32-bit atomics and a carry (the same
+    words as CUDA), and the binary64 receipt sums are gathered per element
+    and summed in a fixed order (deterministic on Metal; CUDA's atomic sums
+    vary in the last bits from run to run). So `woof hex moving` and LTS
+    regional runs work on an Apple GPU;
   - the dynamics subcycle runs eager, because the facade has no CUDA graphs;
   - the MPAS WSM6 unit of the water-budget gates (binary64) once had not
     finished its cold compile after 1 h 45 min; it now compiles cold in
