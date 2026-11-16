@@ -595,6 +595,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   and rock and sit about 1 km north of the shoreline: on the Alps 1 km
   domain, 480 lake cells above 2000 m became 8 real reservoirs
   ([docs/high-resolution-static-geography.md](docs/high-resolution-static-geography.md)).
+  On the hex MPAS-suite route, `--physics config_clm_lake_backend=hex-cuda`
+  (opt-in) runs WRF's CLM lake on the LAKEMASK cells of `--surface-statics`,
+  bitwise to WRF's lake kernel on the same inputs. It starts from lakeini and
+  is refused with SST updates, OML, restarts, checkpoints, moving regions and
+  multi-rank or LTS runs
+  ([mpas-physics-seam.md](components/hex/docs/manual/mpas-physics-seam.md)).
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
   tests by name, and main's full run is periodic. Every merge to `main`

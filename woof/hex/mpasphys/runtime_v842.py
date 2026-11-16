@@ -1697,6 +1697,13 @@ def _run_native_dynamics(arguments, config, layout, payload, streams, library,
             raise ValueError('a native-file restart with &diagnostics accumulators on ('+', '.join(held)+') would '
                              'restart their sums from zero: the Registry restart stream holds none of them. Restart '
                              'from this route\'s own checkpoint (--checkpoint-hours/--restart-from), which carries them')
+    from . import clm_lake_v842 as _clm_lake
+    if _clm_lake.enabled(config):
+        # WOOF-only CLM lake (clm_lake_v842): its columns have no carrier yet, so every route that would restart,
+        # move or split them is refused by name rather than starting them again from lakeini.
+        lake_refusal = _clm_lake.refusal(arguments, config, layout, moving=moving, execution=execution)
+        if lake_refusal is not None:
+            raise ValueError(lake_refusal)
     signature=inspect.signature(CudaDryDycoreDriver._step_device_v841).parameters
     missing={'physics_post_transport_callback','physics_mass_loading_count'}-set(signature)
     if config.moist_physics and missing:
@@ -2031,6 +2038,9 @@ def _run_native_dynamics(arguments, config, layout, payload, streams, library,
             native,layout,preserve_tc_mask=bool(getattr(config, 'tc_surface', None)))
         if getattr(config, 'tc_surface', None):
             receipt['tc_lake_mask'] = bind_tc_lake_mask(native, mesh, layout)
+        if _clm_lake.enabled(config):
+            # The lake mask and bathymetry from the mesh's surface statics (woof hex surface-statics).
+            receipt['clm_lake'] = _clm_lake.bind_statics(native, mesh, layout, arguments)
         if limited_area:
             receipt['limited_area_sentinels']=remap_limited_area_sentinels(native,layout)
         from .streams_output_v842 import PhysicsStreams, output_inventory
