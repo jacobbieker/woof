@@ -464,7 +464,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   wall per forecast hour, Edinburgh 3 km about 2 %; `WOOF_DIFF6_MULTI=0`
   restores the per-field launches). Advection folds each species' tendency
   zero-fill into its first accumulating launch (`zero_first`, word-identical
-  on CUDA and Metal). Its advection receipts for the RTX 5090 and RTX PRO 6000
+  on CUDA and Metal). On CUDA the four flux-divergence launches take 32 x 4
+  thread blocks instead of 128-wide rows (word-identical; 6-14 % less kernel
+  time at 150-260 points per row on the A6000; Metal keeps the rows). Its advection receipts for the RTX 5090 and RTX PRO 6000
   (Blackwell) are **not re-pinned**: no Blackwell card was available, so
   `certified_unrepinned` in each fixture's `gpu-receipts.json` records the
   pins and the commit, and the gate warns rather than fails for those pins. An RK stage's lateral specified/relaxation
