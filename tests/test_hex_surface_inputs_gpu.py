@@ -696,3 +696,65 @@ def test_hex_topo_wind_1_columns_are_wrf_topo_wind_coefficients():
             _host(got).reshape(-1).view(np.uint32),
             _host(ref).reshape(-1).view(np.uint32))
     assert np.any(_host(drag.ctopo) != 1.0)
+
+
+def test_hex_lake_initial_state_is_wrf_lakeini_from_the_same_source(monkeypatch, tmp_path):
+    """lake_state_source on hex R1: the seam binds the source's lake state
+    through the same initialize_surface the WRF route runs, and the CLM
+    columns are WRF lakeini's from that initial state, bit for bit."""
+    from woof.core.lake import initialize_lake
+    from woof.ingest import lake_state
+
+    monkeypatch.setenv("WOOF_LAKE_RECEIPT_DIR", str(tmp_path))
+    targets = int(LAKES.sum())
+    source = {
+        "water_temperature": np.array([279.25, 281.5, 277.75])[:targets],
+        "bottom_temperature": np.array([277.5, 277.25, 277.0])[:targets],
+        "mixed_layer_depth": np.array([8.0, 2.5, 20.0])[:targets],
+        "temperature_shape_factor": np.array([0.6, 0.65, 0.7])[:targets],
+        "ice_thickness": np.full(targets, np.nan),
+        "ice_fraction": np.full(targets, np.nan),
+        "ice_temperature": np.full(targets, np.nan),
+    }
+    asked = []
+
+    def fake(name, valid_time, lat, lon, **kwargs):
+        asked.append((name, len(lat)))
+        return ({k: v.copy() for k, v in source.items()},
+                dict(schema="gpuwm.lake-init.v1", status="bound", source=name))
+
+    monkeypatch.setattr(lake_state, "load_state", fake)
+    physics = dict(_physics(), lake_state_source="era5")
+    sealed = _seal(_mapping(physics, _inputs()))
+    kwargs = sealed.arwen_kwargs()
+    seam = suite.run_mpas_column_physics(**kwargs)
+    driver = seam._driver
+    assert asked == [("era5", targets)]
+    assert driver.lake_initialization_receipt["temperature_bound_cells"] == targets
+    tsk = _host(driver.fields["tsk"]).reshape(-1)
+    np.testing.assert_array_equal(tsk[LAKES], source["water_temperature"].astype(np.float32))
+
+    def grid(values):
+        return cp.asarray(np.asarray(values).reshape(GRID))
+
+    host = kwargs["surface"]
+    initial_state = {}
+    for name, values in source.items():
+        full = np.full(NCOL, np.nan, np.float32)
+        full[LAKES] = values
+        initial_state[name] = grid(full)
+    sst = np.asarray(host["tsk"], np.float32).reshape(-1).copy()
+    sst[LAKES] = source["water_temperature"]
+    wrf = {"tsk": grid(sst), "isltyp": grid(host["isltyp"]),
+           "snow": grid(host["snow"]), "xice": grid(host["xice"]),
+           "lakemask": grid(host["lakemask"])}
+    initialize_lake(
+        wrf, latitude=grid(kwargs["latitude_deg"]),
+        lake_depth=grid(host["lake_depth"]), lake_depth_flag=1,
+        use_lakedepth=1, lakedepth_default=50.0, iswater=17, xice_threshold=0.5,
+        initial_state=initial_state)
+    for name in ("lake_columns", "lake_static"):
+        value = _host(driver.fields[name])
+        np.testing.assert_array_equal(
+            _host(wrf[name]).view(np.uint32),
+            value.reshape(value.shape[:-2] + GRID).view(np.uint32), err_msg=name)

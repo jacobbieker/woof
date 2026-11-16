@@ -547,9 +547,15 @@ domain (see the physics table below), and `hailcast_version` its stone
 model: `wrf_39_noaa` (default, the HAILCAST in NOAA's operational HRRR v4)
 or `wrf_461` (WRF v4.6.1's). `lake_state_source` picks the lake
 initial-state row from `woof/data/surface_obs/lake-state-sources.v1.toml`
-(`auto` and `forcing` are the two built-in choices); a research-only row
+(`auto` and `forcing` are the two built-in choices; `era5` reads ERA5's
+FLake lake state keylessly from the Google ARCO mirror, and `auto+era5` uses
+GLSEA where it covers and ERA5 elsewhere; see
+[lake-state-initialization.md](../lake-state-initialization.md)); a research-only row
 also needs `lake_state_path`, its acquired CF NetCDF file, and
 `lake_state_accept_licence` set to that row's licence string.
+`woof go --lakes clm|ic|off` writes these lake keys, plus `sf_lake_physics`
+and `use_lakedepth`, on every domain in a launched copy of the experiment
+([lakes.md](../lakes.md)).
 
 `clos_choice` and `ishallow` configure the Grell-Freitas cumulus scheme
 (`cu_physics = 3`): which closure the deep scheme uses (0, the default,

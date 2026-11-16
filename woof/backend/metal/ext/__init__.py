@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import sys
 import sysconfig
+import threading
 from functools import lru_cache
 from pathlib import Path
 
@@ -163,6 +164,8 @@ def load():
     if libraries is not None:
         libraries.mkdir(parents=True, exist_ok=True)
         module.set_library_dir(str(libraries))
+    if GPU_TIMES_ENV in os.environ:
+        _install_isolation(module, isolated=gpu_times_isolated())
     times = os.environ.get(GPU_TIMES_ENV, "").strip()
     if times and times not in ("0", "1"):
         import atexit
@@ -174,12 +177,127 @@ def load():
 #: a path (not 0 or 1) also writes them there as JSON when the process exits.
 GPU_TIMES_ENV = "WOOF_METAL_GPU_TIMES"
 
+#: WOOF_METAL_GPU_TIMES_ISOLATE (with WOOF_METAL_GPU_TIMES): each launch runs
+#: alone in a command buffer the host waits for, after the lazy MLX work its
+#: inputs needed, which is counted apart under "mlx<" + its key; facade writes
+#: are keyed by their Python call site (launch.cpp; woof.backend.facade._write).
+GPU_TIMES_ISOLATE_ENV = "WOOF_METAL_GPU_TIMES_ISOLATE"
+
+
+def gpu_times_isolated() -> bool:
+    """Whether launches are timed in isolation (keyed per call site)."""
+    return (GPU_TIMES_ENV in os.environ
+            and os.environ.get(GPU_TIMES_ISOLATE_ENV, "").strip() not in ("", "0"))
+
+
+_BACKEND_DIR = str(HERE.parent.parent) + "/"     # .../woof/backend/
+
+#: mlx.core's eval and synchronize as they were before _install_isolation
+_RAW: dict = {}
+_INSTALL_LOCK = threading.Lock()
+
+
+def call_site(depth: int = 2) -> str:
+    """The first caller outside woof.backend, as ``path:line`` from the
+    package root: the key a GPU interval is counted under in isolation."""
+    frame = sys._getframe(depth)
+    while frame is not None and frame.f_code.co_filename.startswith(_BACKEND_DIR):
+        frame = frame.f_back
+    if frame is None:
+        return "?"
+    name = frame.f_code.co_filename
+    root = name.rfind("/woof/")
+    return f"{name[root + 1:] if root >= 0 else name}:{frame.f_lineno}"
+
+
+def raw(name: str):
+    """mlx.core's ``eval`` or ``synchronize`` without the isolation timing."""
+    import mlx.core as mx
+    return _RAW.get(name) or getattr(mx, name)
+
+
+def run_launches_apart(module, arrays) -> None:
+    """WOOF_METAL_GPU_TIMES_ISOLATE: run each unevaluated launch in the graph
+    of ``arrays`` on its own, after the lazy MLX work its inputs need (counted
+    under ``"mlx<" + its key``), waiting for each, so no launch is encoded
+    inside, and counted with, a later eval's command buffer."""
+    evaluate, sync = raw("eval"), raw("synchronize")
+    sync()
+    for launch in module.pending_launches(list(arrays)):
+        key, inputs = module.launch_inputs(launch)
+        if module.any_unscheduled(inputs):
+            module.time_current_buffer("mlx<" + key)
+            evaluate(*inputs)
+            sync()
+        evaluate(launch)
+        sync()
+
+
+def _install_isolation(module, *, isolated: bool) -> None:
+    """WOOF_METAL_GPU_TIMES: every explicit ``mx.eval`` and ``mx.async_eval``
+    (the facade's pending values, reads, health checks) is counted under
+    ``"mlx@" + its call site`` (its first command buffer), so ``gpu_busy``
+    covers lazy MLX work too.  With WOOF_METAL_GPU_TIMES_ISOLATE each also
+    waits for earlier work first and is waited for, so it is timed apart from
+    the launches."""
+    import mlx.core as mx
+    with _INSTALL_LOCK:
+        # load() is lru_cached, which does not stop two threads (the kernel
+        # prewarm pool) building it at once: wrapping twice would make the
+        # second wrapper's "raw" eval the first wrapper, and recurse.
+        if _RAW:
+            return
+        _RAW.update(eval=mx.eval, synchronize=mx.synchronize)
+        _wrap(module, mx, isolated)
+
+
+def _wrap(module, mx, isolated: bool) -> None:
+    sync = _RAW["synchronize"]
+
+    def arrays(values, out):
+        # The arrays of an eval's arguments, or None for a tree this does not walk.
+        for value in values:
+            if isinstance(value, mx.array):
+                out.append(value)
+            elif isinstance(value, (list, tuple)):
+                if arrays(value, out) is None:
+                    return None
+            elif isinstance(value, dict):
+                if arrays(value.values(), out) is None:
+                    return None
+            else:
+                return None
+        return out
+
+    def timed(fn):
+        def call(*args, **kwargs):
+            found = None if kwargs else arrays(args, [])
+            if found is not None and not module.any_unscheduled(found):
+                # MLX encodes nothing for this call (every array is scheduled
+                # already): no buffer to time, and nothing to wait for.
+                return fn(*args, **kwargs)
+            if isolated and found is not None:
+                run_launches_apart(module, found)
+            if isolated:
+                sync()
+            module.time_current_buffer("mlx@" + call_site())
+            result = fn(*args, **kwargs)
+            if isolated:
+                sync()
+            return result
+        call.__name__, call.__doc__ = fn.__name__, fn.__doc__
+        return call
+
+    mx.eval = timed(mx.eval)
+    mx.async_eval = timed(mx.async_eval)
+
 
 def write_gpu_times(module, path) -> None:
-    """``{kernel: {"launches": n, "gpu_seconds": s}}``, slowest first, to ``path``
-    (``{pid}`` in it is this process's id)."""
+    """``{key: {"launches": n, "gpu_seconds": s, "min_ms": a, "max_ms": b}}``,
+    slowest first, to ``path`` (``{pid}`` in it is this process's id)."""
     import json
     rows = sorted(module.gpu_times(), key=lambda row: -row[2])
     target = Path(str(path).replace("{pid}", str(os.getpid())))
-    target.write_text(json.dumps({k: {"launches": n, "gpu_seconds": round(s, 6)} for k, n, s in rows},
-                                 indent=1), encoding="utf-8")
+    target.write_text(json.dumps({k: {"launches": n, "gpu_seconds": round(s, 6),
+                                      "min_ms": round(lo * 1e3, 4), "max_ms": round(hi * 1e3, 4)}
+                                  for k, n, s, lo, hi in rows}, indent=1), encoding="utf-8")
