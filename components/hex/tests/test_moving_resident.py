@@ -461,7 +461,9 @@ def test_the_preparation_is_skipped_when_the_host_has_no_room_for_a_second_copy(
     resident._R.prep_host_bytes = 10 * GiB
     gate = resident.preparation_host_gate(available=15 * GiB, rss=30 * GiB)
     assert gate['admitted'] and gate['priced_from'] == 'last preparation'
-    assert resident.preparation_host_gate(available=None, rss=30 * GiB)['admitted']   # unknown is not a refusal
+    from woof.core import preflight
+    monkeypatch.setattr(preflight, 'host_available_bytes', lambda: None)
+    assert resident.preparation_host_gate(rss=30 * GiB)['admitted']   # an unknown is not a refusal
     monkeypatch.setenv('WOOF_HEX_MOVING_PREPARE_HOST_GATE', '0')
     resident._R.prep_host_bytes = None
     assert resident.preparation_host_gate(available=1, rss=30 * GiB)['admitted']
