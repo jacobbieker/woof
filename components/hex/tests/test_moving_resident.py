@@ -415,3 +415,33 @@ def test_gpu_driver_budget_excludes_global_mesh_parent_and_shared_host_aliases()
     mesh = SimpleNamespace(arrays={'local':local}, partition_source_mesh=SimpleNamespace(arrays={'all':parent}))
     grid = SimpleNamespace(vertical_grid=SimpleNamespace(zz=local), terrain_metrics=SimpleNamespace(zb_cell=local))
     assert _driver_input_bytes((mesh,grid,None,SimpleNamespace(rho=local),None,None,('qv',))) == local.nbytes
+
+
+def test_a_move_to_another_member_than_the_record_named_renames_the_record(tmp_path):
+    """The record named member A, the policy moved to B: A's record goes and B's is named before the verdict.
+
+    THE BREAKAGE THIS PREVENTS (Milton 2024, 96 km global, 2026-11-15): name_resident_move dropped A's record and
+    returned, so the stop found no record for B, the process sealed its carrier to the file and exited, and 2 of
+    the 6 moves started a cold process.
+    """
+    calls, events = [], []
+    (tmp_path / 'control').mkdir()
+    record = tmp_path / 'control' / moving_run.RESIDENT_NEXT
+    record.write_text(json.dumps(dict(member='A')))
+    proc = SimpleNamespace(poll=lambda: None)
+    ctl = SimpleNamespace(a=SimpleNamespace(resident=True), current_seg=tmp_path, current_proc=proc,
+                          prelaunched=dict(proc=proc, seg=tmp_path / 'next', target='A', resident=True),
+                          state=dict(current='S', members=dict(S=dict(grid='g'))),
+                          operator_path=lambda s, t: f'{s}--{t}', resident_ready=lambda: True,
+                          event=lambda name, **kw: events.append(name))
+    ctl.drop_prelaunch = lambda why: moving_run.Controller.drop_prelaunch(ctl, why)
+
+    def launch(kind, **kw):
+        calls.append(kw['member_name'])
+        return proc, tmp_path / 'next', tmp_path / 'next' / 'control', dict(index=1, resident=True)
+    ctl.launch = launch
+    moving_run.Controller.name_resident_move(ctl, 'B', 3600.0, tmp_path / 'control')
+    assert not record.exists()
+    assert calls == ['B']
+    assert ctl.prelaunched['target'] == 'B'
+    assert events == ['prelaunch-dropped', 'prelaunch']
