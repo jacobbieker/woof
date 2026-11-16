@@ -566,6 +566,15 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   28 s. With an output every 10 minutes, the hour costs 209 s instead of
   2,578 s; with no diagnostic it costs 61 s. Eight wavelengths in one call
   on such a domain hold over 13 GB of host memory.
+- **Lakes.** `lake_state_source = "era5"` or `"auto+era5"` (opt-in) starts
+  lakes outside GLSEA from ERA5's FLake lake state (keyless, Google ARCO),
+  including the CLM lake column's profile, instead of the forcing's skin (on
+  the GFS route, the nearest GFS water: 286-291 K for the Alpine lakes on
+  2026-11-09). The forcing's ice analysis stays in charge of which lakes are
+  frozen. Against Eawag's Simstrat on six Swiss lakes, the error of the
+  starting lake temperature falls from 4.5 K (warm) to 2.7 K (mostly cold),
+  but ERA5 is worse at Constance and Maggiore
+  ([docs/lake-state-initialization.md](docs/lake-state-initialization.md)).
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
   tests by name, and main's full run is periodic. Every merge to `main`

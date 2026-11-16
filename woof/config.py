@@ -8878,7 +8878,8 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
             raise ValueError("sf_ocean_physics requires surface-layer fluxes: UST, HFX and LH would otherwise stay zero")
     from woof.ingest.lake_state import source_rows
     rows = source_rows()
-    if cfg.lake_state_source not in ("auto", "forcing", *rows):
+    from woof.ingest.lake_state import CHAINS
+    if cfg.lake_state_source not in ("auto", "forcing", *CHAINS, *rows):
         raise ConfigurationRefused(
             f"lake_state_source={cfg.lake_state_source!r} is unknown; "
             "an unknown row would leave requested lake observations unbound")
