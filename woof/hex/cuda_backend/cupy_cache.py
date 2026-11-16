@@ -70,9 +70,15 @@ def forecast_directory(scratch):
     forecast bit. The one thing a shared image keeps from the run that compiled it is CuPy's
     temporary program path, which only an ``assert`` failure message would print -- as a re-run
     in the same ``--scratch`` always did. ``WOOF_HEX_SHARED_KERNEL_IMAGES=0`` restores the
-    per-run cache.
+    per-run cache, and a box root the run cannot create ``cupy`` in falls back to it as well.
     """
     if os.environ.get(SHARED_ENV, "1") == "0":
         return scratch
     from woof.hex.kernel_warm import cache_root
-    return cache_root() / "cupy"
+    shared = cache_root() / "cupy"
+    try:
+        shared.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        # A read-only box root must not stop a forecast that can write its own scratch.
+        return scratch
+    return shared

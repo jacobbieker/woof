@@ -30,3 +30,21 @@ def test_switch_off_keeps_the_per_run_scratch(tmp_path, monkeypatch):
     monkeypatch.setenv(cupy_cache.SHARED_ENV, "0")
     monkeypatch.setenv("WOOF_HEX_KERNEL_CACHE_ROOT", str(tmp_path / "box"))
     assert cupy_cache.forecast_directory(tmp_path / "scratch") == tmp_path / "scratch"
+
+
+def test_an_unwritable_box_root_falls_back_to_the_scratch(tmp_path, monkeypatch):
+    import os
+
+    import pytest
+
+    if os.geteuid() == 0:
+        pytest.skip("root ignores directory permissions")
+    root = tmp_path / "box"
+    root.mkdir()
+    root.chmod(0o555)
+    try:
+        monkeypatch.delenv(cupy_cache.SHARED_ENV, raising=False)
+        monkeypatch.setenv("WOOF_HEX_KERNEL_CACHE_ROOT", str(root))
+        assert cupy_cache.forecast_directory(tmp_path / "scratch") == tmp_path / "scratch"
+    finally:
+        root.chmod(0o755)
