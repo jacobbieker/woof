@@ -7893,8 +7893,12 @@ def scratch_slot_registry(cfg: RunConfig, *,
             slots[f"smag_fy_{extra}"] = ys
         # The u/v stress divergences read the stress coefficients stored
         # once per step (dycore.launch_wrf_smag_uv_faces): rho K at the
-        # mass points, rhoavg kavg at the corners.
-        slots.update(smag_cm=m, smag_c12=(nz, ny + 1, nx + 1))
+        # mass points, rhoavg kavg at the corners.  km_opt=5 (km5.compute)
+        # and diff_opt=1 (the coordinate route) never reach that launch.
+        from woof.core.dycore import _smag_uv_faces_enabled
+        if (cfg.km_opt != 5 and cfg.diff_opt != 1
+                and _smag_uv_faces_enabled()):
+            slots.update(smag_cm=m, smag_c12=(nz, ny + 1, nx + 1))
     if cfg.diff_6th_opt:
         slots.update(diff6_z=fl, diff6_m=m)
         # The NOAA WRFV3.9 fork's edge-to-edge form (diff_6th_form =

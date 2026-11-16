@@ -2632,12 +2632,16 @@ def _compute_wrf_moist_theta_mixing(state, cfg, km, kh, specs, *, time_t,
         if budget is not None:
             budget[...] = increment
     exempt = chem_mix2_exempt_slots(state, cfg)
+    # The u and v rows read the same horizontal K: their stress
+    # coefficients are stored once.
+    faces = launch_wrf_smag_uv_faces(state, cfg, specs[0][2], time_t=time_t)
     for f, _tend, xk, _c1, _c2, slot, stag in specs:
         if slot not in exempt:
             launch_wrf_smag2d_hd(
                 state, cfg, f, xk, buffers[slot], stagger=stag,
                 time_t=time_t, full_theta=(slot == "smag_rth"),
-                deformation=deformation if stag in ("x", "y") else None)
+                deformation=deformation if stag in ("x", "y") else None,
+                faces=faces if stag in ("x", "y") else None)
         if seed.get(slot) is None:
             _zero_open_strips(buffers[slot], cfg, 1)
         else:
