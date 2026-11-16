@@ -470,6 +470,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   about 96 % of the queue drains on that mesh, and the hour takes 0.59x the
   wall time on edi-vr and 0.64x on a uniform 12 km mesh. Both are
   byte-identical.
+  Hex `woof hex moving`: the resident forecast process prepares the next
+  region beside the running one only when the host has room for a second
+  copy (`WOOF_HEX_MOVING_PREPARE_HOST_GATE=0` always prepares;
+  `WOOF_HEX_MOVING_PREPARE_HOST_RESERVE_GB`, default 2, is the room kept
+  free), and on Linux it gives the freed heap back at each move. A skipped
+  preparation makes the move slower; the words are the same.
   `WOOF_METAL_GPU_TIMES` times each kernel.
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
