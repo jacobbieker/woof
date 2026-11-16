@@ -4904,7 +4904,66 @@ def bind_native_dynamics(arguments: argparse.Namespace, native_text: str) -> str
         print("woof hex: MPAS suite dycore schedule " + ", ".join(f"{k}={v}" for k, v in options.items())
               + " (explicit flags)", file=sys.stderr, flush=True)
         native_text = set_namelist_options(native_text, {"nhyd_model": options})
+    native_text = bind_native_damping(arguments, native_text)
     return bind_native_dynamics_overrides(arguments, native_text)
+
+
+#: The door's upper-damping flags, the MPAS &damping option each one names and the flag's default
+#: (forecast parser), which is also MPAS-A v8.4.2's Registry default (Registry.xml:291-325).
+NATIVE_DAMPING_FLAGS = (
+    ("cam_coefficient", "--cam-coefficient", "config_mpas_cam_coef", 0.0),
+    ("cam_damping_levels", "--cam-damping-levels", "config_number_cam_damping_levels", 4),
+    ("rayleigh_u", "--rayleigh-u", "config_rayleigh_damp_u", False),
+    ("damping_start_m", "--damping-start-m", "config_zd", 22000.0),
+)
+
+
+def bind_native_damping(arguments: argparse.Namespace, native_text: str) -> str:
+    """The MPAS suite route's upper damping: each door flag set off its default becomes its &damping option.
+
+    MPAS-A v8.4.2 reads config_mpas_cam_coef and config_number_cam_damping_levels (the CAM viscosity floor in
+    the top levels, mpas_atm_time_integration.F:6400-6402), config_rayleigh_damp_u with
+    config_number_rayleigh_damp_u_levels and config_rayleigh_damp_u_timescale_days (the horizontal Rayleigh
+    damping of u, :6608-6630) and config_zd (the w damping's base) from &damping; the route's dycore runs each
+    of them (cuda_driver.py).  The two Rayleigh knobs without a flag of their own come through ``--dynamics``.
+    THE BREAKAGE THIS PREVENTS (obs D1, 2026-11-16): this route returns before resolve_request, the only reader
+    of these four flags, so the 80-level high-top declaration's runtime block (vertical_spec.forecast_arguments)
+    could not run on the MPAS suite: its --dynamics level count was refused and its flags would have been
+    dropped.  A flag at its default leaves the namelist (or the Registry default, the same value) in charge; a
+    namelist naming a different value is refused as two values for one run.
+    """
+    from .mpasphys.forecast_v842 import namelist_option, set_namelist_options
+
+    options: dict[str, Any] = {}
+    for attribute, flag, option, default in NATIVE_DAMPING_FLAGS:
+        given = getattr(arguments, attribute, default)
+        if given is None or given == default:
+            continue
+        value = type(default)(given)
+        named = namelist_option(native_text, "damping", option)
+        if named is not None:
+            if not _namelist_value_matches(named, value):
+                raise ValueError(f"{flag} {given} and the namelist {option} {named} name two values for one run")
+            continue
+        options[option] = value
+    if options:
+        print("woof hex: MPAS suite upper damping " + ", ".join(f"{k}={v}" for k, v in options.items())
+              + " (explicit flags)", file=sys.stderr, flush=True)
+        native_text = set_namelist_options(native_text, {"damping": options})
+    seconds = getattr(arguments, "radiation_seconds", None)
+    if seconds is not None:
+        # The route's radiation interval is the namelist's config_radtlw/radtsw_interval (MPAS default 30 min);
+        # a different --radiation-seconds would be recorded and not run, so it is refused, as --dt is.
+        from .mpasphys.driver_v842 import interval_seconds
+        for option in ("config_radtlw_interval", "config_radtsw_interval"):
+            named = namelist_option(native_text, "physics", option)
+            have = (float(interval_seconds(named)) if named not in (None, "", "none")
+                    else float(mpas_defaults.DEFAULT_RADIATION_SECONDS))
+            if float(seconds) != have:
+                raise ValueError(f"--radiation-seconds {float(seconds):g} and the MPAS suite's {option} "
+                                 f"({have:g} s) name two radiation intervals; set the interval in the "
+                                 "--physics-namelist's &physics")
+    return native_text
 
 
 #: The namelist groups ``--dynamics`` reaches on the MPAS suite route: the dycore's own.  The other groups a
