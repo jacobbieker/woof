@@ -4,15 +4,21 @@
 defor23 face once (``kernels/smag2d_tke_faces.cu`` wrf_tke_defor_faces) and
 forms the TKE source from the stored faces (wrf_tke_rhs_faces), where
 ``wrf_tke_rhs`` re-evaluated every face at each of the up to four points
-that read it.  Both compile with smag2d's IEEE options (no contraction), so
-the stored word is the returned word, and every use squares or sums the
+that read it.  A face is ``dwdx + dudz``: its last operation is an add, so
+the stored word is the returned word even under fast numerics (which drop
+``--fmad=false`` and let NVRTC contract a product into the add that consumes
+it; a stored product would not contract), and every use squares or sums the
 returned float itself.  These cases hold the two routes to the same TKE
 tendency (and budget) words with random winds and TKE on a periodic and an
-open domain, with the surface drag and heat-flux terms on, and in both
-numerics modes (run with ``GPUWM_WRF_EXACT=1`` as well); and pin that
+open domain, with the surface drag and heat-flux terms on, in a child
+process under the default (fast) numerics as well as strict (the battery's
+conftest pins strict; run with ``GPUWM_WRF_EXACT=1`` as well); and pin that
 wrf_tke_rhs_faces is wrf_tke_rhs's text with the twelve calls substituted.
 """
+import os
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -96,13 +102,13 @@ def test_rhs_faces_is_wrf_tke_rhs_with_the_calls_substituted():
     assert not re.search(r"wrf_defor(13|23)\(", stored)
 
 
-def _rhs(cfg, state, route, monkeypatch):
+def _rhs(cfg, state, route):
     import cupy as cp
 
     from woof.core.dycore import launch_wrf_tke_km
     from woof.core import tke_budget
 
-    monkeypatch.setenv("WOOF_TKE_FACES", route)
+    os.environ["WOOF_TKE_FACES"] = route
     nz, ny, nx = state.p.shape
     km = state.scratch((nz, ny, nx), "smag_km")
     kh = state.scratch((nz, ny, nx), "smag_kh")
@@ -118,13 +124,34 @@ def _rhs(cfg, state, route, monkeypatch):
     return out
 
 
-@requires_gpu
-@pytest.mark.parametrize("boundary", ["periodic", "open"])
-@pytest.mark.parametrize("isfflx", [0, 1])
-def test_stored_faces_deposit_the_words_wrf_tke_rhs_deposits(boundary, isfflx, monkeypatch):
+def _identity(boundary, isfflx):
+    """Child-process body: both routes, the same words."""
     cfg, state = _state(boundary == "open", isfflx)
-    words = {route: _rhs(cfg, state, route, monkeypatch) for route in ("0", "1")}
+    words = {route: _rhs(cfg, state, route) for route in ("0", "1")}
     assert np.all(np.isfinite(words["1"]["rtke"].view(np.float32)))
     assert np.any(words["1"]["rtke"] != 0)
     for name in words["0"]:
         assert np.array_equal(words["1"][name], words["0"][name]), name
+    print("IDENTICAL")
+
+
+@requires_gpu
+@pytest.mark.parametrize("numerics", ["fast", "strict"])
+@pytest.mark.parametrize("boundary", ["periodic", "open"])
+@pytest.mark.parametrize("isfflx", [0, 1])
+def test_stored_faces_deposit_the_words_wrf_tke_rhs_deposits(boundary, isfflx, numerics):
+    if numerics == "fast" and os.environ.get("GPUWM_WRF_EXACT", "0") == "1":
+        pytest.skip("GPUWM_WRF_EXACT=1 is strict numerics")
+    here = Path(__file__).resolve().parent
+    # conftest pins strict at import; the child selects its mode after that
+    # import and before the first compile, which fixes the process's mode.
+    code = (f"import os, sys; sys.path.insert(0, {str(here)!r}); "
+            "import test_smag2d_tke_faces as t; "
+            f"os.environ['GPUWM_NUMERICS'] = {numerics!r}; "
+            "from woof import numerics; "
+            f"assert numerics.mode() == {numerics!r}, numerics.mode(); "
+            f"t._identity({boundary!r}, {isfflx!r})")
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True,
+                            text=True, env=dict(os.environ), timeout=900)
+    assert result.returncode == 0 and "IDENTICAL" in result.stdout, (
+        result.stdout[-4000:] + result.stderr[-4000:])
