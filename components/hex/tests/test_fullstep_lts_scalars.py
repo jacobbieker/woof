@@ -240,6 +240,16 @@ def _launch(kernel, total, args):
     kernel(((int(total) + 255) // 256,), (256,), args)
 
 
+def _launch_summed(kernel, total, args, sums, ntr, first, stride):
+    """A launch whose last argument takes the kernel's FP64 sums (a per-element buffer on Metal)."""
+    import cupy as cp
+    from woof.hex.cuda_fullstep_lts_scalars import fold_sums, sums_buffer
+
+    buffer = sums_buffer(cp, sums, total)
+    _launch(kernel, total, (*args, buffer))
+    fold_sums(sums, buffer, ntr, first, stride)
+
+
 @gpu
 def test_reserve_cap_capture_and_apply_match_numpy():
     import cupy as cp
@@ -288,9 +298,9 @@ def test_reserve_cap_capture_and_apply_match_numpy():
     # no dry mass has left any column: the allowance is the reserve alone
     quiet = (cp.asarray(np.maximum(reserve, 0.0)), cp.ones((nlev, rows), dtype=cp.float64),
              cp.zeros((nlev, nslots), dtype=cp.float64))
-    _launch(kernels["lts_reserve_cap"], ntr * nlev * rows, (
+    _launch_summed(kernels["lts_reserve_cap"], ntr * nlev * rows, (
         i32(ntr), i32(nlev), i32(rows), i32(width), i32(nedges), i32(nslots), *table,
-        i32(1), np.float64(margin), d_reserve, *quiet, d_up, d_res, d_hold, stats, amounts))
+        i32(1), np.float64(margin), d_reserve, *quiet, d_up, d_res, d_hold, stats), amounts, ntr, 1, 3)
     np.testing.assert_array_equal(cp.asnumpy(d_up), up.astype(np.float32))
     np.testing.assert_array_equal(cp.asnumpy(d_res), res.astype(np.float32))
     np.testing.assert_array_equal(cp.asnumpy(d_hold), hold)
@@ -314,20 +324,20 @@ def test_reserve_cap_capture_and_apply_match_numpy():
     free_up, free_res = cp.asarray(upwind), cp.asarray(residual)
     free_stats = cp.zeros(4, dtype=cp.uint64)
     request = np.abs(upwind).max() + np.abs(residual).max()
-    _launch(kernels["lts_reserve_cap"], ntr * nlev * rows, (
+    _launch_summed(kernels["lts_reserve_cap"], ntr * nlev * rows, (
         i32(ntr), i32(nlev), i32(rows), i32(width), i32(nedges), i32(nslots), *table,
         i32(1), np.float64(margin), cp.asarray(roomy), cp.asarray(roomy * request),
         cp.ones((nlev, rows), dtype=cp.float64), cp.asarray(air_out),
-        free_up, free_res, cp.zeros((ntr, nlev, nslots), dtype=cp.float32), free_stats,
-        cp.zeros(3 * ntr, dtype=cp.float64)))
+        free_up, free_res, cp.zeros((ntr, nlev, nslots), dtype=cp.float32), free_stats),
+        cp.zeros(3 * ntr, dtype=cp.float64), ntr, 1, 3)
     np.testing.assert_array_equal(cp.asnumpy(free_up), upwind)
     np.testing.assert_array_equal(cp.asnumpy(free_res), residual)
     assert not cp.asnumpy(free_stats).any()
     # capture: the packet joins the register and leaves the reserve
     d_register = cp.zeros((ntr, nlev, nslots), dtype=cp.float64)
-    _launch(kernels["lts_packet_capture"], ntr * nlev * rows, (
+    _launch_summed(kernels["lts_packet_capture"], ntr * nlev * rows, (
         i32(ntr), i32(nlev), i32(rows), i32(width), i32(nedges), i32(nslots), *table,
-        d_hold, d_res, d_register, d_reserve, amounts))
+        d_hold, d_res, d_register, d_reserve), amounts, ntr, 0, 3)
     register = np.zeros((ntr, nlev, nslots))
     left = reserve.copy()
     for row in range(rows):
@@ -396,14 +406,14 @@ def test_donor_guard_removes_what_the_packets_took_beyond_the_upwind_export_and_
         upwind=upwind, residual=residual, mass=mass, vres=vres).items()}
     stats = cp.zeros(4, dtype=cp.uint64)
     i32 = np.int32
-    _launch(kernels["lts_donor_guard"], ntr * 1, (
+    _launch_summed(kernels["lts_donor_guard"], ntr * 1, (
         i32(ntr), i32(nlev), i32(1), i32(1), i32(ncells), i32(nedges), i32(nslots), i32(max_edges), dt,
         cp.asarray(np.array([2], np.int32)), cp.asarray(np.array([1], np.int32)), cp.asarray(coef.reshape(-1)),
         cp.asarray(register), cp.asarray(air), cp.asarray(np.full(5, 2, np.int32)),
         cp.asarray(edges_on_cell.reshape(-1)),
         cp.asarray(acoustic_sign.reshape(-1)), cp.asarray(inv_area), cp.asarray(packet_edge),
         cp.asarray(source_old), cp.asarray(rho_old), cp.asarray(ww), cp.asarray(rdzw),
-        d["upwind"], d["residual"], d["mass"], d["vres"], stats, cp.zeros(3 * ntr, dtype=cp.float64)))
+        d["upwind"], d["residual"], d["mass"], d["vres"], stats), cp.zeros(3 * ntr, dtype=cp.float64), ntr, 2, 3)
     new_up, new_mass = cp.asnumpy(d["upwind"]).astype(np.float64), cp.asnumpy(d["mass"]).astype(np.float64)
     assert int(cp.asnumpy(stats)[0]) > 0
     # the packet edge and every other column are untouched

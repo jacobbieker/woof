@@ -68,6 +68,22 @@ START, MID, END = 0, 1, 2
 _RESERVE_MARGIN = 1.0 - 2.0 ** -20
 
 _SOURCE = CUDA_FTZ_HELPERS + r"""
+/* The interface statistics: counts (LTS_COUNT) and per-tracer FP64 sums
+   (LTS_SUM) that only the receipt reads.  Metal has no 64-bit atomic add
+   (woof/backend/metal/prelude.h): there a count is the low 32-bit word's
+   atomic plus its carry into the high word, the same integer, and a sum is
+   added into the thread's own element of a per-element buffer the host
+   zeroes before the launch and sums per tracer after it (ScalarInterfaces.run),
+   so its order is fixed where CUDA's atomics leave it to the schedule. */
+#ifdef __WOOF_METAL__
+#define LTS_COUNT(p) do { unsigned int *lts_word_ = (unsigned int *)(p); \
+    if (atomicAdd(lts_word_, 1u) == 0xFFFFFFFFu) atomicAdd(lts_word_ + 1, 1u); } while (0)
+#define LTS_SUM(sums, slot, value) ((sums)[element] += (value))
+#else
+#define LTS_COUNT(p) atomicAdd((p), 1ULL)
+#define LTS_SUM(sums, slot, value) atomicAdd(&(sums)[slot], (value))
+#endif
+
 #define LTS_LOOP(total) \
     for (long long element = (long long)blockDim.x * blockIdx.x + threadIdx.x; \
          element < (long long)(total); element += (long long)gridDim.x * blockDim.x)
@@ -212,11 +228,11 @@ extern "C" __global__ void lts_donor_guard(
                between a scalar packet and a mass packet is not an overdraw */
             if (reduce <= (native > 0.0 ? 4.0e-6 * (fabs(exported) + outflow + fabs(content)) : 0.0))
                 continue;
-            if (reduce > outflow) atomicAdd(&stats[1], 1ULL);
+            if (reduce > outflow) LTS_COUNT(&stats[1]);
             if (outflow <= 0.0) continue;
-            atomicAdd(&stats[0], 1ULL);
+            LTS_COUNT(&stats[0]);
             const double keep = reduce < outflow ? (outflow - reduce) / outflow : 0.0;
-            atomicAdd(&amounts[3 * tracer + 2], (1.0 - keep) * outflow / inverse_area);
+            LTS_SUM(amounts, 3 * tracer + 2, (1.0 - keep) * outflow / inverse_area);
             const float scale = (float)keep;
             for (int s = 0; s < count; ++s) {
                 const int edge = edges_on_cell[c * max_edges + s];
@@ -289,13 +305,13 @@ extern "C" __global__ void lts_reserve_cap(
         if (low > available) {
             keep_low = available / low;
             keep_high = 0.0;
-            atomicAdd(&stats[2], 1ULL);
+            LTS_COUNT(&stats[2]);
         } else if (low + high > available) {
             keep_high = (available - low) / high;
-            atomicAdd(&stats[3], 1ULL);
+            LTS_COUNT(&stats[3]);
         }
         if (keep_high < 1.0)
-            atomicAdd(&amounts[3 * (tk / nlev) + 1],
+            LTS_SUM(amounts, 3 * (tk / nlev) + 1,
                       (1.0 - keep_low) * low + (1.0 - keep_high) * high);
         for (int w = 0; w < width; ++w) {
             const double c = coef[row * width + w];
@@ -337,7 +353,7 @@ extern "C" __global__ void lts_packet_capture(
             moved += fabs(packet);
         }
         reserve[tk * n + row] -= net;
-        if (moved != 0.0) atomicAdd(&amounts[3 * (tk / nlev)], moved);
+        if (moved != 0.0) LTS_SUM(amounts, 3 * (tk / nlev), moved);
     }
 }
 
@@ -396,8 +412,8 @@ extern "C" __global__ void lts_clamp_audit(
         value = mpas_sub(value, mpas_mul(rdzw[k], mpas_sub(
             vertical_residual[qi + ncells], vertical_residual[qi])));
         if (value < 0.0f) {
-            atomicAdd(&created[tracer], -(double)value * weight[(long long)k * nowned + cell]);
-            atomicAdd(&count[tracer], 1ULL);
+            LTS_SUM(created, tracer, -(double)value * weight[(long long)k * nowned + cell]);
+            LTS_COUNT(&count[tracer]);
         }
     }
 }
@@ -413,6 +429,27 @@ _FINISH = ("fct_finish_v841", "fct_finish_elem_v841")
 STAT_NAMES = ("donor_guard_levels", "packets_overdrew_levels", "reserve_capped_low_order",
               "reserve_capped_residual")
 AMOUNT_NAMES = ("packet_throughput", "withheld_by_reserve_cap", "withheld_by_donor_guard")
+
+
+def per_element_sums() -> bool:
+    """Whether the kernels' FP64 sums (``LTS_SUM``) go to a per-element buffer: Metal, which has no 64-bit
+    atomic add, so the unit did not compile there and moving runs (LTS active) were CUDA only."""
+    from woof import backend
+    return backend.active() == "mlx"
+
+
+def sums_buffer(cp: Any, sums: Any, total: int) -> Any:
+    """The buffer a launch of ``total`` elements adds its ``LTS_SUM`` terms into: ``sums`` itself (CUDA's
+    atomics), or on Metal a zeroed per-element buffer :func:`fold_sums` reduces after the launch."""
+    return cp.zeros(max(int(total), 1), dtype=cp.float64) if per_element_sums() else sums
+
+
+def fold_sums(sums: Any, buffer: Any, ntr: int, first: int, stride: int) -> None:
+    """Add a per-element buffer into ``sums[first + stride * tracer]``.  Every kernel's elements are tracer
+    major, so a tracer's terms are one contiguous run of the buffer; each run is summed in one fixed order."""
+    if buffer is sums or int(ntr) < 1:
+        return
+    sums[first::stride][:ntr] += buffer.reshape(int(ntr), -1).sum(axis=1)
 
 
 def tap_kernel(module: Any, cache: Any, name: str, *, before: Any = None, after: Any = None,
@@ -526,11 +563,14 @@ class ClampAudit:
         i32 = np.int32
         ntr, nlev, ncells, nedges, max_edges = (int(v) for v in arguments[:5])
         total = ntr * nlev * self.n_owned
+        created = self.created[first:first + ntr]
+        sums = sums_buffer(self.cp, created, total)
         self._kernel(((total + 255) // 256,), (256,), (
             i32(ntr), i32(nlev), i32(self.n_owned), i32(ncells), i32(nedges), i32(max_edges),
             arguments[5], arguments[6], arguments[7], arguments[8], arguments[9],
             arguments[10], arguments[11], arguments[13], self.weight,
-            self.created[first:first + ntr], self.count[first:first + ntr]))
+            sums, self.count[first:first + ntr]))
+        fold_sums(created, sums, ntr, 0, 1)
 
     def read(self) -> dict[str, list[float]]:
         cp = self.cp
@@ -631,6 +671,7 @@ class _ClassScalars:
                 i32(ntr), i32(nlev), i32(count), i32(nedges), i32(owner.nslots),
                 klass.coarse_edge, klass.coarse_slot, reg_scalar, upwind, residual))
             if owner.guard:
+                sums = sums_buffer(owner.cp, amounts, ntr * self.rows)
                 owner.run("lts_donor_guard", ntr * self.rows, (
                     i32(ntr), i32(nlev), i32(self.rows), i32(klass.reflux_width), i32(ncells),
                     i32(nedges), i32(owner.nslots), i32(max_edges), dt,
@@ -638,16 +679,19 @@ class _ClassScalars:
                     owner.active.reg_mass_fine,
                     counts, edges, signs, inverse_area, self.packet_edge,
                     source_old, rho_old, ww, rdzw, upwind, residual, mass, vertical_residual,
-                    self.stats, amounts))
+                    self.stats, sums))
+                fold_sums(amounts, sums, ntr, 2, 3)
         if self.has_fine_side:
             parent = owner.classes[klass.index - 1]
             pk = parent.klass
+            sums = sums_buffer(owner.cp, amounts, ntr * nlev * parent.rows)
             owner.run("lts_reserve_cap", ntr * nlev * parent.rows, (
                 i32(ntr), i32(nlev), i32(parent.rows), i32(pk.reflux_width), i32(nedges),
                 i32(owner.nslots), pk.reflux_slot, pk.reflux_coef, self.edge_of_slot,
                 i32(1 if owner.cap else 0), np.float64(_RESERVE_MARGIN),
                 parent.reserve[rows], parent.content_start[rows], parent.air_start,
-                owner.active.reg_mass_fine, upwind, residual, hold, self.stats, amounts))
+                owner.active.reg_mass_fine, upwind, residual, hold, self.stats, sums))
+            fold_sums(amounts, sums, ntr, 1, 3)
 
     def on_finish(self, arguments: tuple[Any, ...]) -> None:
         klass, owner = self.klass, self.owner
@@ -657,11 +701,13 @@ class _ClassScalars:
         if self.has_fine_side:
             parent = owner.classes[klass.index - 1]
             pk = parent.klass
+            amounts = self.amounts[3 * rows.start:3 * rows.stop]
+            sums = sums_buffer(owner.cp, amounts, ntr * nlev * parent.rows)
             owner.run("lts_packet_capture", ntr * nlev * parent.rows, (
                 i32(ntr), i32(nlev), i32(parent.rows), i32(pk.reflux_width), i32(nedges),
                 i32(owner.nslots), pk.reflux_slot, pk.reflux_coef, self.edge_of_slot,
-                owner.hold[rows], arguments[10], owner.reg_scalar[rows], parent.reserve[rows],
-                self.amounts[3 * rows.start:3 * rows.stop]))
+                owner.hold[rows], arguments[10], owner.reg_scalar[rows], parent.reserve[rows], sums))
+            fold_sums(amounts, sums, ntr, 0, 3)
         if self.audit is not None:
             self.audit.observe(arguments, first=rows.start)
 
