@@ -310,6 +310,14 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "0fc3ab9cca923a53ac383d65c521c9175984b6e26a59547d41d51718627e090f",
+    "constructor": "ElementwiseKernel",
+    "factory": "_frame_kernel",
+    "factory_sha256": "531dd82ea234d20a4546576e47fd13c8fcadc7be253a1f0e60362d12646b6edd",
+    "file": "woof/core/ring_frame.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "10110161cddb95a1865716c4a527914ec924c5a20bb6e10e0159a64046ebb06f",
     "constructor": "RawModule",
     "factory": "fdda_kernels",
@@ -563,14 +571,6 @@
     "factory": "_module_on",
     "factory_sha256": "8d497c22deef74f7ca648e8ff7696b359242e4958c80df4b26996b3c8593c269",
     "file": "woof/hex/mpas_seaice/velocity_v842.py",
-    "status": "unresolved"
-   },
-   {
-    "call_sha256": "35dc95af1e6af5736e37b12b489fc13797c51251cba634f0639af47323fdbd62",
-    "constructor": "ElementwiseKernel",
-    "factory": "_frame_kernel",
-    "factory_sha256": "f1d460bcc54306a0e986aced702d224392e456501d1fdfe20c452a53a18406b3",
-    "file": "woof/core/ring_frame.py",
     "status": "unresolved"
    },
    {
@@ -5251,7 +5251,7 @@
    },
    {
     "file": "woof/core/ring_frame.py",
-    "sha256": "cece2244359a6d005dd53b3c571c5d205ee97ce7619fed5a68dd2c7eb1229e4e"
+    "sha256": "fa7eee299a4ec94653895a29c13f239de3d8599cfd25281b9aec9f49ac6cd133"
    },
    {
     "file": "woof/core/rrtm_lw.py",
