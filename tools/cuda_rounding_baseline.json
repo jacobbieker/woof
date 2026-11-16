@@ -4180,6 +4180,10 @@
     "sha256": "85e469baf5494063679403def8bc1256932ebe972cf4ebb53fd1b44bbe2b9f5a"
    },
    {
+    "file": "woof/core/kernels/smag2d_uv_faces.cu",
+    "sha256": "dc9828ca72bc7c7b6acb02b382c7326f33fd3f9eb16ab365e7f3e19a400dabfd"
+   },
+   {
     "file": "woof/core/kernels/smag2d_w_faces.cu",
     "sha256": "7a318dcdb9d8322e06469cdd30e56bac5f999b128a52fa50cdf33de3d0152a34"
    },
@@ -5075,7 +5079,7 @@
    },
    {
     "file": "woof/core/dycore.py",
-    "sha256": "cba53a997a29d23201f7b6ce860370447a37a3ed0221c5ec5f75a5ad085815cf"
+    "sha256": "fac36c67646a9493092aa9e115cf3f752457c154a7b4cfd57b59a28866ce1e5f"
    },
    {
     "file": "woof/core/etanew.py",
@@ -5111,11 +5115,11 @@
    },
    {
     "file": "woof/core/kernel_frame_recordings.py",
-    "sha256": "5c707374385bc6050000e0198d9f45151ce510dabc42c323e2bf5279cd92867a"
+    "sha256": "c5f3fc2d5967d33f81ecc77eddb38f27f1b9880e915428fac7e2f023cb622c8d"
    },
    {
     "file": "woof/core/kernels/__init__.py",
-    "sha256": "efc1495372db3d6584a34d75dd6e9135df2e2114e627b88efb94242b9195d22d"
+    "sha256": "478fcef78bb37235be117f4503803d94d6d97fd1d5a3070b9043b54b653c428e"
    },
    {
     "file": "woof/core/kernels/no_ftz.py",
@@ -5235,7 +5239,7 @@
    },
    {
     "file": "woof/core/preflight.py",
-    "sha256": "2f43dda86baa394764875d2a9a23952714a616e90c15cb0af2b08f03f57a422c"
+    "sha256": "84b7244abda413553325553b2af41fadd772e0e54a4ef5823f07fb833d052f48"
    },
    {
     "file": "woof/core/refl.py",
@@ -30480,6 +30484,61 @@
     ]
    },
    "source_sha256": "122dd59495c7f40fd44ec7ca97969051d98c82e08ca1d08fabd4c602e7e46b42"
+  },
+  "kernels:smag2d_uv_faces": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "f23f985f51fb6412e3465cff6471e205f14f84a4d62da2356c516726b7586fb1",
+    "sites": {
+     "100": 497
+    }
+   },
+   "native_differences": {
+    "sha256": "5c39275a7eb7e3b2c5478c4d2d429bdffa0e824d6b930892cdb7432c59085ec1",
+    "sites": {
+     "100": 177
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "--fmad=false",
+     "--ftz=false",
+     "--prec-div=true",
+     "--prec-sqrt=true",
+     "-DGPUWM_WRF_EXACT_C_DIFFUSION=1",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "--fmad=false",
+     "--ftz=false",
+     "--prec-div=true",
+     "--prec-sqrt=true",
+     "-DGPUWM_WRF_EXACT_C_DIFFUSION=1",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "a7c7cdfd321aabd08e13a9ff8abb4efb3bd5eb2bc96a992d57fd98939554f49b"
   }
  }
 }
