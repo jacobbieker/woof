@@ -991,10 +991,16 @@ class _Pointer:
             # sees complete on return.
             source = _bytes_view(_address(src), size)
             target = _bytes_view(self.ptr, size) if source is not None else None
-            if target is not None and target._st is not source._st and not any(
-                    st is target._st or st is source._st for _h, st in _HOST_BLOCKS.values()):
-                target._write(source._values())
-                return
+            if target is not None:
+                roots = (target._st.buffer_root(), source._st.buffer_root())
+                if any(st.buffer_root() is r for _h, st in _HOST_BLOCKS.values() for r in roots):
+                    import mlx.core as mx
+                    _memcpy(self.ptr, _address(src), size)
+                    mx.eval(target._st.arr)       # the host may read the block now
+                    return
+                if roots[0] is not roots[1]:
+                    target._write(source._values())
+                    return
         _memcpy(self.ptr, _address(src), size)
 
     def copy_from_host(self, mem, size, stream=None):

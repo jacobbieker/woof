@@ -73,7 +73,9 @@ def test_device_copies_the_bytes(cp, monkeypatch, dtype, device):
     assert np.array_equal(dst2.get().view(np.uint8), want.view(np.uint8))
 
 
-def test_device_copy_is_ordered_without_a_synchronize(cp, synchronizes):
+def test_device_copy_is_ordered_without_a_synchronize(cp, monkeypatch, synchronizes):
+    from woof.backend.facade import _array
+    monkeypatch.setattr(_array, "_DEVICE_COPY", True)
     bump = cp.RawKernel(_BUMP, "bump")
     n = 3 * 40 * 50
     rng = np.random.default_rng(9)
