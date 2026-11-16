@@ -519,6 +519,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   writers' per-field staging into page-locked blocks takes about half the
   time (40 Edinburgh 3 km fields: 51-86 ms against 111-143 ms median,
   byte-identical; `WOOF_METAL_DIRECT_OUT=0` restores the two copies).
+  WRF on Metal: the Smagorinsky row kernels' by-value address
+  tables beside their grid pointers, and the spec-zone ring copy's device
+  table, are resolved to the buffers they name and ordered by MLX instead
+  of a queue drain before and after each launch (Edinburgh 3 km: 26.5 to
+  10.8 blocking drains per step, byte-identical;
+  `WOOF_METAL_RESOLVE_DEVICE_TABLES=0` restores the drains).
   `WOOF_METAL_GPU_TIMES` times each kernel.
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
