@@ -1208,8 +1208,11 @@ BASELINE_PINNED: dict[str, str] = {
     # Moved again: the solver, its helpers and its exp/cos are out of line
     # under NVRTC (RT_OUTLINE), so the unit compiles in about a minute
     # instead of over an hour; same words on host, CUDA and Metal.
+    # Moved again: the per-problem workspace is interleaved across the
+    # launch's threads on CUDA and the host build (rt_w), so a warp's loads
+    # coalesce; only addresses change, same words.
     "radtran_disort":
-        "41b2e53fb43f3f34bb7ec7e049d2733d5ed7bc3292c2084a94ee77c78acdacc0",
+        "7f7018c0c2bfd12a547645163a6f2ca5ce96ab8965e67b5e505850def8babd02",
     # development branch (A158): WRF 4.7.1's implicit-explicit
     # vertical advection, graded word for word against WRF's compiled
     # routines by tests/test_zadvect_implicit.py.  Moved once on the lane:
