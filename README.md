@@ -522,6 +522,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   in its first step (edi-vr 1 h on an A6000: step 1 from 42.5 s to 3.6 s,
   byte-identical; `WOOF_HEX_SHARED_KERNEL_IMAGES=0` restores the per-run
   cache).
+  Hex regional scalar transport reads each edge's advection stencil once
+  per (edge, level chunk) and walks the tracers
+  (`transport_edge_values_regional_hoist_v841`, byte-identical in fast and
+  strict numerics on CUDA and Metal; Alps 3 km variable-resolution, 11
+  tracers: 28 -> 2-3 ms per launch on an M3 Max, 15 -> 0.55 ms on an A6000;
+  `WOOF_HEX_REGIONAL_EDGE_HOIST=0` restores the element kernel).
   Hex `woof hex moving`: the resident forecast process prepares the next
   region beside the running one only when the host has room for a second
   copy (`WOOF_HEX_MOVING_PREPARE_HOST_GATE=0` always prepares;
