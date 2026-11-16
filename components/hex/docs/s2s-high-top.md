@@ -48,6 +48,17 @@ the first daily reversal. The wind band approximates 60N. This demonstrates
 the simulated warming and reversal across the real event. It uses one
 member and retrospective analysis SST/ice. Independent observed skill,
 ensemble probability skill and multi-member card fit remain unqualified.
+
+Short-range observed skill above the tropopause has been measured, on 2026-11-15.
+Seven 72 h forecasts from late October and early November 2026 were scored
+against WIS2 radiosondes, against the 55-level `global-120km` row with the
+same physics (`--physics-row arwen`). The 90-60S 20 hPa bias at 72 h is
+-1.75 K (RMSE 2.32) against -9.98 K (11.44), and the global 20 hPa RMSE is
+3.31 against 6.17 K. Tropical 100 hPa is warmer: by +1.0 K at hour 0
+(+1.65 against +0.66 K), which comes from the initial state, and by
++0.53 K at 72 h. Tables and intervals
+are in [declared-divergences.md](declared-divergences.md), section 1.
+These are not S2S skill numbers.
 Observation coverage was missing; climatology used the explicitly labelled
 ensemble-relative fallback. The plan continues to distinguish derived
 80-level capacity estimates from measured 55-level rows.
