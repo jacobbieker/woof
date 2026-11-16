@@ -1203,10 +1203,51 @@ void state_relaxation_multi(LBC_TABLE_PARAM table, int nrows, real dtbc,
     const unsigned int ncol = (unsigned int)ny * (unsigned int)nx;
     const unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid >= (unsigned int)nz * ncol) return;
-    const int k = (int)(tid / ncol);
-    const int rem = (int)(tid - (unsigned int)k * ncol);
-    const int j = rem / nx;
-    const int i = rem - j * nx;
+    // The perimeter cells (every level's frame rings) take the first
+    // threads and the interior cells the rest, so the relaxation path runs
+    // in dense warps instead of a few lanes of every row's edge warps.  The
+    // cells, and the statements each evaluates, are the row-major walk's;
+    // only the thread a cell lands on moves.
+    int k, j, i;
+    const int aw = (int)(row[15] & 0xffffffffull);
+    const int iny = ny - 2 * aw, inx = nx - 2 * aw;
+    if (aw > 0 && iny > 0 && inx > 0) {
+        const unsigned int band = (unsigned int)aw * (unsigned int)nx;
+        const unsigned int inner = (unsigned int)iny * (unsigned int)inx;
+        const unsigned int ring = ncol - inner;
+        if (tid < (unsigned int)nz * ring) {
+            k = (int)(tid / ring);
+            unsigned int n = tid - (unsigned int)k * ring;
+            if (n < 2u * band) {
+                // the south frames' rows, then the north frames' rows
+                const bool north = n >= band;
+                if (north) n -= band;
+                const int r = (int)(n / (unsigned int)nx);
+                j = north ? ny - aw + r : r;
+                i = (int)(n - (unsigned int)r * (unsigned int)nx);
+            } else {
+                // each middle row's west then east frame columns
+                n -= 2u * band;
+                const unsigned int cols = 2u * (unsigned int)aw;
+                const int r = (int)(n / cols);
+                const int c = (int)(n - (unsigned int)r * cols);
+                j = aw + r;
+                i = c < aw ? c : nx - 2 * aw + c;
+            }
+        } else {
+            const unsigned int t = tid - (unsigned int)nz * ring;
+            k = (int)(t / inner);
+            const unsigned int n = t - (unsigned int)k * inner;
+            const int r = (int)(n / (unsigned int)inx);
+            j = aw + r;
+            i = aw + (int)(n - (unsigned int)r * (unsigned int)inx);
+        }
+    } else {
+        k = (int)(tid / ncol);
+        const int rem = (int)(tid - (unsigned int)k * ncol);
+        j = rem / nx;
+        i = rem - j * nx;
+    }
     const bool held_compute = (flags & LBC_MULTI_HELD_COMPUTE) != 0;
     const bool held_store = (flags & LBC_MULTI_HELD_STORE) != 0;
     const bool held_read = (flags & LBC_MULTI_HELD_READ) != 0;
