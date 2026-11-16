@@ -20,7 +20,9 @@
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 #include <nanobind/stl/tuple.h>
+#include <nanobind/stl/optional.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <memory>
@@ -31,6 +33,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <mutex>
+#include <optional>
 #include <unordered_map>
 #include <cstdint>
 #include <sstream>
@@ -70,9 +73,102 @@ static void compile_log(const char* what, const std::string& name,
 // (gpu_times()).  A launch is evaluated in a command buffer of its own
 // (woof.backend.facade: rebind_written), so the buffer's GPU interval is
 // the kernel's; two launches sharing a buffer would each count it whole.
+// That buffer also holds every lazy MLX operation the launch's inputs still
+// waited on (a facade write's right-hand side), and its interval runs from
+// the GPU's start of the buffer, so it can include waiting on the fences of
+// work still in flight.
+//
+// WOOF_METAL_GPU_TIMES_ISOLATE (set, not 0; with WOOF_METAL_GPU_TIMES): a
+// profiling mode that attributes each interval to one thing
+// (woof.backend.facade: rebind_written).  Every earlier GPU operation is
+// finished; a launch's lazy input work is evaluated in a command buffer of its
+// own, counted under "mlx<" + the launch's key (only the first buffer, if it
+// spans several), and finished; the launch then runs alone and is finished
+// before the host goes on.  The key is the kernel's name, plus "@" and the
+// label set_gpu_label() set when the launch was made (the facade's writes set
+// their Python call site).  Words are unchanged; the host waits on every
+// launch, so wall time is not the production wall time.
 static const bool g_gpu_times = std::getenv("WOOF_METAL_GPU_TIMES") != nullptr;
-static std::mutex g_gpu_times_mutex;
-static std::unordered_map<std::string, std::pair<uint64_t, double>> g_gpu_time_totals;
+static bool isolate_requested() {
+  const char* v = std::getenv("WOOF_METAL_GPU_TIMES_ISOLATE");
+  return v != nullptr && *v != '\0' && std::string(v) != "0";
+}
+static const bool g_isolate = g_gpu_times && isolate_requested();
+struct GpuTime {
+  uint64_t launches = 0;
+  double seconds = 0.0;
+  double min_seconds = 0.0;
+  double max_seconds = 0.0;
+};
+// Never destroyed: a command buffer can complete while the process exits,
+// after static destructors ran, and its handler still takes the lock.
+static std::mutex& g_gpu_times_mutex = *new std::mutex;
+static std::unordered_map<std::string, GpuTime>& g_gpu_time_totals =
+    *new std::unordered_map<std::string, GpuTime>;
+static std::string g_gpu_label;
+
+static void count_gpu_time(const std::string& key, double seconds) {
+  std::lock_guard<std::mutex> lock(g_gpu_times_mutex);
+  auto& total = g_gpu_time_totals[key];
+  if (total.launches == 0 || seconds < total.min_seconds) total.min_seconds = seconds;
+  if (seconds > total.max_seconds) total.max_seconds = seconds;
+  total.launches += 1;
+  total.seconds += seconds;
+}
+
+// The union of the timed buffers' GPU intervals (gpu_busy()): the time the
+// GPU spent on this process's timed work, overlaps counted once.  Intervals
+// are kept and merged; past a cap, merged spans that ended over a second
+// before the latest end are folded into a total (buffers complete within
+// milliseconds of each other, so no later interval reaches back to them).
+struct GpuBusy {
+  std::vector<std::pair<double, double>> spans;
+  double folded = 0.0, first = 0.0, last = 0.0;
+  size_t buffers = 0;
+};
+static GpuBusy& g_gpu_busy = *new GpuBusy;
+
+static void merge_spans(std::vector<std::pair<double, double>>& spans) {
+  std::sort(spans.begin(), spans.end());
+  size_t w = 0;
+  for (size_t r = 0; r < spans.size(); ++r) {
+    if (w > 0 && spans[r].first <= spans[w - 1].second) {
+      spans[w - 1].second = std::max(spans[w - 1].second, spans[r].second);
+    } else {
+      spans[w++] = spans[r];
+    }
+  }
+  spans.resize(w);
+}
+
+static void add_busy(double start, double end) {
+  auto& b = g_gpu_busy;
+  if (end <= start) return;
+  b.first = b.buffers ? std::min(b.first, start) : start;
+  b.last = b.buffers ? std::max(b.last, end) : end;
+  b.buffers += 1;
+  b.spans.emplace_back(start, end);
+  if (b.spans.size() < (1u << 20)) return;
+  merge_spans(b.spans);
+  size_t keep = 0;
+  for (const auto& [lo, hi] : b.spans) {
+    if (hi < b.last - 1.0) {
+      b.folded += hi - lo;
+    } else {
+      b.spans[keep++] = {lo, hi};
+    }
+  }
+  b.spans.resize(keep);
+}
+
+static void time_command_buffer(MTL::CommandBuffer* buffer, const std::string& key) {
+  buffer->addCompletedHandler([key](MTL::CommandBuffer* done) {
+    double start = done->GPUStartTime(), end = done->GPUEndTime();
+    count_gpu_time(key, end - start);
+    std::lock_guard<std::mutex> lock(g_gpu_times_mutex);
+    add_busy(start, end);
+  });
+}
 
 static MTL::CompileOptions* compile_options(int math_mode) {
   auto* options = MTL::CompileOptions::alloc()->init();
@@ -428,7 +524,8 @@ class LaunchTranslated : public mx::Primitive {
         threadgroup_bytes_(threadgroup_bytes),
         math_mode_(math_mode),
         null_slots_(std::move(null_slots)),
-        null_table_(std::move(null_table)) {}
+        null_table_(std::move(null_table)),
+        time_key_(g_gpu_label.empty() ? kernel_ : kernel_ + "@" + g_gpu_label) {}
 
   void eval_cpu(const std::vector<mx::array>&, std::vector<mx::array>&)
       override {
@@ -538,19 +635,16 @@ class LaunchTranslated : public mx::Primitive {
     enc.dispatch_threadgroups(MTL::Size(gx, gy, gz), MTL::Size(tx, ty, tz));
     enc.end_encoding(/* wait_in_flight = */ true);
     if (g_gpu_times) {
-      std::string kernel = kernel_;
-      enc.get_command_buffer()->addCompletedHandler([kernel](MTL::CommandBuffer* buffer) {
-        double seconds = buffer->GPUEndTime() - buffer->GPUStartTime();
-        std::lock_guard<std::mutex> lock(g_gpu_times_mutex);
-        auto& total = g_gpu_time_totals[kernel];
-        total.first += 1;
-        total.second += seconds;
-      });
+      time_command_buffer(enc.get_command_buffer(), time_key_);
     }
   }
 
   const char* name() const override {
     return "LaunchTranslated";
+  }
+
+  const std::string& time_key() const {
+    return time_key_;
   }
 
   std::vector<mx::Shape> output_shapes(const std::vector<mx::array>& inputs)
@@ -578,6 +672,7 @@ class LaunchTranslated : public mx::Primitive {
   std::vector<int> null_slots_;
   std::vector<int> null_table_;
   int math_mode_;
+  std::string time_key_;
 };
 
 // buffer_slots[i] >= 0 binds buffers[i] there; -1 puts its GPU address in
@@ -664,6 +759,24 @@ uint64_t gpu_address(const mx::array& a) {
   return buf->gpuAddress() + uint64_t(a.offset());
 }
 
+// WOOF_METAL_GPU_TIMES_ISOLATE (woof.backend.facade: rebind_written): an
+// unevaluated launch's key and input arrays, so the lazy work they still need
+// can be evaluated and counted on its own before the launch (None: not a
+// launch, or evaluated already).
+std::optional<std::tuple<std::string, std::vector<mx::array>>> launch_inputs(const mx::array& out) {
+  if (!out.has_primitive()) return std::nullopt;
+  auto* launch = dynamic_cast<LaunchTranslated*>(&out.primitive());
+  if (launch == nullptr) return std::nullopt;
+  return std::make_tuple(launch->time_key(), out.inputs());
+}
+
+// Count the GPU interval of the default GPU stream's current (uncommitted)
+// command buffer under ``key``.
+void time_current_buffer(const std::string& key) {
+  auto stream = mx::default_stream(mx::Device::gpu);
+  time_command_buffer(mx::metal::get_command_encoder(stream).get_command_buffer(), key);
+}
+
 }  // namespace
 
 NB_MODULE(_woof_metal_launch, m) {
@@ -701,8 +814,33 @@ NB_MODULE(_woof_metal_launch, m) {
         nb::arg("kernels"), nb::arg("math_mode") = 0, nb::call_guard<nb::gil_scoped_release>());
   m.def("gpu_times", []() {
           std::lock_guard<std::mutex> lock(g_gpu_times_mutex);
-          std::vector<std::tuple<std::string, uint64_t, double>> rows;
-          for (const auto& [kernel, total] : g_gpu_time_totals) rows.emplace_back(kernel, total.first, total.second);
+          std::vector<std::tuple<std::string, uint64_t, double, double, double>> rows;
+          for (const auto& [key, total] : g_gpu_time_totals) {
+            rows.emplace_back(key, total.launches, total.seconds, total.min_seconds, total.max_seconds);
+          }
           return rows;
         });
+  m.def("reset_gpu_times", []() {
+          std::lock_guard<std::mutex> lock(g_gpu_times_mutex);
+          g_gpu_time_totals.clear();
+          g_gpu_busy.spans.clear();
+          g_gpu_busy.folded = g_gpu_busy.first = g_gpu_busy.last = 0.0;
+          g_gpu_busy.buffers = 0;
+        });
+  // (busy GPU seconds, first start to last end in seconds, buffers) since the
+  // last reset: the union of the timed command buffers' GPU intervals
+  m.def("gpu_busy", []() {
+          std::lock_guard<std::mutex> lock(g_gpu_times_mutex);
+          auto spans = g_gpu_busy.spans;
+          merge_spans(spans);
+          double busy = g_gpu_busy.folded;
+          for (const auto& [lo, hi] : spans) busy += hi - lo;
+          return std::make_tuple(busy, g_gpu_busy.buffers ? g_gpu_busy.last - g_gpu_busy.first : 0.0,
+                                 g_gpu_busy.buffers);
+        });
+  // the label later launches' GPU times are keyed by ("" for none)
+  m.def("set_gpu_label", [](const std::string& label) { g_gpu_label = label; }, nb::arg("label"));
+  m.def("gpu_times_isolated", []() { return g_isolate; });
+  m.def("launch_inputs", &launch_inputs, nb::arg("out"));
+  m.def("time_current_buffer", &time_current_buffer, nb::arg("key"));
 }

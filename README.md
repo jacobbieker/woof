@@ -552,7 +552,14 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   a read back and a write: the writer's host time per Edinburgh 3 km frame
   falls from 761-1061 ms to 470-576 ms, byte-identical
   (`WOOF_METAL_DEVICE_COPY=0` restores the host round trip).
-  `WOOF_METAL_GPU_TIMES` times each kernel.
+  `WOOF_METAL_GPU_TIMES` times each kernel. Its per-launch command
+  buffers also hold the lazy MLX work the launch waited on, and their GPU
+  intervals overlap, so a facade write (`woof_copy_4`) used to carry other
+  work's time (on the Alps 3 km/1 km pair, 883 of 2047 timed ms per step).
+  `WOOF_METAL_GPU_TIMES_ISOLATE=1` is a profiling mode with the same words:
+  each launch runs alone, after its lazy inputs are evaluated and counted
+  apart, and writes are keyed by their Python call site. There the facade's
+  writes cost 42 ms of 1366 per step.
   The `woof.radtran` spectral diagnostic (`radtran_*`) is cheaper, keeping
   the same words. `radtran_disort.cu` compiles in about 6 minutes in
   0.55 GB, against over an hour in over 17 GB before: its helpers are kept
