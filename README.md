@@ -519,6 +519,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   writers' per-field staging into page-locked blocks takes about half the
   time (40 Edinburgh 3 km fields: 51-86 ms against 111-143 ms median,
   byte-identical; `WOOF_METAL_DIRECT_OUT=0` restores the two copies).
+  WRF on Metal: the Smagorinsky row kernels' by-value address
+  tables beside their grid pointers, and the spec-zone ring copy's device
+  table, are resolved to the buffers they name and ordered by MLX instead
+  of a queue drain before and after each launch (Edinburgh 3 km: 26.5 to
+  10.8 blocking drains per step, byte-identical;
+  `WOOF_METAL_RESOLVE_DEVICE_TABLES=0` restores the drains).
   A device-to-device `copy_from_device(_async)` between facade arrays (the
   wrfout writer's per-field snapshot) is one ordered device copy instead of
   a read back and a write: the writer's host time per Edinburgh 3 km frame
