@@ -929,6 +929,39 @@ def store_receipt(cache: Path, unit: Unit, arches, identity: dict, row: dict,
     os.replace(handle.name, cache / f"{key}.json")
 
 
+def available_gib() -> float | None:
+    """MemAvailable in GiB (Linux), or None where it cannot be read."""
+    try:
+        for line in Path("/proc/meminfo").read_text().splitlines():
+            if line.startswith("MemAvailable:"):
+                return int(line.split()[1]) / (1 << 20)
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def wait_for_memory(needed_gib: float, timeout_s: float, *, read=available_gib,
+                    sleep=None, clock=None) -> bool:
+    """Block until ``needed_gib`` is available or ``timeout_s`` elapses.
+
+    A heavy unit on a shared host is OOM-killed when it starts into a full
+    machine; waiting is cheaper than three killed attempts. Returns whether the
+    memory was seen (True also when it cannot be measured).
+    """
+    import time
+    sleep, clock = sleep or time.sleep, clock or time.monotonic
+    deadline = clock() + timeout_s
+    while True:
+        free = read()
+        if free is None or free >= needed_gib:
+            return True
+        if clock() >= deadline:
+            print(f"only {free:.1f} GiB free after {timeout_s:.0f} s; starting anyway", flush=True)
+            return False
+        print(f"waiting for {needed_gib:.0f} GiB ({free:.1f} free) before a heavy unit", flush=True)
+        sleep(60)
+
+
 def run_units(units, arches, options, workers, on_row, *, heavy=HEAVY_UNITS, job=None,
               retries: int = 2) -> None:
     """Compile units with bounded memory.
@@ -951,6 +984,9 @@ def run_units(units, arches, options, workers, on_row, *, heavy=HEAVY_UNITS, job
             if not todo:
                 break
             broken = []
+            if group is heavy_units:
+                wait_for_memory(float(os.environ.get("WOOF_ROUNDING_HEAVY_GIB", "20")),
+                                float(os.environ.get("WOOF_ROUNDING_MEM_WAIT_S", "7200")))
             try:
                 with ProcessPoolExecutor(max_workers=width) as executor:
                     futures = {executor.submit(job, (unit, arches, options)): unit for unit in todo}

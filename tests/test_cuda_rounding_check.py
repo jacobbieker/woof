@@ -18,7 +18,7 @@ from tools.cuda_rounding_check import (floating_signatures, inventory,
                                        operation_units, find_nvdisasm,
                                        find_nvrtc_library, compiler_identity,
                                        receipt_key, load_receipt, store_receipt,
-                                       run_units, HEAVY_UNITS)
+                                       run_units, HEAVY_UNITS, wait_for_memory)
 from tools.literal_division_census import Unit
 from tools.cuda_rounding_dataflow import ptx_dataflow_signatures, dataflow_differences
 from tools.cuda_rounding_native import sass_floating_signatures, sass_dataflow_signatures
@@ -488,3 +488,14 @@ def test_nvdisasm_and_nvrtc_are_found_without_environment_help(tmp_path):
     found = find_nvrtc_library({"CUDA_HOME": str(cuda)})
     assert found == str(cuda / "lib64/libnvrtc.so.13") or found.endswith("nvidia/cu13/lib/libnvrtc.so.13")
     assert find_nvdisasm({"PATH": ""}) in (None, "/opt/cuda/bin/nvdisasm", "/usr/local/cuda/bin/nvdisasm")
+
+
+def test_heavy_units_wait_for_memory_then_proceed_even_if_it_never_frees():
+    now, readings = [0.0], iter([4.0, 9.0, 30.0])
+    assert wait_for_memory(20, 600, read=lambda: next(readings),
+                           sleep=lambda s: now.__setitem__(0, now[0] + s), clock=lambda: now[0])
+    assert now[0] == 120.0  # polled twice, then proceeded
+    now[0] = 0.0
+    assert not wait_for_memory(20, 120, read=lambda: 1.0,
+                               sleep=lambda s: now.__setitem__(0, now[0] + s), clock=lambda: now[0])
+    assert wait_for_memory(20, 120, read=lambda: None)
