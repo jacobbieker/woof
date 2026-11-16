@@ -1230,6 +1230,14 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "7d42dc427b7c99d85a49126c09f84d67124c6e102409752c7daec561d3487902",
+    "constructor": "compile_using_nvrtc",
+    "factory": "_direct_module",
+    "factory_sha256": "0579dadc4e2eb0c43096c53e96b8c037a332e3b68fc0573e9ebeb78a85ecefbc",
+    "file": "woof/hex/cuda_regional_hoist_v841.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "7d7478e78bd71a13e9bb0574c8d3e8345ec0b82a9276048c4506f52bb3dac763",
     "constructor": "RawModule",
     "factory": "__init__",
@@ -5614,6 +5622,10 @@
     "sha256": "8140553c0bec161af26c5c4f66ff8a54f1f18762810d36460cf447996ee64b44"
    },
    {
+    "file": "woof/hex/cuda_regional_hoist_v841.py",
+    "sha256": "f3814d50f2933240c00a895a45fc76d8dfbeedccb5627bec6650cd60062b64fa"
+   },
+   {
     "file": "woof/hex/cuda_regional_rrfs.py",
     "sha256": "fbdb5b6a975940026d1c62be8f400f4b42850c2e26fb0f99272395954a55f186"
    },
@@ -7134,6 +7146,10 @@
    {
     "file": "woof/hex/cuda_physics_v841.py",
     "sha256": "c3d5d2be049ac316742967ff78149682d2f3031081a3677fbe634e9b3c603c47"
+   },
+   {
+    "file": "woof/hex/cuda_regional_hoist_v841.py",
+    "sha256": "acd79cb51e85c00f4e3de224e1b45938bb7d3a8c40fb8bf14f502a4a6eba8544"
    },
    {
     "file": "woof/hex/cuda_regional_rrfs.py",
