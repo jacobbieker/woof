@@ -135,18 +135,23 @@ class Storage:
 
     __slots__ = ("arr", "dtype", "_aliases", "_alias_of", "_memory", "_address", "__weakref__")
 
-    def __init__(self, arr, dtype: np.dtype, *, fresh: bool = False):
+    def __init__(self, arr, dtype: np.dtype, *, fresh: bool = False, ready: bool = False):
         """``fresh``: ``arr`` is a newly computed value no other array holds
         (an upload, an operation's result).  Otherwise it is copied: MLX may
         return an input unchanged from a no-op (reshape, astype to the same
         dtype, contiguous), and two storages sharing one buffer would see
-        each other's in-place writes."""
+        each other's in-place writes.  ``ready``: ``arr`` is already the
+        flat, row-contiguous value, built from host memory
+        (host_storage_values), and is held as it is."""
         from woof.backend.facade import _capture
         if _capture.recording() is not None:
             _capture.refuse("a facade array allocation or operation")
         mx = _mx()
-        flat = _materialize(arr)
-        self.arr = flat if fresh else mx.array(flat)
+        if ready:
+            self.arr = arr
+        else:
+            flat = _materialize(arr)
+            self.arr = flat if fresh else mx.array(flat)
         self.dtype = storage_dtype(dtype)
         self._aliases = None
         self._alias_of = None         # the storage this one reinterprets (alias)
@@ -249,6 +254,31 @@ _DEVICE_COPY = os.environ.get("WOOF_METAL_DEVICE_COPY", "1") != "0"
 #: WOOF_METAL_DIRECT_OUT=0: ``get(out=)`` copies to a host array and then
 #: into ``out``, as before 2026-11-16 (two host copies instead of one).
 _DIRECT_OUT = os.environ.get("WOOF_METAL_DIRECT_OUT", "1") != "0"
+
+#: WOOF_METAL_READY_UPLOADS=0: a host upload's storage value is
+#: ``mx.contiguous`` of the uploaded array, as before 2026-11-16.  That is a
+#: lazy primitive on the GPU stream, so the first evaluation of a new upload
+#: (a device address table's words, read at its launch) waited for every
+#: launch queued ahead of it: about 14 ms a step on the hex Edinburgh
+#: variable-resolution mesh, for the WSM6 recovery's species table.
+_READY_UPLOADS = os.environ.get("WOOF_METAL_READY_UPLOADS", "1") != "0"
+
+
+def host_storage_values(host: np.ndarray):
+    """C-contiguous ``host`` as the flat mx.array a Storage holds, built
+    from host memory and so already computed; None where its storage needs
+    a conversion (the caller takes the general path)."""
+    if not _READY_UPLOADS or host.size == 0:
+        return None
+    mx = _mx()
+    flat = host.reshape(-1)
+    if host.dtype in (np.float64, np.complex128):
+        flat = flat.view(np.uint64)  # binary64 words; complex128 as (real, imaginary) pairs
+    values = mx.array(flat)
+    if values.dtype != storage_mx_dtype(host.dtype) or values.shape != (flat.size,):
+        return None
+    return values
+
 
 #: WOOF_METAL_ADDRESS_ASYNC=0: Storage.address waits for the buffer's value
 #: (mx.eval), as it did before 2026-11-15.
