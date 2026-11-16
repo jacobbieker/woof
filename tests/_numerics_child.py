@@ -97,6 +97,10 @@ def run(test_file, names, numerics, exact, *, env=None, timeout=1800):
     # --fmad=false and test nothing production runs.
     for name in ("WOOF_FMAD_OFF", "GPUWM_FMAD_OFF"):
         child_env.pop(name, None)
+    # Inherited WRF-exact sub-controls (woof/wrf_exact.py) would make the
+    # exact row test an incomplete control set; a caller sets one through env.
+    for name in [n for n in child_env if n.startswith(("WOOF_WRF_EXACT_", "GPUWM_WRF_EXACT_"))]:
+        child_env.pop(name)
     child_env.update(env or {})
     code = _CHILD.format(here=str(path.parent), module=path.stem, numerics=numerics,
                          names=list(names))
