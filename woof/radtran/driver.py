@@ -194,7 +194,7 @@ def select_bands(rep, opts: Options, wavelengths=None) -> list[int]:
 
 def compute(opts: Options, col: atmosphere.Column, clouds_in: CloudLayers | None = None,
             *, aerosol: "opac.AerosolLayers | None" = None, backend: str = "gpu", umu0=None, albedo=None,
-            wavelengths=None, budget_bytes: int = 1 << 29) -> Result:
+            wavelengths=None, budget_bytes: int | None = None) -> Result:
     """Band-averaged spectral irradiances/radiances for every column.
 
     ``umu0`` and ``albedo`` (per column) override ``opts.sza`` and

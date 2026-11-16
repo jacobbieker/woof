@@ -13,6 +13,7 @@ import dataclasses
 import numpy as np
 import pytest
 
+import _numerics_child
 from conftest import requires_gpu
 
 OPTIONS = ("-std=c++17", "-arch=compute_89")
@@ -70,13 +71,18 @@ def test_bind_refuses_two_values_for_one_name():
 
 def _state(seed, *, msf, hill, specified, moist):
     from woof.verify.npref import random_acoustic_state
-    state, cfg = random_acoustic_state(seed=seed, nz=10, ny=9, nx=13,
+    # The stretched hybrid grid gives WRF-like fnm != fnp and c1/c2 weights:
+    # on the uniform grid every fnm/fnp product is a 0.5 product (exact), which
+    # hides a contraction a joined body would add (the #475 lesson).
+    state, cfg = random_acoustic_state(seed=seed, nz=10, ny=9, nx=13, stretch=1.2,
+                                       hybrid_opt=2 if hill else 0,
                                        msf_amp=0.1 if msf else 0.0,
                                        hill_height=300.0 if hill else 0.0,
                                        moist=moist, mp_physics=8 if moist else 0)
+    import cupy as cp
+    assert not np.all(cp.asnumpy(state.fnm)[1:] == np.float32(0.5))
     if moist:
         rng = np.random.default_rng(seed + 1)
-        import cupy as cp
         for name in ("qv", "qc", "qr", "qi", "qs", "qg"):
             array = getattr(state, name, None)
             if array is not None:
@@ -218,3 +224,15 @@ def test_a_swapped_kernel_accessor_keeps_the_separate_kernels(monkeypatch):
     monkeypatch.undo()
     monkeypatch.setattr(acoustic, "_w_phi_kernel", lambda *args: None)
     assert not acoustic._fusion_enabled(49)
+
+
+@requires_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize(*_numerics_child.MODES)
+def test_joined_words_hold_under_each_numerics(numerics, exact):
+    """The battery runs strict; production runs fast, where NVRTC (and Metal's
+    fp contract(fast)) may contract across the joined bodies' former kernel
+    boundaries.  Each mode in its own child process."""
+    _numerics_child.run(__file__, ["test_joined_substeps_write_the_separate_words",
+                                   "test_joined_pd_fold_writes_the_separate_words"],
+                        numerics, exact)

@@ -22,15 +22,20 @@ WORDS = Path(__file__).parent / "data" / "radtran" / "kernel_words.npz"
 
 
 @requires_gpu
+@pytest.mark.parametrize("one_per_launch", [False, True])
 @pytest.mark.parametrize("mode_threads", [None, 0])
-def test_device_words_equal_host_words(monkeypatch, mode_threads):
+def test_device_words_equal_host_words(monkeypatch, mode_threads, one_per_launch):
     """Radiance runs go through the mode-parallel kernels (radtran_disort_modes
     + _finish) at the default threshold and through one thread per problem
-    (radtran_disort) with the threshold at 0; both give the host's words."""
+    (radtran_disort) with the threshold at 0; both give the host's words.
+    The workspace budget only groups problems into launches (and sets the
+    interleave stride on CUDA): one problem per launch gives the same words."""
     from tools.uvspec_oracle import kernel_words as kw
     from woof.radtran import solver
     if mode_threads is not None:
         monkeypatch.setattr(solver, "MODE_THREADS", mode_threads)
+    if one_per_launch:
+        monkeypatch.setattr(solver, "_workspace_budget", lambda cp, need: 1)
     d = np.load(WORDS)
     inp = {k[3:]: d[k] for k in d.files if k.startswith("in_")}
     bad = []
