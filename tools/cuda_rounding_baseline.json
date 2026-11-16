@@ -3877,7 +3877,7 @@
    },
    {
     "file": "woof/core/kernels/radtran_disort.cu",
-    "sha256": "41b2e53fb43f3f34bb7ec7e049d2733d5ed7bc3292c2084a94ee77c78acdacc0"
+    "sha256": "7f7018c0c2bfd12a547645163a6f2ca5ce96ab8965e67b5e505850def8babd02"
    },
    {
     "file": "woof/core/kernels/rcon.cu",

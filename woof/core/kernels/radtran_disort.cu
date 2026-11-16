@@ -63,6 +63,28 @@
 #define RT_OUTLINE __noinline__
 #endif
 
+// Per-problem workspace.  CUDA and the host build interleave it across the
+// launch's threads: element k of thread t sits at work[t + k * S], S the
+// launch's active thread count, so a warp's 32 threads touch 32 adjacent
+// doubles (one problem per thread, each thread's banded matrix is ~0.5 MB at
+// 16 streams; laid out per thread every access was a separate cache line).
+// Only addresses change; every operation and its order are the same, so the
+// words are too.  The Metal translation keeps the per-thread block
+// (work + t * wstride).
+#ifdef __WOOF_METAL__
+#define RT_W double *
+#define RT_WBASE(t, nact) (work + (long)(t) * wstride)
+#else
+struct rt_w {
+    double *p;
+    long s;
+    __device__ __forceinline__ double &operator[](long k) const { return p[k * s]; }
+    __device__ __forceinline__ rt_w operator+(long k) const { return rt_w{p + k * s, s}; }
+};
+#define RT_W rt_w
+#define RT_WBASE(t, nact) (rt_w{work + (t), (long)(nact)})
+#endif
+
 __device__ RT_OUTLINE double rt_exp(double x) { return glibc_exp(x); }
 __device__ RT_OUTLINE double rt_cos(double x) { return uw_cos(x); }
 __device__ __forceinline__ double rt_abs(double x) { return x < 0.0 ? -x : x; }
@@ -204,7 +226,7 @@ __device__ __forceinline__ long rt_bidx(int ml, int mu, int ldab, int r, int c)
     return (long)(ml + mu + r - c) + (long)c * ldab;
 }
 
-__device__ RT_OUTLINE void rt_band_solve(int n, int ml, int mu, double *ab, double *piv, double *b)
+__device__ RT_OUTLINE void rt_band_solve(int n, int ml, int mu, RT_W ab, RT_W piv, RT_W b)
 {
     int ldab = 2 * ml + mu + 1;
     for (int k = 0; k < n; ++k) {
@@ -291,7 +313,7 @@ extern "C" __global__ void radtran_work_size(int nlyr, int N, int nstr, long lon
 // mode, so the per-mode partials summed from 0.0 in mode order repeat the
 // single thread's additions.
 __device__ RT_OUTLINE void rt_problem(
-    int prob, double *wk, int m_first, int m_last, int part,
+    int prob, RT_W wk, int m_first, int m_last, int part,
     int nlyr, int nmom, int nstr, int flags,
     const double *dtau_in, const double *ssa_in, const double *pmom_in,
     const double *umu0_in, const double *fbeam_in, const double *albedo_in,
@@ -311,24 +333,24 @@ __device__ RT_OUTLINE void rt_problem(
     const double *ssa = ssa_in + (long)prob * L;
     const double *pmom = pmom_in + (long)prob * L * (nmom + 1);
 
-    double *dtaus = wk;              // L   scaled optical depth
-    double *ssas = dtaus + L;        // L   scaled single-scattering albedo
-    double *fz = ssas + L;           // L   delta-M truncation fraction
-    double *lam = fz + L;            // L   in-layer beam secant
-    double *dtu = lam + L;           // L   unscaled optical depth
-    double *spare = dtu + L;         // L
-    double *ch = spare + L;          // L+1 slant optical depth (scaled)
-    double *chu = ch + (L + 1);      // L+1 slant optical depth (unscaled)
-    double *gm = chu + (L + 1);      // L*nstr scaled moments * (2l+1) * ssas / 2
-    double *Gv = gm + (long)L * nstr; // L*2N*N
-    double *Kv = Gv + (long)L * 2 * N * N;
-    double *Zv = Kv + (long)L * N;
-    double *ab = Zv + (long)L * 2 * N;
+    RT_W dtaus = wk;              // L   scaled optical depth
+    RT_W ssas = dtaus + L;        // L   scaled single-scattering albedo
+    RT_W fz = ssas + L;           // L   delta-M truncation fraction
+    RT_W lam = fz + L;            // L   in-layer beam secant
+    RT_W dtu = lam + L;           // L   unscaled optical depth
+    RT_W spare = dtu + L;         // L
+    RT_W ch = spare + L;          // L+1 slant optical depth (scaled)
+    RT_W chu = ch + (L + 1);      // L+1 slant optical depth (unscaled)
+    RT_W gm = chu + (L + 1);      // L*nstr scaled moments * (2l+1) * ssas / 2
+    RT_W Gv = gm + (long)L * nstr; // L*2N*N
+    RT_W Kv = Gv + (long)L * 2 * N * N;
+    RT_W Zv = Kv + (long)L * N;
+    RT_W ab = Zv + (long)L * 2 * N;
     const int nun = 2 * N * L;
     const int ml = 3 * N - 1, mub = 3 * N - 1;
     const long ldab = 2 * ml + mub + 1;
-    double *rhs = ab + ldab * nun;
-    double *piv = rhs + nun;
+    RT_W rhs = ab + ldab * nun;
+    RT_W piv = rhs + nun;
 
     // ---- delta-M scaling (Wiscombe 1977) ----
     const int deltam = (flags & RT_DELTAM) != 0;
@@ -421,7 +443,7 @@ __device__ RT_OUTLINE void rt_problem(
 
         // ---- homogeneous and particular solutions per layer ----
         for (int n = 0; n < L; ++n) {
-            const double *gl = gm + (long)n * nstr;
+            const RT_W gl = gm + (long)n * nstr;
             double dpm[RT_MAXN * RT_MAXN], dmm[RT_MAXN * RT_MAXN];
             for (int i = 0; i < N; ++i)
                 for (int j = 0; j < N; ++j) {
@@ -481,8 +503,8 @@ __device__ RT_OUTLINE void rt_problem(
                 }
             double ev[RT_MAXN], vv[RT_MAXN * RT_MAXN];
             rt_jacobi(N, cm, ev, vv);
-            double *Gn = Gv + (long)n * 2 * N * N;
-            double *Kn = Kv + (long)n * N;
+            RT_W Gn = Gv + (long)n * 2 * N * N;
+            RT_W Kn = Kv + (long)n * N;
             for (int j = 0; j < N; ++j) {
                 double y[RT_MAXN], v[RT_MAXN], ab2[RT_MAXN];
                 // y = Lc^{-T} u
@@ -530,7 +552,7 @@ __device__ RT_OUTLINE void rt_problem(
                 }
             }
             rt_dense_solve(n2, am, zz);
-            double *Zn = Zv + (long)n * 2 * N;
+            RT_W Zn = Zv + (long)n * 2 * N;
             for (int i = 0; i < n2; ++i) Zn[i] = zz[i];
         }
 
@@ -538,9 +560,9 @@ __device__ RT_OUTLINE void rt_problem(
         for (long i = 0; i < ldab * nun; ++i) ab[i] = 0.0;
         int row = 0;
         for (int n = 0; n < L; ++n) {
-            const double *Gn = Gv + (long)n * 2 * N * N;
-            const double *Kn = Kv + (long)n * N;
-            const double *Zn = Zv + (long)n * 2 * N;
+            const RT_W Gn = Gv + (long)n * 2 * N * N;
+            const RT_W Kn = Kv + (long)n * N;
+            const RT_W Zn = Zv + (long)n * 2 * N;
             double e[RT_MAXN];
             for (int j = 0; j < N; ++j) e[j] = rt_exp(-Kn[j] * dtaus[n]);
             const double att = rt_exp(-ch[n]), attb = rt_exp(-ch[n + 1]);
@@ -557,9 +579,9 @@ __device__ RT_OUTLINE void rt_problem(
                 row += N;
             }
             if (n < L - 1) {
-                const double *G1 = Gv + (long)(n + 1) * 2 * N * N;
-                const double *K1 = Kv + (long)(n + 1) * N;
-                const double *Z1 = Zv + (long)(n + 1) * 2 * N;
+                const RT_W G1 = Gv + (long)(n + 1) * 2 * N * N;
+                const RT_W K1 = Kv + (long)(n + 1) * N;
+                const RT_W Z1 = Zv + (long)(n + 1) * 2 * N;
                 double e1[RT_MAXN];
                 for (int j = 0; j < N; ++j) e1[j] = rt_exp(-K1[j] * dtaus[n + 1]);
                 const int c1 = c0 + 2 * N;
@@ -612,11 +634,11 @@ __device__ RT_OUTLINE void rt_problem(
                 int k = outlev[o];
                 int n = k < L ? k : L - 1;
                 double t = k < L ? 0.0 : dtaus[n];
-                const double *Gn = Gv + (long)n * 2 * N * N;
-                const double *Kn = Kv + (long)n * N;
-                const double *Zn = Zv + (long)n * 2 * N;
-                const double *A = rhs + 2 * N * n;
-                const double *B = A + N;
+                const RT_W Gn = Gv + (long)n * 2 * N * N;
+                const RT_W Kn = Kv + (long)n * N;
+                const RT_W Zn = Zv + (long)n * 2 * N;
+                const RT_W A = rhs + 2 * N * n;
+                const RT_W B = A + N;
                 double bfac = rt_exp(-ch[k]);
                 double fup = 0.0, fdn = 0.0, uup = 0.0, udn = 0.0;
                 for (int i = 0; i < N; ++i) {
@@ -662,11 +684,11 @@ __device__ RT_OUTLINE void rt_problem(
                     if (m == 0) {
                         // Lambert surface: albedo/pi times the total downward irradiance
                         int n = L - 1;
-                        const double *Gn = Gv + (long)n * 2 * N * N;
-                        const double *Kn = Kv + (long)n * N;
-                        const double *Zn = Zv + (long)n * 2 * N;
-                        const double *A = rhs + 2 * N * n;
-                        const double *B = A + N;
+                        const RT_W Gn = Gv + (long)n * 2 * N * N;
+                        const RT_W Kn = Kv + (long)n * N;
+                        const RT_W Zn = Zv + (long)n * 2 * N;
+                        const RT_W A = rhs + 2 * N * n;
+                        const RT_W B = A + N;
                         double fdn = 0.0;
                         for (int i = 0; i < N; ++i) {
                             double dn = Zn[N + i] * rt_exp(-ch[L]);
@@ -682,12 +704,12 @@ __device__ RT_OUTLINE void rt_problem(
                             for (int ip = 0; ip < nphi; ++ip)
                                 rad[(o * numu + iu) * nphi + ip] += val * cosm[ip];
                     for (int n = L - 1; n >= 0; --n) {
-                        const double *gl = gm + (long)n * nstr;
-                        const double *Gn = Gv + (long)n * 2 * N * N;
-                        const double *Kn = Kv + (long)n * N;
-                        const double *Zn = Zv + (long)n * 2 * N;
-                        const double *A = rhs + 2 * N * n;
-                        const double *B = A + N;
+                        const RT_W gl = gm + (long)n * nstr;
+                        const RT_W Gn = Gv + (long)n * 2 * N * N;
+                        const RT_W Kn = Kv + (long)n * N;
+                        const RT_W Zn = Zv + (long)n * 2 * N;
+                        const RT_W A = rhs + 2 * N * n;
+                        const RT_W B = A + N;
                         double d = dtaus[n];
                         double s = 0.0, sz = 0.0;
                         double du[2 * RT_MAXN];
@@ -724,12 +746,12 @@ __device__ RT_OUTLINE void rt_problem(
                             for (int ip = 0; ip < nphi; ++ip)
                                 rad[(o * numu + iu) * nphi + ip] += 0.0;
                     for (int n = 0; n < L; ++n) {
-                        const double *gl = gm + (long)n * nstr;
-                        const double *Gn = Gv + (long)n * 2 * N * N;
-                        const double *Kn = Kv + (long)n * N;
-                        const double *Zn = Zv + (long)n * 2 * N;
-                        const double *A = rhs + 2 * N * n;
-                        const double *B = A + N;
+                        const RT_W gl = gm + (long)n * nstr;
+                        const RT_W Gn = Gv + (long)n * 2 * N * N;
+                        const RT_W Kn = Kv + (long)n * N;
+                        const RT_W Zn = Zv + (long)n * 2 * N;
+                        const RT_W A = rhs + 2 * N * n;
+                        const RT_W B = A + N;
                         double d = dtaus[n];
                         double s = 0.0, sz = 0.0;
                         double du[2 * RT_MAXN];
@@ -828,7 +850,7 @@ extern "C" __global__ void radtran_disort(
     const int tid = blockIdx.x * blockDim.x + threadIdx.x;
     const int prob = prob0 + tid;
     if (prob >= nprob) return;
-    rt_problem(prob, work + (long)tid * wstride, 0, RT_MAXSTR, RT_PART_ALL, RT_ARGS,
+    rt_problem(prob, RT_WBASE(tid, nprob - prob0), 0, RT_MAXSTR, RT_PART_ALL, RT_ARGS,
                flux_out + (long)prob * nout * 6, rad_out + (long)prob * nout * numu * nphi);
 }
 
@@ -854,7 +876,7 @@ extern "C" __global__ void radtran_disort_modes(
     const int prob = prob0 + p;
     if (prob >= nprob) return;
     const long sz = (long)nout * numu * nphi;
-    rt_problem(prob, work + (long)tid * wstride, m, m,
+    rt_problem(prob, RT_WBASE(tid, (long)(nprob - prob0) * nmodes), m, m,
                (m == 0 ? RT_PART_FLUX : 0) | RT_PART_RADZERO, RT_ARGS,
                flux_out + (long)prob * nout * 6, radm + (long)tid * sz);
 }
@@ -880,5 +902,5 @@ extern "C" __global__ void radtran_disort_finish(
         const double *part = radm + ((long)tid * nmodes + m) * sz;
         for (long o = 0; o < sz; ++o) rad[o] += part[o];
     }
-    rt_problem(prob, work + (long)tid * wstride, 1, 0, RT_PART_TMS, RT_ARGS, rad, rad);
+    rt_problem(prob, RT_WBASE(tid, nprob - prob0), 1, 0, RT_PART_TMS, RT_ARGS, rad, rad);
 }
