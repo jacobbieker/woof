@@ -104,6 +104,9 @@ def test_fused_step_matches_the_per_step_glue(monkeypatch, mynn, elapsed, cldfra
     results = {}
     for enabled in (False, True):
         monkeypatch.setattr(farms, "FARMS_FUSED_ENABLED", enabled)
+        # _driver copies the dict, not the arrays: poison each arm's outputs.
+        for name in ("swdown2", "swddir2", "swddni2", "swddif2", "swdownc2", "swddnic2"):
+            fields[name][...] = cp.float32(np.nan)
         driver = _driver(fields, cldfra=cldfra)
         scheme = _farms()
         before = {k: v.copy() for k, v in atmosphere.items()}

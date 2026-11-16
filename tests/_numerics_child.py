@@ -36,8 +36,10 @@ import inspect, itertools, os, sys, tempfile, traceback
 from pathlib import Path
 sys.path.insert(0, {here!r})
 import pytest
+import conftest  # the battery's setup: backend install (WOOF_BACKEND) before any cupy import
+import woof  # the automatic facade, before the module's importorskip("cupy")
 import {module} as t
-os.environ["GPUWM_NUMERICS"] = {numerics!r}
+os.environ["GPUWM_NUMERICS"] = os.environ["WOOF_NUMERICS"] = {numerics!r}
 from woof import numerics
 assert numerics.mode() == {numerics!r}, numerics.mode()
 
@@ -88,7 +90,9 @@ def run(test_file, names, numerics, exact, *, env=None, timeout=1800):
         pytest.skip("GPUWM_WRF_EXACT=1 is strict numerics")
     path = Path(test_file).resolve()
     child_env = dict(os.environ)
-    child_env["GPUWM_WRF_EXACT"] = exact
+    # Both spellings: importing woof copies GPUWM_X onto an unset WOOF_X only,
+    # so an inherited WOOF_WRF_EXACT would otherwise win.
+    child_env["GPUWM_WRF_EXACT"] = child_env["WOOF_WRF_EXACT"] = exact
     child_env.update(env or {})
     code = _CHILD.format(here=str(path.parent), module=path.stem, numerics=numerics,
                          names=list(names))
