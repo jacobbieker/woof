@@ -500,7 +500,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   `--scratch`, so a regional run in a fresh work dir no longer recompiles
   in its first step (edi-vr 1 h on an A6000: step 1 from 42.5 s to 3.6 s,
   byte-identical; `WOOF_HEX_SHARED_KERNEL_IMAGES=0` restores the per-run
-  cache).
+  cache). WRF on Metal: the Smagorinsky row kernels' by-value address
+  tables beside their grid pointers, and the spec-zone ring copy's device
+  table, are resolved to the buffers they name and ordered by MLX instead
+  of a queue drain before and after each launch (Edinburgh 3 km: 26.5 to
+  10.8 blocking drains per step, byte-identical;
+  `WOOF_METAL_RESOLVE_DEVICE_TABLES=0` restores the drains).
   `WOOF_METAL_GPU_TIMES` times each kernel.
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight

@@ -88,6 +88,7 @@ class MetalFunction:
         params = sig.params
         supplied = iter(args)
         buffers, offsets, writable, slots, targets = [], [], [], [], []
+        stores, bound = [], {}            # each entry's storage; pointer name -> view
         null_slots, null_table = [], []
         ordinal = -1                      # the pointer's position: slot, or table entry
         blob = bytearray(sig.scalar_size)
@@ -118,26 +119,45 @@ class MetalFunction:
                 offsets.append(a._offset)
                 writable.append(not p.const)
                 targets.append(a._st if not p.const else None)
+                stores.append(a._st)
+                bound[p.name] = a
             else:
                 blob[p.offset:p.offset + p.size] = self._pack(p, a)
-        # A kernel whose only addresses arrive by value (a table of them in
-        # its scalar block: rk_copy_words, glue_add_arrays) reaches the
-        # storages those words name, and no others: bound as hazard entries
-        # (no slot), MLX orders it after their writers and their later readers
-        # after it, and it needs no synchronize.
+        # A kernel whose addresses arrive in a FLAT table -- by value in its
+        # scalar block (rk_copy_words, glue_add_arrays, the Smagorinsky row
+        # tables), or in a device table that holds only data addresses
+        # (DEVICE_ADDRESS_TABLES) -- reaches the storages its bound pointers
+        # and those words name, and no others: the named ones are bound as
+        # hazard entries (no slot), MLX orders it after their writers and
+        # their later readers after it, and it needs no synchronize.
         mode = _SERIAL_MODE if (not _SERIAL_ONLY or any(k in self.name for k in _SERIAL_ONLY)) else ""
         resolved = False
-        if (sig.indirect and _RESOLVE_TABLES and self.name in FLAT_ADDRESS_TABLES
-                and sig.pointer_mode == "direct" and blob
-                and not any(p.pointer for p in params) and mode == ""):
+        words = None
+        if sig.indirect and _RESOLVE_TABLES and sig.pointer_mode == "direct" and mode == "":
+            if self.name in FLAT_ADDRESS_TABLES and blob and (_RESOLVE_BESIDE_POINTERS or not stores):
+                words = np.frombuffer(bytes(blob[:len(blob) // 8 * 8]), dtype=np.uint64)
+            elif (_RESOLVE_BESIDE_POINTERS and self.name in DEVICE_ADDRESS_TABLES
+                  and DEVICE_ADDRESS_TABLES[self.name] in bound):
+                words = _device_table_words(bound[DEVICE_ADDRESS_TABLES[self.name]])
+        if words is not None:
             from woof.backend.facade._array import storages_holding
-            words = np.frombuffer(bytes(blob[:len(blob) // 8 * 8]), dtype=np.uint64)
+            entry = {}
+            for i, st in enumerate(stores):
+                entry.setdefault(id(st), i)
             for st in storages_holding(set(words[words != 0].tolist())):
+                i = entry.get(id(st))
+                if i is not None:
+                    # already bound at a slot: that entry is the hazard
+                    if not writable[i]:
+                        writable[i] = True
+                        targets[i] = st
+                    continue
                 slots.append(-1)
                 buffers.append(st.arr)
                 offsets.append(0)
                 writable.append(True)
                 targets.append(st)
+                stores.append(st)
             resolved = True
         if not any(writable):
             # It writes only through device addresses it was handed (a pointer
@@ -289,6 +309,11 @@ def share_one_stream():
 #: synchronizes before and after, as every indirect kernel did.
 _RESOLVE_TABLES = os.environ.get("WOOF_METAL_RESOLVE_TABLES", "1") != "0"
 
+#: WOOF_METAL_RESOLVE_DEVICE_TABLES=0: only kernels with no pointer parameter
+#: of their own resolve a by-value table, and none a device table (DEVICE_
+#: ADDRESS_TABLES); the rest synchronize, as before 2026-11-16.
+_RESOLVE_BESIDE_POINTERS = os.environ.get("WOOF_METAL_RESOLVE_DEVICE_TABLES", "1") != "0"
+
 #: Kernels whose by-value address table is FLAT: every buffer they touch is
 #: named by a word of their scalar block, none through an address read from
 #: memory (a device-resident table of addresses).  Only for these may the
@@ -299,7 +324,46 @@ FLAT_ADDRESS_TABLES = frozenset({
     "diff6_multi",                           # woof/core/kernels/diff6.cu
     "state_relaxation_multi",                # woof/core/kernels/lbc_state.cu
     "solve_region_scrub_words_v841",         # woof/hex/cuda_solve_region_v841.py
+    # by-value row tables beside const grid pointers (woof/core/kernels/smag2d.cu)
+    "wrf_smag_flux_s_multi", "wrf_smag_hd_s_multi",
 })
+
+#: Kernels that read their buffers' addresses from a DEVICE table (the named
+#: pointer parameter) holding data addresses only -- no address of another
+#: table -- and never write the table: the words are read in place from the
+#: table's unified memory (_device_table_words) and stand in for a
+#: synchronize, as FLAT_ADDRESS_TABLES' by-value words do.  Add a kernel only
+#: after reading it.
+DEVICE_ADDRESS_TABLES = {
+    "mp_ring_copy": "table",                 # woof/core/kernels/microphysics_validation.cu
+}
+
+#: id(storage) -> (the storage, its value when read, the words): a device
+#: table is read once per value it takes, not once per launch
+_TABLE_WORDS: dict = {}
+
+
+def _device_table_words(view) -> np.ndarray:
+    """The 64-bit words of a device address table, read where they lie.
+
+    Unified memory: an evaluated MLX buffer is host memory, so the words
+    are read in place, with no copy and no wait once the table's upload
+    has run (the first launch after a new value waits for that once).
+    """
+    import weakref
+    import mlx.core as mx
+    st = view._st
+    cached = _TABLE_WORDS.get(id(st))
+    if cached is not None and cached[0]() is st and cached[1] is st.arr \
+            and cached[2] == (view._offset, view.nbytes):
+        return cached[3]
+    mx.eval(st.arr)
+    raw = np.asarray(st.arr).view(np.uint8)[view._offset:view._offset + view.nbytes]
+    words = np.array(raw[:raw.size // 8 * 8].view(np.uint64))
+    _TABLE_WORDS[id(st)] = (weakref.ref(st, lambda _r, key=id(st): _TABLE_WORDS.pop(key, None)),
+                            st.arr, (view._offset, view.nbytes), words)
+    return words
+
 
 #: C type of a module global's element -> the storage dtype it is held in
 #: WOOF_METAL_SERIAL=1: every launch waits for all earlier GPU work and
