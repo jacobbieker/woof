@@ -439,6 +439,7 @@ def constructor_values_for(
     cell_area_m2=None,
     interior_column=None,
     surface_inputs: Mapping[str, Any] | None = None,
+    cell_neighbours=None,
 ) -> dict[str, Any]:
     """The frozen door's mapping, re-shaped to the suite row's seam.
 
@@ -487,6 +488,15 @@ def constructor_values_for(
                     "limited-area mesh's boundary columns would take turbines")
             mapped["interior_column"] = np.asarray(interior_column,
                                                    dtype=np.bool_)
+        if int(mapped["physics"].get("topo_wind", 0) or 0) == 1:
+            # topo_wind = 1's terrain laplacian over the mesh's own
+            # neighbours (woof.core.terrain_drag.topo_wind_coefficients);
+            # only then, so every other run's mapping is unchanged.
+            if cell_neighbours is None:
+                raise ValueError(
+                    "topo_wind = 1 needs the mesh's cell_neighbours "
+                    "(cellsOnCell, nEdgesOnCell) for its terrain laplacian")
+            mapped["cell_neighbours"] = tuple(cell_neighbours)
         if surface_inputs:
             # The per-cell inputs the selection's schemes read beyond the
             # init's dozen (woof.hex.surface_inputs).  Only when there are
@@ -544,6 +554,7 @@ class SealedSuiteConstructorV841:
         keys.discard("generation")
         keys.discard("cell_area_m2")
         keys.discard("interior_column")
+        keys.discard("cell_neighbours")
         if generation is not None and not isinstance(generation, Mapping):
             raise TypeError("generation must be a mapping of generation selectors")
         if values.get("physics") is not None:
@@ -883,6 +894,17 @@ class SealedSuiteConstructorV841:
                     "volume and needs the mesh's cell_area_m2")
             arrays["interior_column"] = _host_exact_array(
                 values, "interior_column", dtype=np.dtype(np.bool_), shape=(ncol,))
+        topo_mesh = int(physics.get("topo_wind", 0) or 0) == 1
+        if (values.get("cell_neighbours") is not None) != topo_mesh:
+            raise ValueError(
+                "cell_neighbours is sealed exactly when topo_wind = 1 takes "
+                "its terrain laplacian over the mesh's neighbours")
+        if topo_mesh:
+            from woof.core.terrain_drag import mesh_neighbours
+            cells, counts = mesh_neighbours(*values["cell_neighbours"], ncol)
+            for value in (cells, counts):
+                value.setflags(write=False)
+            arrays["cells_on_cell"], arrays["n_edges_on_cell"] = cells, counts
         z = np.asarray(values["z_interface_nominal_m"])
         if z.shape != (nlev + 1,) or not np.all(np.isfinite(z)) or np.any(np.diff(z) <= 0):
             raise ValueError("z_interface_nominal_m must be finite, increasing, nlev+1 long")
@@ -1084,6 +1106,10 @@ class SealedSuiteConstructorV841:
             # exactly the keywords it was built with before.
             **({} if values.get("interior_column") is None
                else {"interior_column": values["interior_column"]}),
+            # Only with topo_wind = 1 (its mesh laplacian).
+            **({} if values.get("cells_on_cell") is None
+               else {"cell_neighbours": (values["cells_on_cell"],
+                                         values["n_edges_on_cell"])}),
         }
 
     def receipt(self) -> Mapping[str, Any]:

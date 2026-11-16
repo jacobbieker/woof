@@ -58,6 +58,10 @@ from woof.static.orographic import (GSL_LS_FIELDS, GSL_SS_FIELDS,
 
 #: WRF v4.7.1 topo_wind values and gwd_opt values ported here.
 TOPO_WIND_OPTIONS = (0, 1, 2)
+#: The static-mapping keys under which an unstructured mesh's column seam
+#: hands topo_wind = 1 its cells' edge neighbours (zero-based cellsOnCell,
+#: nEdgesOnCell) for LAP_HGT: :func:`topo_wind_coefficients`.
+MESH_NEIGHBOURS_KEYS = ("CELLS_ON_CELL", "N_EDGES_ON_CELL")
 GWD_OPTIONS = (0, 1, 3)
 
 #: No FMA contraction (gfortran contracts nothing) and no flush to zero.
@@ -142,13 +146,24 @@ def _f32(xp, array, shape, name):
 
 
 def topo_wind_coefficients(ht, xland, *, topo_wind: int, var_sso=None,
-                           var2d=None):
+                           var2d=None, cells_on_cell=None,
+                           n_edges_on_cell=None):
     """``(ctopo, ctopo2, lap_hgt)``: start_em.F:1539-1626 on one domain.
 
     ``ht``, ``xland`` (1 land, 2 water) and the option's field (``var_sso``
     for 1, ``var2d`` for 2) are (ny, nx).  ``topo_wind = 0`` returns the
     Registry fill, ones.  The neighbours of the terrain laplacian clamp at
     the domain edges, WRF's non-periodic arm.
+
+    On an unstructured mesh pass ``cells_on_cell`` (``(ncol, maxEdges)``,
+    zero-based) and ``n_edges_on_cell`` (``(ncol,)``) with the fields as
+    ``(1, ncol)`` or ``(ncol,)``: LAP_HGT is then the mean of each cell's
+    edge neighbours minus its own height (``topo_wind_static_mesh`` in
+    ``kernels/terrain_drag.cu``), which is start_em.F:1558 word for word on a
+    quad neighbourhood listed (i+1, i-1, j+1, j-1).  Without them a mesh's
+    (1, N) field would take its laplacian from cells adjacent in INDEX
+    order, which are not neighbours: the mesh column seam
+    (woof.core.mpas_column_suite) refuses topo_wind = 1 without them.
     """
     import cupy as cp
 
@@ -156,10 +171,19 @@ def topo_wind_coefficients(ht, xland, *, topo_wind: int, var_sso=None,
     if topo_wind not in TOPO_WIND_OPTIONS:
         raise ValueError(f"topo_wind must be one of {TOPO_WIND_OPTIONS}, "
                          f"got {topo_wind}")
+    mesh = cells_on_cell is not None or n_edges_on_cell is not None
+    if mesh and (cells_on_cell is None or n_edges_on_cell is None):
+        raise ValueError("a mesh laplacian needs both cells_on_cell and "
+                         "n_edges_on_cell")
     ht = _f32(cp, ht, np.shape(ht), "ht")
+    if mesh and ht.ndim == 1:
+        ht = ht.reshape(1, -1)
     if ht.ndim != 2:
         raise ValueError(f"ht must be (ny, nx), got {ht.shape}")
     ny, nx = ht.shape
+    if mesh and ny != 1:
+        raise ValueError(f"a mesh's fields are (1, ncol) or (ncol,), got "
+                         f"{ht.shape}")
     xland = _f32(cp, xland, (ny, nx), "xland")
     if topo_wind == 1 and var_sso is None:
         # WRF's own fatal error (start_em.F:222-223).
@@ -175,11 +199,46 @@ def topo_wind_coefficients(ht, xland, *, topo_wind: int, var_sso=None,
     ctopo2 = cp.empty((ny, nx), dtype=cp.float32)
     lap = cp.empty((ny, nx), dtype=cp.float32)
     n = ny * nx
+    if mesh:
+        neighbours, counts = mesh_neighbours(cells_on_cell, n_edges_on_cell,
+                                             nx)
+        neighbours = cp.asarray(neighbours)
+        counts = cp.asarray(counts)
+        _kernel("topo_wind_static_mesh")(
+            ((n + _BLOCK - 1) // _BLOCK,), (_BLOCK,),
+            (ht, var_sso, var2d, xland, neighbours, counts,
+             np.int32(neighbours.shape[1]), lap, ctopo, ctopo2,
+             np.int32(n), np.int32(topo_wind)))
+        return ctopo, ctopo2, lap
     _kernel("topo_wind_static")(
         ((n + _BLOCK - 1) // _BLOCK,), (_BLOCK,),
         (ht, var_sso, var2d, xland, lap, ctopo, ctopo2, np.int32(nx),
          np.int32(ny), np.int32(topo_wind)))
     return ctopo, ctopo2, lap
+
+
+def mesh_neighbours(cells_on_cell, n_edges_on_cell, ncol: int):
+    """Host-checked ``(int32 (ncol, maxEdges), int32 (ncol,))`` neighbours.
+
+    Zero-based indices; an index outside ``[0, ncol)`` in a used slot stands
+    for a cell outside the column set and is read as the cell itself.
+    """
+    to_host = getattr(cells_on_cell, "get", None)
+    cells = np.asarray(cells_on_cell if to_host is None else to_host())
+    to_host = getattr(n_edges_on_cell, "get", None)
+    counts = np.asarray(n_edges_on_cell if to_host is None else to_host())
+    if (cells.ndim != 2 or cells.shape[0] != int(ncol)
+            or cells.dtype.kind not in "iu"):
+        raise ValueError(f"cells_on_cell must be an integer (ncol={ncol}, "
+                         f"maxEdges) array, got {cells.dtype} {cells.shape}")
+    counts = counts.reshape(-1)
+    if counts.shape != (int(ncol),) or counts.dtype.kind not in "iu":
+        raise ValueError(f"n_edges_on_cell must be an integer ({ncol},) "
+                         f"vector, got {counts.dtype} {counts.shape}")
+    if np.any(counts < 0) or np.any(counts > cells.shape[1]):
+        raise ValueError("n_edges_on_cell lies outside cells_on_cell's slots")
+    return (np.ascontiguousarray(cells, dtype=np.int32),
+            np.ascontiguousarray(counts, dtype=np.int32))
 
 
 def gsl_kpblmax(znu) -> int:
@@ -451,10 +510,16 @@ def build_terrain_drag(*, topo_wind: int, gwd_opt: int, static, ht, xland,
     ny, nx = ht.shape
     drag = TerrainDrag(topo_wind=topo_wind, gwd_opt=gwd_opt)
     if topo_wind:
+        # An unstructured mesh's column seam hands its cells' edge
+        # neighbours beside the statistics (MESH_NEIGHBOURS_KEYS).
+        cells_on_cell, n_edges_on_cell = (have.get(name) for name
+                                          in MESH_NEIGHBOURS_KEYS)
         drag.ctopo, drag.ctopo2, _ = topo_wind_coefficients(
             ht, xland, topo_wind=topo_wind,
             var_sso=have.get("VAR_SSO") if topo_wind == 1 else None,
-            var2d=have.get("VAR") if topo_wind == 2 else None)
+            var2d=have.get("VAR") if topo_wind == 2 else None,
+            cells_on_cell=cells_on_cell if topo_wind == 1 else None,
+            n_edges_on_cell=n_edges_on_cell if topo_wind == 1 else None)
     if gwd_opt:
         drag.gwd = {name: _f32(cp, have[name], (ny, nx), name)
                     for name in GWD_FIELDS[gwd_opt]}
