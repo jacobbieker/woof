@@ -106,3 +106,26 @@ def test_wrfout_device_copy_snapshot(cp):
     src += cp.float32(1.0)
     stream.synchronize()
     assert np.array_equal(dst.get(), h)
+
+
+def test_a_copy_into_a_page_locked_block_is_complete_on_return(cp):
+    """hostAlloc memory reached through its device address: the host reads
+    it straight after the copy, so that copy still completes on return."""
+    from woof.backend.facade import cuda as fcuda
+    n = 1 << 22
+    src_h = np.arange(n, dtype=np.float32)
+    src = cp.asarray(src_h)
+    bump = cp.RawKernel(_BUMP, "bump")
+    for k in range(4):                    # keep the GPU busy past the copy's return
+        bump(((n + 255) // 256,), (256,), (src, np.float32(k), np.int32(n)))
+        src_h = _host_bump(src_h, k)
+    ptr = cp.cuda.runtime.hostAlloc(src.nbytes, 0)
+    try:
+        dev = fcuda._pointer_attributes(ptr).devicePointer
+        block = cp.ndarray((n,), cp.float32,
+                           memptr=cp.cuda.MemoryPointer(cp.cuda.UnownedMemory(dev, src.nbytes, None), 0))
+        block.data.copy_from_device(src.data, src.nbytes)
+        host = np.ctypeslib.as_array((np.ctypeslib.ctypes.c_float * n).from_address(ptr))
+        assert np.array_equal(host.view(np.uint32), src_h.view(np.uint32))
+    finally:
+        cp.cuda.runtime.freeHost(ptr)

@@ -982,14 +982,17 @@ class _Pointer:
 
     # CuPy's MemoryPointer copies, by raw address (cupy.cuda.runtime.memcpy)
     def copy_from_device(self, src, size, stream=None):
-        from woof.backend.facade.cuda import _bytes_view, _memcpy
+        from woof.backend.facade.cuda import _HOST_BLOCKS, _bytes_view, _memcpy
         size = int(size)
         if _DEVICE_COPY and size > 0:
             # Both sides storages: a device copy the facade orders, not a
-            # host round trip that waits for the source (wrfout snapshots)
+            # host round trip that waits for the source (wrfout snapshots).
+            # Page-locked host blocks (hostAlloc) keep the copy the host
+            # sees complete on return.
             source = _bytes_view(_address(src), size)
             target = _bytes_view(self.ptr, size) if source is not None else None
-            if target is not None and target._st is not source._st:
+            if target is not None and target._st is not source._st and not any(
+                    st is target._st or st is source._st for _h, st in _HOST_BLOCKS.values()):
                 target._write(source._values())
                 return
         _memcpy(self.ptr, _address(src), size)
