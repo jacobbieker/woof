@@ -175,9 +175,12 @@ extern "C" __global__ void rlw_rtrn_prol_gpoints(
 // over the band's g-points in order) and multiplies the total by fluxfac;
 // the band flux is that term times fluxfac.  A separate launch over the
 // same inputs: the broadband words do not change.
-// thread -> (col, lev, band); out (4, ncol, nl+1, 16): u, d, uc, dc (W/m2)
+// thread -> (col, lev, band); out (4, ncol, nlo, 16): u, d, uc, dc (W/m2).
+// nlo output levels: every level (nlo = nl + 1), or only the surface and the
+// top (nlo = 2, from levels 0 and nl), the two the history fields read; each
+// stored word is the same expression either way.
 extern "C" __global__ void rlw_rtrn_band_rows(
-    int ncol, int nl,
+    int ncol, int nl, int nlo,
     const float* __restrict__ radld_p,     // (ncol, nl, NGPTLW)
     const float* __restrict__ radclrd_p,
     const float* __restrict__ radlu_p,
@@ -190,11 +193,12 @@ extern "C" __global__ void rlw_rtrn_band_rows(
     float wtdiff, float fluxfac,
     float* __restrict__ out)
 {
-    long long n1 = (long long)nl + 1;
+    long long n1 = (long long)nlo;
     long long idx = (long long)blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= (long long)ncol * n1 * NBNDLW) return;
     int iband = (int)(idx % NBNDLW) + 1;
-    int lev = (int)((idx / NBNDLW) % n1);
+    int lo = (int)((idx / NBNDLW) % n1);
+    int lev = nlo == nl + 1 ? lo : lo * nl;
     int col = (int)(idx / NBNDLW / n1);
     int g_lo = (iband == 1) ? 0 : ngs[iband - 2];
     int g_hi = ngs[iband - 1];
@@ -215,7 +219,7 @@ extern "C" __global__ void rlw_rtrn_band_rows(
     }
     float dw = delwave[iband - 1];
     long long plane = (long long)ncol * n1 * NBNDLW;
-    long long at = ((long long)col * n1 + lev) * NBNDLW + (iband - 1);
+    long long at = ((long long)col * n1 + lo) * NBNDLW + (iband - 1);
     out[at] = RLW_MU(RLW_MU(RLW_MU(urad, wtdiff), dw), fluxfac);
     out[plane + at] = RLW_MU(RLW_MU(RLW_MU(drad, wtdiff), dw), fluxfac);
     out[2 * plane + at] = RLW_MU(RLW_MU(RLW_MU(clru, wtdiff), dw), fluxfac);
