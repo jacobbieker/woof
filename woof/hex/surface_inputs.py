@@ -435,16 +435,33 @@ def default_candidates(grid: str | Path, static: str | Path | None,
 CELL_CENTRE_TOLERANCE_RAD = 1.0e-9
 
 
+def _single_precision_ulp(values: np.ndarray) -> np.ndarray:
+    """One float32 unit in the last place at each value (at most 4.8e-7 rad,
+    about 3 m on the Earth, at 2 pi)."""
+
+    return np.spacing(np.abs(values).astype(np.float32)).astype(np.float64)
+
+
 def same_cells(lat_a, lon_a, lat_b, lon_b) -> bool:
-    """Whether two centre lists name the same cells in the same order."""
+    """Whether two centre lists name the same cells in the same order.
+
+    Centres agree to CELL_CENTRE_TOLERANCE_RAD, or to one float32 ulp: the
+    NCAR-published statics (x1.40962 and the rest) store their centres in
+    single precision while the run's grid holds them in double, so a sidecar
+    built from such a static carries the static's rounding of the grid's
+    centres (up to 6e-8 rad on x1.40962).  A float32 ulp is metres; any two
+    distinct cells are at least hundreds of metres apart."""
 
     lat_a, lat_b = (np.asarray(v, dtype=np.float64).reshape(-1) for v in (lat_a, lat_b))
     lon_a, lon_b = (np.asarray(v, dtype=np.float64).reshape(-1) for v in (lon_a, lon_b))
     if lat_a.shape != lat_b.shape or lon_a.shape != lon_b.shape:
         return False
     dlon = np.abs(np.mod(lon_a - lon_b + np.pi, 2.0 * np.pi) - np.pi)
-    return bool(np.all(np.abs(lat_a - lat_b) <= CELL_CENTRE_TOLERANCE_RAD)
-                and np.all(dlon <= CELL_CENTRE_TOLERANCE_RAD))
+    lat_tol = np.maximum(CELL_CENTRE_TOLERANCE_RAD,
+                         np.maximum(_single_precision_ulp(lat_a), _single_precision_ulp(lat_b)))
+    lon_tol = np.maximum(CELL_CENTRE_TOLERANCE_RAD,
+                         _single_precision_ulp(np.full(lon_a.shape, 2.0 * np.pi)))
+    return bool(np.all(np.abs(lat_a - lat_b) <= lat_tol) and np.all(dlon <= lon_tol))
 
 
 def _array_identity(values: np.ndarray) -> dict[str, Any]:
