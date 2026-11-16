@@ -363,6 +363,13 @@ def _device_table_words(view) -> np.ndarray:
     # an alias (another dtype's view of it) rebinds only the alias
     root = st.buffer_root()
     values = (root.arr,) + tuple(a.arr for a in (root._aliases or {}).values())
+    from woof.backend.facade.cuda import _HOST_BLOCKS
+    if any(block is root for _host, block in _HOST_BLOCKS.values()):
+        # page-locked host memory (hostAlloc): the host writes it through
+        # its pointer, leaving every value as it was -- read it each time
+        mx.eval(*values)
+        raw = np.asarray(st.arr).view(np.uint8)[view._offset:view._offset + view.nbytes]
+        return np.array(raw[:raw.size // 8 * 8].view(np.uint64))
     cached = _TABLE_WORDS.get(id(st))
     if cached is not None and cached[0]() is st and len(cached[1]) == len(values) \
             and all(x is y for x, y in zip(cached[1], values)) \

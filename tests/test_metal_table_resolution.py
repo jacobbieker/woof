@@ -254,3 +254,42 @@ def test_a_table_rewritten_through_an_alias_is_read_again(monkeypatch):
     ring((1, 1), (256,), (table, np.int32(1), np.int32(0)))
     assert [int(w) for w in used[-1][:2]] == [b.data.ptr, out_b.data.ptr]
     assert np.array_equal(out_b.get(), np.arange(n, dtype=np.float32) + 100)
+
+
+def test_a_page_locked_table_written_by_the_host_is_read_again(monkeypatch):
+    """A table in hostAlloc memory, rewritten by the host through its
+    pointer between launches, names the new sections at the next launch."""
+    _mlx_or_skip()
+    import cupy as cp
+    from woof.backend.facade import cuda as fcuda
+    from woof.backend.metal import loader
+    from woof.core.kernels import get_kernel
+
+    used = []
+    words = loader._device_table_words
+    monkeypatch.setattr(loader, "_device_table_words",
+                        lambda view: used.append(words(view)) or used[-1])
+    ring = get_kernel("microphysics_validation", "mp_ring_copy")
+    n = 64
+    a, b = cp.asarray(np.arange(n, dtype=np.float32)), cp.asarray(np.arange(n, dtype=np.float32) + 100)
+    out_a, out_b = cp.zeros(n, cp.float32), cp.zeros(n, cp.float32)
+    row = lambda src, dst: np.asarray([(src.data.ptr, dst.data.ptr, 1, 0, 1, 0, n, n, n)],
+                                      dtype=np.int64).reshape(-1)
+    nbytes = row(a, out_a).nbytes
+    ptr = cp.cuda.runtime.hostAlloc(nbytes, 0)
+    try:
+        host = np.ctypeslib.as_array((np.ctypeslib.ctypes.c_int64 * (nbytes // 8)).from_address(ptr))
+        dev = fcuda._pointer_attributes(ptr).devicePointer
+        table = cp.ndarray((nbytes // 8,), cp.int64,
+                           memptr=cp.cuda.MemoryPointer(cp.cuda.UnownedMemory(dev, nbytes, None), 0))
+        host[:] = row(a, out_a)
+        ring((1, 1), (256,), (table, np.int32(1), np.int32(0)))
+        cp.cuda.Stream.null.synchronize()
+        host[:] = row(b, out_b)
+        ring((1, 1), (256,), (table, np.int32(1), np.int32(0)))
+        assert [int(w) for w in used[-1][:2]] == [b.data.ptr, out_b.data.ptr]
+        assert np.array_equal(out_a.get(), np.arange(n, dtype=np.float32))
+        assert np.array_equal(out_b.get(), np.arange(n, dtype=np.float32) + 100)
+    finally:
+        cp.cuda.Stream.null.synchronize()
+        cp.cuda.runtime.freeHost(ptr)
