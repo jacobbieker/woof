@@ -553,6 +553,10 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   falls from 761-1061 ms to 470-576 ms, byte-identical
   (`WOOF_METAL_DEVICE_COPY=0` restores the host round trip).
   `WOOF_METAL_GPU_TIMES` times each kernel.
+  The open-boundary frame zero and copy (`zero_frame`, `copy_frame`)
+  launch one thread per frame element instead of one per buffer element,
+  storing the same words (Alps 1 km nest: about 13x faster on Metal and 7x
+  less kernel time on CUDA).
   The `woof.radtran` spectral diagnostic (`radtran_*`) is cheaper, keeping
   the same words. `radtran_disort.cu` compiles in about 6 minutes in
   0.55 GB, against over an hour in over 17 GB before: its helpers are kept
