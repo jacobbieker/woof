@@ -11,6 +11,7 @@ vertical-order and horizontal-order variants the forecast launches.
 import numpy as np
 import pytest
 
+import _numerics_child
 from conftest import requires_gpu
 from test_pd_advection import _pd_case
 
@@ -101,3 +102,14 @@ def test_zero_first_is_a_scalar_option():
     with pytest.raises(ValueError, match="zero_first"):
         _launch("flux_div_u", None, None, None, None, None, None, None,
                 None, 1.0, 1.0, 1, 1, 1, 1, 1, 1, zero_first=True)
+
+
+@requires_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize(*_numerics_child.MODES)
+def test_identity_holds_under_each_numerics(numerics, exact):
+    """zero_first against a fill followed by the accumulating launch.
+    The battery runs strict; production runs fast, where NVRTC drops
+    --fmad=false and Metal keeps fp contract(fast).  Each mode in its own
+    child process (tests/_numerics_child.py)."""
+    _numerics_child.run(__file__, ['test_flux_div_scalar_zero_first_equals_fill_then_accumulate', 'test_pd_renorm_apply_zero_first_equals_fill_then_accumulate'], numerics, exact)

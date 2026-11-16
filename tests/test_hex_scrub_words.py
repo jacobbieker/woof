@@ -14,6 +14,8 @@ import pytest
 
 cp = pytest.importorskip("cupy")
 
+import _numerics_child
+
 
 def _arrays(seed):
     rng = np.random.default_rng(seed)
@@ -50,3 +52,12 @@ def test_by_value_scrub_matches_the_table_scrub_word_for_word(monkeypatch):
         keep = np.ones(stride, dtype=bool)
         keep[solve] = False
         assert flat_got[:, keep].tobytes() == flat_in[:, keep].tobytes()
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize(*_numerics_child.MODES)
+def test_identity_holds_under_each_numerics(numerics, exact):
+    """The by-value scrub against the device-table scrub (stores only).
+    The battery runs strict; production runs fast.  Each mode in its own
+    child process (tests/_numerics_child.py)."""
+    _numerics_child.run(__file__, ['test_by_value_scrub_matches_the_table_scrub_word_for_word'], numerics, exact)

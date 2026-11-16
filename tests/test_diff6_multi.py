@@ -10,6 +10,7 @@ loop bounds, a held incoming tendency, and more rows than one table holds.
 import numpy as np
 import pytest
 
+import _numerics_child
 from conftest import requires_gpu
 
 
@@ -119,3 +120,14 @@ def test_rows_sharing_a_target_or_shapes_fall_back(monkeypatch):
     assert not _diff6_multi_rows([], c, c, mut, planes)
     monkeypatch.setattr(dycore, "DIFF6_MULTI_ENABLED", False)
     assert not _diff6_multi_rows([(a, t, 0.1, 1.0)], c, c, mut, planes)
+
+
+@requires_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize(*_numerics_child.MODES)
+def test_identity_holds_under_each_numerics(numerics, exact):
+    """diff6_multi against the per-field diff6 launches.
+    The battery runs strict; production runs fast, where NVRTC drops
+    --fmad=false and Metal keeps fp contract(fast).  Each mode in its own
+    child process (tests/_numerics_child.py)."""
+    _numerics_child.run(__file__, ['test_multi_launch_matches_per_field_words', 'test_more_rows_than_one_table_take_further_launches'], numerics, exact)

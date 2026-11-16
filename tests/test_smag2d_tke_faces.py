@@ -75,7 +75,15 @@ def _state(open_boundaries, isfflx, nx=14, ny=9, nz=10, seed=5):
     e = 0.7 * np.abs(rng.standard_normal((nz, ny, nx)))
     e[:, 0, :2] = 0.0
     state.tke[...] = cp.asarray(e, dtype=cp.float32)
+    # WRF-like stretched-level weights (this coordinate's are exactly 0.5,
+    # which makes every vertical interpolation product in defor13/defor23
+    # exact and hides a contraction change: the #475 lesson).
+    fnm = (0.5 - 0.04 * np.sin(np.arange(nz) + 0.3)).astype(np.float32)
+    fnm[0] = 0.0
+    state.fnm[...] = cp.asarray(fnm)
+    state.fnp[...] = cp.asarray(np.where(np.arange(nz) == 0, 0.0, 1.0 - fnm).astype(np.float32))
     update_diagnostics(state, cfg.hypsometric_opt)
+    assert not np.all(cp.asnumpy(state.fnm)[1:] == np.float32(0.5))
     return cfg, state
 
 
