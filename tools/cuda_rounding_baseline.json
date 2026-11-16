@@ -5567,7 +5567,7 @@
    },
    {
     "file": "woof/hex/cuda_fullstep_lts_scalars.py",
-    "sha256": "8eb4f2ee920232eab8c47a6589198025cb32d84c5996800e7d8f6d77764c5ddf"
+    "sha256": "6012ea0fa65867e3cc6bba61772574d21d0ff112b3aec3af5ec97e7e6b5640ab"
    },
    {
     "file": "woof/hex/cuda_gwdo_v841.py",

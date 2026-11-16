@@ -447,8 +447,8 @@ def sums_buffer(cp: Any, sums: Any, total: int) -> Any:
 def fold_sums(sums: Any, buffer: Any, ntr: int, first: int, stride: int) -> None:
     """Add a per-element buffer into ``sums[first + stride * tracer]``.  Every kernel's elements are tracer
     major, so a tracer's terms are one contiguous run of the buffer; each run is summed in one fixed order."""
-    if buffer is sums or int(ntr) < 1:
-        return
+    if buffer is sums or int(ntr) < 1 or int(buffer.size) < int(ntr):
+        return   # CUDA's atomics added in place, or nothing launched (sums_buffer's one-element stand-in)
     sums[first::stride][:ntr] += buffer.reshape(int(ntr), -1).sum(axis=1)
 
 

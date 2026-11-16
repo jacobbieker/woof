@@ -454,3 +454,16 @@ def test_donor_guard_removes_what_the_packets_took_beyond_the_upwind_export_and_
             else:
                 assert new_up[t, k, 1] == upwind[t, k, 1]
     assert scaled == int(cp.asnumpy(stats)[0])
+
+
+def test_fold_sums_adds_each_tracers_run_and_skips_an_empty_launch():
+    """The Metal gather's host fold: tracer-major runs summed into ``sums[first::stride]``; a launch of no
+    elements (``sums_buffer``'s one-element stand-in, e.g. a block that owns no capture rows) adds nothing."""
+    from woof.hex.cuda_fullstep_lts_scalars import fold_sums
+    sums = np.zeros(9)
+    fold_sums(sums, np.arange(12, dtype=np.float64), 3, 1, 3)
+    assert sums.tolist() == [0, 6, 0, 0, 22, 0, 0, 38, 0]
+    fold_sums(sums, np.zeros(1), 3, 0, 3)
+    assert sums.tolist() == [0, 6, 0, 0, 22, 0, 0, 38, 0]
+    fold_sums(sums, sums, 3, 0, 3)          # CUDA: the atomics added in place
+    assert sums.tolist() == [0, 6, 0, 0, 22, 0, 0, 38, 0]
