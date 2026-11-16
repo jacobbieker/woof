@@ -67,3 +67,35 @@ def test_hu_stamnes_rows_match_np_interp_words():
     for lam_um in (*rng.uniform(0.3, 3.9, 25), lam[0], lam[17], lam[-1], 0.1, 5.0):
         got = clouds._hu_prop(blocks, float(lam_um), reff)
         assert np.array_equal(got.view(np.uint64), per_row(float(lam_um)).view(np.uint64)), lam_um
+
+
+@pytest.mark.skipif(not _have_cxx(), reason="needs a host C++ compiler")
+def test_layer_optics_column_blocks_keep_the_words(monkeypatch):
+    """driver._layer_optics_columns (column blocks on host threads) gives the
+    single call's words, radiances and the IMS peaks included."""
+    from woof.radtran import data, driver, model
+    try:
+        data.data_dir()
+    except data.LibradtranDataMissing as exc:
+        pytest.skip(str(exc))
+    rng = np.random.default_rng(3)
+    ncol, nz = 300, 20
+    zw = rng.uniform(0, 2500, ncol)[:, None] + np.linspace(0, 20000, nz + 1)[None, :]
+    pw = 101325.0 * np.exp(-zw / 7600.0)
+    zm = 0.5 * (zw[:, 1:] + zw[:, :-1])
+    t = 288.0 - 6.5e-3 * np.minimum(zm, 11000) + rng.normal(0, 1, (ncol, nz))
+    kw = dict(z_w_m=zw, p_w_pa=pw, t_mass=t, qv_mass=0.01 * np.exp(-zm / 2500.0),
+              umu0=rng.uniform(-0.2, 1.0, ncol), albedo=rng.uniform(0.05, 0.4, ncol),
+              qc_mass=np.where((zm > 1000) & (zm < 3000) & (rng.random((ncol, nz)) < 0.3), 2e-4, 0.0),
+              qi_mass=np.where((zm > 6000) & (zm < 10000) & (rng.random((ncol, nz)) < 0.3), 5e-5, 0.0),
+              rho_dry=pw[:, :-1] / (287.0 * t), re_cloud_um=rng.uniform(4, 20, (ncol, nz)),
+              re_ice_um=rng.uniform(10, 40, (ncol, nz)), day_of_year=172, backend="host")
+    diag = model.Diagnostic(wavelengths=(450.0, 760.5), umu=(0.6, -0.8), phi=(0.0, 90.0))
+    ref = model.compute(diag, **kw)
+    monkeypatch.setattr(driver, "OPTICS_CHUNK", 64)
+    monkeypatch.setattr(driver.os, "cpu_count", lambda: 2)     # blocks on any host
+    got = model.compute(diag, **kw)
+    assert sorted(got) == sorted(ref)
+    for k in ref:
+        a, b = np.asarray(ref[k], dtype=np.float64), np.asarray(got[k], dtype=np.float64)
+        assert np.array_equal(a.view(np.uint64), b.view(np.uint64)), k
