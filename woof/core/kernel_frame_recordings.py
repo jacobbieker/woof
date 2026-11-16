@@ -1975,6 +1975,18 @@ KERNEL_LOCAL_FRAME_RECORDINGS: tuple[KernelFrameRecording, ...] = (
     # 2026-09-28 on an RTX 5090 and an RTX 5070 Ti.  Defined above.
     SM120_NVRTC_13_4_92,
     SM120_NVRTC_12_9_86,
+    # RRTMG-K's three units (woof.core.rrtmgk: device prep + McICA, the LW
+    # band-7 taumol_post, the SW unit with K's cloud optics and solver),
+    # production loader (-std=c++17 --ftz=false), driver
+    # CU_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES of every exported kernel: all 0 B.
+    # Partial: no other module was read.
+    KernelFrameRecording(
+        box="pb", device="NVIDIA RTX A6000",
+        compute_capability="86", nvrtc_build="12.9.86",
+        platform_family="linux", measured="2026-11-16", complete=False,
+        frames=MappingProxyType({
+            "rrtmgk_prep": 0, "rrtmgk_lw": 0, "rrtmgk_sw": 0}),
+    ),
     # BouLac production loader, G2, frame.log and gpu-first.log.
     KernelFrameRecording(
         box="G2", device="NVIDIA RTX PRO 6000 Blackwell Server Edition",

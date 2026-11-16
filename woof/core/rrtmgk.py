@@ -521,6 +521,54 @@ def flags(f_qc, f_qi, f_qs):
     return inflg, iceflg
 
 
+def rrtmgk_vram_bytes(*, ncol, nz, column_chunk=None, resident_threads=None,
+                      o3input=2):
+    """Peak device bytes of ONE RRTMGKRadiation call (host-side pricing).
+
+    An upper bound composed the way :func:`rrtmgk_columns` allocates: the
+    adapter's whole-call column planes and results, then per column chunk
+    the prep profiles and McICA slabs held through both spectra, plus the
+    largest of the three phases (the McICA generator's cloud-fraction
+    slab, the LW engine, the SW engine with its gathered day-column copies
+    and K's per-phase optics slab), plus both engines' resident tables.
+    The SW engine runs at the LW chunk width (``column_chunk``), so every
+    day column of a chunk is priced as lit.
+    """
+    from woof.core.rrtmg_legacy import (
+        _lw_coeffs, legacy_shortwave_constant_bytes)
+    r = _lw._r512
+    ncol, nz = int(ncol), int(nz)
+    nl = nz + 1
+    f = 4
+    chunk = int(column_chunk) if column_chunk else _lw.batch_column_chunk(
+        NGPTLW, _lw.LW_BATCH_COLUMN_CHUNK_CEILING,
+        resident_threads=resident_threads)
+    n = min(chunk, ncol)
+    plane, level = r(ncol * nz * f), r(ncol * nl * f)
+    # p3d t3d rho, five moist species, the zero plane, nc, cldfra, o33d
+    # and its grid copy, the three (ncol, nz) results and the two
+    # transposed tendencies + use_theta_m's total; p8w zw t8w; the
+    # 21 per-column results, coszen and SWDOWN.
+    whole = (18 * plane + 3 * level + 23 * r(ncol * f)
+             + (plane if int(o3input) == 2 else 0))
+    pn, pn1 = r(n * nl * f), r(n * (nl + 1) * f)
+    held = (11 * pn + 2 * pn1 + 3 * r(3 * n * nz * f)      # P + radii
+            + 4 * r(n * nl * NGPTLW * f)                  # McICA slabs
+            + 8 * pn)                                     # well-mixed gases
+    gen = r(n * NSUB28 * nl * f)
+    lw = (r(n * _lw.NBNDLW * f) + r(n * nl * NGPTLW * f)
+          + r(n * nl * _lw.NBNDLW * f)
+          + _lw.lw_batched_vram_bytes(n, nl, mcica_layout="column"))
+    sw_slab = r(n * nl * NGPTSW * f)
+    sw = (4 * sw_slab + 4 * sw_slab                       # mc + zero/one
+          + 9 * pn + 2 * pn1 + 9 * r(n * f) + r(n * 8)
+          + r(9 * n * nl * NGPTSW * f)                    # K's dtwa slab
+          + _sw.sw_batched_vram_bytes(n, nl, mcica_layout="column"))
+    constants = (_lw.lw_batched_const_bytes(_lw_coeffs())
+                 + legacy_shortwave_constant_bytes())
+    return whole + held + max(gen, lw, sw) + constants
+
+
 def rrtmgk_columns(*, p3d, p8w, t3d, t8w, rho, qv, qc, qi, qs, qg, nc,
                    cldfra, o33d, tsk, emiss, albedo, coszen, solcon,
                    f_qc, f_qi, f_qs, f_qnc, o3input, column_chunk=None,

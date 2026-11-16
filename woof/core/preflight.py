@@ -2637,6 +2637,13 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # The adapter's WRF v4.6.1 radconst + calc_coszen (WOOF's own float32
     # trig): 0 B for both entry points, read on sm_120 at NVRTC 12.9.86.
     "rrtmg_legacy_solar": 0,
+    # RRTMG-K's own units (woof.core.rrtmgk): the device prep + McICA,
+    # the LW taumol_post (band 7's lower atmosphere) and the SW unit with
+    # K's cloud optics and two-stream solver.  0 B for every kernel in
+    # each, read on sm_86 (RTX A6000) at NVRTC 12.9.
+    "rrtmgk_prep": 0,
+    "rrtmgk_lw": 0,
+    "rrtmgk_sw": 0,
     # The exact chain's strict Exner unit (physics_exner.cu): 0 B, read
     # on sm_120 at NVRTC 13.4.92.
     "physics_exner": 0,
@@ -4266,6 +4273,8 @@ _RADIATION_KERNEL_MODULES: dict[int, tuple[str, ...]] = {
     1: ("noahmp_libm_slab_composed", "dudhia_sw"),
     4: ("rrtmgp_cloud", "rrtmgp_gas", "rrtmgp_mcica", "rrtmgp_rte"),
     5: ("goddard",),
+    # RRTMG-K: only as the 14/14 pair (physics_compat refuses a mix).
+    14: (),
     # Selector 31 (Held-Suarez relaxation, radiation_composition.py): the
     # temperature relaxation and its sigma Rayleigh momentum partner are both
     # in idealized_forcing.cu.
@@ -4282,6 +4291,16 @@ _RADIATION_KERNEL_MODULES: dict[int, tuple[str, ...]] = {
 _RRTMG_LEGACY_KERNEL_MODULES: tuple[str, ...] = (
     "rrtmg_mcica_wrf", "rrtmg_lw_legacy_chain", "rrtmg_sw_legacy",
     "rrtmg_legacy_adapter", "rrtmg_legacy_prep", "rrtmg_legacy_solar")
+
+
+#: What the RRTMG-K pair (14/14) launches: the legacy LW chain (with K's
+#: band-7 taumol_post hook from ``rrtmgk_lw``), K's own prep and SW units,
+#: the legacy adapter's glue and solar geometry, and cal_cldfra1's slab
+#: libm unit.
+_RRTMGK_KERNEL_MODULES: tuple[str, ...] = (
+    "rrtmg_lw_legacy_chain", "rrtmgk_prep", "rrtmgk_lw", "rrtmgk_sw",
+    "rrtmg_legacy_adapter", "rrtmg_legacy_solar",
+    "noahmp_libm_slab_composed")
 
 
 def _radiation_44_kernel_modules(run) -> tuple[str, ...]:
@@ -4325,6 +4344,8 @@ def _radiation_kernel_modules(run, grid_id: int) -> frozenset[str]:
             # Retain the existing complete implementation ceiling even
             # when only one spectrum uses it.
             modules.update(_radiation_44_kernel_modules(run))
+        elif value == 14:
+            modules.update(_RRTMGK_KERNEL_MODULES)
         else:
             modules.update(_RADIATION_KERNEL_MODULES[value])
     return frozenset(modules)
@@ -6782,12 +6803,12 @@ def physics_array_shapes(cfg: RunConfig, *, cam_ozone: bool = False,
         shapes["radiation/_ozone_vmr"] = (60,)
     if 7 in (ra_lw_physics, ra_sw_physics):
         shapes["radiation_flux_diagnostics"] = (11, ny, nx)
-    if ra_lw_physics in (1, 4, 7, 99):
+    if ra_lw_physics in (1, 4, 7, 14, 99):
         # The OLR publication buffer (physics.py PhysicsDriver __init__):
         # one resident (ny, nx) FP32 driver persistent holding WRF's TOA
         # outgoing longwave for output, allocated when the attached
         # longwave adapter declares ``publishes_olr``.  BOTH built-in 4/4
-        # adapters declare it, and so does the 1/1 WRF RRTM + Dudhia
+        # adapters declare it, as do RRTMG-K (14/14) and the 1/1 WRF RRTM + Dudhia
         # composition, which is what this gate reproduces; a
         # caller-injected adapter that does not leaves this counted but
         # unallocated, and over-counting by one 2-D field is the safe
@@ -6811,12 +6832,12 @@ def physics_array_shapes(cfg: RunConfig, *, cam_ozone: bool = False,
         shapes["aod5503d"] = m
         for key in ("AOD5502D", "ANGEXP2D", "AERSSA2D", "AERASY2D"):
             shapes[key] = s2
-    if ra_lw_physics in (1, 4, 7, 99) or ra_sw_physics in (2, 4, 7, 99) or (int(cfg.icloud) == 3 and (ra_lw_physics or ra_sw_physics)) or (int(cfg.swint_opt) == 2 and int(cfg.icloud) == 3):
+    if ra_lw_physics in (1, 4, 7, 14, 99) or ra_sw_physics in (2, 4, 7, 14, 99) or (int(cfg.icloud) == 3 and (ra_lw_physics or ra_sw_physics)) or (int(cfg.swint_opt) == 2 and int(cfg.icloud) == 3):
         # The CLDFRA publication buffer (physics.py PhysicsDriver
         # __init__): one resident (nz, ny, nx) FP32 driver persistent
         # holding the radiation cloud fraction for output, allocated when
         # the attached radiation callable declares ``publishes_cldfra``.
-        # RTE+RRTMGP and legacy RRTMG declare it on either spectrum, the
+        # RTE+RRTMGP, legacy RRTMG and RRTMG-K declare it on either spectrum, the
         # classic RRTM longwave on its own; Dudhia alone computes no
         # fraction.  Over-counting a caller-injected adapter that does not
         # declare it is the safe direction for a VRAM estimate.
@@ -12400,6 +12421,19 @@ def estimate_experiment(
             if (4 in radiation_scheme_ids(dc.run)
                 and rrtmg_variant(dc.run) == RRTMG_VARIANT_LEGACY) else 0
             for dc in exp.domains)
+        legacy_envelope = max(legacy_calls, default=0)
+    if any(14 in radiation_scheme_ids(dc.run) for dc in exp.domains):
+        # RRTMG-K's call peak (woof.core.rrtmgk.rrtmgk_vram_bytes), priced
+        # into the same per-domain call-peak lane as the legacy adapter.
+        from woof.core.rrtmgk import rrtmgk_vram_bytes
+        k_calls = tuple(
+            rrtmgk_vram_bytes(
+                ncol=dc.run.ny * dc.run.nx, nz=dc.run.nz,
+                resident_threads=device_profile.resident_thread_capacity)
+            if 14 in radiation_scheme_ids(dc.run) else 0
+            for dc in exp.domains)
+        legacy_calls = (tuple(max(a, b) for a, b in zip(legacy_calls, k_calls))
+                        if legacy_calls else k_calls)
         legacy_envelope = max(legacy_calls, default=0)
     from woof.core.flg_radiation import flg_radiation_vram_bytes
     flg_storage = sum(flg_radiation_vram_bytes(dc.run.nx*dc.run.ny, dc.run.nz)

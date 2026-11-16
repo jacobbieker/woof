@@ -5048,6 +5048,27 @@ def test_legacy_rrtmg_variant_prices_the_call_peak_envelope():
     assert bigger <= big * 2, (bigger, big)
 
 
+def test_rrtmgk_pair_prices_its_own_units_and_call_peak():
+    """RRTMG-K (14/14) launches the legacy LW chain with its band-7 hook,
+    its own prep and SW units, the legacy adapter glue and solar geometry
+    and cal_cldfra1's slab libm; never the RTE+RRTMGP kernels."""
+    from woof.core.rrtmgk import rrtmgk_vram_bytes
+    from types import SimpleNamespace
+    run = SimpleNamespace(ra_physics=0, ra_lw_physics=14, ra_sw_physics=14)
+    modules = pf._radiation_kernel_modules(run, 1)
+    assert modules == {
+        "rrtmg_lw_legacy_chain", "rrtmgk_prep", "rrtmgk_lw", "rrtmgk_sw",
+        "rrtmg_legacy_adapter", "rrtmg_legacy_solar",
+        "noahmp_libm_slab_composed"}
+    for name in ("rrtmgk_prep", "rrtmgk_lw", "rrtmgk_sw"):
+        assert pf.KERNEL_MAX_LOCAL_SIZE_BYTES[name] == 0
+    small = rrtmgk_vram_bytes(ncol=1000, nz=49, resident_threads=0)
+    large = rrtmgk_vram_bytes(ncol=100_000, nz=49, resident_threads=0)
+    assert 0 < small < large
+    # Fixed chunk: the whole-call planes are what grows past one chunk.
+    assert large - small >= 18 * (100_000 - 1000) * 49 * 4
+
+
 def test_legacy_rrtmg_variant_prices_the_lw_chain_local_frame():
     """Variant-aware kernel-module selection (step-1 audit, major 1).
 
