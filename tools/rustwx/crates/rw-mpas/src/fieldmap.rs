@@ -288,6 +288,7 @@ pub static FIELD_MAP: &[FieldMapping] = &[
     f("W_DN_MAX", Some("w_dn_max"), Rank::Surface, "m s-1", "Minimum downdraft velocity below 400 hPa", FieldSource::History, SEVERE_OPTION),
     f("HAIL_MAXK1", Some("hail_maxk1"), Rank::Surface, "m", "Maximum PSD hail diameter at lowest level", FieldSource::History, SEVERE_OPTION),
     f("HAIL_MAX2D", Some("hail_max2d"), Rank::Surface, "m", "Maximum PSD hail diameter in column", FieldSource::History, SEVERE_OPTION),
+    f("REFDM10C_MAX", Some("refdm10c_max"), Rank::Surface, "dBZ", "Maximum reflectivity at the -10 C level", FieldSource::History, SEVERE_OPTION),
 ];
 
 /// WRF variables some catalogue product wants that the port's history stream

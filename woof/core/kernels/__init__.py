@@ -449,8 +449,8 @@ _EXTRA_HEADERS: dict[str, tuple[str, ...]] = {
     # wrf_smag_hd_w with each face stress stored once (smag2d_w_faces.cu);
     # composes smag2d.cu the same way, so smag2d.cu keeps every byte.
     "smag2d_w_faces": ("glibc_flt32.cuh", "smag2d.cu"),
-    # wrf_smag_hd_u / wrf_smag_hd_v with each horizontal stress stored once
-    # (smag2d_uv_faces.cu); composes smag2d.cu the same way.
+    # wrf_smag_hd_u / wrf_smag_hd_v with each horizontal stress coefficient
+    # stored once (smag2d_uv_faces.cu); composes smag2d.cu the same way.
     "smag2d_uv_faces": ("glibc_flt32.cuh", "smag2d.cu"),
     # wrf_tke_rhs with each defor13 / defor23 face stored once
     # (smag2d_tke_faces.cu); composes smag2d.cu the same way.

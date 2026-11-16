@@ -9,13 +9,13 @@
     "cupy.ReductionKernel",
     "cupy.cuda.compiler.compile_using_nvrtc"
   ],
-  "site_count": 674,
+  "site_count": 678,
   "site_count_by_kind": {
-    "cupy.ElementwiseKernel": 46,
+    "cupy.ElementwiseKernel": 47,
     "cupy.RawKernel": 112,
-    "cupy.RawModule": 299,
+    "cupy.RawModule": 301,
     "cupy.ReductionKernel": 16,
-    "cupy.cuda.compiler.compile_using_nvrtc": 201
+    "cupy.cuda.compiler.compile_using_nvrtc": 202
   },
   "site_count_by_surface": {
     "other": {
@@ -25,16 +25,16 @@
       "cupy.cuda.compiler.compile_using_nvrtc": 22
     },
     "package": {
-      "cupy.ElementwiseKernel": 34,
+      "cupy.ElementwiseKernel": 35,
       "cupy.RawKernel": 39,
-      "cupy.RawModule": 102,
+      "cupy.RawModule": 103,
       "cupy.ReductionKernel": 9,
-      "cupy.cuda.compiler.compile_using_nvrtc": 126
+      "cupy.cuda.compiler.compile_using_nvrtc": 127
     },
     "tests": {
       "cupy.ElementwiseKernel": 7,
       "cupy.RawKernel": 41,
-      "cupy.RawModule": 109,
+      "cupy.RawModule": 110,
       "cupy.ReductionKernel": 4,
       "cupy.cuda.compiler.compile_using_nvrtc": 36
     },
@@ -1821,6 +1821,22 @@
       ],
       "options_are_literal": true,
       "text": "ptx, _ = compile_using_nvrtc("
+    },
+    {
+      "file": "tests/test_hex_obs_nudging_gpu.py",
+      "line": 44,
+      "column": 11,
+      "surface": "tests",
+      "constructor": "cp.RawModule",
+      "constructor_kind": "cupy.RawModule",
+      "enclosing": "_wrf_module",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "obs.OPTIONS",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "return cp.RawModule(code=source, options=obs.OPTIONS)"
     },
     {
       "file": "tests/test_history_output_path_gpu.py",
@@ -4800,7 +4816,7 @@
     },
     {
       "file": "tools/cuda_rounding_check.py",
-      "line": 473,
+      "line": 559,
       "column": 17,
       "surface": "tools",
       "constructor": "cp.ElementwiseKernel",
@@ -10257,6 +10273,22 @@
       "text": "image, _ = compile_using_nvrtc(module_source(n_ice_layers), options, None,"
     },
     {
+      "file": "woof/hex/mpas_seaice/column_ridge_v842.py",
+      "line": 105,
+      "column": 15,
+      "surface": "package",
+      "constructor": "compile_using_nvrtc",
+      "constructor_kind": "cupy.cuda.compiler.compile_using_nvrtc",
+      "enclosing": "_module_on",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "options",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "image, _ = compile_using_nvrtc(module_source(n_ice_layers), options, None,"
+    },
+    {
       "file": "woof/hex/mpas_seaice/column_therm_v842.py",
       "line": 161,
       "column": 15,
@@ -10274,7 +10306,7 @@
     },
     {
       "file": "woof/hex/mpas_seaice/column_v842.py",
-      "line": 593,
+      "line": 594,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",
@@ -10973,6 +11005,38 @@
       "options_element_expressions": null,
       "options_are_literal": false,
       "text": "module = cp.RawModule(code=_CUDA_SOURCE, options=options)"
+    },
+    {
+      "file": "woof/hex/obs_nudging.py",
+      "line": 394,
+      "column": 17,
+      "surface": "package",
+      "constructor": "cp.RawModule",
+      "constructor_kind": "cupy.RawModule",
+      "enclosing": "kernels",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "OPTIONS",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "module = cp.RawModule(code=source, options=OPTIONS)"
+    },
+    {
+      "file": "woof/hex/obs_nudging.py",
+      "line": 631,
+      "column": 28,
+      "surface": "package",
+      "constructor": "cp.ElementwiseKernel",
+      "constructor_kind": "cupy.ElementwiseKernel",
+      "enclosing": "_theta",
+      "takes_caller_options": true,
+      "options_argument_present": false,
+      "options_expression": null,
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "_MODULES[key] = cp.ElementwiseKernel("
     },
     {
       "file": "woof/hex/ocean_mixed_layer.py",

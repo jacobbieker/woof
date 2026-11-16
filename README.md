@@ -291,7 +291,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     Also its ITD thermodynamics (BL99 or mushy: the linear remap of the
     thickness distribution or the delta function, frazil and new ice,
     lateral melt, rebinning and zapping, with level, CESM or topo ponds),
-    which needs no opt-in;
+    and its ridging (both participation and both redistribution functions,
+    the ridging iterations and the cleanup after them), neither of which
+    needs an opt-in;
   - MALI: the shallow-ice velocity solver, masks and geometry diagnostics,
     thermal initialisation, the thermal solver and basal melt, thickness
     and tracer advection, calving (every option, and front restoration),
@@ -301,7 +303,7 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   remap computes its init geometry (frames, moments, MPAS's RBF
   coefficients) itself, and refuses halo exchanges and periodic planar
   meshes by name. The sea-ice column physics' time step (mushy vertical thermodynamics,
-  ridging, shortwave), ocean KPP and GM/Redi,
+  shortwave), ocean KPP and GM/Redi,
   and the coupler import and export are not ported. A few RKIND 8 cases need the LGPL libm
   opt-in below. These are ported pieces and steps, not coupled forecasts.
   Plan: [docs/mpas-coupled-roadmap.md](docs/mpas-coupled-roadmap.md).
@@ -350,9 +352,14 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     `woof hex products` draws these, the AFWA fields and the PSD hail sizes
     whenever a run writes them (HAILCAST and PSD hail on the renderer's hail
     maps; lightning and AFWA as plain field maps with generic colour scales),
+    plus the -10 C reflectivity maximum (`REFDM10C_MAX`: the WRF route's gsd
+    kernel on mesh columns, written when a stream asks for it; max vertical
+    vorticity is not on hex because WRF's grid stencil does not carry over),
     beside the regional severe set (MLCAPE, SRH, shear, EHI, STP, lightning
     threat, gust);
-  - `aer_opt = 1, 2`, `w_damping`, and grid and spectral analysis nudging;
+  - `aer_opt = 1, 2`, `w_damping`, grid and spectral analysis nudging, and
+    WRF observation nudging (`obs_nudge_opt = 1`, `--obs-nudging`), with
+    WRF's weights and great-circle radii found through a cell KD-tree;
   - stochastic physics: SPP (`spp_conv`, `spp_pbl`, `spp_lsm`) on the WOOF
     column route, WRF-Solar EPS (`multi_perturb`) on regional meshes, and
     WRF's inflow perturbation on the regional relax rings
@@ -413,9 +420,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     at the mandatory levels, by latitude band and lead, including the drift
     per 24 h. The sondes are IGRA v2 and WIS2, read from the Source
     Cooperative icechunk stores.
+  - `woof.hex.station_wind_referee` scores the 10 m wind speed against
+    WIS2 land SYNOP reports by latitude band and lead, globally.
   - `woof.hex.qpe_cell_referee` scores 24 h precipitation against Stage-IV,
     averaged onto the model's cells.
-  - Both compare two arms with a case-paired bootstrap
+  - All three compare two arms with a case-paired bootstrap
     ([obs-referee.md](components/hex/docs/obs-referee.md)).
 - **Performance work.** Metal: out-of-line compilation of the largest units,
   compile prefetch and persisted translations, fewer host syncs per step,
@@ -446,12 +455,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   horizontal flux and divergence launches four rows at a time with the face
   and cell metrics formed once (`wrf_smag_flux_s_multi`/`wrf_smag_hd_s_multi`,
   byte-identical; `WOOF_SMAG_MULTI=0` restores one launch pair per row).
-  The u and v Smagorinsky stress divergences read the tau11/tau22/tau12
-  stresses stored once per step (`smag2d_uv_faces`, byte-identical in fast
-  and strict numerics) where each point re-evaluated up to ten of them: the
-  u+v pair 1.3 -> 0.35 ms at 49x120x150 and 9.7 -> 1.6 ms at 49x300x300 on an
-  A6000, 5.6 -> 2.5 ms and 23 -> 10.5 ms on an M3 Max (`WOOF_SMAG_UV_FACES=0`
-  restores the per-point kernels). `km_opt = 2`'s TKE source reads the
+  The u and v Smagorinsky stress divergences read the stress coefficients
+  (rho K, rhoavg kavg) stored once per step (`smag2d_uv_faces`,
+  byte-identical in fast and strict numerics) where each point re-evaluated
+  up to ten of them: the u+v pair 1.3 -> 0.44 ms at 49x120x150 and
+  9.5 -> 2.1 ms at 49x300x300 on an A6000 (`WOOF_SMAG_UV_FACES=0` restores
+  the per-point kernels). `km_opt = 2`'s TKE source reads the
   defor13/defor23 faces stored once (`smag2d_tke_faces`, the `wrf_tke_rhs`
   statements on the stored words, byte-identical in both numerics modes)
   where each mass point re-evaluated up to six of them (`WOOF_TKE_FACES=0`

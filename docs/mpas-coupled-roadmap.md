@@ -132,8 +132,15 @@ Ordered by how self-contained each piece is:
    `cleanup_itd`, with level, CESM or topo ponds;
    `woof/hex/mpas_seaice/column_itd_v842.py`,
    `tests/test_mpas_seaice_column_itd_parity.py`), which calls no libm and
-   needs no opt-in. Still to port: mushy vertical thermodynamics,
-   `ice_mechred` (ridging), `ice_shortwave` (delta-Eddington), the melt
+   needs no opt-in. Also ported: `column_ridging` (`colpkg_step_ridge`:
+   `ridge_ice` with the Thorndike75 or exponential participation and the
+   Hibler80 or exponential redistribution, then `cleanup_itd`;
+   `woof/hex/mpas_seaice/column_ridge_v842.py`,
+   `tests/test_mpas_seaice_column_ridge_parity.py`). Its `exp` is glibc's,
+   transcribed under MIT, so it needs no opt-in. Where v8.4.2 itself dies
+   (`ridge_shift`'s aborts hit a gfortran runtime error writing their label),
+   the port raises the same error. Still to port: mushy vertical
+   thermodynamics, `ice_shortwave` (delta-Eddington), the melt
    ponds' own physics, the other `ice_atmo` options, then the column time
    step.
 7. Biogeochemistry (`ice_zbgc*`, `ice_algae`, `ice_aerosol`). Refused by name

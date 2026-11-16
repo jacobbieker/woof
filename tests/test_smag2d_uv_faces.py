@@ -1,17 +1,27 @@
-"""The stored-stress u/v routes add the words wrf_smag_hd_u / wrf_smag_hd_v add.
+"""The stored-coefficient u/v routes add the words wrf_smag_hd_u / wrf_smag_hd_v add.
 
 ``woof.core.dycore.launch_wrf_smag2d_hd(stagger="x" | "y")`` reads the
-tau11 / tau22 (mass point) and tau12 (corner) stresses that
-``launch_wrf_smag_uv_faces`` stored once (``kernels/smag2d_uv_faces.cu``),
-where ``wrf_smag_hd_u`` / ``wrf_smag_hd_v`` re-evaluated every stress at each
-of the up to ten points that read it.  Both compile with smag2d's IEEE
-options (no contraction), so the stored word is the returned word.  These
+stress coefficients (``-rho K`` at the mass points, ``-rhoavg kavg`` at the
+corners) that ``launch_wrf_smag_uv_faces`` stored once
+(``kernels/smag2d_uv_faces.cu``), where ``wrf_smag_hd_u`` / ``wrf_smag_hd_v``
+re-evaluated them at each of the up to ten points that read a stress.  These
 cases hold the two routes to the same tendency words on sloped terrain with
-non-unity map factors, moist density, a non-zero incoming tendency, and
-periodic, specified and nested lateral boundaries, with the faces computed
-by the launcher itself and handed in by the caller.  Run them with
-``GPUWM_WRF_EXACT=1`` as well: that build takes smag2d's other statements.
+non-unity map factors, WRF's vertical weights, moist density, a non-zero
+incoming tendency, and periodic, specified and nested lateral boundaries,
+with the faces computed by the launcher itself and handed in by the caller.
+
+Each case runs in a child process under the default (fast) numerics as well
+as strict: the battery's conftest pins ``GPUWM_NUMERICS=strict``, and fast
+mode drops ``--fmad=false``, so a stored STRESS (not coefficient) passed the
+strict battery while moving about two thirds of a 3 km forecast's u words.
+Run them with ``GPUWM_WRF_EXACT=1`` as well: that build takes smag2d's other
+statements.
 """
+import os
+import subprocess
+import sys
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -48,6 +58,12 @@ def _state(boundary_mode, nx=23, ny=17, nz=11, seed=7):
     state.set_map_coriolis(
         msft=msft, msfu=np.concatenate([msfu_core, msfu_core[:, :1]], axis=1),
         msfv=np.concatenate([msfv_core, msfv_core[:1, :]], axis=0))
+    # WRF-like stretched-level weights (this coordinate's are exactly 0.5,
+    # which makes every vertical interpolation product exact).
+    fnm = (0.5 - 0.04 * np.sin(np.arange(nz) + 0.3)).astype(np.float32)
+    fnm[0] = 0.0
+    state.fnm[...] = cp.asarray(fnm)
+    state.fnp[...] = cp.asarray(np.where(np.arange(nz) == 0, 0.0, 1.0 - fnm).astype(np.float32))
     rng = np.random.default_rng(seed)
     state.u[...] = cp.asarray(6.0 * rng.standard_normal(state.u.shape), dtype=cp.float32)
     state.v[...] = cp.asarray(6.0 * rng.standard_normal(state.v.shape), dtype=cp.float32)
@@ -57,9 +73,8 @@ def _state(boundary_mode, nx=23, ny=17, nz=11, seed=7):
     return cfg, state, rng
 
 
-@requires_gpu
-@pytest.mark.parametrize("boundary_mode", ["periodic", "specified", "nested"])
-def test_stored_stresses_add_the_words_wrf_smag_hd_u_and_v_add(boundary_mode, monkeypatch):
+def _identity(boundary_mode):
+    """Child-process body: both routes, every stagger, the same words."""
     import cupy as cp
 
     from woof.core.dycore import (launch_wrf_smag2d_hd, launch_wrf_smag2d_km,
@@ -67,6 +82,9 @@ def test_stored_stresses_add_the_words_wrf_smag_hd_u_and_v_add(boundary_mode, mo
 
     cfg, state, rng = _state(boundary_mode)
     nz, ny, nx = cfg.nz, cfg.ny, cfg.nx
+    # 0.5 weights make every interpolation product exact and hide a
+    # contraction change (the #475 lesson).
+    assert not np.all(cp.asnumpy(state.fnm)[1:] == np.float32(0.5))
     km = state.scratch((nz, ny, nx), "smag_km")
     kh = state.scratch((nz, ny, nx), "smag_kh")
     deformation = launch_wrf_smag2d_km(state, cfg, km, kh, time_t=False)
@@ -75,15 +93,15 @@ def test_stored_stresses_add_the_words_wrf_smag_hd_u_and_v_add(boundary_mode, mo
     fields = {"x": state.u, "y": state.v}
     tendencies = {}
     for route in ("0", "1", "handed"):
-        monkeypatch.setenv("WOOF_SMAG_UV_FACES", "0" if route == "0" else "1")
-        # Poison the stress stores: the stored route must write every word
-        # it reads.
-        for slot, shape in (("smag_t11", (nz, ny, nx)), ("smag_t22", (nz, ny, nx)),
-                            ("smag_t12", (nz, ny + 1, nx + 1))):
+        os.environ["WOOF_SMAG_UV_FACES"] = "0" if route == "0" else "1"
+        # Poison the coefficient stores: the stored route must write every
+        # word it reads.
+        for slot, shape in (("smag_cm", (nz, ny, nx)),
+                            ("smag_c12", (nz, ny + 1, nx + 1))):
             state.scratch(shape, slot)[...] = cp.float32(np.nan)
         faces = None
         if route == "handed":
-            faces = launch_wrf_smag_uv_faces(state, cfg, km, deformation, time_t=False)
+            faces = launch_wrf_smag_uv_faces(state, cfg, km, time_t=False)
             assert faces is not None
         for stagger in ("x", "y"):
             r = incoming[stagger].copy()
@@ -96,6 +114,28 @@ def test_stored_stresses_add_the_words_wrf_smag_hd_u_and_v_add(boundary_mode, mo
         assert np.all(np.isfinite(tendencies["1", stagger].view(np.float32)))
         assert np.array_equal(tendencies["1", stagger], tendencies["0", stagger])
         assert np.array_equal(tendencies["handed", stagger], tendencies["0", stagger])
+    print("IDENTICAL")
+
+
+@requires_gpu
+@pytest.mark.parametrize("numerics", ["fast", "strict"])
+@pytest.mark.parametrize("boundary_mode", ["periodic", "specified", "nested"])
+def test_stored_coefficients_add_the_words_wrf_smag_hd_u_and_v_add(boundary_mode, numerics):
+    if numerics == "fast" and os.environ.get("GPUWM_WRF_EXACT", "0") == "1":
+        pytest.skip("GPUWM_WRF_EXACT=1 is strict numerics")
+    here = Path(__file__).resolve().parent
+    # conftest pins strict at import; the child selects its mode after that
+    # import and before the first compile, which fixes the process's mode.
+    code = (f"import os, sys; sys.path.insert(0, {str(here)!r}); "
+            "import test_smag2d_uv_faces as t; "
+            f"os.environ['GPUWM_NUMERICS'] = {numerics!r}; "
+            "from woof import numerics; "
+            f"assert numerics.mode() == {numerics!r}, numerics.mode(); "
+            f"t._identity({boundary_mode!r})")
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True,
+                            text=True, env=dict(os.environ), timeout=900)
+    assert result.returncode == 0 and "IDENTICAL" in result.stdout, (
+        result.stdout[-4000:] + result.stderr[-4000:])
 
 
 @requires_gpu
@@ -105,6 +145,6 @@ def test_disabled_route_returns_no_faces(monkeypatch):
     cfg, state, _rng = _state("periodic")
     km = state.scratch((cfg.nz, cfg.ny, cfg.nx), "smag_km")
     kh = state.scratch((cfg.nz, cfg.ny, cfg.nx), "smag_kh")
-    deformation = launch_wrf_smag2d_km(state, cfg, km, kh, time_t=False)
+    launch_wrf_smag2d_km(state, cfg, km, kh, time_t=False)
     monkeypatch.setenv("WOOF_SMAG_UV_FACES", "0")
-    assert launch_wrf_smag_uv_faces(state, cfg, km, deformation, time_t=False) is None
+    assert launch_wrf_smag_uv_faces(state, cfg, km, time_t=False) is None

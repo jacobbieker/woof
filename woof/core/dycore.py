@@ -1769,31 +1769,31 @@ def _smag_uv_faces_enabled() -> bool:
     return os.environ.get("WOOF_SMAG_UV_FACES", "1") != "0"
 
 
-def launch_wrf_smag_uv_faces(state: DomainState, cfg: RunConfig, xk,
-                             deformation, *, time_t: bool):
-    """Store WRF's horizontal momentum stresses once (kernels/
-    smag2d_uv_faces.cu wrf_smag_uv_tau_faces): tau11 and tau22 at the mass
-    points, tau12 at the corners, from ``xk`` (the horizontal K) and the
-    deformation tensors ``(d11, d22, d12)``.  Returns ``(t11, t22, t12)``
-    for :func:`launch_wrf_smag2d_hd`'s u and v rows, which then read the
-    stored words where ``wrf_smag_hd_u`` / ``wrf_smag_hd_v`` recomputed
-    each stress (a density divide and, for tau12, four-point averages) at
-    up to ten points; ``None`` when ``WOOF_SMAG_UV_FACES=0``."""
+def launch_wrf_smag_uv_faces(state: DomainState, cfg: RunConfig, xk, *,
+                             time_t: bool):
+    """Store the coefficients of WRF's horizontal momentum stresses once
+    (kernels/smag2d_uv_faces.cu wrf_smag_uv_coef_faces): ``-rho K`` at the
+    mass points (tau11 and tau22) and ``-rhoavg kavg`` at the corners
+    (tau12), from ``xk`` (the horizontal K).  Returns ``(cm, c12)`` for
+    :func:`launch_wrf_smag2d_hd`'s u and v rows, which multiply them by the
+    deformation where ``wrf_smag_hd_u`` / ``wrf_smag_hd_v`` recomputed each
+    coefficient (a density divide and, for tau12, four-point averages) at
+    up to ten points; ``None`` when ``WOOF_SMAG_UV_FACES=0``.  The stress
+    product itself stays at the reader so default-numerics contraction
+    rounds it exactly as the per-point kernels do."""
     if not _smag_uv_faces_enabled():
         return None
     nz, ny, nx = xk.shape
-    d11, d22, d12 = deformation
-    t11 = state.scratch((nz, ny, nx), "smag_t11")
-    t22 = state.scratch((nz, ny, nx), "smag_t22")
-    t12 = state.scratch((nz, ny + 1, nx + 1), "smag_t12")
+    cm = state.scratch((nz, ny, nx), "smag_cm")
+    c12 = state.scratch((nz, ny + 1, nx + 1), "smag_c12")
     common = _wrf_smag_grid_args(state, cfg, time_t=time_t)
     tail = [np.int32(nz), np.int32(ny), np.int32(nx),
             np.int32(state.phb.ndim == 3),
             np.int32(_boundary_x(cfg)), np.int32(_boundary_y(cfg))]
-    get_kernel("smag2d_uv_faces", "wrf_smag_uv_tau_faces")(
+    get_kernel("smag2d_uv_faces", "wrf_smag_uv_coef_faces")(
         ((nx + 1 + _TPB - 1) // _TPB, ny + 1, nz), (_TPB, 1, 1),
-        tuple(common + [xk, d11, d22, d12, t11, t22, t12] + tail))
-    return t11, t22, t12
+        tuple(common + [xk, cm, c12] + tail))
+    return cm, c12
 
 
 def launch_wrf_smag2d_hd(state: DomainState, cfg: RunConfig, f, xk, tend,
@@ -1809,8 +1809,9 @@ def launch_wrf_smag2d_hd(state: DomainState, cfg: RunConfig, f, xk, tend,
     temporary and handles both one-dimensional and terrain-following 3-D
     ``thb``.
 
-    The u and v rows read the stresses :func:`launch_wrf_smag_uv_faces`
-    stored (``faces``, computed here when the caller did not), and take
+    The u and v rows read the stress coefficients
+    :func:`launch_wrf_smag_uv_faces` stored (``faces``, computed here when
+    the caller did not), and take
     the per-point ``wrf_smag_hd_u`` / ``wrf_smag_hd_v`` only with
     ``WOOF_SMAG_UV_FACES=0``.
     """
@@ -1837,19 +1838,18 @@ def launch_wrf_smag2d_hd(state: DomainState, cfg: RunConfig, f, xk, tend,
         if deformation is None:
             raise ValueError(f"{'u' if stagger == 'x' else 'v'} Smagorinsky "
                              "stress requires deformation")
+        d11, d22, d12 = deformation
         if faces is None:
-            faces = launch_wrf_smag_uv_faces(state, cfg, xk, deformation,
-                                             time_t=time_t)
+            faces = launch_wrf_smag_uv_faces(state, cfg, xk, time_t=time_t)
         if faces is not None:
-            t11, t22, t12 = faces
+            cm, c12 = faces
             if stagger == "x":
-                name, payload = "wrf_smag_hd_u_faces", [t11, t12, tend]
+                name, payload = "wrf_smag_hd_u_faces", [cm, c12, d11, d12, tend]
             else:
-                name, payload = "wrf_smag_hd_v_faces", [t22, t12, tend]
+                name, payload = "wrf_smag_hd_v_faces", [cm, c12, d22, d12, tend]
             get_kernel("smag2d_uv_faces", name)(
                 grid, (_TPB, 1, 1), tuple(common + payload + tail))
             return
-        d11, d22, d12 = deformation
         payload = ([xk, d11, d12, tend] if stagger == "x"
                    else [xk, d22, d12, tend])
     else:
@@ -2482,9 +2482,8 @@ def _compute_wrf_smag_tendencies(state: DomainState, cfg: RunConfig,
 
     # u/v must both see the complete deformation set before either borrowed
     # carrying buffer is replaced by its final stress divergence.  Both read
-    # the same horizontal K, so their stresses are stored once.
-    faces = launch_wrf_smag_uv_faces(state, cfg, specs[0][2], deformation,
-                                     time_t=time_t)
+    # the same horizontal K, so their stress coefficients are stored once.
+    faces = launch_wrf_smag_uv_faces(state, cfg, specs[0][2], time_t=time_t)
     for row, tmp_slot in zip(specs[:2], ("diff6_x", "diff6_y")):
         f, _tend, xk, _c1, _c2, _slot, stag = row
         tmp = state.scratch(f.shape, tmp_slot)
@@ -2782,8 +2781,7 @@ def _compute_wrf_constant_k_tendencies(state: DomainState, cfg: RunConfig,
             scalar_rows=[(f, buffers[slot], slot == "smag_rth")
                          for f, _tend, _xk, _c1, _c2, slot, stag in specs
                          if stag == ""])
-    faces = launch_wrf_smag_uv_faces(state, cfg, specs[0][2], deformation,
-                                     time_t=time_t)
+    faces = launch_wrf_smag_uv_faces(state, cfg, specs[0][2], time_t=time_t)
     for f, _tend, xk, _c1, _c2, slot, stag in specs[:2]:
         launch_wrf_smag2d_hd(state, cfg, f, xk, buffers[slot], stagger=stag,
                              time_t=time_t, deformation=deformation,

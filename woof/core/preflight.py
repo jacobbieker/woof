@@ -2898,7 +2898,7 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # wrf_smag_hd_w on stored face stresses (composes smag2d.cu), RTX A6000,
     # default and strict numerics, 2026-11-08: 0 B.
     "smag2d_w_faces": 0,
-    # wrf_smag_hd_u / wrf_smag_hd_v on stored stresses (composes smag2d.cu),
+    # wrf_smag_hd_u / wrf_smag_hd_v on stored stress coefficients (composes smag2d.cu),
     # RTX A6000, default and strict numerics, 2026-11-15: 0 B.
     "smag2d_uv_faces": 0,
     # wrf_tke_rhs on stored defor13/defor23 faces (composes smag2d.cu), RTX
@@ -7894,11 +7894,10 @@ def scratch_slot_registry(cfg: RunConfig, *,
         for extra in range(1, SMAG_MULTI_ROWS):
             slots[f"smag_fx_{extra}"] = xs
             slots[f"smag_fy_{extra}"] = ys
-        # The u/v stress divergences read the horizontal stresses stored
-        # once per step (dycore.launch_wrf_smag_uv_faces): tau11 and tau22
-        # at the mass points, tau12 at the corners.
-        slots.update(smag_t11=m, smag_t22=m,
-                     smag_t12=(nz, ny + 1, nx + 1))
+        # The u/v stress divergences read the stress coefficients stored
+        # once per step (dycore.launch_wrf_smag_uv_faces): -rho K at the
+        # mass points, -rhoavg kavg at the corners.
+        slots.update(smag_cm=m, smag_c12=(nz, ny + 1, nx + 1))
     if cfg.diff_6th_opt:
         slots.update(diff6_z=fl, diff6_m=m)
         # The NOAA WRFV3.9 fork's edge-to-edge form (diff_6th_form =
@@ -8480,9 +8479,9 @@ SCRATCH_SLOT_LIFETIME_AUDIT = (
         "after the step that wrote them (drain ends the window), and both "
         "are float64 while ScratchArena is float32-only"),
     ScratchSlotLifetime(
-        ("smag_t11", "smag_t22", "smag_t12"), "write_before_read",
+        ("smag_cm", "smag_c12"), "write_before_read",
         "woof/core/dycore.py:launch_wrf_smag_uv_faces",
-        "the stored horizontal momentum stresses are written once per "
+        "the stored horizontal stress coefficients are written once per "
         "step and read by the u and v divergence launches that follow "
         "within the same step"),
     ScratchSlotLifetime(
