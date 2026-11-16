@@ -2898,6 +2898,12 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # wrf_smag_hd_w on stored face stresses (composes smag2d.cu), RTX A6000,
     # default and strict numerics, 2026-11-08: 0 B.
     "smag2d_w_faces": 0,
+    # wrf_smag_hd_u / wrf_smag_hd_v on stored stress coefficients (composes smag2d.cu),
+    # RTX A6000, default and strict numerics, 2026-11-15: 0 B.
+    "smag2d_uv_faces": 0,
+    # wrf_tke_rhs on stored defor13/defor23 faces (composes smag2d.cu), RTX
+    # A6000, default and strict numerics, 2026-11-15: 0 B.
+    "smag2d_tke_faces": 0,
     # The partial-depth nest's coupling (Phase D3, kernels/partial_nest.cu),
     # RTX A6000 sm_86, NVRTC 12.9, 2026-10-30: all eight entry points 0 B.
     "partial_nest": 0,
@@ -7888,6 +7894,15 @@ def scratch_slot_registry(cfg: RunConfig, *,
         for extra in range(1, SMAG_MULTI_ROWS):
             slots[f"smag_fx_{extra}"] = xs
             slots[f"smag_fy_{extra}"] = ys
+        # The u/v stress divergences read the stress coefficients stored
+        # once per step (dycore.launch_wrf_smag_uv_faces): rho K at the
+        # mass points, rhoavg kavg at the corners.  km_opt=5 (km5.compute,
+        # which returns ahead of the diff_opt test) reaches that launch
+        # through its u/v rows; diff_opt=1's coordinate route never does.
+        from woof.core.dycore import _smag_uv_faces_enabled
+        if ((cfg.km_opt == 5 or cfg.diff_opt != 1)
+                and _smag_uv_faces_enabled()):
+            slots.update(smag_cm=m, smag_c12=(nz, ny + 1, nx + 1))
     if cfg.diff_6th_opt:
         slots.update(diff6_z=fl, diff6_m=m)
         # The NOAA WRFV3.9 fork's edge-to-edge form (diff_6th_form =
@@ -8469,12 +8484,21 @@ SCRATCH_SLOT_LIFETIME_AUDIT = (
         "after the step that wrote them (drain ends the window), and both "
         "are float64 while ScratchArena is float32-only"),
     ScratchSlotLifetime(
+        ("smag_cm", "smag_c12"), "write_before_read",
+        "woof/core/dycore.py:launch_wrf_smag_uv_faces",
+        "the stored horizontal stress coefficients are written once per "
+        "step and read by the u and v divergence launches that follow "
+        "within the same step"),
+    ScratchSlotLifetime(
         ("smag_fx_1", "smag_fy_1", "smag_fx_2", "smag_fy_2",
          "smag_fx_3", "smag_fy_3"),
         "write_before_read", "woof/core/dycore.py:launch_wrf_smag2d_hd_multi",
         "the multi-row Smagorinsky scalar launch writes a chunk's H1/H2 "
         "face fluxes and reads them in the divergence launch that follows "
-        "within the same step; diff6_x/y are the chunk's first pair"),
+        "within the same step; diff6_x/y are the chunk's first pair; "
+        "earlier in the same step km_opt=2's launch_wrf_tke_km stores the "
+        "defor13/defor23 faces in the first pair for the tke_rhs launch "
+        "that follows it"),
     ScratchSlotLifetime(
         ("diff6_x", "diff6_y", "diff6_z", "diff6_m"),
         "write_before_read", "woof/core/dycore.py:prepare_fixed_tendencies; "

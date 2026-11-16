@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import operator
 import os
+import threading
 import weakref
 from functools import reduce
 
@@ -230,9 +231,13 @@ class Storage:
         # Evaluating for it again waited on every launch still writing the
         # buffer: the microphysics ring copy's table key asked for 390
         # addresses per model step, each a host sync on Metal.
-        if _ADDRESSES.get(base) is None or _ADDRESSES[base]() is not self:
-            _ADDRESSES[base] = weakref.ref(self)
-            _ADDRESS_INDEX[0] = None          # the index is stale
+        current = _ADDRESSES.get(base)
+        if current is None or current() is not self:
+            with _ADDRESS_LOCK:               # one check-and-set against _forget_address
+                current = _ADDRESSES.get(base)
+                if current is None or current() is not self:
+                    _ADDRESSES[base] = weakref.ref(self)
+                    _ADDRESS_INDEX[0] = None  # the index is stale
         return base
 
 
@@ -269,6 +274,10 @@ def _gpu_address(arr) -> int:
 #: GPU base address -> the storage that handed it out (Storage.address)
 _ADDRESSES: dict = {}
 
+#: Serializes a registration (Storage.address) against a removal (_forget_address), so a removal never drops a
+#: storage registered at the same base in between.
+_ADDRESS_LOCK = threading.Lock()
+
 #: _ADDRESSES as [built, sorted bases, their references]; every change to
 #: _ADDRESSES clears ``built`` (a dead entry dropped, a base registered)
 _ADDRESS_INDEX: list = [None, [], []]
@@ -304,19 +313,28 @@ def storages_holding(words) -> list:
     return list(found.values())
 
 
+def _forget_address(base: int, ref) -> None:
+    """Drop ``base``'s entry if it is still ``ref``.  THE BREAKAGE THIS PREVENTS (Milton 2024 hex moving on
+    Metal, 2026-11-16): two threads (an LTS class thread and the history writer) found the same dead entry and
+    both deleted it; the second ``del`` raised KeyError and aborted the segment.  A base registered again in
+    between (a new storage at a reused address) keeps its new entry."""
+    with _ADDRESS_LOCK:
+        if _ADDRESSES.get(base) is ref:
+            del _ADDRESSES[base]
+        _ADDRESS_INDEX[0] = None
+
+
 def storage_at(address: int):
     """(storage, byte offset) of a GPU address a storage handed out, or None."""
     from woof.backend.metal import ext
     for base, ref in list(_ADDRESSES.items()):
         st = ref()
         if st is None:
-            del _ADDRESSES[base]
-            _ADDRESS_INDEX[0] = None
+            _forget_address(base, ref)
             continue
         if base <= address < base + max(st.nbytes, 1):
             if int(ext.load().gpu_address(st.arr)) != base:   # rebound since
-                del _ADDRESSES[base]
-                _ADDRESS_INDEX[0] = None
+                _forget_address(base, ref)
                 continue
             return st, address - base
     return None

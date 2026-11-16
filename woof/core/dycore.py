@@ -1442,12 +1442,18 @@ def launch_wrf_isotropic_km(state: DomainState, cfg: RunConfig,
     return d11, d22, d12
 
 
-def _thermal_diffusion_kernel(cfg, name):
+def _thermal_diffusion_kernel(cfg, name, module="smag2d"):
     """Compile-select WRF's moist-theta diffusion terms; dry source unchanged."""
     if cfg.use_theta_m:
         from woof.core.kernels import get_kernel_int_defines
-        return get_kernel_int_defines("smag2d", name, (("GPUWM_USE_THETA_M", 1),))
-    return get_kernel("smag2d", name)
+        return get_kernel_int_defines(module, name, (("GPUWM_USE_THETA_M", 1),))
+    return get_kernel(module, name)
+
+
+#: ``WOOF_TKE_FACES=0`` keeps wrf_tke_rhs evaluating every defor13 / defor23
+#: face at every point that reads it (A/B and byte-identity checks).
+def _tke_faces_enabled() -> bool:
+    return os.environ.get("WOOF_TKE_FACES", "1") != "0"
 
 
 def launch_wrf_calc_n2(state: DomainState, cfg: RunConfig, bn2, *,
@@ -1585,9 +1591,23 @@ def launch_wrf_tke_km(state: DomainState, cfg: RunConfig,
         # MARTA wall production uses ground wind, including prescribed Cd.
         from woof.moving_frame import ground_relative_components
         common[:2] = ground_relative_components(state, *common[:2])
-    _thermal_diffusion_kernel(cfg, "wrf_tke_rhs")(
+    # The stored-face route (kernels/smag2d_tke_faces.cu): each defor13 /
+    # defor23 face once into the scalar multi launch's spare face pair
+    # (free until the scalar rows, after the u/v staging), then tke_rhs's
+    # statements on the stored words.
+    faces = []
+    rhs_name, rhs_module = "wrf_tke_rhs", "smag2d"
+    if _tke_faces_enabled():
+        d13 = state.scratch((nz, ny, nx + 1), "smag_fx_1")
+        d23 = state.scratch((nz, ny + 1, nx), "smag_fy_1")
+        get_kernel("smag2d_tke_faces", "wrf_tke_defor_faces")(
+            ((nx + 1 + _TPB - 1) // _TPB, ny + 1, nz), (_TPB, 1, 1),
+            tuple(common + [d13, d23] + dims))
+        faces = [d13, d23]
+        rhs_name, rhs_module = "wrf_tke_rhs_faces", "smag2d_tke_faces"
+    _thermal_diffusion_kernel(cfg, rhs_name, rhs_module)(
         grid, (_TPB, 1, 1),
-        tuple(common + [
+        tuple(common + faces + [
             thp, state.thb, np.int32(state.thb.ndim == 3),
             tke, bn2, d11, d22, d12,
             xkmh, xkmv, xkhv,
@@ -1743,10 +1763,43 @@ def launch_wrf_smag2d_hd_multi(state: DomainState, cfg: RunConfig, rows,
                   tuple(common + [blob, np.int32(len(chunk))] + tail))
 
 
+#: ``WOOF_SMAG_UV_FACES=0`` keeps wrf_smag_hd_u / wrf_smag_hd_v evaluating
+#: every stress at every point that reads it (A/B and byte-identity checks).
+def _smag_uv_faces_enabled() -> bool:
+    return os.environ.get("WOOF_SMAG_UV_FACES", "1") != "0"
+
+
+def launch_wrf_smag_uv_faces(state: DomainState, cfg: RunConfig, xk, *,
+                             time_t: bool):
+    """Store the coefficients of WRF's horizontal momentum stresses once
+    (kernels/smag2d_uv_faces.cu wrf_smag_uv_coef_faces): ``rho K`` at the
+    mass points (tau11 and tau22) and ``rhoavg kavg`` at the corners
+    (tau12), from ``xk`` (the horizontal K).  Returns ``(cm, c12)`` for
+    :func:`launch_wrf_smag2d_hd`'s u and v rows, which form each stress as
+    ``-coefficient * deformation`` where ``wrf_smag_hd_u`` / ``wrf_smag_hd_v`` recomputed each
+    coefficient (a density divide and, for tau12, four-point averages) at
+    up to ten points; ``None`` when ``WOOF_SMAG_UV_FACES=0``.  The stress
+    product itself stays at the reader so default-numerics contraction
+    rounds it exactly as the per-point kernels do."""
+    if not _smag_uv_faces_enabled():
+        return None
+    nz, ny, nx = xk.shape
+    cm = state.scratch((nz, ny, nx), "smag_cm")
+    c12 = state.scratch((nz, ny + 1, nx + 1), "smag_c12")
+    common = _wrf_smag_grid_args(state, cfg, time_t=time_t)
+    tail = [np.int32(nz), np.int32(ny), np.int32(nx),
+            np.int32(state.phb.ndim == 3),
+            np.int32(_boundary_x(cfg)), np.int32(_boundary_y(cfg))]
+    get_kernel("smag2d_uv_faces", "wrf_smag_uv_coef_faces")(
+        ((nx + 1 + _TPB - 1) // _TPB, ny + 1, nz), (_TPB, 1, 1),
+        tuple(common + [xk, cm, c12] + tail))
+    return cm, c12
+
+
 def launch_wrf_smag2d_hd(state: DomainState, cfg: RunConfig, f, xk, tend,
                           *, stagger: str, time_t: bool,
                           full_theta: bool = False,
-                          deformation=None) -> None:
+                          deformation=None, faces=None) -> None:
     """Add WRF's metric-aware tensor-stress/scalar-flux horizontal tendency.
 
     WRF passes ``grid%t_2 = theta - T0`` to the scalar operator.  For the
@@ -1755,6 +1808,12 @@ def launch_wrf_smag2d_hd(state: DomainState, cfg: RunConfig, f, xk, tend,
     unchanged.  Reconstruction inside the flux kernel avoids a full-grid
     temporary and handles both one-dimensional and terrain-following 3-D
     ``thb``.
+
+    The u and v rows read the stress coefficients
+    :func:`launch_wrf_smag_uv_faces` stored (``faces``, computed here when
+    the caller did not), and take
+    the per-point ``wrf_smag_hd_u`` / ``wrf_smag_hd_v`` only with
+    ``WOOF_SMAG_UV_FACES=0``.
     """
     if stagger not in _WRF_SMAG_HD:
         raise ValueError(f"unknown Smagorinsky stagger {stagger!r}")
@@ -1775,16 +1834,24 @@ def launch_wrf_smag2d_hd(state: DomainState, cfg: RunConfig, f, xk, tend,
                             np.int32(state.thb.ndim == 3),
                             flux_x, flux_y] + tail))
         payload = [flux_x, flux_y, tend]
-    elif stagger == "x":
+    elif stagger in ("x", "y"):
         if deformation is None:
-            raise ValueError("u Smagorinsky stress requires deformation")
-        d11, _d22, d12 = deformation
-        payload = [xk, d11, d12, tend]
-    elif stagger == "y":
-        if deformation is None:
-            raise ValueError("v Smagorinsky stress requires deformation")
-        _d11, d22, d12 = deformation
-        payload = [xk, d22, d12, tend]
+            raise ValueError(f"{'u' if stagger == 'x' else 'v'} Smagorinsky "
+                             "stress requires deformation")
+        d11, d22, d12 = deformation
+        if faces is None:
+            faces = launch_wrf_smag_uv_faces(state, cfg, xk, time_t=time_t)
+        if faces is not None:
+            cm, c12 = faces
+            if stagger == "x":
+                name, payload = "wrf_smag_hd_u_faces", [cm, c12, d11, d12, tend]
+            else:
+                name, payload = "wrf_smag_hd_v_faces", [cm, c12, d22, d12, tend]
+            get_kernel("smag2d_uv_faces", name)(
+                grid, (_TPB, 1, 1), tuple(common + payload + tail))
+            return
+        payload = ([xk, d11, d12, tend] if stagger == "x"
+                   else [xk, d22, d12, tend])
     else:
         # W takes wrf_smag_hd_w in every mode.  449e3d697 made
         # DIFFUSION_ENABLED true whenever WRF_EXACT is off, so the former
@@ -2414,13 +2481,16 @@ def _compute_wrf_smag_tendencies(state: DomainState, cfg: RunConfig,
             state, cfg, km, kh, time_t=time_t)
 
     # u/v must both see the complete deformation set before either borrowed
-    # carrying buffer is replaced by its final stress divergence.
+    # carrying buffer is replaced by its final stress divergence.  Both read
+    # the same horizontal K, so their stress coefficients are stored once.
+    faces = launch_wrf_smag_uv_faces(state, cfg, specs[0][2], time_t=time_t)
     for row, tmp_slot in zip(specs[:2], ("diff6_x", "diff6_y")):
         f, _tend, xk, _c1, _c2, _slot, stag = row
         tmp = state.scratch(f.shape, tmp_slot)
         tmp[...] = 0
         launch_wrf_smag2d_hd(state, cfg, f, xk, tmp, stagger=stag,
-                             time_t=time_t, deformation=deformation)
+                             time_t=time_t, deformation=deformation,
+                             faces=faces)
         _zero_open_strips(tmp, cfg, 1)
     for row, tmp_slot in zip(specs[:2], ("diff6_x", "diff6_y")):
         f, _tend, _xk, _c1, _c2, slot, _stag = row
@@ -2582,12 +2652,16 @@ def _compute_wrf_moist_theta_mixing(state, cfg, km, kh, specs, *, time_t,
         if budget is not None:
             budget[...] = increment
     exempt = chem_mix2_exempt_slots(state, cfg)
+    # The u and v rows read the same horizontal K: their stress
+    # coefficients are stored once.
+    faces = launch_wrf_smag_uv_faces(state, cfg, specs[0][2], time_t=time_t)
     for f, _tend, xk, _c1, _c2, slot, stag in specs:
         if slot not in exempt:
             launch_wrf_smag2d_hd(
                 state, cfg, f, xk, buffers[slot], stagger=stag,
                 time_t=time_t, full_theta=(slot == "smag_rth"),
-                deformation=deformation if stag in ("x", "y") else None)
+                deformation=deformation if stag in ("x", "y") else None,
+                faces=faces if stag in ("x", "y") else None)
         if seed.get(slot) is None:
             _zero_open_strips(buffers[slot], cfg, 1)
         else:
@@ -2711,9 +2785,11 @@ def _compute_wrf_constant_k_tendencies(state: DomainState, cfg: RunConfig,
             scalar_rows=[(f, buffers[slot], slot == "smag_rth")
                          for f, _tend, _xk, _c1, _c2, slot, stag in specs
                          if stag == ""])
+    faces = launch_wrf_smag_uv_faces(state, cfg, specs[0][2], time_t=time_t)
     for f, _tend, xk, _c1, _c2, slot, stag in specs[:2]:
         launch_wrf_smag2d_hd(state, cfg, f, xk, buffers[slot], stagger=stag,
-                             time_t=time_t, deformation=deformation)
+                             time_t=time_t, deformation=deformation,
+                             faces=faces)
     # D11/D22/D12 are dead: the w buffer and the face workspaces are free.
     f, _tend, xk, _c1, _c2, slot, stag = specs[2]
     rw = buffers[slot]

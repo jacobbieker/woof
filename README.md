@@ -350,7 +350,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   - surface inputs on the generic column seam: CLM lake, SLUCM urban on
     per-cell fractions, WUDAPT LCZ classes, Noah and RUC mosaic, Pleim-Xiu
     and the slab with their soil inits, irrigation and `topo_wind = 1`
-    ([docs/ruc-mosaic-and-clm-lake.md](docs/ruc-mosaic-and-clm-lake.md));
+    ([docs/ruc-mosaic-and-clm-lake.md](docs/ruc-mosaic-and-clm-lake.md)).
+    `topo_wind = 1` is not recommended on the 120 km globe: against WIS2
+    stations it raises the 10 m wind bias by 0.5 m/s. Its terrain
+    Laplacian on hex uses cell-index neighbours, an open defect
+    ([TERRAIN-DRAG.md](docs/public/TERRAIN-DRAG.md));
   - CCPP TKE-EDMF on the column seam;
   - diagnostics: `nwp_diagnostics` maxima, `p_lev`/`z_lev` levels, `tslist`
     station series, `prec_acc_dt` windows and `acc_phy_tend`, AFWA
@@ -466,6 +470,17 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   horizontal flux and divergence launches four rows at a time with the face
   and cell metrics formed once (`wrf_smag_flux_s_multi`/`wrf_smag_hd_s_multi`,
   byte-identical; `WOOF_SMAG_MULTI=0` restores one launch pair per row).
+  The u and v Smagorinsky stress divergences read the stress coefficients
+  (rho K, rhoavg kavg) stored once per step (`smag2d_uv_faces`,
+  byte-identical in fast and strict numerics) where each point re-evaluated
+  up to ten of them: the u+v pair 1.3 -> 0.44 ms at 49x120x150 and
+  9.5 -> 2.1 ms at 49x300x300 on an A6000, 4.0 -> 2.0 ms and 32 -> 18 ms on
+  an M3 Max (`WOOF_SMAG_UV_FACES=0` restores the per-point kernels).
+  `km_opt = 2`'s TKE source reads the defor13/defor23 faces stored once
+  (`smag2d_tke_faces`, the `wrf_tke_rhs` statements on the stored words,
+  byte-identical in fast and strict numerics) where each mass point
+  re-evaluated up to six of them (`WOOF_TKE_FACES=0` restores the
+  per-point kernel).
   `WOOF_ACOUSTIC_KPAR=1` takes a level-parallel w''-phi'' solve (32 columns
   x 8 lanes per block; 1.7-2.2x the column kernel's speed per launch on an
   A6000): opt-in, because on CUDA its words are the column kernel's generic
@@ -486,6 +501,13 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   in its first step (edi-vr 1 h on an A6000: step 1 from 42.5 s to 3.6 s,
   byte-identical; `WOOF_HEX_SHARED_KERNEL_IMAGES=0` restores the per-run
   cache).
+  Hex `woof hex moving`: the resident forecast process prepares the next
+  region beside the running one only when the host has room for a second
+  copy (`WOOF_HEX_MOVING_PREPARE_HOST_GATE=0` always prepares;
+  `WOOF_HEX_MOVING_PREPARE_HOST_RESERVE_GB`, default 2, is the room kept
+  free; the copy is priced at the last preparation's peak growth times
+  `WOOF_HEX_MOVING_PREPARE_HOST_MARGIN`, default 1.25), and on Linux it gives the freed heap back at each move. A skipped
+  preparation makes the move slower; the words are the same.
   `WOOF_METAL_GPU_TIMES` times each kernel.
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
@@ -560,8 +582,12 @@ on it:
     12 km geometry for 1 h took about 10 minutes of wall time), but some
     kernel units are refused by name: TEMPO on macOS, Grell-Freitas
     `gfl_columns` and RRFS `mynnedmf_run_l1` on Metal;
-  - the LTS executor's reserve census needs 64-bit atomic adds, which Apple
-    GPUs lack;
+  - the LTS executor's scalar kernels run without 64-bit atomics on Metal:
+    the reserve census counts with two 32-bit atomics and a carry (the same
+    words as CUDA), and the binary64 receipt sums are gathered per element
+    and summed in a fixed order (deterministic on Metal; CUDA's atomic sums
+    vary in the last bits from run to run). So `woof hex moving` and LTS
+    regional runs work on an Apple GPU;
   - the dynamics subcycle runs eager, because the facade has no CUDA graphs;
   - the MPAS WSM6 unit of the water-budget gates (binary64) once had not
     finished its cold compile after 1 h 45 min; it now compiles cold in

@@ -66,6 +66,44 @@ def nudging_partitioned(execution, moving) -> bool:
     return execution is not None or (moving is not None and not getattr(moving, 'fixed_mesh', False))
 
 
+def wind_reconstruction_refusal(cp, geometry, normal_velocity, value) -> str:
+    """The wind reconstruction's refusal, naming which of its checks failed.
+
+    reconstruct_winds_v841_f32 raises ONE word for every check it makes: the geometry against its sealed copy,
+    an edge slot or count out of range, a non-finite coefficient, a non-finite sine or cosine, and a non-finite
+    normal velocity.  Only the first is a geometry fault; the last is the model state blowing up.  The word is
+    read at most one step after it was raised, so this looks at the arrays when the refusal is made: a sealed
+    copy that still differs, or a state that is still non-finite.
+    THE BREAKAGE THIS PREVENTS (obs D1, 2026-11-15): three 80-level MPAS-suite runs stopped with "failed
+    geometry validation: the mesh geometry differs from its sealed copy" when the geometry was intact and the
+    winds had gone non-finite (an 80-level, 50 km lid run without the
+    spec's upper damping), so the message pointed at the mesh instead of the integration.
+    """
+    names = ('edges_on_cell', 'n_edges_on_cell', 'coeffs_reconstruct', 'lat_cell', 'lon_cell')
+    try:
+        changed = [name for name in names
+                   if not bool(cp.array_equal(getattr(geometry, f'_{name}').view(cp.uint8),
+                                              getattr(geometry, f'_sealed_{name}').view(cp.uint8)))]
+        bad = ~cp.isfinite(normal_velocity)
+        per_level = cp.asnumpy(bad.sum(axis=-1)) if normal_velocity.ndim == 2 else None
+        n_bad = int(bad.sum())
+    except Exception as error:  # pragma: no cover - the diagnosis must never hide the refusal
+        return (f'MPAS_to_physics CUDA wind reconstruction refused (invalid word {value}); '
+                f'the check could not be attributed: {error!r}')
+    if changed:
+        return ('MPAS_to_physics CUDA wind reconstruction failed geometry validation: the mesh geometry differs '
+                f'from its sealed copy in {", ".join(changed)} (invalid word {value})')
+    if n_bad:
+        levels = [] if per_level is None else [int(k) + 1 for k in range(per_level.size) if per_level[k]]
+        shown = ', '.join(str(k) for k in levels[:12]) + (', ...' if len(levels) > 12 else '')
+        return ('MPAS_to_physics CUDA wind reconstruction found a non-finite normal velocity: '
+                f'{n_bad} edge values on {len(levels)} levels (1-based: {shown}); the dynamics went '
+                f'non-finite; the mesh geometry equals its sealed copy (invalid word {value})')
+    return ('MPAS_to_physics CUDA wind reconstruction refused (invalid word '
+            f'{value}): the mesh geometry equals its sealed copy and the normal velocity is finite now, so '
+            'a reconstruction coefficient, edge index or trigonometric value was invalid when it ran')
+
+
 class ResidentNativeCoupling:
     """Hold outer sources and hand transport to native; mpas_atm_time_integration.F:2140-2816."""
 
@@ -233,8 +271,8 @@ class ResidentNativeCoupling:
         # The aggregate preparation this replaces refused a sealed-geometry change by reading this
         # word every synchronization. The same refusal now reads it off the step path.
         from .deferred_checks_v842 import defer
-        defer(invalid, 'MPAS_to_physics CUDA wind reconstruction failed geometry validation: '
-                       'the mesh geometry differs from its sealed copy (invalid word {value})')
+        velocity = atmosphere.saved.normal_velocity
+        defer(invalid, lambda value: wind_reconstruction_refusal(self.cp, geometry, velocity, value))
         return outputs
 
     def stage(self, *, rk_step, dynamics_substep, state, saved, diagnostics):
