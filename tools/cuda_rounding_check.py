@@ -985,8 +985,8 @@ def run_units(units, arches, options, workers, on_row, *, heavy=HEAVY_UNITS, job
                 break
             broken = []
             if group is heavy_units:
-                wait_for_memory(float(os.environ.get("WOOF_ROUNDING_HEAVY_GIB", "20")),
-                                float(os.environ.get("WOOF_ROUNDING_MEM_WAIT_S", "7200")))
+                wait_for_memory(float(os.environ.get("WOOF_ROUNDING_HEAVY_GIB", "12")),
+                                float(os.environ.get("WOOF_ROUNDING_MEM_WAIT_S", "3600")))
             try:
                 with ProcessPoolExecutor(max_workers=width) as executor:
                     futures = {executor.submit(job, (unit, arches, options)): unit for unit in todo}
@@ -1079,13 +1079,14 @@ def main(argv=None) -> int:
                     continue
                 reused[row["unit"]] = row
 
-        def record(row):
+        def record(row, write=True):
             data["units"].append(row)
             comparison = row["native_differences"] if args.native_only else row["differences"]
             counts = {arch: len(sites) for arch, sites in comparison.items()}
             print(f"{row['unit']}: {row['status']} {counts}", flush=True)
             # A detached interrupted sweep retains every completed receipt.
-            args.json.write_text(json.dumps(data, indent=1) + "\n", encoding="utf-8")
+            if write:
+                args.json.write_text(json.dumps(data, indent=1) + "\n", encoding="utf-8")
 
         identity = (compiler_identity(args.root, args.nvrtc_library, args.nvdisasm)
                     if args.cache_dir and not args.keep_ptx else None)
@@ -1103,7 +1104,7 @@ def main(argv=None) -> int:
                                    native_only=args.native_only) if identity is not None else None)
             if cached is not None:
                 cache_hits += 1
-                record(dict(cached, receipt_reused=True))
+                record(dict(cached, receipt_reused=True), write=False)
                 continue
             row = reused.get(unit.key)
             if (row is not None
@@ -1113,9 +1114,11 @@ def main(argv=None) -> int:
                     and (not args.nvdisasm or all("sass_sha256" in row["compiled"].get(str(arch), {})
                                                  for arch in data["architectures"]))):
                 row = dict(row, receipt_reused=True)
-                record(row)
+                record(row, write=False)
             else:
                 pending_units.append(unit)
+        # Reused rows are rewritten once, not once each (indent= JSON is slow).
+        args.json.write_text(json.dumps(data, indent=1) + "\n", encoding="utf-8")
         print(f"receipt cache: {cache_hits} reused, {len(pending_units)} to compile", flush=True)
         run_units(pending_units, data["architectures"], options, args.workers, finished)
         data["units"].sort(key=lambda row: row["unit"])
