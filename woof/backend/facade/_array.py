@@ -246,6 +246,10 @@ class Storage:
 #: 2026-11-16, instead of one device copy the facade orders.
 _DEVICE_COPY = os.environ.get("WOOF_METAL_DEVICE_COPY", "1") != "0"
 
+#: WOOF_METAL_DIRECT_OUT=0: ``get(out=)`` copies to a host array and then
+#: into ``out``, as before 2026-11-16 (two host copies instead of one).
+_DIRECT_OUT = os.environ.get("WOOF_METAL_DIRECT_OUT", "1") != "0"
+
 #: WOOF_METAL_ADDRESS_ASYNC=0: Storage.address waits for the buffer's value
 #: (mx.eval), as it did before 2026-11-15.
 _ADDRESS_ASYNC = os.environ.get("WOOF_METAL_ADDRESS_ASYNC", "1") != "0"
@@ -546,6 +550,15 @@ class ndarray:
         mx = _mx()
         values = self._values()
         mx.eval(values)
+        if out is not None and _DIRECT_OUT and self.dtype != np.complex128 \
+                and isinstance(out, np.ndarray) and out.shape == self.shape:
+            # Unified memory: the evaluated buffer is host memory, read in
+            # place (a view, no copy) and copied once, into ``out``.
+            words = np.asarray(values)
+            if self.dtype == np.float64:
+                words = words.view(np.float64)
+            out[...] = words.reshape(self.shape)
+            return out
         host = np.array(values, copy=True)
         if self.dtype == np.float64:
             host = host.view(np.float64)

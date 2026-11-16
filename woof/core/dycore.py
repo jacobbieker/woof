@@ -1858,16 +1858,18 @@ def launch_wrf_smag2d_hd(state: DomainState, cfg: RunConfig, f, xk, tend,
         # wrf_smag_w_stress/wrf_smag_hd_w_stress route could no longer run
         # and is retired.
         if os.environ.get("WOOF_SMAG_W_FACES", "1") != "0":
-            # The same statement with each tau13/tau23 face evaluated once
-            # into the step-dead diff6 workspaces (smag2d_w_faces.cu): the
-            # words wrf_smag_hd_w computes, a fifth of its time.
-            tx = state.scratch((nz, ny, nx + 1), "diff6_x")
-            ty = state.scratch((nz, ny + 1, nx), "diff6_y")
-            get_kernel("smag2d_w_faces", "wrf_smag_w_tau_faces")(
+            # The same statement with each defor13/defor23 face evaluated
+            # once into the step-dead diff6 workspaces (smag2d_w_faces.cu);
+            # the stresses' density and K averages stay at the reader, so
+            # the words are wrf_smag_hd_w's in fast and strict numerics.
+            dx13 = state.scratch((nz, ny, nx + 1), "diff6_x")
+            dy23 = state.scratch((nz, ny + 1, nx), "diff6_y")
+            get_kernel("smag2d_w_faces", "wrf_smag_w_defor_faces")(
                 ((nx + 1 + _TPB - 1) // _TPB, ny + 1, nz), (_TPB, 1, 1),
-                tuple(common + [xk, tx, ty] + tail))
+                tuple(common + [dx13, dy23] + tail))
             get_kernel("smag2d_w_faces", "wrf_smag_hd_w_faces")(
-                grid, (_TPB, 1, 1), tuple(common + [tx, ty, tend] + tail))
+                grid, (_TPB, 1, 1),
+                tuple(common + [xk, dx13, dy23, tend] + tail))
             return
         payload = [xk, tend]
     kernel = (_wrf_smag_scalar_kernel(_WRF_SMAG_HD[stagger], nz, ny, nx)
