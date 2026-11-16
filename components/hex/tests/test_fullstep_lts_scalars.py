@@ -250,8 +250,11 @@ def _launch_summed(kernel, total, args, sums, ntr, first, stride):
     fold_sums(sums, buffer, ntr, first, stride)
 
 
+# a count's low word one or two short of wrapping: Metal's count is two 32-bit
+# atomics, and the carry into the high word must give CUDA's 64-bit integer
 @gpu
-def test_reserve_cap_capture_and_apply_match_numpy():
+@pytest.mark.parametrize("counted", [(0, 0), (2**32 - 1, 2**33 - 2)])
+def test_reserve_cap_capture_and_apply_match_numpy(counted):
     import cupy as cp
 
     kernels = _kernels()
@@ -291,7 +294,8 @@ def test_reserve_cap_capture_and_apply_match_numpy():
     d_up, d_res = cp.asarray(upwind), cp.asarray(residual)
     d_hold = cp.zeros((ntr, nlev, nslots), dtype=cp.float32)
     d_reserve = cp.asarray(reserve)
-    stats = cp.zeros(4, dtype=cp.uint64)
+    start = np.array([0, 0, *counted], dtype=np.uint64)
+    stats = cp.asarray(start)
     amounts = cp.zeros(3 * ntr, dtype=cp.float64)
     i32 = np.int32
     table = (cp.asarray(slot.reshape(-1)), cp.asarray(coef.reshape(-1)), cp.asarray(edge_of_slot))
@@ -304,7 +308,8 @@ def test_reserve_cap_capture_and_apply_match_numpy():
     np.testing.assert_array_equal(cp.asnumpy(d_up), up.astype(np.float32))
     np.testing.assert_array_equal(cp.asnumpy(d_res), res.astype(np.float32))
     np.testing.assert_array_equal(cp.asnumpy(d_hold), hold)
-    assert [int(v) for v in cp.asnumpy(stats)[2:]] == capped and min(capped) > 0
+    assert [int(v) for v in cp.asnumpy(stats)[2:]] == [c + int(s) for c, s in zip(capped, start[2:])]
+    assert min(capped) > 0
     # what may still leave a column through the interface fits its reserve
     for t in range(ntr):
         for k in range(nlev):
