@@ -144,3 +144,11 @@ using an older prebuilt renderer executable.
 Regular longitude axes may ascend or descend and use either conventional longitude encoding. Sampling chooses an equivalent coordinate within the actual source extent. In particular, a descending axis crossing zero does not imply a 0-to-360 encoding. No donor is extrapolated beyond a regional source boundary.
 
 The source table may declare `zero_roundoff_tolerance` in SI units. Rust snaps only values whose absolute magnitude is within that tolerance to zero. ERA5-Land ice depth uses 1e-12 m because converted GRIB zero depth can be -2.1684e-19 m. The receipt records the tolerance; material negative depths still fail admission.
+
+## Lake extent
+
+Lake ICs only help where the lake mask is right. The WPS 30-arc-second
+lakes include glacier and rock in the Alps, and their shorelines sit about
+1 km north of where they are. `[static.highres] fields = "lakes"`
+([high-resolution-static-geography.md](high-resolution-static-geography.md))
+takes the lake extent from CGLC-MODIS-LCZ instead (opt-in).
