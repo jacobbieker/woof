@@ -1052,7 +1052,7 @@ BASELINE_PINNED: dict[str, str] = {
     # Previously 5da35b59.
     # RE-PINNED at the 1.1.6 upstream merge: the fork's 256-level source on upstream 1.1.6's edits.
     "terrain_drag":
-        '575ed16c15529e6de4b6cf34a31c75917f6a2a27577e11da5721fb3a7afdb2da',
+        'ca3fd7768ff2a02ba1da2629f32ca0ac866af0a4566abdb571f36e6e026bc560',
     # feat/windfarm-fitch-kernel: the Fitch et al. (2012) wind-farm drag
     # from WRF v4.7.1 phys/module_wind_fitch.F (windfarm_opt = 1), word for
     # word against WRF's own Fortran and the binary32 CPU mirror

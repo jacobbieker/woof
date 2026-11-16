@@ -1432,10 +1432,10 @@ def _warn_coarse_topo_wind(driver, xland, dx_m):
     fraction whose CTOPO is 0 (no YSU surface drag), or None if unknown.
 
     The option stays the user's to select (WRF v4.7.1 offers it at any dx);
-    this says what it does there.  MEASURED (2026-11-16, x1.40962, 120 km,
+    this says what it does there.  MEASURED (2026-11-15, x1.40962, 120 km,
     mesh-neighbour LAP_HGT): 32 % of land cells zeroed, and 10 m wind
     against WIS2 SYNOP worse by +0.52 m/s bias at 24 h
-    (components/hex/docs/TERRAIN-DRAG.md).
+    (docs/public/TERRAIN-DRAG.md).
     """
     import warnings
 
@@ -1458,7 +1458,7 @@ def _warn_coarse_topo_wind(driver, xland, dx_m):
             f"{100.0 * fraction:.0f} % of land columns here.  Jimenez and "
             "Dudhia (2012) formulated it for km-scale grids; at 120 km it "
             "measured worse 10 m winds than topo_wind = 0 "
-            "(components/hex/docs/TERRAIN-DRAG.md).",
+            "(docs/public/TERRAIN-DRAG.md).",
             RuntimeWarning, stacklevel=3)
     return fraction
 

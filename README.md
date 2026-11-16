@@ -351,9 +351,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     per-cell fractions, WUDAPT LCZ classes, Noah and RUC mosaic, Pleim-Xiu
     and the slab with their soil inits, irrigation and `topo_wind = 1`
     ([docs/ruc-mosaic-and-clm-lake.md](docs/ruc-mosaic-and-clm-lake.md)).
-    `topo_wind = 1` is not recommended on the 120 km globe: against WIS2
-    stations it raises the 10 m wind bias by 0.5 m/s. Its terrain
-    Laplacian on hex uses cell-index neighbours, an open defect
+    `topo_wind = 1` forms WRF's terrain Laplacian from the mesh's own
+    neighbours (`cellsOnCell`), which is WRF's 5-point form on a quad
+    neighbourhood. It is not recommended on the 120 km globe: WRF's
+    -30 m cut-off removes the surface drag in 32 % of land cells there,
+    and against WIS2 stations it raised the 10 m wind bias by 0.5 m/s.
+    The seam warns above 4 km
     ([TERRAIN-DRAG.md](docs/public/TERRAIN-DRAG.md));
   - CCPP TKE-EDMF on the column seam;
   - diagnostics: `nwp_diagnostics` maxima, `p_lev`/`z_lev` levels, `tslist`

@@ -2310,25 +2310,29 @@ CHAINED_UNITS_WITHOUT_A_PER_PLATFORM_ROW = MappingProxyType({
 # SPP) composition, re-taken at the 1.1.3 upstream merge and again at the
 # 1.1.6 merge, where sm_86 (RTX A6000, NVRTC 13.4) read the same frames:
 # 0 / 0 / 1,152 / 2,208 B.
+#
+# topo_wind_static_mesh (the hex mesh-neighbour LAP_HGT, 2026-11-15) holds no
+# per-thread array: 0 B, read on sm_86 (RTX A6000) with the source below; the
+# other rows carry the same 0, not re-read.
 TERRAIN_DRAG_COMPOSED_SOURCE_SHA256 = (
-    '74ceba8adee4b664ed957d69ad9094db6b3120dcd531121bed813e6768e1b3e9')
+    '43aeaf8da8a7670c4d1f966999a31300ce23bf915b93c2b4666cab19615e0ce0')
 
 TERRAIN_DRAG_COMPOSED_OPTIONS = ("-std=c++17", "-fmad=false", "--ftz=false")
 TERRAIN_DRAG_COMPOSED_FRAME_READINGS = MappingProxyType({
     ("89", "13.4.59"): MappingProxyType({
-        "topo_wind_static": 0, "terrain_pbl_top": 0,
+        "topo_wind_static": 0, "topo_wind_static_mesh": 0, "terrain_pbl_top": 0,
         "gwdo_column": 640, "gwdo_gsl_column": 1184}),
     ("120", "13.4.59"): MappingProxyType({
-        "topo_wind_static": 0, "terrain_pbl_top": 0,
+        "topo_wind_static": 0, "topo_wind_static_mesh": 0, "terrain_pbl_top": 0,
         "gwdo_column": 640, "gwdo_gsl_column": 1184}),
     ("120", "13.4.92"): MappingProxyType({
-        "topo_wind_static": 0, "terrain_pbl_top": 0,
+        "topo_wind_static": 0, "topo_wind_static_mesh": 0, "terrain_pbl_top": 0,
         "gwdo_column": 640, "gwdo_gsl_column": 1184}),
     ("120", "12.9.86"): MappingProxyType({
-        "topo_wind_static": 0, "terrain_pbl_top": 0,
+        "topo_wind_static": 0, "topo_wind_static_mesh": 0, "terrain_pbl_top": 0,
         "gwdo_column": 640, "gwdo_gsl_column": 1184}),
     ("86", "12.9.86"): MappingProxyType({
-        "topo_wind_static": 0, "terrain_pbl_top": 0,
+        "topo_wind_static": 0, "topo_wind_static_mesh": 0, "terrain_pbl_top": 0,
         "gwdo_column": 1152, "gwdo_gsl_column": 2208}),
 })
 

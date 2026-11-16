@@ -198,6 +198,11 @@ def test_topo_wind_mesh_laplacian_on_hexagons_is_the_quad_forms_quantity():
     got = float(cp.asnumpy(lap)[0, 0])
     assert got == pytest.approx(a * dc * dc, rel=1e-6)
     assert float(cp.asnumpy(lap)[0, 1]) == 0.0      # a cell with no edges
+    # The (ncol,) layout is the same computation.
+    _, _, flat = topo_wind_coefficients(
+        cp.asarray(ht[0]), cp.asarray(ones[0]), topo_wind=1,
+        var_sso=cp.asarray(ones[0]), cells_on_cell=cells, n_edges_on_cell=counts)
+    assert np.array_equal(cp.asnumpy(flat), cp.asnumpy(lap))
 
 
 def _gwd_atmosphere(inputs):
@@ -547,8 +552,8 @@ def test_sase_height_supplies_gsls_one_based_upper_bracket_level():
 _MUTATIONS = (
     ("topo1", False, "else c = gfk_log(c);",
      "else c = 1.0f;", "static", 1),
-    ("topo2", False, "var2d[idx] * 0.4f / 200.0f + 1.175f",
-     "var2d[idx] * 0.4f / 200.0f + 1.176f", "static", 2),
+    ("topo2", False, "var2d * 0.4f / 200.0f + 1.175f",
+     "var2d * 0.4f / 200.0f + 1.176f", "static", 2),
     ("gwdo", False,
      "const real veleps = 1.0f, frc = 1.0f, ce = 0.8f, cg = 0.5f;",
      "const real veleps = 1.0f, frc = 1.0f, ce = 0.81f, cg = 0.5f;",

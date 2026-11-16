@@ -184,7 +184,13 @@ def topo_wind_coefficients(ht, xland, *, topo_wind: int, var_sso=None,
     if mesh and ny != 1:
         raise ValueError(f"a mesh's fields are (1, ncol) or (ncol,), got "
                          f"{ht.shape}")
-    xland = _f32(cp, xland, (ny, nx), "xland")
+    def field(array, name):
+        # A mesh's field is (1, ncol) or (ncol,), the layout ht came in.
+        if mesh and np.ndim(array) == 1:
+            array = cp.asarray(array).reshape(1, -1)
+        return _f32(cp, array, (ny, nx), name)
+
+    xland = field(xland, "xland")
     if topo_wind == 1 and var_sso is None:
         # WRF's own fatal error (start_em.F:222-223).
         raise ValueError("topo_wind = 1 requires VAR_SSO data")
@@ -192,9 +198,8 @@ def topo_wind_coefficients(ht, xland, *, topo_wind: int, var_sso=None,
         raise ValueError("topo_wind = 2 requires VAR (the orographic "
                          "standard deviation) data")
     zeros = cp.zeros((ny, nx), dtype=cp.float32)
-    var_sso = zeros if var_sso is None else _f32(cp, var_sso, (ny, nx),
-                                                 "var_sso")
-    var2d = zeros if var2d is None else _f32(cp, var2d, (ny, nx), "var2d")
+    var_sso = zeros if var_sso is None else field(var_sso, "var_sso")
+    var2d = zeros if var2d is None else field(var2d, "var2d")
     ctopo = cp.empty((ny, nx), dtype=cp.float32)
     ctopo2 = cp.empty((ny, nx), dtype=cp.float32)
     lap = cp.empty((ny, nx), dtype=cp.float32)
