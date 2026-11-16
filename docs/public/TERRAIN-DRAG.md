@@ -96,8 +96,9 @@ worse, and it can make the run unstable. Do not use it there.
 - Two of the four runs stopped on the dynamical core's validation flag, at
   34 h and 54 h. The two arms without `topo_wind` completed all four cases.
 
-For comparison, the default YSU orographic drag (`gwd_opt = 1`) lowers the
-bias by 0.23 m/s at 24 h and 0.31 m/s at 48 h.
+For comparison, the YSU orographic drag (`gwd_opt = 1`, which the
+`global-120km --physics-row arwen` suite runs) lowers the bias by 0.23 m/s
+at 24 h and 0.31 m/s at 48 h.
 
 **Why.** WRF forms `LAP_HGT` from the four grid neighbours, in metres, and
 has no grid-spacing scale (`start_em.F:1558`). It then sets `CTOPO = 0` and
