@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import sysconfig
+import time
 
 import pytest
 
