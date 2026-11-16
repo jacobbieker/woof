@@ -500,3 +500,32 @@ def test_the_host_heap_trim_reports_the_resident_set_on_linux_and_nothing_elsewh
     else:
         assert trimmed is None
     assert resident.process_rss_bytes() is None or resident.process_rss_bytes() > 0
+
+
+@pytest.mark.parametrize('prepared_for', ['mn1', 'mn2'])
+def test_the_continuation_drops_a_preparation_made_for_another_member(tmp_path, monkeypatch, prepared_for):
+    old = tmp_path / 'segment-000'
+    new = tmp_path / 'segment-001'
+    (old / 'control').mkdir(parents=True)
+    (new / 'control').mkdir(parents=True)
+    monkeypatch.setenv('WOOF_HEX_MOVING_CONTROL', str(old / 'control'))
+    monkeypatch.setattr(os, 'dup2', lambda *a: None)
+    monkeypatch.setattr(resident, 'release_device_memory', lambda: None)
+    spec = dict(schema=resident.SPEC_SCHEMA, member='mn1', index=1, argv=['forecast'], segment=str(new),
+                env={'WOOF_HEX_MOVING_CONTROL': str(new / 'control')})
+    resident._R.continuation = spec
+    resident._R.prep_spec = dict(spec, member=prepared_for)
+    resident._R.prepared['inputs'] = dict(key='k', value=object())
+    resident.next_segment()
+    resident._R.watch_stop.set()
+    assert ('inputs' in resident._R.prepared) == (prepared_for == 'mn1')
+
+
+def test_a_preparation_whose_resident_set_did_not_grow_keeps_the_last_estimate(monkeypatch):
+    sizes = iter([10, 10, 10, 30])
+    monkeypatch.setattr(resident, 'process_rss_bytes', lambda: next(sizes))
+    monkeypatch.setattr(resident, 'prepare', lambda spec: None)
+    resident._prepare_safely({})
+    assert resident._R.prep_host_bytes is None
+    resident._prepare_safely({})
+    assert resident._R.prep_host_bytes == 20

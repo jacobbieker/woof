@@ -462,7 +462,11 @@ def _prepare_safely(spec):
         prepare(spec)
         after = process_rss_bytes()
         if before is not None and after is not None:
-            _R.prep_host_bytes = max(after - before, 0)
+            grown = after - before
+            # The running segment allocates and frees beside the preparation: a delta at or below zero says
+            # nothing about the preparation's size, so it keeps the last estimate rather than pricing it at 0.
+            if grown > 0:
+                _R.prep_host_bytes = grown
     except Exception as error:
         # A preparation is an optimisation: anything it could not do is done by the segment itself.
         import traceback
@@ -567,13 +571,13 @@ def trim_host_heap() -> dict[str, Any] | None:
     if not sys.platform.startswith('linux'):
         return None
     import ctypes
-    try:
-        libc = ctypes.CDLL('libc.so.6')
-    except OSError:
+    try:   # an optimisation: a libc without glibc's malloc_trim (musl) must not fail the segment's close
+        trim = ctypes.CDLL('libc.so.6').malloc_trim
+        before = process_rss_bytes()
+        began = time.perf_counter()
+        trim(0)
+    except (OSError, AttributeError):
         return None
-    before = process_rss_bytes()
-    began = time.perf_counter()
-    libc.malloc_trim(0)
     return dict(rss_before=before, rss_after=process_rss_bytes(), seconds=time.perf_counter() - began)
 
 
@@ -629,8 +633,18 @@ def next_segment() -> list[str] | None:
     if not enabled() or spec is None:
         return None
     _R.watch_stop.set()
+    if _R.watcher is not None:
+        _R.watcher.join(timeout=5)
+    # A preparation for another member than the one this move goes to (the controller renamed the record after the
+    # watcher had started on the old one) is a second host copy nothing will take: wait for it, then drop it.
+    thread = _R.prep_thread
+    if thread is not None and thread.is_alive():
+        thread.join()
     finished = Path(os.environ[CONTROL_ENV]).parent
     with _R.lock:
+        if _R.prep_spec != spec:
+            _R.prepared.clear()
+            _R.prep_spec = None
         _R.continuation = None
         # The finished segment closed: carriers it held for its own resume are spent.
         _R.handed = {k: v for k, v in _R.handed.items() if k in _R.carriers}
