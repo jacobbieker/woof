@@ -136,9 +136,11 @@ class MetalFunction:
         if sig.indirect and _RESOLVE_TABLES and sig.pointer_mode == "direct" and mode == "":
             if self.name in FLAT_ADDRESS_TABLES and blob and (_RESOLVE_BESIDE_POINTERS or not stores):
                 words = np.frombuffer(bytes(blob[:len(blob) // 8 * 8]), dtype=np.uint64)
-            elif (_RESOLVE_BESIDE_POINTERS and self.name in DEVICE_ADDRESS_TABLES
-                  and DEVICE_ADDRESS_TABLES[self.name] in bound):
-                words = _device_table_words(bound[DEVICE_ADDRESS_TABLES[self.name]])
+            elif _RESOLVE_BESIDE_POINTERS and self.name in DEVICE_ADDRESS_TABLES:
+                tables = DEVICE_ADDRESS_TABLES[self.name]
+                tables = (tables,) if isinstance(tables, str) else tables
+                if all(t in bound for t in tables):
+                    words = np.concatenate([_device_table_words(bound[t]) for t in tables])
         if words is not None:
             from woof.backend.facade._array import storages_holding
             entry = {}
@@ -336,10 +338,30 @@ FLAT_ADDRESS_TABLES = frozenset({
 #: pointer parameter) holding data addresses only -- no address of another
 #: table -- and never write the table: the words are read in place from the
 #: table's unified memory (_device_table_words) and stand in for a
-#: synchronize, as FLAT_ADDRESS_TABLES' by-value words do.  Add a kernel only
-#: after reading it.
+#: synchronize, as FLAT_ADDRESS_TABLES' by-value words do.  A kernel with
+#: several such tables names them all; its words are their union.  Add a
+#: kernel only after reading it.
 DEVICE_ADDRESS_TABLES = {
     "mp_ring_copy": "table",                 # woof/core/kernels/microphysics_validation.cu
+    # rows (address, rows, stride, solve, mode): read-only data addresses
+    # beside counts; the launch writes only its bound flag / partials
+    # (woof/hex/cuda_solve_region_v841.py)
+    "solve_region_validate_v841": "table",
+    "solve_region_envelope_v841": "table",
+    # per-species / per-field address tables built by the hex physics seam
+    # (woof/hex/cuda_physics_prep_v841.py, cuda_physics_v841.py): prep_mass
+    # writes through qout's addresses, the rest only read through theirs
+    "prep_mass_v841_f32": "qout",
+    "validate_prep_v841_f32": "qspecies",
+    "couple_cells_v841_f32": "rates",
+    "recover_wsm6_v841_f32": ("water", "radius"),
+    "validate_wsm6_surface_v841_f32": ("acc_p", "inc_p", "old_p"),
+    # MPAS sea ice: F(name) = a[P_name][i], the driver arrays' addresses
+    # (and 0 for an absent ocean flux); written through, never the table
+    # (woof/hex/mpasphys/seaice_v842.py)
+    "seaice_noah": "a",
+    "seaice_from_MPAS": "a",
+    "seaice_to_MPAS": "a",
 }
 
 #: id(storage) -> (the storage, its buffer's values when read, the words): a device

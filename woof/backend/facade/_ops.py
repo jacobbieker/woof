@@ -75,10 +75,24 @@ def _wrap(values, dtype, *, fresh: bool = False) -> ndarray:
                                                   fresh=fresh))
 
 
+def _ready_storage(flat_host: np.ndarray, shape, strides=None):
+    """An array over ``flat_host``'s elements (C order) in a storage that is
+    already computed (host_storage_values), or None."""
+    from woof.backend.facade._array import Storage, host_storage_values
+    values = host_storage_values(flat_host)
+    if values is None:
+        return None
+    return ndarray(tuple(shape), flat_host.dtype, _storage=Storage(values, flat_host.dtype, fresh=True, ready=True),
+                   _strides=strides)
+
+
 def from_host(host: np.ndarray) -> ndarray:
     # (np.ascontiguousarray promotes a 0-d array to 1-d: keep the scalar shape)
     host = np.require(np.asarray(host), requirements="C")
     if host.dtype == np.float64 or host.dtype.kind in "biufc?":
+        ready = _ready_storage(host, host.shape)
+        if ready is not None:
+            return ready
         return _wrap(to_storage_values(host).reshape(values_shape(host.shape, host.dtype)), host.dtype,
                      fresh=True)
     raise TypeError(f"the mlx backend cannot hold dtype {host.dtype}")
@@ -201,6 +215,9 @@ def _fortran_from_host(host: np.ndarray) -> ndarray:
     from woof.backend.facade._array import Storage
     host = np.asfortranarray(host)
     flat = host.ravel(order="F")
+    ready = _ready_storage(flat, host.shape, host.strides)
+    if ready is not None:
+        return ready
     st = Storage(to_storage_values(flat), host.dtype, fresh=True)
     return ndarray(host.shape, host.dtype, _storage=st, _strides=host.strides)
 
