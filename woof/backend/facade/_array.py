@@ -984,23 +984,22 @@ class _Pointer:
     def copy_from_device(self, src, size, stream=None):
         from woof.backend.facade.cuda import _HOST_BLOCKS, _bytes_view, _memcpy
         size = int(size)
-        if _DEVICE_COPY and size > 0:
-            # Both sides storages: a device copy the facade orders, not a
-            # host round trip that waits for the source (wrfout snapshots).
-            # Page-locked host blocks (hostAlloc) keep the copy the host
-            # sees complete on return.
-            source = _bytes_view(_address(src), size)
-            target = _bytes_view(self.ptr, size) if source is not None else None
-            if target is not None:
-                roots = (target._st.buffer_root(), source._st.buffer_root())
-                if any(st.buffer_root() is r for _h, st in _HOST_BLOCKS.values() for r in roots):
-                    import mlx.core as mx
-                    _memcpy(self.ptr, _address(src), size)
-                    mx.eval(target._st.arr)       # the host may read the block now
-                    return
-                if roots[0] is not roots[1]:
-                    target._write(source._values())
-                    return
+        source = _bytes_view(_address(src), size) if size > 0 else None
+        target = _bytes_view(self.ptr, size) if source is not None else None
+        if target is not None:
+            roots = (target._st.buffer_root(), source._st.buffer_root())
+            if any(st.buffer_root() is r for _h, st in _HOST_BLOCKS.values() for r in roots):
+                # a page-locked host block (hostAlloc): the host may read it
+                # as soon as this returns, so the copy is complete by then
+                import mlx.core as mx
+                _memcpy(self.ptr, _address(src), size)
+                mx.eval(target._st.arr)
+                return
+            if _DEVICE_COPY and roots[0] is not roots[1]:
+                # a device copy the facade orders, not a host round trip
+                # that waits for the source (wrfout snapshots)
+                target._write(source._values())
+                return
         _memcpy(self.ptr, _address(src), size)
 
     def copy_from_host(self, mem, size, stream=None):

@@ -111,10 +111,14 @@ def test_wrfout_device_copy_snapshot(cp):
     assert np.array_equal(dst.get(), h)
 
 
-def test_a_copy_into_a_page_locked_block_is_complete_on_return(cp):
+@pytest.mark.parametrize("device", ["1", "0"])
+def test_a_copy_into_a_page_locked_block_is_complete_on_return(cp, monkeypatch, device):
     """hostAlloc memory reached through its device address: the host reads
-    it straight after the copy, so that copy still completes on return."""
+    it straight after the copy, so that copy completes on return, with the
+    device copy on or off."""
+    from woof.backend.facade import _array
     from woof.backend.facade import cuda as fcuda
+    monkeypatch.setattr(_array, "_DEVICE_COPY", device == "1")
     n = 1 << 22
     src_h = np.arange(n, dtype=np.float32)
     src = cp.asarray(src_h)
