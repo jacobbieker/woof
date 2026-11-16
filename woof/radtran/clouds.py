@@ -70,7 +70,19 @@ def _hu_prop(blocks, lam_um, reff):
         rows = b["rows"]
         r = reff[sel]
         vals = rows[:, 1][None, :] * r[:, None] ** rows[:, 2][None, :] + rows[:, 3][None, :]
-        out[sel] = np.array([np.interp(lam_um, rows[:, 0], v) for v in vals])
+        # np.interp once per distinct radius, then scattered back: a model
+        # domain's radii repeat heavily (every cloud-free layer carries the
+        # default), and identical rows give identical words.  The rows of a
+        # radius group are checked to be the same bits as the row
+        # interpolated for it (the power above is evaluated per element);
+        # if any differs, every row is interpolated as before.
+        _, first, inverse = np.unique(r, return_index=True, return_inverse=True)
+        inverse = inverse.ravel()
+        if np.array_equal(vals.view(np.uint64), vals[first][inverse].view(np.uint64)):
+            vals = vals[first]
+        else:
+            inverse = slice(None)
+        out[sel] = np.array([np.interp(lam_um, rows[:, 0], v) for v in vals])[inverse]
     return out
 
 
