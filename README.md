@@ -544,6 +544,19 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   falls from 761-1061 ms to 470-576 ms, byte-identical
   (`WOOF_METAL_DEVICE_COPY=0` restores the host round trip).
   `WOOF_METAL_GPU_TIMES` times each kernel.
+  The `woof.radtran` spectral diagnostic (`radtran_*`) is cheaper, keeping
+  the same words. `radtran_disort.cu` compiles in about 6 minutes in
+  0.55 GB, against over an hour in over 17 GB before: its helpers are kept
+  out of line on CUDA. Its workspace is interleaved across threads on CUDA,
+  and on CUDA its chunk is sized from free device memory. Together these
+  make the 16-stream solver about 9x faster on an A6000. The Hu & Stamnes cloud optics
+  are evaluated vectorized, with `np.interp`'s own multiply-add (fused or
+  not, as numpy was built). The layer optics run on host threads over
+  blocks of columns. On the Alps 3 km/1 km pair, one 550 nm call fell from
+  about 190 s to 11 s, and a three-wavelength call from about 570 s to
+  28 s. With an output every 10 minutes, the hour costs 209 s instead of
+  2,578 s; with no diagnostic it costs 61 s. Eight wavelengths in one call
+  on such a domain hold over 13 GB of host memory.
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
   tests by name, and main's full run is periodic. Every merge to `main`
