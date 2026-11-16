@@ -269,10 +269,20 @@ BASELINE_PINNED: dict[str, str] = {
     # existing unit keeps its bytes.
     "theta_m_cumulus": "580dfc42c040cb87474f33a32a15427681e92feac2c1bf7283ed9418d923f7d3",
     "smag2d_theta_m": "85e469baf5494063679403def8bc1256932ebe972cf4ebb53fd1b44bbe2b9f5a",
-    # wrf_smag_hd_w on stored tau13/tau23 faces (composes smag2d.cu, which
-    # keeps its bytes): the same tendency words (tests/test_smag2d_w_faces.py,
+    # wrf_smag_hd_w on stored defor13/defor23 faces, the stresses' density
+    # and K averages at the reader (composes smag2d.cu, which keeps its
+    # bytes): the same tendency words (tests/test_smag2d_w_faces.py, CUDA and
+    # Metal, fast and strict numerics, GPUWM_WRF_EXACT=0 and 1).
+    "smag2d_w_faces": "09a35fbd19ac813b0bbc73c6eab5bc513dc5b565de8abdb13f19787ca00b4060",
+    # wrf_smag_hd_u / wrf_smag_hd_v on stored stress coefficients (rho K,
+    # rhoavg kavg; composes smag2d.cu, which keeps its bytes): the same
+    # tendency words (tests/test_smag2d_uv_faces.py, CUDA and Metal, fast and
+    # strict numerics, GPUWM_WRF_EXACT=0 and 1).
+    "smag2d_uv_faces": "dc9828ca72bc7c7b6acb02b382c7326f33fd3f9eb16ab365e7f3e19a400dabfd",
+    # wrf_tke_rhs on stored defor13/defor23 faces (composes smag2d.cu, which
+    # keeps its bytes): the same TKE source words (tests/test_smag2d_tke_faces.py,
     # CUDA and Metal, GPUWM_WRF_EXACT=0 and 1).
-    "smag2d_w_faces": "7a318dcdb9d8322e06469cdd30e56bac5f999b128a52fa50cdf33de3d0152a34",
+    "smag2d_tke_faces": "421c718311e7724d3fd5ba733bfd3c59eca0cf828a753d284bac6e3142128f59",
     # e677dccb6: active table edits multiply binary64 values on the GPU,
     # round once to REAL, and reject non-positive crop roughness.
     "physics_params":
@@ -1195,8 +1205,14 @@ BASELINE_PINNED: dict[str, str] = {
     # radtran-opac: the body became rt_problem, and radtran_disort_modes +
     # _finish spread radiance Fourier modes over threads (same words, held
     # by tests/test_radtran_kernel_words_gpu.py on both device paths).
+    # Moved again: the solver, its helpers and its exp/cos are out of line
+    # under NVRTC (RT_OUTLINE), so the unit compiles in about a minute
+    # instead of over an hour; same words on host, CUDA and Metal.
+    # Moved again: the per-problem workspace is interleaved across the
+    # launch's threads on CUDA and the host build (rt_w), so a warp's loads
+    # coalesce; only addresses change, same words.
     "radtran_disort":
-        "9b4efb5acb2c165a38fd0c4f92870418eb34c58f7faba7ffaa6ec51f3fe23a06",
+        "7f7018c0c2bfd12a547645163a6f2ca5ce96ab8965e67b5e505850def8babd02",
     # development branch (A158): WRF 4.7.1's implicit-explicit
     # vertical advection, graded word for word against WRF's compiled
     # routines by tests/test_zadvect_implicit.py.  Moved once on the lane:

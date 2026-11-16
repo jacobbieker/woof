@@ -14,6 +14,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+import _numerics_child
 from conftest import requires_gpu
 
 NROWS = 5
@@ -29,7 +30,11 @@ def _grid(rng, nz, ny, nx, *, phb3d, moist, boundary):
     eta = np.linspace(1.0, 0.0, nz + 1, dtype=np.float32)
     dnw = np.diff(eta).astype(np.float32)
     dn = np.concatenate([[dnw[0]], 0.5 * (dnw[1:] + dnw[:-1])]).astype(np.float32)
-    fnm = np.full(nz, 0.5, np.float32); fnp = np.full(nz, 0.5, np.float32)
+    # WRF-like stretched-level weights: 0.5 weights make every vertical
+    # interpolation product exact and hide a contraction (the #475 lesson).
+    fnm = (0.5 - 0.04 * np.sin(np.arange(nz) + 0.3)).astype(np.float32)
+    fnm[0] = 0.0
+    fnp = np.where(np.arange(nz) == 0, 0.0, 1.0 - fnm).astype(np.float32)
     args = dict(
         u=f(-10, 10, nz, ny, nx + 1), v=f(-10, 10, nz, ny + 1, nx),
         w=f(-1, 1, nz + 1, ny, nx), php=f(-50, 50, nz + 1, ny, nx),
@@ -82,7 +87,7 @@ def test_multi_row_launches_match_the_per_row_words(phb3d, moist, boundary, thb3
     # per row
     ref_fx, ref_fy, ref_tend = [], [], []
     for r in range(NROWS):
-        fx = cp.empty((nz, ny, nx + 1), cp.float32); fy = cp.empty((nz, ny + 1, nx), cp.float32)
+        fx = cp.full((nz, ny, nx + 1), np.nan, cp.float32); fy = cp.full((nz, ny + 1, nx), np.nan, cp.float32)
         flux_s(flux_grid, (tpb, 1, 1), tuple(common + [fields[r], kh, thb, np.int32(full[r]),
                                                        np.int32(thb3d), fx, fy] + tail))
         tend = tend0[r].copy()
@@ -94,8 +99,9 @@ def test_multi_row_launches_match_the_per_row_words(phb3d, moist, boundary, thb3
     got_fx, got_fy, got_tend = [None] * NROWS, [None] * NROWS, [None] * NROWS
     for start in (0, 3):
         rows = list(range(start, min(start + 3, NROWS)))
-        pairs = [(cp.empty((nz, ny, nx + 1), cp.float32), cp.empty((nz, ny + 1, nx), cp.float32))
-                 for _ in rows]
+        # Poisoned faces: the multi launch must write every face it reads.
+        pairs = [(cp.full((nz, ny, nx + 1), np.nan, cp.float32),
+                  cp.full((nz, ny + 1, nx), np.nan, cp.float32)) for _ in rows]
         tends = [tend0[r].copy() for r in rows]
         table = np.zeros((8, 4), dtype=np.uint64)
         for k, r in enumerate(rows):
@@ -117,6 +123,7 @@ def test_multi_row_launches_match_the_per_row_words(phb3d, moist, boundary, thb3
         assert np.array_equal(ref_fy[r], got_fy[r]), ("fy", r)
         assert np.array_equal(ref_tend[r], got_tend[r]), ("tend", r)
         assert not np.array_equal(ref_tend[r], cp.asnumpy(tend0[r]).view(np.uint32)), r
+        assert np.all(np.isfinite(ref_tend[r].view(np.float32))), r
 
 
 def test_row_eligibility_and_chunking():
@@ -159,3 +166,13 @@ def test_dispatch_batches_the_mass_point_rows_around_the_w_row(monkeypatch):
     dy._launch_wrf_smag_scalar_rows(state, SimpleNamespace(), specs, time_t=True)
     assert calls == [("multi", [True, False, False]), ("row", "z", False)]
     assert len(zeroed) == 4
+
+
+@requires_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize(*_numerics_child.MODES)
+def test_multi_row_words_hold_under_each_numerics(numerics, exact):
+    """The battery runs strict; production runs fast (contraction allowed).
+    Each mode in its own child process."""
+    _numerics_child.run(__file__, ["test_multi_row_launches_match_the_per_row_words"],
+                        numerics, exact)

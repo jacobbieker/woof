@@ -161,10 +161,14 @@ def compute(state, cfg, km, kh, specs, *, time_t, physics_tendencies=None):
              integer(kind), integer(subtract), integer(cfg.use_theta_m)])
     deformation = tuple(a[x] for x in ("d11", "d22", "d12"))
     exempt = d.chem_mix2_exempt_slots(state, cfg)
+    # The u and v rows read the same horizontal K: their stress
+    # coefficients are stored once.
+    faces = d.launch_wrf_smag_uv_faces(state, cfg, specs[0][2], time_t=time_t)
     for var, _, diffusivity, _, _, slot, stag in specs:
         if slot not in exempt:
             d.launch_wrf_smag2d_hd(state, cfg, var, diffusivity, state._scratch[slot],
-                stagger=stag, time_t=time_t, full_theta=slot == "smag_rth", deformation=deformation)
+                stagger=stag, time_t=time_t, full_theta=slot == "smag_rth", deformation=deformation,
+                faces=faces if stag in ("x", "y") else None)
         if seed.get(slot) is None:
             d._zero_open_strips(state._scratch[slot], cfg, 1)
         else:

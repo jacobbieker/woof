@@ -10038,11 +10038,38 @@ error_flags[batch_first+thread]=errflg;
 #: and 2020-01-01 at t=6672600 s, delp(kts) = 0.0 in both).  The corrected thickness is the layer's
 #: own hydrostatic weight rho*g*dz, the formula the NOAA-GSL MYNN-EDMF uses for every level
 #: (module_bl_mynnedmf.F90:4270), so it is positive with the hydrostatic interior thicknesses.
+#: RP8: qsat_blend (mynn_shared.F90:90,93,97,98) is 0.622*e/(p-e) with no guard, so it has a pole where
+#: the saturation vapour pressure reaches the air pressure.  Below a 30 km lid that never happens; under
+#: a 50 km lid (s2s80-v1) the top levels sit at 70-90 Pa and 248 K, where liquid e is ~82 Pa: qsat goes
+#: through the pole to large negative values, and MYNN's tendencies, variances and mixing go NaN in that
+#: column (x1.40962 120 km, 2026-11-05T00 at step 51, then refused by the dycore with ~4,800 columns
+#: non-finite).  The guarded form caps e at 0.15 p and the denominator at 1e-5 Pa, which changes nothing
+#: where e < 0.15 p (under the 30 km lid it binds only at the dry top level, qv/qsat < 1e-9).
 MYNN_TEXT_CORRECTIONS = {
     "RP7": (
         ("delp(kts) = mpas_sub(psfc, mpas_div(mpas_add(mpas_mul(p(((kts) + (1))), dz(kts)), "
          "mpas_mul(p(kts), dz(((kts) + (1))))), mpas_add(dz(kts), dz(((kts) + (1))))));",
          "delp(kts) = mpas_mul(mpas_mul(rho(kts), grav), dz(kts));", 1),
+    ),
+    # RP8: the qsat_blend guards of the NOAA-GSL MYNN-EDMF (module_bl_mynnedmf.F90:7650-7662), placed in
+    # MPAS's own branches; the polynomials, branch limits and blend weight stay MPAS v8.4.2's.
+    "RP8": (
+        ("qsat_blend = mpas_div(mpas_mul(0.622f, esl), mpas_sub(p, esl));",
+         "esl = mynn_min(((float)(esl)), ((float)(mpas_mul(p, 0.15f)))); "
+         "qsat_blend = mpas_div(mpas_mul(0.622f, esl), mynn_max(((float)(mpas_sub(p, esl))), ((float)(1e-5f))));",
+         1),
+        ("qsat_blend = mpas_div(mpas_mul(0.622f, esi), mpas_sub(p, esi));",
+         "esi = mynn_min(((float)(esi)), ((float)(mpas_mul(p, 0.15f)))); "
+         "qsat_blend = mpas_div(mpas_mul(0.622f, esi), mynn_max(((float)(mpas_sub(p, esi))), ((float)(1e-5f))));",
+         1),
+        ("rslf = mpas_div(mpas_mul(0.622f, esl), mpas_sub(p, esl));",
+         "esl = mynn_min(((float)(esl)), ((float)(mpas_mul(p, 0.15f)))); "
+         "rslf = mpas_div(mpas_mul(0.622f, esl), mynn_max(((float)(mpas_sub(p, esl))), ((float)(1e-5f))));",
+         1),
+        ("rsif = mpas_div(mpas_mul(0.622f, esi), mpas_sub(p, esi));",
+         "esi = mynn_min(((float)(esi)), ((float)(mpas_mul(p, 0.15f)))); "
+         "rsif = mpas_div(mpas_mul(0.622f, esi), mynn_max(((float)(mpas_sub(p, esi))), ((float)(1e-5f))));",
+         1),
     ),
 }
 

@@ -553,12 +553,36 @@ moves.
   72 h goes from -11.39 K (RMSE 13.40) on the 55-level MPAS suite arm to
   -1.54 K (RMSE 2.32). The global 20 hPa RMSE goes from 6.36 to 3.59 K.
 - The other three cases (2026-10-31 00Z, 11-02 00Z, 11-05 00Z) stopped at
-  steps 81, 217 and 164. Each stopped with "MPAS_to_physics CUDA wind
-  reconstruction failed geometry validation: the mesh geometry differs from
-  its sealed copy", and 10-31 did so again when alone on the card. This is
-  an open defect of that route at 80 levels, and it is filed as a
-  follow-up. The WOOF-arm row is not affected: it completed all seven
-  cases.
+  steps 81, 217 and 164 with "MPAS_to_physics CUDA wind reconstruction
+  failed geometry validation: the mesh geometry differs from its sealed
+  copy". That message was wrong. The reconstruction raises one word for
+  every check it makes, and a non-finite normal velocity is one of them.
+  The refusal now names the failed check. Rerun on pb (A6000), 10-31 stops
+  at step 162 with "found a non-finite normal velocity: 1197680 edge values
+  on 80 levels ... the mesh geometry equals its sealed copy". The geometry
+  is intact; the integration blew up.
+- The blow-up is MYNN's, not the dycore's (correction RP8, 2026-11-15).
+  MPAS v8.4.2's `qsat_blend` (`mynn_shared.F90:90-98`) is
+  `0.622*e/(p-e)` with no guard. Under a 30 km lid, p - e stays far from
+  zero. Under the 50 km lid, levels 59-80 have p of 50-300 Pa and a
+  saturation vapour pressure of the same size. So p - e <= 0 at about
+  388,000 (cell, level) points every hour, and qsat there is negative.
+  Where p - e lands next to zero in one column, MYNN's variances and
+  diffusivities go NaN. In 11-05 00Z that happened in column 27644
+  (65.3N, 150E) at step 51: top-level T 248 K, p 81.5 Pa, qsat -26.4.
+  The dycore then refuses the next step with about 4,800 columns
+  non-finite. Blaming the missing CAM and Rayleigh damping was wrong,
+  because the same case fails with the damping on.
+- Correct mode now carries the NOAA-GSL MYNN-EDMF guards
+  (`module_bl_mynnedmf.F90:7650-7662`: e at most 0.15 p, p - e at least
+  1e-5). Exact mode keeps MPAS's text, and `--physics-correct-skip RP8`
+  restores it in correct mode.
+- On the default 55-level, 30 km lid the cap binds only at the top level
+  in a warm stratopause. Over the 11-05 00Z 72 h case that was 6,939
+  (cell, hour) points, with largest e/p 0.23. The air there is dry
+  (qv / capped qsat at most 1e-9). On Metal, that 72 h default forecast
+  is bitwise identical with and without RP8 in every history field.
+- The WOOF-arm row is not affected: it completed all seven cases.
 
 ## 2. Convective-to-explicit precipitation repartition
 

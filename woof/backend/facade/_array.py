@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import operator
 import os
+import threading
 import weakref
 from functools import reduce
 
@@ -230,11 +231,24 @@ class Storage:
         # Evaluating for it again waited on every launch still writing the
         # buffer: the microphysics ring copy's table key asked for 390
         # addresses per model step, each a host sync on Metal.
-        if _ADDRESSES.get(base) is None or _ADDRESSES[base]() is not self:
-            _ADDRESSES[base] = weakref.ref(self)
-            _ADDRESS_INDEX[0] = None          # the index is stale
+        current = _ADDRESSES.get(base)
+        if current is None or current() is not self:
+            with _ADDRESS_LOCK:               # one check-and-set against _forget_address
+                current = _ADDRESSES.get(base)
+                if current is None or current() is not self:
+                    _ADDRESSES[base] = weakref.ref(self)
+                    _ADDRESS_INDEX[0] = None  # the index is stale
         return base
 
+
+#: WOOF_METAL_DEVICE_COPY=0: ``MemoryPointer.copy_from_device(_async)``
+#: between two storages goes through the host (get, then set), as before
+#: 2026-11-16, instead of one device copy the facade orders.
+_DEVICE_COPY = os.environ.get("WOOF_METAL_DEVICE_COPY", "1") != "0"
+
+#: WOOF_METAL_DIRECT_OUT=0: ``get(out=)`` copies to a host array and then
+#: into ``out``, as before 2026-11-16 (two host copies instead of one).
+_DIRECT_OUT = os.environ.get("WOOF_METAL_DIRECT_OUT", "1") != "0"
 
 #: WOOF_METAL_ADDRESS_ASYNC=0: Storage.address waits for the buffer's value
 #: (mx.eval), as it did before 2026-11-15.
@@ -268,6 +282,10 @@ def _gpu_address(arr) -> int:
 
 #: GPU base address -> the storage that handed it out (Storage.address)
 _ADDRESSES: dict = {}
+
+#: Serializes a registration (Storage.address) against a removal (_forget_address), so a removal never drops a
+#: storage registered at the same base in between.
+_ADDRESS_LOCK = threading.Lock()
 
 #: _ADDRESSES as [built, sorted bases, their references]; every change to
 #: _ADDRESSES clears ``built`` (a dead entry dropped, a base registered)
@@ -304,19 +322,28 @@ def storages_holding(words) -> list:
     return list(found.values())
 
 
+def _forget_address(base: int, ref) -> None:
+    """Drop ``base``'s entry if it is still ``ref``.  THE BREAKAGE THIS PREVENTS (Milton 2024 hex moving on
+    Metal, 2026-11-16): two threads (an LTS class thread and the history writer) found the same dead entry and
+    both deleted it; the second ``del`` raised KeyError and aborted the segment.  A base registered again in
+    between (a new storage at a reused address) keeps its new entry."""
+    with _ADDRESS_LOCK:
+        if _ADDRESSES.get(base) is ref:
+            del _ADDRESSES[base]
+        _ADDRESS_INDEX[0] = None
+
+
 def storage_at(address: int):
     """(storage, byte offset) of a GPU address a storage handed out, or None."""
     from woof.backend.metal import ext
     for base, ref in list(_ADDRESSES.items()):
         st = ref()
         if st is None:
-            del _ADDRESSES[base]
-            _ADDRESS_INDEX[0] = None
+            _forget_address(base, ref)
             continue
         if base <= address < base + max(st.nbytes, 1):
             if int(ext.load().gpu_address(st.arr)) != base:   # rebound since
-                del _ADDRESSES[base]
-                _ADDRESS_INDEX[0] = None
+                _forget_address(base, ref)
                 continue
             return st, address - base
     return None
@@ -523,6 +550,15 @@ class ndarray:
         mx = _mx()
         values = self._values()
         mx.eval(values)
+        if out is not None and _DIRECT_OUT and self.dtype != np.complex128 \
+                and isinstance(out, np.ndarray) and out.shape == self.shape:
+            # Unified memory: the evaluated buffer is host memory, read in
+            # place (a view, no copy) and copied once, into ``out``.
+            words = np.asarray(values)
+            if self.dtype == np.float64:
+                words = words.view(np.float64)
+            out[...] = words.reshape(self.shape)
+            return out
         host = np.array(values, copy=True)
         if self.dtype == np.float64:
             host = host.view(np.float64)
@@ -946,7 +982,24 @@ class _Pointer:
 
     # CuPy's MemoryPointer copies, by raw address (cupy.cuda.runtime.memcpy)
     def copy_from_device(self, src, size, stream=None):
-        from woof.backend.facade.cuda import _memcpy
+        from woof.backend.facade.cuda import _HOST_BLOCKS, _bytes_view, _memcpy
+        size = int(size)
+        source = _bytes_view(_address(src), size) if size > 0 else None
+        target = _bytes_view(self.ptr, size) if source is not None else None
+        if target is not None:
+            roots = (target._st.buffer_root(), source._st.buffer_root())
+            if any(st.buffer_root() is r for _h, st in _HOST_BLOCKS.values() for r in roots):
+                # a page-locked host block (hostAlloc): the host may read it
+                # as soon as this returns, so the copy is complete by then
+                import mlx.core as mx
+                _memcpy(self.ptr, _address(src), size)
+                mx.eval(target._st.arr)
+                return
+            if _DEVICE_COPY and roots[0] is not roots[1]:
+                # a device copy the facade orders, not a host round trip
+                # that waits for the source (wrfout snapshots)
+                target._write(source._values())
+                return
         _memcpy(self.ptr, _address(src), size)
 
     def copy_from_host(self, mem, size, stream=None):

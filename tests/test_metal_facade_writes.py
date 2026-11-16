@@ -95,3 +95,25 @@ def test_fill_keeps_the_buffer_and_words(cp):
     assert (host[:, :, :2].view(np.uint32)[[0, 3]] == 0x80000000).all()
     assert np.isnan(host[1:3]).all()
     assert (host[[0, 3], :, 2:] == 0).all()
+
+
+def test_a_dead_address_entry_is_forgotten_once_and_a_reregistered_one_kept(monkeypatch):
+    """Two threads that both find the same dead entry must not raise (the second ``del`` did: KeyError aborted a
+    Metal hex moving segment), and a base registered again in between keeps its new storage."""
+    import weakref
+    from woof.backend.facade import _array
+
+    class Dead:
+        pass
+    monkeypatch.setattr(_array, "_ADDRESSES", {})
+    gone = Dead()
+    ref = weakref.ref(gone)
+    del gone
+    _array._ADDRESSES[4096] = ref
+    _array._forget_address(4096, ref)
+    _array._forget_address(4096, ref)      # the second thread: nothing left to drop
+    assert 4096 not in _array._ADDRESSES
+    live = Dead()
+    _array._ADDRESSES[4096] = weakref.ref(live)
+    _array._forget_address(4096, ref)      # a stale thread's view of the old entry
+    assert _array._ADDRESSES[4096]() is live

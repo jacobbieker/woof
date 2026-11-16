@@ -338,6 +338,7 @@
         "corrections": [
           "RP1",
           "RP7",
+          "RP8",
           "WB3"
         ],
         "correct_skip": [],
@@ -346,6 +347,7 @@
           "applied": [
             "RP1",
             "RP7",
+            "RP8",
             "WB3"
           ],
           "skipped": [],
@@ -482,6 +484,7 @@
         "corrections": [
           "RP1",
           "RP7",
+          "RP8",
           "WB3"
         ],
         "correct_skip": [],
@@ -490,6 +493,7 @@
           "applied": [
             "RP1",
             "RP7",
+            "RP8",
             "WB3"
           ],
           "skipped": [],
