@@ -1752,11 +1752,11 @@ def _smag_uv_faces_enabled() -> bool:
 def launch_wrf_smag_uv_faces(state: DomainState, cfg: RunConfig, xk, *,
                              time_t: bool):
     """Store the coefficients of WRF's horizontal momentum stresses once
-    (kernels/smag2d_uv_faces.cu wrf_smag_uv_coef_faces): ``-rho K`` at the
-    mass points (tau11 and tau22) and ``-rhoavg kavg`` at the corners
+    (kernels/smag2d_uv_faces.cu wrf_smag_uv_coef_faces): ``rho K`` at the
+    mass points (tau11 and tau22) and ``rhoavg kavg`` at the corners
     (tau12), from ``xk`` (the horizontal K).  Returns ``(cm, c12)`` for
-    :func:`launch_wrf_smag2d_hd`'s u and v rows, which multiply them by the
-    deformation where ``wrf_smag_hd_u`` / ``wrf_smag_hd_v`` recomputed each
+    :func:`launch_wrf_smag2d_hd`'s u and v rows, which form each stress as
+    ``-coefficient * deformation`` where ``wrf_smag_hd_u`` / ``wrf_smag_hd_v`` recomputed each
     coefficient (a density divide and, for tau12, four-point averages) at
     up to ten points; ``None`` when ``WOOF_SMAG_UV_FACES=0``.  The stress
     product itself stays at the reader so default-numerics contraction

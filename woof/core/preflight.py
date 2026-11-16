@@ -7892,8 +7892,8 @@ def scratch_slot_registry(cfg: RunConfig, *,
             slots[f"smag_fx_{extra}"] = xs
             slots[f"smag_fy_{extra}"] = ys
         # The u/v stress divergences read the stress coefficients stored
-        # once per step (dycore.launch_wrf_smag_uv_faces): -rho K at the
-        # mass points, -rhoavg kavg at the corners.
+        # once per step (dycore.launch_wrf_smag_uv_faces): rho K at the
+        # mass points, rhoavg kavg at the corners.
         slots.update(smag_cm=m, smag_c12=(nz, ny + 1, nx + 1))
     if cfg.diff_6th_opt:
         slots.update(diff6_z=fl, diff6_m=m)
