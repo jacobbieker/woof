@@ -36,3 +36,11 @@ On the WOOF column route (R1), `woof hex forecast --physics sf_lake_physics=1`
 runs the same CLM lake kernel. It reads the lake mask and depth from
 `--surface-statics` (`woof hex surface-statics`). Every lake call has been
 replayed bitwise against WRF's kernel on CUDA and Metal.
+
+## Lake extent
+
+`--lakes` does not change which cells are lakes. Where the WPS 30-arc-second
+lake mask is wrong (in the Alps it marks glacier and rock as lakes),
+`[static.highres] fields = "lakes"` takes the lake extent from the
+CGLC-MODIS-LCZ 100 m land cover (opt-in,
+[high-resolution-static-geography.md](high-resolution-static-geography.md)).
