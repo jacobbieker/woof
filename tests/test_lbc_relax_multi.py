@@ -18,6 +18,7 @@ import dataclasses
 import numpy as np
 import pytest
 
+import _numerics_child
 from conftest import requires_gpu
 
 
@@ -356,3 +357,14 @@ def test_overlapping_device_targets_fall_back_to_the_per_row_path():
     rows[1] = lbc._RelaxRow("theta", device.fields["theta"], target=apart,
                             apply_relax=True)
     assert lbc._relaxation_multi_rows(state, rows) is True
+
+
+@requires_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize(*_numerics_child.MODES)
+def test_identity_holds_under_each_numerics(numerics, exact):
+    """state_relaxation_multi against the per-row relaxation path.
+    The battery runs strict; production runs fast, where NVRTC drops
+    --fmad=false and Metal keeps fp contract(fast).  Each mode in its own
+    child process (tests/_numerics_child.py)."""
+    _numerics_child.run(__file__, ['test_stage_rows_match_the_per_row_path', 'test_every_row_form_matches_the_per_row_path', 'test_more_rows_than_one_table_take_further_launches'], numerics, exact)

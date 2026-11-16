@@ -6,6 +6,8 @@ import pytest
 
 cp = pytest.importorskip("cupy")
 
+import _numerics_child
+
 
 def _slices_zero(a, x_lo, x_hi, y_lo, y_hi):
     if x_lo:
@@ -58,3 +60,13 @@ def test_a_buffer_the_kernel_does_not_cover_is_left_to_the_caller():
     assert not copy_frame(a, cp.ones((4, 6, 7), dtype=cp.float32), 1, 1, 1, 1)
     assert not zero_frame(cp.ones((5,), dtype=cp.float32), 1, 1, 1, 1)
     assert bool((a == 1).all())
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize(*_numerics_child.MODES)
+def test_identity_holds_under_each_numerics(numerics, exact):
+    """zero_frame / copy_frame against the slice assignments (stores only).
+    The battery runs strict; production runs fast.  Each mode in its own
+    child process (tests/_numerics_child.py)."""
+    _numerics_child.run(__file__, ["test_zero_frame_matches_the_slice_assignments",
+                                   "test_copy_frame_matches_the_held_ring_copy"], numerics, exact)
