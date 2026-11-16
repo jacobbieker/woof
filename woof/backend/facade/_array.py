@@ -241,6 +241,11 @@ class Storage:
         return base
 
 
+#: WOOF_METAL_DEVICE_COPY=0: ``MemoryPointer.copy_from_device(_async)``
+#: between two storages goes through the host (get, then set), as before
+#: 2026-11-16, instead of one device copy the facade orders.
+_DEVICE_COPY = os.environ.get("WOOF_METAL_DEVICE_COPY", "1") != "0"
+
 #: WOOF_METAL_DIRECT_OUT=0: ``get(out=)`` copies to a host array and then
 #: into ``out``, as before 2026-11-16 (two host copies instead of one).
 _DIRECT_OUT = os.environ.get("WOOF_METAL_DIRECT_OUT", "1") != "0"
@@ -977,7 +982,24 @@ class _Pointer:
 
     # CuPy's MemoryPointer copies, by raw address (cupy.cuda.runtime.memcpy)
     def copy_from_device(self, src, size, stream=None):
-        from woof.backend.facade.cuda import _memcpy
+        from woof.backend.facade.cuda import _HOST_BLOCKS, _bytes_view, _memcpy
+        size = int(size)
+        source = _bytes_view(_address(src), size) if size > 0 else None
+        target = _bytes_view(self.ptr, size) if source is not None else None
+        if target is not None:
+            roots = (target._st.buffer_root(), source._st.buffer_root())
+            if any(st.buffer_root() is r for _h, st in _HOST_BLOCKS.values() for r in roots):
+                # a page-locked host block (hostAlloc): the host may read it
+                # as soon as this returns, so the copy is complete by then
+                import mlx.core as mx
+                _memcpy(self.ptr, _address(src), size)
+                mx.eval(target._st.arr)
+                return
+            if _DEVICE_COPY and roots[0] is not roots[1]:
+                # a device copy the facade orders, not a host round trip
+                # that waits for the source (wrfout snapshots)
+                target._write(source._values())
+                return
         _memcpy(self.ptr, _address(src), size)
 
     def copy_from_host(self, mem, size, stream=None):
