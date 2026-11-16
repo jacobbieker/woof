@@ -75,6 +75,52 @@ refused because those initializers do not supply the required statistics.
 `topo_wind` with BEP or BEP+BEM is refused because
 that YSU arm does not contain the surface momentum term it would scale.
 
+## `topo_wind = 1` on hex meshes: measured, not recommended (2026-11-16)
+
+The hex generic column seam accepts `topo_wind = 1` with a `VAR_SSO`
+surface-statics file. On the 120 km global mesh it makes the 10 m wind
+worse, and it can make the run unstable. Do not use it there.
+
+**The measurement.**
+
+- Setup: four 72 h `global-120km --physics-row arwen` cases, 2026-10-28 to
+  2026-11-02. Both arms ran `gwd_opt = 0`, because the WOOF arm cannot yet
+  read `VAR_SSO` and the YSU drag statistics from one file.
+- Scoring: `woof.hex.station_wind_referee` against WIS2 land SYNOP,
+  globally, about 72,000 pairs per case.
+- Result: `topo_wind = 1` raises the 10 m wind bias by +0.52 m/s at 24 h
+  (95 % case-paired interval +0.43 to +0.60) and the RMSE by +0.87 m/s.
+  At 48 h the bias rises by +0.58 m/s and the RMSE by +1.00 m/s.
+- The baseline bias is +1.48 m/s at 24 h, so the option takes it to about
+  +2.0 m/s.
+- Two of the four runs stopped on the dynamical core's validation flag, at
+  34 h and 54 h. The two arms without `topo_wind` completed all four cases.
+
+For comparison, the default YSU orographic drag (`gwd_opt = 1`) lowers the
+bias by 0.23 m/s at 24 h and 0.31 m/s at 48 h.
+
+**Why.** WRF forms `LAP_HGT` from the four grid neighbours, in metres, and
+has no grid-spacing scale (`start_em.F:1558`). It then sets `CTOPO = 0` and
+`CTOPO2 = 0` where `LAP_HGT < -30` m. In YSU, `CTOPO` scales the surface
+momentum friction (`bl_ysu.F90:1308-1316`), so zero means a frictionless
+surface. The thresholds suit grids of a few kilometres. At 120 km on
+x1.40962:
+
+- 40 % of land cells fall to `CTOPO = 0` as hex forms the Laplacian.
+- Their 72 h 10 m wind is 3.0 m/s faster than without the option.
+- Where `CTOPO > 1` the wind slows by 0.4 m/s, as intended.
+
+**A known defect in hex's Laplacian.** The seam lays the columns out as one
+row (ny = 1). WRF's kernel therefore takes "neighbours" i-1 and i+1 in cell
+index order, which are not neighbouring cells on the mesh. This is a hex
+port defect.
+
+The mesh's own neighbours (`cellsOnCell`) would not rescue 120 km: they
+would still put 32 % of land cells at `CTOPO = 0`. A mesh-neighbour
+Laplacian is still the correct form for kilometre-scale regional hex
+meshes. Until hex has one, `topo_wind = 1` on hex does not reproduce WRF's
+curvature term.
+
 The reproducible column authority is
 `tools/terrain_drag_wrf471_oracle/build.sh`; its WRF sources and fixture
 files are pinned by SHA-256. The comparison gates are
