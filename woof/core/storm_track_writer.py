@@ -130,6 +130,7 @@ from __future__ import annotations
 
 import datetime as dt
 import math
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -450,6 +451,21 @@ def build_track_config(table, source: str) -> TrackConfig:
 # ---------------------------------------------------------------------------
 # The quantities a row carries
 # ---------------------------------------------------------------------------
+
+def missing_tc_bridge() -> str | None:
+    """Why the TC bridge library cannot be found, or None when it can.
+
+    The surface block (central pressure, peak wind, field fix) is computed
+    by :func:`woof.tc.field_products.diagnose`, which loads that library.
+    Never raises: the answer only decides whether to warn.
+    """
+    try:
+        from woof.tc.mapped_vortex import library_path
+        library_path()
+    except Exception as error:                           # noqa: BLE001
+        return str(error) or type(error).__name__
+    return None
+
 
 def latlon_from_grid(grid, ci: float, cj: float) -> tuple[float, float]:
     """0-based cell index on ``grid`` -> (lat, lon) in decimal degrees.
@@ -836,6 +852,20 @@ class TrackWriter:
                               path=path if path.is_absolute() else root / path)
         self.stream.open()
         self.termination = None
+        #: Why the surface block cannot be computed on this host, or None.
+        #: Its rows read the TC bridge library, and without it every row is
+        #: skipped; the closing receipt counts the skips, but a run that
+        #: writes only a header for 24 hours should say so when it starts.
+        self.bridge_missing = None
+        if self.surface and not self.position_only:
+            self.bridge_missing = missing_tc_bridge()
+            if self.bridge_missing:
+                try:
+                    print(f"woof: warning: [relocation.track] {self.stream.path.name}: "
+                          f"{self.bridge_missing}; rows that need surface diagnosis will be "
+                          "skipped and counted on the run receipt", file=sys.stderr)
+                except (OSError, ValueError):
+                    pass                 # a closed stderr must not stop the forecast
 
     def valid_time(self, t: float):
         """Model seconds since the run's start -> the row's clock."""
