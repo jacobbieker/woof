@@ -350,7 +350,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   - surface inputs on the generic column seam: CLM lake, SLUCM urban on
     per-cell fractions, WUDAPT LCZ classes, Noah and RUC mosaic, Pleim-Xiu
     and the slab with their soil inits, irrigation and `topo_wind = 1`
-    ([docs/ruc-mosaic-and-clm-lake.md](docs/ruc-mosaic-and-clm-lake.md));
+    ([docs/ruc-mosaic-and-clm-lake.md](docs/ruc-mosaic-and-clm-lake.md)).
+    `topo_wind = 1` is not recommended on the 120 km globe: against WIS2
+    stations it raises the 10 m wind bias by 0.5 m/s. Its terrain
+    Laplacian on hex uses cell-index neighbours, an open defect
+    ([TERRAIN-DRAG.md](docs/public/TERRAIN-DRAG.md));
   - CCPP TKE-EDMF on the column seam;
   - diagnostics: `nwp_diagnostics` maxima, `p_lev`/`z_lev` levels, `tslist`
     station series, `prec_acc_dt` windows and `acc_phy_tend`, AFWA
