@@ -587,6 +587,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   starting lake temperature falls from 4.5 K (warm) to 2.7 K (mostly cold),
   but ERA5 is worse at Constance and Maggiore
   ([docs/lake-state-initialization.md](docs/lake-state-initialization.md)).
+  `woof go --lakes clm` turns on WRF's CLM lake model with WPS bathymetry and
+  this initial state on every domain in one opt-in; `--lakes ic` sets only the
+  initial state ([docs/lakes.md](docs/lakes.md)).
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
   tests by name, and main's full run is periodic. Every merge to `main`
