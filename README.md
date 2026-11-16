@@ -508,7 +508,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   and its back substitution, damper, phi'' update and p''/alpha''
   diagnosis in one top-down pass (byte-identical in fast and strict
   numerics on CUDA and Metal): 725 -> 655 us per launch at 49x228x276 and
-  367 -> 329 us at 49x150x186 on an A6000. Hex: CUDA
+  367 -> 329 us at 49x150x186 on an A6000. The specified/nested frame's
+  phi'', w'' and p'' update launches over the ring's columns with level
+  lanes instead of one thread per column of the domain
+  (`advance_frame_phi_w_ring`, byte-identical in fast and strict
+  numerics): 108 -> 25 us per substep at 49x150x186 and 116 -> 33 us at a
+  nested 49x228x276 on an A6000. Hex: CUDA
   subcycle graphs stay on under the adaptive time step, one graph per
   repeated step length. On a 4,565-cell variable-resolution mesh, a
   byte-identical adaptive run takes 0.47-0.64x the eager adaptive time and

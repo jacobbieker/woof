@@ -2601,7 +2601,7 @@
    },
    {
     "file": "woof/core/kernels/acoustic.cu",
-    "sha256": "02d25ba401a374cc4579dc1e5bccf36afd86e828c789135fe573357d4bb4146f"
+    "sha256": "4d9d324788e875c15524219bed9a24ec17579cb8b0219a0618b7deecc9128591"
    },
    {
     "file": "woof/core/kernels/advection.cu",
@@ -10349,15 +10349,15 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "7e1167088433ee5bea0ffe8b7678185671ad7bdbea8a73ab69e130cbc2c26a13",
+    "sha256": "b8ed699cdb8e5095c68ee25d930c1a3c87d41839ee712764d91ab677a439f6b9",
     "sites": {
-     "100": 190
+     "100": 196
     }
    },
    "native_differences": {
-    "sha256": "19d84b2c9e5280f08a28e36fe5ae26de501ea24609c436351c88ade3a2fd2ee6",
+    "sha256": "6fe2485d1921f71f2e27a279ea6b5c6bb0204837a7fbd0972e23544bab9e392a",
     "sites": {
-     "100": 61
+     "100": 68
     }
    },
    "native_errors": {},
@@ -10377,7 +10377,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "e3a2b71e2eb58aa07b3e1acf200cd22cc595d15fcff77477e291af8a3c752fb8"
+   "source_sha256": "49b42f2600ac7d45783bca1348c4f552716c611cb318c5eabc83a2e81f0e8790"
   },
   "kernels:advection": {
    "assessment": "static_diagnostic_only",
@@ -17819,15 +17819,15 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "d062a37ada4f51bdb64b7d78c40cc4c25545e58e3b4fb322a3b4ed65657c6785",
+    "sha256": "2449f27334b170171ce212e26c30c1f264585f505c59ff21b6b36afbb102df27",
     "sites": {
-     "100": 307
+     "100": 313
     }
    },
    "native_differences": {
-    "sha256": "d88f070b6c4c23433c3ede0c03ece4a725f8b2166ff636fe8de3e69d7b1ce218",
+    "sha256": "6c2a111df7da6d3849cdd71682963dfdf09454a415690ec4f88ba485eef29639",
     "sites": {
-     "100": 97
+     "100": 104
     }
    },
    "native_errors": {},
@@ -17847,7 +17847,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "8046ec419ea1dfe864c3f6153ad8a882782f116392b1f798154b03b726934975"
+   "source_sha256": "44fb2052e33feba892d3bad9b2e0efad4b39615d0c683af0eccd471c0806a348"
   },
   "kernels:nextgen_inundation": {
    "assessment": "static_diagnostic_only",
