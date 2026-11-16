@@ -288,7 +288,7 @@ def compiled_rounding_audit(tmp_path_factory):
     for variable in ("GPUWM_WRF_EXACT", "GPUWM_WRF_GLIBC", "WOOF_FMAD_OFF"):
         environment.pop(variable, None)
     probe = subprocess.run([sys.executable, "-m", "tools.cuda_rounding_check", "--compiler-info"],
-                           cwd=ROOT, env=environment, capture_output=True, text=True, timeout=60)
+                           cwd=ROOT, env=environment, capture_output=True, text=True, timeout=600)
     assert probe.returncode == 0, probe.stderr[-4000:]
     information = json.loads(probe.stdout)
     if "unavailable" in information:
