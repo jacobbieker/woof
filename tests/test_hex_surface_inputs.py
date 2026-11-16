@@ -127,6 +127,20 @@ def test_bind_reads_the_sidecar_and_refuses_by_name(tmp_path):
         si.bind(None, path, latitude_rad=lat, longitude_rad=lon)
 
 
+def test_a_sidecar_from_a_single_precision_static_binds_to_the_double_precision_grid(tmp_path):
+    # NCAR's x1.40962 static stores centres as float32, the run's grid as float64.
+    lat = np.radians([40.0, 41.0, 89.9]) + 1.0e-8
+    lon = np.radians([-80.0, 120.0, 179.9]) + 1.0e-8
+    path = _sidecar(tmp_path / "m.surface_statics.nc",
+                    lat.astype(np.float32).astype(np.float64), lon.astype(np.float32).astype(np.float64))
+    assert np.abs(lat.astype(np.float32) - lat).max() > si.CELL_CENTRE_TOLERANCE_RAD
+    inputs, _ = si.bind(_lake_physics(), path, latitude_rad=lat, longitude_rad=lon)
+    assert sorted(inputs) == ["lake_depth", "lake_depth_flag", "lake_mask_flag", "lakemask"]
+    # A neighbour cell is metres-to-kilometres away, never inside a float32 ulp.
+    assert not si.same_cells(lat, lon, lat + 1.0e-5, lon)
+    assert not si.same_cells(lat, lon, lat, lon + 2.0e-6)
+
+
 def test_the_statics_matcher_serves_a_superset_reading_only_the_named_fields():
     static = {"file": "static", "variables": {"VAR": "var2d", "CON": "con", "OA1": "oa1"}}
     gsl = {"file": "ugwp", "variables": {"VAR": "var", "OL1": "ol1"}}
