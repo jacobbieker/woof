@@ -1205,8 +1205,11 @@ BASELINE_PINNED: dict[str, str] = {
     # radtran-opac: the body became rt_problem, and radtran_disort_modes +
     # _finish spread radiance Fourier modes over threads (same words, held
     # by tests/test_radtran_kernel_words_gpu.py on both device paths).
+    # Moved again: the solver, its helpers and its exp/cos are out of line
+    # under NVRTC (RT_OUTLINE), so the unit compiles in about a minute
+    # instead of over an hour; same words on host, CUDA and Metal.
     "radtran_disort":
-        "9b4efb5acb2c165a38fd0c4f92870418eb34c58f7faba7ffaa6ec51f3fe23a06",
+        "41b2e53fb43f3f34bb7ec7e049d2733d5ed7bc3292c2084a94ee77c78acdacc0",
     # development branch (A158): WRF 4.7.1's implicit-explicit
     # vertical advection, graded word for word against WRF's compiled
     # routines by tests/test_zadvect_implicit.py.  Moved once on the lane:
