@@ -148,6 +148,7 @@ SEVERE_OPTION_PRODUCTS = (
     ("hailcast_runmax", "hail_max_hailcast_run"),
     ("hail_maxk1", "hail_max_surface"),
     ("hail_max2d", "hail_max_column"),
+    ("refdm10c_max", "var:wrf_refdm10c_max"),
     ("ic_flashcount", "var:wrf_ic_flashcount"),
     ("cg_flashcount", "var:wrf_cg_flashcount"),
     ("ic_flashrate", "var:wrf_ic_flashrate"),

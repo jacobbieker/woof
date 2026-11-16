@@ -303,6 +303,16 @@ def inventory(root: Path) -> dict:
                                                       for x in constructors)}}
 
 
+#: Kernel files the runtime compiles on their own routes, with their own
+#: headers, defines and options. The generic loader's composition of these
+#: files does not compile; composed_units audits what each route compiles.
+DEDICATED_ROUTES = frozenset({"acm2pbl", "eeps", "etanew", "gbmpbl", "nextgen_cfe",
+                              "nextgen_reservoirs", "snow_papers", "vortex_init"})
+#: EEPS's column depth is a compile-time define (woof/core/eeps_pbl.py). The
+#: audit compiles WRF's default 45 staggered levels, i.e. 44 mass levels.
+EEPS_AUDIT_NZ = 44
+
+
 def source_units(root: Path, *, captures: Path | None = None) -> tuple[list[Unit], dict]:
     """Existing exact-source factories, resolved literals and runtime captures.
 
@@ -321,7 +331,7 @@ def source_units(root: Path, *, captures: Path | None = None) -> tuple[list[Unit
                  "rrtmg_lw_taugb06_09", "rrtmg_lw_taugb13_16"}
     direct = {"rrtmg_legacy_prep", "rrtmg_legacy_adapter", "rrtmg_mcica_wrf", "ruc_spp"}
     stock = [unit for unit in stock
-             if unit.key not in {"kernels:" + name for name in fragments | direct}]
+             if unit.key not in {"kernels:" + name for name in fragments | direct | DEDICATED_ROUTES}]
     source_inventory = inventory(root)
     seen = {(unit.source, unit.options) for unit in stock}
     for record in source_inventory["compile_sites"]:
@@ -423,6 +433,73 @@ def composed_units(root: Path) -> list[Unit]:
     ruc = module("ruc_spp")
     units.append(Unit("direct:ruc_spp", (kdir / "ruc_spp.cu").read_text(encoding="utf-8"),
                       tuple(ruc.MODULE_OPTIONS)))
+    units.extend(dedicated_route_units(root))
+    return units
+
+
+def dedicated_route_units(root: Path) -> list[Unit]:
+    """The DEDICATED_ROUTES kernels as their own loaders compile them.
+
+    Each route passes its options through woof.numerics.effective_options
+    (woof.nvrtc_ptx_cache.compile_using_nvrtc), which drops --fmad=false in
+    the default fast mode, so the audit applies it too.
+    """
+    root = Path(root).resolve()
+
+    def module(name):
+        value = importlib.import_module("woof." + name)
+        if not Path(value.__file__).resolve().is_relative_to(root):
+            raise RuntimeError(f"source factory {name} was imported outside the checked tree")
+        return value
+
+    from woof.numerics import effective_options, is_strict
+    from woof import wrf_exact
+    from woof.core import kernels as K
+    kdir = root / "woof" / "core" / "kernels"
+    strict = is_strict()
+    ieee = ("--fmad=false", "--prec-div=true", "--prec-sqrt=true") if strict else ()
+
+    def land(options):
+        # woof/core/ieee_module.py compile_module, through compile_using_nvrtc.
+        options = tuple(options)
+        return effective_options(wrf_exact.effective_options(options) if wrf_exact.ENABLED else options)
+
+    acm2 = module("core.acm2pbl")
+    etanew = module("core.etanew")
+    gbm = module("core.gbmpbl")
+    cfe = module("hydro.cfe")
+    reservoirs = module("hydro.reservoirs")
+    eeps_options = K.module_options("eeps")
+    if wrf_exact.ENABLED:
+        eeps_options = wrf_exact.effective_options(eeps_options)
+    units = [
+        # compile_no_ftz (woof/core/kernels/__init__.py) fixes these options.
+        Unit("composed:acm2pbl", acm2.module_source(),
+             effective_options(("-std=c++17", "--fmad=false", "--ftz=false"))),
+        Unit("composed:etanew", etanew.module_source(), effective_options(etanew.module_options())),
+        Unit("composed:gbmpbl", gbm.compile_source(cooperative=True),
+             effective_options(gbm.MODULE_OPTIONS)),
+        # eeps_pbl._module -> load_module_int_defines -> compile_noftz_module.
+        Unit(f"composed:eeps[EEPS_NZ={EEPS_AUDIT_NZ}]",
+             K.module_source_int_defines("eeps", (("EEPS_NZ", EEPS_AUDIT_NZ),), kernel_dir=kdir),
+             effective_options(eeps_options)),
+        # cfe._compile_cfe(strict).
+        Unit("composed:nextgen_cfe", cfe._cfe_source()[1],
+             effective_options(("-std=c++17", "--ftz=false") + ieee)),
+        # reservoirs.compile_unit(strict).
+        Unit("composed:nextgen_reservoirs", reservoirs.kernel_source(strict),
+             land(("--std=c++17", "--ftz=false") + ieee)),
+        # snow_papers._module, through noahmp_kernel_sources._compile_loaded_module.
+        Unit("composed:snow_papers", (kdir / "snow_papers.cu").read_text(),
+             land(("-std=c++17", "--ftz=false"))),
+        # woof/tc/vortex.py _module: a RawModule, which appends -ftz=true.
+        Unit("composed:vortex_init", (kdir / "vortex_init.cu").read_text(),
+             ("--std=c++17", "-ftz=true")),
+    ]
+    if not strict:
+        # The scalar fallback of the fast cooperative source (gbmpbl.py:209).
+        units.append(Unit("composed:gbmpbl[paired]", gbm.compile_source(cooperative=False),
+                          effective_options(gbm.MODULE_OPTIONS)))
     return units
 
 
@@ -444,11 +521,20 @@ def elementwise_operation_unit(key, kernel, options=()) -> Unit:
             parameters.append(ctype + "* output_" + name)
             setup.append(ctype + " " + name + ";")
             stores.append("output_" + name + "[i] = " + name + ";")
-    source = ("typedef float T;\n" + kernel.preamble
+    # T is the probed floating type. Other type placeholders (CuPy binds them
+    # from the arguments' dtypes) are index arrays here, so probe them as int.
+    placeholders = sorted({parameter.ctype for parameter in kernel.in_params + kernel.out_params
+                           if parameter.dtype is None and parameter.ctype != "T"})
+    # CuPy closes the operation with ';', so an expression without one compiles.
+    operation = kernel.operation
+    if not operation.rstrip().endswith((";", "}")):
+        operation += ";"
+    source = ("typedef float T;\n" + "".join(f"typedef int {name};\n" for name in placeholders)
+              + kernel.preamble
               + '\nextern "C" __global__ void operation_probe('
               + ", ".join(parameters) + ") {\n"
               + "const unsigned long long i = (unsigned long long)blockIdx.x * blockDim.x + threadIdx.x;\n"
-              + "\n".join(setup) + "\n" + kernel.operation + "\n" + "\n".join(stores) + "\n}\n")
+              + "\n".join(setup) + "\n" + operation + "\n" + "\n".join(stores) + "\n}\n")
     return Unit("operation:" + key, source, tuple(options) + ("-std=c++17", "-ftz=true"))
 
 

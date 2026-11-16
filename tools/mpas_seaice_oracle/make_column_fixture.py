@@ -1,7 +1,7 @@
 """Run the built MPAS-Seaice column-package oracle on every case and write the fixture.
 
     pixi run -e default python tools/mpas_seaice_oracle/make_column_fixture.py BUILD_DIR [--out DIR]
-        [--cases init|therm|itd]
+        [--cases init|therm|itd|ridge]
 
 BUILD_DIR holds ``run_column_r8`` and ``run_init_thermo_r8`` from build.sh.
 Writes into ``tests/data/oracles/mpas_seaice_column`` by default:
@@ -12,7 +12,8 @@ Writes into ``tests/data/oracles/mpas_seaice_column`` by default:
 input-stream digest). ``--cases therm`` runs the vertical thermodynamics'
 cases (``VT_CASES``) into ``tests/data/oracles/mpas_seaice_column_therm``
 instead, without the profiles; ``--cases itd`` the ITD thermodynamics'
-(``ITD_CASES``) into ``tests/data/oracles/mpas_seaice_column_itd``.
+(``ITD_CASES``) into ``tests/data/oracles/mpas_seaice_column_itd``; ``--cases ridge``
+the ridging's (``RIDGE_CASES``) into ``tests/data/oracles/mpas_seaice_column_ridge``.
 """
 from __future__ import annotations
 
@@ -34,18 +35,20 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("build_dir", type=Path)
     parser.add_argument("--out", type=Path, default=None)
-    parser.add_argument("--cases", choices=("init", "therm", "itd"), default="init")
+    parser.add_argument("--cases", choices=("init", "therm", "itd", "ridge"), default="init")
     args = parser.parse_args()
     rows, fixture_dir = {"init": (co.CASES, co.FIXTURE_DIR), "therm": (co.VT_CASES, co.VT_FIXTURE_DIR),
-                         "itd": (co.ITD_CASES, co.ITD_FIXTURE_DIR)}[args.cases]
+                         "itd": (co.ITD_CASES, co.ITD_FIXTURE_DIR),
+                         "ridge": (co.RIDGE_CASES, co.RIDGE_FIXTURE_DIR)}[args.cases]
     args.out = args.out or fixture_dir
     args.out.mkdir(parents=True, exist_ok=True)
     arrays: dict[str, np.ndarray] = {}
     logs, digests = {}, []
     for case in co.cases("r8", rows):
         outputs, log = co.run_oracle(args.build_dir, case)
-        for key, value in co.changed_fields(case, outputs).items():
-            arrays[f"{case['name']}/{key}"] = value
+        if outputs is not None:         # None: v8.4.2 died (log["crash"])
+            for key, value in co.changed_fields(case, outputs).items():
+                arrays[f"{case['name']}/{key}"] = value
         logs[case["name"]] = log
         digests.append(f"{co.input_digest(case)}  {case['name']}/r8")
     np.savez_compressed(args.out / "oracle-r8.npz", **arrays)

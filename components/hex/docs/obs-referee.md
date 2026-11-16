@@ -172,9 +172,9 @@ A history stream produced before this publication is refused by the model
 bundle producer by field name; re-run the forecast rather than repacking
 around the hole.
 
-## Profile and cell-mean QPE referees (2026-11)
+## Profile, station-wind and cell-mean QPE referees (2026-11)
 
-Two small referees score claims the surface battery cannot see. Both read
+Three small referees score claims the surface battery cannot see. Both read
 MPAS-layout history (`*history.*.nc`, from woof hex or native MPAS-A), write
 one JSON record per case and arm, and compare two arms with the same
 case-paired block bootstrap: whole cases are resampled with a fixed seed, so
@@ -204,6 +204,26 @@ exploratory.
   - This is the secondary profile referee the "Scientific boundary"
     section asks for, for the upper-band drift in
     [declared-divergences.md](declared-divergences.md) section 1.
+- `python -m woof.hex.station_wind_referee` scores the 10 m wind speed
+  (`u10`, `v10`) against land SYNOP reports, by the same latitude bands and
+  by lead, with the count, bias, RMSE, mean observed speed and the drift in
+  m/s per 24 h. It reaches the globe, where the ASOS door is CONUS only.
+  - Reports are read anonymously and read-only from
+    `bkr/obs/wis2_land.icechunk` (WIS2 SYNOP, from late October 2026). A
+    report scores the frame whose valid time it carries to the minute; a
+    station reporting twice in an hour keeps its last row.
+  - Only anemometers at 8 to 12 m are used, or with no stated height
+    (the SYNOP standard 10 m). Speeds outside 0 to 75 m/s are dropped,
+    never repaired.
+  - The station's cell is the profile referee's owner, with the same
+    boundary mask and refusal. A station whose elevation is unknown, or
+    differs from its cell's `ter` by more than 300 m, is dropped: that cell
+    does not represent the site's exposure. `ter` comes from the history or
+    from `--terrain` (a static or init file of the same mesh); a history
+    with neither is refused, so the check is never skipped.
+  - A station whose initial-time report departs from the shared initial
+    state by more than 15 m/s is dropped from every lead of the case, and
+    the record lists it.
 - `python -m woof.hex.qpe_cell_referee` scores 24 h precipitation
   (`rainc + rainnc` differenced between two frames) against the Stage-IV
   packs `rw_stage4` writes (`tools/obs_fetch_stage4.py --accumulations 24h`).

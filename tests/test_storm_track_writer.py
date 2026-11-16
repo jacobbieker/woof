@@ -1088,3 +1088,52 @@ def test_an_absolute_path_inside_the_runs_own_directory_is_ours(tmp_path):
     TrackWriter(TrackConfig(str(target)), initial_time=INIT,
                 outdir=outdir).close()
     assert target.read_text(encoding="utf-8").strip() == tw.CSV_HEADER
+
+
+def test_a_missing_tc_bridge_is_announced_when_the_file_opens(tmp_path, monkeypatch, capsys):
+    """Without the TC bridge every surface row is skipped; say so at open, once."""
+    monkeypatch.setattr(tw, "missing_tc_bridge", lambda: "install this release's TC bridge library")
+    writer = _writer(tmp_path)
+    assert writer.bridge_missing == "install this release's TC bridge library"
+    err = capsys.readouterr().err
+    assert err.count("warning: [relocation.track] track.csv") == 1
+    assert "rows that need surface diagnosis will be skipped" in err
+
+
+def test_no_warning_when_the_tc_bridge_is_present(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(tw, "missing_tc_bridge", lambda: None)
+    writer = _writer(tmp_path)
+    assert writer.bridge_missing is None
+    assert "relocation.track" not in capsys.readouterr().err
+
+
+def test_a_position_only_track_never_asks_for_the_tc_bridge(tmp_path, monkeypatch):
+    def boom():
+        raise AssertionError("position-only tracks do not read the bridge")
+    monkeypatch.setattr(tw, "missing_tc_bridge", boom)
+    writer = _writer(tmp_path, tracked_field="uh")
+    assert writer.bridge_missing is None
+
+
+def test_missing_tc_bridge_reports_the_lookup_failure(monkeypatch):
+    import woof.tc.mapped_vortex as mv
+
+    def absent():
+        raise FileNotFoundError("install this release's TC bridge library or build tools/tc_frames_io")
+    monkeypatch.setattr(mv, "library_path", absent)
+    assert "tc_frames_io" in tw.missing_tc_bridge()
+    monkeypatch.setattr(mv, "library_path", lambda: "/x/libtc_frames_io.so")
+    assert tw.missing_tc_bridge() is None
+
+
+def test_a_closed_stderr_does_not_stop_the_writer(tmp_path, monkeypatch):
+    class Closed:
+        def write(self, _):
+            raise BrokenPipeError(32, "Broken pipe")
+
+        def flush(self):
+            raise BrokenPipeError(32, "Broken pipe")
+    monkeypatch.setattr(tw, "missing_tc_bridge", lambda: "no bridge")
+    monkeypatch.setattr(tw.sys, "stderr", Closed())
+    writer = _writer(tmp_path)
+    assert writer.bridge_missing == "no bridge"

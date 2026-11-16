@@ -19,7 +19,11 @@ stage a case names (``oracle_stage``):
   (``categoryThicknessLimits`` and ``hi_min``), then
   ``column_itd_thermodynamics`` at the clock's start, its ierr logged the
   same way. Its cases carry a thickness distribution before and after a
-  thermodynamic step (:func:`_itd_state`).
+  thermodynamic step (:func:`_itd_state`);
+- ``ridging``: ``colpkg_init_thermo`` and ``init_column_itd``, then
+  ``column_ridging``, its ierr logged the same way. Its cases carry a
+  thickness distribution after transport and the ridging forcing
+  (:func:`_ridge_state`).
 
 ``mpas_seaice_column.F``, ``mpas_seaice_initialize.F``'s and
 ``mpas_seaice_forcing.F``'s routines and the column package are compiled
@@ -37,6 +41,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -44,6 +49,7 @@ from pathlib import Path
 import numpy as np
 
 from woof.hex.mpas_seaice import column_itd_v842 as citd
+from woof.hex.mpas_seaice import column_ridge_v842 as crdg
 from woof.hex.mpas_seaice import column_therm_v842 as ct
 from woof.hex.mpas_seaice import column_v842 as cv
 from woof.verify import mpas_ocean_stream as _stream
@@ -53,6 +59,8 @@ FIXTURE_DIR = Path(__file__).resolve().parents[2] / "tests" / "data" / "oracles"
 VT_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_column_therm"
 #: the ITD thermodynamics' fixture (ITD_CASES)
 ITD_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_column_itd"
+#: the ridging's fixture (RIDGE_CASES)
+RIDGE_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_column_ridge"
 PRECISIONS = {"r8": np.float64}
 REAL, INT, DIM = _stream.REAL, _stream.INT, _stream.DIM
 #: the Registry structs the column routines read and write, as oracle_stream pools
@@ -160,6 +168,33 @@ ITD_CASES = (
     ("itd_abort_area_bounds", 20261959, _ITD, {**_BL99}),
     ("itd_delta_abort_zap_negative", 20261960, _ITD, {**_DELTA_NEW}),
 )
+_RDG = "ridging"
+_THORNDIKE, _HIBLER = ({"config_ridging_participation_function": "Thorndike75"},
+                       {"config_ridging_redistribution_function": "Hibler80"})
+_TOPO = {"config_use_level_meltponds": False, "config_use_topo_meltponds": True}
+#: the ridging (colpkg stage 4): name, seed, stage, overrides; the Registry default is
+#: the exponential participation and redistribution, e-folding scale 3, one dynamics subcycle
+RIDGE_CASES = (
+    ("ridge_mushy_level_ponds", 20261971, _RDG, {}),
+    ("ridge_bl99_thorndike_hibler", 20261972, _RDG, {**_BL99, **_THORNDIKE, **_HIBLER}),
+    ("ridge_thorndike_exponential_cesm_ponds", 20261973, _RDG, {
+        **_THORNDIKE, "config_use_level_meltponds": False, "config_use_cesm_meltponds": True,
+        "config_pond_refreezing_type": "cesm"}),
+    ("ridge_exponential_hibler_topo_ponds", 20261974, _RDG, {**_BL99, **_HIBLER, **_TOPO}),
+    ("ridge_subcycles_topo_ponds", 20261975, _RDG, {**_TOPO, "config_dynamics_subcycle_number": 3,
+                                                    "config_ridiging_efolding_scale": 4.5,
+                                                    "config_nIceLayers": 3}),
+    ("ridge_bl99_delta_function_bare", 20261976, _RDG, {**_BL99, **_DELTA_NEW, "config_nCategories": 4,
+                                                        "config_use_level_meltponds": False,
+                                                        "config_use_level_ice": False,
+                                                        "config_use_ice_age": False}),
+    ("ridge_bl99_single_category", 20261977, _RDG, {**_BL99, "config_nCategories": 1,
+                                                    "config_category_bounds_type": "single category",
+                                                    "config_itd_conversion_type": "delta function"}),
+    ("ridge_negative_opening_dies", 20261978, _RDG, {}),
+    ("ridge_abort_iterations", 20261979, _RDG, {**_HIBLER}),
+    ("ridge_abort_cleanup", 20261980, _RDG, {**_BL99}),
+)
 
 
 def configs_of(overrides: dict, stage: str) -> dict:
@@ -179,7 +214,7 @@ def field_rows(config: dict) -> tuple[list, dict[str, int], dict[str, bool]]:
     # the var_struct's (biogeochemistry's newlyFormedIce is the column package's).  The
     # earlier stages' cases keep the struct gate, which only drops fields their routines
     # never read, so their bytes (and fixtures) stay; the ITD stage reads newlyFormedIce.
-    var_packages_only = config.get("oracle_stage") == "itd_thermodynamics"
+    var_packages_only = config.get("oracle_stage") in ("itd_thermodynamics", "ridging")
     for struct in cv.registry_fields()["var_structs"]:
         if struct["name"] not in pools:
             continue
@@ -511,6 +546,105 @@ def _itd_state(rs, case: dict) -> None:
     pools["diagnostics"]["freezeOnset"] = onset
 
 
+def _ridge_state(rs, case: dict) -> None:
+    """A thickness distribution after transport (``openWaterArea`` and the
+    categories summing to ``asum``, not always 1), the ridging forcing
+    (``ridgeConvergence``, ``ridgeShear``) and ``dynamicsTimeStep``, with the
+    owned cells' branches (row r is indexToCellID r + 1):
+
+    0. a plain cell: convergence and shear, 2 % open water;
+    1. open water only;
+    2. transport convergence (asum 1.3), little open water and a thin, small
+       first category: the closing is cut back and ridge_ice repeats;
+    3. divergence (asum 0.85): opening;
+    4. a sub-puny category (not ridging; zapped) and snow too warm in another
+       (zap_snow_temperature's warning);
+    5. thick ice past the bounds in the top category, with snow;
+    6. strong transport convergence (asum 1.6) of thin ice, no open water;
+    7. no forcing;
+    8. ice without volume in category 1.
+
+    The abort cases change one cell (and a later one MPAS never reaches).
+    Every step is a separate numpy ufunc (no reductions), so the words are
+    the same on every host."""
+    pools, dims, name, config = case["pools"], case["dims"], case["name"], case["config"]
+    nc, ncat, nil, nsl = dims["nCells"], dims["nCategories"], dims["nIceLayers"], dims["nSnowLayers"]
+    n1 = nc + 1
+    u = _uniform(rs)
+    bounds = np.array(_approx_bounds(config, ncat))
+    lo, hi = bounds[:-1][None, :], bounds[1:][None, :]
+    h = lo + (hi - lo) * u(0.2, 0.8, (n1, ncat))
+    h[6] = lo[0] + (hi[0] - lo[0]) * 0.1
+    h[5, -1] = 8.0
+    share = u(0.3, 1.0, (n1, ncat))
+    total = np.zeros((n1, 1))
+    for n in range(ncat):
+        total[:, 0] = total[:, 0] + share[:, n]
+    ice = u(0.6, 0.95, (n1, 1))
+    asum = np.ones((n1, 1))
+    asum[2], asum[3], asum[6] = 1.3, 0.85, 1.6
+    aice0 = (1.0 - ice[:, 0]) * asum[:, 0]
+    aice0[0], aice0[1], aice0[2], aice0[6] = 0.02, 1.0, 1.0e-3, 0.0
+    area = share / total * (asum[:, 0] - aice0)[:, None]
+    area[2, 0] = 0.01
+    if ncat >= 2:
+        area[4, 1] = 2.0e-12
+    conv = u(0.0, 3.0e-6, (n1,))
+    shear = u(0.0, 6.0e-6, (n1,))
+    conv[0] = 5.0e-6
+    conv[3] = 0.0
+    conv[7], shear[7] = 0.0, 0.0
+    volume = area * h
+    volume[8, 0] = 0.0
+    hsn = u(0.0, 0.3, (n1, ncat))
+    hsn[5, -1] = 0.3
+    snow = area * hsn
+    if name == "ridge_negative_opening_dies":
+        # an opening rate below zero (a negative convergence) and no open water to give
+        for r in (3, 6):
+            aice0[r], conv[r] = 0.0, -1.0e-3
+    if name == "ridge_abort_iterations":
+        # ridges barely thicker than the 10 km ice they come from: twenty iterations
+        # cannot bring the area down to 1
+        for r in (5, 7):
+            area[r], volume[r], snow[r], aice0[r] = 0.0, 0.0, 0.0, 0.0
+            area[r, -1], volume[r, -1] = 3.0, 3.0e4
+    if name == "ridge_abort_cleanup":
+        # a negative category in the cell without forcing (no ridges land on it):
+        # zap_small_areas stops
+        for r in (7, 8):
+            k = 1 % ncat
+            area[r, k], volume[r, k], snow[r, k] = -1.0e-6, 0.0, 0.0
+    t, ist = pools["tracers"], pools["icestate"]
+    t["iceAreaCategory"], t["iceVolumeCategory"] = area[:, :, None], volume[:, :, None]
+    t["snowVolumeCategory"] = snow[:, :, None]
+    ist["openWaterArea"] = aice0
+    aggregate = np.zeros(n1)
+    for n in range(ncat):
+        aggregate = aggregate + area[:, n]
+    pools["tracers_aggregate"]["iceAreaCell"] = aggregate
+    t["surfaceTemperature"] = u(-20.0, -1.0, (n1, ncat, 1))
+    tsn = u(-20.0, -1.0, (n1, ncat, nsl))
+    tsn[4, -1] = 0.5
+    t["snowEnthalpy"] = -_RHOS * (_LFRESH - _CP_ICE * tsn)
+    sal = u(2.0, 8.0, (n1, ncat, nil))
+    tmlt = -sal * _DEPRESST
+    tin = u(-15.0, -2.0, (n1, ncat, nil))
+    t["iceSalinity"] = sal
+    t["iceEnthalpy"] = -_RHOI * (_CP_ICE * (tmlt - tin) + _LFRESH * (1.0 - tmlt / tin) - _CP_OCN * tmlt)
+    for key, (a, b) in (("iceAge", (0.0, 3.0e7)), ("firstYearIceArea", (0.0, 1.0)),
+                        ("levelIceArea", (0.2, 1.0)), ("levelIceVolume", (0.2, 1.0)),
+                        ("pondArea", (0.0, 0.5)), ("pondDepth", (0.0, 0.3)),
+                        ("pondLidThickness", (0.0, 0.05))):
+        if t.get(key) is not None:
+            t[key] = u(a, b, t[key].shape)
+    pools["mesh"]["indexToCellID"] = np.arange(1, n1 + 1, dtype=np.int32)
+    rg = pools["ridging"]
+    rg["ridgeConvergence"], rg["ridgeShear"] = conv, shear
+    pools["velocity_solver"]["dynamicsTimeStep"] = np.array(
+        float(config["config_dt"]) / config["config_dynamics_subcycle_number"])
+
+
 def make_case(name, seed, stage, overrides) -> dict:
     rs = np.random.RandomState(seed)
     config = configs_of(overrides, stage)
@@ -537,6 +671,8 @@ def make_case(name, seed, stage, overrides) -> dict:
         _thermo_state(rs, case)
     if stage == "itd_thermodynamics":
         _itd_state(rs, case)
+    if stage == "ridging":
+        _ridge_state(rs, case)
     for key, on in active.items():
         config[f"package:{key}"] = on
     case["fields"] = [r[:4] for r in rows]
@@ -575,12 +711,32 @@ def parse_log(text: str) -> dict:
     return {"tracer_object": tobj, "log": other}
 
 
-def run_oracle(build_dir: Path, case: dict) -> tuple[dict[str, np.ndarray], dict]:
+def _runtime_error(stderr: str) -> dict | None:
+    """A gfortran runtime error's file, line and message (``At line N of file
+    F`` / ``Fortran runtime error: M``), or None."""
+    at = re.search(r"At line (\d+) of file (\S+)", stderr)
+    error = re.search(r"Fortran runtime error: (.+)", stderr)
+    if not at or not error:
+        return None
+    return {"file": Path(at.group(2)).name, "line": int(at.group(1)), "error": error.group(1).strip()}
+
+
+def run_oracle(build_dir: Path, case: dict) -> tuple[dict[str, np.ndarray] | None, dict]:
+    """The oracle's outputs and log. A case on which v8.4.2 itself dies with
+    a Fortran runtime error has no outputs; its log carries ``crash`` (the
+    error's file, line and message)."""
     with tempfile.TemporaryDirectory() as tmp:
         src, dst, log = Path(tmp) / "in.bin", Path(tmp) / "out.bin", Path(tmp) / "log.txt"
         src.write_bytes(input_bytes(case))
-        subprocess.run([str(Path(build_dir) / "run_column_r8"), str(src), str(dst), str(log)], check=True)
-        return read_outputs(dst.read_bytes(), case), parse_log(log.read_text(encoding="utf-8"))
+        run = subprocess.run([str(Path(build_dir) / "run_column_r8"), str(src), str(dst), str(log)],
+                             capture_output=True, text=True)
+        crash = _runtime_error(run.stderr) if run.returncode else None
+        if run.returncode and crash is None:
+            raise subprocess.CalledProcessError(run.returncode, run.args, run.stdout, run.stderr)
+        parsed = parse_log(log.read_text(encoding="utf-8"))
+        if crash is not None:
+            return None, {**parsed, "crash": crash}
+        return read_outputs(dst.read_bytes(), case), parsed
 
 
 word_mismatches = _stream.word_mismatches
@@ -645,6 +801,9 @@ def run_gpu(case: dict) -> tuple[dict[str, np.ndarray], "cv.ColumnState"]:
     elif stage == "itd_thermodynamics":
         cv.init_column_itd(dev, state)
         state.abort = citd.itd_thermodynamics(dev, config, state)
+    elif stage == "ridging":
+        cv.init_column_itd(dev, state)
+        state.abort = crdg.ridging(dev, config, state)
     else:
         raise ValueError(f"unknown stage {stage}")
     outputs = {f"{pool}/{name}": cp.asnumpy(dev[pool][name]) for pool, name, kind, _ in case["fields"]
@@ -722,6 +881,46 @@ def measure_itd(reference: dict | None = None, logs: dict | None = None, *, rows
         log = logs[case["name"]]
         row = {"abort": int(tuple(state.abort) != oracle_abort(log, "column_itd_thermodynamics")),
                "warnings": int(state.warnings != log["log"].count(citd.ZAP_WARNING))}
+        want = expected_outputs(case, reference.get(case["name"], {}))
+        row.update({key: word_mismatches(got[key], want[key]) for key in want})
+        mine = state.tracers.log_rows()
+        row["tracer_object"] = sum(int(mine[k] != log["tracer_object"].get(k)) for k in mine)
+        report[case["name"]] = row
+    return report
+
+
+def oracle_ridge_warnings(log: dict) -> list[str]:
+    """The oracle's warning lines :func:`woof.hex.mpas_seaice.column_ridge_v842.ridging`
+    grades (``state.warnings``): ridge_ice's ``Repeat ridging`` lines and
+    zap_snow_temperature's out-of-bounds lines, in log order."""
+    return [line for line in log["log"]
+            if line.startswith("WARN  Repeat ridging, niter =") or line == citd.ZAP_WARNING]
+
+
+def measure_ridge(reference: dict | None = None, logs: dict | None = None, *, rows=RIDGE_CASES,
+                  fixture_dir: Path = RIDGE_FIXTURE_DIR) -> dict[str, dict[str, int]]:
+    """Per ridging case: the words the GPU gets wrong per field (an aborting
+    case's too), whether its abort (ierr, first aborting cell, message)
+    differs from the oracle's, whether its graded warning lines do, and the
+    tracer object's integers that differ; for a case v8.4.2 dies on, whether
+    the port fails to stop with the same runtime error."""
+    reference = load_fixture(fixture_dir) if reference is None else reference
+    logs = load_logs(fixture_dir) if logs is None else logs
+    report: dict[str, dict[str, int]] = {}
+    for case in cases("r8", rows):
+        log = logs[case["name"]]
+        if "crash" in log:
+            # v8.4.2 dies: the port must stop with the same runtime error, nothing to compare
+            try:
+                run_gpu(case)
+            except crdg.FortranRuntimeError as error:
+                report[case["name"]] = {"crash": int(error.crash != log["crash"])}
+            else:
+                report[case["name"]] = {"crash": 1}
+            continue
+        got, state = run_gpu(case)
+        row = {"abort": int(tuple(state.abort) != oracle_abort(log, "column_ridging")),
+               "warnings": int(state.warnings != oracle_ridge_warnings(log))}
         want = expected_outputs(case, reference.get(case["name"], {}))
         row.update({key: word_mismatches(got[key], want[key]) for key in want})
         mine = state.tracers.log_rows()
