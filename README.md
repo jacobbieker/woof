@@ -519,7 +519,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   `--scratch`, so a regional run in a fresh work dir no longer recompiles
   in its first step (edi-vr 1 h on an A6000: step 1 from 42.5 s to 3.6 s,
   byte-identical; `WOOF_HEX_SHARED_KERNEL_IMAGES=0` restores the per-run
-  cache).
+  cache). Hex MYNN on Metal gives every column its own worker (within the
+  one-eighth-of-free-memory bound) instead of 128 per GPU core, so the
+  column loop no longer strides: on the 14,751-cell Alps VR mesh
+  `mynn_mmm_run` drops from 112 to 50 ms a step, byte-identical
+  (`WOOF_HEX_MYNN_WORKERS_PER_PROCESSOR` sets the per-processor cap on
+  either backend; CUDA keeps 128 per SM).
   Hex `woof hex moving`: the resident forecast process prepares the next
   region beside the running one only when the host has room for a second
   copy (`WOOF_HEX_MOVING_PREPARE_HOST_GATE=0` always prepares;

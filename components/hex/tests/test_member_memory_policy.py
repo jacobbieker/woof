@@ -23,10 +23,14 @@ def test_policy_validation_and_release_defaults():
     assert (override.pool_min_bytes, override.headroom) == (123, .25)
 
 
-@pytest.mark.parametrize('policy,expected', [('single',512),('shared-card',128),('compact',256)])
-def test_mynn_worker_capacity_and_scratch_lifetime(policy, expected, monkeypatch):
+@pytest.mark.parametrize('policy,backend_name,expected', [('single','cuda',512),('shared-card','cuda',128),
+    ('compact','cuda',256),('compact','mlx',1024),('shared-card','mlx',128)])
+def test_mynn_worker_capacity_and_scratch_lifetime(policy, backend_name, expected, monkeypatch):
     shared=policy != 'single'
     monkeypatch.setenv('WOOF_HEX_MEMBER_MEMORY',policy)
+    monkeypatch.delenv('WOOF_HEX_MYNN_WORKERS_PER_PROCESSOR', raising=False)
+    from woof import backend
+    monkeypatch.setattr(backend, 'active', lambda: backend_name)
     from woof.hex.mpasphys import bl_mynn_v842 as m
     monkeypatch.setattr(m, '_SHARED_WORKSPACE', {})
     module = m.MynnCudaModule.__new__(m.MynnCudaModule)
@@ -43,6 +47,19 @@ def test_mynn_worker_capacity_and_scratch_lifetime(policy, expected, monkeypatch
     assert workers == next_workers == expected
     assert (first is second) is (not shared)
     assert e1 is not e2
+
+
+@pytest.mark.parametrize('metal', [False, True])
+def test_compact_mynn_workers_override_and_memory_bound(metal, monkeypatch):
+    from woof.hex.mpasphys.bl_mynn_v842 import _compact_workers
+    monkeypatch.setenv('WOOF_HEX_MYNN_WORKERS_PER_PROCESSOR', '512')
+    assert _compact_workers(14751, 16, 40, 1 << 30, metal=metal) == 14784
+    monkeypatch.setenv('WOOF_HEX_MYNN_WORKERS_PER_PROCESSOR', '128')
+    assert _compact_workers(14751, 16, 40, 1 << 30, metal=metal) == 5120
+    monkeypatch.delenv('WOOF_HEX_MYNN_WORKERS_PER_PROCESSOR')
+    assert _compact_workers(14751, 16, 40, 1 << 30, metal=metal) == (14784 if metal else 5120)
+    # one eighth of free memory still bounds the arena: 99,083 B workers, 1 GiB free -> 1,344
+    assert _compact_workers(14751, 99083, 40, 1 << 30, metal=metal) == 1344
 
 
 @pytest.mark.parametrize('mode,expected', [('single', 1536), ('shared-card', 512), ('compact', 512)])
