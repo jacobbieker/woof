@@ -3,14 +3,34 @@
 import types
 
 import numpy as np
+import pytest
 
-from woof.backend import xp as cp
 from woof.hex.mpasphys.runtime_v842 import wind_reconstruction_refusal
 
 NAMES = ("edges_on_cell", "n_edges_on_cell", "coeffs_reconstruct", "lat_cell", "lon_cell")
 
 
-def _geometry():
+# The refusal takes the run's array module.  A host adapter covers it on a
+# CPU-only runner; the device module (CuPy or the Metal facade) runs it too.
+HOST = types.SimpleNamespace(array_equal=np.array_equal, isfinite=np.isfinite, uint8=np.uint8,
+                             asarray=np.asarray, asnumpy=np.asarray)
+
+
+def _device():
+    try:
+        from woof.backend import xp
+        xp.asarray(np.zeros(1, np.float32))
+    except Exception as error:  # no execution backend on this runner
+        pytest.skip(f"no device array module: {error}")
+    return xp
+
+
+@pytest.fixture(params=["host", pytest.param("device", marks=pytest.mark.gpu)])
+def cp(request):
+    return HOST if request.param == "host" else _device()
+
+
+def _geometry(cp):
     geometry = types.SimpleNamespace()
     for name in NAMES:
         values = np.arange(12, dtype=np.float32).reshape(3, 4)
@@ -19,24 +39,24 @@ def _geometry():
     return geometry
 
 
-def test_a_non_finite_normal_velocity_is_not_called_a_geometry_fault():
+def test_a_non_finite_normal_velocity_is_not_called_a_geometry_fault(cp):
     velocity = np.zeros((80, 10), np.float32)
     velocity[78, 3] = np.nan
     velocity[79, 4] = np.inf
-    message = wind_reconstruction_refusal(cp, _geometry(), cp.asarray(velocity), 1)
+    message = wind_reconstruction_refusal(cp, _geometry(cp), cp.asarray(velocity), 1)
     assert "non-finite normal velocity" in message
     assert "2 edge values on 2 levels (1-based: 79, 80)" in message
     assert "geometry equals its sealed copy" in message
     assert "differs" not in message
 
 
-def test_a_changed_geometry_names_the_array():
-    geometry = _geometry()
+def test_a_changed_geometry_names_the_array(cp):
+    geometry = _geometry(cp)
     geometry._sealed_coeffs_reconstruct = cp.asarray(np.ones((3, 4), np.float32))
     message = wind_reconstruction_refusal(cp, geometry, cp.asarray(np.zeros((80, 10), np.float32)), 1)
     assert "differs from its sealed copy in coeffs_reconstruct" in message
 
 
-def test_neither_is_reported_as_an_invalid_coefficient_or_index():
-    message = wind_reconstruction_refusal(cp, _geometry(), cp.asarray(np.zeros((80, 10), np.float32)), 1)
+def test_neither_is_reported_as_an_invalid_coefficient_or_index(cp):
+    message = wind_reconstruction_refusal(cp, _geometry(cp), cp.asarray(np.zeros((80, 10), np.float32)), 1)
     assert "normal velocity is finite now" in message
