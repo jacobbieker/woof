@@ -195,6 +195,7 @@ FLAG_ITEMS: Mapping[str, str] = {
     "nest_at": "A.9 (nests are N/A on the mesh; `woof hex add-nest` hangs a WRF child)",
     "nudging": "5.1 (grid and spectral nudging on hex)",
     "hydro": "P7 (hex hydro)",
+    "lakes": "1.4 follow-up (hex lakes: `--physics sf_lake_physics=1` with `--surface-statics` on the WOOF column route)",
     "wind_farms": "3.1 follow-up (`woof hex forecast --wind-farms` exists; go does not forward it yet)",
     "tiles": "A.17 (out-of-core tiles are N/A on the mesh)",
     "smoke": "3.1 follow-up (smoke runs on the hrrrv5 suite through `woof hex regional`)",

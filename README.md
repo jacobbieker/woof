@@ -561,6 +561,10 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   apart, and writes are keyed by their Python call site. There the facade's
   writes cost 45 ms of 1357 per step (Alps hex variable-resolution mesh:
   65 of 667 ms, where `mynn_mmm_run` is the top kernel at 107 ms).
+  The open-boundary frame zero and copy (`zero_frame`, `copy_frame`)
+  launch one thread per frame element instead of one per buffer element,
+  storing the same words (Alps 1 km nest: about 13x faster on Metal and 7x
+  less kernel time on CUDA).
   The `woof.radtran` spectral diagnostic (`radtran_*`) is cheaper, keeping
   the same words. `radtran_disort.cu` compiles in about 6 minutes in
   0.55 GB, against over an hour in over 17 GB before: its helpers are kept
@@ -583,6 +587,14 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   starting lake temperature falls from 4.5 K (warm) to 2.7 K (mostly cold),
   but ERA5 is worse at Constance and Maggiore
   ([docs/lake-state-initialization.md](docs/lake-state-initialization.md)).
+  `woof go --lakes clm` turns on WRF's CLM lake model with WPS bathymetry and
+  this initial state on every domain in one opt-in; `--lakes ic` sets only the
+  initial state ([docs/lakes.md](docs/lakes.md)).
+  `[static.highres] fields = "lakes"` (opt-in) takes the lake extent from
+  CGLC-MODIS-LCZ 100 m land cover. WPS's 30-arc-second lakes cover glacier
+  and rock and sit about 1 km north of the shoreline: on the Alps 1 km
+  domain, 480 lake cells above 2000 m became 8 real reservoirs
+  ([docs/high-resolution-static-geography.md](docs/high-resolution-static-geography.md)).
   On the hex MPAS-suite route, `--physics config_clm_lake_backend=hex-cuda`
   (opt-in) runs WRF's CLM lake on the LAKEMASK cells of `--surface-statics`,
   bitwise to WRF's lake kernel on the same inputs. It starts from lakeini and

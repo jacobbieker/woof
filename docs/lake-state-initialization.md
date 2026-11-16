@@ -144,3 +144,24 @@ using an older prebuilt renderer executable.
 Regular longitude axes may ascend or descend and use either conventional longitude encoding. Sampling chooses an equivalent coordinate within the actual source extent. In particular, a descending axis crossing zero does not imply a 0-to-360 encoding. No donor is extrapolated beyond a regional source boundary.
 
 The source table may declare `zero_roundoff_tolerance` in SI units. Rust snaps only values whose absolute magnitude is within that tolerance to zero. ERA5-Land ice depth uses 1e-12 m because converted GRIB zero depth can be -2.1684e-19 m. The receipt records the tolerance; material negative depths still fail admission.
+
+## Lake extent
+
+Lake ICs only help where the lake mask is right. The WPS 30-arc-second
+lakes include glacier and rock in the Alps, and their shorelines sit about
+1 km north of where they are. `[static.highres] fields = "lakes"`
+([high-resolution-static-geography.md](high-resolution-static-geography.md))
+takes the lake extent from CGLC-MODIS-LCZ instead (opt-in).
+
+## Hex
+
+On hex's WOOF column route (R1), `lake_state_source` is a `--physics` key.
+`woof hex forecast --physics sf_lake_physics=1 --physics
+lake_state_source=auto+era5 --surface-statics <mesh>.surface_statics.nc`
+binds the same rows, through the same `initialize_surface`, on the cells
+that the surface statics mark as lakes. The CLM columns that result are WRF
+lakeini's columns from that initial state, bit for bit
+(`tests/test_hex_surface_inputs_gpu.py`, CUDA and Metal). Without
+`sf_lake_physics = 1`, no lake mask is staged on the mesh, so no lake
+state is bound either. The MPAS suite route (R2) folds lakes to water, as
+MPAS-A v8.4.2 does.

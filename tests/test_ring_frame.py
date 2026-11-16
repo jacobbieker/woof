@@ -20,9 +20,11 @@ def _slices_zero(a, x_lo, x_hi, y_lo, y_hi):
         a[..., a.shape[-2] - min(y_hi, a.shape[-2]):, :] = 0
 
 
-@pytest.mark.parametrize("shape", [(5, 9, 11), (3, 12, 13), (7, 4), (2, 3, 6, 5)])
+@pytest.mark.parametrize("shape", [(5, 9, 11), (3, 12, 13), (7, 4), (2, 3, 6, 5), (49, 23, 28)])
 @pytest.mark.parametrize("widths", [(1, 1, 1, 1), (3, 4, 3, 4), (2, 0, 0, 2),
-                                    (0, 0, 1, 1), (1, 1, 0, 0), (5, 5, 5, 5), (20, 1, 1, 20)])
+                                    (0, 0, 1, 1), (1, 1, 0, 0), (5, 5, 5, 5), (20, 1, 1, 20),
+                                    (0, 0, 0, 0), (0, 3, 0, 0), (2, 1, 4, 0), (6, 6, 1, 1),
+                                    (1, 1, 2, 2), (5, 6, 5, 6)])
 def test_zero_frame_matches_the_slice_assignments(shape, widths):
     from woof.core.ring_frame import zero_frame
     rng = np.random.default_rng(3)
@@ -52,6 +54,22 @@ def test_copy_frame_matches_the_held_ring_copy(shape, sz):
     assert np.array_equal(cp.asnumpy(dev).view(np.uint32), want.view(np.uint32))
 
 
+@pytest.mark.parametrize("shape", [(6, 11, 13), (9, 7), (2, 3, 8, 10)])
+@pytest.mark.parametrize("widths", [(2, 1, 3, 1), (0, 4, 1, 0), (7, 7, 2, 2), (1, 1, 6, 6)])
+def test_copy_frame_matches_the_zeroed_set_with_uneven_widths(shape, widths):
+    """copy_frame takes ``src`` at exactly the elements zero_frame zeroes."""
+    from woof.core.ring_frame import copy_frame
+    rng = np.random.default_rng(11)
+    tend = rng.standard_normal(shape).astype(np.float32)
+    held = rng.standard_normal(shape).astype(np.float32)
+    mask = np.ones(shape, dtype=np.float32)
+    _slices_zero(mask, *widths)
+    want = np.where(mask == 0, held, tend)
+    dev = cp.asarray(tend)
+    assert copy_frame(dev, cp.asarray(held), *widths)
+    assert np.array_equal(cp.asnumpy(dev).view(np.uint32), want.view(np.uint32))
+
+
 def test_a_buffer_the_kernel_does_not_cover_is_left_to_the_caller():
     from woof.core.ring_frame import copy_frame, zero_frame
     a = cp.ones((4, 6, 8), dtype=cp.float32)
@@ -69,4 +87,6 @@ def test_identity_holds_under_each_numerics(numerics, exact):
     The battery runs strict; production runs fast.  Each mode in its own
     child process (tests/_numerics_child.py)."""
     _numerics_child.run(__file__, ["test_zero_frame_matches_the_slice_assignments",
-                                   "test_copy_frame_matches_the_held_ring_copy"], numerics, exact)
+                                   "test_copy_frame_matches_the_held_ring_copy",
+                                   "test_copy_frame_matches_the_zeroed_set_with_uneven_widths"],
+                        numerics, exact)
