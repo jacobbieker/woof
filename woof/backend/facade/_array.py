@@ -35,6 +35,7 @@ import operator
 import os
 import threading
 import weakref
+from functools import lru_cache
 from functools import reduce
 
 import numpy as np
@@ -192,6 +193,9 @@ class Storage:
         if _capture.recording() is not None:
             _capture.refuse("an in-place write into a facade array (a[...] = v, fill, copy)")
         self.arr = out
+        if _gpu_times_isolated():
+            _isolated_eval(out)
+            return
         mx.async_eval(out)
 
     def alias(self, dtype) -> "Storage":
@@ -308,6 +312,24 @@ def _gpu_address(arr) -> int:
             return address
     mx.eval(arr)
     return int(ext.load().gpu_address(arr))
+
+
+@lru_cache(maxsize=1)
+def _gpu_times_isolated() -> bool:
+    from woof.backend.metal import ext
+    return ext.gpu_times_isolated()
+
+
+def _isolated_eval(out) -> None:
+    """WOOF_METAL_GPU_TIMES_ISOLATE: finish earlier work, then run each
+    launch ``out`` still needs (``out`` itself included) alone, after the
+    lazy inputs it reads, in command buffers counted apart, waiting for each
+    (woof.backend.metal.ext.run_launches_apart; launch.cpp)."""
+    from woof.backend.metal import ext
+    module = ext.load()
+    ext.run_launches_apart(module, [out])
+    ext.raw("eval")(out)
+    ext.raw("synchronize")()
 
 
 #: GPU base address -> the storage that handed it out (Storage.address)

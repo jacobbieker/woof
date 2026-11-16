@@ -87,3 +87,53 @@ zero_roundoff_tolerance = 1e-12
 name = "ice_temperature"
 variable = "lict"
 units = "K"
+
+# ERA5/ERA5T FLake state from the public Google ARCO mirror (keyless, global,
+# 0.25 deg). The same six FLake fields as the ERA5-Land row, so the same CLM
+# profile transfer applies. ERA5T trails real time by about five days; a lake's
+# mixed layer changes slowly, so the latest hour the store publishes at or
+# before initialization is accepted up to max_age_hours old (persistence) and
+# the receipt records its age. FLake runs at every ERA5 point with that box's
+# GLDB depth, so the bilinear donors are lake states, not land skin. A model,
+# not an observation: the forcing's ice decides which lake cells are frozen
+# (ice_authority), and the row is never automatic.
+[[source]]
+id = "era5"
+acquisition = "zarr"
+store = "https://storage.googleapis.com/gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3"
+ice_authority = "forcing"
+licence = "CC-BY-4.0"
+licence_url = "https://cds.climate.copernicus.eu/datasets/reanalysis-era5-single-levels?tab=overview"
+citation = "Hersbach et al. (2020), ERA5 hourly data on single levels, doi:10.24381/cds.adbb2d47; Google ARCO-ERA5 mirror"
+research_only = false
+latitude = "latitude"
+longitude = "longitude"
+time = "time"
+max_age_hours = 240
+[[source.field]]
+name = "water_temperature"
+variable = "lake_mix_layer_temperature"
+units = "K"
+[[source.field]]
+name = "bottom_temperature"
+variable = "lake_bottom_temperature"
+units = "K"
+[[source.field]]
+name = "mixed_layer_depth"
+variable = "lake_mix_layer_depth"
+units = "m"
+[[source.field]]
+name = "temperature_shape_factor"
+variable = "lake_shape_factor"
+# ARCO writes "dimensionless"; rw_zarr declares it as "1".
+units = "1"
+unit_aliases = ["dimensionless"]
+[[source.field]]
+name = "ice_thickness"
+variable = "lake_ice_depth"
+units = "m"
+zero_roundoff_tolerance = 1e-12
+[[source.field]]
+name = "ice_temperature"
+variable = "lake_ice_temperature"
+units = "K"

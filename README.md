@@ -552,7 +552,15 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   a read back and a write: the writer's host time per Edinburgh 3 km frame
   falls from 761-1061 ms to 470-576 ms, byte-identical
   (`WOOF_METAL_DEVICE_COPY=0` restores the host round trip).
-  `WOOF_METAL_GPU_TIMES` times each kernel.
+  `WOOF_METAL_GPU_TIMES` times each kernel. Its per-launch command
+  buffers also hold the lazy MLX work the launch waited on, and their GPU
+  intervals overlap, so a facade write (`woof_copy_4`) used to carry other
+  work's time (on the Alps 3 km/1 km pair, 883 of 2047 timed ms per step).
+  `WOOF_METAL_GPU_TIMES_ISOLATE=1` is a profiling mode with the same words:
+  each launch runs alone, after its lazy inputs are evaluated and counted
+  apart, and writes are keyed by their Python call site. There the facade's
+  writes cost 45 ms of 1357 per step (Alps hex variable-resolution mesh:
+  65 of 667 ms, where `mynn_mmm_run` is the top kernel at 107 ms).
   The open-boundary frame zero and copy (`zero_frame`, `copy_frame`)
   launch one thread per frame element instead of one per buffer element,
   storing the same words (Alps 1 km nest: about 13x faster on Metal and 7x
@@ -570,6 +578,15 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   28 s. With an output every 10 minutes, the hour costs 209 s instead of
   2,578 s; with no diagnostic it costs 61 s. Eight wavelengths in one call
   on such a domain hold over 13 GB of host memory.
+- **Lakes.** `lake_state_source = "era5"` or `"auto+era5"` (opt-in) starts
+  lakes outside GLSEA from ERA5's FLake lake state (keyless, Google ARCO),
+  including the CLM lake column's profile, instead of the forcing's skin (on
+  the GFS route, the nearest GFS water: 286-291 K for the Alpine lakes on
+  2026-11-09). The forcing's ice analysis stays in charge of which lakes are
+  frozen. Against Eawag's Simstrat on six Swiss lakes, the error of the
+  starting lake temperature falls from 4.5 K (warm) to 2.7 K (mostly cold),
+  but ERA5 is worse at Constance and Maggiore
+  ([docs/lake-state-initialization.md](docs/lake-state-initialization.md)).
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
   tests by name, and main's full run is periodic. Every merge to `main`
