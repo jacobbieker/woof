@@ -241,6 +241,11 @@ class Storage:
         return base
 
 
+#: WOOF_METAL_DEVICE_COPY=0: ``MemoryPointer.copy_from_device(_async)``
+#: between two storages goes through the host (get, then set), as before
+#: 2026-11-16, instead of one device copy the facade orders.
+_DEVICE_COPY = os.environ.get("WOOF_METAL_DEVICE_COPY", "1") != "0"
+
 #: WOOF_METAL_ADDRESS_ASYNC=0: Storage.address waits for the buffer's value
 #: (mx.eval), as it did before 2026-11-15.
 _ADDRESS_ASYNC = os.environ.get("WOOF_METAL_ADDRESS_ASYNC", "1") != "0"
@@ -964,7 +969,16 @@ class _Pointer:
 
     # CuPy's MemoryPointer copies, by raw address (cupy.cuda.runtime.memcpy)
     def copy_from_device(self, src, size, stream=None):
-        from woof.backend.facade.cuda import _memcpy
+        from woof.backend.facade.cuda import _bytes_view, _memcpy
+        size = int(size)
+        if _DEVICE_COPY and size > 0:
+            # Both sides storages: a device copy the facade orders, not a
+            # host round trip that waits for the source (wrfout snapshots)
+            source = _bytes_view(_address(src), size)
+            target = _bytes_view(self.ptr, size) if source is not None else None
+            if target is not None and target._st is not source._st:
+                target._write(source._values())
+                return
         _memcpy(self.ptr, _address(src), size)
 
     def copy_from_host(self, mem, size, stream=None):
