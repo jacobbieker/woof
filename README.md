@@ -544,8 +544,12 @@ on it:
     12 km geometry for 1 h took about 10 minutes of wall time), but some
     kernel units are refused by name: TEMPO on macOS, Grell-Freitas
     `gfl_columns` and RRFS `mynnedmf_run_l1` on Metal;
-  - the LTS executor's reserve census needs 64-bit atomic adds, which Apple
-    GPUs lack;
+  - the LTS executor's scalar kernels run without 64-bit atomics on Metal:
+    the reserve census counts with two 32-bit atomics and a carry (the same
+    words as CUDA), and the binary64 receipt sums are gathered per element
+    and summed in a fixed order (deterministic on Metal; CUDA's atomic sums
+    vary in the last bits from run to run). So `woof hex moving` and LTS
+    regional runs work on an Apple GPU;
   - the dynamics subcycle runs eager, because the facade has no CUDA graphs;
   - the MPAS WSM6 unit of the water-budget gates (binary64) once had not
     finished its cold compile after 1 h 45 min; it now compiles cold in
