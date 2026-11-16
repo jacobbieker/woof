@@ -187,28 +187,17 @@ __device__ __forceinline__ int td_nint(float x) { return (int)roundf(x); }
 // --------------------------------------------------------------------------
 // topo_wind: LAP_HGT, CTOPO, CTOPO2 (start_em.F:1539-1626)
 // --------------------------------------------------------------------------
-extern "C" __global__
-void topo_wind_static(const real *ht, const real *var_sso, const real *var2d,
-                      const real *xland, real *lap_hgt, real *ctopo,
-                      real *ctopo2, int nx, int ny, int topo_wind)
+// CTOPO / CTOPO2 from one cell's LAP_HGT (start_em.F:1581-1623), shared by
+// the (ny, nx) kernel and the mesh-neighbour kernel below.
+__device__ __forceinline__
+void td_topo_coefficients(real lap, real xland, real var_sso, real var2d,
+                          int topo_wind, real *ctopo, real *ctopo2)
 {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= nx * ny) return;
-    int i = idx % nx, j = idx / nx;
-    // :1542-1555, the non-periodic arm: neighbours clamp to the domain.
-    int im1 = max(i - 1, 0), ip1 = min(i + 1, nx - 1);
-    int jm1 = max(j - 1, 0), jp1 = min(j + 1, ny - 1);
-    real h = ht[idx];
-    // :1558  (ht(ip1)+ht(im1)+ht(jp1)+ht(jm1)-ht*4.)/4.
-    real lap = (((ht[j * nx + ip1] + ht[j * nx + im1]) + ht[jp1 * nx + i])
-                + ht[jm1 * nx + i]) - h * 4.0f;
-    lap = lap / 4.0f;
-    lap_hgt[idx] = lap;
     // :1581-1582
     real c = 1.0f, c2 = 1.0f;
     if (topo_wind == 1) {
         // :1587-1592
-        if (xland[idx] < 1.5f) c = sqrtf(var_sso[idx]);
+        if (xland < 1.5f) c = sqrtf(var_sso);
         if (c <= 2.718f) c = 1.0f;
         else c = gfk_log(c);
         // :1594-1608
@@ -227,8 +216,8 @@ void topo_wind_static(const real *ht, const real *var_sso, const real *var2d,
     } else if (topo_wind == 2) {
         // :1615-1623
         real vfac;
-        if (xland[idx] < 1.5f) {
-            real x = var2d[idx] * 0.4f / 200.0f + 1.175f;
+        if (xland < 1.5f) {
+            real x = var2d * 0.4f / 200.0f + 1.175f;
             vfac = td_min(1.575f, x);
             vfac = vfac * vfac;
         } else {
@@ -236,8 +225,68 @@ void topo_wind_static(const real *ht, const real *var_sso, const real *var2d,
         }
         c = c * vfac;
     }
-    ctopo[idx] = c;
-    ctopo2[idx] = c2;
+    *ctopo = c;
+    *ctopo2 = c2;
+}
+
+extern "C" __global__
+void topo_wind_static(const real *ht, const real *var_sso, const real *var2d,
+                      const real *xland, real *lap_hgt, real *ctopo,
+                      real *ctopo2, int nx, int ny, int topo_wind)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= nx * ny) return;
+    int i = idx % nx, j = idx / nx;
+    // :1542-1555, the non-periodic arm: neighbours clamp to the domain.
+    int im1 = max(i - 1, 0), ip1 = min(i + 1, nx - 1);
+    int jm1 = max(j - 1, 0), jp1 = min(j + 1, ny - 1);
+    real h = ht[idx];
+    // :1558  (ht(ip1)+ht(im1)+ht(jp1)+ht(jm1)-ht*4.)/4.
+    real lap = (((ht[j * nx + ip1] + ht[j * nx + im1]) + ht[jp1 * nx + i])
+                + ht[jm1 * nx + i]) - h * 4.0f;
+    lap = lap / 4.0f;
+    lap_hgt[idx] = lap;
+    td_topo_coefficients(lap, xland[idx], var_sso[idx], var2d[idx],
+                         topo_wind, &ctopo[idx], &ctopo2[idx]);
+}
+
+// LAP_HGT on an unstructured mesh: the same quantity as :1558, the mean of
+// the cell's edge neighbours (cellsOnCell, zero-based, maxedges slots per
+// cell, nEdgesOnCell of them used) minus the cell's own height, in metres,
+// summed slot by slot in cellsOnCell order:
+//     (((ht(n0) + ht(n1)) + ht(n2)) + ... - ht*n) / n.
+// A neighbour outside the column set (index < 0 or >= ncol, e.g. beyond a
+// limited-area boundary) is the cell itself, as WRF's non-periodic arm
+// clamps an out-of-domain neighbour to the boundary point.  On a quad
+// neighbourhood listed (i+1, i-1, j+1, j-1) this is :1558 word for word.
+// A cell with no edges (a regional mesh's garbage column) is flat: 0.
+extern "C" __global__
+void topo_wind_static_mesh(const real *ht, const real *var_sso,
+                           const real *var2d, const real *xland,
+                           const int *cells_on_cell,
+                           const int *n_edges_on_cell, int maxedges,
+                           real *lap_hgt, real *ctopo, real *ctopo2,
+                           int ncol, int topo_wind)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= ncol) return;
+    real h = ht[idx];
+    int n = n_edges_on_cell[idx];
+    if (n > maxedges) n = maxedges;
+    real lap = 0.0f;
+    if (n > 0) {
+        real sum = 0.0f;
+        for (int s = 0; s < n; ++s) {
+            int nb = cells_on_cell[(size_t)idx * maxedges + s];
+            real v = (nb >= 0 && nb < ncol) ? ht[nb] : h;
+            sum = (s == 0) ? v : sum + v;
+        }
+        lap = sum - h * (real)n;
+        lap = lap / (real)n;
+    }
+    lap_hgt[idx] = lap;
+    td_topo_coefficients(lap, xland[idx], var_sso[idx], var2d[idx],
+                         topo_wind, &ctopo[idx], &ctopo2[idx]);
 }
 
 // The SASE bulk-Richardson height is not a WRF PBL package output.  Derive

@@ -130,6 +130,81 @@ def test_topo_wind_coefficients_are_wrfs_bit_for_bit(option):
         _assert_bits(cp.asnumpy(got), want[name].T, name)
 
 
+def _quad_mesh_neighbours(ny, nx):
+    """cellsOnCell of the (ny, nx) grid as a quad mesh, slots in start_em.F
+    :1558's order (i+1, i-1, j+1, j-1), with the non-periodic clamp of
+    :1542-1555 spelled as WRF spells it (an edge point's missing neighbour is
+    the point itself, here the -1 sentinel the mesh kernel reads as self)."""
+    j, i = np.divmod(np.arange(ny * nx), nx)
+    cells = np.stack([
+        np.where(i + 1 < nx, j * nx + i + 1, -1),
+        np.where(i - 1 >= 0, j * nx + i - 1, -1),
+        np.where(j + 1 < ny, (j + 1) * nx + i, -1),
+        np.where(j - 1 >= 0, (j - 1) * nx + i, -1)], axis=1)
+    return cells.astype(np.int32), np.full(ny * nx, 4, np.int32)
+
+
+@requires_gpu
+@pytest.mark.parametrize("option", [0, 1, 2])
+def test_topo_wind_mesh_laplacian_on_a_quad_mesh_is_wrfs_bit_for_bit(option):
+    """The unstructured LAP_HGT (topo_wind_static_mesh, the hex seam's) is
+    WRF v4.7.1's start_em.F:1558 five-point form on a quad neighbourhood: the
+    oracle's grid handed as a mesh of nx*ny cells gives WRF's own LAP_HGT,
+    CTOPO and CTOPO2 words, the -30 m cut-off included."""
+    import cupy as cp
+
+    from woof.core.terrain_drag import topo_wind_coefficients
+
+    inputs = _load("topo_static/inputs")
+    want = _load(f"topo_static/topo_wind_{option}")
+    ht, xland = inputs["ht"].T, inputs["xland"].T
+    ny, nx = ht.shape
+    flat = lambda value: cp.asarray(np.ascontiguousarray(value).reshape(1, -1))
+    cells, counts = _quad_mesh_neighbours(ny, nx)
+    ctopo, ctopo2, lap = topo_wind_coefficients(
+        flat(ht), flat(xland), topo_wind=option,
+        var_sso=flat(inputs["var_sso"].T), var2d=flat(inputs["var2d"].T),
+        cells_on_cell=cells, n_edges_on_cell=counts)
+    for name, got in (("lap_hgt", lap), ("ctopo", ctopo),
+                      ("ctopo2", ctopo2)):
+        _assert_bits(cp.asnumpy(got).reshape(ny, nx), want[name].T, name)
+    if option == 1:
+        # The fixture reaches every branch of :1594-1608, the zeroing one too.
+        assert np.any(want["lap_hgt"] < -30.0) and np.any(want["ctopo"] == 0)
+
+
+@requires_gpu
+def test_topo_wind_mesh_laplacian_on_hexagons_is_the_quad_forms_quantity():
+    """On a regular hexagonal neighbourhood the neighbour mean minus the
+    centre is the same quantity the quad form is, (dc**2 / 4) * del2(h):
+    a paraboloid h = a*(x**2 + y**2) gives a*dc**2 on both, so the -30 m
+    threshold means the same terrain curvature at the same spacing."""
+    import cupy as cp
+
+    from woof.core.terrain_drag import topo_wind_coefficients
+
+    dc, a = 120000.0, -2.0e-9
+    angles = np.arange(6) * np.pi / 3.0
+    x = np.concatenate([[0.0], dc * np.cos(angles)])
+    y = np.concatenate([[0.0], dc * np.sin(angles)])
+    ht = (a * (x * x + y * y)).astype(np.float32).reshape(1, -1)
+    cells = np.full((7, 6), -1, np.int32)
+    cells[0] = np.arange(1, 7)
+    counts = np.array([6] + [0] * 6, np.int32)
+    ones = np.ones_like(ht)
+    _, _, lap = topo_wind_coefficients(
+        cp.asarray(ht), cp.asarray(ones), topo_wind=1,
+        var_sso=cp.asarray(ones), cells_on_cell=cells, n_edges_on_cell=counts)
+    got = float(cp.asnumpy(lap)[0, 0])
+    assert got == pytest.approx(a * dc * dc, rel=1e-6)
+    assert float(cp.asnumpy(lap)[0, 1]) == 0.0      # a cell with no edges
+    # The (ncol,) layout is the same computation.
+    _, _, flat = topo_wind_coefficients(
+        cp.asarray(ht[0]), cp.asarray(ones[0]), topo_wind=1,
+        var_sso=cp.asarray(ones[0]), cells_on_cell=cells, n_edges_on_cell=counts)
+    assert np.array_equal(cp.asnumpy(flat), cp.asnumpy(lap))
+
+
 def _gwd_atmosphere(inputs):
     return {
         "u": _kij(inputs["u3d"]), "v": _kij(inputs["v3d"]),
@@ -477,8 +552,8 @@ def test_sase_height_supplies_gsls_one_based_upper_bracket_level():
 _MUTATIONS = (
     ("topo1", False, "else c = gfk_log(c);",
      "else c = 1.0f;", "static", 1),
-    ("topo2", False, "var2d[idx] * 0.4f / 200.0f + 1.175f",
-     "var2d[idx] * 0.4f / 200.0f + 1.176f", "static", 2),
+    ("topo2", False, "var2d * 0.4f / 200.0f + 1.175f",
+     "var2d * 0.4f / 200.0f + 1.176f", "static", 2),
     ("gwdo", False,
      "const real veleps = 1.0f, frc = 1.0f, ce = 0.8f, cg = 0.5f;",
      "const real veleps = 1.0f, frc = 1.0f, ce = 0.81f, cg = 0.5f;",

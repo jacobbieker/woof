@@ -544,10 +544,20 @@ sparsity, and it is clear of zero at every level from 50 to 20 hPa.
 configuration, with the MPAS suite as its default physics, and no oracle
 moves.
 
-**On the MPAS suite route the high lid is partial.**
+**On the MPAS suite route.**
 
-- The route lacks the horizontal Rayleigh options, so it refuses the
-  version 2 declaration's runtime block.
+- Since 2026-11-16 the route runs the version 2 declaration's runtime block
+  as MPAS v8.4.2's own `&damping` options: CAM coefficient 0.2 on 8
+  levels, horizontal Rayleigh damping of u on 6 levels with a 5-day
+  timescale, and w damping from 40 km. Its CAM and Rayleigh operators
+  match MPAS-8.4.2's own lines bit for bit. The reference is those lines
+  compiled by gfortran in the pinned container
+  (`components/hex/tests/fixtures/native_upper_damping_v842`).
+- In a 3 h Metal A/B on 11-05 00Z, the damping lowers the top level's RMS
+  u from 23.62 to 23.14 m/s, and the differences are largest at the top.
+  With the damping, 11-05 00Z and 11-03 12Z each run 72 h on Metal.
+- Before that, the route lacked the horizontal Rayleigh options and refused
+  the block.
 - With that block removed (the 80-level, 50 km lid and the w damping only),
   four of seven cases ran 72 h. On those four, the 90-60S, 20 hPa bias at
   72 h goes from -11.39 K (RMSE 13.40) on the 55-level MPAS suite arm to
