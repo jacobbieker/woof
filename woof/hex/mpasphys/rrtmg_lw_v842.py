@@ -653,7 +653,8 @@ def solve_device(ncol, nlay, icld, play, plev, tlay, tlev,
                                 ciwpmcl, clwpmcl, cswpmcl, reicmcl,
                                 relqmcl, resnmcl, tauaer, K,
                                 column_chunk=None, _stage_probe=None, *,
-                                mcica_layout="gpoint", spectral_output="none"):
+                                mcica_layout="gpoint", spectral_output="none",
+                                spectral_levels="all"):
     """MPAS: module_ra_rrtmg_lw.F:10705-11533,2775-10623.
 
     Audited solver launch chain. K holds device coefficient tables, scalar
@@ -684,7 +685,11 @@ def solve_device(ncol, nlay, icld, play, plev, tlay, tlev,
     dflxc = cp.zeros((ncol, nl + 1), dtype=cp.float32)
     hr = cp.zeros((ncol, nl), dtype=cp.float32)
     hrc = cp.zeros((ncol, nl), dtype=cp.float32)
-    lw_band = (cp.empty((len(_legacy.LW_SPECTRAL_QUANTITIES), ncol, nl + 1, NBNDLW), dtype=cp.float32)
+    # spectral_levels "boundary" keeps the surface and the top only
+    # (rrtmg_sw.spectral_level_count): the same words as those two levels.
+    from woof.core.rrtmg_sw import spectral_level_count
+    nlo = spectral_level_count(spectral_levels, nl + 1)
+    lw_band = (cp.empty((len(_legacy.LW_SPECTRAL_QUANTITIES), ncol, nlo, NBNDLW), dtype=cp.float32)
                if spectral_output != "none" else None)
 
     fslot = {name: i for i, name in enumerate(GPU_FSLOTS)}
@@ -880,11 +885,11 @@ def solve_device(ncol, nlay, icld, play, plev, tlay, tlev,
              totuflux, totdflux, totuclfl, totdclfl))
         if lw_band is not None:
             # a separate launch over the same inputs (broadband unchanged)
-            part = cp.empty((len(_legacy.LW_SPECTRAL_QUANTITIES), nc, nl + 1, NBNDLW), dtype=cp.float32)
-            total = nc * (nl + 1) * NBNDLW
+            part = cp.empty((len(_legacy.LW_SPECTRAL_QUANTITIES), nc, nlo, NBNDLW), dtype=cp.float32)
+            total = nc * nlo * NBNDLW
             _gpu_kernel("rlw_rtrn_band_rows")(
                 ((total + 127) // 128,), (128,),
-                (i32(nc), i32(nl), radld_p, radclrd_p, radlu_p, radclru_p,
+                (i32(nc), i32(nl), i32(nlo), radld_p, radclrd_p, radlu_p, radclru_p,
                  iclddn_p, radlu_sfc, radclru_sfc,
                  K["ngs"], K["delwave"], WTDIFF, K["fluxfac"], part))
             lw_band[:, rows] = part
@@ -1293,7 +1298,8 @@ def rrtmg_lwrad_device(model, interfaces, surface, tables, *, icloud,
             inflag,iceflag,1,cloud,cp.zeros_like(cloud),ice,liquid,snow,
             a[:,10,:],a[:,9,:],a[:,11,:],cp.zeros((ng,nl,16),dtype=cp.float32),
             tables,column_chunk=ng,mcica_layout='column',
-            spectral_output=spectral_output if spectral_fields else 'none')
+            spectral_output=spectral_output if spectral_fields else 'none',
+            spectral_levels='boundary')
         tendency_group=cp.empty((ng,nm),dtype=cp.float32)
         radii_group=cp.empty((ng,3,nm),dtype=cp.float32)
         flux_group=cp.empty((ng,len(FLUX_FIELDS)),dtype=cp.float32)
