@@ -479,8 +479,16 @@ FROZEN_MODULE_DIGESTS = {
         # and Metal); the shape-specialized CUDA column build's words differ
         # from that generic build's by NVRTC's contraction on the folded loops
         # (PR #475).  Previously 14f8d637/5c720500.
-        '97a7e1646a217ad7e19c17f52a70e7d6c7cb1837b557e1ab6168084932dc3876',
-        'cfd6ba49dee0bce96b7cd472eafdd53d5c41e18e57dc04beefb92802d20dd4c3'),
+        # Re-pinned for advance_w_phi_msf's one-pass default arm: the forward
+        # sweep inside the forcing loop, then back substitution, damper,
+        # phi'' update and per-level p''/alpha'' diagnosis (diagnose_p_level)
+        # in one top-down pass, 3 resident blocks.  The same statements on
+        # the same operands; WPHI_SEPARATE_SWEEPS=1 keeps the old sweeps.
+        # Reading: whole-substep words equal the separate sweeps' in fast,
+        # strict and WRF-exact builds on CUDA (A6000) and Metal
+        # (tests/test_acoustic_wphi_one_pass.py).  Previously 97a7e164/cfd6ba49.
+        '02d25ba401a374cc4579dc1e5bccf36afd86e828c789135fe573357d4bb4146f',
+        'e3a2b71e2eb58aa07b3e1acf200cd22cc595d15fcff77477e291af8a3c752fb8'),
     # Re-pinned for the WOOF 1.0.0 text scrub: comments only (punctuation, host
     # labels), proven equal with comments stripped; the preprocessor drops
     # comments, so the compiled binary does not move.
