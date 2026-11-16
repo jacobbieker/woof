@@ -327,9 +327,10 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     [declared-divergences.md](components/hex/docs/declared-divergences.md)
     section 2.
   - `global-120km-high-top` (or `--vertical-spec` with
-    `woof/hex/data/countries/s2s80-v1.json`) for the polar stratospheric
-    drift. Hex's global rows use MPAS-A v8.4.2's 55 levels and 30 km lid,
-    and native MPAS drifts the same way.
+    `woof/hex/data/countries/s2s80-v1.json` on a `--physics-row arwen`
+    global row) for the polar stratospheric drift. The default global rows
+    use MPAS-A v8.4.2's 55 levels and 30 km lid, and native MPAS drifts the
+    same way.
     On seven held-out 72 h cases scored against WIS2 radiosondes, the
     90-60S 20 hPa bias goes from −9.98 to −1.75 K and the RMSE from 11.44
     to 2.32 K. The cost is about +0.3 K at 100 hPa, already present at
