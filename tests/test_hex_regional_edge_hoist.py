@@ -16,7 +16,7 @@ import pytest
 
 cp = pytest.importorskip("cupy")
 
-import _numerics_child
+import _numerics_child  # noqa: E402
 
 NLEV, NCELLS, NEDGES, WIDTH = 13, 211, 617, 12
 
