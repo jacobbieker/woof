@@ -14,8 +14,11 @@ them, and GLSEA (`lake_state_source = "auto"`) wherever it covers.
 | `--lakes off` | 0 | (unchanged) | `auto` |
 
 - `clm` turns on WRF's CLM lake model. It uses WPS bathymetry (the
-  `lake_depth` geography, fetched on demand) and starts the lakes from GLSEA
-  where GLSEA covers and from ERA5's FLake state elsewhere.
+  `lake_depth` geography) and starts the lakes from GLSEA where GLSEA covers
+  and from ERA5's FLake state elsewhere. `woof go` does not download
+  `lake_depth` (about 1.9 GB) itself. Where it is missing, preparation stops
+  and names the remedy: `woof fetch-geog --config <stem>.lakes-clm-<hash>.toml`
+  (the copy the switch wrote), then run `woof go --lakes clm` again.
 - `ic` keeps WRF's water-point lakes but replaces the forcing's lake skin
   temperature with the same initial state.
 - `off` writes the defaults.
