@@ -67,6 +67,7 @@ def test_layer_optics_column_blocks_keep_the_words(monkeypatch):
     diag = model.Diagnostic(wavelengths=(450.0, 760.5), umu=(0.6, -0.8), phi=(0.0, 90.0))
     ref = model.compute(diag, **kw)
     monkeypatch.setattr(driver, "OPTICS_CHUNK", 64)
+    monkeypatch.setattr(driver.os, "cpu_count", lambda: 2)     # blocks on any host
     got = model.compute(diag, **kw)
     assert sorted(got) == sorted(ref)
     for k in ref:
