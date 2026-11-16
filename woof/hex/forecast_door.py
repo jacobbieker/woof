@@ -4957,8 +4957,17 @@ def bind_native_damping(arguments: argparse.Namespace, native_text: str) -> str:
         from .mpasphys.driver_v842 import interval_seconds
         for option in ("config_radtlw_interval", "config_radtsw_interval"):
             named = namelist_option(native_text, "physics", option)
-            have = (float(interval_seconds(named)) if named not in (None, "", "none")
-                    else float(mpas_defaults.DEFAULT_RADIATION_SECONDS))
+            if named in (None, ""):
+                have = float(mpas_defaults.DEFAULT_RADIATION_SECONDS)
+            elif str(named).strip() == "none":
+                # An explicit 'none' calls radiation every dynamics step (PhysicsManager: scheme_dt = dt).
+                step = namelist_option(native_text, "nhyd_model", "config_dt")
+                if step is None:
+                    raise ValueError(f"the MPAS suite's {option} is 'none' (every dynamics step) and no config_dt "
+                                     f"is named, so --radiation-seconds {float(seconds):g} cannot be checked")
+                have = float(step)
+            else:
+                have = float(interval_seconds(named))
             if float(seconds) != have:
                 raise ValueError(f"--radiation-seconds {float(seconds):g} and the MPAS suite's {option} "
                                  f"({have:g} s) name two radiation intervals; set the interval in the "

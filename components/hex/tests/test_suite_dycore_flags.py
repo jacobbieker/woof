@@ -119,6 +119,15 @@ def test_a_radiation_interval_the_suite_does_not_run_is_refused():
     assert forecast_door.bind_native_dynamics(args(radiation_seconds=1800.0), TEXT) == TEXT
     with pytest.raises(ValueError, match="two radiation intervals"):
         forecast_door.bind_native_dynamics(args(radiation_seconds=900.0), TEXT)
+    # An explicit 'none' is radiation on every dynamics step (24 s here), not the 30 min Registry default.
+    every_step = TEXT.replace("/\n&physics\n", "/\n&physics\nconfig_radtlw_interval='none'\n"
+                              "config_radtsw_interval='none'\n")
+    with pytest.raises(ValueError, match=r"--radiation-seconds 1800 .*config_radtlw_interval \(24 s\)"):
+        forecast_door.bind_native_dynamics(args(radiation_seconds=1800.0), every_step)
+    assert forecast_door.bind_native_dynamics(args(radiation_seconds=24.0), every_step) == every_step
+    with pytest.raises(ValueError, match="no config_dt"):
+        forecast_door.bind_native_dynamics(args(radiation_seconds=1800.0),
+                                           every_step.replace("config_dt=24.0\n", ""))
 
 
 def test_the_route_dycore_carries_the_damping_levels_and_refuses_bad_ones():
