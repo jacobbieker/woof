@@ -1,0 +1,32 @@
+{
+ "build_receipt": [
+  "GNU Fortran (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+  "Linux x86_64",
+  "flags: -O0 -ffp-contract=off -cpp -ffree-form -ffree-line-length-none -fconvert=big-endian   -fallow-argument-mismatch -DEM_CORE=1 -DWRF_CHEM=0 -DHWRF=0 -DBUILD_RRTMK=1   -DRWORDSIZE=4 -DIWORDSIZE=4 -DDWORDSIZE=8 -DLWORDSIZE=4",
+  "744a89b91faaf5ccc7b3fb3f30a0bfe3379fa1be2f32dcb8e5821e5368077c7b  /mnt/NVME2/woof-work/worktrees/rrtmgk/tools/rrtmg_k_column_oracle/rad_k_column_oracle.F90",
+  "241b5d8fbc6ae2e4b05e771bc7303904e6bc8b67ade8f1c19a21bb4d526e86f3  /mnt/NVME2/woof-work/worktrees/rrtmgk/tools/rrtmg_k_column_oracle/stub_wrf_k.F90",
+  "7c5e5b4d98f24ef66f43d6c8c47b4158c24a36778eba4fbf19b4c268ad4213c4  /mnt/NVME2/woof-work/worktrees/rrtmgk/tools/rrtmg_k_column_oracle/compare.py",
+  "8996ba5c8a3018959b5330fa1cfa1b2a86ccb323a9088001fcd233d1f85fbffd  /mnt/NVME2/woof-work/worktrees/rrtmgk/tools/rrtmg_k_column_oracle/gen_static.py",
+  "1950dd88241ca82e6aa9e146c6e403549f3515383b306ec96bee42a3a7901193  /mnt/NVME2/woof-work/worktrees/rrtmgk/tools/rrtmg_k_column_oracle/make_columns.py",
+  "b733e24a27870f6ed38fbc658dd459cfd10f1391528f17410c36890fa40dc709  /mnt/NVME2/woof-work/worktrees/rrtmgk/tools/rrtmg_k_column_oracle/make_fixture.py",
+  "9b80e79e92cc3eecb1e646f3c5d01c32649c313111a36df781138ededeac567d  /mnt/NVME2/woof-work/worktrees/rrtmgk/tools/rrtmg_k_column_oracle/run_woof.py",
+  "ba94814f04a853d3a4dd6c77bc70bc7077a418c58d52d2f5a6d902945952ffd1  /mnt/NVME2/woof-work/worktrees/rrtmgk/tools/rrtmg_k_column_oracle/build.sh",
+  "f4b98ed61f60e30a57e1eccd852464bbf5bdbdb9d667748695a26e9eba91eb64  /mnt/NVME2/woof-work/worktrees/rrtmgk/tools/rrtmg_k_column_oracle/../rrtmg_legacy_column_oracle/build_units.py",
+  "67a09fa42b2d00ca76d8aa65405a5f1891a7ce21d859c579d577679de00032a5  /mnt/NVME2/woof-work/fortran/src/WRF-4.7.1/phys/module_ra_effective_radius.F",
+  "088cb30e7b113ac97e300592ed15159b183421029c453ab61974fdb6c9ff007f  /mnt/NVME2/woof-work/fortran/src/WRF-4.7.1/phys/module_ra_rrtmg_lwk.F",
+  "30f9eb5f03f5208517b91851ddc7ee205733c56e462b82779126c7a7bd3b59eb  /mnt/NVME2/woof-work/fortran/src/WRF-4.7.1/phys/module_ra_rrtmg_swk.F",
+  "bcfdee24b63a4c909522a329b8e16c539f0173c7e5aea2caf933ab4fe28c5c97  RRTMG_LW_DATA",
+  "a7d25f5b4d33be8629cbef7ecacc1ff413bf398a021297793e843ba1cc627baf  RRTMG_SW_DATA",
+  "2a13ee25809672e0419e40062c1fc753580adbf604bfc67a9166ef77c815dbc0  ozone.formatted",
+  "761597f3454b99e3dbf15d2621b1ede88269948e96e47f4695b79fabd3cc6348  ozone_lat.formatted",
+  "df26a938273b22d2d04ec52b7297827a316cac0061fab020519241cdc0e61d48  ozone_plev.formatted",
+  "168a0da2b21a899474d676ef8ee5dc91c3b5916363cbe8d58fdc10f941be4d49  raddrv_extract.F90",
+  "fused multiply-add instructions in the executable: 0"
+ ],
+ "fixture_sha256": {
+  "columns_ptop2000.npz": "5827a128aabbb8d6a18848db831c1cca9cbaab1f6236dbc81a1b4216e91640a0",
+  "columns_ptop5000.npz": "4549586dc60fa2f6e370e57c4ee3e1f43222f74d4c517e98fb8482601e755224",
+  "wrf471.npz": "c159409bf717a20eb985be73f7df84f46ea69f6010da84f89d2f846c369e9b71",
+  "regimes.json": "d1d60b6d175875d825bb7a5219f9accf0b6290c4c294c7b6cc2532d485bb2bfb"
+ }
+}

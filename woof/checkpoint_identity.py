@@ -807,8 +807,13 @@ LAND_SURFACE_PARAMETER_SOURCES = {
                           "noahmp_genparm")),
     8: ("column_surface_params", ("ssib_vegetation", "noah_landuse")),
 }
+#: WRF 4.7.1 RRTMG-K (14/14): one rad_rrtmg_driver for both spectra, one
+#: radiation layer above the model top to 1e-5 hPa (woof.core.rrtmgk).
+RRTMGK_ALGORITHM_IDENTITY = "wrf-v4.7.1-rrtmg-k-lw-sw-v1"
+RRTMGK_ABOVE_ATMOSPHERE_POLICY = "wrf-v4.7.1-rrtmg-k-one-layer-to-1e-5-hpa-v1"
 LONGWAVE_ALGORITHM_IDENTITIES = {
     7: "wrf461-flg-rad-all-v1",
+    14: RRTMGK_ALGORITHM_IDENTITY,
     31: "wrf-v4.6.1-relaxation-31-v1",
     5: "wrf461-goddard-defined-visible-depth-v1",
     99: "wrf-v4.6.1-gfdleta-lw-v1",
@@ -820,6 +825,7 @@ LONGWAVE_ALGORITHM_IDENTITIES = {
 }
 SHORTWAVE_ALGORITHM_IDENTITIES = {
     7: "wrf461-flg-rad-all-v1",
+    14: RRTMGK_ALGORITHM_IDENTITY,
     5: "wrf461-goddard-defined-visible-depth-v1",
     99: "wrf-v4.6.1-gfdleta-sw-v1",
     2: "wrf-v4.7.1-gsfc-shortwave-v2",
@@ -834,6 +840,7 @@ SHORTWAVE_ALGORITHM_IDENTITIES = {
 #: the same packaged coefficient tables and solver.
 LONGWAVE_ABOVE_ATMOSPHERE_POLICIES = {
     7: "model-column-top-interface-no-added-cap",
+    14: RRTMGK_ABOVE_ATMOSPHERE_POLICY,
     31: "not-applicable-idealized-column-forcing",
     5: "model-column-top-interface-zero-hpa",
     99: "wrf-v4.6.1-gfdl-model-column",
@@ -845,6 +852,7 @@ LONGWAVE_ABOVE_ATMOSPHERE_POLICIES = {
 }
 SHORTWAVE_ABOVE_ATMOSPHERE_POLICIES = {
     7: "model-column-top-interface-no-added-cap",
+    14: RRTMGK_ABOVE_ATMOSPHERE_POLICY,
     5: "model-column-top-interface-zero-hpa",
     99: "wrf-v4.6.1-gfdl-model-column",
     2: "wrf-v4.7.1-gsfc-clear-top-layer-to-zero-pressure",

@@ -323,6 +323,16 @@ def make_radiation(cfg, start_time, latitude_deg, longitude_deg, *,
     if not (lw or sw):
         return None
     args = (start_time, latitude_deg, longitude_deg)
+    if 14 in (lw, sw):
+        # WRF RRTMG-K: one rad_rrtmg_driver call computes both spectra
+        # (config.validate_rrtmgk_config admits only the 14/14 pair).
+        if (lw, sw) != (14, 14):
+            raise ValueError("RRTMG-K runs only as ra_lw_physics=ra_sw_physics=14")
+        from woof.core.rrtmgk import RRTMGKRadiation
+        return RRTMGKRadiation(*args, o3input=cfg.o3input, icloud=cfg.icloud,
+                               column_chunk=column_chunk,
+                               ozone_parent=ozone_parent,
+                               ozone_routing=ozone_routing, p_top=p_top)
     # Additional paired column engines are declared by their registry row.
     from woof import physics_registry
     for option in physics_registry.physics_registry()['components']['radiation']['options'].values():

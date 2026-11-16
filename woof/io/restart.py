@@ -2945,6 +2945,9 @@ def _radiation_setup_identity(driver, cfg) -> dict:
     if (lw_id, sw_id) == (7, 7):
         from woof.core.radiation_composition import adapter_restart_identity
         identity["flg"] = adapter_restart_identity(scheme)
+    if (lw_id, sw_id) == (14, 14):
+        # RRTMG-K's own operands: o3input, ozone routing and assets.
+        identity["rrtmgk"] = scheme.restart_identity()
     if (lw_id, sw_id) == (4, 4) and not legacy_rrtmg:
         try:
             identity.update({

@@ -4619,7 +4619,7 @@ def gpu_rrtmg_lw_batched_device(ncol, nlay, icld, play, plev, tlay, tlev,
                                 relqmcl, resnmcl, tauaer, C,
                                 column_chunk=None, _stage_probe=None, *,
                                 mcica_layout="gpoint", _march="inline",
-                                spectral_output="none"):
+                                spectral_output="none", taumol_post=None):
     """Batched full LW chain, device-resident: same kernels, same compile
     path, same launch-side numerics as gpu_rrtmg_lw -- the only changes
     are grid sizes (ncol > 1) and host plumbing.  Inputs numpy or cupy
@@ -4638,6 +4638,11 @@ def gpu_rrtmg_lw_batched_device(ncol, nlay, icld, play, plev, tlay, tlev,
     (_march_inline_source); ``"staged"`` runs the taut and prol kernels and
     the coalesced march it replaced, kept as the in-suite reference.  Same
     bits.
+    ``taumol_post`` (default None: nothing runs) is called once per chunk
+    right after the sixteen band kernels as
+    ``taumol_post(nc, nl, laytrop_d, fs_d, isv_d, wx_d, K, taug_d,
+    fracs_d)``; RRTMG-K (woof.core.rrtmgk) rewrites its one changed band
+    there.
     """
     if mcica_layout not in ("gpoint", "column"):
         raise ValueError("mcica_layout must be gpoint or column")
@@ -4792,6 +4797,9 @@ def gpu_rrtmg_lw_batched_device(ncol, nlay, icld, play, plev, tlay, tlev,
             (blocks, 16), (128,),
             (i32(nc), i32(nl), laytrop_d, fs_d, isv_d, wx_d,
              K["chi"], K["oneminus"], K["bandptrs"], taug_d, fracs_d))
+        if taumol_post is not None:
+            taumol_post(nc, nl, laytrop_d, fs_d, isv_d, wx_d, K, taug_d,
+                        fracs_d)
         if _stage_probe is not None:
             _stage_probe("bands")
         # FV/IV close over the two slabs, so they are released by
