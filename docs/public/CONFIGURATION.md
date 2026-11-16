@@ -553,6 +553,9 @@ GLSEA where it covers and ERA5 elsewhere; see
 [lake-state-initialization.md](../lake-state-initialization.md)); a research-only row
 also needs `lake_state_path`, its acquired CF NetCDF file, and
 `lake_state_accept_licence` set to that row's licence string.
+`woof go --lakes clm|ic|off` writes these lake keys, plus `sf_lake_physics`
+and `use_lakedepth`, on every domain in a launched copy of the experiment
+([lakes.md](../lakes.md)).
 
 `clos_choice` and `ishallow` configure the Grell-Freitas cumulus scheme
 (`cu_physics = 3`): which closure the deep scheme uses (0, the default,

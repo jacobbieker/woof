@@ -6334,6 +6334,12 @@ def _go_config_main(args, *, observer=None) -> int:
     if getattr(args, "wind_farms", None) is not None:
         from woof.wind_inputs import prepare_launch as prepare_wind_launch
         prepare_wind_launch(args)
+    if getattr(args, "lakes", None) is not None:
+        from woof.lake_launch import prepare_launch as prepare_lake_launch
+        try:
+            prepare_lake_launch(args)
+        except ValueError as refusal:
+            raise GoRefusal(str(refusal)) from None
     from woof.core.resident_admission import memory_gate_override
     from woof.verification_visuals import verification_scope
     enabled = getattr(args, "verify_visuals", None)
@@ -7882,6 +7888,8 @@ def _add_go_arguments(parser) -> None:
     add_go_input_arguments(parser)
     parser.add_argument("--wind-farms", default=None, metavar="uswtdb|TABLE|off",
                         help="opt-in Fitch turbine drag and TKE from USWTDB or a WRF/JSON turbine table")
+    from woof.lake_launch import add_argument as add_lake_argument
+    add_lake_argument(parser)
     parser.add_argument("--hydro", nargs="?", const="", default=None,
                         type=lambda value: "" if value == "on" else value,
                         metavar="on|off|SETTINGS.toml", help="hydro is opt-in: --hydro on couples NextGen hydro "

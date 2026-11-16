@@ -785,7 +785,7 @@
     "call_sha256": "4a2cea31741214d7e99fabb2560934bd7c144853a6a20c27191973b72fccb92a",
     "constructor": "compile_using_nvrtc",
     "factory": "__init__",
-    "factory_sha256": "7f4592c5140e75fb0069431080745a63c73d898784ed443390ab0fc836793d2a",
+    "factory_sha256": "cbff38821f18c265828e685ba8e2a5ef6d6371acac467a3c37d836f0897bb0be",
     "file": "woof/core/rrtmg_sw.py",
     "status": "unresolved"
    },
@@ -3969,7 +3969,7 @@
    },
    {
     "file": "woof/core/kernels/rrtmg_lw_zbatched.cu",
-    "sha256": "dfe3b824da5e8af04366dc873654368fb687a26075ddad898f48e3a6a2a367e6"
+    "sha256": "f1bb5d25fd9855ba377a6dc9298fc213876eb811b42061b8dc48b1413aab0f9f"
    },
    {
     "file": "woof/core/kernels/rrtmg_mcica_wrf.cu",
@@ -3985,7 +3985,7 @@
    },
    {
     "file": "woof/core/kernels/rrtmg_sw_spectral.cuh",
-    "sha256": "5ea756c7d433fa382657f484179adfcb6dfd4b83a4d774061a11d3e968d72340"
+    "sha256": "965ab0c8e92cedf1d201be58426b7e5b357dccd32fa9fd040aca21b74f0ef67f"
    },
    {
     "file": "woof/core/kernels/rrtmgp_cloud.cu",
@@ -5271,7 +5271,7 @@
    },
    {
     "file": "woof/core/rrtmg_legacy.py",
-    "sha256": "d7a86ad8d5e9d5a0bab509bfad17bc0838f16c971fc9b3f96396952eb0f5b36e"
+    "sha256": "c65180c90681aa18dc0fb640f71e00cc7e78c2008b905d97f7d2065828ea674a"
    },
    {
     "file": "woof/core/rrtmg_legacy_device.py",
@@ -5279,7 +5279,7 @@
    },
    {
     "file": "woof/core/rrtmg_lw.py",
-    "sha256": "0d553e50906a7ae9878db7118e2ff4b2ad4de859257083b9ad1c4e14aa047b8b"
+    "sha256": "4a2ede9d819285ab26699e6e55b43e45275b5f51c82612cc72db6c18b37f217c"
    },
    {
     "file": "woof/core/rrtmg_mcica.py",
@@ -5287,7 +5287,7 @@
    },
    {
     "file": "woof/core/rrtmg_sw.py",
-    "sha256": "ba69215adda415ebed037e7818ffa270ad07a16bb0b771bce7d2b9d8f425c9f3"
+    "sha256": "2b16603e91d61d8d3074902402c7d4a38a82a6dc1eced2398b370be7c6a79f6e"
    },
    {
     "file": "woof/core/ruc_gpu.py",
@@ -6067,11 +6067,11 @@
    },
    {
     "file": "woof/hex/mpasphys/rrtmg_lw_v842.py",
-    "sha256": "38eb559235016f09942fdb973c711c2e91c69573437501a378e5322cb821ec11"
+    "sha256": "9ff8b62ba59c8625a8f909828b08f407689097f8a83d51f391af98e4e1bafb48"
    },
    {
     "file": "woof/hex/mpasphys/rrtmg_sw_v842.py",
-    "sha256": "81b18261852c71d3718f051d64ff8de7b34f3c39c3403ce29f672fdf0de58778"
+    "sha256": "ec00a1a8cbaf660d867ece0f9ffd4e158122864bab42ce515a7fae2c2cdd1074"
    },
    {
     "file": "woof/hex/mpasphys/seaice_v842.py",
@@ -9443,7 +9443,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "5a33f7e0f99169b932ad69704cd9f293bc45fe762eca5702dbfae4996869dff8"
+   "source_sha256": "57d37e8d74b5cd0d1a5a81bd4bc2fa80afac8247946d7f9b627bceff9e11b0d2"
   },
   "composed:rrtmg_sw": {
    "assessment": "static_diagnostic_only",

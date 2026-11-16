@@ -173,6 +173,37 @@ def _layer_optics(opts, col, rep, iw, cl, nstr, numu_angles, aer=None, aer_nodes
 #: Columns per host thread in :func:`_layer_optics_columns`.
 OPTICS_CHUNK = 4096
 
+#: Default host-optics bound of one solve (compute's ``group_bytes``).
+GROUP_BYTES = 2 << 30
+
+
+def optics_bytes_per_wavelength(ncol, nlyr, nstr, nang=0):
+    """Host bytes one representative wavelength's optics take in a solve:
+    dtau, ssa, the nstr+1 moments, the user-angle phase functions and zlev
+    (float64), counted three times for the per-wavelength parts, their
+    concatenation and the solver's contiguous copies."""
+    return 3 * 8 * int(ncol) * (int(nlyr) * (2 + int(nstr) + 1 + int(nang)) + int(nlyr) + 1)
+
+
+def band_groups(rep, bands, per_wavelength, group_bytes=None):
+    """Indices into ``bands`` in consecutive groups, each group's distinct
+    representative wavelengths within ``group_bytes`` (at least one band per
+    group).  Grouping is storage only: each problem solves alone and each band
+    sums its own wavelengths in its own order."""
+    if group_bytes is None:
+        group_bytes = int(os.environ.get("WOOF_RADTRAN_GROUP_BYTES", GROUP_BYTES))
+    groups, cur, seen = [], [], set()
+    for j, b in enumerate(bands):
+        iws = {int(i) for i in rep.band(b).iwvl}
+        if cur and len(seen | iws) * per_wavelength > group_bytes:
+            groups.append(cur)
+            cur, seen = [], set()
+        cur.append(j)
+        seen |= iws
+    if cur:
+        groups.append(cur)
+    return groups
+
 
 def _layer_optics_columns(opts, col, rep, iw, cl, nstr, numu_angles, aer=None, aer_nodes=None):
     """:func:`_layer_optics` over column blocks on host threads.
@@ -235,13 +266,15 @@ def select_bands(rep, opts: Options, wavelengths=None) -> list[int]:
 
 def compute(opts: Options, col: atmosphere.Column, clouds_in: CloudLayers | None = None,
             *, aerosol: "opac.AerosolLayers | None" = None, backend: str = "gpu", umu0=None, albedo=None,
-            wavelengths=None, budget_bytes: int | None = None) -> Result:
+            wavelengths=None, budget_bytes: int | None = None, group_bytes: int | None = None) -> Result:
     """Band-averaged spectral irradiances/radiances for every column.
 
     ``umu0`` and ``albedo`` (per column) override ``opts.sza`` and
     ``opts.albedo``; columns with the sun at or below the horizon (umu0 <= 0)
     get zeros.  ``wavelengths`` selects the bands containing those
-    wavelengths instead of ``opts.wavelength``'s range.
+    wavelengths instead of ``opts.wavelength``'s range.  ``group_bytes``
+    bounds the host optics one solve holds (band_groups; default GROUP_BYTES
+    or WOOF_RADTRAN_GROUP_BYTES); it moves no word.
     """
     opts.validate()
     if col.z.ndim == 1:
@@ -251,7 +284,6 @@ def compute(opts: Options, col: atmosphere.Column, clouds_in: CloudLayers | None
     L = nlev - 1
     rep = open_reptran(str(data.reptran_file(opts.reptran_resolution)))
     bands = select_bands(rep, opts, wavelengths)
-    iws = sorted({int(i) for b in bands for i in rep.band(b).iwvl})
     nstr = opts.streams
     mu0_all = (np.full(ncol, math.cos(math.radians(opts.sza))) if umu0 is None
                else np.broadcast_to(np.asarray(umu0, dtype=np.float64), (ncol,)).copy())
@@ -311,47 +343,59 @@ def compute(opts: Options, col: atmosphere.Column, clouds_in: CloudLayers | None
     if opts.umu and opts.disort_intcor == "moments":
         flags |= solver.TMS
     aer_nodes = None if aerosol is None else opac.humidity_nodes(aerosol, col)
-    D, S, P, PT, PK = [], [], [], [], []
-    for iw in iws:
-        d, s, p, pt, pk = _layer_optics_columns(opts, col, rep, iw, clouds_in, nstr,
-                                                ang if flags & solver.TMS else None, aerosol, aer_nodes)
-        D.append(d); S.append(s); P.append(p); PK.append(pk)
-        if pt is not None:
-            PT.append(pt)
-    nw = len(iws)
-    dtau = np.concatenate(D).reshape(nw * nd, L)
-    ssa = np.concatenate(S).reshape(nw * nd, L)
-    pmom = np.concatenate(P).reshape(nw * nd, L, nstr + 1)
-    ptrue = np.concatenate(PT).reshape(nw * nd, L, numu, nphi) if PT else None
-    zlev = np.tile(col.z, (nw, 1))
-    flux, rad = solver.solve(nstr=nstr, flags=flags, dtau=dtau, ssa=ssa, pmom=pmom, umu0=np.tile(mu0, nw),
-                             fbeam=1.0, albedo=np.tile(alb_all[day], nw), zlev=zlev,
-                             radius=opts.earth_radius, outlev=outlev, umu=opts.umu, phi=phis, ptrue=ptrue,
-                             backend=backend, budget_bytes=budget_bytes)
-    flux = flux.reshape(nw, nd, nout, 6)
-    rad = rad.reshape(nw, nd, nout, numu, nphi)
-    if flags & solver.TMS and flags & solver.DELTAM:
-        # Nakajima & Tanaka (1988) IMS: secondary scattering through the forward peak
-        for k in range(nw):
-            f = P[k][..., nstr]
-            rad[k] += ims.correction(dtau=D[k], ssa=S[k], f=f, components=PK[k], nstr=nstr, umu0=mu0,
-                                     umu=opts.umu, cosang=ang, outlev=outlev, fbeam=1.0)
     dist = sun_distance_factor(opts.day_of_year)
-    pos = {iw: k for k, iw in enumerate(iws)}
-    for j, b in enumerate(bands):
-        B = rep.band(b)
-        e0 = 0.0
-        accf = np.zeros((6, nd, nout))
-        accr = np.zeros((nd, nout, numu, nphi))
-        for iw, w in zip(B.iwvl, B.weight):
-            k = pos[int(iw)]
-            f = w * rep.extra[iw] * dist
-            e0 += f
-            accf += f * np.moveaxis(flux[k], -1, 0)
-            accr += f * rad[k]
-        if opts.output_quantity == "transmittance":
-            accf /= e0
-            accr /= e0
-        fo[..., j][:, day, :] = accf
-        uu[..., j][day] = accr
+    # Bands in groups whose representative wavelengths' host optics fit the
+    # group budget (band_groups): every (wavelength, column) problem is solved
+    # on its own and a band sums only its own wavelengths, so a group gives
+    # the words of the one-solve call while the host holds one group's optics.
+    per_iw = optics_bytes_per_wavelength(nd, L, nstr, numu * nphi if flags & solver.TMS else 0)
+    nw_total = len({int(i) for b in bands for i in rep.band(b).iwvl})
+    for group in band_groups(rep, bands, per_iw, group_bytes):
+        giws = sorted({int(i) for j in group for i in rep.band(bands[j]).iwvl})
+        D, S, P, PT, PK = [], [], [], [], []
+        for iw in giws:
+            d, s, p, pt, pk = _layer_optics_columns(opts, col, rep, iw, clouds_in, nstr,
+                                                    ang if flags & solver.TMS else None, aerosol, aer_nodes)
+            D.append(d); S.append(s); P.append(p); PK.append(pk)
+            if pt is not None:
+                PT.append(pt)
+        nw = len(giws)
+        dtau = np.concatenate(D).reshape(nw * nd, L)
+        ssa = np.concatenate(S).reshape(nw * nd, L)
+        pmom = np.concatenate(P).reshape(nw * nd, L, nstr + 1)
+        ptrue = np.concatenate(PT).reshape(nw * nd, L, numu, nphi) if PT else None
+        del PT
+        zlev = np.tile(col.z, (nw, 1))
+        flux, rad = solver.solve(nstr=nstr, flags=flags, dtau=dtau, ssa=ssa, pmom=pmom, umu0=np.tile(mu0, nw),
+                                 fbeam=1.0, albedo=np.tile(alb_all[day], nw), zlev=zlev,
+                                 radius=opts.earth_radius, outlev=outlev, umu=opts.umu, phi=phis, ptrue=ptrue,
+                                 backend=backend, budget_bytes=budget_bytes, nprob_total=nw_total * nd)
+        del dtau, ssa, pmom, ptrue, zlev
+        flux = flux.reshape(nw, nd, nout, 6)
+        rad = rad.reshape(nw, nd, nout, numu, nphi)
+        if flags & solver.TMS and flags & solver.DELTAM:
+            # Nakajima & Tanaka (1988) IMS: secondary scattering through the forward peak
+            for k in range(nw):
+                f = P[k][..., nstr]
+                rad[k] += ims.correction(dtau=D[k], ssa=S[k], f=f, components=PK[k], nstr=nstr, umu0=mu0,
+                                         umu=opts.umu, cosang=ang, outlev=outlev, fbeam=1.0)
+        del D, S, P, PK
+        pos = {iw: k for k, iw in enumerate(giws)}
+        for j in group:
+            B = rep.band(bands[j])
+            e0 = 0.0
+            accf = np.zeros((6, nd, nout))
+            accr = np.zeros((nd, nout, numu, nphi))
+            for iw, w in zip(B.iwvl, B.weight):
+                k = pos[int(iw)]
+                f = w * rep.extra[iw] * dist
+                e0 += f
+                accf += f * np.moveaxis(flux[k], -1, 0)
+                accr += f * rad[k]
+            if opts.output_quantity == "transmittance":
+                accf /= e0
+                accr /= e0
+            fo[..., j][:, day, :] = accf
+            uu[..., j][day] = accr
+        del flux, rad
     return result
