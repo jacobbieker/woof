@@ -298,7 +298,9 @@ obs-referee's scientific boundary says so explicitly. The referee of record is
 a vertical-profile referee: radiosondes or a provenance-pinned analysis
 profile. Until one is supplied, this divergence is **UNRESOLVED by
 observations**: declared, bounded at 24 h, and disqualifying for long-range
-use as stated.
+use as stated. (Superseded for the polar top on 2026-11-15: radiosondes trace it to
+MPAS's own low-top (55-level, 30 km) configuration, with an opt-in fix. See
+"The polar-top cold drift is MPAS's low-top configuration" below.)
 
 The 2026-08-25 run did not change that and was never going to. It records the
 claim `upper-band-theta-drift-cause` as `UNRESOLVED` under the manifest's
@@ -398,6 +400,169 @@ too. The receipt is `evidence/dt-anchor-ntiedtke-20261005/RECEIPT.md`.
 Grell-Freitas stays reachable at every spacing with `--convection gf`. The
 south-polar 15 hPa drift is not touched by this change and stays a named
 follow-up (lid height or non-orographic gravity-wave drag).
+
+### The polar-top cold drift is MPAS's low-top configuration (WIS2 radiosondes, 2026-11-15)
+
+**Upstream, not the port.** This drift belongs to MPAS-A v8.4.2 at its
+standard 55-level, 30 km configuration. It is not a hex physics or port
+defect. The opt-in fix is a higher lid, which hex already ships as the
+`global-120km-high-top` row.
+
+**The runs.** Seven 72 h global forecasts on x1.40962, started from GFS
+analyses between 2026-10-28 and 2026-11-06 (00Z and 12Z). They were scored
+with `woof.hex.sonde_profile_referee` against WIS2 radiosondes from
+`bkr/obs/wis2_upper_air.icechunk`, at 00Z and 12Z, using the case-paired
+bootstrap (5000 replicates, seed 20261115). Bias is model minus observation,
+in K. Four arms ran:
+
+- **WOOF arm:** `global-120km --physics-row arwen`, the WOOF physics
+  (`arwen_mpas_column`). This is the same physics the high-top row runs,
+  so the two differ only in the vertical declaration.
+- **MPAS suite arm:** `global-120km --physics-row mpas`, the row's default.
+- **High-top arm:** `global-120km-high-top`, described under "The opt-in"
+  below.
+- **Native MPAS-A v8.4.2:** run on CPU in the pinned oracle container. It
+  used the same init, the `mesoscale_reference` suite, dt 600 s, w damping
+  from 22 km with coefficient 0.2, and its own gravity-wave-drag and ozone
+  settings.
+
+**Magnitude.** On the WOOF arm, the mean over the seven cases at 72 h:
+
+| band, level | bias at 0 / 24 / 48 / 72 h | RMSE at 72 h | drift per 24 h |
+|---|---|---|---|
+| 90-60S, 20 hPa | -0.57 / -6.62 / -10.70 / -9.98 | 11.44 | -3.13 |
+| 90-60S, 30 hPa | -0.55 / -3.80 / -6.48 / -7.77 | 9.02 | -2.41 |
+| 90-60S, 50 hPa | +0.15 / -0.90 / -2.18 / -2.76 | 4.20 | -1.03 |
+| 60-90N, 20 hPa | +0.28 / +0.38 / +1.78 / +1.86 | 8.10 | +0.70 |
+| global, 20 hPa | +0.20 / -1.07 / -1.42 / -1.46 | 6.17 | -0.51 |
+| global, 100 hPa | +0.51 / +0.46 / +0.56 / +0.56 | 2.23 | +0.01 |
+
+The drift runs cold over the south polar cap and warm over the north polar
+cap. Elsewhere it is small. All seven cases agree in sign at 90-60S, 20 hPa:
+from -5.2 to -16.9 K at 72 h.
+
+**It is the same in native MPAS-A.** Three cases (2026-10-28 00Z, 10-31 00Z,
+11-02 00Z) ran natively. Native minus the WOOF arm, at 72 h:
+
+- At 90-60S, 20 hPa the bias differs by -0.27 K and the RMSE by +0.24 K.
+- In every other band and level checked from 100 to 20 hPa, the bias
+  differs by no more than 0.15 K.
+
+The MPAS suite arm, with different physics again (Thompson,
+Grell-Freitas, MYNN), shows the same drift: 90-60S, 20 hPa at 72 h is -9.94
+against -9.98 K.
+
+So the physics suite, the radiation code path and the port do not set the
+drift. The configuration does:
+
+- **Radiation and ozone are ruled out.** The WOOF arm and native MPAS
+  differ in both and get the same drift.
+- **The w damping is ruled out.** The hex row runs `rayleigh_xnutr` 0.0 and
+  native runs 0.2 from 22 km, with the same result.
+- **The cap temperature is not too cold overall.** In the 2026-10-28 case
+  the model's cap-mean temperature near 22 hPa holds at about 223 K, while
+  the stations, mostly at the edge of the polar vortex, report 235 to
+  240 K. With the lid at 30 km the error is in the wave structure there.
+
+**Non-orographic gravity-wave drag does not fix it.** Native MPAS v8.4.2
+also ran the 2026-10-28 case with the UGWP drag:
+
+- settings: `config_gwdo_scheme = 'bl_ugwp_gwdo'` and `config_ngw_scheme =
+  true`;
+- inputs: `ugwp_oro_data.nc` from `woof.hex.ugwp_oro`, and
+  `ugwp_limb_tau.nc` from NOAA-GSL/MPAS-Model at the repository's pin.
+
+Its 90-60S, 20 hPa bias at 72 h is -17.10 K, against -17.20 K without the
+drag. The global 20 hPa bias is -2.37 against -2.25 K. A drag option on
+the WOOF arm is therefore not offered: it would not move this bias.
+
+**The high-top vertical configuration is the fix, in native MPAS too.**
+Native MPAS v8.4.2 was rerun on the 2026-10-31 case with the high-top
+declaration's vertical configuration: 80 levels, a 50 km lid and w damping
+from 40 km instead of 22 km. These three changed together. It had no
+horizontal Rayleigh or CAM damping, and it kept MPAS's own physics and
+ozone. The 90-60S, 20 hPa bias at 72 h goes from -10.21 K (RMSE 11.79) to
+-0.02 K (RMSE 1.16).
+
+This run alone does not separate the lid from the damping start. The
+2026-10-05 analysis runs above did vary the w-damping start at the 30 km
+lid. Starting at 29 km made the cap worse, and starting at 18 km made it
+only slightly better (-11.2 K to -9.6 K). So the damping start does not
+carry a 10 K change, and the remaining causes are the lid and the levels
+above 30 km.
+
+**The opt-in: `global-120km-high-top`, or `--vertical-spec
+woof/hex/data/countries/s2s80-v1.json` on a `--physics-row arwen` global
+row.** The row was shipped for S2S work before this measurement, and
+nothing in it was tuned to these cases, so all seven cases are held out. It runs:
+
+- 80 levels to 50 km (about 1 hPa);
+- w damping from 40 km;
+- CAM damping 0.2 over the top 8 levels;
+- horizontal Rayleigh damping over the top 6 levels with a 5-day timescale;
+- RRTMG every 1800 s with monthly climatological ozone
+  ([s2s-high-top.md](s2s-high-top.md)).
+
+Before and after at 72 h, as a seven-case mean, bias [RMSE]. The change
+column is high-top minus WOOF arm, with its 95 % case-paired interval:
+
+| band, level | WOOF arm (55 levels, 30 km) | high-top (80 levels, 50 km) | change in bias | change in RMSE |
+|---|---|---|---|---|
+| 90-60S, 20 hPa | -9.98 [11.44] | -1.75 [2.32] | +8.23 [+5.72, +11.04] | -9.12 [-12.63, -5.99] |
+| 90-60S, 30 hPa | -7.77 [9.02] | -1.25 [2.34] | +6.52 [+5.14, +8.00] | -6.68 [-8.55, -4.76] |
+| 90-60S, 50 hPa | -2.76 [4.20] | +1.06 [2.00] | +3.82 [+3.27, +4.43] | -2.20 [-3.17, -1.18] |
+| 60-90N, 20 hPa | +1.86 [8.10] | +0.27 [1.64] | -1.59 [-3.12, -0.09] | -6.46 [-7.78, -5.08] |
+| global, 20 hPa | -1.46 [6.17] | +0.21 [3.31] | +1.67 [+1.15, +2.19] | -2.86 [-3.44, -2.25] |
+| global, 30 hPa | -0.73 [3.88] | +0.26 [2.10] | +0.98 [+0.68, +1.33] | -1.79 [-1.95, -1.63] |
+| global, 50 hPa | -0.25 [2.47] | +0.16 [1.87] | +0.41 [+0.22, +0.61] | -0.60 [-0.72, -0.49] |
+| global, 100 hPa | +0.56 [2.23] | +0.89 [2.30] | +0.33 [+0.27, +0.40] | +0.07 [+0.02, +0.12] |
+| 20S-20N, 100 hPa | +1.16 [2.96] | +1.69 [3.24] | +0.53 [+0.46, +0.59] | +0.27 [+0.16, +0.39] |
+| 90-60S, 100 hPa | +0.06 [1.16] | +1.16 [1.52] | +1.10 [+1.00, +1.21] | +0.36 [+0.05, +0.68] |
+
+The 90-60S, 20 hPa drift goes from -3.13 to -0.41 K per 24 h, and the
+global one from -0.51 to -0.04 K. Every case improves: the 90-60S, 20 hPa
+bias at 72 h is -0.3 to -3.3 K, against -5.2 to -16.9 K on the WOOF arm.
+
+**The cost is near the tropopause.**
+
+- **Global 100 hPa is warmer.** It is warmer by +0.33 K at 72 h, but it is
+  already +0.32 K warmer at lead 0 (+0.83 against +0.51 K). This comes from
+  the 80-level init's vertical representation of the tropopause, not from
+  drift.
+- **Tropical 100 hPa is the largest share.** At lead 0 it is +1.65 against
+  +0.66 K.
+- **The south polar 70-100 hPa does gain about +1 K over the 72 h.**
+
+The high-top row is therefore the better choice for anything that reads the
+stratosphere, including S2S, and the default row stays better at 100 hPa.
+
+**Sampling.** Sondes poleward of 60S are few: 3 to 8 soundings per case at
+20 hPa and 72 h. The interval resamples whole cases, so it carries that
+sparsity, and it is clear of zero at every level from 50 to 20 hPa.
+
+**Defaults are unchanged.** `global-120km` stays MPAS's 55-level, 30 km
+configuration, with the MPAS suite as its default physics, and no oracle
+moves.
+
+**On the MPAS suite route the high lid is partial.**
+
+- The route lacks the horizontal Rayleigh options, so it refuses the
+  version 2 declaration's runtime block.
+- With that block removed (the 80-level, 50 km lid and the w damping only),
+  four of seven cases ran 72 h. On those four, the 90-60S, 20 hPa bias at
+  72 h goes from -11.39 K (RMSE 13.40) on the 55-level MPAS suite arm to
+  -1.54 K (RMSE 2.32). The global 20 hPa RMSE goes from 6.36 to 3.59 K.
+- The other three cases (2026-10-31 00Z, 11-02 00Z, 11-05 00Z) stopped at
+  steps 81, 217 and 164 with "MPAS_to_physics CUDA wind reconstruction
+  failed geometry validation: the mesh geometry differs from its sealed
+  copy". That message was wrong. The reconstruction raises one word for
+  every check it makes, and a non-finite normal velocity is one of them.
+  The refusal now names the failed check. Rerun on pb (A6000), 10-31 stops
+  at step 162 with "found a non-finite normal velocity: 1197680 edge values
+  on 80 levels ... the mesh geometry equals its sealed copy". The geometry
+  is intact; the integration blew up. That configuration is an 80-level,
+  50 km lid without the declaration's CAM and horizontal Rayleigh damping.
+  The WOOF-arm row is not affected: it completed all seven cases.
 
 ## 2. Convective-to-explicit precipitation repartition
 
@@ -709,9 +874,10 @@ way from the deficit. Three things would move the rest.
    `asos-dewpoint-rmse` at **3.312 K RMSE, −1.257 K bias** over 56,667
    station reports. What remains of this item is mechanical: re-run the
    other three cases so their bundles carry the fields too.
-2. **A profile referee for (1)**: radiosondes or a provenance-pinned analysis
-   profile. Choosing the reference is not an automated decision and this work
-   did not make it.
+2. **A profile referee for (1): DONE, 2026-11.** The referee is
+   `woof.hex.sonde_profile_referee` against IGRA v2 and WIS2 radiosondes.
+   Its seven-case result is in section 1: the polar-top drift is MPAS's
+   low-top configuration, and `global-120km-high-top` is the opt-in fix.
 3. **Any GF-lane change re-measures all three**, (3) explicitly only after (2).
    The re-measurement now has a standing target rather than an empty column:
    a GF change that removes the convective rainfall deficit against native

@@ -326,6 +326,17 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     at 1 mm falls by 0.02. Evidence:
     [declared-divergences.md](components/hex/docs/declared-divergences.md)
     section 2.
+  - `global-120km-high-top` (or `--vertical-spec` with
+    `woof/hex/data/countries/s2s80-v1.json` on a `--physics-row arwen`
+    global row) for the polar stratospheric drift. The default global rows
+    use MPAS-A v8.4.2's 55 levels and 30 km lid, and native MPAS drifts the
+    same way.
+    On seven held-out 72 h cases scored against WIS2 radiosondes, the
+    90-60S 20 hPa bias goes from −9.98 to −1.75 K and the RMSE from 11.44
+    to 2.32 K. The cost is about +0.3 K at 100 hPa, already present at
+    hour 0. UGWP non-orographic drag does not help. Evidence:
+    [declared-divergences.md](components/hex/docs/declared-divergences.md)
+    section 1.
 - **Hex (MPAS) parity with WRF's options.** The goal is for the hex model
   to accept the options WRF does, reusing WRF's column implementations
   rather than copies, and to refuse by name what it cannot yet do. Landed:
@@ -339,7 +350,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   - surface inputs on the generic column seam: CLM lake, SLUCM urban on
     per-cell fractions, WUDAPT LCZ classes, Noah and RUC mosaic, Pleim-Xiu
     and the slab with their soil inits, irrigation and `topo_wind = 1`
-    ([docs/ruc-mosaic-and-clm-lake.md](docs/ruc-mosaic-and-clm-lake.md));
+    ([docs/ruc-mosaic-and-clm-lake.md](docs/ruc-mosaic-and-clm-lake.md)).
+    `topo_wind = 1` is not recommended on the 120 km globe: against WIS2
+    stations it raises the 10 m wind bias by 0.5 m/s. Its terrain
+    Laplacian on hex uses cell-index neighbours, an open defect
+    ([TERRAIN-DRAG.md](docs/public/TERRAIN-DRAG.md));
   - CCPP TKE-EDMF on the column seam;
   - diagnostics: `nwp_diagnostics` maxima, `p_lev`/`z_lev` levels, `tslist`
     station series, `prec_acc_dt` windows and `acc_phy_tend`, AFWA
@@ -459,12 +474,13 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   (rho K, rhoavg kavg) stored once per step (`smag2d_uv_faces`,
   byte-identical in fast and strict numerics) where each point re-evaluated
   up to ten of them: the u+v pair 1.3 -> 0.44 ms at 49x120x150 and
-  9.5 -> 2.1 ms at 49x300x300 on an A6000 (`WOOF_SMAG_UV_FACES=0` restores
-  the per-point kernels). `km_opt = 2`'s TKE source reads the
-  defor13/defor23 faces stored once (`smag2d_tke_faces`, the `wrf_tke_rhs`
-  statements on the stored words, byte-identical in both numerics modes)
-  where each mass point re-evaluated up to six of them (`WOOF_TKE_FACES=0`
-  restores the per-point kernel).
+  9.5 -> 2.1 ms at 49x300x300 on an A6000, 4.0 -> 2.0 ms and 32 -> 18 ms on
+  an M3 Max (`WOOF_SMAG_UV_FACES=0` restores the per-point kernels).
+  `km_opt = 2`'s TKE source reads the defor13/defor23 faces stored once
+  (`smag2d_tke_faces`, the `wrf_tke_rhs` statements on the stored words,
+  byte-identical in fast and strict numerics) where each mass point
+  re-evaluated up to six of them (`WOOF_TKE_FACES=0` restores the
+  per-point kernel).
   `WOOF_ACOUSTIC_KPAR=1` takes a level-parallel w''-phi'' solve (32 columns
   x 8 lanes per block; 1.7-2.2x the column kernel's speed per launch on an
   A6000): opt-in, because on CUDA its words are the column kernel's generic
@@ -479,7 +495,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   (`WOOF_METAL_ADDRESS_ASYNC=0` restores the eval). Together they remove
   about 96 % of the queue drains on that mesh, and the hour takes 0.59x the
   wall time on edi-vr and 0.64x on a uniform 12 km mesh. Both are
-  byte-identical.
+  byte-identical. Hex on CUDA: a forecast keeps its kernel images in the
+  box's kernel cache (`<kernel cache root>/cupy`) instead of each run's
+  `--scratch`, so a regional run in a fresh work dir no longer recompiles
+  in its first step (edi-vr 1 h on an A6000: step 1 from 42.5 s to 3.6 s,
+  byte-identical; `WOOF_HEX_SHARED_KERNEL_IMAGES=0` restores the per-run
+  cache).
   `WOOF_METAL_GPU_TIMES` times each kernel.
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight

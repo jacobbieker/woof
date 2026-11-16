@@ -1772,11 +1772,11 @@ def _smag_uv_faces_enabled() -> bool:
 def launch_wrf_smag_uv_faces(state: DomainState, cfg: RunConfig, xk, *,
                              time_t: bool):
     """Store the coefficients of WRF's horizontal momentum stresses once
-    (kernels/smag2d_uv_faces.cu wrf_smag_uv_coef_faces): ``-rho K`` at the
-    mass points (tau11 and tau22) and ``-rhoavg kavg`` at the corners
+    (kernels/smag2d_uv_faces.cu wrf_smag_uv_coef_faces): ``rho K`` at the
+    mass points (tau11 and tau22) and ``rhoavg kavg`` at the corners
     (tau12), from ``xk`` (the horizontal K).  Returns ``(cm, c12)`` for
-    :func:`launch_wrf_smag2d_hd`'s u and v rows, which multiply them by the
-    deformation where ``wrf_smag_hd_u`` / ``wrf_smag_hd_v`` recomputed each
+    :func:`launch_wrf_smag2d_hd`'s u and v rows, which form each stress as
+    ``-coefficient * deformation`` where ``wrf_smag_hd_u`` / ``wrf_smag_hd_v`` recomputed each
     coefficient (a density divide and, for tau12, four-point averages) at
     up to ten points; ``None`` when ``WOOF_SMAG_UV_FACES=0``.  The stress
     product itself stays at the reader so default-numerics contraction
@@ -2652,12 +2652,16 @@ def _compute_wrf_moist_theta_mixing(state, cfg, km, kh, specs, *, time_t,
         if budget is not None:
             budget[...] = increment
     exempt = chem_mix2_exempt_slots(state, cfg)
+    # The u and v rows read the same horizontal K: their stress
+    # coefficients are stored once.
+    faces = launch_wrf_smag_uv_faces(state, cfg, specs[0][2], time_t=time_t)
     for f, _tend, xk, _c1, _c2, slot, stag in specs:
         if slot not in exempt:
             launch_wrf_smag2d_hd(
                 state, cfg, f, xk, buffers[slot], stagger=stag,
                 time_t=time_t, full_theta=(slot == "smag_rth"),
-                deformation=deformation if stag in ("x", "y") else None)
+                deformation=deformation if stag in ("x", "y") else None,
+                faces=faces if stag in ("x", "y") else None)
         if seed.get(slot) is None:
             _zero_open_strips(buffers[slot], cfg, 1)
         else:

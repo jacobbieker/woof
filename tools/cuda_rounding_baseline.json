@@ -4185,7 +4185,7 @@
    },
    {
     "file": "woof/core/kernels/smag2d_uv_faces.cu",
-    "sha256": "b6f43f8e3f48e05a835637f80a1ab5f34356bd7507cf9d16012150ed324f8323"
+    "sha256": "dc9828ca72bc7c7b6acb02b382c7326f33fd3f9eb16ab365e7f3e19a400dabfd"
    },
    {
     "file": "woof/core/kernels/smag2d_w_faces.cu",
@@ -5083,7 +5083,7 @@
    },
    {
     "file": "woof/core/dycore.py",
-    "sha256": "529b372da45a0547cf2fb0eb2ad4c4bf1d60929c6d47b11fe003c3334cf80252"
+    "sha256": "2ebce9594d934e01c70109221d92d999e9e7b5b54fc4ab112a3df78e731a5d2e"
    },
    {
     "file": "woof/core/etanew.py",
@@ -5119,11 +5119,11 @@
    },
    {
     "file": "woof/core/kernel_frame_recordings.py",
-    "sha256": "1ec98dad7791cc305bf2685bb2b92e3190d674f5112851a4c315275ea30f174d"
+    "sha256": "f325b7495f94aea3cabbe3bb8d40ba025f2b1b603ab7bdafc920b2387930a135"
    },
    {
     "file": "woof/core/kernels/__init__.py",
-    "sha256": "65c4db919d43a12868d80e1701eebacde2d88bb16911847d6db850e508efe09d"
+    "sha256": "e3589244adc44d2fee7fc7f38938cc3fec25dc13905b410f1a427c2db2bc2700"
    },
    {
     "file": "woof/core/kernels/no_ftz.py",
@@ -5243,7 +5243,7 @@
    },
    {
     "file": "woof/core/preflight.py",
-    "sha256": "97b35c7644e297b2fb92fd1c677768346145d6a79b32dc71fb291aef5cfa8fb6"
+    "sha256": "2ce151ebdabc732afdb67099913c3e20151f37d7dbe0adcb2aa181dcf02958dc"
    },
    {
     "file": "woof/core/refl.py",
@@ -30506,13 +30506,13 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "31cd31a6fcb4520c0172c731f2fba4aa93baaf3f4a7cd1e33baba78e7a754dd1",
+    "sha256": "f23f985f51fb6412e3465cff6471e205f14f84a4d62da2356c516726b7586fb1",
     "sites": {
-     "100": 498
+     "100": 497
     }
    },
    "native_differences": {
-    "sha256": "5d8fd759552cc9edaa9717d35729e11df85cc1357b1bf5b04837abdb48bb548d",
+    "sha256": "5c39275a7eb7e3b2c5478c4d2d429bdffa0e824d6b930892cdb7432c59085ec1",
     "sites": {
      "100": 177
     }
@@ -30542,7 +30542,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "514d7328a07cc14c9ddc3760f153456b8a113e02632b47ee8443a9e356365b57"
+   "source_sha256": "a7c7cdfd321aabd08e13a9ff8abb4efb3bd5eb2bc96a992d57fd98939554f49b"
   },
   "kernels:smag2d_tke_faces": {
    "assessment": "static_diagnostic_only",

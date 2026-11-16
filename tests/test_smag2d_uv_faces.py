@@ -1,8 +1,8 @@
 """The stored-coefficient u/v routes add the words wrf_smag_hd_u / wrf_smag_hd_v add.
 
 ``woof.core.dycore.launch_wrf_smag2d_hd(stagger="x" | "y")`` reads the
-stress coefficients (``-rho K`` at the mass points, ``-rhoavg kavg`` at the
-corners) that ``launch_wrf_smag_uv_faces`` stored once
+stress coefficients (``rho K`` at the mass points, ``rhoavg kavg`` at the
+corners; the readers keep the stress text's ``-coefficient * deformation``) that ``launch_wrf_smag_uv_faces`` stored once
 (``kernels/smag2d_uv_faces.cu``), where ``wrf_smag_hd_u`` / ``wrf_smag_hd_v``
 re-evaluated them at each of the up to ten points that read a stress.  These
 cases hold the two routes to the same tendency words on sloped terrain with
