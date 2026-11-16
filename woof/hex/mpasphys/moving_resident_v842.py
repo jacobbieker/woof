@@ -491,6 +491,8 @@ def _watch(control_dir: Path, stop: threading.Event) -> None:
             continue   # the next record is prepared once the one in hand finishes
         seen = spec
         gate = preparation_host_gate()
+        if stop.is_set():
+            break   # the segment closed while the gate probed host memory: nothing is prepared after the close
         if not gate['admitted']:
             with _R.lock:
                 _R.prepared.clear()
@@ -634,7 +636,7 @@ def next_segment() -> list[str] | None:
         return None
     _R.watch_stop.set()
     if _R.watcher is not None:
-        _R.watcher.join(timeout=5)
+        _R.watcher.join()   # bounded by one poll and the gate's probe; after it no preparation can start
     # A preparation for another member than the one this move goes to (the controller renamed the record after the
     # watcher had started on the old one) is a second host copy nothing will take: wait for it, then drop it.
     thread = _R.prep_thread
