@@ -877,7 +877,7 @@ def compiler_identity(root: Path, nvrtc_library=None, nvdisasm=None) -> dict:
         for line in Path("/proc/self/maps").read_text().splitlines():
             fields = line.split(maxsplit=5)
             path = fields[5] if len(fields) == 6 else ""
-            if "libnvrtc" in path and "builtins" not in path and path.startswith("/"):
+            if "libnvrtc" in path and path.startswith("/"):  # includes libnvrtc-builtins
                 loaded.add(path)
     except OSError:
         pass
@@ -906,14 +906,15 @@ def load_receipt(cache: Path, unit: Unit, arches, identity: dict, *, native_only
     try:
         stored = json.loads((Path(cache) / f"{key}.json").read_text(encoding="utf-8"))
         row = stored["row"]
-        if (stored["cache_key"] != key or row["unit"] != unit.key or row["errors"]
+        if (not isinstance(row, dict) or not isinstance(row["compiled"], dict)
+                or stored["cache_key"] != key or row["unit"] != unit.key or row["errors"]
                 or row["native_errors"]
                 or row["source_sha256"] != hashlib.sha256(unit.source.encode()).hexdigest()
                 or any(row["compiled"].get(str(arch), {}).get("options") != list(_options(unit, arch))
                        for arch in arches)):
             return None
         return row
-    except (OSError, ValueError, KeyError, TypeError):
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
         return None
 
 
@@ -974,32 +975,32 @@ def run_units(units, arches, options, workers, on_row, *, heavy=HEAVY_UNITS, job
     job = job or _compare_job
     light = [unit for unit in units if not any(name in unit.key for name in heavy)]
     heavy_units = [unit for unit in units if unit not in light]
-    if workers == 1:
-        for unit in units:
-            on_row(unit, job((unit, arches, options)))
-        return
+    # Always use a pool, even for one worker: an OOM kill then takes down a
+    # worker that can be retried, not the whole audit.
     for group, limit in ((light, workers), (heavy_units, 1)):
         todo, width = list(group), limit
         for _ in range(retries + 1):
             if not todo:
                 break
-            broken = []
+            done = set()
             if group is heavy_units:
                 wait_for_memory(float(os.environ.get("WOOF_ROUNDING_HEAVY_GIB", "12")),
                                 float(os.environ.get("WOOF_ROUNDING_MEM_WAIT_S", "3600")))
             try:
                 with ProcessPoolExecutor(max_workers=width) as executor:
-                    futures = {executor.submit(job, (unit, arches, options)): unit for unit in todo}
+                    futures = {}
+                    for unit in todo:  # a worker can die while later units submit
+                        futures[executor.submit(job, (unit, arches, options))] = unit
                     for future in as_completed(futures):
                         try:
                             row = future.result()
                         except BrokenProcessPool:
-                            broken.append(futures[future])
                             continue
+                        done.add(id(futures[future]))
                         on_row(futures[future], row)
             except BrokenProcessPool:
                 pass
-            todo = broken
+            todo = [unit for unit in todo if id(unit) not in done]
             if todo:
                 width = max(1, width // 2)
                 print(f"pool broke; retrying {len(todo)} unfinished unit(s) with {width} worker(s)",

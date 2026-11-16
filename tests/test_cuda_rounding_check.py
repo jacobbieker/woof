@@ -418,6 +418,9 @@ def test_receipt_cache_rejects_tampered_failed_and_misfiled_receipts(tmp_path):
     assert load_receipt(tmp_path, unit, arches, identity) is None
     path.write_text("not json")
     assert load_receipt(tmp_path, unit, arches, identity) is None
+    for row in ({**stored["row"], "compiled": []}, [], "x"):
+        path.write_text(json.dumps({"cache_key": stored["cache_key"], "row": row}))
+        assert load_receipt(tmp_path, unit, arches, identity) is None
 
 
 def test_compiler_identity_changes_with_analysis_code_and_tool_bytes(tmp_path):
@@ -457,9 +460,20 @@ def _flaky_job(payload):
     return {"unit": unit.key, "pid": os.getpid()}
 
 
-def test_pool_retries_unfinished_units_after_a_killed_worker_and_runs_heavy_units_alone(tmp_path):
+def test_pool_retries_unfinished_units_after_a_killed_worker_and_runs_heavy_units_alone(tmp_path, monkeypatch):
+    monkeypatch.setenv("WOOF_ROUNDING_HEAVY_GIB", "0")  # never wait on this host's memory
     units = [_unit(key=k) for k in ("a.cu", "die.cu", "b.cu", f"x/{HEAVY_UNITS[0]}.cu")]
     done = {}
+    run_units(units, (120, 100), {"flag": str(tmp_path / "flag")}, 2,
+              lambda unit, row: done.__setitem__(unit.key, row), job=_flaky_job)
+    # one worker still goes through the pool, so a kill is retried too
+    (tmp_path / "flag").unlink()
+    done.clear()
+    run_units(units, (120, 100), {"flag": str(tmp_path / "flag")}, 1,
+              lambda unit, row: done.__setitem__(unit.key, row), job=_flaky_job)
+    assert set(done) == {unit.key for unit in units}
+    (tmp_path / "flag").unlink()
+    done.clear()
     run_units(units, (120, 100), {"flag": str(tmp_path / "flag")}, 2,
               lambda unit, row: done.__setitem__(unit.key, row), job=_flaky_job)
     assert set(done) == {unit.key for unit in units}
