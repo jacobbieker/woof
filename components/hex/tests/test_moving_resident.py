@@ -522,10 +522,22 @@ def test_the_continuation_drops_a_preparation_made_for_another_member(tmp_path, 
 
 
 def test_a_preparation_whose_resident_set_did_not_grow_keeps_the_last_estimate(monkeypatch):
-    sizes = iter([10, 10, 10, 30])
-    monkeypatch.setattr(resident, 'process_rss_bytes', lambda: next(sizes))
+    import time
+    rss = [10]
+    monkeypatch.setattr(resident, 'process_rss_bytes', lambda: rss[0])
     monkeypatch.setattr(resident, 'prepare', lambda spec: None)
     resident._prepare_safely({})
     assert resident._R.prep_host_bytes is None
+
+    def transient(spec):   # a temporary freed before the preparation returns is its peak, and so its price
+        rss[0] = 50
+        time.sleep(2.5)
+        rss[0] = 30
+    monkeypatch.setattr(resident, 'prepare', transient)
+    rss[0] = 10
     resident._prepare_safely({})
-    assert resident._R.prep_host_bytes == 20
+    assert resident._R.prep_host_bytes == 40
+    GiB = 2**30
+    resident._R.prep_host_bytes = 8 * GiB   # priced with the 1.25 margin: 10 GiB plus the 2 GiB reserve
+    assert not resident.preparation_host_gate(available=11 * GiB, rss=1)['admitted']
+    assert resident.preparation_host_gate(available=13 * GiB, rss=1)['admitted']

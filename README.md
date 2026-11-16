@@ -505,7 +505,8 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   region beside the running one only when the host has room for a second
   copy (`WOOF_HEX_MOVING_PREPARE_HOST_GATE=0` always prepares;
   `WOOF_HEX_MOVING_PREPARE_HOST_RESERVE_GB`, default 2, is the room kept
-  free), and on Linux it gives the freed heap back at each move. A skipped
+  free; the copy is priced at the last preparation's peak growth times
+  `WOOF_HEX_MOVING_PREPARE_HOST_MARGIN`, default 1.25), and on Linux it gives the freed heap back at each move. A skipped
   preparation makes the move slower; the words are the same.
   `WOOF_METAL_GPU_TIMES` times each kernel.
 - **Continuous integration and releases:** GitHub Actions on Linux and

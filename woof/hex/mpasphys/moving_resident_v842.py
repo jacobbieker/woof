@@ -451,6 +451,11 @@ def preparation_host_gate(available: int | None = None, rss: int | None = None) 
     reserve = int(float(os.environ.get('WOOF_HEX_MOVING_PREPARE_HOST_RESERVE_GB', '2')) * 2**30)
     row = dict(available_bytes=available, rss_bytes=rss, need_bytes=need, reserve_bytes=reserve,
                priced_from='last preparation' if _R.prep_host_bytes is not None else 'resident set')
+    if need is not None and _R.prep_host_bytes is not None:
+        # Members of one run share the mesh recipe; the margin covers a member with a few more cells than the
+        # one measured (WOOF_HEX_MOVING_PREPARE_HOST_MARGIN, default 1.25).
+        need = int(need * float(os.environ.get('WOOF_HEX_MOVING_PREPARE_HOST_MARGIN', '1.25')))
+        row['need_bytes'] = need
     if available is None or need is None:
         return dict(row, admitted=True, reason='host memory unknown')
     return dict(row, admitted=available >= need + reserve)
@@ -458,11 +463,24 @@ def preparation_host_gate(available: int | None = None, rss: int | None = None) 
 
 def _prepare_safely(spec):
     before = process_rss_bytes()
+    peak = [before]
+    done = threading.Event()
+
+    def sample():   # the preparation's peak, not its end: temporaries freed before it returns count too
+        while not done.wait(0.5 if sys.platform.startswith('linux') else 2.0):
+            now = process_rss_bytes()
+            if now is not None and (peak[0] is None or now > peak[0]):
+                peak[0] = now
+
+    sampler = threading.Thread(target=sample, name='moving-resident-prepare-rss', daemon=True)
+    sampler.start()
     try:
         prepare(spec)
+        done.set()
+        sampler.join()
         after = process_rss_bytes()
         if before is not None and after is not None:
-            grown = after - before
+            grown = max(after, peak[0] or after) - before
             # The running segment allocates and frees beside the preparation: a delta at or below zero says
             # nothing about the preparation's size, so it keeps the last estimate rather than pricing it at 0.
             if grown > 0:
@@ -474,6 +492,8 @@ def _prepare_safely(spec):
             _R.prepared.clear()
         _log(dict(preparation_failed=f'{type(error).__name__}: {error}',
                   trace=''.join(traceback.format_exception(error))[-2000:]))
+    finally:
+        done.set()
 
 
 def _watch(control_dir: Path, stop: threading.Event) -> None:
