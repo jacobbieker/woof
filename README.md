@@ -559,7 +559,8 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   `WOOF_METAL_GPU_TIMES_ISOLATE=1` is a profiling mode with the same words:
   each launch runs alone, after its lazy inputs are evaluated and counted
   apart, and writes are keyed by their Python call site. There the facade's
-  writes cost 42 ms of 1366 per step.
+  writes cost 45 ms of 1357 per step (Alps hex variable-resolution mesh:
+  65 of 667 ms, where `mynn_mmm_run` is the top kernel at 107 ms).
   The `woof.radtran` spectral diagnostic (`radtran_*`) is cheaper, keeping
   the same words. `radtran_disort.cu` compiles in about 6 minutes in
   0.55 GB, against over an hour in over 17 GB before: its helpers are kept

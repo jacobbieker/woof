@@ -34,6 +34,7 @@
 #include <cstdlib>
 #include <mutex>
 #include <optional>
+#include <unordered_set>
 #include <unordered_map>
 #include <cstdint>
 #include <sstream>
@@ -779,6 +780,35 @@ bool any_unscheduled(const std::vector<mx::array>& arrays) {
   });
 }
 
+// WOOF_METAL_GPU_TIMES_ISOLATE: the unevaluated launches in the graph of
+// ``arrays``, inputs before the launches that read them, so each can be run
+// and timed on its own before the eval that would otherwise encode it inside
+// a command buffer counted under that eval's call site as well.
+std::vector<mx::array> pending_launches(const std::vector<mx::array>& arrays) {
+  std::vector<mx::array> order;
+  std::unordered_set<std::uintptr_t> seen;
+  std::vector<std::pair<mx::array, size_t>> stack;
+  for (const auto& root : arrays) {
+    if (root.status() != mx::array::Status::unscheduled || !seen.insert(root.id()).second) continue;
+    stack.emplace_back(root, 0);
+    while (!stack.empty()) {
+      auto& [a, next] = stack.back();
+      if (next < a.inputs().size()) {
+        const auto& in = a.inputs()[next++];
+        if (in.status() == mx::array::Status::unscheduled && seen.insert(in.id()).second) {
+          stack.emplace_back(in, 0);
+        }
+        continue;
+      }
+      if (a.has_primitive() && dynamic_cast<LaunchTranslated*>(&a.primitive()) != nullptr) {
+        order.push_back(a);
+      }
+      stack.pop_back();
+    }
+  }
+  return order;
+}
+
 // Count the GPU interval of the default GPU stream's current (uncommitted)
 // command buffer under ``key``.
 void time_current_buffer(const std::string& key) {
@@ -853,4 +883,5 @@ NB_MODULE(_woof_metal_launch, m) {
   m.def("launch_inputs", &launch_inputs, nb::arg("out"));
   m.def("time_current_buffer", &time_current_buffer, nb::arg("key"));
   m.def("any_unscheduled", &any_unscheduled, nb::arg("arrays"));
+  m.def("pending_launches", &pending_launches, nb::arg("arrays"));
 }

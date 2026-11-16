@@ -321,21 +321,15 @@ def _gpu_times_isolated() -> bool:
 
 
 def _isolated_eval(out) -> None:
-    """WOOF_METAL_GPU_TIMES_ISOLATE: finish earlier work, evaluate the
-    launch's lazy inputs in a command buffer counted on its own, then the
-    launch alone, waiting for each (woof.backend.metal.ext launch.cpp)."""
+    """WOOF_METAL_GPU_TIMES_ISOLATE: finish earlier work, then run each
+    launch ``out`` still needs (``out`` itself included) alone, after the
+    lazy inputs it reads, in command buffers counted apart, waiting for each
+    (woof.backend.metal.ext.run_launches_apart; launch.cpp)."""
     from woof.backend.metal import ext
     module = ext.load()
-    evaluate, sync = ext.raw("eval"), ext.raw("synchronize")
-    sync()
-    pending = module.launch_inputs(out)
-    if pending is not None:
-        key, inputs = pending
-        module.time_current_buffer("mlx<" + key)
-        evaluate(*inputs)
-        sync()
-    evaluate(out)
-    sync()
+    ext.run_launches_apart(module, [out])
+    ext.raw("eval")(out)
+    ext.raw("synchronize")()
 
 
 #: GPU base address -> the storage that handed it out (Storage.address)

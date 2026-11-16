@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import sys
 import sysconfig
+import threading
 from functools import lru_cache
 from pathlib import Path
 
@@ -193,6 +194,7 @@ _BACKEND_DIR = str(HERE.parent.parent) + "/"     # .../woof/backend/
 
 #: mlx.core's eval and synchronize as they were before _install_isolation
 _RAW: dict = {}
+_INSTALL_LOCK = threading.Lock()
 
 
 def call_site(depth: int = 2) -> str:
@@ -214,6 +216,23 @@ def raw(name: str):
     return _RAW.get(name) or getattr(mx, name)
 
 
+def run_launches_apart(module, arrays) -> None:
+    """WOOF_METAL_GPU_TIMES_ISOLATE: run each unevaluated launch in the graph
+    of ``arrays`` on its own, after the lazy MLX work its inputs need (counted
+    under ``"mlx<" + its key``), waiting for each, so no launch is encoded
+    inside, and counted with, a later eval's command buffer."""
+    evaluate, sync = raw("eval"), raw("synchronize")
+    sync()
+    for launch in module.pending_launches(list(arrays)):
+        key, inputs = module.launch_inputs(launch)
+        if module.any_unscheduled(inputs):
+            module.time_current_buffer("mlx<" + key)
+            evaluate(*inputs)
+            sync()
+        evaluate(launch)
+        sync()
+
+
 def _install_isolation(module, *, isolated: bool) -> None:
     """WOOF_METAL_GPU_TIMES: every explicit ``mx.eval`` and ``mx.async_eval``
     (the facade's pending values, reads, health checks) is counted under
@@ -222,8 +241,18 @@ def _install_isolation(module, *, isolated: bool) -> None:
     waits for earlier work first and is waited for, so it is timed apart from
     the launches."""
     import mlx.core as mx
-    sync = mx.synchronize
-    _RAW.update(eval=mx.eval, synchronize=sync)
+    with _INSTALL_LOCK:
+        # load() is lru_cached, which does not stop two threads (the kernel
+        # prewarm pool) building it at once: wrapping twice would make the
+        # second wrapper's "raw" eval the first wrapper, and recurse.
+        if _RAW:
+            return
+        _RAW.update(eval=mx.eval, synchronize=mx.synchronize)
+        _wrap(module, mx, isolated)
+
+
+def _wrap(module, mx, isolated: bool) -> None:
+    sync = _RAW["synchronize"]
 
     def arrays(values, out):
         # The arrays of an eval's arguments, or None for a tree this does not walk.
@@ -247,6 +276,8 @@ def _install_isolation(module, *, isolated: bool) -> None:
                 # MLX encodes nothing for this call (every array is scheduled
                 # already): no buffer to time, and nothing to wait for.
                 return fn(*args, **kwargs)
+            if isolated and found is not None:
+                run_launches_apart(module, found)
             if isolated:
                 sync()
             module.time_current_buffer("mlx@" + call_site())
