@@ -342,6 +342,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     vapour pressure, which happens above about 35 km. RP8 adds the
     NOAA-GSL MYNN-EDMF guards. It is on in correct mode (the route's
     default), and `--physics-correct-skip RP8` turns it off.
+  - The MPAS suite route also runs the declaration's upper damping as
+    MPAS v8.4.2's `&damping` options (`config_mpas_cam_coef`,
+    `config_rayleigh_damp_u` and their level counts and timescale). The
+    operators match MPAS-8.4.2's own lines, compiled natively, bit for
+    bit.
 - **Hex (MPAS) parity with WRF's options.** The goal is for the hex model
   to accept the options WRF does, reusing WRF's column implementations
   rather than copies, and to refuse by name what it cannot yet do. Landed:
