@@ -501,6 +501,13 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   in its first step (edi-vr 1 h on an A6000: step 1 from 42.5 s to 3.6 s,
   byte-identical; `WOOF_HEX_SHARED_KERNEL_IMAGES=0` restores the per-run
   cache).
+  Hex `woof hex moving`: the resident forecast process prepares the next
+  region beside the running one only when the host has room for a second
+  copy (`WOOF_HEX_MOVING_PREPARE_HOST_GATE=0` always prepares;
+  `WOOF_HEX_MOVING_PREPARE_HOST_RESERVE_GB`, default 2, is the room kept
+  free; the copy is priced at the last preparation's peak growth times
+  `WOOF_HEX_MOVING_PREPARE_HOST_MARGIN`, default 1.25), and on Linux it gives the freed heap back at each move. A skipped
+  preparation makes the move slower; the words are the same.
   `WOOF_METAL_GPU_TIMES` times each kernel.
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
