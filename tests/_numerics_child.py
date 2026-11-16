@@ -93,6 +93,10 @@ def run(test_file, names, numerics, exact, *, env=None, timeout=1800):
     # Both spellings: importing woof copies GPUWM_X onto an unset WOOF_X only,
     # so an inherited WOOF_WRF_EXACT would otherwise win.
     child_env["GPUWM_WRF_EXACT"] = child_env["WOOF_WRF_EXACT"] = exact
+    # A diagnostic contraction override would make the fast row compile with
+    # --fmad=false and test nothing production runs.
+    for name in ("WOOF_FMAD_OFF", "GPUWM_FMAD_OFF"):
+        child_env.pop(name, None)
     child_env.update(env or {})
     code = _CHILD.format(here=str(path.parent), module=path.stem, numerics=numerics,
                          names=list(names))
