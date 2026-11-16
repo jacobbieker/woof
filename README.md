@@ -555,8 +555,8 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   blocks of columns. On the Alps 3 km/1 km pair, one 550 nm call fell from
   about 190 s to 11 s, and a three-wavelength call from about 570 s to
   28 s. With an output every 10 minutes, the hour costs 209 s instead of
-  2,578 s; with no diagnostic it costs 61 s. Eight wavelengths or user
-  radiance angles on such a domain still need tens of GB of host memory.
+  2,578 s; with no diagnostic it costs 61 s. Eight wavelengths in one call
+  on such a domain hold over 13 GB of host memory.
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
   tests by name, and main's full run is periodic. Every merge to `main`
