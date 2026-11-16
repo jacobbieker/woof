@@ -496,7 +496,12 @@ class resident_step:
     raised (chained to the later exception) in preference to it.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, sites: tuple[str, ...] = RESIDENT_SITES) -> None:
+        # ``sites``: the admitted site prefixes.  A caller whose step is a
+        # transaction (the hex composite step drains before its commit and
+        # rolls back on refusal) may admit sites whose deferral moves no
+        # observable boundary there; the default is the dycore's list.
+        self.sites = tuple(sites)
         self.ledger = None
 
     def __enter__(self):
@@ -519,14 +524,15 @@ class resident_step:
         if ledgers is None:
             ledgers = _LOCAL.ledgers = {}
         device = int(cp.cuda.runtime.getDevice())
-        ledger = ledgers.get(device)
+        key = device if self.sites == RESIDENT_SITES else (device, self.sites)
+        ledger = ledgers.get(key)
         if ledger is None:
             # 256 sites: a site keeps its slot for the life of the thread
             # (radiation, cumulus and initialisation sites included), and a
             # full ledger refuses rather than dropping a site.
-            ledger = ledgers[device] = HealthLedger(
+            ledger = ledgers[key] = HealthLedger(
                 RESIDENT_CAPACITY, label=f"resident-step:cuda{device}",
-                footprint_reads=True, ordered=True, admit=RESIDENT_SITES)
+                footprint_reads=True, ordered=True, admit=self.sites)
         _LOCAL.ledger = ledger
         self.ledger = ledger
         return ledger

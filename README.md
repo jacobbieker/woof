@@ -531,6 +531,13 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   falls from 761-1061 ms to 470-576 ms, byte-identical
   (`WOOF_METAL_DEVICE_COPY=0` restores the host round trip).
   `WOOF_METAL_GPU_TIMES` times each kernel.
+  Hex: the composite step's scheme health checks (microphysics, YSU,
+  Grell-Freitas, Noah-MP's surface identity, the lagged heating rate and
+  the radiative-carrier finiteness) record on the device and are read
+  once, just before the step commits, so a failure is still refused and
+  rolled back by the step that produced it (Edinburgh 3 km on Metal: 257
+  to 247 ms per step, byte-identical; `WOOF_HEALTH_READBACK=immediate`
+  restores the per-check reads).
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
   tests by name, and main's full run is periodic. Every merge to `main`
