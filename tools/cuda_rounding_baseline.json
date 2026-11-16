@@ -4289,7 +4289,7 @@
    },
    {
     "file": "woof/core/kernels/terrain_drag.cu",
-    "sha256": "575ed16c15529e6de4b6cf34a31c75917f6a2a27577e11da5721fb3a7afdb2da"
+    "sha256": "ca3fd7768ff2a02ba1da2629f32ca0ac866af0a4566abdb571f36e6e026bc560"
    },
    {
     "file": "woof/core/kernels/theta_m.cu",
@@ -5111,7 +5111,7 @@
    },
    {
     "file": "woof/core/kernel_frame_recordings.py",
-    "sha256": "5c707374385bc6050000e0198d9f45151ce510dabc42c323e2bf5279cd92867a"
+    "sha256": "25360b1dfc3e854c848e205e95bf33a3f9f482e3e51cbe5d1e4d6f456150267d"
    },
    {
     "file": "woof/core/kernels/__init__.py",
@@ -5347,7 +5347,7 @@
    },
    {
     "file": "woof/core/terrain_drag.py",
-    "sha256": "e2560eb8abfe16a9a833c4e25e8ade4b30f8d525432ba82f9e67dad6c5b65c02"
+    "sha256": "f34b16df2a3f4a1d795cbfc17a33c4b36f6adb36d12eac03d07c5268b74cc426"
    },
    {
     "file": "woof/core/theta_m_physics.py",
@@ -9532,15 +9532,15 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "73db8ce462d1155bfd4976fe065958a7ebd09c10d0752a7b93de24689ffffff0",
+    "sha256": "5de8b8f5901505d6322783079e55099b9b2ec00bc0689c3075d0eda4ce03c915",
     "sites": {
-     "100": 145
+     "100": 151
     }
    },
    "native_differences": {
-    "sha256": "7305c4fc6e68850901aeb89a7d0903a7a314bd8a2864effe22a0924bc0ce3fcf",
+    "sha256": "590da34460698eb560c8ae46d34c12074e4341310dc1e04db8450766d97f80e6",
     "sites": {
-     "100": 11
+     "100": 14
     }
    },
    "native_errors": {},
@@ -9562,7 +9562,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "74ceba8adee4b664ed957d69ad9094db6b3120dcd531121bed813e6768e1b3e9"
+   "source_sha256": "43aeaf8da8a7670c4d1f966999a31300ce23bf915b93c2b4666cab19615e0ce0"
   },
   "composed:urban_bem": {
    "assessment": "static_diagnostic_only",
