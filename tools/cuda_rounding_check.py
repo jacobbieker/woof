@@ -26,6 +26,7 @@ import ast
 from collections import Counter
 from contextlib import contextmanager
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
 import functools
 import hashlib
@@ -37,6 +38,9 @@ import re
 import sys
 import threading
 import shutil
+import subprocess
+import sysconfig
+import tempfile
 from typing import Iterable
 
 from tools.literal_division_census import Unit, compile_ptx, production_units
@@ -806,6 +810,212 @@ def _compare_job(payload):
     return compare_unit(unit, arches, **options)
 
 
+# --- content-addressed receipt cache and bounded compile pool -------------
+CACHE_FORMAT = 1
+#: Units whose NVRTC run needs many GB; never run beside other compiles.
+HEAVY_UNITS = ("radtran_disort",)
+#: Every module whose behaviour decides a receipt; a change invalidates all.
+_ANALYSIS_FILES = ("tools/cuda_rounding_check.py", "tools/cuda_rounding_dataflow.py",
+                   "tools/cuda_rounding_native.py", "tools/literal_division_census.py",
+                   "woof/nvrtc_cache_key.py", "woof/cuda_subnormals.py")
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for block in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def find_nvdisasm(environ=None) -> str | None:
+    """nvdisasm from WOOF_NVDISASM, PATH, CUDA_HOME/CUDA_PATH or /opt/cuda."""
+    environ = os.environ if environ is None else environ
+    if environ.get("WOOF_NVDISASM"):
+        return environ["WOOF_NVDISASM"]
+    found = shutil.which("nvdisasm", path=environ.get("PATH"))
+    if found:
+        return found
+    roots = [environ[key] for key in ("CUDA_HOME", "CUDA_PATH") if environ.get(key)]
+    for root in roots + ["/opt/cuda", "/usr/local/cuda"]:
+        candidate = Path(root) / "bin" / "nvdisasm"
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
+def find_nvrtc_library(environ=None) -> str | None:
+    """libnvrtc.so.13 from WOOF_NVRTC_LIBRARY, a CUDA_PATH/CUDA_HOME, the env's wheel or /opt/cuda."""
+    environ = os.environ if environ is None else environ
+    if environ.get("WOOF_NVRTC_LIBRARY"):
+        return environ["WOOF_NVRTC_LIBRARY"]
+    # The PTX half compiles with CuPy's NVRTC, the environment's cu13 wheel;
+    # compile the cubins with the same library (an older toolkit's NVRTC moves
+    # native signatures), so the wheel precedes any CUDA_PATH.
+    wheel = Path(sysconfig.get_path("purelib")) / "nvidia/cu13/lib/libnvrtc.so.13"
+    if wheel.exists():
+        return str(wheel)
+    for key in ("CUDA_PATH", "CUDA_HOME"):
+        if environ.get(key):
+            for folder in ("lib", "lib64"):
+                candidate = Path(environ[key]) / folder / "libnvrtc.so.13"
+                if candidate.exists():
+                    return str(candidate)
+    for root in ("/opt/cuda", "/usr/local/cuda"):
+        candidate = Path(root) / "lib64" / "libnvrtc.so.13"
+        if candidate.exists():
+            return str(candidate)
+    return None
+
+
+def compiler_identity(root: Path, nvrtc_library=None, nvdisasm=None) -> dict:
+    """Everything outside a unit that can change its receipt."""
+    identity = {"cache_format": CACHE_FORMAT, "python": sys.version,
+                "analysis": {name: _file_sha256(root / name) for name in _ANALYSIS_FILES
+                             if (root / name).is_file()}}
+    try:
+        from cupy.cuda import nvrtc
+        identity["nvrtc_version"] = list(nvrtc.getVersion())
+    except Exception as exc:
+        identity["nvrtc_version"] = f"unavailable: {type(exc).__name__}"
+    # The library CuPy actually loaded compiles the PTX; bind its bytes.
+    loaded = set()
+    try:
+        for line in Path("/proc/self/maps").read_text().splitlines():
+            fields = line.split(maxsplit=5)
+            path = fields[5] if len(fields) == 6 else ""
+            if "libnvrtc" in path and path.startswith("/"):  # includes libnvrtc-builtins
+                loaded.add(path)
+    except OSError:
+        pass
+    identity["loaded_nvrtc"] = {Path(path).name: _file_sha256(Path(path)) for path in sorted(loaded)}
+    if nvrtc_library is not None:
+        identity["native_nvrtc_sha256"] = _file_sha256(Path(nvrtc_library))
+    if nvdisasm is not None:
+        identity["nvdisasm_sha256"] = _file_sha256(Path(nvdisasm))
+        version = subprocess.run([str(nvdisasm), "--version"], capture_output=True, text=True, timeout=60)
+        identity["nvdisasm_version"] = version.stdout.strip()
+    return identity
+
+
+def receipt_key(unit: Unit, arches, identity: dict, *, native_only: bool = False) -> str:
+    """Digest of the unit's source, per-target options, targets and compiler."""
+    arches = [int(arch) for arch in arches]
+    payload = {"unit": unit.key, "source_sha256": hashlib.sha256(unit.source.encode()).hexdigest(),
+               "options": {str(arch): list(_options(unit, arch)) for arch in arches},
+               "arches": arches, "native_only": bool(native_only), "identity": identity}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+
+def load_receipt(cache: Path, unit: Unit, arches, identity: dict, *, native_only: bool = False):
+    """A cached row, or None. Re-derives and compares every bound input."""
+    key = receipt_key(unit, arches, identity, native_only=native_only)
+    try:
+        stored = json.loads((Path(cache) / f"{key}.json").read_text(encoding="utf-8"))
+        row = stored["row"]
+        if (not isinstance(row, dict) or not isinstance(row["compiled"], dict)
+                or stored["cache_key"] != key or row["unit"] != unit.key or row["errors"]
+                or row["native_errors"]
+                or row["source_sha256"] != hashlib.sha256(unit.source.encode()).hexdigest()
+                or any(row["compiled"].get(str(arch), {}).get("options") != list(_options(unit, arch))
+                       for arch in arches)):
+            return None
+        return row
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return None
+
+
+def store_receipt(cache: Path, unit: Unit, arches, identity: dict, row: dict,
+                  *, native_only: bool = False) -> None:
+    if row["errors"] or row["native_errors"]:
+        return  # a failed compile is never a receipt
+    key = receipt_key(unit, arches, identity, native_only=native_only)
+    cache = Path(cache)
+    cache.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile("w", dir=cache, suffix=".tmp", delete=False, encoding="utf-8") as handle:
+        json.dump({"cache_key": key, "row": row}, handle)
+    os.replace(handle.name, cache / f"{key}.json")
+
+
+def available_gib() -> float | None:
+    """MemAvailable in GiB (Linux), or None where it cannot be read."""
+    try:
+        for line in Path("/proc/meminfo").read_text().splitlines():
+            if line.startswith("MemAvailable:"):
+                return int(line.split()[1]) / (1 << 20)
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def wait_for_memory(needed_gib: float, timeout_s: float, *, read=available_gib,
+                    sleep=None, clock=None) -> bool:
+    """Block until ``needed_gib`` is available or ``timeout_s`` elapses.
+
+    A heavy unit on a shared host is OOM-killed when it starts into a full
+    machine; waiting is cheaper than three killed attempts. Returns whether the
+    memory was seen (True also when it cannot be measured).
+    """
+    import time
+    sleep, clock = sleep or time.sleep, clock or time.monotonic
+    deadline = clock() + timeout_s
+    while True:
+        free = read()
+        if free is None or free >= needed_gib:
+            return True
+        if clock() >= deadline:
+            print(f"only {free:.1f} GiB free after {timeout_s:.0f} s; starting anyway", flush=True)
+            return False
+        print(f"waiting for {needed_gib:.0f} GiB ({free:.1f} free) before a heavy unit", flush=True)
+        sleep(60)
+
+
+def run_units(units, arches, options, workers, on_row, *, heavy=HEAVY_UNITS, job=None,
+              retries: int = 2) -> None:
+    """Compile units with bounded memory.
+
+    Heavy units run alone in a one-process pool after the rest. A pool whose
+    worker was killed (BrokenProcessPool, typically the OOM killer) is rebuilt
+    with half the workers and only the units that never finished are retried.
+    ``on_row(unit, row)`` is called in this process for each finished unit.
+    """
+    job = job or _compare_job
+    light = [unit for unit in units if not any(name in unit.key for name in heavy)]
+    heavy_units = [unit for unit in units if unit not in light]
+    # Always use a pool, even for one worker: an OOM kill then takes down a
+    # worker that can be retried, not the whole audit.
+    for group, limit in ((light, workers), (heavy_units, 1)):
+        todo, width = list(group), limit
+        for _ in range(retries + 1):
+            if not todo:
+                break
+            done = set()
+            if group is heavy_units:
+                wait_for_memory(float(os.environ.get("WOOF_ROUNDING_HEAVY_GIB", "12")),
+                                float(os.environ.get("WOOF_ROUNDING_MEM_WAIT_S", "3600")))
+            try:
+                with ProcessPoolExecutor(max_workers=width) as executor:
+                    futures = {}
+                    for unit in todo:  # a worker can die while later units submit
+                        futures[executor.submit(job, (unit, arches, options))] = unit
+                    for future in as_completed(futures):
+                        try:
+                            row = future.result()
+                        except BrokenProcessPool:
+                            continue
+                        done.add(id(futures[future]))
+                        on_row(futures[future], row)
+            except BrokenProcessPool:
+                pass
+            todo = [unit for unit in todo if id(unit) not in done]
+            if todo:
+                width = max(1, width // 2)
+                print(f"pool broke; retrying {len(todo)} unfinished unit(s) with {width} worker(s)",
+                      flush=True)
+        if todo:
+            raise BrokenProcessPool("units never finished: " + ", ".join(unit.key for unit in todo))
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--root", type=Path, default=ROOT)
@@ -827,6 +1037,9 @@ def main(argv=None) -> int:
     parser.add_argument("--write-baseline", type=Path, help="save frozen diagnostics for review; never a numerical certification")
     parser.add_argument("--reuse-audit", type=Path,
                         help="reuse same-source/options/target receipts from this compiler installation")
+    parser.add_argument("--cache-dir", type=Path,
+                        help="content-addressed receipt cache; a receipt is reused only when the unit "
+                             "source, per-target options, targets, compiler/tool bytes and analysis code match")
     args = parser.parse_args(argv)
     if args.compiler_info:
         if os.environ.get("CUDA_VISIBLE_DEVICES") not in ("", "-1"):
@@ -874,16 +1087,33 @@ def main(argv=None) -> int:
                     continue
                 reused[row["unit"]] = row
 
-        def record(row):
+        def record(row, write=True):
             data["units"].append(row)
             comparison = row["native_differences"] if args.native_only else row["differences"]
             counts = {arch: len(sites) for arch, sites in comparison.items()}
             print(f"{row['unit']}: {row['status']} {counts}", flush=True)
             # A detached interrupted sweep retains every completed receipt.
-            args.json.write_text(json.dumps(data, indent=1) + "\n", encoding="utf-8")
+            if write:
+                args.json.write_text(json.dumps(data, indent=1) + "\n", encoding="utf-8")
+
+        identity = (compiler_identity(args.root, args.nvrtc_library, args.nvdisasm)
+                    if args.cache_dir and not args.keep_ptx else None)
+        cache_hits = 0
+
+        def finished(unit, row):
+            if identity is not None:
+                store_receipt(args.cache_dir, unit, data["architectures"], identity, row,
+                              native_only=args.native_only)
+            record(row)
 
         pending_units = []
         for unit in units:
+            cached = (load_receipt(args.cache_dir, unit, data["architectures"], identity,
+                                   native_only=args.native_only) if identity is not None else None)
+            if cached is not None:
+                cache_hits += 1
+                record(dict(cached, receipt_reused=True), write=False)
+                continue
             row = reused.get(unit.key)
             if (row is not None
                     and row["source_sha256"] == hashlib.sha256(unit.source.encode()).hexdigest()
@@ -892,17 +1122,13 @@ def main(argv=None) -> int:
                     and (not args.nvdisasm or all("sass_sha256" in row["compiled"].get(str(arch), {})
                                                  for arch in data["architectures"]))):
                 row = dict(row, receipt_reused=True)
-                record(row)
+                record(row, write=False)
             else:
                 pending_units.append(unit)
-        if args.workers == 1:
-            for unit in pending_units:
-                record(compare_unit(unit, data["architectures"], **options))
-        else:
-            with ProcessPoolExecutor(max_workers=args.workers) as executor:
-                futures = [executor.submit(_compare_job, (unit, data["architectures"], options)) for unit in pending_units]
-                for future in as_completed(futures):
-                    record(future.result())
+        # Reused rows are rewritten once, not once each (indent= JSON is slow).
+        args.json.write_text(json.dumps(data, indent=1) + "\n", encoding="utf-8")
+        print(f"receipt cache: {cache_hits} reused, {len(pending_units)} to compile", flush=True)
+        run_units(pending_units, data["architectures"], options, args.workers, finished)
         data["units"].sort(key=lambda row: row["unit"])
     args.json.write_text(json.dumps(data, indent=1) + "\n", encoding="utf-8")
     if args.write_baseline:
