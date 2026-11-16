@@ -304,19 +304,27 @@ def storages_holding(words) -> list:
     return list(found.values())
 
 
+def _forget_address(base: int, ref) -> None:
+    """Drop ``base``'s entry if it is still ``ref``.  THE BREAKAGE THIS PREVENTS (Milton 2024 hex moving on
+    Metal, 2026-11-16): two threads (an LTS class thread and the history writer) found the same dead entry and
+    both deleted it; the second ``del`` raised KeyError and aborted the segment.  A base registered again in
+    between (a new storage at a reused address) keeps its new entry."""
+    if _ADDRESSES.get(base) is ref:
+        _ADDRESSES.pop(base, None)
+    _ADDRESS_INDEX[0] = None
+
+
 def storage_at(address: int):
     """(storage, byte offset) of a GPU address a storage handed out, or None."""
     from woof.backend.metal import ext
     for base, ref in list(_ADDRESSES.items()):
         st = ref()
         if st is None:
-            del _ADDRESSES[base]
-            _ADDRESS_INDEX[0] = None
+            _forget_address(base, ref)
             continue
         if base <= address < base + max(st.nbytes, 1):
             if int(ext.load().gpu_address(st.arr)) != base:   # rebound since
-                del _ADDRESSES[base]
-                _ADDRESS_INDEX[0] = None
+                _forget_address(base, ref)
                 continue
             return st, address - base
     return None
