@@ -500,7 +500,15 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   `--scratch`, so a regional run in a fresh work dir no longer recompiles
   in its first step (edi-vr 1 h on an A6000: step 1 from 42.5 s to 3.6 s,
   byte-identical; `WOOF_HEX_SHARED_KERNEL_IMAGES=0` restores the per-run
-  cache). The Metal facade's `get(out=)` reads the evaluated buffer in
+  cache).
+  Hex `woof hex moving`: the resident forecast process prepares the next
+  region beside the running one only when the host has room for a second
+  copy (`WOOF_HEX_MOVING_PREPARE_HOST_GATE=0` always prepares;
+  `WOOF_HEX_MOVING_PREPARE_HOST_RESERVE_GB`, default 2, is the room kept
+  free; the copy is priced at the last preparation's peak growth times
+  `WOOF_HEX_MOVING_PREPARE_HOST_MARGIN`, default 1.25), and on Linux it gives the freed heap back at each move. A skipped
+  preparation makes the move slower; the words are the same.
+  The Metal facade's `get(out=)` reads the evaluated buffer in
   place from unified memory and copies once, into `out`: the history
   writers' per-field staging into page-locked blocks takes about half the
   time (40 Edinburgh 3 km fields: 51-86 ms against 111-143 ms median,
