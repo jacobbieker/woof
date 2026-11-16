@@ -524,7 +524,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   table, are resolved to the buffers they name and ordered by MLX instead
   of a queue drain before and after each launch (Edinburgh 3 km: 26.5 to
   10.8 blocking drains per step, byte-identical;
-  `WOOF_METAL_RESOLVE_DEVICE_TABLES=0` restores the drains).
+  `WOOF_METAL_RESOLVE_DEVICE_TABLES=0` restores the drains). Hex on Metal:
+  the solve-region checks, the physics seam's per-species tables and the
+  MPAS sea-ice driver tables are resolved the same way (Edinburgh 3 km
+  variable-resolution: 12 to 0 drains around those launches per step,
+  byte-identical).
   A device-to-device `copy_from_device(_async)` between facade arrays (the
   wrfout writer's per-field snapshot) is one ordered device copy instead of
   a read back and a write: the writer's host time per Edinburgh 3 km frame

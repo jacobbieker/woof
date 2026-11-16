@@ -293,3 +293,110 @@ def test_a_page_locked_table_written_by_the_host_is_read_again(monkeypatch):
     finally:
         cp.cuda.Stream.null.synchronize()
         cp.cuda.runtime.freeHost(ptr)
+
+
+_POKE = r'''extern "C" __global__ void poke(float* x, int i, float v) {
+    if (blockIdx.x == 0 && threadIdx.x == 0) x[i] = v; }'''
+
+
+def test_solve_region_checks_read_their_device_table_without_a_synchronize(synchronizes):
+    """The hex solve-region validator and envelope read their fields
+    through a device table of (address, rows, stride, solve, mode) rows.
+    Each sees exactly the words the in-place writes before it left -- a NaN
+    poked in just before, healed just after -- and neither synchronizes."""
+    _mlx_or_skip()
+    import cupy as cp
+    from woof.hex.cuda_backend import KernelCache
+    from woof.hex.cuda_solve_region_v841 import SolveRegionKernels
+
+    kernels = SolveRegionKernels(KernelCache())
+    poke = cp.RawKernel(_POKE, "poke")
+    rng = np.random.default_rng(11)
+    host = [rng.uniform(0.5, 2.0, shape).astype(np.float32) for shape in ((55, 41), (56, 41), (41,))]
+    fields = [cp.asarray(h) for h in host]
+    flag_ok, flag_bad = cp.zeros((1,), cp.int32), cp.zeros((1,), cp.int32)
+    kernels.validate(flag_ok, positive=[(f, 40) for f in fields])     # the table's first read
+    from woof.hex import cuda_solve_region_v841 as sr
+    rows = [sr.describe_field(f, 40, name="f%d" % i) + (0,) for i, f in enumerate(fields)]
+    table = kernels.table(rows)
+    partials = cp.empty((len(rows) * sr._PARTIAL_WORDS,), dtype=cp.int64)
+    out = cp.empty((len(rows) * sr._RESULT_WORDS,), dtype=cp.int64)
+    envelope = kernels.kernel("solve_region_envelope_v841")
+    finish = kernels.kernel("solve_region_envelope_finish_v841")
+    envelope((1, len(rows)), (sr._ENVELOPE_THREADS,),                 # its table's first read
+             (table, np.int32(len(rows)), np.int32(1), partials))
+    del synchronizes[:]
+    poke((1,), (32,), (fields[1], np.int32(41 * 7 + 3), np.float32(np.nan)))
+    kernels.validate(flag_bad, positive=[(f, 40) for f in fields])
+    poke((1,), (32,), (fields[1], np.int32(41 * 7 + 3), np.float32(1.0)))
+    kernels.validate(flag_ok, positive=[(f, 40) for f in fields])
+    poke((1,), (32,), (fields[2], np.int32(39), np.float32(-3.0)))
+    poke((1,), (32,), (fields[2], np.int32(40), np.float32(-50.0)))   # outside the solve region
+    # the envelope pair, launched as envelope_with_flags launches it
+    envelope((1, len(rows)), (sr._ENVELOPE_THREADS,),
+             (table, np.int32(len(rows)), np.int32(1), partials))
+    poke((1,), (32,), (fields[0], np.int32(0), np.float32(np.nan)))     # after: not seen
+    finish((len(rows),), (sr._ENVELOPE_THREADS,),
+           (partials, np.int32(len(rows)), np.int32(1), out))
+    assert synchronizes == [], synchronizes
+    host[2][39] = -3.0
+    host[2][40] = -50.0
+    host[1][7, 3] = 1.0
+    words = out.get().reshape(len(rows), sr._RESULT_WORDS)
+    assert int(flag_bad.get()[0]) == 1
+    assert int(flag_ok.get()[0]) == 0
+    for i, h in enumerate(host):
+        view = h[..., :40]
+        low, high = sr._from_bits(int(words[i, 0])), sr._from_bits(int(words[i, 1]))
+        assert (low, high, int(words[i, 2])) == (
+            float(view.min()), float(view.max()), 0), i
+
+
+_TWO_TABLES = r'''extern "C" __global__ void two_table_axpy(const float* const* src, float* const* dst,
+                                              int n, int rows) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n) return;
+    for (int r = 0; r < rows; ++r) dst[r][i] = dst[r][i] + src[r][i]; }'''
+
+
+def test_a_kernel_with_several_device_tables_is_ordered_by_all_of_them(synchronizes, monkeypatch):
+    """Every table a kernel names is resolved (recover_wsm6_v841_f32 reads
+    two, validate_wsm6_surface_v841_f32 three): writers before it are seen
+    through either table, readers taken before it keep the old words."""
+    _mlx_or_skip()
+    import cupy as cp
+    from woof.backend.metal import loader
+
+    monkeypatch.setitem(loader.DEVICE_ADDRESS_TABLES, "two_table_axpy", ("src", "dst"))
+    axpy = cp.RawKernel(_TWO_TABLES, "two_table_axpy")
+    bump = cp.RawKernel(_BUMP, "bump")
+    n, rows = 4096, 3
+    rng = np.random.default_rng(3)
+    src_h = [rng.standard_normal(n).astype(np.float32) for _ in range(rows)]
+    dst_h = [rng.standard_normal(n).astype(np.float32) for _ in range(rows)]
+    src = [cp.asarray(h) for h in src_h]
+    dst = [cp.asarray(h) for h in dst_h]
+    src_t = cp.asarray(np.asarray([a.data.ptr for a in src], dtype=np.uint64))
+    dst_t = cp.asarray(np.asarray([a.data.ptr for a in dst], dtype=np.uint64))
+    grid = ((n + 255) // 256,)
+    axpy(grid, (256,), (src_t, dst_t, np.int32(n), np.int32(rows)))   # the tables' first read
+    dst_h = [d + s for d, s in zip(dst_h, src_h)]
+    del synchronizes[:]
+    taken, want = [], []
+    for step in range(4):
+        for r in range(rows):
+            bump(grid, (256,), (src[r], np.float32(step), np.int32(n)))
+            src_h[r] = _host_bump(src_h[r], step)
+        taken.append([d * cp.float32(1.0) for d in dst])
+        want.append([d.copy() for d in dst_h])
+        axpy(grid, (256,), (src_t, dst_t, np.int32(n), np.int32(rows)))
+        dst_h = [d + s for d, s in zip(dst_h, src_h)]
+        for r in range(rows):
+            bump(grid, (256,), (src[r], np.float32(-step), np.int32(n)))
+            src_h[r] = _host_bump(src_h[r], -step)
+    assert synchronizes == [], synchronizes
+    taken.append(dst)
+    want.append(dst_h)
+    for got, ref in zip(taken, want):
+        for g, r in zip(got, ref):
+            assert np.array_equal(g.get().view(np.uint32), r.view(np.uint32))
