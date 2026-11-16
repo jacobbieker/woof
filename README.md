@@ -507,6 +507,13 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   in its first step (edi-vr 1 h on an A6000: step 1 from 42.5 s to 3.6 s,
   byte-identical; `WOOF_HEX_SHARED_KERNEL_IMAGES=0` restores the per-run
   cache).
+  Hex `woof hex moving`: the resident forecast process prepares the next
+  region beside the running one only when the host has room for a second
+  copy (`WOOF_HEX_MOVING_PREPARE_HOST_GATE=0` always prepares;
+  `WOOF_HEX_MOVING_PREPARE_HOST_RESERVE_GB`, default 2, is the room kept
+  free; the copy is priced at the last preparation's peak growth times
+  `WOOF_HEX_MOVING_PREPARE_HOST_MARGIN`, default 1.25), and on Linux it gives the freed heap back at each move. A skipped
+  preparation makes the move slower; the words are the same.
   `WOOF_METAL_GPU_TIMES` times each kernel.
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
@@ -581,8 +588,12 @@ on it:
     12 km geometry for 1 h took about 10 minutes of wall time), but some
     kernel units are refused by name: TEMPO on macOS, Grell-Freitas
     `gfl_columns` and RRFS `mynnedmf_run_l1` on Metal;
-  - the LTS executor's reserve census needs 64-bit atomic adds, which Apple
-    GPUs lack;
+  - the LTS executor's scalar kernels run without 64-bit atomics on Metal:
+    the reserve census counts with two 32-bit atomics and a carry (the same
+    words as CUDA), and the binary64 receipt sums are gathered per element
+    and summed in a fixed order (deterministic on Metal; CUDA's atomic sums
+    vary in the last bits from run to run). So `woof hex moving` and LTS
+    regional runs work on an Apple GPU;
   - the dynamics subcycle runs eager, because the facade has no CUDA graphs;
   - the MPAS WSM6 unit of the water-budget gates (binary64) once had not
     finished its cold compile after 1 h 45 min; it now compiles cold in

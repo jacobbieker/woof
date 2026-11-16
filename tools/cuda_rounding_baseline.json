@@ -5571,11 +5571,11 @@
    },
    {
     "file": "woof/hex/cuda_fullstep_lts_multi.py",
-    "sha256": "04f82a5b91f402014887d31aabde06199fd585eb98381eee5f2ff0146fbfebab"
+    "sha256": "7829bc25ed35ecb6050732da3deeae274ceffdbc330aa5875c72e6fb2b238bd5"
    },
    {
     "file": "woof/hex/cuda_fullstep_lts_scalars.py",
-    "sha256": "0b2805e0bf29e0d2326e6992e077076d66390735adb77656fd9b62eafc1b9d73"
+    "sha256": "6012ea0fa65867e3cc6bba61772574d21d0ff112b3aec3af5ec97e7e6b5640ab"
    },
    {
     "file": "woof/hex/cuda_gwdo_v841.py",
@@ -7085,7 +7085,7 @@
    },
    {
     "file": "woof/hex/cuda_fullstep_lts_scalars.py",
-    "sha256": "3f8377f382559d6fcb446fab5a77e7e6806acabcc52d6f49fca6b03ac78fbf6e"
+    "sha256": "a14d6c6cab59e48c3700fdb4a5b14d8d710b6de39e1e38547663d119f003dd8f"
    },
    {
     "file": "woof/hex/cuda_gwdo_v841.py",
