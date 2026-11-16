@@ -47,6 +47,8 @@ PINS = {
     'mpas_atmphys_lsm_shared.F:42-52': c.CitationPin('src/core_atmosphere/physics/mpas_atmphys_lsm_shared.F', 42, 52, 'aa111132b5ff00e18b5bcf8498c4ca779d57dce39b6e0bfa72ae0dbfa8de1cde', 1),
     # Correct mode WB5 (merge/correct-mode-2): the WSM6 rain-out statement.
     'mp_wsm6.F90:1984': c.CitationPin('src/core_atmosphere/physics/physics_mmm/mp_wsm6.F90', 1984, 1984, '77e810fe4814dce0d4aee2cdd58ad2901a040e871c830af4308749cd75ac4d0b', 1),
+    # Correct mode RP8: the unguarded qsat_blend divisions.
+    'mynn_shared.F90:90-98': c.CitationPin('src/core_atmosphere/physics/physics_mmm/mynn_shared.F90', 90, 98, '9038fa9cd253afd409f26c3974ceba24c022a8aa19c7d19ad54cf23fa4c9ce3b', 1),
 }
 
 def test_driver_source_pins():

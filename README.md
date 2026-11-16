@@ -337,6 +337,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     hour 0. UGWP non-orographic drag does not help. Evidence:
     [declared-divergences.md](components/hex/docs/declared-divergences.md)
     section 1.
+  - On the MPAS suite route the 50 km lid needs correction RP8. MPAS
+    v8.4.2's MYNN `qsat_blend` has a pole where p reaches the saturation
+    vapour pressure, which happens above about 35 km. RP8 adds the
+    NOAA-GSL MYNN-EDMF guards. It is on in correct mode (the route's
+    default), and `--physics-correct-skip RP8` turns it off.
 - **Hex (MPAS) parity with WRF's options.** The goal is for the hex model
   to accept the options WRF does, reusing WRF's column implementations
   rather than copies, and to refuse by name what it cannot yet do. Landed:
