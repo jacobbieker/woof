@@ -553,12 +553,16 @@ moves.
   72 h goes from -11.39 K (RMSE 13.40) on the 55-level MPAS suite arm to
   -1.54 K (RMSE 2.32). The global 20 hPa RMSE goes from 6.36 to 3.59 K.
 - The other three cases (2026-10-31 00Z, 11-02 00Z, 11-05 00Z) stopped at
-  steps 81, 217 and 164. Each stopped with "MPAS_to_physics CUDA wind
-  reconstruction failed geometry validation: the mesh geometry differs from
-  its sealed copy", and 10-31 did so again when alone on the card. This is
-  an open defect of that route at 80 levels, and it is filed as a
-  follow-up. The WOOF-arm row is not affected: it completed all seven
-  cases.
+  steps 81, 217 and 164 with "MPAS_to_physics CUDA wind reconstruction
+  failed geometry validation: the mesh geometry differs from its sealed
+  copy". That message was wrong. The reconstruction raises one word for
+  every check it makes, and a non-finite normal velocity is one of them.
+  The refusal now names the failed check. Rerun on pb (A6000), 10-31 stops
+  at step 162 with "found a non-finite normal velocity: 1197680 edge values
+  on 80 levels ... the mesh geometry equals its sealed copy". The geometry
+  is intact; the integration blew up. That configuration is an 80-level,
+  50 km lid without the declaration's CAM and horizontal Rayleigh damping.
+  The WOOF-arm row is not affected: it completed all seven cases.
 
 ## 2. Convective-to-explicit precipitation repartition
 
