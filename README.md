@@ -337,6 +337,16 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     hour 0. UGWP non-orographic drag does not help. Evidence:
     [declared-divergences.md](components/hex/docs/declared-divergences.md)
     section 1.
+  - On the MPAS suite route the 50 km lid needs correction RP8. MPAS
+    v8.4.2's MYNN `qsat_blend` has a pole where p reaches the saturation
+    vapour pressure, which happens above about 35 km. RP8 adds the
+    NOAA-GSL MYNN-EDMF guards. It is on in correct mode (the route's
+    default), and `--physics-correct-skip RP8` turns it off.
+  - The MPAS suite route also runs the declaration's upper damping as
+    MPAS v8.4.2's `&damping` options (`config_mpas_cam_coef`,
+    `config_rayleigh_damp_u` and their level counts and timescale). The
+    operators match MPAS-8.4.2's own lines, compiled natively, bit for
+    bit.
 - **Hex (MPAS) parity with WRF's options.** The goal is for the hex model
   to accept the options WRF does, reusing WRF's column implementations
   rather than copies, and to refuse by name what it cannot yet do. Landed:
@@ -351,9 +361,12 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     per-cell fractions, WUDAPT LCZ classes, Noah and RUC mosaic, Pleim-Xiu
     and the slab with their soil inits, irrigation and `topo_wind = 1`
     ([docs/ruc-mosaic-and-clm-lake.md](docs/ruc-mosaic-and-clm-lake.md)).
-    `topo_wind = 1` is not recommended on the 120 km globe: against WIS2
-    stations it raises the 10 m wind bias by 0.5 m/s. Its terrain
-    Laplacian on hex uses cell-index neighbours, an open defect
+    `topo_wind = 1` forms WRF's terrain Laplacian from the mesh's own
+    neighbours (`cellsOnCell`), which is WRF's 5-point form on a quad
+    neighbourhood. It is not recommended on the 120 km globe: WRF's
+    -30 m cut-off removes the surface drag in 32 % of land cells there,
+    and against WIS2 stations it raised the 10 m wind bias by 0.5 m/s.
+    The seam warns above 4 km
     ([TERRAIN-DRAG.md](docs/public/TERRAIN-DRAG.md));
   - CCPP TKE-EDMF on the column seam;
   - diagnostics: `nwp_diagnostics` maxima, `p_lev`/`z_lev` levels, `tslist`
@@ -535,6 +548,19 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   falls from 761-1061 ms to 470-576 ms, byte-identical
   (`WOOF_METAL_DEVICE_COPY=0` restores the host round trip).
   `WOOF_METAL_GPU_TIMES` times each kernel.
+  The `woof.radtran` spectral diagnostic (`radtran_*`) is cheaper, keeping
+  the same words. `radtran_disort.cu` compiles in about 6 minutes in
+  0.55 GB, against over an hour in over 17 GB before: its helpers are kept
+  out of line on CUDA. Its workspace is interleaved across threads on CUDA,
+  and on CUDA its chunk is sized from free device memory. Together these
+  make the 16-stream solver about 9x faster on an A6000. The Hu & Stamnes cloud optics
+  are evaluated vectorized, with `np.interp`'s own multiply-add (fused or
+  not, as numpy was built). The layer optics run on host threads over
+  blocks of columns. On the Alps 3 km/1 km pair, one 550 nm call fell from
+  about 190 s to 11 s, and a three-wavelength call from about 570 s to
+  28 s. With an output every 10 minutes, the hour costs 209 s instead of
+  2,578 s; with no diagnostic it costs 61 s. Eight wavelengths in one call
+  on such a domain hold over 13 GB of host memory.
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
   tests by name, and main's full run is periodic. Every merge to `main`

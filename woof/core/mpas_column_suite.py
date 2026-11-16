@@ -1419,6 +1419,51 @@ def _capture_cumulus_momentum(driver, sink) -> None:
                               "__module__": base.__module__})
 
 
+#: The grid length above which topo_wind = 1 warns.  Jimenez and Dudhia
+#: (2012, JAMC) formulated and evaluated it on a 2 km WRF grid; its LAP_HGT
+#: is in metres, unscaled by the grid length, so the same terrain curvature
+#: gives a laplacian that grows as dx**2 and the -30 m hill-top cut-off
+#: zeroes the surface drag over much of the land at a global spacing.
+TOPO_WIND_COARSE_DX_M = 4000.0
+
+
+def _warn_coarse_topo_wind(driver, xland, dx_m):
+    """Warn when topo_wind = 1 runs on a coarse mesh; return the land
+    fraction whose CTOPO is 0 (no YSU surface drag), or None if unknown.
+
+    The option stays the user's to select (WRF v4.7.1 offers it at any dx);
+    this says what it does there.  MEASURED (2026-11-15, x1.40962, 120 km,
+    mesh-neighbour LAP_HGT): 32 % of land cells zeroed, and 10 m wind
+    against WIS2 SYNOP worse by +0.52 m/s bias at 24 h
+    (docs/public/TERRAIN-DRAG.md).
+    """
+    import warnings
+
+    drag = getattr(driver, "terrain_drag", None)
+    if drag is None or getattr(drag, "ctopo", None) is None or xland is None:
+        return None
+    ctopo = drag.ctopo
+    ctopo = np.asarray(ctopo.get() if hasattr(ctopo, "get") else ctopo)
+    land = np.asarray(xland.get() if hasattr(xland, "get") else xland)
+    ctopo = ctopo.reshape(-1)
+    land = np.broadcast_to(land.reshape(-1) < 1.5, ctopo.shape)
+    if not np.any(land):
+        return 0.0
+    fraction = float(np.count_nonzero(ctopo[land] == 0.0)
+                     / np.count_nonzero(land))
+    if float(dx_m) > TOPO_WIND_COARSE_DX_M:
+        warnings.warn(
+            f"topo_wind = 1 at a {float(dx_m) / 1000.0:.0f} km mesh: WRF's "
+            "LAP_HGT is in metres and unscaled by the grid length, so its "
+            f"-30 m hill-top cut-off removes the surface drag in "
+            f"{100.0 * fraction:.0f} % of land columns here.  Jimenez and "
+            "Dudhia (2012) formulated it for km-scale grids; at 120 km it "
+            "measured worse 10 m winds than topo_wind = 0 "
+            "(docs/public/TERRAIN-DRAG.md).",
+            RuntimeWarning, stacklevel=3)
+    return fraction
+
+
 class MpasColumnPhysics(MpasColumnBatchPhysics):
     """The two-phase column seam for ANY selection the engine accepts.
 
@@ -1436,8 +1481,14 @@ class MpasColumnPhysics(MpasColumnBatchPhysics):
                  terrain_height_m, z_interface_nominal_m, p_top_pa, dx_m,
                  cumulus_seconds=None, dx_column_m=None, cell_area_m2=None,
                  surface=None, statics=None, cumulus_active_column=None,
-                 interior_column=None, rk_momentum=None):
-        """``interior_column`` (one bool per column, default all True) says
+                 interior_column=None, rk_momentum=None,
+                 cell_neighbours=None):
+        """``cell_neighbours`` is ``(cellsOnCell, nEdgesOnCell)`` of the
+        columns' mesh, zero-based, ``(ncol, maxEdges)`` and ``(ncol,)``; it is
+        read only by ``topo_wind = 1``, whose terrain laplacian (WRF's
+        LAP_HGT) needs each column's true neighbours, and is required then.
+
+        ``interior_column`` (one bool per column, default all True) says
         which columns a limited-area caller models; it is read only by
         ``wind_farm_scheme = "fitch_wrf"``, which places each turbine in the column whose
         cell centre is nearest (:mod:`woof.windfarm.cells`) and refuses one
@@ -1562,6 +1613,26 @@ class MpasColumnPhysics(MpasColumnBatchPhysics):
                     f"static {name} must be finite with one value per "
                     f"column ({ncol},), got {value.shape}")
             oro[name] = value.reshape(1, ncol)
+        if int(getattr(cfg, "topo_wind", 0) or 0) == 1:
+            # WRF's LAP_HGT (start_em.F:1558) is the mean of a point's four
+            # neighbours minus its height.  The columns ride a (1, ncol)
+            # layout, whose index neighbours are not the mesh's, so the
+            # laplacian is taken over cellsOnCell (the hex topo_wind = 1
+            # defect, 2026-11-16: it was taken from index order).
+            if cell_neighbours is None:
+                raise ValueError(
+                    "topo_wind = 1 needs cell_neighbours, the mesh's "
+                    "(cellsOnCell, nEdgesOnCell): its terrain laplacian "
+                    "(LAP_HGT) would otherwise be taken from columns "
+                    "adjacent in index order, which are not neighbours")
+            from woof.core.terrain_drag import (MESH_NEIGHBOURS_KEYS,
+                                                mesh_neighbours)
+            oro.update(zip(MESH_NEIGHBOURS_KEYS,
+                           mesh_neighbours(*cell_neighbours, ncol)))
+        elif cell_neighbours is not None:
+            raise ValueError(
+                "cell_neighbours is read only by topo_wind = 1; with it off "
+                "they would be accepted and never read")
         znu = _nominal_znu(z_interface_nominal_m, p_top)
         windfarm_grid = None
         if getattr(cfg, "wind_farm_scheme", "off") == "fitch_wrf":
@@ -1673,6 +1744,12 @@ class MpasColumnPhysics(MpasColumnBatchPhysics):
             radiation_longitude=lon.reshape(1, ncol),
             terrain_drag_static=(dict(oro, HGT_M=terrain.reshape(1, ncol))
                                  if oro else None))
+        self.topo_wind_zeroed_land_fraction = None
+        if int(getattr(cfg, "topo_wind", 0) or 0) == 1:
+            # The driver's resolved per-column xland: a scalar given here
+            # is broadcast by initialize_physics.
+            self.topo_wind_zeroed_land_fraction = _warn_coarse_topo_wind(
+                self._driver, self._driver.fields.get("xland", given.get("xland")), dx)
         if aerosol_frames is not None:
             from woof.core import aer_opt2
             from woof.core.radiation_composition import radiation_adapters

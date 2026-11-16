@@ -59,6 +59,49 @@ def _hu():
     return _hu_read("wc.ext"), _hu_read("wc.ssa"), _hu_read("wc.asy")
 
 
+# np.interp(x, xp, fp) inside the table evaluates slope * (x - xp[j]) + fp[j]
+# with slope = (fp[j+1] - fp[j]) / (xp[j+1] - xp[j]); whether the multiply-add
+# is fused depends on how numpy was compiled (clang on arm64 contracts it, the
+# x86-64 wheels do not).  This canary differs between the two, so the mode
+# numpy actually uses is read off it once and every row is evaluated the same
+# way at once, from the two bracketing table columns only, instead of one
+# np.interp call per row over the whole table.
+_CANARY = (0.6123, (0.5, 0.7), (-0.3661071783200054, -1.8188992243902193))
+
+
+@lru_cache(maxsize=None)
+def _interp_mode():
+    x, xp, fp = _CANARY
+    if not hasattr(math, "fma"):                                   # Python < 3.13
+        return None
+    ref = float(np.interp(x, np.array(xp), np.array(fp)))
+    slope = (fp[1] - fp[0]) / (xp[1] - xp[0])
+    if ref == math.fma(slope, x - xp[0], fp[0]):
+        return "fused"
+    if ref == slope * (x - xp[0]) + fp[0]:
+        return "separate"
+    return None
+
+
+def _bracket(x, xp):
+    """Index j with xp[j] < x < xp[j+1] when the rows can be interpolated
+    vectorized (x strictly between two nodes of a strictly increasing table,
+    numpy's multiply-add mode known), else None."""
+    if _interp_mode() is None or not xp[0] < x < xp[-1] or not np.all(np.diff(xp) > 0):
+        return None
+    j = int(np.searchsorted(xp, x, side="right")) - 1
+    return None if xp[j] == x else j
+
+
+def _lerp(x, x0, x1, y0, y1):
+    """np.interp(x, [.., x0, x1, ..], [.., y0, y1, ..]) for x0 < x < x1, elementwise over y0, y1."""
+    slope = (y1 - y0) / (x1 - x0)
+    d = x - x0
+    if _interp_mode() == "separate":
+        return slope * d + y0
+    return np.array([math.fma(s, d, y) for s, y in zip(slope.tolist(), y0.tolist())], dtype=np.float64)
+
+
 def _hu_prop(blocks, lam_um, reff):
     reff = np.asarray(reff, dtype=np.float64)
     out = np.zeros(reff.shape)
@@ -69,8 +112,16 @@ def _hu_prop(blocks, lam_um, reff):
             continue
         rows = b["rows"]
         r = reff[sel]
-        vals = rows[:, 1][None, :] * r[:, None] ** rows[:, 2][None, :] + rows[:, 3][None, :]
-        out[sel] = np.array([np.interp(lam_um, rows[:, 0], v) for v in vals])
+        xp = rows[:, 0]
+        coef = lambda c: c[:, 1][None, :] * r[:, None] ** c[:, 2][None, :] + c[:, 3][None, :]
+        j = _bracket(lam_um, xp)
+        if j is not None:
+            # only the two tabulated wavelengths bracketing lam enter np.interp
+            vals = coef(rows[j:j + 2])
+            if np.all(np.isfinite(vals)):
+                out[sel] = _lerp(lam_um, xp[j], xp[j + 1], vals[:, 0], vals[:, 1])
+                continue
+        out[sel] = np.array([np.interp(lam_um, xp, v) for v in coef(rows)])
     return out
 
 

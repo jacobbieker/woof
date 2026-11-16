@@ -18,6 +18,7 @@ d the Sun-Earth distance factor:
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass
 
 import numpy as np
@@ -169,6 +170,46 @@ def _layer_optics(opts, col, rep, iw, cl, nstr, numu_angles, aer=None, aer_nodes
     return text, ssa, pmom, ptrue, peaks
 
 
+#: Columns per host thread in :func:`_layer_optics_columns`.
+OPTICS_CHUNK = 4096
+
+
+def _layer_optics_columns(opts, col, rep, iw, cl, nstr, numu_angles, aer=None, aer_nodes=None):
+    """:func:`_layer_optics` over column blocks on host threads.
+
+    Every operation in ``_layer_optics`` is per column (elementwise, or along
+    a column's own layers), so a block of columns gives the block's words of
+    the whole-domain call; numpy releases the GIL inside its loops, so the
+    blocks run in parallel and their temporaries stay small.  Aerosol layers
+    (per-species node selections) keep the single call.
+    """
+    nd = col.z.shape[0] if col.z.ndim == 2 else 0
+    nthreads = min(8, os.cpu_count() or 1)
+    if aer is not None or nd <= OPTICS_CHUNK or nthreads < 2:
+        return _layer_optics(opts, col, rep, iw, cl, nstr, numu_angles, aer, aer_nodes)
+    from concurrent.futures import ThreadPoolExecutor
+    L = col.z.shape[1] - 1
+
+    def block(c0):
+        rows = slice(c0, min(c0 + OPTICS_CHUNK, nd))
+        cb = atmosphere.Column(z=col.z[rows], p=col.p[rows], t=col.t[rows], n_air=col.n_air[rows],
+                               dens={k: v[rows] for k, v in col.dens.items()})
+        clb = None if cl is None else CloudLayers(**{
+            k: (None if v is None else np.broadcast_to(v, (nd, L))[rows]) for k, v in cl.__dict__.items()})
+        ang = None if numu_angles is None else numu_angles[rows]
+        return _layer_optics(opts, cb, rep, iw, clb, nstr, ang)
+
+    # the first block alone: it loads the lazily read tables (netCDF) once, off the threads
+    parts = [block(0)]
+    with ThreadPoolExecutor(nthreads) as pool:
+        parts += list(pool.map(block, range(OPTICS_CHUNK, nd, OPTICS_CHUNK)))
+    text, ssa, pmom = (np.concatenate([q[i] for q in parts]) for i in range(3))
+    ptrue = None if parts[0][3] is None else np.concatenate([q[3] for q in parts])
+    peaks = [(kind, np.concatenate([q[4][j][1] for q in parts]), np.concatenate([q[4][j][2] for q in parts]))
+             for j, (kind, _, _) in enumerate(parts[0][4])]
+    return text, ssa, pmom, ptrue, peaks
+
+
 def _add_cloud(opts, tau, w, g, coef, nmom):
     ts = tau * (1.0 if opts.no_absorption else w)
     if opts.no_scattering:
@@ -272,8 +313,8 @@ def compute(opts: Options, col: atmosphere.Column, clouds_in: CloudLayers | None
     aer_nodes = None if aerosol is None else opac.humidity_nodes(aerosol, col)
     D, S, P, PT, PK = [], [], [], [], []
     for iw in iws:
-        d, s, p, pt, pk = _layer_optics(opts, col, rep, iw, clouds_in, nstr, ang if flags & solver.TMS else None,
-                                    aerosol, aer_nodes)
+        d, s, p, pt, pk = _layer_optics_columns(opts, col, rep, iw, clouds_in, nstr,
+                                                ang if flags & solver.TMS else None, aerosol, aer_nodes)
         D.append(d); S.append(s); P.append(p); PK.append(pk)
         if pt is not None:
             PT.append(pt)

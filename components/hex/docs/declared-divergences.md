@@ -544,10 +544,20 @@ sparsity, and it is clear of zero at every level from 50 to 20 hPa.
 configuration, with the MPAS suite as its default physics, and no oracle
 moves.
 
-**On the MPAS suite route the high lid is partial.**
+**On the MPAS suite route.**
 
-- The route lacks the horizontal Rayleigh options, so it refuses the
-  version 2 declaration's runtime block.
+- Since 2026-11-16 the route runs the version 2 declaration's runtime block
+  as MPAS v8.4.2's own `&damping` options: CAM coefficient 0.2 on 8
+  levels, horizontal Rayleigh damping of u on 6 levels with a 5-day
+  timescale, and w damping from 40 km. Its CAM and Rayleigh operators
+  match MPAS-8.4.2's own lines bit for bit. The reference is those lines
+  compiled by gfortran in the pinned container
+  (`components/hex/tests/fixtures/native_upper_damping_v842`).
+- In a 3 h Metal A/B on 11-05 00Z, the damping lowers the top level's RMS
+  u from 23.62 to 23.14 m/s, and the differences are largest at the top.
+  With the damping, 11-05 00Z and 11-03 12Z each run 72 h on Metal.
+- Before that, the route lacked the horizontal Rayleigh options and refused
+  the block.
 - With that block removed (the 80-level, 50 km lid and the w damping only),
   four of seven cases ran 72 h. On those four, the 90-60S, 20 hPa bias at
   72 h goes from -11.39 K (RMSE 13.40) on the 55-level MPAS suite arm to
@@ -560,9 +570,29 @@ moves.
   The refusal now names the failed check. Rerun on pb (A6000), 10-31 stops
   at step 162 with "found a non-finite normal velocity: 1197680 edge values
   on 80 levels ... the mesh geometry equals its sealed copy". The geometry
-  is intact; the integration blew up. That configuration is an 80-level,
-  50 km lid without the declaration's CAM and horizontal Rayleigh damping.
-  The WOOF-arm row is not affected: it completed all seven cases.
+  is intact; the integration blew up.
+- The blow-up is MYNN's, not the dycore's (correction RP8, 2026-11-15).
+  MPAS v8.4.2's `qsat_blend` (`mynn_shared.F90:90-98`) is
+  `0.622*e/(p-e)` with no guard. Under a 30 km lid, p - e stays far from
+  zero. Under the 50 km lid, levels 59-80 have p of 50-300 Pa and a
+  saturation vapour pressure of the same size. So p - e <= 0 at about
+  388,000 (cell, level) points every hour, and qsat there is negative.
+  Where p - e lands next to zero in one column, MYNN's variances and
+  diffusivities go NaN. In 11-05 00Z that happened in column 27644
+  (65.3N, 150E) at step 51: top-level T 248 K, p 81.5 Pa, qsat -26.4.
+  The dycore then refuses the next step with about 4,800 columns
+  non-finite. Blaming the missing CAM and Rayleigh damping was wrong,
+  because the same case fails with the damping on.
+- Correct mode now carries the NOAA-GSL MYNN-EDMF guards
+  (`module_bl_mynnedmf.F90:7650-7662`: e at most 0.15 p, p - e at least
+  1e-5). Exact mode keeps MPAS's text, and `--physics-correct-skip RP8`
+  restores it in correct mode.
+- On the default 55-level, 30 km lid the cap binds only at the top level
+  in a warm stratopause. Over the 11-05 00Z 72 h case that was 6,939
+  (cell, hour) points, with largest e/p 0.23. The air there is dry
+  (qv / capped qsat at most 1e-9). On Metal, that 72 h default forecast
+  is bitwise identical with and without RP8 in every history field.
+- The WOOF-arm row is not affected: it completed all seven cases.
 
 ## 2. Convective-to-explicit precipitation repartition
 

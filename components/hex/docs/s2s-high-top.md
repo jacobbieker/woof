@@ -13,6 +13,15 @@ RRTMG uses the engine's pressure, latitude and month dependent climatological
 ozone. The declaration identifies that existing ozone authority. It does not
 introduce prognostic ozone.
 
+On the MPAS suite route (`--physics-row mpas`) the runtime block becomes
+MPAS v8.4.2's own `&damping` options: `config_mpas_cam_coef`,
+`config_number_cam_damping_levels`, `config_rayleigh_damp_u`,
+`config_number_rayleigh_damp_u_levels`,
+`config_rayleigh_damp_u_timescale_days`, `config_zd` and `config_xnutr`.
+The defaults are the Registry's (0, 4, false, 6, 5 days, 22 km, 0.2). A
+namelist that names a different value from the declaration is refused, as
+is a radiation interval that differs from the namelist's.
+
 Print a complete plan without acquiring data or using a GPU:
 
 ```sh
