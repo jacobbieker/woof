@@ -86,7 +86,7 @@ def _check(nstr, flags, umu, phi):
 
 
 def solve(*, nstr, flags, dtau, ssa, pmom, umu0, fbeam, albedo, zlev=None, radius=6370.0,
-          outlev, umu=(), phi=(), ptrue=None, backend="gpu", budget_bytes=None):
+          outlev, umu=(), phi=(), ptrue=None, backend="gpu", budget_bytes=None, nprob_total=None):
     """Fluxes (nprob, nout, 6) and radiances (nprob, nout, numu, nphi).
 
     Flux columns: edir, edn, eup, uavgdir, uavgdn, uavgup (uvspec's default
@@ -114,7 +114,10 @@ def solve(*, nstr, flags, dtau, ssa, pmom, umu0, fbeam, albedo, zlev=None, radiu
     nout, numu, nphi = outlev.size, len(umu), len(phi)
     n_str = 2 if flags & TWOSTREAM else nstr
     wstride = work_size(nlyr, n_str)
-    mode_parallel = numu > 0 and not (flags & TWOSTREAM) and nprob * n_str <= MODE_THREADS
+    # nprob_total: a caller solving one call's problems in parts names the
+    # whole call's count, so every part takes the path the whole call would
+    mode_parallel = (numu > 0 and not (flags & TWOSTREAM)
+                     and (nprob if nprob_total is None else int(nprob_total)) * n_str <= MODE_THREADS)
     nmodes = n_str if mode_parallel else 1
     d = {k: cp.asarray(v) for k, v in dict(
         dtau=dtau, ssa=np.ascontiguousarray(ssa, dtype=np.float64), pmom=pmom,
