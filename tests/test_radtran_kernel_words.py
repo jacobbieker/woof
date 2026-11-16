@@ -41,3 +41,29 @@ def test_work_size_matches_kernel():
     for nlyr in (1, 7, 60):
         for nstr in (2, 4, 8, 16, 32):
             assert lib.radtran_work_size_host(nlyr, nstr // 2, nstr) == solver.work_size(nlyr, nstr)
+
+
+def test_hu_stamnes_rows_match_np_interp_words():
+    """clouds._hu_prop evaluates every row at once; the words must be
+    np.interp's, per row, over the whole table (this numpy's multiply-add)."""
+    from woof.radtran import clouds
+    rng = np.random.default_rng(7)
+    lam = np.sort(rng.uniform(0.25, 4.0, 40))
+    blocks = [{"r": (2.5, 12.5), "rows": np.column_stack((lam, rng.uniform(-3, 3, (40, 3))))},
+              {"r": (12.5, 60.0), "rows": np.column_stack((lam, rng.uniform(-3, 3, (40, 3))))}]
+    reff = np.where(rng.random(5000) < 0.7, 10.0, rng.uniform(2.5, 60.0, 5000))
+    reff[:4] = (2.5, 12.5, 12.5000001, 60.0)
+
+    def per_row(lam_um):
+        out = np.zeros(reff.shape)
+        for k, b in enumerate(blocks):
+            lo, hi = b["r"]
+            sel = (reff >= lo) & (reff <= hi) if k == 0 else (reff > lo) & (reff <= hi)
+            rows, r = b["rows"], reff[sel]
+            vals = rows[:, 1][None, :] * r[:, None] ** rows[:, 2][None, :] + rows[:, 3][None, :]
+            out[sel] = np.array([np.interp(lam_um, rows[:, 0], v) for v in vals])
+        return out
+
+    for lam_um in (*rng.uniform(0.3, 3.9, 25), lam[0], lam[17], lam[-1], 0.1, 5.0):
+        got = clouds._hu_prop(blocks, float(lam_um), reff)
+        assert np.array_equal(got.view(np.uint64), per_row(float(lam_um)).view(np.uint64)), lam_um
