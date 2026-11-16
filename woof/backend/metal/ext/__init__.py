@@ -225,8 +225,28 @@ def _install_isolation(module, *, isolated: bool) -> None:
     sync = mx.synchronize
     _RAW.update(eval=mx.eval, synchronize=sync)
 
+    def arrays(values, out):
+        # The arrays of an eval's arguments, or None for a tree this does not walk.
+        for value in values:
+            if isinstance(value, mx.array):
+                out.append(value)
+            elif isinstance(value, (list, tuple)):
+                if arrays(value, out) is None:
+                    return None
+            elif isinstance(value, dict):
+                if arrays(value.values(), out) is None:
+                    return None
+            else:
+                return None
+        return out
+
     def timed(fn):
         def call(*args, **kwargs):
+            found = None if kwargs else arrays(args, [])
+            if found is not None and not module.any_unscheduled(found):
+                # MLX encodes nothing for this call (every array is scheduled
+                # already): no buffer to time, and nothing to wait for.
+                return fn(*args, **kwargs)
             if isolated:
                 sync()
             module.time_current_buffer("mlx@" + call_site())

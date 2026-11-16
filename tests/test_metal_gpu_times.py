@@ -56,6 +56,11 @@ for _ in range(3):
     k(((n + 255) // 256,), (256,), (x, np.int32(n)))
     x[...] = cp.sqrt(y * x + 1.0) * 0.5 + x   # WRITE-SITE
     x[:7] = 0                                 # FILL-SITE
+import mlx.core as mx
+z = mx.ones(4)
+mx.eval(z)
+for _ in range(5):
+    mx.async_eval(z); mx.eval(z)              # NOOP-SITE
 print(hashlib.sha256(x.get().tobytes()).hexdigest())
 '''
 
@@ -88,6 +93,10 @@ def test_isolated_gpu_times_key_writes_by_call_site_and_keep_the_words(tmp_path)
     copy = [k for k in isolated if k.startswith("woof_copy_4@") and k.endswith(f"isolate_script.py:{write_line}")]
     fill = [k for k in isolated if k.startswith("woof_fill_4@") and k.endswith(f"isolate_script.py:{fill_line}")]
     rhs = [k for k in isolated if k.startswith("mlx@") and k.endswith(f"isolate_script.py:{write_line}")]
+    noop_line = next(i for i, line in enumerate(lines, 1) if "NOOP-SITE" in line)
+    # An eval of arrays already scheduled encodes nothing in MLX: it is not timed.
+    assert not [k for k in isolated if k.endswith(f"isolate_script.py:{noop_line}")]
+    assert not [k for k in plain if k.endswith(f"isolate_script.py:{noop_line}")]
     assert len(copy) == len(fill) == len(rhs) == 1, sorted(isolated)
     assert isolated[copy[0]]["launches"] == isolated[fill[0]]["launches"] == 3
     assert isolated["twice"]["launches"] == 3

@@ -770,6 +770,15 @@ std::optional<std::tuple<std::string, std::vector<mx::array>>> launch_inputs(con
   return std::make_tuple(launch->time_key(), out.inputs());
 }
 
+// Whether mx.eval / mx.async_eval of ``arrays`` would encode anything: MLX
+// returns at once when none is unscheduled (transforms.cpp), so the timing
+// wrapper must not open, time or wait for a command buffer for such a call.
+bool any_unscheduled(const std::vector<mx::array>& arrays) {
+  return std::any_of(arrays.begin(), arrays.end(), [](const mx::array& a) {
+    return a.status() == mx::array::Status::unscheduled;
+  });
+}
+
 // Count the GPU interval of the default GPU stream's current (uncommitted)
 // command buffer under ``key``.
 void time_current_buffer(const std::string& key) {
@@ -843,4 +852,5 @@ NB_MODULE(_woof_metal_launch, m) {
   m.def("gpu_times_isolated", []() { return g_isolate; });
   m.def("launch_inputs", &launch_inputs, nb::arg("out"));
   m.def("time_current_buffer", &time_current_buffer, nb::arg("key"));
+  m.def("any_unscheduled", &any_unscheduled, nb::arg("arrays"));
 }
