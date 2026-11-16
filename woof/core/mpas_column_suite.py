@@ -1445,10 +1445,11 @@ def _warn_coarse_topo_wind(driver, xland, dx_m):
     ctopo = drag.ctopo
     ctopo = np.asarray(ctopo.get() if hasattr(ctopo, "get") else ctopo)
     land = np.asarray(xland.get() if hasattr(xland, "get") else xland)
-    land = land.reshape(-1) < 1.5
+    ctopo = ctopo.reshape(-1)
+    land = np.broadcast_to(land.reshape(-1) < 1.5, ctopo.shape)
     if not np.any(land):
         return 0.0
-    fraction = float(np.count_nonzero(ctopo.reshape(-1)[land] == 0.0)
+    fraction = float(np.count_nonzero(ctopo[land] == 0.0)
                      / np.count_nonzero(land))
     if float(dx_m) > TOPO_WIND_COARSE_DX_M:
         warnings.warn(
@@ -1745,8 +1746,10 @@ class MpasColumnPhysics(MpasColumnBatchPhysics):
                                  if oro else None))
         self.topo_wind_zeroed_land_fraction = None
         if int(getattr(cfg, "topo_wind", 0) or 0) == 1:
+            # The driver's resolved per-column xland: a scalar given here
+            # is broadcast by initialize_physics.
             self.topo_wind_zeroed_land_fraction = _warn_coarse_topo_wind(
-                self._driver, given.get("xland"), dx)
+                self._driver, self._driver.fields.get("xland", given.get("xland")), dx)
         if aerosol_frames is not None:
             from woof.core import aer_opt2
             from woof.core.radiation_composition import radiation_adapters

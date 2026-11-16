@@ -901,7 +901,9 @@ class SealedSuiteConstructorV841:
                 "its terrain laplacian over the mesh's neighbours")
         if topo_mesh:
             from woof.core.terrain_drag import mesh_neighbours
-            cells, counts = mesh_neighbours(*values["cell_neighbours"], ncol)
+            # Owned copies: the sealed identity must not alias a caller's buffer.
+            cells, counts = (np.array(value, dtype=np.int32, order="C", copy=True)
+                             for value in mesh_neighbours(*values["cell_neighbours"], ncol))
             for value in (cells, counts):
                 value.setflags(write=False)
             arrays["cells_on_cell"], arrays["n_edges_on_cell"] = cells, counts
