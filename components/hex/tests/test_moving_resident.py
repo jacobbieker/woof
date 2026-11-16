@@ -445,3 +445,56 @@ def test_a_move_to_another_member_than_the_record_named_renames_the_record(tmp_p
     assert calls == ['B']
     assert ctl.prelaunched['target'] == 'B'
     assert events == ['prelaunch-dropped', 'prelaunch']
+
+
+def test_the_preparation_is_skipped_when_the_host_has_no_room_for_a_second_copy(monkeypatch):
+    # Milton 2024 at 96 km: a 30 GB segment prepared a second 30 GB copy beside itself on a host with ~15 GB free
+    # and was OOM-killed at moves.  Before any preparation the copy is priced at the resident set, then at the last
+    # preparation's measured growth; the reserve is on top; the gate can be turned off.
+    GiB = 2**30
+    monkeypatch.delenv('WOOF_HEX_MOVING_PREPARE_HOST_GATE', raising=False)
+    monkeypatch.delenv('WOOF_HEX_MOVING_PREPARE_HOST_RESERVE_GB', raising=False)
+    gate = resident.preparation_host_gate(available=15 * GiB, rss=30 * GiB)
+    assert not gate['admitted'] and gate['priced_from'] == 'resident set' and gate['need_bytes'] == 30 * GiB
+    assert resident.preparation_host_gate(available=33 * GiB, rss=30 * GiB)['admitted']
+    assert not resident.preparation_host_gate(available=31 * GiB, rss=30 * GiB)['admitted']   # the 2 GiB reserve
+    resident._R.prep_host_bytes = 10 * GiB
+    gate = resident.preparation_host_gate(available=15 * GiB, rss=30 * GiB)
+    assert gate['admitted'] and gate['priced_from'] == 'last preparation'
+    assert resident.preparation_host_gate(available=None, rss=30 * GiB)['admitted']   # unknown is not a refusal
+    monkeypatch.setenv('WOOF_HEX_MOVING_PREPARE_HOST_GATE', '0')
+    resident._R.prep_host_bytes = None
+    assert resident.preparation_host_gate(available=1, rss=30 * GiB)['admitted']
+
+
+def test_a_skipped_preparation_leaves_nothing_prepared_and_is_logged_once(tmp_path, monkeypatch):
+    import threading
+    spec = dict(index=3, member='m03')
+    calls = []
+    monkeypatch.setattr(resident, 'next_spec', lambda control: spec)
+    monkeypatch.setattr(resident, 'preparation_host_gate', lambda: dict(admitted=False, need_bytes=1))
+    monkeypatch.setattr(resident, '_log', calls.append)
+    monkeypatch.setattr(resident, '_prepare_safely', lambda s: pytest.fail('a skipped preparation ran'))
+    resident._R.current.update(decode=object(), mesh=object())
+    resident._R.prepared['decode'] = dict(key='stale', value=None)
+    stop = threading.Event()
+    watcher = threading.Thread(target=resident._watch, args=(tmp_path, stop))
+    watcher.start()
+    deadline = __import__('time').monotonic() + 10
+    while not calls and __import__('time').monotonic() < deadline:
+        stop.wait(0.1)
+    stop.wait(1.5)
+    stop.set()
+    watcher.join(timeout=5)
+    assert len(calls) == 1 and calls[0]['preparation_skipped']['segment'] == 3
+    assert resident._R.prepared == {} and resident._R.prep_spec is None and resident._R.prep_thread is None
+
+
+def test_the_host_heap_trim_reports_the_resident_set_on_linux_and_nothing_elsewhere():
+    import sys
+    trimmed = resident.trim_host_heap()
+    if sys.platform.startswith('linux'):
+        assert trimmed is not None and trimmed['seconds'] >= 0
+    else:
+        assert trimmed is None
+    assert resident.process_rss_bytes() is None or resident.process_rss_bytes() > 0
