@@ -185,3 +185,41 @@ def test_row_tables_beside_grid_pointers_launch_without_a_synchronize(synchroniz
     for k in range(nrows):
         assert np.array_equal(before[k].get(), tend0[k].get()), k
         assert np.array_equal(after[k].get().view(np.uint32), ref[k]), k
+
+
+_REWRITE = r'''extern "C" __global__ void rewrite_table(unsigned long long table,
+                                              long long src, long long dst) {
+    if (blockIdx.x == 0 && threadIdx.x == 0) {
+        long long* t = (long long*)table; t[0] = src; t[1] = dst; } }'''
+
+
+def test_a_table_rewritten_through_its_address_is_read_again(monkeypatch):
+    """A kernel that writes the table through a raw address leaves the
+    table's storage value as it was: the words read for the old value must
+    not be used to order the next gather (it would bind a and out_a, not
+    b and out_b, as the gather's hazards)."""
+    _mlx_or_skip()
+    import cupy as cp
+    from woof.backend.metal import loader
+    from woof.core.kernels import get_kernel
+
+    used = []
+    words = loader._device_table_words
+    monkeypatch.setattr(loader, "_device_table_words",
+                        lambda view: used.append(words(view)) or used[-1])
+
+    ring = get_kernel("microphysics_validation", "mp_ring_copy")
+    rewrite = cp.RawKernel(_REWRITE, "rewrite_table")
+    n = 64
+    a, b = cp.asarray(np.arange(n, dtype=np.float32)), cp.asarray(np.arange(n, dtype=np.float32) + 100)
+    out_a, out_b = cp.zeros(n, cp.float32), cp.zeros(n, cp.float32)
+    row = lambda src, dst: (src.data.ptr, dst.data.ptr, 1, 0, 1, 0, n, n, n)
+    table = cp.asarray(np.asarray([row(a, out_a)], dtype=np.int64).reshape(-1))
+    ring((1, 1), (256,), (table, np.int32(1), np.int32(0)))      # the words are cached
+    rewrite((1,), (32,), (np.uint64(table.data.ptr), np.int64(b.data.ptr), np.int64(out_b.data.ptr)))
+    reader = out_b * cp.float32(1.0)              # taken before the second gather
+    ring((1, 1), (256,), (table, np.int32(1), np.int32(0)))
+    assert [int(w) for w in used[-1][:2]] == [b.data.ptr, out_b.data.ptr]
+    assert np.array_equal(out_a.get(), np.arange(n, dtype=np.float32))
+    assert np.array_equal(reader.get(), np.zeros(n, np.float32))
+    assert np.array_equal(out_b.get(), np.arange(n, dtype=np.float32) + 100)

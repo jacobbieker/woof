@@ -199,6 +199,10 @@ class MetalFunction:
         if (sig.indirect and not resolved) or mode in ("1", "after"):
             import mlx.core as mx
             mx.eval(*outputs)       # ... and finish before anything after it
+            if sig.indirect and not resolved:
+                # it may have written a device table through an address,
+                # leaving the table's storage value as it was
+                _TABLE_WORDS.clear()
             if mode == "1":
                 mx.synchronize()
 
@@ -339,7 +343,9 @@ DEVICE_ADDRESS_TABLES = {
 }
 
 #: id(storage) -> (the storage, its value when read, the words): a device
-#: table is read once per value it takes, not once per launch
+#: table is read once per value it takes, not once per launch.  An
+#: unresolved indirect launch empties it (it can write a table through an
+#: address without giving the storage a new value).
 _TABLE_WORDS: dict = {}
 
 
