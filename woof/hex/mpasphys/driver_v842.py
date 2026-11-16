@@ -76,6 +76,13 @@ CORRECTIONS_V842: Mapping[str, Mapping[str, Any]] = MappingProxyType({
                         "vapour tendency NaN in one column; the dycore then refused the step with ~4,100 whole "
                         "columns non-finite (x1.40962 120 km plain hex, 2021-07-01 start at day 19.2 and 2020-01-01 "
                         "start at day 77.2)"},
+    # RP8: qsat_blend (mynn_shared.F90:90-98) divides by p - e with no guard; under a 50 km lid the top levels
+    # reach the pole (bl_mynn_v842.MYNN_TEXT_CORRECTIONS).
+    "RP8": {"slots": {"pbl": ("bl_mynn",)},
+            "owners": {"pbl": "p12-bl-mynn"},
+            "breakage": "MYNN's saturation mixing ratio has a pole where the vapour pressure reaches the air "
+                        "pressure; under the 80-level, 50 km lid (s2s80-v1) the top levels reach it, MYNN goes NaN "
+                        "in one column and the dycore refuses the step (x1.40962 120 km, 2026-11-05T00 at step 51)"},
     # RP4: refused at resolution, see resolve_namelist (native correct mode refuses it too).
     "RP4": {"slots": {}, "owners": {},
             "breakage": "config_mynn_tkeadvect resets TKE to the never-advected qke_adv every call"},
@@ -532,6 +539,7 @@ def _active_corrections(selectors: Mapping[str, str], options: Mapping[str, Any]
     if on("pbl") and selectors["pbl"] == "bl_mynn":
         active.add("RP1")
         active.add("RP7")
+        active.add("RP8")
     if on("seaice") and on("land_surface") and options.get("config_frac_seaice", False):
         active.add("RP3")
     if on("pbl") and selectors["pbl"] == "bl_mynn" and options.get("config_mynn_tkeadvect", False):

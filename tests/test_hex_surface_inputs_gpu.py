@@ -655,7 +655,9 @@ def test_hex_land_columns_are_the_wrf_ports_on_the_same_inputs(scheme, mapping, 
 def test_hex_topo_wind_1_columns_are_wrf_topo_wind_coefficients():
     """topo_wind = 1 on the hex generic seam: the seam's CTOPO/CTOPO2 are
     woof.core.terrain_drag.topo_wind_coefficients (WRF start_em's kernel) on the
-    same terrain, land mask and VAR_SSO, bit for bit."""
+    same terrain, land mask and VAR_SSO, bit for bit, with the terrain
+    laplacian taken over the mesh's cellsOnCell, not the columns' index order;
+    without the neighbours the seam refuses."""
     from woof.core.terrain_drag import topo_wind_coefficients
 
     physics = dict(suite.MPAS_DEFAULT_PHYSICS, topo_wind=1)
@@ -663,15 +665,32 @@ def test_hex_topo_wind_1_columns_are_wrf_topo_wind_coefficients():
     rng = np.random.default_rng(5)
     var_sso = rng.uniform(50.0, 90000.0, NCOL).astype(np.float32)
     values["orographic_statistics"] = {"VAR_SSO": var_sso}
+    with pytest.raises(ValueError, match="cell_neighbours"):
+        _seal(values)
+    # A shuffled neighbour table, so index order and cellsOnCell disagree.
+    order = rng.permutation(NCOL)
+    cells = np.full((NCOL, 6), -1, np.int32)
+    counts = np.zeros(NCOL, np.int32)
+    for slot, shift in enumerate((1, -1, 2, -2)):
+        cells[order, slot] = order[(np.arange(NCOL) + shift) % NCOL]
+    counts[:] = 4
+    counts[order[0]] = 3
+    values["cell_neighbours"] = (cells, counts)
     kwargs = _seal(values).arwen_kwargs()
     seam = suite.run_mpas_column_physics(**kwargs)
     drag = seam._driver.terrain_drag
     assert drag is not None and drag.topo_wind == 1
+    assert 0.0 <= seam.topo_wind_zeroed_land_fraction <= 1.0
     ht = np.asarray(values["terrain_height_m"], np.float32).reshape(1, NCOL)
     xland = np.asarray(values["xland"], np.float32).reshape(1, NCOL)
     want = topo_wind_coefficients(
         cp.asarray(ht), cp.asarray(xland), topo_wind=1,
+        var_sso=cp.asarray(var_sso.reshape(1, NCOL)),
+        cells_on_cell=cells, n_edges_on_cell=counts)
+    index_order = topo_wind_coefficients(
+        cp.asarray(ht), cp.asarray(xland), topo_wind=1,
         var_sso=cp.asarray(var_sso.reshape(1, NCOL)))
+    assert not np.array_equal(_host(want[2]), _host(index_order[2]))
     for got, ref in zip((drag.ctopo, drag.ctopo2), want[:2]):
         np.testing.assert_array_equal(
             _host(got).reshape(-1).view(np.uint32),

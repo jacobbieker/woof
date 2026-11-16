@@ -608,6 +608,27 @@ def _init_mminlu(init_path) -> str | None:
     return None
 
 
+def _topo_wind_cell_neighbours(mesh: Any, *, is_regional: bool) -> tuple[np.ndarray, np.ndarray]:
+    """The physics columns' ``(cellsOnCell, nEdgesOnCell)``, zero-based, for topo_wind = 1.
+
+    A negative entry (a neighbour beyond a limited-area mesh's boundary) is kept: the laplacian reads it as
+    the cell itself, WRF's clamp at a non-periodic boundary.  A regional mesh's padded garbage column gets no
+    edges, so its laplacian is 0; it holds no atmosphere and is scrubbed.
+    """
+    cells = np.asarray(proof._mesh_value(mesh, "cellsOnCell"), dtype=np.int64)
+    counts = np.asarray(proof._mesh_value(mesh, "nEdgesOnCell"), dtype=np.int64).reshape(-1)
+    if cells.ndim != 2 or cells.shape[0] != counts.size:
+        cells = cells.T
+    if cells.ndim != 2 or cells.shape[0] != counts.size:
+        raise ValueError(f"cellsOnCell {cells.shape} does not fit nEdgesOnCell {counts.shape}")
+    # MPAS-A's "outside" index (nCells + 1, one-based) and any sentinel read as the cell itself.
+    cells = np.where((cells < 0) | (cells >= counts.size), -1, cells)
+    if is_regional:
+        cells = np.concatenate([cells, np.full((1, cells.shape[1]), -1, np.int64)], axis=0)
+        counts = np.concatenate([counts, np.zeros(1, np.int64)])
+    return cells.astype(np.int32), counts.astype(np.int32)
+
+
 def _suite_host(
     adapter: Any,
     row_name: str,
@@ -678,6 +699,10 @@ def _suite_host(
             "shdmax (follow-up: carry it in the suite seam's statics)"
         )
     extra = {}
+    if mesh is not None and int((suite.get("physics") or {}).get("topo_wind", 0) or 0) == 1:
+        # topo_wind = 1's terrain laplacian over the mesh's own neighbours, not
+        # the (1, nCells) layout's index order (woof.core.terrain_drag).
+        extra["cell_neighbours"] = _topo_wind_cell_neighbours(mesh, is_regional=is_regional)
     if interior_column is not None:
         # Read by wind_farm_scheme = "fitch_wrf" alone (woof.hex.wind_farm); an adapter that
         # predates it is handed exactly the keywords it was handed before.
