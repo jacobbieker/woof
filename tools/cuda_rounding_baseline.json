@@ -4181,7 +4181,7 @@
    },
    {
     "file": "woof/core/kernels/smag2d_uv_faces.cu",
-    "sha256": "b6f43f8e3f48e05a835637f80a1ab5f34356bd7507cf9d16012150ed324f8323"
+    "sha256": "dc9828ca72bc7c7b6acb02b382c7326f33fd3f9eb16ab365e7f3e19a400dabfd"
    },
    {
     "file": "woof/core/kernels/smag2d_w_faces.cu",
@@ -5079,7 +5079,7 @@
    },
    {
     "file": "woof/core/dycore.py",
-    "sha256": "ba563fd541fc2771a84e2ecb37d9e055a365ebe4f09ae71ba7d2bc141c83ac1b"
+    "sha256": "505b79fbc6851faf9f41fb4cc9265d834681c4dd40eba825e66be6af3b7a3d87"
    },
    {
     "file": "woof/core/etanew.py",
@@ -5115,11 +5115,11 @@
    },
    {
     "file": "woof/core/kernel_frame_recordings.py",
-    "sha256": "b543cabfb60469a800e4eac20aefee9c522f25fe28d31d7c6f321724a3d5b3d1"
+    "sha256": "c5f3fc2d5967d33f81ecc77eddb38f27f1b9880e915428fac7e2f023cb622c8d"
    },
    {
     "file": "woof/core/kernels/__init__.py",
-    "sha256": "aa9cde17002d1a2f01b51b8c3d31f5f82be18d0fc0714c8b313c5316e8875a21"
+    "sha256": "478fcef78bb37235be117f4503803d94d6d97fd1d5a3070b9043b54b653c428e"
    },
    {
     "file": "woof/core/kernels/no_ftz.py",
@@ -5239,7 +5239,7 @@
    },
    {
     "file": "woof/core/preflight.py",
-    "sha256": "b0bbc91d999ae97e739b97c025dab9045b49a135466788d805bf5149420c14e5"
+    "sha256": "b2debc22b036973dc92b76b16b5d08bc87ea4e4327abb833a6eeb5a14c6bcc9c"
    },
    {
     "file": "woof/core/refl.py",
@@ -30502,13 +30502,13 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "31cd31a6fcb4520c0172c731f2fba4aa93baaf3f4a7cd1e33baba78e7a754dd1",
+    "sha256": "f23f985f51fb6412e3465cff6471e205f14f84a4d62da2356c516726b7586fb1",
     "sites": {
-     "100": 498
+     "100": 497
     }
    },
    "native_differences": {
-    "sha256": "5d8fd759552cc9edaa9717d35729e11df85cc1357b1bf5b04837abdb48bb548d",
+    "sha256": "5c39275a7eb7e3b2c5478c4d2d429bdffa0e824d6b930892cdb7432c59085ec1",
     "sites": {
      "100": 177
     }
@@ -30538,7 +30538,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "514d7328a07cc14c9ddc3760f153456b8a113e02632b47ee8443a9e356365b57"
+   "source_sha256": "a7c7cdfd321aabd08e13a9ff8abb4efb3bd5eb2bc96a992d57fd98939554f49b"
   }
  }
 }
